@@ -11,7 +11,7 @@ import Control.Monad
 import Control.Monad.Reader
 import Control.Monad.State.Strict
 import Data.Bifunctor (second)
-import Data.List (partition, sortOn, (\\))
+import Data.List (sortOn, (\\))
 import qualified Data.Map as M
 import Data.Maybe
 import qualified Data.Set as S
@@ -23,60 +23,6 @@ import Futhark.Construct
 import Futhark.IR.SOACS
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
-import Futhark.Util (splitAt3)
-
-eReverse :: MonadBinder m => VName -> m VName
-eReverse arr = do
-  arr_t <- lookupType arr
-  let w = arraySize 0 arr_t
-  start <-
-    letSubExp "rev_start" $
-      BasicOp $ BinOp (Sub Int64 OverflowUndef) w (intConst Int64 1)
-  let stride = intConst Int64 (-1)
-      slice = fullSlice arr_t [DimSlice start w stride]
-  letExp (baseString arr <> "_rev") $ BasicOp $ Index arr slice
-
-eRotate :: MonadBinder m => [SubExp] -> VName -> m VName
-eRotate rots arr = letExp (baseString arr <> "_rot") $ BasicOp $ Rotate rots arr
-
-scanExc ::
-  (MonadBinder m, Lore m ~ SOACS) =>
-  String ->
-  Scan SOACS ->
-  [VName] ->
-  m [VName]
-scanExc desc scan arrs = do
-  w <- arraysSize 0 <$> mapM lookupType arrs
-  form <- scanSOAC [scan]
-  res_incl <- letTupExp (desc <> "_incl") $ Op $ Screma w form arrs
-  res_incl_rot <- mapM (eRotate [intConst Int64 (-1)]) res_incl
-
-  iota <-
-    letExp "iota" . BasicOp $
-      Iota w (intConst Int64 0) (intConst Int64 1) Int64
-
-  iparam <- newParam "iota_param" $ Prim int64
-  vparams <- mapM (newParam "vp") ts
-  let params = iparam : vparams
-
-  body <- runBodyBinder . localScope (scopeOfLParams params) $ do
-    let first_elem =
-          eCmpOp
-            (CmpEq int64)
-            (eSubExp (Var (paramName iparam)))
-            (eSubExp (intConst Int64 0))
-    eBody
-      [ eIf
-          first_elem
-          (resultBodyM nes)
-          (resultBodyM $ map (Var . paramName) vparams)
-      ]
-
-  let lam = Lambda params body ts
-  letTupExp desc $ Op $ Screma w (mapSOAC lam) (iota : res_incl_rot)
-  where
-    nes = scanNeutral scan
-    ts = lambdaReturnType $ scanLambda scan
 
 data Env = Env
   { adjs :: M.Map VName VName,
@@ -123,7 +69,7 @@ newAdj v = do
   let update = M.singleton v v_adj
   modify $ \env -> env {adjs = update `M.union` adjs env}
   -- Cosmin commented/changed since does not zero out arrays!
-  stms <- runBinder_ $ letBindNames [v_adj] (BasicOp $ adBlank t)
+  stms <- runBinder_ $ letBindNames [v_adj] =<< eBlank t
   return (v_adj, update, stms)
 
 accVName :: VName -> ADM VName
@@ -146,6 +92,12 @@ class Adjoint a where
   updateAdjoint :: a -> VName -> ADM (VName, M.Map VName VName, Stms SOACS)
   updateAdjointArray :: Maybe (Slice SubExp) -> a -> VName -> ADM (VName, M.Map VName VName, Stms SOACS)
 
+addBinOp :: PrimType -> BinOp
+addBinOp (IntType it) = Add it OverflowWrap
+addBinOp (FloatType ft) = FAdd ft
+addBinOp Bool = LogAnd
+addBinOp Cert = LogAnd
+
 instance Adjoint VName where
   lookupAdj v = do
     maybeAdj <- gets $ M.lookup v . adjs
@@ -161,10 +113,10 @@ instance Adjoint VName where
         t <- lookupType v
         (_v', stms) <- runBinder . letExp "adj" $
           case t of
-            Prim (IntType it) ->
-              BasicOp $ BinOp (Add it OverflowWrap) (Var _v) (Var d)
-            Prim (FloatType ft) ->
-              BasicOp $ BinOp (FAdd ft) (Var _v) (Var d)
+            Prim pt ->
+              BasicOp $ BinOp (addBinOp pt) (Var _v) (Var d)
+            _ ->
+              error $ "updateAdjoint: unexpected type " <> pretty t
         let update = M.singleton v _v'
         insAdjMap update
         return (_v', update, stms)
@@ -196,20 +148,22 @@ instance Adjoint VName where
         insAdjMap us
         return (_v', us, stms)
     where
-      bop t = case elemType t of
-        ElemPrim (IntType it) -> Add it OverflowWrap
-        ElemPrim (FloatType ft) -> FAdd ft
-
       addArrays t xs ys =
-        case (shapeDims . arrayShape) t of
-          [] -> return $ BasicOp $ BinOp (bop t) (Var xs) (Var ys)
-          (s : ss) -> do
-            lam <- addArrays' $ t `setArrayShape` Shape ss
-            return $ Op $ Screma s (mapSOAC lam) [xs, ys]
+        case elemType t of
+          ElemAcc {} ->
+            error $ "addArrays: " ++ pretty t
+          ElemPrim pt ->
+            case (shapeDims . arrayShape) t of
+              [] -> return $ BasicOp $ BinOp (addBinOp pt) (Var xs) (Var ys)
+              (s : ss) -> do
+                lam <- addArrays' $ t `setArrayShape` Shape ss
+                return $ Op $ Screma s (mapSOAC lam) [xs, ys]
+
       addArrays' t =
-        case (shapeDims . arrayShape) t of
-          [] -> binOpLambda (bop t) $ case elemType t of ElemPrim pt -> pt
-          (s : ss) -> do
+        case (elemType t, shapeDims $ arrayShape t) of
+          (ElemAcc {}, _) -> error $ "addArrays': " ++ pretty t
+          (ElemPrim pt, []) -> binOpLambda (addBinOp pt) pt
+          (_, s : ss) -> do
             xs <- newVName "xs"
             ys <- newVName "ys"
             let t' = t `setArrayShape` Shape ss
@@ -548,17 +502,6 @@ revStm (Let (Pattern [] [pat@(PatElem p t)]) _ (BasicOp (Index v slice))) = do
   (_p, us1, s1) <- inScopeOf (p, LParamName t) $ lookupAdj $ patElemName pat
   (_, us2, s2) <- updateAdjointArray (Just slice) v _p
   return (us2 <> us1, s1 <> s2)
-revStm (Let (Pattern [] [pat@(PatElem p t)]) _ (BasicOp (Update v slice se))) = do
-  (_p, us1, s1) <- inScopeOf (p, LParamName t) $ lookupAdj $ patElemName pat
-  (_pslice, s2) <- inScopeOf (_p, LParamName t) $ runBinderT' $ letExp (baseString _p ++ "_slice") $ BasicOp $ Index _p slice
-  (_se, us3, s3) <- updateAdjointArray Nothing se _pslice
-  (_v, us4, s4) <- lookupAdj v
-  t' <- case se of
-    Constant c -> return $ Prim $ primValueType c
-    Var se_v -> lookupType se_v
-  (_vslice, s5) <- inScopeOf (_v, LParamName t') $ runBinderT' $ letExp (baseString _v ++ "_slice") $ BasicOp $ Index _v slice
-  (_se', us6, s6) <- updateAdjoint se _vslice
-  return (us6 <> us4 <> us3 <> us1, s1 <> s2 <> s3 <> s4 <> s5 <> s6)
 revStm (Let (Pattern [] [pe]) _ (BasicOp (SubExp se)))
   | Var v <- se = do
     (_p, us1, s1) <- localScope (scopeOfPatElem pe) $ lookupAdj $ patElemName pe
@@ -573,177 +516,6 @@ revStm (Let (Pattern [] [_]) _ (BasicOp (Reshape change v))) = do
     Just _v -> do
       (_v', stms) <- runBinderT' $ letExp "reshape_adj" (BasicOp (Reshape change _v))
       return (M.singleton v _v', stms)
-revStm (Let (Pattern [] [pe]) _ (Op (Screma n (ScremaForm [] [] f) [xs]))) = do
-  (_p, us1, s1) <- lookupAdj $ patElemName pe
-  (_f, bound, fv) <- localS id $ revLambda f
-  (paramsL, paramsR) <-
-    splitAt (length (lambdaReturnType _f))
-      <$> mapM (newParam "lam_adj") (lambdaReturnType _f ++ lambdaReturnType _f)
-  (red_res, red_stms) <- runBinderT' $
-    forM (drop (length bound) $ zip paramsL paramsR) $
-      \(Param l t, Param r _) -> do
-        let _op = case t of
-              Prim (IntType it) -> Add it OverflowWrap
-              Prim (FloatType ft) -> FAdd ft
-              _ -> error "oops"
-        letExp "*" =<< eBinOp _op (toExp l) (toExp r)
-
-  let red_f =
-        Lambda
-          { lambdaParams = drop (length bound) paramsL ++ drop (length bound) paramsR,
-            lambdaBody = mkBody red_stms $ map Var red_res,
-            lambdaReturnType = drop (length bound) $ lambdaReturnType _f
-          }
-  (neutral, neutral_stms) <-
-    runBinderT' $
-      mapM (letSubExp "neut_adj" <=< eBlank . paramType) $
-        drop (length bound) paramsL
-  let red =
-        Reduce
-          { redComm = Commutative,
-            redLambda = red_f,
-            redNeutral = neutral
-          }
-
-  (_ds, d_stms) <- runBinderT' $ letTupExp "adj_updates" $ Op (Screma n (ScremaForm [] [] _f) [xs, _p])
-
-  idf <- mkIdentityLambda $ drop (length bound) $ lambdaReturnType _f
-
-  (_d_red, d_stms_red) <- runBinderT' $ letTupExp "adj_updates" $ Op (Screma n (ScremaForm [] [red] idf) (drop (length bound) _ds))
-
-  (_fv, fv_us, fv_stms) <- inScopeOf d_stms_red $ unzip3 <$> zipWithM updateAdjoint fv _d_red
-
-  (_xs', us2, s3) <- updateAdjointArray Nothing xs (head _ds)
-  return (mconcat fv_us <> us2 <> us1, s1 <> neutral_stms <> d_stms <> d_stms_red <> mconcat fv_stms <> s3)
-
---
-revStm (Let (Pattern [] [pe]) _ (Op (Screma w form as)))
-  | Just [red] <- isReduceSOAC form = do
-    (pe_adj, pe_adj_us, pe_adj_stms) <- lookupAdj $ patElemName pe
-    (us, stms) <- runBinderT' $ do
-      flip_red <- flipReduce red
-      ls <- scanExc "ls" (redToScan red) as
-      rs <-
-        mapM eReverse
-          =<< scanExc "ls" (redToScan flip_red)
-          =<< mapM eReverse as
-
-      f <- mkF $ redLambda red
-      (f_rev, _, _) <- lift $ revLambda f
-      traceM $ pretty f
-      traceM $ pretty f_rev
-
-      f_adj_params <-
-        zipWithM
-          newParam
-          (init (map (baseString . paramName) (lambdaParams f_rev)))
-          (init (map paramType (lambdaParams f_rev)))
-      f_adj_body <- runBodyBinder $
-        localScope (scopeOfLParams f_adj_params) $ do
-          let adj_ses = map (Var . paramName) f_adj_params ++ [Var pe_adj]
-          forM_ (zip (lambdaParams f_rev) adj_ses) $ \(p, adj) ->
-            letBindNames [paramName p] $ BasicOp $ SubExp adj
-          pure $ lambdaBody f_rev
-
-      let f_adj = Lambda f_adj_params f_adj_body $ lambdaReturnType f_rev
-
-      all_adjs <-
-        letTupExp "adjs" $ Op $ Screma w (mapSOAC f_adj) $ ls ++ as ++ rs
-
-      -- We only want the adjoints with respect to the 'as' parameters.
-      let (_, as_adj, _) = splitAt3 (length as) (length as) all_adjs
-
-      (mystery, us, stms) <- fmap unzip3 . forM (zip as as_adj) $ \(a, a_adj) ->
-        lift $ updateAdjointArray Nothing a a_adj
-
-      addStms $ mconcat stms
-      pure us
-
-    pure (pe_adj_us <> mconcat us, pe_adj_stms <> stms)
-  where
-    redToScan :: Reduce SOACS -> Scan SOACS
-    redToScan (Reduce _ lam nes) = Scan lam nes
-    flipReduce (Reduce comm lam nes) = do
-      lam' <- renameLambda lam {lambdaParams = flipParams $ lambdaParams lam}
-      pure $ Reduce comm lam' nes
-    flipParams ps = uncurry (flip (++)) $ splitAt (length ps `div` 2) ps
-
-    mkF lam = do
-      lam_l <- renameLambda lam
-      lam_r <- renameLambda lam
-      let n = length $ lambdaReturnType lam
-          (lps, aps) = splitAt n $ lambdaParams lam_l
-          (ips, rps) = splitAt n $ lambdaParams lam_r
-      body <- runBodyBinder $
-        localScope (scopeOfLParams $ lps <> aps <> rps) $ do
-          lam_l_res <- bodyBind $ lambdaBody lam_l
-          forM_ (zip ips lam_l_res) $ \(ip, se) ->
-            letBindNames [paramName ip] $ BasicOp $ SubExp se
-          pure $ lambdaBody lam_r
-      pure $ Lambda (lps <> aps <> rps) body $ lambdaReturnType lam
---
-revStm stmt@(Let (Pattern [] pes) _ (Op (Screma n (ScremaForm [] [red] f) xs)))
-  | isIdentityLambda f = do
-    let (red_op, red_ne) = (redLambda red, redNeutral red)
-        red_args_1 = take (length red_ne) $ lambdaParams red_op
-        red_args_2 = drop (length red_ne) $ lambdaParams red_op
-        red_op_rev = red_op {lambdaParams = red_args_2 ++ red_args_1}
-    arr_tps <- mapM lookupType xs
-    let full_out_slice = DimSlice (intConst Int64 0) n (intConst Int64 1)
-    let full_slices = map (\arr_tp -> fullSlice arr_tp [full_out_slice]) arr_tps
-    (res_adj, empty1, empty2) <- unzip3 <$> mapM (lookupAdj . patElemName) pes
-    if all M.null empty1 && all null empty2
-      then do
-        -- ls = scan_exc red_op red_ne xs
-        (lft_nms, stms_scan_1) <- mkScanExc n red_op (zip red_ne xs)
-        -- rs = reverse <| scan_exc red_op_rev ne <| reverse xs
-        (arrs1, stms_revs_1) <- mkReverse n (zip xs arr_tps)
-        (arrs2, stms_scan_2) <- mkScanExc n red_op_rev (zip red_ne arrs1)
-        (rgt_nms, stms_revs_2) <- mkReverse n (zip arrs2 arr_tps)
-        -- cs = map3 (f_bar y_bar) ls rs xs
-        map_lam <- revReduce2Map red_op res_adj
-        let map_arr_args = lft_nms ++ rgt_nms ++ xs
-        (adj_contribs, stms_map_ctrib) <-
-          runBinderT' $
-            letTupExp "adj_contribs" $ Op (Screma n (ScremaForm [] [] map_lam) map_arr_args)
-        -- xs_bar = map2 (vect +) xs_bar_0 cs
-        (new_map_adj, stms_map_upd) <-
-          foldM
-            ( \(m_acc, stms_acc) (x, c_, full_slice) -> do
-                (_, m, ss) <- updateAdjointArray (Just full_slice) x c_
-                return (m_acc <> m, stms_acc <> ss)
-            )
-            (M.empty, mempty)
-            (zip3 xs adj_contribs full_slices)
-        --(xs_adj_0, map_xs_adj, stms_xs_adj) <- unzip3 <$> mapM lookupAdj xs
-        --(xs_adj, stms_map_upd) <- mkMapUpdate adj_contribs
-        trace
-          ( "Cosmin reduce: orig-stm: " ++ pretty stmt
-              ++ "\n adjoint of result: "
-              ++ pretty res_adj
-              ++ "\n stms_scan_1: "
-              ++ pretty stms_scan_1
-              ++ "\n stms_revs_1: "
-              ++ pretty stms_revs_1
-              ++ "\n stms_scan_2: "
-              ++ pretty stms_scan_2
-              ++ "\n stms_revs_2: "
-              ++ pretty stms_revs_2
-              ++ "\n stms_map_ctrib: "
-              ++ pretty stms_map_ctrib
-              ++ "\n stms_map_upd: "
-              ++ pretty stms_map_upd
-              ++ "\n reduce_adjoint_nms: "
-              ++ pretty new_map_adj
-          )
-          $ return (new_map_adj, stms_scan_1 <> stms_revs_1 <> stms_scan_2 <> stms_revs_2 <> stms_map_ctrib <> stms_map_upd)
-      else error "Unreachable case in revStm for single reduce!"
-revStm (Let (Pattern [] [pe]) _ (Op (Screma n (ScremaForm [] [red] f) [xs]))) = do
-  (_p, us1, s1) <- lookupAdj $ patElemName pe
-  (_f, _, _) <- localS id $ revLambda $ redLambda red
-  (_ds, d_stms) <- runBinderT' $ letTupExp "adj_updates" $ Op (Screma n (ScremaForm [] [] _f) [xs])
-  (_xs', us2, s3) <- updateAdjointArray Nothing xs (head _ds)
-  return (us2 <> us1, s1 <> d_stms <> s3)
 revStm (Let Pattern {} _ (BasicOp Assert {})) =
   return (mempty, mempty)
 revStm stm@(Let (Pattern [] [pe]) _ (Apply f args _ _))
@@ -770,112 +542,6 @@ revStm stm@(Let (Pattern [] [pe]) _ (Apply f args _ _))
         s1 <> contribs_stms <> mconcat s2
       )
 revStm stm = error $ "unsupported stm: " ++ pretty stm ++ "\n\n\n" ++ show stm
-
-revLambda :: Lambda -> ADM (Lambda, [VName], [VName])
-revLambda (Lambda params body@(Body () stms res) _) = inScopeOf stms $ do
-  let rvars = subExpVars res
-  params_adj <- forM rvars $ \v -> do
-    v_adj <- adjVName v
-    insAdj v v_adj
-    Param v_adj <$> lookupType v
-
-  (body_us, Body () fwdStms _, _body@(Body () rev_stms _)) <-
-    localScope (scopeOfLParams params) $ revBody body
-
-  (params_adjs, _, params_adjs_stms) <-
-    unzip3 <$> mapM (lookupAdj . paramName) params
-
-  (Body () rev_stms' rev_adj_res, subs) <-
-    renameBody' $
-      Body () (rev_stms <> mconcat params_adjs_stms) (map Var params_adjs)
-
-  let body_us' = fmap (subs M.!) body_us
-
-  let _rvars = subExpVars rev_adj_res
-      bound = M.restrictKeys body_us' $ S.fromList $ map paramName params
-      (bound_sort, fv_sort) = partition (`elem` M.elems bound) _rvars
-      _res_sort = map Var $ bound_sort ++ fv_sort -- jank, fix
-      rev =
-        Lambda
-          { lambdaParams = params ++ params_adj,
-            lambdaBody = Body () (fwdStms <> rev_stms') rev_adj_res,
-            lambdaReturnType = map paramType params
-          }
-  return
-    ( rev,
-      map (invert body_us' M.!) bound_sort,
-      map (invert body_us' M.!) fv_sort
-    )
-  where
-    invert m = M.fromList [(v, k) | (k, v) <- M.toList m]
-    --renameBody' b = modifyNameSource $ runRenamer $ do
-    --    b' <- rename b
-    --    subs <- renamerSubstitutions
-    --    return $ (b', subs)
-    --runRenamer :: RenameM a -> VNameSource -> (a, VNameSource)
-    --runRenamer (RenameM m) src = runReader (runStateT m src) env
-    --  where env = RenameEnv M.empty
-    renameBody' b = do
-      let vs = namesToList $ boundInBody b
-      subs <-
-        mconcat
-          <$> forM
-            vs
-            ( \v -> do
-                v' <- newVName (baseString v)
-                return $ M.singleton v v'
-            )
-      return (substituteNames subs b, subs)
-
--- revLambdaAcc :: Lambda -> ADM (Lambda, VName)
--- revLambdaAcc lambda@(Lambda params body@(Body decs stms res) ret) = do
---     let rvars  = concatMap (\se -> case se of Constant{} -> []; Var v -> [v]) res
---
---     _params <- zipWithM (\v t -> do
---                            _v <- adjVName v
---                            insAdj v _v
---                            _t <- lookupType v
---                            return $ Param _v t) rvars ret
---
---     --let _paramMap = mconcat <$> zipWithM (\v (Param _v _) -> M.singleton v _v) rvars _params
---
---     (body_us, fwdBody@(Body fwdDecs fwdStms fwdRes), _body@(Body _ _ _res')) <- localScope (scopeOfLParams params) $ revBody body
---
---     (Body _decs _stms _res, subs) <- renameBody' _body
---
---     let body_us' = fmap (subs M.!) body_us
---
---     let _rvars = concatMap (\se -> case se of Constant{} -> []; Var v -> [v]) _res
---         bound = M.restrictKeys body_us' $ S.fromList $ map paramName params
---         fv = M.restrictKeys body_us' $ S.fromList $ namesToList (freeIn body) \\ M.keys bound
---         (bound_sort, fv_sort) = partition (`elem` M.elems bound) _rvars
---         _res_sort = map Var $ bound_sort ++ fv_sort-- jank, fix
---
---     _ret <- inScopeOf (stms <> _stms) $ concat <$> forM _res (\se ->
---       case se of
---         Constant{} -> return []
---         Var v -> pure <$> lookupType v)
---
---     let rev = Lambda { lambdaParams = params ++ _params
---                      , lambdaBody = Body _decs (fwdStms <> _stms) _res_sort
---                      , lambdaReturnType = _ret
---                      }
---     return (rev, map (invert body_us' M.!) bound_sort, map (invert body_us' M.!) fv_sort)
---
---     where invert m = M.fromList [(v, k) | (k, v) <- M.toList m]
---           --renameBody' b = modifyNameSource $ runRenamer $ do
---           --    b' <- rename b
---           --    subs <- renamerSubstitutions
---           --    return $ (b', subs)
---           --runRenamer :: RenameM a -> VNameSource -> (a, VNameSource)
---           --runRenamer (RenameM m) src = runReader (runStateT m src) env
---           --  where env = RenameEnv M.empty
---           renameBody' b = do
---             let vs = namesToList $ boundInBody b
---             subs <- mconcat <$> forM vs (\v -> do
---               v' <- newVName (baseString v)
---               return $ M.singleton v v')
---             return (substituteNames subs b, subs)
 
 revFwdStms :: Stms SOACS -> ADM (Stms SOACS)
 revFwdStms = fmap mconcat . mapM revFwdStm . stmsToList
@@ -935,130 +601,3 @@ revVJP scope (Lambda params body@(Body () stms res) _) = do
             $ map paramType params
 
     pure lam
-
--------------------------------------
---- Cosmin trial code starts here ---
--------------------------------------
-
-revReduce2Map :: Lambda -> [VName] -> ADM Lambda
-revReduce2Map lam res_adj = do
-  let bdy_lam = lambdaBody lam
-  let arg_nms_lam = map paramName $ lambdaParams lam
-  let lam_ret_tps = lambdaReturnType lam
-  let red_arg_len = length arg_nms_lam `div` 2
-  let fst_arg_nms = take red_arg_len arg_nms_lam
-  let snd_arg_nms = drop red_arg_len arg_nms_lam
-  lft_nms <- mapM (newVNameStr "lft_red_arg") [1 .. red_arg_len]
-  rht_nms <- mapM (newVNameStr "rht_red_arg") [1 .. red_arg_len]
-  dif_nms <- mapM (newVNameStr "dif_red_arg") [1 .. red_arg_len]
-  tmp_nms <- mapM (newVNameStr "tmp_red_arg") [1 .. red_arg_len]
-  -- make the body corresponding to (lambda lft_nms dif_nms -> ... in res)
-  let subs1 = M.fromList $ zip fst_arg_nms lft_nms ++ zip snd_arg_nms dif_nms
-  bdy_lam_1 <- renameBody $ substituteNames subs1 bdy_lam
-  let res_bdy_1 = bodyResult bdy_lam_1
-  -- insert copy statements "let tmp_nms = res"
-  let ini_stms =
-        foldl
-          (\acc (nm, tp, ret) -> acc <> oneStm (mkLet [] [Ident nm tp] (BasicOp $ SubExp ret)))
-          mempty
-          (zip3 tmp_nms lam_ret_tps res_bdy_1)
-  -- make the body corresponding to (lambda tmp_nms rht_nms -> ...)
-  let subs2 = M.fromList $ zip fst_arg_nms tmp_nms ++ zip snd_arg_nms rht_nms
-  bdy_lam_2 <- renameBody $ substituteNames subs2 bdy_lam
-  -- create the body corresponding to (lft_nms \odot dif_nms \odot rht_nms),
-  -- where \odot is assumed to be the reduce operator
-  let fin_body_stms = bodyStms bdy_lam_1 <> ini_stms <> bodyStms bdy_lam_2
-  let fin_body_ret = bodyResult bdy_lam_2
-  let fin_body = mkBody fin_body_stms fin_body_ret
-  -- differentiate the body while linking the adjoint of the result
-  let tp_scope = map LParamName lam_ret_tps
-  inScopeOf (zip res_adj tp_scope) $
-    mapM_ (uncurry insAdj) $ mapMaybe nameSE $ zip fin_body_ret res_adj
-  let args_scope = zip res_adj tp_scope ++ zip lft_nms tp_scope ++ zip rht_nms tp_scope ++ zip dif_nms tp_scope
-  (_, fwd_bdy, rev_bdy) <- inScopeOf args_scope $ revBody fin_body
-  -- get the adjoint results of the differentiated body
-  (adj_dif_nms, empties1, empties2) <- unzip3 <$> mapM lookupAdj dif_nms
-  if all M.null empties1 && all null empties2
-    then do
-      -- create the lambda
-      let dif_lam_stms = bodyStms fwd_bdy <> bodyStms rev_bdy
-          dif_lam_res = map Var adj_dif_nms
-          dif_lam_bdy = mkBody dif_lam_stms dif_lam_res
-          dif_lam_par =
-            zipWith Param lft_nms lam_ret_tps
-              ++ zipWith Param rht_nms lam_ret_tps
-              ++ zipWith Param dif_nms lam_ret_tps
-      return $ Lambda dif_lam_par dif_lam_bdy lam_ret_tps
-    else error "Impossible case reached in revReduce2Map!"
-  where
-    newVNameStr :: String -> Int -> ADM VName
-    newVNameStr str i = newVName (str ++ pretty i ++ "_")
-    nameSE :: (SubExp, VName) -> Maybe (VName, VName)
-    nameSE (Var nm1, nm2) = Just (nm1, nm2)
-    nameSE _ = Nothing
-
-mkScanExc :: SubExp -> Lambda -> [(SubExp, VName)] -> ADM ([VName], Stms SOACS)
-mkScanExc n red_op ne_arrs = do
-  let (red_nes, arrs) = unzip ne_arrs
-  let lam_ret_tps = lambdaReturnType red_op
-  -- create the statements of the mapped lambda:
-  i_nm <- newVName "ind"
-  let lam_par = Param i_nm $ Prim $ IntType Int64
-  (lam_res, lam_stms) <-
-    runBinderT' $ do
-      im1 <- letSubExp "ind_m1" =<< toExp (le64 i_nm + pe64 (intConst Int64 (-1)))
-      letTupExp "res_elem"
-        =<< eIf
-          (toExp $ pe64 im1 .>=. pe64 (intConst Int64 0))
-          ( do
-              then_info <- forM (zip arrs lam_ret_tps) $ \(arr_nm, res_tp) -> do
-                nm <- newVName (baseString arr_nm ++ "_elem")
-                let slc = DimFix im1 : fullSlice res_tp []
-                let stm = mkLet [] [Ident nm res_tp] $ BasicOp $ Index arr_nm slc
-                return (nm, stm)
-              let (then_nms, then_stms) = unzip then_info
-              addStms $ stmsFromList then_stms
-              resultBodyM $ map Var then_nms
-          )
-          (eBody $ map (pure . BasicOp . SubExp) red_nes)
-  -- create the scanomap stm:
-  (nms, stms) <- runBinderT' $ do
-    iota_se <- letSubExp "iota_arr" $ BasicOp $ Iota n (intConst Int64 0) (intConst Int64 1) Int64
-    let lam_body = mkBody lam_stms $ map Var lam_res
-    let f_lam = Lambda [lam_par] lam_body lam_ret_tps
-    -- f_lam <- mkIdentityLambda $ lambdaReturnType red_op
-    case iota_se of
-      Var iota_nm ->
-        letTupExp "scaned_arrays" $ Op (Screma n (ScremaForm [Scan red_op red_nes] [] f_lam) [iota_nm])
-      _ -> error "In mkScanExc function of Rev.hs file: a iota should be held in a new variable!"
-  return (nms, stms)
-
-mkReverse :: SubExp -> [(VName, Type)] -> ADM ([VName], Stms SOACS)
-mkReverse n arrtps = do
-  let (arrs, tps) = unzip arrtps
-  runBinderT' $ do
-    nm1 <- letExp "n_min_1" =<< toExp (le64 n + le64 (intConst Int64 (-1)))
-    iota_se <- letSubExp "iota_arr" $ BasicOp $ Iota n (Var nm1) (intConst Int64 (-1)) Int64
-    i_nm <- newVName "ind"
-    let lam_par = Param i_nm $ Prim $ IntType Int64
-    let lam_ret_tps = map (stripArray 1) tps
-    lam_res_stms <- forM (zip arrs lam_ret_tps) $ \(arr_nm, res_tp) -> do
-      nm <- newVName (baseString arr_nm ++ "_elem")
-      let slc = DimFix (Var i_nm) : fullSlice res_tp []
-      let stm = mkLet [] [Ident nm res_tp] $ BasicOp $ Index arr_nm slc
-      return (nm, stm)
-    let (lam_res, lam_stms_lst) = unzip lam_res_stms
-    let lam_stms = stmsFromList lam_stms_lst
-    let lam_body = mkBody lam_stms $ map Var lam_res
-    let lam = Lambda [lam_par] lam_body lam_ret_tps
-    case iota_se of
-      Var iota_nm ->
-        letTupExp "rev_arrays" $ Op (Screma n (ScremaForm [] [] lam) [iota_nm])
-      _ -> error "In mkReverse function of Rev.hs file: a iota should be held in a new variable!"
-
-adBlank :: Type -> BasicOp
-adBlank (Prim pt) = SubExp $ Constant $ blankPrimValue pt
-adBlank (Array (ElemPrim t) shape _) = Replicate shape $ Constant $ blankPrimValue t
-adBlank (Array (ElemAcc _) _ _) = error "adBlank: cannot create array of accumulators YET (?)"
-adBlank Acc {} = error "adBlank: cannot create blank accumulator"
-adBlank Mem {} = error "adBlank: cannot create blank memory"
