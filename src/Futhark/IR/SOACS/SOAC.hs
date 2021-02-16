@@ -559,36 +559,36 @@ instance
   where
   type OpWithAliases (SOAC lore) = SOAC (Aliases lore)
 
-  addOpAliases (Stream size form lam arr) =
+  addOpAliases aliases (Stream size form lam arr) =
     Stream
       size
       (analyseStreamForm form)
-      (Alias.analyseLambda lam)
+      (Alias.analyseLambda aliases lam)
       arr
     where
       analyseStreamForm (Parallel o comm lam0 acc) =
-        Parallel o comm (Alias.analyseLambda lam0) acc
+        Parallel o comm (Alias.analyseLambda aliases lam0) acc
       analyseStreamForm (Sequential acc) = Sequential acc
-  addOpAliases (Scatter len lam ivs as) =
-    Scatter len (Alias.analyseLambda lam) ivs as
-  addOpAliases (Hist len ops bucket_fun imgs) =
+  addOpAliases aliases (Scatter len lam ivs as) =
+    Scatter len (Alias.analyseLambda aliases lam) ivs as
+  addOpAliases aliases (Hist len ops bucket_fun imgs) =
     Hist
       len
-      (map (mapHistOp Alias.analyseLambda) ops)
-      (Alias.analyseLambda bucket_fun)
+      (map (mapHistOp (Alias.analyseLambda aliases)) ops)
+      (Alias.analyseLambda aliases bucket_fun)
       imgs
-  addOpAliases (Screma w (ScremaForm scans reds map_lam) arrs) =
+  addOpAliases aliases (Screma w (ScremaForm scans reds map_lam) arrs) =
     Screma
       w
       ( ScremaForm
           (map onScan scans)
           (map onRed reds)
-          (Alias.analyseLambda map_lam)
+          (Alias.analyseLambda aliases map_lam)
       )
       arrs
     where
-      onRed red = red {redLambda = Alias.analyseLambda $ redLambda red}
-      onScan scan = scan {scanLambda = Alias.analyseLambda $ scanLambda scan}
+      onRed red = red {redLambda = Alias.analyseLambda aliases $ redLambda red}
+      onScan scan = scan {scanLambda = Alias.analyseLambda aliases $ scanLambda scan}
 
   removeOpAliases = runIdentity . mapSOACM remove
     where

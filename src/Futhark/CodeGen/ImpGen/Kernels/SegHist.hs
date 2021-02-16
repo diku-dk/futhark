@@ -200,7 +200,7 @@ data Passage = MustBeSinglePass | MayBeMultiPass deriving (Eq, Ord)
 
 bodyPassage :: KernelBody KernelsMem -> Passage
 bodyPassage kbody
-  | mempty == consumedInKernelBody (aliasAnalyseKernelBody kbody) =
+  | mempty == consumedInKernelBody (aliasAnalyseKernelBody mempty kbody) =
     MayBeMultiPass
   | otherwise =
     MustBeSinglePass

@@ -274,7 +274,7 @@ jobs:
         echo "$HOME/.local/bin" >> $GITHUB_PATH
 
     - run: |
-        futhark test -c --no-terminal --no-tuning --backend=python --exclude=no_python tests examples
+        futhark test -c --no-terminal --no-tuning --backend=python --exclude=no_python --exclude=compiled tests examples
 
   test-opencl:
     runs-on: ubuntu-20.04

@@ -9,6 +9,55 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+  * `futhark literate` now supports a `$loadimg` builtin function for
+    passing images to Futhark programs.
+
+  * The `futhark literate` directive for generating videos is now
+    `:video`.
+
+  * Support for 64-bit atomics on CUDA and OpenCL for higher
+    performance with `reduce_by_index` in particular.
+    Double-precision float atomics are still not used.
+
+  * New functions: `f32.recip` and `f64.recip` for multiplicative inverses.
+
+  * Executables produced with the `c` and `multicore` backends now
+    also accept `--tuning` and `--size` options (although there are
+    not yet any tunable sizes).
+
+### Removed
+
+### Changed
+
+  * The math modules no longer define the name `negate` (use `neg`
+    instead).
+
+### Fixed
+
+  * Exotic core language alias tracking bug (#1239).
+
+  * Issue with entry points returning constant arrays (#1240).
+
+  * Overzealous CSE collided with uniqueness types (#1241).
+
+  * Defunctionalisation issue (#1242).
+
+  * Tiling inside multiply nested loops (#1243).
+
+  * Substitution bug in interpreter (#1250).
+
+  * `f32.sgn`/`f64.sgn` now correct for NaN arguments.
+
+  * CPU backends (`c`/`multicore`) are now more careful about staying
+    in single precision for `f32` functions (#1253).
+
+  * `futhark test` and `futhark bench` now detect program
+    initialisation errors in a saner way (#1246).
+
+## [0.18.6]
+
+### Added
+
   * The C API now exposes serialisation functions for opaque values.
 
   * The C API now lets you pick which stream (if any) is used for
@@ -34,9 +83,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * Generated header-files are now declared `extern "C"` when
     processed with a C++ compiler.
 
-### Removed
-
-### Changed
+  * Parser errors in test blocks used by `futhark bench` and `futhark
+    test` are now reported with much better error messages.
 
 ### Fixed
 

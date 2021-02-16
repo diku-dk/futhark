@@ -420,7 +420,7 @@ instance Pretty op => Pretty (FunctionT op) where
 
 instance Pretty Param where
   ppr (ScalarParam name ptype) = ppr ptype <+> ppr name
-  ppr (MemParam name space) = text "mem" <> ppr space <+> ppr name
+  ppr (MemParam name space) = text "mem" <> ppr space <> text " " <> ppr name
 
 instance Pretty ValueDesc where
   ppr (ScalarValue t ept name) =
@@ -599,6 +599,8 @@ instance Traversable Code where
   traverse _ (DebugPrint s v) =
     pure $ DebugPrint s v
 
+-- | The names declared with 'DeclareMem', 'DeclareScalar', and
+-- 'DeclareArray' in the given code.
 declaredIn :: Code a -> Names
 declaredIn (DeclareMem name _) = oneName name
 declaredIn (DeclareScalar name _ _) = oneName name
@@ -611,8 +613,22 @@ declaredIn (Comment _ body) = declaredIn body
 declaredIn _ = mempty
 
 instance FreeIn a => FreeIn (Functions a) where
-  freeIn' (Functions fs) =
-    foldMap (freeIn' . functionBody . snd) fs
+  freeIn' (Functions fs) = foldMap (onFun . snd) fs
+    where
+      onFun f =
+        fvBind pnames $
+          freeIn' (functionBody f) <> freeIn' (functionResult f <> functionArgs f)
+        where
+          pnames =
+            namesFromList $ map paramName $ functionInput f <> functionOutput f
+
+instance FreeIn ValueDesc where
+  freeIn' (ArrayValue mem _ _ _ dims) = freeIn' mem <> freeIn' dims
+  freeIn' ScalarValue {} = mempty
+
+instance FreeIn ExternalValue where
+  freeIn' (TransparentValue vd) = freeIn' vd
+  freeIn' (OpaqueValue _ vds) = foldMap freeIn' vds
 
 instance FreeIn a => FreeIn (Code a) where
   freeIn' (x :>>: y) =

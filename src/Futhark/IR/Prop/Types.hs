@@ -468,7 +468,7 @@ shapeContext =
     ext (Free _) = Nothing
 
 -- | If all dimensions of the given 'ExtShape' are statically known,
--- change to the corresponding 'Shape'.
+-- change to the corresponding t'Shape'.
 hasStaticShape :: TypeBase ExtShape u -> Maybe (TypeBase Shape u)
 hasStaticShape (Prim bt) = Just $ Prim bt
 hasStaticShape (Acc arrs) = Just $ Acc arrs

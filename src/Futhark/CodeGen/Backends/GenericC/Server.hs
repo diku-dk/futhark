@@ -6,6 +6,7 @@
 {-# LANGUAGE Trustworthy #-}
 {-# LANGUAGE TupleSections #-}
 
+-- | Code generation for server executables.
 module Futhark.CodeGen.Backends.GenericC.Server
   ( serverDefs,
   )
@@ -47,6 +48,54 @@ genericOptions =
                           fut_progname, option_descriptions);
                    exit(0);
                   }|]
+      },
+    Option
+      { optionLongName = "print-sizes",
+        optionShortName = Nothing,
+        optionArgument = NoArgument,
+        optionDescription = "Print all sizes that can be set with --size or --tuning.",
+        optionAction =
+          [C.cstm|{
+                int n = futhark_get_num_sizes();
+                for (int i = 0; i < n; i++) {
+                  printf("%s (%s)\n", futhark_get_size_name(i),
+                                      futhark_get_size_class(i));
+                }
+                exit(0);
+              }|]
+      },
+    Option
+      { optionLongName = "size",
+        optionShortName = Nothing,
+        optionArgument = RequiredArgument "ASSIGNMENT",
+        optionDescription = "Set a configurable run-time parameter to the given value.",
+        optionAction =
+          [C.cstm|{
+                char *name = optarg;
+                char *equals = strstr(optarg, "=");
+                char *value_str = equals != NULL ? equals+1 : optarg;
+                int value = atoi(value_str);
+                if (equals != NULL) {
+                  *equals = 0;
+                  if (futhark_context_config_set_size(cfg, name, value) != 0) {
+                    futhark_panic(1, "Unknown size: %s\n", name);
+                  }
+                } else {
+                  futhark_panic(1, "Invalid argument for size option: %s\n", optarg);
+                }}|]
+      },
+    Option
+      { optionLongName = "tuning",
+        optionShortName = Nothing,
+        optionArgument = RequiredArgument "FILE",
+        optionDescription = "Read size=value assignments from the given file.",
+        optionAction =
+          [C.cstm|{
+                char *ret = load_tuning_file(optarg, cfg, (int(*)(void*, const char*, size_t))
+                                                          futhark_context_config_set_size);
+                if (ret != NULL) {
+                  futhark_panic(1, "When loading tuning from '%s': %s\n", optarg, ret);
+                }}|]
       }
   ]
 
@@ -205,6 +254,8 @@ mkBoilerplate funs =
    in (type_defs ++ entry_defs, type_inits, entry_inits)
 
 {-# NOINLINE serverDefs #-}
+
+-- | Generate Futhark server executable code.
 serverDefs :: [Option] -> Functions a -> [C.Definition]
 serverDefs options funs =
   let server_h = $(embedStringFile "rts/c/server.h")

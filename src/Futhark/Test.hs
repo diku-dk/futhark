@@ -62,16 +62,10 @@ import qualified Data.Text.Encoding as T
 import qualified Data.Text.IO as T
 import Data.Void
 import Futhark.Analysis.Metrics.Type
-import Futhark.IR.Primitive
-  ( FloatType (..),
-    IntType (..),
-    floatByteSize,
-    floatValue,
-    intByteSize,
-    intValue,
-  )
+import Futhark.IR.Primitive (floatByteSize, intByteSize)
 import Futhark.Server
 import Futhark.Test.Values
+import Futhark.Test.Values.Parser
 import Futhark.Util (directoryContents, pmapIO)
 import Futhark.Util.Pretty (pretty, prettyText)
 import Language.Futhark.Prop (primByteSize, primValueType)
@@ -164,7 +158,7 @@ data Values
 data GenValue
   = -- | Generate a value of the given rank and primitive
     -- type.  Scalars are considered 0-ary arrays.
-    GenValue [Int] PrimType
+    GenValue ValueType
   | -- | A fixed non-randomised primitive value.
     GenPrim PrimValue
   deriving (Show)
@@ -172,7 +166,7 @@ data GenValue
 -- | A prettyprinted representation of type of value produced by a
 -- 'GenValue'.
 genValueType :: GenValue -> String
-genValueType (GenValue ds t) =
+genValueType (GenValue (ValueType ds t)) =
   concatMap (\d -> "[" ++ show d ++ "]") ds ++ pretty t
 genValueType (GenPrim v) =
   pretty v
@@ -227,7 +221,10 @@ parseNatural =
     num c = ord c - ord '0'
 
 restOfLine :: Parser T.Text
-restOfLine = restOfLine_ <* eol
+restOfLine = do
+  l <- restOfLine_
+  if T.null l then void eol else void eol <|> eof
+  pure l
 
 restOfLine_ :: Parser T.Text
 restOfLine_ = takeWhileP Nothing (/= '\n')
@@ -335,102 +332,18 @@ parseRandomValues = GenValues <$> between (lexstr "{") (lexstr "}") (many parseG
 parseGenValue :: Parser GenValue
 parseGenValue =
   choice
-    [ GenValue <$> many dim <*> parsePrimType,
-      lexeme $
-        GenPrim
-          <$> choice
-            [ i8,
-              i16,
-              i32,
-              i64,
-              u8,
-              u16,
-              u32,
-              u64,
-              f32,
-              f64,
-              int SignedValue Int32 ""
-            ]
-    ]
-  where
-    digits = some (satisfy isDigit)
-    dim =
-      between (lexstr "[") (lexstr "]") $
-        lexeme $ read <$> digits
-
-    readint :: String -> Integer
-    readint = read -- To avoid warnings.
-    readfloat :: String -> Double
-    readfloat = read -- To avoid warnings.
-    int f t s =
-      try $
-        lexeme $
-          f . intValue t . readint <$> digits
-            <* string s
-            <* notFollowedBy (satisfy isAlphaNum)
-    i8 = int SignedValue Int8 "i8"
-    i16 = int SignedValue Int16 "i16"
-    i32 = int SignedValue Int32 "i32"
-    i64 = int SignedValue Int64 "i64"
-    u8 = int UnsignedValue Int8 "u8"
-    u16 = int UnsignedValue Int16 "u16"
-    u32 = int UnsignedValue Int32 "u32"
-    u64 = int UnsignedValue Int64 "u64"
-
-    optSuffix s suff = do
-      s' <- s
-      ((s' <>) <$> suff) <|> pure s'
-
-    float f t s =
-      try $
-        lexeme $
-          f . floatValue t . readfloat
-            <$> (digits `optSuffix` (char '.' *> (("." <>) <$> digits)))
-            <* string s
-            <* notFollowedBy (satisfy isAlphaNum)
-    f32 = float FloatValue Float32 "f32"
-    f64 = float FloatValue Float64 "f64"
-
-parsePrimType :: Parser PrimType
-parsePrimType =
-  choice
-    [ lexstr "i8" $> Signed Int8,
-      lexstr "i16" $> Signed Int16,
-      lexstr "i32" $> Signed Int32,
-      lexstr "i64" $> Signed Int64,
-      lexstr "u8" $> Unsigned Int8,
-      lexstr "u16" $> Unsigned Int16,
-      lexstr "u32" $> Unsigned Int32,
-      lexstr "u64" $> Unsigned Int64,
-      lexstr "f32" $> FloatType Float32,
-      lexstr "f64" $> FloatType Float64,
-      lexstr "bool" $> Bool
+    [ GenValue <$> lexeme parseType,
+      GenPrim <$> lexeme parsePrimValue
     ]
 
 parseValues :: Parser Values
 parseValues =
-  do
-    s <- parseBlock
-    case valuesFromByteString "input block contents" $ BS.fromStrict $ T.encodeUtf8 s of
-      Left err -> fail err
-      Right vs -> return $ Values vs
-    <|> lexstr "@" *> lexeme (InFile . T.unpack <$> nextWord)
-
-parseBlock :: Parser T.Text
-parseBlock = lexeme $ braces (T.pack <$> parseBlockBody 0)
-
-parseBlockBody :: Int -> Parser String
-parseBlockBody n = do
-  c <- lookAhead $ lexeme anySingle
-  case (c, n) of
-    ('}', 0) -> return mempty
-    ('}', _) -> (:) <$> anySingle <*> parseBlockBody (n -1)
-    ('{', _) -> (:) <$> anySingle <*> parseBlockBody (n + 1)
-    ('\n', _) -> anySingle *> string "--" *> ((' ' :) <$> parseBlockBody n)
-    _ -> (:) <$> anySingle <*> parseBlockBody n
-
-nextWord :: Parser T.Text
-nextWord = takeWhileP Nothing $ not . isSpace
+  choice
+    [ Values <$> braces (many $ parseValue postlexeme),
+      InFile . T.unpack <$> (lexstr "@" *> lexeme nextWord)
+    ]
+  where
+    nextWord = takeWhileP Nothing $ not . isSpace
 
 parseWarning :: Parser WarningTest
 parseWarning = lexstr "warning:" >> parseExpectedWarning
@@ -471,7 +384,7 @@ couldNotRead = return . Left . show
 pProgramTest :: Parser ProgramTest
 pProgramTest = do
   void $ many pNonTestLine
-  maybe_spec <- optional testSpec <* many pNonTestLine
+  maybe_spec <- optional testSpec <* pEndOfTestBlock <* many pNonTestLine
   case maybe_spec of
     Just spec
       | RunCases old_cases structures warnings <- testAction spec -> do
@@ -486,10 +399,12 @@ pProgramTest = do
     noTest =
       ProgramTest mempty mempty (RunCases mempty mempty mempty)
 
+    pEndOfTestBlock =
+      (void eol <|> eof) *> notFollowedBy "--"
     pNonTestLine =
       void $ notFollowedBy "-- ==" *> restOfLine
     pInputOutputs =
-      parseDescription *> parseInputOutputs
+      parseDescription *> parseInputOutputs <* pEndOfTestBlock
 
 -- | Read the test specification from the given Futhark program.
 testSpecFromFile :: FilePath -> IO (Either String ProgramTest)
@@ -669,7 +584,7 @@ genFileSize :: GenValue -> Integer
 genFileSize = genSize
   where
     header_size = 1 + 1 + 1 + 4 -- 'b' <version> <num_dims> <type>
-    genSize (GenValue ds t) =
+    genSize (GenValue (ValueType ds t)) =
       header_size + toInteger (length ds) * 8
         + product (map toInteger ds) * primSize t
     genSize (GenPrim v) =
@@ -782,6 +697,7 @@ runProgram futhark runner extra_options prog entry input = do
   input' <- getValuesBS futhark dir input
   liftIO $ readProcessWithExitCode to_run to_run_args $ BS.toStrict input'
 
+-- | Read the given variables from a running server.
 readResults ::
   (MonadIO m, MonadError T.Text m) =>
   Server ->
