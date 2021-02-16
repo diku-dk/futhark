@@ -109,6 +109,7 @@ library
       Futhark.CodeGen.Backends.PyOpenCL
       Futhark.CodeGen.Backends.PyOpenCL.Boilerplate
       Futhark.CodeGen.Backends.SequentialC
+      Futhark.CodeGen.Backends.SequentialC.Boilerplate
       Futhark.CodeGen.Backends.SequentialPython
       Futhark.CodeGen.Backends.SimpleRep
       Futhark.CodeGen.ImpCode
@@ -205,11 +206,15 @@ library
       Futhark.Optimise.InPlaceLowering.SubstituteIndices
       Futhark.Optimise.InliningDeadFun
       Futhark.Optimise.Simplify
-      Futhark.Optimise.Simplify.ClosedForm
       Futhark.Optimise.Simplify.Engine
       Futhark.Optimise.Simplify.Lore
       Futhark.Optimise.Simplify.Rule
       Futhark.Optimise.Simplify.Rules
+      Futhark.Optimise.Simplify.Rules.BasicOp
+      Futhark.Optimise.Simplify.Rules.ClosedForm
+      Futhark.Optimise.Simplify.Rules.Index
+      Futhark.Optimise.Simplify.Rules.Loop
+      Futhark.Optimise.Simplify.Rules.Simple
       Futhark.Optimise.Sink
       Futhark.Optimise.TileLoops
       Futhark.Optimise.TileLoops.Shared

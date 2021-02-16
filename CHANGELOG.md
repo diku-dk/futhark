@@ -21,6 +21,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * New functions: `f32.recip` and `f64.recip` for multiplicative inverses.
 
+  * Executables produced with the `c` and `multicore` backends now
+    also accept `--tuning` and `--size` options (although there are
+    not yet any tunable sizes).
+
 ### Removed
 
 ### Changed
@@ -43,6 +47,12 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * Substitution bug in interpreter (#1250).
 
   * `f32.sgn`/`f64.sgn` now correct for NaN arguments.
+
+  * CPU backends (`c`/`multicore`) are now more careful about staying
+    in single precision for `f32` functions (#1253).
+
+  * `futhark test` and `futhark bench` now detect program
+    initialisation errors in a saner way (#1246).
 
 ## [0.18.6]
 

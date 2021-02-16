@@ -531,7 +531,6 @@ void process_line(struct server_state *s, char *line) {
   } else {
     futhark_panic(1, "Unknown command: %s\n", command);
   }
-  ok();
 }
 
 void run_server(struct futhark_prog *prog, struct futhark_context *ctx) {
@@ -551,8 +550,10 @@ void run_server(struct futhark_prog *prog, struct futhark_context *ctx) {
     s.variables[i].name = NULL;
   }
 
+  ok();
   while ((linelen = getline(&line, &buflen, stdin)) > 0) {
     process_line(&s, line);
+    ok();
   }
 
   free(line);
