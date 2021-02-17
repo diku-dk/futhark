@@ -953,7 +953,7 @@ insertKerSOAC aux names ker = do
     f_soac <- SOAC.toSOAC new_soac'
     -- The fused kernel may consume more than the original SOACs (see
     -- issue #224).  We insert copy expressions to fix it.
-    f_soac' <- copyNewlyConsumed (fusedConsumed ker) $ addOpAliases f_soac
+    f_soac' <- copyNewlyConsumed (fusedConsumed ker) $ addOpAliases mempty f_soac
     validents <- zipWithM newIdent (map baseString names) $ SOAC.typeOf new_soac'
     auxing (kerAux ker <> aux) $ letBind (basicPattern [] validents) $ Op f_soac'
     transformOutput (outputTransform ker) names validents

@@ -134,6 +134,7 @@ import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
 import qualified Futhark.TypeCheck as TC
 import Futhark.Util
+import Futhark.Util.Pretty (indent, ppr, text, (</>))
 import qualified Futhark.Util.Pretty as PP
 import GHC.Generics (Generic)
 import Language.SexpGrammar as Sexp
@@ -211,8 +212,8 @@ instance CanBeAliased inner => CanBeAliased (MemOp inner) where
   removeOpAliases (Alloc se space) = Alloc se space
   removeOpAliases (Inner k) = Inner $ removeOpAliases k
 
-  addOpAliases (Alloc se space) = Alloc se space
-  addOpAliases (Inner k) = Inner $ addOpAliases k
+  addOpAliases _ (Alloc se space) = Alloc se space
+  addOpAliases aliases (Inner k) = Inner $ addOpAliases aliases k
 
 instance Rename inner => Rename (MemOp inner) where
   rename (Alloc size space) = Alloc <$> rename size <*> pure space
@@ -661,7 +662,7 @@ getExtMaps ::
     M.Map (Ext VName) (TPrimExp Int64 (Ext VName))
   )
 getExtMaps ctx_lst_ids =
-  ( M.map leafExp $ M.mapKeys Free $ M.fromListWith (flip const) ctx_lst_ids,
+  ( M.map leafExp $ M.mapKeys Free $ M.fromListWith (const id) ctx_lst_ids,
     M.fromList $
       mapMaybe
         ( traverse
@@ -757,15 +758,14 @@ matchReturnType rettype res ts = do
           (x_mem, x_mem_type) <- fetchCtx x_ext
           unless (IxFun.closeEnough x_ixfun $ existentialiseIxFun0 y_ixfun) $
             throwError $
-              unwords
-                [ "Index function unification failed (ReturnsNewBlock)",
-                  "\nixfun of body result: ",
-                  pretty y_ixfun,
-                  "\nixfun of return type: ",
-                  pretty x_ixfun,
-                  "\nand context elements: ",
-                  pretty ctx_res
-                ]
+              pretty $
+                "Index function unification failed (ReturnsNewBlock)"
+                  </> "Ixfun of body result:"
+                  </> indent 2 (ppr y_ixfun)
+                  </> "Ixfun of return type:"
+                  </> indent 2 (ppr x_ixfun)
+                  </> "Context elements: "
+                  </> indent 2 (ppr ctx_res)
           case x_mem_type of
             MemMem y_space ->
               unless (x_space == y_space) $
@@ -801,12 +801,12 @@ matchReturnType rettype res ts = do
       bad s =
         TC.bad $
           TC.TypeError $
-            PP.pretty $
+            pretty $
               "Return type"
-                PP.</> PP.indent 2 (ppTuple' rettype)
-                PP.</> "cannot match returns of results"
-                PP.</> PP.indent 2 (ppTuple' ts)
-                PP.</> PP.text s
+                </> indent 2 (ppTuple' rettype)
+                </> "cannot match returns of results"
+                </> indent 2 (ppTuple' ts)
+                </> text s
 
   unless (length (S.unions $ map extsInMemInfo rettype) == length ctx_res) $
     TC.bad $

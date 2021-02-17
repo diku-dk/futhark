@@ -554,8 +554,8 @@ A variable name; evaluates to its value in the current environment.
 `stringlit`
 ...........
 
-Evaluates to an array of type ``[]i32`` that contains the code points
-of the characters as integers.
+Evaluates to an array of type ``[]u8`` that contains the characters
+encoded as UTF-8.
 
 ``()``
 ......
@@ -611,7 +611,7 @@ former inclusive and the latter exclusive, taking every ``s``-th
 element.  The ``s`` parameter may not be zero.  If ``s`` is negative,
 it means to start at ``i`` and descend by steps of size ``s`` to ``j``
 (not inclusive).  Slicing can be done only with expressions of type
-``i32``.
+``i64``.
 
 It is generally a bad idea for ``s`` to be non-constant.
 Slicing of multiple dimensions can be done by separating with commas,
@@ -782,7 +782,7 @@ run-time.
 
 Due to ambiguities, this syntactic form cannot appear as an array
 index expression unless it is first enclosed in parentheses.  However,
-as an array index must always be of type ``i32``, there is never a
+as an array index must always be of type ``i64``, there is never a
 reason to put an explicit type ascription there.
 
 ``e :> t``
@@ -1029,7 +1029,7 @@ constraints imposed by size annotations.
 *Size-dependent types* are supported, as the names of parameters can
 be used in the return type of a function::
 
-  let replicate 't (n: i32) (x: t): [n]t = ...
+  let replicate 't (n: i64) (x: t): [n]t = ...
 
 An application ``replicate 10 0`` will have type ``[10]i32``.
 

@@ -6,6 +6,7 @@
 {-# LANGUAGE Trustworthy #-}
 {-# LANGUAGE TupleSections #-}
 
+-- | Code generation for standalone executables.
 module Futhark.CodeGen.Backends.GenericC.CLI
   ( cliDefs,
   )
@@ -74,6 +75,54 @@ genericOptions =
                           fut_progname, option_descriptions);
                    exit(0);
                   }|]
+      },
+    Option
+      { optionLongName = "print-sizes",
+        optionShortName = Nothing,
+        optionArgument = NoArgument,
+        optionDescription = "Print all sizes that can be set with --size or --tuning.",
+        optionAction =
+          [C.cstm|{
+                int n = futhark_get_num_sizes();
+                for (int i = 0; i < n; i++) {
+                  printf("%s (%s)\n", futhark_get_size_name(i),
+                                      futhark_get_size_class(i));
+                }
+                exit(0);
+              }|]
+      },
+    Option
+      { optionLongName = "size",
+        optionShortName = Nothing,
+        optionArgument = RequiredArgument "ASSIGNMENT",
+        optionDescription = "Set a configurable run-time parameter to the given value.",
+        optionAction =
+          [C.cstm|{
+                char *name = optarg;
+                char *equals = strstr(optarg, "=");
+                char *value_str = equals != NULL ? equals+1 : optarg;
+                int value = atoi(value_str);
+                if (equals != NULL) {
+                  *equals = 0;
+                  if (futhark_context_config_set_size(cfg, name, value) != 0) {
+                    futhark_panic(1, "Unknown size: %s\n", name);
+                  }
+                } else {
+                  futhark_panic(1, "Invalid argument for size option: %s\n", optarg);
+                }}|]
+      },
+    Option
+      { optionLongName = "tuning",
+        optionShortName = Nothing,
+        optionArgument = RequiredArgument "FILE",
+        optionDescription = "Read size=value assignments from the given file.",
+        optionAction =
+          [C.cstm|{
+                char *ret = load_tuning_file(optarg, cfg, (int(*)(void*, const char*, size_t))
+                                                          futhark_context_config_set_size);
+                if (ret != NULL) {
+                  futhark_panic(1, "When loading tuning from '%s': %s\n", optarg, ret);
+                }}|]
       }
   ]
   where
@@ -364,6 +413,8 @@ cliEntryPoint fname (Function _ _ _ _ results args) =
       )
 
 {-# NOINLINE cliDefs #-}
+
+-- | Generate Futhark standalone executable code.
 cliDefs :: [Option] -> Functions a -> [C.Definition]
 cliDefs options (Functions funs) =
   let values_h = $(embedStringFile "rts/c/values.h")
@@ -374,12 +425,9 @@ cliDefs options (Functions funs) =
       (cli_entry_point_decls, entry_point_inits) =
         unzip $ map (uncurry cliEntryPoint) funs
    in [C.cunit|
-$esc:("#include <string.h>")
-$esc:("#include <inttypes.h>")
-$esc:("#include <errno.h>")
-$esc:("#include <ctype.h>")
-$esc:("#include <errno.h>")
 $esc:("#include <getopt.h>")
+$esc:("#include <ctype.h>")
+$esc:("#include <inttypes.h>")
 
 $esc:values_h
 
@@ -406,10 +454,6 @@ struct entry_point_entry {
 int main(int argc, char** argv) {
   fut_progname = argv[0];
 
-  struct entry_point_entry entry_points[] = {
-    $inits:entry_point_inits
-  };
-
   struct futhark_context_config *cfg = futhark_context_config_new();
   assert(cfg != NULL);
 
@@ -428,6 +472,10 @@ int main(int argc, char** argv) {
   if (error != NULL) {
     futhark_panic(1, "%s", error);
   }
+
+  struct entry_point_entry entry_points[] = {
+    $inits:entry_point_inits
+  };
 
   if (entry_point != NULL) {
     int num_entry_points = sizeof(entry_points) / sizeof(entry_points[0]);

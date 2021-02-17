@@ -50,9 +50,9 @@ import Futhark.TypeCheck (Checkable)
 import Futhark.Util.Log
 import Futhark.Util.Options
 import qualified Futhark.Util.Pretty as PP
+import Language.Futhark.Core (nameFromString)
 import Language.Futhark.Parser (parseFuthark)
 import qualified Language.SexpGrammar as Sexp
-import System.Console.GetOpt
 import System.Exit
 import System.FilePath
 import System.IO
@@ -383,6 +383,13 @@ commandLineOptions =
       "Print on standard output the type-checked program.",
     Option
       []
+      ["no-check"]
+      ( NoArg $
+          Right $ changeFutharkConfig $ \opts -> opts {futharkTypeCheck = False}
+      )
+      "Disable type-checking.",
+    Option
+      []
       ["pretty-print"]
       ( NoArg $
           Right $ \opts ->
@@ -474,6 +481,19 @@ commandLineOptions =
       ["safe"]
       (NoArg $ Right $ changeFutharkConfig $ \opts -> opts {futharkSafe = True})
       "Ignore 'unsafe'.",
+    Option
+      []
+      ["entry-points"]
+      ( ReqArg
+          ( \arg -> Right $
+              changeFutharkConfig $ \opts ->
+                opts
+                  { futharkEntryPoints = nameFromString arg : futharkEntryPoints opts
+                  }
+          )
+          "NAME"
+      )
+      "Treat this function as an additional entry point.",
     typedPassOption soacsProg Seq firstOrderTransform "f",
     soacsPassOption fuseSOACs "o",
     soacsPassOption inlineFunctions [],
@@ -561,6 +581,8 @@ main = mainWithOptions newConfig commandLineOptions "options... program" compile
               . intersperse ""
               . map (if futharkPrintAST config then show else pretty)
 
+          readProgram' = readProgram (futharkEntryPoints (futharkConfig config)) file
+
       case futharkPipeline config of
         PrettyPrint -> liftIO $ do
           maybe_prog <- parseFuthark file <$> T.readFile file
@@ -570,7 +592,7 @@ main = mainWithOptions newConfig commandLineOptions "options... program" compile
               | futharkPrintAST config -> print prog
               | otherwise -> putStrLn $ pretty prog
         TypeCheck -> do
-          (_, imports, _) <- readProgram file
+          (_, imports, _) <- readProgram'
           liftIO $
             forM_ (map snd imports) $ \fm ->
               putStrLn $
@@ -578,17 +600,17 @@ main = mainWithOptions newConfig commandLineOptions "options... program" compile
                   then show $ fileProg fm
                   else pretty $ fileProg fm
         Defunctorise -> do
-          (_, imports, src) <- readProgram file
+          (_, imports, src) <- readProgram'
           liftIO $ p $ evalState (Defunctorise.transformProg imports) src
         Monomorphise -> do
-          (_, imports, src) <- readProgram file
+          (_, imports, src) <- readProgram'
           liftIO $
             p $
               flip evalState src $
                 Defunctorise.transformProg imports
                   >>= Monomorphise.transformProg
         LiftLambdas -> do
-          (_, imports, src) <- readProgram file
+          (_, imports, src) <- readProgram'
           liftIO $
             p $
               flip evalState src $
@@ -596,7 +618,7 @@ main = mainWithOptions newConfig commandLineOptions "options... program" compile
                   >>= Monomorphise.transformProg
                   >>= LiftLambdas.transformProg
         Defunctionalise -> do
-          (_, imports, src) <- readProgram file
+          (_, imports, src) <- readProgram'
           liftIO $
             p $
               flip evalState src $
@@ -677,7 +699,7 @@ runPolyPasses config base initial_prog = do
     pipeline_config =
       PipelineConfig
         { pipelineVerbose = fst (futharkVerbose $ futharkConfig config) > NotVerbose,
-          pipelineValidate = True
+          pipelineValidate = futharkTypeCheck $ futharkConfig config
         }
 
 runPolyPass ::

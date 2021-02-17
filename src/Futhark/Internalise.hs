@@ -1,6 +1,5 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE Safe #-}
 {-# LANGUAGE Strict #-}
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeFamilies #-}
@@ -28,6 +27,7 @@ import Futhark.Internalise.Monomorphise as Monomorphise
 import Futhark.Internalise.TypesValues
 import Futhark.Transform.Rename as I
 import Futhark.Util (splitAt3)
+import Futhark.Util.Pretty (prettyOneLine)
 import Language.Futhark as E hiding (TypeArg)
 import Language.Futhark.Semantic (Imports)
 
@@ -177,7 +177,7 @@ entryPoint params (eret, crets) =
       | otherwise =
         [I.TypeOpaque desc $ length ts]
       where
-        desc = maybe (pretty t') typeExpOpaqueName $ E.entryAscribed t
+        desc = maybe (prettyOneLine t') typeExpOpaqueName $ E.entryAscribed t
         t' = noSizes (E.entryType t) `E.setUniqueness` Nonunique
     typeExpOpaqueName (TEApply te TypeArgExpDim {} _) =
       typeExpOpaqueName te
@@ -187,7 +187,7 @@ entryPoint params (eret, crets) =
             ++ "_"
             ++ show (1 + d)
             ++ "d"
-    typeExpOpaqueName te = pretty te
+    typeExpOpaqueName te = prettyOneLine te
 
     withoutDims (TEArray te _ _) =
       let (d, te') = withoutDims te
@@ -493,7 +493,8 @@ internaliseExp desc e@E.Apply {} = do
       ()
         | Just internalise <- isOverloadedFunction qfname (map fst args) loc ->
           internalise desc
-        | Just (rettype, _) <- M.lookup fname I.builtInFunctions -> do
+        | baseTag (qualLeaf qfname) <= maxIntrinsicTag,
+          Just (rettype, _) <- M.lookup fname I.builtInFunctions -> do
           let tag ses = [(se, I.Observe) | se <- ses]
           args' <- reverse <$> mapM (internaliseArg arg_desc) (reverse args)
           let args'' = concatMap tag args'
@@ -860,6 +861,11 @@ generateCond orig_p orig_ses = do
       return ([], id_ses, rest_ses)
     compares (E.PatternParens pat _) ses =
       compares pat ses
+    -- XXX: treat empty tuples and records as bool.
+    compares (E.TuplePattern [] loc) ses =
+      compares (E.Wildcard (Info $ E.Scalar $ E.Prim E.Bool) loc) ses
+    compares (E.RecordPattern [] loc) ses =
+      compares (E.Wildcard (Info $ E.Scalar $ E.Prim E.Bool) loc) ses
     compares (E.TuplePattern pats _) ses =
       comparesMany pats ses
     compares (E.RecordPattern fs _) ses =

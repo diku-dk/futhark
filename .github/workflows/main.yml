@@ -40,7 +40,7 @@ jobs:
       run: |
         sudo add-apt-repository ppa:hvr/ghc
         sudo apt-get update
-        sudo apt-get install ghc-8.8.4
+        sudo apt-get install ghc-8.10.3
         echo "/opt/ghc/bin" >> $GITHUB_PATH
 
     - uses: actions/cache@v2
@@ -132,7 +132,7 @@ jobs:
     - name: Install dependencies
       run: |
         choco install -y msys2
-        choco install -y ghc --version=8.8.2 --allow-downgrade
+        choco install -y ghc --version=8.10.3 --allow-downgrade
       env:
         ACTIONS_ALLOW_UNSECURE_COMMANDS: true
 
@@ -274,7 +274,7 @@ jobs:
         echo "$HOME/.local/bin" >> $GITHUB_PATH
 
     - run: |
-        futhark test -c --no-terminal --no-tuning --backend=python --exclude=no_python tests examples
+        futhark test -c --no-terminal --no-tuning --backend=python --exclude=no_python --exclude=compiled tests examples
 
   test-opencl:
     runs-on: ubuntu-20.04

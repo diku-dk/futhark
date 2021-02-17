@@ -853,9 +853,6 @@ static inline int scheduler_execute_task(struct scheduler *scheduler,
   struct worker *worker = worker_local;
 
   int err = 0;
-  if (task->iterations == 0) {
-    return err;
-  }
 
   // How much sequential work was performed by the task
   int64_t task_timer = 0;

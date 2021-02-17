@@ -1567,7 +1567,7 @@ compileAlloc pat _ _ =
   error $ "compileAlloc: Invalid pattern: " ++ pretty pat
 
 -- | The number of bytes needed to represent the array in a
--- straightforward contiguous format, as an 'Int64' expression.
+-- straightforward contiguous format, as an t'Int64' expression.
 typeSize :: Type -> Count Bytes (Imp.TExp Int64)
 typeSize t =
   Imp.bytes $

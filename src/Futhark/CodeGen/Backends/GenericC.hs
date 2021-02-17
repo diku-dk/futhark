@@ -12,6 +12,7 @@ module Futhark.CodeGen.Backends.GenericC
     CParts (..),
     asLibrary,
     asExecutable,
+    asServer,
 
     -- * Pluggable compiler
     Operations (..),
@@ -58,6 +59,7 @@ module Futhark.CodeGen.Backends.GenericC
     publicDef,
     publicDef_,
     profileReport,
+    onClear,
     HeaderSection (..),
     libDecl,
     earlyDecl,
@@ -86,8 +88,9 @@ import Data.FileEmbed
 import Data.Loc
 import qualified Data.Map.Strict as M
 import Data.Maybe
-import Futhark.CodeGen.Backends.GenericC.CLI
+import Futhark.CodeGen.Backends.GenericC.CLI (cliDefs)
 import Futhark.CodeGen.Backends.GenericC.Options
+import Futhark.CodeGen.Backends.GenericC.Server (serverDefs)
 import Futhark.CodeGen.Backends.SimpleRep
 import Futhark.CodeGen.ImpCode
 import Futhark.IR.Prop (isBuiltInFunction)
@@ -106,6 +109,7 @@ data CompilerState s = CompilerState
     compLibDecls :: DL.DList C.Definition,
     compCtxFields :: DL.DList (C.Id, C.Type, Maybe C.Exp),
     compProfileItems :: DL.DList C.BlockItem,
+    compClearItems :: DL.DList C.BlockItem,
     compDeclaredMem :: [(VName, Space)]
   }
 
@@ -122,6 +126,7 @@ newCompilerState src s =
       compLibDecls = mempty,
       compCtxFields = mempty,
       compProfileItems = mempty,
+      compClearItems = mempty,
       compDeclaredMem = mempty
     }
 
@@ -486,6 +491,10 @@ profileReport :: C.BlockItem -> CompilerM op s ()
 profileReport x = modify $ \s ->
   s {compProfileItems = compProfileItems s <> DL.singleton x}
 
+onClear :: C.BlockItem -> CompilerM op s ()
+onClear x = modify $ \s ->
+  s {compClearItems = compClearItems s <> DL.singleton x}
+
 stm :: C.Stm -> CompilerM op s ()
 stm s = item [C.citem|$stm:s|]
 
@@ -604,7 +613,7 @@ defineMemorySpace space = do
   if (block->references != NULL) {
     *(block->references) -= 1;
     if (ctx->detail_memory) {
-      fprintf(stderr, "Unreferencing block %s (allocated as %s) in %s: %d references remaining.\n",
+      fprintf(ctx->log, "Unreferencing block %s (allocated as %s) in %s: %d references remaining.\n",
                       desc, block->desc, $string:spacedesc, *(block->references));
     }
     if (*(block->references) == 0) {
@@ -612,7 +621,7 @@ defineMemorySpace space = do
       $items:free
       free(block->references);
       if (ctx->detail_memory) {
-        fprintf(stderr, "%lld bytes freed (now allocated: %lld bytes)\n",
+        fprintf(ctx->log, "%lld bytes freed (now allocated: %lld bytes)\n",
                 (long long) block->size, (long long) ctx->$id:usagename);
       }
     }
@@ -635,7 +644,7 @@ defineMemorySpace space = do
 
   ctx->$id:usagename += size;
   if (ctx->detail_memory) {
-    fprintf(stderr, "Allocating %lld bytes for %s in %s (then allocated: %lld bytes)",
+    fprintf(ctx->log, "Allocating %lld bytes for %s in %s (then allocated: %lld bytes)",
             (long long) size,
             desc, $string:spacedesc,
             (long long) ctx->$id:usagename);
@@ -643,10 +652,10 @@ defineMemorySpace space = do
   if (ctx->$id:usagename > ctx->$id:peakname) {
     ctx->$id:peakname = ctx->$id:usagename;
     if (ctx->detail_memory) {
-      fprintf(stderr, " (new peak).\n");
+      fprintf(ctx->log, " (new peak).\n");
     }
   } else if (ctx->detail_memory) {
-    fprintf(stderr, ".\n");
+    fprintf(ctx->log, ".\n");
   }
 
   $items:alloc
@@ -669,6 +678,8 @@ defineMemorySpace space = do
   return ret;
 }
 |]
+
+  onClear [C.citem|ctx->$id:peakname = 0;|]
 
   let peakmsg = "Peak memory usage for " ++ spacedesc ++ ": %lld bytes.\n"
   return
@@ -947,6 +958,8 @@ opaqueLibraryFunctions ::
 opaqueLibraryFunctions desc vds = do
   name <- publicName $ opaqueName desc vds
   free_opaque <- publicName $ "free_" ++ opaqueName desc vds
+  store_opaque <- publicName $ "store_" ++ opaqueName desc vds
+  restore_opaque <- publicName $ "restore_" ++ opaqueName desc vds
 
   let opaque_type = [C.cty|struct $id:name|]
 
@@ -954,23 +967,96 @@ opaqueLibraryFunctions desc vds = do
         return ()
       freeComponent i (ArrayValue _ _ pt signed shape) = do
         let rank = length shape
+            field = tupleField i
         free_array <- publicName $ "free_" ++ arrayName pt signed rank
+        -- Protect against NULL here, because we also want to use this
+        -- to free partially loaded opaques.
         stm
-          [C.cstm|if ((tmp = $id:free_array(ctx, obj->$id:(tupleField i))) != 0) {
+          [C.cstm|if (obj->$id:field != NULL && (tmp = $id:free_array(ctx, obj->$id:field)) != 0) {
                 ret = tmp;
              }|]
+
+      storeComponent i (ScalarValue pt sign _) =
+        let field = tupleField i
+         in ( storageSize pt 0 [C.cexp|NULL|],
+              storeValueHeader sign pt 0 [C.cexp|NULL|] [C.cexp|out|]
+                ++ [C.cstms|memcpy(out, &obj->$id:field, sizeof(obj->$id:field));
+                            out += sizeof(obj->$id:field);|]
+            )
+      storeComponent i (ArrayValue _ _ pt sign shape) =
+        let rank = length shape
+            arr_name = arrayName pt sign rank
+            field = tupleField i
+            shape_array = "futhark_shape_" ++ arr_name
+            values_array = "futhark_values_" ++ arr_name
+            shape' = [C.cexp|$id:shape_array(ctx, obj->$id:field)|]
+            num_elems = cproduct [[C.cexp|$exp:shape'[$int:j]|] | j <- [0 .. rank -1]]
+         in ( storageSize pt rank shape',
+              storeValueHeader sign pt rank shape' [C.cexp|out|]
+                ++ [C.cstms|ret |= $id:values_array(ctx, obj->$id:field, (void*)out);
+                            out += $exp:num_elems * sizeof($ty:(primTypeToCType pt));|]
+            )
 
   ctx_ty <- contextType
 
   free_body <- collect $ zipWithM_ freeComponent [0 ..] vds
 
+  store_body <- collect $ do
+    let (sizes, stores) = unzip $ zipWith storeComponent [0 ..] vds
+        size_vars = map (("size_" ++) . show) [0 .. length sizes -1]
+        size_sum = csum [[C.cexp|$id:size|] | size <- size_vars]
+    forM_ (zip size_vars sizes) $ \(v, e) ->
+      item [C.citem|typename int64_t $id:v = $exp:e;|]
+    stm [C.cstm|*n = $exp:size_sum;|]
+    stm [C.cstm|if (p != NULL && *p == NULL) { *p = malloc(*n); }|]
+    stm [C.cstm|if (p != NULL) { unsigned char *out = *p; $stms:(concat stores) }|]
+
+  let restoreComponent i (ScalarValue pt sign _) = do
+        let field = tupleField i
+            dataptr = "data_" ++ show i
+        stms $ loadValueHeader sign pt 0 [C.cexp|NULL|] [C.cexp|src|]
+        item [C.citem|const void* $id:dataptr = src;|]
+        stm [C.cstm|src += sizeof(obj->$id:field);|]
+        pure [C.cstms|memcpy(&obj->$id:field, $id:dataptr, sizeof(obj->$id:field));|]
+      restoreComponent i (ArrayValue _ _ pt sign shape) = do
+        let field = tupleField i
+            rank = length shape
+            arr_name = arrayName pt sign rank
+            new_array = "futhark_new_" ++ arr_name
+            dataptr = "data_" ++ show i
+            shapearr = "shape_" ++ show i
+            dims = [[C.cexp|$id:shapearr[$int:j]|] | j <- [0 .. rank -1]]
+            num_elems = cproduct dims
+        item [C.citem|typename int64_t $id:shapearr[$int:rank];|]
+        stms $ loadValueHeader sign pt rank [C.cexp|$id:shapearr|] [C.cexp|src|]
+        item [C.citem|const void* $id:dataptr = src;|]
+        stm [C.cstm|obj->$id:field = NULL;|]
+        stm [C.cstm|src += $exp:num_elems * sizeof($ty:(primTypeToCType pt));|]
+        pure
+          [C.cstms|
+             obj->$id:field = $id:new_array(ctx, $id:dataptr, $args:dims);
+             if (obj->$id:field == NULL) { err = 1; }|]
+
+  load_body <- collect $ do
+    loads <- concat <$> zipWithM restoreComponent [0 ..] vds
+    stm
+      [C.cstm|if (err == 0) {
+                $stms:loads
+              }|]
+
   headerDecl
     (OpaqueDecl desc)
     [C.cedecl|int $id:free_opaque($ty:ctx_ty *ctx, $ty:opaque_type *obj);|]
+  headerDecl
+    (OpaqueDecl desc)
+    [C.cedecl|int $id:store_opaque($ty:ctx_ty *ctx, const $ty:opaque_type *obj, void **p, size_t *n);|]
+  headerDecl
+    (OpaqueDecl desc)
+    [C.cedecl|$ty:opaque_type* $id:restore_opaque($ty:ctx_ty *ctx, const void *p);|]
 
   -- We do not need to enclose the body in a critical section, because
-  -- when we free the components of the opaque, we are calling public
-  -- API functions that do their own locking.
+  -- when we operate on the components of the opaque, we are calling
+  -- public API functions that do their own locking.
   return
     [C.cunit|
           int $id:free_opaque($ty:ctx_ty *ctx, $ty:opaque_type *obj) {
@@ -979,7 +1065,29 @@ opaqueLibraryFunctions desc vds = do
             free(obj);
             return ret;
           }
-           |]
+
+          int $id:store_opaque($ty:ctx_ty *ctx,
+                               const $ty:opaque_type *obj, void **p, size_t *n) {
+            int ret = 0;
+            $items:store_body
+            return ret;
+          }
+
+          $ty:opaque_type* $id:restore_opaque($ty:ctx_ty *ctx,
+                                              const void *p) {
+            int err = 0;
+            const unsigned char *src = p;
+            $ty:opaque_type* obj = malloc(sizeof($ty:opaque_type));
+            $items:load_body
+            if (err != 0) {
+              int ret = 0, tmp;
+              $items:free_body
+              free(obj);
+              obj = NULL;
+            }
+            return obj;
+          }
+    |]
 
 valueDescToCType :: ValueDesc -> CompilerM op s C.Type
 valueDescToCType (ScalarValue pt signed _) =
@@ -1207,9 +1315,9 @@ onEntryPoint get_consts fname (Function _ outputs inputs _ results args) = do
       let ty' = primTypeToCType ty
       decl [C.cdecl|$ty:ty' $id:name;|]
 
--- | The result of compilation to C is four parts, which can be put
--- together in various ways.  The obvious way is to concatenate all of
--- them, which yields a CLI program.  Another is to compile the
+-- | The result of compilation to C is multiple parts, which can be
+-- put together in various ways.  The obvious way is to concatenate
+-- all of them, which yields a CLI program.  Another is to compile the
 -- library part by itself, and use the header file to call into it.
 data CParts = CParts
   { cHeader :: String,
@@ -1217,8 +1325,20 @@ data CParts = CParts
     -- to both CLI and library parts.
     cUtils :: String,
     cCLI :: String,
+    cServer :: String,
     cLib :: String
   }
+
+gnuSource :: String
+gnuSource =
+  pretty
+    [C.cunit|
+// We need to define _GNU_SOURCE before
+// _any_ headers files are imported to get
+// the usage statistics of a thread (i.e. have RUSAGE_THREAD) on GNU/Linux
+// https://manpages.courier-mta.org/htmlman2/getrusage.2.html
+$esc:("#define _GNU_SOURCE")
+|]
 
 -- We may generate variables that are never used (e.g. for
 -- certificates) or functions that are never called (e.g. unused
@@ -1248,12 +1368,18 @@ $esc:("#endif")
 asLibrary :: CParts -> (String, String)
 asLibrary parts =
   ( "#pragma once\n\n" <> cHeader parts,
-    disableWarnings <> cHeader parts <> cUtils parts <> cLib parts
+    gnuSource <> disableWarnings <> cHeader parts <> cUtils parts <> cLib parts
   )
 
 -- | As executable with command-line interface.
 asExecutable :: CParts -> String
-asExecutable (CParts a b c d) = disableWarnings <> a <> b <> c <> d
+asExecutable parts =
+  gnuSource <> disableWarnings <> cHeader parts <> cUtils parts <> cCLI parts <> cLib parts
+
+-- | As server executable.
+asServer :: CParts -> String
+asServer parts =
+  gnuSource <> disableWarnings <> cHeader parts <> cUtils parts <> cServer parts <> cLib parts
 
 -- | Compile imperative program to a C program.  Always uses the
 -- function named "main" as entry point, so make sure it is defined.
@@ -1275,16 +1401,16 @@ compileProg backend ops extra header_extra spaces options prog = do
   let headerdefs =
         [C.cunit|
 $esc:("// Headers\n")
-/* We need to define _GNU_SOURCE before
-   _any_ headers files are imported to get
-   the usage statistics of a thread (i.e. have RUSAGE_THREAD) on GNU/Linux
-   https://manpages.courier-mta.org/htmlman2/getrusage.2.html */
-$esc:("#define _GNU_SOURCE")
 $esc:("#include <stdint.h>")
 $esc:("#include <stddef.h>")
 $esc:("#include <stdbool.h>")
+$esc:("#include <stdio.h>")
 $esc:("#include <float.h>")
 $esc:(header_extra)
+
+$esc:("#ifdef __cplusplus")
+$esc:("extern \"C\" {")
+$esc:("#endif")
 
 $esc:("\n// Initialisation\n")
 $edecls:(initDecls endstate)
@@ -1301,6 +1427,10 @@ $edecls:(entryDecls endstate)
 $esc:("\n// Miscellaneous\n")
 $edecls:(miscDecls endstate)
 $esc:("#define FUTHARK_BACKEND_"++backend)
+
+$esc:("#ifdef __cplusplus")
+$esc:("}")
+$esc:("#endif")
                            |]
 
   let utildefs =
@@ -1325,14 +1455,15 @@ $esc:timing_h
   let early_decls = DL.toList $ compEarlyDecls endstate
   let lib_decls = DL.toList $ compLibDecls endstate
   let clidefs = cliDefs options $ Functions entry_funs
+  let serverdefs = serverDefs options $ Functions entry_funs
   let libdefs =
         [C.cunit|
 $esc:("#ifdef _MSC_VER\n#define inline __inline\n#endif")
 $esc:("#include <string.h>")
-$esc:("#include <inttypes.h>")
-$esc:("#include <ctype.h>")
+$esc:("#include <string.h>")
 $esc:("#include <errno.h>")
 $esc:("#include <assert.h>")
+$esc:("#include <ctype.h>")
 
 $esc:header_extra
 
@@ -1355,7 +1486,14 @@ $edecls:(opaqueDefinitions endstate)
 $edecls:entry_point_decls
   |]
 
-  return $ CParts (pretty headerdefs) (pretty utildefs) (pretty clidefs) (pretty libdefs)
+  return $
+    CParts
+      { cHeader = pretty headerdefs,
+        cUtils = pretty utildefs,
+        cCLI = pretty clidefs,
+        cServer = pretty serverdefs,
+        cLib = pretty libdefs
+      }
   where
     Definitions consts (Functions funs) = prog
     entry_funs = filter (functionEntry . snd) funs
@@ -1400,14 +1538,36 @@ $edecls:entry_point_decls
 commonLibFuns :: [C.BlockItem] -> CompilerM op s ()
 commonLibFuns memreport = do
   ctx <- contextType
+  ops <- asks envOperations
   profilereport <- gets $ DL.toList . compProfileItems
+
+  publicDef_ "get_num_sizes" InitDecl $ \s ->
+    ( [C.cedecl|int $id:s(void);|],
+      [C.cedecl|int $id:s(void) {
+                return sizeof(size_names)/sizeof(size_names[0]);
+              }|]
+    )
+
+  publicDef_ "get_size_name" InitDecl $ \s ->
+    ( [C.cedecl|const char* $id:s(int);|],
+      [C.cedecl|const char* $id:s(int i) {
+                return size_names[i];
+              }|]
+    )
+
+  publicDef_ "get_size_class" InitDecl $ \s ->
+    ( [C.cedecl|const char* $id:s(int);|],
+      [C.cedecl|const char* $id:s(int i) {
+                return size_classes[i];
+              }|]
+    )
 
   publicDef_ "context_report" MiscDecl $ \s ->
     ( [C.cedecl|char* $id:s($ty:ctx *ctx);|],
       [C.cedecl|char* $id:s($ty:ctx *ctx) {
                  struct str_builder builder;
                  str_builder_init(&builder);
-                 if (ctx->detail_memory || ctx->profiling) {
+                 if (ctx->detail_memory || ctx->profiling || ctx->logging) {
                    $items:memreport
                  }
                  if (ctx->profiling) {
@@ -1426,6 +1586,13 @@ commonLibFuns memreport = do
                        }|]
     )
 
+  publicDef_ "context_set_logging_file" MiscDecl $ \s ->
+    ( [C.cedecl|void $id:s($ty:ctx* ctx, typename FILE* f);|],
+      [C.cedecl|void $id:s($ty:ctx* ctx, typename FILE* f) {
+                  ctx->log = f;
+                }|]
+    )
+
   publicDef_ "context_pause_profiling" MiscDecl $ \s ->
     ( [C.cedecl|void $id:s($ty:ctx* ctx);|],
       [C.cedecl|void $id:s($ty:ctx* ctx) {
@@ -1438,6 +1605,15 @@ commonLibFuns memreport = do
       [C.cedecl|void $id:s($ty:ctx* ctx) {
                  ctx->profiling_paused = 0;
                }|]
+    )
+
+  clears <- gets $ DL.toList . compClearItems
+  publicDef_ "context_clear_caches" MiscDecl $ \s ->
+    ( [C.cedecl|int $id:s($ty:ctx* ctx);|],
+      [C.cedecl|int $id:s($ty:ctx* ctx) {
+                         $items:(criticalSection ops clears)
+                         return ctx->error != NULL;
+                       }|]
     )
 
 compileConstants :: Constants op -> CompilerM op s [C.BlockItem]
@@ -1697,6 +1873,12 @@ compilePrimExp f (UnOpExp SSignum {} x) = do
 compilePrimExp f (UnOpExp USignum {} x) = do
   x' <- compilePrimExp f x
   return [C.cexp|($exp:x' > 0) - ($exp:x' < 0) != 0|]
+compilePrimExp f (UnOpExp (FSignum Float32) x) = do
+  x' <- compilePrimExp f x
+  return [C.cexp|fsignum32($exp:x')|]
+compilePrimExp f (UnOpExp (FSignum Float64) x) = do
+  x' <- compilePrimExp f x
+  return [C.cexp|fsignum32($exp:x')|]
 compilePrimExp f (CmpOpExp cmp x y) = do
   x' <- compilePrimExp f x
   y' <- compilePrimExp f y
@@ -1752,7 +1934,7 @@ compileCode (DebugPrint s (Just e)) = do
   e' <- compileExp e
   stm
     [C.cstm|if (ctx->debugging) {
-          fprintf(stderr, $string:fmtstr, $exp:s, ($ty:ety)$exp:e', '\n');
+          fprintf(ctx->log, $string:fmtstr, $exp:s, ($ty:ety)$exp:e', '\n');
        }|]
   where
     (fmt, ety) = case primExpType e of
@@ -1763,7 +1945,7 @@ compileCode (DebugPrint s (Just e)) = do
 compileCode (DebugPrint s Nothing) =
   stm
     [C.cstm|if (ctx->debugging) {
-          fprintf(stderr, "%s\n", $exp:s);
+          fprintf(ctx->log, "%s\n", $exp:s);
        }|]
 compileCode c
   | Just (name, vol, t, e, c') <- declareAndSet c = do

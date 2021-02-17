@@ -17,7 +17,6 @@ import Futhark.Pipeline (FutharkM, Verbosity (..), runFutharkM)
 import Futhark.Util (directoryContents, trim)
 import Futhark.Util.Options
 import Language.Futhark.Syntax (DocComment (..), progDoc)
-import System.Console.GetOpt
 import System.Directory (createDirectoryIfMissing)
 import System.Exit
 import System.FilePath
@@ -50,7 +49,7 @@ main = mainWithOptions initialDocConfig commandLineOptions "options... -o outdir
             liftIO $ do
               mapM_ (hPutStrLn stderr . ("Found source file " <>)) files
               hPutStrLn stderr "Reading files..."
-          (_w, imports, _vns) <- readLibrary files
+          (_w, imports, _vns) <- readLibrary [] files
           liftIO $ printDecs config outdir files $ nubBy sameImport imports
 
     sameImport (x, _) (y, _) = x == y

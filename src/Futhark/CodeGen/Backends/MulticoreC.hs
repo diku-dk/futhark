@@ -9,6 +9,7 @@ module Futhark.CodeGen.Backends.MulticoreC
     GC.CParts (..),
     GC.asLibrary,
     GC.asExecutable,
+    GC.asServer,
   )
 where
 
@@ -26,6 +27,7 @@ import Futhark.MonadFreshNames
 import qualified Language.C.Quote.OpenCL as C
 import qualified Language.C.Syntax as C
 
+-- | Compile the program to ImpCode with multicore operations.
 compileProg ::
   MonadFreshNames m =>
   Prog MCMem ->
@@ -114,8 +116,10 @@ compileProg =
                           int debugging;
                           int profiling;
                           int profiling_paused;
+                          int logging;
                           typename lock_t lock;
                           char *error;
+                          typename FILE *log;
                           int total_runs;
                           long int total_runtime;
                           $sdecls:fields
@@ -140,7 +144,9 @@ compileProg =
                  ctx->debugging = cfg->debugging;
                  ctx->profiling = cfg->profiling;
                  ctx->profiling_paused = 0;
+                 ctx->logging = 0;
                  ctx->error = NULL;
+                 ctx->log = stderr;
                  create_lock(&ctx->lock);
 
                  int tune_kappa = 0;
@@ -183,6 +189,18 @@ compileProg =
                                  (void)ctx;
                                  return 0;
                                }|]
+        )
+
+      GC.earlyDecl [C.cedecl|static const char *size_names[0];|]
+      GC.earlyDecl [C.cedecl|static const char *size_vars[0];|]
+      GC.earlyDecl [C.cedecl|static const char *size_classes[0];|]
+
+      GC.publicDef_ "context_config_set_size" GC.InitDecl $ \s ->
+        ( [C.cedecl|int $id:s(struct $id:cfg* cfg, const char *size_name, size_t size_value);|],
+          [C.cedecl|int $id:s(struct $id:cfg* cfg, const char *size_name, size_t size_value) {
+                         (void)cfg; (void)size_name; (void)size_value;
+                         return 1;
+                       }|]
         )
 
 cliOptions :: [Option]
@@ -356,7 +374,7 @@ multiCoreReport names = report_kernels
             then
               [ [C.citem|
                      for (int i = 0; i < ctx->scheduler.num_threads; i++) {
-                       fprintf(stderr,
+                       fprintf(ctx->log,
                          $string:(format_string name is_array),
                          i,
                          ctx->$id:runs[i],
@@ -371,7 +389,7 @@ multiCoreReport names = report_kernels
               ]
             else
               [ [C.citem|
-                    fprintf(stderr,
+                    fprintf(ctx->log,
                        $string:(format_string name is_array),
                        ctx->$id:runs,
                        (long int) ctx->$id:total_runtime / (ctx->$id:runs != 0 ? ctx->$id:runs : 1),

@@ -9,11 +9,106 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+  * `futhark literate` now supports a `$loadimg` builtin function for
+    passing images to Futhark programs.
+
+  * The `futhark literate` directive for generating videos is now
+    `:video`.
+
+  * Support for 64-bit atomics on CUDA and OpenCL for higher
+    performance with `reduce_by_index` in particular.
+    Double-precision float atomics are still not used.
+
+  * New functions: `f32.recip` and `f64.recip` for multiplicative inverses.
+
+  * Executables produced with the `c` and `multicore` backends now
+    also accept `--tuning` and `--size` options (although there are
+    not yet any tunable sizes).
+
 ### Removed
 
 ### Changed
 
+  * The math modules no longer define the name `negate` (use `neg`
+    instead).
+
 ### Fixed
+
+  * Exotic core language alias tracking bug (#1239).
+
+  * Issue with entry points returning constant arrays (#1240).
+
+  * Overzealous CSE collided with uniqueness types (#1241).
+
+  * Defunctionalisation issue (#1242).
+
+  * Tiling inside multiply nested loops (#1243).
+
+  * Substitution bug in interpreter (#1250).
+
+  * `f32.sgn`/`f64.sgn` now correct for NaN arguments.
+
+  * CPU backends (`c`/`multicore`) are now more careful about staying
+    in single precision for `f32` functions (#1253).
+
+  * `futhark test` and `futhark bench` now detect program
+    initialisation errors in a saner way (#1246).
+
+## [0.18.6]
+
+### Added
+
+  * The C API now exposes serialisation functions for opaque values.
+
+  * The C API now lets you pick which stream (if any) is used for
+    logging prints (#1214).
+
+  * New compilation mode: `--server`.  For now used to support faster
+    benchmarking and testing tools, but can be used to build even
+    fancier things in the future (#1179).
+
+  * Significantly faster reading/writing of large values.  This mainly
+    means that validation of test and benchmark results is much faster
+    (close to an order of magnitude).
+
+  * The experimental `futhark literate` command allows vaguely a
+    notebook-like programming experience.
+
+  * All compilers now accept an `--entry` option for treating more
+    functions as entry points.
+
+  * The `negate` function is now `neg`, but `negate` is kept around
+    for a short while for backwards compatibility.
+
+  * Generated header-files are now declared `extern "C"` when
+    processed with a C++ compiler.
+
+  * Parser errors in test blocks used by `futhark bench` and `futhark
+    test` are now reported with much better error messages.
+
+### Fixed
+
+  * Interaction between slice simplification and in-place updates
+    (#1222).
+
+  * Problem with user-defined functions with the same name as intrinsics.
+
+  * Names from transitive imports no longer leak into scope (#1231).
+
+  * Pattern-matching unit values now works (#1232).
+
+## [0.18.5]
+
+### Fixed
+
+  * Fix tiling crash (#1203).
+
+  * `futhark run` now does slightly more type-checking of its inputs
+    (#1208).
+
+  * Sum type deduplication issue (#1209).
+
+  * Missing parentheses when printing sum values in interpreter.
 
 ## [0.18.4]
 

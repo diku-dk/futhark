@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE Strict #-}
 {-# LANGUAGE Trustworthy #-}
@@ -10,6 +11,8 @@
 -- for your test programs.
 module Futhark.Test.Values
   ( Value (..),
+    Compound (..),
+    CompoundValue,
     Vector,
 
     -- * Reading Values
@@ -18,11 +21,20 @@ module Futhark.Test.Values
     -- * Types of values
     ValueType (..),
     valueType,
+    valueShape,
+
+    -- * Manipulating values
+    valueElems,
+    mkCompound,
 
     -- * Comparing Values
     compareValues,
     compareValues1,
     Mismatch,
+
+    -- * Converting values
+    GetValue (..),
+    PutValue (..),
   )
 where
 
@@ -31,14 +43,19 @@ import Control.Monad.ST
 import Data.Binary
 import Data.Binary.Get
 import Data.Binary.Put
-import qualified Data.ByteString.Lazy.Char8 as BS
+import qualified Data.ByteString as BS
+import qualified Data.ByteString.Lazy.Char8 as LBS
 import Data.Char (chr, isSpace, ord)
 import Data.Int (Int16, Int32, Int64, Int8)
-import Data.Vector.Binary
+import qualified Data.Map as M
+import qualified Data.Text as T
+import qualified Data.Text.Encoding as T
+import Data.Traversable
 import Data.Vector.Generic (freeze)
+import qualified Data.Vector.Storable as SVec
+import Data.Vector.Storable.ByteString (byteStringToVector, vectorToByteString)
 import qualified Data.Vector.Unboxed as UVec
 import qualified Data.Vector.Unboxed.Mutable as UMVec
-import Futhark.IR.Pretty ()
 import Futhark.IR.Primitive (PrimValue)
 import Futhark.IR.Prop.Constants (IsValue (..))
 import Futhark.Util (maybeHead)
@@ -51,8 +68,8 @@ import qualified Language.Futhark.Syntax as F
 
 type STVector s = UMVec.STVector s
 
--- | An Unboxed vector.
-type Vector = UVec.Vector
+-- | The value vector type.
+type Vector = SVec.Vector
 
 -- | An efficiently represented Futhark value.  Use 'pretty' to get a
 -- human-readable representation, and v'put' to obtain binary a
@@ -75,20 +92,22 @@ binaryFormatVersion :: Word8
 binaryFormatVersion = 2
 
 instance Binary Value where
-  put (Int8Value shape vs) = putBinaryValue "  i8" shape vs putInt8
-  put (Int16Value shape vs) = putBinaryValue " i16" shape vs putInt16le
-  put (Int32Value shape vs) = putBinaryValue " i32" shape vs putInt32le
-  put (Int64Value shape vs) = putBinaryValue " i64" shape vs putInt64le
-  put (Word8Value shape vs) = putBinaryValue "  u8" shape vs putWord8
-  put (Word16Value shape vs) = putBinaryValue " u16" shape vs putWord16le
-  put (Word32Value shape vs) = putBinaryValue " u32" shape vs putWord32le
-  put (Word64Value shape vs) = putBinaryValue " u64" shape vs putWord64le
-  put (Float32Value shape vs) = putBinaryValue " f32" shape vs putFloatle
-  put (Float64Value shape vs) = putBinaryValue " f64" shape vs putDoublele
-  put (BoolValue shape vs) = putBinaryValue "bool" shape vs $ putInt8 . boolToInt
+  put (Int8Value shape vs) = putBinaryValue "  i8" shape vs
+  put (Int16Value shape vs) = putBinaryValue " i16" shape vs
+  put (Int32Value shape vs) = putBinaryValue " i32" shape vs
+  put (Int64Value shape vs) = putBinaryValue " i64" shape vs
+  put (Word8Value shape vs) = putBinaryValue "  u8" shape vs
+  put (Word16Value shape vs) = putBinaryValue " u16" shape vs
+  put (Word32Value shape vs) = putBinaryValue " u32" shape vs
+  put (Word64Value shape vs) = putBinaryValue " u64" shape vs
+  put (Float32Value shape vs) = putBinaryValue " f32" shape vs
+  put (Float64Value shape vs) = putBinaryValue " f64" shape vs
+  -- Bool must be treated specially because the Storable instance
+  -- uses four bytes.
+  put (BoolValue shape vs) = putBinaryValue "bool" shape $ SVec.map boolToInt8 vs
     where
-      boolToInt True = 1
-      boolToInt False = 0
+      boolToInt8 True = 1 :: Int8
+      boolToInt8 False = 0
 
   get = do
     first <- getInt8
@@ -106,41 +125,45 @@ instance Binary Value where
 
     shape <- replicateM (fromIntegral rank) $ fromIntegral <$> getInt64le
     let num_elems = product shape
-        shape' = UVec.fromList shape
+        shape' = SVec.fromList shape
 
-    case BS.unpack type_f of
-      "  i8" -> get' (Int8Value shape') getInt8 num_elems
-      " i16" -> get' (Int16Value shape') getInt16le num_elems
-      " i32" -> get' (Int32Value shape') getInt32le num_elems
-      " i64" -> get' (Int64Value shape') getInt64le num_elems
-      "  u8" -> get' (Word8Value shape') getWord8 num_elems
-      " u16" -> get' (Word16Value shape') getWord16le num_elems
-      " u32" -> get' (Word32Value shape') getWord32le num_elems
-      " u64" -> get' (Word64Value shape') getWord64le num_elems
-      " f32" -> get' (Float32Value shape') getFloatle num_elems
-      " f64" -> get' (Float64Value shape') getDoublele num_elems
-      "bool" -> get' (BoolValue shape') getBool num_elems
+    case LBS.unpack type_f of
+      "  i8" -> get' (Int8Value shape') num_elems 1
+      " i16" -> get' (Int16Value shape') num_elems 2
+      " i32" -> get' (Int32Value shape') num_elems 4
+      " i64" -> get' (Int64Value shape') num_elems 8
+      "  u8" -> get' (Word8Value shape') num_elems 1
+      " u16" -> get' (Word16Value shape') num_elems 2
+      " u32" -> get' (Word32Value shape') num_elems 4
+      " u64" -> get' (Word64Value shape') num_elems 8
+      " f32" -> get' (Float32Value shape') num_elems 4
+      " f64" -> get' (Float64Value shape') num_elems 8
+      -- Bool must be treated specially because the Storable instance
+      -- uses four bytes.
+      "bool" -> BoolValue shape' . SVec.map int8ToBool . byteStringToVector . BS.copy <$> getByteString num_elems
       s -> fail $ "Cannot parse binary values of type " ++ show s
     where
-      getBool = (/= 0) <$> getWord8
+      -- The copy is to ensure that the bytestring is properly
+      -- aligned.
+      get' mk num_elems elem_size =
+        mk . byteStringToVector . BS.copy <$> getByteString (num_elems * elem_size)
 
-      get' mk get_elem num_elems =
-        mk <$> genericGetVectorWith (pure num_elems) get_elem
+      int8ToBool :: Int8 -> Bool
+      int8ToBool = (/= 0)
 
 putBinaryValue ::
-  UVec.Unbox a =>
+  SVec.Storable a =>
   String ->
   Vector Int ->
   Vector a ->
-  (a -> Put) ->
   Put
-putBinaryValue tstr shape vs putv = do
+putBinaryValue tstr shape vs = do
   putInt8 $ fromIntegral $ ord 'b'
   putWord8 binaryFormatVersion
-  putWord8 $ fromIntegral $ UVec.length shape
+  putWord8 $ fromIntegral $ SVec.length shape
   mapM_ (putInt8 . fromIntegral . ord) tstr
-  mapM_ (putInt64le . fromIntegral) $ UVec.toList shape
-  mapM_ putv $ UVec.toList vs
+  putByteString $ vectorToByteString shape
+  putByteString $ vectorToByteString vs
 
 instance PP.Pretty Value where
   ppr v
@@ -149,41 +172,77 @@ instance PP.Pretty Value where
         <> parens (dims <> ppr (valueElemType v))
     where
       dims = mconcat $ map (brackets . ppr) $ valueShape v
-  ppr (Int8Value shape vs) = pprArray (UVec.toList shape) vs
-  ppr (Int16Value shape vs) = pprArray (UVec.toList shape) vs
-  ppr (Int32Value shape vs) = pprArray (UVec.toList shape) vs
-  ppr (Int64Value shape vs) = pprArray (UVec.toList shape) vs
-  ppr (Word8Value shape vs) = pprArray (UVec.toList shape) vs
-  ppr (Word16Value shape vs) = pprArray (UVec.toList shape) vs
-  ppr (Word32Value shape vs) = pprArray (UVec.toList shape) vs
-  ppr (Word64Value shape vs) = pprArray (UVec.toList shape) vs
-  ppr (Float32Value shape vs) = pprArray (UVec.toList shape) vs
-  ppr (Float64Value shape vs) = pprArray (UVec.toList shape) vs
-  ppr (BoolValue shape vs) = pprArray (UVec.toList shape) vs
+  ppr (Int8Value shape vs) = pprArray (SVec.toList shape) vs
+  ppr (Int16Value shape vs) = pprArray (SVec.toList shape) vs
+  ppr (Int32Value shape vs) = pprArray (SVec.toList shape) vs
+  ppr (Int64Value shape vs) = pprArray (SVec.toList shape) vs
+  ppr (Word8Value shape vs) = pprArray (SVec.toList shape) vs
+  ppr (Word16Value shape vs) = pprArray (SVec.toList shape) vs
+  ppr (Word32Value shape vs) = pprArray (SVec.toList shape) vs
+  ppr (Word64Value shape vs) = pprArray (SVec.toList shape) vs
+  ppr (Float32Value shape vs) = pprArray (SVec.toList shape) vs
+  ppr (Float64Value shape vs) = pprArray (SVec.toList shape) vs
+  ppr (BoolValue shape vs) = pprArray (SVec.toList shape) vs
 
-pprArray :: (UVec.Unbox a, F.IsPrimValue a) => [Int] -> UVec.Vector a -> Doc
+pprArray :: (SVec.Storable a, F.IsPrimValue a) => [Int] -> SVec.Vector a -> Doc
 pprArray [] vs =
-  ppr $ F.primValue $ UVec.head vs
+  ppr $ F.primValue $ SVec.head vs
 pprArray (d : ds) vs =
   brackets $ cat $ punctuate separator $ map (pprArray ds . slice) [0 .. d -1]
   where
     slice_size = product ds
-    slice i = UVec.slice (i * slice_size) slice_size vs
+    slice i = SVec.slice (i * slice_size) slice_size vs
     separator
       | null ds = comma <> space
       | otherwise = comma <> line
 
+-- | The structure of a compound value, parameterised over the actual
+-- values.  For most cases you probably want 'CompoundValue'.
+data Compound v
+  = ValueRecord (M.Map T.Text (Compound v))
+  | -- | Must not be single value.
+    ValueTuple [Compound v]
+  | ValueAtom v
+  deriving (Eq, Ord, Show)
+
+instance Functor Compound where
+  fmap = fmapDefault
+
+instance Foldable Compound where
+  foldMap = foldMapDefault
+
+instance Traversable Compound where
+  traverse f (ValueAtom v) = ValueAtom <$> f v
+  traverse f (ValueTuple vs) = ValueTuple <$> traverse (traverse f) vs
+  traverse f (ValueRecord m) = ValueRecord <$> traverse (traverse f) m
+
+instance Pretty v => Pretty (Compound v) where
+  ppr (ValueAtom v) = ppr v
+  ppr (ValueTuple vs) = parens $ commasep $ map ppr vs
+  ppr (ValueRecord m) = braces $ commasep $ map field $ M.toList m
+    where
+      field (k, v) = ppr k <> equals <> ppr v
+
+-- | Create a tuple for a non-unit list, and otherwise a 'ValueAtom'
+mkCompound :: [v] -> Compound v
+mkCompound [v] = ValueAtom v
+mkCompound vs = ValueTuple $ map ValueAtom vs
+
+-- | Like a 'Value', but also grouped in compound ways that are not
+-- supported by raw values.  You cannot parse or read these in
+-- standard ways, and they cannot be elements of arrays.
+type CompoundValue = Compound Value
+
 -- | A representation of the simple values we represent in this module.
 data ValueType = ValueType [Int] F.PrimType
-  deriving (Show)
+  deriving (Eq, Ord, Show)
 
 instance PP.Pretty ValueType where
   ppr (ValueType ds t) = mconcat (map pprDim ds) <> ppr t
     where
       pprDim d = brackets $ ppr d
 
--- | A textual description of the type of a value.  Follows Futhark
--- type notation, and contains the exact dimension sizes if an array.
+-- | Get the type of a value.
 valueType :: Value -> ValueType
 valueType v = ValueType (valueShape v) $ valueElemType v
 
@@ -200,42 +259,71 @@ valueElemType Float32Value {} = F.FloatType F.Float32
 valueElemType Float64Value {} = F.FloatType F.Float64
 valueElemType BoolValue {} = F.Bool
 
+-- | The shape of a value.  Empty list in case of a scalar.
 valueShape :: Value -> [Int]
-valueShape (Int8Value shape _) = UVec.toList shape
-valueShape (Int16Value shape _) = UVec.toList shape
-valueShape (Int32Value shape _) = UVec.toList shape
-valueShape (Int64Value shape _) = UVec.toList shape
-valueShape (Word8Value shape _) = UVec.toList shape
-valueShape (Word16Value shape _) = UVec.toList shape
-valueShape (Word32Value shape _) = UVec.toList shape
-valueShape (Word64Value shape _) = UVec.toList shape
-valueShape (Float32Value shape _) = UVec.toList shape
-valueShape (Float64Value shape _) = UVec.toList shape
-valueShape (BoolValue shape _) = UVec.toList shape
+valueShape (Int8Value shape _) = SVec.toList shape
+valueShape (Int16Value shape _) = SVec.toList shape
+valueShape (Int32Value shape _) = SVec.toList shape
+valueShape (Int64Value shape _) = SVec.toList shape
+valueShape (Word8Value shape _) = SVec.toList shape
+valueShape (Word16Value shape _) = SVec.toList shape
+valueShape (Word32Value shape _) = SVec.toList shape
+valueShape (Word64Value shape _) = SVec.toList shape
+valueShape (Float32Value shape _) = SVec.toList shape
+valueShape (Float64Value shape _) = SVec.toList shape
+valueShape (BoolValue shape _) = SVec.toList shape
+
+-- | Produce a list of the immediate elements of the value.  That is,
+-- a 2D array will produce a list of 1D values.  While lists are of
+-- course inefficient, the actual values are just slices of the
+-- original value, which makes them fairly efficient.
+valueElems :: Value -> [Value]
+valueElems v
+  | n : ns <- valueShape v =
+    let k = product ns
+        slices mk vs =
+          [ mk (SVec.fromList ns) $
+              SVec.slice (k * i) k vs
+            | i <- [0 .. n -1]
+          ]
+     in case v of
+          Int8Value _ vs -> slices Int8Value vs
+          Int16Value _ vs -> slices Int16Value vs
+          Int32Value _ vs -> slices Int32Value vs
+          Int64Value _ vs -> slices Int64Value vs
+          Word8Value _ vs -> slices Word8Value vs
+          Word16Value _ vs -> slices Word16Value vs
+          Word32Value _ vs -> slices Word32Value vs
+          Word64Value _ vs -> slices Word64Value vs
+          Float32Value _ vs -> slices Float32Value vs
+          Float64Value _ vs -> slices Float64Value vs
+          BoolValue _ vs -> slices BoolValue vs
+  | otherwise =
+    []
 
 -- The parser
 
-dropRestOfLine, dropSpaces :: BS.ByteString -> BS.ByteString
-dropRestOfLine = BS.drop 1 . BS.dropWhile (/= '\n')
-dropSpaces t = case BS.dropWhile isSpace t of
+dropRestOfLine, dropSpaces :: LBS.ByteString -> LBS.ByteString
+dropRestOfLine = LBS.drop 1 . LBS.dropWhile (/= '\n')
+dropSpaces t = case LBS.dropWhile isSpace t of
   t'
-    | "--" `BS.isPrefixOf` t' -> dropSpaces $ dropRestOfLine t'
+    | "--" `LBS.isPrefixOf` t' -> dropSpaces $ dropRestOfLine t'
     | otherwise -> t'
 
-type ReadValue v = BS.ByteString -> Maybe (v, BS.ByteString)
+type ReadValue v = LBS.ByteString -> Maybe (v, LBS.ByteString)
 
-symbol :: Char -> BS.ByteString -> Maybe BS.ByteString
+symbol :: Char -> LBS.ByteString -> Maybe LBS.ByteString
 symbol c t
-  | Just (c', t') <- BS.uncons t, c' == c = Just $ dropSpaces t'
+  | Just (c', t') <- LBS.uncons t, c' == c = Just $ dropSpaces t'
   | otherwise = Nothing
 
-lexeme :: BS.ByteString -> BS.ByteString -> Maybe BS.ByteString
+lexeme :: LBS.ByteString -> LBS.ByteString -> Maybe LBS.ByteString
 lexeme l t
-  | l `BS.isPrefixOf` t = Just $ dropSpaces $ BS.drop (BS.length l) t
+  | l `LBS.isPrefixOf` t = Just $ dropSpaces $ LBS.drop (LBS.length l) t
   | otherwise = Nothing
 
 -- (Used elements, shape, elements, remaining input)
-type State s v = (Int, Vector Int, STVector s v, BS.ByteString)
+type State s v = (Int, Vector Int, STVector s v, LBS.ByteString)
 
 readArrayElemsST ::
   UMVec.Unbox v =>
@@ -260,12 +348,12 @@ readArrayElemsST j r rv s = do
 
 updateShape :: Int -> Int -> Vector Int -> Maybe (Vector Int)
 updateShape d n shape
-  | old_n < 0 = Just $ shape UVec.// [(r - d, n)]
+  | old_n < 0 = Just $ shape SVec.// [(r - d, n)]
   | old_n == n = Just shape
   | otherwise = Nothing
   where
-    r = UVec.length shape
-    old_n = shape UVec.! (r - d)
+    r = SVec.length shape
+    old_n = shape SVec.! (r - d)
 
 growIfFilled :: UVec.Unbox v => Int -> STVector s v -> ST s (STVector s v)
 growIfFilled i arr =
@@ -302,18 +390,18 @@ closeArray r j (i, shape, arr, t) = do
   return (i, shape', arr, t')
 
 readRankedArrayOf ::
-  UMVec.Unbox v =>
+  (UMVec.Unbox v, SVec.Storable v) =>
   Int ->
   ReadValue v ->
-  BS.ByteString ->
-  Maybe (Vector Int, Vector v, BS.ByteString)
+  LBS.ByteString ->
+  Maybe (Vector Int, Vector v, LBS.ByteString)
 readRankedArrayOf r rv t = runST $ do
   arr <- UMVec.new 1024
-  ms <- readRankedArrayOfST r rv (0, UVec.replicate r (-1), arr, t)
+  ms <- readRankedArrayOfST r rv (0, SVec.replicate r (-1), arr, t)
   case ms of
     Just (i, shape, arr', t') -> do
       arr'' <- freeze (UMVec.slice 0 i arr')
-      return $ Just (shape, arr'', t')
+      return $ Just (shape, UVec.convert arr'', t')
     Nothing ->
       return Nothing
 
@@ -335,7 +423,7 @@ readIntegral f t = do
     _ -> Nothing
   return (v, dropSpaces b)
   where
-    (a, b) = BS.span constituent t
+    (a, b) = LBS.span constituent t
 
 readInt8 :: ReadValue Int8
 readInt8 = readIntegral f
@@ -395,7 +483,7 @@ readFloat f t = do
     _ -> Nothing
   return (v, dropSpaces b)
   where
-    (a, b) = BS.span constituent t
+    (a, b) = LBS.span constituent t
     fromDouble = uncurry encodeFloat . decodeFloat
     unLoc (L _ x) = x
 
@@ -423,7 +511,7 @@ readBool t = do
     _ -> Nothing
   return (v, dropSpaces b)
   where
-    (a, b) = BS.span constituent t
+    (a, b) = LBS.span constituent t
 
 readPrimType :: ReadValue String
 readPrimType t = do
@@ -432,9 +520,9 @@ readPrimType t = do
     _ -> Nothing
   return (pt, dropSpaces b)
   where
-    (a, b) = BS.span constituent t
+    (a, b) = LBS.span constituent t
 
-readEmptyArrayOfShape :: [Int] -> BS.ByteString -> Maybe (Value, BS.ByteString)
+readEmptyArrayOfShape :: [Int] -> LBS.ByteString -> Maybe (Value, LBS.ByteString)
 readEmptyArrayOfShape shape t
   | Just t' <- symbol '[' t,
     Just (d, t'') <- readIntegral (const Nothing) t',
@@ -444,28 +532,28 @@ readEmptyArrayOfShape shape t
     (pt, t') <- readPrimType t
     guard $ elem 0 shape
     v <- case pt of
-      "i8" -> Just $ Int8Value (UVec.fromList shape) UVec.empty
-      "i16" -> Just $ Int16Value (UVec.fromList shape) UVec.empty
-      "i32" -> Just $ Int32Value (UVec.fromList shape) UVec.empty
-      "i64" -> Just $ Int64Value (UVec.fromList shape) UVec.empty
-      "u8" -> Just $ Word8Value (UVec.fromList shape) UVec.empty
-      "u16" -> Just $ Word16Value (UVec.fromList shape) UVec.empty
-      "u32" -> Just $ Word32Value (UVec.fromList shape) UVec.empty
-      "u64" -> Just $ Word64Value (UVec.fromList shape) UVec.empty
-      "f32" -> Just $ Float32Value (UVec.fromList shape) UVec.empty
-      "f64" -> Just $ Float64Value (UVec.fromList shape) UVec.empty
-      "bool" -> Just $ BoolValue (UVec.fromList shape) UVec.empty
+      "i8" -> Just $ Int8Value (SVec.fromList shape) SVec.empty
+      "i16" -> Just $ Int16Value (SVec.fromList shape) SVec.empty
+      "i32" -> Just $ Int32Value (SVec.fromList shape) SVec.empty
+      "i64" -> Just $ Int64Value (SVec.fromList shape) SVec.empty
+      "u8" -> Just $ Word8Value (SVec.fromList shape) SVec.empty
+      "u16" -> Just $ Word16Value (SVec.fromList shape) SVec.empty
+      "u32" -> Just $ Word32Value (SVec.fromList shape) SVec.empty
+      "u64" -> Just $ Word64Value (SVec.fromList shape) SVec.empty
+      "f32" -> Just $ Float32Value (SVec.fromList shape) SVec.empty
+      "f64" -> Just $ Float64Value (SVec.fromList shape) SVec.empty
+      "bool" -> Just $ BoolValue (SVec.fromList shape) SVec.empty
       _ -> Nothing
     return (v, t')
 
-readEmptyArray :: BS.ByteString -> Maybe (Value, BS.ByteString)
+readEmptyArray :: LBS.ByteString -> Maybe (Value, LBS.ByteString)
 readEmptyArray t = do
   t' <- symbol '(' =<< lexeme "empty" t
   (v, t'') <- readEmptyArrayOfShape [] t'
   t''' <- symbol ')' t''
   return (v, t''')
 
-readValue :: BS.ByteString -> Maybe (Value, BS.ByteString)
+readValue :: LBS.ByteString -> Maybe (Value, LBS.ByteString)
 readValue full_t
   | Right (t', _, v) <- decodeOrFail full_t =
     Just (v, dropSpaces t')
@@ -493,11 +581,11 @@ readValue full_t
         `mplus` tryWith readBool BoolValue r t
 
 -- | Parse Futhark values from the given bytestring.
-readValues :: BS.ByteString -> Maybe [Value]
+readValues :: LBS.ByteString -> Maybe [Value]
 readValues = readValues' . dropSpaces
   where
     readValues' t
-      | BS.null t = Just []
+      | LBS.null t = Just []
       | otherwise = do
         (a, t') <- readValue t
         (a :) <$> readValues' t'
@@ -574,28 +662,45 @@ compareValue i got_v expected_v
   | otherwise =
     [ArrayShapeMismatch i (valueShape got_v) (valueShape expected_v)]
   where
+    {-# INLINE compareGen #-}
+    {-# INLINE compareNum #-}
+    {-# INLINE compareFloat #-}
+    {-# INLINE compareFloatElement #-}
+    {-# INLINE compareElement #-}
     compareNum tol = compareGen $ compareElement tol
     compareFloat tol = compareGen $ compareFloatElement tol
 
     compareGen cmp got expected =
-      concat $
-        zipWith cmp (UVec.toList $ UVec.indexed got) (UVec.toList expected)
+      let l = SVec.length got
+          check acc j
+            | j < l =
+              case cmp j (got SVec.! j) (expected SVec.! j) of
+                Just mismatch ->
+                  check (mismatch : acc) (j + 1)
+                Nothing ->
+                  check acc (j + 1)
+            | otherwise =
+              acc
+       in reverse $ check [] 0
 
-    compareElement tol (j, got) expected
-      | comparePrimValue tol got expected = []
-      | otherwise = [PrimValueMismatch (i, j) (value got) (value expected)]
+    compareElement tol j got expected
+      | comparePrimValue tol got expected = Nothing
+      | otherwise = Just $ PrimValueMismatch (i, j) (value got) (value expected)
 
-    compareFloatElement tol (j, got) expected
-      | isNaN got, isNaN expected = []
+    compareFloatElement tol j got expected
+      | isNaN got,
+        isNaN expected =
+        Nothing
       | isInfinite got,
         isInfinite expected,
         signum got == signum expected =
-        []
-      | otherwise = compareElement tol (j, got) expected
+        Nothing
+      | otherwise =
+        compareElement tol j got expected
 
-    compareBool (j, got) expected
-      | got == expected = []
-      | otherwise = [PrimValueMismatch (i, j) (value got) (value expected)]
+    compareBool j got expected
+      | got == expected = Nothing
+      | otherwise = Just $ PrimValueMismatch (i, j) (value got) (value expected)
 
 comparePrimValue ::
   (Ord num, Num num) =>
@@ -611,8 +716,142 @@ comparePrimValue tol x y =
 minTolerance :: Fractional a => a
 minTolerance = 0.002 -- 0.2%
 
-tolerance :: (RealFloat a, UVec.Unbox a) => Vector a -> a
-tolerance = UVec.foldl tolerance' minTolerance . UVec.filter (not . nanOrInf)
+tolerance :: (RealFloat a, SVec.Storable a) => Vector a -> a
+tolerance = SVec.foldl tolerance' minTolerance . SVec.filter (not . nanOrInf)
   where
     tolerance' t v = max t $ minTolerance * v
     nanOrInf x = isInfinite x || isNaN x
+
+-- | A class for Haskell values that can be retrieved from 'Value'.
+-- This is a convenience facility - don't expect it to be fast.
+class GetValue t where
+  getValue :: Value -> Maybe t
+
+instance GetValue t => GetValue [t] where
+  getValue = mapM getValue . valueElems
+
+instance GetValue Bool where
+  getValue (BoolValue shape vs)
+    | [] <- SVec.toList shape =
+      Just $ vs SVec.! 0
+  getValue _ = Nothing
+
+instance GetValue Int8 where
+  getValue (Int8Value shape vs)
+    | [] <- SVec.toList shape =
+      Just $ vs SVec.! 0
+  getValue _ = Nothing
+
+instance GetValue Int16 where
+  getValue (Int16Value shape vs)
+    | [] <- SVec.toList shape =
+      Just $ vs SVec.! 0
+  getValue _ = Nothing
+
+instance GetValue Int32 where
+  getValue (Int32Value shape vs)
+    | [] <- SVec.toList shape =
+      Just $ vs SVec.! 0
+  getValue _ = Nothing
+
+instance GetValue Int64 where
+  getValue (Int64Value shape vs)
+    | [] <- SVec.toList shape =
+      Just $ vs SVec.! 0
+  getValue _ = Nothing
+
+instance GetValue Word8 where
+  getValue (Word8Value shape vs)
+    | [] <- SVec.toList shape =
+      Just $ vs SVec.! 0
+  getValue _ = Nothing
+
+instance GetValue Word16 where
+  getValue (Word16Value shape vs)
+    | [] <- SVec.toList shape =
+      Just $ vs SVec.! 0
+  getValue _ = Nothing
+
+instance GetValue Word32 where
+  getValue (Word32Value shape vs)
+    | [] <- SVec.toList shape =
+      Just $ vs SVec.! 0
+  getValue _ = Nothing
+
+instance GetValue Word64 where
+  getValue (Word64Value shape vs)
+    | [] <- SVec.toList shape =
+      Just $ vs SVec.! 0
+  getValue _ = Nothing
+
+-- | A class for Haskell values that can be converted to 'Value'.
+-- This is a convenience facility - don't expect it to be fast.
+class PutValue t where
+  -- | This may fail for cases such as irregular arrays.
+  putValue :: t -> Maybe Value
+
+instance PutValue Word8 where
+  putValue = Just . Word8Value mempty . SVec.singleton
+
+instance PutValue F.PrimValue where
+  putValue (F.SignedValue (F.Int8Value x)) =
+    Just $ Int8Value mempty $ SVec.singleton x
+  putValue (F.SignedValue (F.Int16Value x)) =
+    Just $ Int16Value mempty $ SVec.singleton x
+  putValue (F.SignedValue (F.Int32Value x)) =
+    Just $ Int32Value mempty $ SVec.singleton x
+  putValue (F.SignedValue (F.Int64Value x)) =
+    Just $ Int64Value mempty $ SVec.singleton x
+  putValue (F.UnsignedValue (F.Int8Value x)) =
+    Just $ Word8Value mempty $ SVec.singleton $ fromIntegral x
+  putValue (F.UnsignedValue (F.Int16Value x)) =
+    Just $ Word16Value mempty $ SVec.singleton $ fromIntegral x
+  putValue (F.UnsignedValue (F.Int32Value x)) =
+    Just $ Word32Value mempty $ SVec.singleton $ fromIntegral x
+  putValue (F.UnsignedValue (F.Int64Value x)) =
+    Just $ Word64Value mempty $ SVec.singleton $ fromIntegral x
+  putValue (F.FloatValue (F.Float32Value x)) =
+    Just $ Float32Value mempty $ SVec.singleton x
+  putValue (F.FloatValue (F.Float64Value x)) =
+    Just $ Float64Value mempty $ SVec.singleton x
+  putValue (F.BoolValue b) =
+    Just $ BoolValue mempty $ SVec.singleton b
+
+instance PutValue [Value] where
+  putValue [] = Nothing
+  putValue (x : xs) = do
+    let res_shape = SVec.fromList $ length (x : xs) : valueShape x
+    guard $ all ((== valueType x) . valueType) xs
+    Just $ case x of
+      Int8Value {} -> Int8Value res_shape $ foldMap getVec (x : xs)
+      Int16Value {} -> Int16Value res_shape $ foldMap getVec (x : xs)
+      Int32Value {} -> Int32Value res_shape $ foldMap getVec (x : xs)
+      Int64Value {} -> Int64Value res_shape $ foldMap getVec (x : xs)
+      Word8Value {} -> Word8Value res_shape $ foldMap getVec (x : xs)
+      Word16Value {} -> Word16Value res_shape $ foldMap getVec (x : xs)
+      Word32Value {} -> Word32Value res_shape $ foldMap getVec (x : xs)
+      Word64Value {} -> Word64Value res_shape $ foldMap getVec (x : xs)
+      Float32Value {} -> Float32Value res_shape $ foldMap getVec (x : xs)
+      Float64Value {} -> Float64Value res_shape $ foldMap getVec (x : xs)
+      BoolValue {} -> BoolValue res_shape $ foldMap getVec (x : xs)
+    where
+      getVec (Int8Value _ vec) = SVec.unsafeCast vec
+      getVec (Int16Value _ vec) = SVec.unsafeCast vec
+      getVec (Int32Value _ vec) = SVec.unsafeCast vec
+      getVec (Int64Value _ vec) = SVec.unsafeCast vec
+      getVec (Word8Value _ vec) = SVec.unsafeCast vec
+      getVec (Word16Value _ vec) = SVec.unsafeCast vec
+      getVec (Word32Value _ vec) = SVec.unsafeCast vec
+      getVec (Word64Value _ vec) = SVec.unsafeCast vec
+      getVec (Float32Value _ vec) = SVec.unsafeCast vec
+      getVec (Float64Value _ vec) = SVec.unsafeCast vec
+      getVec (BoolValue _ vec) = SVec.unsafeCast vec
+
+instance PutValue T.Text where
+  putValue = putValue . T.encodeUtf8
+
+instance PutValue BS.ByteString where
+  putValue bs =
+    Just $ Word8Value size $ byteStringToVector bs
+    where
+      size = SVec.fromList [fromIntegral (BS.length bs)]

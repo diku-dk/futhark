@@ -38,6 +38,7 @@ struct cuda_config {
   size_t default_block_size;
   size_t default_grid_size;
   size_t default_tile_size;
+  size_t default_reg_tile_size;
   size_t default_threshold;
 
   int default_block_size_changed;
@@ -70,6 +71,7 @@ static void cuda_config_init(struct cuda_config *cfg,
   cfg->default_block_size = 256;
   cfg->default_grid_size = 0; // Set properly later.
   cfg->default_tile_size = 32;
+  cfg->default_reg_tile_size = 2;
   cfg->default_threshold = 32*1024;
 
   cfg->default_block_size_changed = 0;
@@ -408,6 +410,9 @@ static void cuda_size_setup(struct cuda_context *ctx)
     } else if (strstr(size_class, "tile_size") == size_class) {
       max_value = ctx->max_tile_size;
       default_value = ctx->cfg.default_tile_size;
+    } else if (strstr(size_class, "reg_tile_size") == size_class) {
+      max_value = 0; // No limit.
+      default_value = ctx->cfg.default_reg_tile_size;
     } else if (strstr(size_class, "threshold") == size_class) {
       // Threshold can be as large as it takes.
       default_value = ctx->cfg.default_threshold;
@@ -495,7 +500,7 @@ static cudaError_t cuda_tally_profiling_records(struct cuda_context *ctx) {
     struct profiling_record record = ctx->profiling_records[i];
 
     float ms;
-    if ((err = cudaEventElapsedTime(&ms, record.events[0], record.events[1])) != CUDA_SUCCESS) {
+    if ((err = cudaEventElapsedTime(&ms, record.events[0], record.events[1])) != cudaSuccess) {
       return err;
     }
 
@@ -503,10 +508,10 @@ static cudaError_t cuda_tally_profiling_records(struct cuda_context *ctx) {
     *record.runs += 1;
     *record.runtime += ms*1000;
 
-    if ((err = cudaEventDestroy(record.events[0])) != CUDA_SUCCESS) {
+    if ((err = cudaEventDestroy(record.events[0])) != cudaSuccess) {
       return err;
     }
-    if ((err = cudaEventDestroy(record.events[1])) != CUDA_SUCCESS) {
+    if ((err = cudaEventDestroy(record.events[1])) != cudaSuccess) {
       return err;
     }
 
@@ -515,7 +520,7 @@ static cudaError_t cuda_tally_profiling_records(struct cuda_context *ctx) {
 
   ctx->profiling_records_used = 0;
 
-  return CUDA_SUCCESS;
+  return cudaSuccess;
 }
 
 // Returns pointer to two events.

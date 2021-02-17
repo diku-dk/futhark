@@ -8,12 +8,13 @@ module Futhark.Optimise.TileLoops (tileLoops) where
 
 import Control.Monad.Reader
 import Control.Monad.State
-import Data.List (foldl')
 import qualified Data.Map.Strict as M
 import Data.Maybe (mapMaybe)
 import qualified Data.Sequence as Seq
 import Futhark.IR.Kernels
 import Futhark.MonadFreshNames
+import Futhark.Optimise.BlkRegTiling
+import Futhark.Optimise.TileLoops.Shared
 import Futhark.Pass
 import Futhark.Tools
 import Futhark.Transform.Rename
@@ -30,8 +31,6 @@ tileLoops =
         runState $
           runReaderT (optimiseStms stms) scope
 
-type TileM = ReaderT (Scope Kernels) (State VNameSource)
-
 optimiseBody :: Body Kernels -> TileM (Body Kernels)
 optimiseBody (Body () stms res) =
   Body () <$> optimiseStms stms <*> pure res
@@ -42,11 +41,17 @@ optimiseStms stms =
     mconcat <$> mapM optimiseStm (stmsToList stms)
 
 optimiseStm :: Stm Kernels -> TileM (Stms Kernels)
-optimiseStm (Let pat aux (Op (SegOp (SegMap lvl@SegThread {} space ts kbody)))) = do
-  (host_stms, (lvl', space', kbody')) <- tileInKernelBody mempty initial_variance lvl space ts kbody
-  return $
-    host_stms
-      <> oneStm (Let pat aux $ Op $ SegOp $ SegMap lvl' space' ts kbody')
+optimiseStm stm@(Let pat aux (Op (SegOp (SegMap lvl@SegThread {} space ts kbody)))) = do
+  res3dtiling <- doRegTiling3D stm
+  case res3dtiling of
+    Just (extra_bnds, stmt') -> return (extra_bnds <> oneStm stmt')
+    Nothing -> do
+      blkRegTiling_res <- mmBlkRegTiling stm
+      case blkRegTiling_res of
+        Just (extra_bnds, stmt') -> return (extra_bnds <> oneStm stmt')
+        Nothing -> do
+          (host_stms, (lvl', space', kbody')) <- tileInKernelBody mempty initial_variance lvl space ts kbody
+          return $ host_stms <> oneStm (Let pat aux $ Op $ SegOp $ SegMap lvl' space' ts kbody')
   where
     initial_variance = M.map mempty $ scopeOfSegSpace space
 optimiseStm (Let pat aux e) =
@@ -65,12 +70,12 @@ tileInKernelBody ::
 tileInKernelBody branch_variant initial_variance lvl initial_kspace ts kbody
   | Just kbody_res <- mapM isSimpleResult $ kernelBodyResult kbody = do
     maybe_tiled <-
-      tileInBody branch_variant mempty initial_variance lvl initial_kspace ts $
+      tileInBody branch_variant initial_variance lvl initial_kspace ts $
         Body () (kernelBodyStms kbody) kbody_res
     case maybe_tiled of
       Just (host_stms, tiling, tiledBody) -> do
         (res', stms') <-
-          runBinder $ mapM (tilingTileReturns tiling) =<< tiledBody mempty
+          runBinder $ mapM (tilingTileReturns tiling) =<< tiledBody mempty mempty
         return
           ( host_stms,
             ( tilingLevel tiling,
@@ -88,14 +93,13 @@ tileInKernelBody branch_variant initial_variance lvl initial_kspace ts kbody
 
 tileInBody ::
   Names ->
-  Names ->
   VarianceTable ->
   SegLevel ->
   SegSpace ->
   [Type] ->
   Body Kernels ->
   TileM (Maybe (Stms Kernels, Tiling, TiledBody))
-tileInBody branch_variant private initial_variance initial_lvl initial_space res_ts (Body () initial_kstms stms_res) =
+tileInBody branch_variant initial_variance initial_lvl initial_space res_ts (Body () initial_kstms stms_res) =
   descend mempty $ stmsToList initial_kstms
   where
     variance = varianceInStms initial_variance initial_kstms
@@ -114,7 +118,7 @@ tileInBody branch_variant private initial_variance initial_lvl initial_space res
         (prestms', poststms') <-
           preludeToPostlude variance prestms stm_to_tile (stmsFromList poststms),
         used <- freeIn stm_to_tile <> freeIn poststms' <> freeIn stms_res =
-        Just . injectPrelude initial_space private variance prestms' used
+        Just . injectPrelude initial_space variance prestms' used
           <$> tileGeneric
             (tiling2d $ reverse $ zip top_gtids_rev top_kdims_rev)
             initial_lvl
@@ -136,7 +140,7 @@ tileInBody branch_variant private initial_variance initial_lvl initial_space res
         (prestms', poststms') <-
           preludeToPostlude variance prestms stm_to_tile (stmsFromList poststms),
         used <- freeIn stm_to_tile <> freeIn poststms' <> freeIn stms_res =
-        Just . injectPrelude initial_space private variance prestms' used
+        Just . injectPrelude initial_space variance prestms' used
           <$> tileGeneric
             (tiling1d $ reverse top_space_rev)
             initial_lvl
@@ -161,13 +165,11 @@ tileInBody branch_variant private initial_variance initial_lvl initial_space res
                       (namesToList (freeIn bound))
                   )
             merge_params = map fst merge
-            private' = namesFromList $ map paramName merge_params
 
         maybe_tiled <-
           localScope (M.insert i (IndexName it) $ scopeOfFParams merge_params) $
             tileInBody
               branch_variant'
-              private'
               variance
               initial_lvl
               initial_space
@@ -237,15 +239,17 @@ preludeToPostlude variance prelude stm_to_tile postlude =
 --
 -- The third category duplicates computation, so we only want to do it
 -- when absolutely necessary.  Currently, this is necessary for
--- results that are views of an array (slicing, rotate, etc), because
--- these cannot be efficiently represented by a scalar segmap (they'll
--- be manifested in memory).
+-- results that are views of an array (slicing, rotate, etc) and which
+-- results are used after the prelude, because these cannot be
+-- efficiently represented by a scalar segmap (they'll be manifested
+-- in memory).
 partitionPrelude ::
   VarianceTable ->
   Stms Kernels ->
   Names ->
+  Names ->
   (Stms Kernels, Stms Kernels, Stms Kernels)
-partitionPrelude variance prestms private =
+partitionPrelude variance prestms private used_after =
   (invariant_prestms, precomputed_variant_prestms, recomputed_variant_prestms)
   where
     invariantTo names stm =
@@ -264,7 +268,9 @@ partitionPrelude variance prestms private =
     mustBeInlinedExp (BasicOp Rearrange {}) = True
     mustBeInlinedExp (BasicOp Reshape {}) = True
     mustBeInlinedExp _ = False
-    mustBeInlined = mustBeInlinedExp . stmExp
+    mustBeInlined stm =
+      mustBeInlinedExp (stmExp stm)
+        && any (`nameIn` used_after) (patternNames (stmPattern stm))
 
     must_be_inlined =
       namesFromList $
@@ -280,29 +286,24 @@ partitionPrelude variance prestms private =
 -- considered thread-local.
 injectPrelude ::
   SegSpace ->
-  Names ->
   VarianceTable ->
   Stms Kernels ->
   Names ->
   (Stms Kernels, Tiling, TiledBody) ->
   (Stms Kernels, Tiling, TiledBody)
-injectPrelude initial_space private variance prestms used (host_stms, tiling, tiledBody) =
+injectPrelude initial_space variance prestms used (host_stms, tiling, tiledBody) =
   (host_stms, tiling, tiledBody')
   where
-    private' =
-      private
-        <> namesFromList
-          ( map fst $
-              filter (`notElem` unSegSpace (tilingSpace tiling)) $
-                unSegSpace initial_space
-          )
-
-    tiledBody' privstms = do
-      let ( invariant_prestms,
+    tiledBody' private privstms = do
+      let nontiled = (`notElem` unSegSpace (tilingSpace tiling))
+          private' =
+            private
+              <> namesFromList (map fst (filter nontiled $ unSegSpace initial_space))
+          ( invariant_prestms,
             precomputed_variant_prestms,
             recomputed_variant_prestms
             ) =
-              partitionPrelude variance prestms private'
+              partitionPrelude variance prestms private' used
 
       addStms invariant_prestms
 
@@ -312,13 +313,13 @@ injectPrelude initial_space private variance prestms used (host_stms, tiling, ti
                 used <> freeIn recomputed_variant_prestms
       prelude_arrs <-
         inScopeOf precomputed_variant_prestms $
-          doPrelude tiling precomputed_variant_prestms live_set
+          doPrelude tiling privstms precomputed_variant_prestms live_set
 
       let prelude_privstms =
             PrivStms recomputed_variant_prestms $
               mkReadPreludeValues prelude_arrs live_set
 
-      tiledBody (prelude_privstms <> privstms)
+      tiledBody private' (prelude_privstms <> privstms)
 
 tileDoLoop ::
   SegSpace ->
@@ -337,11 +338,12 @@ tileDoLoop ::
   Result ->
   TileM (Stms Kernels, Tiling, TiledBody)
 tileDoLoop initial_space variance prestms used_in_body (host_stms, tiling, tiledBody) res_ts pat aux merge i it bound poststms poststms_res = do
-  let ( invariant_prestms,
+  let prestms_used = used_in_body <> freeIn poststms <> freeIn poststms_res
+      ( invariant_prestms,
         precomputed_variant_prestms,
         recomputed_variant_prestms
         ) =
-          partitionPrelude variance prestms tiled_kdims
+          partitionPrelude variance prestms tiled_kdims prestms_used
 
   let (mergeparams, mergeinits) = unzip merge
 
@@ -350,20 +352,17 @@ tileDoLoop initial_space variance prestms used_in_body (host_stms, tiling, tiled
 
       merge_scope = M.insert i (IndexName it) $ scopeOfFParams mergeparams
 
-      tiledBody' privstms = localScope (scopeOf host_stms <> merge_scope) $ do
+      tiledBody' private privstms = localScope (scopeOf host_stms <> merge_scope) $ do
         addStms invariant_prestms
 
         let live_set =
               namesToList $
                 liveSet precomputed_variant_prestms $
-                  freeIn recomputed_variant_prestms
-                    <> used_in_body
-                    <> freeIn poststms
-                    <> freeIn poststms_res
+                  freeIn recomputed_variant_prestms <> prestms_used
 
         prelude_arrs <-
           inScopeOf precomputed_variant_prestms $
-            doPrelude tiling precomputed_variant_prestms live_set
+            doPrelude tiling privstms precomputed_variant_prestms live_set
 
         mergeparams' <- forM mergeparams $ \(Param pname pt) ->
           Param <$> newVName (baseString pname ++ "_group") <*> pure (tileDim pt)
@@ -395,10 +394,16 @@ tileDoLoop initial_space variance prestms used_in_body (host_stms, tiling, tiled
                       Index (paramName from) $
                         fullSlice (paramType from) slice
 
+            private' =
+              private <> namesFromList (map paramName mergeparams ++ map paramName mergeparams')
+
+            privstms' =
+              PrivStms mempty indexMergeParams <> privstms <> inloop_privstms
+
         loopbody' <-
           runBodyBinder $
             resultBody . map Var
-              <$> tiledBody (PrivStms mempty indexMergeParams <> privstms <> inloop_privstms)
+              <$> tiledBody private' privstms'
         accs' <-
           letTupExp "tiled_inside_loop" $
             DoLoop [] merge' (ForLoop i it bound []) loopbody'
@@ -413,17 +418,18 @@ tileDoLoop initial_space variance prestms used_in_body (host_stms, tiling, tiled
           filter (`notElem` unSegSpace (tilingSpace tiling)) $
             unSegSpace initial_space
 
-doPrelude :: Tiling -> Stms Kernels -> [VName] -> Binder Kernels [VName]
-doPrelude tiling prestms prestms_live =
+doPrelude :: Tiling -> PrivStms -> Stms Kernels -> [VName] -> Binder Kernels [VName]
+doPrelude tiling privstms prestms prestms_live =
   -- Create a SegMap that takes care of the prelude for every thread.
   tilingSegMap tiling "prelude" (scalarLevel tiling) ResultPrivate $
-    \in_bounds _slice -> do
+    \in_bounds slice -> do
       ts <- mapM lookupType prestms_live
       fmap (map Var) $
         letTupExp "pre"
           =<< eIf
             (toExp in_bounds)
             ( do
+                addPrivStms slice privstms
                 addStms prestms
                 resultBodyM $ map Var prestms_live
             )
@@ -620,7 +626,7 @@ postludeGeneric tiling privstms pat accs' poststms poststms_res res_ts =
           addStms poststms
           return poststms_res
 
-type TiledBody = PrivStms -> Binder Kernels [VName]
+type TiledBody = Names -> PrivStms -> Binder Kernels [VName]
 
 tileGeneric ::
   DoTiling gtids kdims ->
@@ -642,8 +648,8 @@ tileGeneric doTiling initial_lvl res_ts pat gtids kdims w form inputs poststms p
   where
     (red_comm, red_lam, red_nes, map_lam) = form
 
-    tiledBody :: Tiling -> PrivStms -> Binder Kernels [VName]
-    tiledBody tiling privstms = do
+    tiledBody :: Tiling -> Names -> PrivStms -> Binder Kernels [VName]
+    tiledBody tiling _private privstms = do
       let tile_shape = tilingTileShape tiling
 
       num_whole_tiles <- tilingNumWholeTiles tiling
@@ -975,30 +981,6 @@ invariantToOneOfTwoInnerDims branch_variant variance dims arr = do
         then Just $ InputTile [1, 0] arr
         else Just $ InputDontTile arr
 
-segMap2D ::
-  String ->
-  SegLevel ->
-  ResultManifest ->
-  (SubExp, SubExp) ->
-  ((VName, VName) -> Binder Kernels [SubExp]) ->
-  Binder Kernels [VName]
-segMap2D desc lvl manifest (dim_x, dim_y) f = do
-  ltid_x <- newVName "ltid_x"
-  ltid_y <- newVName "ltid_y"
-  ltid_flat <- newVName "ltid_flat"
-  let space = SegSpace ltid_flat [(ltid_x, dim_x), (ltid_y, dim_y)]
-
-  ((ts, res), stms) <- runBinder $ do
-    res <- f (ltid_x, ltid_y)
-    ts <- mapM subExpType res
-    return (ts, res)
-  Body _ stms' res' <- renameBody $ mkBody stms res
-
-  letTupExp desc $
-    Op $
-      SegOp $
-        SegMap lvl space ts $ KernelBody () stms' $ map (Returns manifest) res'
-
 -- Reconstruct the original gtids from group and local IDs.
 reconstructGtids2D ::
   SubExp ->
@@ -1273,21 +1255,3 @@ tiling2d dims_on_top _initial_lvl (gtid_x, gtid_y) (kdim_x, kdim_y) w = do
         tilingLevel = lvl,
         tilingSpace = space
       }
-
--- | The variance table keeps a mapping from a variable name
--- (something produced by a 'Stm') to the kernel thread indices
--- that name depends on.  If a variable is not present in this table,
--- that means it is bound outside the kernel (and so can be considered
--- invariant to all dimensions).
-type VarianceTable = M.Map VName Names
-
-varianceInStms :: VarianceTable -> Stms Kernels -> VarianceTable
-varianceInStms = foldl varianceInStm
-
-varianceInStm :: VarianceTable -> Stm Kernels -> VarianceTable
-varianceInStm variance bnd =
-  foldl' add variance $ patternNames $ stmPattern bnd
-  where
-    add variance' v = M.insert v binding_variance variance'
-    look variance' v = oneName v <> M.findWithDefault mempty v variance'
-    binding_variance = mconcat $ map (look variance) $ namesToList (freeIn bnd)

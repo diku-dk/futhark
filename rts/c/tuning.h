@@ -21,9 +21,10 @@ static char* load_tuning_file(const char *fname,
       *eql = 0;
       int value = atoi(eql+1);
       if (set_size(cfg, line, value) != 0) {
-        strncpy(eql+1, line, max_line_len-strlen(line)-1);
-        snprintf(line, max_line_len, "Unknown name '%s' on line %d.", eql+1, lineno);
-        return line;
+        char* err = (char*) malloc(max_line_len + 50);
+        snprintf(err, max_line_len + 50, "Unknown name '%s' on line %d.", line, lineno);
+        free(line);
+        return err;
       }
     } else {
       snprintf(line, max_line_len, "Invalid line %d (must be of form 'name=int').",

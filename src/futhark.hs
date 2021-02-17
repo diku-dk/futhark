@@ -18,6 +18,7 @@ import qualified Futhark.CLI.Datacmp as Datacmp
 import qualified Futhark.CLI.Dataset as Dataset
 import qualified Futhark.CLI.Dev as Dev
 import qualified Futhark.CLI.Doc as Doc
+import qualified Futhark.CLI.Literate as Literate
 import qualified Futhark.CLI.Misc as Misc
 import qualified Futhark.CLI.Multicore as Multicore
 import qualified Futhark.CLI.OpenCL as OpenCL
@@ -65,7 +66,8 @@ commands =
       ("check", (Check.main, "Type check a program.")),
       ("imports", (Misc.mainImports, "Print all non-builtin imported Futhark files.")),
       ("autotune", (Autotune.main, "Autotune threshold parameters.")),
-      ("query", (Query.main, "Query semantic information about program."))
+      ("query", (Query.main, "Query semantic information about program.")),
+      ("literate", (Literate.main, "Process a literate Futhark program."))
     ]
 
 msg :: String
