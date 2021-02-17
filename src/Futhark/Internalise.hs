@@ -1727,8 +1727,6 @@ isOverloadedFunction qname args loc = do
           case fname of
             "jvp" -> JVP lam x' v'
             _ -> VJP lam x' v'
-    handleAD [TupLit [f, x, x'] _] "vjp" = Just $ \desc ->
-      undefined
     handleAD _ _ = Nothing
 
     handleRest [x] "!" = Just $ complementF x
