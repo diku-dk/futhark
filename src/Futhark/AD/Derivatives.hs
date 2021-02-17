@@ -23,8 +23,6 @@ fConst ft x = ValueExp $ FloatValue $ floatValue ft x
 untyped2 :: (TPrimExp t v, TPrimExp t v) -> (PrimExp v, PrimExp v)
 untyped2 = bimap untyped untyped
 
-type OnUnOp t v = TPrimExp t v -> TPrimExp t v
-
 pdUnOp :: UnOp -> PrimExp VName -> PrimExp VName
 pdUnOp (Abs it) a = UnOpExp (SSignum it) a
 pdUnOp (FAbs ft) a = UnOpExp (FSignum ft) a
