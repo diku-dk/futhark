@@ -26,6 +26,7 @@ import qualified Futhark.CodeGen.Backends.CCUDA as CCUDA
 import qualified Futhark.CodeGen.Backends.COpenCL as COpenCL
 import qualified Futhark.CodeGen.Backends.MulticoreC as MulticoreC
 import qualified Futhark.CodeGen.Backends.SequentialC as SequentialC
+import qualified Futhark.CodeGen.Backends.SequentialWASM as SequentialWASM
 import qualified Futhark.CodeGen.ImpGen.Kernels as ImpGenKernels
 import qualified Futhark.CodeGen.ImpGen.Multicore as ImpGenMulticore
 import qualified Futhark.CodeGen.ImpGen.Sequential as ImpGenSequential
@@ -186,7 +187,7 @@ compileCtoWASMAction fcfg mode outpath =
     }
   where
     helper prog = do
-      cprog <- handleWarnings fcfg $ SequentialC.compileProg prog
+      (cprog, jsprog) <- handleWarnings fcfg $ SequentialWASM.compileProg prog
       let cpath = outpath `addExtension` "c"
           hpath = outpath `addExtension` "h"
 
@@ -197,6 +198,9 @@ compileCtoWASMAction fcfg mode outpath =
           liftIO $ writeFile cpath imp
         ToExecutable -> do
           liftIO $ writeFile cpath $ SequentialC.asExecutable cprog
+          runEMCC cpath outpath ["-O"] ["-lm"]
+        ToServer -> do
+          liftIO $ writeFile cpath $ SequentialC.asServer cprog
           runEMCC cpath outpath ["-O"] ["-lm"]
 
 -- | The @futhark opencl@ action.
