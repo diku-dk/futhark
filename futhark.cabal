@@ -109,6 +109,7 @@ library
       Futhark.CodeGen.Backends.SequentialC
       Futhark.CodeGen.Backends.SequentialC.Boilerplate
       Futhark.CodeGen.Backends.SequentialPython
+      Futhark.CodeGen.Backends.SequentialWASM
       Futhark.CodeGen.Backends.SimpleRep
       Futhark.CodeGen.ImpCode
       Futhark.CodeGen.ImpCode.Kernels
