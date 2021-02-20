@@ -22,6 +22,8 @@ import Futhark.Analysis.PrimExp.Convert
 import Futhark.Binder
 import Futhark.Construct
 import Futhark.IR.SOACS
+import Futhark.Transform.Rename
+import Futhark.Util (takeLast)
 
 data RState = RState
   { stateAdjs :: M.Map VName VName,
@@ -227,6 +229,26 @@ diffStm stm@(Let (Pattern [] [pe]) _ (Apply f args _ _)) m
     let updateArgAdj (Var x, _) x_contrib = void $ updateAdjoint x x_contrib
         updateArgAdj _ _ = pure ()
     zipWithM_ updateArgAdj args contribs
+diffStm stm@(Let pat _ (If cond tbody fbody _)) m = do
+  addStm stm
+  m
+
+  let tbody_free = freeIn tbody
+      fbody_free = freeIn fbody
+      branches_free = namesToList $ tbody_free <> fbody_free
+
+  adjs <- mapM lookupAdj $ patternValueNames pat
+
+  -- We need to discard any context, as this never contributes to
+  -- adjoints.
+  contribs <-
+    (pure . takeLast (length branches_free) <=< letTupExp "branch_contrib" <=< renameExp)
+      =<< eIf
+        (eSubExp cond)
+        (diffBody adjs branches_free tbody)
+        (diffBody adjs branches_free fbody)
+
+  zipWithM_ updateAdjoint branches_free contribs
 diffStm stm _ = error $ "diffStm unhandled:\n" ++ pretty stm
 
 diffStms :: Stms SOACS -> ADM ()
@@ -236,29 +258,33 @@ diffStms all_stms
   | otherwise =
     pure ()
 
-diffBody :: [VName] -> Body -> ADM Body
-diffBody get_adjs_for (Body desc stms res) = do
+subAD :: ADM a -> ADM a
+subAD m = do
+  old_state_adjs <- gets stateAdjs
+  modify $ \s -> s {stateAdjs = mempty}
+  x <- m
+  modify $ \s -> s {stateAdjs = old_state_adjs}
+  pure x
+
+diffBody :: [VName] -> [VName] -> Body -> ADM Body
+diffBody res_adjs get_adjs_for (Body () stms res) = subAD $ do
+  let onResult (Constant _) _ = pure ()
+      onResult (Var v) v_adj = insAdj v v_adj
+  zipWithM_ onResult (takeLast (length res_adjs) res) res_adjs
   (adjs, stms') <- collectStms $ do
     diffStms stms
     mapM lookupAdj get_adjs_for
-  pure $ Body desc stms' $ res <> map Var adjs
+  pure $ Body () stms' $ res <> map Var adjs
 
 revVJP :: MonadFreshNames m => Scope SOACS -> Lambda -> m Lambda
-revVJP scope (Lambda params body@(Body () _ res) ts) =
+revVJP scope (Lambda params body ts) =
   runADM . localScope (scope <> scopeOfLParams params) $ do
-    let rvars = subExpVars res
-    params_adj <- forM (zip rvars ts) $ \(v, t) -> do
-      v_adj <- adjVName v
-      insAdj v v_adj
-      pure $ Param v_adj t
+    params_adj <- forM (zip (bodyResult body) ts) $ \(se, t) ->
+      Param <$> maybe (newVName "const_adj") adjVName (subExpVar se) <*> pure t
 
-    Body () stms' res' <-
+    Body () stms res <-
       localScope (scopeOfLParams params_adj) $
-        diffBody (map paramName params) body
+        diffBody (map paramName params_adj) (map paramName params) body
+    let body' = Body () stms $ takeLast (length params) res
 
-    let adj_res = drop (length ts) res'
-    pure $
-      Lambda
-        (params ++ params_adj)
-        (Body () stms' adj_res)
-        (map paramType params)
+    pure $ Lambda (params ++ params_adj) body' (map paramType params)
