@@ -149,6 +149,31 @@ fwdStm stm@(Let (Pattern [] pes) aux assert@(BasicOp Assert {})) m =
 fwdStm stm@(Let (Pattern [] pes) aux cOp@(BasicOp CmpOp {})) m =
   withTan pes $ \pes' ->
     m $ oneStm stm <> oneStm (Let (Pattern [] pes') aux cOp)
+fwdStm stm@(Let (Pattern [] pes) aux (BasicOp (Index arr slice))) m = do
+  arr_tan <- tangent arr
+  withTans pes $ \pes' ->
+    m $ oneStm stm <> oneStm (Let (Pattern [] pes') aux (BasicOp (Index arr_tan slice)))
+fwdStm stm@(Let (Pattern [] pes) aux (BasicOp (Reshape reshape arr))) m = do
+  arr_tan <- tangent arr
+  withTans pes $ \pes' ->
+    m $ oneStm stm <> oneStm (Let (Pattern [] pes') aux (BasicOp (Reshape reshape arr_tan)))
+fwdStm stm@(Let (Pattern [] pes) aux (BasicOp (Rearrange perm arr))) m = do
+  arr_tan <- tangent arr
+  withTans pes $ \pes' ->
+    m $ oneStm stm <> oneStm (Let (Pattern [] pes') aux (BasicOp (Rearrange perm arr_tan)))
+fwdStm stm@(Let (Pattern [] pes) aux (BasicOp (Rotate rots arr))) m = do
+  arr_tan <- tangent arr
+  withTans pes $ \pes' ->
+    m $ oneStm stm <> oneStm (Let (Pattern [] pes') aux (BasicOp (Rotate rots arr_tan)))
+fwdStm stm@(Let (Pattern [] pes) aux (BasicOp (Concat d arr arrs w))) m = do
+  arr_tan <- tangent arr
+  arrs_tans <- mapM tangent arrs
+  withTans pes $ \pes' ->
+    m $ oneStm stm <> oneStm (Let (Pattern [] pes') aux (BasicOp (Concat d arr_tan arrs_tans w)))
+fwdStm stm@(Let (Pattern [] pes) aux (BasicOp (Replicate n x))) m = do
+  x_tan <- tangent x
+  withTans pes $ \pes' ->
+    m $ oneStm stm <> oneStm (Let (Pattern [] pes') aux (BasicOp (Replicate n x_tan)))
 fwdStm stm@(Let (Pattern [] pes) _ (Apply f args _ _)) m
   | Just (_, argts) <- M.lookup f builtInFunctions = do
     arg_tans <-
@@ -201,7 +226,7 @@ fwdStm (Let (Pattern [] pes) aux (DoLoop [] valPats (ForLoop v it bound []) body
 --  where
 --    loopParams = map fst loop_vars
 fwdStm stm _ =
-  error $ "unhandled AD for Stm: " ++ pretty stm ++ "\n" ++ show stm
+  error $ "unhandled forward mode AD for Stm: " ++ pretty stm ++ "\n" ++ show stm
 
 fwdBodyInterleave :: Stms SOACS -> ADM Body -> ADM Body
 fwdBodyInterleave stms m =

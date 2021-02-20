@@ -65,13 +65,20 @@ runADM (ADM m) =
 adjVName :: VName -> ADM VName
 adjVName v = newVName (baseString v <> "_adj")
 
+zeroExp :: Type -> Exp
+zeroExp (Prim pt) =
+  BasicOp $ SubExp $ Constant $ blankPrimValue pt
+zeroExp (Array (ElemPrim pt) shape _) =
+  BasicOp $ Replicate shape $ Constant $ blankPrimValue pt
+zeroExp t = error $ "zeroExp: " ++ pretty t
+
 newAdj :: VName -> ADM VName
 newAdj v = do
   v_adj <- adjVName v
   t <- lookupType v
   let update = M.singleton v v_adj
   modify $ \env -> env {stateAdjs = update `M.union` stateAdjs env}
-  letBindNames [v_adj] =<< eBlank t
+  letBindNames [v_adj] $ zeroExp t
   pure v_adj
 
 insAdj :: VName -> VName -> ADM ()
@@ -85,12 +92,33 @@ insAdjMap update = modify $ \env ->
 class Adjoint a where
   lookupAdj :: a -> ADM VName
   updateAdjoint :: a -> VName -> ADM VName
+  updateAdjointSlice :: Slice SubExp -> a -> VName -> ADM VName
 
 addBinOp :: PrimType -> BinOp
 addBinOp (IntType it) = Add it OverflowWrap
 addBinOp (FloatType ft) = FAdd ft
 addBinOp Bool = LogAnd
 addBinOp Cert = LogAnd
+
+-- Construct a lambda for adding two values of the given type.
+addLambda :: Type -> ADM Lambda
+addLambda (Prim pt) = binOpLambda (addBinOp pt) pt
+addLambda (Array (ElemPrim t) (Shape (s : ss)) u) = do
+  xs <- newVName "xs"
+  ys <- newVName "ys"
+  let t' = Array (ElemPrim t) (Shape ss) u
+  lam <- addLambda t'
+  body <- insertStmsM $ do
+    res <- letSubExp "lam_map" $ Op $ Screma s (mapSOAC lam) [xs, ys]
+    return $ resultBody [res]
+  pure
+    Lambda
+      { lambdaParams = [Param xs t', Param ys t'],
+        lambdaReturnType = [t'],
+        lambdaBody = body
+      }
+addLambda t =
+  error $ "addLambda: " ++ pretty t
 
 instance Adjoint VName where
   lookupAdj v = do
@@ -115,13 +143,44 @@ instance Adjoint VName where
         insAdjMap update
         pure v_adj'
 
+  updateAdjointSlice slice v d = do
+    maybeAdj <- gets $ M.lookup v . stateAdjs
+    t <- lookupType v
+    case maybeAdj of
+      Nothing -> do
+        void $ lookupAdj v -- Initialise adjoint.
+        updateAdjointSlice slice v d
+      Just v_adj -> do
+        v_adjslice <-
+          if primType t
+            then return v_adj
+            else letExp (baseString v ++ "_slice") $ BasicOp $ Index v_adj slice
+        t' <- lookupType v_adjslice
+        v_adjslice' <- addArrays t' v_adjslice d
+        v_adj' <- letInPlace "updated_adj" v_adj slice v_adjslice'
+        insAdjMap $ M.singleton v v_adj'
+        pure v_adj'
+    where
+      addArrays t xs ys =
+        case t of
+          Prim pt -> return $ BasicOp $ BinOp (addBinOp pt) (Var xs) (Var ys)
+          Array {} -> do
+            lam <- addLambda $ stripArray 1 t
+            return $ Op $ Screma (arraySize 0 t) (mapSOAC lam) [xs, ys]
+          _ ->
+            error $ "addArrays: " ++ pretty t
+
 instance Adjoint SubExp where
   lookupAdj (Constant c) =
-    letExp "const_adj" =<< eBlank (Prim $ primValueType c)
+    letExp "const_adj" $
+      BasicOp $ SubExp $ Constant $ blankPrimValue $ primValueType c
   lookupAdj (Var v) = lookupAdj v
 
   updateAdjoint se@Constant {} _ = lookupAdj se
   updateAdjoint (Var v) d = updateAdjoint v d
+
+  updateAdjointSlice _ se@Constant {} _ = lookupAdj se
+  updateAdjointSlice slice (Var v) d = updateAdjointSlice slice v d
 
 setAdjoint :: VName -> Exp -> ADM VName
 setAdjoint v e = do
@@ -135,84 +194,171 @@ patternName :: Pattern -> ADM VName
 patternName (Pattern [] [pe]) = pure $ patElemName pe
 patternName pat = error $ "Expected single-element pattern: " ++ pretty pat
 
-diffStm :: Stm -> ADM () -> ADM ()
-diffStm stm@(Let pat _ (BasicOp (CmpOp cmp x y))) m = do
-  addStm stm
+-- The vast majority of BasicOps require no special treatment in the
+-- forward pass and produce one value (and hence once adjoint).  We
+-- deal with that case here.
+commonBasicOp :: Pattern -> StmAux () -> BasicOp -> ADM () -> ADM (VName, VName)
+commonBasicOp pat aux op m = do
+  addStm $ Let pat aux $ BasicOp op
   m
-  let t = cmpOpType cmp
-      update contrib = do
-        void $ updateAdjoint x contrib
-        void $ updateAdjoint y contrib
-
   pat_v <- patternName pat
+  pat_adj <- lookupAdj pat_v
+  pure (pat_v, pat_adj)
 
-  case t of
-    FloatType ft ->
-      update <=< letExp "contrib" $
-        If
-          (Var pat_v)
-          (resultBody [constant (floatValue ft (1 :: Int))])
-          (resultBody [constant (floatValue ft (0 :: Int))])
-          (IfDec [Prim (FloatType ft)] IfNormal)
-    IntType it ->
-      update <=< letExp "contrib" $ BasicOp $ ConvOp (BToI it) (Var pat_v)
-    Bool ->
-      update pat_v
-    Cert ->
-      pure ()
-diffStm stm@(Let pat _ (BasicOp (ConvOp op x))) m = do
-  addStm stm
-  m
+diffBasicOp :: Pattern -> StmAux () -> BasicOp -> ADM () -> ADM ()
+diffBasicOp pat aux e m =
+  case e of
+    CmpOp cmp x y -> do
+      (_pat_v, pat_adj) <- commonBasicOp pat aux e m
+      let t = cmpOpType cmp
+          update contrib = do
+            void $ updateAdjoint x contrib
+            void $ updateAdjoint y contrib
 
-  pat_v <- patternName pat
-  case op of
-    FPConv from_t to_t -> do
-      pat_adj <- lookupAdj pat_v
-      contrib <-
-        letExp "contrib" $
-          BasicOp $ ConvOp (FPConv to_t from_t) $ Var pat_adj
+      case t of
+        FloatType ft ->
+          update <=< letExp "contrib" $
+            If
+              (Var pat_adj)
+              (resultBody [constant (floatValue ft (1 :: Int))])
+              (resultBody [constant (floatValue ft (0 :: Int))])
+              (IfDec [Prim (FloatType ft)] IfNormal)
+        IntType it ->
+          update <=< letExp "contrib" $ BasicOp $ ConvOp (BToI it) (Var pat_adj)
+        Bool ->
+          update pat_adj
+        Cert ->
+          pure ()
+    --
+    ConvOp op x -> do
+      (_pat_v, pat_adj) <- commonBasicOp pat aux e m
+
+      case op of
+        FPConv from_t to_t -> do
+          contrib <-
+            letExp "contrib" $
+              BasicOp $ ConvOp (FPConv to_t from_t) $ Var pat_adj
+          void $ updateAdjoint x contrib
+        _ ->
+          pure ()
+    --
+    UnOp op x -> do
+      (_pat_v, pat_adj) <- commonBasicOp pat aux e m
+
+      let t = unOpType op
+      contrib <- do
+        let x_pe = primExpFromSubExp t x
+            pat_adj' = primExpFromSubExp t (Var pat_adj)
+            dx = pdUnOp op x_pe
+        letExp "contrib" <=< toExp $ pat_adj' ~*~ dx
+
       void $ updateAdjoint x contrib
-    _ ->
-      pure ()
-diffStm stm@(Let pat _aux (BasicOp (UnOp op x))) m = do
-  addStm stm
-  m
+    --
+    BinOp op x y -> do
+      (_pat_v, pat_adj) <- commonBasicOp pat aux e m
 
-  let t = unOpType op
-  pat_adj <- lookupAdj =<< patternName pat
-  contrib <- do
-    let x_pe = primExpFromSubExp t x
-        pat_adj' = primExpFromSubExp t (Var pat_adj)
-        dx = pdUnOp op x_pe
-    letExp "contrib" <=< toExp $ pat_adj' ~*~ dx
+      let t = binOpType op
+          (wrt_x, wrt_y) =
+            pdBinOp op (primExpFromSubExp t x) (primExpFromSubExp t y)
 
-  void $ updateAdjoint x contrib
-diffStm stm@(Let pat _aux (BasicOp (BinOp op x y))) m = do
-  addStm stm
-  m
+          pat_adj' = primExpFromSubExp t $ Var pat_adj
 
-  let t = binOpType op
-  pat_adj <- lookupAdj =<< patternName pat
+      adj_x <- letExp "adj" <=< toExp $ pat_adj' ~*~ wrt_x
+      adj_y <- letExp "adj" <=< toExp $ pat_adj' ~*~ wrt_y
+      void $ updateAdjoint x adj_x
+      void $ updateAdjoint y adj_y
+    --
+    SubExp se -> do
+      (_pat_v, pat_adj) <- commonBasicOp pat aux e m
+      void $ updateAdjoint se pat_adj
+    --
+    Assert {} ->
+      void $ commonBasicOp pat aux e m
+    --
+    ArrayLit elems t -> do
+      (_pat_v, pat_adj) <- commonBasicOp pat aux e m
+      forM_ (zip [(0 :: Int64) ..] elems) $ \(i, se) -> do
+        let slice = fullSlice t [DimFix (constant i)]
+        updateAdjoint se <=< letExp "elem_adj" $ BasicOp $ Index pat_adj slice
+    --
+    Index arr slice -> do
+      (_pat_v, pat_adj) <- commonBasicOp pat aux e m
+      void $ updateAdjointSlice slice arr pat_adj
+    --
+    Opaque se -> do
+      (_pat_v, pat_adj) <- commonBasicOp pat aux e m
+      void $ updateAdjoint se pat_adj
+    --
+    Reshape _ arr -> do
+      (_pat_v, pat_adj) <- commonBasicOp pat aux e m
+      arr_dims <- arrayDims <$> lookupType arr
+      void $
+        updateAdjoint arr <=< letExp "adj_reshape" $
+          BasicOp $ Reshape (map DimNew arr_dims) pat_adj
+    --
+    Rearrange perm arr -> do
+      (_pat_v, pat_adj) <- commonBasicOp pat aux e m
+      void $
+        updateAdjoint arr <=< letExp "adj_rearrange" $
+          BasicOp $ Rearrange (rearrangeInverse perm) pat_adj
+    --
+    Rotate rots arr -> do
+      (_pat_v, pat_adj) <- commonBasicOp pat aux e m
+      let neg = BasicOp . BinOp (Sub Int64 OverflowWrap) (intConst Int64 0)
+      rots' <- mapM (letSubExp "rot_neg" . neg) rots
+      void $
+        updateAdjoint arr <=< letExp "adj_rotate" $
+          BasicOp $ Rotate rots' pat_adj
+    --
+    Replicate (Shape [n]) x -> do
+      (_pat_v, pat_adj) <- commonBasicOp pat aux e m
+      x_t <- subExpType x
+      lam <- addLambda x_t
+      ne <- letSubExp "zero" $ zeroExp x_t
+      reduce <- reduceSOAC [Reduce Commutative lam [ne]]
+      void $
+        updateAdjoint x
+          =<< letExp "contrib" (Op $ Screma n reduce [pat_adj])
+    --
+    Concat d arr arrs _ -> do
+      (_pat_v, pat_adj) <- commonBasicOp pat aux e m
+      let sliceAdj _ [] = pure []
+          sliceAdj start (v : vs) = do
+            v_t <- lookupType v
+            let w = arraySize 0 v_t
+                slice = DimSlice start w (intConst Int64 1)
+            pat_adj_slice <-
+              letExp (baseString pat_adj <> "_slice") $
+                BasicOp $ Index pat_adj (sliceAt v_t d [slice])
+            start' <- letSubExp "start" $ BasicOp $ BinOp (Add Int64 OverflowUndef) start w
+            slices <- sliceAdj start' vs
+            pure $ pat_adj_slice : slices
 
-  let (wrt_x, wrt_y) =
-        pdBinOp op (primExpFromSubExp t x) (primExpFromSubExp t y)
+      slices <- sliceAdj (intConst Int64 0) $ arr : arrs
 
-      pat_adj' = primExpFromSubExp t $ Var pat_adj
+      zipWithM_ updateAdjoint (arr : arrs) slices
+    --
+    Copy se -> do
+      (_pat_v, pat_adj) <- commonBasicOp pat aux e m
+      void $ updateAdjoint se pat_adj
+    --
+    Manifest _ se -> do
+      (_pat_v, pat_adj) <- commonBasicOp pat aux e m
+      void $ updateAdjoint se pat_adj
+    --
+    Scratch {} ->
+      void $ commonBasicOp pat aux e m
+    --
+    Iota {} ->
+      void $ commonBasicOp pat aux e m
+    --
+    Update {} -> error "Reverse-mode Update not handled yet."
+    UnAcc {} -> error "Reverse-mode UnAcc not handled yet."
+    UpdateAcc {} -> error "Reverse-mode UpdateAcc not handled yet."
 
-  adj_x <- letExp "adj" <=< toExp $ pat_adj' ~*~ wrt_x
-  adj_y <- letExp "adj" <=< toExp $ pat_adj' ~*~ wrt_y
-  void $ updateAdjoint x adj_x
-  void $ updateAdjoint y adj_y
-diffStm stm@(Let pat _ (BasicOp (SubExp (Var v)))) m = do
-  addStm stm
-  m
-  void $ updateAdjoint v =<< patternName pat
-diffStm stm@(Let _ _ (BasicOp (SubExp (Constant _)))) m = do
-  addStm stm
-  m
-diffStm stm@(Let Pattern {} _ (BasicOp Assert {})) m = do
-  addStm stm
-  m
+diffStm :: Stm -> ADM () -> ADM ()
+diffStm (Let pat aux (BasicOp e)) m =
+  diffBasicOp pat aux e m
 diffStm stm@(Let pat _ (Apply f args _ _)) m
   | Just (ret, argts) <- M.lookup f builtInFunctions = do
     addStm stm
