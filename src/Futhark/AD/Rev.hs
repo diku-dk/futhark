@@ -134,9 +134,28 @@ setAdjoint v e = do
   return v_adj
 
 diffStm :: Stm -> ADM () -> ADM ()
-diffStm stm@(Let _ _ (BasicOp CmpOp {})) m = do
+diffStm stm@(Let (Pattern [] [pe]) _ (BasicOp (CmpOp cmp x y))) m = do
   addStm stm
   m
+  let t = cmpOpType cmp
+      update contrib = do
+        void $ updateAdjoint x contrib
+        void $ updateAdjoint y contrib
+
+  case t of
+    FloatType ft ->
+      update <=< letExp "contrib" $
+        If
+          (Var (patElemName pe))
+          (resultBody [constant (floatValue ft (1 :: Int))])
+          (resultBody [constant (floatValue ft (0 :: Int))])
+          (IfDec [Prim (FloatType ft)] IfNormal)
+    IntType it ->
+      update <=< letExp "contrib" $ BasicOp $ ConvOp (BToI it) (Var (patElemName pe))
+    Bool ->
+      update $ patElemName pe
+    Cert ->
+      pure ()
 diffStm stm@(Let (Pattern [] [pe]) _ (BasicOp (ConvOp op x))) m = do
   addStm stm
   m

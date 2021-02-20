@@ -13,6 +13,8 @@ entry fwd x y =
 -- entry: rev
 -- compiled input { 1.0 2.0 }
 -- output { 0.0 0.0 }
+-- compiled input { 1.0 1.0 }
+-- output { 1.0 1.0 }
 
 entry rev x y =
   vjp (\(a, b) -> f64.(a == b)) (x,y) true
