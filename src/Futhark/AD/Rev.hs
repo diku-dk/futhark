@@ -310,15 +310,18 @@ diffBasicOp pat aux e m =
         updateAdjoint arr <=< letExp "adj_rotate" $
           BasicOp $ Rotate rots' pat_adj
     --
-    Replicate (Shape [n]) x -> do
+    Replicate (Shape ns) x -> do
       (_pat_v, pat_adj) <- commonBasicOp pat aux e m
       x_t <- subExpType x
       lam <- addLambda x_t
       ne <- letSubExp "zero" $ zeroExp x_t
+      n <- letSubExp "rep_size" =<< foldBinOp (Mul Int64 OverflowUndef) (intConst Int64 1) ns
+      pat_adj_flat <-
+        letExp (baseString pat_adj <> "_flat") $ BasicOp $ Reshape [DimNew n] pat_adj
       reduce <- reduceSOAC [Reduce Commutative lam [ne]]
       void $
         updateAdjoint x
-          =<< letExp "contrib" (Op $ Screma n reduce [pat_adj])
+          =<< letExp "rep_contrib" (Op $ Screma n reduce [pat_adj_flat])
     --
     Concat d arr arrs _ -> do
       (_pat_v, pat_adj) <- commonBasicOp pat aux e m
