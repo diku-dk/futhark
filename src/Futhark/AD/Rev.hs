@@ -135,8 +135,12 @@ setAdjoint v e = do
   insAdjMap update
   return v_adj
 
+patternName :: Pattern -> ADM VName
+patternName (Pattern [] [pe]) = pure $ patElemName pe
+patternName pat = error $ "Expected single-element pattern: " ++ pretty pat
+
 diffStm :: Stm -> ADM () -> ADM ()
-diffStm stm@(Let (Pattern [] [pe]) _ (BasicOp (CmpOp cmp x y))) m = do
+diffStm stm@(Let pat _ (BasicOp (CmpOp cmp x y))) m = do
   addStm stm
   m
   let t = cmpOpType cmp
@@ -144,87 +148,90 @@ diffStm stm@(Let (Pattern [] [pe]) _ (BasicOp (CmpOp cmp x y))) m = do
         void $ updateAdjoint x contrib
         void $ updateAdjoint y contrib
 
+  pat_v <- patternName pat
+
   case t of
     FloatType ft ->
       update <=< letExp "contrib" $
         If
-          (Var (patElemName pe))
+          (Var pat_v)
           (resultBody [constant (floatValue ft (1 :: Int))])
           (resultBody [constant (floatValue ft (0 :: Int))])
           (IfDec [Prim (FloatType ft)] IfNormal)
     IntType it ->
-      update <=< letExp "contrib" $ BasicOp $ ConvOp (BToI it) (Var (patElemName pe))
+      update <=< letExp "contrib" $ BasicOp $ ConvOp (BToI it) (Var pat_v)
     Bool ->
-      update $ patElemName pe
+      update pat_v
     Cert ->
       pure ()
-diffStm stm@(Let (Pattern [] [pe]) _ (BasicOp (ConvOp op x))) m = do
+diffStm stm@(Let pat _ (BasicOp (ConvOp op x))) m = do
   addStm stm
   m
 
+  pat_v <- patternName pat
   case op of
     FPConv from_t to_t -> do
-      pe_adj <- lookupAdj pe
+      pat_adj <- lookupAdj pat_v
       contrib <-
         letExp "contrib" $
-          BasicOp $ ConvOp (FPConv to_t from_t) $ Var pe_adj
+          BasicOp $ ConvOp (FPConv to_t from_t) $ Var pat_adj
       void $ updateAdjoint x contrib
     _ ->
       pure ()
-diffStm stm@(Let (Pattern [] [pe]) _aux (BasicOp (UnOp op x))) m = do
+diffStm stm@(Let pat _aux (BasicOp (UnOp op x))) m = do
   addStm stm
   m
 
   let t = unOpType op
-  pe_adj <- lookupAdj $ patElemName pe
+  pat_adj <- lookupAdj =<< patternName pat
   contrib <- do
     let x_pe = primExpFromSubExp t x
-        pe_adj' = primExpFromSubExp t (Var pe_adj)
+        pat_adj' = primExpFromSubExp t (Var pat_adj)
         dx = pdUnOp op x_pe
-    letExp "contrib" <=< toExp $ pe_adj' ~*~ dx
+    letExp "contrib" <=< toExp $ pat_adj' ~*~ dx
 
   void $ updateAdjoint x contrib
-diffStm stm@(Let (Pattern [] [pe]) _aux (BasicOp (BinOp op x y))) m = do
+diffStm stm@(Let pat _aux (BasicOp (BinOp op x y))) m = do
   addStm stm
   m
 
   let t = binOpType op
-  pe_adj <- lookupAdj $ patElemName pe
+  pat_adj <- lookupAdj =<< patternName pat
 
   let (wrt_x, wrt_y) =
         pdBinOp op (primExpFromSubExp t x) (primExpFromSubExp t y)
 
-      pe_adj' = primExpFromSubExp t $ Var pe_adj
+      pat_adj' = primExpFromSubExp t $ Var pat_adj
 
-  adj_x <- letExp "adj" <=< toExp $ pe_adj' ~*~ wrt_x
-  adj_y <- letExp "adj" <=< toExp $ pe_adj' ~*~ wrt_y
+  adj_x <- letExp "adj" <=< toExp $ pat_adj' ~*~ wrt_x
+  adj_y <- letExp "adj" <=< toExp $ pat_adj' ~*~ wrt_y
   void $ updateAdjoint x adj_x
   void $ updateAdjoint y adj_y
-diffStm stm@(Let (Pattern [] [pe]) _ (BasicOp (SubExp (Var v)))) m = do
+diffStm stm@(Let pat _ (BasicOp (SubExp (Var v)))) m = do
   addStm stm
   m
-  void $ updateAdjoint v =<< lookupAdj pe
+  void $ updateAdjoint v =<< patternName pat
 diffStm stm@(Let _ _ (BasicOp (SubExp (Constant _)))) m = do
   addStm stm
   m
 diffStm stm@(Let Pattern {} _ (BasicOp Assert {})) m = do
   addStm stm
   m
-diffStm stm@(Let (Pattern [] [pe]) _ (Apply f args _ _)) m
+diffStm stm@(Let pat _ (Apply f args _ _)) m
   | Just (ret, argts) <- M.lookup f builtInFunctions = do
     addStm stm
     m
 
-    pe_adj <- lookupAdj pe
+    pat_adj <- lookupAdj =<< patternName pat
     let arg_pes = zipWith primExpFromSubExp argts (map fst args)
-        pe_adj' = primExpFromSubExp ret (Var pe_adj)
+        pat_adj' = primExpFromSubExp ret (Var pat_adj)
 
     contribs <-
       case pdBuiltin f arg_pes of
         Nothing ->
           error $ "No partial derivative defined for builtin function: " ++ pretty f
         Just derivs ->
-          mapM (letExp "contrib" <=< toExp . (pe_adj' ~*~)) derivs
+          mapM (letExp "contrib" <=< toExp . (pat_adj' ~*~)) derivs
 
     let updateArgAdj (Var x, _) x_contrib = void $ updateAdjoint x x_contrib
         updateArgAdj _ _ = pure ()
