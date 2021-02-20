@@ -123,10 +123,6 @@ instance Adjoint SubExp where
   updateAdjoint se@Constant {} _ = lookupAdj se
   updateAdjoint (Var v) d = updateAdjoint v d
 
-instance Adjoint (PatElemT Type) where
-  lookupAdj = lookupAdj . patElemName
-  updateAdjoint = updateAdjoint . patElemName
-
 setAdjoint :: VName -> Exp -> ADM VName
 setAdjoint v e = do
   v_adj <- adjVName v
@@ -233,9 +229,7 @@ diffStm stm@(Let pat _ (Apply f args _ _)) m
         Just derivs ->
           mapM (letExp "contrib" <=< toExp . (pat_adj' ~*~)) derivs
 
-    let updateArgAdj (Var x, _) x_contrib = void $ updateAdjoint x x_contrib
-        updateArgAdj _ _ = pure ()
-    zipWithM_ updateArgAdj args contribs
+    zipWithM_ updateAdjoint (map fst args) contribs
 diffStm stm@(Let pat _ (If cond tbody fbody _)) m = do
   addStm stm
   m
