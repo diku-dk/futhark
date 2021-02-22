@@ -1033,6 +1033,9 @@ be used in the return type of a function::
 
 An application ``replicate 10 0`` will have type ``[10]i32``.
 
+Whenever we write a type ``[n]t``, ``n`` must already be a variable of
+type ``i64`` in scope (possibly by being bound as a size parameter).
+
 .. _unknown-sizes:
 
 Unknown sizes
@@ -1097,7 +1100,7 @@ expressions <slices>`.
 Complex ranges
 ..............
 
-Most complex ranges, such as ``a..<b``, will have an known size.
+Most complex ranges, such as ``a..<b``, will have an unknown size.
 Exceptions exist for :ref:`general ranges <range>` and :ref:`"upto"
 ranges <range_upto>`.
 
