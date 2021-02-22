@@ -4,270 +4,444 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE UndecidableInstances #-}
 
 module Futhark.AD.Fwd (fwdJVP) where
 
 import Control.Monad
-import Control.Monad.Reader
+import Control.Monad.RWS.Strict
 import Control.Monad.State.Strict
+import Data.Bifunctor (second)
+import qualified Data.Kind
+import Data.List (transpose)
 import qualified Data.Map as M
-import Data.Sequence (Seq (..))
 import Futhark.AD.Derivatives
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.Binder
 import Futhark.Construct
 import Futhark.IR.SOACS
 
-data REnv = REnv
-  { tans :: M.Map VName VName,
-    envScope :: Scope SOACS
+zeroTan :: Type -> ADM SubExp
+zeroTan (Prim t) = return $ constant $ blankPrimValue t
+zeroTan t = error $ "zeroTan on non-primitive type: " ++ pretty t
+
+zeroExp :: Type -> Exp
+zeroExp (Prim pt) =
+  BasicOp $ SubExp $ Constant $ blankPrimValue pt
+zeroExp (Array (ElemPrim pt) shape _) =
+  BasicOp $ Replicate shape $ Constant $ blankPrimValue pt
+zeroExp t = error $ "zeroExp: " ++ show t
+
+isAcc :: TypeBase s u -> Bool
+isAcc (Array ElemAcc {} _ _) = True
+isAcc Acc {} = True
+isAcc _ = False
+
+tanType :: TypeBase s u -> ADM (TypeBase s u)
+tanType (Array (ElemAcc vs) shape u) = do
+  vs_tan <- tangent vs
+  return $ Array (ElemAcc $ vs <> vs_tan) shape u
+tanType (Acc vs) = do
+  vs_tan <- tangent vs
+  return $ Acc $ vs <> vs_tan
+tanType t = return t
+
+slocal' :: ADM a -> ADM a
+slocal' = slocal id
+
+slocal :: (RState -> RState) -> ADM a -> ADM a
+slocal f m = do
+  s <- get
+  modify f
+  a <- m
+  modify $ \s' -> s' {stateTans = stateTans s}
+  return a
+
+data RState = RState
+  { stateTans :: M.Map VName VName,
+    stateNameSource :: VNameSource
   }
 
-newtype ADM a = ADM (ReaderT REnv (State VNameSource) a)
+newtype ADM a = ADM (BinderT SOACS (State RState) a)
   deriving
     ( Functor,
       Applicative,
       Monad,
-      MonadReader REnv,
-      MonadFreshNames
+      MonadState RState,
+      MonadFreshNames,
+      HasScope SOACS,
+      LocalScope SOACS
     )
 
-instance HasScope SOACS ADM where
-  askScope = asks envScope
+instance MonadBinder ADM where
+  type Lore ADM = SOACS
+  mkExpDecM pat e = ADM $ mkExpDecM pat e
+  mkBodyM bnds res = ADM $ mkBodyM bnds res
+  mkLetNamesM pat e = ADM $ mkLetNamesM pat e
 
-instance LocalScope SOACS ADM where
-  localScope scope = local $ \env -> env {envScope = scope <> envScope env}
+  addStms = ADM . addStms
+  collectStms (ADM m) = ADM $ collectStms m
 
-runADM :: MonadFreshNames m => ADM a -> REnv -> m a
-runADM (ADM m) renv =
-  modifyNameSource $ runState $ runReaderT m renv
+instance MonadFreshNames (State RState) where
+  getNameSource = gets stateNameSource
+  putNameSource src = modify (\env -> env {stateNameSource = src})
+
+runADM :: MonadFreshNames m => ADM a -> m a
+runADM (ADM m) =
+  modifyNameSource $ \vn ->
+    second stateNameSource $
+      runState
+        (fst <$> runBinderT m mempty)
+        (RState mempty vn)
 
 tanVName :: VName -> ADM VName
 tanVName v = newVName (baseString v <> "_tan")
 
-zeroTan :: Type -> ADM SubExp
-zeroTan (Prim t) = return $ constant $ blankPrimValue t
+insertTan :: VName -> VName -> ADM ()
+insertTan v v' =
+  modify $ \env -> env {stateTans = M.insert v v' (stateTans env)}
 
 class TanBinder a where
-  mkTan :: a -> ADM a
-  getVNames :: a -> [VName]
-  withTans :: [a] -> ([a] -> ADM b) -> ADM b
-  withTans as m = do
-    as' <- mapM mkTan as
-    let f env =
-          env
-            { tans =
-                M.fromList (zip (concatMap getVNames as) (concatMap getVNames as'))
-                  `M.union` tans env
-            }
-    local f $ m as'
-  withTan :: a -> (a -> ADM b) -> ADM b
-  withTan a m = withTans [a] $ \[a'] -> m a'
+  type Bundled a :: Data.Kind.Type
+  type Bundled a = [a]
+  newTan :: a -> ADM a
+  bundleNew :: a -> ADM (Bundled a)
 
-instance TanBinder (PatElemT dec) where
-  mkTan (PatElem p t) = do
+instance (Monoid (Bundled a), TanBinder a) => TanBinder [a] where
+  type Bundled [a] = Bundled a
+  newTan = mapM newTan
+  bundleNew = (mconcat <$>) . mapM bundleNew
+
+instance TanBinder VName where
+  newTan v = do
+    v' <- tanVName v
+    insertTan v v'
+    return v'
+  bundleNew v = do
+    void $ newTan v
+    bundleTan v
+
+instance TanBinder (PatElemT (TypeBase s u)) where
+  newTan (PatElem p t)
+    | isAcc t = do
+      insertTan p p
+      t' <- tanType t
+      return $ PatElem p t'
+    | otherwise = do
+      p' <- tanVName p
+      insertTan p p'
+      t' <- tanType t
+      return $ PatElem p' t'
+  bundleNew pe@(PatElem _ t) = do
+    pe' <- newTan pe
+    if isAcc t
+      then return [pe']
+      else return [pe, pe']
+
+instance TanBinder (PatternT (TypeBase s u)) where
+  type Bundled (PatternT (TypeBase s u)) = (PatternT (TypeBase s u))
+  newTan (Pattern ctx pes) = Pattern ctx <$> newTan pes
+  bundleNew (Pattern ctx pes) = Pattern ctx <$> bundleNew pes
+
+instance TanBinder (Param (TypeBase s u)) where
+  newTan (Param p t) = do
     p' <- tanVName p
-    return $ PatElem p' t
-  getVNames = pure . patElemName
+    insertTan p p'
+    t' <- tanType t
+    return $ Param p' t'
+  bundleNew param@(Param _ t) = do
+    param' <- newTan param
+    if isAcc t
+      then return [param']
+      else return [param, param']
 
-instance TanBinder (Param attr) where
-  mkTan (Param p t) = do
-    p' <- tanVName p
-    return $ Param p' t
-  getVNames = pure . paramName
-
-instance (TanBinder a) => TanBinder [a] where
-  mkTan = mapM mkTan
-  getVNames = concatMap getVNames
+instance Tangent a => TanBinder (Param (TypeBase s u), a) where
+  newTan (p, x) = (,) <$> newTan p <*> tangent x
+  bundleNew (p, x) = do
+    b <- bundleNew p
+    x_tan <- tangent x
+    return $ reverse $ zip (reverse b) [x_tan, x]
 
 class Tangent a where
-  type TangentType a
-  tangent :: a -> ADM (TangentType a)
+  type BundledTan a :: Data.Kind.Type
+  type BundledTan a = [a]
+  tangent :: a -> ADM a
+  bundleTan :: a -> ADM (BundledTan a)
+
+instance Tangent (TypeBase s u) where
+  tangent = tanType
+  bundleTan t
+    | isAcc t = do
+      t' <- tangent t
+      return [t']
+    | otherwise = do
+      t' <- tangent t
+      return [t, t']
+
+instance (Monoid (BundledTan a), Tangent a) => Tangent [a] where
+  type BundledTan [a] = BundledTan a
+  tangent = mapM tangent
+  bundleTan = (mconcat <$>) . mapM bundleTan
 
 instance Tangent VName where
-  type TangentType VName = VName
   tangent v = do
-    maybeTan <- asks $ M.lookup v . tans
+    maybeTan <- gets $ M.lookup v . stateTans
     case maybeTan of
-      Just v' -> return v'
-      Nothing -> error $ "No tangent: " ++ show v
+      Just v_tan -> return v_tan
+      Nothing -> do
+        t <- lookupType v
+        v_tan <- newTan v
+        letBindNames [v_tan] $ zeroExp t
+        return v_tan
+  bundleTan v = do
+    t <- lookupType v
+    if isAcc t
+      then return [v]
+      else do
+        v_tan <- tangent v
+        return [v, v_tan]
 
 instance Tangent SubExp where
-  type TangentType SubExp = SubExp
   tangent (Constant c) = zeroTan $ Prim $ primValueType c
-  tangent (Var v) = do
-    maybeTan <- asks $ M.lookup v . tans
-    case maybeTan of
-      Just v' -> return $ Var v'
-      Nothing -> do t <- lookupType v; zeroTan t
+  tangent (Var v) = Var <$> tangent v
+  bundleTan c@Constant {} = do
+    c_tan <- tangent c
+    return [c, c_tan]
+  bundleTan (Var v) = fmap Var <$> bundleTan v
 
-instance Tangent Stm where
-  type TangentType Stm = Stms SOACS
-  tangent = flip fwdStm return
+patNames :: Pattern -> ADM [VName]
+patNames (Pattern [] pes) = pure $ map patElemName pes
+patNames _ = error "patNames: non-empty context."
 
---
-fwdStm :: Stm -> (Stms SOACS -> ADM a) -> ADM a
-fwdStm stm@(Let (Pattern [] pes) aux (BasicOp (SubExp se))) m = do
-  se' <- tangent se
-  withTans pes $ \pes' ->
-    m $ oneStm stm <> oneStm (Let (Pattern [] pes') aux (BasicOp (SubExp se')))
-fwdStm stm@(Let (Pattern [] pes) aux (BasicOp (Opaque se))) m = do
-  se' <- tangent se
-  withTans pes $ \pes' ->
-    m $ oneStm stm <> oneStm (Let (Pattern [] pes') aux (BasicOp (Opaque se')))
-fwdStm stm@(Let (Pattern [] pes) aux (BasicOp (ArrayLit ses t))) m = do
-  ses' <- mapM tangent ses
-  withTans pes $ \pes' ->
-    m $ oneStm stm <> oneStm (Let (Pattern [] pes') aux (BasicOp (ArrayLit ses' t)))
-fwdStm stm@(Let (Pattern [] [pe]) aux (BasicOp (UnOp op x))) m = do
-  let t = unOpType op
-  x_tan <- primExpFromSubExp t <$> tangent x
-  withTan pe $ \pe' -> do
-    stms <- runBinder_ $ do
-      let dx = pdUnOp op $ primExpFromSubExp t x
-      auxing aux $ letBindNames [patElemName pe'] <=< toExp $ x_tan ~*~ dx
-    m $ oneStm stm <> stms
-fwdStm stm@(Let (Pattern [] [pe]) aux (BasicOp (BinOp op x y))) m = do
-  let t = binOpType op
-  x_tan <- primExpFromSubExp t <$> tangent x
-  y_tan <- primExpFromSubExp t <$> tangent y
-  withTan pe $ \pe' -> do
-    stms <- runBinder_ $ do
+basicFwd :: Pattern -> StmAux () -> BasicOp -> ADM ()
+basicFwd pat aux op = do
+  pat_tan <- newTan pat
+  pat_v_tan <- patNames pat_tan
+  case op of
+    SubExp se -> do
+      se_tan <- tangent se
+      addStm $ Let pat_tan aux $ BasicOp $ SubExp se_tan
+    Opaque se -> do
+      se_tan <- tangent se
+      addStm $ Let pat_tan aux $ BasicOp $ Opaque se_tan
+    ArrayLit ses t -> do
+      ses_tan <- tangent ses
+      addStm $ Let pat_tan aux $ BasicOp $ ArrayLit ses_tan t
+    UnOp unop x -> do
+      let t = unOpType unop
+          x_pe = primExpFromSubExp t x
+          dx = pdUnOp unop x_pe
+      x_tan <- primExpFromSubExp t <$> tangent x
+      auxing aux $ letBindNames pat_v_tan <=< toExp $ x_tan ~*~ dx
+    BinOp bop x y -> do
+      let t = binOpType bop
+      x_tan <- primExpFromSubExp t <$> tangent x
+      y_tan <- primExpFromSubExp t <$> tangent y
       let (wrt_x, wrt_y) =
-            pdBinOp op (primExpFromSubExp t x) (primExpFromSubExp t y)
+            pdBinOp bop (primExpFromSubExp t x) (primExpFromSubExp t y)
       auxing aux $
-        letBindNames [patElemName pe'] <=< toExp $
+        letBindNames pat_v_tan <=< toExp $
           x_tan ~*~ wrt_x ~+~ y_tan ~*~ wrt_y
-    m $ oneStm stm <> stms
-fwdStm stm@(Let (Pattern [] pes) aux (BasicOp (ConvOp op x))) m = do
-  x' <- tangent x
-  withTan pes $ \pes' ->
-    m $ oneStm stm <> oneStm (Let (Pattern [] pes') aux (BasicOp (ConvOp op x')))
-fwdStm stm@(Let (Pattern [] pes) aux assert@(BasicOp Assert {})) m =
-  withTan pes $ \pes' ->
-    m $ oneStm stm <> oneStm (Let (Pattern [] pes') aux assert)
-fwdStm stm@(Let (Pattern [] pes) aux cOp@(BasicOp CmpOp {})) m =
-  withTan pes $ \pes' ->
-    m $ oneStm stm <> oneStm (Let (Pattern [] pes') aux cOp)
-fwdStm stm@(Let (Pattern [] pes) aux (BasicOp (Index arr slice))) m = do
-  arr_tan <- tangent arr
-  withTans pes $ \pes' ->
-    m $ oneStm stm <> oneStm (Let (Pattern [] pes') aux (BasicOp (Index arr_tan slice)))
-fwdStm stm@(Let (Pattern [] pes) aux (BasicOp (Reshape reshape arr))) m = do
-  arr_tan <- tangent arr
-  withTans pes $ \pes' ->
-    m $ oneStm stm <> oneStm (Let (Pattern [] pes') aux (BasicOp (Reshape reshape arr_tan)))
-fwdStm stm@(Let (Pattern [] pes) aux (BasicOp (Rearrange perm arr))) m = do
-  arr_tan <- tangent arr
-  withTans pes $ \pes' ->
-    m $ oneStm stm <> oneStm (Let (Pattern [] pes') aux (BasicOp (Rearrange perm arr_tan)))
-fwdStm stm@(Let (Pattern [] pes) aux (BasicOp (Rotate rots arr))) m = do
-  arr_tan <- tangent arr
-  withTans pes $ \pes' ->
-    m $ oneStm stm <> oneStm (Let (Pattern [] pes') aux (BasicOp (Rotate rots arr_tan)))
-fwdStm stm@(Let (Pattern [] pes) aux (BasicOp (Concat d arr arrs w))) m = do
-  arr_tan <- tangent arr
-  arrs_tans <- mapM tangent arrs
-  withTans pes $ \pes' ->
-    m $ oneStm stm <> oneStm (Let (Pattern [] pes') aux (BasicOp (Concat d arr_tan arrs_tans w)))
-fwdStm stm@(Let (Pattern [] pes) aux (BasicOp (Replicate n x))) m = do
-  x_tan <- tangent x
-  withTans pes $ \pes' ->
-    m $ oneStm stm <> oneStm (Let (Pattern [] pes') aux (BasicOp (Replicate n x_tan)))
-fwdStm stm@(Let (Pattern [] pes) _ (Apply f args _ _)) m
+    CmpOp {} ->
+      addStm $ Let pat_tan aux $ BasicOp op
+    ConvOp cop x -> do
+      x_tan <- tangent x
+      addStm $ Let pat_tan aux $ BasicOp $ ConvOp cop x_tan
+    Assert {} -> return ()
+    Index arr slice -> do
+      arr_tan <- tangent arr
+      addStm $ Let pat_tan aux $ BasicOp $ Index arr_tan slice
+    Update arr slice se -> do
+      arr_tan <- tangent arr
+      se_tan <- tangent se
+      addStm $ Let pat_tan aux $ BasicOp $ Update arr_tan slice se_tan
+    Concat d arr arrs w -> do
+      arr_tan <- tangent arr
+      arrs_tans <- tangent arrs
+      addStm $ Let pat_tan aux $ BasicOp $ Concat d arr_tan arrs_tans w
+    Copy arr -> do
+      arr_tan <- tangent arr
+      addStm $ Let pat_tan aux $ BasicOp $ Copy arr_tan
+    Manifest ds arr -> do
+      arr_tan <- tangent arr
+      addStm $ Let pat_tan aux $ BasicOp $ Manifest ds arr_tan
+    Iota {} -> return ()
+    Replicate n x -> do
+      x_tan <- tangent x
+      addStm $ Let pat_tan aux $ BasicOp $ Replicate n x_tan
+    Scratch {} -> return ()
+    Reshape reshape arr -> do
+      arr_tan <- tangent arr
+      addStm $ Let pat_tan aux $ BasicOp $ Reshape reshape arr_tan
+    Rearrange perm arr -> do
+      arr_tan <- tangent arr
+      addStm $ Let pat_tan aux $ BasicOp $ Rearrange perm arr_tan
+    Rotate rots arr -> do
+      arr_tan <- tangent arr
+      addStm $ Let pat_tan aux $ BasicOp $ Rotate rots arr_tan
+    _ -> error $ "basicFwd: Unsupported op " ++ pretty op
+
+fwdLambda :: Lambda -> ADM Lambda
+fwdLambda l@(Lambda params body ret) = do
+  Lambda <$> bundleNew params <*> inScopeOf l (fwdBody body) <*> bundleTan ret
+
+interleave :: [a] -> [a] -> [a]
+interleave xs ys = concat $ transpose [xs, ys]
+
+zeroFromSubExp :: SubExp -> ADM VName
+zeroFromSubExp (Constant c) =
+  letExp "zero" $
+    BasicOp $ SubExp $ Constant $ blankPrimValue $ primValueType c
+zeroFromSubExp (Var v) = do
+  t <- lookupType v
+  letExp "zero" $ zeroExp t
+
+fwdSOAC :: Pattern -> StmAux () -> SOAC SOACS -> ADM ()
+fwdSOAC pat aux (Screma size (ScremaForm scs reds f) xs) = do
+  pat' <- bundleNew pat
+  xs' <- bundleTan xs
+  scs' <- mapM fwdScan scs
+  reds' <- mapM fwdRed reds
+  f' <- fwdLambda f
+  addStm $ Let pat' aux $ Op $ Screma size (ScremaForm scs' reds' f') xs'
+  where
+    fwdScan :: Scan SOACS -> ADM (Scan SOACS)
+    fwdScan sc = do
+      op' <- fwdLambda $ scanLambda sc
+      neutral_tans <- mapM zeroFromSubExp $ scanNeutral sc
+      return $
+        Scan
+          { scanNeutral = scanNeutral sc `interleave` map Var neutral_tans,
+            scanLambda = op'
+          }
+    fwdRed :: Reduce SOACS -> ADM (Reduce SOACS)
+    fwdRed red = do
+      op' <- fwdLambda $ redLambda red
+      neutral_tans <- mapM zeroFromSubExp $ redNeutral red
+      return $
+        Reduce
+          { redComm = redComm red,
+            redLambda = op',
+            redNeutral = redNeutral red `interleave` map Var neutral_tans
+          }
+fwdSOAC pat aux (Stream size form lam nes xs) = do
+  pat' <- bundleNew pat
+  lam' <- fwdLambda lam
+  xs' <- bundleTan xs
+  nes_tan <- mapM (fmap Var . zeroFromSubExp) nes
+  let nes' = interleave nes nes_tan
+  case form of
+    Sequential -> do
+      addStm $ Let pat' aux $ Op $ Stream size Sequential lam' nes' xs'
+    Parallel o comm lam0 -> do
+      lam0' <- fwdLambda lam0
+      let form' = Parallel o comm lam0'
+      addStm $ Let pat' aux $ Op $ Stream size form' lam' nes' xs'
+fwdSOAC pat aux (Hist len ops bucket_fun imgs) = do
+  pat_tan <- newTan pat
+  ops' <- mapM fwdHist ops
+  bucket_fun' <- fwdLambda bucket_fun
+  addStm $ Let (pat <> pat_tan) aux $ Op $ Hist len ops' bucket_fun' imgs
+  where
+    fwdHist :: HistOp SOACS -> ADM (HistOp SOACS)
+    fwdHist (HistOp width rf dest nes op) = do
+      dest' <- bundleTan dest
+      nes_tan <- mapM (fmap Var . zeroFromSubExp) nes
+      op' <- fwdLambda op
+      return $
+        HistOp
+          { histWidth = width,
+            histRaceFactor = rf,
+            histDest = dest',
+            histNeutral = interleave nes nes_tan,
+            histOp = op'
+          }
+fwdSOAC pat aux scatter@Scatter {} = addStm $ Let pat aux $ Op scatter
+fwdSOAC _ _ soac = error $ "Unsupported SOAC: " ++ pretty soac
+
+fwdStm :: Stm -> ADM ()
+fwdStm (Let pat aux (BasicOp (UnAcc acc ts))) = do
+  acc_tan <- tangent acc
+  pat' <- bundleNew pat
+  ts' <- bundleTan ts
+  addStm $ Let pat' aux $ BasicOp $ UnAcc acc_tan ts'
+fwdStm (Let pat aux (BasicOp (UpdateAcc acc i x))) = do
+  pat' <- bundleNew pat
+  x' <- bundleTan x
+  acc_tan <- tangent acc
+  addStm $ Let pat' aux $ BasicOp $ UpdateAcc acc_tan i x'
+fwdStm stm@(Let pat aux (BasicOp e)) = addStm stm >> basicFwd pat aux e
+fwdStm stm@(Let pat _ (Apply f args _ _))
   | Just (_, argts) <- M.lookup f builtInFunctions = do
+    addStm stm
     arg_tans <-
       zipWith primExpFromSubExp argts <$> mapM (tangent . fst) args
-    withTans pes $ \pes' -> do
-      let arg_pes = zipWith primExpFromSubExp argts (map fst args)
-
-      stms <- runBinder_ $
-        case pdBuiltin f arg_pes of
-          Nothing ->
-            error $ "No partial derivative defined for builtin function: " ++ pretty f
-          Just derivs ->
-            zipWithM_ (letBindNames . pure . patElemName) pes'
-              =<< mapM toExp (zipWith (~*~) arg_tans derivs)
-
-      m $ oneStm stm <> stms
-fwdStm (Let (Pattern ctx pes) aux (If cond t f (IfDec ret ifsort))) m = do
-  t' <- fwdBodyInterleave' t
-  f' <- fwdBodyInterleave' f
-  withTan pes $ \pes' ->
-    m . oneStm . Let (Pattern ctx (pes ++ pes')) aux $
-      If cond t' f' (IfDec (ret ++ ret) ifsort)
-fwdStm (Let (Pattern [] pes) aux (DoLoop [] valPats (WhileLoop v) body)) m = do
-  let (valParams, vals) = unzip valPats
-  vals' <- mapM tangent vals
-  withTans valParams $ \valParams' -> do
-    body' <- fwdBodyInterleave' body
-    withTans pes $ \pes' ->
-      m . oneStm . Let (Pattern [] (pes ++ pes')) aux $
-        DoLoop [] (valPats ++ zip valParams' vals') (WhileLoop v) body'
-fwdStm (Let (Pattern [] pes) aux (DoLoop [] valPats (ForLoop v it bound []) body)) m = do
-  let (valParams, vals) = unzip valPats
-  vals' <- mapM tangent vals
-  withTans valParams $ \valParams' -> do
-    body' <- fwdBodyAfter' body
-    withTans pes $ \pes' ->
-      m . oneStm . Let (Pattern [] (pes ++ pes')) aux $
-        DoLoop [] (valPats ++ zip valParams' vals') (ForLoop v it bound []) body'
---fwdStm (Let (Pattern [] pes) aux (DoLoop [] valPats (ForLoop i it bound loop_vars) body)) m = do
---  let (valParams, vals) = unzip valPats
---  vals' <- mapM tangent vals
---  withTans valParams $ \valParams' ->
---    withTans loopParams $ \loopParams' -> do
---      let f p n = do n' <- tangent n; return (p, n')
---      loop_vars' <- zipWithM f loopParams' (map snd loop_vars)
---      body' <- fwdBodyInterleave' body
---      withTans pes $ \pes' ->
---        m . oneStm . Let (Pattern [] (pes ++ pes')) aux $
---          DoLoop [] (valPats ++ zip valParams' vals') (ForLoop i it bound (loop_vars ++ loop_vars')) body'
---  where
---    loopParams = map fst loop_vars
-fwdStm stm _ =
+    pat_tan <- newTan pat
+    pat_v_tan <- patNames pat_tan
+    let arg_pes = zipWith primExpFromSubExp argts (map fst args)
+    case pdBuiltin f arg_pes of
+      Nothing ->
+        error $ "No partial derivative defined for builtin function: " ++ pretty f
+      Just derivs ->
+        zipWithM_ (letBindNames . pure) pat_v_tan
+          =<< mapM toExp (zipWith (~*~) arg_tans derivs)
+fwdStm (Let pat aux (If cond t f (IfDec ret ifsort))) = do
+  t' <- slocal' $ fwdBody t
+  f' <- slocal' $ fwdBody f
+  pat' <- bundleNew pat
+  ret' <- bundleTan ret
+  addStm $ Let pat' aux $ If cond t' f' $ IfDec ret' ifsort
+fwdStm (Let pat aux (DoLoop l_ctx val_pats (WhileLoop v) body)) = do
+  val_pats' <- bundleNew val_pats
+  pat' <- bundleNew pat
+  body' <- fwdBody body
+  addStm $ Let pat' aux $ DoLoop l_ctx val_pats' (WhileLoop v) body'
+fwdStm (Let pat aux (DoLoop l_ctx val_pats loop@(ForLoop i it bound loop_vars) body)) = do
+  pat' <- bundleNew pat
+  val_pats' <- bundleNew val_pats
+  loop_vars' <- bundleNew loop_vars
+  inScopeOf loop $ do
+    body' <- fwdBody body
+    addStm $
+      Let pat' aux $
+        DoLoop l_ctx val_pats' (ForLoop i it bound loop_vars') body'
+fwdStm (Let pat aux (MkAcc accshape arrs ishape op)) = do
+  arrs_tan <- tangent arrs
+  pat' <- bundleNew pat
+  op' <- case op of
+    Nothing -> return Nothing
+    Just (lam, nes) -> do
+      nes_tan <- mapM (fmap Var . zeroFromSubExp) nes
+      lam' <- fwdLambda lam
+      case lam' of
+        Lambda (i : _ : ps) body ret -> do
+          let lam'' = Lambda (i : ps) body ret
+          return $ Just (lam'', interleave nes nes_tan)
+        _ -> error "Malformed lambda in MkAcc."
+  addStm $ Let pat' aux $ MkAcc accshape (arrs <> arrs_tan) ishape op'
+fwdStm (Let pat aux (Op soac)) = fwdSOAC pat aux soac
+fwdStm stm =
   error $ "unhandled forward mode AD for Stm: " ++ pretty stm ++ "\n" ++ show stm
 
-fwdBodyInterleave :: Stms SOACS -> ADM Body -> ADM Body
-fwdBodyInterleave stms m =
-  case stms of
-    (stm :<| stms') ->
-      inScopeOf stm . fwdStm stm $ \stm' -> do
-        Body _ stms'' res <- fwdBodyInterleave stms' m
-        return $ mkBody (stm' <> stms'') res
-    Empty -> m
-
-fwdBodyInterleave' :: Body -> ADM Body
-fwdBodyInterleave' (Body _ stms res) =
-  fwdBodyInterleave stms $ do
-    res' <- mapM tangent res
-    return $ mkBody mempty $ res ++ res'
+fwdBody :: Body -> ADM Body
+fwdBody (Body _ stms res) = do
+  (res', stms') <- collectStms $ do
+    mapM_ fwdStm stms
+    bundleTan res
+  return $ mkBody stms' res'
 
 fwdBodyOnlyTangents :: Body -> ADM Body
-fwdBodyOnlyTangents (Body _ stms res) =
-  fwdBodyInterleave stms $ do
-    res' <- mapM tangent res
-    return $ mkBody mempty res'
-
-fwdBodyAfter :: Stms SOACS -> ADM Body -> ADM Body
-fwdBodyAfter stms m =
-  case stms of
-    (stm :<| stms') ->
-      fwdStm stm $ \stm' -> do
-        Body _ stms'' res <- fwdBodyAfter stms' m
-        return $ mkBody (stm' <> stms'') res
-    Empty -> m
-
-fwdBodyAfter' :: Body -> ADM Body
-fwdBodyAfter' (Body _ stms res) =
-  fwdBodyAfter stms $ do
-    res' <- mapM tangent res
-    return $ mkBody mempty $ res ++ res'
+fwdBodyOnlyTangents (Body _ stms res) = do
+  (res', stms') <- collectStms $ do
+    mapM_ fwdStm stms
+    tangent res
+  return $ mkBody stms' res'
 
 fwdJVP :: MonadFreshNames m => Scope SOACS -> Lambda -> m Lambda
-fwdJVP scope (Lambda params body ret) = do
-  let initial_renv = REnv {tans = mempty, envScope = scope}
-  flip runADM initial_renv $
-    withTan params $ \params' -> do
-      body' <- fwdBodyOnlyTangents body
-      pure $ Lambda (params ++ params') body' ret
+fwdJVP scope l@(Lambda params body ret) = do
+  runADM . localScope scope $
+    inScopeOf l $ do
+      params_tan <- newTan params
+      body_tan <- fwdBodyOnlyTangents body
+      ret_tan <- tangent ret
+      return $ Lambda (params ++ params_tan) body_tan (ret ++ ret_tan)
