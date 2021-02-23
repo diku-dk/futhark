@@ -233,7 +233,7 @@ fwdStm (Let (Pattern [] pes) aux (DoLoop [] val_pats loop@(ForLoop i it bound []
         t <- lookupType i
         i_tan <- newTan i
         letBindNames [i_tan] $ zeroExp t
-      body_tan <- inScopeOf loop $ fwdBody body
+      body_tan <- fwdBody body
       addStm $
         Let (Pattern [] (pes ++ pes_tan)) aux $
           DoLoop [] (val_pats ++ val_pats_tan) (ForLoop i it bound []) body_tan
