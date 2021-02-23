@@ -54,6 +54,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * `futhark test` and `futhark bench` now detect program
     initialisation errors in a saner way (#1246).
 
+  * Partial application of operators with parameters used in a
+    size-dependent way now works (#1256).
+
 ## [0.18.6]
 
 ### Added
