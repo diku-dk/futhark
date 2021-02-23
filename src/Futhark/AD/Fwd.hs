@@ -16,10 +16,18 @@ import Futhark.AD.Derivatives
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.Binder
 import Futhark.Construct
+import Futhark.IR.Prop.Names (freeIn, nameIn)
 import Futhark.IR.SOACS
 
 zeroTan :: Type -> ADM SubExp
 zeroTan (Prim t) = return $ constant $ blankPrimValue t
+
+zeroExp :: Type -> Exp
+zeroExp (Prim pt) =
+  BasicOp $ SubExp $ Constant $ blankPrimValue pt
+zeroExp (Array (ElemPrim pt) shape _) =
+  BasicOp $ Replicate shape $ Constant $ blankPrimValue pt
+zeroExp t = error $ "zeroExp: " ++ pretty t
 
 slocal' :: (MonadState s m) => m a -> m a
 slocal' = slocal id
@@ -72,16 +80,26 @@ runADM (ADM m) =
 tanVName :: VName -> ADM VName
 tanVName v = newVName (baseString v <> "_tan")
 
+insertTan :: VName -> VName -> ADM ()
+insertTan v v' =
+  modify $ \env -> env {stateTans = M.insert v v' (stateTans env)}
+
 class TanBinder a where
   newTan :: a -> ADM a
 
 instance (TanBinder a) => TanBinder [a] where
   newTan = mapM newTan
 
+instance TanBinder VName where
+  newTan v = do
+    v' <- tanVName v
+    insertTan v v'
+    return v'
+
 instance TanBinder (PatElemT dec) where
   newTan (PatElem p t) = do
     p' <- tanVName p
-    modify $ \env -> env {stateTans = M.insert p p' (stateTans env)}
+    insertTan p p'
     return $ PatElem p' t
 
 instance TanBinder (PatternT dec) where
@@ -90,7 +108,7 @@ instance TanBinder (PatternT dec) where
 instance TanBinder (Param attr) where
   newTan (Param p t) = do
     p' <- tanVName p
-    modify $ \env -> env {stateTans = M.insert p p' (stateTans env)}
+    insertTan p p'
     return $ Param p' t
 
 class Tangent a where
@@ -210,25 +228,30 @@ fwdStm (Let (Pattern [] pes) aux (DoLoop [] val_pats loop@(ForLoop i it bound []
   slocal' $ do
     val_params_tan <- newTan val_params
     let val_pats_tan = zip val_params_tan vals_tan
-    body_tan <- inScopeOf loop $ fwdBody body
-    addStm $
-      Let (Pattern [] (pes ++ pes_tan)) aux $
-        DoLoop [] (val_pats ++ val_pats_tan) (ForLoop i it bound []) body_tan
-fwdStm (Let (Pattern [] pes) aux (DoLoop [] val_pats loop@(ForLoop i it bound loop_vars) body)) = do
-  let (val_params, vals) = unzip val_pats
-      (loop_params, loop_vals) = unzip loop_vars
-  vals_tan <- tangent vals
-  loop_vals_tan <- tangent loop_vals
-  pes_tan <- newTan pes
-  slocal' $ do
-    val_params_tan <- newTan val_params
-    loop_params_tan <- newTan loop_params
-    let val_pats_tan = zip val_params_tan vals_tan
-    let loop_vars_tan = zip loop_params_tan loop_vals_tan
-    body_tan <- inScopeOf loop $ fwdBody body
-    addStm $
-      Let (Pattern [] (pes ++ pes_tan)) aux $
-        DoLoop [] (val_pats ++ val_pats_tan) (ForLoop i it bound (loop_vars ++ loop_vars_tan)) body_tan
+    inScopeOf loop $ do
+      when (i `nameIn` freeIn body) $ do
+        t <- lookupType i
+        i_tan <- newTan i
+        letBindNames [i_tan] $ zeroExp t
+      body_tan <- inScopeOf loop $ fwdBody body
+      addStm $
+        Let (Pattern [] (pes ++ pes_tan)) aux $
+          DoLoop [] (val_pats ++ val_pats_tan) (ForLoop i it bound []) body_tan
+--fwdStm (Let (Pattern [] pes) aux (DoLoop [] val_pats loop@(ForLoop i it bound loop_vars) body)) = do
+--  let (val_params, vals) = unzip val_pats
+--      (loop_params, loop_vals) = unzip loop_vars
+--  vals_tan <- tangent vals
+--  loop_vals_tan <- tangent loop_vals
+--  pes_tan <- newTan pes
+--  --slocal' $ do
+--  val_params_tan <- newTan val_params
+--  loop_params_tan <- newTan loop_params
+--  let val_pats_tan = zip val_params_tan vals_tan
+--  let loop_vars_tan = zip loop_params_tan loop_vals_tan
+--  body_tan <- inScopeOf loop $ fwdBody body
+--  addStm $
+--    Let (Pattern [] (pes ++ pes_tan)) aux $
+--      DoLoop [] (val_pats ++ val_pats_tan) (ForLoop i it bound (loop_vars ++ loop_vars_tan)) body_tan
 fwdStm stm =
   error $ "unhandled forward mode AD for Stm: " ++ pretty stm ++ "\n" ++ show stm
 
