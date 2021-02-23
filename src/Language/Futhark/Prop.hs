@@ -625,10 +625,10 @@ typeOf (Lambda params _ _ (Info (als, t)) _) =
     named (Unnamed, _) = Nothing
 typeOf (OpSection _ (Info t) _) =
   t
-typeOf (OpSectionLeft _ _ _ (_, Info pt2) (Info ret, _) _) =
-  foldFunType [fromStruct pt2] ret
-typeOf (OpSectionRight _ _ _ (Info pt1, _) (Info ret) _) =
-  foldFunType [fromStruct pt1] ret
+typeOf (OpSectionLeft _ _ _ (_, Info (pn, pt2)) (Info ret, _) _) =
+  Scalar $ Arrow mempty pn (fromStruct pt2) ret
+typeOf (OpSectionRight _ _ _ (Info (pn, pt1), _) (Info ret) _) =
+  Scalar $ Arrow mempty pn (fromStruct pt1) ret
 typeOf (ProjectSection _ (Info t) _) = t
 typeOf (IndexSection _ (Info t) _) = t
 typeOf (Constr _ _ (Info t) _) = t

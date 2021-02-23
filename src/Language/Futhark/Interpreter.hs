@@ -1007,11 +1007,11 @@ eval env (LetWith dest src is v body _ loc) = do
 eval env (Lambda ps body _ (Info (_, rt)) _) =
   evalFunction env [] ps body rt
 eval env (OpSection qv (Info t) _) = evalTermVar env qv $ toStruct t
-eval env (OpSectionLeft qv _ e (Info (_, argext), _) (Info t, Info retext) loc) = do
+eval env (OpSectionLeft qv _ e (Info (_, _, argext), _) (Info t, Info retext) loc) = do
   v <- evalArg env e argext
   f <- evalTermVar env qv (toStruct t)
   returned env t retext =<< apply loc env f v
-eval env (OpSectionRight qv _ e (Info _, Info (_, argext)) (Info t) loc) = do
+eval env (OpSectionRight qv _ e (Info _, Info (_, _, argext)) (Info t) loc) = do
   y <- evalArg env e argext
   return $
     ValueFun $ \x -> do
