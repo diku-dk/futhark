@@ -1,4 +1,5 @@
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE TupleSections #-}
 
 -- |
 --
@@ -169,23 +170,23 @@ instance ASTMappable (ExpBase Info VName) where
     OpSection <$> mapOnQualName tv name
       <*> traverse (mapOnPatternType tv) t
       <*> pure loc
-  astMap tv (OpSectionLeft name t arg (Info (t1a, argext), t1b) (t2, retext) loc) =
+  astMap tv (OpSectionLeft name t arg (Info (pa, t1a, argext), Info (pb, t1b)) (t2, retext) loc) =
     OpSectionLeft <$> mapOnQualName tv name
       <*> traverse (mapOnPatternType tv) t
       <*> mapOnExp tv arg
       <*> ( (,)
-              <$> (Info <$> ((,) <$> mapOnStructType tv t1a <*> pure argext))
-              <*> traverse (mapOnStructType tv) t1b
+              <$> (Info <$> ((pa,,) <$> mapOnStructType tv t1a <*> pure argext))
+              <*> (Info <$> ((pb,) <$> mapOnStructType tv t1b))
           )
       <*> ((,) <$> traverse (mapOnPatternType tv) t2 <*> pure retext)
       <*> pure loc
-  astMap tv (OpSectionRight name t arg (t1a, Info (t1b, argext)) t2 loc) =
+  astMap tv (OpSectionRight name t arg (Info (pa, t1a), Info (pb, t1b, argext)) t2 loc) =
     OpSectionRight <$> mapOnQualName tv name
       <*> traverse (mapOnPatternType tv) t
       <*> mapOnExp tv arg
       <*> ( (,)
-              <$> traverse (mapOnStructType tv) t1a
-              <*> (Info <$> ((,) <$> mapOnStructType tv t1b <*> pure argext))
+              <$> (Info <$> ((pa,) <$> mapOnStructType tv t1a))
+              <*> (Info <$> ((pb,,) <$> mapOnStructType tv t1b <*> pure argext))
           )
       <*> traverse (mapOnPatternType tv) t2
       <*> pure loc
