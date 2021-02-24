@@ -25,6 +25,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
     also accept `--tuning` and `--size` options (although there are
     not yet any tunable sizes).
 
+  * New functions: `scatter_2d` and `scatter_3d` for scattering to
+    multi-dimensional arrays (#1258).
+
 ### Removed
 
 ### Changed
