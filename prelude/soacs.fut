@@ -268,3 +268,12 @@ let any [n] 'a (f: a -> bool) (as: [n]a): bool =
 -- **Span:** *O(1)*
 let scatter 't [m] [n] (dest: *[m]t) (is: [n]i64) (vs: [n]t): *[m]t =
   intrinsics.scatter (dest, is, vs) :> *[m]t
+
+-- | `scatter_2d as is vs` is the equivalent of a `scatter` on a 2-dimensional
+-- array.
+--
+-- **Work:** *O(n)*
+--
+-- **Span:** *O(1)*
+let scatter_2d 't [m] [n] [l] (dest: *[m][n]t) (is: [l](i64, i64)) (vs: [l]t): *[m][n]t =
+  intrinsics.scatter_2d (dest, is, vs) :> *[m][n]t

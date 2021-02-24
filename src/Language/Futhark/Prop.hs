@@ -879,6 +879,27 @@ intrinsics =
                  ]
                  $ Array () Unique t_a (rank 1)
              ),
+             ( "scatter_2d",
+               IntrinsicPolyFun
+                 [tp_a]
+                 [ uarr_2d_a,
+                   Array
+                     ()
+                     Nonunique
+                     ( Record
+                         ( M.fromList $
+                             zip
+                               tupleFieldNames
+                               [ Scalar $ Prim $ Signed Int64,
+                                 Scalar $ Prim $ Signed Int64
+                               ]
+                         )
+                     )
+                     (rank 1),
+                   Array () Nonunique t_a (rank 1)
+                 ]
+                 uarr_2d_a
+             ),
              ("zip", IntrinsicPolyFun [tp_a, tp_b] [arr_a, arr_b] arr_a_b),
              ("unzip", IntrinsicPolyFun [tp_a, tp_b] [arr_a_b] t_arr_a_arr_b),
              ( "hist",
@@ -959,6 +980,7 @@ intrinsics =
     t_a = TypeVar () Nonunique (typeName tv_a) []
     arr_a = Array () Nonunique t_a (rank 1)
     arr_2d_a = Array () Nonunique t_a (rank 2)
+    uarr_2d_a = Array () Unique t_a (rank 2)
     uarr_a = Array () Unique t_a (rank 1)
     tp_a = TypeParamType Unlifted tv_a mempty
 
