@@ -91,10 +91,15 @@ data SOAC lore
     --
     -- The lambda body returns the output in this manner:
     --
-    --     [index_0, index_1, ..., index_n, value_0, value_1, ..., value_n]
+    --     [index_0, index_1, ..., index_n, value_0, value_1, ..., value_m]
     --
     -- This must be consistent along all Scatter-related optimisations.
-    Scatter SubExp (Lambda lore) [VName] [(SubExp, Int, VName)]
+    --
+    -- Scatters can be multi-dimensional, so the number of index-values need not
+    -- necessarily match the number of values. Instead, the number of indexes
+    -- must match the sum of the ranks of the shapes in the destination array
+    -- list.
+    Scatter SubExp (Lambda lore) [VName] [(Shape, Int, VName)]
   | -- | @Hist <length> <dest-arrays-and-ops> <bucket fun> <input arrays>@
     --
     -- The first SubExp is the length of the input arrays. The first
@@ -420,7 +425,7 @@ mapSOACM tv (Scatter len lam ivs as) =
     <*> mapM (mapOnSOACVName tv) ivs
     <*> mapM
       ( \(aw, an, a) ->
-          (,,) <$> mapOnSOACSubExp tv aw
+          (,,) <$> mapM (mapOnSOACSubExp tv) aw
             <*> pure an
             <*> mapOnSOACVName tv a
       )
@@ -497,12 +502,10 @@ soacType (Stream outersize form lam _) =
       Parallel _ _ _ acc -> acc
       Sequential acc -> acc
 soacType (Scatter _w lam _ivs as) =
-  zipWith arrayOfRow val_ts ws
+  zipWith arrayOfShape val_ts ws
   where
-    val_ts =
-      concatMap (take 1) $
-        chunks ns $
-          drop (sum ns) $ lambdaReturnType lam
+    indexes = sum $ zipWith (*) ns $ map length ws
+    val_ts = drop indexes $ lambdaReturnType lam
     (ws, ns, _) = unzip3 as
 soacType (Hist _len ops _bucket_fun _imgs) = do
   op <- ops
@@ -693,10 +696,10 @@ typeCheckSOAC (Scatter w lam ivs as) = do
   -- Requirements:
   --
   --   0. @lambdaReturnType@ of @lam@ must be a list
-  --      [index types..., value types].
+  --      [index types..., value types, ...].
   --
-  --   1. The number of index types must be equal to the number of value types
-  --      and the number of writes to arrays in @as@.
+  --   1. The number of index types and value types must be equal to the number
+  --      of return values from @lam@.
   --
   --   2. Each index type must have the type i64.
   --
@@ -715,15 +718,15 @@ typeCheckSOAC (Scatter w lam ivs as) = do
   TC.require [Prim int64] w
 
   -- 0.
-  let (_as_ws, as_ns, _as_vs) = unzip3 as
+  let (as_ws, as_ns, _as_vs) = unzip3 as
+      indexes = sum $ zipWith (*) as_ns $ map length as_ws
       rts = lambdaReturnType lam
-      rtsLen = length rts `div` 2
-      rtsI = take rtsLen rts
-      rtsV = drop rtsLen rts
+      rtsI = take indexes rts
+      rtsV = drop indexes rts
 
   -- 1.
-  unless (rtsLen == sum as_ns) $
-    TC.bad $ TC.TypeError "Scatter: Uneven number of index types, value types, and arrays outputs."
+  unless (length rts == sum as_ns + sum (zipWith (*) as_ns $ map length as_ws)) $
+    TC.bad $ TC.TypeError "Scatter: number of index types, value types and array outputs do not match."
 
   -- 2.
   forM_ rtsI $ \rtI ->
@@ -732,10 +735,10 @@ typeCheckSOAC (Scatter w lam ivs as) = do
 
   forM_ (zip (chunks as_ns rtsV) as) $ \(rtVs, (aw, _, a)) -> do
     -- All lengths must have type i64.
-    TC.require [Prim int64] aw
+    mapM_ (TC.require [Prim int64]) aw
 
     -- 3.
-    forM_ rtVs $ \rtV -> TC.requireI [rtV `arrayOfRow` aw] a
+    forM_ rtVs $ \rtV -> TC.requireI [arrayOfShape rtV aw] a
 
     -- 4.
     TC.consume =<< TC.lookupAliases a
