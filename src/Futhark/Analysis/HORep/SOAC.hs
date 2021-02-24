@@ -377,7 +377,7 @@ transposeInput k n inp =
 -- | A definite representation of a SOAC expression.
 data SOAC lore
   = Stream SubExp (StreamForm lore) (Lambda lore) [Input]
-  | Scatter SubExp (Lambda lore) [Input] [(SubExp, Int, VName)]
+  | Scatter SubExp (Lambda lore) [Input] [(Shape, Int, VName)]
   | Screma SubExp (ScremaForm lore) [Input]
   | Hist SubExp [HistOp lore] (Lambda lore) [Input]
   deriving (Eq, Show)
@@ -453,11 +453,11 @@ typeOf (Stream w form lam _) =
         ]
    in accrtps ++ arrtps
 typeOf (Scatter _w lam _ivs dests) =
-  zipWith arrayOfRow (drop (n `div` 2) lam_ts) aws
+  zipWith arrayOfShape val_ts ws
   where
-    lam_ts = lambdaReturnType lam
-    n = length lam_ts
-    (aws, _, _) = unzip3 dests
+    indexes = sum $ zipWith (*) ns $ map length ws
+    val_ts = drop indexes $ lambdaReturnType lam
+    (ws, ns, _) = unzip3 dests
 typeOf (Screma w form _) =
   scremaType w form
 typeOf (Hist _ ops _ _) = do

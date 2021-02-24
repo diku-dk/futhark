@@ -163,6 +163,7 @@ module Futhark.Pass.ExtractKernels (extractKernels) where
 import Control.Monad.Identity
 import Control.Monad.RWS.Strict
 import Control.Monad.Reader
+import Data.Function ((&))
 import Data.Maybe
 import qualified Futhark.IR.Kernels as Out
 import Futhark.IR.Kernels.Kernel
@@ -567,17 +568,26 @@ transformStm _ (Let pat (StmAux cs _ _) (Op (Scatter w lam ivs as))) = runBinder
   let lam' = soacsLambdaToKernels lam
   write_i <- newVName "write_i"
   let (as_ws, as_ns, as_vs) = unzip3 as
-      (i_res, v_res) = splitAt (sum as_ns) $ bodyResult $ lambdaBody lam'
+      indexes = zipWith (*) as_ns $ map length as_ws
+      (i_res, v_res) = splitAt (sum indexes) $ bodyResult $ lambdaBody lam'
       kstms = bodyStms $ lambdaBody lam'
       krets = do
-        (a_w, a, is_vs) <- zip3 as_ws as_vs $ chunks as_ns $ zip i_res v_res
-        return $ WriteReturns [a_w] a [([DimFix i], v) | (i, v) <- is_vs]
+        (a_w, a, is_vs) <-
+          zip (chunks (concat $ zipWith (\ws n -> replicate n $ length ws) as_ws as_ns) i_res) v_res
+            & chunks as_ns
+            & zip3 as_ws as_vs
+        return $ WriteReturns (shapeDims a_w) a [(map DimFix is, v) | (is, v) <- is_vs]
       body = KernelBody () kstms krets
       inputs = do
         (p, p_a) <- zip (lambdaParams lam') ivs
         return $ KernelInput (paramName p) (paramType p) p_a [Var write_i]
   (kernel, stms) <-
-    mapKernel segThreadCapped [(write_i, w)] inputs (map rowType $ patternTypes pat) body
+    mapKernel
+      segThreadCapped
+      [(write_i, w)]
+      inputs
+      (zipWith (stripArray . length) as_ws $ patternTypes pat)
+      body
   certifying cs $ do
     addStms stms
     letBind pat $ Op $ SegOp kernel
