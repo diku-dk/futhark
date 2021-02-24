@@ -1649,6 +1649,7 @@ isOverloadedFunction qname args loc = do
       mapM (letSubExp desc . BasicOp . Opaque) =<< internaliseExp "opaque_arg" x
     handleRest [E.TupLit [a, si, v] _] "scatter" = Just $ scatterF 1 a si v
     handleRest [E.TupLit [a, si, v] _] "scatter_2d" = Just $ scatterF 2 a si v
+    handleRest [E.TupLit [a, si, v] _] "scatter_3d" = Just $ scatterF 3 a si v
     handleRest [E.TupLit [n, m, arr] _] "unflatten" = Just $ \desc -> do
       arrs <- internaliseExpToVars "unflatten_arr" arr
       n' <- internaliseExp1 "n" n
