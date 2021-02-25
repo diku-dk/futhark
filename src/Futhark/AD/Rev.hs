@@ -64,6 +64,246 @@ isRedPlus lam =
       isAddOp op && (r == Var (patElemName pe)) && ( (x == Var a && y == Var b) || (x == Var b && y == Var a) )
     isRedStm _ _ _ = False
 
+adBlank :: Type -> BasicOp
+adBlank (Prim pt) = SubExp $ Constant $ blankPrimValue pt
+adBlank (Array (ElemPrim t) shape _) = Replicate shape $ Constant $ blankPrimValue t
+adBlank (Array (ElemAcc _) _ _) = error "adBlank: cannot create array of accumulators YET (?)"
+adBlank Acc {} = error "adBlank: cannot create blank accumulator"
+adBlank Mem {} = error "adBlank: cannot create blank memory"
+
+adOne :: Type -> BasicOp
+adOne (Prim pt) = SubExp $ Constant $ onePrimValue pt
+adOne (Array (ElemPrim t) shape _) = Replicate shape $ Constant $ onePrimValue t
+adOne (Array (ElemAcc _) _ _) = error "adOne: cannot create array of accumulators YET (?)"
+adOne Acc {} = error "adOne: cannot create blank accumulator"
+adOne Mem {} = error "adOne: cannot create blank memory"
+
+getPrimElemType :: Type -> PrimType
+getPrimElemType (Prim ptp) = ptp
+getPrimElemType (Array (ElemPrim ptp) _ _) = ptp
+getPrimElemType _ = error "In Rev.hs, getPrimElemType: unsupported input type!"
+
+------------------------
+--- Helpers for Scan ---
+------------------------
+liftPExp2MapNest :: [PrimExp VName] -> M.Map VName (VName,Type) -> ADM ([VName], Stms SOACS)
+liftPExp2MapNest pexps tab
+  | not (null pexps),
+    not (M.null tab),
+    tp_cand <- snd (head (M.elems tab)),
+    depth <- arrayRank tp_cand,
+    fvts <- foldl S.union S.empty (map leafExpTypes pexps),
+    fvs  <- map fst (S.toList fvts),
+    all (isValidPrimType depth) fvts,
+    arr_arg_tps <- mapMaybe (`M.lookup` tab) fvs,
+    (length arr_arg_tps == length fvs) = do
+      genMapNest fvs depth (map (uncurry Param) arr_arg_tps)
+    where
+      isValidPrimType d (v,pt) =
+        case M.lookup v tab of
+          Just (_, t) -> isPrimTypeAtDepthOf d pt t
+          Nothing -> False
+      isPrimTypeAtDepthOf d t (Prim t') =
+        t==t' && d == 0
+      isPrimTypeAtDepthOf d t (Array (ElemPrim t') shape _) =
+        t == t' && d == length (shapeDims shape)
+      isPrimTypeAtDepthOf _ _ _ = False
+      genMapNest :: [VName] -> Int -> [Param Type] -> ADM ([VName], Stms SOACS)
+      genMapNest fvs 0 scal_ps = do
+        runBinderT' . localScope (scopeOfLParams scal_ps) $ do
+          forM_ (zip fvs scal_ps) $ \(v,p) -> do
+            letBindNames [v] $ BasicOp $ SubExp $ Var $ paramName p
+          forM pexps $ \pe -> letExp "r" =<< toExp pe
+      genMapNest fvs d arr_arg_tps = do
+        -- create names and type bindings for lambda args
+        let (arr_nms, arr_tps) = (map paramName arr_arg_tps, map paramDec arr_arg_tps)
+        let l_ts = map (stripArray 1) arr_tps
+        l_ps <- mapM (newParam "lam_arg") l_ts
+        (rs, stms) <- genMapNest fvs (d-1) l_ps
+        let lam_body = mkBody stms $ map Var rs
+            arr_tp = head arr_tps
+            lam_rtps = map (mkRetTp arr_tp . primExpType) pexps
+            lam = Lambda l_ps lam_body lam_rtps
+            n = arraySize 0 arr_tp
+        runBinderT' . localScope (scopeOfLParams l_ps) $
+            letTupExp "map_res" $ Op (Screma n (ScremaForm [] [] lam) arr_nms)
+        where
+          mkRetTp (Array (ElemPrim _) shape u) ptp =
+            stripArray 1 $ Array (ElemPrim ptp) shape u
+          mkRetTp _ _  = error "unreachable case reached!"
+liftPExp2MapNest _ _ = error "In Rev.hs, function liftPExp2MapNest: unreachable case reached!"
+
+-- computes `d(x op y)/dx` when keep_first=true, 
+-- and `d(x op y)/dy otherwise. 
+-- `op` is given as `lam`
+mkScanAdjointLam :: Lambda -> Bool -> ADM Lambda
+mkScanAdjointLam lam0 keep_first = do
+  let len = length $ lambdaReturnType lam0
+  (lam, _, _) <- revLambda =<< renameLambda lam0
+  let (lam_ps, p_adjs) = splitAt (2 * len) $ lambdaParams lam
+  stms <- runBinderT'_ . localScope (scopeOfLParams lam_ps) $ do
+          mapM_ (\ p -> letBindNames [paramName p] $ BasicOp $ adOne $ paramDec p) p_adjs
+  let lam_bdy = lambdaBody lam
+      lam_bdy'= lam_bdy { bodyStms = stms <> bodyStms lam_bdy }
+      (bdy_res', lam_ret') =
+          if keep_first
+          then (take len $ bodyResult lam_bdy, take len $ lambdaReturnType lam)
+          else (drop len $ bodyResult lam_bdy, drop len $ lambdaReturnType lam)
+  return $ lam { lambdaParams = lam_ps, lambdaReturnType = lam_ret', lambdaBody = lam_bdy' { bodyResult = bdy_res' } }
+
+-- Should generate something like:
+-- `\ j -> let i = n - 1 - j
+--         if i < n-1 then ( ys_adj[i], df2dx ys[i] xs[i+1]) else (0,1) )`
+-- where `ys` is  the result of scan
+--       `xs` is  the input  of scan
+--       `ys_adj` is the known adjoint of ys
+--       `j` draw values from `iota n`
+mkScanFusedMapLam :: SubExp -> Lambda -> [VName] -> [VName] -> [VName] -> ADM Lambda
+mkScanFusedMapLam n scn_lam xs ys ys_adj = do
+  lam <- mkScanAdjointLam scn_lam True
+  ystp  <- mapM lookupType ys
+  let rtp = lambdaReturnType lam
+  let lam_arg = map paramName $ lambdaParams lam
+  let (lam_as, lam_bs) = splitAt (length rtp) lam_arg
+  par_i <- newParam "i" $ Prim int64
+  let i = paramName par_i
+  let pars  = zipWith Param ys_adj ystp
+  body <- runBodyBinder . localScope (scopeOfLParams (par_i:pars)) $
+      eBody
+        [ eIf ( toExp $ le64 i .>. pe64 (intConst Int64 0) )
+              ( do
+                  (nms,stms) <- runBinderT' . localScope (scopeOfLParams (par_i:pars)) $ do
+                    j  <- letSubExp "j" =<< toExp (pe64 n - (le64 i + pe64 (intConst Int64 1)))
+                    j1 <- letSubExp "j1"=<< toExp (pe64 n - le64 i)
+                    y_s<- forM (zip (zip3 ys xs ys_adj) (zip3 lam_as lam_bs rtp)) $
+                            \((y, x, y_), (a, b, t)) -> do
+                              yj <- letSubExp (baseString y ++ "_elem") $ BasicOp $ Index y $ DimFix j : fullSlice t []
+                              y_j<- letSubExp (baseString y_++ "_elem") $ BasicOp $ Index y_$ DimFix j : fullSlice t []
+                              xj <- letSubExp (baseString x ++ "_elem") $ BasicOp $ Index x $ DimFix j1: fullSlice t []
+                              letBindNames [a] $ BasicOp $ SubExp yj
+                              letBindNames [b] $ BasicOp $ SubExp xj
+                              return y_j
+                    lam_rs <- bodyBind $ lambdaBody lam
+                    return $ interleave $ zip y_s lam_rs
+                  addStms stms
+                  resultBodyM nms
+              )
+              ( do
+                  (rs, stms) <- runBinderT' $ do
+                    zs <- mapM (letSubExp "ct_zero" . BasicOp . adBlank) rtp
+                    os <- mapM (letSubExp "ct_one"  . BasicOp . adOne  ) rtp
+                    return $ interleave $ zip zs os
+                  addStms stms
+                  resultBodyM rs
+              )
+        ]
+  return $ Lambda [par_i] body (interleave $ zip rtp rtp)
+  where
+    interleave [] = []
+    interleave ((a,b):l) = a:b:interleave l
+
+-- let lin_o (a1: real, b1: real) (a2:real, b2: real) = (a2 \bar{+} b2 \bar{*} a1, b1 \bar{*} b2)
+mkScanLinFunO :: Type -> ADM (Scan SOACS)
+mkScanLinFunO tp = do
+  let ptp = getPrimElemType tp
+      (zero, one) = (Constant $ blankPrimValue ptp, Constant $ onePrimValue ptp)   
+  tmp <- mapM newVName ["a1", "b1", "a2", "b2"]
+  arr_nms <- mapM newVName ["a1s", "b1s", "a2s", "b2s"]
+  let [a1, b1, a2, b2] = tmp
+      ps = map (`Param` tp) arr_nms
+      -- lift scalar computation `a2 + b2*a1, b1*b2` to a map nest
+      (pet, plus, mul) = (primExpFromSubExp ptp . Var, getBinOpPlus ptp, getBinOpMul ptp)
+      pexps = [ BinOpExp plus (pet a2) $ BinOpExp mul (pet b2) (pet a1)
+              , BinOpExp mul (pet b1) (pet b2)
+              ]
+      tab = M.fromList $ zipWith (\ v vs -> (v, (vs, tp))) tmp arr_nms
+  (rs, stms) <- liftPExp2MapNest pexps tab
+  let body = mkBody stms $ map Var rs
+      lam  = Lambda ps body [tp,tp]
+  return $ Scan lam [zero, one]
+
+-- build the map following the scan with linear-function-composition:
+-- for each (ds,cs) length-n array results of the scan, combine them as:
+--    `let rs = map2 (\ d_i c_i -> d_i + c_i * y_adj[n-1]) d c |> reverse`
+-- but insert explicit indexing to reverse inside the map.
+mkScan2ndMaps :: SubExp -> (Type, VName, (VName, VName)) -> ADM (VName, Stms SOACS)
+mkScan2ndMaps n (arr_tp, y_adj, (ds,cs)) = do
+  let ptp  = getPrimElemType arr_tp
+      eltp = stripArray 1 arr_tp
+  par_i <- newParam "i" $ Prim int64
+  let i = paramName par_i
+  let pars = zipWith Param [y_adj, ds, cs] (replicate 3 arr_tp)
+  (nms, bdy_stms_1) <- runBinderT' . localScope (scopeOfLParams (par_i:pars)) $ do
+      -- ys_adj_last = ys_adj[n-1]  will be hoisted outside
+      nm1 <- letSubExp "nm1" =<< toExp (pe64 n + pe64 (intConst Int64 (-1)))
+      y_adj_last <- letExp (baseString y_adj ++ "_last") $ BasicOp $ Index y_adj $ fullSlice arr_tp [DimFix nm1]
+      j  <- letSubExp "j" =<< toExp (pe64 n - (le64 i + pe64 (intConst Int64 1)))
+      dj <- letExp (baseString ds ++ "_elem") $ BasicOp $ Index ds $ DimFix j : fullSlice eltp []
+      cj <- letExp (baseString cs ++ "_elem") $ BasicOp $ Index cs $ DimFix j : fullSlice eltp []
+      return [y_adj_last, dj, cj]
+  tmp <- mapM newVName ["y_adj_last", "d_j", "c_j"]
+  let [y_l, d_j, c_j] = tmp
+      (pet, plus, mul) = (primExpFromSubExp ptp . Var, getBinOpPlus ptp, getBinOpMul ptp)
+      pexps = [ BinOpExp plus (pet d_j) $ BinOpExp mul (pet c_j) (pet y_l) ]
+      tab = M.fromList $ zipWith (\ v vs -> (v, (vs, eltp))) tmp nms
+  (rs, bdy_stms_2) <- liftPExp2MapNest pexps tab
+  let lam = Lambda [par_i] (mkBody (bdy_stms_1<>bdy_stms_2) $ map Var rs) [eltp]
+  (rs_map, map_stms) <- runBinderT' $ do
+      iota <- letExp "iota" $ BasicOp $ Iota n (intConst Int64 0) (intConst Int64 1) Int64
+      letTupExp "after_scan" $ Op (Screma n (ScremaForm [] [] lam) [iota])
+  return (head rs_map, map_stms)
+-- perform the final map, which is fusable with the maps obtained from `mkScan2ndMaps`
+-- let xs_contribs =
+--    map3 (\ i a r -> if i==0 then r else (df2dy (ys[i-1]) a) \bar{*} r
+--         ) (iota n) xs rs
+mkScanFinalMap :: SubExp -> Lambda -> [VName] -> [VName] -> [VName] -> ADM ([VName], Stms SOACS)
+mkScanFinalMap n scn_lam xs ys rs = do
+  let eltps = lambdaReturnType scn_lam
+  lam <- mkScanAdjointLam scn_lam False
+  par_i <- newParam "i" $ Prim int64
+  let i = paramName par_i
+  par_x <- mapM (\ (x,t) -> newParam (baseString x++"_elem") t) $ zip xs eltps
+  par_r <- mapM (\ (r,t) -> newParam (baseString r++"_elem") t) $ zip rs eltps
+  -- unfortunately, we need to handle the ` lam_res \bar{*} r` outside the runBinderT'
+  let lam_rs0 = bodyResult $ lambdaBody lam
+  (lam_rs, cpy_stms) <- runBinderT' . localScope (scopeOfLParams (par_i:par_r++par_x)) $ do
+      forM lam_rs0 $ \lam_r0 -> mkVName lam_r0
+  tmp_res <- forM (zip3 lam_rs (map paramName par_r) eltps) $ \(lam_r, r, eltp) -> do
+      lr0 <- newVName (baseString lam_r ++ "_0_")
+      r0  <- newVName (baseString r ++ "_0_")
+      let ptp = getPrimElemType eltp
+          (pet, mul) = (primExpFromSubExp ptp . Var, getBinOpMul ptp)
+          pexps = [ BinOpExp mul (pet lr0) (pet r0) ]
+          tab = M.fromList $ zipWith (\ v vs -> (v, (vs, eltp))) [lr0, r0] [lam_r, r]
+      (rs_i, stms_i) <- liftPExp2MapNest pexps tab
+      return (head rs_i, stms_i)
+  let (th_res, stms2_lst) = unzip tmp_res
+      stms2 = mconcat stms2_lst
+  (cs, lam_stms) <- runBinderT' . localScope (scopeOfLParams (par_i:par_r++par_x)) $
+      letTupExp "scan_contribs"
+        =<< eIf ( toExp $ le64 i .>. pe64 (intConst Int64 0) )
+                ( do  (_,stms_1) <- runBinderT' . localScope (scopeOfLParams (par_i:par_r++par_x)) $ do
+                        im1 <- letSubExp "im1" =<< toExp (le64 i - pe64 (intConst Int64 1))
+                        ys_im1 <- forM (zip ys eltps) $ \(y,t) -> do
+                          letSubExp (baseString y++ "_elem") $ BasicOp $ Index y $ DimFix im1 : fullSlice t []
+                        forM_ (zip (ys_im1 ++ map (Var . paramName) par_x) (map paramName (lambdaParams lam))) $
+                              \(act,frm) -> letBindNames [frm] $ BasicOp $ SubExp act
+                        bodyBind $ lambdaBody lam
+                      addStms (stms_1 <> cpy_stms <> stms2)
+                      resultBodyM (map Var th_res)
+                )
+                (resultBodyM $ map (Var . paramName) par_r)
+  runBinderT' $ do
+      let map_lam = Lambda (par_i:par_x++par_r) (mkBody lam_stms (map Var cs)) eltps
+      iota <- letExp "iota" $ BasicOp $ Iota n (intConst Int64 0) (intConst Int64 1) Int64
+      letTupExp "scan_contribs" $ Op (Screma n (ScremaForm [] [] map_lam) (iota:xs++rs))
+  where
+    mkVName (Var v) = return v
+    mkVName ct = letExp "ct" $ BasicOp $ SubExp ct
+--------------------------
+--- Helpers for Reduce ---
+--------------------------
+
 eReverse :: MonadBinder m => VName -> m VName
 eReverse arr = do
   arr_t <- lookupType arr
@@ -233,20 +473,6 @@ mkReverse n arrtps = do
         letTupExp "rev_arrays" $ Op (Screma n (ScremaForm [] [] lam) [iota_nm])
       _ -> error "In mkReverse function of Rev.hs file: a iota should be held in a new variable!"
 
-adBlank :: Type -> BasicOp
-adBlank (Prim pt) = SubExp $ Constant $ blankPrimValue pt
-adBlank (Array (ElemPrim t) shape _) = Replicate shape $ Constant $ blankPrimValue t
-adBlank (Array (ElemAcc _) _ _) = error "adBlank: cannot create array of accumulators YET (?)"
-adBlank Acc {} = error "adBlank: cannot create blank accumulator"
-adBlank Mem {} = error "adBlank: cannot create blank memory"
-
-adOne :: Type -> BasicOp
-adOne (Prim pt) = SubExp $ Constant $ onePrimValue pt
-adOne (Array (ElemPrim t) shape _) = Replicate shape $ Constant $ onePrimValue t
-adOne (Array (ElemAcc _) _ _) = error "adOne: cannot create array of accumulators YET (?)"
-adOne Acc {} = error "adOne: cannot create blank accumulator"
-adOne Mem {} = error "adOne: cannot create blank memory"
-
 ------------------------
 -- Core of Reverse AD --
 ------------------------
@@ -338,6 +564,7 @@ instance Adjoint VName where
               BasicOp $ BinOp (Add it OverflowWrap) (Var _v) (Var d)
             Prim (FloatType ft) ->
               BasicOp $ BinOp (FAdd ft) (Var _v) (Var d)
+            tp -> error ("In Rev.hs, updateAdjoint: unsupported type: "++pretty tp)
         let update = M.singleton v _v'
         insAdjMap update
         return (_v', update, stms)
@@ -372,6 +599,7 @@ instance Adjoint VName where
       bop t = case elemType t of
         ElemPrim (IntType it) -> Add it OverflowWrap
         ElemPrim (FloatType ft) -> FAdd ft
+        tt -> error ("In Rev.hs, updateAdjointArray: unsupported element type: "++pretty tt)
 
       addArrays t xs ys =
         case (shapeDims . arrayShape) t of
@@ -530,7 +758,7 @@ revStm stm@(Let (Pattern [] pats) aux (DoLoop [] valpats (ForLoop v it bound [])
         localScope (scopeOfFParams $ map fst $ _free_params ++ _iter_params) $
           revBody' body
 
-      (_body_res_vars, _body_res_map, body_res_stms) <- unzip3 <$> mapM lookupAdj (subExpVars res)
+      (_body_res_vars, _body_res_map, _) <- unzip3 <$> mapM lookupAdj (subExpVars res)
 
       zipWithM_ insAdj fv _free_binds
 
@@ -675,7 +903,7 @@ revStm stm@(Let (Pattern [] [pe]) _aux (BasicOp (BinOp op x y))) = do
       s1 <> s2 <> s3 <> adj_x_s <> adj_y_s <> x_s <> y_s
     )
 revStm stm@(Let (Pattern [] pats) aux (If cond t@(Body _ t_stms t_res) f@(Body _ f_stms f_res) attr)) = do
-  (_pats, uspats, stm_pats) <- unzip3 <$> mapM (lookupAdj . patElemName) pats
+  (_pats, _uspats, _stm_pats) <- unzip3 <$> mapM (lookupAdj . patElemName) pats
   fwdStms <- revFwdStm stm
   t_fwd <- revFwdStms t_stms
   f_fwd <- revFwdStms f_stms
@@ -807,6 +1035,97 @@ revStm (Let (Pattern [] [pe]) _ (Op (Screma _ form [as])))
     shpFstDim (Shape []) = error "error in shpFstDim in Rev.hs"
     shpFstDim (Shape (d:_)) = Shape [d]
 --
+--
+-- Differentiating: let y = reduce \odot ne xs
+-- is implemented as:
+-- ls = scan_exc \odot  ne xs
+-- rs = scan_exc \odot' ne (reverse xs)
+-- xs_c = map3 (f_bar y_bar) ls as (reverse rs)
+-- where
+--   x \odot' y = y \odot x
+--   y_bar is the adjoint of the result y
+--   f l_i x_i r_i = l_i \odot x_i \odot r_i
+--   f_bar = the reverse diff of f with respect to x_i under the adjoint y_bar
+-- The plan is to create
+--   one scanomap SOAC which computes ls and rs
+--   another map which computes xs_c
+revStm (Let (Pattern [] pes) _ (Op (Screma n form xs)))
+  | Just [red] <- isReduceSOAC form = do
+    (ys_adj, pe_adj_us, pe_adj_stms) <- unzip3 <$> mapM (lookupAdj . patElemName) pes
+    let (lam0, ne) = (redLambda red, redNeutral red)
+    let alphas = lambdaReturnType lam0
+    lam  <- renameLambda lam0
+    lam' <- renameLambda lam0 {lambdaParams = flipParams $ lambdaParams lam0}
+    par_i <- newParam "i" $ Prim int64
+    -- phase1: build the scanomap soac
+    g_bdy <- mkFusedMapBody par_i ne alphas
+    let g_lam = Lambda [par_i] g_bdy (alphas++alphas)
+    (r_scan, scan_stms) <- runBinderT' $ do
+        iota <- letExp "iota" $ BasicOp $ Iota n (intConst Int64 0) (intConst Int64 1) Int64
+        letTupExp "adj_ctrb_scan" $ Op (Screma n (ScremaForm [Scan lam ne, Scan lam' ne] [] g_lam) [iota])
+    let (ls_arr, rs_arr) = splitAt (length ne) r_scan
+    -- phase2: build the following map:
+    f <- mkF $ redLambda red
+    (f_rev, _, _) <- revLambda f
+    par_i' <- newParam "i" $ Prim int64
+    let i' = paramName par_i'
+        (ls_as_ps, rs_adj_ps) = splitAt (2*length ne) $ lambdaParams f_rev
+        (rs_ps, adj_ps) = splitAt (length ne) $ map paramName rs_adj_ps
+        scp_params = par_i':ls_as_ps++zipWith Param ys_adj alphas
+    f_adj_body <- runBodyBinder . localScope (scopeOfLParams scp_params) $ do
+        nmim1 <- letSubExp "n_i_1" =<< toExp (pe64 n - (le64 i' + pe64 (intConst Int64 1)))
+        let idx_stms = map (mkIdxStm nmim1) $ zip3 alphas rs_arr rs_ps
+        addStms (stmsFromList idx_stms)            
+        forM_ (zip ys_adj adj_ps) $ \ (y_bar, adj_par) ->
+            letBindNames [adj_par] $ BasicOp $ SubExp $ Var y_bar
+        pure $ lambdaBody f_rev
+    let f_adj_body_res = take (length ne) $ drop (length ne) $ bodyResult f_adj_body
+        map_lam = Lambda (par_i':ls_as_ps) (f_adj_body {bodyResult = f_adj_body_res}) alphas
+    (r_map, map_stms) <- runBinderT' $ do
+        iota <- letExp "iota" $ BasicOp $ Iota n (intConst Int64 0) (intConst Int64 1) Int64
+        letTupExp "adj_ctrb_scan" $ Op (Screma n (ScremaForm [] [] map_lam) (iota:ls_arr++xs))
+    -- finally add contributions to the adjoint of xs
+    (_mystery, adj_upd_us, adj_upd_stms) <- fmap unzip3 . forM (zip xs r_map) $ \(x, x_adj) ->
+        updateAdjointArray Nothing x x_adj
+    let all_stms = mconcat pe_adj_stms <> scan_stms <> map_stms <> mconcat adj_upd_stms
+    return (mconcat pe_adj_us <> mconcat adj_upd_us, all_stms)
+  where
+    flipParams ps = uncurry (flip (++)) $ splitAt (length ps `div` 2) ps
+    mkFusedMapBody par_i ne alphas = do
+      let i = paramName par_i
+      runBodyBinder . localScope (scopeOfLParams [par_i]) $
+        eBody
+          [ eIf ( toExp $ le64 i .>. pe64 (intConst Int64 0) )
+                ( do
+                    ((rs1,rs2), stms) <- runBinderT' . localScope (scopeOfLParams [par_i]) $ do
+                      im1 <- letSubExp "i_1" =<< toExp (le64 i - pe64 (intConst Int64 1))
+                      nmi <- letSubExp "n_i" =<< toExp (pe64 n - le64 i)
+                      tmp <- forM (zip xs alphas) $ \(x,t) -> do
+                                x1 <- letSubExp (baseString x ++ "_elem_1") $ BasicOp $ Index x $ DimFix im1 : fullSlice t []
+                                x2 <- letSubExp (baseString x ++ "_elem_2") $ BasicOp $ Index x $ DimFix nmi : fullSlice t []
+                                return (x1,x2)
+                      return (unzip tmp)
+                    addStms stms
+                    resultBodyM (rs1 ++ rs2)
+                )
+                ( resultBodyM (ne ++ ne) )
+          ]
+    mkIdxStm idx (t,r_arr,r) =
+      mkLet [] [Ident r t] $ BasicOp $ Index r_arr $ DimFix idx : fullSlice t []
+    mkF lam = do
+      lam_l <- renameLambda lam
+      lam_r <- renameLambda lam
+      let w = length $ lambdaReturnType lam
+          (lps, aps) = splitAt w $ lambdaParams lam_l
+          (ips, rps) = splitAt w $ lambdaParams lam_r
+      body <- runBodyBinder $
+        localScope (scopeOfLParams $ lps <> aps <> rps) $ do
+          lam_l_res <- bodyBind $ lambdaBody lam_l
+          forM_ (zip ips lam_l_res) $ \(ip, se) ->
+            letBindNames [paramName ip] $ BasicOp $ SubExp se
+          pure $ lambdaBody lam_r
+      pure $ Lambda (lps <> aps <> rps) body $ lambdaReturnType lam
+--
 revStm (Let (Pattern [] [pe]) _ (Op (Screma w form as)))
   | Just [red] <- isReduceSOAC form = do
     (pe_adj, pe_adj_us, pe_adj_stms) <- lookupAdj $ patElemName pe
@@ -843,7 +1162,7 @@ revStm (Let (Pattern [] [pe]) _ (Op (Screma w form as)))
       -- We only want the adjoints with respect to the 'as' parameters.
       let (_, as_adj, _) = splitAt3 (length as) (length as) all_adjs
 
-      (mystery, us, stms) <- fmap unzip3 . forM (zip as as_adj) $ \(a, a_adj) ->
+      (_mystery, us, stms) <- fmap unzip3 . forM (zip as as_adj) $ \(a, a_adj) ->
         lift $ updateAdjointArray Nothing a a_adj
 
       addStms $ mconcat stms
@@ -870,7 +1189,7 @@ revStm (Let (Pattern [] [pe]) _ (Op (Screma w form as)))
           forM_ (zip ips lam_l_res) $ \(ip, se) ->
             letBindNames [paramName ip] $ BasicOp $ SubExp se
           pure $ lambdaBody lam_r
-      pure $ Lambda (lps <> aps <> rps) body $ lambdaReturnType lam
+      pure $ Lambda (lps <> aps <> rps) body $ lambdaReturnType lam    
 --
 revStm stmt@(Let (Pattern [] pes) _ (Op (Screma n (ScremaForm [] [red] f) xs)))
   | isIdentityLambda f = do
@@ -955,15 +1274,14 @@ revStm stm@(Let (Pattern [] [pe]) _ (Apply f args _ _))
       )
 --
 -- only single scan supported for now:  ys = scan odot xs
--- Implementation restricted to scalar operators for now;
+-- Implementation restricted to scalar operators for now, including tuples;
 -- generalization should handle \bar{+} and \bar{*}
 -- including for the lin_fun_comp operator
 revStm (Let (Pattern [] pes) _ (Op (Screma n (ScremaForm [scn] [] f) xs)))
-  | isIdentityLambda f,
-    all primType (lambdaReturnType (scanLambda scn)) = do
+  | isIdentityLambda f = do
       let ys = map patElemName pes
       (ys_adj, ys_adj_us, ys_adj_stms) <- unzip3 <$> mapM lookupAdj ys
-      map1_lam <- mkFusedMapLam ys ys_adj
+      map1_lam <- mkScanFusedMapLam n (scanLambda scn) xs ys ys_adj
 
       scans_lin_fun_o <- mapM mkScanLinFunO $ lambdaReturnType $ scanLambda scn
       let scp = zip ys_adj $ map (LParamName . patElemDec) pes
@@ -971,9 +1289,9 @@ revStm (Let (Pattern [] pes) _ (Op (Screma n (ScremaForm [scn] [] f) xs)))
             iota <- letExp "iota" $ BasicOp $ Iota n (intConst Int64 0) (intConst Int64 1) Int64
             letTupExp "adj_ctrb_scan" $ Op (Screma n (ScremaForm scans_lin_fun_o [] map1_lam) [iota])
 
-      (red_nms, snd_maps) <- trace ("Cosmin000: "++pretty scan_stms) $ unzip <$> mapM mkSecondMaps (zip3 (map patElemDec pes) ys_adj (chunk2 r_scan))
+      (red_nms, snd_maps) <- unzip <$> mapM (mkScan2ndMaps n) (zip3 (map patElemDec pes) ys_adj (chunk2 r_scan))
 
-      (xs_contribs, fin_map_stms) <- trace ("Cosmin11111: "++pretty snd_maps) $ mkFinalMap red_nms
+      (xs_contribs, fin_map_stms) <- mkScanFinalMap n (scanLambda scn) xs ys red_nms
 
       (new_map_adj, stms_map_upd) <- inScopeOf scp $ do
           foldM
@@ -984,153 +1302,13 @@ revStm (Let (Pattern [] pes) _ (Op (Screma n (ScremaForm [scn] [] f) xs)))
             (M.empty, mempty)
             (zip xs xs_contribs)
       let all_stms = mconcat ys_adj_stms<>scan_stms<>mconcat snd_maps<>fin_map_stms<>stms_map_upd
-      trace ("COSMIN SCAN: "++pretty all_stms) $
-        return (mconcat ys_adj_us <> new_map_adj, all_stms)
+      --trace ("COSMIN SCAN: "++pretty all_stms) $
+      return (mconcat ys_adj_us <> new_map_adj, all_stms)
     where
-      interleave [] = []
-      interleave ((a,b):l) = a:b:interleave l
       chunk2 [] = []
       chunk2 (a:b:r) = (a,b) : chunk2 r
       chunk2 _ = error "Rev.hs, chunk2: impossible case reached!"
-      getPrimType (Prim t) = t
-      getPrimType _ = error "In Rev.hs, revStm of scan: array of array case is unsupproted!"
-      mkAdjointLam :: Scan SOACS -> Bool -> ADM Lambda
-      mkAdjointLam (Scan lam0 nes) keep_first = do
-        (lam, _, _) <- revLambda =<< renameLambda lam0
-        let lam_ps = take (2 * length nes) $ lambdaParams lam
-            p_adjs = drop (2*length nes) $ lambdaParams lam
-        stms <- runBinderT'_ . localScope (scopeOfLParams lam_ps) $ do
-          mapM_ (\ p -> letBindNames [paramName p] $ BasicOp $ adOne $ paramDec p) p_adjs
-        let lam_bdy = lambdaBody lam
-            lam_bdy'= lam_bdy { bodyStms = stms <> bodyStms lam_bdy }
-            (bdy_res', lam_ret') =
-              if keep_first
-              then (take (length nes) $ bodyResult lam_bdy, take (length nes) $ lambdaReturnType lam)
-              else (drop (length nes) $ bodyResult lam_bdy, drop (length nes) $ lambdaReturnType lam)
-            lam' = lam { lambdaParams = lam_ps, lambdaReturnType = lam_ret', lambdaBody = lam_bdy' { bodyResult = bdy_res' } }
-        return lam'
-      -- Should generate something like:
-      -- `\ j -> let i = n - 1 - j
-      --         if i < n-1 then ( ys_adj[i], df2dx ys[i] xs[i+1]) else (0,1) )`
-      -- where `ys` is  the result of scan
-      --       `xs` is  the input  of scan
-      --       `ys_adj` is the known adjoint of ys
-      --       `j` draw values from `iota n`
-      mkFusedMapLam :: [VName] -> [VName] -> ADM Lambda
-      mkFusedMapLam ys ys_adj = do
-        lam <- mkAdjointLam scn True
-        ystp  <- mapM lookupType ys
-        let rtp = lambdaReturnType lam
-        let lam_arg = map paramName $ lambdaParams lam
-        let (lam_as, lam_bs) = splitAt (length rtp) lam_arg
-        par_i <- newParam "i" $ Prim int64
-        let i = paramName par_i
-        let pars  = zipWith Param ys_adj ystp
-        body <- runBodyBinder . localScope (scopeOfLParams (par_i:pars)) $
-            eBody
-              [ eIf ( toExp $ le64 i .>. pe64 (intConst Int64 0) )
-                    (
-                      do
-                        (nms,stms) <- runBinderT' . localScope (scopeOfLParams (par_i:pars)) $ do
-                          j  <- letSubExp "j" =<< toExp (pe64 n - (le64 i + pe64 (intConst Int64 1)))
-                          j1 <- letSubExp "j1"=<< toExp (pe64 n - le64 i)
-                          y_s<- forM (zip (zip3 ys xs ys_adj) (zip3 lam_as lam_bs rtp)) $
-                                  \((y, x, y_), (a, b, t)) -> do
-                                    yj <- letSubExp (baseString y ++ "_elem") $ BasicOp $ Index y $ DimFix j : fullSlice t []
-                                    y_j<- letSubExp (baseString y_++ "_elem") $ BasicOp $ Index y_$ DimFix j : fullSlice t []
-                                    xj <- letSubExp (baseString x ++ "_elem") $ BasicOp $ Index x $ DimFix j1: fullSlice t []
-                                    letBindNames [a] $ BasicOp $ SubExp yj
-                                    letBindNames [b] $ BasicOp $ SubExp xj
-                                    return y_j
-                          lam_rs <- bodyBind $ lambdaBody lam
-                          return $ interleave $ zip y_s lam_rs
-                        addStms stms
-                        resultBodyM nms
-                    )
-                    (
-                      do
-                        (rs, stms) <- runBinderT' $ do
-                          zs <- mapM (letSubExp "ct_zero" . BasicOp . adBlank) rtp
-                          os <- mapM (letSubExp "ct_one"  . BasicOp . adOne  ) rtp
-                          return $ interleave $ zip zs os
-                        addStms stms
-                        resultBodyM rs
-                    )
-              ]
-        return $ Lambda [par_i] body (interleave $ zip rtp rtp)
-      -- let lin_o (a1: real, b1: real) (a2:real, b2: real) = (a2 \bar{+} b2 \bar{*} a1, b1 \bar{*} b2)
-      mkScanLinFunO :: Type -> ADM (Scan SOACS)
-      mkScanLinFunO tp@(Prim ptp) = do
-        let (zero, one) = (Constant $ blankPrimValue ptp, Constant $ onePrimValue ptp)
-        tmp <- mapM newVName ["a1", "b1", "a2", "b2"]
-        let [a1, b1, a2, b2] = tmp
-        let ps = map (`Param` tp) [a1, b1, a2, b2]
-        (rs, stms) <- runBinderT' $
-          localScope (scopeOfLParams ps) $ do
-            --r1 <- letSubExp "r1" =<< toExp (le64 a2 + (le64 b2 * le64 a1))
-            r_tmp <- letSubExp "r_tmp" $ BasicOp $ BinOp (getBinOpMul ptp) (Var b2) (Var a1)
-            r1 <- letSubExp "r1"  $ BasicOp $ BinOp (getBinOpPlus ptp) (Var a2) r_tmp
-            --r2 <- letSubExp "r2" =<< toExp (le64 b1 * le64 b2)
-            r2 <- letSubExp "r2" $ BasicOp $ BinOp (getBinOpMul ptp) (Var b1) (Var b2)
-            return [r1,r2]
-        let body = mkBody stms rs
-        let lam  = Lambda ps body [tp,tp]
-        return $ Scan lam [zero, one]
-      mkScanLinFunO _ = error "revStm: Scan currently supports only operators on primitive types"
-      -- building the map following the scan with linear-function-composition
-      mkSecondMaps :: (Type, VName, (VName, VName)) -> ADM (VName, Stms SOACS)
-      mkSecondMaps (arr_tp, y_adj, (ds,cs)) = do
-        let eltp = stripArray 1 arr_tp
-        par_i <- newParam "i" $ Prim int64
-        let i = paramName par_i
-        let pars = zipWith Param [y_adj, ds, cs] (replicate 3 arr_tp)
-        (rs, bdy_stms) <- runBinderT' . localScope (scopeOfLParams (par_i:pars)) $ do
-            -- ys_adj_last = ys_adj[n-1]  will be hoisted outside
-            nm1 <- letSubExp "nm1" =<< toExp (pe64 n + pe64 (intConst Int64 (-1)))
-            y_adj_last <- letSubExp (baseString y_adj ++ "_last") $ BasicOp $ Index y_adj $ fullSlice arr_tp [DimFix nm1]
-            j  <- letSubExp "j" =<< toExp (pe64 n - (le64 i + pe64 (intConst Int64 1)))
-            dj <- letSubExp (baseString ds ++ "_elem") $ BasicOp $ Index ds $ DimFix j : fullSlice eltp []
-            cj <- letSubExp (baseString cs ++ "_elem") $ BasicOp $ Index cs $ DimFix j : fullSlice eltp []
-            -- this needs to be expanded to support array operations
-            r0 <- letSubExp "r_tmp" $ BasicOp $ BinOp (getBinOpMul  (getPrimType eltp)) cj y_adj_last
-            letSubExp "r_bar" $ BasicOp $ BinOp (getBinOpPlus (getPrimType eltp)) dj r0
-        let lam = Lambda [par_i] (mkBody bdy_stms [rs]) [eltp]
-        (rs_map, map_stms) <- runBinderT' $ do
-            iota <- letExp "iota" $ BasicOp $ Iota n (intConst Int64 0) (intConst Int64 1) Int64
-            letTupExp "after_scan" $ Op (Screma n (ScremaForm [] [] lam) [iota])
-        return (head rs_map, map_stms)
-      mkFinalMap :: [VName] -> ADM ([VName], Stms SOACS)
-      mkFinalMap rs = do
-        lam <- mkAdjointLam scn False
-        par_i <- newParam "i" $ Prim int64
-        let i = paramName par_i
-        let ys = map patElemName pes
-        let arr_tp = map patElemDec pes
-        let eltps = map (stripArray 1) arr_tp
-        --let params = par_i : zipWith Param rs arr_tp
-        par_x <- mapM (\ (x,t) -> newParam (baseString x++"_elem") t) $ zip xs eltps
-        par_r <- mapM (\ (r,t) -> newParam (baseString r++"_elem") t) $ zip rs eltps
-        (cs, lam_stms) <- runBinderT' . localScope (scopeOfLParams (par_i:par_r++par_x)) $
-            letTupExp "scan_contribs"
-              =<< eIf ( toExp $ le64 i .>. pe64 (intConst Int64 0) )
-                      ( do  (th_res,stms) <- runBinderT' . localScope (scopeOfLParams (par_i:par_r++par_x)) $ do
-                              im1 <- letSubExp "im1" =<< toExp (le64 i - pe64 (intConst Int64 1))
-                              ys_im1 <- forM (zip ys eltps) $ \(y,t) -> do
-                                letSubExp (baseString y++ "_elem") $ BasicOp $ Index y $ DimFix im1 : fullSlice t []
-                              forM_ (zip (ys_im1 ++ map (Var . paramName) par_x) (map paramName (lambdaParams lam))) $
-                                    \(act,frm) -> letBindNames [frm] $ BasicOp $ SubExp act
-                              lam_rs <- bodyBind $ lambdaBody lam
-                              forM (zip3 lam_rs (map paramName par_r) eltps) $ \(lam_r, r, eltp) ->
-                                    letSubExp (baseString r ++ "_contrib") $ BasicOp $ BinOp (getBinOpMul (getPrimType eltp)) lam_r (Var r)
-                            addStms stms
-                            resultBodyM th_res
-                      )
-                      (resultBodyM $ map (Var . paramName) par_r)
-        runBinderT' $ do
-            let map_lam = Lambda (par_i:par_x++par_r) (mkBody lam_stms (map Var cs)) eltps
-            iota <- letExp "iota" $ BasicOp $ Iota n (intConst Int64 0) (intConst Int64 1) Int64
-            letTupExp "scan_contribs" $ Op (Screma n (ScremaForm [] [] map_lam) (iota:xs++rs))
--- everything else is an error
+-- everything else is unsupported at the moment
 revStm stm = error $ "unsupported stm: " ++ pretty stm ++ "\n\n\n" ++ show stm
 
 revLambda :: Lambda -> ADM (Lambda, [VName], [VName])
