@@ -7,6 +7,7 @@ module Futhark.Pass.ExtractMulticore (extractMulticore) where
 import Control.Monad.Identity
 import Control.Monad.Reader
 import Control.Monad.State
+import Data.Function ((&))
 import Futhark.Analysis.Rephrase
 import Futhark.IR
 import Futhark.IR.MC
@@ -318,13 +319,15 @@ transformSOAC pat _ (Scatter w lam ivs dests) = do
   Body () kstms res <- mapLambdaToBody transformBody gtid lam ivs
 
   let (dests_ws, dests_ns, dests_vs) = unzip3 dests
-      (i_res, v_res) = splitAt (sum dests_ns) res
+      indexes = zipWith (*) dests_ns $ map length dests_ws
+      (i_res, v_res) = splitAt (sum indexes) res
       rets = takeLast (length dests) $ lambdaReturnType lam
       kres = do
         (a_w, a, is_vs) <-
-          zip3 dests_ws dests_vs $
-            chunks dests_ns $ zip i_res v_res
-        return $ WriteReturns [a_w] a [([DimFix i], v) | (i, v) <- is_vs]
+          zip (chunks (concat $ zipWith (\ws n -> replicate n $ length ws) dests_ws dests_ns) i_res) v_res
+            & chunks dests_ns
+            & zip3 dests_ws dests_vs
+        return $ WriteReturns (shapeDims a_w) a [(map DimFix is, v) | (is, v) <- is_vs]
       kbody = KernelBody () kstms kres
   return $
     oneStm $
