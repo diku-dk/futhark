@@ -7,6 +7,7 @@ import qualified Futhark.CodeGen.ImpCode.Kernels as Imp
 import Futhark.CodeGen.ImpGen hiding (compileProg)
 import Futhark.CodeGen.ImpGen.Kernels.Base
 import qualified Futhark.CodeGen.ImpGen.Kernels.SegScan.SinglePass as SinglePass
+import qualified Futhark.CodeGen.ImpGen.Kernels.SegScan.SegSinglePass as SegSinglePass
 import qualified Futhark.CodeGen.ImpGen.Kernels.SegScan.TwoPass as TwoPass
 import Futhark.IR.KernelsMem
 
@@ -63,6 +64,8 @@ compileSegScan pat lvl space scans kbody = sWhen (0 .<. n) $ do
     CUDA
       | Just scan' <- canBeSinglePass space scans ->
         SinglePass.compileSegScan pat lvl space scan' kbody
+      | [_,_] <- unSegSpace space ->
+        SegSinglePass.compileSegScan pat lvl space (combineScans scans) kbody
     _ -> TwoPass.compileSegScan pat lvl space scans kbody
   where
     n = product $ map toInt64Exp $ segSpaceDims space
