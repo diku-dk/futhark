@@ -146,20 +146,16 @@ instance Pretty (PatElemT b) => Pretty (PatElemT (a, b)) where
   ppr = ppr . fmap snd
 
 instance Pretty (PatElemT Type) where
-  ppr (PatElem name t) = ppr t <+> ppr name
+  ppr (PatElem name t) = ppr name <+> colon <+> ppr t
 
 instance Pretty (Param b) => Pretty (Param (a, b)) where
   ppr = ppr . fmap snd
 
 instance Pretty (Param DeclType) where
-  ppr (Param name t) =
-    ppr t
-      <+> ppr name
+  ppr (Param name t) = ppr name <+> colon <+> ppr t
 
 instance Pretty (Param Type) where
-  ppr (Param name t) =
-    ppr t
-      <+> ppr name
+  ppr (Param name t) = ppr name <+> colon <+> ppr t
 
 instance PrettyLore lore => Pretty (Stm lore) where
   ppr bnd@(Let pat (StmAux cs _ dec) e) =
