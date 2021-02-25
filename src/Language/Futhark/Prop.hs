@@ -883,19 +883,7 @@ intrinsics =
                IntrinsicPolyFun
                  [tp_a]
                  [ uarr_2d_a,
-                   Array
-                     ()
-                     Nonunique
-                     ( Record
-                         ( M.fromList $
-                             zip
-                               tupleFieldNames
-                               [ Scalar $ Prim $ Signed Int64,
-                                 Scalar $ Prim $ Signed Int64
-                               ]
-                         )
-                     )
-                     (rank 1),
+                   Array () Nonunique (tupInt64 2) (rank 1),
                    Array () Nonunique t_a (rank 1)
                  ]
                  uarr_2d_a
@@ -904,20 +892,7 @@ intrinsics =
                IntrinsicPolyFun
                  [tp_a]
                  [ uarr_3d_a,
-                   Array
-                     ()
-                     Nonunique
-                     ( Record
-                         ( M.fromList $
-                             zip
-                               tupleFieldNames
-                               [ Scalar $ Prim $ Signed Int64,
-                                 Scalar $ Prim $ Signed Int64,
-                                 Scalar $ Prim $ Signed Int64
-                               ]
-                         )
-                     )
-                     (rank 1),
+                   Array () Nonunique (tupInt64 3) (rank 1),
                    Array () Nonunique t_a (rank 1)
                  ]
                  uarr_3d_a
@@ -1098,6 +1073,12 @@ intrinsics =
     intrinsicBinOp Greater = ordering
     intrinsicBinOp Geq = ordering
     intrinsicBinOp _ = Nothing
+
+    tupInt64 n =
+      Record $
+        M.fromList $
+          zip tupleFieldNames $
+            replicate n $ Scalar $ Prim $ Signed Int64
 
 -- | The largest tag used by an intrinsic - this can be used to
 -- determine whether a 'VName' refers to an intrinsic or a user-defined name.
