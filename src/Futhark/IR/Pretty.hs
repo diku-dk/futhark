@@ -51,13 +51,6 @@ class
   PrettyLore lore
   where
   ppExpLore :: ExpDec lore -> Exp lore -> Maybe Doc
-  ppExpLore _ (If _ _ _ (IfDec ts _)) =
-    Just $
-      stack $
-        map (text . ("-- " ++)) $
-          lines $
-            pretty $
-              text "Branch returns:" <+> ppTuple' ts
   ppExpLore _ _ = Nothing
 
 commastack :: [Doc] -> Doc
@@ -229,19 +222,21 @@ instance Pretty BasicOp where
     text "assert" <> apply [ppr e, ppr msg, text $ show $ locStr loc]
 
 instance Pretty a => Pretty (ErrorMsg a) where
-  ppr (ErrorMsg parts) = commasep $ map p parts
+  ppr (ErrorMsg parts) = braces $ align $ commasep $ map p parts
     where
       p (ErrorString s) = text $ show s
-      p (ErrorInt32 x) = ppr x
-      p (ErrorInt64 x) = ppr x
+      p (ErrorInt32 x) = ppr x <+> colon <+> text "i32"
+      p (ErrorInt64 x) = ppr x <+> colon <+> text "i64"
 
 instance PrettyLore lore => Pretty (Exp lore) where
-  ppr (If c t f (IfDec _ ifsort)) =
+  ppr (If c t f (IfDec ret ifsort)) =
     text "if" <+> info' <+> ppr c
       </> text "then"
       <+> maybeNest t
       <+> text "else"
       <+> maybeNest f
+      <+> colon
+      <+> braces (commasep $ map ppr ret)
     where
       info' = case ifsort of
         IfNormal -> mempty
