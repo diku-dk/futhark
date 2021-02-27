@@ -379,8 +379,7 @@ instance Traversable Param where
 -- | How to index a single dimension of an array.
 data DimIndex d
   = -- | Fix index in this dimension.
-    DimFix
-      d
+    DimFix d
   | -- | @DimSlice start_offset num_elems stride@.
     DimSlice d d d
   deriving (Eq, Ord, Show, Generic)
