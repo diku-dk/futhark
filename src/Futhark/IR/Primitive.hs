@@ -687,7 +687,8 @@ allCmpOps =
       map CmpSlt allIntTypes,
       map CmpSle allIntTypes,
       map FCmpLt allFloatTypes,
-      map FCmpLe allFloatTypes
+      map FCmpLe allFloatTypes,
+      [CmpLlt, CmpLle]
     ]
 
 -- | A list of all conversion operators for all types.
