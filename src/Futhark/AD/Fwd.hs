@@ -103,7 +103,7 @@ instance TanBinder (PatElemT dec) where
     return $ PatElem p' t
 
 instance TanBinder (PatternT dec) where
-  newTan (Pattern [] pes) = Pattern [] <$> newTan pes
+  newTan (Pattern ctx pes) = Pattern ctx <$> newTan pes
 
 instance TanBinder (Param attr) where
   newTan (Param p t) = do
@@ -121,8 +121,14 @@ instance Tangent VName where
   tangent v = do
     maybeTan <- gets $ M.lookup v . stateTans
     case maybeTan of
-      Just v' -> return v'
-      Nothing -> error $ "No tangent: " ++ show v
+      Just v_tan -> return v_tan
+      Nothing -> do
+        t <- lookupType v
+        v_tan <- newTan v
+        letBindNames [v_tan] $ zeroExp t
+        return v_tan
+
+--        error $ "No tangent: " ++ show v
 
 instance Tangent SubExp where
   tangent (Constant c) = zeroTan $ Prim $ primValueType c
@@ -187,6 +193,49 @@ basicFwd pat aux op = do
       x_tan <- tangent x
       addStm $ Let pat_tan aux $ BasicOp $ Replicate n x_tan
 
+fwdLambda :: Lambda -> ADM Lambda
+fwdLambda (Lambda params body ret) = do
+  params' <- newTan params
+  body' <- fwdBody body
+  pure $ Lambda (params ++ params') body' $ ret ++ ret
+
+flipLambda :: Lambda -> Lambda
+flipLambda (Lambda params body ret) = Lambda (reverse params) body (reverse ret)
+
+fwdSOAC :: Pattern -> StmAux () -> SOAC SOACS -> ADM ()
+fwdSOAC pat aux (Screma size (ScremaForm [] [] f) xs) = do
+  pat_tan <- newTan pat
+  xs_tan <- tangent xs
+  f' <- fwdLambda f
+  addStm $ Let (pat <> pat_tan) aux $ Op $ Screma size (mapSOAC f') $ xs ++ xs_tan
+
+--fwdSOAC pat aux (Screma size (ScremaForm [] [Reduce com op zeros] _) [xs]) = do
+--  pat_tan <- newTan pat
+--  xs_tan <- tangent xs
+--  error "oops"
+--  PrimType t <- lookupType xs
+--  add_op <- case t of
+--    IntType it -> binOpLambda (Add it OverflowWrap) t
+--    FloatType ft -> binOpLambda (FAdd ft) t
+--  let sum_red = Reduce Commutative add_op (Constant $ blankPrimValue t)
+--  op' <- fwdLambda op
+--  --scan_left <- letBindNames ["scan_left"] . Op . Screma size <$> scanSOAC [Scan op zeros]
+--  --scan_right <- letBindNames ["scan_right"] . Op . Screma size <$> scanSOAC [Scan (flipLambda op) (reverse zeros)]
+--  map_f <- do
+--    x <- newVName "x"
+--    i <- newVName "i"
+--    body <- insertStmsM $ do
+--      Index scan_left (DimFix $ Var i)
+
+--redomapSOAC
+
+--binOpLambda ::
+--  (MonadBinder m, Bindable (Lore m)) =>
+--  BinOp ->
+--  PrimType ->
+--  m (Lambda (Lore m))
+--binOpLambda bop t = binLambda (BinOp bop) t t
+
 fwdStm :: Stm -> ADM ()
 fwdStm stm@(Let pat aux (BasicOp e)) = addStm stm >> basicFwd pat aux e
 fwdStm stm@(Let pat _ (Apply f args _ _))
@@ -210,7 +259,7 @@ fwdStm (Let (Pattern ctx pes) aux (If cond t f (IfDec ret ifsort))) = do
   addStm $
     Let (Pattern ctx (pes ++ pes_tan)) aux $
       If cond t_tan f_tan (IfDec (ret ++ ret) ifsort)
-fwdStm (Let (Pattern [] pes) aux (DoLoop [] val_pats (WhileLoop v) body)) = do
+fwdStm (Let (Pattern ctx pes) aux (DoLoop l_ctx val_pats (WhileLoop v) body)) = do
   let (val_params, vals) = unzip val_pats
   vals_tan <- tangent vals
   pes_tan <- newTan pes
@@ -219,9 +268,25 @@ fwdStm (Let (Pattern [] pes) aux (DoLoop [] val_pats (WhileLoop v) body)) = do
     let val_pats_tan = zip val_params_tan vals_tan
     body_tan <- fwdBody body
     addStm $
-      Let (Pattern [] (pes ++ pes_tan)) aux $
-        DoLoop [] (val_pats ++ val_pats_tan) (WhileLoop v) body_tan
-fwdStm (Let (Pattern [] pes) aux (DoLoop [] val_pats loop@(ForLoop i it bound []) body)) = do
+      Let (Pattern ctx (pes ++ pes_tan)) aux $
+        DoLoop l_ctx (val_pats ++ val_pats_tan) (WhileLoop v) body_tan
+--fwdStm (Let (Pattern ctx pes) aux (DoLoop l_ctx val_pats loop@(ForLoop i it bound []) body)) = do
+--  let (val_params, vals) = unzip val_pats
+--  vals_tan <- tangent vals
+--  pes_tan <- newTan pes
+--  slocal' $ do
+--    val_params_tan <- newTan val_params
+--    let val_pats_tan = zip val_params_tan vals_tan
+--    inScopeOf loop $ do
+--      when (i `nameIn` freeIn body) $ do
+--        t <- lookupType i
+--        i_tan <- newTan i
+--        letBindNames [i_tan] $ zeroExp t
+--      body_tan <- fwdBody body
+--      addStm $
+--        Let (Pattern ctx (pes ++ pes_tan)) aux $
+--          DoLoop l_ctx (val_pats ++ val_pats_tan) (ForLoop i it bound []) body_tan
+fwdStm (Let (Pattern ctx pes) aux (DoLoop l_ctx val_pats loop@(ForLoop i it bound []) body)) = do
   let (val_params, vals) = unzip val_pats
   vals_tan <- tangent vals
   pes_tan <- newTan pes
@@ -229,29 +294,31 @@ fwdStm (Let (Pattern [] pes) aux (DoLoop [] val_pats loop@(ForLoop i it bound []
     val_params_tan <- newTan val_params
     let val_pats_tan = zip val_params_tan vals_tan
     inScopeOf loop $ do
-      when (i `nameIn` freeIn body) $ do
-        t <- lookupType i
-        i_tan <- newTan i
-        letBindNames [i_tan] $ zeroExp t
       body_tan <- fwdBody body
       addStm $
-        Let (Pattern [] (pes ++ pes_tan)) aux $
-          DoLoop [] (val_pats ++ val_pats_tan) (ForLoop i it bound []) body_tan
---fwdStm (Let (Pattern [] pes) aux (DoLoop [] val_pats loop@(ForLoop i it bound loop_vars) body)) = do
---  let (val_params, vals) = unzip val_pats
---      (loop_params, loop_vals) = unzip loop_vars
---  vals_tan <- tangent vals
---  loop_vals_tan <- tangent loop_vals
---  pes_tan <- newTan pes
---  --slocal' $ do
---  val_params_tan <- newTan val_params
---  loop_params_tan <- newTan loop_params
---  let val_pats_tan = zip val_params_tan vals_tan
---  let loop_vars_tan = zip loop_params_tan loop_vals_tan
---  body_tan <- inScopeOf loop $ fwdBody body
---  addStm $
---    Let (Pattern [] (pes ++ pes_tan)) aux $
---      DoLoop [] (val_pats ++ val_pats_tan) (ForLoop i it bound (loop_vars ++ loop_vars_tan)) body_tan
+        Let (Pattern ctx (pes ++ pes_tan)) aux $
+          DoLoop l_ctx (val_pats ++ val_pats_tan) (ForLoop i it bound []) body_tan
+fwdStm (Let (Pattern ctx pes) aux (DoLoop l_ctx val_pats loop@(ForLoop i it bound loop_vars) body)) = do
+  let (val_params, vals) = unzip val_pats
+      (loop_params, loop_vals) = unzip loop_vars
+  vals_tan <- tangent vals
+  loop_vals_tan <- tangent loop_vals
+  pes_tan <- newTan pes
+  slocal' $ do
+    val_params_tan <- newTan val_params
+    loop_params_tan <- newTan loop_params
+    let val_pats_tan = zip val_params_tan vals_tan
+    let loop_vars_tan = zip loop_params_tan loop_vals_tan
+    inScopeOf loop $ do
+      --when (i `nameIn` freeIn body) $ do
+      --  t <- lookupType i
+      --  i_tan <- newTan i
+      --  letBindNames [i_tan] $ zeroExp t
+      body_tan <- fwdBody body
+      addStm $
+        Let (Pattern ctx (pes ++ pes_tan)) aux $
+          DoLoop l_ctx (val_pats ++ val_pats_tan) (ForLoop i it bound (loop_vars ++ loop_vars_tan)) body_tan
+fwdStm s@(Let pat aux (Op soac)) = fwdSOAC pat aux soac
 fwdStm stm =
   error $ "unhandled forward mode AD for Stm: " ++ pretty stm ++ "\n" ++ show stm
 
