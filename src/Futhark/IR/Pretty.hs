@@ -67,14 +67,14 @@ instance Pretty Commutativity where
   ppr Noncommutative = text "noncommutative"
 
 instance Pretty Shape where
-  ppr = brackets . commasep . map ppr . shapeDims
+  ppr = mconcat . map (brackets . ppr) . shapeDims
 
 instance Pretty a => Pretty (Ext a) where
   ppr (Free e) = ppr e
   ppr (Ext x) = text "?" <> text (show x)
 
 instance Pretty ExtShape where
-  ppr = brackets . commasep . map ppr . shapeDims
+  ppr = mconcat . map (brackets . ppr) . shapeDims
 
 instance Pretty Space where
   ppr DefaultSpace = mempty
@@ -249,7 +249,9 @@ instance PrettyLore lore => Pretty (Exp lore) where
         | otherwise = nestedBlock "{" "}" $ ppr b
   ppr (BasicOp op) = ppr op
   ppr (Apply fname args _ (safety, _, _)) =
-    text (nameToString fname) <> safety' <> apply (map (align . pprArg) args)
+    text "apply"
+      <+> text (nameToString fname) <> safety'
+        <> apply (map (align . pprArg) args)
     where
       pprArg (arg, Consume) = text "*" <> ppr arg
       pprArg (arg, _) = ppr arg
