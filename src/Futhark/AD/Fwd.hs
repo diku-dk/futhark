@@ -29,15 +29,15 @@ zeroExp (Array (ElemPrim pt) shape _) =
   BasicOp $ Replicate shape $ Constant $ blankPrimValue pt
 zeroExp t = error $ "zeroExp: " ++ pretty t
 
-slocal' :: (MonadState s m) => m a -> m a
+slocal' :: ADM a -> ADM a
 slocal' = slocal id
 
-slocal :: (MonadState s m) => (s -> s) -> m a -> m a
+slocal :: (RState -> RState) -> ADM a -> ADM a
 slocal f m = do
   s <- get
   modify f
   a <- m
-  put s
+  modify $ \s' -> s' {stateTans = stateTans s}
   return a
 
 data RState = RState
