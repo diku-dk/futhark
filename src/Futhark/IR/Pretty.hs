@@ -188,6 +188,8 @@ instance Pretty BasicOp where
     case rt of
       Array {} -> brackets $ commastack $ map ppr es
       _ -> brackets $ commasep $ map ppr es
+      <+> colon
+      <+> text "[]" <> ppr rt
   ppr (BinOp bop x y) = ppr bop <> parens (ppr x <> comma <+> ppr y)
   ppr (CmpOp op x y) = ppr op <> parens (ppr x <> comma <+> ppr y)
   ppr (ConvOp conv x) =
@@ -199,7 +201,7 @@ instance Pretty BasicOp where
     ppr v <> brackets (commasep (map ppr idxs))
   ppr (Update src idxs se) =
     ppr src <+> text "with" <+> brackets (commasep (map ppr idxs))
-      <+> text "<-"
+      <+> text "="
       <+> ppr se
   ppr (Iota e x s et) = text "iota" <> et' <> apply [ppr e, ppr x, ppr s]
     where
@@ -214,8 +216,8 @@ instance Pretty BasicOp where
     text "rearrange" <> apply [apply (map ppr perm), ppr e]
   ppr (Rotate es e) =
     text "rotate" <> apply [apply (map ppr es), ppr e]
-  ppr (Concat i x ys _) =
-    text "concat" <> text "@" <> ppr i <> apply (ppr x : map ppr ys)
+  ppr (Concat i x ys w) =
+    text "concat" <> text "@" <> ppr i <> apply (ppr w : ppr x : map ppr ys)
   ppr (Copy e) = text "copy" <> parens (ppr e)
   ppr (Manifest perm e) = text "manifest" <> apply [apply (map ppr perm), ppr e]
   ppr (Assert e msg (loc, _)) =
