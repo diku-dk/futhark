@@ -108,7 +108,7 @@ instance Pretty SubExp where
 
 instance Pretty Certificates where
   ppr (Certificates []) = empty
-  ppr (Certificates cs) = text "<" <> commasep (map ppr cs) <> text ">"
+  ppr (Certificates cs) = braces $ commasep (map ppr cs)
 
 instance PrettyLore lore => Pretty (Stms lore) where
   ppr = stack . map ppr . stmsToList
