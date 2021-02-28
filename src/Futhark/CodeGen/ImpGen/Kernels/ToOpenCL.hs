@@ -709,6 +709,8 @@ inKernelOperations mode body =
     -- First the 64-bit operations.
     atomicOps s (AtomicAdd Int64 old arr ind val) =
       doAtomic s Int64 old arr ind val "atomic_add" [C.cty|typename int64_t|]
+    atomicOps s (AtomicFAdd Float64 old arr ind val) =
+      doAtomic s Float64 old arr ind val "atomic_fadd" [C.cty|double|]
     atomicOps s (AtomicSMax Int64 old arr ind val) =
       doAtomic s Int64 old arr ind val "atomic_smax" [C.cty|typename int64_t|]
     atomicOps s (AtomicSMin Int64 old arr ind val) =
@@ -730,8 +732,8 @@ inKernelOperations mode body =
     --
     atomicOps s (AtomicAdd t old arr ind val) =
       doAtomic s t old arr ind val "atomic_add" [C.cty|int|]
-    atomicOps s (AtomicFAdd t old arr ind val) =
-      doAtomic s t old arr ind val "atomic_fadd" [C.cty|float|]
+    atomicOps s (AtomicFAdd Float32 old arr ind val) =
+      doAtomic s Float32 old arr ind val "atomic_fadd" [C.cty|float|]
     atomicOps s (AtomicSMax t old arr ind val) =
       doAtomic s t old arr ind val "atomic_smax" [C.cty|int|]
     atomicOps s (AtomicSMin t old arr ind val) =
