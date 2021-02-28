@@ -416,7 +416,6 @@ data BasicOp
     Opaque SubExp
   | -- | Array literals, e.g., @[ [1+x, 3], [2, 1+4] ]@.
     -- Second arg is the element type of the rows of the array.
-    -- Scalar operations
     ArrayLit [SubExp] Type
   | -- | Unary operation.
     UnOp UnOp SubExp
