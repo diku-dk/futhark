@@ -24,6 +24,8 @@ module Futhark.IR.SegOp
     -- * Details
     HistOp (..),
     histType,
+    StencilOp (..),
+    stencilRank,
     SegBinOp (..),
     segBinOpResults,
     segBinOpChunks,
@@ -85,7 +87,7 @@ import Futhark.Tools
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
 import qualified Futhark.TypeCheck as TC
-import Futhark.Util (chunks, maybeNth)
+import Futhark.Util (chunks, maybeHead, maybeNth)
 import Futhark.Util.Pretty
   ( Pretty,
     commasep,
@@ -169,6 +171,25 @@ histType op =
         . (`arrayOfShape` histShape op)
     )
     $ lambdaReturnType $ histOp op
+
+-- | An operator for 'SegStencil'.
+data StencilOp lore = StencilOp
+  { -- | Encodes @[r][p]i64@ array.
+    stencilIndexes :: [[Integer]],
+    stencilArrays :: [VName],
+    stencilOp :: Lambda lore
+  }
+  deriving (Eq, Ord, Show, Generic)
+
+instance Decorations lore => SexpIso (StencilOp lore) where
+  sexpIso = with $ \stencilop ->
+    Sexp.list (Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso)
+      >>> stencilop
+
+-- | The rank of a stencil, i.e. the number of dimensions in its input
+-- arrays.
+stencilRank :: StencilOp lore -> Int
+stencilRank = maybe 0 length . maybeHead . stencilIndexes
 
 -- | An operator for 'SegScan' and 'SegRed'.
 data SegBinOp lore = SegBinOp
@@ -575,6 +596,9 @@ data SegOp lvl lore
     SegRed lvl SegSpace [SegBinOp lore] [Type] (KernelBody lore)
   | SegScan lvl SegSpace [SegBinOp lore] [Type] (KernelBody lore)
   | SegHist lvl SegSpace [HistOp lore] [Type] (KernelBody lore)
+  | -- | SegStencils only encode the case of "static stencils"; those
+    -- with dynamic neighbourhoods are turned into SegMaps.
+    SegStencil lvl SegSpace (StencilOp lore) [Type] (KernelBody lore)
   deriving (Eq, Ord, Show, Generic)
 
 instance (SexpIso lvl, Decorations lore) => SexpIso (SegOp lvl lore) where
@@ -585,7 +609,9 @@ instance (SexpIso lvl, Decorations lore) => SexpIso (SegOp lvl lore) where
           With (. Sexp.list (Sexp.el (Sexp.sym "segscan") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
             With
               (. Sexp.list (Sexp.el (Sexp.sym "seghist") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso))
-              End
+              $ With
+                (. Sexp.list (Sexp.el (Sexp.sym "segstencil") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso))
+                End
 
 -- | The level of a 'SegOp'.
 segLevel :: SegOp lvl lore -> lvl
@@ -593,6 +619,7 @@ segLevel (SegMap lvl _ _ _) = lvl
 segLevel (SegRed lvl _ _ _ _) = lvl
 segLevel (SegScan lvl _ _ _ _) = lvl
 segLevel (SegHist lvl _ _ _ _) = lvl
+segLevel (SegStencil lvl _ _ _ _) = lvl
 
 -- | The space of a 'SegOp'.
 segSpace :: SegOp lvl lore -> SegSpace
@@ -600,6 +627,7 @@ segSpace (SegMap _ lvl _ _) = lvl
 segSpace (SegRed _ lvl _ _ _) = lvl
 segSpace (SegScan _ lvl _ _ _) = lvl
 segSpace (SegHist _ lvl _ _ _) = lvl
+segSpace (SegStencil _ lvl _ _ _) = lvl
 
 segResultShape :: SegSpace -> Type -> KernelResult -> Type
 segResultShape _ t (WriteReturns rws _ _) =
@@ -649,6 +677,10 @@ segOpType (SegHist _ space ops _ _) = do
   where
     dims = segSpaceDims space
     segment_dims = init dims
+segOpType (SegStencil _ space op _ _) =
+  map (`arrayOfShape` shape) $ lambdaReturnType (stencilOp op)
+  where
+    shape = Shape $ segSpaceDims space
 
 instance TypedOp (SegOp lvl lore) where
   opType = pure . staticShapes . segOpType
@@ -667,6 +699,8 @@ instance
     consumedInKernelBody kbody
   consumedInOp (SegHist _ _ ops _ kbody) =
     namesFromList (concatMap histDest ops) <> consumedInKernelBody kbody
+  consumedInOp (SegStencil _ _ _ _ kbody) =
+    consumedInKernelBody kbody
 
 -- | Type check a 'SegOp', given a checker for its level.
 typeCheckSegOp ::
@@ -741,6 +775,36 @@ typeCheckSegOp checkLvl (SegHist lvl space ops ts kbody) = do
             ++ prettyTuple bucket_ret_t
   where
     segment_dims = init $ segSpaceDims space
+typeCheckSegOp checkLvl (SegStencil lvl space op ts kbody) = do
+  checkLvl lvl
+  checkSegSpace space
+  mapM_ TC.checkType ts
+
+  TC.binding (scopeOfSegSpace space) $ do
+    checkOp op
+    checkKernelBody ts kbody
+  where
+    checkOp (StencilOp _ arrs lam) = do
+      -- Find size of stencil neighbourhood and rank of stencil itself.
+      let p = stencilRank op
+          r = length $ segSpaceDims space
+
+      -- The lambda is passed the invariant input, as well as one
+      -- point per neighbourhood per array.
+      let mkArg x = (x, mempty)
+          onArr arr = do
+            arr_t <- lookupType arr
+            case peelArray r arr_t of
+              Nothing ->
+                TC.bad . TC.TypeError $
+                  "Expected stencil input array " ++ pretty arr ++ " : " ++ pretty arr_t
+                    ++ " to have at least "
+                    ++ pretty r
+                    ++ "dimensions."
+              Just arr_t' ->
+                pure $ replicate p arr_t'
+      arr_ts <- concat <$> mapM onArr arrs
+      TC.checkLambda lam $ map mkArg $ ts ++ arr_ts
 
 checkScanRed ::
   TC.Checkable lore =>
@@ -860,6 +924,18 @@ mapSegOpM tv (SegHist lvl space ops ts body) =
         <*> mapM (mapOnSegOpSubExp tv) nes
         <*> (Shape <$> mapM (mapOnSegOpSubExp tv) (shapeDims shape))
         <*> mapOnSegOpLambda tv op
+mapSegOpM tv (SegStencil lvl space op ts body) =
+  SegStencil
+    <$> mapOnSegOpLevel tv lvl
+    <*> mapOnSegSpace tv space
+    <*> onStencilOp op
+    <*> mapM (mapOnType $ mapOnSegOpSubExp tv) ts
+    <*> mapOnSegOpBody tv body
+  where
+    onStencilOp (StencilOp is arrs lam) =
+      StencilOp is
+        <$> mapM (mapOnSegOpVName tv) arrs
+        <*> mapOnSegOpLambda tv lam
 
 mapOnSegOpType ::
   Monad m =>
@@ -926,6 +1002,10 @@ instance OpMetrics (Op lore) => OpMetrics (SegOp lvl lore) where
     inside "SegHist" $ do
       mapM_ (lambdaMetrics . histOp) ops
       kernelBodyMetrics body
+  opMetrics (SegStencil _ _ op _ body) =
+    inside "SegStencil" $ do
+      lambdaMetrics $ stencilOp op
+      kernelBodyMetrics body
 
 instance Pretty SegSpace where
   ppr (SegSpace phys dims) =
@@ -982,6 +1062,18 @@ instance (PrettyLore lore, PP.Pretty lvl) => PP.Pretty (SegOp lvl lore) where
           </> PP.braces (PP.commasep $ map ppr nes) <> PP.comma
           </> ppr shape <> PP.comma
           </> ppr op
+  ppr (SegStencil lvl space op ts body) =
+    text "segstencil" <> ppr lvl
+      </> PP.braces (ppOp op) <> PP.comma
+      </> PP.align (ppr space)
+      <+> PP.colon
+      <+> ppTuple' ts
+      <+> PP.nestedBlock "{" "}" (ppr body)
+    where
+      ppOp (StencilOp is arrs lam) =
+        ppr is <> PP.comma
+          </> PP.braces (PP.commasep $ map ppr arrs) <> PP.comma
+          </> ppr lam
 
 instance
   ( ASTLore lore,
@@ -1251,6 +1343,26 @@ simplifySegOp (SegHist lvl space ops ts kbody) = do
   where
     scope = scopeOfSegSpace space
     scope_vtable = ST.fromScope scope
+simplifySegOp (SegStencil lvl space op ts kbody) = do
+  (lvl', space', ts') <- Engine.simplify (lvl, space, ts)
+  (op', op_hoisted) <- simplifyOp op
+
+  (kbody', body_hoisted) <- simplifyKernelBody space kbody
+
+  return
+    ( SegStencil lvl' space' op' ts' kbody',
+      op_hoisted <> body_hoisted
+    )
+  where
+    scope = scopeOfSegSpace space
+    scope_vtable = ST.fromScope scope
+    simplifyOp (StencilOp is arrs lam) = do
+      arrs' <- Engine.simplify arrs
+      (lam', lam_hoisted) <-
+        Engine.localVtable (<> scope_vtable)
+          . Engine.localVtable (\vtable -> vtable {ST.simplifyMemory = True})
+          $ Engine.simplifyLambda lam
+      return (StencilOp is arrs' lam', lam_hoisted)
 
 -- | Does this lore contain 'SegOp's in its t'Op's?  A lore must be an
 -- instance of this class for the simplification rules to work.
@@ -1393,6 +1505,8 @@ segOpGuts (SegRed lvl space ops kts body) =
   (kts, body, segBinOpResults ops, SegRed lvl space ops)
 segOpGuts (SegHist lvl space ops kts body) =
   (kts, body, sum $ map (length . histDest) ops, SegHist lvl space ops)
+segOpGuts (SegStencil lvl space op kts body) =
+  (kts, body, length $ lambdaReturnType $ stencilOp op, SegStencil lvl space op)
 
 bottomUpSegOp ::
   (HasSegOp lore, BinderOps lore) =>
@@ -1514,3 +1628,5 @@ segOpReturns k@(SegScan _ _ _ _ kbody) =
   kernelBodyReturns kbody =<< (extReturns <$> opType k)
 segOpReturns (SegHist _ _ ops _ _) =
   concat <$> mapM (mapM varReturns . histDest) ops
+segOpReturns k@SegStencil {} =
+  extReturns <$> opType k

@@ -596,6 +596,59 @@ transformStm _ (Let orig_pat (StmAux cs _ _) (Op (Hist w ops bucket_fun imgs))) 
     addStms =<< histKernel onLambda lvl orig_pat [] [] cs w ops bfun' imgs
   where
     onLambda = pure . soacsLambdaToKernels
+--
+transformStm _ (Let pat (StmAux cs _ _) (Op (Stencil ws _p (StencilStatic stencil_is) lam inv_arrs arrs))) =
+  runBinder_ . certifying cs $ do
+    space <- mkSegSpace <=< forM ws $ \w -> do
+      p <- newVName "gtid"
+      pure (p, w)
+    lvl <- segThreadCapped (segSpaceDims space) "segstencil" $ NoRecommendation SegVirt
+
+    ((lam_params, lam_body_res), lam_body_stms) <- runBinder $ do
+      let (inv_params, stencil_params) = splitAt (length inv_arrs) $ lambdaParams lam
+          body = lambdaBody $ soacsLambdaToKernels lam
+          p = maybe 0 length $ maybeHead stencil_is
+
+      stencil_params' <- fmap concat $
+        forM stencil_params $ \(Param v t) -> do
+          let t' = stripArray 1 t
+          params <- replicateM p $ newParam (baseString v <> "_elem") t'
+          letBindNames [v] $ BasicOp $ ArrayLit (map (Var . paramName) params) t'
+          pure params
+
+      addStms $ bodyStms body
+      pure (inv_params ++ stencil_params', bodyResult body)
+
+    let lam_body = mkBody lam_body_stms lam_body_res
+        lam' =
+          Lambda
+            { lambdaReturnType = lambdaReturnType lam,
+              lambdaParams = lam_params,
+              lambdaBody = lam_body
+            }
+        stencil_op = StencilOp stencil_is arrs lam'
+
+    -- The body produces only the invariant (non-stenciled) arrays;
+    -- the others are passed to the stencil operation itself.
+    ((body_ret, krets), kstms) <-
+      runBinder . fmap unzip . forM inv_arrs $ \(inv, arr) -> do
+        let all_is = map fst $ unSegSpace space
+        arr_t <- lookupType arr
+        let slice =
+              fullSlice arr_t . map (DimFix . Var) $
+                variantIndexes (zip all_is [0 ..]) inv
+        arr' <- letSubExp "stencil_inv" $ BasicOp $ Index arr slice
+        arr_t' <- subExpType arr'
+        pure (arr_t', Returns ResultMaySimplify arr')
+
+    let body = KernelBody () kstms krets
+    letBind pat $ Op $ SegOp $ SegStencil lvl space stencil_op body_ret body
+  where
+    variantIndexes ((p, j) : ps) (i : is)
+      | j == i = variantIndexes ps is
+      | otherwise = p : variantIndexes ps is
+    variantIndexes ps _ = map fst ps
+--
 transformStm _ bnd =
   runBinder_ $ FOT.transformStmRecursively bnd
 
