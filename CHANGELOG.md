@@ -58,6 +58,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * Partial application of operators with parameters used in a
     size-dependent way now works (#1256).
 
+  * An issue regarding abstract size-lifted sum types (#1260).
+
 ## [0.18.6]
 
 ### Added
