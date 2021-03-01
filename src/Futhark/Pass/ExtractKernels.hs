@@ -376,7 +376,7 @@ transformStm path (Let res_pat (StmAux cs _ _) (Op (Screma w form arrs)))
     Scan scan_lam nes <- singleScan scans,
     Just do_iswim <- iswim res_pat w scan_lam $ zip nes arrs = do
     types <- asksScope scopeForSOACs
-    transformStms path =<< (stmsToList . snd <$> runBinderT (certifying cs do_iswim) types)
+    transformStms path . stmsToList . snd =<< runBinderT (certifying cs do_iswim) types
   | Just (scans, map_lam) <- isScanomapSOAC form = runBinder_ $ do
     scan_ops <- forM scans $ \(Scan scan_lam nes) -> do
       (scan_lam', nes', shape) <- determineReduceOp scan_lam nes
@@ -384,10 +384,8 @@ transformStm path (Let res_pat (StmAux cs _ _) (Op (Screma w form arrs)))
       return $ SegBinOp Noncommutative scan_lam'' nes' shape
     let map_lam_sequential = soacsLambdaToKernels map_lam
     lvl <- segThreadCapped [w] "segscan" $ NoRecommendation SegNoVirt
-    addStms
-      =<< ( fmap (certify cs)
-              <$> segScan lvl res_pat w scan_ops map_lam_sequential arrs [] []
-          )
+    addStms . fmap (certify cs)
+      =<< segScan lvl res_pat w scan_ops map_lam_sequential arrs [] []
 
   -- We are only willing to generate code for scanomaps that do not
   -- involve array accumulators, and do not have parallelism in their
@@ -429,10 +427,8 @@ transformStm path (Let pat aux@(StmAux cs _ _) (Op (Screma w form arrs)))
             return $ SegBinOp comm' red_lam'' nes' shape
           let map_lam_sequential = soacsLambdaToKernels map_lam
           lvl <- segThreadCapped [w] "segred" $ NoRecommendation SegNoVirt
-          addStms
-            =<< ( fmap (certify cs)
-                    <$> nonSegRed lvl pat w red_ops map_lam_sequential arrs
-                )
+          addStms . fmap (certify cs)
+            =<< nonSegRed lvl pat w red_ops map_lam_sequential arrs
 
         outerParallelBody =
           renameBody
@@ -475,8 +471,8 @@ transformStm path (Let pat aux@(StmAux cs _ _) (Op (Stream w (Parallel _ _ _ [])
     -- No reduction part.  Remove the stream and leave the body
     -- parallel.  It will be distributed.
     types <- asksScope scopeForSOACs
-    transformStms path
-      =<< (stmsToList . snd <$> runBinderT (certifying cs $ sequentialStreamWholeArray pat w [] map_fun arrs) types)
+    transformStms path . stmsToList . snd
+      =<< runBinderT (certifying cs $ sequentialStreamWholeArray pat w [] map_fun arrs) types
 transformStm path (Let pat aux@(StmAux cs _ _) (Op (Stream w (Parallel o comm red_fun nes) fold_fun arrs)))
   | "sequential_inner" `inAttrs` stmAuxAttrs aux =
     paralleliseOuter path
@@ -540,8 +536,8 @@ transformStm path (Let pat aux@(StmAux cs _ _) (Op (Stream w (Parallel o comm re
 
     paralleliseInner path' = do
       types <- asksScope scopeForSOACs
-      transformStms path' . fmap (certify cs)
-        =<< (stmsToList . snd <$> runBinderT (sequentialStreamWholeArray pat w nes fold_fun arrs) types)
+      transformStms path' . fmap (certify cs) . stmsToList . snd
+        =<< runBinderT (sequentialStreamWholeArray pat w nes fold_fun arrs) types
 
     innerParallelBody path' =
       renameBody
@@ -560,10 +556,8 @@ transformStm path (Let pat _ (Op (Stream w (Sequential nes) fold_fun arrs))) = d
   -- Remove the stream and leave the body parallel.  It will be
   -- distributed.
   types <- asksScope scopeForSOACs
-  transformStms path
-    =<< ( stmsToList . snd
-            <$> runBinderT (sequentialStreamWholeArray pat w nes fold_fun arrs) types
-        )
+  transformStms path . stmsToList . snd
+    =<< runBinderT (sequentialStreamWholeArray pat w nes fold_fun arrs) types
 transformStm _ (Let pat (StmAux cs _ _) (Op (Scatter w lam ivs as))) = runBinder_ $ do
   let lam' = soacsLambdaToKernels lam
   write_i <- newVName "write_i"
