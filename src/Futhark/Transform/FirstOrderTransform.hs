@@ -197,7 +197,7 @@ transformSOAC pat (Screma w form@(ScremaForm scans reds map_lam) arrs) = do
     (++ patternNames pat)
       <$> replicateM (length scanacc_params) (newVName "discard")
   letBindNames names $ DoLoop [] merge loopform loop_body
-transformSOAC pat (Stream w stream_form lam nes arrs) = do
+transformSOAC pat (Stream w _ lam nes arrs) = do
   -- Create a loop that repeatedly applies the lambda body to a
   -- chunksize of 1.  Hopefully this will lead to this outer loop
   -- being the only one, as all the innermost one can be simplified
