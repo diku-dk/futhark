@@ -93,6 +93,23 @@ simplifyConsts ::
 simplifyConsts =
   Simplify.simplifyStms simpleSOACS soacRules Engine.noExtraHoistBlockers mempty
 
+instance Engine.Simplifiable StencilIndexes where
+  simplify (StencilDynamic is) = do
+    vtable <- Engine.askVtable
+    case mapM (isStaticArray vtable) is of
+      Just is' ->
+        pure $ StencilStatic is'
+      Nothing ->
+        StencilDynamic <$> Engine.simplify is
+    where
+      isStaticArray vtable v = do
+        (ArrayLit elems _, _) <- ST.lookupBasicOp v vtable
+        mapM isConstInt elems
+      isConstInt (Constant (IntValue (Int64Value x))) = Just $ fromIntegral x
+      isConstInt _ = Nothing
+  simplify (StencilStatic is) =
+    pure $ StencilStatic is
+
 simplifySOAC ::
   Simplify.SimplifiableLore lore =>
   Simplify.SimplifyOp lore (SOAC lore)

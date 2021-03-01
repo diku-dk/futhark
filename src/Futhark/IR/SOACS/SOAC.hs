@@ -10,6 +10,7 @@
 -- the main form of parallelism in the early stages of the compiler.
 module Futhark.IR.SOACS.SOAC
   ( SOAC (..),
+    StencilIndexes (..),
     StreamOrd (..),
     StreamForm (..),
     ScremaForm (..),
@@ -76,6 +77,24 @@ import Language.SexpGrammar as Sexp
 import Language.SexpGrammar.Generic
 import Prelude hiding (id, (.))
 
+-- | The relative neighbourhood indexes for a 'Stencil'.  Conceptually
+-- a 'p'-size array of 'r'-tuples, but we encode it as 'r' arrs each
+-- of size [p]i64.  This data type encodes the important (and
+-- hopefully common) special case where the indexes are statically
+-- known.
+data StencilIndexes
+  = StencilDynamic [VName]
+  | -- | The list-of-lists must represent a regular array of type
+    -- @[r][p]i64@.
+    StencilStatic [[Integer]]
+  deriving (Eq, Ord, Show, Generic)
+
+instance SexpIso StencilIndexes where
+  sexpIso =
+    match $
+      With (. Sexp.list (Sexp.el (Sexp.sym "dynamic") >>> Sexp.el sexpIso)) $
+        With (. Sexp.list (Sexp.el (Sexp.sym "static") >>> Sexp.el sexpIso)) End
+
 -- | A second-order array combinator (SOAC).
 data SOAC lore
   = Stream SubExp (StreamForm lore) (Lambda lore) [VName]
@@ -117,7 +136,7 @@ data SOAC lore
       SubExp
       -- Neighbourhood indexes.  Conceptually a 'p'-size array of
       -- 'r'-tuples, but we encode it as 'r' arrs each of size [p]i64.
-      [VName]
+      StencilIndexes
       -- ...invariant... -> [p]a -> ... -> [p]a -> b.
       (Lambda lore)
       [([Int], VName)] -- List of (invariant,arr)
@@ -480,13 +499,18 @@ mapSOACM tv (Screma w (ScremaForm scans reds map_lam) arrs) =
             <*> mapOnSOACLambda tv map_lam
         )
     <*> mapM (mapOnSOACVName tv) arrs
-mapSOACM tv (Stencil ws p is lam inv arrs) =
+mapSOACM tv (Stencil ws p stencil lam inv arrs) =
   Stencil <$> mapM (mapOnSOACSubExp tv) ws
     <*> mapOnSOACSubExp tv p
-    <*> mapM (mapOnSOACVName tv) is
+    <*> onIndexes stencil
     <*> mapOnSOACLambda tv lam
     <*> mapM (traverse (mapOnSOACVName tv)) inv
     <*> mapM (mapOnSOACVName tv) arrs
+  where
+    onIndexes (StencilDynamic is) =
+      StencilDynamic <$> mapM (mapOnSOACVName tv) is
+    onIndexes (StencilStatic is) =
+      pure $ StencilStatic is
 
 instance ASTLore lore => FreeIn (SOAC lore) where
   freeIn' = flip execState mempty . mapSOACM free
@@ -867,15 +891,27 @@ typeCheckSOAC (Screma w (ScremaForm scans reds map_lam) arrs) = do
         "Map function return type " ++ prettyTuple map_lam_ts
           ++ " wrong for given scan and reduction functions."
 --
-typeCheckSOAC (Stencil ws p is lam inv arrs) = do
+typeCheckSOAC (Stencil ws p stencil lam inv arrs) = do
   let r = length ws
   mapM_ (TC.require [Prim int64]) ws
   TC.require [Prim int64] p
 
-  unless (length ws == length is) $
-    TC.bad $ TC.TypeError "Mismatch in number of input and neighbourhood index arrays."
+  case stencil of
+    StencilDynamic is -> do
+      unless (length ws == length is) $
+        TC.bad $ TC.TypeError "Mismatch in number of input and neighbourhood index arrays."
 
-  void $ TC.checkSOACArrayArgs p is
+      void $ TC.checkSOACArrayArgs p is
+    StencilStatic is -> do
+      unless (length ws == length is) $
+        TC.bad $ TC.TypeError "Mismatch in number of input and neighbourhood index arrays."
+
+      case p of
+        Constant (IntValue (Int64Value p'))
+          | all ((== p') . fromIntegral . length) is ->
+            pure ()
+        _ ->
+          TC.bad $ TC.TypeError $ "Static stencil indexes invalid: " <> pretty stencil
 
   let checkInput shape arr = do
         (t, als) <- TC.checkArg $ Var arr
@@ -926,6 +962,10 @@ instance OpMetrics (Op lore) => OpMetrics (SOAC lore) where
   opMetrics (Stencil _ _ _ lam _ _) =
     inside "Stencil" $ lambdaMetrics lam
 
+instance PP.Pretty StencilIndexes where
+  ppr (StencilDynamic is) = PP.braces (commasep $ map ppr is)
+  ppr (StencilStatic is) = PP.braces (commasep $ map ppr is)
+
 instance PrettyLore lore => PP.Pretty (SOAC lore) where
   ppr (Stream size form lam arrs) =
     case form of
@@ -975,12 +1015,12 @@ instance PrettyLore lore => PP.Pretty (SOAC lore) where
               </> commasep (map ppr arrs)
           )
   ppr (Screma w form arrs) = ppScrema w form arrs
-  ppr (Stencil ws p is lam inv arrs) =
+  ppr (Stencil ws p stencil lam inv arrs) =
     "stencil"
       <> parens
         ( PP.braces (commasep $ map ppr ws) <> comma
             </> ppr p <> comma
-            </> PP.braces (commasep $ map ppr is) <> comma
+            </> ppr stencil <> comma
             </> ppr lam <> comma
             </> PP.braces (commasep $ map ppr inv) <> comma
             </> commasep (map ppr arrs)
