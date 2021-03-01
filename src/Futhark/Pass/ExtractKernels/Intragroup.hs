@@ -261,7 +261,7 @@ intraGroupStm lvl stm@(Let pat aux e) = do
       certifying (stmAuxCerts aux) $
         addStms =<< segHist lvl' pat w [] [] ops' bucket_fun' arrs
       parallelMin [w]
-    Op (Stream w (Sequential accs) lam arrs)
+    Op (Stream w Sequential lam accs arrs)
       | chunk_size_param : _ <- lambdaParams lam -> do
         types <- asksScope castScope
         ((), stream_bnds) <-

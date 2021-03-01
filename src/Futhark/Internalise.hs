@@ -1173,8 +1173,8 @@ internaliseStreamMap desc o lam arr = do
   arrs <- internaliseExpToVars "stream_input" arr
   lam' <- internaliseStreamMapLambda internaliseLambda lam $ map I.Var arrs
   w <- arraysSize 0 <$> mapM lookupType arrs
-  let form = I.Parallel o Commutative (I.Lambda [] (mkBody mempty []) []) []
-  letTupExp' desc $ I.Op $ I.Stream w form lam' arrs
+  let form = I.Parallel o Commutative (I.Lambda [] (mkBody mempty []) [])
+  letTupExp' desc $ I.Op $ I.Stream w form lam' [] arrs
 
 internaliseStreamRed ::
   String ->
@@ -1237,7 +1237,7 @@ internaliseStreamRed desc o comm lam0 lam arr = do
               map (I.Var . paramName) lam_acc_params ++ lam_res'
         return $ resultBody new_lam_res
 
-  let form = I.Parallel o comm lam0' nes
+  let form = I.Parallel o comm lam0'
       lam' =
         I.Lambda
           { lambdaParams = lam_params',
@@ -1245,7 +1245,7 @@ internaliseStreamRed desc o comm lam0 lam arr = do
             lambdaReturnType = nes_ts
           }
   w <- arraysSize 0 <$> mapM lookupType arrs
-  letTupExp' desc $ I.Op $ I.Stream w form lam' arrs
+  letTupExp' desc $ I.Op $ I.Stream w form lam' nes arrs
 
 internaliseExp1 :: String -> E.Exp -> InternaliseM I.SubExp
 internaliseExp1 desc e = do
