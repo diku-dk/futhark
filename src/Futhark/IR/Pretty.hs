@@ -51,13 +51,6 @@ class
   PrettyLore lore
   where
   ppExpLore :: ExpDec lore -> Exp lore -> Maybe Doc
-  ppExpLore _ (If _ _ _ (IfDec ts _)) =
-    Just $
-      stack $
-        map (text . ("-- " ++)) $
-          lines $
-            pretty $
-              text "Branch returns:" <+> ppTuple' ts
   ppExpLore _ _ = Nothing
 
 commastack :: [Doc] -> Doc
@@ -74,14 +67,14 @@ instance Pretty Commutativity where
   ppr Noncommutative = text "noncommutative"
 
 instance Pretty Shape where
-  ppr = brackets . commasep . map ppr . shapeDims
+  ppr = mconcat . map (brackets . ppr) . shapeDims
 
 instance Pretty a => Pretty (Ext a) where
   ppr (Free e) = ppr e
   ppr (Ext x) = text "?" <> text (show x)
 
 instance Pretty ExtShape where
-  ppr = brackets . commasep . map ppr . shapeDims
+  ppr = mconcat . map (brackets . ppr) . shapeDims
 
 instance Pretty Space where
   ppr DefaultSpace = mempty
@@ -115,7 +108,7 @@ instance Pretty SubExp where
 
 instance Pretty Certificates where
   ppr (Certificates []) = empty
-  ppr (Certificates cs) = text "<" <> commasep (map ppr cs) <> text ">"
+  ppr (Certificates cs) = braces $ commasep (map ppr cs)
 
 instance PrettyLore lore => Pretty (Stms lore) where
   ppr = stack . map ppr . stmsToList
@@ -146,20 +139,16 @@ instance Pretty (PatElemT b) => Pretty (PatElemT (a, b)) where
   ppr = ppr . fmap snd
 
 instance Pretty (PatElemT Type) where
-  ppr (PatElem name t) = ppr t <+> ppr name
+  ppr (PatElem name t) = ppr name <+> colon <+> ppr t
 
 instance Pretty (Param b) => Pretty (Param (a, b)) where
   ppr = ppr . fmap snd
 
 instance Pretty (Param DeclType) where
-  ppr (Param name t) =
-    ppr t
-      <+> ppr name
+  ppr (Param name t) = ppr name <+> colon <+> ppr t
 
 instance Pretty (Param Type) where
-  ppr (Param name t) =
-    ppr t
-      <+> ppr name
+  ppr (Param name t) = ppr name <+> colon <+> ppr t
 
 instance PrettyLore lore => Pretty (Stm lore) where
   ppr bnd@(Let pat (StmAux cs _ dec) e) =
@@ -199,6 +188,8 @@ instance Pretty BasicOp where
     case rt of
       Array {} -> brackets $ commastack $ map ppr es
       _ -> brackets $ commasep $ map ppr es
+      <+> colon
+      <+> text "[]" <> ppr rt
   ppr (BinOp bop x y) = ppr bop <> parens (ppr x <> comma <+> ppr y)
   ppr (CmpOp op x y) = ppr op <> parens (ppr x <> comma <+> ppr y)
   ppr (ConvOp conv x) =
@@ -210,7 +201,7 @@ instance Pretty BasicOp where
     ppr v <> brackets (commasep (map ppr idxs))
   ppr (Update src idxs se) =
     ppr src <+> text "with" <+> brackets (commasep (map ppr idxs))
-      <+> text "<-"
+      <+> text "="
       <+> ppr se
   ppr (Iota e x s et) = text "iota" <> et' <> apply [ppr e, ppr x, ppr s]
     where
@@ -225,27 +216,29 @@ instance Pretty BasicOp where
     text "rearrange" <> apply [apply (map ppr perm), ppr e]
   ppr (Rotate es e) =
     text "rotate" <> apply [apply (map ppr es), ppr e]
-  ppr (Concat i x ys _) =
-    text "concat" <> text "@" <> ppr i <> apply (ppr x : map ppr ys)
+  ppr (Concat i x ys w) =
+    text "concat" <> text "@" <> ppr i <> apply (ppr w : ppr x : map ppr ys)
   ppr (Copy e) = text "copy" <> parens (ppr e)
   ppr (Manifest perm e) = text "manifest" <> apply [apply (map ppr perm), ppr e]
   ppr (Assert e msg (loc, _)) =
     text "assert" <> apply [ppr e, ppr msg, text $ show $ locStr loc]
 
 instance Pretty a => Pretty (ErrorMsg a) where
-  ppr (ErrorMsg parts) = commasep $ map p parts
+  ppr (ErrorMsg parts) = braces $ align $ commasep $ map p parts
     where
       p (ErrorString s) = text $ show s
-      p (ErrorInt32 x) = ppr x
-      p (ErrorInt64 x) = ppr x
+      p (ErrorInt32 x) = ppr x <+> colon <+> text "i32"
+      p (ErrorInt64 x) = ppr x <+> colon <+> text "i64"
 
 instance PrettyLore lore => Pretty (Exp lore) where
-  ppr (If c t f (IfDec _ ifsort)) =
+  ppr (If c t f (IfDec ret ifsort)) =
     text "if" <+> info' <+> ppr c
       </> text "then"
       <+> maybeNest t
       <+> text "else"
       <+> maybeNest f
+      <+> colon
+      <+> braces (commasep $ map ppr ret)
     where
       info' = case ifsort of
         IfNormal -> mempty
@@ -256,7 +249,9 @@ instance PrettyLore lore => Pretty (Exp lore) where
         | otherwise = nestedBlock "{" "}" $ ppr b
   ppr (BasicOp op) = ppr op
   ppr (Apply fname args _ (safety, _, _)) =
-    text (nameToString fname) <> safety' <> apply (map (align . pprArg) args)
+    text "apply"
+      <+> text (nameToString fname) <> safety'
+        <> apply (map (align . pprArg) args)
     where
       pprArg (arg, Consume) = text "*" <> ppr arg
       pprArg (arg, _) = ppr arg

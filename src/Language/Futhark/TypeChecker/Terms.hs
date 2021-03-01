@@ -1668,14 +1668,14 @@ checkExp (OpSectionLeft op _ e _ _ loc) = do
   (op', ftype) <- lookupVar loc op
   e_arg <- checkArg e
   (t1, rt, argext, retext) <- checkApply loc (Just op', 0) ftype e_arg
-  case rt of
-    Scalar (Arrow _ _ t2 rettype) ->
+  case (ftype, rt) of
+    (Scalar (Arrow _ m1 _ _), Scalar (Arrow _ m2 t2 rettype)) ->
       return $
         OpSectionLeft
           op'
           (Info ftype)
           (argExp e_arg)
-          (Info (toStruct t1, argext), Info $ toStruct t2)
+          (Info (m1, toStruct t1, argext), Info (m2, toStruct t2))
           (Info rettype, Info retext)
           loc
     _ ->
@@ -1697,7 +1697,7 @@ checkExp (OpSectionRight op _ e _ NoInfo loc) = do
           op'
           (Info ftype)
           (argExp e_arg)
-          (Info $ toStruct t1, Info (toStruct t2', argext))
+          (Info (m1, toStruct t1), Info (m2, toStruct t2', argext))
           (Info $ addAliases ret (<> aliases ret'))
           loc
     _ ->

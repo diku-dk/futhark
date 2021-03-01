@@ -1463,6 +1463,7 @@ $esc:("#include <string.h>")
 $esc:("#include <string.h>")
 $esc:("#include <errno.h>")
 $esc:("#include <assert.h>")
+$esc:("#include <ctype.h>")
 
 $esc:header_extra
 
@@ -1539,6 +1540,27 @@ commonLibFuns memreport = do
   ctx <- contextType
   ops <- asks envOperations
   profilereport <- gets $ DL.toList . compProfileItems
+
+  publicDef_ "get_num_sizes" InitDecl $ \s ->
+    ( [C.cedecl|int $id:s(void);|],
+      [C.cedecl|int $id:s(void) {
+                return sizeof(size_names)/sizeof(size_names[0]);
+              }|]
+    )
+
+  publicDef_ "get_size_name" InitDecl $ \s ->
+    ( [C.cedecl|const char* $id:s(int);|],
+      [C.cedecl|const char* $id:s(int i) {
+                return size_names[i];
+              }|]
+    )
+
+  publicDef_ "get_size_class" InitDecl $ \s ->
+    ( [C.cedecl|const char* $id:s(int);|],
+      [C.cedecl|const char* $id:s(int i) {
+                return size_classes[i];
+              }|]
+    )
 
   publicDef_ "context_report" MiscDecl $ \s ->
     ( [C.cedecl|char* $id:s($ty:ctx *ctx);|],
@@ -1851,6 +1873,12 @@ compilePrimExp f (UnOpExp SSignum {} x) = do
 compilePrimExp f (UnOpExp USignum {} x) = do
   x' <- compilePrimExp f x
   return [C.cexp|($exp:x' > 0) - ($exp:x' < 0) != 0|]
+compilePrimExp f (UnOpExp (FSignum Float32) x) = do
+  x' <- compilePrimExp f x
+  return [C.cexp|fsignum32($exp:x')|]
+compilePrimExp f (UnOpExp (FSignum Float64) x) = do
+  x' <- compilePrimExp f x
+  return [C.cexp|fsignum32($exp:x')|]
 compilePrimExp f (CmpOpExp cmp x y) = do
   x' <- compilePrimExp f x
   y' <- compilePrimExp f y

@@ -17,13 +17,18 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Support for 64-bit atomics on CUDA and OpenCL for higher
     performance with `reduce_by_index` in particular.
-    Double-precision float atomics are still not used.
+    Double-precision float atomics are used on CUDA.
 
   * New functions: `f32.recip` and `f64.recip` for multiplicative inverses.
 
-### Removed
+  * Executables produced with the `c` and `multicore` backends now
+    also accept `--tuning` and `--size` options (although there are
+    not yet any tunable sizes).
 
-### Changed
+  * New functions: `scatter_2d` and `scatter_3d` for scattering to
+    multi-dimensional arrays (#1258).
+
+### Removed
 
   * The math modules no longer define the name `negate` (use `neg`
     instead).
@@ -39,6 +44,19 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * Defunctionalisation issue (#1242).
 
   * Tiling inside multiply nested loops (#1243).
+
+  * Substitution bug in interpreter (#1250).
+
+  * `f32.sgn`/`f64.sgn` now correct for NaN arguments.
+
+  * CPU backends (`c`/`multicore`) are now more careful about staying
+    in single precision for `f32` functions (#1253).
+
+  * `futhark test` and `futhark bench` now detect program
+    initialisation errors in a saner way (#1246).
+
+  * Partial application of operators with parameters used in a
+    size-dependent way now works (#1256).
 
 ## [0.18.6]
 

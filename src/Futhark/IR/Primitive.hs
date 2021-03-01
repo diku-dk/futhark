@@ -419,6 +419,8 @@ data UnOp
     SSignum IntType
   | -- | Unsigned sign function: @usignum(2)@ = 1.
     USignum IntType
+  | -- | Floating-point sign function.
+    FSignum FloatType
   deriving (Eq, Ord, Show, Generic)
 
 instance SexpIso UnOp where
@@ -429,9 +431,10 @@ instance SexpIso UnOp where
           With (. Sexp.list (Sexp.el (Sexp.sym "abs") >>> Sexp.el sexpIso)) $
             With (. Sexp.list (Sexp.el (Sexp.sym "fabs") >>> Sexp.el sexpIso)) $
               With (. Sexp.list (Sexp.el (Sexp.sym "ssignum") >>> Sexp.el sexpIso)) $
-                With
-                  (. Sexp.list (Sexp.el (Sexp.sym "usignum") >>> Sexp.el sexpIso))
-                  End
+                With (. Sexp.list (Sexp.el (Sexp.sym "usignum") >>> Sexp.el sexpIso)) $
+                  With
+                    (. Sexp.list (Sexp.el (Sexp.sym "fsignum") >>> Sexp.el sexpIso))
+                    End
 
 -- | What to do in case of arithmetic overflow.  Futhark's semantics
 -- are that overflow does wraparound, but for generated code (like
@@ -635,27 +638,28 @@ allUnOps =
     ++ map FAbs [minBound .. maxBound]
     ++ map SSignum [minBound .. maxBound]
     ++ map USignum [minBound .. maxBound]
+    ++ map FSignum [minBound .. maxBound]
 
 -- | A list of all binary operators for all types.
 allBinOps :: [BinOp]
 allBinOps =
   concat
-    [ map (`Add` OverflowWrap) allIntTypes,
+    [ Add <$> allIntTypes <*> [OverflowWrap, OverflowUndef],
       map FAdd allFloatTypes,
-      map (`Sub` OverflowWrap) allIntTypes,
+      Sub <$> allIntTypes <*> [OverflowWrap, OverflowUndef],
       map FSub allFloatTypes,
-      map (`Mul` OverflowWrap) allIntTypes,
+      Mul <$> allIntTypes <*> [OverflowWrap, OverflowUndef],
       map FMul allFloatTypes,
-      map (`UDiv` Unsafe) allIntTypes,
-      map (`UDivUp` Unsafe) allIntTypes,
-      map (`SDiv` Unsafe) allIntTypes,
-      map (`SDivUp` Unsafe) allIntTypes,
+      UDiv <$> allIntTypes <*> [Unsafe, Safe],
+      UDivUp <$> allIntTypes <*> [Unsafe, Safe],
+      SDiv <$> allIntTypes <*> [Unsafe, Safe],
+      SDivUp <$> allIntTypes <*> [Unsafe, Safe],
       map FDiv allFloatTypes,
       map FMod allFloatTypes,
-      map (`UMod` Unsafe) allIntTypes,
-      map (`SMod` Unsafe) allIntTypes,
-      map (`SQuot` Unsafe) allIntTypes,
-      map (`SRem` Unsafe) allIntTypes,
+      UMod <$> allIntTypes <*> [Unsafe, Safe],
+      SMod <$> allIntTypes <*> [Unsafe, Safe],
+      SQuot <$> allIntTypes <*> [Unsafe, Safe],
+      SRem <$> allIntTypes <*> [Unsafe, Safe],
       map SMin allIntTypes,
       map UMin allIntTypes,
       map FMin allFloatTypes,
@@ -683,7 +687,8 @@ allCmpOps =
       map CmpSlt allIntTypes,
       map CmpSle allIntTypes,
       map FCmpLt allFloatTypes,
-      map FCmpLe allFloatTypes
+      map FCmpLe allFloatTypes,
+      [CmpLlt, CmpLle]
     ]
 
 -- | A list of all conversion operators for all types.
@@ -710,6 +715,7 @@ doUnOp Abs {} (IntValue v) = Just $ IntValue $ doAbs v
 doUnOp FAbs {} (FloatValue v) = Just $ FloatValue $ doFAbs v
 doUnOp SSignum {} (IntValue v) = Just $ IntValue $ doSSignum v
 doUnOp USignum {} (IntValue v) = Just $ IntValue $ doUSignum v
+doUnOp FSignum {} (FloatValue v) = Just $ FloatValue $ doFSignum v
 doUnOp _ _ = Nothing
 
 -- | E.g., @~(~1) = 1@.
@@ -731,6 +737,11 @@ doSSignum v = intValue (intValueType v) $ signum $ intToInt64 v
 -- | @usignum(-2)@ = -1.
 doUSignum :: IntValue -> IntValue
 doUSignum v = intValue (intValueType v) $ signum $ intToWord64 v
+
+-- | @fsignum(-2.0)@ = -1.0.
+doFSignum :: FloatValue -> FloatValue
+doFSignum (Float32Value v) = Float32Value $ signum v
+doFSignum (Float64Value v) = Float64Value $ signum v
 
 -- | Apply a 'BinOp' to an operand.  Returns 'Nothing' if the
 -- application is mistyped, or outside the domain (e.g. division by
@@ -964,10 +975,8 @@ doSExt (Int64Value x) t = intValue t $ toInteger x
 
 -- | Convert the former floating-point type to the latter.
 doFPConv :: FloatValue -> FloatType -> FloatValue
-doFPConv (Float32Value v) Float32 = Float32Value v
-doFPConv (Float64Value v) Float32 = Float32Value $ fromRational $ toRational v
-doFPConv (Float64Value v) Float64 = Float64Value v
-doFPConv (Float32Value v) Float64 = Float64Value $ fromRational $ toRational v
+doFPConv v Float32 = Float32Value $ floatToFloat v
+doFPConv v Float64 = Float64Value $ floatToDouble v
 
 -- | Convert a floating-point value to the nearest
 -- unsigned integer (rounding towards zero).
@@ -1050,8 +1059,20 @@ intToInt :: IntValue -> Int
 intToInt = fromIntegral . intToInt64
 
 floatToDouble :: FloatValue -> Double
-floatToDouble (Float32Value v) = fromRational $ toRational v
+floatToDouble (Float32Value v)
+  | isInfinite v, v > 0 = 1 / 0
+  | isInfinite v, v < 0 = -1 / 0
+  | isNaN v = 0 / 0
+  | otherwise = fromRational $ toRational v
 floatToDouble (Float64Value v) = v
+
+floatToFloat :: FloatValue -> Float
+floatToFloat (Float64Value v)
+  | isInfinite v, v > 0 = 1 / 0
+  | isInfinite v, v < 0 = -1 / 0
+  | isNaN v = 0 / 0
+  | otherwise = fromRational $ toRational v
+floatToFloat (Float32Value v) = v
 
 -- | The result type of a binary operator.
 binOpType :: BinOp -> PrimType
@@ -1108,6 +1129,7 @@ unOpType Not = Bool
 unOpType (Complement t) = IntType t
 unOpType (Abs t) = IntType t
 unOpType (FAbs t) = FloatType t
+unOpType (FSignum t) = FloatType t
 
 -- | The input and output types of a conversion operator.
 convOpType :: ConvOp -> (PrimType, PrimType)
@@ -1655,6 +1677,7 @@ instance Pretty UnOp where
   ppr (FAbs t) = taggedF "fabs" t
   ppr (SSignum t) = taggedI "ssignum" t
   ppr (USignum t) = taggedI "usignum" t
+  ppr (FSignum t) = taggedF "fsignum" t
   ppr (Complement t) = taggedI "complement" t
 
 -- | The human-readable name for a 'ConvOp'.  This is used to expose

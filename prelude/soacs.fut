@@ -269,6 +269,24 @@ let any [n] 'a (f: a -> bool) (as: [n]a): bool =
 let scatter 't [m] [n] (dest: *[m]t) (is: [n]i64) (vs: [n]t): *[m]t =
   intrinsics.scatter (dest, is, vs) :> *[m]t
 
+-- | `scatter_2d as is vs` is the equivalent of a `scatter` on a 2-dimensional
+-- array.
+--
+-- **Work:** *O(n)*
+--
+-- **Span:** *O(1)*
+let scatter_2d 't [m] [n] [l] (dest: *[m][n]t) (is: [l](i64, i64)) (vs: [l]t): *[m][n]t =
+  intrinsics.scatter_2d (dest, is, vs) :> *[m][n]t
+
+-- | `scatter_3d as is vs` is the equivalent of a `scatter` on a 3-dimensional
+-- array.
+--
+-- **Work:** *O(n)*
+--
+-- **Span:** *O(1)*
+let scatter_3d 't [m] [n] [o] [l] (dest: *[m][n][o]t) (is: [l](i64, i64, i64)) (vs: [l]t): *[m][n][o]t =
+  intrinsics.scatter_3d (dest, is, vs) :> *[m][n][o]t
+
 -- | A one-dimensional stencil.  The first argument is relative
 -- indexes for the 'd'-element neighbourhood surrounding an element.
 let stencil_1d [n][d] 'a 'b 'c (is: [d]i64) (f: c -> [d]a -> b) (cs: [n]c) (as: [n]a) : [n]b =
