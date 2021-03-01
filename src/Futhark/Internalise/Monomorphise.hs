@@ -675,17 +675,7 @@ inferSizeArgs tparams bind_t t =
         Just (ConstDim x) ->
           Just $ Literal (SignedValue $ Int64Value $ fromIntegral x) mempty
         _ ->
-          Nothing
-
-explicitSizes :: StructType -> MonoType -> S.Set VName
-explicitSizes t1 t2 =
-  execState (matchDims onDims t1 t2) mempty `S.intersection` mustBeExplicit t1
-  where
-    onDims d1 d2 = do
-      case (d1, d2) of
-        (NamedDim v, MonoKnown _) -> modify $ S.insert $ qualLeaf v
-        _ -> return ()
-      return d1
+          Just $ Literal (SignedValue $ Int64Value 0) mempty
 
 -- Monomorphising higher-order functions can result in function types
 -- where the same named parameter occurs in multiple spots.  When
@@ -726,7 +716,7 @@ monomorphiseBinding entry (PolyBinding rr (name, tparams, params, rettype, retex
         params' = map (substPattern entry substPatternType) params
         bind_t' = substTypesAny (`M.lookup` substs') bind_t
         (shape_params_explicit, shape_params_implicit) =
-          partition ((`S.member` explicitSizes bind_t' t) . typeParamName) $
+          partition ((`S.member` mustBeExplicit bind_t') . typeParamName) $
             shape_params ++ t_shape_params
 
     (params'', rrs) <- unzip <$> mapM transformPattern params'
