@@ -374,6 +374,11 @@ commandLineOptions =
       (NoArg $ Right $ changeFutharkConfig $ \opts -> opts {futharkWerror = True})
       "Treat warnings as errors.",
     Option
+      "w"
+      []
+      (NoArg $ Right $ changeFutharkConfig $ \opts -> opts {futharkWarn = False})
+      "Disable all warnings.",
+    Option
       "t"
       ["type-check"]
       ( NoArg $
