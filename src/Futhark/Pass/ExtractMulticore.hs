@@ -350,7 +350,7 @@ transformSOAC pat _ (Hist w hists map_lam arrs) = do
       return $
         mconcat seq_hist_stms
           <> oneStm (Let pat (defAux ()) $ Op $ ParOp Nothing seq_op)
-transformSOAC pat attrs (Stream w (Parallel _ comm red_lam red_nes) fold_lam arrs)
+transformSOAC pat attrs (Stream w (Parallel _ comm red_lam) fold_lam red_nes arrs)
   | not $ null red_nes = do
     map_lam <- unstreamLambda attrs red_nes fold_lam
     (seq_red_stms, seq_op) <-
@@ -383,12 +383,12 @@ transformSOAC pat attrs (Stream w (Parallel _ comm red_lam red_nes) fold_lam arr
         return $
           seq_red_stms
             <> oneStm (Let pat (defAux ()) $ Op $ ParOp Nothing seq_op)
-transformSOAC pat _ (Stream w form lam arrs) = do
+transformSOAC pat _ (Stream w _ lam nes arrs) = do
   -- Just remove the stream and transform the resulting stms.
   soacs_scope <- castScope <$> askScope
   stream_stms <-
     flip runBinderT_ soacs_scope $
-      sequentialStreamWholeArray pat w (getStreamAccums form) lam arrs
+      sequentialStreamWholeArray pat w nes lam arrs
   transformStms stream_stms
 
 transformProg :: Prog SOACS -> PassM (Prog MC)
