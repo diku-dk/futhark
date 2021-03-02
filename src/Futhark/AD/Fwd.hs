@@ -231,18 +231,44 @@ fwdSOAC pat aux (Screma size (ScremaForm scs reds f) xs) = do
       op' <- fwdLambda $ redLambda red
       neutral_tans <- mapM zeroFromSubExp $ redNeutral red
       return $
-        -- FIX: The neutral element is actually operator dependent
-        -- and probably not statically derivable in general. (I guess
-        -- this amounts to finding fixed points of arbitrary functions.)
-        -- We could turn reduces/scans into loops when the neutral
-        -- element isn't available?
         Reduce
           { redComm = Noncommutative, -- Dunno
             redLambda = op',
             redNeutral = redNeutral red ++ map Var neutral_tans
           }
-fwdSOAC pat aux (Stream size form lam arrs) = undefined
-fwdSOAC pat aux (Hist len ops bucket_fun imgs) = undefined
+fwdSOAC pat aux (Stream size form lam xs) = do
+  pat_tan <- newTan pat
+  lam' <- fwdLambda lam
+  xs_tan <- tangent xs
+  case form of
+    Sequential nes -> do
+      nes_tan <- mapM (fmap Var . zeroFromSubExp) nes
+      let form' = Sequential $ nes ++ nes_tan
+      addStm $ Let (pat <> pat_tan) aux $ Op $ Stream size form' lam' $ xs ++ xs_tan
+    Parallel o comm lam0 nes -> do
+      nes_tan <- mapM (fmap Var . zeroFromSubExp) nes
+      lam0' <- fwdLambda lam0
+      let form' = Parallel o comm lam0' $ nes ++ nes_tan
+      addStm $ Let (pat <> pat_tan) aux $ Op $ Stream size form' lam' $ xs ++ xs_tan
+fwdSOAC pat aux (Hist len ops bucket_fun imgs) = do
+  pat_tan <- newTan pat
+  ops' <- mapM fwdHist ops
+  bucket_fun' <- fwdLambda bucket_fun
+  addStm $ Let (pat <> pat_tan) aux $ Op $ Hist len ops' bucket_fun' imgs
+  where
+    fwdHist :: HistOp SOACS -> ADM (HistOp SOACS)
+    fwdHist (HistOp width rf dest nes op) = do
+      dest_tan <- mapM tangent dest
+      nes_tan <- mapM (fmap Var . zeroFromSubExp) nes
+      op' <- fwdLambda op
+      return $
+        HistOp
+          { histWidth = width,
+            histRaceFactor = rf,
+            histDest = dest ++ dest_tan,
+            histNeutral = nes ++ nes_tan,
+            histOp = op'
+          }
 fwdSOAC pat aux scatter@(Scatter {}) = addStm $ Let pat aux $ Op scatter
 fwdSOAC _ _ soac = error $ "Unsupported SOAC: " ++ pretty soac
 
