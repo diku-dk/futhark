@@ -200,41 +200,45 @@ fwdLambda (Lambda params body ret) = do
   pure $ Lambda (params ++ params') body' $ ret ++ ret
 
 flipLambda :: Lambda -> Lambda
-flipLambda (Lambda params body ret) = Lambda (reverse params) body (reverse ret)
+flipLambda (Lambda params body ret) = Lambda (reverse params) body ret
+
+zeroFromSubExp :: SubExp -> ADM VName
+zeroFromSubExp (Constant c) =
+  letExp "zero" $
+    BasicOp $ SubExp $ Constant $ blankPrimValue $ primValueType c
+zeroFromSubExp (Var v) = do
+  t <- lookupType v
+  letExp "zero" $ zeroExp t
 
 fwdSOAC :: Pattern -> StmAux () -> SOAC SOACS -> ADM ()
-fwdSOAC pat aux (Screma size (ScremaForm [] [] f) xs) = do
+fwdSOAC pat aux (Screma size (ScremaForm scs reds f) xs) = do
   pat_tan <- newTan pat
   xs_tan <- tangent xs
+  scs' <- mapM fwdScan scs
+  reds' <- mapM fwdRed reds
   f' <- fwdLambda f
-  addStm $ Let (pat <> pat_tan) aux $ Op $ Screma size (mapSOAC f') $ xs ++ xs_tan
-
---fwdSOAC pat aux (Screma size (ScremaForm [] [Reduce com op zeros] _) [xs]) = do
---  pat_tan <- newTan pat
---  xs_tan <- tangent xs
---  error "oops"
---  PrimType t <- lookupType xs
---  add_op <- case t of
---    IntType it -> binOpLambda (Add it OverflowWrap) t
---    FloatType ft -> binOpLambda (FAdd ft) t
---  let sum_red = Reduce Commutative add_op (Constant $ blankPrimValue t)
---  op' <- fwdLambda op
---  --scan_left <- letBindNames ["scan_left"] . Op . Screma size <$> scanSOAC [Scan op zeros]
---  --scan_right <- letBindNames ["scan_right"] . Op . Screma size <$> scanSOAC [Scan (flipLambda op) (reverse zeros)]
---  map_f <- do
---    x <- newVName "x"
---    i <- newVName "i"
---    body <- insertStmsM $ do
---      Index scan_left (DimFix $ Var i)
-
---redomapSOAC
-
---binOpLambda ::
---  (MonadBinder m, Bindable (Lore m)) =>
---  BinOp ->
---  PrimType ->
---  m (Lambda (Lore m))
---binOpLambda bop t = binLambda (BinOp bop) t t
+  let s = Let (pat <> pat_tan) aux $ Op $ Screma size (ScremaForm scs' reds' f') $ xs ++ xs_tan
+  addStm s
+  where
+    fwdScan :: Scan SOACS -> ADM (Scan SOACS)
+    fwdScan sc = do
+      op' <- fwdLambda $ scanLambda sc
+      neutral_tans <- mapM zeroFromSubExp $ scanNeutral sc
+      return $
+        Scan
+          { scanNeutral = scanNeutral sc ++ map Var neutral_tans,
+            scanLambda = op'
+          }
+    fwdRed :: Reduce SOACS -> ADM (Reduce SOACS)
+    fwdRed red = do
+      op' <- fwdLambda $ redLambda red
+      neutral_tans <- mapM zeroFromSubExp $ redNeutral red
+      return $
+        Reduce
+          { redComm = Noncommutative, -- Dunno
+            redLambda = op',
+            redNeutral = redNeutral red ++ map Var neutral_tans
+          }
 
 fwdStm :: Stm -> ADM ()
 fwdStm stm@(Let pat aux (BasicOp e)) = addStm stm >> basicFwd pat aux e
