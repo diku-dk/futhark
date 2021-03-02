@@ -44,7 +44,6 @@ import Futhark.Util.Pretty
     ppr,
     text,
     (<+>),
-    (</>),
   )
 import qualified Futhark.Util.Pretty as PP
 import GHC.Generics (Generic)
@@ -76,20 +75,19 @@ instance SexpIso SegLevel where
 
 instance PP.Pretty SegLevel where
   ppr lvl =
-    lvl'
-      </> PP.parens
-        ( text "#groups=" <> ppr (segNumGroups lvl) <> PP.semi
-            <+> text "groupsize="
-            <> ppr (segGroupSize lvl)
-            <> case segVirt lvl of
-              SegNoVirt -> mempty
-              SegNoVirtFull -> PP.semi <+> text "full"
-              SegVirt -> PP.semi <+> text "virtualise"
-        )
+    PP.parens
+      ( lvl' <> PP.semi
+          <+> text "#groups=" <> ppr (segNumGroups lvl) <> PP.semi
+          <+> text "groupsize=" <> ppr (segGroupSize lvl) <> virt
+      )
     where
       lvl' = case lvl of
-        SegThread {} -> "_thread"
-        SegGroup {} -> "_group"
+        SegThread {} -> "thread"
+        SegGroup {} -> "group"
+      virt = case segVirt lvl of
+        SegNoVirt -> mempty
+        SegNoVirtFull -> PP.semi <+> text "full"
+        SegVirt -> PP.semi <+> text "virtualise"
 
 instance Engine.Simplifiable SegLevel where
   simplify (SegThread num_groups group_size virt) =

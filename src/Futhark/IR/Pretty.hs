@@ -252,10 +252,13 @@ instance PrettyLore lore => Pretty (Exp lore) where
         | null $ bodyStms b = ppr b
         | otherwise = nestedBlock "{" "}" $ ppr b
   ppr (BasicOp op) = ppr op
-  ppr (Apply fname args _ (safety, _, _)) =
+  ppr (Apply fname args ret (safety, _, _)) =
     text "apply"
-      <+> text (nameToString fname) <> safety'
-        <> apply (map (align . pprArg) args)
+      <+> text (nameToString fname)
+      <> safety'
+      <> apply (map (align . pprArg) args)
+      </> colon
+      <+> braces (commasep $ map ppr ret)
     where
       pprArg (arg, Consume) = text "*" <> ppr arg
       pprArg (arg, _) = ppr arg

@@ -143,7 +143,7 @@ lowerUpdatesIntoSegMap scope pat updates kspace kbody = do
                   map (pe64 . Var) gtids
 
           let res_dims = arrayDims $ snd bindee_dec
-              ret' = WriteReturns res_dims src [(map DimFix slice', se)]
+              ret' = WriteReturns (Shape res_dims) src [(map DimFix slice', se)]
 
           return
             ( PatElem bindee_nm bindee_dec,

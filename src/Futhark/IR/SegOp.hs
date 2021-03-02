@@ -259,7 +259,7 @@ data KernelResult
     -- result-per-group depends on where the 'SegOp' occurs.
     Returns ResultManifest SubExp
   | WriteReturns
-      [SubExp] -- Size of array.  Must match number of dims.
+      Shape -- Size of array.  Must match number of dims.
       VName -- Which array
       [(Slice SubExp, SubExp)]
   | -- Arbitrary number of index/value pairs.
@@ -412,13 +412,13 @@ checkKernelBody ts (KernelBody (_, dec) stms kres) = do
   where
     checkKernelResult (Returns _ what) t =
       TC.require [t] what
-    checkKernelResult (WriteReturns rws arr res) t = do
-      mapM_ (TC.require [Prim int64]) rws
+    checkKernelResult (WriteReturns shape arr res) t = do
+      mapM_ (TC.require [Prim int64]) $ shapeDims shape
       arr_t <- lookupType arr
       forM_ res $ \(slice, e) -> do
         mapM_ (traverse $ TC.require [Prim int64]) slice
         TC.require [t] e
-        unless (arr_t == t `arrayOfShape` Shape rws) $
+        unless (arr_t == t `arrayOfShape` shape) $
           TC.bad $
             TC.TypeError $
               "WriteReturns returning "
@@ -426,7 +426,7 @@ checkKernelBody ts (KernelBody (_, dec) stms kres) = do
                 ++ " of type "
                 ++ pretty t
                 ++ ", shape="
-                ++ pretty rws
+                ++ pretty shape
                 ++ ", but destination array has type "
                 ++ pretty arr_t
       TC.consume =<< TC.lookupAliases arr
@@ -478,12 +478,12 @@ instance Pretty KernelResult where
     text "returns (private)" <+> ppr what
   ppr (Returns ResultMaySimplify what) =
     text "returns" <+> ppr what
-  ppr (WriteReturns rws arr res) =
-    ppr arr <+> text "with" <+> PP.apply (map ppRes res)
+  ppr (WriteReturns shape arr res) =
+    ppr arr <+> PP.colon <+> ppr shape
+      </> text "with" <+> PP.apply (map ppRes res)
     where
-      ppRes (is, e) =
-        PP.brackets (PP.commasep $ zipWith f is rws) <+> text "<-" <+> ppr e
-      f i rw = ppr i <+> text "<" <+> ppr rw
+      ppRes (slice, e) =
+        PP.brackets (commasep (map ppr slice)) <+> text "=" <+> ppr e
   ppr (ConcatReturns o w per_thread_elems v) =
     text "concat" <> suff
       <> parens (commasep [ppr w, ppr per_thread_elems]) <+> ppr v
@@ -602,8 +602,8 @@ segSpace (SegScan _ lvl _ _ _) = lvl
 segSpace (SegHist _ lvl _ _ _) = lvl
 
 segResultShape :: SegSpace -> Type -> KernelResult -> Type
-segResultShape _ t (WriteReturns rws _ _) =
-  t `arrayOfShape` Shape rws
+segResultShape _ t (WriteReturns shape _ _) =
+  t `arrayOfShape` shape
 segResultShape space t (Returns _ _) =
   foldr (flip arrayOfRow) t $ segSpaceDims space
 segResultShape _ t (ConcatReturns _ w _ _) =
