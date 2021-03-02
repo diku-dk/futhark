@@ -680,21 +680,13 @@ cFloatConvOps :: [C.Definition]
 cFloat32Funs :: [C.Definition]
 cFloat32Funs =
   [C.cunit|
-$esc:("#if defined(__OPENCL_VERSION__) || defined(__CUDA_ARCH__)")
     static inline typename bool $id:(funName' "isnan32")(float x) {
       return isnan(x);
     }
+
     static inline typename bool $id:(funName' "isinf32")(float x) {
       return isinf(x);
     }
-$esc:("#else")
-    static inline typename bool $id:(funName' "isnan32")(float x) {
-      return isnanf(x);
-    }
-    static inline typename bool $id:(funName' "isinf32")(float x) {
-      return isinff(x);
-    }
-$esc:("#endif")
 
 $esc:("#ifdef __OPENCL_VERSION__")
     static inline float $id:(funName' "log32")(float x) {
