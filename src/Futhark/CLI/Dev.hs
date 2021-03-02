@@ -11,6 +11,7 @@ import Control.Monad.State
 import qualified Data.ByteString.Lazy as ByteString
 import Data.List (intersperse)
 import Data.Maybe
+import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import Futhark.Actions
 import Futhark.Analysis.Metrics (OpMetrics)
@@ -20,6 +21,7 @@ import qualified Futhark.IR.Kernels as Kernels
 import qualified Futhark.IR.KernelsMem as KernelsMem
 import qualified Futhark.IR.MC as MC
 import qualified Futhark.IR.MCMem as MCMem
+import Futhark.IR.Parse (parseSOACS)
 import Futhark.IR.Prop.Aliases (CanBeAliased)
 import qualified Futhark.IR.SOACS as SOACS
 import qualified Futhark.IR.Seq as Seq
@@ -636,6 +638,11 @@ main = mainWithOptions newConfig commandLineOptions "options... program" compile
             (base, ".fut") -> do
               prog <- runPipelineOnProgram (futharkConfig config) id file
               runPolyPasses config base (SOACS prog)
+            (base, ".fut_soacs") -> do
+              input <- liftIO $ T.readFile file
+              case parseSOACS file input of
+                Left err -> externalErrorS $ T.unpack err
+                Right prog -> runPolyPasses config base $ SOACS prog
             (base, ".sexp") -> do
               input <- liftIO $ ByteString.readFile file
               prog <- case Sexp.decode @(Prog SOACS.SOACS) input of
@@ -655,7 +662,7 @@ main = mainWithOptions newConfig commandLineOptions "options... program" compile
                                 Left e -> externalErrorS $ "Couldn't parse sexp input: " ++ show e
               runPolyPasses config base prog
             (_, ext) ->
-              externalErrorS $ unwords ["Unsupported extension", show ext, ". Supported extensions: sexp, fut"]
+              externalErrorS $ unwords ["Unsupported extension", show ext, ". Supported extensions: .sexp, .fut, .fut_soacs"]
 
 runPolyPasses :: Config -> FilePath -> UntypedPassState -> FutharkM ()
 runPolyPasses config base initial_prog = do
