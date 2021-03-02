@@ -86,8 +86,8 @@ freeVars expr = case expr of
   If e1 e2 e3 _ _ -> freeVars e1 <> freeVars e2 <> freeVars e3
   Apply e1 e2 _ _ _ -> freeVars e1 <> freeVars e2
   Negate e _ -> freeVars e
-  Lambda pats e0 _ _ _ ->
-    (sizes (foldMap patternDimNames pats) <> freeVars e0)
+  Lambda pats e0 _ (Info (_, t)) _ ->
+    (sizes (foldMap patternDimNames pats) <> freeVars e0 <> sizes (typeDimNames t))
       `withoutM` foldMap patternVars pats
   OpSection {} -> mempty
   OpSectionLeft _ _ e _ _ _ -> freeVars e
