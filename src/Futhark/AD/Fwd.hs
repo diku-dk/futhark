@@ -128,8 +128,6 @@ instance Tangent VName where
         letBindNames [v_tan] $ zeroExp t
         return v_tan
 
---        error $ "No tangent: " ++ show v
-
 instance Tangent SubExp where
   tangent (Constant c) = zeroTan $ Prim $ primValueType c
   tangent (Var v) = Var <$> tangent v
@@ -217,8 +215,7 @@ fwdSOAC pat aux (Screma size (ScremaForm scs reds f) xs) = do
   scs' <- mapM fwdScan scs
   reds' <- mapM fwdRed reds
   f' <- fwdLambda f
-  let s = Let (pat <> pat_tan) aux $ Op $ Screma size (ScremaForm scs' reds' f') $ xs ++ xs_tan
-  addStm s
+  addStm $ Let (pat <> pat_tan) aux $ Op $ Screma size (ScremaForm scs' reds' f') $ xs ++ xs_tan
   where
     fwdScan :: Scan SOACS -> ADM (Scan SOACS)
     fwdScan sc = do
@@ -234,11 +231,20 @@ fwdSOAC pat aux (Screma size (ScremaForm scs reds f) xs) = do
       op' <- fwdLambda $ redLambda red
       neutral_tans <- mapM zeroFromSubExp $ redNeutral red
       return $
+        -- FIX: The neutral element is actually operator dependent
+        -- and probably not statically derivable in general. (I guess
+        -- this amounts to finding fixed points of arbitrary functions.)
+        -- We could turn reduces/scans into loops when the neutral
+        -- element isn't available?
         Reduce
           { redComm = Noncommutative, -- Dunno
             redLambda = op',
             redNeutral = redNeutral red ++ map Var neutral_tans
           }
+fwdSOAC pat aux (Stream size form lam arrs) = undefined
+fwdSOAC pat aux (Hist len ops bucket_fun imgs) = undefined
+fwdSOAC pat aux scatter@(Scatter {}) = addStm $ Let pat aux $ Op scatter
+fwdSOAC _ _ soac = error $ "Unsupported SOAC: " ++ pretty soac
 
 fwdStm :: Stm -> ADM ()
 fwdStm stm@(Let pat aux (BasicOp e)) = addStm stm >> basicFwd pat aux e
@@ -274,22 +280,6 @@ fwdStm (Let (Pattern ctx pes) aux (DoLoop l_ctx val_pats (WhileLoop v) body)) = 
     addStm $
       Let (Pattern ctx (pes ++ pes_tan)) aux $
         DoLoop l_ctx (val_pats ++ val_pats_tan) (WhileLoop v) body_tan
---fwdStm (Let (Pattern ctx pes) aux (DoLoop l_ctx val_pats loop@(ForLoop i it bound []) body)) = do
---  let (val_params, vals) = unzip val_pats
---  vals_tan <- tangent vals
---  pes_tan <- newTan pes
---  slocal' $ do
---    val_params_tan <- newTan val_params
---    let val_pats_tan = zip val_params_tan vals_tan
---    inScopeOf loop $ do
---      when (i `nameIn` freeIn body) $ do
---        t <- lookupType i
---        i_tan <- newTan i
---        letBindNames [i_tan] $ zeroExp t
---      body_tan <- fwdBody body
---      addStm $
---        Let (Pattern ctx (pes ++ pes_tan)) aux $
---          DoLoop l_ctx (val_pats ++ val_pats_tan) (ForLoop i it bound []) body_tan
 fwdStm (Let (Pattern ctx pes) aux (DoLoop l_ctx val_pats loop@(ForLoop i it bound []) body)) = do
   let (val_params, vals) = unzip val_pats
   vals_tan <- tangent vals
@@ -314,10 +304,6 @@ fwdStm (Let (Pattern ctx pes) aux (DoLoop l_ctx val_pats loop@(ForLoop i it boun
     let val_pats_tan = zip val_params_tan vals_tan
     let loop_vars_tan = zip loop_params_tan loop_vals_tan
     inScopeOf loop $ do
-      --when (i `nameIn` freeIn body) $ do
-      --  t <- lookupType i
-      --  i_tan <- newTan i
-      --  letBindNames [i_tan] $ zeroExp t
       body_tan <- fwdBody body
       addStm $
         Let (Pattern ctx (pes ++ pes_tan)) aux $
