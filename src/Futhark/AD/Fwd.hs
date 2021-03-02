@@ -232,7 +232,7 @@ fwdSOAC pat aux (Screma size (ScremaForm scs reds f) xs) = do
       neutral_tans <- mapM zeroFromSubExp $ redNeutral red
       return $
         Reduce
-          { redComm = Noncommutative, -- Dunno
+          { redComm = redComm red, -- FIXME: Does differentiation perserve commutativity?
             redLambda = op',
             redNeutral = redNeutral red ++ map Var neutral_tans
           }
@@ -306,18 +306,6 @@ fwdStm (Let (Pattern ctx pes) aux (DoLoop l_ctx val_pats (WhileLoop v) body)) = 
     addStm $
       Let (Pattern ctx (pes ++ pes_tan)) aux $
         DoLoop l_ctx (val_pats ++ val_pats_tan) (WhileLoop v) body_tan
-fwdStm (Let (Pattern ctx pes) aux (DoLoop l_ctx val_pats loop@(ForLoop i it bound []) body)) = do
-  let (val_params, vals) = unzip val_pats
-  vals_tan <- tangent vals
-  pes_tan <- newTan pes
-  slocal' $ do
-    val_params_tan <- newTan val_params
-    let val_pats_tan = zip val_params_tan vals_tan
-    inScopeOf loop $ do
-      body_tan <- fwdBody body
-      addStm $
-        Let (Pattern ctx (pes ++ pes_tan)) aux $
-          DoLoop l_ctx (val_pats ++ val_pats_tan) (ForLoop i it bound []) body_tan
 fwdStm (Let (Pattern ctx pes) aux (DoLoop l_ctx val_pats loop@(ForLoop i it bound loop_vars) body)) = do
   let (val_params, vals) = unzip val_pats
       (loop_params, loop_vals) = unzip loop_vars
