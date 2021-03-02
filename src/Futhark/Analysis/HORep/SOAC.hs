@@ -443,7 +443,7 @@ setLambda lam (Hist w ops _ inps) =
 
 -- | The return type of a SOAC.
 typeOf :: SOAC lore -> [Type]
-typeOf (Stream w form lam nes _) =
+typeOf (Stream w _ lam nes _) =
   let accrtps = take (length nes) $ lambdaReturnType lam
       arrtps =
         [ arrayOf (stripArray 1 t) (Shape [w]) NoUniqueness
