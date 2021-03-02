@@ -232,7 +232,7 @@ fwdSOAC pat aux (Screma size (ScremaForm scs reds f) xs) = do
       neutral_tans <- mapM zeroFromSubExp $ redNeutral red
       return $
         Reduce
-          { redComm = redComm red, -- FIXME: Does differentiation perserve commutativity?
+          { redComm = Noncommutative, -- FIXME: Does differentiation perserve commutativity?
             redLambda = op',
             redNeutral = redNeutral red ++ map Var neutral_tans
           }
