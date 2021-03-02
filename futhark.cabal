@@ -147,6 +147,7 @@ library
       Futhark.IR
       Futhark.IR.Aliases
       Futhark.IR.Decorations
+      Futhark.IR.Parse
       Futhark.IR.Kernels
       Futhark.IR.Kernels.Kernel
       Futhark.IR.Kernels.Simplify
