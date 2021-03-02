@@ -11,6 +11,7 @@ import Control.Monad
 import Control.Monad.RWS.Strict
 import Control.Monad.State.Strict
 import Data.Bifunctor (second)
+import Data.List (transpose)
 import qualified Data.Map as M
 import Futhark.AD.Derivatives
 import Futhark.Analysis.PrimExp.Convert
@@ -193,9 +194,10 @@ basicFwd pat aux op = do
 
 fwdLambda :: Lambda -> ADM Lambda
 fwdLambda (Lambda params body ret) = do
-  params' <- newTan params
+  params_tan <- newTan params
   body' <- fwdBody body
-  pure $ Lambda (params ++ params') body' $ ret ++ ret
+  let params' = concat $ transpose [params, params_tan]
+  pure $ Lambda params' body' $ ret ++ ret
 
 flipLambda :: Lambda -> Lambda
 flipLambda (Lambda params body ret) = Lambda (reverse params) body ret
@@ -343,6 +345,7 @@ fwdBodyOnlyTangents (Body _ stms res) = do
 fwdJVP :: MonadFreshNames m => Scope SOACS -> Lambda -> m Lambda
 fwdJVP scope (Lambda params body ret) = do
   runADM . localScope scope $ do
-    params' <- newTan params
+    params_tan <- newTan params
     body' <- fwdBodyOnlyTangents body
-    pure $ Lambda (params ++ params') body' ret
+    let params' = concat $ transpose [params, params_tan]
+    pure $ Lambda params' body' $ ret ++ ret
