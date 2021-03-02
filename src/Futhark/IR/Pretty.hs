@@ -108,7 +108,7 @@ instance Pretty SubExp where
 
 instance Pretty Certificates where
   ppr (Certificates []) = empty
-  ppr (Certificates cs) = braces $ commasep (map ppr cs)
+  ppr (Certificates cs) = text "#" <> braces (commasep (map ppr cs))
 
 instance PrettyLore lore => Pretty (Stms lore) where
   ppr = stack . map ppr . stmsToList
@@ -132,6 +132,14 @@ attrAnnots = map f . toList . unAttrs
 stmAttrAnnots :: Stm lore -> [Doc]
 stmAttrAnnots = attrAnnots . stmAuxAttrs . stmAux
 
+certAnnots :: Certificates -> [Doc]
+certAnnots cs
+  | cs == mempty = []
+  | otherwise = [ppr cs]
+
+stmCertAnnots :: Stm lore -> [Doc]
+stmCertAnnots = certAnnots . stmAuxCerts . stmAux
+
 instance Pretty (PatElemT dec) => Pretty (PatternT dec) where
   ppr pat = ppPattern (patternContextElements pat) (patternValueElements pat)
 
@@ -151,19 +159,16 @@ instance Pretty (Param Type) where
   ppr (Param name t) = ppr name <+> colon <+> ppr t
 
 instance PrettyLore lore => Pretty (Stm lore) where
-  ppr bnd@(Let pat (StmAux cs _ dec) e) =
+  ppr bnd@(Let pat aux e) =
     stmannot $
       align $
         hang 2 $
           text "let" <+> align (ppr pat)
-            <+> case (linebreak, ppExpLore dec e) of
-              (True, Nothing) -> equals </> e'
-              (_, Just ann) -> equals </> (ann </> e')
-              (False, Nothing) -> equals <+/> e'
+            <+> case (linebreak, ppExpLore (stmAuxDec aux) e) of
+              (True, Nothing) -> equals </> ppr e
+              (_, Just ann) -> equals </> (ann </> ppr e)
+              (False, Nothing) -> equals <+/> ppr e
     where
-      e'
-        | linebreak = ppr cs </> ppr e
-        | otherwise = ppr cs <> ppr e
       linebreak = case e of
         DoLoop {} -> True
         Op {} -> True
@@ -171,10 +176,11 @@ instance PrettyLore lore => Pretty (Stm lore) where
         Apply {} -> True
         BasicOp ArrayLit {} -> False
         BasicOp Assert {} -> True
-        _ -> cs /= mempty
+        _ -> False
 
       stmannot =
         case stmAttrAnnots bnd
+          <> stmCertAnnots bnd
           <> mapMaybe ppAnnot (patternElements $ stmPattern bnd) of
           [] -> id
           annots -> (align (stack annots) </>)
@@ -182,8 +188,6 @@ instance PrettyLore lore => Pretty (Stm lore) where
 instance Pretty BasicOp where
   ppr (SubExp se) = ppr se
   ppr (Opaque e) = text "opaque" <> apply [ppr e]
-  ppr (ArrayLit [] rt) =
-    text "empty" <> parens (ppr rt)
   ppr (ArrayLit es rt) =
     case rt of
       Array {} -> brackets $ commastack $ map ppr es
@@ -322,7 +326,7 @@ instance Pretty d => Pretty (DimChange d) where
 
 instance Pretty d => Pretty (DimIndex d) where
   ppr (DimFix i) = ppr i
-  ppr (DimSlice i n s) = ppr i <> text ":+" <> ppr n <> text "*" <> ppr s
+  ppr (DimSlice i n s) = ppr i <+> text ":+" <+> ppr n <+> text "*" <+> ppr s
 
 ppPattern :: (Pretty a, Pretty b) => [a] -> [b] -> Doc
 ppPattern [] bs = braces $ commasep $ map ppr bs

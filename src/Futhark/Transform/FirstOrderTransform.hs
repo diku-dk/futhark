@@ -197,13 +197,12 @@ transformSOAC pat (Screma w form@(ScremaForm scans reds map_lam) arrs) = do
     (++ patternNames pat)
       <$> replicateM (length scanacc_params) (newVName "discard")
   letBindNames names $ DoLoop [] merge loopform loop_body
-transformSOAC pat (Stream w stream_form lam arrs) = do
+transformSOAC pat (Stream w _ lam nes arrs) = do
   -- Create a loop that repeatedly applies the lambda body to a
   -- chunksize of 1.  Hopefully this will lead to this outer loop
   -- being the only one, as all the innermost one can be simplified
   -- array (as they will have one iteration each).
-  let nes = getStreamAccums stream_form
-      (chunk_size_param, fold_params, chunk_params) =
+  let (chunk_size_param, fold_params, chunk_params) =
         partitionChunkedFoldParameters (length nes) $ lambdaParams lam
 
   mapout_merge <- forM (drop (length nes) $ lambdaReturnType lam) $ \t ->

@@ -279,7 +279,7 @@ unbalancedLambda lam =
         bodyStms body
 
     -- XXX - our notion of balancing is probably still too naive.
-    unbalancedStm bound (Op (Stream w _ _ _)) =
+    unbalancedStm bound (Op (Stream w _ _ _ _)) =
       w `subExpBound` bound
     unbalancedStm bound (Op (Screma w _ _)) =
       w `subExpBound` bound
@@ -466,14 +466,14 @@ transformStm path (Let pat aux@(StmAux cs _ _) (Op (Screma w form arrs)))
 
 -- Streams can be handled in two different ways - either we
 -- sequentialise the body or we keep it parallel and distribute.
-transformStm path (Let pat aux@(StmAux cs _ _) (Op (Stream w (Parallel _ _ _ []) map_fun arrs)))
+transformStm path (Let pat aux@(StmAux cs _ _) (Op (Stream w Parallel {} map_fun [] arrs)))
   | not ("sequential_inner" `inAttrs` stmAuxAttrs aux) = do
     -- No reduction part.  Remove the stream and leave the body
     -- parallel.  It will be distributed.
     types <- asksScope scopeForSOACs
     transformStms path . stmsToList . snd
       =<< runBinderT (certifying cs $ sequentialStreamWholeArray pat w [] map_fun arrs) types
-transformStm path (Let pat aux@(StmAux cs _ _) (Op (Stream w (Parallel o comm red_fun nes) fold_fun arrs)))
+transformStm path (Let pat aux@(StmAux cs _ _) (Op (Stream w (Parallel o comm red_fun) fold_fun nes arrs)))
   | "sequential_inner" `inAttrs` stmAuxAttrs aux =
     paralleliseOuter path
   | otherwise = do
@@ -552,7 +552,7 @@ transformStm path (Let pat (StmAux cs _ _) (Op (Screma w form arrs))) = do
   scope <- asksScope scopeForSOACs
   transformStms path . map (certify cs) . stmsToList . snd
     =<< runBinderT (dissectScrema pat w form arrs) scope
-transformStm path (Let pat _ (Op (Stream w (Sequential nes) fold_fun arrs))) = do
+transformStm path (Let pat _ (Op (Stream w Sequential fold_fun nes arrs))) = do
   -- Remove the stream and leave the body parallel.  It will be
   -- distributed.
   types <- asksScope scopeForSOACs
@@ -683,7 +683,7 @@ worthIntraGroup lam = bodyInterest (lambdaBody lam) > 1
         max (bodyInterest tbody) (bodyInterest fbody)
       | Op (Screma w (ScremaForm _ _ lam') _) <- stmExp stm =
         zeroIfTooSmall w + bodyInterest (lambdaBody lam')
-      | Op (Stream _ (Sequential _) lam' _) <- stmExp stm =
+      | Op (Stream _ Sequential lam' _ _) <- stmExp stm =
         bodyInterest $ lambdaBody lam'
       | otherwise =
         0

@@ -1621,11 +1621,11 @@ segOpReturns ::
   SegOp lvl lore ->
   m [ExpReturns]
 segOpReturns k@(SegMap _ _ _ kbody) =
-  kernelBodyReturns kbody =<< (extReturns <$> opType k)
+  kernelBodyReturns kbody . extReturns =<< opType k
 segOpReturns k@(SegRed _ _ _ _ kbody) =
-  kernelBodyReturns kbody =<< (extReturns <$> opType k)
+  kernelBodyReturns kbody . extReturns =<< opType k
 segOpReturns k@(SegScan _ _ _ _ kbody) =
-  kernelBodyReturns kbody =<< (extReturns <$> opType k)
+  kernelBodyReturns kbody . extReturns =<< opType k
 segOpReturns (SegHist _ _ ops _ _) =
   concat <$> mapM (mapM varReturns . histDest) ops
 segOpReturns k@SegStencil {} =

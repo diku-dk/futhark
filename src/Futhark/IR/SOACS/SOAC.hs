@@ -23,7 +23,6 @@ module Futhark.IR.SOACS.SOAC
     singleReduce,
 
     -- * Utility
-    getStreamAccums,
     scremaType,
     soacType,
     typeCheckSOAC,
@@ -97,7 +96,7 @@ instance SexpIso StencilIndexes where
 
 -- | A second-order array combinator (SOAC).
 data SOAC lore
-  = Stream SubExp (StreamForm lore) (Lambda lore) [VName]
+  = Stream SubExp (StreamForm lore) (Lambda lore) [SubExp] [VName]
   | -- | @Scatter <cs> <length> <lambda> <original index and value arrays>@
     --
     -- <input/output arrays along with their sizes and number of
@@ -148,7 +147,7 @@ instance Decorations lore => SexpIso (SOAC lore) where
     match $ With streamsexp $ With scattersexp $ With histsexp $ With scremasexp $ With stencilsexp End
     where
       streamsexp =
-        (. Sexp.list (Sexp.el (Sexp.sym "stream") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso))
+        (. Sexp.list (Sexp.el (Sexp.sym "stream") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso))
       scattersexp =
         (. Sexp.list (Sexp.el (Sexp.sym "scatter") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso))
       histsexp =
@@ -198,8 +197,8 @@ instance SexpIso StreamOrd where
 
 -- | What kind of stream is this?
 data StreamForm lore
-  = Parallel StreamOrd Commutativity (Lambda lore) [SubExp]
-  | Sequential [SubExp]
+  = Parallel StreamOrd Commutativity (Lambda lore)
+  | Sequential
   deriving (Eq, Ord, Show, Generic)
 
 instance Decorations lore => SexpIso (StreamForm lore) where
@@ -212,16 +211,10 @@ instance Decorations lore => SexpIso (StreamForm lore) where
                   >>> Sexp.el sexpIso
                   >>> Sexp.el sexpIso
                   >>> Sexp.el sexpIso
-                  >>> Sexp.rest sexpIso
               )
         )
         $ With
-          ( .
-              Sexp.list
-                ( Sexp.el (Sexp.sym "sequential")
-                    >>> Sexp.rest sexpIso
-                )
-          )
+          (. Sexp.list (Sexp.el (Sexp.sym "sequential")))
           End
 
 -- | The essential parts of a 'Screma' factored out (everything
@@ -443,18 +436,17 @@ mapSOACM ::
   SOACMapper flore tlore m ->
   SOAC flore ->
   m (SOAC tlore)
-mapSOACM tv (Stream size form lam arrs) =
+mapSOACM tv (Stream size form lam accs arrs) =
   Stream <$> mapOnSOACSubExp tv size
     <*> mapOnStreamForm form
     <*> mapOnSOACLambda tv lam
+    <*> mapM (mapOnSOACSubExp tv) accs
     <*> mapM (mapOnSOACVName tv) arrs
   where
-    mapOnStreamForm (Parallel o comm lam0 acc) =
-      Parallel o comm
-        <$> mapOnSOACLambda tv lam0
-        <*> mapM (mapOnSOACSubExp tv) acc
-    mapOnStreamForm (Sequential acc) =
-      Sequential <$> mapM (mapOnSOACSubExp tv) acc
+    mapOnStreamForm (Parallel o comm lam0) =
+      Parallel o comm <$> mapOnSOACLambda tv lam0
+    mapOnStreamForm Sequential =
+      pure Sequential
 mapSOACM tv (Scatter len lam ivs as) =
   Scatter
     <$> mapOnSOACSubExp tv len
@@ -541,15 +533,12 @@ instance ASTLore lore => Rename (SOAC lore) where
 
 -- | The type of a SOAC.
 soacType :: SOAC lore -> [Type]
-soacType (Stream outersize form lam _) =
+soacType (Stream outersize _ lam accs _) =
   map (substNamesInType substs) rtp
   where
     nms = map paramName $ take (1 + length accs) params
     substs = M.fromList $ zip nms (outersize : accs)
     Lambda params _ rtp = lam
-    accs = case form of
-      Parallel _ _ _ acc -> acc
-      Sequential acc -> acc
 soacType (Scatter _w lam _ivs as) =
   zipWith arrayOfShape val_ts ws
   where
@@ -577,21 +566,19 @@ instance (ASTLore lore, Aliased lore) => AliasedOp (SOAC lore) where
     where
       consumedArray v = fromMaybe v $ lookup v params_to_arrs
       params_to_arrs = zip (map paramName $ lambdaParams map_lam) arrs
-  consumedInOp (Stream _ form lam arrs) =
+  consumedInOp (Stream _ form lam accs arrs) =
     namesFromList $
       subExpVars $
         case form of
-          Sequential accs ->
-            map (consumedArray accs) $ namesToList $ consumedByLambda lam
-          Parallel _ _ _ accs ->
-            map (consumedArray accs) $ namesToList $ consumedByLambda lam
+          Sequential ->
+            map consumedArray $ namesToList $ consumedByLambda lam
+          Parallel {} ->
+            map consumedArray $ namesToList $ consumedByLambda lam
     where
-      consumedArray accs v = fromMaybe (Var v) $ lookup v $ paramsToInput accs
+      consumedArray v = fromMaybe (Var v) $ lookup v paramsToInput
       -- Drop the chunk parameter, which cannot alias anything.
-      paramsToInput accs =
-        zip
-          (map paramName $ drop 1 $ lambdaParams lam)
-          (accs ++ map Var arrs)
+      paramsToInput =
+        zip (map paramName $ drop 1 $ lambdaParams lam) (accs ++ map Var arrs)
   consumedInOp (Scatter _ _ _ as) =
     namesFromList $ map (\(_, _, a) -> a) as
   consumedInOp (Hist _ ops _ _) =
@@ -621,16 +608,17 @@ instance
   where
   type OpWithAliases (SOAC lore) = SOAC (Aliases lore)
 
-  addOpAliases aliases (Stream size form lam arr) =
+  addOpAliases aliases (Stream size form lam accs arr) =
     Stream
       size
       (analyseStreamForm form)
       (Alias.analyseLambda aliases lam)
+      accs
       arr
     where
-      analyseStreamForm (Parallel o comm lam0 acc) =
-        Parallel o comm (Alias.analyseLambda aliases lam0) acc
-      analyseStreamForm (Sequential acc) = Sequential acc
+      analyseStreamForm (Parallel o comm lam0) =
+        Parallel o comm (Alias.analyseLambda aliases lam0)
+      analyseStreamForm Sequential = Sequential
   addOpAliases aliases (Scatter len lam ivs as) =
     Scatter len (Alias.analyseLambda aliases lam) ivs as
   addOpAliases aliases (Hist len ops bucket_fun imgs) =
@@ -721,8 +709,7 @@ instance Decorations lore => ST.IndexOp (SOAC lore) where
 
 -- | Type-check a SOAC.
 typeCheckSOAC :: TC.Checkable lore => SOAC (Aliases lore) -> TC.TypeM lore ()
-typeCheckSOAC (Stream size form lam arrexps) = do
-  let accexps = getStreamAccums form
+typeCheckSOAC (Stream size form lam accexps arrexps) = do
   TC.require [Prim int64] size
   accargs <- mapM TC.checkArg accexps
   arrargs <- mapM lookupType arrexps
@@ -737,7 +724,7 @@ typeCheckSOAC (Stream size form lam arrexps) = do
     TC.bad $ TC.TypeError "Stream with inconsistent accumulator type in lambda."
   -- check reduce's lambda, if any
   _ <- case form of
-    Parallel _ _ lam0 _ -> do
+    Parallel _ _ lam0 -> do
       let acct = map TC.argType accargs
           outerRetType = lambdaReturnType lam0
       TC.checkLambda lam0 $ map TC.noArgAliases $ accargs ++ accargs
@@ -748,7 +735,7 @@ typeCheckSOAC (Stream size form lam arrexps) = do
               ++ ", but stream's reduce lambda returns type "
               ++ prettyTuple outerRetType
               ++ "."
-    _ -> return ()
+    Sequential -> return ()
   -- just get the dflow of lambda on the fakearg, which does not alias
   -- arr, so we can later check that aliases of arr are not used inside lam.
   let fake_lamarrs' = map asArg lamarrs'
@@ -942,13 +929,8 @@ typeCheckSOAC (Stencil ws p stencil lam inv arrs) = do
 
   TC.checkLambda lam $ map TC.noArgAliases $ inv' ++ arrs'
 
--- | Get Stream's accumulators as a sub-expression list
-getStreamAccums :: StreamForm lore -> [SubExp]
-getStreamAccums (Parallel _ _ _ accs) = accs
-getStreamAccums (Sequential accs) = accs
-
 instance OpMetrics (Op lore) => OpMetrics (SOAC lore) where
-  opMetrics (Stream _ _ lam _) =
+  opMetrics (Stream _ _ lam _ _) =
     inside "Stream" $ lambdaMetrics lam
   opMetrics (Scatter _len lam _ivs _as) =
     inside "Scatter" $ lambdaMetrics lam
@@ -967,26 +949,27 @@ instance PP.Pretty StencilIndexes where
   ppr (StencilStatic is) = PP.braces (commasep $ map ppr is)
 
 instance PrettyLore lore => PP.Pretty (SOAC lore) where
-  ppr (Stream size form lam arrs) =
+  ppr (Stream size form lam acc arrs) =
     case form of
-      Parallel o comm lam0 acc ->
+      Parallel o comm lam0 ->
         let ord_str = if o == Disorder then "Per" else ""
             comm_str = case comm of
               Commutative -> "Comm"
               Noncommutative -> ""
          in text ("streamPar" ++ ord_str ++ comm_str)
               <> parens
-                ( ppr size <> comma </> ppr lam0 </> comma </> ppr lam
+                ( ppr size <> comma </> ppr lam0 <> comma
+                    </> ppr lam <> comma
                     </> commasep (PP.braces (commasep $ map ppr acc) : map ppr arrs)
                 )
-      Sequential acc ->
+      Sequential ->
         text "streamSeq"
           <> parens
             ( ppr size <> comma </> ppr lam <> comma
                 </> commasep (PP.braces (commasep $ map ppr acc) : map ppr arrs)
             )
   ppr (Scatter len lam ivs as) =
-    ppSOAC "scatter" len [lam] (Just (map Var ivs)) (map (\(_, n, a) -> (n, a)) as)
+    ppSOAC "scatter" len [lam] (Just (map Var ivs)) as
   ppr (Hist len ops bucket_fun imgs) =
     ppHist len ops bucket_fun imgs
   ppr (Screma w (ScremaForm scans reds map_lam) arrs)
