@@ -6,6 +6,7 @@
 module Futhark.IR.Parse
   ( parseSOACS,
     parseKernels,
+    parseMC,
   )
 where
 
@@ -17,6 +18,8 @@ import Data.Void
 import Futhark.IR
 import Futhark.IR.Kernels (Kernels)
 import qualified Futhark.IR.Kernels.Kernel as Kernel
+import Futhark.IR.MC (MC)
+import qualified Futhark.IR.MC.Op as MC
 import Futhark.IR.SOACS (SOACS)
 import qualified Futhark.IR.SOACS.SOAC as SOAC
 import qualified Futhark.IR.SegOp as SegOp
@@ -801,6 +804,18 @@ pHostOp pr pOther =
       Kernel.OtherOp <$> pOther
     ]
 
+pMCOp :: PR lore -> Parser op -> Parser (MC.MCOp lore op)
+pMCOp pr pOther =
+  choice
+    [ MC.ParOp . Just
+        <$> (keyword "par" *> braces pMCSegOp)
+        <*> (keyword "seq" *> braces pMCSegOp),
+      MC.ParOp Nothing <$> pMCSegOp,
+      MC.OtherOp <$> pOther
+    ]
+  where
+    pMCSegOp = pSegOp pr (void $ lexeme "()")
+
 prSOACS :: PR SOACS
 prSOACS = PR pDeclExtType pExtType pDeclType pType pType (pSOAC prSOACS) () ()
 
@@ -808,6 +823,11 @@ prKernels :: PR Kernels
 prKernels = PR pDeclExtType pExtType pDeclType pType pType op () ()
   where
     op = pHostOp prKernels (pSOAC prKernels)
+
+prMC :: PR MC
+prMC = PR pDeclExtType pExtType pDeclType pType pType op () ()
+  where
+    op = pMCOp prMC (pSOAC prMC)
 
 parseLore :: PR lore -> FilePath -> T.Text -> Either T.Text (Prog lore)
 parseLore pr fname s =
@@ -819,3 +839,6 @@ parseSOACS = parseLore prSOACS
 
 parseKernels :: FilePath -> T.Text -> Either T.Text (Prog Kernels)
 parseKernels = parseLore prKernels
+
+parseMC :: FilePath -> T.Text -> Either T.Text (Prog MC)
+parseMC = parseLore prMC
