@@ -134,6 +134,7 @@ runEMCC cpath outpath cflags_def ldflags = do
         "emcc"
         ( [cpath, "-o", outpath]
             ++ ["-lnodefs.js", "-s", "ALLOW_MEMORY_GROWTH=1"]
+            ++ ["-s", "--post-js", "futharkClass.js"]
             ++ cmdCFLAGS cflags_def
             ++
             -- The default LDFLAGS are always added.
@@ -196,6 +197,9 @@ compileCtoWASMAction fcfg mode outpath =
           let (h, imp) = SequentialC.asLibrary cprog
           liftIO $ writeFile hpath h
           liftIO $ writeFile cpath imp
+          liftIO $ writeFile cpath imp
+          liftIO $ writeFile "futharkClass.js" jsprog
+          runEMCC cpath outpath ["-O"] ["-lm"]
         ToExecutable -> do
           liftIO $ writeFile cpath $ SequentialC.asExecutable cprog
           runEMCC cpath outpath ["-O"] ["-lm"]
