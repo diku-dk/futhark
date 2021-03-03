@@ -160,14 +160,12 @@ instance Pretty (Param Type) where
 
 instance PrettyLore lore => Pretty (Stm lore) where
   ppr bnd@(Let pat aux e) =
-    stmannot $
-      align $
-        hang 2 $
-          text "let" <+> align (ppr pat)
-            <+> case (linebreak, ppExpLore (stmAuxDec aux) e) of
-              (True, Nothing) -> equals </> ppr e
-              (_, Just ann) -> equals </> (ann </> ppr e)
-              (False, Nothing) -> equals <+/> ppr e
+    align . hang 2 $
+      text "let" <+> align (ppr pat)
+        <+> case (linebreak, stmannot) of
+          (True, []) -> equals </> ppr e
+          (False, []) -> equals <+/> ppr e
+          (_, ann) -> equals </> (stack ann </> ppr e)
     where
       linebreak = case e of
         DoLoop {} -> True
@@ -179,11 +177,12 @@ instance PrettyLore lore => Pretty (Stm lore) where
         _ -> False
 
       stmannot =
-        case stmAttrAnnots bnd
-          <> stmCertAnnots bnd
-          <> mapMaybe ppAnnot (patternElements $ stmPattern bnd) of
-          [] -> id
-          annots -> (align (stack annots) </>)
+        concat
+          [ maybeToList (ppExpLore (stmAuxDec aux) e),
+            stmAttrAnnots bnd,
+            stmCertAnnots bnd,
+            mapMaybe ppAnnot (patternElements $ stmPattern bnd)
+          ]
 
 instance Pretty BasicOp where
   ppr (SubExp se) = ppr se

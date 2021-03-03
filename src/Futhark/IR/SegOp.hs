@@ -484,13 +484,12 @@ instance Pretty KernelResult where
     where
       ppRes (slice, e) =
         PP.brackets (commasep (map ppr slice)) <+> text "=" <+> ppr e
-  ppr (ConcatReturns o w per_thread_elems v) =
-    text "concat" <> suff
+  ppr (ConcatReturns SplitContiguous w per_thread_elems v) =
+    text "concat"
       <> parens (commasep [ppr w, ppr per_thread_elems]) <+> ppr v
-    where
-      suff = case o of
-        SplitContiguous -> mempty
-        SplitStrided stride -> text "Strided" <> parens (ppr stride)
+  ppr (ConcatReturns (SplitStrided stride) w per_thread_elems v) =
+    text "concat_strided"
+      <> parens (commasep [ppr stride, ppr w, ppr per_thread_elems]) <+> ppr v
   ppr (TileReturns dims v) =
     "tile" <> parens (commasep $ map onDim dims) <+> ppr v
     where
@@ -955,24 +954,23 @@ instance (PrettyLore lore, PP.Pretty lvl) => PP.Pretty (SegOp lvl lore) where
       <+> PP.nestedBlock "{" "}" (ppr body)
   ppr (SegRed lvl space reds ts body) =
     text "segred" <> ppr lvl
-      </> PP.parens (PP.braces (mconcat $ intersperse (PP.comma <> PP.line) $ map ppr reds))
       </> PP.align (ppr space)
-      <+> PP.colon
+      </> PP.parens (mconcat $ intersperse (PP.comma <> PP.line) $ map ppr reds)
+      </> PP.colon
       <+> ppTuple' ts
       <+> PP.nestedBlock "{" "}" (ppr body)
   ppr (SegScan lvl space scans ts body) =
     text "segscan" <> ppr lvl
-      </> PP.parens (PP.braces (mconcat $ intersperse (PP.comma <> PP.line) $ map ppr scans))
       </> PP.align (ppr space)
-      <+> PP.colon
+      </> PP.parens (mconcat $ intersperse (PP.comma <> PP.line) $ map ppr scans)
+      </> PP.colon
       <+> ppTuple' ts
       <+> PP.nestedBlock "{" "}" (ppr body)
   ppr (SegHist lvl space ops ts body) =
     text "seghist" <> ppr lvl
-      </> ppr lvl
-      </> PP.parens (PP.braces (mconcat $ intersperse (PP.comma <> PP.line) $ map ppOp ops))
       </> PP.align (ppr space)
-      <+> PP.colon
+      </> PP.parens (mconcat $ intersperse (PP.comma <> PP.line) $ map ppOp ops)
+      </> PP.colon
       <+> ppTuple' ts
       <+> PP.nestedBlock "{" "}" (ppr body)
     where
