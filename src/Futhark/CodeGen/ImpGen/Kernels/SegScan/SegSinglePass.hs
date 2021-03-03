@@ -16,8 +16,14 @@ import Futhark.IR.KernelsMem
 import qualified Futhark.IR.Mem.IxFun as IxFun
 import Futhark.Transform.Rename
 import Futhark.Util (takeLast)
-import Futhark.Util.IntegralExp (IntegralExp, divUp, quot)
+import Futhark.Util.IntegralExp (IntegralExp (mod), divUp, quot)
 import Prelude hiding (quot)
+
+xParams, yParams :: SegBinOp KernelsMem -> [LParam KernelsMem]
+xParams scan =
+  take (length (segBinOpNeutral scan)) (lambdaParams (segBinOpLambda scan))
+yParams scan =
+  drop (length (segBinOpNeutral scan)) (lambdaParams (segBinOpLambda scan))
 
 alignTo :: IntegralExp a => a -> a -> a
 alignTo x a = (x `divUp` a) * a
@@ -110,8 +116,8 @@ compileSegScan pat lvl space scanOp kbody = do
       m = 9
       num_groups = Count (n `divUp` (unCount group_size * m))
       num_threads = unCount num_groups * unCount group_size
-      (mapIdx, _) = head $ unSegSpace space
-      (innerIdx, _) = unSegSpace space !! 1
+      (mapIdx, mapSpaceExp) = head $ unSegSpace space
+      (innerIdx, innerExp) = unSegSpace space !! 1
       scanOpNe = segBinOpNeutral scanOp
       tys = map (\(Prim pt) -> pt) $ lambdaReturnType $ segBinOpLambda scanOp
       statusX, statusA, statusP :: Num a => a
@@ -179,11 +185,13 @@ compileSegScan pat lvl space scanOp kbody = do
 
     sComment "Load and map" $
       sFor "i" m $ \i -> do
+        let phys_tid = segFlat space
         -- The map's input index
-        dPrimV_ mapIdx $
+        dPrimV_ phys_tid $
           tvExp blockOff + sExt64 (kernelLocalThreadId constants)
             + i * kernelGroupSize constants
-        dPrimV_ innerIdx i
+        dPrimV_ mapIdx $ toInt64Exp mapSpaceExp
+        dPrimV_ innerIdx $ toInt64Exp innerExp
         -- Perform the map
         let in_bounds =
               compileStms mempty (kernelBodyStms kbody) $ do
@@ -191,7 +199,7 @@ compileSegScan pat lvl space scanOp kbody = do
 
                 -- Write map results to their global memory destinations
                 forM_ (zip (takeLast (length map_res) all_pes) map_res) $ \(dest, src) ->
-                  copyDWIMFix (patElemName dest) [Imp.vi64 mapIdx] (kernelResultSubExp src) []
+                  copyDWIMFix (patElemName dest) [Imp.vi64 phys_tid] (kernelResultSubExp src) []
 
                 -- Write to-scan results to private memory.
                 forM_ (zip privateArrays $ map kernelResultSubExp all_scan_res) $ \(dest, src) ->
@@ -201,4 +209,85 @@ compileSegScan pat lvl space scanOp kbody = do
               forM_ (zip privateArrays scanOpNe) $ \(dest, ne) ->
                 copyDWIMFix dest [i] ne []
 
-        sIf (Imp.vi64 mapIdx .<. n) in_bounds out_of_bounds
+        sIf (Imp.vi64 phys_tid .<. n) in_bounds out_of_bounds
+
+    sComment "Transpose scan inputs" $ do
+      forM_ (zip transposedArrays privateArrays) $ \(trans, priv) -> do
+        sOp localBarrier
+        sFor "i" m $ \i -> do
+          sharedIdx <-
+            dPrimVE "sharedIdx" $
+              sExt64 (kernelLocalThreadId constants)
+                + i * kernelGroupSize constants
+          copyDWIMFix trans [sharedIdx] (Var priv) [i]
+        sOp localBarrier
+        sFor "i" m $ \i -> do
+          sharedIdx <- dPrimV "sharedIdx" $ kernelLocalThreadId constants * m + i
+          copyDWIMFix priv [sExt64 i] (Var trans) [sExt64 $ tvExp sharedIdx]
+      sOp localBarrier
+
+    sComment "Per thread scan" $
+      -- We don't need to touch the first element, so only m-1
+      -- iterations here.
+      sFor "i" (m -1) $ \i -> do
+        let xs = map paramName $ xParams scanOp
+            ys = map paramName $ yParams scanOp
+        -- calculate global index
+        globalIdx <-
+          dPrimVE "gidx" $
+            tvExp blockOff + sExt64 (kernelLocalThreadId constants * m) + i + 1
+        -- determine if start of segment
+        isNewSgm <-
+          dPrimVE "new_sgm" $
+            Futhark.Util.IntegralExp.mod globalIdx (toInt64Exp innerExp) .==. 0
+        -- skip scan of first element in segment
+        sUnless isNewSgm $
+          forM_ (zip privateArrays $ zip3 xs ys tys) $ \(src, (x, y, ty)) -> do
+            dPrim_ x ty
+            dPrim_ y ty
+            copyDWIMFix x [] (Var src) [i]
+            copyDWIMFix y [] (Var src) [i + 1]
+
+            compileStms mempty (bodyStms $ lambdaBody $ segBinOpLambda scanOp) $
+              forM_ (zip privateArrays $ bodyResult $ lambdaBody $ segBinOpLambda scanOp) $ \(dest, res) ->
+                copyDWIMFix dest [i + 1] res []
+
+    sComment "Publish results in shared memory" $ do
+      forM_ (zip prefixArrays privateArrays) $ \(dest, src) ->
+        copyDWIMFix dest [sExt64 $ kernelLocalThreadId constants] (Var src) [m - 1]
+      sOp localBarrier
+
+    scanOp' <- renameLambda $ segBinOpLambda scanOp
+
+    accs <- mapM (dPrim "acc") tys
+    sComment "Scan results (with warp scan)" $ do
+      groupScan
+        Nothing -- TODO
+        (tvExp numThreads)
+        (kernelGroupSize constants)
+        scanOp'
+        prefixArrays
+
+      sOp localBarrier
+      let firstThread acc prefixes =
+            copyDWIMFix (tvVar acc) [] (Var prefixes) [sExt64 (kernelGroupSize constants) - 1]
+          notFirstThread acc prefixes =
+            copyDWIMFix (tvVar acc) [] (Var prefixes) [sExt64 (kernelLocalThreadId constants) - 1]
+      sIf
+        (kernelLocalThreadId constants .==. 0)
+        (zipWithM_ firstThread accs prefixArrays)
+        (zipWithM_ notFirstThread accs prefixArrays)
+
+      sOp localBarrier
+    prefixes <- forM (zip scanOpNe tys) $ \(ne, ty) ->
+      dPrimV "prefix" $ TPrimExp $ toExp' ty ne
+    sComment "Perform lookback" $ do
+      sWhen (tvExp dynamicId .==. 0 .&&. kernelLocalThreadId constants .==. 0) $ do
+        everythingVolatile $
+          forM_ (zip incprefixArrays accs) $ \(incprefixArray, acc) ->
+            copyDWIMFix incprefixArray [tvExp dynamicId] (tvSize acc) []
+        sOp globalFence
+        everythingVolatile $
+          copyDWIMFix statusFlags [tvExp dynamicId] (intConst Int8 statusP) []
+        forM_ (zip scanOpNe accs) $ \(ne, acc) ->
+          copyDWIMFix (tvVar acc) [] ne []
