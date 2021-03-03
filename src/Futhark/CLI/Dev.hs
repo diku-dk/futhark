@@ -21,7 +21,7 @@ import qualified Futhark.IR.Kernels as Kernels
 import qualified Futhark.IR.KernelsMem as KernelsMem
 import qualified Futhark.IR.MC as MC
 import qualified Futhark.IR.MCMem as MCMem
-import Futhark.IR.Parse (parseKernels, parseSOACS)
+import Futhark.IR.Parse (parseKernels, parseMC, parseSOACS)
 import Futhark.IR.Prop.Aliases (CanBeAliased)
 import qualified Futhark.IR.SOACS as SOACS
 import qualified Futhark.IR.Seq as Seq
@@ -634,39 +634,54 @@ main = mainWithOptions newConfig commandLineOptions "options... program" compile
                   >>= LiftLambdas.transformProg
                   >>= Defunctionalise.transformProg
         Pipeline {} -> do
-          let readCore base parse construct = do
+          let (base, ext) = splitExtension file
+
+              readCore parse construct = do
                 input <- liftIO $ T.readFile file
                 case parse file input of
                   Left err -> externalErrorS $ T.unpack err
                   Right prog -> runPolyPasses config base $ construct prog
-          case splitExtensions file of
-            (base, ".fut") -> do
-              prog <- runPipelineOnProgram (futharkConfig config) id file
-              runPolyPasses config base (SOACS prog)
-            (base, ".fut_soacs") ->
-              readCore base parseSOACS SOACS
-            (base, ".fut_kernels") ->
-              readCore base parseKernels Kernels
-            (base, ".sexp") -> do
-              input <- liftIO $ ByteString.readFile file
-              prog <- case Sexp.decode @(Prog SOACS.SOACS) input of
-                Right prog' -> return $ SOACS prog'
-                Left _ ->
-                  case Sexp.decode @(Prog Kernels.Kernels) input of
-                    Right prog' -> return $ Kernels prog'
-                    Left _ ->
-                      case Sexp.decode @(Prog Seq.Seq) input of
-                        Right prog' -> return $ Seq prog'
+
+              handlers =
+                [ ( ".fut",
+                    do
+                      prog <- runPipelineOnProgram (futharkConfig config) id file
+                      runPolyPasses config base (SOACS prog)
+                  ),
+                  (".fut_soacs", readCore parseSOACS SOACS),
+                  (".fut_kernels", readCore parseKernels Kernels),
+                  (".fut_mc", readCore parseMC MC),
+                  ( ".sexp",
+                    do
+                      input <- liftIO $ ByteString.readFile file
+                      prog <- case Sexp.decode @(Prog SOACS.SOACS) input of
+                        Right prog' -> return $ SOACS prog'
                         Left _ ->
-                          case Sexp.decode @(Prog KernelsMem.KernelsMem) input of
-                            Right prog' -> return $ KernelsMem prog'
+                          case Sexp.decode @(Prog Kernels.Kernels) input of
+                            Right prog' -> return $ Kernels prog'
                             Left _ ->
-                              case Sexp.decode @(Prog SeqMem.SeqMem) input of
-                                Right prog' -> return $ SeqMem prog'
-                                Left e -> externalErrorS $ "Couldn't parse sexp input: " ++ show e
-              runPolyPasses config base prog
-            (_, ext) ->
-              externalErrorS $ unwords ["Unsupported extension", show ext, ". Supported extensions: .sexp, .fut, .fut_soacs"]
+                              case Sexp.decode @(Prog Seq.Seq) input of
+                                Right prog' -> return $ Seq prog'
+                                Left _ ->
+                                  case Sexp.decode @(Prog KernelsMem.KernelsMem) input of
+                                    Right prog' -> return $ KernelsMem prog'
+                                    Left _ ->
+                                      case Sexp.decode @(Prog SeqMem.SeqMem) input of
+                                        Right prog' -> return $ SeqMem prog'
+                                        Left e -> externalErrorS $ "Couldn't parse sexp input: " ++ show e
+                      runPolyPasses config base prog
+                  )
+                ]
+          case lookup ext handlers of
+            Just handler -> handler
+            Nothing ->
+              externalErrorS $
+                unwords
+                  [ "Unsupported extension",
+                    show ext,
+                    ". Supported extensions:",
+                    unwords $ map fst handlers
+                  ]
 
 runPolyPasses :: Config -> FilePath -> UntypedPassState -> FutharkM ()
 runPolyPasses config base initial_prog = do

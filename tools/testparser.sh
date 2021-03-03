@@ -16,14 +16,20 @@ mkdir -p $dir
 if [ "$TESTPARSER_WORKER" ]; then
     shift
     testwith() {
-        out=$dir/$(basename $1)_$3
-        futhark dev -w $2 $1 > $out
+        f=$1
+        suffix=$2
+        shift; shift
+        out=$dir/$(basename $f)_$suffix
+        futhark dev -w "$@" $f > $out
         futhark dev $out >/dev/null
     }
     for f in "$@"; do
         if futhark check $f 2>/dev/null; then
-            testwith $f -s soacs
-            testwith $f --kernels kernels
+            testwith $f soacs -s
+            testwith $f mc -s --extract-multicore
+            testwith $f kernels --kernels
+            # testwith $f mc_mem --cpu
+            # testwith $f kernels_mem --gpu
         fi
     done
 else
