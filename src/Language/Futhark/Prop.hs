@@ -954,6 +954,23 @@ intrinsics =
                  ]
                  $ shape_n `uarray` t_b
              ),
+             ( "stencil_2d",
+               IntrinsicPolyFun
+                 [ tp_a,
+                   tp_b,
+                   tp_c,
+                   TypeParamDim tv_n mempty,
+                   TypeParamDim tv_m mempty,
+                   TypeParamDim tv_k mempty
+                 ]
+                 [ shape_k `array` Record (M.fromList $ 
+                        zip tupleFieldNames [Scalar (Prim (Signed Int64)),Scalar (Prim (Signed Int64))]),
+                   Scalar t_c `arr` ((shape_k `array` t_a) `arr` Scalar t_b),
+                   shape_nm `array` t_c,
+                   shape_nm `array` t_a
+                 ]
+                 $ shape_nm `uarray` t_b
+             ),
              ( "map_stream",
                IntrinsicPolyFun
                  [tp_a, tp_b]
@@ -988,10 +1005,10 @@ intrinsics =
              ("break", IntrinsicPolyFun [tp_a] [Scalar t_a] $ Scalar t_a)
            ]
   where
-    [tv_a, tv_b, tv_c, tv_n, tv_k] =
+    [tv_a, tv_b, tv_c, tv_n, tv_k, tv_m] =
       zipWith
         VName
-        (map nameFromString ["a", "b", "c", "n", "k"])
+        (map nameFromString ["a", "b", "c", "n", "k", "m"])
         [0 ..]
 
     array = flip $ Array () Nonunique
@@ -1023,6 +1040,7 @@ intrinsics =
 
     shape_n = ShapeDecl [NamedDim (qualName tv_n)]
     shape_k = ShapeDecl [NamedDim (qualName tv_k)]
+    shape_nm = ShapeDecl [NamedDim (qualName tv_n), NamedDim (qualName tv_m)]
     arr_ka = shape_k `array` t_a
     arr_kb = shape_k `array` t_b
     karr x y = Scalar $ Arrow mempty (Named tv_k) x y

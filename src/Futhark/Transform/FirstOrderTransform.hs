@@ -349,6 +349,92 @@ transformSOAC pat (Hist len ops bucket_fun imgs) = do
 
   -- Wrap up the above into a for-loop.
   letBind pat $ DoLoop [] merge (ForLoop iter Int64 len []) loopBody
+transformSOAC pat (Stencil inputShape neighboursLen iss lam invariants variants) = do
+
+  variants_tp <- mapM lookupType variants
+  neighbours_tp <- case iss of
+                    StencilDynamic is -> mapM lookupType is
+                    StencilStatic is -> pure $ [arrayOfShape (Prim $ IntType $ Int64) (Shape [intConst Int64 (toInteger (length is))])] --shape and length of is
+
+  let input_len = inputShape !! 0 -- assumes 1d stencil
+  let returns_elem_tp = lambdaReturnType lam
+  let variant_shp = arrayShape (variants_tp !! 0) -- non-empty and all have same shape
+  let neighbours_shp = arrayShape (neighbours_tp !! 0) -- non-empty and all have same shape
+  let temp_tp = map (`setArrayShape` neighbours_shp) variants_tp
+  let returns_tp =  map (`arrayOfShape` variant_shp) returns_elem_tp
+
+  map_arrs <- resultArray returns_tp
+  stencilout_params <- mapM (newParam "stencil_out" . flip toDecl Unique) returns_tp
+
+  let iterated_variables = zip stencilout_params $ map Var map_arrs
+  let (invariantParams,variantParams) = splitAt (length invariants) $ map paramName (lambdaParams lam)
+
+  i <- newVName "i"
+
+  max_index <- letSubExp "max_index" $ BasicOp $
+    BinOp (Sub Int64 OverflowUndef) input_len (intConst Int64 1)
+
+  let loop_form = ForLoop i Int64 input_len []
+
+  loop_body <- runBodyBinder $
+    localScope (scopeOf loop_form <> (scopeOfFParams $ map fst iterated_variables)) $ do
+      temp_array <- temporaryArray temp_tp
+      temp_params <- mapM (newParam "temporaryArray" . flip toDecl Unique) temp_tp
+      let merge_inner = zip temp_params $ map Var temp_array
+      j <- newVName "j"
+      let inner_loop_form = ForLoop j Int64 neighboursLen []
+
+      forM_ (zip invariantParams invariants) $ \(p, (_,arr)) -> do
+        arr_t <- lookupType arr
+        letBindNames [p] $ BasicOp $ Index arr $ fullSlice arr_t [DimFix $ Var i] 
+
+      -- does not consider multi-dim stencils.
+      _ <- case iss of
+        StencilDynamic is -> do
+          inner_loop_body <- runBodyBinder $
+            localScope (scopeOf inner_loop_form <> (scopeOfFParams $ map fst merge_inner)) $ do
+              relative_offset <- forM (zip is neighbours_tp) $ \(vname, tp) ->
+                letSubExp "relative_offset" $ BasicOp $ Index vname $ fullSlice tp [DimFix $ Var j]
+              -- does not handle overflow.
+              index <- forM relative_offset $ \rel ->
+                letSubExp "index" $ BasicOp $ BinOp (Add Int64 OverflowUndef) rel (Var i)
+              lower_bounded_index <- forM index $ \ix ->
+                letSubExp "lower_bounded_index" $ BasicOp $ BinOp (SMax Int64) ix (intConst Int64 0)
+              upper_bounded_index <- forM lower_bounded_index $ \lbix ->
+                letSubExp "upper_bounded_index" $ BasicOp $ BinOp (SMin Int64) lbix max_index
+              input_element <- forM (zip3 variants variants_tp $ cycle upper_bounded_index) $ \(vname, tp, hbix) ->
+                letSubExp "input_element" $ BasicOp $ Index vname $ fullSlice tp [DimFix hbix]
+              tmp <- letwith (map paramName temp_params) (pexp (Var j)) $
+                        map (BasicOp . SubExp) input_element
+              resultBodyM $ map Var tmp
+          letBindNames variantParams $ DoLoop [] merge_inner inner_loop_form inner_loop_body
+        StencilStatic is -> do 
+          let result idx temp_arr_idx = runBodyBinder $
+                localScope (scopeOf inner_loop_form <> (scopeOfFParams $ temp_params)) $ do 
+                  index <- forM idx $ \rel ->
+                    letSubExp "index" $ BasicOp $ BinOp (Add Int64 OverflowUndef) (intConst Int64 rel) (Var i)
+                  lower_bounded_index <- forM index $ \ix ->
+                    letSubExp "lower_bounded_index" $ BasicOp $ BinOp (SMax Int64) ix (intConst Int64 0)
+                  upper_bounded_index <- forM lower_bounded_index $ \lbix ->
+                    letSubExp "upper_bounded_index" $ BasicOp $ BinOp (SMin Int64) lbix max_index
+                  input_element <- forM (zip3 variants variants_tp $ cycle upper_bounded_index) $ \(vname, tp, hbix) ->
+                    letSubExp "input_element" $ BasicOp $ Index vname $ fullSlice tp [DimFix hbix]
+                  tmp <- letwith (map paramName temp_params) (pexp (intConst Int64 temp_arr_idx)) $
+                            map (BasicOp . SubExp) input_element 
+                  resultBodyM $ map Var tmp
+          bodies <- mapM (uncurry result) (zip is [0..((toInteger (length is))-1)])
+          mapM_ (\(p,v) -> letBindNames [p] v) $ zip variantParams $ map (BasicOp . SubExp) $ []  --use bodyResult on bodies to get [SubExp]
+         -- let xD = map (\(one,two,three) -> result one two three) (zip3 is [0..((toInteger (length is))-1)] variantParams)
+         -- sequence_ xD
+
+      mapM_ addStm $ bodyStms $ lambdaBody lam
+      let lambda_res = bodyResult $ lambdaBody lam
+      stencil_outarrs <-
+        letwith (map paramName stencilout_params) (pexp (Var i)) $
+          map (BasicOp . SubExp) lambda_res
+
+      resultBodyM $ map Var stencil_outarrs
+  letBind pat $ DoLoop [] iterated_variables loop_form loop_body
 
 -- | Recursively first-order-transform a lambda.
 transformLambda ::
@@ -372,6 +458,13 @@ resultArray :: Transformer m => [Type] -> m [VName]
 resultArray = mapM oneArray
   where
     oneArray t = letExp "result" $ BasicOp $ Scratch (elemType t) (arrayDims t)
+
+
+temporaryArray :: Transformer m => [Type] -> m [VName]
+temporaryArray = mapM oneArray
+  where
+    oneArray t = letExp "temporaryArray" $ BasicOp $ Scratch (elemType t) (arrayDims t)
+
 
 letwith ::
   Transformer m =>
