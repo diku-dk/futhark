@@ -521,12 +521,11 @@ pFunDef :: PR lore -> Parser (FunDef lore)
 pFunDef pr = do
   attrs <- pAttrs
   entry <- (keyword "entry" <|> keyword "fun") $> Nothing
+  fname <- pName
+  fparams <- pFParams pr <* pColon
   ret <- pRetTypes pr
-  FunDef entry attrs
-    <$> pName
-    <*> pure ret
-    <*> pFParams pr
-    <*> (pEqual *> braces (pBody pr))
+  FunDef entry attrs fname ret fparams
+    <$> (pEqual *> braces (pBody pr))
 
 pProg :: PR lore -> Parser (Prog lore)
 pProg pr = Prog <$> pStms pr <*> many (pFunDef pr)

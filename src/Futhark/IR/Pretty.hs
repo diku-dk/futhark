@@ -308,9 +308,9 @@ instance PrettyLore lore => Pretty (Lambda lore) where
 instance PrettyLore lore => Pretty (FunDef lore) where
   ppr (FunDef entry attrs name rettype fparams body) =
     annot (mapMaybe ppAnnot fparams <> attrAnnots attrs) $
-      text fun <+> ppTuple' rettype
-        <+/> text (nameToString name)
+      text fun <+> text (nameToString name)
         <+> apply (map ppr fparams)
+        </> indent 2 (colon <+> align (ppTuple' rettype))
         <+> equals
         <+> nestedBlock "{" "}" (ppr body)
     where
