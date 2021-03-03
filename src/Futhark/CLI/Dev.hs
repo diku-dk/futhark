@@ -21,7 +21,7 @@ import qualified Futhark.IR.Kernels as Kernels
 import qualified Futhark.IR.KernelsMem as KernelsMem
 import qualified Futhark.IR.MC as MC
 import qualified Futhark.IR.MCMem as MCMem
-import Futhark.IR.Parse (parseSOACS)
+import Futhark.IR.Parse (parseKernels, parseSOACS)
 import Futhark.IR.Prop.Aliases (CanBeAliased)
 import qualified Futhark.IR.SOACS as SOACS
 import qualified Futhark.IR.Seq as Seq
@@ -633,16 +633,20 @@ main = mainWithOptions newConfig commandLineOptions "options... program" compile
                   >>= Monomorphise.transformProg
                   >>= LiftLambdas.transformProg
                   >>= Defunctionalise.transformProg
-        Pipeline {} ->
+        Pipeline {} -> do
+          let readCore base parse construct = do
+                input <- liftIO $ T.readFile file
+                case parse file input of
+                  Left err -> externalErrorS $ T.unpack err
+                  Right prog -> runPolyPasses config base $ construct prog
           case splitExtensions file of
             (base, ".fut") -> do
               prog <- runPipelineOnProgram (futharkConfig config) id file
               runPolyPasses config base (SOACS prog)
-            (base, ".fut_soacs") -> do
-              input <- liftIO $ T.readFile file
-              case parseSOACS file input of
-                Left err -> externalErrorS $ T.unpack err
-                Right prog -> runPolyPasses config base $ SOACS prog
+            (base, ".fut_soacs") ->
+              readCore base parseSOACS SOACS
+            (base, ".fut_kernels") ->
+              readCore base parseKernels Kernels
             (base, ".sexp") -> do
               input <- liftIO $ ByteString.readFile file
               prog <- case Sexp.decode @(Prog SOACS.SOACS) input of
