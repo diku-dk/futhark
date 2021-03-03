@@ -15,6 +15,9 @@ import qualified Futhark.CodeGen.Backends.GenericC as GC
 import Futhark.CodeGen.Backends.SequentialC.Boilerplate
 import qualified Futhark.CodeGen.ImpCode.Sequential as Imp
 import qualified Futhark.CodeGen.ImpGen.Sequential as ImpGen
+
+import Language.Futhark.Core (nameToString)
+import Futhark.IR.Primitive
 import Futhark.IR.SeqMem
 import Futhark.MonadFreshNames
 
@@ -24,6 +27,7 @@ import Data.List
 compileProg :: MonadFreshNames m => Prog SeqMem -> m (ImpGen.Warnings, (GC.CParts, String))
 compileProg prog = do
   (ws, prog') <- ImpGen.compileProg prog
+  
   prog'' <-
     GC.compileProg
       "wasm"
@@ -33,7 +37,8 @@ compileProg prog = do
       [DefaultSpace]
       []
       prog'
-  pure (ws, (prog'', undefined))
+  pure (ws, (prog'', javascriptWrapper (fRepMyRep prog')))
+  -- pure (ws, (prog'', undefined))
   where
     operations :: GC.Operations Imp.Sequential ()
     operations =
@@ -43,6 +48,35 @@ compileProg prog = do
 
 
 
+-- What do we need
+-- Go from 
+-- prog' :: Imp.Program :: Imp.Definitions Sequential :: Definitions a :: Functions a :: Functions [(Name, Function a)] ... where Function a is Function 
+--
+
+fRepMyRep :: Imp.Program -> [JSEntryPoint]
+fRepMyRep prog =
+  let Imp.Definitions _ (Imp.Functions fs) = prog
+      res = map (\(n, Imp.Function b _ _ _ res args) -> JSEntryPoint {name = nameToString n , parameters = map extToString args, ret = map extToString res}) fs
+      -- TODO take futhark_entry from nameToString n
+  in res
+
+
+
+extToString :: Imp.ExternalValue -> String
+extToString (Imp.TransparentValue (Imp.ArrayValue vn _ pt s dimSize)) = concat (replicate (length dimSize) "[]") ++ extToString (Imp.TransparentValue (Imp.ScalarValue pt s vn))
+extToString (Imp.TransparentValue (Imp.ScalarValue (FloatType Float32) _ _)) = "f32"
+extToString (Imp.TransparentValue (Imp.ScalarValue (FloatType Float64) _ _)) = "f64"
+extToString (Imp.TransparentValue (Imp.ScalarValue (IntType Int8 ) Imp.TypeDirect _)) = "i8"
+extToString (Imp.TransparentValue (Imp.ScalarValue (IntType Int16) Imp.TypeDirect _)) = "i16"
+extToString (Imp.TransparentValue (Imp.ScalarValue (IntType Int32) Imp.TypeDirect _)) = "i32"
+extToString (Imp.TransparentValue (Imp.ScalarValue (IntType Int64) Imp.TypeDirect _)) = "i64"
+extToString (Imp.TransparentValue (Imp.ScalarValue (IntType Int8 ) Imp.TypeUnsigned _)) = "u8"
+extToString (Imp.TransparentValue (Imp.ScalarValue (IntType Int16) Imp.TypeUnsigned  _)) = "u16"
+extToString (Imp.TransparentValue (Imp.ScalarValue (IntType Int32) Imp.TypeUnsigned  _)) = "u32"
+extToString (Imp.TransparentValue (Imp.ScalarValue (IntType Int64) Imp.TypeUnsigned  _)) = "u64"
+-- TODO 
+-- Handle Booleans
+-- Hhandle OpaqueTypes
 
 type EntryPointName = String
 type EntryPointTyp = String
