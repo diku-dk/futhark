@@ -44,6 +44,7 @@ import qualified Futhark.IR.Aliases as Aliases
 import Futhark.IR.Prop.Aliases
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
+import Futhark.Util.Pretty
 import GHC.Generics (Generic)
 import Language.SexpGrammar as Sexp hiding (cons)
 import Language.SexpGrammar.Generic
@@ -157,8 +158,8 @@ instance (ASTLore lore, CanBeWise (Op lore)) => ASTLore (Wise lore) where
   expTypesFromPattern =
     withoutWisdom . expTypesFromPattern . removePatternWisdom
 
-instance PrettyAnnot (PatElemT dec) => PrettyAnnot (PatElemT (VarWisdom, dec)) where
-  ppAnnot = ppAnnot . fmap snd
+instance Pretty VarWisdom where
+  ppr _ = ppr ()
 
 instance (PrettyLore lore, CanBeWise (Op lore)) => PrettyLore (Wise lore) where
   ppExpLore (_, dec) = ppExpLore dec . removeExpWisdom

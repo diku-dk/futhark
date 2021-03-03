@@ -6,44 +6,42 @@
 module Futhark.IR.Parse
   ( parseSOACS,
     parseKernels,
+    parseKernelsMem,
     parseMC,
+    parseMCMem,
   )
 where
 
-import Data.Char
+import Data.Char (isAlpha)
 import Data.Functor
+import Data.List (zipWith5)
+import qualified Data.List.NonEmpty as NE
 import qualified Data.Set as S
 import qualified Data.Text as T
 import Data.Void
+import Futhark.Analysis.PrimExp.Parse
 import Futhark.IR
 import Futhark.IR.Kernels (Kernels)
 import qualified Futhark.IR.Kernels.Kernel as Kernel
+import Futhark.IR.KernelsMem (KernelsMem)
 import Futhark.IR.MC (MC)
 import qualified Futhark.IR.MC.Op as MC
+import Futhark.IR.MCMem (MCMem)
+import Futhark.IR.Mem
+import qualified Futhark.IR.Mem.IxFun as IxFun
+import Futhark.IR.Primitive.Parse
 import Futhark.IR.SOACS (SOACS)
 import qualified Futhark.IR.SOACS.SOAC as SOAC
 import qualified Futhark.IR.SegOp as SegOp
 import Futhark.Util.Pretty (prettyText)
 import Text.Megaparsec
-import Text.Megaparsec.Char
+import Text.Megaparsec.Char hiding (space)
 import qualified Text.Megaparsec.Char.Lexer as L
 
 type Parser = Parsec Void T.Text
 
 pStringLiteral :: Parser String
 pStringLiteral = char '"' >> manyTill L.charLiteral (char '"')
-
-constituent :: Char -> Bool
-constituent c = isAlphaNum c || (c `elem` ("_/'+-=!&^.<>*|" :: String))
-
-whitespace :: Parser ()
-whitespace = L.space space1 (L.skipLineComment "--") empty
-
-lexeme :: Parser a -> Parser a
-lexeme = try . L.lexeme whitespace
-
-keyword :: T.Text -> Parser ()
-keyword s = lexeme $ chunk s *> notFollowedBy (satisfy constituent)
 
 pName :: Parser Name
 pName =
@@ -59,6 +57,9 @@ pVName = lexeme $ do
   where
     pTag =
       "_" *> L.decimal <* notFollowedBy (satisfy constituent)
+
+pBool :: Parser Bool
+pBool = choice [keyword "true" $> True, keyword "false" $> False]
 
 pInt :: Parser Int
 pInt = lexeme L.decimal
@@ -79,22 +80,6 @@ pEqual = void $ lexeme "="
 pSlash = void $ lexeme "/"
 pAsterisk = void $ lexeme "*"
 
-pFloatType :: Parser FloatType
-pFloatType = choice $ map p allFloatTypes
-  where
-    p t = keyword (prettyText t) $> t
-
-pIntType :: Parser IntType
-pIntType = choice $ map p allIntTypes
-  where
-    p t = keyword (prettyText t) $> t
-
-pPrimType :: Parser PrimType
-pPrimType =
-  choice [p Bool, p Cert, FloatType <$> pFloatType, IntType <$> pIntType]
-  where
-    p t = keyword (prettyText t) $> t
-
 pNonArray :: Parser (TypeBase shape u)
 pNonArray = Prim <$> pPrimType
 
@@ -111,12 +96,15 @@ pTypeBase ps pu = do
 pShape :: Parser Shape
 pShape = Shape <$> many (brackets pSubExp)
 
-pExtSize :: Parser ExtSize
-pExtSize =
+pExt :: Parser a -> Parser (Ext a)
+pExt p =
   choice
     [ lexeme $ "?" $> Ext <*> L.decimal,
-      Free <$> pSubExp
+      Free <$> p
     ]
+
+pExtSize :: Parser ExtSize
+pExtSize = pExt pSubExp
 
 pExtShape :: Parser ExtShape
 pExtShape = Shape <$> many (brackets pExtSize)
@@ -130,59 +118,19 @@ pTypes = braces $ pType `sepBy` pComma
 pExtType :: Parser ExtType
 pExtType = pTypeBase pExtShape (pure NoUniqueness)
 
+pUniqueness :: Parser Uniqueness
+pUniqueness = choice [pAsterisk $> Unique, pure Nonunique]
+
 pDeclBase ::
   Parser (TypeBase shape NoUniqueness) ->
   Parser (TypeBase shape Uniqueness)
-pDeclBase p =
-  choice
-    [ lexeme "*" $> (`toDecl` Unique) <*> p,
-      (`toDecl` Nonunique) <$> p
-    ]
+pDeclBase p = flip toDecl <$> pUniqueness <*> p
 
 pDeclType :: Parser DeclType
 pDeclType = pDeclBase pType
 
 pDeclExtType :: Parser DeclExtType
 pDeclExtType = pDeclBase pExtType
-
-pIntValue :: Parser IntValue
-pIntValue = try $ do
-  x <- L.signed (pure ()) L.decimal
-  t <- pIntType
-  pure $ intValue t (x :: Integer)
-
-pFloatValue :: Parser FloatValue
-pFloatValue =
-  choice
-    [ pNum,
-      keyword "f32.nan" $> Float32Value (0 / 0),
-      keyword "f32.inf" $> Float32Value (1 / 0),
-      keyword "-f32.inf" $> Float32Value (-1 / 0),
-      keyword "f64.nan" $> Float64Value (0 / 0),
-      keyword "f64.inf" $> Float64Value (1 / 0),
-      keyword "-f64.inf" $> Float64Value (-1 / 0)
-    ]
-  where
-    pNum = try $ do
-      x <- L.signed (pure ()) L.float
-      t <- pFloatType
-      pure $ floatValue t (x :: Double)
-
-pBoolValue :: Parser Bool
-pBoolValue =
-  choice
-    [ keyword "true" $> True,
-      keyword "false" $> False
-    ]
-
-pPrimValue :: Parser PrimValue
-pPrimValue =
-  choice
-    [ FloatValue <$> pFloatValue,
-      IntValue <$> pIntValue,
-      BoolValue <$> pBoolValue
-    ]
-    <?> "primitive value"
 
 pSubExp :: Parser SubExp
 pSubExp = Var <$> pVName <|> Constant <$> pPrimValue
@@ -358,6 +306,10 @@ pComm =
       pure Noncommutative
     ]
 
+-- | This record contains parser for all the representation-specific
+-- bits.  Essentially a manually passed-around type class dictionary,
+-- because ambiguities make it impossible to write this with actual
+-- type classes.
 data PR lore = PR
   { pRetType :: Parser (RetType lore),
     pBranchType :: Parser (BranchType lore),
@@ -815,18 +767,128 @@ pMCOp pr pOther =
   where
     pMCSegOp = pSegOp pr (void $ lexeme "()")
 
+pIxFunBase :: Parser a -> Parser (IxFun.IxFun a)
+pIxFunBase pNum =
+  braces $ do
+    base <- pLab "base" $ brackets (pNum `sepBy` pComma) <* pSemi
+    ct <- pLab "contiguous" $ pBool <* pSemi
+    lmads <- pLab "LMADs" $ brackets (pLMAD `sepBy1` pComma)
+    pure $ IxFun.IxFun (NE.fromList lmads) base ct
+  where
+    pLab s m = keyword s *> pColon *> m
+    pMon =
+      choice
+        [ "Inc" $> IxFun.Inc,
+          "Dec" $> IxFun.Dec,
+          "Unknown" $> IxFun.Unknown
+        ]
+    pLMAD = braces $ do
+      offset <- pLab "offset" pNum <* pSemi
+      strides <- pLab "strides" $ brackets (pNum `sepBy` pComma) <* pSemi
+      rotates <- pLab "rotates" $ brackets (pNum `sepBy` pComma) <* pSemi
+      shape <- pLab "shape" $ brackets (pNum `sepBy` pComma) <* pSemi
+      perm <- pLab "permutation" $ brackets (pInt `sepBy` pComma) <* pSemi
+      mon <- pLab "monotonicity" $ brackets (pMon `sepBy` pComma)
+      pure $ IxFun.LMAD offset $ zipWith5 IxFun.LMADDim strides rotates shape perm mon
+
+pPrimExpLeaf :: Parser (VName, PrimType)
+pPrimExpLeaf = (,int64) <$> pVName
+
+pExtPrimExpLeaf :: Parser (Ext VName, PrimType)
+pExtPrimExpLeaf = (,int64) <$> pExt pVName
+
+pIxFun :: Parser IxFun
+pIxFun = pIxFunBase $ isInt64 <$> pPrimExp pPrimExpLeaf
+
+pExtIxFun :: Parser ExtIxFun
+pExtIxFun = pIxFunBase $ isInt64 <$> pPrimExp pExtPrimExpLeaf
+
+pMemInfo :: Parser d -> Parser u -> Parser ret -> Parser (MemInfo d u ret)
+pMemInfo pd pu pret =
+  choice
+    [ MemPrim <$> pPrimType,
+      keyword "mem" $> MemMem <*> choice [pSpace, pure DefaultSpace],
+      pArray
+    ]
+  where
+    pArray = do
+      u <- pu
+      shape <- Shape <$> many (brackets pd)
+      pt <- pPrimType
+      MemArray pt shape u <$> (lexeme "@" *> pret)
+
+pSpace :: Parser Space
+pSpace =
+  lexeme "@"
+    *> choice
+      [ Space . nameToString <$> pName,
+        ScalarSpace <$> (shapeDims <$> pShape) <*> pPrimType
+      ]
+
+pMemBind :: Parser MemBind
+pMemBind = ArrayIn <$> pVName <* lexeme "->" <*> pIxFun
+
+pMemReturn :: Parser MemReturn
+pMemReturn =
+  choice
+    [ parens $ ReturnsInBlock <$> pVName <* lexeme "->" <*> pExtIxFun,
+      do
+        i <- "?" *> pInt
+        space <- choice [pSpace, pure DefaultSpace] <* lexeme "->"
+        ReturnsNewBlock space i <$> pExtIxFun
+    ]
+
+pRetTypeMem :: Parser RetTypeMem
+pRetTypeMem = pMemInfo pExtSize pUniqueness pMemReturn
+
+pBranchTypeMem :: Parser BranchTypeMem
+pBranchTypeMem = pMemInfo pExtSize (pure NoUniqueness) pMemReturn
+
+pFParamMem :: Parser FParamMem
+pFParamMem = pMemInfo pSubExp pUniqueness pMemBind
+
+pLParamMem :: Parser LParamMem
+pLParamMem = pMemInfo pSubExp (pure NoUniqueness) pMemBind
+
+pLetDecMem :: Parser LetDecMem
+pLetDecMem = pMemInfo pSubExp (pure NoUniqueness) pMemBind
+
+pMemOp :: Parser inner -> Parser (MemOp inner)
+pMemOp pInner =
+  choice
+    [ keyword "alloc"
+        *> parens
+          (Alloc <$> pSubExp <*> choice [pComma *> pSpace, pure DefaultSpace]),
+      Inner <$> pInner
+    ]
+
 prSOACS :: PR SOACS
-prSOACS = PR pDeclExtType pExtType pDeclType pType pType (pSOAC prSOACS) () ()
+prSOACS =
+  PR pDeclExtType pExtType pDeclType pType pType (pSOAC prSOACS) () ()
 
 prKernels :: PR Kernels
-prKernels = PR pDeclExtType pExtType pDeclType pType pType op () ()
+prKernels =
+  PR pDeclExtType pExtType pDeclType pType pType op () ()
   where
     op = pHostOp prKernels (pSOAC prKernels)
 
+prKernelsMem :: PR KernelsMem
+prKernelsMem =
+  PR pRetTypeMem pBranchTypeMem pFParamMem pLParamMem pLetDecMem op () ()
+  where
+    op = pMemOp $ pHostOp prKernelsMem empty
+
 prMC :: PR MC
-prMC = PR pDeclExtType pExtType pDeclType pType pType op () ()
+prMC =
+  PR pDeclExtType pExtType pDeclType pType pType op () ()
   where
     op = pMCOp prMC (pSOAC prMC)
+
+prMCMem :: PR MCMem
+prMCMem =
+  PR pRetTypeMem pBranchTypeMem pFParamMem pLParamMem pLetDecMem op () ()
+  where
+    op = pMemOp $ pMCOp prMCMem empty
 
 parseLore :: PR lore -> FilePath -> T.Text -> Either T.Text (Prog lore)
 parseLore pr fname s =
@@ -839,5 +901,11 @@ parseSOACS = parseLore prSOACS
 parseKernels :: FilePath -> T.Text -> Either T.Text (Prog Kernels)
 parseKernels = parseLore prKernels
 
+parseKernelsMem :: FilePath -> T.Text -> Either T.Text (Prog KernelsMem)
+parseKernelsMem = parseLore prKernelsMem
+
 parseMC :: FilePath -> T.Text -> Either T.Text (Prog MC)
 parseMC = parseLore prMC
+
+parseMCMem :: FilePath -> T.Text -> Either T.Text (Prog MCMem)
+parseMCMem = parseLore prMCMem
