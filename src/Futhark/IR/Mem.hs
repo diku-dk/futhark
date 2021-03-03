@@ -134,7 +134,7 @@ import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
 import qualified Futhark.TypeCheck as TC
 import Futhark.Util
-import Futhark.Util.Pretty (indent, ppr, text, (</>))
+import Futhark.Util.Pretty (indent, ppr, text, (<+>), (</>))
 import qualified Futhark.Util.Pretty as PP
 import GHC.Generics (Generic)
 import Language.SexpGrammar as Sexp
@@ -371,16 +371,7 @@ instance
   ppr (MemMem DefaultSpace) = PP.text "mem"
   ppr (MemMem s) = PP.text "mem" <> PP.ppr s
   ppr (MemArray bt shape u ret) =
-    PP.ppr (Array bt shape u) <> PP.text "@" <> PP.ppr ret
-
-instance PP.Pretty (Param (MemInfo SubExp Uniqueness ret)) where
-  ppr = PP.ppr . fmap declTypeOf
-
-instance PP.Pretty (Param (MemInfo SubExp NoUniqueness ret)) where
-  ppr = PP.ppr . fmap typeOf
-
-instance PP.Pretty (PatElemT (MemInfo SubExp NoUniqueness ret)) where
-  ppr = PP.ppr . fmap typeOf
+    PP.ppr (Array bt shape u) <+> PP.text "@" <+> PP.ppr ret
 
 -- | Memory information for an array bound somewhere in the program.
 data MemBind
@@ -409,7 +400,7 @@ instance Substitute MemBind where
 
 instance PP.Pretty MemBind where
   ppr (ArrayIn mem ixfun) =
-    PP.text "@" <> PP.ppr mem <> PP.text "->" PP.</> PP.ppr ixfun
+    PP.ppr mem <+> "->" PP.</> PP.ppr ixfun
 
 instance FreeIn MemBind where
   freeIn' (ArrayIn mem ixfun) = freeIn' mem <> freeIn' ixfun
@@ -501,9 +492,9 @@ existentialiseIxFun ctx = IxFun.substituteInIxFun ctx' . fmap (fmap Free)
 
 instance PP.Pretty MemReturn where
   ppr (ReturnsInBlock v ixfun) =
-    PP.parens $ PP.text (pretty v) <> PP.text "->" PP.</> PP.ppr ixfun
+    PP.parens $ ppr v <+> "->" PP.</> PP.ppr ixfun
   ppr (ReturnsNewBlock space i ixfun) =
-    PP.text ("?" ++ show i) <> PP.ppr space <> PP.text "->" PP.</> PP.ppr ixfun
+    "?" <> ppr i <> PP.ppr space <+> "->" PP.</> PP.ppr ixfun
 
 instance FreeIn MemReturn where
   freeIn' (ReturnsInBlock v ixfun) = freeIn' v <> freeIn' ixfun
@@ -1000,31 +991,6 @@ bodyReturnsFromPattern pat =
                     existentialiseIxFun (map patElemName ctx) ixfun
                 _ -> ReturnsInBlock mem $ existentialiseIxFun [] ixfun
       )
-
-instance (PP.Pretty u, PP.Pretty r) => PrettyAnnot (PatElemT (MemInfo SubExp u r)) where
-  ppAnnot = bindeeAnnot patElemName patElemDec
-
-instance (PP.Pretty u, PP.Pretty r) => PrettyAnnot (Param (MemInfo SubExp u r)) where
-  ppAnnot = bindeeAnnot paramName paramDec
-
-bindeeAnnot ::
-  (PP.Pretty u, PP.Pretty r) =>
-  (a -> VName) ->
-  (a -> MemInfo SubExp u r) ->
-  a ->
-  Maybe PP.Doc
-bindeeAnnot bindeeName bindeeLore bindee =
-  case bindeeLore bindee of
-    dec@MemArray {} ->
-      Just $
-        PP.stack $
-          map (("-- " <>) . PP.text) $
-            lines $
-              pretty (PP.ppr (bindeeName bindee) PP.<+> ":" PP.<+> PP.ppr dec)
-    MemMem {} ->
-      Nothing
-    MemPrim _ ->
-      Nothing
 
 extReturns :: [ExtType] -> [ExpReturns]
 extReturns ts =

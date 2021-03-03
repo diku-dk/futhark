@@ -6,6 +6,9 @@
 -- linear-memory accessor descriptors; see Zhu, Hoeflinger and David work.
 module Futhark.IR.Mem.IxFun
   ( IxFun (..),
+    LMAD (..),
+    LMADDim (..),
+    Monotonicity (..),
     index,
     iota,
     iotaOffset,
@@ -181,12 +184,12 @@ instance Pretty num => Pretty (LMAD num) where
   ppr (LMAD offset dims) =
     braces $
       semisep
-        [ text "offset: " <> oneLine (ppr offset),
-          text "strides: " <> p ldStride,
-          text "rotates: " <> p ldRotate,
-          text "shape: " <> p ldShape,
-          text "permutation: " <> p ldPerm,
-          text "monotonicity: " <> p ldMon
+        [ "offset: " <> oneLine (ppr offset),
+          "strides: " <> p ldStride,
+          "rotates: " <> p ldRotate,
+          "shape: " <> p ldShape,
+          "permutation: " <> p ldPerm,
+          "monotonicity: " <> p ldMon
         ]
     where
       p f = oneLine $ brackets $ commasep $ map (ppr . f) dims
@@ -195,9 +198,9 @@ instance Pretty num => Pretty (IxFun num) where
   ppr (IxFun lmads oshp cg) =
     braces $
       semisep
-        [ text "base: " <> brackets (commasep $ map ppr oshp),
-          text "contiguous: " <> text (show cg),
-          text "LMADs: " <> brackets (commasep $ NE.toList $ NE.map ppr lmads)
+        [ "base: " <> brackets (commasep $ map ppr oshp),
+          "contiguous: " <> if cg then "true" else "false",
+          "LMADs: " <> brackets (commasep $ NE.toList $ NE.map ppr lmads)
         ]
 
 instance Substitute num => Substitute (LMAD num) where

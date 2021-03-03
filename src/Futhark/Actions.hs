@@ -4,6 +4,7 @@
 -- something with the result of the pipeline.
 module Futhark.Actions
   ( printAction,
+    printAliasesAction,
     impCodeGenAction,
     kernelImpCodeGenAction,
     multicoreImpCodeGenAction,
@@ -41,9 +42,18 @@ import System.Exit
 import System.FilePath
 import qualified System.Info
 
--- | Print the result to stdout, with alias annotations.
-printAction :: (ASTLore lore, CanBeAliased (Op lore)) => Action lore
+-- | Print the result to stdout.
+printAction :: ASTLore lore => Action lore
 printAction =
+  Action
+    { actionName = "Prettyprint",
+      actionDescription = "Prettyprint the resulting internal representation on standard output.",
+      actionProcedure = liftIO . putStrLn . pretty
+    }
+
+-- | Print the result to stdout, alias annotations.
+printAliasesAction :: (ASTLore lore, CanBeAliased (Op lore)) => Action lore
+printAliasesAction =
   Action
     { actionName = "Prettyprint",
       actionDescription = "Prettyprint the resulting internal representation on standard output.",

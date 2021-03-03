@@ -21,7 +21,7 @@ import qualified Futhark.IR.Kernels as Kernels
 import qualified Futhark.IR.KernelsMem as KernelsMem
 import qualified Futhark.IR.MC as MC
 import qualified Futhark.IR.MCMem as MCMem
-import Futhark.IR.Parse (parseKernels, parseMC, parseSOACS)
+import Futhark.IR.Parse
 import Futhark.IR.Prop.Aliases (CanBeAliased)
 import qualified Futhark.IR.SOACS as SOACS
 import qualified Futhark.IR.Seq as Seq
@@ -447,7 +447,12 @@ commandLineOptions =
       "p"
       ["print"]
       (NoArg $ Right $ \opts -> opts {futharkAction = PolyAction printAction})
-      "Prettyprint the resulting internal representation on standard output (default action).",
+      "Print the resulting IR (default action).",
+    Option
+      []
+      ["print-aliases"]
+      (NoArg $ Right $ \opts -> opts {futharkAction = PolyAction printAliasesAction})
+      "Print the resulting IR with aliases.",
     Option
       "m"
       ["metrics"]
@@ -650,7 +655,9 @@ main = mainWithOptions newConfig commandLineOptions "options... program" compile
                   ),
                   (".fut_soacs", readCore parseSOACS SOACS),
                   (".fut_kernels", readCore parseKernels Kernels),
+                  (".fut_kernels_mem", readCore parseKernelsMem KernelsMem),
                   (".fut_mc", readCore parseMC MC),
+                  (".fut_mc_mem", readCore parseMCMem MCMem),
                   ( ".sexp",
                     do
                       input <- liftIO $ ByteString.readFile file

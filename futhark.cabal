@@ -61,6 +61,7 @@ library
       Futhark.Analysis.Metrics
       Futhark.Analysis.Metrics.Type
       Futhark.Analysis.PrimExp
+      Futhark.Analysis.PrimExp.Parse
       Futhark.Analysis.PrimExp.Convert
       Futhark.Analysis.PrimExp.Generalize
       Futhark.Analysis.PrimExp.Simplify
@@ -161,6 +162,7 @@ library
       Futhark.IR.Mem.Simplify
       Futhark.IR.Pretty
       Futhark.IR.Primitive
+      Futhark.IR.Primitive.Parse
       Futhark.IR.Prop
       Futhark.IR.Prop.Aliases
       Futhark.IR.Prop.Constants

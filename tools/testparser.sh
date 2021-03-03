@@ -28,8 +28,10 @@ if [ "$TESTPARSER_WORKER" ]; then
             testwith $f soacs -s
             testwith $f mc -s --extract-multicore
             testwith $f kernels --kernels
-            # testwith $f mc_mem --cpu
-            # testwith $f kernels_mem --gpu
+            testwith $f mc_mem --cpu
+            if ! grep -q no_opencl $f; then
+                testwith $f kernels_mem --gpu
+            fi
         fi
     done
 else

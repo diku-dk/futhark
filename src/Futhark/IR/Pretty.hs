@@ -10,7 +10,6 @@
 module Futhark.IR.Pretty
   ( prettyTuple,
     pretty,
-    PrettyAnnot (..),
     PrettyLore (..),
     ppTuple',
   )
@@ -18,34 +17,17 @@ where
 
 import Data.Foldable (toList)
 import Data.Maybe
-import Futhark.IR.Prop.Patterns
 import Futhark.IR.Syntax
 import Futhark.Util.Pretty
-
--- | Class for values that may have some prettyprinted annotation.
-class PrettyAnnot a where
-  ppAnnot :: a -> Maybe Doc
-
-instance PrettyAnnot (PatElemT (TypeBase shape u)) where
-  ppAnnot = const Nothing
-
-instance PrettyAnnot (Param (TypeBase shape u)) where
-  ppAnnot = const Nothing
-
-instance PrettyAnnot () where
-  ppAnnot = const Nothing
 
 -- | The class of lores whose annotations can be prettyprinted.
 class
   ( Decorations lore,
     Pretty (RetType lore),
     Pretty (BranchType lore),
-    Pretty (Param (FParamInfo lore)),
-    Pretty (Param (LParamInfo lore)),
-    Pretty (PatElemT (LetDec lore)),
-    PrettyAnnot (PatElem lore),
-    PrettyAnnot (FParam lore),
-    PrettyAnnot (LParam lore),
+    Pretty (FParamInfo lore),
+    Pretty (LParamInfo lore),
+    Pretty (LetDec lore),
     Pretty (Op lore)
   ) =>
   PrettyLore lore
@@ -143,20 +125,11 @@ stmCertAnnots = certAnnots . stmAuxCerts . stmAux
 instance Pretty (PatElemT dec) => Pretty (PatternT dec) where
   ppr pat = ppPattern (patternContextElements pat) (patternValueElements pat)
 
-instance Pretty (PatElemT b) => Pretty (PatElemT (a, b)) where
-  ppr = ppr . fmap snd
+instance Pretty t => Pretty (PatElemT t) where
+  ppr (PatElem name t) = ppr name <+> colon <+> align (ppr t)
 
-instance Pretty (PatElemT Type) where
-  ppr (PatElem name t) = ppr name <+> colon <+> ppr t
-
-instance Pretty (Param b) => Pretty (Param (a, b)) where
-  ppr = ppr . fmap snd
-
-instance Pretty (Param DeclType) where
-  ppr (Param name t) = ppr name <+> colon <+> ppr t
-
-instance Pretty (Param Type) where
-  ppr (Param name t) = ppr name <+> colon <+> ppr t
+instance Pretty t => Pretty (Param t) where
+  ppr (Param name t) = ppr name <+> colon <+> align (ppr t)
 
 instance PrettyLore lore => Pretty (Stm lore) where
   ppr bnd@(Let pat aux e) =
@@ -180,8 +153,7 @@ instance PrettyLore lore => Pretty (Stm lore) where
         concat
           [ maybeToList (ppExpLore (stmAuxDec aux) e),
             stmAttrAnnots bnd,
-            stmCertAnnots bnd,
-            mapMaybe ppAnnot (patternElements $ stmPattern bnd)
+            stmCertAnnots bnd
           ]
 
 instance Pretty BasicOp where
@@ -266,32 +238,30 @@ instance PrettyLore lore => Pretty (Exp lore) where
         Safe -> mempty
   ppr (Op op) = ppr op
   ppr (DoLoop ctx val form loopbody) =
-    annot (mapMaybe ppAnnot (ctxparams ++ valparams)) $
-      text "loop" <+> ppPattern ctxparams valparams
-        <+> equals
-        <+> ppTuple' (ctxinit ++ valinit)
-        </> ( case form of
-                ForLoop i it bound [] ->
-                  text "for"
-                    <+> align
-                      ( ppr i <> text ":" <> ppr it
-                          <+> text "<"
-                          <+> align (ppr bound)
-                      )
-                ForLoop i it bound loop_vars ->
-                  annot (mapMaybe (ppAnnot . fst) loop_vars) $
-                    text "for"
-                      <+> align
-                        ( ppr i <> text ":" <> ppr it
-                            <+> text "<"
-                            <+> align (ppr bound)
-                            </> stack (map pprLoopVar loop_vars)
-                        )
-                WhileLoop cond ->
-                  text "while" <+> ppr cond
-            )
-        <+> text "do"
-        <+> nestedBlock "{" "}" (ppr loopbody)
+    text "loop" <+> ppPattern ctxparams valparams
+      <+> equals
+      <+> ppTuple' (ctxinit ++ valinit)
+      </> ( case form of
+              ForLoop i it bound [] ->
+                text "for"
+                  <+> align
+                    ( ppr i <> text ":" <> ppr it
+                        <+> text "<"
+                        <+> align (ppr bound)
+                    )
+              ForLoop i it bound loop_vars ->
+                text "for"
+                  <+> align
+                    ( ppr i <> text ":" <> ppr it
+                        <+> text "<"
+                        <+> align (ppr bound)
+                        </> stack (map pprLoopVar loop_vars)
+                    )
+              WhileLoop cond ->
+                text "while" <+> ppr cond
+          )
+      <+> text "do"
+      <+> nestedBlock "{" "}" (ppr loopbody)
     where
       (ctxparams, ctxinit) = unzip ctx
       (valparams, valinit) = unzip val
@@ -300,14 +270,13 @@ instance PrettyLore lore => Pretty (Exp lore) where
 instance PrettyLore lore => Pretty (Lambda lore) where
   ppr (Lambda [] _ []) = text "nilFn"
   ppr (Lambda params body rettype) =
-    annot (mapMaybe ppAnnot params) $
-      text "fn" <+> ppTuple' rettype
-        <+/> align (parens (commasep (map ppr params)))
-        <+> text "=>" </> indent 2 (ppr body)
+    text "fn" <+> ppTuple' rettype
+      <+/> align (parens (commasep (map ppr params)))
+      <+> text "=>" </> indent 2 (ppr body)
 
 instance PrettyLore lore => Pretty (FunDef lore) where
   ppr (FunDef entry attrs name rettype fparams body) =
-    annot (mapMaybe ppAnnot fparams <> attrAnnots attrs) $
+    annot (attrAnnots attrs) $
       text fun <+> text (nameToString name)
         <+> apply (map ppr fparams)
         </> indent 2 (colon <+> align (ppTuple' rettype))

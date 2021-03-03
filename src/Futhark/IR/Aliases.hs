@@ -67,7 +67,7 @@ import Language.SexpGrammar.Generic
 -- | The lore for the basic representation.
 data Aliases lore
 
--- | A wrapper around 'AliasDec to get around the fact that we need an
+-- | A wrapper around 'AliasDec' to get around the fact that we need an
 -- 'Ord' instance, which 'AliasDec does not have.
 newtype AliasDec = AliasDec {unAliases :: Names}
   deriving (Show, Generic)
@@ -97,7 +97,7 @@ instance FreeIn AliasDec where
   freeIn' = const mempty
 
 instance PP.Pretty AliasDec where
-  ppr = PP.commasep . map PP.ppr . namesToList . unAliases
+  ppr = PP.braces . PP.commasep . map PP.ppr . namesToList . unAliases
 
 -- | The aliases of the let-bound variable.
 type VarAliases = AliasDec
@@ -143,20 +143,6 @@ instance (ASTLore lore, CanBeAliased (Op lore)) => Aliased (Aliases lore) where
   bodyAliases = map unAliases . fst . fst . bodyDec
   consumedInBody = unAliases . snd . fst . bodyDec
 
-instance
-  PrettyAnnot (PatElemT dec) =>
-  PrettyAnnot (PatElemT (VarAliases, dec))
-  where
-  ppAnnot (PatElem name (AliasDec als, dec)) =
-    let alias_comment = PP.oneLine <$> aliasComment name als
-     in case (alias_comment, ppAnnot (PatElem name dec)) of
-          (_, Nothing) ->
-            alias_comment
-          (Just alias_comment', Just inner_comment) ->
-            Just $ alias_comment' PP.</> inner_comment
-          (Nothing, Just inner_comment) ->
-            Just inner_comment
-
 instance (ASTLore lore, CanBeAliased (Op lore)) => PrettyLore (Aliases lore) where
   ppExpLore (consumed, inner) e =
     maybeComment $
@@ -190,16 +176,6 @@ instance (ASTLore lore, CanBeAliased (Op lore)) => PrettyLore (Aliases lore) whe
 maybeComment :: [PP.Doc] -> Maybe PP.Doc
 maybeComment [] = Nothing
 maybeComment cs = Just $ PP.folddoc (PP.</>) cs
-
-aliasComment :: PP.Pretty a => a -> Names -> Maybe PP.Doc
-aliasComment name als =
-  case namesToList als of
-    [] -> Nothing
-    als' ->
-      Just $
-        PP.oneLine $
-          PP.text "-- " <> PP.ppr name <> PP.text " aliases "
-            <> PP.commasep (map PP.ppr als')
 
 resultAliasComment :: PP.Pretty a => a -> Names -> Maybe PP.Doc
 resultAliasComment name als =
