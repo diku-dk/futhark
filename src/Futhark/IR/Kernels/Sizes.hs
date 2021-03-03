@@ -63,16 +63,19 @@ instance SexpIso SizeClass where
                     End
 
 instance Pretty SizeClass where
-  ppr (SizeThreshold path _) = text $ "threshold (" ++ unwords (map pStep path) ++ ")"
+  ppr (SizeThreshold path def) =
+    "threshold(" <> ppr (map pStep path) <> def' <> ")"
     where
-      pStep (v, True) = pretty v
-      pStep (v, False) = '!' : pretty v
+      pStep (v, True) = ppr v
+      pStep (v, False) = "!" <> ppr v
+      def' = maybe mempty ((", " <>) . ppr) def
   ppr SizeGroup = text "group_size"
   ppr SizeNumGroups = text "num_groups"
   ppr SizeTile = text "tile_size"
   ppr SizeRegTile = text "reg_tile_size"
   ppr SizeLocalMemory = text "local_memory"
-  ppr (SizeBespoke k _) = ppr k
+  ppr (SizeBespoke k def) =
+    text "bespoke" <> parens (ppr k <> comma <+> ppr def)
 
 -- | The default value for the size.  If 'Nothing', that means the backend gets to decide.
 sizeDefault :: SizeClass -> Maybe Int64

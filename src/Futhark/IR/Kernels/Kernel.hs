@@ -220,19 +220,18 @@ instance FreeIn SizeOp where
   freeIn' _ = mempty
 
 instance PP.Pretty SizeOp where
-  ppr (SplitSpace o w i elems_per_thread) =
-    text "splitSpace" <> suff
+  ppr (SplitSpace SplitContiguous w i elems_per_thread) =
+    text "split_space"
       <> parens (commasep [ppr w, ppr i, ppr elems_per_thread])
-    where
-      suff = case o of
-        SplitContiguous -> mempty
-        SplitStrided stride -> text "Strided" <> parens (ppr stride)
+  ppr (SplitSpace (SplitStrided stride) w i elems_per_thread) =
+    text "split_space_strided"
+      <> parens (commasep [ppr stride, ppr w, ppr i, ppr elems_per_thread])
   ppr (GetSize name size_class) =
     text "get_size" <> parens (commasep [ppr name, ppr size_class])
   ppr (GetSizeMax size_class) =
     text "get_size_max" <> parens (commasep [ppr size_class])
   ppr (CmpSizeLe name size_class x) =
-    text "get_size" <> parens (commasep [ppr name, ppr size_class])
+    text "cmp_size" <> parens (commasep [ppr name, ppr size_class])
       <+> text "<="
       <+> ppr x
   ppr (CalcNumGroups w max_num_groups group_size) =
