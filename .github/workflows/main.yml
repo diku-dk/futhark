@@ -55,6 +55,7 @@ jobs:
     - name: Build Futhark
       run: |
         cabal --version
+        ghc --version
         cabal update
         cabal install --install-method=copy --overwrite-policy=always
 
