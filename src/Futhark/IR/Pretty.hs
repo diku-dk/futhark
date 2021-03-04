@@ -278,7 +278,7 @@ instance PrettyLore lore => Pretty (Lambda lore) where
 instance Pretty EntryPointType where
   ppr TypeDirect = "direct"
   ppr TypeUnsigned = "unsigned"
-  ppr (TypeOpaque desc n) = "opaque" <> apply [ppr desc, ppr n]
+  ppr (TypeOpaque desc n) = "opaque" <> apply [ppr (show desc), ppr n]
 
 instance PrettyLore lore => Pretty (FunDef lore) where
   ppr (FunDef entry attrs name rettype fparams body) =
