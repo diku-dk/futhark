@@ -922,7 +922,7 @@ typeCheckSOAC (Stencil ws p stencil lam inv arrs) = do
 
       checkVariant arr = do
         (t, als) <- checkInput (Shape ws) arr
-        pure (t `arrayOfShape` Shape ws, als)
+        pure (t `arrayOfShape` Shape [p], als)
 
   inv' <- mapM checkInvariant inv
   arrs' <- mapM checkVariant arrs
