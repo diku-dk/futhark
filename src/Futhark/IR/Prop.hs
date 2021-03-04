@@ -59,7 +59,6 @@ import Futhark.IR.Syntax
 import Futhark.Transform.Rename (Rename, Renameable)
 import Futhark.Transform.Substitute (Substitutable, Substitute)
 import Futhark.Util.Pretty
-import Language.SexpGrammar as Sexp
 
 -- | @isBuiltInFunction k@ is 'True' if @k@ is an element of 'builtInFunctions'.
 isBuiltInFunction :: Name -> Bool
@@ -198,7 +197,7 @@ certify cs1 (Let pat (StmAux cs2 attrs dec) e) =
 -- | A handy shorthand for properties that we usually want to things
 -- we stuff into ASTs.
 type ASTConstraints a =
-  (Eq a, Ord a, Show a, Rename a, Substitute a, FreeIn a, Pretty a, SexpIso a)
+  (Eq a, Ord a, Show a, Rename a, Substitute a, FreeIn a, Pretty a)
 
 -- | A type class for operations.
 class (ASTConstraints op, TypedOp op) => IsOp op where
