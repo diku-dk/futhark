@@ -57,7 +57,7 @@ jobs:
         cabal --version
         ghc --version
         cabal update
-        cabal install --install-method=copy --overwrite-policy=always
+        cabal install -w ghc-8.10.3 --install-method=copy --overwrite-policy=always
 
   build-linux-stack:
     runs-on: ubuntu-20.04
