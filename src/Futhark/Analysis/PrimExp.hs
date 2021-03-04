@@ -1,4 +1,3 @@
-{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# OPTIONS_GHC -fno-warn-redundant-constraints #-}
@@ -62,15 +61,11 @@ import Control.Category
 import Control.Monad
 import qualified Data.Map as M
 import qualified Data.Set as S
-import qualified Data.Text as T
 import Data.Traversable
 import Futhark.IR.Primitive
 import Futhark.IR.Prop.Names
 import Futhark.Util.IntegralExp
 import Futhark.Util.Pretty
-import GHC.Generics (Generic)
-import Language.SexpGrammar as Sexp
-import Language.SexpGrammar.Generic
 import Prelude hiding (id, (.))
 
 -- | A primitive expression parametrised over the representation of
@@ -87,20 +82,7 @@ data PrimExp v
   | UnOpExp UnOp (PrimExp v)
   | ConvOpExp ConvOp (PrimExp v)
   | FunExp String [PrimExp v] PrimType
-  deriving (Eq, Ord, Show, Generic)
-
-instance SexpIso v => SexpIso (PrimExp v) where
-  sexpIso =
-    match $
-      With (. Sexp.list (Sexp.el (Sexp.sym "leaf") >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
-        With (. Sexp.list (Sexp.el (Sexp.sym "value") >>> Sexp.el sexpIso)) $
-          With (. Sexp.list (Sexp.el (Sexp.sym "bin-op") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
-            With (. Sexp.list (Sexp.el (Sexp.sym "cmp-op") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
-              With (. Sexp.list (Sexp.el (Sexp.sym "un-op") >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
-                With (. Sexp.list (Sexp.el (Sexp.sym "conv-op") >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
-                  With
-                    (. Sexp.list (Sexp.el (Sexp.sym "fun") >>> Sexp.el (iso T.unpack T.pack . sexpIso) >>> Sexp.el sexpIso >>> Sexp.el sexpIso))
-                    End
+  deriving (Eq, Ord, Show)
 
 instance Functor PrimExp where
   fmap = fmapDefault
@@ -131,10 +113,7 @@ instance FreeIn v => FreeIn (PrimExp v) where
 -- construction.  Does not guarantee that the underlying expression is
 -- actually type correct.
 newtype TPrimExp t v = TPrimExp {untyped :: PrimExp v}
-  deriving (Eq, Ord, Show, Generic)
-
-instance SexpIso v => SexpIso (TPrimExp t v) where
-  sexpIso = with $ \e -> sexpIso >>> e
+  deriving (Eq, Ord, Show)
 
 instance Functor (TPrimExp t) where
   fmap = fmapDefault

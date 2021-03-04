@@ -1,5 +1,4 @@
 {-# LANGUAGE ConstraintKinds #-}
-{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
@@ -136,9 +135,6 @@ import qualified Futhark.TypeCheck as TC
 import Futhark.Util
 import Futhark.Util.Pretty (indent, ppr, text, (<+>), (</>))
 import qualified Futhark.Util.Pretty as PP
-import GHC.Generics (Generic)
-import Language.SexpGrammar as Sexp
-import Language.SexpGrammar.Generic
 import Prelude hiding (id, (.))
 
 type LetDecMem = MemInfo SubExp NoUniqueness MemBind
@@ -179,15 +175,7 @@ data MemOp inner
     -- expression, but what are you gonna do...
     Alloc SubExp Space
   | Inner inner
-  deriving (Eq, Ord, Show, Generic)
-
-instance SexpIso inner => SexpIso (MemOp inner) where
-  sexpIso =
-    match $
-      With (. Sexp.list (Sexp.el (Sexp.sym "alloc") >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
-        With
-          (. Sexp.list (Sexp.el (Sexp.sym "inner") >>> Sexp.el sexpIso))
-          End
+  deriving (Eq, Ord, Show)
 
 instance AllocOp (MemOp inner) where
   allocOp = Alloc
@@ -268,16 +256,7 @@ data MemInfo d u ret
     -- byte offsets, multiply the offset with the size of the array
     -- element type.
     MemArray PrimType (ShapeBase d) u ret
-  deriving (Eq, Show, Ord, Generic) --- XXX Ord?
-
-instance (SexpIso d, SexpIso u, SexpIso ret) => SexpIso (MemInfo d u ret) where
-  sexpIso =
-    match $
-      With (. Sexp.list (Sexp.el (Sexp.sym "prim") >>> Sexp.el sexpIso)) $
-        With (. Sexp.list (Sexp.el (Sexp.sym "mem") >>> Sexp.el sexpIso)) $
-          With
-            (. Sexp.list (Sexp.el (Sexp.sym "array") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso))
-            End
+  deriving (Eq, Show, Ord) --- XXX Ord?
 
 type MemBound u = MemInfo SubExp u MemBind
 
@@ -378,12 +357,7 @@ data MemBind
   = -- | Located in this memory block with this index
     -- function.
     ArrayIn VName IxFun
-  deriving (Show, Generic)
-
-instance SexpIso MemBind where
-  sexpIso = with $ \membind ->
-    Sexp.list (Sexp.el sexpIso >>> Sexp.el sexpIso)
-      >>> membind
+  deriving (Show)
 
 instance Eq MemBind where
   _ == _ = True
@@ -414,29 +388,7 @@ data MemReturn
   | -- | The operation returns a new (existential) memory
     -- block.
     ReturnsNewBlock Space Int ExtIxFun
-  deriving (Show, Generic)
-
-instance SexpIso MemReturn where
-  sexpIso =
-    match $
-      With
-        ( .
-            Sexp.list
-              ( Sexp.el (Sexp.sym "returns-in-block")
-                  >>> Sexp.el sexpIso
-                  >>> Sexp.el sexpIso
-              )
-        )
-        $ With
-          ( .
-              Sexp.list
-                ( Sexp.el (Sexp.sym "returns-new-block")
-                    >>> Sexp.el sexpIso
-                    >>> Sexp.el sexpIso
-                    >>> Sexp.el sexpIso
-                )
-          )
-          End
+  deriving (Show)
 
 instance Eq MemReturn where
   _ == _ = True
