@@ -2368,8 +2368,6 @@ consumeArg loc (Scalar (Arrow _ _ t1 _)) (FuncDiet d _)
       contravariantArg tp dp && contravariantArg tr dr
     contravariantArg _ _ =
       True
-consumeArg loc (Scalar (Arrow _ _ _ t2)) (FuncDiet _ pd) =
-  consumeArg loc t2 pd
 consumeArg loc at Consume = return [consumption (aliases at) loc]
 consumeArg loc at _ = return [observation (aliases at) loc]
 
