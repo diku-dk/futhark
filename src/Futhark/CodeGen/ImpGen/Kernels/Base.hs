@@ -1739,7 +1739,7 @@ compileThreadResult _ pe (ConcatReturns (SplitStrided stride) _ _ what) = do
   offset <- sExt64 . kernelGlobalThreadId . kernelConstants <$> askEnv
   n <- toInt64Exp . arraySize 0 <$> lookupType what
   copyDWIM (patElemName pe) [DimSlice offset n $ toInt64Exp stride] (Var what) []
-compileThreadResult _ pe (WriteReturns rws _arr dests) = do
+compileThreadResult _ pe (WriteReturns (Shape rws) _arr dests) = do
   constants <- kernelConstants <$> askEnv
   let rws' = map toInt64Exp rws
   forM_ dests $ \(slice, e) -> do

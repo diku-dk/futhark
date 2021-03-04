@@ -1,5 +1,4 @@
 {-# LANGUAGE ConstraintKinds #-}
-{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
@@ -134,11 +133,8 @@ import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
 import qualified Futhark.TypeCheck as TC
 import Futhark.Util
-import Futhark.Util.Pretty (indent, ppr, text, (</>))
+import Futhark.Util.Pretty (indent, ppr, text, (<+>), (</>))
 import qualified Futhark.Util.Pretty as PP
-import GHC.Generics (Generic)
-import Language.SexpGrammar as Sexp
-import Language.SexpGrammar.Generic
 import Prelude hiding (id, (.))
 
 type LetDecMem = MemInfo SubExp NoUniqueness MemBind
@@ -179,15 +175,7 @@ data MemOp inner
     -- expression, but what are you gonna do...
     Alloc SubExp Space
   | Inner inner
-  deriving (Eq, Ord, Show, Generic)
-
-instance SexpIso inner => SexpIso (MemOp inner) where
-  sexpIso =
-    match $
-      With (. Sexp.list (Sexp.el (Sexp.sym "alloc") >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
-        With
-          (. Sexp.list (Sexp.el (Sexp.sym "inner") >>> Sexp.el sexpIso))
-          End
+  deriving (Eq, Ord, Show)
 
 instance AllocOp (MemOp inner) where
   allocOp = Alloc
@@ -276,18 +264,7 @@ data MemInfo d u ret
     -- handle to the underlying arrays which is what are really
     -- updated by 'UpdateAcc'.
     MemAcc [VName] (ShapeBase d)
-  deriving (Eq, Show, Ord, Generic) --- XXX Ord?
-
-instance (SexpIso d, SexpIso u, SexpIso ret) => SexpIso (MemInfo d u ret) where
-  sexpIso =
-    match $
-      With (. Sexp.list (Sexp.el (Sexp.sym "prim") >>> Sexp.el sexpIso)) $
-        With (. Sexp.list (Sexp.el (Sexp.sym "mem") >>> Sexp.el sexpIso)) $
-          With
-            (. Sexp.list (Sexp.el (Sexp.sym "array") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso))
-            $ With
-              (. Sexp.list (Sexp.el (Sexp.sym "acc") >>> Sexp.el sexpIso >>> Sexp.el sexpIso))
-              End
+  deriving (Eq, Show, Ord) --- XXX Ord?
 
 type MemBound u = MemInfo SubExp u MemBind
 
@@ -403,30 +380,16 @@ instance
   ppr (MemMem DefaultSpace) = PP.text "mem"
   ppr (MemMem s) = PP.text "mem" <> PP.ppr s
   ppr (MemArray bt shape u ret) =
-    PP.ppr (Array (ElemPrim bt) shape u) <> PP.text "@" <> PP.ppr ret
+    PP.ppr (Array (ElemPrim bt) shape u) <+> PP.text "@" <+> PP.ppr ret
   ppr (MemAcc arrs shape) =
     PP.ppr shape <> PP.ppr (Acc arrs :: Type)
-
-instance PP.Pretty (Param (MemInfo SubExp Uniqueness ret)) where
-  ppr = PP.ppr . fmap declTypeOf
-
-instance PP.Pretty (Param (MemInfo SubExp NoUniqueness ret)) where
-  ppr = PP.ppr . fmap typeOf
-
-instance PP.Pretty (PatElemT (MemInfo SubExp NoUniqueness ret)) where
-  ppr = PP.ppr . fmap typeOf
 
 -- | Memory information for an array bound somewhere in the program.
 data MemBind
   = -- | Located in this memory block with this index
     -- function.
     ArrayIn VName IxFun
-  deriving (Show, Generic)
-
-instance SexpIso MemBind where
-  sexpIso = with $ \membind ->
-    Sexp.list (Sexp.el sexpIso >>> Sexp.el sexpIso)
-      >>> membind
+  deriving (Show)
 
 instance Eq MemBind where
   _ == _ = True
@@ -443,7 +406,7 @@ instance Substitute MemBind where
 
 instance PP.Pretty MemBind where
   ppr (ArrayIn mem ixfun) =
-    PP.text "@" <> PP.ppr mem <> PP.text "->" PP.</> PP.ppr ixfun
+    PP.ppr mem <+> "->" PP.</> PP.ppr ixfun
 
 instance FreeIn MemBind where
   freeIn' (ArrayIn mem ixfun) = freeIn' mem <> freeIn' ixfun
@@ -457,29 +420,7 @@ data MemReturn
   | -- | The operation returns a new (existential) memory
     -- block.
     ReturnsNewBlock Space Int ExtIxFun
-  deriving (Show, Generic)
-
-instance SexpIso MemReturn where
-  sexpIso =
-    match $
-      With
-        ( .
-            Sexp.list
-              ( Sexp.el (Sexp.sym "returns-in-block")
-                  >>> Sexp.el sexpIso
-                  >>> Sexp.el sexpIso
-              )
-        )
-        $ With
-          ( .
-              Sexp.list
-                ( Sexp.el (Sexp.sym "returns-new-block")
-                    >>> Sexp.el sexpIso
-                    >>> Sexp.el sexpIso
-                    >>> Sexp.el sexpIso
-                )
-          )
-          End
+  deriving (Show)
 
 instance Eq MemReturn where
   _ == _ = True
@@ -535,9 +476,9 @@ existentialiseIxFun ctx = IxFun.substituteInIxFun ctx' . fmap (fmap Free)
 
 instance PP.Pretty MemReturn where
   ppr (ReturnsInBlock v ixfun) =
-    PP.parens $ PP.text (pretty v) <> PP.text "->" PP.</> PP.ppr ixfun
+    PP.parens $ ppr v <+> "->" PP.</> PP.ppr ixfun
   ppr (ReturnsNewBlock space i ixfun) =
-    PP.text ("?" ++ show i) <> PP.ppr space <> PP.text "->" PP.</> PP.ppr ixfun
+    "?" <> ppr i <> PP.ppr space <+> "->" PP.</> PP.ppr ixfun
 
 instance FreeIn MemReturn where
   freeIn' (ReturnsInBlock v ixfun) = freeIn' v <> freeIn' ixfun
@@ -1052,33 +993,6 @@ bodyReturnsFromPattern pat =
           MemAcc arrs shape ->
             MemAcc arrs $ Shape $ map ext $ shapeDims shape
       )
-
-instance (PP.Pretty u, PP.Pretty r) => PrettyAnnot (PatElemT (MemInfo SubExp u r)) where
-  ppAnnot = bindeeAnnot patElemName patElemDec
-
-instance (PP.Pretty u, PP.Pretty r) => PrettyAnnot (Param (MemInfo SubExp u r)) where
-  ppAnnot = bindeeAnnot paramName paramDec
-
-bindeeAnnot ::
-  (PP.Pretty u, PP.Pretty r) =>
-  (a -> VName) ->
-  (a -> MemInfo SubExp u r) ->
-  a ->
-  Maybe PP.Doc
-bindeeAnnot bindeeName bindeeLore bindee =
-  case bindeeLore bindee of
-    dec@MemArray {} ->
-      Just $
-        PP.stack $
-          map (("-- " <>) . PP.text) $
-            lines $
-              pretty (PP.ppr (bindeeName bindee) PP.<+> ":" PP.<+> PP.ppr dec)
-    MemMem {} ->
-      Nothing
-    MemPrim _ ->
-      Nothing
-    MemAcc {} ->
-      Nothing
 
 extReturns :: [ExtType] -> [ExpReturns]
 extReturns ts =

@@ -1,8 +1,6 @@
-{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE Strict #-}
 {-# LANGUAGE Trustworthy #-}
@@ -174,29 +172,17 @@ import Data.Foldable
 import qualified Data.Sequence as Seq
 import qualified Data.Set as S
 import Data.String
-import qualified Data.Text as T
 import Data.Traversable (fmapDefault, foldMapDefault)
 import Futhark.IR.Decorations
 import Futhark.IR.Syntax.Core
-import GHC.Generics (Generic)
 import Language.Futhark.Core
-import Language.SexpGrammar as Sexp
-import Language.SexpGrammar.Generic
 import Prelude hiding (id, (.))
 
 -- | A single attribute.
 data Attr
   = AttrAtom Name
   | AttrComp Name [Attr]
-  deriving (Ord, Show, Eq, Generic)
-
-instance SexpIso Attr where
-  sexpIso =
-    match $
-      With (. Sexp.list (Sexp.el (Sexp.sym "atom") >>> Sexp.el sexpIso)) $
-        With
-          (. Sexp.list (Sexp.el (Sexp.sym "comp") >>> Sexp.el sexpIso >>> Sexp.el sexpIso))
-          End
+  deriving (Ord, Show, Eq)
 
 instance IsString Attr where
   fromString = AttrAtom . fromString
@@ -204,10 +190,7 @@ instance IsString Attr where
 -- | Every statement is associated with a set of attributes, which can
 -- have various effects throughout the compiler.
 newtype Attrs = Attrs {unAttrs :: S.Set Attr}
-  deriving (Ord, Show, Eq, Monoid, Semigroup, Generic)
-
-instance SexpIso Attrs where
-  sexpIso = with $ \attrs -> sexpIso >>> attrs
+  deriving (Ord, Show, Eq, Monoid, Semigroup)
 
 -- | Construct 'Attrs' from a single 'Attr'.
 oneAttr :: Attr -> Attrs
@@ -231,15 +214,7 @@ data PatternT dec = Pattern
     -- | "real" values
     patternValueElements :: [PatElemT dec]
   }
-  deriving (Ord, Show, Eq, Generic)
-
-instance SexpIso dec => SexpIso (PatternT dec) where
-  sexpIso = with $ \vname ->
-    Sexp.list
-      ( Sexp.el sexpIso
-          >>> Sexp.el sexpIso
-      )
-      >>> vname
+  deriving (Ord, Show, Eq)
 
 instance Semigroup (PatternT dec) where
   Pattern cs1 vs1 <> Pattern cs2 vs2 = Pattern (cs1 ++ cs2) (vs1 ++ vs2)
@@ -266,17 +241,7 @@ data StmAux dec = StmAux
     stmAuxAttrs :: Attrs,
     stmAuxDec :: dec
   }
-  deriving (Ord, Show, Eq, Generic)
-
-instance SexpIso dec => SexpIso (StmAux dec) where
-  sexpIso = with $ \vname ->
-    Sexp.list
-      ( Sexp.el (Sexp.sym "aux")
-          >>> Sexp.el sexpIso
-          >>> Sexp.el sexpIso
-          >>> Sexp.el sexpIso
-      )
-      >>> vname
+  deriving (Ord, Show, Eq)
 
 instance Semigroup dec => Semigroup (StmAux dec) where
   StmAux cs1 attrs1 dec1 <> StmAux cs2 attrs2 dec2 =
@@ -291,17 +256,6 @@ data Stm lore = Let
     -- | Expression.
     stmExp :: Exp lore
   }
-  deriving (Generic)
-
-instance Decorations lore => SexpIso (Stm lore) where
-  sexpIso = with $ \stm ->
-    Sexp.list
-      ( Sexp.el (Sexp.sym "let")
-          >>> Sexp.el sexpIso
-          >>> Sexp.el sexpIso
-          >>> Sexp.el sexpIso
-      )
-      >>> stm
 
 deriving instance Decorations lore => Ord (Stm lore)
 
@@ -311,9 +265,6 @@ deriving instance Decorations lore => Eq (Stm lore)
 
 -- | A sequence of statements.
 type Stms lore = Seq.Seq (Stm lore)
-
-instance Decorations lore => SexpIso (Stms lore) where
-  sexpIso = iso stmsFromList stmsToList . sexpIso
 
 -- | A single statement.
 oneStm :: Stm lore -> Stms lore
@@ -349,16 +300,6 @@ data BodyT lore = Body
     bodyStms :: Stms lore,
     bodyResult :: Result
   }
-  deriving (Generic)
-
-instance Decorations lore => SexpIso (BodyT lore) where
-  sexpIso = with $ \stm ->
-    Sexp.list
-      ( Sexp.el sexpIso
-          >>> Sexp.el sexpIso
-          >>> Sexp.el sexpIso
-      )
-      >>> stm
 
 deriving instance Decorations lore => Ord (BodyT lore)
 
@@ -380,15 +321,7 @@ data DimChange d
   | -- | The new dimension is not necessarily numerically
     -- equal to the old one.
     DimNew d
-  deriving (Ord, Show, Generic)
-
-instance SexpIso d => SexpIso (DimChange d) where
-  sexpIso =
-    match $
-      With (. Sexp.list (Sexp.el (Sexp.sym "coercion") >>> Sexp.el sexpIso)) $
-        With
-          (. Sexp.list (Sexp.el (Sexp.sym "new") >>> Sexp.el sexpIso))
-          End
+  deriving (Ord, Show)
 
 instance Eq d => Eq (DimChange d) where
   DimCoercion x == DimNew y = x == y
@@ -423,7 +356,6 @@ data BasicOp
     Opaque SubExp
   | -- | Array literals, e.g., @[ [1+x, 3], [2, 1+4] ]@.
     -- Second arg is the element type of the rows of the array.
-    -- Scalar operations
     ArrayLit [SubExp] Type
   | -- | Unary operation.
     UnOp UnOp SubExp
@@ -484,43 +416,7 @@ data BasicOp
   | -- | Update an accumulator at the given index with the given value.
     -- Consumes the accumulator and produces a new one.
     UpdateAcc VName [SubExp] [SubExp]
-  deriving (Eq, Ord, Show, Generic)
-
-instance SexpIso BasicOp where
-  sexpIso =
-    match $
-      With (. Sexp.list (Sexp.el sexpIso)) $
-        With (. Sexp.list (Sexp.el (Sexp.sym "opaque") >>> Sexp.el sexpIso)) $
-          With (. Sexp.list (Sexp.el (Sexp.sym "array") >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
-            With (. Sexp.list (Sexp.el sexpIso >>> Sexp.el sexpIso)) $
-              With (. Sexp.list (Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
-                With (. Sexp.list (Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
-                  With (. Sexp.list (Sexp.el sexpIso >>> Sexp.el sexpIso)) $
-                    With (. Sexp.list (Sexp.el (Sexp.sym "assert") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el assertHelper)) $
-                      With (. Sexp.list (Sexp.el (Sexp.sym "index") >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
-                        With (. Sexp.list (Sexp.el (Sexp.sym "update") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
-                          With (. Sexp.list (Sexp.el (Sexp.sym "concat") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
-                            With (. Sexp.list (Sexp.el (Sexp.sym "copy") >>> Sexp.el sexpIso)) $
-                              With (. Sexp.list (Sexp.el (Sexp.sym "manifest") >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
-                                With (. Sexp.list (Sexp.el (Sexp.sym "iota") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
-                                  With (. Sexp.list (Sexp.el (Sexp.sym "replicate") >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
-                                    With (. Sexp.list (Sexp.el (Sexp.sym "scratch") >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
-                                      With (. Sexp.list (Sexp.el (Sexp.sym "reshape") >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
-                                        With (. Sexp.list (Sexp.el (Sexp.sym "rearrange") >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
-                                          With
-                                            (. Sexp.list (Sexp.el (Sexp.sym "rotate") >>> Sexp.el sexpIso >>> Sexp.el sexpIso))
-                                            $ With (. Sexp.list (Sexp.el (Sexp.sym "unacc") >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
-                                              With
-                                                (. Sexp.list (Sexp.el (Sexp.sym "updateacc") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso))
-                                                End
-    where
-      assertHelper =
-        with $ \tuple ->
-          Sexp.list
-            ( Sexp.el (iso (const mempty) (T.pack . show) . Sexp.symbol)
-                >>> Sexp.rest (iso (const mempty) (T.pack . show) . Sexp.symbol)
-            )
-            >>> tuple
+  deriving (Eq, Ord, Show)
 
 -- | The root Futhark expression type.  The v'Op' constructor contains
 -- a lore-specific operation.  Do-loops, branches and function calls
@@ -540,28 +436,6 @@ data ExpT lore
     -- 'BasicOp' because we need the @lore@ parameter.
     MkAcc Shape [VName] Shape (Maybe (Lambda lore, [SubExp]))
   | Op (Op lore)
-  deriving (Generic)
-
-instance Decorations lore => SexpIso (ExpT lore) where
-  sexpIso =
-    match $
-      With (. sexpIso) $
-        With (. Sexp.list (Sexp.el (Sexp.sym "apply") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el applyHelper)) $
-          With (. Sexp.list (Sexp.el (Sexp.sym "if") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
-            With (. Sexp.list (Sexp.el (Sexp.sym "loop") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
-              With (. Sexp.list (Sexp.el (Sexp.sym "mkacc") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
-                With
-                  (. sexpIso)
-                  End
-    where
-      applyHelper =
-        with $ \triple ->
-          Sexp.list
-            ( Sexp.el sexpIso
-                >>> Sexp.el (iso (const mempty) (T.pack . show) . Sexp.symbol)
-                >>> Sexp.rest (iso (const mempty) (T.pack . show) . Sexp.symbol)
-            )
-            >>> triple
 
 deriving instance Decorations lore => Eq (ExpT lore)
 
@@ -573,15 +447,6 @@ deriving instance Decorations lore => Ord (ExpT lore)
 data LoopForm lore
   = ForLoop VName IntType SubExp [(LParam lore, VName)]
   | WhileLoop VName
-  deriving (Generic)
-
-instance Decorations lore => SexpIso (LoopForm lore) where
-  sexpIso =
-    match $
-      With (. Sexp.list (Sexp.el (Sexp.sym "for") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
-        With
-          (. Sexp.list (Sexp.el (Sexp.sym "while") >>> Sexp.el sexpIso))
-          End
 
 deriving instance Decorations lore => Eq (LoopForm lore)
 
@@ -594,15 +459,7 @@ data IfDec rt = IfDec
   { ifReturns :: [rt],
     ifSort :: IfSort
   }
-  deriving (Eq, Show, Ord, Generic)
-
-instance SexpIso rt => SexpIso (IfDec rt) where
-  sexpIso = with $ \stm ->
-    Sexp.list
-      ( Sexp.el sexpIso
-          >>> Sexp.el sexpIso
-      )
-      >>> stm
+  deriving (Eq, Show, Ord)
 
 -- | What kind of branch is this?  This has no semantic meaning, but
 -- provides hints to simplifications.
@@ -621,16 +478,7 @@ data IfSort
     -- have problems (e.g. contain things we cannot generate
     -- code for).
     IfEquiv
-  deriving (Eq, Show, Ord, Generic)
-
-instance SexpIso IfSort where
-  sexpIso =
-    match $
-      With (sym "normal" >>>) $
-        With (sym "fallback" >>>) $
-          With
-            (sym "equiv" >>>)
-            End
+  deriving (Eq, Show, Ord)
 
 -- | A type alias for namespace control.
 type Exp = ExpT
@@ -641,17 +489,6 @@ data LambdaT lore = Lambda
     lambdaBody :: BodyT lore,
     lambdaReturnType :: [Type]
   }
-  deriving (Generic)
-
-instance Decorations lore => SexpIso (LambdaT lore) where
-  sexpIso = with $ \lambdat ->
-    Sexp.list
-      ( Sexp.el (Sexp.sym "lambda")
-          >>> Sexp.el sexpIso
-          >>> Sexp.el sexpIso
-          >>> Sexp.el sexpIso
-      )
-      >>> lambdat
 
 deriving instance Decorations lore => Eq (LambdaT lore)
 
@@ -679,20 +516,6 @@ data FunDef lore = FunDef
     funDefParams :: [FParam lore],
     funDefBody :: BodyT lore
   }
-  deriving (Generic)
-
-instance Decorations lore => SexpIso (FunDef lore) where
-  sexpIso = with $ \fundef ->
-    Sexp.list
-      ( Sexp.el (Sexp.sym "fundef")
-          >>> Sexp.el sexpIso
-          >>> Sexp.el sexpIso
-          >>> Sexp.el sexpIso
-          >>> Sexp.el sexpIso
-          >>> Sexp.el sexpIso
-          >>> Sexp.el sexpIso
-      )
-      >>> fundef
 
 deriving instance Decorations lore => Eq (FunDef lore)
 
@@ -717,16 +540,7 @@ data EntryPointType
     TypeOpaque String Int
   | -- | Maps directly.
     TypeDirect
-  deriving (Eq, Show, Ord, Generic)
-
-instance SexpIso EntryPointType where
-  sexpIso =
-    match $
-      With (. Sexp.sym "unsigned") $
-        With (. Sexp.list (Sexp.el (Sexp.sym "opaque") >>> Sexp.el (iso T.unpack T.pack . sexpIso) >>> Sexp.el sexpIso)) $
-          With
-            (. Sexp.sym "direct")
-            End
+  deriving (Eq, Show, Ord)
 
 -- | An entire Futhark program.
 data Prog lore = Prog
@@ -739,13 +553,4 @@ data Prog lore = Prog
     -- checked).
     progFuns :: [FunDef lore]
   }
-  deriving (Eq, Ord, Show, Generic)
-
-instance Decorations lore => SexpIso (Prog lore) where
-  sexpIso = with $ \prog ->
-    Sexp.list
-      ( Sexp.el (Sexp.sym "prog")
-          >>> Sexp.el sexpIso
-          >>> Sexp.rest sexpIso
-      )
-      >>> prog
+  deriving (Eq, Ord, Show)

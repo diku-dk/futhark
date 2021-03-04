@@ -20,6 +20,7 @@ where
 
 import Control.Monad.Except
 import Control.Monad.State
+import Data.Function ((&))
 import Data.List (zip4)
 import qualified Data.Map.Strict as M
 import qualified Futhark.IR as AST
@@ -196,13 +197,12 @@ transformSOAC pat (Screma w form@(ScremaForm scans reds map_lam) arrs) = do
     (++ patternNames pat)
       <$> replicateM (length scanacc_params) (newVName "discard")
   letBindNames names $ DoLoop [] merge loopform loop_body
-transformSOAC pat (Stream w stream_form lam arrs) = do
+transformSOAC pat (Stream w _ lam nes arrs) = do
   -- Create a loop that repeatedly applies the lambda body to a
   -- chunksize of 1.  Hopefully this will lead to this outer loop
   -- being the only one, as all the innermost one can be simplified
   -- array (as they will have one iteration each).
-  let nes = getStreamAccums stream_form
-      (chunk_size_param, fold_params, chunk_params) =
+  let (chunk_size_param, fold_params, chunk_params) =
         partitionChunkedFoldParameters (length nes) $ lambdaParams lam
 
   mapout_merge <- forM (drop (length nes) $ lambdaReturnType lam) $ \t ->
@@ -255,11 +255,11 @@ transformSOAC pat (Stream w stream_form lam arrs) = do
 transformSOAC pat (Scatter len lam ivs as) = do
   iter <- newVName "write_iter"
 
-  let (_as_ws, as_ns, as_vs) = unzip3 as
+  let (as_ws, as_ns, as_vs) = unzip3 as
   ts <- mapM lookupType as_vs
   asOuts <- mapM (newIdent "write_out") ts
 
-  let ivsLen = length (lambdaReturnType lam) `div` 2
+  let ivsLen = zipWith (*) as_ns $ map length as_ws
 
   -- Scatter is in-place, so we use the input array as the output array.
   let merge = loopMerge asOuts $ map Var as_vs
@@ -274,12 +274,15 @@ transformSOAC pat (Scatter len lam ivs as) = do
           letSubExp "write_iv" $ BasicOp $ Index iv $ fullSlice iv_t [DimFix $ Var iter]
         ivs'' <- bindLambda lam (map (BasicOp . SubExp) ivs')
 
-        let indexes = chunks as_ns $ take ivsLen ivs''
-            values = chunks as_ns $ drop ivsLen ivs''
+        let indexes =
+              take (sum ivsLen) ivs''
+                & chunks (concat $ zipWith (\ws n -> replicate n (length ws)) as_ws as_ns)
+                & chunks as_ns
+            values = chunks as_ns $ drop (sum ivsLen) ivs''
 
         ress <- forM (zip3 indexes values (map identName asOuts)) $ \(indexes', values', arr) -> do
           let saveInArray arr' (indexCur, valueCur) =
-                letExp "write_out" =<< eWriteArray arr' [eSubExp indexCur] (eSubExp valueCur)
+                letExp "write_out" =<< eWriteArray arr' (map eSubExp indexCur) (eSubExp valueCur)
 
           foldM saveInArray arr $ zip indexes' values'
         return $ resultBody (map Var ress)

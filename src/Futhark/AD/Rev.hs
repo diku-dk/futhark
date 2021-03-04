@@ -232,15 +232,9 @@ diffBasicOp pat aux e m =
     --
     ConvOp op x -> do
       (_pat_v, pat_adj) <- commonBasicOp pat aux e m
-
-      case op of
-        FPConv from_t to_t -> do
-          contrib <-
-            letExp "contrib" $
-              BasicOp $ ConvOp (FPConv to_t from_t) $ Var pat_adj
-          void $ updateAdjoint x contrib
-        _ ->
-          pure ()
+      contrib <-
+        letExp "contrib" $ BasicOp $ ConvOp (flipConvOp op) $ Var pat_adj
+      void $ updateAdjoint x contrib
     --
     UnOp op x -> do
       (_pat_v, pat_adj) <- commonBasicOp pat aux e m

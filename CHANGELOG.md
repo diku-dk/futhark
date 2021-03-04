@@ -5,7 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
-## [0.19.0]
+## [0.20.0]
+
+### Added
+
+### Removed
+
+### Changed
+
+### Fixed
+
+  * Type-checking of higher-order functions that take consuming
+    funtional arguments.
+
+## [0.19.1]
 
 ### Added
 
@@ -17,7 +30,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Support for 64-bit atomics on CUDA and OpenCL for higher
     performance with `reduce_by_index` in particular.
-    Double-precision float atomics are still not used.
+    Double-precision float atomics are used on CUDA.
 
   * New functions: `f32.recip` and `f64.recip` for multiplicative inverses.
 
@@ -25,9 +38,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
     also accept `--tuning` and `--size` options (although there are
     not yet any tunable sizes).
 
-### Removed
+  * New functions: `scatter_2d` and `scatter_3d` for scattering to
+    multi-dimensional arrays (#1258).
 
-### Changed
+### Removed
 
   * The math modules no longer define the name `negate` (use `neg`
     instead).
@@ -56,6 +70,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Partial application of operators with parameters used in a
     size-dependent way now works (#1256).
+
+  * An issue regarding abstract size-lifted sum types (#1260).
 
 ## [0.18.6]
 
