@@ -42,3 +42,4 @@ core.*
 # Ignore directories often created by testing
 data/
 lib/
+testparser/

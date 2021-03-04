@@ -1,4 +1,3 @@
-{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE UndecidableInstances #-}
@@ -52,19 +51,12 @@ import Futhark.IR.Prop.Scope
 import Futhark.IR.Syntax
 import Futhark.IR.Traversals
 import Futhark.Util.Pretty
-import GHC.Generics
-import Language.SexpGrammar as Sexp
-import Language.SexpGrammar.Generic
 import Prelude hiding (id, (.))
 
 -- | A set of names.  Note that the 'Ord' instance is a dummy that
 -- treats everything as 'EQ' if '==', and otherwise 'LT'.
 newtype Names = Names (IM.IntMap VName)
-  deriving (Eq, Show, Generic)
-
-instance SexpIso Names where
-  sexpIso = with $ \names ->
-    (iso IM.fromList IM.toList . sexpIso) >>> names
+  deriving (Eq, Show)
 
 -- | Retrieve the data structure underlying the names representation.
 namesIntMap :: Names -> IM.IntMap VName

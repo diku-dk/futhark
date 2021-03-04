@@ -1,4 +1,3 @@
-{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE OverloadedStrings #-}
@@ -44,19 +43,14 @@ import qualified Futhark.IR.Aliases as Aliases
 import Futhark.IR.Prop.Aliases
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
-import GHC.Generics (Generic)
-import Language.SexpGrammar as Sexp hiding (cons)
-import Language.SexpGrammar.Generic
+import Futhark.Util.Pretty
 import Prelude hiding (id, (.))
 
 data Wise lore
 
 -- | The wisdom of the let-bound variable.
 newtype VarWisdom = VarWisdom {varWisdomAliases :: VarAliases}
-  deriving (Eq, Ord, Show, Generic)
-
-instance SexpIso VarWisdom where
-  sexpIso = with $ \varwisdom -> sexpIso >>> varwisdom
+  deriving (Eq, Ord, Show)
 
 instance Rename VarWisdom where
   rename = substituteRename
@@ -73,15 +67,7 @@ data ExpWisdom = ExpWisdom
   { _expWisdomConsumed :: ConsumedInExp,
     expWisdomFree :: AliasDec
   }
-  deriving (Eq, Ord, Show, Generic)
-
-instance SexpIso ExpWisdom where
-  sexpIso = with $ \expwisdom ->
-    Sexp.list
-      ( Sexp.el sexpIso
-          >>> Sexp.el sexpIso
-      )
-      >>> expwisdom
+  deriving (Eq, Ord, Show)
 
 instance FreeIn ExpWisdom where
   freeIn' = mempty
@@ -104,14 +90,7 @@ data BodyWisdom = BodyWisdom
     bodyWisdomConsumed :: ConsumedInExp,
     bodyWisdomFree :: AliasDec
   }
-  deriving (Eq, Ord, Show, Generic)
-
-instance SexpIso BodyWisdom where
-  sexpIso = with $ \bodywisdom ->
-    Sexp.list
-      ( Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso
-      )
-      >>> bodywisdom
+  deriving (Eq, Ord, Show)
 
 instance Rename BodyWisdom where
   rename = substituteRename
@@ -157,8 +136,8 @@ instance (ASTLore lore, CanBeWise (Op lore)) => ASTLore (Wise lore) where
   expTypesFromPattern =
     withoutWisdom . expTypesFromPattern . removePatternWisdom
 
-instance PrettyAnnot (PatElemT dec) => PrettyAnnot (PatElemT (VarWisdom, dec)) where
-  ppAnnot = ppAnnot . fmap snd
+instance Pretty VarWisdom where
+  ppr _ = ppr ()
 
 instance (PrettyLore lore, CanBeWise (Op lore)) => PrettyLore (Wise lore) where
   ppExpLore (_, dec) = ppExpLore dec . removeExpWisdom

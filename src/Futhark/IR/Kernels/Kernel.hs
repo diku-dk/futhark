@@ -1,5 +1,4 @@
 {-# LANGUAGE ConstraintKinds #-}
-{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
@@ -25,7 +24,6 @@ module Futhark.IR.Kernels.Kernel
   )
 where
 
-import Control.Category
 import Futhark.Analysis.Metrics
 import qualified Futhark.Analysis.SymbolTable as ST
 import Futhark.IR
@@ -44,12 +42,8 @@ import Futhark.Util.Pretty
     ppr,
     text,
     (<+>),
-    (</>),
   )
 import qualified Futhark.Util.Pretty as PP
-import GHC.Generics (Generic)
-import Language.SexpGrammar as Sexp
-import Language.SexpGrammar.Generic
 import Prelude hiding (id, (.))
 
 -- | At which level the *body* of a t'SegOp' executes.
@@ -64,32 +58,23 @@ data SegLevel
         segGroupSize :: Count GroupSize SubExp,
         segVirt :: SegVirt
       }
-  deriving (Eq, Ord, Show, Generic)
-
-instance SexpIso SegLevel where
-  sexpIso =
-    match $
-      With (. Sexp.list (Sexp.el (Sexp.sym "thread") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
-        With
-          (. Sexp.list (Sexp.el (Sexp.sym "group") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso))
-          End
+  deriving (Eq, Ord, Show)
 
 instance PP.Pretty SegLevel where
   ppr lvl =
-    lvl'
-      </> PP.parens
-        ( text "#groups=" <> ppr (segNumGroups lvl) <> PP.semi
-            <+> text "groupsize="
-            <> ppr (segGroupSize lvl)
-            <> case segVirt lvl of
-              SegNoVirt -> mempty
-              SegNoVirtFull -> PP.semi <+> text "full"
-              SegVirt -> PP.semi <+> text "virtualise"
-        )
+    PP.parens
+      ( lvl' <> PP.semi
+          <+> text "#groups=" <> ppr (segNumGroups lvl) <> PP.semi
+          <+> text "groupsize=" <> ppr (segGroupSize lvl) <> virt
+      )
     where
       lvl' = case lvl of
-        SegThread {} -> "_thread"
-        SegGroup {} -> "_group"
+        SegThread {} -> "thread"
+        SegGroup {} -> "group"
+      virt = case segVirt lvl of
+        SegNoVirt -> mempty
+        SegNoVirtFull -> PP.semi <+> text "full"
+        SegVirt -> PP.semi <+> text "virtualise"
 
 instance Engine.Simplifiable SegLevel where
   simplify (SegThread num_groups group_size virt) =
@@ -157,18 +142,7 @@ data SizeOp
     -- The @Name@ is a size name.  Note that @w@ is an i64 to avoid
     -- overflow issues.
     CalcNumGroups SubExp Name SubExp
-  deriving (Eq, Ord, Show, Generic)
-
-instance SexpIso SizeOp where
-  sexpIso =
-    match $
-      With (. Sexp.list (Sexp.el (Sexp.sym "split-space") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
-        With (. Sexp.list (Sexp.el (Sexp.sym "get-size") >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
-          With (. Sexp.list (Sexp.el (Sexp.sym "get-size-max") >>> Sexp.el sexpIso)) $
-            With (. Sexp.list (Sexp.el (Sexp.sym "cmp-size-le") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
-              With
-                (. Sexp.list (Sexp.el (Sexp.sym "calc-num-groups") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso))
-                End
+  deriving (Eq, Ord, Show)
 
 instance Substitute SizeOp where
   substituteNames subst (SplitSpace o w i elems_per_thread) =
@@ -222,19 +196,18 @@ instance FreeIn SizeOp where
   freeIn' _ = mempty
 
 instance PP.Pretty SizeOp where
-  ppr (SplitSpace o w i elems_per_thread) =
-    text "splitSpace" <> suff
+  ppr (SplitSpace SplitContiguous w i elems_per_thread) =
+    text "split_space"
       <> parens (commasep [ppr w, ppr i, ppr elems_per_thread])
-    where
-      suff = case o of
-        SplitContiguous -> mempty
-        SplitStrided stride -> text "Strided" <> parens (ppr stride)
+  ppr (SplitSpace (SplitStrided stride) w i elems_per_thread) =
+    text "split_space_strided"
+      <> parens (commasep [ppr stride, ppr w, ppr i, ppr elems_per_thread])
   ppr (GetSize name size_class) =
     text "get_size" <> parens (commasep [ppr name, ppr size_class])
   ppr (GetSizeMax size_class) =
     text "get_size_max" <> parens (commasep [ppr size_class])
   ppr (CmpSizeLe name size_class x) =
-    text "get_size" <> parens (commasep [ppr name, ppr size_class])
+    text "cmp_size" <> parens (commasep [ppr name, ppr size_class])
       <+> text "<="
       <+> ppr x
   ppr (CalcNumGroups w max_num_groups group_size) =
@@ -266,16 +239,7 @@ data HostOp lore op
     SegOp (SegOp SegLevel lore)
   | SizeOp SizeOp
   | OtherOp op
-  deriving (Eq, Ord, Show, Generic)
-
-instance (SexpIso op, Decorations lore) => SexpIso (HostOp lore op) where
-  sexpIso =
-    match $
-      With (. sexpIso) $
-        With (. sexpIso) $
-          With
-            (. sexpIso)
-            End
+  deriving (Eq, Ord, Show)
 
 instance (ASTLore lore, Substitute op) => Substitute (HostOp lore op) where
   substituteNames substs (SegOp op) =

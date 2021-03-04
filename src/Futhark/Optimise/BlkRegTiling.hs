@@ -848,7 +848,7 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
                         --y_tp  <- subExpType y_elm
                         return (y_elm, y_ind)
 
-                      let ret = WriteReturns [rz] loc_Y_nm [([DimFix res_i], res_v)]
+                      let ret = WriteReturns (Shape [rz]) loc_Y_nm [([DimFix res_i], res_v)]
                       let body = KernelBody () stms [ret]
 
                       res_nms <-

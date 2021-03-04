@@ -570,7 +570,7 @@ transformStm _ (Let pat (StmAux cs _ _) (Op (Scatter w lam ivs as))) = runBinder
           zip (chunks (concat $ zipWith (\ws n -> replicate n $ length ws) as_ws as_ns) i_res) v_res
             & chunks as_ns
             & zip3 as_ws as_vs
-        return $ WriteReturns (shapeDims a_w) a [(map DimFix is, v) | (is, v) <- is_vs]
+        return $ WriteReturns a_w a [(map DimFix is, v) | (is, v) <- is_vs]
       body = KernelBody () kstms krets
       inputs = do
         (p, p_a) <- zip (lambdaParams lam') ivs
