@@ -1,6 +1,5 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE RankNTypes #-}
-{-# LANGUAGE TypeApplications #-}
 
 -- | Futhark Compiler Driver
 module Futhark.CLI.Dev (main) where
@@ -8,7 +7,6 @@ module Futhark.CLI.Dev (main) where
 import Control.Category (id)
 import Control.Monad
 import Control.Monad.State
-import qualified Data.ByteString.Lazy as ByteString
 import Data.List (intersperse)
 import Data.Maybe
 import qualified Data.Text as T
@@ -54,7 +52,6 @@ import Futhark.Util.Options
 import qualified Futhark.Util.Pretty as PP
 import Language.Futhark.Core (nameFromString)
 import Language.Futhark.Parser (parseFuthark)
-import qualified Language.SexpGrammar as Sexp
 import System.Exit
 import System.FilePath
 import System.IO
@@ -460,11 +457,6 @@ commandLineOptions =
       "Print AST metrics of the resulting internal representation on standard output.",
     Option
       []
-      ["sexp"]
-      (NoArg $ Right $ \opts -> opts {futharkAction = PolyAction sexpAction})
-      "Print the resulting IR as S-expressions to standard output.",
-    Option
-      []
       ["defunctorise"]
       (NoArg $ Right $ \opts -> opts {futharkPipeline = Defunctorise})
       "Partially evaluate all module constructs and print the residual program.",
@@ -657,27 +649,7 @@ main = mainWithOptions newConfig commandLineOptions "options... program" compile
                   (".fut_kernels", readCore parseKernels Kernels),
                   (".fut_kernels_mem", readCore parseKernelsMem KernelsMem),
                   (".fut_mc", readCore parseMC MC),
-                  (".fut_mc_mem", readCore parseMCMem MCMem),
-                  ( ".sexp",
-                    do
-                      input <- liftIO $ ByteString.readFile file
-                      prog <- case Sexp.decode @(Prog SOACS.SOACS) input of
-                        Right prog' -> return $ SOACS prog'
-                        Left _ ->
-                          case Sexp.decode @(Prog Kernels.Kernels) input of
-                            Right prog' -> return $ Kernels prog'
-                            Left _ ->
-                              case Sexp.decode @(Prog Seq.Seq) input of
-                                Right prog' -> return $ Seq prog'
-                                Left _ ->
-                                  case Sexp.decode @(Prog KernelsMem.KernelsMem) input of
-                                    Right prog' -> return $ KernelsMem prog'
-                                    Left _ ->
-                                      case Sexp.decode @(Prog SeqMem.SeqMem) input of
-                                        Right prog' -> return $ SeqMem prog'
-                                        Left e -> externalErrorS $ "Couldn't parse sexp input: " ++ show e
-                      runPolyPasses config base prog
-                  )
+                  (".fut_mc_mem", readCore parseMCMem MCMem)
                 ]
           case lookup ext handlers of
             Just handler -> handler

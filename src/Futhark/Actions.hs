@@ -13,13 +13,11 @@ module Futhark.Actions
     compileOpenCLAction,
     compileCUDAAction,
     compileMulticoreAction,
-    sexpAction,
   )
 where
 
 import Control.Monad
 import Control.Monad.IO.Class
-import qualified Data.ByteString.Lazy.Char8 as ByteString
 import Data.Maybe (fromMaybe)
 import Futhark.Analysis.Alias
 import Futhark.Analysis.Metrics
@@ -37,7 +35,6 @@ import Futhark.IR.MCMem (MCMem)
 import Futhark.IR.Prop.Aliases
 import Futhark.IR.SeqMem (SeqMem)
 import Futhark.Util (runProgramWithExitCode, unixEnvironment)
-import Language.SexpGrammar as Sexp
 import System.Exit
 import System.FilePath
 import qualified System.Info
@@ -95,28 +92,6 @@ multicoreImpCodeGenAction =
       actionDescription = "Translate program into imperative multicore IL and write it on standard output.",
       actionProcedure = liftIO . putStrLn . pretty . snd <=< ImpGenMulticore.compileProg
     }
-
--- | Print metrics about AST node counts to stdout.
-sexpAction :: ASTLore lore => Action lore
-sexpAction =
-  Action
-    { actionName = "Print sexps",
-      actionDescription = "Print sexps on the final IR.",
-      actionProcedure = liftIO . helper
-    }
-  where
-    helper :: ASTLore lore => Prog lore -> IO ()
-    helper prog =
-      case encodePretty prog of
-        Right prog' -> do
-          ByteString.putStrLn prog'
-          let prog'' = decode prog'
-          unless (prog'' == Right prog) $
-            error $
-              "S-exp not isomorph!\n"
-                ++ either show pretty prog''
-        Left s ->
-          error $ "Couldn't encode program: " ++ s
 
 cmdCC :: String
 cmdCC = fromMaybe "cc" $ lookup "CC" unixEnvironment

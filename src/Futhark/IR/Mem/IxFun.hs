@@ -1,4 +1,3 @@
-{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# OPTIONS_GHC -fno-warn-redundant-constraints #-}
 
@@ -62,9 +61,6 @@ import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
 import Futhark.Util.IntegralExp
 import Futhark.Util.Pretty
-import GHC.Generics (Generic)
-import Language.SexpGrammar as Sexp
-import Language.SexpGrammar.Generic
 import Prelude hiding (id, mod, (.))
 
 type Shape num = [num]
@@ -78,16 +74,7 @@ data Monotonicity
   | Dec
   | -- | monotonously increasing, decreasing or unknown
     Unknown
-  deriving (Show, Eq, Generic)
-
-instance SexpIso Monotonicity where
-  sexpIso =
-    match $
-      With (. Sexp.sym "inc") $
-        With (. Sexp.sym "dec") $
-          With
-            (. Sexp.sym "unknown")
-            End
+  deriving (Show, Eq)
 
 data LMADDim num = LMADDim
   { ldStride :: num,
@@ -96,19 +83,7 @@ data LMADDim num = LMADDim
     ldPerm :: Int,
     ldMon :: Monotonicity
   }
-  deriving (Show, Eq, Generic)
-
-instance SexpIso num => SexpIso (LMADDim num) where
-  sexpIso = with $ \lmaddim ->
-    Sexp.list
-      ( Sexp.el (Sexp.sym "dim")
-          >>> Sexp.el sexpIso
-          >>> Sexp.el sexpIso
-          >>> Sexp.el sexpIso
-          >>> Sexp.el sexpIso
-          >>> Sexp.el sexpIso
-      )
-      >>> lmaddim
+  deriving (Show, Eq)
 
 -- | LMAD's representation consists of a general offset and for each dimension a
 -- stride, rotate factor, number of elements (or shape), permutation, and
@@ -140,16 +115,7 @@ data LMAD num = LMAD
   { lmadOffset :: num,
     lmadDims :: [LMADDim num]
   }
-  deriving (Show, Eq, Generic)
-
-instance SexpIso num => SexpIso (LMAD num) where
-  sexpIso = with $ \lmad ->
-    Sexp.list
-      ( Sexp.el (Sexp.sym "lmad")
-          >>> Sexp.el sexpIso
-          >>> Sexp.rest sexpIso
-      )
-      >>> lmad
+  deriving (Show, Eq)
 
 -- | An index function is a mapping from a multidimensional array
 -- index space (the domain) to a one-dimensional memory index space.
@@ -165,17 +131,7 @@ data IxFun num = IxFun
     -- | ignoring permutations, is the index function contiguous?
     ixfunContig :: Bool
   }
-  deriving (Show, Eq, Generic)
-
-instance SexpIso num => SexpIso (IxFun num) where
-  sexpIso = with $ \ixfun ->
-    Sexp.list
-      ( Sexp.el (Sexp.sym "ixfun")
-          >>> Sexp.el sexpIso
-          >>> Sexp.el sexpIso
-          >>> Sexp.el sexpIso
-      )
-      >>> ixfun
+  deriving (Show, Eq)
 
 instance Pretty Monotonicity where
   ppr = text . show
