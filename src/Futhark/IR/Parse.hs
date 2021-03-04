@@ -477,9 +477,7 @@ pEntry = parens $ (,) <$> pEntryPointTypes <* pComma <*> pEntryPointTypes
       choice
         [ "direct" $> TypeDirect,
           "unsigned" $> TypeUnsigned,
-          "opaque"
-            *> parens (TypeOpaque . nameToString <$> pName <* pComma)
-            <*> pInt
+          "opaque" *> parens (TypeOpaque <$> pStringLiteral <* pComma <*> pInt)
         ]
 
 pFunDef :: PR lore -> Parser (FunDef lore)
