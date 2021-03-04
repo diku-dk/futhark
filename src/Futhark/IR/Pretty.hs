@@ -1,5 +1,6 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 
@@ -274,18 +275,25 @@ instance PrettyLore lore => Pretty (Lambda lore) where
       <+/> align (parens (commasep (map ppr params)))
       <+> text "=>" </> indent 2 (ppr body)
 
+instance Pretty EntryPointType where
+  ppr TypeDirect = "direct"
+  ppr TypeUnsigned = "unsigned"
+  ppr (TypeOpaque desc n) = "opaque" <> apply [ppr desc, ppr n]
+
 instance PrettyLore lore => Pretty (FunDef lore) where
   ppr (FunDef entry attrs name rettype fparams body) =
     annot (attrAnnots attrs) $
-      text fun <+> text (nameToString name)
+      fun <+> text (nameToString name)
         <+> apply (map ppr fparams)
         </> indent 2 (colon <+> align (ppTuple' rettype))
         <+> equals
         <+> nestedBlock "{" "}" (ppr body)
     where
-      fun
-        | isJust entry = "entry"
-        | otherwise = "fun"
+      fun = case entry of
+        Nothing -> "fun"
+        Just (p_entry, ret_entry) ->
+          "entry"
+            <> nestedBlock "(" ")" (ppTuple' p_entry <> comma </> ppTuple' ret_entry)
 
 instance PrettyLore lore => Pretty (Prog lore) where
   ppr (Prog consts funs) =
