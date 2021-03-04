@@ -25,6 +25,63 @@ import Futhark.IR.SOACS
 import Futhark.Transform.Rename
 import Futhark.Util (takeLast)
 
+--- First some general utility functions that are not specific to AD.
+
+eReverse :: MonadBinder m => VName -> m VName
+eReverse arr = do
+  arr_t <- lookupType arr
+  let w = arraySize 0 arr_t
+  start <-
+    letSubExp "rev_start" $
+      BasicOp $ BinOp (Sub Int64 OverflowUndef) w (intConst Int64 1)
+  let stride = intConst Int64 (-1)
+      slice = fullSlice arr_t [DimSlice start w stride]
+  letExp (baseString arr <> "_rev") $ BasicOp $ Index arr slice
+
+eRotate :: MonadBinder m => [SubExp] -> VName -> m VName
+eRotate rots arr = letExp (baseString arr <> "_rot") $ BasicOp $ Rotate rots arr
+
+scanExc ::
+  (MonadBinder m, Lore m ~ SOACS) =>
+  String ->
+  Scan SOACS ->
+  [VName] ->
+  m [VName]
+scanExc desc scan arrs = do
+  w <- arraysSize 0 <$> mapM lookupType arrs
+  form <- scanSOAC [scan]
+  res_incl <- letTupExp (desc <> "_incl") $ Op $ Screma w form arrs
+  res_incl_rot <- mapM (eRotate [intConst Int64 (-1)]) res_incl
+
+  iota <-
+    letExp "iota" . BasicOp $
+      Iota w (intConst Int64 0) (intConst Int64 1) Int64
+
+  iparam <- newParam "iota_param" $ Prim int64
+  vparams <- mapM (newParam "vp") ts
+  let params = iparam : vparams
+
+  body <- runBodyBinder . localScope (scopeOfLParams params) $ do
+    let first_elem =
+          eCmpOp
+            (CmpEq int64)
+            (eSubExp (Var (paramName iparam)))
+            (eSubExp (intConst Int64 0))
+    eBody
+      [ eIf
+          first_elem
+          (resultBodyM nes)
+          (resultBodyM $ map (Var . paramName) vparams)
+      ]
+
+  let lam = Lambda params body ts
+  letTupExp desc $ Op $ Screma w (mapSOAC lam) (iota : res_incl_rot)
+  where
+    nes = scanNeutral scan
+    ts = lambdaReturnType $ scanLambda scan
+
+--- Now comes the AD.
+
 data RState = RState
   { stateAdjs :: M.Map VName VName,
     stateNameSource :: VNameSource
@@ -353,6 +410,57 @@ diffBasicOp pat aux e m =
     UnAcc {} -> error "Reverse-mode UnAcc not handled yet."
     UpdateAcc {} -> error "Reverse-mode UpdateAcc not handled yet."
 
+diffSOAC :: Pattern -> StmAux () -> SOAC SOACS -> ADM () -> ADM ()
+diffSOAC pat aux soac@(Screma w form as) m
+  | Just red <- singleReduce <$> isReduceSOAC form = do
+    addStm $ Let pat aux $ Op soac
+    m
+    pat_adj <- mapM lookupAdj $ patternNames pat
+    red' <- renameRed red
+    flip_red <- renameRed =<< flipReduce red
+    ls <- scanExc "ls" (redToScan red') as
+    rs <-
+      mapM eReverse
+        =<< scanExc "ls" (redToScan flip_red)
+        =<< mapM eReverse as
+
+    (as_params, f) <- mkF $ redLambda red
+
+    f_adj <- diffLambda pat_adj as_params f
+
+    as_adj <- letTupExp "adjs" $ Op $ Screma w (mapSOAC f_adj) $ ls ++ as ++ rs
+
+    zipWithM_ updateAdjoint as as_adj
+  where
+    renameRed (Reduce comm lam nes) =
+      Reduce comm <$> renameLambda lam <*> pure nes
+
+    redToScan :: Reduce SOACS -> Scan SOACS
+    redToScan (Reduce _ lam nes) = Scan lam nes
+    flipReduce (Reduce comm lam nes) = do
+      lam' <- renameLambda lam {lambdaParams = flipParams $ lambdaParams lam}
+      pure $ Reduce comm lam' nes
+    flipParams ps = uncurry (flip (++)) $ splitAt (length ps `div` 2) ps
+
+    mkF lam = do
+      lam_l <- renameLambda lam
+      lam_r <- renameLambda lam
+      let n = length $ lambdaReturnType lam
+          (lps, aps) = splitAt n $ lambdaParams lam_l
+          (ips, rps) = splitAt n $ lambdaParams lam_r
+      body <- runBodyBinder $
+        localScope (scopeOfLParams $ lps <> aps <> rps) $ do
+          lam_l_res <- bodyBind $ lambdaBody lam_l
+          forM_ (zip ips lam_l_res) $ \(ip, se) ->
+            letBindNames [paramName ip] $ BasicOp $ SubExp se
+          pure $ lambdaBody lam_r
+      pure
+        ( map paramName aps,
+          Lambda (lps <> aps <> rps) body $ lambdaReturnType lam
+        )
+diffSOAC _ _ soac _ =
+  error $ "diffSOAC unhandled:\n" ++ pretty soac
+
 diffStm :: Stm -> ADM () -> ADM ()
 diffStm (Let pat aux (BasicOp e)) m =
   diffBasicOp pat aux e m
@@ -393,6 +501,8 @@ diffStm stm@(Let pat _ (If cond tbody fbody _)) m = do
         (diffBody adjs branches_free fbody)
 
   zipWithM_ updateAdjoint branches_free contribs
+diffStm (Let pat aux (Op soac)) m =
+  diffSOAC pat aux soac m
 diffStm stm _ = error $ "diffStm unhandled:\n" ++ pretty stm
 
 diffStms :: Stms SOACS -> ADM ()
@@ -419,6 +529,14 @@ diffBody res_adjs get_adjs_for (Body () stms res) = subAD $ do
     diffStms stms
     mapM lookupAdj get_adjs_for
   pure $ Body () stms' $ res <> map Var adjs
+
+diffLambda :: [VName] -> [VName] -> Lambda -> ADM Lambda
+diffLambda res_adjs get_adjs_for (Lambda params body _) =
+  localScope (scopeOfLParams params) $ do
+    Body () stms res <- diffBody res_adjs get_adjs_for body
+    let body' = Body () stms $ takeLast (length get_adjs_for) res
+    ts' <- mapM lookupType get_adjs_for
+    pure $ Lambda params body' ts'
 
 revVJP :: MonadFreshNames m => Scope SOACS -> Lambda -> m Lambda
 revVJP scope (Lambda params body ts) =
