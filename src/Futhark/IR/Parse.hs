@@ -469,10 +469,27 @@ pBody pr =
   where
     pResult = braces $ pSubExp `sepBy` pComma
 
+pEntry :: Parser EntryPoint
+pEntry = parens $ (,) <$> pEntryPointTypes <* pComma <*> pEntryPointTypes
+  where
+    pEntryPointTypes = braces (pEntryPointType `sepBy` pComma)
+    pEntryPointType =
+      choice
+        [ "direct" $> TypeDirect,
+          "unsigned" $> TypeUnsigned,
+          "opaque"
+            *> parens (TypeOpaque . nameToString <$> pName <* pComma)
+            <*> pInt
+        ]
+
 pFunDef :: PR lore -> Parser (FunDef lore)
 pFunDef pr = do
   attrs <- pAttrs
-  entry <- (keyword "entry" <|> keyword "fun") $> Nothing
+  entry <-
+    choice
+      [ keyword "entry" $> Just <*> pEntry,
+        keyword "fun" $> Nothing
+      ]
   fname <- pName
   fparams <- pFParams pr <* pColon
   ret <- pRetTypes pr
