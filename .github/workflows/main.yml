@@ -370,6 +370,9 @@ jobs:
         echo "$HOME/.local/bin" >> $GITHUB_PATH
 
     - run: |
+        tools/testparser.sh tests
+
+    - run: |
         cd pkgtests && sh test.sh
 
     - run: |

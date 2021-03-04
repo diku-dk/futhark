@@ -1,6 +1,5 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE RankNTypes #-}
-{-# LANGUAGE TypeApplications #-}
 
 -- | Futhark Compiler Driver
 module Futhark.CLI.Dev (main) where
@@ -8,9 +7,9 @@ module Futhark.CLI.Dev (main) where
 import Control.Category (id)
 import Control.Monad
 import Control.Monad.State
-import qualified Data.ByteString.Lazy as ByteString
 import Data.List (intersperse)
 import Data.Maybe
+import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import Futhark.Actions
 import Futhark.Analysis.Metrics (OpMetrics)
@@ -20,6 +19,7 @@ import qualified Futhark.IR.Kernels as Kernels
 import qualified Futhark.IR.KernelsMem as KernelsMem
 import qualified Futhark.IR.MC as MC
 import qualified Futhark.IR.MCMem as MCMem
+import Futhark.IR.Parse
 import Futhark.IR.Prop.Aliases (CanBeAliased)
 import qualified Futhark.IR.SOACS as SOACS
 import qualified Futhark.IR.Seq as Seq
@@ -52,7 +52,6 @@ import Futhark.Util.Options
 import qualified Futhark.Util.Pretty as PP
 import Language.Futhark.Core (nameFromString)
 import Language.Futhark.Parser (parseFuthark)
-import qualified Language.SexpGrammar as Sexp
 import System.Exit
 import System.FilePath
 import System.IO
@@ -445,17 +444,17 @@ commandLineOptions =
       "p"
       ["print"]
       (NoArg $ Right $ \opts -> opts {futharkAction = PolyAction printAction})
-      "Prettyprint the resulting internal representation on standard output (default action).",
+      "Print the resulting IR (default action).",
+    Option
+      []
+      ["print-aliases"]
+      (NoArg $ Right $ \opts -> opts {futharkAction = PolyAction printAliasesAction})
+      "Print the resulting IR with aliases.",
     Option
       "m"
       ["metrics"]
       (NoArg $ Right $ \opts -> opts {futharkAction = PolyAction metricsAction})
       "Print AST metrics of the resulting internal representation on standard output.",
-    Option
-      []
-      ["sexp"]
-      (NoArg $ Right $ \opts -> opts {futharkAction = PolyAction sexpAction})
-      "Print the resulting IR as S-expressions to standard output.",
     Option
       []
       ["defunctorise"]
@@ -631,31 +630,37 @@ main = mainWithOptions newConfig commandLineOptions "options... program" compile
                   >>= Monomorphise.transformProg
                   >>= LiftLambdas.transformProg
                   >>= Defunctionalise.transformProg
-        Pipeline {} ->
-          case splitExtensions file of
-            (base, ".fut") -> do
-              prog <- runPipelineOnProgram (futharkConfig config) id file
-              runPolyPasses config base (SOACS prog)
-            (base, ".sexp") -> do
-              input <- liftIO $ ByteString.readFile file
-              prog <- case Sexp.decode @(Prog SOACS.SOACS) input of
-                Right prog' -> return $ SOACS prog'
-                Left _ ->
-                  case Sexp.decode @(Prog Kernels.Kernels) input of
-                    Right prog' -> return $ Kernels prog'
-                    Left _ ->
-                      case Sexp.decode @(Prog Seq.Seq) input of
-                        Right prog' -> return $ Seq prog'
-                        Left _ ->
-                          case Sexp.decode @(Prog KernelsMem.KernelsMem) input of
-                            Right prog' -> return $ KernelsMem prog'
-                            Left _ ->
-                              case Sexp.decode @(Prog SeqMem.SeqMem) input of
-                                Right prog' -> return $ SeqMem prog'
-                                Left e -> externalErrorS $ "Couldn't parse sexp input: " ++ show e
-              runPolyPasses config base prog
-            (_, ext) ->
-              externalErrorS $ unwords ["Unsupported extension", show ext, ". Supported extensions: sexp, fut"]
+        Pipeline {} -> do
+          let (base, ext) = splitExtension file
+
+              readCore parse construct = do
+                input <- liftIO $ T.readFile file
+                case parse file input of
+                  Left err -> externalErrorS $ T.unpack err
+                  Right prog -> runPolyPasses config base $ construct prog
+
+              handlers =
+                [ ( ".fut",
+                    do
+                      prog <- runPipelineOnProgram (futharkConfig config) id file
+                      runPolyPasses config base (SOACS prog)
+                  ),
+                  (".fut_soacs", readCore parseSOACS SOACS),
+                  (".fut_kernels", readCore parseKernels Kernels),
+                  (".fut_kernels_mem", readCore parseKernelsMem KernelsMem),
+                  (".fut_mc", readCore parseMC MC),
+                  (".fut_mc_mem", readCore parseMCMem MCMem)
+                ]
+          case lookup ext handlers of
+            Just handler -> handler
+            Nothing ->
+              externalErrorS $
+                unwords
+                  [ "Unsupported extension",
+                    show ext,
+                    ". Supported extensions:",
+                    unwords $ map fst handlers
+                  ]
 
 runPolyPasses :: Config -> FilePath -> UntypedPassState -> FutharkM ()
 runPolyPasses config base initial_prog = do
