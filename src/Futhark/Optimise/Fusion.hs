@@ -797,10 +797,6 @@ fusionGatherStms fres [] res =
   foldM fusionGatherExp fres $ map (BasicOp . SubExp) res
 
 fusionGatherExp :: FusedRes -> Exp -> FusionGM FusedRes
------------------------------------------
----- Index/If    ----
------------------------------------------
-
 fusionGatherExp fres (DoLoop ctx val form loop_body) = do
   fres' <- addNamesToInfusible fres $ freeIn form <> freeIn ctx <> freeIn val
   let form_idents =
@@ -827,18 +823,14 @@ fusionGatherExp fres (If cond e_then e_else _) = do
   let both_res = then_res <> else_res
   fres' <- fusionGatherSubExp fres cond
   mergeFusionRes fres' both_res
-
------------------------------------------------------------------------------------
---- Errors: all SOACs, (because normalization ensures they appear
---- directly in let exp, i.e., let x = e)
------------------------------------------------------------------------------------
-
+--
 fusionGatherExp _ (Op Futhark.Screma {}) = errorIllegal "screma"
 fusionGatherExp _ (Op Futhark.Scatter {}) = errorIllegal "write"
------------------------------------
----- Generic Traversal         ----
------------------------------------
-
+fusionGatherExp fres (Op (Futhark.VJP lam _ _)) =
+  snd <$> fusionGatherLam (mempty, fres) lam
+fusionGatherExp fres (Op (Futhark.JVP lam _ _)) =
+  snd <$> fusionGatherLam (mempty, fres) lam
+--
 fusionGatherExp fres e = addNamesToInfusible fres $ freeIn e
 
 fusionGatherSubExp :: FusedRes -> SubExp -> FusionGM FusedRes
