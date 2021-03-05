@@ -403,8 +403,14 @@ diffBasicOp pat aux e m =
     Scratch {} ->
       void $ commonBasicOp pat aux e m
     --
-    Iota {} ->
-      void $ commonBasicOp pat aux e m
+    Iota n _ _ t -> do
+      (_pat_v, pat_adj) <- commonBasicOp pat aux e m
+      ne <- letSubExp "zero" $ zeroExp $ Prim $ IntType t
+      lam <- addLambda $ Prim $ IntType t
+      reduce <- reduceSOAC [Reduce Commutative lam [ne]]
+      void $
+        updateAdjoint n
+          =<< letExp "iota_contrib" (Op $ Screma n reduce [pat_adj])
     --
     Update {} -> error "Reverse-mode Update not handled yet."
     UnAcc {} -> error "Reverse-mode UnAcc not handled yet."
