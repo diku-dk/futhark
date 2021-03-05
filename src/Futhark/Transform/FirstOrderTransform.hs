@@ -434,7 +434,7 @@ transformSOAC pat (Stencil inputShape neighboursLen iss lam invariants variants)
              resultBody <$> loopNestBuilder g (map paramName out_pars) out_pars xs (Var i : list_of_index) (max_index : list_of_max_ix)
         pure $ DoLoop [] it_vars loop_form loop_body
       loopNestBuilder g _ out_pars [] list_of_index list_of_max_ix =
-        g out_pars list_of_index list_of_max_ix
+        g out_pars (reverse list_of_index) (reverse list_of_max_ix)
       loopNestBuilder g lname _ (alen : xs) list_of_index list_of_max_ix = do
         out_pars <- mapM (newParam "stencil_out" . flip toDecl Unique) returns_tp
         let it_vars = zip out_pars $ map Var lname

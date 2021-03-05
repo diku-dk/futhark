@@ -296,3 +296,8 @@ let stencil_1d [n][d] 'a 'b 'c (is: [d]i64) (f: c -> [d]a -> b) (cs: [n]c) (as: 
 -- indexes for the 'd'-element neighbourhood surrounding an element.
 let stencil_2d [n][d][m] 'a 'b 'c (is: [d](i64,i64)) (f: c -> [d]a -> b) (cs: [n][m]c) (as: [n][m]a) : [n][m]b =
   intrinsics.stencil_2d (is, f, cs, as)
+
+-- | A three-dimensional stencil.  The first argument is relative
+-- indexes for the 'd'-element neighbourhood surrounding an element.
+let stencil_3d [n][d][m][z] 'a 'b 'c (is: [d](i64,i64,i64)) (f: c -> [d]a -> b) (cs: [n][m][z]c) (as: [n][m][z]a) : [n][m][z]b =
+  intrinsics.stencil_3d (is, f, cs, as)
