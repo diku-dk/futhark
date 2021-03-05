@@ -1632,37 +1632,47 @@ initialCtx =
     --
     def "stencil_2d" = Just $
           TermPoly Nothing $ \t -> return $
-	    ValueFun $ \v ->
-	      case (fromTuple v, unfoldFunType t) of
-	        (Just [is, f, cs, as], ([_], ret_t))
-	          | Just row_shape <- typeRowShape ret_t,
-	            ValueArray (ShapeDim n (ShapeDim m elm_shape)) as_arr <- as,
-	            Just ixss <- mapM ((\ix -> case ix of
-	                [k,l] -> Just (k,l)
-	                _ -> Nothing
-	                ) <=< fromTuple)
-	                        $ snd $ fromArray is -> do
-	            -- We Hardcode the boundary condition to repeat edge element.
-	            let bound i = (max 0) . (min i) . (\x -> x - 1)
-	            let getElem (i,j) =
-	                    case (as_arr ! i) of
-	                        ValueArray _ row -> row ! j
-	                        _ -> error "Bad input"
-	                hood i j = toArray' elm_shape $ map getElem $
-	                            map (\(k,l) -> (fromIntegral $ bound (i + asInt64 k) n
-	                                           , fromIntegral $ bound (j + asInt64 l) m
-	                                           )
-	                                ) ixss
-	                hoods = map (\i -> map (hood i) [0 .. m - 1]) [0 .. n -1]
-	            toArray (ShapeDim n row_shape) <$> forM (zip (snd $ fromArray cs) hoods) (\(cvs, rows) ->
-	                    toArray (ShapeDim m elm_shape) <$> zipWithM (apply2 noLoc mempty f) (snd $ fromArray cvs) rows
-	                )
-	          | otherwise ->
-	            error $ "Bad return type: " ++ pretty ret_t
-	        _ ->
-	          error $
-	            "Invalid arguments to stencil_2d intrinsic:\n"
-	              ++ unlines [pretty t, pretty v]
+      ValueFun $ \v ->
+        case (fromTuple v, unfoldFunType t) of
+          (Just [is, f, cs, as], ([_], ret_t))
+            | Just row_shape <- typeRowShape ret_t,
+              ValueArray (ShapeDim n (ShapeDim m elm_shape)) as_arr <- as,
+              Just ixss <- mapM ((\ix -> case ix of
+                  [k,l] -> Just (k,l)
+                  _ -> Nothing
+                  ) <=< fromTuple)
+                          $ snd $ fromArray is -> do
+              -- We Hardcode the boundary condition to repeat edge element.
+              let bound i = (max 0) . (min i) . (\x -> x - 1)
+              let getElem (i,j) =
+                      case (as_arr ! i) of
+                          ValueArray _ row -> row ! j
+                          _ -> error "Bad input"
+                  hood i j = toArray' elm_shape $ map getElem $
+                              map (\(k,l) -> (fromIntegral $ bound (i + asInt64 k) n
+                                             , fromIntegral $ bound (j + asInt64 l) m
+                                             )
+                                  ) ixss
+                  hoods = map (\i -> map (hood i) [0 .. m - 1]) [0 .. n -1]
+              toArray (ShapeDim n row_shape) <$> forM (zip (snd $ fromArray cs) hoods) (\(cvs, rows) ->
+                      toArray (ShapeDim m elm_shape) <$> zipWithM (apply2 noLoc mempty f) (snd $ fromArray cvs) rows
+                  )
+            | otherwise ->
+              error $ "Bad return type: " ++ pretty ret_t
+          _ ->
+            error $
+              "Invalid arguments to stencil_2d intrinsic:\n"
+                ++ unlines [pretty t, pretty v]
+    --
+    def "stencil_3d" = Just $
+          TermPoly Nothing $ \t -> return $
+      ValueFun $ \v ->
+        case (fromTuple v, unfoldFunType t) of
+          (Just _, ([_], _)) ->  error $ "Undefined"
+          _ ->
+            error $
+              "Invalid arguments to stencil_2d intrinsic:\n"
+                ++ unlines [pretty t, pretty v]
     --
     def "partition" = Just $
       fun3t $ \k f xs -> do
