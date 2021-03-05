@@ -84,6 +84,7 @@ module Futhark.Construct
     foldBinOp,
     binOpLambda,
     cmpOpLambda,
+    mkLambda,
     sliceDim,
     fullSlice,
     fullSliceNum,
@@ -477,6 +478,18 @@ binLambda bop arg_t ret_t = do
         lambdaReturnType = [Prim ret_t],
         lambdaBody = body
       }
+
+-- | Easily construct a 'Lambda' within a 'MonadBinder'.
+mkLambda ::
+  MonadBinder m =>
+  [LParam (Lore m)] ->
+  [Type] ->
+  m Result ->
+  m (Lambda (Lore m))
+mkLambda params ret m = do
+  (res, stms) <- collectStms . localScope (scopeOfLParams params) $ m
+  body <- mkBodyM stms res
+  pure $ Lambda params body ret
 
 -- | Slice a full dimension of the given size.
 sliceDim :: SubExp -> DimIndex SubExp

@@ -454,16 +454,12 @@ diffSOAC pat aux soac@(Screma w form as) m
       let n = length $ lambdaReturnType lam
           (lps, aps) = splitAt n $ lambdaParams lam_l
           (ips, rps) = splitAt n $ lambdaParams lam_r
-      body <- runBodyBinder $
-        localScope (scopeOfLParams $ lps <> aps <> rps) $ do
-          lam_l_res <- bodyBind $ lambdaBody lam_l
-          forM_ (zip ips lam_l_res) $ \(ip, se) ->
-            letBindNames [paramName ip] $ BasicOp $ SubExp se
-          pure $ lambdaBody lam_r
-      pure
-        ( map paramName aps,
-          Lambda (lps <> aps <> rps) body $ lambdaReturnType lam
-        )
+      lam' <- mkLambda (lps <> aps <> rps) $ do
+        lam_l_res <- bodyBind $ lambdaBody lam_l
+        forM_ (zip ips lam_l_res) $ \(ip, se) ->
+          letBindNames [paramName ip] $ BasicOp $ SubExp se
+        bodyBind $ lambdaBody lam_r
+      pure (map paramName aps, lam')
 diffSOAC _ _ soac _ =
   error $ "diffSOAC unhandled:\n" ++ pretty soac
 
