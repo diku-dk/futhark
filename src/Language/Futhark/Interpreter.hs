@@ -1668,10 +1668,37 @@ initialCtx =
           TermPoly Nothing $ \t -> return $
       ValueFun $ \v ->
         case (fromTuple v, unfoldFunType t) of
-          (Just _, ([_], _)) ->  error $ "Undefined"
+          (Just [is, f, cs, as], ([_], ret_t))
+            | Just row_shape <- typeRowShape ret_t,
+              ValueArray (ShapeDim n (ShapeDim m (ShapeDim z elm_shape))) as_arr <- as,
+              Just ixss <- mapM ((\ix -> case ix of
+                  [k,l,h] -> Just (k,l,h)
+                  _ -> Nothing
+                  ) <=< fromTuple)
+                          $ snd $ fromArray is -> do
+              -- We Hardcode the boundary condition to repeat edge element.
+              let bound i = (max 0) . (min i) . (\x -> x - 1)
+              let getElem (i,j,k) =
+                      case (as_arr ! i) of
+                          ValueArray _ row -> case (row ! j) of 
+                                                  ValueArray _ inner_row -> inner_row ! k
+                                                  _ -> error "Bad input"
+                          _ -> error "Bad input"  
+                  hood i j u = toArray' elm_shape $ map getElem $
+                              map (\(k,l,h) -> (fromIntegral $ bound (i + asInt64 k) n
+                                             , fromIntegral $ bound (j + asInt64 l) m
+                                             , fromIntegral $ bound (u + asInt64 h) z
+                                             )
+                                  ) ixss
+                  hoods = map (\i -> map (\j -> map (hood i j) [0 .. z - 1]) [0 .. m - 1]) [0 .. n - 1] 
+              toArray (ShapeDim n (ShapeDim m row_shape)) <$> forM (zip (snd $ fromArray cs) hoods) (\(cvss, rowss) ->
+                      toArray (ShapeDim m (ShapeDim z elm_shape)) <$> forM (zip (snd $ fromArray cvss) rowss) (\(cvs,rows) ->
+                              toArray (ShapeDim z elm_shape) <$> zipWithM (apply2 noLoc mempty f) (snd $ fromArray cvs) rows))
+            | otherwise ->
+              error $ "Bad return type: " ++ pretty ret_t
           _ ->
             error $
-              "Invalid arguments to stencil_2d intrinsic:\n"
+              "Invalid arguments to stencil_3d intrinsic:\n"
                 ++ unlines [pretty t, pretty v]
     --
     def "partition" = Just $
