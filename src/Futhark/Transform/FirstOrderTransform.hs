@@ -401,7 +401,8 @@ transformSOAC pat (Stencil inputShape neighboursLen iss lam invariants variants)
                   tmp <- letwith (map paramName temp_params) (pexp (Var j)) $
                             map (BasicOp . SubExp) input_element
                   resultBodyM $ map Var tmp
-              pure $ [DoLoop [] merge_inner inner_loop_form inner_loop_body]
+              vars <- letTupExp' "vars" $ DoLoop [] merge_inner inner_loop_form inner_loop_body
+              pure $ map (BasicOp . SubExp) vars
            StencilStatic is -> do
               let ixs_len = toInteger $ length $ head is
               let ix_unroll idx temp_arr_idx write_arr = do

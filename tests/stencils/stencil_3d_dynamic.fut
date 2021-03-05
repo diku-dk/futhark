@@ -1,4 +1,4 @@
--- Testing for static stencil index in 3D
+-- Testing for dynamic stencil index in 3D
 -- ==
 --
 -- input {[[[0i64, 1i64, 2i64, 3i64],
@@ -7,6 +7,7 @@
 --         [[100i64, 101i64, 102i64, 103i64],
 --          [110i64, 111i64, 112i64, 113i64],
 --          [120i64, 121i64, 122i64, 123i64]]]
+--       [-1i64,0i64,1i64] 
 --       }
 -- output {   [[[111i64, 113i64, 116i64, 118i64],
 --              [131i64, 133i64, 136i64, 138i64],
@@ -17,6 +18,7 @@
 --        }
 
 
-let main [n][m][k] (arr : [n][m][k]i64) : [n][m][k]i64 =
+let main [n][m][k] (arr : [n][m][k]i64) (range : [3]i64) : [n][m][k]i64  =
+  let ixs = zip3 range range range
   let f _ xs = xs[0] + xs[1] + xs[2]
-  in stencil_3d [(-1,-1,-1),  (0,0,0),  (1,1,1)] f (map (map (map (const ()))) arr) arr
+  in stencil_3d ixs f (map (map (map (const ()))) arr) arr

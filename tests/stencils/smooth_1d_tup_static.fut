@@ -1,7 +1,7 @@
 -- Testing for static stencil index with tuples
 -- ==
 --
--- input { [1f32,2,3,4,5] [5f64,4,3,2,1] [1u8,2,3,4,5] } output { [24f32,33,45,57,66] }
+-- input { [1f32,2f32,3f32,4f32,5f32] [5f64,4f64,3f64,2f64,1f64] [1u8,2u8,3u8,4u8,5u8] } output { [38f32, 41f32, 45f32, 49f32, 52f32] }
 
 let smooth (xs: [](f32,f64,u8)) =
   let f () xss =
@@ -13,6 +13,6 @@ let smooth (xs: [](f32,f64,u8)) =
 
   in stencil_1d ([-2,-1,0,1,2]) f (map (const ()) xs) xs
 
-let main [n] (xs : [n]f32) (ys : [n]f64) (zs : [n]fu8) = 
+let main [n] (xs : [n]f32) (ys : [n]f64) (zs : [n]u8) = 
 	let smoothened = smooth (zip3 xs ys zs)
 	in map (\(fl, bt) -> fl + f32.u8 bt) smoothened
