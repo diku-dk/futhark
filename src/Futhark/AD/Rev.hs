@@ -861,7 +861,7 @@ revStm (Let (Pattern [] [_]) _ (BasicOp (Reshape change v))) = do
 revStm (Let (Pattern [] [pe]) _ (Op (Screma n (ScremaForm [] [] f) [xs]))) = do
   (_p, us1, s1) <- lookupAdj $ patElemName pe
   (_f, bound, fv) <- localS id $ revLambda f
-  (paramsL, paramsR) <-
+  (paramsL, paramsR) <- trace ("Cosmin map: "++ pretty _f) $
     splitAt (length (lambdaReturnType _f))
       <$> mapM (newParam "lam_adj") (lambdaReturnType _f ++ lambdaReturnType _f)
   (red_res, red_stms) <- runBinderT' $
@@ -1102,9 +1102,7 @@ revStm stm@(Let (Pattern [] [pe]) _ (Apply f args _ _))
       )
 --
 -- only single scan supported for now:  ys = scan odot xs
--- Implementation restricted to scalar operators for now, including tuples;
--- generalization should handle \bar{+} and \bar{*}
--- including for the lin_fun_comp operator
+-- Implementation "should" handle associative operators on tuples and arrays
 revStm (Let (Pattern [] pes) _ (Op (Screma n (ScremaForm [scn] [] f) xs)))
   | isIdentityLambda f = do
       let ys = map patElemName pes
