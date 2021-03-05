@@ -593,18 +593,14 @@ pSOAC pr =
     pVJP =
       parens $
         SOAC.VJP
-          <$> pLambda pr
-          <* pComma
-          <*> braces (pSubExp `sepBy` pComma)
-          <* pComma
+          <$> pLambda pr <* pComma
+          <*> braces (pSubExp `sepBy` pComma) <* pComma
           <*> braces (pSubExp `sepBy` pComma)
     pJVP =
       parens $
         SOAC.JVP
-          <$> pLambda pr
-          <* pComma
-          <*> braces (pSubExp `sepBy` pComma)
-          <* pComma
+          <$> pLambda pr <* pComma
+          <*> braces (pSubExp `sepBy` pComma) <* pComma
           <*> braces (pSubExp `sepBy` pComma)
 
 pSizeClass :: Parser Kernel.SizeClass
