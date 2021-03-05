@@ -454,7 +454,7 @@ diffSOAC pat aux soac@(Screma w form as) m
       let n = length $ lambdaReturnType lam
           (lps, aps) = splitAt n $ lambdaParams lam_l
           (ips, rps) = splitAt n $ lambdaParams lam_r
-      lam' <- mkLambda (lps <> aps <> rps) $ do
+      lam' <- mkLambda (lps <> aps <> rps) (lambdaReturnType lam) $ do
         lam_l_res <- bodyBind $ lambdaBody lam_l
         forM_ (zip ips lam_l_res) $ \(ip, se) ->
           letBindNames [paramName ip] $ BasicOp $ SubExp se
