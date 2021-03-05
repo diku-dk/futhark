@@ -18,6 +18,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * Type-checking of higher-order functions that take consuming
     funtional arguments.
 
+  * Missing cases in causality checking (#1263).
+
 ## [0.19.1]
 
 ### Added
