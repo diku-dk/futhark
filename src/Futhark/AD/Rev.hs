@@ -416,12 +416,16 @@ diffBasicOp pat aux e m =
     UnAcc {} -> error "Reverse-mode UnAcc not handled yet."
     UpdateAcc {} -> error "Reverse-mode UpdateAcc not handled yet."
 
+commonSOAC :: Pattern -> StmAux () -> SOAC SOACS -> ADM () -> ADM [VName]
+commonSOAC pat aux soac m = do
+  addStm $ Let pat aux $ Op soac
+  m
+  mapM lookupAdj $ patternNames pat
+
 diffSOAC :: Pattern -> StmAux () -> SOAC SOACS -> ADM () -> ADM ()
 diffSOAC pat aux soac@(Screma w form as) m
   | Just red <- singleReduce <$> isReduceSOAC form = do
-    addStm $ Let pat aux $ Op soac
-    m
-    pat_adj <- mapM lookupAdj $ patternNames pat
+    pat_adj <- commonSOAC pat aux soac m
     red' <- renameRed red
     flip_red <- renameRed =<< flipReduce red
     ls <- scanExc "ls" (redToScan red') as
@@ -460,6 +464,27 @@ diffSOAC pat aux soac@(Screma w form as) m
           letBindNames [paramName ip] $ BasicOp $ SubExp se
         bodyBind $ lambdaBody lam_r
       pure (map paramName aps, lam')
+--
+diffSOAC pat aux soac@(Screma w form as) m
+  | Just lam <- isMapSOAC form = do
+    pat_adj <- commonSOAC pat aux soac m
+
+    pat_adj_params <-
+      mapM (newParam "map_adj_p" . rowType <=< lookupType) pat_adj
+    lam' <- renameLambda lam
+
+    let adjs_for = map paramName $ lambdaParams lam'
+        lam_rev_params = lambdaParams lam' ++ pat_adj_params
+        lam_rev_ret = map paramType (lambdaParams lam')
+    lam_rev <-
+      mkLambda lam_rev_params lam_rev_ret $
+        bodyBind . lambdaBody
+          =<< diffLambda (map paramName pat_adj_params) adjs_for lam'
+
+    contribs <-
+      letTupExp "map_adjs" $ Op $ Screma w (mapSOAC lam_rev) $ as ++ pat_adj
+    zipWithM_ updateAdjoint as contribs
+--
 diffSOAC _ _ soac _ =
   error $ "diffSOAC unhandled:\n" ++ pretty soac
 
