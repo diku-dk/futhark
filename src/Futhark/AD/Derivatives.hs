@@ -23,8 +23,6 @@ fConst ft x = ValueExp $ FloatValue $ floatValue ft x
 untyped2 :: (TPrimExp t v, TPrimExp t v) -> (PrimExp v, PrimExp v)
 untyped2 = bimap untyped untyped
 
-type OnUnOp t v = TPrimExp t v -> TPrimExp t v
-
 pdUnOp :: UnOp -> PrimExp VName -> PrimExp VName
 pdUnOp (Abs it) a = UnOpExp (SSignum it) a
 pdUnOp (FAbs ft) a = UnOpExp (FSignum ft) a
@@ -85,6 +83,7 @@ pdBinOp (FMin ft) a b =
   floatBinOp derivs derivs ft a b
   where
     derivs x y = (fromBoolExp (x .<. y), fromBoolExp (x .>. y))
+pdBinOp LogAnd a b = (b,a)
 pdBinOp op _ _ = error $ "pdBinOp: missing case: " ++ pretty op
 
 -- | @pdBuiltin f args i@ computes the partial derivative of @f@
