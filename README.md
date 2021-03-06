@@ -13,6 +13,8 @@ stable and suitable for practical programming.
 
 For more information, see:
 
+* [A collection of code examples](https://futhark-lang.org/examples.html)
+
 * [Installation instructions](http://futhark.readthedocs.io/en/latest/installation.html)
 
 * [The main website](http://futhark-lang.org)
