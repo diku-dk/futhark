@@ -23,6 +23,7 @@ module Futhark.Util
     splitFromEnd,
     splitAt3,
     focusNth,
+    hashIntText,
     unixEnvironment,
     isEnvVarSet,
     isEnvVarAtLeast,
@@ -70,6 +71,7 @@ import qualified System.FilePath.Posix as Posix
 import System.IO (hIsTerminalDevice, stdout)
 import System.IO.Unsafe
 import System.Process.ByteString
+import Text.Printf
 import Text.Read (readMaybe)
 
 -- | Like 'nub', but without the quadratic runtime.
@@ -155,6 +157,11 @@ focusNth :: Integral int => int -> [a] -> Maybe ([a], a, [a])
 focusNth i xs
   | (bef, x : aft) <- genericSplitAt i xs = Just (bef, x, aft)
   | otherwise = Nothing
+
+-- | Convert the given integer (implied to be a hash digest) to a
+-- hexadecimal non-negative number.
+hashIntText :: Int -> T.Text
+hashIntText x = T.pack $ printf "%x" (fromIntegral x :: Word)
 
 {-# NOINLINE unixEnvironment #-}
 

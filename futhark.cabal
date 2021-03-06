@@ -313,6 +313,7 @@ library
     , filepath >=1.4.1.1
     , free >=4.12.4
     , gitrev >=1.2.0
+    , hashable
     , haskeline
     , language-c-quote >=0.12
     , mainland-pretty >=0.6.1

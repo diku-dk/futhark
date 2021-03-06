@@ -6,6 +6,7 @@
 -- more high-level API.
 module Futhark.Compiler.Program
   ( readLibrary,
+    readUntypedLibrary,
     readImports,
     Imports,
     FileModule (..),
@@ -183,19 +184,15 @@ setEntryPoints extra_eps fps = map onProg
         E.ValDec vb {E.valBindEntryPoint = Just E.NoInfo}
     onDec dec = dec
 
--- | Read and type-check some Futhark files.
-readLibrary ::
-  (MonadError CompilerError m, MonadIO m) =>
-  -- | Extra functions that should be marked as entry points; only
-  -- applies to the immediate files, not any imports imported.
-  [E.Name] ->
-  -- | The files to read.
+-- | Read (and parse) all source files (including the builtin prelude)
+-- corresponding to a set of root files.
+readUntypedLibrary ::
+  (MonadIO m, MonadError CompilerError m) =>
   [FilePath] ->
-  m (E.Warnings, Imports, VNameSource)
-readLibrary extra_eps fps =
-  typeCheckProgram emptyBasis . setEntryPoints extra_eps fps <=< runReaderM $ do
-    readImport [] (mkInitialImport "/prelude/prelude")
-    mapM_ onFile fps
+  m [(ImportName, E.UncheckedProg)]
+readUntypedLibrary fps = runReaderM $ do
+  readImport [] (mkInitialImport "/prelude/prelude")
+  mapM_ onFile fps
   where
     onFile fp = do
       r <- liftIO $ readFileSafely fp
@@ -206,6 +203,19 @@ readLibrary extra_eps fps =
         Nothing -> externalErrorS $ fp ++ ": file not found."
       where
         (fp_name, _) = Posix.splitExtension fp
+
+-- | Read and type-check some Futhark files.
+readLibrary ::
+  (MonadError CompilerError m, MonadIO m) =>
+  -- | Extra functions that should be marked as entry points; only
+  -- applies to the immediate files, not any imports imported.
+  [E.Name] ->
+  -- | The files to read.
+  [FilePath] ->
+  m (E.Warnings, Imports, VNameSource)
+readLibrary extra_eps fps =
+  typeCheckProgram emptyBasis . setEntryPoints extra_eps fps
+    =<< readUntypedLibrary fps
 
 -- | Read and type-check Futhark imports (no @.fut@ extension; may
 -- refer to baked-in prelude).  This is an exotic operation that
