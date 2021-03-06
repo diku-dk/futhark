@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * New subcommand: `futhark hash`.
 
+  * `futhark literate` is now smart about when to regenerate image and
+    animation files.
+
 ### Removed
 
 ### Changed
