@@ -27,6 +27,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * `f32.sgn` was mistakenly defined with double precision arithmetic.
 
+  * Only include double-precision atomics if actually needed by
+    program (this avoids problems on devices that only support single
+    precision).
+
 ## [0.19.1]
 
 ### Added
