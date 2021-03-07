@@ -31,6 +31,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
     program (this avoids problems on devices that only support single
     precision).
 
+  * A lambda lifting bug due to not handling existential sizes
+    produced by loops correctly (#1267).
+
 ## [0.19.1]
 
 ### Added
