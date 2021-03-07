@@ -911,7 +911,7 @@ $esc:("#endif")
       return p.t;
     }
 
-    static inline double fsignum32(double x) {
+    static inline float fsignum32(float x) {
       return $id:(funName' "isnan32")(x) ? x : ((x > 0) - (x < 0));
     }
 |]
