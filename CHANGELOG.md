@@ -25,6 +25,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Missing cases in causality checking (#1263).
 
+  * `f32.sgn` was mistakenly defined with double precision arithmetic.
+
 ## [0.19.1]
 
 ### Added
