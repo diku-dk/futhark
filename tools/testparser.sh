@@ -19,7 +19,8 @@ if [ "$TESTPARSER_WORKER" ]; then
         f=$1
         suffix=$2
         shift; shift
-        out=$dir/$(basename $f)_$suffix
+        out=$dir/${f}_${suffix}
+        mkdir -p $(dirname $out)
         futhark dev -w "$@" $f > $out
         futhark dev $out >/dev/null
     }
