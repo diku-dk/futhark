@@ -190,7 +190,7 @@ instance Adjoint VName where
       Nothing -> setAdjoint v (BasicOp . SubExp . Var $ d)
       Just v_adj -> do
         t <- lookupType v
-        v_adj' <- letExp "adj" $
+        v_adj' <- letExp (baseString v <> "_adj") $
           case t of
             Prim pt ->
               BasicOp $ BinOp (addBinOp pt) (Var v_adj) (Var d)
@@ -314,8 +314,8 @@ diffBasicOp pat aux e m =
 
           pat_adj' = primExpFromSubExp t $ Var pat_adj
 
-      adj_x <- letExp "adj" <=< toExp $ pat_adj' ~*~ wrt_x
-      adj_y <- letExp "adj" <=< toExp $ pat_adj' ~*~ wrt_y
+      adj_x <- letExp "binop_x_adj" <=< toExp $ pat_adj' ~*~ wrt_x
+      adj_y <- letExp "binop_y_adj" <=< toExp $ pat_adj' ~*~ wrt_y
       void $ updateAdjoint x adj_x
       void $ updateAdjoint y adj_y
     --
