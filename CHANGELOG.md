@@ -34,6 +34,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * A lambda lifting bug due to not handling existential sizes
     produced by loops correctly (#1267).
 
+  * Incorrect uniqueness attributes inserted by lambda lifting
+    (#1268).
+
 ## [0.19.1]
 
 ### Added
