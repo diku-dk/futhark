@@ -165,16 +165,34 @@ basicFwd pat aux op = do
       auxing aux $
         letBindNames pat_v_tan <=< toExp $
           x_tan ~*~ wrt_x ~+~ y_tan ~*~ wrt_y
+    CmpOp {} ->
+      addStm $ Let pat_tan aux $ BasicOp op
     ConvOp cop x -> do
       x_tan <- tangent x
       addStm $ Let pat_tan aux $ BasicOp $ ConvOp cop x_tan
-    Assert {} ->
-      addStm $ Let pat_tan aux $ BasicOp op
-    CmpOp {} ->
-      addStm $ Let pat_tan aux $ BasicOp op
+    Assert {} -> return ()
     Index arr slice -> do
       arr_tan <- tangent arr
       addStm $ Let pat_tan aux $ BasicOp $ Index arr_tan slice
+    Update arr slice se -> do
+      arr_tan <- tangent arr
+      se_tan <- tangent se
+      addStm $ Let pat_tan aux $ BasicOp $ Update arr_tan slice se_tan
+    Concat d arr arrs w -> do
+      arr_tan <- tangent arr
+      arrs_tans <- tangent arrs
+      addStm $ Let pat_tan aux $ BasicOp $ Concat d arr_tan arrs_tans w
+    Copy arr -> do
+      arr_tan <- tangent arr
+      addStm $ Let pat_tan aux $ BasicOp $ Copy arr_tan
+    Manifest ds arr -> do
+      arr_tan <- tangent arr
+      addStm $ Let pat_tan aux $ BasicOp $ Manifest ds arr_tan
+    Iota {} -> return ()
+    Replicate n x -> do
+      x_tan <- tangent x
+      addStm $ Let pat_tan aux $ BasicOp $ Replicate n x_tan
+    Scratch {} -> return ()
     Reshape reshape arr -> do
       arr_tan <- tangent arr
       addStm $ Let pat_tan aux $ BasicOp $ Reshape reshape arr_tan
@@ -184,23 +202,26 @@ basicFwd pat aux op = do
     Rotate rots arr -> do
       arr_tan <- tangent arr
       addStm $ Let pat_tan aux $ BasicOp $ Rotate rots arr_tan
-    Concat d arr arrs w -> do
-      arr_tan <- tangent arr
-      arrs_tans <- tangent arrs
-      addStm $ Let pat_tan aux $ BasicOp $ Concat d arr_tan arrs_tans w
-    Replicate n x -> do
+    UnAcc acc ts -> do
+      acc_tan <- tangent acc
+      addStm $ Let pat_tan aux $ BasicOp $ UnAcc acc_tan ts
+    UpdateAcc acc i x -> do
+      acc_tan <- tangent acc
       x_tan <- tangent x
-      addStm $ Let pat_tan aux $ BasicOp $ Replicate n x_tan
+      addStm $ Let pat_tan aux $ BasicOp $ UpdateAcc acc_tan i x_tan
 
 fwdLambda :: Lambda -> ADM Lambda
 fwdLambda (Lambda params body ret) = do
   params_tan <- newTan params
   body' <- fwdBody body
-  let params' = concat $ transpose [params, params_tan]
+  let params' = interleave params params_tan
   pure $ Lambda params' body' $ ret ++ ret
 
 flipLambda :: Lambda -> Lambda
 flipLambda (Lambda params body ret) = Lambda (reverse params) body ret
+
+interleave :: [a] -> [a] -> [a]
+interleave xs ys = concat $ transpose [xs, ys]
 
 zeroFromSubExp :: SubExp -> ADM VName
 zeroFromSubExp (Constant c) =
@@ -234,7 +255,7 @@ fwdSOAC pat aux (Screma size (ScremaForm scs reds f) xs) = do
       neutral_tans <- mapM zeroFromSubExp $ redNeutral red
       return $
         Reduce
-          { redComm = Noncommutative, -- FIXME: Does differentiation perserve commutativity?
+          { redComm = redComm red,
             redLambda = op',
             redNeutral = redNeutral red ++ map Var neutral_tans
           }
@@ -245,12 +266,12 @@ fwdSOAC pat aux (Stream size form lam xs) = do
   case form of
     Sequential nes -> do
       nes_tan <- mapM (fmap Var . zeroFromSubExp) nes
-      let form' = Sequential $ nes ++ nes_tan
+      let form' = Sequential $ interleave nes nes_tan
       addStm $ Let (pat <> pat_tan) aux $ Op $ Stream size form' lam' $ xs ++ xs_tan
     Parallel o comm lam0 nes -> do
       nes_tan <- mapM (fmap Var . zeroFromSubExp) nes
       lam0' <- fwdLambda lam0
-      let form' = Parallel o comm lam0' $ nes ++ nes_tan
+      let form' = Parallel o comm lam0' $ interleave nes nes_tan
       addStm $ Let (pat <> pat_tan) aux $ Op $ Stream size form' lam' $ xs ++ xs_tan
 fwdSOAC pat aux (Hist len ops bucket_fun imgs) = do
   pat_tan <- newTan pat
@@ -268,7 +289,7 @@ fwdSOAC pat aux (Hist len ops bucket_fun imgs) = do
           { histWidth = width,
             histRaceFactor = rf,
             histDest = dest ++ dest_tan,
-            histNeutral = nes ++ nes_tan,
+            histNeutral = interleave nes nes_tan,
             histOp = op'
           }
 fwdSOAC pat aux scatter@(Scatter {}) = addStm $ Let pat aux $ Op scatter
@@ -324,6 +345,17 @@ fwdStm (Let (Pattern ctx pes) aux (DoLoop l_ctx val_pats loop@(ForLoop i it boun
       addStm $
         Let (Pattern ctx (pes ++ pes_tan)) aux $
           DoLoop l_ctx (val_pats ++ val_pats_tan) (ForLoop i it bound (loop_vars ++ loop_vars_tan)) body_tan
+fwdStm stm@(Let pat aux (MkAcc accshape arrs ishape op)) = do
+  pat_tan <- newTan pat
+  arrs_tan <- tangent arrs
+  op' <- case op of
+    Nothing -> return Nothing
+    Just (lam, nes) -> do
+      nes_tan <- mapM (fmap Var . zeroFromSubExp) nes
+      lam' <- fwdLambda lam
+      return $ Just (lam', nes_tan)
+  addStm stm
+  addStm $ Let pat_tan aux $ MkAcc accshape arrs_tan ishape op'
 fwdStm s@(Let pat aux (Op soac)) = fwdSOAC pat aux soac
 fwdStm stm =
   error $ "unhandled forward mode AD for Stm: " ++ pretty stm ++ "\n" ++ show stm
@@ -347,5 +379,5 @@ fwdJVP scope (Lambda params body ret) = do
   runADM . localScope scope $ do
     params_tan <- newTan params
     body' <- fwdBodyOnlyTangents body
-    let params' = concat $ transpose [params, params_tan]
+    let params' = interleave params params_tan
     pure $ Lambda params' body' $ ret ++ ret
