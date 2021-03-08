@@ -28,7 +28,6 @@ module Futhark.IR.Prop
     safeExp,
     subExpVars,
     subExpVar,
-    shapeVars,
     commutativeLambda,
     entryPointSize,
     defAux,
@@ -143,11 +142,6 @@ subExpVars = mapMaybe subExpVar
 subExpVar :: SubExp -> Maybe VName
 subExpVar (Var v) = Just v
 subExpVar Constant {} = Nothing
-
--- | Return the variable dimension sizes.  May contain
--- duplicates.
-shapeVars :: Shape -> [VName]
-shapeVars = subExpVars . shapeDims
 
 -- | Does the given lambda represent a known commutative function?
 -- Based on pattern matching and checking whether the lambda
