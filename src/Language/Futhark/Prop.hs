@@ -67,7 +67,6 @@ module Language.Futhark.Prop
     addAliases,
     setUniqueness,
     noSizes,
-    addSizes,
     anySizes,
     traverseDims,
     DimPos (..),
@@ -163,10 +162,6 @@ nestedDims t =
 -- | Change the shape of a type to be just the rank.
 noSizes :: TypeBase (DimDecl vn) as -> TypeBase () as
 noSizes = first $ const ()
-
--- | Add size annotations that are all 'AnyDim'.
-addSizes :: TypeBase () as -> TypeBase (DimDecl vn) as
-addSizes = first $ const AnyDim
 
 -- | Change all size annotations to be 'AnyDim'.
 anySizes :: TypeBase (DimDecl vn) as -> TypeBase (DimDecl vn) as

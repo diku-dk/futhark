@@ -1,6 +1,5 @@
 module Futhark.CodeGen.ImpGen.Multicore.Base
-  ( compileKBody,
-    extractAllocations,
+  ( extractAllocations,
     compileThreadResult,
     HostEnv (..),
     AtomicBinOp,
@@ -98,15 +97,6 @@ renameSegBinOp segbinops =
   forM segbinops $ \(SegBinOp comm lam ne shape) -> do
     lam' <- renameLambda lam
     return $ SegBinOp comm lam' ne shape
-
-compileKBody ::
-  KernelBody MCMem ->
-  ([(SubExp, [Imp.Exp])] -> ImpM MCMem () Imp.Multicore ()) ->
-  ImpM MCMem () Imp.Multicore ()
-compileKBody kbody red_cont =
-  compileStms (freeIn $ kernelBodyResult kbody) (kernelBodyStms kbody) $ do
-    let red_res = kernelBodyResult kbody
-    red_cont $ zip (map kernelResultSubExp red_res) $ repeat []
 
 compileThreadResult ::
   SegSpace ->
