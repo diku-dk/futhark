@@ -72,13 +72,14 @@ braces = between (lexeme "{") (lexeme "}")
 brackets = between (lexeme "[") (lexeme "]")
 parens = between (lexeme "(") (lexeme ")")
 
-pComma, pColon, pSemi, pEqual, pSlash, pAsterisk :: Parser ()
+pComma, pColon, pSemi, pEqual, pSlash, pAsterisk, pArrow :: Parser ()
 pComma = void $ lexeme ","
 pColon = void $ lexeme ":"
 pSemi = void $ lexeme ";"
 pEqual = void $ lexeme "="
 pSlash = void $ lexeme "/"
 pAsterisk = void $ lexeme "*"
+pArrow = void $ lexeme "->"
 
 pElemType :: Parser ElemType
 pElemType = ElemPrim <$> pPrimType
@@ -343,7 +344,7 @@ pLParam :: PR lore -> Parser (LParam lore)
 pLParam = pParam . pLParamInfo
 
 pLParams :: PR lore -> Parser [LParam lore]
-pLParams pr = parens $ pLParam pr `sepBy` pComma
+pLParams pr = braces $ pLParam pr `sepBy` pComma
 
 pPatElem :: PR lore -> Parser (PatElem lore)
 pPatElem pr =
@@ -415,15 +416,15 @@ pLoop pr =
 pLambda :: PR lore -> Parser (Lambda lore)
 pLambda pr =
   choice
-    [ keyword "fn"
+    [ lexeme "\\"
         $> lam
-        <*> pTypes
-        <*> pLParams pr <* lexeme "=>"
+        <*> pLParams pr <* pColon
+        <*> pTypes <* pArrow
         <*> pBody pr,
       keyword "nilFn" $> Lambda mempty (Body (pBodyDec pr) mempty []) []
     ]
   where
-    lam ret params body = Lambda params body ret
+    lam params ret body = Lambda params body ret
 
 pReduce :: PR lore -> Parser (SOAC.Reduce lore)
 pReduce pr =

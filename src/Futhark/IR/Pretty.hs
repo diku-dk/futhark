@@ -293,9 +293,9 @@ instance PrettyLore lore => Pretty (Exp lore) where
 instance PrettyLore lore => Pretty (Lambda lore) where
   ppr (Lambda [] _ []) = text "nilFn"
   ppr (Lambda params body rettype) =
-    text "fn" <+> ppTuple' rettype
-      <+/> align (parens (commasep (map ppr params)))
-      <+> text "=>" </> indent 2 (ppr body)
+    text "\\" <> ppTuple' params
+      <+/> colon <+> ppTuple' rettype <+> text "->"
+      </> indent 2 (ppr body)
 
 instance Pretty EntryPointType where
   ppr TypeDirect = "direct"
