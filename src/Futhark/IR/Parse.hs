@@ -82,10 +82,14 @@ pAsterisk = void $ lexeme "*"
 pArrow = void $ lexeme "->"
 
 pElemType :: Parser ElemType
-pElemType = ElemPrim <$> pPrimType
+pElemType =
+  choice
+    [ ElemPrim <$> pPrimType,
+      keyword "acc" $> ElemAcc <*> pVNames
+    ]
 
 pNonArray :: Parser (TypeBase shape u)
-pNonArray = Prim <$> pPrimType
+pNonArray = elemToType <$> pElemType
 
 pTypeBase ::
   ArrayShape shape =>
@@ -138,6 +142,12 @@ pDeclExtType = pDeclBase pExtType
 
 pSubExp :: Parser SubExp
 pSubExp = Var <$> pVName <|> Constant <$> pPrimValue
+
+pSubExps :: Parser [SubExp]
+pSubExps = braces (pSubExp `sepBy` pComma)
+
+pVNames :: Parser [VName]
+pVNames = braces (pVName `sepBy` pComma)
 
 pPatternLike :: Parser a -> Parser ([a], [a])
 pPatternLike p = braces $ do
@@ -272,6 +282,10 @@ pBasicOp =
       ArrayLit
         <$> brackets (pSubExp `sepBy` pComma)
         <*> (lexeme ":" *> "[]" *> pType),
+      keyword "update_acc"
+        *> parens
+          (UpdateAcc <$> pVName <* pComma <*> pSubExps <* pComma <*> pSubExps),
+      keyword "un_acc" *> parens (UnAcc <$> pVName <* pComma <*> pTypes),
       --
       pConvOp "sext" SExt pIntType pIntType,
       pConvOp "zext" ZExt pIntType pIntType,
@@ -439,12 +453,25 @@ pScan pr =
     <$> pLambda pr <* pComma
     <*> braces (pSubExp `sepBy` pComma)
 
+pMkAcc :: PR lore -> Parser (Exp lore)
+pMkAcc pr =
+  keyword "mk_acc"
+    *> parens
+      ( MkAcc <$> pShape <* pComma
+          <*> pVNames <* pComma
+          <*> pShape
+          <*> optional (pComma *> pCombFun)
+      )
+  where
+    pCombFun = parens ((,) <$> pLambda pr <* pComma <*> pSubExps)
+
 pExp :: PR lore -> Parser (Exp lore)
 pExp pr =
   choice
     [ pIf pr,
       pApply pr,
       pLoop pr,
+      pMkAcc pr,
       Op <$> pOp pr,
       BasicOp <$> pBasicOp
     ]
@@ -827,14 +854,18 @@ pMemInfo pd pu pret =
   choice
     [ MemPrim <$> pPrimType,
       keyword "mem" $> MemMem <*> choice [pSpace, pure DefaultSpace],
-      pArray
+      pArrayOrAcc
     ]
   where
-    pArray = do
+    pArrayOrAcc = do
       u <- pu
       shape <- Shape <$> many (brackets pd)
+      choice [pArray u shape, pAcc shape]
+    pArray u shape = do
       pt <- pPrimType
       MemArray pt shape u <$> (lexeme "@" *> pret)
+    pAcc shape =
+      keyword "acc" $> MemAcc <*> pVNames <*> pure shape
 
 pSpace :: Parser Space
 pSpace =
