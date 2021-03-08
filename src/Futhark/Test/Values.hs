@@ -29,7 +29,6 @@ module Futhark.Test.Values
 
     -- * Comparing Values
     compareValues,
-    compareValues1,
     Mismatch,
 
     -- * Converting values
@@ -58,7 +57,6 @@ import qualified Data.Vector.Unboxed as UVec
 import qualified Data.Vector.Unboxed.Mutable as UMVec
 import Futhark.IR.Primitive (PrimValue)
 import Futhark.IR.Prop.Constants (IsValue (..))
-import Futhark.Util (maybeHead)
 import Futhark.Util.Loc (Pos (..))
 import Futhark.Util.Pretty
 import qualified Futhark.Util.Pretty as PP
@@ -626,10 +624,6 @@ compareValues got expected
   where
     n = length got
     m = length expected
-
--- | As 'compareValues', but only reports one mismatch.
-compareValues1 :: [Value] -> [Value] -> Maybe Mismatch
-compareValues1 got expected = maybeHead $ compareValues got expected
 
 compareValue :: Int -> Value -> Value -> [Mismatch]
 compareValue i got_v expected_v

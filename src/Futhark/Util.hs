@@ -25,7 +25,6 @@ module Futhark.Util
     focusNth,
     hashIntText,
     unixEnvironment,
-    isEnvVarSet,
     isEnvVarAtLeast,
     fancyTerminal,
     runProgramWithExitCode,
@@ -168,16 +167,6 @@ hashIntText x = T.pack $ printf "%x" (fromIntegral x :: Word)
 -- | The Unix environment when the Futhark compiler started.
 unixEnvironment :: [(String, String)]
 unixEnvironment = unsafePerformIO getEnvironment
-
--- | Is an environment variable set to 0 or 1?  If 0, return False; if
--- 1, True; otherwise default.
-isEnvVarSet :: String -> Bool -> Bool
-isEnvVarSet name default_val = fromMaybe default_val $ do
-  val <- lookup name unixEnvironment
-  case val of
-    "0" -> return False
-    "1" -> return True
-    _ -> Nothing
 
 -- | True if the environment variable, viewed as an integer, has at
 -- least this numeric value.  Returns False if variable is unset or
