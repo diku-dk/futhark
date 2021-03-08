@@ -16,7 +16,6 @@ module Futhark.Test
     getValuesBS,
     withValuesFile,
     compareValues,
-    compareValues1,
     checkResult,
     testRunReferenceOutput,
     getExpectedResult,
