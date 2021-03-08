@@ -177,6 +177,19 @@ addLambda (Array (ElemPrim t) (Shape (s : ss)) u) = do
 addLambda t =
   error $ "addLambda: " ++ pretty t
 
+-- Construct an expression for adding the two variables.
+addExp :: VName -> VName -> ADM Exp
+addExp x y = do
+  x_t <- lookupType x
+  case x_t of
+    Prim pt ->
+      pure $ BasicOp $ BinOp (addBinOp pt) (Var x) (Var y)
+    Array {} -> do
+      lam <- addLambda $ rowType x_t
+      pure $ Op $ Screma (arraySize 0 x_t) (mapSOAC lam) [x, y]
+    _ ->
+      error $ "addExp: undexpected type: " ++ pretty x_t
+
 instance Adjoint VName where
   lookupAdj v = do
     maybeAdj <- gets $ M.lookup v . stateAdjs
@@ -189,13 +202,7 @@ instance Adjoint VName where
     case maybeAdj of
       Nothing -> setAdjoint v (BasicOp . SubExp . Var $ d)
       Just v_adj -> do
-        t <- lookupType v
-        v_adj' <- letExp (baseString v <> "_adj") $
-          case t of
-            Prim pt ->
-              BasicOp $ BinOp (addBinOp pt) (Var v_adj) (Var d)
-            _ ->
-              error $ "updateAdjoint: unexpected type " <> pretty t
+        v_adj' <- letExp (baseString v <> "_adj") =<< addExp v_adj d
         let update = M.singleton v v_adj'
         insAdjMap update
         pure v_adj'
@@ -212,20 +219,9 @@ instance Adjoint VName where
           if primType t
             then return v_adj
             else letExp (baseString v ++ "_slice") $ BasicOp $ Index v_adj slice
-        t' <- lookupType v_adjslice
-        v_adjslice' <- addArrays t' v_adjslice d
-        v_adj' <- letInPlace "updated_adj" v_adj slice v_adjslice'
+        v_adj' <- letInPlace "updated_adj" v_adj slice =<< addExp v_adjslice d
         insAdjMap $ M.singleton v v_adj'
         pure v_adj'
-    where
-      addArrays t xs ys =
-        case t of
-          Prim pt -> return $ BasicOp $ BinOp (addBinOp pt) (Var xs) (Var ys)
-          Array {} -> do
-            lam <- addLambda $ stripArray 1 t
-            return $ Op $ Screma (arraySize 0 t) (mapSOAC lam) [xs, ys]
-          _ ->
-            error $ "addArrays: " ++ pretty t
 
 instance Adjoint SubExp where
   lookupAdj (Constant c) =
