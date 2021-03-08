@@ -414,7 +414,11 @@ genOpenClPrelude ts =
     [C.cedecl|$esc:("#endif")|],
     [C.cedecl|$esc:("#pragma OPENCL EXTENSION cl_khr_byte_addressable_store : enable")|]
   ]
-    ++ [[C.cedecl|$esc:("#pragma OPENCL EXTENSION cl_khr_fp64 : enable")|] | uses_float64]
+    ++ concat
+      [ [C.cunit|$esc:("#pragma OPENCL EXTENSION cl_khr_fp64 : enable")
+                 $esc:("#define FUTHARK_F64_ENABLED")|]
+        | uses_float64
+      ]
     ++ [C.cunit|
 /* Some OpenCL programs dislike empty progams, or programs with no kernels.
  * Declare a dummy kernel to ensure they remain our friends. */
@@ -472,6 +476,7 @@ genCUDAPrelude =
     cudafy =
       [CUDAC.cunit|
 $esc:("#define FUTHARK_CUDA")
+$esc:("#define FUTHARK_F64_ENABLED")
 
 typedef char int8_t;
 typedef short int16_t;

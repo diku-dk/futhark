@@ -281,21 +281,21 @@ instance PrettyLore lore => Pretty (Exp lore) where
       pprLoopVar (p, a) = ppr p <+> text "in" <+> ppr a
   ppr (MkAcc shape arrs ishape Nothing) =
     text "mk_acc" <> apply [ppr shape, ppTuple' arrs, ppr ishape]
-  ppr (MkAcc shape arrs ishape (Just op)) =
+  ppr (MkAcc shape arrs ishape (Just (lam, nes))) =
     text "mk_acc"
       <> parens
         ( ppr shape <> comma
             <+> ppTuple' arrs <> comma
             <+> ppr ishape <> comma
-            </> ppr op
+            </> parens (ppr lam <> comma </> ppTuple' nes)
         )
 
 instance PrettyLore lore => Pretty (Lambda lore) where
   ppr (Lambda [] _ []) = text "nilFn"
   ppr (Lambda params body rettype) =
-    text "fn" <+> ppTuple' rettype
-      <+/> align (parens (commasep (map ppr params)))
-      <+> text "=>" </> indent 2 (ppr body)
+    text "\\" <> ppTuple' params
+      <+/> colon <+> ppTuple' rettype <+> text "->"
+      </> indent 2 (ppr body)
 
 instance Pretty EntryPointType where
   ppr TypeDirect = "direct"

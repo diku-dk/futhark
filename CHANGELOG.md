@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+  * New subcommand: `futhark hash`.
+
+  * `futhark literate` is now smart about when to regenerate image and
+    animation files.
+
 ### Removed
 
 ### Changed
@@ -17,6 +22,17 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Type-checking of higher-order functions that take consuming
     funtional arguments.
+
+  * Missing cases in causality checking (#1263).
+
+  * `f32.sgn` was mistakenly defined with double precision arithmetic.
+
+  * Only include double-precision atomics if actually needed by
+    program (this avoids problems on devices that only support single
+    precision).
+
+  * A lambda lifting bug due to not handling existential sizes
+    produced by loops correctly (#1267).
 
 ## [0.19.1]
 

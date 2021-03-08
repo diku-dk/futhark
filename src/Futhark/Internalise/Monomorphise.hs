@@ -412,8 +412,7 @@ transformExp (BinOp (fname, _) (Info t) (e1, d1) (e2, d2) tp ext loc) = do
   fname' <- transformFName loc fname $ toStruct t
   e1' <- transformExp e1
   e2' <- transformExp e2
-  if orderZero (typeOf e1')
-    && orderZero (typeOf e2')
+  if orderZero (typeOf e1') && orderZero (typeOf e2')
     then return $ applyOp fname' e1' e2'
     else do
       -- We have to flip the arguments to the function, because

@@ -246,6 +246,8 @@ inline int64_t atomic_add_i64_local(volatile __local int64_t *p, int64_t x) {
 #endif
 }
 
+#ifdef FUTHARK_F64_ENABLED
+
 inline double atomic_fadd_f64_global(volatile __global double *p, double x) {
 #if defined(FUTHARK_CUDA) && __CUDA_ARCH__ >= 600
   return atomicAdd((double*)p, x);
@@ -277,6 +279,8 @@ inline double atomic_fadd_f64_local(volatile __local double *p, double x) {
   return old.f;
 #endif
 }
+
+#endif
 
 inline int64_t atomic_smax_i64_global(volatile __global int64_t *p, int64_t x) {
 #ifdef FUTHARK_CUDA
