@@ -76,6 +76,8 @@ existentials e =
           S.fromList ext
         Match _ _ (_, Info ext) _ ->
           S.fromList ext
+        DoLoop _ _ _ _ _ (Info (_, ext)) _ ->
+          S.fromList ext
         _ ->
           mempty
 
