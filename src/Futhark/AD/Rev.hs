@@ -516,14 +516,17 @@ diffStm stm@(Let pat _ (If cond tbody fbody _)) m = do
 
   -- We need to discard any context, as this never contributes to
   -- adjoints.
-  contribs <-
-    (pure . takeLast (length branches_free) <=< letTupExp "branch_contrib" <=< renameExp)
+  branches_free_adj <-
+    ( pure . takeLast (length branches_free)
+        <=< letTupExp "branch_adj"
+        <=< renameExp
+      )
       =<< eIf
         (eSubExp cond)
         (diffBody adjs branches_free tbody)
         (diffBody adjs branches_free fbody)
 
-  zipWithM_ updateAdjoint branches_free contribs
+  zipWithM_ insAdj branches_free branches_free_adj
 diffStm (Let pat aux (Op soac)) m =
   diffSOAC pat aux soac m
 diffStm stm _ = error $ "diffStm unhandled:\n" ++ pretty stm
@@ -538,7 +541,6 @@ diffStms all_stms
 subAD :: ADM a -> ADM a
 subAD m = do
   old_state_adjs <- gets stateAdjs
-  modify $ \s -> s {stateAdjs = mempty}
   x <- m
   modify $ \s -> s {stateAdjs = old_state_adjs}
   pure x
@@ -546,9 +548,9 @@ subAD m = do
 diffBody :: [VName] -> [VName] -> Body -> ADM Body
 diffBody res_adjs get_adjs_for (Body () stms res) = subAD $ do
   let onResult (Constant _) _ = pure ()
-      onResult (Var v) v_adj = insAdj v v_adj
-  zipWithM_ onResult (takeLast (length res_adjs) res) res_adjs
+      onResult (Var v) v_adj = void $ updateAdjoint v v_adj
   (adjs, stms') <- collectStms $ do
+    zipWithM_ onResult (takeLast (length res_adjs) res) res_adjs
     diffStms stms
     mapM lookupAdj get_adjs_for
   pure $ Body () stms' $ res <> map Var adjs

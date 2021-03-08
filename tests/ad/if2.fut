@@ -4,6 +4,7 @@
 -- output { [0.0, 3.0, 2.0] }
 -- compiled input { [-1.0,2.0,3.0] }
 -- output { [3.0, 0.0, -1.0] }
+-- structure { If/Replicate 0 }
 
 let f x : f64 =
   #[unsafe]
