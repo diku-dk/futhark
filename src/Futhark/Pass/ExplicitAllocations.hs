@@ -281,7 +281,7 @@ arraySizeInBytesExpM t = do
   let dim_prod_i64 = product $ map pe64 dims
       elm_size_i64 = primByteSize $ elemType t
   return $
-    BinOpExp (SMax Int64) (ValueExp $ IntValue $ Int64Value $ 0) $
+    BinOpExp (SMax Int64) (ValueExp $ IntValue $ Int64Value 0) $
       untyped $
         dim_prod_i64 * elm_size_i64
 

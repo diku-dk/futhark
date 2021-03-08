@@ -45,7 +45,7 @@ emptyGraph =
     assertEqual
       "Color an empty graph"
       ([] :: [(Int, Char)], [] :: [(Int, Int)])
-      $ (Map.toList *** Map.toList) $ GreedyColoring.colorGraph (Map.fromList []) $ Set.fromList []
+      $ (Map.toList *** Map.toList) $ GreedyColoring.colorGraph Map.empty $ Set.fromList []
 
 noIntersections :: TestTree
 noIntersections =

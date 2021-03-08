@@ -159,4 +159,4 @@ flipMap m =
 
 insertNames :: VName -> Names -> LastUse -> LastUse
 insertNames name names lumap =
-  foldr (flip (Map.insertWith $ flip const) name) lumap $ namesToList names
+  foldr (flip (Map.insertWith $ \_ x -> x) name) lumap $ namesToList names
