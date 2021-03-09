@@ -549,13 +549,10 @@ processDirective env (DirectivePlot e size) = do
         pngfile <- newFile env "plot.png" $ plotWith $ map (first Just) $ M.toList m'
         pure $ imgBlock pngfile
     Right v ->
-      nope $ fmap valueType v
+      throwError $ "Cannot plot value of type " <> prettyText (fmap valueType v)
     Left t ->
-      nope t
+      throwError $ "Cannot plot opaque value of type " <> prettyText t
   where
-    nope t =
-      throwError $ "Cannot plot value of type " <> prettyText t
-
     plottable2d v = do
       [x, y] <- plottable v
       Just [x, y]
@@ -593,13 +590,10 @@ processDirective env (DirectiveGnuplot e script) = do
         pngfile <- newFile env "plot.png" $ plotWith $ M.toList m'
         pure $ imgBlock pngfile
     Right v ->
-      nope $ fmap valueType v
+      throwError $ "Cannot plot value of type " <> prettyText (fmap valueType v)
     Left t ->
-      nope t
+      throwError $ "Cannot plot opaque value of type " <> prettyText t
   where
-    nope t =
-      throwError $
-        "Cannot plot value of type " <> prettyText t
     plotWith xys pngfile = withGnuplotData [] xys $ \_ sets -> do
       let script' =
             T.unlines
