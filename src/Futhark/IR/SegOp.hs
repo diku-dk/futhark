@@ -964,8 +964,8 @@ instance (PrettyLore lore, PP.Pretty lvl) => PP.Pretty (SegOp lvl lore) where
           </> ppr op
   ppr (SegStencil lvl space op ts body) =
     text "segstencil" <> ppr lvl
-      </> PP.braces (ppOp op) <> PP.comma
       </> PP.align (ppr space)
+      </> PP.braces (ppOp op)
       <+> PP.colon
       <+> ppTuple' ts
       <+> PP.nestedBlock "{" "}" (ppr body)

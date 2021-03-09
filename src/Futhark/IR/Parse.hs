@@ -736,7 +736,8 @@ pSegOp pr pLvl =
     [ keyword "segmap" *> pSegMap,
       keyword "segred" *> pSegRed,
       keyword "segscan" *> pSegScan,
-      keyword "seghist" *> pSegHist
+      keyword "seghist" *> pSegHist,
+      keyword "segstencil" *> pSegStencil
     ]
   where
     pSegMap =
@@ -765,9 +766,21 @@ pSegOp pr pLvl =
         <*> braces (pSubExp `sepBy` pComma) <* pComma
         <*> pShape <* pComma
         <*> pLambda pr
+    pStencilOp =
+      SegOp.StencilOp
+        <$> brackets (brackets (pInteger `sepBy` pComma) `sepBy` pComma) <* pComma
+        <*> braces (pVName `sepBy` pComma) <* pComma
+        <*> pLambda pr
     pSegRed = pSegOp' SegOp.SegRed pSegBinOp
     pSegScan = pSegOp' SegOp.SegScan pSegBinOp
     pSegHist = pSegOp' SegOp.SegHist pHistOp
+    pSegStencil =
+      SegOp.SegStencil
+        <$> pLvl
+        <*> pSegSpace
+        <*> braces pStencilOp <* pColon
+        <*> pTypes
+        <*> braces (pKernelBody pr)
 
 pSegLevel :: Parser Kernel.SegLevel
 pSegLevel =
