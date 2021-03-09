@@ -61,11 +61,14 @@ pVName = lexeme $ do
 pBool :: Parser Bool
 pBool = choice [keyword "true" $> True, keyword "false" $> False]
 
+pInteger :: Parser Integer
+pInteger = lexeme $ L.signed (pure ()) L.decimal
+
 pInt :: Parser Int
-pInt = lexeme L.decimal
+pInt = fromInteger <$> pInteger
 
 pInt64 :: Parser Int64
-pInt64 = lexeme L.decimal
+pInt64 = fromInteger <$> pInteger
 
 braces, brackets, parens :: Parser a -> Parser a
 braces = between (lexeme "{") (lexeme "}")
@@ -507,6 +510,7 @@ pSOAC pr =
       keyword "screma" *> pScrema pScremaForm,
       pScatter,
       pHist,
+      pStencil,
       pStream
     ]
   where
@@ -560,6 +564,26 @@ pSOAC pr =
             <*> braces (pVName `sepBy` pComma) <* pComma
             <*> braces (pSubExp `sepBy` pComma) <* pComma
             <*> pLambda pr
+    pStencil =
+      keyword "stencil"
+        *> parens
+          ( SOAC.Stencil
+              <$> braces (pSubExp `sepBy` pComma) <* pComma
+              <*> pSubExp <* pComma
+              <*> pStencilIndexes <* pComma
+              <*> pLambda pr <* pComma
+              <*> pInvariant <* pComma
+              <*> (pVName `sepBy` pComma)
+          )
+    pStencilIndexes =
+      choice
+        [ try $ SOAC.StencilDynamic <$> braces (pVName `sepBy` pComma),
+          SOAC.StencilStatic <$> braces (brackets (pInteger `sepBy` pComma) `sepBy` pComma)
+        ]
+    pInvariant =
+      braces $
+        parens ((,) <$> brackets (pInt `sepBy` pComma) <* pComma <*> pVName)
+          `sepBy` pComma
     pStream =
       choice
         [ keyword "streamParComm" *> pStreamPar SOAC.InOrder Commutative,
