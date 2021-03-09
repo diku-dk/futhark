@@ -28,7 +28,7 @@ import Futhark.Pass.ExtractKernels.ToKernels (injectSOACS)
 import Futhark.Tools
 import qualified Futhark.Transform.FirstOrderTransform as FOT
 import Futhark.Transform.Rename (Rename, renameSomething)
-import Futhark.Util (chunks, takeLast)
+import Futhark.Util (chunks, maybeHead, takeLast)
 import Futhark.Util.Log
 
 newtype ExtractM a = ExtractM (ReaderT (Scope MC) (State VNameSource) a)
@@ -390,6 +390,58 @@ transformSOAC pat _ (Stream w _ lam nes arrs) = do
     flip runBinderT_ soacs_scope $
       sequentialStreamWholeArray pat w nes lam arrs
   transformStms stream_stms
+transformSOAC pat _ (Stencil ws _p (StencilStatic stencil_is) lam inv_arrs arrs) = do
+  flat <- newVName "flat_tid"
+  space <- fmap (SegSpace flat) . forM ws $ \w -> do
+    p <- newVName "gtid"
+    pure (p, w)
+
+  lam_body <- lambdaBody <$> transformLambda lam
+
+  ((lam_params, lam_body_res), lam_body_stms) <- runBinder $ do
+    let (inv_params, stencil_params) = splitAt (length inv_arrs) $ lambdaParams lam
+        p = maybe 0 length $ maybeHead stencil_is
+
+    stencil_params' <- fmap concat $
+      forM stencil_params $ \(Param v t) -> do
+        let t' = stripArray 1 t
+        params <- replicateM p $ newParam (baseString v <> "_elem") t'
+        letBindNames [v] $ BasicOp $ ArrayLit (map (Var . paramName) params) t'
+        pure params
+
+    addStms $ bodyStms lam_body
+    pure (inv_params ++ stencil_params', bodyResult lam_body)
+
+  let lam_body' = mkBody lam_body_stms lam_body_res
+      lam' =
+        Lambda
+          { lambdaReturnType = lambdaReturnType lam,
+            lambdaParams = lam_params,
+            lambdaBody = lam_body'
+          }
+      stencil_op = StencilOp stencil_is arrs lam'
+
+  -- The body produces only the invariant (non-stenciled) arrays;
+  -- the others are passed to the stencil operation itself.
+  ((body_ret, krets), kstms) <-
+    runBinder . fmap unzip . forM inv_arrs $ \(inv, arr) -> do
+      let all_is = map fst $ unSegSpace space
+      arr_t <- lookupType arr
+      let slice =
+            fullSlice arr_t . map (DimFix . Var) $
+              variantIndexes (zip all_is [0 ..]) inv
+      arr' <- letSubExp "stencil_inv" $ BasicOp $ Index arr slice
+      arr_t' <- subExpType arr'
+      pure (arr_t', Returns ResultMaySimplify arr')
+
+  let body = KernelBody () kstms krets
+  pure . oneStm . Let pat (defAux ()) $
+    Op $ ParOp Nothing $ SegStencil () space stencil_op body_ret body
+  where
+    variantIndexes ((p, j) : ps) (i : is)
+      | j == i = variantIndexes ps is
+      | otherwise = p : variantIndexes ps is
+    variantIndexes ps _ = map fst ps
 
 transformProg :: Prog SOACS -> PassM (Prog MC)
 transformProg (Prog consts funs) =
