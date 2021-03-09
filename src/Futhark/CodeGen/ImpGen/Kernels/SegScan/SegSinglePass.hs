@@ -269,7 +269,7 @@ compileSegScan pat lvl space scanOp kbody = do
     accs <- mapM (dPrim "acc") tys
     sComment "Scan results (with warp scan)" $ do
       groupScan
-        crossesSegment -- TODO
+        crossesSegment
         (tvExp numThreads)
         (kernelGroupSize constants)
         scanOp'
@@ -448,7 +448,6 @@ compileSegScan pat lvl space scanOp kbody = do
     -- end sWhen
     -- end sComment
 
-    -- Parallel reduction during lookback should be performed here --
     scanOp''''' <- renameLambda scanOp'
     scanOp'''''' <- renameLambda scanOp'
 
@@ -466,10 +465,15 @@ compileSegScan pat lvl space scanOp kbody = do
       compileStms mempty (bodyStms $ lambdaBody scanOp'''''') $
         forM_ (zip3 xs tys $ bodyResult $ lambdaBody scanOp'''''') $
           \(x, ty, res) -> x <~~ toExp' ty res
-
+      stop <-
+        dPrimVE "stopping_point" $
+          (tvExp blockOff + sExt64 (kernelLocalThreadId constants ) * m)
+            `mod` segment_size
       sFor "i" m $ \i -> do
         forM_ (zip privateArrays ys) $ \(src, y) ->
-          copyDWIMFix y [] (Var src) [i]
+          -- only include prefix for the first segment part per thread
+          sWhen (i .<. segment_size - stop) $
+            copyDWIMFix y [] (Var src) [i]
 
         compileStms mempty (bodyStms $ lambdaBody scanOp''''') $
           forM_ (zip privateArrays $ bodyResult $ lambdaBody scanOp''''') $
@@ -501,7 +505,6 @@ compileSegScan pat lvl space scanOp kbody = do
               tvExp blockOff + kernelGroupSize constants * i
                 + sExt64 (kernelLocalThreadId constants)
           sWhen (tvExp flatIdx .<. n) $
-            -- Gives rank error
             let outerIdx = tvExp flatIdx `div` segment_size
                 sgmIdx = tvExp flatIdx `mod` segment_size
             in copyDWIMFix dest [outerIdx, sgmIdx] (Var src) [i]
