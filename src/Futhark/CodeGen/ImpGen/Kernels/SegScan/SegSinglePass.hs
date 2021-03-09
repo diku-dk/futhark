@@ -190,8 +190,8 @@ compileSegScan pat lvl space scanOp kbody = do
         dPrimV_ phys_tid $
           tvExp blockOff + sExt64 (kernelLocalThreadId constants)
             + i * kernelGroupSize constants
-        dPrimV_ mapIdx $ toInt64Exp mapSpaceExp
-        dPrimV_ innerIdx $ toInt64Exp innerExp
+        dPrimV_ mapIdx $ Imp.vi64 phys_tid `Futhark.Util.IntegralExp.div` toInt64Exp innerExp
+        dPrimV_ innerIdx $ Imp.vi64 phys_tid `Futhark.Util.IntegralExp.mod` toInt64Exp innerExp
         -- Perform the map
         let in_bounds =
               compileStms mempty (kernelBodyStms kbody) $ do
