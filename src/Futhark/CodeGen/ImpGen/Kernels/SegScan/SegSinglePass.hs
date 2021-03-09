@@ -472,13 +472,12 @@ compileSegScan pat lvl space scanOp kbody = do
       sFor "i" m $ \i -> do
         forM_ (zip privateArrays ys) $ \(src, y) ->
           -- only include prefix for the first segment part per thread
-          sWhen (i .<. segment_size - stop) $
             copyDWIMFix y [] (Var src) [i]
-
-        compileStms mempty (bodyStms $ lambdaBody scanOp''''') $
-          forM_ (zip privateArrays $ bodyResult $ lambdaBody scanOp''''') $
-            \(dest, res) ->
-              copyDWIMFix dest [i] res []
+        sWhen (i .<. segment_size - stop) $
+          compileStms mempty (bodyStms $ lambdaBody scanOp''''') $
+            forM_ (zip privateArrays $ bodyResult $ lambdaBody scanOp''''') $
+              \(dest, res) ->
+                copyDWIMFix dest [i] res []
 
     sComment "Transpose scan output" $ do
       forM_ (zip transposedArrays privateArrays) $ \(trans, priv) -> do
