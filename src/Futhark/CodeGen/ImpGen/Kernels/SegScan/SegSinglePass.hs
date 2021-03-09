@@ -17,7 +17,7 @@ import qualified Futhark.IR.Mem.IxFun as IxFun
 import Futhark.Transform.Rename
 import Futhark.Util (takeLast)
 import Futhark.Util.IntegralExp (IntegralExp (mod, div), divUp, quot)
-import Prelude hiding (quot)
+import Prelude hiding (quot, mod, div)
 
 xParams, yParams :: SegBinOp KernelsMem -> [LParam KernelsMem]
 xParams scan =
@@ -116,8 +116,9 @@ compileSegScan pat lvl space scanOp kbody = do
       m = 9
       num_groups = Count (n `divUp` (unCount group_size * m))
       num_threads = unCount num_groups * unCount group_size
-      (mapIdx, mapSpaceExp) = head $ unSegSpace space
+      (mapIdx, _) = head $ unSegSpace space
       (innerIdx, innerExp) = unSegSpace space !! 1
+      segment_size = toInt64Exp innerExp
       scanOpNe = segBinOpNeutral scanOp
       tys = map (\(Prim pt) -> pt) $ lambdaReturnType $ segBinOpLambda scanOp
       statusX, statusA, statusP :: Num a => a
@@ -190,8 +191,8 @@ compileSegScan pat lvl space scanOp kbody = do
         dPrimV_ phys_tid $
           tvExp blockOff + sExt64 (kernelLocalThreadId constants)
             + i * kernelGroupSize constants
-        dPrimV_ mapIdx $ Imp.vi64 phys_tid `Futhark.Util.IntegralExp.div` toInt64Exp innerExp
-        dPrimV_ innerIdx $ Imp.vi64 phys_tid `Futhark.Util.IntegralExp.mod` toInt64Exp innerExp
+        dPrimV_ mapIdx $ Imp.vi64 phys_tid `div` segment_size
+        dPrimV_ innerIdx $ Imp.vi64 phys_tid `mod` segment_size
         -- Perform the map
         let in_bounds =
               compileStms mempty (kernelBodyStms kbody) $ do
@@ -239,7 +240,7 @@ compileSegScan pat lvl space scanOp kbody = do
         -- determine if start of segment
         isNewSgm <-
           dPrimVE "new_sgm" $
-            Futhark.Util.IntegralExp.mod globalIdx (toInt64Exp innerExp) .==. 0
+            globalIdx `mod` segment_size .==. 0
         -- skip scan of first element in segment
         sUnless isNewSgm $
           forM_ (zip privateArrays $ zip3 xs ys tys) $ \(src, (x, y, ty)) -> do
@@ -257,12 +258,18 @@ compileSegScan pat lvl space scanOp kbody = do
         copyDWIMFix dest [sExt64 $ kernelLocalThreadId constants] (Var src) [m - 1]
       sOp localBarrier
 
+    let crossesSegment =
+          Just $ \from to ->
+          let from' = sExt64 from * m + tvExp blockOff
+              to' = sExt64 to * m + tvExp blockOff
+          in (from' - to') .>. to' `mod` segment_size
+
     scanOp' <- renameLambda $ segBinOpLambda scanOp
 
     accs <- mapM (dPrim "acc") tys
     sComment "Scan results (with warp scan)" $ do
       groupScan
-        Nothing -- TODO
+        crossesSegment -- TODO
         (tvExp numThreads)
         (kernelGroupSize constants)
         scanOp'
@@ -495,8 +502,8 @@ compileSegScan pat lvl space scanOp kbody = do
                 + sExt64 (kernelLocalThreadId constants)
           sWhen (tvExp flatIdx .<. n) $
             -- Gives rank error
-            let outerIdx = tvExp flatIdx `Futhark.Util.IntegralExp.div` toInt64Exp innerExp
-                sgmIdx = tvExp flatIdx `Futhark.Util.IntegralExp.mod` toInt64Exp innerExp
+            let outerIdx = tvExp flatIdx `div` segment_size
+                sgmIdx = tvExp flatIdx `mod` segment_size
             in copyDWIMFix dest [outerIdx, sgmIdx] (Var src) [i]
 
     sComment "If this is the last block, reset the dynamicId" $
