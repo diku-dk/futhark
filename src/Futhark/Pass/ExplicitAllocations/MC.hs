@@ -14,18 +14,26 @@ instance SizeSubst (MCOp lore op) where
   opSizeSubst _ _ = mempty
 
 handleSegOp :: SegOp () MC -> AllocM MC MCMem (SegOp () MCMem)
-handleSegOp op = do
+handleSegOp segop = do
   let num_threads = intConst Int64 256 -- FIXME
-  mapSegOpM (mapper num_threads) op
+  case segop of
+    SegStencil lvl space op ts body -> do
+      op' <- handleStencilOp num_threads op
+      SegStencil lvl space op' ts
+        <$> localScope scope (allocInKernelBody body)
+    _ -> mapSegOpM (mapper num_threads) segop
   where
-    scope = scopeOfSegSpace $ segSpace op
+    scope = scopeOfSegSpace $ segSpace segop
     mapper num_threads =
       identitySegOpMapper
         { mapOnSegOpBody =
             localScope scope . allocInKernelBody,
           mapOnSegOpLambda =
-            allocInBinOpLambda num_threads (segSpace op)
+            allocInBinOpLambda num_threads (segSpace segop)
         }
+
+    handleStencilOp num_threads (StencilOp is arrs lam) =
+      StencilOp is arrs <$> allocInStencilOpLambda num_threads (segSpace segop) lam
 
 handleMCOp :: Op MC -> AllocM MC MCMem (Op MCMem)
 handleMCOp (ParOp par_op op) =

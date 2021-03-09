@@ -6,6 +6,7 @@
 module Futhark.Pass.ExplicitAllocations.SegOp
   ( allocInKernelBody,
     allocInBinOpLambda,
+    allocInStencilOpLambda,
   )
 where
 
@@ -96,3 +97,17 @@ allocInBinOpLambda num_threads (SegSpace flat _) lam = do
     (acc_params' ++ arr_params')
     (lambdaBody lam)
     (lambdaReturnType lam)
+
+allocInStencilOpLambda ::
+  Allocable fromlore tolore =>
+  SubExp ->
+  SegSpace ->
+  Lambda fromlore ->
+  AllocM fromlore tolore (Lambda tolore)
+allocInStencilOpLambda _num_threads (SegSpace _flat _) lam = do
+  allocInLambda
+    (map (fmap onParamType) (lambdaParams lam))
+    (lambdaBody lam)
+    (lambdaReturnType lam)
+  where
+    onParamType (Prim pt) = MemPrim pt

@@ -41,7 +41,7 @@ allocAtLevel lvl = local $ \env ->
 handleSegOp ::
   SegOp SegLevel Kernels ->
   AllocM Kernels KernelsMem (SegOp SegLevel KernelsMem)
-handleSegOp op = do
+handleSegOp segop = do
   num_threads <-
     letSubExp "num_threads" $
       BasicOp $
@@ -49,23 +49,31 @@ handleSegOp op = do
           (Mul Int64 OverflowUndef)
           (unCount (segNumGroups lvl))
           (unCount (segGroupSize lvl))
-  allocAtLevel lvl $ mapSegOpM (mapper num_threads) op
+  allocAtLevel lvl $ case segop of
+    SegStencil _ space op ts body -> do
+      op' <- handleStencilOp num_threads op
+      SegStencil lvl space op' ts
+        <$> localScope scope (local f $ allocInKernelBody body)
+    _ -> mapSegOpM (mapper num_threads) segop
   where
-    scope = scopeOfSegSpace $ segSpace op
-    lvl = segLevel op
+    scope = scopeOfSegSpace $ segSpace segop
+    lvl = segLevel segop
     mapper num_threads =
       identitySegOpMapper
         { mapOnSegOpBody =
             localScope scope . local f . allocInKernelBody,
           mapOnSegOpLambda =
             local inThread
-              . allocInBinOpLambda num_threads (segSpace op)
+              . allocInBinOpLambda num_threads (segSpace segop)
         }
-    f = case segLevel op of
+    f = case segLevel segop of
       SegThread {} -> inThread
       SegGroup {} -> inGroup
     inThread env = env {envExpHints = inThreadExpHints}
     inGroup env = env {envExpHints = inGroupExpHints}
+
+    handleStencilOp num_threads (StencilOp is arrs lam) =
+      StencilOp is arrs <$> allocInStencilOpLambda num_threads (segSpace segop) lam
 
 handleHostOp ::
   HostOp Kernels (SOAC Kernels) ->
