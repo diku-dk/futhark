@@ -379,10 +379,21 @@ getExpValue (ScriptServer server _) e =
       throwError $ "Function " <> fname <> " not fully applied."
     toGround (SValue _ v) = pure v
 
--- | Like 'evalExp', but requires all values to be non-functional.
+-- | Like 'evalExp', but requires all values to be non-functional.  If
+-- the value has a bad type, return that type instead.  Other
+-- evaluation problems (e.g. type failures) raise errors.
 evalExpToGround ::
-  (MonadError T.Text m, MonadIO m) => EvalBuiltin m -> ScriptServer -> Exp -> m V.CompoundValue
-evalExpToGround builtin server e = getExpValue server =<< evalExp builtin server e
+  (MonadError T.Text m, MonadIO m) =>
+  EvalBuiltin m ->
+  ScriptServer ->
+  Exp ->
+  m (Either (V.Compound ScriptValueType) V.CompoundValue)
+evalExpToGround builtin server e = do
+  v <- evalExp builtin server e
+  -- This assumes that the only error that can occur during
+  -- getExpValue is trying to read an opaque.
+  (Right <$> getExpValue server v)
+    `catchError` const (pure $ Left $ fmap scriptValueType v)
 
 -- | The set of Futhark variables that are referenced by the
 -- expression - these will have to be entry points in the Futhark
