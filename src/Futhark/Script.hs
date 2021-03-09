@@ -164,6 +164,7 @@ readVar server v =
           s <- LBS.readFile tmpf
           case V.readValues s of
             Just [val] -> pure $ Right val
+            Just [] -> pure $ Left "Cannot read opaque value from Futhark server."
             _ -> pure $ Left "Invalid data file produced by Futhark server."
 
 writeVar :: (MonadError T.Text m, MonadIO m) => Server -> VarName -> V.Value -> m ()
