@@ -13,7 +13,6 @@ import qualified Data.Kind
 import Futhark.IR.Prop.Types
 import Futhark.IR.RetType
 import Futhark.IR.Syntax.Core
-import Language.SexpGrammar (SexpIso)
 
 -- | A collection of type families, along with constraints specifying
 -- that the types they map to should satisfy some minimal
@@ -48,15 +47,7 @@ class
     Typed (FParamInfo l),
     Typed (LParamInfo l),
     Typed (LetDec l),
-    DeclTyped (FParamInfo l),
-    SexpIso (LetDec l),
-    SexpIso (ExpDec l),
-    SexpIso (BodyDec l),
-    SexpIso (FParamInfo l),
-    SexpIso (LParamInfo l),
-    SexpIso (RetType l),
-    SexpIso (BranchType l),
-    SexpIso (Op l)
+    DeclTyped (FParamInfo l)
   ) =>
   Decorations l
   where

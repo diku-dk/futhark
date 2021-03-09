@@ -5,7 +5,39 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
-## [0.19.0]
+## [0.20.0]
+
+### Added
+
+  * New subcommand: `futhark hash`.
+
+  * `futhark literate` is now smart about when to regenerate image and
+    animation files.
+
+### Removed
+
+### Changed
+
+### Fixed
+
+  * Type-checking of higher-order functions that take consuming
+    funtional arguments.
+
+  * Missing cases in causality checking (#1263).
+
+  * `f32.sgn` was mistakenly defined with double precision arithmetic.
+
+  * Only include double-precision atomics if actually needed by
+    program (this avoids problems on devices that only support single
+    precision).
+
+  * A lambda lifting bug due to not handling existential sizes
+    produced by loops correctly (#1267).
+
+  * Incorrect uniqueness attributes inserted by lambda lifting
+    (#1268).
+
+## [0.19.1]
 
 ### Added
 

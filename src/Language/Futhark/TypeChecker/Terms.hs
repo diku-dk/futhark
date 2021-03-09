@@ -2368,8 +2368,6 @@ consumeArg loc (Scalar (Arrow _ _ t1 _)) (FuncDiet d _)
       contravariantArg tp dp && contravariantArg tr dr
     contravariantArg _ _ =
       True
-consumeArg loc (Scalar (Arrow _ _ _ t2)) (FuncDiet _ pd) =
-  consumeArg loc t2 pd
 consumeArg loc at Consume = return [consumption (aliases at) loc]
 consumeArg loc at _ = return [observation (aliases at) loc]
 
@@ -2414,6 +2412,15 @@ causalityCheck binding_body = do
       onExp known (Var v (Info t) loc)
         | Just bad <- checkCausality (pquote (ppr v)) known t loc =
           bad
+      onExp known (ProjectSection _ (Info t) loc)
+        | Just bad <- checkCausality "projection section" known t loc =
+          bad
+      onExp known (OpSectionRight _ (Info t) _ _ _ loc)
+        | Just bad <- checkCausality "operator section" known t loc =
+          bad
+      onExp known (OpSectionLeft _ (Info t) _ _ _ loc)
+        | Just bad <- checkCausality "operator section" known t loc =
+          bad
       onExp known (ArrayLit [] (Info t) loc)
         | Just bad <- checkCausality "empty array" known t loc =
           bad
@@ -2432,15 +2439,7 @@ causalityCheck binding_body = do
         return e
       onExp
         known
-        e@( BinOp
-              (f, floc)
-              ft
-              (x, Info (_, xp))
-              (y, Info (_, yp))
-              _
-              (Info ext)
-              _
-            ) = do
+        e@(BinOp (f, floc) ft (x, Info (_, xp)) (y, Info (_, yp)) _ (Info ext) _) = do
           args_known <-
             lift $
               execStateT (sequencePoint known x y $ catMaybes [xp, yp]) mempty

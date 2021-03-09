@@ -284,7 +284,7 @@ intraGroupStm lvl stm@(Let pat aux e) = do
               zip (chunks (concat $ zipWith (\ws n -> replicate n $ length ws) dests_ws dests_ns) i_res) v_res
                 & chunks dests_ns
                 & zip3 dests_ws dests_vs
-            return $ WriteReturns (shapeDims a_w) a [(map DimFix is, v) | (is, v) <- is_vs]
+            return $ WriteReturns a_w a [(map DimFix is, v) | (is, v) <- is_vs]
           inputs = do
             (p, p_a) <- zip (lambdaParams lam') ivs
             return $ KernelInput (paramName p) (paramType p) p_a [Var write_i]

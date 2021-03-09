@@ -1,5 +1,4 @@
 {-# LANGUAGE ConstraintKinds #-}
-{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE OverloadedStrings #-}
@@ -71,9 +70,6 @@ import qualified Futhark.TypeCheck as TC
 import Futhark.Util (chunks, maybeNth, nubOrd)
 import Futhark.Util.Pretty (Doc, Pretty, comma, commasep, parens, ppr, text, (<+>), (</>))
 import qualified Futhark.Util.Pretty as PP
-import GHC.Generics (Generic)
-import Language.SexpGrammar as Sexp
-import Language.SexpGrammar.Generic
 import Prelude hiding (id, (.))
 
 -- | The relative neighbourhood indexes for a 'Stencil'.  Conceptually
@@ -86,13 +82,7 @@ data StencilIndexes
   | -- | The list-of-lists must represent a regular array of type
     -- @[r][p]i64@.
     StencilStatic [[Integer]]
-  deriving (Eq, Ord, Show, Generic)
-
-instance SexpIso StencilIndexes where
-  sexpIso =
-    match $
-      With (. Sexp.list (Sexp.el (Sexp.sym "dynamic") >>> Sexp.el sexpIso)) $
-        With (. Sexp.list (Sexp.el (Sexp.sym "static") >>> Sexp.el sexpIso)) End
+  deriving (Eq, Ord, Show)
 
 -- | A second-order array combinator (SOAC).
 data SOAC lore
@@ -140,22 +130,7 @@ data SOAC lore
       (Lambda lore)
       [([Int], VName)] -- List of (invariant,arr)
       [VName] -- [...ds...]a, input to stencil.
-  deriving (Eq, Ord, Show, Generic)
-
-instance Decorations lore => SexpIso (SOAC lore) where
-  sexpIso =
-    match $ With streamsexp $ With scattersexp $ With histsexp $ With scremasexp $ With stencilsexp End
-    where
-      streamsexp =
-        (. Sexp.list (Sexp.el (Sexp.sym "stream") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso))
-      scattersexp =
-        (. Sexp.list (Sexp.el (Sexp.sym "scatter") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso))
-      histsexp =
-        (. Sexp.list (Sexp.el (Sexp.sym "hist") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso))
-      scremasexp =
-        (. Sexp.list (Sexp.el (Sexp.sym "screma") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso))
-      stencilsexp =
-        (. Sexp.list (Sexp.el (Sexp.sym "stencil") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso))
+  deriving (Eq, Ord, Show)
 
 -- | Information about computing a single histogram.
 data HistOp lore = HistOp
@@ -167,55 +142,20 @@ data HistOp lore = HistOp
     histNeutral :: [SubExp],
     histOp :: Lambda lore
   }
-  deriving (Eq, Ord, Show, Generic)
-
-instance Decorations lore => SexpIso (HistOp lore) where
-  sexpIso = with $ \histop ->
-    Sexp.list
-      ( Sexp.el sexpIso
-          >>> Sexp.el sexpIso
-          >>> Sexp.el sexpIso
-          >>> Sexp.el sexpIso
-          >>> Sexp.el sexpIso
-      )
-      >>> histop
+  deriving (Eq, Ord, Show)
 
 -- | Is the stream chunk required to correspond to a contiguous
 -- subsequence of the original input ('InOrder') or not?  'Disorder'
 -- streams can be more efficient, but not all algorithms work with
 -- this.
 data StreamOrd = InOrder | Disorder
-  deriving (Eq, Ord, Show, Generic)
-
-instance SexpIso StreamOrd where
-  sexpIso =
-    match $
-      With (. Sexp.sym "in-order") $
-        With
-          (. Sexp.sym "disorder")
-          End
+  deriving (Eq, Ord, Show)
 
 -- | What kind of stream is this?
 data StreamForm lore
   = Parallel StreamOrd Commutativity (Lambda lore)
   | Sequential
-  deriving (Eq, Ord, Show, Generic)
-
-instance Decorations lore => SexpIso (StreamForm lore) where
-  sexpIso =
-    match $
-      With
-        ( .
-            Sexp.list
-              ( Sexp.el (Sexp.sym "parallel")
-                  >>> Sexp.el sexpIso
-                  >>> Sexp.el sexpIso
-                  >>> Sexp.el sexpIso
-              )
-        )
-        $ With
-          (. Sexp.list (Sexp.el (Sexp.sym "sequential")))
-          End
+  deriving (Eq, Ord, Show)
 
 -- | The essential parts of a 'Screma' factored out (everything
 -- except the input arrays).
@@ -224,16 +164,7 @@ data ScremaForm lore
       [Scan lore]
       [Reduce lore]
       (Lambda lore)
-  deriving (Eq, Ord, Show, Generic)
-
-instance Decorations lore => SexpIso (ScremaForm lore) where
-  sexpIso = with $ \scremaform ->
-    Sexp.list
-      ( Sexp.el sexpIso
-          >>> Sexp.el sexpIso
-          >>> Sexp.el sexpIso
-      )
-      >>> scremaform
+  deriving (Eq, Ord, Show)
 
 singleBinOp :: Bindable lore => [Lambda lore] -> Lambda lore
 singleBinOp lams =
@@ -254,16 +185,7 @@ data Scan lore = Scan
   { scanLambda :: Lambda lore,
     scanNeutral :: [SubExp]
   }
-  deriving (Eq, Ord, Show, Generic)
-
-instance Decorations lore => SexpIso (Scan lore) where
-  sexpIso = with $ \scan ->
-    Sexp.list
-      ( Sexp.el (Sexp.sym "scan")
-          >>> Sexp.el sexpIso
-          >>> Sexp.el sexpIso
-      )
-      >>> scan
+  deriving (Eq, Ord, Show)
 
 -- | How many reduction results are produced by these 'Scan's?
 scanResults :: [Scan lore] -> Int
@@ -282,17 +204,7 @@ data Reduce lore = Reduce
     redLambda :: Lambda lore,
     redNeutral :: [SubExp]
   }
-  deriving (Eq, Ord, Show, Generic)
-
-instance Decorations lore => SexpIso (Reduce lore) where
-  sexpIso = with $ \red ->
-    Sexp.list
-      ( Sexp.el (Sexp.sym "reduce")
-          >>> Sexp.el sexpIso
-          >>> Sexp.el sexpIso
-          >>> Sexp.el sexpIso
-      )
-      >>> red
+  deriving (Eq, Ord, Show)
 
 -- | How many reduction results are produced by these 'Reduce's?
 redResults :: [Reduce lore] -> Int
