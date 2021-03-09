@@ -14,6 +14,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * `futhark literate` is now smart about when to regenerate image and
     animation files.
 
+  * `futhark literate` now produces better error messages passing
+    expressions of the wrong type to directives.
+
 ### Removed
 
 ### Changed
