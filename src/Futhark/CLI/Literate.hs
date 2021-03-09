@@ -50,6 +50,7 @@ import System.Environment (getExecutablePath)
 import System.Exit
 import System.FilePath
 import System.IO
+import System.IO.Error (isDoesNotExistError)
 import System.IO.Temp (withSystemTempDirectory, withSystemTempFile)
 import Text.Megaparsec hiding (State, failure, token)
 import Text.Megaparsec.Char
@@ -729,8 +730,11 @@ processBlock env (BlockDirective directive) = do
 cleanupImgDir :: Env -> Files -> IO ()
 cleanupImgDir env keep_files =
   mapM_ toRemove . filter (not . (`S.member` keep_files))
-    =<< directoryContents (envImgDir env)
+    =<< (directoryContents (envImgDir env) `catchError` onError)
   where
+    onError e
+      | isDoesNotExistError e = pure []
+      | otherwise = throwError e
     toRemove f = do
       when (scriptVerbose (envOpts env) > 0) $
         T.hPutStrLn stderr $ "Deleting unused file: " <> T.pack f
