@@ -504,20 +504,23 @@ processDirective env (DirectiveBrief d) =
 processDirective env (DirectiveCovert d) =
   processDirective env d
 processDirective env (DirectiveRes e) = do
-  vs <- evalExpToGround literateBuiltin (envServer env) e
+  v <- either nope pure =<< evalExpToGround literateBuiltin (envServer env) e
   pure $
     T.unlines
       [ "",
         "```",
-        prettyText vs,
+        prettyText v,
         "```",
         ""
       ]
+  where
+    nope t =
+      throwError $ "Cannot show value of type " <> prettyText t
 --
 processDirective env (DirectiveImg e) = do
-  vs <- evalExpToGround literateBuiltin (envServer env) e
-  case vs of
-    ValueAtom v
+  maybe_v <- evalExpToGround literateBuiltin (envServer env) e
+  case maybe_v of
+    Right (ValueAtom v)
       | Just bmp <- valueToBMP v -> do
         pngfile <- withTempDir $ \dir -> do
           let bmpfile = dir </> "img.bmp"
@@ -525,26 +528,34 @@ processDirective env (DirectiveImg e) = do
           newFile env "img.png" $ \pngfile ->
             void $ system "convert" [bmpfile, pngfile] mempty
         pure $ imgBlock pngfile
-    _ ->
+    Right v ->
+      nope $ fmap valueType v
+    Left t ->
+      nope t
+  where
+    nope t =
       throwError $
-        "Cannot create image from value of type "
-          <> prettyText (fmap valueType vs)
+        "Cannot create image from value of type " <> prettyText t
 --
 processDirective env (DirectivePlot e size) = do
-  v <- evalExpToGround literateBuiltin (envServer env) e
-  case v of
-    _
+  maybe_v <- evalExpToGround literateBuiltin (envServer env) e
+  case maybe_v of
+    Right v
       | Just vs <- plottable2d v -> do
         pngfile <- newFile env "plot.png" $ plotWith [(Nothing, vs)]
         pure $ imgBlock pngfile
-    ValueRecord m
+    Right (ValueRecord m)
       | Just m' <- traverse plottable2d m -> do
         pngfile <- newFile env "plot.png" $ plotWith $ map (first Just) $ M.toList m'
         pure $ imgBlock pngfile
-    _ ->
-      throwError $
-        "Cannot plot value of type " <> prettyText (fmap valueType v)
+    Right v ->
+      nope $ fmap valueType v
+    Left t ->
+      nope t
   where
+    nope t =
+      throwError $ "Cannot plot value of type " <> prettyText t
+
     plottable2d v = do
       [x, y] <- plottable v
       Just [x, y]
@@ -575,16 +586,20 @@ processDirective env (DirectivePlot e size) = do
         void $ system "gnuplot" [] script
 --
 processDirective env (DirectiveGnuplot e script) = do
-  vs <- evalExpToGround literateBuiltin (envServer env) e
-  case vs of
-    ValueRecord m
+  maybe_v <- evalExpToGround literateBuiltin (envServer env) e
+  case maybe_v of
+    Right (ValueRecord m)
       | Just m' <- traverse plottable m -> do
         pngfile <- newFile env "plot.png" $ plotWith $ M.toList m'
         pure $ imgBlock pngfile
-    _ ->
-      throwError $
-        "Cannot plot value of type " <> prettyText (fmap valueType vs)
+    Right v ->
+      nope $ fmap valueType v
+    Left t ->
+      nope t
   where
+    nope t =
+      throwError $
+        "Cannot plot value of type " <> prettyText t
     plotWith xys pngfile = withGnuplotData [] xys $ \_ sets -> do
       let script' =
             T.unlines
