@@ -16,7 +16,7 @@ import Futhark.IR.KernelsMem
 import qualified Futhark.IR.Mem.IxFun as IxFun
 import Futhark.Transform.Rename
 import Futhark.Util (takeLast)
-import Futhark.Util.IntegralExp (IntegralExp (mod), divUp, quot)
+import Futhark.Util.IntegralExp (IntegralExp (mod, div), divUp, quot)
 import Prelude hiding (quot)
 
 xParams, yParams :: SegBinOp KernelsMem -> [LParam KernelsMem]
@@ -291,3 +291,65 @@ compileSegScan pat lvl space scanOp kbody = do
           copyDWIMFix statusFlags [tvExp dynamicId] (intConst Int8 statusP) []
         forM_ (zip scanOpNe accs) $ \(ne, acc) ->
           copyDWIMFix (tvVar acc) [] ne []
+
+    -- Parallel reduction during lookback should be performed here --
+    scanOp''''' <- renameLambda scanOp'
+    scanOp'''''' <- renameLambda scanOp'
+
+    sComment "Distribute results" $ do
+      let (xs, ys) = splitAt (length tys) $ map paramName $ lambdaParams scanOp'''''
+          (xs', ys') = splitAt (length tys) $ map paramName $ lambdaParams scanOp''''''
+
+      forM_ (zip4 (zip prefixes accs) (zip xs xs') (zip ys ys') tys) $
+        \((prefix, acc), (x, x'), (y, y'), ty) -> do
+          dPrim_ x ty
+          dPrim_ y ty
+          dPrimV_ x' $ tvExp prefix
+          dPrimV_ y' $ tvExp acc
+
+      compileStms mempty (bodyStms $ lambdaBody scanOp'''''') $
+        forM_ (zip3 xs tys $ bodyResult $ lambdaBody scanOp'''''') $
+          \(x, ty, res) -> x <~~ toExp' ty res
+
+      sFor "i" m $ \i -> do
+        forM_ (zip privateArrays ys) $ \(src, y) ->
+          copyDWIMFix y [] (Var src) [i]
+
+        compileStms mempty (bodyStms $ lambdaBody scanOp''''') $
+          forM_ (zip privateArrays $ bodyResult $ lambdaBody scanOp''''') $
+            \(dest, res) ->
+              copyDWIMFix dest [i] res []
+
+    sComment "Transpose scan output" $ do
+      forM_ (zip transposedArrays privateArrays) $ \(trans, priv) -> do
+        sOp localBarrier
+        sFor "i" m $ \i -> do
+          sharedIdx <-
+            dPrimV "sharedIdx" $
+              sExt64 (kernelLocalThreadId constants * m) + i
+          copyDWIMFix trans [tvExp sharedIdx] (Var priv) [i]
+        sOp localBarrier
+        sFor "i" m $ \i -> do
+          sharedIdx <-
+            dPrimV "sharedIdx" $
+              kernelLocalThreadId constants
+                + sExt32 (kernelGroupSize constants * i)
+          copyDWIMFix priv [i] (Var trans) [sExt64 $ tvExp sharedIdx]
+      sOp localBarrier
+
+    sComment "Write block scan results to global memory" $
+      forM_ (zip (map patElemName all_pes) privateArrays) $ \(dest, src) ->
+        sFor "i" m $ \i -> do
+          flatIdx <-
+            dPrimV "flatIdx" $
+              tvExp blockOff + kernelGroupSize constants * i
+                + sExt64 (kernelLocalThreadId constants)
+          sWhen (tvExp flatIdx .<. n) $
+            -- Gives rank error
+            let outerIdx = tvExp flatIdx `Futhark.Util.IntegralExp.div` toInt64Exp innerExp
+                sgmIdx = tvExp flatIdx `Futhark.Util.IntegralExp.mod` toInt64Exp innerExp
+            in copyDWIMFix dest [outerIdx, sgmIdx] (Var src) [i]
+
+    sComment "If this is the last block, reset the dynamicId" $
+      sWhen (tvExp dynamicId .==. unCount num_groups - 1) $
+        copyDWIMFix globalId [0] (constant (0 :: Int32)) []
