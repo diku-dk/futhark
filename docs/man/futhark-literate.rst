@@ -150,7 +150,8 @@ The following directives are supported:
   The two arrays must have the same length and are interpreted as
   ``x`` and ``y`` values, respectively.
 
-  The expression may also be a record, where each field will be
+  The expression may also be a record expression (*not* merely the
+  name of a Futhark variable of record type), where each field will be
   plotted separately and must have the type mentioned above.
 
 * ``> :gnuplot e; script...``
