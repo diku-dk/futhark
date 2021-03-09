@@ -14,6 +14,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * `futhark literate` is now smart about when to regenerate image and
     animation files.
 
+  * `futhark literate` now produces better error messages passing
+    expressions of the wrong type to directives.
+
 ### Removed
 
 ### Changed
@@ -33,6 +36,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * A lambda lifting bug due to not handling existential sizes
     produced by loops correctly (#1267).
+
+  * Incorrect uniqueness attributes inserted by lambda lifting
+    (#1268).
 
 ## [0.19.1]
 

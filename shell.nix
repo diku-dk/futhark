@@ -11,6 +11,7 @@ pkgs.stdenv.mkDerivation {
     pkgs.file
     pkgs.git
     pkgs.haskell.compiler.ghc8104
+    pkgs.haskellPackages.weeder
     pkgs.hlint
     pkgs.ocl-icd
     pkgs.opencl-headers

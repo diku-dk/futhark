@@ -194,7 +194,7 @@ The following program tests simple indexing and bounds checking::
   -- input { [4,3,2,1] 1i64 }
   -- output { 3 }
   -- input { [4,3,2,1] 5i64 }
-  -- error: Assertion.*failed
+  -- error: Error*
 
   let main (a: []i32) (i: i64): i32 =
     a[i]
@@ -202,7 +202,7 @@ The following program tests simple indexing and bounds checking::
 The following program contains two entry points, both of which are
 tested::
 
-  let add(x: i32, y: i32): i32 = x + y
+  let add (x: i32) (y: i32): i32 = x + y
 
   -- Test the add1 function.
   -- ==
