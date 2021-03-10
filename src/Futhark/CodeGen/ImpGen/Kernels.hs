@@ -28,6 +28,7 @@ import Futhark.CodeGen.ImpGen.Kernels.SegHist
 import Futhark.CodeGen.ImpGen.Kernels.SegMap
 import Futhark.CodeGen.ImpGen.Kernels.SegRed
 import Futhark.CodeGen.ImpGen.Kernels.SegScan
+import Futhark.CodeGen.ImpGen.Kernels.SegStencil
 import Futhark.CodeGen.ImpGen.Kernels.Transpose
 import Futhark.CodeGen.SetDefaultSpace
 import Futhark.Error
@@ -158,6 +159,8 @@ segOpCompiler pat (SegScan lvl@SegThread {} space scans _ kbody) =
   compileSegScan pat lvl space scans kbody
 segOpCompiler pat (SegHist (SegThread num_groups group_size _) space ops _ kbody) =
   compileSegHist pat num_groups group_size space ops kbody
+segOpCompiler pat (SegStencil lvl space stencilOps _ kbody) =
+  compileSegStencil pat lvl space stencilOps kbody
 segOpCompiler pat segop =
   compilerBugS $ "segOpCompiler: unexpected " ++ pretty (segLevel segop) ++ " for rhs of pattern " ++ pretty pat
 
