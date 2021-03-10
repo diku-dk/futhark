@@ -39,7 +39,7 @@ for others.
 
 The general format has this header::
 
-  b <version> <num_dims> <type>
+  b <version> <num_dims> <type> <values...>
 
 Where ``version`` is a byte containing the version of the binary format used for
 encoding (currently 2), ``num_dims`` is the number of dimensions in the array as
@@ -50,11 +50,12 @@ Encoding a scalar value is done by treating it as a 0-dimensional array::
 
   b <version> 0 <type> <value>
 
-To encode an array we must encode the number of dimensions ``n`` as a single
-byte, each dimension ``dim_i`` as an unsigned 64-bit little endian integer, and
-finally all the values in their binary little endian representation::
+To encode an array, we encode the number of dimensions ``n`` as a
+single byte, each dimension ``dim_i`` as an unsigned 64-bit little
+endian integer, and finally all the values in row-major order in their
+binary little endian representation::
 
-  b <version> <n> <type> <dim_1> <dim_2> ... <dim_n> <values>
+  b <version> <n> <type> <dim_1> <dim_2> ... <dim_n> <values...>
 
 
 Type Values
@@ -77,3 +78,6 @@ types are::
 
 Note that unsigned and signed integers have the same byte-level
 representation.
+
+Values of type ``bool`` are encoded with a byte each.  The results are
+undefined if this byte is not either 0 or 1.
