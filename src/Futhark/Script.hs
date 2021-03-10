@@ -125,7 +125,7 @@ parseExp sep =
       StringLit . T.pack <$> lexeme sep ("\"" *> manyTill charLiteral "\"")
     ]
   where
-    pField = (,) <$> parseEntryName <*> (pEquals *> parseExp sep)
+    pField = (,) <$> lexeme sep parseEntryName <*> (pEquals *> parseExp sep)
     pEquals = lexeme sep "="
     pComma = lexeme sep ","
     mkTuple [v] = v
