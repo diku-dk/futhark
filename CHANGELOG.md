@@ -40,6 +40,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * Incorrect uniqueness attributes inserted by lambda lifting
     (#1268).
 
+  * FutharkScript record expressions were a bit too sensitive to
+    whitespace.
+
 ## [0.19.1]
 
 ### Added
