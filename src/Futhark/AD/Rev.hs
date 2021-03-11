@@ -440,7 +440,9 @@ diffMap pat_adj w map_lam as = do
     partitionEithers <$> mapM decideOnFreeVar free_in_map_lam
 
   acc_params <-
-    mapM (newParam "map_acc_p" . rowType <=< lookupType . snd) arrs_and_accs
+    mapM
+      (newParam "map_acc_p" . rowType <=< lookupType . snd . snd)
+      arrs_and_accs
 
   let adjs_for =
         map paramName (lambdaParams map_lam')
@@ -460,11 +462,11 @@ diffMap pat_adj w map_lam as = do
   (param_contribs, free_contribs, acc_contribs) <-
     fmap (splitAt3 (length (lambdaParams map_lam')) (length prim_free)) $
       letTupExp "map_adjs" . Op . Screma w (mapSOAC lam_rev) $
-        as ++ map snd arrs_and_accs ++ pat_adj
+        as ++ map (snd . snd) arrs_and_accs ++ pat_adj
 
   zipWithM_ updateAdj as param_contribs
   zipWithM_ freeContrib prim_free free_contribs
-  zipWithM_ accContrib (map fst arrs_and_accs) acc_contribs
+  zipWithM_ accContrib arrs_and_accs acc_contribs
   where
     addIdxParam lam = do
       idx <- newParam "idx" $ Prim int64
@@ -473,24 +475,34 @@ diffMap pat_adj w map_lam as = do
     accAddLambda t = addIdxParam =<< addLambda t
 
     decideOnFreeVar v = do
-      v_t <- lookupType v
-      case v_t of
+      v_adj <- lookupAdj v
+      v_adj_t <- lookupType v_adj
+      case v_adj_t of
         Array (ElemPrim _) (Shape (d : _)) _ -> do
-          v_adj <- lookupAdj v
-          add_lam <- accAddLambda $ rowType v_t
-          zero <- letSubExp "zero" $ zeroExp $ rowType v_t
-          fmap (Right . (v,)) . letExp (baseString v <> "_acc") $
+          add_lam <- accAddLambda $ rowType v_adj_t
+          zero <- letSubExp "zero" $ zeroExp $ rowType v_adj_t
+          fmap (Right . (v,) . (v_adj_t,)) . letExp (baseString v <> "_acc") $
             MkAcc (Shape [w]) [v_adj] (Shape [d]) (Just (add_lam, [zero]))
+        Acc _ ->
+          fmap (Right . (v,) . (v_adj_t,))
+            . letExp (baseString v_adj <> "_rep")
+            $ BasicOp $ Replicate (Shape [w]) (Var v_adj)
         Prim pt ->
           pure $ Left (v, pt)
         _ ->
-          error $ "decideOnFreeVar: cannot handle type " ++ pretty v_t
+          error $ "decideOnFreeVar: cannot handle type " ++ pretty v_adj_t
 
-    accContrib arr contrib_acc = do
-      arr_t <- lookupType arr
-      arr_adj <-
-        letExp (baseString arr <> "_arr") $ BasicOp $ UnAcc contrib_acc [arr_t]
-      insAdj arr arr_adj
+    accContrib (arr, (arr_adj_t, _)) contrib_acc =
+      -- A hack to determine whether the adjoint was an accumulator in
+      -- the first place.
+      insAdj arr =<< case arr_adj_t of
+        Acc _ ->
+          letExp (baseString arr <> "_arr") $
+            -- FIXME: we need a JoinAcc construct.
+            BasicOp $ Index contrib_acc [DimFix $ intConst Int64 0]
+        _ ->
+          letExp (baseString arr <> "_arr") $
+            BasicOp $ UnAcc contrib_acc [arr_adj_t]
 
     freeContrib (v, v_pt) contrib = do
       lam <- addLambda $ Prim v_pt
