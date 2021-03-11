@@ -28,6 +28,9 @@ pdUnOp (Abs it) a = UnOpExp (SSignum it) a
 pdUnOp (FAbs ft) a = UnOpExp (FSignum ft) a
 pdUnOp Not x = x
 pdUnOp (Complement it) x = UnOpExp (Complement it) x
+pdUnOp (SSignum it) _ = iConst it 0
+pdUnOp (USignum it) _ = iConst it 0
+pdUnOp (FSignum ft) _ = fConst ft 0
 
 type OnBinOp t v = TPrimExp t v -> TPrimExp t v -> (TPrimExp t v, TPrimExp t v)
 
