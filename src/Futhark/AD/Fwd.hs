@@ -343,15 +343,14 @@ fwdSOAC pat aux (Hist len ops bucket_fun imgs) = do
   where
     fwdHist :: HistOp SOACS -> ADM (HistOp SOACS)
     fwdHist (HistOp width rf dest nes op) = do
-      dest_tan <- mapM tangent dest
-
+      dest' <- bundleTan dest
       nes_tan <- mapM (fmap Var . zeroFromSubExp) nes
       op' <- fwdLambda op
       return $
         HistOp
           { histWidth = width,
             histRaceFactor = rf,
-            histDest = dest ++ dest_tan,
+            histDest = dest',
             histNeutral = interleave nes nes_tan,
             histOp = op'
           }
