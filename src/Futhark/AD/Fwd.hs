@@ -145,9 +145,7 @@ instance TanBinder (PatternT (TypeBase s u)) where
 
 instance TanBinder (Param (TypeBase s u)) where
   newTan (Param p t) = do
-    p' <- tanVName p
-    insertTan p p'
-    t' <- tanType t
+    PatElem p' t' <- newTan $ PatElem p t
     return $ Param p' t'
   bundleNew param@(Param _ t) = do
     param' <- newTan param
@@ -282,7 +280,7 @@ basicFwd pat aux op = do
     _ -> error $ "basicFwd: Unsupported op " ++ pretty op
 
 fwdLambda :: Lambda -> ADM Lambda
-fwdLambda l@(Lambda params body ret) = do
+fwdLambda l@(Lambda params body ret) =
   Lambda <$> bundleNew params <*> inScopeOf l (fwdBody body) <*> bundleTan ret
 
 interleave :: [a] -> [a] -> [a]
@@ -331,7 +329,7 @@ fwdSOAC pat aux (Stream size form lam nes xs) = do
   nes_tan <- mapM (fmap Var . zeroFromSubExp) nes
   let nes' = interleave nes nes_tan
   case form of
-    Sequential -> do
+    Sequential ->
       addStm $ Let pat' aux $ Op $ Stream size Sequential lam' nes' xs'
     Parallel o comm lam0 -> do
       lam0' <- fwdLambda lam0
@@ -345,14 +343,15 @@ fwdSOAC pat aux (Hist len ops bucket_fun imgs) = do
   where
     fwdHist :: HistOp SOACS -> ADM (HistOp SOACS)
     fwdHist (HistOp width rf dest nes op) = do
-      dest' <- bundleTan dest
+      dest_tan <- mapM tangent dest
+
       nes_tan <- mapM (fmap Var . zeroFromSubExp) nes
       op' <- fwdLambda op
       return $
         HistOp
           { histWidth = width,
             histRaceFactor = rf,
-            histDest = dest',
+            histDest = dest ++ dest_tan,
             histNeutral = interleave nes nes_tan,
             histOp = op'
           }
@@ -438,7 +437,7 @@ fwdBodyOnlyTangents (Body _ stms res) = do
   return $ mkBody stms' res'
 
 fwdJVP :: MonadFreshNames m => Scope SOACS -> Lambda -> m Lambda
-fwdJVP scope l@(Lambda params body ret) = do
+fwdJVP scope l@(Lambda params body ret) =
   runADM . localScope scope $
     inScopeOf l $ do
       params_tan <- newTan params
