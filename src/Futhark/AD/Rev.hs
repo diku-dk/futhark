@@ -3,6 +3,7 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeFamilies #-}
 
 -- Naming scheme:
@@ -16,6 +17,7 @@ module Futhark.AD.Rev (revVJP) where
 import Control.Monad
 import Control.Monad.State.Strict
 import Data.Bifunctor (second)
+import Data.Either (partitionEithers)
 import qualified Data.Map as M
 import Futhark.AD.Derivatives
 import Futhark.Analysis.PrimExp.Convert
@@ -23,7 +25,7 @@ import Futhark.Binder
 import Futhark.Construct
 import Futhark.IR.SOACS
 import Futhark.Transform.Rename
-import Futhark.Util (takeLast)
+import Futhark.Util (splitAt3, takeLast)
 
 --- First some general utility functions that are not specific to AD.
 
@@ -183,7 +185,7 @@ addExp x y = do
       lam <- addLambda $ rowType x_t
       pure $ Op $ Screma (arraySize 0 x_t) (mapSOAC lam) [x, y]
     _ ->
-      error $ "addExp: undexpected type: " ++ pretty x_t
+      error $ "addExp: unexpected type: " ++ pretty x_t
 
 setAdj :: VName -> Exp -> ADM VName
 setAdj v e = do
@@ -204,9 +206,13 @@ instance Adjoint VName where
     case maybeAdj of
       Nothing -> setAdj v $ BasicOp $ SubExp $ Var d
       Just v_adj -> do
-        v_adj' <- letExp (baseString v <> "_adj") =<< addExp v_adj d
-        insAdj v v_adj'
-        pure v_adj'
+        v_adj_t <- lookupType v_adj
+        case v_adj_t of
+          Acc _ -> error $ "updateAdj on accumulator: " <> pretty v
+          _ -> do
+            v_adj' <- letExp (baseString v <> "_adj") =<< addExp v_adj d
+            insAdj v v_adj'
+            pure v_adj'
 
   updateAdjSlice slice v d = do
     maybeAdj <- gets $ M.lookup v . stateAdjs
@@ -216,11 +222,22 @@ instance Adjoint VName where
         void $ lookupAdj v -- Initialise adjoint.
         updateAdjSlice slice v d
       Just v_adj -> do
-        v_adjslice <-
-          if primType t
-            then return v_adj
-            else letExp (baseString v ++ "_slice") $ BasicOp $ Index v_adj slice
-        v_adj' <- letInPlace "updated_adj" v_adj slice =<< addExp v_adjslice d
+        let isDimFix (DimFix i) = i
+            isDimFix _ =
+              error $ "Invalid slice for accumulator update: " ++ pretty slice
+        v_adj_t <- lookupType v_adj
+        v_adj' <- case v_adj_t of
+          Acc _ ->
+            letExp (baseString v_adj) . BasicOp $
+              UpdateAcc v_adj (map isDimFix slice) [Var d]
+          _ -> do
+            v_adjslice <-
+              if primType t
+                then return v_adj
+                else
+                  letExp (baseString v ++ "_slice") $
+                    BasicOp $ Index v_adj slice
+            letInPlace "updated_adj" v_adj slice =<< addExp v_adjslice d
         insAdj v v_adj'
         pure v_adj'
 
@@ -411,6 +428,79 @@ commonSOAC pat aux soac m = do
   m
   mapM lookupAdj $ patternNames pat
 
+diffMap :: [VName] -> SubExp -> Lambda -> [VName] -> ADM ()
+diffMap pat_adj w map_lam as = do
+  pat_adj_params <-
+    mapM (newParam "map_adj_p" . rowType <=< lookupType) pat_adj
+  map_lam' <- renameLambda map_lam
+
+  let free_in_map_lam = namesToList $ freeIn map_lam'
+
+  (prim_free, arrs_and_accs) <-
+    partitionEithers <$> mapM decideOnFreeVar free_in_map_lam
+
+  acc_params <-
+    mapM (newParam "map_acc_p" . rowType <=< lookupType . snd) arrs_and_accs
+
+  let adjs_for =
+        map paramName (lambdaParams map_lam')
+          ++ map fst prim_free
+          ++ map fst arrs_and_accs
+      lam_rev_params = lambdaParams map_lam' ++ acc_params ++ pat_adj_params
+      lam_rev_ret =
+        map paramType (lambdaParams map_lam')
+          ++ map (Prim . snd) prim_free
+          ++ map paramType acc_params
+  lam_rev <-
+    mkLambda lam_rev_params lam_rev_ret $ do
+      zipWithM_ insAdj (map fst arrs_and_accs) (map paramName acc_params)
+      bodyBind . lambdaBody
+        =<< diffLambda (map paramName pat_adj_params) adjs_for map_lam'
+
+  (param_contribs, free_contribs, acc_contribs) <-
+    fmap (splitAt3 (length (lambdaParams map_lam')) (length prim_free)) $
+      letTupExp "map_adjs" . Op . Screma w (mapSOAC lam_rev) $
+        as ++ map snd arrs_and_accs ++ pat_adj
+
+  zipWithM_ updateAdj as param_contribs
+  zipWithM_ freeContrib prim_free free_contribs
+  zipWithM_ accContrib (map fst arrs_and_accs) acc_contribs
+  where
+    addIdxParam lam = do
+      idx <- newParam "idx" $ Prim int64
+      pure $ lam {lambdaParams = idx : lambdaParams lam}
+
+    accAddLambda t = addIdxParam =<< addLambda t
+
+    decideOnFreeVar v = do
+      v_t <- lookupType v
+      case v_t of
+        Array (ElemPrim _) (Shape (d : _)) _ -> do
+          v_adj <- lookupAdj v
+          add_lam <- accAddLambda $ rowType v_t
+          zero <- letSubExp "zero" $ zeroExp $ rowType v_t
+          fmap (Right . (v,)) . letExp (baseString v <> "_acc") $
+            MkAcc (Shape [w]) [v_adj] (Shape [d]) (Just (add_lam, [zero]))
+        Prim pt ->
+          pure $ Left (v, pt)
+        _ ->
+          error $ "decideOnFreeVar: cannot handle type " ++ pretty v_t
+
+    accContrib arr contrib_acc = do
+      arr_t <- lookupType arr
+      arr_adj <-
+        letExp (baseString arr <> "_arr") $ BasicOp $ UnAcc contrib_acc [arr_t]
+      insAdj arr arr_adj
+
+    freeContrib (v, v_pt) contrib = do
+      lam <- addLambda $ Prim v_pt
+      zero <- letSubExp "zero" $ zeroExp $ Prim v_pt
+      reduce <- reduceSOAC [Reduce Commutative lam [zero]]
+      contrib_sum <-
+        letExp (baseString v <> "_contrib_sum") $
+          Op $ Screma w reduce [contrib]
+      void $ updateAdj v contrib_sum
+
 diffSOAC :: Pattern -> StmAux () -> SOAC SOACS -> ADM () -> ADM ()
 diffSOAC pat aux soac@(Screma w form as) m
   | Just red <- singleReduce <$> isReduceSOAC form = do
@@ -457,22 +547,7 @@ diffSOAC pat aux soac@(Screma w form as) m
 diffSOAC pat aux soac@(Screma w form as) m
   | Just lam <- isMapSOAC form = do
     pat_adj <- commonSOAC pat aux soac m
-
-    pat_adj_params <-
-      mapM (newParam "map_adj_p" . rowType <=< lookupType) pat_adj
-    lam' <- renameLambda lam
-
-    let adjs_for = map paramName $ lambdaParams lam'
-        lam_rev_params = lambdaParams lam' ++ pat_adj_params
-        lam_rev_ret = map paramType (lambdaParams lam')
-    lam_rev <-
-      mkLambda lam_rev_params lam_rev_ret $
-        bodyBind . lambdaBody
-          =<< diffLambda (map paramName pat_adj_params) adjs_for lam'
-
-    contribs <-
-      letTupExp "map_adjs" $ Op $ Screma w (mapSOAC lam_rev) $ as ++ pat_adj
-    zipWithM_ updateAdj as contribs
+    diffMap pat_adj w lam as
 --
 diffSOAC _ _ soac _ =
   error $ "diffSOAC unhandled:\n" ++ pretty soac
