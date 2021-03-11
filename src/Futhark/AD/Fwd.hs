@@ -4,6 +4,7 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE UndecidableInstances #-}
 
 module Futhark.AD.Fwd (fwdJVP) where
 
@@ -30,6 +31,11 @@ zeroExp (Prim pt) =
 zeroExp (Array (ElemPrim pt) shape _) =
   BasicOp $ Replicate shape $ Constant $ blankPrimValue pt
 zeroExp t = error $ "zeroExp: " ++ show t
+
+isAcc :: TypeBase s u -> Bool
+isAcc (Array (ElemAcc vs) _ _) = True
+isAcc Acc {} = True
+isAcc _ = False
 
 tanType :: TypeBase s u -> ADM (TypeBase s u)
 tanType (Array (ElemAcc vs) shape u) = do
@@ -96,16 +102,24 @@ insertTan v v' =
   modify $ \env -> env {stateTans = M.insert v v' (stateTans env)}
 
 class TanBinder a where
+  type Bundled a :: *
+  type Bundled a = [a]
   newTan :: a -> ADM a
+  bundleNew :: a -> ADM (Bundled a)
 
-instance (TanBinder a) => TanBinder [a] where
+instance (Monoid (Bundled a), TanBinder a) => TanBinder [a] where
+  type Bundled [a] = Bundled a
   newTan = mapM newTan
+  bundleNew = (mconcat <$>) . mapM bundleNew
 
 instance TanBinder VName where
   newTan v = do
     v' <- tanVName v
     insertTan v v'
     return v'
+  bundleNew v = do
+    newTan v
+    bundleTan v
 
 instance TanBinder (PatElemT (TypeBase s u)) where
   newTan (PatElem p t) = do
@@ -113,9 +127,16 @@ instance TanBinder (PatElemT (TypeBase s u)) where
     insertTan p p'
     t' <- tanType t
     return $ PatElem p' t'
+  bundleNew pe@(PatElem p t) = do
+    pe' <- newTan pe
+    if isAcc t
+      then return [pe']
+      else return [pe, pe']
 
 instance TanBinder (PatternT (TypeBase s u)) where
+  type Bundled (PatternT (TypeBase s u)) = (PatternT (TypeBase s u))
   newTan (Pattern ctx pes) = Pattern ctx <$> newTan pes
+  bundleNew (Pattern ctx pes) = Pattern ctx <$> bundleNew pes
 
 instance TanBinder (Param (TypeBase s u)) where
   newTan (Param p t) = do
@@ -123,12 +144,39 @@ instance TanBinder (Param (TypeBase s u)) where
     insertTan p p'
     t' <- tanType t
     return $ Param p' t'
+  bundleNew param@(Param p t) = do
+    param' <- newTan param
+    if isAcc t
+      then return [param']
+      else return [param, param']
+
+instance Tangent a => TanBinder (Param (TypeBase s u), a) where
+  newTan (p, x) = (,) <$> newTan p <*> tangent x
+  bundleNew (p, x) = do
+    b <- bundleNew p
+    x_tan <- tangent x
+    return $ reverse $ zip (reverse b) [x_tan, x]
 
 class Tangent a where
+  type BundledTan a :: *
+  type BundledTan a = [a]
   tangent :: a -> ADM a
+  bundleTan :: a -> ADM (BundledTan a)
 
-instance Tangent a => Tangent [a] where
+instance Tangent (TypeBase s u) where
+  tangent = tanType
+  bundleTan t
+    | isAcc t = do
+      t' <- tangent t
+      return [t']
+    | otherwise = do
+      t' <- tangent t
+      return [t, t']
+
+instance (Monoid (BundledTan a), Tangent a) => Tangent [a] where
+  type BundledTan [a] = BundledTan a
   tangent = mapM tangent
+  bundleTan = (mconcat <$>) . mapM bundleTan
 
 instance Tangent VName where
   tangent v = do
@@ -140,10 +188,21 @@ instance Tangent VName where
         v_tan <- newTan v
         letBindNames [v_tan] $ zeroExp t
         return v_tan
+  bundleTan v = do
+    t <- lookupType v
+    if isAcc t
+      then return [v]
+      else do
+        v_tan <- tangent v
+        return [v, v_tan]
 
 instance Tangent SubExp where
   tangent (Constant c) = zeroTan $ Prim $ primValueType c
   tangent (Var v) = Var <$> tangent v
+  bundleTan c@(Constant {}) = do
+    c_tan <- tangent c
+    return [c, c_tan]
+  bundleTan (Var v) = (fmap . fmap) Var $ bundleTan v
 
 patNames :: Pattern -> ADM [VName]
 patNames (Pattern [] pes) = pure $ map patElemName pes
@@ -216,12 +275,8 @@ basicFwd pat aux op = do
       addStm $ Let pat_tan aux $ BasicOp $ Rotate rots arr_tan
 
 fwdLambda :: Lambda -> ADM Lambda
-fwdLambda (Lambda params body ret) = do
-  params_tan <- newTan params
-  body' <- fwdBody body
-  let params' = interleave params params_tan
-  ret_tan <- mapM tanType ret
-  pure $ Lambda params' body' $ interleave ret ret_tan
+fwdLambda (Lambda params body ret) =
+  Lambda <$> bundleNew params <*> fwdBody body <*> bundleTan ret
 
 flipLambda :: Lambda -> Lambda
 flipLambda (Lambda params body ret) = Lambda (reverse params) body ret
@@ -239,12 +294,13 @@ zeroFromSubExp (Var v) = do
 
 fwdSOAC :: Pattern -> StmAux () -> SOAC SOACS -> ADM ()
 fwdSOAC pat aux (Screma size (ScremaForm scs reds f) xs) = do
-  pat_tan <- newTan pat
+  pat' <- bundleNew pat
   xs_tan <- tangent xs
+  xs' <- bundleTan xs
   scs' <- mapM fwdScan scs
   reds' <- mapM fwdRed reds
   f' <- fwdLambda f
-  addStm $ Let (pat <> pat_tan) aux $ Op $ Screma size (ScremaForm scs' reds' f') $ interleave xs xs_tan
+  addStm $ Let pat' aux $ Op $ Screma size (ScremaForm scs' reds' f') xs'
   where
     fwdScan :: Scan SOACS -> ADM (Scan SOACS)
     fwdScan sc = do
@@ -303,19 +359,16 @@ fwdSOAC pat aux scatter@(Scatter {}) = addStm $ Let pat aux $ Op scatter
 fwdSOAC _ _ soac = error $ "Unsupported SOAC: " ++ pretty soac
 
 fwdStm :: Stm -> ADM ()
-fwdStm stm@(Let (Pattern ctx [(PatElem p t)]) aux (BasicOp (UnAcc acc ts))) = do
+fwdStm stm@(Let pat aux (BasicOp (UnAcc acc ts))) = do
   acc_tan <- tangent acc
-  throw <- newVName (baseString p <> "_throwaway")
-  p' <- tanVName p
-  insertTan p p'
-  addStm stm
-  addStm $ Let (Pattern ctx [PatElem throw t, PatElem p' t]) aux $ BasicOp $ UnAcc acc_tan $ ts <> ts
+  pat' <- bundleNew pat
+  ts' <- bundleTan ts
+  addStm $ Let pat' aux $ BasicOp $ UnAcc acc_tan ts
 fwdStm stm@(Let pat aux (BasicOp (UpdateAcc acc i x))) = do
-  pat_tan <- newTan pat
-  x_tan <- tangent x
+  pat' <- bundleNew pat
+  x' <- bundleTan x
   acc_tan <- tangent acc
-  addStm stm
-  addStm $ Let pat_tan aux $ BasicOp $ UpdateAcc acc_tan i $ interleave x x_tan
+  addStm $ Let pat' aux $ BasicOp $ UpdateAcc acc_tan i x'
 fwdStm stm@(Let pat aux (BasicOp e)) = addStm stm >> basicFwd pat aux e
 fwdStm stm@(Let pat _ (Apply f args _ _))
   | Just (_, argts) <- M.lookup f builtInFunctions = do
@@ -331,62 +384,41 @@ fwdStm stm@(Let pat _ (Apply f args _ _))
       Just derivs ->
         zipWithM_ (letBindNames . pure) pat_v_tan
           =<< mapM toExp (zipWith (~*~) arg_tans derivs)
-fwdStm (Let (Pattern ctx pes) aux (If cond t f (IfDec ret ifsort))) = do
-  t_tan <- slocal' $ fwdBody t
-  f_tan <- slocal' $ fwdBody f
-  pes_tan <- newTan pes
-  addStm $
-    Let (Pattern ctx (pes ++ pes_tan)) aux $
-      If cond t_tan f_tan (IfDec (ret ++ ret) ifsort)
-fwdStm (Let (Pattern ctx pes) aux (DoLoop l_ctx val_pats (WhileLoop v) body)) = do
-  let (val_params, vals) = unzip val_pats
-  vals_tan <- tangent vals
-  pes_tan <- newTan pes
-  slocal' $ do
-    val_params_tan <- newTan val_params
-    let val_pats_tan = zip val_params_tan vals_tan
-    body_tan <- fwdBody body
+fwdStm (Let pat aux (If cond t f (IfDec ret ifsort))) = do
+  t' <- slocal' $ fwdBody t
+  f' <- slocal' $ fwdBody f
+  pat' <- bundleNew pat
+  ret' <- bundleTan ret
+  addStm $ Let pat' aux $ If cond t' f' $ IfDec ret' ifsort
+fwdStm (Let pat aux (DoLoop l_ctx val_pats (WhileLoop v) body)) = do
+  val_pats' <- bundleNew val_pats
+  pat' <- bundleNew pat
+  body' <- fwdBody body
+  addStm $ Let pat' aux $ DoLoop l_ctx val_pats' (WhileLoop v) body'
+fwdStm (Let pat aux (DoLoop l_ctx val_pats loop@(ForLoop i it bound loop_vars) body)) = do
+  pat' <- bundleNew pat
+  val_pats' <- bundleNew val_pats
+  loop_vars' <- bundleNew loop_vars
+  inScopeOf loop $ do
+    body' <- fwdBody body
     addStm $
-      Let (Pattern ctx (pes ++ pes_tan)) aux $
-        DoLoop l_ctx (val_pats ++ val_pats_tan) (WhileLoop v) body_tan
-fwdStm (Let (Pattern ctx pes) aux (DoLoop l_ctx val_pats loop@(ForLoop i it bound loop_vars) body)) = do
-  let (val_params, vals) = unzip val_pats
-      (loop_params, loop_vals) = unzip loop_vars
-  vals_tan <- tangent vals
-  loop_vals_tan <- tangent loop_vals
-  pes_tan <- newTan pes
-  slocal' $ do
-    val_params_tan <- newTan val_params
-    loop_params_tan <- newTan loop_params
-    let val_pats_tan = zip val_params_tan vals_tan
-    let loop_vars_tan = zip loop_params_tan loop_vals_tan
-    inScopeOf loop $ do
-      body_tan <- fwdBody body
-      addStm $
-        Let (Pattern ctx (pes ++ pes_tan)) aux $
-          DoLoop l_ctx (val_pats ++ val_pats_tan) (ForLoop i it bound (loop_vars ++ loop_vars_tan)) body_tan
-fwdStm stm@(Let (Pattern ctx [pe@(PatElem p t)]) aux (MkAcc accshape arrs ishape op)) = do
-  case t of
-    Array (ElemAcc ts) s u -> do
-      arrs_tan <- tangent arrs
-      t_tan <- mapM lookupType arrs_tan
-      p' <- newVName (baseString p <> "_combined_tan")
-      insertTan p p'
-      let t' = Array (ElemAcc $ ts <> arrs_tan) s u
-          pat' = Pattern ctx [PatElem p' t']
-      op' <- case op of
-        Nothing -> return Nothing
-        Just (lam, nes) -> do
-          nes_tan <- mapM (fmap Var . zeroFromSubExp) nes
-          lam' <- fwdLambda lam
-          case lam' of
-            Lambda (i : _ : ps) body ret -> do
-              let lam'' = Lambda (i : ps) body ret
-              lam''' <- renameLambda lam''
-              return $ Just (lam''', interleave nes nes_tan)
-            _ -> error "Malformed lambda in MkAcc."
-      addStm stm
-      addStm $ Let pat' aux $ MkAcc accshape (arrs <> arrs_tan) ishape op'
+      Let pat' aux $
+        DoLoop l_ctx val_pats' (ForLoop i it bound loop_vars') body'
+fwdStm stm@(Let pat aux (MkAcc accshape arrs ishape op)) = do
+  arrs_tan <- tangent arrs
+  pat' <- bundleNew pat
+  op' <- case op of
+    Nothing -> return Nothing
+    Just (lam, nes) -> do
+      nes_tan <- mapM (fmap Var . zeroFromSubExp) nes
+      lam' <- fwdLambda lam
+      case lam' of
+        Lambda (i : _ : ps) body ret -> do
+          let lam'' = Lambda (i : ps) body ret
+          lam''' <- renameLambda lam''
+          return $ Just (lam''', interleave nes nes_tan)
+        _ -> error "Malformed lambda in MkAcc."
+  addStm $ Let pat' aux $ MkAcc accshape (arrs <> arrs_tan) ishape op'
 fwdStm s@(Let pat aux (Op soac)) = fwdSOAC pat aux soac
 fwdStm stm =
   error $ "unhandled forward mode AD for Stm: " ++ pretty stm ++ "\n" ++ show stm
@@ -395,21 +427,20 @@ fwdBody :: Body -> ADM Body
 fwdBody (Body _ stms res) = do
   (res', stms') <- collectStms $ do
     mapM_ fwdStm stms
-    mapM tangent res
-  return $ mkBody stms' $ interleave res res'
+    bundleTan res
+  return $ mkBody stms' res'
 
 fwdBodyOnlyTangents :: Body -> ADM Body
 fwdBodyOnlyTangents (Body _ stms res) = do
   (res', stms') <- collectStms $ do
     mapM_ fwdStm stms
-    mapM tangent res
+    tangent res
   return $ mkBody stms' res'
 
 fwdJVP :: MonadFreshNames m => Scope SOACS -> Lambda -> m Lambda
 fwdJVP scope (Lambda params body ret) = do
   runADM . localScope scope $ do
     params_tan <- newTan params
-    body' <- fwdBodyOnlyTangents body
-    let params' = interleave params params_tan
-    ret_tan <- mapM tanType ret
-    pure $ Lambda params' body' $ interleave ret ret_tan
+    body_tan <- fwdBodyOnlyTangents body
+    ret_tan <- tangent ret
+    return $ Lambda (params ++ params_tan) body_tan (ret ++ ret_tan)
