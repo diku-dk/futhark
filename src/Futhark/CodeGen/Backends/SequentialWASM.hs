@@ -1,3 +1,6 @@
+{-# Language QuasiQuotes #-}
+
+--
 -- | C code generator.  This module can convert a correct ImpCode
 -- program to an equivalent C program.  This C program is expected to
 -- be converted to WebAssembly, so we also produce the intended
@@ -21,6 +24,8 @@ import Futhark.IR.Primitive
 import Futhark.IR.SeqMem
 import Futhark.MonadFreshNames
 
+import qualified Data.Text as T
+import NeatInterpolation (text)
 import Data.List 
 
 -- | Compile the program to sequential C with a JavaScript wrapper.
@@ -87,14 +92,16 @@ data JSEntryPoint = JSEntryPoint { name :: String,
 
 initFunc :: String
 initFunc = 
-  unlines
-  [" function initData(data) {",
-  "    var nDataBytes = data.length * data.BYTES_PER_ELEMENT",
-  "    var dataPtr = Module._malloc(nDataBytes);",
-  "    var dataHeap = new Uint8Array(Module.HEAPU8.buffer, dataPtr, nDataBytes);",
-  "    dataHeap.set(new Uint8Array(data.buffer));",
-  "    return dataHeap",
-  "}"]
+  T.unpack 
+  [text|
+   function initData(data) {
+      var nDataBytes = data.length * data.BYTES_PER_ELEMENT;
+      var dataPtr = Module._malloc(nDataBytes);
+      var dataHeap = new Uint8Array(Module.HEAPU8.buffer, dataPtr, nDataBytes);
+      dataHeap.set(new Uint8Array(data.buffer));
+      return dataHeap
+  }
+  |]
 
 initDataHeap :: Int -> String -> String
 initDataHeap idx arrType = "    var dataHeap" ++ show idx ++ " = initData(new " ++ arrType ++ "(1));"
@@ -119,7 +126,7 @@ javascriptWrapper entryPoints = unlines
   unlines $ concatMap (\jse -> map toFutharkArray (parameters jse)) entryPoints,
   unlines $ concatMap (\jse -> map fromFutharkArrayShape (ret jse)) entryPoints,
   --unlines $ concatMap (\jse -> map fromFutharkArrayRawValues (ret jse)) entryPoints,
-  unlines $ concatMap (\jse -> map fromFutharkArrayValues(ret jse)) entryPoints,
+  unlines $ concatMap (\jse -> map fromFutharkArrayValues (ret jse)) entryPoints,
   (unlines $ map jsWrapEntryPoint entryPoints),
   endClassDef]
 
@@ -148,13 +155,13 @@ cwrapsJSE jses =
 
 cwrapFun :: String -> Int -> String
 cwrapFun fname numArgs =
-  unlines
-  [
-  fname ++ " = Module.cwrap(",
-  "  '" ++ fname ++ "', 'number', [" ++ intercalate ", " (replicate numArgs "'number'") ++ "]",
-  ");"
-  ]
-
+  T.unpack
+  [text|
+  ${fn} = Module.cwrap(
+    '${fn}', 'number', [$(intercalate ", " (replicate numArgs "'number'"))],
+  );
+  |]
+  where fn = T.pack fname
 
   
 classDef :: String
@@ -165,12 +172,18 @@ endClassDef = "}"
 
 constructor :: String
 constructor = 
-  unlines
-  ["  constructor() {",
-   "    this.cfg = futhark_context_config_new();",
-   "    this.ctx = futhark_context_new(this.cfg);",
-   "  }"]
-
+--  unlines
+--  ["  constructor() {",
+--   "    this.cfg = futhark_context_config_new();",
+--   "    this.ctx = futhark_context_new(this.cfg);",
+--   "  }"]
+--
+  T.unpack [text|
+    constructor() {
+      this.cfg = futhark_context_config_new();
+      this.ctx = futhark_context_new(this.cfg);
+    }
+  |]
 
 jsWrapEntryPoint :: JSEntryPoint -> String
 jsWrapEntryPoint jse =
