@@ -2,62 +2,55 @@
 //
 //
 
-class ReaderInput {
-  constructor(f) {
-    this.f = f;
-    this.lookahead_buffer = [];
-  }
+type_strs = { "Int8Array" : '  i8',
+              "Int16Array" : ' i16',
+              "Int32Array" : ' i32',
+              "BigInt64Array" : ' i64',
+              "BigUint8Array" : '  u8',
+              "BigUint16Array" :  ' u16',
+              "BigUint32Array" :  ' u32',
+              "BigUint64Array" :  ' u64',
+              "Float32Array" : ' f32',
+              "Float64Array" : ' f64',
+              // TODO implement bool here
+             }
 
-  get_char() {
-    if (this.lookaheaad_buffer.length == 0) {
-      // TODO find the js equivalent of read()
-      return this.f.read(1);
-    } else {
-      c = this.lookahead_buffer[0];
-      this.lookahead_buffer = this.lookahead_buffer.slice(1);
-      return c;
-    }
-  }
+function construct_binary_value(v) {
 
-  unget_char(c) {
-    this.lookahead_buffer = [c].concat(this.lookahead_buffer);
+  var bytes = v.type();
+  var shape = v.shape();
+  var values = v.values();
+  var elems = 1;
+  for (var i = 0; i < shape.length; i++) {
+    elems = elems * shape[i];
   }
-
-  get_chars(n) {
-    var n1 = Math.min(n, this.lookahead_buffer.length);
-    // TODO make sure this is done properly with binary value
-    var s = this.lookahead_buffer.slice(0, n1).join("");
-    this.lookahead_buffer = this.lookahead_buffer.slice(n1);
-    var n2 = n - n1;
-    if (n2 > 0) {
-      //TODO another instance of python read
-      s = s + this.f.read(n2);
-    }
-    return s;
-  }
+  var num_bytes = 1 + 1 + 1 + 4 + shape.length * 8 + elems * bytes;
 
 
-  get peek_char() {
-    var c = this.get_char();
-    if (c) {
-      unget_char(c);
-    }
-    return c;
+  var bytes = new Uint8Array(num_bytes);
+  bytes[0] = Buffer.from('b').readUInt8();
+  bytes[1] = 2; // Not sure why this
+  bytes[2] = shape.length
+
+  var ftype = type_strs[ftype];
+
+  for (var i = 0; i < 4; i++) {
+    bytes[3+i] = ftype.charCodeAt(i);
   }
+
+  var sizes = new BigInt64Array(shape);
+  var size_bytes = new Uint8Array(sizes.buffer);
+  bytes.set(size_bytes, 7);
+
+  var val_bytes = new Uint8Array(values.buffer);
+  bytes.set(val_bytes, 7 + (shape.length * 8));
+  
+  return bytes;
 }
 
-
-function skip_spaces(f) {
-  var c = f.get_char();
-  // TODO get JS version of None
-  while (c != None) {
-    // TODO get JS equivalent of isspace
-    if (c.isspace()) {
-      c = f.get_char();
-    } 
-    else if (c
-
-
     
+
+  
+  
 
 
