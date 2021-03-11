@@ -57,8 +57,8 @@ compileSegStencil pat lvl space op kbody = do
             compileStms mempty (kernelBodyStms kbody) $ pure ()
 
             -- declare and attach invariant elements to invariantParams
-            zipWithM_ dPrimV_ (map paramName invariantParams)
-                =<< (map TPrimExp <$> mapM toExp invarElems)
+            zipWithM_ dPrimV_ (map paramName invariantParams) . map TPrimExp
+                =<< mapM toExp invarElems
 
             -- calculate the unrolled variants parameter indexers
             let bounded_ixs = flip map (zip3 gid_flat stencil_ixss dims') $

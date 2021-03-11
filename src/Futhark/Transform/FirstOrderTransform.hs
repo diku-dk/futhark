@@ -21,14 +21,13 @@ where
 import Control.Monad.Except
 import Control.Monad.State
 import Data.Function ((&))
-import Data.List (zip4)
+import Data.List (zip4, transpose)
 import qualified Data.Map.Strict as M
 import qualified Futhark.IR as AST
 import Futhark.IR.SOACS
 import Futhark.MonadFreshNames
 import Futhark.Tools
 import Futhark.Util (chunks, splitAt3)
-import Data.List (transpose)
 
 -- | The constraints that must hold for a lore in order to be the
 -- target of first-order transformation.
@@ -356,8 +355,9 @@ transformSOAC pat (Stencil inputShape neighboursLen iss lam invariants variants)
     case iss of
       StencilDynamic is -> mapM lookupType is
       StencilStatic is ->
-        pure $ [arrayOfShape (Prim $ IntType $ Int64)
-               $ (Shape [intConst Int64 (toInteger (length $ head is))])] --shape and length of is
+        pure [arrayOfShape
+                (Prim $ IntType Int64)
+                (Shape [intConst Int64 (toInteger (length $ head is))])] --shape and length of is
 
   let returns_elem_tp = lambdaReturnType lam
   let variant_shp = arrayShape (head variants_tp) -- non-empty and all have same shape
@@ -411,7 +411,7 @@ transformSOAC pat (Stencil inputShape neighboursLen iss lam invariants variants)
                     input_elements <- load_elements ixs
                     letwith write_arr (pexp (intConst Int64 temp_arr_idx)) $
                       map (BasicOp . SubExp) input_elements
-              let funls = map (uncurry ix_unroll) (zip (transpose is) [0..ixs_len-1])
+              let funls = zipWith ix_unroll (transpose is) [0..ixs_len-1]
               temp <- foldM (flip ($)) temp_array funls
               pure $ map (BasicOp . SubExp . Var) temp
         mapM_ (\(vp,vl) -> letBindNames [vp] vl) $ zip variantParams exps
@@ -448,7 +448,7 @@ transformSOAC pat (Stencil inputShape neighboursLen iss lam invariants variants)
              resultBody <$> loopNestBuilder g (map paramName out_pars) out_pars xs (Var i : list_of_index) (max_index : list_of_max_ix)
         letTupExp' "res" $ DoLoop [] it_vars loop_form loop_body
   outer_loops <- loopNest innerBody map_arrs [] inputShape [] []
-  letBind pat $ outer_loops
+  letBind pat outer_loops
 
 -- | Recursively first-order-transform a lambda.
 transformLambda ::
@@ -497,7 +497,7 @@ letwith ks i vs = do
 letwithNDim ::
   Transformer m =>
   [VName] ->
-  m ([AST.Exp (Lore m)]) ->
+  m [AST.Exp (Lore m)] ->
   [AST.Exp (Lore m)] ->
   m [VName]
 letwithNDim ks is vs = do
