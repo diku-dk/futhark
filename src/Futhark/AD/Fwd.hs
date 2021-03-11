@@ -12,18 +12,18 @@ import Control.Monad
 import Control.Monad.RWS.Strict
 import Control.Monad.State.Strict
 import Data.Bifunctor (second)
+import qualified Data.Kind
 import Data.List (transpose)
 import qualified Data.Map as M
 import Futhark.AD.Derivatives
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.Binder
 import Futhark.Construct
-import Futhark.IR.Prop.Names (freeIn, nameIn)
 import Futhark.IR.SOACS
-import Futhark.Transform.Rename (renameLambda, renameStm)
 
 zeroTan :: Type -> ADM SubExp
 zeroTan (Prim t) = return $ constant $ blankPrimValue t
+zeroTan t = error $ "zeroTan on non-primitive type: " ++ pretty t
 
 zeroExp :: Type -> Exp
 zeroExp (Prim pt) =
@@ -33,7 +33,7 @@ zeroExp (Array (ElemPrim pt) shape _) =
 zeroExp t = error $ "zeroExp: " ++ show t
 
 isAcc :: TypeBase s u -> Bool
-isAcc (Array (ElemAcc vs) _ _) = True
+isAcc (Array ElemAcc {} _ _) = True
 isAcc Acc {} = True
 isAcc _ = False
 
@@ -102,7 +102,7 @@ insertTan v v' =
   modify $ \env -> env {stateTans = M.insert v v' (stateTans env)}
 
 class TanBinder a where
-  type Bundled a :: *
+  type Bundled a :: Data.Kind.Type
   type Bundled a = [a]
   newTan :: a -> ADM a
   bundleNew :: a -> ADM (Bundled a)
@@ -118,16 +118,21 @@ instance TanBinder VName where
     insertTan v v'
     return v'
   bundleNew v = do
-    newTan v
+    void $ newTan v
     bundleTan v
 
 instance TanBinder (PatElemT (TypeBase s u)) where
-  newTan (PatElem p t) = do
-    p' <- tanVName p
-    insertTan p p'
-    t' <- tanType t
-    return $ PatElem p' t'
-  bundleNew pe@(PatElem p t) = do
+  newTan (PatElem p t)
+    | isAcc t = do
+      insertTan p p
+      t' <- tanType t
+      return $ PatElem p t'
+    | otherwise = do
+      p' <- tanVName p
+      insertTan p p'
+      t' <- tanType t
+      return $ PatElem p' t'
+  bundleNew pe@(PatElem _ t) = do
     pe' <- newTan pe
     if isAcc t
       then return [pe']
@@ -144,7 +149,7 @@ instance TanBinder (Param (TypeBase s u)) where
     insertTan p p'
     t' <- tanType t
     return $ Param p' t'
-  bundleNew param@(Param p t) = do
+  bundleNew param@(Param _ t) = do
     param' <- newTan param
     if isAcc t
       then return [param']
@@ -158,7 +163,7 @@ instance Tangent a => TanBinder (Param (TypeBase s u), a) where
     return $ reverse $ zip (reverse b) [x_tan, x]
 
 class Tangent a where
-  type BundledTan a :: *
+  type BundledTan a :: Data.Kind.Type
   type BundledTan a = [a]
   tangent :: a -> ADM a
   bundleTan :: a -> ADM (BundledTan a)
@@ -199,13 +204,14 @@ instance Tangent VName where
 instance Tangent SubExp where
   tangent (Constant c) = zeroTan $ Prim $ primValueType c
   tangent (Var v) = Var <$> tangent v
-  bundleTan c@(Constant {}) = do
+  bundleTan c@Constant {} = do
     c_tan <- tangent c
     return [c, c_tan]
-  bundleTan (Var v) = (fmap . fmap) Var $ bundleTan v
+  bundleTan (Var v) = fmap Var <$> bundleTan v
 
 patNames :: Pattern -> ADM [VName]
 patNames (Pattern [] pes) = pure $ map patElemName pes
+patNames _ = error "patNames: non-empty context."
 
 basicFwd :: Pattern -> StmAux () -> BasicOp -> ADM ()
 basicFwd pat aux op = do
@@ -273,13 +279,11 @@ basicFwd pat aux op = do
     Rotate rots arr -> do
       arr_tan <- tangent arr
       addStm $ Let pat_tan aux $ BasicOp $ Rotate rots arr_tan
+    _ -> error $ "basicFwd: Unsupported op " ++ pretty op
 
 fwdLambda :: Lambda -> ADM Lambda
-fwdLambda (Lambda params body ret) =
-  Lambda <$> bundleNew params <*> fwdBody body <*> bundleTan ret
-
-flipLambda :: Lambda -> Lambda
-flipLambda (Lambda params body ret) = Lambda (reverse params) body ret
+fwdLambda l@(Lambda params body ret) = do
+  Lambda <$> bundleNew params <*> inScopeOf l (fwdBody body) <*> bundleTan ret
 
 interleave :: [a] -> [a] -> [a]
 interleave xs ys = concat $ transpose [xs, ys]
@@ -295,7 +299,6 @@ zeroFromSubExp (Var v) = do
 fwdSOAC :: Pattern -> StmAux () -> SOAC SOACS -> ADM ()
 fwdSOAC pat aux (Screma size (ScremaForm scs reds f) xs) = do
   pat' <- bundleNew pat
-  xs_tan <- tangent xs
   xs' <- bundleTan xs
   scs' <- mapM fwdScan scs
   reds' <- mapM fwdRed reds
@@ -308,7 +311,7 @@ fwdSOAC pat aux (Screma size (ScremaForm scs reds f) xs) = do
       neutral_tans <- mapM zeroFromSubExp $ scanNeutral sc
       return $
         Scan
-          { scanNeutral = scanNeutral sc ++ map Var neutral_tans,
+          { scanNeutral = scanNeutral sc `interleave` map Var neutral_tans,
             scanLambda = op'
           }
     fwdRed :: Reduce SOACS -> ADM (Reduce SOACS)
@@ -319,23 +322,21 @@ fwdSOAC pat aux (Screma size (ScremaForm scs reds f) xs) = do
         Reduce
           { redComm = redComm red,
             redLambda = op',
-            redNeutral = redNeutral red ++ map Var neutral_tans
+            redNeutral = redNeutral red `interleave` map Var neutral_tans
           }
 fwdSOAC pat aux (Stream size form lam nes xs) = do
-  pat_tan <- newTan pat
+  pat' <- bundleNew pat
   lam' <- fwdLambda lam
-  xs_tan <- tangent xs
+  xs' <- bundleTan xs
   nes_tan <- mapM (fmap Var . zeroFromSubExp) nes
   let nes' = interleave nes nes_tan
   case form of
     Sequential -> do
-      nes_tan <- mapM (fmap Var . zeroFromSubExp) nes
-      addStm $ Let (pat <> pat_tan) aux $ Op $ Stream size Sequential lam' nes' $ xs ++ xs_tan
+      addStm $ Let pat' aux $ Op $ Stream size Sequential lam' nes' xs'
     Parallel o comm lam0 -> do
-      nes_tan <- mapM (fmap Var . zeroFromSubExp) nes
       lam0' <- fwdLambda lam0
       let form' = Parallel o comm lam0'
-      addStm $ Let (pat <> pat_tan) aux $ Op $ Stream size form' lam' nes' $ xs ++ xs_tan
+      addStm $ Let pat' aux $ Op $ Stream size form' lam' nes' xs'
 fwdSOAC pat aux (Hist len ops bucket_fun imgs) = do
   pat_tan <- newTan pat
   ops' <- mapM fwdHist ops
@@ -355,16 +356,16 @@ fwdSOAC pat aux (Hist len ops bucket_fun imgs) = do
             histNeutral = interleave nes nes_tan,
             histOp = op'
           }
-fwdSOAC pat aux scatter@(Scatter {}) = addStm $ Let pat aux $ Op scatter
+fwdSOAC pat aux scatter@Scatter {} = addStm $ Let pat aux $ Op scatter
 fwdSOAC _ _ soac = error $ "Unsupported SOAC: " ++ pretty soac
 
 fwdStm :: Stm -> ADM ()
-fwdStm stm@(Let pat aux (BasicOp (UnAcc acc ts))) = do
+fwdStm (Let pat aux (BasicOp (UnAcc acc ts))) = do
   acc_tan <- tangent acc
   pat' <- bundleNew pat
   ts' <- bundleTan ts
-  addStm $ Let pat' aux $ BasicOp $ UnAcc acc_tan ts
-fwdStm stm@(Let pat aux (BasicOp (UpdateAcc acc i x))) = do
+  addStm $ Let pat' aux $ BasicOp $ UnAcc acc_tan ts'
+fwdStm (Let pat aux (BasicOp (UpdateAcc acc i x))) = do
   pat' <- bundleNew pat
   x' <- bundleTan x
   acc_tan <- tangent acc
@@ -404,7 +405,7 @@ fwdStm (Let pat aux (DoLoop l_ctx val_pats loop@(ForLoop i it bound loop_vars) b
     addStm $
       Let pat' aux $
         DoLoop l_ctx val_pats' (ForLoop i it bound loop_vars') body'
-fwdStm stm@(Let pat aux (MkAcc accshape arrs ishape op)) = do
+fwdStm (Let pat aux (MkAcc accshape arrs ishape op)) = do
   arrs_tan <- tangent arrs
   pat' <- bundleNew pat
   op' <- case op of
@@ -415,11 +416,10 @@ fwdStm stm@(Let pat aux (MkAcc accshape arrs ishape op)) = do
       case lam' of
         Lambda (i : _ : ps) body ret -> do
           let lam'' = Lambda (i : ps) body ret
-          lam''' <- renameLambda lam''
-          return $ Just (lam''', interleave nes nes_tan)
+          return $ Just (lam'', interleave nes nes_tan)
         _ -> error "Malformed lambda in MkAcc."
   addStm $ Let pat' aux $ MkAcc accshape (arrs <> arrs_tan) ishape op'
-fwdStm s@(Let pat aux (Op soac)) = fwdSOAC pat aux soac
+fwdStm (Let pat aux (Op soac)) = fwdSOAC pat aux soac
 fwdStm stm =
   error $ "unhandled forward mode AD for Stm: " ++ pretty stm ++ "\n" ++ show stm
 
@@ -438,9 +438,10 @@ fwdBodyOnlyTangents (Body _ stms res) = do
   return $ mkBody stms' res'
 
 fwdJVP :: MonadFreshNames m => Scope SOACS -> Lambda -> m Lambda
-fwdJVP scope (Lambda params body ret) = do
-  runADM . localScope scope $ do
-    params_tan <- newTan params
-    body_tan <- fwdBodyOnlyTangents body
-    ret_tan <- tangent ret
-    return $ Lambda (params ++ params_tan) body_tan (ret ++ ret_tan)
+fwdJVP scope l@(Lambda params body ret) = do
+  runADM . localScope scope $
+    inScopeOf l $ do
+      params_tan <- newTan params
+      body_tan <- fwdBodyOnlyTangents body
+      ret_tan <- tangent ret
+      return $ Lambda (params ++ params_tan) body_tan (ret ++ ret_tan)
