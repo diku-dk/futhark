@@ -177,13 +177,13 @@ tabNest = tabNest' []
 -- Construct a lambda for adding two values of the given type.
 addLambda :: Type -> ADM Lambda
 addLambda (Prim pt) = binOpLambda (addBinOp pt) pt
-addLambda (Array (ElemPrim t) (Shape (s : ss)) u) = do
+addLambda t@(Array (ElemPrim _) _ _) = do
   xs <- newVName "xs"
   ys <- newVName "ys"
-  let t' = Array (ElemPrim t) (Shape ss) u
+  let t' = rowType t
   lam <- addLambda t'
   body <- insertStmsM $ do
-    res <- letSubExp "lam_map" $ Op $ Screma s (mapSOAC lam) [xs, ys]
+    res <- letSubExp "lam_map" $ Op $ Screma (arraySize 0 t) (mapSOAC lam) [xs, ys]
     return $ resultBody [res]
   pure
     Lambda
@@ -192,7 +192,7 @@ addLambda (Array (ElemPrim t) (Shape (s : ss)) u) = do
         lambdaBody = body
       }
 addLambda t =
-  error $ "addLambda: " ++ pretty t
+  error $ "addLambda: " ++ show t
 
 -- Construct an expression for adding the two variables.
 addExp :: VName -> VName -> ADM Exp
