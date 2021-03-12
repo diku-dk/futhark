@@ -1,12 +1,45 @@
 -- ==
--- tags { disable }
+-- entry: fwd_J rev_J
+-- compiled input
+-- {
+-- [[1.0,2.0],[3.0,4.0]] [1i64, 0i64, 1i64, 1i64]
+-- }
+-- output
+-- {
+-- [[[[0.000000f64, 1.000000f64],
+--    [0.000000f64, 0.000000f64]],
+--   [[1.000000f64, 0.000000f64],
+--    [0.000000f64, 0.000000f64]],
+--   [[0.000000f64, 1.000000f64],
+--    [0.000000f64, 0.000000f64]],
+--   [[0.000000f64, 1.000000f64],
+--    [0.000000f64, 0.000000f64]]],
+--  [[[0.000000f64, 0.000000f64],
+--    [0.000000f64, 1.000000f64]],
+--   [[0.000000f64, 0.000000f64],
+--    [1.000000f64, 0.000000f64]],
+--   [[0.000000f64, 0.000000f64],
+--    [0.000000f64, 1.000000f64]],
+--   [[0.000000f64, 0.000000f64],
+--    [0.000000f64, 1.000000f64]]]]
+-- }
+
 
 let gather xs is = map (\(i: i64) -> xs[i]) is
 
 let mapgather xss is = map (`gather` is) xss
 
-entry fwd (xs: [][]f64) (is: []i64) y =
-  jvp (`mapgather` is) xs y
+let onehot n i : [n]f64 =
+  tabulate n (\j -> f64.bool (i==j))
 
-entry rev (xs: [][]f64) (is: []i64) y =
-  vjp (`mapgather` is) xs y
+let onehot_2d n m p : [n][m]f64 =
+  tabulate_2d n m (\i j -> f64.bool ((i,j)==p))
+
+entry fwd_J [n][m][k] (xs: [n][m]f64) (is: [k]i64) =
+  tabulate_2d n m (\i j -> jvp (`mapgather` is) xs (onehot_2d n m (i,j)))
+  |> map transpose
+  |> map (map transpose)
+  |> map transpose
+
+entry rev_J [n][m][k] (xs: [n][m]f64) (is: [k]i64) =
+  tabulate_2d n k (\i j -> vjp (`mapgather` is) xs (onehot_2d n k (i,j)))

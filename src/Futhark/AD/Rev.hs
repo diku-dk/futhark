@@ -154,6 +154,26 @@ addBinOp (FloatType ft) = FAdd ft
 addBinOp Bool = LogAnd
 addBinOp Cert = LogAnd
 
+tabNest :: Int -> [VName] -> ([VName] -> [VName] -> ADM [VName]) -> ADM [VName]
+tabNest = tabNest' []
+  where
+    tabNest' is 0 vs f = f (reverse is) vs
+    tabNest' is n vs f = do
+      vs_ts <- mapM lookupType vs
+      let w = arraysSize 0 vs_ts
+      iota <-
+        letExp "tab_iota" . BasicOp $
+          Iota w (intConst Int64 0) (intConst Int64 1) Int64
+      iparam <- newParam "i" $ Prim int64
+      params <- forM vs $ \v ->
+        newParam (baseString v <> "_p") . rowType =<< lookupType v
+      ((ret, res), stms) <- collectStms . localScope (scopeOfLParams (iparam : params)) $ do
+        res <- tabNest' (paramName iparam : is) (n -1) (map paramName params) f
+        ret <- mapM lookupType res
+        pure (ret, map Var res)
+      let lam = Lambda (iparam : params) (Body () stms res) ret
+      letTupExp "tab" $ Op $ Screma w (mapSOAC lam) (iota : vs)
+
 -- Construct a lambda for adding two values of the given type.
 addLambda :: Type -> ADM Lambda
 addLambda (Prim pt) = binOpLambda (addBinOp pt) pt
@@ -208,7 +228,21 @@ instance Adjoint VName where
       Just v_adj -> do
         v_adj_t <- lookupType v_adj
         case v_adj_t of
-          Acc _ -> error $ "updateAdj on accumulator: " <> pretty v
+          Acc _ -> do
+            dims <- arrayDims <$> lookupType d
+            v_adj_arr <-
+              letExp (baseString v_adj <> "_arr") $
+                BasicOp $ Replicate (Shape dims) $ Var v_adj
+            ~[v_adj_arr'] <-
+              tabNest (length dims) [v_adj_arr, d] $ \is [v_adj_arr', d'] ->
+                letTupExp "acc" $
+                  BasicOp $ UpdateAcc v_adj_arr' (map Var is) [Var d']
+            v_adj' <-
+              -- FIXME: we need a JoinAcc construct.
+              letExp (baseString v <> "_adj") . BasicOp . Index v_adj_arr' $
+                replicate (length dims) $ DimFix $ intConst Int64 0
+            insAdj v v_adj'
+            pure v_adj'
           _ -> do
             v_adj' <- letExp (baseString v <> "_adj") =<< addExp v_adj d
             insAdj v v_adj'
