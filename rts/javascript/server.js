@@ -19,7 +19,7 @@ class Server {
     if (this.ctx.entry_points.includes(entry)) {
       return this.entry_points[entry];
     } else {
-      throw "Unkown entry point: " + entry);
+      throw "Unkown entry point: " + entry;
     }
   }
 
@@ -133,29 +133,61 @@ class Server {
     
     var fs = require("fs"); 
     var reader = ReaderInput(f);
-
-
-
-
+    while (args != []) {
+      var vname = args[0];
+      var typename = args[1];
+      args = args.slice(2);
       
+      // TODO finish the rest of this function
+      if (this._vars.includes()) {}
+    }
+  }
 
+
+  _commands = { 'inputs': _cmd_inputs,
+                'outputs': _cmd_outputs,
+                'call': _cmd_call,
+                'restore': _cmd_restore,
+                'store': _cmd_store,
+                'free': _cmd_free,
+                'clear': _cmd_dummy,
+                'pause_profiling': _cmd_dummy,
+                'unpause_profiling': _cmd_dummy,
+                'report': _cmd_dummy
+               };
     
 
 
+  _process_line(line) {
+    // TODO make sure it splits on anywhite space
+    var words = line.split(" ");
+    if (words.length == 0) {
+      throw "Empty line";
+    } else {
+      var cmd = words[0];
+      var args = words.splice(1);
+      if (cmd in this._commands) {
+        self._commands[cmd](args);
+      } else {
+        throw "Unknown command: " + cmd;
+      }
+    }
+  }
 
-
-
-  
-
-
-      
-
-
-
-
-
-
-
-
-    
-  
+  run() {
+    console.log('%%% OK'); // TODO figure out if flushing is neccesary for JS
+    const readline = require('readline');
+    const rl = readline.createInterface(process.stdin);
+    rl.on('line', (line) => {
+      if (line == "") {
+        rl.close();
+      }
+      try {
+        _process_line(line);
+      } catch (err) {
+        console.log('%%% FAILURE');
+        console.log(err);
+      }
+    });
+  }
+}
