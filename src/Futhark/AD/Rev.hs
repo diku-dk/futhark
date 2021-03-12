@@ -16,14 +16,14 @@ module Futhark.AD.Rev (revVJP) where
 
 import Control.Monad
 import Control.Monad.State.Strict
-import Data.Bifunctor (second)
+import Data.Bifunctor (first, second)
 import Data.Either (partitionEithers)
 import qualified Data.Map as M
 import Futhark.AD.Derivatives
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.Binder
-import Futhark.Construct
 import Futhark.IR.SOACS
+import Futhark.Tools
 import Futhark.Transform.Rename
 import Futhark.Util (splitAt3, takeLast)
 
@@ -502,21 +502,21 @@ diffMap pat_adj w map_lam as = do
   zipWithM_ freeContrib prim_free free_contribs
   zipWithM_ accContrib arrs_and_accs acc_contribs
   where
-    addIdxParam lam = do
-      idx <- newParam "idx" $ Prim int64
-      pure $ lam {lambdaParams = idx : lambdaParams lam}
+    addIdxParams n lam = do
+      idxs <- replicateM n $ newParam "idx" $ Prim int64
+      pure $ lam {lambdaParams = idxs ++ lambdaParams lam}
 
-    accAddLambda t = addIdxParam =<< addLambda t
+    accAddLambda n t = addIdxParams n =<< addLambda t
 
     decideOnFreeVar v = do
       v_adj <- lookupAdj v
       v_adj_t <- lookupType v_adj
       case v_adj_t of
-        Array (ElemPrim _) (Shape (d : _)) _ -> do
-          add_lam <- accAddLambda $ rowType v_adj_t
-          zero <- letSubExp "zero" $ zeroExp $ rowType v_adj_t
+        Array (ElemPrim pt) (Shape ds) _ -> do
+          add_lam <- accAddLambda (length ds) $ Prim pt
+          zero <- letSubExp "zero" $ zeroExp $ Prim pt
           fmap (Right . (v,) . (v_adj_t,)) . letExp (baseString v <> "_acc") $
-            MkAcc (Shape [w]) [v_adj] (Shape [d]) (Just (add_lam, [zero]))
+            MkAcc (Shape [w]) [v_adj] (Shape ds) (Just (add_lam, [zero]))
         Acc _ ->
           fmap (Right . (v,) . (v_adj_t,))
             . letExp (baseString v_adj <> "_rep")
@@ -595,6 +595,12 @@ diffSOAC pat aux soac@(Screma w form as) m
     pat_adj <- commonSOAC pat aux soac m
     diffMap pat_adj w lam as
 --
+diffSOAC pat _aux (Screma w form as) m
+  | Just (Reduce comm red_lam nes, map_lam) <-
+      first singleReduce <$> isRedomapSOAC form = do
+    (mapstm, redstm) <-
+      redomapToMapAndReduce pat (w, comm, red_lam, map_lam, nes, as)
+    diffStm mapstm $ diffStm redstm m
 diffSOAC _ _ soac _ =
   error $ "diffSOAC unhandled:\n" ++ pretty soac
 
