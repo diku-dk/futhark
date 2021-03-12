@@ -47,7 +47,7 @@ data SizeClass
 
 instance Pretty SizeClass where
   ppr (SizeThreshold path def) =
-    "threshold(" <> ppr (map pStep path) <> def' <> ")"
+    "threshold(" <> spread (map pStep path) <> def' <> ")"
     where
       pStep (v, True) = ppr v
       pStep (v, False) = "!" <> ppr v
