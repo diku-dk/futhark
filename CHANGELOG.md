@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+  * Mismatch between how thresholds were printed and what the
+    autotuner was looking for (#1269).
+
 ## [0.19.2]
 
 ### Added
