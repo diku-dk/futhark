@@ -110,6 +110,10 @@ transformSOAC ::
   AST.Pattern (Lore m) ->
   SOAC (Lore m) ->
   m ()
+transformSOAC _ JVP {} =
+  error "transformSOAC: unhandled JVP"
+transformSOAC _ VJP {} =
+  error "transformSOAC: unhandled VJP"
 transformSOAC pat (Screma w form@(ScremaForm scans reds map_lam) arrs) = do
   -- Start by combining all the reduction parts into a single operator
   let Reduce _ red_lam red_nes = singleReduce reds
