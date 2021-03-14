@@ -50,6 +50,7 @@ import System.Environment (getExecutablePath)
 import System.Exit
 import System.FilePath
 import System.IO
+import System.IO.Error (isDoesNotExistError)
 import System.IO.Temp (withSystemTempDirectory, withSystemTempFile)
 import Text.Megaparsec hiding (State, failure, token)
 import Text.Megaparsec.Char
@@ -503,20 +504,23 @@ processDirective env (DirectiveBrief d) =
 processDirective env (DirectiveCovert d) =
   processDirective env d
 processDirective env (DirectiveRes e) = do
-  vs <- evalExpToGround literateBuiltin (envServer env) e
+  v <- either nope pure =<< evalExpToGround literateBuiltin (envServer env) e
   pure $
     T.unlines
       [ "",
         "```",
-        prettyText vs,
+        prettyText v,
         "```",
         ""
       ]
+  where
+    nope t =
+      throwError $ "Cannot show value of type " <> prettyText t
 --
 processDirective env (DirectiveImg e) = do
-  vs <- evalExpToGround literateBuiltin (envServer env) e
-  case vs of
-    ValueAtom v
+  maybe_v <- evalExpToGround literateBuiltin (envServer env) e
+  case maybe_v of
+    Right (ValueAtom v)
       | Just bmp <- valueToBMP v -> do
         pngfile <- withTempDir $ \dir -> do
           let bmpfile = dir </> "img.bmp"
@@ -524,25 +528,30 @@ processDirective env (DirectiveImg e) = do
           newFile env "img.png" $ \pngfile ->
             void $ system "convert" [bmpfile, pngfile] mempty
         pure $ imgBlock pngfile
-    _ ->
+    Right v ->
+      nope $ fmap valueType v
+    Left t ->
+      nope t
+  where
+    nope t =
       throwError $
-        "Cannot create image from value of type "
-          <> prettyText (fmap valueType vs)
+        "Cannot create image from value of type " <> prettyText t
 --
 processDirective env (DirectivePlot e size) = do
-  v <- evalExpToGround literateBuiltin (envServer env) e
-  case v of
-    _
+  maybe_v <- evalExpToGround literateBuiltin (envServer env) e
+  case maybe_v of
+    Right v
       | Just vs <- plottable2d v -> do
         pngfile <- newFile env "plot.png" $ plotWith [(Nothing, vs)]
         pure $ imgBlock pngfile
-    ValueRecord m
+    Right (ValueRecord m)
       | Just m' <- traverse plottable2d m -> do
         pngfile <- newFile env "plot.png" $ plotWith $ map (first Just) $ M.toList m'
         pure $ imgBlock pngfile
-    _ ->
-      throwError $
-        "Cannot plot value of type " <> prettyText (fmap valueType v)
+    Right v ->
+      throwError $ "Cannot plot value of type " <> prettyText (fmap valueType v)
+    Left t ->
+      throwError $ "Cannot plot opaque value of type " <> prettyText t
   where
     plottable2d v = do
       [x, y] <- plottable v
@@ -574,15 +583,16 @@ processDirective env (DirectivePlot e size) = do
         void $ system "gnuplot" [] script
 --
 processDirective env (DirectiveGnuplot e script) = do
-  vs <- evalExpToGround literateBuiltin (envServer env) e
-  case vs of
-    ValueRecord m
+  maybe_v <- evalExpToGround literateBuiltin (envServer env) e
+  case maybe_v of
+    Right (ValueRecord m)
       | Just m' <- traverse plottable m -> do
         pngfile <- newFile env "plot.png" $ plotWith $ M.toList m'
         pure $ imgBlock pngfile
-    _ ->
-      throwError $
-        "Cannot plot value of type " <> prettyText (fmap valueType vs)
+    Right v ->
+      throwError $ "Cannot plot value of type " <> prettyText (fmap valueType v)
+    Left t ->
+      throwError $ "Cannot plot opaque value of type " <> prettyText t
   where
     plotWith xys pngfile = withGnuplotData [] xys $ \_ sets -> do
       let script' =
@@ -729,8 +739,11 @@ processBlock env (BlockDirective directive) = do
 cleanupImgDir :: Env -> Files -> IO ()
 cleanupImgDir env keep_files =
   mapM_ toRemove . filter (not . (`S.member` keep_files))
-    =<< directoryContents (envImgDir env)
+    =<< (directoryContents (envImgDir env) `catchError` onError)
   where
+    onError e
+      | isDoesNotExistError e = pure []
+      | otherwise = throwError e
     toRemove f = do
       when (scriptVerbose (envOpts env) > 0) $
         T.hPutStrLn stderr $ "Deleting unused file: " <> T.pack f
