@@ -628,16 +628,15 @@ pSizeClass =
       keyword "local_memory" $> Kernel.SizeLocalMemory,
       keyword "threshold"
         *> parens
-          ( Kernel.SizeThreshold
-              <$> pKernelPath
-              <*> optional (pComma *> pInt64)
+          ( flip Kernel.SizeThreshold
+              <$> choice [Just <$> pInt64, "def" $> Nothing] <* pComma
+              <*> pKernelPath
           ),
       keyword "bespoke"
         *> parens (Kernel.SizeBespoke <$> pName <* pComma <*> pInt64)
     ]
   where
-    pKernelPath =
-      brackets $ pStep `sepBy` pComma
+    pKernelPath = many pStep
     pStep =
       choice
         [ lexeme "!" $> (,) <*> pName <*> pure False,

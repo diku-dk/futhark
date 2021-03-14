@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+### Removed
+
+### Changed
+
+### Fixed
+
+  * Mismatch between how thresholds were printed and what the
+    autotuner was looking for (#1269).
+
+## [0.19.2]
+
+### Added
+
   * New subcommand: `futhark hash`.
 
   * `futhark literate` is now smart about when to regenerate image and
@@ -16,10 +29,6 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * `futhark literate` now produces better error messages passing
     expressions of the wrong type to directives.
-
-### Removed
-
-### Changed
 
 ### Fixed
 
@@ -39,6 +48,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Incorrect uniqueness attributes inserted by lambda lifting
     (#1268).
+
+  * FutharkScript record expressions were a bit too sensitive to
+    whitespace.
 
 ## [0.19.1]
 

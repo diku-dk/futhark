@@ -15,7 +15,6 @@ module Futhark.IR.Kernels.Sizes
   )
 where
 
-import Control.Category
 import Data.Int (Int64)
 import Data.Traversable
 import Futhark.IR.Prop.Names (FreeIn)
@@ -47,11 +46,11 @@ data SizeClass
 
 instance Pretty SizeClass where
   ppr (SizeThreshold path def) =
-    "threshold(" <> ppr (map pStep path) <> def' <> ")"
+    "threshold" <> parens (def' <> comma <+> spread (map pStep path))
     where
       pStep (v, True) = ppr v
       pStep (v, False) = "!" <> ppr v
-      def' = maybe mempty ((", " <>) . ppr) def
+      def' = maybe "def" ppr def
   ppr SizeGroup = text "group_size"
   ppr SizeNumGroups = text "num_groups"
   ppr SizeTile = text "tile_size"
