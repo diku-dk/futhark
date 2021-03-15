@@ -1125,8 +1125,11 @@ expReturns (BasicOp (Index v slice)) = do
     MemAcc arrs shape -> return [MemAcc arrs (fmap Free shape)]
 expReturns (BasicOp (Update v _ _)) =
   pure <$> varReturns v
-expReturns (BasicOp (JoinAcc _ arrs)) =
-  mapM varReturns arrs
+expReturns (BasicOp (JoinAcc acc _)) = do
+  r <- varReturns acc
+  case r of
+    MemAcc arrs _ -> pure [MemAcc arrs mempty]
+    _ -> error $ "JoinAcc: " ++ pretty r
 expReturns (BasicOp (UpdateAcc acc _ _)) =
   pure <$> varReturns acc
 expReturns (WithAcc _ arrs lam _) =
@@ -1136,7 +1139,9 @@ expReturns (WithAcc _ arrs lam _) =
       -- XXX: this is a bit dubious.  I think WithAcc should perhaps
       -- have a return annotation like If.
       (scopeOfLParams (lambdaParams lam) <> scopeOf (bodyStms (lambdaBody lam)))
-      (mapM subExpReturns (bodyResult (lambdaBody lam)))
+      (mapM subExpReturns (drop num_accs (bodyResult (lambdaBody lam))))
+  where
+    num_accs = 1
 expReturns (BasicOp op) =
   extReturns . staticShapes <$> primOpType op
 expReturns e@(DoLoop ctx val _ _) = do

@@ -69,6 +69,12 @@ transformFunDef scope fundec = do
 transformBody :: Body KernelsMem -> ExpandM (Body KernelsMem)
 transformBody (Body () stms res) = Body () <$> transformStms stms <*> pure res
 
+transformLambda :: Lambda KernelsMem -> ExpandM (Lambda KernelsMem)
+transformLambda (Lambda params body ret) =
+  Lambda params
+    <$> localScope (scopeOfLParams params) (transformBody body)
+    <*> pure ret
+
 transformStms :: Stms KernelsMem -> ExpandM (Stms KernelsMem)
 transformStms stms =
   inScopeOf stms $ mconcat <$> mapM transformStm (stmsToList stms)
@@ -158,17 +164,17 @@ transformExp (WithAcc shape arrs lam (Just (op_lam, nes))) = do
       return ()
 
   let num_is = shapeRank shape
-      is = map paramName $ take num_is $ lambdaParams lam
+      is = map paramName $ take num_is $ lambdaParams op_lam
   (alloc_stms, alloc_offsets) <-
     genericExpandedInvariantAllocations (const (shape, is)) invariant_allocs
 
   scope <- askScope
-  let scope' = scopeOf lam <> scope
+  let scope' = scopeOf op_lam <> scope
+  lam' <- transformLambda lam
   either throwError pure $
     runOffsetM scope' alloc_offsets $ do
       op_lam'' <- offsetMemoryInLambda op_lam'
-      let lam'' = undefined
-      return (alloc_stms, WithAcc shape arrs lam'' $ Just (op_lam'', nes))
+      return (alloc_stms, WithAcc shape arrs lam' $ Just (op_lam'', nes))
 transformExp e =
   return (mempty, e)
 

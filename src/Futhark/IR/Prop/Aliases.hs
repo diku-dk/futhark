@@ -115,7 +115,9 @@ expAliases (DoLoop ctxmerge valmerge _ loopbody) =
 expAliases (Apply _ args t _) =
   funcallAliases args $ map declExtTypeOf t
 expAliases (WithAcc _ arrs lam _) =
-  map (const mempty) arrs ++ drop (length arrs) (bodyAliases (lambdaBody lam))
+  map (const mempty) arrs ++ drop num_accs (bodyAliases (lambdaBody lam))
+  where
+    num_accs = 1
 expAliases (Op op) = opAliases op
 
 returnAliases :: [TypeBase shape Uniqueness] -> [(Names, Diet)] -> [Names]
@@ -158,8 +160,8 @@ consumedInExp (DoLoop _ merge _ _) =
 consumedInExp (WithAcc _ arrs lam _) = namesFromList arrs <> consumedByLambda lam
 consumedInExp (BasicOp (Update src _ _)) = oneName src
 consumedInExp (BasicOp (UpdateAcc acc _ _)) = oneName acc
+consumedInExp (BasicOp _) = mempty
 consumedInExp (Op op) = consumedInOp op
-consumedInExp _ = mempty
 
 -- | The variables consumed by this lambda.
 consumedByLambda :: Aliased lore => Lambda lore -> Names

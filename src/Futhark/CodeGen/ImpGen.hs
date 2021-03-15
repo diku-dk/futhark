@@ -807,14 +807,20 @@ defCompileExp pat (DoLoop ctx val form body) = do
   where
     merge = ctx ++ val
     mergepat = map fst merge
-{-
-defCompileExp _ (MkAcc _ arrs _ Nothing) =
-  -- In case these arrays have been used for another accumulator on
-  -- another code path, we have to forget about that.
-  modify $ \s -> s {stateAccs = M.delete arrs $ stateAccs s}
-defCompileExp _ (MkAcc _ arrs _ (Just (lam, nes))) =
-  modify $ \s -> s {stateAccs = M.insert arrs (lam, nes) $ stateAccs s}
--}
+defCompileExp pat (WithAcc _ arrs lam op) = do
+  dLParams $ lambdaParams lam
+  modify $ \s ->
+    case op of
+      Just (op_lam, nes) ->
+        s {stateAccs = M.insert arrs (op_lam, nes) $ stateAccs s}
+      Nothing ->
+        s {stateAccs = M.delete arrs $ stateAccs s}
+  compileStms mempty (bodyStms $ lambdaBody lam) $ do
+    let nonacc_res = drop num_accs (bodyResult (lambdaBody lam))
+    forM_ (zip (patternNames pat) nonacc_res) $ \(v, se) ->
+      copyDWIM v [] se []
+  where
+    num_accs = 1
 defCompileExp pat (Op op) = do
   opc <- asks envOpCompiler
   opc pat op
