@@ -18,6 +18,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * Mismatch between how thresholds were printed and what the
     autotuner was looking for (#1269).
 
+  * `zip` now produces unique arrays (#1271).
+
 ## [0.19.2]
 
 ### Added
