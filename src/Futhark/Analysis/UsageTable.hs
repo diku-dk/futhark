@@ -141,7 +141,7 @@ matches (Usages x) (Usages y) = x == (x .&. y)
 withoutU :: Usages -> Usages -> Usages
 withoutU (Usages x) (Usages y) = Usages $ x .&. complement y
 
-usageInBody :: (ASTLore lore, Aliased lore) => Body lore -> UsageTable
+usageInBody :: Aliased lore => Body lore -> UsageTable
 usageInBody = foldMap consumedUsage . namesToList . consumedInBody
 
 -- | Produce a usage table reflecting the use of the free variables in
