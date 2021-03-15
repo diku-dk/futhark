@@ -315,7 +315,8 @@ compileSegScan pat lvl space scanOp kbody = do
 
         status <- dPrim "status" int8 :: InKernelGen (TV Int8)
         copyDWIMFix (tvVar status) [] (Var warpscan) [0]
-
+        lastIdx <- dPrimVE "last_idx" $
+          (tvExp dynamicId + 1) * kernelGroupSize constants * m - 1
         sIf
           (tvExp status .==. statusP)
           ( sWhen (kernelLocalThreadId constants .==. 0) $
@@ -328,6 +329,10 @@ compileSegScan pat lvl space scanOp kbody = do
                 dPrimV "readOffset" $
                   sExt32 $ tvExp dynamicId - sExt64 (kernelWaveSize constants)
               let loopStop = warpSize * (-1)
+                  --lastIdx = (tvExp dynamicId + 1) * kernelGroupSize constants * m - 1
+                  sameSegment readIdx =
+                    let startIdx = sExt64 (tvExp readIdx + 1) * kernelGroupSize constants * m - 1
+                    in lastIdx - startIdx .>. lastIdx `mod` segment_size
               sWhile (tvExp readOffset .>. loopStop) $ do
                 readI <- dPrimV "read_i" $ tvExp readOffset + kernelLocalThreadId constants
                 aggrs <- forM (zip scanOpNe tys) $ \(ne, ty) ->
@@ -335,7 +340,7 @@ compileSegScan pat lvl space scanOp kbody = do
                 flag <- dPrimV "flag" statusX
                 used <- dPrimV "used" (0 :: Imp.TExp Int8)
                 everythingVolatile $
-                  sWhen (tvExp readI .>=. 0) $ do
+                  sWhen (tvExp readI .>=. 0 .&&. sameSegment readI) $ do
                     copyDWIMFix (tvVar flag) [] (Var statusFlags) [sExt64 $ tvExp readI]
                     sIf
                       (tvExp flag .==. statusP)
