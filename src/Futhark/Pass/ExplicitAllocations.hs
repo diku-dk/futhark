@@ -77,7 +77,7 @@ bindAllocStm (ArrayCopy name src) =
   letBindNames [name] $ BasicOp $ Copy src
 
 class
-  (MonadFreshNames m, HasScope lore m, Mem lore) =>
+  (MonadFreshNames m, LocalScope lore m, Mem lore) =>
   Allocator lore m
   where
   addAllocStm :: AllocStm -> m ()
@@ -248,6 +248,7 @@ newtype PatAllocM lore a
       Functor,
       Monad,
       HasScope lore,
+      LocalScope lore,
       MonadWriter [AllocStm],
       MonadFreshNames
     )
@@ -944,12 +945,19 @@ allocInExp (If cond tbranch0 fbranch0 (IfDec rets ifsort)) = do
         let (_, val_res) = splitFromEnd num_vals res
         mem_ixfs <- mapM subExpIxFun val_res
         return (Body () bnds' res, mem_ixfs)
-allocInExp (MkAcc accshape arrs ishape op) =
-  MkAcc accshape arrs ishape <$> traverse onOp op
+allocInExp (WithAcc accshape arrs bodylam op) =
+  WithAcc accshape arrs <$> onLambda bodylam <*> traverse onOp op
   where
+    onLambda lam = do
+      params <- forM (lambdaParams lam) $ \(Param pv t) ->
+        case t of
+          Acc acc_arrs -> pure $ Param pv $ MemAcc acc_arrs mempty
+          _ -> error $ "Unexpected WithAcc lambda param: " ++ pretty (Param pv t)
+      allocInLambda params (lambdaBody lam) (lambdaReturnType lam)
+
     onOp (lam, nes) = do
       let num_vs = length (lambdaReturnType lam)
-          num_is = shapeRank ishape
+          num_is = shapeRank accshape
           (i_params, x_params, y_params) =
             splitAt3 num_is num_vs $ lambdaParams lam
           i_params' = map ((`Param` MemPrim int64) . paramName) i_params

@@ -835,17 +835,18 @@ simplifyExp (DoLoop ctx val form loopbody) = do
 simplifyExp (Op op) = do
   (op', stms) <- simplifyOp op
   return (Op op', stms)
-simplifyExp (MkAcc shape arrs ishape op) = do
+simplifyExp (WithAcc shape arrs lam op) = do
   (op', op_stms) <- case op of
     Nothing ->
       pure (Nothing, mempty)
-    Just (lam, nes) -> do
-      (lam', lam_stms) <- simplifyLambda lam
+    Just (op_lam, nes) -> do
+      (op_lam', op_lam_stms) <- simplifyLambda op_lam
       nes' <- simplify nes
-      return (Just (lam', nes'), lam_stms)
+      return (Just (op_lam', nes'), op_lam_stms)
+  (lam', lam_stms) <- simplifyLambda lam
   (,)
-    <$> (MkAcc <$> simplify shape <*> simplify arrs <*> simplify ishape <*> pure op')
-    <*> pure op_stms
+    <$> (WithAcc <$> simplify shape <*> simplify arrs <*> pure lam' <*> pure op')
+    <*> pure (lam_stms <> op_stms)
 
 -- Special case for simplification of commutative BinOps where we
 -- arrange the operands in sorted order.  This can make expressions

@@ -266,10 +266,9 @@ transformStms path (bnd : bnds) =
       transformStms path $ stmsToList bnds' <> bnds
 
 unbalancedLambda :: Lambda -> Bool
-unbalancedLambda lam =
-  unbalancedBody
-    (namesFromList $ map paramName $ lambdaParams lam)
-    $ lambdaBody lam
+unbalancedLambda orig_lam =
+  unbalancedBody (namesFromList $ map paramName $ lambdaParams orig_lam) $
+    lambdaBody orig_lam
   where
     subExpBound (Var i) bound = i `nameIn` bound
     subExpBound (Constant _) _ = False
@@ -286,7 +285,8 @@ unbalancedLambda lam =
     unbalancedStm _ Op {} =
       False
     unbalancedStm _ DoLoop {} = False
-    unbalancedStm _ MkAcc {} = False
+    unbalancedStm bound (WithAcc _ _ lam _) =
+      unbalancedBody bound (lambdaBody lam)
     unbalancedStm bound (If cond tbranch fbranch _) =
       cond `subExpBound` bound
         && (unbalancedBody bound tbranch || unbalancedBody bound fbranch)

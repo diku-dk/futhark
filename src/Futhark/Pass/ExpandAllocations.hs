@@ -137,14 +137,14 @@ transformExp (Op (Inner (SegOp (SegHist lvl space ops ts kbody)))) = do
   where
     lams = map histOp ops
     onOp op lam = op {histOp = lam}
-transformExp (MkAcc shape arrs ishape (Just (lam, nes))) = do
+transformExp (WithAcc shape arrs lam (Just (op_lam, nes))) = do
   bound_outside <- asks $ namesFromList . M.keys
   let -- XXX: fake a SegLevel, which we don't have here.  We will not
       -- use it for anything, as we will not allow irregular
       -- allocations inside the update function.
       lvl = SegThread (Count $ intConst Int64 0) (Count $ intConst Int64 0) SegNoVirt
-      (lam', lam_allocs) =
-        extractLambdaAllocations lvl bound_outside mempty lam
+      (op_lam', lam_allocs) =
+        extractLambdaAllocations lvl bound_outside mempty op_lam
       variantAlloc (_, Var v, _) = not $ v `nameIn` bound_outside
       variantAlloc _ = False
       (variant_allocs, invariant_allocs) = M.partition variantAlloc lam_allocs
@@ -157,17 +157,18 @@ transformExp (MkAcc shape arrs ishape (Just (lam, nes))) = do
     [] ->
       return ()
 
-  let num_is = shapeRank ishape
+  let num_is = shapeRank shape
       is = map paramName $ take num_is $ lambdaParams lam
   (alloc_stms, alloc_offsets) <-
-    genericExpandedInvariantAllocations (const (ishape, is)) invariant_allocs
+    genericExpandedInvariantAllocations (const (shape, is)) invariant_allocs
 
   scope <- askScope
   let scope' = scopeOf lam <> scope
   either throwError pure $
     runOffsetM scope' alloc_offsets $ do
-      lam'' <- offsetMemoryInLambda lam'
-      return (alloc_stms, MkAcc shape arrs ishape $ Just (lam'', nes))
+      op_lam'' <- offsetMemoryInLambda op_lam'
+      let lam'' = undefined
+      return (alloc_stms, WithAcc shape arrs lam'' $ Just (op_lam'', nes))
 transformExp e =
   return (mempty, e)
 

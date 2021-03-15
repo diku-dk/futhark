@@ -285,7 +285,7 @@ pBasicOp =
       keyword "update_acc"
         *> parens
           (UpdateAcc <$> pVName <* pComma <*> pSubExps <* pComma <*> pSubExps),
-      keyword "un_acc" *> parens (UnAcc <$> pVName <* pComma <*> pTypes),
+      keyword "join_acc" *> parens (JoinAcc <$> pVName <* pComma <*> pVNames),
       --
       pConvOp "sext" SExt pIntType pIntType,
       pConvOp "zext" ZExt pIntType pIntType,
@@ -454,7 +454,9 @@ pScan pr =
     <*> braces (pSubExp `sepBy` pComma)
 
 pMkAcc :: PR lore -> Parser (Exp lore)
-pMkAcc pr =
+pMkAcc pr = undefined
+
+{-
   keyword "mk_acc"
     *> parens
       ( MkAcc <$> pShape <* pComma
@@ -464,7 +466,7 @@ pMkAcc pr =
       )
   where
     pCombFun = parens ((,) <$> pLambda pr <* pComma <*> pSubExps)
-
+-}
 pExp :: PR lore -> Parser (Exp lore)
 pExp pr =
   choice

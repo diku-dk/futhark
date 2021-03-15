@@ -152,7 +152,7 @@ instance PrettyLore lore => Pretty (Stm lore) where
         DoLoop {} -> True
         Op {} -> True
         If {} -> True
-        MkAcc {} -> True
+        WithAcc {} -> True
         Apply {} -> True
         BasicOp ArrayLit {} -> False
         BasicOp Assert {} -> True
@@ -206,10 +206,10 @@ instance Pretty BasicOp where
   ppr (Manifest perm e) = text "manifest" <> apply [apply (map ppr perm), ppr e]
   ppr (Assert e msg (loc, _)) =
     text "assert" <> apply [ppr e, ppr msg, text $ show $ locStr loc]
-  ppr (UnAcc acc ts) =
-    text "un_acc" <> apply [ppr acc, ppTuple' ts]
   ppr (UpdateAcc acc is v) =
     text "update_acc" <> apply [ppr acc, ppTuple' is, ppTuple' v]
+  ppr (JoinAcc acc arrs) =
+    text "join_acc" <> apply [ppr acc, ppTuple' arrs]
 
 instance Pretty a => Pretty (ErrorMsg a) where
   ppr (ErrorMsg parts) = braces $ align $ commasep $ map p parts
@@ -279,15 +279,13 @@ instance PrettyLore lore => Pretty (Exp lore) where
       (ctxparams, ctxinit) = unzip ctx
       (valparams, valinit) = unzip val
       pprLoopVar (p, a) = ppr p <+> text "in" <+> ppr a
-  ppr (MkAcc shape arrs ishape Nothing) =
-    text "mk_acc" <> apply [ppr shape, ppTuple' arrs, ppr ishape]
-  ppr (MkAcc shape arrs ishape (Just (lam, nes))) =
-    text "mk_acc"
+  ppr (WithAcc shape arrs lam op) =
+    text "with_acc"
       <> parens
-        ( ppr shape <> comma
-            <+> ppTuple' arrs <> comma
-            <+> ppr ishape <> comma
-            </> parens (ppr lam <> comma </> ppTuple' nes)
+        ( ppr shape <> comma <+> ppTuple' arrs <> comma </> ppr lam
+            <> case op of
+              Nothing -> mempty
+              Just (op', nes) -> comma </> ppTuple' [ppr op', ppTuple' $ map ppr nes]
         )
 
 instance PrettyLore lore => Pretty (Lambda lore) where

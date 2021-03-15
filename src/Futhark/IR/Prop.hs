@@ -128,7 +128,7 @@ safeExp (Apply fname _ _ _) =
 safeExp (If _ tbranch fbranch _) =
   all (safeExp . stmExp) (bodyStms tbranch)
     && all (safeExp . stmExp) (bodyStms fbranch)
-safeExp MkAcc {} = True -- Although unlikely to matter.
+safeExp WithAcc {} = True -- Although unlikely to matter.
 safeExp (Op op) = safeOp op
 
 safeBody :: IsOp (Op lore) => Body lore -> Bool

@@ -399,16 +399,11 @@ data BasicOp
     -- subexpressions specify how much each dimension is rotated.  The
     -- length of this list must be equal to the rank of the array.
     Rotate [SubExp] VName
-  | -- Accumulator operations
-
-    -- | Collapse an array of accumulators to the final arrays produced
-    -- by the accumulations.  Consumes the accumulator and returns an
-    -- array for each 'Type' (which is also incidentally the types of
-    -- the arrays).
-    UnAcc VName [Type]
   | -- | Update an accumulator at the given index with the given value.
     -- Consumes the accumulator and produces a new one.
     UpdateAcc VName [SubExp] [SubExp]
+  | -- | Compact an array of accumulators to a single accumulator.
+    JoinAcc VName [VName]
   deriving (Eq, Ord, Show)
 
 -- | The root Futhark expression type.  The v'Op' constructor contains
@@ -422,12 +417,14 @@ data ExpT lore
   | -- | @loop {a} = {v} (for i < n|while b) do b@.  The merge
     -- parameters are divided into context and value part.
     DoLoop [(FParam lore, SubExp)] [(FParam lore, SubExp)] (LoopForm lore) (BodyT lore)
-  | -- | Create an array of accumulators of the given shape and
-    -- combination function, which is ultimately backed by the given
-    -- arrays.  The second 'Shape' is the write index space.  The
-    -- arrays must all have this shape outermost.  This is not part of
-    -- 'BasicOp' because we need the @lore@ parameter.
-    MkAcc Shape [VName] Shape (Maybe (Lambda lore, [SubExp]))
+  | -- | Create accumulators backed by the given arrays (which are
+    -- consumed) and pass them to the lambda, which must return the
+    -- updated accumulators and possibly some extra values.  The
+    -- accumulators are turned back into arrays.  The 'Shape' is the
+    -- write index space.  The arrays must all have this shape
+    -- outermost.  This is not part of 'BasicOp' because we need the
+    -- @lore@ parameter.
+    WithAcc Shape [VName] (Lambda lore) (Maybe (Lambda lore, [SubExp]))
   | Op (Op lore)
 
 deriving instance Decorations lore => Eq (ExpT lore)

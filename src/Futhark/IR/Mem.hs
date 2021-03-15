@@ -1055,17 +1055,23 @@ varReturns v = do
     MemAcc arrs shape ->
       return $ MemAcc arrs $ fmap Free shape
 
+subExpReturns :: (HasScope lore m, Monad m, Mem lore) => SubExp -> m ExpReturns
+subExpReturns (Var v) =
+  varReturns v
+subExpReturns (Constant v) =
+  pure $ MemPrim $ primValueType v
+
 -- | The return information of an expression.  This can be seen as the
 -- "return type with memory annotations" of the expression.
 expReturns ::
   ( Monad m,
-    HasScope lore m,
+    LocalScope lore m,
     Mem lore
   ) =>
   Exp lore ->
   m [ExpReturns]
-expReturns (BasicOp (SubExp (Var v))) =
-  pure <$> varReturns v
+expReturns (BasicOp (SubExp se)) =
+  pure <$> subExpReturns se
 expReturns (BasicOp (Opaque (Var v))) =
   pure <$> varReturns v
 expReturns (BasicOp (Reshape newshape v)) = do
@@ -1119,15 +1125,18 @@ expReturns (BasicOp (Index v slice)) = do
     MemAcc arrs shape -> return [MemAcc arrs (fmap Free shape)]
 expReturns (BasicOp (Update v _ _)) =
   pure <$> varReturns v
-expReturns (BasicOp (UnAcc acc _)) = do
-  acc_info <- lookupMemInfo acc
-  case acc_info of
-    MemAcc arrs _ -> mapM varReturns arrs
-    _ -> error $ "UnAcc accumulator has info: " ++ pretty acc_info
+expReturns (BasicOp (JoinAcc _ arrs)) =
+  mapM varReturns arrs
 expReturns (BasicOp (UpdateAcc acc _ _)) =
   pure <$> varReturns acc
-expReturns (MkAcc shape arrs _ _) =
-  return [MemAcc arrs $ fmap Free shape]
+expReturns (WithAcc _ arrs lam _) =
+  (<>)
+    <$> mapM varReturns arrs
+    <*> localScope
+      -- XXX: this is a bit dubious.  I think WithAcc should perhaps
+      -- have a return annotation like If.
+      (scopeOfLParams (lambdaParams lam) <> scopeOf (bodyStms (lambdaBody lam)))
+      (mapM subExpReturns (bodyResult (lambdaBody lam)))
 expReturns (BasicOp op) =
   extReturns . staticShapes <$> primOpType op
 expReturns e@(DoLoop ctx val _ _) = do

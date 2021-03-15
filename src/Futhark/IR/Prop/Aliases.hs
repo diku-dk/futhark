@@ -82,7 +82,7 @@ basicOpAliases Concat {} = [mempty]
 basicOpAliases Copy {} = [mempty]
 basicOpAliases Manifest {} = [mempty]
 basicOpAliases Assert {} = [mempty]
-basicOpAliases (UnAcc _ ts) = map (const mempty) ts
+basicOpAliases JoinAcc {} = [mempty]
 basicOpAliases UpdateAcc {} = [mempty]
 
 ifAliases :: ([Names], Names) -> ([Names], Names) -> [Names]
@@ -114,7 +114,8 @@ expAliases (DoLoop ctxmerge valmerge _ loopbody) =
     merge_names = namesFromList $ map (paramName . fst) $ ctxmerge ++ valmerge
 expAliases (Apply _ args t _) =
   funcallAliases args $ map declExtTypeOf t
-expAliases MkAcc {} = [mempty]
+expAliases (WithAcc _ arrs lam _) =
+  map (const mempty) arrs ++ drop (length arrs) (bodyAliases (lambdaBody lam))
 expAliases (Op op) = opAliases op
 
 returnAliases :: [TypeBase shape Uniqueness] -> [(Names, Diet)] -> [Names]
@@ -154,7 +155,7 @@ consumedInExp (DoLoop _ merge _ _) =
     ( map (subExpAliases . snd) $
         filter (unique . paramDeclType . fst) merge
     )
-consumedInExp (MkAcc _ arrs _ _) = foldMap oneName arrs
+consumedInExp (WithAcc _ arrs lam _) = namesFromList arrs <> consumedByLambda lam
 consumedInExp (BasicOp (Update src _ _)) = oneName src
 consumedInExp (BasicOp (UpdateAcc acc _ _)) = oneName acc
 consumedInExp (Op op) = consumedInOp op

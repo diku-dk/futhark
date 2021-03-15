@@ -908,18 +908,18 @@ checkBasicOp (Assert e (ErrorMsg parts) _) = do
     checkPart ErrorString {} = return ()
     checkPart (ErrorInt32 x) = require [Prim int32] x
     checkPart (ErrorInt64 x) = require [Prim int64] x
-checkBasicOp (UnAcc acc ts) = do
+checkBasicOp (JoinAcc acc vs) = do
   expected <- checkIfAccArr =<< checkArrIdent acc
-  unless (expected == ts) $
+  unless (expected == vs) $
     bad $
       TypeError $
         unlines
-          [ "Annotation: " ++ pretty ts,
+          [ "Annotation: " ++ pretty vs,
             "Inferred: " ++ pretty expected
           ]
   where
     checkIfAccArr (Array (ElemAcc arrs) _ _) =
-      mapM lookupType arrs
+      pure arrs
     checkIfAccArr t =
       bad $ TypeError $ "Bad type for UnAcc: " ++ pretty t
 checkBasicOp (UpdateAcc acc is ses) = do
@@ -1088,30 +1088,32 @@ checkExp (DoLoop ctxmerge valmerge form loopbody) = do
                       scopeOf $ bodyStms loopbody
             map (`namesSubtract` bound_here)
               <$> mapM subExpAliasesM (bodyResult loopbody)
-checkExp (MkAcc shape arrs ishape op) = do
+checkExp (WithAcc shape arrs lam op) = do
   mapM_ (require [Prim int64]) (shapeDims shape)
   arrs_ts <- forM arrs $ \arr -> do
     arr_t <- lookupType arr
-    unless (shapeDims ishape `isPrefixOf` arrayDims arr_t) $
-      bad . TypeError $ pretty arr <> " is not an array of outer shape " <> pretty ishape
+    unless (shapeDims shape `isPrefixOf` arrayDims arr_t) $
+      bad . TypeError $ pretty arr <> " is not an array of outer shape " <> pretty shape
     pure arr_t
 
   case op of
-    Just (lam, nes) -> do
-      let num_is = shapeRank ishape
+    Just (op_lam, nes) -> do
+      let num_is = shapeRank shape
           mkArrArg t = (stripArray num_is t, mempty)
       nes_ts <- mapM checkSubExp nes
-      unless (nes_ts == lambdaReturnType lam) $
+      unless (nes_ts == lambdaReturnType op_lam) $
         bad $
           TypeError $
             unlines
-              [ "Accumulator operator return type: " ++ pretty (lambdaReturnType lam),
+              [ "Accumulator operator return type: " ++ pretty (lambdaReturnType op_lam),
                 "Type of neutral elements: " ++ pretty nes_ts
               ]
-      checkLambda lam $
+      checkLambda op_lam $
         replicate num_is (Prim int64, mempty) ++ map mkArrArg (arrs_ts ++ arrs_ts)
     Nothing ->
       return ()
+
+  checkLambda lam [(Acc arrs, mempty)]
 checkExp (Op op) = do
   checker <- asks envCheckOp
   checker op
