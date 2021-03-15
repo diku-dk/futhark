@@ -892,7 +892,7 @@ intrinsics =
                  ]
                  uarr_3d_a
              ),
-             ("zip", IntrinsicPolyFun [tp_a, tp_b] [arr_a, arr_b] arr_a_b),
+             ("zip", IntrinsicPolyFun [tp_a, tp_b] [arr_a, arr_b] uarr_a_b),
              ("unzip", IntrinsicPolyFun [tp_a, tp_b] [arr_a_b] t_arr_a_arr_b),
              ( "hist",
                IntrinsicPolyFun
@@ -989,6 +989,7 @@ intrinsics =
         Nonunique
         (Record (M.fromList $ zip tupleFieldNames [Scalar t_a, Scalar t_b]))
         (rank 1)
+    uarr_a_b = arr_a_b `setUniqueness` Unique
     t_arr_a_arr_b = Scalar $ Record $ M.fromList $ zip tupleFieldNames [arr_a, arr_b]
 
     arr x y = Scalar $ Arrow mempty Unnamed x y

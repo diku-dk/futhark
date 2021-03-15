@@ -1712,8 +1712,11 @@ isOverloadedFunction qname args loc = do
         r <- I.arrayRank <$> lookupType v
         return $ I.Rearrange ([1, 0] ++ [2 .. r -1]) v
     handleRest [TupLit [x, y] _] "zip" = Just $ \desc ->
-      (++) <$> internaliseExp (desc ++ "_zip_x") x
-        <*> internaliseExp (desc ++ "_zip_y") y
+      mapM (letSubExp "zip_copy" . BasicOp . Copy)
+        =<< ( (++)
+                <$> internaliseExpToVars (desc ++ "_zip_x") x
+                <*> internaliseExpToVars (desc ++ "_zip_y") y
+            )
     handleRest [x] "unzip" = Just $ flip internaliseExp x
     handleRest [x] "trace" = Just $ flip internaliseExp x
     handleRest [x] "break" = Just $ flip internaliseExp x
