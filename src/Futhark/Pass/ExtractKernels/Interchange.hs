@@ -12,11 +12,14 @@ module Futhark.Pass.ExtractKernels.Interchange
     interchangeLoops,
     Branch (..),
     interchangeBranch,
+    WithAccStm (..),
+    interchangeWithAcc,
   )
 where
 
 import Control.Monad.RWS.Strict
 import Data.List (find)
+import qualified Data.Map as M
 import Data.Maybe
 import Futhark.IR.SOACS
 import Futhark.MonadFreshNames
@@ -173,3 +176,56 @@ interchangeBranch nest loop = do
   (loop', bnds) <-
     runBinder $ foldM interchangeBranch1 loop $ reverse $ kernelNestLoops nest
   return $ bnds <> oneStm (branchStm loop')
+
+data WithAccStm
+  = WithAccStm [Int] Pattern Shape [VName] Lambda (Maybe (Lambda, [SubExp]))
+
+withAccStm :: WithAccStm -> Stm
+withAccStm (WithAccStm _ pat shape arrs lam op) =
+  Let pat (defAux ()) $ WithAcc shape arrs lam op
+
+interchangeWithAcc1 ::
+  (MonadBinder m, Lore m ~ SOACS) =>
+  WithAccStm ->
+  LoopNesting ->
+  m WithAccStm
+interchangeWithAcc1
+  (WithAccStm perm _withacc_pat shape acc_arrs lam op)
+  (MapNesting pat aux w params_and_arrs) = do
+    acc_arrs' <- mapM onArr acc_arrs
+    lam_params <- mapM (onParam acc_arrs') (lambdaParams lam)
+    let lam_ret =
+          map paramType lam_params
+            ++ drop (length lam_params) (map rowType (patternTypes pat))
+    lam' <- renameLambda <=< mkLambda lam_params lam_ret $ do
+      let (params, arrs) = unzip params_and_arrs
+          maplam_ret = lambdaReturnType lam
+          maplam = Lambda params (lambdaBody lam) maplam_ret
+      (accs_vs, other_vs) <-
+        fmap (splitAt num_accs) . auxing aux . letTupExp "withacc_inter" $
+          Op $ Screma w (mapSOAC maplam) arrs
+      accs_vs' <- fmap concat $
+        forM accs_vs $ \acc ->
+          letTupExp "acc_joined" $ BasicOp $ JoinAcc acc acc_arrs
+      pure $ map Var $ accs_vs' ++ other_vs
+    let pat' = Pattern [] $ rearrangeShape perm $ patternValueElements pat
+        perm' = [0 .. patternSize pat -1]
+    pure $
+      WithAccStm perm' pat' (Shape [w] <> shape) acc_arrs' lam' op
+    where
+      num_accs = 1
+      onArr v =
+        pure . maybe v snd $
+          find ((== v) . paramName . fst) params_and_arrs
+      onParam acc_arrs' (Param pv _) =
+        pure $ Param pv $ Acc acc_arrs'
+
+interchangeWithAcc ::
+  (MonadFreshNames m, HasScope SOACS m) =>
+  KernelNest ->
+  WithAccStm ->
+  m (Stms SOACS)
+interchangeWithAcc nest withacc = do
+  (withacc', stms) <-
+    runBinder $ foldM interchangeWithAcc1 withacc $ reverse $ kernelNestLoops nest
+  return $ stms <> oneStm (withAccStm withacc')

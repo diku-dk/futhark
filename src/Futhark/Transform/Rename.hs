@@ -246,6 +246,8 @@ instance Renameable lore => Rename (Stm lore) where
   rename (Let pat elore e) = Let <$> rename pat <*> rename elore <*> rename e
 
 instance Renameable lore => Rename (Exp lore) where
+  rename (WithAcc shape accarrs lam op) =
+    WithAcc <$> rename shape <*> rename accarrs <*> rename lam <*> rename op
   rename (DoLoop ctx val form loopbody) = do
     let (ctxparams, ctxinit) = unzip ctx
         (valparams, valinit) = unzip val
@@ -307,14 +309,10 @@ instance Rename ElemType where
   rename (ElemPrim t) = pure $ ElemPrim t
   rename (ElemAcc ts) = ElemAcc <$> mapM rename ts
 
-instance
-  Rename shape =>
-  Rename (TypeBase shape u)
-  where
-  rename (Array et size u) =
-    Array <$> rename et <*> rename size <*> pure u
+instance Rename shape => Rename (TypeBase shape u) where
+  rename (Array et size u) = Array <$> rename et <*> rename size <*> pure u
   rename (Prim t) = return $ Prim t
-  rename (Acc ts) = Acc <$> mapM rename ts
+  rename (Acc x) = Acc <$> rename x
   rename (Mem space) = pure $ Mem space
 
 instance Renameable lore => Rename (Lambda lore) where

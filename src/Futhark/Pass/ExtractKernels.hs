@@ -163,6 +163,7 @@ module Futhark.Pass.ExtractKernels (extractKernels) where
 import Control.Monad.Identity
 import Control.Monad.RWS.Strict
 import Control.Monad.Reader
+import Data.Bitraversable
 import Data.Function ((&))
 import Data.Maybe
 import qualified Futhark.IR.Kernels as Out
@@ -344,6 +345,12 @@ kernelAlternatives pat default_body ((cond, alt) : alts) = runBinder_ $ do
     If cond alt alt_body $
       IfDec (staticShapes (patternTypes pat)) IfEquiv
 
+transformLambda :: KernelPath -> Lambda -> DistribM (Out.Lambda Out.Kernels)
+transformLambda path (Lambda params body ret) =
+  Lambda params
+    <$> localScope (scopeOfLParams params) (transformBody path body)
+    <*> pure ret
+
 transformStm :: KernelPath -> Stm -> DistribM KernelsStms
 transformStm _ stm
   | "sequential" `inAttrs` stmAuxAttrs (stmAux stm) =
@@ -356,6 +363,12 @@ transformStm path (Let pat aux (If c tb fb rt)) = do
   tb' <- transformBody path tb
   fb' <- transformBody path fb
   return $ oneStm $ Let pat aux $ If c tb' fb' rt
+transformStm path (Let pat aux (WithAcc shape arrs lam op)) =
+  oneStm . Let pat aux
+    <$> ( WithAcc shape arrs
+            <$> transformLambda path lam
+            <*> traverse (bitraverse (transformLambda path) pure) op
+        )
 transformStm path (Let pat aux (DoLoop ctx val form body)) =
   localScope
     ( castScope (scopeOf form)

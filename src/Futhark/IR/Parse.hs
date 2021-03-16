@@ -454,19 +454,18 @@ pScan pr =
     <*> braces (pSubExp `sepBy` pComma)
 
 pMkAcc :: PR lore -> Parser (Exp lore)
-pMkAcc pr = undefined
-
-{-
-  keyword "mk_acc"
+pMkAcc pr =
+  keyword "with_acc"
     *> parens
-      ( MkAcc <$> pShape <* pComma
+      ( WithAcc
+          <$> pShape <* pComma
           <*> pVNames <* pComma
-          <*> pShape
+          <*> pLambda pr
           <*> optional (pComma *> pCombFun)
       )
   where
     pCombFun = parens ((,) <$> pLambda pr <* pComma <*> pSubExps)
--}
+
 pExp :: PR lore -> Parser (Exp lore)
 pExp pr =
   choice
