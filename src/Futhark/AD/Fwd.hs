@@ -354,8 +354,32 @@ fwdSOAC pat aux (Hist len ops bucket_fun imgs) = do
             histNeutral = interleave nes nes_tan,
             histOp = op'
           }
-fwdSOAC pat aux scatter@Scatter {} = addStm $ Let pat aux $ Op scatter
-fwdSOAC _ _ soac = error $ "Unsupported SOAC: " ++ pretty soac
+fwdSOAC (Pattern ctx pes) aux (Scatter len lam ivs as) = do
+  as_tan <- mapM (\(s, n, a) -> do a_tan <- tangent a; return (s, n, a_tan)) as
+  pes_tan <- newTan pes
+  ivs' <- bundleTan ivs
+  let (as_ws, as_ns, _as_vs) = unzip3 as
+      n_indices = sum $ zipWith (*) as_ns $ map length as_ws
+  lam' <- fwdScatterLambda n_indices lam
+  let s = Let (Pattern ctx (pes ++ pes_tan)) aux $ Op $ Scatter len lam' ivs' $ as ++ as_tan
+  addStm s
+  where
+    fwdScatterLambda :: Int -> Lambda -> ADM Lambda
+    fwdScatterLambda n_indices (Lambda params body ret) = do
+      params' <- bundleNew params
+      ret_tan <- tangent $ drop n_indices ret
+      body' <- fwdBodyScatter n_indices body
+      let indices = concat $ replicate 2 $ take n_indices ret
+          ret' = indices ++ drop n_indices ret ++ ret_tan
+      return $ Lambda params' body' ret'
+    fwdBodyScatter :: Int -> Body -> ADM Body
+    fwdBodyScatter n_indices (Body _ stms res) = do
+      (res_tan, stms') <- collectStms $ do
+        mapM_ fwdStm stms
+        tangent $ drop n_indices $ res
+      let indices = concat $ replicate 2 $ take n_indices res
+          res' = indices ++ drop n_indices res ++ res_tan
+      return $ mkBody stms' res'
 
 fwdStm :: Stm -> ADM ()
 fwdStm (Let pat aux (BasicOp (UnAcc acc ts))) = do
