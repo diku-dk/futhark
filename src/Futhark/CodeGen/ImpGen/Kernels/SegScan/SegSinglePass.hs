@@ -337,7 +337,8 @@ compileSegScan pat lvl space scanOp kbody = do
                 flag <- dPrimV "flag" statusX
                 used <- dPrimV "used" (0 :: Imp.TExp Int8)
                 everythingVolatile $
-                  sWhen (tvExp readI .>=. 0 .&&. sameSegment readI) $ do
+                  sIf (tvExp readI .>=. 0 .&&. sameSegment readI)
+                    (do
                     copyDWIMFix (tvVar flag) [] (Var statusFlags) [sExt64 $ tvExp readI]
                     sIf
                       (tvExp flag .==. statusP)
@@ -348,7 +349,9 @@ compileSegScan pat lvl space scanOp kbody = do
                           forM_ (zip aggrs aggregateArrays) $ \(aggr, aggregate) ->
                             copyDWIMFix (tvVar aggr) [] (Var aggregate) [sExt64 $ tvExp readI]
                           used <-- (1 :: Imp.TExp Int8)
-                      )
+                      ))
+                    (sWhen (tvExp readI .>=. 0) $
+                      copyDWIMFix (tvVar flag) [] (intConst Int8 statusP) [])
                 -- end sIf
                 -- end sWhen
                 forM_ (zip exchanges aggrs) $ \(exchange, aggr) ->
@@ -477,10 +480,10 @@ compileSegScan pat lvl space scanOp kbody = do
           (tvExp blockOff + sExt64 (kernelLocalThreadId constants) * m - 1)
             `mod` segment_size
       sFor "i" m $ \i -> do
-        forM_ (zip privateArrays ys) $ \(src, y) ->
-          -- only include prefix for the first segment part per thread
-            copyDWIMFix y [] (Var src) [i]
-        sWhen (i .<. segment_size - stop - 1) $
+        sWhen (i .<. segment_size - stop - 1) $ do
+          forM_ (zip privateArrays ys) $ \(src, y) ->
+            -- only include prefix for the first segment part per thread
+              copyDWIMFix y [] (Var src) [i]
           compileStms mempty (bodyStms $ lambdaBody scanOp''''') $
             forM_ (zip privateArrays $ bodyResult $ lambdaBody scanOp''''') $
               \(dest, res) ->
