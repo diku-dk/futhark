@@ -21,7 +21,7 @@ where
 import Control.Monad.Except
 import Control.Monad.State
 import Data.Function ((&))
-import Data.List (zip4, transpose)
+import Data.List (transpose, zip4)
 import qualified Data.Map.Strict as M
 import qualified Futhark.IR as AST
 import Futhark.IR.SOACS
@@ -355,18 +355,20 @@ transformSOAC pat (Stencil inputShape neighboursLen iss lam invariants variants)
     case iss of
       StencilDynamic is -> mapM lookupType is
       StencilStatic is ->
-        pure [arrayOfShape
-                (Prim $ IntType Int64)
-                (Shape [intConst Int64 (toInteger (length $ head is))])] --shape and length of is
+        pure
+          [ arrayOfShape
+              (Prim $ IntType Int64)
+              (Shape [intConst Int64 (toInteger (length $ head is))]) --shape and length of is
+          ]
 
   let returns_elem_tp = lambdaReturnType lam
   let variant_shp = arrayShape (head variants_tp) -- non-empty and all have same shape
   let neighbours_shp = arrayShape (head neighbours_tp) -- non-empty and all have same shape
   let temp_tp = map (`setArrayShape` neighbours_shp) variants_tp
-  let returns_tp =  map (`arrayOfShape` variant_shp) returns_elem_tp
+  let returns_tp = map (`arrayOfShape` variant_shp) returns_elem_tp
 
   map_arrs <- resultArray returns_tp
-  let (invariantParams,variantParams) = splitAt (length invariants) $ map paramName (lambdaParams lam)
+  let (invariantParams, variantParams) = splitAt (length invariants) $ map paramName (lambdaParams lam)
 
   let boundIx li max_index ix_off = do
         -- does not handle overflow.
@@ -379,48 +381,51 @@ transformSOAC pat (Stencil inputShape neighboursLen iss lam invariants variants)
           letSubExp "input_element" $ BasicOp $ Index vname $ fullSlice tp $ map DimFix ixs
 
   let innerBody out_pars list_of_index list_of_max_ix = do
-        forM_ (zip invariantParams invariants) $ \(p, (_,arr)) -> do
+        forM_ (zip invariantParams invariants) $ \(p, (_, arr)) -> do
           arr_t <- lookupType arr
           letBindNames [p] $ BasicOp $ Index arr $ fullSlice arr_t $ map DimFix list_of_index
 
         temp_array <- temporaryArray temp_tp
 
         exps <- case iss of
-           StencilDynamic is -> do
-              temp_params <- mapM (newParam "temporaryArray" . flip toDecl Unique) temp_tp
-              let merge_inner = zip temp_params $ map Var temp_array
-              j <- newVName "j"
-              let inner_loop_form = ForLoop j Int64 neighboursLen []
-              inner_loop_body <- runBodyBinder $
-                localScope (scopeOf inner_loop_form <> scopeOfFParams temp_params) $ do
-                  relative_offset <- forM (zip is neighbours_tp) $ \(vname, tp) ->
-                    letSubExp "relative_offset" $ BasicOp $ Index vname $ fullSlice tp [DimFix $ Var j]
-                  index <- forM (zip3 relative_offset list_of_index list_of_max_ix) $ \(rel, gix, imax) ->
-                        boundIx gix imax rel
-                  input_element <- load_elements index
-                  tmp <- letwith (map paramName temp_params) (pexp (Var j)) $
-                            map (BasicOp . SubExp) input_element
-                  resultBodyM $ map Var tmp
-              vars <- letTupExp' "vars" $ DoLoop [] merge_inner inner_loop_form inner_loop_body
-              pure $ map (BasicOp . SubExp) vars
-           StencilStatic is -> do
-              let ixs_len = toInteger $ length $ head is
-              let ix_unroll idx temp_arr_idx write_arr = do
-                    ixs <- forM (zip3 idx list_of_index list_of_max_ix) $ \(rel, gix, imax) ->
-                        boundIx gix imax . intConst Int64 $ rel
-                    input_elements <- load_elements ixs
-                    letwith write_arr (pexp (intConst Int64 temp_arr_idx)) $
-                      map (BasicOp . SubExp) input_elements
-              let funls = zipWith ix_unroll (transpose is) [0..ixs_len-1]
-              temp <- foldM (flip ($)) temp_array funls
-              pure $ map (BasicOp . SubExp . Var) temp
-        mapM_ (\(vp,vl) -> letBindNames [vp] vl) $ zip variantParams exps
+          StencilDynamic is -> do
+            temp_params <- mapM (newParam "temporaryArray" . flip toDecl Unique) temp_tp
+            let merge_inner = zip temp_params $ map Var temp_array
+            j <- newVName "j"
+            let inner_loop_form = ForLoop j Int64 neighboursLen []
+            inner_loop_body <- runBodyBinder $
+              localScope (scopeOf inner_loop_form <> scopeOfFParams temp_params) $ do
+                relative_offset <- forM (zip is neighbours_tp) $ \(vname, tp) ->
+                  letSubExp "relative_offset" $ BasicOp $ Index vname $ fullSlice tp [DimFix $ Var j]
+                index <- forM (zip3 relative_offset list_of_index list_of_max_ix) $ \(rel, gix, imax) ->
+                  boundIx gix imax rel
+                input_element <- load_elements index
+                tmp <-
+                  letwith (map paramName temp_params) (pexp (Var j)) $
+                    map (BasicOp . SubExp) input_element
+                resultBodyM $ map Var tmp
+            vars <- letTupExp' "vars" $ DoLoop [] merge_inner inner_loop_form inner_loop_body
+            pure $ map (BasicOp . SubExp) vars
+          StencilStatic is -> do
+            let ixs_len = toInteger $ length $ head is
+            let ix_unroll idx temp_arr_idx write_arr = do
+                  ixs <- forM (zip3 idx list_of_index list_of_max_ix) $ \(rel, gix, imax) ->
+                    boundIx gix imax . intConst Int64 $ rel
+                  input_elements <- load_elements ixs
+                  letwith write_arr (pexp (intConst Int64 temp_arr_idx)) $
+                    map (BasicOp . SubExp) input_elements
+            let funls = zipWith ix_unroll (transpose is) [0 .. ixs_len -1]
+            temp <- foldM (flip ($)) temp_array funls
+            pure $ map (BasicOp . SubExp . Var) temp
+        mapM_ (\(vp, vl) -> letBindNames [vp] vl) $ zip variantParams exps
 
         mapM_ addStm $ bodyStms $ lambdaBody lam
         let lambda_res = bodyResult $ lambdaBody lam
-        out_var <- letwithNDim (map paramName out_pars)
-                               (mapM pexp list_of_index)
-                               (map (BasicOp . SubExp) lambda_res)
+        out_var <-
+          letwithNDim
+            (map paramName out_pars)
+            (mapM pexp list_of_index)
+            (map (BasicOp . SubExp) lambda_res)
         pure $ map Var out_var
   let loopNest _ _ _ [] _ _ = error ""
       loopNest g lname _ (alen : xs) list_of_index list_of_max_ix = do
@@ -428,11 +433,14 @@ transformSOAC pat (Stencil inputShape neighboursLen iss lam invariants variants)
         let it_vars = zip out_pars $ map Var lname
         i <- newVName "i"
         let loop_form = ForLoop i Int64 alen []
-        max_index <- letSubExp "max_index" $ BasicOp $
-          BinOp (Sub Int64 OverflowUndef) alen (intConst Int64 1)
-        loop_body <- runBodyBinder $
-          localScope (scopeOf loop_form <> scopeOfFParams out_pars) $
-             resultBody <$> loopNestBuilder g (map paramName out_pars) out_pars xs (Var i : list_of_index) (max_index : list_of_max_ix)
+        max_index <-
+          letSubExp "max_index" $
+            BasicOp $
+              BinOp (Sub Int64 OverflowUndef) alen (intConst Int64 1)
+        loop_body <-
+          runBodyBinder $
+            localScope (scopeOf loop_form <> scopeOfFParams out_pars) $
+              resultBody <$> loopNestBuilder g (map paramName out_pars) out_pars xs (Var i : list_of_index) (max_index : list_of_max_ix)
         pure $ DoLoop [] it_vars loop_form loop_body
       loopNestBuilder g _ out_pars [] list_of_index list_of_max_ix =
         g out_pars (reverse list_of_index) (reverse list_of_max_ix)
@@ -441,11 +449,14 @@ transformSOAC pat (Stencil inputShape neighboursLen iss lam invariants variants)
         let it_vars = zip out_pars $ map Var lname
         i <- newVName "i"
         let loop_form = ForLoop i Int64 alen []
-        max_index <- letSubExp "max_index" $ BasicOp $
-          BinOp (Sub Int64 OverflowUndef) alen (intConst Int64 1)
-        loop_body <- runBodyBinder $
-          localScope (scopeOf loop_form <> scopeOfFParams out_pars) $
-             resultBody <$> loopNestBuilder g (map paramName out_pars) out_pars xs (Var i : list_of_index) (max_index : list_of_max_ix)
+        max_index <-
+          letSubExp "max_index" $
+            BasicOp $
+              BinOp (Sub Int64 OverflowUndef) alen (intConst Int64 1)
+        loop_body <-
+          runBodyBinder $
+            localScope (scopeOf loop_form <> scopeOfFParams out_pars) $
+              resultBody <$> loopNestBuilder g (map paramName out_pars) out_pars xs (Var i : list_of_index) (max_index : list_of_max_ix)
         letTupExp' "res" $ DoLoop [] it_vars loop_form loop_body
   outer_loops <- loopNest innerBody map_arrs [] inputShape [] []
   letBind pat outer_loops
@@ -473,12 +484,10 @@ resultArray = mapM oneArray
   where
     oneArray t = letExp "result" $ BasicOp $ Scratch (elemType t) (arrayDims t)
 
-
 temporaryArray :: Transformer m => [Type] -> m [VName]
 temporaryArray = mapM oneArray
   where
     oneArray t = letExp "temporaryArray" $ BasicOp $ Scratch (elemType t) (arrayDims t)
-
 
 letwith ::
   Transformer m =>

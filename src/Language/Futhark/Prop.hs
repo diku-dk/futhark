@@ -958,8 +958,11 @@ intrinsics =
                    TypeParamDim tv_m mempty,
                    TypeParamDim tv_k mempty
                  ]
-                 [ shape_k `array` Record (M.fromList $
-                        zip tupleFieldNames [Scalar (Prim (Signed Int64)),Scalar (Prim (Signed Int64))]),
+                 [ shape_k
+                     `array` Record
+                       ( M.fromList $
+                           zip tupleFieldNames [Scalar (Prim (Signed Int64)), Scalar (Prim (Signed Int64))]
+                       ),
                    Scalar t_c `arr` ((shape_k `array` t_a) `arr` Scalar t_b),
                    shape_nm `array` t_c,
                    shape_nm `array` t_a
@@ -976,14 +979,19 @@ intrinsics =
                    TypeParamDim tv_z mempty,
                    TypeParamDim tv_k mempty
                  ]
-                 [ shape_k `array` Record (M.fromList $
-                        zip tupleFieldNames [Scalar (Prim (Signed Int64)),
-                                             Scalar (Prim (Signed Int64)),
-                                             Scalar (Prim (Signed Int64))]),
+                 [ shape_k
+                     `array` Record
+                       ( M.fromList $
+                           zip
+                             tupleFieldNames
+                             [ Scalar (Prim (Signed Int64)),
+                               Scalar (Prim (Signed Int64)),
+                               Scalar (Prim (Signed Int64))
+                             ]
+                       ),
                    Scalar t_c `arr` ((shape_k `array` t_a) `arr` Scalar t_b),
                    shape_nmz `array` t_c,
                    shape_nmz `array` t_a
-
                  ]
                  $ shape_nmz `uarray` t_b
              ),

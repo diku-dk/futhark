@@ -1637,24 +1637,34 @@ initialCtx =
             (Just [is, f, cs, as], ([_], ret_t))
               | Just row_shape <- typeRowShape ret_t,
                 ValueArray (ShapeDim n (ShapeDim m elm_shape)) as_arr <- as,
-                Just ixss <- mapM ((\ix -> case ix of
-                    [k,l] -> Just (k,l)
-                    _ -> Nothing
-                    ) <=< fromTuple)
-                            $ snd $ fromArray is -> do
+                Just ixss <-
+                  let from2 [k, l] = Just (k, l)
+                      from2 _ = Nothing
+                   in mapM
+                        (from2 <=< fromTuple)
+                        $ snd $ fromArray is -> do
                 -- We Hardcode the boundary condition to repeat edge element.
-                let bound i = (max 0) . (min i) . (\x -> x - 1)
-                let getElem (i,j) =
-                        case (as_arr ! i) of
-                            ValueArray _ row -> row ! j
-                            _ -> error "Bad input"
-                    hood i j = toArray' elm_shape $ map getElem $
-                                map (\(k,l) -> (fromIntegral $ bound (i + asInt64 k) n
-                                               , fromIntegral $ bound (j + asInt64 l) m
-                                               )
-                                    ) ixss
+                let bound i = max 0 . min i . (\x -> x - 1)
+                let getElem (i, j) =
+                      case as_arr ! i of
+                        ValueArray _ row -> row ! j
+                        _ -> error "Bad input"
+                    hood i j =
+                      toArray' elm_shape $
+                        map
+                          ( getElem
+                              . ( \(k, l) ->
+                                    ( fromIntegral $ bound (i + asInt64 k) n,
+                                      fromIntegral $ bound (j + asInt64 l) m
+                                    )
+                                )
+                          )
+                          ixss
                     hoods = map (\i -> map (hood i) [0 .. m - 1]) [0 .. n -1]
-                toArray (ShapeDim n row_shape) <$> forM (zip (snd $ fromArray cs) hoods) (\(cvs, rows) ->
+                toArray (ShapeDim n row_shape)
+                  <$> forM
+                    (zip (snd $ fromArray cs) hoods)
+                    ( \(cvs, rows) ->
                         toArray (ShapeDim m elm_shape) <$> zipWithM (apply2 noLoc mempty f) (snd $ fromArray cvs) rows
                     )
               | otherwise ->
@@ -1671,29 +1681,43 @@ initialCtx =
             (Just [is, f, cs, as], ([_], ret_t))
               | Just row_shape <- typeRowShape ret_t,
                 ValueArray (ShapeDim n (ShapeDim m (ShapeDim z elm_shape))) as_arr <- as,
-                Just ixss <- mapM ((\ix -> case ix of
-                    [k,l,h] -> Just (k,l,h)
-                    _ -> Nothing
-                    ) <=< fromTuple)
-                            $ snd $ fromArray is -> do
+                Just ixss <-
+                  let from3 [k, l, h] = Just (k, l, h)
+                      from3 _ = Nothing
+                   in mapM
+                        (from3 <=< fromTuple)
+                        $ snd $ fromArray is -> do
                 -- We Hardcode the boundary condition to repeat edge element.
-                let bound i = (max 0) . (min i) . (\x -> x - 1)
+                let bound i = max 0 . min i . (\x -> x - 1)
                 let ind_with arr i =
-                      case (arr ! i) of
+                      case arr ! i of
                         ValueArray _ contents -> contents
                         _ -> error "Bad input"
-                let getElem (i,j,k) = (ind_with (ind_with as_arr i) j) ! k
-                    hood i j u = toArray' elm_shape $ map getElem $
-                                map (\(k,l,h) ->
-                                      ( fromIntegral $ bound (i + asInt64 k) n,
-                                        fromIntegral $ bound (j + asInt64 l) m,
-                                        fromIntegral $ bound (u + asInt64 h) z
-                                      )
-                                    ) ixss
+                let getElem (i, j, k) = ind_with (ind_with as_arr i) j ! k
+                    hood i j u =
+                      toArray' elm_shape $
+                        map
+                          ( getElem
+                              . ( \(k, l, h) ->
+                                    ( fromIntegral $ bound (i + asInt64 k) n,
+                                      fromIntegral $ bound (j + asInt64 l) m,
+                                      fromIntegral $ bound (u + asInt64 h) z
+                                    )
+                                )
+                          )
+                          ixss
                     hoods = map (\i -> map (\j -> map (hood i j) [0 .. z - 1]) [0 .. m - 1]) [0 .. n - 1]
-                toArray (ShapeDim n (ShapeDim m row_shape)) <$> forM (zip (snd $ fromArray cs) hoods) (\(cvss, rowss) ->
-                        toArray (ShapeDim m (ShapeDim z elm_shape)) <$> forM (zip (snd $ fromArray cvss) rowss) (\(cvs,rows) ->
-                                toArray (ShapeDim z elm_shape) <$> zipWithM (apply2 noLoc mempty f) (snd $ fromArray cvs) rows))
+                toArray (ShapeDim n (ShapeDim m row_shape))
+                  <$> forM
+                    (zip (snd $ fromArray cs) hoods)
+                    ( \(cvss, rowss) ->
+                        toArray (ShapeDim m (ShapeDim z elm_shape))
+                          <$> forM
+                            (zip (snd $ fromArray cvss) rowss)
+                            ( \(cvs, rows) ->
+                                toArray (ShapeDim z elm_shape) <$> zipWithM (apply2 noLoc mempty f) (snd $ fromArray cvs) rows
+                            )
+                    )
               | otherwise ->
                 error $ "Bad return type: " ++ pretty ret_t
             _ ->
