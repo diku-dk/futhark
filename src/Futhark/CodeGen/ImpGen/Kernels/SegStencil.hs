@@ -22,7 +22,7 @@ compileSegStencil ::
   KernelBody KernelsMem ->
   CallKernelGen ()
 compileSegStencil pat lvl space op kbody = do
-  let dims = map toInt64Exp $ snd $ unzip $ unSegSpace space
+  let dims = map (toInt64Exp . snd) $ unSegSpace space
       num_groups' = toInt64Exp <$> segNumGroups lvl
       group_size' = toInt64Exp <$> segGroupSize lvl
 
@@ -81,14 +81,14 @@ compileGlobalRead pat space op kbody group_id group_size =
           let bounded_ixs = flip map (zip gids stencil_ixss) $
                 \(axis_gid, axis_ixs) -> bound_idx $ map (axis_gid +) axis_ixs
           let vname_ixs_for_tup =
-                concatMap (\vn -> map ((,) vn) (transpose bounded_ixs)) $ stencilArrays op
+                concatMap (mapM (,) (transpose bounded_ixs)) $ stencilArrays op
 
           -- declare lambda variant parameters
           dLParams variantParams
 
           -- load variants into lambda variant parameters
           forM_ (zip variantParams vname_ixs_for_tup) $
-            \(vparam, (input_arr, ixs_tup)) -> do
+            \(vparam, (ixs_tup, input_arr)) -> do
               let pname = paramName vparam
               copyDWIMFix pname [] (Var input_arr) ixs_tup
 
