@@ -316,7 +316,7 @@ compileSegScan pat lvl space scanOp kbody = do
         status <- dPrim "status" int8 :: InKernelGen (TV Int8)
         copyDWIMFix (tvVar status) [] (Var warpscan) [0]
         sIf
-          (tvExp status .==. statusP)
+          (tvExp status .==. statusP .&&. tvExp blockOff `mod` kernelGroupSize constants .>. 0)
           ( sWhen (kernelLocalThreadId constants .==. 0) $
               everythingVolatile $
                 forM_ (zip prefixes incprefixArrays) $ \(prefix, incprefixArray) ->
@@ -467,15 +467,17 @@ compileSegScan pat lvl space scanOp kbody = do
       compileStms mempty (bodyStms $ lambdaBody scanOp'''''') $
         forM_ (zip3 xs tys $ bodyResult $ lambdaBody scanOp'''''') $
           \(x, ty, res) -> x <~~ toExp' ty res
+      -- calculate where previous thread stopped, to determine number of
+      -- elements left before new segment.
       stop <-
         dPrimVE "stopping_point" $
-          (tvExp blockOff + sExt64 (kernelLocalThreadId constants ) * m)
+          (tvExp blockOff + sExt64 (kernelLocalThreadId constants) * m - 1)
             `mod` segment_size
       sFor "i" m $ \i -> do
         forM_ (zip privateArrays ys) $ \(src, y) ->
           -- only include prefix for the first segment part per thread
             copyDWIMFix y [] (Var src) [i]
-        sWhen (i .<. segment_size - stop) $
+        sWhen (i .<. segment_size - stop - 1) $
           compileStms mempty (bodyStms $ lambdaBody scanOp''''') $
             forM_ (zip privateArrays $ bodyResult $ lambdaBody scanOp''''') $
               \(dest, res) ->
