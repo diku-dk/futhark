@@ -463,10 +463,12 @@ compileSegScan pat lvl space scanOp kbody = do
           dPrim_ y ty
           dPrimV_ x' $ tvExp prefix
           dPrimV_ y' $ tvExp acc
-
-      compileStms mempty (bodyStms $ lambdaBody scanOp'''''') $
-        forM_ (zip3 xs tys $ bodyResult $ lambdaBody scanOp'''''') $
-          \(x, ty, res) -> x <~~ toExp' ty res
+      sIf (tvExp blockOff `mod` segment_size .>. 0)
+        (compileStms mempty (bodyStms $ lambdaBody scanOp'''''') $
+          forM_ (zip3 xs tys $ bodyResult $ lambdaBody scanOp'''''') $
+            \(x, ty, res) -> x <~~ toExp' ty res)
+        (forM_ (zip xs accs) $
+          \(x, acc) -> do copyDWIMFix x [] (Var $ tvVar acc) [])
       -- calculate where previous thread stopped, to determine number of
       -- elements left before new segment.
       stop <-
