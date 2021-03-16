@@ -316,7 +316,7 @@ compileSegScan pat lvl space scanOp kbody = do
         status <- dPrim "status" int8 :: InKernelGen (TV Int8)
         copyDWIMFix (tvVar status) [] (Var warpscan) [0]
         sIf
-          (tvExp status .==. statusP .&&. tvExp blockOff `mod` kernelGroupSize constants .>. 0)
+          (tvExp status .==. statusP)
           ( sWhen (kernelLocalThreadId constants .==. 0) $
               everythingVolatile $
                 forM_ (zip prefixes incprefixArrays) $ \(prefix, incprefixArray) ->
