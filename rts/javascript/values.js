@@ -17,12 +17,12 @@ type_strs = { "Int8Array" : '  i8',
 
 function construct_binary_value(v) {
 
-  var bytes = v.type();
+  var bytes = v.bytes_per_elem();
   var shape = v.shape();
   var values = v.values();
   var elems = 1;
   for (var i = 0; i < shape.length; i++) {
-    elems = elems * shape[i];
+    elems = elems * Number(shape[i]);
   }
   var num_bytes = 1 + 1 + 1 + 4 + shape.length * 8 + elems * bytes;
 
@@ -32,7 +32,7 @@ function construct_binary_value(v) {
   bytes[1] = 2; // Not sure why this
   bytes[2] = shape.length
 
-  var ftype = type_strs[ftype];
+  var ftype = type_strs[v.str_type()];
 
   for (var i = 0; i < 4; i++) {
     bytes[3+i] = ftype.charCodeAt(i);
@@ -47,10 +47,4 @@ function construct_binary_value(v) {
   
   return bytes;
 }
-
-    
-
-  
-  
-
 
