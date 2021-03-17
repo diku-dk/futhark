@@ -79,15 +79,15 @@ allocInBinOpParams num_threads my_id other_id xs ys = unzip <$> zipWithM alloc x
             )
         -- This next two cases will never happen.
 
-        Array (ElemAcc arrs) shape _ ->
+        Array (ElemAcc acc ispace ts) shape _ ->
           return
-            ( x {paramDec = MemAcc arrs shape},
-              y {paramDec = MemAcc arrs shape}
+            ( x {paramDec = MemAcc acc ispace ts shape},
+              y {paramDec = MemAcc acc ispace ts shape}
             )
-        Acc arrs ->
+        Acc acc ispace ts ->
           return
-            ( x {paramDec = MemAcc arrs mempty},
-              y {paramDec = MemAcc arrs mempty}
+            ( x {paramDec = MemAcc acc ispace ts mempty},
+              y {paramDec = MemAcc acc ispace ts mempty}
             )
 
 allocInBinOpLambda ::

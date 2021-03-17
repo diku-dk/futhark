@@ -975,13 +975,14 @@ instance Simplifiable Space where
 
 instance Simplifiable ElemType where
   simplify (ElemPrim pt) = pure $ ElemPrim pt
-  simplify (ElemAcc ts) = ElemAcc <$> mapM simplify ts
+  simplify (ElemAcc acc ispace ts) =
+    ElemAcc <$> simplify acc <*> simplify ispace <*> simplify ts
 
 instance Simplifiable shape => Simplifiable (TypeBase shape u) where
   simplify (Array et shape u) =
     Array <$> simplify et <*> simplify shape <*> pure u
-  simplify (Acc ts) =
-    Acc <$> mapM simplify ts
+  simplify (Acc acc ispace ts) =
+    Acc <$> simplify acc <*> simplify ispace <*> simplify ts
   simplify (Mem space) =
     Mem <$> simplify space
   simplify (Prim bt) =

@@ -145,9 +145,8 @@ mapExpM tv (BasicOp (Assert e msg loc)) =
   BasicOp <$> (Assert <$> mapOnSubExp tv e <*> traverse (mapOnSubExp tv) msg <*> pure loc)
 mapExpM tv (BasicOp (Opaque e)) =
   BasicOp <$> (Opaque <$> mapOnSubExp tv e)
-mapExpM tv (BasicOp (JoinAcc v vs)) =
-  BasicOp
-    <$> (JoinAcc <$> mapOnVName tv v <*> mapM (mapOnVName tv) vs)
+mapExpM tv (BasicOp (JoinAcc v)) =
+  BasicOp <$> (JoinAcc <$> mapOnVName tv v)
 mapExpM tv (BasicOp (UpdateAcc v is ses)) =
   BasicOp
     <$> ( UpdateAcc
@@ -240,7 +239,10 @@ walkOnShape tv (Shape ds) = mapM_ (walkOnSubExp tv) ds
 
 walkOnType :: Monad m => Walker lore m -> Type -> m ()
 walkOnType _ Prim {} = return ()
-walkOnType tv (Acc arrs) = mapM_ (walkOnVName tv) arrs
+walkOnType tv (Acc acc ispace ts) = do
+  walkOnVName tv acc
+  mapM_ (traverse_ (walkOnSubExp tv)) ispace
+  mapM_ (walkOnType tv) ts
 walkOnType _ Mem {} = return ()
 walkOnType tv (Array _ shape _) = walkOnShape tv shape
 
@@ -309,9 +311,8 @@ walkExpM tv (BasicOp (Assert e msg _)) =
   walkOnSubExp tv e >> traverse_ (walkOnSubExp tv) msg
 walkExpM tv (BasicOp (Opaque e)) =
   walkOnSubExp tv e
-walkExpM tv (BasicOp (JoinAcc v vs)) = do
+walkExpM tv (BasicOp (JoinAcc v)) =
   walkOnVName tv v
-  mapM_ (walkOnVName tv) vs
 walkExpM tv (BasicOp (UpdateAcc v is ses)) = do
   walkOnVName tv v
   mapM_ (walkOnSubExp tv) is

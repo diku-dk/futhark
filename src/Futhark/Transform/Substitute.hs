@@ -150,14 +150,20 @@ instance Substitute Names where
 instance Substitute ElemType where
   substituteNames _ (ElemPrim t) =
     ElemPrim t
-  substituteNames substs (ElemAcc arrs) =
-    ElemAcc $ map (substituteNames substs) arrs
+  substituteNames substs (ElemAcc acc ispace ts) =
+    ElemAcc
+      (substituteNames substs acc)
+      (substituteNames substs ispace)
+      (substituteNames substs ts)
 
 instance Substitute shape => Substitute (TypeBase shape u) where
   substituteNames _ (Prim et) =
     Prim et
-  substituteNames substs (Acc arrs) =
-    Acc $ map (substituteNames substs) arrs
+  substituteNames substs (Acc acc ispace ts) =
+    Acc
+      (substituteNames substs acc)
+      (substituteNames substs ispace)
+      (substituteNames substs ts)
   substituteNames substs (Array et sz u) =
     Array (substituteNames substs et) (substituteNames substs sz) u
   substituteNames _ (Mem space) =

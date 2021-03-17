@@ -66,25 +66,31 @@ instance Pretty Space where
 
 instance Pretty ElemType where
   ppr (ElemPrim et) = ppr et
-  ppr (ElemAcc arrs) = text "acc" <> ppTuple' arrs
+  ppr (ElemAcc acc ispace ts) =
+    text "acc"
+      <> apply
+        [ ppr acc,
+          brackets $ commasep $ map ppr ispace,
+          ppTuple' ts
+        ]
 
 instance Pretty u => Pretty (TypeBase Shape u) where
   ppr (Prim t) = ppr $ ElemPrim t
-  ppr (Acc ts) = ppr $ ElemAcc ts
+  ppr (Acc acc ispace ts) = ppr $ ElemAcc acc ispace ts
   ppr (Array et (Shape ds) u) =
     ppr u <> mconcat (map (brackets . ppr) ds) <> ppr et
   ppr (Mem s) = text "mem" <> ppr s
 
 instance Pretty u => Pretty (TypeBase ExtShape u) where
   ppr (Prim t) = ppr $ ElemPrim t
-  ppr (Acc ts) = ppr $ ElemAcc ts
+  ppr (Acc acc ispace ts) = ppr $ ElemAcc acc ispace ts
   ppr (Array et (Shape ds) u) =
     ppr u <> mconcat (map (brackets . ppr) ds) <> ppr et
   ppr (Mem s) = text "mem" <> ppr s
 
 instance Pretty u => Pretty (TypeBase Rank u) where
   ppr (Prim t) = ppr $ ElemPrim t
-  ppr (Acc ts) = ppr $ ElemAcc ts
+  ppr (Acc acc ispace ts) = ppr $ ElemAcc acc ispace ts
   ppr (Array et (Rank n) u) =
     ppr u <> mconcat (replicate n $ brackets mempty) <> ppr et
   ppr (Mem s) = text "mem" <> ppr s
@@ -208,8 +214,8 @@ instance Pretty BasicOp where
     text "assert" <> apply [ppr e, ppr msg, text $ show $ locStr loc]
   ppr (UpdateAcc acc is v) =
     text "update_acc" <> apply [ppr acc, ppTuple' is, ppTuple' v]
-  ppr (JoinAcc acc arrs) =
-    text "join_acc" <> apply [ppr acc, ppTuple' arrs]
+  ppr (JoinAcc acc) =
+    text "join_acc" <> apply [ppr acc]
 
 instance Pretty a => Pretty (ErrorMsg a) where
   ppr (ErrorMsg parts) = braces $ align $ commasep $ map p parts

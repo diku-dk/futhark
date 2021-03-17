@@ -2,7 +2,6 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE Strict #-}
@@ -117,8 +116,8 @@ instance Checkable lore => Show (ErrorCase lore) where
   show (DupPatternError name) =
     "Variable " ++ pretty name ++ " bound twice in pattern."
   show (InvalidPatternError pat t desc) =
-    "Pattern " ++ pretty pat
-      ++ " cannot match value of type "
+    "Pattern\n" ++ pretty pat
+      ++ "\ncannot match value of type\n"
       ++ prettyTuple t
       ++ end
     where
@@ -530,20 +529,12 @@ checkArrIdent v = do
 checkAccIdent ::
   Checkable lore =>
   VName ->
-  TypeM lore [(PrimType, Shape)]
+  TypeM lore (Shape, [Type])
 checkAccIdent v = do
   t <- lookupType v
   case t of
-    Acc arrs -> do
-      arr_ts <- mapM checkArrIdent arrs
-      forM arr_ts $ \case
-        Array (ElemPrim pt) shape _ ->
-          return (pt, shape)
-        _ ->
-          bad $
-            TypeError $
-              pretty v
-                ++ " is an accumulator of arrays of accumulators."
+    Acc _ ispace ts -> do
+      pure (Shape $ sliceDims ispace, ts)
     _ ->
       bad $
         TypeError $
@@ -908,44 +899,35 @@ checkBasicOp (Assert e (ErrorMsg parts) _) = do
     checkPart ErrorString {} = return ()
     checkPart (ErrorInt32 x) = require [Prim int32] x
     checkPart (ErrorInt64 x) = require [Prim int64] x
-checkBasicOp (JoinAcc acc vs) = do
-  expected <- checkIfAccArr =<< checkArrIdent acc
-  unless (expected == vs) $
-    bad $
-      TypeError $
-        unlines
-          [ "Annotation: " ++ pretty vs,
-            "Inferred: " ++ pretty expected
-          ]
+checkBasicOp (JoinAcc acc) =
+  checkIfAccArr =<< checkArrIdent acc
   where
-    checkIfAccArr (Array (ElemAcc arrs) _ _) =
-      pure arrs
+    checkIfAccArr Array {} =
+      pure ()
     checkIfAccArr t =
-      bad $ TypeError $ "Bad type for UnAcc: " ++ pretty t
+      bad $ TypeError $ "Bad type for JoinAcc: " ++ pretty t
 checkBasicOp (UpdateAcc acc is ses) = do
-  ts_and_shapes <- checkAccIdent acc
+  (shape, ts) <- checkAccIdent acc
 
-  unless (length ses == length ts_and_shapes) $
+  unless (length ses == length ts) $
     bad $
       TypeError $
         "Accumulator requires "
-          ++ show (length ts_and_shapes)
+          ++ show (length ts)
           ++ " values, but only "
           ++ show (length ses)
           ++ " provided."
 
-  forM_ (zip ts_and_shapes ses) $ \((t, shape), se) -> do
-    se_t <- subExpType se
-    case peelArray (length is) (Array (ElemPrim t) shape NoUniqueness) of
-      Just t'
-        | t' == se_t -> return ()
-        | otherwise ->
-          bad $
-            TypeError $
-              pretty se ++ " has type " ++ pretty se_t
-                ++ ", but expected "
-                ++ pretty t'
-      _ -> bad $ TypeError "Too many indexes for accumulator."
+  unless (length is == shapeRank shape) $
+    bad $
+      TypeError $
+        "Accumulator requires "
+          ++ show (shapeRank shape)
+          ++ " indices, but only "
+          ++ show (length is)
+          ++ " provided."
+
+  zipWithM_ require (map pure ts) ses
 
 matchLoopResultExt ::
   Checkable lore =>
@@ -1090,11 +1072,11 @@ checkExp (DoLoop ctxmerge valmerge form loopbody) = do
               <$> mapM subExpAliasesM (bodyResult loopbody)
 checkExp (WithAcc shape arrs lam op) = do
   mapM_ (require [Prim int64]) (shapeDims shape)
-  arrs_ts <- forM arrs $ \arr -> do
+  elem_ts <- forM arrs $ \arr -> do
     arr_t <- lookupType arr
     unless (shapeDims shape `isPrefixOf` arrayDims arr_t) $
       bad . TypeError $ pretty arr <> " is not an array of outer shape " <> pretty shape
-    pure arr_t
+    pure $ stripArray (shapeRank shape) arr_t
 
   case op of
     Just (op_lam, nes) -> do
@@ -1109,11 +1091,31 @@ checkExp (WithAcc shape arrs lam op) = do
                 "Type of neutral elements: " ++ pretty nes_ts
               ]
       checkLambda op_lam $
-        replicate num_is (Prim int64, mempty) ++ map mkArrArg (arrs_ts ++ arrs_ts)
+        replicate num_is (Prim int64, mempty) ++ map mkArrArg (elem_ts ++ elem_ts)
     Nothing ->
       return ()
 
-  checkLambda lam [(Acc arrs, mempty)]
+  unless (length (lambdaParams lam) == 2 * num_accs) $
+    bad . TypeError $
+      show (length (lambdaParams lam))
+        ++ " parameters, but "
+        ++ show num_accs
+        ++ " accumulators."
+
+  let ispace =
+        [ DimSlice (intConst Int64 0) d (intConst Int64 1)
+          | d <- shapeDims shape
+        ]
+
+  checkLambda lam $
+    concat
+      [ [ (Prim Cert, mempty),
+          (Acc (paramName px) ispace elem_ts, mempty)
+        ]
+        | [px, _py] <- chunk 2 $ lambdaParams lam
+      ]
+  where
+    num_accs = 1
 checkExp (Op op) = do
   checker <- asks envCheckOp
   checker op

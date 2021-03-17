@@ -63,7 +63,7 @@ internaliseFunName = nameFromString . pretty
 internaliseValBind :: E.ValBind -> InternaliseM ()
 internaliseValBind fb@(E.ValBind entry fname retdecl (Info (rettype, _)) tparams params body _ attrs loc) = do
   localConstsScope $
-    bindingParams tparams params $ \shapeparams params' -> do
+    bindingFParams tparams params $ \shapeparams params' -> do
       let shapenames = map I.paramName shapeparams
 
       msg <- case retdecl of
@@ -76,8 +76,7 @@ internaliseValBind fb@(E.ValBind entry fname retdecl (Info (rettype, _)) tparams
       ((rettype', body_res), body_stms) <- collectStms $ do
         body_res <- internaliseExp (baseString fname <> "_res") body
         rettype_bad <-
-          internaliseReturnType rettype
-            =<< mapM subExpType body_res
+          internaliseReturnType rettype =<< mapM subExpType body_res
         let rettype' = zeroExts rettype_bad
         return (rettype', body_res)
       body' <-
@@ -116,7 +115,7 @@ internaliseValBind fb@(E.ValBind entry fname retdecl (Info (rettype, _)) tparams
 generateEntryPoint :: E.EntryPoint -> E.ValBind -> InternaliseM ()
 generateEntryPoint (E.EntryPoint e_paramts e_rettype) vb = localConstsScope $ do
   let (E.ValBind _ ofname _ (Info (rettype, _)) tparams params _ _ attrs loc) = vb
-  bindingParams tparams params $ \shapeparams params' -> do
+  bindingFParams tparams params $ \shapeparams params' -> do
     entry_rettype <- internaliseEntryReturnType rettype
     let entry' = entryPoint (zip e_paramts params') (e_rettype, entry_rettype)
         args = map (I.Var . I.paramName) $ concat params'
@@ -1270,9 +1269,13 @@ internaliseStreamAcc desc dest op lam bs = do
   dest' <- internaliseExpToVars "scatter_dest" dest
   bs' <- internaliseExpToVars "scatter_input" bs
 
-  let acc_t = Acc dest'
+  acc_cert_v <- newVName "acc_cert"
+  dest_ts <- mapM lookupType dest'
+  let dest_w = arraysSize 0 dest_ts
+      ispace = [I.DimSlice (intConst Int64 0) dest_w (intConst Int64 1)]
+      acc_t = Acc acc_cert_v ispace $ map rowType dest_ts
   acc_p <- newParam "acc_p" acc_t
-  withacc_lam <- mkLambda [acc_p] [acc_t] $ do
+  withacc_lam <- mkLambda [Param acc_cert_v (I.Prim I.Cert), acc_p] [acc_t] $ do
     lam' <-
       internaliseMapLambda internaliseLambda lam $
         map I.Var $ paramName acc_p : bs'
@@ -1281,7 +1284,7 @@ internaliseStreamAcc desc dest op lam bs = do
     accs' <-
       letExp "scatter_acc_res" . I.Op . I.Screma w (I.mapSOAC lam') $ accs : bs'
     fmap (map I.Var) $
-      letTupExp "acc_joined" $ BasicOp $ JoinAcc accs' dest'
+      letTupExp "acc_joined" $ BasicOp $ JoinAcc accs'
 
   op' <-
     case op of

@@ -59,8 +59,8 @@ arrParam arr = do
 toParam :: VName -> TypeBase shape u -> MulticoreGen [Imp.Param]
 toParam name (Prim pt) = return [Imp.ScalarParam name pt]
 toParam name (Mem space) = return [Imp.MemParam name space]
-toParam _ (Acc arrs) = mapM arrParam arrs
 toParam name Array {} = pure <$> arrParam name
+toParam name Acc {} = error $ "toParam Acc: " ++ pretty name
 
 getSpace :: SegOp () MCMem -> SegSpace
 getSpace (SegHist _ space _ _ _) = space

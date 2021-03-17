@@ -200,8 +200,12 @@ instance Monoid NoUniqueness where
 
 -- | The type of things that can be array elements.
 data ElemType
-  = -- | Accumulator corresponding to some arrays in scope.
-    ElemAcc [VName]
+  = -- | Accumulator.  The 'VName' is the name of the original
+    -- 'WithAcc' parameter and uniquely identifies the accumulator.
+    -- The 'Slice' indicates the index space of updates.  The 'Type'
+    -- list denotes the value that can be passed to update the
+    -- accumulator.
+    ElemAcc VName (Slice SubExp) [Type]
   | ElemPrim PrimType
   deriving (Show, Eq, Ord)
 
@@ -210,7 +214,7 @@ data ElemType
 data TypeBase shape u
   = Prim PrimType
   | -- | See 'ElemAcc'.
-    Acc [VName]
+    Acc VName (Slice SubExp) [Type]
   | Array ElemType shape u
   | Mem Space
   deriving (Show, Eq, Ord)
@@ -218,7 +222,7 @@ data TypeBase shape u
 instance Bitraversable TypeBase where
   bitraverse f g (Array t shape u) = Array t <$> f shape <*> g u
   bitraverse _ _ (Prim pt) = pure $ Prim pt
-  bitraverse _ _ (Acc arrs) = pure $ Acc arrs
+  bitraverse _ _ (Acc arrs ispace ts) = pure $ Acc arrs ispace ts
   bitraverse _ _ (Mem s) = pure $ Mem s
 
 instance Bifunctor TypeBase where

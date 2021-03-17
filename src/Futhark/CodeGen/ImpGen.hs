@@ -220,7 +220,7 @@ data VarEntry lore
   = ArrayVar (Maybe (Exp lore)) ArrayEntry
   | ScalarVar (Maybe (Exp lore)) ScalarEntry
   | MemVar (Maybe (Exp lore)) MemEntry
-  | AccVar (Maybe (Exp lore)) [VName] Shape
+  | AccVar (Maybe (Exp lore)) (VName, Slice SubExp, [Type], Shape)
   deriving (Show)
 
 -- | When compiling an expression, this is a description of where the
@@ -290,7 +290,7 @@ data ImpState lore r op = ImpState
     -- accumulator throughout its lifetime.  If the arrays
     -- backing an accumulator is not in this mapping, the
     -- accumulator is scatter-like.
-    stateAccs :: M.Map [VName] (Lambda lore, [SubExp]),
+    stateAccs :: M.Map VName ([VName], Maybe (Lambda lore, [SubExp])),
     stateNameSource :: VNameSource
   }
 
@@ -325,11 +325,11 @@ instance HasScope SOACS (ImpM lore r op) where
           NoUniqueness
       entryType (ScalarVar _ scalarEntry) =
         Prim $ entryScalarType scalarEntry
-      entryType (AccVar _ arrs shape)
+      entryType (AccVar _ (acc, ispace, ts, shape))
         | shape == mempty =
-          Acc arrs
+          Acc acc ispace ts
         | otherwise =
-          Array (ElemAcc arrs) shape NoUniqueness
+          Array (ElemAcc acc ispace ts) shape NoUniqueness
 
 runImpM ::
   ImpM lore r op a ->
@@ -809,12 +809,9 @@ defCompileExp pat (DoLoop ctx val form body) = do
     mergepat = map fst merge
 defCompileExp pat (WithAcc _ arrs lam op) = do
   dLParams $ lambdaParams lam
-  modify $ \s ->
-    case op of
-      Just (op_lam, nes) ->
-        s {stateAccs = M.insert arrs (op_lam, nes) $ stateAccs s}
-      Nothing ->
-        s {stateAccs = M.delete arrs $ stateAccs s}
+  forM_ (lambdaParams lam) $ \p ->
+    modify $ \s ->
+      s {stateAccs = M.insert (paramName p) (arrs, op) $ stateAccs s}
   compileStms mempty (bodyStms $ lambdaBody lam) $ do
     let nonacc_res = drop num_accs (bodyResult (lambdaBody lam))
     forM_ (zip (patternNames pat) nonacc_res) $ \(v, se) ->
@@ -1061,8 +1058,8 @@ memBoundToVarEntry e (MemPrim bt) =
   ScalarVar e ScalarEntry {entryScalarType = bt}
 memBoundToVarEntry e (MemMem space) =
   MemVar e $ MemEntry space
-memBoundToVarEntry e (MemAcc arrs space) =
-  AccVar e arrs space
+memBoundToVarEntry e (MemAcc acc ispace ts space) =
+  AccVar e (acc, ispace, ts, space)
 memBoundToVarEntry e (MemArray bt shape _ (ArrayIn mem ixfun)) =
   let location = MemLocation mem (shapeDims shape) $ fmap (fmap Imp.ScalarVar) ixfun
    in ArrayVar
@@ -1281,10 +1278,13 @@ lookupAcc ::
 lookupAcc name = do
   res <- lookupVar name
   case res of
-    AccVar _ arrs _ -> do
-      op <- gets $ M.lookup arrs . stateAccs
-      ds <- map toInt64Exp . arrayDims <$> lookupType (head arrs)
-      return (arrs, ds, op)
+    AccVar _ (acc, ispace, _, _) -> do
+      acc' <- gets $ M.lookup acc . stateAccs
+      case acc' of
+        Just (arrs, op) ->
+          return (arrs, map toInt64Exp (sliceDims ispace), op)
+        Nothing ->
+          error $ "ImpGen.lookupAcc: unlisted accumulator: " ++ pretty name
     _ -> error $ "ImpGen.lookupAcc: not an accumulator: " ++ pretty name
 
 destinationFromPattern :: Mem lore => Pattern lore -> ImpM lore r op Destination

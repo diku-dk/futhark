@@ -200,6 +200,9 @@ instance (FreeIn a, FreeIn b) => FreeIn (a, b) where
 instance (FreeIn a, FreeIn b, FreeIn c) => FreeIn (a, b, c) where
   freeIn' (a, b, c) = freeIn' a <> freeIn' b <> freeIn' c
 
+instance (FreeIn a, FreeIn b, FreeIn c, FreeIn d) => FreeIn (a, b, c, d) where
+  freeIn' (a, b, c, d) = freeIn' a <> freeIn' b <> freeIn' c <> freeIn' d
+
 instance FreeIn a => FreeIn [a] where
   freeIn' = foldMap freeIn'
 
@@ -330,13 +333,13 @@ instance FreeIn d => FreeIn (Ext d) where
 
 instance FreeIn ElemType where
   freeIn' ElemPrim {} = mempty
-  freeIn' (ElemAcc arrs) = freeIn' arrs
+  freeIn' (ElemAcc acc ispace ts) = freeIn' (acc, ispace, ts)
 
 instance FreeIn shape => FreeIn (TypeBase shape u) where
   freeIn' (Array t shape _) = freeIn' t <> freeIn' shape
   freeIn' (Mem s) = freeIn' s
   freeIn' Prim {} = mempty
-  freeIn' (Acc arrs) = freeIn' arrs
+  freeIn' (Acc acc ispace ts) = freeIn' (acc, ispace, ts)
 
 instance FreeIn dec => FreeIn (Param dec) where
   freeIn' (Param _ dec) = freeIn' dec

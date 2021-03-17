@@ -748,9 +748,9 @@ unMem ::
   Maybe (TypeBase (ShapeBase d) u)
 unMem (MemPrim pt) = Just $ Prim pt
 unMem (MemArray pt shape u _) = Just $ Array (ElemPrim pt) shape u
-unMem (MemAcc arrs shape)
-  | shapeRank shape == 0 = Just $ Acc arrs
-  | otherwise = Just $ Array (ElemAcc arrs) shape mempty
+unMem (MemAcc acc ispace ts shape)
+  | shapeRank shape == 0 = Just $ Acc acc ispace ts
+  | otherwise = Just $ Array (ElemAcc acc ispace ts) shape mempty
 unMem MemMem {} = Nothing
 
 unAllocScope :: Scope KernelsMem -> Scope Kernels.Kernels

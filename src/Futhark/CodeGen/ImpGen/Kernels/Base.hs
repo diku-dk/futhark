@@ -800,7 +800,7 @@ isConstExp vtable size = do
     hasExp (ArrayVar e _) = e
     hasExp (ScalarVar e _) = e
     hasExp (MemVar e _) = e
-    hasExp (AccVar e _ _) = e
+    hasExp (AccVar e _) = e
 
 computeThreadChunkSize ::
   SplitOrdering ->

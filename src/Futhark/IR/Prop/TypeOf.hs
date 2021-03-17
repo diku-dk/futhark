@@ -116,8 +116,8 @@ primOpType (Manifest _ v) =
   pure <$> lookupType v
 primOpType Assert {} =
   pure [Prim Cert]
-primOpType (JoinAcc _ arrs) =
-  pure [Acc arrs]
+primOpType (JoinAcc acc) =
+  pure . elemToType . elemType <$> lookupType acc
 primOpType (UpdateAcc v _ _) =
   pure <$> lookupType v
 
