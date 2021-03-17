@@ -1080,8 +1080,7 @@ checkExp (WithAcc shape arrs lam op) = do
 
   case op of
     Just (op_lam, nes) -> do
-      let num_is = shapeRank shape
-          mkArrArg t = (stripArray num_is t, mempty)
+      let mkArrArg t = (t, mempty)
       nes_ts <- mapM checkSubExp nes
       unless (nes_ts == lambdaReturnType op_lam) $
         bad $
@@ -1091,7 +1090,8 @@ checkExp (WithAcc shape arrs lam op) = do
                 "Type of neutral elements: " ++ pretty nes_ts
               ]
       checkLambda op_lam $
-        replicate num_is (Prim int64, mempty) ++ map mkArrArg (elem_ts ++ elem_ts)
+        replicate (shapeRank shape) (Prim int64, mempty)
+          ++ map mkArrArg (elem_ts ++ elem_ts)
     Nothing ->
       return ()
 
@@ -1107,13 +1107,11 @@ checkExp (WithAcc shape arrs lam op) = do
           | d <- shapeDims shape
         ]
 
+  let cert_params = take num_accs $ lambdaParams lam
+
   checkLambda lam $
-    concat
-      [ [ (Prim Cert, mempty),
-          (Acc (paramName px) ispace elem_ts, mempty)
-        ]
-        | [px, _py] <- chunk 2 $ lambdaParams lam
-      ]
+    replicate num_accs (Prim Cert, mempty)
+      ++ [(Acc (paramName p) ispace elem_ts, mempty) | p <- cert_params]
   where
     num_accs = 1
 checkExp (Op op) = do

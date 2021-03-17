@@ -809,7 +809,7 @@ defCompileExp pat (DoLoop ctx val form body) = do
     mergepat = map fst merge
 defCompileExp pat (WithAcc _ arrs lam op) = do
   dLParams $ lambdaParams lam
-  forM_ (lambdaParams lam) $ \p ->
+  forM_ (take num_accs $ lambdaParams lam) $ \p ->
     modify $ \s ->
       s {stateAccs = M.insert (paramName p) (arrs, op) $ stateAccs s}
   compileStms mempty (bodyStms $ lambdaBody lam) $ do
