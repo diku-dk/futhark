@@ -130,6 +130,50 @@ javascriptWrapper entryPoints = unlines
   (unlines $ map jsWrapEntryPoint entryPoints),
   endClassDef]
 
+
+--TODO Figure out if this needs arguements
+arrWrapper :: String
+arrWrapper = 
+  T.unpack 
+  [text|
+    class array_wrapper {
+      constructor(fc, ptr, typ, dim) {
+        this.ptr = ptr;
+        this.arr = eval(func_name('values'))(this.ptr);
+        this.arr_init = false;
+        this.shape_init = false;
+      }
+
+      func_name(fname) {
+        return 'this.fc.futhark_' + fname + '_' + this.typ + '_' + dim + 'd_arr';
+      }
+
+      shape() {
+        if (this.shape_init) {
+          return this.shape;
+        } else {
+          this.shape = eval(func_name('shape'))(this.ptr);
+          this.shape_init = true;
+          return this.shape;
+       }
+     }
+
+      values() {
+        return this.arr;
+      }
+
+    bytes_per_element() {
+      return this.arr.BYTES_PER_ELEMENT;
+    }
+
+    str_type() {
+      return this.arr.constructor.name;
+    }
+      
+
+  } 
+  |]
+
   
 cwraps :: String
 cwraps =
