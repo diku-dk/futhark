@@ -436,7 +436,7 @@ loadBMP bmpfile = do
 loadImage :: FilePath -> ScriptM (Compound Value)
 loadImage imgfile =
   withTempDir $ \dir -> do
-    let bmpfile = dir </> imgfile `replaceExtension` "bmp"
+    let bmpfile = dir </> takeBaseName imgfile `replaceExtension` "bmp"
     void $ system "convert" [imgfile, "-type", "TrueColorAlpha", bmpfile] mempty
     loadBMP bmpfile
 
