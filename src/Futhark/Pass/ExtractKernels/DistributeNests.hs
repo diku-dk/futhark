@@ -801,9 +801,7 @@ segmentedScatterKernel nest perm scatter_pat cs scatter_w lam ivs dests = do
         else certifying cs $ letSubExp "scatter_i" $ BasicOp $ SubExp i
 
   let k_body =
-        zip (chunks (concat $ zipWith (\ws n -> replicate n $ length ws) as_ws as_ns) is') vs
-          & chunks as_ns
-          & zip3 (map shapeDims as_ws) as_inps
+        groupScatterResults (zip3 as_ws as_ns as_inps) (is' ++ vs)
           & map (inPlaceReturn ispace)
           & KernelBody () k_body_stms
 
@@ -825,7 +823,7 @@ segmentedScatterKernel nest perm scatter_pat cs scatter_w lam ivs dests = do
 
     inPlaceReturn ispace (aw, inp, is_vs) =
       WriteReturns
-        (Shape (init ws ++ aw))
+        (Shape (init ws ++ shapeDims aw))
         (kernelInputArray inp)
         [(map DimFix $ map Var (init gtids) ++ is, v) | (is, v) <- is_vs]
       where
