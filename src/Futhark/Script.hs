@@ -292,7 +292,12 @@ evalExp builtin (ScriptServer server counter) top_level_e = do
 
       valToInterVal :: V.CompoundValue -> InterValue
       valToInterVal = fmap $ \v ->
-        SValue (prettyText (V.valueType v)) $ VVal v
+        SValue (typeText (V.valueType v)) $ VVal v
+        where
+          -- We don't want the actual sizes in the type, so we cannot
+          -- use the normal prettyprinter.
+          typeText (V.ValueType dims t) =
+            mconcat (replicate (length dims) "[]") <> prettyText t
 
       interValToExpVal :: InterValue -> m ExpValue
       interValToExpVal = traverse (traverse toVar)
@@ -322,9 +327,9 @@ evalExp builtin (ScriptServer server counter) top_level_e = do
         unless (and $ zipWith (==) es_types (map (V.ValueAtom . STValue) in_types)) $
           throwError $
             "Function \"" <> name <> "\" expects arguments of types:\n"
-              <> prettyText (V.ValueTuple $ map V.ValueAtom in_types)
+              <> prettyText (V.mkCompound $ map V.ValueAtom in_types)
               <> "\nBut called with arguments of types:\n"
-              <> prettyText (V.ValueTuple $ map V.ValueAtom es_types)
+              <> prettyText (V.mkCompound $ map V.ValueAtom es_types)
 
         ins <- mapM (interValToVar <=< evalExp') es
 
