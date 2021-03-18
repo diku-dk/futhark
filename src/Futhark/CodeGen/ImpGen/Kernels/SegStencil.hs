@@ -24,16 +24,19 @@ compileSegStencil ::
 compileSegStencil = compileGlobalReadFlat
 
 -- the provided one has a ton of common subexpressions so a new one was made
+-- !!!! It does however require the variables of dim be subjected to
+-- tail . scanr1 (*)
 unflattenIx ::
   IntExp t =>
   String ->
   [Imp.TExp t] ->
   Imp.TExp t ->
   ImpM lore r op [Imp.TExp t]
-unflattenIx _ [] _ = pure []
+unflattenIx base [] i = (: []) <$> dPrimVE base i
 unflattenIx base (x : xs) i = do
   dimIx <- dPrimVE base $ i `quot` x
-  (dimIx :) <$> unflattenIx base xs (i - (dimIx * x))
+  rem_val <- dPrimVE "rem_val" (i - (dimIx * x))
+  (dimIx :) <$> unflattenIx base xs rem_val
 
 chunksOf :: Int -> [a] -> [[a]]
 chunksOf _ [] = []
@@ -66,10 +69,11 @@ compileGlobalReadFlat pat lvl space op kbody = do
     SegThread {} -> do
       -- Host side evaluated variables
       max_idxs <- mapM (dPrimVE "max_idx" . (+ (-1))) dims
+      inner_dims <- mapM (dPrimVE "dims_inner") $ tail $ scanr1 (*) dims
 
       emit $ Imp.DebugPrint "\n# SegStencil" Nothing
       let virt_num_groups =
-            sExt32 $ product dims `divUp` unCount group_size_flat_c
+            sExt32 $ product dims `divUp` group_size_flat
       sKernelThread "segstencil" num_groups' group_size_flat_c (segFlat space) $
         virtualiseGroups (segVirt lvl) virt_num_groups $ \group_id_flat_exp -> do
           group_id_flat <- dPrimVE "group_id_flat" $ sExt64 group_id_flat_exp
@@ -77,7 +81,7 @@ compileGlobalReadFlat pat lvl space op kbody = do
 
           -- create global ids for each axis
           gid_flat <- dPrimVE "global_id_flat" $ group_id_flat * group_size_flat + local_id_flat
-          gids <- unflattenIx "global_id" (map sExt64 dims) gid_flat
+          gids <- unflattenIx "global_id" (map sExt64 inner_dims) gid_flat
           zipWithM_ dPrimV_ is gids
 
           -- check for out of bound on global id for each axis
@@ -99,8 +103,9 @@ compileGlobalReadFlat pat lvl space op kbody = do
 
             -- load variants into lambda variant parameters
             forM_ (zip param_ixs params_ixs_ordered) $ \(parix, pars) -> do
+              read_ixs <- mapM (dPrimVE "read_ix") $ bound_ixs parix
               forM_ (zip pars $ stencilArrays op) $ \(par, src) ->
-                copyDWIMFix (paramName par) [] (Var src) $ bound_ixs parix
+                copyDWIMFix (paramName par) [] (Var src) read_ixs
 
             -- compile lambda function and designate output style
             compileStms mempty (bodyStms lamBody) $
@@ -153,8 +158,8 @@ compileBigTile pat lvl space op kbody = do
       group_sizes <- mapM (dPrimVE "group_sizes") group_sizes_exp
       readSet_iters <- mapM (dPrimV "readSet_iters") (zipWith divUp shared_sizes group_sizes)
       grid_sizes <- mapM (dPrimVE "grid_sizes") $ zipWith divUp dims group_sizes_exp
-      inner_grid <- mapM (dPrimVE "grid_sizes_inner") $ tail $ scanr (*) 1 grid_sizes
-      inner_group <- mapM (dPrimVE "group_sizes_inner") $ tail $ scanr (*) 1 group_sizes
+      inner_grid <- mapM (dPrimVE "grid_sizes_inner") $ tail . scanr1 (*) $ grid_sizes
+      inner_group <- mapM (dPrimVE "group_sizes_inner") $ tail . scanr1 (*) $ group_sizes
 
       let dims_round_up = zipWith (*) grid_sizes group_sizes
           virt_num_groups =
