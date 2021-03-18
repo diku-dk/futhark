@@ -1,7 +1,7 @@
 #!/bin/sh
 
 for x in *.fut; do
-    md=${x/.fut/.md}
+    md=$(basename -s .fut $x).md
     echo
     echo "$x:"
     futhark literate $x
