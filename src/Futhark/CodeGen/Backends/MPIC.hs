@@ -211,3 +211,7 @@ compileOp (DistributedLoop _s i prebody body postbody _ _) = do
                 $items:body'
               }|]
   GC.compileCode postbody
+compileOp (LoadNbNode name) = do
+  GC.stm [C.cstm|$id:name = ctx->world_size;|]
+compileOp (LoadNodeId name) = do
+  GC.stm [C.cstm|$id:name = ctx->rank;|]
