@@ -163,7 +163,7 @@ module Futhark.Pass.ExtractKernels (extractKernels) where
 import Control.Monad.Identity
 import Control.Monad.RWS.Strict
 import Control.Monad.Reader
-import Data.Bitraversable
+import Data.Bifunctor (first)
 import Data.Function ((&))
 import Data.Maybe
 import qualified Futhark.IR.Kernels as Out
@@ -365,8 +365,9 @@ transformStm path (Let pat aux (If c tb fb rt)) = do
   return $ oneStm $ Let pat aux $ If c tb' fb' rt
 transformStm path (Let pat aux (WithAcc shape arrs lam op)) =
   oneStm . Let pat aux
-    <$> ( WithAcc shape arrs (soacsLambdaToKernels lam)
-            <$> traverse (bitraverse (transformLambda path) pure) op
+    <$> ( WithAcc shape arrs
+            <$> transformLambda path lam
+            <*> pure (fmap (first soacsLambdaToKernels) op)
         )
 transformStm path (Let pat aux (DoLoop ctx val form body)) =
   localScope
