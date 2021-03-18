@@ -163,12 +163,12 @@ parseInt :: Parser Int
 parseInt = lexeme $ read <$> some (satisfy isDigit)
 
 restOfLine :: Parser T.Text
-restOfLine = takeWhileP Nothing (/= '\n') <* eol
+restOfLine = takeWhileP Nothing (/= '\n') <* (void eol <|> eof)
 
 parseBlockComment :: Parser T.Text
 parseBlockComment = T.unlines <$> some line
   where
-    line = ("-- " *> restOfLine) <|> ("--" *> eol $> "")
+    line = "--" *> optional " " *> restOfLine
 
 parseTestBlock :: Parser T.Text
 parseTestBlock =
@@ -181,7 +181,7 @@ parseBlockCode :: Parser T.Text
 parseBlockCode = T.unlines . noblanks <$> some line
   where
     noblanks = reverse . dropWhile T.null . reverse . dropWhile T.null
-    line = try (notFollowedBy "--") *> restOfLine
+    line = try (notFollowedBy "--") *> notFollowedBy eof *> restOfLine
 
 parsePlotParams :: Parser (Maybe (Int, Int))
 parsePlotParams =
@@ -436,7 +436,7 @@ loadBMP bmpfile = do
 loadImage :: FilePath -> ScriptM (Compound Value)
 loadImage imgfile =
   withTempDir $ \dir -> do
-    let bmpfile = dir </> imgfile `replaceExtension` "bmp"
+    let bmpfile = dir </> takeBaseName imgfile `replaceExtension` "bmp"
     void $ system "convert" [imgfile, "-type", "TrueColorAlpha", bmpfile] mempty
     loadBMP bmpfile
 

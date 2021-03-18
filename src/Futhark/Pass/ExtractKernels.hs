@@ -163,7 +163,7 @@ module Futhark.Pass.ExtractKernels (extractKernels) where
 import Control.Monad.Identity
 import Control.Monad.RWS.Strict
 import Control.Monad.Reader
-import Data.Function ((&))
+import Data.Bifunctor (first)
 import Data.Maybe
 import qualified Futhark.IR.Kernels as Out
 import Futhark.IR.Kernels.Kernel
@@ -181,7 +181,6 @@ import Futhark.Pass.ExtractKernels.ToKernels
 import Futhark.Tools
 import qualified Futhark.Transform.FirstOrderTransform as FOT
 import Futhark.Transform.Rename
-import Futhark.Util
 import Futhark.Util.Log
 import Prelude hiding (log)
 
@@ -266,10 +265,9 @@ transformStms path (bnd : bnds) =
       transformStms path $ stmsToList bnds' <> bnds
 
 unbalancedLambda :: Lambda -> Bool
-unbalancedLambda lam =
-  unbalancedBody
-    (namesFromList $ map paramName $ lambdaParams lam)
-    $ lambdaBody lam
+unbalancedLambda orig_lam =
+  unbalancedBody (namesFromList $ map paramName $ lambdaParams orig_lam) $
+    lambdaBody orig_lam
   where
     subExpBound (Var i) bound = i `nameIn` bound
     subExpBound (Constant _) _ = False
@@ -286,7 +284,8 @@ unbalancedLambda lam =
     unbalancedStm _ Op {} =
       False
     unbalancedStm _ DoLoop {} = False
-    unbalancedStm _ MkAcc {} = False
+    unbalancedStm bound (WithAcc _ _ lam _) =
+      unbalancedBody bound (lambdaBody lam)
     unbalancedStm bound (If cond tbranch fbranch _) =
       cond `subExpBound` bound
         && (unbalancedBody bound tbranch || unbalancedBody bound fbranch)
@@ -344,6 +343,12 @@ kernelAlternatives pat default_body ((cond, alt) : alts) = runBinder_ $ do
     If cond alt alt_body $
       IfDec (staticShapes (patternTypes pat)) IfEquiv
 
+transformLambda :: KernelPath -> Lambda -> DistribM (Out.Lambda Out.Kernels)
+transformLambda path (Lambda params body ret) =
+  Lambda params
+    <$> localScope (scopeOfLParams params) (transformBody path body)
+    <*> pure ret
+
 transformStm :: KernelPath -> Stm -> DistribM KernelsStms
 transformStm _ stm
   | "sequential" `inAttrs` stmAuxAttrs (stmAux stm) =
@@ -356,6 +361,12 @@ transformStm path (Let pat aux (If c tb fb rt)) = do
   tb' <- transformBody path tb
   fb' <- transformBody path fb
   return $ oneStm $ Let pat aux $ If c tb' fb' rt
+transformStm path (Let pat aux (WithAcc shape arrs lam op)) =
+  oneStm . Let pat aux
+    <$> ( WithAcc shape arrs
+            <$> transformLambda path lam
+            <*> pure (fmap (first soacsLambdaToKernels) op)
+        )
 transformStm path (Let pat aux (DoLoop ctx val form body)) =
   localScope
     ( castScope (scopeOf form)
@@ -562,15 +573,11 @@ transformStm path (Let pat _ (Op (Stream w Sequential fold_fun nes arrs))) = do
 transformStm _ (Let pat (StmAux cs _ _) (Op (Scatter w lam ivs as))) = runBinder_ $ do
   let lam' = soacsLambdaToKernels lam
   write_i <- newVName "write_i"
-  let (as_ws, as_ns, as_vs) = unzip3 as
-      indexes = zipWith (*) as_ns $ map length as_ws
-      (i_res, v_res) = splitAt (sum indexes) $ bodyResult $ lambdaBody lam'
+  let (as_ws, _, _) = unzip3 as
       kstms = bodyStms $ lambdaBody lam'
       krets = do
         (a_w, a, is_vs) <-
-          zip (chunks (concat $ zipWith (\ws n -> replicate n $ length ws) as_ws as_ns) i_res) v_res
-            & chunks as_ns
-            & zip3 as_ws as_vs
+          groupScatterResults as $ bodyResult $ lambdaBody lam'
         return $ WriteReturns a_w a [(map DimFix is, v) | (is, v) <- is_vs]
       body = KernelBody () kstms krets
       inputs = do

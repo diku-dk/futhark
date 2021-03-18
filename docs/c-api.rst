@@ -277,16 +277,19 @@ Results in the following C function:
    sure to call :c:func:`futhark_context_sync` before using the value
    of ``out0``.
 
-The exact behaviour of the exit code depends on the backend.  For the
-sequential C backend, errors will always be available when the entry
-point returns, and :c:func:`futhark_context_sync` will always return
-success.  When using a GPU backend such as ``cuda`` or ``opencl``, the
-entry point may still be running asynchronous operations when it
+Errors are indicated by a nonzero return value.  On error, nothing is
+written to the *out*-parameters.
+
+The precise semantics of the return value depends on the backend.  For
+the sequential C backend, errors will always be available when the
+entry point returns, and :c:func:`futhark_context_sync` will always
+return zero.  When using a GPU backend such as ``cuda`` or ``opencl``,
+the entry point may still be running asynchronous operations when it
 returns, in which case the entry point may return zero successfully,
 even though execution has already (or will) fail.  These problems will
-be reported when :c:func:`futhark_context_sync` is called.  When using
-GPU backends, be careful to check the return code of *both* the entry
-point itself, and :c:func:`futhark_context_sync`.
+be reported when :c:func:`futhark_context_sync` is called.  Therefore,
+be careful to check the return code of *both* the entry point itself,
+and :c:func:`futhark_context_sync`.
 
 GPU
 ---

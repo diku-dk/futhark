@@ -85,7 +85,13 @@ pElemType :: Parser ElemType
 pElemType =
   choice
     [ ElemPrim <$> pPrimType,
-      keyword "acc" $> ElemAcc <*> pVNames
+      "acc"
+        *> parens
+          ( ElemAcc
+              <$> pVName <* pComma
+              <*> pShape <* pComma
+              <*> pTypes
+          )
     ]
 
 pNonArray :: Parser (TypeBase shape u)
@@ -285,7 +291,7 @@ pBasicOp =
       keyword "update_acc"
         *> parens
           (UpdateAcc <$> pVName <* pComma <*> pSubExps <* pComma <*> pSubExps),
-      keyword "un_acc" *> parens (UnAcc <$> pVName <* pComma <*> pTypes),
+      keyword "join_acc" *> parens (JoinAcc <$> pVName),
       --
       pConvOp "sext" SExt pIntType pIntType,
       pConvOp "zext" ZExt pIntType pIntType,
@@ -455,11 +461,12 @@ pScan pr =
 
 pMkAcc :: PR lore -> Parser (Exp lore)
 pMkAcc pr =
-  keyword "mk_acc"
+  keyword "with_acc"
     *> parens
-      ( MkAcc <$> pShape <* pComma
+      ( WithAcc
+          <$> pShape <* pComma
           <*> pVNames <* pComma
-          <*> pShape
+          <*> pLambda pr
           <*> optional (pComma *> pCombFun)
       )
   where
@@ -878,7 +885,13 @@ pMemInfo pd pu pret =
       pt <- pPrimType
       MemArray pt shape u <$> (lexeme "@" *> pret)
     pAcc shape =
-      keyword "acc" $> MemAcc <*> pVNames <*> pure shape
+      keyword "acc"
+        *> parens
+          ( MemAcc <$> pVName <* pComma
+              <*> pShape <* pComma
+              <*> pTypes
+              <*> pure shape
+          )
 
 pSpace :: Parser Space
 pSpace =

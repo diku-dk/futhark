@@ -326,6 +326,7 @@ bodyContainsParallelism = any isParallelStm . bodyStms
         && not ("sequential" `inAttrs` stmAuxAttrs (stmAux stm))
     isMap Op {} = True
     isMap (DoLoop _ _ ForLoop {} body) = bodyContainsParallelism body
+    isMap (WithAcc _ _ lam _) = bodyContainsParallelism $ lambdaBody lam
     isMap _ = False
 
 lambdaContainsParallelism :: Lambda SOACS -> Bool
@@ -438,6 +439,30 @@ maybeDistributeStm stm@(Let pat _ (If cond tbranch fbranch ret)) acc
             return acc'
       _ ->
         addStmToAcc stm acc
+maybeDistributeStm stm@(Let pat _ (WithAcc shape arrs lam op)) acc
+  | lambdaContainsParallelism lam =
+    distributeSingleStm acc stm >>= \case
+      Just (kernels, res, nest, acc')
+        | not $
+            freeIn (drop num_accs (lambdaReturnType lam))
+              `namesIntersect` boundInKernelNest nest,
+          Just (perm, pat_unused) <- permutationAndMissing pat res ->
+          -- We need to pretend pat_unused was used anyway, by adding
+          -- it to the kernel nest.
+          localScope (typeEnvFromDistAcc acc') $ do
+            nest' <- expandKernelNest pat_unused nest
+            types <- asksScope scopeForSOACs
+            addPostStms kernels
+            let withacc = WithAccStm perm pat shape arrs lam op
+            stms <-
+              (`runReaderT` types) $
+                fmap snd . simplifyStms =<< interchangeWithAcc nest' withacc
+            onTopLevelStms stms
+            return acc'
+      _ ->
+        addStmToAcc stm acc
+  where
+    num_accs = 1
 maybeDistributeStm (Let pat aux (Op (Screma w form arrs))) acc
   | Just [Reduce comm lam nes] <- isReduceSOAC form,
     Just m <- irwim pat w comm lam $ zip nes arrs = do
@@ -589,6 +614,13 @@ maybeDistributeStm stm@(Let _ aux (BasicOp (Reshape reshape stm_arr))) acc =
           map DimNew (kernelNestWidths nest)
             ++ map DimNew (newDims reshape)
     return $ oneStm $ Let outerpat aux $ BasicOp $ Reshape reshape' arr
+maybeDistributeStm stm@(Let _ aux (BasicOp (JoinAcc stm_arr))) acc =
+  distributeSingleUnaryStm acc stm stm_arr $ \nest outerpat arr ->
+    runBinder_ $ do
+      arr_joined <- letExp (baseString arr <> "_joined") $ BasicOp $ JoinAcc arr
+      let nest_shape = Shape $ kernelNestWidths nest
+      auxing aux . letBind outerpat $
+        BasicOp $ Replicate nest_shape $ Var arr_joined
 maybeDistributeStm stm@(Let _ aux (BasicOp (Rotate rots stm_arr))) acc =
   distributeSingleUnaryStm acc stm stm_arr $ \nest outerpat arr -> do
     let rots' = map (const $ intConst Int64 0) (kernelNestWidths nest) ++ rots
@@ -801,9 +833,7 @@ segmentedScatterKernel nest perm scatter_pat cs scatter_w lam ivs dests = do
         else certifying cs $ letSubExp "scatter_i" $ BasicOp $ SubExp i
 
   let k_body =
-        zip (chunks (concat $ zipWith (\ws n -> replicate n $ length ws) as_ws as_ns) is') vs
-          & chunks as_ns
-          & zip3 (map shapeDims as_ws) as_inps
+        groupScatterResults (zip3 as_ws as_ns as_inps) (is' ++ vs)
           & map (inPlaceReturn ispace)
           & KernelBody () k_body_stms
 
@@ -825,7 +855,7 @@ segmentedScatterKernel nest perm scatter_pat cs scatter_w lam ivs dests = do
 
     inPlaceReturn ispace (aw, inp, is_vs) =
       WriteReturns
-        (Shape (init ws ++ aw))
+        (Shape (init ws ++ shapeDims aw))
         (kernelInputArray inp)
         [(map DimFix $ map Var (init gtids) ++ is, v) | (is, v) <- is_vs]
       where

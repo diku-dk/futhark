@@ -63,7 +63,7 @@ internaliseFunName = nameFromString . pretty
 internaliseValBind :: E.ValBind -> InternaliseM ()
 internaliseValBind fb@(E.ValBind entry fname retdecl (Info (rettype, _)) tparams params body _ attrs loc) = do
   localConstsScope $
-    bindingParams tparams params $ \shapeparams params' -> do
+    bindingFParams tparams params $ \shapeparams params' -> do
       let shapenames = map I.paramName shapeparams
 
       msg <- case retdecl of
@@ -76,8 +76,7 @@ internaliseValBind fb@(E.ValBind entry fname retdecl (Info (rettype, _)) tparams
       ((rettype', body_res), body_stms) <- collectStms $ do
         body_res <- internaliseExp (baseString fname <> "_res") body
         rettype_bad <-
-          internaliseReturnType rettype
-            =<< mapM subExpType body_res
+          internaliseReturnType rettype =<< mapM subExpType body_res
         let rettype' = zeroExts rettype_bad
         return (rettype', body_res)
       body' <-
@@ -116,7 +115,7 @@ internaliseValBind fb@(E.ValBind entry fname retdecl (Info (rettype, _)) tparams
 generateEntryPoint :: E.EntryPoint -> E.ValBind -> InternaliseM ()
 generateEntryPoint (E.EntryPoint e_paramts e_rettype) vb = localConstsScope $ do
   let (E.ValBind _ ofname _ (Info (rettype, _)) tparams params _ _ attrs loc) = vb
-  bindingParams tparams params $ \shapeparams params' -> do
+  bindingFParams tparams params $ \shapeparams params' -> do
     entry_rettype <- internaliseEntryReturnType rettype
     let entry' = entryPoint (zip e_paramts params') (e_rettype, entry_rettype)
         args = map (I.Var . I.paramName) $ concat params'
@@ -1268,8 +1267,23 @@ internaliseStreamAcc ::
   InternaliseM [SubExp]
 internaliseStreamAcc desc dest op lam bs = do
   dest' <- internaliseExpToVars "scatter_dest" dest
-  dest_ts <- mapM lookupType dest'
   bs' <- internaliseExpToVars "scatter_input" bs
+
+  acc_cert_v <- newVName "acc_cert"
+  dest_ts <- mapM lookupType dest'
+  let dest_w = arraysSize 0 dest_ts
+      acc_t = Acc acc_cert_v (Shape [dest_w]) $ map rowType dest_ts
+  acc_p <- newParam "acc_p" acc_t
+  withacc_lam <- mkLambda [Param acc_cert_v (I.Prim I.Cert), acc_p] [acc_t] $ do
+    lam' <-
+      internaliseMapLambda internaliseLambda lam $
+        map I.Var $ paramName acc_p : bs'
+    w <- arraysSize 0 <$> mapM lookupType bs'
+    accs <- letExp "accs" $ BasicOp $ Replicate (Shape [w]) $ I.Var $ paramName acc_p
+    accs' <-
+      letExp "scatter_acc_res" . I.Op . I.Screma w (I.mapSOAC lam') $ accs : bs'
+    fmap (map I.Var) $
+      letTupExp "acc_joined" $ BasicOp $ JoinAcc accs'
 
   op' <-
     case op of
@@ -1284,18 +1298,9 @@ internaliseStreamAcc desc dest op lam bs = do
       Nothing ->
         return Nothing
 
-  w <- arraysSize 0 <$> mapM lookupType bs'
   destw <- arraysSize 0 <$> mapM lookupType dest'
-  acc <- letExp "scatter_acc" $ MkAcc (Shape [w]) dest' (Shape [destw]) op'
-
-  lam' <-
-    internaliseMapLambda internaliseLambda lam $
-      map I.Var $ acc : bs'
-
-  acc' <-
-    letExp "scatter_acc_res" . I.Op . I.Screma w (I.mapSOAC lam') $ acc : bs'
-
-  letTupExp' desc (BasicOp $ UnAcc acc' dest_ts)
+  fmap (map I.Var) $
+    letTupExp desc $ WithAcc (Shape [destw]) dest' withacc_lam op'
 
 internaliseExp1 :: String -> E.Exp -> InternaliseM I.SubExp
 internaliseExp1 desc e = do
@@ -1797,8 +1802,11 @@ isOverloadedFunction qname args loc = do
         r <- I.arrayRank <$> lookupType v
         return $ I.Rearrange ([1, 0] ++ [2 .. r -1]) v
     handleRest [TupLit [x, y] _] "zip" = Just $ \desc ->
-      (++) <$> internaliseExp (desc ++ "_zip_x") x
-        <*> internaliseExp (desc ++ "_zip_y") y
+      mapM (letSubExp "zip_copy" . BasicOp . Copy)
+        =<< ( (++)
+                <$> internaliseExpToVars (desc ++ "_zip_x") x
+                <*> internaliseExpToVars (desc ++ "_zip_y") y
+            )
     handleRest [x] "unzip" = Just $ flip internaliseExp x
     handleRest [x] "trace" = Just $ flip internaliseExp x
     handleRest [x] "break" = Just $ flip internaliseExp x

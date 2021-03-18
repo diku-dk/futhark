@@ -69,6 +69,12 @@ transformFunDef scope fundec = do
 transformBody :: Body KernelsMem -> ExpandM (Body KernelsMem)
 transformBody (Body () stms res) = Body () <$> transformStms stms <*> pure res
 
+transformLambda :: Lambda KernelsMem -> ExpandM (Lambda KernelsMem)
+transformLambda (Lambda params body ret) =
+  Lambda params
+    <$> localScope (scopeOfLParams params) (transformBody body)
+    <*> pure ret
+
 transformStms :: Stms KernelsMem -> ExpandM (Stms KernelsMem)
 transformStms stms =
   inScopeOf stms $ mconcat <$> mapM transformStm (stmsToList stms)
@@ -137,14 +143,14 @@ transformExp (Op (Inner (SegOp (SegHist lvl space ops ts kbody)))) = do
   where
     lams = map histOp ops
     onOp op lam = op {histOp = lam}
-transformExp (MkAcc shape arrs ishape (Just (lam, nes))) = do
+transformExp (WithAcc shape arrs lam (Just (op_lam, nes))) = do
   bound_outside <- asks $ namesFromList . M.keys
   let -- XXX: fake a SegLevel, which we don't have here.  We will not
       -- use it for anything, as we will not allow irregular
       -- allocations inside the update function.
       lvl = SegThread (Count $ intConst Int64 0) (Count $ intConst Int64 0) SegNoVirt
-      (lam', lam_allocs) =
-        extractLambdaAllocations lvl bound_outside mempty lam
+      (op_lam', lam_allocs) =
+        extractLambdaAllocations lvl bound_outside mempty op_lam
       variantAlloc (_, Var v, _) = not $ v `nameIn` bound_outside
       variantAlloc _ = False
       (variant_allocs, invariant_allocs) = M.partition variantAlloc lam_allocs
@@ -157,17 +163,18 @@ transformExp (MkAcc shape arrs ishape (Just (lam, nes))) = do
     [] ->
       return ()
 
-  let num_is = shapeRank ishape
-      is = map paramName $ take num_is $ lambdaParams lam
+  let num_is = shapeRank shape
+      is = map paramName $ take num_is $ lambdaParams op_lam
   (alloc_stms, alloc_offsets) <-
-    genericExpandedInvariantAllocations (const (ishape, is)) invariant_allocs
+    genericExpandedInvariantAllocations (const (shape, is)) invariant_allocs
 
   scope <- askScope
-  let scope' = scopeOf lam <> scope
+  let scope' = scopeOf op_lam <> scope
+  lam' <- transformLambda lam
   either throwError pure $
     runOffsetM scope' alloc_offsets $ do
-      lam'' <- offsetMemoryInLambda lam'
-      return (alloc_stms, MkAcc shape arrs ishape $ Just (lam'', nes))
+      op_lam'' <- offsetMemoryInLambda op_lam'
+      return (alloc_stms, WithAcc shape arrs lam' $ Just (op_lam'', nes))
 transformExp e =
   return (mempty, e)
 
@@ -741,9 +748,9 @@ unMem ::
   Maybe (TypeBase (ShapeBase d) u)
 unMem (MemPrim pt) = Just $ Prim pt
 unMem (MemArray pt shape u _) = Just $ Array (ElemPrim pt) shape u
-unMem (MemAcc arrs shape)
-  | shapeRank shape == 0 = Just $ Acc arrs
-  | otherwise = Just $ Array (ElemAcc arrs) shape mempty
+unMem (MemAcc acc ispace ts shape)
+  | shapeRank shape == 0 = Just $ Acc acc ispace ts
+  | otherwise = Just $ Array (ElemAcc acc ispace ts) shape mempty
 unMem MemMem {} = Nothing
 
 unAllocScope :: Scope KernelsMem -> Scope Kernels.Kernels

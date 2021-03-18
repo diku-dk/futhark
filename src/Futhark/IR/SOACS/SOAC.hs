@@ -39,6 +39,7 @@ module Futhark.IR.SOACS.SOAC
     isMapSOAC,
     ppScrema,
     ppHist,
+    groupScatterResults,
 
     -- * Generic traversal
     SOACMapper (..),
@@ -51,6 +52,7 @@ import Control.Category
 import Control.Monad.Identity
 import Control.Monad.State.Strict
 import Control.Monad.Writer
+import Data.Function ((&))
 import Data.List (intersperse)
 import qualified Data.Map.Strict as M
 import Data.Maybe
@@ -74,26 +76,43 @@ import Prelude hiding (id, (.))
 -- | A second-order array combinator (SOAC).
 data SOAC lore
   = Stream SubExp (StreamForm lore) (Lambda lore) [SubExp] [VName]
-  | -- | @Scatter <cs> <length> <lambda> <original index and value arrays>@
+  | -- | @Scatter <length> <lambda> <inputs> <outputs>@
     --
-    -- <input/output arrays along with their sizes and number of
-    -- values to write for that array>
+    -- Scatter maps values from a set of input arrays to indices and values of a
+    -- set of output arrays. It is able to write multiple values to multiple
+    -- outputs each of which may have multiple dimensions.
     --
-    -- <length> is the length of each index array and value array, since they
-    -- all must be the same length for any fusion to make sense.  If you have a
-    -- list of index-value array pairs of different sizes, you need to use
-    -- multiple writes instead.
+    -- <inputs> is a list of input arrays, all having size <length>, elements of
+    -- which are applied to the <lambda> function. For instance, if there are
+    -- two arrays, <lambda> will get two values as input, one from each array.
     --
-    -- The lambda body returns the output in this manner:
+    -- <outputs> specifies the result of the <lambda> and which arrays to write
+    -- to. Each element of the list consists of a <VName> specifying which array
+    -- to scatter to, a <Shape> describing the shape of that array, and an <Int>
+    -- describing how many elements should be written to that array for each
+    -- invocation of the <lambda>.
+    --
+    -- <lambda> is a function that takes inputs from <inputs> and returns values
+    -- according to the output-specification in <outputs>. It returns values in
+    -- the following manner:
     --
     --     [index_0, index_1, ..., index_n, value_0, value_1, ..., value_m]
     --
-    -- This must be consistent along all Scatter-related optimisations.
+    -- For each output in <outputs>, <lambda> returns <i> * <j> index values and
+    -- <j> output values, where <i> is the number of dimensions (rank) of the
+    -- given output, and <j> is the number of output values written to the given
+    -- output.
     --
-    -- Scatters can be multi-dimensional, so the number of index-values need not
-    -- necessarily match the number of values. Instead, the number of indexes
-    -- must match the sum of the ranks of the shapes in the destination array
-    -- list.
+    -- For example, given the following output specification:
+    --
+    --     [([x1, y1, z1], 2, arr1), ([x2, y2], 1, arr2)]
+    --
+    -- <lambda> will produce 6 (3 * 2) index values and 2 output values for
+    -- <arr1>, and 2 (2 * 1) index values and 1 output value for
+    -- arr2. Additionally, the results are grouped, so the first 6 index values
+    -- will correspond to the first two output values, and so on. For this
+    -- example, <lambda> should return a total of 11 values, 8 index values and
+    -- 3 output values.
     Scatter SubExp (Lambda lore) [VName] [(Shape, Int, VName)]
   | -- | @Hist <length> <dest-arrays-and-ops> <bucket fun> <input arrays>@
     --
@@ -301,6 +320,32 @@ isMapSOAC (ScremaForm scans reds map_lam) = do
   guard $ null scans
   guard $ null reds
   return map_lam
+
+-- | @groupResult <output specification> <result>@
+--
+-- Groups the index values and result values of <result> according to the
+-- <output specification>.
+--
+-- This function is used for extracting and grouping the results of a
+-- scatter. In the SOAC representation, the lambda inside a 'Scatter' returns
+-- all indices and values as one big list. This function groups each value with
+-- its corresponding indices (as determined by the 'Shape' of the output array).
+--
+-- The elements of the resulting list correspond to the shape and name of the
+-- output parameters, in addition to a list of values written to that output
+-- parameter, along with the array indices marking where to write them to.
+--
+-- See 'Scatter' for more information.
+groupScatterResults :: [(Shape, Int, array)] -> [SubExp] -> [(Shape, array, [([SubExp], SubExp)])]
+groupScatterResults output_spec result =
+  let (shapes, ns, arrays) = unzip3 output_spec
+      num_indices = sum $ zipWith (*) ns $ map length shapes
+      (indices, values) = splitAt num_indices result
+      chunk_sizes =
+        concat $ zipWith (\shp n -> replicate n $ length shp) shapes ns
+   in zip (chunks chunk_sizes indices) values
+        & chunks ns
+        & zip3 shapes arrays
 
 -- | Like 'Mapper', but just for 'SOAC's.
 data SOACMapper flore tlore m = SOACMapper
