@@ -164,7 +164,6 @@ import Control.Monad.Identity
 import Control.Monad.RWS.Strict
 import Control.Monad.Reader
 import Data.Bifunctor (first)
-import Data.Function ((&))
 import Data.Maybe
 import qualified Futhark.IR.Kernels as Out
 import Futhark.IR.Kernels.Kernel

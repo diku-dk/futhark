@@ -8,7 +8,6 @@ import Control.Monad.Identity
 import Control.Monad.Reader
 import Control.Monad.State
 import Data.Bitraversable
-import Data.Function ((&))
 import Futhark.Analysis.Rephrase
 import Futhark.IR
 import Futhark.IR.MC
