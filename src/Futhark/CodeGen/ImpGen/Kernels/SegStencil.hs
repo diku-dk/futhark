@@ -22,7 +22,25 @@ compileSegStencil ::
   KernelBody KernelsMem ->
   CallKernelGen ()
 compileSegStencil pat lvl space op kbody =
-  compileBigTileFlat pat lvl space op kbody
+  compileGlobalReadFlat pat lvl space op kbody
+
+-- the provided one has a ton of common subexpressions so a new one was made
+unflattenIx
+  :: IntExp t
+  => String
+  -> [Imp.TExp t]
+  -> Imp.TExp t
+  -> ImpM lore r op [Imp.TExp t]
+unflattenIx _ [] _ = pure []
+unflattenIx base (x:xs) i = do
+  dimIx <- dPrimVE base $ i `quot` x
+  (dimIx:) <$> unflattenIx base xs (i - (dimIx * x))
+
+chunksOf :: Int -> [a] -> [[a]]
+chunksOf _   [] = []
+chunksOf len xs =
+  let (left, right) = splitAt len xs
+   in left : chunksOf len right
 
 compileGlobalReadFlat ::
   Pattern KernelsMem ->
@@ -32,90 +50,76 @@ compileGlobalReadFlat ::
   KernelBody KernelsMem ->
   CallKernelGen ()
 compileGlobalReadFlat pat lvl space op kbody = do
-  let dims = map (toInt64Exp . snd) $ unSegSpace space
-      num_groups' = toInt64Exp <$> segNumGroups lvl
-      group_size' = toInt64Exp <$> segGroupSize lvl
-
-  case lvl of
-    SegThread {} -> do
-      emit $ Imp.DebugPrint "\n# SegStencil" Nothing
-      let virt_num_groups =
-            sExt32 $ product dims `divUp` unCount group_size'
-      sKernelThread "segstencil" num_groups' group_size' (segFlat space) $
-        virtualiseGroups (segVirt lvl) virt_num_groups $ \group_id ->
-          let group_id' = sExt64 group_id
-              group_size'' = sExt64 (unCount group_size')
-           in compileGlobalReadFlatBody pat space op kbody group_id' group_size''
-    SegGroup {} ->
-      error "not implemented"
-
-compileGlobalReadFlatBody ::
-  Pattern KernelsMem ->
-  SegSpace ->
-  StencilOp KernelsMem ->
-  KernelBody KernelsMem ->
-  Imp.TExp Int64 ->
-  Imp.TExp Int64 ->
-  InKernelGen ()
-compileGlobalReadFlatBody pat space op kbody group_id group_size =
   let (is, dims') = unzip $ unSegSpace space
       dims = map toInt64Exp dims'
+      num_groups' = toInt64Exp <$> segNumGroups lvl
+      group_size_flat_c = toInt64Exp <$> segGroupSize lvl
+      group_size_flat = (unCount group_size_flat_c)
       stencil_ixss = map (map fromInteger) $ stencilIndexes op
       invarElems = map kernelResultSubExp $ kernelBodyResult kbody
       lam = stencilOp op
       lamBody = lambdaBody lam
       (invariantParams, variantParams) =
         splitAt (length invarElems) $ lambdaParams lam
-   in do
-        local_tid <- sExt64 . kernelLocalThreadId . kernelConstants <$> askEnv
-        let global_tid = group_id * group_size + local_tid
+      n_point_stencil = length $ head stencil_ixss
 
-        -- create global ids for each axis
-        let gids = map sExt64 $ unflattenIndex (map sExt64 dims) global_tid
-        zipWithM_ dPrimV_ is gids
+  case lvl of
+    SegThread {} -> do
 
-        -- check for out of bound on global id for each axis
-        sWhen (isActive $ unSegSpace space) $ do
-          -- compile invariant elements
-          compileStms mempty (kernelBodyStms kbody) $ pure ()
+      -- Host side evaluated variables
+      max_idxs <- mapM (dPrimVE "max_idx" . (+ (-1))) dims
 
-          -- declare and attach invariant elements to invariantParams
-          zipWithM_ dPrimV_ (map paramName invariantParams) . map TPrimExp
-            =<< mapM toExp invarElems
+      emit $ Imp.DebugPrint "\n# SegStencil" Nothing
+      let virt_num_groups =
+            sExt32 $ product dims `divUp` unCount group_size_flat_c
+      sKernelThread "segstencil" num_groups' group_size_flat_c (segFlat space) $
+        virtualiseGroups (segVirt lvl) virt_num_groups $ \group_id_flat_exp -> do
+          group_id_flat <- dPrimVE "group_id_flat" $ sExt64 group_id_flat_exp
+          local_id_flat <- dPrimVE "local_id_flat" . sExt64 . kernelLocalThreadId . kernelConstants =<< askEnv
 
-          -- create max indexes for each axis, and the bound macro
-          max_idxs <- forM dims (dPrimVE "max_idx_" . (+ (-1)))
-          let bound_idx = zipWith sMin64 max_idxs . map (sMax64 0)
+          -- create global ids for each axis
+          gid_flat <- dPrimVE "global_id_flat" $ group_id_flat * group_size_flat + local_id_flat
+          gids <- unflattenIx "global_id" (map sExt64 dims) gid_flat
+          zipWithM_ dPrimV_ is gids
 
-          -- calculate the unrolled variants parameter indexers
-          let bounded_ixs = flip map (zip gids stencil_ixss) $
-                \(axis_gid, axis_ixs) -> bound_idx $ map (axis_gid +) axis_ixs
-          let vname_ixs_for_tup =
-                concatMap (mapM (,) (transpose bounded_ixs)) $ stencilArrays op
+          -- check for out of bound on global id for each axis
+          sWhen (isActive $ unSegSpace space) $ do
+            -- compile invariant elements
+            compileStms mempty (kernelBodyStms kbody) $ pure ()
 
-          -- declare lambda variant parameters
-          dLParams variantParams
+            -- declare and attach invariant elements to invariantParams
+            zipWithM_ dPrimV_ (map paramName invariantParams) . map TPrimExp
+              =<< mapM toExp invarElems
 
-          -- load variants into lambda variant parameters
-          forM_ (zip variantParams vname_ixs_for_tup) $
-            \(vparam, (ixs_tup, input_arr)) -> do
-              let pname = paramName vparam
-              copyDWIMFix pname [] (Var input_arr) ixs_tup
+            -- create max indexes for each axis, and the bound macro
+            let bound_ixs = zipWith sMin64 max_idxs . map (sMax64 0)
 
-          -- compile lambda function and designate output style
-          compileStms mempty (bodyStms lamBody) $
-            zipWithM_ (compileThreadResult space) (patternElements pat) $
-              map (Returns ResultMaySimplify) $ bodyResult lamBody
+            let param_ixs = transpose $ zipWith (mapM (+)) stencil_ixss gids
+            let params_ixs_ordered = transpose $ chunksOf n_point_stencil variantParams
 
+            dLParams variantParams
 
-compileBigTileFlat ::
+            -- load variants into lambda variant parameters
+            forM_ (zip param_ixs params_ixs_ordered) $ \(parix, pars) -> do
+                forM_ (zip pars $ stencilArrays op) $ \(par, src) ->
+                  copyDWIMFix (paramName par) [] (Var src) $ bound_ixs parix
+
+            -- compile lambda function and designate output style
+            compileStms mempty (bodyStms lamBody) $
+              zipWithM_ (compileThreadResult space) (patternElements pat) $
+                map (Returns ResultMaySimplify) $ bodyResult lamBody
+
+    SegGroup {} ->
+      error "not implemented"
+
+compileBigTile ::
   Pattern KernelsMem ->
   SegLevel ->
   SegSpace ->
   StencilOp KernelsMem ->
   KernelBody KernelsMem ->
   CallKernelGen ()
-compileBigTileFlat pat lvl space op kbody = do
+compileBigTile pat lvl space op kbody = do
   let
       num_groups' = toInt64Exp <$> segNumGroups lvl
       group_size_flat_c = toInt64Exp <$> segGroupSize lvl
@@ -138,16 +142,8 @@ compileBigTileFlat pat lvl space op kbody = do
       a_mins = map (fromInteger . (\x -> if x > 0 then error "invalid axis min" else x) . minimum) $ stencilIndexes op
       a_maxs = map (fromInteger . (\x -> if x < 0 then error "invalid axis max" else x) . maximum) $ stencilIndexes op
       shared_sizes_exp = zipWith (+) group_sizes_exp $ zipWith (\x y -> x - y) a_maxs a_mins
-      chunksOf _   [] = []
-      chunksOf len xs =
-        let (left, right) = splitAt len xs
-         in left : chunksOf len right
       n_point_stencil = length $ head stencil_ixss
       lamParTypes = map (elemType . paramType) $ map head $ chunksOf n_point_stencil variantParams
-      unflattenIx _ [] _ = pure []
-      unflattenIx base (x:xs) i = do
-        dimIx <- dPrimVE base $ i `quot` x
-        (dimIx:) <$> unflattenIx base xs (i - (dimIx * x))
 
   case lvl of
     SegThread {} -> do
