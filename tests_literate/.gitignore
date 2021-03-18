@@ -1,0 +1,5 @@
+/*
+/*/
+!*.fut
+!/expected/
+!.gitignore
