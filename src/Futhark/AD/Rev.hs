@@ -883,12 +883,12 @@ diffSOAC (Pattern [] [pe]) _ (Screma w form [as]) m
     m
     -- reverse trace is really simple:
     pe_bar <- lookupAdj $ patElemName pe
-    as_bar <- letTupExp (baseString as ++ "_ctrb") =<<
+    res_if <- letTupExp (baseString as ++ "_ctrb") =<<
                 eIf (toExp $ mind_eq_min1 mm_ind)
-                    ( resultBodyM [Constant (blankPrimValue ptp)] )
-                    ( resultBodyM [Var pe_bar] )
-    --as_bar_slc <- letExp (baseString as ++ "_ctrb_slc") $ BasicOp $ ArrayLit (map Var a_bar) eltp
-    void $ updateAdjointSlice [DimFix $ Var mm_ind] as $ head as_bar
+                    ( resultBodyM [Constant (blankPrimValue ptp), intConst Int64 0] )
+                    ( resultBodyM [Var pe_bar, Var mm_ind] )
+    let [as_bar, mm_ind_bds] = res_if
+    void $ updateAdjointSlice [DimFix $ Var mm_ind_bds] as as_bar
     where
       p_int64 = IntType Int64
       min_idx_pexp i1 i2 = BinOpExp (SMin Int64) (LeafExp i1 p_int64) (LeafExp i2 p_int64)
@@ -896,7 +896,6 @@ diffSOAC (Pattern [] [pe]) _ (Screma w form [as]) m
         let [leaf_acc, leaf_arg] = map (`LeafExp` ptp) [facc, farg]
         in  ( CmpOpExp (CmpEq ptp) leaf_acc leaf_arg
             , CmpOpExp (CmpEq ptp) leaf_acc $ BinOpExp bop leaf_acc leaf_arg )
-      -- mind_eq_min1 :: SubExp -> PrimExp SubExp
       mind_eq_min1 ind = CmpOpExp (CmpEq (IntType Int64)) (LeafExp ind p_int64)
                                         (ValueExp (IntValue $ Int64Value (-1)))
 --
