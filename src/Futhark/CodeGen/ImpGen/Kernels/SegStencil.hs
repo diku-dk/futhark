@@ -184,7 +184,7 @@ compileBigTileFlat pat lvl space op kbody = do
              --readSet_iters <- forM readSetIters (dPrimV "readSet_iters")
 
              sLoopNest (Shape $ map (Var . tvVar) readSet_iters) $ \ix_list -> do
-               tile_locals <- mapM (dPrimVE "tile_local_") $ zipWith (*) ix_list group_sizes
+               tile_locals <- mapM (dPrimVE "tile_local_") $ zipWith (+) local_ids $ zipWith (*) ix_list group_sizes
                tile_read_gids <- mapM (dPrimVE "tile_read_gid_") $ bound_idxs $ zipWith (+) readSet_offsets tile_locals
                --tile_read_flat <- dPrimVE "tile_read_flat" $ flattenIndex dims tile_read_gids
                sWhen (foldl1 (.&&.) (zipWith (.<.) tile_locals shared_sizes)) $
