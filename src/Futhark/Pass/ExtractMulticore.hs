@@ -29,7 +29,7 @@ import Futhark.Pass.ExtractKernels.ToKernels (injectSOACS)
 import Futhark.Tools
 import qualified Futhark.Transform.FirstOrderTransform as FOT
 import Futhark.Transform.Rename (Rename, renameSomething)
-import Futhark.Util (chunks, takeLast)
+import Futhark.Util (takeLast)
 import Futhark.Util.Log
 
 newtype ExtractM a = ExtractM (ReaderT (Scope MC) (State VNameSource) a)
@@ -325,15 +325,10 @@ transformSOAC pat _ (Scatter w lam ivs dests) = do
 
   Body () kstms res <- mapLambdaToBody transformBody gtid lam ivs
 
-  let (dests_ws, dests_ns, dests_vs) = unzip3 dests
-      indexes = zipWith (*) dests_ns $ map length dests_ws
-      (i_res, v_res) = splitAt (sum indexes) res
-      rets = takeLast (length dests) $ lambdaReturnType lam
+  let rets = takeLast (length dests) $ lambdaReturnType lam
       kres = do
         (a_w, a, is_vs) <-
-          zip (chunks (concat $ zipWith (\ws n -> replicate n $ length ws) dests_ws dests_ns) i_res) v_res
-            & chunks dests_ns
-            & zip3 dests_ws dests_vs
+          groupScatterResults dests res
         return $ WriteReturns a_w a [(map DimFix is, v) | (is, v) <- is_vs]
       kbody = KernelBody () kstms kres
   return $

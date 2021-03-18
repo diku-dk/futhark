@@ -20,6 +20,14 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * `zip` now produces unique arrays (#1271).
 
+  * `futhark literate` no longer chokes on lines beginning with `--`
+    without a following whitespace.
+
+  * `futhark literate`: `:loadimg` was broken due to overzealous
+    type checking (#1276).
+
+  * `futhark literate`: `:loadimg` now handles relative paths properly.
+
 ## [0.19.2]
 
 ### Added

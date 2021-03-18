@@ -182,7 +182,6 @@ import Futhark.Pass.ExtractKernels.ToKernels
 import Futhark.Tools
 import qualified Futhark.Transform.FirstOrderTransform as FOT
 import Futhark.Transform.Rename
-import Futhark.Util
 import Futhark.Util.Log
 import Prelude hiding (log)
 
@@ -575,15 +574,11 @@ transformStm path (Let pat _ (Op (Stream w Sequential fold_fun nes arrs))) = do
 transformStm _ (Let pat (StmAux cs _ _) (Op (Scatter w lam ivs as))) = runBinder_ $ do
   let lam' = soacsLambdaToKernels lam
   write_i <- newVName "write_i"
-  let (as_ws, as_ns, as_vs) = unzip3 as
-      indexes = zipWith (*) as_ns $ map length as_ws
-      (i_res, v_res) = splitAt (sum indexes) $ bodyResult $ lambdaBody lam'
+  let (as_ws, _, _) = unzip3 as
       kstms = bodyStms $ lambdaBody lam'
       krets = do
         (a_w, a, is_vs) <-
-          zip (chunks (concat $ zipWith (\ws n -> replicate n $ length ws) as_ws as_ns) i_res) v_res
-            & chunks as_ns
-            & zip3 as_ws as_vs
+          groupScatterResults as $ bodyResult $ lambdaBody lam'
         return $ WriteReturns a_w a [(map DimFix is, v) | (is, v) <- is_vs]
       body = KernelBody () kstms krets
       inputs = do
