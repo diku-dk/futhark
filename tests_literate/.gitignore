@@ -3,3 +3,4 @@
 !*.fut
 !/expected/
 !.gitignore
+!test.sh
