@@ -365,9 +365,8 @@ transformStm path (Let pat aux (If c tb fb rt)) = do
   return $ oneStm $ Let pat aux $ If c tb' fb' rt
 transformStm path (Let pat aux (WithAcc shape arrs lam op)) =
   oneStm . Let pat aux
-    <$> ( WithAcc shape arrs
-            <$> transformLambda path lam
-            <*> traverse (bitraverse (transformLambda path) pure) op
+    <$> ( WithAcc shape arrs (soacsLambdaToKernels lam)
+            <$> traverse (bitraverse (transformLambda path) pure) op
         )
 transformStm path (Let pat aux (DoLoop ctx val form body)) =
   localScope
