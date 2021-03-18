@@ -85,7 +85,13 @@ pElemType :: Parser ElemType
 pElemType =
   choice
     [ ElemPrim <$> pPrimType,
-      undefined -- keyword "acc" $> ElemAcc <*> pVNames
+      "acc"
+        *> parens
+          ( ElemAcc
+              <$> pVName <* pComma
+              <*> pShape <* pComma
+              <*> pTypes
+          )
     ]
 
 pNonArray :: Parser (TypeBase shape u)
@@ -865,7 +871,13 @@ pMemInfo pd pu pret =
       pt <- pPrimType
       MemArray pt shape u <$> (lexeme "@" *> pret)
     pAcc shape =
-      undefined -- keyword "acc" $> MemAcc <*> pVNames <*> pure shape
+      keyword "acc"
+        *> parens
+          ( MemAcc <$> pVName <* pComma
+              <*> pShape <* pComma
+              <*> pTypes
+              <*> pure shape
+          )
 
 pSpace :: Parser Space
 pSpace =

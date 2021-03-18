@@ -17,9 +17,8 @@ module Futhark.Pass.ExtractKernels.Interchange
   )
 where
 
-import Control.Monad.RWS.Strict
+import Control.Monad.Identity
 import Data.List (find)
-import qualified Data.Map as M
 import Data.Maybe
 import Futhark.IR.SOACS
 import Futhark.MonadFreshNames
@@ -190,37 +189,85 @@ interchangeWithAcc1 ::
   LoopNesting ->
   m WithAccStm
 interchangeWithAcc1
-  (WithAccStm perm _withacc_pat shape acc_arrs lam op)
-  (MapNesting pat aux w params_and_arrs) = do
-    undefined {-
-                  acc_arrs' <- mapM onArr acc_arrs
-                  lam_params <- mapM (onParam acc_arrs') (lambdaParams lam)
-                  let lam_ret =
-                        map paramType lam_params
-                          ++ drop (length lam_params) (map rowType (patternTypes pat))
-                  lam' <- renameLambda <=< mkLambda lam_params lam_ret $ do
-                    let (params, arrs) = unzip params_and_arrs
-                        maplam_ret = lambdaReturnType lam
-                        maplam = Lambda params (lambdaBody lam) maplam_ret
-                    (accs_vs, other_vs) <-
-                      fmap (splitAt num_accs) . auxing aux . letTupExp "withacc_inter" $
-                        Op $ Screma w (mapSOAC maplam) arrs
-                    accs_vs' <- fmap concat $
-                      forM accs_vs $ \acc ->
-                        letTupExp "acc_joined" $ BasicOp $ JoinAcc acc acc_arrs
-                    pure $ map Var $ accs_vs' ++ other_vs
-                  let pat' = Pattern [] $ rearrangeShape perm $ patternValueElements pat
-                      perm' = [0 .. patternSize pat -1]
-                  pure $
-                    WithAccStm perm' pat' (Shape [w] <> shape) acc_arrs' lam' op
-                  where
-                    num_accs = 1
-                    onArr v =
-                      pure . maybe v snd $
-                        find ((== v) . paramName . fst) params_and_arrs
-                    onParam acc_arrs' (Param pv _) =
-                      pure $ Param pv $ Acc acc_arrs'
-              -}
+  (WithAccStm perm _withacc_pat shape acc_arrs acc_lam op)
+  (MapNesting map_pat map_aux w params_and_arrs) = do
+    acc_arrs' <- mapM onArr acc_arrs
+    let lam_params = lambdaParams acc_lam
+        lam_ret =
+          map paramType (drop num_accs lam_params)
+            ++ drop num_accs (map rowType (patternTypes map_pat))
+    iota_p <- newParam "iota_p" $ Prim int64
+    acc_lam' <- trLam (Var (paramName iota_p)) <=< mkLambda lam_params lam_ret $ do
+      iota_w <-
+        letExp "acc_inter_iota" . BasicOp $
+          Iota w (intConst Int64 0) (intConst Int64 1) Int64
+      let (params, arrs) = unzip params_and_arrs
+          maplam_ret = lambdaReturnType acc_lam
+          maplam = Lambda (iota_p : params) (lambdaBody acc_lam) maplam_ret
+      (accs_vs, other_vs) <-
+        fmap (splitAt num_accs) . auxing map_aux . letTupExp "withacc_inter" $
+          Op $ Screma w (mapSOAC maplam) (iota_w : arrs)
+      accs_vs' <- fmap concat $
+        forM accs_vs $ \acc ->
+          letTupExp "acc_joined" $ BasicOp $ JoinAcc acc
+      pure $ map Var $ accs_vs' ++ other_vs
+    let pat = Pattern [] $ rearrangeShape perm $ patternValueElements map_pat
+        perm' = [0 .. patternSize pat -1]
+    pure $
+      WithAccStm perm' pat (Shape [w] <> shape) acc_arrs' acc_lam' op
+    where
+      num_accs = 1
+      acc_certs = map paramName $ take num_accs $ lambdaParams acc_lam
+      onArr v =
+        pure . maybe v snd $
+          find ((== v) . paramName . fst) params_and_arrs
+
+      trType :: TypeBase shape u -> TypeBase shape u
+      trType (Acc acc ispace ts)
+        | acc `elem` acc_certs =
+          Acc acc (Shape [w] <> ispace) ts
+      trType (Array (ElemAcc acc ispace ts) s u)
+        | acc `elem` acc_certs =
+          Array (ElemAcc acc (Shape [w] <> ispace) ts) s u
+      trType t = t
+
+      trParam :: Param (TypeBase shape u) -> Param (TypeBase shape u)
+      trParam = fmap trType
+
+      trLam i (Lambda params body ret) =
+        localScope (scopeOfLParams params) $
+          Lambda (map trParam params) <$> trBody i body <*> pure (map trType ret)
+
+      trBody i (Body dec stms res) =
+        inScopeOf stms $ Body dec <$> traverse (trStm i) stms <*> pure res
+
+      trStm i (Let pat aux e) =
+        Let (fmap trType pat) aux <$> trExp i e
+
+      trSOAC i = mapSOACM mapper
+        where
+          mapper =
+            identitySOACMapper {mapOnSOACLambda = trLam i}
+
+      trExp i (BasicOp (UpdateAcc acc is ses)) = do
+        acc_t <- lookupType acc
+        pure $ case acc_t of
+          Acc cert _ _
+            | cert `elem` acc_certs ->
+              BasicOp $ UpdateAcc acc (i : is) ses
+          _ ->
+            BasicOp $ UpdateAcc acc (i : is) ses
+      trExp i e = mapExpM mapper e
+        where
+          mapper =
+            identityMapper
+              { mapOnBody = \scope -> localScope scope . trBody i,
+                mapOnRetType = pure . trType,
+                mapOnBranchType = pure . trType,
+                mapOnFParam = pure . trParam,
+                mapOnLParam = pure . trParam,
+                mapOnOp = trSOAC i
+              }
 
 interchangeWithAcc ::
   (MonadFreshNames m, HasScope SOACS m) =>

@@ -67,12 +67,7 @@ instance Pretty Space where
 instance Pretty ElemType where
   ppr (ElemPrim et) = ppr et
   ppr (ElemAcc acc ispace ts) =
-    text "acc"
-      <> apply
-        [ ppr acc,
-          brackets $ commasep $ map ppr ispace,
-          ppTuple' ts
-        ]
+    text "acc" <> apply [ppr acc, ppr ispace, ppTuple' ts]
 
 instance Pretty u => Pretty (TypeBase Shape u) where
   ppr (Prim t) = ppr $ ElemPrim t
@@ -291,7 +286,7 @@ instance PrettyLore lore => Pretty (Exp lore) where
         ( ppr shape <> comma <+> ppTuple' arrs <> comma </> ppr lam
             <> case op of
               Nothing -> mempty
-              Just (op', nes) -> comma </> ppTuple' [ppr op', ppTuple' $ map ppr nes]
+              Just (op', nes) -> comma </> apply [ppr op', ppTuple' $ map ppr nes]
         )
 
 instance PrettyLore lore => Pretty (Lambda lore) where

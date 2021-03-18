@@ -54,6 +54,7 @@ import Control.Monad.Identity hiding (mapM_)
 import Control.Monad.State.Strict
 import Control.Monad.Writer hiding (mapM_)
 import Data.Bifunctor (first)
+import Data.Bitraversable
 import Data.List
   ( elemIndex,
     foldl',
@@ -775,10 +776,20 @@ mapOnSegOpType ::
   Type ->
   m Type
 mapOnSegOpType _tv t@Prim {} = pure t
-mapOnSegOpType _tv t@Acc {} = pure t
-mapOnSegOpType tv (Array pt shape u) = Array pt <$> f shape <*> pure u
+mapOnSegOpType tv (Acc acc ispace ts) =
+  Acc
+    <$> mapOnSegOpVName tv acc
+    <*> traverse (mapOnSegOpSubExp tv) ispace
+    <*> traverse (bitraverse (traverse (mapOnSegOpSubExp tv)) pure) ts
+mapOnSegOpType tv (Array et shape u) =
+  Array <$> onElemType et <*> traverse (mapOnSegOpSubExp tv) shape <*> pure u
   where
-    f (Shape dims) = Shape <$> mapM (mapOnSegOpSubExp tv) dims
+    onElemType (ElemPrim pt) = pure $ ElemPrim pt
+    onElemType (ElemAcc acc ispace ts) =
+      ElemAcc
+        <$> mapOnSegOpVName tv acc
+        <*> traverse (mapOnSegOpSubExp tv) ispace
+        <*> traverse (bitraverse (traverse (mapOnSegOpSubExp tv)) pure) ts
 mapOnSegOpType _tv (Mem s) = pure $ Mem s
 
 instance

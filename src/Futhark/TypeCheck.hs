@@ -533,8 +533,8 @@ checkAccIdent ::
 checkAccIdent v = do
   t <- lookupType v
   case t of
-    Acc _ ispace ts -> do
-      pure (Shape $ sliceDims ispace, ts)
+    Acc _ ispace ts ->
+      pure (ispace, ts)
     _ ->
       bad $
         TypeError $
@@ -1102,16 +1102,11 @@ checkExp (WithAcc shape arrs lam op) = do
         ++ show num_accs
         ++ " accumulators."
 
-  let ispace =
-        [ DimSlice (intConst Int64 0) d (intConst Int64 1)
-          | d <- shapeDims shape
-        ]
-
   let cert_params = take num_accs $ lambdaParams lam
 
   checkLambda lam $
     replicate num_accs (Prim Cert, mempty)
-      ++ [(Acc (paramName p) ispace elem_ts, mempty) | p <- cert_params]
+      ++ [(Acc (paramName p) shape elem_ts, mempty) | p <- cert_params]
   where
     num_accs = 1
 checkExp (Op op) = do

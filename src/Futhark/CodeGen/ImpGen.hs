@@ -220,7 +220,7 @@ data VarEntry lore
   = ArrayVar (Maybe (Exp lore)) ArrayEntry
   | ScalarVar (Maybe (Exp lore)) ScalarEntry
   | MemVar (Maybe (Exp lore)) MemEntry
-  | AccVar (Maybe (Exp lore)) (VName, Slice SubExp, [Type], Shape)
+  | AccVar (Maybe (Exp lore)) (VName, Shape, [Type], Shape)
   deriving (Show)
 
 -- | When compiling an expression, this is a description of where the
@@ -1282,7 +1282,7 @@ lookupAcc name = do
       acc' <- gets $ M.lookup acc . stateAccs
       case acc' of
         Just (arrs, op) ->
-          return (arrs, map toInt64Exp (sliceDims ispace), op)
+          return (arrs, map toInt64Exp (shapeDims ispace), op)
         Nothing ->
           error $ "ImpGen.lookupAcc: unlisted accumulator: " ++ pretty name
     _ -> error $ "ImpGen.lookupAcc: not an accumulator: " ++ pretty name

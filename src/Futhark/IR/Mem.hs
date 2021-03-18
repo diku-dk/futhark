@@ -263,7 +263,7 @@ data MemInfo d u ret
     -- They are a fiction for the benefit of code generation; a mere
     -- handle to the underlying arrays which is what are really
     -- updated by 'UpdateAcc'.
-    MemAcc VName (Slice SubExp) [Type] (ShapeBase d)
+    MemAcc VName Shape [Type] (ShapeBase d)
   deriving (Eq, Show, Ord) --- XXX Ord?
 
 type MemBound u = MemInfo SubExp u MemBind
@@ -1027,7 +1027,7 @@ extReturns ets =
 
 data ArrayVar
   = ArrayVar PrimType Shape VName (IxFun.IxFun (TPrimExp Int64 VName))
-  | ArrayAccVar VName (Slice SubExp) [Type] Shape
+  | ArrayAccVar VName Shape [Type] Shape
 
 arrayVarReturns ::
   (HasScope lore m, Monad m, Mem lore) =>

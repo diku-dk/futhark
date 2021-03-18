@@ -241,7 +241,7 @@ walkOnType :: Monad m => Walker lore m -> Type -> m ()
 walkOnType _ Prim {} = return ()
 walkOnType tv (Acc acc ispace ts) = do
   walkOnVName tv acc
-  mapM_ (traverse_ (walkOnSubExp tv)) ispace
+  traverse_ (walkOnSubExp tv) ispace
   mapM_ (walkOnType tv) ts
 walkOnType _ Mem {} = return ()
 walkOnType tv (Array _ shape _) = walkOnShape tv shape

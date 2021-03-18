@@ -146,9 +146,7 @@ internaliseTypeM orig_t =
         baseString (E.typeLeaf tn) == "acc" -> do
         ts <- map (fromDecl . onAccType) <$> internaliseTypeM arr_t
         acc_param <- liftInternaliseM $ newVName "acc_cert"
-        let ispace =
-              [DimSlice (I.intConst Int64 0) (arraysSize 0 ts) (I.intConst Int64 1)]
-        let acc_t = Acc acc_param ispace $ map rowType ts
+        let acc_t = Acc acc_param (Shape [arraysSize 0 ts]) $ map rowType ts
         return [acc_t]
     E.Scalar E.TypeVar {} ->
       error "internaliseTypeM: cannot handle type variable."

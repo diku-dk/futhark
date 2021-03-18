@@ -202,10 +202,10 @@ instance Monoid NoUniqueness where
 data ElemType
   = -- | Accumulator.  The 'VName' is the name of the original
     -- 'WithAcc' parameter and uniquely identifies the accumulator.
-    -- The 'Slice' indicates the index space of updates.  The 'Type'
+    -- The 'Shape' indicates the index space of updates.  The 'Type'
     -- list denotes the value that can be passed to update the
     -- accumulator.
-    ElemAcc VName (Slice SubExp) [Type]
+    ElemAcc VName Shape [Type]
   | ElemPrim PrimType
   deriving (Show, Eq, Ord)
 
@@ -214,7 +214,7 @@ data ElemType
 data TypeBase shape u
   = Prim PrimType
   | -- | See 'ElemAcc'.
-    Acc VName (Slice SubExp) [Type]
+    Acc VName Shape [Type]
   | Array ElemType shape u
   | Mem Space
   deriving (Show, Eq, Ord)

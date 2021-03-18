@@ -325,7 +325,7 @@ mapOnExtType ::
 mapOnExtType _ (Prim bt) =
   return $ Prim bt
 mapOnExtType f (Acc acc ispace ts) =
-  Acc <$> f' acc <*> mapM (traverse f) ispace <*> mapM (mapOnType f) ts
+  Acc <$> f' acc <*> traverse f ispace <*> mapM (mapOnType f) ts
   where
     f' v = do
       x <- f $ Var v
@@ -347,7 +347,7 @@ mapOnType ::
   m (TypeBase Shape u)
 mapOnType _ (Prim bt) = return $ Prim bt
 mapOnType f (Acc acc ispace ts) =
-  Acc <$> f' acc <*> mapM (traverse f) ispace <*> mapM (mapOnType f) ts
+  Acc <$> f' acc <*> traverse f ispace <*> mapM (mapOnType f) ts
   where
     f' v = do
       x <- f $ Var v
@@ -368,7 +368,7 @@ mapOnElemType ::
 mapOnElemType _ (ElemPrim t) =
   pure $ ElemPrim t
 mapOnElemType f (ElemAcc acc ispace ts) =
-  ElemAcc <$> f' acc <*> mapM (traverse f) ispace <*> mapM (mapOnType f) ts
+  ElemAcc <$> f' acc <*> traverse f ispace <*> mapM (mapOnType f) ts
   where
     f' v = do
       x <- f $ Var v
