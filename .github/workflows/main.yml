@@ -376,6 +376,9 @@ jobs:
         cd tests_pkg && sh test.sh
 
     - run: |
+        cd tests_literate && sh test.sh
+
+    - run: |
         futhark doc -o prelude-docs prelude
         tar -Jcf prelude-docs.tar.xz prelude-docs
 
