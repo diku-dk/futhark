@@ -121,12 +121,22 @@ isSpecOpLam isOp lam =
       if (r == Var (patElemName pe)) && ( (x == Var a && y == Var b) || (x == Var b && y == Var a) )
       then isOp op else Nothing
     isRedStm _ _ _ = Nothing
-isAddLam :: Lambda -> Maybe BinOp
-isAddLam lam = isSpecOpLam isAddOp lam
-  where 
+isAddTowLam :: Lambda -> Maybe BinOp
+isAddTowLam lam = isSpecOpLam isAddOp $ filterMapOp lam
+  where
     isAddOp bop@(Add _ _) = Just bop
     isAddOp bop@(FAdd  _) = Just bop
     isAddOp _             = Nothing
+    filterMapOp (Lambda [pa1, pa2] lam_body _)
+      | [r] <- bodyResult lam_body,
+        [map_stm] <- stmsToList (bodyStms lam_body),
+        (Let pat _ (Op scrm)) <- map_stm,
+        (Pattern [] [pe]) <- pat,
+        (Screma _ (ScremaForm [] [] map_lam) [a1,a2]) <- scrm,
+        (a1 == paramName pa1 && a2 == paramName pa2) || (a1 == paramName pa2 && a2 == paramName pa1),
+        r == Var (patElemName pe) = filterMapOp map_lam
+    filterMapOp other_lam = other_lam
+
 isMulLam :: Lambda -> Maybe BinOp
 isMulLam lam = isSpecOpLam isMulOp lam
   where
@@ -739,7 +749,7 @@ diffSOAC :: Pattern -> StmAux () -> SOAC SOACS -> ADM () -> ADM ()
 diffSOAC pat@(Pattern [] [pe]) aux soac@(Screma _ form [as]) m
   | Just [red] <- isReduceSOAC form,
     lam <- redLambda red,
-    Just _ <- isAddLam lam = do
+    Just _ <- isAddTowLam lam = do
     addStm $ Let pat aux $ Op soac
     m
     pe_adj <- lookupAdj $ patElemName pe
@@ -846,8 +856,9 @@ diffSOAC (Pattern [] [pe]) _ (Screma w form [as]) m
 --                ) (ne_min, -1)
 --    let m = m_tmp
 -- Reverse trace:
---    ctrb = if m_ind == -1 then 0 else m_bar
---    as_bar[m_ind] += ctrb
+--    num_elems = i64.bool not (m_ind == -1)
+--    m_bar_repl = replicate num_elems m_bar
+--    as_bar[m_ind:num_elems:1] += m_bar_repl
 diffSOAC (Pattern [] [pe]) _ (Screma w form [as]) m
   | Just [red] <- isReduceSOAC form,
     lam <- redLambda  red,
@@ -881,14 +892,14 @@ diffSOAC (Pattern [] [pe]) _ (Screma w form [as]) m
     let [mm_tmp, mm_ind] = fwd_nms
     addStm (mkLet [] [Ident (patElemName pe) eltp] $ BasicOp $ SubExp $ Var $ mm_tmp)
     m
-    -- reverse trace is really simple:
+    -- reverse trace is really simple, but we need to take care of the
+    --   empty-array case => we create a possibly empty slice to update.
     pe_bar <- lookupAdj $ patElemName pe
-    res_if <- letTupExp (baseString as ++ "_ctrb") =<<
-                eIf (toExp $ mind_eq_min1 mm_ind)
-                    ( resultBodyM [Constant (blankPrimValue ptp), intConst Int64 0] )
-                    ( resultBodyM [Var pe_bar, Var mm_ind] )
-    let [as_bar, mm_ind_bds] = res_if
-    void $ updateAdjointSlice [DimFix $ Var mm_ind_bds] as as_bar
+    num_elems <- letExp "num_elems" =<< toExp (ConvOpExp (BToI Int64) $ UnOpExp Not $ mind_eq_min1 mm_ind)
+    pe_bar_repl <- letExp (baseString pe_bar ++ "_repl") $
+                      BasicOp $ Replicate (Shape [Var num_elems]) $ Var pe_bar
+    let as_slice = [ DimSlice (Var mm_ind) (Var num_elems) (intConst Int64 1) ]
+    void $ updateAdjointSlice as_slice as pe_bar_repl
     where
       p_int64 = IntType Int64
       min_idx_pexp i1 i2 = BinOpExp (SMin Int64) (LeafExp i1 p_int64) (LeafExp i2 p_int64)
