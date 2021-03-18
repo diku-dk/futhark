@@ -228,7 +228,7 @@ jobs:
 
     - run: |
         futhark test -c --backend=c tests examples --no-tuning
-        make -C libtests/c -j
+        make -C tests_lib/c -j
 
   test-multicore:
     runs-on: ubuntu-20.04
@@ -249,7 +249,7 @@ jobs:
 
     - run: |
         futhark test -c --backend=multicore tests examples --no-tuning
-        make -C libtests/c FUTHARK_BACKEND=multicore
+        make -C tests_lib/c FUTHARK_BACKEND=multicore
 
   test-python:
     runs-on: ubuntu-20.04
@@ -397,7 +397,7 @@ jobs:
         tools/testparser.sh tests
 
     - run: |
-        cd pkgtests && sh test.sh
+        cd tests_pkg && sh test.sh
 
     - run: |
         futhark doc -o prelude-docs prelude
