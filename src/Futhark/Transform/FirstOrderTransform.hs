@@ -20,7 +20,6 @@ where
 
 import Control.Monad.Except
 import Control.Monad.State
-import Data.Function ((&))
 import Data.List (zip4)
 import qualified Data.Map.Strict as M
 import qualified Futhark.IR as AST
@@ -257,9 +256,7 @@ transformSOAC pat (Scatter len lam ivs as) = do
 
   let (as_ws, as_ns, as_vs) = unzip3 as
   ts <- mapM lookupType as_vs
-  asOuts <- mapM (newIdent "write_out") ts
-
-  let ivsLen = zipWith (*) as_ns $ map length as_ws
+  asOuts <- mapM (newIdent "write_outasdf") ts
 
   -- Scatter is in-place, so we use the input array as the output array.
   let merge = loopMerge asOuts $ map Var as_vs
@@ -274,17 +271,13 @@ transformSOAC pat (Scatter len lam ivs as) = do
           letSubExp "write_iv" $ BasicOp $ Index iv $ fullSlice iv_t [DimFix $ Var iter]
         ivs'' <- bindLambda lam (map (BasicOp . SubExp) ivs')
 
-        let indexes =
-              take (sum ivsLen) ivs''
-                & chunks (concat $ zipWith (\ws n -> replicate n (length ws)) as_ws as_ns)
-                & chunks as_ns
-            values = chunks as_ns $ drop (sum ivsLen) ivs''
+        let indexes = groupScatterResults (zip3 as_ws as_ns $ map identName asOuts) ivs''
 
-        ress <- forM (zip3 indexes values (map identName asOuts)) $ \(indexes', values', arr) -> do
+        ress <- forM indexes $ \(_, arr, indexes') -> do
           let saveInArray arr' (indexCur, valueCur) =
-                letExp "write_out" =<< eWriteArray arr' (map eSubExp indexCur) (eSubExp valueCur)
+                letExp "write_outbals" =<< eWriteArray arr' (map eSubExp indexCur) (eSubExp valueCur)
 
-          foldM saveInArray arr $ zip indexes' values'
+          foldM saveInArray arr indexes'
         return $ resultBody (map Var ress)
   letBind pat $ DoLoop [] merge (ForLoop iter Int64 len []) loopBody
 transformSOAC pat (Hist len ops bucket_fun imgs) = do

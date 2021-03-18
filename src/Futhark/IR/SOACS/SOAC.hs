@@ -39,6 +39,7 @@ module Futhark.IR.SOACS.SOAC
     isMapSOAC,
     ppScrema,
     ppHist,
+    groupScatterResults,
 
     -- * Generic traversal
     SOACMapper (..),
@@ -51,6 +52,7 @@ import Control.Category
 import Control.Monad.Identity
 import Control.Monad.State.Strict
 import Control.Monad.Writer
+import Data.Function ((&))
 import Data.List (intersperse)
 import qualified Data.Map.Strict as M
 import Data.Maybe
@@ -314,6 +316,32 @@ isMapSOAC (ScremaForm scans reds map_lam) = do
   guard $ null scans
   guard $ null reds
   return map_lam
+
+-- | @groupResult <output specification> <result>@
+--
+-- Groups the index values and result values of <result> according to the
+-- <output specification>.
+--
+-- This function is used for extracting and grouping the results of a
+-- scatter. In the SOAC representation, the lambda inside a 'Scatter' returns
+-- all indices and values as one big list. This function groups each value with
+-- its corresponding indices (as determined by the 'Shape' of the output array).
+--
+-- The elements of the resulting list correspond to the shape and name of the
+-- output parameters, in addition to a list of values written to that output
+-- parameter, along with the array indices marking where to write them to.
+--
+-- See 'Scatter' for more information.
+groupScatterResults :: [(Shape, Int, array)] -> [SubExp] -> [(Shape, array, [([SubExp], SubExp)])]
+groupScatterResults output_spec result =
+  let (shapes, ns, arrays) = unzip3 output_spec
+      num_indices = sum $ zipWith (*) ns $ map length shapes
+      (indices, values) = splitAt num_indices result
+      chunk_sizes =
+        concat $ zipWith (\shp n -> replicate n $ length shp) shapes ns
+   in zip (chunks chunk_sizes indices) values
+        & chunks ns
+        & zip3 shapes arrays
 
 -- | Like 'Mapper', but just for 'SOAC's.
 data SOACMapper flore tlore m = SOACMapper
