@@ -134,20 +134,20 @@ EXAMPLES
 The following program benchmarks how quickly we can sum arrays of
 different sizes::
 
-  -- How quickly can we reduce arrays?
-  --
-  -- ==
-  -- nobench input { 0 }
-  -- output { 0 }
-  -- input { 100 }
-  -- output { 4950 }
-  -- compiled input { 100000 }
-  -- output { 704982704 }
-  -- compiled input { 100000000 }
-  -- output { 887459712 }
-
-  let main(n: i32): i32 =
-    reduce (+) 0 (iota n)
+ -- How quickly can we reduce arrays?
+ --
+ -- ==
+ -- nobench input { 0i64 }
+ -- output { 0i64 }
+ -- input { 100i64 }
+ -- output { 4950i64 }
+ -- compiled input { 10000i64 }
+ -- output { 49995000i64 }
+ -- compiled input { 1000000i64 }
+ -- output { 499999500000i64 }
+ 
+ let main(n: i64): i64 =
+   reduce (+) 0 (iota n)
 
 SEE ALSO
 ========

@@ -1,5 +1,4 @@
 {-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE Safe #-}
 
 -- | This module implements facilities for determining whether a
 -- reduction or fold can be expressed in a closed form (i.e. not as a
@@ -8,10 +7,9 @@
 -- Right now, the module can detect only trivial cases.  In the
 -- future, we would like to make it more powerful, as well as possibly
 -- also being able to analyse sequential loops.
-module Futhark.Optimise.Simplify.ClosedForm
+module Futhark.Optimise.Simplify.Rules.ClosedForm
   ( foldClosedForm,
     loopClosedForm,
-    VarLookup,
   )
 where
 
@@ -21,10 +19,8 @@ import Data.Maybe
 import Futhark.Construct
 import Futhark.IR
 import Futhark.Optimise.Simplify.Rule
+import Futhark.Optimise.Simplify.Rules.Simple (VarLookup)
 import Futhark.Transform.Rename
-
--- | A function that, given a variable name, returns its definition.
-type VarLookup lore = VName -> Maybe (Exp lore, Certificates)
 
 {-
 Motivation:

@@ -1,5 +1,4 @@
 {-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE Safe #-}
 {-# LANGUAGE TypeFamilies #-}
 
 -- | A simple representation with SOACs and nested parallelism.

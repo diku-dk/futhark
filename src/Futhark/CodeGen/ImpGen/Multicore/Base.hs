@@ -1,6 +1,5 @@
 module Futhark.CodeGen.ImpGen.Multicore.Base
-  ( compileKBody,
-    extractAllocations,
+  ( extractAllocations,
     compileThreadResult,
     HostEnv (..),
     AtomicBinOp,
@@ -95,15 +94,6 @@ renameSegBinOp segbinops =
     lam' <- renameLambda lam
     return $ SegBinOp comm lam' ne shape
 
-compileKBody ::
-  KernelBody MCMem ->
-  ([(SubExp, [Imp.Exp])] -> ImpM MCMem () Imp.Multicore ()) ->
-  ImpM MCMem () Imp.Multicore ()
-compileKBody kbody red_cont =
-  compileStms (freeIn $ kernelBodyResult kbody) (kernelBodyStms kbody) $ do
-    let red_res = kernelBodyResult kbody
-    red_cont $ zip (map kernelResultSubExp red_res) $ repeat []
-
 compileThreadResult ::
   SegSpace ->
   PatElem MCMem ->
@@ -118,6 +108,8 @@ compileThreadResult _ _ WriteReturns {} =
   compilerBugS "compileThreadResult: WriteReturns unhandled."
 compileThreadResult _ _ TileReturns {} =
   compilerBugS "compileThreadResult: TileReturns unhandled."
+compileThreadResult _ _ RegTileReturns {} =
+  compilerBugS "compileThreadResult: RegTileReturns unhandled."
 
 freeVariables :: Imp.Code -> [VName] -> [VName]
 freeVariables code names =
@@ -170,8 +162,8 @@ decideScheduling code =
     else Imp.Dynamic
 
 -- | Try to extract invariant allocations.  If we assume that the
--- given 'Code' is the body of a 'SegOp', then it is always safe to
--- move the immediate allocations to the prebody.
+-- given 'Imp.Code' is the body of a 'SegOp', then it is always safe
+-- to move the immediate allocations to the prebody.
 extractAllocations :: Imp.Code -> (Imp.Code, Imp.Code)
 extractAllocations segop_code = f segop_code
   where

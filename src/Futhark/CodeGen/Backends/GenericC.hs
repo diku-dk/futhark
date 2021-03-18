@@ -12,6 +12,7 @@ module Futhark.CodeGen.Backends.GenericC
     CParts (..),
     asLibrary,
     asExecutable,
+    asServer,
 
     -- * Pluggable compiler
     Operations (..),
@@ -58,6 +59,7 @@ module Futhark.CodeGen.Backends.GenericC
     publicDef,
     publicDef_,
     profileReport,
+    onClear,
     HeaderSection (..),
     libDecl,
     earlyDecl,
@@ -86,8 +88,9 @@ import Data.FileEmbed
 import Data.Loc
 import qualified Data.Map.Strict as M
 import Data.Maybe
-import Futhark.CodeGen.Backends.GenericC.CLI
+import Futhark.CodeGen.Backends.GenericC.CLI (cliDefs)
 import Futhark.CodeGen.Backends.GenericC.Options
+import Futhark.CodeGen.Backends.GenericC.Server (serverDefs)
 import Futhark.CodeGen.Backends.SimpleRep
 import Futhark.CodeGen.ImpCode
 import Futhark.IR.Prop (isBuiltInFunction)
@@ -106,6 +109,7 @@ data CompilerState s = CompilerState
     compLibDecls :: DL.DList C.Definition,
     compCtxFields :: DL.DList (C.Id, C.Type, Maybe C.Exp),
     compProfileItems :: DL.DList C.BlockItem,
+    compClearItems :: DL.DList C.BlockItem,
     compDeclaredMem :: [(VName, Space)]
   }
 
@@ -122,6 +126,7 @@ newCompilerState src s =
       compLibDecls = mempty,
       compCtxFields = mempty,
       compProfileItems = mempty,
+      compClearItems = mempty,
       compDeclaredMem = mempty
     }
 
@@ -486,6 +491,10 @@ profileReport :: C.BlockItem -> CompilerM op s ()
 profileReport x = modify $ \s ->
   s {compProfileItems = compProfileItems s <> DL.singleton x}
 
+onClear :: C.BlockItem -> CompilerM op s ()
+onClear x = modify $ \s ->
+  s {compClearItems = compClearItems s <> DL.singleton x}
+
 stm :: C.Stm -> CompilerM op s ()
 stm s = item [C.citem|$stm:s|]
 
@@ -604,7 +613,7 @@ defineMemorySpace space = do
   if (block->references != NULL) {
     *(block->references) -= 1;
     if (ctx->detail_memory) {
-      fprintf(stderr, "Unreferencing block %s (allocated as %s) in %s: %d references remaining.\n",
+      fprintf(ctx->log, "Unreferencing block %s (allocated as %s) in %s: %d references remaining.\n",
                       desc, block->desc, $string:spacedesc, *(block->references));
     }
     if (*(block->references) == 0) {
@@ -612,7 +621,7 @@ defineMemorySpace space = do
       $items:free
       free(block->references);
       if (ctx->detail_memory) {
-        fprintf(stderr, "%lld bytes freed (now allocated: %lld bytes)\n",
+        fprintf(ctx->log, "%lld bytes freed (now allocated: %lld bytes)\n",
                 (long long) block->size, (long long) ctx->$id:usagename);
       }
     }
@@ -635,7 +644,7 @@ defineMemorySpace space = do
 
   ctx->$id:usagename += size;
   if (ctx->detail_memory) {
-    fprintf(stderr, "Allocating %lld bytes for %s in %s (then allocated: %lld bytes)",
+    fprintf(ctx->log, "Allocating %lld bytes for %s in %s (then allocated: %lld bytes)",
             (long long) size,
             desc, $string:spacedesc,
             (long long) ctx->$id:usagename);
@@ -643,10 +652,10 @@ defineMemorySpace space = do
   if (ctx->$id:usagename > ctx->$id:peakname) {
     ctx->$id:peakname = ctx->$id:usagename;
     if (ctx->detail_memory) {
-      fprintf(stderr, " (new peak).\n");
+      fprintf(ctx->log, " (new peak).\n");
     }
   } else if (ctx->detail_memory) {
-    fprintf(stderr, ".\n");
+    fprintf(ctx->log, ".\n");
   }
 
   $items:alloc
@@ -669,6 +678,8 @@ defineMemorySpace space = do
   return ret;
 }
 |]
+
+  onClear [C.citem|ctx->$id:peakname = 0;|]
 
   let peakmsg = "Peak memory usage for " ++ spacedesc ++ ": %lld bytes.\n"
   return
@@ -1304,9 +1315,9 @@ onEntryPoint get_consts fname (Function _ outputs inputs _ results args) = do
       let ty' = primTypeToCType ty
       decl [C.cdecl|$ty:ty' $id:name;|]
 
--- | The result of compilation to C is four parts, which can be put
--- together in various ways.  The obvious way is to concatenate all of
--- them, which yields a CLI program.  Another is to compile the
+-- | The result of compilation to C is multiple parts, which can be
+-- put together in various ways.  The obvious way is to concatenate
+-- all of them, which yields a CLI program.  Another is to compile the
 -- library part by itself, and use the header file to call into it.
 data CParts = CParts
   { cHeader :: String,
@@ -1314,8 +1325,20 @@ data CParts = CParts
     -- to both CLI and library parts.
     cUtils :: String,
     cCLI :: String,
+    cServer :: String,
     cLib :: String
   }
+
+gnuSource :: String
+gnuSource =
+  pretty
+    [C.cunit|
+// We need to define _GNU_SOURCE before
+// _any_ headers files are imported to get
+// the usage statistics of a thread (i.e. have RUSAGE_THREAD) on GNU/Linux
+// https://manpages.courier-mta.org/htmlman2/getrusage.2.html
+$esc:("#define _GNU_SOURCE")
+|]
 
 -- We may generate variables that are never used (e.g. for
 -- certificates) or functions that are never called (e.g. unused
@@ -1345,12 +1368,18 @@ $esc:("#endif")
 asLibrary :: CParts -> (String, String)
 asLibrary parts =
   ( "#pragma once\n\n" <> cHeader parts,
-    disableWarnings <> cHeader parts <> cUtils parts <> cLib parts
+    gnuSource <> disableWarnings <> cHeader parts <> cUtils parts <> cLib parts
   )
 
 -- | As executable with command-line interface.
 asExecutable :: CParts -> String
-asExecutable (CParts a b c d) = disableWarnings <> a <> b <> c <> d
+asExecutable parts =
+  gnuSource <> disableWarnings <> cHeader parts <> cUtils parts <> cCLI parts <> cLib parts
+
+-- | As server executable.
+asServer :: CParts -> String
+asServer parts =
+  gnuSource <> disableWarnings <> cHeader parts <> cUtils parts <> cServer parts <> cLib parts
 
 -- | Compile imperative program to a C program.  Always uses the
 -- function named "main" as entry point, so make sure it is defined.
@@ -1372,16 +1401,16 @@ compileProg backend ops extra header_extra spaces options prog = do
   let headerdefs =
         [C.cunit|
 $esc:("// Headers\n")
-/* We need to define _GNU_SOURCE before
-   _any_ headers files are imported to get
-   the usage statistics of a thread (i.e. have RUSAGE_THREAD) on GNU/Linux
-   https://manpages.courier-mta.org/htmlman2/getrusage.2.html */
-$esc:("#define _GNU_SOURCE")
 $esc:("#include <stdint.h>")
 $esc:("#include <stddef.h>")
 $esc:("#include <stdbool.h>")
+$esc:("#include <stdio.h>")
 $esc:("#include <float.h>")
 $esc:(header_extra)
+
+$esc:("#ifdef __cplusplus")
+$esc:("extern \"C\" {")
+$esc:("#endif")
 
 $esc:("\n// Initialisation\n")
 $edecls:(initDecls endstate)
@@ -1398,6 +1427,10 @@ $edecls:(entryDecls endstate)
 $esc:("\n// Miscellaneous\n")
 $edecls:(miscDecls endstate)
 $esc:("#define FUTHARK_BACKEND_"++backend)
+
+$esc:("#ifdef __cplusplus")
+$esc:("}")
+$esc:("#endif")
                            |]
 
   let utildefs =
@@ -1422,14 +1455,15 @@ $esc:timing_h
   let early_decls = DL.toList $ compEarlyDecls endstate
   let lib_decls = DL.toList $ compLibDecls endstate
   let clidefs = cliDefs options $ Functions entry_funs
+  let serverdefs = serverDefs options $ Functions entry_funs
   let libdefs =
         [C.cunit|
 $esc:("#ifdef _MSC_VER\n#define inline __inline\n#endif")
 $esc:("#include <string.h>")
-$esc:("#include <inttypes.h>")
-$esc:("#include <ctype.h>")
+$esc:("#include <string.h>")
 $esc:("#include <errno.h>")
 $esc:("#include <assert.h>")
+$esc:("#include <ctype.h>")
 
 $esc:header_extra
 
@@ -1452,7 +1486,14 @@ $edecls:(opaqueDefinitions endstate)
 $edecls:entry_point_decls
   |]
 
-  return $ CParts (pretty headerdefs) (pretty utildefs) (pretty clidefs) (pretty libdefs)
+  return $
+    CParts
+      { cHeader = pretty headerdefs,
+        cUtils = pretty utildefs,
+        cCLI = pretty clidefs,
+        cServer = pretty serverdefs,
+        cLib = pretty libdefs
+      }
   where
     Definitions consts (Functions funs) = prog
     entry_funs = filter (functionEntry . snd) funs
@@ -1497,7 +1538,29 @@ $edecls:entry_point_decls
 commonLibFuns :: [C.BlockItem] -> CompilerM op s ()
 commonLibFuns memreport = do
   ctx <- contextType
+  ops <- asks envOperations
   profilereport <- gets $ DL.toList . compProfileItems
+
+  publicDef_ "get_num_sizes" InitDecl $ \s ->
+    ( [C.cedecl|int $id:s(void);|],
+      [C.cedecl|int $id:s(void) {
+                return sizeof(size_names)/sizeof(size_names[0]);
+              }|]
+    )
+
+  publicDef_ "get_size_name" InitDecl $ \s ->
+    ( [C.cedecl|const char* $id:s(int);|],
+      [C.cedecl|const char* $id:s(int i) {
+                return size_names[i];
+              }|]
+    )
+
+  publicDef_ "get_size_class" InitDecl $ \s ->
+    ( [C.cedecl|const char* $id:s(int);|],
+      [C.cedecl|const char* $id:s(int i) {
+                return size_classes[i];
+              }|]
+    )
 
   publicDef_ "context_report" MiscDecl $ \s ->
     ( [C.cedecl|char* $id:s($ty:ctx *ctx);|],
@@ -1523,6 +1586,13 @@ commonLibFuns memreport = do
                        }|]
     )
 
+  publicDef_ "context_set_logging_file" MiscDecl $ \s ->
+    ( [C.cedecl|void $id:s($ty:ctx* ctx, typename FILE* f);|],
+      [C.cedecl|void $id:s($ty:ctx* ctx, typename FILE* f) {
+                  ctx->log = f;
+                }|]
+    )
+
   publicDef_ "context_pause_profiling" MiscDecl $ \s ->
     ( [C.cedecl|void $id:s($ty:ctx* ctx);|],
       [C.cedecl|void $id:s($ty:ctx* ctx) {
@@ -1535,6 +1605,15 @@ commonLibFuns memreport = do
       [C.cedecl|void $id:s($ty:ctx* ctx) {
                  ctx->profiling_paused = 0;
                }|]
+    )
+
+  clears <- gets $ DL.toList . compClearItems
+  publicDef_ "context_clear_caches" MiscDecl $ \s ->
+    ( [C.cedecl|int $id:s($ty:ctx* ctx);|],
+      [C.cedecl|int $id:s($ty:ctx* ctx) {
+                         $items:(criticalSection ops clears)
+                         return ctx->error != NULL;
+                       }|]
     )
 
 compileConstants :: Constants op -> CompilerM op s [C.BlockItem]
@@ -1794,6 +1873,12 @@ compilePrimExp f (UnOpExp SSignum {} x) = do
 compilePrimExp f (UnOpExp USignum {} x) = do
   x' <- compilePrimExp f x
   return [C.cexp|($exp:x' > 0) - ($exp:x' < 0) != 0|]
+compilePrimExp f (UnOpExp (FSignum Float32) x) = do
+  x' <- compilePrimExp f x
+  return [C.cexp|fsignum32($exp:x')|]
+compilePrimExp f (UnOpExp (FSignum Float64) x) = do
+  x' <- compilePrimExp f x
+  return [C.cexp|fsignum32($exp:x')|]
 compilePrimExp f (CmpOpExp cmp x y) = do
   x' <- compilePrimExp f x
   y' <- compilePrimExp f y
@@ -1849,7 +1934,7 @@ compileCode (DebugPrint s (Just e)) = do
   e' <- compileExp e
   stm
     [C.cstm|if (ctx->debugging) {
-          fprintf(stderr, $string:fmtstr, $exp:s, ($ty:ety)$exp:e', '\n');
+          fprintf(ctx->log, $string:fmtstr, $exp:s, ($ty:ety)$exp:e', '\n');
        }|]
   where
     (fmt, ety) = case primExpType e of
@@ -1860,7 +1945,7 @@ compileCode (DebugPrint s (Just e)) = do
 compileCode (DebugPrint s Nothing) =
   stm
     [C.cstm|if (ctx->debugging) {
-          fprintf(stderr, "%s\n", $exp:s);
+          fprintf(ctx->log, "%s\n", $exp:s);
        }|]
 compileCode c
   | Just (name, vol, t, e, c') <- declareAndSet c = do

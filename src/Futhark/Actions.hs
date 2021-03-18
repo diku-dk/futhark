@@ -4,6 +4,7 @@
 -- something with the result of the pipeline.
 module Futhark.Actions
   ( printAction,
+    printAliasesAction,
     impCodeGenAction,
     kernelImpCodeGenAction,
     multicoreImpCodeGenAction,
@@ -13,13 +14,11 @@ module Futhark.Actions
     compileCUDAAction,
     compileMPIAction,
     compileMulticoreAction,
-    sexpAction,
   )
 where
 
 import Control.Monad
 import Control.Monad.IO.Class
-import qualified Data.ByteString.Lazy.Char8 as ByteString
 import Data.Maybe (fromMaybe)
 import Futhark.Analysis.Alias
 import Futhark.Analysis.Metrics
@@ -38,14 +37,22 @@ import Futhark.IR.MCMem (MCMem)
 import Futhark.IR.Prop.Aliases
 import Futhark.IR.SeqMem (SeqMem)
 import Futhark.Util (runProgramWithExitCode, unixEnvironment)
-import Language.SexpGrammar as Sexp
 import System.Exit
 import System.FilePath
 import qualified System.Info
 
--- | Print the result to stdout, with alias annotations.
-printAction :: (ASTLore lore, CanBeAliased (Op lore)) => Action lore
+-- | Print the result to stdout.
+printAction :: ASTLore lore => Action lore
 printAction =
+  Action
+    { actionName = "Prettyprint",
+      actionDescription = "Prettyprint the resulting internal representation on standard output.",
+      actionProcedure = liftIO . putStrLn . pretty
+    }
+
+-- | Print the result to stdout, alias annotations.
+printAliasesAction :: (ASTLore lore, CanBeAliased (Op lore)) => Action lore
+printAliasesAction =
   Action
     { actionName = "Prettyprint",
       actionDescription = "Prettyprint the resulting internal representation on standard output.",
@@ -79,6 +86,7 @@ kernelImpCodeGenAction =
       actionProcedure = liftIO . putStrLn . pretty . snd <=< ImpGenKernels.compileProgOpenCL
     }
 
+-- | Convert the program to CPU multicore ImpCode and print it to stdout.
 multicoreImpCodeGenAction :: Action MCMem
 multicoreImpCodeGenAction =
   Action
@@ -86,28 +94,6 @@ multicoreImpCodeGenAction =
       actionDescription = "Translate program into imperative multicore IL and write it on standard output.",
       actionProcedure = liftIO . putStrLn . pretty . snd <=< ImpGenMulticore.compileProg
     }
-
--- | Print metrics about AST node counts to stdout.
-sexpAction :: ASTLore lore => Action lore
-sexpAction =
-  Action
-    { actionName = "Print sexps",
-      actionDescription = "Print sexps on the final IR.",
-      actionProcedure = liftIO . helper
-    }
-  where
-    helper :: ASTLore lore => Prog lore -> IO ()
-    helper prog =
-      case encodePretty prog of
-        Right prog' -> do
-          ByteString.putStrLn prog'
-          let prog'' = decode prog'
-          unless (prog'' == Right prog) $
-            error $
-              "S-exp not isomorph!\n"
-                ++ either show pretty prog''
-        Left s ->
-          error $ "Couldn't encode program: " ++ s
 
 cmdCC :: String
 cmdCC = fromMaybe "cc" $ lookup "CC" unixEnvironment
@@ -162,6 +148,9 @@ compileCAction fcfg mode outpath =
         ToExecutable -> do
           liftIO $ writeFile cpath $ SequentialC.asExecutable cprog
           runCC cpath outpath ["-O3", "-std=c99"] ["-lm"]
+        ToServer -> do
+          liftIO $ writeFile cpath $ SequentialC.asServer cprog
+          runCC cpath outpath ["-O3", "-std=c99"] ["-lm"]
 
 -- | The @futhark opencl@ action.
 compileOpenCLAction :: FutharkConfig -> CompilerMode -> FilePath -> Action KernelsMem
@@ -192,6 +181,9 @@ compileOpenCLAction fcfg mode outpath =
         ToExecutable -> do
           liftIO $ writeFile cpath $ COpenCL.asExecutable cprog
           runCC cpath outpath ["-O", "-std=c99"] ("-lm" : extra_options)
+        ToServer -> do
+          liftIO $ writeFile cpath $ COpenCL.asServer cprog
+          runCC cpath outpath ["-O", "-std=c99"] ("-lm" : extra_options)
 
 -- | The @futhark cuda@ action.
 compileCUDAAction :: FutharkConfig -> CompilerMode -> FilePath -> Action KernelsMem
@@ -219,6 +211,9 @@ compileCUDAAction fcfg mode outpath =
         ToExecutable -> do
           liftIO $ writeFile cpath $ CCUDA.asExecutable cprog
           runCC cpath outpath ["-O", "-std=c99"] ("-lm" : extra_options)
+        ToServer -> do
+          liftIO $ writeFile cpath $ CCUDA.asServer cprog
+          runCC cpath outpath ["-O", "-std=c99"] ("-lm" : extra_options)
 
 -- | The @futhark multicore@ action.
 compileMulticoreAction :: FutharkConfig -> CompilerMode -> FilePath -> Action MCMem
@@ -242,6 +237,9 @@ compileMulticoreAction fcfg mode outpath =
         ToExecutable -> do
           liftIO $ writeFile cpath $ MulticoreC.asExecutable cprog
           runCC cpath outpath ["-O", "-std=c99"] ["-lm", "-pthread"]
+        ToServer -> do
+          liftIO $ writeFile cpath $ MulticoreC.asServer cprog
+          runCC cpath outpath ["-O", "-std=c99"] ["-lm", "-pthread"]
 
 -- | The @futhark mpi@ action.
 compileMPIAction :: FutharkConfig -> CompilerMode -> FilePath -> Action MCMem
@@ -264,4 +262,7 @@ compileMPIAction fcfg mode outpath =
           liftIO $ writeFile cpath impl
         ToExecutable -> do
           liftIO $ writeFile cpath $ MPIC.asExecutable cprog
+        -- TODO, change with MPIC as Server
+        ToServer -> do
+          liftIO $ writeFile cpath $ MulticoreC.asServer cprog
           runCC cpath outpath ["-O", "-std=c99"] ["-lm", "-pthread"]

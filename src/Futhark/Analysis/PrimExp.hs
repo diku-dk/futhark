@@ -1,4 +1,4 @@
-{-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# OPTIONS_GHC -fno-warn-redundant-constraints #-}
 
@@ -61,15 +61,11 @@ import Control.Category
 import Control.Monad
 import qualified Data.Map as M
 import qualified Data.Set as S
-import qualified Data.Text as T
 import Data.Traversable
 import Futhark.IR.Primitive
 import Futhark.IR.Prop.Names
 import Futhark.Util.IntegralExp
 import Futhark.Util.Pretty
-import GHC.Generics (Generic)
-import Language.SexpGrammar as Sexp
-import Language.SexpGrammar.Generic
 import Prelude hiding (id, (.))
 
 -- | A primitive expression parametrised over the representation of
@@ -86,20 +82,7 @@ data PrimExp v
   | UnOpExp UnOp (PrimExp v)
   | ConvOpExp ConvOp (PrimExp v)
   | FunExp String [PrimExp v] PrimType
-  deriving (Eq, Ord, Show, Generic)
-
-instance SexpIso v => SexpIso (PrimExp v) where
-  sexpIso =
-    match $
-      With (. Sexp.list (Sexp.el (Sexp.sym "leaf") >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
-        With (. Sexp.list (Sexp.el (Sexp.sym "value") >>> Sexp.el sexpIso)) $
-          With (. Sexp.list (Sexp.el (Sexp.sym "bin-op") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
-            With (. Sexp.list (Sexp.el (Sexp.sym "cmp-op") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
-              With (. Sexp.list (Sexp.el (Sexp.sym "un-op") >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
-                With (. Sexp.list (Sexp.el (Sexp.sym "conv-op") >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
-                  With
-                    (. Sexp.list (Sexp.el (Sexp.sym "fun") >>> Sexp.el (iso T.unpack T.pack . sexpIso) >>> Sexp.el sexpIso >>> Sexp.el sexpIso))
-                    End
+  deriving (Eq, Ord, Show)
 
 instance Functor PrimExp where
   fmap = fmapDefault
@@ -130,10 +113,7 @@ instance FreeIn v => FreeIn (PrimExp v) where
 -- construction.  Does not guarantee that the underlying expression is
 -- actually type correct.
 newtype TPrimExp t v = TPrimExp {untyped :: PrimExp v}
-  deriving (Eq, Ord, Show, Generic)
-
-instance SexpIso v => SexpIso (TPrimExp t v) where
-  sexpIso = with $ \e -> sexpIso >>> e
+  deriving (Eq, Ord, Show)
 
 instance Functor (TPrimExp t) where
   fmap = fmapDefault
@@ -147,19 +127,19 @@ instance Traversable (TPrimExp t) where
 instance FreeIn v => FreeIn (TPrimExp t v) where
   freeIn' = freeIn' . untyped
 
--- | This expression is of type 'Int8'.
+-- | This expression is of type t'Int8'.
 isInt8 :: PrimExp v -> TPrimExp Int8 v
 isInt8 = TPrimExp
 
--- | This expression is of type 'Int16'.
+-- | This expression is of type t'Int16'.
 isInt16 :: PrimExp v -> TPrimExp Int16 v
 isInt16 = TPrimExp
 
--- | This expression is of type 'Int32'.
+-- | This expression is of type t'Int32'.
 isInt32 :: PrimExp v -> TPrimExp Int32 v
 isInt32 = TPrimExp
 
--- | This expression is of type 'Int64'.
+-- | This expression is of type t'Int64'.
 isInt64 :: PrimExp v -> TPrimExp Int64 v
 isInt64 = TPrimExp
 
@@ -167,11 +147,11 @@ isInt64 = TPrimExp
 isBool :: PrimExp v -> TPrimExp Bool v
 isBool = TPrimExp
 
--- | This expression is of type 'Float'.
+-- | This expression is of type t'Float'.
 isF32 :: PrimExp v -> TPrimExp Float v
 isF32 = TPrimExp
 
--- | This expression is of type 'Double'.
+-- | This expression is of type t'Double'.
 isF64 :: PrimExp v -> TPrimExp Double v
 isF64 = TPrimExp
 
@@ -240,27 +220,35 @@ class NumExp t where
   -- | Construct a typed expression from an integer.
   fromInteger' :: Integer -> TPrimExp t v
 
+  -- | Construct a numeric expression from a boolean expression.  This
+  -- can be used to encode arithmetic control flow.
+  fromBoolExp :: TPrimExp Bool v -> TPrimExp t v
+
 -- | The class of integer types that can be used for constructing
 -- 'TPrimExp's.
 class NumExp t => IntExp t
 
 instance NumExp Int8 where
   fromInteger' = isInt8 . ValueExp . IntValue . Int8Value . fromInteger
+  fromBoolExp = isInt8 . ConvOpExp (BToI Int8) . untyped
 
 instance IntExp Int8
 
 instance NumExp Int16 where
   fromInteger' = isInt16 . ValueExp . IntValue . Int16Value . fromInteger
+  fromBoolExp = isInt16 . ConvOpExp (BToI Int16) . untyped
 
 instance IntExp Int16
 
 instance NumExp Int32 where
   fromInteger' = isInt32 . ValueExp . IntValue . Int32Value . fromInteger
+  fromBoolExp = isInt32 . ConvOpExp (BToI Int32) . untyped
 
 instance IntExp Int32
 
 instance NumExp Int64 where
   fromInteger' = isInt64 . ValueExp . IntValue . Int64Value . fromInteger
+  fromBoolExp = isInt64 . ConvOpExp (BToI Int64) . untyped
 
 instance IntExp Int64
 
@@ -271,10 +259,12 @@ class NumExp t => FloatExp t where
   fromRational' :: Rational -> TPrimExp t v
 
 instance NumExp Float where
-  fromInteger' = TPrimExp . ValueExp . FloatValue . Float32Value . fromInteger
+  fromInteger' = isF32 . ValueExp . FloatValue . Float32Value . fromInteger
+  fromBoolExp = isF32 . ConvOpExp (SIToFP Int32 Float32) . ConvOpExp (BToI Int32) . untyped
 
 instance NumExp Double where
   fromInteger' = TPrimExp . ValueExp . FloatValue . Float64Value . fromInteger
+  fromBoolExp = isF64 . ConvOpExp (SIToFP Int32 Float64) . ConvOpExp (BToI Int32) . untyped
 
 instance FloatExp Float where
   fromRational' = TPrimExp . ValueExp . FloatValue . Float32Value . fromRational
@@ -327,6 +317,42 @@ instance (FloatExp t, Pretty v) => Fractional (TPrimExp t v) where
     | otherwise = numBad "/" (x, y)
 
   fromRational = fromRational'
+
+instance Pretty v => Floating (TPrimExp Float v) where
+  x ** y = isF32 $ BinOpExp (FPow Float32) (untyped x) (untyped y)
+  pi = isF32 $ ValueExp $ FloatValue $ Float32Value pi
+  exp x = isF32 $ FunExp "exp32" [untyped x] $ FloatType Float32
+  log x = isF32 $ FunExp "log32" [untyped x] $ FloatType Float32
+  sin x = isF32 $ FunExp "sin32" [untyped x] $ FloatType Float32
+  cos x = isF32 $ FunExp "cos32" [untyped x] $ FloatType Float32
+  tan x = isF32 $ FunExp "tan32" [untyped x] $ FloatType Float32
+  asin x = isF32 $ FunExp "asin32" [untyped x] $ FloatType Float32
+  acos x = isF32 $ FunExp "acos32" [untyped x] $ FloatType Float32
+  atan x = isF32 $ FunExp "atan32" [untyped x] $ FloatType Float32
+  sinh x = isF32 $ FunExp "sinh32" [untyped x] $ FloatType Float32
+  cosh x = isF32 $ FunExp "cosh32" [untyped x] $ FloatType Float32
+  tanh x = isF32 $ FunExp "tanh32" [untyped x] $ FloatType Float32
+  asinh x = isF32 $ FunExp "asinh32" [untyped x] $ FloatType Float32
+  acosh x = isF32 $ FunExp "acosh32" [untyped x] $ FloatType Float32
+  atanh x = isF32 $ FunExp "atanh32" [untyped x] $ FloatType Float32
+
+instance Pretty v => Floating (TPrimExp Double v) where
+  x ** y = isF64 $ BinOpExp (FPow Float64) (untyped x) (untyped y)
+  pi = isF64 $ ValueExp $ FloatValue $ Float64Value pi
+  exp x = isF64 $ FunExp "exp64" [untyped x] $ FloatType Float64
+  log x = isF64 $ FunExp "log64" [untyped x] $ FloatType Float64
+  sin x = isF64 $ FunExp "sin64" [untyped x] $ FloatType Float64
+  cos x = isF64 $ FunExp "cos64" [untyped x] $ FloatType Float64
+  tan x = isF64 $ FunExp "tan64" [untyped x] $ FloatType Float64
+  asin x = isF64 $ FunExp "asin64" [untyped x] $ FloatType Float64
+  acos x = isF64 $ FunExp "acos64" [untyped x] $ FloatType Float64
+  atan x = isF64 $ FunExp "atan64" [untyped x] $ FloatType Float64
+  sinh x = isF64 $ FunExp "sinh64" [untyped x] $ FloatType Float64
+  cosh x = isF64 $ FunExp "cosh64" [untyped x] $ FloatType Float64
+  tanh x = isF64 $ FunExp "tanh64" [untyped x] $ FloatType Float64
+  asinh x = isF64 $ FunExp "asinh64" [untyped x] $ FloatType Float64
+  acosh x = isF64 $ FunExp "acosh64" [untyped x] $ FloatType Float64
+  atanh x = isF64 $ FunExp "atanh64" [untyped x] $ FloatType Float64
 
 instance (IntExp t, Pretty v) => IntegralExp (TPrimExp t v) where
   TPrimExp x `div` TPrimExp y

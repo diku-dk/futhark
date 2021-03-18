@@ -1,7 +1,6 @@
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
-{-# LANGUAGE UndecidableInstances #-}
 
 module Futhark.Analysis.SymbolTable
   ( SymbolTable (bindings, loopDepth, availableAtClosestLoop, simplifyMemory),

@@ -554,8 +554,8 @@ A variable name; evaluates to its value in the current environment.
 `stringlit`
 ...........
 
-Evaluates to an array of type ``[]i32`` that contains the code points
-of the characters as integers.
+Evaluates to an array of type ``[]u8`` that contains the characters
+encoded as UTF-8.
 
 ``()``
 ......
@@ -611,7 +611,7 @@ former inclusive and the latter exclusive, taking every ``s``-th
 element.  The ``s`` parameter may not be zero.  If ``s`` is negative,
 it means to start at ``i`` and descend by steps of size ``s`` to ``j``
 (not inclusive).  Slicing can be done only with expressions of type
-``i32``.
+``i64``.
 
 It is generally a bad idea for ``s`` to be non-constant.
 Slicing of multiple dimensions can be done by separating with commas,
@@ -782,7 +782,7 @@ run-time.
 
 Due to ambiguities, this syntactic form cannot appear as an array
 index expression unless it is first enclosed in parentheses.  However,
-as an array index must always be of type ``i32``, there is never a
+as an array index must always be of type ``i64``, there is never a
 reason to put an explicit type ascription there.
 
 ``e :> t``
@@ -1033,6 +1033,9 @@ be used in the return type of a function::
 
 An application ``replicate 10 0`` will have type ``[10]i32``.
 
+Whenever we write a type ``[n]t``, ``n`` must already be a variable of
+type ``i64`` in scope (possibly by being bound as a size parameter).
+
 .. _unknown-sizes:
 
 Unknown sizes
@@ -1097,7 +1100,7 @@ expressions <slices>`.
 Complex ranges
 ..............
 
-Most complex ranges, such as ``a..<b``, will have an known size.
+Most complex ranges, such as ``a..<b``, will have an unknown size.
 Exceptions exist for :ref:`general ranges <range>` and :ref:`"upto"
 ranges <range_upto>`.
 

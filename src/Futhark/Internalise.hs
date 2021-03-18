@@ -1,6 +1,5 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE Safe #-}
 {-# LANGUAGE Strict #-}
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeFamilies #-}
@@ -28,6 +27,7 @@ import Futhark.Internalise.Monomorphise as Monomorphise
 import Futhark.Internalise.TypesValues
 import Futhark.Transform.Rename as I
 import Futhark.Util (splitAt3)
+import Futhark.Util.Pretty (prettyOneLine)
 import Language.Futhark as E hiding (TypeArg)
 import Language.Futhark.Semantic (Imports)
 
@@ -177,7 +177,7 @@ entryPoint params (eret, crets) =
       | otherwise =
         [I.TypeOpaque desc $ length ts]
       where
-        desc = maybe (pretty t') typeExpOpaqueName $ E.entryAscribed t
+        desc = maybe (prettyOneLine t') typeExpOpaqueName $ E.entryAscribed t
         t' = noSizes (E.entryType t) `E.setUniqueness` Nonunique
     typeExpOpaqueName (TEApply te TypeArgExpDim {} _) =
       typeExpOpaqueName te
@@ -187,7 +187,7 @@ entryPoint params (eret, crets) =
             ++ "_"
             ++ show (1 + d)
             ++ "d"
-    typeExpOpaqueName te = pretty te
+    typeExpOpaqueName te = prettyOneLine te
 
     withoutDims (TEArray te _ _) =
       let (d, te') = withoutDims te
@@ -493,7 +493,8 @@ internaliseExp desc e@E.Apply {} = do
       ()
         | Just internalise <- isOverloadedFunction qfname (map fst args) loc ->
           internalise desc
-        | Just (rettype, _) <- M.lookup fname I.builtInFunctions -> do
+        | baseTag (qualLeaf qfname) <= maxIntrinsicTag,
+          Just (rettype, _) <- M.lookup fname I.builtInFunctions -> do
           let tag ses = [(se, I.Observe) | se <- ses]
           args' <- reverse <$> mapM (internaliseArg arg_desc) (reverse args)
           let args'' = concatMap tag args'
@@ -860,6 +861,11 @@ generateCond orig_p orig_ses = do
       return ([], id_ses, rest_ses)
     compares (E.PatternParens pat _) ses =
       compares pat ses
+    -- XXX: treat empty tuples and records as bool.
+    compares (E.TuplePattern [] loc) ses =
+      compares (E.Wildcard (Info $ E.Scalar $ E.Prim E.Bool) loc) ses
+    compares (E.RecordPattern [] loc) ses =
+      compares (E.Wildcard (Info $ E.Scalar $ E.Prim E.Bool) loc) ses
     compares (E.TuplePattern pats _) ses =
       comparesMany pats ses
     compares (E.RecordPattern fs _) ses =
@@ -1167,8 +1173,8 @@ internaliseStreamMap desc o lam arr = do
   arrs <- internaliseExpToVars "stream_input" arr
   lam' <- internaliseStreamMapLambda internaliseLambda lam $ map I.Var arrs
   w <- arraysSize 0 <$> mapM lookupType arrs
-  let form = I.Parallel o Commutative (I.Lambda [] (mkBody mempty []) []) []
-  letTupExp' desc $ I.Op $ I.Stream w form lam' arrs
+  let form = I.Parallel o Commutative (I.Lambda [] (mkBody mempty []) [])
+  letTupExp' desc $ I.Op $ I.Stream w form lam' [] arrs
 
 internaliseStreamRed ::
   String ->
@@ -1231,7 +1237,7 @@ internaliseStreamRed desc o comm lam0 lam arr = do
               map (I.Var . paramName) lam_acc_params ++ lam_res'
         return $ resultBody new_lam_res
 
-  let form = I.Parallel o comm lam0' nes
+  let form = I.Parallel o comm lam0'
       lam' =
         I.Lambda
           { lambdaParams = lam_params',
@@ -1239,7 +1245,7 @@ internaliseStreamRed desc o comm lam0 lam arr = do
             lambdaReturnType = nes_ts
           }
   w <- arraysSize 0 <$> mapM lookupType arrs
-  letTupExp' desc $ I.Op $ I.Stream w form lam' arrs
+  letTupExp' desc $ I.Op $ I.Stream w form lam' nes arrs
 
 internaliseExp1 :: String -> E.Exp -> InternaliseM I.SubExp
 internaliseExp1 desc e = do
@@ -1641,7 +1647,9 @@ isOverloadedFunction qname args loc = do
     handleRest [x] "!" = Just $ complementF x
     handleRest [x] "opaque" = Just $ \desc ->
       mapM (letSubExp desc . BasicOp . Opaque) =<< internaliseExp "opaque_arg" x
-    handleRest [E.TupLit [a, si, v] _] "scatter" = Just $ scatterF a si v
+    handleRest [E.TupLit [a, si, v] _] "scatter" = Just $ scatterF 1 a si v
+    handleRest [E.TupLit [a, si, v] _] "scatter_2d" = Just $ scatterF 2 a si v
+    handleRest [E.TupLit [a, si, v] _] "scatter_3d" = Just $ scatterF 3 a si v
     handleRest [E.TupLit [n, m, arr] _] "unflatten" = Just $ \desc -> do
       arrs <- internaliseExpToVars "unflatten_arr" arr
       n' <- internaliseExp1 "n" n
@@ -1704,8 +1712,11 @@ isOverloadedFunction qname args loc = do
         r <- I.arrayRank <$> lookupType v
         return $ I.Rearrange ([1, 0] ++ [2 .. r -1]) v
     handleRest [TupLit [x, y] _] "zip" = Just $ \desc ->
-      (++) <$> internaliseExp (desc ++ "_zip_x") x
-        <*> internaliseExp (desc ++ "_zip_y") y
+      mapM (letSubExp "zip_copy" . BasicOp . Copy)
+        =<< ( (++)
+                <$> internaliseExpToVars (desc ++ "_zip_x") x
+                <*> internaliseExpToVars (desc ++ "_zip_y") y
+            )
     handleRest [x] "unzip" = Just $ flip internaliseExp x
     handleRest [x] "trace" = Just $ flip internaliseExp x
     handleRest [x] "break" = Just $ flip internaliseExp x
@@ -1758,13 +1769,12 @@ isOverloadedFunction qname args loc = do
         _ ->
           error "Futhark.Internalise.internaliseExp: non-int/bool type in Complement"
 
-    scatterF a si v desc = do
-      si' <- letExp "write_si" . BasicOp . SubExp =<< internaliseExp1 "write_arg_i" si
+    scatterF dim a si v desc = do
+      si' <- internaliseExpToVars "write_arg_i" si
       svs <- internaliseExpToVars "write_arg_v" v
       sas <- internaliseExpToVars "write_arg_a" a
 
-      si_shape <- I.arrayShape <$> lookupType si'
-      let si_w = shapeSize 0 si_shape
+      si_w <- I.arraysSize 0 <$> mapM lookupType si'
       sv_ts <- mapM lookupType svs
 
       svs' <- forM (zip svs sv_ts) $ \(sv, sv_t) -> do
@@ -1787,21 +1797,21 @@ isOverloadedFunction qname args loc = do
           letExp (baseString sv ++ "_write_sv") $
             I.BasicOp $ I.Reshape (reshapeOuter [DimCoercion si_w] 1 sv_shape) sv
 
-      indexType <- rowType <$> lookupType si'
-      indexName <- newVName "write_index"
+      indexType <- fmap rowType <$> mapM lookupType si'
+      indexName <- mapM (\_ -> newVName "write_index") indexType
       valueNames <- replicateM (length sv_ts) $ newVName "write_value"
 
       sa_ts <- mapM lookupType sas
-      let bodyTypes = replicate (length sv_ts) indexType ++ map rowType sa_ts
-          paramTypes = indexType : map rowType sv_ts
-          bodyNames = indexName : valueNames
+      let bodyTypes = concat (replicate (length sv_ts) indexType) ++ map (I.stripArray dim) sa_ts
+          paramTypes = indexType <> map rowType sv_ts
+          bodyNames = indexName <> valueNames
           bodyParams = zipWith I.Param bodyNames paramTypes
 
       -- This body is pretty boring right now, as every input is exactly the output.
       -- But it can get funky later on if fused with something else.
       body <- localScope (scopeOfLParams bodyParams) $
         insertStmsM $ do
-          let outs = replicate (length valueNames) indexName ++ valueNames
+          let outs = concat (replicate (length valueNames) indexName) ++ valueNames
           results <- forM outs $ \name ->
             letSubExp "write_res" $ I.BasicOp $ I.SubExp $ I.Var name
           ensureResultShape
@@ -1816,9 +1826,9 @@ isOverloadedFunction qname args loc = do
                 I.lambdaReturnType = bodyTypes,
                 I.lambdaBody = body
               }
-          sivs = si' : svs'
+          sivs = si' <> svs'
 
-      let sa_ws = map (arraySize 0) sa_ts
+      let sa_ws = map (Shape . take dim . arrayDims) sa_ts
       letTupExp' desc $ I.Op $ I.Scatter si_w lam sivs $ zip3 sa_ws (repeat 1) sas
 
 funcall ::
@@ -1984,7 +1994,7 @@ partitionWithSOACS k lam arrs = do
           w
           write_lam
           (classes : all_offsets ++ arrs)
-          $ zip3 (repeat w) (repeat 1) blanks
+          $ zip3 (repeat $ Shape [w]) (repeat 1) blanks
   sizes' <-
     letSubExp "partition_sizes" $
       I.BasicOp $

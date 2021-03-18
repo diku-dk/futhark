@@ -1,4 +1,3 @@
-{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeFamilies #-}
@@ -16,7 +15,6 @@ module Futhark.IR.MC.Op
   )
 where
 
-import Control.Category
 import Data.Bifunctor (first)
 import Futhark.Analysis.Metrics
 import qualified Futhark.Analysis.SymbolTable as ST
@@ -37,9 +35,6 @@ import Futhark.Util.Pretty
     (<+>),
     (</>),
   )
-import GHC.Generics (Generic)
-import Language.SexpGrammar as Sexp
-import Language.SexpGrammar.Generic
 import Prelude hiding (id, (.))
 
 -- | An operation for the multicore representation.  Feel free to
@@ -54,15 +49,7 @@ data MCOp lore op
       (SegOp () lore)
   | -- | Something else (in practice often a SOAC).
     OtherOp op
-  deriving (Eq, Ord, Show, Generic)
-
-instance (Decorations lore, SexpIso op) => SexpIso (MCOp lore op) where
-  sexpIso =
-    match $
-      With (. Sexp.list (Sexp.el sexpIso >>> Sexp.el sexpIso)) $
-        With
-          (. Sexp.list (Sexp.el sexpIso))
-          End
+  deriving (Eq, Ord, Show)
 
 instance (ASTLore lore, Substitute op) => Substitute (MCOp lore op) where
   substituteNames substs (ParOp par_op op) =
@@ -105,10 +92,10 @@ instance
   where
   type OpWithAliases (MCOp lore op) = MCOp (Aliases lore) (OpWithAliases op)
 
-  addOpAliases (ParOp par_op op) =
-    ParOp (addOpAliases <$> par_op) (addOpAliases op)
-  addOpAliases (OtherOp op) =
-    OtherOp $ addOpAliases op
+  addOpAliases aliases (ParOp par_op op) =
+    ParOp (addOpAliases aliases <$> par_op) (addOpAliases aliases op)
+  addOpAliases aliases (OtherOp op) =
+    OtherOp $ addOpAliases aliases op
 
   removeOpAliases (ParOp par_op op) =
     ParOp (removeOpAliases <$> par_op) (removeOpAliases op)

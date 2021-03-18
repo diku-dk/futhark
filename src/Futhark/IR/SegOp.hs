@@ -1,5 +1,4 @@
 {-# LANGUAGE ConstraintKinds #-}
-{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE OverloadedStrings #-}
@@ -96,24 +95,13 @@ import Futhark.Util.Pretty
     (</>),
   )
 import qualified Futhark.Util.Pretty as PP
-import GHC.Generics (Generic)
-import Language.SexpGrammar as Sexp
-import Language.SexpGrammar.Generic
 import Prelude hiding (id, (.))
 
 -- | How an array is split into chunks.
 data SplitOrdering
   = SplitContiguous
   | SplitStrided SubExp
-  deriving (Eq, Ord, Show, Generic)
-
-instance SexpIso SplitOrdering where
-  sexpIso =
-    match $
-      With (. Sexp.sym "contiguous") $
-        With
-          (. Sexp.list (Sexp.el (Sexp.sym "strided") >>> Sexp.el sexpIso))
-          End
+  deriving (Eq, Ord, Show)
 
 instance FreeIn SplitOrdering where
   freeIn' SplitContiguous = mempty
@@ -145,19 +133,7 @@ data HistOp lore = HistOp
     histShape :: Shape,
     histOp :: Lambda lore
   }
-  deriving (Eq, Ord, Show, Generic)
-
-instance Decorations lore => SexpIso (HistOp lore) where
-  sexpIso = with $ \histop ->
-    Sexp.list
-      ( Sexp.el sexpIso
-          >>> Sexp.el sexpIso
-          >>> Sexp.el sexpIso
-          >>> Sexp.el sexpIso
-          >>> Sexp.el sexpIso
-          >>> Sexp.el sexpIso
-      )
-      >>> histop
+  deriving (Eq, Ord, Show)
 
 -- | The type of a histogram produced by a 'HistOp'.  This can be
 -- different from the type of the 'histDest's in case we are
@@ -182,17 +158,7 @@ data SegBinOp lore = SegBinOp
     -- code.
     segBinOpShape :: Shape
   }
-  deriving (Eq, Ord, Show, Generic)
-
-instance Decorations lore => SexpIso (SegBinOp lore) where
-  sexpIso = with $ \segbinop ->
-    Sexp.list
-      ( Sexp.el sexpIso
-          >>> Sexp.el sexpIso
-          >>> Sexp.el sexpIso
-          >>> Sexp.el sexpIso
-      )
-      >>> segbinop
+  deriving (Eq, Ord, Show)
 
 -- | How many reduction results are produced by these 'SegBinOp's?
 segBinOpResults :: [SegBinOp lore] -> Int
@@ -209,16 +175,6 @@ data KernelBody lore = KernelBody
     kernelBodyStms :: Stms lore,
     kernelBodyResult :: [KernelResult]
   }
-  deriving (Generic)
-
-instance Decorations lore => SexpIso (KernelBody lore) where
-  sexpIso = with $ \kernelbody ->
-    Sexp.list
-      ( Sexp.el sexpIso
-          >>> Sexp.el sexpIso
-          >>> Sexp.el sexpIso
-      )
-      >>> kernelbody
 
 deriving instance Decorations lore => Ord (KernelBody lore)
 
@@ -240,16 +196,7 @@ data ResultManifest
     -- same physical thread later on, and can thus be
     -- kept in registers.
     ResultPrivate
-  deriving (Eq, Show, Ord, Generic)
-
-instance SexpIso ResultManifest where
-  sexpIso =
-    match $
-      With (. Sexp.sym "no-simplify") $
-        With (. Sexp.sym "may-simplify") $
-          With
-            (. Sexp.sym "private")
-            End
+  deriving (Eq, Show, Ord)
 
 -- | A 'KernelBody' does not return an ordinary 'Result'.  Instead, it
 -- returns a list of these.
@@ -259,7 +206,7 @@ data KernelResult
     -- result-per-group depends on where the 'SegOp' occurs.
     Returns ResultManifest SubExp
   | WriteReturns
-      [SubExp] -- Size of array.  Must match number of dims.
+      Shape -- Size of array.  Must match number of dims.
       VName -- Which array
       [(Slice SubExp, SubExp)]
   | -- Arbitrary number of index/value pairs.
@@ -273,17 +220,15 @@ data KernelResult
       VName -- Tile written by this worker.
       -- The TileReturns must not expect more than one
       -- result to be written per physical thread.
-  deriving (Eq, Show, Ord, Generic)
-
-instance SexpIso KernelResult where
-  sexpIso =
-    match $
-      With (. Sexp.list (Sexp.el (Sexp.sym "returns") >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
-        With (. Sexp.list (Sexp.el (Sexp.sym "write-returns") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
-          With (. Sexp.list (Sexp.el (Sexp.sym "concat-returns") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
-            With
-              (. Sexp.list (Sexp.el (Sexp.sym "tile-returns") >>> Sexp.el sexpIso >>> Sexp.el sexpIso))
-              End
+  | RegTileReturns
+      -- For each dim of result:
+      [ ( SubExp, -- size of this dim.
+          SubExp, -- block tile size for this dim.
+          SubExp -- reg tile size for this dim.
+        )
+      ]
+      VName -- Tile returned by this worker/group.
+  deriving (Eq, Show, Ord)
 
 -- | Get the root t'SubExp' corresponding values for a 'KernelResult'.
 kernelResultSubExp :: KernelResult -> SubExp
@@ -291,6 +236,7 @@ kernelResultSubExp (Returns _ se) = se
 kernelResultSubExp (WriteReturns _ arr _) = Var arr
 kernelResultSubExp (ConcatReturns _ _ _ v) = Var v
 kernelResultSubExp (TileReturns _ v) = Var v
+kernelResultSubExp (RegTileReturns _ v) = Var v
 
 instance FreeIn KernelResult where
   freeIn' (Returns _ what) = freeIn' what
@@ -299,6 +245,8 @@ instance FreeIn KernelResult where
     freeIn' o <> freeIn' w <> freeIn' per_thread_elems <> freeIn' v
   freeIn' (TileReturns dims v) =
     freeIn' dims <> freeIn' v
+  freeIn' (RegTileReturns dims_n_tiles v) =
+    freeIn' dims_n_tiles <> freeIn' v
 
 instance ASTLore lore => FreeIn (KernelBody lore) where
   freeIn' (KernelBody dec stms res) =
@@ -329,6 +277,10 @@ instance Substitute KernelResult where
       (substituteNames subst v)
   substituteNames subst (TileReturns dims v) =
     TileReturns (substituteNames subst dims) (substituteNames subst v)
+  substituteNames subst (RegTileReturns dims_n_tiles v) =
+    RegTileReturns
+      (substituteNames subst dims_n_tiles)
+      (substituteNames subst v)
 
 instance ASTLore lore => Rename (KernelBody lore) where
   rename (KernelBody dec stms res) = do
@@ -344,10 +296,11 @@ aliasAnalyseKernelBody ::
   ( ASTLore lore,
     CanBeAliased (Op lore)
   ) =>
+  AliasTable ->
   KernelBody lore ->
   KernelBody (Aliases lore)
-aliasAnalyseKernelBody (KernelBody dec stms res) =
-  let Body dec' stms' _ = Alias.analyseBody mempty $ Body dec stms []
+aliasAnalyseKernelBody aliases (KernelBody dec stms res) =
+  let Body dec' stms' _ = Alias.analyseBody aliases $ Body dec stms []
    in KernelBody dec' stms' res
 
 removeKernelBodyAliases ::
@@ -395,13 +348,13 @@ checkKernelBody ts (KernelBody (_, dec) stms kres) = do
   where
     checkKernelResult (Returns _ what) t =
       TC.require [t] what
-    checkKernelResult (WriteReturns rws arr res) t = do
-      mapM_ (TC.require [Prim int64]) rws
+    checkKernelResult (WriteReturns shape arr res) t = do
+      mapM_ (TC.require [Prim int64]) $ shapeDims shape
       arr_t <- lookupType arr
       forM_ res $ \(slice, e) -> do
         mapM_ (traverse $ TC.require [Prim int64]) slice
         TC.require [t] e
-        unless (arr_t == t `arrayOfShape` Shape rws) $
+        unless (arr_t == t `arrayOfShape` shape) $
           TC.bad $
             TC.TypeError $
               "WriteReturns returning "
@@ -409,7 +362,7 @@ checkKernelBody ts (KernelBody (_, dec) stms kres) = do
                 ++ " of type "
                 ++ pretty t
                 ++ ", shape="
-                ++ pretty rws
+                ++ pretty shape
                 ++ ", but destination array has type "
                 ++ pretty arr_t
       TC.consume =<< TC.lookupAliases arr
@@ -429,6 +382,22 @@ checkKernelBody ts (KernelBody (_, dec) stms kres) = do
       vt <- lookupType v
       unless (vt == t `arrayOfShape` Shape (map snd dims)) $
         TC.bad $ TC.TypeError $ "Invalid type for TileReturns " ++ pretty v
+    checkKernelResult (RegTileReturns dims_n_tiles arr) t = do
+      mapM_ (TC.require [Prim int64]) dims
+      mapM_ (TC.require [Prim int64]) blk_tiles
+      mapM_ (TC.require [Prim int64]) reg_tiles
+
+      -- assert that arr is of element type t and shape (rev outer_tiles ++ reg_tiles)
+      arr_t <- lookupType arr
+      unless (arr_t == expected) $
+        TC.bad . TC.TypeError $
+          "Invalid type for TileReturns. Expected:\n  "
+            ++ pretty expected
+            ++ ",\ngot:\n  "
+            ++ pretty arr_t
+      where
+        (dims, blk_tiles, reg_tiles) = unzip3 dims_n_tiles
+        expected = t `arrayOfShape` Shape (blk_tiles ++ reg_tiles)
 
 kernelBodyMetrics :: OpMetrics (Op lore) => KernelBody lore -> MetricsM ()
 kernelBodyMetrics = mapM_ stmMetrics . kernelBodyStms
@@ -445,24 +414,27 @@ instance Pretty KernelResult where
     text "returns (private)" <+> ppr what
   ppr (Returns ResultMaySimplify what) =
     text "returns" <+> ppr what
-  ppr (WriteReturns rws arr res) =
-    ppr arr <+> text "with" <+> PP.apply (map ppRes res)
+  ppr (WriteReturns shape arr res) =
+    ppr arr <+> PP.colon <+> ppr shape
+      </> text "with" <+> PP.apply (map ppRes res)
     where
-      ppRes (is, e) =
-        PP.brackets (PP.commasep $ zipWith f is rws) <+> text "<-" <+> ppr e
-      f i rw = ppr i <+> text "<" <+> ppr rw
-  ppr (ConcatReturns o w per_thread_elems v) =
-    text "concat" <> suff
+      ppRes (slice, e) =
+        PP.brackets (commasep (map ppr slice)) <+> text "=" <+> ppr e
+  ppr (ConcatReturns SplitContiguous w per_thread_elems v) =
+    text "concat"
       <> parens (commasep [ppr w, ppr per_thread_elems]) <+> ppr v
-    where
-      suff = case o of
-        SplitContiguous -> mempty
-        SplitStrided stride -> text "Strided" <> parens (ppr stride)
+  ppr (ConcatReturns (SplitStrided stride) w per_thread_elems v) =
+    text "concat_strided"
+      <> parens (commasep [ppr stride, ppr w, ppr per_thread_elems]) <+> ppr v
   ppr (TileReturns dims v) =
-    text "tile"
-      <> parens (commasep $ map onDim dims) <+> ppr v
+    "tile" <> parens (commasep $ map onDim dims) <+> ppr v
     where
-      onDim (dim, tile) = ppr dim <+> text "/" <+> ppr tile
+      onDim (dim, tile) = ppr dim <+> "/" <+> ppr tile
+  ppr (RegTileReturns dims_n_tiles v) =
+    "blkreg_tile" <> parens (commasep $ map onDim dims_n_tiles) <+> ppr v
+    where
+      onDim (dim, blk_tile, reg_tile) =
+        ppr dim <+> "/" <+> parens (ppr blk_tile <+> "*" <+> ppr reg_tile)
 
 -- | Do we need group-virtualisation when generating code for the
 -- segmented operation?  In most cases, we do, but for some simple
@@ -478,16 +450,7 @@ data SegVirt
     -- that all physical threads participate in the work.  This can
     -- save some checks in code generation.
     SegNoVirtFull
-  deriving (Eq, Ord, Show, Generic)
-
-instance SexpIso SegVirt where
-  sexpIso =
-    match $
-      With (. Sexp.sym "virt") $
-        With (. Sexp.sym "no-virt") $
-          With
-            (. Sexp.sym "no-virt-ful")
-            End
+  deriving (Eq, Ord, Show)
 
 -- | Index space of a 'SegOp'.
 data SegSpace = SegSpace
@@ -497,15 +460,7 @@ data SegSpace = SegSpace
     segFlat :: VName,
     unSegSpace :: [(VName, SubExp)]
   }
-  deriving (Eq, Ord, Show, Generic)
-
-instance SexpIso SegSpace where
-  sexpIso = with $ \segspace ->
-    Sexp.list
-      ( Sexp.el sexpIso
-          >>> Sexp.el sexpIso
-      )
-      >>> segspace
+  deriving (Eq, Ord, Show)
 
 -- | The sizes spanned by the indexes of the 'SegSpace'.
 segSpaceDims :: SegSpace -> [SubExp]
@@ -538,17 +493,7 @@ data SegOp lvl lore
     SegRed lvl SegSpace [SegBinOp lore] [Type] (KernelBody lore)
   | SegScan lvl SegSpace [SegBinOp lore] [Type] (KernelBody lore)
   | SegHist lvl SegSpace [HistOp lore] [Type] (KernelBody lore)
-  deriving (Eq, Ord, Show, Generic)
-
-instance (SexpIso lvl, Decorations lore) => SexpIso (SegOp lvl lore) where
-  sexpIso =
-    match $
-      With (. Sexp.list (Sexp.el (Sexp.sym "segmap") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
-        With (. Sexp.list (Sexp.el (Sexp.sym "segred") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
-          With (. Sexp.list (Sexp.el (Sexp.sym "segscan") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
-            With
-              (. Sexp.list (Sexp.el (Sexp.sym "seghist") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso))
-              End
+  deriving (Eq, Ord, Show)
 
 -- | The level of a 'SegOp'.
 segLevel :: SegOp lvl lore -> lvl
@@ -565,14 +510,16 @@ segSpace (SegScan _ lvl _ _ _) = lvl
 segSpace (SegHist _ lvl _ _ _) = lvl
 
 segResultShape :: SegSpace -> Type -> KernelResult -> Type
-segResultShape _ t (WriteReturns rws _ _) =
-  t `arrayOfShape` Shape rws
+segResultShape _ t (WriteReturns shape _ _) =
+  t `arrayOfShape` shape
 segResultShape space t (Returns _ _) =
   foldr (flip arrayOfRow) t $ segSpaceDims space
 segResultShape _ t (ConcatReturns _ w _ _) =
   t `arrayOfRow` w
 segResultShape _ t (TileReturns dims _) =
   t `arrayOfShape` Shape (map fst dims)
+segResultShape _ t (RegTileReturns dims_n_tiles _) =
+  t `arrayOfShape` Shape (map (\(dim, _, _) -> dim) dims_n_tiles)
 
 -- | The return type of a 'SegOp'.
 segOpType :: SegOp lvl lore -> [Type]
@@ -916,24 +863,23 @@ instance (PrettyLore lore, PP.Pretty lvl) => PP.Pretty (SegOp lvl lore) where
       <+> PP.nestedBlock "{" "}" (ppr body)
   ppr (SegRed lvl space reds ts body) =
     text "segred" <> ppr lvl
-      </> PP.parens (PP.braces (mconcat $ intersperse (PP.comma <> PP.line) $ map ppr reds))
       </> PP.align (ppr space)
-      <+> PP.colon
+      </> PP.parens (mconcat $ intersperse (PP.comma <> PP.line) $ map ppr reds)
+      </> PP.colon
       <+> ppTuple' ts
       <+> PP.nestedBlock "{" "}" (ppr body)
   ppr (SegScan lvl space scans ts body) =
     text "segscan" <> ppr lvl
-      </> PP.parens (PP.braces (mconcat $ intersperse (PP.comma <> PP.line) $ map ppr scans))
       </> PP.align (ppr space)
-      <+> PP.colon
+      </> PP.parens (mconcat $ intersperse (PP.comma <> PP.line) $ map ppr scans)
+      </> PP.colon
       <+> ppTuple' ts
       <+> PP.nestedBlock "{" "}" (ppr body)
   ppr (SegHist lvl space ops ts body) =
     text "seghist" <> ppr lvl
-      </> ppr lvl
-      </> PP.parens (PP.braces (mconcat $ intersperse (PP.comma <> PP.line) $ map ppOp ops))
       </> PP.align (ppr space)
-      <+> PP.colon
+      </> PP.parens (mconcat $ intersperse (PP.comma <> PP.line) $ map ppOp ops)
+      </> PP.colon
       <+> ppTuple' ts
       <+> PP.nestedBlock "{" "}" (ppr body)
     where
@@ -954,13 +900,13 @@ instance
   where
   type OpWithAliases (SegOp lvl lore) = SegOp lvl (Aliases lore)
 
-  addOpAliases = runIdentity . mapSegOpM alias
+  addOpAliases aliases = runIdentity . mapSegOpM alias
     where
       alias =
         SegOpMapper
           return
-          (return . Alias.analyseLambda)
-          (return . aliasAnalyseKernelBody)
+          (return . Alias.analyseLambda aliases)
+          (return . aliasAnalyseKernelBody aliases)
           return
           return
 
@@ -1066,6 +1012,10 @@ instance Engine.Simplifiable KernelResult where
       <*> Engine.simplify what
   simplify (TileReturns dims what) =
     TileReturns <$> Engine.simplify dims <*> Engine.simplify what
+  simplify (RegTileReturns dims_n_tiles what) =
+    RegTileReturns
+      <$> Engine.simplify dims_n_tiles
+      <*> Engine.simplify what
 
 mkWiseKernelBody ::
   (ASTLore lore, CanBeWise (Op lore)) =>
@@ -1464,10 +1414,10 @@ segOpReturns ::
   SegOp lvl lore ->
   m [ExpReturns]
 segOpReturns k@(SegMap _ _ _ kbody) =
-  kernelBodyReturns kbody =<< (extReturns <$> opType k)
+  kernelBodyReturns kbody . extReturns =<< opType k
 segOpReturns k@(SegRed _ _ _ _ kbody) =
-  kernelBodyReturns kbody =<< (extReturns <$> opType k)
+  kernelBodyReturns kbody . extReturns =<< opType k
 segOpReturns k@(SegScan _ _ _ _ kbody) =
-  kernelBodyReturns kbody =<< (extReturns <$> opType k)
+  kernelBodyReturns kbody . extReturns =<< opType k
 segOpReturns (SegHist _ _ ops _ _) =
   concat <$> mapM (mapM varReturns . histDest) ops

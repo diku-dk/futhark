@@ -12,6 +12,7 @@ module Futhark.CodeGen.Backends.SimpleRep
     signedPrimTypeToCType,
     arrayName,
     opaqueName,
+    externalValueType,
     cproduct,
     csum,
 
@@ -122,6 +123,16 @@ opaqueName s vds = "opaque_" ++ hash (zipWith xor [0 ..] $ map ord (s ++ concatM
               . fromIntegral
           )
     iter x = ((x :: Word32) `shiftR` 16) `xor` x
+
+-- | The type used to expose a Futhark value in the C API.  A pointer
+-- in the case of arrays and opaques.
+externalValueType :: ExternalValue -> C.Type
+externalValueType (OpaqueValue desc vds) =
+  [C.cty|struct $id:("futhark_" ++ opaqueName desc vds)*|]
+externalValueType (TransparentValue (ArrayValue _ _ pt signed shape)) =
+  [C.cty|struct $id:("futhark_" ++ arrayName pt signed (length shape))*|]
+externalValueType (TransparentValue (ScalarValue pt signed _)) =
+  signedPrimTypeToCType signed pt
 
 -- | Return an expression multiplying together the given expressions.
 -- If an empty list is given, the expression @1@ is returned.
@@ -669,6 +680,15 @@ cFloatConvOps :: [C.Definition]
 cFloat32Funs :: [C.Definition]
 cFloat32Funs =
   [C.cunit|
+    static inline typename bool $id:(funName' "isnan32")(float x) {
+      return isnan(x);
+    }
+
+    static inline typename bool $id:(funName' "isinf32")(float x) {
+      return isinf(x);
+    }
+
+$esc:("#ifdef __OPENCL_VERSION__")
     static inline float $id:(funName' "log32")(float x) {
       return log(x);
     }
@@ -749,33 +769,6 @@ cFloat32Funs =
       return lgamma(x);
     }
 
-    static inline typename bool $id:(funName' "isnan32")(float x) {
-      return isnan(x);
-    }
-
-    static inline typename bool $id:(funName' "isinf32")(float x) {
-      return isinf(x);
-    }
-
-    static inline typename int32_t $id:(funName' "to_bits32")(float x) {
-      union {
-        float f;
-        typename int32_t t;
-      } p;
-      p.f = x;
-      return p.t;
-    }
-
-    static inline float $id:(funName' "from_bits32")(typename int32_t x) {
-      union {
-        typename int32_t f;
-        float t;
-      } p;
-      p.f = x;
-      return p.t;
-    }
-
-$esc:("#ifdef __OPENCL_VERSION__")
     static inline float fmod32(float x, float y) {
       return fmod(x, y);
     }
@@ -798,6 +791,86 @@ $esc:("#ifdef __OPENCL_VERSION__")
       return fma(a,b,c);
     }
 $esc:("#else")
+    static inline float $id:(funName' "log32")(float x) {
+      return logf(x);
+    }
+
+    static inline float $id:(funName' "log2_32")(float x) {
+      return log2f(x);
+    }
+
+    static inline float $id:(funName' "log10_32")(float x) {
+      return log10f(x);
+    }
+
+    static inline float $id:(funName' "sqrt32")(float x) {
+      return sqrtf(x);
+    }
+
+    static inline float $id:(funName' "exp32")(float x) {
+      return expf(x);
+    }
+
+    static inline float $id:(funName' "cos32")(float x) {
+      return cosf(x);
+    }
+
+    static inline float $id:(funName' "sin32")(float x) {
+      return sinf(x);
+    }
+
+    static inline float $id:(funName' "tan32")(float x) {
+      return tanf(x);
+    }
+
+    static inline float $id:(funName' "acos32")(float x) {
+      return acosf(x);
+    }
+
+    static inline float $id:(funName' "asin32")(float x) {
+      return asinf(x);
+    }
+
+    static inline float $id:(funName' "atan32")(float x) {
+      return atanf(x);
+    }
+
+    static inline float $id:(funName' "cosh32")(float x) {
+      return coshf(x);
+    }
+
+    static inline float $id:(funName' "sinh32")(float x) {
+      return sinhf(x);
+    }
+
+    static inline float $id:(funName' "tanh32")(float x) {
+      return tanhf(x);
+    }
+
+    static inline float $id:(funName' "acosh32")(float x) {
+      return acoshf(x);
+    }
+
+    static inline float $id:(funName' "asinh32")(float x) {
+      return asinhf(x);
+    }
+
+    static inline float $id:(funName' "atanh32")(float x) {
+      return atanhf(x);
+    }
+
+    static inline float $id:(funName' "atan2_32")(float x, float y) {
+      return atan2f(x,y);
+    }
+
+    static inline float $id:(funName' "gamma32")(float x) {
+      return tgammaf(x);
+    }
+
+    static inline float $id:(funName' "lgamma32")(float x) {
+      return lgammaf(x);
+    }
+
     static inline float fmod32(float x, float y) {
       return fmodf(x, y);
     }
@@ -820,6 +893,27 @@ $esc:("#else")
       return fmaf(a,b,c);
     }
 $esc:("#endif")
+    static inline typename int32_t $id:(funName' "to_bits32")(float x) {
+      union {
+        float f;
+        typename int32_t t;
+      } p;
+      p.f = x;
+      return p.t;
+    }
+
+    static inline float $id:(funName' "from_bits32")(typename int32_t x) {
+      union {
+        typename int32_t f;
+        float t;
+      } p;
+      p.f = x;
+      return p.t;
+    }
+
+    static inline float fsignum32(float x) {
+      return $id:(funName' "isnan32")(x) ? x : ((x > 0) - (x < 0));
+    }
 |]
 
 cFloat64Funs :: [C.Definition]
@@ -949,6 +1043,10 @@ cFloat64Funs =
 
     static inline double fmod64(double x, double y) {
       return fmod(x, y);
+    }
+
+    static inline double fsignum64(double x) {
+      return $id:(funName' "isnan64")(x) ? x : ((x > 0) - (x < 0));
     }
 
 $esc:("#ifdef __OPENCL_VERSION__")

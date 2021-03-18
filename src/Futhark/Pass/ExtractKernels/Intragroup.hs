@@ -23,7 +23,6 @@ import Futhark.Pass.ExtractKernels.Distribution
 import Futhark.Pass.ExtractKernels.ToKernels
 import Futhark.Tools
 import qualified Futhark.Transform.FirstOrderTransform as FOT
-import Futhark.Util (chunks)
 import Futhark.Util.Log
 import Prelude hiding (log)
 
@@ -260,7 +259,7 @@ intraGroupStm lvl stm@(Let pat aux e) = do
       certifying (stmAuxCerts aux) $
         addStms =<< segHist lvl' pat w [] [] ops' bucket_fun' arrs
       parallelMin [w]
-    Op (Stream w (Sequential accs) lam arrs)
+    Op (Stream w Sequential lam accs arrs)
       | chunk_size_param : _ <- lambdaParams lam -> do
         types <- asksScope castScope
         ((), stream_bnds) <-
@@ -275,11 +274,11 @@ intraGroupStm lvl stm@(Let pat aux e) = do
       space <- mkSegSpace [(write_i, w)]
 
       let lam' = soacsLambdaToKernels lam
-          (dests_ws, dests_ns, dests_vs) = unzip3 dests
-          (i_res, v_res) = splitAt (sum dests_ns) $ bodyResult $ lambdaBody lam'
+          (dests_ws, _, _) = unzip3 dests
           krets = do
-            (a_w, a, is_vs) <- zip3 dests_ws dests_vs $ chunks dests_ns $ zip i_res v_res
-            return $ WriteReturns [a_w] a [([DimFix i], v) | (i, v) <- is_vs]
+            (a_w, a, is_vs) <-
+              groupScatterResults dests $ bodyResult $ lambdaBody lam'
+            return $ WriteReturns a_w a [(map DimFix is, v) | (is, v) <- is_vs]
           inputs = do
             (p, p_a) <- zip (lambdaParams lam') ivs
             return $ KernelInput (paramName p) (paramType p) p_a [Var write_i]
@@ -290,7 +289,7 @@ intraGroupStm lvl stm@(Let pat aux e) = do
           addStms $ bodyStms $ lambdaBody lam'
 
       certifying (stmAuxCerts aux) $ do
-        let ts = map rowType $ patternTypes pat
+        let ts = zipWith (stripArray . length) dests_ws $ patternTypes pat
             body = KernelBody () kstms krets
         letBind pat $ Op $ SegOp $ SegMap lvl' space ts body
 

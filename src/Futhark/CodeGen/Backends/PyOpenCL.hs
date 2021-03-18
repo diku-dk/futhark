@@ -1,6 +1,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TupleSections #-}
 
+-- | Code generation for Python with OpenCL.
 module Futhark.CodeGen.Backends.PyOpenCL
   ( compileProg,
   )
@@ -10,7 +11,6 @@ import Control.Monad
 import qualified Data.Map as M
 import qualified Futhark.CodeGen.Backends.GenericPython as Py
 import Futhark.CodeGen.Backends.GenericPython.AST
-import Futhark.CodeGen.Backends.GenericPython.Definitions
 import Futhark.CodeGen.Backends.GenericPython.Options
 import Futhark.CodeGen.Backends.PyOpenCL.Boilerplate
 import qualified Futhark.CodeGen.ImpCode.OpenCL as Imp
@@ -19,13 +19,14 @@ import Futhark.IR.KernelsMem (KernelsMem, Prog)
 import Futhark.MonadFreshNames
 import Futhark.Util (zEncodeString)
 
---maybe pass the config file rather than multiple arguments
+-- | Compile the program to Python with calls to OpenCL.
 compileProg ::
   MonadFreshNames m =>
-  Maybe String ->
+  Py.CompilerMode ->
+  String ->
   Prog KernelsMem ->
   m (ImpGen.Warnings, String)
-compileProg module_name prog = do
+compileProg mode class_name prog = do
   ( ws,
     Imp.Program
       opencl_code
@@ -57,11 +58,8 @@ compileProg module_name prog = do
           Assign (Var "default_group_size") None,
           Assign (Var "default_num_groups") None,
           Assign (Var "default_tile_size") None,
-          Assign (Var "fut_opencl_src") $ RawStringLiteral $ opencl_prelude ++ opencl_code,
-          Escape pyValues,
-          Escape pyFunctions,
-          Escape pyPanic,
-          Escape pyTuning
+          Assign (Var "default_reg_tile_size") None,
+          Assign (Var "fut_opencl_src") $ RawStringLiteral $ opencl_prelude ++ opencl_code
         ]
 
   let imports =
@@ -83,6 +81,7 @@ compileProg module_name prog = do
             "default_group_size=default_group_size",
             "default_num_groups=default_num_groups",
             "default_tile_size=default_tile_size",
+            "default_reg_tile_size=default_reg_tile_size",
             "default_threshold=default_threshold",
             "sizes=sizes"
           ]
@@ -131,6 +130,13 @@ compileProg module_name prog = do
                 [Assign (Var "default_tile_size") $ Var "optarg"]
             },
           Option
+            { optionLongName = "default-reg-tile-size",
+              optionShortName = Nothing,
+              optionArgument = RequiredArgument "int",
+              optionAction =
+                [Assign (Var "default_reg_tile_size") $ Var "optarg"]
+            },
+          Option
             { optionLongName = "size",
               optionShortName = Nothing,
               optionArgument = RequiredArgument "size_assignment",
@@ -152,7 +158,8 @@ compileProg module_name prog = do
 
   (ws,)
     <$> Py.compileProg
-      module_name
+      mode
+      class_name
       constructor
       imports
       defines

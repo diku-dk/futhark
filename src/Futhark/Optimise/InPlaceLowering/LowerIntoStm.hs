@@ -13,7 +13,7 @@ import Control.Monad
 import Control.Monad.Writer
 import Data.Either
 import Data.List (find, unzip4)
-import Data.Maybe (mapMaybe)
+import Data.Maybe (isNothing, mapMaybe)
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.Construct
 import Futhark.IR.Aliases
@@ -127,6 +127,14 @@ lowerUpdatesIntoSegMap scope pat updates kspace kbody = do
           find ((== v) . updateValue) updates = do
         Returns _ se <- Just ret
 
+        -- The slice we're writing per thread must fully cover the
+        -- underlying dimensions.
+        guard $
+          let (dims', slice') =
+                unzip . drop (length gtids) . filter (isNothing . dimFix . snd) $
+                  zip (arrayDims (typeOf bindee_dec)) slice
+           in isFullSlice (Shape dims') slice'
+
         Just $ do
           (slice', bodystms) <-
             flip runBinderT scope $
@@ -135,7 +143,7 @@ lowerUpdatesIntoSegMap scope pat updates kspace kbody = do
                   map (pe64 . Var) gtids
 
           let res_dims = arrayDims $ snd bindee_dec
-              ret' = WriteReturns res_dims src [(map DimFix slice', se)]
+              ret' = WriteReturns (Shape res_dims) src [(map DimFix slice', se)]
 
           return
             ( PatElem bindee_nm bindee_dec,
