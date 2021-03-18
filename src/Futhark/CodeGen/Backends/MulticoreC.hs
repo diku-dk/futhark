@@ -27,6 +27,7 @@ import Futhark.MonadFreshNames
 import qualified Language.C.Quote.OpenCL as C
 import qualified Language.C.Syntax as C
 
+-- | Compile the program to ImpCode with multicore operations.
 compileProg ::
   MonadFreshNames m =>
   Prog MCMem ->
@@ -188,6 +189,18 @@ compileProg =
                                  (void)ctx;
                                  return 0;
                                }|]
+        )
+
+      GC.earlyDecl [C.cedecl|static const char *size_names[0];|]
+      GC.earlyDecl [C.cedecl|static const char *size_vars[0];|]
+      GC.earlyDecl [C.cedecl|static const char *size_classes[0];|]
+
+      GC.publicDef_ "context_config_set_size" GC.InitDecl $ \s ->
+        ( [C.cedecl|int $id:s(struct $id:cfg* cfg, const char *size_name, size_t size_value);|],
+          [C.cedecl|int $id:s(struct $id:cfg* cfg, const char *size_name, size_t size_value) {
+                         (void)cfg; (void)size_name; (void)size_value;
+                         return 1;
+                       }|]
         )
 
 cliOptions :: [Option]

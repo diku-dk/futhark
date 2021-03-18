@@ -54,6 +54,12 @@ A Futhark compiler development command, intentionally undocumented and
 intended for use in developing the Futhark compiler, not for
 programmers writing in Futhark.
 
+futhark hash PROGRAM
+--------------------
+
+Print a hexadecimal hash of the program AST, including all imports.
+Supposed to be invariant to whitespace changes.
+
 futhark imports PROGRAM
 -----------------------
 
@@ -68,4 +74,4 @@ program.
 SEE ALSO
 ========
 
-:ref:`futhark-opencl(1)`, :ref:`futhark-c(1)`, :ref:`futhark-py(1)`, :ref:`futhark-pyopencl(1)`, :ref:`futhark-dataset(1)`, :ref:`futhark-doc(1)`, :ref:`futhark-test(1)`, :ref:`futhark-bench(1)`, :ref:`futhark-run(1)`, :ref:`futhark-repl(1)`, :ref:`futhark-script(1)`
+:ref:`futhark-opencl(1)`, :ref:`futhark-c(1)`, :ref:`futhark-py(1)`, :ref:`futhark-pyopencl(1)`, :ref:`futhark-dataset(1)`, :ref:`futhark-doc(1)`, :ref:`futhark-test(1)`, :ref:`futhark-bench(1)`, :ref:`futhark-run(1)`, :ref:`futhark-repl(1)`, :ref:`futhark-literate(1)`

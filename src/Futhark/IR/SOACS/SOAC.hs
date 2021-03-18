@@ -1,5 +1,4 @@
 {-# LANGUAGE ConstraintKinds #-}
-{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE OverloadedStrings #-}
@@ -22,7 +21,6 @@ module Futhark.IR.SOACS.SOAC
     singleReduce,
 
     -- * Utility
-    getStreamAccums,
     scremaType,
     soacType,
     typeCheckSOAC,
@@ -41,6 +39,7 @@ module Futhark.IR.SOACS.SOAC
     isMapSOAC,
     ppScrema,
     ppHist,
+    groupScatterResults,
 
     -- * Generic traversal
     SOACMapper (..),
@@ -53,6 +52,7 @@ import Control.Category
 import Control.Monad.Identity
 import Control.Monad.State.Strict
 import Control.Monad.Writer
+import Data.Function ((&))
 import Data.List (intersperse)
 import qualified Data.Map.Strict as M
 import Data.Maybe
@@ -71,30 +71,49 @@ import qualified Futhark.TypeCheck as TC
 import Futhark.Util (chunks, maybeNth)
 import Futhark.Util.Pretty (Doc, Pretty, comma, commasep, parens, ppr, text, (<+>), (</>))
 import qualified Futhark.Util.Pretty as PP
-import GHC.Generics (Generic)
-import Language.SexpGrammar as Sexp
-import Language.SexpGrammar.Generic
 import Prelude hiding (id, (.))
 
 -- | A second-order array combinator (SOAC).
 data SOAC lore
-  = Stream SubExp (StreamForm lore) (Lambda lore) [VName]
-  | -- | @Scatter <cs> <length> <lambda> <original index and value arrays>@
+  = Stream SubExp (StreamForm lore) (Lambda lore) [SubExp] [VName]
+  | -- | @Scatter <length> <lambda> <inputs> <outputs>@
     --
-    -- <input/output arrays along with their sizes and number of
-    -- values to write for that array>
+    -- Scatter maps values from a set of input arrays to indices and values of a
+    -- set of output arrays. It is able to write multiple values to multiple
+    -- outputs each of which may have multiple dimensions.
     --
-    -- <length> is the length of each index array and value array, since they
-    -- all must be the same length for any fusion to make sense.  If you have a
-    -- list of index-value array pairs of different sizes, you need to use
-    -- multiple writes instead.
+    -- <inputs> is a list of input arrays, all having size <length>, elements of
+    -- which are applied to the <lambda> function. For instance, if there are
+    -- two arrays, <lambda> will get two values as input, one from each array.
     --
-    -- The lambda body returns the output in this manner:
+    -- <outputs> specifies the result of the <lambda> and which arrays to write
+    -- to. Each element of the list consists of a <VName> specifying which array
+    -- to scatter to, a <Shape> describing the shape of that array, and an <Int>
+    -- describing how many elements should be written to that array for each
+    -- invocation of the <lambda>.
     --
-    --     [index_0, index_1, ..., index_n, value_0, value_1, ..., value_n]
+    -- <lambda> is a function that takes inputs from <inputs> and returns values
+    -- according to the output-specification in <outputs>. It returns values in
+    -- the following manner:
     --
-    -- This must be consistent along all Scatter-related optimisations.
-    Scatter SubExp (Lambda lore) [VName] [(SubExp, Int, VName)]
+    --     [index_0, index_1, ..., index_n, value_0, value_1, ..., value_m]
+    --
+    -- For each output in <outputs>, <lambda> returns <i> * <j> index values and
+    -- <j> output values, where <i> is the number of dimensions (rank) of the
+    -- given output, and <j> is the number of output values written to the given
+    -- output.
+    --
+    -- For example, given the following output specification:
+    --
+    --     [([x1, y1, z1], 2, arr1), ([x2, y2], 1, arr2)]
+    --
+    -- <lambda> will produce 6 (3 * 2) index values and 2 output values for
+    -- <arr1>, and 2 (2 * 1) index values and 1 output value for
+    -- arr2. Additionally, the results are grouped, so the first 6 index values
+    -- will correspond to the first two output values, and so on. For this
+    -- example, <lambda> should return a total of 11 values, 8 index values and
+    -- 3 output values.
+    Scatter SubExp (Lambda lore) [VName] [(Shape, Int, VName)]
   | -- | @Hist <length> <dest-arrays-and-ops> <bucket fun> <input arrays>@
     --
     -- The first SubExp is the length of the input arrays. The first
@@ -104,17 +123,7 @@ data SOAC lore
   | -- | A combination of scan, reduction, and map.  The first
     -- t'SubExp' is the size of the input arrays.
     Screma SubExp (ScremaForm lore) [VName]
-  deriving (Eq, Ord, Show, Generic)
-
-instance Decorations lore => SexpIso (SOAC lore) where
-  sexpIso =
-    match $
-      With (. Sexp.list (Sexp.el (Sexp.sym "stream") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
-        With (. Sexp.list (Sexp.el (Sexp.sym "scatter") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
-          With (. Sexp.list (Sexp.el (Sexp.sym "hist") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
-            With
-              (. Sexp.list (Sexp.el (Sexp.sym "screma") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso))
-              End
+  deriving (Eq, Ord, Show)
 
 -- | Information about computing a single histogram.
 data HistOp lore = HistOp
@@ -126,61 +135,20 @@ data HistOp lore = HistOp
     histNeutral :: [SubExp],
     histOp :: Lambda lore
   }
-  deriving (Eq, Ord, Show, Generic)
-
-instance Decorations lore => SexpIso (HistOp lore) where
-  sexpIso = with $ \histop ->
-    Sexp.list
-      ( Sexp.el sexpIso
-          >>> Sexp.el sexpIso
-          >>> Sexp.el sexpIso
-          >>> Sexp.el sexpIso
-          >>> Sexp.el sexpIso
-      )
-      >>> histop
+  deriving (Eq, Ord, Show)
 
 -- | Is the stream chunk required to correspond to a contiguous
 -- subsequence of the original input ('InOrder') or not?  'Disorder'
 -- streams can be more efficient, but not all algorithms work with
 -- this.
 data StreamOrd = InOrder | Disorder
-  deriving (Eq, Ord, Show, Generic)
-
-instance SexpIso StreamOrd where
-  sexpIso =
-    match $
-      With (. Sexp.sym "in-order") $
-        With
-          (. Sexp.sym "disorder")
-          End
+  deriving (Eq, Ord, Show)
 
 -- | What kind of stream is this?
 data StreamForm lore
-  = Parallel StreamOrd Commutativity (Lambda lore) [SubExp]
-  | Sequential [SubExp]
-  deriving (Eq, Ord, Show, Generic)
-
-instance Decorations lore => SexpIso (StreamForm lore) where
-  sexpIso =
-    match $
-      With
-        ( .
-            Sexp.list
-              ( Sexp.el (Sexp.sym "parallel")
-                  >>> Sexp.el sexpIso
-                  >>> Sexp.el sexpIso
-                  >>> Sexp.el sexpIso
-                  >>> Sexp.rest sexpIso
-              )
-        )
-        $ With
-          ( .
-              Sexp.list
-                ( Sexp.el (Sexp.sym "sequential")
-                    >>> Sexp.rest sexpIso
-                )
-          )
-          End
+  = Parallel StreamOrd Commutativity (Lambda lore)
+  | Sequential
+  deriving (Eq, Ord, Show)
 
 -- | The essential parts of a 'Screma' factored out (everything
 -- except the input arrays).
@@ -189,16 +157,7 @@ data ScremaForm lore
       [Scan lore]
       [Reduce lore]
       (Lambda lore)
-  deriving (Eq, Ord, Show, Generic)
-
-instance Decorations lore => SexpIso (ScremaForm lore) where
-  sexpIso = with $ \scremaform ->
-    Sexp.list
-      ( Sexp.el sexpIso
-          >>> Sexp.el sexpIso
-          >>> Sexp.el sexpIso
-      )
-      >>> scremaform
+  deriving (Eq, Ord, Show)
 
 singleBinOp :: Bindable lore => [Lambda lore] -> Lambda lore
 singleBinOp lams =
@@ -219,16 +178,7 @@ data Scan lore = Scan
   { scanLambda :: Lambda lore,
     scanNeutral :: [SubExp]
   }
-  deriving (Eq, Ord, Show, Generic)
-
-instance Decorations lore => SexpIso (Scan lore) where
-  sexpIso = with $ \scan ->
-    Sexp.list
-      ( Sexp.el (Sexp.sym "scan")
-          >>> Sexp.el sexpIso
-          >>> Sexp.el sexpIso
-      )
-      >>> scan
+  deriving (Eq, Ord, Show)
 
 -- | How many reduction results are produced by these 'Scan's?
 scanResults :: [Scan lore] -> Int
@@ -247,17 +197,7 @@ data Reduce lore = Reduce
     redLambda :: Lambda lore,
     redNeutral :: [SubExp]
   }
-  deriving (Eq, Ord, Show, Generic)
-
-instance Decorations lore => SexpIso (Reduce lore) where
-  sexpIso = with $ \red ->
-    Sexp.list
-      ( Sexp.el (Sexp.sym "reduce")
-          >>> Sexp.el sexpIso
-          >>> Sexp.el sexpIso
-          >>> Sexp.el sexpIso
-      )
-      >>> red
+  deriving (Eq, Ord, Show)
 
 -- | How many reduction results are produced by these 'Reduce's?
 redResults :: [Reduce lore] -> Int
@@ -377,6 +317,32 @@ isMapSOAC (ScremaForm scans reds map_lam) = do
   guard $ null reds
   return map_lam
 
+-- | @groupResult <output specification> <result>@
+--
+-- Groups the index values and result values of <result> according to the
+-- <output specification>.
+--
+-- This function is used for extracting and grouping the results of a
+-- scatter. In the SOAC representation, the lambda inside a 'Scatter' returns
+-- all indices and values as one big list. This function groups each value with
+-- its corresponding indices (as determined by the 'Shape' of the output array).
+--
+-- The elements of the resulting list correspond to the shape and name of the
+-- output parameters, in addition to a list of values written to that output
+-- parameter, along with the array indices marking where to write them to.
+--
+-- See 'Scatter' for more information.
+groupScatterResults :: [(Shape, Int, array)] -> [SubExp] -> [(Shape, array, [([SubExp], SubExp)])]
+groupScatterResults output_spec result =
+  let (shapes, ns, arrays) = unzip3 output_spec
+      num_indices = sum $ zipWith (*) ns $ map length shapes
+      (indices, values) = splitAt num_indices result
+      chunk_sizes =
+        concat $ zipWith (\shp n -> replicate n $ length shp) shapes ns
+   in zip (chunks chunk_sizes indices) values
+        & chunks ns
+        & zip3 shapes arrays
+
 -- | Like 'Mapper', but just for 'SOAC's.
 data SOACMapper flore tlore m = SOACMapper
   { mapOnSOACSubExp :: SubExp -> m SubExp,
@@ -401,18 +367,17 @@ mapSOACM ::
   SOACMapper flore tlore m ->
   SOAC flore ->
   m (SOAC tlore)
-mapSOACM tv (Stream size form lam arrs) =
+mapSOACM tv (Stream size form lam accs arrs) =
   Stream <$> mapOnSOACSubExp tv size
     <*> mapOnStreamForm form
     <*> mapOnSOACLambda tv lam
+    <*> mapM (mapOnSOACSubExp tv) accs
     <*> mapM (mapOnSOACVName tv) arrs
   where
-    mapOnStreamForm (Parallel o comm lam0 acc) =
-      Parallel o comm
-        <$> mapOnSOACLambda tv lam0
-        <*> mapM (mapOnSOACSubExp tv) acc
-    mapOnStreamForm (Sequential acc) =
-      Sequential <$> mapM (mapOnSOACSubExp tv) acc
+    mapOnStreamForm (Parallel o comm lam0) =
+      Parallel o comm <$> mapOnSOACLambda tv lam0
+    mapOnStreamForm Sequential =
+      pure Sequential
 mapSOACM tv (Scatter len lam ivs as) =
   Scatter
     <$> mapOnSOACSubExp tv len
@@ -420,7 +385,7 @@ mapSOACM tv (Scatter len lam ivs as) =
     <*> mapM (mapOnSOACVName tv) ivs
     <*> mapM
       ( \(aw, an, a) ->
-          (,,) <$> mapOnSOACSubExp tv aw
+          (,,) <$> mapM (mapOnSOACSubExp tv) aw
             <*> pure an
             <*> mapOnSOACVName tv a
       )
@@ -487,22 +452,17 @@ instance ASTLore lore => Rename (SOAC lore) where
 
 -- | The type of a SOAC.
 soacType :: SOAC lore -> [Type]
-soacType (Stream outersize form lam _) =
+soacType (Stream outersize _ lam accs _) =
   map (substNamesInType substs) rtp
   where
     nms = map paramName $ take (1 + length accs) params
     substs = M.fromList $ zip nms (outersize : accs)
     Lambda params _ rtp = lam
-    accs = case form of
-      Parallel _ _ _ acc -> acc
-      Sequential acc -> acc
 soacType (Scatter _w lam _ivs as) =
-  zipWith arrayOfRow val_ts ws
+  zipWith arrayOfShape val_ts ws
   where
-    val_ts =
-      concatMap (take 1) $
-        chunks ns $
-          drop (sum ns) $ lambdaReturnType lam
+    indexes = sum $ zipWith (*) ns $ map length ws
+    val_ts = drop indexes $ lambdaReturnType lam
     (ws, ns, _) = unzip3 as
 soacType (Hist _len ops _bucket_fun _imgs) = do
   op <- ops
@@ -523,21 +483,19 @@ instance (ASTLore lore, Aliased lore) => AliasedOp (SOAC lore) where
     where
       consumedArray v = fromMaybe v $ lookup v params_to_arrs
       params_to_arrs = zip (map paramName $ lambdaParams map_lam) arrs
-  consumedInOp (Stream _ form lam arrs) =
+  consumedInOp (Stream _ form lam accs arrs) =
     namesFromList $
       subExpVars $
         case form of
-          Sequential accs ->
-            map (consumedArray accs) $ namesToList $ consumedByLambda lam
-          Parallel _ _ _ accs ->
-            map (consumedArray accs) $ namesToList $ consumedByLambda lam
+          Sequential ->
+            map consumedArray $ namesToList $ consumedByLambda lam
+          Parallel {} ->
+            map consumedArray $ namesToList $ consumedByLambda lam
     where
-      consumedArray accs v = fromMaybe (Var v) $ lookup v $ paramsToInput accs
+      consumedArray v = fromMaybe (Var v) $ lookup v paramsToInput
       -- Drop the chunk parameter, which cannot alias anything.
-      paramsToInput accs =
-        zip
-          (map paramName $ drop 1 $ lambdaParams lam)
-          (accs ++ map Var arrs)
+      paramsToInput =
+        zip (map paramName $ drop 1 $ lambdaParams lam) (accs ++ map Var arrs)
   consumedInOp (Scatter _ _ _ as) =
     namesFromList $ map (\(_, _, a) -> a) as
   consumedInOp (Hist _ ops _ _) =
@@ -559,36 +517,37 @@ instance
   where
   type OpWithAliases (SOAC lore) = SOAC (Aliases lore)
 
-  addOpAliases (Stream size form lam arr) =
+  addOpAliases aliases (Stream size form lam accs arr) =
     Stream
       size
       (analyseStreamForm form)
-      (Alias.analyseLambda lam)
+      (Alias.analyseLambda aliases lam)
+      accs
       arr
     where
-      analyseStreamForm (Parallel o comm lam0 acc) =
-        Parallel o comm (Alias.analyseLambda lam0) acc
-      analyseStreamForm (Sequential acc) = Sequential acc
-  addOpAliases (Scatter len lam ivs as) =
-    Scatter len (Alias.analyseLambda lam) ivs as
-  addOpAliases (Hist len ops bucket_fun imgs) =
+      analyseStreamForm (Parallel o comm lam0) =
+        Parallel o comm (Alias.analyseLambda aliases lam0)
+      analyseStreamForm Sequential = Sequential
+  addOpAliases aliases (Scatter len lam ivs as) =
+    Scatter len (Alias.analyseLambda aliases lam) ivs as
+  addOpAliases aliases (Hist len ops bucket_fun imgs) =
     Hist
       len
-      (map (mapHistOp Alias.analyseLambda) ops)
-      (Alias.analyseLambda bucket_fun)
+      (map (mapHistOp (Alias.analyseLambda aliases)) ops)
+      (Alias.analyseLambda aliases bucket_fun)
       imgs
-  addOpAliases (Screma w (ScremaForm scans reds map_lam) arrs) =
+  addOpAliases aliases (Screma w (ScremaForm scans reds map_lam) arrs) =
     Screma
       w
       ( ScremaForm
           (map onScan scans)
           (map onRed reds)
-          (Alias.analyseLambda map_lam)
+          (Alias.analyseLambda aliases map_lam)
       )
       arrs
     where
-      onRed red = red {redLambda = Alias.analyseLambda $ redLambda red}
-      onScan scan = scan {scanLambda = Alias.analyseLambda $ scanLambda scan}
+      onRed red = red {redLambda = Alias.analyseLambda aliases $ redLambda red}
+      onScan scan = scan {scanLambda = Alias.analyseLambda aliases $ scanLambda scan}
 
   removeOpAliases = runIdentity . mapSOACM remove
     where
@@ -657,8 +616,7 @@ instance Decorations lore => ST.IndexOp (SOAC lore) where
 
 -- | Type-check a SOAC.
 typeCheckSOAC :: TC.Checkable lore => SOAC (Aliases lore) -> TC.TypeM lore ()
-typeCheckSOAC (Stream size form lam arrexps) = do
-  let accexps = getStreamAccums form
+typeCheckSOAC (Stream size form lam accexps arrexps) = do
   TC.require [Prim int64] size
   accargs <- mapM TC.checkArg accexps
   arrargs <- mapM lookupType arrexps
@@ -673,7 +631,7 @@ typeCheckSOAC (Stream size form lam arrexps) = do
     TC.bad $ TC.TypeError "Stream with inconsistent accumulator type in lambda."
   -- check reduce's lambda, if any
   _ <- case form of
-    Parallel _ _ lam0 _ -> do
+    Parallel _ _ lam0 -> do
       let acct = map TC.argType accargs
           outerRetType = lambdaReturnType lam0
       TC.checkLambda lam0 $ map TC.noArgAliases $ accargs ++ accargs
@@ -684,7 +642,7 @@ typeCheckSOAC (Stream size form lam arrexps) = do
               ++ ", but stream's reduce lambda returns type "
               ++ prettyTuple outerRetType
               ++ "."
-    _ -> return ()
+    Sequential -> return ()
   -- just get the dflow of lambda on the fakearg, which does not alias
   -- arr, so we can later check that aliases of arr are not used inside lam.
   let fake_lamarrs' = map asArg lamarrs'
@@ -693,10 +651,10 @@ typeCheckSOAC (Scatter w lam ivs as) = do
   -- Requirements:
   --
   --   0. @lambdaReturnType@ of @lam@ must be a list
-  --      [index types..., value types].
+  --      [index types..., value types, ...].
   --
-  --   1. The number of index types must be equal to the number of value types
-  --      and the number of writes to arrays in @as@.
+  --   1. The number of index types and value types must be equal to the number
+  --      of return values from @lam@.
   --
   --   2. Each index type must have the type i64.
   --
@@ -715,15 +673,15 @@ typeCheckSOAC (Scatter w lam ivs as) = do
   TC.require [Prim int64] w
 
   -- 0.
-  let (_as_ws, as_ns, _as_vs) = unzip3 as
+  let (as_ws, as_ns, _as_vs) = unzip3 as
+      indexes = sum $ zipWith (*) as_ns $ map length as_ws
       rts = lambdaReturnType lam
-      rtsLen = length rts `div` 2
-      rtsI = take rtsLen rts
-      rtsV = drop rtsLen rts
+      rtsI = take indexes rts
+      rtsV = drop indexes rts
 
   -- 1.
-  unless (rtsLen == sum as_ns) $
-    TC.bad $ TC.TypeError "Scatter: Uneven number of index types, value types, and arrays outputs."
+  unless (length rts == sum as_ns + sum (zipWith (*) as_ns $ map length as_ws)) $
+    TC.bad $ TC.TypeError "Scatter: number of index types, value types and array outputs do not match."
 
   -- 2.
   forM_ rtsI $ \rtI ->
@@ -732,10 +690,10 @@ typeCheckSOAC (Scatter w lam ivs as) = do
 
   forM_ (zip (chunks as_ns rtsV) as) $ \(rtVs, (aw, _, a)) -> do
     -- All lengths must have type i64.
-    TC.require [Prim int64] aw
+    mapM_ (TC.require [Prim int64]) aw
 
     -- 3.
-    forM_ rtVs $ \rtV -> TC.requireI [rtV `arrayOfRow` aw] a
+    forM_ rtVs $ \rtV -> TC.requireI [arrayOfShape rtV aw] a
 
     -- 4.
     TC.consume =<< TC.lookupAliases a
@@ -827,13 +785,8 @@ typeCheckSOAC (Screma w (ScremaForm scans reds map_lam) arrs) = do
         "Map function return type " ++ prettyTuple map_lam_ts
           ++ " wrong for given scan and reduction functions."
 
--- | Get Stream's accumulators as a sub-expression list
-getStreamAccums :: StreamForm lore -> [SubExp]
-getStreamAccums (Parallel _ _ _ accs) = accs
-getStreamAccums (Sequential accs) = accs
-
 instance OpMetrics (Op lore) => OpMetrics (SOAC lore) where
-  opMetrics (Stream _ _ lam _) =
+  opMetrics (Stream _ _ lam _ _) =
     inside "Stream" $ lambdaMetrics lam
   opMetrics (Scatter _len lam _ivs _as) =
     inside "Scatter" $ lambdaMetrics lam
@@ -846,26 +799,27 @@ instance OpMetrics (Op lore) => OpMetrics (SOAC lore) where
       lambdaMetrics map_lam
 
 instance PrettyLore lore => PP.Pretty (SOAC lore) where
-  ppr (Stream size form lam arrs) =
+  ppr (Stream size form lam acc arrs) =
     case form of
-      Parallel o comm lam0 acc ->
+      Parallel o comm lam0 ->
         let ord_str = if o == Disorder then "Per" else ""
             comm_str = case comm of
               Commutative -> "Comm"
               Noncommutative -> ""
          in text ("streamPar" ++ ord_str ++ comm_str)
               <> parens
-                ( ppr size <> comma </> ppr lam0 </> comma </> ppr lam
+                ( ppr size <> comma </> ppr lam0 <> comma
+                    </> ppr lam <> comma
                     </> commasep (PP.braces (commasep $ map ppr acc) : map ppr arrs)
                 )
-      Sequential acc ->
+      Sequential ->
         text "streamSeq"
           <> parens
             ( ppr size <> comma </> ppr lam <> comma
                 </> commasep (PP.braces (commasep $ map ppr acc) : map ppr arrs)
             )
   ppr (Scatter len lam ivs as) =
-    ppSOAC "scatter" len [lam] (Just (map Var ivs)) (map (\(_, n, a) -> (n, a)) as)
+    ppSOAC "scatter" len [lam] (Just (map Var ivs)) as
   ppr (Hist len ops bucket_fun imgs) =
     ppHist len ops bucket_fun imgs
   ppr (Screma w (ScremaForm scans reds map_lam) arrs)

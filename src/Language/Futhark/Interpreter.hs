@@ -30,7 +30,7 @@ import Control.Monad.Reader
 import Control.Monad.State
 import Control.Monad.Trans.Maybe
 import Data.Array
-import Data.Bifunctor (first)
+import Data.Bifunctor (first, second)
 import Data.List
   ( find,
     foldl',
@@ -1004,11 +1004,11 @@ eval env (LetWith dest src is v body _ loc) = do
 eval env (Lambda ps body _ (Info (_, rt)) _) =
   evalFunction env [] ps body rt
 eval env (OpSection qv (Info t) _) = evalTermVar env qv $ toStruct t
-eval env (OpSectionLeft qv _ e (Info (_, argext), _) (Info t, Info retext) loc) = do
+eval env (OpSectionLeft qv _ e (Info (_, _, argext), _) (Info t, Info retext) loc) = do
   v <- evalArg env e argext
   f <- evalTermVar env qv (toStruct t)
   returned env t retext =<< apply loc env f v
-eval env (OpSectionRight qv _ e (Info _, Info (_, argext)) (Info t) loc) = do
+eval env (OpSectionRight qv _ e (Info _, Info (_, _, argext)) (Info t) loc) = do
   y <- evalArg env e argext
   return $
     ValueFun $ \x -> do
@@ -1110,19 +1110,27 @@ evalCase v env (CasePat p cExp _) = runMaybeT $ do
   env' <- patternMatch env p v
   lift $ eval env' cExp
 
+-- We hackily do multiple substitutions in modules, because otherwise
+-- we would lose in cases where the parameter substitutions are [a->x,
+-- b->x] when we reverse. (See issue #1250.)
+reverseSubstitutions :: M.Map VName VName -> M.Map VName [VName]
+reverseSubstitutions =
+  M.fromListWith (<>) . map (second pure . uncurry (flip (,))) . M.toList
+
 substituteInModule :: M.Map VName VName -> Module -> Module
 substituteInModule substs = onModule
   where
     rev_substs = reverseSubstitutions substs
-    replace v = fromMaybe v $ M.lookup v rev_substs
-    replaceQ v = maybe v qualName $ M.lookup (qualLeaf v) rev_substs
+    replace v = fromMaybe [v] $ M.lookup v rev_substs
+    replaceQ v = maybe v qualName $ maybeHead =<< M.lookup (qualLeaf v) rev_substs
     replaceM f m = M.fromList $ do
       (k, v) <- M.toList m
-      return (replace k, f v)
+      k' <- replace k
+      return (k', f v)
     onModule (Module (Env terms types _)) =
       Module $ Env (replaceM onTerm terms) (replaceM onType types) mempty
     onModule (ModuleFun f) =
-      ModuleFun $ \m -> onModule <$> f (substituteInModule rev_substs m)
+      ModuleFun $ \m -> onModule <$> f (substituteInModule (M.mapMaybe maybeHead rev_substs) m)
     onTerm (TermValue t v) = TermValue t v
     onTerm (TermPoly t v) = TermPoly t v
     onTerm (TermModule m) = TermModule $ onModule m
@@ -1130,9 +1138,6 @@ substituteInModule substs = onModule
     onDim (NamedDim v) = NamedDim $ replaceQ v
     onDim (ConstDim x) = ConstDim x
     onDim AnyDim = AnyDim
-
-reverseSubstitutions :: M.Map VName VName -> M.Map VName VName
-reverseSubstitutions = M.fromList . map (uncurry $ flip (,)) . M.toList
 
 evalModuleVar :: Env -> QualName VName -> EvalM Module
 evalModuleVar env qv =
@@ -1555,6 +1560,36 @@ initialCtx =
           if i >= 0 && i < arrayLength arr'
             then arr' // [(i, v)]
             else arr'
+    def "scatter_2d" = Just $
+      fun3t $ \arr is vs ->
+        case arr of
+          ValueArray _ _ ->
+            return $
+              foldl' update arr $
+                zip (map fromTuple $ snd $ fromArray is) (snd $ fromArray vs)
+          _ ->
+            error $ "scatter_2d expects array, but got: " ++ pretty arr
+      where
+        update :: Value -> (Maybe [Value], Value) -> Value
+        update arr (Just idxs@[_, _], v) =
+          fromMaybe arr $ updateArray (map (IndexingFix . asInt64) idxs) arr v
+        update _ _ =
+          error "scatter_2d expects 2-dimensional indices"
+    def "scatter_3d" = Just $
+      fun3t $ \arr is vs ->
+        case arr of
+          ValueArray _ _ ->
+            return $
+              foldl' update arr $
+                zip (map fromTuple $ snd $ fromArray is) (snd $ fromArray vs)
+          _ ->
+            error $ "scatter_3d expects array, but got: " ++ pretty arr
+      where
+        update :: Value -> (Maybe [Value], Value) -> Value
+        update arr (Just idxs@[_, _, _], v) =
+          fromMaybe arr $ updateArray (map (IndexingFix . asInt64) idxs) arr v
+        update _ _ =
+          error "scatter_3d expects 3-dimensional indices"
     def "hist" = Just $
       fun6t $ \_ arr fun _ is vs ->
         case arr of
@@ -1626,13 +1661,14 @@ initialCtx =
       fun2t $ \i xs -> do
         let (shape, xs') = fromArray xs
         return $
-          if asInt i > 0
-            then
-              let (bef, aft) = splitAt (asInt i) xs'
-               in toArray shape $ aft ++ bef
-            else
-              let (bef, aft) = splitFromEnd (- asInt i) xs'
-               in toArray shape $ aft ++ bef
+          let idx = if null xs' then 0 else rem (asInt i) (length xs')
+           in if idx > 0
+                then
+                  let (bef, aft) = splitAt idx xs'
+                   in toArray shape $ aft ++ bef
+                else
+                  let (bef, aft) = splitFromEnd (- idx) xs'
+                   in toArray shape $ aft ++ bef
     def "flatten" = Just $
       fun1 $ \xs -> do
         let (ShapeDim n (ShapeDim m shape), xs') = fromArray xs

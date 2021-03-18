@@ -1329,6 +1329,17 @@ data CParts = CParts
     cLib :: String
   }
 
+gnuSource :: String
+gnuSource =
+  pretty
+    [C.cunit|
+// We need to define _GNU_SOURCE before
+// _any_ headers files are imported to get
+// the usage statistics of a thread (i.e. have RUSAGE_THREAD) on GNU/Linux
+// https://manpages.courier-mta.org/htmlman2/getrusage.2.html
+$esc:("#define _GNU_SOURCE")
+|]
+
 -- We may generate variables that are never used (e.g. for
 -- certificates) or functions that are never called (e.g. unused
 -- intrinsics), and generated code may have other cosmetic issues that
@@ -1357,18 +1368,18 @@ $esc:("#endif")
 asLibrary :: CParts -> (String, String)
 asLibrary parts =
   ( "#pragma once\n\n" <> cHeader parts,
-    disableWarnings <> cHeader parts <> cUtils parts <> cLib parts
+    gnuSource <> disableWarnings <> cHeader parts <> cUtils parts <> cLib parts
   )
 
 -- | As executable with command-line interface.
 asExecutable :: CParts -> String
 asExecutable parts =
-  disableWarnings <> cHeader parts <> cUtils parts <> cCLI parts <> cLib parts
+  gnuSource <> disableWarnings <> cHeader parts <> cUtils parts <> cCLI parts <> cLib parts
 
 -- | As server executable.
 asServer :: CParts -> String
 asServer parts =
-  disableWarnings <> cHeader parts <> cUtils parts <> cServer parts <> cLib parts
+  gnuSource <> disableWarnings <> cHeader parts <> cUtils parts <> cServer parts <> cLib parts
 
 -- | Compile imperative program to a C program.  Always uses the
 -- function named "main" as entry point, so make sure it is defined.
@@ -1390,17 +1401,16 @@ compileProg backend ops extra header_extra spaces options prog = do
   let headerdefs =
         [C.cunit|
 $esc:("// Headers\n")
-/* We need to define _GNU_SOURCE before
-   _any_ headers files are imported to get
-   the usage statistics of a thread (i.e. have RUSAGE_THREAD) on GNU/Linux
-   https://manpages.courier-mta.org/htmlman2/getrusage.2.html */
-$esc:("#define _GNU_SOURCE")
 $esc:("#include <stdint.h>")
 $esc:("#include <stddef.h>")
 $esc:("#include <stdbool.h>")
 $esc:("#include <stdio.h>")
 $esc:("#include <float.h>")
 $esc:(header_extra)
+
+$esc:("#ifdef __cplusplus")
+$esc:("extern \"C\" {")
+$esc:("#endif")
 
 $esc:("\n// Initialisation\n")
 $edecls:(initDecls endstate)
@@ -1417,6 +1427,10 @@ $edecls:(entryDecls endstate)
 $esc:("\n// Miscellaneous\n")
 $edecls:(miscDecls endstate)
 $esc:("#define FUTHARK_BACKEND_"++backend)
+
+$esc:("#ifdef __cplusplus")
+$esc:("}")
+$esc:("#endif")
                            |]
 
   let utildefs =
@@ -1449,6 +1463,7 @@ $esc:("#include <string.h>")
 $esc:("#include <string.h>")
 $esc:("#include <errno.h>")
 $esc:("#include <assert.h>")
+$esc:("#include <ctype.h>")
 
 $esc:header_extra
 
@@ -1525,6 +1540,27 @@ commonLibFuns memreport = do
   ctx <- contextType
   ops <- asks envOperations
   profilereport <- gets $ DL.toList . compProfileItems
+
+  publicDef_ "get_num_sizes" InitDecl $ \s ->
+    ( [C.cedecl|int $id:s(void);|],
+      [C.cedecl|int $id:s(void) {
+                return sizeof(size_names)/sizeof(size_names[0]);
+              }|]
+    )
+
+  publicDef_ "get_size_name" InitDecl $ \s ->
+    ( [C.cedecl|const char* $id:s(int);|],
+      [C.cedecl|const char* $id:s(int i) {
+                return size_names[i];
+              }|]
+    )
+
+  publicDef_ "get_size_class" InitDecl $ \s ->
+    ( [C.cedecl|const char* $id:s(int);|],
+      [C.cedecl|const char* $id:s(int i) {
+                return size_classes[i];
+              }|]
+    )
 
   publicDef_ "context_report" MiscDecl $ \s ->
     ( [C.cedecl|char* $id:s($ty:ctx *ctx);|],
@@ -1837,6 +1873,12 @@ compilePrimExp f (UnOpExp SSignum {} x) = do
 compilePrimExp f (UnOpExp USignum {} x) = do
   x' <- compilePrimExp f x
   return [C.cexp|($exp:x' > 0) - ($exp:x' < 0) != 0|]
+compilePrimExp f (UnOpExp (FSignum Float32) x) = do
+  x' <- compilePrimExp f x
+  return [C.cexp|fsignum32($exp:x')|]
+compilePrimExp f (UnOpExp (FSignum Float64) x) = do
+  x' <- compilePrimExp f x
+  return [C.cexp|fsignum32($exp:x')|]
 compilePrimExp f (CmpOpExp cmp x y) = do
   x' <- compilePrimExp f x
   y' <- compilePrimExp f y

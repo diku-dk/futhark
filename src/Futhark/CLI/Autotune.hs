@@ -194,11 +194,11 @@ thresholdForest prog = do
       map root $ filter (null . snd) thresholds
   where
     getThresholds = mapMaybe findThreshold . lines
-    regex = makeRegex ("(.*)\\ \\(threshold\\ \\((.*)\\)\\)" :: String)
+    regex = makeRegex ("(.*) \\(threshold\\(([^ ]+,)(.*)\\)\\)" :: String)
 
     findThreshold :: String -> Maybe (String, [(String, Bool)])
     findThreshold l = do
-      [grp1, grp2] <- regexGroups regex l
+      [grp1, _, grp2] <- regexGroups regex l
       return
         ( grp1,
           filter (not . null . fst) $

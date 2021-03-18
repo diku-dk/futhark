@@ -9,8 +9,19 @@
 -- slower than `reduce`@term, although they have the same asymptotic
 -- complexity.
 --
--- *Reminder on terminology*: A function `op` is said to be
--- *associative* if
+-- **Higher-order complexity**
+--
+-- Specifying the time complexity of higher-order functions is tricky
+-- because it depends on the functional argument.  We use the informal
+-- convention that *W(f)* denotes the largest (asymptotic) *work* of
+-- function *f*, for the values it may be applied to.  Similarly,
+-- *S(f)* denotes the largest span.  See [this Wikipedia
+-- article](https://en.wikipedia.org/wiki/Analysis_of_parallel_algorithms)
+-- for a general introduction to these constructs.
+--
+-- **Reminder on terminology**
+--
+-- A function `op` is said to be *associative* if
 --
 --     (x `op` y) `op` z == x `op` (y `op` z)
 --
@@ -33,49 +44,49 @@ import "zip"
 
 -- | Apply the given function to each element of an array.
 --
--- **Work:** *O(n)*
+-- **Work:** *O(n ✕ W(f))*
 --
--- **Span:** *O(1)*
+-- **Span:** *O(S(f))*
 let map 'a [n] 'x (f: a -> x) (as: [n]a): *[n]x =
   intrinsics.map (f, as) :> *[n]x
 
 -- | Apply the given function to each element of a single array.
 --
--- **Work:** *O(n)*
+-- **Work:** *O(n ✕ W(f))*
 --
--- **Span:** *O(1)*
+-- **Span:** *O(S(f))*
 let map1 'a [n] 'x (f: a -> x) (as: [n]a): *[n]x =
   map f as
 
 -- | As `map1`@term, but with one more array.
 --
--- **Work:** *O(n)*
+-- **Work:** *O(n ✕ W(f))*
 --
--- **Span:** *O(1)*
+-- **Span:** *O(S(f))*
 let map2 'a 'b [n] 'x (f: a -> b -> x) (as: [n]a) (bs: [n]b): *[n]x =
   map (\(a, b) -> f a b) (zip2 as bs)
 
 -- | As `map2`@term, but with one more array.
 --
--- **Work:** *O(n)*
+-- **Work:** *O(n ✕ W(f))*
 --
--- **Span:** *O(1)*
+-- **Span:** *O(S(f))*
 let map3 'a 'b 'c [n] 'x (f: a -> b -> c -> x) (as: [n]a) (bs: [n]b) (cs: [n]c): *[n]x =
   map (\(a, b, c) -> f a b c) (zip3 as bs cs)
 
 -- | As `map3`@term, but with one more array.
 --
--- **Work:** *O(n)*
+-- **Work:** *O(n ✕ W(f))*
 --
--- **Span:** *O(1)*
+-- **Span:** *O(S(f))*
 let map4 'a 'b 'c 'd [n] 'x (f: a -> b -> c -> d -> x) (as: [n]a) (bs: [n]b) (cs: [n]c) (ds: [n]d): *[n]x =
   map (\(a, b, c, d) -> f a b c d) (zip4 as bs cs ds)
 
--- | As `map4`@term, but with one more array.
+-- | As `map3`@term, but with one more array.
 --
--- **Work:** *O(n)*
+-- **Work:** *O(n ✕ W(f))*
 --
--- **Span:** *O(1)*
+-- **Span:** *O(S(f))*
 let map5 'a 'b 'c 'd 'e [n] 'x (f: a -> b -> c -> d -> e -> x) (as: [n]a) (bs: [n]b) (cs: [n]c) (ds: [n]d) (es: [n]e): *[n]x =
   map (\(a, b, c, d, e) -> f a b c d e) (zip5 as bs cs ds es)
 
@@ -86,9 +97,12 @@ let map5 'a 'b 'c 'd 'e [n] 'x (f: a -> b -> c -> d -> e -> x) (as: [n]a) (bs: [
 -- the neutral element, and that must again have the same size as the
 -- elements of the input array.
 --
--- **Work:** *O(n)*
+-- **Work:** *O(n ✕ W(op))*
 --
--- **Span:** *O(log(n))*
+-- **Span:** *O(log(n) ✕ W(op))*
+--
+-- Note that the complexity implies that parallelism in the combining
+-- operator will *not* be exploited.
 let reduce [n] 'a (op: a -> a -> a) (ne: a) (as: [n]a): a =
   intrinsics.reduce (op, ne, as)
 
@@ -97,9 +111,9 @@ let reduce [n] 'a (op: a -> a -> a) (ne: a) (as: [n]a): a =
 -- like addition, the compiler already knows that the operator is
 -- commutative, so plain `reduce`@term will work just as well.
 --
--- **Work:** *O(n)*
+-- **Work:** *O(n ✕ W(op))*
 --
--- **Span:** *O(log(n))*
+-- **Span:** *O(log(n) ✕ W(op))*
 let reduce_comm [n] 'a (op: a -> a -> a) (ne: a) (as: [n]a): a =
   intrinsics.reduce_comm (op, ne, as)
 
@@ -111,10 +125,10 @@ let reduce_comm [n] 'a (op: a -> a -> a) (ne: a) (as: [n]a): a =
 -- associative and commutative.  Out-of-bounds indices in `is` are
 -- ignored.
 --
--- **Work:** *O(n)*
+-- **Work:** *O(n ✕ W(op))*
 --
--- **Span:** *O(n)* in the worst case (all updates to same position),
--- but *O(1)* in the best case.
+-- **Span:** *O(n ✕ W(op))* in the worst case (all updates to same
+-- position), but *O(W(op))* in the best case.
 --
 -- In practice, the *O(n)* behaviour only occurs if *m* is also very
 -- large.
@@ -122,20 +136,20 @@ let reduce_by_index 'a [m] [n] (dest : *[m]a) (f : a -> a -> a) (ne : a) (is : [
   intrinsics.hist (1, dest, f, ne, is, as) :> *[m]a
 
 -- | Inclusive prefix scan.  Has the same caveats with respect to
--- associativity as `reduce`.
+-- associativity and complexity as `reduce`.
 --
--- **Work:** *O(n)*
+-- **Work:** *O(n ✕ W(op))*
 --
--- **Span:** *O(log(n))*
+-- **Span:** *O(log(n) ✕ W(op))*
 let scan [n] 'a (op: a -> a -> a) (ne: a) (as: [n]a): *[n]a =
   intrinsics.scan (op, ne, as) :> *[n]a
 
 -- | Remove all those elements of `as` that do not satisfy the
 -- predicate `p`.
 --
--- **Work:** *O(n)*
+-- **Work:** *O(n ✕ W(p))*
 --
--- **Span:** *O(log(n))*
+-- **Span:** *O(log(n) ✕ W(p))*
 let filter [n] 'a (p: a -> bool) (as: [n]a): *[]a =
   let (as', is) = intrinsics.partition (1, \x -> if p x then 0 else 1, as)
   in as'[:is[0]]
@@ -143,9 +157,9 @@ let filter [n] 'a (p: a -> bool) (as: [n]a): *[]a =
 -- | Split an array into those elements that satisfy the given
 -- predicate, and those that do not.
 --
--- **Work:** *O(n)*
+-- **Work:** *O(n ✕ W(p))*
 --
--- **Span:** *O(log(n))*
+-- **Span:** *O(log(n) ✕ W(p))*
 let partition [n] 'a (p: a -> bool) (as: [n]a): ([]a, []a) =
   let p' x = if p x then 0 else 1
   let (as', is) = intrinsics.partition (2, p', as)
@@ -153,9 +167,9 @@ let partition [n] 'a (p: a -> bool) (as: [n]a): ([]a, []a) =
 
 -- | Split an array by two predicates, producing three arrays.
 --
--- **Work:** *O(n)*
+-- **Work:** *O(n ✕ (W(p1) + W(p2)))*
 --
--- **Span:** *O(log(n))*
+-- **Span:** *O(log(n) ✕ (W(p1) + W(p2)))*
 let partition2 [n] 'a (p1: a -> bool) (p2: a -> bool) (as: [n]a): ([]a, []a, []a) =
   let p' x = if p1 x then 0 else if p2 x then 1 else 2
   let (as', is) = intrinsics.partition (3, p', as)
@@ -173,9 +187,9 @@ let partition2 [n] 'a (p1: a -> bool) (p2: a -> bool) (as: [n]a): ([]a, []a, []a
 -- A chunk may be empty, and `f 0 []` must produce the neutral element for
 -- `op`.
 --
--- **Work:** *O(n)*
+-- **Work:** *O(n ✕ W(op) + W(f))*
 --
--- **Span:** *O(log(n))*
+-- **Span:** *O(log(n) ✕ W(op))*
 let reduce_stream [n] 'a 'b (op: b -> b -> b) (f: (k: i64) -> [k]a -> b) (as: [n]a): b =
   intrinsics.reduce_stream (op, f, as)
 
@@ -183,9 +197,9 @@ let reduce_stream [n] 'a 'b (op: b -> b -> b) (f: (k: i64) -> [k]a -> b) (as: [n
 -- correspond to subsequences of the original array (they may be
 -- interleaved).
 --
--- **Work:** *O(n)*
+-- **Work:** *O(n ✕ W(op) + W(f))*
 --
--- **Span:** *O(log(n))*
+-- **Span:** *O(log(n) ✕ W(op))*
 let reduce_stream_per [n] 'a 'b (op: b -> b -> b) (f: (k: i64) -> [k]a -> b) (as: [n]a): b =
   intrinsics.reduce_stream_per (op, f, as)
 
@@ -193,9 +207,9 @@ let reduce_stream_per [n] 'a 'b (op: b -> b -> b) (f: (k: i64) -> [k]a -> b) (as
 -- an array *of the same size*.  The per-chunk results are
 -- concatenated.
 --
--- **Work:** *O(n)*
+-- **Work:** *O(n ✕ W(f))*
 --
--- **Span:** *O(1)*
+-- **Span:** *O(S(f))*
 let map_stream [n] 'a 'b (f: (k: i64) -> [k]a -> [k]b) (as: [n]a): *[n]b =
   intrinsics.map_stream (f, as) :> *[n]b
 
@@ -203,32 +217,32 @@ let map_stream [n] 'a 'b (f: (k: i64) -> [k]a -> [k]b) (as: [n]a): *[n]b =
 -- correspond to subsequences of the original array (they may be
 -- interleaved).
 --
--- **Work:** *O(n)*
+-- **Work:** *O(n ✕ W(f))*
 --
--- **Span:** *O(1)*
+-- **Span:** *O(S(f))*
 let map_stream_per [n] 'a 'b (f: (k: i64) -> [k]a -> [k]b) (as: [n]a): *[n]b =
   intrinsics.map_stream_per (f, as) :> *[n]b
 
 -- | Return `true` if the given function returns `true` for all
 -- elements in the array.
 --
--- **Work:** *O(n)*
+-- **Work:** *O(n ✕ W(f))*
 --
--- **Span:** *O(log(n))*
+-- **Span:** *O(log(n) + S(f))*
 let all [n] 'a (f: a -> bool) (as: [n]a): bool =
   reduce (&&) true (map f as)
 
 -- | Return `true` if the given function returns `true` for any
 -- elements in the array.
 --
--- **Work:** *O(n)*
+-- **Work:** *O(n ✕ W(f))*
 --
--- **Span:** *O(log(n))*
+-- **Span:** *O(log(n) + S(f))*
 let any [n] 'a (f: a -> bool) (as: [n]a): bool =
   reduce (||) false (map f as)
 
--- | The `scatter as is vs` expression calculates the equivalent of
--- this imperative code:
+-- | `scatter as is vs` calculates the equivalent of this imperative
+-- code:
 --
 -- ```
 -- for index in 0..length is-1:
@@ -254,3 +268,21 @@ let any [n] 'a (f: a -> bool) (as: [n]a): bool =
 -- **Span:** *O(1)*
 let scatter 't [m] [n] (dest: *[m]t) (is: [n]i64) (vs: [n]t): *[m]t =
   intrinsics.scatter (dest, is, vs) :> *[m]t
+
+-- | `scatter_2d as is vs` is the equivalent of a `scatter` on a 2-dimensional
+-- array.
+--
+-- **Work:** *O(n)*
+--
+-- **Span:** *O(1)*
+let scatter_2d 't [m] [n] [l] (dest: *[m][n]t) (is: [l](i64, i64)) (vs: [l]t): *[m][n]t =
+  intrinsics.scatter_2d (dest, is, vs) :> *[m][n]t
+
+-- | `scatter_3d as is vs` is the equivalent of a `scatter` on a 3-dimensional
+-- array.
+--
+-- **Work:** *O(n)*
+--
+-- **Span:** *O(1)*
+let scatter_3d 't [m] [n] [o] [l] (dest: *[m][n][o]t) (is: [l](i64, i64, i64)) (vs: [l]t): *[m][n][o]t =
+  intrinsics.scatter_3d (dest, is, vs) :> *[m][n][o]t

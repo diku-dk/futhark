@@ -9,6 +9,7 @@ module Futhark.Internalise.LiftLambdas (transformProg) where
 
 import Control.Monad.Reader
 import Control.Monad.State
+import Data.Bifunctor
 import Data.Foldable
 import Data.List (partition)
 import qualified Data.Map.Strict as M
@@ -76,6 +77,8 @@ existentials e =
           S.fromList ext
         Match _ _ (_, Info ext) _ ->
           S.fromList ext
+        DoLoop _ _ _ _ _ (Info (_, ext)) _ ->
+          S.fromList ext
         _ ->
           mempty
 
@@ -110,7 +113,9 @@ liftFunction fname tparams params ret funbody = do
       isSize (v, _) = v `S.member` sizes_in_types
       (free_dims, free_nondims) = partition isSize free
 
-      free_params = map mkParam $ free_dims ++ free_nondims
+      free_params =
+        map (mkParam . second (`setUniqueness` Nonunique)) $
+          free_dims ++ free_nondims
 
   addValBind $
     ValBind
@@ -168,6 +173,8 @@ transformValBind vb = do
   addValBind $ vb {valBindBody = e}
 
 {-# NOINLINE transformProg #-}
+
+-- | Perform the transformation.
 transformProg :: MonadFreshNames m => [ValBind] -> m [ValBind]
 transformProg vbinds =
   modifyNameSource $ \namesrc ->

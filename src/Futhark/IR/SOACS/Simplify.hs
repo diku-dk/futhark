@@ -3,7 +3,6 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeFamilies #-}
-{-# LANGUAGE UndecidableInstances #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 
 module Futhark.IR.SOACS.Simplify
@@ -41,11 +40,11 @@ import Futhark.IR.Prop.Aliases
 import Futhark.IR.SOACS
 import Futhark.MonadFreshNames
 import qualified Futhark.Optimise.Simplify as Simplify
-import Futhark.Optimise.Simplify.ClosedForm
 import qualified Futhark.Optimise.Simplify.Engine as Engine
 import Futhark.Optimise.Simplify.Lore
 import Futhark.Optimise.Simplify.Rule
 import Futhark.Optimise.Simplify.Rules
+import Futhark.Optimise.Simplify.Rules.ClosedForm
 import Futhark.Pass
 import Futhark.Tools
 import Futhark.Transform.Rename
@@ -96,20 +95,19 @@ simplifyConsts =
 simplifySOAC ::
   Simplify.SimplifiableLore lore =>
   Simplify.SimplifyOp lore (SOAC lore)
-simplifySOAC (Stream outerdim form lam arr) = do
+simplifySOAC (Stream outerdim form lam nes arr) = do
   outerdim' <- Engine.simplify outerdim
   (form', form_hoisted) <- simplifyStreamForm form
+  nes' <- mapM Engine.simplify nes
   arr' <- mapM Engine.simplify arr
   (lam', lam_hoisted) <- Engine.simplifyLambda lam
-  return (Stream outerdim' form' lam' arr', form_hoisted <> lam_hoisted)
+  return (Stream outerdim' form' lam' nes' arr', form_hoisted <> lam_hoisted)
   where
-    simplifyStreamForm (Parallel o comm lam0 acc) = do
-      acc' <- mapM Engine.simplify acc
+    simplifyStreamForm (Parallel o comm lam0) = do
       (lam0', hoisted) <- Engine.simplifyLambda lam0
-      return (Parallel o comm lam0' acc', hoisted)
-    simplifyStreamForm (Sequential acc) = do
-      acc' <- mapM Engine.simplify acc
-      return (Sequential acc', mempty)
+      return (Parallel o comm lam0', hoisted)
+    simplifyStreamForm Sequential =
+      return (Sequential, mempty)
 simplifySOAC (Scatter len lam ivs as) = do
   len' <- Engine.simplify len
   (lam', hoisted) <- Engine.simplifyLambda lam
@@ -210,6 +208,8 @@ topDownRules =
     RuleOp removeUnusedSOACInput,
     RuleOp simplifyClosedFormReduce,
     RuleOp simplifyKnownIterationSOAC,
+    RuleOp liftIdentityMapping,
+    RuleOp removeDuplicateMapOutput,
     RuleOp fuseConcatScatter,
     RuleOp simplifyMapIota,
     RuleOp moveTransformToInput
@@ -221,9 +221,7 @@ bottomUpRules =
     RuleOp removeDeadReduction,
     RuleOp removeDeadWrite,
     RuleBasicOp removeUnnecessaryCopy,
-    RuleOp liftIdentityMapping,
     RuleOp liftIdentityStreaming,
-    RuleOp removeDuplicateMapOutput,
     RuleOp mapOpToOp
   ]
 
@@ -257,8 +255,8 @@ hoistCertificates _ _ _ _ =
 liftIdentityMapping ::
   forall lore.
   (Bindable lore, Simplify.SimplifiableLore lore, HasSOAC (Wise lore)) =>
-  BottomUpRuleOp (Wise lore)
-liftIdentityMapping (_, usages) pat aux op
+  TopDownRuleOp (Wise lore)
+liftIdentityMapping _ pat aux op
   | Just (Screma w form arrs :: SOAC (Wise lore)) <- asSOAC op,
     Just fun <- isMapSOAC form = do
     let inputMap = M.fromList $ zip (map paramName $ lambdaParams fun) arrs
@@ -271,16 +269,10 @@ liftIdentityMapping (_, usages) pat aux op
 
         checkInvariance (outId, Var v, _) (invariant, mapresult, rettype')
           | Just inp <- M.lookup v inputMap =
-            let e
-                  | patElemName outId `UT.isConsumed` usages
-                      || inp `UT.isConsumed` usages =
-                    Copy inp
-                  | otherwise =
-                    SubExp $ Var inp
-             in ( (Pattern [] [outId], BasicOp e) : invariant,
-                  mapresult,
-                  rettype'
-                )
+            ( (Pattern [] [outId], BasicOp (Copy inp)) : invariant,
+              mapresult,
+              rettype'
+            )
         checkInvariance (outId, e, t) (invariant, mapresult, rettype')
           | freeOrConst e =
             ( (Pattern [] [outId], BasicOp $ Replicate (Shape [w]) e) : invariant,
@@ -309,7 +301,7 @@ liftIdentityMapping (_, usages) pat aux op
 liftIdentityMapping _ _ _ _ = Skip
 
 liftIdentityStreaming :: BottomUpRuleOp (Wise SOACS)
-liftIdentityStreaming _ (Pattern [] pes) aux (Stream w form lam arrs)
+liftIdentityStreaming _ (Pattern [] pes) aux (Stream w form lam nes arrs)
   | (variant_map, invariant_map) <-
       partitionEithers $ map isInvariantRes $ zip3 map_ts map_pes map_res,
     not $ null invariant_map = Simplify $ do
@@ -325,9 +317,9 @@ liftIdentityStreaming _ (Pattern [] pes) aux (Stream w form lam arrs)
 
     auxing aux $
       letBind (Pattern [] $ fold_pes ++ variant_map_pes) $
-        Op $ Stream w form lam' arrs
+        Op $ Stream w form lam' nes arrs
   where
-    num_folds = length $ getStreamAccums form
+    num_folds = length nes
     (fold_pes, map_pes) = splitAt num_folds pes
     (fold_ts, map_ts) = splitAt num_folds $ lambdaReturnType lam
     lam_res = bodyResult $ lambdaBody lam
@@ -435,8 +427,8 @@ removeDeadMapping (_, used) pat aux (Screma w form arrs)
           else Skip
 removeDeadMapping _ _ _ _ = Skip
 
-removeDuplicateMapOutput :: BottomUpRuleOp (Wise SOACS)
-removeDuplicateMapOutput (_, used) pat aux (Screma w form arrs)
+removeDuplicateMapOutput :: TopDownRuleOp (Wise SOACS)
+removeDuplicateMapOutput _ pat aux (Screma w form arrs)
   | Just fun <- isMapSOAC form =
     let ses = bodyResult $ lambdaBody fun
         ts = lambdaReturnType fun
@@ -456,9 +448,7 @@ removeDuplicateMapOutput (_, used) pat aux (Screma w form arrs)
                     }
             auxing aux $ letBind pat' $ Op $ Screma w (mapSOAC fun') arrs
             forM_ copies $ \(from, to) ->
-              if UT.isConsumed (patElemName to) used
-                then letBind (Pattern [] [to]) $ BasicOp $ Copy $ patElemName from
-                else letBind (Pattern [] [to]) $ BasicOp $ SubExp $ Var $ patElemName from
+              letBind (Pattern [] [to]) $ BasicOp $ Copy $ patElemName from
   where
     checkForDuplicates (ses_ts_pes', copies) (se, t, pe)
       | Just (_, _, pe') <- find (\(x, _, _) -> x == se) ses_ts_pes' =
@@ -698,10 +688,9 @@ simplifyKnownIterationSOAC _ pat _ op
     zipWithM_ bindResult red_pes red_res
     zipWithM_ bindArrayResult map_pes map_res
 simplifyKnownIterationSOAC _ pat _ op
-  | Just (Stream (Constant k) form fold_lam arrs) <- asSOAC op,
+  | Just (Stream (Constant k) _ fold_lam nes arrs) <- asSOAC op,
     oneIsh k = Simplify $ do
-    let nes = getStreamAccums form
-        (chunk_param, acc_params, slice_params) =
+    let (chunk_param, acc_params, slice_params) =
           partitionChunkedFoldParameters (length nes) (lambdaParams fold_lam)
 
     letBindNames [paramName chunk_param] $

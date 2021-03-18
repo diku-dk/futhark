@@ -5,8 +5,9 @@
 -- | @futhark bench@
 module Futhark.CLI.Bench (main) where
 
+import Control.Exception
 import Control.Monad
-import Control.Monad.Except
+import Control.Monad.Except hiding (throwError)
 import qualified Data.ByteString.Char8 as SBS
 import qualified Data.ByteString.Lazy.Char8 as LBS
 import Data.Either
@@ -176,24 +177,24 @@ withProgramServer program runner extra_options f = do
         | null runner = (binpath, extra_options)
         | otherwise = (runner, binpath : extra_options)
 
-  liftIO $ withServer to_run to_run_args f
+  liftIO $ withServer to_run to_run_args f `catch` onError
+  where
+    onError :: SomeException -> IO a
+    onError e = do
+      hPrint stderr e
+      exitFailure
 
 runBenchmark :: BenchOptions -> FutharkExe -> (FilePath, [InputOutputs]) -> IO [BenchResult]
-runBenchmark opts futhark (program, cases) =
-  withProgramServer program (optRunner opts) ("-L" : optExtraOptions opts) $ \server ->
-    mapM (forInputOutputs server) $ filter relevant cases
+runBenchmark opts futhark (program, cases) = do
+  (tuning_opts, tuning_desc) <- determineTuning (optTuning opts) program
+  let runopts = "-L" : optExtraOptions opts ++ tuning_opts
+  withProgramServer program (optRunner opts) runopts $ \server ->
+    mapM (forInputOutputs server tuning_desc) $ filter relevant cases
   where
-    forInputOutputs server (InputOutputs entry_name runs) = do
-      (tuning_opts, tuning_desc) <- determineTuning (optTuning opts) program
-
+    forInputOutputs server tuning_desc (InputOutputs entry_name runs) = do
       putStr $ inBold $ "\nResults for " ++ program' ++ tuning_desc ++ ":\n"
-      let opts' =
-            opts
-              { optExtraOptions =
-                  optExtraOptions opts ++ tuning_opts
-              }
       BenchResult program' . catMaybes
-        <$> mapM (runBenchmarkCase server opts' futhark program entry_name pad_to) runs
+        <$> mapM (runBenchmarkCase server opts futhark program entry_name pad_to) runs
       where
         program' =
           if entry_name == "main"

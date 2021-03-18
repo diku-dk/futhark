@@ -54,9 +54,10 @@ class Server:
         entry = self._get_entry_point(self._get_arg(args, 0))
         num_ins = len(entry[0])
         num_outs = len(entry[1])
+        exp_len = 1 + num_outs + num_ins
 
-        if len(args) != 1 + num_outs + num_ins:
-            raise self.Failure('Invalid argument count, expected %d')
+        if len(args) != exp_len:
+            raise self.Failure('Invalid argument count, expected %d' % exp_len)
 
         out_vnames = args[1:num_outs+1]
 
@@ -151,6 +152,7 @@ class Server:
 
     def run(self):
         while True:
+            print('%%% OK', flush=True)
             line = sys.stdin.readline()
             if line == '':
                 return
@@ -159,7 +161,5 @@ class Server:
             except self.Failure as e:
                 print('%%% FAILURE')
                 print(e.msg)
-            print('%%% OK', flush=True)
-
 
 # End of server.py
