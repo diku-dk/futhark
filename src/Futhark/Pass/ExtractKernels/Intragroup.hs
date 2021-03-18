@@ -10,7 +10,6 @@ module Futhark.Pass.ExtractKernels.Intragroup (intraGroupParallelise) where
 import Control.Monad.Identity
 import Control.Monad.RWS
 import Control.Monad.Trans.Maybe
-import Data.Function ((&))
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 import Futhark.Analysis.PrimExp.Convert
@@ -24,7 +23,6 @@ import Futhark.Pass.ExtractKernels.Distribution
 import Futhark.Pass.ExtractKernels.ToKernels
 import Futhark.Tools
 import qualified Futhark.Transform.FirstOrderTransform as FOT
-import Futhark.Util (chunks)
 import Futhark.Util.Log
 import Prelude hiding (log)
 
@@ -276,14 +274,10 @@ intraGroupStm lvl stm@(Let pat aux e) = do
       space <- mkSegSpace [(write_i, w)]
 
       let lam' = soacsLambdaToKernels lam
-          (dests_ws, dests_ns, dests_vs) = unzip3 dests
-          indexes = zipWith (*) dests_ns $ map length dests_ws
-          (i_res, v_res) = splitAt (sum indexes) $ bodyResult $ lambdaBody lam'
+          (dests_ws, _, _) = unzip3 dests
           krets = do
             (a_w, a, is_vs) <-
-              zip (chunks (concat $ zipWith (\ws n -> replicate n $ length ws) dests_ws dests_ns) i_res) v_res
-                & chunks dests_ns
-                & zip3 dests_ws dests_vs
+              groupScatterResults dests $ bodyResult $ lambdaBody lam'
             return $ WriteReturns a_w a [(map DimFix is, v) | (is, v) <- is_vs]
           inputs = do
             (p, p_a) <- zip (lambdaParams lam') ivs
