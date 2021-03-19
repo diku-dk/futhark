@@ -19,14 +19,14 @@ import Futhark.CodeGen.Backends.SequentialC.Boilerplate
 import qualified Futhark.CodeGen.ImpCode.Sequential as Imp
 import qualified Futhark.CodeGen.ImpGen.Sequential as ImpGen
 
-import Language.Futhark.Core (nameToString)
+--import Language.Futhark.Core (nameToString) -- TODO (see if might be useful later)
 import Futhark.IR.Primitive
 import Futhark.IR.SeqMem
 import Futhark.MonadFreshNames
 
 import qualified Data.Text as T
 import NeatInterpolation (text)
-import Data.List 
+import Data.List (nub, intercalate)
 
 -- | Compile the program to sequential C with a JavaScript wrapper.
 compileProg :: MonadFreshNames m => Prog SeqMem -> m (ImpGen.Warnings, (GC.CParts, String))
@@ -61,9 +61,9 @@ compileProg prog = do
 fRepMyRep :: Imp.Program -> [JSEntryPoint]
 fRepMyRep prog =
   let Imp.Definitions _ (Imp.Functions fs) = prog
-      res = map (\(n, Imp.Function b _ _ _ res args) -> JSEntryPoint {name = nameToString n , parameters = map extToString args, ret = map extToString res}) fs
+      result = map (\(n, Imp.Function _ _ _ _ res args) -> JSEntryPoint {name = nameToString n , parameters = map extToString args, ret = map extToString res}) fs
       -- TODO take futhark_entry from nameToString n
-  in res
+  in result
 
 
 
@@ -79,11 +79,12 @@ extToString (Imp.TransparentValue (Imp.ScalarValue (IntType Int8 ) Imp.TypeUnsig
 extToString (Imp.TransparentValue (Imp.ScalarValue (IntType Int16) Imp.TypeUnsigned  _)) = "u16"
 extToString (Imp.TransparentValue (Imp.ScalarValue (IntType Int32) Imp.TypeUnsigned  _)) = "u32"
 extToString (Imp.TransparentValue (Imp.ScalarValue (IntType Int64) Imp.TypeUnsigned  _)) = "u64"
--- TODO 
+extToString _ = "SEE_TODO_32"
+-- TODO 32
 -- Handle Booleans
 -- Hhandle OpaqueTypes
 
-type EntryPointName = String
+--type EntryPointName = String
 type EntryPointTyp = String
 data JSEntryPoint = JSEntryPoint { name :: String,
                                    parameters :: [EntryPointTyp],
@@ -103,8 +104,8 @@ initFunc =
   }
   |]
 
-initDataHeap :: Int -> String -> String
-initDataHeap idx arrType = "    var dataHeap" ++ show idx ++ " = initData(new " ++ arrType ++ "(1));"
+-- initDataHeap :: Int -> String -> String
+-- initDataHeap idx arrType = "    var dataHeap" ++ show idx ++ " = initData(new " ++ arrType ++ "(1));"
 
 dataHeapConv :: String -> String -> String
 dataHeapConv size arrType = 
@@ -167,16 +168,15 @@ arrWrapper =
         return this.arr;
       }
 
-    bytes_per_element() {
-      return this.arr.BYTES_PER_ELEMENT;
-    }
+      bytes_per_element() {
+        return this.arr.BYTES_PER_ELEMENT;
+      }
 
-    str_type() {
-      return this.arr.constructor.name;
-    }
-      
-
-  } 
+      str_type() {
+        return this.arr.constructor.name;
+      }
+        
+    } 
   |]
 
   
@@ -263,8 +263,8 @@ jsWrapEntryPoint jse =
     ptrRes i _ = "res" ++ show i
     ptrResValue i _ = "new ArrayWrapper(this, getValue(res" ++ show i ++ ", 'i32'), '" 
                         ++ (baseType (ret jse !! i)) ++ "', " ++ show (dim (ret jse !! i)) ++ ")"
-    retPtrOrOther i jse pre post f = if ((ret jse) !! i) !! 0 == '[' 
-                                  then f i $ (ret jse) !! i
+    retPtrOrOther i jse' pre post f = if ((ret jse') !! i) !! 0 == '[' 
+                                  then f i $ (ret jse') !! i
                                   else pre ++ show i ++ post
 
 
@@ -281,6 +281,7 @@ ptrFromWrap =
   |]
         
 
+cwrapEntryPoint :: JSEntryPoint -> String
 cwrapEntryPoint jse = 
   unlines 
   ["    futhark_entry_" ++ ename ++ " = Module.cwrap(", 
@@ -294,7 +295,7 @@ cwrapEntryPoint jse =
 
 initPtr :: Int -> EntryPointTyp -> String
 initPtr argNum ep =
-  let (i, jstype) = retType ep
+  let (i, _) = retType ep
   in 
     if i == 0 
     then "" else 
@@ -315,8 +316,9 @@ baseType typ = typ
 
 dim :: String -> Int
 dim ('[':']':end) = (dim end) + 1
-dim typ = 0
+dim _ = 0
 
+jsType :: String -> String
 jsType = (snd . retType)
 
 typeConversion :: String -> String
@@ -352,7 +354,7 @@ toFutharkArray str =
   arr = "arr"
   ofs = "dataHeap.byteOffset"
   i = dim str
-  dims = map (\i -> "dim" ++ show i) [0..i-1]
+  dims = map (\j -> "dim" ++ show j) [0..i-1]
   args1 = [arr] ++ dims
   args2 = [ctx, ofs] ++ dims
   ftype = baseType str
@@ -372,7 +374,6 @@ fromFutharkArrayShape str =
   where
     ctx = "this.ctx"
     arr = "futhark_arr"
-    dims = map (\i -> "dim" ++ show i) [0..i-1]
     args1 = [ctx, arr]
     i = dim str
     ftype = baseType str
@@ -395,9 +396,7 @@ fromFutharkArrayValues str =
   where
   ctx = "this.ctx"
   fut_arr = "fut_arr"
-  ptr = "ptr"
   ofs = "dataHeap.byteOffset"
-  dims = map (\i -> "dim" ++ show i) [0..i-1]
   args1 = [fut_arr]
   args2 = [ctx, fut_arr, ofs]
   i = dim str
