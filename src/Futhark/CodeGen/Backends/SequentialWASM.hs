@@ -121,6 +121,8 @@ javascriptWrapper entryPoints = unlines
    cwrapsJSE entryPoints,
   unlines $ map (cwrapEntryPoint) entryPoints,
   initFunc,
+  ptrFromWrap,
+  arrWrapper,
   classDef,
   constructor,
   unlines $ concatMap (\jse -> map toFutharkArray (parameters jse)) entryPoints,
@@ -136,23 +138,26 @@ arrWrapper :: String
 arrWrapper = 
   T.unpack 
   [text|
-    class array_wrapper {
+    class ArrayWrapper {
       constructor(fc, ptr, typ, dim) {
+        this.dim = dim;
+        this.typ = typ;
         this.ptr = ptr;
-        this.arr = eval(func_name('values'))(this.ptr);
+        this.fc = fc;
+        this.arr = this.fc[this.func_name('values')].apply(this.fc, [this.ptr]);
         this.arr_init = false;
         this.shape_init = false;
       }
 
       func_name(fname) {
-        return 'this.fc.futhark_' + fname + '_' + this.typ + '_' + dim + 'd_arr';
+        return 'from_futhark_' + fname + '_' + this.typ + '_' + this.dim + 'd_arr';
       }
 
       shape() {
         if (this.shape_init) {
           return this.shape;
         } else {
-          this.shape = eval(func_name('shape'))(this.ptr);
+          this.shape = this.fc[this.func_name('values')].apply(this.fc, [this.ptr]);
           this.shape_init = true;
           return this.shape;
        }
@@ -202,10 +207,12 @@ cwrapFun fname numArgs =
   T.unpack
   [text|
   ${fn} = Module.cwrap(
-    '${fn}', 'number', [$(intercalate ", " (replicate numArgs "'number'"))],
+    '${fn}', 'number', [${args}],
   );
   |]
-  where fn = T.pack fname
+  where 
+   fn = T.pack fname
+   args = T.pack $ intercalate ", " $ replicate numArgs "'number'"
 
   
 classDef :: String
@@ -235,6 +242,7 @@ jsWrapEntryPoint jse =
   ["  " ++ func_name ++ "(" ++ args1 ++ ") {",
   --inits,
   initPtrs,
+  paramsToPtr,
   "    futhark_entry_" ++ func_name ++ "(this.ctx, " ++ rets ++ ", " ++ args1 ++ ");",
   results,  
   "    futhark_context_sync(this.ctx);",
@@ -250,12 +258,28 @@ jsWrapEntryPoint jse =
     results = unlines $ map (\i -> if (ret jse !! i) !! 0 == '[' then "" else resDataHeap i (convTypes !! i)) alr
     rets = intercalate ", " [retPtrOrOther i jse "dataHeap" ".byteOffset" ptrRes | i <- alr]
     args1 = intercalate ", " ["in" ++ show i | i <- alp]
+    paramsToPtr = unlines ["  in" ++ show i ++ " = ptrFromWrap(in" ++ show i ++ ")" | i <- alp]
     res = intercalate ", " [retPtrOrOther i jse "res" "[0]" ptrResValue | i <- alr]
     ptrRes i _ = "res" ++ show i
-    ptrResValue i _ = "getValue(res" ++ show i ++ ", 'i32')"
+    ptrResValue i _ = "new ArrayWrapper(this, getValue(res" ++ show i ++ ", 'i32'), '" 
+                        ++ (baseType (ret jse !! i)) ++ "', " ++ show (dim (ret jse !! i)) ++ ")"
     retPtrOrOther i jse pre post f = if ((ret jse) !! i) !! 0 == '[' 
                                   then f i $ (ret jse) !! i
                                   else pre ++ show i ++ post
+
+
+ptrFromWrap :: String
+ptrFromWrap =
+  T.unpack [text|
+    function ptrFromWrap(x) {
+      if (x.constructor.name == "ArrayWrapper") {
+        return x.ptr;
+      } else {
+        return x;
+      }
+    }
+  |]
+        
 
 cwrapEntryPoint jse = 
   unlines 
