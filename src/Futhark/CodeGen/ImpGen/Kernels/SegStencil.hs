@@ -21,7 +21,7 @@ compileSegStencil ::
   StencilOp KernelsMem ->
   KernelBody KernelsMem ->
   CallKernelGen ()
-compileSegStencil = compileGlobalReadFlat
+compileSegStencil = compileBigTile
 
 -- the provided one has a ton of common subexpressions so a new one was made
 -- !!!! It does however require the variables of dim be subjected to
@@ -74,8 +74,11 @@ compileGlobalReadFlat pat lvl space op kbody = do
       emit $ Imp.DebugPrint "\n# SegStencil" Nothing
       let virt_num_groups =
             sExt32 $ product dims `divUp` group_size_flat
+
+      virt_num_groups_var <- dPrimVE "virt_num_groups" virt_num_groups
+
       sKernelThread "segstencil" num_groups' group_size_flat_c (segFlat space) $
-        virtualiseGroups (segVirt lvl) virt_num_groups $ \group_id_flat_exp -> do
+        virtualiseGroups (segVirt lvl) virt_num_groups_var $ \group_id_flat_exp -> do
           group_id_flat <- dPrimVE "group_id_flat" $ sExt64 group_id_flat_exp
           local_id_flat <- dPrimVE "local_id_flat" . sExt64 . kernelLocalThreadId . kernelConstants =<< askEnv
 
@@ -164,9 +167,13 @@ compileBigTile pat lvl space op kbody = do
       let dims_round_up = zipWith (*) grid_sizes group_sizes
           virt_num_groups =
             sExt32 $ product dims_round_up `divUp` unCount group_size_flat_c
+
+      virt_num_groups_var <- dPrimVE "virt_num_groups" virt_num_groups
+
       sKernelThread "segstencil" num_groups' group_size_flat_c (segFlat space) $
-        virtualiseGroups (segVirt lvl) virt_num_groups $ \group_id_flat_exp -> do
+        virtualiseGroups (segVirt lvl) virt_num_groups_var $ \group_id_flat_exp -> do
           group_id_flat <- dPrimVE "group_id_flat" $ sExt64 group_id_flat_exp
+          -- move the localId stuff outside of the virtualisegroup loop if possible.
           local_id_flat <- dPrimVE "local_id_flat" . sExt64 . kernelLocalThreadId . kernelConstants =<< askEnv
           local_ids <- unflattenIx "local_id" (map sExt64 inner_group) local_id_flat
           group_ids <- unflattenIx "group_id" (map sExt64 inner_grid) group_id_flat
@@ -180,7 +187,10 @@ compileBigTile pat lvl space op kbody = do
             mapM (dPrimVE "writeSet_offset") $ zipWith (*) group_ids group_sizes
           -- create offsets for the readSet
           readSet_offsets <- mapM (dPrimVE "readSet_offset") $ zipWith (+) writeSet_offsets a_mins
-
+          
+          --We need to unroll this with a #pragma unroll (However, some of the variables are not garuanteed to be constant at compile-time
+          --, how do we fix it?)
+          --Also optimize the flattenIndex such that we use fewer multiplications z*a*b + y*b + x = (z*a+y)*b + x
           sLoopNest (Shape $ map (Var . tvVar) readSet_iters) $ \ix_list -> do
             tile_locals <- mapM (dPrimVE "tile_local") $ zipWith (+) local_ids $ zipWith (*) ix_list group_sizes
             tile_read_gids <- mapM (dPrimVE "tile_read_gid") $ bound_idxs $ zipWith (+) readSet_offsets tile_locals

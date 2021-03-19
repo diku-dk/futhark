@@ -1299,11 +1299,14 @@ virtualiseGroups SegVirt required_groups m = do
   constants <- kernelConstants <$> askEnv
   phys_group_id <- dPrim "phys_group_id" int32
   sOp $ Imp.GetGroupId (tvVar phys_group_id) 0
+  
   let iterations =
         (required_groups - tvExp phys_group_id)
           `divUp` sExt32 (kernelNumGroups constants)
 
-  sFor "i" iterations $ \i -> do
+  num_iterations <- dPrimVE "iterations" iterations
+
+  sFor "i" num_iterations $ \i -> do
     m . tvExp
       =<< dPrimV
         "virt_group_id"
