@@ -88,6 +88,14 @@ scanExc desc scan arrs = do
     nes = scanNeutral scan
     ts = lambdaReturnType $ scanLambda scan
 
+chunk2 :: [VName] -> [(VName,VName)]
+chunk2 [] = []
+chunk2 (a:b:r) = (a,b) : chunk2 r
+chunk2 _ = error "Rev.hs, chunk2: impossible case reached!"
+
+p_int64 :: PrimType
+p_int64 = IntType Int64
+
 onePrimValue :: PrimType -> PrimValue
 onePrimValue (IntType Int8) = IntValue $ Int8Value 1
 onePrimValue (IntType Int16) = IntValue $ Int16Value 1
@@ -186,6 +194,81 @@ flipConvOp (UIToFP from to) = FPToSI to from
 flipConvOp (SIToFP from to) = FPToSI to from
 flipConvOp (IToB from) = BToI from
 flipConvOp (BToI to) = IToB to
+
+-------------------------------------------
+--- Helpers for Histogram and Reduction ---
+-------------------------------------------
+
+withinBounds :: VName -> SubExp -> TPrimExp Bool VName
+withinBounds i q = (le64 i .<. pe64 q) .&&. (pe64 (intConst Int64 (-1)) .<. le64 i)
+
+peElemEq0 :: PrimType -> Param Type -> PrimExp VName
+peElemEq0 ptp farg = CmpOpExp (CmpEq ptp) (LeafExp (paramName farg) ptp)
+                                          (ValueExp (blankPrimValue ptp))
+
+helperMulOp1 :: PrimType -> BinOp -> ADM (Lambda, Lambda)
+helperMulOp1 ptp bop = do
+  -- on forward sweep: create the map lambda 
+  let eltp = Prim ptp
+  farg <- newParam "arg" eltp
+  map_lam_bdy <- runBodyBinder . localScope (scopeOfLParams [farg]) $
+    eBody [ eIf ( toExp $ peElemEq0 ptp farg )
+                ( resultBodyM [Constant $ onePrimValue ptp, intConst Int64 1] )
+                ( resultBodyM [Var (paramName farg), intConst Int64 0] )
+          ]
+  let map_lam = Lambda [farg] map_lam_bdy [eltp, Prim p_int64]
+  -- still on forward sweep: create the reduce lambda [*, +]
+  fargs_prod <- mapM (`newParam` eltp) ["acc_prod", "arg_val"]
+  fargs_count<- mapM (`newParam` (Prim p_int64)) ["acc_count", "arg_count"]
+  let ([acc_v, arg_v], [acc_c, arg_c]) = (fargs_prod, fargs_count)
+  red_lam_bdy <- runBodyBinder . localScope (scopeOfLParams (fargs_prod++fargs_count)) $ do
+    r_prod <- letSubExp "res_prod" $ BasicOp $ BinOp bop
+                        (Var $ paramName acc_v) (Var $ paramName arg_v)
+    r_count<- letSubExp "res_count" =<< toExp (le64 (paramName acc_c) + le64 (paramName arg_c))
+    resultBodyM [r_prod, r_count]
+  let red_lam = Lambda [acc_v, acc_c, arg_v, arg_c] red_lam_bdy [eltp, Prim p_int64]
+  return (map_lam, red_lam)
+
+helperMulOp2 :: PrimType -> VName -> VName -> VName -> ADM (Stms SOACS)
+helperMulOp2 ptp nz_prod zr_count prod = do  
+  -- on forward sweep: if statement to recover the potentially-zero product
+  runBinder_ $ do
+    tmps <- letTupExp "tmp_if_res" =<<
+      eIf ( toExp $ le64 zr_count .>. pe64 (intConst Int64 0) )
+          ( resultBodyM [Constant $ blankPrimValue ptp] )
+          ( resultBodyM [Var nz_prod] )
+    addStm (mkLet [] [Ident prod $ Prim ptp] $ BasicOp $ SubExp $ Var $ head tmps)
+
+helperMulOp3 :: PrimType -> BinOp -> VName -> VName -> Param Type -> VName -> ADM Body
+helperMulOp3 ptp bop nz_prod zr_count fa_orig prod_bar = do
+  -- if zero_count == 0 then (nz_prod / a) * p_bar
+  --                            else if zero_count == 1 && a == 0
+  --                                 then nz_prod * p_bar
+  --                                 else 0
+  let params = zipWith Param [nz_prod, zr_count, prod_bar] [Prim ptp, Prim p_int64, Prim ptp]
+  runBodyBinder . localScope (scopeOfLParams (fa_orig:params)) $
+    eBody[
+          eIf ( toExp $ le64 zr_count .<.  pe64 (intConst Int64 1) )
+              ( do  div_se <- letSubExp "div_res" $ BasicOp $ BinOp (getBinOpDiv bop)
+                                           (Var nz_prod) (Var $ paramName fa_orig)
+                    res_se <- letSubExp "res_ctrb"$ BasicOp $ BinOp bop div_se (Var prod_bar)
+                    resultBodyM [res_se]
+              )
+              ( eBody 
+                    [ eIf (toExp $ BinOpExp LogAnd (peElemEq0 ptp fa_orig) (eqToOne zr_count) )
+                          ( do res_se <- letSubExp "res_ctrb"$ BasicOp $ BinOp bop
+                                                        (Var nz_prod) (Var prod_bar)
+                               resultBodyM [res_se]
+                          )
+                          ( resultBodyM [Constant $ blankPrimValue ptp] )
+                    ]
+              )
+         ]
+  where
+    eqToOne v_nm = CmpOpExp (CmpEq p_int64) (LeafExp v_nm p_int64) (ValueExp $ IntValue $ Int64Value (-1))
+    getBinOpDiv (Mul t _) = SDiv t Unsafe
+    getBinOpDiv (FMul t)  = FDiv t
+    getBinOpDiv _ = error "In Rev.hs, getBinOpDiv, unreachable case reached!"
 
 ------------------------
 --- Helpers for Scan ---
@@ -745,20 +828,48 @@ diffBasicOp pat aux e m =
     UpdateAcc {} -> error "Reverse-mode UpdateAcc not handled yet."
 
 diffSOAC :: Pattern -> StmAux () -> SOAC SOACS -> ADM () -> ADM ()
--- special case: reduce (+)
+-- special reduce case: + or (map +)
 diffSOAC pat@(Pattern [] [pe]) aux soac@(Screma _ form [as]) m
   | Just [red] <- isReduceSOAC form,
     lam <- redLambda red,
     Just _ <- isAddTowLam lam = do
     addStm $ Let pat aux $ Op soac
     m
-    pe_adj <- lookupAdj $ patElemName pe
+    pe_bar <- lookupAdj $ patElemName pe
     as_tp <- lookupType as
-    v_rep <- letTupExp "v_rep" $ BasicOp $ Replicate (shpFstDim $ arrayShape as_tp) $ Var pe_adj
+    v_rep <- letTupExp "v_rep" $ BasicOp $ Replicate (shpFstDim $ arrayShape as_tp) $ Var pe_bar
     zipWithM_ updateAdjoint [as] v_rep
   where
     shpFstDim (Shape []) = error "error in shpFstDim in Rev.hs"
     shpFstDim (Shape (d:_)) = Shape [d]
+-- special histo case: + or (map +)
+-- ToDo: not sure if correct since we do not consider what was already inside the histogram!!!
+diffSOAC pat@(Pattern [] [pe]) aux (Hist n [hist_add] f [is,vs]) m
+  | isIdentityLambda f,
+    HistOp w rf [orig_dst] [ne] add_lam <- hist_add,
+    Just _ <- isAddTowLam add_lam = do
+    -- need to create a copy of the orig histo, because the reverse trace might need
+    -- the values of the original histogram input!
+    dst_cpy<- letExp (baseString orig_dst ++ "_copy") $ BasicOp $ Copy $ orig_dst
+    let histo' = Hist n [HistOp w rf [dst_cpy] [ne] add_lam] f [is,vs]
+    addStm $ Let pat aux $ Op histo'
+    m
+    let (nes, eltp) = (histNeutral hist_add, head $ lambdaReturnType add_lam)
+    pe_bar <- lookupAdj $ patElemName pe
+    pind <- newParam "ind" (Prim p_int64)
+    let i = paramName pind
+    map_bar_lam_bdy <- runBodyBinder . localScope (scopeOfLParams [pind]) $
+      eBody [ eIf ( toExp $ withinBounds i w)
+                  ( do r <- letSubExp "r" $ BasicOp $ Index pe_bar $ DimFix (Var i) : fullSlice eltp [] 
+                       resultBodyM [r]
+                  )
+                  ( resultBodyM nes )
+            ]
+    let map_bar_lam = Lambda [pind] map_bar_lam_bdy [eltp]
+    vs_bar <- letTupExp "vs_bar" $ Op $ Screma n (ScremaForm [] [] map_bar_lam) [vs]
+    zipWithM_ updateAdjoint [vs] vs_bar
+    zipWithM_ updateAdjoint [orig_dst] [pe_bar]
+--
 -- Special reduce case: p = reduce (*) 1 as
 -- Forward trace: 
 --    let (nz_prod, zero_count) =
@@ -770,7 +881,7 @@ diffSOAC pat@(Pattern [] [pe]) aux soac@(Screma _ form [as]) m
 --                                 then nz_prod * p_bar
 --                                 else 0
 --                     ) as 
-diffSOAC (Pattern [] [pe]) _ (Screma w form [as]) m
+diffSOAC (Pattern [] [pe]) aux (Screma w form [as]) m
   | Just [red] <- isReduceSOAC form,
     lam <- redLambda red,
     Just bop <- isMulLam lam,
@@ -778,78 +889,109 @@ diffSOAC (Pattern [] [pe]) _ (Screma w form [as]) m
     Prim ptp  <- eltp = do
     -- Forward pass modifies the reduce (*) original soac to compute the
     --     product of non-zero elements and the number of zero elements.
-    -- first create the map_lambda
-    farg <- newParam "arg" eltp
-    map_lam_bdy <- runBodyBinder . localScope (scopeOfLParams [farg]) $
-      eBody [ eIf ( toExp $ pe_elem_eq_0 ptp farg )
-                  ( resultBodyM [Constant $ onePrimValue ptp, intConst Int64 1] )
-                  ( resultBodyM [Var (paramName farg), intConst Int64 0] )
-            ]
-    let map_lam = Lambda [farg] map_lam_bdy [eltp, Prim p_int64]
-    -- still on forward trace: we create the reduce lambda [*, +]
-    fargs_prod <- mapM (`newParam` eltp) ["acc_prod", "arg_val"]
-    fargs_count<- mapM (`newParam` (Prim p_int64)) ["acc_count", "arg_count"]
-    let ([acc_v, arg_v], [acc_c, arg_c]) = (fargs_prod, fargs_count)
-    red_lam_bdy <- runBodyBinder . localScope (scopeOfLParams (fargs_prod++fargs_count)) $ do
-      r_prod <- letSubExp "res_prod" $ BasicOp $ BinOp bop
-                          (Var $ paramName acc_v) (Var $ paramName arg_v)
-      r_count<- letSubExp "res_count" =<< toExp (le64 (paramName acc_c) + le64 (paramName arg_c))
-      resultBodyM [r_prod, r_count]
-    let red_lam = Lambda [acc_v, acc_c, arg_v, arg_c] red_lam_bdy [eltp, Prim p_int64]
-    -- still on forward trace: create the map-reduce soac
-    pe_nzprod<- newVName "non_zero_prod"
-    pe_count <- newVName "zero_count"
+    -- create the redomap soac:
+    (map_lam, red_lam) <- helperMulOp1 ptp bop
+    nz_prod  <- newVName "non_zero_prod"
+    zr_count <- newVName "zero_count"
     let red_frm = Reduce Commutative red_lam [Constant $ onePrimValue ptp, intConst Int64 0]
-    let soac_stm = mkLet [] [Ident pe_nzprod eltp, Ident pe_count $ Prim p_int64] $
-                            Op $ Screma w (ScremaForm [] [red_frm] map_lam) [as]
-    addStm soac_stm
+    let soac_pat = Pattern [] [PatElem nz_prod eltp, PatElem zr_count $ Prim p_int64]
+    let soac_exp = Op $ Screma w (ScremaForm [] [red_frm] map_lam) [as]
+    auxing aux $ letBind soac_pat soac_exp
+    -- addStm soac_stm
     -- still on forward trace: insert an if statement to recover the zero product
-    if_stms <- runBinder_ $ do
-      tmps <- letTupExp "tmp_if_res" =<<
-        eIf ( toExp $ le64 pe_count .>. pe64 (intConst Int64 0) )
-            ( resultBodyM [Constant $ blankPrimValue ptp] )
-            ( resultBodyM [Var pe_nzprod] )
-      addStm (mkLet [] [Ident (patElemName pe) eltp] $ BasicOp $ SubExp $ Var $ head tmps)
+    if_stms <- helperMulOp2 ptp nz_prod zr_count (patElemName pe)
     addStms if_stms
     m
     -- Reverse trase requires a map (see opening comment)
-    pe_adj <- lookupAdj $ patElemName pe
+    prod_bar <- lookupAdj $ patElemName pe
     farg_orig <- newParam "arg" eltp
-    map_bar_lam_bdy <- runBodyBinder . localScope (scopeOfLParams [farg_orig]) $
-      eBody
-          [ eIf ( toExp $ le64 pe_count .<.  pe64 (intConst Int64 1) )
-                ( do div_se <- letSubExp "div_res" $ BasicOp $ BinOp (getBinOpDiv bop)
-                                  (Var pe_nzprod) (Var $ paramName farg_orig)
-                     res_se <- letSubExp "res_ctrb"$ BasicOp $ BinOp bop div_se (Var pe_adj)
-                     resultBodyM [res_se]
-                )
-                ( eBody 
-                      [ eIf (toExp $ BinOpExp LogAnd (pe_elem_eq_0 ptp farg_orig) (pe_count_eq_1 pe_count) )
-                            ( do res_se <- letSubExp "res_ctrb"$ BasicOp $ BinOp bop
-                                                        (Var pe_nzprod) (Var pe_adj)
-                                 resultBodyM [res_se]
-                            )
-                            ( resultBodyM [Constant $ blankPrimValue ptp] )
-                      ]
-                )
-          ]
+    map_bar_lam_bdy <- helperMulOp3 ptp bop nz_prod zr_count farg_orig prod_bar
     let map_bar_lam = Lambda [farg_orig] map_bar_lam_bdy [eltp]
     as_bar <- letTupExp "as_bar" $ Op $ Screma w (ScremaForm [] [] map_bar_lam) [as]
     zipWithM_ updateAdjoint [as] as_bar
+-- special histo case: *
+diffSOAC (Pattern [] [pe]) aux (Hist n [hist_mul] f [is,vs]) m
+  | isIdentityLambda f,
+    HistOp w rf [orig_dst] [ne] mul_lam <- hist_mul,
+    Just mulop <- isMulLam mul_lam,
+    [eltp] <- lambdaReturnType mul_lam,
+    Prim ptp  <- eltp = do
+    -- starts here:
+    let pe_tp = patElemDec pe
+    (map_lam, _) <- helperMulOp1 ptp mulop
+    vs_lift   <- letTupExp "nzel_zrct" $ Op $ Screma n (ScremaForm [] [] map_lam) [vs]
+    let [nz_vs, one_zrs] = vs_lift
+    zr_counts0<- letExp "zr_cts" $ BasicOp $ Replicate (Shape [w]) (intConst Int64 0)
+    nz_prods0 <- letExp "nz_prd" $ BasicOp $ Replicate (Shape [w]) ne
+    nz_prods  <- newVName "non_zero_prod"
+    zr_counts <- newVName "zero_count"
+    lam_add <- mkLamAddI64
+    let hist_zrn = HistOp w rf [zr_counts0] [intConst Int64 0] lam_add
+    let hist_nzp = HistOp w rf [nz_prods0 ] [ne] mul_lam
+    f' <- mkIdentityLambda [Prim p_int64, eltp, Prim p_int64, Prim p_int64]
+    let soac_pat = Pattern [] [PatElem nz_prods pe_tp, PatElem zr_counts $ Array (ElemPrim p_int64) (Shape [w]) NoUniqueness]
+    let soac_exp = Op $ Hist n [hist_nzp, hist_zrn] f' [is, nz_vs, is, one_zrs]
+    auxing aux $ letBind soac_pat soac_exp
+    -- construct the histo result:
+    res_part <- newVName "res_part"
+    ps2 <- zipWithM newParam ["nz_pr", "zr_ct"] [eltp, Prim p_int64]
+    let [nz_prod, zr_count] = map paramName ps2
+    if_stms <- helperMulOp2 ptp nz_prod zr_count res_part
+    lam_bdy_2 <- runBodyBinder . localScope (scopeOfLParams ps2) $ do
+                    addStms if_stms
+                    resultBodyM [Var res_part]
+    h_part <- letExp "hist_part" $ Op $ Screma w
+        (ScremaForm [] [] (Lambda ps2 lam_bdy_2 [eltp])) [nz_prods, zr_counts]
+    ps3 <- zipWithM newParam ["h_orig", "h_part"] [eltp, eltp]
+    let [ph_orig, ph_part] = map paramName ps3
+    lam_pe_bdy <- runBodyBinder . localScope (scopeOfLParams ps3) $ do
+                    r <- letSubExp "res" $ BasicOp $ BinOp mulop (Var ph_orig) (Var ph_part)
+                    resultBodyM [r]
+    auxing aux $ letBind (Pattern [] [pe]) $ Op $ Screma w
+        (ScremaForm [] [] (Lambda ps3 lam_pe_bdy [eltp])) [orig_dst, h_part]
+    m
+    -- reverse trace
+    pe_bar <- lookupAdj $ patElemName pe
+    pj <- newParam "j" (Prim p_int64)
+    pv <- newParam "v" eltp
+    let j = paramName pj
+    ((zr_cts, pr_bar, nz_prd), tmp_stms) <- runBinderT' . localScope (scopeOfLParams [pj, pv]) $ do
+          zr_cts <- letExp "zr_cts" $ BasicOp $ Index zr_counts $ DimFix (Var j) : fullSlice eltp []
+          pr_bar <- letExp "pr_bar" $ BasicOp $ Index pe_bar    $ DimFix (Var j) : fullSlice eltp []
+          nz_prd <- letExp "nz_prd" $ BasicOp $ Index nz_prods  $ DimFix (Var j) : []
+          return (zr_cts, pr_bar, nz_prd)
+    bdy_tmp <- helperMulOp3 ptp mulop nz_prd zr_cts pv pr_bar
+    lam_bar <- runBodyBinder . localScope (scopeOfLParams [pj, pv]) $
+                eBody [ eIf (toExp $ withinBounds j w)
+                            (do addStms (tmp_stms <> bodyStms bdy_tmp)
+                                resultBodyM (bodyResult bdy_tmp)
+                            )
+                            ( resultBodyM [Constant $ blankPrimValue ptp] )
+                      ]
+    vs_bar <- letTupExp (baseString vs ++ "_bar") $ Op $ Screma n
+                (ScremaForm [] [] (Lambda [pj, pv] lam_bar [eltp])) [patElemName pe, vs]
+    zipWithM_ updateAdjoint [vs] vs_bar
+    -- now update the orig_dst with its proper bar
+    mul_lam' <- renameLambda mul_lam
+    orig_bar <- letTupExp (baseString orig_dst ++ "_bar") $ Op $ Screma w
+                  (ScremaForm [] [] mul_lam') [h_part, pe_bar]
+    zipWithM_ updateAdjoint [orig_dst] orig_bar
     where
-      p_int64 = IntType Int64
-      pe_zero ptp = ValueExp (blankPrimValue ptp)
-      pe_elem_eq_0 ptp farg = CmpOpExp (CmpEq ptp) (LeafExp (paramName farg) ptp) (pe_zero ptp)
-      pe_count_eq_1 v_nm = CmpOpExp (CmpEq p_int64) (LeafExp v_nm p_int64) (ValueExp $ IntValue $ Int64Value (-1))
-      getBinOpDiv (Mul ptp _) = SDiv ptp Unsafe
-      getBinOpDiv (FMul ptp)  = FDiv ptp
-      getBinOpDiv _ = error "In Rev.hs, getBinOpDiv, unreachable case reached!"
+      mkLamAddI64 = do
+        pab <- zipWithM newParam ["a", "b"] [Prim p_int64, Prim p_int64]
+        let [a,b] = map paramName pab
+        let addop = (Add Int64 OverflowUndef)
+        lam_bdy <- runBodyBinder . localScope (scopeOfLParams pab) $ do
+                      r <- letSubExp "r" $ BasicOp $ BinOp addop (Var a) (Var b)
+                      resultBodyM [r]
+        return $ Lambda pab lam_bdy [Prim p_int64]
+--
 -- Special case of min/max:
 --    let m = reduce minmax ne_min as
 -- Forward trace (assuming w = length as):
 --    let (m_tmp, m_ind) = map2 (\ v i -> (v,i)) as (iota w)
 --      |> reduce (\ acc_v acc_i v i ->
---                    if (acc_v == v) then (acc_v, min acc_i, v_i)
+--                    if (acc_v == v) then (acc_v, min acc_i, i)
 --                    else if (acc_v == minmax acc_v v)
 --                         then (acc_v, acc_i)
 --                         else (v, i)
@@ -901,7 +1043,6 @@ diffSOAC (Pattern [] [pe]) _ (Screma w form [as]) m
     let as_slice = [ DimSlice (Var mm_ind) (Var num_elems) (intConst Int64 1) ]
     void $ updateAdjointSlice as_slice as pe_bar_repl
     where
-      p_int64 = IntType Int64
       min_idx_pexp i1 i2 = BinOpExp (SMin Int64) (LeafExp i1 p_int64) (LeafExp i2 p_int64)
       get_cmp_pexp bop ptp facc farg =
         let [leaf_acc, leaf_arg] = map (`LeafExp` ptp) [facc, farg]
@@ -909,6 +1050,7 @@ diffSOAC (Pattern [] [pe]) _ (Screma w form [as]) m
             , CmpOpExp (CmpEq ptp) leaf_acc $ BinOpExp bop leaf_acc leaf_arg )
       mind_eq_min1 ind = CmpOpExp (CmpEq (IntType Int64)) (LeafExp ind p_int64)
                                         (ValueExp (IntValue $ Int64Value (-1)))
+diffSOAC _ _ (Hist _ _ _ _) _ = error "AD, Rev.hs, unsupported histogram case!"
 --
 -- Differentiating: let y = reduce \odot ne xs
 -- is implemented as:
@@ -1066,10 +1208,6 @@ diffSOAC pat@(Pattern [] pes) aux soac@(Screma n (ScremaForm [scn] [] f) xs) m
       (xs_contribs, fin_map_stms) <- mkScanFinalMap n (scanLambda scn) xs ys red_nms
       addStms fin_map_stms
       inScopeOf scp $ zipWithM_ updateAdjoint xs xs_contribs
-    where
-      chunk2 [] = []
-      chunk2 (a:b:r) = (a,b) : chunk2 r
-      chunk2 _ = error "Rev.hs, chunk2: impossible case reached!"
 -- a map translates to generalized reduction
 diffSOAC pat@(Pattern [] pes) aux soac@(Screma w form as) m
   | Just lam <- isMapSOAC form = do
