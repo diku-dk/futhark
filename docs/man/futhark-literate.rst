@@ -140,10 +140,11 @@ The following directives are supported:
 
 * ``> :img e``
 
-  Visualises ``e``, which must be of type ``[][]i32``, ``[][]u32`` or
-  ``[][]f32``. The two first are interpreted as rows of ARGB pixel
-  values, while the last is interpreted as greyscale (value should be
-  in the range from 0 to 1).
+  Visualises ``e``, which must be of type ``[][]i32``, ``[][]u32``,
+  ``[][]u8``, ``[][]f32`` or ``[][]f64``. The two first are
+  interpreted as rows of ARGB pixel values, while the last three are
+  interpreted as greyscale (f32 and f64 values should be in the range
+  from 0 to 1).
 
 * ``> :plot2d e[; size=(height,width)]``
 
