@@ -1,5 +1,6 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeFamilies #-}
 
 module Futhark.Pass.ExtractMulticore (extractMulticore) where
@@ -118,12 +119,12 @@ transformStm (Let pat aux (DoLoop ctx val form body)) = do
 transformStm (Let pat aux (If cond tbranch fbranch ret)) =
   oneStm . Let pat aux
     <$> (If cond <$> transformBody tbranch <*> transformBody fbranch <*> pure ret)
-transformStm (Let pat aux (WithAcc shape arrs lam op)) =
+transformStm (Let pat aux (WithAcc inputs lam)) =
   oneStm . Let pat aux
-    <$> ( WithAcc shape arrs
-            <$> transformLambda lam
-            <*> traverse (bitraverse transformLambda pure) op
-        )
+    <$> (WithAcc <$> mapM transformInput inputs <*> transformLambda lam)
+  where
+    transformInput (shape, arrs, op) =
+      (shape,arrs,) <$> traverse (bitraverse transformLambda pure) op
 transformStm (Let pat aux (Op op)) =
   fmap (certify (stmAuxCerts aux)) <$> transformSOAC pat (stmAuxAttrs aux) op
 

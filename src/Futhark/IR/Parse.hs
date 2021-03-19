@@ -462,14 +462,15 @@ pScan pr =
 pMkAcc :: PR lore -> Parser (Exp lore)
 pMkAcc pr =
   keyword "with_acc"
-    *> parens
-      ( WithAcc
-          <$> pShape <* pComma
-          <*> pVNames <* pComma
-          <*> pLambda pr
-          <*> optional (pComma *> pCombFun)
-      )
+    *> parens (WithAcc <$> braces (pInput `sepBy` pComma) <* pComma <*> pLambda pr)
   where
+    pInput =
+      parens
+        ( (,,)
+            <$> pShape <* pComma
+            <*> pVNames
+            <*> optional (pComma *> pCombFun)
+        )
     pCombFun = parens ((,) <$> pLambda pr <* pComma <*> pSubExps)
 
 pExp :: PR lore -> Parser (Exp lore)

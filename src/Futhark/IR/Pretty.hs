@@ -280,14 +280,17 @@ instance PrettyLore lore => Pretty (Exp lore) where
       (ctxparams, ctxinit) = unzip ctx
       (valparams, valinit) = unzip val
       pprLoopVar (p, a) = ppr p <+> text "in" <+> ppr a
-  ppr (WithAcc shape arrs lam op) =
+  ppr (WithAcc inputs lam) =
     text "with_acc"
-      <> parens
-        ( ppr shape <> comma <+> ppTuple' arrs <> comma </> ppr lam
-            <> case op of
-              Nothing -> mempty
-              Just (op', nes) -> comma </> apply [ppr op', ppTuple' $ map ppr nes]
-        )
+      <> parens (braces (commasep $ map ppInput inputs) <> comma </> ppr lam)
+    where
+      ppInput (shape, arrs, op) =
+        parens
+          ( ppr shape <> comma <+> ppTuple' arrs
+              <> case op of
+                Nothing -> mempty
+                Just (op', nes) -> comma </> apply [ppr op', ppTuple' $ map ppr nes]
+          )
 
 instance PrettyLore lore => Pretty (Lambda lore) where
   ppr (Lambda [] _ []) = text "nilFn"

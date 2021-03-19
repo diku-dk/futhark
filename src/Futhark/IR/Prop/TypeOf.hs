@@ -131,13 +131,14 @@ expExtType (If _ _ _ rt) = pure $ map extTypeOf $ ifReturns rt
 expExtType (DoLoop ctxmerge valmerge _ _) =
   pure $ loopExtType (map (paramIdent . fst) ctxmerge) (map (paramIdent . fst) valmerge)
 expExtType (BasicOp op) = staticShapes <$> primOpType op
-expExtType (WithAcc _ arrs lam _) =
+expExtType (WithAcc inputs lam) =
   fmap staticShapes $
     (<>)
-      <$> traverse lookupType arrs
+      <$> (concat <$> traverse inputType inputs)
       <*> pure (drop num_accs (lambdaReturnType lam))
   where
-    num_accs = 1
+    inputType (_, arrs, _) = traverse lookupType arrs
+    num_accs = length inputs
 expExtType (Op op) = opType op
 
 -- | The number of values returned by an expression.

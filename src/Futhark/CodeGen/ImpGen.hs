@@ -807,17 +807,18 @@ defCompileExp pat (DoLoop ctx val form body) = do
   where
     merge = ctx ++ val
     mergepat = map fst merge
-defCompileExp pat (WithAcc _ arrs lam op) = do
+defCompileExp pat (WithAcc inputs lam) = do
   dLParams $ lambdaParams lam
-  forM_ (take num_accs $ lambdaParams lam) $ \p ->
+  forM_ (zip inputs $ lambdaParams lam) $ \((_, arrs, op), p) ->
     modify $ \s ->
       s {stateAccs = M.insert (paramName p) (arrs, op) $ stateAccs s}
   compileStms mempty (bodyStms $ lambdaBody lam) $ do
     let nonacc_res = drop num_accs (bodyResult (lambdaBody lam))
-    forM_ (zip (patternNames pat) nonacc_res) $ \(v, se) ->
+        nonacc_pat_names = takeLast (length nonacc_res) (patternNames pat)
+    forM_ (zip nonacc_pat_names nonacc_res) $ \(v, se) ->
       copyDWIM v [] se []
   where
-    num_accs = 1
+    num_accs = length inputs
 defCompileExp pat (Op op) = do
   opc <- asks envOpCompiler
   opc pat op

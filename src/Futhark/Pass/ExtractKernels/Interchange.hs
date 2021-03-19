@@ -1,4 +1,5 @@
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeFamilies #-}
 
 -- | It is well known that fully parallel loops can always be
@@ -177,11 +178,11 @@ interchangeBranch nest loop = do
   return $ bnds <> oneStm (branchStm loop')
 
 data WithAccStm
-  = WithAccStm [Int] Pattern Shape [VName] Lambda (Maybe (Lambda, [SubExp]))
+  = WithAccStm [Int] Pattern [(Shape, [VName], Maybe (Lambda, [SubExp]))] Lambda
 
 withAccStm :: WithAccStm -> Stm
-withAccStm (WithAccStm _ pat shape arrs lam op) =
-  Let pat (defAux ()) $ WithAcc shape arrs lam op
+withAccStm (WithAccStm _ pat inputs lam) =
+  Let pat (defAux ()) $ WithAcc inputs lam
 
 interchangeWithAcc1 ::
   (MonadBinder m, Lore m ~ SOACS) =>
@@ -189,9 +190,9 @@ interchangeWithAcc1 ::
   LoopNesting ->
   m WithAccStm
 interchangeWithAcc1
-  (WithAccStm perm _withacc_pat shape acc_arrs acc_lam op)
+  (WithAccStm perm _withacc_pat inputs acc_lam)
   (MapNesting map_pat map_aux w params_and_arrs) = do
-    acc_arrs' <- mapM onArr acc_arrs
+    inputs' <- mapM onInput inputs
     let lam_params = lambdaParams acc_lam
         lam_ret =
           map paramType (drop num_accs lam_params)
@@ -213,14 +214,15 @@ interchangeWithAcc1
       pure $ map Var $ accs_vs' ++ other_vs
     let pat = Pattern [] $ rearrangeShape perm $ patternValueElements map_pat
         perm' = [0 .. patternSize pat -1]
-    pure $
-      WithAccStm perm' pat (Shape [w] <> shape) acc_arrs' acc_lam' op
+    pure $ WithAccStm perm' pat inputs' acc_lam'
     where
-      num_accs = 1
+      num_accs = length inputs
       acc_certs = map paramName $ take num_accs $ lambdaParams acc_lam
       onArr v =
         pure . maybe v snd $
           find ((== v) . paramName . fst) params_and_arrs
+      onInput (shape, arrs, op) =
+        (Shape [w] <> shape,,op) <$> mapM onArr arrs
 
       trType :: TypeBase shape u -> TypeBase shape u
       trType (Acc acc ispace ts)

@@ -246,8 +246,8 @@ instance Renameable lore => Rename (Stm lore) where
   rename (Let pat elore e) = Let <$> rename pat <*> rename elore <*> rename e
 
 instance Renameable lore => Rename (Exp lore) where
-  rename (WithAcc shape accarrs lam op) =
-    WithAcc <$> rename shape <*> rename accarrs <*> rename lam <*> rename op
+  rename (WithAcc inputs lam) =
+    WithAcc <$> rename inputs <*> rename lam
   rename (DoLoop ctx val form loopbody) = do
     let (ctxparams, ctxinit) = unzip ctx
         (valparams, valinit) = unzip val
