@@ -1300,7 +1300,7 @@ internaliseStreamAcc desc dest op lam bs = do
 
   destw <- arraysSize 0 <$> mapM lookupType dest'
   fmap (map I.Var) $
-    letTupExp desc $ WithAcc (Shape [destw]) dest' withacc_lam op'
+    letTupExp desc $ WithAcc [(Shape [destw], dest', op')] withacc_lam
 
 internaliseExp1 :: String -> E.Exp -> InternaliseM I.SubExp
 internaliseExp1 desc e = do

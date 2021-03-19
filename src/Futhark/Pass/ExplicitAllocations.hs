@@ -945,8 +945,8 @@ allocInExp (If cond tbranch0 fbranch0 (IfDec rets ifsort)) = do
         let (_, val_res) = splitFromEnd num_vals res
         mem_ixfs <- mapM subExpIxFun val_res
         return (Body () bnds' res, mem_ixfs)
-allocInExp (WithAcc accshape arrs bodylam op) =
-  WithAcc accshape arrs <$> onLambda bodylam <*> traverse onOp op
+allocInExp (WithAcc inputs bodylam) =
+  WithAcc <$> mapM onInput inputs <*> onLambda bodylam
   where
     onLambda lam = do
       params <- forM (lambdaParams lam) $ \(Param pv t) ->
@@ -956,7 +956,10 @@ allocInExp (WithAcc accshape arrs bodylam op) =
           _ -> error $ "Unexpected WithAcc lambda param: " ++ pretty (Param pv t)
       allocInLambda params (lambdaBody lam) (lambdaReturnType lam)
 
-    onOp (lam, nes) = do
+    onInput (shape, arrs, op) =
+      (shape,arrs,) <$> traverse (onOp shape arrs) op
+
+    onOp accshape arrs (lam, nes) = do
       let num_vs = length (lambdaReturnType lam)
           num_is = shapeRank accshape
           (i_params, x_params, y_params) =

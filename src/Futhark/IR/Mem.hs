@@ -1138,16 +1138,17 @@ expReturns (BasicOp (JoinAcc v)) = do
     _ -> error $ "JoinAcc: " ++ pretty r
 expReturns (BasicOp (UpdateAcc acc _ _)) =
   pure <$> varReturns acc
-expReturns (WithAcc _ arrs lam _) =
+expReturns (WithAcc inputs lam) =
   (<>)
-    <$> mapM varReturns arrs
+    <$> (concat <$> mapM inputReturns inputs)
     <*> localScope
       -- XXX: this is a bit dubious.  I think WithAcc should perhaps
       -- have a return annotation like If.
       (scopeOfLParams (lambdaParams lam) <> scopeOf (bodyStms (lambdaBody lam)))
       (mapM subExpReturns (drop num_accs (bodyResult (lambdaBody lam))))
   where
-    num_accs = 1
+    inputReturns (_, arrs, _) = mapM varReturns arrs
+    num_accs = length inputs
 expReturns (BasicOp op) =
   extReturns . staticShapes <$> primOpType op
 expReturns e@(DoLoop ctx val _ _) = do

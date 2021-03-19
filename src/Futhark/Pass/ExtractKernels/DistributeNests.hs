@@ -326,7 +326,7 @@ bodyContainsParallelism = any isParallelStm . bodyStms
         && not ("sequential" `inAttrs` stmAuxAttrs (stmAux stm))
     isMap Op {} = True
     isMap (DoLoop _ _ ForLoop {} body) = bodyContainsParallelism body
-    isMap (WithAcc _ _ lam _) = bodyContainsParallelism $ lambdaBody lam
+    isMap (WithAcc _ lam) = bodyContainsParallelism $ lambdaBody lam
     isMap _ = False
 
 lambdaContainsParallelism :: Lambda SOACS -> Bool
@@ -439,7 +439,7 @@ maybeDistributeStm stm@(Let pat _ (If cond tbranch fbranch ret)) acc
             return acc'
       _ ->
         addStmToAcc stm acc
-maybeDistributeStm stm@(Let pat _ (WithAcc shape arrs lam op)) acc
+maybeDistributeStm stm@(Let pat _ (WithAcc inputs lam)) acc
   | lambdaContainsParallelism lam =
     distributeSingleStm acc stm >>= \case
       Just (kernels, res, nest, acc')
@@ -453,7 +453,7 @@ maybeDistributeStm stm@(Let pat _ (WithAcc shape arrs lam op)) acc
             nest' <- expandKernelNest pat_unused nest
             types <- asksScope scopeForSOACs
             addPostStms kernels
-            let withacc = WithAccStm perm pat shape arrs lam op
+            let withacc = WithAccStm perm pat inputs lam
             stms <-
               (`runReaderT` types) $
                 fmap snd . simplifyStms =<< interchangeWithAcc nest' withacc
@@ -462,7 +462,7 @@ maybeDistributeStm stm@(Let pat _ (WithAcc shape arrs lam op)) acc
       _ ->
         addStmToAcc stm acc
   where
-    num_accs = 1
+    num_accs = length inputs
 maybeDistributeStm (Let pat aux (Op (Screma w form arrs))) acc
   | Just [Reduce comm lam nes] <- isReduceSOAC form,
     Just m <- irwim pat w comm lam $ zip nes arrs = do

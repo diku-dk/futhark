@@ -143,38 +143,47 @@ transformExp (Op (Inner (SegOp (SegHist lvl space ops ts kbody)))) = do
   where
     lams = map histOp ops
     onOp op lam = op {histOp = lam}
-transformExp (WithAcc shape arrs lam (Just (op_lam, nes))) = do
-  bound_outside <- asks $ namesFromList . M.keys
-  let -- XXX: fake a SegLevel, which we don't have here.  We will not
-      -- use it for anything, as we will not allow irregular
-      -- allocations inside the update function.
-      lvl = SegThread (Count $ intConst Int64 0) (Count $ intConst Int64 0) SegNoVirt
-      (op_lam', lam_allocs) =
-        extractLambdaAllocations lvl bound_outside mempty op_lam
-      variantAlloc (_, Var v, _) = not $ v `nameIn` bound_outside
-      variantAlloc _ = False
-      (variant_allocs, invariant_allocs) = M.partition variantAlloc lam_allocs
-
-  case M.elems variant_allocs of
-    (_, v, _) : _ ->
-      throwError $
-        "Cannot handle un-sliceable allocation size: " ++ pretty v
-          ++ "\nLikely cause: irregular nested operations inside accumulator update operator."
-    [] ->
-      return ()
-
-  let num_is = shapeRank shape
-      is = map paramName $ take num_is $ lambdaParams op_lam
-  (alloc_stms, alloc_offsets) <-
-    genericExpandedInvariantAllocations (const (shape, is)) invariant_allocs
-
-  scope <- askScope
-  let scope' = scopeOf op_lam <> scope
+transformExp (WithAcc inputs lam) = do
   lam' <- transformLambda lam
-  either throwError pure $
-    runOffsetM scope' alloc_offsets $ do
-      op_lam'' <- offsetMemoryInLambda op_lam'
-      return (alloc_stms, WithAcc shape arrs lam' $ Just (op_lam'', nes))
+  (input_alloc_stms, inputs') <- unzip <$> mapM onInput inputs
+  pure
+    ( mconcat input_alloc_stms,
+      WithAcc inputs' lam'
+    )
+  where
+    onInput (shape, arrs, Nothing) =
+      pure (mempty, (shape, arrs, Nothing))
+    onInput (shape, arrs, Just (op_lam, nes)) = do
+      bound_outside <- asks $ namesFromList . M.keys
+      let -- XXX: fake a SegLevel, which we don't have here.  We will not
+          -- use it for anything, as we will not allow irregular
+          -- allocations inside the update function.
+          lvl = SegThread (Count $ intConst Int64 0) (Count $ intConst Int64 0) SegNoVirt
+          (op_lam', lam_allocs) =
+            extractLambdaAllocations lvl bound_outside mempty op_lam
+          variantAlloc (_, Var v, _) = not $ v `nameIn` bound_outside
+          variantAlloc _ = False
+          (variant_allocs, invariant_allocs) = M.partition variantAlloc lam_allocs
+
+      case M.elems variant_allocs of
+        (_, v, _) : _ ->
+          throwError $
+            "Cannot handle un-sliceable allocation size: " ++ pretty v
+              ++ "\nLikely cause: irregular nested operations inside accumulator update operator."
+        [] ->
+          return ()
+
+      let num_is = shapeRank shape
+          is = map paramName $ take num_is $ lambdaParams op_lam
+      (alloc_stms, alloc_offsets) <-
+        genericExpandedInvariantAllocations (const (shape, is)) invariant_allocs
+
+      scope <- askScope
+      let scope' = scopeOf op_lam <> scope
+      either throwError pure $
+        runOffsetM scope' alloc_offsets $ do
+          op_lam'' <- offsetMemoryInLambda op_lam'
+          return (alloc_stms, (shape, arrs, Just (op_lam'', nes)))
 transformExp e =
   return (mempty, e)
 

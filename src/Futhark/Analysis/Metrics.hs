@@ -111,7 +111,7 @@ expMetrics (If _ tb fb _) =
     inside "False" $ bodyMetrics fb
 expMetrics Apply {} =
   seen "Apply"
-expMetrics (WithAcc _ _ lam _) =
+expMetrics (WithAcc _ lam) =
   inside "MkAcc" $ lambdaMetrics lam
 expMetrics (Op op) =
   opMetrics op

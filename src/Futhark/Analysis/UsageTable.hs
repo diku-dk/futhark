@@ -183,8 +183,10 @@ usageInExp (DoLoop _ merge _ _) =
     ]
 usageInExp (If _ tbranch fbranch _) =
   usageInBody tbranch <> usageInBody fbranch
-usageInExp (WithAcc _ arrs lam _) =
-  foldMap consumedUsage arrs <> usageInBody (lambdaBody lam)
+usageInExp (WithAcc inputs lam) =
+  foldMap inputUsage inputs <> usageInBody (lambdaBody lam)
+  where
+    inputUsage (_, arrs, _) = foldMap consumedUsage arrs
 usageInExp (BasicOp (Update src _ _)) =
   consumedUsage src
 usageInExp (Op op) =

@@ -4,6 +4,7 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE Strict #-}
+{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
 
@@ -835,18 +836,18 @@ simplifyExp (DoLoop ctx val form loopbody) = do
 simplifyExp (Op op) = do
   (op', stms) <- simplifyOp op
   return (Op op', stms)
-simplifyExp (WithAcc shape arrs lam op) = do
-  (op', op_stms) <- case op of
-    Nothing ->
-      pure (Nothing, mempty)
-    Just (op_lam, nes) -> do
-      (op_lam', op_lam_stms) <- simplifyLambda op_lam
-      nes' <- simplify nes
-      return (Just (op_lam', nes'), op_lam_stms)
+simplifyExp (WithAcc inputs lam) = do
+  (inputs', inputs_stms) <- fmap unzip . forM inputs $ \(shape, arrs, op) -> do
+    (op', op_stms) <- case op of
+      Nothing ->
+        pure (Nothing, mempty)
+      Just (op_lam, nes) -> do
+        (op_lam', op_lam_stms) <- simplifyLambda op_lam
+        nes' <- simplify nes
+        return (Just (op_lam', nes'), op_lam_stms)
+    (,op_stms) <$> ((,,op') <$> simplify shape <*> simplify arrs)
   (lam', lam_stms) <- simplifyLambda lam
-  (,)
-    <$> (WithAcc <$> simplify shape <*> simplify arrs <*> pure lam' <*> pure op')
-    <*> pure (lam_stms <> op_stms)
+  pure (WithAcc inputs' lam', mconcat inputs_stms <> lam_stms)
 
 -- Special case for simplification of commutative BinOps where we
 -- arrange the operands in sorted order.  This can make expressions

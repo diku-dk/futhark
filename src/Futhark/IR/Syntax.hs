@@ -428,10 +428,10 @@ data ExpT lore
     -- consumed) and pass them to the lambda, which must return the
     -- updated accumulators and possibly some extra values.  The
     -- accumulators are turned back into arrays.  The 'Shape' is the
-    -- write index space.  The arrays must all have this shape
-    -- outermost.  This is not part of 'BasicOp' because we need the
-    -- @lore@ parameter.
-    WithAcc Shape [VName] (Lambda lore) (Maybe (Lambda lore, [SubExp]))
+    -- write index space.  The corresponding arrays must all have this
+    -- shape outermost.  This construct is not part of 'BasicOp'
+    -- because we need the @lore@ parameter.
+    WithAcc [(Shape, [VName], Maybe (Lambda lore, [SubExp]))] (Lambda lore)
   | Op (Op lore)
 
 deriving instance Decorations lore => Eq (ExpT lore)

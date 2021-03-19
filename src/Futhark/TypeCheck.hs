@@ -1070,31 +1070,7 @@ checkExp (DoLoop ctxmerge valmerge form loopbody) = do
                       scopeOf $ bodyStms loopbody
             map (`namesSubtract` bound_here)
               <$> mapM subExpAliasesM (bodyResult loopbody)
-checkExp (WithAcc shape arrs lam op) = do
-  mapM_ (require [Prim int64]) (shapeDims shape)
-  elem_ts <- forM arrs $ \arr -> do
-    arr_t <- lookupType arr
-    unless (shapeDims shape `isPrefixOf` arrayDims arr_t) $
-      bad . TypeError $ pretty arr <> " is not an array of outer shape " <> pretty shape
-    pure $ stripArray (shapeRank shape) arr_t
-
-  case op of
-    Just (op_lam, nes) -> do
-      let mkArrArg t = (t, mempty)
-      nes_ts <- mapM checkSubExp nes
-      unless (nes_ts == lambdaReturnType op_lam) $
-        bad $
-          TypeError $
-            unlines
-              [ "Accumulator operator return type: " ++ pretty (lambdaReturnType op_lam),
-                "Type of neutral elements: " ++ pretty nes_ts
-              ]
-      checkLambda op_lam $
-        replicate (shapeRank shape) (Prim int64, mempty)
-          ++ map mkArrArg (elem_ts ++ elem_ts)
-    Nothing ->
-      return ()
-
+checkExp (WithAcc inputs lam) = do
   unless (length (lambdaParams lam) == 2 * num_accs) $
     bad . TypeError $
       show (length (lambdaParams lam))
@@ -1103,12 +1079,36 @@ checkExp (WithAcc shape arrs lam op) = do
         ++ " accumulators."
 
   let cert_params = take num_accs $ lambdaParams lam
+  acc_args <- forM (zip inputs cert_params) $ \((shape, arrs, op), p) -> do
+    mapM_ (require [Prim int64]) (shapeDims shape)
+    elem_ts <- forM arrs $ \arr -> do
+      arr_t <- lookupType arr
+      unless (shapeDims shape `isPrefixOf` arrayDims arr_t) $
+        bad . TypeError $ pretty arr <> " is not an array of outer shape " <> pretty shape
+      pure $ stripArray (shapeRank shape) arr_t
 
-  checkLambda lam $
-    replicate num_accs (Prim Cert, mempty)
-      ++ [(Acc (paramName p) shape elem_ts, mempty) | p <- cert_params]
+    case op of
+      Just (op_lam, nes) -> do
+        let mkArrArg t = (t, mempty)
+        nes_ts <- mapM checkSubExp nes
+        unless (nes_ts == lambdaReturnType op_lam) $
+          bad $
+            TypeError $
+              unlines
+                [ "Accumulator operator return type: " ++ pretty (lambdaReturnType op_lam),
+                  "Type of neutral elements: " ++ pretty nes_ts
+                ]
+        checkLambda op_lam $
+          replicate (shapeRank shape) (Prim int64, mempty)
+            ++ map mkArrArg (elem_ts ++ elem_ts)
+      Nothing ->
+        return ()
+
+    pure (Acc (paramName p) shape elem_ts, mempty)
+
+  checkLambda lam $ replicate num_accs (Prim Cert, mempty) ++ acc_args
   where
-    num_accs = 1
+    num_accs = length inputs
 checkExp (Op op) = do
   checker <- asks envCheckOp
   checker op
