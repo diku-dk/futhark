@@ -472,11 +472,13 @@ binLambda bop arg_t ret_t = do
 mkLambda ::
   MonadBinder m =>
   [LParam (Lore m)] ->
-  [Type] ->
   m Result ->
   m (Lambda (Lore m))
-mkLambda params ret m = do
-  (res, stms) <- collectStms . localScope (scopeOfLParams params) $ m
+mkLambda params m = do
+  ((ret, res), stms) <- collectStms . localScope (scopeOfLParams params) $ do
+    res <- m
+    ret <- mapM subExpType res
+    pure (ret, res)
   body <- mkBodyM stms res
   pure $ Lambda params body ret
 

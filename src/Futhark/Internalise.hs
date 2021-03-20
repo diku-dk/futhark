@@ -1274,7 +1274,7 @@ internaliseStreamAcc desc dest op lam bs = do
   let dest_w = arraysSize 0 dest_ts
       acc_t = Acc acc_cert_v (Shape [dest_w]) $ map rowType dest_ts
   acc_p <- newParam "acc_p" acc_t
-  withacc_lam <- mkLambda [Param acc_cert_v (I.Prim I.Cert), acc_p] [acc_t] $ do
+  withacc_lam <- mkLambda [Param acc_cert_v (I.Prim I.Cert), acc_p] $ do
     lam' <-
       internaliseMapLambda internaliseLambda lam $
         map I.Var $ paramName acc_p : bs'
