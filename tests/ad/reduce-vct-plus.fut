@@ -1,4 +1,4 @@
--- Simple reduce with multiplication
+-- Simple reduce with vector addition
 -- ==
 -- compiled input { [ [1f32, 2f32,  3f32,  4f32]
 --					, [5f32, 6f32,  7f32,  8f32]

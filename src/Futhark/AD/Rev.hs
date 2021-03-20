@@ -232,7 +232,8 @@ helperMulOp1 ptp bop = do
 helperMulOp2 :: PrimType -> VName -> VName -> VName -> ADM (Stms SOACS)
 helperMulOp2 ptp nz_prod zr_count prod = do  
   -- on forward sweep: if statement to recover the potentially-zero product
-  runBinder_ $ do
+  let ps = [Param nz_prod $ Prim ptp, Param zr_count $ Prim p_int64]
+  runBinder_ . localScope (scopeOfLParams ps) $ do
     tmps <- letTupExp "tmp_if_res" =<<
       eIf ( toExp $ le64 zr_count .>. pe64 (intConst Int64 0) )
           ( resultBodyM [Constant $ blankPrimValue ptp] )
@@ -265,7 +266,7 @@ helperMulOp3 ptp bop nz_prod zr_count fa_orig prod_bar = do
               )
          ]
   where
-    eqToOne v_nm = CmpOpExp (CmpEq p_int64) (LeafExp v_nm p_int64) (ValueExp $ IntValue $ Int64Value (-1))
+    eqToOne v_nm = CmpOpExp (CmpEq p_int64) (LeafExp v_nm p_int64) (ValueExp $ IntValue $ Int64Value 1)
     getBinOpDiv (Mul t _) = SDiv t Unsafe
     getBinOpDiv (FMul t)  = FDiv t
     getBinOpDiv _ = error "In Rev.hs, getBinOpDiv, unreachable case reached!"
@@ -571,7 +572,9 @@ addBinOp Cert = LogAnd
 -- Construct a lambda for adding two values of the given type.
 addLambda :: Type -> ADM Lambda
 addLambda (Prim pt) = binOpLambda (addBinOp pt) pt
-addLambda (Array (ElemPrim t) (Shape (s : ss)) u) = do
+addLambda (Array (ElemPrim t) (Shape []) _) =
+  addLambda (Prim t)
+addLambda tp@(Array (ElemPrim t) (Shape (s : ss)) u) = do
   xs <- newVName "xs"
   ys <- newVName "ys"
   let t' = Array (ElemPrim t) (Shape ss) u
@@ -581,8 +584,8 @@ addLambda (Array (ElemPrim t) (Shape (s : ss)) u) = do
     return $ resultBody [res]
   pure
     Lambda
-      { lambdaParams = [Param xs t', Param ys t'],
-        lambdaReturnType = [t'],
+      { lambdaParams = [Param xs tp, Param ys tp],
+        lambdaReturnType = [tp],
         lambdaBody = body
       }
 addLambda t =
@@ -837,8 +840,9 @@ diffSOAC pat@(Pattern [] [pe]) aux soac@(Screma _ form [as]) m
     m
     pe_bar <- lookupAdj $ patElemName pe
     as_tp <- lookupType as
-    v_rep <- letTupExp "v_rep" $ BasicOp $ Replicate (shpFstDim $ arrayShape as_tp) $ Var pe_bar
-    zipWithM_ updateAdjoint [as] v_rep
+    v_reps <- letTupExp "v_rep" $ BasicOp $ Replicate (shpFstDim $ arrayShape as_tp) $ Var pe_bar
+    let [v_rep] = v_reps
+    void $ updateAdjointSlice (fullSlice as_tp []) as v_rep
   where
     shpFstDim (Shape []) = error "error in shpFstDim in Rev.hs"
     shpFstDim (Shape (d:_)) = Shape [d]
@@ -854,8 +858,11 @@ diffSOAC pat@(Pattern [] [pe]) aux (Hist n [hist_add] f [is,vs]) m
     let histo' = Hist n [HistOp w rf [dst_cpy] [ne] add_lam] f [is,vs]
     addStm $ Let pat aux $ Op histo'
     m
-    let (nes, eltp) = (histNeutral hist_add, head $ lambdaReturnType add_lam)
+    let eltp = head $ lambdaReturnType add_lam
     pe_bar <- lookupAdj $ patElemName pe
+    -- already update orig_dst bar
+    void $ updateAdjointSlice (fullSlice (patElemDec pe) []) orig_dst pe_bar
+    -- update the vs bar
     pind <- newParam "ind" (Prim p_int64)
     let i = paramName pind
     map_bar_lam_bdy <- runBodyBinder . localScope (scopeOfLParams [pind]) $
@@ -863,12 +870,13 @@ diffSOAC pat@(Pattern [] [pe]) aux (Hist n [hist_add] f [is,vs]) m
                   ( do r <- letSubExp "r" $ BasicOp $ Index pe_bar $ DimFix (Var i) : fullSlice eltp [] 
                        resultBodyM [r]
                   )
-                  ( resultBodyM nes )
+                  ( resultBodyM [ne] )
             ]
     let map_bar_lam = Lambda [pind] map_bar_lam_bdy [eltp]
-    vs_bar <- letTupExp "vs_bar" $ Op $ Screma n (ScremaForm [] [] map_bar_lam) [vs]
-    zipWithM_ updateAdjoint [vs] vs_bar
-    zipWithM_ updateAdjoint [orig_dst] [pe_bar]
+    vs_bars <- letTupExp (baseString vs ++ "_bar") $ Op $ Screma n (ScremaForm [] [] map_bar_lam) [is]
+    let [vs_bar] = vs_bars
+    vs_type <- lookupType vs
+    void $ updateAdjointSlice (fullSlice vs_type []) vs vs_bar
 --
 -- Special reduce case: p = reduce (*) 1 as
 -- Forward trace: 
@@ -928,9 +936,10 @@ diffSOAC (Pattern [] [pe]) aux (Hist n [hist_mul] f [is,vs]) m
     lam_add <- mkLamAddI64
     let hist_zrn = HistOp w rf [zr_counts0] [intConst Int64 0] lam_add
     let hist_nzp = HistOp w rf [nz_prods0 ] [ne] mul_lam
-    f' <- mkIdentityLambda [Prim p_int64, eltp, Prim p_int64, Prim p_int64]
-    let soac_pat = Pattern [] [PatElem nz_prods pe_tp, PatElem zr_counts $ Array (ElemPrim p_int64) (Shape [w]) NoUniqueness]
-    let soac_exp = Op $ Hist n [hist_nzp, hist_zrn] f' [is, nz_vs, is, one_zrs]
+    f' <- mkIdentityLambda [Prim p_int64, Prim p_int64, eltp, Prim p_int64]
+    let soac_pat = Pattern [] [PatElem nz_prods pe_tp, PatElem zr_counts $
+                                Array (ElemPrim p_int64) (Shape [w]) NoUniqueness]
+    let soac_exp = Op $ Hist n [hist_nzp, hist_zrn] f' [is, is, nz_vs, one_zrs]
     auxing aux $ letBind soac_pat soac_exp
     -- construct the histo result:
     res_part <- newVName "res_part"
@@ -952,12 +961,23 @@ diffSOAC (Pattern [] [pe]) aux (Hist n [hist_mul] f [is,vs]) m
     m
     -- reverse trace
     pe_bar <- lookupAdj $ patElemName pe
+    -- updates the orig_dst with its proper bar
+    mul_lam' <- renameLambda mul_lam
+    orig_bar <- letTupExp (baseString orig_dst ++ "_bar") $ Op $ Screma w
+                  (ScremaForm [] [] mul_lam') [h_part, pe_bar]
+    zipWithM_ updateAdjoint [orig_dst] orig_bar
+    -- updates the partial histo result with its proper bar
+    mul_lam''<- renameLambda mul_lam
+    part_bars<- letTupExp (baseString h_part ++ "_bar") $ Op $ Screma w
+                  (ScremaForm [] [] mul_lam'') [orig_dst, pe_bar]
+    let [part_bar] = part_bars
+    -- add the contributions to each array element
     pj <- newParam "j" (Prim p_int64)
     pv <- newParam "v" eltp
     let j = paramName pj
     ((zr_cts, pr_bar, nz_prd), tmp_stms) <- runBinderT' . localScope (scopeOfLParams [pj, pv]) $ do
           zr_cts <- letExp "zr_cts" $ BasicOp $ Index zr_counts $ DimFix (Var j) : fullSlice eltp []
-          pr_bar <- letExp "pr_bar" $ BasicOp $ Index pe_bar    $ DimFix (Var j) : fullSlice eltp []
+          pr_bar <- letExp "pr_bar" $ BasicOp $ Index part_bar  $ DimFix (Var j) : fullSlice eltp []
           nz_prd <- letExp "nz_prd" $ BasicOp $ Index nz_prods  $ DimFix (Var j) : []
           return (zr_cts, pr_bar, nz_prd)
     bdy_tmp <- helperMulOp3 ptp mulop nz_prd zr_cts pv pr_bar
@@ -969,13 +989,8 @@ diffSOAC (Pattern [] [pe]) aux (Hist n [hist_mul] f [is,vs]) m
                             ( resultBodyM [Constant $ blankPrimValue ptp] )
                       ]
     vs_bar <- letTupExp (baseString vs ++ "_bar") $ Op $ Screma n
-                (ScremaForm [] [] (Lambda [pj, pv] lam_bar [eltp])) [patElemName pe, vs]
+                (ScremaForm [] [] (Lambda [pj, pv] lam_bar [eltp])) [is,vs]
     zipWithM_ updateAdjoint [vs] vs_bar
-    -- now update the orig_dst with its proper bar
-    mul_lam' <- renameLambda mul_lam
-    orig_bar <- letTupExp (baseString orig_dst ++ "_bar") $ Op $ Screma w
-                  (ScremaForm [] [] mul_lam') [h_part, pe_bar]
-    zipWithM_ updateAdjoint [orig_dst] orig_bar
     where
       mkLamAddI64 = do
         pab <- zipWithM newParam ["a", "b"] [Prim p_int64, Prim p_int64]
@@ -1096,12 +1111,14 @@ diffSOAC pat@(Pattern [] pes) aux soac@(Screma n form xs) m
         addStms (stmsFromList idx_stms)
         pure $ lambdaBody f_rev
     let map_lam = Lambda (par_i':ls_as_ps) f_adj_body alphas
-    (r_map, map_stms) <- runBinderT' $ do
+    (r_maps, map_stms) <- runBinderT' $ do
         iota <- letExp "iota" $ BasicOp $ Iota n (intConst Int64 0) (intConst Int64 1) Int64
         letTupExp "adj_ctrb_scan" $ Op (Screma n (ScremaForm [] [] map_lam) (iota:ls_arr++xs))
     addStms map_stms
     -- finally add contributions to the adjoint of xs
-    zipWithM_ updateAdjoint xs r_map
+    xs_tps <- mapM lookupType xs
+    forM_ (zip3 xs r_maps xs_tps) $ \(x, r_map, x_tp) ->
+      updateAdjointSlice (fullSlice x_tp []) x r_map
   where
     flipParams ps = uncurry (flip (++)) $ splitAt (length ps `div` 2) ps
     mkFusedMapBody par_i ne alphas = do
@@ -1187,8 +1204,24 @@ diffSOAC pat aux soac@(Screma w form as) m
           Lambda (lps <> aps <> rps) body $ lambdaReturnType lam
         )
 --
+-- special case: scan with vectorized plus
+diffSOAC pat@(Pattern [] [pe]) aux soac@(Screma n form [as]) m
+  | Just [scn] <- isScanSOAC form,
+    lam <- scanLambda scn,
+    Just _ <- isAddTowLam lam = do
+      addStm $ Let pat aux $ Op soac
+      m
+      pe_bar <- lookupAdj $ patElemName pe
+      as_tp  <- lookupType as
+      as_bar <- eReverse =<< mkScan =<< eReverse pe_bar
+      void $ updateAdjointSlice (fullSlice as_tp []) as as_bar
+    where
+      mkScan xs = do
+        rs <- letTupExp (baseString xs ++ "_scaned") $ Op $ Screma n form [xs]
+        return $ head rs
+
 -- only single scan supported for now:  ys = scan odot xs
--- Implementation "should" handle associative operators on tuples and arrays
+-- General scan implem "should" handle associative ops on tuples and arrays
 diffSOAC pat@(Pattern [] pes) aux soac@(Screma n (ScremaForm [scn] [] f) xs) m
   | isIdentityLambda f = do
       addStm $ Let pat aux $ Op soac
@@ -1196,10 +1229,8 @@ diffSOAC pat@(Pattern [] pes) aux soac@(Screma n (ScremaForm [scn] [] f) xs) m
       let ys = map patElemName pes
       ys_adj <- mapM lookupAdj ys
       map1_lam <- mkScanFusedMapLam n (scanLambda scn) xs ys ys_adj
-
       scans_lin_fun_o <- mapM mkScanLinFunO $ lambdaReturnType $ scanLambda scn
-      let scp = zip ys_adj $ map (LParamName . patElemDec) pes
-      (r_scan, scan_stms) <- runBinderT' $ inScopeOf scp $ do
+      (r_scan, scan_stms) <- runBinderT' $ do
             iota <- letExp "iota" $ BasicOp $ Iota n (intConst Int64 0) (intConst Int64 1) Int64
             letTupExp "adj_ctrb_scan" $ Op (Screma n (ScremaForm scans_lin_fun_o [] map1_lam) [iota])
       addStms scan_stms
@@ -1207,7 +1238,9 @@ diffSOAC pat@(Pattern [] pes) aux soac@(Screma n (ScremaForm [scn] [] f) xs) m
       addStms (mconcat snd_maps) 
       (xs_contribs, fin_map_stms) <- mkScanFinalMap n (scanLambda scn) xs ys red_nms
       addStms fin_map_stms
-      inScopeOf scp $ zipWithM_ updateAdjoint xs xs_contribs
+      xs_tps <- mapM lookupType xs
+      forM_ (zip3 xs xs_contribs xs_tps) $ \(x, x_ctrb, x_tp) ->
+        updateAdjointSlice (fullSlice x_tp []) x x_ctrb
 -- a map translates to generalized reduction
 diffSOAC pat@(Pattern [] pes) aux soac@(Screma w form as) m
   | Just lam <- isMapSOAC form = do
@@ -1218,9 +1251,9 @@ diffSOAC pat@(Pattern [] pes) aux soac@(Screma w form as) m
     fvs_adj_tp <- mapM lookupType fvs_adj
     let fvs_all = zip3 fvs_adj_tp fvs fvs_adj 
         fvs_scal = map (\(x,y,_) -> (x,y)) $ filter (\(t_adj,_,_) -> primType t_adj) fvs_all
-        fvs_acc  = filter (\(t_adj,_,_) -> accType  t_adj) fvs_all
-        fvs_arr  = filter (\(t_adj,_,_) -> arrType  t_adj) fvs_all
-    map_fv_scal <- forM fvs_scal $ \(_, fv) -> do
+        _fvs_acc  = filter (\(t_adj,_,_) -> accType  t_adj) fvs_all
+        _fvs_arr  = filter (\(t_adj,_,_) -> arrType  t_adj) fvs_all
+    _map_fv_scal <- forM fvs_scal $ \(_, fv) -> do
       let repl_exp = BasicOp $ Replicate (Shape [w]) $ Var fv
       letExp (baseString fv ++ "_adj_repl") repl_exp
     lam_ps_scal <- mapM (newParam "lam_fv_scal") (map fst fvs_scal)
@@ -1231,31 +1264,35 @@ diffSOAC pat@(Pattern [] pes) aux soac@(Screma w form as) m
     ys_adj <- mapM lookupAdj $ map patElemName pes
     lam_adj_ps <- mapM (newParam "lam_adj" . rowType . patElemDec) pes
     lam' <- renameLambda lam_scal
-    lam_rev <- localScope (scopeOfLParams lam_adj_ps) $
+    lam_rev0 <- localScope (scopeOfLParams lam_adj_ps) $
       diffLambda (map paramName lam_adj_ps) (map paramName (lambdaParams lam')) lam'
-    let lam_rev' = Lambda (lambdaParams lam' ++ lam_adj_ps) (lambdaBody lam_rev) $
-                          map paramType $ lambdaParams lam'
-    contribs <- letTupExp "map_adjs" $ Op $ Screma w (mapSOAC lam_rev') $ as ++ map_fv_scal ++ ys_adj
+    let lam_ps_scal0' = take (length lam_ps_scal) $ drop (length $ lambdaParams lam) $ lambdaParams lam_rev0
+        substs' = M.fromList $ zip (map paramName lam_ps_scal0') (map snd fvs_scal)
+        lam_rev = substituteNames substs' lam_rev0
+        lam_pars= take (length $ lambdaParams lam) $ lambdaParams lam_rev
+        lam_rtp = map paramType $ lambdaParams lam_scal0
+    let lam_rev' = Lambda (lam_pars ++ lam_adj_ps) (lambdaBody lam_rev) lam_rtp
+                          --map paramType $ lambdaParams lam'
+    contribs <- letTupExp "map_adjs" $ Op $ Screma w (mapSOAC lam_rev') $ as ++ ys_adj
     let (ctrb_pure, ctrb_other0) = splitAt (length as) contribs
-        (ctrb_scal0, ctrb_other) = splitAt (length lam_ps_scal) ctrb_other0
+        (ctrb_scal0, _ctrb_other) = splitAt (length lam_ps_scal) ctrb_other0
     ctrb_scal <- forM (zip fvs_scal ctrb_scal0) $ \((tp,fv),ctrb) -> do --Screma n form xs
       red <- mkReducePlus (prmTypeRep tp)
       id_lam <- mkIdentityLambda [tp]
       let soac_exp = Op $ Screma w (ScremaForm [] [red] id_lam) $ [ctrb]
       res <- letTupExp (baseString fv++"_adj_sum") soac_exp
-      trace ("\nidlam:\n "++pretty soac_exp++"\n\n") $ return $ head res
+      return $ head res
     zipWithM_ updateAdjoint (map snd fvs_scal) ctrb_scal
-    trace ("Lam':\n" ++ pretty lam' ++ "\nLam_rev:\n"++pretty lam_rev'++"\n fv scal: "++pretty fvs_scal++" fvs_arr: "++pretty fvs_arr++" fvs acc: "++pretty fvs_acc) $
-      zipWithM_ updateAdjoint as ctrb_pure
+    as_tps <- mapM lookupType as
+    -- trace ("Lam':\n" ++ pretty lam' ++ "\nLam_rev:\n"++pretty lam_rev'++"\n fv scal: "++pretty fvs_scal++" fvs_arr: "++pretty fvs_arr++" fvs acc: "++pretty fvs_acc) $
+    --trace ("\n lam_rev'\n"++pretty lam_rev'++"\n substs': "++pretty substs') $
+    forM_ (zip3 as ctrb_pure as_tps) $ \(a, ctrb, tp) ->
+        updateAdjointSlice (fullSlice tp []) a ctrb
     where
-      accType (Acc arrs) = True
+      accType (Acc _) = True
       accType _ = False
       arrType (Array (ElemPrim _) _ _) = True
       arrType _ = False
-      accTypeRep (Acc arrs) = arrs
-      accTypeRep _ = error "ERROR 1111!!!"
-      arrTypeRep (Array (ElemPrim ptp) shape u) = (ptp, shape, u)
-      arrTypeRep _ = error "ERROR 2222!!!"
       prmTypeRep (Prim ptp) = ptp
       prmTypeRep _ = error "ERROR 3333!!!"
       mkReducePlus ptp = do
@@ -1265,7 +1302,8 @@ diffSOAC pat@(Pattern [] pes) aux soac@(Screma w form as) m
         lam_rs <- newVName "r"
         let lam_stm = mkLet [] [Ident lam_rs tp] $ BasicOp $ BinOp (getBinOpPlus ptp) (Var a) (Var b) 
             lam = Lambda lam_ps (mkBody (oneStm lam_stm) [Var lam_rs]) [Prim ptp]
-        trace ("redplus: "++pretty lam) $ return $ Reduce Commutative lam [Constant $ blankPrimValue ptp]
+        --trace ("redplus: "++pretty lam) $
+        return $ Reduce Commutative lam [Constant $ blankPrimValue ptp]
 -- everything else unsuported
 diffSOAC _ _ soac _ =
   error $ "diffSOAC unhandled:\n" ++ pretty soac
@@ -1358,4 +1396,5 @@ revVJP scope (Lambda params body ts) =
         diffBody (map paramName params_adj) (map paramName params) body
     let body' = Body () stms $ takeLast (length params) res
 
-    pure $ Lambda (params ++ params_adj) body' (map paramType params)
+    trace ("prg:\n"++pretty body') $
+      pure $ Lambda (params ++ params_adj) body' (map paramType params)
