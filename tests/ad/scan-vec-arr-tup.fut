@@ -1,6 +1,5 @@
--- Simple reduce with multiplication
+-- scan with vectorized operator
 -- ==
--- compiled input { [1.0f32, 2.0f32, 3.0f32, 4.0f32] [5.0f32, 4.0f32, 3.0f32, 2.0f32] } output { [79.0f32, 37.0f32, 22.0f32, 12.0f32] }
 
 let scan_vec_add_mult [m][n] (xss: [m][n](f32,f64)) : [m][n](f32,f64) =
   scan ( map2 (\ (a1,b1) (a2,b2) -> (a1+a2, b1*b2) ) )

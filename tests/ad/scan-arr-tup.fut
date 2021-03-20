@@ -1,6 +1,5 @@
--- Simple reduce with multiplication
+-- scan with some operator
 -- ==
--- compiled input { [1.0f32, 2.0f32, 3.0f32, 4.0f32] [5.0f32, 4.0f32, 3.0f32, 2.0f32] } output { [79.0f32, 37.0f32, 22.0f32, 12.0f32] }
 
 let scan_vec_add_mult [m] (xss: [m][2](f32,f64)) : [m][2](f32,f64) =
   scan  (\ ac xs -> let (a32, a64) = unzip ac

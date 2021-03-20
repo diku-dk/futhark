@@ -1,5 +1,6 @@
 -- Simple reduce with multiplication
 -- ==
+
 -- compiled input { [1.0f32, 2.0f32, 3.0f32, 4.0f32] [5.0f32, 6.0, 7.0, 8.0]} output { [24.0f32, 12.0f32, 8.0f32, 6.0f32] }
 
 let map_mult [n][m] (xs: [n]f32) : [m]f32 =

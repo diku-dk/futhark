@@ -395,7 +395,8 @@ mkScanFusedMapLam n scn_lam xs ys ys_adj = do
 mkScanLinFunO :: Type -> ADM (Scan SOACS)
 mkScanLinFunO tp = do
   let ptp = getPrimElemType tp
-      (zero, one) = (Constant $ blankPrimValue ptp, Constant $ onePrimValue ptp)   
+  zero <- mkCtOrReplicate "zeros" tp (Constant $ blankPrimValue ptp)
+  one  <- mkCtOrReplicate "ones" tp (Constant $ onePrimValue ptp)
   tmp <- mapM newVName ["a1", "b1", "a2", "b2"]
   arr_nms <- mapM newVName ["a1s", "b1s", "a2s", "b2s"]
   let [a1, b1, a2, b2] = tmp
@@ -410,7 +411,11 @@ mkScanLinFunO tp = do
   let body = mkBody stms $ map Var rs
       lam  = Lambda ps body [tp,tp]
   return $ Scan lam [zero, one]
-
+  where
+    mkCtOrReplicate _ (Prim _) ct = return ct
+    mkCtOrReplicate str (Array (ElemPrim _) shape _) ct =
+      letSubExp str $ BasicOp $ Replicate shape ct
+    mkCtOrReplicate _ _ _ = error "In Rev.hs, mkCtOrReplicate, unsupported type!"
 -- build the map following the scan with linear-function-composition:
 -- for each (ds,cs) length-n array results of the scan, combine them as:
 --    `let rs = map2 (\ d_i c_i -> d_i + c_i * y_adj[n-1]) d c |> reverse`
@@ -1016,7 +1021,7 @@ diffSOAC (Pattern [] [pe]) aux (Hist n [hist_mul] f [is,vs]) m
 --    num_elems = i64.bool not (m_ind == -1)
 --    m_bar_repl = replicate num_elems m_bar
 --    as_bar[m_ind:num_elems:1] += m_bar_repl
-diffSOAC (Pattern [] [pe]) _ (Screma w form [as]) m
+diffSOAC (Pattern [] [pe]) aux (Screma w form [as]) m
   | Just [red] <- isReduceSOAC form,
     lam <- redLambda  red,
     nes <- redNeutral red,
@@ -1044,9 +1049,11 @@ diffSOAC (Pattern [] [pe]) _ (Screma w form [as]) m
     let red_lam = Lambda [facc_v, facc_i, farg_v, farg_i] red_lam_bdy [eltp, Prim p_int64]
     let red_frm = Reduce Commutative red_lam (nes ++ [intConst Int64 (-1)])
     iota <- letExp "iota" $ BasicOp $ Iota w (intConst Int64 0) (intConst Int64 1) Int64
-    fwd_nms <- letTupExp "mm_ind" $ Op $ Screma w (ScremaForm [] [red_frm] map_lam) [as, iota]
-    -- insert the copy stm
+    fwd_nms <- mapM newVName ["mm_val", "mm_ind"]
     let [mm_tmp, mm_ind] = fwd_nms
+    let soac_pat = Pattern [] [PatElem mm_tmp eltp, PatElem mm_ind $ Prim p_int64]
+    auxing aux $ letBind soac_pat $ Op $ Screma w (ScremaForm [] [red_frm] map_lam) [as, iota]
+    -- insert the copy stm
     addStm (mkLet [] [Ident (patElemName pe) eltp] $ BasicOp $ SubExp $ Var $ mm_tmp)
     m
     -- reverse trace is really simple, but we need to take care of the
@@ -1205,6 +1212,7 @@ diffSOAC pat aux soac@(Screma w form as) m
         )
 --
 -- special case: scan with vectorized plus
+-- rewrite eReverse to create a map-soac
 diffSOAC pat@(Pattern [] [pe]) aux soac@(Screma n form [as]) m
   | Just [scn] <- isScanSOAC form,
     lam <- scanLambda scn,
@@ -1213,13 +1221,15 @@ diffSOAC pat@(Pattern [] [pe]) aux soac@(Screma n form [as]) m
       m
       pe_bar <- lookupAdj $ patElemName pe
       as_tp  <- lookupType as
-      as_bar <- eReverse =<< mkScan =<< eReverse pe_bar
+      as_bar <- eReverse =<< (mkScan as_tp scn) =<< eReverse pe_bar
       void $ updateAdjointSlice (fullSlice as_tp []) as as_bar
     where
-      mkScan xs = do
-        rs <- letTupExp (baseString xs ++ "_scaned") $ Op $ Screma n form [xs]
+      mkScan xs_tp scn xs = do
+        f' <- mkIdentityLambda [stripArray 1 xs_tp]
+        lam' <- renameLambda (scanLambda scn)
+        let form' = ScremaForm [ scn {scanLambda = lam'} ] [] f'
+        rs <- letTupExp (baseString xs ++ "_scaned") $ Op $ Screma n form' [xs]
         return $ head rs
-
 -- only single scan supported for now:  ys = scan odot xs
 -- General scan implem "should" handle associative ops on tuples and arrays
 diffSOAC pat@(Pattern [] pes) aux soac@(Screma n (ScremaForm [scn] [] f) xs) m
