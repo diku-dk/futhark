@@ -38,12 +38,12 @@ isAcc Acc {} = True
 isAcc _ = False
 
 tanType :: TypeBase s u -> ADM (TypeBase s u)
-tanType (Array (ElemAcc vs) shape u) = do
-  vs_tan <- tangent vs
-  return $ Array (ElemAcc $ vs <> vs_tan) shape u
-tanType (Acc vs) = do
-  vs_tan <- tangent vs
-  return $ Acc $ vs <> vs_tan
+tanType (Array (ElemAcc acc ispace ts) shape u) = do
+  ts_tan <- mapM tanType ts
+  return $ Array (ElemAcc acc ispace (ts ++ ts_tan)) shape u
+tanType (Acc acc ispace ts) = do
+  ts_tan <- mapM tanType ts
+  return $ Acc acc ispace (ts ++ ts_tan)
 tanType t = return t
 
 slocal' :: ADM a -> ADM a
@@ -382,11 +382,6 @@ fwdSOAC (Pattern ctx pes) aux (Scatter len lam ivs as) = do
       return $ mkBody stms' res'
 
 fwdStm :: Stm -> ADM ()
-fwdStm (Let pat aux (BasicOp (UnAcc acc ts))) = do
-  acc_tan <- tangent acc
-  pat' <- bundleNew pat
-  ts' <- bundleTan ts
-  addStm $ Let pat' aux $ BasicOp $ UnAcc acc_tan ts'
 fwdStm (Let pat aux (BasicOp (UpdateAcc acc i x))) = do
   pat' <- bundleNew pat
   x' <- bundleTan x
@@ -427,20 +422,6 @@ fwdStm (Let pat aux (DoLoop l_ctx val_pats loop@(ForLoop i it bound loop_vars) b
     addStm $
       Let pat' aux $
         DoLoop l_ctx val_pats' (ForLoop i it bound loop_vars') body'
-fwdStm (Let pat aux (MkAcc accshape arrs ishape op)) = do
-  arrs_tan <- tangent arrs
-  pat' <- bundleNew pat
-  op' <- case op of
-    Nothing -> return Nothing
-    Just (lam, nes) -> do
-      nes_tan <- mapM (fmap Var . zeroFromSubExp) nes
-      lam' <- fwdLambda lam
-      case lam' of
-        Lambda (i : _ : ps) body ret -> do
-          let lam'' = Lambda (i : ps) body ret
-          return $ Just (lam'', interleave nes nes_tan)
-        _ -> error "Malformed lambda in MkAcc."
-  addStm $ Let pat' aux $ MkAcc accshape (arrs <> arrs_tan) ishape op'
 fwdStm (Let pat aux (Op soac)) = fwdSOAC pat aux soac
 fwdStm stm =
   error $ "unhandled forward mode AD for Stm: " ++ pretty stm ++ "\n" ++ show stm
