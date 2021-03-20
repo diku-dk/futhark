@@ -39,6 +39,7 @@ import Futhark.Util
 topDownRules :: BinderOps lore => [TopDownRule lore]
 topDownRules =
   [ RuleGeneric constantFoldPrimFun,
+    RuleGeneric ruleWithAcc,
     RuleIf ruleIf,
     RuleIf hoistBranchInvariant
   ]
@@ -289,6 +290,38 @@ removeDeadBranchResult (_, used) pat _ (e1, tb, fb, IfDec rettype ifsort)
         rettype' = pick rettype
      in Simplify $ letBind (Pattern [] pat') $ If e1 tb' fb' $ IfDec rettype' ifsort
   | otherwise = Skip
+
+ruleWithAcc :: BinderOps lore => TopDownRuleGeneric lore
+ruleWithAcc vtable (Let pat aux (WithAcc inputs lam)) = Simplify . auxing aux $ do
+  let (acc_res, nonacc_res) =
+        splitFromEnd num_nonaccs $ bodyResult $ lambdaBody lam
+      (acc_pes, nonacc_pes) =
+        splitFromEnd num_nonaccs $ patternElements pat
+      (acc_rets, nonacc_rets) =
+        splitFromEnd num_nonaccs $ lambdaReturnType lam
+  -- Identify those results in 'lam' that are free and move them out.
+  (nonacc_rets', nonacc_pes', nonacc_res') <-
+    unzip3 . catMaybes <$> mapM tryMove (zip3 nonacc_rets nonacc_pes nonacc_res)
+
+  when (nonacc_pes' == nonacc_pes) cannotSimplify
+  letBind (Pattern [] (acc_pes <> nonacc_pes')) $
+    WithAcc inputs $
+      lam
+        { lambdaBody = (lambdaBody lam) {bodyResult = acc_res <> nonacc_res'},
+          lambdaReturnType = acc_rets ++ nonacc_rets'
+        }
+  where
+    num_nonaccs = length (lambdaReturnType lam) - length inputs
+    tryMove (_, pe, Var v)
+      | v `ST.elem` vtable = do
+        letBindNames [patElemName pe] $ BasicOp $ SubExp $ Var v
+        pure Nothing
+    tryMove (_, pe, Constant v) = do
+      letBindNames [patElemName pe] $ BasicOp $ SubExp $ Constant v
+      pure Nothing
+    tryMove (t, pe, se) =
+      pure $ Just (t, pe, se)
+ruleWithAcc _ _ = Skip
 
 -- Some helper functions
 
