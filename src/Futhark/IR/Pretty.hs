@@ -293,7 +293,7 @@ instance PrettyLore lore => Pretty (Exp lore) where
           )
 
 instance PrettyLore lore => Pretty (Lambda lore) where
-  ppr (Lambda [] _ []) = text "nilFn"
+  ppr (Lambda [] (Body _ stms []) []) | stms == mempty = text "nilFn"
   ppr (Lambda params body rettype) =
     text "\\" <> ppTuple' params
       <+/> colon <+> ppTuple' rettype <+> text "->"
