@@ -194,11 +194,8 @@ interchangeWithAcc1
   (MapNesting map_pat map_aux w params_and_arrs) = do
     inputs' <- mapM onInput inputs
     let lam_params = lambdaParams acc_lam
-        lam_ret =
-          map paramType (drop num_accs lam_params)
-            ++ drop num_accs (map rowType (patternTypes map_pat))
     iota_p <- newParam "iota_p" $ Prim int64
-    acc_lam' <- trLam (Var (paramName iota_p)) <=< mkLambda lam_params lam_ret $ do
+    acc_lam' <- trLam (Var (paramName iota_p)) <=< mkLambda lam_params $ do
       iota_w <-
         letExp "acc_inter_iota" . BasicOp $
           Iota w (intConst Int64 0) (intConst Int64 1) Int64
@@ -222,7 +219,13 @@ interchangeWithAcc1
         pure . maybe v snd $
           find ((== v) . paramName . fst) params_and_arrs
       onInput (shape, arrs, op) =
-        (Shape [w] <> shape,,op) <$> mapM onArr arrs
+        (Shape [w] <> shape,,) <$> mapM onArr arrs <*> traverse onOp op
+
+      onOp (op_lam, nes) = do
+        -- We need to add an additional index parameter because we are
+        -- extending the index space of the accumulator.
+        idx_p <- newParam "idx" $ Prim int64
+        pure (op_lam {lambdaParams = idx_p : lambdaParams op_lam}, nes)
 
       trType :: TypeBase shape u -> TypeBase shape u
       trType (Acc acc ispace ts)
@@ -251,6 +254,8 @@ interchangeWithAcc1
           mapper =
             identitySOACMapper {mapOnSOACLambda = trLam i}
 
+      trExp i (WithAcc acc_inputs lam) =
+        WithAcc acc_inputs <$> trLam i lam
       trExp i (BasicOp (UpdateAcc acc is ses)) = do
         acc_t <- lookupType acc
         pure $ case acc_t of
@@ -258,7 +263,7 @@ interchangeWithAcc1
             | cert `elem` acc_certs ->
               BasicOp $ UpdateAcc acc (i : is) ses
           _ ->
-            BasicOp $ UpdateAcc acc (i : is) ses
+            BasicOp $ UpdateAcc acc is ses
       trExp i e = mapExpM mapper e
         where
           mapper =
