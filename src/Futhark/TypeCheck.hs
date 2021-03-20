@@ -3,6 +3,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE Strict #-}
 {-# LANGUAGE Trustworthy #-}
@@ -63,7 +64,7 @@ import Futhark.Analysis.PrimExp
 import Futhark.Construct (instantiateShapes)
 import Futhark.IR.Aliases hiding (lookupAliases)
 import Futhark.Util
-import Futhark.Util.Pretty (Pretty, align, indent, ppr, prettyDoc, text, (<+>))
+import Futhark.Util.Pretty (Pretty, align, indent, ppr, prettyDoc, text, (<+>), (</>))
 
 -- | Information about an error during type checking.  The 'Show'
 -- instance for this type produces a human-readable description.
@@ -703,7 +704,7 @@ checkStms ::
 checkStms origbnds m = delve $ stmsToList origbnds
   where
     delve (stm@(Let pat _ e) : bnds) = do
-      context ("In expression of statement " ++ pretty pat) $
+      context (pretty $ "In expression of statement" </> indent 2 (ppr pat)) $
         checkExp e
       checkStm stm $
         delve bnds
@@ -923,7 +924,7 @@ checkBasicOp (UpdateAcc acc is ses) = do
       TypeError $
         "Accumulator requires "
           ++ show (shapeRank shape)
-          ++ " indices, but only "
+          ++ " indices, but "
           ++ show (length is)
           ++ " provided."
 
@@ -1381,7 +1382,14 @@ checkLambda (Lambda params body rettype) args = do
           checkLambdaParams params
           mapM_ checkType rettype
           checkLambdaBody rettype body
-    else bad $ TypeError $ "Anonymous function defined with " ++ show (length params) ++ " parameters, but expected to take " ++ show (length args) ++ " arguments."
+    else
+      bad $
+        TypeError $
+          "Anonymous function defined with " ++ show (length params) ++ " parameters:\n"
+            ++ pretty params
+            ++ "\nbut expected to take "
+            ++ show (length args)
+            ++ " arguments."
 
 checkPrimExp :: Checkable lore => PrimExp VName -> TypeM lore ()
 checkPrimExp ValueExp {} = return ()
