@@ -110,7 +110,7 @@ class TanBinder a where
 instance (Monoid (Bundled a), TanBinder a) => TanBinder [a] where
   type Bundled [a] = Bundled a
   newTan = mapM newTan
-  bundleNew = (mconcat <$>) . mapM bundleNew
+  bundleNew = fmap mconcat . mapM bundleNew
 
 instance TanBinder VName where
   newTan v = do
@@ -147,6 +147,8 @@ instance TanBinder (Param (TypeBase s u)) where
   newTan (Param p t) = do
     PatElem p' t' <- newTan $ PatElem p t
     return $ Param p' t'
+  bundleNew param@(Param _ (Prim Cert)) =
+    pure [param]
   bundleNew param@(Param _ t) = do
     param' <- newTan param
     if isAcc t
@@ -376,18 +378,25 @@ fwdSOAC (Pattern ctx pes) aux (Scatter len lam ivs as) = do
     fwdBodyScatter n_indices (Body _ stms res) = do
       (res_tan, stms') <- collectStms $ do
         mapM_ fwdStm stms
-        tangent $ drop n_indices $ res
+        tangent $ drop n_indices res
       let indices = concat $ replicate 2 $ take n_indices res
           res' = indices ++ drop n_indices res ++ res_tan
       return $ mkBody stms' res'
 
 fwdStm :: Stm -> ADM ()
+fwdStm (Let pat aux (BasicOp (JoinAcc acc))) = do
+  pat' <- bundleNew pat
+  addStm $ Let pat' aux $ BasicOp $ JoinAcc acc
 fwdStm (Let pat aux (BasicOp (UpdateAcc acc i x))) = do
   pat' <- bundleNew pat
   x' <- bundleTan x
   acc_tan <- tangent acc
   addStm $ Let pat' aux $ BasicOp $ UpdateAcc acc_tan i x'
-fwdStm stm@(Let pat aux (BasicOp e)) = addStm stm >> basicFwd pat aux e
+fwdStm stm@(Let pat aux (BasicOp e)) = do
+  -- XXX: this has to be too naive.
+  unless (any isAcc $ patternTypes pat) $
+    addStm stm
+  basicFwd pat aux e
 fwdStm stm@(Let pat _ (Apply f args _ _))
   | Just (_, argts) <- M.lookup f builtInFunctions = do
     addStm stm
@@ -422,6 +431,23 @@ fwdStm (Let pat aux (DoLoop l_ctx val_pats loop@(ForLoop i it bound loop_vars) b
     addStm $
       Let pat' aux $
         DoLoop l_ctx val_pats' (ForLoop i it bound loop_vars') body'
+fwdStm (Let pat aux (WithAcc inputs lam)) = do
+  inputs' <- forM inputs $ \(shape, arrs, op) -> do
+    arrs_tan <- tangent arrs
+    op' <- case op of
+      Nothing -> return Nothing
+      Just (op_lam, nes) -> do
+        nes_tan <- mapM (fmap Var . zeroFromSubExp) nes
+        op_lam' <- fwdLambda op_lam
+        case op_lam' of
+          Lambda (i : _ : ps) body ret -> do
+            let op_lam'' = Lambda (i : ps) body ret
+            return $ Just (op_lam'', interleave nes nes_tan)
+          _ -> error "Malformed lambda in MkAcc."
+    pure (shape, arrs <> arrs_tan, op')
+  pat' <- bundleNew pat
+  lam' <- fwdLambda lam
+  addStm $ Let pat' aux $ WithAcc inputs' lam'
 fwdStm (Let pat aux (Op soac)) = fwdSOAC pat aux soac
 fwdStm stm =
   error $ "unhandled forward mode AD for Stm: " ++ pretty stm ++ "\n" ++ show stm
