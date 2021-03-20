@@ -467,7 +467,7 @@ compileSegScan pat lvl space scanOp kbody = do
           dPrimV_ x' $ tvExp prefix
           dPrimV_ y' $ tvExp acc
       sIf (sExt64 (kernelLocalThreadId constants) * m + 1 .<=.
-        tvExp blockOff + sExt64 (kernelLocalThreadId constants) * m `mod` segment_size)
+        (tvExp blockOff + sExt64 (kernelLocalThreadId constants) * m) `mod` segment_size)
         (compileStms mempty (bodyStms $ lambdaBody scanOp'''''') $
           forM_ (zip3 xs tys $ bodyResult $ lambdaBody scanOp'''''') $
             \(x, ty, res) -> x <~~ toExp' ty res)
