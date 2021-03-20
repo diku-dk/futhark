@@ -1141,11 +1141,10 @@ expReturns (BasicOp (UpdateAcc acc _ _)) =
 expReturns (WithAcc inputs lam) =
   (<>)
     <$> (concat <$> mapM inputReturns inputs)
-    <*> localScope
-      -- XXX: this is a bit dubious.  I think WithAcc should perhaps
-      -- have a return annotation like If.
-      (scopeOfLParams (lambdaParams lam) <> scopeOf (bodyStms (lambdaBody lam)))
-      (mapM subExpReturns (drop num_accs (bodyResult (lambdaBody lam))))
+    <*>
+    -- XXX: this is a bit dubious because it enforces extra copies.  I
+    -- think WithAcc should perhaps have a return annotation like If.
+    pure (extReturns $ staticShapes $ drop num_accs $ lambdaReturnType lam)
   where
     inputReturns (_, arrs, _) = mapM varReturns arrs
     num_accs = length inputs
