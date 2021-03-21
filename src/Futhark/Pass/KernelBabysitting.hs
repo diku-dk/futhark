@@ -81,16 +81,21 @@ nonlinearInMemory name m =
       | otherwise = Nothing
 
 transformStm :: ExpMap -> Stm Kernels -> BabysitM ExpMap
-transformStm expmap (Let pat aux (Op (SegOp op))) = do
-  let mapper =
-        identitySegOpMapper
-          { mapOnSegOpBody =
-              transformKernelBody expmap (segLevel op) (segSpace op)
-          }
-  op' <- mapSegOpM mapper op
-  let stm' = Let pat aux $ Op $ SegOp op'
-  addStm stm'
-  return $ M.fromList [(name, stm') | name <- patternNames pat] <> expmap
+transformStm expmap (Let pat aux (Op (SegOp op)))
+  -- FIXME: We only make coalescing optimisations for SegThread
+  -- SegOps, because that's what the analysis assumes.  For SegGroup
+  -- we should probably look at the component SegThreads, but it
+  -- apparently hasn't come up in practice yet.
+  | SegThread {} <- segLevel op = do
+    let mapper =
+          identitySegOpMapper
+            { mapOnSegOpBody =
+                transformKernelBody expmap (segLevel op) (segSpace op)
+            }
+    op' <- mapSegOpM mapper op
+    let stm' = Let pat aux $ Op $ SegOp op'
+    addStm stm'
+    return $ M.fromList [(name, stm') | name <- patternNames pat] <> expmap
 transformStm expmap (Let pat aux e) = do
   e' <- mapExpM (transform expmap) e
   let bnd' = Let pat aux e'
