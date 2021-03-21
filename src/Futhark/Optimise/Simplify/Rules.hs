@@ -22,6 +22,7 @@ where
 
 import Control.Monad
 import Data.Either
+import Data.List (unzip4, zip4)
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import Futhark.Analysis.PrimExp.Convert
@@ -39,14 +40,15 @@ import Futhark.Util
 topDownRules :: BinderOps lore => [TopDownRule lore]
 topDownRules =
   [ RuleGeneric constantFoldPrimFun,
-    RuleGeneric ruleWithAcc,
     RuleIf ruleIf,
-    RuleIf hoistBranchInvariant
+    RuleIf hoistBranchInvariant,
+    RuleGeneric withAccTopDown
   ]
 
 bottomUpRules :: BinderOps lore => [BottomUpRule lore]
 bottomUpRules =
   [ RuleIf removeDeadBranchResult,
+    RuleGeneric withAccBottomUp,
     RuleBasicOp simplifyIndex
   ]
 
@@ -291,37 +293,105 @@ removeDeadBranchResult (_, used) pat _ (e1, tb, fb, IfDec rettype ifsort)
      in Simplify $ letBind (Pattern [] pat') $ If e1 tb' fb' $ IfDec rettype' ifsort
   | otherwise = Skip
 
-ruleWithAcc :: BinderOps lore => TopDownRuleGeneric lore
-ruleWithAcc vtable (Let pat aux (WithAcc inputs lam)) = Simplify . auxing aux $ do
-  let (acc_res, nonacc_res) =
+withAccTopDown :: BinderOps lore => TopDownRuleGeneric lore
+-- A WithAcc with no accumulators is sent to Valhalla.
+withAccTopDown _ (Let pat aux (WithAcc [] lam)) = Simplify . auxing aux $ do
+  lam_res <- bodyBind $ lambdaBody lam
+  forM_ (zip (patternNames pat) lam_res) $ \(v, se) ->
+    letBindNames [v] $ BasicOp $ SubExp se
+-- Identify those results in 'lam' that are free and move them out.
+withAccTopDown vtable (Let pat aux (WithAcc inputs lam)) = Simplify . auxing aux $ do
+  let (cert_params, acc_params) =
+        splitAt (length inputs) $ lambdaParams lam
+      (acc_res, nonacc_res) =
         splitFromEnd num_nonaccs $ bodyResult $ lambdaBody lam
       (acc_pes, nonacc_pes) =
         splitFromEnd num_nonaccs $ patternElements pat
-      (acc_rets, nonacc_rets) =
-        splitFromEnd num_nonaccs $ lambdaReturnType lam
-  -- Identify those results in 'lam' that are free and move them out.
-  (nonacc_rets', nonacc_pes', nonacc_res') <-
-    unzip3 . catMaybes <$> mapM tryMove (zip3 nonacc_rets nonacc_pes nonacc_res)
 
-  when (nonacc_pes' == nonacc_pes) cannotSimplify
-  letBind (Pattern [] (acc_pes <> nonacc_pes')) $
-    WithAcc inputs $
-      lam
-        { lambdaBody = (lambdaBody lam) {bodyResult = acc_res <> nonacc_res'},
-          lambdaReturnType = acc_rets ++ nonacc_rets'
-        }
+  -- Look at accumulator results.
+  (acc_pes', inputs', params', acc_res') <-
+    fmap (unzip4 . catMaybes) . mapM tryMoveAcc $
+      zip4
+        (chunks (map inputArrs inputs) acc_pes)
+        inputs
+        (zip cert_params acc_params)
+        acc_res
+  let (cert_params', acc_params') = unzip params'
+
+  -- Look at non-accumulator results.
+  (nonacc_pes', nonacc_res') <-
+    unzip . catMaybes <$> mapM tryMoveNonAcc (zip nonacc_pes nonacc_res)
+
+  when (concat acc_pes' == acc_pes && nonacc_pes' == nonacc_pes) cannotSimplify
+
+  lam' <-
+    mkLambda (cert_params' ++ acc_params') $
+      bodyBind $ (lambdaBody lam) {bodyResult = acc_res' <> nonacc_res'}
+
+  letBind (Pattern [] (concat acc_pes' <> nonacc_pes')) $ WithAcc inputs' lam'
   where
     num_nonaccs = length (lambdaReturnType lam) - length inputs
-    tryMove (_, pe, Var v)
+    inputArrs (_, arrs, _) = length arrs
+
+    tryMoveAcc (pes, (_, arrs, _), (_, acc_p), Var v)
+      | paramName acc_p == v = do
+        forM_ (zip pes arrs) $ \(pe, arr) ->
+          letBindNames [patElemName pe] $ BasicOp $ SubExp $ Var arr
+        pure Nothing
+    tryMoveAcc x =
+      pure $ Just x
+
+    tryMoveNonAcc (pe, Var v)
       | v `ST.elem` vtable = do
         letBindNames [patElemName pe] $ BasicOp $ SubExp $ Var v
         pure Nothing
-    tryMove (_, pe, Constant v) = do
+    tryMoveNonAcc (pe, Constant v) = do
       letBindNames [patElemName pe] $ BasicOp $ SubExp $ Constant v
       pure Nothing
-    tryMove (t, pe, se) =
-      pure $ Just (t, pe, se)
-ruleWithAcc _ _ = Skip
+    tryMoveNonAcc x =
+      pure $ Just x
+withAccTopDown _ _ = Skip
+
+withAccBottomUp :: BinderOps lore => BottomUpRuleGeneric lore
+-- Eliminate dead results.
+withAccBottomUp (_, utable) (Let pat aux (WithAcc inputs lam))
+  | not $ all (`UT.used` utable) $ patternNames pat = Simplify $ do
+    let (acc_res, nonacc_res) =
+          splitFromEnd num_nonaccs $ bodyResult $ lambdaBody lam
+        (acc_pes, nonacc_pes) =
+          splitFromEnd num_nonaccs $ patternElements pat
+        (cert_params, acc_params) =
+          splitAt (length inputs) $ lambdaParams lam
+
+    -- Eliminate unused accumulator results
+    let (acc_pes', inputs', param_pairs, acc_res') =
+          unzip4 . filter keepAccRes $
+            zip4
+              (chunks (map inputArrs inputs) acc_pes)
+              inputs
+              (zip cert_params acc_params)
+              acc_res
+        (cert_params', acc_params') = unzip param_pairs
+
+    -- Eliminate unused non-accumulator results
+    let (nonacc_pes', nonacc_res') =
+          unzip $ filter keepNonAccRes $ zip nonacc_pes nonacc_res
+
+    when (concat acc_pes' == acc_pes && nonacc_pes' == nonacc_pes) cannotSimplify
+
+    let pes' = concat acc_pes' ++ nonacc_pes'
+
+    lam' <- mkLambda (cert_params' ++ acc_params') $ do
+      void $ bodyBind $ lambdaBody lam
+      pure $ acc_res' ++ nonacc_res'
+
+    auxing aux $ letBind (Pattern [] pes') $ WithAcc inputs' lam'
+  where
+    num_nonaccs = length (lambdaReturnType lam) - length inputs
+    inputArrs (_, arrs, _) = length arrs
+    keepAccRes (pes, _, _, _) = any ((`UT.used` utable) . patElemName) pes
+    keepNonAccRes (pe, _) = patElemName pe `UT.used` utable
+withAccBottomUp _ _ = Skip
 
 -- Some helper functions
 
