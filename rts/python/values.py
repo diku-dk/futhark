@@ -478,7 +478,7 @@ FUTHARK_PRIMTYPES = {
              'bin_reader': read_bin_bool,
              'str_reader': read_str_bool,
              'bin_format': 'b',
-             'numpy_type': np.bool }
+             'numpy_type': bool }
 }
 
 def read_bin_read_type(f):
