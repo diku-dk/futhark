@@ -61,7 +61,7 @@ generateOptionParser fname options =
            futhark_panic(-1, "Missing argument for option %s\n", argv[optind-1]);
          }
          if ($id:chosen_option == '?') {
-           fprintf(stderr, "Usage: %s: %s\n", fut_progname, $string:option_descriptions);
+           fprintf(stderr, "Usage: %s [OPTIONS]...\nOptions:\n\n%s\n", fut_progname, $string:option_descriptions);
            futhark_panic(1, "Unknown option: %s\n", argv[optind-1]);
          }
        }
