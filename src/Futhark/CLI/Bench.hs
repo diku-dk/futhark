@@ -216,7 +216,7 @@ runOptions f opts =
 
 progressBar :: Int -> Int -> Int -> String
 progressBar cur bound steps =
-  "[" ++ map cell [1 .. steps] ++ "] " ++ show cur ++ "/" ++ show bound
+  "|" ++ map cell [1 .. steps] ++ "| " ++ show cur ++ "/" ++ show bound
   where
     step_size :: Double
     step_size = fromIntegral bound / fromIntegral steps
