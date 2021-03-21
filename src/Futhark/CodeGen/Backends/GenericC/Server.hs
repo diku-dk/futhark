@@ -44,7 +44,7 @@ genericOptions =
         optionDescription = "Print help information and exit.",
         optionAction =
           [C.cstm|{
-                   printf("Usage: %s [OPTION]...\nOptions:\n\n%s\nFor more information, consult the Futhark User's Guide or the man pages.\n",
+                   printf("Usage: %s [OPTIONS]...\nOptions:\n\n%s\nFor more information, consult the Futhark User's Guide or the man pages.\n",
                           fut_progname, option_descriptions);
                    exit(0);
                   }|]
