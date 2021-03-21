@@ -289,7 +289,8 @@ instance PrettyLore lore => Pretty (Exp lore) where
           ( ppr shape <> comma <+> ppTuple' arrs
               <> case op of
                 Nothing -> mempty
-                Just (op', nes) -> comma </> apply [ppr op', ppTuple' $ map ppr nes]
+                Just (op', nes) ->
+                  comma </> parens (ppr op' <> comma </> ppTuple' (map ppr nes))
           )
 
 instance PrettyLore lore => Pretty (Lambda lore) where
