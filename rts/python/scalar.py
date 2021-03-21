@@ -152,7 +152,7 @@ def sext_T_i64(x):
   return np.int64(x)
 
 def itob_T_bool(x):
-  return np.bool(x)
+  return bool(x)
 
 def btoi_bool_i8(x):
   return np.int8(x)
