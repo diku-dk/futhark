@@ -185,7 +185,7 @@ compileProg mode class_name prog = do
 -- We have many casts to 'long', because PyOpenCL may get confused at
 -- the 32-bit numbers that ImpCode uses for offsets and the like.
 asLong :: PyExp -> PyExp
-asLong x = Py.simpleCall "np.long" [x]
+asLong x = Py.simpleCall "int" [x]
 
 callKernel :: Py.OpCompiler Imp.OpenCL ()
 callKernel (Imp.GetSize v key) = do
