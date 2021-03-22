@@ -41,7 +41,6 @@ compileSegRed pat space reds kbody
     tmp <- collect $ do 
       dPrim_ gtid int64
       copyDWIM gtid [] (Var . tvVar $ stage_one_idx) []
-      --gtid <~~ toExp $ (Var . tvVar $ stage_one_idx)
       compileStms mempty (kernelBodyStms kbody) $ do
         dLParams $ lambdaParams lam
         let (x_params, y_params) =
@@ -59,7 +58,7 @@ compileSegRed pat space reds kbody
     emit $ Imp.Op $ Imp.DistributedLoop "segred" (tvVar stage_one_idx) Imp.Skip tmp mempty [] $ segFlat space
     
     -- Step B : Copy accumulator to array
-    -- Create local accumulator
+    -- Recover infos about the world and the node
     nb_nodes <- dPrim "nb_nodes" int32
     emit $ Imp.Op $ Imp.LoadNbNode (tvVar nb_nodes)
 
@@ -67,16 +66,16 @@ compileSegRed pat space reds kbody
     emit $ Imp.Op $ Imp.LoadNodeId (tvVar node_id)
 
     -- I may need to change the PrimeType int64 -> xx
-    -- pt <- lookupType $ head acc_vs I should look up how to create an array with those types
+    -- `pt <- lookupType $ head acc_vs` I should look up how to create an array with those types
     let array_type = int64 
     let array_size = typeSize $ Array array_type (Shape [Var $ tvVar nb_nodes]) NoUniqueness
-    mem <- sAlloc "second_stage_acc" array_size DefaultSpace 
-    array <- sArrayInMem "Array" array_type (Shape [Var . tvVar $ nb_nodes]) mem 
+    second_stage_mem <- sAlloc "second_stage_acc" array_size DefaultSpace 
+    second_stage_array <- sArrayInMem "second_stage_arr" array_type (Shape [Var . tvVar $ nb_nodes]) second_stage_mem 
+    copyDWIMFix second_stage_array [Imp.vi64 $ tvVar node_id] (Var $ head acc_vs) []
     
-
-    copyDWIMFix array [Imp.vi64 $ tvVar node_id] (Var $ head acc_vs) []
     -- Step C : Gather array on main node
-    emit $ Imp.Op $ Imp.Gather mem
+    emit $ Imp.Op $ Imp.Gather second_stage_mem
+    
     -- Step D : Stage 2 reduction
     stage_two <- collect $ do
       -- Reset acc 
@@ -84,7 +83,7 @@ compileSegRed pat space reds kbody
         ne' <- toExp ne
         -- "<~~" Untyped assignment.
         acc_v <~~ ne'
-      -- Here I need to change the input array of the loop under
+      -- Here I need to change the input array of the loop body
       sFor "i" (Imp.vi64 . tvVar $ nb_nodes) $ \i -> do
         dPrimV_ gtid i
         compileStms mempty (kernelBodyStms kbody) $ do
@@ -92,11 +91,11 @@ compileSegRed pat space reds kbody
           let (x_params, y_params) =
                 splitAt (length nes) $ lambdaParams lam
 
-          -- Test fix, create fake returns to use the array
+          -- Test fix, rewrite the input array var
           let (Returns _ (Var result_vname)) = head $ kernelBodyResult kbody
           traceM $ "var : " ++ show result_vname
-          -- Replace se with read from stage 1 result, namely `array`
-          copyDWIMFix result_vname [] (Var array) [Imp.vi64 gtid]
+          -- Replace se with read from stage 1 result, namely `second_stage_array`
+          copyDWIMFix result_vname [] (Var second_stage_array) [Imp.vi64 gtid]
 
           forM_ (zip x_params acc_vs) $ \(x_param, acc_v) ->
             copyDWIMFix (paramName x_param) [] (Var acc_v) []
