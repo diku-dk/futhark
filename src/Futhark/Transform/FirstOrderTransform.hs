@@ -256,7 +256,7 @@ transformSOAC pat (Scatter len lam ivs as) = do
 
   let (as_ws, as_ns, as_vs) = unzip3 as
   ts <- mapM lookupType as_vs
-  asOuts <- mapM (newIdent "write_outasdf") ts
+  asOuts <- mapM (newIdent "write_out") ts
 
   -- Scatter is in-place, so we use the input array as the output array.
   let merge = loopMerge asOuts $ map Var as_vs
@@ -275,7 +275,7 @@ transformSOAC pat (Scatter len lam ivs as) = do
 
         ress <- forM indexes $ \(_, arr, indexes') -> do
           let saveInArray arr' (indexCur, valueCur) =
-                letExp "write_outbals" =<< eWriteArray arr' (map eSubExp indexCur) (eSubExp valueCur)
+                letExp "write_out" =<< eWriteArray arr' (map eSubExp indexCur) (eSubExp valueCur)
 
           foldM saveInArray arr indexes'
         return $ resultBody (map Var ress)
