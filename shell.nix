@@ -22,5 +22,6 @@ pkgs.stdenv.mkDerivation {
     pkgs.ghcid
     pkgs.ormolu
     pkgs.niv
+    pkgs.imagemagick # needed for literate tests
   ];
 }
