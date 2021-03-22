@@ -573,8 +573,8 @@ removeDeadReduction _ _ _ _ = Skip
 -- | If we are writing to an array that is never used, get rid of it.
 removeDeadWrite :: BottomUpRuleOp (Wise SOACS)
 removeDeadWrite (_, used) pat aux (Scatter w fun arrs dests) =
-  let (i_ses, v_ses) = splitAt (length dests) $ bodyResult $ lambdaBody fun
-      (i_ts, v_ts) = splitAt (length dests) $ lambdaReturnType fun
+  let (i_ses, v_ses) = unzip $ groupScatterResults' dests $ bodyResult $ lambdaBody fun
+      (i_ts, v_ts) = unzip $ groupScatterResults' dests $ lambdaReturnType fun
       isUsed (bindee, _, _, _, _, _) = (`UT.used` used) $ patElemName bindee
       (pat', i_ses', v_ses', i_ts', v_ts', dests') =
         unzip6 $
@@ -582,8 +582,8 @@ removeDeadWrite (_, used) pat aux (Scatter w fun arrs dests) =
             zip6 (patternElements pat) i_ses v_ses i_ts v_ts dests
       fun' =
         fun
-          { lambdaBody = (lambdaBody fun) {bodyResult = i_ses' ++ v_ses'},
-            lambdaReturnType = i_ts' ++ v_ts'
+          { lambdaBody = (lambdaBody fun) {bodyResult = concat i_ses' ++ v_ses'},
+            lambdaReturnType = concat i_ts' ++ v_ts'
           }
    in if pat /= Pattern [] pat'
         then
@@ -601,11 +601,10 @@ fuseConcatScatter vtable pat _ (Scatter _ fun arrs dests)
     all (w' ==) ws = Simplify $ do
     let r = length xivs
     fun2s <- mapM (\_ -> renameLambda fun) [1 .. r -1]
-    let fun_n = length $ lambdaReturnType fun
-        (fun_is, fun_vs) =
+    let (fun_is, fun_vs) =
           unzip $
             map
-              ( splitAt (fun_n `div` 2)
+              ( splitScatterResults dests
                   . bodyResult
                   . lambdaBody
               )
@@ -613,7 +612,7 @@ fuseConcatScatter vtable pat _ (Scatter _ fun arrs dests)
         (its, vts) =
           unzip $
             replicate r $
-              splitAt (fun_n `div` 2) $ lambdaReturnType fun
+              splitScatterResults dests $ lambdaReturnType fun
         new_stmts = mconcat $ map (bodyStms . lambdaBody) (fun : fun2s)
     let fun' =
           Lambda
