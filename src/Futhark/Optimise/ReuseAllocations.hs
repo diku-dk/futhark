@@ -214,7 +214,8 @@ onKernels f =
 optimise :: Pass KernelsMem KernelsMem
 optimise =
   Pass "reuse allocations" "reuse allocations" $ \prog ->
-    let (lumap, _) = LastUse.analyseProg prog
+    let _ = unsafePerformIO (memoryBlockMerging prog)
+        (lumap, _) = LastUse.analyseProg prog
         graph =
           foldMap
             ( \f ->
