@@ -24,18 +24,17 @@ import System.Exit
 import System.FilePath
 import System.IO
 
+isBuiltin :: String -> Bool
+isBuiltin = ("prelude/" `isPrefixOf`)
+
 -- | @futhark imports@
 mainImports :: String -> [String] -> IO ()
 mainImports = mainWithOptions () [] "program" $ \args () ->
   case args of
     [file] -> Just $ do
       (_, prog_imports, _) <- readProgramOrDie file
-      liftIO $
-        putStr $
-          unlines $
-            map (++ ".fut") $
-              filter (\f -> not ("prelude/" `isPrefixOf` f)) $
-                map fst prog_imports
+      liftIO . putStr . unlines . map (++ ".fut") . filter (not . isBuiltin) $
+        map fst prog_imports
     _ -> Nothing
 
 -- | @futhark hash@
@@ -43,7 +42,7 @@ mainHash :: String -> [String] -> IO ()
 mainHash = mainWithOptions () [] "program" $ \args () ->
   case args of
     [file] -> Just $ do
-      prog <- readUntypedProgramOrDie file
+      prog <- filter (not . isBuiltin . fst) <$> readUntypedProgramOrDie file
       liftIO $ T.putStrLn $ hashIntText $ hash $ prettyText prog
     _ -> Nothing
 
