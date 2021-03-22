@@ -288,8 +288,10 @@ compileSegScan pat lvl space scanOp kbody = do
       sOp localBarrier
     prefixes <- forM (zip scanOpNe tys) $ \(ne, ty) ->
       dPrimV "prefix" $ TPrimExp $ toExp' ty ne
+    blockNewSgm <- dPrimVE "block_new_sgm" $
+      tvExp blockOff `mod` segment_size .==. 0
     sComment "Perform lookback" $ do
-      sWhen (tvExp dynamicId .==. 0 .&&. kernelLocalThreadId constants .==. 0) $ do
+      sWhen (blockNewSgm .&&. kernelLocalThreadId constants .==. 0) $ do
         everythingVolatile $
           forM_ (zip incprefixArrays accs) $ \(incprefixArray, acc) ->
             copyDWIMFix incprefixArray [tvExp dynamicId] (tvSize acc) []
@@ -301,7 +303,7 @@ compileSegScan pat lvl space scanOp kbody = do
       -- end sWhen
 
       let warpSize = kernelWaveSize constants
-      sWhen (bNot (tvExp dynamicId .==. 0) .&&. kernelLocalThreadId constants .<. warpSize) $ do
+      sWhen (bNot blockNewSgm .&&. kernelLocalThreadId constants .<. warpSize) $ do
         sWhen (kernelLocalThreadId constants .==. 0) $ do
           everythingVolatile $
             forM_ (zip aggregateArrays accs) $ \(aggregateArray, acc) ->
