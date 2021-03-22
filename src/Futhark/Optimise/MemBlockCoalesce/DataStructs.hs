@@ -109,15 +109,17 @@ updateAliasing stab pat =
             -- In case of an IN-PLACE update, add the previous name
             -- to the alias set of the new one.
             let (al,_)  = patElemAttr patel
-                al_nms0 = unNames al
-{-- 
+                al_nms0 = unNames al 
                 -- ToDo: in-place updates may not be treated as aliases
                 --       and they should with customized LastUse
+                --       but we have changed representation and
+                --       "bindage" does not exist anymore, i.e.,
+                --       not related to pattern
                 al_nms = case patElemBindage patel of
                            BindVar -> al_nms0
                            BindInPlace _ nm _ -> S.insert nm al_nms0
---}
-                al_nms = al_nms0
+
+                --al_nms = al_nms0
                 al_trns= S.foldl' (\acc x -> case M.lookup x stabb of
                                                 Nothing -> acc
                                                 Just aal -> acc `S.union` aal
