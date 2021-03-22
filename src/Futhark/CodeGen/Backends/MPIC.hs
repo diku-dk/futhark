@@ -19,7 +19,7 @@ import Futhark.CodeGen.ImpCode.MPI
 import qualified Futhark.CodeGen.ImpGen.MPI as ImpGen
 import Futhark.IR.MCMem (MCMem, Prog)
 import Futhark.MonadFreshNames
-import qualified Language.C.Quote.C as C
+import qualified Language.C.Quote.OpenCL as C
 
 compileProg ::
   MonadFreshNames m =>
@@ -157,12 +157,25 @@ compileProg =
                                }|]
         )
 
+      GC.earlyDecl [C.cedecl|static const char *size_names[0];|]
+      GC.earlyDecl [C.cedecl|static const char *size_vars[0];|]
+      GC.earlyDecl [C.cedecl|static const char *size_classes[0];|]
+
+      GC.publicDef_ "context_config_set_size" GC.InitDecl $ \s ->
+        ( [C.cedecl|int $id:s(struct $id:cfg* cfg, const char *size_name, size_t size_value);|],
+          [C.cedecl|int $id:s(struct $id:cfg* cfg, const char *size_name, size_t size_value) {
+                         (void)cfg; (void)size_name; (void)size_value;
+                         return 1;
+                       }|]
+        )
+
       GC.publicDef_ "context_get_rank" GC.InitDecl $ \s ->
         ( [C.cedecl|int $id:s(struct $id:ctx*ctx);|],
           [C.cedecl|int $id:s(struct $id:ctx*ctx) {
                               return ctx->rank;
                           }|]
         )
+
       GC.publicDef_ "context_get_world_size" GC.InitDecl $ \s ->
         ( [C.cedecl|int $id:s(struct $id:ctx*ctx);|],
           [C.cedecl|int $id:s(struct $id:ctx*ctx) {

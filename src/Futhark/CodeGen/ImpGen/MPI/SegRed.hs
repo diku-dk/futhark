@@ -108,6 +108,7 @@ compileSegRed pat space reds kbody
             forM_ (zip acc_vs (bodyResult (lambdaBody lam))) $ \(acc_v, se) ->
               copyDWIMFix acc_v [] se []
     
+    -- Node id 0 is the main node
     sIf ((Imp.vi64. tvVar  $ node_id) .==. 0) (emit stage_two) (pure ())
     
     forM_ (zip (patternNames pat) acc_vs) $ \(v, acc_v) ->
