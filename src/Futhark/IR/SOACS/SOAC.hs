@@ -40,6 +40,8 @@ module Futhark.IR.SOACS.SOAC
     ppScrema,
     ppHist,
     groupScatterResults,
+    groupScatterResults',
+    splitScatterResults,
 
     -- * Generic traversal
     SOACMapper (..),
@@ -317,9 +319,9 @@ isMapSOAC (ScremaForm scans reds map_lam) = do
   guard $ null reds
   return map_lam
 
--- | @groupResult <output specification> <result>@
+-- | @groupScatterResults <output specification> <results>@
 --
--- Groups the index values and result values of <result> according to the
+-- Groups the index values and result values of <results> according to the
 -- <output specification>.
 --
 -- This function is used for extracting and grouping the results of a
@@ -332,16 +334,39 @@ isMapSOAC (ScremaForm scans reds map_lam) = do
 -- parameter, along with the array indices marking where to write them to.
 --
 -- See 'Scatter' for more information.
-groupScatterResults :: [(Shape, Int, array)] -> [SubExp] -> [(Shape, array, [([SubExp], SubExp)])]
-groupScatterResults output_spec result =
+groupScatterResults :: [(Shape, Int, array)] -> [a] -> [(Shape, array, [([a], a)])]
+groupScatterResults output_spec results =
   let (shapes, ns, arrays) = unzip3 output_spec
-      num_indices = sum $ zipWith (*) ns $ map length shapes
-      (indices, values) = splitAt num_indices result
+   in groupScatterResults' output_spec results
+        & chunks ns
+        & zip3 shapes arrays
+
+-- | @groupScatterResults' <output specification> <results>@
+--
+-- Groups the index values and result values of <results> according to the
+-- output specification. This is the simpler version of @groupScatterResults@,
+-- which doesn't return any information about shapes or output arrays.
+--
+-- See 'groupScatterResults' for more information,
+groupScatterResults' :: [(Shape, Int, array)] -> [a] -> [([a], a)]
+groupScatterResults' output_spec results =
+  let (indices, values) = splitScatterResults output_spec results
+      (shapes, ns, _) = unzip3 output_spec
       chunk_sizes =
         concat $ zipWith (\shp n -> replicate n $ length shp) shapes ns
    in zip (chunks chunk_sizes indices) values
-        & chunks ns
-        & zip3 shapes arrays
+
+-- | @splitScatterResults <output specification> <results>@
+--
+-- Splits the results array into indices and values according to the output
+-- specification.
+--
+-- See 'groupScatterResults' for more information.
+splitScatterResults :: [(Shape, Int, array)] -> [a] -> ([a], [a])
+splitScatterResults output_spec results =
+  let (shapes, ns, _) = unzip3 output_spec
+      num_indices = sum $ zipWith (*) ns $ map length shapes
+   in splitAt num_indices results
 
 -- | Like 'Mapper', but just for 'SOAC's.
 data SOACMapper flore tlore m = SOACMapper
