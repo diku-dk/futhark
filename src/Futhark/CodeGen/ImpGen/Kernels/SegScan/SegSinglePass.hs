@@ -381,8 +381,11 @@ compileSegScan pat lvl space scanOp kbody = do
                         flag2 <- dPrim "flag2" int8
                         used1 <- dPrimV "used1" (0 :: Imp.TExp Int8)
                         used2 <- dPrim "used2" int8
-                        sFor "i" warpSize $ \i -> do
-                          copyDWIMFix (tvVar flag2) [] (Var warpscan) [sExt64 i]
+                        prev_blocks <- dPrimVE "prev_blocks" $
+                          ((tvExp blockOff `mod` segment_size - 1) `div`
+                          (unCount group_size * m)) + 1
+                        sFor "i" prev_blocks $ \i -> do
+                          copyDWIMFix (tvVar flag2) [] (Var warpscan) [sExt64 warpSize+i-prev_blocks]
                           unmakeStatusUsed flag2 flag2 used2
                           forM_ (zip agg2s exchanges) $ \(agg2, exchange) ->
                             copyDWIMFix agg2 [] (Var exchange) [sExt64 i]
