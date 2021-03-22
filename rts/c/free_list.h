@@ -31,6 +31,9 @@ static void free_list_pack(struct free_list *l) {
   for (int i = 0; i < l->capacity; i++) {
     if (l->entries[i].valid) {
       l->entries[p] = l->entries[i];
+      if (i > p) {
+        l->entries[i].valid = 0;
+      }
       p++;
     }
   }
