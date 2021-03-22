@@ -352,6 +352,9 @@ valueToBMP v@(Word8Value _ bytes)
 valueToBMP v@(Float64Value _ bytes)
   | [h, w] <- valueShape v =
     Just $ vecToBMP h w $ greyFloatToImg bytes
+valueToBMP v@(BoolValue _ bytes)
+  | [h, w] <- valueShape v =
+    Just $ vecToBMP h w $ greyByteToImg $ SVec.map ((*) 255 . fromEnum) bytes
 valueToBMP _ = Nothing
 
 valueToBMPs :: Value -> Maybe [LBS.ByteString]
@@ -847,6 +850,8 @@ main = mainWithOptions initialOptions commandLineOptions "program" $ \args opts 
                 ++ scriptCompilerOptions opts
         when (scriptVerbose opts > 0) $
           T.hPutStrLn stderr $ "Compiling " <> T.pack prog <> "..."
+        when (scriptVerbose opts > 1) $
+          T.hPutStrLn stderr $ T.pack $ unwords compile_options
 
         let onError err = do
               mapM_ (T.hPutStrLn stderr) err
