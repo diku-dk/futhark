@@ -209,6 +209,10 @@ library
       Futhark.Optimise.InliningDeadFun
       Futhark.Optimise.ReuseAllocations
       Futhark.Optimise.ReuseAllocations.GreedyColoring
+      Futhark.Optimise.MemBlockCoalesce
+      Futhark.Optimise.MemBlockCoalesce.ArrayCoalescing
+      Futhark.Optimise.MemBlockCoalesce.DataStructs
+      Futhark.Optimise.MemBlockCoalesce.LastUse
       Futhark.Optimise.Simplify
       Futhark.Optimise.Simplify.Engine
       Futhark.Optimise.Simplify.Lore
