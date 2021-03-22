@@ -450,33 +450,29 @@ fuseSOACwithKer unfus_set outVars soac_p soac_p_consumed ker = do
             SOAC.Hist w (ops_c <> ops_p) lam' (inp_c_arr <> inp_p_arr)
 
     -- Scatter-write fusion.
-    ( SOAC.Scatter _len2 _lam_c ivs2 as2,
+    ( SOAC.Scatter _len_c _lam_c ivs_c as_c,
       SOAC.Scatter _len_p _lam_p ivs_p as_p
       )
         | horizFuse -> do
-          let zipW xs ys = ys_p ++ xs_p ++ ys2 ++ xs2
+          let zipW as_xs xs as_ys ys = xs_indices ++ ys_indices ++ xs_vals ++ ys_vals
                 where
-                  lenx = length xs `div` 2
-                  xs_p = take lenx xs
-                  xs2 = drop lenx xs
-                  leny = length ys `div` 2
-                  ys_p = take leny ys
-                  ys2 = drop leny ys
-          let (body_p, body2) = (lambdaBody lam_p, lambdaBody lam_c)
+                  (xs_indices, xs_vals) = splitScatterResults as_xs xs
+                  (ys_indices, ys_vals) = splitScatterResults as_ys ys
+          let (body_p, body_c) = (lambdaBody lam_p, lambdaBody lam_c)
           let body' =
                 Body
-                  { bodyDec = bodyDec body_p, -- body_p and body2 have the same lores
-                    bodyStms = bodyStms body_p <> bodyStms body2,
-                    bodyResult = zipW (bodyResult body_p) (bodyResult body2)
+                  { bodyDec = bodyDec body_p, -- body_p and body_c have the same lores
+                    bodyStms = bodyStms body_p <> bodyStms body_c,
+                    bodyResult = zipW as_c (bodyResult body_c) as_p (bodyResult body_p)
                   }
           let lam' =
                 Lambda
-                  { lambdaParams = lambdaParams lam_p ++ lambdaParams lam_c,
+                  { lambdaParams = lambdaParams lam_c ++ lambdaParams lam_p,
                     lambdaBody = body',
-                    lambdaReturnType = zipW (lambdaReturnType lam_p) (lambdaReturnType lam_c)
+                    lambdaReturnType = zipW as_c (lambdaReturnType lam_c) as_p (lambdaReturnType lam_p)
                   }
           success (outNames ker ++ returned_outvars) $
-            SOAC.Scatter w lam' (ivs_p ++ ivs2) (as2 ++ as_p)
+            SOAC.Scatter w lam' (ivs_c ++ ivs_p) (as_c ++ as_p)
     (SOAC.Scatter {}, _) ->
       fail "Cannot fuse a write with anything else than a write or a map"
     (_, SOAC.Scatter {}) ->
