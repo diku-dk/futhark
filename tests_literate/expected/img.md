@@ -11,7 +11,7 @@ let checkerboard_f32 =
 ```
 
 
-![](img-img/da58d646eb37f5f-img.png)
+![](img-img/a475391586169d75-img.png)
 
 
 ```futhark
@@ -26,5 +26,5 @@ let checkerboard_bool =
 ```
 
 
-![](img-img/12ad892d6aae2374-img.png)
+![](img-img/f722f3ed6ea7e79a-img.png)
 
