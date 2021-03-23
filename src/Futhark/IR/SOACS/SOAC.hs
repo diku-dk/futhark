@@ -843,8 +843,13 @@ instance PrettyLore lore => PP.Pretty (SOAC lore) where
             ( ppr size <> comma </> ppr lam <> comma
                 </> commasep (PP.braces (commasep $ map ppr acc) : map ppr arrs)
             )
-  ppr (Scatter len lam ivs as) =
-    ppSOAC "scatter" len [lam] (Just (map Var ivs)) as
+  ppr (Scatter w lam ivs as) =
+    "scatter"
+      <> parens
+        ( ppr w <> comma
+            </> ppr lam <> comma
+            </> commasep (ppTuple' ivs : map ppr as)
+        )
   ppr (Hist len ops bucket_fun imgs) =
     ppHist len ops bucket_fun imgs
   ppr (Screma w (ScremaForm scans reds map_lam) arrs)
@@ -925,26 +930,3 @@ ppHist len ops bucket_fun imgs =
       ppr w <> comma <+> ppr rf <> comma <+> PP.braces (commasep $ map ppr dests) <> comma
         </> PP.braces (commasep $ map ppr nes) <> comma
         </> ppr op
-
-ppSOAC ::
-  (Pretty fn, Pretty v) =>
-  String ->
-  SubExp ->
-  [fn] ->
-  Maybe [SubExp] ->
-  [v] ->
-  Doc
-ppSOAC name size funs es as =
-  text name
-    <> parens
-      ( ppr size <> comma
-          </> ppList funs
-          </> commasep (es' ++ map ppr as)
-      )
-  where
-    es' = maybe [] ((: []) . ppTuple') es
-
-ppList :: Pretty a => [a] -> Doc
-ppList as = case map ppr as of
-  [] -> mempty
-  a' : as' -> foldl (</>) (a' <> comma) $ map (<> comma) as'
