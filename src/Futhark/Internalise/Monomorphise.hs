@@ -366,7 +366,7 @@ transformExp (Lambda params e0 decl tp loc) = do
 transformExp (OpSection qn t loc) =
   transformExp $ Var qn t loc
 transformExp (OpSectionLeft fname (Info t) e arg ret loc) = do
-  let (Info (xtype, xargext), Info ytype) = arg
+  let (Info (xp, xtype, xargext), Info (yp, ytype)) = arg
       (Info rettype, Info retext) = ret
   fname' <- transformFName loc fname $ toStruct t
   e' <- transformExp e
@@ -375,12 +375,12 @@ transformExp (OpSectionLeft fname (Info t) e arg ret loc) = do
     (Just e')
     Nothing
     t
-    (xtype, xargext)
-    (ytype, Nothing)
+    (xp, xtype, xargext)
+    (yp, ytype, Nothing)
     (rettype, retext)
     loc
 transformExp (OpSectionRight fname (Info t) e arg (Info rettype) loc) = do
-  let (Info xtype, Info (ytype, yargext)) = arg
+  let (Info (xp, xtype), Info (yp, ytype, yargext)) = arg
   fname' <- transformFName loc fname $ toStruct t
   e' <- transformExp e
   desugarBinOpSection
@@ -388,8 +388,8 @@ transformExp (OpSectionRight fname (Info t) e arg (Info rettype) loc) = do
     Nothing
     (Just e')
     t
-    (xtype, Nothing)
-    (ytype, yargext)
+    (xp, xtype, Nothing)
+    (yp, ytype, yargext)
     (rettype, [])
     loc
 transformExp (ProjectSection fields (Info t) loc) =
@@ -412,8 +412,7 @@ transformExp (BinOp (fname, _) (Info t) (e1, d1) (e2, d2) tp ext loc) = do
   fname' <- transformFName loc fname $ toStruct t
   e1' <- transformExp e1
   e2' <- transformExp e2
-  if orderZero (typeOf e1')
-    && orderZero (typeOf e2')
+  if orderZero (typeOf e1') && orderZero (typeOf e2')
     then return $ applyOp fname' e1' e2'
     else do
       -- We have to flip the arguments to the function, because
@@ -518,46 +517,53 @@ desugarBinOpSection ::
   Maybe Exp ->
   Maybe Exp ->
   PatternType ->
-  (StructType, Maybe VName) ->
-  (StructType, Maybe VName) ->
+  (PName, StructType, Maybe VName) ->
+  (PName, StructType, Maybe VName) ->
   (PatternType, [VName]) ->
   SrcLoc ->
   MonoM Exp
-desugarBinOpSection op e_left e_right t (xtype, xext) (ytype, yext) (rettype, retext) loc = do
-  (wrap_left, e1, p1) <- makeVarParam e_left $ fromStruct xtype
-  (wrap_right, e2, p2) <- makeVarParam e_right $ fromStruct ytype
+desugarBinOpSection op e_left e_right t (xp, xtype, xext) (yp, ytype, yext) (rettype, retext) loc = do
+  (v1, wrap_left, e1, p1) <- makeVarParam e_left $ fromStruct xtype
+  (v2, wrap_right, e2, p2) <- makeVarParam e_right $ fromStruct ytype
   let apply_left =
         Apply
           op
           e1
           (Info (Observe, xext))
-          (Info $ foldFunType [fromStruct ytype] t, Info [])
+          (Info $ Scalar $ Arrow mempty yp (fromStruct ytype) t, Info [])
           loc
+      rettype' =
+        let onDim (NamedDim d)
+              | Named p <- xp, qualLeaf d == p = NamedDim $ qualName v1
+              | Named p <- yp, qualLeaf d == p = NamedDim $ qualName v2
+            onDim d = d
+         in first onDim rettype
       body =
         Apply
           apply_left
           e2
           (Info (Observe, yext))
-          (Info rettype, Info retext)
+          (Info rettype', Info retext)
           loc
-      rettype' = toStruct rettype
-  return $ wrap_left $ wrap_right $ Lambda (p1 ++ p2) body Nothing (Info (mempty, rettype')) loc
+      rettype'' = toStruct rettype'
+  return $ wrap_left $ wrap_right $ Lambda (p1 ++ p2) body Nothing (Info (mempty, rettype'')) loc
   where
     patAndVar argtype = do
       x <- newNameFromString "x"
       pure
-        ( Id x (Info argtype) mempty,
+        ( x,
+          Id x (Info argtype) mempty,
           Var (qualName x) (Info argtype) mempty
         )
 
     makeVarParam (Just e) argtype = do
-      (pat, var_e) <- patAndVar argtype
+      (v, pat, var_e) <- patAndVar argtype
       let wrap body =
             LetPat pat e body (Info (typeOf body), Info mempty) mempty
-      return (wrap, var_e, [])
+      return (v, wrap, var_e, [])
     makeVarParam Nothing argtype = do
-      (pat, var_e) <- patAndVar argtype
-      return (id, var_e, [pat])
+      (v, pat, var_e) <- patAndVar argtype
+      return (v, id, var_e, [pat])
 
 desugarProjectSection :: [Name] -> PatternType -> SrcLoc -> MonoM Exp
 desugarProjectSection fields (Scalar (Arrow _ _ t1 t2)) loc = do
@@ -668,17 +674,7 @@ inferSizeArgs tparams bind_t t =
         Just (ConstDim x) ->
           Just $ Literal (SignedValue $ Int64Value $ fromIntegral x) mempty
         _ ->
-          Nothing
-
-explicitSizes :: StructType -> MonoType -> S.Set VName
-explicitSizes t1 t2 =
-  execState (matchDims onDims t1 t2) mempty `S.intersection` mustBeExplicit t1
-  where
-    onDims d1 d2 = do
-      case (d1, d2) of
-        (NamedDim v, MonoKnown _) -> modify $ S.insert $ qualLeaf v
-        _ -> return ()
-      return d1
+          Just $ Literal (SignedValue $ Int64Value 0) mempty
 
 -- Monomorphising higher-order functions can result in function types
 -- where the same named parameter occurs in multiple spots.  When
@@ -719,7 +715,7 @@ monomorphiseBinding entry (PolyBinding rr (name, tparams, params, rettype, retex
         params' = map (substPattern entry substPatternType) params
         bind_t' = substTypesAny (`M.lookup` substs') bind_t
         (shape_params_explicit, shape_params_implicit) =
-          partition ((`S.member` explicitSizes bind_t' t) . typeParamName) $
+          partition ((`S.member` mustBeExplicit bind_t') . typeParamName) $
             shape_params ++ t_shape_params
 
     (params'', rrs) <- unzip <$> mapM transformPattern params'

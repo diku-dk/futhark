@@ -34,10 +34,56 @@ programming techniques.
 Image directives and builtin functions Shells out to ``convert`` (from
 ImageMagick).  Video generation uses ``fmpeg``.
 
-Directives
+OPTIONS
+=======
+
+--backend=name
+
+  The backend used when compiling Futhark programs (without leading
+  ``futhark``, e.g. just ``opencl``).  Defaults to ``c``.
+
+--futhark=program
+
+  The program used to perform operations (eg. compilation).  Defaults
+  to the binary running ``futhark literate`` itself.
+
+--output=FILE
+
+  Override the default output file.  The image directory will be set
+  to the provided ``FILE`` with its extension stripped and ``-img/``
+  appended.
+
+--pass-option=opt
+
+  Pass an option to benchmark programs that are being run.  For
+  example, we might want to run OpenCL programs on a specific device::
+
+    futhark literate prog.fut --backend=opencl --pass-option=-dHawaii
+
+--pass-compiler-option=opt
+
+  Pass an extra option to the compiler when compiling the programs.
+
+--skip-compilation
+
+  Do not run the compiler, and instead assume that the program has
+  already been compiled.  Use with caution.
+
+--stop-on-error
+
+  Terminate immediately without producing an output file if a
+  directive fails.  Otherwise a file will still be produced, and
+  failing directives will be followed by an error message.
+
+-v, --verbose
+
+  Print verbose information on stderr about directives as they are
+  executing.
+
+DIRECTIVES
 ==========
 
-A directive is a way to embed the results the running the program.
+A directive is a way to show the result of running a funtion.
 Depending on the directive, this can be as simple as printing the
 textual representation of the result, or as complex as running an
 external plotting program and referencing a generated image.
@@ -94,8 +140,10 @@ The following directives are supported:
 
 * ``> :img e``
 
-  Visualises ``e``, which must be of type ``[][]i32`` or ``[][]u32``
-  (interpreted as rows of ARGB pixel values).
+  Visualises ``e``, which must be of type ``[][]i32``, ``[][]u32`` or
+  ``[][]f32``. The two first are interpreted as rows of ARGB pixel
+  values, while the last is interpreted as greyscale (value should be
+  in the range from 0 to 1).
 
 * ``> :plot2d e[; size=(height,width)]``
 
@@ -104,7 +152,8 @@ The following directives are supported:
   The two arrays must have the same length and are interpreted as
   ``x`` and ``y`` values, respectively.
 
-  The expression may also be a record, where each field will be
+  The expression may also be a record expression (*not* merely the
+  name of a Futhark variable of record type), where each field will be
   plotted separately and must have the type mentioned above.
 
 * ``> :gnuplot e; script...``
@@ -119,7 +168,7 @@ The following directives are supported:
   Use ``set term png size width,height`` to change the size to
   ``width`` by ``height`` pixels.
 
-FutharkScript
+FUTHARKSCRIPT
 =============
 
 Only an extremely limited subset of Futhark is supported:
@@ -140,52 +189,6 @@ Futhark.  The following builtins are supported:
 
 * ``$loadimg "file"`` reads an image from the given file and returns
   it as a row-major ``[][]u32`` array with each pixel encoded as ARGB.
-
-OPTIONS
-=======
-
---backend=name
-
-  The backend used when compiling Futhark programs (without leading
-  ``futhark``, e.g. just ``opencl``).  Defaults to ``c``.
-
---futhark=program
-
-  The program used to perform operations (eg. compilation).  Defaults
-  to the binary running ``futhark literate`` itself.
-
---output=FILE
-
-  Override the default output file.  The image directory will be set
-  to the provided ``FILE`` with its extension stripped and ``-img/``
-  appended.
-
---pass-option=opt
-
-  Pass an option to benchmark programs that are being run.  For
-  example, we might want to run OpenCL programs on a specific device::
-
-    futhark literate prog.fut --backend=opencl --pass-option=-dHawaii
-
---pass-compiler-option=opt
-
-  Pass an extra option to the compiler when compiling the programs.
-
---skip-compilation
-
-  Do not run the compiler, and instead assume that the program has
-  already been compiled.  Use with caution.
-
---stop-on-error
-
-  Terminate immediately without producing an output file if a
-  directive fails.  Otherwise a file will still be produced, and
-  failing directives will be followed by an error message.
-
--v, --verbose
-
-  Print verbose information on stderr about directives as they are
-  executing.
 
 SAFETY
 ======

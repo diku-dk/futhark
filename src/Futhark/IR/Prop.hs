@@ -28,7 +28,6 @@ module Futhark.IR.Prop
     safeExp,
     subExpVars,
     subExpVar,
-    shapeVars,
     commutativeLambda,
     entryPointSize,
     defAux,
@@ -59,7 +58,6 @@ import Futhark.IR.Syntax
 import Futhark.Transform.Rename (Rename, Renameable)
 import Futhark.Transform.Substitute (Substitutable, Substitute)
 import Futhark.Util.Pretty
-import Language.SexpGrammar as Sexp
 
 -- | @isBuiltInFunction k@ is 'True' if @k@ is an element of 'builtInFunctions'.
 isBuiltInFunction :: Name -> Bool
@@ -130,7 +128,7 @@ safeExp (Apply fname _ _ _) =
 safeExp (If _ tbranch fbranch _) =
   all (safeExp . stmExp) (bodyStms tbranch)
     && all (safeExp . stmExp) (bodyStms fbranch)
-safeExp MkAcc {} = True -- Although unlikely to matter.
+safeExp WithAcc {} = True -- Although unlikely to matter.
 safeExp (Op op) = safeOp op
 
 safeBody :: IsOp (Op lore) => Body lore -> Bool
@@ -145,11 +143,6 @@ subExpVars = mapMaybe subExpVar
 subExpVar :: SubExp -> Maybe VName
 subExpVar (Var v) = Just v
 subExpVar Constant {} = Nothing
-
--- | Return the variable dimension sizes.  May contain
--- duplicates.
-shapeVars :: Shape -> [VName]
-shapeVars = subExpVars . shapeDims
 
 -- | Does the given lambda represent a known commutative function?
 -- Based on pattern matching and checking whether the lambda
@@ -198,7 +191,7 @@ certify cs1 (Let pat (StmAux cs2 attrs dec) e) =
 -- | A handy shorthand for properties that we usually want to things
 -- we stuff into ASTs.
 type ASTConstraints a =
-  (Eq a, Ord a, Show a, Rename a, Substitute a, FreeIn a, Pretty a, SexpIso a)
+  (Eq a, Ord a, Show a, Rename a, Substitute a, FreeIn a, Pretty a)
 
 -- | A type class for operations.
 class (ASTConstraints op, TypedOp op) => IsOp op where

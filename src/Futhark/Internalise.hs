@@ -63,7 +63,7 @@ internaliseFunName = nameFromString . pretty
 internaliseValBind :: E.ValBind -> InternaliseM ()
 internaliseValBind fb@(E.ValBind entry fname retdecl (Info (rettype, _)) tparams params body _ attrs loc) = do
   localConstsScope $
-    bindingParams tparams params $ \shapeparams params' -> do
+    bindingFParams tparams params $ \shapeparams params' -> do
       let shapenames = map I.paramName shapeparams
 
       msg <- case retdecl of
@@ -76,8 +76,7 @@ internaliseValBind fb@(E.ValBind entry fname retdecl (Info (rettype, _)) tparams
       ((rettype', body_res), body_stms) <- collectStms $ do
         body_res <- internaliseExp (baseString fname <> "_res") body
         rettype_bad <-
-          internaliseReturnType rettype
-            =<< mapM subExpType body_res
+          internaliseReturnType rettype =<< mapM subExpType body_res
         let rettype' = zeroExts rettype_bad
         return (rettype', body_res)
       body' <-
@@ -116,7 +115,7 @@ internaliseValBind fb@(E.ValBind entry fname retdecl (Info (rettype, _)) tparams
 generateEntryPoint :: E.EntryPoint -> E.ValBind -> InternaliseM ()
 generateEntryPoint (E.EntryPoint e_paramts e_rettype) vb = localConstsScope $ do
   let (E.ValBind _ ofname _ (Info (rettype, _)) tparams params _ _ attrs loc) = vb
-  bindingParams tparams params $ \shapeparams params' -> do
+  bindingFParams tparams params $ \shapeparams params' -> do
     entry_rettype <- internaliseEntryReturnType rettype
     let entry' = entryPoint (zip e_paramts params') (e_rettype, entry_rettype)
         args = map (I.Var . I.paramName) $ concat params'
@@ -1185,8 +1184,8 @@ internaliseStreamMap desc o lam arr = do
   arrs <- internaliseExpToVars "stream_input" arr
   lam' <- internaliseStreamMapLambda internaliseLambda lam $ map I.Var arrs
   w <- arraysSize 0 <$> mapM lookupType arrs
-  let form = I.Parallel o Commutative (I.Lambda [] (mkBody mempty []) []) []
-  letTupExp' desc $ I.Op $ I.Stream w form lam' arrs
+  let form = I.Parallel o Commutative (I.Lambda [] (mkBody mempty []) [])
+  letTupExp' desc $ I.Op $ I.Stream w form lam' [] arrs
 
 internaliseStreamRed ::
   String ->
@@ -1249,7 +1248,7 @@ internaliseStreamRed desc o comm lam0 lam arr = do
               map (I.Var . paramName) lam_acc_params ++ lam_res'
         return $ resultBody new_lam_res
 
-  let form = I.Parallel o comm lam0' nes
+  let form = I.Parallel o comm lam0'
       lam' =
         I.Lambda
           { lambdaParams = lam_params',
@@ -1257,7 +1256,7 @@ internaliseStreamRed desc o comm lam0 lam arr = do
             lambdaReturnType = nes_ts
           }
   w <- arraysSize 0 <$> mapM lookupType arrs
-  letTupExp' desc $ I.Op $ I.Stream w form lam' arrs
+  letTupExp' desc $ I.Op $ I.Stream w form lam' nes arrs
 
 internaliseStreamAcc ::
   String ->
@@ -1268,8 +1267,23 @@ internaliseStreamAcc ::
   InternaliseM [SubExp]
 internaliseStreamAcc desc dest op lam bs = do
   dest' <- internaliseExpToVars "scatter_dest" dest
-  dest_ts <- mapM lookupType dest'
   bs' <- internaliseExpToVars "scatter_input" bs
+
+  acc_cert_v <- newVName "acc_cert"
+  dest_ts <- mapM lookupType dest'
+  let dest_w = arraysSize 0 dest_ts
+      acc_t = Acc acc_cert_v (Shape [dest_w]) $ map rowType dest_ts
+  acc_p <- newParam "acc_p" acc_t
+  withacc_lam <- mkLambda [Param acc_cert_v (I.Prim I.Cert), acc_p] $ do
+    lam' <-
+      internaliseMapLambda internaliseLambda lam $
+        map I.Var $ paramName acc_p : bs'
+    w <- arraysSize 0 <$> mapM lookupType bs'
+    accs <- letExp "accs" $ BasicOp $ Replicate (Shape [w]) $ I.Var $ paramName acc_p
+    accs' <-
+      letExp "scatter_acc_res" . I.Op . I.Screma w (I.mapSOAC lam') $ accs : bs'
+    fmap (map I.Var) $
+      letTupExp "acc_joined" $ BasicOp $ JoinAcc accs'
 
   op' <-
     case op of
@@ -1284,18 +1298,9 @@ internaliseStreamAcc desc dest op lam bs = do
       Nothing ->
         return Nothing
 
-  w <- arraysSize 0 <$> mapM lookupType bs'
   destw <- arraysSize 0 <$> mapM lookupType dest'
-  acc <- letExp "scatter_acc" $ MkAcc (Shape [w]) dest' (Shape [destw]) op'
-
-  lam' <-
-    internaliseMapLambda internaliseLambda lam $
-      map I.Var $ acc : bs'
-
-  acc' <-
-    letExp "scatter_acc_res" . I.Op . I.Screma w (I.mapSOAC lam') $ acc : bs'
-
-  letTupExp' desc (BasicOp $ UnAcc acc' dest_ts)
+  fmap (map I.Var) $
+    letTupExp desc $ WithAcc [(Shape [destw], dest', op')] withacc_lam
 
 internaliseExp1 :: String -> E.Exp -> InternaliseM I.SubExp
 internaliseExp1 desc e = do
@@ -1734,7 +1739,9 @@ isOverloadedFunction qname args loc = do
     handleRest [x] "!" = Just $ complementF x
     handleRest [x] "opaque" = Just $ \desc ->
       mapM (letSubExp desc . BasicOp . Opaque) =<< internaliseExp "opaque_arg" x
-    handleRest [E.TupLit [a, si, v] _] "scatter" = Just $ scatterF a si v
+    handleRest [E.TupLit [a, si, v] _] "scatter" = Just $ scatterF 1 a si v
+    handleRest [E.TupLit [a, si, v] _] "scatter_2d" = Just $ scatterF 2 a si v
+    handleRest [E.TupLit [a, si, v] _] "scatter_3d" = Just $ scatterF 3 a si v
     handleRest [E.TupLit [n, m, arr] _] "unflatten" = Just $ \desc -> do
       arrs <- internaliseExpToVars "unflatten_arr" arr
       n' <- internaliseExp1 "n" n
@@ -1797,8 +1804,11 @@ isOverloadedFunction qname args loc = do
         r <- I.arrayRank <$> lookupType v
         return $ I.Rearrange ([1, 0] ++ [2 .. r -1]) v
     handleRest [TupLit [x, y] _] "zip" = Just $ \desc ->
-      (++) <$> internaliseExp (desc ++ "_zip_x") x
-        <*> internaliseExp (desc ++ "_zip_y") y
+      mapM (letSubExp "zip_copy" . BasicOp . Copy)
+        =<< ( (++)
+                <$> internaliseExpToVars (desc ++ "_zip_x") x
+                <*> internaliseExpToVars (desc ++ "_zip_y") y
+            )
     handleRest [x] "unzip" = Just $ flip internaliseExp x
     handleRest [x] "trace" = Just $ flip internaliseExp x
     handleRest [x] "break" = Just $ flip internaliseExp x
@@ -1851,13 +1861,12 @@ isOverloadedFunction qname args loc = do
         _ ->
           error "Futhark.Internalise.internaliseExp: non-int/bool type in Complement"
 
-    scatterF a si v desc = do
-      si' <- letExp "write_si" . BasicOp . SubExp =<< internaliseExp1 "write_arg_i" si
+    scatterF dim a si v desc = do
+      si' <- internaliseExpToVars "write_arg_i" si
       svs <- internaliseExpToVars "write_arg_v" v
       sas <- internaliseExpToVars "write_arg_a" a
 
-      si_shape <- I.arrayShape <$> lookupType si'
-      let si_w = shapeSize 0 si_shape
+      si_w <- I.arraysSize 0 <$> mapM lookupType si'
       sv_ts <- mapM lookupType svs
 
       svs' <- forM (zip svs sv_ts) $ \(sv, sv_t) -> do
@@ -1880,21 +1889,21 @@ isOverloadedFunction qname args loc = do
           letExp (baseString sv ++ "_write_sv") $
             I.BasicOp $ I.Reshape (reshapeOuter [DimCoercion si_w] 1 sv_shape) sv
 
-      indexType <- rowType <$> lookupType si'
-      indexName <- newVName "write_index"
+      indexType <- fmap rowType <$> mapM lookupType si'
+      indexName <- mapM (\_ -> newVName "write_index") indexType
       valueNames <- replicateM (length sv_ts) $ newVName "write_value"
 
       sa_ts <- mapM lookupType sas
-      let bodyTypes = replicate (length sv_ts) indexType ++ map rowType sa_ts
-          paramTypes = indexType : map rowType sv_ts
-          bodyNames = indexName : valueNames
+      let bodyTypes = concat (replicate (length sv_ts) indexType) ++ map (I.stripArray dim) sa_ts
+          paramTypes = indexType <> map rowType sv_ts
+          bodyNames = indexName <> valueNames
           bodyParams = zipWith I.Param bodyNames paramTypes
 
       -- This body is pretty boring right now, as every input is exactly the output.
       -- But it can get funky later on if fused with something else.
       body <- localScope (scopeOfLParams bodyParams) $
         insertStmsM $ do
-          let outs = replicate (length valueNames) indexName ++ valueNames
+          let outs = concat (replicate (length valueNames) indexName) ++ valueNames
           results <- forM outs $ \name ->
             letSubExp "write_res" $ I.BasicOp $ I.SubExp $ I.Var name
           ensureResultShape
@@ -1909,9 +1918,9 @@ isOverloadedFunction qname args loc = do
                 I.lambdaReturnType = bodyTypes,
                 I.lambdaBody = body
               }
-          sivs = si' : svs'
+          sivs = si' <> svs'
 
-      let sa_ws = map (arraySize 0) sa_ts
+      let sa_ws = map (Shape . take dim . arrayDims) sa_ts
       letTupExp' desc $ I.Op $ I.Scatter si_w lam sivs $ zip3 sa_ws (repeat 1) sas
 
 funcall ::
@@ -2076,7 +2085,7 @@ partitionWithSOACS k lam arrs = do
           w
           write_lam
           (classes : all_offsets ++ arrs)
-          $ zip3 (repeat w) (repeat 1) blanks
+          $ zip3 (repeat $ Shape [w]) (repeat 1) blanks
   sizes' <-
     letSubExp "partition_sizes" $
       I.BasicOp $

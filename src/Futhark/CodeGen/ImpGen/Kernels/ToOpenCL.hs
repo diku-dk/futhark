@@ -414,7 +414,11 @@ genOpenClPrelude ts =
     [C.cedecl|$esc:("#endif")|],
     [C.cedecl|$esc:("#pragma OPENCL EXTENSION cl_khr_byte_addressable_store : enable")|]
   ]
-    ++ [[C.cedecl|$esc:("#pragma OPENCL EXTENSION cl_khr_fp64 : enable")|] | uses_float64]
+    ++ concat
+      [ [C.cunit|$esc:("#pragma OPENCL EXTENSION cl_khr_fp64 : enable")
+                 $esc:("#define FUTHARK_F64_ENABLED")|]
+        | uses_float64
+      ]
     ++ [C.cunit|
 /* Some OpenCL programs dislike empty progams, or programs with no kernels.
  * Declare a dummy kernel to ensure they remain our friends. */
@@ -472,6 +476,7 @@ genCUDAPrelude =
     cudafy =
       [CUDAC.cunit|
 $esc:("#define FUTHARK_CUDA")
+$esc:("#define FUTHARK_F64_ENABLED")
 
 typedef char int8_t;
 typedef short int16_t;
@@ -709,6 +714,8 @@ inKernelOperations mode body =
     -- First the 64-bit operations.
     atomicOps s (AtomicAdd Int64 old arr ind val) =
       doAtomic s Int64 old arr ind val "atomic_add" [C.cty|typename int64_t|]
+    atomicOps s (AtomicFAdd Float64 old arr ind val) =
+      doAtomic s Float64 old arr ind val "atomic_fadd" [C.cty|double|]
     atomicOps s (AtomicSMax Int64 old arr ind val) =
       doAtomic s Int64 old arr ind val "atomic_smax" [C.cty|typename int64_t|]
     atomicOps s (AtomicSMin Int64 old arr ind val) =
@@ -730,8 +737,8 @@ inKernelOperations mode body =
     --
     atomicOps s (AtomicAdd t old arr ind val) =
       doAtomic s t old arr ind val "atomic_add" [C.cty|int|]
-    atomicOps s (AtomicFAdd t old arr ind val) =
-      doAtomic s t old arr ind val "atomic_fadd" [C.cty|float|]
+    atomicOps s (AtomicFAdd Float32 old arr ind val) =
+      doAtomic s Float32 old arr ind val "atomic_fadd" [C.cty|float|]
     atomicOps s (AtomicSMax t old arr ind val) =
       doAtomic s t old arr ind val "atomic_smax" [C.cty|int|]
     atomicOps s (AtomicSMin t old arr ind val) =

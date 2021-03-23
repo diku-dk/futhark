@@ -1,5 +1,6 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeFamilies #-}
 
 module Futhark.Pass.ExtractMulticore (extractMulticore) where
@@ -28,7 +29,7 @@ import Futhark.Pass.ExtractKernels.ToKernels (injectSOACS)
 import Futhark.Tools
 import qualified Futhark.Transform.FirstOrderTransform as FOT
 import Futhark.Transform.Rename (Rename, renameSomething)
-import Futhark.Util (chunks, takeLast)
+import Futhark.Util (takeLast)
 import Futhark.Util.Log
 
 newtype ExtractM a = ExtractM (ReaderT (Scope MC) (State VNameSource) a)
@@ -118,9 +119,12 @@ transformStm (Let pat aux (DoLoop ctx val form body)) = do
 transformStm (Let pat aux (If cond tbranch fbranch ret)) =
   oneStm . Let pat aux
     <$> (If cond <$> transformBody tbranch <*> transformBody fbranch <*> pure ret)
-transformStm (Let pat aux (MkAcc shape arrs ishape op)) =
+transformStm (Let pat aux (WithAcc inputs lam)) =
   oneStm . Let pat aux
-    <$> (MkAcc shape arrs ishape <$> traverse (bitraverse transformLambda pure) op)
+    <$> (WithAcc <$> mapM transformInput inputs <*> transformLambda lam)
+  where
+    transformInput (shape, arrs, op) =
+      (shape,arrs,) <$> traverse (bitraverse transformLambda pure) op
 transformStm (Let pat aux (Op op)) =
   fmap (certify (stmAuxCerts aux)) <$> transformSOAC pat (stmAuxAttrs aux) op
 
@@ -321,14 +325,11 @@ transformSOAC pat _ (Scatter w lam ivs dests) = do
 
   Body () kstms res <- mapLambdaToBody transformBody gtid lam ivs
 
-  let (dests_ws, dests_ns, dests_vs) = unzip3 dests
-      (i_res, v_res) = splitAt (sum dests_ns) res
-      rets = takeLast (length dests) $ lambdaReturnType lam
+  let rets = takeLast (length dests) $ lambdaReturnType lam
       kres = do
         (a_w, a, is_vs) <-
-          zip3 dests_ws dests_vs $
-            chunks dests_ns $ zip i_res v_res
-        return $ WriteReturns [a_w] a [([DimFix i], v) | (i, v) <- is_vs]
+          groupScatterResults dests res
+        return $ WriteReturns a_w a [(map DimFix is, v) | (is, v) <- is_vs]
       kbody = KernelBody () kstms kres
   return $
     oneStm $
@@ -351,7 +352,7 @@ transformSOAC pat _ (Hist w hists map_lam arrs) = do
       return $
         mconcat seq_hist_stms
           <> oneStm (Let pat (defAux ()) $ Op $ ParOp Nothing seq_op)
-transformSOAC pat attrs (Stream w (Parallel _ comm red_lam red_nes) fold_lam arrs)
+transformSOAC pat attrs (Stream w (Parallel _ comm red_lam) fold_lam red_nes arrs)
   | not $ null red_nes = do
     map_lam <- unstreamLambda attrs red_nes fold_lam
     (seq_red_stms, seq_op) <-
@@ -384,12 +385,12 @@ transformSOAC pat attrs (Stream w (Parallel _ comm red_lam red_nes) fold_lam arr
         return $
           seq_red_stms
             <> oneStm (Let pat (defAux ()) $ Op $ ParOp Nothing seq_op)
-transformSOAC pat _ (Stream w form lam arrs) = do
+transformSOAC pat _ (Stream w _ lam nes arrs) = do
   -- Just remove the stream and transform the resulting stms.
   soacs_scope <- castScope <$> askScope
   stream_stms <-
     flip runBinderT_ soacs_scope $
-      sequentialStreamWholeArray pat w (getStreamAccums form) lam arrs
+      sequentialStreamWholeArray pat w nes lam arrs
   transformStms stream_stms
 
 transformProg :: Prog SOACS -> PassM (Prog MC)

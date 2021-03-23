@@ -1,4 +1,5 @@
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 -- | @futhark literate@
@@ -6,12 +7,14 @@ module Futhark.CLI.Literate (main) where
 
 import qualified Codec.BMP as BMP
 import Control.Monad.Except
-import Data.Bifunctor (bimap, first, second)
+import Control.Monad.State hiding (State)
+import Data.Bifunctor (first, second)
 import Data.Bits
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as LBS
 import Data.Char
 import Data.Functor
+import Data.Hashable (hash)
 import Data.Int (Int64)
 import Data.List (foldl', transpose)
 import qualified Data.Map as M
@@ -28,21 +31,28 @@ import Futhark.Script
 import Futhark.Server
 import Futhark.Test
 import Futhark.Test.Values
-import Futhark.Util (nubOrd, runProgramWithExitCode)
+import Futhark.Util
+  ( directoryContents,
+    hashIntText,
+    nubOrd,
+    runProgramWithExitCode,
+  )
 import Futhark.Util.Options
 import Futhark.Util.Pretty (prettyText, prettyTextOneLine)
 import qualified Futhark.Util.Pretty as PP
 import System.Directory
-  ( createDirectoryIfMissing,
-    removeFile,
+  ( copyFile,
+    createDirectoryIfMissing,
+    doesFileExist,
     removePathForcibly,
   )
 import System.Environment (getExecutablePath)
 import System.Exit
 import System.FilePath
 import System.IO
+import System.IO.Error (isDoesNotExistError)
 import System.IO.Temp (withSystemTempDirectory, withSystemTempFile)
-import Text.Megaparsec hiding (failure, token)
+import Text.Megaparsec hiding (State, failure, token)
 import Text.Megaparsec.Char
 import Text.Printf
 
@@ -153,12 +163,12 @@ parseInt :: Parser Int
 parseInt = lexeme $ read <$> some (satisfy isDigit)
 
 restOfLine :: Parser T.Text
-restOfLine = takeWhileP Nothing (/= '\n') <* eol
+restOfLine = takeWhileP Nothing (/= '\n') <* (void eol <|> eof)
 
 parseBlockComment :: Parser T.Text
 parseBlockComment = T.unlines <$> some line
   where
-    line = ("-- " *> restOfLine) <|> ("--" *> eol $> "")
+    line = "--" *> optional " " *> restOfLine
 
 parseTestBlock :: Parser T.Text
 parseTestBlock =
@@ -171,7 +181,7 @@ parseBlockCode :: Parser T.Text
 parseBlockCode = T.unlines . noblanks <$> some line
   where
     noblanks = reverse . dropWhile T.null . reverse . dropWhile T.null
-    line = try (notFollowedBy "--") *> restOfLine
+    line = try (notFollowedBy "--") *> notFollowedBy eof *> restOfLine
 
 parsePlotParams :: Parser (Maybe (Int, Int))
 parsePlotParams =
@@ -255,18 +265,44 @@ parseProgFile prog = do
     Right script ->
       pure script
 
-type ScriptM = ExceptT T.Text IO
+-- | The collection of file paths (all inside the image directory)
+-- produced during directive execution.
+type Files = S.Set FilePath
+
+newtype State = State {stateFiles :: Files}
+
+newtype ScriptM a = ScriptM (ExceptT T.Text (StateT State IO) a)
+  deriving
+    ( Functor,
+      Applicative,
+      Monad,
+      MonadError T.Text,
+      MonadFail,
+      MonadIO,
+      MonadState State
+    )
+
+runScriptM :: ScriptM a -> IO (Either T.Text a, Files)
+runScriptM (ScriptM m) = second stateFiles <$> runStateT (runExceptT m) s
+  where
+    s = State mempty
 
 withTempFile :: (FilePath -> ScriptM a) -> ScriptM a
 withTempFile f =
   join . liftIO . withSystemTempFile "futhark-literate" $ \tmpf tmpf_h -> do
     hClose tmpf_h
-    either throwError pure <$> runExceptT (f tmpf)
+    (res, files) <- runScriptM (f tmpf)
+    pure $ do
+      modify $ \s -> s {stateFiles = files <> stateFiles s}
+      either throwError pure res
 
 withTempDir :: (FilePath -> ScriptM a) -> ScriptM a
 withTempDir f =
-  join . liftIO . withSystemTempDirectory "futhark-literate" $ \dir ->
-    either throwError pure <$> runExceptT (f dir)
+  join . liftIO . withSystemTempDirectory "futhark-literate" $ \dir -> do
+    (res, files) <- runScriptM (f dir)
+    pure $ do
+      modify $ \s -> s {stateFiles = files <> stateFiles s}
+      either throwError pure res
 
 greyFloatToImg ::
   (RealFrac a, SVec.Storable a) =>
@@ -309,7 +345,12 @@ valueToBMP _ = Nothing
 valueToBMPs :: Value -> Maybe [LBS.ByteString]
 valueToBMPs = mapM valueToBMP . valueElems
 
-system :: FilePath -> [String] -> T.Text -> ScriptM T.Text
+system ::
+  (MonadIO m, MonadError T.Text m) =>
+  FilePath ->
+  [String] ->
+  T.Text ->
+  m T.Text
 system prog options input = do
   res <- liftIO $ runProgramWithExitCode prog options $ T.encodeUtf8 input
   case res of
@@ -325,13 +366,6 @@ system prog options input = do
           <> T.pack stderr_t
   where
     prog' = "'" <> T.pack prog <> "'"
-
-bmpToPNG :: FilePath -> ScriptM FilePath
-bmpToPNG bmp = do
-  void $ system "convert" [bmp, png] mempty
-  pure png
-  where
-    png = bmp `replaceExtension` "png"
 
 formatDataForGnuplot :: [Value] -> T.Text
 formatDataForGnuplot = T.unlines . map line . transpose . map valueElems
@@ -402,7 +436,7 @@ loadBMP bmpfile = do
 loadImage :: FilePath -> ScriptM (Compound Value)
 loadImage imgfile =
   withTempDir $ \dir -> do
-    let bmpfile = dir </> imgfile `replaceExtension` "bmp"
+    let bmpfile = dir </> takeBaseName imgfile `replaceExtension` "bmp"
     void $ system "convert" [imgfile, "-type", "TrueColorAlpha", bmpfile] mempty
     loadBMP bmpfile
 
@@ -419,204 +453,6 @@ literateBuiltin "loadimg" vs =
           <> T.intercalate ", " (map (prettyText . fmap valueType) vs)
 literateBuiltin f _ =
   throwError $ "Unknown builtin function $" <> prettyText f
-
-processDirective :: FilePath -> ScriptServer -> Int -> Directive -> ScriptM T.Text
-processDirective imgdir server i (DirectiveBrief d) =
-  processDirective imgdir server i d
-processDirective imgdir server i (DirectiveCovert d) =
-  processDirective imgdir server i d
-processDirective _ server _ (DirectiveRes e) = do
-  vs <- evalExpToGround literateBuiltin server e
-  pure $
-    T.unlines
-      [ "",
-        "```",
-        prettyText vs,
-        "```",
-        ""
-      ]
---
-processDirective imgdir server i (DirectiveImg e) = do
-  vs <- evalExpToGround literateBuiltin server e
-  case vs of
-    ValueAtom v
-      | Just bmp <- valueToBMP v -> do
-        let bmpfile = imgdir </> "img" <> show i <.> ".bmp"
-        liftIO $ createDirectoryIfMissing True imgdir
-        liftIO $ LBS.writeFile bmpfile bmp
-        pngfile <- bmpToPNG bmpfile
-        liftIO $ removeFile bmpfile
-        pure $ imgBlock pngfile
-    _ ->
-      throwError $
-        "Cannot create image from value of type "
-          <> prettyText (fmap valueType vs)
---
-processDirective imgdir server i (DirectivePlot e size) = do
-  v <- evalExpToGround literateBuiltin server e
-  case v of
-    _
-      | Just vs <- plottable2d v ->
-        plotWith [(Nothing, vs)]
-    ValueRecord m
-      | Just m' <- traverse plottable2d m ->
-        plotWith $ map (first Just) $ M.toList m'
-    _ ->
-      throwError $
-        "Cannot plot value of type " <> prettyText (fmap valueType v)
-  where
-    plottable2d v = do
-      [x, y] <- plottable v
-      Just [x, y]
-
-    pngfile = imgdir </> "plot" <> show i <.> ".png"
-
-    tag (Nothing, xys) j = ("data" <> T.pack (show (j :: Int)), xys)
-    tag (Just f, xys) _ = (f, xys)
-
-    plotWith xys = withGnuplotData [] (zipWith tag xys [0 ..]) $ \fs sets -> do
-      liftIO $ createDirectoryIfMissing True imgdir
-      let size' = T.pack $
-            case size of
-              Nothing -> "500,500"
-              Just (w, h) -> show w ++ "," ++ show h
-          plotCmd f title =
-            let title' = case title of
-                  Nothing -> "notitle"
-                  Just x -> "title '" <> x <> "'"
-             in f <> " " <> title' <> " with lines"
-          cmds = T.intercalate ", " (zipWith plotCmd fs (map fst xys))
-          script =
-            T.unlines
-              [ "set terminal png size " <> size' <> " enhanced",
-                "set output '" <> T.pack pngfile <> "'",
-                "set key outside",
-                T.unlines sets,
-                "plot " <> cmds
-              ]
-      void $ system "gnuplot" [] script
-      pure $ imgBlock pngfile
---
-processDirective imgdir server i (DirectiveGnuplot e script) = do
-  vs <- evalExpToGround literateBuiltin server e
-  case vs of
-    ValueRecord m
-      | Just m' <- traverse plottable m ->
-        plotWith $ M.toList m'
-    _ ->
-      throwError $
-        "Cannot plot value of type " <> prettyText (fmap valueType vs)
-  where
-    pngfile = imgdir </> "plot" <> show i <.> ".png"
-
-    plotWith xys = withGnuplotData [] xys $ \_ sets -> do
-      liftIO $ createDirectoryIfMissing True imgdir
-      let script' =
-            T.unlines
-              [ "set terminal png enhanced",
-                "set output '" <> T.pack pngfile <> "'",
-                T.unlines sets,
-                script
-              ]
-      void $ system "gnuplot" [] script'
-      pure $ imgBlock pngfile
---
-processDirective imgdir server i (DirectiveVideo e params) = do
-  when (format `notElem` ["webm", "gif"]) $
-    throwError $ "Unknown video format: " <> format
-
-  v <- evalExp literateBuiltin server e
-  let nope =
-        throwError $
-          "Cannot produce video from value of type " <> prettyText (fmap scriptValueType v)
-  case v of
-    ValueAtom SValue {} -> do
-      ValueAtom arr <- getExpValue server v
-      case valueToBMPs arr of
-        Nothing -> nope
-        Just bmps ->
-          withTempDir $ \dir -> do
-            zipWithM_ (writeBMPFile dir) [0 ..] bmps
-            bmpsToVideo dir
-    ValueTuple [stepfun, initial, num_frames]
-      | ValueAtom (SFun stepfun' _ [_, _] closure) <- stepfun,
-        ValueAtom (SValue _ _) <- initial,
-        ValueAtom (SValue "i64" _) <- num_frames -> do
-        Just (ValueAtom num_frames') <-
-          mapM getValue <$> getExpValue server num_frames
-        withTempDir $ \dir -> do
-          let num_frames_int = fromIntegral (num_frames' :: Int64)
-          renderFrames dir (stepfun', map ValueAtom closure) initial num_frames_int
-          bmpsToVideo dir
-    _ ->
-      nope
-
-  when (videoFormat params == Just "gif") $ do
-    void $ system "ffmpeg" ["-i", webmfile, giffile] mempty
-    liftIO $ removeFile webmfile
-
-  pure $ videoBlock params videofile
-  where
-    framerate = fromMaybe 30 $ videoFPS params
-    format = fromMaybe "webm" $ videoFormat params
-    webmfile = imgdir </> "video" <> show i <.> "webm"
-    giffile = imgdir </> "video" <> show i <.> "gif"
-    bmpfile dir j = dir </> printf "frame%010d.bmp" (j :: Int)
-    videofile = imgdir </> "video" <> show i <.> T.unpack format
-
-    renderFrames dir (stepfun, closure) initial num_frames =
-      foldM_ frame initial [0 .. num_frames -1]
-      where
-        frame old_state j = do
-          v <-
-            evalExp literateBuiltin server
-              . Call (FuncFut stepfun)
-              . map valueToExp
-              $ closure ++ [old_state]
-          freeValue server old_state
-
-          let nope =
-                throwError $
-                  "Cannot handle step function return type: "
-                    <> prettyText (fmap scriptValueType v)
-
-          case v of
-            ValueTuple [arr_v@(ValueAtom SValue {}), new_state] -> do
-              ValueAtom arr <- getExpValue server arr_v
-              freeValue server arr_v
-              case valueToBMP arr of
-                Nothing -> nope
-                Just bmp -> do
-                  writeBMPFile dir j bmp
-                  pure new_state
-            _ -> nope
-
-    bmpsToVideo dir = do
-      liftIO $ createDirectoryIfMissing True imgdir
-      void $
-        system
-          "ffmpeg"
-          [ "-y",
-            "-r",
-            show framerate,
-            "-i",
-            dir </> "frame%010d.bmp",
-            "-c:v",
-            "libvpx-vp9",
-            "-pix_fmt",
-            "yuv420p",
-            "-b:v",
-            "2M",
-            webmfile
-          ]
-          mempty
-
-    writeBMPFile dir j bmp =
-      liftIO $ LBS.writeFile (bmpfile dir j) bmp
-
--- Did this script block succeed or fail?
-data Failure = Failure | Success
-  deriving (Eq, Ord, Show)
 
 data Options = Options
   { scriptBackend :: String,
@@ -642,14 +478,238 @@ initialOptions =
       scriptStopOnError = False
     }
 
-processBlock :: Options -> FilePath -> ScriptServer -> Int -> Block -> IO (Failure, T.Text)
-processBlock _ _ _ _ (BlockCode code)
-  | T.null code = pure (Success, "\n")
-  | otherwise = pure (Success, "\n```futhark\n" <> code <> "```\n\n")
-processBlock _ _ _ _ (BlockComment text) =
-  pure (Success, text)
-processBlock opts imgdir server i (BlockDirective directive) = do
-  when (scriptVerbose opts > 0) $
+data Env = Env
+  { envImgDir :: FilePath,
+    envOpts :: Options,
+    envServer :: ScriptServer,
+    envHash :: Int
+  }
+
+newFile :: Env -> FilePath -> (FilePath -> ScriptM ()) -> ScriptM FilePath
+newFile env template m = do
+  let fname =
+        envImgDir env
+          </> T.unpack (hashIntText (envHash env)) <> "-" <> template
+  exists <- liftIO $ doesFileExist fname
+  liftIO $ createDirectoryIfMissing True $ envImgDir env
+  when (exists && scriptVerbose (envOpts env) > 0) $
+    liftIO $ T.hPutStrLn stderr $ "Using existing file: " <> T.pack fname
+  unless exists $ m fname
+  modify $ \s -> s {stateFiles = S.insert fname $ stateFiles s}
+  pure fname
+
+processDirective :: Env -> Directive -> ScriptM T.Text
+processDirective env (DirectiveBrief d) =
+  processDirective env d
+processDirective env (DirectiveCovert d) =
+  processDirective env d
+processDirective env (DirectiveRes e) = do
+  v <- either nope pure =<< evalExpToGround literateBuiltin (envServer env) e
+  pure $
+    T.unlines
+      [ "",
+        "```",
+        prettyText v,
+        "```",
+        ""
+      ]
+  where
+    nope t =
+      throwError $ "Cannot show value of type " <> prettyText t
+--
+processDirective env (DirectiveImg e) = do
+  maybe_v <- evalExpToGround literateBuiltin (envServer env) e
+  case maybe_v of
+    Right (ValueAtom v)
+      | Just bmp <- valueToBMP v -> do
+        pngfile <- withTempDir $ \dir -> do
+          let bmpfile = dir </> "img.bmp"
+          liftIO $ LBS.writeFile bmpfile bmp
+          newFile env "img.png" $ \pngfile ->
+            void $ system "convert" [bmpfile, pngfile] mempty
+        pure $ imgBlock pngfile
+    Right v ->
+      nope $ fmap valueType v
+    Left t ->
+      nope t
+  where
+    nope t =
+      throwError $
+        "Cannot create image from value of type " <> prettyText t
+--
+processDirective env (DirectivePlot e size) = do
+  maybe_v <- evalExpToGround literateBuiltin (envServer env) e
+  case maybe_v of
+    Right v
+      | Just vs <- plottable2d v -> do
+        pngfile <- newFile env "plot.png" $ plotWith [(Nothing, vs)]
+        pure $ imgBlock pngfile
+    Right (ValueRecord m)
+      | Just m' <- traverse plottable2d m -> do
+        pngfile <- newFile env "plot.png" $ plotWith $ map (first Just) $ M.toList m'
+        pure $ imgBlock pngfile
+    Right v ->
+      throwError $ "Cannot plot value of type " <> prettyText (fmap valueType v)
+    Left t ->
+      throwError $ "Cannot plot opaque value of type " <> prettyText t
+  where
+    plottable2d v = do
+      [x, y] <- plottable v
+      Just [x, y]
+
+    tag (Nothing, xys) j = ("data" <> T.pack (show (j :: Int)), xys)
+    tag (Just f, xys) _ = (f, xys)
+
+    plotWith xys pngfile =
+      withGnuplotData [] (zipWith tag xys [0 ..]) $ \fs sets -> do
+        let size' = T.pack $
+              case size of
+                Nothing -> "500,500"
+                Just (w, h) -> show w ++ "," ++ show h
+            plotCmd f title =
+              let title' = case title of
+                    Nothing -> "notitle"
+                    Just x -> "title '" <> x <> "'"
+               in f <> " " <> title' <> " with lines"
+            cmds = T.intercalate ", " (zipWith plotCmd fs (map fst xys))
+            script =
+              T.unlines
+                [ "set terminal png size " <> size' <> " enhanced",
+                  "set output '" <> T.pack pngfile <> "'",
+                  "set key outside",
+                  T.unlines sets,
+                  "plot " <> cmds
+                ]
+        void $ system "gnuplot" [] script
+--
+processDirective env (DirectiveGnuplot e script) = do
+  maybe_v <- evalExpToGround literateBuiltin (envServer env) e
+  case maybe_v of
+    Right (ValueRecord m)
+      | Just m' <- traverse plottable m -> do
+        pngfile <- newFile env "plot.png" $ plotWith $ M.toList m'
+        pure $ imgBlock pngfile
+    Right v ->
+      throwError $ "Cannot plot value of type " <> prettyText (fmap valueType v)
+    Left t ->
+      throwError $ "Cannot plot opaque value of type " <> prettyText t
+  where
+    plotWith xys pngfile = withGnuplotData [] xys $ \_ sets -> do
+      let script' =
+            T.unlines
+              [ "set terminal png enhanced",
+                "set output '" <> T.pack pngfile <> "'",
+                T.unlines sets,
+                script
+              ]
+      void $ system "gnuplot" [] script'
+--
+processDirective env (DirectiveVideo e params) = do
+  when (format `notElem` ["webm", "gif"]) $
+    throwError $ "Unknown video format: " <> format
+
+  v <- evalExp literateBuiltin (envServer env) e
+  let nope =
+        throwError $
+          "Cannot produce video from value of type " <> prettyText (fmap scriptValueType v)
+
+  videofile <- newFile env ("video" <.> T.unpack format) $ \videofile ->
+    case v of
+      ValueAtom SValue {} -> do
+        ValueAtom arr <- getExpValue (envServer env) v
+        case valueToBMPs arr of
+          Nothing -> nope
+          Just bmps ->
+            withTempDir $ \dir -> do
+              zipWithM_ (writeBMPFile dir) [0 ..] bmps
+              onWebM videofile =<< bmpsToVideo dir
+      ValueTuple [stepfun, initial, num_frames]
+        | ValueAtom (SFun stepfun' _ [_, _] closure) <- stepfun,
+          ValueAtom (SValue _ _) <- initial,
+          ValueAtom (SValue "i64" _) <- num_frames -> do
+          Just (ValueAtom num_frames') <-
+            mapM getValue <$> getExpValue (envServer env) num_frames
+          withTempDir $ \dir -> do
+            let num_frames_int = fromIntegral (num_frames' :: Int64)
+            renderFrames dir (stepfun', map ValueAtom closure) initial num_frames_int
+            onWebM videofile =<< bmpsToVideo dir
+      _ ->
+        nope
+
+  pure $ videoBlock params videofile
+  where
+    framerate = fromMaybe 30 $ videoFPS params
+    format = fromMaybe "webm" $ videoFormat params
+    bmpfile dir j = dir </> printf "frame%010d.bmp" (j :: Int)
+
+    renderFrames dir (stepfun, closure) initial num_frames =
+      foldM_ frame initial [0 .. num_frames -1]
+      where
+        frame old_state j = do
+          v <-
+            evalExp literateBuiltin (envServer env)
+              . Call (FuncFut stepfun)
+              . map valueToExp
+              $ closure ++ [old_state]
+          freeValue (envServer env) old_state
+
+          let nope =
+                throwError $
+                  "Cannot handle step function return type: "
+                    <> prettyText (fmap scriptValueType v)
+
+          case v of
+            ValueTuple [arr_v@(ValueAtom SValue {}), new_state] -> do
+              ValueAtom arr <- getExpValue (envServer env) arr_v
+              freeValue (envServer env) arr_v
+              case valueToBMP arr of
+                Nothing -> nope
+                Just bmp -> do
+                  writeBMPFile dir j bmp
+                  pure new_state
+            _ -> nope
+
+    writeBMPFile dir j bmp =
+      liftIO $ LBS.writeFile (bmpfile dir j) bmp
+
+    bmpsToVideo dir = do
+      void $
+        system
+          "ffmpeg"
+          [ "-y",
+            "-r",
+            show framerate,
+            "-i",
+            dir </> "frame%010d.bmp",
+            "-c:v",
+            "libvpx-vp9",
+            "-pix_fmt",
+            "yuv420p",
+            "-b:v",
+            "2M",
+            dir </> "video.webm"
+          ]
+          mempty
+      pure $ dir </> "video.webm"
+
+    onWebM videofile webmfile
+      | format == "gif" =
+        void $ system "ffmpeg" ["-i", webmfile, videofile] mempty
+      | otherwise =
+        liftIO $ copyFile webmfile videofile
+
+-- Did this script block succeed or fail?
+data Failure = Failure | Success
+  deriving (Eq, Ord, Show)
+
+processBlock :: Env -> Block -> IO (Failure, T.Text, Files)
+processBlock _ (BlockCode code)
+  | T.null code = pure (Success, "\n", mempty)
+  | otherwise = pure (Success, "\n```futhark\n" <> code <> "```\n\n", mempty)
+processBlock _ (BlockComment text) =
+  pure (Success, text, mempty)
+processBlock env (BlockDirective directive) = do
+  when (scriptVerbose (envOpts env) > 0) $
     T.hPutStrLn stderr . prettyText $
       "Processing " <> PP.align (PP.ppr directive) <> "..."
   let prompt = case directive of
@@ -658,24 +718,43 @@ processBlock opts imgdir server i (BlockDirective directive) = do
           "```\n" <> prettyText (pprDirective False directive) <> "\n```\n"
         _ ->
           "```\n" <> prettyText (pprDirective True directive) <> "\n```\n"
-  r <- runExceptT $ processDirective imgdir server i directive
-  second (prompt <>) <$> case r of
-    Left err -> failed err
-    Right t -> pure (Success, t)
+      env' = env {envHash = hash (envHash env, prettyText directive)}
+  (r, files) <- runScriptM $ processDirective env' directive
+  case r of
+    Left err -> failed prompt err files
+    Right t -> pure (Success, prompt <> t, files)
   where
-    failed err = do
+    failed prompt err files = do
       let message = prettyTextOneLine directive <> " failed:\n" <> err <> "\n"
       liftIO $ T.hPutStr stderr message
-      when (scriptStopOnError opts) exitFailure
+      when (scriptStopOnError (envOpts env)) exitFailure
       pure
         ( Failure,
-          T.unlines ["**FAILED**", "```", err, "```"]
+          T.unlines [prompt, "**FAILED**", "```", err, "```"],
+          files
         )
 
-processScript :: Options -> FilePath -> ScriptServer -> [Block] -> IO (Failure, T.Text)
-processScript opts imgdir server script =
-  bimap (foldl' min Success) mconcat . unzip
-    <$> zipWithM (processBlock opts imgdir server) [0 ..] script
+-- Delete all files in the given directory that are not contained in
+-- 'files'.
+cleanupImgDir :: Env -> Files -> IO ()
+cleanupImgDir env keep_files =
+  mapM_ toRemove . filter (not . (`S.member` keep_files))
+    =<< (directoryContents (envImgDir env) `catchError` onError)
+  where
+    onError e
+      | isDoesNotExistError e = pure []
+      | otherwise = throwError e
+    toRemove f = do
+      when (scriptVerbose (envOpts env) > 0) $
+        T.hPutStrLn stderr $ "Deleting unused file: " <> T.pack f
+      removePathForcibly f
+
+processScript :: Env -> [Block] -> IO (Failure, T.Text)
+processScript env script = do
+  (failures, outputs, files) <-
+    unzip3 <$> mapM (processBlock env) script
+  cleanupImgDir env $ mconcat files
+  pure (foldl' min Success failures, mconcat outputs)
 
 commandLineOptions :: [FunOptDescr Options]
 commandLineOptions =
@@ -756,24 +835,34 @@ main = mainWithOptions initialOptions commandLineOptions "program" $ \args opts 
                 ++ scriptCompilerOptions opts
         when (scriptVerbose opts > 0) $
           T.hPutStrLn stderr $ "Compiling " <> T.pack prog <> "..."
-        cres <-
-          runExceptT $
+
+        let onError err = do
+              mapM_ (T.hPutStrLn stderr) err
+              exitFailure
+        void $
+          either onError pure <=< runExceptT $
             compileProgram compile_options (FutharkExe futhark) (scriptBackend opts) prog
-        case cres of
-          Left err -> do
-            mapM_ (T.hPutStrLn stderr) err
+
+      let onError err = do
+            T.hPutStrLn stderr err
             exitFailure
-          Right _ ->
-            pure ()
+      proghash <-
+        either onError (pure . hash) <=< runExceptT $
+          system futhark ["hash", prog] mempty
 
       let mdfile = fromMaybe (prog `replaceExtension` "md") $ scriptOutput opts
           imgdir = dropExtension mdfile <> "-img"
           run_options = scriptExtraOptions opts
 
-      removePathForcibly imgdir
-
       withScriptServer ("." </> dropExtension prog) run_options $ \server -> do
-        (failure, md) <- processScript opts imgdir server script
-        when (failure == Failure) exitFailure
+        let env =
+              Env
+                { envServer = server,
+                  envOpts = opts,
+                  envHash = proghash,
+                  envImgDir = imgdir
+                }
+        (failure, md) <- processScript env script
         T.writeFile mdfile md
+        when (failure == Failure) exitFailure
     _ -> Nothing

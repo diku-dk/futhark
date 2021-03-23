@@ -125,7 +125,7 @@ parseExp sep =
       StringLit . T.pack <$> lexeme sep ("\"" *> manyTill charLiteral "\"")
     ]
   where
-    pField = (,) <$> parseEntryName <*> (pEquals *> parseExp sep)
+    pField = (,) <$> lexeme sep parseEntryName <*> (pEquals *> parseExp sep)
     pEquals = lexeme sep "="
     pComma = lexeme sep ","
     mkTuple [v] = v
@@ -164,6 +164,7 @@ readVar server v =
           s <- LBS.readFile tmpf
           case V.readValues s of
             Just [val] -> pure $ Right val
+            Just [] -> pure $ Left "Cannot read opaque value from Futhark server."
             _ -> pure $ Left "Invalid data file produced by Futhark server."
 
 writeVar :: (MonadError T.Text m, MonadIO m) => Server -> VarName -> V.Value -> m ()
@@ -291,7 +292,12 @@ evalExp builtin (ScriptServer server counter) top_level_e = do
 
       valToInterVal :: V.CompoundValue -> InterValue
       valToInterVal = fmap $ \v ->
-        SValue (prettyText (V.valueType v)) $ VVal v
+        SValue (typeText (V.valueType v)) $ VVal v
+        where
+          -- We don't want the actual sizes in the type, so we cannot
+          -- use the normal prettyprinter.
+          typeText (V.ValueType dims t) =
+            mconcat (replicate (length dims) "[]") <> prettyText t
 
       interValToExpVal :: InterValue -> m ExpValue
       interValToExpVal = traverse (traverse toVar)
@@ -321,9 +327,9 @@ evalExp builtin (ScriptServer server counter) top_level_e = do
         unless (and $ zipWith (==) es_types (map (V.ValueAtom . STValue) in_types)) $
           throwError $
             "Function \"" <> name <> "\" expects arguments of types:\n"
-              <> prettyText (V.ValueTuple $ map V.ValueAtom in_types)
+              <> prettyText (V.mkCompound $ map V.ValueAtom in_types)
               <> "\nBut called with arguments of types:\n"
-              <> prettyText (V.ValueTuple $ map V.ValueAtom es_types)
+              <> prettyText (V.mkCompound $ map V.ValueAtom es_types)
 
         ins <- mapM (interValToVar <=< evalExp') es
 
@@ -378,10 +384,21 @@ getExpValue (ScriptServer server _) e =
       throwError $ "Function " <> fname <> " not fully applied."
     toGround (SValue _ v) = pure v
 
--- | Like 'evalExp', but requires all values to be non-functional.
+-- | Like 'evalExp', but requires all values to be non-functional.  If
+-- the value has a bad type, return that type instead.  Other
+-- evaluation problems (e.g. type failures) raise errors.
 evalExpToGround ::
-  (MonadError T.Text m, MonadIO m) => EvalBuiltin m -> ScriptServer -> Exp -> m V.CompoundValue
-evalExpToGround builtin server e = getExpValue server =<< evalExp builtin server e
+  (MonadError T.Text m, MonadIO m) =>
+  EvalBuiltin m ->
+  ScriptServer ->
+  Exp ->
+  m (Either (V.Compound ScriptValueType) V.CompoundValue)
+evalExpToGround builtin server e = do
+  v <- evalExp builtin server e
+  -- This assumes that the only error that can occur during
+  -- getExpValue is trying to read an opaque.
+  (Right <$> getExpValue server v)
+    `catchError` const (pure $ Left $ fmap scriptValueType v)
 
 -- | The set of Futhark variables that are referenced by the
 -- expression - these will have to be entry points in the Futhark

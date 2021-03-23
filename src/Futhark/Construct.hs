@@ -66,7 +66,6 @@ module Futhark.Construct
     eConvOp,
     eSignum,
     eCopy,
-    eAssert,
     eBody,
     eLambda,
     eRoundToMultipleOf,
@@ -84,6 +83,7 @@ module Futhark.Construct
     foldBinOp,
     binOpLambda,
     cmpOpLambda,
+    mkLambda,
     sliceDim,
     fullSlice,
     fullSliceNum,
@@ -277,16 +277,6 @@ eCopy ::
   m (Exp (Lore m))
 eCopy e = BasicOp . Copy <$> (letExp "copy_arg" =<< e)
 
-eAssert ::
-  MonadBinder m =>
-  m (Exp (Lore m)) ->
-  ErrorMsg SubExp ->
-  SrcLoc ->
-  m (Exp (Lore m))
-eAssert e msg loc = do
-  e' <- letSubExp "assert_arg" =<< e
-  return $ BasicOp $ Assert e' msg (loc, mempty)
-
 eBody ::
   (MonadBinder m) =>
   [m (Exp (Lore m))] ->
@@ -477,6 +467,20 @@ binLambda bop arg_t ret_t = do
         lambdaReturnType = [Prim ret_t],
         lambdaBody = body
       }
+
+-- | Easily construct a 'Lambda' within a 'MonadBinder'.
+mkLambda ::
+  MonadBinder m =>
+  [LParam (Lore m)] ->
+  m Result ->
+  m (Lambda (Lore m))
+mkLambda params m = do
+  ((ret, res), stms) <- collectStms . localScope (scopeOfLParams params) $ do
+    res <- m
+    ret <- mapM subExpType res
+    pure (ret, res)
+  body <- mkBodyM stms res
+  pure $ Lambda params body ret
 
 -- | Slice a full dimension of the given size.
 sliceDim :: SubExp -> DimIndex SubExp

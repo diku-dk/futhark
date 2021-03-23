@@ -188,14 +188,14 @@ isMinMaxLam lam = isSpecOpLam isMinMaxOp lam
 adBlank :: Type -> BasicOp
 adBlank (Prim pt) = SubExp $ Constant $ blankPrimValue pt
 adBlank (Array (ElemPrim t) shape _) = Replicate shape $ Constant $ blankPrimValue t
-adBlank (Array (ElemAcc _) _ _) = error "adBlank: cannot create array of accumulators YET (?)"
+adBlank (Array (ElemAcc _ _ _) _ _) = error "adBlank: cannot create array of accumulators YET (?)"
 adBlank Acc {} = error "adBlank: cannot create blank accumulator"
 adBlank Mem {} = error "adBlank: cannot create blank memory"
 
 adOne :: Type -> BasicOp
 adOne (Prim pt) = SubExp $ Constant $ onePrimValue pt
 adOne (Array (ElemPrim t) shape _) = Replicate shape $ Constant $ onePrimValue t
-adOne (Array (ElemAcc _) _ _) = error "adOne: cannot create array of accumulators YET (?)"
+adOne (Array (ElemAcc _ _ _) _ _) = error "adOne: cannot create array of accumulators YET (?)"
 adOne Acc {} = error "adOne: cannot create blank accumulator"
 adOne Mem {} = error "adOne: cannot create blank memory"
 
@@ -895,7 +895,7 @@ diffBasicOp pat aux e m =
           =<< letExp "iota_contrib" (Op $ Screma n reduce [pat_adj])
     --
     Update {} -> error "Reverse-mode Update not handled yet."
-    UnAcc {} -> error "Reverse-mode UnAcc not handled yet."
+    JoinAcc {} -> error "Reverse-mode JoinAcc not handled yet."
     UpdateAcc {} -> error "Reverse-mode UpdateAcc not handled yet."
 
 diffSOAC :: Pattern -> StmAux () -> SOAC SOACS -> ADM () -> ADM ()
@@ -1479,7 +1479,7 @@ diffSOAC pat@(Pattern [] pes) aux soac@(Screma w form as) m
     forM_ (zip3 as ctrb_pure as_tps) $ \(a, ctrb, tp) ->
         updateAdjointSlice (fullSlice tp []) a ctrb
     where
-      accType (Acc _) = True
+      accType (Acc _ _ _) = True
       accType _ = False
       arrType (Array (ElemPrim _) _ _) = True
       arrType _ = False

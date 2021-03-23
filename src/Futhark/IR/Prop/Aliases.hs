@@ -82,7 +82,7 @@ basicOpAliases Concat {} = [mempty]
 basicOpAliases Copy {} = [mempty]
 basicOpAliases Manifest {} = [mempty]
 basicOpAliases Assert {} = [mempty]
-basicOpAliases (UnAcc _ ts) = map (const mempty) ts
+basicOpAliases JoinAcc {} = [mempty]
 basicOpAliases UpdateAcc {} = [mempty]
 
 ifAliases :: ([Names], Names) -> ([Names], Names) -> [Names]
@@ -114,7 +114,11 @@ expAliases (DoLoop ctxmerge valmerge _ loopbody) =
     merge_names = namesFromList $ map (paramName . fst) $ ctxmerge ++ valmerge
 expAliases (Apply _ args t _) =
   funcallAliases args $ map declExtTypeOf t
-expAliases MkAcc {} = [mempty]
+expAliases (WithAcc inputs lam) =
+  concatMap inputAliases inputs ++ drop num_accs (bodyAliases (lambdaBody lam))
+  where
+    inputAliases (_, arrs, _) = replicate (length arrs) mempty
+    num_accs = length inputs
 expAliases (Op op) = opAliases op
 
 returnAliases :: [TypeBase shape Uniqueness] -> [(Names, Diet)] -> [Names]
@@ -154,11 +158,14 @@ consumedInExp (DoLoop _ merge _ _) =
     ( map (subExpAliases . snd) $
         filter (unique . paramDeclType . fst) merge
     )
-consumedInExp (MkAcc _ arrs _ _) = foldMap oneName arrs
+consumedInExp (WithAcc inputs lam) =
+  mconcat (map inputConsumed inputs) <> consumedByLambda lam
+  where
+    inputConsumed (_, arrs, _) = namesFromList arrs
 consumedInExp (BasicOp (Update src _ _)) = oneName src
 consumedInExp (BasicOp (UpdateAcc acc _ _)) = oneName acc
+consumedInExp (BasicOp _) = mempty
 consumedInExp (Op op) = consumedInOp op
-consumedInExp _ = mempty
 
 -- | The variables consumed by this lambda.
 consumedByLambda :: Aliased lore => Lambda lore -> Names

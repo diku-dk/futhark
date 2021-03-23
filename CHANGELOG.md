@@ -5,7 +5,64 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
-## [0.19.0]
+## [0.20.0]
+
+### Added
+
+### Removed
+
+### Changed
+
+### Fixed
+
+  * Mismatch between how thresholds were printed and what the
+    autotuner was looking for (#1269).
+
+  * `zip` now produces unique arrays (#1271).
+
+  * `futhark literate` no longer chokes on lines beginning with `--`
+    without a following whitespace.
+
+  * `futhark literate`: `:loadimg` was broken due to overzealous
+    type checking (#1276).
+
+  * `futhark literate`: `:loadimg` now handles relative paths properly.
+
+## [0.19.2]
+
+### Added
+
+  * New subcommand: `futhark hash`.
+
+  * `futhark literate` is now smart about when to regenerate image and
+    animation files.
+
+  * `futhark literate` now produces better error messages passing
+    expressions of the wrong type to directives.
+
+### Fixed
+
+  * Type-checking of higher-order functions that take consuming
+    funtional arguments.
+
+  * Missing cases in causality checking (#1263).
+
+  * `f32.sgn` was mistakenly defined with double precision arithmetic.
+
+  * Only include double-precision atomics if actually needed by
+    program (this avoids problems on devices that only support single
+    precision).
+
+  * A lambda lifting bug due to not handling existential sizes
+    produced by loops correctly (#1267).
+
+  * Incorrect uniqueness attributes inserted by lambda lifting
+    (#1268).
+
+  * FutharkScript record expressions were a bit too sensitive to
+    whitespace.
+
+## [0.19.1]
 
 ### Added
 
@@ -17,7 +74,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Support for 64-bit atomics on CUDA and OpenCL for higher
     performance with `reduce_by_index` in particular.
-    Double-precision float atomics are still not used.
+    Double-precision float atomics are used on CUDA.
 
   * New functions: `f32.recip` and `f64.recip` for multiplicative inverses.
 
@@ -25,9 +82,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
     also accept `--tuning` and `--size` options (although there are
     not yet any tunable sizes).
 
-### Removed
+  * New functions: `scatter_2d` and `scatter_3d` for scattering to
+    multi-dimensional arrays (#1258).
 
-### Changed
+### Removed
 
   * The math modules no longer define the name `negate` (use `neg`
     instead).
@@ -53,6 +111,11 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * `futhark test` and `futhark bench` now detect program
     initialisation errors in a saner way (#1246).
+
+  * Partial application of operators with parameters used in a
+    size-dependent way now works (#1256).
+
+  * An issue regarding abstract size-lifted sum types (#1260).
 
 ## [0.18.6]
 

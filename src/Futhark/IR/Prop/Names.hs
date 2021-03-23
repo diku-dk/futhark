@@ -1,4 +1,3 @@
-{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE UndecidableInstances #-}
@@ -52,19 +51,12 @@ import Futhark.IR.Prop.Scope
 import Futhark.IR.Syntax
 import Futhark.IR.Traversals
 import Futhark.Util.Pretty
-import GHC.Generics
-import Language.SexpGrammar as Sexp
-import Language.SexpGrammar.Generic
 import Prelude hiding (id, (.))
 
 -- | A set of names.  Note that the 'Ord' instance is a dummy that
 -- treats everything as 'EQ' if '==', and otherwise 'LT'.
 newtype Names = Names (IM.IntMap VName)
-  deriving (Eq, Show, Generic)
-
-instance SexpIso Names where
-  sexpIso = with $ \names ->
-    (iso IM.fromList IM.toList . sexpIso) >>> names
+  deriving (Eq, Show)
 
 -- | Retrieve the data structure underlying the names representation.
 namesIntMap :: Names -> IM.IntMap VName
@@ -208,6 +200,9 @@ instance (FreeIn a, FreeIn b) => FreeIn (a, b) where
 instance (FreeIn a, FreeIn b, FreeIn c) => FreeIn (a, b, c) where
   freeIn' (a, b, c) = freeIn' a <> freeIn' b <> freeIn' c
 
+instance (FreeIn a, FreeIn b, FreeIn c, FreeIn d) => FreeIn (a, b, c, d) where
+  freeIn' (a, b, c, d) = freeIn' a <> freeIn' b <> freeIn' c <> freeIn' d
+
 instance FreeIn a => FreeIn [a] where
   freeIn' = foldMap freeIn'
 
@@ -282,8 +277,8 @@ instance
           freeIn' (ctxinits ++ valinits) <> freeIn' form
             <> freeIn' (ctxparams ++ valparams)
             <> freeIn' loopbody
-  freeIn' (MkAcc shape arrs ishape op) =
-    freeIn' shape <> freeIn' arrs <> freeIn' ishape <> foldMap freeIn' op
+  freeIn' (WithAcc inputs lam) =
+    freeIn' inputs <> freeIn' lam
   freeIn' e = execState (walkExpM freeWalker e) mempty
 
 instance
@@ -338,13 +333,13 @@ instance FreeIn d => FreeIn (Ext d) where
 
 instance FreeIn ElemType where
   freeIn' ElemPrim {} = mempty
-  freeIn' (ElemAcc arrs) = freeIn' arrs
+  freeIn' (ElemAcc acc ispace ts) = freeIn' (acc, ispace, ts)
 
 instance FreeIn shape => FreeIn (TypeBase shape u) where
   freeIn' (Array t shape _) = freeIn' t <> freeIn' shape
   freeIn' (Mem s) = freeIn' s
   freeIn' Prim {} = mempty
-  freeIn' (Acc arrs) = freeIn' arrs
+  freeIn' (Acc acc ispace ts) = freeIn' (acc, ispace, ts)
 
 instance FreeIn dec => FreeIn (Param dec) where
   freeIn' (Param _ dec) = freeIn' dec

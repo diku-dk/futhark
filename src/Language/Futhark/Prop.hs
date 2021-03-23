@@ -67,7 +67,6 @@ module Language.Futhark.Prop
     addAliases,
     setUniqueness,
     noSizes,
-    addSizes,
     anySizes,
     traverseDims,
     DimPos (..),
@@ -163,10 +162,6 @@ nestedDims t =
 -- | Change the shape of a type to be just the rank.
 noSizes :: TypeBase (DimDecl vn) as -> TypeBase () as
 noSizes = first $ const ()
-
--- | Add size annotations that are all 'AnyDim'.
-addSizes :: TypeBase () as -> TypeBase (DimDecl vn) as
-addSizes = first $ const AnyDim
 
 -- | Change all size annotations to be 'AnyDim'.
 anySizes :: TypeBase (DimDecl vn) as -> TypeBase (DimDecl vn) as
@@ -625,10 +620,10 @@ typeOf (Lambda params _ _ (Info (als, t)) _) =
     named (Unnamed, _) = Nothing
 typeOf (OpSection _ (Info t) _) =
   t
-typeOf (OpSectionLeft _ _ _ (_, Info pt2) (Info ret, _) _) =
-  foldFunType [fromStruct pt2] ret
-typeOf (OpSectionRight _ _ _ (Info pt1, _) (Info ret) _) =
-  foldFunType [fromStruct pt1] ret
+typeOf (OpSectionLeft _ _ _ (_, Info (pn, pt2)) (Info ret, _) _) =
+  Scalar $ Arrow mempty pn (fromStruct pt2) ret
+typeOf (OpSectionRight _ _ _ (Info (pn, pt1), _) (Info ret) _) =
+  Scalar $ Arrow mempty pn (fromStruct pt1) ret
 typeOf (ProjectSection _ (Info t) _) = t
 typeOf (IndexSection _ (Info t) _) = t
 typeOf (Constr _ _ (Info t) _) = t
@@ -884,8 +879,66 @@ intrinsics =
                    arr_a
                ),
                ("transpose", IntrinsicPolyFun [tp_a] [arr_2d_a] arr_2d_a),
-               ("zip", IntrinsicPolyFun [tp_a, tp_b] [arr_a, arr_b] arr_a_b),
+               ( "scatter",
+                 IntrinsicPolyFun
+                   [tp_a]
+                   [ Array () Unique t_a (rank 1),
+                     Array () Nonunique (Prim $ Signed Int64) (rank 1),
+                     Array () Nonunique t_a (rank 1)
+                   ]
+                   $ Array () Unique t_a (rank 1)
+               ),
+               ( "scatter_2d",
+                 IntrinsicPolyFun
+                   [tp_a]
+                   [ uarr_2d_a,
+                     Array () Nonunique (tupInt64 2) (rank 1),
+                     Array () Nonunique t_a (rank 1)
+                   ]
+                   uarr_2d_a
+               ),
+               ( "scatter_3d",
+                 IntrinsicPolyFun
+                   [tp_a]
+                   [ uarr_3d_a,
+                     Array () Nonunique (tupInt64 3) (rank 1),
+                     Array () Nonunique t_a (rank 1)
+                   ]
+                   uarr_3d_a
+               ),
+               ("zip", IntrinsicPolyFun [tp_a, tp_b] [arr_a, arr_b] uarr_a_b),
                ("unzip", IntrinsicPolyFun [tp_a, tp_b] [arr_a_b] t_arr_a_arr_b),
+               ( "hist",
+                 IntrinsicPolyFun
+                   [tp_a]
+                   [ Scalar $ Prim $ Signed Int64,
+                     uarr_a,
+                     Scalar t_a `arr` (Scalar t_a `arr` Scalar t_a),
+                     Scalar t_a,
+                     Array () Nonunique (Prim $ Signed Int64) (rank 1),
+                     arr_a
+                   ]
+                   uarr_a
+               ),
+               ("map", IntrinsicPolyFun [tp_a, tp_b] [Scalar t_a `arr` Scalar t_b, arr_a] uarr_b),
+               ( "reduce",
+                 IntrinsicPolyFun
+                   [tp_a]
+                   [Scalar t_a `arr` (Scalar t_a `arr` Scalar t_a), Scalar t_a, arr_a]
+                   $ Scalar t_a
+               ),
+               ( "reduce_comm",
+                 IntrinsicPolyFun
+                   [tp_a]
+                   [Scalar t_a `arr` (Scalar t_a `arr` Scalar t_a), Scalar t_a, arr_a]
+                   $ Scalar t_a
+               ),
+               ( "scan",
+                 IntrinsicPolyFun
+                   [tp_a]
+                   [Scalar t_a `arr` (Scalar t_a `arr` Scalar t_a), Scalar t_a, arr_a]
+                   uarr_a
+               ),
                ( "partition",
                  IntrinsicPolyFun
                    [tp_a]
@@ -924,49 +977,6 @@ intrinsics =
                      arr_a
                    ]
                    $ Scalar t_b
-               ),
-               ("transpose", IntrinsicPolyFun [tp_a] [arr_2d_a] arr_2d_a),
-               ( "scatter",
-                 IntrinsicPolyFun
-                   [tp_a]
-                   [ Array () Unique t_a (rank 1),
-                     Array () Nonunique (Prim $ Signed Int64) (rank 1),
-                     Array () Nonunique t_a (rank 1)
-                   ]
-                   $ Array () Unique t_a (rank 1)
-               ),
-               ("zip", IntrinsicPolyFun [tp_a, tp_b] [arr_a, arr_b] arr_a_b),
-               ("unzip", IntrinsicPolyFun [tp_a, tp_b] [arr_a_b] t_arr_a_arr_b),
-               ( "hist",
-                 IntrinsicPolyFun
-                   [tp_a]
-                   [ Scalar $ Prim $ Signed Int64,
-                     uarr_a,
-                     Scalar t_a `arr` (Scalar t_a `arr` Scalar t_a),
-                     Scalar t_a,
-                     Array () Nonunique (Prim $ Signed Int64) (rank 1),
-                     arr_a
-                   ]
-                   uarr_a
-               ),
-               ("map", IntrinsicPolyFun [tp_a, tp_b] [Scalar t_a `arr` Scalar t_b, arr_a] uarr_b),
-               ( "reduce",
-                 IntrinsicPolyFun
-                   [tp_a]
-                   [Scalar t_a `arr` (Scalar t_a `arr` Scalar t_a), Scalar t_a, arr_a]
-                   $ Scalar t_a
-               ),
-               ( "reduce_comm",
-                 IntrinsicPolyFun
-                   [tp_a]
-                   [Scalar t_a `arr` (Scalar t_a `arr` Scalar t_a), Scalar t_a, arr_a]
-                   $ Scalar t_a
-               ),
-               ( "scan",
-                 IntrinsicPolyFun
-                   [tp_a]
-                   [Scalar t_a `arr` (Scalar t_a `arr` Scalar t_a), Scalar t_a, arr_a]
-                   uarr_a
                ),
                ( "acc_write",
                  IntrinsicPolyFun
@@ -1029,6 +1039,8 @@ intrinsics =
     t_a = TypeVar () Nonunique (typeName tv_a) []
     arr_a = Array () Nonunique t_a (rank 1)
     arr_2d_a = Array () Nonunique t_a (rank 2)
+    uarr_2d_a = Array () Unique t_a (rank 2)
+    uarr_3d_a = Array () Unique t_a (rank 3)
     uarr_a = Array () Unique t_a (rank 1)
     tp_a = TypeParamType Unlifted tv_a mempty
 
@@ -1044,6 +1056,7 @@ intrinsics =
         Nonunique
         (Record (M.fromList $ zip tupleFieldNames [Scalar t_a, Scalar t_b]))
         (rank 1)
+    uarr_a_b = arr_a_b `setUniqueness` Unique
     t_arr_a_arr_b = Scalar $ Record $ M.fromList $ zip tupleFieldNames [arr_a, arr_b]
 
     arr x y = Scalar $ Arrow mempty Unnamed x y
@@ -1128,6 +1141,12 @@ intrinsics =
     intrinsicBinOp Greater = ordering
     intrinsicBinOp Geq = ordering
     intrinsicBinOp _ = Nothing
+
+    tupInt64 n =
+      Record $
+        M.fromList $
+          zip tupleFieldNames $
+            replicate n $ Scalar $ Prim $ Signed Int64
 
 -- | The largest tag used by an intrinsic - this can be used to
 -- determine whether a 'VName' refers to an intrinsic or a user-defined name.

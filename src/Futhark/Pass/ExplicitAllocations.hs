@@ -77,7 +77,7 @@ bindAllocStm (ArrayCopy name src) =
   letBindNames [name] $ BasicOp $ Copy src
 
 class
-  (MonadFreshNames m, HasScope lore m, Mem lore) =>
+  (MonadFreshNames m, LocalScope lore m, Mem lore) =>
   Allocator lore m
   where
   addAllocStm :: AllocStm -> m ()
@@ -248,6 +248,7 @@ newtype PatAllocM lore a
       Functor,
       Monad,
       HasScope lore,
+      LocalScope lore,
       MonadWriter [AllocStm],
       MonadFreshNames
     )
@@ -369,8 +370,8 @@ allocsForPattern sizeidents validents rts hints = do
               PatElem (identName ident) $
                 MemArray bt ident_shape u $
                   ArrayIn (identName memid) ixfn
-          MemAcc arrs _ ->
-            return $ PatElem (identName ident) $ MemAcc arrs ident_shape
+          MemAcc acc ispace ts _ ->
+            return $ PatElem (identName ident) $ MemAcc acc ispace ts ident_shape
           _ -> error "Impossible case reached in allocsForPattern!"
 
   return
@@ -442,10 +443,10 @@ summaryForBindage (Prim bt) _ =
   return $ MemPrim bt
 summaryForBindage (Mem space) _ =
   return $ MemMem space
-summaryForBindage (Array (ElemAcc arrs) shape _) _ =
-  return $ MemAcc arrs shape
-summaryForBindage (Acc arrs) _ =
-  return $ MemAcc arrs mempty
+summaryForBindage (Array (ElemAcc acc ispace ts) shape _) _ =
+  return $ MemAcc acc ispace ts shape
+summaryForBindage (Acc acc ispace ts) _ =
+  return $ MemAcc acc ispace ts mempty
 summaryForBindage t@(Array (ElemPrim pt) shape u) NoHint = do
   m <- allocForArray t =<< askDefaultSpace
   return $ directIxFun pt shape u m t
@@ -500,14 +501,14 @@ allocInFParam param pspace =
       mem <- lift $ newVName memname
       tell ([], [Param mem $ MemMem pspace])
       return param {paramDec = MemArray pt shape u $ ArrayIn mem ixfun}
-    Array (ElemAcc arrs) shape _ ->
-      return param {paramDec = MemAcc arrs shape}
+    Array (ElemAcc acc ispace ts) shape _ ->
+      return param {paramDec = MemAcc acc ispace ts shape}
     Prim pt ->
       return param {paramDec = MemPrim pt}
     Mem space ->
       return param {paramDec = MemMem space}
-    Acc arrs ->
-      return param {paramDec = MemAcc arrs mempty}
+    Acc acc ispace ts ->
+      return param {paramDec = MemAcc acc ispace ts mempty}
 
 allocInMergeParams ::
   ( Allocable fromlore tolore,
@@ -735,7 +736,7 @@ explicitAllocationsInStmsGeneric handleOp hints stms = do
   runAllocM handleOp hints $ localScope scope $ allocInStms stms return
 
 memoryInDeclExtType :: [DeclExtType] -> [FunReturns]
-memoryInDeclExtType ts = evalState (mapM addMem ts) $ startOfFreeIDRange ts
+memoryInDeclExtType dets = evalState (mapM addMem dets) $ startOfFreeIDRange dets
   where
     addMem (Prim t) = return $ MemPrim t
     addMem Mem {} = error "memoryInDeclExtType: too much memory"
@@ -745,9 +746,9 @@ memoryInDeclExtType ts = evalState (mapM addMem ts) $ startOfFreeIDRange ts
         MemArray pt shape u $
           ReturnsNewBlock DefaultSpace i $
             IxFun.iota $ map convert $ shapeDims shape
-    addMem (Array (ElemAcc arrs) shape _) =
-      return $ MemAcc arrs shape
-    addMem (Acc arrs) = return $ MemAcc arrs mempty
+    addMem (Array (ElemAcc acc ispace ts) shape _) =
+      return $ MemAcc acc ispace ts shape
+    addMem (Acc acc ispace ts) = return $ MemAcc acc ispace ts mempty
 
     convert (Ext i) = le64 $ Ext i
     convert (Free v) = Free <$> pe64 v
@@ -944,12 +945,23 @@ allocInExp (If cond tbranch0 fbranch0 (IfDec rets ifsort)) = do
         let (_, val_res) = splitFromEnd num_vals res
         mem_ixfs <- mapM subExpIxFun val_res
         return (Body () bnds' res, mem_ixfs)
-allocInExp (MkAcc accshape arrs ishape op) =
-  MkAcc accshape arrs ishape <$> traverse onOp op
+allocInExp (WithAcc inputs bodylam) =
+  WithAcc <$> mapM onInput inputs <*> onLambda bodylam
   where
-    onOp (lam, nes) = do
+    onLambda lam = do
+      params <- forM (lambdaParams lam) $ \(Param pv t) ->
+        case t of
+          Prim Cert -> pure $ Param pv $ MemPrim Cert
+          Acc acc ispace ts -> pure $ Param pv $ MemAcc acc ispace ts mempty
+          _ -> error $ "Unexpected WithAcc lambda param: " ++ pretty (Param pv t)
+      allocInLambda params (lambdaBody lam) (lambdaReturnType lam)
+
+    onInput (shape, arrs, op) =
+      (shape,arrs,) <$> traverse (onOp shape arrs) op
+
+    onOp accshape arrs (lam, nes) = do
       let num_vs = length (lambdaReturnType lam)
-          num_is = shapeRank ishape
+          num_is = shapeRank accshape
           (i_params, x_params, y_params) =
             splitAt3 num_is num_vs $ lambdaParams lam
           i_params' = map ((`Param` MemPrim int64) . paramName) i_params
@@ -1080,10 +1092,10 @@ addResCtxInIfBody ifrets (Body _ bnds res) spaces substs = do
               ReturnsNewBlock space' 0 $
                 IxFun.iota $ map convert $ shapeDims shape
        in bodyret
-    inspect (Array (ElemAcc arrs) shape _) _ =
-      MemAcc arrs shape
-    inspect (Acc arrs) _ =
-      MemAcc arrs mempty
+    inspect (Array (ElemAcc acc ispace ts) shape _) _ =
+      MemAcc acc ispace ts shape
+    inspect (Acc acc ispace ts) _ =
+      MemAcc acc ispace ts mempty
     inspect (Prim pt) _ = MemPrim pt
     inspect (Mem space) _ = MemMem space
 
@@ -1136,14 +1148,14 @@ allocInLoopForm (ForLoop i it n loopvars) =
                 IxFun.slice ixfun $
                   fullSliceNum dims [DimFix $ le64 i]
           return (p {paramDec = MemArray pt shape u $ ArrayIn mem ixfun'}, a)
-        Array (ElemAcc arrs) shape _ ->
-          return (p {paramDec = MemAcc arrs shape}, a)
+        Array (ElemAcc acc ispace ts) shape _ ->
+          return (p {paramDec = MemAcc acc ispace ts shape}, a)
         Prim bt ->
           return (p {paramDec = MemPrim bt}, a)
         Mem space ->
           return (p {paramDec = MemMem space}, a)
-        Acc arrs ->
-          return (p {paramDec = MemAcc arrs mempty}, a)
+        Acc acc ispace ts ->
+          return (p {paramDec = MemAcc acc ispace ts mempty}, a)
 
 class SizeSubst op where
   opSizeSubst :: PatternT dec -> op -> ChunkMap

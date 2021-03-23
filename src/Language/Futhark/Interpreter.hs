@@ -1007,11 +1007,11 @@ eval env (LetWith dest src is v body _ loc) = do
 eval env (Lambda ps body _ (Info (_, rt)) _) =
   evalFunction env [] ps body rt
 eval env (OpSection qv (Info t) _) = evalTermVar env qv $ toStruct t
-eval env (OpSectionLeft qv _ e (Info (_, argext), _) (Info t, Info retext) loc) = do
+eval env (OpSectionLeft qv _ e (Info (_, _, argext), _) (Info t, Info retext) loc) = do
   v <- evalArg env e argext
   f <- evalTermVar env qv (toStruct t)
   returned env t retext =<< apply loc env f v
-eval env (OpSectionRight qv _ e (Info _, Info (_, argext)) (Info t) loc) = do
+eval env (OpSectionRight qv _ e (Info _, Info (_, _, argext)) (Info t) loc) = do
   y <- evalArg env e argext
   return $
     ValueFun $ \x -> do
@@ -1570,6 +1570,36 @@ initialCtx =
           if i >= 0 && i < arrayLength arr'
             then arr' // [(i, v)]
             else arr'
+    def "scatter_2d" = Just $
+      fun3t $ \arr is vs ->
+        case arr of
+          ValueArray _ _ ->
+            return $
+              foldl' update arr $
+                zip (map fromTuple $ snd $ fromArray is) (snd $ fromArray vs)
+          _ ->
+            error $ "scatter_2d expects array, but got: " ++ pretty arr
+      where
+        update :: Value -> (Maybe [Value], Value) -> Value
+        update arr (Just idxs@[_, _], v) =
+          fromMaybe arr $ updateArray (map (IndexingFix . asInt64) idxs) arr v
+        update _ _ =
+          error "scatter_2d expects 2-dimensional indices"
+    def "scatter_3d" = Just $
+      fun3t $ \arr is vs ->
+        case arr of
+          ValueArray _ _ ->
+            return $
+              foldl' update arr $
+                zip (map fromTuple $ snd $ fromArray is) (snd $ fromArray vs)
+          _ ->
+            error $ "scatter_3d expects array, but got: " ++ pretty arr
+      where
+        update :: Value -> (Maybe [Value], Value) -> Value
+        update arr (Just idxs@[_, _, _], v) =
+          fromMaybe arr $ updateArray (map (IndexingFix . asInt64) idxs) arr v
+        update _ _ =
+          error "scatter_3d expects 3-dimensional indices"
     def "hist" = Just $
       fun6t $ \_ arr fun _ is vs ->
         case arr of

@@ -32,10 +32,7 @@ internaliseUniqueness :: E.Uniqueness -> I.Uniqueness
 internaliseUniqueness E.Nonunique = I.Nonunique
 internaliseUniqueness E.Unique = I.Unique
 
-data TypeState = TypeState
-  { typeCounter :: Int,
-    typeAccArrs :: [I.FParam]
-  }
+newtype TypeState = TypeState {typeCounter :: Int}
 
 newtype InternaliseTypeM a
   = InternaliseTypeM (StateT TypeState InternaliseM a)
@@ -48,30 +45,24 @@ runInternaliseTypeM ::
   InternaliseTypeM a ->
   InternaliseM a
 runInternaliseTypeM (InternaliseTypeM m) =
-  evalStateT m $ TypeState 0 []
+  evalStateT m $ TypeState 0
 
 internaliseParamTypes ::
   [E.TypeBase (E.DimDecl VName) ()] ->
-  InternaliseM
-    ( [I.FParam],
-      [[I.TypeBase Shape Uniqueness]]
-    )
+  InternaliseM [[I.TypeBase Shape Uniqueness]]
 internaliseParamTypes ts =
-  runInternaliseTypeM $
-    flip (,)
-      <$> mapM (fmap (map onType) . internaliseTypeM) ts
-      <*> gets typeAccArrs
+  runInternaliseTypeM $ mapM (fmap (map onType) . internaliseTypeM) ts
   where
     onType = fromMaybe bad . hasStaticShape
     bad = error $ "internaliseParamTypes: " ++ pretty ts
 
 -- We need to fix up the arrays for any Acc return values or loop
 -- parameters.  We look at the concrete types for this, since the Acc
--- arrays in et_ts will just be something we made up.
+-- parameter name in et_ts will just be something we made up.
 fixupTypes :: [TypeBase shape1 u1] -> [TypeBase shape2 u2] -> [TypeBase shape2 u2]
 fixupTypes = zipWith fixup
   where
-    fixup (Acc arrs) (Acc _) = Acc arrs
+    fixup (Acc acc ispace ts) _ = Acc acc ispace ts
     fixup _ t = t
 
 internaliseLoopParamType ::
@@ -79,7 +70,7 @@ internaliseLoopParamType ::
   [TypeBase shape u] ->
   InternaliseM [I.TypeBase Shape Uniqueness]
 internaliseLoopParamType et ts =
-  fixupTypes ts . concat . snd <$> internaliseParamTypes [et]
+  fixupTypes ts . concat <$> internaliseParamTypes [et]
 
 internaliseReturnType ::
   E.TypeBase (E.DimDecl VName) () ->
@@ -153,11 +144,10 @@ internaliseTypeM orig_t =
     E.Scalar (E.TypeVar _ _ tn [E.TypeArgType arr_t _])
       | baseTag (E.typeLeaf tn) <= E.maxIntrinsicTag,
         baseString (E.typeLeaf tn) == "acc" -> do
-        arr_params <-
-          mapM (liftInternaliseM . newParam "acc_arr" . onAccType)
-            =<< internaliseTypeM arr_t
-        modify $ \s -> s {typeAccArrs = arr_params ++ typeAccArrs s}
-        return [Acc $ map paramName arr_params]
+        ts <- map (fromDecl . onAccType) <$> internaliseTypeM arr_t
+        acc_param <- liftInternaliseM $ newVName "acc_cert"
+        let acc_t = Acc acc_param (Shape [arraysSize 0 ts]) $ map rowType ts
+        return [acc_t]
     E.Scalar E.TypeVar {} ->
       error "internaliseTypeM: cannot handle type variable."
     E.Scalar E.Arrow {} ->

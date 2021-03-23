@@ -40,6 +40,7 @@ import Control.Monad.RWS.Strict
 import Control.Monad.Reader
 import Control.Monad.Trans.Maybe
 import Control.Monad.Writer.Strict
+import Data.Function ((&))
 import Data.List (find, partition, tails)
 import qualified Data.Map as M
 import Data.Maybe
@@ -325,6 +326,7 @@ bodyContainsParallelism = any isParallelStm . bodyStms
         && not ("sequential" `inAttrs` stmAuxAttrs (stmAux stm))
     isMap Op {} = True
     isMap (DoLoop _ _ ForLoop {} body) = bodyContainsParallelism body
+    isMap (WithAcc _ lam) = bodyContainsParallelism $ lambdaBody lam
     isMap _ = False
 
 lambdaContainsParallelism :: Lambda SOACS -> Bool
@@ -338,7 +340,7 @@ distributeMapBodyStms ::
 distributeMapBodyStms orig_acc = distribute <=< onStms orig_acc . stmsToList
   where
     onStms acc [] = return acc
-    onStms acc (Let pat (StmAux cs _ _) (Op (Stream w (Sequential accs) lam arrs)) : stms) = do
+    onStms acc (Let pat (StmAux cs _ _) (Op (Stream w Sequential lam accs arrs)) : stms) = do
       types <- asksScope scopeForSOACs
       stream_stms <-
         snd <$> runBinderT (sequentialStreamWholeArray pat w accs lam arrs) types
@@ -437,6 +439,30 @@ maybeDistributeStm stm@(Let pat _ (If cond tbranch fbranch ret)) acc
             return acc'
       _ ->
         addStmToAcc stm acc
+maybeDistributeStm stm@(Let pat _ (WithAcc inputs lam)) acc
+  | lambdaContainsParallelism lam =
+    distributeSingleStm acc stm >>= \case
+      Just (kernels, res, nest, acc')
+        | not $
+            freeIn (drop num_accs (lambdaReturnType lam))
+              `namesIntersect` boundInKernelNest nest,
+          Just (perm, pat_unused) <- permutationAndMissing pat res ->
+          -- We need to pretend pat_unused was used anyway, by adding
+          -- it to the kernel nest.
+          localScope (typeEnvFromDistAcc acc') $ do
+            nest' <- expandKernelNest pat_unused nest
+            types <- asksScope scopeForSOACs
+            addPostStms kernels
+            let withacc = WithAccStm perm pat inputs lam
+            stms <-
+              (`runReaderT` types) $
+                fmap snd . simplifyStms =<< interchangeWithAcc nest' withacc
+            onTopLevelStms stms
+            return acc'
+      _ ->
+        addStmToAcc stm acc
+  where
+    num_accs = length inputs
 maybeDistributeStm (Let pat aux (Op (Screma w form arrs))) acc
   | Just [Reduce comm lam nes] <- isReduceSOAC form,
     Just m <- irwim pat w comm lam $ zip nes arrs = do
@@ -588,6 +614,13 @@ maybeDistributeStm stm@(Let _ aux (BasicOp (Reshape reshape stm_arr))) acc =
           map DimNew (kernelNestWidths nest)
             ++ map DimNew (newDims reshape)
     return $ oneStm $ Let outerpat aux $ BasicOp $ Reshape reshape' arr
+maybeDistributeStm stm@(Let _ aux (BasicOp (JoinAcc stm_arr))) acc =
+  distributeSingleUnaryStm acc stm stm_arr $ \nest outerpat arr ->
+    runBinder_ $ do
+      arr_joined <- letExp (baseString arr <> "_joined") $ BasicOp $ JoinAcc arr
+      let nest_shape = Shape $ kernelNestWidths nest
+      auxing aux . letBind outerpat $
+        BasicOp $ Replicate nest_shape $ Var arr_joined
 maybeDistributeStm stm@(Let _ aux (BasicOp (Rotate rots stm_arr))) acc =
   distributeSingleUnaryStm acc stm stm_arr $ \nest outerpat arr -> do
     let rots' = map (const $ intConst Int64 0) (kernelNestWidths nest) ++ rots
@@ -627,7 +660,7 @@ maybeDistributeStm (Let pat aux (BasicOp (Update arr [DimFix i] v))) acc
               lambdaReturnType = [Prim int64, et],
               lambdaBody = mkBody mempty [i, v]
             }
-    maybeDistributeStm (Let pat aux $ Op $ Scatter (intConst Int64 1) lam [] [(w, 1, arr)]) acc
+    maybeDistributeStm (Let pat aux $ Op $ Scatter (intConst Int64 1) lam [] [(Shape [w], 1, arr)]) acc
   where
     amortises DoLoop {} = True
     amortises Op {} = True
@@ -759,7 +792,7 @@ segmentedScatterKernel ::
   SubExp ->
   Lambda lore ->
   [VName] ->
-  [(SubExp, Int, VName)] ->
+  [(Shape, Int, VName)] ->
   DistNestT lore m (Stms lore)
 segmentedScatterKernel nest perm scatter_pat cs scatter_w lam ivs dests = do
   -- We replicate some of the checking done by 'isSegmentedOp', but
@@ -776,6 +809,7 @@ segmentedScatterKernel nest perm scatter_pat cs scatter_w lam ivs dests = do
   (ispace, kernel_inps) <- flatKernel nest'
 
   let (as_ws, as_ns, as) = unzip3 dests
+      indexes = zipWith (*) as_ns $ map length as_ws
 
   -- The input/output arrays ('as') _must_ correspond to some kernel
   -- input, or else the original nested scatter would have been
@@ -787,8 +821,8 @@ segmentedScatterKernel nest perm scatter_pat cs scatter_w lam ivs dests = do
   let rts =
         concatMap (take 1) $
           chunks as_ns $
-            drop (sum as_ns) $ lambdaReturnType lam
-      (is, vs) = splitAt (sum as_ns) $ bodyResult $ lambdaBody lam
+            drop (sum indexes) $ lambdaReturnType lam
+      (is, vs) = splitAt (sum indexes) $ bodyResult $ lambdaBody lam
 
   -- Maybe add certificates to the indices.
   (is', k_body_stms) <- runBinder $ do
@@ -799,9 +833,9 @@ segmentedScatterKernel nest perm scatter_pat cs scatter_w lam ivs dests = do
         else certifying cs $ letSubExp "scatter_i" $ BasicOp $ SubExp i
 
   let k_body =
-        KernelBody () k_body_stms $
-          map (inPlaceReturn ispace) $
-            zip3 as_ws as_inps $ chunks as_ns $ zip is' vs
+        groupScatterResults (zip3 as_ws as_ns as_inps) (is' ++ vs)
+          & map (inPlaceReturn ispace)
+          & KernelBody () k_body_stms
 
   (k, k_bnds) <- mapKernel mk_lvl ispace kernel_inps rts k_body
 
@@ -821,9 +855,9 @@ segmentedScatterKernel nest perm scatter_pat cs scatter_w lam ivs dests = do
 
     inPlaceReturn ispace (aw, inp, is_vs) =
       WriteReturns
-        (init ws ++ [aw])
+        (Shape (init ws ++ shapeDims aw))
         (kernelInputArray inp)
-        [(map DimFix $ map Var (init gtids) ++ [i], v) | (i, v) <- is_vs]
+        [(map DimFix $ map Var (init gtids) ++ is, v) | (is, v) <- is_vs]
       where
         (gtids, ws) = unzip ispace
 
@@ -860,7 +894,7 @@ segmentedUpdateKernel nest perm cs arr slice v = do
     v_t <- subExpType v'
     return
       ( v_t,
-        WriteReturns (arrayDims arr_t) arr' [(map DimFix write_is, v')]
+        WriteReturns (arrayShape arr_t) arr' [(map DimFix write_is, v')]
       )
 
   mk_lvl <- mkSegLevel

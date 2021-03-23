@@ -4,6 +4,7 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE Strict #-}
+{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
 
@@ -835,17 +836,18 @@ simplifyExp (DoLoop ctx val form loopbody) = do
 simplifyExp (Op op) = do
   (op', stms) <- simplifyOp op
   return (Op op', stms)
-simplifyExp (MkAcc shape arrs ishape op) = do
-  (op', op_stms) <- case op of
-    Nothing ->
-      pure (Nothing, mempty)
-    Just (lam, nes) -> do
-      (lam', lam_stms) <- simplifyLambda lam
-      nes' <- simplify nes
-      return (Just (lam', nes'), lam_stms)
-  (,)
-    <$> (MkAcc <$> simplify shape <*> simplify arrs <*> simplify ishape <*> pure op')
-    <*> pure op_stms
+simplifyExp (WithAcc inputs lam) = do
+  (inputs', inputs_stms) <- fmap unzip . forM inputs $ \(shape, arrs, op) -> do
+    (op', op_stms) <- case op of
+      Nothing ->
+        pure (Nothing, mempty)
+      Just (op_lam, nes) -> do
+        (op_lam', op_lam_stms) <- simplifyLambda op_lam
+        nes' <- simplify nes
+        return (Just (op_lam', nes'), op_lam_stms)
+    (,op_stms) <$> ((,,op') <$> simplify shape <*> simplify arrs)
+  (lam', lam_stms) <- simplifyLambda lam
+  pure (WithAcc inputs' lam', mconcat inputs_stms <> lam_stms)
 
 -- Special case for simplification of commutative BinOps where we
 -- arrange the operands in sorted order.  This can make expressions
@@ -974,13 +976,14 @@ instance Simplifiable Space where
 
 instance Simplifiable ElemType where
   simplify (ElemPrim pt) = pure $ ElemPrim pt
-  simplify (ElemAcc ts) = ElemAcc <$> mapM simplify ts
+  simplify (ElemAcc acc ispace ts) =
+    ElemAcc <$> simplify acc <*> simplify ispace <*> simplify ts
 
 instance Simplifiable shape => Simplifiable (TypeBase shape u) where
   simplify (Array et shape u) =
     Array <$> simplify et <*> simplify shape <*> pure u
-  simplify (Acc ts) =
-    Acc <$> mapM simplify ts
+  simplify (Acc acc ispace ts) =
+    Acc <$> simplify acc <*> simplify ispace <*> simplify ts
   simplify (Mem space) =
     Mem <$> simplify space
   simplify (Prim bt) =

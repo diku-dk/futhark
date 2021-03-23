@@ -116,8 +116,8 @@ primOpType (Manifest _ v) =
   pure <$> lookupType v
 primOpType Assert {} =
   pure [Prim Cert]
-primOpType (UnAcc _ ts) =
-  pure ts
+primOpType (JoinAcc acc) =
+  pure . elemToType . elemType <$> lookupType acc
 primOpType (UpdateAcc v _ _) =
   pure <$> lookupType v
 
@@ -131,8 +131,14 @@ expExtType (If _ _ _ rt) = pure $ map extTypeOf $ ifReturns rt
 expExtType (DoLoop ctxmerge valmerge _ _) =
   pure $ loopExtType (map (paramIdent . fst) ctxmerge) (map (paramIdent . fst) valmerge)
 expExtType (BasicOp op) = staticShapes <$> primOpType op
-expExtType (MkAcc shape arrs _ _) =
-  pure $ staticShapes [Array (ElemAcc arrs) shape NoUniqueness]
+expExtType (WithAcc inputs lam) =
+  fmap staticShapes $
+    (<>)
+      <$> (concat <$> traverse inputType inputs)
+      <*> pure (drop num_accs (lambdaReturnType lam))
+  where
+    inputType (_, arrs, _) = traverse lookupType arrs
+    num_accs = length inputs
 expExtType (Op op) = opType op
 
 -- | The number of values returned by an expression.

@@ -105,20 +105,20 @@ simplifySOAC (JVP lam arr vec) = do
   arr' <- mapM Engine.simplify arr
   vec' <- mapM Engine.simplify vec
   return (JVP lam' arr' vec', hoisted)
-simplifySOAC (Stream outerdim form lam arr) = do
+--simplifySOAC (Stream outerdim form lam arr) = do
+simplifySOAC (Stream outerdim form lam nes arr) = do
   outerdim' <- Engine.simplify outerdim
   (form', form_hoisted) <- simplifyStreamForm form
+  nes' <- mapM Engine.simplify nes
   arr' <- mapM Engine.simplify arr
   (lam', lam_hoisted) <- Engine.simplifyLambda lam
-  return (Stream outerdim' form' lam' arr', form_hoisted <> lam_hoisted)
+  return (Stream outerdim' form' lam' nes' arr', form_hoisted <> lam_hoisted)
   where
-    simplifyStreamForm (Parallel o comm lam0 acc) = do
-      acc' <- mapM Engine.simplify acc
+    simplifyStreamForm (Parallel o comm lam0) = do
       (lam0', hoisted) <- Engine.simplifyLambda lam0
-      return (Parallel o comm lam0' acc', hoisted)
-    simplifyStreamForm (Sequential acc) = do
-      acc' <- mapM Engine.simplify acc
-      return (Sequential acc', mempty)
+      return (Parallel o comm lam0', hoisted)
+    simplifyStreamForm Sequential =
+      return (Sequential, mempty)
 simplifySOAC (Scatter len lam ivs as) = do
   len' <- Engine.simplify len
   (lam', hoisted) <- Engine.simplifyLambda lam
@@ -312,7 +312,7 @@ liftIdentityMapping _ pat aux op
 liftIdentityMapping _ _ _ _ = Skip
 
 liftIdentityStreaming :: BottomUpRuleOp (Wise SOACS)
-liftIdentityStreaming _ (Pattern [] pes) aux (Stream w form lam arrs)
+liftIdentityStreaming _ (Pattern [] pes) aux (Stream w form lam nes arrs)
   | (variant_map, invariant_map) <-
       partitionEithers $ map isInvariantRes $ zip3 map_ts map_pes map_res,
     not $ null invariant_map = Simplify $ do
@@ -328,9 +328,9 @@ liftIdentityStreaming _ (Pattern [] pes) aux (Stream w form lam arrs)
 
     auxing aux $
       letBind (Pattern [] $ fold_pes ++ variant_map_pes) $
-        Op $ Stream w form lam' arrs
+        Op $ Stream w form lam' nes arrs
   where
-    num_folds = length $ getStreamAccums form
+    num_folds = length nes
     (fold_pes, map_pes) = splitAt num_folds pes
     (fold_ts, map_ts) = splitAt num_folds $ lambdaReturnType lam
     lam_res = bodyResult $ lambdaBody lam
@@ -699,10 +699,9 @@ simplifyKnownIterationSOAC _ pat _ op
     zipWithM_ bindResult red_pes red_res
     zipWithM_ bindArrayResult map_pes map_res
 simplifyKnownIterationSOAC _ pat _ op
-  | Just (Stream (Constant k) form fold_lam arrs) <- asSOAC op,
+  | Just (Stream (Constant k) _ fold_lam nes arrs) <- asSOAC op,
     oneIsh k = Simplify $ do
-    let nes = getStreamAccums form
-        (chunk_param, acc_params, slice_params) =
+    let (chunk_param, acc_params, slice_params) =
           partitionChunkedFoldParameters (length nes) (lambdaParams fold_lam)
 
     letBindNames [paramName chunk_param] $

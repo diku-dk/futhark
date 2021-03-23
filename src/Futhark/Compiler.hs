@@ -13,11 +13,14 @@ module Futhark.Compiler
     module Futhark.Compiler.Program,
     readProgram,
     readProgramOrDie,
+    readUntypedProgram,
+    readUntypedProgramOrDie,
   )
 where
 
 import Control.Monad
 import Control.Monad.Except
+import Data.Bifunctor (first)
 import qualified Data.Text.IO as T
 import qualified Futhark.Analysis.Alias as Alias
 import Futhark.Compiler.Program
@@ -29,6 +32,8 @@ import Futhark.Pipeline
 import qualified Futhark.TypeCheck as I
 import Futhark.Util.Log
 import Futhark.Util.Pretty (ppr, prettyText)
+import qualified Language.Futhark as E
+import Language.Futhark.Semantic (includeToString)
 import Language.Futhark.Warnings
 import System.Exit (ExitCode (..), exitWith)
 import System.IO
@@ -162,15 +167,31 @@ readProgram ::
   m (Warnings, Imports, VNameSource)
 readProgram extra_eps = readLibrary extra_eps . pure
 
--- | Not verbose, and terminates process on error.
-readProgramOrDie :: MonadIO m => FilePath -> m (Warnings, Imports, VNameSource)
-readProgramOrDie file = liftIO $ do
-  res <- runFutharkM (readProgram mempty file) NotVerbose
+-- | Read and parse (but do not type-check) a Futhark program,
+-- including all imports.
+readUntypedProgram ::
+  (MonadError CompilerError m, MonadIO m) =>
+  FilePath ->
+  m [(String, E.UncheckedProg)]
+readUntypedProgram =
+  fmap (map (first includeToString)) . readUntypedLibrary . pure
+
+orDie :: MonadIO m => FutharkM a -> m a
+orDie m = liftIO $ do
+  res <- runFutharkM m NotVerbose
   case res of
     Left err -> do
       dumpError newFutharkConfig err
       exitWith $ ExitFailure 2
     Right res' -> return res'
+
+-- | Not verbose, and terminates process on error.
+readProgramOrDie :: MonadIO m => FilePath -> m (Warnings, Imports, VNameSource)
+readProgramOrDie file = orDie $ readProgram mempty file
+
+-- | Not verbose, and terminates process on error.
+readUntypedProgramOrDie :: MonadIO m => FilePath -> m [(String, E.UncheckedProg)]
+readUntypedProgramOrDie file = orDie $ readUntypedProgram file
 
 -- | Run an operation that produces warnings, and handle them
 -- appropriately, yielding the non-warning return value.  "Proper
