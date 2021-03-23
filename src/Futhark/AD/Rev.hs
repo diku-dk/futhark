@@ -35,6 +35,29 @@ import Futhark.Util (takeLast)
 
 --- First some general utility functions that are not specific to AD.
 
+eReverse :: VName -> ADM VName
+eReverse arr = do
+  arr_t <- lookupType arr
+  let w = arraySize 0 arr_t
+      arr_t' = stripArray 1 arr_t
+  -- generate the reverse indexing expression
+  ip <- newParam "i" (Prim p_int64)
+  let i = paramName ip
+  (arr_i, ind_stms) <- runBinderT' . localScope (scopeOfLParams [ip, Param arr arr_t]) $ do
+    inv_ind <- letSubExp "inv_ind" =<< toExp (pe64 w - (le64 i + pe64 (intConst Int64 1)))
+    letExp (baseString arr ++ "_inv_elem") $ BasicOp $ Index arr $ fullSlice arr_t [DimFix inv_ind]
+  -- produce the inner map nest enumerating the elements on each dimension
+  v_elm <- newVName "elem"
+  let pexps = [ LeafExp v_elm (getPrimElemType arr_t) ]
+      tab = M.fromList [ (v_elm, (arr_i,arr_t')) ]
+  (rs, map_stms) <- liftPExp2MapNest pexps tab
+  -- put back the results into a map soac
+  let lam_bdy = mkBody (ind_stms <> map_stms) $ map Var rs
+      lam = Lambda [ip] lam_bdy [arr_t']
+  iota_v <- letExp "iota" . BasicOp $
+      Iota w (intConst Int64 0) (intConst Int64 1) Int64
+  letExp (baseString arr ++ "_inv") $ Op $ Screma w (mapSOAC lam) [iota_v]
+{--
 eReverse :: MonadBinder m => VName -> m VName
 eReverse arr = do
   arr_t <- lookupType arr
@@ -45,7 +68,7 @@ eReverse arr = do
   let stride = intConst Int64 (-1)
       slice = fullSlice arr_t [DimSlice start w stride]
   letExp (baseString arr <> "_rev") $ BasicOp $ Index arr slice
-
+--}
 eRotate :: MonadBinder m => [SubExp] -> VName -> m VName
 eRotate rots arr = letExp (baseString arr <> "_rot") $ BasicOp $ Rotate rots arr
 
@@ -867,21 +890,35 @@ diffSOAC pat@(Pattern [] [pe]) aux (Hist n [hist_add] f [is,vs]) m
     pe_bar <- lookupAdj $ patElemName pe
     -- already update orig_dst bar
     void $ updateAdjointSlice (fullSlice (patElemDec pe) []) orig_dst pe_bar
-    -- update the vs bar
+    -- update the vs bar; create a map nest with the branch innermost so all
+    -- parallelism can be exploited.
     pind <- newParam "ind" (Prim p_int64)
-    let i = paramName pind
-    map_bar_lam_bdy <- runBodyBinder . localScope (scopeOfLParams [pind]) $
-      eBody [ eIf ( toExp $ withinBounds i w)
-                  ( do r <- letSubExp "r" $ BasicOp $ Index pe_bar $ DimFix (Var i) : fullSlice eltp [] 
-                       resultBodyM [r]
-                  )
-                  ( resultBodyM [ne] )
-            ]
+    map_bar_lam_bdy <- genRecLamBdy w pe_bar [pind] eltp
     let map_bar_lam = Lambda [pind] map_bar_lam_bdy [eltp]
-    vs_bars <- letTupExp (baseString vs ++ "_bar") $ Op $ Screma n (ScremaForm [] [] map_bar_lam) [is]
-    let [vs_bar] = vs_bars
+    vs_bar <- letExp (baseString vs ++ "_bar") $ Op $ Screma n (mapSOAC map_bar_lam) [is]
     vs_type <- lookupType vs
     void $ updateAdjointSlice (fullSlice vs_type []) vs vs_bar
+    where
+      genRecLamBdy :: SubExp -> VName -> [Param Type] -> Type -> ADM Body
+      genRecLamBdy w arr pinds (Prim ptp) = do
+        let inds = map paramName pinds
+        runBodyBinder . localScope (scopeOfLParams pinds) $
+          eBody [ eIf ( toExp $ withinBounds (head inds) w )
+                      ( do r <- letSubExp "r" $ BasicOp $ Index arr $ map (DimFix . Var) inds
+                           resultBodyM [r]
+                      )
+                      ( resultBodyM [Constant $ blankPrimValue ptp] )
+                ]
+      genRecLamBdy w arr pinds (Array (ElemPrim t) (Shape (s : ss)) u) = do
+        new_ip <- newParam "i" (Prim p_int64)
+        let t' = if null ss then Prim t else Array (ElemPrim t) (Shape ss) u
+        inner_lam_bdy <- genRecLamBdy w arr (pinds++[new_ip]) t'
+        let inner_lam = Lambda [new_ip] inner_lam_bdy [t']
+        (r, stms) <- runBinderT' . localScope (scopeOfLParams pinds) $ do
+          iota_v <- letExp "iota" $ BasicOp $ Iota s (intConst Int64 0) (intConst Int64 1) Int64
+          letSubExp (baseString arr ++ "_elem") $ Op $ Screma s (mapSOAC inner_lam) [iota_v]
+        mkBodyM stms [r]
+      genRecLamBdy _ _ _ _ = error "In Rev.hs, helper function genRecLamBdy, unreachable case reached!"
 --
 -- Special reduce case: p = reduce (*) 1 as
 -- Forward trace: 
@@ -1251,6 +1288,105 @@ diffSOAC pat@(Pattern [] pes) aux soac@(Screma n (ScremaForm [scn] [] f) xs) m
       xs_tps <- mapM lookupType xs
       forM_ (zip3 xs xs_contribs xs_tps) $ \(x, x_ctrb, x_tp) ->
         updateAdjointSlice (fullSlice x_tp []) x x_ctrb
+-- Original: 
+--   let ys = scatter xs is vs
+-- Assumes no duplicate indices in `is`
+-- Forward Sweep:
+--   let xs_save = gather xs is
+--   let ys = scatter xs is vs
+-- Backward Sweep:
+--   let vs_ctrbs = gather is ys_bar
+--   let vs_bar \overline{+}= vs_ctrbs -- by map or generalized reduction
+--   let xs_bar = scatter ys_bar is \overline{0}
+--   let xs = scatter ys is xs_save
+-- ToDo: 1. since we do not have generalized reduction implemented yet,
+--          I will just produce a map-scatter composition for `vs_bar`
+--          and extend it later based on type discrimination of vs_bar
+--       2. treat the case when the index is out of bounds!
+-- Scatter SubExp (Lambda lore) [VName] [(SubExp, Int, VName)]
+diffSOAC pat@(Pattern [] [pys]) aux scat@(Scatter n f0 ass [(se,num_vals,xs)]) m -- CHANGE shp
+  | isIdentityLambda f0 = do
+    let shp = Shape [se]
+    let rank = length $ shapeDims shp
+        (all_inds, val_as) = splitAt (rank * num_vals) ass
+        inds_as = chunk rank all_inds
+    tp_xs <- lookupType xs
+    let ptp = getPrimElemType tp_xs
+    -- computing xs_save
+    xs_saves <- mkGather inds_as xs tp_xs
+    -- performing the scatter
+    addStm $ Let pat aux $ Op scat
+    m
+    let ys = patElemName pys
+    ys_bar <- lookupAdj ys
+    -- computing vs_ctrbs and updating vs_bar
+    vs_ctrbs <- mkGather inds_as ys_bar tp_xs
+    zipWithM_ updateAdjoint val_as vs_ctrbs -- use Slice?
+    -- creating xs_bar
+    zeros  <- forM val_as $ \ _ -> letExp "zeros" $ BasicOp $ Replicate (Shape [n]) se0
+    let f_tps = replicate (rank*num_vals) (Prim p_int64) ++ replicate num_vals (Prim ptp)
+    f <- mkIdentityLambda f_tps
+    let soac = Scatter n f (all_inds++zeros) [(se,num_vals,ys_bar)] -- CHANGE shp <- se
+    xs_bar <- letExp (baseString xs++"_bar") $ Op soac
+    insAdj xs xs_bar -- reusing the ys_bar for xs_bar!
+    -- re-creating xs -- here we will unsafely use the same name as in fwd sweep:
+    f' <- mkIdentityLambda f_tps
+    addStm $ Let (Pattern [] [PatElem xs tp_xs]) aux $ Op $
+                Scatter n f' (all_inds++xs_saves) [(se,num_vals,ys)] -- CHANGE shp <- se
+    where
+      se0 = intConst Int64 0
+      chunk _ []  = []
+      chunk k lst = take k lst : chunk k (drop k lst)
+      -- ToDo: fix indices out of bounds!
+      mkGather :: [[VName]] -> VName -> Type -> ADM [VName]
+      mkGather inds_as arr tp_arr = do
+        let ptp = getPrimElemType tp_arr
+        ips <- forM inds_as $ \ idxs ->
+                mapM (\idx -> newParam (baseString idx++"_elem") (Prim p_int64)) idxs
+        let params = Param arr tp_arr : concat ips
+        (rs, stms) <- runBinderT' . localScope (scopeOfLParams params) $ do
+            forM ips $ \ idxs -> do
+                letSubExp (baseString arr ++ "_elem_gather") $ BasicOp $
+                            Index arr $ map (DimFix . Var. paramName) idxs
+        let gather_lam = Lambda (concat ips) (mkBody stms rs) (replicate num_vals (Prim ptp))
+        localScope (scopeOfLParams [Param arr tp_arr]) $ do
+            --let iota_exp = Iota n (intConst Int64 0) (intConst Int64 1) Int64
+            --iota <- letExp "iota" $ BasicOp iota_exp
+            let soac = Screma n (mapSOAC gather_lam) (concat inds_as)
+            letTupExp (baseString arr ++ "_gather") $ Op soac
+-- scatter dispatcher
+diffSOAC (Pattern [] pes) aux (Scatter n f0 ass written_info) m
+  | isIdentityLambda f0 = do
+    let sind = foldl(\ split (se,num_res,_) -> -- CHANGE shp
+                        let shp = Shape [se]
+                        in  split + num_res * length (shapeDims shp) 
+                    ) 0 written_info
+        (inds, vals) = splitAt sind ass
+    (inds_lst, vals_lst, lst_stms) <-
+        foldM (\ (acc_inds, acc_vals, acc_stms) (pe, info@(se,num_vals,_)) -> do -- CHANGE shp
+                let shp = Shape [se]
+                    num_inds = num_vals * length (shapeDims shp)
+                    (curr_inds, other_inds) = splitAt num_inds acc_inds
+                    (curr_vals, other_vals) = splitAt num_vals acc_vals
+                vtps <- mapM lookupType curr_vals
+                f <- mkIdentityLambda (replicate num_inds (Prim p_int64) ++ vtps)
+                let stm = Let (Pattern [] [pe]) aux $ Op $
+                            Scatter n f (curr_inds++curr_vals) [info]
+                return (other_inds, other_vals, stm : acc_stms)
+              ) (inds,vals,[]) (zip pes written_info)
+    case (inds_lst, vals_lst) of
+        ([],[]) -> diffScatters (stmsFromList $ reverse lst_stms)
+        _ -> error "In Rev.hs, diffSOAC, scatter dispatcher: unreachable case reached!"
+    where
+      diffScatters all_stms
+        | Just (stm, stms) <- stmsHead all_stms =
+            diffStm stm $ diffStms stms
+        | otherwise = m
+diffSOAC (Pattern [] _) _ (Scatter _ f0 _ _) _
+  | not (isIdentityLambda f0) =
+    error "In Rev.hs, diffSOAC, scatter with non-identity map is not supported!"
+diffSOAC _ _ (Scatter _ _ _ _) _ =
+    error "In Rev.hs, diffSOAC, scatter: unreachable case reached!"
 -- a map translates to generalized reduction
 diffSOAC pat@(Pattern [] pes) aux soac@(Screma w form as) m
   | Just lam <- isMapSOAC form = do
