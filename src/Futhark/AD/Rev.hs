@@ -597,15 +597,33 @@ addBinOp (FloatType ft) = FAdd ft
 addBinOp Bool = LogAnd
 addBinOp Cert = LogAnd
 
+tabNest :: Int -> [VName] -> ([VName] -> [VName] -> ADM [VName]) -> ADM [VName]
+tabNest = tabNest' []
+  where
+    tabNest' is 0 vs f = f (reverse is) vs
+    tabNest' is n vs f = do
+      vs_ts <- mapM lookupType vs
+      let w = arraysSize 0 vs_ts
+      iota <-
+        letExp "tab_iota" . BasicOp $
+          Iota w (intConst Int64 0) (intConst Int64 1) Int64
+      iparam <- newParam "i" $ Prim int64
+      params <- forM vs $ \v ->
+        newParam (baseString v <> "_p") . rowType =<< lookupType v
+      ((ret, res), stms) <- collectStms . localScope (scopeOfLParams (iparam : params)) $ do
+        res <- tabNest' (paramName iparam : is) (n -1) (map paramName params) f
+        ret <- mapM lookupType res
+        pure (ret, map Var res)
+      let lam = Lambda (iparam : params) (Body () stms res) ret
+      letTupExp "tab" $ Op $ Screma w (mapSOAC lam) (iota : vs)
+
 -- Construct a lambda for adding two values of the given type.
 addLambda :: Type -> ADM Lambda
 addLambda (Prim pt) = binOpLambda (addBinOp pt) pt
-addLambda (Array (ElemPrim t) (Shape []) _) =
-  addLambda (Prim t)
 addLambda tp@(Array (ElemPrim t) (Shape (s : ss)) u) = do
   xs <- newVName "xs"
   ys <- newVName "ys"
-  let t' = Array (ElemPrim t) (Shape ss) u
+  let t' = if null ss then Prim t else Array (ElemPrim t) (Shape ss) u
   lam <- addLambda t'
   body <- insertStmsM $ do
     res <- letSubExp "lam_map" $ Op $ Screma s (mapSOAC lam) [xs, ys]
@@ -619,6 +637,19 @@ addLambda tp@(Array (ElemPrim t) (Shape (s : ss)) u) = do
 addLambda t =
   error $ "addLambda: " ++ pretty t
 
+-- Construct an expression for adding the two variables.
+addExp :: VName -> VName -> ADM Exp
+addExp x y = do
+  x_t <- lookupType x
+  case x_t of
+    Prim pt ->
+      pure $ BasicOp $ BinOp (addBinOp pt) (Var x) (Var y)
+    Array {} -> do
+      lam <- addLambda $ rowType x_t
+      pure $ Op $ Screma (arraySize 0 x_t) (mapSOAC lam) [x, y]
+    _ ->
+      error $ "addExp: unexpected type: " ++ pretty x_t
+
 instance Adjoint VName where
   lookupAdj v = do
     maybeAdj <- gets $ M.lookup v . stateAdjs
@@ -629,18 +660,27 @@ instance Adjoint VName where
   updateAdjoint v d = do
     maybeAdj <- gets $ M.lookup v . stateAdjs
     case maybeAdj of
-      Nothing -> setAdjoint v (BasicOp . SubExp . Var $ d)
+      Nothing -> setAdjoint v $ BasicOp $ SubExp $ Var d
       Just v_adj -> do
-        t <- lookupType v
-        v_adj' <- letExp "adj" $
-          case t of
-            Prim pt ->
-              BasicOp $ BinOp (addBinOp pt) (Var v_adj) (Var d)
-            _ ->
-              error $ "updateAdjoint: unexpected type " <> pretty t
-        let update = M.singleton v v_adj'
-        insAdjMap update
-        pure v_adj'
+        v_adj_t <- lookupType v_adj
+        case v_adj_t of
+          Acc {} -> do
+            dims <- arrayDims <$> lookupType d
+            v_adj_arr <-
+              letExp (baseString v_adj <> "_arr") $
+                BasicOp $ Replicate (Shape dims) $ Var v_adj
+            ~[v_adj_arr'] <-
+              tabNest (length dims) [v_adj_arr, d] $ \is [v_adj_arr', d'] ->
+                letTupExp "acc" $
+                  BasicOp $ UpdateAcc v_adj_arr' (map Var is) [Var d']
+            v_adj' <-
+              letExp (baseString v <> "_adj") $ BasicOp $ JoinAcc v_adj_arr'
+            insAdj v v_adj'
+            pure v_adj'
+          _ -> do
+            v_adj' <- letExp (baseString v <> "_adj") =<< addExp v_adj d
+            insAdj v v_adj'
+            pure v_adj'
 
   updateAdjointSlice slice v d = do
     maybeAdj <- gets $ M.lookup v . stateAdjs
@@ -650,24 +690,24 @@ instance Adjoint VName where
         void $ lookupAdj v -- Initialise adjoint.
         updateAdjointSlice slice v d
       Just v_adj -> do
-        v_adjslice <-
-          if primType t
-            then return v_adj
-            else letExp (baseString v ++ "_slice") $ BasicOp $ Index v_adj slice
-        t' <- lookupType v_adjslice
-        v_adjslice' <- addArrays t' v_adjslice d
-        v_adj' <- letInPlace "updated_adj" v_adj slice v_adjslice'
-        insAdjMap $ M.singleton v v_adj'
+        let isDimFix (DimFix i) = i
+            isDimFix _ =
+              error $ "Invalid slice for accumulator update: " ++ pretty slice
+        v_adj_t <- lookupType v_adj
+        v_adj' <- case v_adj_t of
+          Acc {} ->
+            letExp (baseString v_adj) . BasicOp $
+              UpdateAcc v_adj (map isDimFix slice) [Var d]
+          _ -> do
+            v_adjslice <-
+              if primType t
+                then return v_adj
+                else
+                  letExp (baseString v ++ "_slice") $
+                    BasicOp $ Index v_adj slice
+            letInPlace "updated_adj" v_adj slice =<< addExp v_adjslice d
+        insAdj v v_adj'
         pure v_adj'
-    where
-      addArrays t xs ys =
-        case t of
-          Prim pt -> return $ BasicOp $ BinOp (addBinOp pt) (Var xs) (Var ys)
-          Array {} -> do
-            lam <- addLambda $ stripArray 1 t
-            return $ Op $ Screma (arraySize 0 t) (mapSOAC lam) [xs, ys]
-          _ ->
-            error $ "addArrays: " ++ pretty t
 
 instance Adjoint SubExp where
   lookupAdj (Constant c) =
@@ -1357,27 +1397,31 @@ diffSOAC pat@(Pattern [] [pys]) aux scat@(Scatter n f0 ass [(se,num_vals,xs)]) m
 -- scatter dispatcher
 diffSOAC (Pattern [] pes) aux (Scatter n f0 ass written_info) m
   | isIdentityLambda f0 = do
-    let sind = foldl(\ split (se,num_res,_) -> -- CHANGE shp
-                        let shp = Shape [se]
-                        in  split + num_res * length (shapeDims shp) 
-                    ) 0 written_info
+    let sind = splitInd written_info
         (inds, vals) = splitAt sind ass
-    (inds_lst, vals_lst, lst_stms) <-
-        foldM (\ (acc_inds, acc_vals, acc_stms) (pe, info@(se,num_vals,_)) -> do -- CHANGE shp
-                let shp = Shape [se]
-                    num_inds = num_vals * length (shapeDims shp)
-                    (curr_inds, other_inds) = splitAt num_inds acc_inds
-                    (curr_vals, other_vals) = splitAt num_vals acc_vals
-                vtps <- mapM lookupType curr_vals
-                f <- mkIdentityLambda (replicate num_inds (Prim p_int64) ++ vtps)
-                let stm = Let (Pattern [] [pe]) aux $ Op $
-                            Scatter n f (curr_inds++curr_vals) [info]
-                return (other_inds, other_vals, stm : acc_stms)
-              ) (inds,vals,[]) (zip pes written_info)
-    case (inds_lst, vals_lst) of
-        ([],[]) -> diffScatters (stmsFromList $ reverse lst_stms)
-        _ -> error "In Rev.hs, diffSOAC, scatter dispatcher: unreachable case reached!"
+    lst_stms <- chunkScatterInps (inds,vals) (zip pes written_info)
+    diffScatters (stmsFromList lst_stms)
     where
+      splitInd [] = 0
+      splitInd ((se,num_res,_):rest) = -- CHANGE shp
+        let shp = Shape [se]
+        in  num_res * length (shapeDims shp) + splitInd rest 
+      chunkScatterInps  (acc_inds, acc_vals) [] =
+        case (acc_inds, acc_vals) of
+          ([],[]) -> return []
+          _ -> error "In Rev.hs, chunkScatterInps, unreachable case reached!"
+      chunkScatterInps  (acc_inds, acc_vals)
+                        ( (pe, info@(se,num_vals,_)) : rest) = do -- CHANGE shp
+        let shp = Shape [se]
+            num_inds = num_vals * length (shapeDims shp)
+            (curr_inds, other_inds) = splitAt num_inds acc_inds
+            (curr_vals, other_vals) = splitAt num_vals acc_vals
+        vtps <- mapM lookupType curr_vals
+        f <- mkIdentityLambda (replicate num_inds (Prim p_int64) ++ vtps)
+        let stm = Let (Pattern [] [pe]) aux $ Op $
+                      Scatter n f (curr_inds++curr_vals) [info]
+        stms_rest <- chunkScatterInps (other_inds,other_vals) rest
+        return $ stm : stms_rest
       diffScatters all_stms
         | Just (stm, stms) <- stmsHead all_stms =
             diffStm stm $ diffStms stms
