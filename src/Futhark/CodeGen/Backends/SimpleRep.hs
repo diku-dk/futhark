@@ -1097,7 +1097,7 @@ storeValueHeader :: Signedness -> PrimType -> Int -> C.Exp -> C.Exp -> [C.Stm]
 storeValueHeader sign pt rank shape dest =
   [C.cstms|
           *$exp:dest++ = 'b';
-          *$exp:dest++ = 1;
+          *$exp:dest++ = 2;
           *$exp:dest++ = $int:rank;
           memcpy($exp:dest, $string:(typeStr sign pt), 4);
           $exp:dest += 4;
