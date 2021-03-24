@@ -49,11 +49,11 @@ redomapToMapAndReduce
   (w, comm, redlam, map_lam, accs, arrs) = do
     (map_pat, red_pat, red_args) <-
       splitScanOrRedomap patelems w map_lam accs
-    let map_bnd = mkLet [] map_pat $ Op $ Screma w (mapSOAC map_lam) arrs
+    let map_bnd = mkLet [] map_pat $ Op $ Screma w arrs (mapSOAC map_lam)
         (nes, red_arrs) = unzip red_args
     red_bnd <-
       Let red_pat (defAux ()) . Op
-        <$> (Screma w <$> reduceSOAC [Reduce comm redlam nes] <*> pure red_arrs)
+        <$> (Screma w red_arrs <$> reduceSOAC [Reduce comm redlam nes])
     return (map_bnd, red_bnd)
 redomapToMapAndReduce _ _ =
   error "redomapToMapAndReduce does not handle a non-empty 'patternContextElements'"
@@ -102,10 +102,10 @@ dissectScrema pat w (ScremaForm scans reds map_lam) arrs = do
 
   let scanomap = scanomapSOAC scans map_lam
   letBindNames (scan_res <> to_red <> map_res) $
-    Op $ Screma w scanomap arrs
+    Op $ Screma w arrs scanomap
 
   reduce <- reduceSOAC reds
-  letBindNames red_res $ Op $ Screma w reduce to_red
+  letBindNames red_res $ Op $ Screma w to_red reduce
 
 -- | Turn a stream SOAC into statements that apply the stream lambda
 -- to the entire input.

@@ -448,7 +448,7 @@ tileable ::
       (Commutativity, Lambda Kernels, [SubExp], Lambda Kernels)
     )
 tileable stm
-  | Op (OtherOp (Screma w form arrs)) <- stmExp stm,
+  | Op (OtherOp (Screma w arrs form)) <- stmExp stm,
     Just (reds, map_lam) <- isRedomapSOAC form,
     Reduce red_comm red_lam red_nes <- singleReduce reds,
     lambdaReturnType map_lam == lambdaReturnType red_lam, -- No mapout arrays.
@@ -843,7 +843,7 @@ processTile1D gid gtid kdim tile_size num_groups group_size tile_args = do
       letTupExp "acc"
         =<< eIf
           (toExp $ le64 gtid .<. pe64 kdim)
-          (eBody [pure $ Op $ OtherOp $ Screma tile_size form' tiles'])
+          (eBody [pure $ Op $ OtherOp $ Screma tile_size tiles' form'])
           (resultBodyM thread_accs)
   where
     lvl = SegThread num_groups group_size SegNoVirt
@@ -1123,7 +1123,7 @@ processTile2D (gid_x, gid_y) (gtid_x, gtid_y) (kdim_x, kdim_y) tile_size num_gro
           =<< eIf
             ( toExp $ le64 gtid_x .<. pe64 kdim_x .&&. le64 gtid_y .<. pe64 kdim_y
             )
-            (eBody [pure $ Op $ OtherOp $ Screma actual_tile_size form' tiles'])
+            (eBody [pure $ Op $ OtherOp $ Screma actual_tile_size tiles' form'])
             (resultBodyM thread_accs)
 
 processResidualTile2D ::

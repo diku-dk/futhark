@@ -727,7 +727,7 @@ fusionGatherStms
                 lambdaBody = lam_body,
                 lambdaReturnType = map paramType $ acc_params ++ [offset_param]
               }
-          stream = Futhark.Stream w Sequential lam (merge_init ++ [intConst it 0]) loop_arrs
+          stream = Futhark.Stream w loop_arrs Sequential (merge_init ++ [intConst it 0]) lam
 
       -- It is important that the (discarded) final-offset is not the
       -- first element in the pattern, as we use the first element to
@@ -997,7 +997,7 @@ copyNewlyConsumed ::
   Binder SOACS (Futhark.SOAC SOACS)
 copyNewlyConsumed was_consumed soac =
   case soac of
-    Futhark.Screma w (Futhark.ScremaForm scans reds map_lam) arrs -> do
+    Futhark.Screma w arrs (Futhark.ScremaForm scans reds map_lam) -> do
       -- Copy any arrays that are consumed now, but were not in the
       -- constituents.
       arrs' <- mapM copyConsumedArr arrs
@@ -1028,7 +1028,7 @@ copyNewlyConsumed was_consumed soac =
               )
               reds
 
-      return $ Futhark.Screma w (Futhark.ScremaForm scans' reds' map_lam') arrs'
+      return $ Futhark.Screma w arrs' $ Futhark.ScremaForm scans' reds' map_lam'
     _ -> return $ removeOpAliases soac
   where
     consumed = consumedInOp soac

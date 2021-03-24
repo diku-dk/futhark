@@ -396,7 +396,7 @@ instance PP.Pretty Input where
         text "replicate" <> ppr cs <> PP.apply [ppr ne, e]
 
 instance PrettyLore lore => PP.Pretty (SOAC lore) where
-  ppr (Screma w form arrs) = Futhark.ppScrema w form arrs
+  ppr (Screma w form arrs) = Futhark.ppScrema w arrs form
   ppr (Hist len ops bucket_fun imgs) =
     Futhark.ppHist len ops bucket_fun imgs
   ppr soac = text $ show soac
@@ -483,12 +483,12 @@ toSOAC ::
   SOAC (Lore m) ->
   m (Futhark.SOAC (Lore m))
 toSOAC (Stream w form lam nes inps) =
-  Futhark.Stream w form lam nes <$> inputsToSubExps inps
+  Futhark.Stream w <$> inputsToSubExps inps <*> pure form <*> pure nes <*> pure lam
 toSOAC (Scatter len lam ivs dests) = do
   ivs' <- inputsToSubExps ivs
   return $ Futhark.Scatter len lam ivs' dests
 toSOAC (Screma w form arrs) =
-  Futhark.Screma w form <$> inputsToSubExps arrs
+  Futhark.Screma w <$> inputsToSubExps arrs <*> pure form
 toSOAC (Hist w ops lam inps) =
   Futhark.Hist w ops lam <$> inputsToSubExps inps
 
@@ -506,11 +506,11 @@ fromExp ::
   (Op lore ~ Futhark.SOAC lore, HasScope lore m) =>
   Exp lore ->
   m (Either NotSOAC (SOAC lore))
-fromExp (Op (Futhark.Stream w form lam nes as)) =
+fromExp (Op (Futhark.Stream w as form nes lam)) =
   Right . Stream w form lam nes <$> traverse varInput as
 fromExp (Op (Futhark.Scatter len lam ivs as)) =
   Right <$> (Scatter len lam <$> traverse varInput ivs <*> pure as)
-fromExp (Op (Futhark.Screma w form arrs)) =
+fromExp (Op (Futhark.Screma w arrs form)) =
   Right . Screma w form <$> traverse varInput arrs
 fromExp (Op (Futhark.Hist w ops lam arrs)) =
   Right . Hist w ops lam <$> traverse varInput arrs
@@ -544,7 +544,9 @@ soacToStream soac = do
         --
         -- array result and input IDs of the stream's lambda
         strm_resids <- mapM (newIdent "res") loutps
-        let insoac = Futhark.Screma chvar (Futhark.mapSOAC lam') $ map paramName strm_inpids
+        let insoac =
+              Futhark.Screma chvar (map paramName strm_inpids) $
+                Futhark.mapSOAC lam'
             insbnd = mkLet [] strm_resids $ Op insoac
             strmbdy = mkBody (oneStm insbnd) $ map (Futhark.Var . identName) strm_resids
             strmpar = chunk_param : strm_inpids
@@ -582,8 +584,8 @@ soacToStream soac = do
         let insbnd =
               mkLet [] (scan0_ids ++ map_resids) $
                 Op $
-                  Futhark.Screma chvar (Futhark.scanomapSOAC [Futhark.Scan scan_lam nes] lam') $
-                    map paramName strm_inpids
+                  Futhark.Screma chvar (map paramName strm_inpids) $
+                    Futhark.scanomapSOAC [Futhark.Scan scan_lam nes] lam'
             -- 2. let outerszm1id = chunksize - 1
             outszm1bnd =
               mkLet [] [outszm1id] $
@@ -626,8 +628,10 @@ soacToStream soac = do
         let mapbnd =
               mkLet [] strm_resids $
                 Op $
-                  Futhark.Screma chvar (Futhark.mapSOAC maplam) $
-                    map identName scan0_ids
+                  Futhark.Screma
+                    chvar
+                    (map identName scan0_ids)
+                    (Futhark.mapSOAC maplam)
         -- 5. let acc'        = acc + lasteel_ids
         addlelbdy <-
           mkPlusBnds scan_lam $
@@ -664,8 +668,8 @@ soacToStream soac = do
         let insoac =
               Futhark.Screma
                 chvar
-                (Futhark.redomapSOAC [Futhark.Reduce comm lamin nes] foldlam)
-                $ map paramName strm_inpids
+                (map paramName strm_inpids)
+                $ Futhark.redomapSOAC [Futhark.Reduce comm lamin nes] foldlam
             insbnd = mkLet [] (acc0_ids ++ strm_resids) $ Op insoac
         -- 2. let acc'     = acc + acc0_ids    in
         addaccbdy <-

@@ -52,7 +52,7 @@ iswim res_pat w scan_fun scan_input
           mkBody
             ( oneStm $
                 Let (setPatternOuterDimTo w map_pat) (defAux ()) $
-                  Op $ Screma w scan_soac scan_arrs
+                  Op $ Screma w scan_arrs scan_soac
             )
             $ map Var $ patternNames map_pat
         map_fun' = Lambda map_params map_body map_rettype
@@ -64,11 +64,7 @@ iswim res_pat w scan_fun scan_input
 
     addStm $
       Let res_pat' (StmAux map_cs mempty ()) $
-        Op $
-          Screma
-            map_w
-            (mapSOAC map_fun')
-            map_arrs'
+        Op $ Screma map_w map_arrs' (mapSOAC map_fun')
 
     forM_
       ( zip
@@ -128,7 +124,7 @@ irwim res_pat w comm red_fun red_input
             mkBody
               ( oneStm $
                   Let red_pat (defAux ()) $
-                    Op $ Screma w reduce_soac $ map snd red_input'
+                    Op $ Screma w (map snd red_input') reduce_soac
               )
               $ map Var $ patternNames map_pat
         Just m -> localScope (scopeOfLParams map_params) $ do
@@ -139,7 +135,7 @@ irwim res_pat w comm red_fun red_input
 
     addStm $
       Let res_pat (StmAux map_cs mempty ()) $
-        Op $ Screma map_w (mapSOAC map_fun') arrs'
+        Op $ Screma map_w arrs' $ mapSOAC map_fun'
   | otherwise = Nothing
 
 -- | Does this reduce operator contain an inner map, and if so, what
@@ -152,7 +148,7 @@ rwimPossible fun
     [bnd] <- stmsToList stms, -- Body has a single binding
     map_pat <- stmPattern bnd,
     map Var (patternNames map_pat) == res, -- Returned verbatim
-    Op (Screma map_w form map_arrs) <- stmExp bnd,
+    Op (Screma map_w map_arrs form) <- stmExp bnd,
     Just map_fun <- isMapSOAC form,
     map paramName (lambdaParams fun) == map_arrs =
     Just (map_pat, stmCerts bnd, map_w, map_fun)

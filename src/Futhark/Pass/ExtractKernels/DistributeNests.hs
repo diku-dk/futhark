@@ -69,7 +69,7 @@ data MapLoop = MapLoop SOACS.Pattern (StmAux ()) SubExp SOACS.Lambda [VName]
 
 mapLoopStm :: MapLoop -> Stm SOACS
 mapLoopStm (MapLoop pat aux w lam arrs) =
-  Let pat aux $ Op $ Screma w (mapSOAC lam) arrs
+  Let pat aux $ Op $ Screma w arrs $ mapSOAC lam
 
 data DistEnv lore m = DistEnv
   { distNest :: Nestings,
@@ -251,10 +251,8 @@ leavingNesting acc =
                   lambdaReturnType = map rowType $ patternTypes pat
                 }
         stms <-
-          runBinder_ $
-            auxing aux $
-              FOT.transformSOAC pat $
-                Screma w (mapSOAC lam') used_arrs
+          runBinder_ . auxing aux . FOT.transformSOAC pat $
+            Screma w used_arrs $ mapSOAC lam'
 
         return $ acc {distTargets = newtargets, distStms = stms}
       | otherwise -> do
@@ -339,7 +337,7 @@ distributeMapBodyStms ::
 distributeMapBodyStms orig_acc = distribute <=< onStms orig_acc . stmsToList
   where
     onStms acc [] = return acc
-    onStms acc (Let pat (StmAux cs _ _) (Op (Stream w Sequential lam accs arrs)) : stms) = do
+    onStms acc (Let pat (StmAux cs _ _) (Op (Stream w arrs Sequential accs lam)) : stms) = do
       types <- asksScope scopeForSOACs
       stream_stms <-
         snd <$> runBinderT (sequentialStreamWholeArray pat w accs lam arrs) types
@@ -374,7 +372,7 @@ maybeDistributeStm (Let pat aux (Op soac)) acc
   | "sequential_outer" `inAttrs` stmAuxAttrs aux =
     distributeMapBodyStms acc . fmap (certify (stmAuxCerts aux))
       =<< runBinder_ (FOT.transformSOAC pat soac)
-maybeDistributeStm stm@(Let pat _ (Op (Screma w form arrs))) acc
+maybeDistributeStm stm@(Let pat _ (Op (Screma w arrs form))) acc
   | Just lam <- isMapSOAC form =
     -- Only distribute inside the map if we can distribute everything
     -- following the map.
@@ -438,7 +436,7 @@ maybeDistributeStm stm@(Let pat _ (If cond tbranch fbranch ret)) acc
             return acc'
       _ ->
         addStmToAcc stm acc
-maybeDistributeStm (Let pat aux (Op (Screma w form arrs))) acc
+maybeDistributeStm (Let pat aux (Op (Screma w arrs form))) acc
   | Just [Reduce comm lam nes] <- isReduceSOAC form,
     Just m <- irwim pat w comm lam $ zip nes arrs = do
     types <- asksScope scopeForSOACs
@@ -496,7 +494,7 @@ maybeDistributeStm
 --
 -- If the scan cannot be distributed by itself, it will be
 -- sequentialised in the default case for this function.
-maybeDistributeStm bnd@(Let pat (StmAux cs _ _) (Op (Screma w form arrs))) acc
+maybeDistributeStm bnd@(Let pat (StmAux cs _ _) (Op (Screma w arrs form))) acc
   | Just (scans, map_lam) <- isScanomapSOAC form,
     Scan lam nes <- singleScan scans =
     distributeSingleStm acc bnd >>= \case
@@ -518,7 +516,7 @@ maybeDistributeStm bnd@(Let pat (StmAux cs _ _) (Op (Screma w form arrs))) acc
 --
 -- If the reduction cannot be distributed by itself, it will be
 -- sequentialised in the default case for this function.
-maybeDistributeStm bnd@(Let pat (StmAux cs _ _) (Op (Screma w form arrs))) acc
+maybeDistributeStm bnd@(Let pat (StmAux cs _ _) (Op (Screma w arrs form))) acc
   | Just (reds, map_lam) <- isRedomapSOAC form,
     Reduce comm lam nes <- singleReduce reds =
     distributeSingleStm acc bnd >>= \case
@@ -540,7 +538,7 @@ maybeDistributeStm bnd@(Let pat (StmAux cs _ _) (Op (Screma w form arrs))) acc
               >>= kernelOrNot cs bnd acc kernels acc'
       _ ->
         addStmToAcc bnd acc
-maybeDistributeStm (Let pat (StmAux cs _ _) (Op (Screma w form arrs))) acc = do
+maybeDistributeStm (Let pat (StmAux cs _ _) (Op (Screma w arrs form))) acc = do
   -- This Screma is too complicated for us to immediately do
   -- anything, so split it up and try again.
   scope <- asksScope scopeForSOACs
@@ -550,7 +548,7 @@ maybeDistributeStm (Let pat aux (BasicOp (Replicate (Shape (d : ds)) v))) acc
   | [t] <- patternTypes pat = do
     tmp <- newVName "tmp"
     let rowt = rowType t
-        newbnd = Let pat aux $ Op $ Screma d (mapSOAC lam) []
+        newbnd = Let pat aux $ Op $ Screma d [] $ mapSOAC lam
         tmpbnd =
           Let (Pattern [] [PatElem tmp rowt]) aux $
             BasicOp $ Replicate (Shape ds) v
@@ -1011,7 +1009,7 @@ determineReduceOp lam nes =
 
 isVectorMap :: Lambda SOACS -> (Shape, Lambda SOACS)
 isVectorMap lam
-  | [Let (Pattern [] pes) _ (Op (Screma w form arrs))] <-
+  | [Let (Pattern [] pes) _ (Op (Screma w arrs form))] <-
       stmsToList $ bodyStms $ lambdaBody lam,
     bodyResult (lambdaBody lam) == map (Var . patElemName) pes,
     Just map_lam <- isMapSOAC form,
