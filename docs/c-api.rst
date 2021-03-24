@@ -233,9 +233,15 @@ see :c:func:`futhark_restore_opaque_foo`).
 
    Serialise an opaque value to a byte sequence, which can later be
    restored with :c:func:`futhark_restore_opaque_foo`.  The byte
-   representation is not otherwise specified.  The variable pointed to
-   by ``n`` will always be set to the number of bytes needed to
-   represent the value.  The ``p`` parameter is more complex:
+   representation is not otherwise specified, and is not stable
+   between compiler versions or programs.  It is stable under change
+   of compiler backend, but not change of compiler version, or
+   modification to the source program (although in most cases the
+   format will not change).
+
+   The variable pointed to by ``n`` will always be set to the number
+   of bytes needed to represent the value.  The ``p`` parameter is
+   more complex:
 
    * If ``p`` is ``NULL``, the function will write to ``*n``, but not
      actually serialise the opaque value.
