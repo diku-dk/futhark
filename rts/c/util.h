@@ -49,27 +49,34 @@ static inline void check_err(int errval, int sets_errno, const char *fun, int li
 #define CHECK_ERR(err, msg...) check_err(err, 0, __func__, __LINE__, msg)
 #define CHECK_ERRNO(err, msg...) check_err(err, 1, __func__, __LINE__, msg)
 
-// Read a file into a NUL-terminated string; returns NULL on error.
-static void* slurp_file(const char *filename, size_t *size) {
-  unsigned char *s;
-  FILE *f = fopen(filename, "rb"); // To avoid Windows messing with linebreaks.
-  if (f == NULL) return NULL;
+// Read the rest of an open file into a NUL-terminated string; returns
+// NULL on error.
+static void* fslurp_file(FILE *f, size_t *size) {
+  size_t start = ftell(f);
   fseek(f, 0, SEEK_END);
-  size_t src_size = ftell(f);
-  fseek(f, 0, SEEK_SET);
-  s = (unsigned char*) malloc(src_size + 1);
+  size_t src_size = ftell(f)-start;
+  fseek(f, start, SEEK_SET);
+  unsigned char *s = (unsigned char*) malloc(src_size + 1);
   if (fread(s, 1, src_size, f) != src_size) {
     free(s);
     s = NULL;
   } else {
     s[src_size] = '\0';
   }
-  fclose(f);
 
   if (size) {
     *size = src_size;
   }
 
+  return s;
+}
+
+// Read a file into a NUL-terminated string; returns NULL on error.
+static void* slurp_file(const char *filename, size_t *size) {
+  FILE *f = fopen(filename, "rb"); // To avoid Windows messing with linebreaks.
+  if (f == NULL) return NULL;
+  unsigned char *s = fslurp_file(f, size);
+  fclose(f);
   return s;
 }
 
