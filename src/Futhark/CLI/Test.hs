@@ -295,8 +295,11 @@ runCompiledEntry futhark server program (InputOutputs entry run_cases) = do
       context1 case_ctx $ do
         expected <- getExpectedResult futhark program entry run
 
-        (liftCommand . withValuesFile futhark dir inputValues) $ \values_f ->
-          cmdRestore server values_f (zip ins input_types)
+        either E.throwError pure
+          <=< withValuesFile futhark dir inputValues
+          $ \values_f -> runExceptT $ do
+            checkValueTypes values_f input_types
+            liftCommand $ cmdRestore server values_f (zip ins input_types)
 
         call_r <- liftIO $ cmdCall server entry outs ins
         liftCommand $ cmdFree server ins

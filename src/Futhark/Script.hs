@@ -296,14 +296,9 @@ evalExp builtin (ScriptServer server counter) top_level_e = do
       interValToVar (V.ValueAtom v) = scriptValueToVar v
       interValToVar _ = throwError "Unexpected tuple or record value."
 
-      -- We don't want the actual sizes in the type, so we cannot
-      -- use the normal prettyprinter.
-      typeText (V.ValueType dims t) =
-        mconcat (replicate (length dims) "[]") <> prettyText t
-
       valToInterVal :: V.CompoundValue -> ExpValue
       valToInterVal = fmap $ \v ->
-        SValue (typeText (V.valueType v)) $ VVal v
+        SValue (V.prettyValueTypeNoDims (V.valueType v)) $ VVal v
 
       simpleType (V.ValueAtom (STValue _)) = True
       simpleType _ = False
@@ -350,7 +345,7 @@ evalExp builtin (ScriptServer server counter) top_level_e = do
             pure $ V.ValueAtom $ SValue (prettyText (V.valueType s')) $ VVal s'
           Nothing -> error $ "Unable to write value " ++ pretty s
       evalExp' (Const val) =
-        pure $ V.ValueAtom $ SValue (typeText (V.valueType val)) $ VVal val
+        pure $ V.ValueAtom $ SValue (V.prettyValueTypeNoDims (V.valueType val)) $ VVal val
       evalExp' (Tuple es) =
         V.ValueTuple <$> mapM evalExp' es
       evalExp' e@(Record m) = do
