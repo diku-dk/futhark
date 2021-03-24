@@ -166,8 +166,12 @@ benchmarkDataset server opts futhark program entry input_spec expected_spec ref_
 
   cmdMaybe . liftIO $ cmdClear server
 
-  cmdMaybe . liftIO . withValuesFile futhark dir input_spec $ \values_f ->
-    cmdRestore server values_f (zip ins input_types)
+  either throwError pure
+    <=< withValuesFile futhark dir input_spec
+    $ \values_f ->
+      runExceptT $ do
+        checkValueTypes values_f input_types
+        cmdMaybe $ cmdRestore server values_f (zip ins input_types)
 
   let runtime l
         | Just l' <- T.stripPrefix "runtime: " l,

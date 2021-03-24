@@ -15,6 +15,7 @@ module Futhark.Test
     getValues,
     getValuesBS,
     withValuesFile,
+    checkValueTypes,
     compareValues,
     checkResult,
     testRunReferenceOutput,
@@ -528,6 +529,23 @@ withValuesFile futhark dir vs f =
     BS.hPutStr tmpf_h =<< getValuesBS futhark dir vs
     hClose tmpf_h
     f tmpf
+
+-- | Check that the file contains values of the expected types.
+checkValueTypes ::
+  (MonadError T.Text m, MonadIO m) => FilePath -> [TypeName] -> m ()
+checkValueTypes values_f input_types = do
+  maybe_vs <- liftIO $ readValues <$> BS.readFile values_f
+  case maybe_vs of
+    Nothing ->
+      throwError "Invalid input data format."
+    Just vs -> do
+      let vs_types = map (prettyValueTypeNoDims . valueType) vs
+      unless (vs_types == input_types) $
+        throwError $
+          T.unlines
+            [ "Expected input types: " <> T.unwords input_types,
+              "Provided input types: " <> T.unwords vs_types
+            ]
 
 -- | There is a risk of race conditions when multiple programs have
 -- identical 'GenValues'.  In such cases, multiple threads in 'futhark
