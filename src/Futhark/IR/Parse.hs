@@ -514,8 +514,8 @@ pSOAC pr =
       parens $
         SOAC.Screma
           <$> pSubExp <* pComma
-          <*> p <* pComma
-          <*> (pVName `sepBy` pComma)
+          <*> braces (pVName `sepBy` pComma) <* pComma
+          <*> p
     pScremaForm =
       SOAC.ScremaForm
         <$> braces (pScan pr `sepBy` pComma) <* pComma
@@ -572,20 +572,20 @@ pSOAC pr =
       parens $
         SOAC.Stream
           <$> pSubExp <* pComma
+          <*> braces (pVName `sepBy` pComma) <* pComma
           <*> pParForm order comm <* pComma
-          <*> pLambda pr <* pComma
-          <*> braces (pSubExp `sepBy` pComma)
-          <*> many (pComma *> pVName)
+          <*> braces (pSubExp `sepBy` pComma) <* pComma
+          <*> pLambda pr
     pParForm order comm =
       SOAC.Parallel order comm <$> pLambda pr
     pStreamSeq =
       parens $
         SOAC.Stream
           <$> pSubExp <* pComma
+          <*> braces (pVName `sepBy` pComma) <* pComma
           <*> pure SOAC.Sequential
-          <*> pLambda pr <* pComma
-          <*> braces (pSubExp `sepBy` pComma)
-          <*> many (pComma *> pVName)
+          <*> braces (pSubExp `sepBy` pComma) <* pComma
+          <*> pLambda pr
 
 pSizeClass :: Parser Kernel.SizeClass
 pSizeClass =
