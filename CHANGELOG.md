@@ -33,6 +33,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * `futhark hash` no longer considers the built-in prelude.
 
+  * Server executables had broken store/restore commands for opaque types.
+
 ## [0.19.2]
 
 ### Added

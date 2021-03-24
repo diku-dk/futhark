@@ -616,11 +616,51 @@ int free_array(const struct array_aux *aux,
   return aux->free(ctx, arr);
 }
 
+typedef void* (*opaque_restore_fn)(struct futhark_context*, void*);
+typedef int (*opaque_store_fn)(struct futhark_context*, const void*, void **, size_t *);
 typedef int (*opaque_free_fn)(struct futhark_context*, void*);
 
 struct opaque_aux {
+  opaque_restore_fn restore;
+  opaque_store_fn store;
   opaque_free_fn free;
 };
+
+int restore_opaque(const struct opaque_aux *aux, FILE *f,
+                   struct futhark_context *ctx, void *p) {
+  // We have a problem: we need to load data from 'f', since the
+  // restore function takes a pointer, but we don't know how much we
+  // need (and cannot possibly).  So we do something hacky: we read
+  // *all* of the file, pass all of the data to the restore function
+  // (which doesn't care if there's extra at the end), then we compute
+  // how much space the the object actually takes in serialised form
+  // and rewind the file to that position.  The only downside is more IO.
+  size_t start = ftell(f);
+  size_t size;
+  char *bytes = fslurp_file(f, &size);
+  void *obj = aux->restore(ctx, bytes);
+  free(bytes);
+  if (obj != NULL) {
+    *(void**)p = obj;
+    size_t obj_size;
+    (void)aux->store(ctx, obj, NULL, &obj_size);
+    fseek(f, start+obj_size, SEEK_SET);
+    return 0;
+  } else {
+    fseek(f, start, SEEK_SET);
+    return 1;
+  }
+}
+
+void store_opaque(const struct opaque_aux *aux, FILE *f,
+                  struct futhark_context *ctx, void *p) {
+  void *obj = *(void**)p;
+  size_t obj_size;
+  void *data = NULL;
+  (void)aux->store(ctx, obj, &data, &obj_size);
+  fwrite(data, sizeof(char), obj_size, f);
+  free(data);
+}
 
 int free_opaque(const struct opaque_aux *aux,
                  struct futhark_context *ctx, void *p) {

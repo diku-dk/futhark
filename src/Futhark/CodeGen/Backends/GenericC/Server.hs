@@ -165,12 +165,14 @@ valueDescBoilerplate ev@(OpaqueValue name vds) =
         ( [C.cinit|&$id:type_name|],
           [C.cunit|
               struct opaque_aux $id:aux_name = {
+                .store = (typename opaque_store_fn)$id:opaque_store,
+                .restore = (typename opaque_restore_fn)$id:opaque_restore,
                 .free = (typename opaque_free_fn)$id:opaque_free
               };
               struct type $id:type_name = {
                 .name = $string:name,
-                .restore = (typename restore_fn)$id:opaque_store,
-                .store = (typename store_fn)$id:opaque_restore,
+                .restore = (typename restore_fn)restore_opaque,
+                .store = (typename store_fn)store_opaque,
                 .free = (typename free_fn)free_opaque,
                 .aux = &$id:aux_name
               };|]
