@@ -17,7 +17,6 @@ import Data.List (delete, partition)
 import qualified Data.Map.Strict as M
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
-import qualified Data.Text.IO as T
 import Futhark.Analysis.Metrics.Type
 import Futhark.Server
 import Futhark.Test
@@ -553,7 +552,7 @@ runTests config paths = do
                 Failure s -> do
                   when fancy moveCursorToTableTop
                   clear
-                  T.putStr $ (T.pack (inRed $ testCaseProgram test) <> ":\n") <> T.unlines s
+                  putStr $ inBold (testCaseProgram test <> ":\n") <> T.unpack (T.unlines s)
                   when fancy spaceTable
                   getResults $
                     ts'
