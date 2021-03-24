@@ -77,7 +77,7 @@ import Prelude hiding (id, (.))
 
 -- | A second-order array combinator (SOAC).
 data SOAC lore
-  = Stream SubExp (StreamForm lore) (Lambda lore) [SubExp] [VName]
+  = Stream SubExp [VName] (StreamForm lore) [SubExp] (Lambda lore)
   | -- | @Scatter <length> <lambda> <inputs> <outputs>@
     --
     -- Scatter maps values from a set of input arrays to indices and values of a
@@ -124,7 +124,7 @@ data SOAC lore
     Hist SubExp [HistOp lore] (Lambda lore) [VName]
   | -- | A combination of scan, reduction, and map.  The first
     -- t'SubExp' is the size of the input arrays.
-    Screma SubExp (ScremaForm lore) [VName]
+    Screma SubExp [VName] (ScremaForm lore)
   deriving (Eq, Ord, Show)
 
 -- | Information about computing a single histogram.
@@ -392,12 +392,12 @@ mapSOACM ::
   SOACMapper flore tlore m ->
   SOAC flore ->
   m (SOAC tlore)
-mapSOACM tv (Stream size form lam accs arrs) =
+mapSOACM tv (Stream size arrs form accs lam) =
   Stream <$> mapOnSOACSubExp tv size
-    <*> mapOnStreamForm form
-    <*> mapOnSOACLambda tv lam
-    <*> mapM (mapOnSOACSubExp tv) accs
     <*> mapM (mapOnSOACVName tv) arrs
+    <*> mapOnStreamForm form
+    <*> mapM (mapOnSOACSubExp tv) accs
+    <*> mapOnSOACLambda tv lam
   where
     mapOnStreamForm (Parallel o comm lam0) =
       Parallel o comm <$> mapOnSOACLambda tv lam0
@@ -429,8 +429,9 @@ mapSOACM tv (Hist len ops bucket_fun imgs) =
       ops
     <*> mapOnSOACLambda tv bucket_fun
     <*> mapM (mapOnSOACVName tv) imgs
-mapSOACM tv (Screma w (ScremaForm scans reds map_lam) arrs) =
+mapSOACM tv (Screma w arrs (ScremaForm scans reds map_lam)) =
   Screma <$> mapOnSOACSubExp tv w
+    <*> mapM (mapOnSOACVName tv) arrs
     <*> ( ScremaForm
             <$> forM
               scans
@@ -446,7 +447,6 @@ mapSOACM tv (Screma w (ScremaForm scans reds map_lam) arrs) =
               )
             <*> mapOnSOACLambda tv map_lam
         )
-    <*> mapM (mapOnSOACVName tv) arrs
 
 instance ASTLore lore => FreeIn (SOAC lore) where
   freeIn' = flip execState mempty . mapSOACM free
@@ -477,7 +477,7 @@ instance ASTLore lore => Rename (SOAC lore) where
 
 -- | The type of a SOAC.
 soacType :: SOAC lore -> [Type]
-soacType (Stream outersize _ lam accs _) =
+soacType (Stream outersize _ _ accs lam) =
   map (substNamesInType substs) rtp
   where
     nms = map paramName $ take (1 + length accs) params
@@ -492,7 +492,7 @@ soacType (Scatter _w lam _ivs as) =
 soacType (Hist _len ops _bucket_fun _imgs) = do
   op <- ops
   map (`arrayOfRow` histWidth op) (lambdaReturnType $ histOp op)
-soacType (Screma w form _arrs) =
+soacType (Screma w _arrs form) =
   scremaType w form
 
 instance TypedOp (SOAC lore) where
@@ -503,12 +503,12 @@ instance (ASTLore lore, Aliased lore) => AliasedOp (SOAC lore) where
 
   -- Only map functions can consume anything.  The operands to scan
   -- and reduce functions are always considered "fresh".
-  consumedInOp (Screma _ (ScremaForm _ _ map_lam) arrs) =
+  consumedInOp (Screma _ arrs (ScremaForm _ _ map_lam)) =
     mapNames consumedArray $ consumedByLambda map_lam
     where
       consumedArray v = fromMaybe v $ lookup v params_to_arrs
       params_to_arrs = zip (map paramName $ lambdaParams map_lam) arrs
-  consumedInOp (Stream _ form lam accs arrs) =
+  consumedInOp (Stream _ arrs form accs lam) =
     namesFromList $
       subExpVars $
         case form of
@@ -542,13 +542,9 @@ instance
   where
   type OpWithAliases (SOAC lore) = SOAC (Aliases lore)
 
-  addOpAliases aliases (Stream size form lam accs arr) =
-    Stream
-      size
-      (analyseStreamForm form)
-      (Alias.analyseLambda aliases lam)
-      accs
-      arr
+  addOpAliases aliases (Stream size arr form accs lam) =
+    Stream size arr (analyseStreamForm form) accs $
+      Alias.analyseLambda aliases lam
     where
       analyseStreamForm (Parallel o comm lam0) =
         Parallel o comm (Alias.analyseLambda aliases lam0)
@@ -561,15 +557,12 @@ instance
       (map (mapHistOp (Alias.analyseLambda aliases)) ops)
       (Alias.analyseLambda aliases bucket_fun)
       imgs
-  addOpAliases aliases (Screma w (ScremaForm scans reds map_lam) arrs) =
-    Screma
-      w
-      ( ScremaForm
-          (map onScan scans)
-          (map onRed reds)
-          (Alias.analyseLambda aliases map_lam)
-      )
-      arrs
+  addOpAliases aliases (Screma w arrs (ScremaForm scans reds map_lam)) =
+    Screma w arrs $
+      ScremaForm
+        (map onScan scans)
+        (map onRed reds)
+        (Alias.analyseLambda aliases map_lam)
     where
       onRed red = red {redLambda = Alias.analyseLambda aliases $ redLambda red}
       onScan scan = scan {scanLambda = Alias.analyseLambda aliases $ scanLambda scan}
@@ -610,7 +603,7 @@ instance Decorations lore => ST.IndexOp (SOAC lore) where
       Var v -> uncurry (flip ST.Indexed) <$> M.lookup v arr_indexes'
       _ -> Nothing
     where
-      lambdaAndSubExp (Screma _ (ScremaForm scans reds map_lam) arrs) =
+      lambdaAndSubExp (Screma _ arrs (ScremaForm scans reds map_lam)) =
         nthMapOut (scanResults scans + redResults reds) map_lam arrs
       lambdaAndSubExp _ =
         Nothing
@@ -641,7 +634,7 @@ instance Decorations lore => ST.IndexOp (SOAC lore) where
 
 -- | Type-check a SOAC.
 typeCheckSOAC :: TC.Checkable lore => SOAC (Aliases lore) -> TC.TypeM lore ()
-typeCheckSOAC (Stream size form lam accexps arrexps) = do
+typeCheckSOAC (Stream size arrexps form accexps lam) = do
   TC.require [Prim int64] size
   accargs <- mapM TC.checkArg accexps
   arrargs <- mapM lookupType arrexps
@@ -766,7 +759,7 @@ typeCheckSOAC (Hist len ops bucket_fun imgs) = do
           ++ prettyTuple (lambdaReturnType bucket_fun)
           ++ " but should have type "
           ++ prettyTuple bucket_ret_t
-typeCheckSOAC (Screma w (ScremaForm scans reds map_lam) arrs) = do
+typeCheckSOAC (Screma w arrs (ScremaForm scans reds map_lam)) = do
   TC.require [Prim int64] w
   arrs' <- TC.checkSOACArrayArgs w arrs
   TC.checkLambda map_lam $ map TC.noArgAliases arrs'
@@ -811,20 +804,20 @@ typeCheckSOAC (Screma w (ScremaForm scans reds map_lam) arrs) = do
           ++ " wrong for given scan and reduction functions."
 
 instance OpMetrics (Op lore) => OpMetrics (SOAC lore) where
-  opMetrics (Stream _ _ lam _ _) =
+  opMetrics (Stream _ _ _ _ lam) =
     inside "Stream" $ lambdaMetrics lam
   opMetrics (Scatter _len lam _ivs _as) =
     inside "Scatter" $ lambdaMetrics lam
   opMetrics (Hist _len ops bucket_fun _imgs) =
     inside "Hist" $ mapM_ (lambdaMetrics . histOp) ops >> lambdaMetrics bucket_fun
-  opMetrics (Screma _ (ScremaForm scans reds map_lam) _) =
+  opMetrics (Screma _ _ (ScremaForm scans reds map_lam)) =
     inside "Screma" $ do
       mapM_ (lambdaMetrics . scanLambda) scans
       mapM_ (lambdaMetrics . redLambda) reds
       lambdaMetrics map_lam
 
 instance PrettyLore lore => PP.Pretty (SOAC lore) where
-  ppr (Stream size form lam acc arrs) =
+  ppr (Stream size arrs form acc lam) =
     case form of
       Parallel o comm lam0 ->
         let ord_str = if o == Disorder then "Per" else ""
@@ -833,15 +826,19 @@ instance PrettyLore lore => PP.Pretty (SOAC lore) where
               Noncommutative -> ""
          in text ("streamPar" ++ ord_str ++ comm_str)
               <> parens
-                ( ppr size <> comma </> ppr lam0 <> comma
-                    </> ppr lam <> comma
-                    </> commasep (PP.braces (commasep $ map ppr acc) : map ppr arrs)
+                ( ppr size <> comma
+                    </> ppTuple' arrs <> comma
+                    </> ppr lam0 <> comma
+                    </> ppTuple' acc <> comma
+                    </> ppr lam
                 )
       Sequential ->
         text "streamSeq"
           <> parens
-            ( ppr size <> comma </> ppr lam <> comma
-                </> commasep (PP.braces (commasep $ map ppr acc) : map ppr arrs)
+            ( ppr size <> comma
+                </> ppTuple' arrs <> comma
+                </> ppTuple' acc <> comma
+                </> ppr lam
             )
   ppr (Scatter w lam ivs as) =
     "scatter"
@@ -852,48 +849,44 @@ instance PrettyLore lore => PP.Pretty (SOAC lore) where
         )
   ppr (Hist len ops bucket_fun imgs) =
     ppHist len ops bucket_fun imgs
-  ppr (Screma w (ScremaForm scans reds map_lam) arrs)
+  ppr (Screma w arrs (ScremaForm scans reds map_lam))
     | null scans,
       null reds =
       text "map"
         <> parens
           ( ppr w <> comma
-              </> ppr map_lam <> comma
-              </> commasep (map ppr arrs)
+              </> ppTuple' arrs <> comma
+              </> ppr map_lam
           )
     | null scans =
       text "redomap"
         <> parens
           ( ppr w <> comma
+              </> ppTuple' arrs <> comma
               </> PP.braces (mconcat $ intersperse (comma <> PP.line) $ map ppr reds) <> comma
-              </> ppr map_lam <> comma
-              </> commasep (map ppr arrs)
+              </> ppr map_lam
           )
     | null reds =
       text "scanomap"
         <> parens
           ( ppr w <> comma
+              </> ppTuple' arrs <> comma
               </> PP.braces (mconcat $ intersperse (comma <> PP.line) $ map ppr scans) <> comma
-              </> ppr map_lam <> comma
-              </> commasep (map ppr arrs)
+              </> ppr map_lam
           )
-  ppr (Screma w form arrs) = ppScrema w form arrs
+  ppr (Screma w arrs form) = ppScrema w arrs form
 
 -- | Prettyprint the given Screma.
 ppScrema ::
-  (PrettyLore lore, Pretty inp) =>
-  SubExp ->
-  ScremaForm lore ->
-  [inp] ->
-  Doc
-ppScrema w (ScremaForm scans reds map_lam) arrs =
+  (PrettyLore lore, Pretty inp) => SubExp -> [inp] -> ScremaForm lore -> Doc
+ppScrema w arrs (ScremaForm scans reds map_lam) =
   text "screma"
     <> parens
       ( ppr w <> comma
+          </> ppTuple' arrs <> comma
           </> PP.braces (mconcat $ intersperse (comma <> PP.line) $ map ppr scans) <> comma
           </> PP.braces (mconcat $ intersperse (comma <> PP.line) $ map ppr reds) <> comma
-          </> ppr map_lam <> comma
-          </> commasep (map ppr arrs)
+          </> ppr map_lam
       )
 
 instance PrettyLore lore => Pretty (Scan lore) where

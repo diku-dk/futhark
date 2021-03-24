@@ -110,7 +110,7 @@ isTileableRedomap ::
       (Commutativity, Lambda Kernels, [SubExp], Lambda Kernels)
     )
 isTileableRedomap stm
-  | Op (OtherOp (Screma w form arrs)) <- stmExp stm,
+  | Op (OtherOp (Screma w arrs form)) <- stmExp stm,
     Just (reds, map_lam) <- isRedomapSOAC form,
     Reduce red_comm red_lam red_nes <- singleReduce reds,
     all (primType . rowType . paramType) $ lambdaParams red_lam,

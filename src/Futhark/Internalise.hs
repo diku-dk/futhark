@@ -1174,7 +1174,7 @@ internaliseStreamMap desc o lam arr = do
   lam' <- internaliseStreamMapLambda internaliseLambda lam $ map I.Var arrs
   w <- arraysSize 0 <$> mapM lookupType arrs
   let form = I.Parallel o Commutative (I.Lambda [] (mkBody mempty []) [])
-  letTupExp' desc $ I.Op $ I.Stream w form lam' [] arrs
+  letTupExp' desc $ I.Op $ I.Stream w arrs form [] lam'
 
 internaliseStreamRed ::
   String ->
@@ -1245,7 +1245,7 @@ internaliseStreamRed desc o comm lam0 lam arr = do
             lambdaReturnType = nes_ts
           }
   w <- arraysSize 0 <$> mapM lookupType arrs
-  letTupExp' desc $ I.Op $ I.Stream w form lam' nes arrs
+  letTupExp' desc $ I.Op $ I.Stream w arrs form nes lam'
 
 internaliseExp1 :: String -> E.Exp -> InternaliseM I.SubExp
 internaliseExp1 desc e = do
@@ -1576,12 +1576,12 @@ isOverloadedFunction qname args loc = do
                 cmps <-
                   letExp "cmps" $
                     I.Op $
-                      I.Screma x_num_elems (I.mapSOAC cmp_lam) [x_flat, y_flat]
+                      I.Screma x_num_elems [x_flat, y_flat] (I.mapSOAC cmp_lam)
 
                 -- Check that all were equal.
                 and_lam <- binOpLambda I.LogAnd I.Bool
                 reduce <- I.reduceSOAC [Reduce Commutative and_lam [constant True]]
-                all_equal <- letSubExp "all_equal" $ I.Op $ I.Screma x_num_elems reduce [cmps]
+                all_equal <- letSubExp "all_equal" $ I.Op $ I.Screma x_num_elems [cmps] reduce
                 return $ resultBody [all_equal]
 
               letSubExp "arrays_equal" $
@@ -1604,7 +1604,7 @@ isOverloadedFunction qname args loc = do
       w <- arraysSize 0 <$> mapM lookupType arr'
       letTupExp' desc $
         I.Op $
-          I.Screma w (I.mapSOAC lam') arr'
+          I.Screma w arr' (I.mapSOAC lam')
     handleSOACs [TupLit [k, lam, arr] _] "partition" = do
       k' <- fromIntegral <$> fromInt32 k
       Just $ \_desc -> do
@@ -1619,19 +1619,19 @@ isOverloadedFunction qname args loc = do
       internaliseScanOrReduce desc "reduce" reduce (lam, ne, arr, loc)
       where
         reduce w red_lam nes arrs =
-          I.Screma w
-            <$> I.reduceSOAC [Reduce Noncommutative red_lam nes] <*> pure arrs
+          I.Screma w arrs
+            <$> I.reduceSOAC [Reduce Noncommutative red_lam nes]
     handleSOACs [TupLit [lam, ne, arr] _] "reduce_comm" = Just $ \desc ->
       internaliseScanOrReduce desc "reduce" reduce (lam, ne, arr, loc)
       where
         reduce w red_lam nes arrs =
-          I.Screma w
-            <$> I.reduceSOAC [Reduce Commutative red_lam nes] <*> pure arrs
+          I.Screma w arrs
+            <$> I.reduceSOAC [Reduce Commutative red_lam nes]
     handleSOACs [TupLit [lam, ne, arr] _] "scan" = Just $ \desc ->
       internaliseScanOrReduce desc "scan" reduce (lam, ne, arr, loc)
       where
         reduce w scan_lam nes arrs =
-          I.Screma w <$> I.scanSOAC [Scan scan_lam nes] <*> pure arrs
+          I.Screma w arrs <$> I.scanSOAC [Scan scan_lam nes]
     handleSOACs [TupLit [op, f, arr] _] "reduce_stream" = Just $ \desc ->
       internaliseStreamRed desc InOrder Noncommutative op f arr
     handleSOACs [TupLit [op, f, arr] _] "reduce_stream_per" = Just $ \desc ->
@@ -1909,7 +1909,7 @@ partitionWithSOACS :: Int -> I.Lambda -> [I.VName] -> InternaliseM ([I.SubExp], 
 partitionWithSOACS k lam arrs = do
   arr_ts <- mapM lookupType arrs
   let w = arraysSize 0 arr_ts
-  classes_and_increments <- letTupExp "increments" $ I.Op $ I.Screma w (mapSOAC lam) arrs
+  classes_and_increments <- letTupExp "increments" $ I.Op $ I.Screma w arrs (mapSOAC lam)
   (classes, increments) <- case classes_and_increments of
     classes : increments -> return (classes, take k increments)
     _ -> error "partitionWithSOACS"
@@ -1937,7 +1937,7 @@ partitionWithSOACS k lam arrs = do
       nes = replicate (length increments) $ intConst Int64 0
 
   scan <- I.scanSOAC [I.Scan add_lam nes]
-  all_offsets <- letTupExp "offsets" $ I.Op $ I.Screma w scan increments
+  all_offsets <- letTupExp "offsets" $ I.Op $ I.Screma w increments scan
 
   -- We have the offsets for each of the partitions, but we also need
   -- the total sizes, which are the last elements in the offests.  We
