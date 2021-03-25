@@ -18,6 +18,7 @@ module Futhark.IR.Prop.Names
     namesIntersect,
     namesSubtract,
     mapNames,
+    foldlNames,
 
     -- * Class
     FreeIn (..),
@@ -105,6 +106,10 @@ namesSubtract (Names vs1) (Names vs2) = Names $ IM.difference vs1 vs2
 -- | Map over the names in a set.
 mapNames :: (VName -> VName) -> Names -> Names
 mapNames f vs = namesFromList $ map f $ namesToList vs
+
+foldlNames :: (a -> VName -> a) -> a -> Names -> a
+foldlNames f z0 (Names xs) =
+  IM.foldl f z0 xs
 
 -- | A computation to build a free variable set.
 newtype FV = FV {unFV :: Names}

@@ -5,6 +5,7 @@
 module Futhark.Actions
   ( printAction,
     printAliasesAction,
+    memoryBlockMerging,
     impCodeGenAction,
     kernelImpCodeGenAction,
     multicoreImpCodeGenAction,
@@ -34,6 +35,7 @@ import Futhark.IR.KernelsMem (KernelsMem)
 import Futhark.IR.MCMem (MCMem)
 import Futhark.IR.Prop.Aliases
 import Futhark.IR.SeqMem (SeqMem)
+import qualified Futhark.Optimise.MemBlockCoalesce as Coalesce
 import Futhark.Util (runProgramWithExitCode, unixEnvironment)
 import System.Exit
 import System.FilePath
@@ -91,6 +93,14 @@ multicoreImpCodeGenAction =
     { actionName = "Compile to imperative multicore",
       actionDescription = "Translate program into imperative multicore IL and write it on standard output.",
       actionProcedure = liftIO . putStrLn . pretty . snd <=< ImpGenMulticore.compileProg
+    }
+
+memoryBlockMerging :: Action SeqMem
+memoryBlockMerging =
+  Action
+    { actionName = "Merge memory blocks",
+      actionDescription = "Perform memory block merging and print results",
+      actionProcedure = liftIO . Coalesce.memoryBlockMerging
     }
 
 cmdCC :: String

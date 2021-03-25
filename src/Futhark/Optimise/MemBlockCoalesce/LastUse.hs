@@ -5,13 +5,14 @@
 module Futhark.Optimise.MemBlockCoalesce.LastUse (lastUseFun, lastUsePrg) where
 
 import qualified Data.Map.Strict as M
-import qualified Data.Set as S
 --import Debug.Trace
 
 --import Futhark.Representation.AST.Syntax
 
+import Data.Sequence (Seq (..))
+import qualified Data.Sequence as Seq
 import Futhark.IR.Aliases
-import qualified Futhark.IR.Mem as ExpMem
+import qualified Futhark.IR.SeqMem as Mem
 import Futhark.Optimise.MemBlockCoalesce.DataStructs
 import Prelude
 
@@ -22,12 +23,12 @@ import Prelude
 --   Note that the results of a body do not have a last use, and neither
 --   do a function parameters if it happens to not be used inside function's body.
 --   Such cases are supposed to be treated separately.
-lastUsePrg :: Prog (Aliases ExpMem.ExplicitMemory) -> LUTabPrg
-lastUsePrg prg = M.fromList $ map lastUseFun $ progFunctions prg
+lastUsePrg :: Prog (Aliases Mem.SeqMem) -> LUTabPrg
+lastUsePrg prg = M.fromList $ map lastUseFun $ progFuns prg
 
-lastUseFun :: FunDef (Aliases ExpMem.ExplicitMemory) -> (Name, LUTabFun)
-lastUseFun (FunDef _ fname _ _ body) =
-  let (_, res, _) = lastUseAnBdy M.empty body (M.empty, S.empty)
+lastUseFun :: FunDef (Aliases Mem.SeqMem) -> (Name, LUTabFun)
+lastUseFun (FunDef _ _ fname _ _ body) =
+  let (_, res, _) = lastUseAnBdy mempty body (mempty, mempty)
    in (fname, res)
 
 -- | Performing the last-use analysis on a body. Arguments are:
@@ -44,7 +45,7 @@ lastUseFun (FunDef _ fname _ _ body) =
 --   known to be used after that statement.
 lastUseAnBdy ::
   AliasTab ->
-  Body (Aliases ExpMem.ExplicitMemory) ->
+  Body (Aliases Mem.SeqMem) ->
   (LUTabFun, Names) ->
   (Names, LUTabFun, Names)
 lastUseAnBdy alstab bdy@(Body _ bnds result) (lutab, used_nms) =
@@ -56,35 +57,35 @@ lastUseAnBdy alstab bdy@(Body _ bnds result) (lutab, used_nms) =
 
       -- Clean up the used names by recomputing the aliasing tenasitive-closure
       -- of the free names in body based on the current alias table @alstab@.
-      free_in_body = freeInBody bdy
+      free_in_body = freeIn bdy
       maybe_used =
-        S.foldl'
+        foldlNames
           ( \acc x -> case M.lookup x alstab of
               Nothing -> acc
-              Just al -> acc `S.union` al
+              Just al -> acc <> al
           )
           free_in_body
           free_in_body
-   in (free_in_body, lutab', used_nms `S.union` maybe_used)
+   in (free_in_body, lutab', used_nms <> maybe_used)
   where
     traverseBindings ::
       AliasTab ->
-      [Stm (Aliases ExpMem.ExplicitMemory)] ->
+      Stms (Aliases Mem.SeqMem) ->
       (LUTabFun, Names) ->
       [VName] ->
       (LUTabFun, Names)
 
-    traverseBindings stab [] (lutab1, nms) res_nms =
+    traverseBindings stab Seq.Empty (lutab1, nms) res_nms =
       let nms' =
-            foldl
+            foldlNames
               ( \acc x -> case M.lookup x stab of
                   Nothing -> acc
-                  Just al -> acc `S.union` al
+                  Just al -> acc <> al
               )
               nms
-              res_nms
+              (namesFromList res_nms)
        in (lutab1, nms')
-    traverseBindings stab (bd@(Let pat _ _) : bds) (lutab1, nms) res_nms =
+    traverseBindings stab (bd@(Let pat _ _) :<| bds) (lutab1, nms) res_nms =
       let stab' = updateAliasing stab pat
           (lutab1', nms') = traverseBindings stab' bds (lutab1, nms) res_nms
           (lutab1'', nms'') = lastUseAnBnd stab' bd (lutab1', nms')
@@ -92,7 +93,7 @@ lastUseAnBdy alstab bdy@(Body _ bnds result) (lutab, used_nms) =
 
 lastUseAnBnd ::
   AliasTab ->
-  Stm (Aliases ExpMem.ExplicitMemory) ->
+  Stm (Aliases Mem.SeqMem) ->
   (LUTabFun, Names) ->
   (LUTabFun, Names)
 lastUseAnBnd alstab (Let pat _ e) (lutab, used_nms) =
@@ -105,12 +106,12 @@ lastUseAnBnd alstab (Let pat _ e) (lutab, used_nms) =
       -- filter-out the binded names from the set of used variables,
       -- since they go out of scope, and update the last-use table.
       patnms = patternNames pat
-      used_nms'' = S.difference used_nms' $ S.fromList patnms
-      lutab'' = M.union lutab' $
+      used_nms'' = namesSubtract used_nms' $ namesFromList patnms
+      lutab'' = (<>) lutab' $
         case patnms of
           [] -> lutab
           nm : _ ->
-            if S.null last_uses
+            if last_uses == mempty
               then lutab
               else M.insert nm last_uses lutab
    in --trace ("LU Pattern: "++(pretty nm)++" last use: "++pretty (S.toList last_uses)++" orig used nms: "++(pretty $ S.toList used_nms)) last_uses
@@ -128,7 +129,7 @@ lastUseAnBnd alstab (Let pat _ e) (lutab, used_nms) =
 --           3. the updated used names, now including expression's free vars.
 lastUseAnExp ::
   AliasTab ->
-  Exp (Aliases ExpMem.ExplicitMemory) ->
+  Exp (Aliases Mem.SeqMem) ->
   Names ->
   (LUTabFun, Names, Names)
 
@@ -137,33 +138,33 @@ lastUseAnExp ::
 --   the last use in the statement in the inner bodies.
 lastUseAnExp alstab (If _ then_body else_body _) used_nms =
   let -- ignore the condition as it is a boolean scalar
-      (free_in_body_then, then_lutab, then_used_nms) = lastUseAnBdy alstab then_body (M.empty, used_nms)
-      (free_in_body_else, else_lutab, else_used_nms) = lastUseAnBdy alstab else_body (M.empty, used_nms)
-      used_nms' = S.union then_used_nms else_used_nms
+      (free_in_body_then, then_lutab, then_used_nms) = lastUseAnBdy alstab then_body (mempty, used_nms)
+      (free_in_body_else, else_lutab, else_used_nms) = lastUseAnBdy alstab else_body (mempty, used_nms)
+      used_nms' = then_used_nms <> else_used_nms
       (_, last_used_arrs) =
         lastUseAnVars alstab used_nms $
-          free_in_body_then `S.union` free_in_body_else
-   in (then_lutab `M.union` else_lutab, last_used_arrs, used_nms')
+          free_in_body_then <> free_in_body_else
+   in (then_lutab <> else_lutab, last_used_arrs, used_nms')
 lastUseAnExp alstab (DoLoop _ var_ses _ body) used_nms0 =
-  let free_in_body = aliasTransClos alstab $ freeInBody body
+  let free_in_body = aliasTransClos alstab $ freeIn body
       -- compute the alising transitive closure of initializers
       var_inis =
         map
           ( \(fp, se) ->
               let fpnm = identName $ paramIdent fp
                in case se of
-                    Constant _ -> (fpnm, S.empty)
+                    Constant _ -> (fpnm, mempty)
                     Var nm -> case M.lookup nm alstab of
-                      Nothing -> (fpnm, S.singleton nm)
-                      Just al -> (fpnm, S.insert nm al)
+                      Nothing -> (fpnm, oneName nm)
+                      Just al -> (fpnm, oneName nm <> al)
           )
           var_ses
       var_inis_a =
         filter
           ( \(_, nms) ->
-              null $
-                S.intersection nms $
-                  S.union free_in_body used_nms0
+              (== mempty) $
+                namesIntersection nms $
+                  free_in_body <> used_nms0
           )
           var_inis
 
@@ -171,34 +172,34 @@ lastUseAnExp alstab (DoLoop _ var_ses _ body) used_nms0 =
       -- being:  (free_in_body - loop-variants-a) + used_nms0. As such we disable cases b)
       -- and c) to produce loop-variant last uses inside the loop, and also we prevent
       -- the free-loop-variables to having last uses inside the loop.
-      free_in_body' = S.difference free_in_body $ S.fromList $ fst $ unzip var_inis_a
-      used_nms = S.union used_nms0 free_in_body'
-      (_, body_lutab, _) = lastUseAnBdy alstab body (M.empty, used_nms)
+      free_in_body' = namesSubtract free_in_body $ namesFromList $ map fst var_inis_a
+      used_nms = used_nms0 <> free_in_body'
+      (_, body_lutab, _) = lastUseAnBdy alstab body (mempty, used_nms)
 
       -- add var_inis_a to the body_lutab, i.e., record the last-use of
       -- initializer in the corresponding loop variant.
-      lutab_res = M.union body_lutab $ M.fromList var_inis_a
+      lutab_res = body_lutab <> M.fromList var_inis_a
 
       -- the result used names are:
-      fpar_nms = S.fromList $ map (identName . paramIdent) $ fst $ unzip var_ses
-      used_nms' = S.difference free_in_body fpar_nms
-      used_nms_res = S.union used_nms0 used_nms'
+      fpar_nms = namesFromList $ map (identName . paramIdent) $ map fst var_ses
+      used_nms' = namesSubtract free_in_body fpar_nms
+      used_nms_res = used_nms0 <> used_nms'
 
       -- the last-uses at loop-statement level are the loop free variables that
       -- do not belong to @used_nms0@; this includes the initializers of b), @lu_ini_b@
-      lu_arrs = S.difference used_nms' used_nms0
+      lu_arrs = namesSubtract used_nms' used_nms0
    in (lutab_res, lu_arrs, used_nms_res)
---lastUseAnExp alstab (Op (ExpMem.Inner (ExpMem.Kernel str cs ker_space tps ker_bdy))) used_nms = (M.empty, S.empty, used_nms)
+--lastUseAnExp alstab (Op (Mem.Inner (Mem.Kernel str cs ker_space tps ker_bdy))) used_nms = (M.empty, S.empty, used_nms)
 
 lastUseAnExp alstab e used_nms =
-  let free_in_e = freeInExp e
+  let free_in_e = freeIn e
       (used_nms', lu_vars) = lastUseAnVars alstab used_nms free_in_e
-   in (M.empty, lu_vars, used_nms')
+   in (mempty, lu_vars, used_nms')
 
 {-
-myFun :: AliasTab -> Exp (Aliases ExpMem.InKernel)
+myFun :: AliasTab -> Exp (Aliases Mem.InKernel)
              -> Names -> (LUTabFun,Names,Names)
-myFun alstab (Op (ExpMem.Inner (ExpMem.SplitArray _ _ _ _ _ _))) used_nms = (M.empty, S.empty, used_nms)
+myFun alstab (Op (Mem.Inner (Mem.SplitArray _ _ _ _ _ _))) used_nms = (M.empty, S.empty, used_nms)
 -}
 
 ------------------------------------------------------
@@ -215,14 +216,14 @@ lastUseAnVars alstab used_nms args =
       -- before, then it is a last use of both that variable and all other
       -- variables in its alias set
       lu_arrs =
-        S.foldl'
+        foldlNames
           ( \acc x ->
               let x_alias = case M.lookup x alstab of
-                    Nothing -> S.singleton x
-                    Just al -> S.insert x al
-                  is_unused = null $ S.intersection used_nms x_alias
-               in if is_unused then acc `S.union` x_alias else acc
+                    Nothing -> oneName x
+                    Just al -> oneName x <> al
+                  is_unused = (== mempty) $ namesIntersection used_nms x_alias
+               in if is_unused then acc <> x_alias else acc
           )
-          S.empty
+          mempty
           args
-   in (used_nms `S.union` args_nms, lu_arrs)
+   in (used_nms <> args_nms, lu_arrs)
