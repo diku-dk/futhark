@@ -378,7 +378,6 @@ test-suite unit
       Futhark.IR.PrimitiveTests
       Language.Futhark.CoreTests
       Language.Futhark.SyntaxTests
-      Futhark.Analysis.InterferenceTests
       Futhark.Optimise.ReuseAllocations.GreedyColoringTests
       Paths_futhark
   hs-source-dirs:
