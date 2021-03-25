@@ -1,6 +1,5 @@
 module Main (main) where
 
-import qualified Futhark.Analysis.InterferenceTests
 import qualified Futhark.BenchTests
 import qualified Futhark.IR.Mem.IxFunTests
 import qualified Futhark.IR.PrimitiveTests
@@ -22,8 +21,7 @@ allTests =
       Futhark.Pkg.SolveTests.tests,
       Futhark.IR.Mem.IxFunTests.tests,
       Futhark.IR.PrimitiveTests.tests,
-      Futhark.Optimise.ReuseAllocations.GreedyColoringTests.tests,
-      Futhark.Analysis.InterferenceTests.tests
+      Futhark.Optimise.ReuseAllocations.GreedyColoringTests.tests
     ]
 
 main :: IO ()
