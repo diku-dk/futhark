@@ -51,7 +51,9 @@ Some of them are supposed to be automatic.
    produces `futhark-X.Y.Z-linux-x86_64.xz`.  Put this tarball in some
    public location and make sure its permissions make it readable.
 
- * Run `stack upload .`.
+ * Run `cabal sdist` and then `cabal upload --publish` on the generated tarball.
+
+ * Run `tools/release/hackage.sh`.
 
  * Update the Homebrew formula with `brew bump-formula-pr
    --url=https://github.com/diku-dk/futhark/archive/vX.Y.Z.tar.gz
