@@ -10,7 +10,8 @@ pkgs.stdenv.mkDerivation {
     pkgs.curl
     pkgs.file
     pkgs.git
-    pkgs.haskell.compiler.ghc8102
+    pkgs.haskell.compiler.ghc8104
+    pkgs.haskellPackages.weeder
     pkgs.hlint
     pkgs.ocl-icd
     pkgs.opencl-headers
@@ -21,5 +22,6 @@ pkgs.stdenv.mkDerivation {
     pkgs.ghcid
     pkgs.ormolu
     pkgs.niv
+    pkgs.imagemagick # needed for literate tests
   ];
 }

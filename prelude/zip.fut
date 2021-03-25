@@ -1,6 +1,8 @@
 -- | Transforming arrays of tuples into tuples of arrays and back
--- again.  These are generally very cheap operations, as the internal
--- compiler representation is always tuples of arrays.
+-- again.
+--
+-- These are generally very cheap operations, as the internal compiler
+-- representation is always tuples of arrays.
 
 -- The main reason this module exists is that we need it to define
 -- SOACs like `map2`.
@@ -12,23 +14,23 @@ local let internal_map 'a [n] 'x (f: a -> x) (as: [n]a): [n]x =
   intrinsics.map (f, as) :> [n]x
 
 -- | Construct an array of pairs from two arrays.
-let zip [n] 'a 'b (as: [n]a) (bs: [n]b): [n](a,b) =
-  intrinsics.zip (as, bs) :> [n](a,b)
+let zip [n] 'a 'b (as: [n]a) (bs: [n]b): *[n](a,b) =
+  intrinsics.zip (as, bs) :> *[n](a,b)
 
 -- | Construct an array of pairs from two arrays.
-let zip2 [n] 'a 'b (as: [n]a) (bs: [n]b): [n](a,b) =
+let zip2 [n] 'a 'b (as: [n]a) (bs: [n]b): *[n](a,b) =
   zip as bs :> [n](a,b)
 
 -- | As `zip2`@term, but with one more array.
-let zip3 [n] 'a 'b 'c (as: [n]a) (bs: [n]b) (cs: [n]c): [n](a,b,c) =
+let zip3 [n] 'a 'b 'c (as: [n]a) (bs: [n]b) (cs: [n]c): *[n](a,b,c) =
   internal_map (\(a,(b,c)) -> (a,b,c)) (zip as (zip2 bs cs))
 
 -- | As `zip3`@term, but with one more array.
-let zip4 [n] 'a 'b 'c 'd (as: [n]a) (bs: [n]b) (cs: [n]c) (ds: [n]d): [n](a,b,c,d) =
+let zip4 [n] 'a 'b 'c 'd (as: [n]a) (bs: [n]b) (cs: [n]c) (ds: [n]d): *[n](a,b,c,d) =
   internal_map (\(a,(b,c,d)) -> (a,b,c,d)) (zip as (zip3 bs cs ds))
 
 -- | As `zip4`@term, but with one more array.
-let zip5 [n] 'a 'b 'c 'd 'e (as: [n]a) (bs: [n]b) (cs: [n]c) (ds: [n]d) (es: [n]e): [n](a,b,c,d,e) =
+let zip5 [n] 'a 'b 'c 'd 'e (as: [n]a) (bs: [n]b) (cs: [n]c) (ds: [n]d) (es: [n]e): *[n](a,b,c,d,e) =
   internal_map (\(a,(b,c,d,e)) -> (a,b,c,d,e)) (zip as (zip4 bs cs ds es))
 
 -- | Turn an array of pairs into two arrays.

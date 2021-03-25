@@ -91,32 +91,10 @@ generateSizeFuns sizes = do
   let size_name_inits = map (\k -> [C.cinit|$string:(pretty k)|]) $ M.keys sizes
       size_var_inits = map (\k -> [C.cinit|$string:(zEncodeString (pretty k))|]) $ M.keys sizes
       size_class_inits = map (\c -> [C.cinit|$string:(pretty c)|]) $ M.elems sizes
-      num_sizes = M.size sizes
 
   GC.earlyDecl [C.cedecl|static const char *size_names[] = { $inits:size_name_inits };|]
   GC.earlyDecl [C.cedecl|static const char *size_vars[] = { $inits:size_var_inits };|]
   GC.earlyDecl [C.cedecl|static const char *size_classes[] = { $inits:size_class_inits };|]
-
-  GC.publicDef_ "get_num_sizes" GC.InitDecl $ \s ->
-    ( [C.cedecl|int $id:s(void);|],
-      [C.cedecl|int $id:s(void) {
-                return $int:num_sizes;
-              }|]
-    )
-
-  GC.publicDef_ "get_size_name" GC.InitDecl $ \s ->
-    ( [C.cedecl|const char* $id:s(int);|],
-      [C.cedecl|const char* $id:s(int i) {
-                return size_names[i];
-              }|]
-    )
-
-  GC.publicDef_ "get_size_class" GC.InitDecl $ \s ->
-    ( [C.cedecl|const char* $id:s(int);|],
-      [C.cedecl|const char* $id:s(int i) {
-                return size_classes[i];
-              }|]
-    )
 
 generateConfigFuns :: M.Map Name SizeClass -> GC.CompilerM OpenCL () String
 generateConfigFuns sizes = do
@@ -255,6 +233,13 @@ generateConfigFuns sizes = do
                        }|]
     )
 
+  GC.publicDef_ "context_config_set_default_reg_tile_size" GC.InitDecl $ \s ->
+    ( [C.cedecl|void $id:s(struct $id:cfg* cfg, int num);|],
+      [C.cedecl|void $id:s(struct $id:cfg* cfg, int size) {
+                         cfg->cu_cfg.default_reg_tile_size = size;
+                       }|]
+    )
+
   GC.publicDef_ "context_config_set_default_threshold" GC.InitDecl $ \s ->
     ( [C.cedecl|void $id:s(struct $id:cfg* cfg, int num);|],
       [C.cedecl|void $id:s(struct $id:cfg* cfg, int size) {
@@ -292,6 +277,12 @@ generateConfigFuns sizes = do
                            cfg->cu_cfg.default_tile_size = size_value;
                            return 0;
                          }
+
+                         if (strcmp(size_name, "default_reg_tile_size") == 0) {
+                           cfg->cu_cfg.default_reg_tile_size = size_value;
+                           return 0;
+                         }
+
                          return 1;
                        }|]
     )
@@ -337,8 +328,10 @@ generateContextFuns cfg cost_centres kernels sizes failures = do
                          int debugging;
                          int profiling;
                          int profiling_paused;
+                         int logging;
                          typename lock_t lock;
                          char *error;
+                         typename FILE *log;
                          $sdecls:fields
                          $sdecls:kernel_fields
                          typename CUdeviceptr global_failure;
@@ -371,7 +364,9 @@ generateContextFuns cfg cost_centres kernels sizes failures = do
                  ctx->debugging = ctx->detail_memory = cfg->cu_cfg.debugging;
                  ctx->profiling = cfg->profiling;
                  ctx->profiling_paused = 0;
+                 ctx->logging = cfg->cu_cfg.logging;
                  ctx->error = NULL;
+                 ctx->log = stderr;
                  ctx->cuda.profiling_records_capacity = 200;
                  ctx->cuda.profiling_records_used = 0;
                  ctx->cuda.profiling_records =
@@ -458,12 +453,7 @@ generateContextFuns cfg cost_centres kernels sizes failures = do
                }|]
     )
 
-  GC.publicDef_ "context_clear_caches" GC.MiscDecl $ \s ->
-    ( [C.cedecl|int $id:s(struct $id:ctx* ctx);|],
-      [C.cedecl|int $id:s(struct $id:ctx* ctx) {
-                         lock_lock(&ctx->lock);
-                         CUDA_SUCCEED(cuda_free_all(&ctx->cuda));
-                         lock_unlock(&ctx->lock);
-                         return 0;
-                       }|]
-    )
+  GC.onClear
+    [C.citem|if (ctx->error == NULL) {
+               CUDA_SUCCEED(cuda_free_all(&ctx->cuda));
+             }|]

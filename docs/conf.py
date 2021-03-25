@@ -261,6 +261,7 @@ latex_documents = [
 # (source start file, name, description, authors, manual section).
 man_pages = [
     ('man/futhark', 'futhark', 'a parallel functional array language', [], 1),
+    ('man/futhark-autotune', 'futhark-autotune', 'calibrate run-time parameters', [], 1),
     ('man/futhark-c', 'futhark-c', 'compile Futhark to sequential C', [], 1),
     ('man/futhark-multicore', 'futhark-multicore', 'compile Futhark to multithreaded C', [], 1),
     ('man/futhark-opencl', 'futhark-opencl', 'compile Futhark to OpenCL', [], 1),
@@ -273,7 +274,8 @@ man_pages = [
     ('man/futhark-bench', 'futhark-bench', 'benchmark Futhark programs', [], 1),
     ('man/futhark-doc', 'futhark-doc', 'generate documentation for Futhark code', [], 1),
     ('man/futhark-dataset', 'futhark-dataset', 'generate random data sets', [], 1),
-    ('man/futhark-pkg', 'futhark-pkg', 'manage Futhark packages', [], 1)
+    ('man/futhark-pkg', 'futhark-pkg', 'manage Futhark packages', [], 1),
+    ('man/futhark-literate', 'futhark-literate', 'execute literate Futhark program', [], 1)
 ]
 
 # If true, show URL addresses after external links.

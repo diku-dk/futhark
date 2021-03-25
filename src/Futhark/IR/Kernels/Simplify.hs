@@ -94,10 +94,10 @@ kernelRules =
     <> ruleBook
       [ RuleOp redomapIotaToLoop,
         RuleOp SOAC.simplifyKnownIterationSOAC,
-        RuleOp SOAC.removeReplicateMapping
-      ]
-      [ RuleBasicOp removeUnnecessaryCopy,
+        RuleOp SOAC.removeReplicateMapping,
         RuleOp SOAC.liftIdentityMapping
+      ]
+      [ RuleBasicOp removeUnnecessaryCopy
       ]
 
 -- We turn reductions over (solely) iotas into do-loops, because there
@@ -105,7 +105,7 @@ kernelRules =
 -- around the fact that loop tiling would otherwise pointlessly tile
 -- them.
 redomapIotaToLoop :: TopDownRuleOp (Wise Kernels)
-redomapIotaToLoop vtable pat aux (OtherOp soac@(Screma _ form [arr]))
+redomapIotaToLoop vtable pat aux (OtherOp soac@(Screma _ [arr] form))
   | Just _ <- isRedomapSOAC form,
     Just (Iota {}, _) <- ST.lookupBasicOp arr vtable =
     Simplify $ certifying (stmAuxCerts aux) $ FOT.transformSOAC pat soac

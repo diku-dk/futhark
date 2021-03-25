@@ -109,7 +109,7 @@ transformSOAC ::
   AST.Pattern (Lore m) ->
   SOAC (Lore m) ->
   m ()
-transformSOAC pat (Screma w form@(ScremaForm scans reds map_lam) arrs) = do
+transformSOAC pat (Screma w arrs form@(ScremaForm scans reds map_lam)) = do
   -- Start by combining all the reduction parts into a single operator
   let Reduce _ red_lam red_nes = singleReduce reds
       Scan scan_lam scan_nes = singleScan scans
@@ -196,13 +196,12 @@ transformSOAC pat (Screma w form@(ScremaForm scans reds map_lam) arrs) = do
     (++ patternNames pat)
       <$> replicateM (length scanacc_params) (newVName "discard")
   letBindNames names $ DoLoop [] merge loopform loop_body
-transformSOAC pat (Stream w stream_form lam arrs) = do
+transformSOAC pat (Stream w arrs _ nes lam) = do
   -- Create a loop that repeatedly applies the lambda body to a
   -- chunksize of 1.  Hopefully this will lead to this outer loop
   -- being the only one, as all the innermost one can be simplified
   -- array (as they will have one iteration each).
-  let nes = getStreamAccums stream_form
-      (chunk_size_param, fold_params, chunk_params) =
+  let (chunk_size_param, fold_params, chunk_params) =
         partitionChunkedFoldParameters (length nes) $ lambdaParams lam
 
   mapout_merge <- forM (drop (length nes) $ lambdaReturnType lam) $ \t ->
@@ -255,11 +254,9 @@ transformSOAC pat (Stream w stream_form lam arrs) = do
 transformSOAC pat (Scatter len lam ivs as) = do
   iter <- newVName "write_iter"
 
-  let (_as_ws, as_ns, as_vs) = unzip3 as
+  let (as_ws, as_ns, as_vs) = unzip3 as
   ts <- mapM lookupType as_vs
   asOuts <- mapM (newIdent "write_out") ts
-
-  let ivsLen = length (lambdaReturnType lam) `div` 2
 
   -- Scatter is in-place, so we use the input array as the output array.
   let merge = loopMerge asOuts $ map Var as_vs
@@ -274,14 +271,13 @@ transformSOAC pat (Scatter len lam ivs as) = do
           letSubExp "write_iv" $ BasicOp $ Index iv $ fullSlice iv_t [DimFix $ Var iter]
         ivs'' <- bindLambda lam (map (BasicOp . SubExp) ivs')
 
-        let indexes = chunks as_ns $ take ivsLen ivs''
-            values = chunks as_ns $ drop ivsLen ivs''
+        let indexes = groupScatterResults (zip3 as_ws as_ns $ map identName asOuts) ivs''
 
-        ress <- forM (zip3 indexes values (map identName asOuts)) $ \(indexes', values', arr) -> do
+        ress <- forM indexes $ \(_, arr, indexes') -> do
           let saveInArray arr' (indexCur, valueCur) =
-                letExp "write_out" =<< eWriteArray arr' [eSubExp indexCur] (eSubExp valueCur)
+                letExp "write_out" =<< eWriteArray arr' (map eSubExp indexCur) (eSubExp valueCur)
 
-          foldM saveInArray arr $ zip indexes' values'
+          foldM saveInArray arr indexes'
         return $ resultBody (map Var ress)
   letBind pat $ DoLoop [] merge (ForLoop iter Int64 len []) loopBody
 transformSOAC pat (Hist len ops bucket_fun imgs) = do

@@ -35,6 +35,9 @@ OPTIONS
 -h
   Print help text to standard output and exit.
 
+--entry NAME
+  Treat the specified top-level function as an entry point.
+
 --library
   Generate a library instead of an executable.  Appends ``.c``/``.h``
   to the name indicated by the ``-o`` option to determine output
@@ -46,6 +49,9 @@ OPTIONS
 
 --safe
   Ignore ``unsafe`` in program and perform safety checks unconditionally.
+
+--server
+  Generate a server-mode executable that reads commands from stdin.
 
 -v verbose
   Enable debugging output.  If compilation fails due to a compiler

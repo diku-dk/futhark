@@ -71,7 +71,7 @@ maxNumOps = 10
 -- | Code generation for the body of the SegRed, taking a continuation
 -- for saving the results of the body.  The results should be
 -- represented as a pairing of a t'SubExp' along with a list of
--- indexes into that 'SubExp' for reading the result.
+-- indexes into that t'SubExp' for reading the result.
 type DoSegBody = ([(SubExp, [Imp.TExp Int64])] -> InKernelGen ()) -> InKernelGen ()
 
 -- | Compile 'SegRed' instance to host-level code with calls to
@@ -179,7 +179,7 @@ nonsegmentedReduction segred_pat num_groups group_size space reds body = do
       dims' = map toInt64Exp dims
       num_groups' = fmap toInt64Exp num_groups
       group_size' = fmap toInt64Exp group_size
-      global_tid = Imp.vi32 $ segFlat space
+      global_tid = Imp.vi64 $ segFlat space
       w = last dims'
 
   counter <-
@@ -472,7 +472,7 @@ largeSegmentsReduction segred_pat num_groups group_size space reds body = do
           constants
           (zip gtids dims')
           num_elements
-          (sExt32 global_tid)
+          global_tid
           elems_per_thread
           (tvVar threads_per_segment)
           slugs
@@ -598,7 +598,7 @@ reductionStageZero ::
   KernelConstants ->
   [(VName, Imp.TExp Int64)] ->
   Imp.Count Imp.Elements (Imp.TExp Int64) ->
-  Imp.TExp Int32 ->
+  Imp.TExp Int64 ->
   Imp.Count Imp.Elements (Imp.TExp Int64) ->
   VName ->
   [SegBinOpSlug] ->
@@ -663,13 +663,12 @@ reductionStageZero constants ispace num_elements global_tid elems_per_thread thr
     gtid
       <-- case comm of
         Commutative ->
-          sExt64 global_tid
-            + Imp.vi64 threads_per_segment * i
+          global_tid + Imp.vi64 threads_per_segment * i
         Noncommutative ->
-          let index_in_segment = global_tid `quot` sExt32 (kernelGroupSize constants)
+          let index_in_segment = global_tid `quot` kernelGroupSize constants
            in sExt64 local_tid
-                + (sExt64 index_in_segment * Imp.unCount elems_per_thread + i)
-                * sExt64 (kernelGroupSize constants)
+                + (index_in_segment * Imp.unCount elems_per_thread + i)
+                * kernelGroupSize constants
 
     check_bounds $
       sComment "apply map function" $
@@ -713,7 +712,7 @@ reductionStageOne ::
   KernelConstants ->
   [(VName, Imp.TExp Int64)] ->
   Imp.Count Imp.Elements (Imp.TExp Int64) ->
-  Imp.TExp Int32 ->
+  Imp.TExp Int64 ->
   Imp.Count Imp.Elements (Imp.TExp Int64) ->
   VName ->
   [SegBinOpSlug] ->

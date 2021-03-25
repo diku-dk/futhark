@@ -5,26 +5,30 @@
 -- | @futhark bench@
 module Futhark.CLI.Bench (main) where
 
+import Control.Exception
 import Control.Monad
-import Control.Monad.Except
+import Control.Monad.Except hiding (throwError)
 import qualified Data.ByteString.Char8 as SBS
 import qualified Data.ByteString.Lazy.Char8 as LBS
 import Data.Either
+import Data.Function ((&))
 import Data.IORef
 import Data.List (foldl', sortBy)
+import qualified Data.Map as M
 import Data.Maybe
 import Data.Ord
 import qualified Data.Text as T
 import Futhark.Bench
+import Futhark.Server
 import Futhark.Test
 import Futhark.Util (fancyTerminal, maxinum, maybeNth, pmapIO)
 import Futhark.Util.Console
 import Futhark.Util.Options
 import System.Console.ANSI (clearLine)
-import System.Console.GetOpt
 import System.Directory
 import System.Environment
 import System.Exit
+import System.FilePath
 import System.IO
 import Text.Printf
 import Text.Regex.TDFA
@@ -161,20 +165,36 @@ compileBenchmark opts (program, spec) =
   where
     hasRuns (InputOutputs _ runs) = not $ null runs
 
-runBenchmark :: BenchOptions -> FutharkExe -> (FilePath, [InputOutputs]) -> IO [BenchResult]
-runBenchmark opts futhark (program, cases) = mapM forInputOutputs $ filter relevant cases
-  where
-    forInputOutputs (InputOutputs entry_name runs) = do
-      (tuning_opts, tuning_desc) <- determineTuning (optTuning opts) program
+withProgramServer :: FilePath -> FilePath -> [String] -> (Server -> IO a) -> IO a
+withProgramServer program runner extra_options f = do
+  -- Explicitly prefixing the current directory is necessary for
+  -- readProcessWithExitCode to find the binary when binOutputf has
+  -- no path component.
+  let binOutputf = dropExtension program
+      binpath = "." </> binOutputf
 
-      putStr $ inBold $ "\nResults for " ++ program' ++ tuning_desc ++ ":\n"
-      let opts' =
-            opts
-              { optExtraOptions =
-                  optExtraOptions opts ++ tuning_opts
-              }
+      (to_run, to_run_args)
+        | null runner = (binpath, extra_options)
+        | otherwise = (runner, binpath : extra_options)
+
+  liftIO $ withServer to_run to_run_args f `catch` onError
+  where
+    onError :: SomeException -> IO a
+    onError e = do
+      hPrint stderr e
+      exitFailure
+
+runBenchmark :: BenchOptions -> FutharkExe -> (FilePath, [InputOutputs]) -> IO [BenchResult]
+runBenchmark opts futhark (program, cases) = do
+  (tuning_opts, tuning_desc) <- determineTuning (optTuning opts) program
+  let runopts = "-L" : optExtraOptions opts ++ tuning_opts
+  withProgramServer program (optRunner opts) runopts $ \server ->
+    mapM (forInputOutputs server tuning_desc) $ filter relevant cases
+  where
+    forInputOutputs server tuning_desc (InputOutputs entry_name runs) = do
+      putStr $ inBold $ "\n" ++ program' ++ tuning_desc ++ ":\n"
       BenchResult program' . catMaybes
-        <$> mapM (runBenchmarkCase opts' futhark program entry_name pad_to) runs
+        <$> mapM (runBenchmarkCase server opts futhark program entry_name pad_to) runs
       where
         program' =
           if entry_name == "main"
@@ -188,9 +208,7 @@ runBenchmark opts futhark (program, cases) = mapM forInputOutputs $ filter relev
 runOptions :: (Int -> IO ()) -> BenchOptions -> RunOptions
 runOptions f opts =
   RunOptions
-    { runRunner = optRunner opts,
-      runRuns = optRuns opts,
-      runExtraOptions = optExtraOptions opts,
+    { runRuns = optRuns opts,
       runTimeout = optTimeout opts,
       runVerbose = optVerbose opts,
       runResultAction = Just f
@@ -198,7 +216,7 @@ runOptions f opts =
 
 progressBar :: Int -> Int -> Int -> String
 progressBar cur bound steps =
-  "[" ++ map cell [1 .. steps] ++ "] " ++ show cur ++ "/" ++ show bound
+  "|" ++ map cell [1 .. steps] ++ "| " ++ show cur ++ "/" ++ show bound
   where
     step_size :: Double
     step_size = fromIntegral bound / fromIntegral steps
@@ -254,6 +272,7 @@ reportResult results = do
       ((maxinum runtimes / avg - 1) * 100)
 
 runBenchmarkCase ::
+  Server ->
   BenchOptions ->
   FutharkExe ->
   FilePath ->
@@ -261,12 +280,12 @@ runBenchmarkCase ::
   Int ->
   TestRun ->
   IO (Maybe DataResult)
-runBenchmarkCase _ _ _ _ _ (TestRun _ _ RunTimeFailure {} _ _) =
+runBenchmarkCase _ _ _ _ _ _ (TestRun _ _ RunTimeFailure {} _ _) =
   return Nothing -- Not our concern, we are not a testing tool.
-runBenchmarkCase opts _ _ _ _ (TestRun tags _ _ _ _)
+runBenchmarkCase _ opts _ _ _ _ (TestRun tags _ _ _ _)
   | any (`elem` tags) $ optExcludeCase opts =
     return Nothing
-runBenchmarkCase opts futhark program entry pad_to tr@(TestRun _ input_spec (Succeeds expected_spec) _ dataset_desc) = do
+runBenchmarkCase server opts futhark program entry pad_to tr@(TestRun _ input_spec (Succeeds expected_spec) _ dataset_desc) = do
   prompt <- mkProgressPrompt (optRuns opts) pad_to dataset_desc
 
   -- Report the dataset name before running the program, so that if an
@@ -275,6 +294,7 @@ runBenchmarkCase opts futhark program entry pad_to tr@(TestRun _ input_spec (Suc
 
   res <-
     benchmarkDataset
+      server
       (runOptions (prompt . Just) opts)
       futhark
       program
@@ -289,7 +309,8 @@ runBenchmarkCase opts futhark program entry pad_to tr@(TestRun _ input_spec (Suc
 
   case res of
     Left err -> do
-      liftIO $ putStrLn $ descString dataset_desc pad_to
+      when fancyTerminal $
+        liftIO $ putStrLn $ descString dataset_desc pad_to
       liftIO $ putStrLn $ inRed $ T.unpack err
       return $ Just $ DataResult dataset_desc $ Left err
     Right (runtimes, errout) -> do
@@ -297,7 +318,20 @@ runBenchmarkCase opts futhark program entry pad_to tr@(TestRun _ input_spec (Suc
         putStr $ descString dataset_desc pad_to
 
       reportResult runtimes
-      return $ Just $ DataResult dataset_desc $ Right (runtimes, errout)
+      Result runtimes (getMemoryUsage errout) errout
+        & Right
+        & DataResult dataset_desc
+        & Just
+        & return
+
+getMemoryUsage :: T.Text -> M.Map T.Text Int
+getMemoryUsage t =
+  foldMap matchMap $ T.lines t
+  where
+    mem_regex = "Peak memory usage for space '([^']+)': ([0-9]+) bytes." :: T.Text
+    matchMap line = case (line =~ mem_regex :: (T.Text, T.Text, T.Text, [T.Text])) of
+      (_, _, _, [device, bytes]) -> M.singleton device (read $ T.unpack bytes)
+      _ -> mempty
 
 commandLineOptions :: [FunOptDescr BenchOptions]
 commandLineOptions =
@@ -467,7 +501,9 @@ commandLineOptions =
 -- | Run @futhark bench@.
 main :: String -> [String] -> IO ()
 main = mainWithOptions initialBenchOptions commandLineOptions "options... programs..." $ \progs config ->
-  Just $ runBenchmarks config progs
+  case progs of
+    [] -> Nothing
+    _ -> Just $ runBenchmarks config progs
 
 --- The following extracted from hstats package by Marshall Beddoe:
 --- https://hackage.haskell.org/package/hstats-0.3

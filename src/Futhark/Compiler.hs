@@ -1,6 +1,5 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE Safe #-}
 {-# LANGUAGE Strict #-}
 
 -- | High-level API for invoking the Futhark compiler.
@@ -13,13 +12,15 @@ module Futhark.Compiler
     handleWarnings,
     module Futhark.Compiler.Program,
     readProgram,
-    readLibrary,
     readProgramOrDie,
+    readUntypedProgram,
+    readUntypedProgramOrDie,
   )
 where
 
 import Control.Monad
 import Control.Monad.Except
+import Data.Bifunctor (first)
 import qualified Data.Text.IO as T
 import qualified Futhark.Analysis.Alias as Alias
 import Futhark.Compiler.Program
@@ -31,6 +32,8 @@ import Futhark.Pipeline
 import qualified Futhark.TypeCheck as I
 import Futhark.Util.Log
 import Futhark.Util.Pretty (ppr, prettyText)
+import qualified Language.Futhark as E
+import Language.Futhark.Semantic (includeToString)
 import Language.Futhark.Warnings
 import System.Exit (ExitCode (..), exitWith)
 import System.IO
@@ -46,7 +49,11 @@ data FutharkConfig = FutharkConfig
     -- | If true, error on any warnings.
     futharkWerror :: Bool,
     -- | If True, ignore @unsafe@.
-    futharkSafe :: Bool
+    futharkSafe :: Bool,
+    -- | Additional functions that should be exposed as entry points.
+    futharkEntryPoints :: [Name],
+    -- | If false, disable type-checking
+    futharkTypeCheck :: Bool
   }
 
 -- | The default compiler configuration.
@@ -56,7 +63,9 @@ newFutharkConfig =
     { futharkVerbose = (NotVerbose, Nothing),
       futharkWarn = True,
       futharkWerror = False,
-      futharkSafe = False
+      futharkSafe = False,
+      futharkEntryPoints = [],
+      futharkTypeCheck = True
     }
 
 -- | Print a compiler error to stdout.  The 'FutharkConfig' controls
@@ -123,7 +132,9 @@ runPipelineOnProgram config pipeline file = do
   when (pipelineVerbose pipeline_config) $
     logMsg ("Reading and type-checking source program" :: String)
   (prog_imports, namesrc) <-
-    handleWarnings config $ (\(a, b, c) -> (a, (b, c))) <$> readProgram file
+    handleWarnings config $
+      (\(a, b, c) -> (a, (b, c)))
+        <$> readProgram (futharkEntryPoints config) file
 
   putNameSource namesrc
   when (pipelineVerbose pipeline_config) $
@@ -137,7 +148,7 @@ runPipelineOnProgram config pipeline file = do
     pipeline_config =
       PipelineConfig
         { pipelineVerbose = fst (futharkVerbose config) > NotVerbose,
-          pipelineValidate = True
+          pipelineValidate = futharkTypeCheck config
         }
 
 typeCheckInternalProgram :: I.Prog I.SOACS -> FutharkM ()
@@ -151,27 +162,36 @@ typeCheckInternalProgram prog =
 -- | Read and type-check a Futhark program, including all imports.
 readProgram ::
   (MonadError CompilerError m, MonadIO m) =>
+  [I.Name] ->
   FilePath ->
   m (Warnings, Imports, VNameSource)
-readProgram = readLibrary . pure
+readProgram extra_eps = readLibrary extra_eps . pure
 
--- | Read and type-check a collection of Futhark files, including all
--- imports.
-readLibrary ::
+-- | Read and parse (but do not type-check) a Futhark program,
+-- including all imports.
+readUntypedProgram ::
   (MonadError CompilerError m, MonadIO m) =>
-  [FilePath] ->
-  m (Warnings, Imports, VNameSource)
-readLibrary = readLibraryWithBasis emptyBasis
+  FilePath ->
+  m [(String, E.UncheckedProg)]
+readUntypedProgram =
+  fmap (map (first includeToString)) . readUntypedLibrary . pure
 
--- | Not verbose, and terminates process on error.
-readProgramOrDie :: MonadIO m => FilePath -> m (Warnings, Imports, VNameSource)
-readProgramOrDie file = liftIO $ do
-  res <- runFutharkM (readProgram file) NotVerbose
+orDie :: MonadIO m => FutharkM a -> m a
+orDie m = liftIO $ do
+  res <- runFutharkM m NotVerbose
   case res of
     Left err -> do
       dumpError newFutharkConfig err
       exitWith $ ExitFailure 2
     Right res' -> return res'
+
+-- | Not verbose, and terminates process on error.
+readProgramOrDie :: MonadIO m => FilePath -> m (Warnings, Imports, VNameSource)
+readProgramOrDie file = orDie $ readProgram mempty file
+
+-- | Not verbose, and terminates process on error.
+readUntypedProgramOrDie :: MonadIO m => FilePath -> m [(String, E.UncheckedProg)]
+readUntypedProgramOrDie file = orDie $ readUntypedProgram file
 
 -- | Run an operation that produces warnings, and handle them
 -- appropriately, yielding the non-warning return value.  "Proper

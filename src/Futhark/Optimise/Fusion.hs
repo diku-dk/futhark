@@ -528,7 +528,7 @@ horizontGreedyFuse rem_bnds res (out_idds, aux, soac, consumed) = do
         -- the accumulator result cannot be fused!
         SOAC.Screma _ (ScremaForm scans reds _) _ ->
           drop (scanResults scans + redResults reds) out_nms
-        SOAC.Stream _ frm _ _ -> drop (length $ getStreamAccums frm) out_nms
+        SOAC.Stream _ _ _ nes _ -> drop (length nes) out_nms
         _ -> out_nms
       to_fuse_knms1 = S.toList $ getKersWithInpArrs res (out_arr_nms ++ inp_nms)
       to_fuse_knms2 = getKersWithSameInpSize (SOAC.width soac) res
@@ -727,7 +727,7 @@ fusionGatherStms
                 lambdaBody = lam_body,
                 lambdaReturnType = map paramType $ acc_params ++ [offset_param]
               }
-          stream = Futhark.Stream w (Sequential $ merge_init ++ [intConst it 0]) lam loop_arrs
+          stream = Futhark.Stream w loop_arrs Sequential (merge_init ++ [intConst it 0]) lam
 
       -- It is important that the (discarded) final-offset is not the
       -- first element in the pattern, as we use the first element to
@@ -757,16 +757,16 @@ fusionGatherStms fres (bnd@(Let pat _ e) : bnds) res = do
     Right soac@(SOAC.Screma _ (ScremaForm scans reds map_lam) _) ->
       reduceLike soac (map scanLambda scans <> map redLambda reds <> [map_lam]) $
         concatMap scanNeutral scans <> concatMap redNeutral reds
-    Right soac@(SOAC.Stream _ form lam _) -> do
+    Right soac@(SOAC.Stream _ form lam nes _) -> do
       -- a redomap does not neccessarily start a new kernel, e.g.,
       -- @let a= reduce(+,0,A) in ... bnds ... in let B = map(f,A)@
       -- can be fused into a redomap that replaces the @map@, if @a@
       -- and @B@ are defined in the same scope and @bnds@ does not uses @a@.
       -- a redomap always starts a new kernel
       let lambdas = case form of
-            Parallel _ _ lout _ -> [lout, lam]
-            _ -> [lam]
-      reduceLike soac lambdas $ getStreamAccums form
+            Parallel _ _ lout -> [lout, lam]
+            Sequential -> [lam]
+      reduceLike soac lambdas nes
     _
       | [pe] <- patternValueElements pat,
         Just (src, trns) <- SOAC.transformFromExp (stmCerts bnd) e ->
@@ -953,7 +953,7 @@ insertKerSOAC aux names ker = do
     f_soac <- SOAC.toSOAC new_soac'
     -- The fused kernel may consume more than the original SOACs (see
     -- issue #224).  We insert copy expressions to fix it.
-    f_soac' <- copyNewlyConsumed (fusedConsumed ker) $ addOpAliases f_soac
+    f_soac' <- copyNewlyConsumed (fusedConsumed ker) $ addOpAliases mempty f_soac
     validents <- zipWithM newIdent (map baseString names) $ SOAC.typeOf new_soac'
     auxing (kerAux ker <> aux) $ letBind (basicPattern [] validents) $ Op f_soac'
     transformOutput (outputTransform ker) names validents
@@ -980,9 +980,9 @@ finaliseSOAC new_soac =
     SOAC.Hist w ops lam arrs -> do
       lam' <- simplifyAndFuseInLambda lam
       return $ SOAC.Hist w ops lam' arrs
-    SOAC.Stream w form lam inps -> do
+    SOAC.Stream w form lam nes inps -> do
       lam' <- simplifyAndFuseInLambda lam
-      return $ SOAC.Stream w form lam' inps
+      return $ SOAC.Stream w form lam' nes inps
 
 simplifyAndFuseInLambda :: Lambda -> FusionGM Lambda
 simplifyAndFuseInLambda lam = do
@@ -997,7 +997,7 @@ copyNewlyConsumed ::
   Binder SOACS (Futhark.SOAC SOACS)
 copyNewlyConsumed was_consumed soac =
   case soac of
-    Futhark.Screma w (Futhark.ScremaForm scans reds map_lam) arrs -> do
+    Futhark.Screma w arrs (Futhark.ScremaForm scans reds map_lam) -> do
       -- Copy any arrays that are consumed now, but were not in the
       -- constituents.
       arrs' <- mapM copyConsumedArr arrs
@@ -1028,7 +1028,7 @@ copyNewlyConsumed was_consumed soac =
               )
               reds
 
-      return $ Futhark.Screma w (Futhark.ScremaForm scans' reds' map_lam') arrs'
+      return $ Futhark.Screma w arrs' $ Futhark.ScremaForm scans' reds' map_lam'
     _ -> return $ removeOpAliases soac
   where
     consumed = consumedInOp soac

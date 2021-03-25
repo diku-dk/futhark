@@ -1,7 +1,7 @@
 cabal-version: 2.4
-
+-- Run 'cabal2nix . >futhark.nix' after adding deps.
 name:           futhark
-version:        0.19.0
+version:        0.20.0
 synopsis:       An optimising compiler for a functional, array-oriented language.
 
 description:    Futhark is a small programming language designed to be compiled to
@@ -59,7 +59,9 @@ library
       Futhark.Analysis.HORep.MapNest
       Futhark.Analysis.HORep.SOAC
       Futhark.Analysis.Metrics
+      Futhark.Analysis.Metrics.Type
       Futhark.Analysis.PrimExp
+      Futhark.Analysis.PrimExp.Parse
       Futhark.Analysis.PrimExp.Convert
       Futhark.Analysis.PrimExp.Generalize
       Futhark.Analysis.PrimExp.Simplify
@@ -78,6 +80,7 @@ library
       Futhark.CLI.Dataset
       Futhark.CLI.Dev
       Futhark.CLI.Doc
+      Futhark.CLI.Literate
       Futhark.CLI.Misc
       Futhark.CLI.MPI
       Futhark.CLI.Multicore
@@ -95,6 +98,7 @@ library
       Futhark.CodeGen.Backends.COpenCL.Boilerplate
       Futhark.CodeGen.Backends.GenericC
       Futhark.CodeGen.Backends.GenericC.CLI
+      Futhark.CodeGen.Backends.GenericC.Server
       Futhark.CodeGen.Backends.GenericC.Options
       Futhark.CodeGen.Backends.GenericPython
       Futhark.CodeGen.Backends.GenericPython.AST
@@ -105,6 +109,7 @@ library
       Futhark.CodeGen.Backends.PyOpenCL
       Futhark.CodeGen.Backends.PyOpenCL.Boilerplate
       Futhark.CodeGen.Backends.SequentialC
+      Futhark.CodeGen.Backends.SequentialC.Boilerplate
       Futhark.CodeGen.Backends.SequentialPython
       Futhark.CodeGen.Backends.SimpleRep
       Futhark.CodeGen.ImpCode
@@ -128,6 +133,7 @@ library
       Futhark.CodeGen.ImpGen.MPI
       Futhark.CodeGen.ImpGen.MPI.Base
       Futhark.CodeGen.ImpGen.MPI.SegMap
+      Futhark.CodeGen.ImpGen.MPI.SegRed
       Futhark.CodeGen.ImpGen.Multicore
       Futhark.CodeGen.ImpGen.Multicore.Base
       Futhark.CodeGen.ImpGen.Multicore.SegHist
@@ -149,6 +155,7 @@ library
       Futhark.IR
       Futhark.IR.Aliases
       Futhark.IR.Decorations
+      Futhark.IR.Parse
       Futhark.IR.Kernels
       Futhark.IR.Kernels.Kernel
       Futhark.IR.Kernels.Simplify
@@ -162,6 +169,7 @@ library
       Futhark.IR.Mem.Simplify
       Futhark.IR.Pretty
       Futhark.IR.Primitive
+      Futhark.IR.Primitive.Parse
       Futhark.IR.Prop
       Futhark.IR.Prop.Aliases
       Futhark.IR.Prop.Constants
@@ -194,6 +202,7 @@ library
       Futhark.Internalise.Monomorphise
       Futhark.Internalise.TypesValues
       Futhark.MonadFreshNames
+      Futhark.Optimise.BlkRegTiling
       Futhark.Optimise.CSE
       Futhark.Optimise.DoubleBuffer
       Futhark.Optimise.Fusion
@@ -204,13 +213,18 @@ library
       Futhark.Optimise.InPlaceLowering.SubstituteIndices
       Futhark.Optimise.InliningDeadFun
       Futhark.Optimise.Simplify
-      Futhark.Optimise.Simplify.ClosedForm
       Futhark.Optimise.Simplify.Engine
       Futhark.Optimise.Simplify.Lore
       Futhark.Optimise.Simplify.Rule
       Futhark.Optimise.Simplify.Rules
+      Futhark.Optimise.Simplify.Rules.BasicOp
+      Futhark.Optimise.Simplify.Rules.ClosedForm
+      Futhark.Optimise.Simplify.Rules.Index
+      Futhark.Optimise.Simplify.Rules.Loop
+      Futhark.Optimise.Simplify.Rules.Simple
       Futhark.Optimise.Sink
       Futhark.Optimise.TileLoops
+      Futhark.Optimise.TileLoops.Shared
       Futhark.Optimise.Unstream
       Futhark.Pass
       Futhark.Pass.ExpandAllocations
@@ -237,8 +251,11 @@ library
       Futhark.Pkg.Info
       Futhark.Pkg.Solve
       Futhark.Pkg.Types
+      Futhark.Script
+      Futhark.Server
       Futhark.Test
       Futhark.Test.Values
+      Futhark.Test.Values.Parser
       Futhark.Tools
       Futhark.Transform.CopyPropagate
       Futhark.Transform.FirstOrderTransform
@@ -293,6 +310,8 @@ library
     , binary >=0.8.3
     , blaze-html >=0.9.0.1
     , bytestring >=0.10.8
+    , bytestring-to-vector >=0.3.0.1
+    , bmp >=1.2.6.3
     , containers >=0.6.2.1
     , directory >=1.3.0.0
     , directory-tree >=0.12.1
@@ -301,11 +320,12 @@ library
     , filepath >=1.4.1.1
     , free >=4.12.4
     , gitrev >=1.2.0
+    , hashable
     , haskeline
     , language-c-quote >=0.12
     , mainland-pretty >=0.6.1
     , cmark-gfm >=0.2.1
-    , megaparsec >=8.0.0
+    , megaparsec >=9.0.0
     , mtl >=2.2.1
     , neat-interpolation >=0.3
     , parallel >=3.2.1.0
@@ -313,7 +333,6 @@ library
     , process >=1.4.3.0
     , process-extras >=0.7.2
     , regex-tdfa >=1.2
-    , sexp-grammar >= 2.2.1
     , srcloc >=0.4
     , template-haskell >=2.11.1
     , temporary
@@ -370,7 +389,6 @@ test-suite unit
     , megaparsec
     , mtl
     , parser-combinators
-    , sexp-grammar
     , tasty
     , tasty-hunit
     , tasty-quickcheck

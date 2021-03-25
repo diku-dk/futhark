@@ -117,6 +117,13 @@ Context
    subsequent call to the function returns ``NULL``, until a new error
    occurs.
 
+.. c:function:: void futhark_context_set_logging_file(struct futhark_context *ctx, FILE* f)
+
+   Set the stream used to print diagnostics, debug prints, and logging
+   messages during runtime.  This is ``stderr`` by default.  Even when
+   this is used to re-route logging messages, fatal errors will still
+   only be printed to ``stderr``.
+
 .. c:function:: char *futhark_context_report(struct futhark_context *ctx)
 
    Produce a human-readable C string with debug and profiling
@@ -139,21 +146,17 @@ Values
 ------
 
 Primitive types (``i32``, ``bool``, etc) are mapped directly to their
-corresponding C type.  For each distinct array type (without sizes),
-an opaque C struct is defined.  Complex types (records, nested tuples)
-are also assigned an opaque C struct.  In the general case, these
-types will be named with a random hash.  However, if you insert an
-explicit type annotation (and the type name contains only characters
-valid for C identifiers), the indicated name will be used.  Note that
-arrays contain brackets, which are usually not valid in identifiers.
-Defining a simple type alias is the best way around this.
+corresponding C type.  For each distinct array type of primitives
+(ignoring sizes), an opaque C struct is defined.  For types that do
+not map cleanly to C, including records, sum types, and arrays of
+tuples, see :ref:`opaques`.
 
-All values share a similar API, which is illustrated here for the case
-of the type ``[]i32``.  The creation/retrieval functions are all
-asynchronous, so make sure to call :c:func:`futhark_context_sync` when
-appropriate.  Memory management is entirely manual.  All values that
-are created with a ``new`` function, or returned from an entry point,
-*must* at some point be freed manually.  Values are internally
+All array values share a similar API, which is illustrated here for
+the case of the type ``[]i32``.  The creation/retrieval functions are
+all asynchronous, so make sure to call :c:func:`futhark_context_sync`
+when appropriate.  Memory management is entirely manual.  All values
+that are created with a ``new`` function, or returned from an entry
+point, *must* at some point be freed manually.  Values are internally
 reference counted, so even for entry points that return their input
 unchanged, you should still free both the input and the output - this
 will not result in a double free.
@@ -196,6 +199,72 @@ will not result in a double free.
    dimension.  The lifetime of the shape is the same as ``arr``, and
    should *not* be manually freed.
 
+.. _opaques:
+
+Opaque values
+~~~~~~~~~~~~~
+
+Each instance of a complex type in an entry point (records, nested
+tuples, etc) is represented by an opaque C struct named
+``futhark_opaque_foo``.  In the general case, ``foo`` will be a hash
+of the internal representation.  However, if you insert explicit type
+annotations in the entry point (and the type name contains only
+characters valid for C identifiers), the indicated name will be used.
+Note that arrays contain brackets, which are usually not valid in
+identifiers.  Defining a simple type abbreviation is the best way
+around this.
+
+The API for opaque values is similar to that of arrays, and the same
+rules for memory management apply.  You cannot construct them from
+scratch, but must obtain them via entry points (or deserialisation,
+see :c:func:`futhark_restore_opaque_foo`).
+
+.. c:struct:: futhark_opaque_foo
+
+   An opaque struct representing a Futhark value of type ``foo``.
+
+.. c:function:: int futhark_free_opaque_foo(struct futhark_context *ctx, struct futhark_opaque_foo *obj)
+
+   Free the value.  In practice, this merely decrements the reference
+   count by one.  The value (or at least this reference) may not be
+   used again after this function returns.
+
+.. c:function:: int futhark_store_opaque_foo(struct futhark_context *ctx, const struct futhark_opaque_foo *obj, void **p, size_t *n)
+
+   Serialise an opaque value to a byte sequence, which can later be
+   restored with :c:func:`futhark_restore_opaque_foo`.  The byte
+   representation is not otherwise specified, and is not stable
+   between compiler versions or programs.  It is stable under change
+   of compiler backend, but not change of compiler version, or
+   modification to the source program (although in most cases the
+   format will not change).
+
+   The variable pointed to by ``n`` will always be set to the number
+   of bytes needed to represent the value.  The ``p`` parameter is
+   more complex:
+
+   * If ``p`` is ``NULL``, the function will write to ``*n``, but not
+     actually serialise the opaque value.
+
+   * If ``*p`` is ``NULL``, the function will allocate sufficient
+     storage with ``malloc()``, serialise the value, and write the
+     address of the byte representation to ``*p``.
+
+   * Otherwise, the serialised representation of the value will be
+     stored at ``*p``, which *must* have room for at least ``*n``
+     bytes.
+
+   Returns 0 on success.
+
+.. c:function:: struct futhark_opaque_foo* futhark_restore_opaque_foo(struct futhark_context *ctx, const void *p)
+
+   Restore a byte sequence previously written with
+   :c:func:`futhark_store_opaque_foo`.  Returns ``NULL`` on failure.
+   The byte sequence does not need to have been generated by the same
+   program *instance*, but it *must* have been generated by the same
+   Futhark program, and compiled with the same version of the Futhark
+   compiler.
+
 Entry points
 ------------
 
@@ -214,16 +283,19 @@ Results in the following C function:
    sure to call :c:func:`futhark_context_sync` before using the value
    of ``out0``.
 
-The exact behaviour of the exit code depends on the backend.  For the
-sequential C backend, errors will always be available when the entry
-point returns, and :c:func:`futhark_context_sync` will always return
-success.  When using a GPU backend such as ``cuda`` or ``opencl``, the
-entry point may still be running asynchronous operations when it
+Errors are indicated by a nonzero return value.  On error, nothing is
+written to the *out*-parameters.
+
+The precise semantics of the return value depends on the backend.  For
+the sequential C backend, errors will always be available when the
+entry point returns, and :c:func:`futhark_context_sync` will always
+return zero.  When using a GPU backend such as ``cuda`` or ``opencl``,
+the entry point may still be running asynchronous operations when it
 returns, in which case the entry point may return zero successfully,
 even though execution has already (or will) fail.  These problems will
-be reported when :c:func:`futhark_context_sync` is called.  When using
-GPU backends, be careful to check the return code of *both* the entry
-point itself, and :c:func:`futhark_context_sync`.
+be reported when :c:func:`futhark_context_sync` is called.  Therefore,
+be careful to check the return code of *both* the entry point itself,
+and :c:func:`futhark_context_sync`.
 
 GPU
 ---

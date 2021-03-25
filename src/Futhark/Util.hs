@@ -23,8 +23,8 @@ module Futhark.Util
     splitFromEnd,
     splitAt3,
     focusNth,
+    hashIntText,
     unixEnvironment,
-    isEnvVarSet,
     isEnvVarAtLeast,
     fancyTerminal,
     runProgramWithExitCode,
@@ -43,6 +43,7 @@ module Futhark.Util
     toPOSIX,
     trim,
     pmapIO,
+    readFileSafely,
     UserString,
     EncodedString,
     zEncodeString,
@@ -61,6 +62,7 @@ import Data.Maybe
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import qualified Data.Text.Encoding.Error as T
+import qualified Data.Text.IO as T
 import Numeric
 import qualified System.Directory.Tree as Dir
 import System.Environment
@@ -68,8 +70,10 @@ import System.Exit
 import qualified System.FilePath as Native
 import qualified System.FilePath.Posix as Posix
 import System.IO (hIsTerminalDevice, stdout)
+import System.IO.Error (isDoesNotExistError)
 import System.IO.Unsafe
 import System.Process.ByteString
+import Text.Printf
 import Text.Read (readMaybe)
 
 -- | Like 'nub', but without the quadratic runtime.
@@ -156,21 +160,16 @@ focusNth i xs
   | (bef, x : aft) <- genericSplitAt i xs = Just (bef, x, aft)
   | otherwise = Nothing
 
+-- | Convert the given integer (implied to be a hash digest) to a
+-- hexadecimal non-negative number.
+hashIntText :: Int -> T.Text
+hashIntText x = T.pack $ printf "%x" (fromIntegral x :: Word)
+
 {-# NOINLINE unixEnvironment #-}
 
 -- | The Unix environment when the Futhark compiler started.
 unixEnvironment :: [(String, String)]
 unixEnvironment = unsafePerformIO getEnvironment
-
--- | Is an environment variable set to 0 or 1?  If 0, return False; if
--- 1, True; otherwise default.
-isEnvVarSet :: String -> Bool -> Bool
-isEnvVarSet name default_val = fromMaybe default_val $ do
-  val <- lookup name unixEnvironment
-  case val of
-    "0" -> return False
-    "1" -> return True
-    _ -> Nothing
 
 -- | True if the environment variable, viewed as an integer, has at
 -- least this numeric value.  Returns False if variable is unset or
@@ -323,6 +322,18 @@ pmapIO concurrency f elems = do
       case res of
         Left err -> throw (err :: SomeException)
         Right v -> pure v
+
+-- | Read a file, returning 'Nothing' if the file does not exist, and
+-- 'Left' if some other error occurs.
+readFileSafely :: FilePath -> IO (Maybe (Either String T.Text))
+readFileSafely filepath =
+  (Just . Right <$> T.readFile filepath) `catch` couldNotRead
+  where
+    couldNotRead e
+      | isDoesNotExistError e =
+        return Nothing
+      | otherwise =
+        return $ Just $ Left $ show e
 
 -- Z-encoding from https://ghc.haskell.org/trac/ghc/wiki/Commentary/Compiler/SymbolNames
 --

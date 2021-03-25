@@ -147,7 +147,7 @@ instance Pretty (ShapeDecl dim) => Pretty (ScalarTypeBase dim as) where
       oneLine (mconcat $ punctuate (text " | ") cs')
         <|> align (mconcat $ punctuate (text " |" <> line) cs')
     where
-      ppConstr (name, fs) = sep $ (text "#" <> ppr name) : map (pprPrec 1) fs
+      ppConstr (name, fs) = sep $ (text "#" <> ppr name) : map (pprPrec 2) fs
       cs' = map ppConstr $ M.toList cs
 
 instance Pretty (ShapeDecl dim) => Pretty (TypeBase dim as) where
@@ -331,9 +331,9 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (ExpBase f vn) where
   pprPrec _ (OpSection binop _ _) =
     parens $ ppr binop
   pprPrec _ (OpSectionLeft binop _ x _ _ _) =
-    parens $ ppr x <+> ppr binop
+    parens $ ppr x <+> ppBinOp binop
   pprPrec _ (OpSectionRight binop _ x _ _ _) =
-    parens $ ppr binop <+> ppr x
+    parens $ ppBinOp binop <+> ppr x
   pprPrec _ (ProjectSection fields _ _) =
     parens $ mconcat $ map p fields
     where
@@ -495,6 +495,15 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (ModBindBase f vn) where
       sig' = case sig of
         Nothing -> mempty
         Just (s, _) -> colon <+> ppr s <> text " "
+
+ppBinOp :: IsName v => QualName v -> Doc
+ppBinOp bop =
+  case leading of
+    Backtick -> text "`" <> ppr bop <> text "`"
+    _ -> ppr bop
+  where
+    leading =
+      leadingOperator $ nameFromString $ pretty $ pprName $ qualLeaf bop
 
 prettyBinOp ::
   (Eq vn, IsName vn, Annot f) =>

@@ -5,7 +5,6 @@ on:
     branches: [ master ]
 
   push:
-    branches: [ master ]
 
 jobs:
   build-linux-nix:
@@ -40,7 +39,7 @@ jobs:
       run: |
         sudo add-apt-repository ppa:hvr/ghc
         sudo apt-get update
-        sudo apt-get install ghc-8.8.4
+        sudo apt-get install ghc-8.10.3
         echo "/opt/ghc/bin" >> $GITHUB_PATH
 
     - uses: actions/cache@v2
@@ -55,8 +54,9 @@ jobs:
     - name: Build Futhark
       run: |
         cabal --version
+        ghc --version
         cabal update
-        cabal install --install-method=copy --overwrite-policy=always
+        cabal install -w ghc-8.10.3 --install-method=copy --overwrite-policy=always
 
   build-linux-stack:
     runs-on: ubuntu-20.04
@@ -132,7 +132,7 @@ jobs:
     - name: Install dependencies
       run: |
         choco install -y msys2
-        choco install -y ghc --version=8.8.2 --allow-downgrade
+        choco install -y ghc --version=8.10.3 --allow-downgrade
       env:
         ACTIONS_ALLOW_UNSECURE_COMMANDS: true
 
@@ -228,7 +228,7 @@ jobs:
 
     - run: |
         futhark test -c --backend=c tests examples --no-tuning
-        make -C libtests/c -j
+        make -C tests_lib/c -j
 
   test-multicore:
     runs-on: ubuntu-20.04
@@ -249,7 +249,7 @@ jobs:
 
     - run: |
         futhark test -c --backend=multicore tests examples --no-tuning
-        make -C libtests/c FUTHARK_BACKEND=multicore
+        make -C tests_lib/c FUTHARK_BACKEND=multicore
 
   test-python:
     runs-on: ubuntu-20.04
@@ -274,7 +274,7 @@ jobs:
         echo "$HOME/.local/bin" >> $GITHUB_PATH
 
     - run: |
-        futhark test -c --no-terminal --no-tuning --backend=python --exclude=no_python tests examples
+        futhark test -c --no-terminal --no-tuning --backend=python --exclude=no_python --exclude=compiled tests examples
 
   test-opencl:
     runs-on: ubuntu-20.04
@@ -370,7 +370,13 @@ jobs:
         echo "$HOME/.local/bin" >> $GITHUB_PATH
 
     - run: |
-        cd pkgtests && sh test.sh
+        tools/testparser.sh tests
+
+    - run: |
+        cd tests_pkg && sh test.sh
+
+    - run: |
+        cd tests_literate && sh test.sh
 
     - run: |
         futhark doc -o prelude-docs prelude

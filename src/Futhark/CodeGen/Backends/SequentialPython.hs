@@ -1,3 +1,4 @@
+-- | Code generation for sequential Python.
 module Futhark.CodeGen.Backends.SequentialPython
   ( compileProg,
   )
@@ -6,22 +7,24 @@ where
 import Control.Monad
 import qualified Futhark.CodeGen.Backends.GenericPython as GenericPython
 import Futhark.CodeGen.Backends.GenericPython.AST
-import Futhark.CodeGen.Backends.GenericPython.Definitions
 import qualified Futhark.CodeGen.ImpCode.Sequential as Imp
 import qualified Futhark.CodeGen.ImpGen.Sequential as ImpGen
 import Futhark.IR.SeqMem
 import Futhark.MonadFreshNames
 
+-- | Compile the program to Python.
 compileProg ::
   MonadFreshNames m =>
-  Maybe String ->
+  GenericPython.CompilerMode ->
+  String ->
   Prog SeqMem ->
   m (ImpGen.Warnings, String)
-compileProg module_name =
+compileProg mode class_name =
   ImpGen.compileProg
     >=> traverse
       ( GenericPython.compileProg
-          module_name
+          mode
+          class_name
           GenericPython.emptyConstructor
           imports
           defines
@@ -37,7 +40,7 @@ compileProg module_name =
         Import "ctypes" $ Just "ct",
         Import "time" Nothing
       ]
-    defines = [Escape pyValues, Escape pyFunctions, Escape pyPanic, Escape pyTuning]
+    defines = []
     operations :: GenericPython.Operations Imp.Sequential ()
     operations =
       GenericPython.defaultOperations

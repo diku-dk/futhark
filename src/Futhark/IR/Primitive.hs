@@ -1,9 +1,6 @@
-{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RankNTypes #-}
-{-# LANGUAGE Safe #-}
-{-# LANGUAGE TypeOperators #-}
 
 -- | Definitions of primitive types, the values that inhabit these
 -- types, and operations on these values.  A primitive value can also
@@ -117,7 +114,6 @@ import Data.Bits
 import Data.Fixed (mod') -- Weird location.
 import Data.Int (Int16, Int32, Int64, Int8)
 import qualified Data.Map as M
-import qualified Data.Text as T
 import Data.Word
 import Futhark.Util
   ( ceilDouble,
@@ -132,10 +128,6 @@ import Futhark.Util
     tgammaf,
   )
 import Futhark.Util.Pretty
-import GHC.Generics (Generic)
-import Language.SexpGrammar as Sexp
-import Language.SexpGrammar.Generic
-import Text.Read (readMaybe)
 import Prelude hiding (id, (.))
 
 -- | An integer type, ordered by size.  Note that signedness is not a
@@ -146,17 +138,7 @@ data IntType
   | Int16
   | Int32
   | Int64
-  deriving (Eq, Ord, Show, Enum, Bounded, Generic)
-
-instance SexpIso IntType where
-  sexpIso =
-    match $
-      With (sym "i8" >>>) $
-        With (sym "i16" >>>) $
-          With (sym "i32" >>>) $
-            With
-              (sym "i64" >>>)
-              End
+  deriving (Eq, Ord, Show, Enum, Bounded)
 
 instance Pretty IntType where
   ppr Int8 = text "i8"
@@ -172,15 +154,7 @@ allIntTypes = [minBound .. maxBound]
 data FloatType
   = Float32
   | Float64
-  deriving (Eq, Ord, Show, Enum, Bounded, Generic)
-
-instance SexpIso FloatType where
-  sexpIso =
-    match $
-      With (sym "f32" >>>) $
-        With
-          (sym "f64" >>>)
-          End
+  deriving (Eq, Ord, Show, Enum, Bounded)
 
 instance Pretty FloatType where
   ppr Float32 = text "f32"
@@ -196,17 +170,7 @@ data PrimType
   | FloatType FloatType
   | Bool
   | Cert
-  deriving (Eq, Ord, Show, Generic)
-
-instance SexpIso PrimType where
-  sexpIso =
-    match $
-      With (. sexpIso) $
-        With (. sexpIso) $
-          With (sym "bool" >>>) $
-            With
-              (sym "cert" >>>)
-              End
+  deriving (Eq, Ord, Show)
 
 instance Enum PrimType where
   toEnum 0 = IntType Int8
@@ -244,35 +208,13 @@ allPrimTypes =
     ++ map FloatType allFloatTypes
     ++ [Bool, Cert]
 
-numberIso :: (Read a, Pretty a) => T.Text -> Grammar p (T.Text :- t) (a :- t)
-numberIso postfix = partialOsi (fromS postfix) (toS postfix)
-  where
-    toS t s = prettyText s <> t
-
-    fromS t s
-      | t `T.isSuffixOf` s,
-        Just v <- readMaybe $ T.unpack $ T.dropEnd (T.length t) s =
-        Right v
-      | otherwise =
-        Left $ expected $ "Couldn't parse " <> t
-
 -- | An integer value.
 data IntValue
   = Int8Value !Int8
   | Int16Value !Int16
   | Int32Value !Int32
   | Int64Value !Int64
-  deriving (Eq, Ord, Show, Generic)
-
-instance SexpIso IntValue where
-  sexpIso =
-    match $
-      With (. numberIso "i8" . Sexp.symbol) $
-        With (. numberIso "i16" . Sexp.symbol) $
-          With (. numberIso "i32" . Sexp.symbol) $
-            With
-              (. numberIso "i64" . Sexp.symbol)
-              End
+  deriving (Eq, Ord, Show)
 
 instance Pretty IntValue where
   ppr (Int8Value v) = text $ show v ++ "i8"
@@ -305,7 +247,7 @@ valueIntegral (Int64Value v) = fromIntegral v
 data FloatValue
   = Float32Value !Float
   | Float64Value !Double
-  deriving (Show, Generic)
+  deriving (Show)
 
 instance Eq FloatValue where
   Float32Value x == Float32Value y = isNaN x && isNaN y || x == y
@@ -327,14 +269,6 @@ instance Ord FloatValue where
 
   (>) = flip (<)
   (>=) = flip (<=)
-
-instance SexpIso FloatValue where
-  sexpIso =
-    match $
-      With (. numberIso "f32" . Sexp.symbol) $
-        With
-          (. numberIso "f64" . Sexp.symbol)
-          End
 
 instance Pretty FloatValue where
   ppr (Float32Value v)
@@ -365,17 +299,7 @@ data PrimValue
   | BoolValue !Bool
   | -- | The only value of type @cert@.
     Checked
-  deriving (Eq, Ord, Show, Generic)
-
-instance SexpIso PrimValue where
-  sexpIso =
-    match $
-      With (. sexpIso) $
-        With (. sexpIso) $
-          With (. sexpIso) $
-            With
-              (sym "checked" >>>)
-              End
+  deriving (Eq, Ord, Show)
 
 instance Pretty PrimValue where
   ppr (IntValue v) = ppr v
@@ -420,19 +344,9 @@ data UnOp
     SSignum IntType
   | -- | Unsigned sign function: @usignum(2)@ = 1.
     USignum IntType
-  deriving (Eq, Ord, Show, Generic)
-
-instance SexpIso UnOp where
-  sexpIso =
-    match $
-      With (. Sexp.sym "not") $
-        With (. Sexp.list (Sexp.el (Sexp.sym "complement") >>> Sexp.el sexpIso)) $
-          With (. Sexp.list (Sexp.el (Sexp.sym "abs") >>> Sexp.el sexpIso)) $
-            With (. Sexp.list (Sexp.el (Sexp.sym "fabs") >>> Sexp.el sexpIso)) $
-              With (. Sexp.list (Sexp.el (Sexp.sym "ssignum") >>> Sexp.el sexpIso)) $
-                With
-                  (. Sexp.list (Sexp.el (Sexp.sym "usignum") >>> Sexp.el sexpIso))
-                  End
+  | -- | Floating-point sign function.
+    FSignum FloatType
+  deriving (Eq, Ord, Show)
 
 -- | What to do in case of arithmetic overflow.  Futhark's semantics
 -- are that overflow does wraparound, but for generated code (like
@@ -443,15 +357,7 @@ instance SexpIso UnOp where
 -- Note that all values of this type are considered equal for 'Eq' and
 -- 'Ord'.
 data Overflow = OverflowWrap | OverflowUndef
-  deriving (Show, Generic)
-
-instance SexpIso Overflow where
-  sexpIso =
-    match $
-      With (. Sexp.sym "wrap") $
-        With
-          (. Sexp.sym "undef")
-          End
+  deriving (Show)
 
 instance Eq Overflow where
   _ == _ = True
@@ -475,15 +381,7 @@ instance Ord Overflow where
 -- result will only be used when it is non-zero (so it doesn't matter
 -- what result is provided with a zero divisor, as long as the program
 -- keeps running).
-data Safety = Unsafe | Safe deriving (Eq, Ord, Show, Generic)
-
-instance SexpIso Safety where
-  sexpIso =
-    match $
-      With (. Sexp.sym "unsafe") $
-        With
-          (. Sexp.sym "safe")
-          End
+data Safety = Unsafe | Safe deriving (Eq, Ord, Show)
 
 -- | Binary operators.  These correspond closely to the binary operators in
 -- LLVM.  Most are parametrised by their expected input and output
@@ -563,7 +461,7 @@ data BinOp
     LogAnd
   | -- | Boolean or - not short-circuiting.
     LogOr
-  deriving (Eq, Ord, Show, Generic)
+  deriving (Eq, Ord, Show)
 
 -- | Comparison operators are like 'BinOp's, but they always return a
 -- boolean value.  The somewhat ugly constructor names are straight
@@ -592,7 +490,7 @@ data CmpOp
     CmpLlt
   | -- | Boolean less than or equal.
     CmpLle
-  deriving (Eq, Ord, Show, Generic)
+  deriving (Eq, Ord, Show)
 
 -- | Conversion operators try to generalise the @from t0 x to t1@
 -- instructions from LLVM.
@@ -625,7 +523,7 @@ data ConvOp
   | -- | Convert a boolean to an integer.  True is converted
     -- to 1 and False to 0.
     BToI IntType
-  deriving (Eq, Ord, Show, Generic)
+  deriving (Eq, Ord, Show)
 
 -- | A list of all unary operators for all types.
 allUnOps :: [UnOp]
@@ -636,27 +534,28 @@ allUnOps =
     ++ map FAbs [minBound .. maxBound]
     ++ map SSignum [minBound .. maxBound]
     ++ map USignum [minBound .. maxBound]
+    ++ map FSignum [minBound .. maxBound]
 
 -- | A list of all binary operators for all types.
 allBinOps :: [BinOp]
 allBinOps =
   concat
-    [ map (`Add` OverflowWrap) allIntTypes,
+    [ Add <$> allIntTypes <*> [OverflowWrap, OverflowUndef],
       map FAdd allFloatTypes,
-      map (`Sub` OverflowWrap) allIntTypes,
+      Sub <$> allIntTypes <*> [OverflowWrap, OverflowUndef],
       map FSub allFloatTypes,
-      map (`Mul` OverflowWrap) allIntTypes,
+      Mul <$> allIntTypes <*> [OverflowWrap, OverflowUndef],
       map FMul allFloatTypes,
-      map (`UDiv` Unsafe) allIntTypes,
-      map (`UDivUp` Unsafe) allIntTypes,
-      map (`SDiv` Unsafe) allIntTypes,
-      map (`SDivUp` Unsafe) allIntTypes,
+      UDiv <$> allIntTypes <*> [Unsafe, Safe],
+      UDivUp <$> allIntTypes <*> [Unsafe, Safe],
+      SDiv <$> allIntTypes <*> [Unsafe, Safe],
+      SDivUp <$> allIntTypes <*> [Unsafe, Safe],
       map FDiv allFloatTypes,
       map FMod allFloatTypes,
-      map (`UMod` Unsafe) allIntTypes,
-      map (`SMod` Unsafe) allIntTypes,
-      map (`SQuot` Unsafe) allIntTypes,
-      map (`SRem` Unsafe) allIntTypes,
+      UMod <$> allIntTypes <*> [Unsafe, Safe],
+      SMod <$> allIntTypes <*> [Unsafe, Safe],
+      SQuot <$> allIntTypes <*> [Unsafe, Safe],
+      SRem <$> allIntTypes <*> [Unsafe, Safe],
       map SMin allIntTypes,
       map UMin allIntTypes,
       map FMin allFloatTypes,
@@ -684,7 +583,8 @@ allCmpOps =
       map CmpSlt allIntTypes,
       map CmpSle allIntTypes,
       map FCmpLt allFloatTypes,
-      map FCmpLe allFloatTypes
+      map FCmpLe allFloatTypes,
+      [CmpLlt, CmpLle]
     ]
 
 -- | A list of all conversion operators for all types.
@@ -711,6 +611,7 @@ doUnOp Abs {} (IntValue v) = Just $ IntValue $ doAbs v
 doUnOp FAbs {} (FloatValue v) = Just $ FloatValue $ doFAbs v
 doUnOp SSignum {} (IntValue v) = Just $ IntValue $ doSSignum v
 doUnOp USignum {} (IntValue v) = Just $ IntValue $ doUSignum v
+doUnOp FSignum {} (FloatValue v) = Just $ FloatValue $ doFSignum v
 doUnOp _ _ = Nothing
 
 -- | E.g., @~(~1) = 1@.
@@ -732,6 +633,11 @@ doSSignum v = intValue (intValueType v) $ signum $ intToInt64 v
 -- | @usignum(-2)@ = -1.
 doUSignum :: IntValue -> IntValue
 doUSignum v = intValue (intValueType v) $ signum $ intToWord64 v
+
+-- | @fsignum(-2.0)@ = -1.0.
+doFSignum :: FloatValue -> FloatValue
+doFSignum (Float32Value v) = Float32Value $ signum v
+doFSignum (Float64Value v) = Float64Value $ signum v
 
 -- | Apply a 'BinOp' to an operand.  Returns 'Nothing' if the
 -- application is mistyped, or outside the domain (e.g. division by
@@ -965,10 +871,8 @@ doSExt (Int64Value x) t = intValue t $ toInteger x
 
 -- | Convert the former floating-point type to the latter.
 doFPConv :: FloatValue -> FloatType -> FloatValue
-doFPConv (Float32Value v) Float32 = Float32Value v
-doFPConv (Float64Value v) Float32 = Float32Value $ fromRational $ toRational v
-doFPConv (Float64Value v) Float64 = Float64Value v
-doFPConv (Float32Value v) Float64 = Float64Value $ fromRational $ toRational v
+doFPConv v Float32 = Float32Value $ floatToFloat v
+doFPConv v Float64 = Float64Value $ floatToDouble v
 
 -- | Convert a floating-point value to the nearest
 -- unsigned integer (rounding towards zero).
@@ -1051,8 +955,20 @@ intToInt :: IntValue -> Int
 intToInt = fromIntegral . intToInt64
 
 floatToDouble :: FloatValue -> Double
-floatToDouble (Float32Value v) = fromRational $ toRational v
+floatToDouble (Float32Value v)
+  | isInfinite v, v > 0 = 1 / 0
+  | isInfinite v, v < 0 = -1 / 0
+  | isNaN v = 0 / 0
+  | otherwise = fromRational $ toRational v
 floatToDouble (Float64Value v) = v
+
+floatToFloat :: FloatValue -> Float
+floatToFloat (Float64Value v)
+  | isInfinite v, v > 0 = 1 / 0
+  | isInfinite v, v < 0 = -1 / 0
+  | isNaN v = 0 / 0
+  | otherwise = fromRational $ toRational v
+floatToFloat (Float32Value v) = v
 
 -- | The result type of a binary operator.
 binOpType :: BinOp -> PrimType
@@ -1109,6 +1025,7 @@ unOpType Not = Bool
 unOpType (Complement t) = IntType t
 unOpType (Abs t) = IntType t
 unOpType (FAbs t) = FloatType t
+unOpType (FSignum t) = FloatType t
 
 -- | The input and output types of a conversion operator.
 convOpType :: ConvOp -> (PrimType, PrimType)
@@ -1517,76 +1434,6 @@ commutativeBinOp FMax {} = True
 commutativeBinOp FMin {} = True
 commutativeBinOp _ = False
 
--- SexpIso instances
-
-instance SexpIso BinOp where
-  sexpIso =
-    match $
-      With (. Sexp.list (Sexp.el (Sexp.sym "add") >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
-        With (. Sexp.list (Sexp.el (Sexp.sym "fadd") >>> Sexp.el sexpIso)) $
-          With (. Sexp.list (Sexp.el (Sexp.sym "sub") >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
-            With (. Sexp.list (Sexp.el (Sexp.sym "fsub") >>> Sexp.el sexpIso)) $
-              With (. Sexp.list (Sexp.el (Sexp.sym "mul") >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
-                With (. Sexp.list (Sexp.el (Sexp.sym "fmul") >>> Sexp.el sexpIso)) $
-                  With (. Sexp.list (Sexp.el (Sexp.sym "udiv") >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
-                    With (. Sexp.list (Sexp.el (Sexp.sym "udivup") >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
-                      With (. Sexp.list (Sexp.el (Sexp.sym "sdiv") >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
-                        With (. Sexp.list (Sexp.el (Sexp.sym "sdivup") >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
-                          With (. Sexp.list (Sexp.el (Sexp.sym "fdiv") >>> Sexp.el sexpIso)) $
-                            With (. Sexp.list (Sexp.el (Sexp.sym "fmod") >>> Sexp.el sexpIso)) $
-                              With (. Sexp.list (Sexp.el (Sexp.sym "umod") >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
-                                With (. Sexp.list (Sexp.el (Sexp.sym "smod") >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
-                                  With (. Sexp.list (Sexp.el (Sexp.sym "squot") >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
-                                    With (. Sexp.list (Sexp.el (Sexp.sym "srem") >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
-                                      With (. Sexp.list (Sexp.el (Sexp.sym "smin") >>> Sexp.el sexpIso)) $
-                                        With (. Sexp.list (Sexp.el (Sexp.sym "umin") >>> Sexp.el sexpIso)) $
-                                          With (. Sexp.list (Sexp.el (Sexp.sym "fmin") >>> Sexp.el sexpIso)) $
-                                            With (. Sexp.list (Sexp.el (Sexp.sym "smax") >>> Sexp.el sexpIso)) $
-                                              With (. Sexp.list (Sexp.el (Sexp.sym "umax") >>> Sexp.el sexpIso)) $
-                                                With (. Sexp.list (Sexp.el (Sexp.sym "fmap") >>> Sexp.el sexpIso)) $
-                                                  With (. Sexp.list (Sexp.el (Sexp.sym "shl") >>> Sexp.el sexpIso)) $
-                                                    With (. Sexp.list (Sexp.el (Sexp.sym "lshr") >>> Sexp.el sexpIso)) $
-                                                      With (. Sexp.list (Sexp.el (Sexp.sym "ashr") >>> Sexp.el sexpIso)) $
-                                                        With (. Sexp.list (Sexp.el (Sexp.sym "and") >>> Sexp.el sexpIso)) $
-                                                          With (. Sexp.list (Sexp.el (Sexp.sym "or") >>> Sexp.el sexpIso)) $
-                                                            With (. Sexp.list (Sexp.el (Sexp.sym "xor") >>> Sexp.el sexpIso)) $
-                                                              With (. Sexp.list (Sexp.el (Sexp.sym "pow") >>> Sexp.el sexpIso)) $
-                                                                With (. Sexp.list (Sexp.el (Sexp.sym "fpow") >>> Sexp.el sexpIso)) $
-                                                                  With (. Sexp.sym "logand") $
-                                                                    With
-                                                                      (. Sexp.sym "logor")
-                                                                      End
-
-instance SexpIso CmpOp where
-  sexpIso =
-    match $
-      With (. Sexp.list (Sexp.el (Sexp.sym "eq") >>> Sexp.el sexpIso)) $
-        With (. Sexp.list (Sexp.el (Sexp.sym "ult") >>> Sexp.el sexpIso)) $
-          With (. Sexp.list (Sexp.el (Sexp.sym "ule") >>> Sexp.el sexpIso)) $
-            With (. Sexp.list (Sexp.el (Sexp.sym "slt") >>> Sexp.el sexpIso)) $
-              With (. Sexp.list (Sexp.el (Sexp.sym "sle") >>> Sexp.el sexpIso)) $
-                With (. Sexp.list (Sexp.el (Sexp.sym "lt") >>> Sexp.el sexpIso)) $
-                  With (. Sexp.list (Sexp.el (Sexp.sym "le") >>> Sexp.el sexpIso)) $
-                    With (. Sexp.sym "llt") $
-                      With
-                        (. Sexp.sym "lle")
-                        End
-
-instance SexpIso ConvOp where
-  sexpIso =
-    match $
-      With (. Sexp.list (Sexp.el (Sexp.sym "zext") >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
-        With (. Sexp.list (Sexp.el (Sexp.sym "sext") >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
-          With (. Sexp.list (Sexp.el (Sexp.sym "fpconv") >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
-            With (. Sexp.list (Sexp.el (Sexp.sym "fptoui") >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
-              With (. Sexp.list (Sexp.el (Sexp.sym "fptosi") >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
-                With (. Sexp.list (Sexp.el (Sexp.sym "uitofp") >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
-                  With (. Sexp.list (Sexp.el (Sexp.sym "sitofp") >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
-                    With (. Sexp.list (Sexp.el (Sexp.sym "itob") >>> Sexp.el sexpIso)) $
-                      With
-                        (. Sexp.list (Sexp.el (Sexp.sym "btoi") >>> Sexp.el sexpIso))
-                        End
-
 -- Prettyprinting instances
 
 instance Pretty BinOp where
@@ -1656,6 +1503,7 @@ instance Pretty UnOp where
   ppr (FAbs t) = taggedF "fabs" t
   ppr (SSignum t) = taggedI "ssignum" t
   ppr (USignum t) = taggedI "usignum" t
+  ppr (FSignum t) = taggedF "fsignum" t
   ppr (Complement t) = taggedI "complement" t
 
 -- | The human-readable name for a 'ConvOp'.  This is used to expose

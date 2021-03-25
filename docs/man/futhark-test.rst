@@ -20,8 +20,8 @@ datasets.  If a directory is given, all contained files with a
 
 A Futhark test program is an ordinary Futhark program, with at least
 one test block describing input/output test cases and possibly other
-options.  A test block consists of commented-out text with the
-following overall format::
+options.  The last line must end in a newline.  A test block consists
+of commented-out text with the following overall format::
 
   description
   ==
@@ -191,18 +191,18 @@ The following program tests simple indexing and bounds checking::
   -- Test simple indexing of an array.
   -- ==
   -- tags { firsttag secondtag }
-  -- input { [4,3,2,1] 1 }
+  -- input { [4,3,2,1] 1i64 }
   -- output { 3 }
-  -- input { [4,3,2,1] 5 }
-  -- error: Assertion.*failed
+  -- input { [4,3,2,1] 5i64 }
+  -- error: Error*
 
-  let main (a: []i32) (i: i32): i32 =
+  let main (a: []i32) (i: i64): i32 =
     a[i]
 
 The following program contains two entry points, both of which are
 tested::
 
-  let add(x: i32, y: i32): i32 = x + y
+  let add (x: i32) (y: i32): i32 = x + y
 
   -- Test the add1 function.
   -- ==

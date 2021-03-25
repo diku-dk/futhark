@@ -450,33 +450,29 @@ fuseSOACwithKer unfus_set outVars soac_p soac_p_consumed ker = do
             SOAC.Hist w (ops_c <> ops_p) lam' (inp_c_arr <> inp_p_arr)
 
     -- Scatter-write fusion.
-    ( SOAC.Scatter _len2 _lam_c ivs2 as2,
+    ( SOAC.Scatter _len_c _lam_c ivs_c as_c,
       SOAC.Scatter _len_p _lam_p ivs_p as_p
       )
         | horizFuse -> do
-          let zipW xs ys = ys_p ++ xs_p ++ ys2 ++ xs2
+          let zipW as_xs xs as_ys ys = xs_indices ++ ys_indices ++ xs_vals ++ ys_vals
                 where
-                  lenx = length xs `div` 2
-                  xs_p = take lenx xs
-                  xs2 = drop lenx xs
-                  leny = length ys `div` 2
-                  ys_p = take leny ys
-                  ys2 = drop leny ys
-          let (body_p, body2) = (lambdaBody lam_p, lambdaBody lam_c)
+                  (xs_indices, xs_vals) = splitScatterResults as_xs xs
+                  (ys_indices, ys_vals) = splitScatterResults as_ys ys
+          let (body_p, body_c) = (lambdaBody lam_p, lambdaBody lam_c)
           let body' =
                 Body
-                  { bodyDec = bodyDec body_p, -- body_p and body2 have the same lores
-                    bodyStms = bodyStms body_p <> bodyStms body2,
-                    bodyResult = zipW (bodyResult body_p) (bodyResult body2)
+                  { bodyDec = bodyDec body_p, -- body_p and body_c have the same lores
+                    bodyStms = bodyStms body_p <> bodyStms body_c,
+                    bodyResult = zipW as_c (bodyResult body_c) as_p (bodyResult body_p)
                   }
           let lam' =
                 Lambda
-                  { lambdaParams = lambdaParams lam_p ++ lambdaParams lam_c,
+                  { lambdaParams = lambdaParams lam_c ++ lambdaParams lam_p,
                     lambdaBody = body',
-                    lambdaReturnType = zipW (lambdaReturnType lam_p) (lambdaReturnType lam_c)
+                    lambdaReturnType = zipW as_c (lambdaReturnType lam_c) as_p (lambdaReturnType lam_p)
                   }
           success (outNames ker ++ returned_outvars) $
-            SOAC.Scatter w lam' (ivs_p ++ ivs2) (as2 ++ as_p)
+            SOAC.Scatter w lam' (ivs_c ++ ivs_p) (as_c ++ as_p)
     (SOAC.Scatter {}, _) ->
       fail "Cannot fuse a write with anything else than a write or a map"
     (_, SOAC.Scatter {}) ->
@@ -484,19 +480,19 @@ fuseSOACwithKer unfus_set outVars soac_p soac_p_consumed ker = do
     ----------------------------
     -- Stream-Stream Fusions: --
     ----------------------------
-    (SOAC.Stream _ Sequential {} _ _, SOAC.Stream _ form_p@Sequential {} _ _)
-      | mapFusionOK (drop (length $ getStreamAccums form_p) outVars) ker || horizFuse -> do
+    (SOAC.Stream _ Sequential _ _ _, SOAC.Stream _ Sequential _ nes _)
+      | mapFusionOK (drop (length nes) outVars) ker || horizFuse -> do
         -- fuse two SEQUENTIAL streams
         (res_nms, res_stream) <- fuseStreamHelper (outNames ker) unfus_set outVars outPairs soac_c soac_p
         success res_nms res_stream
-    (SOAC.Stream _ Sequential {} _ _, SOAC.Stream _ Sequential {} _ _) ->
+    (SOAC.Stream _ Sequential _ _ _, SOAC.Stream _ Sequential _ _ _) ->
       fail "Fusion conditions not met for two SEQ streams!"
-    (SOAC.Stream _ Sequential {} _ _, SOAC.Stream {}) ->
+    (SOAC.Stream _ Sequential _ _ _, SOAC.Stream {}) ->
       fail "Cannot fuse a parallel with a sequential Stream!"
-    (SOAC.Stream {}, SOAC.Stream _ Sequential {} _ _) ->
+    (SOAC.Stream {}, SOAC.Stream _ Sequential _ _ _) ->
       fail "Cannot fuse a parallel with a sequential Stream!"
-    (SOAC.Stream {}, SOAC.Stream _ form_p _ _)
-      | mapFusionOK (drop (length $ getStreamAccums form_p) outVars) ker || horizFuse -> do
+    (SOAC.Stream {}, SOAC.Stream _ _ _ nes _)
+      | mapFusionOK (drop (length nes) outVars) ker || horizFuse -> do
         -- fuse two PARALLEL streams
         (res_nms, res_stream) <- fuseStreamHelper (outNames ker) unfus_set outVars outPairs soac_c soac_p
         success res_nms res_stream
@@ -511,7 +507,7 @@ fuseSOACwithKer unfus_set outVars soac_p soac_p_consumed ker = do
     ---   we could run in an infinite recursion, i.e., repeatedly   ---
     ---   fusing map o scan into an infinity of Stream levels!      ---
     -------------------------------------------------------------------
-    (SOAC.Stream _ form2 _ _, _) -> do
+    (SOAC.Stream _ form2 _ _ _, _) -> do
       -- If this rule is matched then soac_p is NOT a stream.
       -- To fuse a stream kernel, we transform soac_p to a stream, which
       -- borrows the sequential/parallel property of the soac_c Stream,
@@ -531,7 +527,7 @@ fuseSOACwithKer unfus_set outVars soac_p soac_p_consumed ker = do
       if soac_p' /= soac_p
         then fuseSOACwithKer unfus_set (map identName newacc_ids ++ outVars) soac_p' soac_p_consumed ker
         else fail "SOAC could not be turned into stream."
-    (_, SOAC.Stream _ form_p _ _) -> do
+    (_, SOAC.Stream _ form_p _ _ _) -> do
       -- If it reached this case then soac_c is NOT a Stream kernel,
       -- hence transform the kernel's soac to a stream and attempt
       -- stream-stream fusion recursivelly.
@@ -540,7 +536,7 @@ fuseSOACwithKer unfus_set outVars soac_p soac_p_consumed ker = do
       (soac_c', newacc_ids) <- SOAC.soacToStream soac_c
       when (soac_c' == soac_c) $ fail "SOAC could not be turned into stream."
       soac_c'' <- case form_p of
-        Sequential _ -> toSeqStream soac_c'
+        Sequential -> toSeqStream soac_c'
         _ -> return soac_c'
 
       fuseSOACwithKer unfus_set outVars soac_p soac_p_consumed $
@@ -552,8 +548,8 @@ fuseSOACwithKer unfus_set outVars soac_p soac_p_consumed ker = do
     _ -> fail "Cannot fuse"
 
 getStreamOrder :: StreamForm lore -> StreamOrd
-getStreamOrder (Parallel o _ _ _) = o
-getStreamOrder (Sequential _) = InOrder
+getStreamOrder (Parallel o _ _) = o
+getStreamOrder Sequential = InOrder
 
 fuseStreamHelper ::
   [VName] ->
@@ -568,16 +564,15 @@ fuseStreamHelper
   unfus_set
   outVars
   outPairs
-  (SOAC.Stream w2 form2 lam2 inp2_arr)
-  (SOAC.Stream _ form1 lam1 inp1_arr) =
+  (SOAC.Stream w2 form2 lam2 nes2 inp2_arr)
+  (SOAC.Stream _ form1 lam1 nes1 inp1_arr) =
     if getStreamOrder form2 /= getStreamOrder form1
       then fail "fusion conditions not met!"
       else do
         -- very similar to redomap o redomap composition, but need
         -- to remove first the `chunk' parameters of streams'
         -- lambdas and put them in the resulting stream lambda.
-        let nes1 = getStreamAccums form1
-            chunk1 = head $ lambdaParams lam1
+        let chunk1 = head $ lambdaParams lam1
             chunk2 = head $ lambdaParams lam2
             hmnms = M.fromList [(paramName chunk2, paramName chunk1)]
             lam20 = substituteNames hmnms lam2
@@ -594,7 +589,7 @@ fuseStreamHelper
                 outPairs
                 lam2'
                 []
-                (getStreamAccums form2)
+                nes2
                 inp2_arr
             res_lam'' = res_lam' {lambdaParams = chunk1 : lambdaParams res_lam'}
             unfus_accs = take (length nes1) outVars
@@ -602,21 +597,21 @@ fuseStreamHelper
         res_form <- mergeForms form2 form1
         return
           ( unfus_accs ++ out_kernms ++ unfus_arrs,
-            SOAC.Stream w2 res_form res_lam'' new_inp
+            SOAC.Stream w2 res_form res_lam'' (nes1 ++ nes2) new_inp
           )
     where
-      mergeForms (Sequential acc2) (Sequential acc1) = return $ Sequential (acc1 ++ acc2)
-      mergeForms (Parallel _ comm2 lam2r acc2) (Parallel o1 comm1 lam1r acc1) =
-        return $ Parallel o1 (comm1 <> comm2) (mergeReduceOps lam1r lam2r) (acc1 ++ acc2)
+      mergeForms Sequential Sequential = return Sequential
+      mergeForms (Parallel _ comm2 lam2r) (Parallel o1 comm1 lam1r) =
+        return $ Parallel o1 (comm1 <> comm2) (mergeReduceOps lam1r lam2r)
       mergeForms _ _ = fail "Fusing sequential to parallel stream disallowed!"
 fuseStreamHelper _ _ _ _ _ _ = fail "Cannot Fuse Streams!"
 
 -- | If a Stream is passed as argument then it converts it to a
 --   Sequential Stream; Otherwise it FAILS!
 toSeqStream :: SOAC -> TryFusion SOAC
-toSeqStream s@(SOAC.Stream _ (Sequential _) _ _) = return s
-toSeqStream (SOAC.Stream w (Parallel _ _ _ acc) l inps) =
-  return $ SOAC.Stream w (Sequential acc) l inps
+toSeqStream s@(SOAC.Stream _ Sequential _ _ _) = return s
+toSeqStream (SOAC.Stream w Parallel {} l acc inps) =
+  return $ SOAC.Stream w Sequential l acc inps
 toSeqStream _ = fail "toSeqStream expects a stream, but given a SOAC."
 
 -- Here follows optimizations and transforms to expose fusability.
@@ -690,7 +685,7 @@ iswim _ (SOAC.Screma w form arrs) ots
           mkBody
             ( oneStm $
                 Let (setPatternOuterDimTo w map_pat) (defAux ()) $
-                  Op $ Futhark.Screma w scan_form arrs'
+                  Op $ Futhark.Screma w arrs' scan_form
             )
             $ map Var $ patternNames map_pat
         map_fun' = Lambda map_params map_body map_rettype

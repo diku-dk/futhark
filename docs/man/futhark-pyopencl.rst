@@ -37,6 +37,9 @@ OPTIONS
 -h
   Print help text to standard output and exit.
 
+--entry NAME
+  Treat the specified top-level function as an entry point.
+
 --library
   Instead of compiling to an executable program, generate a Python
   module that can be imported by other Python code.  The module will
@@ -48,6 +51,9 @@ OPTIONS
 -o outfile
   Where to write the resulting binary.  By default, if the source
   program is named 'foo.fut', the binary will be named 'foo'.
+
+--server
+  Generate a server-mode executable that reads commands from stdin.
 
 --safe
   Ignore ``unsafe`` in program and perform safety checks unconditionally.

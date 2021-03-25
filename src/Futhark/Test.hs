@@ -14,12 +14,15 @@ module Futhark.Test
     FutharkExe (..),
     getValues,
     getValuesBS,
+    withValuesFile,
+    checkValueTypes,
     compareValues,
-    compareValues1,
+    checkResult,
     testRunReferenceOutput,
     getExpectedResult,
     compileProgram,
     runProgram,
+    readResults,
     ensureReferenceOutput,
     determineTuning,
     binaryName,
@@ -46,6 +49,7 @@ import Control.Exception (catch)
 import qualified Control.Exception.Base as E
 import Control.Monad
 import Control.Monad.Except
+import qualified Data.Binary as Bin
 import qualified Data.ByteString as SBS
 import qualified Data.ByteString.Lazy as BS
 import Data.Char
@@ -57,16 +61,11 @@ import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import qualified Data.Text.IO as T
 import Data.Void
-import Futhark.Analysis.Metrics
-import Futhark.IR.Primitive
-  ( FloatType (..),
-    IntType (..),
-    floatByteSize,
-    floatValue,
-    intByteSize,
-    intValue,
-  )
+import Futhark.Analysis.Metrics.Type
+import Futhark.IR.Primitive (floatByteSize, intByteSize)
+import Futhark.Server
 import Futhark.Test.Values
+import Futhark.Test.Values.Parser
 import Futhark.Util (directoryContents, pmapIO)
 import Futhark.Util.Pretty (pretty, prettyText)
 import Language.Futhark.Prop (primByteSize, primValueType)
@@ -159,7 +158,7 @@ data Values
 data GenValue
   = -- | Generate a value of the given rank and primitive
     -- type.  Scalars are considered 0-ary arrays.
-    GenValue [Int] PrimType
+    GenValue ValueType
   | -- | A fixed non-randomised primitive value.
     GenPrim PrimValue
   deriving (Show)
@@ -167,7 +166,7 @@ data GenValue
 -- | A prettyprinted representation of type of value produced by a
 -- 'GenValue'.
 genValueType :: GenValue -> String
-genValueType (GenValue ds t) =
+genValueType (GenValue (ValueType ds t)) =
   concatMap (\d -> "[" ++ show d ++ "]") ds ++ pretty t
 genValueType (GenPrim v) =
   pretty v
@@ -192,12 +191,15 @@ data Success
 
 type Parser = Parsec Void T.Text
 
+postlexeme :: Parser ()
+postlexeme = void $ hspace *> optional (try $ eol *> "--" *> postlexeme)
+
 lexeme :: Parser a -> Parser a
-lexeme p = p <* space
+lexeme p = p <* postlexeme
 
 -- Like 'lexeme', but does not consume trailing linebreaks.
 lexeme' :: Parser a -> Parser a
-lexeme' p = p <* many (oneOf (" \t" :: String))
+lexeme' p = p <* hspace
 
 lexstr :: T.Text -> Parser ()
 lexstr = void . try . lexeme . string
@@ -218,22 +220,24 @@ parseNatural =
   where
     num c = ord c - ord '0'
 
+restOfLine :: Parser T.Text
+restOfLine = do
+  l <- restOfLine_
+  if T.null l then void eol else void eol <|> eof
+  pure l
+
+restOfLine_ :: Parser T.Text
+restOfLine_ = takeWhileP Nothing (/= '\n')
+
 parseDescription :: Parser T.Text
-parseDescription = lexeme $ T.pack <$> (anySingle `manyTill` parseDescriptionSeparator)
-
-parseDescriptionSeparator :: Parser ()
-parseDescriptionSeparator =
-  try
-    ( string descriptionSeparator
-        >> void (satisfy isSpace `manyTill` newline)
-    )
-    <|> eof
-
-descriptionSeparator :: T.Text
-descriptionSeparator = "=="
+parseDescription =
+  T.unlines <$> pDescLine `manyTill` pDescriptionSeparator
+  where
+    pDescLine = "--" *> restOfLine
+    pDescriptionSeparator = void $ "-- ==" *> postlexeme
 
 parseTags :: Parser [T.Text]
-parseTags = lexstr "tags" *> braces (many parseTag) <|> pure []
+parseTags = lexeme' "tags" *> braces (many parseTag) <|> pure []
   where
     parseTag = T.pack <$> lexeme (some $ satisfy tagConstituent)
 
@@ -252,22 +256,24 @@ parseInputOutputs :: Parser [InputOutputs]
 parseInputOutputs = do
   entrys <- parseEntryPoints
   cases <- parseRunCases
-  return $ map (`InputOutputs` cases) entrys
+  return $
+    if null cases
+      then []
+      else map (`InputOutputs` cases) entrys
 
 parseEntryPoints :: Parser [T.Text]
-parseEntryPoints = (lexstr "entry:" *> many entry <* space) <|> pure ["main"]
+parseEntryPoints =
+  (lexeme' "entry:" *> many entry <* postlexeme)
+    <|> pure ["main"]
   where
     constituent c = not (isSpace c) && c /= '}'
     entry = lexeme' $ T.pack <$> some (satisfy constituent)
 
 parseRunTags :: Parser [String]
-parseRunTags = many parseTag
-  where
-    parseTag = try $
-      lexeme $ do
-        s <- some $ satisfy tagConstituent
-        guard $ s `notElem` ["input", "structure", "warning"]
-        return s
+parseRunTags = many . try . lexeme' $ do
+  s <- some $ satisfy tagConstituent
+  guard $ s `notElem` ["input", "structure", "warning"]
+  return s
 
 parseRunCases :: Parser [TestRun]
 parseRunCases = parseRunCases' (0 :: Int)
@@ -313,7 +319,7 @@ parseExpectedResult =
 
 parseExpectedError :: Parser ExpectedError
 parseExpectedError = lexeme $ do
-  s <- T.strip <$> restOfLine
+  s <- T.strip <$> restOfLine_ <* postlexeme
   if T.null s
     then return AnyError
     else -- blankCompOpt creates a regular expression that treats
@@ -326,110 +332,24 @@ parseRandomValues = GenValues <$> between (lexstr "{") (lexstr "}") (many parseG
 parseGenValue :: Parser GenValue
 parseGenValue =
   choice
-    [ GenValue <$> many dim <*> parsePrimType,
-      lexeme $
-        GenPrim
-          <$> choice
-            [ i8,
-              i16,
-              i32,
-              i64,
-              u8,
-              u16,
-              u32,
-              u64,
-              f32,
-              f64,
-              int SignedValue Int32 ""
-            ]
-    ]
-  where
-    digits = some (satisfy isDigit)
-    dim =
-      between (lexstr "[") (lexstr "]") $
-        lexeme $ read <$> digits
-
-    readint :: String -> Integer
-    readint = read -- To avoid warnings.
-    readfloat :: String -> Double
-    readfloat = read -- To avoid warnings.
-    int f t s =
-      try $
-        lexeme $
-          f . intValue t . readint <$> digits
-            <* string s
-            <* notFollowedBy (satisfy isAlphaNum)
-    i8 = int SignedValue Int8 "i8"
-    i16 = int SignedValue Int16 "i16"
-    i32 = int SignedValue Int32 "i32"
-    i64 = int SignedValue Int64 "i64"
-    u8 = int UnsignedValue Int8 "u8"
-    u16 = int UnsignedValue Int16 "u16"
-    u32 = int UnsignedValue Int32 "u32"
-    u64 = int UnsignedValue Int64 "u64"
-
-    optSuffix s suff = do
-      s' <- s
-      ((s' <>) <$> suff) <|> pure s'
-
-    float f t s =
-      try $
-        lexeme $
-          f . floatValue t . readfloat
-            <$> (digits `optSuffix` (char '.' *> (("." <>) <$> digits)))
-            <* string s
-            <* notFollowedBy (satisfy isAlphaNum)
-    f32 = float FloatValue Float32 "f32"
-    f64 = float FloatValue Float64 "f64"
-
-parsePrimType :: Parser PrimType
-parsePrimType =
-  choice
-    [ lexstr "i8" $> Signed Int8,
-      lexstr "i16" $> Signed Int16,
-      lexstr "i32" $> Signed Int32,
-      lexstr "i64" $> Signed Int64,
-      lexstr "u8" $> Unsigned Int8,
-      lexstr "u16" $> Unsigned Int16,
-      lexstr "u32" $> Unsigned Int32,
-      lexstr "u64" $> Unsigned Int64,
-      lexstr "f32" $> FloatType Float32,
-      lexstr "f64" $> FloatType Float64,
-      lexstr "bool" $> Bool
+    [ GenValue <$> lexeme parseType,
+      GenPrim <$> lexeme parsePrimValue
     ]
 
 parseValues :: Parser Values
 parseValues =
-  do
-    s <- parseBlock
-    case valuesFromByteString "input block contents" $ BS.fromStrict $ T.encodeUtf8 s of
-      Left err -> fail err
-      Right vs -> return $ Values vs
-    <|> lexstr "@" *> lexeme (InFile . T.unpack <$> nextWord)
-
-parseBlock :: Parser T.Text
-parseBlock = lexeme $ braces (T.pack <$> parseBlockBody 0)
-
-parseBlockBody :: Int -> Parser String
-parseBlockBody n = do
-  c <- lookAhead anySingle
-  case (c, n) of
-    ('}', 0) -> return mempty
-    ('}', _) -> (:) <$> anySingle <*> parseBlockBody (n -1)
-    ('{', _) -> (:) <$> anySingle <*> parseBlockBody (n + 1)
-    _ -> (:) <$> anySingle <*> parseBlockBody n
-
-restOfLine :: Parser T.Text
-restOfLine = T.pack <$> (anySingle `manyTill` (void newline <|> eof))
-
-nextWord :: Parser T.Text
-nextWord = T.pack <$> (anySingle `manyTill` satisfy isSpace)
+  choice
+    [ Values <$> braces (many $ parseValue postlexeme),
+      InFile . T.unpack <$> (lexstr "@" *> lexeme nextWord)
+    ]
+  where
+    nextWord = takeWhileP Nothing $ not . isSpace
 
 parseWarning :: Parser WarningTest
 parseWarning = lexstr "warning:" >> parseExpectedWarning
   where
     parseExpectedWarning = lexeme $ do
-      s <- T.strip <$> restOfLine
+      s <- T.strip <$> restOfLine_
       ExpectedWarning s <$> makeRegexOptsM blankCompOpt defaultExecOpt (T.unpack s)
 
 parseExpectedStructure :: Parser StructureTest
@@ -458,68 +378,41 @@ testSpec :: Parser ProgramTest
 testSpec =
   ProgramTest <$> parseDescription <*> parseTags <*> parseAction
 
-parserState :: Int -> FilePath -> s -> State s e
-parserState line name t =
-  State
-    { stateInput = t,
-      stateOffset = 0,
-      statePosState =
-        PosState
-          { pstateInput = t,
-            pstateOffset = 0,
-            pstateSourcePos =
-              SourcePos
-                { sourceName = name,
-                  sourceLine = mkPos line,
-                  sourceColumn = mkPos 3
-                },
-            pstateTabWidth = defaultTabWidth,
-            pstateLinePrefix = "-- "
-          },
-      stateParseErrors = []
-    }
-
-readTestSpec :: Int -> String -> T.Text -> Either (ParseErrorBundle T.Text Void) ProgramTest
-readTestSpec line name t =
-  snd $ runParser' (testSpec <* eof) $ parserState line name t
-
-readInputOutputs :: Int -> String -> T.Text -> Either (ParseErrorBundle T.Text Void) [InputOutputs]
-readInputOutputs line name t =
-  snd $
-    runParser' (parseDescription *> space *> parseInputOutputs <* eof) $
-      parserState line name t
-
-commentPrefix :: T.Text
-commentPrefix = T.pack "--"
-
 couldNotRead :: IOError -> IO (Either String a)
 couldNotRead = return . Left . show
 
+pProgramTest :: Parser ProgramTest
+pProgramTest = do
+  void $ many pNonTestLine
+  maybe_spec <- optional testSpec <* pEndOfTestBlock <* many pNonTestLine
+  case maybe_spec of
+    Just spec
+      | RunCases old_cases structures warnings <- testAction spec -> do
+        cases <- many $ pInputOutputs <* many pNonTestLine
+        pure spec {testAction = RunCases (old_cases ++ concat cases) structures warnings}
+      | otherwise ->
+        many pNonTestLine *> notFollowedBy "-- ==" *> pure spec
+          <?> "no more test blocks, since first test block specifies type error."
+    Nothing ->
+      eof $> noTest
+  where
+    noTest =
+      ProgramTest mempty mempty (RunCases mempty mempty mempty)
+
+    pEndOfTestBlock =
+      (void eol <|> eof) *> notFollowedBy "--"
+    pNonTestLine =
+      void $ notFollowedBy "-- ==" *> restOfLine
+    pInputOutputs =
+      parseDescription *> parseInputOutputs <* pEndOfTestBlock
+
 -- | Read the test specification from the given Futhark program.
 testSpecFromFile :: FilePath -> IO (Either String ProgramTest)
-testSpecFromFile path = do
-  blocks_or_err <-
-    (Right . testBlocks <$> T.readFile path)
-      `catch` couldNotRead
-  case blocks_or_err of
-    Left err -> return $ Left err
-    Right blocks -> do
-      let (first_spec_line, first_spec, rest_specs) =
-            case blocks of
-              [] -> (0, mempty, [])
-              (n, s) : ss -> (n, s, ss)
-      case readTestSpec (1 + first_spec_line) path first_spec of
-        Left err -> return $ Left $ errorBundlePretty err
-        Right v -> return $ foldM moreCases v rest_specs
-  where
-    moreCases test (lineno, cases) =
-      case readInputOutputs lineno path cases of
-        Left err -> Left $ errorBundlePretty err
-        Right cases' ->
-          case testAction test of
-            RunCases old_cases structures warnings ->
-              Right test {testAction = RunCases (old_cases ++ cases') structures warnings}
-            _ -> Left "Secondary test block provided, but primary test block specifies compilation error."
+testSpecFromFile path =
+  ( either (Left . errorBundlePretty) Right . parse pProgramTest path
+      <$> T.readFile path
+  )
+    `catch` couldNotRead
 
 -- | Like 'testSpecFromFile', but kills the process on error.
 testSpecFromFileOrDie :: FilePath -> IO ProgramTest
@@ -530,28 +423,6 @@ testSpecFromFileOrDie prog = do
       putStrLn err
       exitFailure
     Right spec -> return spec
-
-testBlocks :: T.Text -> [(Int, T.Text)]
-testBlocks = mapMaybe isTestBlock . commentBlocks
-  where
-    isTestBlock (n, block)
-      | any ((" " <> descriptionSeparator) `T.isPrefixOf`) block =
-        Just (n, T.unlines block)
-      | otherwise =
-        Nothing
-
-commentBlocks :: T.Text -> [(Int, [T.Text])]
-commentBlocks = commentBlocks' . zip [0 ..] . T.lines
-  where
-    isComment = (commentPrefix `T.isPrefixOf`)
-    commentBlocks' ls =
-      let ls' = dropWhile (not . isComment . snd) ls
-       in case ls' of
-            [] -> []
-            (n, _) : _ ->
-              let (block, ls'') = span (isComment . snd) ls'
-                  block' = map (T.drop 2 . snd) block
-               in (n, block') : commentBlocks' ls''
 
 -- | Read test specifications from the given path, which can be a file
 -- or directory containing @.fut@ files and further directories.
@@ -641,6 +512,42 @@ getValuesBS _ dir (InFile file) =
 getValuesBS futhark dir (GenValues gens) =
   mconcat <$> mapM (getGenBS futhark dir) gens
 
+-- | Evaluate an IO action while the values are available in the
+-- binary format in a file by some name.  The file will be removed
+-- after the action is done.
+withValuesFile ::
+  MonadIO m =>
+  FutharkExe ->
+  FilePath ->
+  Values ->
+  (FilePath -> IO a) ->
+  m a
+withValuesFile _ dir (InFile file) f
+  | takeExtension file /= ".gz" =
+    liftIO $ f $ dir </> file
+withValuesFile futhark dir vs f =
+  liftIO . withSystemTempFile "futhark-input" $ \tmpf tmpf_h -> do
+    mapM_ (BS.hPutStr tmpf_h . Bin.encode) =<< getValues futhark dir vs
+    hClose tmpf_h
+    f tmpf
+
+-- | Check that the file contains values of the expected types.
+checkValueTypes ::
+  (MonadError T.Text m, MonadIO m) => FilePath -> [TypeName] -> m ()
+checkValueTypes values_f input_types = do
+  maybe_vs <- liftIO $ readValues <$> BS.readFile values_f
+  case maybe_vs of
+    Nothing ->
+      throwError "Invalid input data format."
+    Just vs -> do
+      let vs_types = map (prettyValueTypeNoDims . valueType) vs
+      unless (vs_types == input_types) $
+        throwError $
+          T.unlines
+            [ "Expected input types: " <> T.unwords input_types,
+              "Provided input types: " <> T.unwords vs_types
+            ]
+
 -- | There is a risk of race conditions when multiple programs have
 -- identical 'GenValues'.  In such cases, multiple threads in 'futhark
 -- test' might attempt to create the same file (or read from it, while
@@ -695,7 +602,7 @@ genFileSize :: GenValue -> Integer
 genFileSize = genSize
   where
     header_size = 1 + 1 + 1 + 4 -- 'b' <version> <num_dims> <type>
-    genSize (GenValue ds t) =
+    genSize (GenValue (ValueType ds t)) =
       header_size + toInteger (length ds) * 8
         + product (map toInteger ds) * primSize t
     genSize (GenPrim v) =
@@ -788,14 +695,13 @@ compileProgram extra_options (FutharkExe futhark) backend program = do
 -- the Python backends).  The @extra_options@ are passed to the
 -- program.
 runProgram ::
-  MonadIO m =>
   FutharkExe ->
   FilePath ->
   [String] ->
   String ->
   T.Text ->
   Values ->
-  m (ExitCode, SBS.ByteString, SBS.ByteString)
+  IO (ExitCode, SBS.ByteString, SBS.ByteString)
 runProgram futhark runner extra_options prog entry input = do
   let progbin = binaryName prog
       dir = takeDirectory prog
@@ -808,6 +714,29 @@ runProgram futhark runner extra_options prog entry input = do
 
   input' <- getValuesBS futhark dir input
   liftIO $ readProcessWithExitCode to_run to_run_args $ BS.toStrict input'
+
+-- | Read the given variables from a running server.
+readResults ::
+  (MonadIO m, MonadError T.Text m) =>
+  Server ->
+  [VarName] ->
+  FilePath ->
+  m [Value]
+readResults server outs program =
+  join . liftIO . withSystemTempFile "futhark-output" $ \outputf outputh -> do
+    hClose outputh
+    store_r <- cmdStore server outputf outs
+    case store_r of
+      Just (CmdFailure _ err) ->
+        pure $ throwError $ T.unlines err
+      Nothing -> do
+        bytes <- BS.readFile outputf
+        case valuesFromByteString "output" bytes of
+          Left e -> do
+            let actualf = program `addExtension` "actual"
+            liftIO $ BS.writeFile actualf bytes
+            pure $ throwError $ T.pack e <> "\n(See " <> T.pack actualf <> ")"
+          Right vs -> pure $ pure vs
 
 -- | Ensure that any reference output files exist, or create them (by
 -- compiling the program with the reference compiler and running it on
@@ -874,3 +803,28 @@ determineTuning (Just ext) program = do
           " (using " <> takeFileName (program <.> ext) <> ")"
         )
     else return ([], mempty)
+
+-- | Check that the result is as expected, and write files and throw
+-- an error if not.
+checkResult ::
+  (MonadError T.Text m, MonadIO m) =>
+  FilePath ->
+  [Value] ->
+  [Value] ->
+  m ()
+checkResult program expected_vs actual_vs =
+  case compareValues actual_vs expected_vs of
+    mismatch : mismatches -> do
+      let actualf = program <.> "actual"
+          expectedf = program <.> "expected"
+      liftIO $ BS.writeFile actualf $ mconcat $ map Bin.encode actual_vs
+      liftIO $ BS.writeFile expectedf $ mconcat $ map Bin.encode expected_vs
+      throwError $
+        T.pack actualf <> " and " <> T.pack expectedf
+          <> " do not match:\n"
+          <> T.pack (show mismatch)
+          <> if null mismatches
+            then mempty
+            else "\n...and " <> prettyText (length mismatches) <> " other mismatches."
+    [] ->
+      return ()

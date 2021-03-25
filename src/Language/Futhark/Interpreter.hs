@@ -30,7 +30,7 @@ import Control.Monad.Reader
 import Control.Monad.State
 import Control.Monad.Trans.Maybe
 import Data.Array
-import Data.Bifunctor (first)
+import Data.Bifunctor (first, second)
 import Data.List
   ( find,
     foldl',
@@ -262,17 +262,19 @@ instance Eq Value where
   _ == _ = False
 
 instance Pretty Value where
-  ppr (ValuePrim v) = ppr v
-  ppr (ValueArray _ a) =
+  ppr = pprPrec 0
+  pprPrec _ (ValuePrim v) = ppr v
+  pprPrec _ (ValueArray _ a) =
     let elements = elems a -- [Value]
         (x : _) = elements
         separator = case x of
           ValueArray _ _ -> comma <> line
           _ -> comma <> space
      in brackets $ cat $ punctuate separator (map ppr elements)
-  ppr (ValueRecord m) = prettyRecord m
-  ppr ValueFun {} = text "#<fun>"
-  ppr (ValueSum _ n vs) = text "#" <> sep (ppr n : map ppr vs)
+  pprPrec _ (ValueRecord m) = prettyRecord m
+  pprPrec _ ValueFun {} = text "#<fun>"
+  pprPrec p (ValueSum _ n vs) =
+    parensIf (p > 0) $ text "#" <> sep (ppr n : map (pprPrec 1) vs)
 
 valueShape :: Value -> ValueShape
 valueShape (ValueArray shape _) = shape
@@ -1002,11 +1004,11 @@ eval env (LetWith dest src is v body _ loc) = do
 eval env (Lambda ps body _ (Info (_, rt)) _) =
   evalFunction env [] ps body rt
 eval env (OpSection qv (Info t) _) = evalTermVar env qv $ toStruct t
-eval env (OpSectionLeft qv _ e (Info (_, argext), _) (Info t, Info retext) loc) = do
+eval env (OpSectionLeft qv _ e (Info (_, _, argext), _) (Info t, Info retext) loc) = do
   v <- evalArg env e argext
   f <- evalTermVar env qv (toStruct t)
   returned env t retext =<< apply loc env f v
-eval env (OpSectionRight qv _ e (Info _, Info (_, argext)) (Info t) loc) = do
+eval env (OpSectionRight qv _ e (Info _, Info (_, _, argext)) (Info t) loc) = do
   y <- evalArg env e argext
   return $
     ValueFun $ \x -> do
@@ -1108,19 +1110,27 @@ evalCase v env (CasePat p cExp _) = runMaybeT $ do
   env' <- patternMatch env p v
   lift $ eval env' cExp
 
+-- We hackily do multiple substitutions in modules, because otherwise
+-- we would lose in cases where the parameter substitutions are [a->x,
+-- b->x] when we reverse. (See issue #1250.)
+reverseSubstitutions :: M.Map VName VName -> M.Map VName [VName]
+reverseSubstitutions =
+  M.fromListWith (<>) . map (second pure . uncurry (flip (,))) . M.toList
+
 substituteInModule :: M.Map VName VName -> Module -> Module
 substituteInModule substs = onModule
   where
     rev_substs = reverseSubstitutions substs
-    replace v = fromMaybe v $ M.lookup v rev_substs
-    replaceQ v = maybe v qualName $ M.lookup (qualLeaf v) rev_substs
+    replace v = fromMaybe [v] $ M.lookup v rev_substs
+    replaceQ v = maybe v qualName $ maybeHead =<< M.lookup (qualLeaf v) rev_substs
     replaceM f m = M.fromList $ do
       (k, v) <- M.toList m
-      return (replace k, f v)
+      k' <- replace k
+      return (k', f v)
     onModule (Module (Env terms types _)) =
       Module $ Env (replaceM onTerm terms) (replaceM onType types) mempty
     onModule (ModuleFun f) =
-      ModuleFun $ \m -> onModule <$> f (substituteInModule rev_substs m)
+      ModuleFun $ \m -> onModule <$> f (substituteInModule (M.mapMaybe maybeHead rev_substs) m)
     onTerm (TermValue t v) = TermValue t v
     onTerm (TermPoly t v) = TermPoly t v
     onTerm (TermModule m) = TermModule $ onModule m
@@ -1128,9 +1138,6 @@ substituteInModule substs = onModule
     onDim (NamedDim v) = NamedDim $ replaceQ v
     onDim (ConstDim x) = ConstDim x
     onDim AnyDim = AnyDim
-
-reverseSubstitutions :: M.Map VName VName -> M.Map VName VName
-reverseSubstitutions = M.fromList . map (uncurry $ flip (,)) . M.toList
 
 evalModuleVar :: Env -> QualName VName -> EvalM Module
 evalModuleVar env qv =
@@ -1553,6 +1560,36 @@ initialCtx =
           if i >= 0 && i < arrayLength arr'
             then arr' // [(i, v)]
             else arr'
+    def "scatter_2d" = Just $
+      fun3t $ \arr is vs ->
+        case arr of
+          ValueArray _ _ ->
+            return $
+              foldl' update arr $
+                zip (map fromTuple $ snd $ fromArray is) (snd $ fromArray vs)
+          _ ->
+            error $ "scatter_2d expects array, but got: " ++ pretty arr
+      where
+        update :: Value -> (Maybe [Value], Value) -> Value
+        update arr (Just idxs@[_, _], v) =
+          fromMaybe arr $ updateArray (map (IndexingFix . asInt64) idxs) arr v
+        update _ _ =
+          error "scatter_2d expects 2-dimensional indices"
+    def "scatter_3d" = Just $
+      fun3t $ \arr is vs ->
+        case arr of
+          ValueArray _ _ ->
+            return $
+              foldl' update arr $
+                zip (map fromTuple $ snd $ fromArray is) (snd $ fromArray vs)
+          _ ->
+            error $ "scatter_3d expects array, but got: " ++ pretty arr
+      where
+        update :: Value -> (Maybe [Value], Value) -> Value
+        update arr (Just idxs@[_, _, _], v) =
+          fromMaybe arr $ updateArray (map (IndexingFix . asInt64) idxs) arr v
+        update _ _ =
+          error "scatter_3d expects 3-dimensional indices"
     def "hist" = Just $
       fun6t $ \_ arr fun _ is vs ->
         case arr of
@@ -1624,13 +1661,14 @@ initialCtx =
       fun2t $ \i xs -> do
         let (shape, xs') = fromArray xs
         return $
-          if asInt i > 0
-            then
-              let (bef, aft) = splitAt (asInt i) xs'
-               in toArray shape $ aft ++ bef
-            else
-              let (bef, aft) = splitFromEnd (- asInt i) xs'
-               in toArray shape $ aft ++ bef
+          let idx = if null xs' then 0 else rem (asInt i) (length xs')
+           in if idx > 0
+                then
+                  let (bef, aft) = splitAt idx xs'
+                   in toArray shape $ aft ++ bef
+                else
+                  let (bef, aft) = splitFromEnd (- idx) xs'
+                   in toArray shape $ aft ++ bef
     def "flatten" = Just $
       fun1 $ \xs -> do
         let (ShapeDim n (ShapeDim m shape), xs') = fromArray xs
@@ -1698,9 +1736,9 @@ interpretFunction :: Ctx -> VName -> [F.Value] -> Either String (F ExtOp Value)
 interpretFunction ctx fname vs = do
   ft <- case lookupVar (qualName fname) $ ctxEnv ctx of
     Just (TermValue (Just (T.BoundV _ t)) _) ->
-      Right $ updateType (map valueType vs) t
+      updateType (map valueType vs) t
     Just (TermPoly (Just (T.BoundV _ t)) _) ->
-      Right $ updateType (map valueType vs) t
+      updateType (map valueType vs) t
     _ ->
       Left $ "Unknown function `" <> prettyName fname <> "`."
 
@@ -1715,9 +1753,26 @@ interpretFunction ctx fname vs = do
       f <- evalTermVar (ctxEnv ctx) (qualName fname) ft
       foldM (apply noLoc mempty) f vs'
   where
-    updateType (vt : vts) (Scalar (Arrow als u _ rt)) =
-      Scalar $ Arrow als u (valueStructType vt) $ updateType vts rt
-    updateType _ t = t
+    updateType (vt : vts) (Scalar (Arrow als u pt rt)) = do
+      checkInput vt pt
+      Scalar . Arrow als u (valueStructType vt) <$> updateType vts rt
+    updateType _ t =
+      Right t
+
+    -- FIXME: we don't check array sizes.
+    checkInput :: ValueType -> StructType -> Either String ()
+    checkInput (Scalar (Prim vt)) (Scalar (Prim pt))
+      | vt /= pt = badPrim vt pt
+    checkInput (Array _ _ (Prim vt) _) (Array _ _ (Prim pt) _)
+      | vt /= pt = badPrim vt pt
+    checkInput _ _ =
+      Right ()
+
+    badPrim vt pt =
+      Left . pretty $
+        "Invalid argument type."
+          </> "Expected:" <+> align (ppr pt)
+          </> "Got:     " <+> align (ppr vt)
 
     convertValue (F.PrimValue p) = Just $ ValuePrim p
     convertValue (F.ArrayValue arr t) = mkArray t =<< mapM convertValue (elems arr)

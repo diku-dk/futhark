@@ -1115,7 +1115,7 @@ instance MonadUnify UnifyM where
           </> indent 2 (ppr t2)
           </> "do not match."
 
--- | Construct a the name of a new type variable given a base
+-- | Construct the name of a new type variable given a base
 -- description and a tag number (note that this is distinct from
 -- actually constructing a VName; the tag here is intended for human
 -- consumption but the machine does not care).

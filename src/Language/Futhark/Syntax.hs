@@ -1,7 +1,6 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE Safe #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE Strict #-}
 
@@ -129,6 +128,8 @@ class
     Show (f Int),
     Show (f StructType),
     Show (f (StructType, Maybe VName)),
+    Show (f (PName, StructType)),
+    Show (f (PName, StructType, Maybe VName)),
     Show (f (Aliasing, StructType)),
     Show (f (M.Map VName VName)),
     Show (f Uniqueness)
@@ -754,7 +755,7 @@ data ExpBase f vn
       (QualName vn)
       (f PatternType)
       (ExpBase f vn)
-      (f (StructType, Maybe VName), f StructType)
+      (f (PName, StructType, Maybe VName), f (PName, StructType))
       (f PatternType, f [VName])
       SrcLoc
   | -- | @+2@; first type is operand, second is result.
@@ -762,7 +763,7 @@ data ExpBase f vn
       (QualName vn)
       (f PatternType)
       (ExpBase f vn)
-      (f StructType, f (StructType, Maybe VName))
+      (f (PName, StructType), f (PName, StructType, Maybe VName))
       (f PatternType)
       SrcLoc
   | -- | Field projection as a section: @(.x.y.z)@.

@@ -1,7 +1,8 @@
 -- Integers can contain underscores
 -- ==
--- input { 100_000i32 }
+-- input {  }
 -- output { 101000i32 }
 
-let main(x: i32) =
-  x + i32.i16(1_000i16)
+let main =
+  let x = 100_000i32
+  in x + i32.i16(1_000i16)

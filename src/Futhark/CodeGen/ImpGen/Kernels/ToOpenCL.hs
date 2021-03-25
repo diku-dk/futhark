@@ -414,7 +414,11 @@ genOpenClPrelude ts =
     [C.cedecl|$esc:("#endif")|],
     [C.cedecl|$esc:("#pragma OPENCL EXTENSION cl_khr_byte_addressable_store : enable")|]
   ]
-    ++ [[C.cedecl|$esc:("#pragma OPENCL EXTENSION cl_khr_fp64 : enable")|] | uses_float64]
+    ++ concat
+      [ [C.cunit|$esc:("#pragma OPENCL EXTENSION cl_khr_fp64 : enable")
+                 $esc:("#define FUTHARK_F64_ENABLED")|]
+        | uses_float64
+      ]
     ++ [C.cunit|
 /* Some OpenCL programs dislike empty progams, or programs with no kernels.
  * Declare a dummy kernel to ensure they remain our friends. */
@@ -423,6 +427,9 @@ __kernel void dummy_kernel(__global unsigned char *dummy, int n)
     const int thread_gid = get_global_id(0);
     if (thread_gid >= n) return;
 }
+
+$esc:("#pragma OPENCL EXTENSION cl_khr_int64_base_atomics : enable")
+$esc:("#pragma OPENCL EXTENSION cl_khr_int64_extended_atomics : enable")
 
 typedef char int8_t;
 typedef short int16_t;
@@ -469,6 +476,7 @@ genCUDAPrelude =
     cudafy =
       [CUDAC.cunit|
 $esc:("#define FUTHARK_CUDA")
+$esc:("#define FUTHARK_F64_ENABLED")
 
 typedef char int8_t;
 typedef short int16_t;
@@ -688,10 +696,49 @@ inKernelOperations mode body =
       where
         op' = op ++ "_" ++ pretty t ++ "_" ++ atomicSpace s
 
+    doAtomicCmpXchg s t old arr ind cmp val ty = do
+      ind' <- GC.compileExp $ untyped $ unCount ind
+      cmp' <- GC.compileExp cmp
+      val' <- GC.compileExp val
+      cast <- atomicCast s ty
+      GC.stm [C.cstm|$id:old = $id:op(&(($ty:cast *)$id:arr)[$exp:ind'], $exp:cmp', $exp:val');|]
+      where
+        op = "atomic_cmpxchg_" ++ pretty t ++ "_" ++ atomicSpace s
+    doAtomicXchg s t old arr ind val ty = do
+      cast <- atomicCast s ty
+      ind' <- GC.compileExp $ untyped $ unCount ind
+      val' <- GC.compileExp val
+      GC.stm [C.cstm|$id:old = $id:op(&(($ty:cast *)$id:arr)[$exp:ind'], $exp:val');|]
+      where
+        op = "atomic_chg_" ++ pretty t ++ "_" ++ atomicSpace s
+    -- First the 64-bit operations.
+    atomicOps s (AtomicAdd Int64 old arr ind val) =
+      doAtomic s Int64 old arr ind val "atomic_add" [C.cty|typename int64_t|]
+    atomicOps s (AtomicFAdd Float64 old arr ind val) =
+      doAtomic s Float64 old arr ind val "atomic_fadd" [C.cty|double|]
+    atomicOps s (AtomicSMax Int64 old arr ind val) =
+      doAtomic s Int64 old arr ind val "atomic_smax" [C.cty|typename int64_t|]
+    atomicOps s (AtomicSMin Int64 old arr ind val) =
+      doAtomic s Int64 old arr ind val "atomic_smin" [C.cty|typename int64_t|]
+    atomicOps s (AtomicUMax Int64 old arr ind val) =
+      doAtomic s Int64 old arr ind val "atomic_umax" [C.cty|unsigned int64_t|]
+    atomicOps s (AtomicUMin Int64 old arr ind val) =
+      doAtomic s Int64 old arr ind val "atomic_umin" [C.cty|unsigned int64_t|]
+    atomicOps s (AtomicAnd Int64 old arr ind val) =
+      doAtomic s Int64 old arr ind val "atomic_and" [C.cty|typename int64_t|]
+    atomicOps s (AtomicOr Int64 old arr ind val) =
+      doAtomic s Int64 old arr ind val "atomic_or" [C.cty|typename int64_t|]
+    atomicOps s (AtomicXor Int64 old arr ind val) =
+      doAtomic s Int64 old arr ind val "atomic_xor" [C.cty|typename int64_t|]
+    atomicOps s (AtomicCmpXchg (IntType Int64) old arr ind cmp val) =
+      doAtomicCmpXchg s (IntType Int64) old arr ind cmp val [C.cty|typename int64_t|]
+    atomicOps s (AtomicXchg (IntType Int64) old arr ind val) =
+      doAtomicXchg s (IntType Int64) old arr ind val [C.cty|typename int64_t|]
+    --
     atomicOps s (AtomicAdd t old arr ind val) =
       doAtomic s t old arr ind val "atomic_add" [C.cty|int|]
-    atomicOps s (AtomicFAdd t old arr ind val) =
-      doAtomic s t old arr ind val "atomic_fadd" [C.cty|float|]
+    atomicOps s (AtomicFAdd Float32 old arr ind val) =
+      doAtomic s Float32 old arr ind val "atomic_fadd" [C.cty|float|]
     atomicOps s (AtomicSMax t old arr ind val) =
       doAtomic s t old arr ind val "atomic_smax" [C.cty|int|]
     atomicOps s (AtomicSMin t old arr ind val) =
@@ -706,21 +753,10 @@ inKernelOperations mode body =
       doAtomic s t old arr ind val "atomic_or" [C.cty|int|]
     atomicOps s (AtomicXor t old arr ind val) =
       doAtomic s t old arr ind val "atomic_xor" [C.cty|int|]
-    atomicOps s (AtomicCmpXchg t old arr ind cmp val) = do
-      ind' <- GC.compileExp $ untyped $ unCount ind
-      cmp' <- GC.compileExp cmp
-      val' <- GC.compileExp val
-      cast <- atomicCast s [C.cty|int|]
-      GC.stm [C.cstm|$id:old = $id:op(&(($ty:cast *)$id:arr)[$exp:ind'], $exp:cmp', $exp:val');|]
-      where
-        op = "atomic_cmpxchg_" ++ pretty t ++ "_" ++ atomicSpace s
-    atomicOps s (AtomicXchg t old arr ind val) = do
-      ind' <- GC.compileExp $ untyped $ unCount ind
-      val' <- GC.compileExp val
-      cast <- atomicCast s [C.cty|int|]
-      GC.stm [C.cstm|$id:old = $id:op(&(($ty:cast *)$id:arr)[$exp:ind'], $exp:val');|]
-      where
-        op = "atomic_cmpxchg_" ++ pretty t ++ "_" ++ atomicSpace s
+    atomicOps s (AtomicCmpXchg t old arr ind cmp val) =
+      doAtomicCmpXchg s t old arr ind cmp val [C.cty|int|]
+    atomicOps s (AtomicXchg t old arr ind val) =
+      doAtomicXchg s t old arr ind val [C.cty|int|]
 
     cannotAllocate :: GC.Allocate KernelOp KernelState
     cannotAllocate _ =
