@@ -1,3 +1,4 @@
+{-# LANGUAGE TemplateHaskell #-}
 {-# Language QuasiQuotes #-}
 
 --
@@ -26,10 +27,11 @@ import Futhark.MonadFreshNames
 
 import qualified Data.Text as T
 import NeatInterpolation (text)
+import Data.FileEmbed
 import Data.List (nub, intercalate)
 
 -- | Compile the program to sequential C with a JavaScript wrapper.
-compileProg :: MonadFreshNames m => Prog SeqMem -> m (ImpGen.Warnings, (GC.CParts, String))
+compileProg :: MonadFreshNames m => Prog SeqMem -> m (ImpGen.Warnings, (GC.CParts, String, [String]))
 compileProg prog = do
   (ws, prog') <- ImpGen.compileProg prog
   
@@ -42,7 +44,7 @@ compileProg prog = do
       [DefaultSpace]
       []
       prog'
-  pure (ws, (prog'', javascriptWrapper (fRepMyRep prog')))
+  pure (ws, (prog'', javascriptWrapper (fRepMyRep prog'), emccExportNames (fRepMyRep prog')))
   -- pure (ws, (prog'', undefined))
   where
     operations :: GC.Operations Imp.Sequential ()
@@ -91,6 +93,13 @@ data JSEntryPoint = JSEntryPoint { name :: String,
                                    ret :: [EntryPointTyp]
                                  }
 
+jsServer :: String
+jsServer = $(embedStringFile "rts/javascript/server.js")
+
+jsValues :: String
+jsValues = $(embedStringFile "rts/javascript/values.js")
+
+
 initFunc :: String
 initFunc = 
   T.unpack 
@@ -118,8 +127,10 @@ resDataHeap idx arrType =
                             
 javascriptWrapper :: [JSEntryPoint] -> String
 javascriptWrapper entryPoints = unlines 
-  [cwraps,
-   cwrapsJSE entryPoints,
+  [jsServer,
+  jsValues,
+  cwraps,
+  cwrapsJSE entryPoints,
   unlines $ map (cwrapEntryPoint) entryPoints,
   initFunc,
   ptrFromWrap,
@@ -201,6 +212,16 @@ cwrapsJSE jses =
     gfn typ str = "futhark_" ++ typ ++ "_" ++ baseType str ++ "_" ++ show (dim str) ++ "d"
   
   
+emccExportNames :: [JSEntryPoint] -> [String]
+emccExportNames jses =
+    map (\arg -> gfn "new" arg) jses' ++
+    map (\arg -> gfn "shape" arg) jses' ++
+    map (\arg -> gfn "values_raw" arg) jses' ++
+    map (\arg -> gfn "values" arg)  jses'
+  where
+    jses' = filter (\t -> dim t >  0) $ nub $ concatMap (\jse -> (parameters jse) ++ (ret jse)) jses
+    gfn typ str = "futhark_" ++ typ ++ "_" ++ baseType str ++ "_" ++ show (dim str) ++ "d"
+
 
 cwrapFun :: String -> Int -> String
 cwrapFun fname numArgs =

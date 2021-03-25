@@ -203,7 +203,7 @@ compileCtoWASMAction fcfg mode outpath =
     }
   where
     helper prog = do
-      (cprog, jsprog) <- handleWarnings fcfg $ SequentialWASM.compileProg prog
+      (cprog, jsprog, exps) <- handleWarnings fcfg $ SequentialWASM.compileProg prog
       let cpath = outpath `addExtension` "c"
           hpath = outpath `addExtension` "h"
 
