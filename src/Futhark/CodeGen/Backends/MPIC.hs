@@ -206,13 +206,12 @@ compileOp (Segop _name _params code _retvals iterations) = do
   i <- GC.compileExp iterations
   GC.decl [C.cdecl|typename int64_t iterations = $exp:i;|]
   GC.compileCode code
-compileOp (Gather output) = do
-  -- This part should be perfected in the future.
-  GC.decl [C.cdecl|typename int64_t mem_chunk_size = ($id:output.size/ctx->world_size);|]
-  GC.decl [C.cdecl|typename int64_t start = mem_chunk_size*ctx->rank;|]
+compileOp (Gather memory start size) = do
+  GC.stm [C.cstm| $id:size = ($id:memory.size/ctx->world_size);|]
+  GC.stm [C.cstm| $id:start = $id:size*ctx->rank;|]
   GC.stm
-    [C.cstm|MPI_Gather($id:output.mem+start, mem_chunk_size, MPI_BYTE, 
-                  $id:output.mem, mem_chunk_size, MPI_BYTE, 0, MPI_COMM_WORLD);|]
+    [C.cstm|MPI_Gather($id:memory.mem+$id:start, $id:size, MPI_BYTE, 
+                  $id:memory.mem, $id:size, MPI_BYTE, 0, MPI_COMM_WORLD);|]
 compileOp (DistributedLoop _s i prebody body postbody _ _) = do
   GC.compileCode prebody
   GC.decl [C.cdecl|typename int64_t chunk_size = iterations/ctx->world_size;|]

@@ -29,7 +29,7 @@ data MPIOp
   | LoadNbNode VName
   | LoadNodeId VName
   | DistributedLoop String VName Code Code Code [Param] VName
-  | Gather VName
+  | Gather VName VName VName 
   | CrashWithThisMessage String
   deriving (Show)
 
@@ -54,8 +54,11 @@ instance Pretty MPIOp where
       <+> langle
       <+> nestedBlock "{" "}" (ppr body)
       <+> ppr postbody
-  ppr (Gather name) =
-    text "Gather" <+> ppr name
+  ppr (Gather memory start size) =
+    text "Gather" 
+      <+> ppr memory
+      <+> ppr start
+      <+> ppr size
 
 -- The free variables of an MPIOp.
 instance FreeIn MPIOp where
@@ -64,4 +67,4 @@ instance FreeIn MPIOp where
   freeIn' (LoadNodeId _) = mempty
   freeIn' (DistributedLoop _ _ prebody body postbody _ _) = freeIn' prebody <> fvBind (Imp.declaredIn prebody) (freeIn' $ body <> postbody)
   freeIn' (Segop _ _ code _ _) = freeIn' code
-  freeIn' (Gather _) = mempty
+  freeIn' Gather {} = mempty
