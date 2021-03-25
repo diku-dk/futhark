@@ -1,13 +1,24 @@
 #!/bin/sh
 #
-# Generate and upload documentation to Hackage.
+# Generate adists and documentation for Hackage.  Only creates package
+# candidates, which are then manually enabled.
 
 set -e
 
-dir=$(mktemp -d dist-docs.XXXXXX)
+user=TroelsHenriksen
+pass=$HACKAGE_KEY
+
+dir=$(mktemp -d dist.XXXXXX)
 trap 'rm -rf "$dir"' EXIT
 
-# assumes cabal 2.4 or later
+echo "Generating sdist..."
+cabal sdist --builddir="$dir"
+
+echo "Uploading sdist..."
+cabal upload --username=$user --password=$pass $dir/sdist/*.tar.gz
+
+echo "Generating Haddock..."
 cabal v2-haddock --builddir="$dir" --haddock-for-hackage --enable-doc
 
-cabal upload -d --publish $dir/*-docs.tar.gz
+echo "Uploading Haddock..."
+cabal upload --username=$user --password=$pass -d $dir/*-docs.tar.gz
