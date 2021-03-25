@@ -214,10 +214,10 @@ cwrapsJSE jses =
   
 emccExportNames :: [JSEntryPoint] -> [String]
 emccExportNames jses =
-    map (\arg -> gfn "new" arg) jses' ++
-    map (\arg -> gfn "shape" arg) jses' ++
-    map (\arg -> gfn "values_raw" arg) jses' ++
-    map (\arg -> gfn "values" arg)  jses'
+    map (\arg -> "'" ++ gfn "new" arg ++ "'") jses' ++
+    map (\arg -> "'" ++ gfn "shape" arg ++ "'") jses' ++
+    map (\arg -> "'" ++ gfn "values_raw" arg ++ "'") jses' ++
+    map (\arg -> "'" ++ gfn "values" arg ++ "'")  jses'
   where
     jses' = filter (\t -> dim t >  0) $ nub $ concatMap (\jse -> (parameters jse) ++ (ret jse)) jses
     gfn typ str = "futhark_" ++ typ ++ "_" ++ baseType str ++ "_" ++ show (dim str) ++ "d"

@@ -19,6 +19,8 @@ where
 
 import Control.Monad
 import Control.Monad.IO.Class
+import qualified Data.ByteString.Lazy.Char8 as ByteString
+import Data.List (intercalate)
 import Data.Maybe (fromMaybe)
 import Futhark.Analysis.Alias
 import Futhark.Analysis.Metrics
@@ -126,8 +128,8 @@ runCC cpath outpath cflags_def ldflags = do
     Right (ExitSuccess, _, _) ->
       return ()
 
-runEMCC :: String -> String -> [String] -> [String] -> FutharkM ()
-runEMCC cpath outpath cflags_def ldflags = do
+runEMCC :: String -> String -> [String] -> [String] -> [String] -> FutharkM ()
+runEMCC cpath outpath cflags_def ldflags expfuns = do
   ret <-
     liftIO $
       runProgramWithExitCode
@@ -136,9 +138,13 @@ runEMCC cpath outpath cflags_def ldflags = do
             ++ ["-lnodefs.js", "-s", "ALLOW_MEMORY_GROWTH=1"]
             ++ ["-s", "--post-js", "futharkClass.js"]
             ++ cmdCFLAGS cflags_def
-            ++
+            ++ ["-s", "EXPORTED_FUNCTIONS=" ++ 
+              intercalate "," ("'malloc'":expfuns) ++
+              "]"]
+            ++ ["-s", "EXTRA_EXPORTED_RUNTIME_METHODS=['cwrap', 'getValue']"]
+
             -- The default LDFLAGS are always added.
-            ldflags
+            ++ ldflags
         )
         mempty
   case ret of
@@ -199,13 +205,13 @@ compileCtoWASMAction fcfg mode outpath =
           liftIO $ writeFile cpath imp
           liftIO $ writeFile cpath imp
           liftIO $ writeFile "futharkClass.js" jsprog
-          runEMCC cpath outpath ["-O"] ["-lm"]
+          runEMCC cpath outpath ["-O"] ["-lm"] exps
         ToExecutable -> do
           liftIO $ writeFile cpath $ SequentialC.asExecutable cprog
-          runEMCC cpath outpath ["-O"] ["-lm"]
+          runEMCC cpath outpath ["-O"] ["-lm"] exps
         ToServer -> do
           liftIO $ writeFile cpath $ SequentialC.asServer cprog
-          runEMCC cpath outpath ["-O"] ["-lm"]
+          runEMCC cpath outpath ["-O"] ["-lm"] exps
 
 -- | The @futhark opencl@ action.
 compileOpenCLAction :: FutharkConfig -> CompilerMode -> FilePath -> Action KernelsMem

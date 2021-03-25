@@ -131,15 +131,23 @@ class Server {
     // TODO make sure this is legal 
     var args = args.slice(1);
     
-    var fs = require("fs"); 
-    var reader = ReaderInput(f);
+    // Reading from file is part of values.js
+    var reader = ReaderInput(fname);
     while (args != []) {
       var vname = args[0];
       var typename = args[1];
       args = args.slice(2);
       
       // TODO finish the rest of this function
-      if (this._vars.includes()) {}
+      if (this._vars.includes(vname)) {
+        throw "Variable already exists: " + vname;
+      }
+      try {
+        this._vars[vname] = read_value(typename, reader);
+      } catch (err) {
+        err_msg = "Failed to restore variable " + vname + ".\nPossibly malformed data in " + fname + ".\n";
+        throw "Failed to restore variable " + err_msg;
+      }
     }
   }
 
