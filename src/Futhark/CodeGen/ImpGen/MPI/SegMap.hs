@@ -20,7 +20,6 @@ writeResult is pe (Returns _ se) =
 writeResult _ _ res =
   error $ "writeResult: cannot handle " ++ pretty res
 
-
 compileSegMapBody ::
   TV Int64 ->
   Pattern MCMem ->
@@ -35,17 +34,15 @@ compileSegMapBody flat_idx pat space (KernelBody _ kstms kres) = do
   kstms' <- mapM renameStm kstms
   collect $ do
     emit $ Imp.DebugPrint "SegMap fbody" Nothing
-    -- Continue here --------
     zipWithM_ dPrimV_ is $ map sExt64 $ unflattenIndex ns' $ tvExp flat_idx
     compileStms (freeIn kres) kstms' $
       zipWithM_ (writeResult is) (patternElements pat) kres
 
-
 compileSegMap ::
   Pattern MCMem ->
   SegSpace ->
-  KernelBody MCMem -> 
-    MPIGen  Imp.Code
+  KernelBody MCMem ->
+  MPIGen Imp.Code
 compileSegMap pat space kbody = do
   collect $ do
     --iteration variable
@@ -55,4 +52,19 @@ compileSegMap pat space kbody = do
     free_params <- freeParams body [segFlat space, tvVar flat_par_idx]
     -- Moove allocs outside of body
     let (body_allocs, body') = extractAllocations body
+    -- Get the output array
+    let gather =
+          ( case extractOutputMem body of
+              Just name -> Imp.Gather name
+              Nothing -> error "Gather need an output memory"
+          )
     emit $ Imp.Op $ Imp.DistributedLoop "segmap" (tvVar flat_par_idx) body_allocs body' mempty free_params $ segFlat space
+    emit $ Imp.Op gather
+
+extractOutputMem :: Imp.Code -> Maybe VName
+extractOutputMem (a Imp.:>>: b) =
+  case extractOutputMem b of
+    Nothing -> extractOutputMem a
+    Just name -> Just name
+extractOutputMem (Imp.Write output _ _ _ _ _) = Just output
+extractOutputMem _ = Nothing

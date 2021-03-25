@@ -24,9 +24,12 @@ type Code = Imp.Code MPIOp
 
 -- | Some kind of MPI-level imperative operation, that will presumably
 -- be turned into some particular C code.
-data MPIOp = Segop String [Param] Code [Param] Imp.Exp
-   | DistributedLoop String VName Code Code Code [Param] VName
-   | CrashWithThisMessage String
+data MPIOp
+  = Segop String [Param] Code [Param] Imp.Exp
+  | DistributedLoop String VName Code Code Code [Param] VName
+  | Gather VName
+  | CrashWithThisMessage String
+  deriving (Show)
 
 instance Pretty MPIOp where
   ppr (CrashWithThisMessage s) = text "crash" <+> parens (ppr s)
@@ -47,10 +50,12 @@ instance Pretty MPIOp where
       <+> langle
       <+> nestedBlock "{" "}" (ppr body)
       <+> ppr postbody
-
+  ppr (Gather name) =
+    text "Gather" <+> ppr name
 
 -- The free variables of an MPIOp.
 instance FreeIn MPIOp where
   freeIn' (CrashWithThisMessage _) = mempty
   freeIn' (DistributedLoop _ _ prebody body postbody _ _) = freeIn' prebody <> fvBind (Imp.declaredIn prebody) (freeIn' $ body <> postbody)
   freeIn' (Segop _ _ code _ _) = freeIn' code
+  freeIn' (Gather _) = mempty

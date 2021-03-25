@@ -98,6 +98,8 @@ compileProg =
                           int detail_memory;
                           int debugging;
                           int profiling;
+                          int logging;
+                          typename FILE * log;
                           typename lock_t lock;
                           char *error;
                           int profiling_paused;
@@ -119,6 +121,8 @@ compileProg =
                  ctx->debugging = cfg->debugging;
                  ctx->profiling = cfg->profiling;
                  ctx->profiling_paused = 0;
+                 ctx->logging = cfg->debugging;
+                 ctx->log = stderr;
                  ctx->error = NULL;
                  create_lock(&ctx->lock);
                  $stms:init_fields
@@ -153,6 +157,19 @@ compileProg =
                                }|]
         )
 
+      GC.publicDef_ "context_get_rank" GC.InitDecl $ \s ->
+        ( [C.cedecl|int $id:s(struct $id:ctx*ctx);|],
+          [C.cedecl|int $id:s(struct $id:ctx*ctx) {
+                              return ctx->rank;
+                          }|]
+        )
+      GC.publicDef_ "context_get_world_size" GC.InitDecl $ \s ->
+        ( [C.cedecl|int $id:s(struct $id:ctx*ctx);|],
+          [C.cedecl|int $id:s(struct $id:ctx*ctx) {
+                              return ctx->world_size;
+                          }|]
+        )
+
 cliOptions :: [Option]
 cliOptions =
   [ Option
@@ -172,27 +189,25 @@ compileOp :: GC.OpCompiler MPIOp ()
 compileOp (CrashWithThisMessage s) = do
   GC.stm [C.cstm|fprintf(stderr, "%s\n", $string:s);|]
   GC.stm [C.cstm|exit(1);|]
-
 compileOp (Segop _name _params code _retvals iterations) = do
   i <- GC.compileExp iterations
   GC.decl [C.cdecl|typename int64_t iterations = $exp:i;|]
   GC.compileCode code
-
-compileOp (DistributedLoop _s i prebody body postbody free _) = do
-  let free_args = map paramName free
-  let output = last free_args
-
+compileOp (Gather output) = do
+  -- This part should be perfected in the future.
+  GC.decl [C.cdecl|typename int64_t mem_chunk_size = ($id:output.size/ctx->world_size);|]
+  GC.decl [C.cdecl|typename int64_t start = mem_chunk_size*ctx->rank;|]
+  GC.stm
+    [C.cstm|MPI_Gather($id:output.mem+start, mem_chunk_size, MPI_BYTE, 
+                  $id:output.mem, mem_chunk_size, MPI_BYTE, 0, MPI_COMM_WORLD);|]
+compileOp (DistributedLoop _s i prebody body postbody _ _) = do
   GC.compileCode prebody
   GC.decl [C.cdecl|typename int64_t chunk_size = iterations/ctx->world_size;|]
   GC.stm [C.cstm|$id:i = ctx->rank*chunk_size;|]
   GC.decl [C.cdecl|typename int64_t end = $id:i + chunk_size;|]
   body' <- GC.blockScope $ GC.compileCode body
-  GC.stm [C.cstm|for (; $id:i < end; $id:i++) {
+  GC.stm
+    [C.cstm|for (; $id:i < end; $id:i++) {
                 $items:body'
               }|]
-  -- This part should be perfected in the future.
-  GC.decl [C.cdecl|typename int64_t mem_chunk_size = ($id:output.size/ctx->world_size);|]
-  GC.decl [C.cdecl|typename int64_t start = mem_chunk_size*ctx->rank;|]
-  GC.stm [C.cstm|MPI_Gather($id:output.mem+start, mem_chunk_size, MPI_BYTE, 
-                  $id:output.mem, mem_chunk_size, MPI_BYTE, 0, MPI_COMM_WORLD);|]
   GC.compileCode postbody
