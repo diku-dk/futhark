@@ -1,3 +1,5 @@
+{-# OPTIONS_GHC -Wno-deferred-type-errors #-}
+
 module Futhark.CodeGen.ImpGen.MPI.Base
   ( Env (..),
     MPIGen,
@@ -5,18 +7,17 @@ module Futhark.CodeGen.ImpGen.MPI.Base
     segOpString,
     freeParams,
     extractAllocations,
-    getIterationDomain
+    getIterationDomain,
+    gather,
   )
 where
 
-
+import Control.Monad
+import Data.Bifunctor
 import qualified Futhark.CodeGen.ImpCode.MPI as Imp
 import Futhark.CodeGen.ImpGen
 import Futhark.IR.MCMem
 import Prelude hiding (quot, rem)
-import Control.Monad
-import Data.Bifunctor
-
 
 data Env = Env
 
@@ -108,3 +109,9 @@ getIterationDomain _ space = do
     -- so we drop the last dimension, which is
     -- executed sequentially
     _ -> return $ product $ init ns_64
+
+gather :: VName -> MPIGen ()
+gather mem = do
+  start <- dPrim "start" int64
+  size <- dPrim "size" int64
+  emit $ Imp.Op $ Imp.Gather mem (tvVar start) (tvVar size)

@@ -53,13 +53,13 @@ compileSegMap pat space kbody = do
     -- Moove allocs outside of body
     let (body_allocs, body') = extractAllocations body
     -- Get the output array
-    let gather =
+    let out_name =
           ( case extractOutputMem body of
-              Just name -> Imp.Gather name
+              Just name -> name
               Nothing -> error "Gather need an output memory"
           )
     emit $ Imp.Op $ Imp.DistributedLoop "segmap" (tvVar flat_par_idx) body_allocs body' mempty free_params $ segFlat space
-    emit $ Imp.Op gather
+    gather out_name
 
 extractOutputMem :: Imp.Code -> Maybe VName
 extractOutputMem (a Imp.:>>: b) =

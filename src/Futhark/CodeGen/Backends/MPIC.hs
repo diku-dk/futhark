@@ -19,7 +19,7 @@ import Futhark.CodeGen.ImpCode.MPI
 import qualified Futhark.CodeGen.ImpGen.MPI as ImpGen
 import Futhark.IR.MCMem (MCMem, Prog)
 import Futhark.MonadFreshNames
-import qualified Language.C.Quote.C as C
+import qualified Language.C.Quote.OpenCL as C
 
 compileProg ::
   MonadFreshNames m =>
@@ -157,12 +157,25 @@ compileProg =
                                }|]
         )
 
+      GC.earlyDecl [C.cedecl|static const char *size_names[0];|]
+      GC.earlyDecl [C.cedecl|static const char *size_vars[0];|]
+      GC.earlyDecl [C.cedecl|static const char *size_classes[0];|]
+
+      GC.publicDef_ "context_config_set_size" GC.InitDecl $ \s ->
+        ( [C.cedecl|int $id:s(struct $id:cfg* cfg, const char *size_name, size_t size_value);|],
+          [C.cedecl|int $id:s(struct $id:cfg* cfg, const char *size_name, size_t size_value) {
+                         (void)cfg; (void)size_name; (void)size_value;
+                         return 1;
+                       }|]
+        )
+
       GC.publicDef_ "context_get_rank" GC.InitDecl $ \s ->
         ( [C.cedecl|int $id:s(struct $id:ctx*ctx);|],
           [C.cedecl|int $id:s(struct $id:ctx*ctx) {
                               return ctx->rank;
                           }|]
         )
+
       GC.publicDef_ "context_get_world_size" GC.InitDecl $ \s ->
         ( [C.cedecl|int $id:s(struct $id:ctx*ctx);|],
           [C.cedecl|int $id:s(struct $id:ctx*ctx) {
@@ -193,13 +206,12 @@ compileOp (Segop _name _params code _retvals iterations) = do
   i <- GC.compileExp iterations
   GC.decl [C.cdecl|typename int64_t iterations = $exp:i;|]
   GC.compileCode code
-compileOp (Gather output) = do
-  -- This part should be perfected in the future.
-  GC.decl [C.cdecl|typename int64_t mem_chunk_size = ($id:output.size/ctx->world_size);|]
-  GC.decl [C.cdecl|typename int64_t start = mem_chunk_size*ctx->rank;|]
+compileOp (Gather memory start size) = do
+  GC.stm [C.cstm| $id:size = ($id:memory.size/ctx->world_size);|]
+  GC.stm [C.cstm| $id:start = $id:size*ctx->rank;|]
   GC.stm
-    [C.cstm|MPI_Gather($id:output.mem+start, mem_chunk_size, MPI_BYTE, 
-                  $id:output.mem, mem_chunk_size, MPI_BYTE, 0, MPI_COMM_WORLD);|]
+    [C.cstm|MPI_Gather($id:memory.mem+$id:start, $id:size, MPI_BYTE, 
+                  $id:memory.mem, $id:size, MPI_BYTE, 0, MPI_COMM_WORLD);|]
 compileOp (DistributedLoop _s i prebody body postbody _ _) = do
   GC.compileCode prebody
   GC.decl [C.cdecl|typename int64_t chunk_size = iterations/ctx->world_size;|]
@@ -211,3 +223,7 @@ compileOp (DistributedLoop _s i prebody body postbody _ _) = do
                 $items:body'
               }|]
   GC.compileCode postbody
+compileOp (LoadNbNode name) = do
+  GC.stm [C.cstm|$id:name = ctx->world_size;|]
+compileOp (LoadNodeId name) = do
+  GC.stm [C.cstm|$id:name = ctx->rank;|]

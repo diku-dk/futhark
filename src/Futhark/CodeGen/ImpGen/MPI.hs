@@ -11,6 +11,7 @@ import qualified Futhark.CodeGen.ImpCode.MPI as Imp
 import Futhark.CodeGen.ImpGen
 import Futhark.CodeGen.ImpGen.MPI.Base
 import Futhark.CodeGen.ImpGen.MPI.SegMap
+import Futhark.CodeGen.ImpGen.MPI.SegRed
 import Futhark.IR.MCMem
 import Futhark.MonadFreshNames
 import Prelude hiding (quot, rem)
@@ -51,6 +52,8 @@ compileSegOp ::
   SegOp () MCMem ->
   ImpM MCMem Env Imp.MPIOp Imp.Code
 compileSegOp pat (SegMap _ space _ kbody) = compileSegMap pat space kbody
+compileSegOp pat (SegRed _ space reds _ kbody) =
+  compileSegRed pat space reds kbody
 compileSegOp _ _ = pure Imp.Skip
 
 getSpace :: SegOp () MCMem -> SegSpace
