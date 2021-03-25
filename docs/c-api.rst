@@ -229,13 +229,19 @@ see :c:func:`futhark_restore_opaque_foo`).
    count by one.  The value (or at least this reference) may not be
    used again after this function returns.
 
-.. c:function:: int futhark_store_opaque_foo(struct futhark_context *ctx, const struct futhark_opaque_foo *obj, void **p, size_t *n);
+.. c:function:: int futhark_store_opaque_foo(struct futhark_context *ctx, const struct futhark_opaque_foo *obj, void **p, size_t *n)
 
    Serialise an opaque value to a byte sequence, which can later be
    restored with :c:func:`futhark_restore_opaque_foo`.  The byte
-   representation is not otherwise specified.  The variable pointed to
-   by ``n`` will always be set to the number of bytes needed to
-   represent the value.  The ``p`` parameter is more complex:
+   representation is not otherwise specified, and is not stable
+   between compiler versions or programs.  It is stable under change
+   of compiler backend, but not change of compiler version, or
+   modification to the source program (although in most cases the
+   format will not change).
+
+   The variable pointed to by ``n`` will always be set to the number
+   of bytes needed to represent the value.  The ``p`` parameter is
+   more complex:
 
    * If ``p`` is ``NULL``, the function will write to ``*n``, but not
      actually serialise the opaque value.
@@ -250,7 +256,7 @@ see :c:func:`futhark_restore_opaque_foo`).
 
    Returns 0 on success.
 
-.. c:function:: struct futhark_opaque_foo* futhark_restore_opaque_foo(struct futhark_context *ctx, const void *p);
+.. c:function:: struct futhark_opaque_foo* futhark_restore_opaque_foo(struct futhark_context *ctx, const void *p)
 
    Restore a byte sequence previously written with
    :c:func:`futhark_store_opaque_foo`.  Returns ``NULL`` on failure.
@@ -277,16 +283,19 @@ Results in the following C function:
    sure to call :c:func:`futhark_context_sync` before using the value
    of ``out0``.
 
-The exact behaviour of the exit code depends on the backend.  For the
-sequential C backend, errors will always be available when the entry
-point returns, and :c:func:`futhark_context_sync` will always return
-success.  When using a GPU backend such as ``cuda`` or ``opencl``, the
-entry point may still be running asynchronous operations when it
+Errors are indicated by a nonzero return value.  On error, nothing is
+written to the *out*-parameters.
+
+The precise semantics of the return value depends on the backend.  For
+the sequential C backend, errors will always be available when the
+entry point returns, and :c:func:`futhark_context_sync` will always
+return zero.  When using a GPU backend such as ``cuda`` or ``opencl``,
+the entry point may still be running asynchronous operations when it
 returns, in which case the entry point may return zero successfully,
 even though execution has already (or will) fail.  These problems will
-be reported when :c:func:`futhark_context_sync` is called.  When using
-GPU backends, be careful to check the return code of *both* the entry
-point itself, and :c:func:`futhark_context_sync`.
+be reported when :c:func:`futhark_context_sync` is called.  Therefore,
+be careful to check the return code of *both* the entry point itself,
+and :c:func:`futhark_context_sync`.
 
 GPU
 ---

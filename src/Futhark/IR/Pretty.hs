@@ -142,13 +142,12 @@ instance PrettyLore lore => Pretty (Stm lore) where
           (_, ann) -> equals </> (stack ann </> ppr e)
     where
       linebreak = case e of
-        DoLoop {} -> True
-        Op {} -> True
-        If {} -> True
-        Apply {} -> True
-        BasicOp ArrayLit {} -> False
-        BasicOp Assert {} -> True
-        _ -> False
+        BasicOp BinOp {} -> False
+        BasicOp CmpOp {} -> False
+        BasicOp ConvOp {} -> False
+        BasicOp UnOp {} -> False
+        BasicOp SubExp {} -> False
+        _ -> True
 
       stmannot =
         concat
@@ -269,7 +268,7 @@ instance PrettyLore lore => Pretty (Exp lore) where
       pprLoopVar (p, a) = ppr p <+> text "in" <+> ppr a
 
 instance PrettyLore lore => Pretty (Lambda lore) where
-  ppr (Lambda [] _ []) = text "nilFn"
+  ppr (Lambda [] (Body _ stms []) []) | stms == mempty = text "nilFn"
   ppr (Lambda params body rettype) =
     text "\\" <> ppTuple' params
       <+/> colon <+> ppTuple' rettype <+> text "->"

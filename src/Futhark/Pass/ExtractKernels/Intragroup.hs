@@ -202,7 +202,7 @@ intraGroupStm lvl stm@(Let pat aux e) = do
       | "sequential_outer" `inAttrs` stmAuxAttrs aux ->
         intraGroupStms lvl . fmap (certify (stmAuxCerts aux))
           =<< runBinder_ (FOT.transformSOAC pat soac)
-    Op (Screma w form arrs)
+    Op (Screma w arrs form)
       | Just lam <- isMapSOAC form -> do
         let loopnest = MapNesting pat aux w $ zip (lambdaParams lam) arrs
             env =
@@ -233,7 +233,7 @@ intraGroupStm lvl stm@(Let pat aux e) = do
 
         addStms
           =<< runDistNestT env (distributeMapBodyStms acc (bodyStms $ lambdaBody lam))
-    Op (Screma w form arrs)
+    Op (Screma w arrs form)
       | Just (scans, mapfun) <- isScanomapSOAC form,
         Scan scanfun nes <- singleScan scans -> do
         let scanfun' = soacsLambdaToKernels scanfun
@@ -241,7 +241,7 @@ intraGroupStm lvl stm@(Let pat aux e) = do
         certifying (stmAuxCerts aux) $
           addStms =<< segScan lvl' pat w [SegBinOp Noncommutative scanfun' nes mempty] mapfun' arrs [] []
         parallelMin [w]
-    Op (Screma w form arrs)
+    Op (Screma w arrs form)
       | Just (reds, map_lam) <- isRedomapSOAC form,
         Reduce comm red_lam nes <- singleReduce reds -> do
         let red_lam' = soacsLambdaToKernels red_lam
@@ -259,7 +259,7 @@ intraGroupStm lvl stm@(Let pat aux e) = do
       certifying (stmAuxCerts aux) $
         addStms =<< segHist lvl' pat w [] [] ops' bucket_fun' arrs
       parallelMin [w]
-    Op (Stream w Sequential lam accs arrs)
+    Op (Stream w arrs Sequential accs lam)
       | chunk_size_param : _ <- lambdaParams lam -> do
         types <- asksScope castScope
         ((), stream_bnds) <-
