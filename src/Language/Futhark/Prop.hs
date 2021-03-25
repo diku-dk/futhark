@@ -624,10 +624,10 @@ typeOf (Lambda params _ _ (Info (als, t)) _) =
     named (Unnamed, _) = Nothing
 typeOf (OpSection _ (Info t) _) =
   t
-typeOf (OpSectionLeft _ _ _ (_, Info pt2) (Info ret, _) _) =
-  foldFunType [fromStruct pt2] ret
-typeOf (OpSectionRight _ _ _ (Info pt1, _) (Info ret) _) =
-  foldFunType [fromStruct pt1] ret
+typeOf (OpSectionLeft _ _ _ (_, Info (pn, pt2)) (Info ret, _) _) =
+  Scalar $ Arrow mempty pn (fromStruct pt2) ret
+typeOf (OpSectionRight _ _ _ (Info (pn, pt1), _) (Info ret) _) =
+  Scalar $ Arrow mempty pn (fromStruct pt1) ret
 typeOf (ProjectSection _ (Info t) _) = t
 typeOf (IndexSection _ (Info t) _) = t
 typeOf (Constr _ _ (Info t) _) = t
@@ -879,6 +879,24 @@ intrinsics =
                  ]
                  $ Array () Unique t_a (rank 1)
              ),
+             ( "scatter_2d",
+               IntrinsicPolyFun
+                 [tp_a]
+                 [ uarr_2d_a,
+                   Array () Nonunique (tupInt64 2) (rank 1),
+                   Array () Nonunique t_a (rank 1)
+                 ]
+                 uarr_2d_a
+             ),
+             ( "scatter_3d",
+               IntrinsicPolyFun
+                 [tp_a]
+                 [ uarr_3d_a,
+                   Array () Nonunique (tupInt64 3) (rank 1),
+                   Array () Nonunique t_a (rank 1)
+                 ]
+                 uarr_3d_a
+             ),
              ("zip", IntrinsicPolyFun [tp_a, tp_b] [arr_a, arr_b] arr_a_b),
              ("unzip", IntrinsicPolyFun [tp_a, tp_b] [arr_a_b] t_arr_a_arr_b),
              ( "hist",
@@ -959,6 +977,8 @@ intrinsics =
     t_a = TypeVar () Nonunique (typeName tv_a) []
     arr_a = Array () Nonunique t_a (rank 1)
     arr_2d_a = Array () Nonunique t_a (rank 2)
+    uarr_2d_a = Array () Unique t_a (rank 2)
+    uarr_3d_a = Array () Unique t_a (rank 3)
     uarr_a = Array () Unique t_a (rank 1)
     tp_a = TypeParamType Unlifted tv_a mempty
 
@@ -1053,6 +1073,12 @@ intrinsics =
     intrinsicBinOp Greater = ordering
     intrinsicBinOp Geq = ordering
     intrinsicBinOp _ = Nothing
+
+    tupInt64 n =
+      Record $
+        M.fromList $
+          zip tupleFieldNames $
+            replicate n $ Scalar $ Prim $ Signed Int64
 
 -- | The largest tag used by an intrinsic - this can be used to
 -- determine whether a 'VName' refers to an intrinsic or a user-defined name.

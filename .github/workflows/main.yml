@@ -55,8 +55,9 @@ jobs:
     - name: Build Futhark
       run: |
         cabal --version
+        ghc --version
         cabal update
-        cabal install --install-method=copy --overwrite-policy=always
+        cabal install -w ghc-8.10.3 --install-method=copy --overwrite-policy=always
 
   build-linux-stack:
     runs-on: ubuntu-20.04
@@ -392,6 +393,9 @@ jobs:
         tar xvf futhark-nightly-linux-x86_64.tar.xz
         make -C futhark-nightly-linux-x86_64/ install PREFIX=$HOME/.local
         echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+    - run: |
+        tools/testparser.sh tests
 
     - run: |
         cd pkgtests && sh test.sh

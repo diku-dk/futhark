@@ -65,6 +65,7 @@ commands =
       ("pkg", (Pkg.main, "Manage local packages.")),
       ("check", (Check.main, "Type check a program.")),
       ("imports", (Misc.mainImports, "Print all non-builtin imported Futhark files.")),
+      ("hash", (Misc.mainHash, "Print hash of program AST.")),
       ("autotune", (Autotune.main, "Autotune threshold parameters.")),
       ("query", (Query.main, "Query semantic information about program.")),
       ("literate", (Literate.main, "Process a literate Futhark program."))

@@ -10,7 +10,7 @@ pkgs.stdenv.mkDerivation {
     pkgs.curl
     pkgs.file
     pkgs.git
-    pkgs.haskell.compiler.ghc8103
+    pkgs.haskell.compiler.ghc8104
     pkgs.hlint
     pkgs.ocl-icd
     pkgs.opencl-headers
