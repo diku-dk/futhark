@@ -512,8 +512,9 @@ getValuesBS _ dir (InFile file) =
 getValuesBS futhark dir (GenValues gens) =
   mconcat <$> mapM (getGenBS futhark dir) gens
 
--- | Evaluate an IO action while the values are available in a file by
--- some name.  The file will be removed after the action is done.
+-- | Evaluate an IO action while the values are available in the
+-- binary format in a file by some name.  The file will be removed
+-- after the action is done.
 withValuesFile ::
   MonadIO m =>
   FutharkExe ->
@@ -526,7 +527,7 @@ withValuesFile _ dir (InFile file) f
     liftIO $ f $ dir </> file
 withValuesFile futhark dir vs f =
   liftIO . withSystemTempFile "futhark-input" $ \tmpf tmpf_h -> do
-    BS.hPutStr tmpf_h =<< getValuesBS futhark dir vs
+    mapM_ (BS.hPutStr tmpf_h . Bin.encode) =<< getValues futhark dir vs
     hClose tmpf_h
     f tmpf
 
