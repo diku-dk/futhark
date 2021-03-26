@@ -15,6 +15,13 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+  * Some uniqueness ignorance in fusion (#1291).
+
+  * An invalid transformation could in rare cases cause race
+    conditions (#1292).
+
+  * Generated Python and C code should now be warning-free.
+
 ## [0.19.3]
 
 ### Added
