@@ -371,7 +371,8 @@ def mk_bin_scalar_reader(t):
     def bin_reader(f):
         fmt = FUTHARK_PRIMTYPES[t]['bin_format']
         size = FUTHARK_PRIMTYPES[t]['size']
-        return struct.unpack('<' + fmt, f.get_chars(size))[0]
+        tf = FUTHARK_PRIMTYPES[t]['numpy_type']
+        return tf(struct.unpack('<' + fmt, f.get_chars(size))[0])
     return bin_reader
 
 read_bin_i8 = mk_bin_scalar_reader('i8')
