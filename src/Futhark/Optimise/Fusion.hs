@@ -152,7 +152,7 @@ checkForUpdates res (BasicOp (Update src is _)) = do
   let ifvs = namesToList $ mconcat $ map freeIn is
   updateKerInPlaces res ([src], ifvs)
 checkForUpdates res (Op (Futhark.Scatter _ _ _ written_info)) = do
-  let updt_arrs = map (\(_,_,x)->x) written_info
+  let updt_arrs = map (\(_, _, x) -> x) written_info
   updateKerInPlaces res (updt_arrs, [])
 checkForUpdates res _ = return res
 
