@@ -118,9 +118,16 @@ checkForFailure (l : ls) =
     Left (CmdFailure xs ys) -> Left $ CmdFailure (l : xs) ys
     Right ls' -> Right $ l : ls'
 
+-- Words with spaces in them must be quoted.
+quoteWord :: Text -> Text
+quoteWord t
+  | Just _ <- T.find (== ' ') t =
+    "\"" <> t <> "\""
+  | otherwise = t
+
 sendCommand :: Server -> [Text] -> IO (Either CmdFailure [Text])
 sendCommand s command = do
-  let command' = T.unwords command
+  let command' = T.unwords $ map quoteWord command
 
   when (serverDebug s) $
     T.hPutStrLn stderr $ ">>> " <> command'
