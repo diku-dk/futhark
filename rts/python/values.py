@@ -537,7 +537,7 @@ def read_array(f, expected_type, rank):
     shape = []
     elem_count = 1
     for i in range(rank):
-        bin_size = read_bin_u64(f)
+        bin_size = read_bin_i64(f)
         elem_count *= bin_size
         shape.append(bin_size)
 
