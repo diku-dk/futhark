@@ -17,6 +17,9 @@ import Prelude hiding (quot)
 iConst :: IntType -> Integer -> PrimExp VName
 iConst it x = ValueExp $ IntValue $ intValue it x
 
+iBool :: Bool -> PrimExp VName
+iBool b = ValueExp $ BoolValue b
+
 fConst :: FloatType -> Double -> PrimExp VName
 fConst ft x = ValueExp $ FloatValue $ floatValue ft x
 
@@ -84,6 +87,7 @@ pdBinOp (FMin ft) a b =
   where
     derivs x y = (fromBoolExp (x .<. y), fromBoolExp (x .>. y))
 pdBinOp LogAnd a b = (b,a)
+pdBinOp LogOr  _ _ = (iBool True, iBool True) -- cosmin: does it make even sense?
 pdBinOp op _ _ = error $ "pdBinOp: missing case: " ++ pretty op
 
 -- | @pdBuiltin f args i@ computes the partial derivative of @f@

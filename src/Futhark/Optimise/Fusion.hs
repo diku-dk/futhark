@@ -29,6 +29,7 @@ import Futhark.Pass
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
 import Futhark.Util (maxinum)
+import Debug.Trace
 
 data VarEntry
   = IsArray VName (NameInfo SOACS) Names SOAC.Input
@@ -148,6 +149,14 @@ checkForUpdates res (BasicOp (Update src is _)) = do
   aliases <- varAliases src
   let inspectKer k = k {inplace = aliases <> inplace k}
   return res' {kernels = M.map inspectKer $ kernels res'}
+
+checkForUpdates res (Op (Futhark.Scatter _ _ _ written_info)) = do
+  let updt_arrs = map (\(_,_,x)->x) written_info
+  res' <-
+    foldM forceVarToInfusible res updt_arrs
+  aliases <- mconcat <$> mapM varAliases updt_arrs
+  let inspectKer k = k {inplace = aliases <> inplace k}
+  return res' {kernels = M.map inspectKer $ kernels res'}
 checkForUpdates res _ = return res
 
 -- | Updates the environment: (i) the @soacs@ (map) by binding each pattern
@@ -221,13 +230,14 @@ fuseConsts used_consts consts =
 
 fuseFun :: Stms SOACS -> FunDef SOACS -> PassM (FunDef SOACS)
 fuseFun consts fun = do
-  stms <-
+  stms <- trace ("Fusion fun, orig fun:\n"++pretty fun++"\n") $
     fuseStms
       (scopeOf consts <> scopeOfFParams (funDefParams fun))
       (bodyStms $ funDefBody fun)
       (bodyResult $ funDefBody fun)
   let body = (funDefBody fun) {bodyStms = stms}
-  return fun {funDefBody = body}
+  trace ("fused program:\n"++pretty (fun {funDefBody = body})++"\n") $
+    return fun {funDefBody = body}
 
 fuseStms :: Scope SOACS -> Stms SOACS -> Result -> PassM (Stms SOACS)
 fuseStms scope stms res = do
@@ -413,7 +423,7 @@ greedyFuse rem_bnds lam_used_nms res (out_idds, aux, orig_soac, consumed) = do
   -- (without duplicating computation in both cases)
 
   (ok_kers_compat, fused_kers, fused_nms, old_kers, oldker_nms) <-
-    if is_screma || any isInfusible out_nms
+    if is_screma || any isInfusible out_nms -- || any isInfusible (namesToList lam_used_nms)
       then horizontGreedyFuse rem_bnds res (out_idds, aux, soac, consumed)
       else prodconsGreedyFuse res (out_idds, aux, soac, consumed)
   --
@@ -421,7 +431,7 @@ greedyFuse rem_bnds lam_used_nms res (out_idds, aux, orig_soac, consumed) = do
   --      restriction, e.g., would move an input array past its in-place update.
   let all_used_names = namesToList $ mconcat [lam_used_nms, namesFromList inp_nms, namesFromList other_nms]
       has_inplace ker = any (`nameIn` inplace ker) all_used_names
-      ok_inplace = not $ any has_inplace old_kers
+      ok_inplace = (not $ any has_inplace old_kers) && (not $ any has_inplace fused_kers)
   --
   -- (iii)  there are some kernels that use some of `out_idds' as inputs
   -- (iv)   and producer-consumer or horizontal fusion succeeds with those.
@@ -746,7 +756,9 @@ fusionGatherStms fres (bnd@(Let pat _ e) : bnds) res = do
       -- We put the variables produced by Scatter into the infusible
       -- set to force horizontal fusion.  It is not possible to
       -- producer/consumer-fuse Scatter anyway.
-      fres' <- addNamesToInfusible fres $ namesFromList $ patternNames pat
+      fres0' <- addNamesToInfusible fres $ namesFromList $ patternNames pat 
+      fres1' <- foldM forceVarToInfusible fres (map (\(_,_,x)->x) _as)
+      let fres' = fres0' <> fres1'
       mapLike fres' soac lam
     Right soac@(SOAC.Hist _ _ lam _) -> do
       -- We put the variables produced by Hist into the infusible
@@ -855,6 +867,14 @@ addVarToInfusible fres name = do
         Nothing -> name
         Just (SOAC.Input _ orig _) -> orig
   return fres {infusible = oneName name' <> infusible fres}
+
+forceVarToInfusible :: FusedRes -> VName -> FusionGM FusedRes
+forceVarToInfusible fres name = do
+  trns <- asks $ lookupArr name
+  let name' = case trns of
+        Nothing -> name
+        Just (SOAC.Input _ orig _) -> orig
+  return fres {infusible = oneName name <> oneName name' <> infusible fres }
 
 -- Lambdas create a new scope.  Disallow fusing from outside lambda by
 -- adding inp_arrs to the infusible set.

@@ -908,9 +908,10 @@ diffSOAC pat@(Pattern [] [pe]) aux soac@(Screma _ form [as]) m
     m
     pe_bar <- lookupAdj $ patElemName pe
     as_tp <- lookupType as
-    v_reps <- letTupExp "v_rep" $ BasicOp $ Replicate (shpFstDim $ arrayShape as_tp) $ Var pe_bar
-    let [v_rep] = v_reps
-    void $ updateAdjointSlice (fullSlice as_tp []) as v_rep
+    v_rep <- letExp "v_rep" $ BasicOp $ Replicate (shpFstDim $ arrayShape as_tp) $ Var pe_bar
+    void $ updateAdjoint as v_rep
+    --let [v_rep] = v_reps
+    --void $ updateAdjointSlice (fullSlice as_tp []) as v_rep
   where
     shpFstDim (Shape []) = error "error in shpFstDim in Rev.hs"
     shpFstDim (Shape (d:_)) = Shape [d]
@@ -929,15 +930,17 @@ diffSOAC pat@(Pattern [] [pe]) aux (Hist n [hist_add] f [is,vs]) m
     let eltp = head $ lambdaReturnType add_lam
     pe_bar <- lookupAdj $ patElemName pe
     -- already update orig_dst bar
-    void $ updateAdjointSlice (fullSlice (patElemDec pe) []) orig_dst pe_bar
+    void $ updateAdjoint orig_dst pe_bar
+    -- void $ updateAdjointSlice (fullSlice (patElemDec pe) []) orig_dst pe_bar
     -- update the vs bar; create a map nest with the branch innermost so all
     -- parallelism can be exploited.
     pind <- newParam "ind" (Prim p_int64)
     map_bar_lam_bdy <- genRecLamBdy w pe_bar [pind] eltp
     let map_bar_lam = Lambda [pind] map_bar_lam_bdy [eltp]
     vs_bar <- letExp (baseString vs ++ "_bar") $ Op $ Screma n (mapSOAC map_bar_lam) [is]
-    vs_type <- lookupType vs
-    void $ updateAdjointSlice (fullSlice vs_type []) vs vs_bar
+    void $ updateAdjoint vs vs_bar
+    --vs_type <- lookupType vs
+    --void $ updateAdjointSlice (fullSlice vs_type []) vs vs_bar
     where
       genRecLamBdy :: SubExp -> VName -> [Param Type] -> Type -> ADM Body
       genRecLamBdy w arr pinds (Prim ptp) = do
@@ -1200,9 +1203,10 @@ diffSOAC pat@(Pattern [] pes) aux soac@(Screma n form xs) m
         letTupExp "adj_ctrb_scan" $ Op (Screma n (ScremaForm [] [] map_lam) (iota:ls_arr++xs))
     addStms map_stms
     -- finally add contributions to the adjoint of xs
-    xs_tps <- mapM lookupType xs
-    forM_ (zip3 xs r_maps xs_tps) $ \(x, r_map, x_tp) ->
-      updateAdjointSlice (fullSlice x_tp []) x r_map
+    zipWithM_ updateAdjoint xs r_maps
+    -- xs_tps <- mapM lookupType xs
+    --forM_ (zip3 xs r_maps xs_tps) $ \(x, r_map, x_tp) ->
+    --  updateAdjointSlice (fullSlice x_tp []) x r_map
   where
     flipParams ps = uncurry (flip (++)) $ splitAt (length ps `div` 2) ps
     mkFusedMapBody par_i ne alphas = do
@@ -1299,7 +1303,8 @@ diffSOAC pat@(Pattern [] [pe]) aux soac@(Screma n form [as]) m
       pe_bar <- lookupAdj $ patElemName pe
       as_tp  <- lookupType as
       as_bar <- eReverse =<< (mkScan as_tp scn) =<< eReverse pe_bar
-      void $ updateAdjointSlice (fullSlice as_tp []) as as_bar
+      --void $ updateAdjointSlice (fullSlice as_tp []) as as_bar
+      void $ updateAdjoint as as_bar
     where
       mkScan xs_tp scn xs = do
         f' <- mkIdentityLambda [stripArray 1 xs_tp]
@@ -1325,9 +1330,10 @@ diffSOAC pat@(Pattern [] pes) aux soac@(Screma n (ScremaForm [scn] [] f) xs) m
       addStms (mconcat snd_maps) 
       (xs_contribs, fin_map_stms) <- mkScanFinalMap n (scanLambda scn) xs ys red_nms
       addStms fin_map_stms
-      xs_tps <- mapM lookupType xs
-      forM_ (zip3 xs xs_contribs xs_tps) $ \(x, x_ctrb, x_tp) ->
-        updateAdjointSlice (fullSlice x_tp []) x x_ctrb
+      zipWithM_ updateAdjoint xs xs_contribs
+      -- xs_tps <- mapM lookupType xs
+      -- forM_ (zip3 xs xs_contribs xs_tps) $ \(x, x_ctrb, x_tp) ->
+      --  updateAdjointSlice (fullSlice x_tp []) x x_ctrb
 -- Original: 
 --   let ys = scatter xs is vs
 -- Assumes no duplicate indices in `is`
@@ -1339,14 +1345,9 @@ diffSOAC pat@(Pattern [] pes) aux soac@(Screma n (ScremaForm [scn] [] f) xs) m
 --   let vs_bar \overline{+}= vs_ctrbs -- by map or generalized reduction
 --   let xs_bar = scatter ys_bar is \overline{0}
 --   let xs = scatter ys is xs_save
--- ToDo: 1. since we do not have generalized reduction implemented yet,
---          I will just produce a map-scatter composition for `vs_bar`
---          and extend it later based on type discrimination of vs_bar
---       2. treat the case when the index is out of bounds!
--- Scatter SubExp (Lambda lore) [VName] [(SubExp, Int, VName)]
-diffSOAC pat@(Pattern [] [pys]) aux scat@(Scatter n f0 ass [(se,num_vals,xs)]) m -- CHANGE shp
+-- ToDo: 1. treat the case when the index is out of bounds!
+diffSOAC pat@(Pattern [] [pys]) aux scat@(Scatter n f0 ass [(shp,num_vals,xs)]) m
   | isIdentityLambda f0 = do
-    let shp = Shape [se]
     let rank = length $ shapeDims shp
         (all_inds, val_as) = splitAt (rank * num_vals) ass
         inds_as = chunk rank all_inds
@@ -1363,18 +1364,19 @@ diffSOAC pat@(Pattern [] [pys]) aux scat@(Scatter n f0 ass [(se,num_vals,xs)]) m
     vs_ctrbs <- mkGather inds_as ys_bar tp_xs
     zipWithM_ updateAdjoint val_as vs_ctrbs -- use Slice?
     -- creating xs_bar
-    zeros  <- forM val_as $ \ _ -> letExp "zeros" $ BasicOp $ Replicate (Shape [n]) se0
+    let zero = Constant $ blankPrimValue $ getPrimElemType tp_xs 
+    zeros  <- forM val_as $ \ _ -> letExp "zeros" $ BasicOp $ Replicate (Shape [n]) zero
     let f_tps = replicate (rank*num_vals) (Prim p_int64) ++ replicate num_vals (Prim ptp)
     f <- mkIdentityLambda f_tps
-    let soac = Scatter n f (all_inds++zeros) [(se,num_vals,ys_bar)] -- CHANGE shp <- se
+    let soac = Scatter n f (all_inds++zeros) [(shp,num_vals,ys_bar)]
     xs_bar <- letExp (baseString xs++"_bar") $ Op soac
     insAdj xs xs_bar -- reusing the ys_bar for xs_bar!
+    --insAdj ys xs_bar
     -- re-creating xs -- here we will unsafely use the same name as in fwd sweep:
     f' <- mkIdentityLambda f_tps
     addStm $ Let (Pattern [] [PatElem xs tp_xs]) aux $ Op $
-                Scatter n f' (all_inds++xs_saves) [(se,num_vals,ys)] -- CHANGE shp <- se
+                Scatter n f' (all_inds++xs_saves) [(shp,num_vals,ys)]
     where
-      se0 = intConst Int64 0
       chunk _ []  = []
       chunk k lst = take k lst : chunk k (drop k lst)
       -- ToDo: fix indices out of bounds!
@@ -1390,8 +1392,6 @@ diffSOAC pat@(Pattern [] [pys]) aux scat@(Scatter n f0 ass [(se,num_vals,xs)]) m
                             Index arr $ map (DimFix . Var. paramName) idxs
         let gather_lam = Lambda (concat ips) (mkBody stms rs) (replicate num_vals (Prim ptp))
         localScope (scopeOfLParams [Param arr tp_arr]) $ do
-            --let iota_exp = Iota n (intConst Int64 0) (intConst Int64 1) Int64
-            --iota <- letExp "iota" $ BasicOp iota_exp
             let soac = Screma n (mapSOAC gather_lam) (concat inds_as)
             letTupExp (baseString arr ++ "_gather") $ Op soac
 -- scatter dispatcher
@@ -1403,17 +1403,15 @@ diffSOAC (Pattern [] pes) aux (Scatter n f0 ass written_info) m
     diffScatters (stmsFromList lst_stms)
     where
       splitInd [] = 0
-      splitInd ((se,num_res,_):rest) = -- CHANGE shp
-        let shp = Shape [se]
-        in  num_res * length (shapeDims shp) + splitInd rest 
+      splitInd ((shp,num_res,_):rest) =
+        num_res * length (shapeDims shp) + splitInd rest 
       chunkScatterInps  (acc_inds, acc_vals) [] =
         case (acc_inds, acc_vals) of
           ([],[]) -> return []
           _ -> error "In Rev.hs, chunkScatterInps, unreachable case reached!"
       chunkScatterInps  (acc_inds, acc_vals)
-                        ( (pe, info@(se,num_vals,_)) : rest) = do -- CHANGE shp
-        let shp = Shape [se]
-            num_inds = num_vals * length (shapeDims shp)
+                        ( (pe, info@(shp,num_vals,_)) : rest) = do
+        let num_inds = num_vals * length (shapeDims shp)
             (curr_inds, other_inds) = splitAt num_inds acc_inds
             (curr_vals, other_vals) = splitAt num_vals acc_vals
         vtps <- mapM lookupType curr_vals
@@ -1473,11 +1471,12 @@ diffSOAC pat@(Pattern [] pes) aux soac@(Screma w form as) m
       res <- letTupExp (baseString fv++"_adj_sum") soac_exp
       return $ head res
     zipWithM_ updateAdjoint (map snd fvs_scal) ctrb_scal
-    as_tps <- mapM lookupType as
     -- trace ("Lam':\n" ++ pretty lam' ++ "\nLam_rev:\n"++pretty lam_rev'++"\n fv scal: "++pretty fvs_scal++" fvs_arr: "++pretty fvs_arr++" fvs acc: "++pretty fvs_acc) $
     --trace ("\n lam_rev'\n"++pretty lam_rev'++"\n substs': "++pretty substs') $
-    forM_ (zip3 as ctrb_pure as_tps) $ \(a, ctrb, tp) ->
-        updateAdjointSlice (fullSlice tp []) a ctrb
+    zipWithM_ updateAdjoint as ctrb_pure
+    -- as_tps <- mapM lookupType as
+    -- forM_ (zip3 as ctrb_pure as_tps) $ \(a, ctrb, tp) ->
+    --   updateAdjointSlice (fullSlice tp []) a ctrb
     where
       accType (Acc _ _ _) = True
       accType _ = False
@@ -1585,6 +1584,8 @@ revVJP scope (Lambda params body ts) =
       localScope (scopeOfLParams params_adj) $
         diffBody (map paramName params_adj) (map paramName params) body
     let body' = Body () stms $ takeLast (length params) res
-
-    trace ("prg:\n"++pretty body') $
-      pure $ Lambda (params ++ params_adj) body' (map paramType params)
+    let lam = Lambda (params ++ params_adj) body' (map paramType params)
+    lam' <- renameLambda lam
+    trace ("prg:\n"++pretty lam'++"\n orig prog: \n"++pretty body) $
+      pure lam'
+    -- pure $ Lambda (params ++ params_adj) body' (map paramType params)
