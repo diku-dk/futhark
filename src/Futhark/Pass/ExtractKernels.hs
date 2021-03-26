@@ -384,26 +384,6 @@ transformStm path (Let res_pat (StmAux cs _ _) (Op (Screma w arrs form)))
     lvl <- segThreadCapped [w] "segscan" $ NoRecommendation SegNoVirt
     addStms . fmap (certify cs)
       =<< segScan lvl res_pat w scan_ops map_lam_sequential arrs [] []
-
-  -- We are only willing to generate code for scanomaps that do not
-  -- involve array accumulators, and do not have parallelism in their
-  -- map function.  Such cases will fall through to the
-  -- screma-splitting case, and produce an ordinary map and scan.
-  -- Hopefully, the scan then triggers the ISWIM case above (otherwise
-  -- we will still crash in code generation).  However, if the map
-  -- lambda is already identity, let's just go ahead here.
-  | Just (scans, map_lam) <- isScanomapSOAC form,
-    ( all primType (concatMap (lambdaReturnType . scanLambda) scans)
-        && not (lambdaContainsParallelism map_lam)
-    )
-      || isIdentityLambda map_lam = runBinder_ $ do
-    scan_ops <- forM scans $ \(Scan scan_lam nes) -> do
-      let scan_lam' = soacsLambdaToKernels scan_lam
-      return $ SegBinOp Noncommutative scan_lam' nes mempty
-
-    let map_lam' = soacsLambdaToKernels map_lam
-    lvl <- segThreadCapped [w] "segscan" $ NoRecommendation SegNoVirt
-    addStms =<< segScan lvl res_pat w scan_ops map_lam' arrs [] []
 transformStm path (Let res_pat aux (Op (Screma w arrs form)))
   | Just [Reduce comm red_fun nes] <- isReduceSOAC form,
     let comm'
