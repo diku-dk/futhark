@@ -34,7 +34,6 @@ import Futhark.Util (takeLast)
 ----------------------
 
 --- First some general utility functions that are not specific to AD.
-
 eReverse :: VName -> ADM VName
 eReverse arr = do
   arr_t <- lookupType arr
@@ -218,9 +217,9 @@ flipConvOp (SIToFP from to) = FPToSI to from
 flipConvOp (IToB from) = BToI from
 flipConvOp (BToI to) = IToB to
 
--------------------------------------------
---- Helpers for Histogram and Reduction ---
--------------------------------------------
+----------------------------------------------------
+--- Helpers for Histogram, Reduction and Scatter ---
+----------------------------------------------------
 
 withinBounds :: VName -> SubExp -> TPrimExp Bool VName
 withinBounds i q = (le64 i .<. pe64 q) .&&. (pe64 (intConst Int64 (-1)) .<. le64 i)
@@ -293,6 +292,27 @@ helperMulOp3 ptp bop nz_prod zr_count fa_orig prod_bar = do
     getBinOpDiv (Mul t _) = SDiv t Unsafe
     getBinOpDiv (FMul t)  = FDiv t
     getBinOpDiv _ = error "In Rev.hs, getBinOpDiv, unreachable case reached!"
+
+genRecLamBdy :: SubExp -> VName -> [Param Type] -> Type -> ADM Body
+genRecLamBdy w arr pinds (Prim ptp) = do
+  let inds = map paramName pinds
+  runBodyBinder . localScope (scopeOfLParams pinds) $
+    eBody [ eIf ( toExp $ withinBounds (head inds) w )
+                ( do r <- letSubExp "r" $ BasicOp $ Index arr $ map (DimFix . Var) inds
+                     resultBodyM [r]
+                )
+                ( resultBodyM [Constant $ blankPrimValue ptp] )
+          ]
+genRecLamBdy w arr pinds (Array (ElemPrim t) (Shape (s : ss)) u) = do
+  new_ip <- newParam "i" (Prim p_int64)
+  let t' = if null ss then Prim t else Array (ElemPrim t) (Shape ss) u
+  inner_lam_bdy <- genRecLamBdy w arr (pinds++[new_ip]) t'
+  let inner_lam = Lambda [new_ip] inner_lam_bdy [t']
+  (r, stms) <- runBinderT' . localScope (scopeOfLParams pinds) $ do
+    iota_v <- letExp "iota" $ BasicOp $ Iota s (intConst Int64 0) (intConst Int64 1) Int64
+    letSubExp (baseString arr ++ "_elem") $ Op $ Screma s (mapSOAC inner_lam) [iota_v]
+  mkBodyM stms [r]
+genRecLamBdy _ _ _ _ = error "In Rev.hs, function genRecLamBdy, unreachable case reached!"
 
 ------------------------
 --- Helpers for Scan ---
@@ -939,29 +959,6 @@ diffSOAC pat@(Pattern [] [pe]) aux (Hist n [hist_add] f [is,vs]) m
     let map_bar_lam = Lambda [pind] map_bar_lam_bdy [eltp]
     vs_bar <- letExp (baseString vs ++ "_bar") $ Op $ Screma n (mapSOAC map_bar_lam) [is]
     void $ updateAdjoint vs vs_bar
-    --vs_type <- lookupType vs
-    --void $ updateAdjointSlice (fullSlice vs_type []) vs vs_bar
-    where
-      genRecLamBdy :: SubExp -> VName -> [Param Type] -> Type -> ADM Body
-      genRecLamBdy w arr pinds (Prim ptp) = do
-        let inds = map paramName pinds
-        runBodyBinder . localScope (scopeOfLParams pinds) $
-          eBody [ eIf ( toExp $ withinBounds (head inds) w )
-                      ( do r <- letSubExp "r" $ BasicOp $ Index arr $ map (DimFix . Var) inds
-                           resultBodyM [r]
-                      )
-                      ( resultBodyM [Constant $ blankPrimValue ptp] )
-                ]
-      genRecLamBdy w arr pinds (Array (ElemPrim t) (Shape (s : ss)) u) = do
-        new_ip <- newParam "i" (Prim p_int64)
-        let t' = if null ss then Prim t else Array (ElemPrim t) (Shape ss) u
-        inner_lam_bdy <- genRecLamBdy w arr (pinds++[new_ip]) t'
-        let inner_lam = Lambda [new_ip] inner_lam_bdy [t']
-        (r, stms) <- runBinderT' . localScope (scopeOfLParams pinds) $ do
-          iota_v <- letExp "iota" $ BasicOp $ Iota s (intConst Int64 0) (intConst Int64 1) Int64
-          letSubExp (baseString arr ++ "_elem") $ Op $ Screma s (mapSOAC inner_lam) [iota_v]
-        mkBodyM stms [r]
-      genRecLamBdy _ _ _ _ = error "In Rev.hs, helper function genRecLamBdy, unreachable case reached!"
 --
 -- Special reduce case: p = reduce (*) 1 as
 -- Forward trace: 
