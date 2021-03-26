@@ -39,7 +39,7 @@ jobs:
       run: |
         sudo add-apt-repository ppa:hvr/ghc
         sudo apt-get update
-        sudo apt-get install ghc-8.10.3
+        sudo apt-get install ghc-9.0.1
         echo "/opt/ghc/bin" >> $GITHUB_PATH
 
     - uses: actions/cache@v2
@@ -56,7 +56,7 @@ jobs:
         cabal --version
         ghc --version
         cabal update
-        cabal install -w ghc-8.10.3 --install-method=copy --overwrite-policy=always
+        cabal install -w ghc-9.0.1 --install-method=copy --overwrite-policy=always
 
   build-linux-stack:
     runs-on: ubuntu-20.04
