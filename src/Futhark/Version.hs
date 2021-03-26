@@ -41,6 +41,4 @@ versionString =
     branch
       | $(gitBranch) == "master" = ""
       | otherwise = $(gitBranch) ++ " @ "
-    dirty
-      | $(gitDirtyTracked) = " [modified]"
-      | otherwise = ""
+    dirty = if $(gitDirtyTracked) then " [modified]" else ""
