@@ -488,19 +488,61 @@ void cmd_report(struct server_state *s, const char *args[]) {
   free(report);
 }
 
+char *next_word(char **line) {
+  char *p = *line;
+
+  while (isspace(*p)) {
+    p++;
+  }
+
+  if (*p == 0) {
+    return NULL;
+  }
+
+  if (*p == '"') {
+    char *save = p+1;
+    // Skip ahead till closing quote.
+    p++;
+
+    while (*p && *p != '"') {
+      p++;
+    }
+
+    if (*p == '"') {
+      *p = 0;
+      *line = p+1;
+      return save;
+    } else {
+      return NULL;
+    }
+  } else {
+    char *save = p;
+    // Skip ahead till next whitespace.
+
+    while (*p && !isspace(*p)) {
+      p++;
+    }
+
+    if (*p) {
+      *p = 0;
+      *line = p+1;
+    } else {
+      *line = p;
+    }
+    return save;
+  }
+}
+
 void process_line(struct server_state *s, char *line) {
-  int max_num_tokens = 100;
+  int max_num_tokens = 1000;
   const char* tokens[max_num_tokens];
   int num_tokens = 0;
-  char *saveptr;
 
-  char *tmp = line;
-  while ((tokens[num_tokens] = strtok_r(tmp, " \n", &saveptr)) != NULL) {
+  while ((tokens[num_tokens] = next_word(&line)) != NULL) {
     num_tokens++;
     if (num_tokens == max_num_tokens) {
       futhark_panic(1, "Line too long.\n");
     }
-    tmp = NULL;
   }
 
   const char *command = tokens[0];

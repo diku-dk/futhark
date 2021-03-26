@@ -2,6 +2,7 @@
 
 import sys
 import time
+import shlex # For string splitting
 
 class Server:
     def __init__(self, ctx):
@@ -81,22 +82,26 @@ class Server:
             for (out_vname, val) in zip(out_vnames, vals):
                 self._vars[out_vname] = val
 
+    def _store_val(self, f, value):
+        # In case we are using the PyOpenCL backend, we first
+        # need to convert OpenCL arrays to ordinary NumPy
+        # arrays.  We do this in a nasty way.
+        if isinstance(value, opaque):
+            for component in value.data:
+                self._store_val(f, component)
+        elif isinstance(value, np.number) or isinstance(value, bool) or isinstance(value, np.bool_) or isinstance(value, np.ndarray):
+            # Ordinary NumPy value.
+            f.write(construct_binary_value(value))
+        else:
+            # Assuming PyOpenCL array.
+            f.write(construct_binary_value(value.get()))
+
     def _cmd_store(self, args):
         fname = self._get_arg(args, 0)
 
         with open(fname, 'wb') as f:
             for i in range(1, len(args)):
-                vname = args[i]
-                value = self._get_var(vname)
-                # In case we are using the PyOpenCL backend, we first
-                # need to convert OpenCL arrays to ordinary NumPy
-                # arrays.  We do this in a nasty way.
-                if isinstance(value, np.number) or isinstance(value, bool) or isinstance(value, np.bool_) or isinstance(value, np.ndarray):
-                    # Ordinary NumPy value.
-                    f.write(construct_binary_value(self._vars[vname]))
-                else:
-                    # Assuming PyOpenCL array.
-                    f.write(construct_binary_value(self._vars[vname].get()))
+                self._store_val(f, self._get_var(args[i]))
 
     def _cmd_restore(self, args):
         if len(args) % 2 == 0:
@@ -139,7 +144,7 @@ class Server:
                  }
 
     def _process_line(self, line):
-        words = line.split()
+        words = shlex.split(line)
         if words == []:
             raise self.Failure('Empty line')
         else:
