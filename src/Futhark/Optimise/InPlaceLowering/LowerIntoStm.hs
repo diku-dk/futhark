@@ -81,7 +81,8 @@ lowerUpdateKernels
   scope
   (Let pat aux (Op (SegOp (SegMap lvl space ts kbody))))
   updates
-    | all ((`elem` patternNames pat) . updateValue) updates = do
+    | all ((`elem` patternNames pat) . updateValue) updates,
+      not source_used_in_kbody = do
       mk <- lowerUpdatesIntoSegMap scope pat updates space kbody
       Just $ do
         (pat', kbody', poststms) <- mk
@@ -89,6 +90,14 @@ lowerUpdateKernels
         return $
           certify cs (Let pat' aux $ Op $ SegOp $ SegMap lvl space ts kbody') :
           stmsToList poststms
+    where
+      -- This is a bit more conservative than ideal.  In a perfect
+      -- world, we would allow indexing a[i,j] if the update is also
+      -- to exactly a[i,j], as that will not create cross-iteration
+      -- dependencies.  (Although the type checker wouldn't be able to
+      -- permit this anyway.)
+      source_used_in_kbody =
+        freeIn kbody `namesIntersect` namesFromList (map updateSource updates)
 lowerUpdateKernels scope stm updates = lowerUpdate scope stm updates
 
 lowerUpdatesIntoSegMap ::
