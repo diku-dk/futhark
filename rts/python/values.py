@@ -665,9 +665,9 @@ def construct_binary_value(v):
     bytes[3:7] = type_strs[t]
 
     for i in range(len(shape)):
-        bytes[7+i*8:7+(i+1)*8] = np.int64(shape[i]).tostring()
+        bytes[7+i*8:7+(i+1)*8] = np.int64(shape[i]).tobytes()
 
-    bytes[7+len(shape)*8:] = np.ascontiguousarray(v).tostring()
+    bytes[7+len(shape)*8:] = np.ascontiguousarray(v).tobytes()
 
     return bytes
 
