@@ -802,8 +802,12 @@ segmentedScatterKernel nest perm scatter_pat cs scatter_w lam ivs dests = do
         groupScatterResults (zip3 as_ws as_ns as_inps) (is' ++ vs)
           & map (inPlaceReturn ispace)
           & KernelBody () k_body_stms
+      -- Remove unused kernel inputs, since some of these might
+      -- reference the array we are scattering into.
+      kernel_inps' =
+        filter ((`nameIn` freeIn k_body) . kernelInputName) kernel_inps
 
-  (k, k_bnds) <- mapKernel mk_lvl ispace kernel_inps rts k_body
+  (k, k_bnds) <- mapKernel mk_lvl ispace kernel_inps' rts k_body
 
   traverse renameStm <=< runBinder_ $ do
     addStms k_bnds
@@ -863,9 +867,14 @@ segmentedUpdateKernel nest perm cs arr slice v = do
         WriteReturns (arrayShape arr_t) arr' [(map DimFix write_is, v')]
       )
 
+  -- Remove unused kernel inputs, since some of these might
+  -- reference the array we are scattering into.
+  let kernel_inps' =
+        filter ((`nameIn` freeIn kstms) . kernelInputName) kernel_inps
+
   mk_lvl <- mkSegLevel
   (k, prestms) <-
-    mapKernel mk_lvl ispace kernel_inps [res_t] $
+    mapKernel mk_lvl ispace kernel_inps' [res_t] $
       KernelBody () kstms [res]
 
   traverse renameStm <=< runBinder_ $ do
