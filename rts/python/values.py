@@ -371,7 +371,8 @@ def mk_bin_scalar_reader(t):
     def bin_reader(f):
         fmt = FUTHARK_PRIMTYPES[t]['bin_format']
         size = FUTHARK_PRIMTYPES[t]['size']
-        return struct.unpack('<' + fmt, f.get_chars(size))[0]
+        tf = FUTHARK_PRIMTYPES[t]['numpy_type']
+        return tf(struct.unpack('<' + fmt, f.get_chars(size))[0])
     return bin_reader
 
 read_bin_i8 = mk_bin_scalar_reader('i8')
@@ -478,7 +479,7 @@ FUTHARK_PRIMTYPES = {
              'bin_reader': read_bin_bool,
              'str_reader': read_str_bool,
              'bin_format': 'b',
-             'numpy_type': np.bool }
+             'numpy_type': bool }
 }
 
 def read_bin_read_type(f):
@@ -536,18 +537,18 @@ def read_array(f, expected_type, rank):
     shape = []
     elem_count = 1
     for i in range(rank):
-        bin_size = read_bin_u64(f)
+        bin_size = read_bin_i64(f)
         elem_count *= bin_size
         shape.append(bin_size)
 
     bin_fmt = FUTHARK_PRIMTYPES[bin_type_enum]['bin_format']
 
     # We first read the expected number of types into a bytestring,
-    # then use np.fromstring.  This is because np.fromfile does not
+    # then use np.frombuffer.  This is because np.fromfile does not
     # work on things that are insufficiently file-like, like a network
     # stream.
     bytes = f.get_chars(elem_count * FUTHARK_PRIMTYPES[expected_type]['size'])
-    arr = np.fromstring(bytes, dtype=FUTHARK_PRIMTYPES[bin_type_enum]['numpy_type'])
+    arr = np.frombuffer(bytes, dtype=FUTHARK_PRIMTYPES[bin_type_enum]['numpy_type'])
     arr.shape = shape
 
     return arr
@@ -664,9 +665,9 @@ def construct_binary_value(v):
     bytes[3:7] = type_strs[t]
 
     for i in range(len(shape)):
-        bytes[7+i*8:7+(i+1)*8] = np.int64(shape[i]).tostring()
+        bytes[7+i*8:7+(i+1)*8] = np.int64(shape[i]).tobytes()
 
-    bytes[7+len(shape)*8:] = np.ascontiguousarray(v).tostring()
+    bytes[7+len(shape)*8:] = np.ascontiguousarray(v).tobytes()
 
     return bytes
 

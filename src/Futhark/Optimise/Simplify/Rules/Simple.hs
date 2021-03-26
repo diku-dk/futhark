@@ -288,6 +288,36 @@ simplifyReshapeIota defOf _ (Reshape newshape v)
     Just (Iota n offset stride it, v_cs)
 simplifyReshapeIota _ _ _ = Nothing
 
+reshapeSlice :: [DimIndex d] -> [d] -> [DimIndex d]
+reshapeSlice (DimFix i : slice') scs =
+  DimFix i : reshapeSlice slice' scs
+reshapeSlice (DimSlice x _ s : slice') (d : ds') =
+  DimSlice x d s : reshapeSlice slice' ds'
+reshapeSlice _ _ = []
+
+-- If we are size-coercing a slice, then we might as well just use a
+-- different slice instead.
+simplifyReshapeIndex :: SimpleRule lore
+simplifyReshapeIndex defOf _ (Reshape newshape v)
+  | Just ds <- shapeCoercion newshape,
+    Just (BasicOp (Index v' slice), v_cs) <- defOf v,
+    slice' <- reshapeSlice slice ds,
+    slice' /= slice =
+    Just (Index v' slice', v_cs)
+simplifyReshapeIndex _ _ _ = Nothing
+
+-- If we are updating a slice with the result of a size coercion, we
+-- instead use the original array and update the slice dimensions.
+simplifyUpdateReshape :: SimpleRule lore
+simplifyUpdateReshape defOf seType (Update dest slice (Var v))
+  | Just (BasicOp (Reshape newshape v'), v_cs) <- defOf v,
+    Just _ <- shapeCoercion newshape,
+    Just ds <- arrayDims <$> seType (Var v'),
+    slice' <- reshapeSlice slice ds,
+    slice' /= slice =
+    Just (Update dest slice' $ Var v', v_cs)
+simplifyUpdateReshape _ _ _ = Nothing
+
 improveReshape :: SimpleRule lore
 improveReshape _ seType (Reshape newshape v)
   | Just t <- seType $ Var v,
@@ -338,6 +368,8 @@ simpleRules =
     simplifyReshapeScratch,
     simplifyReshapeReplicate,
     simplifyReshapeIota,
+    simplifyReshapeIndex,
+    simplifyUpdateReshape,
     improveReshape,
     joinReplicateAcc
   ]

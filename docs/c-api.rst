@@ -229,13 +229,19 @@ see :c:func:`futhark_restore_opaque_foo`).
    count by one.  The value (or at least this reference) may not be
    used again after this function returns.
 
-.. c:function:: int futhark_store_opaque_foo(struct futhark_context *ctx, const struct futhark_opaque_foo *obj, void **p, size_t *n);
+.. c:function:: int futhark_store_opaque_foo(struct futhark_context *ctx, const struct futhark_opaque_foo *obj, void **p, size_t *n)
 
    Serialise an opaque value to a byte sequence, which can later be
    restored with :c:func:`futhark_restore_opaque_foo`.  The byte
-   representation is not otherwise specified.  The variable pointed to
-   by ``n`` will always be set to the number of bytes needed to
-   represent the value.  The ``p`` parameter is more complex:
+   representation is not otherwise specified, and is not stable
+   between compiler versions or programs.  It is stable under change
+   of compiler backend, but not change of compiler version, or
+   modification to the source program (although in most cases the
+   format will not change).
+
+   The variable pointed to by ``n`` will always be set to the number
+   of bytes needed to represent the value.  The ``p`` parameter is
+   more complex:
 
    * If ``p`` is ``NULL``, the function will write to ``*n``, but not
      actually serialise the opaque value.
@@ -250,7 +256,7 @@ see :c:func:`futhark_restore_opaque_foo`).
 
    Returns 0 on success.
 
-.. c:function:: struct futhark_opaque_foo* futhark_restore_opaque_foo(struct futhark_context *ctx, const void *p);
+.. c:function:: struct futhark_opaque_foo* futhark_restore_opaque_foo(struct futhark_context *ctx, const void *p)
 
    Restore a byte sequence previously written with
    :c:func:`futhark_store_opaque_foo`.  Returns ``NULL`` on failure.

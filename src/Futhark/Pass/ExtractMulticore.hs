@@ -281,7 +281,7 @@ transformParStream rename onBody w comm red_lam red_nes map_lam arrs = do
   return (red_stms, op)
 
 transformSOAC :: Pattern SOACS -> Attrs -> SOAC SOACS -> ExtractM (Stms MC)
-transformSOAC pat _ (Screma w form arrs)
+transformSOAC pat _ (Screma w arrs form)
   | Just lam <- isMapSOAC form = do
     seq_op <- transformMap DoNotRename sequentialiseBody w lam arrs
     if lambdaContainsParallelism lam
@@ -352,7 +352,7 @@ transformSOAC pat _ (Hist w hists map_lam arrs) = do
       return $
         mconcat seq_hist_stms
           <> oneStm (Let pat (defAux ()) $ Op $ ParOp Nothing seq_op)
-transformSOAC pat attrs (Stream w (Parallel _ comm red_lam) fold_lam red_nes arrs)
+transformSOAC pat attrs (Stream w arrs (Parallel _ comm red_lam) red_nes fold_lam)
   | not $ null red_nes = do
     map_lam <- unstreamLambda attrs red_nes fold_lam
     (seq_red_stms, seq_op) <-
@@ -369,15 +369,7 @@ transformSOAC pat attrs (Stream w (Parallel _ comm red_lam) fold_lam red_nes arr
     if lambdaContainsParallelism map_lam
       then do
         (par_red_stms, par_op) <-
-          transformParStream
-            DoRename
-            transformBody
-            w
-            comm
-            red_lam
-            red_nes
-            map_lam
-            arrs
+          transformParStream DoRename transformBody w comm red_lam red_nes map_lam arrs
         return $
           seq_red_stms <> par_red_stms
             <> oneStm (Let pat (defAux ()) $ Op $ ParOp (Just par_op) seq_op)
@@ -385,7 +377,7 @@ transformSOAC pat attrs (Stream w (Parallel _ comm red_lam) fold_lam red_nes arr
         return $
           seq_red_stms
             <> oneStm (Let pat (defAux ()) $ Op $ ParOp Nothing seq_op)
-transformSOAC pat _ (Stream w _ lam nes arrs) = do
+transformSOAC pat _ (Stream w arrs _ nes lam) = do
   -- Just remove the stream and transform the resulting stms.
   soacs_scope <- castScope <$> askScope
   stream_stms <-

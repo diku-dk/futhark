@@ -150,14 +150,12 @@ instance PrettyLore lore => Pretty (Stm lore) where
           (_, ann) -> equals </> (stack ann </> ppr e)
     where
       linebreak = case e of
-        DoLoop {} -> True
-        Op {} -> True
-        If {} -> True
-        WithAcc {} -> True
-        Apply {} -> True
-        BasicOp ArrayLit {} -> False
-        BasicOp Assert {} -> True
-        _ -> False
+        BasicOp BinOp {} -> False
+        BasicOp CmpOp {} -> False
+        BasicOp ConvOp {} -> False
+        BasicOp UnOp {} -> False
+        BasicOp SubExp {} -> False
+        _ -> True
 
       stmannot =
         concat

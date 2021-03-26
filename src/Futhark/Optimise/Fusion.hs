@@ -140,14 +140,20 @@ varAliases v =
 varsAliases :: Names -> FusionGM Names
 varsAliases = fmap mconcat . mapM varAliases . namesToList
 
-checkForUpdates :: FusedRes -> Exp -> FusionGM FusedRes
-checkForUpdates res (BasicOp (Update src is _)) = do
-  res' <-
-    foldM addVarToInfusible res $
-      src : namesToList (mconcat $ map freeIn is)
-  aliases <- varAliases src
+updateKerInPlaces :: FusedRes -> ([VName], [VName]) -> FusionGM FusedRes
+updateKerInPlaces res (ip_vs, other_infuse_vs) = do
+  res' <- foldM addVarToInfusible res (ip_vs ++ other_infuse_vs)
+  aliases <- mconcat <$> mapM varAliases ip_vs
   let inspectKer k = k {inplace = aliases <> inplace k}
   return res' {kernels = M.map inspectKer $ kernels res'}
+
+checkForUpdates :: FusedRes -> Exp -> FusionGM FusedRes
+checkForUpdates res (BasicOp (Update src is _)) = do
+  let ifvs = namesToList $ mconcat $ map freeIn is
+  updateKerInPlaces res ([src], ifvs)
+checkForUpdates res (Op (Futhark.Scatter _ _ _ written_info)) = do
+  let updt_arrs = map (\(_, _, x) -> x) written_info
+  updateKerInPlaces res (updt_arrs, [])
 checkForUpdates res _ = return res
 
 -- | Updates the environment: (i) the @soacs@ (map) by binding each pattern
@@ -727,7 +733,7 @@ fusionGatherStms
                 lambdaBody = lam_body,
                 lambdaReturnType = map paramType $ acc_params ++ [offset_param]
               }
-          stream = Futhark.Stream w Sequential lam (merge_init ++ [intConst it 0]) loop_arrs
+          stream = Futhark.Stream w loop_arrs Sequential (merge_init ++ [intConst it 0]) lam
 
       -- It is important that the (discarded) final-offset is not the
       -- first element in the pattern, as we use the first element to
@@ -747,7 +753,8 @@ fusionGatherStms fres (bnd@(Let pat _ e) : bnds) res = do
       -- set to force horizontal fusion.  It is not possible to
       -- producer/consumer-fuse Scatter anyway.
       fres' <- addNamesToInfusible fres $ namesFromList $ patternNames pat
-      mapLike fres' soac lam
+      fres'' <- mapLike fres' soac lam
+      checkForUpdates fres'' e
     Right soac@(SOAC.Hist _ _ lam _) -> do
       -- We put the variables produced by Hist into the infusible
       -- set to force horizontal fusion.  It is not possible to
@@ -997,7 +1004,7 @@ copyNewlyConsumed ::
   Binder SOACS (Futhark.SOAC SOACS)
 copyNewlyConsumed was_consumed soac =
   case soac of
-    Futhark.Screma w (Futhark.ScremaForm scans reds map_lam) arrs -> do
+    Futhark.Screma w arrs (Futhark.ScremaForm scans reds map_lam) -> do
       -- Copy any arrays that are consumed now, but were not in the
       -- constituents.
       arrs' <- mapM copyConsumedArr arrs
@@ -1028,7 +1035,7 @@ copyNewlyConsumed was_consumed soac =
               )
               reds
 
-      return $ Futhark.Screma w (Futhark.ScremaForm scans' reds' map_lam') arrs'
+      return $ Futhark.Screma w arrs' $ Futhark.ScremaForm scans' reds' map_lam'
     _ -> return $ removeOpAliases soac
   where
     consumed = consumedInOp soac

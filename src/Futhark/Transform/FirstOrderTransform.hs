@@ -109,7 +109,7 @@ transformSOAC ::
   AST.Pattern (Lore m) ->
   SOAC (Lore m) ->
   m ()
-transformSOAC pat (Screma w form@(ScremaForm scans reds map_lam) arrs) = do
+transformSOAC pat (Screma w arrs form@(ScremaForm scans reds map_lam)) = do
   -- Start by combining all the reduction parts into a single operator
   let Reduce _ red_lam red_nes = singleReduce reds
       Scan scan_lam scan_nes = singleScan scans
@@ -196,7 +196,7 @@ transformSOAC pat (Screma w form@(ScremaForm scans reds map_lam) arrs) = do
     (++ patternNames pat)
       <$> replicateM (length scanacc_params) (newVName "discard")
   letBindNames names $ DoLoop [] merge loopform loop_body
-transformSOAC pat (Stream w _ lam nes arrs) = do
+transformSOAC pat (Stream w arrs _ nes lam) = do
   -- Create a loop that repeatedly applies the lambda body to a
   -- chunksize of 1.  Hopefully this will lead to this outer loop
   -- being the only one, as all the innermost one can be simplified
@@ -256,7 +256,7 @@ transformSOAC pat (Scatter len lam ivs as) = do
 
   let (as_ws, as_ns, as_vs) = unzip3 as
   ts <- mapM lookupType as_vs
-  asOuts <- mapM (newIdent "write_outasdf") ts
+  asOuts <- mapM (newIdent "write_out") ts
 
   -- Scatter is in-place, so we use the input array as the output array.
   let merge = loopMerge asOuts $ map Var as_vs
@@ -275,7 +275,7 @@ transformSOAC pat (Scatter len lam ivs as) = do
 
         ress <- forM indexes $ \(_, arr, indexes') -> do
           let saveInArray arr' (indexCur, valueCur) =
-                letExp "write_outbals" =<< eWriteArray arr' (map eSubExp indexCur) (eSubExp valueCur)
+                letExp "write_out" =<< eWriteArray arr' (map eSubExp indexCur) (eSubExp valueCur)
 
           foldM saveInArray arr indexes'
         return $ resultBody (map Var ress)

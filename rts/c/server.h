@@ -488,19 +488,61 @@ void cmd_report(struct server_state *s, const char *args[]) {
   free(report);
 }
 
+char *next_word(char **line) {
+  char *p = *line;
+
+  while (isspace(*p)) {
+    p++;
+  }
+
+  if (*p == 0) {
+    return NULL;
+  }
+
+  if (*p == '"') {
+    char *save = p+1;
+    // Skip ahead till closing quote.
+    p++;
+
+    while (*p && *p != '"') {
+      p++;
+    }
+
+    if (*p == '"') {
+      *p = 0;
+      *line = p+1;
+      return save;
+    } else {
+      return NULL;
+    }
+  } else {
+    char *save = p;
+    // Skip ahead till next whitespace.
+
+    while (*p && !isspace(*p)) {
+      p++;
+    }
+
+    if (*p) {
+      *p = 0;
+      *line = p+1;
+    } else {
+      *line = p;
+    }
+    return save;
+  }
+}
+
 void process_line(struct server_state *s, char *line) {
-  int max_num_tokens = 100;
+  int max_num_tokens = 1000;
   const char* tokens[max_num_tokens];
   int num_tokens = 0;
-  char *saveptr;
 
-  char *tmp = line;
-  while ((tokens[num_tokens] = strtok_r(tmp, " \n", &saveptr)) != NULL) {
+  while ((tokens[num_tokens] = next_word(&line)) != NULL) {
     num_tokens++;
     if (num_tokens == max_num_tokens) {
       futhark_panic(1, "Line too long.\n");
     }
-    tmp = NULL;
   }
 
   const char *command = tokens[0];
@@ -616,11 +658,51 @@ int free_array(const struct array_aux *aux,
   return aux->free(ctx, arr);
 }
 
+typedef void* (*opaque_restore_fn)(struct futhark_context*, void*);
+typedef int (*opaque_store_fn)(struct futhark_context*, const void*, void **, size_t *);
 typedef int (*opaque_free_fn)(struct futhark_context*, void*);
 
 struct opaque_aux {
+  opaque_restore_fn restore;
+  opaque_store_fn store;
   opaque_free_fn free;
 };
+
+int restore_opaque(const struct opaque_aux *aux, FILE *f,
+                   struct futhark_context *ctx, void *p) {
+  // We have a problem: we need to load data from 'f', since the
+  // restore function takes a pointer, but we don't know how much we
+  // need (and cannot possibly).  So we do something hacky: we read
+  // *all* of the file, pass all of the data to the restore function
+  // (which doesn't care if there's extra at the end), then we compute
+  // how much space the the object actually takes in serialised form
+  // and rewind the file to that position.  The only downside is more IO.
+  size_t start = ftell(f);
+  size_t size;
+  char *bytes = fslurp_file(f, &size);
+  void *obj = aux->restore(ctx, bytes);
+  free(bytes);
+  if (obj != NULL) {
+    *(void**)p = obj;
+    size_t obj_size;
+    (void)aux->store(ctx, obj, NULL, &obj_size);
+    fseek(f, start+obj_size, SEEK_SET);
+    return 0;
+  } else {
+    fseek(f, start, SEEK_SET);
+    return 1;
+  }
+}
+
+void store_opaque(const struct opaque_aux *aux, FILE *f,
+                  struct futhark_context *ctx, void *p) {
+  void *obj = *(void**)p;
+  size_t obj_size;
+  void *data = NULL;
+  (void)aux->store(ctx, obj, &data, &obj_size);
+  fwrite(data, sizeof(char), obj_size, f);
+  free(data);
+}
 
 int free_opaque(const struct opaque_aux *aux,
                  struct futhark_context *ctx, void *p) {
