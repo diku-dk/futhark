@@ -753,7 +753,7 @@ fusionGatherStms fres (bnd@(Let pat _ e) : bnds) res = do
       -- set to force horizontal fusion.  It is not possible to
       -- producer/consumer-fuse Scatter anyway.
       fres' <- addNamesToInfusible fres $ namesFromList $ patternNames pat
-      fres''<- mapLike fres' soac lam
+      fres'' <- mapLike fres' soac lam
       checkForUpdates fres'' e
     Right soac@(SOAC.Hist _ _ lam _) -> do
       -- We put the variables produced by Hist into the infusible
