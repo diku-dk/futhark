@@ -1056,25 +1056,32 @@ simplifyKernelBody ::
 simplifyKernelBody space (KernelBody _ stms res) = do
   par_blocker <- Engine.asksEngineEnv $ Engine.blockHoistPar . Engine.envHoistBlockers
 
+  -- Ensure we do not try to use anything that is consumed in the result.
   ((body_stms, body_res), hoisted) <-
-    Engine.localVtable (<> scope_vtable) $
-      Engine.localVtable (\vtable -> vtable {ST.simplifyMemory = True}) $
-        Engine.blockIf
-          ( Engine.hasFree bound_here
-              `Engine.orIf` Engine.isOp
-              `Engine.orIf` par_blocker
-              `Engine.orIf` Engine.isConsumed
-          )
-          $ Engine.simplifyStms stms $ do
-            res' <-
-              Engine.localVtable (ST.hideCertified $ namesFromList $ M.keys $ scopeOf stms) $
-                mapM Engine.simplify res
-            return ((res', UT.usages $ freeIn res'), mempty)
+    Engine.localVtable (flip (foldl' (flip ST.consume)) (foldMap consumedInResult res))
+      . Engine.localVtable (<> scope_vtable)
+      . Engine.localVtable (\vtable -> vtable {ST.simplifyMemory = True})
+      $ Engine.blockIf
+        ( Engine.hasFree bound_here
+            `Engine.orIf` Engine.isOp
+            `Engine.orIf` par_blocker
+            `Engine.orIf` Engine.isConsumed
+        )
+        $ Engine.simplifyStms stms $ do
+          res' <-
+            Engine.localVtable (ST.hideCertified $ namesFromList $ M.keys $ scopeOf stms) $
+              mapM Engine.simplify res
+          return ((res', UT.usages $ freeIn res'), mempty)
 
   return (mkWiseKernelBody () body_stms body_res, hoisted)
   where
     scope_vtable = segSpaceSymbolTable space
     bound_here = namesFromList $ M.keys $ scopeOfSegSpace space
+
+    consumedInResult (WriteReturns _ arr _) =
+      [arr]
+    consumedInResult _ =
+      []
 
 segSpaceSymbolTable :: ASTLore lore => SegSpace -> ST.SymbolTable lore
 segSpaceSymbolTable (SegSpace flat gtids_and_dims) =
