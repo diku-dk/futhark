@@ -103,6 +103,15 @@ class Server:
             for i in range(1, len(args)):
                 self._store_val(f, self._get_var(args[i]))
 
+    def _restore_val(self, reader, typename):
+        if typename in self._ctx.opaques:
+            vs = []
+            for t in self._ctx.opaques[typename]:
+                vs += [read_value(t, reader)]
+            return opaque(typename, *vs)
+        else:
+            return read_value(typename, reader)
+
     def _cmd_restore(self, args):
         if len(args) % 2 == 0:
             raise self.Failure('Invalid argument count')
@@ -121,7 +130,7 @@ class Server:
                     raise self.Failure('Variable already exists: %s' % vname)
 
                 try:
-                    self._vars[vname] = read_value(typename, reader)
+                    self._vars[vname] = self._restore_val(reader, typename)
                 except ValueError:
                     raise self.Failure('Failed to restore variable %s.\n'
                                        'Possibly malformed data in %s.\n'
