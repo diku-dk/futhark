@@ -29,7 +29,6 @@ import Futhark.Pass
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
 import Futhark.Util (maxinum)
-import Debug.Trace
 
 data VarEntry
   = IsArray VName (NameInfo SOACS) Names SOAC.Input
@@ -141,22 +140,20 @@ varAliases v =
 varsAliases :: Names -> FusionGM Names
 varsAliases = fmap mconcat . mapM varAliases . namesToList
 
-checkForUpdates :: FusedRes -> Exp -> FusionGM FusedRes
-checkForUpdates res (BasicOp (Update src is _)) = do
-  res' <-
-    foldM addVarToInfusible res $
-      src : namesToList (mconcat $ map freeIn is)
-  aliases <- varAliases src
+updateKerInPlaces :: FusedRes -> ([VName], [VName]) -> FusionGM FusedRes
+updateKerInPlaces res (ip_vs, other_infuse_vs) = do
+  res' <- foldM addVarToInfusible res (ip_vs ++ other_infuse_vs)
+  aliases <- mconcat <$> mapM varAliases ip_vs
   let inspectKer k = k {inplace = aliases <> inplace k}
   return res' {kernels = M.map inspectKer $ kernels res'}
 
+checkForUpdates :: FusedRes -> Exp -> FusionGM FusedRes
+checkForUpdates res (BasicOp (Update src is _)) = do
+  let ifvs = namesToList $ mconcat $ map freeIn is
+  updateKerInPlaces res ([src], ifvs)
 checkForUpdates res (Op (Futhark.Scatter _ _ _ written_info)) = do
   let updt_arrs = map (\(_,_,x)->x) written_info
-  res' <-
-    foldM forceVarToInfusible res updt_arrs
-  aliases <- mconcat <$> mapM varAliases updt_arrs
-  let inspectKer k = k {inplace = aliases <> inplace k}
-  return res' {kernels = M.map inspectKer $ kernels res'}
+  updateKerInPlaces res (updt_arrs, [])
 checkForUpdates res _ = return res
 
 -- | Updates the environment: (i) the @soacs@ (map) by binding each pattern
@@ -230,14 +227,13 @@ fuseConsts used_consts consts =
 
 fuseFun :: Stms SOACS -> FunDef SOACS -> PassM (FunDef SOACS)
 fuseFun consts fun = do
-  stms <- trace ("Fusion fun, orig fun:\n"++pretty fun++"\n") $
+  stms <-
     fuseStms
       (scopeOf consts <> scopeOfFParams (funDefParams fun))
       (bodyStms $ funDefBody fun)
       (bodyResult $ funDefBody fun)
   let body = (funDefBody fun) {bodyStms = stms}
-  trace ("fused program:\n"++pretty (fun {funDefBody = body})++"\n") $
-    return fun {funDefBody = body}
+  return fun {funDefBody = body}
 
 fuseStms :: Scope SOACS -> Stms SOACS -> Result -> PassM (Stms SOACS)
 fuseStms scope stms res = do
@@ -431,7 +427,7 @@ greedyFuse rem_bnds lam_used_nms res (out_idds, aux, orig_soac, consumed) = do
   --      restriction, e.g., would move an input array past its in-place update.
   let all_used_names = namesToList $ mconcat [lam_used_nms, namesFromList inp_nms, namesFromList other_nms]
       has_inplace ker = any (`nameIn` inplace ker) all_used_names
-      ok_inplace = (not $ any has_inplace old_kers) && (not $ any has_inplace fused_kers)
+      ok_inplace = not $ any has_inplace old_kers
   --
   -- (iii)  there are some kernels that use some of `out_idds' as inputs
   -- (iv)   and producer-consumer or horizontal fusion succeeds with those.
@@ -756,10 +752,9 @@ fusionGatherStms fres (bnd@(Let pat _ e) : bnds) res = do
       -- We put the variables produced by Scatter into the infusible
       -- set to force horizontal fusion.  It is not possible to
       -- producer/consumer-fuse Scatter anyway.
-      fres0' <- addNamesToInfusible fres $ namesFromList $ patternNames pat 
-      fres1' <- foldM forceVarToInfusible fres (map (\(_,_,x)->x) _as)
-      let fres' = fres0' <> fres1'
-      mapLike fres' soac lam
+      fres' <- addNamesToInfusible fres $ namesFromList $ patternNames pat
+      fres''<- mapLike fres' soac lam 
+      checkForUpdates fres'' e
     Right soac@(SOAC.Hist _ _ lam _) -> do
       -- We put the variables produced by Hist into the infusible
       -- set to force horizontal fusion.  It is not possible to
@@ -867,14 +862,6 @@ addVarToInfusible fres name = do
         Nothing -> name
         Just (SOAC.Input _ orig _) -> orig
   return fres {infusible = oneName name' <> infusible fres}
-
-forceVarToInfusible :: FusedRes -> VName -> FusionGM FusedRes
-forceVarToInfusible fres name = do
-  trns <- asks $ lookupArr name
-  let name' = case trns of
-        Nothing -> name
-        Just (SOAC.Input _ orig _) -> orig
-  return fres {infusible = oneName name <> oneName name' <> infusible fres }
 
 -- Lambdas create a new scope.  Disallow fusing from outside lambda by
 -- adding inp_arrs to the infusible set.
