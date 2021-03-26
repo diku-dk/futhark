@@ -336,6 +336,10 @@ checkKernelBody ::
   TC.TypeM lore ()
 checkKernelBody ts (KernelBody (_, dec) stms kres) = do
   TC.checkBodyLore dec
+  -- We consume the kernel results (when applicable) before
+  -- type-checking the stms, so we will get an error if a statement
+  -- uses an array that is written to in a result.
+  mapM_ consumeKernelResult kres
   TC.checkStms stms $ do
     unless (length ts == length kres) $
       TC.bad $
@@ -346,6 +350,11 @@ checkKernelBody ts (KernelBody (_, dec) stms kres) = do
             ++ " values."
     zipWithM_ checkKernelResult kres ts
   where
+    consumeKernelResult (WriteReturns _ arr _) =
+      TC.consume =<< TC.lookupAliases arr
+    consumeKernelResult _ =
+      pure ()
+
     checkKernelResult (Returns _ what) t =
       TC.require [t] what
     checkKernelResult (WriteReturns shape arr res) t = do
@@ -365,7 +374,6 @@ checkKernelBody ts (KernelBody (_, dec) stms kres) = do
                 ++ pretty shape
                 ++ ", but destination array has type "
                 ++ pretty arr_t
-      TC.consume =<< TC.lookupAliases arr
     checkKernelResult (ConcatReturns o w per_thread_elems v) t = do
       case o of
         SplitContiguous -> return ()
