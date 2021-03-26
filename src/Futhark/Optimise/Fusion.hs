@@ -140,14 +140,20 @@ varAliases v =
 varsAliases :: Names -> FusionGM Names
 varsAliases = fmap mconcat . mapM varAliases . namesToList
 
-checkForUpdates :: FusedRes -> Exp -> FusionGM FusedRes
-checkForUpdates res (BasicOp (Update src is _)) = do
-  res' <-
-    foldM addVarToInfusible res $
-      src : namesToList (mconcat $ map freeIn is)
-  aliases <- varAliases src
+updateKerInPlaces :: FusedRes -> ([VName], [VName]) -> FusionGM FusedRes
+updateKerInPlaces res (ip_vs, other_infuse_vs) = do
+  res' <- foldM addVarToInfusible res (ip_vs ++ other_infuse_vs)
+  aliases <- mconcat <$> mapM varAliases ip_vs
   let inspectKer k = k {inplace = aliases <> inplace k}
   return res' {kernels = M.map inspectKer $ kernels res'}
+
+checkForUpdates :: FusedRes -> Exp -> FusionGM FusedRes
+checkForUpdates res (BasicOp (Update src is _)) = do
+  let ifvs = namesToList $ mconcat $ map freeIn is
+  updateKerInPlaces res ([src], ifvs)
+checkForUpdates res (Op (Futhark.Scatter _ _ _ written_info)) = do
+  let updt_arrs = map (\(_,_,x)->x) written_info
+  updateKerInPlaces res (updt_arrs, [])
 checkForUpdates res _ = return res
 
 -- | Updates the environment: (i) the @soacs@ (map) by binding each pattern
@@ -747,7 +753,8 @@ fusionGatherStms fres (bnd@(Let pat _ e) : bnds) res = do
       -- set to force horizontal fusion.  It is not possible to
       -- producer/consumer-fuse Scatter anyway.
       fres' <- addNamesToInfusible fres $ namesFromList $ patternNames pat
-      mapLike fres' soac lam
+      fres''<- mapLike fres' soac lam
+      checkForUpdates fres'' e
     Right soac@(SOAC.Hist _ _ lam _) -> do
       -- We put the variables produced by Hist into the infusible
       -- set to force horizontal fusion.  It is not possible to
