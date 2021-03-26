@@ -91,13 +91,14 @@ lowerUpdateKernels
           certify cs (Let pat' aux $ Op $ SegOp $ SegMap lvl space ts kbody') :
           stmsToList poststms
     where
-      -- This is a bit more conservative than ideal.  In a perfect
+      -- This check is a bit more conservative than ideal.  In a perfect
       -- world, we would allow indexing a[i,j] if the update is also
       -- to exactly a[i,j], as that will not create cross-iteration
       -- dependencies.  (Although the type checker wouldn't be able to
       -- permit this anyway.)
       source_used_in_kbody =
-        freeIn kbody `namesIntersect` namesFromList (map updateSource updates)
+        mconcat (map (`lookupAliases` scope) (namesToList (freeIn kbody)))
+          `namesIntersect` mconcat (map ((`lookupAliases` scope) . updateSource) updates)
 lowerUpdateKernels scope stm updates = lowerUpdate scope stm updates
 
 lowerUpdatesIntoSegMap ::
