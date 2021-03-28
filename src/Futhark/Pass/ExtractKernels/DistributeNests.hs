@@ -326,6 +326,7 @@ bodyContainsParallelism = any isParallelStm . bodyStms
     isMap Apply {} = False
     isMap If {} = False
     isMap (DoLoop _ _ ForLoop {} body) = bodyContainsParallelism body
+    isMap (DoLoop _ _ WhileLoop {} _) = False
     isMap (WithAcc _ lam) = bodyContainsParallelism $ lambdaBody lam
     isMap (SplitAcc _ _ lam) = bodyContainsParallelism $ lambdaBody lam
     isMap Op {} = True
