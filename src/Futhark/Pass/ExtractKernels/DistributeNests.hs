@@ -322,12 +322,13 @@ bodyContainsParallelism = any isParallelStm . bodyStms
     isParallelStm stm =
       isMap (stmExp stm)
         && not ("sequential" `inAttrs` stmAuxAttrs (stmAux stm))
-    isMap Op {} = True
+    isMap BasicOp {} = False
+    isMap Apply {} = False
+    isMap If {} = False
     isMap (DoLoop _ _ ForLoop {} body) = bodyContainsParallelism body
     isMap (WithAcc _ lam) = bodyContainsParallelism $ lambdaBody lam
     isMap (SplitAcc _ _ lam) = bodyContainsParallelism $ lambdaBody lam
-    isMap BasicOp {} = False
-    isMap If {} = False
+    isMap Op {} = True
 
 lambdaContainsParallelism :: Lambda SOACS -> Bool
 lambdaContainsParallelism = bodyContainsParallelism . lambdaBody
