@@ -145,8 +145,6 @@ mapExpM tv (BasicOp (Assert e msg loc)) =
   BasicOp <$> (Assert <$> mapOnSubExp tv e <*> traverse (mapOnSubExp tv) msg <*> pure loc)
 mapExpM tv (BasicOp (Opaque e)) =
   BasicOp <$> (Opaque <$> mapOnSubExp tv e)
-mapExpM tv (BasicOp (JoinAcc v)) =
-  BasicOp <$> (JoinAcc <$> mapOnVName tv v)
 mapExpM tv (BasicOp (UpdateAcc v is ses)) =
   BasicOp
     <$> ( UpdateAcc
@@ -160,6 +158,8 @@ mapExpM tv (WithAcc inputs lam) =
     onInput (shape, vs, op) =
       (,,) <$> mapOnShape tv shape <*> mapM (mapOnVName tv) vs
         <*> traverse (bitraverse (mapOnLambda tv) (mapM (mapOnSubExp tv))) op
+mapExpM tv (SplitAcc shape accs lam) =
+  SplitAcc <$> mapOnShape tv shape <*> mapM (mapOnVName tv) accs <*> mapOnLambda tv lam
 mapExpM tv (DoLoop ctxmerge valmerge form loopbody) = do
   ctxparams' <- mapM (mapOnFParam tv) ctxparams
   valparams' <- mapM (mapOnFParam tv) valparams
@@ -312,8 +312,6 @@ walkExpM tv (BasicOp (Assert e msg _)) =
   walkOnSubExp tv e >> traverse_ (walkOnSubExp tv) msg
 walkExpM tv (BasicOp (Opaque e)) =
   walkOnSubExp tv e
-walkExpM tv (BasicOp (JoinAcc v)) =
-  walkOnVName tv v
 walkExpM tv (BasicOp (UpdateAcc v is ses)) = do
   walkOnVName tv v
   mapM_ (walkOnSubExp tv) is
@@ -323,6 +321,10 @@ walkExpM tv (WithAcc inputs lam) = do
     walkOnShape tv shape
     mapM_ (walkOnVName tv) vs
     traverse_ (bitraverse (walkOnLambda tv) (mapM (walkOnSubExp tv))) op
+  walkOnLambda tv lam
+walkExpM tv (SplitAcc shape accs lam) = do
+  walkOnShape tv shape
+  mapM_ (walkOnVName tv) accs
   walkOnLambda tv lam
 walkExpM tv (DoLoop ctxmerge valmerge form loopbody) = do
   mapM_ (walkOnFParam tv) ctxparams

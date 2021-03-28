@@ -116,8 +116,6 @@ primOpType (Manifest _ v) =
   pure <$> lookupType v
 primOpType Assert {} =
   pure [Prim Cert]
-primOpType (JoinAcc acc) =
-  pure . elemToType . elemType <$> lookupType acc
 primOpType (UpdateAcc v _ _) =
   pure <$> lookupType v
 
@@ -139,6 +137,13 @@ expExtType (WithAcc inputs lam) =
   where
     inputType (_, arrs, _) = traverse lookupType arrs
     num_accs = length inputs
+expExtType (SplitAcc _ accs lam) =
+  fmap staticShapes $
+    (<>)
+      <$> traverse lookupType accs
+      <*> pure (drop num_accs (lambdaReturnType lam))
+  where
+    num_accs = length accs
 expExtType (Op op) = opType op
 
 -- | The number of values returned by an expression.

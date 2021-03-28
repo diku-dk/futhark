@@ -402,8 +402,6 @@ data BasicOp
   | -- | Update an accumulator at the given index with the given value.
     -- Consumes the accumulator and produces a new one.
     UpdateAcc VName [SubExp] [SubExp]
-  | -- | Compact an array of accumulators to a single accumulator.
-    JoinAcc VName
   deriving (Eq, Ord, Show)
 
 -- | The root Futhark expression type.  The v'Op' constructor contains
@@ -425,6 +423,7 @@ data ExpT lore
     -- shape outermost.  This construct is not part of 'BasicOp'
     -- because we need the @lore@ parameter.
     WithAcc [(Shape, [VName], Maybe (Lambda lore, [SubExp]))] (Lambda lore)
+  | SplitAcc Shape [VName] (Lambda lore)
   | Op (Op lore)
 
 deriving instance Decorations lore => Eq (ExpT lore)

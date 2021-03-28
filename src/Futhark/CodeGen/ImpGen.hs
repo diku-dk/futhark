@@ -819,6 +819,15 @@ defCompileExp pat (WithAcc inputs lam) = do
       copyDWIM v [] se []
   where
     num_accs = length inputs
+defCompileExp pat (SplitAcc _ accs lam) = do
+  dLParams $ lambdaParams lam
+  compileStms mempty (bodyStms $ lambdaBody lam) $ do
+    let nonacc_res = drop num_accs (bodyResult (lambdaBody lam))
+        nonacc_pat_names = takeLast (length nonacc_res) (patternNames pat)
+    forM_ (zip nonacc_pat_names nonacc_res) $ \(v, se) ->
+      copyDWIM v [] se []
+  where
+    num_accs = length accs
 defCompileExp pat (Op op) = do
   opc <- asks envOpCompiler
   opc pat op
@@ -922,8 +931,6 @@ defCompileBasicOp _ Rearrange {} =
 defCompileBasicOp _ Rotate {} =
   return ()
 defCompileBasicOp _ Reshape {} =
-  return ()
-defCompileBasicOp _ JoinAcc {} =
   return ()
 defCompileBasicOp _ (UpdateAcc acc is vs) = do
   let is' = map toInt64Exp is

@@ -1131,11 +1131,6 @@ expReturns (BasicOp (Index v slice)) = do
     MemAcc acc ispace ts shape -> return [MemAcc acc ispace ts (fmap Free shape)]
 expReturns (BasicOp (Update v _ _)) =
   pure <$> varReturns v
-expReturns (BasicOp (JoinAcc v)) = do
-  r <- varReturns v
-  case r of
-    MemAcc acc ispace ts _ -> pure [MemAcc acc ispace ts mempty]
-    _ -> error $ "JoinAcc: " ++ pretty r
 expReturns (BasicOp (UpdateAcc acc _ _)) =
   pure <$> varReturns acc
 expReturns (WithAcc inputs lam) =
@@ -1148,6 +1143,14 @@ expReturns (WithAcc inputs lam) =
   where
     inputReturns (_, arrs, _) = mapM varReturns arrs
     num_accs = length inputs
+expReturns (SplitAcc _ accs lam) =
+  (<>)
+    <$> mapM varReturns accs
+    <*>
+    -- XXX: same problem as WithAcc.
+    pure (extReturns $ staticShapes $ drop num_accs $ lambdaReturnType lam)
+  where
+    num_accs = length accs
 expReturns (BasicOp op) =
   extReturns . staticShapes <$> primOpType op
 expReturns e@(DoLoop ctx val _ _) = do

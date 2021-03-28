@@ -1,6 +1,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeFamilies #-}
 
 -- | This module defines a collection of simplification rules, as per
@@ -42,13 +43,15 @@ topDownRules =
   [ RuleGeneric constantFoldPrimFun,
     RuleIf ruleIf,
     RuleIf hoistBranchInvariant,
-    RuleGeneric withAccTopDown
+    RuleGeneric withAccTopDown,
+    RuleGeneric splitAccTopDown
   ]
 
 bottomUpRules :: BinderOps lore => [BottomUpRule lore]
 bottomUpRules =
   [ RuleIf removeDeadBranchResult,
     RuleGeneric withAccBottomUp,
+    RuleGeneric splitAccBottomUp,
     RuleBasicOp simplifyIndex
   ]
 
@@ -352,46 +355,140 @@ withAccTopDown vtable (Let pat aux (WithAcc inputs lam)) = Simplify . auxing aux
       pure $ Just x
 withAccTopDown _ _ = Skip
 
+-- This rule is annoyingly similar to withAccTopDown, but the
+-- differences make it tricky to factor out the commonalities, without
+-- ending up with very baroque code.
+splitAccTopDown :: BinderOps lore => TopDownRuleGeneric lore
+-- A SplitAcc with no accumulators is sent to Valhalla.
+splitAccTopDown _ (Let pat aux (SplitAcc _ [] lam)) = Simplify . auxing aux $ do
+  lam_res <- bodyBind $ lambdaBody lam
+  forM_ (zip (patternNames pat) lam_res) $ \(v, se) ->
+    letBindNames [v] $ BasicOp $ SubExp se
+-- If the body of a SplitAcc is just another splitting of the split
+-- accumulators, then collapse them.
+splitAccTopDown _ (Let pat aux (SplitAcc _ accs lam))
+  | [Let inner_pat _ (SplitAcc inner_shape inner_accs inner_lam)] <-
+      stmsToList $ bodyStms body,
+    inner_accs == map paramName params,
+    bodyResult body == map Var (patternNames inner_pat) =
+    Simplify . auxing aux $
+      letBind pat $ SplitAcc inner_shape accs inner_lam
+  where
+    params = lambdaParams lam
+    body = lambdaBody lam
+-- Identify those results in 'lam' that are free and move them out.
+splitAccTopDown vtable (Let pat aux (SplitAcc shape accs lam)) = Simplify . auxing aux $ do
+  let (acc_res, nonacc_res) =
+        splitFromEnd num_nonaccs $ bodyResult $ lambdaBody lam
+      (acc_pes, nonacc_pes) =
+        splitFromEnd num_nonaccs $ patternElements pat
+
+  -- Look at accumulator results.
+  (acc_pes', accs', params', acc_res') <-
+    fmap (unzip4 . catMaybes) . mapM tryMoveAcc $
+      zip4 acc_pes accs (lambdaParams lam) acc_res
+
+  -- Look at non-accumulator results.
+  (nonacc_pes', nonacc_res') <-
+    unzip . catMaybes <$> mapM tryMoveNonAcc (zip nonacc_pes nonacc_res)
+
+  when (acc_pes' == acc_pes && nonacc_pes' == nonacc_pes) cannotSimplify
+
+  lam' <-
+    mkLambda params' . bodyBind $
+      (lambdaBody lam) {bodyResult = acc_res' <> nonacc_res'}
+
+  letBind (Pattern [] (acc_pes' <> nonacc_pes')) $ SplitAcc shape accs' lam'
+  where
+    num_nonaccs = length (lambdaReturnType lam) - length accs
+
+    tryMoveAcc (pe, acc, acc_p, Var v)
+      | paramName acc_p == v = do
+        letBindNames [patElemName pe] $ BasicOp $ SubExp $ Var acc
+        pure Nothing
+    tryMoveAcc x =
+      pure $ Just x
+
+    tryMoveNonAcc (pe, Var v)
+      | v `ST.elem` vtable = do
+        letBindNames [patElemName pe] $ BasicOp $ SubExp $ Var v
+        pure Nothing
+    tryMoveNonAcc (pe, Constant v) = do
+      letBindNames [patElemName pe] $ BasicOp $ SubExp $ Constant v
+      pure Nothing
+    tryMoveNonAcc x =
+      pure $ Just x
+splitAccTopDown _ _ = Skip
+
+-- WithAcc and SplitAcc are pretty similar, so use a single common
+-- function to simplify them both.
+bottomUpWithSplitAcc ::
+  BinderOps lore =>
+  (Lambda lore -> [b], [b] -> [LParam lore], a -> Int, [a] -> Lambda lore -> Exp lore) ->
+  UT.UsageTable ->
+  Pattern lore ->
+  StmAux (ExpDec lore) ->
+  [a] ->
+  Lambda lore ->
+  RuleM lore ()
+bottomUpWithSplitAcc (fromParams, toParams, inputElems, mk) utable pat aux inputs lam = do
+  let (acc_res, nonacc_res) =
+        splitFromEnd num_nonaccs $ bodyResult $ lambdaBody lam
+      (acc_pes, nonacc_pes) =
+        splitFromEnd num_nonaccs $ patternElements pat
+      params =
+        fromParams lam
+
+  -- Eliminate unused accumulator results
+  let (acc_pes', acc_stuff) =
+        unzip . filter keepAccRes $
+          zip (chunks (map inputElems inputs) acc_pes) $
+            zip3 inputs params acc_res
+      (inputs', params', acc_res') = unzip3 acc_stuff
+
+  -- Eliminate unused non-accumulator results
+  let (nonacc_pes', nonacc_res') =
+        unzip $ filter keepNonAccRes $ zip nonacc_pes nonacc_res
+
+  when (concat acc_pes' == acc_pes && nonacc_pes' == nonacc_pes) cannotSimplify
+
+  let pes' = concat acc_pes' ++ nonacc_pes'
+
+  lam' <- mkLambda (toParams params') $ do
+    void $ bodyBind $ lambdaBody lam
+    pure $ acc_res' ++ nonacc_res'
+
+  auxing aux $ letBind (Pattern [] pes') $ mk inputs' lam'
+  where
+    num_nonaccs = length (lambdaReturnType lam) - length inputs
+    keepAccRes (pes, _) = any ((`UT.used` utable) . patElemName) pes
+    keepNonAccRes (pe, _) = patElemName pe `UT.used` utable
+
 withAccBottomUp :: BinderOps lore => BottomUpRuleGeneric lore
 -- Eliminate dead results.
 withAccBottomUp (_, utable) (Let pat aux (WithAcc inputs lam))
-  | not $ all (`UT.used` utable) $ patternNames pat = Simplify $ do
-    let (acc_res, nonacc_res) =
-          splitFromEnd num_nonaccs $ bodyResult $ lambdaBody lam
-        (acc_pes, nonacc_pes) =
-          splitFromEnd num_nonaccs $ patternElements pat
-        (cert_params, acc_params) =
-          splitAt (length inputs) $ lambdaParams lam
-
-    -- Eliminate unused accumulator results
-    let (acc_pes', inputs', param_pairs, acc_res') =
-          unzip4 . filter keepAccRes $
-            zip4
-              (chunks (map inputArrs inputs) acc_pes)
-              inputs
-              (zip cert_params acc_params)
-              acc_res
-        (cert_params', acc_params') = unzip param_pairs
-
-    -- Eliminate unused non-accumulator results
-    let (nonacc_pes', nonacc_res') =
-          unzip $ filter keepNonAccRes $ zip nonacc_pes nonacc_res
-
-    when (concat acc_pes' == acc_pes && nonacc_pes' == nonacc_pes) cannotSimplify
-
-    let pes' = concat acc_pes' ++ nonacc_pes'
-
-    lam' <- mkLambda (cert_params' ++ acc_params') $ do
-      void $ bodyBind $ lambdaBody lam
-      pure $ acc_res' ++ nonacc_res'
-
-    auxing aux $ letBind (Pattern [] pes') $ WithAcc inputs' lam'
+  | not $ all (`UT.used` utable) $ patternNames pat =
+    Simplify $
+      bottomUpWithSplitAcc (fromParams, toParams, inputElems, mk) utable pat aux inputs lam
   where
-    num_nonaccs = length (lambdaReturnType lam) - length inputs
-    inputArrs (_, arrs, _) = length arrs
-    keepAccRes (pes, _, _, _) = any ((`UT.used` utable) . patElemName) pes
-    keepNonAccRes (pe, _) = patElemName pe `UT.used` utable
+    fromParams = uncurry zip . splitAt (length inputs) . lambdaParams
+    toParams ps = map fst ps ++ map snd ps
+    inputElems (_, arrs, _) = length arrs
+    mk = WithAcc
 withAccBottomUp _ _ = Skip
+
+splitAccBottomUp :: forall lore. BinderOps lore => BottomUpRuleGeneric lore
+-- Eliminate dead results.
+splitAccBottomUp (_, utable) (Let pat aux (SplitAcc shape inputs lam))
+  | not $ all (`UT.used` utable) $ patternNames pat =
+    Simplify $
+      bottomUpWithSplitAcc (fromParams, toParams, inputElems, mk) utable pat aux inputs lam
+  where
+    fromParams = lambdaParams
+    toParams = id
+    inputElems = const 1
+    mk = SplitAcc shape
+splitAccBottomUp _ _ = Skip
 
 -- Some helper functions
 

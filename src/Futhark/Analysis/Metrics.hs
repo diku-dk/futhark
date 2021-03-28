@@ -112,7 +112,9 @@ expMetrics (If _ tb fb _) =
 expMetrics Apply {} =
   seen "Apply"
 expMetrics (WithAcc _ lam) =
-  inside "MkAcc" $ lambdaMetrics lam
+  inside "WithAcc" $ lambdaMetrics lam
+expMetrics (SplitAcc _ _ lam) =
+  inside "SplitAcc" $ lambdaMetrics lam
 expMetrics (Op op) =
   opMetrics op
 
@@ -136,7 +138,6 @@ primOpMetrics Scratch {} = seen "Scratch"
 primOpMetrics Reshape {} = seen "Reshape"
 primOpMetrics Rearrange {} = seen "Rearrange"
 primOpMetrics Rotate {} = seen "Rotate"
-primOpMetrics JoinAcc {} = seen "JoinAcc"
 primOpMetrics UpdateAcc {} = seen "UpdateAcc"
 
 -- | Compute metrics for this lambda.

@@ -997,6 +997,14 @@ allocInExp (WithAcc inputs bodylam) =
       pure $ mkP p pt shape u mem ixfun is
     onYParam _ p _ =
       error $ "Cannot handle MkAcc param: " ++ pretty p
+allocInExp (SplitAcc shape accs lam) = do
+  ts <- forM accs $ \acc -> do
+    acc_t <- lookupMemInfo acc
+    case acc_t of
+      MemAcc c ispace ts _ -> pure $ MemAcc c ispace ts shape
+      _ -> error $ "Invalid SplitAcc input type: " ++ pretty acc_t
+  let params = zipWith Param (map paramName (lambdaParams lam)) ts
+  SplitAcc shape accs <$> allocInLambda params (lambdaBody lam) (lambdaReturnType lam)
 allocInExp e = mapExpM alloc e
   where
     alloc =
