@@ -458,8 +458,8 @@ pScan pr =
     <$> pLambda pr <* pComma
     <*> braces (pSubExp `sepBy` pComma)
 
-pMkAcc :: PR lore -> Parser (Exp lore)
-pMkAcc pr =
+pWithAcc :: PR lore -> Parser (Exp lore)
+pWithAcc pr =
   keyword "with_acc"
     *> parens (WithAcc <$> braces (pInput `sepBy` pComma) <* pComma <*> pLambda pr)
   where
@@ -472,13 +472,19 @@ pMkAcc pr =
         )
     pCombFun = parens ((,) <$> pLambda pr <* pComma <*> pSubExps)
 
+pSplitAcc :: PR lore -> Parser (Exp lore)
+pSplitAcc pr =
+  keyword "split_acc"
+    *> parens (SplitAcc <$> pShape <* pComma <*> pVNames <* pComma <*> pLambda pr)
+
 pExp :: PR lore -> Parser (Exp lore)
 pExp pr =
   choice
     [ pIf pr,
       pApply pr,
       pLoop pr,
-      pMkAcc pr,
+      pWithAcc pr,
+      pSplitAcc pr,
       Op <$> pOp pr,
       BasicOp <$> pBasicOp
     ]
