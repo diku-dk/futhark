@@ -44,7 +44,6 @@ import Data.Function ((&))
 import Data.List (find, partition, tails)
 import qualified Data.Map as M
 import Data.Maybe
-import Debug.Trace
 import Futhark.IR
 import Futhark.IR.SOACS (SOACS)
 import qualified Futhark.IR.SOACS as SOACS
