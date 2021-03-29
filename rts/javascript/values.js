@@ -48,8 +48,7 @@ function fileToValue(fname) {
 }
 
 function read_binary(buff) {
-  // TODO Trim white space at the beggining
-  //var buff = buff.trimStart();
+  // Skip leading white space
   while (buff.slice(0, 1).toString().trim() == "") {
     buff = buff.slice(1);
   }
@@ -70,11 +69,6 @@ function read_binary(buff) {
   }
 }
 
-function read_bin_array(buff, num_dim, typ) {
-  console.log("not implemented yet");
-  return undefined;
-}
-
 var typToSize = {
   "bool" : 1,
   "  u8" : 1,
@@ -89,12 +83,30 @@ var typToSize = {
   " f64" : 8,
 }
 
+function read_bin_array(buff, num_dim, typ) {
+  var u8_array = new Uint8Array(num_dim * 8);
+  binToStringArray(buff.slice(0, num_dim * 8), u8_array);
+  shape = new BigInt64Array(u8_array.buffer);
+  var length = shape[0];
+  for (var i = 1; i < shape.length; i++) {
+    length = length * shape[i];
+  }
+  length = Number(length);
+  var dbytes = typToSize[typ];
+  var u8_data = new Uint8Array(length * dbytes);
+  binToStringArray(buff.slice(num_dim * 8, num_dim * 8 + dbytes * length), u8_data);
+  var data  = new (typToType[typ])(u8_data.buffer);
+  // TODO figure out what to return
+  // Pair with (shape, data)
+  // A class?
+  return data;
+}
 
 function read_bin_scalar(buff, typ) {
   var size = typToSize[typ];
   var u8_array = new Uint8Array(size);
   binToStringArray(buff, u8_array);
-  array = new (typToType[typ])(u8_array.buffer);
+  var array = new (typToType[typ])(u8_array.buffer);
   return array[0];
 }
 
