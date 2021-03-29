@@ -22,6 +22,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Generated Python and C code should now be warning-free.
 
+  * Missing check for uses of size-lifted types (#1294).
+
 ## [0.19.3]
 
 ### Added
