@@ -3151,7 +3151,7 @@ arrayOfM ::
   Uniqueness ->
   TermTypeM (TypeBase dim as)
 arrayOfM loc t shape u = do
-  zeroOrderType (mkUsage loc "use as array element") "type used in array" t
+  arrayElemType (mkUsage loc "use as array element") "type used in array" t
   return $ arrayOf t shape u
 
 updateTypes :: ASTMappable e => e -> TermTypeM e
