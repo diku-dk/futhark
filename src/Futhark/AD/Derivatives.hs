@@ -86,8 +86,8 @@ pdBinOp (FMin ft) a b =
   floatBinOp derivs derivs ft a b
   where
     derivs x y = (fromBoolExp (x .<. y), fromBoolExp (x .>. y))
-pdBinOp LogAnd a b = (b,a)
-pdBinOp LogOr  _ _ = (iBool True, iBool True) -- cosmin: does it make even sense?
+pdBinOp LogAnd a b = (b, a)
+pdBinOp LogOr _ _ = (iBool True, iBool True) -- cosmin: does it make even sense?
 pdBinOp op _ _ = error $ "pdBinOp: missing case: " ++ pretty op
 
 -- | @pdBuiltin f args i@ computes the partial derivative of @f@
