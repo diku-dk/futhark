@@ -171,7 +171,7 @@ will not result in a double free.
    dimensions express the number of elements.  The data is copied into
    the new value.  It is the caller's responsibility to eventually
    call :c:func:`futhark_free_i32_1d`.  Multi-dimensional arrays are
-   assumed to be in row-major form.
+   assumed to be in row-major form.  Returns ``NULL`` on failure.
 
 .. c:function:: struct futhark_i32_1d *futhark_new_raw_i32_1d(struct futhark_context *ctx, char *data, int offset, int64_t dim0)
 
@@ -180,6 +180,7 @@ will not result in a double free.
    ``c`` backend, but when using e.g. the ``opencl`` backend, the
    ``data`` parameter will be a ``cl_mem``.  It is the caller's
    responsibility to eventually call :c:func:`futhark_free_i32_1d`.
+   Returns ``NULL`` on failure.
 
 .. c:function:: int futhark_free_i32_1d(struct futhark_context *ctx, struct futhark_i32_1d *arr)
 
@@ -197,7 +198,8 @@ will not result in a double free.
 
    Return a pointer to the shape of the array, with one element per
    dimension.  The lifetime of the shape is the same as ``arr``, and
-   should *not* be manually freed.
+   should *not* be manually freed.  Assuming ``arr`` is a valid
+   object, this function cannot fail.
 
 .. _opaques:
 
