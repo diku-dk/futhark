@@ -1378,15 +1378,13 @@ bottomUpSegOp (vtable, used) (Pattern [] kpes) dec segop = Simplify $ do
                 )
                 $ segSpaceDims space
             index kpe' =
-              letBind (Pattern [] [kpe']) $
-                BasicOp $
-                  Index arr $
-                    outer_slice <> remaining_slice
+              letBindNames [patElemName kpe'] . BasicOp . Index arr $
+                outer_slice <> remaining_slice
         if patElemName kpe `UT.isConsumed` used
           then do
             precopy <- newVName $ baseString (patElemName kpe) <> "_precopy"
             index kpe {patElemName = precopy}
-            letBind (Pattern [] [kpe]) $ BasicOp $ Copy precopy
+            letBindNames [patElemName kpe] $ BasicOp $ Copy precopy
           else index kpe
         return
           ( kpes'',
