@@ -1061,6 +1061,7 @@ simplifyKernelBody space (KernelBody _ stms res) = do
     Engine.localVtable (flip (foldl' (flip ST.consume)) (foldMap consumedInResult res))
       . Engine.localVtable (<> scope_vtable)
       . Engine.localVtable (\vtable -> vtable {ST.simplifyMemory = True})
+      . Engine.enterLoop
       $ Engine.blockIf
         ( Engine.hasFree bound_here
             `Engine.orIf` Engine.isOp
