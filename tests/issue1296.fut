@@ -1,5 +1,5 @@
 -- ==
--- structure { Concat 0 }
+-- structure { Concat 0 Copy 0 }
 
 let main(n: i64) =
   let xs = replicate n 0
