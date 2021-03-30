@@ -14,6 +14,7 @@ module Futhark.Analysis.SymbolTable
     entryDepth,
     entryLetBoundDec,
     entryIsSize,
+    entryStm,
 
     -- * Lookup
     elem,
