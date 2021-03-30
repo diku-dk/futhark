@@ -124,15 +124,22 @@ simplifyConcat (vtable, _) pat aux (Concat 0 x xs outer_w)
   | -- We produce the to-be-concatenated arrays in reverse order, so
     -- reverse them back.
     y : ys <-
-      reverse $
-        foldl' fuseConcatArg mempty $
-          map (toConcatArg vtable) $ x : xs,
+      forSingleArray $
+        reverse $
+          foldl' fuseConcatArg mempty $
+            map (toConcatArg vtable) $ x : xs,
     length xs /= length ys =
     Simplify $ do
       elem_type <- lookupType x
       y' <- fromConcatArg elem_type y
       ys' <- mapM (fromConcatArg elem_type) ys
       auxing aux $ letBind pat $ BasicOp $ Concat 0 y' ys' outer_w
+  where
+    -- If we fuse so much that there is only a single input left, then
+    -- it must have the right size.
+    forSingleArray [(ArgReplicate _ v, cs)] =
+      [(ArgReplicate [outer_w] v, cs)]
+    forSingleArray ys = ys
 simplifyConcat _ _ _ _ = Skip
 
 ruleBasicOp :: BinderOps lore => TopDownRuleBasicOp lore
