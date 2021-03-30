@@ -24,6 +24,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Missing check for uses of size-lifted types (#1294).
 
+  * Error in simplification of concatenations could cause compiler
+    crashes (#1296).
+
 ## [0.19.3]
 
 ### Added
