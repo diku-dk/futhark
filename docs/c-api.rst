@@ -90,8 +90,10 @@ Context
 
 .. c:function:: void futhark_context_free(struct futhark_context *ctx)
 
-   Free the context object.  It must not be used again.  The
-   configuration must be freed separately with
+   Free the context object.  It must not be used again.  You must call
+   :c:func:`futhark_context_sync` before calling this function to
+   ensure there are no outstanding asynchronous operations still
+   running. The configuration must be freed separately with
    :c:func:`futhark_context_config_free`.
 
 .. c:function:: int futhark_context_sync(struct futhark_context *ctx)
@@ -132,7 +134,7 @@ Context
    contain interesting information if
    :c:func:`futhark_context_config_set_debugging` or
    :c:func:`futhark_context_config_set_profiling` has been called
-   previously.
+   previously.  Returns ``NULL`` on failure.
 
 .. c:function:: int futhark_context_clear_caches(struct futhark_context *ctx)
 
