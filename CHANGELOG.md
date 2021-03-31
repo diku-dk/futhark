@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+  * `futhark_context_report()` now internally calls
+    `futhark_context_sync()` before collecting profiling information
+    (if applicable).
+
 ## [0.19.4]
 
 ### Fixed

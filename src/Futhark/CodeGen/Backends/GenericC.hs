@@ -1565,9 +1565,14 @@ commonLibFuns memreport = do
               }|]
     )
 
+  sync <- publicName "context_sync"
   publicDef_ "context_report" MiscDecl $ \s ->
     ( [C.cedecl|char* $id:s($ty:ctx *ctx);|],
       [C.cedecl|char* $id:s($ty:ctx *ctx) {
+                 if ($id:sync(ctx) != 0) {
+                   return NULL;
+                 }
+
                  struct str_builder builder;
                  str_builder_init(&builder);
                  if (ctx->detail_memory || ctx->profiling || ctx->logging) {
