@@ -248,8 +248,6 @@ instance Renameable lore => Rename (Stm lore) where
 instance Renameable lore => Rename (Exp lore) where
   rename (WithAcc inputs lam) =
     WithAcc <$> rename inputs <*> rename lam
-  rename (SplitAcc shape accs lam) =
-    SplitAcc <$> rename shape <*> rename accs <*> rename lam
   rename (DoLoop ctx val form loopbody) = do
     let (ctxparams, ctxinit) = unzip ctx
         (valparams, valinit) = unzip val

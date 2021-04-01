@@ -187,8 +187,6 @@ usageInExp (WithAcc inputs lam) =
   foldMap inputUsage inputs <> usageInBody (lambdaBody lam)
   where
     inputUsage (_, arrs, _) = foldMap consumedUsage arrs
-usageInExp (SplitAcc _ accs lam) =
-  foldMap consumedUsage accs <> usageInBody (lambdaBody lam)
 usageInExp (BasicOp (Update src _ _)) =
   consumedUsage src
 usageInExp (Op op) =

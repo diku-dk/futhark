@@ -125,8 +125,6 @@ transformStm (Let pat aux (WithAcc inputs lam)) =
   where
     transformInput (shape, arrs, op) =
       (shape,arrs,) <$> traverse (bitraverse transformLambda pure) op
-transformStm (Let pat aux (SplitAcc shape accs lam)) =
-  oneStm . Let pat aux <$> (SplitAcc shape accs <$> transformLambda lam)
 transformStm (Let pat aux (Op op)) =
   fmap (certify (stmAuxCerts aux)) <$> transformSOAC pat (stmAuxAttrs aux) op
 

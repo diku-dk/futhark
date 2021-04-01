@@ -291,6 +291,7 @@ pBasicOp =
       keyword "update_acc"
         *> parens
           (UpdateAcc <$> pVName <* pComma <*> pSubExps <* pComma <*> pSubExps),
+      keyword "join_acc" *> parens (JoinAcc <$> pVName),
       --
       pConvOp "sext" SExt pIntType pIntType,
       pConvOp "zext" ZExt pIntType pIntType,
@@ -472,11 +473,6 @@ pWithAcc pr =
         )
     pCombFun = parens ((,) <$> pLambda pr <* pComma <*> pSubExps)
 
-pSplitAcc :: PR lore -> Parser (Exp lore)
-pSplitAcc pr =
-  keyword "split_acc"
-    *> parens (SplitAcc <$> pShape <* pComma <*> pVNames <* pComma <*> pLambda pr)
-
 pExp :: PR lore -> Parser (Exp lore)
 pExp pr =
   choice
@@ -484,7 +480,6 @@ pExp pr =
       pApply pr,
       pLoop pr,
       pWithAcc pr,
-      pSplitAcc pr,
       Op <$> pOp pr,
       BasicOp <$> pBasicOp
     ]

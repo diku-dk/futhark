@@ -831,12 +831,9 @@ checkBasicOp (Iota e x s et) = do
   require [Prim int64] e
   require [Prim $ IntType et] x
   require [Prim $ IntType et] s
-checkBasicOp (Replicate (Shape dims) se) = do
+checkBasicOp (Replicate (Shape dims) valexp) = do
   mapM_ (require [Prim int64]) dims
-  se_t <- checkSubExp se
-  case elemType se_t of
-    ElemAcc {} -> bad . TypeError $ "Cannot replicate accumulator type: " <> pretty se_t
-    _ -> pure ()
+  void $ checkSubExp valexp
 checkBasicOp (Scratch _ shape) =
   mapM_ checkSubExp shape
 checkBasicOp (Reshape newshape arrexp) = do
@@ -903,6 +900,13 @@ checkBasicOp (Assert e (ErrorMsg parts) _) = do
     checkPart ErrorString {} = return ()
     checkPart (ErrorInt32 x) = require [Prim int32] x
     checkPart (ErrorInt64 x) = require [Prim int64] x
+checkBasicOp (JoinAcc acc) =
+  checkIfAccArr =<< checkArrIdent acc
+  where
+    checkIfAccArr Array {} =
+      pure ()
+    checkIfAccArr t =
+      bad $ TypeError $ "Bad type for JoinAcc: " ++ pretty t
 checkBasicOp (UpdateAcc acc is ses) = do
   (shape, ts) <- checkAccIdent acc
 
@@ -925,8 +929,6 @@ checkBasicOp (UpdateAcc acc is ses) = do
           ++ " provided."
 
   zipWithM_ require (map pure ts) ses
-
-  consume =<< lookupAliases acc
 
 matchLoopResultExt ::
   Checkable lore =>
@@ -1086,8 +1088,6 @@ checkExp (WithAcc inputs lam) = do
         bad . TypeError $ pretty arr <> " is not an array of outer shape " <> pretty shape
       pure $ stripArray (shapeRank shape) arr_t
 
-    mapM_ (consume <=< lookupAliases) arrs
-
     case op of
       Just (op_lam, nes) -> do
         let mkArrArg t = (t, mempty)
@@ -1110,19 +1110,6 @@ checkExp (WithAcc inputs lam) = do
   checkLambda lam $ replicate num_accs (Prim Cert, mempty) ++ acc_args
   where
     num_accs = length inputs
-checkExp (SplitAcc shape accs lam) = do
-  ts <- forM accs $ \acc -> do
-    acc_t <- lookupType acc
-    case elemToType $ elemType acc_t of
-      t@Acc {} -> pure t
-      _ ->
-        bad . TypeError $
-          unlines
-            [ "Must be an accumulator: " <> pretty acc,
-              "But has type: " <> pretty acc_t
-            ]
-  mapM_ (consume <=< lookupAliases) accs
-  checkLambda lam $ map ((,mempty) . (`arrayOfShape` shape)) ts
 checkExp (Op op) = do
   checker <- asks envCheckOp
   checker op

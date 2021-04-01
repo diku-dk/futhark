@@ -82,6 +82,7 @@ basicOpAliases Concat {} = [mempty]
 basicOpAliases Copy {} = [mempty]
 basicOpAliases Manifest {} = [mempty]
 basicOpAliases Assert {} = [mempty]
+basicOpAliases JoinAcc {} = [mempty]
 basicOpAliases UpdateAcc {} = [mempty]
 
 ifAliases :: ([Names], Names) -> ([Names], Names) -> [Names]
@@ -118,10 +119,6 @@ expAliases (WithAcc inputs lam) =
   where
     inputAliases (_, arrs, _) = replicate (length arrs) mempty
     num_accs = length inputs
-expAliases (SplitAcc _ accs lam) =
-  replicate num_accs mempty ++ drop num_accs (bodyAliases (lambdaBody lam))
-  where
-    num_accs = length accs
 expAliases (Op op) = opAliases op
 
 returnAliases :: [TypeBase shape Uniqueness] -> [(Names, Diet)] -> [Names]
@@ -165,8 +162,6 @@ consumedInExp (WithAcc inputs lam) =
   mconcat (map inputConsumed inputs) <> consumedByLambda lam
   where
     inputConsumed (_, arrs, _) = namesFromList arrs
-consumedInExp (SplitAcc _ accs lam) =
-  mconcat (map oneName accs) <> consumedByLambda lam
 consumedInExp (BasicOp (Update src _ _)) = oneName src
 consumedInExp (BasicOp (UpdateAcc acc _ _)) = oneName acc
 consumedInExp (BasicOp _) = mempty

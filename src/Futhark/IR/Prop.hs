@@ -129,7 +129,6 @@ safeExp (If _ tbranch fbranch _) =
   all (safeExp . stmExp) (bodyStms tbranch)
     && all (safeExp . stmExp) (bodyStms fbranch)
 safeExp WithAcc {} = True -- Although unlikely to matter.
-safeExp SplitAcc {} = True -- Although unlikely to matter.
 safeExp (Op op) = safeOp op
 
 safeBody :: IsOp (Op lore) => Body lore -> Bool

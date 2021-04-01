@@ -579,7 +579,6 @@ cheapExp (BasicOp ConvOp {}) = True
 cheapExp (BasicOp Copy {}) = False
 cheapExp (BasicOp Replicate {}) = False
 cheapExp (BasicOp Manifest {}) = False
-cheapExp (BasicOp UpdateAcc {}) = False
 cheapExp DoLoop {} = False
 cheapExp (If _ tbranch fbranch _) =
   all cheapStm (bodyStms tbranch)
@@ -849,11 +848,6 @@ simplifyExp (WithAcc inputs lam) = do
     (,op_stms) <$> ((,,op') <$> simplify shape <*> simplify arrs)
   (lam', lam_stms) <- simplifyLambda lam
   pure (WithAcc inputs' lam', mconcat inputs_stms <> lam_stms)
-simplifyExp (SplitAcc shape accs lam) = do
-  shape' <- simplify shape
-  accs' <- simplify accs
-  (lam', lam_stms) <- simplifyLambda lam
-  pure (SplitAcc shape' accs' lam', lam_stms)
 
 -- Special case for simplification of commutative BinOps where we
 -- arrange the operands in sorted order.  This can make expressions

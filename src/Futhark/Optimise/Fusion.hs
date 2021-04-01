@@ -837,9 +837,6 @@ fusionGatherExp fres (If cond e_then e_else _) = do
 fusionGatherExp fres (WithAcc inps lam) = do
   (_, fres') <- fusionGatherLam (mempty, fres) lam
   addNamesToInfusible fres' $ freeIn inps
-fusionGatherExp fres (SplitAcc _ _ lam) = do
-  (_, fres') <- fusionGatherLam (mempty, fres) lam
-  pure fres'
 
 -----------------------------------------------------------------------------------
 --- Errors: all SOACs, (because normalization ensures they appear

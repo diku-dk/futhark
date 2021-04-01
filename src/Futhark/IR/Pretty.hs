@@ -207,6 +207,8 @@ instance Pretty BasicOp where
     text "assert" <> apply [ppr e, ppr msg, text $ show $ locStr loc]
   ppr (UpdateAcc acc is v) =
     text "update_acc" <> apply [ppr acc, ppTuple' is, ppTuple' v]
+  ppr (JoinAcc acc) =
+    text "join_acc" <> apply [ppr acc]
 
 instance Pretty a => Pretty (ErrorMsg a) where
   ppr (ErrorMsg parts) = braces $ align $ commasep $ map p parts
@@ -288,13 +290,6 @@ instance PrettyLore lore => Pretty (Exp lore) where
                 Just (op', nes) ->
                   comma </> parens (ppr op' <> comma </> ppTuple' (map ppr nes))
           )
-  ppr (SplitAcc shape accs lam) =
-    text "split_acc"
-      <> parens
-        ( ppr shape <> comma
-            </> ppTuple' accs <> comma
-            </> ppr lam
-        )
 
 instance PrettyLore lore => Pretty (Lambda lore) where
   ppr (Lambda [] (Body _ stms []) []) | stms == mempty = text "nilFn"

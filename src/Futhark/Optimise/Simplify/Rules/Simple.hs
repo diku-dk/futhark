@@ -344,6 +344,17 @@ copyScratchToScratch defOf seType (Copy src) = do
 copyScratchToScratch _ _ _ =
   Nothing
 
+-- Joining a replicated accumulator can be compacted to just joining
+-- whatever was being replicated.
+joinReplicateAcc :: SimpleRule lore
+joinReplicateAcc defOf seType (JoinAcc acc) = do
+  (BasicOp (Replicate _ (Var acc')), cs) <- defOf acc
+  acc_t <- seType $ Var acc'
+  case acc_t of
+    Acc {} -> pure (SubExp $ Var acc', cs)
+    _ -> pure (JoinAcc acc', cs)
+joinReplicateAcc _ _ _ = Nothing
+
 simpleRules :: [SimpleRule lore]
 simpleRules =
   [ simplifyBinOp,
@@ -359,7 +370,8 @@ simpleRules =
     simplifyReshapeIota,
     simplifyReshapeIndex,
     simplifyUpdateReshape,
-    improveReshape
+    improveReshape,
+    joinReplicateAcc
   ]
 
 -- | Try to simplify the given 'BasicOp', returning a new 'BasicOp'

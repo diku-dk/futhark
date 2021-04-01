@@ -1269,6 +1269,22 @@ internaliseStreamAcc desc dest op lam bs = do
   dest' <- internaliseExpToVars "scatter_dest" dest
   bs' <- internaliseExpToVars "scatter_input" bs
 
+  acc_cert_v <- newVName "acc_cert"
+  dest_ts <- mapM lookupType dest'
+  let dest_w = arraysSize 0 dest_ts
+      acc_t = Acc acc_cert_v (Shape [dest_w]) $ map rowType dest_ts
+  acc_p <- newParam "acc_p" acc_t
+  withacc_lam <- mkLambda [Param acc_cert_v (I.Prim I.Cert), acc_p] $ do
+    lam' <-
+      internaliseMapLambda internaliseLambda lam $
+        map I.Var $ paramName acc_p : bs'
+    w <- arraysSize 0 <$> mapM lookupType bs'
+    accs <- letExp "accs" $ BasicOp $ Replicate (Shape [w]) $ I.Var $ paramName acc_p
+    accs' <-
+      letExp "scatter_acc_res" $ I.Op $ I.Screma w (accs : bs') (I.mapSOAC lam')
+    fmap (map I.Var) $
+      letTupExp "acc_joined" $ BasicOp $ JoinAcc accs'
+
   op' <-
     case op of
       Just (op_lam, ne) -> do
@@ -1282,14 +1298,9 @@ internaliseStreamAcc desc dest op lam bs = do
       Nothing ->
         return Nothing
 
-  letTupExp' desc <=< withAcc [(1, dest', op')] $ \acc -> do
-    w <- arraysSize 0 <$> mapM lookupType bs'
-    letTupExp' (desc <> "_acc") <=< splitAcc (Shape [w]) acc $ \accs -> do
-      lam' <-
-        internaliseMapLambda internaliseLambda lam $
-          map I.Var $ acc ++ bs'
-      fmap (map I.Var) . letTupExp "scatter_acc_res" $
-        I.Op $ I.Screma w (accs ++ bs') (I.mapSOAC lam')
+  destw <- arraysSize 0 <$> mapM lookupType dest'
+  fmap (map I.Var) $
+    letTupExp desc $ WithAcc [(Shape [destw], dest', op')] withacc_lam
 
 internaliseExp1 :: String -> E.Exp -> InternaliseM I.SubExp
 internaliseExp1 desc e = do

@@ -286,8 +286,6 @@ unbalancedLambda orig_lam =
     unbalancedStm _ DoLoop {} = False
     unbalancedStm bound (WithAcc _ lam) =
       unbalancedBody bound (lambdaBody lam)
-    unbalancedStm bound (SplitAcc _ _ lam) =
-      unbalancedBody bound (lambdaBody lam)
     unbalancedStm bound (If cond tbranch fbranch _) =
       cond `subExpBound` bound
         && (unbalancedBody bound tbranch || unbalancedBody bound fbranch)
@@ -369,9 +367,6 @@ transformStm path (Let pat aux (WithAcc inputs lam)) =
   where
     transformInput (shape, arrs, op) =
       (shape, arrs, fmap (first soacsLambdaToKernels) op)
-transformStm path (Let pat aux (SplitAcc shape accs lam)) =
-  oneStm . Let pat aux
-    <$> (SplitAcc shape accs <$> transformLambda path lam)
 transformStm path (Let pat aux (DoLoop ctx val form body)) =
   localScope
     ( castScope (scopeOf form)

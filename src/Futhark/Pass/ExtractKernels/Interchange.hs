@@ -13,8 +13,8 @@ module Futhark.Pass.ExtractKernels.Interchange
     interchangeLoops,
     Branch (..),
     interchangeBranch,
-    AccStm (..),
-    interchangeAcc,
+    WithAccStm (..),
+    interchangeWithAcc,
   )
 where
 
@@ -177,52 +177,44 @@ interchangeBranch nest loop = do
     runBinder $ foldM interchangeBranch1 loop $ reverse $ kernelNestLoops nest
   return $ bnds <> oneStm (branchStm loop')
 
-data AccStm
+data WithAccStm
   = WithAccStm [Int] Pattern [(Shape, [VName], Maybe (Lambda, [SubExp]))] Lambda
-  | SplitAccStm [Int] Pattern Shape [VName] Lambda
 
-accStm :: AccStm -> Stm
-accStm (WithAccStm _ pat inputs lam) =
+withAccStm :: WithAccStm -> Stm
+withAccStm (WithAccStm _ pat inputs lam) =
   Let pat (defAux ()) $ WithAcc inputs lam
-accStm (SplitAccStm _ pat shape accs lam) =
-  Let pat (defAux ()) $ SplitAcc shape accs lam
 
-renameParam :: MonadFreshNames m => Param dec -> m (Param dec)
-renameParam (Param p t) = newParam (baseString p) t
-
-interchangeAcc1 ::
+interchangeWithAcc1 ::
   (MonadBinder m, Lore m ~ SOACS) =>
-  AccStm ->
+  WithAccStm ->
   LoopNesting ->
-  m AccStm
-interchangeAcc1
-  (WithAccStm perm _withacc_pat inputs withacc_lam)
+  m WithAccStm
+interchangeWithAcc1
+  (WithAccStm perm _withacc_pat inputs acc_lam)
   (MapNesting map_pat map_aux w params_and_arrs) = do
     inputs' <- mapM onInput inputs
-    let (withacc_cert_params, withacc_acc_params) =
-          splitAt (length inputs) $ lambdaParams withacc_lam
-    withacc_acc_params' <- mapM renameParam withacc_acc_params
-    let withacc_params = withacc_cert_params ++ withacc_acc_params'
-    withacc_lam' <- mkLambda (map trParam withacc_params) $ do
-      letTupExp' "splitacc_inter"
-        <=< splitAcc (Shape [w]) (map paramName withacc_acc_params')
-        $ \splitaccs -> do
-          iota_w <-
-            letExp "acc_inter_iota" . BasicOp $
-              Iota w (intConst Int64 0) (intConst Int64 1) Int64
-          iota_p <- newParam "iota_p" $ Prim int64
-          let (params, arrs) = unzip params_and_arrs
-              maplam_ret = lambdaReturnType withacc_lam
-              maplam = Lambda (iota_p : withacc_acc_params ++ params) (lambdaBody withacc_lam) maplam_ret
-          maplam' <- trLam (Var (paramName iota_p)) maplam
-          auxing map_aux . letTupExp' "withacc_inter" $
-            Op $ Screma w (iota_w : splitaccs ++ arrs) (mapSOAC maplam')
+    let lam_params = lambdaParams acc_lam
+    iota_p <- newParam "iota_p" $ Prim int64
+    acc_lam' <- trLam (Var (paramName iota_p)) <=< mkLambda lam_params $ do
+      iota_w <-
+        letExp "acc_inter_iota" . BasicOp $
+          Iota w (intConst Int64 0) (intConst Int64 1) Int64
+      let (params, arrs) = unzip params_and_arrs
+          maplam_ret = lambdaReturnType acc_lam
+          maplam = Lambda (iota_p : params) (lambdaBody acc_lam) maplam_ret
+      (accs_vs, other_vs) <-
+        fmap (splitAt num_accs) . auxing map_aux . letTupExp "withacc_inter" $
+          Op $ Screma w (iota_w : arrs) (mapSOAC maplam)
+      accs_vs' <- fmap concat $
+        forM accs_vs $ \acc ->
+          letTupExp "acc_joined" $ BasicOp $ JoinAcc acc
+      pure $ map Var $ accs_vs' ++ other_vs
     let pat = Pattern [] $ rearrangeShape perm $ patternValueElements map_pat
         perm' = [0 .. patternSize pat -1]
-    pure $ WithAccStm perm' pat inputs' withacc_lam'
+    pure $ WithAccStm perm' pat inputs' acc_lam'
     where
       num_accs = length inputs
-      acc_certs = map paramName $ take num_accs $ lambdaParams withacc_lam
+      acc_certs = map paramName $ take num_accs $ lambdaParams acc_lam
       onArr v =
         pure . maybe v snd $
           find ((== v) . paramName . fst) params_and_arrs
@@ -264,8 +256,6 @@ interchangeAcc1
 
       trExp i (WithAcc acc_inputs lam) =
         WithAcc acc_inputs <$> trLam i lam
-      trExp i (SplitAcc shape accs lam) =
-        SplitAcc shape accs <$> trLam i lam
       trExp i (BasicOp (UpdateAcc acc is ses)) = do
         acc_t <- lookupType acc
         pure $ case acc_t of
@@ -285,45 +275,13 @@ interchangeAcc1
                 mapOnLParam = pure . trParam,
                 mapOnOp = trSOAC i
               }
-interchangeAcc1
-  (SplitAccStm perm _withacc_pat shape accs splitacc_lam)
-  (MapNesting map_pat map_aux w params_and_arrs) = do
-    let pat = Pattern [] $ rearrangeShape perm $ patternValueElements map_pat
-        perm' = [0 .. patternSize pat -1]
-        shape' = Shape [w] <> shape
-        accs' = map onAcc accs
 
-    splitacc_params' <-
-      map (fmap trType) <$> mapM renameParam (lambdaParams splitacc_lam)
-
-    splitacc_lam' <- mkLambda splitacc_params' $ do
-      let (params, arrs) = unzip $ map (onMapInput accs' splitacc_params') params_and_arrs
-          maplam_ret = lambdaReturnType splitacc_lam
-          maplam = Lambda params (lambdaBody splitacc_lam) maplam_ret
-      auxing map_aux . letTupExp' "withacc_inter" $
-        Op $ Screma w arrs (mapSOAC maplam)
-    pure $ SplitAccStm perm' pat shape' accs' splitacc_lam'
-    where
-      onAcc v =
-        maybe v snd $
-          find ((== v) . paramName . fst) params_and_arrs
-
-      onMapInput accs' splitacc_params' (p, arr) =
-        maybe (p, arr) snd . find ((== arr) . fst) $
-          zip accs' (zip (lambdaParams splitacc_lam) (map paramName splitacc_params'))
-
-      trType (Acc acc ispace ts) =
-        Array (ElemAcc acc ispace ts) (Shape [w] <> shape) NoUniqueness
-      trType (Array (ElemAcc acc ispace ts) _ u) =
-        Array (ElemAcc acc ispace ts) (Shape [w] <> shape) u
-      trType t = t
-
-interchangeAcc ::
+interchangeWithAcc ::
   (MonadFreshNames m, HasScope SOACS m) =>
   KernelNest ->
-  AccStm ->
+  WithAccStm ->
   m (Stms SOACS)
-interchangeAcc nest withacc = do
+interchangeWithAcc nest withacc = do
   (withacc', stms) <-
-    runBinder $ foldM interchangeAcc1 withacc $ reverse $ kernelNestLoops nest
-  return $ stms <> oneStm (accStm withacc')
+    runBinder $ foldM interchangeWithAcc1 withacc $ reverse $ kernelNestLoops nest
+  return $ stms <> oneStm (withAccStm withacc')

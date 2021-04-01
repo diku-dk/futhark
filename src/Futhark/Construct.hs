@@ -84,8 +84,6 @@ module Futhark.Construct
     binOpLambda,
     cmpOpLambda,
     mkLambda,
-    withAcc,
-    splitAcc,
     sliceDim,
     fullSlice,
     fullSliceNum,
@@ -483,40 +481,6 @@ mkLambda params m = do
     pure (ret, res)
   body <- mkBodyM stms res
   pure $ Lambda params body ret
-
--- | Easily construct a 'WithAcc' expression.  The integer indicates
--- the rank of the index space for the given input.
-withAcc ::
-  (MonadBinder m, LParamInfo (Lore m) ~ Type) =>
-  [(Int, [VName], Maybe (Lambda (Lore m), [SubExp]))] ->
-  ([VName] -> m Result) ->
-  m (Exp (Lore m))
-withAcc inputs f = do
-  (inputs', cert_ps, acc_ps) <- fmap unzip3 . forM inputs $ \(rank, arrs, op) -> do
-    acc_cert_v <- newVName "acc_cert"
-    arrs_ts <- mapM lookupType arrs
-    let dims = map (`arraysSize` arrs_ts) [0 .. rank -1]
-        shape = Shape dims
-    acc_p <-
-      newParam "acc_p" $ Acc acc_cert_v shape $ map (stripArray rank) arrs_ts
-    pure ((shape, arrs, op), Param acc_cert_v (Prim Cert), acc_p)
-  lam <- mkLambda (cert_ps ++ acc_ps) $ f $ map paramName acc_ps
-  pure $ WithAcc inputs' lam
-
--- | Easily construct a 'SplitAcc' expression.
-splitAcc ::
-  (MonadBinder m, LParamInfo (Lore m) ~ Type) =>
-  Shape ->
-  [VName] ->
-  ([VName] -> m Result) ->
-  m (Exp (Lore m))
-splitAcc shape accs f = do
-  acc_ps <- forM accs $ \acc -> do
-    acc_t <- lookupType acc
-    newParam (baseString acc <> "_split_p") $
-      Array (elemType acc_t) shape NoUniqueness
-  split_lam <- mkLambda acc_ps $ f $ map paramName acc_ps
-  pure $ SplitAcc shape accs split_lam
 
 -- | Slice a full dimension of the given size.
 sliceDim :: SubExp -> DimIndex SubExp
