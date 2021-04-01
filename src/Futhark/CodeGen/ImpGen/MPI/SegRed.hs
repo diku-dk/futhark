@@ -21,6 +21,27 @@ initAccumulators acc_vs nes =
     -- "<~~" Untyped assignment.
     acc_v <~~ ne'
 
+-- Core stage reduction 
+stageReduction :: Lambda MCMem -> [SubExp] -> [VName] -> [SubExp] -> [Imp.TExp Int64] -> ImpM MCMem Env Imp.MPIOp ()
+stageReduction lam nes acc_vs stage_arrays idxs = do
+  -- Declare lambda params
+  dLParams $ lambdaParams lam
+  let (x_params, y_params) =
+        splitAt (length nes) $ lambdaParams lam
+
+  -- Load accumulators values
+  forM_ (zip x_params acc_vs) $ \(x_param, acc_v) ->
+    copyDWIMFix (paramName x_param) [] (Var acc_v) []
+
+  -- Load input arrays values
+  forM_ (zip y_params stage_arrays) $ \(y_param, array) ->
+    copyDWIMFix (paramName y_param) [] array idxs
+
+  -- Compile the reduction lambdas
+  compileStms mempty (bodyStms (lambdaBody lam)) $
+    forM_ (zip acc_vs (bodyResult (lambdaBody lam))) $ \(acc_v, se) ->
+      copyDWIMFix acc_v [] se []
+
 -- | Generate code for a SegRed construct
 compileSegRed ::
   Pattern MCMem ->
@@ -44,23 +65,7 @@ compileSegRed pat space reds kbody
       -- gtid is the index used to read the input array
       dPrim_ gtid int64
       copyDWIM gtid [] (Var . tvVar $ stage_one_idx) []
-      compileStms mempty (kernelBodyStms kbody) $ do
-        -- Declare lambda params
-        dLParams $ lambdaParams lam
-        let (x_params, y_params) =
-              splitAt (length nes) $ lambdaParams lam
-
-        -- Load params
-        forM_ (zip x_params acc_vs) $ \(x_param, acc_v) ->
-          copyDWIMFix (paramName x_param) [] (Var acc_v) []
-
-        forM_ (zip y_params (kernelBodyResult kbody)) $ \(y_param, Returns _ se) ->
-          copyDWIMFix (paramName y_param) [] se []
-
-        -- Compile the reduction lambdas
-        compileStms mempty (bodyStms (lambdaBody lam)) $
-          forM_ (zip acc_vs (bodyResult (lambdaBody lam))) $ \(acc_v, se) ->
-            copyDWIMFix acc_v [] se []
+      compileStms mempty (kernelBodyStms kbody) $ stageReduction lam nes acc_vs (map (\(Returns _ se) -> se) (kernelBodyResult kbody)) []
     
     emit $ Imp.Op $ Imp.DistributedLoop "segred" (tvVar stage_one_idx) Imp.Skip stage_one mempty [] $ segFlat space
 
@@ -92,21 +97,8 @@ compileSegRed pat space reds kbody
     stage_two <- collect $ do
       -- Reset acc
       initAccumulators acc_vs nes
-      -- Here I need to change the input array of the loop body
-      sFor "i" (Imp.vi64 . tvVar $ nb_nodes) $ \i -> do
-        dLParams $ lambdaParams lam
-        let (x_params, y_params) =
-              splitAt (length nes) $ lambdaParams lam
-
-        forM_ (zip x_params acc_vs) $ \(x_param, acc_v) ->
-          copyDWIMFix (paramName x_param) [] (Var acc_v) []
-
-        forM_ (zip y_params stage_one_arrays) $ \(y_param, array) ->
-          copyDWIMFix (paramName y_param) [] (Var array) [i]
-
-        compileStms mempty (bodyStms (lambdaBody lam)) $
-          forM_ (zip acc_vs (bodyResult (lambdaBody lam))) $ \(acc_v, se) ->
-            copyDWIMFix acc_v [] se []
+      -- Here I need to change the input array of the loop body()
+      sFor "i" (Imp.vi64 . tvVar $ nb_nodes) $ \i -> stageReduction lam nes acc_vs (map Var stage_one_arrays) [i]
 
     -- Node id 0 is the main node
     sIf ((Imp.vi64 . tvVar $ node_id) .==. 0) (emit stage_two) (pure ())
