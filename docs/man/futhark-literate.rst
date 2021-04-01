@@ -31,8 +31,8 @@ programming techniques.
 
 **Warning:** Do not run untrusted programs.  See SAFETY below.
 
-Image directives and builtin functions Shells out to ``convert`` (from
-ImageMagick).  Video generation uses ``fmpeg``.
+Image directives and builtin functions shell out to ``convert`` (from
+ImageMagick).  Video generation uses ``ffmpeg``.
 
 OPTIONS
 =======
