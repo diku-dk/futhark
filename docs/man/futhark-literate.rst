@@ -20,7 +20,7 @@ prettyprinted form of the program.  This is useful for demonstrating
 programming techniques.
 
 * Top-level comments that start with a line comment marker (``--``)
-  and a space in the first column will be turned into ordinary text in
+  and a space in the next column will be turned into ordinary text in
   the Markdown file.
 
 * Ordinary top-level definitions will be enclosed in Markdown code
