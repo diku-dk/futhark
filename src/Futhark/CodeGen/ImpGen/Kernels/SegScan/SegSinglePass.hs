@@ -185,14 +185,13 @@ compileSegScan pat lvl space scanOp kbody = do
           (ScalarSpace [intConst Int64 m] ty)
     sComment "Load and map" $
       sFor "i" m $ \i -> do
-        --dScope Nothing $ scopeOfLParams $ lambdaParams $ segBinOpLambda scanOp
-        let phys_tid = segFlat space
+        -- let phys_tid = segFlat space
         -- The map's input index
-        dPrimV_ phys_tid $
+        dPrimV_ mapIdx $
           tvExp blockOff + sExt64 (kernelLocalThreadId constants)
             + i * kernelGroupSize constants
-        dPrimV_ mapIdx $ Imp.vi64 phys_tid `div` segment_size
-        dPrimV_ innerIdx $ Imp.vi64 phys_tid `mod` segment_size
+        --dPrimV_ mapIdx $ Imp.vi64 phys_tid `div` segment_size
+        dPrimV_ innerIdx $ Imp.vi64 mapIdx `mod` segment_size
         -- Perform the map
         let in_bounds =
               compileStms mempty (kernelBodyStms kbody) $ do
@@ -200,7 +199,7 @@ compileSegScan pat lvl space scanOp kbody = do
 
                 -- Write map results to their global memory destinations
                 forM_ (zip (takeLast (length map_res) all_pes) map_res) $ \(dest, src) ->
-                  copyDWIMFix (patElemName dest) [Imp.vi64 phys_tid] (kernelResultSubExp src) []
+                  copyDWIMFix (patElemName dest) [Imp.vi64 mapIdx] (kernelResultSubExp src) []
 
                 -- Write to-scan results to private memory.
                 forM_ (zip privateArrays $ map kernelResultSubExp all_scan_res) $ \(dest, src) ->
@@ -210,7 +209,7 @@ compileSegScan pat lvl space scanOp kbody = do
               forM_ (zip privateArrays scanOpNe) $ \(dest, ne) ->
                 copyDWIMFix dest [i] ne []
 
-        sIf (Imp.vi64 phys_tid .<. n) in_bounds out_of_bounds
+        sIf (Imp.vi64 mapIdx .<. n) in_bounds out_of_bounds
 
     sComment "Transpose scan inputs" $ do
       forM_ (zip transposedArrays privateArrays) $ \(trans, priv) -> do
