@@ -922,6 +922,7 @@ checkBasicOp (UpdateAcc acc is ses) = do
           ++ " provided."
 
   zipWithM_ require (map pure ts) ses
+  consume =<< lookupAliases acc
 
 matchLoopResultExt ::
   Checkable lore =>
@@ -1079,6 +1080,7 @@ checkExp (WithAcc inputs lam) = do
       arr_t <- lookupType arr
       unless (shapeDims shape `isPrefixOf` arrayDims arr_t) $
         bad . TypeError $ pretty arr <> " is not an array of outer shape " <> pretty shape
+      consume =<< lookupAliases arr
       pure $ stripArray (shapeRank shape) arr_t
 
     case op of
