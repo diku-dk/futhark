@@ -1279,11 +1279,7 @@ internaliseStreamAcc desc dest op lam bs = do
       internaliseMapLambda internaliseLambda lam $
         map I.Var $ paramName acc_p : bs'
     w <- arraysSize 0 <$> mapM lookupType bs'
-    accs <- letExp "accs" $ BasicOp $ Replicate (Shape [w]) $ I.Var $ paramName acc_p
-    accs' <-
-      letExp "scatter_acc_res" $ I.Op $ I.Screma w (accs : bs') (I.mapSOAC lam')
-    fmap (map I.Var) $
-      letTupExp "acc_joined" $ BasicOp $ JoinAcc accs'
+    letTupExp' "acc_res" $ I.Op $ I.Screma w (paramName acc_p : bs') (I.mapSOAC lam')
 
   op' <-
     case op of

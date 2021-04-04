@@ -615,13 +615,6 @@ maybeDistributeStm stm@(Let _ aux (BasicOp (Reshape reshape stm_arr))) acc =
           map DimNew (kernelNestWidths nest)
             ++ map DimNew (newDims reshape)
     return $ oneStm $ Let outerpat aux $ BasicOp $ Reshape reshape' arr
-maybeDistributeStm stm@(Let _ aux (BasicOp (JoinAcc stm_arr))) acc =
-  distributeSingleUnaryStm acc stm stm_arr $ \nest outerpat arr ->
-    runBinder_ $ do
-      arr_joined <- letExp (baseString arr <> "_joined") $ BasicOp $ JoinAcc arr
-      let nest_shape = Shape $ kernelNestWidths nest
-      auxing aux . letBind outerpat $
-        BasicOp $ Replicate nest_shape $ Var arr_joined
 maybeDistributeStm stm@(Let _ aux (BasicOp (Rotate rots stm_arr))) acc =
   distributeSingleUnaryStm acc stm stm_arr $ \nest outerpat arr -> do
     let rots' = map (const $ intConst Int64 0) (kernelNestWidths nest) ++ rots

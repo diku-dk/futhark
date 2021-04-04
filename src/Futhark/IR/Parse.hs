@@ -291,7 +291,6 @@ pBasicOp =
       keyword "update_acc"
         *> parens
           (UpdateAcc <$> pVName <* pComma <*> pSubExps <* pComma <*> pSubExps),
-      keyword "join_acc" *> parens (JoinAcc <$> pVName),
       --
       pConvOp "sext" SExt pIntType pIntType,
       pConvOp "zext" ZExt pIntType pIntType,

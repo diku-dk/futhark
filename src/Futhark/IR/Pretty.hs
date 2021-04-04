@@ -207,8 +207,6 @@ instance Pretty BasicOp where
     text "assert" <> apply [ppr e, ppr msg, text $ show $ locStr loc]
   ppr (UpdateAcc acc is v) =
     text "update_acc" <> apply [ppr acc, ppTuple' is, ppTuple' v]
-  ppr (JoinAcc acc) =
-    text "join_acc" <> apply [ppr acc]
 
 instance Pretty a => Pretty (ErrorMsg a) where
   ppr (ErrorMsg parts) = braces $ align $ commasep $ map p parts

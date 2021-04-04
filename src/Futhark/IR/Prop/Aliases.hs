@@ -82,7 +82,6 @@ basicOpAliases Concat {} = [mempty]
 basicOpAliases Copy {} = [mempty]
 basicOpAliases Manifest {} = [mempty]
 basicOpAliases Assert {} = [mempty]
-basicOpAliases JoinAcc {} = [mempty]
 basicOpAliases UpdateAcc {} = [mempty]
 
 ifAliases :: ([Names], Names) -> ([Names], Names) -> [Names]
