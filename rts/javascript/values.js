@@ -50,7 +50,7 @@ function fileToValue(fname) {
 function read_binary(buff) {
   // Skip leading white space
   while (buff.slice(0, 1).toString().trim() == "") {
-    buff = buff.slice(1);
+    buff = this.buff.slice(1);
   }
   if (buff[0] != 'b'.charCodeAt(0)) {
     throw "Not in binary format"
@@ -83,32 +83,32 @@ var typToSize = {
   " f64" : 8,
 }
 
-function read_bin_array(buff, num_dim, typ) {
-  var u8_array = new Uint8Array(num_dim * 8);
-  binToStringArray(buff.slice(0, num_dim * 8), u8_array);
-  shape = new BigInt64Array(u8_array.buffer);
-  var length = shape[0];
-  for (var i = 1; i < shape.length; i++) {
-    length = length * shape[i];
-  }
-  length = Number(length);
-  var dbytes = typToSize[typ];
-  var u8_data = new Uint8Array(length * dbytes);
-  binToStringArray(buff.slice(num_dim * 8, num_dim * 8 + dbytes * length), u8_data);
-  var data  = new (typToType[typ])(u8_data.buffer);
-  // TODO figure out what to return
-  // Pair with (shape, data)
-  // A class?
-  return data;
-}
-
-function read_bin_scalar(buff, typ) {
-  var size = typToSize[typ];
-  var u8_array = new Uint8Array(size);
-  binToStringArray(buff, u8_array);
-  var array = new (typToType[typ])(u8_array.buffer);
-  return array[0];
-}
+//function read_bin_array(buff, num_dim, typ) {
+//  var u8_array = new Uint8Array(num_dim * 8);
+//  binToStringArray(buff.slice(0, num_dim * 8), u8_array);
+//  shape = new BigInt64Array(u8_array.buffer);
+//  var length = shape[0];
+//  for (var i = 1; i < shape.length; i++) {
+//    length = length * shape[i];
+//  }
+//  length = Number(length);
+//  var dbytes = typToSize[typ];
+//  var u8_data = new Uint8Array(length * dbytes);
+//  binToStringArray(buff.slice(num_dim * 8, num_dim * 8 + dbytes * length), u8_data);
+//  var data  = new (typToType[typ])(u8_data.buffer);
+//  // TODO figure out what to return
+//  // Pair with (shape, data)
+//  // A class?
+//  return data;
+//}
+//
+//function read_bin_scalar(buff, typ) {
+//  var size = typToSize[typ];
+//  var u8_array = new Uint8Array(size);
+//  binToStringArray(buff, u8_array);
+//  var array = new (typToType[typ])(u8_array.buffer);
+//  return array[0];
+//}
 
   
 
@@ -146,3 +146,91 @@ function construct_binary_value(v) {
   return bytes;
 }
 
+
+class Reader {
+  constructor(f) {
+    this.f = f;
+    // TODO update this buff when value is read
+    this.buff = fileToBuff(f);
+    this.old_buff = this.buff;
+  }
+
+  read_bin_array(num_dim, typ) {
+    var u8_array = new Uint8Array(num_dim * 8);
+    binToStringArray(this.buff.slice(0, num_dim * 8), u8_array);
+    var shape = new BigInt64Array(u8_array.buffer);
+    var length = shape[0];
+    for (var i = 1; i < shape.length; i++) {
+      length = length * shape[i];
+    }
+    length = Number(length);
+    var dbytes = typToSize[typ];
+    var u8_data = new Uint8Array(length * dbytes);
+    binToStringArray(this.buff.slice(num_dim * 8, num_dim * 8 + dbytes * length), u8_data);
+    var data  = new (typToType[typ])(u8_data.buffer);
+    var tmp_buff = this.buff.slice(num_dim * 8, num_dim * 8 + dbytes * length);
+    console.log("testing array buff change");
+    console.log(this.buff);
+    this.buff = this.buff.slice(num_dim * 8 + dbytes * length);
+    console.log(this.buff);
+    console.log("end of arr buff test");
+    // TODO figure out what to return
+    // Pair with (shape, data)
+    // A class?
+    return data;
+  }
+
+  read_bin_scalar(typ) {
+    var size = typToSize[typ];
+    var u8_array = new Uint8Array(size);
+    binToStringArray(this.buff, u8_array);
+    var array = new (typToType[typ])(u8_array.buffer);
+    console.log("testing scalar buff change");
+    console.log(this.buff);
+    this.buff = this.buff.slice(u8_array.length); // Update buff to be unread part of the string
+    console.log(this.buff);
+    return array[0];
+  }
+
+  read_binary() {
+    // Skip leading white space
+    console.log("Made it here");
+    console.log(this.buff);
+    while (this.buff.slice(0, 1).toString().trim() == "") {
+      this.buff = this.buff.slice(1);
+    }
+    console.log("Made it here1");
+    if (this.buff[0] != 'b'.charCodeAt(0)) {
+      throw "Not in binary format"
+    }
+    console.log("Made it here1");
+    var version = this.buff[1];
+    if (version != 2) {
+      throw "Not version 2";
+    }
+    var num_dim = this.buff[2];
+    var typ = this.buff.slice(3, 7);
+    this.buff = this.buff.slice(7);
+    if (num_dim == 0) {
+      return this.read_bin_scalar(typ);
+    } else {
+      return this.read_bin_array(num_dim, typ);
+    }
+  }
+}
+
+
+function read_value(typename, reader) {
+  // TODO include typename in implementation
+  var val = reader.read_binary();
+  return val;
+}
+
+
+
+var r = new Reader("data2.in");
+console.log("r is ", r);
+var val = read_value(0, r);
+console.log(val);
+var val2 = read_value(0, r);
+console.log(val2);
