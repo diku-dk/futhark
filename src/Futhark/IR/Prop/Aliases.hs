@@ -82,7 +82,6 @@ basicOpAliases Concat {} = [mempty]
 basicOpAliases Copy {} = [mempty]
 basicOpAliases Manifest {} = [mempty]
 basicOpAliases Assert {} = [mempty]
-basicOpAliases JoinAcc {} = [mempty]
 basicOpAliases UpdateAcc {} = [mempty]
 
 ifAliases :: ([Names], Names) -> ([Names], Names) -> [Names]
@@ -159,7 +158,10 @@ consumedInExp (DoLoop _ merge _ _) =
         filter (unique . paramDeclType . fst) merge
     )
 consumedInExp (WithAcc inputs lam) =
-  mconcat (map inputConsumed inputs) <> consumedByLambda lam
+  mconcat (map inputConsumed inputs)
+    <> ( consumedByLambda lam
+           `namesSubtract` namesFromList (map paramName (lambdaParams lam))
+       )
   where
     inputConsumed (_, arrs, _) = namesFromList arrs
 consumedInExp (BasicOp (Update src _ _)) = oneName src

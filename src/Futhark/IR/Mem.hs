@@ -1131,11 +1131,6 @@ expReturns (BasicOp (Index v slice)) = do
     MemAcc acc ispace ts shape -> return [MemAcc acc ispace ts (fmap Free shape)]
 expReturns (BasicOp (Update v _ _)) =
   pure <$> varReturns v
-expReturns (BasicOp (JoinAcc v)) = do
-  r <- varReturns v
-  case r of
-    MemAcc acc ispace ts _ -> pure [MemAcc acc ispace ts mempty]
-    _ -> error $ "JoinAcc: " ++ pretty r
 expReturns (BasicOp (UpdateAcc acc _ _)) =
   pure <$> varReturns acc
 expReturns (WithAcc inputs lam) =

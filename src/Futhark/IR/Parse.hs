@@ -291,7 +291,6 @@ pBasicOp =
       keyword "update_acc"
         *> parens
           (UpdateAcc <$> pVName <* pComma <*> pSubExps <* pComma <*> pSubExps),
-      keyword "join_acc" *> parens (JoinAcc <$> pVName),
       --
       pConvOp "sext" SExt pIntType pIntType,
       pConvOp "zext" ZExt pIntType pIntType,
@@ -459,8 +458,8 @@ pScan pr =
     <$> pLambda pr <* pComma
     <*> braces (pSubExp `sepBy` pComma)
 
-pMkAcc :: PR lore -> Parser (Exp lore)
-pMkAcc pr =
+pWithAcc :: PR lore -> Parser (Exp lore)
+pWithAcc pr =
   keyword "with_acc"
     *> parens (WithAcc <$> braces (pInput `sepBy` pComma) <* pComma <*> pLambda pr)
   where
@@ -479,7 +478,7 @@ pExp pr =
     [ pIf pr,
       pApply pr,
       pLoop pr,
-      pMkAcc pr,
+      pWithAcc pr,
       Op <$> pOp pr,
       BasicOp <$> pBasicOp
     ]
@@ -554,8 +553,8 @@ pSOAC pr =
       parens $
         SOAC.Screma
           <$> pSubExp <* pComma
-          <*> p <* pComma
-          <*> (pVName `sepBy` pComma)
+          <*> braces (pVName `sepBy` pComma) <* pComma
+          <*> p
     pScremaForm =
       SOAC.ScremaForm
         <$> braces (pScan pr `sepBy` pComma) <* pComma
@@ -612,20 +611,20 @@ pSOAC pr =
       parens $
         SOAC.Stream
           <$> pSubExp <* pComma
+          <*> braces (pVName `sepBy` pComma) <* pComma
           <*> pParForm order comm <* pComma
-          <*> pLambda pr <* pComma
-          <*> braces (pSubExp `sepBy` pComma)
-          <*> many (pComma *> pVName)
+          <*> braces (pSubExp `sepBy` pComma) <* pComma
+          <*> pLambda pr
     pParForm order comm =
       SOAC.Parallel order comm <$> pLambda pr
     pStreamSeq =
       parens $
         SOAC.Stream
           <$> pSubExp <* pComma
+          <*> braces (pVName `sepBy` pComma) <* pComma
           <*> pure SOAC.Sequential
-          <*> pLambda pr <* pComma
-          <*> braces (pSubExp `sepBy` pComma)
-          <*> many (pComma *> pVName)
+          <*> braces (pSubExp `sepBy` pComma) <* pComma
+          <*> pLambda pr
     pVJP =
       parens $
         SOAC.VJP

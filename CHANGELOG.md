@@ -15,6 +15,22 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+  * Some uniqueness ignorance in fusion (#1291).
+
+  * An invalid transformation could in rare cases cause race
+    conditions (#1292).
+
+  * Generated Python and C code should now be warning-free.
+
+## [0.19.3]
+
+### Added
+
+  * Better `futhark test`/`futhark bench` errors when test data does
+    not have the expected type.
+
+### Fixed
+
   * Mismatch between how thresholds were printed and what the
     autotuner was looking for (#1269).
 
@@ -27,6 +43,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
     type checking (#1276).
 
   * `futhark literate`: `:loadimg` now handles relative paths properly.
+
+  * `futhark hash` no longer considers the built-in prelude.
+
+  * Server executables had broken store/restore commands for opaque types.
 
 ## [0.19.2]
 

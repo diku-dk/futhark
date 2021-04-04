@@ -17,7 +17,6 @@ import Data.List (delete, partition)
 import qualified Data.Map.Strict as M
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
-import qualified Data.Text.IO as T
 import Futhark.Analysis.Metrics.Type
 import Futhark.Server
 import Futhark.Test
@@ -295,8 +294,11 @@ runCompiledEntry futhark server program (InputOutputs entry run_cases) = do
       context1 case_ctx $ do
         expected <- getExpectedResult futhark program entry run
 
-        (liftCommand . withValuesFile futhark dir inputValues) $ \values_f ->
-          cmdRestore server values_f (zip ins input_types)
+        either E.throwError pure
+          <=< withValuesFile futhark dir inputValues
+          $ \values_f -> runExceptT $ do
+            checkValueTypes values_f input_types
+            liftCommand $ cmdRestore server values_f (zip ins input_types)
 
         call_r <- liftIO $ cmdCall server entry outs ins
         liftCommand $ cmdFree server ins
@@ -550,7 +552,7 @@ runTests config paths = do
                 Failure s -> do
                   when fancy moveCursorToTableTop
                   clear
-                  T.putStr $ (T.pack (inRed $ testCaseProgram test) <> ":\n") <> T.unlines s
+                  putStr $ inBold (testCaseProgram test <> ":\n") <> T.unpack (T.unlines s)
                   when fancy spaceTable
                   getResults $
                     ts'

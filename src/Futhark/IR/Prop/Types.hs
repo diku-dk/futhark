@@ -178,9 +178,8 @@ arrayOf (Array et size1 _) size2 u =
 arrayOf (Prim t) shape u
   | 0 <- shapeRank shape = Prim t
   | otherwise = Array (ElemPrim t) shape u
-arrayOf (Acc acc ispace ts) shape u
-  | 0 <- shapeRank shape = Acc acc ispace ts
-  | otherwise = Array (ElemAcc acc ispace ts) shape u
+arrayOf (Acc acc ispace ts) _shape _u =
+  Acc acc ispace ts
 arrayOf Mem {} _ _ =
   error "arrayOf Mem"
 

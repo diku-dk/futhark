@@ -295,7 +295,7 @@ unbalancedLambda orig_lam =
       not $ isBuiltInFunction fname
 
 sequentialisedUnbalancedStm :: Stm -> DistribM (Maybe (Stms SOACS))
-sequentialisedUnbalancedStm (Let pat _ (Op soac@(Screma _ form _)))
+sequentialisedUnbalancedStm (Let pat _ (Op soac@(Screma _ _ form)))
   | Just (_, lam2) <- isRedomapSOAC form,
     unbalancedLambda lam2,
     lambdaContainsParallelism lam2 = do
@@ -380,10 +380,10 @@ transformStm path (Let pat aux (DoLoop ctx val form body)) =
         WhileLoop cond
       ForLoop i it bound ps ->
         ForLoop i it bound ps
-transformStm path (Let pat aux (Op (Screma w form arrs)))
+transformStm path (Let pat aux (Op (Screma w arrs form)))
   | Just lam <- isMapSOAC form =
     onMap path $ MapLoop pat aux w lam arrs
-transformStm path (Let res_pat (StmAux cs _ _) (Op (Screma w form arrs)))
+transformStm path (Let res_pat (StmAux cs _ _) (Op (Screma w arrs form)))
   | Just scans <- isScanSOAC form,
     Scan scan_lam nes <- singleScan scans,
     Just do_iswim <- iswim res_pat w scan_lam $ zip nes arrs = do
@@ -398,27 +398,7 @@ transformStm path (Let res_pat (StmAux cs _ _) (Op (Screma w form arrs)))
     lvl <- segThreadCapped [w] "segscan" $ NoRecommendation SegNoVirt
     addStms . fmap (certify cs)
       =<< segScan lvl res_pat w scan_ops map_lam_sequential arrs [] []
-
-  -- We are only willing to generate code for scanomaps that do not
-  -- involve array accumulators, and do not have parallelism in their
-  -- map function.  Such cases will fall through to the
-  -- screma-splitting case, and produce an ordinary map and scan.
-  -- Hopefully, the scan then triggers the ISWIM case above (otherwise
-  -- we will still crash in code generation).  However, if the map
-  -- lambda is already identity, let's just go ahead here.
-  | Just (scans, map_lam) <- isScanomapSOAC form,
-    ( all primType (concatMap (lambdaReturnType . scanLambda) scans)
-        && not (lambdaContainsParallelism map_lam)
-    )
-      || isIdentityLambda map_lam = runBinder_ $ do
-    scan_ops <- forM scans $ \(Scan scan_lam nes) -> do
-      let scan_lam' = soacsLambdaToKernels scan_lam
-      return $ SegBinOp Noncommutative scan_lam' nes mempty
-
-    let map_lam' = soacsLambdaToKernels map_lam
-    lvl <- segThreadCapped [w] "segscan" $ NoRecommendation SegNoVirt
-    addStms =<< segScan lvl res_pat w scan_ops map_lam' arrs [] []
-transformStm path (Let res_pat aux (Op (Screma w form arrs)))
+transformStm path (Let res_pat aux (Op (Screma w arrs form)))
   | Just [Reduce comm red_fun nes] <- isReduceSOAC form,
     let comm'
           | commutativeLambda red_fun = Commutative
@@ -427,7 +407,7 @@ transformStm path (Let res_pat aux (Op (Screma w form arrs)))
     types <- asksScope scopeForSOACs
     (_, bnds) <- fst <$> runBinderT (simplifyStms =<< collectStms_ (auxing aux do_irwim)) types
     transformStms path $ stmsToList bnds
-transformStm path (Let pat aux@(StmAux cs _ _) (Op (Screma w form arrs)))
+transformStm path (Let pat aux@(StmAux cs _ _) (Op (Screma w arrs form)))
   | Just (reds, map_lam) <- isRedomapSOAC form = do
     let paralleliseOuter = runBinder_ $ do
           red_ops <- forM reds $ \(Reduce comm red_lam nes) -> do
@@ -478,14 +458,14 @@ transformStm path (Let pat aux@(StmAux cs _ _) (Op (Screma w form arrs)))
 
 -- Streams can be handled in two different ways - either we
 -- sequentialise the body or we keep it parallel and distribute.
-transformStm path (Let pat aux@(StmAux cs _ _) (Op (Stream w Parallel {} map_fun [] arrs)))
+transformStm path (Let pat aux@(StmAux cs _ _) (Op (Stream w arrs Parallel {} [] map_fun)))
   | not ("sequential_inner" `inAttrs` stmAuxAttrs aux) = do
     -- No reduction part.  Remove the stream and leave the body
     -- parallel.  It will be distributed.
     types <- asksScope scopeForSOACs
     transformStms path . stmsToList . snd
       =<< runBinderT (certifying cs $ sequentialStreamWholeArray pat w [] map_fun arrs) types
-transformStm path (Let pat aux@(StmAux cs _ _) (Op (Stream w (Parallel o comm red_fun) fold_fun nes arrs)))
+transformStm path (Let pat aux@(StmAux cs _ _) (Op (Stream w arrs (Parallel o comm red_fun) nes fold_fun)))
   | "sequential_inner" `inAttrs` stmAuxAttrs aux =
     paralleliseOuter path
   | otherwise = do
@@ -526,7 +506,7 @@ transformStm path (Let pat aux@(StmAux cs _ _) (Op (Stream w (Parallel o comm re
             stms
             ( transformStm path' $
                 Let red_pat aux {stmAuxAttrs = mempty} $
-                  Op (Screma num_threads reduce_soac red_results)
+                  Op (Screma num_threads red_results reduce_soac)
             )
       | otherwise = do
         let red_fun_sequential = soacsLambdaToKernels red_fun
@@ -558,13 +538,13 @@ transformStm path (Let pat aux@(StmAux cs _ _) (Op (Stream w (Parallel o comm re
     comm'
       | commutativeLambda red_fun, o /= InOrder = Commutative
       | otherwise = comm
-transformStm path (Let pat (StmAux cs _ _) (Op (Screma w form arrs))) = do
+transformStm path (Let pat (StmAux cs _ _) (Op (Screma w arrs form))) = do
   -- This screma is too complicated for us to immediately do
   -- anything, so split it up and try again.
   scope <- asksScope scopeForSOACs
   transformStms path . map (certify cs) . stmsToList . snd
     =<< runBinderT (dissectScrema pat w form arrs) scope
-transformStm path (Let pat _ (Op (Stream w Sequential fold_fun nes arrs))) = do
+transformStm path (Let pat _ (Op (Stream w arrs Sequential nes fold_fun))) = do
   -- Remove the stream and leave the body parallel.  It will be
   -- distributed.
   types <- asksScope scopeForSOACs
@@ -627,7 +607,7 @@ worthIntraGroup lam = bodyInterest (lambdaBody lam) > 1
     interest stm
       | "sequential" `inAttrs` attrs =
         0 :: Int
-      | Op (Screma w form _) <- stmExp stm,
+      | Op (Screma w _ form) <- stmExp stm,
         Just lam' <- isMapSOAC form =
         mapLike w lam'
       | Op (Scatter w lam' _ _) <- stmExp stm =
@@ -636,9 +616,9 @@ worthIntraGroup lam = bodyInterest (lambdaBody lam) > 1
         bodyInterest body * 10
       | If _ tbody fbody _ <- stmExp stm =
         max (bodyInterest tbody) (bodyInterest fbody)
-      | Op (Screma w (ScremaForm _ _ lam') _) <- stmExp stm =
+      | Op (Screma w _ (ScremaForm _ _ lam')) <- stmExp stm =
         zeroIfTooSmall w + bodyInterest (lambdaBody lam')
-      | Op (Stream _ Sequential lam' _ _) <- stmExp stm =
+      | Op (Stream _ _ Sequential _ lam') <- stmExp stm =
         bodyInterest $ lambdaBody lam'
       | otherwise =
         0
@@ -665,7 +645,7 @@ worthSequentialising lam = bodyInterest (lambdaBody lam) > 1
     interest stm
       | "sequential" `inAttrs` attrs =
         0 :: Int
-      | Op (Screma _ form@(ScremaForm _ _ lam') _) <- stmExp stm,
+      | Op (Screma _ _ form@(ScremaForm _ _ lam')) <- stmExp stm,
         isJust $ isMapSOAC form =
         if sequential_inner
           then 0
@@ -674,7 +654,7 @@ worthSequentialising lam = bodyInterest (lambdaBody lam) > 1
         0 -- Basically a map.
       | DoLoop _ _ ForLoop {} body <- stmExp stm =
         bodyInterest body * 10
-      | Op (Screma _ form@(ScremaForm _ _ lam') _) <- stmExp stm =
+      | Op (Screma _ _ form@(ScremaForm _ _ lam')) <- stmExp stm =
         1 + bodyInterest (lambdaBody lam')
           +
           -- Give this a bigger score if it's a redomap, as these

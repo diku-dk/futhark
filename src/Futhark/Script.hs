@@ -47,8 +47,6 @@ import qualified Futhark.Test.Values as V
 import qualified Futhark.Test.Values.Parser as V
 import Futhark.Util (nubOrd)
 import Futhark.Util.Pretty hiding (float, line, sep, string, (</>), (<|>))
-import Language.Futhark.Prop (primValueType)
-import Language.Futhark.Syntax (PrimValue (..))
 import System.IO
 import System.IO.Temp
 import Text.Megaparsec
@@ -76,7 +74,7 @@ data Func = FuncFut EntryName | FuncBuiltin T.Text
 -- all this is meant for.
 data Exp
   = Call Func [Exp]
-  | Const PrimValue
+  | Const V.Value
   | Tuple [Exp]
   | Record [(T.Text, Exp)]
   | StringLit T.Text
@@ -121,7 +119,7 @@ parseExp sep =
     [ inParens sep (mkTuple <$> (parseExp sep `sepBy` pComma)),
       inBraces sep (Record <$> (pField `sepBy` pComma)),
       Call <$> lexeme sep parseFunc <*> many (parseExp sep),
-      Const <$> lexeme sep V.parsePrimValue,
+      constV =<< lexeme sep V.parsePrimValue,
       StringLit . T.pack <$> lexeme sep ("\"" *> manyTill charLiteral "\"")
     ]
   where
@@ -141,6 +139,9 @@ parseExp sep =
       fmap T.pack $ (:) <$> satisfy isAlpha <*> many (satisfy constituent)
       where
         constituent c = isAlphaNum c || c == '_'
+
+    constV v =
+      maybe (fail "invalid value read") (pure . Const) $ V.putValue v
 
 prettyFailure :: CmdFailure -> T.Text
 prettyFailure (CmdFailure bef aft) =
@@ -217,13 +218,9 @@ instance Pretty ScriptValueType where
 data ValOrVar = VVal V.Value | VVar VarName
   deriving (Show)
 
--- | The intermediate values used during expression evaluation - in
+-- | The intermediate values produced by an expression - in
 -- particular, these may not be on the server.
-type InterValue = V.Compound (ScriptValue ValOrVar)
-
--- | The value that is produced by expression evaluation.  This
--- representation keeps all values on the server.
-type ExpValue = V.Compound (ScriptValue VarName)
+type ExpValue = V.Compound (ScriptValue ValOrVar)
 
 -- | The type of a 'ScriptValue'.
 scriptValueType :: ScriptValue v -> ScriptValueType
@@ -233,13 +230,16 @@ scriptValueType (SFun _ ins outs _) = STFun ins outs
 serverVarsInValue :: ExpValue -> S.Set VarName
 serverVarsInValue = S.fromList . concatMap isVar . toList
   where
-    isVar (SValue _ x) = [x]
+    isVar (SValue _ (VVar x)) = [x]
+    isVar (SValue _ (VVal _)) = []
     isVar (SFun _ _ _ closure) = concatMap isVar $ toList closure
 
 -- | Convert a value into a corresponding expression.
 valueToExp :: ExpValue -> Exp
-valueToExp (V.ValueAtom (SValue t v)) =
+valueToExp (V.ValueAtom (SValue t (VVar v))) =
   ServerVar t v
+valueToExp (V.ValueAtom (SValue _ (VVal v))) =
+  Const v
 valueToExp (V.ValueAtom (SFun fname _ _ closure)) =
   Call (FuncFut fname) $ map (valueToExp . V.ValueAtom) closure
 valueToExp (V.ValueRecord fs) =
@@ -251,7 +251,13 @@ valueToExp (V.ValueTuple fs) =
 type EvalBuiltin m = T.Text -> [V.CompoundValue] -> m V.CompoundValue
 
 -- | Evaluate a FutharkScript expression relative to some running server.
-evalExp :: forall m. (MonadError T.Text m, MonadIO m) => EvalBuiltin m -> ScriptServer -> Exp -> m ExpValue
+evalExp ::
+  forall m.
+  (MonadError T.Text m, MonadIO m) =>
+  EvalBuiltin m ->
+  ScriptServer ->
+  Exp ->
+  m ExpValue
 evalExp builtin (ScriptServer server counter) top_level_e = do
   vars <- liftIO $ newIORef []
   let newVar base = liftIO $ do
@@ -283,29 +289,21 @@ evalExp builtin (ScriptServer server counter) top_level_e = do
       scriptValueToVar :: ScriptValue ValOrVar -> m VarName
       scriptValueToVar = toVar <=< scriptValueToValOrVar
 
-      interValToVal :: InterValue -> m V.CompoundValue
+      interValToVal :: ExpValue -> m V.CompoundValue
       interValToVal = traverse scriptValueToVal
 
-      interValToVar :: InterValue -> m VarName
+      interValToVar :: ExpValue -> m VarName
       interValToVar (V.ValueAtom v) = scriptValueToVar v
       interValToVar _ = throwError "Unexpected tuple or record value."
 
-      valToInterVal :: V.CompoundValue -> InterValue
+      valToInterVal :: V.CompoundValue -> ExpValue
       valToInterVal = fmap $ \v ->
-        SValue (typeText (V.valueType v)) $ VVal v
-        where
-          -- We don't want the actual sizes in the type, so we cannot
-          -- use the normal prettyprinter.
-          typeText (V.ValueType dims t) =
-            mconcat (replicate (length dims) "[]") <> prettyText t
-
-      interValToExpVal :: InterValue -> m ExpValue
-      interValToExpVal = traverse (traverse toVar)
+        SValue (V.prettyValueTypeNoDims (V.valueType v)) $ VVal v
 
       simpleType (V.ValueAtom (STValue _)) = True
       simpleType _ = False
 
-      evalExp' :: Exp -> m InterValue
+      evalExp' :: Exp -> m ExpValue
       evalExp' (ServerVar t v) =
         pure $ V.ValueAtom $ SValue t $ VVar v
       evalExp' (Call (FuncBuiltin name) es) = do
@@ -347,10 +345,7 @@ evalExp builtin (ScriptServer server counter) top_level_e = do
             pure $ V.ValueAtom $ SValue (prettyText (V.valueType s')) $ VVal s'
           Nothing -> error $ "Unable to write value " ++ pretty s
       evalExp' (Const val) =
-        case V.putValue val of
-          Just val' ->
-            pure $ V.ValueAtom $ SValue (prettyText (primValueType val)) $ VVal val'
-          Nothing -> error $ "Unable to write value " ++ pretty val
+        pure $ V.ValueAtom $ SValue (V.prettyValueTypeNoDims (V.valueType val)) $ VVal val
       evalExp' (Tuple es) =
         V.ValueTuple <$> mapM evalExp' es
       evalExp' e@(Record m) = do
@@ -371,15 +366,17 @@ evalExp builtin (ScriptServer server counter) top_level_e = do
         -- Call.
         void $ liftIO $ cmdFree server =<< readIORef vars
         throwError e
-  (freeNonresultVars =<< interValToExpVal =<< evalExp' top_level_e) `catchError` freeVarsOnError
+  (freeNonresultVars =<< evalExp' top_level_e) `catchError` freeVarsOnError
 
 -- | Read actual values from the server.  Fails for values that have
 -- no well-defined external representation.
 getExpValue ::
   (MonadError T.Text m, MonadIO m) => ScriptServer -> ExpValue -> m V.CompoundValue
 getExpValue (ScriptServer server _) e =
-  traverse toGround =<< traverse (traverse (readVar server)) e
+  traverse toGround =<< traverse (traverse onLeaf) e
   where
+    onLeaf (VVar v) = readVar server v
+    onLeaf (VVal v) = pure v
     toGround (SFun fname _ _ _) =
       throwError $ "Function " <> fname <> " not fully applied."
     toGround (SValue _ v) = pure v

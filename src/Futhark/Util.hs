@@ -43,6 +43,7 @@ module Futhark.Util
     toPOSIX,
     trim,
     pmapIO,
+    readFileSafely,
     UserString,
     EncodedString,
     zEncodeString,
@@ -61,6 +62,7 @@ import Data.Maybe
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import qualified Data.Text.Encoding.Error as T
+import qualified Data.Text.IO as T
 import Numeric
 import qualified System.Directory.Tree as Dir
 import System.Environment
@@ -68,6 +70,7 @@ import System.Exit
 import qualified System.FilePath as Native
 import qualified System.FilePath.Posix as Posix
 import System.IO (hIsTerminalDevice, stdout)
+import System.IO.Error (isDoesNotExistError)
 import System.IO.Unsafe
 import System.Process.ByteString
 import Text.Printf
@@ -319,6 +322,18 @@ pmapIO concurrency f elems = do
       case res of
         Left err -> throw (err :: SomeException)
         Right v -> pure v
+
+-- | Read a file, returning 'Nothing' if the file does not exist, and
+-- 'Left' if some other error occurs.
+readFileSafely :: FilePath -> IO (Maybe (Either String T.Text))
+readFileSafely filepath =
+  (Just . Right <$> T.readFile filepath) `catch` couldNotRead
+  where
+    couldNotRead e
+      | isDoesNotExistError e =
+        return Nothing
+      | otherwise =
+        return $ Just $ Left $ show e
 
 -- Z-encoding from https://ghc.haskell.org/trac/ghc/wiki/Commentary/Compiler/SymbolNames
 --

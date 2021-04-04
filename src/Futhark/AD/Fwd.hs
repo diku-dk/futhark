@@ -297,13 +297,13 @@ zeroFromSubExp (Var v) = do
   letExp "zero" $ zeroExp t
 
 fwdSOAC :: Pattern -> StmAux () -> SOAC SOACS -> ADM ()
-fwdSOAC pat aux (Screma size (ScremaForm scs reds f) xs) = do
+fwdSOAC pat aux (Screma size xs (ScremaForm scs reds f)) = do
   pat' <- bundleNew pat
   xs' <- bundleTan xs
   scs' <- mapM fwdScan scs
   reds' <- mapM fwdRed reds
   f' <- fwdLambda f
-  addStm $ Let pat' aux $ Op $ Screma size (ScremaForm scs' reds' f') xs'
+  addStm $ Let pat' aux $ Op $ Screma size xs' $ ScremaForm scs' reds' f'
   where
     fwdScan :: Scan SOACS -> ADM (Scan SOACS)
     fwdScan sc = do
@@ -324,7 +324,7 @@ fwdSOAC pat aux (Screma size (ScremaForm scs reds f) xs) = do
             redLambda = op',
             redNeutral = redNeutral red `interleave` map Var neutral_tans
           }
-fwdSOAC pat aux (Stream size form lam nes xs) = do
+fwdSOAC pat aux (Stream size xs form nes lam) = do
   pat' <- bundleNew pat
   lam' <- fwdLambda lam
   xs' <- bundleTan xs
@@ -332,11 +332,11 @@ fwdSOAC pat aux (Stream size form lam nes xs) = do
   let nes' = interleave nes nes_tan
   case form of
     Sequential ->
-      addStm $ Let pat' aux $ Op $ Stream size Sequential lam' nes' xs'
+      addStm $ Let pat' aux $ Op $ Stream size xs' Sequential nes' lam'
     Parallel o comm lam0 -> do
       lam0' <- fwdLambda lam0
       let form' = Parallel o comm lam0'
-      addStm $ Let pat' aux $ Op $ Stream size form' lam' nes' xs'
+      addStm $ Let pat' aux $ Op $ Stream size xs' form' nes' lam'
 fwdSOAC pat aux (Hist len ops bucket_fun imgs) = do
   pat_tan <- newTan pat
   ops' <- mapM fwdHist ops
@@ -384,9 +384,6 @@ fwdSOAC (Pattern ctx pes) aux (Scatter len lam ivs as) = do
       return $ mkBody stms' res'
 
 fwdStm :: Stm -> ADM ()
-fwdStm (Let pat aux (BasicOp (JoinAcc acc))) = do
-  pat' <- bundleNew pat
-  addStm $ Let pat' aux $ BasicOp $ JoinAcc acc
 fwdStm (Let pat aux (BasicOp (UpdateAcc acc i x))) = do
   pat' <- bundleNew pat
   x' <- bundleTan x

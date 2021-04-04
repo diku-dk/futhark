@@ -136,7 +136,6 @@ primOpMetrics Scratch {} = seen "Scratch"
 primOpMetrics Reshape {} = seen "Reshape"
 primOpMetrics Rearrange {} = seen "Rearrange"
 primOpMetrics Rotate {} = seen "Rotate"
-primOpMetrics JoinAcc {} = seen "JoinAcc"
 primOpMetrics UpdateAcc {} = seen "UpdateAcc"
 
 -- | Compute metrics for this lambda.

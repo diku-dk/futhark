@@ -150,14 +150,12 @@ instance PrettyLore lore => Pretty (Stm lore) where
           (_, ann) -> equals </> (stack ann </> ppr e)
     where
       linebreak = case e of
-        DoLoop {} -> True
-        Op {} -> True
-        If {} -> True
-        WithAcc {} -> True
-        Apply {} -> True
-        BasicOp ArrayLit {} -> False
-        BasicOp Assert {} -> True
-        _ -> False
+        BasicOp BinOp {} -> False
+        BasicOp CmpOp {} -> False
+        BasicOp ConvOp {} -> False
+        BasicOp UnOp {} -> False
+        BasicOp SubExp {} -> False
+        _ -> True
 
       stmannot =
         concat
@@ -209,8 +207,6 @@ instance Pretty BasicOp where
     text "assert" <> apply [ppr e, ppr msg, text $ show $ locStr loc]
   ppr (UpdateAcc acc is v) =
     text "update_acc" <> apply [ppr acc, ppTuple' is, ppTuple' v]
-  ppr (JoinAcc acc) =
-    text "join_acc" <> apply [ppr acc]
 
 instance Pretty a => Pretty (ErrorMsg a) where
   ppr (ErrorMsg parts) = braces $ align $ commasep $ map p parts

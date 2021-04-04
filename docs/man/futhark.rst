@@ -57,8 +57,8 @@ programmers writing in Futhark.
 futhark hash PROGRAM
 --------------------
 
-Print a hexadecimal hash of the program AST, including all imports.
-Supposed to be invariant to whitespace changes.
+Print a hexadecimal hash of the program AST, including all non-builtin
+imports.  Supposed to be invariant to whitespace changes.
 
 futhark imports PROGRAM
 -----------------------

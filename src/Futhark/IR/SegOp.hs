@@ -337,6 +337,10 @@ checkKernelBody ::
   TC.TypeM lore ()
 checkKernelBody ts (KernelBody (_, dec) stms kres) = do
   TC.checkBodyLore dec
+  -- We consume the kernel results (when applicable) before
+  -- type-checking the stms, so we will get an error if a statement
+  -- uses an array that is written to in a result.
+  mapM_ consumeKernelResult kres
   TC.checkStms stms $ do
     unless (length ts == length kres) $
       TC.bad $
@@ -347,6 +351,11 @@ checkKernelBody ts (KernelBody (_, dec) stms kres) = do
             ++ " values."
     zipWithM_ checkKernelResult kres ts
   where
+    consumeKernelResult (WriteReturns _ arr _) =
+      TC.consume =<< TC.lookupAliases arr
+    consumeKernelResult _ =
+      pure ()
+
     checkKernelResult (Returns _ what) t =
       TC.require [t] what
     checkKernelResult (WriteReturns shape arr res) t = do
@@ -366,7 +375,6 @@ checkKernelBody ts (KernelBody (_, dec) stms kres) = do
                 ++ pretty shape
                 ++ ", but destination array has type "
                 ++ pretty arr_t
-      TC.consume =<< TC.lookupAliases arr
     checkKernelResult (ConcatReturns o w per_thread_elems v) t = do
       case o of
         SplitContiguous -> return ()
@@ -1060,25 +1068,32 @@ simplifyKernelBody ::
 simplifyKernelBody space (KernelBody _ stms res) = do
   par_blocker <- Engine.asksEngineEnv $ Engine.blockHoistPar . Engine.envHoistBlockers
 
+  -- Ensure we do not try to use anything that is consumed in the result.
   ((body_stms, body_res), hoisted) <-
-    Engine.localVtable (<> scope_vtable) $
-      Engine.localVtable (\vtable -> vtable {ST.simplifyMemory = True}) $
-        Engine.blockIf
-          ( Engine.hasFree bound_here
-              `Engine.orIf` Engine.isOp
-              `Engine.orIf` par_blocker
-              `Engine.orIf` Engine.isConsumed
-          )
-          $ Engine.simplifyStms stms $ do
-            res' <-
-              Engine.localVtable (ST.hideCertified $ namesFromList $ M.keys $ scopeOf stms) $
-                mapM Engine.simplify res
-            return ((res', UT.usages $ freeIn res'), mempty)
+    Engine.localVtable (flip (foldl' (flip ST.consume)) (foldMap consumedInResult res))
+      . Engine.localVtable (<> scope_vtable)
+      . Engine.localVtable (\vtable -> vtable {ST.simplifyMemory = True})
+      $ Engine.blockIf
+        ( Engine.hasFree bound_here
+            `Engine.orIf` Engine.isOp
+            `Engine.orIf` par_blocker
+            `Engine.orIf` Engine.isConsumed
+        )
+        $ Engine.simplifyStms stms $ do
+          res' <-
+            Engine.localVtable (ST.hideCertified $ namesFromList $ M.keys $ scopeOf stms) $
+              mapM Engine.simplify res
+          return ((res', UT.usages $ freeIn res'), mempty)
 
   return (mkWiseKernelBody () body_stms body_res, hoisted)
   where
     scope_vtable = segSpaceSymbolTable space
     bound_here = namesFromList $ M.keys $ scopeOfSegSpace space
+
+    consumedInResult (WriteReturns _ arr _) =
+      [arr]
+    consumedInResult _ =
+      []
 
 segSpaceSymbolTable :: ASTLore lore => SegSpace -> ST.SymbolTable lore
 segSpaceSymbolTable (SegSpace flat gtids_and_dims) =

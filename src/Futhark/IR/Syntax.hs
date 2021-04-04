@@ -409,8 +409,6 @@ data BasicOp
   | -- | Update an accumulator at the given index with the given value.
     -- Consumes the accumulator and produces a new one.
     UpdateAcc VName [SubExp] [SubExp]
-  | -- | Compact an array of accumulators to a single accumulator.
-    JoinAcc VName
   deriving (Eq, Ord, Show)
 
 -- | The root Futhark expression type.  The v'Op' constructor contains

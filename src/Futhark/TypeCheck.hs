@@ -900,13 +900,6 @@ checkBasicOp (Assert e (ErrorMsg parts) _) = do
     checkPart ErrorString {} = return ()
     checkPart (ErrorInt32 x) = require [Prim int32] x
     checkPart (ErrorInt64 x) = require [Prim int64] x
-checkBasicOp (JoinAcc acc) =
-  checkIfAccArr =<< checkArrIdent acc
-  where
-    checkIfAccArr Array {} =
-      pure ()
-    checkIfAccArr t =
-      bad $ TypeError $ "Bad type for JoinAcc: " ++ pretty t
 checkBasicOp (UpdateAcc acc is ses) = do
   (shape, ts) <- checkAccIdent acc
 
@@ -929,6 +922,7 @@ checkBasicOp (UpdateAcc acc is ses) = do
           ++ " provided."
 
   zipWithM_ require (map pure ts) ses
+  consume =<< lookupAliases acc
 
 matchLoopResultExt ::
   Checkable lore =>
@@ -1086,6 +1080,7 @@ checkExp (WithAcc inputs lam) = do
       arr_t <- lookupType arr
       unless (shapeDims shape `isPrefixOf` arrayDims arr_t) $
         bad . TypeError $ pretty arr <> " is not an array of outer shape " <> pretty shape
+      consume =<< lookupAliases arr
       pure $ stripArray (shapeRank shape) arr_t
 
     case op of
@@ -1119,27 +1114,24 @@ checkSOACArrayArgs ::
   SubExp ->
   [VName] ->
   TypeM lore [Arg]
-checkSOACArrayArgs width vs =
-  forM vs $ \v -> do
-    (vt, v') <- checkSOACArrayArg v
-    let argSize = arraySize 0 vt
-    unless (argSize == width) $
-      bad $
-        TypeError $
-          "SOAC argument " ++ pretty v ++ " has outer size "
-            ++ pretty argSize
-            ++ ", but width of SOAC is "
-            ++ pretty width
-    return v'
+checkSOACArrayArgs width = mapM checkSOACArrayArg
   where
-    checkSOACArrayArg ident = do
-      (t, als) <- checkArg $ Var ident
-      case peelArray 1 t of
-        Nothing ->
-          bad $
-            TypeError $
-              "SOAC argument " ++ pretty ident ++ " is not an array"
-        Just rt -> return (t, (rt, als))
+    checkSOACArrayArg v = do
+      (t, als) <- checkArg $ Var v
+      case t of
+        Acc {} -> pure (t, als)
+        Array {} -> do
+          let argSize = arraySize 0 t
+          unless (argSize == width) $
+            bad . TypeError $
+              "SOAC argument " ++ pretty v ++ " has outer size "
+                ++ pretty argSize
+                ++ ", but width of SOAC is "
+                ++ pretty width
+          pure (rowType t, als)
+        _ ->
+          bad . TypeError $
+            "SOAC argument " ++ pretty v ++ " is not an array"
 
 checkType ::
   Checkable lore =>

@@ -923,8 +923,6 @@ defCompileBasicOp _ Rotate {} =
   return ()
 defCompileBasicOp _ Reshape {} =
   return ()
-defCompileBasicOp _ JoinAcc {} =
-  return ()
 defCompileBasicOp _ (UpdateAcc acc is vs) = do
   let is' = map toInt64Exp is
 

@@ -51,7 +51,7 @@ scanExc ::
 scanExc desc scan arrs = do
   w <- arraysSize 0 <$> mapM lookupType arrs
   form <- scanSOAC [scan]
-  res_incl <- letTupExp (desc <> "_incl") $ Op $ Screma w form arrs
+  res_incl <- letTupExp (desc <> "_incl") $ Op $ Screma w arrs form
   res_incl_rot <- mapM (eRotate [intConst Int64 (-1)]) res_incl
 
   iota <-
@@ -76,7 +76,7 @@ scanExc desc scan arrs = do
       ]
 
   let lam = Lambda params body ts
-  letTupExp desc $ Op $ Screma w (mapSOAC lam) (iota : res_incl_rot)
+  letTupExp desc $ Op $ Screma w (iota : res_incl_rot) (mapSOAC lam)
   where
     nes = scanNeutral scan
     ts = lambdaReturnType $ scanLambda scan
@@ -171,7 +171,7 @@ tabNest = tabNest' []
         ret <- mapM lookupType res
         pure (ret, map Var res)
       let lam = Lambda (iparam : params) (Body () stms res) ret
-      letTupExp "tab" $ Op $ Screma w (mapSOAC lam) (iota : vs)
+      letTupExp "tab" $ Op $ Screma w (iota : vs) (mapSOAC lam)
 
 -- Construct a lambda for adding two values of the given type.
 addLambda :: Type -> ADM Lambda
@@ -181,7 +181,7 @@ addLambda t@(Array (ElemPrim _) _ _) = do
   ys <- newVName "ys"
   lam <- addLambda $ rowType t
   body <- insertStmsM $ do
-    res <- letSubExp "lam_map" $ Op $ Screma (arraySize 0 t) (mapSOAC lam) [xs, ys]
+    res <- letSubExp "lam_map" $ Op $ Screma (arraySize 0 t) [xs, ys] (mapSOAC lam)
     return $ resultBody [res]
   pure
     Lambda
@@ -201,7 +201,7 @@ addExp x y = do
       pure $ BasicOp $ BinOp (addBinOp pt) (Var x) (Var y)
     Array {} -> do
       lam <- addLambda $ rowType x_t
-      pure $ Op $ Screma (arraySize 0 x_t) (mapSOAC lam) [x, y]
+      pure $ Op $ Screma (arraySize 0 x_t) [x, y] (mapSOAC lam)
     _ ->
       error $ "addExp: unexpected type: " ++ pretty x_t
 
@@ -231,12 +231,10 @@ instance Adjoint VName where
             v_adj_arr <-
               letExp (baseString v_adj <> "_arr") $
                 BasicOp $ Replicate (Shape dims) $ Var v_adj
-            ~[v_adj_arr'] <-
+            ~[v_adj'] <-
               tabNest (length dims) [v_adj_arr, d] $ \is [v_adj_arr', d'] ->
                 letTupExp "acc" $
                   BasicOp $ UpdateAcc v_adj_arr' (map Var is) [Var d']
-            v_adj' <-
-              letExp (baseString v <> "_adj") $ BasicOp $ JoinAcc v_adj_arr'
             insAdj v v_adj'
             pure v_adj'
           _ -> do
@@ -408,7 +406,7 @@ diffBasicOp pat aux e m =
       reduce <- reduceSOAC [Reduce Commutative lam [ne]]
       void $
         updateAdj x
-          =<< letExp "rep_contrib" (Op $ Screma n reduce [pat_adj_flat])
+          =<< letExp "rep_contrib" (Op $ Screma n [pat_adj_flat] reduce)
     --
     Concat d arr arrs _ -> do
       (_pat_v, pat_adj) <- commonBasicOp pat aux e m
@@ -446,10 +444,9 @@ diffBasicOp pat aux e m =
       reduce <- reduceSOAC [Reduce Commutative lam [ne]]
       void $
         updateAdj n
-          =<< letExp "iota_contrib" (Op $ Screma n reduce [pat_adj])
+          =<< letExp "iota_contrib" (Op $ Screma n [pat_adj] reduce)
     --
     Update {} -> error "Reverse-mode Update not handled yet."
-    JoinAcc {} -> error "Reverse-mode JoinAcc not handled yet."
     UpdateAcc {} -> error "Reverse-mode UpdateAcc not handled yet."
 
 commonSOAC :: Pattern -> StmAux () -> SOAC SOACS -> ADM () -> ADM [VName]
@@ -480,8 +477,7 @@ diffMap pat_adj w map_lam as = do
 
     (param_contribs, free_contribs) <-
       fmap (splitAt (length (lambdaParams map_lam'))) $
-        letTupExp "map_adjs" . Op . Screma w (mapSOAC lam_rev) $
-          as ++ pat_adj
+        letTupExp "map_adjs" $ Op $ Screma w (as ++ pat_adj) (mapSOAC lam_rev)
 
     zipWithM_ updateAdj as param_contribs
     zipWithM_ freeContrib free_in_map_lam free_contribs
@@ -537,21 +533,18 @@ diffMap pat_adj w map_lam as = do
     freeContrib v contribs = do
       contribs_t <- lookupType contribs
       case rowType contribs_t of
-        Acc {} ->
-          void $
-            insAdj v
-              =<< letExp (baseString contribs <> "_joined") (BasicOp $ JoinAcc contribs)
+        Acc {} -> void $ insAdj v contribs
         t -> do
           lam <- addLambda t
           zero <- letSubExp "zero" $ zeroExp t
           reduce <- reduceSOAC [Reduce Commutative lam [zero]]
           contrib_sum <-
             letExp (baseString v <> "_contrib_sum") $
-              Op $ Screma w reduce [contribs]
+              Op $ Screma w [contribs] reduce
           void $ updateAdj v contrib_sum
 
 diffSOAC :: Pattern -> StmAux () -> SOAC SOACS -> ADM () -> ADM ()
-diffSOAC pat aux soac@(Screma w form as) m
+diffSOAC pat aux soac@(Screma w as form) m
   | Just red <- singleReduce <$> isReduceSOAC form = do
     pat_adj <- commonSOAC pat aux soac m
     red' <- renameRed red
@@ -566,7 +559,7 @@ diffSOAC pat aux soac@(Screma w form as) m
 
     f_adj <- diffLambda pat_adj as_params f
 
-    as_adj <- letTupExp "adjs" $ Op $ Screma w (mapSOAC f_adj) $ ls ++ as ++ rs
+    as_adj <- letTupExp "adjs" $ Op $ Screma w (ls ++ as ++ rs) (mapSOAC f_adj)
 
     zipWithM_ updateAdj as as_adj
   where
@@ -593,12 +586,12 @@ diffSOAC pat aux soac@(Screma w form as) m
         bodyBind $ lambdaBody lam_r
       pure (map paramName aps, lam')
 --
-diffSOAC pat aux soac@(Screma w form as) m
+diffSOAC pat aux soac@(Screma w as form) m
   | Just lam <- isMapSOAC form = do
     pat_adj <- commonSOAC pat aux soac m
     diffMap pat_adj w lam as
 --
-diffSOAC pat _aux (Screma w form as) m
+diffSOAC pat _aux (Screma w as form) m
   | Just (Reduce comm red_lam nes, map_lam) <-
       first singleReduce <$> isRedomapSOAC form = do
     (mapstm, redstm) <-

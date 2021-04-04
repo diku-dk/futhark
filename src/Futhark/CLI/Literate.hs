@@ -314,6 +314,15 @@ greyFloatToImg = SVec.map grey
       let i' = round (i * 255) .&. 0xFF
        in (i' `shiftL` 16) .|. (i' `shiftL` 8) .|. i'
 
+greyByteToImg ::
+  (Integral a, SVec.Storable a) =>
+  SVec.Vector a ->
+  SVec.Vector Word32
+greyByteToImg = SVec.map grey
+  where
+    grey i =
+      (fromIntegral i `shiftL` 16) .|. (fromIntegral i `shiftL` 8) .|. fromIntegral i
+
 -- BMPs are RGBA and bottom-up where we assumes images are top-down
 -- and ARGB.  We fix this up before encoding the BMP.  This is
 -- probably a little slower than it has to be.
@@ -337,9 +346,15 @@ valueToBMP v@(Int32Value _ bytes)
 valueToBMP v@(Float32Value _ bytes)
   | [h, w] <- valueShape v =
     Just $ vecToBMP h w $ greyFloatToImg bytes
+valueToBMP v@(Word8Value _ bytes)
+  | [h, w] <- valueShape v =
+    Just $ vecToBMP h w $ greyByteToImg bytes
 valueToBMP v@(Float64Value _ bytes)
   | [h, w] <- valueShape v =
     Just $ vecToBMP h w $ greyFloatToImg bytes
+valueToBMP v@(BoolValue _ bytes)
+  | [h, w] <- valueShape v =
+    Just $ vecToBMP h w $ greyByteToImg $ SVec.map ((*) 255 . fromEnum) bytes
 valueToBMP _ = Nothing
 
 valueToBMPs :: Value -> Maybe [LBS.ByteString]
@@ -835,6 +850,8 @@ main = mainWithOptions initialOptions commandLineOptions "program" $ \args opts 
                 ++ scriptCompilerOptions opts
         when (scriptVerbose opts > 0) $
           T.hPutStrLn stderr $ "Compiling " <> T.pack prog <> "..."
+        when (scriptVerbose opts > 1) $
+          T.hPutStrLn stderr $ T.pack $ unwords compile_options
 
         let onError err = do
               mapM_ (T.hPutStrLn stderr) err
