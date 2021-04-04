@@ -48,8 +48,10 @@ instance MonadLogger ExtractM where
 
 indexArray :: VName -> LParam SOACS -> VName -> Stm MC
 indexArray i (Param p t) arr =
-  Let (Pattern [] [PatElem p t]) (defAux ()) $
-    BasicOp $ Index arr $ DimFix (Var i) : map sliceDim (arrayDims t)
+  Let (Pattern [] [PatElem p t]) (defAux ()) . BasicOp $
+    case t of
+      Acc {} -> SubExp $ Var arr
+      _ -> Index arr $ DimFix (Var i) : map sliceDim (arrayDims t)
 
 mapLambdaToBody ::
   (Body SOACS -> ExtractM (Body MC)) ->
