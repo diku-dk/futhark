@@ -60,6 +60,7 @@ module Futhark.Optimise.Simplify.Engine
     ST.SymbolTable,
     hoistStms,
     blockIf,
+    enterLoop,
     module Futhark.Optimise.Simplify.Lore,
   )
 where
@@ -221,6 +222,7 @@ changed = modify $ \(src, _, cs) -> (src, True, cs)
 usedCerts :: Certificates -> SimpleM lore ()
 usedCerts cs = modify $ \(a, b, c) -> (a, b, cs <> c)
 
+-- | Indicate in the symbol table that we have descended into a loop.
 enterLoop :: SimpleM lore a -> SimpleM lore a
 enterLoop = localVtable ST.deepen
 

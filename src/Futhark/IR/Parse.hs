@@ -9,6 +9,8 @@ module Futhark.IR.Parse
     parseKernelsMem,
     parseMC,
     parseMCMem,
+    parseSeq,
+    parseSeqMem,
   )
 where
 
@@ -33,6 +35,8 @@ import Futhark.IR.Primitive.Parse
 import Futhark.IR.SOACS (SOACS)
 import qualified Futhark.IR.SOACS.SOAC as SOAC
 import qualified Futhark.IR.SegOp as SegOp
+import Futhark.IR.Seq (Seq)
+import Futhark.IR.SeqMem (SeqMem)
 import Futhark.Util.Pretty (prettyText)
 import Text.Megaparsec
 import Text.Megaparsec.Char hiding (space)
@@ -914,6 +918,16 @@ prSOACS :: PR SOACS
 prSOACS =
   PR pDeclExtType pExtType pDeclType pType pType (pSOAC prSOACS) () ()
 
+prSeq :: PR Seq
+prSeq =
+  PR pDeclExtType pExtType pDeclType pType pType empty () ()
+
+prSeqMem :: PR SeqMem
+prSeqMem =
+  PR pRetTypeMem pBranchTypeMem pFParamMem pLParamMem pLetDecMem op () ()
+  where
+    op = pMemOp empty
+
 prKernels :: PR Kernels
 prKernels =
   PR pDeclExtType pExtType pDeclType pType pType op () ()
@@ -945,6 +959,12 @@ parseLore pr fname s =
 
 parseSOACS :: FilePath -> T.Text -> Either T.Text (Prog SOACS)
 parseSOACS = parseLore prSOACS
+
+parseSeq :: FilePath -> T.Text -> Either T.Text (Prog Seq)
+parseSeq = parseLore prSeq
+
+parseSeqMem :: FilePath -> T.Text -> Either T.Text (Prog SeqMem)
+parseSeqMem = parseLore prSeqMem
 
 parseKernels :: FilePath -> T.Text -> Either T.Text (Prog Kernels)
 parseKernels = parseLore prKernels

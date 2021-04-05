@@ -22,7 +22,7 @@ where
 
 import Control.Monad
 import Data.Either
-import Data.List (unzip4, zip4)
+import Data.List (find, unzip4, zip4)
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import Futhark.Analysis.PrimExp.Convert
@@ -62,19 +62,25 @@ standardRules = ruleBook topDownRules bottomUpRules <> loopRules <> basicOpRules
 -- statement and it can be consumed.
 --
 -- This simplistic rule is only valid before we introduce memory.
-removeUnnecessaryCopy :: BinderOps lore => BottomUpRuleBasicOp lore
+removeUnnecessaryCopy :: (BinderOps lore, Aliased lore) => BottomUpRuleBasicOp lore
 removeUnnecessaryCopy (vtable, used) (Pattern [] [d]) _ (Copy v)
   | not (v `UT.isConsumed` used),
     (not (v `UT.used` used) && consumable) || not (patElemName d `UT.isConsumed` used) =
     Simplify $ letBindNames [patElemName d] $ BasicOp $ SubExp $ Var v
   where
-    -- We need to make sure we can even consume the original.
-    -- This is currently a hacky check, much too conservative,
-    -- because we don't have the information conveniently
-    -- available.
+    -- We need to make sure we can even consume the original.  The big
+    -- missing piece here is that we cannot do copy removal inside of
+    -- 'map' and other SOACs, but those cases tend to be handled in
+    -- later representations anyway.
     consumable = case M.lookup v $ ST.toScope vtable of
       Just (FParamName info) -> unique $ declTypeOf info
-      _ -> False
+      _ -> fromMaybe False $ do
+        e <- ST.lookup v vtable
+        pat <- stmPattern <$> ST.entryStm e
+        guard $ ST.entryDepth e == ST.loopDepth vtable
+        pe <- find ((== v) . patElemName) (patternElements pat)
+        guard $ aliasesOf pe == mempty
+        pure True
 removeUnnecessaryCopy _ _ _ _ = Skip
 
 constantFoldPrimFun :: BinderOps lore => TopDownRuleGeneric lore
