@@ -246,7 +246,7 @@ emccExportNames jses =
     map (\arg -> "'" ++ gfn "values" arg ++ "'")  jses'
   where
     jses' = filter (\t -> dim t >  0) $ nub $ concatMap (\jse -> (parameters jse) ++ (ret jse)) jses
-    gfn typ str = "futhark_" ++ typ ++ "_" ++ baseType str ++ "_" ++ show (dim str) ++ "d"
+    gfn typ str = "_futhark_" ++ typ ++ "_" ++ baseType str ++ "_" ++ show (dim str) ++ "d"
 
 
 cwrapFun :: String -> Int -> String
