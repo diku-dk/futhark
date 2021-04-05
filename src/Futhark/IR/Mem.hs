@@ -985,33 +985,30 @@ extReturns ets =
       return $ MemPrim bt
     addDec (Mem space) =
       return $ MemMem space
-    addDec t@(Array pt shape u)
+    addDec t@(Array bt shape u)
       | existential t = do
         i <- get <* modify (+ 1)
         return $
-          MemArray pt shape u $
+          MemArray bt shape u $
             Just $
               ReturnsNewBlock DefaultSpace i $
                 IxFun.iota $ map convert $ shapeDims shape
       | otherwise =
-        return $ MemArray pt shape u Nothing
+        return $ MemArray bt shape u Nothing
     addDec (Acc acc ispace ts) =
       return $ MemAcc acc ispace ts
     convert (Ext i) = le64 (Ext i)
     convert (Free v) = Free <$> pe64 v
 
-data ArrayVar
-  = ArrayVar PrimType Shape VName (IxFun.IxFun (TPrimExp Int64 VName))
-
 arrayVarReturns ::
   (HasScope lore m, Monad m, Mem lore) =>
   VName ->
-  m ArrayVar
+  m (PrimType, Shape, VName, IxFun)
 arrayVarReturns v = do
   summary <- lookupMemInfo v
   case summary of
     MemArray et shape _ (ArrayIn mem ixfun) ->
-      return $ ArrayVar et (Shape $ shapeDims shape) mem ixfun
+      return (et, Shape $ shapeDims shape, mem, ixfun)
     _ ->
       error $ "arrayVarReturns: " ++ pretty v ++ " is not an array."
 
@@ -1053,37 +1050,30 @@ expReturns (BasicOp (SubExp se)) =
 expReturns (BasicOp (Opaque (Var v))) =
   pure <$> varReturns v
 expReturns (BasicOp (Reshape newshape v)) = do
-  info <- arrayVarReturns v
-  let shape = Shape $ map (Free . newDim) newshape
-  case info of
-    ArrayVar et _ mem ixfun ->
-      return
-        [ MemArray et shape NoUniqueness $
-            Just $
-              ReturnsInBlock mem $
-                existentialiseIxFun [] $
-                  IxFun.reshape ixfun $ map (fmap pe64) newshape
-        ]
+  (et, _, mem, ixfun) <- arrayVarReturns v
+  return
+    [ MemArray et (Shape $ map (Free . newDim) newshape) NoUniqueness $
+        Just $
+          ReturnsInBlock mem $
+            existentialiseIxFun [] $
+              IxFun.reshape ixfun $ map (fmap pe64) newshape
+    ]
 expReturns (BasicOp (Rearrange perm v)) = do
-  info <- arrayVarReturns v
-  case info of
-    ArrayVar et (Shape dims) mem ixfun -> do
-      let ixfun' = IxFun.permute ixfun perm
-          dims' = rearrangeShape perm dims
-      return
-        [ MemArray et (Shape $ map Free dims') NoUniqueness $
-            Just $ ReturnsInBlock mem $ existentialiseIxFun [] ixfun'
-        ]
+  (et, Shape dims, mem, ixfun) <- arrayVarReturns v
+  let ixfun' = IxFun.permute ixfun perm
+      dims' = rearrangeShape perm dims
+  return
+    [ MemArray et (Shape $ map Free dims') NoUniqueness $
+        Just $ ReturnsInBlock mem $ existentialiseIxFun [] ixfun'
+    ]
 expReturns (BasicOp (Rotate offsets v)) = do
-  info <- arrayVarReturns v
-  case info of
-    ArrayVar et (Shape dims) mem ixfun -> do
-      let offsets' = map pe64 offsets
-          ixfun' = IxFun.rotate ixfun offsets'
-      return
-        [ MemArray et (Shape $ map Free dims) NoUniqueness $
-            Just $ ReturnsInBlock mem $ existentialiseIxFun [] ixfun'
-        ]
+  (et, Shape dims, mem, ixfun) <- arrayVarReturns v
+  let offsets' = map pe64 offsets
+      ixfun' = IxFun.rotate ixfun offsets'
+  return
+    [ MemArray et (Shape $ map Free dims) NoUniqueness $
+        Just $ ReturnsInBlock mem $ existentialiseIxFun [] ixfun'
+    ]
 expReturns (BasicOp (Index v slice)) = do
   info <- sliceInfo v slice
   case info of
@@ -1093,22 +1083,10 @@ expReturns (BasicOp (Index v slice)) = do
             Just $ ReturnsInBlock mem $ existentialiseIxFun [] ixfun
         ]
     MemPrim pt -> return [MemPrim pt]
-    MemMem space -> return [MemMem space]
     MemAcc acc ispace ts -> return [MemAcc acc ispace ts]
+    MemMem space -> return [MemMem space]
 expReturns (BasicOp (Update v _ _)) =
   pure <$> varReturns v
-expReturns (BasicOp (UpdateAcc acc _ _)) =
-  pure <$> varReturns acc
-expReturns (WithAcc inputs lam) =
-  (<>)
-    <$> (concat <$> mapM inputReturns inputs)
-    <*>
-    -- XXX: this is a bit dubious because it enforces extra copies.  I
-    -- think WithAcc should perhaps have a return annotation like If.
-    pure (extReturns $ staticShapes $ drop num_accs $ lambdaReturnType lam)
-  where
-    inputReturns (_, arrs, _) = mapM varReturns arrs
-    num_accs = length inputs
 expReturns (BasicOp op) =
   extReturns . staticShapes <$> primOpType op
 expReturns e@(DoLoop ctx val _ _) = do
@@ -1146,6 +1124,16 @@ expReturns (If _ _ _ (IfDec ret _)) =
   return $ map bodyReturnsToExpReturns ret
 expReturns (Op op) =
   opReturns op
+expReturns (WithAcc inputs lam) =
+  (<>)
+    <$> (concat <$> mapM inputReturns inputs)
+    <*>
+    -- XXX: this is a bit dubious because it enforces extra copies.  I
+    -- think WithAcc should perhaps have a return annotation like If.
+    pure (extReturns $ staticShapes $ drop num_accs $ lambdaReturnType lam)
+  where
+    inputReturns (_, arrs, _) = mapM varReturns arrs
+    num_accs = length inputs
 
 sliceInfo ::
   (Monad m, HasScope lore m, Mem lore) =>
@@ -1153,17 +1141,16 @@ sliceInfo ::
   Slice SubExp ->
   m (MemInfo SubExp NoUniqueness MemBind)
 sliceInfo v slice = do
-  info <- arrayVarReturns v
-  case (info, sliceDims slice) of
-    (ArrayVar et _ _ _, []) ->
-      return $ MemPrim et
-    (ArrayVar et _ mem ixfun, dims) ->
+  (et, _, mem, ixfun) <- arrayVarReturns v
+  case sliceDims slice of
+    [] -> return $ MemPrim et
+    dims ->
       return $
         MemArray et (Shape dims) NoUniqueness $
           ArrayIn mem $
             IxFun.slice
               ixfun
-              (map (fmap pe64) slice)
+              (map (fmap (isInt64 . primExpFromSubExp int64)) slice)
 
 class TypedOp (Op lore) => OpReturns lore where
   opReturns ::

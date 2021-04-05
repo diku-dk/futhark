@@ -754,10 +754,8 @@ defCompileExp ::
   Pattern lore ->
   Exp lore ->
   ImpM lore r op ()
-defCompileExp pat (If cond tbranch fbranch _) = do
-  tcode <- collect $ compileBody pat tbranch
-  fcode <- collect $ compileBody pat fbranch
-  emit $ Imp.If (toBoolExp cond) tcode fcode
+defCompileExp pat (If cond tbranch fbranch _) =
+  sIf (toBoolExp cond) (compileBody pat tbranch) (compileBody pat fbranch)
 defCompileExp pat (Apply fname args _ _) = do
   dest <- destinationFromPattern pat
   targets <- funcallTargets dest
