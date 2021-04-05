@@ -293,7 +293,7 @@ prepareIntraGroupSegHist group_size =
           let num_locks = toInt64Exp $ unCount group_size
               dims = map toInt64Exp $ shapeDims (histShape op) ++ [histWidth op]
               l' = Locking locks 0 1 0 (pure . (`rem` num_locks) . flattenIndex dims)
-              locks_t = Array (ElemPrim int32) (Shape [unCount group_size]) NoUniqueness
+              locks_t = Array int32 (Shape [unCount group_size]) NoUniqueness
 
           locks_mem <- sAlloc "locks_mem" (typeSize locks_t) $ Space "local"
           dArray locks int32 (arrayShape locks_t) $
@@ -362,11 +362,10 @@ compileGroupOp pat (Inner (SegOp (SegScan lvl space scans _ body))) = do
         MemLocation mem _ _ <-
           entryArrayLocation <$> lookupArray (patElemName pe)
         let pe_t = typeOf pe
-            ElemPrim pt = elemType pe_t
             arr_dims = Var (tvVar dims_flat) : drop (length dims') (arrayDims pe_t)
         sArray
           (baseString (patElemName pe) ++ "_flat")
-          pt
+          (elemType pe_t)
           (Shape arr_dims)
           $ ArrayIn mem $ IxFun.iota $ map pe64 arr_dims
 
@@ -386,9 +385,8 @@ compileGroupOp pat (Inner (SegOp (SegRed lvl space ops _ body))) = do
 
       dims' = map toInt64Exp dims
 
-      mkTempArr t = do
-        let ElemPrim pt = elemType t
-        sAllocArray "red_arr" pt (Shape dims <> arrayShape t) $ Space "local"
+      mkTempArr t =
+        sAllocArray "red_arr" (elemType t) (Shape dims <> arrayShape t) $ Space "local"
 
   tmp_arrs <- mapM mkTempArr $ concatMap (lambdaReturnType . segBinOpLambda) ops
   let tmps_for_ops = chunks (map (length . segBinOpNeutral) ops) tmp_arrs
@@ -798,9 +796,9 @@ isConstExp vtable size = do
   return $ replaceInPrimExpM onLeaf size
   where
     hasExp (ArrayVar e _) = e
+    hasExp (AccVar e _) = e
     hasExp (ScalarVar e _) = e
     hasExp (MemVar e _) = e
-    hasExp (AccVar e _) = e
 
 computeThreadChunkSize ::
   SplitOrdering ->

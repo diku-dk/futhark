@@ -81,21 +81,8 @@ pSlash = void $ lexeme "/"
 pAsterisk = void $ lexeme "*"
 pArrow = void $ lexeme "->"
 
-pElemType :: Parser ElemType
-pElemType =
-  choice
-    [ ElemPrim <$> pPrimType,
-      "acc"
-        *> parens
-          ( ElemAcc
-              <$> pVName <* pComma
-              <*> pShape <* pComma
-              <*> pTypes
-          )
-    ]
-
 pNonArray :: Parser (TypeBase shape u)
-pNonArray = elemToType <$> pElemType
+pNonArray = Prim <$> pPrimType
 
 pTypeBase ::
   ArrayShape shape =>
@@ -267,7 +254,7 @@ pBasicOp =
       keyword "reshape"
         *> parens (Reshape <$> pShapeChange <* pComma <*> pVName),
       keyword "scratch"
-        *> parens (Scratch <$> pElemType <*> many (pComma *> pSubExp)),
+        *> parens (Scratch <$> pPrimType <*> many (pComma *> pSubExp)),
       keyword "rearrange"
         *> parens
           (Rearrange <$> parens (pInt `sepBy` pComma) <* pComma <*> pVName),
@@ -866,17 +853,16 @@ pMemInfo pd pu pret =
     pArrayOrAcc = do
       u <- pu
       shape <- Shape <$> many (brackets pd)
-      choice [pArray u shape, pAcc shape]
+      choice [pArray u shape, pAcc]
     pArray u shape = do
       pt <- pPrimType
       MemArray pt shape u <$> (lexeme "@" *> pret)
-    pAcc shape =
+    pAcc =
       keyword "acc"
         *> parens
           ( MemAcc <$> pVName <* pComma
               <*> pShape <* pComma
               <*> pTypes
-              <*> pure shape
           )
 
 pSpace :: Parser Space

@@ -974,10 +974,8 @@ instance Simplifiable Space where
   simplify (ScalarSpace ds t) = ScalarSpace <$> simplify ds <*> pure t
   simplify s = pure s
 
-instance Simplifiable ElemType where
-  simplify (ElemPrim pt) = pure $ ElemPrim pt
-  simplify (ElemAcc acc ispace ts) =
-    ElemAcc <$> simplify acc <*> simplify ispace <*> simplify ts
+instance Simplifiable PrimType where
+  simplify = pure
 
 instance Simplifiable shape => Simplifiable (TypeBase shape u) where
   simplify (Array et shape u) =

@@ -331,9 +331,8 @@ instance FreeIn d => FreeIn (Ext d) where
   freeIn' (Free x) = freeIn' x
   freeIn' (Ext _) = mempty
 
-instance FreeIn ElemType where
-  freeIn' ElemPrim {} = mempty
-  freeIn' (ElemAcc acc ispace ts) = freeIn' (acc, ispace, ts)
+instance FreeIn PrimType where
+  freeIn' _ = mempty
 
 instance FreeIn shape => FreeIn (TypeBase shape u) where
   freeIn' (Array t shape _) = freeIn' t <> freeIn' shape

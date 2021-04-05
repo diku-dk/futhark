@@ -226,9 +226,6 @@ interchangeWithAcc1
       trType (Acc acc ispace ts)
         | acc `elem` acc_certs =
           Acc acc (Shape [w] <> ispace) ts
-      trType (Array (ElemAcc acc ispace ts) s u)
-        | acc `elem` acc_certs =
-          Array (ElemAcc acc (Shape [w] <> ispace) ts) s u
       trType t = t
 
       trParam :: Param (TypeBase shape u) -> Param (TypeBase shape u)

@@ -790,14 +790,7 @@ mapOnSegOpType tv (Acc acc ispace ts) =
     <*> traverse (mapOnSegOpSubExp tv) ispace
     <*> traverse (bitraverse (traverse (mapOnSegOpSubExp tv)) pure) ts
 mapOnSegOpType tv (Array et shape u) =
-  Array <$> onElemType et <*> traverse (mapOnSegOpSubExp tv) shape <*> pure u
-  where
-    onElemType (ElemPrim pt) = pure $ ElemPrim pt
-    onElemType (ElemAcc acc ispace ts) =
-      ElemAcc
-        <$> mapOnSegOpVName tv acc
-        <*> traverse (mapOnSegOpSubExp tv) ispace
-        <*> traverse (bitraverse (traverse (mapOnSegOpSubExp tv)) pure) ts
+  Array et <$> traverse (mapOnSegOpSubExp tv) shape <*> pure u
 mapOnSegOpType _tv (Mem s) = pure $ Mem s
 
 instance

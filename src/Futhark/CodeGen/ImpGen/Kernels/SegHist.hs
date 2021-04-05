@@ -111,11 +111,10 @@ computeHistoUsage space op = do
           ArrayIn subhistos_mem $
             IxFun.iota $
               map pe64 $ shapeDims subhistos_shape
-        ElemPrim pt = elemType dest_t
     subhistos <-
       sArray
         (baseString dest ++ "_subhistos")
-        pt
+        (elemType dest_t)
         subhistos_shape
         subhistos_membind
 
@@ -133,7 +132,7 @@ computeHistoUsage space op = do
 
               let subhistos_mem_size =
                     Imp.bytes $
-                      Imp.unCount (Imp.elements num_elems `Imp.withElemType` pt)
+                      Imp.unCount (Imp.elements num_elems `Imp.withElemType` elemType dest_t)
 
               sAlloc_ subhistos_mem subhistos_mem_size $ Space "device"
               sReplicate subhistos ne
@@ -565,10 +564,9 @@ prepareIntermediateArraysLocal num_subhistos_per_group groups_per_segment space 
                 let sub_local_shape =
                       Shape [tvSize num_subhistos_per_group]
                         <> (arrayShape t `setOuterDim` hist_H_chk)
-                    ElemPrim pt = elemType t
                 sAllocArray
                   "subhistogram_local"
-                  pt
+                  (elemType t)
                   sub_local_shape
                   (Space "local")
 

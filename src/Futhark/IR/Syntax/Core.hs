@@ -24,7 +24,6 @@ module Futhark.IR.Syntax.Core
     ArrayShape (..),
     Space (..),
     SpaceId,
-    ElemType (..),
     TypeBase (..),
     Type,
     ExtType,
@@ -198,24 +197,13 @@ instance Semigroup NoUniqueness where
 instance Monoid NoUniqueness where
   mempty = NoUniqueness
 
--- | The type of things that can be array elements.
-data ElemType
-  = -- | Accumulator.  The 'VName' is the name of the original
-    -- 'WithAcc' parameter and uniquely identifies the accumulator.
-    -- The 'Shape' indicates the index space of updates.  The 'Type'
-    -- list denotes the value that can be passed to update the
-    -- accumulator.
-    ElemAcc VName Shape [Type]
-  | ElemPrim PrimType
-  deriving (Show, Eq, Ord)
-
 -- | The type of a value.  When comparing types for equality with
 -- '==', shapes must match.
 data TypeBase shape u
   = Prim PrimType
   | -- | See 'ElemAcc'.
     Acc VName Shape [Type]
-  | Array ElemType shape u
+  | Array PrimType shape u
   | Mem Space
   deriving (Show, Eq, Ord)
 

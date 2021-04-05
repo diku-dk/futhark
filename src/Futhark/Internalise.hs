@@ -829,12 +829,8 @@ internaliseArg desc (arg, argdim) = do
     _ -> return ()
   return arg'
 
-elemPrimType :: I.ElemType -> I.PrimType
-elemPrimType ElemAcc {} = error "elemPrimType: accumulator"
-elemPrimType (ElemPrim t) = t
-
 subExpPrimType :: I.SubExp -> InternaliseM I.PrimType
-subExpPrimType = fmap (elemPrimType . I.elemType) . subExpType
+subExpPrimType = fmap I.elemType . subExpType
 
 generateCond :: E.Pattern -> [I.SubExp] -> InternaliseM (I.SubExp, [I.SubExp])
 generateCond orig_p orig_ses = do
@@ -1633,7 +1629,7 @@ isOverloadedFunction qname args loc = do
                 y_flat <- letExp "y_flat" $ I.BasicOp $ I.Reshape [I.DimNew x_num_elems] y'
 
                 -- Compare the elements.
-                cmp_lam <- cmpOpLambda $ I.CmpEq (elemPrimType (elemType x_t))
+                cmp_lam <- cmpOpLambda $ I.CmpEq (elemType x_t)
                 cmps <-
                   letExp "cmps" $
                     I.Op $
