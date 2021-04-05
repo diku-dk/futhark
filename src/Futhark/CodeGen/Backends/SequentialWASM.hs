@@ -137,12 +137,38 @@ javascriptWrapper entryPoints = unlines
   arrWrapper,
   classDef,
   constructor,
+  entryDic entryPoints,
   unlines $ concatMap (\jse -> map toFutharkArray (parameters jse)) entryPoints,
   unlines $ concatMap (\jse -> map fromFutharkArrayShape (ret jse)) entryPoints,
   --unlines $ concatMap (\jse -> map fromFutharkArrayRawValues (ret jse)) entryPoints,
   unlines $ concatMap (\jse -> map fromFutharkArrayValues (ret jse)) entryPoints,
   (unlines $ map jsWrapEntryPoint entryPoints),
   endClassDef]
+
+
+entryDic :: [JSEntryPoint] -> String
+entryDic jses = 
+  T.unpack
+  [text|
+    entry_points = {
+      ${entries}  
+    }
+  |]
+  where 
+    entries = T.pack $ intercalate "," $ map dicEntry jses
+
+dicEntry :: JSEntryPoint -> String
+dicEntry jse =
+  T.unpack
+  [text|
+  '${ename}' : [${params}, ${rets}]
+  |]
+  where
+    ename = T.pack $ name jse
+    params = T.pack $ show $ parameters jse
+    rets = T.pack $ show $ ret jse
+    
+  
 
 
 --TODO Figure out if this needs arguements
