@@ -28,19 +28,15 @@ zeroTan t = error $ "zeroTan on non-primitive type: " ++ pretty t
 zeroExp :: Type -> Exp
 zeroExp (Prim pt) =
   BasicOp $ SubExp $ Constant $ blankPrimValue pt
-zeroExp (Array (ElemPrim pt) shape _) =
+zeroExp (Array pt shape _) =
   BasicOp $ Replicate shape $ Constant $ blankPrimValue pt
 zeroExp t = error $ "zeroExp: " ++ show t
 
 isAcc :: TypeBase s u -> Bool
-isAcc (Array ElemAcc {} _ _) = True
 isAcc Acc {} = True
 isAcc _ = False
 
 tanType :: TypeBase s u -> ADM (TypeBase s u)
-tanType (Array (ElemAcc acc ispace ts) shape u) = do
-  ts_tan <- mapM tanType ts
-  return $ Array (ElemAcc acc ispace (ts ++ ts_tan)) shape u
 tanType (Acc acc ispace ts) = do
   ts_tan <- mapM tanType ts
   return $ Acc acc ispace (ts ++ ts_tan)

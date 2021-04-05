@@ -790,14 +790,7 @@ mapOnSegOpType tv (Acc acc ispace ts) =
     <*> traverse (mapOnSegOpSubExp tv) ispace
     <*> traverse (bitraverse (traverse (mapOnSegOpSubExp tv)) pure) ts
 mapOnSegOpType tv (Array et shape u) =
-  Array <$> onElemType et <*> traverse (mapOnSegOpSubExp tv) shape <*> pure u
-  where
-    onElemType (ElemPrim pt) = pure $ ElemPrim pt
-    onElemType (ElemAcc acc ispace ts) =
-      ElemAcc
-        <$> mapOnSegOpVName tv acc
-        <*> traverse (mapOnSegOpSubExp tv) ispace
-        <*> traverse (bitraverse (traverse (mapOnSegOpSubExp tv)) pure) ts
+  Array et <$> traverse (mapOnSegOpSubExp tv) shape <*> pure u
 mapOnSegOpType _tv (Mem s) = pure $ Mem s
 
 instance
@@ -1073,6 +1066,7 @@ simplifyKernelBody space (KernelBody _ stms res) = do
     Engine.localVtable (flip (foldl' (flip ST.consume)) (foldMap consumedInResult res))
       . Engine.localVtable (<> scope_vtable)
       . Engine.localVtable (\vtable -> vtable {ST.simplifyMemory = True})
+      . Engine.enterLoop
       $ Engine.blockIf
         ( Engine.hasFree bound_here
             `Engine.orIf` Engine.isOp
@@ -1389,15 +1383,13 @@ bottomUpSegOp (vtable, used) (Pattern [] kpes) dec segop = Simplify $ do
                 )
                 $ segSpaceDims space
             index kpe' =
-              letBind (Pattern [] [kpe']) $
-                BasicOp $
-                  Index arr $
-                    outer_slice <> remaining_slice
+              letBindNames [patElemName kpe'] . BasicOp . Index arr $
+                outer_slice <> remaining_slice
         if patElemName kpe `UT.isConsumed` used
           then do
             precopy <- newVName $ baseString (patElemName kpe) <> "_precopy"
             index kpe {patElemName = precopy}
-            letBind (Pattern [] [kpe]) $ BasicOp $ Copy precopy
+            letBindNames [patElemName kpe] $ BasicOp $ Copy precopy
           else index kpe
         return
           ( kpes'',

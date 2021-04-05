@@ -20,7 +20,7 @@ prettyprinted form of the program.  This is useful for demonstrating
 programming techniques.
 
 * Top-level comments that start with a line comment marker (``--``)
-  and a space in the first column will be turned into ordinary text in
+  and a space in the next column will be turned into ordinary text in
   the Markdown file.
 
 * Ordinary top-level definitions will be enclosed in Markdown code
@@ -31,8 +31,8 @@ programming techniques.
 
 **Warning:** Do not run untrusted programs.  See SAFETY below.
 
-Image directives and builtin functions Shells out to ``convert`` (from
-ImageMagick).  Video generation uses ``fmpeg``.
+Image directives and builtin functions shell out to ``convert`` (from
+ImageMagick).  Video generation uses ``ffmpeg``.
 
 OPTIONS
 =======

@@ -78,7 +78,7 @@ primOpType (ConvOp conv _) =
 primOpType (Index ident slice) =
   result <$> lookupType ident
   where
-    result t = [elemToType (elemType t) `arrayOfShape` shape]
+    result t = [Prim (elemType t) `arrayOfShape` shape]
     shape = Shape $ mapMaybe dimSize slice
     dimSize (DimSlice _ d _) = Just d
     dimSize DimFix {} = Nothing
@@ -91,11 +91,11 @@ primOpType (Replicate (Shape []) e) =
 primOpType (Replicate shape e) =
   pure . flip arrayOfShape shape <$> subExpType e
 primOpType (Scratch t shape) =
-  pure [Array t (Shape shape) NoUniqueness]
+  pure [arrayOf (Prim t) (Shape shape) NoUniqueness]
 primOpType (Reshape [] e) =
   result <$> lookupType e
   where
-    result t = [elemToType $ elemType t]
+    result t = [Prim $ elemType t]
 primOpType (Reshape shape e) =
   result <$> lookupType e
   where

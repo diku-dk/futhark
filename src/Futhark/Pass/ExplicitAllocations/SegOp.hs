@@ -47,7 +47,7 @@ allocInBinOpParams num_threads my_id other_id xs ys = unzip <$> zipWithM alloc x
   where
     alloc x y =
       case paramType x of
-        Array (ElemPrim pt) shape u -> do
+        Array pt shape u -> do
           twice_num_threads <-
             letSubExp "twice_num_threads" $
               BasicOp $ BinOp (Mul Int64 OverflowUndef) num_threads $ intConst Int64 2
@@ -77,17 +77,11 @@ allocInBinOpParams num_threads my_id other_id xs ys = unzip <$> zipWithM alloc x
             ( x {paramDec = MemMem space},
               y {paramDec = MemMem space}
             )
-        -- This next two cases will never happen.
-
-        Array (ElemAcc acc ispace ts) shape _ ->
-          return
-            ( x {paramDec = MemAcc acc ispace ts shape},
-              y {paramDec = MemAcc acc ispace ts shape}
-            )
+        -- This next case will never happen.
         Acc acc ispace ts ->
           return
-            ( x {paramDec = MemAcc acc ispace ts mempty},
-              y {paramDec = MemAcc acc ispace ts mempty}
+            ( x {paramDec = MemAcc acc ispace ts},
+              y {paramDec = MemAcc acc ispace ts}
             )
 
 allocInBinOpLambda ::

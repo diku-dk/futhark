@@ -220,7 +220,7 @@ data VarEntry lore
   = ArrayVar (Maybe (Exp lore)) ArrayEntry
   | ScalarVar (Maybe (Exp lore)) ScalarEntry
   | MemVar (Maybe (Exp lore)) MemEntry
-  | AccVar (Maybe (Exp lore)) (VName, Shape, [Type], Shape)
+  | AccVar (Maybe (Exp lore)) (VName, Shape, [Type])
   deriving (Show)
 
 -- | When compiling an expression, this is a description of where the
@@ -320,16 +320,13 @@ instance HasScope SOACS (ImpM lore r op) where
         Mem (entryMemSpace memEntry)
       entryType (ArrayVar _ arrayEntry) =
         Array
-          (ElemPrim (entryArrayElemType arrayEntry))
+          (entryArrayElemType arrayEntry)
           (Shape $ entryArrayShape arrayEntry)
           NoUniqueness
       entryType (ScalarVar _ scalarEntry) =
         Prim $ entryScalarType scalarEntry
-      entryType (AccVar _ (acc, ispace, ts, shape))
-        | shape == mempty =
-          Acc acc ispace ts
-        | otherwise =
-          Array (ElemAcc acc ispace ts) shape NoUniqueness
+      entryType (AccVar _ (acc, ispace, ts)) =
+        Acc acc ispace ts
 
 runImpM ::
   ImpM lore r op a ->
@@ -757,10 +754,8 @@ defCompileExp ::
   Pattern lore ->
   Exp lore ->
   ImpM lore r op ()
-defCompileExp pat (If cond tbranch fbranch _) = do
-  tcode <- collect $ compileBody pat tbranch
-  fcode <- collect $ compileBody pat fbranch
-  emit $ Imp.If (toBoolExp cond) tcode fcode
+defCompileExp pat (If cond tbranch fbranch _) =
+  sIf (toBoolExp cond) (compileBody pat tbranch) (compileBody pat fbranch)
 defCompileExp pat (Apply fname args _ _) = do
   dest <- destinationFromPattern pat
   targets <- funcallTargets dest
@@ -1057,8 +1052,8 @@ memBoundToVarEntry e (MemPrim bt) =
   ScalarVar e ScalarEntry {entryScalarType = bt}
 memBoundToVarEntry e (MemMem space) =
   MemVar e $ MemEntry space
-memBoundToVarEntry e (MemAcc acc ispace ts space) =
-  AccVar e (acc, ispace, ts, space)
+memBoundToVarEntry e (MemAcc acc ispace ts) =
+  AccVar e (acc, ispace, ts)
 memBoundToVarEntry e (MemArray bt shape _ (ArrayIn mem ixfun)) =
   let location = MemLocation mem (shapeDims shape) $ fmap (fmap Imp.ScalarVar) ixfun
    in ArrayVar
@@ -1277,7 +1272,7 @@ lookupAcc ::
 lookupAcc name = do
   res <- lookupVar name
   case res of
-    AccVar _ (acc, ispace, _, _) -> do
+    AccVar _ (acc, ispace, _) -> do
       acc' <- gets $ M.lookup acc . stateAccs
       case acc' of
         Just (arrs, op) ->
@@ -1677,9 +1672,7 @@ typeSize t =
   Imp.bytes $
     elem_size * product (map toInt64Exp (arrayDims t))
   where
-    elem_size = case elemType t of
-      ElemPrim t' -> isInt64 $ Imp.LeafExp (Imp.SizeOf t') int64
-      ElemAcc {} -> 0
+    elem_size = isInt64 $ Imp.LeafExp (Imp.SizeOf (elemType t)) int64
 
 -- | Is this indexing in-bounds for an array of the given shape?  This
 -- is useful for things like scatter, which ignores out-of-bounds
@@ -1771,7 +1764,7 @@ sArrayInMem name pt shape mem =
 sAllocArrayPerm :: String -> PrimType -> ShapeBase SubExp -> Space -> [Int] -> ImpM lore r op VName
 sAllocArrayPerm name pt shape space perm = do
   let permuted_dims = rearrangeShape perm $ shapeDims shape
-  mem <- sAlloc (name ++ "_mem") (typeSize (Array (ElemPrim pt) shape NoUniqueness)) space
+  mem <- sAlloc (name ++ "_mem") (typeSize (Array pt shape NoUniqueness)) space
   let iota_ixfun = IxFun.iota $ map (isInt64 . primExpFromSubExp int64) permuted_dims
   sArray name pt shape $
     ArrayIn mem $ IxFun.permute iota_ixfun $ rearrangeInverse perm

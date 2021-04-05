@@ -648,6 +648,8 @@ main = mainWithOptions newConfig commandLineOptions "options... program" compile
                       runPolyPasses config base (SOACS prog)
                   ),
                   (".fut_soacs", readCore parseSOACS SOACS),
+                  (".fut_seq", readCore parseSeq Seq),
+                  (".fut_seq_mem", readCore parseSeqMem SeqMem),
                   (".fut_kernels", readCore parseKernels Kernels),
                   (".fut_kernels_mem", readCore parseKernelsMem KernelsMem),
                   (".fut_mc", readCore parseMC MC),

@@ -184,8 +184,7 @@ subHistogram pat flat_idx space histops num_histos kbody = do
   global_subhistograms <- forM histops $ \histop ->
     forM (histType histop) $ \t -> do
       let shape = Shape [tvSize num_histos] <> arrayShape t
-          ElemPrim pt = elemType t
-      sAllocArray "subhistogram" pt shape DefaultSpace
+      sAllocArray "subhistogram" (elemType t) shape DefaultSpace
 
   let tid' = Imp.vi64 $ segFlat space
       flat_idx' = tvExp flat_idx
@@ -194,9 +193,8 @@ subHistogram pat flat_idx space histops num_histos kbody = do
     zipWithM_ dPrimV_ is $ unflattenIndex ns_64 $ sExt64 flat_idx'
 
     forM (zip per_red_pes histops) $ \(pes', histop) -> do
-      op_local_subhistograms <- forM (histType histop) $ \t -> do
-        let ElemPrim pt = elemType t
-        sAllocArray "subhistogram" pt (arrayShape t) DefaultSpace
+      op_local_subhistograms <- forM (histType histop) $ \t ->
+        sAllocArray "subhistogram" (elemType t) (arrayShape t) DefaultSpace
 
       forM_ (zip3 pes' op_local_subhistograms (histNeutral histop)) $ \(pe, hist, ne) ->
         -- First thread initializes histogram with dest vals. Others

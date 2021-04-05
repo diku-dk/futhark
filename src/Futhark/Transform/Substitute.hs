@@ -147,14 +147,8 @@ instance Substitute d => Substitute (Ext d) where
 instance Substitute Names where
   substituteNames = mapNames . substituteNames
 
-instance Substitute ElemType where
-  substituteNames _ (ElemPrim t) =
-    ElemPrim t
-  substituteNames substs (ElemAcc acc ispace ts) =
-    ElemAcc
-      (substituteNames substs acc)
-      (substituteNames substs ispace)
-      (substituteNames substs ts)
+instance Substitute PrimType where
+  substituteNames _ t = t
 
 instance Substitute shape => Substitute (TypeBase shape u) where
   substituteNames _ (Prim et) =

@@ -134,9 +134,8 @@ groupResultArrays ::
 groupResultArrays s num_threads reds =
   forM reds $ \(SegBinOp _ lam _ shape) ->
     forM (lambdaReturnType lam) $ \t -> do
-      let ElemPrim pt = elemType t
-          full_shape = Shape [num_threads] <> shape <> arrayShape t
-      sAllocArray s pt full_shape DefaultSpace
+      let full_shape = Shape [num_threads] <> shape <> arrayShape t
+      sAllocArray s (elemType t) full_shape DefaultSpace
 
 isLoadBalanced :: Imp.Code -> Bool
 isLoadBalanced (a Imp.:>>: b) = isLoadBalanced a && isLoadBalanced b

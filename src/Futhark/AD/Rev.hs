@@ -126,7 +126,7 @@ adjVName v = newVName (baseString v <> "_adj")
 zeroExp :: Type -> Exp
 zeroExp (Prim pt) =
   BasicOp $ SubExp $ Constant $ blankPrimValue pt
-zeroExp (Array (ElemPrim pt) shape _) =
+zeroExp (Array pt shape _) =
   BasicOp $ Replicate shape $ Constant $ blankPrimValue pt
 zeroExp t = error $ "zeroExp: " ++ pretty t
 
@@ -176,7 +176,7 @@ tabNest = tabNest' []
 -- Construct a lambda for adding two values of the given type.
 addLambda :: Type -> ADM Lambda
 addLambda (Prim pt) = binOpLambda (addBinOp pt) pt
-addLambda t@(Array (ElemPrim _) _ _) = do
+addLambda t@Array {} = do
   xs <- newVName "xs"
   ys <- newVName "ys"
   lam <- addLambda $ rowType t
@@ -509,7 +509,7 @@ diffMap pat_adj w map_lam as = do
       v_adj <- lookupAdj v
       v_adj_t <- lookupType v_adj
       case v_adj_t of
-        Array (ElemPrim pt) shape _
+        Array pt shape _
           | v `notElem` as -> do
             add_lam <- accAddLambda (shapeRank shape) $ Prim pt
             zero <- letSubExp "zero" $ zeroExp $ Prim pt

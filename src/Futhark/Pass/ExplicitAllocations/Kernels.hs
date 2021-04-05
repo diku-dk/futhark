@@ -113,8 +113,7 @@ mapResultHint lvl space = hint
     coalesceReturnOfShape _ _ = True
 
     hint t Returns {}
-      | ElemPrim pt <- elemType t,
-        coalesceReturnOfShape (primByteSize pt) $ arrayDims t = do
+      | coalesceReturnOfShape (primByteSize (elemType t)) $ arrayDims t = do
         let space_dims = segSpaceDims space
         t_dims <- mapM dimAllocationSize $ arrayDims t
         return $ Hint (innermost space_dims t_dims) DefaultSpace
@@ -152,18 +151,17 @@ inGroupExpHints (Op (Inner (SegOp (SegMap _ space ts body))))
     return $ do
       (t, r) <- zip ts $ kernelBodyResult body
       return $
-        case elemType t of
-          ElemPrim pt
-            | private r && all (semiStatic consts) (arrayDims t) ->
-              let seg_dims = map pe64 $ segSpaceDims space
-                  dims = seg_dims ++ map pe64 (arrayDims t)
-                  nilSlice d = DimSlice 0 d 0
-               in Hint
-                    ( IxFun.slice (IxFun.iota dims) $
-                        fullSliceNum dims $ map nilSlice seg_dims
-                    )
-                    $ ScalarSpace (arrayDims t) pt
-          _ -> NoHint
+        if private r && all (semiStatic consts) (arrayDims t)
+          then
+            let seg_dims = map pe64 $ segSpaceDims space
+                dims = seg_dims ++ map pe64 (arrayDims t)
+                nilSlice d = DimSlice 0 d 0
+             in Hint
+                  ( IxFun.slice (IxFun.iota dims) $
+                      fullSliceNum dims $ map nilSlice seg_dims
+                  )
+                  $ ScalarSpace (arrayDims t) $ elemType t
+          else NoHint
   where
     private (Returns ResultPrivate _) = True
     private _ = False
@@ -175,7 +173,7 @@ inThreadExpHints e = do
   mapM (maybePrivate consts) =<< expExtType e
   where
     maybePrivate consts t
-      | Just (Array (ElemPrim pt) shape _) <- hasStaticShape t,
+      | Just (Array pt shape _) <- hasStaticShape t,
         all (semiStatic consts) $ shapeDims shape = do
         let ixfun = IxFun.iota $ map pe64 $ shapeDims shape
         return $ Hint ixfun $ ScalarSpace (shapeDims shape) pt

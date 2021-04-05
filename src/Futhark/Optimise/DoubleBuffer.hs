@@ -249,7 +249,7 @@ doubleBufferMergeParams ctx_and_res val_params bound_in_loop =
             mem == arraymem =
             Just
               ( arraySizeInBytesExp $
-                  Array (ElemPrim pt) (Shape dims) NoUniqueness,
+                  Array pt (Shape dims) NoUniqueness,
                 or b
               )
         arrayInMem _ = Nothing
@@ -291,9 +291,9 @@ allocStms merge = runWriterT . zipWithM allocation merge
     allocation (f, Var v) (BufferCopy mem _ _ b) | b = do
       v_copy <- lift $ newVName $ baseString v ++ "_double_buffer_copy"
       (_v_mem, v_ixfun) <- lift $ lookupArraySummary v
-      let ElemPrim pt = elemType $ paramType f
+      let bt = elemType $ paramType f
           shape = arrayShape $ paramType f
-          bound = MemArray pt shape NoUniqueness $ ArrayIn mem v_ixfun
+          bound = MemArray bt shape NoUniqueness $ ArrayIn mem v_ixfun
       tell
         [ Let (Pattern [] [PatElem v_copy bound]) (defAux ()) $
             BasicOp $ Copy v
@@ -302,8 +302,8 @@ allocStms merge = runWriterT . zipWithM allocation merge
       -- avoid the Copy from being hoisted out of any enclosing
       -- loops.  Since we re-use (=overwrite) memory in the loop,
       -- the copy is critical for initialisation.  See issue #816.
-      let uniqueMemInfo (MemArray ppt pshape _ ret) =
-            MemArray ppt pshape Unique ret
+      let uniqueMemInfo (MemArray pt pshape _ ret) =
+            MemArray pt pshape Unique ret
           uniqueMemInfo info = info
       return (uniqueMemInfo <$> f, Var v_copy)
     allocation (f, se) _ =
@@ -327,8 +327,7 @@ doubleBufferResult valparams buffered (Body _ bnds res) =
       -- To construct the copy we will need to figure out its type
       -- based on the type of the function parameter.
       let t = resultType $ paramType fparam
-          ElemPrim pt = elemType t
-          summary = MemArray pt (arrayShape t) NoUniqueness $ ArrayIn bufname ixfun
+          summary = MemArray (elemType t) (arrayShape t) NoUniqueness $ ArrayIn bufname ixfun
           copybnd =
             Let (Pattern [] [PatElem copyname summary]) (defAux ()) $
               BasicOp $ Copy v

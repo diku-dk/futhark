@@ -28,9 +28,8 @@ module Futhark.IR.Prop.Types
     shapeSize,
     arraySize,
     arraysSize,
-    rowType,
     elemType,
-    elemToType,
+    rowType,
     transposeType,
     rearrangeType,
     mapOnExtType,
@@ -95,13 +94,6 @@ arrayShape :: ArrayShape shape => TypeBase shape u -> shape
 arrayShape (Array _ ds _) = ds
 arrayShape _ = mempty
 
--- | Concert an element type to an ordinary type.  Anything that can
--- be put in an array can also exist on its own, but the opposite is
--- not true.
-elemToType :: ElemType -> TypeBase shape u
-elemToType (ElemAcc acc ispace ts) = Acc acc ispace ts
-elemToType (ElemPrim t) = Prim t
-
 -- | Modify the shape of an array - for non-arrays, this does nothing.
 modifyArrayShape ::
   ArrayShape newshape =>
@@ -109,7 +101,7 @@ modifyArrayShape ::
   TypeBase oldshape u ->
   TypeBase newshape u
 modifyArrayShape f (Array t ds u)
-  | shapeRank ds' == 0 = elemToType t
+  | shapeRank ds' == 0 = Prim t
   | otherwise = Array t (f ds) u
   where
     ds' = f ds
@@ -177,7 +169,7 @@ arrayOf (Array et size1 _) size2 u =
   Array et (size2 <> size1) u
 arrayOf (Prim t) shape u
   | 0 <- shapeRank shape = Prim t
-  | otherwise = Array (ElemPrim t) shape u
+  | otherwise = Array t shape u
 arrayOf (Acc acc ispace ts) _shape _u =
   Acc acc ispace ts
 arrayOf Mem {} _ _ =
@@ -241,7 +233,7 @@ peelArray ::
   Maybe (TypeBase shape u)
 peelArray 0 t = Just t
 peelArray n (Array et shape u)
-  | shapeRank shape == n = Just $ elemToType et
+  | shapeRank shape == n = Just $ Prim et
   | shapeRank shape > n = Just $ Array et (stripDims n shape) u
 peelArray _ _ = Nothing
 
@@ -251,7 +243,7 @@ peelArray _ _ = Nothing
 stripArray :: ArrayShape shape => Int -> TypeBase shape u -> TypeBase shape u
 stripArray n (Array et shape u)
   | n < shapeRank shape = Array et (stripDims n shape) u
-  | otherwise = elemToType et
+  | otherwise = Prim et
 stripArray _ t = t
 
 -- | Return the size of the given dimension.  If the dimension does
@@ -296,10 +288,10 @@ primType _ = True
 
 -- | Returns the bottommost type of an array.  For @[][]i32@, this
 -- would be @i32@.  If the given type is not an array, it is returned.
-elemType :: TypeBase shape u -> ElemType
+elemType :: TypeBase shape u -> PrimType
 elemType (Array t _ _) = t
-elemType (Prim t) = ElemPrim t
-elemType (Acc acc ispace ts) = ElemAcc acc ispace ts
+elemType (Prim t) = t
+elemType Acc {} = error "Acc"
 elemType Mem {} = error "elemType Mem"
 
 -- | Swap the two outer dimensions of the type.
@@ -334,8 +326,8 @@ mapOnExtType f (Acc acc ispace ts) =
 mapOnExtType _ (Mem space) =
   pure $ Mem space
 mapOnExtType f (Array t shape u) =
-  Array <$> mapOnElemType f t
-    <*> (Shape <$> mapM (traverse f) (shapeDims shape))
+  Array t
+    <$> (Shape <$> mapM (traverse f) (shapeDims shape))
     <*> pure u
 
 -- | Transform any t'SubExp's in the type.
@@ -355,25 +347,9 @@ mapOnType f (Acc acc ispace ts) =
         Constant {} -> pure v
 mapOnType _ (Mem space) = pure $ Mem space
 mapOnType f (Array t shape u) =
-  Array <$> mapOnElemType f t
-    <*> (Shape <$> mapM f (shapeDims shape))
+  Array t
+    <$> (Shape <$> mapM f (shapeDims shape))
     <*> pure u
-
-mapOnElemType ::
-  Monad m =>
-  (SubExp -> m SubExp) ->
-  ElemType ->
-  m ElemType
-mapOnElemType _ (ElemPrim t) =
-  pure $ ElemPrim t
-mapOnElemType f (ElemAcc acc ispace ts) =
-  ElemAcc <$> f' acc <*> traverse f ispace <*> mapM (mapOnType f) ts
-  where
-    f' v = do
-      x <- f $ Var v
-      case x of
-        Var v' -> pure v'
-        Constant {} -> pure v
 
 -- | @diet t@ returns a description of how a function parameter of
 -- type @t@ might consume its argument.

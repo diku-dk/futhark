@@ -60,6 +60,7 @@ module Futhark.Optimise.Simplify.Engine
     ST.SymbolTable,
     hoistStms,
     blockIf,
+    enterLoop,
     module Futhark.Optimise.Simplify.Lore,
   )
 where
@@ -221,6 +222,7 @@ changed = modify $ \(src, _, cs) -> (src, True, cs)
 usedCerts :: Certificates -> SimpleM lore ()
 usedCerts cs = modify $ \(a, b, c) -> (a, b, cs <> c)
 
+-- | Indicate in the symbol table that we have descended into a loop.
 enterLoop :: SimpleM lore a -> SimpleM lore a
 enterLoop = localVtable ST.deepen
 
@@ -974,10 +976,8 @@ instance Simplifiable Space where
   simplify (ScalarSpace ds t) = ScalarSpace <$> simplify ds <*> pure t
   simplify s = pure s
 
-instance Simplifiable ElemType where
-  simplify (ElemPrim pt) = pure $ ElemPrim pt
-  simplify (ElemAcc acc ispace ts) =
-    ElemAcc <$> simplify acc <*> simplify ispace <*> simplify ts
+instance Simplifiable PrimType where
+  simplify = pure
 
 instance Simplifiable shape => Simplifiable (TypeBase shape u) where
   simplify (Array et shape u) =

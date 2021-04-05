@@ -40,7 +40,7 @@ resultArrays :: String -> [SegBinOp MCMem] -> MulticoreGen [[VName]]
 resultArrays s segops =
   forM segops $ \(SegBinOp _ lam _ shape) ->
     forM (lambdaReturnType lam) $ \t -> do
-      let ElemPrim pt = elemType t
+      let pt = elemType t
           full_shape = shape <> arrayShape t
       sAllocArray s pt full_shape DefaultSpace
 
@@ -89,7 +89,7 @@ scanStage1 pat space scan_ops kbody = do
           case shapeDims shape of
             [] -> pure $ paramName p
             _ -> do
-              let ElemPrim pt = elemType t
+              let pt = elemType t
               sAllocArray "local_acc" pt (shape <> arrayShape t) DefaultSpace
 
         -- Now neutral-initialise the accumulator.
@@ -211,7 +211,7 @@ scanStage3 pat space scan_ops kbody = do
           case shapeDims shape of
             [] -> pure $ paramName p
             _ -> do
-              let ElemPrim pt = elemType t
+              let pt = elemType t
               sAllocArray "local_acc" pt (shape <> arrayShape t) DefaultSpace
 
         -- Initialise the accumulator with neutral from previous chunk.
