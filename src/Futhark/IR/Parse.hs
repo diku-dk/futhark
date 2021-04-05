@@ -86,7 +86,17 @@ pAsterisk = void $ lexeme "*"
 pArrow = void $ lexeme "->"
 
 pNonArray :: Parser (TypeBase shape u)
-pNonArray = Prim <$> pPrimType
+pNonArray =
+  choice
+    [ Prim <$> pPrimType,
+      "acc"
+        *> parens
+          ( Acc
+              <$> pVName <* pComma
+              <*> pShape <* pComma
+              <*> pTypes
+          )
+    ]
 
 pTypeBase ::
   ArrayShape shape =>
