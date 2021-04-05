@@ -138,8 +138,8 @@ runEMCC cpath outpath cflags_def ldflags expfuns = do
             ++ ["-lnodefs.js", "-s", "ALLOW_MEMORY_GROWTH=1"]
             ++ ["-s", "--post-js", "futharkClass.js"]
             ++ cmdCFLAGS cflags_def
-            ++ ["-s", "EXPORTED_FUNCTIONS=" ++ 
-              intercalate "," ("'malloc'":expfuns) ++
+            ++ ["-s", "EXPORTED_FUNCTIONS=[" ++ 
+              intercalate "," ("'_malloc'":expfuns) ++
               "]"]
             ++ ["-s", "EXTRA_EXPORTED_RUNTIME_METHODS=['cwrap', 'getValue']"]
 
