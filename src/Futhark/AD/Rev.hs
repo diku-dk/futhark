@@ -461,14 +461,14 @@ diffMap pat_adj w map_lam as = do
     mapM (newParam "map_adj_p" . rowType <=< lookupType) pat_adj
   map_lam' <- renameLambda map_lam
 
-  let free_in_map_lam = namesToList $ freeIn map_lam'
+  let free = namesToList $ freeIn map_lam'
 
-  accAdjoints (nubOrd (free_in_map_lam <> as)) $ do
+  accAdjoints free $ \free_adjs -> do
+    free_adjs_ts <- mapM lookupType free_adjs
+    free_adjs_params <- mapM (newParam "free_adj_p") free_adjs_ts
     let lam_rev_params =
-          lambdaParams map_lam' ++ pat_adj_params
-        adjs_for =
-          map paramName (lambdaParams map_lam')
-            ++ free_in_map_lam
+          lambdaParams map_lam' ++ pat_adj_params ++ free_adjs_params
+        adjs_for = map paramName (lambdaParams map_lam') ++ free
 
     lam_rev <-
       mkLambda lam_rev_params $
@@ -477,10 +477,11 @@ diffMap pat_adj w map_lam as = do
 
     (param_contribs, free_contribs) <-
       fmap (splitAt (length (lambdaParams map_lam'))) $
-        letTupExp "map_adjs" $ Op $ Screma w (as ++ pat_adj) (mapSOAC lam_rev)
+        letTupExp "map_adjs" . Op $
+          Screma w (as ++ pat_adj ++ free_adjs) (mapSOAC lam_rev)
 
     zipWithM_ updateAdj as param_contribs
-    zipWithM_ freeContrib free_in_map_lam free_contribs
+    zipWithM_ freeContrib free free_contribs
   where
     addIdxParams n lam = do
       idxs <- replicateM n $ newParam "idx" $ Prim int64
@@ -523,7 +524,7 @@ diffMap pat_adj w map_lam as = do
         fmap (splitAt (length acc_free)) $
           withAcc (map snd acc_free) $ \accs -> do
             zipWithM_ insAdj (map fst acc_free) accs
-            () <- m
+            () <- m accs
             acc_free_adj <- mapM (lookupAdj . fst) acc_free
             nonacc_free_adj <- mapM lookupAdj nonacc_free
             pure $ map Var $ acc_free_adj <> nonacc_free_adj
