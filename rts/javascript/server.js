@@ -3,6 +3,7 @@
 class Server {
   constructor(ctx) {
     this.ctx = ctx;
+    this._vars = {};
   }
 
   _get_arg(args, i) {
@@ -25,7 +26,7 @@ class Server {
 
 
   _check_var(vname) {
-    if (!this._vars.includes(vname)) {
+    if (vname in this._vars) {
       throw 'Unknown variable: ' + vname;
     }
   }
@@ -132,7 +133,7 @@ class Server {
     var args = args.slice(1);
     
     // Reading from file is part of values.js
-    var reader = ReaderInput(fname);
+    var reader = new Reader(fname);
     while (args != []) {
       var vname = args[0];
       var typename = args[1];
@@ -148,6 +149,10 @@ class Server {
         err_msg = "Failed to restore variable " + vname + ".\nPossibly malformed data in " + fname + ".\n";
         throw "Failed to restore variable " + err_msg;
       }
+    }
+    skip_spaces(reader);
+    if (reader.get_buff() == "") {
+      throw "Expected EOF after reading values";
     }
   }
 
