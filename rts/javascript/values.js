@@ -169,11 +169,7 @@ class Reader {
     binToStringArray(this.buff.slice(num_dim * 8, num_dim * 8 + dbytes * length), u8_data);
     var data  = new (typToType[typ])(u8_data.buffer);
     var tmp_buff = this.buff.slice(num_dim * 8, num_dim * 8 + dbytes * length);
-    console.log("testing array buff change");
-    console.log(this.buff);
     this.buff = this.buff.slice(num_dim * 8 + dbytes * length);
-    console.log(this.buff);
-    console.log("end of arr buff test");
     // TODO figure out what to return
     // Pair with (shape, data)
     // A class?
@@ -185,25 +181,24 @@ class Reader {
     var u8_array = new Uint8Array(size);
     binToStringArray(this.buff, u8_array);
     var array = new (typToType[typ])(u8_array.buffer);
-    console.log("testing scalar buff change");
-    console.log(this.buff);
     this.buff = this.buff.slice(u8_array.length); // Update buff to be unread part of the string
-    console.log(this.buff);
     return array[0];
+  }
+
+  skip_spaces() {
+    while (this.buff.slice(0, 1).toString().trim() == "") {
+      this.buff = this.buff.slice(1);
+    }
   }
 
   read_binary() {
     // Skip leading white space
-    console.log("Made it here");
-    console.log(this.buff);
     while (this.buff.slice(0, 1).toString().trim() == "") {
       this.buff = this.buff.slice(1);
     }
-    console.log("Made it here1");
     if (this.buff[0] != 'b'.charCodeAt(0)) {
       throw "Not in binary format"
     }
-    console.log("Made it here1");
     var version = this.buff[1];
     if (version != 2) {
       throw "Not version 2";
@@ -217,8 +212,16 @@ class Reader {
       return this.read_bin_array(num_dim, typ);
     }
   }
+
+  get_buff() {
+    return this.buff;
+  }
 }
 
+// Function is redudant but is helpful for keeping consistent with python implementation
+function skip_spaces(reader) {
+  reader.skip_spaces();
+}
 
 function read_value(typename, reader) {
   // TODO include typename in implementation
@@ -226,11 +229,9 @@ function read_value(typename, reader) {
   return val;
 }
 
-
-
-var r = new Reader("data2.in");
-console.log("r is ", r);
-var val = read_value(0, r);
-console.log(val);
-var val2 = read_value(0, r);
-console.log(val2);
+//var r = new Reader("data2.in");
+//console.log("r is ", r);
+//var val = read_value(0, r);
+//console.log(val);
+//var val2 = read_value(0, r);
+//console.log(val2);
