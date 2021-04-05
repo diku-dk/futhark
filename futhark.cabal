@@ -36,6 +36,7 @@ build-type:     Simple
 extra-source-files:
     rts/c/*.h
     rts/futhark-doc/*.css
+    rts/javascript/*.js
     rts/python/*.py
     prelude/*.fut
 -- Just enough of the docs to build the manpages.
