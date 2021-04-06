@@ -231,9 +231,6 @@ compileSegScan pat lvl space scanOp kbody = do
       sFor "i" (m -1) $ \i -> do
         let xs = map paramName $ xParams scanOp
             ys = map paramName $ yParams scanOp
-        -- forM_ (zip3 xs ys tys) $ \(x, y, ty) -> do
-        --   dPrim_ x ty
-        --   dPrim_ y ty
         -- calculate global index
         globalIdx <-
           dPrimVE "gidx" $
@@ -249,7 +246,7 @@ compileSegScan pat lvl space scanOp kbody = do
             dPrim_ y ty
             copyDWIMFix x [] (Var src) [i]
             copyDWIMFix y [] (Var src) [i + 1]
-        --sUnless isNewSgm $
+
           compileStms mempty (bodyStms $ lambdaBody $ segBinOpLambda scanOp) $
             forM_ (zip privateArrays $ bodyResult $ lambdaBody $ segBinOpLambda scanOp) $ \(dest, res) ->
               copyDWIMFix dest [i + 1] res []
@@ -536,16 +533,17 @@ compileSegScan pat lvl space scanOp kbody = do
       sOp localBarrier
 
     sComment "Write block scan results to global memory" $
-      forM_ (zip (map patElemName all_pes) privateArrays) $ \(dest, src) ->
-        sFor "i" m $ \i -> do
-          flatIdx <-
-            dPrimV "flatIdx" $
-              tvExp blockOff + kernelGroupSize constants * i
-                + sExt64 (kernelLocalThreadId constants)
-          sWhen (tvExp flatIdx .<. n) $
-            let outerIdx = tvExp flatIdx `div` segment_size
-                sgmIdx = tvExp flatIdx `mod` segment_size
-            in copyDWIMFix dest [outerIdx, sgmIdx] (Var src) [i]
+      sFor "i" m $ \i -> do
+        flatIdx <-
+          dPrimV "flatIdx" $
+            tvExp blockOff + kernelGroupSize constants * i
+              + sExt64 (kernelLocalThreadId constants)
+        sWhen (tvExp flatIdx .<. n) $
+          let outerIdx = tvExp flatIdx `div` segment_size
+              sgmIdx = tvExp flatIdx `mod` segment_size
+          in
+          forM_ (zip (map patElemName all_pes) privateArrays) $ \(dest, src) ->
+            copyDWIMFix dest [outerIdx, sgmIdx] (Var src) [i]
 
     sComment "If this is the last block, reset the dynamicId" $
       sWhen (tvExp dynamicId .==. unCount num_groups - 1) $
