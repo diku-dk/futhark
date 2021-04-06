@@ -4,7 +4,7 @@
 -- entry: main1 main2
 -- no_python compiled random input { [1024][1024]f32 [1024][1024]f32 [1024][1024]f32 0.5f32 0.75f32} auto output
 
-entry main1 [n][m][q] (A: [n][q]f32) 
+entry main1 [n][m][q] (A: [n][q]f32)
 					(B: [q][m]f32)
 					(C: [n][m]f32)
 					(alpha: f32)

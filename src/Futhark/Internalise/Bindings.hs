@@ -2,7 +2,7 @@
 
 -- | Internalising bindings.
 module Futhark.Internalise.Bindings
-  ( bindingParams,
+  ( bindingFParams,
     bindingLoopParams,
     bindingLambdaParams,
     stmPattern,
@@ -11,18 +11,19 @@ where
 
 import Control.Monad.Reader hiding (mapM)
 import qualified Data.Map.Strict as M
+import Data.Maybe
 import qualified Futhark.IR.SOACS as I
 import Futhark.Internalise.Monad
 import Futhark.Internalise.TypesValues
 import Futhark.Util
 import Language.Futhark as E hiding (matchDims)
 
-bindingParams ::
+bindingFParams ::
   [E.TypeParam] ->
   [E.Pattern] ->
   ([I.FParam] -> [[I.FParam]] -> InternaliseM a) ->
   InternaliseM a
-bindingParams tparams params m = do
+bindingFParams tparams params m = do
   flattened_params <- mapM flattenPattern params
   let params_idents = concat flattened_params
   params_ts <-
@@ -33,20 +34,27 @@ bindingParams tparams params m = do
 
   let shape_params = [I.Param v $ I.Prim I.int64 | E.TypeParamDim v _ <- tparams]
       shape_subst = M.fromList [(I.paramName p, [I.Var $ I.paramName p]) | p <- shape_params]
-  bindingFlatPattern params_idents (concat params_ts) $ \valueparams ->
-    I.localScope (I.scopeOfFParams $ shape_params ++ concat valueparams) $
+  bindingFlatPattern params_idents (concat params_ts) $ \valueparams -> do
+    let (certparams, valueparams') = unzip $ map fixAccParam (concat valueparams)
+    I.localScope (I.scopeOfFParams $ catMaybes certparams ++ shape_params ++ valueparams') $
       substitutingVars shape_subst $
-        m shape_params $
-          chunks num_param_ts (concat valueparams)
+        m (catMaybes certparams ++ shape_params) $ chunks num_param_ts valueparams'
+  where
+    fixAccParam (I.Param pv (I.Acc acc ispace ts u)) =
+      ( Just (I.Param acc $ I.Prim I.Cert),
+        I.Param pv (I.Acc acc ispace ts u)
+      )
+    fixAccParam p = (Nothing, p)
 
 bindingLoopParams ::
   [E.TypeParam] ->
   E.Pattern ->
+  [I.Type] ->
   ([I.FParam] -> [I.FParam] -> InternaliseM a) ->
   InternaliseM a
-bindingLoopParams tparams pat m = do
+bindingLoopParams tparams pat ts m = do
   pat_idents <- flattenPattern pat
-  pat_ts <- internaliseLoopParamType (E.patternStructType pat)
+  pat_ts <- internaliseLoopParamType (E.patternStructType pat) ts
 
   let shape_params = [I.Param v $ I.Prim I.int64 | E.TypeParamDim v _ <- tparams]
       shape_subst = M.fromList [(I.paramName p, [I.Var $ I.paramName p]) | p <- shape_params]

@@ -69,6 +69,12 @@ transformFunDef scope fundec = do
 transformBody :: Body KernelsMem -> ExpandM (Body KernelsMem)
 transformBody (Body () stms res) = Body () <$> transformStms stms <*> pure res
 
+transformLambda :: Lambda KernelsMem -> ExpandM (Lambda KernelsMem)
+transformLambda (Lambda params body ret) =
+  Lambda params
+    <$> localScope (scopeOfLParams params) (transformBody body)
+    <*> pure ret
+
 transformStms :: Stms KernelsMem -> ExpandM (Stms KernelsMem)
 transformStms stms =
   inScopeOf stms $ mconcat <$> mapM transformStm (stmsToList stms)
@@ -104,12 +110,6 @@ transformStm (Let pat aux e) = do
         { mapOnBody = \scope -> localScope scope . transformBody
         }
 
-nameInfoConv :: NameInfo KernelsMem -> NameInfo KernelsMem
-nameInfoConv (LetName mem_info) = LetName mem_info
-nameInfoConv (FParamName mem_info) = FParamName mem_info
-nameInfoConv (LParamName mem_info) = LParamName mem_info
-nameInfoConv (IndexName it) = IndexName it
-
 transformExp :: Exp KernelsMem -> ExpandM (Stms KernelsMem, Exp KernelsMem)
 transformExp (Op (Inner (SegOp (SegMap lvl space ts kbody)))) = do
   (alloc_stms, (_, kbody')) <- transformScanRed lvl space [] kbody
@@ -143,6 +143,47 @@ transformExp (Op (Inner (SegOp (SegHist lvl space ops ts kbody)))) = do
   where
     lams = map histOp ops
     onOp op lam = op {histOp = lam}
+transformExp (WithAcc inputs lam) = do
+  lam' <- transformLambda lam
+  (input_alloc_stms, inputs') <- unzip <$> mapM onInput inputs
+  pure
+    ( mconcat input_alloc_stms,
+      WithAcc inputs' lam'
+    )
+  where
+    onInput (shape, arrs, Nothing) =
+      pure (mempty, (shape, arrs, Nothing))
+    onInput (shape, arrs, Just (op_lam, nes)) = do
+      bound_outside <- asks $ namesFromList . M.keys
+      let -- XXX: fake a SegLevel, which we don't have here.  We will not
+          -- use it for anything, as we will not allow irregular
+          -- allocations inside the update function.
+          lvl = SegThread (Count $ intConst Int64 0) (Count $ intConst Int64 0) SegNoVirt
+          (op_lam', lam_allocs) =
+            extractLambdaAllocations lvl bound_outside mempty op_lam
+          variantAlloc (_, Var v, _) = not $ v `nameIn` bound_outside
+          variantAlloc _ = False
+          (variant_allocs, invariant_allocs) = M.partition variantAlloc lam_allocs
+
+      case M.elems variant_allocs of
+        (_, v, _) : _ ->
+          throwError $
+            "Cannot handle un-sliceable allocation size: " ++ pretty v
+              ++ "\nLikely cause: irregular nested operations inside accumulator update operator."
+        [] ->
+          return ()
+
+      let num_is = shapeRank shape
+          is = map paramName $ take num_is $ lambdaParams op_lam
+      (alloc_stms, alloc_offsets) <-
+        genericExpandedInvariantAllocations (const (shape, is)) invariant_allocs
+
+      scope <- askScope
+      let scope' = scopeOf op_lam <> scope
+      either throwError pure $
+        runOffsetM scope' alloc_offsets $ do
+          op_lam'' <- offsetMemoryInLambda op_lam'
+          return (alloc_stms, (shape, arrs, Just (op_lam'', nes)))
 transformExp e =
   return (mempty, e)
 
@@ -159,8 +200,8 @@ transformScanRed lvl space ops kbody = do
       (ops', ops_allocs) = unzip $ map (extractLambdaAllocations lvl bound_outside mempty) ops
       variantAlloc (_, Var v, _) = not $ v `nameIn` bound_outside
       variantAlloc _ = False
-      allocs = kbody_allocs <> mconcat ops_allocs
-      (variant_allocs, invariant_allocs) = M.partition variantAlloc allocs
+      (variant_allocs, invariant_allocs) =
+        M.partition variantAlloc $ kbody_allocs <> mconcat ops_allocs
       badVariant (_, Var v, _) = not $ v `nameIn` bound_in_kernel
       badVariant _ = False
 
@@ -209,7 +250,7 @@ allocsForBody variant_allocs invariant_allocs lvl space kbody' m = do
       invariant_allocs
 
   scope <- askScope
-  let scope' = scopeOfSegSpace space <> M.map nameInfoConv scope
+  let scope' = scopeOfSegSpace space <> scope
   either throwError pure $
     runOffsetM scope' alloc_offsets $ do
       kbody'' <- offsetMemoryInKernelBody kbody'
@@ -224,18 +265,17 @@ memoryRequirements ::
   ExpandM (RebaseMap, Stms KernelsMem)
 memoryRequirements lvl space kstms variant_allocs invariant_allocs = do
   (num_threads, num_threads_stms) <-
-    runBinder $
-      letSubExp "num_threads" $
-        BasicOp $
-          BinOp
-            (Mul Int64 OverflowUndef)
-            (unCount $ segNumGroups lvl)
-            (unCount $ segGroupSize lvl)
+    runBinder . letSubExp "num_threads" . BasicOp $
+      BinOp
+        (Mul Int64 OverflowUndef)
+        (unCount $ segNumGroups lvl)
+        (unCount $ segGroupSize lvl)
 
   (invariant_alloc_stms, invariant_alloc_offsets) <-
     inScopeOf num_threads_stms $
       expandedInvariantAllocations
-        (num_threads, segNumGroups lvl, segGroupSize lvl)
+        num_threads
+        (segNumGroups lvl)
         space
         invariant_allocs
 
@@ -368,68 +408,57 @@ extractStmAllocations lvl bound_outside bound_kernel stm = do
       body <- onBody lvl' $ lambdaBody lam
       return lam {lambdaBody = body}
 
+genericExpandedInvariantAllocations ::
+  (SegLevel -> (Shape, [VName])) ->
+  Extraction ->
+  ExpandM (Stms KernelsMem, RebaseMap)
+genericExpandedInvariantAllocations getNumUsers invariant_allocs = do
+  -- We expand the invariant allocations by adding an inner dimension
+  -- equal to the number of kernel threads.
+  (rebases, alloc_stms) <- runBinder $ mapM expand $ M.toList invariant_allocs
+
+  return (alloc_stms, mconcat rebases)
+  where
+    expand (mem, (lvl, per_thread_size, space)) = do
+      let num_users = fst $ getNumUsers lvl
+          allocpat = Pattern [] [PatElem mem $ MemMem space]
+      total_size <-
+        letExp "total_size" <=< toExp . product $
+          pe64 per_thread_size : map pe64 (shapeDims num_users)
+      letBind allocpat $ Op $ Alloc (Var total_size) space
+      pure $ M.singleton mem $ newBase lvl
+
+    untouched d = DimSlice 0 d 1
+
+    newBase lvl@SegThread {} (old_shape, _) =
+      let (users_shape, users_id) = getNumUsers lvl
+          num_dims = length old_shape
+          perm = [num_dims .. num_dims + shapeRank users_shape -1] ++ [0 .. num_dims -1]
+          root_ixfun = IxFun.iota (old_shape ++ map pe64 (shapeDims users_shape))
+          permuted_ixfun = IxFun.permute root_ixfun perm
+          offset_ixfun =
+            IxFun.slice permuted_ixfun $
+              map (DimFix . le64) users_id ++ map untouched old_shape
+       in offset_ixfun
+    newBase lvl@SegGroup {} (old_shape, _) =
+      let (users_shape, users_id) = getNumUsers lvl
+          root_ixfun = IxFun.iota $ map pe64 (shapeDims users_shape) ++ old_shape
+          offset_ixfun =
+            IxFun.slice root_ixfun $
+              map (DimFix . le64) users_id ++ map untouched old_shape
+       in offset_ixfun
+
 expandedInvariantAllocations ::
-  ( SubExp,
-    Count NumGroups SubExp,
-    Count GroupSize SubExp
-  ) ->
+  SubExp ->
+  Count NumGroups SubExp ->
   SegSpace ->
   Extraction ->
   ExpandM (Stms KernelsMem, RebaseMap)
-expandedInvariantAllocations
-  ( num_threads,
-    Count num_groups,
-    Count group_size
-    )
-  segspace
-  invariant_allocs = do
-    -- We expand the invariant allocations by adding an inner dimension
-    -- equal to the number of kernel threads.
-    (alloc_bnds, rebases) <- unzip <$> mapM expand (M.toList invariant_allocs)
-
-    return (mconcat alloc_bnds, mconcat rebases)
-    where
-      expand (mem, (lvl, per_thread_size, space)) = do
-        total_size <- newVName "total_size"
-        let sizepat = Pattern [] [PatElem total_size $ MemPrim int64]
-            allocpat = Pattern [] [PatElem mem $ MemMem space]
-            num_users = case lvl of
-              SegThread {} -> num_threads
-              SegGroup {} -> num_groups
-        return
-          ( stmsFromList
-              [ Let sizepat (defAux ()) $
-                  BasicOp $ BinOp (Mul Int64 OverflowUndef) num_users per_thread_size,
-                Let allocpat (defAux ()) $
-                  Op $ Alloc (Var total_size) space
-              ],
-            M.singleton mem $ newBase lvl
-          )
-
-      untouched d = DimSlice 0 d 1
-
-      newBase SegThread {} (old_shape, _) =
-        let num_dims = length old_shape
-            perm = num_dims : [0 .. num_dims -1]
-            root_ixfun =
-              IxFun.iota
-                ( old_shape
-                    ++ [ pe64 num_groups * pe64 group_size
-                       ]
-                )
-            permuted_ixfun = IxFun.permute root_ixfun perm
-            offset_ixfun =
-              IxFun.slice permuted_ixfun $
-                DimFix (le64 (segFlat segspace)) :
-                map untouched old_shape
-         in offset_ixfun
-      newBase SegGroup {} (old_shape, _) =
-        let root_ixfun = IxFun.iota (pe64 num_groups : old_shape)
-            offset_ixfun =
-              IxFun.slice root_ixfun $
-                DimFix (le64 (segFlat segspace)) :
-                map untouched old_shape
-         in offset_ixfun
+expandedInvariantAllocations num_threads (Count num_groups) segspace =
+  genericExpandedInvariantAllocations getNumUsers
+  where
+    getNumUsers SegThread {} = (Shape [num_threads], [segFlat segspace])
+    getNumUsers SegGroup {} = (Shape [num_groups], [segFlat segspace])
 
 expandedVariantAllocations ::
   SubExp ->
@@ -725,6 +754,7 @@ unAllocKernelsStms = unAllocStms False
 unMem :: MemInfo d u ret -> Maybe (TypeBase (ShapeBase d) u)
 unMem (MemPrim pt) = Just $ Prim pt
 unMem (MemArray pt shape u _) = Just $ Array pt shape u
+unMem (MemAcc acc ispace ts u) = Just $ Acc acc ispace ts u
 unMem MemMem {} = Nothing
 
 unAllocScope :: Scope KernelsMem -> Scope Kernels.Kernels

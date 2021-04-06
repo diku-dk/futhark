@@ -111,6 +111,8 @@ expMetrics (If _ tb fb _) =
     inside "False" $ bodyMetrics fb
 expMetrics Apply {} =
   seen "Apply"
+expMetrics (WithAcc _ lam) =
+  inside "MkAcc" $ lambdaMetrics lam
 expMetrics (Op op) =
   opMetrics op
 
@@ -134,6 +136,7 @@ primOpMetrics Scratch {} = seen "Scratch"
 primOpMetrics Reshape {} = seen "Reshape"
 primOpMetrics Rearrange {} = seen "Rearrange"
 primOpMetrics Rotate {} = seen "Rotate"
+primOpMetrics UpdateAcc {} = seen "UpdateAcc"
 
 -- | Compute metrics for this lambda.
 lambdaMetrics :: OpMetrics (Op lore) => Lambda lore -> MetricsM ()

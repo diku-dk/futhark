@@ -1,4 +1,5 @@
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeFamilies #-}
 
 -- | It is well known that fully parallel loops can always be
@@ -12,10 +13,12 @@ module Futhark.Pass.ExtractKernels.Interchange
     interchangeLoops,
     Branch (..),
     interchangeBranch,
+    WithAccStm (..),
+    interchangeWithAcc,
   )
 where
 
-import Control.Monad.RWS.Strict
+import Control.Monad.Identity
 import Data.List (find)
 import Data.Maybe
 import Futhark.IR.SOACS
@@ -173,3 +176,104 @@ interchangeBranch nest loop = do
   (loop', bnds) <-
     runBinder $ foldM interchangeBranch1 loop $ reverse $ kernelNestLoops nest
   return $ bnds <> oneStm (branchStm loop')
+
+data WithAccStm
+  = WithAccStm [Int] Pattern [(Shape, [VName], Maybe (Lambda, [SubExp]))] Lambda
+
+withAccStm :: WithAccStm -> Stm
+withAccStm (WithAccStm _ pat inputs lam) =
+  Let pat (defAux ()) $ WithAcc inputs lam
+
+interchangeWithAcc1 ::
+  (MonadBinder m, Lore m ~ SOACS) =>
+  WithAccStm ->
+  LoopNesting ->
+  m WithAccStm
+interchangeWithAcc1
+  (WithAccStm perm _withacc_pat inputs acc_lam)
+  (MapNesting map_pat map_aux w params_and_arrs) = do
+    inputs' <- mapM onInput inputs
+    let lam_params = lambdaParams acc_lam
+    iota_p <- newParam "iota_p" $ Prim int64
+    acc_lam' <- trLam (Var (paramName iota_p)) <=< mkLambda lam_params $ do
+      iota_w <-
+        letExp "acc_inter_iota" . BasicOp $
+          Iota w (intConst Int64 0) (intConst Int64 1) Int64
+      let (params, arrs) = unzip params_and_arrs
+          maplam_ret = lambdaReturnType acc_lam
+          maplam = Lambda (iota_p : params) (lambdaBody acc_lam) maplam_ret
+      auxing map_aux . letTupExp' "withacc_inter" $
+        Op $ Screma w (iota_w : arrs) (mapSOAC maplam)
+    let pat = Pattern [] $ rearrangeShape perm $ patternValueElements map_pat
+        perm' = [0 .. patternSize pat -1]
+    pure $ WithAccStm perm' pat inputs' acc_lam'
+    where
+      num_accs = length inputs
+      acc_certs = map paramName $ take num_accs $ lambdaParams acc_lam
+      onArr v =
+        pure . maybe v snd $
+          find ((== v) . paramName . fst) params_and_arrs
+      onInput (shape, arrs, op) =
+        (Shape [w] <> shape,,) <$> mapM onArr arrs <*> traverse onOp op
+
+      onOp (op_lam, nes) = do
+        -- We need to add an additional index parameter because we are
+        -- extending the index space of the accumulator.
+        idx_p <- newParam "idx" $ Prim int64
+        pure (op_lam {lambdaParams = idx_p : lambdaParams op_lam}, nes)
+
+      trType :: TypeBase shape u -> TypeBase shape u
+      trType (Acc acc ispace ts u)
+        | acc `elem` acc_certs =
+          Acc acc (Shape [w] <> ispace) ts u
+      trType t = t
+
+      trParam :: Param (TypeBase shape u) -> Param (TypeBase shape u)
+      trParam = fmap trType
+
+      trLam i (Lambda params body ret) =
+        localScope (scopeOfLParams params) $
+          Lambda (map trParam params) <$> trBody i body <*> pure (map trType ret)
+
+      trBody i (Body dec stms res) =
+        inScopeOf stms $ Body dec <$> traverse (trStm i) stms <*> pure res
+
+      trStm i (Let pat aux e) =
+        Let (fmap trType pat) aux <$> trExp i e
+
+      trSOAC i = mapSOACM mapper
+        where
+          mapper =
+            identitySOACMapper {mapOnSOACLambda = trLam i}
+
+      trExp i (WithAcc acc_inputs lam) =
+        WithAcc acc_inputs <$> trLam i lam
+      trExp i (BasicOp (UpdateAcc acc is ses)) = do
+        acc_t <- lookupType acc
+        pure $ case acc_t of
+          Acc cert _ _ _
+            | cert `elem` acc_certs ->
+              BasicOp $ UpdateAcc acc (i : is) ses
+          _ ->
+            BasicOp $ UpdateAcc acc is ses
+      trExp i e = mapExpM mapper e
+        where
+          mapper =
+            identityMapper
+              { mapOnBody = \scope -> localScope scope . trBody i,
+                mapOnRetType = pure . trType,
+                mapOnBranchType = pure . trType,
+                mapOnFParam = pure . trParam,
+                mapOnLParam = pure . trParam,
+                mapOnOp = trSOAC i
+              }
+
+interchangeWithAcc ::
+  (MonadFreshNames m, HasScope SOACS m) =>
+  KernelNest ->
+  WithAccStm ->
+  m (Stms SOACS)
+interchangeWithAcc nest withacc = do
+  (withacc', stms) <-
+    runBinder $ foldM interchangeWithAcc1 withacc $ reverse $ kernelNestLoops nest
+  return $ stms <> oneStm (withAccStm withacc')

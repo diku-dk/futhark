@@ -37,8 +37,8 @@ where
 
 import Control.Monad
 import Control.Monad.Identity
+import Data.Bitraversable
 import Data.Foldable (traverse_)
-import qualified Data.Traversable
 import Futhark.IR.Prop.Scope
 import Futhark.IR.Prop.Types (mapOnType)
 import Futhark.IR.Syntax
@@ -123,7 +123,7 @@ mapExpM tv (BasicOp (Scratch t shape)) =
 mapExpM tv (BasicOp (Reshape shape arrexp)) =
   BasicOp
     <$> ( Reshape
-            <$> mapM (Data.Traversable.traverse (mapOnSubExp tv)) shape
+            <$> mapM (traverse (mapOnSubExp tv)) shape
             <*> mapOnVName tv arrexp
         )
 mapExpM tv (BasicOp (Rearrange perm e)) =
@@ -145,6 +145,19 @@ mapExpM tv (BasicOp (Assert e msg loc)) =
   BasicOp <$> (Assert <$> mapOnSubExp tv e <*> traverse (mapOnSubExp tv) msg <*> pure loc)
 mapExpM tv (BasicOp (Opaque e)) =
   BasicOp <$> (Opaque <$> mapOnSubExp tv e)
+mapExpM tv (BasicOp (UpdateAcc v is ses)) =
+  BasicOp
+    <$> ( UpdateAcc
+            <$> mapOnVName tv v
+            <*> mapM (mapOnSubExp tv) is
+            <*> mapM (mapOnSubExp tv) ses
+        )
+mapExpM tv (WithAcc inputs lam) =
+  WithAcc <$> mapM onInput inputs <*> mapOnLambda tv lam
+  where
+    onInput (shape, vs, op) =
+      (,,) <$> mapOnShape tv shape <*> mapM (mapOnVName tv) vs
+        <*> traverse (bitraverse (mapOnLambda tv) (mapM (mapOnSubExp tv))) op
 mapExpM tv (DoLoop ctxmerge valmerge form loopbody) = do
   ctxparams' <- mapM (mapOnFParam tv) ctxparams
   valparams' <- mapM (mapOnFParam tv) valparams
@@ -176,6 +189,17 @@ mapOnLoopForm tv (ForLoop i it bound loop_vars) =
     (loop_lparams, loop_arrs) = unzip loop_vars
 mapOnLoopForm tv (WhileLoop cond) =
   WhileLoop <$> mapOnVName tv cond
+
+mapOnLambda ::
+  Monad m =>
+  Mapper flore tlore m ->
+  Lambda flore ->
+  m (Lambda tlore)
+mapOnLambda tv (Lambda params body ret) = do
+  params' <- mapM (mapOnLParam tv) params
+  Lambda params'
+    <$> mapOnBody tv (scopeOfLParams params') body
+    <*> mapM (mapOnType (mapOnSubExp tv)) ret
 
 -- | Like 'mapExpM', but in the 'Identity' monad.
 mapExp :: Mapper flore tlore Identity -> Exp flore -> Exp tlore
@@ -214,6 +238,10 @@ walkOnShape tv (Shape ds) = mapM_ (walkOnSubExp tv) ds
 
 walkOnType :: Monad m => Walker lore m -> Type -> m ()
 walkOnType _ Prim {} = return ()
+walkOnType tv (Acc acc ispace ts _) = do
+  walkOnVName tv acc
+  traverse_ (walkOnSubExp tv) ispace
+  mapM_ (walkOnType tv) ts
 walkOnType _ Mem {} = return ()
 walkOnType tv (Array _ shape _) = walkOnShape tv shape
 
@@ -226,6 +254,12 @@ walkOnLoopForm tv (ForLoop i _ bound loop_vars) =
     (loop_lparams, loop_arrs) = unzip loop_vars
 walkOnLoopForm tv (WhileLoop cond) =
   walkOnVName tv cond
+
+walkOnLambda :: Monad m => Walker lore m -> Lambda lore -> m ()
+walkOnLambda tv (Lambda params body ret) = do
+  mapM_ (walkOnLParam tv) params
+  walkOnBody tv (scopeOfLParams params) body
+  mapM_ (walkOnType tv) ret
 
 -- | As 'mapExpM', but do not construct a result AST.
 walkExpM :: Monad m => Walker lore m -> Exp lore -> m ()
@@ -276,6 +310,16 @@ walkExpM tv (BasicOp (Assert e msg _)) =
   walkOnSubExp tv e >> traverse_ (walkOnSubExp tv) msg
 walkExpM tv (BasicOp (Opaque e)) =
   walkOnSubExp tv e
+walkExpM tv (BasicOp (UpdateAcc v is ses)) = do
+  walkOnVName tv v
+  mapM_ (walkOnSubExp tv) is
+  mapM_ (walkOnSubExp tv) ses
+walkExpM tv (WithAcc inputs lam) = do
+  forM_ inputs $ \(shape, vs, op) -> do
+    walkOnShape tv shape
+    mapM_ (walkOnVName tv) vs
+    traverse_ (bitraverse (walkOnLambda tv) (mapM (walkOnSubExp tv))) op
+  walkOnLambda tv lam
 walkExpM tv (DoLoop ctxmerge valmerge form loopbody) = do
   mapM_ (walkOnFParam tv) ctxparams
   mapM_ (walkOnFParam tv) valparams

@@ -32,7 +32,7 @@ internaliseUniqueness :: E.Uniqueness -> I.Uniqueness
 internaliseUniqueness E.Nonunique = I.Nonunique
 internaliseUniqueness E.Unique = I.Unique
 
-type TypeState = Int
+newtype TypeState = TypeState {typeCounter :: Int}
 
 newtype InternaliseTypeM a
   = InternaliseTypeM (StateT TypeState InternaliseM a)
@@ -45,7 +45,7 @@ runInternaliseTypeM ::
   InternaliseTypeM a ->
   InternaliseM a
 runInternaliseTypeM (InternaliseTypeM m) =
-  evalStateT m 0
+  evalStateT m $ TypeState 0
 
 internaliseParamTypes ::
   [E.TypeBase (E.DimDecl VName) ()] ->
@@ -56,22 +56,35 @@ internaliseParamTypes ts =
     onType = fromMaybe bad . hasStaticShape
     bad = error $ "internaliseParamTypes: " ++ pretty ts
 
+-- We need to fix up the arrays for any Acc return values or loop
+-- parameters.  We look at the concrete types for this, since the Acc
+-- parameter name in the second list will just be something we made up.
+fixupTypes :: [TypeBase shape1 u1] -> [TypeBase shape2 u2] -> [TypeBase shape2 u2]
+fixupTypes = zipWith fixup
+  where
+    fixup (Acc acc ispace ts _) (Acc _ _ _ u2) = Acc acc ispace ts u2
+    fixup _ t = t
+
 internaliseLoopParamType ::
   E.TypeBase (E.DimDecl VName) () ->
+  [TypeBase shape u] ->
   InternaliseM [I.TypeBase Shape Uniqueness]
-internaliseLoopParamType et =
-  concat <$> internaliseParamTypes [et]
+internaliseLoopParamType et ts =
+  fixupTypes ts . concat <$> internaliseParamTypes [et]
 
 internaliseReturnType ::
   E.TypeBase (E.DimDecl VName) () ->
+  [TypeBase shape u] ->
   InternaliseM [I.TypeBase ExtShape Uniqueness]
-internaliseReturnType et =
-  runInternaliseTypeM (internaliseTypeM et)
+internaliseReturnType et ts =
+  fixupTypes ts <$> runInternaliseTypeM (internaliseTypeM et)
 
 internaliseLambdaReturnType ::
   E.TypeBase (E.DimDecl VName) () ->
+  [TypeBase shape u] ->
   InternaliseM [I.TypeBase Shape NoUniqueness]
-internaliseLambdaReturnType = fmap (map fromDecl) . internaliseLoopParamType
+internaliseLambdaReturnType et ts =
+  map fromDecl <$> internaliseLoopParamType et ts
 
 -- | As 'internaliseReturnType', but returns components of a top-level
 -- tuple type piecemeal.
@@ -79,11 +92,10 @@ internaliseEntryReturnType ::
   E.TypeBase (E.DimDecl VName) () ->
   InternaliseM [[I.TypeBase ExtShape Uniqueness]]
 internaliseEntryReturnType et =
-  runInternaliseTypeM $
-    mapM internaliseTypeM $
-      case E.isTupleRecord et of
-        Just ets | not $ null ets -> ets
-        _ -> [et]
+  runInternaliseTypeM . mapM internaliseTypeM $
+    case E.isTupleRecord et of
+      Just ets | not $ null ets -> ets
+      _ -> [et]
 
 internaliseType ::
   E.TypeBase (E.DimDecl VName) () ->
@@ -92,8 +104,8 @@ internaliseType = runInternaliseTypeM . internaliseTypeM
 
 newId :: InternaliseTypeM Int
 newId = do
-  i <- get
-  put $ i + 1
+  i <- gets typeCounter
+  modify $ \s -> s {typeCounter = i + 1}
   return i
 
 internaliseDim ::
@@ -128,6 +140,13 @@ internaliseTypeM orig_t =
       | null ets -> return [I.Prim I.Bool]
       | otherwise ->
         concat <$> mapM (internaliseTypeM . snd) (E.sortFields ets)
+    E.Scalar (E.TypeVar _ u tn [E.TypeArgType arr_t _])
+      | baseTag (E.typeLeaf tn) <= E.maxIntrinsicTag,
+        baseString (E.typeLeaf tn) == "acc" -> do
+        ts <- map (fromDecl . onAccType) <$> internaliseTypeM arr_t
+        acc_param <- liftInternaliseM $ newVName "acc_cert"
+        let acc_t = Acc acc_param (Shape [arraysSize 0 ts]) (map rowType ts) $ internaliseUniqueness u
+        return [acc_t]
     E.Scalar E.TypeVar {} ->
       error "internaliseTypeM: cannot handle type variable."
     E.Scalar E.Arrow {} ->
@@ -139,6 +158,9 @@ internaliseTypeM orig_t =
       return $ I.Prim (I.IntType I.Int8) : ts
   where
     internaliseShape = mapM internaliseDim . E.shapeDims
+
+    onAccType = fromMaybe bad . hasStaticShape
+    bad = error $ "internaliseTypeM Acc: " ++ pretty orig_t
 
 internaliseConstructors ::
   M.Map Name [I.TypeBase ExtShape Uniqueness] ->

@@ -19,17 +19,23 @@ import Futhark.Internalise.Monad
 import Futhark.Util (takeLast)
 
 shapeMapping ::
-  HasScope SOACS m =>
+  (HasScope SOACS m, Monad m) =>
   [FParam] ->
   [Type] ->
   m (M.Map VName SubExp)
 shapeMapping all_params value_arg_types =
-  mconcat <$> zipWithM f value_params value_arg_types
+  mconcat <$> zipWithM f (map paramType value_params) value_arg_types
   where
     value_params = takeLast (length value_arg_types) all_params
 
-    f (Param _ t1@Array {}) t2@Array {} =
+    f t1@Array {} t2@Array {} =
       pure $ M.fromList $ mapMaybe match $ zip (arrayDims t1) (arrayDims t2)
+    f (Acc acc1 ispace1 ts1 _) (Acc acc2 ispace2 ts2 _) = do
+      let ispace_m =
+            M.fromList . mapMaybe match $
+              zip (shapeDims ispace1) (shapeDims ispace2)
+      arr_sizes_m <- mconcat <$> zipWithM f ts1 ts2
+      pure $ M.singleton acc1 (Var acc2) <> ispace_m <> arr_sizes_m
     f _ _ =
       pure mempty
 

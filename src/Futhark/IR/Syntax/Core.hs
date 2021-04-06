@@ -191,10 +191,18 @@ type SpaceId = String
 data NoUniqueness = NoUniqueness
   deriving (Eq, Ord, Show)
 
--- | A Futhark type is either an array or an element type.  When
--- comparing types for equality with '==', shapes must match.
+instance Semigroup NoUniqueness where
+  NoUniqueness <> NoUniqueness = NoUniqueness
+
+instance Monoid NoUniqueness where
+  mempty = NoUniqueness
+
+-- | The type of a value.  When comparing types for equality with
+-- '==', shapes must match.
 data TypeBase shape u
   = Prim PrimType
+  | -- | Token, index space, element type, and uniqueness.
+    Acc VName Shape [Type] u
   | Array PrimType shape u
   | Mem Space
   deriving (Show, Eq, Ord)
@@ -202,6 +210,7 @@ data TypeBase shape u
 instance Bitraversable TypeBase where
   bitraverse f g (Array t shape u) = Array t <$> f shape <*> g u
   bitraverse _ _ (Prim pt) = pure $ Prim pt
+  bitraverse _ g (Acc arrs ispace ts u) = Acc arrs ispace ts <$> g u
   bitraverse _ _ (Mem s) = pure $ Mem s
 
 instance Bifunctor TypeBase where

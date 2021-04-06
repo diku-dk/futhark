@@ -1,5 +1,6 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeFamilies #-}
 
 module Futhark.Pass.ExtractMulticore (extractMulticore) where
@@ -7,6 +8,7 @@ module Futhark.Pass.ExtractMulticore (extractMulticore) where
 import Control.Monad.Identity
 import Control.Monad.Reader
 import Control.Monad.State
+import Data.Bitraversable
 import Futhark.Analysis.Rephrase
 import Futhark.IR
 import Futhark.IR.MC
@@ -46,8 +48,10 @@ instance MonadLogger ExtractM where
 
 indexArray :: VName -> LParam SOACS -> VName -> Stm MC
 indexArray i (Param p t) arr =
-  Let (Pattern [] [PatElem p t]) (defAux ()) $
-    BasicOp $ Index arr $ DimFix (Var i) : map sliceDim (arrayDims t)
+  Let (Pattern [] [PatElem p t]) (defAux ()) . BasicOp $
+    case t of
+      Acc {} -> SubExp $ Var arr
+      _ -> Index arr $ DimFix (Var i) : map sliceDim (arrayDims t)
 
 mapLambdaToBody ::
   (Body SOACS -> ExtractM (Body MC)) ->
@@ -117,6 +121,12 @@ transformStm (Let pat aux (DoLoop ctx val form body)) = do
 transformStm (Let pat aux (If cond tbranch fbranch ret)) =
   oneStm . Let pat aux
     <$> (If cond <$> transformBody tbranch <*> transformBody fbranch <*> pure ret)
+transformStm (Let pat aux (WithAcc inputs lam)) =
+  oneStm . Let pat aux
+    <$> (WithAcc <$> mapM transformInput inputs <*> transformLambda lam)
+  where
+    transformInput (shape, arrs, op) =
+      (shape,arrs,) <$> traverse (bitraverse transformLambda pure) op
 transformStm (Let pat aux (Op op)) =
   fmap (certify (stmAuxCerts aux)) <$> transformSOAC pat (stmAuxAttrs aux) op
 
