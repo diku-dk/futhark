@@ -1,9 +1,22 @@
 // Start of server.js
 
 class Server {
+
+    
   constructor(ctx) {
     this.ctx = ctx;
     this._vars = {};
+    this._commands = { 'inputs': _cmd_inputs,
+                'outputs': _cmd_outputs,
+                'call': _cmd_call,
+                'restore': _cmd_restore,
+                'store': _cmd_store,
+                'free': _cmd_free,
+                'clear': _cmd_dummy,
+                'pause_profiling': _cmd_dummy,
+                'unpause_profiling': _cmd_dummy,
+                'report': _cmd_dummy
+               };
   }
 
   _get_arg(args, i) {
@@ -157,18 +170,6 @@ class Server {
   }
 
 
-  _commands = { 'inputs': _cmd_inputs,
-                'outputs': _cmd_outputs,
-                'call': _cmd_call,
-                'restore': _cmd_restore,
-                'store': _cmd_store,
-                'free': _cmd_free,
-                'clear': _cmd_dummy,
-                'pause_profiling': _cmd_dummy,
-                'unpause_profiling': _cmd_dummy,
-                'report': _cmd_dummy
-               };
-    
 
 
   _process_line(line) {
@@ -180,7 +181,7 @@ class Server {
       var cmd = words[0];
       var args = words.splice(1);
       if (cmd in this._commands) {
-        self._commands[cmd](args);
+        this._commands[cmd](args);
       } else {
         throw "Unknown command: " + cmd;
       }
