@@ -66,24 +66,24 @@ instance Pretty Space where
 
 instance Pretty u => Pretty (TypeBase Shape u) where
   ppr (Prim t) = ppr t
-  ppr (Acc acc ispace ts) =
-    text "acc" <> apply [ppr acc, ppr ispace, ppTuple' ts]
+  ppr (Acc acc ispace ts u) =
+    ppr u <> text "acc" <> apply [ppr acc, ppr ispace, ppTuple' ts]
   ppr (Array et (Shape ds) u) =
     ppr u <> mconcat (map (brackets . ppr) ds) <> ppr et
   ppr (Mem s) = text "mem" <> ppr s
 
 instance Pretty u => Pretty (TypeBase ExtShape u) where
   ppr (Prim t) = ppr t
-  ppr (Acc acc ispace ts) =
-    text "acc" <> apply [ppr acc, ppr ispace, ppTuple' ts]
+  ppr (Acc acc ispace ts u) =
+    ppr u <> text "acc" <> apply [ppr acc, ppr ispace, ppTuple' ts]
   ppr (Array et (Shape ds) u) =
     ppr u <> mconcat (map (brackets . ppr) ds) <> ppr et
   ppr (Mem s) = text "mem" <> ppr s
 
 instance Pretty u => Pretty (TypeBase Rank u) where
   ppr (Prim t) = ppr t
-  ppr (Acc acc ispace ts) =
-    text "acc" <> apply [ppr acc, ppr ispace, ppTuple' ts]
+  ppr (Acc acc ispace ts u) =
+    ppr u <> text "acc" <> apply [ppr acc, ppr ispace, ppTuple' ts]
   ppr (Array et (Rank n) u) =
     ppr u <> mconcat (replicate n $ brackets mempty) <> ppr et
   ppr (Mem s) = text "mem" <> ppr s

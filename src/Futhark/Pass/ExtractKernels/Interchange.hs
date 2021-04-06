@@ -223,9 +223,9 @@ interchangeWithAcc1
         pure (op_lam {lambdaParams = idx_p : lambdaParams op_lam}, nes)
 
       trType :: TypeBase shape u -> TypeBase shape u
-      trType (Acc acc ispace ts)
+      trType (Acc acc ispace ts u)
         | acc `elem` acc_certs =
-          Acc acc (Shape [w] <> ispace) ts
+          Acc acc (Shape [w] <> ispace) ts u
       trType t = t
 
       trParam :: Param (TypeBase shape u) -> Param (TypeBase shape u)
@@ -251,7 +251,7 @@ interchangeWithAcc1
       trExp i (BasicOp (UpdateAcc acc is ses)) = do
         acc_t <- lookupType acc
         pure $ case acc_t of
-          Acc cert _ _
+          Acc cert _ _ _
             | cert `elem` acc_certs ->
               BasicOp $ UpdateAcc acc (i : is) ses
           _ ->

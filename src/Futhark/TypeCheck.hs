@@ -534,14 +534,13 @@ checkAccIdent ::
 checkAccIdent v = do
   t <- lookupType v
   case t of
-    Acc _ ispace ts ->
+    Acc _ ispace ts _ ->
       pure (ispace, ts)
     _ ->
-      bad $
-        TypeError $
-          pretty v
-            ++ " should be an accumulator but is of type "
-            ++ pretty t
+      bad . TypeError $
+        pretty v
+          ++ " should be an accumulator but is of type "
+          ++ pretty t
 
 -- | Type check a program containing arbitrary type information,
 -- yielding either a type error or a program with complete type
@@ -1100,7 +1099,7 @@ checkExp (WithAcc inputs lam) = do
       Nothing ->
         return ()
 
-    pure (Acc (paramName p) shape elem_ts, mempty)
+    pure (Acc (paramName p) shape elem_ts NoUniqueness, mempty)
 
   checkLambda lam $ replicate num_accs (Prim Cert, mempty) ++ acc_args
   where

@@ -326,7 +326,7 @@ instance HasScope SOACS (ImpM lore r op) where
       entryType (ScalarVar _ scalarEntry) =
         Prim $ entryScalarType scalarEntry
       entryType (AccVar _ (acc, ispace, ts)) =
-        Acc acc ispace ts
+        Acc acc ispace ts NoUniqueness
 
 runImpM ::
   ImpM lore r op a ->
@@ -1052,7 +1052,7 @@ memBoundToVarEntry e (MemPrim bt) =
   ScalarVar e ScalarEntry {entryScalarType = bt}
 memBoundToVarEntry e (MemMem space) =
   MemVar e $ MemEntry space
-memBoundToVarEntry e (MemAcc acc ispace ts) =
+memBoundToVarEntry e (MemAcc acc ispace ts _) =
   AccVar e (acc, ispace, ts)
 memBoundToVarEntry e (MemArray bt shape _ (ArrayIn mem ixfun)) =
   let location = MemLocation mem (shapeDims shape) $ fmap (fmap Imp.ScalarVar) ixfun

@@ -784,11 +784,12 @@ mapOnSegOpType ::
   Type ->
   m Type
 mapOnSegOpType _tv t@Prim {} = pure t
-mapOnSegOpType tv (Acc acc ispace ts) =
+mapOnSegOpType tv (Acc acc ispace ts u) =
   Acc
     <$> mapOnSegOpVName tv acc
     <*> traverse (mapOnSegOpSubExp tv) ispace
     <*> traverse (bitraverse (traverse (mapOnSegOpSubExp tv)) pure) ts
+    <*> pure u
 mapOnSegOpType tv (Array et shape u) =
   Array et <$> traverse (mapOnSegOpSubExp tv) shape <*> pure u
 mapOnSegOpType _tv (Mem s) = pure $ Mem s
