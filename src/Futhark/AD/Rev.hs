@@ -500,7 +500,7 @@ diffMap pat_adj w map_lam as = do
         forM inputs $ \(shape, arrs, _) -> do
           cert_param <- newParam "acc_cert_p" $ Prim Cert
           ts <- mapM (fmap (stripArray (shapeRank shape)) . lookupType) arrs
-          acc_param <- newParam "acc_p" $ Acc (paramName cert_param) shape ts
+          acc_param <- newParam "acc_p" $ Acc (paramName cert_param) shape ts NoUniqueness
           pure (cert_param, acc_param)
       acc_lam <-
         subAD $ mkLambda (cert_params ++ acc_params) $ m $ map paramName acc_params

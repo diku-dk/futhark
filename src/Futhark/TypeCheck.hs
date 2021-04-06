@@ -361,7 +361,7 @@ observe name = do
 consume :: Checkable lore => Names -> TypeM lore ()
 consume als = do
   scope <- askScope
-  let isArray = maybe False ((> 0) . arrayRank . typeOf) . (`M.lookup` scope)
+  let isArray = maybe False (not . primType . typeOf) . (`M.lookup` scope)
   occur [consumption $ namesFromList $ filter isArray $ namesToList als]
 
 collectOccurences :: TypeM lore a -> TypeM lore (a, Occurences)
@@ -534,14 +534,13 @@ checkAccIdent ::
 checkAccIdent v = do
   t <- lookupType v
   case t of
-    Acc _ ispace ts ->
+    Acc _ ispace ts _ ->
       pure (ispace, ts)
     _ ->
-      bad $
-        TypeError $
-          pretty v
-            ++ " should be an accumulator but is of type "
-            ++ pretty t
+      bad . TypeError $
+        pretty v
+          ++ " should be an accumulator but is of type "
+          ++ pretty t
 
 -- | Type check a program containing arbitrary type information,
 -- yielding either a type error or a program with complete type
@@ -1100,7 +1099,7 @@ checkExp (WithAcc inputs lam) = do
       Nothing ->
         return ()
 
-    pure (Acc (paramName p) shape elem_ts, mempty)
+    pure (Acc (paramName p) shape elem_ts NoUniqueness, mempty)
 
   checkLambda lam $ replicate num_accs (Prim Cert, mempty) ++ acc_args
   where
@@ -1355,10 +1354,11 @@ checkLambda (Lambda params body rettype) args = do
   let fname = nameFromString "<anonymous>"
   if length params == length args
     then do
+      -- Consumption for this is done explicitly elsewhere.
       checkFuncall
         Nothing
         (map ((`toDecl` Nonunique) . paramType) params)
-        args
+        $ map noArgAliases args
       let consumable = zip (map paramName params) (map argAliases args)
       checkFun'
         ( fname,

@@ -58,11 +58,11 @@ internaliseParamTypes ts =
 
 -- We need to fix up the arrays for any Acc return values or loop
 -- parameters.  We look at the concrete types for this, since the Acc
--- parameter name in et_ts will just be something we made up.
+-- parameter name in the second list will just be something we made up.
 fixupTypes :: [TypeBase shape1 u1] -> [TypeBase shape2 u2] -> [TypeBase shape2 u2]
 fixupTypes = zipWith fixup
   where
-    fixup (Acc acc ispace ts) _ = Acc acc ispace ts
+    fixup (Acc acc ispace ts _) (Acc _ _ _ u2) = Acc acc ispace ts u2
     fixup _ t = t
 
 internaliseLoopParamType ::
@@ -91,12 +91,11 @@ internaliseLambdaReturnType et ts =
 internaliseEntryReturnType ::
   E.TypeBase (E.DimDecl VName) () ->
   InternaliseM [[I.TypeBase ExtShape Uniqueness]]
-internaliseEntryReturnType et = do
-  runInternaliseTypeM $
-    mapM internaliseTypeM $
-      case E.isTupleRecord et of
-        Just ets | not $ null ets -> ets
-        _ -> [et]
+internaliseEntryReturnType et =
+  runInternaliseTypeM . mapM internaliseTypeM $
+    case E.isTupleRecord et of
+      Just ets | not $ null ets -> ets
+      _ -> [et]
 
 internaliseType ::
   E.TypeBase (E.DimDecl VName) () ->
@@ -141,12 +140,12 @@ internaliseTypeM orig_t =
       | null ets -> return [I.Prim I.Bool]
       | otherwise ->
         concat <$> mapM (internaliseTypeM . snd) (E.sortFields ets)
-    E.Scalar (E.TypeVar _ _ tn [E.TypeArgType arr_t _])
+    E.Scalar (E.TypeVar _ u tn [E.TypeArgType arr_t _])
       | baseTag (E.typeLeaf tn) <= E.maxIntrinsicTag,
         baseString (E.typeLeaf tn) == "acc" -> do
         ts <- map (fromDecl . onAccType) <$> internaliseTypeM arr_t
         acc_param <- liftInternaliseM $ newVName "acc_cert"
-        let acc_t = Acc acc_param (Shape [arraysSize 0 ts]) $ map rowType ts
+        let acc_t = Acc acc_param (Shape [arraysSize 0 ts]) (map rowType ts) $ internaliseUniqueness u
         return [acc_t]
     E.Scalar E.TypeVar {} ->
       error "internaliseTypeM: cannot handle type variable."

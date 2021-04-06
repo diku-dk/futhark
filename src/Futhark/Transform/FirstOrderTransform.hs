@@ -144,9 +144,9 @@ transformSOAC pat (Screma w arrs form@(ScremaForm scans reds map_lam)) = do
   mapout_params <- mapM (newParam "mapout" . flip toDecl Unique) map_arr_ts
 
   arr_ts <- mapM lookupType arrs
-  let paramForAcc (Acc c _ _) = find (f . paramType) mapout_params
+  let paramForAcc (Acc c _ _ _) = find (f . paramType) mapout_params
         where
-          f (Acc c2 _ _) = c == c2
+          f (Acc c2 _ _ _) = c == c2
           f _ = False
       paramForAcc _ = Nothing
 
@@ -227,9 +227,9 @@ transformSOAC pat (Stream w arrs _ nes lam) = do
           <$> newParam "stream_mapout" (toDecl t' Unique)
           <*> letSubExp "stream_mapout_scratch" scratch
 
-  let merge =
-        zip (map (fmap (`toDecl` Nonunique)) fold_params) nes
-          ++ mapout_merge
+  let onType t@Acc {} = t `toDecl` Unique
+      onType t = t `toDecl` Nonunique
+      merge = zip (map (fmap onType) fold_params) nes ++ mapout_merge
       merge_params = map fst merge
       mapout_params = map fst mapout_merge
 

@@ -85,7 +85,7 @@ pSlash = void $ lexeme "/"
 pAsterisk = void $ lexeme "*"
 pArrow = void $ lexeme "->"
 
-pNonArray :: Parser (TypeBase shape u)
+pNonArray :: Parser (TypeBase shape NoUniqueness)
 pNonArray =
   choice
     [ Prim <$> pPrimType,
@@ -95,6 +95,7 @@ pNonArray =
               <$> pVName <* pComma
               <*> pShape <* pComma
               <*> pTypes
+              <*> pure NoUniqueness
           )
     ]
 
@@ -881,16 +882,17 @@ pMemInfo pd pu pret =
     pArrayOrAcc = do
       u <- pu
       shape <- Shape <$> many (brackets pd)
-      choice [pArray u shape, pAcc]
+      choice [pArray u shape, pAcc u]
     pArray u shape = do
       pt <- pPrimType
       MemArray pt shape u <$> (lexeme "@" *> pret)
-    pAcc =
+    pAcc u =
       keyword "acc"
         *> parens
           ( MemAcc <$> pVName <* pComma
               <*> pShape <* pComma
               <*> pTypes
+              <*> pure u
           )
 
 pSpace :: Parser Space

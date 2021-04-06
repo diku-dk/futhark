@@ -201,8 +201,8 @@ instance Monoid NoUniqueness where
 -- '==', shapes must match.
 data TypeBase shape u
   = Prim PrimType
-  | -- | See 'ElemAcc'.
-    Acc VName Shape [Type]
+  | -- | Token, index space, element type, and uniqueness.
+    Acc VName Shape [Type] u
   | Array PrimType shape u
   | Mem Space
   deriving (Show, Eq, Ord)
@@ -210,7 +210,7 @@ data TypeBase shape u
 instance Bitraversable TypeBase where
   bitraverse f g (Array t shape u) = Array t <$> f shape <*> g u
   bitraverse _ _ (Prim pt) = pure $ Prim pt
-  bitraverse _ _ (Acc arrs ispace ts) = pure $ Acc arrs ispace ts
+  bitraverse _ g (Acc arrs ispace ts u) = Acc arrs ispace ts <$> g u
   bitraverse _ _ (Mem s) = pure $ Mem s
 
 instance Bifunctor TypeBase where

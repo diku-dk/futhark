@@ -37,9 +37,9 @@ isAcc Acc {} = True
 isAcc _ = False
 
 tanType :: TypeBase s u -> ADM (TypeBase s u)
-tanType (Acc acc ispace ts) = do
+tanType (Acc acc ispace ts u) = do
   ts_tan <- mapM tanType ts
-  return $ Acc acc ispace (ts ++ ts_tan)
+  return $ Acc acc ispace (ts ++ ts_tan) u
 tanType t = return t
 
 slocal' :: ADM a -> ADM a

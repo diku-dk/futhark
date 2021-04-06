@@ -30,11 +30,11 @@ shapeMapping all_params value_arg_types =
 
     f t1@Array {} t2@Array {} =
       pure $ M.fromList $ mapMaybe match $ zip (arrayDims t1) (arrayDims t2)
-    f (Acc acc1 ispace1 arrs1_ts) (Acc acc2 ispace2 arrs2_ts) = do
+    f (Acc acc1 ispace1 ts1 _) (Acc acc2 ispace2 ts2 _) = do
       let ispace_m =
             M.fromList . mapMaybe match $
               zip (shapeDims ispace1) (shapeDims ispace2)
-      arr_sizes_m <- mconcat <$> zipWithM f arrs1_ts arrs2_ts
+      arr_sizes_m <- mconcat <$> zipWithM f ts1 ts2
       pure $ M.singleton acc1 (Var acc2) <> ispace_m <> arr_sizes_m
     f _ _ =
       pure mempty

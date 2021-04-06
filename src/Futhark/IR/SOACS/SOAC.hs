@@ -787,7 +787,7 @@ typeCheckSOAC (Hist len ops bucket_fun imgs) = do
 typeCheckSOAC (Screma w arrs (ScremaForm scans reds map_lam)) = do
   TC.require [Prim int64] w
   arrs' <- TC.checkSOACArrayArgs w arrs
-  TC.checkLambda map_lam $ map TC.noArgAliases arrs'
+  TC.checkLambda map_lam arrs'
 
   scan_nes' <- fmap concat $
     forM scans $ \(Scan scan_lam scan_nes) -> do

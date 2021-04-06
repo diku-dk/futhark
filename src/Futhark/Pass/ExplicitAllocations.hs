@@ -367,8 +367,8 @@ allocsForPattern sizeidents validents rts hints = do
               PatElem (identName ident) $
                 MemArray bt ident_shape u $
                   ArrayIn (identName memid) ixfn
-          MemAcc acc ispace ts ->
-            return $ PatElem (identName ident) $ MemAcc acc ispace ts
+          MemAcc acc ispace ts u ->
+            return $ PatElem (identName ident) $ MemAcc acc ispace ts u
           _ -> error "Impossible case reached in allocsForPattern!"
 
   return
@@ -440,8 +440,8 @@ summaryForBindage (Prim bt) _ =
   return $ MemPrim bt
 summaryForBindage (Mem space) _ =
   return $ MemMem space
-summaryForBindage (Acc acc ispace ts) _ =
-  return $ MemAcc acc ispace ts
+summaryForBindage (Acc acc ispace ts u) _ =
+  return $ MemAcc acc ispace ts u
 summaryForBindage t@(Array pt shape u) NoHint = do
   m <- allocForArray t =<< askDefaultSpace
   return $ directIxFun pt shape u m t
@@ -500,8 +500,8 @@ allocInFParam param pspace =
       return param {paramDec = MemPrim pt}
     Mem space ->
       return param {paramDec = MemMem space}
-    Acc acc ispace ts ->
-      return param {paramDec = MemAcc acc ispace ts}
+    Acc acc ispace ts u ->
+      return param {paramDec = MemAcc acc ispace ts u}
 
 allocInMergeParams ::
   ( Allocable fromlore tolore,
@@ -739,7 +739,7 @@ memoryInDeclExtType dets = evalState (mapM addMem dets) $ startOfFreeIDRange det
         MemArray pt shape u $
           ReturnsNewBlock DefaultSpace i $
             IxFun.iota $ map convert $ shapeDims shape
-    addMem (Acc acc ispace ts) = return $ MemAcc acc ispace ts
+    addMem (Acc acc ispace ts u) = return $ MemAcc acc ispace ts u
 
     convert (Ext i) = le64 $ Ext i
     convert (Free v) = Free <$> pe64 v
@@ -943,7 +943,7 @@ allocInExp (WithAcc inputs bodylam) =
       params <- forM (lambdaParams lam) $ \(Param pv t) ->
         case t of
           Prim Cert -> pure $ Param pv $ MemPrim Cert
-          Acc acc ispace ts -> pure $ Param pv $ MemAcc acc ispace ts
+          Acc acc ispace ts u -> pure $ Param pv $ MemAcc acc ispace ts u
           _ -> error $ "Unexpected WithAcc lambda param: " ++ pretty (Param pv t)
       allocInLambda params (lambdaBody lam) (lambdaReturnType lam)
 
@@ -1083,7 +1083,7 @@ addResCtxInIfBody ifrets (Body _ bnds res) spaces substs = do
               ReturnsNewBlock space' 0 $
                 IxFun.iota $ map convert $ shapeDims shape
        in bodyret
-    inspect (Acc acc ispace ts) _ = MemAcc acc ispace ts
+    inspect (Acc acc ispace ts u) _ = MemAcc acc ispace ts u
     inspect (Prim pt) _ = MemPrim pt
     inspect (Mem space) _ = MemMem space
 
@@ -1140,8 +1140,8 @@ allocInLoopForm (ForLoop i it n loopvars) =
           return (p {paramDec = MemPrim bt}, a)
         Mem space ->
           return (p {paramDec = MemMem space}, a)
-        Acc acc ispace ts ->
-          return (p {paramDec = MemAcc acc ispace ts}, a)
+        Acc acc ispace ts u ->
+          return (p {paramDec = MemAcc acc ispace ts u}, a)
 
 class SizeSubst op where
   opSizeSubst :: PatternT dec -> op -> ChunkMap

@@ -238,7 +238,7 @@ walkOnShape tv (Shape ds) = mapM_ (walkOnSubExp tv) ds
 
 walkOnType :: Monad m => Walker lore m -> Type -> m ()
 walkOnType _ Prim {} = return ()
-walkOnType tv (Acc acc ispace ts) = do
+walkOnType tv (Acc acc ispace ts _) = do
   walkOnVName tv acc
   traverse_ (walkOnSubExp tv) ispace
   mapM_ (walkOnType tv) ts

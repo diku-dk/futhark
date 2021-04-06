@@ -312,8 +312,8 @@ instance Rename shape => Rename (TypeBase shape u) where
   rename (Array et size u) = Array <$> rename et <*> rename size <*> pure u
   rename (Prim t) = return $ Prim t
   rename (Mem space) = pure $ Mem space
-  rename (Acc acc ispace ts) =
-    Acc <$> rename acc <*> rename ispace <*> rename ts
+  rename (Acc acc ispace ts u) =
+    Acc <$> rename acc <*> rename ispace <*> rename ts <*> pure u
 
 instance Renameable lore => Rename (Lambda lore) where
   rename (Lambda params body ret) =

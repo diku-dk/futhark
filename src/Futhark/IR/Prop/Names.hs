@@ -338,7 +338,7 @@ instance FreeIn shape => FreeIn (TypeBase shape u) where
   freeIn' (Array t shape _) = freeIn' t <> freeIn' shape
   freeIn' (Mem s) = freeIn' s
   freeIn' Prim {} = mempty
-  freeIn' (Acc acc ispace ts) = freeIn' (acc, ispace, ts)
+  freeIn' (Acc acc ispace ts _) = freeIn' (acc, ispace, ts)
 
 instance FreeIn dec => FreeIn (Param dec) where
   freeIn' (Param _ dec) = freeIn' dec
