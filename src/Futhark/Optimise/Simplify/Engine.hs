@@ -4,6 +4,7 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE Strict #-}
+{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
 
@@ -384,11 +385,13 @@ makeSafe _ =
 emptyOfType :: MonadBinder m => [VName] -> Type -> m (Exp (Lore m))
 emptyOfType _ Mem {} =
   error "emptyOfType: Cannot hoist non-existential memory."
+emptyOfType _ Acc {} =
+  error "emptyOfType: Cannot hoist accumulator."
 emptyOfType _ (Prim pt) =
   return $ BasicOp $ SubExp $ Constant $ blankPrimValue pt
-emptyOfType ctx_names (Array pt shape _) = do
+emptyOfType ctx_names (Array et shape _) = do
   let dims = map zeroIfContext $ shapeDims shape
-  return $ BasicOp $ Scratch pt dims
+  return $ BasicOp $ Scratch et dims
   where
     zeroIfContext (Var v) | v `elem` ctx_names = intConst Int32 0
     zeroIfContext se = se
@@ -835,6 +838,18 @@ simplifyExp (DoLoop ctx val form loopbody) = do
 simplifyExp (Op op) = do
   (op', stms) <- simplifyOp op
   return (Op op', stms)
+simplifyExp (WithAcc inputs lam) = do
+  (inputs', inputs_stms) <- fmap unzip . forM inputs $ \(shape, arrs, op) -> do
+    (op', op_stms) <- case op of
+      Nothing ->
+        pure (Nothing, mempty)
+      Just (op_lam, nes) -> do
+        (op_lam', op_lam_stms) <- simplifyLambda op_lam
+        nes' <- simplify nes
+        return (Just (op_lam', nes'), op_lam_stms)
+    (,op_stms) <$> ((,,op') <$> simplify shape <*> simplify arrs)
+  (lam', lam_stms) <- simplifyLambda lam
+  pure (WithAcc inputs' lam', mconcat inputs_stms <> lam_stms)
 
 -- Special case for simplification of commutative BinOps where we
 -- arrange the operands in sorted order.  This can make expressions
@@ -961,10 +976,14 @@ instance Simplifiable Space where
   simplify (ScalarSpace ds t) = ScalarSpace <$> simplify ds <*> pure t
   simplify s = pure s
 
+instance Simplifiable PrimType where
+  simplify = pure
+
 instance Simplifiable shape => Simplifiable (TypeBase shape u) where
-  simplify (Array et shape u) = do
-    shape' <- simplify shape
-    return $ Array et shape' u
+  simplify (Array et shape u) =
+    Array <$> simplify et <*> simplify shape <*> pure u
+  simplify (Acc acc ispace ts u) =
+    Acc <$> simplify acc <*> simplify ispace <*> simplify ts <*> pure u
   simplify (Mem space) =
     Mem <$> simplify space
   simplify (Prim bt) =
