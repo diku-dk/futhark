@@ -136,8 +136,8 @@ javascriptWrapper entryPoints = unlines
   ptrFromWrap,
   arrWrapper,
   classDef,
-  constructor,
-  entryDic entryPoints,
+  constructor entryPoints,
+  --entryDic entryPoints,
   unlines $ concatMap (\jse -> map toFutharkArray (parameters jse)) entryPoints,
   unlines $ concatMap (\jse -> map fromFutharkArrayShape (ret jse)) entryPoints,
   --unlines $ concatMap (\jse -> map fromFutharkArrayRawValues (ret jse)) entryPoints,
@@ -146,29 +146,6 @@ javascriptWrapper entryPoints = unlines
   endClassDef]
 
 
-entryDic :: [JSEntryPoint] -> String
-entryDic jses = 
-  T.unpack
-  [text|
-    entry_points = {
-      ${entries}  
-    }
-  |]
-  where 
-    entries = T.pack $ intercalate "," $ map dicEntry jses
-
-dicEntry :: JSEntryPoint -> String
-dicEntry jse =
-  T.unpack
-  [text|
-  '${ename}' : [${params}, ${rets}]
-  |]
-  where
-    ename = T.pack $ name jse
-    params = T.pack $ show $ parameters jse
-    rets = T.pack $ show $ ret jse
-    
-  
 
 
 --TODO Figure out if this needs arguements
@@ -268,8 +245,8 @@ classDef = "class FutharkContext {"
 endClassDef :: String
 endClassDef = "}"
 
-constructor :: String
-constructor = 
+constructor :: [JSEntryPoint] -> String
+constructor jses = 
 --  unlines
 --  ["  constructor() {",
 --   "    this.cfg = futhark_context_config_new();",
@@ -280,9 +257,35 @@ constructor =
     constructor() {
       this.cfg = futhark_context_config_new();
       this.ctx = futhark_context_new(this.cfg);
+      this.entry_points = {
+        ${entries}  
+      };
     }
   |]
+  where
+    entries = T.pack $ intercalate "," $ map dicEntry jses
 
+
+--entryDic :: [JSEntryPoint] -> String
+--entryDic jses = 
+--  T.unpack
+--  [text|
+--  |]
+--  where 
+--    entries = T.pack $ intercalate "," $ map dicEntry jses
+
+dicEntry :: JSEntryPoint -> String
+dicEntry jse =
+  T.unpack
+  [text|
+  '${ename}' : [${params}, ${rets}]
+  |]
+  where
+    ename = T.pack $ name jse
+    params = T.pack $ show $ parameters jse
+    rets = T.pack $ show $ ret jse
+    
+  
 jsWrapEntryPoint :: JSEntryPoint -> String
 jsWrapEntryPoint jse =
   unlines
