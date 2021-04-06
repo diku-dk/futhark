@@ -52,6 +52,7 @@ module Futhark.CodeGen.ImpGen
     lookupVar,
     lookupArray,
     lookupMemory,
+    lookupAcc,
 
     -- * Building Blocks
     TV,
@@ -76,6 +77,7 @@ module Futhark.CodeGen.ImpGen
     copyDWIMFix,
     copyElementWise,
     typeSize,
+    inBounds,
     isMapTransposeCopy,
 
     -- * Constructing code.
@@ -218,6 +220,7 @@ data VarEntry lore
   = ArrayVar (Maybe (Exp lore)) ArrayEntry
   | ScalarVar (Maybe (Exp lore)) ScalarEntry
   | MemVar (Maybe (Exp lore)) MemEntry
+  | AccVar (Maybe (Exp lore)) (VName, Shape, [Type])
   deriving (Show)
 
 -- | When compiling an expression, this is a description of where the
@@ -281,11 +284,18 @@ data ImpState lore r op = ImpState
     stateFunctions :: Imp.Functions op,
     stateCode :: Imp.Code op,
     stateWarnings :: Warnings,
+    -- | Maps the arrays backing each accumulator to their
+    -- update function and neutral elements.  This works
+    -- because an array name can only become part of a single
+    -- accumulator throughout its lifetime.  If the arrays
+    -- backing an accumulator is not in this mapping, the
+    -- accumulator is scatter-like.
+    stateAccs :: M.Map VName ([VName], Maybe (Lambda lore, [SubExp])),
     stateNameSource :: VNameSource
   }
 
 newState :: VNameSource -> ImpState lore r op
-newState = ImpState mempty mempty mempty mempty
+newState = ImpState mempty mempty mempty mempty mempty
 
 newtype ImpM lore r op a
   = ImpM (ReaderT (Env lore r op) (State (ImpState lore r op)) a)
@@ -315,6 +325,8 @@ instance HasScope SOACS (ImpM lore r op) where
           NoUniqueness
       entryType (ScalarVar _ scalarEntry) =
         Prim $ entryScalarType scalarEntry
+      entryType (AccVar _ (acc, ispace, ts)) =
+        Acc acc ispace ts NoUniqueness
 
 runImpM ::
   ImpM lore r op a ->
@@ -356,7 +368,8 @@ subImpM r ops (ImpM m) = do
             stateFunctions = mempty,
             stateCode = mempty,
             stateNameSource = stateNameSource s,
-            stateWarnings = mempty
+            stateWarnings = mempty,
+            stateAccs = stateAccs s
           }
       (x, s'') = runState (runReaderT m env') s'
 
@@ -493,6 +506,8 @@ compileInParam fparam = case paramDec fparam of
       Right $
         ArrayDecl name bt $
           MemLocation mem (shapeDims shape) $ fmap (fmap Imp.ScalarVar) ixfun
+  MemAcc {} ->
+    error "Functions may not have accumulator parameters."
   where
     name = paramName fparam
 
@@ -587,6 +602,8 @@ compileOutParams orig_rts orig_epts = do
 
     mkParam MemMem {} _ =
       error "Functions may not explicitly return memory blocks."
+    mkParam MemAcc {} _ =
+      error "Functions may not return accumulators."
     mkParam (MemPrim t) ept = do
       out <- imp $ newVName "scalar_out"
       tell ([Imp.ScalarParam out t], mempty)
@@ -785,6 +802,18 @@ defCompileExp pat (DoLoop ctx val form body) = do
   where
     merge = ctx ++ val
     mergepat = map fst merge
+defCompileExp pat (WithAcc inputs lam) = do
+  dLParams $ lambdaParams lam
+  forM_ (zip inputs $ lambdaParams lam) $ \((_, arrs, op), p) ->
+    modify $ \s ->
+      s {stateAccs = M.insert (paramName p) (arrs, op) $ stateAccs s}
+  compileStms mempty (bodyStms $ lambdaBody lam) $ do
+    let nonacc_res = drop num_accs (bodyResult (lambdaBody lam))
+        nonacc_pat_names = takeLast (length nonacc_res) (patternNames pat)
+    forM_ (zip nonacc_pat_names nonacc_res) $ \(v, se) ->
+      copyDWIM v [] se []
+  where
+    num_accs = length inputs
 defCompileExp pat (Op op) = do
   opc <- asks envOpCompiler
   opc pat op
@@ -889,6 +918,43 @@ defCompileBasicOp _ Rotate {} =
   return ()
 defCompileBasicOp _ Reshape {} =
   return ()
+defCompileBasicOp _ (UpdateAcc acc is vs) = do
+  let is' = map toInt64Exp is
+
+  -- We need to figure out whether we are updating a scatter-like
+  -- accumulator or a generalised reduction.
+  (arrs, dims, op) <- lookupAcc acc
+
+  -- We are abusing the comment mechanism to wrap the operator in
+  -- braces when we end up generating code.  This is necessary because
+  -- we might otherwise end up declaring lambda parameters (if any) multiple
+  -- times, as they are duplicated every time we do an UpdateAcc for
+  -- the same accumulator.
+  sWhen (inBounds (map DimFix is') dims) $
+    sComment "UpdateAcc" $
+      case op of
+        Nothing ->
+          -- Scatter-like.
+          forM_ (zip arrs vs) $ \(arr, v) -> copyDWIMFix arr is' v []
+        Just (lam, _) -> do
+          -- Generalised reduction.
+          dLParams $ lambdaParams lam
+          let num_is =
+                length (lambdaParams lam) - 2 * length (lambdaReturnType lam)
+              (i_params, x_params, y_params) =
+                splitAt3 num_is (length vs) $ map paramName $ lambdaParams lam
+
+          zipWithM_ (<--) (map (`mkTV` int64) i_params) is'
+
+          forM_ (zip x_params arrs) $ \(xp, arr) ->
+            copyDWIMFix xp [] (Var arr) is'
+
+          forM_ (zip y_params vs) $ \(yp, v) ->
+            copyDWIM yp [] v []
+
+          compileStms mempty (bodyStms $ lambdaBody lam) $
+            forM_ (zip arrs (bodyResult (lambdaBody lam))) $ \(arr, se) ->
+              copyDWIMFix arr is' se []
 defCompileBasicOp pat e =
   error $
     "ImpGen.defCompileBasicOp: Invalid pattern\n  "
@@ -986,6 +1052,8 @@ memBoundToVarEntry e (MemPrim bt) =
   ScalarVar e ScalarEntry {entryScalarType = bt}
 memBoundToVarEntry e (MemMem space) =
   MemVar e $ MemEntry space
+memBoundToVarEntry e (MemAcc acc ispace ts _) =
+  AccVar e (acc, ispace, ts)
 memBoundToVarEntry e (MemArray bt shape _ (ArrayIn mem ixfun)) =
   let location = MemLocation mem (shapeDims shape) $ fmap (fmap Imp.ScalarVar) ixfun
    in ArrayVar
@@ -1018,6 +1086,8 @@ dInfo e name info = do
     ScalarVar _ entry' ->
       emit $ Imp.DeclareScalar name Imp.Nonvolatile $ entryScalarType entry'
     ArrayVar _ _ ->
+      return ()
+    AccVar {} ->
       return ()
   addVar name entry
 
@@ -1189,6 +1259,28 @@ lookupMemory name = do
     MemVar _ entry -> return entry
     _ -> error $ "Unknown memory block: " ++ pretty name
 
+lookupAcc ::
+  VName ->
+  ImpM
+    lore
+    r
+    op
+    ( [VName],
+      [Imp.TExp Int64],
+      Maybe (Lambda lore, [SubExp])
+    )
+lookupAcc name = do
+  res <- lookupVar name
+  case res of
+    AccVar _ (acc, ispace, _) -> do
+      acc' <- gets $ M.lookup acc . stateAccs
+      case acc' of
+        Just (arrs, op) ->
+          return (arrs, map toInt64Exp (shapeDims ispace), op)
+        Nothing ->
+          error $ "ImpGen.lookupAcc: unlisted accumulator: " ++ pretty name
+    _ -> error $ "ImpGen.lookupAcc: not an accumulator: " ++ pretty name
+
 destinationFromPattern :: Mem lore => Pattern lore -> ImpM lore r op Destination
 destinationFromPattern pat =
   fmap (Destination (baseTag <$> maybeHead (patternNames pat))) . mapM inspect $
@@ -1204,6 +1296,8 @@ destinationFromPattern pat =
           return $ MemoryDestination name
         ScalarVar {} ->
           return $ ScalarDestination name
+        AccVar {} ->
+          return $ ArrayDestination Nothing
 
 fullyIndexArray ::
   VName ->
@@ -1515,6 +1609,8 @@ copyDWIMDest dest dest_slice (Var src) src_slice = do
     (ArrayDestination Nothing, _) ->
       return () -- Nothing to do; something else set some memory
       -- somewhere.
+    (_, AccVar {}) ->
+      return () -- Nothing to do; accumulators are phantoms.
 
 -- | Copy from here to there; both destination and source be
 -- indexeded.  If so, they better be arrays of enough dimensions.
@@ -1536,6 +1632,9 @@ copyDWIM dest dest_slice src src_slice = do
             ArrayDestination $ Just $ MemLocation mem shape ixfun
           MemVar _ _ ->
             MemoryDestination dest
+          AccVar {} ->
+            -- Does not matter; accumulators are phantoms.
+            ArrayDestination Nothing
   copyDWIMDest dest_target dest_slice src src_slice
 
 -- | As 'copyDWIM', but implicitly 'DimFix'es the indexes.
@@ -1571,8 +1670,20 @@ compileAlloc pat _ _ =
 typeSize :: Type -> Count Bytes (Imp.TExp Int64)
 typeSize t =
   Imp.bytes $
-    isInt64 (Imp.LeafExp (Imp.SizeOf $ elemType t) int64)
-      * product (map toInt64Exp (arrayDims t))
+    elem_size * product (map toInt64Exp (arrayDims t))
+  where
+    elem_size = isInt64 $ Imp.LeafExp (Imp.SizeOf (elemType t)) int64
+
+-- | Is this indexing in-bounds for an array of the given shape?  This
+-- is useful for things like scatter, which ignores out-of-bounds
+-- writes.
+inBounds :: Slice (Imp.TExp Int64) -> [Imp.TExp Int64] -> Imp.TExp Bool
+inBounds slice dims =
+  let condInBounds (DimFix i) d =
+        0 .<=. i .&&. i .<. d
+      condInBounds (DimSlice i n s) d =
+        0 .<=. i .&&. i + n * s .<. d
+   in foldl1 (.&&.) $ zipWith condInBounds slice dims
 
 --- Building blocks for constructing code.
 

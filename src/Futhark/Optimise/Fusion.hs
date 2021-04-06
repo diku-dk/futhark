@@ -834,6 +834,9 @@ fusionGatherExp fres (If cond e_then e_else _) = do
   let both_res = then_res <> else_res
   fres' <- fusionGatherSubExp fres cond
   mergeFusionRes fres' both_res
+fusionGatherExp fres (WithAcc inps lam) = do
+  (_, fres') <- fusionGatherLam (mempty, fres) lam
+  addNamesToInfusible fres' $ freeIn inps
 
 -----------------------------------------------------------------------------------
 --- Errors: all SOACs, (because normalization ensures they appear

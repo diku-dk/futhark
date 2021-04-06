@@ -661,7 +661,7 @@ linkVarToType onDims usage bcs vn lvl tp = do
 
         arrayElemTypeWith usage bcs' tp'
 
-        when (l == Unlifted) $ do
+        when (l == Unlifted) $
           when (hasEmptyDims tp') $
             unifyError usage mempty bcs $
               "Type variable" <+> pprName vn
