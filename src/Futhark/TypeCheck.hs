@@ -361,7 +361,7 @@ observe name = do
 consume :: Checkable lore => Names -> TypeM lore ()
 consume als = do
   scope <- askScope
-  let isArray = maybe False ((> 0) . arrayRank . typeOf) . (`M.lookup` scope)
+  let isArray = maybe False (not . primType . typeOf) . (`M.lookup` scope)
   occur [consumption $ namesFromList $ filter isArray $ namesToList als]
 
 collectOccurences :: TypeM lore a -> TypeM lore (a, Occurences)
@@ -1355,10 +1355,11 @@ checkLambda (Lambda params body rettype) args = do
   let fname = nameFromString "<anonymous>"
   if length params == length args
     then do
+      -- Consumption for this is done explicitly elsewhere.
       checkFuncall
         Nothing
         (map ((`toDecl` Nonunique) . paramType) params)
-        args
+        $ map noArgAliases args
       let consumable = zip (map paramName params) (map argAliases args)
       checkFun'
         ( fname,

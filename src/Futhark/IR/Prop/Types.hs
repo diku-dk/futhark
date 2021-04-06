@@ -128,6 +128,7 @@ existential = any ext . shapeDims . arrayShape
 -- | Return the uniqueness of a type.
 uniqueness :: TypeBase shape Uniqueness -> Uniqueness
 uniqueness (Array _ _ u) = u
+uniqueness Acc {} = Unique
 uniqueness _ = Nonunique
 
 -- | @unique t@ is 'True' if the type of the argument is unique.
@@ -282,9 +283,8 @@ rowType = stripArray 1
 
 -- | A type is a primitive type if it is not an array or memory block.
 primType :: TypeBase shape u -> Bool
-primType Array {} = False
-primType Mem {} = False
-primType _ = True
+primType Prim {} = True
+primType _ = False
 
 -- | Returns the bottommost type of an array.  For @[][]i32@, this
 -- would be @i32@.  If the given type is not an array, it is returned.
