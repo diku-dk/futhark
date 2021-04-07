@@ -24,7 +24,7 @@ compileSegStencil ::
 compileSegStencil =
   --compileGlobalReadFlat
   --compileBigTile tile_loader_cube
-  compileBigTile tile_loader_flat
+  compileBigTileSingleDim tile_loader_flat
 
 -- the provided one has a ton of common subexpressions so a new one was made
 -- !!!! It does however need the span of the inner dimensions, so use
@@ -68,7 +68,7 @@ propagateConst name = mapM (dPrimVEC name)
 createSpans :: Num a => [a] -> [a]
 createSpans = scanr1 (*) . tail
 
-sForUnflat ::
+{-sForUnflat ::
   TPrimExp Int64 Imp.ExpLeaf
   -> [TPrimExp Int64 Imp.ExpLeaf]
   -> TV Int64
@@ -78,7 +78,7 @@ sForUnflat ::
   -> ImpM lore r op ()
 sForUnflat num_iterations sizes_exp start_flat added_flat loop_tail m = do
   sizes <- propagateConst "size" sizes_exp
-  size_span <- propagateConst "size_span" $ createSpans sizes_exp
+  size_span <- propagateConst "size_span" $ createSpans sizes
   iterations <- dPrimVEC "iterations" num_iterations
   starts <- unflattenIx "start" size_span . sExt64 . tvExp $ start_flat
   adds <- unflattenIx "added" size_span . sExt64 $ added_flat
@@ -121,6 +121,7 @@ virtualiseGroupsHigherDim _ _ grid_sizes_exp m = do
   gid <- sExt64 . Imp.vi32 . kernelGroupIdVar . kernelConstants <$> askEnv
   gids <- unflattenIx "group_id" (createSpans grid_sizes_exp) gid
   m . map tvExp $ gids
+-}
 
 compileGlobalReadFlat ::
   Pattern KernelsMem ->
@@ -197,9 +198,9 @@ type BigTileLoaderT lore r op =
   -> ([Imp.TExp Int64] -> [Imp.TExp Int64])
   -> [VName]
   -> [VName]
-  -> [Imp.TExp Int64]
-  -> [Imp.TExp Int64]
-  -> ([Imp.TExp Int64], Imp.TExp Int64)
+  -> [Imp.TExp Int32]
+  -> [Imp.TExp Int32]
+  -> ([Imp.TExp Int32], Imp.TExp Int32)
   -> ImpM lore r op ()
 
 load_tuple_srcs_to_tiles ::
@@ -212,15 +213,6 @@ load_tuple_srcs_to_tiles tiles srcs flat_local read_gids = do
   forM_ (zip tiles srcs) $ \(tile, input_arr) -> do
     copyDWIMFix tile [flat_local] (Var input_arr) read_gids
 
-tile_loader_cube :: BigTileLoader
-tile_loader_cube readSet_offsets bound_ixs tiles srcs shared_sizes group_sizes (local_ids, _) = do
-  readSet_iters <- mapM (dPrimV "readSet_iters") $ zipWith divUp shared_sizes group_sizes
-  sLoopNest (Shape $ map (Var . tvVar) readSet_iters) $ \ix_list -> do
-    tile_locals <- mapM (dPrimVE "tile_local") $ zipWith (+) local_ids $ zipWith (*) ix_list group_sizes
-    read_gids <- mapM (dPrimVE "read_gid") $ bound_ixs $ zipWith (+) readSet_offsets tile_locals
-    flat_local <- dPrimVE "tile_local_flat" $ flattenIx shared_sizes tile_locals
-    sWhen (foldl1 (.&&.) (zipWith (.<.) tile_locals shared_sizes)) $ do
-      load_tuple_srcs_to_tiles tiles srcs flat_local read_gids
 
 tile_loader_flat :: BigTileLoader
 tile_loader_flat readSet_offsets bound_ixs tiles srcs shared_sizes group_sizes (_, local_id_flat) = do
@@ -231,11 +223,14 @@ tile_loader_flat readSet_offsets bound_ixs tiles srcs shared_sizes group_sizes (
   sFor "i" flatIters $ \i -> do
     tile_ix_flat <- dPrimVEC "tile_ix_flat" $ (i * group_size_flat) + local_id_flat
     tile_idxs <- map tvExp <$> unflattenIx "tile_ix" shared_spans tile_ix_flat
-    read_gids <- propagateConst "read_gid" $ bound_ixs $ zipWith (+) readSet_offsets tile_idxs
+    read_gids <- propagateConst "read_gid" $ bound_ixs $ zipWith (+) readSet_offsets (map sExt64 tile_idxs)
     sWhen (tile_ix_flat .<. shared_size_flat) $ do
-      load_tuple_srcs_to_tiles tiles srcs tile_ix_flat read_gids
+      load_tuple_srcs_to_tiles tiles srcs (sExt64 tile_ix_flat) read_gids
 
-compileBigTile ::
+
+
+-- Still need to find a way to choose the maximum possible block size.
+compileBigTileSingleDim ::
   BigTileLoader ->
   Pattern KernelsMem ->
   SegLevel ->
@@ -243,10 +238,10 @@ compileBigTile ::
   StencilOp KernelsMem ->
   KernelBody KernelsMem ->
   CallKernelGen ()
-compileBigTile loader pat lvl space op kbody = do
-  let num_groups' = toInt64Exp <$> segNumGroups lvl
-      group_size_flat_c = toInt64Exp <$> segGroupSize lvl
-      group_size_flat_exp = unCount group_size_flat_c
+compileBigTileSingleDim loader pat lvl space op kbody = do
+  let group_size_flat_c = toInt64Exp <$> segGroupSize lvl
+      group_size_flat_exp = sExt32 $ unCount group_size_flat_c
+      group_sizes_exp :: [TPrimExp Int32 Imp.ExpLeaf]
       group_sizes_exp =
         case length dims of
           1 -> [group_size_flat_exp]
@@ -255,6 +250,9 @@ compileBigTile loader pat lvl space op kbody = do
           _ -> error "not valid dimensions"
       (is, dims') = unzip $ unSegSpace space
       dims = map toInt64Exp dims'
+      -- It is possible to use int32, since a value larger than a maximum int32 would surely make the program
+      -- run out of shared memory
+      stencil_ixss :: [[TPrimExp Int32 Imp.ExpLeaf]]
       stencil_ixss = map (map fromInteger) $ stencilIndexes op
       invarElems = map kernelResultSubExp $ kernelBodyResult kbody
       lam = stencilOp op
@@ -262,32 +260,37 @@ compileBigTile loader pat lvl space op kbody = do
       lamPar = lambdaParams lam
       (invariantParams, variantParams) =
         splitAt (length invarElems) lamPar
+      a_mins :: [TPrimExp Int32 Imp.ExpLeaf]
       a_mins = map (fromInteger . (\x -> if x > 0 then error "invalid axis min" else x) . minimum) $ stencilIndexes op
+      a_maxs :: [TPrimExp Int32 Imp.ExpLeaf]
       a_maxs = map (fromInteger . (\x -> if x < 0 then error "invalid axis max" else x) . maximum) $ stencilIndexes op
       n_point_stencil = length $ head stencil_ixss
       lamParTypes = map (elemType . paramType . head) $ chunksOf n_point_stencil variantParams
-
-      grid_sizes_exp = zipWith divUp dims group_sizes_exp
+      grid_sizes_exp = map sExt64 $ zipWith divUp dims (map sExt64 group_sizes_exp)
       shared_sizes_exp = zipWith (+) group_sizes_exp $ zipWith (-) a_maxs a_mins
-      virt_num_groups = sExt32 $ product grid_sizes_exp
+      virt_num_groups = product grid_sizes_exp
   case lvl of
     SegThread {} -> do
       emit $ Imp.DebugPrint "\n# SegStencil" Nothing
 
+      --group_size_flat <- dPrim "group_size_flat" int32
+      --sOp $ Imp.GetSizeMax (tvVar group_size_flat) Imp.SizeGroup
+      
       -- host side variables
+      sizes <- propagateConst "size" grid_sizes_exp
+      size_span <- propagateConst "size_span" $ createSpans sizes
       virt_num_groups_var <- dPrimVEC "virt_num_groups" virt_num_groups
       tile_len_flat <- dPrimV "sh_flat_len" $ product shared_sizes_exp
       max_idxs <- mapM (dPrimVEC "max_idx" . (+ (-1))) dims
-      num_launched_groups <- dPrimVEC "num lauched groups" $ unCount num_groups'
 
-      sKernelThread "segstencil" (Count num_launched_groups) group_size_flat_c (segFlat space) $ do
+      sKernelThread "segstencil" (Count virt_num_groups_var) group_size_flat_c (segFlat space) $ do
         -- device side variables that are independent of group id
         tiles <- forM lamParTypes $ \ptype -> sAllocArray "tile" ptype (Shape [Var $ tvVar tile_len_flat]) (Space "local")
         constants <- kernelConstants <$> askEnv
         shared_sizes <- propagateConst "shared_size_outer" shared_sizes_exp
         group_sizes <- propagateConst "group_size" group_sizes_exp
         group_spans <- propagateConst "group_span" $ createSpans group_sizes
-        local_id_flat <- dPrimVEC "local_id_flat" . sExt64 . kernelLocalThreadId $ constants
+        local_id_flat <- dPrimVEC "local_id_flat" . kernelLocalThreadId $ constants
         local_ids <- map tvExp <$> unflattenIx "local_id" group_spans local_id_flat
         local_id_sh_flat <- dPrimVEC "local_id_sh_flat" $ flattenIx shared_sizes local_ids
 
@@ -296,43 +299,46 @@ compileBigTile loader pat lvl space op kbody = do
             variant_params_tuples = transpose $ chunksOf n_point_stencil variantParams
             bound_idxs = zipWith sMin64 max_idxs . map (sMax64 0)
 
-        virtualiseGroupsHigherDim (segVirt lvl) virt_num_groups_var grid_sizes_exp $ \group_ids_exp -> do
-          group_ids <- propagateConst "group_id" group_ids_exp
 
-          -- create writeSet offSets
-          writeSet_offsets <- propagateConst "writeSet_offset" $ zipWith (*) group_ids group_sizes
-          -- create offsets for the readSet
-          readSet_offsets <- propagateConst "readSet_offset" $ zipWith (+) writeSet_offsets a_mins
 
-          -- run the data loader
-          loader readSet_offsets bound_idxs tiles (stencilArrays op)
-            shared_sizes group_sizes (local_ids, local_id_flat)
+        phys_group_id <- dPrim "phys_group_id" int32
+        sOp $ Imp.GetGroupId (tvVar phys_group_id) 0
 
-          -- group syncronize
-          sOp $ Imp.Barrier Imp.FenceLocal
+        group_ids <- map tvExp <$> (unflattenIx "group_id" size_span . tvExp $ phys_group_id)
 
-          let gids = zipWith (+) writeSet_offsets local_ids
-          zipWithM_ dPrimV_ is gids
-          -- check for out of bound on global id for each axis
-          sWhen (isActive $ unSegSpace space) $ do
-            -- compile invariant elements
-            compileStms mempty (kernelBodyStms kbody) $ pure ()
+        -- create writeSet offSets
+        writeSet_offsets <- propagateConst "writeSet_offset" $ zipWith (*) (map sExt64 group_ids) (map sExt64 group_sizes)
+        -- create offsets for the readSet
+        readSet_offsets <- propagateConst "readSet_offset" $ zipWith (+) writeSet_offsets (map sExt64 a_mins)
 
-            -- declare and attach invariant elements to invariantParams
-            zipWithM_ dPrimV_ (map paramName invariantParams) . map TPrimExp
-              =<< mapM toExp invarElems
+        -- run the data loader
+        loader readSet_offsets bound_idxs tiles (stencilArrays op)
+          shared_sizes group_sizes (local_ids, local_id_flat)
 
-            dLParams variantParams
+        -- group syncronize
+        sOp $ Imp.Barrier Imp.FenceLocal
 
-            ---- load variants into lambda variant parameters
-            forM_ (zip tile_ixs variant_params_tuples) $ \(tile_ix, pars) -> do
-              forM_ (zip pars tiles) $ \(par, tile) ->
-                copyDWIMFix (paramName par) [] (Var tile) [tile_ix]
+        let gids = zipWith (+) writeSet_offsets (map sExt64 local_ids)
+        zipWithM_ dPrimV_ is gids
+        -- check for out of bound on global id for each axis
+        sWhen (isActive $ unSegSpace space) $ do
+          -- compile invariant elements
+          compileStms mempty (kernelBodyStms kbody) $ pure ()
 
-            -- compile lambda function and designate output style
-            compileStms mempty (bodyStms lamBody) $
-              zipWithM_ (compileThreadResult space) (patternElements pat) $
-                map (Returns ResultMaySimplify) $ bodyResult lamBody
+          -- declare and attach invariant elements to invariantParams
+          zipWithM_ dPrimV_ (map paramName invariantParams) . map TPrimExp
+            =<< mapM toExp invarElems
+
+          dLParams variantParams
+
+          ---- load variants into lambda variant parameters
+          forM_ (zip tile_ixs variant_params_tuples) $ \(tile_ix, pars) -> do
+            forM_ (zip pars tiles) $ \(par, tile) ->
+              copyDWIMFix (paramName par) [] (Var tile) [sExt64 tile_ix]
+
+          -- compile lambda function and designate output style
+          compileStms mempty (bodyStms lamBody) $
+            zipWithM_ (compileThreadResult space) (patternElements pat) $
+              map (Returns ResultMaySimplify) $ bodyResult lamBody
     SegGroup {} ->
       error "not implemented"
-
