@@ -8,6 +8,7 @@
 -- JavaScript wrapper.
 module Futhark.CodeGen.Backends.SequentialWASM
   ( compileProg,
+    runServer,
     GC.CParts (..),
     GC.asLibrary,
     GC.asExecutable,
@@ -452,3 +453,12 @@ fromFutharkArrayValues str =
   i = dim str
   ftype = baseType str
   arrType = jsType str
+
+runServer :: String
+runServer = 
+  T.unpack 
+  [text|
+   var context = new FutharkContext();
+   var server = new Server(context);
+   server.run;
+  |]
