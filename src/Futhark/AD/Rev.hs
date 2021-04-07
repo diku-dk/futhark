@@ -24,7 +24,7 @@ import Futhark.Binder
 import Futhark.IR.SOACS
 import Futhark.Tools
 import Futhark.Transform.Rename
-import Futhark.Util (nubOrd, takeLast)
+import Futhark.Util (takeLast)
 
 --- First some general utility functions that are not specific to AD.
 
@@ -232,7 +232,7 @@ instance Adjoint VName where
               letExp (baseString v_adj <> "_arr") $
                 BasicOp $ Replicate (Shape dims) $ Var v_adj
             ~[v_adj'] <-
-              tabNest (length dims) [v_adj_arr, d] $ \is [v_adj_arr', d'] ->
+              tabNest (length dims) [d, v_adj_arr] $ \is [d', v_adj_arr'] ->
                 letTupExp "acc" $
                   BasicOp $ UpdateAcc v_adj_arr' (map Var is) [Var d']
             insAdj v v_adj'
@@ -463,7 +463,8 @@ diffMap pat_adj w map_lam as = do
 
   let free = namesToList $ freeIn map_lam'
 
-  accAdjoints free $ \free_adjs -> do
+  accAdjoints free $ \free_with_adjs -> do
+    free_adjs <- mapM lookupAdj free_with_adjs
     free_adjs_ts <- mapM lookupType free_adjs
     free_adjs_params <- mapM (newParam "free_adj_p") free_adjs_ts
     let lam_rev_params =
@@ -471,7 +472,8 @@ diffMap pat_adj w map_lam as = do
         adjs_for = map paramName (lambdaParams map_lam') ++ free
 
     lam_rev <-
-      mkLambda lam_rev_params $
+      mkLambda lam_rev_params $ do
+        zipWithM_ insAdj free_with_adjs $ map paramName free_adjs_params
         bodyBind . lambdaBody
           =<< diffLambda (map paramName pat_adj_params) adjs_for map_lam'
 
@@ -521,13 +523,12 @@ diffMap pat_adj w map_lam as = do
     accAdjoints free m = do
       (acc_free, nonacc_free) <- partitionEithers <$> mapM decideOnFreeVar free
       (acc_adjs, nonacc_adjs) <-
-        fmap (splitAt (length acc_free)) $
-          withAcc (map snd acc_free) $ \accs -> do
-            zipWithM_ insAdj (map fst acc_free) accs
-            () <- m accs
-            acc_free_adj <- mapM (lookupAdj . fst) acc_free
-            nonacc_free_adj <- mapM lookupAdj nonacc_free
-            pure $ map Var $ acc_free_adj <> nonacc_free_adj
+        fmap (splitAt (length acc_free)) . withAcc (map snd acc_free) $ \accs -> do
+          zipWithM_ insAdj (map fst acc_free) accs
+          () <- m $ map fst acc_free
+          acc_free_adj <- mapM (lookupAdj . fst) acc_free
+          nonacc_free_adj <- mapM lookupAdj nonacc_free
+          pure $ map Var $ acc_free_adj <> nonacc_free_adj
       zipWithM_ insAdj (map fst acc_free) acc_adjs
       zipWithM_ insAdj nonacc_free nonacc_adjs
 
