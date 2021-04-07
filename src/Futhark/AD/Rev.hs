@@ -1792,9 +1792,11 @@ revVJP scope (Lambda params body ts) =
     Body () stms res <-
       localScope (scopeOfLParams params_adj) $
         diffBody (map paramName params_adj) (map paramName params) body
-    let body' = Body () (cpy_stms <> stms) $ takeLast (length params) res
-    let lam = Lambda (params ++ params_adj') body' (map paramType params)
-    renameLambda lam
+    let stms' = cpy_stms <> stms
+    let body' = Body () stms $ takeLast (length params) res -- stms'
+    let lam = Lambda (params ++ params_adj) body' (map paramType params) -- params-adj'
+    lam' <- renameLambda lam
+    trace ("prg:\n" ++ pretty lam') $ return lam'
   where
     --trace ("prg:\n" ++ pretty lam' ++ "\n orig prog: \n" ++ pretty body) $
     -- pure $ Lambda (params ++ params_adj) body' (map paramType params)
