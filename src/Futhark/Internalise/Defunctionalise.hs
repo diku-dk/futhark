@@ -251,8 +251,8 @@ collectFuns m = pass $ do
   return ((x, decs), const mempty)
 
 -- | Looks up the associated static value for a given name in the environment.
-lookupVar :: StructType -> SrcLoc -> VName -> DefM StaticVal
-lookupVar t loc x = do
+lookupVar :: StructType -> VName -> DefM StaticVal
+lookupVar t x = do
   env <- askEnv
   case M.lookup x env of
     Just (Binding (Just (dims, sv_t)) sv) -> do
@@ -263,14 +263,9 @@ lookupVar t loc x = do
     Nothing -- If the variable is unknown, it may refer to the 'intrinsics'
     -- module, which we will have to treat specially.
       | baseTag x <= maxIntrinsicTag -> return IntrinsicSV
-      | otherwise -> -- Anything not in scope is going to be an
-      -- existential size.
-        return $ Dynamic $ Scalar $ Prim $ Signed Int64
       | otherwise ->
-        error $
-          "Variable " ++ pretty x ++ " at "
-            ++ locStr loc
-            ++ " is out of scope."
+        -- Anything not in scope is going to be an existential size.
+        return $ Dynamic $ Scalar $ Prim $ Signed Int64
 
 -- Like patternDimNames, but ignores sizes that are only found in
 -- funtion types.
@@ -461,7 +456,7 @@ defuncExp (RecordLit fs loc) = do
       (e', sv) <- defuncExp e
       return (RecordFieldExplicit vn e' loc', (vn, sv))
     defuncField (RecordFieldImplicit vn (Info t) loc') = do
-      sv <- lookupVar (toStruct t) loc' vn
+      sv <- lookupVar (toStruct t) vn
       case sv of
         -- If the implicit field refers to a dynamic function, we
         -- convert it to an explicit field with a record closing over
@@ -486,7 +481,7 @@ defuncExp (Range e1 me incl t@(Info t', _) loc) = do
   incl' <- mapM defuncExp' incl
   return (Range e1' me' incl' t loc, Dynamic t')
 defuncExp e@(Var qn (Info t) loc) = do
-  sv <- lookupVar (toStruct t) loc (qualLeaf qn)
+  sv <- lookupVar (toStruct t) (qualLeaf qn)
   case sv of
     -- If the variable refers to a dynamic function, we return its closure
     -- representation (i.e., a record expression capturing the free variables
@@ -931,7 +926,7 @@ defuncApply depth e@(Apply e1 e2 d t@(Info ret, Info ext) loc) = do
           ++ show sv1
 defuncApply depth e@(Var qn (Info t) loc) = do
   let (argtypes, _) = unfoldFunType t
-  sv <- lookupVar (toStruct t) loc (qualLeaf qn)
+  sv <- lookupVar (toStruct t) (qualLeaf qn)
 
   case sv of
     DynamicFun _ _

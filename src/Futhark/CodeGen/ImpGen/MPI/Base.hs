@@ -110,8 +110,6 @@ getIterationDomain _ space = do
     -- executed sequentially
     _ -> return $ product $ init ns_64
 
-gather :: VName -> MPIGen ()
-gather mem = do
-  start <- dPrim "start" int64
-  size <- dPrim "size" int64
-  emit $ Imp.Op $ Imp.Gather mem (tvVar start) (tvVar size)
+gather :: VName -> PrimType -> MPIGen ()
+gather mem pt = do
+  emit $ Imp.Op $ Imp.Gather mem $ primByteSize pt

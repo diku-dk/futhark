@@ -190,12 +190,14 @@ Functions are classified via function types, but they are not fully
 first class.  See :ref:`hofs` for the details.
 
 .. productionlist::
-   stringlit: '"' `stringchar` '"'
+   stringlit: '"' `stringchar`* '"'
+   charlit: "'" `stringchar` "'"
    stringchar: <any source character except "\" or newline or quotes>
 
 String literals are supported, but only as syntactic sugar for UTF-8
 encoded arrays of ``u8`` values.  There is no character type in
-Futhark.
+Futhark, but character literals are interpreted as integers of the
+corresponding Unicode code point.
 
 Declarations
 ------------
@@ -407,6 +409,7 @@ literals and variables, but also more complicated forms.
    atom:   `literal`
        : | `qualid` ("." `fieldid`)*
        : | `stringlit`
+       : | `charlit`
        : | "(" ")"
        : | "(" `exp` ")" ("." `fieldid`)*
        : | "(" `exp` ("," `exp`)* ")"

@@ -206,17 +206,49 @@ compileOp (Segop _name _params code _retvals iterations) = do
   i <- GC.compileExp iterations
   GC.decl [C.cdecl|typename int64_t iterations = $exp:i;|]
   GC.compileCode code
-compileOp (Gather memory start size) = do
-  GC.stm [C.cstm| $id:size = ($id:memory.size/ctx->world_size);|]
-  GC.stm [C.cstm| $id:start = $id:size*ctx->rank;|]
-  GC.stm
-    [C.cstm|MPI_Gather($id:memory.mem+$id:start, $id:size, MPI_BYTE, 
-                  $id:memory.mem, $id:size, MPI_BYTE, 0, MPI_COMM_WORLD);|]
+compileOp (Gather memory type_size) = do
+  GC.stm [C.cstm|
+      {
+        uint nb_elements = $id:memory.size / $type_size;
+        uint size_remainder = $type_size *(nb_elements % ctx->world_size);
+        // Euclidian division, cannot be simplified.
+        uint size = $type_size*(nb_elements / ctx->world_size);
+        if(!ctx->rank){
+          int *recvcounts = malloc(ctx->world_size * sizeof(int));
+          int *displs = malloc(ctx->world_size * sizeof(int));
+
+          recvcounts[0] = size + size_remainder;
+          displs[0] = 0;
+          for(int i = 1; i < ctx->world_size; i++){
+            recvcounts[i] = size;
+            displs[i] = recvcounts[i-1] + displs[i-1];
+          }
+          MPI_Gatherv($id:memory.mem, recvcounts[ctx->rank], MPI_BYTE, 
+          $id:memory.mem, recvcounts, displs, MPI_BYTE, 0, MPI_COMM_WORLD);
+          free(recvcounts);
+          free(displs);
+        }else{
+          int start = size*ctx->rank + size_remainder;
+          MPI_Gatherv($id:memory.mem+start, size, MPI_BYTE, 
+          NULL, NULL, NULL, MPI_BYTE, 0, MPI_COMM_WORLD);
+        }
+      }
+    |]
 compileOp (DistributedLoop _s i prebody body postbody _ _) = do
   GC.compileCode prebody
-  GC.decl [C.cdecl|typename int64_t chunk_size = iterations/ctx->world_size;|]
-  GC.stm [C.cstm|$id:i = ctx->rank*chunk_size;|]
-  GC.decl [C.cdecl|typename int64_t end = $id:i + chunk_size;|]
+  GC.decl [C.cdecl|typename int64_t chunk_size;|]
+  GC.decl [C.cdecl|typename int64_t end;|]
+  GC.stm [C.cstm|
+      if(!ctx->rank){
+        chunk_size = iterations / ctx->world_size + iterations % ctx->world_size;
+        $id:i = 0;
+      }else{
+        chunk_size = iterations / ctx->world_size;
+        $id:i = chunk_size*ctx->rank + iterations % ctx->world_size;
+      }
+    |]
+  
+  GC.stm [C.cstm| end = $id:i + chunk_size;|]
   body' <- GC.blockScope $ GC.compileCode body
   GC.stm
     [C.cstm|for (; $id:i < end; $id:i++) {
