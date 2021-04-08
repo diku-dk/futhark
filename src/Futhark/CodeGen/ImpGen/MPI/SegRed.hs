@@ -90,8 +90,8 @@ compileSegRed pat space reds kbody
       copyDWIMFix array [Imp.vi64 $ tvVar node_id] (Var acc) []
 
     -- Step C : Gather arrays on main node
-    forM_ stage_one_mems $ \mem ->
-      gather mem
+    forM_ (zip stage_one_mems  (lambdaReturnType lam)) $ \(mem, Prim pt) ->
+      gather mem pt
 
     -- Step D : Stage 2 reduction
     stage_two <- collect $ do
