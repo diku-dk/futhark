@@ -182,16 +182,16 @@ class Server {
       var args = words.splice(1);
       if (cmd in this._commands) {
         switch (cmd) {
-          case 'inputs': _cmd_inputs(args); break;
-          case 'outputs': _cmd_outputs(args); break
-          case 'call': _cmd_call(args); break
-          case 'restore': _cmd_restore(args); break
-          case 'store': _cmd_store(args); break
-          case 'free': _cmd_free(args); break
-          case 'clear': _cmd_dummy(args); break
-          case 'pause_profiling': _cmd_dummy(args); break
-          case 'unpause_profiling': _cmd_dummy(args); break
-          case 'report': _cmd_dummy(args); break
+          case 'inputs': this._cmd_inputs(args); break;
+          case 'outputs': this._cmd_outputs(args); break
+          case 'call': this._cmd_call(args); break
+          case 'restore': this._cmd_restore(args); break
+          case 'store': this._cmd_store(args); break
+          case 'free': this._cmd_free(args); break
+          case 'clear': this._cmd_dummy(args); break
+          case 'pause_profiling': this._cmd_dummy(args); break
+          case 'unpause_profiling': this._cmd_dummy(args); break
+          case 'report': this._cmd_dummy(args); break
        }
       } else {
         throw "Unknown command: " + cmd;
@@ -208,7 +208,7 @@ class Server {
         rl.close();
       }
       try {
-        _process_line(line);
+        this._process_line(line);
       } catch (err) {
         console.log('%%% FAILURE');
         console.log(err);
