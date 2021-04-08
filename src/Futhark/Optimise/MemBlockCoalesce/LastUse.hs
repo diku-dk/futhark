@@ -13,6 +13,7 @@ import Data.Sequence (Seq (..))
 import qualified Data.Sequence as Seq
 import Futhark.IR.Aliases
 import qualified Futhark.IR.SeqMem as Mem
+import Futhark.Optimise.MemBlockCoalesce.Bindage
 import Futhark.Optimise.MemBlockCoalesce.DataStructs
 import Prelude
 
@@ -24,11 +25,13 @@ import Prelude
 --   do a function parameters if it happens to not be used inside function's body.
 --   Such cases are supposed to be treated separately.
 lastUsePrg :: Prog (Aliases Mem.SeqMem) -> LUTabPrg
-lastUsePrg prg = M.fromList $ map lastUseFun $ progFuns prg
+lastUsePrg prg =
+  let in_place_updates = inPlaceUpdates prg
+   in M.fromList $ map (lastUseFun in_place_updates) $ progFuns prg
 
-lastUseFun :: FunDef (Aliases Mem.SeqMem) -> (Name, LUTabFun)
-lastUseFun (FunDef _ _ fname _ _ body) =
-  let (_, res, _) = lastUseAnBdy mempty body (mempty, mempty)
+lastUseFun :: InPlaceUpdates -> FunDef (Aliases Mem.SeqMem) -> (Name, LUTabFun)
+lastUseFun in_place_updates (FunDef _ _ fname _ _ body) =
+  let (_, res, _) = lastUseAnBdy in_place_updates mempty body (mempty, mempty)
    in (fname, res)
 
 -- | Performing the last-use analysis on a body. Arguments are:
@@ -44,11 +47,12 @@ lastUseFun (FunDef _ _ fname _ _ body) =
 --   difference between the free-variables in that stmt and the set of variables
 --   known to be used after that statement.
 lastUseAnBdy ::
+  InPlaceUpdates ->
   AliasTab ->
   Body (Aliases Mem.SeqMem) ->
   (LUTabFun, Names) ->
   (Names, LUTabFun, Names)
-lastUseAnBdy alstab bdy@(Body _ bnds result) (lutab, used_nms) =
+lastUseAnBdy in_place_updates alstab bdy@(Body _ bnds result) (lutab, used_nms) =
   let res_nms = getNamesFromSubExps result
 
       -- perform analysis bottom-up in bindings: results are known to be used,
@@ -86,22 +90,23 @@ lastUseAnBdy alstab bdy@(Body _ bnds result) (lutab, used_nms) =
               (namesFromList res_nms)
        in (lutab1, nms')
     traverseBindings stab (bd@(Let pat _ _) :<| bds) (lutab1, nms) res_nms =
-      let stab' = updateAliasing stab pat
+      let stab' = updateAliasing in_place_updates stab pat
           (lutab1', nms') = traverseBindings stab' bds (lutab1, nms) res_nms
-          (lutab1'', nms'') = lastUseAnBnd stab' bd (lutab1', nms')
+          (lutab1'', nms'') = lastUseAnBnd in_place_updates stab' bd (lutab1', nms')
        in (lutab1'', nms'')
 
 lastUseAnBnd ::
+  InPlaceUpdates ->
   AliasTab ->
   Stm (Aliases Mem.SeqMem) ->
   (LUTabFun, Names) ->
   (LUTabFun, Names)
-lastUseAnBnd alstab (Let pat _ e) (lutab, used_nms) =
+lastUseAnBnd in_place_updates alstab (Let pat _ e) (lutab, used_nms) =
   -- analyse the expression and get the
   --  (i)  a new last-use table (in case the @e@ contains bodies of stmts)
   -- (ii) the set of variables lastly used in the current binding.
   --(iii)  aliased transitive-closure of used names, and
-  let (lutab', last_uses, used_nms') = lastUseAnExp alstab e used_nms
+  let (lutab', last_uses, used_nms') = lastUseAnExp in_place_updates alstab e used_nms
 
       -- filter-out the binded names from the set of used variables,
       -- since they go out of scope, and update the last-use table.
@@ -128,6 +133,7 @@ lastUseAnBnd alstab (Let pat _ e) (lutab, used_nms) =
 --           2. the set of last-used vars in the expression at this level,
 --           3. the updated used names, now including expression's free vars.
 lastUseAnExp ::
+  InPlaceUpdates ->
   AliasTab ->
   Exp (Aliases Mem.SeqMem) ->
   Names ->
@@ -136,16 +142,16 @@ lastUseAnExp ::
 -- | For an if-then-else, we duplicate the last use at each body level,
 --   meaning we record the last use of the outer statement, and also
 --   the last use in the statement in the inner bodies.
-lastUseAnExp alstab (If _ then_body else_body _) used_nms =
+lastUseAnExp in_place_updates alstab (If _ then_body else_body _) used_nms =
   let -- ignore the condition as it is a boolean scalar
-      (free_in_body_then, then_lutab, then_used_nms) = lastUseAnBdy alstab then_body (mempty, used_nms)
-      (free_in_body_else, else_lutab, else_used_nms) = lastUseAnBdy alstab else_body (mempty, used_nms)
+      (free_in_body_then, then_lutab, then_used_nms) = lastUseAnBdy in_place_updates alstab then_body (mempty, used_nms)
+      (free_in_body_else, else_lutab, else_used_nms) = lastUseAnBdy in_place_updates alstab else_body (mempty, used_nms)
       used_nms' = then_used_nms <> else_used_nms
       (_, last_used_arrs) =
         lastUseAnVars alstab used_nms $
           free_in_body_then <> free_in_body_else
    in (then_lutab <> else_lutab, last_used_arrs, used_nms')
-lastUseAnExp alstab (DoLoop _ var_ses _ body) used_nms0 =
+lastUseAnExp in_place_updates alstab (DoLoop _ var_ses _ body) used_nms0 =
   let free_in_body = aliasTransClos alstab $ freeIn body
       -- compute the alising transitive closure of initializers
       var_inis =
@@ -174,7 +180,7 @@ lastUseAnExp alstab (DoLoop _ var_ses _ body) used_nms0 =
       -- the free-loop-variables to having last uses inside the loop.
       free_in_body' = namesSubtract free_in_body $ namesFromList $ map fst var_inis_a
       used_nms = used_nms0 <> free_in_body'
-      (_, body_lutab, _) = lastUseAnBdy alstab body (mempty, used_nms)
+      (_, body_lutab, _) = lastUseAnBdy in_place_updates alstab body (mempty, used_nms)
 
       -- add var_inis_a to the body_lutab, i.e., record the last-use of
       -- initializer in the corresponding loop variant.
@@ -191,7 +197,7 @@ lastUseAnExp alstab (DoLoop _ var_ses _ body) used_nms0 =
    in (lutab_res, lu_arrs, used_nms_res)
 --lastUseAnExp alstab (Op (Mem.Inner (Mem.Kernel str cs ker_space tps ker_bdy))) used_nms = (M.empty, S.empty, used_nms)
 
-lastUseAnExp alstab e used_nms =
+lastUseAnExp in_place_updates alstab e used_nms =
   let free_in_e = freeIn e
       (used_nms', lu_vars) = lastUseAnVars alstab used_nms free_in_e
    in (mempty, lu_vars, used_nms')

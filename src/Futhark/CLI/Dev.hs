@@ -33,6 +33,7 @@ import Futhark.Optimise.DoubleBuffer
 import Futhark.Optimise.Fusion
 import Futhark.Optimise.InPlaceLowering
 import Futhark.Optimise.InliningDeadFun
+import Futhark.Optimise.MemBlockCoalesce.Bindage
 import qualified Futhark.Optimise.ReuseAllocations as ReuseAllocations
 import Futhark.Optimise.Sink
 import Futhark.Optimise.TileLoops
@@ -456,6 +457,11 @@ commandLineOptions =
       ["merge-mem"]
       (NoArg $ Right $ \opts -> opts {futharkAction = SeqMemAction $ const memoryBlockMerging})
       "Perform memory merging and print the results.",
+    Option
+      []
+      ["bindage"]
+      (NoArg $ Right $ \opts -> opts {futharkAction = SeqMemAction $ const inPlaceUpdatesAction})
+      "Bindage",
     Option
       "m"
       ["metrics"]

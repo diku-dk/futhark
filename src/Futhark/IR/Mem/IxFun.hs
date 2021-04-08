@@ -13,6 +13,7 @@ module Futhark.IR.Mem.IxFun
     iotaOffset,
     permute,
     rotate,
+    offsetIndex,
     reshape,
     slice,
     rebase,
@@ -333,6 +334,17 @@ iotaOffset o ns =
 -- | iota.
 iota :: IntegralExp num => Shape num -> IxFun num
 iota = iotaOffset 0
+
+offsetIndex ::
+  (Eq num, IntegralExp num) =>
+  IxFun num ->
+  num ->
+  IxFun num
+offsetIndex ixfun i | i == 0 = ixfun
+offsetIndex ixfun i =
+  case shape ixfun of
+    d : ds -> slice ixfun (DimSlice i (d - i) 1 : map (unitSlice 0) ds)
+    [] -> error "offsetIndex: underlying index function has rank zero"
 
 -- | Permute dimensions.
 permute ::

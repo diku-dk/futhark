@@ -212,6 +212,7 @@ library
       Futhark.Optimise.MemBlockCoalesce
       Futhark.Optimise.MemBlockCoalesce.ArrayCoalescing
       Futhark.Optimise.MemBlockCoalesce.DataStructs
+      Futhark.Optimise.MemBlockCoalesce.Bindage
       Futhark.Optimise.MemBlockCoalesce.LastUse
       Futhark.Optimise.Simplify
       Futhark.Optimise.Simplify.Engine

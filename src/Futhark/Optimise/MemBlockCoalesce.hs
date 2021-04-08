@@ -5,20 +5,27 @@
 module Futhark.Optimise.MemBlockCoalesce (memoryBlockMerging) where
 
 import Control.Arrow
-import qualified Data.Map.Strict as M
-import Data.Maybe
-import Debug.Trace
 --import Futhark.Representation.AST.Syntax
 
 -- default AbSyn
 
 --import qualified Futhark.Representation.Aliases    as RepAls  -- In
-import qualified Futhark.Analysis.Alias as AnlAls -- Als
+
+-- Als
+
+import Control.Monad.IO.Class
+import qualified Data.Map.Strict as M
+import Data.Maybe
+import Debug.Trace
+import qualified Futhark.Analysis.Alias as AnlAls
 import Futhark.IR.Aliases
+import Futhark.IR.SeqMem (SeqMem)
 import qualified Futhark.IR.SeqMem as Mem
 import Futhark.Optimise.MemBlockCoalesce.ArrayCoalescing
+import Futhark.Optimise.MemBlockCoalesce.Bindage
 import Futhark.Optimise.MemBlockCoalesce.DataStructs
 import Futhark.Optimise.MemBlockCoalesce.LastUse
+import Futhark.Pipeline
 import Prelude
 
 -----------------------------------
@@ -67,38 +74,41 @@ emptyInterfEnv =
 intrfAnPrg :: LUTabPrg -> Mem.Prog Mem.SeqMem -> M.Map Name IntrfEnv
 intrfAnPrg lutab prg =
   let aliased_prg = AnlAls.aliasAnalysis prg
-   in M.fromList $ map (intrfAnFun lutab) $ progFuns aliased_prg
+      in_place_updates = inPlaceUpdates aliased_prg
+   in M.fromList $ map (intrfAnFun in_place_updates lutab) $ progFuns aliased_prg
 
-intrfAnFun :: LUTabPrg -> FunDef (Aliases Mem.SeqMem) -> (Name, IntrfEnv)
-intrfAnFun lutabprg (FunDef _ _ fname _ _ body) =
+intrfAnFun :: InPlaceUpdates -> LUTabPrg -> FunDef (Aliases Mem.SeqMem) -> (Name, IntrfEnv)
+intrfAnFun in_place_updates lutabprg (FunDef _ _ fname _ _ body) =
   let lutab = fromMaybe M.empty (M.lookup fname lutabprg)
-      env = intrfAnBdy lutab emptyInterfEnv body
+      env = intrfAnBdy in_place_updates lutab emptyInterfEnv body
    in (fname, env)
 
 intrfAnBdy ::
+  InPlaceUpdates ->
   LUTabFun ->
   IntrfEnv ->
   Body (Aliases Mem.SeqMem) ->
   IntrfEnv
-intrfAnBdy lutab env (Body _ bnds _) =
-  foldl (intrfAnBnd lutab) env bnds
+intrfAnBdy in_place_updates lutab env (Body _ bnds _) =
+  foldl (intrfAnBnd in_place_updates lutab) env bnds
 
 intrfAnBnd ::
+  InPlaceUpdates ->
   LUTabFun ->
   IntrfEnv ->
   Stm (Aliases Mem.SeqMem) ->
   IntrfEnv
-intrfAnBnd _ env (Let pat _ (Op (Mem.Alloc sz _))) =
+intrfAnBnd in_place_updates _ env (Let pat _ (Op (Mem.Alloc sz _))) =
   case patternNames pat of
     [] -> env
     nm : _ ->
       let nm' = trace ("AllocNode: " ++ pretty nm ++ " size: " ++ pretty sz) nm
        in env {alloc = oneName nm' <> alloc env}
-intrfAnBnd lutab env (Let pat _ (DoLoop memctx var_ses _ body)) =
+intrfAnBnd in_place_updates lutab env (Let pat _ (DoLoop memctx var_ses _ body)) =
   -- BUG!!! you need to handle the potential circular aliasing
   -- between loop-variant variables and their memory blocks;
   -- just borrow them from the pattern (via substitution)!
-  let alias0 = updateAliasing (alias env) pat
+  let alias0 = updateAliasing in_place_updates (alias env) pat
       alias' =
         foldl
           ( \acc ((fpar, _), patel) ->
@@ -129,20 +139,21 @@ intrfAnBnd lutab env (Let pat _ (DoLoop memctx var_ses _ body)) =
             (alloc env)
             (aliasTransClos alias' mems)
 
-      env' = intrfAnBdy lutab (env {v2mem = v2mem', active = active', alias = alias'}) body
-   in defInterference lutab env' pat
-intrfAnBnd lutab env (Let pat _ _) =
-  defInterference lutab env pat
+      env' = intrfAnBdy in_place_updates lutab (env {v2mem = v2mem', active = active', alias = alias'}) body
+   in defInterference in_place_updates lutab env' pat
+intrfAnBnd in_place_updates lutab env (Let pat _ _) =
+  defInterference in_place_updates lutab env pat
 
 defInterference ::
+  InPlaceUpdates ->
   LUTabFun ->
   IntrfEnv ->
   Pattern (Aliases Mem.SeqMem) ->
   IntrfEnv
-defInterference lutab env pat =
-  let alias' = updateAliasing (alias env) pat
+defInterference in_place_updates lutab env pat =
+  let alias' = updateAliasing in_place_updates (alias env) pat
 
-      arrmems = map (\(a, b, _) -> (a, b)) $ getArrMemAssoc pat
+      arrmems = map (\(a, b, _) -> (a, b)) $ getArrMemAssoc in_place_updates pat
       v2mem' = M.union (v2mem env) $ M.fromList arrmems
 
       patmems = map (\(MemBlock _ _ mn _) -> mn) $ map snd arrmems
@@ -262,6 +273,14 @@ memoryBlockMerging prg = do
           )
           $ M.elems coaltab
   putStrLn $ unlines (map ("  " ++) $ lines $ pretty coal_info)
+
+action :: Action SeqMem
+action =
+  Action
+    { actionName = "MemBlockCoalesce",
+      actionDescription = "MemBlockCoalesce",
+      actionProcedure = liftIO . memoryBlockMerging
+    }
 
 lookAtFunction :: Mem.FunDef Mem.SeqMem -> IO ()
 lookAtFunction (Mem.FunDef _ _ fname _ params body) = do

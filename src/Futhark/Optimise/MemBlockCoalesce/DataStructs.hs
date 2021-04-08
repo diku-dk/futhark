@@ -30,13 +30,15 @@ module Futhark.Optimise.MemBlockCoalesce.DataStructs
   )
 where
 
+--import Debug.Trace
+
+import qualified Data.Map as Map
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import qualified Data.Set as S
---import Debug.Trace
-
 import Futhark.IR.Aliases
 import qualified Futhark.IR.SeqMem as Mem
+import Futhark.Optimise.MemBlockCoalesce.Bindage
 import Prelude
 
 data CoalescedKind
@@ -141,59 +143,53 @@ aliasTransClos alstab args =
     args
     args
 
-updateAliasing :: AliasTab -> Pattern (Aliases Mem.SeqMem) -> AliasTab
-updateAliasing = undefined
+updateAliasing :: InPlaceUpdates -> AliasTab -> Pattern (Aliases Mem.SeqMem) -> AliasTab
+updateAliasing in_place_updates stab pat =
+  foldl
+    ( \stabb patel ->
+        -- Compute the transitive closure of current pattern
+        -- name by concating all its aliases entries in stabb.
+        -- In case of an IN-PLACE update, add the previous name
+        -- to the alias set of the new one.
+        let (al, _) = patElemDec patel
+            al_nms0 = unAliases al
+            -- ToDo: in-place updates may not be treated as aliases
+            --       and they should with customized LastUse
+            --       but we have changed representation and
+            --       "bindage" does not exist anymore, i.e.,
+            --       not related to pattern
+            al_nms = case Map.lookup (patElemName patel) in_place_updates of
+              Nothing -> al_nms0
+              Just (nm, _) -> oneName nm <> al_nms0
 
--- updateAliasing :: AliasTab -> Pattern (Aliases Mem.SeqMem) -> AliasTab
--- updateAliasing stab pat =
---   foldl
---     ( \stabb patel ->
---         -- Compute the transitive closure of current pattern
---         -- name by concating all its aliases entries in stabb.
---         -- In case of an IN-PLACE update, add the previous name
---         -- to the alias set of the new one.
---         let (al, _) = patElemAttr patel
---             al_nms0 = unNames al
---             -- ToDo: in-place updates may not be treated as aliases
---             --       and they should with customized LastUse
---             --       but we have changed representation and
---             --       "bindage" does not exist anymore, i.e.,
---             --       not related to pattern
---             al_nms = case patElemBindage patel of
---               BindVar -> al_nms0
---               BindInPlace _ nm _ -> S.insert nm al_nms0
+            --al_nms = al_nms0
+            al_trns =
+              foldlNames
+                ( \acc x -> case M.lookup x stabb of
+                    Nothing -> acc
+                    Just aal -> acc <> aal
+                )
+                al_nms
+                al_nms
+         in -- al_trns' = trace ("ALIAS Pattern: "++(pretty (patElemName patel))++" aliases: "++pretty (S.toList al_trns)) al_trns
+            if al_trns == mempty
+              then stabb
+              else M.insert (patElemName patel) al_trns stabb
+    )
+    stab
+    $ patternContextElements pat ++ patternValueElements pat
 
---             --al_nms = al_nms0
---             al_trns =
---               S.foldl'
---                 ( \acc x -> case M.lookup x stabb of
---                     Nothing -> acc
---                     Just aal -> acc `S.union` aal
---                 )
---                 al_nms
---                 al_nms
---          in -- al_trns' = trace ("ALIAS Pattern: "++(pretty (patElemName patel))++" aliases: "++pretty (S.toList al_trns)) al_trns
---             if null al_trns
---               then stabb
---               else M.insert (patElemName patel) al_trns stabb
---     )
---     stab
---     $ patternContextElements pat ++ patternValueElements pat
-
-getArrMemAssoc :: Pattern (Aliases Mem.SeqMem) -> [(VName, ArrayMemBound, a)]
-getArrMemAssoc = undefined
-
--- getArrMemAssoc :: Pattern (Aliases Mem.SeqMem) -> [(VName, ArrayMemBound, Bindage)]
--- getArrMemAssoc pat =
---   mapMaybe
---     ( \patel -> case snd $ patElemAttr patel of
---         (Mem.MemArray tp shp _ (Mem.ArrayIn mem_nm indfun)) ->
---           -- let mem_nm' = trace ("MemLore: "++(pretty (patElemName patel))++" is ArrayMem: "++pretty tp++" , "++pretty shp++" , "++pretty u++" , "++pretty mem_nm++" , "++pretty indfun++" ("++pretty l1++") ") mem_nm
---           Just (patElemName patel, MemBlock tp shp mem_nm indfun, patElemBindage patel)
---         Mem.MemMem _ _ -> Nothing
---         Mem.MemPrim _ -> Nothing
---     )
---     $ patternValueElements pat
+getArrMemAssoc :: InPlaceUpdates -> Pattern (Aliases Mem.SeqMem) -> [(VName, ArrayMemBound, Maybe (VName, Slice SubExp))]
+getArrMemAssoc in_place_updates pat =
+  mapMaybe
+    ( \patel -> case snd $ patElemDec patel of
+        (Mem.MemArray tp shp _ (Mem.ArrayIn mem_nm indfun)) ->
+          -- let mem_nm' = trace ("MemLore: "++(pretty (patElemName patel))++" is ArrayMem: "++pretty tp++" , "++pretty shp++" , "++pretty u++" , "++pretty mem_nm++" , "++pretty indfun++" ("++pretty l1++") ") mem_nm
+          Just (patElemName patel, MemBlock tp shp mem_nm indfun, Map.lookup (patElemName patel) in_place_updates)
+        Mem.MemMem _ -> Nothing
+        Mem.MemPrim _ -> Nothing
+    )
+    $ patternValueElements pat
 
 getArrMemAssocFParam :: [FParam (Aliases Mem.SeqMem)] -> [(VName, ArrayMemBound)]
 getArrMemAssocFParam =
