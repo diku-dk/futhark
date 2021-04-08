@@ -399,6 +399,9 @@ data BasicOp
     -- subexpressions specify how much each dimension is rotated.  The
     -- length of this list must be equal to the rank of the array.
     Rotate [SubExp] VName
+  | -- | Update an accumulator at the given index with the given value.
+    -- Consumes the accumulator and produces a new one.
+    UpdateAcc VName [SubExp] [SubExp]
   deriving (Eq, Ord, Show)
 
 -- | The root Futhark expression type.  The v'Op' constructor contains
@@ -412,6 +415,14 @@ data ExpT lore
   | -- | @loop {a} = {v} (for i < n|while b) do b@.  The merge
     -- parameters are divided into context and value part.
     DoLoop [(FParam lore, SubExp)] [(FParam lore, SubExp)] (LoopForm lore) (BodyT lore)
+  | -- | Create accumulators backed by the given arrays (which are
+    -- consumed) and pass them to the lambda, which must return the
+    -- updated accumulators and possibly some extra values.  The
+    -- accumulators are turned back into arrays.  The 'Shape' is the
+    -- write index space.  The corresponding arrays must all have this
+    -- shape outermost.  This construct is not part of 'BasicOp'
+    -- because we need the @lore@ parameter.
+    WithAcc [(Shape, [VName], Maybe (Lambda lore, [SubExp]))] (Lambda lore)
   | Op (Op lore)
 
 deriving instance Decorations lore => Eq (ExpT lore)

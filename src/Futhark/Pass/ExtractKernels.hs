@@ -163,6 +163,7 @@ module Futhark.Pass.ExtractKernels (extractKernels) where
 import Control.Monad.Identity
 import Control.Monad.RWS.Strict
 import Control.Monad.Reader
+import Data.Bifunctor (first)
 import Data.Maybe
 import qualified Futhark.IR.Kernels as Out
 import Futhark.IR.Kernels.Kernel
@@ -264,10 +265,9 @@ transformStms path (bnd : bnds) =
       transformStms path $ stmsToList bnds' <> bnds
 
 unbalancedLambda :: Lambda -> Bool
-unbalancedLambda lam =
-  unbalancedBody
-    (namesFromList $ map paramName $ lambdaParams lam)
-    $ lambdaBody lam
+unbalancedLambda orig_lam =
+  unbalancedBody (namesFromList $ map paramName $ lambdaParams orig_lam) $
+    lambdaBody orig_lam
   where
     subExpBound (Var i) bound = i `nameIn` bound
     subExpBound (Constant _) _ = False
@@ -284,6 +284,8 @@ unbalancedLambda lam =
     unbalancedStm _ Op {} =
       False
     unbalancedStm _ DoLoop {} = False
+    unbalancedStm bound (WithAcc _ lam) =
+      unbalancedBody bound (lambdaBody lam)
     unbalancedStm bound (If cond tbranch fbranch _) =
       cond `subExpBound` bound
         && (unbalancedBody bound tbranch || unbalancedBody bound fbranch)
@@ -341,6 +343,12 @@ kernelAlternatives pat default_body ((cond, alt) : alts) = runBinder_ $ do
     If cond alt alt_body $
       IfDec (staticShapes (patternTypes pat)) IfEquiv
 
+transformLambda :: KernelPath -> Lambda -> DistribM (Out.Lambda Out.Kernels)
+transformLambda path (Lambda params body ret) =
+  Lambda params
+    <$> localScope (scopeOfLParams params) (transformBody path body)
+    <*> pure ret
+
 transformStm :: KernelPath -> Stm -> DistribM KernelsStms
 transformStm _ stm
   | "sequential" `inAttrs` stmAuxAttrs (stmAux stm) =
@@ -353,6 +361,12 @@ transformStm path (Let pat aux (If c tb fb rt)) = do
   tb' <- transformBody path tb
   fb' <- transformBody path fb
   return $ oneStm $ Let pat aux $ If c tb' fb' rt
+transformStm path (Let pat aux (WithAcc inputs lam)) =
+  oneStm . Let pat aux
+    <$> (WithAcc (map transformInput inputs) <$> transformLambda path lam)
+  where
+    transformInput (shape, arrs, op) =
+      (shape, arrs, fmap (first soacsLambdaToKernels) op)
 transformStm path (Let pat aux (DoLoop ctx val form body)) =
   localScope
     ( castScope (scopeOf form)
@@ -384,26 +398,6 @@ transformStm path (Let res_pat (StmAux cs _ _) (Op (Screma w arrs form)))
     lvl <- segThreadCapped [w] "segscan" $ NoRecommendation SegNoVirt
     addStms . fmap (certify cs)
       =<< segScan lvl res_pat w scan_ops map_lam_sequential arrs [] []
-
-  -- We are only willing to generate code for scanomaps that do not
-  -- involve array accumulators, and do not have parallelism in their
-  -- map function.  Such cases will fall through to the
-  -- screma-splitting case, and produce an ordinary map and scan.
-  -- Hopefully, the scan then triggers the ISWIM case above (otherwise
-  -- we will still crash in code generation).  However, if the map
-  -- lambda is already identity, let's just go ahead here.
-  | Just (scans, map_lam) <- isScanomapSOAC form,
-    ( all primType (concatMap (lambdaReturnType . scanLambda) scans)
-        && not (lambdaContainsParallelism map_lam)
-    )
-      || isIdentityLambda map_lam = runBinder_ $ do
-    scan_ops <- forM scans $ \(Scan scan_lam nes) -> do
-      let scan_lam' = soacsLambdaToKernels scan_lam
-      return $ SegBinOp Noncommutative scan_lam' nes mempty
-
-    let map_lam' = soacsLambdaToKernels map_lam
-    lvl <- segThreadCapped [w] "segscan" $ NoRecommendation SegNoVirt
-    addStms =<< segScan lvl res_pat w scan_ops map_lam' arrs [] []
 transformStm path (Let res_pat aux (Op (Screma w arrs form)))
   | Just [Reduce comm red_fun nes] <- isReduceSOAC form,
     let comm'

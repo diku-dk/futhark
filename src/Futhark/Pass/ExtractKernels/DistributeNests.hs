@@ -322,9 +322,13 @@ bodyContainsParallelism = any isParallelStm . bodyStms
     isParallelStm stm =
       isMap (stmExp stm)
         && not ("sequential" `inAttrs` stmAuxAttrs (stmAux stm))
-    isMap Op {} = True
+    isMap BasicOp {} = False
+    isMap Apply {} = False
+    isMap If {} = False
     isMap (DoLoop _ _ ForLoop {} body) = bodyContainsParallelism body
-    isMap _ = False
+    isMap (DoLoop _ _ WhileLoop {} _) = False
+    isMap (WithAcc _ lam) = bodyContainsParallelism $ lambdaBody lam
+    isMap Op {} = True
 
 lambdaContainsParallelism :: Lambda SOACS -> Bool
 lambdaContainsParallelism = bodyContainsParallelism . lambdaBody
@@ -436,6 +440,30 @@ maybeDistributeStm stm@(Let pat _ (If cond tbranch fbranch ret)) acc
             return acc'
       _ ->
         addStmToAcc stm acc
+maybeDistributeStm stm@(Let pat _ (WithAcc inputs lam)) acc
+  | lambdaContainsParallelism lam =
+    distributeSingleStm acc stm >>= \case
+      Just (kernels, res, nest, acc')
+        | not $
+            freeIn (drop num_accs (lambdaReturnType lam))
+              `namesIntersect` boundInKernelNest nest,
+          Just (perm, pat_unused) <- permutationAndMissing pat res ->
+          -- We need to pretend pat_unused was used anyway, by adding
+          -- it to the kernel nest.
+          localScope (typeEnvFromDistAcc acc') $ do
+            nest' <- expandKernelNest pat_unused nest
+            types <- asksScope scopeForSOACs
+            addPostStms kernels
+            let withacc = WithAccStm perm pat inputs lam
+            stms <-
+              (`runReaderT` types) $
+                fmap snd . simplifyStms =<< interchangeWithAcc nest' withacc
+            onTopLevelStms stms
+            return acc'
+      _ ->
+        addStmToAcc stm acc
+  where
+    num_accs = length inputs
 maybeDistributeStm (Let pat aux (Op (Screma w arrs form))) acc
   | Just [Reduce comm lam nes] <- isReduceSOAC form,
     Just m <- irwim pat w comm lam $ zip nes arrs = do
@@ -802,8 +830,12 @@ segmentedScatterKernel nest perm scatter_pat cs scatter_w lam ivs dests = do
         groupScatterResults (zip3 as_ws as_ns as_inps) (is' ++ vs)
           & map (inPlaceReturn ispace)
           & KernelBody () k_body_stms
+      -- Remove unused kernel inputs, since some of these might
+      -- reference the array we are scattering into.
+      kernel_inps' =
+        filter ((`nameIn` freeIn k_body) . kernelInputName) kernel_inps
 
-  (k, k_bnds) <- mapKernel mk_lvl ispace kernel_inps rts k_body
+  (k, k_bnds) <- mapKernel mk_lvl ispace kernel_inps' rts k_body
 
   traverse renameStm <=< runBinder_ $ do
     addStms k_bnds
@@ -863,9 +895,14 @@ segmentedUpdateKernel nest perm cs arr slice v = do
         WriteReturns (arrayShape arr_t) arr' [(map DimFix write_is, v')]
       )
 
+  -- Remove unused kernel inputs, since some of these might
+  -- reference the array we are scattering into.
+  let kernel_inps' =
+        filter ((`nameIn` freeIn kstms) . kernelInputName) kernel_inps
+
   mk_lvl <- mkSegLevel
   (k, prestms) <-
-    mapKernel mk_lvl ispace kernel_inps [res_t] $
+    mapKernel mk_lvl ispace kernel_inps' [res_t] $
       KernelBody () kstms [res]
 
   traverse renameStm <=< runBinder_ $ do

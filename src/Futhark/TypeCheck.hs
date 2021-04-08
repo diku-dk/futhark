@@ -56,7 +56,7 @@ where
 
 import Control.Monad.RWS.Strict
 import Control.Parallel.Strategies
-import Data.List (find, intercalate, sort)
+import Data.List (find, intercalate, isPrefixOf, sort)
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import qualified Data.Set as S
@@ -117,8 +117,8 @@ instance Checkable lore => Show (ErrorCase lore) where
   show (DupPatternError name) =
     "Variable " ++ pretty name ++ " bound twice in pattern."
   show (InvalidPatternError pat t desc) =
-    "Pattern " ++ pretty pat
-      ++ " cannot match value of type "
+    "Pattern\n" ++ pretty pat
+      ++ "\ncannot match value of type\n"
       ++ prettyTuple t
       ++ end
     where
@@ -361,7 +361,7 @@ observe name = do
 consume :: Checkable lore => Names -> TypeM lore ()
 consume als = do
   scope <- askScope
-  let isArray = maybe False ((> 0) . arrayRank . typeOf) . (`M.lookup` scope)
+  let isArray = maybe False (not . primType . typeOf) . (`M.lookup` scope)
   occur [consumption $ namesFromList $ filter isArray $ namesToList als]
 
 collectOccurences :: TypeM lore a -> TypeM lore (a, Occurences)
@@ -526,6 +526,21 @@ checkArrIdent v = do
   case t of
     Array {} -> return t
     _ -> bad $ NotAnArray v t
+
+checkAccIdent ::
+  Checkable lore =>
+  VName ->
+  TypeM lore (Shape, [Type])
+checkAccIdent v = do
+  t <- lookupType v
+  case t of
+    Acc _ ispace ts _ ->
+      pure (ispace, ts)
+    _ ->
+      bad . TypeError $
+        pretty v
+          ++ " should be an accumulator but is of type "
+          ++ pretty t
 
 -- | Type check a program containing arbitrary type information,
 -- yielding either a type error or a program with complete type
@@ -809,7 +824,7 @@ checkBasicOp (Update src idxes se) = do
     bad $ TypeError "The target of an Update must not alias the value to be written."
 
   mapM_ checkDimIndex idxes
-  require [Prim (elemType src_t) `arrayOfShape` Shape (sliceDims idxes)] se
+  require [arrayOf (Prim (elemType src_t)) (Shape (sliceDims idxes)) NoUniqueness] se
   consume =<< lookupAliases src
 checkBasicOp (Iota e x s et) = do
   require [Prim int64] e
@@ -884,6 +899,29 @@ checkBasicOp (Assert e (ErrorMsg parts) _) = do
     checkPart ErrorString {} = return ()
     checkPart (ErrorInt32 x) = require [Prim int32] x
     checkPart (ErrorInt64 x) = require [Prim int64] x
+checkBasicOp (UpdateAcc acc is ses) = do
+  (shape, ts) <- checkAccIdent acc
+
+  unless (length ses == length ts) $
+    bad $
+      TypeError $
+        "Accumulator requires "
+          ++ show (length ts)
+          ++ " values, but only "
+          ++ show (length ses)
+          ++ " provided."
+
+  unless (length is == shapeRank shape) $
+    bad $
+      TypeError $
+        "Accumulator requires "
+          ++ show (shapeRank shape)
+          ++ " indices, but only "
+          ++ show (length is)
+          ++ " provided."
+
+  zipWithM_ require (map pure ts) ses
+  consume =<< lookupAliases acc
 
 matchLoopResultExt ::
   Checkable lore =>
@@ -934,7 +972,7 @@ checkExp (Apply fname args rettype_annot _) = do
         "Expected apply result type " ++ pretty rettype_derived
           ++ " but annotation is "
           ++ pretty rettype_annot
-  checkFuncall (Just fname) paramtypes argflows
+  consumeArgs paramtypes argflows
 checkExp (DoLoop ctxmerge valmerge form loopbody) = do
   let merge = ctxmerge ++ valmerge
       (mergepat, mergeexps) = unzip merge
@@ -1026,6 +1064,46 @@ checkExp (DoLoop ctxmerge valmerge form loopbody) = do
                       scopeOf $ bodyStms loopbody
             map (`namesSubtract` bound_here)
               <$> mapM subExpAliasesM (bodyResult loopbody)
+checkExp (WithAcc inputs lam) = do
+  unless (length (lambdaParams lam) == 2 * num_accs) $
+    bad . TypeError $
+      show (length (lambdaParams lam))
+        ++ " parameters, but "
+        ++ show num_accs
+        ++ " accumulators."
+
+  let cert_params = take num_accs $ lambdaParams lam
+  acc_args <- forM (zip inputs cert_params) $ \((shape, arrs, op), p) -> do
+    mapM_ (require [Prim int64]) (shapeDims shape)
+    elem_ts <- forM arrs $ \arr -> do
+      arr_t <- lookupType arr
+      unless (shapeDims shape `isPrefixOf` arrayDims arr_t) $
+        bad . TypeError $ pretty arr <> " is not an array of outer shape " <> pretty shape
+      consume =<< lookupAliases arr
+      pure $ stripArray (shapeRank shape) arr_t
+
+    case op of
+      Just (op_lam, nes) -> do
+        let mkArrArg t = (t, mempty)
+        nes_ts <- mapM checkSubExp nes
+        unless (nes_ts == lambdaReturnType op_lam) $
+          bad $
+            TypeError $
+              unlines
+                [ "Accumulator operator return type: " ++ pretty (lambdaReturnType op_lam),
+                  "Type of neutral elements: " ++ pretty nes_ts
+                ]
+        checkLambda op_lam $
+          replicate (shapeRank shape) (Prim int64, mempty)
+            ++ map mkArrArg (elem_ts ++ elem_ts)
+      Nothing ->
+        return ()
+
+    pure (Acc (paramName p) shape elem_ts NoUniqueness, mempty)
+
+  checkLambda lam $ replicate num_accs (Prim Cert, mempty) ++ acc_args
+  where
+    num_accs = length inputs
 checkExp (Op op) = do
   checker <- asks envCheckOp
   checker op
@@ -1035,27 +1113,24 @@ checkSOACArrayArgs ::
   SubExp ->
   [VName] ->
   TypeM lore [Arg]
-checkSOACArrayArgs width vs =
-  forM vs $ \v -> do
-    (vt, v') <- checkSOACArrayArg v
-    let argSize = arraySize 0 vt
-    unless (argSize == width) $
-      bad $
-        TypeError $
-          "SOAC argument " ++ pretty v ++ " has outer size "
-            ++ pretty argSize
-            ++ ", but width of SOAC is "
-            ++ pretty width
-    return v'
+checkSOACArrayArgs width = mapM checkSOACArrayArg
   where
-    checkSOACArrayArg ident = do
-      (t, als) <- checkArg $ Var ident
-      case peelArray 1 t of
-        Nothing ->
-          bad $
-            TypeError $
-              "SOAC argument " ++ pretty ident ++ " is not an array"
-        Just rt -> return (t, (rt, als))
+    checkSOACArrayArg v = do
+      (t, als) <- checkArg $ Var v
+      case t of
+        Acc {} -> pure (t, als)
+        Array {} -> do
+          let argSize = arraySize 0 t
+          unless (argSize == width) $
+            bad . TypeError $
+              "SOAC argument " ++ pretty v ++ " has outer size "
+                ++ pretty argSize
+                ++ ", but width of SOAC is "
+                ++ pretty width
+          pure (rowType t, als)
+        _ ->
+          bad . TypeError $
+            "SOAC argument " ++ pretty v ++ " is not an array"
 
 checkType ::
   Checkable lore =>
@@ -1256,11 +1331,14 @@ checkFuncall ::
 checkFuncall fname paramts args = do
   let argts = map argType args
   unless (validApply paramts argts) $
-    bad $
-      ParameterMismatch
-        fname
-        (map fromDecl paramts)
-        $ map argType args
+    bad $ ParameterMismatch fname (map fromDecl paramts) $ map argType args
+  consumeArgs paramts args
+
+consumeArgs ::
+  [DeclType] ->
+  [Arg] ->
+  TypeM lore ()
+consumeArgs paramts args =
   forM_ (zip (map diet paramts) args) $ \(d, (_, als)) ->
     occur [consumption (consumeArg als d)]
   where
@@ -1276,10 +1354,11 @@ checkLambda (Lambda params body rettype) args = do
   let fname = nameFromString "<anonymous>"
   if length params == length args
     then do
+      -- Consumption for this is done explicitly elsewhere.
       checkFuncall
         Nothing
         (map ((`toDecl` Nonunique) . paramType) params)
-        args
+        $ map noArgAliases args
       let consumable = zip (map paramName params) (map argAliases args)
       checkFun'
         ( fname,

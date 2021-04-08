@@ -83,6 +83,7 @@ module Futhark.Construct
     foldBinOp,
     binOpLambda,
     cmpOpLambda,
+    mkLambda,
     sliceDim,
     fullSlice,
     fullSliceNum,
@@ -381,6 +382,7 @@ eWriteArray arr is v = do
 eBlank :: MonadBinder m => Type -> m (Exp (Lore m))
 eBlank (Prim t) = return $ BasicOp $ SubExp $ Constant $ blankPrimValue t
 eBlank (Array t shape _) = return $ BasicOp $ Scratch t $ shapeDims shape
+eBlank Acc {} = error "eBlank: cannot create blank accumulator"
 eBlank Mem {} = error "eBlank: cannot create blank memory"
 
 -- | Sign-extend to the given integer type.
@@ -465,6 +467,20 @@ binLambda bop arg_t ret_t = do
         lambdaReturnType = [Prim ret_t],
         lambdaBody = body
       }
+
+-- | Easily construct a 'Lambda' within a 'MonadBinder'.
+mkLambda ::
+  MonadBinder m =>
+  [LParam (Lore m)] ->
+  m Result ->
+  m (Lambda (Lore m))
+mkLambda params m = do
+  ((ret, res), stms) <- collectStms . localScope (scopeOfLParams params) $ do
+    res <- m
+    ret <- mapM subExpType res
+    pure (ret, res)
+  body <- mkBodyM stms res
+  pure $ Lambda params body ret
 
 -- | Slice a full dimension of the given size.
 sliceDim :: SubExp -> DimIndex SubExp

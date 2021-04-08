@@ -51,8 +51,11 @@ Some of them are supposed to be automatic.
    produces `futhark-X.Y.Z-linux-x86_64.xz`.  Put this tarball in some
    public location and make sure its permissions make it readable.
 
- * Run `stack upload .`.
+ * **This is done automatically by a CI job**: Run
+   `tools/release/hackage.sh`.
 
  * Update the Homebrew formula with `brew bump-formula-pr
    --url=https://github.com/diku-dk/futhark/archive/vX.Y.Z.tar.gz
-   futhark --verbose`.  This may take significant previous setup.
+   futhark --verbose`.  This may take significant previous setup.  In
+   practice someone else is running a script that automatically bumps
+   formulae every few hours.
