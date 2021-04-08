@@ -55,7 +55,7 @@ compileSegRed pat space reds kbody
     -- Declaration of the accumulator variables
     -- We have multiple accumulators because ie. an array of tuples is represented as multiple arrays.
     acc_vs <- forM (lambdaReturnType lam) $ \(Prim pt) ->
-      fmap tvVar $ dPrim "acc" pt
+      tvVar <$> dPrim "acc" pt
 
     initAccumulators acc_vs nes
 

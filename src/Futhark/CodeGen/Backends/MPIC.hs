@@ -130,7 +130,6 @@ compileProg =
                  MPI_Initialized(&(ctx->init_already));
                  if (!ctx->init_already)
                   MPI_Init(NULL, NULL);
-                 
                  MPI_Comm_size(MPI_COMM_WORLD, &(ctx->world_size));
                  MPI_Comm_rank(MPI_COMM_WORLD, &(ctx->rank));
 
@@ -224,13 +223,13 @@ compileOp (Gather memory type_size) = do
             recvcounts[i] = size;
             displs[i] = recvcounts[i-1] + displs[i-1];
           }
-          MPI_Gatherv($id:memory.mem, recvcounts[ctx->rank], MPI_BYTE, 
+          MPI_Gatherv($id:memory.mem, recvcounts[ctx->rank], MPI_BYTE,
           $id:memory.mem, recvcounts, displs, MPI_BYTE, 0, MPI_COMM_WORLD);
           free(recvcounts);
           free(displs);
         }else{
           int start = size*ctx->rank + size_remainder;
-          MPI_Gatherv($id:memory.mem+start, size, MPI_BYTE, 
+          MPI_Gatherv($id:memory.mem+start, size, MPI_BYTE,
           NULL, NULL, NULL, MPI_BYTE, 0, MPI_COMM_WORLD);
         }
       }
