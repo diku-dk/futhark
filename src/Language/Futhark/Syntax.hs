@@ -247,15 +247,14 @@ data DimDecl vn
     NamedDim (QualName vn)
   | -- | The size is a constant.
     ConstDim Int
-  | -- | No dimension declaration.
-    AnyDim
+  | -- | No known size - but still possibly given a unique name, so we
+    -- can recognise e.g. @type square [n] = [n][n]i32@ and make
+    -- @square []@ do the right thing.  If @Nothing@, then this is a
+    -- name distinct from any other.
+    AnyDim (Maybe vn)
   deriving (Show)
 
-deriving instance Eq (DimDecl Name)
-
 deriving instance Eq (DimDecl VName)
-
-deriving instance Ord (DimDecl Name)
 
 deriving instance Ord (DimDecl VName)
 
@@ -268,13 +267,13 @@ instance Foldable DimDecl where
 instance Traversable DimDecl where
   traverse f (NamedDim qn) = NamedDim <$> traverse f qn
   traverse _ (ConstDim x) = pure $ ConstDim x
-  traverse _ AnyDim = pure AnyDim
+  traverse f (AnyDim v) = AnyDim <$> traverse f v
 
 -- Note that the notion of unifyDims here is intentionally not what we
 -- use when we do real type unification in the type checker.
 instance ArrayDim (DimDecl VName) where
-  unifyDims AnyDim y = Just y
-  unifyDims x AnyDim = Just x
+  unifyDims AnyDim {} y = Just y
+  unifyDims x AnyDim {} = Just x
   unifyDims (NamedDim x) (NamedDim y) | x == y = Just $ NamedDim x
   unifyDims (ConstDim x) (ConstDim y) | x == y = Just $ ConstDim x
   unifyDims _ _ = Nothing

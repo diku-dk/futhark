@@ -679,7 +679,7 @@ relativise dest src =
   concat (replicate (length (splitPath src) - 1) "../") ++ dest
 
 dimDeclHtml :: DimDecl VName -> DocM Html
-dimDeclHtml AnyDim = return mempty
+dimDeclHtml (AnyDim _) = return mempty
 dimDeclHtml (NamedDim v) = qualNameHtml v
 dimDeclHtml (ConstDim n) = return $ toHtml (show n)
 
