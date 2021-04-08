@@ -452,6 +452,11 @@ commandLineOptions =
       (NoArg $ Right $ \opts -> opts {futharkAction = PolyAction printAliasesAction})
       "Print the resulting IR with aliases.",
     Option
+      []
+      ["merge-mem"]
+      (NoArg $ Right $ \opts -> opts {futharkAction = SeqMemAction $ const memoryBlockMerging})
+      "Perform memory merging and print the results.",
+    Option
       "m"
       ["metrics"]
       (NoArg $ Right $ \opts -> opts {futharkAction = PolyAction metricsAction})
