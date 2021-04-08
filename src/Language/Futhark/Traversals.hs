@@ -247,7 +247,7 @@ instance ASTMappable (DimExp VName) where
 instance ASTMappable (DimDecl VName) where
   astMap tv (NamedDim vn) = NamedDim <$> mapOnQualName tv vn
   astMap _ (ConstDim k) = pure $ ConstDim k
-  astMap _ AnyDim = pure AnyDim
+  astMap tv (AnyDim vn) = AnyDim <$> traverse (mapOnName tv) vn
 
 instance ASTMappable (TypeParamBase VName) where
   astMap = traverse . mapOnName

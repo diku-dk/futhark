@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+  * Initial work on granting programmers more control over existential
+    sizes, starting with making type abbreviations function as
+    existential quantifiers (#1301).
+
 ### Removed
 
 ### Changed

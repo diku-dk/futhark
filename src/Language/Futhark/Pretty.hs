@@ -100,7 +100,8 @@ instance Pretty PrimValue where
   ppr (FloatValue v) = ppr v
 
 instance IsName vn => Pretty (DimDecl vn) where
-  ppr AnyDim = mempty
+  ppr (AnyDim Nothing) = mempty
+  ppr (AnyDim (Just v)) = text "?" <> pprName v
   ppr (NamedDim v) = ppr v
   ppr (ConstDim n) = ppr n
 
