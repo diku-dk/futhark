@@ -45,6 +45,7 @@ toParam name Array {} = do
     ArrayVar _ (ArrayEntry (MemLocation mem _ _) _) ->
       return $ Imp.MemParam mem DefaultSpace
     _ -> error $ "[toParam] Could not handle array for " ++ show name
+toParam name Acc {} = error $ "toParam Acc: " ++ pretty name
 
 freeParams :: Imp.Code -> [VName] -> MPIGen [Imp.Param]
 freeParams code names = do

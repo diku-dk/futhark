@@ -207,7 +207,8 @@ compileOp (Segop _name _params code _retvals iterations) = do
   GC.decl [C.cdecl|typename int64_t iterations = $exp:i;|]
   GC.compileCode code
 compileOp (Gather memory type_size) = do
-  GC.stm [C.cstm|
+  GC.stm
+    [C.cstm|
       {
         uint nb_elements = $id:memory.size / $type_size;
         uint size_remainder = $type_size *(nb_elements % ctx->world_size);
@@ -238,7 +239,8 @@ compileOp (DistributedLoop _s i prebody body postbody _ _) = do
   GC.compileCode prebody
   GC.decl [C.cdecl|typename int64_t chunk_size;|]
   GC.decl [C.cdecl|typename int64_t end;|]
-  GC.stm [C.cstm|
+  GC.stm
+    [C.cstm|
       if(!ctx->rank){
         chunk_size = iterations / ctx->world_size + iterations % ctx->world_size;
         $id:i = 0;
@@ -247,7 +249,7 @@ compileOp (DistributedLoop _s i prebody body postbody _ _) = do
         $id:i = chunk_size*ctx->rank + iterations % ctx->world_size;
       }
     |]
-  
+
   GC.stm [C.cstm| end = $id:i + chunk_size;|]
   body' <- GC.blockScope $ GC.compileCode body
   GC.stm

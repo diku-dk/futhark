@@ -29,7 +29,7 @@ data MPIOp
   | LoadNbNode VName
   | LoadNodeId VName
   | DistributedLoop String VName Code Code Code [Param] VName
-  | Gather VName Int64 
+  | Gather VName Int64
   | CrashWithThisMessage String
   deriving (Show)
 
@@ -55,7 +55,7 @@ instance Pretty MPIOp where
       <+> nestedBlock "{" "}" (ppr body)
       <+> ppr postbody
   ppr (Gather memory type_size) =
-    text "Gather" 
+    text "Gather"
       <+> ppr memory
       <+> ppr type_size
 
