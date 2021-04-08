@@ -5,14 +5,13 @@ module Futhark.Optimise.MemBlockCoalesce.DataStructs
        , CoalsEntry(..), FreeVarSubsts
        , aliasTransClos, updateAliasing, getNamesFromSubExps, unionCoalsEntry
        , getArrMemAssocFParam, createsAliasedArrOK, getScopeMemInfo, prettyCoalTab
-       , createsNewArrIK, createsNewArrOK, getArrMemAssoc, getUniqueMemFParam )
+       , createsNewArrOK, getArrMemAssoc, getUniqueMemFParam )
        where
 
 
 import Prelude
 import Data.Maybe
 import qualified Data.Map.Strict as M
-import qualified Data.Set      as S
 
 --import Debug.Trace
 
@@ -84,104 +83,98 @@ unionCoalsEntry :: CoalsEntry -> CoalsEntry -> CoalsEntry
 unionCoalsEntry etry1 (CoalsEntry dstmem2 dstind2  alsmem2 vartab2 optdeps2) =
   if   dstmem etry1 /= dstmem2 || dstind etry1 /= dstind2
   then etry1
-  else etry1 { alsmem = alsmem  etry1 `S.union` alsmem2
+  else etry1 { alsmem = alsmem  etry1 <> alsmem2
              , optdeps= optdeps etry1 `M.union` optdeps2
              , vartab = vartab  etry1 `M.union` vartab2 }
 
 getNamesFromSubExps :: [SubExp] -> [VName]
-getNamesFromSubExps =
-  mapMaybe (\se->case se of
-                   Constant _ -> Nothing
-                   Var     nm -> Just nm )
+getNamesFromSubExps = mapMaybe var2Maybe
+  where
+    var2Maybe (Constant _) = Nothing
+    var2Maybe (Var nm) = Just nm
 
 aliasTransClos :: AliasTab -> Names -> Names
 aliasTransClos alstab args =
-  S.foldl' (\acc x -> case M.lookup x alstab of
-                        Nothing -> acc
-                        Just al -> acc `S.union` al
-            ) args args
+  foldl (<>) args $ mapMaybe (`M.lookup` alstab) $ namesToList args
 
-updateAliasing :: AliasTab -> Pattern (Aliases ExpMem.SeqMem) -> AliasTab
-updateAliasing stab pat =
-  foldl (\stabb patel->
-            -- Compute the transitive closure of current pattern
-            -- name by concating all its aliases entries in stabb.
-            -- In case of an IN-PLACE update, add the previous name
-            -- to the alias set of the new one.
-            let (al,_)  = patElemAttr patel
-                al_nms0 = unNames al 
-                -- ToDo: in-place updates may not be treated as aliases
-                --       and they should with customized LastUse
-                --       but we have changed representation and
-                --       "bindage" does not exist anymore, i.e.,
-                --       not related to pattern
-                al_nms = case patElemBindage patel of
-                           BindVar -> al_nms0
-                           BindInPlace _ nm _ -> S.insert nm al_nms0
+updateAliasing :: AliasTab -> (Pattern (Aliases ExpMem.SeqMem), Maybe VName) -> AliasTab
+updateAliasing stab (pat, m_ip) =
+  -- ^ `m_ip` is maybe the old variable of an in-place update
+  foldl updateTab stab $ map addNothing (patternContextElements pat) ++
+                         map (addMaybe m_ip) (patternValueElements pat)
+  where
+    addMaybe m_v a = (a, m_v)
+    addNothing a = (a,Nothing)
+    -- Compute the transitive closure of current pattern
+    -- name by concating all its aliases entries in stabb.
+    -- In case of an IN-PLACE update (`mb_v` not Nothing)
+    -- add the previous name to the alias set of the new one.
+    updateTab :: AliasTab -> (PatElemT (LetDec (Aliases ExpMem.SeqMem)), Maybe VName) -> AliasTab
+    updateTab stabb (patel, mb_v) =
+      let (al,_)  = patElemDec patel
+          al_nms  = case mb_v of
+                      Nothing -> unAliases al
+                      Just v  -> unAliases al <> oneName v
+          al_trns = foldl (<>) al_nms $ mapMaybe (`M.lookup` stabb) $ namesToList al_nms
+      in  if al_trns == mempty then stabb
+          else M.insert (patElemName patel) al_trns stabb
 
-                --al_nms = al_nms0
-                al_trns= S.foldl' (\acc x -> case M.lookup x stabb of
-                                                Nothing -> acc
-                                                Just aal -> acc `S.union` aal
-                                   ) al_nms al_nms
-                -- al_trns' = trace ("ALIAS Pattern: "++(pretty (patElemName patel))++" aliases: "++pretty (S.toList al_trns)) al_trns
-            in  if null al_trns then stabb
-                else M.insert (patElemName patel) al_trns stabb
-        ) stab $ patternContextElements pat ++ patternValueElements pat
-
-
-getArrMemAssoc :: Pattern (Aliases ExpMem.SeqMem) -> [(VName,ArrayMemBound,Bindage)]
+getArrMemAssoc :: Pattern (Aliases ExpMem.SeqMem) -> [(VName,ArrayMemBound)]
 getArrMemAssoc pat =
-  mapMaybe (\patel -> case snd $ patElemAttr patel of
-                        (ExpMem.MemArray tp shp _ (ArrayIn mem_nm indfun) ) ->
+  mapMaybe (\patel -> case snd $ patElemDec patel of
+                        (ExpMem.MemArray tp shp _ (ExpMem.ArrayIn mem_nm indfun) ) ->
                             -- let mem_nm' = trace ("MemLore: "++(pretty (patElemName patel))++" is ArrayMem: "++pretty tp++" , "++pretty shp++" , "++pretty u++" , "++pretty mem_nm++" , "++pretty indfun++" ("++pretty l1++") ") mem_nm
-                            Just (patElemName patel, MemBlock tp shp mem_nm indfun, patElemBindage patel)
-                        ExpMem.MemMem _ _ -> Nothing
-                        ExpMem.MemPrim _   -> Nothing
+                            Just (patElemName patel, MemBlock tp shp mem_nm indfun)
+                        ExpMem.MemMem _  -> Nothing
+                        ExpMem.MemPrim _ -> Nothing
            ) $ patternValueElements pat
 
 getArrMemAssocFParam :: [FParam (Aliases ExpMem.SeqMem)] -> [(VName,ArrayMemBound)]
 getArrMemAssocFParam =
-  mapMaybe (\param -> case paramAttr param of
-                        (ExpMem.MemArray tp shp _ (ArrayIn mem_nm indfun)) ->
+  mapMaybe (\param -> case paramDec param of
+                        (ExpMem.MemArray tp shp _ (ExpMem.ArrayIn mem_nm indfun)) ->
                             Just (paramName param, MemBlock tp shp mem_nm indfun)
-                        ExpMem.MemMem _ _ -> Nothing
-                        ExpMem.MemPrim _   -> Nothing
+                        ExpMem.MemMem _  -> Nothing
+                        ExpMem.MemPrim _ -> Nothing
            )
 
 
 getUniqueMemFParam :: [FParam (Aliases ExpMem.SeqMem)] -> M.Map VName (SubExp,Space)
 getUniqueMemFParam params =
-  let mems = mapMaybe (\el -> case paramAttr el of
-                                ExpMem.MemMem sz sp -> Just (paramName el, (sz,sp))
+  let mems = mapMaybe (\el -> case paramDec el of
+                                ExpMem.MemMem sp -> Just (paramName el, (intConst Int64 3, sp))
+                                -- ^ potential bug: size of mem is not a param anymore! Put 3 to compile!
                                 _ -> Nothing
                       ) params
-      upms = S.fromList $
-             mapMaybe (\el -> case paramAttr el of
-                                ExpMem.MemArray _ _ Unique (ArrayIn mem_nm _) ->
+      upms = namesFromList $
+             mapMaybe (\el -> case paramDec el of
+                                ExpMem.MemArray _ _ Unique (ExpMem.ArrayIn mem_nm _) ->
                                     Just mem_nm
                                 _ -> Nothing
                       ) params
-  in M.fromList $ filter (\ (k,_) -> S.member k upms) mems
+  in M.fromList $ filter (\ (k,_) -> nameIn k upms) mems
 
 getScopeMemInfo :: VName -> Scope (Aliases ExpMem.SeqMem)
                 -> Maybe ArrayMemBound
 getScopeMemInfo r scope_env0 =
   case M.lookup r scope_env0 of
-    Just (LetInfo  (_,ExpMem.MemArray tp shp _ (ArrayIn m idx))) -> Just (MemBlock tp shp m idx)
-    Just (FParamInfo (ExpMem.MemArray tp shp _ (ArrayIn m idx))) -> Just (MemBlock tp shp m idx)
-    Just (LParamInfo (ExpMem.MemArray tp shp _ (ArrayIn m idx))) -> Just (MemBlock tp shp m idx)
+    Just (LetName  (_,ExpMem.MemArray tp shp _ (ExpMem.ArrayIn m idx))) -> Just (MemBlock tp shp m idx)
+    Just (FParamName (ExpMem.MemArray tp shp _ (ExpMem.ArrayIn m idx))) -> Just (MemBlock tp shp m idx)
+    Just (LParamName (ExpMem.MemArray tp shp _ (ExpMem.ArrayIn m idx))) -> Just (MemBlock tp shp m idx)
     _ -> Nothing
 
 createsNewArrOK :: Exp (Aliases ExpMem.SeqMem) -> Bool
-createsNewArrOK (BasicOp Partition{}) = True
 createsNewArrOK (BasicOp Replicate{}) = True
 createsNewArrOK (BasicOp Iota{}) = True
 createsNewArrOK (BasicOp Manifest{}) = True
 createsNewArrOK (BasicOp ExpMem.Copy{}) = True
 createsNewArrOK (BasicOp Concat{}) = True
 createsNewArrOK (BasicOp ArrayLit{}) = True
-createsNewArrOK (Op (ExpMem.Inner ExpMem.Kernel{})) = True
+createsNewArrOK (Op _) = True
+--createsNewArrOK (Op (ExpMem.Inner (ExpMem.SegOp _))) = True
+--createsNewArrOK (BasicOp Partition{}) = True -- was this removed?
+--createsNewArrOK (Op (ExpMem.Inner ExpMem.Kernel{})) = True -- absolete
+--KernelsMem
 createsNewArrOK _ = False
 
 {--
@@ -212,7 +205,7 @@ createsNewArrIK _ = False
 --   by transposition we get a directly-mapped array, which
 --   is expected by the copying in y[4].
 createsAliasedArrOK :: Exp (Aliases ExpMem.SeqMem) -> Maybe VName --ExpMem.IxFun
-createsAliasedArrOK (BasicOp (Reshape   _ _ arr_nm)) = Just arr_nm
+createsAliasedArrOK (BasicOp (Reshape _ arr_nm)) = Just arr_nm
 createsAliasedArrOK (BasicOp (SubExp  (Var arr_nm))) = Just arr_nm
 --createsAliasedArrOK (BasicOp (Rearrange _ _ arr_nm)) = Just arr_nm
 --createsAliasedArrOK (BasicOp (Rotate    _ _ arr_nm)) = Just arr_nm
@@ -221,6 +214,6 @@ createsAliasedArrOK _ = Nothing
 prettyCoalTab :: CoalsTab -> String
 prettyCoalTab tab =
   let list_tups = map (\(m_b, CoalsEntry md _ als vtab deps) ->
-                          (m_b, md, S.toList als, M.keys vtab, M.toList deps)
+                          (m_b, md, namesToList als, M.keys vtab, M.toList deps)
                       ) $ M.toList tab
   in  pretty list_tups
