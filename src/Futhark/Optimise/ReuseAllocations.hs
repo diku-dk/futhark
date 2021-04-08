@@ -26,6 +26,9 @@ import Futhark.Pass (Pass (..), PassM)
 import qualified Futhark.Pass as Pass
 import Futhark.Util (invertMap)
 
+import qualified Futhark.Optimise.MemBlockCoalesce as MemCoal
+import System.IO.Unsafe (unsafePerformIO)
+
 -- | A mapping from allocation names to their size and space.
 type Allocs = Map VName (SubExp, Space)
 
@@ -214,7 +217,7 @@ onKernels f =
 optimise :: Pass KernelsMem KernelsMem
 optimise =
   Pass "reuse allocations" "reuse allocations" $ \prog ->
-    let _ = unsafePerformIO (memoryBlockMerging prog)
+    let _ = unsafePerformIO (MemCoal.memoryBlockMerging prog)
         (lumap, _) = LastUse.analyseProg prog
         graph =
           foldMap
