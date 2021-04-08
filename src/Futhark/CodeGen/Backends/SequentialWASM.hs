@@ -221,7 +221,8 @@ emccExportNames jses =
     map (\arg -> "'" ++ gfn "new" arg ++ "'") jses' ++
     map (\arg -> "'" ++ gfn "shape" arg ++ "'") jses' ++
     map (\arg -> "'" ++ gfn "values_raw" arg ++ "'") jses' ++
-    map (\arg -> "'" ++ gfn "values" arg ++ "'")  jses'
+    map (\arg -> "'" ++ gfn "values" arg ++ "'")  jses' ++ 
+    ["_futhark_context_config_new", "_futhark_context_new", "_futhark_context_sync"]
   where
     jses' = filter (\t -> dim t >  0) $ nub $ concatMap (\jse -> (parameters jse) ++ (ret jse)) jses
     gfn typ str = "_futhark_" ++ typ ++ "_" ++ baseType str ++ "_" ++ show (dim str) ++ "d"
@@ -231,9 +232,11 @@ cwrapFun :: String -> Int -> String
 cwrapFun fname numArgs =
   T.unpack
   [text|
-  ${fn} = Module.cwrap(
-    '${fn}', 'number', [${args}],
-  );
+  ${fn} = Module.onRuntimeInitialized = () => { 
+    Module.cwrap(
+      '${fn}', 'number', [${args}],
+    );
+  }
   |]
   where 
    fn = T.pack fname
@@ -335,9 +338,11 @@ ptrFromWrap =
 cwrapEntryPoint :: JSEntryPoint -> String
 cwrapEntryPoint jse = 
   unlines 
-  ["    futhark_entry_" ++ ename ++ " = Module.cwrap(", 
-   "      'futhark_entry_" ++ ename ++ "', 'number', " ++ args,
-   "    );"]
+  ["    futhark_entry_" ++ ename ++ " = Module.onRuntimeInitialized = () => {",
+   "      Module.cwrap(", 
+   "        'futhark_entry_" ++ ename ++ "', 'number', " ++ args,
+   "      );",
+   "    }"]
    where
     ename = name jse
     arg_length = (length (parameters jse)) + (length (ret jse))
@@ -460,5 +465,5 @@ runServer =
   [text|
    var context = new FutharkContext();
    var server = new Server(context);
-   server.run;
+   server.run();
   |]

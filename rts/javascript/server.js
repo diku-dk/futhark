@@ -6,17 +6,17 @@ class Server {
   constructor(ctx) {
     this.ctx = ctx;
     this._vars = {};
-    this._commands = { 'inputs': _cmd_inputs,
-                'outputs': _cmd_outputs,
-                'call': _cmd_call,
-                'restore': _cmd_restore,
-                'store': _cmd_store,
-                'free': _cmd_free,
-                'clear': _cmd_dummy,
-                'pause_profiling': _cmd_dummy,
-                'unpause_profiling': _cmd_dummy,
-                'report': _cmd_dummy
-               };
+    this._commands = [ 'inputs',
+                'outputs',
+                'call',
+                'restore',
+                'store',
+                'free',
+                'clear',
+                'pause_profiling',
+                'unpause_profiling',
+                'report'
+               ];
   }
 
   _get_arg(args, i) {
@@ -181,7 +181,18 @@ class Server {
       var cmd = words[0];
       var args = words.splice(1);
       if (cmd in this._commands) {
-        this._commands[cmd](args);
+        switch (cmd) {
+          case 'inputs': _cmd_inputs(args); break;
+          case 'outputs': _cmd_outputs(args); break
+          case 'call': _cmd_call(args); break
+          case 'restore': _cmd_restore(args); break
+          case 'store': _cmd_store(args); break
+          case 'free': _cmd_free(args); break
+          case 'clear': _cmd_dummy(args); break
+          case 'pause_profiling': _cmd_dummy(args); break
+          case 'unpause_profiling': _cmd_dummy(args); break
+          case 'report': _cmd_dummy(args); break
+       }
       } else {
         throw "Unknown command: " + cmd;
       }
