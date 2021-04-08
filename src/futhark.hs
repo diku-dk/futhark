@@ -18,8 +18,8 @@ import qualified Futhark.CLI.Datacmp as Datacmp
 import qualified Futhark.CLI.Dataset as Dataset
 import qualified Futhark.CLI.Dev as Dev
 import qualified Futhark.CLI.Doc as Doc
-import qualified Futhark.CLI.MPI as MPI
 import qualified Futhark.CLI.Literate as Literate
+import qualified Futhark.CLI.MPI as MPI
 import qualified Futhark.CLI.Misc as Misc
 import qualified Futhark.CLI.Multicore as Multicore
 import qualified Futhark.CLI.OpenCL as OpenCL

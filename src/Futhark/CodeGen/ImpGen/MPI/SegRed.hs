@@ -14,14 +14,14 @@ import Prelude hiding (quot, rem)
 type DoSegBody = (([(SubExp, [Imp.TExp Int64])] -> MPIGen ()) -> MPIGen ())
 
 initAccumulators :: [VName] -> [SubExp] -> ImpM lore r op ()
-initAccumulators acc_vs nes = 
+initAccumulators acc_vs nes =
   -- Assign each acumulator value to the corresponding neutral element
   forM_ (zip acc_vs nes) $ \(acc_v, ne) -> do
     ne' <- toExp ne
     -- "<~~" Untyped assignment.
     acc_v <~~ ne'
 
--- Core stage reduction 
+-- Core stage reduction
 stageReduction :: Lambda MCMem -> [SubExp] -> [VName] -> [SubExp] -> [Imp.TExp Int64] -> ImpM MCMem Env Imp.MPIOp ()
 stageReduction lam nes acc_vs stage_arrays idxs = do
   -- Declare lambda params
@@ -53,7 +53,7 @@ compileSegRed pat space reds kbody
   | [(gtid, _w)] <- unSegSpace space,
     [SegBinOp _ lam nes (Shape [])] <- reds = collect $ do
     -- Declaration of the accumulator variables
-    -- We have multiple accumulators because ie. an array of tuples is represented as multiple arrays. 
+    -- We have multiple accumulators because ie. an array of tuples is represented as multiple arrays.
     acc_vs <- forM (lambdaReturnType lam) $ \(Prim pt) ->
       fmap tvVar $ dPrim "acc" pt
 
@@ -66,7 +66,7 @@ compileSegRed pat space reds kbody
       dPrim_ gtid int64
       copyDWIM gtid [] (Var . tvVar $ stage_one_idx) []
       compileStms mempty (kernelBodyStms kbody) $ stageReduction lam nes acc_vs (map (\(Returns _ se) -> se) (kernelBodyResult kbody)) []
-    
+
     emit $ Imp.Op $ Imp.DistributedLoop "segred" (tvVar stage_one_idx) Imp.Skip stage_one mempty [] $ segFlat space
 
     -- Step B : Copy accumulator to array
@@ -77,11 +77,11 @@ compileSegRed pat space reds kbody
     node_id <- dPrim "node_id" int32
     emit $ Imp.Op $ Imp.LoadNodeId (tvVar node_id)
 
-    -- Allocate memory for stage one arrays 
+    -- Allocate memory for stage one arrays
     stage_one_mems <- forM (lambdaReturnType lam) $ \(Prim pt) ->
       sAlloc "second_stage_acc" (typeSize $ Array pt (Shape [tvSize nb_nodes]) NoUniqueness) DefaultSpace
 
-    -- Declare stage one arrays 
+    -- Declare stage one arrays
     stage_one_arrays <- forM (zip stage_one_mems (lambdaReturnType lam)) $ \(mem, Prim pt) ->
       sArrayInMem "second_stage_arr" pt (Shape [Var . tvVar $ nb_nodes]) mem
 
@@ -90,7 +90,7 @@ compileSegRed pat space reds kbody
       copyDWIMFix array [Imp.vi64 $ tvVar node_id] (Var acc) []
 
     -- Step C : Gather arrays on main node
-    forM_ (zip stage_one_mems  (lambdaReturnType lam)) $ \(mem, Prim pt) ->
+    forM_ (zip stage_one_mems (lambdaReturnType lam)) $ \(mem, Prim pt) ->
       gather mem pt
 
     -- Step D : Stage 2 reduction
