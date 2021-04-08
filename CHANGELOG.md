@@ -9,12 +9,38 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
-  * Better `futhark test`/`futhark bench` errors when test data does
-    not have the expected type.
-
 ### Removed
 
 ### Changed
+
+### Fixed
+
+  * `futhark_context_report()` now internally calls
+    `futhark_context_sync()` before collecting profiling information
+    (if applicable).
+
+## [0.19.4]
+
+### Fixed
+
+  * Some uniqueness ignorance in fusion (#1291).
+
+  * An invalid transformation could in rare cases cause race
+    conditions (#1292).
+
+  * Generated Python and C code should now be warning-free.
+
+  * Missing check for uses of size-lifted types (#1294).
+
+  * Error in simplification of concatenations could cause compiler
+    crashes (#1296).
+
+## [0.19.3]
+
+### Added
+
+  * Better `futhark test`/`futhark bench` errors when test data does
+    not have the expected type.
 
 ### Fixed
 

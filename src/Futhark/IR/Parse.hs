@@ -9,6 +9,8 @@ module Futhark.IR.Parse
     parseKernelsMem,
     parseMC,
     parseMCMem,
+    parseSeq,
+    parseSeqMem,
   )
 where
 
@@ -33,6 +35,8 @@ import Futhark.IR.Primitive.Parse
 import Futhark.IR.SOACS (SOACS)
 import qualified Futhark.IR.SOACS.SOAC as SOAC
 import qualified Futhark.IR.SegOp as SegOp
+import Futhark.IR.Seq (Seq)
+import Futhark.IR.SeqMem (SeqMem)
 import Futhark.Util.Pretty (prettyText)
 import Text.Megaparsec
 import Text.Megaparsec.Char hiding (space)
@@ -81,8 +85,19 @@ pSlash = void $ lexeme "/"
 pAsterisk = void $ lexeme "*"
 pArrow = void $ lexeme "->"
 
-pNonArray :: Parser (TypeBase shape u)
-pNonArray = Prim <$> pPrimType
+pNonArray :: Parser (TypeBase shape NoUniqueness)
+pNonArray =
+  choice
+    [ Prim <$> pPrimType,
+      "acc"
+        *> parens
+          ( Acc
+              <$> pVName <* pComma
+              <*> pShape <* pComma
+              <*> pTypes
+              <*> pure NoUniqueness
+          )
+    ]
 
 pTypeBase ::
   ArrayShape shape =>
@@ -135,6 +150,12 @@ pDeclExtType = pDeclBase pExtType
 
 pSubExp :: Parser SubExp
 pSubExp = Var <$> pVName <|> Constant <$> pPrimValue
+
+pSubExps :: Parser [SubExp]
+pSubExps = braces (pSubExp `sepBy` pComma)
+
+pVNames :: Parser [VName]
+pVNames = braces (pVName `sepBy` pComma)
 
 pPatternLike :: Parser a -> Parser ([a], [a])
 pPatternLike p = braces $ do
@@ -269,6 +290,9 @@ pBasicOp =
       ArrayLit
         <$> brackets (pSubExp `sepBy` pComma)
         <*> (lexeme ":" *> "[]" *> pType),
+      keyword "update_acc"
+        *> parens
+          (UpdateAcc <$> pVName <* pComma <*> pSubExps <* pComma <*> pSubExps),
       --
       pConvOp "sext" SExt pIntType pIntType,
       pConvOp "zext" ZExt pIntType pIntType,
@@ -436,12 +460,27 @@ pScan pr =
     <$> pLambda pr <* pComma
     <*> braces (pSubExp `sepBy` pComma)
 
+pWithAcc :: PR lore -> Parser (Exp lore)
+pWithAcc pr =
+  keyword "with_acc"
+    *> parens (WithAcc <$> braces (pInput `sepBy` pComma) <* pComma <*> pLambda pr)
+  where
+    pInput =
+      parens
+        ( (,,)
+            <$> pShape <* pComma
+            <*> pVNames
+            <*> optional (pComma *> pCombFun)
+        )
+    pCombFun = parens ((,) <$> pLambda pr <* pComma <*> pSubExps)
+
 pExp :: PR lore -> Parser (Exp lore)
 pExp pr =
   choice
     [ pIf pr,
       pApply pr,
       pLoop pr,
+      pWithAcc pr,
       Op <$> pOp pr,
       BasicOp <$> pBasicOp
     ]
@@ -823,14 +862,24 @@ pMemInfo pd pu pret =
   choice
     [ MemPrim <$> pPrimType,
       keyword "mem" $> MemMem <*> choice [pSpace, pure DefaultSpace],
-      pArray
+      pArrayOrAcc
     ]
   where
-    pArray = do
+    pArrayOrAcc = do
       u <- pu
       shape <- Shape <$> many (brackets pd)
+      choice [pArray u shape, pAcc u]
+    pArray u shape = do
       pt <- pPrimType
       MemArray pt shape u <$> (lexeme "@" *> pret)
+    pAcc u =
+      keyword "acc"
+        *> parens
+          ( MemAcc <$> pVName <* pComma
+              <*> pShape <* pComma
+              <*> pTypes
+              <*> pure u
+          )
 
 pSpace :: Parser Space
 pSpace =
@@ -881,6 +930,16 @@ prSOACS :: PR SOACS
 prSOACS =
   PR pDeclExtType pExtType pDeclType pType pType (pSOAC prSOACS) () ()
 
+prSeq :: PR Seq
+prSeq =
+  PR pDeclExtType pExtType pDeclType pType pType empty () ()
+
+prSeqMem :: PR SeqMem
+prSeqMem =
+  PR pRetTypeMem pBranchTypeMem pFParamMem pLParamMem pLetDecMem op () ()
+  where
+    op = pMemOp empty
+
 prKernels :: PR Kernels
 prKernels =
   PR pDeclExtType pExtType pDeclType pType pType op () ()
@@ -912,6 +971,12 @@ parseLore pr fname s =
 
 parseSOACS :: FilePath -> T.Text -> Either T.Text (Prog SOACS)
 parseSOACS = parseLore prSOACS
+
+parseSeq :: FilePath -> T.Text -> Either T.Text (Prog Seq)
+parseSeq = parseLore prSeq
+
+parseSeqMem :: FilePath -> T.Text -> Either T.Text (Prog SeqMem)
+parseSeqMem = parseLore prSeqMem
 
 parseKernels :: FilePath -> T.Text -> Either T.Text (Prog Kernels)
 parseKernels = parseLore prKernels

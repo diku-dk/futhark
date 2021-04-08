@@ -90,8 +90,10 @@ Context
 
 .. c:function:: void futhark_context_free(struct futhark_context *ctx)
 
-   Free the context object.  It must not be used again.  The
-   configuration must be freed separately with
+   Free the context object.  It must not be used again.  You must call
+   :c:func:`futhark_context_sync` before calling this function to
+   ensure there are no outstanding asynchronous operations still
+   running. The configuration must be freed separately with
    :c:func:`futhark_context_config_free`.
 
 .. c:function:: int futhark_context_sync(struct futhark_context *ctx)
@@ -132,7 +134,7 @@ Context
    contain interesting information if
    :c:func:`futhark_context_config_set_debugging` or
    :c:func:`futhark_context_config_set_profiling` has been called
-   previously.
+   previously.  Returns ``NULL`` on failure.
 
 .. c:function:: int futhark_context_clear_caches(struct futhark_context *ctx)
 
@@ -171,7 +173,7 @@ will not result in a double free.
    dimensions express the number of elements.  The data is copied into
    the new value.  It is the caller's responsibility to eventually
    call :c:func:`futhark_free_i32_1d`.  Multi-dimensional arrays are
-   assumed to be in row-major form.
+   assumed to be in row-major form.  Returns ``NULL`` on failure.
 
 .. c:function:: struct futhark_i32_1d *futhark_new_raw_i32_1d(struct futhark_context *ctx, char *data, int offset, int64_t dim0)
 
@@ -180,6 +182,7 @@ will not result in a double free.
    ``c`` backend, but when using e.g. the ``opencl`` backend, the
    ``data`` parameter will be a ``cl_mem``.  It is the caller's
    responsibility to eventually call :c:func:`futhark_free_i32_1d`.
+   Returns ``NULL`` on failure.
 
 .. c:function:: int futhark_free_i32_1d(struct futhark_context *ctx, struct futhark_i32_1d *arr)
 
@@ -197,7 +200,8 @@ will not result in a double free.
 
    Return a pointer to the shape of the array, with one element per
    dimension.  The lifetime of the shape is the same as ``arr``, and
-   should *not* be manually freed.
+   should *not* be manually freed.  Assuming ``arr`` is a valid
+   object, this function cannot fail.
 
 .. _opaques:
 

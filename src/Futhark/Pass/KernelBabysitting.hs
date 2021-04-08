@@ -282,7 +282,8 @@ ensureCoalescedAccess
           not $ null rem_slice,
           allDimAreSlice rem_slice,
           Nothing <- M.lookup arr expmap,
-          not $ tooSmallSlice (primByteSize (elemType t)) rem_slice,
+          pt <- elemType t,
+          not $ tooSmallSlice (primByteSize pt) rem_slice,
           is /= map Var (take (length is) thread_gids) || length is == length thread_gids,
           not (null thread_gids || null is),
           not (last thread_gids `nameIn` (freeIn is <> freeIn rem_slice)) ->
@@ -293,7 +294,8 @@ ensureCoalescedAccess
         -- dimensions will be traversed sequentially.
         | (is, rem_slice) <- splitSlice slice,
           not $ null rem_slice,
-          not $ tooSmallSlice (primByteSize (elemType t)) rem_slice,
+          pt <- elemType t,
+          not $ tooSmallSlice (primByteSize pt) rem_slice,
           is /= map Var (take (length is) thread_gids) || length is == length thread_gids,
           any isThreadLocal (namesToList $ freeIn is) -> do
           let perm = coalescingPermutation (length is) $ arrayRank t

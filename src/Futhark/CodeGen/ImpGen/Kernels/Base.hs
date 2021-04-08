@@ -769,6 +769,7 @@ readsFromSet free =
       vtable <- getVTable
       case t of
         Array {} -> return Nothing
+        Acc {} -> return Nothing
         Mem (Space "local") -> return Nothing
         Mem {} -> return $ Just $ Imp.MemoryUse var
         Prim bt ->
@@ -795,6 +796,7 @@ isConstExp vtable size = do
   return $ replaceInPrimExpM onLeaf size
   where
     hasExp (ArrayVar e _) = e
+    hasExp (AccVar e _) = e
     hasExp (ScalarVar e _) = e
     hasExp (MemVar e _) = e
 
