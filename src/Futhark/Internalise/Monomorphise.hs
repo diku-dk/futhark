@@ -147,12 +147,13 @@ data MonoSize
   = -- | The integer encodes an equivalence class, so we can keep
     -- track of sizes that are statically identical.
     MonoKnown Int
-  | MonoAnon
+  | MonoAnon (Maybe VName)
   deriving (Eq, Ord, Show)
 
 instance Pretty MonoSize where
   ppr (MonoKnown i) = text "?" <> ppr i
-  ppr MonoAnon = text "?"
+  ppr (MonoAnon Nothing) = mempty
+  ppr (MonoAnon (Just v)) = text "?" <> pprName v
 
 instance Pretty (ShapeDecl MonoSize) where
   ppr (ShapeDecl ds) = mconcat (map (brackets . ppr) ds)
@@ -167,8 +168,8 @@ monoType = (`evalState` (0, mempty)) . traverseDims onDim . toStruct
   where
     onDim bound _ (NamedDim d)
       -- A locally bound size.
-      | qualLeaf d `S.member` bound = pure MonoAnon
-    onDim _ _ AnyDim = pure MonoAnon
+      | qualLeaf d `S.member` bound = pure $ MonoAnon $ Just $ qualLeaf d
+    onDim _ _ (AnyDim v) = pure $ MonoAnon v
     onDim _ _ d = do
       (i, m) <- get
       case M.lookup d m of
@@ -266,7 +267,7 @@ sizesForPat pat = do
   return (sizes, params')
   where
     tv = identityMapper {mapOnPatternType = bitraverse onDim pure}
-    onDim AnyDim = do
+    onDim (AnyDim _) = do
       v <- lift $ newVName "size"
       modify (v :)
       pure $ NamedDim $ qualName v
@@ -825,7 +826,7 @@ typeSubstsM loc orig_t1 orig_t2 =
           return $ NamedDim $ qualName d
         Just d ->
           return $ NamedDim $ qualName d
-    onDim MonoAnon = return AnyDim
+    onDim (MonoAnon v) = pure $ AnyDim v
 
 -- Perform a given substitution on the types in a pattern.
 substPattern :: Bool -> (PatternType -> PatternType) -> Pattern -> Pattern

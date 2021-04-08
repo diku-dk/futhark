@@ -162,8 +162,8 @@ newNamesForMTy orig_mty = do
           TypeArgDim (NamedDim $ QualName (map substitute qs) $ substitute v) loc
         substituteInTypeArg (TypeArgDim (ConstDim x) loc) =
           TypeArgDim (ConstDim x) loc
-        substituteInTypeArg (TypeArgDim AnyDim loc) =
-          TypeArgDim AnyDim loc
+        substituteInTypeArg (TypeArgDim (AnyDim v) loc) =
+          TypeArgDim (AnyDim v) loc
         substituteInTypeArg (TypeArgType t loc) =
           TypeArgType (substituteInType t) loc
 
@@ -303,7 +303,7 @@ resolveAbsTypes mod_abs mod sig_abs loc = do
     emptyDims :: StructType -> Bool
     emptyDims = isNothing . traverseDims onDim
       where
-        onDim _ PosImmediate AnyDim = Nothing
+        onDim _ PosImmediate (AnyDim _) = Nothing
         onDim _ _ d = Just d
 
 resolveMTyNames ::

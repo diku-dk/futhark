@@ -1140,7 +1140,7 @@ substituteInModule substs = onModule
     onType (T.TypeAbbr l ps t) = T.TypeAbbr l ps $ first onDim t
     onDim (NamedDim v) = NamedDim $ replaceQ v
     onDim (ConstDim x) = ConstDim x
-    onDim AnyDim = AnyDim
+    onDim (AnyDim v) = AnyDim v
 
 evalModuleVar :: Env -> QualName VName -> EvalM Module
 evalModuleVar env qv =

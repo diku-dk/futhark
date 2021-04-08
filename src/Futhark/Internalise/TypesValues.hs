@@ -113,7 +113,7 @@ internaliseDim ::
   InternaliseTypeM ExtSize
 internaliseDim d =
   case d of
-    E.AnyDim -> Ext <$> newId
+    E.AnyDim _ -> Ext <$> newId
     E.ConstDim n -> return $ Free $ intConst I.Int64 $ toInteger n
     E.NamedDim name -> namedDim name
   where
