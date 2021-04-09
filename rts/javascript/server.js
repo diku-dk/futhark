@@ -91,7 +91,7 @@ class Server {
     var out_vnames = args.slice(1, num_outs+1)
     for (var i = 0; i < out_vnames.length; i++) {
       var out_vname = out_vnames[i];
-      if (this._vars.includes(out_vname)) {
+      if (outvname in this._vars) {
         throw "Variable already exists: " + out_vname;
       }
     }
@@ -146,6 +146,14 @@ class Server {
     var args = args.slice(1);
     
     // Reading from file is part of values.js
+    ///////////////////////////////////////////
+
+    var fs = require("fs");
+    fs.copyFile(fname, 'destination.txt', (err) => {
+  if (err) throw err;
+  console.log('source.txt was copied to destination.txt');
+});
+    ///////////////////////////////////////////
     var reader = new Reader(fname);
     while (args != []) {
       var vname = args[0];
@@ -153,13 +161,14 @@ class Server {
       args = args.slice(2);
       
       // TODO finish the rest of this function
-      if (this._vars.includes(vname)) {
+      if (vname in this._vars) {
         throw "Variable already exists: " + vname;
       }
       try {
+        console.log(reader);
         this._vars[vname] = read_value(typename, reader);
       } catch (err) {
-        err_msg = "Failed to restore variable " + vname + ".\nPossibly malformed data in " + fname + ".\n";
+        var err_msg = "Failed to restore variable " + vname + ".\nPossibly malformed data in " + fname + ".\n";
         throw "Failed to restore variable " + err_msg;
       }
     }
@@ -209,6 +218,7 @@ class Server {
       }
       try {
         this._process_line(line);
+        console.log('%%% OK');
       } catch (err) {
         console.log('%%% FAILURE');
         console.log(err);
