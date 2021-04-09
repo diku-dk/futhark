@@ -602,7 +602,7 @@ transformStm _ (Let pat (StmAux cs _ _) (Op (Stencil ws _p (StencilStatic stenci
     space <- mkSegSpace <=< forM ws $ \w -> do
       p <- newVName "gtid"
       pure (p, w)
-    lvl <- segThreadCapped (segSpaceDims space) "segstencil" $ ManyThreads
+    lvl <- segThreadCapped (segSpaceDims space) "segstencil" ManyThreads
 
     ((lam_params, lam_body_res), lam_body_stms) <- runBinder $ do
       let (inv_params, stencil_params) = splitAt (length inv_arrs) $ lambdaParams lam
