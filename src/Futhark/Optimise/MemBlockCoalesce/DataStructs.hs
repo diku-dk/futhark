@@ -81,7 +81,7 @@ type CoalsTab = M.Map VName CoalsEntry
 
 unionCoalsEntry :: CoalsEntry -> CoalsEntry -> CoalsEntry
 unionCoalsEntry etry1 (CoalsEntry dstmem2 dstind2  alsmem2 vartab2 optdeps2) =
-  if   dstmem etry1 /= dstmem2 || dstind etry1 /= dstind2
+  if dstmem etry1 /= dstmem2 || dstind etry1 /= dstind2
   then etry1
   else etry1 { alsmem = alsmem  etry1 <> alsmem2
              , optdeps= optdeps etry1 `M.union` optdeps2
@@ -139,20 +139,16 @@ getArrMemAssocFParam =
            )
 
 
-getUniqueMemFParam :: [FParam (Aliases ExpMem.SeqMem)] -> M.Map VName (SubExp,Space)
+getUniqueMemFParam :: [FParam (Aliases ExpMem.SeqMem)] -> M.Map VName Space
 getUniqueMemFParam params =
-  let mems = mapMaybe (\el -> case paramDec el of
-                                ExpMem.MemMem sp -> Just (paramName el, (intConst Int64 3, sp))
-                                -- ^ potential bug: size of mem is not a param anymore! Put 3 to compile!
-                                _ -> Nothing
-                      ) params
-      upms = namesFromList $
-             mapMaybe (\el -> case paramDec el of
-                                ExpMem.MemArray _ _ Unique (ExpMem.ArrayIn mem_nm _) ->
-                                    Just mem_nm
-                                _ -> Nothing
-                      ) params
+  let mems = mapMaybe (\el -> getMemMem (paramName el) (paramDec el)) params
+      upms = namesFromList $ mapMaybe (getMemArray . paramDec) params
   in M.fromList $ filter (\ (k,_) -> nameIn k upms) mems
+  where
+    getMemMem nm (ExpMem.MemMem sp) = Just (nm, sp)
+    getMemMem _ _ = Nothing
+    getMemArray (ExpMem.MemArray _ _ Unique (ExpMem.ArrayIn mem_nm _)) = Just mem_nm
+    getMemArray _ = Nothing
 
 getScopeMemInfo :: VName -> Scope (Aliases ExpMem.SeqMem)
                 -> Maybe ArrayMemBound
@@ -170,6 +166,7 @@ createsNewArrOK (BasicOp Manifest{}) = True
 createsNewArrOK (BasicOp ExpMem.Copy{}) = True
 createsNewArrOK (BasicOp Concat{}) = True
 createsNewArrOK (BasicOp ArrayLit{}) = True
+createsNewArrOK (BasicOp Scratch{}) = True
 createsNewArrOK (Op _) = True
 --createsNewArrOK (Op (ExpMem.Inner (ExpMem.SegOp _))) = True
 --createsNewArrOK (BasicOp Partition{}) = True -- was this removed?
@@ -207,8 +204,8 @@ createsNewArrIK _ = False
 createsAliasedArrOK :: Exp (Aliases ExpMem.SeqMem) -> Maybe VName --ExpMem.IxFun
 createsAliasedArrOK (BasicOp (Reshape _ arr_nm)) = Just arr_nm
 createsAliasedArrOK (BasicOp (SubExp  (Var arr_nm))) = Just arr_nm
---createsAliasedArrOK (BasicOp (Rearrange _ _ arr_nm)) = Just arr_nm
---createsAliasedArrOK (BasicOp (Rotate    _ _ arr_nm)) = Just arr_nm
+createsAliasedArrOK (BasicOp (Rearrange _ arr_nm)) = Just arr_nm
+createsAliasedArrOK (BasicOp (Rotate    _ arr_nm)) = Just arr_nm
 createsAliasedArrOK _ = Nothing
 
 prettyCoalTab :: CoalsTab -> String
