@@ -22,9 +22,9 @@ compileSegStencil ::
   KernelBody KernelsMem ->
   CallKernelGen ()
 compileSegStencil =
-  --compileGlobalReadFlat
+  compileGlobalReadFlat
   --compileBigTile tile_loader_cube
-  compileBigTileSingleDim tile_loader_flat
+  --compileBigTileSingleDim tile_loader_flat
 
 -- the provided one has a ton of common subexpressions so a new one was made
 -- !!!! It does however need the span of the inner dimensions, so use
@@ -151,44 +151,44 @@ compileGlobalReadFlat pat lvl space op kbody = do
 
       -- Host side evaluated variables
       max_idxs <- mapM (dPrimVE "max_idx" . (+ (-1))) dims
-      virt_num_groups_var <- dPrimVE "virt_num_groups" $
-        sExt32 $ product dims `divUp` group_size_flat
-      dim_span <- mapM (dPrimVE "dim_span" . sExt64) $ createSpans dims
+      size_span <- mapM (dPrimVE "size_span" . sExt64) $ createSpans dims
 
       sKernelThread "segstencil" num_groups' group_size_flat_c (segFlat space) $ do
         -- device side variable that is independent of virtual kernel id
         local_id_flat <- dPrimVEC "local_id_flat" . sExt64 . kernelLocalThreadId . kernelConstants =<< askEnv
-        virtualiseGroups (segVirt lvl) virt_num_groups_var $ \group_id_flat_exp -> do
-          group_id_flat <- dPrimVE "group_id_flat" $ sExt64 group_id_flat_exp
-          gid_flat <- dPrimVE "global_id_flat" $ group_id_flat * group_size_flat + local_id_flat
-          gids <- map tvExp <$> unflattenIx "global_id" dim_span gid_flat
-          zipWithM_ dPrimV_ is gids
+          
+        phys_group_id <- dPrim "phys_group_id" int32
+        sOp $ Imp.GetGroupId (tvVar phys_group_id) 0
+        
+        gid_flat <- dPrimVE "global_id_flat" $ (tvExp phys_group_id) * group_size_flat + local_id_flat
+        gids <- map tvExp <$> unflattenIx "global_id" size_span gid_flat
+        zipWithM_ dPrimV_ is gids
 
-          -- check for out of bound on global id for each axis
-          sWhen (isActive $ unSegSpace space) $ do
-            -- compile invariant elements
-            compileStms mempty (kernelBodyStms kbody) $ pure ()
+        -- check for out of bound on global id for each axis
+        sWhen (isActive $ unSegSpace space) $ do
+          -- compile invariant elements
+          compileStms mempty (kernelBodyStms kbody) $ pure ()
 
-            -- declare and attach invariant elements to invariantParams
-            zipWithM_ dPrimV_ (map paramName invariantParams) . map TPrimExp
-              =<< mapM toExp invarElems
+          -- declare and attach invariant elements to invariantParams
+          zipWithM_ dPrimV_ (map paramName invariantParams) . map TPrimExp
+            =<< mapM toExp invarElems
 
-            let bound_ixs = zipWith sMin64 max_idxs . map (sMax64 0)
-                param_ixs = transpose $ zipWith (mapM (+)) stencil_ixss gids
-                params_ixs_ordered = transpose $ chunksOf n_point_stencil variantParams
+          let bound_ixs = zipWith sMin64 max_idxs . map (sMax64 0)
+              param_ixs = transpose $ zipWith (mapM (+)) stencil_ixss gids
+              params_ixs_ordered = transpose $ chunksOf n_point_stencil variantParams
 
-            dLParams variantParams
+          dLParams variantParams
 
-            -- load variants into lambda variant parameters
-            forM_ (zip param_ixs params_ixs_ordered) $ \(parix, pars) -> do
-              read_ixs <- mapM (dPrimVE "read_ix") $ bound_ixs parix
-              forM_ (zip pars $ stencilArrays op) $ \(par, src) ->
-                copyDWIMFix (paramName par) [] (Var src) read_ixs
+          -- load variants into lambda variant parameters
+          forM_ (zip param_ixs params_ixs_ordered) $ \(parix, pars) -> do
+            read_ixs <- mapM (dPrimVE "read_ix") $ bound_ixs parix
+            forM_ (zip pars $ stencilArrays op) $ \(par, src) ->
+              copyDWIMFix (paramName par) [] (Var src) read_ixs
 
-            -- compile lambda function and designate output style
-            compileStms mempty (bodyStms lamBody) $
-              zipWithM_ (compileThreadResult space) (patternElements pat) $
-                map (Returns ResultMaySimplify) $ bodyResult lamBody
+          -- compile lambda function and designate output style
+          compileStms mempty (bodyStms lamBody) $
+            zipWithM_ (compileThreadResult space) (patternElements pat) $
+              map (Returns ResultMaySimplify) $ bodyResult lamBody
     SegGroup {} ->
       error "not implemented"
 
