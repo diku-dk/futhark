@@ -150,34 +150,6 @@ defInterference lutab env (pat, ip_v) =
 
   in env { alias = alias', v2mem = v2mem', intrf = intrf', active = active' }
 
---             (Let pat _ (If _ then_body else_body _)) =
-{--
-intrfAnBnd lutab env (Let pat _ e) =
-  let stab  = alias env
-      stab' = foldl (\stabb patel->
-                        -- compute the transitive closure of current pattern
-                        -- name by concating all its aliases entries in stabb
-                        let (al0,l1) = patElemAttr patel
-                            al = case l1 of
-                                   ExpMem.Scalar tp ->
-                                     trace ("MemLore: "++(pretty (patElemName patel))++" is Scalar: "++pretty tp++" ("++pretty l1++") ") al0
-                                   ExpMem.MemMem se sp ->
-                                     trace ("MemLore: "++(pretty (patElemName patel))++" is MemMem: "++pretty se++" , "++pretty sp++" ("++pretty l1++") ") al0
-                                   ExpMem.ArrayMem tp shp u nm indfun ->
-                                     trace ("MemLore: "++(pretty (patElemName patel))++" is ArrayMem: "++pretty tp++" , "++pretty shp++" , "++pretty u++" , "++pretty nm++" , "++pretty indfun++" ("++pretty l1++") ") al0
-                            al_nms = unNames al
-                            al_trns= S.foldl' (\acc x -> case M.lookup x stabb of
-                                                            Nothing -> acc
-                                                            Just aal -> S.union acc aal
-                                               ) al_nms al_nms
---al_trns' = trace ("AL Pattern: "++(pretty (patElemName patel))++" aliases: "++pretty (S.toList al_trns)) al_trns
-                        in  if null al_trns then stabb
-                        else M.insert (patElemName patel) al_trns stabb
-                    ) stab $ patternValueElements pat -- patternContextElements pat
-  in  env { alias = stab' }
---}
-
-
 updateInterference :: AliasTab -> AllocTab -> Names -> IntrfTab -> [VName] -> IntrfTab
 updateInterference alias0 alloc0 active0 =
   foldl (\itrf mm -> let m_al = case M.lookup mm alias0 of
@@ -202,14 +174,7 @@ getLastUseMem v2mem0 =
 --- Printer/Tester Main Program
 ----------------------------------------------------------------
 
-{--
-
-lastUseAnPrg :: ExpMem.Prog ExpMem.ExplicitMemory -> LUTabPrg
-lastUseAnPrg prg = let aliased_prg = AnlAls.aliasAnalysis prg
-                   in  M.fromList $ map lastUseAnFun $ progFunctions aliased_prg
-
---}
-
+-- run it with: `futhark dev --cpu --merge-mem test.fut`
 memoryBlockMerging :: ExpMem.Prog ExpMem.SeqMem -> IO ()
 memoryBlockMerging prg = do
   mapM_ lookAtFunction (progFuns prg)
@@ -243,15 +208,7 @@ memoryBlockMerging prg = do
 
 
 lookAtFunction :: ExpMem.FunDef ExpMem.SeqMem -> IO ()
-lookAtFunction (ExpMem.FunDef _ _ fname _ params body) = do
-  let ExpMem.Body () bnds res = body
-  putStrLn $ "In Function: " ++ pretty fname ++ " with params " ++ pretty params
-  mapM_ lookAtBinding bnds
-  putStrLn $ "Result: " ++ pretty res
-  where lookAtBinding (ExpMem.Let pat _ e) = do
-          putStrLn $ "The binding with pattern: " ++ pretty pat
-          putStrLn $ "And corresponding expression:\n" ++
-                     unlines (map ("  "++) $ lines $ pretty e)
+lookAtFunction fdef = do
+  putStrLn $ "Function:\n" ++ pretty fdef
 
-
---futhark --gpu --memory-playground ../futhark-benchmarks/accelerate/canny/canny.fut
+-- try also ../futhark-benchmarks/accelerate/canny/canny.fut (?)
