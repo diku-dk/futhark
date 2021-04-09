@@ -138,6 +138,7 @@ javascriptWrapper entryPoints = unlines
   arrWrapper,
   classDef,
   constructor entryPoints,
+  getEntryPointsFun,
   --entryDic entryPoints,
   unlines $ concatMap (\jse -> map toFutharkArray (parameters jse)) entryPoints,
   unlines $ concatMap (\jse -> map fromFutharkArrayShape (ret jse)) entryPoints,
@@ -251,12 +252,6 @@ endClassDef = "}"
 
 constructor :: [JSEntryPoint] -> String
 constructor jses = 
---  unlines
---  ["  constructor() {",
---   "    this.cfg = futhark_context_config_new();",
---   "    this.ctx = futhark_context_new(this.cfg);",
---   "  }"]
---
   T.unpack [text|
     constructor() {
       this.cfg = futhark_context_config_new();
@@ -270,13 +265,13 @@ constructor jses =
     entries = T.pack $ intercalate "," $ map dicEntry jses
 
 
---entryDic :: [JSEntryPoint] -> String
---entryDic jses = 
---  T.unpack
---  [text|
---  |]
---  where 
---    entries = T.pack $ intercalate "," $ map dicEntry jses
+getEntryPointsFun :: String
+getEntryPointsFun =
+  T.unpack [text|
+    get_entry_points() {
+      return this.entry_points;
+    }
+  |]
 
 dicEntry :: JSEntryPoint -> String
 dicEntry jse =

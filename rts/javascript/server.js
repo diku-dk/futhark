@@ -30,8 +30,8 @@ class Server {
   _get_entry_point(entry) {
     // TODO Context contains a list of entry points, my implementation does not
     // Seems to be a dictionary
-    if (this.ctx.entry_points.includes(entry)) {
-      return this.entry_points[entry];
+    if (entry in this.ctx.get_entry_points()) {
+      return this.ctx.get_entry_points()[entry];
     } else {
       throw "Unkown entry point: " + entry;
     }
@@ -50,18 +50,18 @@ class Server {
   }
 
   _cmd_inputs(args) {
-    var entry = self._get_arg(args, 0);
-    var inputs = _get_entry_point(entry)[0];
-    for (var i = 0; i < e.length; i++) {
-      console.log(e[i]);
+    var entry = this._get_arg(args, 0);
+    var inputs = this._get_entry_point(entry)[0];
+    for (var i = 0; i < inputs.length; i++) {
+      console.log(inputs[i]);
     }
   }
 
-  _cmd_inputs(args) {
-    var entry = self._get_arg(args, 0);
-    var outputs = _get_entry_point(entry)[1];
-    for (var i = 0; i < e.length; i++) {
-      console.log(e[i]);
+  _cmd_outputs(args) {
+    var entry = this._get_arg(args, 0);
+    var outputs = this._get_entry_point(entry)[1];
+    for (var i = 0; i < outputs.length; i++) {
+      console.log(outputs[i]);
     }
   }
 
@@ -72,14 +72,14 @@ class Server {
   _cmd_free(args) {
     for (var i = 0; i < args.length; i++) {
       var vname = args[i];
-      _check_var(vname);
+      this._check_var(vname);
       const idx = _vars.getIndex(vname);
       _vars.splice(idx, 1);
     }
   }
 
   _cmd_call(args) {
-    var entry = _get_entry_point(get_arg(args, 0));
+    var entry = this._get_entry_point(get_arg(args, 0));
     var num_ins = entry[0].length;
     var num_outs = entry[0].length;
     var expected_len = 1 + num_outs + num_ins
@@ -102,7 +102,7 @@ class Server {
     }
     // TODO Figure this bad boy out
     try {
-      var runtime = getattr(self._ctx, args[0]);
+      var runtime = getattr(this._ctx, args[0]);
       var vals;
     } 
     catch (err) {
@@ -180,7 +180,7 @@ class Server {
     } else {
       var cmd = words[0];
       var args = words.splice(1);
-      if (cmd in this._commands) {
+      if (this._commands.includes(cmd)) {
         switch (cmd) {
           case 'inputs': this._cmd_inputs(args); break;
           case 'outputs': this._cmd_outputs(args); break

@@ -19,7 +19,6 @@ where
 
 import Control.Monad
 import Control.Monad.IO.Class
-import qualified Data.ByteString.Lazy.Char8 as ByteString
 import Data.List (intercalate)
 import Data.Maybe (fromMaybe)
 import Futhark.Analysis.Alias
@@ -215,7 +214,7 @@ compileCtoWASMAction fcfg mode outpath =
           liftIO $ writeFile cpath imp
           liftIO $ writeFile "futharkClass.js" jsprog
           liftIO $ appendFile "futharkClass.js" SequentialWASM.runServer
-          runEMCC cpath jpath [""] ["-lm"] exps
+          runEMCC cpath outpath [""] ["-lm"] exps
 
 -- | The @futhark opencl@ action.
 compileOpenCLAction :: FutharkConfig -> CompilerMode -> FilePath -> Action KernelsMem
