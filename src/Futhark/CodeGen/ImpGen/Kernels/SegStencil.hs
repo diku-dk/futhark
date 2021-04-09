@@ -241,13 +241,6 @@ compileBigTileSingleDim ::
 compileBigTileSingleDim loader pat lvl space op kbody = do
   let group_size_flat_c = toInt64Exp <$> segGroupSize lvl
       group_size_flat_exp = sExt32 $ unCount group_size_flat_c
-      group_sizes_exp :: [TPrimExp Int32 Imp.ExpLeaf]
-      group_sizes_exp =
-        case length dims of
-          1 -> [group_size_flat_exp]
-          2 -> [group_size_flat_exp `quot` 32, 32]
-          3 -> [group_size_flat_exp `quot` 256, 8, 32]
-          _ -> error "not valid dimensions"
       (is, dims') = unzip $ unSegSpace space
       dims = map toInt64Exp dims'
       -- It is possible to use int32, since a value larger than a maximum int32 would surely make the program
@@ -266,16 +259,23 @@ compileBigTileSingleDim loader pat lvl space op kbody = do
       a_maxs = map (fromInteger . (\x -> if x < 0 then error "invalid axis max" else x) . maximum) $ stencilIndexes op
       n_point_stencil = length $ head stencil_ixss
       lamParTypes = map (elemType . paramType . head) $ chunksOf n_point_stencil variantParams
-      grid_sizes_exp = map sExt64 $ zipWith divUp dims (map sExt64 group_sizes_exp)
-      shared_sizes_exp = zipWith (+) group_sizes_exp $ zipWith (-) a_maxs a_mins
-      virt_num_groups = product grid_sizes_exp
+
   case lvl of
     SegThread {} -> do
       emit $ Imp.DebugPrint "\n# SegStencil" Nothing
 
-      --group_size_flat <- dPrim "group_size_flat" int32
-      --sOp $ Imp.GetSizeMax (tvVar group_size_flat) Imp.SizeGroup
-      
+      let group_sizes_exp :: [TPrimExp Int32 Imp.ExpLeaf]
+          group_sizes_exp = 
+            case length dims of
+              1 -> [group_size_flat_exp]
+              2 -> [group_size_flat_exp `quot` 32, 32]
+              3 -> [group_size_flat_exp `quot` 256, 8, 32]
+              _ -> error "not valid dimensions"
+
+          grid_sizes_exp = map sExt64 $ zipWith divUp dims (map sExt64 group_sizes_exp)
+          shared_sizes_exp = zipWith (+) group_sizes_exp $ zipWith (-) a_maxs a_mins
+          virt_num_groups = product grid_sizes_exp
+
       -- host side variables
       sizes <- propagateConst "size" grid_sizes_exp
       size_span <- propagateConst "size_span" $ createSpans sizes
