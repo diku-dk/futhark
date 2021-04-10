@@ -1,6 +1,7 @@
 module Futhark.CodeGen.ImpGen.Multicore.Base
   ( extractAllocations,
     compileThreadResult,
+    Locks (..),
     HostEnv (..),
     AtomicBinOp,
     MulticoreGen,
@@ -23,6 +24,7 @@ where
 import Control.Monad
 import Data.Bifunctor
 import Data.List (elemIndex, find)
+import qualified Data.Map as M
 import Data.Maybe
 import qualified Futhark.CodeGen.ImpCode.Multicore as Imp
 import Futhark.CodeGen.ImpGen
@@ -37,8 +39,16 @@ type AtomicBinOp =
   BinOp ->
   Maybe (VName -> VName -> Imp.Count Imp.Elements (Imp.TExp Int32) -> Imp.Exp -> Imp.AtomicOp)
 
-newtype HostEnv = HostEnv
-  {hostAtomics :: AtomicBinOp}
+-- | Information about the locks available for accumulators.
+data Locks = Locks
+  { locksArray :: VName,
+    locksCount :: Int
+  }
+
+data HostEnv = HostEnv
+  { hostAtomics :: AtomicBinOp,
+    hostLocks :: M.Map VName Locks
+  }
 
 type MulticoreGen = ImpM MCMem HostEnv Imp.Multicore
 
