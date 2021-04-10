@@ -918,43 +918,39 @@ defCompileBasicOp _ Rotate {} =
   return ()
 defCompileBasicOp _ Reshape {} =
   return ()
-defCompileBasicOp _ (UpdateAcc acc is vs) = do
+defCompileBasicOp _ (UpdateAcc acc is vs) = sComment "UpdateAcc" $ do
+  -- We are abusing the comment mechanism to wrap the operator in
+  -- braces when we end up generating code.  This is necessary because
+  -- we might otherwise end up declaring lambda parameters (if any)
+  -- multiple times, as they are duplicated every time we do an
+  -- UpdateAcc for the same accumulator.
   let is' = map toInt64Exp is
 
   -- We need to figure out whether we are updating a scatter-like
-  -- accumulator or a generalised reduction.
-  (arrs, dims, op) <- lookupAcc acc
+  -- accumulator or a generalised reduction.  This also binds the
+  -- index parameters.
+  (_, _, arrs, dims, op) <- lookupAcc acc is'
 
-  -- We are abusing the comment mechanism to wrap the operator in
-  -- braces when we end up generating code.  This is necessary because
-  -- we might otherwise end up declaring lambda parameters (if any) multiple
-  -- times, as they are duplicated every time we do an UpdateAcc for
-  -- the same accumulator.
   sWhen (inBounds (map DimFix is') dims) $
-    sComment "UpdateAcc" $
-      case op of
-        Nothing ->
-          -- Scatter-like.
-          forM_ (zip arrs vs) $ \(arr, v) -> copyDWIMFix arr is' v []
-        Just (lam, _) -> do
-          -- Generalised reduction.
-          dLParams $ lambdaParams lam
-          let num_is =
-                length (lambdaParams lam) - 2 * length (lambdaReturnType lam)
-              (i_params, x_params, y_params) =
-                splitAt3 num_is (length vs) $ map paramName $ lambdaParams lam
+    case op of
+      Nothing ->
+        -- Scatter-like.
+        forM_ (zip arrs vs) $ \(arr, v) -> copyDWIMFix arr is' v []
+      Just lam -> do
+        -- Generalised reduction.
+        dLParams $ lambdaParams lam
+        let (x_params, y_params) =
+              splitAt (length vs) $ map paramName $ lambdaParams lam
 
-          zipWithM_ (<--) (map (`mkTV` int64) i_params) is'
+        forM_ (zip x_params arrs) $ \(xp, arr) ->
+          copyDWIMFix xp [] (Var arr) is'
 
-          forM_ (zip x_params arrs) $ \(xp, arr) ->
-            copyDWIMFix xp [] (Var arr) is'
+        forM_ (zip y_params vs) $ \(yp, v) ->
+          copyDWIM yp [] v []
 
-          forM_ (zip y_params vs) $ \(yp, v) ->
-            copyDWIM yp [] v []
-
-          compileStms mempty (bodyStms $ lambdaBody lam) $
-            forM_ (zip arrs (bodyResult (lambdaBody lam))) $ \(arr, se) ->
-              copyDWIMFix arr is' se []
+        compileStms mempty (bodyStms $ lambdaBody lam) $
+          forM_ (zip arrs (bodyResult (lambdaBody lam))) $ \(arr, se) ->
+            copyDWIMFix arr is' se []
 defCompileBasicOp pat e =
   error $
     "ImpGen.defCompileBasicOp: Invalid pattern\n  "
@@ -1259,24 +1255,39 @@ lookupMemory name = do
     MemVar _ entry -> return entry
     _ -> error $ "Unknown memory block: " ++ pretty name
 
+lookupArraySpace :: VName -> ImpM lore r op Space
+lookupArraySpace =
+  fmap entryMemSpace . lookupMemory
+    <=< fmap (memLocationName . entryArrayLocation) . lookupArray
+
+-- | In the case of a histogram-like accumulator, also sets the index
+-- parameters.
 lookupAcc ::
   VName ->
-  ImpM
-    lore
-    r
-    op
-    ( [VName],
-      [Imp.TExp Int64],
-      Maybe (Lambda lore, [SubExp])
-    )
-lookupAcc name = do
+  [Imp.TExp Int64] ->
+  ImpM lore r op (VName, Space, [VName], [Imp.TExp Int64], Maybe (Lambda lore))
+lookupAcc name is = do
   res <- lookupVar name
   case res of
     AccVar _ (acc, ispace, _) -> do
       acc' <- gets $ M.lookup acc . stateAccs
       case acc' of
-        Just (arrs, op) ->
-          return (arrs, map toInt64Exp (shapeDims ispace), op)
+        Just ([], _) ->
+          error $ "Accumulator with no arrays: " ++ pretty name
+        Just (arrs@(arr : _), Just (op, _)) -> do
+          space <- lookupArraySpace arr
+          let (i_params, ps) = splitAt (length is) $ lambdaParams op
+          zipWithM_ dPrimV_ (map paramName i_params) is
+          return
+            ( acc,
+              space,
+              arrs,
+              map toInt64Exp (shapeDims ispace),
+              Just op {lambdaParams = ps}
+            )
+        Just (arrs@(arr : _), Nothing) -> do
+          space <- lookupArraySpace arr
+          return (acc, space, arrs, map toInt64Exp (shapeDims ispace), Nothing)
         Nothing ->
           error $ "ImpGen.lookupAcc: unlisted accumulator: " ++ pretty name
     _ -> error $ "ImpGen.lookupAcc: not an accumulator: " ++ pretty name
