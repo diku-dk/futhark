@@ -206,6 +206,7 @@ createsAliasedArrOK (BasicOp (Reshape _ arr_nm)) = Just arr_nm
 createsAliasedArrOK (BasicOp (SubExp  (Var arr_nm))) = Just arr_nm
 createsAliasedArrOK (BasicOp (Rearrange _ arr_nm)) = Just arr_nm
 createsAliasedArrOK (BasicOp (Rotate    _ arr_nm)) = Just arr_nm
+-- ToDo: very important is to treat Index, i.e., array slices!
 createsAliasedArrOK _ = Nothing
 
 prettyCoalTab :: CoalsTab -> String

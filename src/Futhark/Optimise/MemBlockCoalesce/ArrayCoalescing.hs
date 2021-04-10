@@ -341,10 +341,10 @@ mkCoalsTabBnd lutab (Let patt _ (If _ body_then body_else _)) td_env bu_env =
   --     bodies before invalidating active based on free names
   --     (e.g., that can occur at the very beginning of the then-else bodies).
       body_free_vars = freeIn body_then <> freeIn body_else
-      ((actv_res, inhibit_res0),_) =
+      (actv_res, inhibit_res0) =
         Exc.assert not_ip_pat $
         trace ("COALESCING IF: active == "++prettyCoalTab actv_res0++" res_mem_then: "++pretty res_mem_then++" else: "++pretty res_mem_else) $
-        mkCoalsHelper1FilterActive (patt,Nothing) body_free_vars (scope td_env)
+        mkCoalsHelper1FilterActive patt body_free_vars (scope td_env)
                                    (scals bu_env) actv_res0 inhibit1
 
       inhibit_res = --trace ("COALESCING IF inhibits: " ++ prettyInhibitTab inhibit_res0 ++ " " ++ prettyInhibitTab inhb_then1 ++ " " ++ prettyInhibitTab inhb_else1) $
@@ -369,9 +369,9 @@ mkCoalsTabBnd lutab (Let pat _ (DoLoop arginis_ctx arginis lform body)) td_env b
                                                      Var v -> Just v
                                                      _     -> Nothing
                                           ) arginis)
-      ((actv0,inhibit0),_) =
+      (actv0,inhibit0) =
         Exc.assert not_ip_pat $
-        mkCoalsHelper1FilterActive (pat, Nothing) loop_fv (scope td_env)
+        mkCoalsHelper1FilterActive pat loop_fv (scope td_env)
                                    (scals bu_env) activeCoals00 inhibit00
       scopetab = scope td_env                              <>
                  (scopeOfFParams (fst $ unzip arginis_ctx) <>
@@ -486,15 +486,48 @@ mkCoalsTabBnd lutab (Let pat _ (DoLoop arginis_ctx arginis lform body)) td_env b
                                  in  trace ("COALESCING: optimistic loop promotion: "++pretty b++" "++pretty m_b)
                                            ((act1,inhb), succc1)
                   ) ((actv_tab,inhb_tab), succ_tab) (zip3 othmems resmems inimems)
-
+-- The case of in-place update:
+--   @let x' = x with slice <- elm@
+mkCoalsTabBnd lutab (Let pat@(Pattern [] [x']) _ e@(BasicOp (Update x _ elm))) td_env bu_env
+  | [(_,MemBlock _ _ m_x _)] <- getArrMemAssoc pat =
+  -- (a) filter by the 3rd safety for @elm@ and @x'@
+  let (actv,inhbt) =
+        mkCoalsHelper1FilterActive pat (se2names elm) (scope td_env) (scals bu_env)
+                                              (activeCoals bu_env) (inhibit bu_env)
+  -- (b) if @x'@ is in active coalesced table, then add an entry for @x@ as well
+      (actv',inhbt') =
+        case M.lookup m_x actv of
+          Nothing -> (actv,inhbt)
+          Just info@(CoalsEntry _ _ _ vtab _) ->
+            case M.lookup (patElemName x') vtab of
+              Nothing ->
+                error "In ArrayCoalescing.hs, fun mkCoalsTabBnd, case in-place update!"
+                -- ^ this case should not happen, but if it can that just fail conservatively
+                -- markFailedCoal (actv, inhbt) m_x
+              Just (Coalesced k mblk@(MemBlock _ _ _ x_indfun) _) ->
+                let (ok, fv_subs) = translateIndFunFreeVar (scope td_env) (scals bu_env) x_indfun
+                in  if not ok
+                    -- conservatively fail free-var translation fails
+                    then markFailedCoal (actv, inhbt) m_x
+                    -- successfully transitions to x
+                    else  let coal_etry_x = Coalesced k mblk fv_subs
+                              info' = info { vartab = M.insert x coal_etry_x $
+                                             M.insert (patElemName x') coal_etry_x vtab }
+                          in  (M.insert m_x info' actv, inhbt)
+  -- (c) this stm is also a potential source for coalescing, so process it
+      actv'' = mkCoalsHelper3PatternMatch pat e lutab td_env (successCoals bu_env) actv' inhbt'
+  in  bu_env { activeCoals = actv'', inhibit = inhbt' }
+  where
+    se2names (Var v) = oneName v
+    se2names (Constant _) = mempty
+mkCoalsTabBnd _ (Let pat _ (BasicOp (Update{}))) _ _ =
+  error $ "In ArrayCoalescing.hs, fun mkCoalsTabBnd, illegal pattern for in-place update: "++pretty pat
+-- default handling
 mkCoalsTabBnd lutab (Let pat _ e) td_env bu_env =
-  let m_ip = case e of
-              BasicOp (Update b' slice_b elm) -> Just (b',slice_b, elm)
-              _ -> Nothing
   --   i) Filter @activeCoals@ by the 3rd safety condition:
-      ((activeCoals',inhibit'), _) =
-        mkCoalsHelper1FilterActive (pat,m_ip) (freeIn e) (scope td_env)
-                                   (scals bu_env) (activeCoals bu_env) (inhibit bu_env)
+  let (activeCoals',inhibit') =
+        mkCoalsHelper1FilterActive pat (freeIn e) (scope td_env) (scals bu_env)
+                                   (activeCoals bu_env) (inhibit bu_env)
 
   --  ii) promote any of the entries in @activeCoals@ to @successCoals@ as long as
   --        - this statement defined a variable consumed in a coalesced statement
@@ -534,14 +567,9 @@ mkCoalsTabBnd lutab (Let pat _ e) td_env bu_env =
                           --    for later on
                           let safe_2 = nameIn x_mem (alloc td_env)
                               (safe_5, fv_subst) = translateIndFunFreeVar (scope td_env) (scals bu_env) new_indfun
-                              (alias_var, in_place) =
-                                  case m_ip of
-                                    Just{}  -> Exc.assert safe_4 (Nothing, True) -- ToDo: why? "too drastic"
-                                    Nothing -> (createsAliasedArrOK e, False)
-                          in  case (safe_2, safe_4, safe_5, alias_var, in_place) of
-                                (_, _, _, Just _, True) -> Exc.assert False ((a_acc,inhb), s_acc) --error!
-                                (_, _, _, _, True) -> ((a_acc,inhb), s_acc) -- already treated.
-                                (True, True, True, Nothing, False) ->
+                              alias_var = createsAliasedArrOK e
+                          in  case (safe_2, safe_4, safe_5, alias_var) of
+                                (True, True, True, Nothing) ->
                                   -- great, new array creation point AND safety conditions
                                   --  2,4,5 hold => promote and append
                                   let mem_info = Coalesced k mblk fv_subst
@@ -549,7 +577,7 @@ mkCoalsTabBnd lutab (Let pat _ e) td_env bu_env =
                                       (a_acc',s_acc') = markSuccessCoal (a_acc,s_acc) mb info'
                                   in  trace ("COALESCING: successfull promote: "++pretty b++" "++pretty mb)
                                             ((a_acc',inhb), s_acc')
-                                (True, _, True, Just b_al, False) ->
+                                (True, _, True, Just b_al) ->
                                   -- We treat aliased cases such as:
                                   --   @let b    = rotate a@
                                   --   @let x[i] = b@
@@ -567,7 +595,7 @@ mkCoalsTabBnd lutab (Let pat _ e) td_env bu_env =
                                       case getScopeMemInfo b_al (scope td_env) of
                                         Nothing -> Exc.assert False (failed, s_acc)
                                         Just (MemBlock b_al_tp b_al_shp m_b_al indfun_b_al) ->
-                                          case Exc.assert (m_b_al == mb && m_ip == Nothing) (tryRebase x_indfun indfun_b_al) of
+                                          case Exc.assert (m_b_al == mb) (tryRebase x_indfun indfun_b_al) of
                                             Nothing -> (failed, s_acc)
                                             Just new_indfun_b_al ->
                                               -- create a new entry for the aliased of b (@b_al@)
@@ -598,11 +626,11 @@ mkCoalsTabBnd lutab (Let pat _ e) td_env bu_env =
 --       (Maybe) index functions corresponding to expression's results,
 --       in which the elements correspond to the result of @getArrMemAssoc@.
 --   4. Assumption: the in-place assigned expression creates a new array!
-mkCoalsHelper1FilterActive :: (Pattern (Aliases ExpMem.SeqMem), Maybe (VName, Slice SubExp, SubExp))
+mkCoalsHelper1FilterActive :: Pattern (Aliases ExpMem.SeqMem)
                            -> Names
                            -> ScopeTab -> ScalarTab -> CoalsTab -> InhibitTab
-                           -> ((CoalsTab,InhibitTab), [ExpMem.IxFun])
-mkCoalsHelper1FilterActive (pat, m_ip) inner_free_vars scope_tab scals_tab active_tab inhibit_tab =
+                           -> (CoalsTab,InhibitTab)
+mkCoalsHelper1FilterActive pat inner_free_vars scope_tab _scals_tab active_tab inhibit_tab =
   let e_mems  = mapMaybe (`getScopeMemInfo` scope_tab) $ namesToList inner_free_vars
       memasoc = getArrMemAssoc pat
       -- get memory-block names that are used in the current stmt.
@@ -611,60 +639,64 @@ mkCoalsHelper1FilterActive (pat, m_ip) inner_free_vars scope_tab scals_tab activ
 
       -- BUG/ToDo take the aliasing transitive closure of @all_mems@
       all_mems = stm_mems
-      -- trace ("COALESCING: for pattern "++pretty pat++", cond3 disables "++pretty (S.toList stm_mems)) $ stm_mems
 
       -- keep only the entries that do not overlap with the memory
-      -- blocks defined in @pat@ or used in expression @e@.
-      -- the others must be recorded in inhibit_tab because
+      -- blocks defined in @pat@ or @inner_free_vars@.
+      -- the others must be recorded in @inhibit_tab@ because
       -- they violate the 3rd safety condition.
       active_tab1 = M.filter (\etry -> mempty == namesIntersection all_mems (alsmem etry)) active_tab
       failed_tab  = M.difference active_tab active_tab1
       (_,inhibit_tab1) = foldl markFailedCoal (failed_tab,inhibit_tab) (M.keys failed_tab)
 
-      -- if necessary insert new vartab entries for the in-place "old" names
-      -- and compute slice-index functions for the in-place assigned expressions
-      -- and for the normal bindings results in normal index functions.
-      ((active_tab2, inhibit_tab2), rev_lst_indfuns) =
-        foldl (\((act_tab,inhb_tab), indfuns) (b, MemBlock _ _ mem_nm indf) ->
+      (active_tab2, inhibit_tab2) =
+        foldl (\(act_tab,inhb_tab) (b, MemBlock _ _ mem_nm _) ->
                 case M.lookup mem_nm active_tab of
-                  Nothing ->
-                    case m_ip of
-                      Nothing -> ((act_tab,inhb_tab), indf : indfuns)
-                      Just (_, slice_b, _) ->
-                        ((act_tab,inhb_tab), updateIndFunSlice indf slice_b : indfuns) -- ToDo: wired!
-
-                  Just info@(CoalsEntry _ _ _ vtab _) ->
+                  Nothing -> (act_tab,inhb_tab)
+                  Just _info@(CoalsEntry _ _ _ vtab _) ->
                     let failed = markFailedCoal (act_tab,inhb_tab) mem_nm
                     in
                      case M.lookup b vtab of
-                      Nothing -> 
+                      Nothing ->
                         -- ToDo: this is not an impossible case. It is actually similar
                         --       to the "too drastic" case in filterSafetyCond2and5!
-                        Exc.assert False $
-                                 case m_ip of
-                                   Nothing -> (failed, indf : indfuns)
-                                   Just (_,slice_b,_) ->
-                                    trace ("COALESCING: FAILS : "++pretty b++" "++pretty mem_nm)
-                                          ( failed, updateIndFunSlice indf slice_b : indfuns )
+                        --       It is the case of an alias, such as in if-then-else
+                        --       and we need to treat it!
+                        Exc.assert False $ failed
+                      Just _ -> (act_tab,inhb_tab)
+              ) (active_tab1,inhibit_tab1) memasoc
 
-                      Just (Coalesced k mblk@(MemBlock _ _ _ b_indfun) _) ->
-                        case m_ip of
-                          Nothing -> ((act_tab,inhb_tab), b_indfun : indfuns)
-                          Just (b', slice_b, _) ->
-                            let b_ind_slice  = updateIndFunSlice b_indfun slice_b
-                                indfuns'     = b_ind_slice : indfuns
-                                (ok,fv_subs) = -- CORRECTNESS ASSUMPTION: the righ-hand side of
-                                               -- an in-place update should create a new array!
-                                               -- Exc.assert (createsNewArrOK e) $
-                                               translateIndFunFreeVar scope_tab scals_tab b_indfun
-                            in  if not ok then (failed, indfuns')
-                                else let coal_etry_b  = Coalesced k mblk fv_subs
-                                         info' = info { vartab = M.insert b' coal_etry_b $
-                                                        M.insert b  coal_etry_b vtab }
-                                     in  ((M.insert mem_nm info' act_tab,inhb_tab), indfuns')
-              ) ((active_tab1,inhibit_tab1), []) memasoc
+  in  (active_tab2, inhibit_tab2)
 
-  in  ((active_tab2, inhibit_tab2), reverse rev_lst_indfuns)
+-- | Check safety conditions 2 and 5 and update new substitutions:
+filterSafetyCond2and5 :: CoalsTab -> InhibitTab -> ScalarTab -> AllocTab
+                      -> ScopeTab -> [PatElem (Aliases ExpMem.SeqMem)]
+                      -> (CoalsTab, InhibitTab)
+filterSafetyCond2and5 act_coal inhb_coal scals_env allocs_env scope_env =
+  foldl (\ (acc,inhb) patel ->
+           case (patElemName patel, patElemDec patel) of
+             (b, (_,ExpMem.MemArray _ _ _ (ExpMem.ArrayIn m_b _idxfn_b))) ->
+               case M.lookup m_b acc of
+                 Nothing -> (acc,inhb)
+                 Just info@(CoalsEntry x_mem _ _ vtab _) ->
+                   let failed = markFailedCoal (acc,inhb) m_b
+                   in
+                    case M.lookup b vtab of
+                     Nothing -> trace ("Too drastic case: "++pretty (b,m_b,x_mem)) failed
+                        -- ^ ToDo: is this too drastic? The code below would fail coalescing:
+                        --   @let a = ...@
+                        --   @let b = potential alias of a@
+                        --   @ ... @
+                        --   @let y[i] = a@
+                     Just (Coalesced k mblk@(MemBlock _ _ _ new_indfun) _) ->
+                       let (safe_5, fv_subst) = translateIndFunFreeVar scope_env scals_env new_indfun
+                           safe_2 = nameIn x_mem allocs_env
+                       in  if safe_5 && safe_2
+                           then let mem_info = Coalesced k mblk fv_subst
+                                    info' = info { vartab = M.insert b mem_info vtab }
+                                in  (M.insert m_b info' acc, inhb)
+                           else failed
+             _ -> (acc,inhb)
+        ) (act_coal,inhb_coal)
 
 -- |   Pattern matches a potentially coalesced statement and
 --     records a new association in @activeCoals@
@@ -701,6 +733,7 @@ mkCoalsHelper3PatternMatch pat e lutab td_env successCoals_tab activeCoals_tab i
               (True, Just new_ind, True, True) ->
                 -- finally update the @activeCoals@ table with a fresh
                 -- binding for @m_b@; if such one exists then overwrite.
+                -- ToDo: can we do better than overwrite?
                 let mem_info  = Coalesced knd (MemBlock tp_b shp_b m_yx new_ind) M.empty
                     coal_etry = CoalsEntry m_yx ind_yx mem_yx_al (M.singleton b mem_info) $
                                   -- coalescing is dependent on the coalescing
@@ -715,32 +748,6 @@ mkCoalsHelper3PatternMatch pat e lutab td_env successCoals_tab activeCoals_tab i
               _ -> acc
 mkCoalsHelper3PatternMatch _ _ _ _ _ _ _ =
   error "In ArrayCoalescing.hs, fun mkCoalsHelper3PatternMatch: Unreachable!!!"
-
-translateIndFunFreeVar :: ScopeTab -> ScalarTab -> ExpMem.IxFun
-                       -> (Bool,FreeVarSubsts)
-translateIndFunFreeVar scope0 scals0 indfun =
-  let fv_indfun     = namesToList $ freeIn indfun
-      fv_trans_vars = trace ("COALESCING: free vars in indexfun: "++pretty indfun++" are: "++pretty fv_indfun) $
-                      filter (\x -> not $ M.member x scope0) fv_indfun
-      fv_trans_exps = mapMaybe (`M.lookup` scals0) fv_trans_vars
-  in  if  length fv_trans_exps == length fv_trans_vars
-      then trace ("COALESCING translation: vars: "++pretty fv_trans_vars++" exps: "++pretty fv_trans_exps)
-                 (True , M.fromList $ zip fv_trans_vars fv_trans_exps)
-      else (False, M.empty)
-
--- | merges entries in the coalesced table.
-appendCoalsInfo :: VName -> CoalsEntry -> CoalsTab -> CoalsTab
-appendCoalsInfo mb info_new coalstab =
-  case M.lookup mb coalstab of
-    Nothing       -> M.insert mb info_new coalstab
-    Just info_old -> M.insert mb (unionCoalsEntry info_old info_new) coalstab
-
-tryRebase :: ExpMem.IxFun -> ExpMem.IxFun -> Maybe ExpMem.IxFun
-tryRebase x_indfun b_indfun =
-  let new_fun = IxFun.rebase x_indfun b_indfun
-  in  if IxFun.rank x_indfun == length (IxFun.base b_indfun)
-      then Just new_fun
-      else Nothing
 
 genCoalStmtInfo :: LUTabFun
                 -> ScopeTab
@@ -788,58 +795,33 @@ genCoalStmtInfo lutab scopetab pat (BasicOp (Concat 0 b0 bs _))
         in  if null res then Nothing else Just res
 -- CASE other than a), b), or c) not supported
 genCoalStmtInfo _ _ _ _ = Nothing
-{--
-genCoalStmtInfo lutab scopetab pat e =
-  case (patternValueElements pat,e) of
-    -- CASE a) @let y = copy(b^{lu})@
-    ( [PatElem x BindVar (_,ExpMem.MemArray _ _ _ m_x ind_x)], BasicOp (Copy b) ) ->
-        case (M.lookup x lutab, getScopeMemInfo b scopetab) of
-            (Just last_uses, Just (MemBlock tpb shpb m_b ind_b)) ->
-                if not (S.member b last_uses) then Nothing
-                else Just [(Ccopy,x,m_x,ind_x,b,m_b,ind_b,tpb,shpb)]
-            _ -> Nothing
 
-    -- CASE c) @let y[i] = b^{lu}@
-    ( [PatElem x' (BindInPlace _ x slice_x) (_,ExpMem.MemArray _ _ _ m_x ind_x)], BasicOp (Copy b) ) ->
-        -- do something to also cover @e == BasicOp (SubExp (Var b))@
-        case (M.lookup x' lutab, getScopeMemInfo b scopetab) of
-            (Just last_uses, Just (MemBlock tpb shpb m_b ind_b)) ->
-                if trace ("COALESCING: in-place pattern found for "++pretty b) $ not (S.member b last_uses) then Nothing
-                else let ind_x_slice = updateIndFunSlice ind_x slice_x
-                     in  Just [(InPl,x,m_x,ind_x_slice,b,m_b,ind_b,tpb,shpb)]
-            _ -> Nothing
+translateIndFunFreeVar :: ScopeTab -> ScalarTab -> ExpMem.IxFun
+                       -> (Bool,FreeVarSubsts)
+translateIndFunFreeVar scope0 scals0 indfun =
+  let fv_indfun     = namesToList $ freeIn indfun
+      fv_trans_vars = trace ("COALESCING: free vars in indexfun: "++pretty indfun++" are: "++pretty fv_indfun) $
+                      filter (\x -> not $ M.member x scope0) fv_indfun
+      fv_trans_exps = mapMaybe (`M.lookup` scals0) fv_trans_vars
+  in  if  length fv_trans_exps == length fv_trans_vars
+      then trace ("COALESCING translation: vars: "++pretty fv_trans_vars++" exps: "++pretty fv_trans_exps)
+                 (True , M.fromList $ zip fv_trans_vars fv_trans_exps)
+      else (False, M.empty)
 
-    -- CASE b) @let y = concat(a, b^{lu})@
-    ( [PatElem x BindVar (_,ExpMem.MemArray _ _ _ m_x ind_x)], BasicOp (Concat _ 0 b0 bs _) ) ->
-      case M.lookup x lutab of
-        Nothing -> Nothing
-        Just last_uses ->
-          let zero = primExpFromSubExp (IntType Int32) (constant (0::Int32))
-              (res,_,_) =
-                foldl (\ (acc,offs,succ0) b ->
-                        if not succ0 then (acc, offs, succ0)
-                        else
-                          case (getScopeMemInfo b scopetab, M.lookup b scopetab) of
-                            (Just (MemBlock tpb shpb m_b ind_b), Just scp_info) ->
-                              let (succ1,offs_b) =
-                                    case typeOf scp_info of
-                                      Array _ shp _ ->
-                                        case shapeDims shp of
-                                          []   -> (False, zero)
-                                          se:_ -> (succ0, primExpFromSubExp (IntType Int32) se)
-                                      _ -> (False, zero)
-                                  offs' = BinOpExp (Add Int32) offs_b offs
-                              in  if S.member b last_uses && succ1
-                                  then let ind_x_slice = IxFun.offsetIndex ind_x offs'
-                                       in  (acc++[(Conc,x,m_x,ind_x_slice,b,m_b,ind_b,tpb,shpb)],offs',succ1)
-                                  else (acc,offs',succ1)
-                            _ ->  (acc,offs,False)
-                      ) ([],zero,True) (b0:bs)
-          in  if null res then Nothing
-              else Just res
-    -- CASE other than a), b), or c).
-    _ -> Nothing
--}
+-- | merges entries in the coalesced table.
+appendCoalsInfo :: VName -> CoalsEntry -> CoalsTab -> CoalsTab
+appendCoalsInfo mb info_new coalstab =
+  case M.lookup mb coalstab of
+    Nothing       -> M.insert mb info_new coalstab
+    Just info_old -> M.insert mb (unionCoalsEntry info_old info_new) coalstab
+
+tryRebase :: ExpMem.IxFun -> ExpMem.IxFun -> Maybe ExpMem.IxFun
+tryRebase x_indfun b_indfun =
+  let new_fun = IxFun.rebase x_indfun b_indfun
+  in  if IxFun.rank x_indfun == length (IxFun.base b_indfun)
+      then Just new_fun
+      else Nothing
+
 
 -- | Results in pairs of pattern-blockresult pairs of (var name, mem block)
 --   for those if-patterns that are candidates for coalescing.
@@ -864,38 +846,6 @@ findMemBodyResult activeCoals_tab scope_env patelms bdy =
                                 Just _  -> Just (m_b,b,r,m_r)
                     _ ->     Nothing
                ) (zip patelms (bodyResult bdy))
-
--- | Check safety conditions 2 and 5
---      and update new substitutions:
-filterSafetyCond2and5 :: CoalsTab -> InhibitTab -> ScalarTab -> AllocTab
-                      -> ScopeTab -> [PatElem (Aliases ExpMem.SeqMem)]
-                      -> (CoalsTab, InhibitTab)
-filterSafetyCond2and5 act_coal inhb_coal scals_env allocs_env scope_env =
-  foldl (\ (acc,inhb) patel ->
-           case (patElemName patel, patElemDec patel) of
-             (b, (_,ExpMem.MemArray _ _ _ (ExpMem.ArrayIn m_b _idxfn_b))) ->
-               case M.lookup m_b acc of
-                 Nothing -> (acc,inhb)
-                 Just info@(CoalsEntry x_mem _ _ vtab _) ->
-                   let failed = markFailedCoal (acc,inhb) m_b
-                   in
-                    case M.lookup b vtab of
-                     Nothing -> trace ("Too drastic case: "++pretty (b,m_b,x_mem)) failed
-                        -- ^ ToDo: is this too drastic? The code below would fail coalescing:
-                        --   @let a = ...@
-                        --   @let b = potential alias of a@
-                        --   @ ... @
-                        --   @let y[i] = a@
-                     Just (Coalesced k mblk@(MemBlock _ _ _ new_indfun) _) ->
-                       let (safe_5, fv_subst) = translateIndFunFreeVar scope_env scals_env new_indfun
-                           safe_2 = nameIn x_mem allocs_env
-                       in  if safe_5 && safe_2
-                           then let mem_info = Coalesced k mblk fv_subst
-                                    info' = info { vartab = M.insert b mem_info vtab }
-                                in  (M.insert m_b info' acc, inhb)
-                           else failed
-             _ -> (acc,inhb)
-        ) (act_coal,inhb_coal)
 
 -- | transfers coalescing from if-pattern to then|else body result
 --   in the active coalesced table. The transfer involves, among
