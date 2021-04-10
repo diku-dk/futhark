@@ -79,7 +79,7 @@ class Server {
   }
 
   _cmd_call(args) {
-    var entry = this._get_entry_point(get_arg(args, 0));
+    var entry = this._get_entry_point(this._get_arg(args, 0));
     var num_ins = entry[0].length;
     var num_outs = entry[0].length;
     var expected_len = 1 + num_outs + num_ins
@@ -91,14 +91,14 @@ class Server {
     var out_vnames = args.slice(1, num_outs+1)
     for (var i = 0; i < out_vnames.length; i++) {
       var out_vname = out_vnames[i];
-      if (outvname in this._vars) {
+      if (out_vname in this._vars) {
         throw "Variable already exists: " + out_vname;
       }
     }
-    var in_vnames = args.slice(1+num+outs);
+    var in_vnames = args.slice(1+num_outs);
     var ins = [];
     for (var i = 0; i < in_vnames.length; i++) {
-      ins.push(_get_var(in_vnames[i]));
+      ins.push(this._get_var(in_vnames[i]));
     }
     // TODO Figure this bad boy out
     try {
@@ -106,7 +106,7 @@ class Server {
       var vals;
     } 
     catch (err) {
-      throw "" + err;
+      throw "THIS FAILED" + err;
     }
 
     // This probablty isn't right
@@ -122,7 +122,7 @@ class Server {
 
 
   _cmd_store(args) {
-    var fname = _get_arg(args, 0);
+    var fname = this._get_arg(args, 0);
     for (var i = 1; i < args.length; i++) {
       var vname = args[i];
       var value = _get_var(vname);
@@ -147,33 +147,35 @@ class Server {
     
     // Reading from file is part of values.js
     ///////////////////////////////////////////
-
-    var fs = require("fs");
-    fs.copyFile(fname, 'destination.txt', (err) => {
-  if (err) throw err;
-  console.log('source.txt was copied to destination.txt');
-});
+//
+//    var fs = require("fs");
+//    fs.copyFile(fname, 'destination.txt', (err) => {
+//  if (err) throw err;
+//  console.log('source.txt was copied to destination.txt');
+//});
     ///////////////////////////////////////////
+    var as = args;
     var reader = new Reader(fname);
-    while (args != []) {
-      var vname = args[0];
-      var typename = args[1];
-      args = args.slice(2);
+    while (as.length != 0) {
+      var vname = as[0];
+      var typename = as[1];
+      as = as.slice(2);
       
       // TODO finish the rest of this function
       if (vname in this._vars) {
         throw "Variable already exists: " + vname;
       }
       try {
-        console.log(reader);
         this._vars[vname] = read_value(typename, reader);
       } catch (err) {
         var err_msg = "Failed to restore variable " + vname + ".\nPossibly malformed data in " + fname + ".\n";
         throw "Failed to restore variable " + err_msg;
       }
     }
+    console.log("skipping spaces");
     skip_spaces(reader);
-    if (reader.get_buff() == "") {
+    console.log("skipped spaces");
+    if (reader.get_buff().length != 0) {
       throw "Expected EOF after reading values";
     }
   }

@@ -186,7 +186,7 @@ class Reader {
   }
 
   skip_spaces() {
-    while (this.buff.slice(0, 1).toString().trim() == "") {
+    while (this.buff.length > 0 && this.buff.slice(0, 1).toString().trim() == "") {
       this.buff = this.buff.slice(1);
     }
   }
