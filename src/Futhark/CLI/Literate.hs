@@ -220,6 +220,14 @@ parseVideoParams =
       s <- lexeme $ takeWhileP Nothing (not . isSpace)
       pure params {videoFormat = Just s}
 
+atStartOfLine :: Parser ()
+atStartOfLine = do
+  col <- sourceColumn <$> getSourcePos
+  when (col /= pos1) empty
+
+afterExp :: Parser ()
+afterExp = choice [atStartOfLine, void eol]
+
 parseBlock :: Parser Block
 parseBlock =
   choice
@@ -231,7 +239,7 @@ parseBlock =
   where
     parseDirective =
       choice
-        [ DirectiveRes <$> parseExp postlexeme,
+        [ DirectiveRes <$> parseExp postlexeme <* afterExp,
           directiveName "covert" $> DirectiveCovert
             <*> parseDirective,
           directiveName "brief" $> DirectiveBrief
