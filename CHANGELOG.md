@@ -23,6 +23,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
     `futhark_context_sync()` before collecting profiling information
     (if applicable).
 
+  * `futhark literate`: Parse errors for expression directives now
+    detected properly.
+
 ## [0.19.4]
 
 ### Fixed
