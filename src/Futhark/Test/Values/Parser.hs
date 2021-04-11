@@ -63,7 +63,7 @@ parseInteger =
 parseIntConst :: Parser F.PrimValue
 parseIntConst = do
   x <- parseInteger
-  notFollowedBy $ "f32" <|> "f64" <|> "."
+  notFollowedBy $ "f32" <|> "f64" <|> "." <|> "e"
   choice
     [ signedV F.Int8Value x "i8",
       signedV F.Int16Value x "i16",

@@ -119,7 +119,7 @@ parseExp sep =
     [ inParens sep (mkTuple <$> (parseExp sep `sepBy` pComma)),
       inBraces sep (Record <$> (pField `sepBy` pComma)),
       Call <$> lexeme sep parseFunc <*> many (parseExp sep),
-      constV =<< lexeme sep V.parsePrimValue,
+      Const <$> V.parseValue sep,
       StringLit . T.pack <$> lexeme sep ("\"" *> manyTill charLiteral "\"")
     ]
   where
@@ -139,9 +139,6 @@ parseExp sep =
       fmap T.pack $ (:) <$> satisfy isAlpha <*> many (satisfy constituent)
       where
         constituent c = isAlphaNum c || c == '_'
-
-    constV v =
-      maybe (fail "invalid value read") (pure . Const) $ V.putValue v
 
 prettyFailure :: CmdFailure -> T.Text
 prettyFailure (CmdFailure bef aft) =

@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
     sizes, starting with making type abbreviations function as
     existential quantifiers (#1301).
 
+  * FutharkScript now also supports arrays and scientific notation.
+
 ### Removed
 
 ### Changed

@@ -192,10 +192,16 @@ Only an extremely limited subset of Futhark is supported:
    scriptexp:   `fun` `scriptexp`*
             : | "(" `scriptexp` ")"
             : | "(" `scriptexp` ( "," `scriptexp` )+ ")"
+            : | "[" `scriptexp` ( "," `scriptexp` )+ "]"
+            : | "empty" "(" ("[" `decimal` "]" )+ `type` ")"
             : | "{" "}"
             : | "{" (`id` = `scriptexp`) ("," `id` = `scriptexp`)* "}"
             : | `literal`
    fun:  `id` | "$" `id`
+   type: `int_type` | `float_type` | "bool"
+
+Note that empty arrays must be written using the ``empty(t)``
+notation, e.g. ``empty([0]i32)``.
 
 Function applications are either of Futhark funtions or *builtin
 functions*.  The latter are prefixed with ``$`` and are magical
