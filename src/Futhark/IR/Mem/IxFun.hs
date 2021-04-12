@@ -156,7 +156,7 @@ instance Pretty num => Pretty (IxFun num) where
       semisep
         [ "base: " <> brackets (commasep $ map ppr oshp),
           "contiguous: " <> if cg then "true" else "false",
-          "LMADs: " <> brackets (commasep $ NE.toList $ NE.map ppr lmads)
+          "LMADs: " <> brackets (commastack $ NE.toList $ NE.map ppr lmads)
         ]
 
 instance Substitute num => Substitute (LMAD num) where

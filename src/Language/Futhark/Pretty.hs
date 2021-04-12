@@ -32,9 +32,6 @@ import Language.Futhark.Prop
 import Language.Futhark.Syntax
 import Prelude
 
-commastack :: [Doc] -> Doc
-commastack = align . stack . punctuate comma
-
 -- | A class for types that are variable names in the Futhark source
 -- language.  This is used instead of a mere 'Pretty' instance because
 -- in the compiler frontend we want to print VNames differently
