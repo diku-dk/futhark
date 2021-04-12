@@ -92,8 +92,8 @@ compileProg env prog =
 compileProgOpenCL,
   compileProgCUDA ::
     MonadFreshNames m => Prog KernelsMem -> m (Warnings, Imp.Program)
-compileProgOpenCL = compileProg $ HostEnv openclAtomics OpenCL
-compileProgCUDA = compileProg $ HostEnv cudaAtomics CUDA
+compileProgOpenCL = compileProg $ HostEnv openclAtomics OpenCL mempty
+compileProgCUDA = compileProg $ HostEnv cudaAtomics CUDA mempty
 
 opCompiler ::
   Pattern KernelsMem ->
@@ -202,6 +202,31 @@ checkLocalMemoryReqs code = do
     -- they fit.
     alignedSize x = x + ((8 - (x `rem` 8)) `rem` 8)
 
+withAcc ::
+  Pattern KernelsMem ->
+  [(Shape, [VName], Maybe (Lambda KernelsMem, [SubExp]))] ->
+  Lambda KernelsMem ->
+  CallKernelGen ()
+withAcc pat inputs lam = do
+  atomics <- hostAtomics <$> askEnv
+  locksForInputs atomics $ zip accs inputs
+  where
+    accs = map paramName $ lambdaParams lam
+    locksForInputs _ [] =
+      defCompileExp pat $ WithAcc inputs lam
+    locksForInputs atomics ((c, (_, _, op)) : inputs')
+      | Just (op_lam, _) <- op,
+        AtomicLocking _ <- atomicUpdateLocking atomics op_lam = do
+        let num_locks = 100151
+        locks_arr <-
+          sStaticArray "withacc_locks" (Space "device") int32 $
+            Imp.ArrayZeros num_locks
+        let locks = Locks locks_arr num_locks
+            extend env = env {hostLocks = M.insert c locks $ hostLocks env}
+        localEnv extend $ locksForInputs atomics inputs'
+      | otherwise =
+        locksForInputs atomics inputs'
+
 expCompiler :: ExpCompiler KernelsMem HostEnv Imp.HostOp
 -- We generate a simple kernel for itoa and replicate.
 expCompiler (Pattern _ [pe]) (BasicOp (Iota n x s et)) = do
@@ -214,6 +239,8 @@ expCompiler (Pattern _ [pe]) (BasicOp (Replicate _ se)) =
 -- Allocation in the "local" space is just a placeholder.
 expCompiler _ (Op (Alloc _ (Space "local"))) =
   return ()
+expCompiler pat (WithAcc inputs lam) =
+  withAcc pat inputs lam
 -- This is a multi-versioning If created by incremental flattening.
 -- We need to augment the conditional with a check that any local
 -- memory requirements in tbranch are compatible with the hardware.

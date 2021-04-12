@@ -1337,7 +1337,9 @@ gnuSource =
 // _any_ headers files are imported to get
 // the usage statistics of a thread (i.e. have RUSAGE_THREAD) on GNU/Linux
 // https://manpages.courier-mta.org/htmlman2/getrusage.2.html
+$esc:("#ifndef _GNU_SOURCE") // Avoid possible double-definition warning.
 $esc:("#define _GNU_SOURCE")
+$esc:("#endif")
 |]
 
 -- We may generate variables that are never used (e.g. for
@@ -1354,6 +1356,7 @@ $esc:("#pragma GCC diagnostic ignored \"-Wunused-function\"")
 $esc:("#pragma GCC diagnostic ignored \"-Wunused-variable\"")
 $esc:("#pragma GCC diagnostic ignored \"-Wparentheses\"")
 $esc:("#pragma GCC diagnostic ignored \"-Wunused-label\"")
+$esc:("#pragma GCC diagnostic ignored \"-Wunused-but-set-variable\"")
 $esc:("#endif")
 
 $esc:("#ifdef __clang__")
@@ -1562,9 +1565,14 @@ commonLibFuns memreport = do
               }|]
     )
 
+  sync <- publicName "context_sync"
   publicDef_ "context_report" MiscDecl $ \s ->
     ( [C.cedecl|char* $id:s($ty:ctx *ctx);|],
       [C.cedecl|char* $id:s($ty:ctx *ctx) {
+                 if ($id:sync(ctx) != 0) {
+                   return NULL;
+                 }
+
                  struct str_builder builder;
                  str_builder_init(&builder);
                  if (ctx->detail_memory || ctx->profiling || ctx->logging) {

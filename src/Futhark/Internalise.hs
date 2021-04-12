@@ -63,7 +63,7 @@ internaliseFunName = nameFromString . pretty
 internaliseValBind :: E.ValBind -> InternaliseM ()
 internaliseValBind fb@(E.ValBind entry fname retdecl (Info (rettype, _)) tparams params body _ attrs loc) = do
   localConstsScope $
-    bindingParams tparams params $ \shapeparams params' -> do
+    bindingFParams tparams params $ \shapeparams params' -> do
       let shapenames = map I.paramName shapeparams
 
       msg <- case retdecl of
@@ -75,7 +75,8 @@ internaliseValBind fb@(E.ValBind entry fname retdecl (Info (rettype, _)) tparams
 
       ((rettype', body_res), body_stms) <- collectStms $ do
         body_res <- internaliseExp (baseString fname <> "_res") body
-        rettype_bad <- internaliseReturnType rettype
+        rettype_bad <-
+          internaliseReturnType rettype =<< mapM subExpType body_res
         let rettype' = zeroExts rettype_bad
         return (rettype', body_res)
       body' <-
@@ -114,7 +115,7 @@ internaliseValBind fb@(E.ValBind entry fname retdecl (Info (rettype, _)) tparams
 generateEntryPoint :: E.EntryPoint -> E.ValBind -> InternaliseM ()
 generateEntryPoint (E.EntryPoint e_paramts e_rettype) vb = localConstsScope $ do
   let (E.ValBind _ ofname _ (Info (rettype, _)) tparams params _ _ attrs loc) = vb
-  bindingParams tparams params $ \shapeparams params' -> do
+  bindingFParams tparams params $ \shapeparams params' -> do
     entry_rettype <- internaliseEntryReturnType rettype
     let entry' = entryPoint (zip e_paramts params') (e_rettype, entry_rettype)
         args = map (I.Var . I.paramName) $ concat params'
@@ -273,7 +274,7 @@ internaliseExp desc (E.ArrayLit es (Info arr_t) loc)
       letSubExp desc $ I.BasicOp $ I.Reshape new_shape' flat_arr
   | otherwise = do
     es' <- mapM (internaliseExp "arr_elem") es
-    arr_t_ext <- internaliseReturnType (E.toStruct arr_t)
+    arr_t_ext <- internaliseType $ E.toStruct arr_t
 
     rowtypes <-
       case mapM (fmap rowType . hasStaticShape . I.fromDecl) arr_t_ext of
@@ -455,7 +456,7 @@ internaliseExp desc (E.Ascript e _ _) =
   internaliseExp desc e
 internaliseExp desc (E.Coerce e (TypeDecl dt (Info et)) (Info ret, Info retext) loc) = do
   ses <- internaliseExp desc e
-  ts <- internaliseReturnType et
+  ts <- internaliseReturnType et =<< mapM subExpType ses
   dt' <- typeExpForError dt
   bindExtSizes (E.toStruct ret) retext ses
   forM (zip ses ts) $ \(e', t') -> do
@@ -585,7 +586,8 @@ internaliseExp desc (E.DoLoop sparams mergepat mergeexp form loopbody (Info (ret
 
       i <- newVName "i"
 
-      bindingLoopParams sparams' mergepat $
+      ts <- mapM subExpType mergeinit
+      bindingLoopParams sparams' mergepat ts $
         \shapepat mergepat' ->
           bindingLambdaParams [x] (map rowType arr_ts) $ \x_params -> do
             let loopvars = zip x_params arr'
@@ -598,12 +600,14 @@ internaliseExp desc (E.DoLoop sparams mergepat mergeexp form loopbody (Info (ret
         I.Prim (IntType it) -> return it
         _ -> error "internaliseExp DoLoop: invalid type"
 
-      bindingLoopParams sparams' mergepat $
+      ts <- mapM subExpType mergeinit
+      bindingLoopParams sparams' mergepat ts $
         \shapepat mergepat' ->
           forLoop mergepat' shapepat mergeinit $
             I.ForLoop (E.identName i) it num_iterations' []
-    handleForm mergeinit (E.While cond) =
-      bindingLoopParams sparams' mergepat $ \shapepat mergepat' -> do
+    handleForm mergeinit (E.While cond) = do
+      ts <- mapM subExpType mergeinit
+      bindingLoopParams sparams' mergepat ts $ \shapepat mergepat' -> do
         mergeinit_ts <- mapM subExpType mergeinit
         -- We need to insert 'cond' twice - once for the initial
         -- condition (do we enter the loop at all?), and once with the
@@ -825,6 +829,9 @@ internaliseArg desc (arg, argdim) = do
     _ -> return ()
   return arg'
 
+subExpPrimType :: I.SubExp -> InternaliseM I.PrimType
+subExpPrimType = fmap I.elemType . subExpType
+
 generateCond :: E.Pattern -> [I.SubExp] -> InternaliseM (I.SubExp, [I.SubExp])
 generateCond orig_p orig_ses = do
   (cmps, pertinent, _) <- compares orig_p orig_ses
@@ -837,7 +844,7 @@ generateCond orig_p orig_ses = do
         PatLitPrim v -> pure $ constant $ internalisePrimValue v
         PatLitInt x -> internaliseExp1 "constant" $ E.IntLit x t mempty
         PatLitFloat x -> internaliseExp1 "constant" $ E.FloatLit x t mempty
-      t' <- elemType <$> subExpType se
+      t' <- subExpPrimType se
       cmp <- letSubExp "match_lit" $ I.BasicOp $ I.CmpOp (I.CmpEq t') e' se
       return ([cmp], [se], ses)
     compares (E.PatternConstr c (Info (E.Scalar (E.Sum fs))) pats _) (se : ses) = do
@@ -1174,7 +1181,7 @@ internaliseStreamMap desc o lam arr = do
   lam' <- internaliseStreamMapLambda internaliseLambda lam $ map I.Var arrs
   w <- arraysSize 0 <$> mapM lookupType arrs
   let form = I.Parallel o Commutative (I.Lambda [] (mkBody mempty []) [])
-  letTupExp' desc $ I.Op $ I.Stream w form lam' [] arrs
+  letTupExp' desc $ I.Op $ I.Stream w arrs form [] lam'
 
 internaliseStreamRed ::
   String ->
@@ -1245,7 +1252,47 @@ internaliseStreamRed desc o comm lam0 lam arr = do
             lambdaReturnType = nes_ts
           }
   w <- arraysSize 0 <$> mapM lookupType arrs
-  letTupExp' desc $ I.Op $ I.Stream w form lam' nes arrs
+  letTupExp' desc $ I.Op $ I.Stream w arrs form nes lam'
+
+internaliseStreamAcc ::
+  String ->
+  E.Exp ->
+  Maybe (E.Exp, E.Exp) ->
+  E.Exp ->
+  E.Exp ->
+  InternaliseM [SubExp]
+internaliseStreamAcc desc dest op lam bs = do
+  dest' <- internaliseExpToVars "scatter_dest" dest
+  bs' <- internaliseExpToVars "scatter_input" bs
+
+  acc_cert_v <- newVName "acc_cert"
+  dest_ts <- mapM lookupType dest'
+  let dest_w = arraysSize 0 dest_ts
+      acc_t = Acc acc_cert_v (Shape [dest_w]) (map rowType dest_ts) NoUniqueness
+  acc_p <- newParam "acc_p" acc_t
+  withacc_lam <- mkLambda [Param acc_cert_v (I.Prim I.Cert), acc_p] $ do
+    lam' <-
+      internaliseMapLambda internaliseLambda lam $
+        map I.Var $ paramName acc_p : bs'
+    w <- arraysSize 0 <$> mapM lookupType bs'
+    letTupExp' "acc_res" $ I.Op $ I.Screma w (paramName acc_p : bs') (I.mapSOAC lam')
+
+  op' <-
+    case op of
+      Just (op_lam, ne) -> do
+        ne' <- internaliseExp "hist_ne" ne
+        ne_ts <- mapM I.subExpType ne'
+        (lam_params, lam_body, lam_rettype) <-
+          internaliseLambda op_lam $ ne_ts ++ ne_ts
+        idxp <- newParam "idx" $ I.Prim int64
+        let op_lam' = I.Lambda (idxp : lam_params) lam_body lam_rettype
+        return $ Just (op_lam', ne')
+      Nothing ->
+        return Nothing
+
+  destw <- arraysSize 0 <$> mapM lookupType dest'
+  fmap (map I.Var) $
+    letTupExp desc $ WithAcc [(Shape [destw], dest', op')] withacc_lam
 
 internaliseExp1 :: String -> E.Exp -> InternaliseM I.SubExp
 internaliseExp1 desc e = do
@@ -1471,13 +1518,22 @@ findFuncall (E.Apply f arg (Info (_, argext)) (Info ret, Info retext) _) = do
 findFuncall e =
   error $ "Invalid function expression in application: " ++ pretty e
 
+-- The type of a body.  Watch out: this only works for the degenerate
+-- case where the body does not already return its context.
+bodyExtType :: Body -> InternaliseM [ExtType]
+bodyExtType (Body _ stms res) =
+  existentialiseExtTypes (M.keys stmsscope) . staticShapes
+    <$> extendedScope (traverse subExpType res) stmsscope
+  where
+    stmsscope = scopeOf stms
+
 internaliseLambda :: InternaliseLambda
 internaliseLambda (E.Parens e _) rowtypes =
   internaliseLambda e rowtypes
 internaliseLambda (E.Lambda params body _ (Info (_, rettype)) _) rowtypes =
   bindingLambdaParams params rowtypes $ \params' -> do
     body' <- internaliseBody "lam" body
-    rettype' <- internaliseLambdaReturnType rettype
+    rettype' <- internaliseLambdaReturnType rettype =<< bodyExtType body'
     return (params', body', rettype')
 internaliseLambda e _ = error $ "internaliseLambda: unexpected expression:\n" ++ pretty e
 
@@ -1495,6 +1551,7 @@ isOverloadedFunction qname args loc = do
           handleIntrinsicOps,
           handleOps,
           handleSOACs,
+          handleAccs,
           handleRest
         ]
   msum [h args $ baseString $ qualLeaf qname | h <- handlers]
@@ -1576,12 +1633,12 @@ isOverloadedFunction qname args loc = do
                 cmps <-
                   letExp "cmps" $
                     I.Op $
-                      I.Screma x_num_elems (I.mapSOAC cmp_lam) [x_flat, y_flat]
+                      I.Screma x_num_elems [x_flat, y_flat] (I.mapSOAC cmp_lam)
 
                 -- Check that all were equal.
                 and_lam <- binOpLambda I.LogAnd I.Bool
                 reduce <- I.reduceSOAC [Reduce Commutative and_lam [constant True]]
-                all_equal <- letSubExp "all_equal" $ I.Op $ I.Screma x_num_elems reduce [cmps]
+                all_equal <- letSubExp "all_equal" $ I.Op $ I.Screma x_num_elems [cmps] reduce
                 return $ resultBody [all_equal]
 
               letSubExp "arrays_equal" $
@@ -1604,7 +1661,7 @@ isOverloadedFunction qname args loc = do
       w <- arraysSize 0 <$> mapM lookupType arr'
       letTupExp' desc $
         I.Op $
-          I.Screma w (I.mapSOAC lam') arr'
+          I.Screma w arr' (I.mapSOAC lam')
     handleSOACs [TupLit [k, lam, arr] _] "partition" = do
       k' <- fromIntegral <$> fromInt32 k
       Just $ \_desc -> do
@@ -1619,19 +1676,19 @@ isOverloadedFunction qname args loc = do
       internaliseScanOrReduce desc "reduce" reduce (lam, ne, arr, loc)
       where
         reduce w red_lam nes arrs =
-          I.Screma w
-            <$> I.reduceSOAC [Reduce Noncommutative red_lam nes] <*> pure arrs
+          I.Screma w arrs
+            <$> I.reduceSOAC [Reduce Noncommutative red_lam nes]
     handleSOACs [TupLit [lam, ne, arr] _] "reduce_comm" = Just $ \desc ->
       internaliseScanOrReduce desc "reduce" reduce (lam, ne, arr, loc)
       where
         reduce w red_lam nes arrs =
-          I.Screma w
-            <$> I.reduceSOAC [Reduce Commutative red_lam nes] <*> pure arrs
+          I.Screma w arrs
+            <$> I.reduceSOAC [Reduce Commutative red_lam nes]
     handleSOACs [TupLit [lam, ne, arr] _] "scan" = Just $ \desc ->
       internaliseScanOrReduce desc "scan" reduce (lam, ne, arr, loc)
       where
         reduce w scan_lam nes arrs =
-          I.Screma w <$> I.scanSOAC [Scan scan_lam nes] <*> pure arrs
+          I.Screma w arrs <$> I.scanSOAC [Scan scan_lam nes]
     handleSOACs [TupLit [is, lam, inv, arr] _] "stencil_1d" = Just $ \desc -> do
       is' <- internaliseExpToVars "stencil_is" is
       inv' <- internaliseExpToVars "stencil_arr" inv
@@ -1662,9 +1719,8 @@ isOverloadedFunction qname args loc = do
       w2 <- arraysSize 1 <$> mapM lookupType arr'
       w3 <- arraysSize 2 <$> mapM lookupType arr'
       p <- arraysSize 0 <$> mapM lookupType is'
-      letTupExp' desc $
-        I.Op $
-          I.Stencil [w1, w2, w3] p (StencilDynamic is') lam' (map ([],) inv') arr'
+      letTupExp' desc . I.Op $
+        I.Stencil [w1, w2, w3] p (StencilDynamic is') lam' (map ([],) inv') arr'
     handleSOACs [TupLit [op, f, arr] _] "reduce_stream" = Just $ \desc ->
       internaliseStreamRed desc InOrder Noncommutative op f arr
     handleSOACs [TupLit [op, f, arr] _] "reduce_stream_per" = Just $ \desc ->
@@ -1676,6 +1732,17 @@ isOverloadedFunction qname args loc = do
     handleSOACs [TupLit [rf, dest, op, ne, buckets, img] _] "hist" = Just $ \desc ->
       internaliseHist desc rf dest op ne buckets img loc
     handleSOACs _ _ = Nothing
+
+    handleAccs [TupLit [dest, f, bs] _] "scatter_stream" = Just $ \desc ->
+      internaliseStreamAcc desc dest Nothing f bs
+    handleAccs [TupLit [dest, op, ne, f, bs] _] "hist_stream" = Just $ \desc ->
+      internaliseStreamAcc desc dest (Just (op, ne)) f bs
+    handleAccs [TupLit [acc, i, v] _] "acc_write" = Just $ \desc -> do
+      acc' <- head <$> internaliseExpToVars "acc" acc
+      i' <- internaliseExp1 "acc_i" i
+      vs <- internaliseExp "acc_v" v
+      fmap pure $ letSubExp desc $ BasicOp $ UpdateAcc acc' [i'] vs
+    handleAccs _ _ = Nothing
 
     handleRest [x] "!" = Just $ complementF x
     handleRest [x] "opaque" = Just $ \desc ->
@@ -1745,8 +1812,11 @@ isOverloadedFunction qname args loc = do
         r <- I.arrayRank <$> lookupType v
         return $ I.Rearrange ([1, 0] ++ [2 .. r -1]) v
     handleRest [TupLit [x, y] _] "zip" = Just $ \desc ->
-      (++) <$> internaliseExp (desc ++ "_zip_x") x
-        <*> internaliseExp (desc ++ "_zip_y") y
+      mapM (letSubExp "zip_copy" . BasicOp . Copy)
+        =<< ( (++)
+                <$> internaliseExpToVars (desc ++ "_zip_x") x
+                <*> internaliseExpToVars (desc ++ "_zip_y") y
+            )
     handleRest [x] "unzip" = Just $ flip internaliseExp x
     handleRest [x] "trace" = Just $ flip internaliseExp x
     handleRest [x] "break" = Just $ flip internaliseExp x
@@ -1939,7 +2009,7 @@ partitionWithSOACS :: Int -> I.Lambda -> [I.VName] -> InternaliseM ([I.SubExp], 
 partitionWithSOACS k lam arrs = do
   arr_ts <- mapM lookupType arrs
   let w = arraysSize 0 arr_ts
-  classes_and_increments <- letTupExp "increments" $ I.Op $ I.Screma w (mapSOAC lam) arrs
+  classes_and_increments <- letTupExp "increments" $ I.Op $ I.Screma w arrs (mapSOAC lam)
   (classes, increments) <- case classes_and_increments of
     classes : increments -> return (classes, take k increments)
     _ -> error "partitionWithSOACS"
@@ -1967,7 +2037,7 @@ partitionWithSOACS k lam arrs = do
       nes = replicate (length increments) $ intConst Int64 0
 
   scan <- I.scanSOAC [I.Scan add_lam nes]
-  all_offsets <- letTupExp "offsets" $ I.Op $ I.Screma w scan increments
+  all_offsets <- letTupExp "offsets" $ I.Op $ I.Screma w increments scan
 
   -- We have the offsets for each of the partitions, but we also need
   -- the total sizes, which are the last elements in the offests.  We
@@ -1990,8 +2060,7 @@ partitionWithSOACS k lam arrs = do
   -- Create scratch arrays for the result.
   blanks <- forM arr_ts $ \arr_t ->
     letExp "partition_dest" $
-      I.BasicOp $
-        Scratch (elemType arr_t) (w : drop 1 (I.arrayDims arr_t))
+      I.BasicOp $ Scratch (I.elemType arr_t) (w : drop 1 (I.arrayDims arr_t))
 
   -- Now write into the result.
   write_lam <- do

@@ -20,6 +20,7 @@ module Futhark.Test.Values
 
     -- * Types of values
     ValueType (..),
+    prettyValueTypeNoDims,
     valueType,
     valueShape,
 
@@ -239,6 +240,12 @@ instance PP.Pretty ValueType where
   ppr (ValueType ds t) = mconcat (map pprDim ds) <> ppr t
     where
       pprDim d = brackets $ ppr d
+
+-- | Prettyprint a value type with empty dimensions.  This is needed
+-- for Futhark server programs, whose types are un-sized.
+prettyValueTypeNoDims :: ValueType -> T.Text
+prettyValueTypeNoDims (ValueType dims t) =
+  mconcat (replicate (length dims) "[]") <> prettyText t
 
 -- | Get the type of a value.
 valueType :: Value -> ValueType

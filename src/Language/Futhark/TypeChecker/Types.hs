@@ -171,7 +171,7 @@ checkTypeExp (TEArray t d loc) = do
           <+/> "(might contain function)."
   where
     checkDimExp DimExpAny =
-      return (DimExpAny, AnyDim)
+      return (DimExpAny, AnyDim Nothing)
     checkDimExp (DimExpConst k dloc) =
       return (DimExpConst k dloc, ConstDim k)
     checkDimExp (DimExpNamed v dloc) = do
@@ -247,10 +247,11 @@ checkTypeExp ote@TEApply {} = do
         ( TypeArgExpDim (DimExpConst x dloc) loc,
           M.singleton pv $ DimSub $ ConstDim x
         )
-    checkArgApply (TypeParamDim pv _) (TypeArgExpDim DimExpAny loc) =
+    checkArgApply (TypeParamDim pv _) (TypeArgExpDim DimExpAny loc) = do
+      d <- newID "d"
       return
         ( TypeArgExpDim DimExpAny loc,
-          M.singleton pv $ DimSub AnyDim
+          M.singleton pv $ DimSub $ AnyDim $ Just d
         )
     checkArgApply (TypeParamType l pv _) (TypeArgExpType te) = do
       (te', st, _) <- checkTypeExp te
@@ -438,12 +439,8 @@ applyType ps t args =
   where
     substs = M.fromList $ zipWith mkSubst ps args
     -- We are assuming everything has already been type-checked for correctness.
-    mkSubst (TypeParamDim pv _) (TypeArgDim (NamedDim v) _) =
-      (pv, DimSub $ NamedDim v)
-    mkSubst (TypeParamDim pv _) (TypeArgDim (ConstDim x) _) =
-      (pv, DimSub $ ConstDim x)
-    mkSubst (TypeParamDim pv _) (TypeArgDim AnyDim _) =
-      (pv, DimSub AnyDim)
+    mkSubst (TypeParamDim pv _) (TypeArgDim d _) =
+      (pv, DimSub d)
     mkSubst (TypeParamType l pv _) (TypeArgType at _) =
       (pv, TypeSub $ TypeAbbr l [] at)
     mkSubst p a =

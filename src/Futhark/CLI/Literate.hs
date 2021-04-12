@@ -163,12 +163,12 @@ parseInt :: Parser Int
 parseInt = lexeme $ read <$> some (satisfy isDigit)
 
 restOfLine :: Parser T.Text
-restOfLine = takeWhileP Nothing (/= '\n') <* eol
+restOfLine = takeWhileP Nothing (/= '\n') <* (void eol <|> eof)
 
 parseBlockComment :: Parser T.Text
 parseBlockComment = T.unlines <$> some line
   where
-    line = ("-- " *> restOfLine) <|> ("--" *> eol $> "")
+    line = "--" *> optional " " *> restOfLine
 
 parseTestBlock :: Parser T.Text
 parseTestBlock =
@@ -181,7 +181,7 @@ parseBlockCode :: Parser T.Text
 parseBlockCode = T.unlines . noblanks <$> some line
   where
     noblanks = reverse . dropWhile T.null . reverse . dropWhile T.null
-    line = try (notFollowedBy "--") *> restOfLine
+    line = try (notFollowedBy "--") *> notFollowedBy eof *> restOfLine
 
 parsePlotParams :: Parser (Maybe (Int, Int))
 parsePlotParams =
@@ -220,6 +220,14 @@ parseVideoParams =
       s <- lexeme $ takeWhileP Nothing (not . isSpace)
       pure params {videoFormat = Just s}
 
+atStartOfLine :: Parser ()
+atStartOfLine = do
+  col <- sourceColumn <$> getSourcePos
+  when (col /= pos1) empty
+
+afterExp :: Parser ()
+afterExp = choice [atStartOfLine, void eol]
+
 parseBlock :: Parser Block
 parseBlock =
   choice
@@ -231,7 +239,7 @@ parseBlock =
   where
     parseDirective =
       choice
-        [ DirectiveRes <$> parseExp postlexeme,
+        [ DirectiveRes <$> parseExp postlexeme <* afterExp,
           directiveName "covert" $> DirectiveCovert
             <*> parseDirective,
           directiveName "brief" $> DirectiveBrief
@@ -314,6 +322,15 @@ greyFloatToImg = SVec.map grey
       let i' = round (i * 255) .&. 0xFF
        in (i' `shiftL` 16) .|. (i' `shiftL` 8) .|. i'
 
+greyByteToImg ::
+  (Integral a, SVec.Storable a) =>
+  SVec.Vector a ->
+  SVec.Vector Word32
+greyByteToImg = SVec.map grey
+  where
+    grey i =
+      (fromIntegral i `shiftL` 16) .|. (fromIntegral i `shiftL` 8) .|. fromIntegral i
+
 -- BMPs are RGBA and bottom-up where we assumes images are top-down
 -- and ARGB.  We fix this up before encoding the BMP.  This is
 -- probably a little slower than it has to be.
@@ -337,9 +354,15 @@ valueToBMP v@(Int32Value _ bytes)
 valueToBMP v@(Float32Value _ bytes)
   | [h, w] <- valueShape v =
     Just $ vecToBMP h w $ greyFloatToImg bytes
+valueToBMP v@(Word8Value _ bytes)
+  | [h, w] <- valueShape v =
+    Just $ vecToBMP h w $ greyByteToImg bytes
 valueToBMP v@(Float64Value _ bytes)
   | [h, w] <- valueShape v =
     Just $ vecToBMP h w $ greyFloatToImg bytes
+valueToBMP v@(BoolValue _ bytes)
+  | [h, w] <- valueShape v =
+    Just $ vecToBMP h w $ greyByteToImg $ SVec.map ((*) 255 . fromEnum) bytes
 valueToBMP _ = Nothing
 
 valueToBMPs :: Value -> Maybe [LBS.ByteString]
@@ -436,7 +459,7 @@ loadBMP bmpfile = do
 loadImage :: FilePath -> ScriptM (Compound Value)
 loadImage imgfile =
   withTempDir $ \dir -> do
-    let bmpfile = dir </> imgfile `replaceExtension` "bmp"
+    let bmpfile = dir </> takeBaseName imgfile `replaceExtension` "bmp"
     void $ system "convert" [imgfile, "-type", "TrueColorAlpha", bmpfile] mempty
     loadBMP bmpfile
 
@@ -835,6 +858,8 @@ main = mainWithOptions initialOptions commandLineOptions "program" $ \args opts 
                 ++ scriptCompilerOptions opts
         when (scriptVerbose opts > 0) $
           T.hPutStrLn stderr $ "Compiling " <> T.pack prog <> "..."
+        when (scriptVerbose opts > 1) $
+          T.hPutStrLn stderr $ T.pack $ unwords compile_options
 
         let onError err = do
               mapM_ (T.hPutStrLn stderr) err

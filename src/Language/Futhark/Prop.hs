@@ -1,5 +1,6 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
 -- | This module provides various simple ways to query and manipulate
@@ -55,7 +56,6 @@ module Language.Futhark.Prop
     primByteSize,
 
     -- * Operations on types
-    rank,
     peelArray,
     stripArray,
     arrayOf,
@@ -164,7 +164,7 @@ noSizes = first $ const ()
 
 -- | Change all size annotations to be 'AnyDim'.
 anySizes :: TypeBase (DimDecl vn) as -> TypeBase (DimDecl vn) as
-anySizes = first $ const AnyDim
+anySizes = first $ const $ AnyDim Nothing
 
 -- | Where does this dimension occur?
 data DimPos
@@ -537,11 +537,6 @@ primByteSize (Unsigned it) = Primitive.intByteSize it
 primByteSize (FloatType ft) = Primitive.floatByteSize ft
 primByteSize Bool = 1
 
--- | Construct a 'ShapeDecl' with the given number of 'AnyDim'
--- dimensions.
-rank :: Int -> ShapeDecl (DimDecl VName)
-rank n = ShapeDecl $ replicate n AnyDim
-
 -- | The type is leaving a scope, so clean up any aliases that
 -- reference the bound variables, and turn any dimensions that name
 -- them into AnyDim instead.
@@ -550,7 +545,9 @@ unscopeType bound_here t = first onDim $ t `addAliases` S.map unbind
   where
     unbind (AliasBound v) | v `S.member` bound_here = AliasFree v
     unbind a = a
-    onDim (NamedDim qn) | qualLeaf qn `S.member` bound_here = AnyDim
+    onDim (NamedDim qn)
+      | qualLeaf qn `S.member` bound_here =
+        AnyDim $ Just $ qualLeaf qn
     onDim d = d
 
 -- | Perform some operation on a given record field.  Returns
@@ -790,287 +787,375 @@ namesToPrimTypes =
             ++ map FloatType [minBound .. maxBound]
     ]
 
--- | The nature of something predefined.  These can either be
--- monomorphic or overloaded.  An overloaded builtin is a list valid
--- types it can be instantiated with, to the parameter and result
--- type, with 'Nothing' representing the overloaded parameter type.
+-- | The nature of something predefined.  For functions, these can
+-- either be monomorphic or overloaded.  An overloaded builtin is a
+-- list valid types it can be instantiated with, to the parameter and
+-- result type, with 'Nothing' representing the overloaded parameter
+-- type.
 data Intrinsic
   = IntrinsicMonoFun [PrimType] PrimType
   | IntrinsicOverloadedFun [PrimType] [Maybe PrimType] (Maybe PrimType)
   | IntrinsicPolyFun [TypeParamBase VName] [StructType] StructType
-  | IntrinsicType PrimType
+  | IntrinsicType Liftedness [TypeParamBase VName] StructType
   | IntrinsicEquality -- Special cased.
+
+intrinsicAcc :: (VName, Intrinsic)
+intrinsicAcc =
+  ( acc_v,
+    IntrinsicType SizeLifted [TypeParamType Unlifted t_v mempty] $
+      Scalar $ TypeVar () Nonunique (TypeName [] acc_v) [arg]
+  )
+  where
+    acc_v = VName "acc" 10
+    t_v = VName "t" 11
+    arg = TypeArgType (Scalar (TypeVar () Nonunique (TypeName [] t_v) [])) mempty
 
 -- | A map of all built-ins.
 intrinsics :: M.Map VName Intrinsic
 intrinsics =
-  M.fromList $
-    zipWith namify [10 ..] $
-      map primFun (M.toList Primitive.primFuns)
-        ++ [("opaque", IntrinsicPolyFun [tp_a] [Scalar t_a] $ Scalar t_a)]
-        ++ map unOpFun Primitive.allUnOps
-        ++ map binOpFun Primitive.allBinOps
-        ++ map cmpOpFun Primitive.allCmpOps
-        ++ map convOpFun Primitive.allConvOps
-        ++ map signFun Primitive.allIntTypes
-        ++ map unsignFun Primitive.allIntTypes
-        ++ map
-          intrinsicType
-          ( map Signed [minBound .. maxBound]
-              ++ map Unsigned [minBound .. maxBound]
-              ++ map FloatType [minBound .. maxBound]
-              ++ [Bool]
-          )
-        ++
-        -- This overrides the ! from Primitive.
-        [ ( "!",
-            IntrinsicOverloadedFun
-              ( map Signed [minBound .. maxBound]
-                  ++ map Unsigned [minBound .. maxBound]
-                  ++ [Bool]
-              )
-              [Nothing]
-              Nothing
-          )
-        ]
-        ++
-        -- The reason for the loop formulation is to ensure that we
-        -- get a missing case warning if we forget a case.
-        mapMaybe mkIntrinsicBinOp [minBound .. maxBound]
-        ++ [ ( "flatten",
-               IntrinsicPolyFun
-                 [tp_a]
-                 [Array () Nonunique t_a (rank 2)]
-                 $ Array () Nonunique t_a (rank 1)
-             ),
-             ( "unflatten",
-               IntrinsicPolyFun
-                 [tp_a]
-                 [ Scalar $ Prim $ Signed Int64,
-                   Scalar $ Prim $ Signed Int64,
-                   Array () Nonunique t_a (rank 1)
-                 ]
-                 $ Array () Nonunique t_a (rank 2)
-             ),
-             ( "concat",
-               IntrinsicPolyFun
-                 [tp_a]
-                 [arr_a, arr_a]
-                 uarr_a
-             ),
-             ( "rotate",
-               IntrinsicPolyFun
-                 [tp_a]
-                 [Scalar $ Prim $ Signed Int64, arr_a]
-                 arr_a
-             ),
-             ("transpose", IntrinsicPolyFun [tp_a] [arr_2d_a] arr_2d_a),
-             ( "scatter",
-               IntrinsicPolyFun
-                 [tp_a]
-                 [ Array () Unique t_a (rank 1),
-                   Array () Nonunique (Prim $ Signed Int64) (rank 1),
-                   Array () Nonunique t_a (rank 1)
-                 ]
-                 $ Array () Unique t_a (rank 1)
-             ),
-             ( "scatter_2d",
-               IntrinsicPolyFun
-                 [tp_a]
-                 [ uarr_2d_a,
-                   Array () Nonunique (tupInt64 2) (rank 1),
-                   Array () Nonunique t_a (rank 1)
-                 ]
-                 uarr_2d_a
-             ),
-             ( "scatter_3d",
-               IntrinsicPolyFun
-                 [tp_a]
-                 [ uarr_3d_a,
-                   Array () Nonunique (tupInt64 3) (rank 1),
-                   Array () Nonunique t_a (rank 1)
-                 ]
-                 uarr_3d_a
-             ),
-             ("zip", IntrinsicPolyFun [tp_a, tp_b] [arr_a, arr_b] arr_a_b),
-             ("unzip", IntrinsicPolyFun [tp_a, tp_b] [arr_a_b] t_arr_a_arr_b),
-             ( "hist",
-               IntrinsicPolyFun
-                 [tp_a]
-                 [ Scalar $ Prim $ Signed Int64,
-                   uarr_a,
-                   Scalar t_a `arr` (Scalar t_a `arr` Scalar t_a),
-                   Scalar t_a,
-                   Array () Nonunique (Prim $ Signed Int64) (rank 1),
-                   arr_a
-                 ]
-                 uarr_a
-             ),
-             ("map", IntrinsicPolyFun [tp_a, tp_b] [Scalar t_a `arr` Scalar t_b, arr_a] uarr_b),
-             ( "reduce",
-               IntrinsicPolyFun
-                 [tp_a]
-                 [Scalar t_a `arr` (Scalar t_a `arr` Scalar t_a), Scalar t_a, arr_a]
-                 $ Scalar t_a
-             ),
-             ( "reduce_comm",
-               IntrinsicPolyFun
-                 [tp_a]
-                 [Scalar t_a `arr` (Scalar t_a `arr` Scalar t_a), Scalar t_a, arr_a]
-                 $ Scalar t_a
-             ),
-             ( "scan",
-               IntrinsicPolyFun
-                 [tp_a]
-                 [Scalar t_a `arr` (Scalar t_a `arr` Scalar t_a), Scalar t_a, arr_a]
-                 uarr_a
-             ),
-             ( "partition",
-               IntrinsicPolyFun
-                 [tp_a]
-                 [ Scalar (Prim $ Signed Int32),
-                   Scalar t_a `arr` Scalar (Prim $ Signed Int64),
-                   arr_a
-                 ]
-                 $ tupleRecord [uarr_a, rank 1 `uarray` Prim (Signed Int64)]
-             ),
-             ( "stencil_1d",
-               IntrinsicPolyFun
-                 [ tp_a,
-                   tp_b,
-                   tp_c,
-                   TypeParamDim tv_n mempty,
-                   TypeParamDim tv_k mempty
-                 ]
-                 [ shape_k `array` Prim (Signed Int64),
-                   Scalar t_c `arr` ((shape_k `array` t_a) `arr` Scalar t_b),
-                   shape_n `array` t_c,
-                   shape_n `array` t_a
-                 ]
-                 $ shape_n `uarray` t_b
-             ),
-             ( "stencil_2d",
-               IntrinsicPolyFun
-                 [ tp_a,
-                   tp_b,
-                   tp_c,
-                   TypeParamDim tv_n mempty,
-                   TypeParamDim tv_m mempty,
-                   TypeParamDim tv_k mempty
-                 ]
-                 [ shape_k
-                     `array` Record
-                       ( M.fromList $
-                           zip tupleFieldNames [Scalar (Prim (Signed Int64)), Scalar (Prim (Signed Int64))]
-                       ),
-                   Scalar t_c `arr` ((shape_k `array` t_a) `arr` Scalar t_b),
-                   shape_nm `array` t_c,
-                   shape_nm `array` t_a
-                 ]
-                 $ shape_nm `uarray` t_b
-             ),
-             ( "stencil_3d",
-               IntrinsicPolyFun
-                 [ tp_a,
-                   tp_b,
-                   tp_c,
-                   TypeParamDim tv_n mempty,
-                   TypeParamDim tv_m mempty,
-                   TypeParamDim tv_z mempty,
-                   TypeParamDim tv_k mempty
-                 ]
-                 [ shape_k
-                     `array` Record
-                       ( M.fromList $
-                           zip
-                             tupleFieldNames
-                             [ Scalar (Prim (Signed Int64)),
-                               Scalar (Prim (Signed Int64)),
-                               Scalar (Prim (Signed Int64))
-                             ]
-                       ),
-                   Scalar t_c `arr` ((shape_k `array` t_a) `arr` Scalar t_b),
-                   shape_nmz `array` t_c,
-                   shape_nmz `array` t_a
-                 ]
-                 $ shape_nmz `uarray` t_b
-             ),
-             ( "map_stream",
-               IntrinsicPolyFun
-                 [tp_a, tp_b]
-                 [Scalar (Prim $ Signed Int64) `karr` (arr_ka `arr` arr_kb), arr_a]
-                 uarr_b
-             ),
-             ( "map_stream_per",
-               IntrinsicPolyFun
-                 [tp_a, tp_b]
-                 [Scalar (Prim $ Signed Int64) `karr` (arr_ka `arr` arr_kb), arr_a]
-                 uarr_b
-             ),
-             ( "reduce_stream",
-               IntrinsicPolyFun
-                 [tp_a, tp_b]
-                 [ Scalar t_b `arr` (Scalar t_b `arr` Scalar t_b),
-                   Scalar (Prim $ Signed Int64) `karr` (arr_ka `arr` Scalar t_b),
-                   arr_a
-                 ]
-                 $ Scalar t_b
-             ),
-             ( "reduce_stream_per",
-               IntrinsicPolyFun
-                 [tp_a, tp_b]
-                 [ Scalar t_b `arr` (Scalar t_b `arr` Scalar t_b),
-                   Scalar (Prim $ Signed Int64) `karr` (arr_ka `arr` Scalar t_b),
-                   arr_a
-                 ]
-                 $ Scalar t_b
-             ),
-             ("trace", IntrinsicPolyFun [tp_a] [Scalar t_a] $ Scalar t_a),
-             ("break", IntrinsicPolyFun [tp_a] [Scalar t_a] $ Scalar t_a)
-           ]
+  (M.fromList [intrinsicAcc] <>) $
+    M.fromList $
+      zipWith namify [20 ..] $
+        map primFun (M.toList Primitive.primFuns)
+          ++ [("opaque", IntrinsicPolyFun [tp_a] [Scalar t_a] $ Scalar t_a)]
+          ++ map unOpFun Primitive.allUnOps
+          ++ map binOpFun Primitive.allBinOps
+          ++ map cmpOpFun Primitive.allCmpOps
+          ++ map convOpFun Primitive.allConvOps
+          ++ map signFun Primitive.allIntTypes
+          ++ map unsignFun Primitive.allIntTypes
+          ++ map
+            intrinsicPrim
+            ( map Signed [minBound .. maxBound]
+                ++ map Unsigned [minBound .. maxBound]
+                ++ map FloatType [minBound .. maxBound]
+                ++ [Bool]
+            )
+          ++
+          -- This overrides the ! from Primitive.
+          [ ( "!",
+              IntrinsicOverloadedFun
+                ( map Signed [minBound .. maxBound]
+                    ++ map Unsigned [minBound .. maxBound]
+                    ++ [Bool]
+                )
+                [Nothing]
+                Nothing
+            )
+          ]
+          ++
+          -- The reason for the loop formulation is to ensure that we
+          -- get a missing case warning if we forget a case.
+          mapMaybe mkIntrinsicBinOp [minBound .. maxBound]
+          ++ [ ( "flatten",
+                 IntrinsicPolyFun
+                   [tp_a, sp_n, sp_m]
+                   [Array () Nonunique t_a (shape [n, m])]
+                   $ Array () Nonunique t_a (ShapeDecl [AnyDim Nothing])
+               ),
+               ( "unflatten",
+                 IntrinsicPolyFun
+                   [tp_a, sp_n]
+                   [ Scalar $ Prim $ Signed Int64,
+                     Scalar $ Prim $ Signed Int64,
+                     Array () Nonunique t_a (shape [n])
+                   ]
+                   $ Array () Nonunique t_a $ ShapeDecl [AnyDim Nothing, AnyDim Nothing]
+               ),
+               ( "concat",
+                 IntrinsicPolyFun
+                   [tp_a, sp_n, sp_m]
+                   [arr_a $ shape [n], arr_a $ shape [m]]
+                   $ uarr_a $ ShapeDecl [AnyDim Nothing]
+               ),
+               ( "rotate",
+                 IntrinsicPolyFun
+                   [tp_a, sp_n]
+                   [Scalar $ Prim $ Signed Int64, arr_a $ shape [n]]
+                   $ arr_a $ shape [n]
+               ),
+               ( "transpose",
+                 IntrinsicPolyFun
+                   [tp_a, sp_n, sp_m]
+                   [arr_a $ shape [n, m]]
+                   $ arr_a $ shape [m, n]
+               ),
+               ( "scatter",
+                 IntrinsicPolyFun
+                   [tp_a, sp_n, sp_l]
+                   [ Array () Unique t_a (shape [n]),
+                     Array () Nonunique (Prim $ Signed Int64) (shape [l]),
+                     Array () Nonunique t_a (shape [l])
+                   ]
+                   $ Array () Unique t_a (shape [n])
+               ),
+               ( "scatter_2d",
+                 IntrinsicPolyFun
+                   [tp_a, sp_n, sp_m, sp_l]
+                   [ uarr_a $ shape [n, m],
+                     Array () Nonunique (tupInt64 2) (shape [l]),
+                     Array () Nonunique t_a (shape [l])
+                   ]
+                   $ uarr_a $ shape [n, m]
+               ),
+               ( "scatter_3d",
+                 IntrinsicPolyFun
+                   [tp_a, sp_n, sp_m, sp_k, sp_l]
+                   [ uarr_a $ shape [n, m, k],
+                     Array () Nonunique (tupInt64 3) (shape [l]),
+                     Array () Nonunique t_a (shape [l])
+                   ]
+                   (uarr_a $ shape [n, m, k])
+               ),
+               ( "zip",
+                 IntrinsicPolyFun
+                   [tp_a, tp_b, sp_n]
+                   [arr_a (shape [n]), arr_b (shape [n])]
+                   $ tuple_uarr (Scalar t_a) (Scalar t_b) $ shape [n]
+               ),
+               ( "unzip",
+                 IntrinsicPolyFun
+                   [tp_a, tp_b, sp_n]
+                   [tuple_arr (Scalar t_a) (Scalar t_b) $ shape [n]]
+                   ( Scalar . Record . M.fromList $
+                       zip tupleFieldNames [arr_a $ shape [n], arr_b $ shape [n]]
+                   )
+               ),
+               ( "hist",
+                 IntrinsicPolyFun
+                   [tp_a, sp_n, sp_m]
+                   [ Scalar $ Prim $ Signed Int64,
+                     uarr_a $ shape [n],
+                     Scalar t_a `arr` (Scalar t_a `arr` Scalar t_a),
+                     Scalar t_a,
+                     Array () Nonunique (Prim $ Signed Int64) (shape [m]),
+                     arr_a (shape [m])
+                   ]
+                   (uarr_a $ shape [n])
+               ),
+               ( "map",
+                 IntrinsicPolyFun
+                   [tp_a, tp_b, sp_n]
+                   [ Scalar t_a `arr` Scalar t_b,
+                     arr_a $ shape [n]
+                   ]
+                   $ uarr_b $ shape [n]
+               ),
+               ( "reduce",
+                 IntrinsicPolyFun
+                   [tp_a, sp_n]
+                   [ Scalar t_a `arr` (Scalar t_a `arr` Scalar t_a),
+                     Scalar t_a,
+                     arr_a $ shape [n]
+                   ]
+                   $ Scalar t_a
+               ),
+               ( "reduce_comm",
+                 IntrinsicPolyFun
+                   [tp_a, sp_n]
+                   [ Scalar t_a `arr` (Scalar t_a `arr` Scalar t_a),
+                     Scalar t_a,
+                     arr_a $ shape [n]
+                   ]
+                   $ Scalar t_a
+               ),
+               ( "scan",
+                 IntrinsicPolyFun
+                   [tp_a, sp_n]
+                   [ Scalar t_a `arr` (Scalar t_a `arr` Scalar t_a),
+                     Scalar t_a,
+                     arr_a $ shape [n]
+                   ]
+                   $ uarr_a $ shape [n]
+               ),
+               ( "partition",
+                 IntrinsicPolyFun
+                   [tp_a, sp_n]
+                   [ Scalar (Prim $ Signed Int32),
+                     Scalar t_a `arr` Scalar (Prim $ Signed Int64),
+                     arr_a $ shape [n]
+                   ]
+                   ( tupleRecord
+                       [ uarr_a $ ShapeDecl [AnyDim Nothing],
+                         Array () Unique (Prim $ Signed Int64) (shape [n])
+                       ]
+                   )
+               ),
+               ( "stencil_1d",
+                 IntrinsicPolyFun
+                   [ tp_a,
+                     tp_b,
+                     tp_c,
+                     sp_n,
+                     sp_k
+                   ]
+                   [ shape [k] `array` Prim (Signed Int64),
+                     Scalar t_c `arr` ((shape [k] `array` t_a) `arr` Scalar t_b),
+                     shape [n] `array` t_c,
+                     shape [n] `array` t_a
+                   ]
+                   $ shape [n] `uarray` t_b
+               ),
+               ( "stencil_2d",
+                 IntrinsicPolyFun
+                   [ tp_a,
+                     tp_b,
+                     tp_c,
+                     sp_n,
+                     sp_m,
+                     sp_k
+                   ]
+                   [ shape [k]
+                       `array` Record
+                         ( M.fromList $
+                             zip tupleFieldNames [Scalar (Prim (Signed Int64)), Scalar (Prim (Signed Int64))]
+                         ),
+                     Scalar t_c `arr` ((shape [k] `array` t_a) `arr` Scalar t_b),
+                     shape [n, m] `array` t_c,
+                     shape [n, m] `array` t_a
+                   ]
+                   $ shape [n, m] `uarray` t_b
+               ),
+               ( "stencil_3d",
+                 IntrinsicPolyFun
+                   [ tp_a,
+                     tp_b,
+                     tp_c,
+                     sp_n,
+                     sp_m,
+                     sp_z,
+                     sp_k
+                   ]
+                   [ shape [k]
+                       `array` Record
+                         ( M.fromList $
+                             zip
+                               tupleFieldNames
+                               [ Scalar (Prim (Signed Int64)),
+                                 Scalar (Prim (Signed Int64)),
+                                 Scalar (Prim (Signed Int64))
+                               ]
+                         ),
+                     Scalar t_c `arr` ((shape [k] `array` t_a) `arr` Scalar t_b),
+                     shape [n, m, z] `array` t_c,
+                     shape [n, m, z] `array` t_a
+                   ]
+                   $ shape [n, m, z] `uarray` t_b
+               ),
+               ( "map_stream",
+                 IntrinsicPolyFun
+                   [tp_a, tp_b, sp_n]
+                   [ Scalar (Prim $ Signed Int64) `karr` (arr_ka `arr` arr_kb),
+                     arr_a $ shape [n]
+                   ]
+                   $ uarr_b $ shape [n]
+               ),
+               ( "map_stream_per",
+                 IntrinsicPolyFun
+                   [tp_a, tp_b, sp_n]
+                   [ Scalar (Prim $ Signed Int64) `karr` (arr_ka `arr` arr_kb),
+                     arr_a $ shape [n]
+                   ]
+                   (uarr_b $ shape [n])
+               ),
+               ( "reduce_stream",
+                 IntrinsicPolyFun
+                   [tp_a, tp_b, sp_n]
+                   [ Scalar t_b `arr` (Scalar t_b `arr` Scalar t_b),
+                     Scalar (Prim $ Signed Int64) `karr` (arr_ka `arr` Scalar t_b),
+                     arr_a $ shape [n]
+                   ]
+                   $ Scalar t_b
+               ),
+               ( "reduce_stream_per",
+                 IntrinsicPolyFun
+                   [tp_a, tp_b, sp_n]
+                   [ Scalar t_b `arr` (Scalar t_b `arr` Scalar t_b),
+                     Scalar (Prim $ Signed Int64) `karr` (arr_ka `arr` Scalar t_b),
+                     arr_a $ shape [n]
+                   ]
+                   $ Scalar t_b
+               ),
+               ( "acc_write",
+                 IntrinsicPolyFun
+                   [sp_k, tp_a]
+                   [ Scalar $ accType arr_ka,
+                     Scalar (Prim $ Signed Int64),
+                     Scalar t_a
+                   ]
+                   $ Scalar $ accType arr_ka
+               ),
+               ( "scatter_stream",
+                 IntrinsicPolyFun
+                   [tp_a, tp_b, sp_k, sp_n]
+                   [ uarr_ka,
+                     Scalar (accType arr_ka)
+                       `arr` ( Scalar t_b
+                                 `arr` Scalar (accType $ arr_a $ shape [k])
+                             ),
+                     arr_b $ shape [n]
+                   ]
+                   uarr_ka
+               ),
+               ( "hist_stream",
+                 IntrinsicPolyFun
+                   [tp_a, tp_b, sp_k, sp_n]
+                   [ uarr_a $ shape [k],
+                     Scalar t_a `arr` (Scalar t_a `arr` Scalar t_a),
+                     Scalar t_a,
+                     Scalar (accType arr_ka)
+                       `arr` ( Scalar t_b
+                                 `arr` Scalar (accType $ arr_a $ shape [k])
+                             ),
+                     arr_b $ shape [n]
+                   ]
+                   $ uarr_a $ shape [k]
+               ),
+               ("trace", IntrinsicPolyFun [tp_a] [Scalar t_a] $ Scalar t_a),
+               ("break", IntrinsicPolyFun [tp_a] [Scalar t_a] $ Scalar t_a)
+             ]
   where
-    [tv_a, tv_b, tv_c, tv_n, tv_k, tv_m, tv_z] =
-      zipWith
-        VName
-        (map nameFromString ["a", "b", "c", "n", "k", "m", "z"])
-        [0 ..]
+    [a, b, c, n, m, z, k, l, p] =
+      zipWith VName (map nameFromString ["a", "b", "c", "n", "m", "z", "k", "l", "p"]) [0 ..]
+
+    t_a = TypeVar () Nonunique (typeName a) []
+    arr_a = Array () Nonunique t_a
+    uarr_a = Array () Unique t_a
+    tp_a = TypeParamType Unlifted a mempty
+
+    t_b = TypeVar () Nonunique (typeName b) []
+    arr_b = Array () Nonunique t_b
+    uarr_b = Array () Unique t_b
+    tp_b = TypeParamType Unlifted b mempty
+
+    t_c = TypeVar () Nonunique (typeName c) []
+    tp_c = TypeParamType Unlifted c mempty
+
+    [sp_n, sp_m, sp_z, sp_k, sp_l, _sp_p] = map (`TypeParamDim` mempty) [n, m, z, k, l, p]
+
+    shape = ShapeDecl . map (NamedDim . qualName)
 
     array = flip $ Array () Nonunique
     uarray = flip $ Array () Unique
 
-    t_a = TypeVar () Nonunique (typeName tv_a) []
-    arr_a = rank 1 `array` t_a
-    arr_2d_a = rank 2 `array` t_a
-    uarr_a = rank 1 `uarray` t_a
-    uarr_2d_a = rank 2 `uarray` t_a
-    uarr_3d_a = rank 3 `uarray` t_a
-    tp_a = TypeParamType Unlifted tv_a mempty
-
-    t_b = TypeVar () Nonunique (typeName tv_b) []
-    arr_b = rank 1 `array` t_b
-    uarr_b = rank 1 `uarray` t_b
-    tp_b = TypeParamType Unlifted tv_b mempty
-
-    t_c = TypeVar () Nonunique (typeName tv_c) []
-    tp_c = TypeParamType Unlifted tv_c mempty
-
-    arr_a_b =
-      rank 1
-        `array` Record (M.fromList $ zip tupleFieldNames [Scalar t_a, Scalar t_b])
-    t_arr_a_arr_b =
-      Scalar $ Record $ M.fromList $ zip tupleFieldNames [arr_a, arr_b]
+    tuple_arr x y =
+      Array
+        ()
+        Nonunique
+        (Record (M.fromList $ zip tupleFieldNames [x, y]))
+    tuple_uarr x y s = tuple_arr x y s `setUniqueness` Unique
 
     arr x y = Scalar $ Arrow mempty Unnamed x y
 
-    shape_n = ShapeDecl [NamedDim (qualName tv_n)]
-    shape_k = ShapeDecl [NamedDim (qualName tv_k)]
-    shape_nm = ShapeDecl [NamedDim (qualName tv_n), NamedDim (qualName tv_m)]
-    shape_nmz = ShapeDecl [NamedDim (qualName tv_n), NamedDim (qualName tv_m), NamedDim (qualName tv_z)]
-    arr_ka = shape_k `array` t_a
-    arr_kb = shape_k `array` t_b
-    karr x y = Scalar $ Arrow mempty (Named tv_k) x y
+    arr_ka = Array () Nonunique t_a (ShapeDecl [NamedDim $ qualName k])
+    uarr_ka = Array () Unique t_a (ShapeDecl [NamedDim $ qualName k])
+    arr_kb = Array () Nonunique t_b (ShapeDecl [NamedDim $ qualName k])
+    karr x y = Scalar $ Arrow mempty (Named k) x y
 
-    namify i (k, v) = (VName (nameFromString k) i, v)
+    accType t =
+      TypeVar () Unique (typeName (fst intrinsicAcc)) [TypeArgType t mempty]
+
+    namify i (x, y) = (VName (nameFromString x) i, y)
 
     primFun (name, (ts, t, _)) =
       (name, IntrinsicMonoFun (map unPrim ts) $ unPrim t)
@@ -1100,7 +1185,7 @@ intrinsics =
     unPrim Primitive.Bool = Bool
     unPrim Primitive.Cert = Bool
 
-    intrinsicType t = (pretty t, IntrinsicType t)
+    intrinsicPrim t = (pretty t, IntrinsicType Unlifted [] $ Scalar $ Prim t)
 
     anyIntType =
       map Signed [minBound .. maxBound]
@@ -1141,11 +1226,9 @@ intrinsics =
     intrinsicBinOp Geq = ordering
     intrinsicBinOp _ = Nothing
 
-    tupInt64 n =
-      Record $
-        M.fromList $
-          zip tupleFieldNames $
-            replicate n $ Scalar $ Prim $ Signed Int64
+    tupInt64 x =
+      Record . M.fromList . zip tupleFieldNames $
+        replicate x $ Scalar $ Prim $ Signed Int64
 
 -- | The largest tag used by an intrinsic - this can be used to
 -- determine whether a 'VName' refers to an intrinsic or a user-defined name.

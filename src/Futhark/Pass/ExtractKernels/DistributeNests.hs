@@ -69,7 +69,7 @@ data MapLoop = MapLoop SOACS.Pattern (StmAux ()) SubExp SOACS.Lambda [VName]
 
 mapLoopStm :: MapLoop -> Stm SOACS
 mapLoopStm (MapLoop pat aux w lam arrs) =
-  Let pat aux $ Op $ Screma w (mapSOAC lam) arrs
+  Let pat aux $ Op $ Screma w arrs $ mapSOAC lam
 
 data DistEnv lore m = DistEnv
   { distNest :: Nestings,
@@ -251,10 +251,8 @@ leavingNesting acc =
                   lambdaReturnType = map rowType $ patternTypes pat
                 }
         stms <-
-          runBinder_ $
-            auxing aux $
-              FOT.transformSOAC pat $
-                Screma w (mapSOAC lam') used_arrs
+          runBinder_ . auxing aux . FOT.transformSOAC pat $
+            Screma w used_arrs $ mapSOAC lam'
 
         return $ acc {distTargets = newtargets, distStms = stms}
       | otherwise -> do
@@ -324,9 +322,13 @@ bodyContainsParallelism = any isParallelStm . bodyStms
     isParallelStm stm =
       isMap (stmExp stm)
         && not ("sequential" `inAttrs` stmAuxAttrs (stmAux stm))
-    isMap Op {} = True
+    isMap BasicOp {} = False
+    isMap Apply {} = False
+    isMap If {} = False
     isMap (DoLoop _ _ ForLoop {} body) = bodyContainsParallelism body
-    isMap _ = False
+    isMap (DoLoop _ _ WhileLoop {} _) = False
+    isMap (WithAcc _ lam) = bodyContainsParallelism $ lambdaBody lam
+    isMap Op {} = True
 
 lambdaContainsParallelism :: Lambda SOACS -> Bool
 lambdaContainsParallelism = bodyContainsParallelism . lambdaBody
@@ -339,7 +341,7 @@ distributeMapBodyStms ::
 distributeMapBodyStms orig_acc = distribute <=< onStms orig_acc . stmsToList
   where
     onStms acc [] = return acc
-    onStms acc (Let pat (StmAux cs _ _) (Op (Stream w Sequential lam accs arrs)) : stms) = do
+    onStms acc (Let pat (StmAux cs _ _) (Op (Stream w arrs Sequential accs lam)) : stms) = do
       types <- asksScope scopeForSOACs
       stream_stms <-
         snd <$> runBinderT (sequentialStreamWholeArray pat w accs lam arrs) types
@@ -374,7 +376,7 @@ maybeDistributeStm (Let pat aux (Op soac)) acc
   | "sequential_outer" `inAttrs` stmAuxAttrs aux =
     distributeMapBodyStms acc . fmap (certify (stmAuxCerts aux))
       =<< runBinder_ (FOT.transformSOAC pat soac)
-maybeDistributeStm stm@(Let pat _ (Op (Screma w form arrs))) acc
+maybeDistributeStm stm@(Let pat _ (Op (Screma w arrs form))) acc
   | Just lam <- isMapSOAC form =
     -- Only distribute inside the map if we can distribute everything
     -- following the map.
@@ -438,7 +440,31 @@ maybeDistributeStm stm@(Let pat _ (If cond tbranch fbranch ret)) acc
             return acc'
       _ ->
         addStmToAcc stm acc
-maybeDistributeStm (Let pat aux (Op (Screma w form arrs))) acc
+maybeDistributeStm stm@(Let pat _ (WithAcc inputs lam)) acc
+  | lambdaContainsParallelism lam =
+    distributeSingleStm acc stm >>= \case
+      Just (kernels, res, nest, acc')
+        | not $
+            freeIn (drop num_accs (lambdaReturnType lam))
+              `namesIntersect` boundInKernelNest nest,
+          Just (perm, pat_unused) <- permutationAndMissing pat res ->
+          -- We need to pretend pat_unused was used anyway, by adding
+          -- it to the kernel nest.
+          localScope (typeEnvFromDistAcc acc') $ do
+            nest' <- expandKernelNest pat_unused nest
+            types <- asksScope scopeForSOACs
+            addPostStms kernels
+            let withacc = WithAccStm perm pat inputs lam
+            stms <-
+              (`runReaderT` types) $
+                fmap snd . simplifyStms =<< interchangeWithAcc nest' withacc
+            onTopLevelStms stms
+            return acc'
+      _ ->
+        addStmToAcc stm acc
+  where
+    num_accs = length inputs
+maybeDistributeStm (Let pat aux (Op (Screma w arrs form))) acc
   | Just [Reduce comm lam nes] <- isReduceSOAC form,
     Just m <- irwim pat w comm lam $ zip nes arrs = do
     types <- asksScope scopeForSOACs
@@ -496,7 +522,7 @@ maybeDistributeStm
 --
 -- If the scan cannot be distributed by itself, it will be
 -- sequentialised in the default case for this function.
-maybeDistributeStm bnd@(Let pat (StmAux cs _ _) (Op (Screma w form arrs))) acc
+maybeDistributeStm bnd@(Let pat (StmAux cs _ _) (Op (Screma w arrs form))) acc
   | Just (scans, map_lam) <- isScanomapSOAC form,
     Scan lam nes <- singleScan scans =
     distributeSingleStm acc bnd >>= \case
@@ -518,7 +544,7 @@ maybeDistributeStm bnd@(Let pat (StmAux cs _ _) (Op (Screma w form arrs))) acc
 --
 -- If the reduction cannot be distributed by itself, it will be
 -- sequentialised in the default case for this function.
-maybeDistributeStm bnd@(Let pat (StmAux cs _ _) (Op (Screma w form arrs))) acc
+maybeDistributeStm bnd@(Let pat (StmAux cs _ _) (Op (Screma w arrs form))) acc
   | Just (reds, map_lam) <- isRedomapSOAC form,
     Reduce comm lam nes <- singleReduce reds =
     distributeSingleStm acc bnd >>= \case
@@ -540,7 +566,7 @@ maybeDistributeStm bnd@(Let pat (StmAux cs _ _) (Op (Screma w form arrs))) acc
               >>= kernelOrNot cs bnd acc kernels acc'
       _ ->
         addStmToAcc bnd acc
-maybeDistributeStm (Let pat (StmAux cs _ _) (Op (Screma w form arrs))) acc = do
+maybeDistributeStm (Let pat (StmAux cs _ _) (Op (Screma w arrs form))) acc = do
   -- This Screma is too complicated for us to immediately do
   -- anything, so split it up and try again.
   scope <- asksScope scopeForSOACs
@@ -550,7 +576,7 @@ maybeDistributeStm (Let pat aux (BasicOp (Replicate (Shape (d : ds)) v))) acc
   | [t] <- patternTypes pat = do
     tmp <- newVName "tmp"
     let rowt = rowType t
-        newbnd = Let pat aux $ Op $ Screma d (mapSOAC lam) []
+        newbnd = Let pat aux $ Op $ Screma d [] $ mapSOAC lam
         tmpbnd =
           Let (Pattern [] [PatElem tmp rowt]) aux $
             BasicOp $ Replicate (Shape ds) v
@@ -801,13 +827,15 @@ segmentedScatterKernel nest perm scatter_pat cs scatter_w lam ivs dests = do
         else certifying cs $ letSubExp "scatter_i" $ BasicOp $ SubExp i
 
   let k_body =
-        zip (chunks (concat $ zipWith (\ws n -> replicate n $ length ws) as_ws as_ns) is') vs
-          & chunks as_ns
-          & zip3 (map shapeDims as_ws) as_inps
+        groupScatterResults (zip3 as_ws as_ns as_inps) (is' ++ vs)
           & map (inPlaceReturn ispace)
           & KernelBody () k_body_stms
+      -- Remove unused kernel inputs, since some of these might
+      -- reference the array we are scattering into.
+      kernel_inps' =
+        filter ((`nameIn` freeIn k_body) . kernelInputName) kernel_inps
 
-  (k, k_bnds) <- mapKernel mk_lvl ispace kernel_inps rts k_body
+  (k, k_bnds) <- mapKernel mk_lvl ispace kernel_inps' rts k_body
 
   traverse renameStm <=< runBinder_ $ do
     addStms k_bnds
@@ -825,7 +853,7 @@ segmentedScatterKernel nest perm scatter_pat cs scatter_w lam ivs dests = do
 
     inPlaceReturn ispace (aw, inp, is_vs) =
       WriteReturns
-        (Shape (init ws ++ aw))
+        (Shape (init ws ++ shapeDims aw))
         (kernelInputArray inp)
         [(map DimFix $ map Var (init gtids) ++ is, v) | (is, v) <- is_vs]
       where
@@ -867,9 +895,14 @@ segmentedUpdateKernel nest perm cs arr slice v = do
         WriteReturns (arrayShape arr_t) arr' [(map DimFix write_is, v')]
       )
 
+  -- Remove unused kernel inputs, since some of these might
+  -- reference the array we are scattering into.
+  let kernel_inps' =
+        filter ((`nameIn` freeIn kstms) . kernelInputName) kernel_inps
+
   mk_lvl <- mkSegLevel
   (k, prestms) <-
-    mapKernel mk_lvl ispace kernel_inps [res_t] $
+    mapKernel mk_lvl ispace kernel_inps' [res_t] $
       KernelBody () kstms [res]
 
   traverse renameStm <=< runBinder_ $ do
@@ -1013,7 +1046,7 @@ determineReduceOp lam nes =
 
 isVectorMap :: Lambda SOACS -> (Shape, Lambda SOACS)
 isVectorMap lam
-  | [Let (Pattern [] pes) _ (Op (Screma w form arrs))] <-
+  | [Let (Pattern [] pes) _ (Op (Screma w arrs form))] <-
       stmsToList $ bodyStms $ lambdaBody lam,
     bodyResult (lambdaBody lam) == map (Var . patElemName) pes,
     Just map_lam <- isMapSOAC form,

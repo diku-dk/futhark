@@ -10,7 +10,6 @@ module Futhark.Pass.ExtractKernels.Intragroup (intraGroupParallelise) where
 import Control.Monad.Identity
 import Control.Monad.RWS
 import Control.Monad.Trans.Maybe
-import Data.Function ((&))
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 import Futhark.Analysis.PrimExp.Convert
@@ -24,7 +23,6 @@ import Futhark.Pass.ExtractKernels.Distribution
 import Futhark.Pass.ExtractKernels.ToKernels
 import Futhark.Tools
 import qualified Futhark.Transform.FirstOrderTransform as FOT
-import Futhark.Util (chunks)
 import Futhark.Util.Log
 import Prelude hiding (log)
 
@@ -137,21 +135,21 @@ intraGroupParallelise knest lam = runMaybeT $ do
     first_nest = fst knest
     aux = loopNestingAux first_nest
 
-data Acc = Acc
+data IntraAcc = IntraAcc
   { accMinPar :: S.Set [SubExp],
     accAvailPar :: S.Set [SubExp],
     accLog :: Log
   }
 
-instance Semigroup Acc where
-  Acc min_x avail_x log_x <> Acc min_y avail_y log_y =
-    Acc (min_x <> min_y) (avail_x <> avail_y) (log_x <> log_y)
+instance Semigroup IntraAcc where
+  IntraAcc min_x avail_x log_x <> IntraAcc min_y avail_y log_y =
+    IntraAcc (min_x <> min_y) (avail_x <> avail_y) (log_x <> log_y)
 
-instance Monoid Acc where
-  mempty = Acc mempty mempty mempty
+instance Monoid IntraAcc where
+  mempty = IntraAcc mempty mempty mempty
 
 type IntraGroupM =
-  BinderT Out.Kernels (RWS () Acc VNameSource)
+  BinderT Out.Kernels (RWS () IntraAcc VNameSource)
 
 instance MonadLogger IntraGroupM where
   addLog log = tell mempty {accLog = log}
@@ -159,7 +157,7 @@ instance MonadLogger IntraGroupM where
 runIntraGroupM ::
   (MonadFreshNames m, HasScope Out.Kernels m) =>
   IntraGroupM () ->
-  m (Acc, Out.Stms Out.Kernels)
+  m (IntraAcc, Out.Stms Out.Kernels)
 runIntraGroupM m = do
   scope <- castScope <$> askScope
   modifyNameSource $ \src ->
@@ -204,7 +202,7 @@ intraGroupStm lvl stm@(Let pat aux e) = do
       | "sequential_outer" `inAttrs` stmAuxAttrs aux ->
         intraGroupStms lvl . fmap (certify (stmAuxCerts aux))
           =<< runBinder_ (FOT.transformSOAC pat soac)
-    Op (Screma w form arrs)
+    Op (Screma w arrs form)
       | Just lam <- isMapSOAC form -> do
         let loopnest = MapNesting pat aux w $ zip (lambdaParams lam) arrs
             env =
@@ -235,7 +233,7 @@ intraGroupStm lvl stm@(Let pat aux e) = do
 
         addStms
           =<< runDistNestT env (distributeMapBodyStms acc (bodyStms $ lambdaBody lam))
-    Op (Screma w form arrs)
+    Op (Screma w arrs form)
       | Just (scans, mapfun) <- isScanomapSOAC form,
         Scan scanfun nes <- singleScan scans -> do
         let scanfun' = soacsLambdaToKernels scanfun
@@ -243,7 +241,7 @@ intraGroupStm lvl stm@(Let pat aux e) = do
         certifying (stmAuxCerts aux) $
           addStms =<< segScan lvl' pat w [SegBinOp Noncommutative scanfun' nes mempty] mapfun' arrs [] []
         parallelMin [w]
-    Op (Screma w form arrs)
+    Op (Screma w arrs form)
       | Just (reds, map_lam) <- isRedomapSOAC form,
         Reduce comm red_lam nes <- singleReduce reds -> do
         let red_lam' = soacsLambdaToKernels red_lam
@@ -261,29 +259,25 @@ intraGroupStm lvl stm@(Let pat aux e) = do
       certifying (stmAuxCerts aux) $
         addStms =<< segHist lvl' pat w [] [] ops' bucket_fun' arrs
       parallelMin [w]
-    Op (Stream w Sequential lam accs arrs)
+    Op (Stream w arrs Sequential accs lam)
       | chunk_size_param : _ <- lambdaParams lam -> do
         types <- asksScope castScope
         ((), stream_bnds) <-
           runBinderT (sequentialStreamWholeArray pat w accs lam arrs) types
         let replace (Var v) | v == paramName chunk_size_param = w
             replace se = se
-            replaceSets (Acc x y log) =
-              Acc (S.map (map replace) x) (S.map (map replace) y) log
+            replaceSets (IntraAcc x y log) =
+              IntraAcc (S.map (map replace) x) (S.map (map replace) y) log
         censor replaceSets $ intraGroupStms lvl stream_bnds
     Op (Scatter w lam ivs dests) -> do
       write_i <- newVName "write_i"
       space <- mkSegSpace [(write_i, w)]
 
       let lam' = soacsLambdaToKernels lam
-          (dests_ws, dests_ns, dests_vs) = unzip3 dests
-          indexes = zipWith (*) dests_ns $ map length dests_ws
-          (i_res, v_res) = splitAt (sum indexes) $ bodyResult $ lambdaBody lam'
+          (dests_ws, _, _) = unzip3 dests
           krets = do
             (a_w, a, is_vs) <-
-              zip (chunks (concat $ zipWith (\ws n -> replicate n $ length ws) dests_ws dests_ns) i_res) v_res
-                & chunks dests_ns
-                & zip3 dests_ws dests_vs
+              groupScatterResults dests $ bodyResult $ lambdaBody lam'
             return $ WriteReturns a_w a [(map DimFix is, v) | (is, v) <- is_vs]
           inputs = do
             (p, p_a) <- zip (lambdaParams lam') ivs
@@ -312,7 +306,7 @@ intraGroupParalleliseBody ::
   Body ->
   m ([[SubExp]], [[SubExp]], Log, Out.KernelBody Out.Kernels)
 intraGroupParalleliseBody lvl body = do
-  (Acc min_ws avail_ws log, kstms) <-
+  (IntraAcc min_ws avail_ws log, kstms) <-
     runIntraGroupM $ intraGroupStms lvl $ bodyStms body
   return
     ( S.toList min_ws,

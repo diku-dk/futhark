@@ -61,3 +61,29 @@ jobs:
       env:
         TARBALL: ${{ steps.metadata.outputs.TARBALL }}
       run: scp -o StrictHostKeyChecking=no result/$TARBALL futhark@futhark-lang.org:/var/www/htdocs/futhark-lang.org/releases
+
+  upload-to-hackage:
+    name: Upload to Hackage
+    if: github.event.base_ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Install Nix
+      uses: cachix/install-nix-action@v12
+
+    - uses: cachix/cachix-action@v8
+      with:
+        name: futhark
+        signingKey: '${{ secrets.CACHIX_SIGNING_KEY }}'
+
+    - name: Upload to Hackage
+      run: |
+        export HACKAGE_KEY
+        export VERSION
+        nix-shell --run 'cabal update'
+        nix-shell --run tools/release/hackage.sh
+      env:
+        HACKAGE_KEY: ${{ secrets.HACKAGE_KEY }}
+        VERSION: ${{ steps.metadata.outputs.VERSION }}

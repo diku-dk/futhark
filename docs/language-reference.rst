@@ -107,8 +107,9 @@ Compound Types and Values
 
 Compound types can be constructed based on the primitive types.  The
 Futhark type system is entirely structural, and type abbreviations are
-merely shorthands.  The only exception is abstract types whose
-definition has been hidden via the module system (see `Module
+merely shorthands (with one exception, see
+:ref:`sizes-in-abbreviations`).  The only exception is abstract types
+whose definition has been hidden via the module system (see `Module
 System`_).
 
 .. productionlist::
@@ -190,12 +191,14 @@ Functions are classified via function types, but they are not fully
 first class.  See :ref:`hofs` for the details.
 
 .. productionlist::
-   stringlit: '"' `stringchar` '"'
+   stringlit: '"' `stringchar`* '"'
+   charlit: "'" `stringchar` "'"
    stringchar: <any source character except "\" or newline or quotes>
 
 String literals are supported, but only as syntactic sugar for UTF-8
 encoded arrays of ``u8`` values.  There is no character type in
-Futhark.
+Futhark, but character literals are interpreted as integers of the
+corresponding Unicode code point.
 
 Declarations
 ------------
@@ -407,6 +410,7 @@ literals and variables, but also more complicated forms.
    atom:   `literal`
        : | `qualid` ("." `fieldid`)*
        : | `stringlit`
+       : | `charlit`
        : | "(" ")"
        : | "(" `exp` ")" ("." `fieldid`)*
        : | "(" `exp` ("," `exp`)* ")"
@@ -1279,6 +1283,30 @@ fresh size ``k``.  The lambda is then assigned the type ``[n]t ->
 ``k`` was generated inside its body.  A function of this type cannot
 be passed to ``map``, as explained before.  The solution is to bind
 ``length`` to a name *before* the lambda.
+
+.. _sizes-in-abbreviations:
+
+Sizes in type abbreviations
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+When anonymous sizes are passed to type abbreviations, if that
+anonymous size is eventually instantiated with an existential size,
+the *same* existential size is going to be used for all instances of
+the corresponding parameter in the right-hand-side of the type
+abbreviation.  Note that this breaks with the usual conception of type
+abbreviations as purely a shorthand, as this could not be expressed
+without the abbreviation.  Example::
+
+  type square [n] = [n][n]i32
+
+The following function is be *known* to return a square array::
+
+  val f : () -> square []
+
+But this is not the case for the function that inlines the definition
+of ``square``::
+
+  val g : () -> [][]i32
 
 .. _in-place-updates:
 

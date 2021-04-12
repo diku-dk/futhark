@@ -9,14 +9,66 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+  * Initial work on granting programmers more control over existential
+    sizes, starting with making type abbreviations function as
+    existential quantifiers (#1301).
+
+  * FutharkScript now also supports arrays and scientific notation.
+
 ### Removed
 
 ### Changed
 
 ### Fixed
 
+  * `futhark_context_report()` now internally calls
+    `futhark_context_sync()` before collecting profiling information
+    (if applicable).
+
+  * `futhark literate`: Parse errors for expression directives now
+    detected properly.
+
+## [0.19.4]
+
+### Fixed
+
+  * Some uniqueness ignorance in fusion (#1291).
+
+  * An invalid transformation could in rare cases cause race
+    conditions (#1292).
+
+  * Generated Python and C code should now be warning-free.
+
+  * Missing check for uses of size-lifted types (#1294).
+
+  * Error in simplification of concatenations could cause compiler
+    crashes (#1296).
+
+## [0.19.3]
+
+### Added
+
+  * Better `futhark test`/`futhark bench` errors when test data does
+    not have the expected type.
+
+### Fixed
+
   * Mismatch between how thresholds were printed and what the
     autotuner was looking for (#1269).
+
+  * `zip` now produces unique arrays (#1271).
+
+  * `futhark literate` no longer chokes on lines beginning with `--`
+    without a following whitespace.
+
+  * `futhark literate`: `:loadimg` was broken due to overzealous
+    type checking (#1276).
+
+  * `futhark literate`: `:loadimg` now handles relative paths properly.
+
+  * `futhark hash` no longer considers the built-in prelude.
+
+  * Server executables had broken store/restore commands for opaque types.
 
 ## [0.19.2]
 

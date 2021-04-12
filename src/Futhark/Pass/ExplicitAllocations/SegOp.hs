@@ -48,7 +48,7 @@ allocInBinOpParams num_threads my_id other_id xs ys = unzip <$> zipWithM alloc x
   where
     alloc x y =
       case paramType x of
-        Array bt shape u -> do
+        Array pt shape u -> do
           twice_num_threads <-
             letSubExp "twice_num_threads" $
               BasicOp $ BinOp (Mul Int64 OverflowUndef) num_threads $ intConst Int64 2
@@ -65,8 +65,8 @@ allocInBinOpParams num_threads my_id other_id xs ys = unzip <$> zipWithM alloc x
                 IxFun.slice ixfun_base $
                   fullSliceNum base_dims [DimFix other_id]
           return
-            ( x {paramDec = MemArray bt shape u $ ArrayIn mem ixfun_x},
-              y {paramDec = MemArray bt shape u $ ArrayIn mem ixfun_y}
+            ( x {paramDec = MemArray pt shape u $ ArrayIn mem ixfun_x},
+              y {paramDec = MemArray pt shape u $ ArrayIn mem ixfun_y}
             )
         Prim bt ->
           return
@@ -77,6 +77,12 @@ allocInBinOpParams num_threads my_id other_id xs ys = unzip <$> zipWithM alloc x
           return
             ( x {paramDec = MemMem space},
               y {paramDec = MemMem space}
+            )
+        -- This next case will never happen.
+        Acc acc ispace ts u ->
+          return
+            ( x {paramDec = MemAcc acc ispace ts u},
+              y {paramDec = MemAcc acc ispace ts u}
             )
 
 allocInBinOpLambda ::
@@ -104,10 +110,11 @@ allocInStencilOpLambda ::
   SegSpace ->
   Lambda fromlore ->
   AllocM fromlore tolore (Lambda tolore)
-allocInStencilOpLambda _num_threads (SegSpace _flat _) lam = do
+allocInStencilOpLambda _num_threads (SegSpace _flat _) lam =
   allocInLambda
     (map (fmap onParamType) (lambdaParams lam))
     (lambdaBody lam)
     (lambdaReturnType lam)
   where
     onParamType (Prim pt) = MemPrim pt
+    onParamType t = error $ "stencil onParamType: unexpected " ++ pretty t

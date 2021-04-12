@@ -192,7 +192,7 @@ runBenchmark opts futhark (program, cases) = do
     mapM (forInputOutputs server tuning_desc) $ filter relevant cases
   where
     forInputOutputs server tuning_desc (InputOutputs entry_name runs) = do
-      putStr $ inBold $ "\nResults for " ++ program' ++ tuning_desc ++ ":\n"
+      putStr $ inBold $ "\n" ++ program' ++ tuning_desc ++ ":\n"
       BenchResult program' . catMaybes
         <$> mapM (runBenchmarkCase server opts futhark program entry_name pad_to) runs
       where
@@ -216,7 +216,7 @@ runOptions f opts =
 
 progressBar :: Int -> Int -> Int -> String
 progressBar cur bound steps =
-  "[" ++ map cell [1 .. steps] ++ "] " ++ show cur ++ "/" ++ show bound
+  "|" ++ map cell [1 .. steps] ++ "| " ++ show cur ++ "/" ++ show bound
   where
     step_size :: Double
     step_size = fromIntegral bound / fromIntegral steps
@@ -309,7 +309,8 @@ runBenchmarkCase server opts futhark program entry pad_to tr@(TestRun _ input_sp
 
   case res of
     Left err -> do
-      liftIO $ putStrLn $ descString dataset_desc pad_to
+      when fancyTerminal $
+        liftIO $ putStrLn $ descString dataset_desc pad_to
       liftIO $ putStrLn $ inRed $ T.unpack err
       return $ Just $ DataResult dataset_desc $ Left err
     Right (runtimes, errout) -> do

@@ -56,6 +56,7 @@ import Control.Monad.Identity hiding (mapM_)
 import Control.Monad.State.Strict
 import Control.Monad.Writer hiding (mapM_)
 import Data.Bifunctor (first)
+import Data.Bitraversable
 import Data.List
   ( elemIndex,
     foldl',
@@ -352,6 +353,10 @@ checkKernelBody ::
   TC.TypeM lore ()
 checkKernelBody ts (KernelBody (_, dec) stms kres) = do
   TC.checkBodyLore dec
+  -- We consume the kernel results (when applicable) before
+  -- type-checking the stms, so we will get an error if a statement
+  -- uses an array that is written to in a result.
+  mapM_ consumeKernelResult kres
   TC.checkStms stms $ do
     unless (length ts == length kres) $
       TC.bad $
@@ -362,6 +367,11 @@ checkKernelBody ts (KernelBody (_, dec) stms kres) = do
             ++ " values."
     zipWithM_ checkKernelResult kres ts
   where
+    consumeKernelResult (WriteReturns _ arr _) =
+      TC.consume =<< TC.lookupAliases arr
+    consumeKernelResult _ =
+      pure ()
+
     checkKernelResult (Returns _ what) t =
       TC.require [t] what
     checkKernelResult (WriteReturns shape arr res) t = do
@@ -381,7 +391,6 @@ checkKernelBody ts (KernelBody (_, dec) stms kres) = do
                 ++ pretty shape
                 ++ ", but destination array has type "
                 ++ pretty arr_t
-      TC.consume =<< TC.lookupAliases arr
     checkKernelResult (ConcatReturns o w per_thread_elems v) t = do
       case o of
         SplitContiguous -> return ()
@@ -844,9 +853,14 @@ mapOnSegOpType ::
   Type ->
   m Type
 mapOnSegOpType _tv t@Prim {} = pure t
-mapOnSegOpType tv (Array pt shape u) = Array pt <$> f shape <*> pure u
-  where
-    f (Shape dims) = Shape <$> mapM (mapOnSegOpSubExp tv) dims
+mapOnSegOpType tv (Acc acc ispace ts u) =
+  Acc
+    <$> mapOnSegOpVName tv acc
+    <*> traverse (mapOnSegOpSubExp tv) ispace
+    <*> traverse (bitraverse (traverse (mapOnSegOpSubExp tv)) pure) ts
+    <*> pure u
+mapOnSegOpType tv (Array et shape u) =
+  Array et <$> traverse (mapOnSegOpSubExp tv) shape <*> pure u
 mapOnSegOpType _tv (Mem s) = pure $ Mem s
 
 instance
@@ -1133,25 +1147,33 @@ simplifyKernelBody ::
 simplifyKernelBody space (KernelBody _ stms res) = do
   par_blocker <- Engine.asksEngineEnv $ Engine.blockHoistPar . Engine.envHoistBlockers
 
+  -- Ensure we do not try to use anything that is consumed in the result.
   ((body_stms, body_res), hoisted) <-
-    Engine.localVtable (<> scope_vtable) $
-      Engine.localVtable (\vtable -> vtable {ST.simplifyMemory = True}) $
-        Engine.blockIf
-          ( Engine.hasFree bound_here
-              `Engine.orIf` Engine.isOp
-              `Engine.orIf` par_blocker
-              `Engine.orIf` Engine.isConsumed
-          )
-          $ Engine.simplifyStms stms $ do
-            res' <-
-              Engine.localVtable (ST.hideCertified $ namesFromList $ M.keys $ scopeOf stms) $
-                mapM Engine.simplify res
-            return ((res', UT.usages $ freeIn res'), mempty)
+    Engine.localVtable (flip (foldl' (flip ST.consume)) (foldMap consumedInResult res))
+      . Engine.localVtable (<> scope_vtable)
+      . Engine.localVtable (\vtable -> vtable {ST.simplifyMemory = True})
+      . Engine.enterLoop
+      $ Engine.blockIf
+        ( Engine.hasFree bound_here
+            `Engine.orIf` Engine.isOp
+            `Engine.orIf` par_blocker
+            `Engine.orIf` Engine.isConsumed
+        )
+        $ Engine.simplifyStms stms $ do
+          res' <-
+            Engine.localVtable (ST.hideCertified $ namesFromList $ M.keys $ scopeOf stms) $
+              mapM Engine.simplify res
+          return ((res', UT.usages $ freeIn res'), mempty)
 
   return (mkWiseKernelBody () body_stms body_res, hoisted)
   where
     scope_vtable = segSpaceSymbolTable space
     bound_here = namesFromList $ M.keys $ scopeOfSegSpace space
+
+    consumedInResult (WriteReturns _ arr _) =
+      [arr]
+    consumedInResult _ =
+      []
 
 segSpaceSymbolTable :: ASTLore lore => SegSpace -> ST.SymbolTable lore
 segSpaceSymbolTable (SegSpace flat gtids_and_dims) =
@@ -1469,15 +1491,13 @@ bottomUpSegOp (vtable, used) (Pattern [] kpes) dec segop = Simplify $ do
                 )
                 $ segSpaceDims space
             index kpe' =
-              letBind (Pattern [] [kpe']) $
-                BasicOp $
-                  Index arr $
-                    outer_slice <> remaining_slice
+              letBindNames [patElemName kpe'] . BasicOp . Index arr $
+                outer_slice <> remaining_slice
         if patElemName kpe `UT.isConsumed` used
           then do
             precopy <- newVName $ baseString (patElemName kpe) <> "_precopy"
             index kpe {patElemName = precopy}
-            letBind (Pattern [] [kpe]) $ BasicOp $ Copy precopy
+            letBindNames [patElemName kpe] $ BasicOp $ Copy precopy
           else index kpe
         return
           ( kpes'',

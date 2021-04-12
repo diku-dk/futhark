@@ -443,7 +443,7 @@ extSize loc e = do
               RigidBound $ prettyOneLine e'
             SourceSlice d i j s ->
               RigidSlice d $ prettyOneLine $ DimSlice i j s
-      d <- newDimVar loc (Rigid rsrc) "argdim"
+      d <- newDimVar loc (Rigid rsrc) "n"
       modify $ \s -> s {stateDimTable = M.insert e d $ stateDimTable s}
       return
         ( NamedDim $ qualName d,
@@ -1053,7 +1053,7 @@ patternDims (TuplePattern pats _) = concatMap patternDims pats
 patternDims (PatternAscription p (TypeDecl _ (Info t)) _) =
   patternDims p <> mapMaybe (dimIdent (srclocOf p)) (nestedDims t)
   where
-    dimIdent _ AnyDim = Nothing
+    dimIdent _ (AnyDim _) = Nothing
     dimIdent _ (ConstDim _) = Nothing
     dimIdent _ NamedDim {} = Nothing
 patternDims _ = []
@@ -1090,7 +1090,7 @@ sliceShape r slice t@(Array als u et (ShapeDecl orig_dims)) =
         Just (loc, Nonrigid) ->
           lift $ NamedDim . qualName <$> newDimVar loc Nonrigid "slice_dim"
         Nothing ->
-          pure AnyDim
+          pure $ AnyDim Nothing
       where
         -- The original size does not matter if the slice is fully specified.
         orig_d'
@@ -1157,7 +1157,7 @@ checkAscript ::
   SrcLoc ->
   UncheckedTypeDecl ->
   UncheckedExp ->
-  (StructType -> StructType) ->
+  (StructType -> TermTypeM StructType) ->
   TermTypeM (TypeDecl, Exp)
 checkAscript loc decl e shapef = do
   decl' <- checkTypeDecl decl
@@ -1165,9 +1165,8 @@ checkAscript loc decl e shapef = do
   t <- expTypeFully e'
 
   (decl_t_nonrigid, _) <-
-    instantiateEmptyArrayDims loc "impl" Nonrigid $
-      shapef $
-        unInfo $ expandedType decl'
+    instantiateEmptyArrayDims loc "impl" Nonrigid
+      =<< shapef (unInfo $ expandedType decl')
 
   onFailure (CheckingAscription (unInfo $ expandedType decl') (toStruct t)) $
     unify (mkUsage loc "type ascription") decl_t_nonrigid (toStruct t)
@@ -1176,7 +1175,7 @@ checkAscript loc decl e shapef = do
   -- explicitly, because uniqueness is ignored by unification.
   t' <- normTypeFully t
   decl_t' <- normTypeFully $ unInfo $ expandedType decl'
-  unless (t' `subtypeOf` anySizes decl_t') $
+  unless (noSizes t' `subtypeOf` noSizes decl_t') $
     typeError loc mempty $
       "Type" <+> pquote (ppr t') <+> "is not a subtype of"
         <+> pquote (ppr decl_t') <> "."
@@ -1196,7 +1195,7 @@ unscopeType tloc unscoped t = do
       | Just loc <- srclocOf <$> M.lookup (qualLeaf d) unscoped =
         if p == PosImmediate || p == PosParam
           then inst loc $ qualLeaf d
-          else return AnyDim
+          else return $ AnyDim $ Just $ qualLeaf d
     onDim _ _ d = return d
 
     inst loc d = do
@@ -1335,7 +1334,7 @@ checkExp (Range start maybe_step end _ loc) = do
 
   return $ Range start' maybe_step' end' ret loc
 checkExp (Ascript e decl loc) = do
-  (decl', e') <- checkAscript loc decl e id
+  (decl', e') <- checkAscript loc decl e pure
   return $ Ascript e' decl' loc
 checkExp (Coerce e decl _ loc) = do
   -- We instantiate the declared types with all dimensions as nonrigid
@@ -1344,7 +1343,7 @@ checkExp (Coerce e decl _ loc) = do
   -- type must still match.  Eventually we will throw away those sizes
   -- (they will end up being unified with various sizes in 'e', which
   -- is fine).
-  (decl', e') <- checkAscript loc decl e anySizes
+  (decl', e') <- checkAscript loc decl e $ pure . anySizes
 
   -- Now we instantiate the declared type again, but this time we keep
   -- around the sizes as existentials.  This is the result of the
@@ -1657,7 +1656,7 @@ checkExp (Lambda params body rettype_te NoInfo loc) =
 
       let onDim (NamedDim name)
             | not (qualLeaf name `S.member` hidden_sizes) = NamedDim name
-            | otherwise = AnyDim
+            | otherwise = AnyDim $ Just $ qualLeaf name
           onDim d = d
 
       return $ first onDim ret
@@ -1896,7 +1895,7 @@ checkExp (DoLoop _ mergepat mergeexp form loopbody NoInfo loc) =
     consumeMerge mergepat'' =<< expTypeFully mergeexp'
 
     -- dim handling (3)
-    let sparams_anydim = M.fromList $ zip sparams $ repeat $ SizeSubst AnyDim
+    let sparams_anydim = M.fromList $ zip sparams $ repeat $ SizeSubst $ AnyDim Nothing
         loopt_anydims =
           applySubst (`M.lookup` sparams_anydim) $
             patternType mergepat''
@@ -2213,7 +2212,7 @@ checkApply
         [] -> return ()
         ext_paramdims -> do
           let onDim (NamedDim qn)
-                | qualLeaf qn `elem` ext_paramdims = AnyDim
+                | qualLeaf qn `elem` ext_paramdims = AnyDim $ Just $ qualLeaf qn
               onDim d = d
           typeError loc mempty $
             "Anonymous size would appear in function parameter of return type:"
@@ -2249,7 +2248,7 @@ checkApply
       return (tp1', tp2'', argext, ext)
     where
       sizeSubst (Scalar (Prim (Signed Int64))) e = dimFromArg fname e
-      sizeSubst _ _ = return (AnyDim, Nothing)
+      sizeSubst _ _ = return (AnyDim Nothing, Nothing)
 checkApply loc fname tfun@(Scalar TypeVar {}) arg = do
   tv <- newTypeVar loc "b"
   unify (mkUsage loc "use as function") (toStruct tfun) $
@@ -2636,8 +2635,8 @@ fixOverloadedTypes tyvars_at_toplevel =
         "Type is ambiguous (must be a sum type with constructors:"
           <+> ppr (Sum cs) <> ")."
           </> "Add a type annotation to disambiguate the type."
-    fixOverloaded (_, Size Nothing usage) =
-      typeError usage mempty "Size is ambiguous."
+    fixOverloaded (v, Size Nothing usage) =
+      typeError usage mempty $ "Size is ambiguous.\n" <> pprName v
     fixOverloaded _ = return ()
 
 hiddenParamNames :: [Pattern] -> Names
@@ -2894,8 +2893,8 @@ dimUses = execWriter . traverseDims f
     f _ PosReturn (NamedDim v) = tell (mempty, mempty, S.singleton (qualLeaf v))
     f _ _ _ = return ()
 
--- | Find at all type variables in the given type that are covered by
--- the constraints, and produce type parameters that close over them.
+-- | Find all type variables in the given type that are covered by the
+-- constraints, and produce type parameters that close over them.
 --
 -- The passed-in list of type parameters is always prepended to the
 -- produced list of type parameters.
@@ -2914,7 +2913,7 @@ closeOverTypes defname defloc tparams paramts ret substs = do
   let retToAnyDim v = do
         guard $ v `S.member` ret_sizes
         UnknowableSize {} <- snd <$> M.lookup v substs
-        Just $ SizeSubst AnyDim
+        Just $ SizeSubst $ AnyDim $ Just v
   return
     ( tparams ++ more_tparams,
       applySubst retToAnyDim ret,
@@ -3151,7 +3150,7 @@ arrayOfM ::
   Uniqueness ->
   TermTypeM (TypeBase dim as)
 arrayOfM loc t shape u = do
-  zeroOrderType (mkUsage loc "use as array element") "type used in array" t
+  arrayElemType (mkUsage loc "use as array element") "type used in array" t
   return $ arrayOf t shape u
 
 updateTypes :: ASTMappable e => e -> TermTypeM e

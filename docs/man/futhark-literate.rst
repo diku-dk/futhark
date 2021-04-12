@@ -20,7 +20,7 @@ prettyprinted form of the program.  This is useful for demonstrating
 programming techniques.
 
 * Top-level comments that start with a line comment marker (``--``)
-  and a space in the first column will be turned into ordinary text in
+  and a space in the next column will be turned into ordinary text in
   the Markdown file.
 
 * Ordinary top-level definitions will be enclosed in Markdown code
@@ -31,8 +31,8 @@ programming techniques.
 
 **Warning:** Do not run untrusted programs.  See SAFETY below.
 
-Image directives and builtin functions Shells out to ``convert`` (from
-ImageMagick).  Video generation uses ``fmpeg``.
+Image directives and builtin functions shell out to ``convert`` (from
+ImageMagick).  Video generation uses ``ffmpeg``.
 
 OPTIONS
 =======
@@ -140,8 +140,25 @@ The following directives are supported:
 
 * ``> :img e``
 
-  Visualises ``e``, which must be of type ``[][]i32`` or ``[][]u32``
-  (interpreted as rows of ARGB pixel values).
+  Visualises ``e``. The following types are supported:
+
+  * ``[][]i32`` and ``[][]u32``
+
+    Interpreted as ARGB pixel values.
+
+  * ``[][]f32`` and ``[][]f64``
+
+    Interpreted as greyscale. Values should be between 0 and 1, with 0
+    being black and 0 being white.
+
+  * ``[][]u8``
+
+    Interpreted as greyscale. 0 is black and 255 is white.
+
+  * ``[][]bool``
+
+    Interpreted as black and white. ``false`` is black and ``true`` is
+    white.
 
 * ``> :plot2d e[; size=(height,width)]``
 
@@ -172,13 +189,19 @@ FUTHARKSCRIPT
 Only an extremely limited subset of Futhark is supported:
 
 .. productionlist::
-   scriptexp:   `fun` `scriptexp`*
-            : | "(" `scriptexp` ")"
-            : | "(" `scriptexp` ( "," `scriptexp` )+ ")"
+   script_exp:   `fun` `script_exp`*
+            : | "(" `script_exp` ")"
+            : | "(" `script_exp` ( "," `script_exp` )+ ")"
+            : | "[" `script_exp` ( "," `script_exp` )+ "]"
+            : | "empty" "(" ("[" `decimal` "]" )+ `script_type` ")"
             : | "{" "}"
-            : | "{" (`id` = `scriptexp`) ("," `id` = `scriptexp`)* "}"
+            : | "{" (`id` = `script_exp`) ("," `id` = `script_exp`)* "}"
             : | `literal`
-   fun:  `id` | "$" `id`
+   script_fun:  `id` | "$" `id`
+   script_type: `int_type` | `float_type` | "bool"
+
+Note that empty arrays must be written using the ``empty(t)``
+notation, e.g. ``empty([0]i32)``.
 
 Function applications are either of Futhark funtions or *builtin
 functions*.  The latter are prefixed with ``$`` and are magical

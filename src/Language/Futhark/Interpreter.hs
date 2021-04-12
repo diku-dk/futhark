@@ -243,9 +243,10 @@ data Value
   | -- Stores the full shape.
     ValueRecord (M.Map Name Value)
   | ValueFun (Value -> EvalM Value)
-  | ValueSum ValueShape Name [Value]
-
--- Stores the full shape.
+  | -- Stores the full shape.
+    ValueSum ValueShape Name [Value]
+  | -- The update function and the array.
+    ValueAcc (Value -> Value -> EvalM Value) !(Array Int Value)
 
 instance Eq Value where
   ValuePrim (SignedValue x) == ValuePrim (SignedValue y) =
@@ -259,6 +260,7 @@ instance Eq Value where
   ValueArray _ x == ValueArray _ y = x == y
   ValueRecord x == ValueRecord y = x == y
   ValueSum _ n1 vs1 == ValueSum _ n2 vs2 = n1 == n2 && vs1 == vs2
+  ValueAcc _ x == ValueAcc _ y = x == y
   _ == _ = False
 
 instance Pretty Value where
@@ -273,6 +275,7 @@ instance Pretty Value where
      in brackets $ cat $ punctuate separator (map ppr elements)
   pprPrec _ (ValueRecord m) = prettyRecord m
   pprPrec _ ValueFun {} = text "#<fun>"
+  pprPrec _ ValueAcc {} = text "#<acc>"
   pprPrec p (ValueSum _ n vs) =
     parensIf (p > 0) $ text "#" <> sep (ppr n : map (pprPrec 1) vs)
 
@@ -1137,7 +1140,7 @@ substituteInModule substs = onModule
     onType (T.TypeAbbr l ps t) = T.TypeAbbr l ps $ first onDim t
     onDim (NamedDim v) = NamedDim $ replaceQ v
     onDim (ConstDim x) = ConstDim x
-    onDim AnyDim = AnyDim
+    onDim (AnyDim v) = AnyDim v
 
 evalModuleVar :: Env -> QualName VName -> EvalM Module
 evalModuleVar env qv =
@@ -1336,6 +1339,13 @@ initialCtx =
           case fromTuple v of
             Just [x, y, z] -> f x y z
             _ -> error $ "Expected triple; got: " ++ pretty v
+
+    fun5t f =
+      TermValue Nothing $
+        ValueFun $ \v ->
+          case fromTuple v of
+            Just [x, y, z, a, b] -> f x y z a b
+            _ -> error $ "Expected pentuple; got: " ++ pretty v
 
     fun6t f =
       TermValue Nothing $
@@ -1745,6 +1755,50 @@ initialCtx =
         insertAt 0 x (l : ls) = (x : l) : ls
         insertAt i x (l : ls) = l : insertAt (i -1) x ls
         insertAt _ _ ls = ls
+    def "scatter_stream" = Just $
+      fun3t $ \dest f vs ->
+        case (dest, vs) of
+          ( ValueArray dest_shape dest_arr,
+            ValueArray _ vs_arr
+            ) -> do
+              let acc = ValueAcc (\_ x -> pure x) dest_arr
+              acc' <- foldM (apply2 noLoc mempty f) acc vs_arr
+              case acc' of
+                ValueAcc _ dest_arr' ->
+                  return $ ValueArray dest_shape dest_arr'
+                _ ->
+                  error $ "scatter_stream produced: " ++ pretty acc'
+          _ ->
+            error $ "scatter_stream expects array, but got: " ++ pretty (dest, vs)
+    def "hist_stream" = Just $
+      fun5t $ \dest op _ne f vs ->
+        case (dest, vs) of
+          ( ValueArray dest_shape dest_arr,
+            ValueArray _ vs_arr
+            ) -> do
+              let acc = ValueAcc (apply2 noLoc mempty op) dest_arr
+              acc' <- foldM (apply2 noLoc mempty f) acc vs_arr
+              case acc' of
+                ValueAcc _ dest_arr' ->
+                  return $ ValueArray dest_shape dest_arr'
+                _ ->
+                  error $ "hist_stream produced: " ++ pretty acc'
+          _ ->
+            error $ "hist_stream expects array, but got: " ++ pretty (dest, vs)
+    def "acc_write" = Just $
+      fun3t $ \acc i v ->
+        case (acc, i) of
+          ( ValueAcc op acc_arr,
+            ValuePrim (SignedValue (Int64Value i'))
+            ) ->
+              if i' >= 0 && i' < arrayLength acc_arr
+                then do
+                  let x = acc_arr ! fromIntegral i'
+                  res <- op x v
+                  pure $ ValueAcc op $ acc_arr // [(fromIntegral i', res)]
+                else pure acc
+          _ ->
+            error $ "acc_write invalid arguments: " ++ pretty (acc, i, v)
     def "unzip" = Just $
       fun1 $ \x -> do
         let ShapeDim _ (ShapeRecord fs) = valueShape x
@@ -1802,6 +1856,7 @@ initialCtx =
       fun1 $ \v -> do
         break
         return v
+    def "acc" = Nothing
     def s | nameFromString s `M.member` namesToPrimTypes = Nothing
     def s = error $ "Missing intrinsic: " ++ s
 
