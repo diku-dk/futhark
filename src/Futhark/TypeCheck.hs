@@ -598,7 +598,7 @@ checkFun (FunDef _ _ fname rettype params body) =
         map declExtTypeOf rettype,
         funParamsToNameInfos params
       )
-      consumable
+      (Just consumable)
       $ do
         checkFunParams params
         checkRetType rettype
@@ -642,13 +642,13 @@ checkFun' ::
     [DeclExtType],
     [(VName, NameInfo (Aliases lore))]
   ) ->
-  [(VName, Names)] ->
+  Maybe [(VName, Names)] ->
   TypeM lore [Names] ->
   TypeM lore ()
 checkFun' (fname, rettype, params) consumable check = do
   checkNoDuplicateParams
   binding (M.fromList params) $
-    consumeOnlyParams consumable $ do
+    maybe id consumeOnlyParams consumable $ do
       body_aliases <- check
       scope <- askScope
       let isArray = maybe False ((> 0) . arrayRank . typeOf) . (`M.lookup` scope)
@@ -1046,7 +1046,7 @@ checkExp (DoLoop ctxmerge valmerge form loopbody) = do
           staticShapes rettype,
           funParamsToNameInfos mergepat
         )
-        consumable
+        (Just consumable)
         $ do
           checkFunParams mergepat
           checkBodyLore $ snd $ bodyDec loopbody
@@ -1101,7 +1101,7 @@ checkExp (WithAcc inputs lam) = do
 
     pure (Acc (paramName p) shape elem_ts NoUniqueness, mempty)
 
-  checkLambda lam $ replicate num_accs (Prim Cert, mempty) ++ acc_args
+  checkAnyLambda False lam $ replicate num_accs (Prim Cert, mempty) ++ acc_args
   where
     num_accs = length inputs
 checkExp (Op op) = do
@@ -1345,12 +1345,11 @@ consumeArgs paramts args =
     consumeArg als Consume = als
     consumeArg _ _ = mempty
 
-checkLambda ::
-  Checkable lore =>
-  Lambda (Aliases lore) ->
-  [Arg] ->
-  TypeM lore ()
-checkLambda (Lambda params body rettype) args = do
+-- The boolean indicates whether we only allow consumption of
+-- parameters.
+checkAnyLambda ::
+  Checkable lore => Bool -> Lambda (Aliases lore) -> [Arg] -> TypeM lore ()
+checkAnyLambda soac (Lambda params body rettype) args = do
   let fname = nameFromString "<anonymous>"
   if length params == length args
     then do
@@ -1359,7 +1358,10 @@ checkLambda (Lambda params body rettype) args = do
         Nothing
         (map ((`toDecl` Nonunique) . paramType) params)
         $ map noArgAliases args
-      let consumable = zip (map paramName params) (map argAliases args)
+      let consumable =
+            if soac
+              then Just $ zip (map paramName params) (map argAliases args)
+              else Nothing
       checkFun'
         ( fname,
           staticShapes $ map (`toDecl` Nonunique) rettype,
@@ -1382,6 +1384,9 @@ checkLambda (Lambda params body rettype) args = do
             ++ "\nbut expected to take "
             ++ show (length args)
             ++ " arguments."
+
+checkLambda :: Checkable lore => Lambda (Aliases lore) -> [Arg] -> TypeM lore ()
+checkLambda = checkAnyLambda True
 
 checkPrimExp :: Checkable lore => PrimExp VName -> TypeM lore ()
 checkPrimExp ValueExp {} = return ()
