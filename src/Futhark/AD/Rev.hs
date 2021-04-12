@@ -16,7 +16,6 @@ module Futhark.AD.Rev (revVJP) where
 import Control.Monad
 import Control.Monad.State.Strict
 import Data.Bifunctor (first, second)
-import Data.Either (partitionEithers)
 import qualified Data.Map as M
 import Futhark.AD.Derivatives
 import Futhark.Analysis.PrimExp.Convert
@@ -24,7 +23,7 @@ import Futhark.Binder
 import Futhark.IR.SOACS
 import Futhark.Tools
 import Futhark.Transform.Rename
-import Futhark.Util (takeLast)
+import Futhark.Util (splitAt3, takeLast)
 
 --- First some general utility functions that are not specific to AD.
 
@@ -228,13 +227,10 @@ instance Adjoint VName where
         case v_adj_t of
           Acc {} -> do
             dims <- arrayDims <$> lookupType d
-            v_adj_arr <-
-              letExp (baseString v_adj <> "_arr") $
-                BasicOp $ Replicate (Shape dims) $ Var v_adj
             ~[v_adj'] <-
-              tabNest (length dims) [d, v_adj_arr] $ \is [d', v_adj_arr'] ->
+              tabNest (length dims) [d, v_adj] $ \is [d', v_adj'] ->
                 letTupExp "acc" $
-                  BasicOp $ UpdateAcc v_adj_arr' (map Var is) [Var d']
+                  BasicOp $ UpdateAcc v_adj' (map Var is) [Var d']
             insAdj v v_adj'
             pure v_adj'
           _ -> do
@@ -455,6 +451,41 @@ commonSOAC pat aux soac m = do
   m
   mapM lookupAdj $ patternNames pat
 
+-- | A classification of a free variable based on its adjoint.  The
+-- 'VName' stored is *not* the adjoint, but the primal variable.
+data AdjVar
+  = -- | Adjoint is already an accumulator.
+    FreeAcc VName
+  | -- | Currently has no adjoint, but should be given one, and is an
+    -- array with this shape and element type.
+    FreeArr VName Shape PrimType
+  | -- | Does not need an accumulator adjoint (might still be an array).
+    FreeNonAcc VName
+
+classifyAdjVars :: [VName] -> ADM [AdjVar]
+classifyAdjVars = mapM f
+  where
+    f v = do
+      v_adj <- lookupAdj v
+      v_adj_t <- lookupType v_adj
+      case v_adj_t of
+        Array pt shape _ ->
+          pure $ FreeArr v shape pt
+        Acc {} ->
+          pure $ FreeAcc v
+        _ ->
+          pure $ FreeNonAcc v
+
+partitionAdjVars :: [AdjVar] -> ([VName], [(VName, (Shape, PrimType))], [VName])
+partitionAdjVars [] = ([], [], [])
+partitionAdjVars (fv : fvs) =
+  case fv of
+    FreeAcc v -> (v : xs, ys, zs)
+    FreeArr v shape t -> (xs, (v, (shape, t)) : ys, zs)
+    FreeNonAcc v -> (xs, ys, v : zs)
+  where
+    (xs, ys, zs) = partitionAdjVars fvs
+
 diffMap :: [VName] -> SubExp -> Lambda -> [VName] -> ADM ()
 diffMap pat_adj w map_lam as = do
   pat_adj_params <-
@@ -470,20 +501,22 @@ diffMap pat_adj w map_lam as = do
     let lam_rev_params =
           lambdaParams map_lam' ++ pat_adj_params ++ free_adjs_params
         adjs_for = map paramName (lambdaParams map_lam') ++ free
-
     lam_rev <-
-      mkLambda lam_rev_params $ do
-        zipWithM_ insAdj free_with_adjs $ map paramName free_adjs_params
-        bodyBind . lambdaBody
-          =<< diffLambda (map paramName pat_adj_params) adjs_for map_lam'
+      mkLambda lam_rev_params $
+        subAD $ do
+          zipWithM_ insAdj free_with_adjs $ map paramName free_adjs_params
+          bodyBind . lambdaBody
+            =<< diffLambda (map paramName pat_adj_params) adjs_for map_lam'
 
     (param_contribs, free_contribs) <-
       fmap (splitAt (length (lambdaParams map_lam'))) $
         letTupExp "map_adjs" . Op $
           Screma w (as ++ pat_adj ++ free_adjs) (mapSOAC lam_rev)
 
-    zipWithM_ updateAdj as param_contribs
+    -- Crucial that we handle the free contribs first in case 'free'
+    -- and 'as' intersect.
     zipWithM_ freeContrib free free_contribs
+    zipWithM_ updateAdj as param_contribs
   where
     addIdxParams n lam = do
       idxs <- replicateM n $ newParam "idx" $ Prim int64
@@ -508,29 +541,33 @@ diffMap pat_adj w map_lam as = do
         subAD $ mkLambda (cert_params ++ acc_params) $ m $ map paramName acc_params
       letTupExp "withacc_res" $ WithAcc inputs acc_lam
 
-    decideOnFreeVar v = do
+    withAccInput (v, (shape, pt)) = do
       v_adj <- lookupAdj v
-      v_adj_t <- lookupType v_adj
-      case v_adj_t of
-        Array pt shape _
-          | v `notElem` as -> do
-            add_lam <- accAddLambda (shapeRank shape) $ Prim pt
-            zero <- letSubExp "zero" $ zeroExp $ Prim pt
-            pure $ Left (v, (shape, [v_adj], Just (add_lam, [zero])))
-        _ ->
-          pure $ Right v
+      add_lam <- accAddLambda (shapeRank shape) $ Prim pt
+      zero <- letSubExp "zero" $ zeroExp $ Prim pt
+      pure (shape, [v_adj], Just (add_lam, [zero]))
 
     accAdjoints free m = do
-      (acc_free, nonacc_free) <- partitionEithers <$> mapM decideOnFreeVar free
-      (acc_adjs, nonacc_adjs) <-
-        fmap (splitAt (length acc_free)) . withAcc (map snd acc_free) $ \accs -> do
-          zipWithM_ insAdj (map fst acc_free) accs
-          () <- m $ map fst acc_free
-          acc_free_adj <- mapM (lookupAdj . fst) acc_free
+      (acc_free, arr_free, nonacc_free) <-
+        partitionAdjVars <$> classifyAdjVars free
+      arr_free' <- mapM withAccInput arr_free
+      -- We only consider those input arrays that are also not free in
+      -- the lambda.
+      let as_nonfree = filter (`notElem` free) as
+      (acc_adjs, arr_adjs, rest_adjs) <-
+        fmap (splitAt3 (length acc_free) (length arr_free)) . withAcc arr_free' $ \accs -> do
+          zipWithM_ insAdj (map fst arr_free) accs
+          () <- m $ acc_free ++ map fst arr_free
+          acc_free_adj <- mapM lookupAdj acc_free
+          arr_free_adj <- mapM (lookupAdj . fst) arr_free
           nonacc_free_adj <- mapM lookupAdj nonacc_free
-          pure $ map Var $ acc_free_adj <> nonacc_free_adj
-      zipWithM_ insAdj (map fst acc_free) acc_adjs
+          as_nonfree_adj <- mapM lookupAdj as_nonfree
+          pure $ map Var $ acc_free_adj <> arr_free_adj <> nonacc_free_adj <> as_nonfree_adj
+      zipWithM_ insAdj acc_free acc_adjs
+      zipWithM_ insAdj (map fst arr_free) arr_adjs
+      let (nonacc_adjs, as_nonfree_adjs) = splitAt (length nonacc_free) rest_adjs
       zipWithM_ insAdj nonacc_free nonacc_adjs
+      zipWithM_ insAdj as_nonfree as_nonfree_adjs
 
     freeContrib v contribs = do
       contribs_t <- lookupType contribs
