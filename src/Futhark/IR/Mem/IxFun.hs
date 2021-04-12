@@ -984,18 +984,6 @@ existentialize (IxFun (lmad :| []) oshp True)
       stride' <- existentializeExp str
       shape' <- existentializeExp shp
       return $ LMADDim stride' (fmap Free rot) shape' perm mon
-
--- oshp' = LeafExp (Ext 0)
--- lmad' = LMAD lmadOffset' lmadDims'
--- lmadOffset' = LeafExp (Ext 1)
--- (_, lmadDims', lmadDimSubsts) = foldr generalizeDim (2, [], []) $ lmadDims lmad
--- substs = oshp : lmadOffset lmad' : lmadDimSubsts
-
--- generalizeDim :: (Int, [LMADDim num]) -> LMADDim num -> (Int, [LMADDim num])
--- generalizeDim (i, acc) (LMADDim stride rotate shape perm mon) =
---   (i + 3,
---    LMADDim (LeafExp $ Ext i) (LeafExp $ Ext $ i + 1) (LeafExp $ Ext $ i + 2) perm mon,
---    [stride, rotate, shape])
 existentialize _ = return Nothing
 
 -- | When comparing index functions as part of the type check in KernelsMem,
