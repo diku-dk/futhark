@@ -324,8 +324,8 @@ instance Pretty d => Pretty (DimIndex d) where
   ppr (DimSlice i n s) = ppr i <+> text ":+" <+> ppr n <+> text "*" <+> ppr s
 
 ppPattern :: (Pretty a, Pretty b) => [a] -> [b] -> Doc
-ppPattern [] bs = braces $ commasep $ map ppr bs
-ppPattern as bs = braces $ commasep (map ppr as) <> semi </> commasep (map ppr bs)
+ppPattern [] bs = braces $ commastack $ map ppr bs
+ppPattern as bs = braces $ commastack (map ppr as) <> semi </> commasep (map ppr bs)
 
 -- | Like 'prettyTuple', but produces a 'Doc'.
 ppTuple' :: Pretty a => [a] -> Doc
