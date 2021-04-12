@@ -244,7 +244,7 @@ compileSegScan pat lvl space scanOp kbody = do
             dPrim_ y ty
             copyDWIMFix x [] (Var src) [i]
             copyDWIMFix y [] (Var src) [i + 1]
-        --sUnless isNewSgm $
+
           compileStms mempty (bodyStms $ lambdaBody $ segBinOpLambda scanOp) $
             forM_ (zip privateArrays $ bodyResult $ lambdaBody $ segBinOpLambda scanOp) $ \(dest, res) ->
               copyDWIMFix dest [i + 1] res []
@@ -532,15 +532,15 @@ compileSegScan pat lvl space scanOp kbody = do
       sOp localBarrier
 
     sComment "Write block scan results to global memory" $
-      forM_ (zip (map patElemName all_pes) privateArrays) $ \(dest, src) ->
         sFor "i" m $ \i -> do
           flat_idx <-
             dPrimVE "flat_idx" $
               tvExp blockOff + kernelGroupSize constants * i
                 + sExt64 (kernelLocalThreadId constants)
           zipWithM_ dPrimV_ gtids $ unflattenIndex dims' flat_idx
-          sWhen (flat_idx .<. n) $
-            copyDWIMFix dest (map Imp.vi64 gtids) (Var src) [i]
+          sWhen (flat_idx .<. n) $ do
+            forM_ (zip (map patElemName all_pes) privateArrays) $ \(dest, src) ->
+              copyDWIMFix dest (map Imp.vi64 gtids) (Var src) [i]
 
     sComment "If this is the last block, reset the dynamicId" $
       sWhen (tvExp dynamicId .==. unCount num_groups - 1) $
