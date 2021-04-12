@@ -384,24 +384,15 @@ sliceOneLMAD (IxFun (lmad@(LMAD _ ldims) :| lmads) oshp cg) is = do
 
   return $ IxFun (setLMADPermutation perm' lmad' :| lmads) oshp cg'
   where
-    updatePerm ps inds = foldl (\acc p -> acc ++ decrease p) [] ps
+    updatePerm ps inds = concatMap decrease ps
       where
         decrease p =
-          let d =
-                foldl
-                  ( \n i ->
-                      if i == p
-                        then -1
-                        else
-                          if i > p
-                            then n
-                            else
-                              if n /= -1
-                                then n + 1
-                                else n
-                  )
-                  0
-                  inds
+          let f n i
+                | i == p = -1
+                | i > p = n
+                | n /= -1 = n + 1
+                | otherwise = n
+              d = foldl f 0 inds
            in [p - d | d /= -1]
 
     harmlessRotation' ::
