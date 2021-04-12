@@ -773,7 +773,10 @@ sizesForAll bound_sizes params = do
   where
     bound = bound_sizes <> foldMap patternNames params
     tv = identityMapper {mapOnPatternType = bitraverse onDim pure}
-    onDim AnyDim = do
+    onDim (AnyDim (Just v)) = do
+      modify $ S.insert v
+      pure $ NamedDim $ qualName v
+    onDim (AnyDim Nothing) = do
       v <- lift $ newVName "size"
       modify $ S.insert v
       pure $ NamedDim $ qualName v
@@ -1018,7 +1021,7 @@ liftValDec fname rettype dims pats body = tell $ Seq.singleton dec
     bound_here = S.fromList dims <> S.map identName (foldMap patternIdents pats)
     anyDimIfNotBound (NamedDim v)
       | qualLeaf v `S.member` bound_here = NamedDim v
-      | otherwise = AnyDim
+      | otherwise = AnyDim $ Just $ qualLeaf v
     anyDimIfNotBound d = d
     rettype_st = first anyDimIfNotBound $ toStruct rettype
 

@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+  * Initial work on granting programmers more control over existential
+    sizes, starting with making type abbreviations function as
+    existential quantifiers (#1301).
+
+  * FutharkScript now also supports arrays and scientific notation.
+
 ### Removed
 
 ### Changed
@@ -18,6 +24,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * `futhark_context_report()` now internally calls
     `futhark_context_sync()` before collecting profiling information
     (if applicable).
+
+  * `futhark literate`: Parse errors for expression directives now
+    detected properly.
 
 ## [0.19.4]
 
