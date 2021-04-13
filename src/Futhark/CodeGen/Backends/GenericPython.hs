@@ -742,7 +742,7 @@ readTypeEnum (IntType Int64) Imp.TypeDirect = "i64"
 readTypeEnum (FloatType Float32) _ = "f32"
 readTypeEnum (FloatType Float64) _ = "f64"
 readTypeEnum Imp.Bool _ = "bool"
-readTypeEnum Unit _ = error "readTypeEnum: cert"
+readTypeEnum Unit _ = "bool"
 
 readInput :: Imp.ExternalValue -> PyStmt
 readInput (Imp.OpaqueValue desc _) =
