@@ -74,7 +74,8 @@ pPrimValue =
   choice
     [ FloatValue <$> pFloatValue,
       IntValue <$> pIntValue,
-      BoolValue <$> pBoolValue
+      BoolValue <$> pBoolValue,
+      UnitValue <$ "()"
     ]
     <?> "primitive value"
 
