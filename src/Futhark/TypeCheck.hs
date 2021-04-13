@@ -907,7 +907,7 @@ checkBasicOp (UpdateAcc acc is ses) = do
       TypeError $
         "Accumulator requires "
           ++ show (length ts)
-          ++ " values, but only "
+          ++ " values, but "
           ++ show (length ses)
           ++ " provided."
 
@@ -916,7 +916,7 @@ checkBasicOp (UpdateAcc acc is ses) = do
       TypeError $
         "Accumulator requires "
           ++ show (shapeRank shape)
-          ++ " indices, but only "
+          ++ " indices, but "
           ++ show (length is)
           ++ " provided."
 
