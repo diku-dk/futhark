@@ -817,9 +817,7 @@ readsFromSet free =
         Prim bt ->
           isConstExp vtable (Imp.var var bt) >>= \case
             Just ce -> return $ Just $ Imp.ConstUse var ce
-            Nothing
-              | bt == Unit -> return Nothing
-              | otherwise -> return $ Just $ Imp.ScalarUse var bt
+            Nothing -> return $ Just $ Imp.ScalarUse var bt
 
 isConstExp ::
   VTable KernelsMem ->
