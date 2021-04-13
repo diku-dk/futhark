@@ -1101,7 +1101,7 @@ checkExp (WithAcc inputs lam) = do
 
     pure (Acc (paramName p) shape elem_ts NoUniqueness, mempty)
 
-  checkAnyLambda False lam $ replicate num_accs (Prim Cert, mempty) ++ acc_args
+  checkAnyLambda False lam $ replicate num_accs (Prim Unit, mempty) ++ acc_args
   where
     num_accs = length inputs
 checkExp (Op op) = do
@@ -1197,7 +1197,7 @@ checkStm ::
   TypeM lore a ->
   TypeM lore a
 checkStm stm@(Let pat (StmAux (Certificates cs) _ (_, dec)) e) m = do
-  context "When checking certificates" $ mapM_ (requireI [Prim Cert]) cs
+  context "When checking certificates" $ mapM_ (requireI [Prim Unit]) cs
   context "When checking expression annotation" $ checkExpLore dec
   context ("When matching\n" ++ message "  " pat ++ "\nwith\n" ++ message "  " e) $
     matchPattern pat e

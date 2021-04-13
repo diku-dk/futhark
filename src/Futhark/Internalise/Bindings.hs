@@ -41,7 +41,7 @@ bindingFParams tparams params m = do
         m (catMaybes certparams ++ shape_params) $ chunks num_param_ts valueparams'
   where
     fixAccParam (I.Param pv (I.Acc acc ispace ts u)) =
-      ( Just (I.Param acc $ I.Prim I.Cert),
+      ( Just (I.Param acc $ I.Prim I.Unit),
         I.Param pv (I.Acc acc ispace ts u)
       )
     fixAccParam p = (Nothing, p)

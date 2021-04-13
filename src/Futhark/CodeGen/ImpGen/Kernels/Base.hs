@@ -818,7 +818,7 @@ readsFromSet free =
           isConstExp vtable (Imp.var var bt) >>= \case
             Just ce -> return $ Just $ Imp.ConstUse var ce
             Nothing
-              | bt == Cert -> return Nothing
+              | bt == Unit -> return Nothing
               | otherwise -> return $ Just $ Imp.ScalarUse var bt
 
 isConstExp ::

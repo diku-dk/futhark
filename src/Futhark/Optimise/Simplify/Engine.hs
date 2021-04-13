@@ -1038,7 +1038,7 @@ instance Simplifiable Certificates where
       check idd = do
         vv <- ST.lookupSubExp idd <$> askVtable
         case vv of
-          Just (Constant Checked, Certificates cs) -> return cs
+          Just (Constant _, Certificates cs) -> return cs
           Just (Var idd', _) -> return [idd']
           _ -> return [idd]
 

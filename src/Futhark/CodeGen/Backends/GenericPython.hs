@@ -742,7 +742,7 @@ readTypeEnum (IntType Int64) Imp.TypeDirect = "i64"
 readTypeEnum (FloatType Float32) _ = "f32"
 readTypeEnum (FloatType Float64) _ = "f64"
 readTypeEnum Imp.Bool _ = "bool"
-readTypeEnum Cert _ = error "readTypeEnum: cert"
+readTypeEnum Unit _ = error "readTypeEnum: cert"
 
 readInput :: Imp.ExternalValue -> PyStmt
 readInput (Imp.OpaqueValue desc _) =
@@ -1039,7 +1039,7 @@ compilePrimType t =
     FloatType Float32 -> "ct.c_float"
     FloatType Float64 -> "ct.c_double"
     Imp.Bool -> "ct.c_bool"
-    Cert -> "ct.c_bool"
+    Unit -> "ct.c_bool"
 
 -- | The ctypes type corresponding to a 'PrimType', taking sign into account.
 compilePrimTypeExt :: PrimType -> Imp.Signedness -> String
@@ -1056,7 +1056,7 @@ compilePrimTypeExt t ept =
     (FloatType Float32, _) -> "ct.c_float"
     (FloatType Float64, _) -> "ct.c_double"
     (Imp.Bool, _) -> "ct.c_bool"
-    (Cert, _) -> "ct.c_byte"
+    (Unit, _) -> "ct.c_byte"
 
 -- | The Numpy type corresponding to a 'PrimType'.
 compilePrimToNp :: Imp.PrimType -> String
@@ -1069,7 +1069,7 @@ compilePrimToNp bt =
     FloatType Float32 -> "np.float32"
     FloatType Float64 -> "np.float64"
     Imp.Bool -> "np.byte"
-    Cert -> "np.byte"
+    Unit -> "np.byte"
 
 -- | The Numpy type corresponding to a 'PrimType', taking sign into account.
 compilePrimToExtNp :: Imp.PrimType -> Imp.Signedness -> String
@@ -1086,7 +1086,7 @@ compilePrimToExtNp bt ept =
     (FloatType Float32, _) -> "np.float32"
     (FloatType Float64, _) -> "np.float64"
     (Imp.Bool, _) -> "np.bool_"
-    (Cert, _) -> "np.byte"
+    (Unit, _) -> "np.byte"
 
 compilePrimValue :: Imp.PrimValue -> PyExp
 compilePrimValue (IntValue (Int8Value v)) =
@@ -1110,7 +1110,7 @@ compilePrimValue (FloatValue (Float64Value v))
     Var "np.nan"
   | otherwise = simpleCall "np.float64" [Float $ fromRational $ toRational v]
 compilePrimValue (BoolValue v) = Bool v
-compilePrimValue Checked = Var "True"
+compilePrimValue UnitValue = Var "None"
 
 compileVar :: VName -> CompilerM op s PyExp
 compileVar v =
@@ -1207,7 +1207,7 @@ compileCode (Imp.For i bound body) = do
 compileCode (Imp.SetScalar name exp1) =
   stm =<< Assign <$> compileVar name <*> compileExp exp1
 compileCode Imp.DeclareMem {} = return ()
-compileCode (Imp.DeclareScalar v _ Cert) = do
+compileCode (Imp.DeclareScalar v _ Unit) = do
   v' <- compileVar v
   stm $ Assign v' $ Var "True"
 compileCode Imp.DeclareScalar {} = return ()

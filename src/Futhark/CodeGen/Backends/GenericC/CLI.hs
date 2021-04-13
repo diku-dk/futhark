@@ -171,7 +171,7 @@ primTypeInfo (IntType it) t = case (it, t) of
 primTypeInfo (FloatType Float32) _ = [C.cexp|f32_info|]
 primTypeInfo (FloatType Float64) _ = [C.cexp|f64_info|]
 primTypeInfo Bool _ = [C.cexp|bool_info|]
-primTypeInfo Cert _ = [C.cexp|bool_info|]
+primTypeInfo Unit _ = [C.cexp|bool_info|]
 
 readPrimStm :: C.ToIdent a => a -> Int -> PrimType -> Signedness -> C.Stm
 readPrimStm place i t ept =

@@ -90,6 +90,6 @@ pIntType = choice $ map p allIntTypes
 
 pPrimType :: Parser PrimType
 pPrimType =
-  choice [p Bool, p Cert, FloatType <$> pFloatType, IntType <$> pIntType]
+  choice [p Bool, p Unit, FloatType <$> pFloatType, IntType <$> pIntType]
   where
     p t = keyword (prettyText t) $> t
