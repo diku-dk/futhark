@@ -69,6 +69,7 @@ module Futhark.IR.Primitive
     doSIToFP,
     intToInt64,
     intToWord64,
+    flipConvOp,
 
     -- * Comparison Operations
     doCmpOp,
@@ -850,6 +851,20 @@ doConvOp (SIToFP _ to) (IntValue v) = Just $ FloatValue $ doSIToFP v to
 doConvOp (IToB _) (IntValue v) = Just $ BoolValue $ intToInt64 v /= 0
 doConvOp (BToI to) (BoolValue v) = Just $ IntValue $ intValue to $ if v then 1 else 0 :: Int
 doConvOp _ _ = Nothing
+
+-- | Turn the conversion the other way around.  Note that most
+-- conversions are lossy, so there is no guarantee the value will
+-- round-trip.
+flipConvOp :: ConvOp -> ConvOp
+flipConvOp (ZExt from to) = ZExt to from
+flipConvOp (SExt from to) = SExt to from
+flipConvOp (FPConv from to) = FPConv to from
+flipConvOp (FPToUI from to) = UIToFP to from
+flipConvOp (FPToSI from to) = SIToFP to from
+flipConvOp (UIToFP from to) = FPToSI to from
+flipConvOp (SIToFP from to) = FPToSI to from
+flipConvOp (IToB from) = BToI from
+flipConvOp (BToI to) = IToB to
 
 -- | Zero-extend the given integer value to the size of the given
 -- type.  If the type is smaller than the given value, the result is a
