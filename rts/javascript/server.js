@@ -39,7 +39,7 @@ class Server {
 
 
   _check_var(vname) {
-    if (vname in this._vars) {
+    if (!(vname in this._vars)) {
       throw 'Unknown variable: ' + vname;
     }
   }
@@ -100,17 +100,10 @@ class Server {
     for (var i = 0; i < in_vnames.length; i++) {
       ins.push(this._get_var(in_vnames[i]));
     }
-    // TODO Figure this bad boy out
-    try {
-      var runtime = getattr(this._ctx, args[0]);
-      var vals;
-    } 
-    catch (err) {
-      throw "THIS FAILED" + err;
-    }
+    // Call entry point function from string name
+    var vals = this.ctx[args[0]].apply(this.ctx, ins);
+    console.log(vals);
 
-    // This probablty isn't right
-    console.log('runtime: ' + runtime);
     if (num_outs == 1) {
       this._vars[out_vnames[0]] = vals;
     } else {
@@ -167,6 +160,7 @@ class Server {
       }
       try {
         this._vars[vname] = read_value(typename, reader);
+        console.log(this._vars);
       } catch (err) {
         var err_msg = "Failed to restore variable " + vname + ".\nPossibly malformed data in " + fname + ".\n";
         throw "Failed to restore variable " + err_msg;
