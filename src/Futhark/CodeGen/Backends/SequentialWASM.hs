@@ -219,6 +219,7 @@ cwrapsJSE jses =
   
 emccExportNames :: [JSEntryPoint] -> [String]
 emccExportNames jses =
+    map (\jse -> "'_futhark_entry_" ++ name jse ++ "'") jses ++ 
     map (\arg -> "'" ++ gfn "new" arg ++ "'") jses' ++
     map (\arg -> "'" ++ gfn "shape" arg ++ "'") jses' ++
     map (\arg -> "'" ++ gfn "values_raw" arg ++ "'") jses' ++
@@ -233,11 +234,10 @@ cwrapFun :: String -> Int -> String
 cwrapFun fname numArgs =
   T.unpack
   [text|
-  ${fn} = Module.onRuntimeInitialized = () => { 
-    Module.cwrap(
+  ${fn} = 
+  Module.cwrap(
       '${fn}', 'number', [${args}],
     );
-  }
   |]
   where 
    fn = T.pack fname
@@ -292,6 +292,8 @@ jsWrapEntryPoint jse =
   --inits,
   initPtrs,
   paramsToPtr,
+  -- TODO CHange line below
+  "     var dataHeap0 = initData(new Int32Array(1));",
   "    futhark_entry_" ++ func_name ++ "(this.ctx, " ++ rets ++ ", " ++ args1 ++ ");",
   results,  
   "    futhark_context_sync(this.ctx);",
@@ -333,11 +335,10 @@ ptrFromWrap =
 cwrapEntryPoint :: JSEntryPoint -> String
 cwrapEntryPoint jse = 
   unlines 
-  ["    futhark_entry_" ++ ename ++ " = Module.onRuntimeInitialized = () => {",
+  ["    futhark_entry_" ++ ename ++ " = ",
    "      Module.cwrap(", 
    "        'futhark_entry_" ++ ename ++ "', 'number', " ++ args,
-   "      );",
-   "    }"]
+   "      );"]
    where
     ename = name jse
     arg_length = (length (parameters jse)) + (length (ret jse))
