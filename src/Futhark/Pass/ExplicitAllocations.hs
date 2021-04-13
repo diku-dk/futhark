@@ -942,7 +942,7 @@ allocInExp (WithAcc inputs bodylam) =
     onLambda lam = do
       params <- forM (lambdaParams lam) $ \(Param pv t) ->
         case t of
-          Prim Cert -> pure $ Param pv $ MemPrim Cert
+          Prim Unit -> pure $ Param pv $ MemPrim Unit
           Acc acc ispace ts u -> pure $ Param pv $ MemAcc acc ispace ts u
           _ -> error $ "Unexpected WithAcc lambda param: " ++ pretty (Param pv t)
       allocInLambda params (lambdaBody lam) (lambdaReturnType lam)

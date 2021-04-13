@@ -115,7 +115,7 @@ primOpType (Copy v) =
 primOpType (Manifest _ v) =
   pure <$> lookupType v
 primOpType Assert {} =
-  pure [Prim Cert]
+  pure [Prim Unit]
 primOpType (UpdateAcc v _ _) =
   pure <$> lookupType v
 

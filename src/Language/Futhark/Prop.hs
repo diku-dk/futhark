@@ -1115,7 +1115,7 @@ intrinsics =
     unPrim (Primitive.IntType t) = Signed t
     unPrim (Primitive.FloatType t) = FloatType t
     unPrim Primitive.Bool = Bool
-    unPrim Primitive.Cert = Bool
+    unPrim Primitive.Unit = Bool
 
     intrinsicPrim t = (pretty t, IntrinsicType Unlifted [] $ Scalar $ Prim t)
 

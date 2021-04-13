@@ -1299,7 +1299,7 @@ initialCtx =
     putV (P.IntValue x) = SignedValue x
     putV (P.FloatValue x) = FloatValue x
     putV (P.BoolValue x) = BoolValue x
-    putV P.Checked = BoolValue True
+    putV P.UnitValue = BoolValue True
 
     getS (SignedValue x) = Just $ P.IntValue x
     getS _ = Nothing

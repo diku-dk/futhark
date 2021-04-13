@@ -246,7 +246,7 @@ simplifyConvOp _ _ _ =
 -- If expression is true then just replace assertion.
 simplifyAssert :: SimpleRule lore
 simplifyAssert _ _ (Assert (Constant (BoolValue True)) _ _) =
-  constRes Checked
+  constRes UnitValue
 simplifyAssert _ _ _ =
   Nothing
 
