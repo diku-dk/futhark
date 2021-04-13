@@ -372,6 +372,7 @@ useAsParam (ScalarUse name bt) =
   let ctp = case bt of
         -- OpenCL does not permit bool as a kernel parameter type.
         Bool -> [C.cty|unsigned char|]
+        Unit -> [C.cty|unsigned char|]
         _ -> GC.primTypeToCType bt
    in Just [C.cparam|$ty:ctp $id:name|]
 useAsParam (MemoryUse name) =
