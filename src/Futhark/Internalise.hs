@@ -233,12 +233,12 @@ internaliseExp desc (E.Index e idxs (Info ret, Info retext) loc) = do
   bindExtSizes (E.toStruct ret) retext ses
   return ses
 
--- XXX: we map empty records and tuples to bools, because otherwise
+-- XXX: we map empty records and tuples to units, because otherwise
 -- arrays of unit will lose their sizes.
 internaliseExp _ (E.TupLit [] _) =
-  return [constant True]
+  return [constant UnitValue]
 internaliseExp _ (E.RecordLit [] _) =
-  return [constant True]
+  return [constant UnitValue]
 internaliseExp desc (E.TupLit es _) = concat <$> mapM (internaliseExp desc) es
 internaliseExp desc (E.RecordLit orig_fields _) =
   concatMap snd . sortFields . M.unions <$> mapM internaliseField orig_fields

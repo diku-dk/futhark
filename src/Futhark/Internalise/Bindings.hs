@@ -134,11 +134,11 @@ flattenPattern = flattenPattern'
       flattenPattern' $ E.Id name t loc
     flattenPattern' (E.Id v (Info t) loc) =
       return [E.Ident v (Info t) loc]
-    -- XXX: treat empty tuples and records as bool.
+    -- XXX: treat empty tuples and records as unit.
     flattenPattern' (E.TuplePattern [] loc) =
-      flattenPattern' (E.Wildcard (Info $ E.Scalar $ E.Prim E.Bool) loc)
+      flattenPattern' (E.Wildcard (Info $ E.Scalar $ E.Record mempty) loc)
     flattenPattern' (E.RecordPattern [] loc) =
-      flattenPattern' (E.Wildcard (Info $ E.Scalar $ E.Prim E.Bool) loc)
+      flattenPattern' (E.Wildcard (Info $ E.Scalar $ E.Record mempty) loc)
     flattenPattern' (E.TuplePattern pats _) =
       concat <$> mapM flattenPattern' pats
     flattenPattern' (E.RecordPattern fs loc) =
