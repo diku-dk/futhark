@@ -152,11 +152,19 @@ consumedInExp (Apply _ args _ _) =
     consumeArg _ = mempty
 consumedInExp (If _ tb fb _) =
   consumedInBody tb <> consumedInBody fb
-consumedInExp (DoLoop _ merge _ _) =
+consumedInExp (DoLoop _ merge form body) =
   mconcat
     ( map (subExpAliases . snd) $
         filter (unique . paramDeclType . fst) merge
     )
+    <> consumedInForm form
+  where
+    body_consumed = consumedInBody body
+    varConsumed = (`nameIn` body_consumed) . paramName . fst
+    consumedInForm (ForLoop _ _ _ loopvars) =
+      namesFromList $ map snd $ filter varConsumed loopvars
+    consumedInForm WhileLoop {} =
+      mempty
 consumedInExp (WithAcc inputs lam) =
   mconcat (map inputConsumed inputs)
     <> ( consumedByLambda lam
