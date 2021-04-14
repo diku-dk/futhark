@@ -1,8 +1,10 @@
+-- Slightly odd result due to interchange.
 -- ==
 -- random input { [10][10][10]i32 } auto output
 -- structure distributed {
---   /SegMap 1
---   /SegRed 0
+--   /DoLoop 1
+--   /DoLoop/SegRed 1
+--   /DoLoop/SegMap 1
 -- }
 
 let main xsss =
