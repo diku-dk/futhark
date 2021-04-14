@@ -192,7 +192,8 @@ instance AliasesOf dec => AliasesOf (PatElemT dec) where
 lookupAliases :: AliasesOf (LetDec lore) => VName -> Scope lore -> Names
 lookupAliases v scope =
   case M.lookup v scope of
-    Just (LetName dec) -> oneName v <> aliasesOf dec
+    Just (LetName dec) ->
+      oneName v <> foldMap (`lookupAliases` scope) (namesToList (aliasesOf dec))
     _ -> oneName v
 
 -- | The class of operations that can produce aliasing and consumption
