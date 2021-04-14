@@ -110,7 +110,7 @@ intraGroupParallelise knest lam = runMaybeT $ do
           used_inps = filter inputIsUsed inps
 
       addStms w_stms
-      read_input_stms <- runBinder_ $ mapM readKernelInput used_inps
+      read_input_stms <- runBinder_ $ mapM readGroupKernelInput used_inps
       space <- mkSegSpace ispace
       return (intra_avail_par, space, read_input_stms)
 
@@ -134,6 +134,18 @@ intraGroupParallelise knest lam = runMaybeT $ do
   where
     first_nest = fst knest
     aux = loopNestingAux first_nest
+
+readGroupKernelInput ::
+  (DistLore (Lore m), MonadBinder m) =>
+  KernelInput ->
+  m ()
+readGroupKernelInput inp
+  | Array {} <- kernelInputType inp = do
+    v <- newVName $ baseString $ kernelInputName inp
+    readKernelInput inp {kernelInputName = v}
+    letBindNames [kernelInputName inp] $ BasicOp $ Copy v
+  | otherwise =
+    readKernelInput inp
 
 data IntraAcc = IntraAcc
   { accMinPar :: S.Set [SubExp],
