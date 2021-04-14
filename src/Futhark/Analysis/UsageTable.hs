@@ -164,7 +164,7 @@ usageInStm (Let pat lore e) =
     usageInExpLore =
       usages $ freeIn lore
 
-usageInExp :: (ASTLore lore, Aliased lore) => Exp lore -> UsageTable
+usageInExp :: Aliased lore => Exp lore -> UsageTable
 usageInExp (Apply _ args _ _) =
   mconcat
     [ mconcat $
@@ -173,14 +173,8 @@ usageInExp (Apply _ args _ _) =
       | (arg, d) <- args,
         d == Consume
     ]
-usageInExp (DoLoop _ merge _ _) =
-  mconcat
-    [ mconcat $
-        map consumedUsage $
-          namesToList $ subExpAliases se
-      | (v, se) <- merge,
-        unique $ paramDeclType v
-    ]
+usageInExp e@DoLoop {} =
+  foldMap consumedUsage $ namesToList $ consumedInExp e
 usageInExp (If _ tbranch fbranch _) =
   usageInBody tbranch <> usageInBody fbranch
 usageInExp (WithAcc inputs lam) =
