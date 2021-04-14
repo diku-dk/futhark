@@ -987,51 +987,7 @@ checkExp (DoLoop ctxmerge valmerge form loopbody) = do
       return ()
 
   binding (scopeOf form) $ do
-    case form of
-      ForLoop loopvar it boundexp loopvars -> do
-        iparam <- primFParam loopvar $ IntType it
-        let funparams = iparam : mergepat
-            paramts = map paramDeclType funparams
-
-        forM_ loopvars $ \(p, a) -> do
-          a_t <- lookupType a
-          observe a
-          case peelArray 1 a_t of
-            Just a_t_r -> do
-              checkLParamLore (paramName p) $ paramDec p
-              unless (a_t_r `subtypeOf` typeOf (paramDec p)) $
-                bad $
-                  TypeError $
-                    "Loop parameter " ++ pretty p
-                      ++ " not valid for element of "
-                      ++ pretty a
-                      ++ ", which has row type "
-                      ++ pretty a_t_r
-            _ ->
-              bad $
-                TypeError $
-                  "Cannot loop over " ++ pretty a
-                    ++ " of type "
-                    ++ pretty a_t
-
-        boundarg <- checkArg boundexp
-        checkFuncall Nothing paramts $ boundarg : mergeargs
-      WhileLoop cond -> do
-        case find ((== cond) . paramName . fst) merge of
-          Just (condparam, _) ->
-            unless (paramType condparam == Prim Bool) $
-              bad $
-                TypeError $
-                  "Conditional '" ++ pretty cond ++ "' of while-loop is not boolean, but "
-                    ++ pretty (paramType condparam)
-                    ++ "."
-          Nothing ->
-            bad $
-              TypeError $
-                "Conditional '" ++ pretty cond ++ "' of while-loop is not a merge variable."
-        let funparams = mergepat
-            paramts = map paramDeclType funparams
-        checkFuncall Nothing paramts mergeargs
+    form_consumable <- checkForm merge mergeargs form
 
     let rettype = map paramDeclType mergepat
         consumable =
@@ -1039,6 +995,7 @@ checkExp (DoLoop ctxmerge valmerge form loopbody) = do
             | param <- mergepat,
               unique $ paramDeclType param
           ]
+            ++ form_consumable
 
     context "Inside the loop body" $
       checkFun'
@@ -1064,6 +1021,57 @@ checkExp (DoLoop ctxmerge valmerge form loopbody) = do
                       scopeOf $ bodyStms loopbody
             map (`namesSubtract` bound_here)
               <$> mapM subExpAliasesM (bodyResult loopbody)
+  where
+    checkLoopVar (p, a) = do
+      a_t <- lookupType a
+      observe a
+      case peelArray 1 a_t of
+        Just a_t_r -> do
+          checkLParamLore (paramName p) $ paramDec p
+          unless (a_t_r `subtypeOf` typeOf (paramDec p)) $
+            bad $
+              TypeError $
+                "Loop parameter " ++ pretty p
+                  ++ " not valid for element of "
+                  ++ pretty a
+                  ++ ", which has row type "
+                  ++ pretty a_t_r
+          als <- lookupAliases a
+          pure (paramName p, als)
+        _ ->
+          bad $
+            TypeError $
+              "Cannot loop over " ++ pretty a
+                ++ " of type "
+                ++ pretty a_t
+    checkForm merge mergeargs (ForLoop loopvar it boundexp loopvars) = do
+      iparam <- primFParam loopvar $ IntType it
+      let mergepat = map fst merge
+          funparams = iparam : mergepat
+          paramts = map paramDeclType funparams
+
+      consumable <- mapM checkLoopVar loopvars
+      boundarg <- checkArg boundexp
+      checkFuncall Nothing paramts $ boundarg : mergeargs
+      pure consumable
+    checkForm merge mergeargs (WhileLoop cond) = do
+      case find ((== cond) . paramName . fst) merge of
+        Just (condparam, _) ->
+          unless (paramType condparam == Prim Bool) $
+            bad $
+              TypeError $
+                "Conditional '" ++ pretty cond ++ "' of while-loop is not boolean, but "
+                  ++ pretty (paramType condparam)
+                  ++ "."
+        Nothing ->
+          bad $
+            TypeError $
+              "Conditional '" ++ pretty cond ++ "' of while-loop is not a merge variable."
+      let mergepat = map fst merge
+          funparams = mergepat
+          paramts = map paramDeclType funparams
+      checkFuncall Nothing paramts mergeargs
+      pure mempty
 checkExp (WithAcc inputs lam) = do
   unless (length (lambdaParams lam) == 2 * num_accs) $
     bad . TypeError $
