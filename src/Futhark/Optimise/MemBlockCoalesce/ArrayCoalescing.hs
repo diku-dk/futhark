@@ -118,57 +118,53 @@ mkCoalsTabFun fun@(FunDef _ _ _ _ fpars body) =
                              , alloc = unique_mems
                              }
   in  fixPointCoalesce lutab fpars body topenv
+  where
+    fixPointCoalesce :: LUTabFun
+                     -> [FParam (Aliases ExpMem.SeqMem)]
+                     -> Body (Aliases ExpMem.SeqMem)
+                     -> TopDnEnv -> CoalsTab
+    fixPointCoalesce lutab fpar bdy topenv =
+      let buenv = mkCoalsTabBdy lutab bdy topenv emptyBotUpEnv
+          (succ_tab, actv_tab, inhb_tab) = (successCoals buenv, activeCoals buenv, inhibit buenv)
+          -- remove @fpar@ from @actv_tab@, as function's parameters cannot be merged
+          mems = map ((\(MemBlock _ _ m _) -> m) . snd) $ getArrMemAssocFParam fpar
+          (actv_tab', inhb_tab') = trace ("HAHAHAHAHAHAHAHAHAHA!!!! active: "++pretty (M.keys actv_tab)++" mems: "++pretty mems++" inhbtab: "++pretty inhb_tab) $
+            foldl markFailedCoal (actv_tab, inhb_tab) mems
 
-  where fixPointCoalesce :: LUTabFun
-                         -> [FParam (Aliases ExpMem.SeqMem)]
-                         -> Body (Aliases ExpMem.SeqMem)
-                         -> TopDnEnv -> CoalsTab
-        fixPointCoalesce lutab fpars0 body0 topenv0 =
-          let buenv' = mkCoalsTabBdy lutab body0 topenv0 emptyBotUpEnv
-              (succ_tab1, actv_tab11, inhb_tab11) = (successCoals buenv', activeCoals buenv', inhibit buenv')
-
-              -- remove fpars from actv_tab1, as function's parameters cannot be merged
-              mems = map ((\(MemBlock _ _ m _) -> m) . snd) $ getArrMemAssocFParam fpars0
-              (actv_tab1, inhb_tab1) = trace ("active: "++pretty (M.keys actv_tab11)++" mems: "++pretty mems) $
-                foldl markFailedCoal (actv_tab11, inhb_tab11) mems
-              -- ^ WHY NOT? they should be merged if they are unique!
-              --(actv_tab1, inhb_tab1) = trace ("ACTIVE TAB: "++pretty (M.keys actv_tab11)) $ (actv_tab11, inhb_tab11)
-
-              (succ_tab, failed_optdeps) = fixPointFilterDeps succ_tab1 M.empty
-              inhb_tab = M.unionWith (<>) failed_optdeps inhb_tab1
-              new_inhibited = M.unionWith (<>) inhb_tab (inhibited topenv0)
-          in  if not (M.null actv_tab1)
-              then trace ("COALESCING ROOT: BROKEN INV, active not empty: " ++ pretty (M.keys actv_tab1) ) M.empty
-              else if   trace ("COALESCING ROOT, new inhibitions : "++prettyInhibitTab inhb_tab) $
-                        M.null inhb_tab
-                   then succ_tab
-                   else fixPointCoalesce lutab fpars0 body0 (topenv0{ inhibited = new_inhibited })
-
-        fixPointFilterDeps :: CoalsTab -> InhibitTab -> (CoalsTab, InhibitTab)
-        fixPointFilterDeps coaltab0 inhbtab0=
-          let (coaltab,inhbtab) =
-                foldl(\(coal,inhb) mb ->
-                        case M.lookup mb coal of
-                          Nothing -> (coal,inhb)
-                          Just (CoalsEntry _ _ _ _ opts) ->
-                            let failed = M.filterWithKey
-                                  (\ r mr -> case M.lookup mr coal of
-                                               Nothing -> True
-                                               Just (CoalsEntry _ _ _ vtab _) ->
-                                                 case M.lookup r vtab of
-                                                   Nothing -> True
-                                                   Just _  -> False
-                                  ) opts
-                            in  if   M.null failed
-                                then (coal,inhb) -- all ok
-                                else -- optimistic dependencies failed for the current
-                                     -- memblock; extend inhibited mem-block mergings.
-                                     trace ("COALESCING: OPTDEPS FAILED for "++pretty mb++" set: "++pretty (M.keys failed)) $
-                                     markFailedCoal (coal,inhb) mb
-                     ) (coaltab0,inhbtab0) (M.keys coaltab0)
-          in  if length (M.keys coaltab0) == length (M.keys coaltab)
-              then (coaltab,inhbtab)
-              else fixPointFilterDeps coaltab inhbtab
+          (succ_tab', failed_optdeps) = fixPointFilterDeps succ_tab M.empty
+          inhb_tab'' = M.unionWith (<>) failed_optdeps inhb_tab'
+          --new_inhibited = M.unionWith (<>) inhb_tab'' (inhibited topenv)
+      in  if not (M.null actv_tab')
+          then  error ("COALESCING ROOT: BROKEN INV, active not empty: " ++ pretty (M.keys actv_tab') )
+          else  if trace ("COALESCING ROOT, new inhibitions : "++prettyInhibitTab inhb_tab'') $
+                    M.null (M.difference inhb_tab'' (inhibited topenv))
+                then succ_tab'
+                else fixPointCoalesce lutab fpar bdy (topenv { inhibited = inhb_tab'' }) --new_inhibited })
+    -- helper to helper
+    fixPointFilterDeps :: CoalsTab -> InhibitTab -> (CoalsTab, InhibitTab)
+    fixPointFilterDeps coaltab inhbtab=
+      let (coaltab', inhbtab') = foldl filterDeps (coaltab, inhbtab) (M.keys coaltab)
+      in  if length (M.keys coaltab) == length (M.keys coaltab')
+          then (coaltab', inhbtab')
+          else fixPointFilterDeps coaltab' inhbtab'
+    -- helper to helper to helper
+    filterDeps (coal, inhb) mb
+      | not (M.member mb coal) = (coal, inhb)
+    filterDeps (coal, inhb) mb
+      | Just (CoalsEntry _ _ _ _ opts) <- M.lookup mb coal =
+        let failed = M.filterWithKey (failedOptDep coal) opts
+        in  if   M.null failed
+            then (coal, inhb) -- all ok
+            else -- optimistic dependencies failed for the current
+                 -- memblock; extend inhibited mem-block mergings.
+                 trace ("COALESCING: OPTDEPS FAILED for "++pretty mb++" set: "++pretty (M.keys failed)) $
+                  markFailedCoal (coal, inhb) mb
+    filterDeps _ _ = error "In ArrayCoalescing.hs, fun filterDeps, impossible case reached!"
+    failedOptDep coal _ mr
+      | not (mr `M.member` coal) = True
+    failedOptDep coal r mr
+      | Just (CoalsEntry _ _ _ vtab _) <- M.lookup mr coal = not $ r `M.member` vtab
+    failedOptDep _ _ _ = error "In ArrayCoalescing.hs, fun failedOptDep, impossible case reached!"
 
 mkCoalsTabBdy :: LUTabFun -> Body (Aliases ExpMem.SeqMem)
               -> TopDnEnv -> BotUpEnv -> BotUpEnv
@@ -491,13 +487,13 @@ mkCoalsTabBnd lutab (Let pat _ (DoLoop arginis_ctx arginis lform body)) td_env b
 mkCoalsTabBnd lutab (Let pat@(Pattern [] [x']) _ e@(BasicOp (Update x _ elm))) td_env bu_env
   | [(_,MemBlock _ _ m_x _)] <- getArrMemAssoc pat =
   -- (a) filter by the 3rd safety for @elm@ and @x'@
-  let (actv,inhbt) =
+  let (actv, inhbt) =
         mkCoalsHelper1FilterActive pat (se2names elm) (scope td_env) (scals bu_env)
                                               (activeCoals bu_env) (inhibit bu_env)
   -- (b) if @x'@ is in active coalesced table, then add an entry for @x@ as well
-      (actv',inhbt') =
+      (actv', inhbt') =
         case M.lookup m_x actv of
-          Nothing -> (actv,inhbt)
+          Nothing -> (actv, inhbt)
           Just info@(CoalsEntry _ _ _ vtab _) ->
             case M.lookup (patElemName x') vtab of
               Nothing ->
@@ -583,8 +579,6 @@ mkCoalsTabBnd lutab (Let pat _ e) td_env bu_env =
                                   --   @let x[i] = b@
                                   --   by deferring versification of b
                                   --   until the creation of @a@ or recursively.
-                                  -- Note that it cannot be @b[i] = rotate a@, see assert abve.
-                                  -- in-place: has been treated in mkCoalsHelper1FilterActive
                                   let mem_info = Coalesced k mblk fv_subst
                                       info' = info { vartab = M.insert b mem_info vtab }
                                   in  -- update the b forward substitution info as before
@@ -878,7 +872,7 @@ transferCoalsToBody activeCoals_tab (m_b, b, r, m_r) =
                    let opts_x_new = M.insert r m_r opts_x
                        coal_etry  = CoalsEntry m_x ind_x als_x (M.singleton r mem_info) $
                                     M.insert b m_b opts_x
-                   in  M.insert m_b (etry{optdeps = opts_x_new}) $
+                   in  M.insert m_b (etry {optdeps = opts_x_new} ) $
                        M.insert m_r coal_etry activeCoals_tab
 
 

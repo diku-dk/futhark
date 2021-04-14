@@ -56,8 +56,8 @@ data CoalsEntry = CoalsEntry{ dstmem :: VName
                             --   is dependent of the success of the coalescing
                             --   of @x@ in @y[k]@, which fails in this case
                             --   because @y@ is used before the new array creation
-                            --   of @x = map f@. Hence @optdeps@ of the @m_b@ entry
-                            --   records @m_x@ and at the end of analysis it is removed
+                            --   of @x = map f@. Hence @optdeps@ of the @m_b@ CoalsEntry
+                            --   records @x -> m_x@ and at the end of analysis it is removed
                             --   from the successfully coalesced table if @m_x@ is
                             --   unsuccessful. Ok, this case cannot happen because
                             --   you need a copying.
@@ -203,9 +203,10 @@ createsNewArrIK _ = False
 --   is expected by the copying in y[4].
 createsAliasedArrOK :: Exp (Aliases ExpMem.SeqMem) -> Maybe VName --ExpMem.IxFun
 createsAliasedArrOK (BasicOp (Reshape _ arr_nm)) = Just arr_nm
-createsAliasedArrOK (BasicOp (SubExp  (Var arr_nm))) = Just arr_nm
-createsAliasedArrOK (BasicOp (Rearrange _ arr_nm)) = Just arr_nm
-createsAliasedArrOK (BasicOp (Rotate    _ arr_nm)) = Just arr_nm
+createsAliasedArrOK (BasicOp (SubExp (Var arr_nm))) = Just arr_nm
+createsAliasedArrOK (BasicOp (Rearrange _ arr_nm))  = Just arr_nm
+createsAliasedArrOK (BasicOp (Rotate    _ arr_nm))  = Just arr_nm
+createsAliasedArrOK (BasicOp (Opaque (Var arr_nm))) = Just arr_nm
 -- ToDo: very important is to treat Index, i.e., array slices!
 createsAliasedArrOK _ = Nothing
 
