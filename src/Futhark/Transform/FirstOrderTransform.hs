@@ -22,7 +22,6 @@ import Control.Monad.Except
 import Control.Monad.State
 import Data.List (find, zip4)
 import qualified Data.Map.Strict as M
-import Data.Maybe
 import qualified Futhark.IR as AST
 import Futhark.IR.SOACS
 import Futhark.MonadFreshNames
@@ -155,20 +154,28 @@ transformSOAC pat (Screma w arrs form@(ScremaForm scans reds map_lam)) = do
             zip mapout_params $ map Var map_arrs
           ]
   i <- newVName "i"
-  let loopform = ForLoop i Int64 w $ do
-        (p, arr, arr_t) <- zip3 (lambdaParams map_lam) arrs arr_ts
-        guard $ isNothing $ paramForAcc arr_t
-        pure (p, arr)
+  let loopform = ForLoop i Int64 w []
 
   loop_body <- runBodyBinder
     . localScope (scopeOfFParams (map fst merge) <> scopeOf loopform)
     $ do
       -- Bind the accumulator parameters.
-      forM_ (zip (lambdaParams map_lam) arr_ts) $ \(p, arr_t) ->
+      forM_ (zip3 (lambdaParams map_lam) arrs arr_ts) $ \(p, arr, arr_t) ->
         case paramForAcc arr_t of
           Just acc_out_p ->
             letBindNames [paramName p] $ BasicOp $ SubExp $ Var $ paramName acc_out_p
-          Nothing -> pure ()
+          -- The downstream passes are brittle in the presence of loop
+          -- parameters, so as a hack we don't use them.  Instead, we
+          -- have to copy array parameters so they can be consumed.
+          -- Hopefully later simplified away when unnecessary.
+          Nothing
+            | primType $ paramType p ->
+              letBindNames [paramName p] $ BasicOp $ Index arr [DimFix $ Var i]
+            | otherwise -> do
+              p' <-
+                letExp (baseString (paramName p)) $
+                  BasicOp $ Index arr $ fullSlice arr_t [DimFix $ Var i]
+              letBindNames [paramName p] $ BasicOp $ Copy p'
 
       -- Insert the statements of the lambda.  We have taken care to
       -- ensure that the parameters are bound at this point.
