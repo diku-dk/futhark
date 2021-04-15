@@ -1,5 +1,5 @@
 packages: futhark.cabal
-index-state: 2021-03-26T04:41:59Z
+index-state: 2021-04-15T09:02:06Z
 
 package futhark
   ghc-options: -Werror -j

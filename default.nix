@@ -20,6 +20,8 @@ let
     packageOverrides = pkgs: rec {
       haskellPackages = pkgs.haskellPackages.override {
         overrides = haskellPackagesNew: haskellPackagesOld: rec {
+          versions =
+            haskellPackagesNew.callPackage ./nix/versions.nix { };
 
           futhark =
             pkgs.haskell.lib.overrideCabal

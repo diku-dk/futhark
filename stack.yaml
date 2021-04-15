@@ -15,3 +15,6 @@ nix:
 # This makes it do so.
 ghc-options:
   $locals: -j -optP-Wno-nonportable-include-path
+
+extra-deps:
+- versions-5.0.0
