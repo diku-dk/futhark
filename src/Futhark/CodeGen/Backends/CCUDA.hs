@@ -15,7 +15,7 @@ import Control.Monad
 import Data.List (intercalate)
 import Data.Maybe (catMaybes)
 import Futhark.CodeGen.Backends.CCUDA.Boilerplate
-import Futhark.CodeGen.Backends.COpenCL.Boilerplate (commonOptions)
+import Futhark.CodeGen.Backends.COpenCL.Boilerplate (commonOptions, sizeLoggingCode)
 import qualified Futhark.CodeGen.Backends.GenericC as GC
 import Futhark.CodeGen.Backends.GenericC.Options
 import Futhark.CodeGen.ImpCode.OpenCL
@@ -251,6 +251,7 @@ callKernel (GetSize v key) =
 callKernel (CmpSizeLe v key x) = do
   x' <- GC.compileExp x
   GC.stm [C.cstm|$id:v = ctx->sizes.$id:key <= $exp:x';|]
+  sizeLoggingCode v key x'
 callKernel (GetSizeMax v size_class) =
   let field = "max_" ++ cudaSizeClass size_class
    in GC.stm [C.cstm|$id:v = ctx->cuda.$id:field;|]
