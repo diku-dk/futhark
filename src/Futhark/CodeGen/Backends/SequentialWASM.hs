@@ -459,7 +459,9 @@ runServer :: String
 runServer = 
   T.unpack 
   [text|
-   var context = new FutharkContext();
-   var server = new Server(context);
-   server.run();
+   Module.onRuntimeInitialized = () => {
+     var context = new FutharkContext();
+     var server = new Server(context);
+     server.run();
+   }
   |]
