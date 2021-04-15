@@ -414,6 +414,33 @@ jobs:
     - run: |
         futhark test -C --no-terminal --backend=opencl --exclude=no_opencl  --pass-compiler-option=--Werror futhark-benchmarks
 
+  test-adhoc:
+    runs-on: ubuntu-20.04
+    needs: [build-linux-nix]
+
+    steps:
+    - uses: actions/checkout@v2
+      with:
+        submodules: true
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y opencl-headers nvidia-cuda-dev nvidia-opencl-dev
+
+    - uses: actions/download-artifact@v2
+      with:
+        name: futhark-nightly-linux-x86_64.tar.xz
+
+    - name: Install from nightly tarball
+      run: |
+        tar xvf futhark-nightly-linux-x86_64.tar.xz
+        make -C futhark-nightly-linux-x86_64/ install PREFIX=$HOME/.local
+        echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+    - run: |
+        cd tests_adhoc && sh test.sh
+
   deploy-nightly:
     runs-on: ubuntu-20.04
     needs: [build-windows, build-linux-nix, build-mac-cabal, test-tools]
