@@ -165,7 +165,7 @@ compileBenchmark opts (program, spec) =
   where
     hasRuns (InputOutputs _ runs) = not $ null runs
 
-withProgramServer :: FilePath -> FilePath -> [String] -> (Server -> IO a) -> IO a
+withProgramServer :: FilePath -> FilePath -> [String] -> (Server -> IO [a]) -> IO [a]
 withProgramServer program runner extra_options f = do
   -- Explicitly prefixing the current directory is necessary for
   -- readProcessWithExitCode to find the binary when binOutputf has
@@ -179,10 +179,11 @@ withProgramServer program runner extra_options f = do
 
   liftIO $ withServer to_run to_run_args f `catch` onError
   where
-    onError :: SomeException -> IO a
+    onError :: SomeException -> IO [a]
     onError e = do
-      hPrint stderr e
-      exitFailure
+      putStrLn $ inBold $ inRed $ "\nFailed to run " ++ program
+      putStrLn $ inRed $ show e
+      pure []
 
 runBenchmark :: BenchOptions -> FutharkExe -> (FilePath, [InputOutputs]) -> IO [BenchResult]
 runBenchmark opts futhark (program, cases) = do
