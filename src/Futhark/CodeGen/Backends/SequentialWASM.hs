@@ -323,10 +323,11 @@ ptrFromWrap :: String
 ptrFromWrap =
   T.unpack [text|
     function ptrFromWrap(x) {
+      if (typeof x == 'number') {
+        return x;
+      }
       if (x.constructor.name == "ArrayWrapper") {
         return x.ptr;
-      } else {
-        return x;
       }
     }
   |]
@@ -407,8 +408,9 @@ toFutharkArray str =
   ofs = "dataHeap.byteOffset"
   i = dim str
   dims = map (\j -> "dim" ++ show j) [0..i-1]
+  cast = map (\d -> "Number(" ++ d ++ ")") dims
   args1 = [arr] ++ dims
-  args2 = [ctx, ofs] ++ dims
+  args2 = [ctx, ofs] ++ cast
   ftype = baseType str
 
 fromFutharkArrayShape :: String -> String
