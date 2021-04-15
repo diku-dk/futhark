@@ -73,8 +73,7 @@ class Server {
     for (var i = 0; i < args.length; i++) {
       var vname = args[i];
       this._check_var(vname);
-      const idx = _vars.getIndex(vname);
-      _vars.splice(idx, 1);
+      delete this._vars[vname];
     }
   }
 
@@ -118,7 +117,7 @@ class Server {
     var fname = this._get_arg(args, 0);
     for (var i = 1; i < args.length; i++) {
       var vname = args[i];
-      var value = _get_var(vname);
+      var value = this._get_var(vname);
       //TODO right this more elengantly
       //TODO make sure file is open in binary mode
       var fs = require("fs");
@@ -130,12 +129,13 @@ class Server {
   }
 
   fut_to_dim_typ(typ) {
+    var type = typ;
     var count = 0;
-    while (typ.substr(0, 2) == '[]') {
+    while (type.substr(0, 2) == '[]') {
       count = count + 1;
-      typ = typ.slice(2);
+      type = type.slice(2);
     }
-    return [count, ft];
+    return [count, type];
   }
   _cmd_restore(args) {
     if (args.length % 2 == 0) {
@@ -166,17 +166,22 @@ class Server {
         throw "Variable already exists: " + vname;
       }
       try {
-        value = read_value(typename, reader);
-        if (typof value == 'number') {
+        var value = read_value(typename, reader);
+        if (typeof value == 'number') {
           this._vars[vname] = value;
         } else {
           // We are working with an array and need to create to convert [shape, arr] to futhark ptr
-          [shape, arr] = value;
-          [dim, typ] = fut_to_dim_typ(typename);
-          arg_list = [arr, ...shape];
-          var fname = "to_futhark_" + typ + "_" ++ dim ++ "d_arr";
-          var ptr = this.ctx[fname].apply(null, arg_list);
+          var shape= value[0];
+          var arr = value[1];
+          var dimtyp = this.fut_to_dim_typ(typename);
+          var dim = dimtyp[0];
+          var typ = dimtyp[1];
+          var arg_list = [arr, ...shape];
+          var fnam = "to_futhark_" + typ + "_" + dim + "d_arr";
+          //arg_list = [arr, 4];
+          var ptr = this.ctx[fnam].apply(this.ctx, arg_list);
           this._vars[vname] = ptr;
+        }
       } catch (err) {
         var err_msg = "Failed to restore variable " + vname + ".\nPossibly malformed data in " + fname + ".\n";
         throw "Failed to restore variable " + err_msg;

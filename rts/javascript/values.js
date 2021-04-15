@@ -173,7 +173,7 @@ class Reader {
     // TODO figure out what to return
     // Pair with (shape, data)
     // A class?
-    return data;
+    return [shape, data];
   }
 
   read_bin_scalar(typ) {
