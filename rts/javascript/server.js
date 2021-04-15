@@ -129,6 +129,14 @@ class Server {
     }
   }
 
+  fut_to_dim_typ(typ) {
+    var count = 0;
+    while (typ.substr(0, 2) == '[]') {
+      count = count + 1;
+      typ = typ.slice(2);
+    }
+    return [count, ft];
+  }
   _cmd_restore(args) {
     if (args.length % 2 == 0) {
       throw "Invalid argument count";
@@ -154,13 +162,21 @@ class Server {
       var typename = as[1];
       as = as.slice(2);
       
-      // TODO finish the rest of this function
       if (vname in this._vars) {
         throw "Variable already exists: " + vname;
       }
       try {
-        this._vars[vname] = read_value(typename, reader);
-        console.log(this._vars);
+        value = read_value(typename, reader);
+        if (typof value == 'number') {
+          this._vars[vname] = value;
+        } else {
+          // We are working with an array and need to create to convert [shape, arr] to futhark ptr
+          [shape, arr] = value;
+          [dim, typ] = fut_to_dim_typ(typename);
+          arg_list = [arr, ...shape];
+          var fname = "to_futhark_" + typ + "_" ++ dim ++ "d_arr";
+          var ptr = this.ctx[fname].apply(null, arg_list);
+          this._vars[vname] = ptr;
       } catch (err) {
         var err_msg = "Failed to restore variable " + vname + ".\nPossibly malformed data in " + fname + ".\n";
         throw "Failed to restore variable " + err_msg;
