@@ -16,7 +16,7 @@ import Futhark.IR.KernelsMem
 import qualified Futhark.IR.Mem.IxFun as IxFun
 import Futhark.Transform.Rename
 import Futhark.Util (takeLast)
-import Futhark.Util.IntegralExp (IntegralExp (mod, div), divUp, quot)
+import Futhark.Util.IntegralExp (IntegralExp (mod), divUp, quot)
 import Prelude hiding (quot, mod, div)
 
 xParams, yParams :: SegBinOp KernelsMem -> [LParam KernelsMem]
@@ -302,12 +302,24 @@ compileSegScan pat lvl space scanOp kbody = do
       let warpSize = kernelWaveSize constants
       sWhen (bNot blockNewSgm .&&. kernelLocalThreadId constants .<. warpSize) $ do
         sWhen (kernelLocalThreadId constants .==. 0) $ do
-          everythingVolatile $
-            forM_ (zip aggregateArrays accs) $ \(aggregateArray, acc) ->
-              copyDWIMFix aggregateArray [tvExp dynamicId] (tvSize acc) []
-          sOp globalFence
-          everythingVolatile $
-            copyDWIMFix statusFlags [tvExp dynamicId] (intConst Int8 statusA) []
+          sIf (segment_size - sgmIdx .>=. unCount group_size * m)
+            ( do
+              everythingVolatile $
+                forM_ (zip aggregateArrays accs) $ \(aggregateArray, acc) ->
+                  copyDWIMFix aggregateArray [tvExp dynamicId] (tvSize acc) []
+              sOp globalFence
+              everythingVolatile $
+                copyDWIMFix statusFlags [tvExp dynamicId] (intConst Int8 statusA) []
+            )
+            (
+              do
+              everythingVolatile $
+                forM_ (zip incprefixArrays accs) $ \(incprefixArray, acc) ->
+                  copyDWIMFix incprefixArray [tvExp dynamicId] (tvSize acc) []
+              sOp globalFence
+              everythingVolatile $
+                copyDWIMFix statusFlags [tvExp dynamicId] (intConst Int8 statusP) []
+            )
           copyDWIMFix warpscan [0] (Var statusFlags) [tvExp dynamicId - 1]
         -- sWhen
         sOp localFence
