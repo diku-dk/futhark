@@ -385,6 +385,8 @@ test-suite unit
       Futhark.IR.PrimitiveTests
       Language.Futhark.CoreTests
       Language.Futhark.SyntaxTests
+      Language.Futhark.TypeCheckerTests
+      Language.Futhark.TypeChecker.TypesTests
       Futhark.Optimise.MemoryBlockMerging.GreedyColoringTests
       Paths_futhark
   hs-source-dirs:

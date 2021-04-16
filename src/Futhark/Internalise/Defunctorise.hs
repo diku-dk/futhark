@@ -252,7 +252,9 @@ transformNames x = do
           mapOnQualName = \v ->
             return $ fst $ lookupSubstInScope v scope,
           mapOnStructType = astMap (substituter scope),
-          mapOnPatType = astMap (substituter scope)
+          mapOnPatType = astMap (substituter scope),
+          mapOnStructRetType = astMap (substituter scope),
+          mapOnPatRetType = astMap (substituter scope)
         }
     onExp scope e =
       -- One expression is tricky, because it interacts with scoping rules.
@@ -274,25 +276,22 @@ transformExp :: Exp -> TransformM Exp
 transformExp = transformNames
 
 transformValBind :: ValBind -> TransformM ()
-transformValBind (ValBind entry name tdecl (Info (t, retext)) tparams params e doc attrs loc) = do
+transformValBind (ValBind entry name tdecl (Info (RetType dims t, retext)) tparams params e doc attrs loc) = do
   name' <- transformName name
   tdecl' <- traverse transformTypeExp tdecl
   t' <- transformStructType t
   e' <- transformExp e
   tparams' <- traverse transformNames tparams
   params' <- traverse transformNames params
-  emit $ ValDec $ ValBind entry name' tdecl' (Info (t', retext)) tparams' params' e' doc attrs loc
-
-transformTypeDecl :: TypeDecl -> TransformM TypeDecl
-transformTypeDecl (TypeDecl dt (Info et)) =
-  TypeDecl <$> transformTypeExp dt <*> (Info <$> transformStructType et)
+  emit $ ValDec $ ValBind entry name' tdecl' (Info (RetType dims t', retext)) tparams' params' e' doc attrs loc
 
 transformTypeBind :: TypeBind -> TransformM ()
-transformTypeBind (TypeBind name l tparams te doc loc) = do
+transformTypeBind (TypeBind name l tparams te (Info (RetType dims t)) doc loc) = do
   name' <- transformName name
   emit . TypeDec
     =<< ( TypeBind name' l <$> traverse transformNames tparams
-            <*> transformTypeDecl te
+            <*> transformTypeExp te
+            <*> (Info . RetType dims <$> transformStructType t)
             <*> pure doc
             <*> pure loc
         )
