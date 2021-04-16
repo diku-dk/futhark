@@ -113,7 +113,7 @@ compileSegScan pat lvl space scanOp kbody = do
       group_size = toInt64Exp <$> segGroupSize lvl
       n = product $ map toInt64Exp $ segSpaceDims space
       m :: Num a => a
-      m = 9
+      m = 3
       num_groups = Count (n `divUp` (unCount group_size * m))
       num_threads = unCount num_groups * unCount group_size
       (gtids, dims) = unzip $ unSegSpace space
@@ -396,20 +396,6 @@ compileSegScan pat lvl space scanOp kbody = do
                           unmakeStatusUsed flag2 flag2 used2
                           forM_ (zip agg2s exchanges) $ \(agg2, exchange) ->
                             copyDWIMFix agg2 [] (Var exchange) [sExt64 i]
-                          -- sIf (sameSegment $ tvExp readOffset+i)
-                          --   ( do
-                          --     copyDWIMFix (tvVar flag2) [] (Var warpscan) [sExt64 i]
-                          --     unmakeStatusUsed flag2 flag2 used2
-                          --     forM_ (zip agg2s exchanges) $ \(agg2, exchange) ->
-                          --       copyDWIMFix agg2 [] (Var exchange) [sExt64 i]
-                          --   )
-                          --   ( do
-                          --     flag2 <-- statusP
-                          --     used2 <-- (0 :: Imp.TExp Int8)
-                          --     --copyDWIMFix (tvVar flag2) [] (intConst Int32 statusP) []
-                          --     forM_ (zip agg2s scanOpNe) $ \(agg2, ne) ->
-                          --       copyDWIMFix agg2 [] ne []
-                          --   )
                           sIf
                             (bNot $ tvExp flag2 .==. statusA)
                             ( do
@@ -456,8 +442,8 @@ compileSegScan pat lvl space scanOp kbody = do
           scanOp'''' <- renameLambda scanOp'
           let xs = map paramName $ take (length tys) $ lambdaParams scanOp''''
               ys = map paramName $ drop (length tys) $ lambdaParams scanOp''''
-          sIf
-            (unCount group_size * m .<=. (tvExp blockOff + unCount group_size * m - 1) `mod` segment_size)
+          sWhen
+            (unCount group_size * m .<=. segment_size - sgmIdx)
             ( do
               forM_ (zip xs prefixes) $ \(x, prefix) -> dPrimV_ x $ tvExp prefix
               forM_ (zip ys accs) $ \(y, acc) -> dPrimV_ y $ tvExp acc
@@ -465,14 +451,9 @@ compileSegScan pat lvl space scanOp kbody = do
                 everythingVolatile $
                   forM_ (zip incprefixArrays $ bodyResult $ lambdaBody scanOp'''') $
                     \(incprefixArray, res) -> copyDWIMFix incprefixArray [tvExp dynamicId] res []
+              sOp globalFence
+              everythingVolatile $ copyDWIMFix statusFlags [tvExp dynamicId] (intConst Int8 statusP) []
             )
-            (
-              everythingVolatile $
-                forM_ (zip incprefixArrays accs) $
-                  \(incprefixArray, acc) -> copyDWIMFix incprefixArray [tvExp dynamicId] (Var $ tvVar acc) []
-            )
-          sOp globalFence
-          everythingVolatile $ copyDWIMFix statusFlags [tvExp dynamicId] (intConst Int8 statusP) []
           forM_ (zip exchanges prefixes) $ \(exchange, prefix) ->
             copyDWIMFix exchange [0] (tvSize prefix) []
           forM_ (zip3 accs tys scanOpNe) $ \(acc, ty, ne) ->
