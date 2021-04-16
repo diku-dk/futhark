@@ -89,21 +89,30 @@ compileSegStencil pat lvl space op kbody =
             mapPrintf "weighedReuseFactors" weighedReuseFactors
             pure $ foldl1 (.||.) $ map (5 .<=.) weighedReuseFactors
 
+      max_shared_bytes <- do
+        name <- dPrim "max_shared_bytes" int32
+        sOp $ Imp.GetSizeMax (tvVar name) Imp.SizeLocalMemory
+        pure $ tvExp name
       can_and_should_run_stripTile <- do
-        max_shared_bytes <- dPrim "max_shared_bytes" int32
-        sOp $ Imp.GetSizeMax (tvVar max_shared_bytes) Imp.SizeLocalMemory
         stripTileSizes <- mapM (dPrimVE "stripTileSizes") $ zipWith (*) group_sizes_exp strip_multiples_exp
         stripTileElems <- dPrimVE "stripTileElems" $ product $ zipWith (+) halo_widths_exp stripTileSizes
         stripTileBytes <- dPrimVE "stripTileBytes" $ stripTileElems * fromInteger memory_per_elem
-        canRunStripTile <- dPrimVE "canRunStripTile" $ (stripTileBytes .<=. tvExp max_shared_bytes)
+        canRunStripTile <- dPrimVE "canRunStripTile" $ (stripTileBytes .<=. max_shared_bytes)
         shouldRunStripTile <- dPrimVE "shouldRunStripTile" =<< computeReuses stripTileSizes halo_widths_exp
         dPrimVE "can_and_should_run_stripTile" $ canRunStripTile .&&. shouldRunStripTile
+      can_and_should_run_tile <- do
+        tileElems <- dPrimVE "tileElems" $ product $ zipWith (+) halo_widths_exp group_sizes_exp
+        tileBytes <- dPrimVE "tileBytes" $ tileElems * fromInteger memory_per_elem
+        canRunTile <- dPrimVE "canRunTile" $ (tileBytes .<=. max_shared_bytes)
+        shouldRunTile <- dPrimVE "shouldRunTile" =<< computeReuses group_sizes_exp halo_widths_exp
+        dPrimVE "can_and_should_run_tile" $ canRunTile .&&. shouldRunTile
 
       emit $ Imp.DebugPrint "\ncan_and_should_run_stripTile" $ Just $ untyped $ can_and_should_run_stripTile
-      sIf (can_and_should_run_stripTile)
+      sIf can_and_should_run_stripTile
         (compileBigTileStripMinedSingleDim pat lvl space op kbody group_sizes_exp strip_multiples)
-      --(compileBigTileSingleDim tileLoaderFlat pat lvl space op kbody)
-        (compileGlobalReadFlat pat lvl space op kbody)
+        (sIf can_and_should_run_tile
+          (compileBigTileStripMinedSingleDim pat lvl space op kbody group_sizes_exp $ map (const 1) group_sizes_exp)
+          (compileGlobalReadFlat pat lvl space op kbody))
 
 createSpans :: Num a => [a] -> [a]
 createSpans = scanr1 (*) . tail
