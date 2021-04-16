@@ -50,6 +50,7 @@ module Language.Futhark.TypeChecker.Monad
     Namespace (..),
     intrinsicsNameMap,
     topLevelNameMap,
+    mkTypeVarName,
   )
 where
 
@@ -162,7 +163,8 @@ data Context = Context
 
 data TypeState = TypeState
   { stateNameSource :: VNameSource,
-    stateWarnings :: Warnings
+    stateWarnings :: Warnings,
+    stateCounter :: Int
   }
 
 -- | The type checker runs in this monad.
@@ -203,10 +205,10 @@ runTypeM ::
   (Warnings, Either TypeError (a, VNameSource))
 runTypeM env imports fpath src (TypeM m) = do
   let ctx = Context env imports fpath True
-      s = TypeState src mempty
+      s = TypeState src mempty 0
   case runExcept $ runStateT (runReaderT m ctx) s of
     Left (ws, e) -> (ws, Left e)
-    Right (x, TypeState src' ws) -> (ws, Right (x, src'))
+    Right (x, TypeState src' ws _) -> (ws, Right (x, src'))
 
 -- | Retrieve the current 'Env'.
 askEnv :: TypeM Env
@@ -253,6 +255,12 @@ localEnv env = local $ \ctx ->
   let env' = env <> contextEnv ctx
    in ctx {contextEnv = env'}
 
+incCounter :: TypeM Int
+incCounter = do
+  s <- get
+  put s {stateCounter = stateCounter s + 1}
+  return $ stateCounter s
+
 -- | Monads that support type checking.  The reason we have this
 -- internal interface is because we use distinct monads for checking
 -- expressions and declarations.
@@ -261,13 +269,14 @@ class Monad m => MonadTypeChecker m where
 
   newName :: VName -> m VName
   newID :: Name -> m VName
+  newTypeName :: Name -> m VName
 
   bindNameMap :: NameMap -> m a -> m a
   bindVal :: VName -> BoundV -> m a -> m a
 
   checkQualName :: Namespace -> QualName Name -> SrcLoc -> m (QualName VName)
 
-  lookupType :: SrcLoc -> QualName Name -> m (QualName VName, [TypeParam], StructType, Liftedness)
+  lookupType :: SrcLoc -> QualName Name -> m (QualName VName, [TypeParam], StructRetType, Liftedness)
   lookupMod :: SrcLoc -> QualName Name -> m (QualName VName, Mod)
   lookupVar :: SrcLoc -> QualName Name -> m (QualName VName, PatType)
 
@@ -310,6 +319,10 @@ instance MonadTypeChecker TypeM where
 
   newID s = newName $ VName s 0
 
+  newTypeName name = do
+    i <- incCounter
+    newID $ mkTypeVarName name i
+
   bindNameMap m = local $ \ctx ->
     let env = contextEnv ctx
      in ctx {contextEnv = env {envNameMap = m <> envNameMap env}}
@@ -329,7 +342,8 @@ instance MonadTypeChecker TypeM where
     (scope, qn'@(QualName qs name)) <- checkQualNameWithEnv Type qn loc
     case M.lookup name $ envTypeTable scope of
       Nothing -> unknownType loc qn
-      Just (TypeAbbr l ps def) -> return (qn', ps, qualifyTypeVars outer_env mempty qs def, l)
+      Just (TypeAbbr l ps (RetType dims def)) ->
+        return (qn', ps, RetType dims $ qualifyTypeVars outer_env mempty qs def, l)
 
   lookupMod loc qn = do
     (scope, qn'@(QualName _ name)) <- checkQualNameWithEnv Term qn loc
@@ -346,10 +360,10 @@ instance MonadTypeChecker TypeM where
         | "_" `isPrefixOf` baseString name -> underscoreUse loc qn
         | otherwise ->
           case getType t of
-            Left {} ->
+            Nothing ->
               typeError loc mempty $
                 "Attempt to use function" <+> pprName name <+> "as value."
-            Right t' ->
+            Just t' ->
               return
                 ( qn',
                   fromStruct $
@@ -358,18 +372,10 @@ instance MonadTypeChecker TypeM where
 
   typeError loc notes s = throwError $ TypeError (srclocOf loc) notes s
 
--- | Extract from a type either a function type comprising a list of
--- parameter types and a return type, or a first-order type.
-getType ::
-  TypeBase dim as ->
-  Either
-    ([(PName, TypeBase dim as)], TypeBase dim as)
-    (TypeBase dim as)
-getType (Scalar (Arrow _ v t1 t2)) =
-  case getType t2 of
-    Left (ps, r) -> Left ((v, t1) : ps, r)
-    Right _ -> Left ([(v, t1)], t2)
-getType t = Right t
+-- | Extract from a type a first-order type.
+getType :: TypeBase dim as -> Maybe (TypeBase dim as)
+getType (Scalar Arrow {}) = Nothing
+getType t = Just t
 
 checkQualNameWithEnv :: Namespace -> QualName Name -> SrcLoc -> TypeM (Env, QualName VName)
 checkQualNameWithEnv space qn@(QualName quals name) loc = do
@@ -420,8 +426,8 @@ qualifyTypeVars outer_env orig_except ref_qs = onType (S.fromList orig_except)
       Record $ M.map (onType except) m
     onScalar except (Sum m) =
       Sum $ M.map (map $ onType except) m
-    onScalar except (Arrow as p t1 t2) =
-      Arrow as p (onType except' t1) (onType except' t2)
+    onScalar except (Arrow as p t1 (RetType dims t2)) =
+      Arrow as p (onType except' t1) $ RetType dims (onType except' t2)
       where
         except' = case p of
           Named p' -> S.insert p' except
@@ -451,7 +457,7 @@ qualifyTypeVars outer_env orig_except ref_qs = onType (S.fromList orig_except)
       name `M.member` envVtable env
         || isJust (find matches $ M.elems (envTypeTable env))
       where
-        matches (TypeAbbr _ _ (Scalar (TypeVar _ _ (TypeName x_qs name') _))) =
+        matches (TypeAbbr _ _ (RetType _ (Scalar (TypeVar _ _ (TypeName x_qs name') _)))) =
           null x_qs && name == name'
         matches _ = False
     reachable (q : qs') name env
@@ -512,3 +518,13 @@ topLevelNameMap = M.filterWithKey (\k _ -> available k) intrinsicsNameMap
               [minBound .. (maxBound :: BinOp)]
         fun_names = S.fromList $ map nameFromString ["shape"]
     available _ = False
+
+-- | Construct the name of a new type variable given a base
+-- description and a tag number (note that this is distinct from
+-- actually constructing a VName; the tag here is intended for human
+-- consumption but the machine does not care).
+mkTypeVarName :: Name -> Int -> Name
+mkTypeVarName desc i =
+  desc <> nameFromString (mapMaybe subscript (show i))
+  where
+    subscript = flip lookup $ zip "0123456789" "₀₁₂₃₄₅₆₇₈₉"
