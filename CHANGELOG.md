@@ -28,6 +28,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * `futhark literate`: Parse errors for expression directives now
     detected properly.
 
+  * `futhark autotune` now works with the `cuda` backend (#1312).
+
 ## [0.19.4]
 
 ### Fixed
