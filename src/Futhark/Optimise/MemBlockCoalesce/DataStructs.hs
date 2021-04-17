@@ -29,6 +29,8 @@ type FreeVarSubsts = M.Map VName (ExpMem.PrimExp VName)
 -- | Coalesced Access Entry
 data Coalesced = Coalesced CoalescedKind -- the kind of coalescing
                            ArrayMemBound -- destination mem_block info @f_m_x[i]@ (must be ArrayMem)
+                           (Maybe ExpMem.IxFun) -- the inverse ixfun of a coalesced array, such that
+                                                --  ixfuns can be correctly constructed for aliases; 
                            FreeVarSubsts -- substitutions for free vars in index function
 
 data CoalsEntry = CoalsEntry{ dstmem :: VName

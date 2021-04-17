@@ -39,7 +39,7 @@ import Data.List (sort, sortBy, unzip4, zip4, zip5, zipWith5, (\\))
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as M
-import Data.Maybe (isJust, mapMaybe)
+import Data.Maybe (isJust, mapMaybe, isNothing)
 --import Futhark.Analysis.PrimExp
 --  ( IntExp,
 --    PrimExp (..),
@@ -54,6 +54,7 @@ import Futhark.IR.Syntax
     DimIndex (..),
     ShapeChange,
     Slice,
+    VName,
     dimFix,
     unitSlice,
   )
@@ -1057,12 +1058,12 @@ closeEnough ixf1 ixf2 =
 --           @ixf_b' = ixf_alias o ixf_a'@
 --         Hence recursively:
 --           @ixf_a' = invIxFun ixf_b' ixf_alias@
-invIxFun ::
+invIxFunGen ::
   Eq v =>
   IxFun (PrimExp v) ->
   IxFun (PrimExp v) ->
   Maybe (IxFun (PrimExp v))
-invIxFun
+invIxFunGen
   (IxFun (lmad_y :| []) oshp_y ctg_y)
   (IxFun (lmad_b :| []) _oshp_b _ctg_b)
     -- Sanity condition: both lmads have the same rank:
@@ -1205,4 +1206,13 @@ invIxFun
       subtrctElmFromLst Nothing _ = Nothing
       subtrctElmFromLst (Just lst) x =
         if x `elem` lst then Just ((\\) lst [x]) else Nothing
-invIxFun _ _ = Nothing
+invIxFunGen _ _ = Nothing
+
+invIxFun ::
+  IxFun (TPrimExp Int64 VName) ->
+  IxFun (TPrimExp Int64 VName) ->
+  Maybe (IxFun (TPrimExp Int64 VName))
+invIxFun a b =
+  case invIxFunGen (fmap untyped a) (fmap untyped b) of
+    Nothing -> Nothing
+    Just ixf-> Just $ fmap TPrimExp ixf
