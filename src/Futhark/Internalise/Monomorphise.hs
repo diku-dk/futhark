@@ -148,7 +148,13 @@ data MonoSize
     -- track of sizes that are statically identical.
     MonoKnown Int
   | MonoAnon (Maybe VName)
-  deriving (Eq, Ord, Show)
+  deriving (Show)
+
+-- We treat all MonoAnon as identical.
+instance Eq MonoSize where
+  MonoKnown x == MonoKnown y = x == y
+  MonoAnon _ == MonoAnon _ = True
+  _ == _ = False
 
 instance Pretty MonoSize where
   ppr (MonoKnown i) = text "?" <> ppr i
