@@ -689,6 +689,7 @@ data ExpBase f vn
   | -- | A string literal is just a fancy syntax for an array
     -- of bytes.
     StringLit [Word8] SrcLoc
+  | Var (QualName vn) (f PatternType) SrcLoc
   | -- | A parenthesized expression.
     Parens (ExpBase f vn) SrcLoc
   | QualParens (QualName vn, SrcLoc) (ExpBase f vn) SrcLoc
@@ -705,7 +706,45 @@ data ExpBase f vn
       (Inclusiveness (ExpBase f vn))
       (f PatternType, f [VName])
       SrcLoc
-  | Var (QualName vn) (f PatternType) SrcLoc
+  | -- | An attribute applied to the following expression.
+    Attr AttrInfo (ExpBase f vn) SrcLoc
+  | Project Name (ExpBase f vn) (f PatternType) SrcLoc
+  | -- | Numeric negation (ugly special case; Haskell did it first).
+    Negate (ExpBase f vn) SrcLoc
+  | -- | Fail if the first expression does not return true,
+    -- and return the value of the second expression if it
+    -- does.
+    Assert (ExpBase f vn) (ExpBase f vn) (f String) SrcLoc
+  | -- | An n-ary value constructor.
+    Constr Name [ExpBase f vn] (f PatternType) SrcLoc
+  | Lambda
+      [PatternBase f vn]
+      (ExpBase f vn)
+      (Maybe (TypeExp vn))
+      (f (Aliasing, StructType))
+      SrcLoc
+  | -- | @+@; first two types are operands, third is result.
+    OpSection (QualName vn) (f PatternType) SrcLoc
+  | -- | @2+@; first type is operand, second is result.
+    OpSectionLeft
+      (QualName vn)
+      (f PatternType)
+      (ExpBase f vn)
+      (f (PName, StructType, Maybe VName), f (PName, StructType))
+      (f PatternType, f [VName])
+      SrcLoc
+  | -- | @+2@; first type is operand, second is result.
+    OpSectionRight
+      (QualName vn)
+      (f PatternType)
+      (ExpBase f vn)
+      (f (PName, StructType), f (PName, StructType, Maybe VName))
+      (f PatternType)
+      SrcLoc
+  | -- | Field projection as a section: @(.x.y.z)@.
+    ProjectSection [Name] (f PatternType) SrcLoc
+  | -- | Array indexing as a section: @(.[i,j])@.
+    IndexSection [DimIndexBase f vn] (f PatternType) SrcLoc
   | -- | Type ascription: @e : t@.
     Ascript (ExpBase f vn) (TypeDeclBase f vn) SrcLoc
   | -- | Size coercion: @e :> t@.
@@ -739,36 +778,6 @@ data ExpBase f vn
       (f (Diet, Maybe VName))
       (f PatternType, f [VName])
       SrcLoc
-  | -- | Numeric negation (ugly special case; Haskell did it first).
-    Negate (ExpBase f vn) SrcLoc
-  | Lambda
-      [PatternBase f vn]
-      (ExpBase f vn)
-      (Maybe (TypeExp vn))
-      (f (Aliasing, StructType))
-      SrcLoc
-  | -- | @+@; first two types are operands, third is result.
-    OpSection (QualName vn) (f PatternType) SrcLoc
-  | -- | @2+@; first type is operand, second is result.
-    OpSectionLeft
-      (QualName vn)
-      (f PatternType)
-      (ExpBase f vn)
-      (f (PName, StructType, Maybe VName), f (PName, StructType))
-      (f PatternType, f [VName])
-      SrcLoc
-  | -- | @+2@; first type is operand, second is result.
-    OpSectionRight
-      (QualName vn)
-      (f PatternType)
-      (ExpBase f vn)
-      (f (PName, StructType), f (PName, StructType, Maybe VName))
-      (f PatternType)
-      SrcLoc
-  | -- | Field projection as a section: @(.x.y.z)@.
-    ProjectSection [Name] (f PatternType) SrcLoc
-  | -- | Array indexing as a section: @(.[i,j])@.
-    IndexSection [DimIndexBase f vn] (f PatternType) SrcLoc
   | DoLoop
       [VName] -- Size parameters.
       (PatternBase f vn) -- Merge variable pattern.
@@ -785,9 +794,7 @@ data ExpBase f vn
       (f PatternType)
       (f [VName])
       SrcLoc
-  | Project Name (ExpBase f vn) (f PatternType) SrcLoc
-  | -- Primitive array operations
-    LetWith
+  | LetWith
       (IdentBase f vn)
       (IdentBase f vn)
       [DimIndexBase f vn]
@@ -798,20 +805,12 @@ data ExpBase f vn
   | Index (ExpBase f vn) [DimIndexBase f vn] (f PatternType, f [VName]) SrcLoc
   | Update (ExpBase f vn) [DimIndexBase f vn] (ExpBase f vn) SrcLoc
   | RecordUpdate (ExpBase f vn) [Name] (ExpBase f vn) (f PatternType) SrcLoc
-  | -- | Fail if the first expression does not return true,
-    -- and return the value of the second expression if it
-    -- does.
-    Assert (ExpBase f vn) (ExpBase f vn) (f String) SrcLoc
-  | -- | An n-ary value constructor.
-    Constr Name [ExpBase f vn] (f PatternType) SrcLoc
   | -- | A match expression.
     Match
       (ExpBase f vn)
       (NE.NonEmpty (CaseBase f vn))
       (f PatternType, f [VName])
       SrcLoc
-  | -- | An attribute applied to the following expression.
-    Attr AttrInfo (ExpBase f vn) SrcLoc
 
 deriving instance Showable f vn => Show (ExpBase f vn)
 
