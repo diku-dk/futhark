@@ -614,17 +614,7 @@ typeOf (ProjectSection _ (Info t) _) = t
 typeOf (IndexSection _ (Info t) _) = t
 typeOf (Constr _ _ (Info t) _) = t
 typeOf (Attr _ e _) = typeOf e
-typeOf (Range _ _ _ (Info res) _) = appResType res
-typeOf (BinOp _ _ _ _ (Info res) _) = appResType res
-typeOf (If _ _ _ (Info res) _) = appResType res
-typeOf (Match _ _ (Info res) _) = appResType res
-typeOf (Coerce _ _ (Info res) _) = appResType res
-typeOf (Apply _ _ _ (Info res) _) = appResType res
-typeOf (LetPat _ _ _ (Info res) _) = appResType res
-typeOf (LetFun _ _ _ (Info res) _) = appResType res
-typeOf (LetWith _ _ _ _ _ (Info res) _) = appResType res
-typeOf (DoLoop _ _ _ _ _ (Info res) _) = appResType res
-typeOf (Index _ _ (Info res) _) = appResType res
+typeOf (AppExp _ (Info res)) = appResType res
 
 -- | @foldFunType ts ret@ creates a function type ('Arrow') that takes
 -- @ts@ as parameters and returns @ret@.

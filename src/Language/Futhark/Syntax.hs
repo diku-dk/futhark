@@ -5,9 +5,11 @@
 {-# LANGUAGE Strict #-}
 
 -- | The Futhark source language AST definition.  Many types, such as
--- 'ExpBase'@, are parametrised by type and name representation.  See
--- the @https://futhark.readthedocs.org@ for a language reference, or
--- this module may be a little hard to understand.
+-- 'ExpBase'@, are parametrised by type and name representation.
+-- E.g. in a value of type @ExpBase f vn@, annotations are wrapped in
+-- the functor @f@, and all names are of type @vn@.  See the
+-- @https://futhark.readthedocs.org@ for a language reference, or this
+-- module may be a little hard to understand.
 module Language.Futhark.Syntax
   ( module Language.Futhark.Core,
 
@@ -51,6 +53,7 @@ module Language.Futhark.Syntax
     IdentBase (..),
     Inclusiveness (..),
     DimIndexBase (..),
+    AppExpBase (..),
     AppRes (..),
     ExpBase (..),
     FieldBase (..),
@@ -670,6 +673,88 @@ instance Foldable QualName where
 instance Traversable QualName where
   traverse f (QualName qs v) = QualName <$> traverse f qs <*> f v
 
+-- | An "application expression" is a semantic (not syntactic)
+-- grouping of expressions that have "funcall-like" semantics, mostly
+-- meaning that they can return existential sizes.  In our type
+-- theory, these are all thought to be bound to names (*Administrative
+-- Normal Form*), but as this is not practical in a real language, we
+-- instead use an annotation ('AppRes') that stores the information we
+-- need, so we can pretend that an application expression was really
+-- bound to a name.
+data AppExpBase f vn
+  = -- | The @Maybe VName@ is a possible existential size
+    -- that is instantiated by this argument..
+    Apply
+      (ExpBase f vn)
+      (ExpBase f vn)
+      (f (Diet, Maybe VName))
+      SrcLoc
+  | -- | Size coercion: @e :> t@.
+    Coerce (ExpBase f vn) (TypeDeclBase f vn) SrcLoc
+  | Range
+      (ExpBase f vn)
+      (Maybe (ExpBase f vn))
+      (Inclusiveness (ExpBase f vn))
+      SrcLoc
+  | LetPat
+      (PatternBase f vn)
+      (ExpBase f vn)
+      (ExpBase f vn)
+      SrcLoc
+  | LetFun
+      vn
+      ( [TypeParamBase vn],
+        [PatternBase f vn],
+        Maybe (TypeExp vn),
+        f StructType,
+        ExpBase f vn
+      )
+      (ExpBase f vn)
+      SrcLoc
+  | If (ExpBase f vn) (ExpBase f vn) (ExpBase f vn) SrcLoc
+  | DoLoop
+      [VName] -- Size parameters.
+      (PatternBase f vn) -- Merge variable pattern.
+      (ExpBase f vn) -- Initial values of merge variables.
+      (LoopFormBase f vn) -- Do or while loop.
+      (ExpBase f vn) -- Loop body.
+      SrcLoc
+  | BinOp
+      (QualName vn, SrcLoc)
+      (f PatternType)
+      (ExpBase f vn, f (StructType, Maybe VName))
+      (ExpBase f vn, f (StructType, Maybe VName))
+      SrcLoc
+  | LetWith
+      (IdentBase f vn)
+      (IdentBase f vn)
+      [DimIndexBase f vn]
+      (ExpBase f vn)
+      (ExpBase f vn)
+      SrcLoc
+  | Index (ExpBase f vn) [DimIndexBase f vn] SrcLoc
+  | -- | A match expression.
+    Match (ExpBase f vn) (NE.NonEmpty (CaseBase f vn)) SrcLoc
+
+deriving instance Showable f vn => Show (AppExpBase f vn)
+
+deriving instance Eq (AppExpBase NoInfo VName)
+
+deriving instance Ord (AppExpBase NoInfo VName)
+
+instance Located (AppExpBase f vn) where
+  locOf (Range _ _ _ pos) = locOf pos
+  locOf (BinOp _ _ _ _ loc) = locOf loc
+  locOf (If _ _ _ loc) = locOf loc
+  locOf (Coerce _ _ loc) = locOf loc
+  locOf (Apply _ _ _ loc) = locOf loc
+  locOf (LetPat _ _ _ loc) = locOf loc
+  locOf (LetFun _ _ _ loc) = locOf loc
+  locOf (LetWith _ _ _ _ _ loc) = locOf loc
+  locOf (Index _ _ loc) = locOf loc
+  locOf (DoLoop _ _ _ _ _ loc) = locOf loc
+  locOf (Match _ _ loc) = locOf loc
+
 -- | An annotation inserted by the type checker on constructs that are
 -- "function calls" (either literally or conceptually).  This
 -- annotation encodes the result type, as well as any existential
@@ -681,9 +766,6 @@ data AppRes = AppRes
   deriving (Eq, Ord, Show)
 
 -- | The Futhark expression language.
---
--- In a value of type @Exp f vn@, annotations are wrapped in the
--- functor @f@, and all names are of type @vn@.
 --
 -- This allows us to encode whether or not the expression has been
 -- type-checked in the Haskell type of the expression.  Specifically,
@@ -753,73 +835,7 @@ data ExpBase f vn
     IndexSection [DimIndexBase f vn] (f PatternType) SrcLoc
   | -- | Type ascription: @e : t@.
     Ascript (ExpBase f vn) (TypeDeclBase f vn) SrcLoc
-  | -- | Size coercion: @e :> t@.
-    Coerce (ExpBase f vn) (TypeDeclBase f vn) (f AppRes) SrcLoc
-  | Range
-      (ExpBase f vn)
-      (Maybe (ExpBase f vn))
-      (Inclusiveness (ExpBase f vn))
-      (f AppRes)
-      SrcLoc
-  | LetPat
-      (PatternBase f vn)
-      (ExpBase f vn)
-      (ExpBase f vn)
-      (f AppRes)
-      SrcLoc
-  | LetFun
-      vn
-      ( [TypeParamBase vn],
-        [PatternBase f vn],
-        Maybe (TypeExp vn),
-        f StructType,
-        ExpBase f vn
-      )
-      (ExpBase f vn)
-      (f AppRes)
-      SrcLoc
-  | If (ExpBase f vn) (ExpBase f vn) (ExpBase f vn) (f AppRes) SrcLoc
-  | -- | The @Maybe VName@ is a possible existential size
-    -- that is instantiated by this argument..
-    --
-    -- The @[VName]@ are the existential sizes that come
-    -- into being at this call site.
-    Apply
-      (ExpBase f vn)
-      (ExpBase f vn)
-      (f (Diet, Maybe VName))
-      (f AppRes)
-      SrcLoc
-  | DoLoop
-      [VName] -- Size parameters.
-      (PatternBase f vn) -- Merge variable pattern.
-      (ExpBase f vn) -- Initial values of merge variables.
-      (LoopFormBase f vn) -- Do or while loop.
-      (ExpBase f vn) -- Loop body.
-      (f AppRes)
-      SrcLoc
-  | BinOp
-      (QualName vn, SrcLoc)
-      (f PatternType)
-      (ExpBase f vn, f (StructType, Maybe VName))
-      (ExpBase f vn, f (StructType, Maybe VName))
-      (f AppRes)
-      SrcLoc
-  | LetWith
-      (IdentBase f vn)
-      (IdentBase f vn)
-      [DimIndexBase f vn]
-      (ExpBase f vn)
-      (ExpBase f vn)
-      (f AppRes)
-      SrcLoc
-  | Index (ExpBase f vn) [DimIndexBase f vn] (f AppRes) SrcLoc
-  | -- | A match expression.
-    Match
-      (ExpBase f vn)
-      (NE.NonEmpty (CaseBase f vn))
-      (f AppRes)
-      SrcLoc
+  | AppExp (AppExpBase f vn) (f AppRes)
 
 deriving instance Showable f vn => Show (ExpBase f vn)
 
@@ -838,18 +854,9 @@ instance Located (ExpBase f vn) where
   locOf (Project _ _ _ pos) = locOf pos
   locOf (ArrayLit _ _ pos) = locOf pos
   locOf (StringLit _ loc) = locOf loc
-  locOf (Range _ _ _ _ pos) = locOf pos
-  locOf (BinOp _ _ _ _ _ loc) = locOf loc
-  locOf (If _ _ _ _ pos) = locOf pos
   locOf (Var _ _ loc) = locOf loc
   locOf (Ascript _ _ loc) = locOf loc
-  locOf (Coerce _ _ _ loc) = locOf loc
   locOf (Negate _ pos) = locOf pos
-  locOf (Apply _ _ _ _ loc) = locOf loc
-  locOf (LetPat _ _ _ _ loc) = locOf loc
-  locOf (LetFun _ _ _ _ loc) = locOf loc
-  locOf (LetWith _ _ _ _ _ _ loc) = locOf loc
-  locOf (Index _ _ _ loc) = locOf loc
   locOf (Update _ _ _ pos) = locOf pos
   locOf (RecordUpdate _ _ _ _ pos) = locOf pos
   locOf (Lambda _ _ _ _ loc) = locOf loc
@@ -858,11 +865,10 @@ instance Located (ExpBase f vn) where
   locOf (OpSectionRight _ _ _ _ _ loc) = locOf loc
   locOf (ProjectSection _ _ loc) = locOf loc
   locOf (IndexSection _ _ loc) = locOf loc
-  locOf (DoLoop _ _ _ _ _ _ loc) = locOf loc
   locOf (Assert _ _ _ loc) = locOf loc
   locOf (Constr _ _ _ loc) = locOf loc
-  locOf (Match _ _ _ loc) = locOf loc
   locOf (Attr _ _ loc) = locOf loc
+  locOf (AppExp e _) = locOf e
 
 -- | An entry in a record literal.
 data FieldBase f vn

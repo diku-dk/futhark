@@ -1213,13 +1213,13 @@ unscopeType tloc unscoped t = do
 -- 'checkApplyExp' is like 'checkExp', but tries to find the "root
 -- function", for better error messages.
 checkApplyExp :: UncheckedExp -> TermTypeM (Exp, ApplyOp)
-checkApplyExp (Apply e1 e2 _ _ loc) = do
+checkApplyExp (AppExp (Apply e1 e2 _ loc) _) = do
   (e1', (fname, i)) <- checkApplyExp e1
   arg <- checkArg e2
   t <- expType e1'
   (t1, rt, argext, exts) <- checkApply loc (fname, i) t arg
   return
-    ( Apply e1' (argExp arg) (Info (diet t1, argext)) (Info $ AppRes rt exts) loc,
+    ( AppExp (Apply e1' (argExp arg) (Info (diet t1, argext)) loc) (Info $ AppRes rt exts),
       (fname, i + 1)
     )
 checkApplyExp e = do
@@ -1291,7 +1291,7 @@ checkExp (ArrayLit all_es _ loc) =
       et' <- normTypeFully et
       t <- arrayOfM loc et' (ShapeDecl [ConstDim $ length all_es]) Unique
       return $ ArrayLit (e' : es') (Info t) loc
-checkExp (Range start maybe_step end _ loc) = do
+checkExp (AppExp (Range start maybe_step end loc) _) = do
   start' <- require "use in range expression" anySignedType =<< checkExp start
   start_t <- toStruct <$> expTypeFully start'
   maybe_step' <- case maybe_step of
@@ -1332,11 +1332,11 @@ checkExp (Range start maybe_step end _ loc) = do
   t <- arrayOfM loc start_t (ShapeDecl [dim]) Unique
   let res = AppRes (t `setAliases` mempty) (maybeToList retext)
 
-  return $ Range start' maybe_step' end' (Info res) loc
+  return $ AppExp (Range start' maybe_step' end' loc) (Info res)
 checkExp (Ascript e decl loc) = do
   (decl', e') <- checkAscript loc decl e pure
   return $ Ascript e' decl' loc
-checkExp (Coerce e decl _ loc) = do
+checkExp (AppExp (Coerce e decl loc) _) = do
   -- We instantiate the declared types with all dimensions as nonrigid
   -- fresh type variables, which we then use to unify with the type of
   -- 'e'.  This lets 'e' have whatever sizes it wants, but the overall
@@ -1356,8 +1356,8 @@ checkExp (Coerce e decl _ loc) = do
 
   t' <- matchDims (const pure) t $ fromStruct decl_t_rigid
 
-  return $ Coerce e' decl' (Info $ AppRes t' ext) loc
-checkExp (BinOp (op, oploc) NoInfo (e1, _) (e2, _) NoInfo loc) = do
+  return $ AppExp (Coerce e' decl' loc) (Info $ AppRes t' ext)
+checkExp (AppExp (BinOp (op, oploc) NoInfo (e1, _) (e2, _) loc) NoInfo) = do
   (op', ftype) <- lookupVar oploc op
   e1_arg <- checkArg e1
   e2_arg <- checkArg e2
@@ -1368,19 +1368,21 @@ checkExp (BinOp (op, oploc) NoInfo (e1, _) (e2, _) NoInfo loc) = do
   (p2_t, rt', p2_ext, retext) <- checkApply loc (Just op', 1) rt e2_arg
 
   return $
-    BinOp
-      (op', oploc)
-      (Info ftype)
-      (argExp e1_arg, Info (toStruct p1_t, p1_ext))
-      (argExp e2_arg, Info (toStruct p2_t, p2_ext))
+    AppExp
+      ( BinOp
+          (op', oploc)
+          (Info ftype)
+          (argExp e1_arg, Info (toStruct p1_t, p1_ext))
+          (argExp e2_arg, Info (toStruct p2_t, p2_ext))
+          loc
+      )
       (Info (AppRes rt' retext))
-      loc
 checkExp (Project k e NoInfo loc) = do
   e' <- checkExp e
   t <- expType e'
   kt <- mustHaveField (mkUsage loc $ "projection of field " ++ quote (pretty k)) k t
   return $ Project k e' (Info kt) loc
-checkExp (If e1 e2 e3 _ loc) =
+checkExp (AppExp (If e1 e2 e3 loc) _) =
   sequentially checkCond $ \e1' _ -> do
     ((e2', e3'), dflow) <- tapOccurences $ checkExp e2 `alternative` checkExp e3
 
@@ -1392,7 +1394,7 @@ checkExp (If e1 e2 e3 _ loc) =
       "type returned from branch"
       t'
 
-    return $ If e1' e2' e3' (Info $ AppRes t' retext) loc
+    return $ AppExp (If e1' e2' e3' loc) (Info $ AppRes t' retext)
   where
     checkCond = do
       e1' <- checkExp e1
@@ -1448,8 +1450,8 @@ checkExp (Var qn NoInfo loc) = do
 checkExp (Negate arg loc) = do
   arg' <- require "numeric negation" anyNumberType =<< checkExp arg
   return $ Negate arg' loc
-checkExp e@Apply {} = fst <$> checkApplyExp e
-checkExp (LetPat pat e body _ loc) =
+checkExp e@(AppExp Apply {} _) = fst <$> checkApplyExp e
+checkExp (AppExp (LetPat pat e body loc) _) =
   sequentially (checkExp e) $ \e' e_occs -> do
     -- Not technically an ascription, but we want the pattern to have
     -- exactly the type of 'e'.
@@ -1466,8 +1468,8 @@ checkExp (LetPat pat e body _ loc) =
         (body_t, retext) <-
           unscopeType loc (patternMap pat') =<< expTypeFully body'
 
-        return $ LetPat pat' e' body' (Info $ AppRes body_t retext) loc
-checkExp (LetFun name (tparams, params, maybe_retdecl, NoInfo, e) body NoInfo loc) =
+        return $ AppExp (LetPat pat' e' body' loc) (Info $ AppRes body_t retext)
+checkExp (AppExp (LetFun name (tparams, params, maybe_retdecl, NoInfo, e) body loc) _) =
   sequentially (checkBinding (name, maybe_retdecl, tparams, params, e, loc)) $
     \(tparams', params', maybe_retdecl', rettype, _, e') closure -> do
       closure' <- lexicalClosure params' closure
@@ -1496,13 +1498,15 @@ checkExp (LetFun name (tparams, params, maybe_retdecl, NoInfo, e) body NoInfo lo
             =<< expTypeFully body'
 
         return $
-          LetFun
-            name'
-            (tparams', params', maybe_retdecl', Info rettype, e')
-            body'
+          AppExp
+            ( LetFun
+                name'
+                (tparams', params', maybe_retdecl', Info rettype, e')
+                body'
+                loc
+            )
             (Info $ AppRes body_t ext)
-            loc
-checkExp (LetWith dest src idxes ve body NoInfo loc) =
+checkExp (AppExp (LetWith dest src idxes ve body loc) _) =
   sequentially (checkIdent src) $ \src' _ -> do
     (t, _) <- newArrayType (srclocOf src) "src" $ length idxes
     unify (mkUsage loc "type of target array") t $ toStruct $ unInfo $ identType src'
@@ -1539,7 +1543,7 @@ checkExp (LetWith dest src idxes ve body NoInfo loc) =
         (body_t, ext) <-
           unscopeType loc (M.singleton (identName dest') dest')
             =<< expTypeFully body'
-        return $ LetWith dest' src' idxes' ve' body' (Info $ AppRes body_t ext) loc
+        return $ AppExp (LetWith dest' src' idxes' ve' body' loc) (Info $ AppRes body_t ext)
 checkExp (Update src idxes ve loc) = do
   (t, _) <- newArrayType (srclocOf src) "src" $ length idxes
   idxes' <- mapM checkDimIndex idxes
@@ -1583,7 +1587,7 @@ checkExp (RecordUpdate src fields ve NoInfo loc) = do
         "Full type of"
           </> indent 2 (ppr src)
           </> textwrap " is not known at this point.  Add a size annotation to the original record to disambiguate."
-checkExp (Index e idxes _ loc) = do
+checkExp (AppExp (Index e idxes loc) _) = do
   (t, _) <- newArrayType loc "e" $ length idxes
   e' <- unifies "being indexed at" t =<< checkExp e
   idxes' <- mapM checkDimIndex idxes
@@ -1596,7 +1600,7 @@ checkExp (Index e idxes _ loc) = do
   -- will certainly not be aliased.
   t'' <- noAliasesIfOverloaded t'
 
-  return $ Index e' idxes' (Info $ AppRes t'' retext) loc
+  return $ AppExp (Index e' idxes' loc) (Info $ AppRes t'' retext)
 checkExp (Assert e1 e2 NoInfo loc) = do
   e1' <- require "being asserted" [Bool] =<< checkExp e1
   e2' <- checkExp e2
@@ -1711,7 +1715,7 @@ checkExp (IndexSection idxes NoInfo loc) = do
   idxes' <- mapM checkDimIndex idxes
   (t', _) <- sliceShape Nothing idxes' t
   return $ IndexSection idxes' (Info $ fromStruct $ Scalar $ Arrow mempty Unnamed t t') loc
-checkExp (DoLoop _ mergepat mergeexp form loopbody NoInfo loc) =
+checkExp (AppExp (DoLoop _ mergepat mergeexp form loopbody loc) _) =
   sequentially (checkExp mergeexp) $ \mergeexp' _ -> do
     zeroOrderType
       (mkUsage (srclocOf mergeexp) "use as loop variable")
@@ -1926,7 +1930,10 @@ checkExp (DoLoop _ mergepat mergeexp form loopbody NoInfo loc) =
     -- look like we have ambiguous sizes lying around.
     modifyConstraints $ M.filterWithKey $ \k _ -> k `notElem` sparams
 
-    return $ DoLoop sparams mergepat'' mergeexp' form' loopbody' (Info $ AppRes loopt' retext) loc
+    return $
+      AppExp
+        (DoLoop sparams mergepat'' mergeexp' form' loopbody' loc)
+        (Info $ AppRes loopt' retext)
   where
     convergePattern pat body_cons body_t body_loc = do
       let consumed_merge = patternNames pat `S.intersection` body_cons
@@ -2039,7 +2046,7 @@ checkExp (Constr name es NoInfo loc) = do
   -- A sum value aliases *anything* that went into its construction.
   let als = foldMap aliases ets
   return $ Constr name es' (Info $ fromStruct t `addAliases` (<> als)) loc
-checkExp (Match e cs _ loc) =
+checkExp (AppExp (Match e cs loc) _) =
   sequentially (checkExp e) $ \e' _ -> do
     mt <- expTypeFully e'
     (cs', t, retext) <- checkCases mt cs
@@ -2047,7 +2054,7 @@ checkExp (Match e cs _ loc) =
       (mkUsage loc "being returned 'match'")
       "type returned from pattern match"
       t
-    return $ Match e' cs' (Info $ AppRes t retext) loc
+    return $ AppExp (Match e' cs' loc) (Info $ AppRes t retext)
 checkExp (Attr info e loc) =
   Attr info <$> checkExp e <*> pure loc
 
@@ -2110,7 +2117,7 @@ instance Pretty (Unmatched (PatternBase Info VName)) where
 checkUnmatched :: Exp -> TermTypeM ()
 checkUnmatched e = void $ checkUnmatched' e >> astMap tv e
   where
-    checkUnmatched' (Match _ cs _ loc) =
+    checkUnmatched' (AppExp (Match _ cs loc) _) =
       let ps = fmap (\(CasePat p _ _) -> p) cs
        in case unmatched $ NE.toList ps of
             [] -> return ()
@@ -2425,43 +2432,28 @@ causalityCheck binding_body = do
       onExp known (Lambda params _ _ _ _)
         | bad : _ <- mapMaybe (checkParamCausality known) params =
           bad
-      onExp known e@(Coerce what _ (Info res) _) = do
-        modify (S.fromList (appResExt res) <>)
-        void $ onExp known what
-        return e
-      onExp known e@(LetPat _ bindee_e body_e (Info res) _) = do
+      onExp known e@(AppExp (LetPat _ bindee_e body_e _) (Info res)) = do
         sequencePoint known bindee_e body_e $ appResExt res
         return e
-      onExp known e@(Apply f arg (Info (_, p)) (Info res) _) = do
+      onExp known e@(AppExp (Apply f arg (Info (_, p)) _) (Info res)) = do
         sequencePoint known arg f $ maybeToList p ++ appResExt res
         return e
       onExp
         known
-        e@(BinOp (f, floc) ft (x, Info (_, xp)) (y, Info (_, yp)) (Info res) _) = do
+        e@(AppExp (BinOp (f, floc) ft (x, Info (_, xp)) (y, Info (_, yp)) _) (Info res)) = do
           args_known <-
             lift $
               execStateT (sequencePoint known x y $ catMaybes [xp, yp]) mempty
           void $ onExp (args_known <> known) (Var f ft floc)
           modify ((args_known <> S.fromList (appResExt res)) <>)
           return e
+      onExp known e@(AppExp e' (Info res)) = do
+        recurse known e'
+        modify (<> S.fromList (appResExt res))
+        pure e
       onExp known e = do
         recurse known e
-
-        case e of
-          DoLoop _ _ _ _ _ (Info res) _ ->
-            modify (<> S.fromList (appResExt res))
-          If _ _ _ (Info res) _ ->
-            modify (<> S.fromList (appResExt res))
-          Index _ _ (Info res) _ ->
-            modify (<> S.fromList (appResExt res))
-          Match _ _ (Info res) _ ->
-            modify (<> S.fromList (appResExt res))
-          Range _ _ _ (Info res) _ ->
-            modify (<> S.fromList (appResExt res))
-          _ ->
-            return ()
-
-        return e
+        pure e
 
       recurse known = void . astMap mapper
         where
