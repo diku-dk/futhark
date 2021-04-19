@@ -617,10 +617,7 @@ typeOf (Attr _ e _) = typeOf e
 typeOf (Range _ _ _ (Info res) _) = appResType res
 typeOf (BinOp _ _ _ _ (Info res) _) = appResType res
 typeOf (If _ _ _ (Info res) _) = appResType res
-typeOf (Match _ cs (Info res) _) =
-  unscopeType (foldMap unscopeSet cs) (appResType res)
-  where
-    unscopeSet (CasePat p _ _) = S.map identName $ patternIdents p
+typeOf (Match _ _ (Info res) _) = appResType res
 typeOf (Coerce _ _ (Info res) _) = appResType res
 typeOf (Apply _ _ _ (Info res) _) = appResType res
 typeOf (LetPat _ _ _ (Info res) _) = appResType res
