@@ -17,7 +17,7 @@ import qualified Futhark.IR.Mem.IxFun as IxFun
 import Futhark.Transform.Rename
 import Futhark.Util (takeLast)
 import Futhark.Util.IntegralExp (IntegralExp (mod), divUp, quot)
-import Prelude hiding (quot, mod, div)
+import Prelude hiding (quot, mod)
 
 xParams, yParams :: SegBinOp KernelsMem -> [LParam KernelsMem]
 xParams scan =
@@ -112,8 +112,12 @@ compileSegScan pat lvl space scanOp kbody = do
   let Pattern _ all_pes = pat
       group_size = toInt64Exp <$> segGroupSize lvl
       n = product $ map toInt64Exp $ segSpaceDims space
+      sumT :: Integer
+      maxT :: Integer
+      sumT = foldl (\bytes typ -> bytes + primByteSize typ) 0 tys `div` 4
+      maxT = maximum (map primByteSize tys) `div` 4
       m :: Num a => a
-      m = 3
+      m = fromIntegral $ min ((64 `div` sumT) - 6) $ (max 12 sumT) `div` maxT
       num_groups = Count (n `divUp` (unCount group_size * m))
       num_threads = unCount num_groups * unCount group_size
       (gtids, dims) = unzip $ unSegSpace space
@@ -132,8 +136,8 @@ compileSegScan pat lvl space scanOp kbody = do
         flag <-- tvExp flagUsed .&. 3
 
   -- Allocate the shared memory for output component
-  numThreads <- dPrimV "numThreads" num_threads
   numGroups <- dPrimV "numGroups" $ unCount num_groups
+  numThreads <- dPrimV "numThreads" num_threads
 
   globalId <- sStaticArray "id_counter" (Space "device") int32 $ Imp.ArrayZeros 1
   statusFlags <- sAllocArray "status_flags" int8 (Shape [tvSize numGroups]) (Space "device")
