@@ -1,11 +1,15 @@
 {-# OPTIONS_GHC -fno-warn-orphans #-}
+{-# OPTIONS_GHC -fno-warn-unused-imports #-}
 
 module Futhark.IR.Mem.IxFunTests
   ( tests,
   )
 where
 
+import Data.Function ((&))
 import qualified Data.List as DL
+import Data.List.NonEmpty (NonEmpty (..))
+import Data.Maybe (fromJust)
 import qualified Futhark.IR.Mem.IxFun as IxFunLMAD
 import qualified Futhark.IR.Mem.IxFun.Alg as IxFunAlg
 import Futhark.IR.Mem.IxFunWrapper
@@ -110,7 +114,8 @@ tests =
         test_rebase1,
         test_rebase2,
         test_rebase3,
-        test_rebase4_5
+        test_rebase4_5,
+        test_invIxFun
       ]
 
 singleton :: TestTree -> [TestTree]
@@ -393,3 +398,89 @@ test_rebase4_5 =
           compareOps $
             rebase ixfn_base ixfn_orig
       ]
+
+test_invIxFun :: [TestTree]
+test_invIxFun =
+  [ testCase "Two identical iota index functions should give a neutral element as result" $
+      let i1 = IxFunLMAD.iota [n]
+       in case IxFunLMAD.invIxFun i1 i1 of
+            Just inv -> inv == i1 @? pretty i1 ++ ", " ++ pretty inv
+            Nothing -> fail "oh no",
+    testCase "Two identical rotated index functions should give a neutral element as result" $
+      let i1 = IxFunLMAD.rotate (IxFunLMAD.iota [n]) [4]
+       in case IxFunLMAD.invIxFun i1 i1 of
+            Just inv -> inv == i1 @? pretty i1 ++ ", " ++ pretty inv
+            Nothing -> fail "oh no",
+    testCase "Rotating the target index functions give a reverted rotation in the result " $
+      let i1 = IxFunLMAD.iota [n]
+          i_target = IxFunLMAD.rotate (IxFunLMAD.iota [n]) [4]
+          i_expected = IxFunLMAD.rotate (IxFunLMAD.iota [n]) [-4]
+       in case IxFunLMAD.invIxFun i_target i1 of
+            Just inv -> inv == i_expected @? pretty i_expected ++ ", " ++ pretty inv
+            Nothing -> fail "oh no",
+    testCase "Simple rotation" $
+      let i_0 = IxFunLMAD.iota [n]
+          i_b = IxFunLMAD.rebase (IxFunLMAD.rotate (i_0) [4]) i_0
+          i_y = IxFunLMAD.iota [n]
+       in case IxFunLMAD.invIxFun i_y i_b of
+            Just i_0' ->
+              let i_b' = IxFunLMAD.rebase i_b i_0'
+               in i_b' == i_y @? "Applying inverted index function does not yield i_y"
+            Nothing -> fail "Couldn't invert i_b on i_y",
+    testCase "Simple negative rotation" $
+      let i_0 = IxFunLMAD.iota [n]
+          i_b = IxFunLMAD.rebase (IxFunLMAD.rotate (i_0) [-1]) i_0
+          i_y = IxFunLMAD.iota [n]
+       in case IxFunLMAD.invIxFun i_y i_b of
+            Just i_0' ->
+              let i_b' = IxFunLMAD.rebase i_b i_0'
+               in i_b' == i_y @? "Applying inverted index function does not yield i_y"
+            Nothing -> fail "Couldn't invert i_b on i_y",
+    testCase "Rotation on 2-dimensional index function" $
+      let i_0 = IxFunLMAD.iota [n, n * 2]
+          i_b = IxFunLMAD.rebase (IxFunLMAD.rotate (i_0) [-1, 5]) i_0
+          i_y = IxFunLMAD.iota [n, n * 2]
+       in case IxFunLMAD.invIxFun i_y i_b of
+            Just i_0' ->
+              let i_b' = IxFunLMAD.rebase i_b i_0'
+               in i_b' == i_y @? "Applying inverted index function does not yield i_y"
+            Nothing -> fail "Couldn't invert i_b on i_y",
+    testCase "Cannot invert lossy strides" $
+      let i_0 = IxFunLMAD.iota [n]
+          i_b = IxFunLMAD.slice i_0 [DimSlice 0 19 2]
+          i_y = IxFunLMAD.iota [n]
+       in case IxFunLMAD.invIxFun i_y i_b of
+            Just i_0' -> fail $ "Inverting strides should not be possible:\n" ++ pretty i_0'
+            Nothing -> True @? "impossible",
+    testCase "Cannot invert lossy slices" $
+      let i_0 = IxFunLMAD.iota [n]
+          i_b = IxFunLMAD.slice i_0 [DimSlice 5 14 1]
+          i_y = IxFunLMAD.iota [14]
+       in case IxFunLMAD.invIxFun i_y i_b of
+            Just i_0' -> fail $ "Inverting lossy slices should not be possible:\n" ++ pretty i_0'
+            Nothing -> True @? "impossible",
+    testCase "Inverting permutations" $
+      let i_0 = IxFunLMAD.iota [n]
+          i_b = IxFunLMAD.permute i_0 [0, 1]
+          i_y = IxFunLMAD.iota [n]
+       in case IxFunLMAD.invIxFun i_y i_b of
+            Just i_0' ->
+              let i_b' = IxFunLMAD.rebase i_b i_0'
+               in i_b' == i_y @? "Applying inverted index function does not yield i_y"
+            Nothing -> fail "Couldn't invert i_b on i_y",
+    testCase
+      "Cannot invert multi-lmad index functions"
+      $ let i_b =
+              IxFunLMAD.IxFun
+                ( IxFunLMAD.LMAD 0 [IxFunLMAD.LMADDim 1 0 n 0 IxFunLMAD.Inc]
+                    :| [IxFunLMAD.LMAD 0 [IxFunLMAD.LMADDim 1 0 n 0 IxFunLMAD.Inc]]
+                )
+                [n]
+                True
+            i_y = IxFunLMAD.iota [n]
+         in case IxFunLMAD.invIxFun i_y i_b of
+              Just i_0' -> fail $ "Inverting multi-lmad index functions should not be possible:\n" ++ pretty i_0'
+              Nothing -> True @? "impossible"
+  ]
+    & testGroup "invIxFun"
+    & singleton

@@ -127,6 +127,7 @@ getArrMemAssoc pat =
                             Just (patElemName patel, MemBlock tp shp mem_nm indfun)
                         ExpMem.MemMem _  -> Nothing
                         ExpMem.MemPrim _ -> Nothing
+                        ExpMem.MemAcc _ _ _ _ -> Nothing
            ) $ patternValueElements pat
 
 getArrMemAssocFParam :: [FParam (Aliases ExpMem.SeqMem)] -> [(VName,ArrayMemBound)]
@@ -136,6 +137,7 @@ getArrMemAssocFParam =
                             Just (paramName param, MemBlock tp shp mem_nm indfun)
                         ExpMem.MemMem _  -> Nothing
                         ExpMem.MemPrim _ -> Nothing
+                        ExpMem.MemAcc _ _ _ _ -> Nothing
            )
 
 

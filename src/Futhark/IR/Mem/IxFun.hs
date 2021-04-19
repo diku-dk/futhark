@@ -35,11 +35,11 @@ import Control.Monad.Identity
 import Control.Monad.State
 import Control.Monad.Writer
 import Data.Function (on)
-import Data.List (sort, sortBy, unzip4, zip4, zip5, zipWith5, (\\))
+import Data.List (sort, sortBy, unzip4, zip4, zip5, zipWith5)
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as M
-import Data.Maybe (isJust, mapMaybe)
+import Data.Maybe (isJust)
 --import Futhark.Analysis.PrimExp
 --  ( IntExp,
 --    PrimExp (..),
@@ -1037,10 +1037,10 @@ closeEnough ixf1 ixf2 =
 --         Hence recursively:
 --           @ixf_a' = invIxFun ixf_b' ixf_alias@
 invIxFun ::
-  Eq v =>
-  IxFun (PrimExp v) ->
-  IxFun (PrimExp v) ->
-  Maybe (IxFun (PrimExp v))
+  (Eq num, IntegralExp num) =>
+  IxFun num ->
+  IxFun num ->
+  Maybe (IxFun num)
 invIxFun
   (IxFun (lmad_y :| []) oshp_y ctg_y)
   (IxFun (lmad_b :| []) _oshp_b _ctg_b)
@@ -1085,10 +1085,10 @@ invIxFun
                   lmad_0 = LMAD offs_0 ldms_0
                in Just $ IxFun (lmad_0 :| []) oshp_y ctg_y -- ToDo: can this be relaxed ???
     where
-      zeroI64PE = ValueExp (IntValue (Int64Value 0))
-      oneI64PE = ValueExp (IntValue (Int64Value 1))
-      mulI64 = Mul Int64 OverflowUndef
-      subI64 = Sub Int64 OverflowUndef
+      zeroI64PE = 0
+      oneI64PE = 0
+      -- mulI64 = Mul Int64 OverflowUndef
+      -- subI64 = Sub Int64 OverflowUndef
 
       invMon :: Monotonicity -> Monotonicity -> Monotonicity
       invMon Inc Inc = Inc
@@ -1097,91 +1097,92 @@ invIxFun
       invMon Dec Inc = Dec
       invMon _ _ = Unknown
       eqSpanAndStride (LMADDim s1 _ n1 _ _) (s2, n2) = s1 == s2 && n1 == n2
-      subtractHelp :: Eq v => PrimExp v -> PrimExp v -> PrimExp v
-      subtractHelp r_y r_b
-        | r_y == r_b = zeroI64PE
-        | ValueExp (IntValue (Int64Value rv_y)) <- r_y,
-          ValueExp (IntValue (Int64Value rv_b)) <- r_b =
-          ValueExp (IntValue (Int64Value (rv_y - rv_b)))
-        | otherwise = BinOpExp subI64 r_y r_b
+      -- subtractHelp :: IntegralExp v => v -> v -> v
+      subtractHelp r_y r_b = r_y - r_b
+        -- | r_y == r_b = zeroI64PE
+        -- | ValueExp (IntValue (Int64Value rv_y)) <- r_y,
+        --   ValueExp (IntValue (Int64Value rv_b)) <- r_b =
+        --   ValueExp (IntValue (Int64Value (rv_y - rv_b)))
+        -- | otherwise = BinOpExp subI64 r_y r_b
       invCaseRotateEqual (ss_b, rs_b)
         | rs_y <- map ldRotate (lmadDims lmad_y),
           and (zipWith (==) rs_y rs_b),
           --  Soundness: @s_b@ divides @s_y@ for all dimensions
           tmp_zip <- zip (map ldStride (lmadDims lmad_y)) ss_b,
-          res_strd <- mapMaybe divStrides tmp_zip,
+          res_strd <- fmap divStrides tmp_zip,
           length res_strd == length ss_b =
           Just res_strd
         | otherwise = Nothing
-      --
-      -- normalizing a PrimExp product:
-      -- ToDo: all wrong: should not use sets as it eliminates duplicates!
-      normalize :: Eq v => PrimExp v -> (Maybe Int64, Maybe [v], Maybe (PrimExp v))
-      normalize z
-        | ValueExp (IntValue (Int64Value v)) <- z = (Just v, Nothing, Nothing)
-        | LeafExp x (IntType Int64) <- z = (Nothing, Just [x], Nothing)
-        | BinOpExp (Mul Int64 OverflowUndef) (ValueExp (IntValue (Int64Value v_y))) e <- z =
-          let (v_e, xs_e, e_e) = normalize e
-           in (Just $ mulMbVal v_y v_e, xs_e, e_e)
-        | BinOpExp (Mul Int64 OverflowUndef) e (ValueExp (IntValue (Int64Value v_y))) <- z =
-          let (v_e, xs_e, e_e) = normalize e
-           in (Just $ mulMbVal v_y v_e, xs_e, e_e)
-        | BinOpExp (Mul Int64 OverflowUndef) (LeafExp x (IntType Int64)) e <- z =
-          let (v_e, xs_e, e_e) = normalize e
-           in (v_e, Just $ catMbNms [x] xs_e, e_e)
-        | BinOpExp (Mul Int64 OverflowUndef) e (LeafExp x (IntType Int64)) <- z =
-          let (v_e, xs_e, e_e) = normalize e
-           in (v_e, Just $ catMbNms [x] xs_e, e_e)
-        | otherwise = (Nothing, Nothing, Just z)
-      mulMbVal v_1 Nothing = v_1
-      mulMbVal v_1 (Just v_2) = v_1 * v_2
-      catMbNms nms Nothing = nms
-      catMbNms nms1 (Just nms2) = nms1 ++ nms2
-      mkMulPE :: Eq v => Maybe Int64 -> Maybe [v] -> Maybe (PrimExp v) -> PrimExp v
-      mkMulPE Nothing Nothing Nothing = error "In IxFun, mkMulPE, impossible case reached!"
-      mkMulPE Nothing Nothing (Just e) = e
-      mkMulPE (Just v) Nothing Nothing =
-        ValueExp (IntValue (Int64Value v))
-      mkMulPE Nothing (Just xs) Nothing
-        | [] <- xs = error "In IxFun.hs, fun mkMulPE, impossible case reached!"
-        | [x] <- xs = LeafExp x (IntType Int64)
-        | a : as <- xs =
-          BinOpExp mulI64 (LeafExp a (IntType Int64)) $ mkMulPE Nothing (Just as) Nothing
-      mkMulPE (Just v) (Just xs) Nothing =
-        BinOpExp mulI64 (mkMulPE (Just v) Nothing Nothing) $ mkMulPE Nothing (Just xs) Nothing
-      mkMulPE (Just v) Nothing (Just e) =
-        BinOpExp mulI64 (mkMulPE (Just v) Nothing Nothing) e
-      mkMulPE Nothing (Just xs) (Just e) =
-        BinOpExp mulI64 (mkMulPE Nothing (Just xs) Nothing) e
-      mkMulPE (Just v) (Just xs) (Just e) =
-        BinOpExp mulI64 (mkMulPE (Just v) (Just xs) Nothing) e
-      divStrides (s_y, s_b)
-        | s_y /= zeroI64PE && s_b == oneI64PE = Just s_y
-        | s_y == s_b = Just oneI64PE
-        | otherwise = handleSimpleDivs (normalize s_y) (normalize s_b)
-      handleSimpleDivs (Just v_y, xs_y, e_y) (Just v_b, Nothing, e_b) =
-        if (isNothing e_b || e_y == e_b) && v_y `Prelude.rem` v_b == 0
-          then
-            let e = if isNothing e_b then e_y else Nothing
-             in Just $ mkMulPE (Just (v_y `Prelude.div` v_b)) xs_y e
-          else Nothing
-      handleSimpleDivs (v_y, Just xs_y, e_y) (Nothing, Just xs_b, e_b)
-        | Just dff <- foldl subtrctElmFromLst (Just xs_y) xs_b =
-          if isNothing e_b || e_y == e_b
-            then
-              let e = if isNothing e_b then e_y else Nothing
-               in Just $ mkMulPE v_y (Just dff) e
-            else Nothing
-      handleSimpleDivs (Just v_y, Just xs_y, e_y) (Just v_b, Just xs_b, e_b)
-        | Just dff <- foldl subtrctElmFromLst (Just xs_y) xs_b =
-          if (isNothing e_b || e_y == e_b) && v_y `Prelude.rem` v_b == 0
-            then
-              let e = if isNothing e_b then e_y else Nothing
-               in Just $ mkMulPE (Just $ v_y `Prelude.div` v_b) (Just dff) e
-            else Nothing
-      handleSimpleDivs _ _ = Nothing
-      subtrctElmFromLst :: Eq v => Maybe [v] -> v -> Maybe [v]
-      subtrctElmFromLst Nothing _ = Nothing
-      subtrctElmFromLst (Just lst) x =
-        if x `elem` lst then Just ((\\) lst [x]) else Nothing
+      -- --
+      -- -- normalizing a PrimExp product:
+      -- -- ToDo: all wrong: should not use sets as it eliminates duplicates!
+      -- normalize :: Eq v => PrimExp v -> (Maybe Int64, Maybe [v], Maybe (PrimExp v))
+      -- normalize z
+      --   | ValueExp (IntValue (Int64Value v)) <- z = (Just v, Nothing, Nothing)
+      --   | LeafExp x (IntType Int64) <- z = (Nothing, Just [x], Nothing)
+      --   | BinOpExp (Mul Int64 OverflowUndef) (ValueExp (IntValue (Int64Value v_y))) e <- z =
+      --     let (v_e, xs_e, e_e) = normalize e
+      --      in (Just $ mulMbVal v_y v_e, xs_e, e_e)
+      --   | BinOpExp (Mul Int64 OverflowUndef) e (ValueExp (IntValue (Int64Value v_y))) <- z =
+      --     let (v_e, xs_e, e_e) = normalize e
+      --      in (Just $ mulMbVal v_y v_e, xs_e, e_e)
+      --   | BinOpExp (Mul Int64 OverflowUndef) (LeafExp x (IntType Int64)) e <- z =
+      --     let (v_e, xs_e, e_e) = normalize e
+      --      in (v_e, Just $ catMbNms [x] xs_e, e_e)
+      --   | BinOpExp (Mul Int64 OverflowUndef) e (LeafExp x (IntType Int64)) <- z =
+      --     let (v_e, xs_e, e_e) = normalize e
+      --      in (v_e, Just $ catMbNms [x] xs_e, e_e)
+      --   | otherwise = (Nothing, Nothing, Just z)
+      -- mulMbVal v_1 Nothing = v_1
+      -- mulMbVal v_1 (Just v_2) = v_1 * v_2
+      -- catMbNms nms Nothing = nms
+      -- catMbNms nms1 (Just nms2) = nms1 ++ nms2
+      -- mkMulPE :: Eq v => Maybe Int64 -> Maybe [v] -> Maybe (PrimExp v) -> PrimExp v
+      -- mkMulPE Nothing Nothing Nothing = error "In IxFun, mkMulPE, impossible case reached!"
+      -- mkMulPE Nothing Nothing (Just e) = e
+      -- mkMulPE (Just v) Nothing Nothing =
+      --   ValueExp (IntValue (Int64Value v))
+      -- mkMulPE Nothing (Just xs) Nothing
+      --   | [] <- xs = error "In IxFun.hs, fun mkMulPE, impossible case reached!"
+      --   | [x] <- xs = LeafExp x (IntType Int64)
+      --   | a : as <- xs =
+      --       product
+      --     BinOpExp mulI64 (LeafExp a (IntType Int64)) $ mkMulPE Nothing (Just as) Nothing
+      -- mkMulPE (Just v) (Just xs) Nothing =
+      --   BinOpExp mulI64 (mkMulPE (Just v) Nothing Nothing) $ mkMulPE Nothing (Just xs) Nothing
+      -- mkMulPE (Just v) Nothing (Just e) =
+      --   BinOpExp mulI64 (mkMulPE (Just v) Nothing Nothing) e
+      -- mkMulPE Nothing (Just xs) (Just e) =
+      --   BinOpExp mulI64 (mkMulPE Nothing (Just xs) Nothing) e
+      -- mkMulPE (Just v) (Just xs) (Just e) =
+      --   BinOpExp mulI64 (mkMulPE (Just v) (Just xs) Nothing) e
+      divStrides (s_y, s_b) = s_y `Futhark.Util.IntegralExp.div` s_b
+      --   | s_y /= zeroI64PE && s_b == oneI64PE = Just s_y
+      --   | s_y == s_b = Just oneI64PE
+      --   | otherwise = handleSimpleDivs (normalize s_y) (normalize s_b)
+      -- handleSimpleDivs (Just v_y, xs_y, e_y) (Just v_b, Nothing, e_b) =
+      --   if (isNothing e_b || e_y == e_b) && v_y `Prelude.rem` v_b == 0
+      --     then
+      --       let e = if isNothing e_b then e_y else Nothing
+      --        in Just $ mkMulPE (Just (v_y `Prelude.div` v_b)) xs_y e
+      --     else Nothing
+      -- handleSimpleDivs (v_y, Just xs_y, e_y) (Nothing, Just xs_b, e_b)
+      --   | Just dff <- foldl subtrctElmFromLst (Just xs_y) xs_b =
+      --     if isNothing e_b || e_y == e_b
+      --       then
+      --         let e = if isNothing e_b then e_y else Nothing
+      --          in Just $ mkMulPE v_y (Just dff) e
+      --       else Nothing
+      -- handleSimpleDivs (Just v_y, Just xs_y, e_y) (Just v_b, Just xs_b, e_b)
+      --   | Just dff <- foldl subtrctElmFromLst (Just xs_y) xs_b =
+      --     if (isNothing e_b || e_y == e_b) && v_y `Prelude.rem` v_b == 0
+      --       then
+      --         let e = if isNothing e_b then e_y else Nothing
+      --          in Just $ mkMulPE (Just $ v_y `Prelude.div` v_b) (Just dff) e
+      --       else Nothing
+      -- handleSimpleDivs _ _ = Nothing
+      -- subtrctElmFromLst :: Eq v => Maybe [v] -> v -> Maybe [v]
+      -- subtrctElmFromLst Nothing _ = Nothing
+      -- subtrctElmFromLst (Just lst) x =
+      --   if x `elem` lst then Just ((\\) lst [x]) else Nothing
 invIxFun _ _ = Nothing
