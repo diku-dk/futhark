@@ -140,8 +140,8 @@ replaceStaticValSizes globals orig_substs sv =
           Literal (SignedValue (Int64Value (fromIntegral d))) loc
         Nothing ->
           Var v (replaceTypeSizes substs <$> t) loc
-    onExp substs (Coerce e tdecl t loc) =
-      Coerce (onExp substs e) tdecl' (first (fmap (replaceTypeSizes substs)) t) loc
+    onExp substs (Coerce e tdecl (Info (AppRes t ext)) loc) =
+      Coerce (onExp substs e) tdecl' (Info (AppRes (replaceTypeSizes substs t) ext)) loc
       where
         tdecl' =
           TypeDecl
@@ -475,11 +475,11 @@ defuncExp (RecordLit fs loc) = do
 defuncExp (ArrayLit es t@(Info t') loc) = do
   es' <- mapM defuncExp' es
   return (ArrayLit es' t loc, Dynamic t')
-defuncExp (Range e1 me incl t@(Info t', _) loc) = do
+defuncExp (Range e1 me incl res loc) = do
   e1' <- defuncExp' e1
   me' <- mapM defuncExp' me
   incl' <- mapM defuncExp' incl
-  return (Range e1' me' incl' t loc, Dynamic t')
+  return (Range e1' me' incl' res loc, Dynamic $ appResType $ unInfo res)
 defuncExp e@(Var qn (Info t) loc) = do
   sv <- lookupVar (toStruct t) (qualLeaf qn)
   case sv of
@@ -500,12 +500,12 @@ defuncExp (Ascript e0 tydecl loc)
     (e0', sv) <- defuncExp e0
     return (Ascript e0' tydecl loc, sv)
   | otherwise = defuncExp e0
-defuncExp (Coerce e0 tydecl t loc)
+defuncExp (Coerce e0 tydecl res loc)
   | orderZero (typeOf e0) = do
     (e0', sv) <- defuncExp e0
-    return (Coerce e0' tydecl t loc, sv)
+    return (Coerce e0' tydecl res loc, sv)
   | otherwise = defuncExp e0
-defuncExp (LetPat pat e1 e2 (Info t, retext) loc) = do
+defuncExp (LetPat pat e1 e2 (Info (AppRes t retext)) loc) = do
   (e1', sv1) <- defuncExp e1
   let env = matchPatternSV pat sv1
       pat' = updatePattern pat sv1
@@ -516,7 +516,7 @@ defuncExp (LetPat pat e1 e2 (Info t, retext) loc) = do
   let mapping = dimMapping' (typeOf e2) t
       subst v = fromMaybe v $ M.lookup v mapping
       t' = first (fmap subst) $ typeOf e2'
-  return (LetPat pat' e1' e2' (Info t', retext) loc, sv2)
+  return (LetPat pat' e1' e2' (Info (AppRes t' retext)) loc, sv2)
 defuncExp (LetFun vn _ _ _ _) =
   error $ "defuncExp: Unexpected LetFun: " ++ prettyName vn
 defuncExp (If e1 e2 e3 tp loc) = do
@@ -524,13 +524,13 @@ defuncExp (If e1 e2 e3 tp loc) = do
   (e2', sv) <- defuncExp e2
   (e3', _) <- defuncExp e3
   return (If e1' e2' e3' tp loc, sv)
-defuncExp e@(Apply f@(Var f' _ _) arg d (t, ext) loc)
+defuncExp e@(Apply f@(Var f' _ _) arg d res loc)
   | baseTag (qualLeaf f') <= maxIntrinsicTag,
     TupLit es tuploc <- arg = do
     -- defuncSoacExp also works fine for non-SOACs.
     es' <- mapM defuncSoacExp es
     return
-      ( Apply f (TupLit es' tuploc) d (t, ext) loc,
+      ( Apply f (TupLit es' tuploc) d res loc,
         Dynamic $ typeOf e
       )
 defuncExp e@Apply {} = defuncApply 0 e
@@ -546,7 +546,7 @@ defuncExp OpSectionLeft {} = error "defuncExp: unexpected operator section."
 defuncExp OpSectionRight {} = error "defuncExp: unexpected operator section."
 defuncExp ProjectSection {} = error "defuncExp: unexpected projection section."
 defuncExp IndexSection {} = error "defuncExp: unexpected projection section."
-defuncExp (DoLoop sparams pat e1 form e3 ret loc) = do
+defuncExp (DoLoop sparams pat e1 form e3 res loc) = do
   (e1', sv1) <- defuncExp e1
   let env1 = matchPatternSV pat sv1
   (form', env2) <- case form of
@@ -560,7 +560,7 @@ defuncExp (DoLoop sparams pat e1 form e3 ret loc) = do
       e2' <- localEnv env1 $ defuncExp' e2
       return (While e2', mempty)
   (e3', sv) <- localEnv (env1 <> env2) $ defuncExp e3
-  return (DoLoop sparams pat e1' form' e3' ret loc, sv)
+  return (DoLoop sparams pat e1' form' e3' res loc, sv)
   where
     envFromIdent (Ident vn (Info tp) _) =
       M.singleton vn $ Binding Nothing $ Dynamic tp
@@ -712,7 +712,7 @@ etaExpand e_t e = do
                 e1
                 e2
                 (Info (diet t2, Nothing))
-                (Info (foldFunType argtypes ret), Info [])
+                (Info (AppRes (foldFunType argtypes ret) []))
                 mempty
           )
           e
@@ -791,7 +791,7 @@ sizesForAll bound_sizes params = do
 -- but a new lifted function is created if a dynamic function is only partially
 -- applied.
 defuncApply :: Int -> Exp -> DefM (Exp, StaticVal)
-defuncApply depth e@(Apply e1 e2 d t@(Info ret, Info ext) loc) = do
+defuncApply depth e@(Apply e1 e2 d t@(Info (AppRes ret ext)) loc) = do
   let (argtypes, _) = unfoldFunType ret
   (e1', sv1) <- defuncApply (depth + 1) e1
   (e2', sv2) <- defuncExp e2
@@ -868,8 +868,8 @@ defuncApply depth e@(Apply e1 e2 d t@(Info ret, Info ext) loc) = do
           -- FIXME: what if this application returns both a function
           -- and a value?
           callret
-            | orderZero ret = (Info ret, Info ext)
-            | otherwise = (Info rettype, Info ext)
+            | orderZero ret = AppRes ret ext
+            | otherwise = AppRes rettype ext
 
       return
         ( Parens
@@ -878,14 +878,12 @@ defuncApply depth e@(Apply e1 e2 d t@(Info ret, Info ext) loc) = do
                     fname''
                     e1'
                     (Info (Observe, Nothing))
-                    ( Info $ Scalar $ Arrow mempty Unnamed (fromStruct t2) rettype,
-                      Info []
-                    )
+                    (Info $ AppRes (Scalar $ Arrow mempty Unnamed (fromStruct t2) rettype) [])
                     loc
                 )
                 e2'
                 d
-                callret
+                (Info callret)
                 loc
             )
             mempty,
@@ -901,9 +899,9 @@ defuncApply depth e@(Apply e1 e2 d t@(Info ret, Info ext) loc) = do
           -- FIXME: what if this application returns both a function
           -- and a value?
           callret
-            | orderZero ret = (Info ret, Info ext)
-            | otherwise = (Info restype, Info ext)
-          apply_e = Apply e1' e2' d callret loc
+            | orderZero ret = AppRes ret ext
+            | otherwise = AppRes restype ext
+          apply_e = Apply e1' e2' d (Info callret) loc
       return (apply_e, sv)
     -- Propagate the 'IntrinsicsSV' until we reach the outermost application,
     -- where we construct a dynamic static value with the appropriate type.

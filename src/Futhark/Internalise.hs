@@ -220,7 +220,7 @@ internaliseExp _ (E.Var (E.QualName _ name) _ _) = do
   case subst of
     Just substs -> return substs
     Nothing -> pure [I.Var name]
-internaliseExp desc (E.Index e idxs (Info ret, Info retext) loc) = do
+internaliseExp desc (E.Index e idxs (Info appres) loc) = do
   vs <- internaliseExpToVars "indexed" e
   dims <- case vs of
     [] -> return [] -- Will this happen?
@@ -230,7 +230,7 @@ internaliseExp desc (E.Index e idxs (Info ret, Info retext) loc) = do
         v_t <- lookupType v
         return $ I.BasicOp $ I.Index v $ fullSlice v_t idxs'
   ses <- certifying cs $ letSubExps desc =<< mapM index vs
-  bindExtSizes (E.toStruct ret) retext ses
+  bindExtSizes appres ses
   return ses
 
 -- XXX: we map empty records and tuples to units, because otherwise
@@ -313,7 +313,7 @@ internaliseExp desc (E.ArrayLit es (Info arr_t) loc)
       return (length inner_es : eshape, e ++ concatMap snd inner_es')
     isArrayLiteral e =
       Just ([], [e])
-internaliseExp desc (E.Range start maybe_second end (Info ret, Info retext) loc) = do
+internaliseExp desc (E.Range start maybe_second end (Info appres) loc) = do
   start' <- internaliseExp1 "range_start" start
   end' <- internaliseExp1 "range_end" $ case end of
     DownToExclusive e -> e
@@ -450,15 +450,15 @@ internaliseExp desc (E.Range start maybe_second end (Info ret, Info retext) loc)
         I.BasicOp $ I.BinOp (SDivUp Int64 I.Unsafe) distance pos_step
 
   se <- letSubExp desc (I.BasicOp $ I.Iota num_elems start' step it)
-  bindExtSizes (E.toStruct ret) retext [se]
+  bindExtSizes appres [se]
   return [se]
 internaliseExp desc (E.Ascript e _ _) =
   internaliseExp desc e
-internaliseExp desc (E.Coerce e (TypeDecl dt (Info et)) (Info ret, Info retext) loc) = do
+internaliseExp desc (E.Coerce e (TypeDecl dt (Info et)) (Info appres) loc) = do
   ses <- internaliseExp desc e
   ts <- internaliseReturnType et =<< mapM subExpType ses
   dt' <- typeExpForError dt
-  bindExtSizes (E.toStruct ret) retext ses
+  bindExtSizes appres ses
   forM (zip ses ts) $ \(e', t') -> do
     dims <- arrayDims <$> subExpType e'
     let parts =
@@ -478,7 +478,7 @@ internaliseExp desc (E.Negate e _) = do
       letTupExp' desc $ I.BasicOp $ I.BinOp (I.FSub t) (I.floatConst t 0) e'
     _ -> error "Futhark.Internalise.internaliseExp: non-numeric type in Negate"
 internaliseExp desc e@E.Apply {} = do
-  (qfname, args, ret, retext) <- findFuncall e
+  (qfname, args, appres) <- findFuncall e
   -- Argument evaluation is outermost-in so that any existential sizes
   -- created by function applications can be brought into scope.
   let fname = nameFromString $ pretty $ baseName $ qualLeaf qfname
@@ -509,15 +509,15 @@ internaliseExp desc e@E.Apply {} = do
           args' <- concat . reverse <$> mapM (internaliseArg arg_desc) (reverse args)
           fst <$> funcall desc qfname args' loc
 
-  bindExtSizes ret retext ses
+  bindExtSizes appres ses
   return ses
-internaliseExp desc (E.LetPat pat e body (Info ret, Info retext) _) = do
+internaliseExp desc (E.LetPat pat e body (Info appres) _) = do
   ses <- internalisePat desc pat e body (internaliseExp desc)
-  bindExtSizes (E.toStruct ret) retext ses
+  bindExtSizes appres ses
   return ses
 internaliseExp _ (E.LetFun ofname _ _ _ _) =
   error $ "Unexpected LetFun " ++ pretty ofname
-internaliseExp desc (E.DoLoop sparams mergepat mergeexp form loopbody (Info (ret, retext)) loc) = do
+internaliseExp desc (E.DoLoop sparams mergepat mergeexp form loopbody (Info appres) loc) = do
   ses <- internaliseExp "loop_init" mergeexp
   ((loopbody', (form', shapepat, mergepat', mergeinit')), initstms) <-
     collectStms $ handleForm ses form
@@ -559,7 +559,7 @@ internaliseExp desc (E.DoLoop sparams mergepat mergeexp form loopbody (Info (ret
       <$> attributing
         attrs
         (letTupExp desc (I.DoLoop ctxmerge valmerge form' loopbody''))
-  bindExtSizes (E.toStruct ret) retext loop_res
+  bindExtSizes appres loop_res
   return loop_res
   where
     sparams' = map (`TypeParamDim` mempty) sparams
@@ -668,7 +668,7 @@ internaliseExp desc (E.LetWith name src idxs ve body t loc) = do
   let pat = E.Id (E.identName name) (E.identType name) loc
       src_t = E.fromStruct <$> E.identType src
       e = E.Update (E.Var (E.qualName $ E.identName src) src_t loc) idxs ve loc
-  internaliseExp desc $ E.LetPat pat e body (t, Info []) loc
+  internaliseExp desc $ E.LetPat pat e body t loc
 internaliseExp desc (E.Update src slice ve loc) = do
   ves <- internaliseExp "lw_val" ve
   srcs <- internaliseExpToVars "src" src
@@ -749,7 +749,7 @@ internaliseExp _ (E.Constr c es (Info (E.Scalar (E.Sum fs))) _) = do
       return []
 internaliseExp _ (E.Constr _ _ (Info t) loc) =
   error $ "internaliseExp: constructor with type " ++ pretty t ++ " at " ++ locStr loc
-internaliseExp desc (E.Match e cs (Info ret, Info retext) _) = do
+internaliseExp desc (E.Match e cs (Info appres) _) = do
   ses <- internaliseExp (desc ++ "_scrutinee") e
   res <-
     case NE.uncons cs of
@@ -764,7 +764,7 @@ internaliseExp desc (E.Match e cs (Info ret, Info retext) _) = do
           foldM (\bf c' -> eBody $ return $ generateCaseIf ses c' bf) eLast' $
             reverse $ NE.init cs'
         letTupExp' desc =<< generateCaseIf ses c bFalse
-  bindExtSizes (E.toStruct ret) retext res
+  bindExtSizes appres res
   return res
 
 -- The "interesting" cases are over, now it's mostly boilerplate.
@@ -785,14 +785,14 @@ internaliseExp _ (E.FloatLit v (Info t) _) =
     E.Scalar (E.Prim (E.FloatType ft)) ->
       return [I.Constant $ I.FloatValue $ floatValue ft v]
     _ -> error $ "internaliseExp: nonsensical type for float literal: " ++ pretty t
-internaliseExp desc (E.If ce te fe (Info ret, Info retext) _) = do
+internaliseExp desc (E.If ce te fe (Info res) _) = do
   ses <-
     letTupExp' desc
       =<< eIf
         (BasicOp . SubExp <$> internaliseExp1 "cond" ce)
         (internaliseBody (desc <> "_t") te)
         (internaliseBody (desc <> "_f") fe)
-  bindExtSizes (E.toStruct ret) retext ses
+  bindExtSizes res ses
   return ses
 
 -- Builtin operators are handled specially because they are
@@ -1507,14 +1507,13 @@ findFuncall ::
   InternaliseM
     ( E.QualName VName,
       [(E.Exp, Maybe VName)],
-      E.StructType,
-      [VName]
+      AppRes
     )
 findFuncall (E.Var fname (Info t) _) =
-  return (fname, [], E.toStruct t, [])
-findFuncall (E.Apply f arg (Info (_, argext)) (Info ret, Info retext) _) = do
-  (fname, args, _, _) <- findFuncall f
-  return (fname, args ++ [(arg, argext)], E.toStruct ret, retext)
+  return (fname, [], AppRes t [])
+findFuncall (E.Apply f arg (Info (_, argext)) (Info appres) _) = do
+  (fname, args, _) <- findFuncall f
+  return (fname, args ++ [(arg, argext)], appres)
 findFuncall e =
   error $ "Invalid function expression in application: " ++ pretty e
 
@@ -1588,10 +1587,10 @@ isOverloadedFunction qname args loc = do
     -- Short-circuiting operators are magical.
     handleOps [x, y] "&&" = Just $ \desc ->
       internaliseExp desc $
-        E.If x y (E.Literal (E.BoolValue False) mempty) (Info $ E.Scalar $ E.Prim E.Bool, Info []) mempty
+        E.If x y (E.Literal (E.BoolValue False) mempty) (Info $ AppRes (E.Scalar $ E.Prim E.Bool) []) mempty
     handleOps [x, y] "||" = Just $ \desc ->
       internaliseExp desc $
-        E.If x (E.Literal (E.BoolValue True) mempty) y (Info $ E.Scalar $ E.Prim E.Bool, Info []) mempty
+        E.If x (E.Literal (E.BoolValue True) mempty) y (Info $ AppRes (E.Scalar $ E.Prim E.Bool) []) mempty
     -- Handle equality and inequality specially, to treat the case of
     -- arrays.
     handleOps [xe, ye] op
@@ -1953,9 +1952,9 @@ funcall desc (QualName _ fname) args loc = do
 -- importantly should be done after function calls, but also
 -- everything else that can produce existentials in the source
 -- language.
-bindExtSizes :: E.StructType -> [VName] -> [SubExp] -> InternaliseM ()
-bindExtSizes ret retext ses = do
-  ts <- internaliseType ret
+bindExtSizes :: AppRes -> [SubExp] -> InternaliseM ()
+bindExtSizes (AppRes ret retext) ses = do
+  ts <- internaliseType $ E.toStruct ret
   ses_ts <- mapM subExpType ses
 
   let combine t1 t2 =

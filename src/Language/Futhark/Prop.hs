@@ -588,23 +588,13 @@ typeOf (StringLit vs _) =
     Unique
     (Prim (Unsigned Int8))
     (ShapeDecl [ConstDim $ genericLength vs])
-typeOf (Range _ _ _ (Info t, _) _) = t
-typeOf (BinOp _ _ _ _ (Info t) _ _) = t
 typeOf (Project _ _ (Info t) _) = t
-typeOf (If _ _ _ (Info t, _) _) = t
 typeOf (Var _ (Info t) _) = t
 typeOf (Ascript e _ _) = typeOf e
-typeOf (Coerce _ _ (Info t, _) _) = t
-typeOf (Apply _ _ _ (Info t, _) _) = t
 typeOf (Negate e _) = typeOf e
-typeOf (LetPat _ _ _ (Info t, _) _) = t
-typeOf (LetFun _ _ _ (Info t) _) = t
-typeOf (LetWith _ _ _ _ _ (Info t) _) = t
-typeOf (Index _ _ (Info t, _) _) = t
 typeOf (Update e _ _ _) = typeOf e `setAliases` mempty
 typeOf (RecordUpdate _ _ _ (Info t) _) = t
 typeOf (Assert _ e _ _) = typeOf e
-typeOf (DoLoop _ _ _ _ _ (Info (t, _)) _) = t
 typeOf (Lambda params _ _ (Info (als, t)) _) =
   unscopeType bound_here $ foldr (arrow . patternParam) t params `setAliases` als
   where
@@ -623,11 +613,21 @@ typeOf (OpSectionRight _ _ _ (Info (pn, pt1), _) (Info ret) _) =
 typeOf (ProjectSection _ (Info t) _) = t
 typeOf (IndexSection _ (Info t) _) = t
 typeOf (Constr _ _ (Info t) _) = t
-typeOf (Match _ cs (Info t, _) _) =
-  unscopeType (foldMap unscopeSet cs) t
+typeOf (Attr _ e _) = typeOf e
+typeOf (Range _ _ _ (Info res) _) = appResType res
+typeOf (BinOp _ _ _ _ (Info res) _) = appResType res
+typeOf (If _ _ _ (Info res) _) = appResType res
+typeOf (Match _ cs (Info res) _) =
+  unscopeType (foldMap unscopeSet cs) (appResType res)
   where
     unscopeSet (CasePat p _ _) = S.map identName $ patternIdents p
-typeOf (Attr _ e _) = typeOf e
+typeOf (Coerce _ _ (Info res) _) = appResType res
+typeOf (Apply _ _ _ (Info res) _) = appResType res
+typeOf (LetPat _ _ _ (Info res) _) = appResType res
+typeOf (LetFun _ _ _ (Info res) _) = appResType res
+typeOf (LetWith _ _ _ _ _ (Info res) _) = appResType res
+typeOf (DoLoop _ _ _ _ _ (Info res) _) = appResType res
+typeOf (Index _ _ (Info res) _) = appResType res
 
 -- | @foldFunType ts ret@ creates a function type ('Arrow') that takes
 -- @ts@ as parameters and returns @ret@.
