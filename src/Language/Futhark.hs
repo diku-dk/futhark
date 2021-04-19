@@ -5,6 +5,7 @@ module Language.Futhark
     module Language.Futhark.Pretty,
     Ident,
     DimIndex,
+    AppExp,
     Exp,
     Pattern,
     ModExp,
@@ -37,6 +38,9 @@ type DimIndex = DimIndexBase Info VName
 
 -- | An expression with type information.
 type Exp = ExpBase Info VName
+
+-- | An application expression with type information.
+type AppExp = AppExpBase Info VName
 
 -- | A pattern with type information.
 type Pattern = PatternBase Info VName

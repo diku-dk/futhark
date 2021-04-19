@@ -66,25 +66,25 @@ freeVars expr = case expr of
       freeVarsField (RecordFieldImplicit vn t _) = ident $ Ident vn t mempty
   ArrayLit es t _ ->
     foldMap freeVars es <> sizes (typeDimNames $ unInfo t)
-  Range e me incl _ _ ->
+  AppExp (Range e me incl _) _ ->
     freeVars e <> foldMap freeVars me <> foldMap freeVars incl
   Var qn (Info t) _ -> NameSet $ M.singleton (qualLeaf qn) $ toStruct t
   Ascript e t _ -> freeVars e <> sizes (typeDimNames $ unInfo $ expandedType t)
-  Coerce e t _ _ -> freeVars e <> sizes (typeDimNames $ unInfo $ expandedType t)
-  LetPat pat e1 e2 _ _ ->
+  AppExp (Coerce e t _) _ -> freeVars e <> sizes (typeDimNames $ unInfo $ expandedType t)
+  AppExp (LetPat pat e1 e2 _) _ ->
     freeVars e1
       <> ( (sizes (patternDimNames pat) <> freeVars e2)
              `withoutM` patternVars pat
          )
-  LetFun vn (tparams, pats, _, _, e1) e2 _ _ ->
+  AppExp (LetFun vn (tparams, pats, _, _, e1) e2 _) _ ->
     ( (freeVars e1 <> sizes (foldMap patternDimNames pats))
         `without` ( S.map identName (foldMap patternIdents pats)
                       <> S.fromList (map typeParamName tparams)
                   )
     )
       <> (freeVars e2 `without` S.singleton vn)
-  If e1 e2 e3 _ _ -> freeVars e1 <> freeVars e2 <> freeVars e3
-  Apply e1 e2 _ _ _ -> freeVars e1 <> freeVars e2
+  AppExp (If e1 e2 e3 _) _ -> freeVars e1 <> freeVars e2 <> freeVars e3
+  AppExp (Apply e1 e2 _ _) _ -> freeVars e1 <> freeVars e2
   Negate e _ -> freeVars e
   Lambda pats e0 _ (Info (_, t)) _ ->
     (sizes (foldMap patternDimNames pats) <> freeVars e0 <> sizes (typeDimNames t))
@@ -94,7 +94,7 @@ freeVars expr = case expr of
   OpSectionRight _ _ e _ _ _ -> freeVars e
   ProjectSection {} -> mempty
   IndexSection idxs _ _ -> foldMap freeDimIndex idxs
-  DoLoop sparams pat e1 form e3 _ _ ->
+  AppExp (DoLoop sparams pat e1 form e3 _) _ ->
     let (e2fv, e2ident) = formVars form
      in freeVars e1
           <> ( (e2fv <> freeVars e3)
@@ -104,21 +104,21 @@ freeVars expr = case expr of
       formVars (For v e2) = (freeVars e2, ident v)
       formVars (ForIn p e2) = (freeVars e2, patternVars p)
       formVars (While e2) = (freeVars e2, mempty)
-  BinOp (qn, _) (Info qn_t) (e1, _) (e2, _) _ _ ->
+  AppExp (BinOp (qn, _) (Info qn_t) (e1, _) (e2, _) _) _ ->
     NameSet (M.singleton (qualLeaf qn) $ toStruct qn_t)
       <> freeVars e1
       <> freeVars e2
   Project _ e _ _ -> freeVars e
-  LetWith id1 id2 idxs e1 e2 _ _ ->
+  AppExp (LetWith id1 id2 idxs e1 e2 _) _ ->
     ident id2 <> foldMap freeDimIndex idxs <> freeVars e1
       <> (freeVars e2 `without` S.singleton (identName id1))
-  Index e idxs _ _ -> freeVars e <> foldMap freeDimIndex idxs
+  AppExp (Index e idxs _) _ -> freeVars e <> foldMap freeDimIndex idxs
   Update e1 idxs e2 _ -> freeVars e1 <> foldMap freeDimIndex idxs <> freeVars e2
   RecordUpdate e1 _ e2 _ _ -> freeVars e1 <> freeVars e2
   Assert e1 e2 _ _ -> freeVars e1 <> freeVars e2
   Constr _ es _ _ -> foldMap freeVars es
   Attr _ e _ -> freeVars e
-  Match e cs _ _ -> freeVars e <> foldMap caseFV cs
+  AppExp (Match e cs _) _ -> freeVars e <> foldMap caseFV cs
     where
       caseFV (CasePat p eCase _) =
         (sizes (patternDimNames p) <> freeVars eCase)

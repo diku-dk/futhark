@@ -63,21 +63,9 @@ replacing v e = local $ \env ->
 existentials :: Exp -> S.Set VName
 existentials e =
   let here = case e of
-        Apply _ _ (Info (_, pdim)) (Info res) _ ->
+        AppExp (Apply _ _ (Info (_, pdim)) _) (Info res) ->
           S.fromList (maybeToList pdim ++ appResExt res)
-        If _ _ _ (Info res) _ ->
-          S.fromList (appResExt res)
-        LetPat _ _ _ (Info res) _ ->
-          S.fromList (appResExt res)
-        Coerce _ _ (Info res) _ ->
-          S.fromList (appResExt res)
-        Range _ _ _ (Info res) _ ->
-          S.fromList (appResExt res)
-        Index _ _ (Info res) _ ->
-          S.fromList (appResExt res)
-        Match _ _ (Info res) _ ->
-          S.fromList (appResExt res)
-        DoLoop _ _ _ _ _ (Info res) _ ->
+        AppExp _ (Info res) ->
           S.fromList (appResExt res)
         _ ->
           mempty
@@ -145,11 +133,11 @@ liftFunction fname tparams params ret funbody = do
     apply f [] = f
     apply f (p : rem_ps) =
       let inner_ret = AppRes (fromStruct (augType rem_ps)) mempty
-          inner = Apply f (freeVar p) (Info (Observe, Nothing)) (Info inner_ret) mempty
+          inner = AppExp (Apply f (freeVar p) (Info (Observe, Nothing)) mempty) (Info inner_ret)
        in apply inner rem_ps
 
 transformExp :: Exp -> LiftM Exp
-transformExp (LetFun fname (tparams, params, _, Info ret, funbody) body _ _) = do
+transformExp (AppExp (LetFun fname (tparams, params, _, Info ret, funbody) body _) _) = do
   funbody' <- transformExp funbody
   fname' <- newVName $ "lifted_" ++ baseString fname
   lifted_call <- liftFunction fname' tparams params ret funbody'

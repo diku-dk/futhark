@@ -227,12 +227,9 @@ transformFName loc fname t
 
     applySizeArg (i, f) size_arg =
       ( i -1,
-        Apply
-          f
-          size_arg
-          (Info (Observe, Nothing))
+        AppExp
+          (Apply f size_arg (Info (Observe, Nothing)) loc)
           (Info $ AppRes (foldFunType (replicate i i64) (fromStruct t)) [])
-          loc
       )
 
     applySizeArgs fname' t' size_args =
@@ -283,6 +280,122 @@ transformAppRes :: AppRes -> MonoM AppRes
 transformAppRes (AppRes t ext) =
   AppRes <$> transformType t <*> pure ext
 
+transformAppExp :: AppExp -> AppRes -> MonoM Exp
+transformAppExp (Range e1 me incl loc) res = do
+  e1' <- transformExp e1
+  me' <- mapM transformExp me
+  incl' <- mapM transformExp incl
+  return $ AppExp (Range e1' me' incl' loc) (Info res)
+transformAppExp (Coerce e tp loc) res =
+  AppExp <$> (Coerce <$> transformExp e <*> pure tp <*> pure loc) <*> pure (Info res)
+transformAppExp (LetPat pat e1 e2 loc) res = do
+  (pat', rr) <- transformPattern pat
+  AppExp
+    <$> ( LetPat pat' <$> transformExp e1
+            <*> withRecordReplacements rr (transformExp e2)
+            <*> pure loc
+        )
+    <*> pure (Info res)
+transformAppExp (LetFun fname (tparams, params, retdecl, Info ret, body) e loc) res
+  | not $ null tparams = do
+    -- Retrieve the lifted monomorphic function bindings that are produced,
+    -- filter those that are monomorphic versions of the current let-bound
+    -- function and insert them at this point, and propagate the rest.
+    rr <- asks envRecordReplacements
+    let funbind = PolyBinding rr (fname, tparams, params, ret, [], body, mempty, loc)
+    pass $ do
+      (e', bs) <- listen $ extendEnv fname funbind $ transformExp e
+      -- Do not remember this one for next time we monomorphise this
+      -- function.
+      modifyLifts $ filter ((/= fname) . fst . fst)
+      let (bs_local, bs_prop) = Seq.partition ((== fname) . fst) bs
+      return (unfoldLetFuns (map snd $ toList bs_local) e', const bs_prop)
+  | otherwise = do
+    body' <- transformExp body
+    AppExp
+      <$> (LetFun fname (tparams, params, retdecl, Info ret, body') <$> transformExp e <*> pure loc)
+      <*> pure (Info res)
+transformAppExp (If e1 e2 e3 loc) res =
+  AppExp <$> (If <$> transformExp e1 <*> transformExp e2 <*> transformExp e3 <*> pure loc) <*> pure (Info res)
+transformAppExp (Apply e1 e2 d loc) res =
+  AppExp <$> (Apply <$> transformExp e1 <*> transformExp e2 <*> pure d <*> pure loc) <*> pure (Info res)
+transformAppExp (DoLoop sparams pat e1 form e3 loc) res = do
+  e1' <- transformExp e1
+  form' <- case form of
+    For ident e2 -> For ident <$> transformExp e2
+    ForIn pat2 e2 -> ForIn pat2 <$> transformExp e2
+    While e2 -> While <$> transformExp e2
+  e3' <- transformExp e3
+  -- Maybe monomorphisation introduced new arrays to the loop, and
+  -- maybe they have AnyDim sizes.  This is not allowed.  Invent some
+  -- sizes for them.
+  (pat_sizes, pat') <- sizesForPat pat
+  return $ AppExp (DoLoop (sparams ++ pat_sizes) pat' e1' form' e3' loc) (Info res)
+transformAppExp (BinOp (fname, _) (Info t) (e1, d1) (e2, d2) loc) (AppRes ret ext) = do
+  fname' <- transformFName loc fname $ toStruct t
+  e1' <- transformExp e1
+  e2' <- transformExp e2
+  if orderZero (typeOf e1') && orderZero (typeOf e2')
+    then return $ applyOp fname' e1' e2'
+    else do
+      -- We have to flip the arguments to the function, because
+      -- operator application is left-to-right, while function
+      -- application is outside-in.  This matters when the arguments
+      -- produce existential sizes.  There are later places in the
+      -- compiler where we transform BinOp to Apply, but anything that
+      -- involves existential sizes will necessarily go through here.
+      (x_param_e, x_param) <- makeVarParam e1'
+      (y_param_e, y_param) <- makeVarParam e2'
+      -- XXX: the type annotations here are wrong, but hopefully it
+      -- doesn't matter as there will be an outer AppExp to handle
+      -- them.
+      return $
+        AppExp
+          ( LetPat
+              x_param
+              e1'
+              ( AppExp
+                  (LetPat y_param e2' (applyOp fname' x_param_e y_param_e) loc)
+                  (Info $ AppRes ret mempty)
+              )
+              mempty
+          )
+          (Info (AppRes ret mempty))
+  where
+    applyOp fname' x y =
+      AppExp
+        ( Apply
+            ( AppExp
+                (Apply fname' x (Info (Observe, snd (unInfo d1))) loc)
+                (Info $ AppRes ret mempty)
+            )
+            y
+            (Info (Observe, snd (unInfo d2)))
+            loc
+        )
+        (Info (AppRes ret ext))
+
+    makeVarParam arg = do
+      let argtype = typeOf arg
+      x <- newNameFromString "binop_p"
+      return
+        ( Var (qualName x) (Info argtype) mempty,
+          Id x (Info $ fromStruct argtype) mempty
+        )
+transformAppExp (LetWith id1 id2 idxs e1 body loc) res = do
+  idxs' <- mapM transformDimIndex idxs
+  e1' <- transformExp e1
+  body' <- transformExp body
+  return $ AppExp (LetWith id1 id2 idxs' e1' body' loc) (Info res)
+transformAppExp (Index e0 idxs loc) res =
+  AppExp
+    <$> (Index <$> transformExp e0 <*> mapM transformDimIndex idxs <*> pure loc)
+    <*> pure (Info res)
+transformAppExp (Match e cs loc) res =
+  AppExp
+    <$> (Match <$> transformExp e <*> mapM transformCase cs <*> pure loc)
+    <*> pure (Info res)
+
 -- Monomorphization of expressions.
 transformExp :: Exp -> MonoM Exp
 transformExp e@Literal {} = return e
@@ -309,11 +422,9 @@ transformExp (RecordLit fs loc) =
           loc
 transformExp (ArrayLit es t loc) =
   ArrayLit <$> mapM transformExp es <*> traverse transformType t <*> pure loc
-transformExp (Range e1 me incl tp loc) = do
-  e1' <- transformExp e1
-  me' <- mapM transformExp me
-  incl' <- mapM transformExp incl
-  return $ Range e1' me' incl' tp loc
+transformExp (AppExp e res) = do
+  noticeDims $ appResType $ unInfo res
+  transformAppExp e =<< transformAppRes (unInfo res)
 transformExp (Var fname (Info t) loc) = do
   maybe_fs <- lookupRecordReplacement $ qualLeaf fname
   case maybe_fs of
@@ -328,41 +439,6 @@ transformExp (Var fname (Info t) loc) = do
       transformFName loc fname (toStruct t')
 transformExp (Ascript e tp loc) =
   Ascript <$> transformExp e <*> pure tp <*> pure loc
-transformExp (Coerce e tp res loc) = do
-  noticeDims $ appResType $ unInfo res
-  Coerce <$> transformExp e <*> pure tp
-    <*> traverse transformAppRes res
-    <*> pure loc
-transformExp (LetPat pat e1 e2 res loc) = do
-  (pat', rr) <- transformPattern pat
-  LetPat pat' <$> transformExp e1
-    <*> withRecordReplacements rr (transformExp e2)
-    <*> traverse transformAppRes res
-    <*> pure loc
-transformExp (LetFun fname (tparams, params, retdecl, Info ret, body) e res loc)
-  | not $ null tparams = do
-    -- Retrieve the lifted monomorphic function bindings that are produced,
-    -- filter those that are monomorphic versions of the current let-bound
-    -- function and insert them at this point, and propagate the rest.
-    rr <- asks envRecordReplacements
-    let funbind = PolyBinding rr (fname, tparams, params, ret, [], body, mempty, loc)
-    pass $ do
-      (e', bs) <- listen $ extendEnv fname funbind $ transformExp e
-      -- Do not remember this one for next time we monomorphise this
-      -- function.
-      modifyLifts $ filter ((/= fname) . fst . fst)
-      let (bs_local, bs_prop) = Seq.partition ((== fname) . fst) bs
-      return (unfoldLetFuns (map snd $ toList bs_local) e', const bs_prop)
-  | otherwise = do
-    body' <- transformExp body
-    LetFun fname (tparams, params, retdecl, Info ret, body')
-      <$> transformExp e <*> traverse transformAppRes res <*> pure loc
-transformExp (If e1 e2 e3 res loc) =
-  If <$> transformExp e1 <*> transformExp e2 <*> transformExp e3
-    <*> traverse transformAppRes res
-    <*> pure loc
-transformExp (Apply e1 e2 d res loc) =
-  Apply <$> transformExp e1 <*> transformExp e2 <*> pure d <*> traverse transformAppRes res <*> pure loc
 transformExp (Negate e loc) =
   Negate <$> transformExp e <*> pure loc
 transformExp (Lambda params e0 decl tp loc) = do
@@ -401,69 +477,6 @@ transformExp (ProjectSection fields (Info t) loc) =
   desugarProjectSection fields t loc
 transformExp (IndexSection idxs (Info t) loc) =
   desugarIndexSection idxs t loc
-transformExp (DoLoop sparams pat e1 form e3 res loc) = do
-  e1' <- transformExp e1
-  form' <- case form of
-    For ident e2 -> For ident <$> transformExp e2
-    ForIn pat2 e2 -> ForIn pat2 <$> transformExp e2
-    While e2 -> While <$> transformExp e2
-  e3' <- transformExp e3
-  -- Maybe monomorphisation introduced new arrays to the loop, and
-  -- maybe they have AnyDim sizes.  This is not allowed.  Invent some
-  -- sizes for them.
-  (pat_sizes, pat') <- sizesForPat pat
-  res' <- traverse transformAppRes res
-  return $ DoLoop (sparams ++ pat_sizes) pat' e1' form' e3' res' loc
-transformExp (BinOp (fname, _) (Info t) (e1, d1) (e2, d2) (Info (AppRes tp ext)) loc) = do
-  fname' <- transformFName loc fname $ toStruct t
-  e1' <- transformExp e1
-  e2' <- transformExp e2
-  if orderZero (typeOf e1') && orderZero (typeOf e2')
-    then return $ applyOp fname' e1' e2'
-    else do
-      -- We have to flip the arguments to the function, because
-      -- operator application is left-to-right, while function
-      -- application is outside-in.  This matters when the arguments
-      -- produce existential sizes.  There are later places in the
-      -- compiler where we transform BinOp to Apply, but anything that
-      -- involves existential sizes will necessarily go through here.
-      (x_param_e, x_param) <- makeVarParam e1'
-      (y_param_e, y_param) <- makeVarParam e2'
-      return $
-        LetPat
-          x_param
-          e1'
-          ( LetPat
-              y_param
-              e2'
-              (applyOp fname' x_param_e y_param_e)
-              (Info $ AppRes tp mempty)
-              mempty
-          )
-          (Info $ AppRes tp mempty)
-          mempty
-  where
-    applyOp fname' x y =
-      Apply
-        ( Apply
-            fname'
-            x
-            (Info (Observe, snd (unInfo d1)))
-            (Info $ AppRes (foldFunType [fromStruct $ fst (unInfo d2)] tp) mempty)
-            loc
-        )
-        y
-        (Info (Observe, snd (unInfo d2)))
-        (Info $ AppRes tp ext)
-        loc
-
-    makeVarParam arg = do
-      let argtype = typeOf arg
-      x <- newNameFromString "binop_p"
-      return
-        ( Var (qualName x) (Info argtype) mempty,
-          Id x (Info $ fromStruct argtype) mempty
-        )
 transformExp (Project n e tp loc) = do
   maybe_fs <- case e of
     Var qn _ _ -> lookupRecordReplacement (qualLeaf qn)
@@ -475,14 +488,6 @@ transformExp (Project n e tp loc) = do
     _ -> do
       e' <- transformExp e
       return $ Project n e' tp loc
-transformExp (LetWith id1 id2 idxs e1 body (Info (AppRes t ext)) loc) = do
-  idxs' <- mapM transformDimIndex idxs
-  e1' <- transformExp e1
-  body' <- transformExp body
-  t' <- transformType t
-  return $ LetWith id1 id2 idxs' e1' body' (Info (AppRes t' ext)) loc
-transformExp (Index e0 idxs res loc) =
-  Index <$> transformExp e0 <*> mapM transformDimIndex idxs <*> pure res <*> pure loc
 transformExp (Update e1 idxs e2 loc) =
   Update <$> transformExp e1 <*> mapM transformDimIndex idxs
     <*> transformExp e2
@@ -496,10 +501,6 @@ transformExp (Assert e1 e2 desc loc) =
   Assert <$> transformExp e1 <*> transformExp e2 <*> pure desc <*> pure loc
 transformExp (Constr name all_es t loc) =
   Constr name <$> mapM transformExp all_es <*> pure t <*> pure loc
-transformExp (Match e cs res loc) =
-  Match <$> transformExp e <*> mapM transformCase cs
-    <*> traverse transformAppRes res
-    <*> pure loc
 transformExp (Attr info e loc) =
   Attr info <$> transformExp e <*> pure loc
 
@@ -530,12 +531,14 @@ desugarBinOpSection op e_left e_right t (xp, xtype, xext) (yp, ytype, yext) (ret
   (v1, wrap_left, e1, p1) <- makeVarParam e_left $ fromStruct xtype
   (v2, wrap_right, e2, p2) <- makeVarParam e_right $ fromStruct ytype
   let apply_left =
-        Apply
-          op
-          e1
-          (Info (Observe, xext))
+        AppExp
+          ( Apply
+              op
+              e1
+              (Info (Observe, xext))
+              loc
+          )
           (Info $ AppRes (Scalar $ Arrow mempty yp (fromStruct ytype) t) [])
-          loc
       rettype' =
         let onDim (NamedDim d)
               | Named p <- xp, qualLeaf d == p = NamedDim $ qualName v1
@@ -543,12 +546,14 @@ desugarBinOpSection op e_left e_right t (xp, xtype, xext) (yp, ytype, yext) (ret
             onDim d = d
          in first onDim rettype
       body =
-        Apply
-          apply_left
-          e2
-          (Info (Observe, yext))
+        AppExp
+          ( Apply
+              apply_left
+              e2
+              (Info (Observe, yext))
+              loc
+          )
           (Info $ AppRes rettype' retext)
-          loc
       rettype'' = toStruct rettype'
   return $ wrap_left $ wrap_right $ Lambda (p1 ++ p2) body Nothing (Info (mempty, rettype'')) loc
   where
@@ -563,7 +568,7 @@ desugarBinOpSection op e_left e_right t (xp, xtype, xext) (yp, ytype, yext) (ret
     makeVarParam (Just e) argtype = do
       (v, pat, var_e) <- patAndVar argtype
       let wrap body =
-            LetPat pat e body (Info $ AppRes (typeOf body) mempty) mempty
+            AppExp (LetPat pat e body mempty) (Info $ AppRes (typeOf body) mempty)
       return (v, wrap, var_e, [])
     makeVarParam Nothing argtype = do
       (v, pat, var_e) <- patAndVar argtype
@@ -590,7 +595,7 @@ desugarProjectSection _ t _ = error $ "desugarOpSection: not a function type: " 
 desugarIndexSection :: [DimIndex] -> PatternType -> SrcLoc -> MonoM Exp
 desugarIndexSection idxs (Scalar (Arrow _ _ t1 t2)) loc = do
   p <- newVName "index_i"
-  let body = Index (Var (qualName p) (Info t1) loc) idxs (Info (AppRes t2 [])) loc
+  let body = AppExp (Index (Var (qualName p) (Info t1) loc) idxs loc) (Info (AppRes t2 []))
   return $ Lambda [Id p (Info t1) mempty] body Nothing (Info (mempty, toStruct t2)) loc
 desugarIndexSection _ t _ = error $ "desugarIndexSection: not a function type: " ++ pretty t
 
@@ -605,7 +610,7 @@ noticeDims = mapM_ notice . nestedDims
 unfoldLetFuns :: [ValBind] -> Exp -> Exp
 unfoldLetFuns [] e = e
 unfoldLetFuns (ValBind _ fname _ (Info (rettype, _)) dim_params params body _ _ loc : rest) e =
-  LetFun fname (dim_params, params, Nothing, Info rettype, body) e' (Info $ AppRes e_t mempty) loc
+  AppExp (LetFun fname (dim_params, params, Nothing, Info rettype, body) e' loc) (Info $ AppRes e_t mempty)
   where
     e' = unfoldLetFuns rest e
     e_t = typeOf e'
