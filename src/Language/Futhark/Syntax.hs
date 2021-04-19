@@ -51,6 +51,7 @@ module Language.Futhark.Syntax
     IdentBase (..),
     Inclusiveness (..),
     DimIndexBase (..),
+    AppRes (..),
     ExpBase (..),
     FieldBase (..),
     CaseBase (..),
@@ -125,14 +126,13 @@ class
     Show (f (PatternType, [VName])),
     Show (f (StructType, [VName])),
     Show (f EntryPoint),
-    Show (f Int),
     Show (f StructType),
     Show (f (StructType, Maybe VName)),
     Show (f (PName, StructType)),
     Show (f (PName, StructType, Maybe VName)),
     Show (f (Aliasing, StructType)),
     Show (f (M.Map VName VName)),
-    Show (f Uniqueness)
+    Show (f AppRes)
   ) =>
   Showable f vn
 
@@ -670,6 +670,16 @@ instance Foldable QualName where
 instance Traversable QualName where
   traverse f (QualName qs v) = QualName <$> traverse f qs <*> f v
 
+-- | An annotation inserted by the type checker on constructs that are
+-- "function calls" (either literally or conceptually).  This
+-- annotation encodes the result type, as well as any existential
+-- sizes that are generated here.
+data AppRes = AppRes
+  { appResType :: PatternType,
+    appResExt :: [VName]
+  }
+  deriving (Eq, Ord, Show)
+
 -- | The Futhark expression language.
 --
 -- In a value of type @Exp f vn@, annotations are wrapped in the
@@ -700,12 +710,6 @@ data ExpBase f vn
   | -- | Array literals, e.g., @[ [1+x, 3], [2, 1+4] ]@.
     -- Second arg is the row type of the rows of the array.
     ArrayLit [ExpBase f vn] (f PatternType) SrcLoc
-  | Range
-      (ExpBase f vn)
-      (Maybe (ExpBase f vn))
-      (Inclusiveness (ExpBase f vn))
-      (f PatternType, f [VName])
-      SrcLoc
   | -- | An attribute applied to the following expression.
     Attr AttrInfo (ExpBase f vn) SrcLoc
   | Project Name (ExpBase f vn) (f PatternType) SrcLoc
@@ -717,6 +721,8 @@ data ExpBase f vn
     Assert (ExpBase f vn) (ExpBase f vn) (f String) SrcLoc
   | -- | An n-ary value constructor.
     Constr Name [ExpBase f vn] (f PatternType) SrcLoc
+  | Update (ExpBase f vn) [DimIndexBase f vn] (ExpBase f vn) SrcLoc
+  | RecordUpdate (ExpBase f vn) [Name] (ExpBase f vn) (f PatternType) SrcLoc
   | Lambda
       [PatternBase f vn]
       (ExpBase f vn)
@@ -748,12 +754,18 @@ data ExpBase f vn
   | -- | Type ascription: @e : t@.
     Ascript (ExpBase f vn) (TypeDeclBase f vn) SrcLoc
   | -- | Size coercion: @e :> t@.
-    Coerce (ExpBase f vn) (TypeDeclBase f vn) (f PatternType, f [VName]) SrcLoc
+    Coerce (ExpBase f vn) (TypeDeclBase f vn) (f AppRes) SrcLoc
+  | Range
+      (ExpBase f vn)
+      (Maybe (ExpBase f vn))
+      (Inclusiveness (ExpBase f vn))
+      (f AppRes)
+      SrcLoc
   | LetPat
       (PatternBase f vn)
       (ExpBase f vn)
       (ExpBase f vn)
-      (f PatternType, f [VName])
+      (f AppRes)
       SrcLoc
   | LetFun
       vn
@@ -764,9 +776,9 @@ data ExpBase f vn
         ExpBase f vn
       )
       (ExpBase f vn)
-      (f PatternType)
+      (f AppRes)
       SrcLoc
-  | If (ExpBase f vn) (ExpBase f vn) (ExpBase f vn) (f PatternType, f [VName]) SrcLoc
+  | If (ExpBase f vn) (ExpBase f vn) (ExpBase f vn) (f AppRes) SrcLoc
   | -- | The @Maybe VName@ is a possible existential size
     -- that is instantiated by this argument..
     --
@@ -776,7 +788,7 @@ data ExpBase f vn
       (ExpBase f vn)
       (ExpBase f vn)
       (f (Diet, Maybe VName))
-      (f PatternType, f [VName])
+      (f AppRes)
       SrcLoc
   | DoLoop
       [VName] -- Size parameters.
@@ -784,15 +796,14 @@ data ExpBase f vn
       (ExpBase f vn) -- Initial values of merge variables.
       (LoopFormBase f vn) -- Do or while loop.
       (ExpBase f vn) -- Loop body.
-      (f (PatternType, [VName])) -- Return type.
+      (f AppRes)
       SrcLoc
   | BinOp
       (QualName vn, SrcLoc)
       (f PatternType)
       (ExpBase f vn, f (StructType, Maybe VName))
       (ExpBase f vn, f (StructType, Maybe VName))
-      (f PatternType)
-      (f [VName])
+      (f AppRes)
       SrcLoc
   | LetWith
       (IdentBase f vn)
@@ -800,16 +811,14 @@ data ExpBase f vn
       [DimIndexBase f vn]
       (ExpBase f vn)
       (ExpBase f vn)
-      (f PatternType)
+      (f AppRes)
       SrcLoc
-  | Index (ExpBase f vn) [DimIndexBase f vn] (f PatternType, f [VName]) SrcLoc
-  | Update (ExpBase f vn) [DimIndexBase f vn] (ExpBase f vn) SrcLoc
-  | RecordUpdate (ExpBase f vn) [Name] (ExpBase f vn) (f PatternType) SrcLoc
+  | Index (ExpBase f vn) [DimIndexBase f vn] (f AppRes) SrcLoc
   | -- | A match expression.
     Match
       (ExpBase f vn)
       (NE.NonEmpty (CaseBase f vn))
-      (f PatternType, f [VName])
+      (f AppRes)
       SrcLoc
 
 deriving instance Showable f vn => Show (ExpBase f vn)
@@ -830,7 +839,7 @@ instance Located (ExpBase f vn) where
   locOf (ArrayLit _ _ pos) = locOf pos
   locOf (StringLit _ loc) = locOf loc
   locOf (Range _ _ _ _ pos) = locOf pos
-  locOf (BinOp _ _ _ _ _ _ loc) = locOf loc
+  locOf (BinOp _ _ _ _ _ loc) = locOf loc
   locOf (If _ _ _ _ pos) = locOf pos
   locOf (Var _ _ loc) = locOf loc
   locOf (Ascript _ _ loc) = locOf loc

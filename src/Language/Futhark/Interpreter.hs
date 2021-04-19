@@ -835,7 +835,7 @@ eval env (ArrayLit (v : vs) _ _) = do
   v' <- eval env v
   vs' <- mapM (eval env) vs
   return $ toArray' (valueShape v') (v' : vs')
-eval env (Range start maybe_second end (Info t, Info retext) loc) = do
+eval env (Range start maybe_second end (Info (AppRes t retext)) loc) = do
   start' <- asInteger <$> eval env start
   maybe_second' <- traverse (fmap asInteger . eval env) maybe_second
   end' <- traverse (fmap asInteger . eval env) end
@@ -886,7 +886,7 @@ eval env (Range start maybe_second end (Info t, Info retext) loc) = do
         ++ " is invalid."
 eval env (Var qv (Info t) _) = evalTermVar env qv (toStruct t)
 eval env (Ascript e _ _) = eval env e
-eval env (Coerce e td (Info ret, Info retext) loc) = do
+eval env (Coerce e td (Info (AppRes ret retext)) loc) = do
   v <- returned env ret retext =<< eval env e
   let t = evalType env $ unInfo $ expandedType td
   case checkShape (structTypeShape (envShapes env) t) (valueShape v) of
@@ -899,7 +899,7 @@ eval env (Coerce e td (Info ret, Info retext) loc) = do
           <> "` (`"
           <> pretty t
           <> "`)"
-eval env (LetPat p e body (Info ret, Info retext) _) = do
+eval env (LetPat p e body (Info (AppRes ret retext)) _) = do
   v <- eval env e
   env' <- matchPattern env p v
   returned env ret retext =<< eval env' body
@@ -927,8 +927,7 @@ eval
       op_t
       (x, Info (_, xext))
       (y, Info (_, yext))
-      (Info t)
-      (Info retext)
+      (Info (AppRes t retext))
       loc
     )
     | baseString (qualLeaf op) == "&&" = do
@@ -946,11 +945,11 @@ eval
       x' <- evalArg env x xext
       y' <- evalArg env y yext
       returned env t retext =<< apply2 loc env op' x' y'
-eval env (If cond e1 e2 (Info ret, Info retext) _) = do
+eval env (If cond e1 e2 (Info (AppRes ret retext)) _) = do
   cond' <- asBool <$> eval env cond
   returned env ret retext
     =<< if cond' then eval env e1 else eval env e2
-eval env (Apply f x (Info (_, ext)) (Info t, Info retext) loc) = do
+eval env (Apply f x (Info (_, ext)) (Info (AppRes t retext)) loc) = do
   -- It is important that 'x' is evaluated first in order to bring any
   -- sizes into scope that may be used in the type of 'f'.
   x' <- evalArg env x ext
@@ -970,7 +969,7 @@ eval env (Negate e _) = do
     ValuePrim (FloatValue (Float32Value v)) -> return $ FloatValue $ Float32Value (- v)
     ValuePrim (FloatValue (Float64Value v)) -> return $ FloatValue $ Float64Value (- v)
     _ -> error $ "Cannot negate " ++ pretty ev
-eval env (Index e is (Info t, Info retext) loc) = do
+eval env (Index e is (Info (AppRes t retext)) loc) = do
   is' <- mapM (evalDimIndex env) is
   arr <- eval env e
   returned env t retext =<< evalIndex loc env is' arr
@@ -1026,7 +1025,7 @@ eval _ (ProjectSection ks _ _) =
     walk (ValueRecord fs) f
       | Just v' <- M.lookup f fs = return v'
     walk _ _ = error "Value does not have expected field."
-eval env (DoLoop sparams pat init_e form body (Info (ret, retext)) _) = do
+eval env (DoLoop sparams pat init_e form body (Info (AppRes ret retext)) _) = do
   init_v <- eval env init_e
   returned env ret retext
     =<< case form of
@@ -1091,7 +1090,7 @@ eval env (Constr c es (Info t) _) = do
   vs <- mapM (eval env) es
   shape <- typeValueShape env $ toStruct t
   return $ ValueSum shape c vs
-eval env (Match e cs (Info ret, Info retext) _) = do
+eval env (Match e cs (Info (AppRes ret retext)) _) = do
   v <- eval env e
   returned env ret retext =<< match v (NE.toList cs)
   where
