@@ -210,6 +210,10 @@ module type float = {
   val num_bits: i32
   val get_bit: i32 -> t -> i32
   val set_bit: i32 -> t -> i32 -> t
+
+  -- | The difference between 1.0 and the next larger representable
+  -- number.
+  val epsilon: t
 }
 
 -- | Boolean numbers.  When converting from a number to `bool`, 0 is
@@ -922,6 +926,7 @@ module f64: (float with t = f64 with int_t = u64) = {
 
   let highest = inf
   let lowest = -inf
+  let epsilon = 2.220446049250313e-16f64
 
   let pi = 3.1415926535897932384626433832795028841971693993751058209749445923078164062f64
   let e = 2.718281828459045235360287471352662497757247093699959574966967627724076630353f64
@@ -1028,6 +1033,7 @@ module f32: (float with t = f32 with int_t = u32) = {
 
   let highest = inf
   let lowest = -inf
+  let epsilon = 1.1920929e-7f32
 
   let pi = f64 f64m.pi
   let e = f64 f64m.e
