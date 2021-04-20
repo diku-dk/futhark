@@ -77,8 +77,7 @@ import Futhark.Util.Loc hiding (L) -- Lexer has replacements.
 
       constructor     { L _ (CONSTRUCTOR _) }
 
-      '.field'        { L _ (PROJ_FIELD _) }
-      '.['            { L _ PROJ_INDEX }
+      '.int'          { L _ (PROJ_INTFIELD _) }
 
       intlit          { L _ (INTLIT _) }
       i8lit           { L _ (I8LIT _) }
@@ -95,6 +94,7 @@ import Futhark.Util.Loc hiding (L) -- Lexer has replacements.
       stringlit       { L _ (STRINGLIT _) }
       charlit         { L _ (CHARLIT _) }
 
+      '.'             { L $$ DOT }
       '..'            { L $$ TWO_DOTS }
       '...'           { L $$ THREE_DOTS }
       '..<'           { L $$ TWO_DOTS_LT }
@@ -669,8 +669,8 @@ Atom : PrimLit        { Literal (fst $1) (snd $1) }
      | '(' FieldAccess FieldAccesses ')'
        { ProjectSection (map fst ($2:$3)) NoInfo (srcspan $1 $>) }
 
-     | '(' '.[' DimIndices ']' ')'
-       { IndexSection $3 NoInfo (srcspan $1 $>) }
+     | '(' '.' '[' DimIndices ']' ')'
+       { IndexSection $4 NoInfo (srcspan $1 $>) }
 
 
 PrimLit :: { (PrimValue, SrcLoc) }
@@ -700,7 +700,8 @@ Exps1_ :: { ([UncheckedExp], UncheckedExp) }
         | Exp            { ([], $1) }
 
 FieldAccess :: { (Name, SrcLoc) }
-             : '.field' { let L loc (PROJ_FIELD f) = $1 in (f, loc) }
+             : '.' id { let L loc (ID f) = $2 in (f, loc) }
+             | '.int' { let L loc (PROJ_INTFIELD x) = $1 in (x, loc) }
 
 FieldAccesses :: { [(Name, SrcLoc)] }
                : FieldAccess FieldAccesses { $1 : $2 }
