@@ -103,13 +103,13 @@ class Server {
     var vals = this.ctx[args[0]].apply(this.ctx, ins);
     console.log(vals);
 
-    if (num_outs == 1) {
-      this._vars[out_vnames[0]] = vals;
-    } else {
+    //if (num_outs == 1) {
+      //this._vars[out_vnames[0]] = vals;
+    //} else {
       for (var i = 0; i < out_vnames.length; i++) {
         this._vars[out_vnames[i]] = vals[i];
       }
-    }
+    //}
   }
 
 
@@ -124,7 +124,9 @@ class Server {
       var bin_val = construct_binary_value(this._vars[vname]);
       console.log("What does bin val look like??");
       console.log(bin_val);
-      fs.appendFile(fname, bin_val);
+      fs.appendFile(fname, bin_val, 'binary', (err) => {
+      if (err) throw err;
+      });
     }
   }
 

@@ -156,7 +156,18 @@ arrWrapper =
   T.unpack 
   [text|
     class ArrayWrapper {
-      constructor(fc, ptr, typ, dim) {
+      // array has one element if scalar
+      // else it has 4
+      constructor(arr) {
+        if (arr.length == 1) {
+          this.scalar_constructor(arr[0]);
+        } else {
+          this.arr_constructor(arr[0], arr[1], arr[2], arr[3]);
+        }
+      }
+
+
+      arr_constructor(fc, ptr, typ, dim) {
         this.dim = dim;
         this.typ = typ;
         this.ptr = ptr;
@@ -164,7 +175,19 @@ arrWrapper =
         this.arr = this.fc[this.func_name('values')].apply(this.fc, [this.ptr]);
         this.arr_init = false;
         this.shape_init = false;
+        this.is_scalar = false;
+        this.is_arr = false;
+        this.value = this.arr;
       }
+
+      // should only be called with one element array
+      scalar_constructor(arr) {
+        this.shape_init = true;
+        this.shapey = [];
+        this.is_scalar = true;
+        this.arr = arr;
+      }
+
 
       func_name(fname) {
         return 'from_futhark_' + fname + '_' + this.typ + '_' + this.dim + 'd_arr';
@@ -172,11 +195,11 @@ arrWrapper =
 
       shape() {
         if (this.shape_init) {
-          return this.shape;
+          return this.shapey;
         } else {
-          this.shape = this.fc[this.func_name('values')].apply(this.fc, [this.ptr]);
+          this.shapey = this.fc[this.func_name('values')].apply(this.fc, [this.ptr]);
           this.shape_init = true;
-          return this.shape;
+          return this.shapey;
        }
      }
 
@@ -310,13 +333,14 @@ jsWrapEntryPoint jse =
     rets = intercalate ", " [retPtrOrOther i jse "dataHeap" ".byteOffset" ptrRes | i <- alr]
     args1 = intercalate ", " ["in" ++ show i | i <- alp]
     paramsToPtr = unlines ["  in" ++ show i ++ " = ptrFromWrap(in" ++ show i ++ ")" | i <- alp]
-    res = intercalate ", " [retPtrOrOther i jse "res" "[0]" ptrResValue | i <- alr]
+    res = intercalate ", " [retPtrOrOther i jse "new ArrayWrapper([res" "])" ptrResValue | i <- alr]
     ptrRes i _ = "res" ++ show i
-    ptrResValue i _ = "new ArrayWrapper(this, getValue(res" ++ show i ++ ", 'i32'), '" 
-                        ++ (baseType (ret jse !! i)) ++ "', " ++ show (dim (ret jse !! i)) ++ ")"
+    ptrResValue i _ = "new ArrayWrapper([this, getValue(res" ++ show i ++ ", 'i32'), '" 
+                        ++ (baseType (ret jse !! i)) ++ "', " ++ show (dim (ret jse !! i)) ++ "])"
     retPtrOrOther i jse' pre post f = if ((ret jse') !! i) !! 0 == '[' 
                                   then f i $ (ret jse') !! i
-                                  else pre ++ show i ++ post
+                                  --else "new ArrayWrapper([res" ++ show i ++ "])"
+                                   else pre ++ show i ++ post
 
 
 ptrFromWrap :: String
