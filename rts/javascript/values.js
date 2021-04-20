@@ -28,6 +28,18 @@ var typToType = { '  i8' : Int8Array ,
               // TODO implement bool here
              };
 
+function getAllFuncs(toCheck) {
+    var props = [];
+    var obj = toCheck;
+    do {
+        props = props.concat(Object.getOwnPropertyNames(obj));
+    } while (obj = Object.getPrototypeOf(obj));
+
+    return props.sort().filter(function(e, i, arr) { 
+       if (e!=arr[i+1] && typeof toCheck[e] == 'function') return true;
+    });
+}
+
 function binToStringArray(buff, array) {
   for (var i = 0; i < array.length; i++) {
     array[i] = buff[i];
@@ -114,15 +126,19 @@ var typToSize = {
 
 
 function construct_binary_value(v) {
-
-  var bytes = v.bytes_per_elem();
+  console.log(v);
+  console.log(getAllFuncs(v));
+  var bytes = v.bytes_per_element();
   var shape = v.shape();
   var values = v.values();
   var elems = 1;
-  for (var i = 0; i < shape.length; i++) {
-    elems = elems * Number(shape[i]);
+  if (shape != 0) {
+    for (var i = 0; i < shape.length; i++) {
+      elems = elems * Number(shape[i]);
+    }
   }
-  var num_bytes = 1 + 1 + 1 + 4 + shape.length * 8 + elems * bytes;
+  var num_bytes = 1 + 1 + 1 + 4 + (shape.length) * 8 + elems * bytes;
+  console.log(num_bytes);
 
 
   var bytes = new Uint8Array(num_bytes);
@@ -136,14 +152,21 @@ function construct_binary_value(v) {
     bytes[3+i] = ftype.charCodeAt(i);
   }
 
-  var sizes = new BigInt64Array(shape);
-  var size_bytes = new Uint8Array(sizes.buffer);
-  bytes.set(size_bytes, 7);
+  if (shape.length > 0) {
+    var sizes = new BigInt64Array(shape);
+    var size_bytes = new Uint8Array(sizes.buffer);
+    bytes.set(size_bytes, 7);
+  }
 
-  var val_bytes = new Uint8Array(values.buffer);
+  var val_bytes = new Uint8Array(values.buffer, values.byteOffset, values.length);
+  console.log(values);
+  console.log(values.buffer, values.byteOffset, values.length);
+  console.log(val_bytes);
+  console.log(7 + shape.length * 8);
   bytes.set(val_bytes, 7 + (shape.length * 8));
   
-  return bytes;
+  //return a buffer needed by appendFile instead of a uint8array
+  return Buffer.from(bytes);
 }
 
 
