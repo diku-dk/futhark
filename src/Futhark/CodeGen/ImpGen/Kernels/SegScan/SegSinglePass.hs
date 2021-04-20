@@ -266,9 +266,9 @@ compileSegScan pat lvl space scanOp kbody = do
 
     let crossesSegment =
           Just $ \from to ->
-          let from' = sExt64 from * m + tvExp blockOff + m - 1
-              to' = sExt64 to * m + tvExp blockOff + m - 1
-          in (to' - from') .>. to' `mod` segment_size
+          let from' = (from + 1) * m - 1
+              to'   = (to   + 1) * m - 1
+          in (to' - from') .>. (to'+segsize_compact-boundary) `mod` segsize_compact
 
     scanOp' <- renameLambda $ segBinOpLambda scanOp
 
