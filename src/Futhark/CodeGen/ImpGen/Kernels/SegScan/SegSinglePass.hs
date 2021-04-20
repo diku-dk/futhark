@@ -117,7 +117,7 @@ compileSegScan pat lvl space scanOp kbody = do
       sumT = foldl (\bytes typ -> bytes + primByteSize typ) 0 tys `div` 4
       maxT = maximum (map primByteSize tys) `div` 4
       m :: Num a => a
-      m = fromIntegral $ min ((64 `div` sumT) - 6) $ (max 12 sumT) `div` maxT
+      m = fromIntegral $ min ((64 `div` sumT) - 6) $ max 9 sumT `div` maxT
       num_groups = Count (n `divUp` (unCount group_size * m))
       num_threads = unCount num_groups * unCount group_size
       (gtids, dims) = unzip $ unSegSpace space
@@ -179,7 +179,13 @@ compileSegScan pat lvl space scanOp kbody = do
     blockOff <-
       dPrimV "blockOff" $
         sExt64 (tvExp dynamicId) * m * kernelGroupSize constants
-
+    sgmIdx <- dPrimVE "sgm_idx" $ tvExp blockOff `mod` segment_size
+    boundary <-
+      dPrimVE "boundary" $
+        sExt32 $ sMin64 (m * unCount group_size) (segment_size - sgmIdx)
+    segsize_compact <-
+      dPrimVE "segsize_compact" $
+        sExt32 $ sMin64 (m * unCount group_size) (segment_size)
     privateArrays <-
       forM tys $ \ty ->
         sAllocArray
@@ -228,19 +234,19 @@ compileSegScan pat lvl space scanOp kbody = do
           copyDWIMFix priv [sExt64 i] (Var trans) [sExt64 $ tvExp sharedIdx]
       sOp localBarrier
 
-    sComment "Per thread scan" $
+    sComment "Per thread scan" $ do
       -- We don't need to touch the first element, so only m-1
       -- iterations here.
+      globalIdx <-
+        dPrimVE "gidx" $
+          (kernelLocalThreadId constants * m) + 1
       sFor "i" (m -1) $ \i -> do
         let xs = map paramName $ xParams scanOp
             ys = map paramName $ yParams scanOp
         -- calculate global index
-        globalIdx <-
-          dPrimVE "gidx" $
-            tvExp blockOff + sExt64 (kernelLocalThreadId constants * m) + i + 1
         -- determine if start of segment
         isNewSgm <-
-          dPrimVE "new_sgm" $ globalIdx `mod` segment_size .==. 0
+          dPrimVE "new_sgm" $ (globalIdx + sExt32 i - boundary) `mod` segsize_compact .==. 0
         -- skip scan of first element in segment
         sUnless isNewSgm $ do
           forM_ (zip privateArrays $ zip3 xs ys tys) $ \(src, (x, y, ty)) -> do
@@ -289,7 +295,6 @@ compileSegScan pat lvl space scanOp kbody = do
     prefixes <-
       forM (zip scanOpNe tys) $ \(ne, ty) ->
         dPrimV "prefix" $ TPrimExp $ toExp' ty ne
-    sgmIdx <- dPrimVE "sgm_idx" $ tvExp blockOff `mod` segment_size
     blockNewSgm <- dPrimVE "block_new_sgm" $ sgmIdx .==. 0
     sComment "Perform lookback" $ do
       sWhen (blockNewSgm .&&. kernelLocalThreadId constants .==. 0) $ do
