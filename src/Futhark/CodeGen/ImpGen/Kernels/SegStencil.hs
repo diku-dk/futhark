@@ -60,7 +60,7 @@ compileSegStencil pat lvl space op kbody =
             case dimentionality of
               1 -> [1024]
               2 -> [32, 32]
-              3 -> if (halo_widths!!1) /= 0 then [4, 8, 32] else [32,1,32]
+              3 -> if (halo_widths!!1) /= 0 then [2, 16, 32] else [32,1,32]
               _ -> error "not valid dimensions"
           -- This is lowest limit of allowed max shared memory per block for the
           -- supported Cuda compute capabilities (>= 3.0).
