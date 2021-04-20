@@ -35,11 +35,11 @@ compileSegStencil pat lvl space op kbody =
           group_size_flat_exp = unCount (TPrimExp . toExp' int32 <$> segGroupSize lvl)
           group_sizes_exp :: [Imp.TExp Int32]
           group_sizes_exp =
-            let remainder = group_size_flat_exp `quot` 64
-            in case dimentionality of
+              case dimentionality of
                   1 -> [group_size_flat_exp]
-                  2 -> [remainder, 32]
-                  3 -> if (halo_widths!!1) /= 0 then [2, remainder, 32] else [2*remainder, 1, 32]
+                  2 -> [group_size_flat_exp `quot` 32, 32]
+                  3 -> let remainder = group_size_flat_exp `quot` 64
+                       in if (halo_widths!!1) /= 0 then [2, remainder, 32] else [2*remainder, 1, 32]
                   _ -> error "not valid dimensions"
           n_point_stencil = length $ head stencil_indexes
           n_invarElems = length $ map kernelResultSubExp $ kernelBodyResult kbody
@@ -79,15 +79,12 @@ compileSegStencil pat lvl space op kbody =
           uses_exp = map fromIntegral uses
           printf :: String -> Imp.TExp t -> ImpM lore r op ()
           printf text = emit . Imp.DebugPrint text . Just . untyped
-          mapPrintf text exps = forM_ exps (printf text)
           computeReuses works hws = do
             let tileReads = zipWith (*) uses_exp works
                 weights = 1 : cycle [3]
             tileReadsWeighed <- mapM (dPrimVE "tileReadsWeighed") $ reverse $ zipWith (*) weights $ reverse tileReads
-            mapPrintf "tileReadsWeighed" tileReadsWeighed
             let tileWrites = zipWith (+) hws works
             weighedReuseFactors <- mapM (dPrimVE "weighedReuseFactors") $ zipWith div tileReadsWeighed tileWrites
-            mapPrintf "weighedReuseFactors" weighedReuseFactors
             pure (     foldl1 (.||.) (map (5 .<=.) weighedReuseFactors)
                   .&&. foldl1 (.&&.) (map (1 .<=.) weighedReuseFactors)
                  )
@@ -97,6 +94,7 @@ compileSegStencil pat lvl space op kbody =
         sOp $ Imp.GetSizeMax (tvVar name) Imp.SizeLocalMemory
         pure $ tvExp name
       aboveMinBlock <- dPrimVE "aboveMinBlock" $ 128 .<=. group_size_flat_exp
+      printf "aboveMinBlock" aboveMinBlock
       let can_and_should_run_stripTile_m = do
             stripTileSizes <- mapM (dPrimVE "stripTileSizes") $ zipWith (*) group_sizes_exp strip_multiples_exp
             stripTileElems <- dPrimVE "stripTileElems" $ product $ zipWith (+) halo_widths_exp stripTileSizes
@@ -104,6 +102,9 @@ compileSegStencil pat lvl space op kbody =
             canRunStripTile <- dPrimVE "canRunStripTile" $ (stripTileBytes .<=. max_shared_bytes)
             reuseIsHighEnough <- dPrimVE "reuseIsHighEnoughST" =<< computeReuses stripTileSizes halo_widths_exp
             isNotSkewed <- dPrimVE "isNotSkewedST" $ foldl1 (.&&.) $ zipWith (.<=.) stripTileSizes dims
+            printf "can_run_strips" canRunStripTile
+            printf "reuseIsHighEnough_strips" reuseIsHighEnough
+            printf "isNotSkewed_strips" isNotSkewed
             dPrimVE "can_and_should_run_stripTile" $ canRunStripTile .&&. reuseIsHighEnough .&&. isNotSkewed .&&. aboveMinBlock
       let can_and_should_run_tile_m = do
             tileElems <- dPrimVE "tileElems" $ product $ zipWith (+) halo_widths_exp group_sizes_exp
@@ -111,10 +112,15 @@ compileSegStencil pat lvl space op kbody =
             canRunTile <- dPrimVE "canRunTile" $ (tileBytes .<=. max_shared_bytes)
             reuseIsHighEnough <- dPrimVE "reuseIsHighEnoughT" =<< computeReuses group_sizes_exp halo_widths_exp
             isNotSkewed <- dPrimVE "isNotSkewedT" $ foldl1 (.&&.) $ zipWith (.<=.) group_sizes_exp dims
+            printf "can_run_tile" canRunTile
+            printf "reuseIsHighEnough_tile" reuseIsHighEnough
+            printf "isNotSkewed_tile" isNotSkewed
+            printf "aboveMinBlock_tile" aboveMinBlock
             dPrimVE "can_and_should_run_tile" $ canRunTile .&&. reuseIsHighEnough .&&. isNotSkewed .&&. aboveMinBlock
 
       can_and_should_run_stripTile <- can_and_should_run_stripTile_m
-      emit $ Imp.DebugPrint "\ncan_and_should_run_stripTile" $ Just $ untyped $ can_and_should_run_stripTile
+      printf "can_and_should_run_stripTile" can_and_should_run_stripTile
+      emit $ Imp.DebugPrint "\n" $ Nothing
       sIf can_and_should_run_stripTile
         (compileBigTileStripMinedSingleDim pat lvl space op kbody group_sizes_exp strip_multiples)
         (do
