@@ -29,16 +29,17 @@ compileSegStencil pat lvl space op kbody =
       emit $ Imp.DebugPrint "\n# SegStencil" Nothing
 
       -- constexpr and constants
-      let stencil_indexes = stencilIndexes op
+      let dims = map (TPrimExp . toExp' int32 . snd) $ unSegSpace space
+          stencil_indexes = stencilIndexes op
           dimentionality = length stencil_indexes
           group_size_flat_exp = unCount (TPrimExp . toExp' int32 <$> segGroupSize lvl)
           group_sizes_exp :: [Imp.TExp Int32]
           group_sizes_exp =
-            let remainder = group_size_flat_exp `quot` 32
+            let remainder = group_size_flat_exp `quot` 64
             in case dimentionality of
                   1 -> [group_size_flat_exp]
                   2 -> [remainder, 32]
-                  3 -> if (halo_widths!!1) /= 0 then [1, remainder, 32] else [remainder, 1, 32]
+                  3 -> if (halo_widths!!1) /= 0 then [2, remainder, 32] else [2*remainder, 1, 32]
                   _ -> error "not valid dimensions"
           n_point_stencil = length $ head stencil_indexes
           n_invarElems = length $ map kernelResultSubExp $ kernelBodyResult kbody
@@ -59,7 +60,7 @@ compileSegStencil pat lvl space op kbody =
             case dimentionality of
               1 -> [1024]
               2 -> [32, 32]
-              3 -> if (halo_widths!!1) /= 0 then [1, 32, 32] else [32,1,32]
+              3 -> if (halo_widths!!1) /= 0 then [4, 8, 32] else [32,1,32]
               _ -> error "not valid dimensions"
           -- This is lowest limit of allowed max shared memory per block for the
           -- supported Cuda compute capabilities (>= 3.0).
@@ -87,32 +88,40 @@ compileSegStencil pat lvl space op kbody =
             let tileWrites = zipWith (+) hws works
             weighedReuseFactors <- mapM (dPrimVE "weighedReuseFactors") $ zipWith div tileReadsWeighed tileWrites
             mapPrintf "weighedReuseFactors" weighedReuseFactors
-            pure $ foldl1 (.||.) $ map (5 .<=.) weighedReuseFactors
+            pure (     foldl1 (.||.) (map (5 .<=.) weighedReuseFactors)
+                  .&&. foldl1 (.&&.) (map (1 .<=.) weighedReuseFactors)
+                 )
 
       max_shared_bytes <- do
         name <- dPrim "max_shared_bytes" int32
         sOp $ Imp.GetSizeMax (tvVar name) Imp.SizeLocalMemory
         pure $ tvExp name
-      can_and_should_run_stripTile <- do
-        stripTileSizes <- mapM (dPrimVE "stripTileSizes") $ zipWith (*) group_sizes_exp strip_multiples_exp
-        stripTileElems <- dPrimVE "stripTileElems" $ product $ zipWith (+) halo_widths_exp stripTileSizes
-        stripTileBytes <- dPrimVE "stripTileBytes" $ stripTileElems * fromInteger memory_per_elem
-        canRunStripTile <- dPrimVE "canRunStripTile" $ (stripTileBytes .<=. max_shared_bytes)
-        shouldRunStripTile <- dPrimVE "shouldRunStripTile" =<< computeReuses stripTileSizes halo_widths_exp
-        dPrimVE "can_and_should_run_stripTile" $ canRunStripTile .&&. shouldRunStripTile
-      can_and_should_run_tile <- do
-        tileElems <- dPrimVE "tileElems" $ product $ zipWith (+) halo_widths_exp group_sizes_exp
-        tileBytes <- dPrimVE "tileBytes" $ tileElems * fromInteger memory_per_elem
-        canRunTile <- dPrimVE "canRunTile" $ (tileBytes .<=. max_shared_bytes)
-        shouldRunTile <- dPrimVE "shouldRunTile" =<< computeReuses group_sizes_exp halo_widths_exp
-        dPrimVE "can_and_should_run_tile" $ canRunTile .&&. shouldRunTile
+      aboveMinBlock <- dPrimVE "aboveMinBlock" $ 128 .<=. group_size_flat_exp
+      let can_and_should_run_stripTile_m = do
+            stripTileSizes <- mapM (dPrimVE "stripTileSizes") $ zipWith (*) group_sizes_exp strip_multiples_exp
+            stripTileElems <- dPrimVE "stripTileElems" $ product $ zipWith (+) halo_widths_exp stripTileSizes
+            stripTileBytes <- dPrimVE "stripTileBytes" $ stripTileElems * fromInteger memory_per_elem
+            canRunStripTile <- dPrimVE "canRunStripTile" $ (stripTileBytes .<=. max_shared_bytes)
+            reuseIsHighEnough <- dPrimVE "reuseIsHighEnoughST" =<< computeReuses stripTileSizes halo_widths_exp
+            isNotSkewed <- dPrimVE "isNotSkewedST" $ foldl1 (.&&.) $ zipWith (.<=.) stripTileSizes dims
+            dPrimVE "can_and_should_run_stripTile" $ canRunStripTile .&&. reuseIsHighEnough .&&. isNotSkewed .&&. aboveMinBlock
+      let can_and_should_run_tile_m = do
+            tileElems <- dPrimVE "tileElems" $ product $ zipWith (+) halo_widths_exp group_sizes_exp
+            tileBytes <- dPrimVE "tileBytes" $ tileElems * fromInteger memory_per_elem
+            canRunTile <- dPrimVE "canRunTile" $ (tileBytes .<=. max_shared_bytes)
+            reuseIsHighEnough <- dPrimVE "reuseIsHighEnoughT" =<< computeReuses group_sizes_exp halo_widths_exp
+            isNotSkewed <- dPrimVE "isNotSkewedT" $ foldl1 (.&&.) $ zipWith (.<=.) group_sizes_exp dims
+            dPrimVE "can_and_should_run_tile" $ canRunTile .&&. reuseIsHighEnough .&&. isNotSkewed .&&. aboveMinBlock
 
+      can_and_should_run_stripTile <- can_and_should_run_stripTile_m
       emit $ Imp.DebugPrint "\ncan_and_should_run_stripTile" $ Just $ untyped $ can_and_should_run_stripTile
       sIf can_and_should_run_stripTile
         (compileBigTileStripMinedSingleDim pat lvl space op kbody group_sizes_exp strip_multiples)
-        (sIf can_and_should_run_tile
-          (compileBigTileStripMinedSingleDim pat lvl space op kbody group_sizes_exp $ map (const 1) group_sizes_exp)
-          (compileGlobalReadFlat pat lvl space op kbody))
+        (do
+          can_and_should_run_tile <- can_and_should_run_tile_m
+          sIf can_and_should_run_tile
+            (compileBigTileStripMinedSingleDim pat lvl space op kbody group_sizes_exp $ map (const 1) group_sizes_exp)
+            (compileGlobalReadFlat pat lvl space op kbody))
 
 createSpans :: Num a => [a] -> [a]
 createSpans = scanr1 (*) . tail
