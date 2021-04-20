@@ -82,7 +82,6 @@ module Language.Futhark.Prop
     isSizeParam,
     combineTypeShapes,
     matchDims,
-    unscopeType,
     onRecordField,
     -- | Values of these types are produces by the parser.  They use
     -- unadorned names and have no type information, apart from that

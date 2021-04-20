@@ -14,7 +14,7 @@ import qualified Data.Map.Strict as M
 import Data.Maybe
 import Futhark.Util (maybeHead, nubOrd)
 import Futhark.Util.Pretty hiding (bool, group, space)
-import Language.Futhark hiding (ExpBase (Constr), unscopeType)
+import Language.Futhark hiding (ExpBase (Constr))
 
 data Constr
   = Constr Name
