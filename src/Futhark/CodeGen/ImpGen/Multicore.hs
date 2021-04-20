@@ -17,6 +17,7 @@ import Futhark.CodeGen.ImpGen.Multicore.SegHist
 import Futhark.CodeGen.ImpGen.Multicore.SegMap
 import Futhark.CodeGen.ImpGen.Multicore.SegRed
 import Futhark.CodeGen.ImpGen.Multicore.SegScan
+import Futhark.CodeGen.ImpGen.Multicore.SegStencil
 import Futhark.IR.MCMem
 import Futhark.MonadFreshNames
 import Futhark.Util.IntegralExp (rem)
@@ -168,3 +169,5 @@ compileSegOp pat (SegRed _ space reds _ kbody) ntasks =
   compileSegRed pat space reds kbody ntasks
 compileSegOp pat (SegMap _ space _ kbody) _ =
   compileSegMap pat space kbody
+compileSegOp pat (SegStencil _ space sten _ kbody) ntasks =
+  compileSegStencil pat space sten kbody ntasks

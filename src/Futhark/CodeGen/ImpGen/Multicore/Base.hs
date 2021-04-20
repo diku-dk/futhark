@@ -57,6 +57,7 @@ segOpString SegMap {} = return "segmap"
 segOpString SegRed {} = return "segred"
 segOpString SegScan {} = return "segscan"
 segOpString SegHist {} = return "seghist"
+segOpString SegStencil {} = return "segstencil"
 
 arrParam :: VName -> MulticoreGen Imp.Param
 arrParam arr = do
@@ -77,9 +78,14 @@ getSpace (SegHist _ space _ _ _) = space
 getSpace (SegRed _ space _ _ _) = space
 getSpace (SegScan _ space _ _ _) = space
 getSpace (SegMap _ space _ _) = space
+getSpace (SegStencil _ space _ _ _) = space
 
 getIterationDomain :: SegOp () MCMem -> SegSpace -> MulticoreGen (Imp.TExp Int64)
 getIterationDomain SegMap {} space = do
+  let ns = map snd $ unSegSpace space
+      ns_64 = map toInt64Exp ns
+  return $ product ns_64
+getIterationDomain SegStencil {} space = do
   let ns = map snd $ unSegSpace space
       ns_64 = map toInt64Exp ns
   return $ product ns_64
@@ -162,6 +168,7 @@ segBinOpComm' = mconcat . map segBinOpComm
 decideScheduling' :: SegOp () lore -> Imp.Code -> Imp.Scheduling
 decideScheduling' SegHist {} _ = Imp.Static
 decideScheduling' SegScan {} _ = Imp.Static
+decideScheduling' SegStencil {} _ = Imp.Static
 decideScheduling' (SegRed _ _ reds _ _) code =
   case segBinOpComm' reds of
     Commutative -> decideScheduling code
