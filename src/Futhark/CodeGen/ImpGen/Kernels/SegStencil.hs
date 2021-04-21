@@ -5,7 +5,7 @@
 module Futhark.CodeGen.ImpGen.Kernels.SegStencil (compileSegStencil) where
 
 import Control.Monad.Except
-import Data.List (transpose, minimumBy, nub)
+import Data.List (transpose, minimumBy, nub, sortOn)
 import qualified Futhark.CodeGen.ImpCode.Kernels as Imp
 import Futhark.CodeGen.ImpGen
 import Futhark.CodeGen.ImpGen.Kernels.Base
@@ -127,7 +127,8 @@ compileSegStencil pat lvl space op kbody =
           can_and_should_run_tile <- can_and_should_run_tile_m
           sIf can_and_should_run_tile
             (compileBigTileStripMinedSingleDim pat lvl space op kbody group_sizes_exp $ map (const 1) group_sizes_exp)
-            (compileGlobalReadFlat pat lvl space op kbody))
+            (compileGlobalReadFlat pat lvl space op kbody)
+        )
 
 createSpans :: Num a => [a] -> [a]
 createSpans = scanr1 (*) . tail
@@ -212,21 +213,20 @@ compileGlobalReadFlat ::
 compileGlobalReadFlat pat lvl space op kbody = do
   let (is, dims') = unzip $ unSegSpace space
       dims = map toInt64Exp dims'
-      num_groups' = toInt64Exp <$> segNumGroups lvl
       group_size_flat_c = toInt64Exp <$> segGroupSize lvl
       group_size_flat = unCount group_size_flat_c
-      stencil_ixss = map (map fromInteger) $ stencilIndexes op
       invarElems = map kernelResultSubExp $ kernelBodyResult kbody
       lam = stencilOp op
       lamBody = lambdaBody lam
       (invariantParams, variantParams) =
         splitAt (length invarElems) $ lambdaParams lam
-      n_point_stencil = length $ head stencil_ixss
+      n_point_stencil = length $ head $ stencilIndexes op
 
   -- Host side evaluated variables
   size_span <- mapM (dPrimVE "size_span" . sExt64) $ createSpans dims
+  grid_flat <- Count <$> dPrimVE "grid_flat" (divUp (product dims) group_size_flat)
 
-  sKernelThread "segstencil-globalRead" num_groups' group_size_flat_c (segFlat space) $ do
+  sKernelThread "segstencil-globalRead" grid_flat group_size_flat_c (segFlat space) $ do
     constants <- kernelConstants <$> askEnv
     local_id_flat <- dPrimVE "local_id_flat" . sExt64 . kernelLocalThreadId $ constants
     group_id_flat <- dPrimVE "strip_id_flat" . sExt64 . kernelGroupId $ constants
@@ -234,6 +234,7 @@ compileGlobalReadFlat pat lvl space op kbody = do
     gid_flat <- dPrimVE "global_id_flat" $ group_id_flat * group_size_flat + local_id_flat
     gids <- map tvExp <$> unflattenIx "global_id" size_span gid_flat
     zipWithM_ dPrimV_ is gids
+    max_ixs <- mapM (dPrimVE "max_ixs") $ map (\x->x-1) dims
 
     -- check for out of bound on global id for each axis
     sWhen (isActive $ unSegSpace space) $ do
@@ -244,15 +245,21 @@ compileGlobalReadFlat pat lvl space op kbody = do
       zipWithM_ dPrimV_ (map paramName invariantParams) . map TPrimExp
         =<< mapM toExp invarElems
 
-      let bound_ixs = zipWith sMin64 (map (\x->x-1) dims) . map (sMax64 0)
-          param_ixs = transpose $ zipWith (mapM (+)) stencil_ixss gids
-          params_ixs_ordered = transpose $ chunksOf n_point_stencil variantParams
+      let bound_ixs = zipWith sMin64 max_ixs . map (sMax64 0)
+          param_tups = transpose $ chunksOf n_point_stencil variantParams
+          par_relIxs_pairs = zip (transpose (stencilIndexes op)) param_tups
+          (sorted_ixs, sorted_params_tup) = unzip $ sortOn fst $ par_relIxs_pairs
+          fetch_ixs = map bound_ixs
+                    $ transpose
+                    $ flip (zipWith (mapM (+))) gids
+                    $ map (map fromInteger)
+                    $ transpose sorted_ixs
 
       dLParams variantParams
 
       -- load variants into lambda variant parameters
-      forM_ (zip param_ixs params_ixs_ordered) $ \(parix, pars) -> do
-        read_ixs <- mapM (dPrimVE "read_ix") $ bound_ixs parix
+      forM_ (zip fetch_ixs sorted_params_tup) $ \(ixs, pars) -> do
+        read_ixs <- mapM (dPrimVE "read_ix") ixs
         forM_ (zip pars $ stencilArrays op) $ \(par, src) ->
           copyDWIMFix (paramName par) [] (Var src) read_ixs
 
@@ -451,8 +458,6 @@ compileBigTileStripMinedSingleDim pat _ space op kbody group_sizes_exp strip_mul
       strip_multiples_exp :: [Imp.TExp Int32]
       strip_multiples_exp = map fromInteger strip_multiples
 
-      bound_idxs = zipWith sMin64 (map (\x->x-1) dims) . map (sMax64 0)
-
       -- constexpr variables
       strip_sizes = zipWith (*) strip_multiples_exp group_sizes_exp
       shared_sizes = zipWith (+) strip_sizes $ zipWith (-) a_maxs a_mins
@@ -479,6 +484,8 @@ compileBigTileStripMinedSingleDim pat _ space op kbody group_sizes_exp strip_mul
     strip_id_flat <- dPrimVEC "strip_id_flat" . kernelGroupId $ constants
     strip_ids <- map tvExp <$> unflattenIx "strip_id" strip_grid_spans strip_id_flat
 
+    max_ixs <- mapM (dPrimVE "max_ixs") $ map (\x->x-1) dims
+    let bound_idxs = zipWith sMin64 max_ixs . map (sMax64 0)
     writeSet_offsets <- propagateConst "writeSet_offset" $
       zipWith (*) (map sExt64 strip_ids) (map sExt64 strip_sizes)
     -- run the data loader
