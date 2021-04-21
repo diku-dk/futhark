@@ -368,19 +368,6 @@ cwrapEntryPoint jse =
     arg_length = (length (parameters jse)) + (length (ret jse))
     args = T.pack $ "['number'" ++ (concat (replicate  arg_length ", 'number'")) ++ "]"
 
---cwrapEntryPoint :: JSEntryPoint -> String
---cwrapEntryPoint jse = 
---  unlines 
---  ["    futhark_entry_" ++ ename ++ " = ",
---   "      Module.cwrap(", 
---   "        'futhark_entry_" ++ ename ++ "', 'number', " ++ args,
---   "      );"]
---   where
---    ename = name jse
---    arg_length = (length (parameters jse)) + (length (ret jse))
---    args = T.pack "['number'" ++ (concat (replicate  arg_length ", 'number'")) ++ "]"
-
-
 inits :: Int -> EntryPointTyp -> String
 inits argNum ep =
   let (i, typ) = retType ep
