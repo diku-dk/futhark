@@ -44,7 +44,9 @@ import Control.Monad.RWS.Strict hiding (Sum)
 import Control.Monad.State
 import Control.Monad.Writer hiding (Sum)
 import Data.Bifoldable (biany)
-import Data.List (intersect)
+import Data.Bifunctor
+import Data.Char (isAscii)
+import Data.List (foldl', intersect)
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import qualified Data.Set as S
@@ -234,7 +236,7 @@ prettySource ctx loc (RigidOutOfScope boundloc v) =
     <> text (locStrRel ctx boundloc)
     <> "."
 prettySource _ _ RigidUnify =
-  "is an artificial size invented during unification of functions with anonymous sizes"
+  "is an artificial size invented during unification of functions with anonymous sizes."
 prettySource ctx loc (RigidCond t1 t2) =
   "is unknown due to conditional expression at "
     <> text (locStrRel ctx loc)
@@ -337,15 +339,27 @@ instantiateEmptyArrayDims ::
   Rigidity ->
   TypeBase (DimDecl VName) als ->
   m (TypeBase (DimDecl VName) als, [VName])
-instantiateEmptyArrayDims tloc desc r = runWriterT . traverseDims onDim
+instantiateEmptyArrayDims tloc desc r =
+  fmap (second snd) . (`runStateT` mempty) . traverseDims onDim
   where
-    onDim _ PosImmediate AnyDim = inst
-    onDim _ PosParam AnyDim = inst
-    onDim _ _ d = return d
-    inst = do
-      dim <- lift $ newDimVar tloc r desc
-      tell [dim]
-      return $ NamedDim $ qualName dim
+    onDim _ PosImmediate (AnyDim v) = inst v
+    onDim _ PosParam (AnyDim v) = inst v
+    onDim _ _ d = pure d
+    inst v = do
+      (m, ds) <- get
+      d <- case v of
+        Just v' ->
+          case M.lookup v' m of
+            Just old_d -> pure old_d
+            Nothing -> do
+              d <- lift $ newDimVar tloc r $ takeWhile isAscii $ baseString v'
+              put (M.insert v' d m, d : ds)
+              pure d
+        Nothing -> do
+          d <- lift $ newDimVar tloc r desc
+          put (m, d : ds)
+          pure d
+      pure $ NamedDim $ qualName d
 
 -- | Is the given type variable the name of an abstract type or type
 -- parameter, which we cannot substitute?
@@ -395,7 +409,7 @@ unifyWith onDims usage = subunify False mempty
           unbound = applySubst f
             where
               f d
-                | d `elem` bound = Just $ SizeSubst AnyDim
+                | d `elem` bound = Just $ SizeSubst $ AnyDim $ Just d
                 | otherwise = Nothing
 
           link ord' v lvl =
@@ -466,22 +480,25 @@ unifyWith onDims usage = subunify False mempty
         ( Scalar (Arrow _ p1 a1 b1),
           Scalar (Arrow _ p2 a2 b2)
           ) -> do
-            let (r1, r2) = swap ord (Rigid RigidUnify) Nonrigid
-            (a1', a1_dims) <- instantiateEmptyArrayDims (srclocOf usage) "anonymous" r1 a1
-            (a2', a2_dims) <- instantiateEmptyArrayDims (srclocOf usage) "anonymous" r2 a2
-            let bound' = bound <> mapMaybe pname [p1, p2] <> a1_dims <> a2_dims
+            let (r1, r2) = swap ord Nonrigid (Rigid RigidUnify)
+            (b1'', b1_dims) <- instantiateEmptyArrayDims (srclocOf usage) "anonymous" r1 b1'
+            (b2'', b2_dims) <- instantiateEmptyArrayDims (srclocOf usage) "anonymous" r2 b2'
+            let bound' = bound <> mapMaybe pname [p1, p2] <> b1_dims <> b2_dims
             subunify
               (not ord)
               bound
               (breadCrumb (Matching "When matching parameter types.") bcs)
-              a1'
-              a2'
+              a1
+              a2
             subunify
               ord
               bound'
               (breadCrumb (Matching "When matching return types.") bcs)
-              b1'
-              b2'
+              b1''
+              b2''
+            -- Delete the size variables we introduced to represent
+            -- the existential sizes.
+            modifyConstraints $ \m -> foldl' (flip M.delete) m (b1_dims <> b2_dims)
             where
               (b1', b2') =
                 -- Replace one parameter name with the other in the
@@ -551,17 +568,19 @@ unify usage = unifyWith (unifyDims usage) usage noBreadCrumbs
 expect :: MonadUnify m => Usage -> StructType -> StructType -> m ()
 expect usage = unifyWith onDims usage noBreadCrumbs
   where
-    onDims _ _ _ AnyDim _ = return ()
+    onDims _ _ _ (AnyDim _) _ = return ()
     onDims _ _ _ d1 d2
       | d1 == d2 = return ()
+    -- We identify existentially bound names by them being nonrigid
+    -- and yet bound.  It's OK to unify with those.
     onDims bcs bound nonrigid (NamedDim (QualName _ d1)) d2
       | Just lvl1 <- nonrigid d1,
-        d2 /= AnyDim,
-        not $ boundParam bound d2 =
+        not $ isAnyDim d2,
+        not (boundParam bound d2) || (d1 `elem` bound) =
         linkVarToDim usage bcs d1 lvl1 d2
     onDims bcs bound nonrigid d1 (NamedDim (QualName _ d2))
       | Just lvl2 <- nonrigid d2,
-        not $ boundParam bound d1 =
+        not (boundParam bound d1) || (d2 `elem` bound) =
         linkVarToDim usage bcs d2 lvl2 d1
     onDims bcs _ _ d1 d2 = do
       notes <- (<>) <$> dimNotes usage d1 <*> dimNotes usage d2
@@ -574,10 +593,13 @@ expect usage = unifyWith onDims usage noBreadCrumbs
     boundParam bound (NamedDim (QualName _ d)) = d `elem` bound
     boundParam _ _ = False
 
+    isAnyDim (AnyDim _) = True
+    isAnyDim _ = False
+
 hasEmptyDims :: StructType -> Bool
 hasEmptyDims = biany empty (const False)
   where
-    empty AnyDim = True
+    empty (AnyDim _) = True
     empty _ = False
 
 occursCheck ::
@@ -1065,7 +1087,7 @@ anyDimOnMismatch t1 t2 = runWriter $ matchDims onDims t1 t2
       | d1 == d2 = return d1
       | otherwise = do
         tell [(d1, d2)]
-        return AnyDim
+        return $ AnyDim undefined
 
 newDimOnMismatch ::
   (Monoid as, MonadUnify m) =>

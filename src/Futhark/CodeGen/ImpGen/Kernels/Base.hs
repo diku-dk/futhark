@@ -7,6 +7,7 @@ module Futhark.CodeGen.ImpGen.Kernels.Base
     keyWithEntryPoint,
     CallKernelGen,
     InKernelGen,
+    Locks (..),
     HostEnv (..),
     Target (..),
     KernelEnv (..),
@@ -56,14 +57,22 @@ import Prelude hiding (quot, rem)
 -- targeting.
 data Target = CUDA | OpenCL
 
+-- | Information about the locks available for accumulators.
+data Locks = Locks
+  { locksArray :: VName,
+    locksCount :: Int
+  }
+
 data HostEnv = HostEnv
   { hostAtomics :: AtomicBinOp,
-    hostTarget :: Target
+    hostTarget :: Target,
+    hostLocks :: M.Map VName Locks
   }
 
 data KernelEnv = KernelEnv
   { kernelAtomics :: AtomicBinOp,
-    kernelConstants :: KernelConstants
+    kernelConstants :: KernelConstants,
+    kernelLocks :: M.Map VName Locks
   }
 
 type CallKernelGen = ImpM KernelsMem HostEnv Imp.HostOp
@@ -155,10 +164,41 @@ splitSpace (Pattern [] [size]) o w i elems_per_thread = do
 splitSpace pat _ _ _ _ =
   error $ "Invalid target for splitSpace: " ++ pretty pat
 
+updateAcc :: VName -> [SubExp] -> [SubExp] -> InKernelGen ()
+updateAcc acc is vs = sComment "UpdateAcc" $ do
+  -- See the ImpGen implementation of UpdateAcc for general notes.
+  let is' = map toInt64Exp is
+  (c, space, arrs, dims, op) <- lookupAcc acc is'
+  sWhen (inBounds (map DimFix is') dims) $
+    case op of
+      Nothing ->
+        forM_ (zip arrs vs) $ \(arr, v) -> copyDWIMFix arr is' v []
+      Just lam -> do
+        dLParams $ lambdaParams lam
+        let (_x_params, y_params) =
+              splitAt (length vs) $ map paramName $ lambdaParams lam
+        forM_ (zip y_params vs) $ \(yp, v) -> copyDWIM yp [] v []
+        atomics <- kernelAtomics <$> askEnv
+        case atomicUpdateLocking atomics lam of
+          AtomicPrim f -> f space arrs is'
+          AtomicCAS f -> f space arrs is'
+          AtomicLocking f -> do
+            c_locks <- M.lookup c . kernelLocks <$> askEnv
+            case c_locks of
+              Just (Locks locks num_locks) -> do
+                let locking =
+                      Locking locks 0 1 0 $
+                        pure . (`rem` fromIntegral num_locks) . flattenIndex dims
+                f locking space arrs is'
+              Nothing ->
+                error $ "Missing locks for " ++ pretty acc
+
 compileThreadExp :: ExpCompiler KernelsMem KernelEnv Imp.KernelOp
 compileThreadExp (Pattern _ [dest]) (BasicOp (ArrayLit es _)) =
   forM_ (zip [0 ..] es) $ \(i, e) ->
     copyDWIMFix (patElemName dest) [fromIntegral (i :: Int64)] e []
+compileThreadExp _ (BasicOp (UpdateAcc acc is vs)) =
+  updateAcc acc is vs
 compileThreadExp dest e =
   defCompileExp dest e
 
@@ -214,6 +254,8 @@ compileGroupExp :: ExpCompiler KernelsMem KernelEnv Imp.KernelOp
 compileGroupExp (Pattern _ [dest]) (BasicOp (ArrayLit es _)) =
   forM_ (zip [0 ..] es) $ \(i, e) ->
     copyDWIMFix (patElemName dest) [fromIntegral (i :: Int64)] e []
+compileGroupExp _ (BasicOp (UpdateAcc acc is vs)) =
+  updateAcc acc is vs
 compileGroupExp (Pattern _ [dest]) (BasicOp (Replicate ds se)) = do
   let ds' = map toInt64Exp $ shapeDims ds
   groupCoverSpace ds' $ \is ->
@@ -775,9 +817,7 @@ readsFromSet free =
         Prim bt ->
           isConstExp vtable (Imp.var var bt) >>= \case
             Just ce -> return $ Just $ Imp.ConstUse var ce
-            Nothing
-              | bt == Cert -> return Nothing
-              | otherwise -> return $ Just $ Imp.ScalarUse var bt
+            Nothing -> return $ Just $ Imp.ScalarUse var bt
 
 isConstExp ::
   VTable KernelsMem ->
@@ -1343,8 +1383,8 @@ sKernelFailureTolerant ::
   InKernelGen () ->
   CallKernelGen ()
 sKernelFailureTolerant tol ops constants name m = do
-  HostEnv atomics _ <- askEnv
-  body <- makeAllMemoryGlobal $ subImpM_ (KernelEnv atomics constants) ops m
+  HostEnv atomics _ locks <- askEnv
+  body <- makeAllMemoryGlobal $ subImpM_ (KernelEnv atomics constants locks) ops m
   uses <- computeKernelUses body mempty
   emit $
     Imp.Op $

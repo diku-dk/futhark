@@ -9,6 +9,10 @@ module Futhark.Analysis.PrimExp.Convert
     le32,
     pe64,
     le64,
+    f32pe,
+    f32le,
+    f64pe,
+    f64le,
     primExpFromSubExpM,
     replaceInPrimExp,
     replaceInPrimExpM,
@@ -101,6 +105,22 @@ pe64 = isInt64 . primExpFromSubExp int64
 -- | Shorthand for constructing a 'TPrimExp' of type 'Int64', from a leaf.
 le64 :: a -> TPrimExp Int64 a
 le64 = isInt64 . flip LeafExp int64
+
+-- | Shorthand for constructing a 'TPrimExp' of type 'Float32'.
+f32pe :: SubExp -> TPrimExp Float VName
+f32pe = isF32 . primExpFromSubExp float32
+
+-- | Shorthand for constructing a 'TPrimExp' of type 'Float32', from a leaf.
+f32le :: a -> TPrimExp Float a
+f32le = isF32 . flip LeafExp float32
+
+-- | Shorthand for constructing a 'TPrimExp' of type 'Float64'.
+f64pe :: SubExp -> TPrimExp Double VName
+f64pe = isF64 . primExpFromSubExp float64
+
+-- | Shorthand for constructing a 'TPrimExp' of type 'Float64', from a leaf.
+f64le :: a -> TPrimExp Double a
+f64le = isF64 . flip LeafExp float64
 
 -- | Applying a monadic transformation to the leaves in a 'PrimExp'.
 replaceInPrimExpM ::

@@ -17,6 +17,7 @@ module Futhark.Util.Pretty
     nestedBlock,
     textwrap,
     shorten,
+    commastack,
   )
 where
 
@@ -90,3 +91,7 @@ shorten a
   | otherwise = text s
   where
     s = pretty a
+
+-- | Like 'commasep', but a newline after every comma.
+commastack :: [Doc] -> Doc
+commastack = align . stack . punctuate comma

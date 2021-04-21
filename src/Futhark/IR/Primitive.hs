@@ -69,6 +69,7 @@ module Futhark.IR.Primitive
     doSIToFP,
     intToInt64,
     intToWord64,
+    flipConvOp,
 
     -- * Comparison Operations
     doCmpOp,
@@ -169,7 +170,8 @@ data PrimType
   = IntType IntType
   | FloatType FloatType
   | Bool
-  | Cert
+  | -- | A zero-size type.
+    Unit
   deriving (Eq, Ord, Show)
 
 instance Enum PrimType where
@@ -180,7 +182,7 @@ instance Enum PrimType where
   toEnum 4 = FloatType Float32
   toEnum 5 = FloatType Float64
   toEnum 6 = Bool
-  toEnum _ = Cert
+  toEnum _ = Unit
 
   fromEnum (IntType Int8) = 0
   fromEnum (IntType Int16) = 1
@@ -189,24 +191,24 @@ instance Enum PrimType where
   fromEnum (FloatType Float32) = 4
   fromEnum (FloatType Float64) = 5
   fromEnum Bool = 6
-  fromEnum Cert = 7
+  fromEnum Unit = 7
 
 instance Bounded PrimType where
   minBound = IntType Int8
-  maxBound = Cert
+  maxBound = Unit
 
 instance Pretty PrimType where
   ppr (IntType t) = ppr t
   ppr (FloatType t) = ppr t
   ppr Bool = text "bool"
-  ppr Cert = text "cert"
+  ppr Unit = text "unit"
 
 -- | A list of all primitive types.
 allPrimTypes :: [PrimType]
 allPrimTypes =
   map IntType allIntTypes
     ++ map FloatType allFloatTypes
-    ++ [Bool, Cert]
+    ++ [Bool, Unit]
 
 -- | An integer value.
 data IntValue
@@ -297,8 +299,8 @@ data PrimValue
   = IntValue !IntValue
   | FloatValue !FloatValue
   | BoolValue !Bool
-  | -- | The only value of type @cert@.
-    Checked
+  | -- | The only value of type 'Unit'.
+    UnitValue
   deriving (Eq, Ord, Show)
 
 instance Pretty PrimValue where
@@ -306,14 +308,14 @@ instance Pretty PrimValue where
   ppr (BoolValue True) = text "true"
   ppr (BoolValue False) = text "false"
   ppr (FloatValue v) = ppr v
-  ppr Checked = text "checked"
+  ppr UnitValue = text "()"
 
 -- | The type of a basic value.
 primValueType :: PrimValue -> PrimType
 primValueType (IntValue v) = IntType $ intValueType v
 primValueType (FloatValue v) = FloatType $ floatValueType v
 primValueType BoolValue {} = Bool
-primValueType Checked = Cert
+primValueType UnitValue = Unit
 
 -- | A "blank" value of the given primitive type - this is zero, or
 -- whatever is close to it.  Don't depend on this value, but use it
@@ -326,7 +328,7 @@ blankPrimValue (IntType Int64) = IntValue $ Int64Value 0
 blankPrimValue (FloatType Float32) = FloatValue $ Float32Value 0.0
 blankPrimValue (FloatType Float64) = FloatValue $ Float64Value 0.0
 blankPrimValue Bool = BoolValue False
-blankPrimValue Cert = Checked
+blankPrimValue Unit = UnitValue
 
 -- | Various unary operators.  It is a bit ad-hoc what is a unary
 -- operator and what is a built-in function.  Perhaps these should all
@@ -851,6 +853,20 @@ doConvOp (IToB _) (IntValue v) = Just $ BoolValue $ intToInt64 v /= 0
 doConvOp (BToI to) (BoolValue v) = Just $ IntValue $ intValue to $ if v then 1 else 0 :: Int
 doConvOp _ _ = Nothing
 
+-- | Turn the conversion the other way around.  Note that most
+-- conversions are lossy, so there is no guarantee the value will
+-- round-trip.
+flipConvOp :: ConvOp -> ConvOp
+flipConvOp (ZExt from to) = ZExt to from
+flipConvOp (SExt from to) = SExt to from
+flipConvOp (FPConv from to) = FPConv to from
+flipConvOp (FPToUI from to) = UIToFP to from
+flipConvOp (FPToSI from to) = SIToFP to from
+flipConvOp (UIToFP from to) = FPToSI to from
+flipConvOp (SIToFP from to) = FPToSI to from
+flipConvOp (IToB from) = BToI from
+flipConvOp (BToI to) = IToB to
+
 -- | Zero-extend the given integer value to the size of the given
 -- type.  If the type is smaller than the given value, the result is a
 -- truncation.
@@ -1369,7 +1385,7 @@ negativeIsh (IntValue k) = negativeIshInt k
 negativeIsh (FloatValue (Float32Value k)) = k < 0
 negativeIsh (FloatValue (Float64Value k)) = k < 0
 negativeIsh (BoolValue _) = False
-negativeIsh Checked = False
+negativeIsh UnitValue = False
 
 -- | Is the given integer value kind of zero?
 zeroIshInt :: IntValue -> Bool
@@ -1401,7 +1417,7 @@ primByteSize :: Num a => PrimType -> a
 primByteSize (IntType t) = intByteSize t
 primByteSize (FloatType t) = floatByteSize t
 primByteSize Bool = 1
-primByteSize Cert = 1
+primByteSize Unit = 1
 
 -- | The size of a value of a given integer type in eight-bit bytes.
 intByteSize :: Num a => IntType -> a
