@@ -213,25 +213,21 @@ compileOp (Gather memory type_size) = do
         uint size_remainder = $type_size *(nb_elements % ctx->world_size);
         // Euclidian division, cannot be simplified.
         uint size = $type_size*(nb_elements / ctx->world_size);
-        if(!ctx->rank){
-          int *recvcounts = malloc(ctx->world_size * sizeof(int));
-          int *displs = malloc(ctx->world_size * sizeof(int));
 
-          recvcounts[0] = size + size_remainder;
-          displs[0] = 0;
-          for(int i = 1; i < ctx->world_size; i++){
-            recvcounts[i] = size;
-            displs[i] = recvcounts[i-1] + displs[i-1];
-          }
-          MPI_Gatherv($id:memory.mem, recvcounts[ctx->rank], MPI_BYTE,
-          $id:memory.mem, recvcounts, displs, MPI_BYTE, 0, MPI_COMM_WORLD);
-          free(recvcounts);
-          free(displs);
-        }else{
-          int start = size*ctx->rank + size_remainder;
-          MPI_Gatherv($id:memory.mem+start, size, MPI_BYTE,
-          NULL, NULL, NULL, MPI_BYTE, 0, MPI_COMM_WORLD);
+        int *recvcounts = malloc(ctx->world_size * sizeof(int));
+        int *displs = malloc(ctx->world_size * sizeof(int));
+
+        recvcounts[0] = size + size_remainder;
+        displs[0] = 0;
+        for(int i = 1; i < ctx->world_size; i++){
+          recvcounts[i] = size;
+          displs[i] = recvcounts[i-1] + displs[i-1];
         }
+
+        MPI_Allgatherv($id:memory.mem+displs[ctx->rank], recvcounts[ctx->rank], MPI_BYTE,
+        $id:memory.mem, recvcounts, displs, MPI_BYTE, MPI_COMM_WORLD);
+        free(recvcounts);
+        free(displs);
       }
     |]
 compileOp (DistributedLoop _s i prebody body postbody _ _) = do
