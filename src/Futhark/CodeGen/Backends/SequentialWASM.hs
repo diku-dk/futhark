@@ -316,7 +316,6 @@ jsWrapEntryPoint jse =
   init,
   paramsToPtr,
   -- TODO CHange line below
-  "     var dataHeap0 = initData(new Int32Array(1));",
   "    futhark_entry_" ++ func_name ++ "(this.ctx, " ++ rets ++ ", " ++ args1 ++ ");",
   results,  
   "    futhark_context_sync(this.ctx);",
@@ -358,15 +357,28 @@ ptrFromWrap =
 
 cwrapEntryPoint :: JSEntryPoint -> String
 cwrapEntryPoint jse = 
-  unlines 
-  ["    futhark_entry_" ++ ename ++ " = ",
-   "      Module.cwrap(", 
-   "        'futhark_entry_" ++ ename ++ "', 'number', " ++ args,
-   "      );"]
+  T.unpack [text| 
+    futhark_entry_${ename} = 
+      Module.cwrap(
+        'futhark_entry_${ename}', 'number', ${args}
+      );
+   |]
    where
-    ename = name jse
+    ename = T.pack $ name jse
     arg_length = (length (parameters jse)) + (length (ret jse))
-    args = "['number'" ++ (concat (replicate  arg_length ", 'number'")) ++ "]"
+    args = T.pack $ "['number'" ++ (concat (replicate  arg_length ", 'number'")) ++ "]"
+
+--cwrapEntryPoint :: JSEntryPoint -> String
+--cwrapEntryPoint jse = 
+--  unlines 
+--  ["    futhark_entry_" ++ ename ++ " = ",
+--   "      Module.cwrap(", 
+--   "        'futhark_entry_" ++ ename ++ "', 'number', " ++ args,
+--   "      );"]
+--   where
+--    ename = name jse
+--    arg_length = (length (parameters jse)) + (length (ret jse))
+--    args = T.pack "['number'" ++ (concat (replicate  arg_length ", 'number'")) ++ "]"
 
 
 inits :: Int -> EntryPointTyp -> String
