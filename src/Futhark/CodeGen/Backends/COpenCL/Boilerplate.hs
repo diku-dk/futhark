@@ -16,6 +16,7 @@ module Futhark.CodeGen.Backends.COpenCL.Boilerplate
     costCentreReport,
     kernelRuntime,
     kernelRuns,
+    sizeLoggingCode,
   )
 where
 
@@ -28,6 +29,7 @@ import Futhark.CodeGen.Backends.GenericC.Options
 import Futhark.CodeGen.ImpCode.OpenCL
 import Futhark.CodeGen.OpenCL.Heuristics
 import Futhark.Util (chunk, zEncodeString)
+import Futhark.Util.Pretty (prettyOneLine)
 import qualified Language.C.Quote.OpenCL as C
 import qualified Language.C.Syntax as C
 
@@ -666,6 +668,17 @@ sizeHeuristicsCode (SizeHeuristic platform_name device_type which (TPrimExp what
         Just _ -> return ()
 
       return [C.cexp|$id:v|]
+
+-- Output size information if logging is enabled.
+--
+-- The autotuner depends on the format of this output, so use caution if
+-- changing it.
+sizeLoggingCode :: VName -> Name -> C.Exp -> GC.CompilerM op () ()
+sizeLoggingCode v key x' = do
+  GC.stm
+    [C.cstm|if (ctx->logging) {
+    fprintf(ctx->log, "Compared %s <= %ld: %s.\n", $string:(prettyOneLine key), (long)$exp:x', $id:v ? "true" : "false");
+    }|]
 
 -- Options that are common to multiple GPU-like backends.
 commonOptions :: [Option]

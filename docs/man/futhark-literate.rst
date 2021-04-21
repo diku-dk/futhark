@@ -189,13 +189,19 @@ FUTHARKSCRIPT
 Only an extremely limited subset of Futhark is supported:
 
 .. productionlist::
-   scriptexp:   `fun` `scriptexp`*
-            : | "(" `scriptexp` ")"
-            : | "(" `scriptexp` ( "," `scriptexp` )+ ")"
+   script_exp:   `fun` `script_exp`*
+            : | "(" `script_exp` ")"
+            : | "(" `script_exp` ( "," `script_exp` )+ ")"
+            : | "[" `script_exp` ( "," `script_exp` )+ "]"
+            : | "empty" "(" ("[" `decimal` "]" )+ `script_type` ")"
             : | "{" "}"
-            : | "{" (`id` = `scriptexp`) ("," `id` = `scriptexp`)* "}"
+            : | "{" (`id` = `script_exp`) ("," `id` = `script_exp`)* "}"
             : | `literal`
-   fun:  `id` | "$" `id`
+   script_fun:  `id` | "$" `id`
+   script_type: `int_type` | `float_type` | "bool"
+
+Note that empty arrays must be written using the ``empty(t)``
+notation, e.g. ``empty([0]i32)``.
 
 Function applications are either of Futhark funtions or *builtin
 functions*.  The latter are prefixed with ``$`` and are magical

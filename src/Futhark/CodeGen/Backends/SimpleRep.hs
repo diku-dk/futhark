@@ -65,7 +65,7 @@ primTypeToCType :: PrimType -> C.Type
 primTypeToCType (IntType t) = intTypeToCType t
 primTypeToCType (FloatType t) = floatTypeToCType t
 primTypeToCType Bool = [C.cty|typename bool|]
-primTypeToCType Cert = [C.cty|typename bool|]
+primTypeToCType Unit = [C.cty|typename bool|]
 
 -- | The C type corresponding to a primitive type.  Integers are
 -- assumed to have the specified sign.
@@ -174,7 +174,7 @@ instance C.ToExp PrimValue where
   toExp (FloatValue v) = C.toExp v
   toExp (BoolValue True) = C.toExp (1 :: Int8)
   toExp (BoolValue False) = C.toExp (0 :: Int8)
-  toExp Checked = C.toExp (1 :: Int8)
+  toExp UnitValue = C.toExp (1 :: Int8)
 
 instance C.ToExp SubExp where
   toExp (Var v) = C.toExp v
@@ -1081,7 +1081,7 @@ typeStr :: Signedness -> PrimType -> String
 typeStr sign pt =
   case (sign, pt) of
     (_, Bool) -> "bool"
-    (_, Cert) -> "bool"
+    (_, Unit) -> "bool"
     (_, FloatType Float32) -> " f32"
     (_, FloatType Float64) -> " f64"
     (TypeDirect, IntType Int8) -> "  i8"

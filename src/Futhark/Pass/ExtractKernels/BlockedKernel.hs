@@ -24,6 +24,7 @@ import Control.Monad.Writer
 import Data.List ()
 import Futhark.Analysis.PrimExp
 import Futhark.IR
+import Futhark.IR.Prop.Aliases
 import Futhark.IR.SegOp
 import Futhark.MonadFreshNames
 import Futhark.Tools
@@ -37,7 +38,8 @@ type DistLore lore =
     BinderOps lore,
     LetDec lore ~ Type,
     ExpDec lore ~ (),
-    BodyDec lore ~ ()
+    BodyDec lore ~ (),
+    CanBeAliased (Op lore)
   )
 
 data ThreadRecommendation = ManyThreads | NoRecommendation SegVirt

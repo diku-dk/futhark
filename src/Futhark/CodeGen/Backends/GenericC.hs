@@ -1791,7 +1791,7 @@ compilePrimValue (BoolValue b) =
   where
     b' :: Int
     b' = if b then 1 else 0
-compilePrimValue Checked =
+compilePrimValue UnitValue =
   [C.cexp|0|]
 
 derefPointer :: C.Exp -> C.Exp -> C.Type -> C.Exp
