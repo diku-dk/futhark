@@ -169,5 +169,5 @@ compileSegOp pat (SegRed _ space reds _ kbody) ntasks =
   compileSegRed pat space reds kbody ntasks
 compileSegOp pat (SegMap _ space _ kbody) _ =
   compileSegMap pat space kbody
-compileSegOp pat (SegStencil _ space sten _ kbody) ntasks =
-  compileSegStencil pat space sten kbody ntasks
+compileSegOp pat (SegStencil _ space sten _ kbody) _ =
+  compileSegStencil pat space sten kbody

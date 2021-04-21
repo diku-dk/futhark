@@ -12,16 +12,13 @@ import Futhark.CodeGen.ImpGen
 import Futhark.CodeGen.ImpGen.Multicore.Base
 import Futhark.IR.MCMem
 
-import Debug.Trace (trace)
-
 compileSegStencil ::
   Pattern MCMem ->
   SegSpace ->
   StencilOp MCMem ->
   KernelBody MCMem ->
-  TV Int32 ->
   MulticoreGen Imp.Code
-compileSegStencil pat space sten kbody nsubtasks = collect $ do
+compileSegStencil pat space sten kbody = collect $ do
   emit $ Imp.DebugPrint "SegStencil" Nothing
   let sten_idxs = stencilIndexes sten
       sten_lam = stencilOp sten
@@ -39,15 +36,15 @@ compileSegStencil pat space sten kbody nsubtasks = collect $ do
     sComment "kernel body" $
       compileStms mempty (kernelBodyStms kbody) $ do
         -- create expressions for actual (bounded) indices
-        -- let idxs = flip map (zip sten_idxs ns') $ \(idxs', n') ->
-        --       flip map idxs' $ \idx -> sMin64 (n' - 1) (sMax64 0 (tvExp iter + fromInteger idx))
         let idxs = stencilIdxs (tvExp iter) (zip sten_idxs ns')
         let idxs_with_vnames = concatMap (\vn -> map (vn,) (transpose idxs)) arrs
 
+        dLParams const_params
+        forM_ (zip const_params kbres) $ \(param, r) -> do
+          copyDWIMFix (paramName param) [] r []
+
         dLParams sten_params
-        let names = ["a", "b", "c", "x", "y", "z"]
-        forM_ (zip3 sten_params idxs_with_vnames names) $ \(param, (arr, idxs'), name) -> do
-          forM_ idxs' $ \idx -> emit $ Imp.DebugPrint ("point " ++ name ++ " param " ++ (show $ paramName param) ++ ": ") $ Just (untyped idx)
+        forM_ (zip sten_params idxs_with_vnames) $ \(param, (arr, idxs')) -> do
           copyDWIMFix (paramName param) [] (Var arr) idxs'
 
         compileStms mempty (bodyStms $ lambdaBody sten_lam) $
@@ -63,7 +60,7 @@ stencilIdxs ::
   Imp.TExp Int64 ->
   [([Integer], Imp.TExp Int64)] -> 
   [[Imp.TExp Int64]]
-stencilIdxs flat_iter [] = error "Impossible! 0-dimensional array???"
+stencilIdxs _ [] = error "StencilIdxs called on 0-dimensional array???"
 stencilIdxs flat_iter [(idxs, n)] =
   let idxs' = flip map idxs $ \idx -> sMin64 (n - 1) (sMax64 0 (flat_iter + fromInteger idx))
   in [idxs']
