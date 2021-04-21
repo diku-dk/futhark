@@ -125,6 +125,7 @@ resDataHeap :: Int -> String -> String
 resDataHeap idx arrType = 
   "    var res" ++ show idx ++ " = new " ++ arrType ++ "(dataHeap" ++ show idx ++ ".buffer," ++
   " dataHeap" ++ show idx ++ ".byteOffset, 1);"
+
                             
 javascriptWrapper :: [JSEntryPoint] -> String
 javascriptWrapper entryPoints = unlines 
@@ -312,8 +313,7 @@ jsWrapEntryPoint :: JSEntryPoint -> String
 jsWrapEntryPoint jse =
   unlines
   ["  " ++ func_name ++ "(" ++ args1 ++ ") {",
-  --inits,
-  initPtrs,
+  init,
   paramsToPtr,
   -- TODO CHange line below
   "     var dataHeap0 = initData(new Int32Array(1));",
@@ -327,8 +327,7 @@ jsWrapEntryPoint jse =
     alr = [0..(length (ret jse)) - 1]
     alp = [0..(length (parameters jse)) - 1]
     convTypes = map typeConversion $ ret jse
-    --inits = unlines $ map (\i -> initDataHeap i (convTypes !! i)) alr
-    initPtrs = unlines $ map (\i -> initPtr i (ret jse !! i)) alr
+    init = unlines $ map (\i -> inits i (ret jse !! i)) alr
     results = unlines $ map (\i -> if (ret jse !! i) !! 0 == '[' then "" else resDataHeap i (convTypes !! i)) alr
     rets = intercalate ", " [retPtrOrOther i jse "dataHeap" ".byteOffset" ptrRes | i <- alr]
     args1 = intercalate ", " ["in" ++ show i | i <- alp]
@@ -370,13 +369,17 @@ cwrapEntryPoint jse =
     args = "['number'" ++ (concat (replicate  arg_length ", 'number'")) ++ "]"
 
 
-initPtr :: Int -> EntryPointTyp -> String
-initPtr argNum ep =
-  let (i, _) = retType ep
+inits :: Int -> EntryPointTyp -> String
+inits argNum ep =
+  let (i, typ) = retType ep
   in 
     if i == 0 
-    then "" else 
+    then initNotPtr i typ else 
     makePtr argNum
+
+initNotPtr :: Integer -> String -> String
+initNotPtr i typ = 
+  "var dataHeap" ++ show i ++ " = initData(new " ++ typeConversion typ ++ "(1));"
 
 makePtr :: Int -> String 
 makePtr i = "    var res" ++ show i ++ " = Module._malloc(8);"
