@@ -28,18 +28,6 @@ var typToType = { '  i8' : Int8Array ,
               // TODO implement bool here
              };
 
-function getAllFuncs(toCheck) {
-    var props = [];
-    var obj = toCheck;
-    do {
-        props = props.concat(Object.getOwnPropertyNames(obj));
-    } while (obj = Object.getPrototypeOf(obj));
-
-    return props.sort().filter(function(e, i, arr) { 
-       if (e!=arr[i+1] && typeof toCheck[e] == 'function') return true;
-    });
-}
-
 function binToStringArray(buff, array) {
   for (var i = 0; i < array.length; i++) {
     array[i] = buff[i];
@@ -126,8 +114,6 @@ var typToSize = {
 
 
 function construct_binary_value(v) {
-  console.log(v);
-  console.log(getAllFuncs(v));
   var bytes = v.bytes_per_element();
   var shape = v.shape();
   var values = v.values();
@@ -138,8 +124,6 @@ function construct_binary_value(v) {
     }
   }
   var num_bytes = 1 + 1 + 1 + 4 + (shape.length) * 8 + elems * bytes;
-  console.log(num_bytes);
-
 
   var bytes = new Uint8Array(num_bytes);
   bytes[0] = Buffer.from('b').readUInt8();
@@ -159,10 +143,6 @@ function construct_binary_value(v) {
   }
 
   var val_bytes = new Uint8Array(values.buffer, values.byteOffset, values.length);
-  console.log(values);
-  console.log(values.buffer, values.byteOffset, values.length);
-  console.log(val_bytes);
-  console.log(7 + shape.length * 8);
   bytes.set(val_bytes, 7 + (shape.length * 8));
   
   //return a buffer needed by appendFile instead of a uint8array
@@ -251,10 +231,3 @@ function read_value(typename, reader) {
   var val = reader.read_binary();
   return val;
 }
-
-//var r = new Reader("data2.in");
-//console.log("r is ", r);
-//var val = read_value(0, r);
-//console.log(val);
-//var val2 = read_value(0, r);
-//console.log(val2);

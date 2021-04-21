@@ -122,11 +122,7 @@ class Server {
       //TODO make sure file is open in binary mode
       var fs = require("fs");
       var bin_val = construct_binary_value(this._vars[vname]);
-      console.log("What does bin val look like??");
-      console.log(bin_val);
-      fs.appendFile(fname, bin_val, 'binary', (err) => {
-      if (err) throw err;
-      });
+      fs.appendFileSync(fname, bin_val, 'binary')
     }
   }
 
@@ -189,9 +185,7 @@ class Server {
         throw "Failed to restore variable " + err_msg;
       }
     }
-    console.log("skipping spaces");
     skip_spaces(reader);
-    console.log("skipped spaces");
     if (reader.get_buff().length != 0) {
       throw "Expected EOF after reading values";
     }
