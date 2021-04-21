@@ -27,6 +27,7 @@ import Futhark.Util.Pretty (prettyText)
 import Futhark.Util.Table
 import System.Console.ANSI
 import qualified System.Console.Terminal.Size as Terminal
+import System.Directory
 import System.Environment
 import System.Exit
 import System.FilePath
@@ -235,6 +236,11 @@ runTestCase (TestCase mode program testcase progs) = do
           ExitSuccess -> return ()
           ExitFailure 127 -> throwError $ progNotFound $ T.pack futhark
           ExitFailure _ -> throwError $ T.decodeUtf8 err
+    RunCases ios _ _ | mode == SkipCompile -> do
+      exists <- liftIO $ doesFileExist $ binaryName program
+      if exists
+        then runCompiledProgram (FutharkExe futhark) program progs ios
+        else throwError $ T.pack (binaryName program) <> " does not exist, but --skip-compilation passed.\n"
     RunCases ios structures warnings -> do
       -- Compile up-front and reuse same executable for several entry points.
       let backend = configBackend progs
@@ -250,19 +256,22 @@ runTestCase (TestCase mode program testcase progs) = do
         context ("Compiling with --backend=" <> T.pack backend) $ do
           compileTestProgram extra_compiler_options (FutharkExe futhark) backend program warnings
           mapM_ (testMetrics progs program) structures
-          unless (mode == Compile) $ do
-            (tuning_opts, _) <-
-              liftIO $ determineTuning (configTuning progs) program
-            let extra_options = tuning_opts ++ configExtraOptions progs
-                runner = configRunner progs
-            context "Running compiled program" $
-              withProgramServer program runner extra_options $ \server -> do
-                let run = runCompiledEntry (FutharkExe futhark) server program
-                concat <$> mapM run ios
+          unless (mode == Compile) $ runCompiledProgram (FutharkExe futhark) program progs ios
 
       unless (mode == Compile || mode == Compiled) $
         context "Interpreting" $
           accErrors_ $ map (runInterpretedEntry (FutharkExe futhark) program) ios
+
+runCompiledProgram :: FutharkExe -> FilePath -> ProgConfig -> [InputOutputs] -> TestM ()
+runCompiledProgram (FutharkExe futhark) program progs ios = do
+  (tuning_opts, _) <-
+    liftIO $ determineTuning (configTuning progs) program
+  let extra_options = tuning_opts ++ configExtraOptions progs
+      runner = configRunner progs
+  context "Running compiled program" $
+    withProgramServer program runner extra_options $ \server -> do
+      let run = runCompiledEntry (FutharkExe futhark) server program
+      concat <$> mapM run ios
 
 liftCommand ::
   (MonadError T.Text m, MonadIO m) =>
@@ -661,6 +670,7 @@ data TestMode
   | Compile
   | Compiled
   | Interpreted
+  | SkipCompile
   | Everything
   deriving (Eq, Show)
 
@@ -676,6 +686,11 @@ commandLineOptions =
       ["interpreted"]
       (NoArg $ Right $ \config -> config {configTestMode = Interpreted})
       "Only interpret",
+    Option
+      []
+      ["skip-compilation"]
+      (NoArg $ Right $ \config -> config {configTestMode = SkipCompile})
+      "Use already compiled program.",
     Option
       "c"
       ["compiled"]
