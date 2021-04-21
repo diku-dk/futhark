@@ -81,7 +81,7 @@ compileSegStencil pat lvl space op kbody =
           printf text = emit . Imp.DebugPrint text . Just . untyped
           computeReuses works hws = do
             let tileReads = zipWith (*) uses_exp works
-                weights = 1 : cycle [3]
+                weights = 1 : repeat 3
             tileReadsWeighed <- mapM (dPrimVE "tileReadsWeighed") $ reverse $ zipWith (*) weights $ reverse tileReads
             let tileWrites = zipWith (+) hws works
             weighedReuseFactors <- mapM (dPrimVE "weighedReuseFactors") $ zipWith div tileReadsWeighed tileWrites
@@ -99,7 +99,7 @@ compileSegStencil pat lvl space op kbody =
             stripTileSizes <- mapM (dPrimVE "stripTileSizes") $ zipWith (*) group_sizes_exp strip_multiples_exp
             stripTileElems <- dPrimVE "stripTileElems" $ product $ zipWith (+) halo_widths_exp stripTileSizes
             stripTileBytes <- dPrimVE "stripTileBytes" $ stripTileElems * fromInteger memory_per_elem
-            canRunStripTile <- dPrimVE "canRunStripTile" $ (stripTileBytes .<=. max_shared_bytes)
+            canRunStripTile <- dPrimVE "canRunStripTile" $ stripTileBytes .<=. max_shared_bytes
             reuseIsHighEnough <- dPrimVE "reuseIsHighEnoughST" =<< computeReuses stripTileSizes halo_widths_exp
             isNotSkewed <- dPrimVE "isNotSkewedST" $ foldl1 (.&&.) $ zipWith (.<=.) stripTileSizes dims
             printf "can_run_strips" canRunStripTile
@@ -109,7 +109,7 @@ compileSegStencil pat lvl space op kbody =
       let can_and_should_run_tile_m = do
             tileElems <- dPrimVE "tileElems" $ product $ zipWith (+) halo_widths_exp group_sizes_exp
             tileBytes <- dPrimVE "tileBytes" $ tileElems * fromInteger memory_per_elem
-            canRunTile <- dPrimVE "canRunTile" $ (tileBytes .<=. max_shared_bytes)
+            canRunTile <- dPrimVE "canRunTile" $ tileBytes .<=. max_shared_bytes
             reuseIsHighEnough <- dPrimVE "reuseIsHighEnoughT" =<< computeReuses group_sizes_exp halo_widths_exp
             isNotSkewed <- dPrimVE "isNotSkewedT" $ foldl1 (.&&.) $ zipWith (.<=.) group_sizes_exp dims
             printf "can_run_tile" canRunTile
@@ -120,7 +120,7 @@ compileSegStencil pat lvl space op kbody =
 
       can_and_should_run_stripTile <- can_and_should_run_stripTile_m
       printf "can_and_should_run_stripTile" can_and_should_run_stripTile
-      emit $ Imp.DebugPrint "\n" $ Nothing
+      emit $ Imp.DebugPrint "\n" Nothing
       sIf can_and_should_run_stripTile
         (compileBigTileStripMinedSingleDim pat lvl space op kbody group_sizes_exp strip_multiples)
         (do
@@ -234,7 +234,7 @@ compileGlobalReadFlat pat lvl space op kbody = do
     gid_flat <- dPrimVE "global_id_flat" $ group_id_flat * group_size_flat + local_id_flat
     gids <- map tvExp <$> unflattenIx "global_id" size_span gid_flat
     zipWithM_ dPrimV_ is gids
-    max_ixs <- mapM (dPrimVE "max_ixs") $ map (\x->x-1) dims
+    max_ixs <- mapM (dPrimVE "max_ixs" . (\x->x-1)) dims
 
     -- check for out of bound on global id for each axis
     sWhen (isActive $ unSegSpace space) $ do
@@ -248,7 +248,7 @@ compileGlobalReadFlat pat lvl space op kbody = do
       let bound_ixs = zipWith sMin64 max_ixs . map (sMax64 0)
           param_tups = transpose $ chunksOf n_point_stencil variantParams
           par_relIxs_pairs = zip (transpose (stencilIndexes op)) param_tups
-          (sorted_ixs, sorted_params_tup) = unzip $ sortOn fst $ par_relIxs_pairs
+          (sorted_ixs, sorted_params_tup) = unzip $ sortOn fst par_relIxs_pairs
           fetch_ixs = map bound_ixs
                     $ transpose
                     $ flip (zipWith (mapM (+))) gids
@@ -472,7 +472,7 @@ compileBigTileStripMinedSingleDim pat _ space op kbody group_sizes_exp strip_mul
   strip_grid <- propagateConst "strip_grid" $ map sExt32 $ zipWith divUp dims $ map sExt64 strip_sizes
   strip_grid_spans <- propagateConst "strip_grid_spans" $ createSpans strip_grid
   tile_length <- dPrimV "tile_length_flat" shared_size_flat
-  num_groups <- Count <$> (dPrimVE "num_groups" $ sExt64 $ product strip_grid)
+  num_groups <- Count <$> dPrimVE "num_groups" (sExt64 $ product strip_grid)
 
   sKernelThread "segstencil-stripbigtile" num_groups block_size_c (segFlat space) $ do
     -- declaration of shared tile(s)
@@ -484,7 +484,7 @@ compileBigTileStripMinedSingleDim pat _ space op kbody group_sizes_exp strip_mul
     strip_id_flat <- dPrimVEC "strip_id_flat" . kernelGroupId $ constants
     strip_ids <- map tvExp <$> unflattenIx "strip_id" strip_grid_spans strip_id_flat
 
-    max_ixs <- mapM (dPrimVE "max_ixs") $ map (\x->x-1) dims
+    max_ixs <- mapM (dPrimVE "max_ixs" . (\x->x-1)) dims
     let bound_idxs = zipWith sMin64 max_ixs . map (sMax64 0)
     writeSet_offsets <- propagateConst "writeSet_offset" $
       zipWith (*) (map sExt64 strip_ids) (map sExt64 strip_sizes)
