@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * FutharkScript now also supports arrays and scientific notation.
 
+  * Added `f32.epsilon` and `f64.epsilon` for the difference between
+    1.0 and the next larger representable number.
+
 ### Removed
 
 ### Changed
