@@ -33,6 +33,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * `futhark autotune` now works with the `cuda` backend (#1312).
 
+  * Devious fusion bug (#1322) causing compiler crashes.
+
 ## [0.19.4]
 
 ### Fixed
