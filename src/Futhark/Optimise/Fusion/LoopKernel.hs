@@ -593,7 +593,7 @@ fuseStreamHelper
                 inp2_arr
             res_lam'' = res_lam' {lambdaParams = chunk1 : lambdaParams res_lam'}
             unfus_accs = take (length nes1) outVars
-            unfus_arrs = filter (`nameIn` unfus_set) outVars
+            unfus_arrs = filter (`notElem` unfus_accs) $ filter (`nameIn` unfus_set) outVars
         res_form <- mergeForms form2 form1
         return
           ( unfus_accs ++ out_kernms ++ unfus_arrs,
