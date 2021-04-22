@@ -804,10 +804,6 @@ fusionGatherStms fres [] res =
   foldM fusionGatherExp fres $ map (BasicOp . SubExp) res
 
 fusionGatherExp :: FusedRes -> Exp -> FusionGM FusedRes
------------------------------------------
----- Index/If    ----
------------------------------------------
-
 fusionGatherExp fres (DoLoop ctx val form loop_body) = do
   fres' <- addNamesToInfusible fres $ freeIn form <> freeIn ctx <> freeIn val
   let form_idents =
