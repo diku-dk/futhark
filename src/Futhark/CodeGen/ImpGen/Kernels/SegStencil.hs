@@ -32,14 +32,18 @@ compileSegStencil pat lvl space op kbody =
       let dims = map (TPrimExp . toExp' int32 . snd) $ unSegSpace space
           stencil_indexes = stencilIndexes op
           dimentionality = length stencil_indexes
-          group_size_flat_exp = unCount (TPrimExp . toExp' int32 <$> segGroupSize lvl)
+          group_size_flat_subexp = unCount $ segGroupSize lvl
+          group_size_flat_exp = TPrimExp . toExp' int32 $ group_size_flat_subexp
+          flNumT2 x = 1 + (sMin32 1 (group_size_flat_exp `quot` x))
+          fl256t2 = flNumT2 256
+          fl512t2 = flNumT2 512
+          fl1024t2 = flNumT2 1024
           group_sizes_exp :: [Imp.TExp Int32]
           group_sizes_exp =
               case dimentionality of
                   1 -> [group_size_flat_exp]
                   2 -> [group_size_flat_exp `quot` 32, 32]
-                  3 -> let remainder = group_size_flat_exp `quot` 64
-                       in if (halo_widths!!1) /= 0 then [2, remainder, 32] else [2*remainder, 1, 32]
+                  3 -> [2*fl512t2,2*fl256t2*fl1024t2,32]
                   _ -> error "not valid dimensions"
           n_point_stencil = length $ head stencil_indexes
           n_invarElems = length $ map kernelResultSubExp $ kernelBodyResult kbody
@@ -60,7 +64,7 @@ compileSegStencil pat lvl space op kbody =
             case dimentionality of
               1 -> [1024]
               2 -> [32, 32]
-              3 -> if (halo_widths!!1) /= 0 then [2, 16, 32] else [32,1,32]
+              3 -> [4, 8, 32]
               _ -> error "not valid dimensions"
           -- This is lowest limit of allowed max shared memory per block for the
           -- supported Cuda compute capabilities (>= 3.0).
@@ -93,42 +97,31 @@ compileSegStencil pat lvl space op kbody =
         name <- dPrim "max_shared_bytes" int32
         sOp $ Imp.GetSizeMax (tvVar name) Imp.SizeLocalMemory
         pure $ tvExp name
-      aboveMinBlock <- dPrimVE "aboveMinBlock" $ 128 .<=. group_size_flat_exp
+      aboveMinBlock <- dPrimVE "aboveMinBlock" ((128 .<=. group_size_flat_exp))
       printf "aboveMinBlock" aboveMinBlock
-      let can_and_should_run_stripTile_m = do
-            stripTileSizes <- mapM (dPrimVE "stripTileSizes") $ zipWith (*) group_sizes_exp strip_multiples_exp
-            stripTileElems <- dPrimVE "stripTileElems" $ product $ zipWith (+) halo_widths_exp stripTileSizes
-            stripTileBytes <- dPrimVE "stripTileBytes" $ stripTileElems * fromInteger memory_per_elem
-            canRunStripTile <- dPrimVE "canRunStripTile" $ stripTileBytes .<=. max_shared_bytes
-            reuseIsHighEnough <- dPrimVE "reuseIsHighEnoughST" =<< computeReuses stripTileSizes halo_widths_exp
-            isNotSkewed <- dPrimVE "isNotSkewedST" $ foldl1 (.&&.) $ zipWith (.<=.) stripTileSizes dims
-            printf "can_run_strips" canRunStripTile
-            printf "reuseIsHighEnough_strips" reuseIsHighEnough
-            printf "isNotSkewed_strips" isNotSkewed
-            dPrimVE "can_and_should_run_stripTile" $ canRunStripTile .&&. reuseIsHighEnough .&&. isNotSkewed .&&. aboveMinBlock
-      let can_and_should_run_tile_m = do
-            tileElems <- dPrimVE "tileElems" $ product $ zipWith (+) halo_widths_exp group_sizes_exp
-            tileBytes <- dPrimVE "tileBytes" $ tileElems * fromInteger memory_per_elem
-            canRunTile <- dPrimVE "canRunTile" $ tileBytes .<=. max_shared_bytes
-            reuseIsHighEnough <- dPrimVE "reuseIsHighEnoughT" =<< computeReuses group_sizes_exp halo_widths_exp
-            isNotSkewed <- dPrimVE "isNotSkewedT" $ foldl1 (.&&.) $ zipWith (.<=.) group_sizes_exp dims
-            printf "can_run_tile" canRunTile
-            printf "reuseIsHighEnough_tile" reuseIsHighEnough
-            printf "isNotSkewed_tile" isNotSkewed
-            printf "aboveMinBlock_tile" aboveMinBlock
-            dPrimVE "can_and_should_run_tile" $ canRunTile .&&. reuseIsHighEnough .&&. isNotSkewed .&&. aboveMinBlock
+      can_and_should_run_stripTile <- do
+        host_strip_sizes <- mapM (dPrimVE "host_strip_sizes") $ zipWith (*) group_sizes_exp strip_multiples_exp
+        --stripTileSizes <- mapM (dPrimVE "stripTileSizes") $ zipWith (*) group_sizes_exp strip_multiples_exp
+        stripTileElems <- dPrimVE "stripTileElems" $ product $ zipWith (+) halo_widths_exp host_strip_sizes
+        stripTileBytes <- dPrimVE "stripTileBytes" $ stripTileElems * fromInteger memory_per_elem
+        printf "shared_size_max" max_shared_bytes
+        forM_ group_sizes_exp $ printf "group_sizes"
+        printf "stripTileBytes" stripTileBytes
+        canRunStripTile <- dPrimVE "canRunStripTile" $ stripTileBytes .<=. max_shared_bytes
+        reuseIsHighEnough <- dPrimVE "reuseIsHighEnoughST" =<< computeReuses host_strip_sizes halo_widths_exp
+        isNotSkewed <- dPrimVE "isNotSkewedST" $ foldl1 (.&&.) $ zipWith (.<=.) host_strip_sizes dims
+        printf "can_run_strips" canRunStripTile
+        printf "reuseIsHighEnough_strips" reuseIsHighEnough
+        printf "isNotSkewed_strips" isNotSkewed
+        dPrimVE "can_and_should_run_stripTile" $ canRunStripTile .&&. reuseIsHighEnough .&&. isNotSkewed .&&. aboveMinBlock
 
-      can_and_should_run_stripTile <- can_and_should_run_stripTile_m
+      printf "group_size_flat" $ product group_sizes_exp
       printf "can_and_should_run_stripTile" can_and_should_run_stripTile
       emit $ Imp.DebugPrint "\n" Nothing
       sIf can_and_should_run_stripTile
         (compileBigTileStripMinedSingleDim pat lvl space op kbody group_sizes_exp strip_multiples)
-        (do
-          can_and_should_run_tile <- can_and_should_run_tile_m
-          sIf can_and_should_run_tile
-            (compileBigTileStripMinedSingleDim pat lvl space op kbody group_sizes_exp $ map (const 1) group_sizes_exp)
-            (compileGlobalReadFlat pat lvl space op kbody)
-        )
+        (compileGlobalReadFlat pat lvl space op kbody)
+        -- spagheti happen if 2 kernels have the same 'name'
 
 createSpans :: Num a => [a] -> [a]
 createSpans = scanr1 (*) . tail
@@ -229,7 +222,7 @@ compileGlobalReadFlat pat lvl space op kbody = do
   sKernelThread "segstencil-globalRead" grid_flat group_size_flat_c (segFlat space) $ do
     constants <- kernelConstants <$> askEnv
     local_id_flat <- dPrimVE "local_id_flat" . sExt64 . kernelLocalThreadId $ constants
-    group_id_flat <- dPrimVE "strip_id_flat" . sExt64 . kernelGroupId $ constants
+    group_id_flat <- dPrimVE "group_id_flat" . sExt64 . kernelGroupId $ constants
 
     gid_flat <- dPrimVE "global_id_flat" $ group_id_flat * group_size_flat + local_id_flat
     gids <- map tvExp <$> unflattenIx "global_id" size_span gid_flat
@@ -417,11 +410,12 @@ calculateStripSetup
 calculateStripSetup group_sizes halo_widths max_memory memory_per_elem =
   let max_flat_length = max_memory `Prelude.quot` memory_per_elem
       inverse_weights = zipWith (\h g -> if h == 0 then max_flat_length else g) halo_widths group_sizes
+      arg_min = fst . minimumBy (\(_,x) (_,y) -> x `compare` y) . zip [0 :: Integer ..]
       go sm =
         let sl = zipWith (*) sm inverse_weights
-            min_ix = snd $ minimumBy (\(x,_) (y,_) -> x `compare` y) $ zip sl [0 :: Integer ..]
+            min_ix = arg_min sl
             next_sm = zipWith (\m i-> if i == min_ix then m*2 else m) sm [0..]
-            flat_length = product $ zipWith (*) next_sm group_sizes
+            flat_length = product $ zipWith (+) halo_widths $ zipWith (*) next_sm group_sizes
          in if flat_length > max_flat_length then sm else go next_sm
    in go $ map (const 1) group_sizes
 
@@ -469,8 +463,9 @@ compileBigTileStripMinedSingleDim pat _ space op kbody group_sizes_exp strip_mul
       block_size_c = Count $ sExt64 group_size_flat
 
   -- host side evaluated variables
-  strip_grid <- propagateConst "strip_grid" $ map sExt32 $ zipWith divUp dims $ map sExt64 strip_sizes
-  strip_grid_spans <- propagateConst "strip_grid_spans" $ createSpans strip_grid
+  host_strip_sizes <- mapM (dPrimVE "host_strip_sizes") strip_sizes
+  strip_grid <- mapM (dPrimVE "strip_grid") $ map sExt32 $ zipWith divUp dims $ map sExt64 host_strip_sizes
+  strip_grid_spans <- mapM (dPrimVE "strip_grid_spans") $ createSpans strip_grid
   tile_length <- dPrimV "tile_length_flat" shared_size_flat
   num_groups <- Count <$> dPrimVE "num_groups" (sExt64 $ product strip_grid)
 
@@ -502,7 +497,9 @@ compileBigTileStripMinedSingleDim pat _ space op kbody group_sizes_exp strip_mul
     -- could be rewriten to reshape the writer work block for better cache performance
     let nest_shape_const = Shape $ map (Constant . IntValue . intValue Int64) strip_multiples
     sLoopNest nest_shape_const $ \local_strip_ids -> do
-      tile_local_ids <- propagateConst "tile_local_id" $ zipWith (+) local_ids $ zipWith (*) (map sExt32 local_strip_ids) group_sizes
+      tile_local_ids <- propagateConst "tile_local_id"
+                      $ zipWith (+) local_ids
+                      $ zipWith (*) (map sExt32 local_strip_ids) group_sizes
       tile_local_id_flat <- dPrimVEC "tile_local_id_flat" $ flattenIx shared_sizes tile_local_ids
       let gids = zipWith (+) writeSet_offsets (map sExt64 tile_local_ids)
       zipWithM_ dPrimV_ is gids
