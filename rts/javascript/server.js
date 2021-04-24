@@ -80,7 +80,7 @@ class Server {
   _cmd_call(args) {
     var entry = this._get_entry_point(this._get_arg(args, 0));
     var num_ins = entry[0].length;
-    var num_outs = entry[0].length;
+    var num_outs = entry[1].length;
     var expected_len = 1 + num_outs + num_ins
 
     if (args.length != expected_len) {
@@ -165,7 +165,7 @@ class Server {
       }
       try {
         var value = read_value(typename, reader);
-        if (typeof value == 'number') {
+        if (typeof value == 'number' || typeof value == 'bigint') {
           this._vars[vname] = value;
         } else {
           // We are working with an array and need to create to convert [shape, arr] to futhark ptr

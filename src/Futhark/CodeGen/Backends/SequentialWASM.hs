@@ -345,8 +345,8 @@ ptrFromWrap :: String
 ptrFromWrap =
   T.unpack [text|
     function ptrFromWrap(x) {
-      if (typeof x == 'number') {
-        return x;
+      if (typeof x == 'number' || typeof x == 'bigint') {
+        return Number(x);
       }
       if (x.constructor.name == "ArrayWrapper") {
         return x.ptr;
@@ -447,8 +447,8 @@ fromFutharkArrayShape str =
   unlines
   ["from_futhark_shape_" ++ftype ++ "_" ++ show i ++  "d_arr(futhark_arr) {",
    "  var ptr = futhark_shape_" ++ ftype ++ "_" ++ show i ++ "d(" ++ intercalate ", " args1 ++  ");",
-   "  var dataHeap = new Uint8Array(Module.HEAPU8.buffer, ptr, 8 * "++ show i ++ ");",
-   " var result = new BigInt64Array(dataHeap.buffer, dataHeap.byteOffset, " ++ show i ++ ");",
+   "  var dataHeap = new Uint8Array(Module.HEAPU8.buffer, ptr, 4 * "++ show i ++ ");",
+   " var result = new Int32Array(dataHeap.buffer, dataHeap.byteOffset, " ++ show i ++ ");",
    " return result;",
    "}"]
   where
@@ -469,16 +469,16 @@ fromFutharkArrayValues str =
    "  var dims = this.from_futhark_shape_" ++ ftype ++ "_" ++ show i ++ "d_arr(fut_arr);",
    "  var length = Number(dims.reduce((a, b) => a * b));",
    "  var dataHeap = initData(new " ++ arrType ++ "(length));",
-   "  futhark_values_" ++ ftype ++ "_" ++ show i ++ "d(" ++ intercalate ", " args2 ++ ");",
+   "  var res = futhark_values_raw_" ++ ftype ++ "_" ++ show i ++ "d(" ++ intercalate ", " args2 ++ ");",
    dataHeapConv "length" arrType,
-   "  return dataHeapRes;",
+   "  return res;",
    "}"]
   where
   ctx = "this.ctx"
   fut_arr = "fut_arr"
   ofs = "dataHeap.byteOffset"
   args1 = [fut_arr]
-  args2 = [ctx, fut_arr, ofs]
+  args2 = [ctx, fut_arr]
   i = dim str
   ftype = baseType str
   arrType = jsType str
