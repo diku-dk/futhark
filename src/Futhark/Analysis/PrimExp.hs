@@ -632,7 +632,7 @@ x ~*~ y = BinOpExp op x y
       IntType it -> Mul it OverflowUndef
       FloatType ft -> FMul ft
       Bool -> LogAnd
-      Cert -> LogAnd
+      Unit -> LogAnd
 
 -- | Division of untyped 'PrimExps', which must have the same
 -- type.  For integers, this is unsafe signed division.
@@ -644,7 +644,7 @@ x ~/~ y = BinOpExp op x y
       IntType it -> SDiv it Unsafe
       FloatType ft -> FDiv ft
       Bool -> LogAnd
-      Cert -> LogAnd
+      Unit -> LogAnd
 
 -- | Addition of untyped 'PrimExps', which must have the same type.
 (~+~) :: PrimExp v -> PrimExp v -> PrimExp v
@@ -655,7 +655,7 @@ x ~+~ y = BinOpExp op x y
       IntType it -> Add it OverflowUndef
       FloatType ft -> FAdd ft
       Bool -> LogOr
-      Cert -> LogOr
+      Unit -> LogOr
 
 -- | Subtraction of untyped 'PrimExps', which must have the same type.
 (~-~) :: PrimExp v -> PrimExp v -> PrimExp v
@@ -666,7 +666,7 @@ x ~-~ y = BinOpExp op x y
       IntType it -> Sub it OverflowUndef
       FloatType ft -> FSub ft
       Bool -> LogOr
-      Cert -> LogOr
+      Unit -> LogOr
 
 infix 7 ~*~, ~/~
 

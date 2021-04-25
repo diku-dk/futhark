@@ -189,16 +189,16 @@ FUTHARKSCRIPT
 Only an extremely limited subset of Futhark is supported:
 
 .. productionlist::
-   scriptexp:   `fun` `scriptexp`*
-            : | "(" `scriptexp` ")"
-            : | "(" `scriptexp` ( "," `scriptexp` )+ ")"
-            : | "[" `scriptexp` ( "," `scriptexp` )+ "]"
-            : | "empty" "(" ("[" `decimal` "]" )+ `type` ")"
+   script_exp:   `fun` `script_exp`*
+            : | "(" `script_exp` ")"
+            : | "(" `script_exp` ( "," `script_exp` )+ ")"
+            : | "[" `script_exp` ( "," `script_exp` )+ "]"
+            : | "empty" "(" ("[" `decimal` "]" )+ `script_type` ")"
             : | "{" "}"
-            : | "{" (`id` = `scriptexp`) ("," `id` = `scriptexp`)* "}"
+            : | "{" (`id` = `script_exp`) ("," `id` = `script_exp`)* "}"
             : | `literal`
-   fun:  `id` | "$" `id`
-   type: `int_type` | `float_type` | "bool"
+   script_fun:  `id` | "$" `id`
+   script_type: `int_type` | `float_type` | "bool"
 
 Note that empty arrays must be written using the ``empty(t)``
 notation, e.g. ``empty([0]i32)``.

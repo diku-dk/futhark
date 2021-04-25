@@ -140,8 +140,8 @@ replaceStaticValSizes globals orig_substs sv =
           Literal (SignedValue (Int64Value (fromIntegral d))) loc
         Nothing ->
           Var v (replaceTypeSizes substs <$> t) loc
-    onExp substs (Coerce e tdecl t loc) =
-      Coerce (onExp substs e) tdecl' (first (fmap (replaceTypeSizes substs)) t) loc
+    onExp substs (AppExp (Coerce e tdecl loc) (Info (AppRes t ext))) =
+      AppExp (Coerce (onExp substs e) tdecl' loc) (Info (AppRes (replaceTypeSizes substs t) ext))
       where
         tdecl' =
           TypeDecl
@@ -475,11 +475,14 @@ defuncExp (RecordLit fs loc) = do
 defuncExp (ArrayLit es t@(Info t') loc) = do
   es' <- mapM defuncExp' es
   return (ArrayLit es' t loc, Dynamic t')
-defuncExp (Range e1 me incl t@(Info t', _) loc) = do
+defuncExp (AppExp (Range e1 me incl loc) res) = do
   e1' <- defuncExp' e1
   me' <- mapM defuncExp' me
   incl' <- mapM defuncExp' incl
-  return (Range e1' me' incl' t loc, Dynamic t')
+  return
+    ( AppExp (Range e1' me' incl' loc) res,
+      Dynamic $ appResType $ unInfo res
+    )
 defuncExp e@(Var qn (Info t) loc) = do
   sv <- lookupVar (toStruct t) (qualLeaf qn)
   case sv of
@@ -500,12 +503,12 @@ defuncExp (Ascript e0 tydecl loc)
     (e0', sv) <- defuncExp e0
     return (Ascript e0' tydecl loc, sv)
   | otherwise = defuncExp e0
-defuncExp (Coerce e0 tydecl t loc)
+defuncExp (AppExp (Coerce e0 tydecl loc) res)
   | orderZero (typeOf e0) = do
     (e0', sv) <- defuncExp e0
-    return (Coerce e0' tydecl t loc, sv)
+    return (AppExp (Coerce e0' tydecl loc) res, sv)
   | otherwise = defuncExp e0
-defuncExp (LetPat pat e1 e2 (Info t, retext) loc) = do
+defuncExp (AppExp (LetPat pat e1 e2 loc) (Info (AppRes t retext))) = do
   (e1', sv1) <- defuncExp e1
   let env = matchPatternSV pat sv1
       pat' = updatePattern pat sv1
@@ -516,24 +519,24 @@ defuncExp (LetPat pat e1 e2 (Info t, retext) loc) = do
   let mapping = dimMapping' (typeOf e2) t
       subst v = fromMaybe v $ M.lookup v mapping
       t' = first (fmap subst) $ typeOf e2'
-  return (LetPat pat' e1' e2' (Info t', retext) loc, sv2)
-defuncExp (LetFun vn _ _ _ _) =
+  return (AppExp (LetPat pat' e1' e2' loc) (Info (AppRes t' retext)), sv2)
+defuncExp (AppExp (LetFun vn _ _ _) _) =
   error $ "defuncExp: Unexpected LetFun: " ++ prettyName vn
-defuncExp (If e1 e2 e3 tp loc) = do
+defuncExp (AppExp (If e1 e2 e3 loc) res) = do
   (e1', _) <- defuncExp e1
   (e2', sv) <- defuncExp e2
   (e3', _) <- defuncExp e3
-  return (If e1' e2' e3' tp loc, sv)
-defuncExp e@(Apply f@(Var f' _ _) arg d (t, ext) loc)
+  return (AppExp (If e1' e2' e3' loc) res, sv)
+defuncExp e@(AppExp (Apply f@(Var f' _ _) arg d loc) res)
   | baseTag (qualLeaf f') <= maxIntrinsicTag,
     TupLit es tuploc <- arg = do
     -- defuncSoacExp also works fine for non-SOACs.
     es' <- mapM defuncSoacExp es
     return
-      ( Apply f (TupLit es' tuploc) d (t, ext) loc,
+      ( AppExp (Apply f (TupLit es' tuploc) d loc) res,
         Dynamic $ typeOf e
       )
-defuncExp e@Apply {} = defuncApply 0 e
+defuncExp e@(AppExp Apply {} _) = defuncApply 0 e
 defuncExp (Negate e0 loc) = do
   (e0', sv) <- defuncExp e0
   return (Negate e0' loc, sv)
@@ -546,7 +549,7 @@ defuncExp OpSectionLeft {} = error "defuncExp: unexpected operator section."
 defuncExp OpSectionRight {} = error "defuncExp: unexpected operator section."
 defuncExp ProjectSection {} = error "defuncExp: unexpected projection section."
 defuncExp IndexSection {} = error "defuncExp: unexpected projection section."
-defuncExp (DoLoop sparams pat e1 form e3 ret loc) = do
+defuncExp (AppExp (DoLoop sparams pat e1 form e3 loc) res) = do
   (e1', sv1) <- defuncExp e1
   let env1 = matchPatternSV pat sv1
   (form', env2) <- case form of
@@ -560,11 +563,11 @@ defuncExp (DoLoop sparams pat e1 form e3 ret loc) = do
       e2' <- localEnv env1 $ defuncExp' e2
       return (While e2', mempty)
   (e3', sv) <- localEnv (env1 <> env2) $ defuncExp e3
-  return (DoLoop sparams pat e1' form' e3' ret loc, sv)
+  return (AppExp (DoLoop sparams pat e1' form' e3' loc) res, sv)
   where
     envFromIdent (Ident vn (Info tp) _) =
       M.singleton vn $ Binding Nothing $ Dynamic tp
-defuncExp e@BinOp {} =
+defuncExp e@(AppExp BinOp {} _) =
   error $ "defuncExp: unexpected binary operator: " ++ pretty e
 defuncExp (Project vn e0 tp@(Info tp') loc) = do
   (e0', sv0) <- defuncExp e0
@@ -574,18 +577,21 @@ defuncExp (Project vn e0 tp@(Info tp') loc) = do
       Nothing -> error "Invalid record projection."
     Dynamic _ -> return (Project vn e0' tp loc, Dynamic tp')
     _ -> error $ "Projection of an expression with static value " ++ show sv0
-defuncExp (LetWith id1 id2 idxs e1 body t loc) = do
+defuncExp (AppExp (LetWith id1 id2 idxs e1 body loc) res) = do
   e1' <- defuncExp' e1
   idxs' <- mapM defuncDimIndex idxs
   let id1_binding = Binding Nothing $ Dynamic $ unInfo $ identType id1
   (body', sv) <-
     localEnv (M.singleton (identName id1) id1_binding) $
       defuncExp body
-  return (LetWith id1 id2 idxs' e1' body' t loc, sv)
-defuncExp expr@(Index e0 idxs info loc) = do
+  return (AppExp (LetWith id1 id2 idxs' e1' body' loc) res, sv)
+defuncExp expr@(AppExp (Index e0 idxs loc) res) = do
   e0' <- defuncExp' e0
   idxs' <- mapM defuncDimIndex idxs
-  return (Index e0' idxs' info loc, Dynamic $ typeOf expr)
+  return
+    ( AppExp (Index e0' idxs' loc) res,
+      Dynamic $ typeOf expr
+    )
 defuncExp (Update e1 idxs e2 loc) = do
   (e1', sv) <- defuncExp e1
   idxs' <- mapM defuncDimIndex idxs
@@ -647,12 +653,12 @@ defuncExp (Constr name _ (Info t) loc) =
       ++ pretty t
       ++ " at "
       ++ locStr loc
-defuncExp (Match e cs t loc) = do
+defuncExp (AppExp (Match e cs loc) res) = do
   (e', sv) <- defuncExp e
   csPairs <- mapM (defuncCase sv) cs
   let cs' = fmap fst csPairs
       sv' = snd $ NE.head csPairs
-  return (Match e' cs' t loc, sv')
+  return (AppExp (Match e' cs' loc) res, sv')
 defuncExp (Attr info e loc) = do
   (e', sv) <- defuncExp e
   return (Attr info e' loc, sv)
@@ -708,12 +714,9 @@ etaExpand e_t e = do
   let e' =
         foldl'
           ( \e1 (e2, t2, argtypes) ->
-              Apply
-                e1
-                e2
-                (Info (diet t2, Nothing))
-                (Info (foldFunType argtypes ret), Info [])
-                mempty
+              AppExp
+                (Apply e1 e2 (Info (diet t2, Nothing)) mempty)
+                (Info (AppRes (foldFunType argtypes ret) []))
           )
           e
           $ zip3 vars (map snd ps) (drop 1 $ tails $ map snd ps)
@@ -791,11 +794,11 @@ sizesForAll bound_sizes params = do
 -- but a new lifted function is created if a dynamic function is only partially
 -- applied.
 defuncApply :: Int -> Exp -> DefM (Exp, StaticVal)
-defuncApply depth e@(Apply e1 e2 d t@(Info ret, Info ext) loc) = do
+defuncApply depth e@(AppExp (Apply e1 e2 d loc) t@(Info (AppRes ret ext))) = do
   let (argtypes, _) = unfoldFunType ret
   (e1', sv1) <- defuncApply (depth + 1) e1
   (e2', sv2) <- defuncExp e2
-  let e' = Apply e1' e2' d t loc
+  let e' = AppExp (Apply e1' e2' d loc) t
   case sv1 of
     LambdaSV pat e0_t e0 closure_env -> do
       let env' = matchPatternSV pat sv2
@@ -833,7 +836,7 @@ defuncApply depth e@(Apply e1 e2 d t@(Info ret, Info ext) loc) = do
           -- result slightly more human-readable.
           liftedName i (Var f _ _) =
             "defunc_" ++ show i ++ "_" ++ baseString (qualLeaf f)
-          liftedName i (Apply f _ _ _ _) =
+          liftedName i (AppExp (Apply f _ _ _) _) =
             liftedName (i + 1) f
           liftedName _ _ = "defunc"
 
@@ -868,25 +871,22 @@ defuncApply depth e@(Apply e1 e2 d t@(Info ret, Info ext) loc) = do
           -- FIXME: what if this application returns both a function
           -- and a value?
           callret
-            | orderZero ret = (Info ret, Info ext)
-            | otherwise = (Info rettype, Info ext)
+            | orderZero ret = AppRes ret ext
+            | otherwise = AppRes rettype ext
 
       return
         ( Parens
-            ( Apply
+            ( AppExp
                 ( Apply
-                    fname''
-                    e1'
-                    (Info (Observe, Nothing))
-                    ( Info $ Scalar $ Arrow mempty Unnamed (fromStruct t2) rettype,
-                      Info []
+                    ( AppExp
+                        (Apply fname'' e1' (Info (Observe, Nothing)) loc)
+                        (Info $ AppRes (Scalar $ Arrow mempty Unnamed (fromStruct t2) rettype) [])
                     )
+                    e2'
+                    d
                     loc
                 )
-                e2'
-                d
-                callret
-                loc
+                (Info callret)
             )
             mempty,
           sv
@@ -901,9 +901,9 @@ defuncApply depth e@(Apply e1 e2 d t@(Info ret, Info ext) loc) = do
           -- FIXME: what if this application returns both a function
           -- and a value?
           callret
-            | orderZero ret = (Info ret, Info ext)
-            | otherwise = (Info restype, Info ext)
-          apply_e = Apply e1' e2' d callret loc
+            | orderZero ret = AppRes ret ext
+            | otherwise = AppRes restype ext
+          apply_e = AppExp (Apply e1' e2' d loc) (Info callret)
       return (apply_e, sv)
     -- Propagate the 'IntrinsicsSV' until we reach the outermost application,
     -- where we construct a dynamic static value with the appropriate type.

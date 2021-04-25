@@ -150,7 +150,7 @@ addBinOp :: PrimType -> BinOp
 addBinOp (IntType it) = Add it OverflowWrap
 addBinOp (FloatType ft) = FAdd ft
 addBinOp Bool = LogAnd
-addBinOp Cert = LogAnd
+addBinOp Unit = LogAnd
 
 tabNest :: Int -> [VName] -> ([VName] -> [VName] -> ADM [VName]) -> ADM [VName]
 tabNest = tabNest' []
@@ -314,7 +314,7 @@ diffBasicOp pat aux e m =
           update <=< letExp "contrib" $ BasicOp $ ConvOp (BToI it) (Var pat_adj)
         Bool ->
           update pat_adj
-        Cert ->
+        Unit ->
           pure ()
     --
     ConvOp op x -> do
@@ -533,7 +533,7 @@ diffMap pat_adj w map_lam as = do
     withAcc inputs m = do
       (cert_params, acc_params) <- fmap unzip $
         forM inputs $ \(shape, arrs, _) -> do
-          cert_param <- newParam "acc_cert_p" $ Prim Cert
+          cert_param <- newParam "acc_cert_p" $ Prim Unit
           ts <- mapM (fmap (stripArray (shapeRank shape)) . lookupType) arrs
           acc_param <- newParam "acc_p" $ Acc (paramName cert_param) shape ts NoUniqueness
           pure (cert_param, acc_param)

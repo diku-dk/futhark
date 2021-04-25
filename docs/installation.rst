@@ -370,7 +370,7 @@ Now you should be able to run the `Game of Life`_ example.
 Futhark with Nix
 ----------------
 
-Futhark mostly works fine with `Nix <https://nixos.org/>`_ and `NixOS
+Futhark mostly works fine with Nix and `NixOS
 <https://nixos.org/>`_, but when using OpenCL you may need to make
 more packages available in your environment.  This is regardless of
 whether you are using the ``futhark`` package from Nixpkgs or one you

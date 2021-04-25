@@ -143,7 +143,7 @@ instance TanBinder (Param (TypeBase s u)) where
   newTan (Param p t) = do
     PatElem p' t' <- newTan $ PatElem p t
     return $ Param p' t'
-  bundleNew param@(Param _ (Prim Cert)) =
+  bundleNew param@(Param _ (Prim Unit)) =
     pure [param]
   bundleNew param@(Param _ t) = do
     param' <- newTan param

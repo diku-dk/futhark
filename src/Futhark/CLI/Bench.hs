@@ -92,15 +92,15 @@ runBenchmarks opts paths = do
 
   futhark <- FutharkExe . compFuthark <$> compileOptions opts
 
-  results <-
-    concat
-      <$> mapM
-        (runBenchmark opts futhark)
-        (sortBy (comparing fst) compiled_benchmarks)
+  maybe_results <-
+    mapM
+      (runBenchmark opts futhark)
+      (sortBy (comparing fst) compiled_benchmarks)
+  let results = concat $ catMaybes maybe_results
   case optJSON opts of
     Nothing -> return ()
     Just file -> LBS.writeFile file $ encodeBenchResults results
-  when (anyFailed results) exitFailure
+  when (any isNothing maybe_results || anyFailed results) exitFailure
   where
     ignored f = any (`match` f) $ optIgnoreFiles opts
 
@@ -165,7 +165,7 @@ compileBenchmark opts (program, spec) =
   where
     hasRuns (InputOutputs _ runs) = not $ null runs
 
-withProgramServer :: FilePath -> FilePath -> [String] -> (Server -> IO a) -> IO a
+withProgramServer :: FilePath -> FilePath -> [String] -> (Server -> IO a) -> IO (Maybe a)
 withProgramServer program runner extra_options f = do
   -- Explicitly prefixing the current directory is necessary for
   -- readProcessWithExitCode to find the binary when binOutputf has
@@ -177,14 +177,15 @@ withProgramServer program runner extra_options f = do
         | null runner = (binpath, extra_options)
         | otherwise = (runner, binpath : extra_options)
 
-  liftIO $ withServer to_run to_run_args f `catch` onError
+  liftIO $ (Just <$> withServer to_run to_run_args f) `catch` onError
   where
-    onError :: SomeException -> IO a
+    onError :: SomeException -> IO (Maybe a)
     onError e = do
-      hPrint stderr e
-      exitFailure
+      putStrLn $ inBold $ inRed $ "\nFailed to run " ++ program
+      putStrLn $ inRed $ show e
+      pure Nothing
 
-runBenchmark :: BenchOptions -> FutharkExe -> (FilePath, [InputOutputs]) -> IO [BenchResult]
+runBenchmark :: BenchOptions -> FutharkExe -> (FilePath, [InputOutputs]) -> IO (Maybe [BenchResult])
 runBenchmark opts futhark (program, cases) = do
   (tuning_opts, tuning_desc) <- determineTuning (optTuning opts) program
   let runopts = "-L" : optExtraOptions opts ++ tuning_opts

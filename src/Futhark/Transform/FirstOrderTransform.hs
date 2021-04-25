@@ -22,7 +22,9 @@ import Control.Monad.Except
 import Control.Monad.State
 import Data.List (find, zip4)
 import qualified Data.Map.Strict as M
+import qualified Futhark.Analysis.Alias as Alias
 import qualified Futhark.IR as AST
+import Futhark.IR.Prop.Aliases
 import Futhark.IR.SOACS
 import Futhark.MonadFreshNames
 import Futhark.Tools
@@ -34,7 +36,8 @@ type FirstOrderLore lore =
   ( Bindable lore,
     BinderOps lore,
     LetDec SOACS ~ LetDec lore,
-    LParamInfo SOACS ~ LParamInfo lore
+    LParamInfo SOACS ~ LParamInfo lore,
+    CanBeAliased (Op lore)
   )
 
 -- | First-order-transform a single function, with the given scope
@@ -67,7 +70,8 @@ type Transformer m =
     LocalScope (Lore m) m,
     Bindable (Lore m),
     BinderOps (Lore m),
-    LParamInfo SOACS ~ LParamInfo (Lore m)
+    LParamInfo SOACS ~ LParamInfo (Lore m),
+    CanBeAliased (Op (Lore m))
   )
 
 transformBody ::
@@ -159,18 +163,28 @@ transformSOAC pat (Screma w arrs form@(ScremaForm scans reds map_lam)) = do
           ]
   i <- newVName "i"
   let loopform = ForLoop i Int64 w []
+      lam_cons = consumedByLambda $ Alias.analyseLambda mempty map_lam
 
   loop_body <- runBodyBinder
     . localScope (scopeOfFParams (map fst merge) <> scopeOf loopform)
     $ do
       -- Bind the parameters to the lambda.
       forM_ (zip3 (lambdaParams map_lam) arrs arr_ts) $ \(p, arr, arr_t) ->
-        letBindNames [paramName p] . BasicOp $
-          case paramForAcc arr_t of
-            Just acc_out_p ->
+        case paramForAcc arr_t of
+          Just acc_out_p ->
+            letBindNames [paramName p] . BasicOp $
               SubExp $ Var $ paramName acc_out_p
-            Nothing ->
-              Index arr $ fullSlice arr_t [DimFix $ Var i]
+          Nothing
+            | paramName p `nameIn` lam_cons -> do
+              p' <-
+                letExp (baseString (paramName p)) $
+                  BasicOp $
+                    Index arr $ fullSlice arr_t [DimFix $ Var i]
+              letBindNames [paramName p] $ BasicOp $ Copy p'
+            | otherwise ->
+              letBindNames [paramName p] $
+                BasicOp $
+                  Index arr $ fullSlice arr_t [DimFix $ Var i]
 
       -- Insert the statements of the lambda.  We have taken care to
       -- ensure that the parameters are bound at this point.
@@ -366,7 +380,8 @@ transformLambda ::
     BinderOps lore,
     LocalScope somelore m,
     SameScope somelore lore,
-    LetDec lore ~ LetDec SOACS
+    LetDec lore ~ LetDec SOACS,
+    CanBeAliased (Op lore)
   ) =>
   Lambda ->
   m (AST.Lambda lore)

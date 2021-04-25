@@ -152,11 +152,19 @@ consumedInExp (Apply _ args _ _) =
     consumeArg _ = mempty
 consumedInExp (If _ tb fb _) =
   consumedInBody tb <> consumedInBody fb
-consumedInExp (DoLoop _ merge _ _) =
+consumedInExp (DoLoop _ merge form body) =
   mconcat
     ( map (subExpAliases . snd) $
         filter (unique . paramDeclType . fst) merge
     )
+    <> consumedInForm form
+  where
+    body_consumed = consumedInBody body
+    varConsumed = (`nameIn` body_consumed) . paramName . fst
+    consumedInForm (ForLoop _ _ _ loopvars) =
+      namesFromList $ map snd $ filter varConsumed loopvars
+    consumedInForm WhileLoop {} =
+      mempty
 consumedInExp (WithAcc inputs lam) =
   mconcat (map inputConsumed inputs)
     <> ( consumedByLambda lam
@@ -192,7 +200,8 @@ instance AliasesOf dec => AliasesOf (PatElemT dec) where
 lookupAliases :: AliasesOf (LetDec lore) => VName -> Scope lore -> Names
 lookupAliases v scope =
   case M.lookup v scope of
-    Just (LetName dec) -> oneName v <> aliasesOf dec
+    Just (LetName dec) ->
+      oneName v <> foldMap (`lookupAliases` scope) (namesToList (aliasesOf dec))
     _ -> oneName v
 
 -- | The class of operations that can produce aliasing and consumption
