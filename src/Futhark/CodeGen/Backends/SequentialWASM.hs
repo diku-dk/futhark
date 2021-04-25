@@ -223,7 +223,11 @@ arrWrapper =
       }
 
       str_type() {
-        return padTyp(this.typ);
+        if (this.is_scalar) {
+          return padTyp(type_strs[this.arr.constructor.name]);
+        } else {
+          return padTyp(this.typ);
+        }
       }
         
     } 
