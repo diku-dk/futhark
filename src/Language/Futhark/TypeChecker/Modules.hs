@@ -534,7 +534,8 @@ matchMTys orig_mty orig_mty_sig =
     matchTypeAbbr loc abs_subst_to_type spec_name spec_l spec_ps spec_t name l ps t = do
       -- We have to create substitutions for the type parameters, too.
       unless (length spec_ps == length ps) $ nomatch spec_t
-      param_substs <- mconcat <$> zipWithM matchTypeParam spec_ps ps
+      param_substs <-
+        mconcat <$> zipWithM (matchTypeParam (nomatch spec_t)) spec_ps ps
 
       -- Abstract types have a particular restriction to ensure that
       -- if we have a value of an abstract type 't [n]', then there is
@@ -564,22 +565,14 @@ matchMTys orig_mty orig_mty_sig =
             (spec_l, spec_ps, spec_t')
             (l, ps, t)
 
-        matchTypeParam (TypeParamDim x _) (TypeParamDim y _) =
-          pure $ M.singleton x $ DimSub $ NamedDim $ qualName y
-        matchTypeParam (TypeParamType Unlifted x _) (TypeParamType Unlifted y _) =
-          pure $
-            M.singleton x $
-              TypeSub $
-                TypeAbbr Unlifted [] $
-                  Scalar $ TypeVar () Nonunique (typeName y) []
-        matchTypeParam (TypeParamType _ x _) (TypeParamType Lifted y _) =
-          pure $
-            M.singleton x $
-              TypeSub $
-                TypeAbbr Lifted [] $
-                  Scalar $ TypeVar () Nonunique (typeName y) []
-        matchTypeParam _ _ =
-          nomatch spec_t
+    matchTypeParam _ (TypeParamDim x _) (TypeParamDim y _) =
+      pure $ M.singleton x $ DimSub $ NamedDim $ qualName y
+    matchTypeParam _ (TypeParamType spec_l x _) (TypeParamType l y _)
+      | spec_l <= l =
+        pure . M.singleton x . TypeSub . TypeAbbr l [] $
+          Scalar $ TypeVar () Nonunique (typeName y) []
+    matchTypeParam nomatch _ _ =
+      nomatch
 
     matchVal ::
       SrcLoc ->
