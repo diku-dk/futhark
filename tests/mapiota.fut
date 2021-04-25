@@ -2,4 +2,4 @@
 -- ==
 -- error: type containing anonymous sizes
 
-let main(ns: []i32) = map iota ns
+let main(ns: []i64) = map iota ns
