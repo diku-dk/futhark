@@ -119,7 +119,7 @@ initFunc =
 
 dataHeapConv :: String -> String -> String
 dataHeapConv size arrType = 
-  "    var dataHeapRes = new " ++ arrType ++ "(dataHeap.buffer, dataHeap.byteOffset, " ++ size ++ ");"
+  "    var dataHeapRes = new " ++ arrType ++ "(dataHeap.buffer, res, " ++ size ++ ");"
 
 resDataHeap :: Int -> String -> String
 resDataHeap idx arrType = 
@@ -156,6 +156,16 @@ arrWrapper :: String
 arrWrapper = 
   T.unpack 
   [text|
+    function padTyp(typ) {
+      if (typ.length == 3) {
+        return " " + typ;
+      } else if (typ.length == 2) {
+        return "  " + typ;
+      } else {
+        return typ;
+      }
+    }
+
     class ArrayWrapper {
       // array has one element if scalar
       // else it has 4
@@ -198,7 +208,7 @@ arrWrapper =
         if (this.shape_init) {
           return this.shapey;
         } else {
-          this.shapey = this.fc[this.func_name('values')].apply(this.fc, [this.ptr]);
+          this.shapey = this.fc[this.func_name('shape')].apply(this.fc, [this.ptr]);
           this.shape_init = true;
           return this.shapey;
        }
@@ -213,7 +223,7 @@ arrWrapper =
       }
 
       str_type() {
-        return this.arr.constructor.name;
+        return padTyp(this.typ);
       }
         
     } 
@@ -313,7 +323,7 @@ jsWrapEntryPoint :: JSEntryPoint -> String
 jsWrapEntryPoint jse =
   unlines
   ["  " ++ func_name ++ "(" ++ args1 ++ ") {",
-  init,
+  initss,
   paramsToPtr,
   -- TODO CHange line below
   "    futhark_entry_" ++ func_name ++ "(this.ctx, " ++ rets ++ ", " ++ args1 ++ ");",
@@ -326,7 +336,7 @@ jsWrapEntryPoint jse =
     alr = [0..(length (ret jse)) - 1]
     alp = [0..(length (parameters jse)) - 1]
     convTypes = map typeConversion $ ret jse
-    init = unlines $ map (\i -> inits i (ret jse !! i)) alr
+    initss = unlines $ map (\i -> inits i (ret jse !! i)) alr
     results = unlines $ map (\i -> if (ret jse !! i) !! 0 == '[' then "" else resDataHeap i (convTypes !! i)) alr
     rets = intercalate ", " [retPtrOrOther i jse "dataHeap" ".byteOffset" ptrRes | i <- alr]
     args1 = intercalate ", " ["in" ++ show i | i <- alp]
@@ -373,10 +383,10 @@ inits argNum ep =
   let (i, typ) = retType ep
   in 
     if i == 0 
-    then initNotPtr i typ else 
+    then initNotPtr argNum typ else 
     makePtr argNum
 
-initNotPtr :: Integer -> String -> String
+initNotPtr :: Int -> String -> String
 initNotPtr i typ = 
   "var dataHeap" ++ show i ++ " = initData(new " ++ typeConversion typ ++ "(1));"
 
@@ -471,7 +481,7 @@ fromFutharkArrayValues str =
    "  var dataHeap = initData(new " ++ arrType ++ "(length));",
    "  var res = futhark_values_raw_" ++ ftype ++ "_" ++ show i ++ "d(" ++ intercalate ", " args2 ++ ");",
    dataHeapConv "length" arrType,
-   "  return res;",
+   "  return dataHeapRes;",
    "}"]
   where
   ctx = "this.ctx"

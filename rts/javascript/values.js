@@ -114,7 +114,7 @@ var typToSize = {
 
 
 function construct_binary_value(v) {
-  var bytes = v.bytes_per_element();
+  var byte_len = v.bytes_per_element();
   var shape = v.shape();
   var values = v.values();
   var elems = 1;
@@ -123,26 +123,30 @@ function construct_binary_value(v) {
       elems = elems * Number(shape[i]);
     }
   }
-  var num_bytes = 1 + 1 + 1 + 4 + (shape.length) * 8 + elems * bytes;
+  var num_bytes = 1 + 1 + 1 + 4 + (shape.length) * 8 + elems * byte_len;
 
   var bytes = new Uint8Array(num_bytes);
   bytes[0] = Buffer.from('b').readUInt8();
   bytes[1] = 2; // Not sure why this
   bytes[2] = shape.length
 
-  var ftype = type_strs[v.str_type()];
+  var ftype = v.str_type();
 
   for (var i = 0; i < 4; i++) {
     bytes[3+i] = ftype.charCodeAt(i);
   }
 
   if (shape.length > 0) {
-    var sizes = new BigInt64Array(shape);
+    var sizes = new BigUint64Array(shape.length);
+    for (var i = 0; i < shape.length; i++) {
+      sizes[i] = BigInt(shape[i]);
+    }
     var size_bytes = new Uint8Array(sizes.buffer);
     bytes.set(size_bytes, 7);
   }
 
-  var val_bytes = new Uint8Array(values.buffer, values.byteOffset, values.length);
+  var val_bytes = new Uint8Array(values.buffer, values.byteOffset, byte_len * values.length);
+
   bytes.set(val_bytes, 7 + (shape.length * 8));
   
   //return a buffer needed by appendFile instead of a uint8array
