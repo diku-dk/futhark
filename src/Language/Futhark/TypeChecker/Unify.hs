@@ -27,7 +27,6 @@ module Language.Futhark.TypeChecker.Unify
     mustHaveField,
     mustBeOneOf,
     equalityType,
-    normType,
     normPatternType,
     normTypeFully,
     instantiateEmptyArrayDims,
