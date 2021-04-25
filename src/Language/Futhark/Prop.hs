@@ -82,7 +82,6 @@ module Language.Futhark.Prop
     isSizeParam,
     combineTypeShapes,
     matchDims,
-    onRecordField,
     -- | Values of these types are produces by the parser.  They use
     -- unadorned names and have no type information, apart from that
     -- which is syntactically required.
@@ -548,19 +547,6 @@ unscopeType bound_here t = first onDim $ t `addAliases` S.map unbind
       | qualLeaf qn `S.member` bound_here =
         AnyDim $ Just $ qualLeaf qn
     onDim d = d
-
--- | Perform some operation on a given record field.  Returns
--- 'Nothing' if that field does not exist.
-onRecordField ::
-  (TypeBase dim als -> TypeBase dim als) ->
-  [Name] ->
-  TypeBase dim als ->
-  Maybe (TypeBase dim als)
-onRecordField f [] t = Just $ f t
-onRecordField f (k : ks) (Scalar (Record m)) = do
-  t <- onRecordField f ks =<< M.lookup k m
-  Just $ Scalar $ Record $ M.insert k t m
-onRecordField _ _ _ = Nothing
 
 -- | The type of an Futhark term.  The aliasing will refer to itself, if
 -- the term is a non-tuple-typed variable.
