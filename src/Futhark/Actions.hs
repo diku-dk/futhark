@@ -136,6 +136,7 @@ runEMCC cpath outpath cflags_def ldflags expfuns = do
         ( [cpath, "-o", outpath]
             ++ ["-lnodefs.js"] --, "-s", "ALLOW_MEMORY_GROWTH=1"]
             ++ ["-s", "--post-js", "futharkClass.js"]
+            ++ ["-s", "WASM_BIGINT"]
             ++ cmdCFLAGS cflags_def
             ++ ["-s", "EXPORTED_FUNCTIONS=[" ++ 
               intercalate "," ("'_malloc'":expfuns) ++
