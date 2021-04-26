@@ -306,7 +306,9 @@ lexicalMemoryUsage func =
     declared x = go declared x
 
     set (SetMem x y _) = namesFromList [x, y]
-    set (Call _ _ args) = foldMap onArg args
+    set (Call dests _ args) =
+      -- Some of the dests might not be memory, but it does not matter.
+      namesFromList dests <> foldMap onArg args
       where
         onArg ExpArg {} = mempty
         onArg (MemArg x) = oneName x
