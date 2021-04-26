@@ -892,8 +892,9 @@ transformValBind valbind = do
         foldFunType
           (map patternStructType (valBindParams valbind))
           $ fst $ unInfo $ valBindRetType valbind
-    (name, _, valbind'') <- monomorphiseBinding True valbind' $ monoType t
+    (name, infer, valbind'') <- monomorphiseBinding True valbind' $ monoType t
     tell $ Seq.singleton (name, valbind'' {valBindEntryPoint = valBindEntryPoint valbind})
+    addLifted (valBindName valbind) (monoType t) (name, infer)
 
   return mempty {envPolyBindings = M.singleton (valBindName valbind) valbind'}
 
