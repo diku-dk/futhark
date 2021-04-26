@@ -138,7 +138,9 @@ newAdj v = do
   v_adj <- adjVName v
   t <- lookupType v
   insAdj v v_adj
-  letBindNames [v_adj] $ zeroExp t
+  -- It is (probably) important not to parallelise any Replicates we
+  -- create here.
+  attributing (oneAttr "sequential") $ letBindNames [v_adj] $ zeroExp t
   pure v_adj
 
 class Adjoint a where
