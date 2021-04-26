@@ -361,7 +361,7 @@ ptrFromWrap =
   T.unpack [text|
     function ptrFromWrap(x) {
       if (typeof x == 'number' || typeof x == 'bigint') {
-        return Number(x);
+        return x;
       }
       if (x.constructor.name == "ArrayWrapper") {
         return x.ptr;
