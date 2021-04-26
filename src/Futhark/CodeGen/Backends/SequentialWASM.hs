@@ -141,10 +141,10 @@ javascriptWrapper entryPoints = unlines
   constructor entryPoints,
   getEntryPointsFun,
   --entryDic entryPoints,
-  unlines $ concatMap (\jse -> map toFutharkArray (parameters jse)) entryPoints,
-  unlines $ concatMap (\jse -> map fromFutharkArrayShape (ret jse)) entryPoints,
+  unlines $ concatMap (\jse -> map toFutharkArray (nub ((ret jse) ++ (parameters jse)))) entryPoints,
+  unlines $ concatMap (\jse -> map fromFutharkArrayShape (nub ((ret jse) ++ (parameters jse)))) entryPoints,
   --unlines $ concatMap (\jse -> map fromFutharkArrayRawValues (ret jse)) entryPoints,
-  unlines $ concatMap (\jse -> map fromFutharkArrayValues (ret jse)) entryPoints,
+  unlines $ concatMap (\jse -> map fromFutharkArrayValues (nub ((ret jse) ++ (parameters jse)))) entryPoints,
   (unlines $ map jsWrapEntryPoint entryPoints),
   endClassDef]
 
@@ -184,8 +184,9 @@ arrWrapper =
         this.ptr = ptr;
         this.fc = fc;
         this.arr = this.fc[this.func_name('values')].apply(this.fc, [this.ptr]);
+        this.shapey = this.fc[this.func_name('shape')].apply(this.fc, [this.ptr]);
         this.arr_init = false;
-        this.shape_init = false;
+        this.shape_init = true;
         this.is_scalar = false;
         this.is_arr = false;
         this.value = this.arr;
@@ -448,9 +449,9 @@ toFutharkArray str =
   ofs = "dataHeap.byteOffset"
   i = dim str
   dims = map (\j -> "dim" ++ show j) [0..i-1]
-  cast = map (\d -> "Number(" ++ d ++ ")") dims
+  --cast = map (\d -> "Number(" ++ d ++ ")") dims
   args1 = [arr] ++ dims
-  args2 = [ctx, ofs] ++ cast
+  args2 = [ctx, ofs] ++ dims
   ftype = baseType str
 
 fromFutharkArrayShape :: String -> String
@@ -461,8 +462,8 @@ fromFutharkArrayShape str =
   unlines
   ["from_futhark_shape_" ++ftype ++ "_" ++ show i ++  "d_arr(futhark_arr) {",
    "  var ptr = futhark_shape_" ++ ftype ++ "_" ++ show i ++ "d(" ++ intercalate ", " args1 ++  ");",
-   "  var dataHeap = new Uint8Array(Module.HEAPU8.buffer, ptr, 4 * "++ show i ++ ");",
-   " var result = new Int32Array(dataHeap.buffer, dataHeap.byteOffset, " ++ show i ++ ");",
+   "  var dataHeap = new Uint8Array(Module.HEAPU8.buffer, ptr, 8 * "++ show i ++ ");",
+   " var result = new BigUint64Array(dataHeap.buffer, dataHeap.byteOffset, " ++ show i ++ ");",
    " return result;",
    "}"]
   where
