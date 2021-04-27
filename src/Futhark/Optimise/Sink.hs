@@ -49,7 +49,6 @@ import Control.Monad.State
 import Data.Bifunctor
 import Data.List (foldl')
 import qualified Data.Map as M
-import qualified Data.Set as S
 import qualified Futhark.Analysis.Alias as Alias
 import qualified Futhark.Analysis.SymbolTable as ST
 import Futhark.IR.Aliases
@@ -61,7 +60,7 @@ type SymbolTable lore = ST.SymbolTable lore
 
 type Sinking lore = M.Map VName (Stm lore)
 
-type Sunk = S.Set VName
+type Sunk = Names
 
 type Sinker lore a = SymbolTable lore -> Sinking lore -> a -> (a, Sunk)
 
@@ -91,8 +90,8 @@ optimiseBranch ::
   Sinker lore (Op lore) ->
   Sinker lore (Body lore)
 optimiseBranch onOp vtable sinking (Body dec stms res) =
-  let (stms', stms_sunk) = optimiseStms onOp vtable sinking' stms $ freeIn res
-   in ( Body dec (sunk_stms <> stms') res,
+  let (stms', stms_sunk) = optimiseStms onOp vtable sinking' (sunk_stms <> stms) $ freeIn res
+   in ( Body dec stms' res,
         sunk <> stms_sunk
       )
   where
@@ -102,7 +101,7 @@ optimiseBranch onOp vtable sinking (Body dec stms res) =
     sunkHere v stm =
       v `nameIn` free_in_stms
         && all (`ST.available` vtable) (namesToList (freeIn stm))
-    sunk = S.fromList $ concatMap (patternNames . stmPattern) sunk_stms
+    sunk = namesFromList $ foldMap (patternNames . stmPattern) sunk_stms
 
 optimiseStms ::
   Constraints lore =>
@@ -131,7 +130,7 @@ optimiseStms onOp init_vtable init_sinking all_stms free_in_res =
         maybe True (== 1) $ M.lookup (patElemName pe) multiplicities =
         let (stms', sunk) =
               optimiseStms' vtable' (M.insert (patElemName pe) stm sinking) stms
-         in if patElemName pe `S.member` sunk
+         in if patElemName pe `nameIn` sunk
               then (stms', sunk)
               else (stm : stms', sunk)
       | If cond tbranch fbranch ret <- stmExp stm =
