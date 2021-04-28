@@ -70,11 +70,13 @@ class Server {
   }
 
   _cmd_free(args) {
+    console.log(this);
     for (var i = 0; i < args.length; i++) {
       var vname = args[i];
       this._check_var(vname);
       delete this._vars[vname];
     }
+    console.log(this);
   }
 
   _cmd_call(args) {
@@ -101,8 +103,6 @@ class Server {
     }
     // Call entry point function from string name
     var vals = this.ctx[args[0]].apply(this.ctx, ins);
-    console.log(vals);
-
     //if (num_outs == 1) {
       //this._vars[out_vnames[0]] = vals;
     //} else {
@@ -189,6 +189,7 @@ class Server {
     if (reader.get_buff().length != 0) {
       throw "Expected EOF after reading values";
     }
+    console.log(this);
   }
 
 

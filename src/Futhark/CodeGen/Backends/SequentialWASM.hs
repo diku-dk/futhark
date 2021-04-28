@@ -82,7 +82,8 @@ extToString (Imp.TransparentValue (Imp.ScalarValue (IntType Int8 ) Imp.TypeUnsig
 extToString (Imp.TransparentValue (Imp.ScalarValue (IntType Int16) Imp.TypeUnsigned  _)) = "u16"
 extToString (Imp.TransparentValue (Imp.ScalarValue (IntType Int32) Imp.TypeUnsigned  _)) = "u32"
 extToString (Imp.TransparentValue (Imp.ScalarValue (IntType Int64) Imp.TypeUnsigned  _)) = "u64"
-extToString _ = "SEE_TODO_32"
+extToString (Imp.TransparentValue (Imp.ScalarValue (Bool) _ _)) = "bool"
+
 -- TODO 32
 -- Handle Booleans
 -- Hhandle OpaqueTypes
@@ -172,6 +173,8 @@ arrWrapper =
       constructor(arr) {
         if (arr.length == 1) {
           this.scalar_constructor(arr[0]);
+        } else if (arr.length == 2) {
+          this.bool_constructor(arr[0], arr[1]);
         } else {
           this.arr_constructor(arr[0], arr[1], arr[2], arr[3]);
         }
@@ -200,6 +203,12 @@ arrWrapper =
         this.arr = arr;
       }
 
+      bool_constructor(v1, v2) {
+        this.typ = "bool";
+        this.scalar_constructor(v1);
+      }
+
+
 
       func_name(fname) {
         return 'from_futhark_' + fname + '_' + this.typ + '_' + this.dim + 'd_arr';
@@ -220,10 +229,17 @@ arrWrapper =
       }
 
       bytes_per_element() {
-        return this.arr.BYTES_PER_ELEMENT;
+        if (this.typ == "bool") {
+          return 1;
+        } else {
+          return this.arr.BYTES_PER_ELEMENT;
+        }
       }
 
       str_type() {
+        if (this.typ == "bool") {
+          return "bool";
+        }
         if (this.is_scalar) {
           return padTyp(type_strs[this.arr.constructor.name]);
         } else {
@@ -346,7 +362,7 @@ jsWrapEntryPoint jse =
     rets = intercalate ", " [retPtrOrOther i jse "dataHeap" ".byteOffset" ptrRes | i <- alr]
     args1 = intercalate ", " ["in" ++ show i | i <- alp]
     paramsToPtr = unlines ["  in" ++ show i ++ " = ptrFromWrap(in" ++ show i ++ ")" | i <- alp]
-    res = intercalate ", " [retPtrOrOther i jse "new ArrayWrapper([res" "])" ptrResValue | i <- alr]
+    res = intercalate ", " [retPtrOrOtherBool i jse "new ArrayWrapper([res" "])" ptrResValue | i <- alr]
     ptrRes i _ = "res" ++ show i
     ptrResValue i _ = "new ArrayWrapper([this, getValue(res" ++ show i ++ ", 'i32'), '" 
                         ++ (baseType (ret jse !! i)) ++ "', " ++ show (dim (ret jse !! i)) ++ "])"
@@ -354,6 +370,12 @@ jsWrapEntryPoint jse =
                                   then f i $ (ret jse') !! i
                                   --else "new ArrayWrapper([res" ++ show i ++ "])"
                                    else pre ++ show i ++ post
+    retPtrOrOtherBool i jse' pre post f = if ((ret jse') !! i) !! 0 == '[' 
+                                  then f i $ (ret jse') !! i
+                                  --else "new ArrayWrapper([res" ++ show i ++ "])"
+                                   else (if ((ret jse') !! i) !! 0 == 'b'
+                                         then pre ++ show i ++ ", 'bool'" ++ post
+                                         else pre ++ show i ++ post)
 
 
 ptrFromWrap :: String
@@ -428,6 +450,7 @@ typeConversion typ =
     "u64" -> "BigUint64Array"
     "f32" -> "Float32Array"
     "f64" -> "Float64Array"
+    "bool" -> "Int8Array"
     _ -> typ
 
 
