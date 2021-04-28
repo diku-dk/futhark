@@ -25,6 +25,7 @@ var typToType = { '  i8' : Int8Array ,
               ' u64' :  BigUint64Array ,
               ' f32' : Float32Array ,
               ' f64' : Float64Array ,
+              'bool' : Uint8Array
               // TODO implement bool here
              };
 

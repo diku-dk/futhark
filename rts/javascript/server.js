@@ -70,13 +70,11 @@ class Server {
   }
 
   _cmd_free(args) {
-    console.log(this);
     for (var i = 0; i < args.length; i++) {
       var vname = args[i];
       this._check_var(vname);
       delete this._vars[vname];
     }
-    console.log(this);
   }
 
   _cmd_call(args) {
@@ -189,7 +187,6 @@ class Server {
     if (reader.get_buff().length != 0) {
       throw "Expected EOF after reading values";
     }
-    console.log(this);
   }
 
 
