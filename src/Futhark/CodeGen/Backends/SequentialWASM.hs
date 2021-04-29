@@ -347,7 +347,9 @@ jsWrapEntryPoint jse =
   initss,
   paramsToPtr,
   -- TODO CHange line below
-  "    futhark_entry_" ++ func_name ++ "(this.ctx, " ++ rets ++ ", " ++ args1 ++ ");",
+  "    if (futhark_entry_" ++ func_name ++ "(this.ctx, " ++ rets ++ ", " ++ args1 ++ ") > 0) {",
+  "       throw 'Error';",
+  "    }",
   results,  
   "    futhark_context_sync(this.ctx);",
   "    return [" ++ res ++ "];",

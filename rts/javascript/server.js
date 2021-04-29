@@ -233,6 +233,7 @@ class Server {
       } catch (err) {
         console.log('%%% FAILURE');
         console.log(err);
+        console.log('%%% OK');
       }
     });
   }
