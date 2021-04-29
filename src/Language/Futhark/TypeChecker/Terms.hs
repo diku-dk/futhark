@@ -1572,21 +1572,29 @@ checkExp (RecordUpdate src fields ve NoInfo loc) = do
   src' <- checkExp src
   ve' <- checkExp ve
   a <- expTypeFully src'
-  let usage = mkUsage loc "record update"
-  r <- foldM (flip $ mustHaveField usage) a fields
+  foldM_ (flip $ mustHaveField usage) a fields
   ve_t <- expType ve'
-  let r' = anySizes $ toStruct r
-      ve_t' = anySizes $ toStruct ve_t
-  onFailure (CheckingRecordUpdate fields r' ve_t') $
-    unify usage r' ve_t'
-  maybe_a' <- onRecordField (const ve_t) fields <$> expTypeFully src'
-  case maybe_a' of
-    Just a' -> return $ RecordUpdate src' fields ve' (Info a') loc
-    Nothing ->
+  updated_t <- updateField fields ve_t =<< expTypeFully src'
+  return $ RecordUpdate src' fields ve' (Info updated_t) loc
+  where
+    usage = mkUsage loc "record update"
+    updateField [] ve_t src_t = do
+      (src_t', _) <- instantiateEmptyArrayDims loc "any" Nonrigid $ anySizes src_t
+      onFailure (CheckingRecordUpdate fields (toStruct src_t') (toStruct ve_t)) $
+        unify usage (toStruct src_t') (toStruct ve_t)
+      -- Important that we return ve_t so that we get the right aliases.
+      pure ve_t
+    updateField (f : fs) ve_t (Scalar (Record m))
+      | Just f_t <- M.lookup f m = do
+        f_t' <- updateField fs ve_t f_t
+        pure $ Scalar $ Record $ M.insert f f_t' m
+    updateField _ _ _ =
       typeError loc mempty $
         "Full type of"
           </> indent 2 (ppr src)
           </> textwrap " is not known at this point.  Add a size annotation to the original record to disambiguate."
+
+--
 checkExp (AppExp (Index e idxes loc) _) = do
   (t, _) <- newArrayType loc "e" $ length idxes
   e' <- unifies "being indexed at" t =<< checkExp e

@@ -27,7 +27,6 @@ module Language.Futhark.TypeChecker.Unify
     mustHaveField,
     mustBeOneOf,
     equalityType,
-    normType,
     normPatternType,
     normTypeFully,
     instantiateEmptyArrayDims,
@@ -670,26 +669,23 @@ linkVarToType onDims usage bcs vn lvl tp = do
   let tp' = removeUniqueness tp
   modifyConstraints $ M.insert vn (lvl, Constraint tp' usage)
   case snd <$> M.lookup vn constraints of
-    Just (NoConstraint l unlift_usage)
-      | l < Lifted -> do
-        let bcs' =
-              breadCrumb
-                ( Matching $
-                    "When verifying that" <+> pquote (pprName vn)
-                      <+> textwrap "is not instantiated with a function type, due to"
-                      <+> ppr unlift_usage
-                )
-                bcs
+    Just (NoConstraint Unlifted unlift_usage) -> do
+      let bcs' =
+            breadCrumb
+              ( Matching $
+                  "When verifying that" <+> pquote (pprName vn)
+                    <+> textwrap "is not instantiated with a function type, due to"
+                    <+> ppr unlift_usage
+              )
+              bcs
 
-        arrayElemTypeWith usage bcs' tp'
-
-        when (l == Unlifted) $
-          when (hasEmptyDims tp') $
-            unifyError usage mempty bcs $
-              "Type variable" <+> pprName vn
-                <+> "cannot be instantiated with type containing anonymous sizes:"
-                </> indent 2 (ppr tp)
-                </> textwrap "This is usually because the size of an array returned by a higher-order function argument cannot be determined statically.  This can also be due to the return size being a value parameter.  Add type annotation to clarify."
+      arrayElemTypeWith usage bcs' tp'
+      when (hasEmptyDims tp') $
+        unifyError usage mempty bcs $
+          "Type variable" <+> pprName vn
+            <+> "cannot be instantiated with type containing anonymous sizes:"
+            </> indent 2 (ppr tp)
+            </> textwrap "This is usually because the size of an array returned by a higher-order function argument cannot be determined statically.  This can also be due to the return size being a value parameter.  Add type annotation to clarify."
     Just (Equality _) ->
       equalityType usage tp'
     Just (Overloaded ts old_usage)
@@ -946,7 +942,7 @@ arrayElemTypeWith usage bcs t = do
       constraints <- getConstraints
       case M.lookup vn constraints of
         Just (lvl, NoConstraint _ _) ->
-          modifyConstraints $ M.insert vn (lvl, NoConstraint SizeLifted usage)
+          modifyConstraints $ M.insert vn (lvl, NoConstraint Unlifted usage)
         Just (_, ParamType l ploc)
           | l `elem` [Lifted, SizeLifted] ->
             unifyError usage mempty bcs $
