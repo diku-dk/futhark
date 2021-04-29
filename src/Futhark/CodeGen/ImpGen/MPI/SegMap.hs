@@ -17,6 +17,8 @@ writeResult ::
   MPIGen ()
 writeResult is pe (Returns _ se) =
   copyDWIMFix (patElemName pe) (map Imp.vi64 is) se []
+writeResult _ _ (WriteReturns (Shape _) _ _) = do
+    error "writeResult: not implemented yet"
 writeResult _ _ res =
   error $ "writeResult: cannot handle " ++ pretty res
 
@@ -53,15 +55,14 @@ compileSegMap pat space kbody = do
     -- Moove allocs outside of body
     let (body_allocs, body') = extractAllocations body
     
-    -- Get the output array
-    let (out_pt, out_name) = extractOutputMem pat
+    -- Get the output arrays
+    let out_arrays = extractOutputMem pat
     emit $ Imp.Op $ Imp.DistributedLoop "segmap" (tvVar flat_par_idx) body_allocs body' mempty free_params $ segFlat space
-    gather out_name out_pt
+    forM_ out_arrays $ \(pt, name) -> gather name pt 
+    
 
 
-extractOutputMem :: PatternT (MemInfo d u MemBind) -> (PrimType, VName)
+extractOutputMem :: PatternT (MemInfo d u MemBind) -> [(PrimType, VName)]
 extractOutputMem pat = do
   let Pattern _ pat_val = pat
-  let pat_elem = head pat_val
-  let PatElem _ (MemArray out_pt _ _ (ArrayIn out_name _)) = pat_elem
-  (out_pt, out_name)
+  map (\(PatElem _ (MemArray out_pt _ _ (ArrayIn out_name _))) -> (out_pt, out_name)) pat_val
