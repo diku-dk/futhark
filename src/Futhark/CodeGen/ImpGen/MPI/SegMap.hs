@@ -52,19 +52,16 @@ compileSegMap pat space kbody = do
     free_params <- freeParams body [segFlat space, tvVar flat_par_idx]
     -- Moove allocs outside of body
     let (body_allocs, body') = extractAllocations body
+    
     -- Get the output array
-    let (out_name, out_pt) =
-          ( case extractOutputMem body of
-              Just (name, pt) -> (name, pt)
-              Nothing -> error "Gather need an output memory"
-          )
+    let (out_pt, out_name) = extractOutputMem pat
     emit $ Imp.Op $ Imp.DistributedLoop "segmap" (tvVar flat_par_idx) body_allocs body' mempty free_params $ segFlat space
     gather out_name out_pt
 
-extractOutputMem :: Imp.Code -> Maybe (VName, PrimType)
-extractOutputMem (a Imp.:>>: b) =
-  case extractOutputMem b of
-    Nothing -> extractOutputMem a
-    Just name -> Just name
-extractOutputMem (Imp.Write output _ pt _ _ _) = Just (output, pt)
-extractOutputMem _ = Nothing
+
+extractOutputMem :: PatternT (MemInfo d u MemBind) -> (PrimType, VName)
+extractOutputMem pat = do
+  let Pattern _ pat_val = pat
+  let pat_elem = head pat_val
+  let PatElem _ (MemArray out_pt _ _ (ArrayIn out_name _)) = pat_elem
+  (out_pt, out_name)
