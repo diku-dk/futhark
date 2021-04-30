@@ -714,7 +714,7 @@ monomorphiseBinding entry (PolyBinding rr (name, tparams, params, rettype, retex
   replaceRecordReplacements rr $ do
     let bind_t = foldFunType (map patternStructType params) rettype
     (substs, t_shape_params) <- typeSubstsM loc (noSizes bind_t) $ noNamedParams t
-    let substs' = M.map Subst substs
+    let substs' = M.map (Subst []) substs
         rettype' = substTypesAny (`M.lookup` substs') rettype
         substPatternType =
           substTypesAny (fmap (fmap fromStruct) . (`M.lookup` substs'))
@@ -856,29 +856,29 @@ toPolyBinding (ValBind _ name _ (Info (rettype, retext)) tparams params body _ a
 -- Remove all type variables and type abbreviations from a value binding.
 removeTypeVariables :: Bool -> ValBind -> MonoM ValBind
 removeTypeVariables entry valbind@(ValBind _ _ _ (Info (rettype, retext)) _ pats body _ _ _) = do
-  subs <- asks $ M.map TypeSub . envTypeBindings
+  subs <- asks $ M.map substFromAbbr . envTypeBindings
   let mapper =
         ASTMapper
           { mapOnExp = astMap mapper,
             mapOnName = pure,
             mapOnQualName = pure,
-            mapOnStructType = pure . substituteTypes subs,
-            mapOnPatternType = pure . substituteTypes subs
+            mapOnStructType = pure . applySubst (`M.lookup` subs),
+            mapOnPatternType = pure . applySubst (`M.lookup` subs)
           }
 
   body' <- astMap mapper body
 
   return
     valbind
-      { valBindRetType = Info (substituteTypes subs rettype, retext),
-        valBindParams = map (substPattern entry $ substituteTypes subs) pats,
+      { valBindRetType = Info (applySubst (`M.lookup` subs) rettype, retext),
+        valBindParams = map (substPattern entry $ applySubst (`M.lookup` subs)) pats,
         valBindBody = body'
       }
 
 removeTypeVariablesInType :: StructType -> MonoM StructType
 removeTypeVariablesInType t = do
-  subs <- asks $ M.map TypeSub . envTypeBindings
-  return $ substituteTypes subs t
+  subs <- asks $ M.map substFromAbbr . envTypeBindings
+  return $ applySubst (`M.lookup` subs) t
 
 transformValBind :: ValBind -> MonoM Env
 transformValBind valbind = do
@@ -900,9 +900,9 @@ transformValBind valbind = do
 
 transformTypeBind :: TypeBind -> MonoM Env
 transformTypeBind (TypeBind name l tparams tydecl _ _) = do
-  subs <- asks $ M.map TypeSub . envTypeBindings
+  subs <- asks $ M.map substFromAbbr . envTypeBindings
   noticeDims $ unInfo $ expandedType tydecl
-  let tp = substituteTypes subs . unInfo $ expandedType tydecl
+  let tp = applySubst (`M.lookup` subs) . unInfo $ expandedType tydecl
       tbinding = TypeAbbr l tparams tp
   return mempty {envTypeBindings = M.singleton name tbinding}
 

@@ -12,15 +12,16 @@ module Language.Futhark.TypeChecker.Types
     checkForDuplicateNames,
     checkTypeParams,
     typeParamToArg,
-    TypeSub (..),
-    TypeSubs,
-    substituteTypes,
     Subst (..),
+    substFromAbbr,
+    TypeSubs,
+    unionSubs,
     Substitutable (..),
     substTypesAny,
   )
 where
 
+import Control.Applicative
 import Control.Monad.Identity
 import Control.Monad.Reader
 import Control.Monad.State
@@ -29,7 +30,7 @@ import Data.List (foldl', sort)
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import Futhark.Util (nubOrd)
-import Futhark.Util.Pretty
+import Futhark.Util.Pretty hiding ((<|>))
 import Language.Futhark
 import Language.Futhark.Traversals
 import Language.Futhark.TypeChecker.Monad
@@ -257,7 +258,7 @@ checkTypeExp ote@TEApply {} = do
       (te', st, _) <- checkTypeExp te
       return
         ( TypeArgExpType te',
-          M.singleton pv $ Subst st
+          M.singleton pv $ Subst [] st
         )
     checkArgApply p a =
       typeError tloc mempty $
@@ -384,84 +385,32 @@ typeParamToArg (TypeParamDim v ploc) =
 typeParamToArg (TypeParamType _ v ploc) =
   TypeArgType (Scalar $ TypeVar () Nonunique (typeName v) []) ploc
 
--- | A substitution for when using 'substituteTypes'.
-data TypeSub
-  = TypeSub TypeBinding
-  | DimSub (DimDecl VName)
-  deriving (Show)
-
--- | A collection of type substitutions.
-type TypeSubs = M.Map VName TypeSub
-
--- | Apply type substitutions to the given type.
-substituteTypes :: Monoid als => TypeSubs -> TypeBase (DimDecl VName) als -> TypeBase (DimDecl VName) als
-substituteTypes substs ot = case ot of
-  Array als u at shape ->
-    arrayOf
-      (substituteTypes substs (Scalar at) `setAliases` mempty)
-      (substituteInShape shape)
-      u
-      `addAliases` (<> als)
-  Scalar (Prim t) -> Scalar $ Prim t
-  Scalar (TypeVar als u v targs)
-    | Just (TypeSub (TypeAbbr _ ps t)) <-
-        M.lookup (qualLeaf (qualNameFromTypeName v)) substs ->
-      applyType ps (t `setAliases` mempty) (map substituteInTypeArg targs)
-        `setUniqueness` u `addAliases` (<> als)
-    | otherwise -> Scalar $ TypeVar als u v $ map substituteInTypeArg targs
-  Scalar (Record ts) ->
-    Scalar $ Record $ fmap (substituteTypes substs) ts
-  Scalar (Arrow als v t1 t2) ->
-    Scalar $ Arrow als v (substituteTypes substs t1) (substituteTypes substs t2)
-  Scalar (Sum cs) ->
-    Scalar $ Sum $ (fmap . fmap) (substituteTypes substs) cs
-  where
-    substituteInTypeArg (TypeArgDim d loc) =
-      TypeArgDim (substituteInDim d) loc
-    substituteInTypeArg (TypeArgType t loc) =
-      TypeArgType (substituteTypes substs t) loc
-
-    substituteInShape (ShapeDecl ds) =
-      ShapeDecl $ map substituteInDim ds
-
-    substituteInDim (NamedDim v)
-      | Just (DimSub d) <- M.lookup (qualLeaf v) substs = d
-    substituteInDim d = d
-
-applyType ::
-  Monoid als =>
-  [TypeParam] ->
-  TypeBase (DimDecl VName) als ->
-  [StructTypeArg] ->
-  TypeBase (DimDecl VName) als
-applyType ps t args =
-  substituteTypes substs t
-  where
-    substs = M.fromList $ zipWith mkSubst ps args
-    -- We are assuming everything has already been type-checked for correctness.
-    mkSubst (TypeParamDim pv _) (TypeArgDim d _) =
-      (pv, DimSub d)
-    mkSubst (TypeParamType l pv _) (TypeArgType at _) =
-      (pv, TypeSub $ TypeAbbr l [] at)
-    mkSubst p a =
-      error $ "applyType mkSubst: cannot substitute " ++ pretty a ++ " for " ++ pretty p
-
 -- | A type substituion may be a substitution or a yet-unknown
 -- substitution (but which is certainly an overloaded primitive
 -- type!).  The latter is used to remove aliases from types that are
 -- yet-unknown but that we know cannot carry aliases (see issue #682).
-data Subst t = Subst t | PrimSubst | SizeSubst (DimDecl VName)
+data Subst t = Subst [TypeParam] t | PrimSubst | SizeSubst (DimDecl VName)
   deriving (Show)
 
+substFromAbbr :: TypeBinding -> Subst StructType
+substFromAbbr (TypeAbbr _ ps t) = Subst ps t
+
+-- | Substitutions to apply in a type.
+type TypeSubs = VName -> Maybe (Subst StructType)
+
+-- | Additively combine two non-intersecting substitutions.
+unionSubs :: TypeSubs -> TypeSubs -> TypeSubs
+unionSubs f g v = g v <|> f v
+
 instance Functor Subst where
-  fmap f (Subst t) = Subst $ f t
+  fmap f (Subst ps t) = Subst ps $ f t
   fmap _ PrimSubst = PrimSubst
   fmap _ (SizeSubst v) = SizeSubst v
 
 -- | Class of types which allow for substitution of types with no
 -- annotations for type variable names.
 class Substitutable a where
-  applySubst :: (VName -> Maybe (Subst StructType)) -> a -> a
+  applySubst :: TypeSubs -> a -> a
 
 instance Substitutable (TypeBase (DimDecl VName) ()) where
   applySubst = substTypesAny
@@ -489,10 +438,27 @@ instance Substitutable Pattern where
             mapOnPatternType = return . applySubst f
           }
 
+applyType ::
+  (Eq als, Monoid als) =>
+  [TypeParam] ->
+  TypeBase (DimDecl VName) als ->
+  [StructTypeArg] ->
+  TypeBase (DimDecl VName) als
+applyType ps t args = substTypesAny (`M.lookup` substs) t
+  where
+    substs = M.fromList $ zipWith mkSubst ps args
+    -- We are assuming everything has already been type-checked for correctness.
+    mkSubst (TypeParamDim pv _) (TypeArgDim d _) =
+      (pv, SizeSubst d)
+    mkSubst (TypeParamType _ pv _) (TypeArgType at _) =
+      (pv, Subst [] $ second mempty at)
+    mkSubst p a =
+      error $ "applyType mkSubst: cannot substitute " ++ pretty a ++ " for " ++ pretty p
+
 -- | Perform substitutions, from type names to types, on a type. Works
 -- regardless of what shape and uniqueness information is attached to the type.
 substTypesAny ::
-  Monoid as =>
+  (Eq as, Monoid as) =>
   (VName -> Maybe (Subst (TypeBase (DimDecl VName) as))) ->
   TypeBase (DimDecl VName) as ->
   TypeBase (DimDecl VName) as
@@ -504,13 +470,18 @@ substTypesAny lookupSubst ot = case ot of
       u
       `setAliases` als
   Scalar (Prim t) -> Scalar $ Prim t
-  -- We only substitute for a type variable with no arguments, since
-  -- type parameters cannot have higher kind.
   Scalar (TypeVar als u v targs) ->
-    case lookupSubst $ qualLeaf (qualNameFromTypeName v) of
-      Just (Subst t) -> substTypesAny lookupSubst $ t `setUniqueness` u `addAliases` (<> als)
-      Just PrimSubst -> Scalar $ TypeVar mempty u v $ map subsTypeArg targs
-      _ -> Scalar $ TypeVar als u v $ map subsTypeArg targs
+    let targs' = map subsTypeArg targs
+     in case lookupSubst $ qualLeaf (qualNameFromTypeName v) of
+          Just (Subst ps t)
+            -- XXX: This check is a workaround for our dumb
+            -- representation of abstract types in modules.
+            | t /= ot ->
+              substTypesAny lookupSubst $
+                applyType ps (t `setAliases` mempty) targs'
+                  `setUniqueness` u `addAliases` (<> als)
+          Just PrimSubst -> Scalar $ TypeVar mempty u v targs'
+          _ -> Scalar $ TypeVar als u v targs'
   Scalar (Record ts) -> Scalar $ Record $ fmap (substTypesAny lookupSubst) ts
   Scalar (Arrow als v t1 t2) ->
     Scalar $ Arrow als v (substTypesAny lookupSubst t1) (substTypesAny lookupSubst t2)

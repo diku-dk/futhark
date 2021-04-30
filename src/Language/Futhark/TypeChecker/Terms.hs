@@ -664,7 +664,7 @@ instantiateTypeParam loc tparam = do
   case tparam of
     TypeParamType x _ _ -> do
       constrain v $ NoConstraint x $ mkUsage' loc
-      return (v, Subst $ Scalar $ TypeVar mempty Nonunique (typeName v) [])
+      return (v, Subst [] $ Scalar $ TypeVar mempty Nonunique (typeName v) [])
     TypeParamDim {} -> do
       constrain v $ Size Nothing $ mkUsage' loc
       return (v, SizeSubst $ NamedDim $ qualName v)

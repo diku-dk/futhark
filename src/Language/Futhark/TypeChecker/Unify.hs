@@ -165,7 +165,7 @@ type Constraints = M.Map VName (Level, Constraint)
 
 lookupSubst :: VName -> Constraints -> Maybe (Subst StructType)
 lookupSubst v constraints = case snd <$> M.lookup v constraints of
-  Just (Constraint t _) -> Just $ Subst t
+  Just (Constraint t _) -> Just $ Subst [] t
   Just Overloaded {} -> Just PrimSubst
   Just (Size (Just d) _) ->
     Just $ SizeSubst $ applySubst (`lookupSubst` constraints) d
