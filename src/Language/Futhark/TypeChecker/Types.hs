@@ -221,7 +221,7 @@ checkTypeExp ote@TEApply {} = do
       (targs', substs) <- unzip <$> zipWithM checkArgApply ps targs
       return
         ( foldl (\x y -> TEApply x y tloc) (TEVar tname' tname_loc) targs',
-          substituteTypes (mconcat substs) t,
+          applySubst (`M.lookup` mconcat substs) t,
           l
         )
   where
@@ -240,24 +240,24 @@ checkTypeExp ote@TEApply {} = do
       v' <- checkNamedDim loc v
       return
         ( TypeArgExpDim (DimExpNamed v' dloc) loc,
-          M.singleton pv $ DimSub $ NamedDim v'
+          M.singleton pv $ SizeSubst $ NamedDim v'
         )
     checkArgApply (TypeParamDim pv _) (TypeArgExpDim (DimExpConst x dloc) loc) =
       return
         ( TypeArgExpDim (DimExpConst x dloc) loc,
-          M.singleton pv $ DimSub $ ConstDim x
+          M.singleton pv $ SizeSubst $ ConstDim x
         )
     checkArgApply (TypeParamDim pv _) (TypeArgExpDim DimExpAny loc) = do
       d <- newID "d"
       return
         ( TypeArgExpDim DimExpAny loc,
-          M.singleton pv $ DimSub $ AnyDim $ Just d
+          M.singleton pv $ SizeSubst $ AnyDim $ Just d
         )
-    checkArgApply (TypeParamType l pv _) (TypeArgExpType te) = do
+    checkArgApply (TypeParamType _ pv _) (TypeArgExpType te) = do
       (te', st, _) <- checkTypeExp te
       return
         ( TypeArgExpType te',
-          M.singleton pv $ TypeSub $ TypeAbbr l [] st
+          M.singleton pv $ Subst st
         )
     checkArgApply p a =
       typeError tloc mempty $
