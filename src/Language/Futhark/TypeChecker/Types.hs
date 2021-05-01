@@ -439,7 +439,7 @@ instance Substitutable Pattern where
           }
 
 applyType ::
-  (Eq als, Monoid als) =>
+  Monoid als =>
   [TypeParam] ->
   TypeBase (DimDecl VName) als ->
   [StructTypeArg] ->
@@ -458,7 +458,7 @@ applyType ps t args = substTypesAny (`M.lookup` substs) t
 -- | Perform substitutions, from type names to types, on a type. Works
 -- regardless of what shape and uniqueness information is attached to the type.
 substTypesAny ::
-  (Eq as, Monoid as) =>
+  Monoid as =>
   (VName -> Maybe (Subst (TypeBase (DimDecl VName) as))) ->
   TypeBase (DimDecl VName) as ->
   TypeBase (DimDecl VName) as
@@ -473,13 +473,9 @@ substTypesAny lookupSubst ot = case ot of
   Scalar (TypeVar als u v targs) ->
     let targs' = map subsTypeArg targs
      in case lookupSubst $ qualLeaf (qualNameFromTypeName v) of
-          Just (Subst ps t)
-            -- XXX: This check is a workaround for our dumb
-            -- representation of abstract types in modules.
-            | t /= ot ->
-              substTypesAny lookupSubst $
-                applyType ps (t `setAliases` mempty) targs'
-                  `setUniqueness` u `addAliases` (<> als)
+          Just (Subst ps t) ->
+            applyType ps (t `setAliases` mempty) targs'
+              `setUniqueness` u `addAliases` (<> als)
           Just PrimSubst -> Scalar $ TypeVar mempty u v targs'
           _ -> Scalar $ TypeVar als u v targs'
   Scalar (Record ts) -> Scalar $ Record $ fmap (substTypesAny lookupSubst) ts
