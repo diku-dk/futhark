@@ -15,6 +15,7 @@ module Futhark.CodeGen.ImpGen.Multicore.Base
     AtomicUpdate (..),
     Locking (..),
     getSpace,
+    tileDims,
     getIterationDomain,
     getReturnParams,
     segOpString,
@@ -80,15 +81,27 @@ getSpace (SegScan _ space _ _ _) = space
 getSpace (SegMap _ space _ _) = space
 getSpace (SegStencil _ space _ _ _) = space
 
+tileDims :: Int -> [SubExp]
+tileDims dims = map (Constant . IntValue . Int64Value) $ tileDims' dims
+  where tileDims' 1 = [65536]
+        tileDims' 2 = [256, 256]
+        tileDims' 3 = [16, 64, 64]
+        tileDims' _ = repeat 16
+
 getIterationDomain :: SegOp () MCMem -> SegSpace -> MulticoreGen (Imp.TExp Int64)
 getIterationDomain SegMap {} space = do
   let ns = map snd $ unSegSpace space
       ns_64 = map toInt64Exp ns
   return $ product ns_64
 getIterationDomain SegStencil {} space = do
-  let ns = map snd $ unSegSpace space
-      ns_64 = map toInt64Exp ns
-  return $ product ns_64
+  let ns = map (toInt64Exp . snd) $ unSegSpace space
+      tds = map toInt64Exp $ tileDims (length ns)
+      toIters :: Imp.TExp Int64 -> Imp.TExp Int64 -> Imp.TExp Int64
+      toIters n td = TPrimExp $ BinOpExp (SDiv Int64 Unsafe) (untyped $ n + td - 1)
+                                                             (untyped td)
+      iters = zipWith toIters ns tds
+  emit $ Imp.DebugPrint "Iterations" $ Just $ untyped $ product iters
+  return $ product iters
 getIterationDomain _ space = do
   let ns = map snd $ unSegSpace space
       ns_64 = map toInt64Exp ns
