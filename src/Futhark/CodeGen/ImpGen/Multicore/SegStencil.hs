@@ -6,7 +6,7 @@ module Futhark.CodeGen.ImpGen.Multicore.SegStencil
 where
 
 import Control.Monad
-import Data.List (transpose, zip4, zipWith4)
+import Data.List (transpose, zip5, zipWith4)
 
 import qualified Futhark.CodeGen.ImpCode.Multicore as Imp
 import Futhark.CodeGen.ImpGen
@@ -58,7 +58,7 @@ compileSegStencil pat space sten kbody = collect $ do
       MulticoreGen ()
     innerLoop [] ts = do
       let ts' = reverse ts
-          idxs = map (uncurry4 stencilIdxs) $ zip4 is sten_idxs dimsI64 ts'
+          idxs = map (uncurry5 stencilIdxs) $ zip5 is sten_idxs dimsI64 ts' tileDimsI64
           idxs_with_vnames = concatMap (\vn -> map (vn,) (transpose idxs)) arrs
 
       forM_ (zip sten_params idxs_with_vnames) $ \(param, (arr, idxs')) ->
@@ -87,9 +87,10 @@ compileSegStencil pat space sten kbody = collect $ do
       [Integer] ->
       Imp.TExp Int64 ->
       Imp.TExp Int64 ->
+      Imp.TExp Int64 ->
       [Imp.TExp Int64]
-    stencilIdxs iter idxs dim tile_iter =
-      let iter' = (toInt64Exp (Var iter)) + tile_iter in
+    stencilIdxs iter idxs dim tile_iter tile_dim =
+      let iter' = (toInt64Exp (Var iter)) * tile_dim + tile_iter in
         flip map idxs $ \idx -> inBounds' (iter' + fromInteger idx) dim
 
     inBounds' ::
@@ -98,5 +99,5 @@ compileSegStencil pat space sten kbody = collect $ do
       Imp.TExp Int64
     inBounds' x n = sMin64 (n - 1) (sMax64 0 x)
 
-uncurry4 :: (t1 -> t2 -> t3 -> t4 -> t5) -> (t1, t2, t3, t4) -> t5
-uncurry4 f (a, b, c, d) = f a b c d
+uncurry5 :: (t1 -> t2 -> t3 -> t4 -> t5 -> t6) -> (t1, t2, t3, t4, t5) -> t6
+uncurry5 f (a, b, c, d, e) = f a b c d e
