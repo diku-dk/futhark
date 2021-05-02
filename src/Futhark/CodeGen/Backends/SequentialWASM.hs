@@ -64,7 +64,8 @@ compileProg prog = do
 fRepMyRep :: Imp.Program -> [JSEntryPoint]
 fRepMyRep prog =
   let Imp.Definitions _ (Imp.Functions fs) = prog
-      result = map (\(n, Imp.Function _ _ _ _ res args) -> JSEntryPoint {name = nameToString n , parameters = map extToString args, ret = map extToString res}) fs
+      entries = filter (\(n, Imp.Function isEntry _ _ _ _ _) -> isEntry) fs
+      result = map (\(n, Imp.Function _ _ _ _ res args) -> JSEntryPoint {name = nameToString n , parameters = map extToString args, ret = map extToString res}) entries
       -- TODO take futhark_entry from nameToString n
   in result
 
@@ -83,6 +84,7 @@ extToString (Imp.TransparentValue (Imp.ScalarValue (IntType Int16) Imp.TypeUnsig
 extToString (Imp.TransparentValue (Imp.ScalarValue (IntType Int32) Imp.TypeUnsigned  _)) = "u32"
 extToString (Imp.TransparentValue (Imp.ScalarValue (IntType Int64) Imp.TypeUnsigned  _)) = "u64"
 extToString (Imp.TransparentValue (Imp.ScalarValue (Bool) _ _)) = "bool"
+extToString (Imp.OpaqueValue name vd) = "opaq"
 
 -- TODO 32
 -- Handle Booleans
@@ -256,7 +258,8 @@ cwraps =
   unlines
   [ cwrapFun "futhark_context_config_new" 0,
     cwrapFun "futhark_context_new" 1,
-    cwrapFun "futhark_context_sync" 1
+    cwrapFun "futhark_context_sync" 1,
+    cwrapFun "futhark_context_get_error" 1
   ]
 
 -- TODO Only wrap functions for first params
@@ -278,8 +281,8 @@ emccExportNames jses =
     map (\arg -> "'" ++ gfn "new" arg ++ "'") jses' ++
     map (\arg -> "'" ++ gfn "shape" arg ++ "'") jses' ++
     map (\arg -> "'" ++ gfn "values_raw" arg ++ "'") jses' ++
-    map (\arg -> "'" ++ gfn "values" arg ++ "'")  jses' ++ 
-    ["_futhark_context_config_new", "_futhark_context_new", "_futhark_context_sync"]
+    map (\arg -> "'" ++ gfn "values" arg ++ "'")  jses' ++
+    ["_futhark_context_config_new", "_futhark_context_new", "_futhark_context_sync", "_futhark_context_get_error"]
   where
     jses' = filter (\t -> dim t >  0) $ nub $ concatMap (\jse -> (parameters jse) ++ (ret jse)) jses
     gfn typ str = "_futhark_" ++ typ ++ "_" ++ baseType str ++ "_" ++ show (dim str) ++ "d"
@@ -346,9 +349,14 @@ jsWrapEntryPoint jse =
   ["  " ++ func_name ++ "(" ++ args1 ++ ") {",
   initss,
   paramsToPtr,
-  -- TODO CHange line below
   "    if (futhark_entry_" ++ func_name ++ "(this.ctx, " ++ rets ++ ", " ++ args1 ++ ") > 0) {",
-  "       throw 'Error';",
+  "     var error_ptr = futhark_context_get_error(this.ctx);",
+  "     var error_msg = '';",
+  "     var next_char;",
+  "     for (var i=0; 0 != (next_char=getValue(i + error_ptr, 'i8')); i++) {",
+  "       error_msg = error_msg + String.fromCharCode(next_char);",
+  "     }",
+  "     throw error_msg;",
   "    }",
   results,  
   "    futhark_context_sync(this.ctx);",
