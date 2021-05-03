@@ -27,6 +27,7 @@ import Futhark.Util.Pretty (prettyText)
 import Futhark.Util.Table
 import System.Console.ANSI
 import qualified System.Console.Terminal.Size as Terminal
+import System.Directory
 import System.Environment
 import System.Exit
 import System.FilePath
@@ -236,33 +237,62 @@ runTestCase (TestCase mode program testcase progs) = do
           ExitFailure 127 -> throwError $ progNotFound $ T.pack futhark
           ExitFailure _ -> throwError $ T.decodeUtf8 err
     RunCases ios structures warnings -> do
-      -- Compile up-front and reuse same executable for several entry points.
-      let backend = configBackend progs
-          extra_compiler_options = configExtraCompilerOptions progs
+      exists <- liftIO $ doesFileExist $ "." </> (dropExtension program)
+      if mode == Run && exists
+      then runCompiledProgram (FutharkExe futhark) program progs ios 
+      else do
+    -- Compile up-front and reuse same executable for several entry points.
+        let backend = configBackend progs
+            extra_compiler_options = configExtraCompilerOptions progs
 
-      unless (mode == Compile) $
-        context "Generating reference outputs" $
-          -- We probably get the concurrency at the test program level,
-          -- so force just one data set at a time here.
-          ensureReferenceOutput (Just 1) (FutharkExe futhark) "c" program ios
+        unless (mode == Compile) $
+          context "Generating reference outputs" $
+            -- We probably get the concurrency at the test program level,
+            -- so force just one data set at a time here.
+            ensureReferenceOutput (Just 1) (FutharkExe futhark) "c" program ios
 
-      unless (mode == Interpreted) $
-        context ("Compiling with --backend=" <> T.pack backend) $ do
-          compileTestProgram extra_compiler_options (FutharkExe futhark) backend program warnings
-          mapM_ (testMetrics progs program) structures
-          unless (mode == Compile) $ do
-            (tuning_opts, _) <-
-              liftIO $ determineTuning (configTuning progs) program
-            let extra_options = tuning_opts ++ configExtraOptions progs
-                runner = configRunner progs
-            context "Running compiled program" $
-              withProgramServer program runner extra_options $ \server -> do
-                let run = runCompiledEntry (FutharkExe futhark) server program
-                concat <$> mapM run ios
+        unless (mode == Interpreted) $
+          context ("Compiling with --backend=" <> T.pack backend) $ do
+            compileTestProgram extra_compiler_options (FutharkExe futhark) backend program warnings
+            mapM_ (testMetrics progs program) structures
+            unless (mode == Compile) $ runCompiledProgram (FutharkExe futhark) program progs ios
 
-      unless (mode == Compile || mode == Compiled) $
-        context "Interpreting" $
-          accErrors_ $ map (runInterpretedEntry (FutharkExe futhark) program) ios
+        unless (mode == Compile || mode == Compiled) $
+          context "Interpreting" $
+            accErrors_ $ map (runInterpretedEntry (FutharkExe futhark) program) ios
+
+--compileAndRun :: FutharkExe -> FilePath -> ProgConfig -> RunCases -> TestM ()
+--compileAndRun (FutharkExe futhark) program progs (RunCases ios structures warnings) = do
+--  -- Compile up-front and reuse same executable for several entry points.
+--  let backend = configBackend progs
+--      extra_compiler_options = configExtraCompilerOptions progs
+--
+--  unless (mode == Compile) $
+--    context "Generating reference outputs" $
+--      -- We probably get the concurrency at the test program level,
+--      -- so force just one data set at a time here.
+--      ensureReferenceOutput (Just 1) (FutharkExe futhark) "c" program ios
+--
+--  unless (mode == Interpreted) $
+--    context ("Compiling with --backend=" <> T.pack backend) $ do
+--      compileTestProgram extra_compiler_options (FutharkExe futhark) backend program warnings
+--      mapM_ (testMetrics progs program) structures
+--      unless (mode == Compile) $ runCompiledProgram (FutharkExe futhark) program progs ios
+--
+--  unless (mode == Compile || mode == Compiled) $
+--    context "Interpreting" $
+--      accErrors_ $ map (runInterpretedEntry (FutharkExe futhark) program) ios
+
+runCompiledProgram :: FutharkExe -> FilePath -> ProgConfig -> [InputOutputs] -> TestM ()
+runCompiledProgram (FutharkExe futhark) program progs ios = do
+  (tuning_opts, _) <-
+    liftIO $ determineTuning (configTuning progs) program
+  let extra_options = tuning_opts ++ configExtraOptions progs
+      runner = configRunner progs
+  context "Running compiled program" $
+    withProgramServer program runner extra_options $ \server -> do
+      let run = runCompiledEntry (FutharkExe futhark) server program
+      concat <$> mapM run ios
 
 liftCommand ::
   (MonadError T.Text m, MonadIO m) =>
@@ -656,6 +686,7 @@ data TestMode
   | Compile
   | Compiled
   | Interpreted
+  | Run
   | Everything
   deriving (Eq, Show)
 
@@ -671,6 +702,11 @@ commandLineOptions =
       ["interpreted"]
       (NoArg $ Right $ \config -> config {configTestMode = Interpreted})
       "Only interpret",
+    Option
+      "r"
+      ["run"]
+      (NoArg $ Right $ \config -> config {configTestMode = Run})
+      "Only run executable without recompiling",
     Option
       "c"
       ["compiled"]
