@@ -124,7 +124,7 @@ function construct_binary_value(v) {
       elems = elems * Number(shape[i]);
     }
   }
-  var num_bytes = 1 + 1 + 1 + 4 + (shape.length) * 8 + elems * byte_len;
+  var num_bytes = 1 + 1 + 1 + 4 + (shape.length) * 8 + elems * byte_len * (values.length > 0);
 
   var bytes = new Uint8Array(num_bytes);
   bytes[0] = Buffer.from('b').readUInt8();
@@ -144,6 +144,10 @@ function construct_binary_value(v) {
     }
     var size_bytes = new Uint8Array(sizes.buffer);
     bytes.set(size_bytes, 7);
+  }
+
+  if (values.length == 0) {
+    return Buffer.from(bytes);
   }
 
   var val_bytes = new Uint8Array(values.buffer, values.byteOffset, byte_len * values.length);
