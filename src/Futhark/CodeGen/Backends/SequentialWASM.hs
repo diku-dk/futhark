@@ -64,7 +64,7 @@ compileProg prog = do
 fRepMyRep :: Imp.Program -> [JSEntryPoint]
 fRepMyRep prog =
   let Imp.Definitions _ (Imp.Functions fs) = prog
-      entries = filter (\(n, Imp.Function isEntry _ _ _ _ _) -> isEntry) fs
+      entries = filter (\(_, Imp.Function isEntry _ _ _ _ _) -> isEntry) fs
       result = map (\(n, Imp.Function _ _ _ _ res args) -> JSEntryPoint {name = nameToString n , parameters = map extToString args, ret = map extToString res}) entries
       -- TODO take futhark_entry from nameToString n
   in result
@@ -84,7 +84,8 @@ extToString (Imp.TransparentValue (Imp.ScalarValue (IntType Int16) Imp.TypeUnsig
 extToString (Imp.TransparentValue (Imp.ScalarValue (IntType Int32) Imp.TypeUnsigned  _)) = "u32"
 extToString (Imp.TransparentValue (Imp.ScalarValue (IntType Int64) Imp.TypeUnsigned  _)) = "u64"
 extToString (Imp.TransparentValue (Imp.ScalarValue (Bool) _ _)) = "bool"
-extToString (Imp.OpaqueValue name vd) = "opaq"
+extToString (Imp.OpaqueValue _ _) = "opaq"
+extToString _ = "Not Reached"
 
 -- TODO 32
 -- Handle Booleans
@@ -524,7 +525,7 @@ fromFutharkArrayValues str =
   where
   ctx = "this.ctx"
   fut_arr = "fut_arr"
-  ofs = "dataHeap.byteOffset"
+  -- ofs = "dataHeap.byteOffset"
   args1 = [fut_arr]
   args2 = [ctx, fut_arr]
   i = dim str
