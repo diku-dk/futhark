@@ -1141,7 +1141,7 @@ sliceInfo ::
   VName ->
   Slice SubExp ->
   m (MemInfo SubExp NoUniqueness MemBind)
-sliceInfo v slice = do
+sliceInfo v slice@(DimIndices idxs) = do
   (et, _, mem, ixfun) <- arrayVarReturns v
   case sliceDims slice of
     [] -> return $ MemPrim et
@@ -1151,7 +1151,7 @@ sliceInfo v slice = do
           ArrayIn mem $
             IxFun.slice
               ixfun
-              (map (fmap (isInt64 . primExpFromSubExp int64)) slice)
+              $ DimIndices (map (fmap (isInt64 . primExpFromSubExp int64)) idxs)
 
 class TypedOp (Op lore) => OpReturns lore where
   opReturns ::

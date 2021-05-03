@@ -243,12 +243,14 @@ simplifyLoopVariables vtable pat aux (ctx, val, form@(ForLoop i it num_iters loo
     vtable' = ST.fromScope (scopeOf form) <> vtable
 
     checkIfSimplifiable (p, arr) =
-      simplifyIndexing
-        vtable'
-        seType
-        arr
-        (DimFix (Var i) : fullSlice (paramType p) [])
-        $ paramName p `nameIn` consumed_in_body
+      case fullSlice (paramType p) (DimIndices []) of
+        DimIndices idxs ->
+          simplifyIndexing
+            vtable'
+            seType
+            arr
+            (DimIndices $ DimFix (Var i) : idxs)
+            $ paramName p `nameIn` consumed_in_body
 
     -- We only want this simplification if the result does not refer
     -- to 'i' at all, or does not contain accesses.
@@ -259,7 +261,8 @@ simplifyLoopVariables vtable pat aux (ctx, val, form@(ForLoop i it num_iters loo
       case x of
         IndexResult cs arr' slice
           | not $ any ((i `nameIn`) . freeIn) x_stms,
-            DimFix (Var j) : slice' <- slice,
+            DimIndices idxs <- slice,
+            DimFix (Var j) : idxs' <- idxs,
             j == i,
             not $ i `nameIn` freeIn slice -> do
             addStms x_stms
@@ -269,7 +272,8 @@ simplifyLoopVariables vtable pat aux (ctx, val, form@(ForLoop i it num_iters loo
                 letExp "for_in_partial" $
                   BasicOp $
                     Index arr' $
-                      DimSlice (intConst Int64 0) w (intConst Int64 1) : slice'
+                      DimIndices $
+                        DimSlice (intConst Int64 0) w (intConst Int64 1) : idxs'
             return (Just (p, for_in_partial), mempty)
         SubExpResult cs se
           | all (notIndex . stmExp) x_stms -> do
@@ -334,10 +338,12 @@ unroll n merge (iv, it, i) loop_vars body
       letBindNames [iv] $ BasicOp $ SubExp $ intConst it i
 
       forM_ loop_vars $ \(p, arr) ->
-        letBindNames [paramName p] $
-          BasicOp $
-            Index arr $
-              DimFix (intConst Int64 i) : fullSlice (paramType p) []
+        let (DimIndices idxs) = fullSlice (paramType p) (DimIndices [])
+         in letBindNames [paramName p] $
+              BasicOp $
+                Index arr $
+                  DimIndices $
+                    DimFix (intConst Int64 i) : idxs
 
       -- Some of the sizes in the types here might be temporarily wrong
       -- until copy propagation fixes it up.

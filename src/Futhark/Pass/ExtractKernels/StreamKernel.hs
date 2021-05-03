@@ -94,12 +94,12 @@ splitArrays chunk_size split_bound ordering w i elems_per_i arrs = do
   where
     contiguousSlice offset slice_name arr = do
       arr_t <- lookupType arr
-      let slice = fullSlice arr_t [DimSlice offset (Var chunk_size) (constant (1 :: Int64))]
+      let slice = fullSlice arr_t $ DimIndices [DimSlice offset (Var chunk_size) (constant (1 :: Int64))]
       letBindNames [slice_name] $ BasicOp $ Index arr slice
 
     stridedSlice stride slice_name arr = do
       arr_t <- lookupType arr
-      let slice = fullSlice arr_t [DimSlice i (Var chunk_size) stride]
+      let slice = fullSlice arr_t $ DimIndices [DimSlice i (Var chunk_size) stride]
       letBindNames [slice_name] $ BasicOp $ Index arr slice
 
 partitionChunkedKernelFoldParameters ::

@@ -268,7 +268,8 @@ ensureCoalescedAccess
           not $ null thread_gids,
           inner_gid <- last thread_gids,
           length slice >= length perm,
-          slice' <- map (slice !!) perm,
+          slice' <- case slice of
+            DimIndices idxs -> map (idxs !!) perm,
           DimFix inner_ind <- last slice',
           not $ null thread_gids,
           isGidVariant inner_gid inner_ind ->
@@ -307,7 +308,7 @@ ensureCoalescedAccess
         -- We will really want to treat the sliced dimension like two
         -- dimensions so we can transpose them.  This may require
         -- padding.
-        | (is, rem_slice) <- splitSlice slice,
+        | (is, DimIndices rem_slice) <- splitSlice slice,
           and $ zipWith (==) is $ map Var thread_gids,
           DimSlice offset len (Constant stride) : _ <- rem_slice,
           isThreadLocalSubExp offset,
@@ -352,14 +353,21 @@ tooSmallSlice bs = fst . foldl comb (True, bs) . sliceDims
     comb (_, x) _ = (False, x)
 
 splitSlice :: Slice SubExp -> ([SubExp], Slice SubExp)
-splitSlice [] = ([], [])
-splitSlice (DimFix i : is) = first (i :) $ splitSlice is
-splitSlice is = ([], is)
+splitSlice (DimIndices idxs) =
+  let (sexps, idxs') = splitSlice' idxs
+   in (sexps, DimIndices idxs')
+  where
+    splitSlice' :: [DimIndex SubExp] -> ([SubExp], [DimIndex SubExp])
+    splitSlice' [] = ([], [])
+    splitSlice' (DimFix i : is) = first (i :) $ splitSlice' is
+    splitSlice' is = ([], is)
 
 allDimAreSlice :: Slice SubExp -> Bool
-allDimAreSlice [] = True
-allDimAreSlice (DimFix _ : _) = False
-allDimAreSlice (_ : is) = allDimAreSlice is
+allDimAreSlice (DimIndices idxs) = allDimAreSlice' idxs
+  where
+    allDimAreSlice' [] = True
+    allDimAreSlice' (DimFix _ : _) = False
+    allDimAreSlice' (_ : is) = allDimAreSlice' is
 
 -- Try to move thread indexes into their proper position.
 coalescedIndexes :: Names -> (VName -> SubExp -> Bool) -> [SubExp] -> [SubExp] -> Maybe [SubExp]

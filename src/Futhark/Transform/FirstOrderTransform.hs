@@ -175,12 +175,12 @@ transformSOAC pat (Screma w arrs form@(ScremaForm scans reds map_lam)) = do
               p' <-
                 letExp (baseString (paramName p)) $
                   BasicOp $
-                    Index arr $ fullSlice arr_t [DimFix $ Var i]
+                    Index arr $ fullSlice arr_t $ DimIndices [DimFix $ Var i]
               letBindNames [paramName p] $ BasicOp $ Copy p'
             | otherwise ->
               letBindNames [paramName p] $
                 BasicOp $
-                  Index arr $ fullSlice arr_t [DimFix $ Var i]
+                  Index arr $ fullSlice arr_t $ DimIndices [DimFix $ Var i]
 
       -- Insert the statements of the lambda.  We have taken care to
       -- ensure that the parameters are bound at this point.
@@ -257,7 +257,7 @@ transformSOAC pat (Stream w arrs _ nes lam) = do
       )
       $ do
         let slice =
-              [DimSlice (Var i) (Var (paramName chunk_size_param)) (intConst Int64 1)]
+              DimIndices [DimSlice (Var i) (Var (paramName chunk_size_param)) (intConst Int64 1)]
         forM_ (zip chunk_params arrs) $ \(p, arr) ->
           letBindNames [paramName p] $
             BasicOp $
@@ -294,7 +294,7 @@ transformSOAC pat (Scatter len lam ivs as) = do
       $ do
         ivs' <- forM ivs $ \iv -> do
           iv_t <- lookupType iv
-          letSubExp "write_iv" $ BasicOp $ Index iv $ fullSlice iv_t [DimFix $ Var iter]
+          letSubExp "write_iv" $ BasicOp $ Index iv $ fullSlice iv_t $ DimIndices [DimFix $ Var iter]
         ivs'' <- bindLambda lam (map (BasicOp . SubExp) ivs')
 
         let indexes = groupScatterResults (zip3 as_ws as_ns $ map identName asOuts) ivs''
@@ -324,7 +324,7 @@ transformSOAC pat (Hist len ops bucket_fun imgs) = do
         -- Bind images to parameters of bucket function.
         imgs' <- forM imgs $ \img -> do
           img_t <- lookupType img
-          letSubExp "pixel" $ BasicOp $ Index img $ fullSlice img_t [DimFix $ Var iter]
+          letSubExp "pixel" $ BasicOp $ Index img $ fullSlice img_t $ DimIndices [DimFix $ Var iter]
         imgs'' <- bindLambda bucket_fun $ map (BasicOp . SubExp) imgs'
 
         -- Split out values from bucket function.
@@ -349,7 +349,7 @@ transformSOAC pat (Hist len ops bucket_fun imgs) = do
               -- Read values from histogram.
               h_val <- forM hist $ \arr -> do
                 arr_t <- lookupType arr
-                letSubExp "read_hist" $ BasicOp $ Index arr $ fullSlice arr_t [DimFix idx]
+                letSubExp "read_hist" $ BasicOp $ Index arr $ fullSlice arr_t $ DimIndices [DimFix idx]
 
               -- Apply operator.
               h_val' <-
@@ -359,7 +359,7 @@ transformSOAC pat (Hist len ops bucket_fun imgs) = do
               -- Write values back to histograms.
               hist' <- forM (zip hist h_val') $ \(arr, v) -> do
                 arr_t <- lookupType arr
-                letInPlace "hist_out" arr (fullSlice arr_t [DimFix idx]) $
+                letInPlace "hist_out" arr (fullSlice arr_t $ DimIndices [DimFix idx]) $
                   BasicOp $ SubExp v
 
               return $ resultBody $ map Var hist'
@@ -396,7 +396,7 @@ letwith ks i vs = do
           Acc {} ->
             letExp "lw_acc" $ BasicOp $ SubExp v
           _ ->
-            letInPlace "lw_dest" k (fullSlice k_t [DimFix i]) $ BasicOp $ SubExp v
+            letInPlace "lw_dest" k (fullSlice k_t $ DimIndices [DimFix i]) $ BasicOp $ SubExp v
   zipWithM update ks vs
 
 bindLambda ::

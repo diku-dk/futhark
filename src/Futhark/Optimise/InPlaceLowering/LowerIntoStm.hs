@@ -134,7 +134,8 @@ lowerUpdatesIntoSegMap scope pat updates kspace kbody = do
 
     onRet (PatElem v v_dec) ret
       | Just (DesiredUpdate bindee_nm bindee_dec _cs src slice _val) <-
-          find ((== v) . updateValue) updates = do
+          find ((== v) . updateValue) updates,
+        DimIndices idxs <- slice = do
         Returns _ se <- Just ret
 
         -- The slice we're writing per thread must fully cover the
@@ -142,18 +143,18 @@ lowerUpdatesIntoSegMap scope pat updates kspace kbody = do
         guard $
           let (dims', slice') =
                 unzip . drop (length gtids) . filter (isNothing . dimFix . snd) $
-                  zip (arrayDims (typeOf bindee_dec)) slice
-           in isFullSlice (Shape dims') slice'
+                  zip (arrayDims (typeOf bindee_dec)) idxs
+           in isFullSlice (Shape dims') $ DimIndices slice'
 
         Just $ do
           (slice', bodystms) <-
             flip runBinderT scope $
               traverse (toSubExp "index") $
-                fixSlice (map (fmap pe64) slice) $
+                fixSlice (fmap pe64 slice) $
                   map (pe64 . Var) gtids
 
           let res_dims = arrayDims $ snd bindee_dec
-              ret' = WriteReturns (Shape res_dims) src [(map DimFix slice', se)]
+              ret' = WriteReturns (Shape res_dims) src [(DimIndices $ map DimFix slice', se)]
 
           return
             ( PatElem bindee_nm bindee_dec,

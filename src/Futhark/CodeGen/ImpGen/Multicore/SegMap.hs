@@ -22,13 +22,13 @@ writeResult _ pe (WriteReturns (Shape rws) _ idx_vals) = do
   let (iss, vs) = unzip idx_vals
       rws' = map toInt64Exp rws
   forM_ (zip iss vs) $ \(slice, v) -> do
-    let slice' = map (fmap toInt64Exp) slice
+    let slice'@(DimIndices idxs) = fmap toInt64Exp slice
         condInBounds (DimFix i) rw =
           0 .<=. i .&&. i .<. rw
         condInBounds (DimSlice i n s) rw =
           0 .<=. i .&&. i + n * s .<. rw
-        in_bounds = foldl1 (.&&.) $ zipWith condInBounds slice' rws'
-        when_in_bounds = copyDWIM (patElemName pe) slice' v []
+        in_bounds = foldl1 (.&&.) $ zipWith condInBounds idxs rws'
+        when_in_bounds = copyDWIM (patElemName pe) slice' v (DimIndices [])
     sWhen in_bounds when_in_bounds
 writeResult _ _ res =
   error $ "writeResult: cannot handle " ++ pretty res

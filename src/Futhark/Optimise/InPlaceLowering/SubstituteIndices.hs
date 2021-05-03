@@ -128,7 +128,7 @@ substituteIndicesInExp substs e = do
                       `setType` ( typeOf src2dec
                                     `setArrayDims` sliceDims is2
                                 ),
-                    []
+                    DimIndices []
                   )
                   substs'
           consumingSubst substs' _ =
@@ -151,7 +151,7 @@ substituteIndicesInVar ::
   VName ->
   m VName
 substituteIndicesInVar substs v
-  | Just (cs2, src2, _, []) <- lookup v substs =
+  | Just (cs2, src2, _, DimIndices []) <- lookup v substs =
     certifying cs2 $
       letExp (baseString src2) $ BasicOp $ SubExp $ Var src2
   | Just (cs2, src2, src2_dec, is2) <- lookup v substs =

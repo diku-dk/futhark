@@ -1060,7 +1060,7 @@ patternDims _ = []
 
 sliceShape ::
   Maybe (SrcLoc, Rigidity) ->
-  [DimIndex] ->
+  Slice ->
   TypeBase (DimDecl VName) as ->
   TermTypeM (TypeBase (DimDecl VName) as, [VName])
 sliceShape r slice t@(Array als u et (ShapeDecl orig_dims)) =
@@ -1097,22 +1097,24 @@ sliceShape r slice t@(Array als u et (ShapeDecl orig_dims)) =
           | isJust i, isJust j = Nothing
           | otherwise = Just orig_d
 
-    adjustDims (DimFix {} : idxes') (_ : dims) =
-      adjustDims idxes' dims
+    adjustDims (DimIndices idxs) = adjustDims' idxs
+
+    adjustDims' (DimFix {} : idxes') (_ : dims) =
+      adjustDims' idxes' dims
     -- Pattern match some known slices to be non-existential.
-    adjustDims (DimSlice i j stride : idxes') (_ : dims)
+    adjustDims' (DimSlice i j stride : idxes') (_ : dims)
       | refine_sizes,
         maybe True ((== Just 0) . isInt64) i,
         Just j' <- maybeDimFromExp =<< j,
         maybe True ((== Just 1) . isInt64) stride =
-        (j' :) <$> adjustDims idxes' dims
-    adjustDims (DimSlice Nothing Nothing stride : idxes') (d : dims)
+        (j' :) <$> adjustDims' idxes' dims
+    adjustDims' (DimSlice Nothing Nothing stride : idxes') (d : dims)
       | refine_sizes,
         maybe True (maybe False ((== 1) . abs) . isInt64) stride =
-        (d :) <$> adjustDims idxes' dims
-    adjustDims (DimSlice i j stride : idxes') (d : dims) =
-      (:) <$> sliceSize d i j stride <*> adjustDims idxes' dims
-    adjustDims _ dims =
+        (d :) <$> adjustDims' idxes' dims
+    adjustDims' (DimSlice i j stride : idxes') (d : dims) =
+      (:) <$> sliceSize d i j stride <*> adjustDims' idxes' dims
+    adjustDims' _ dims =
       pure dims
 sliceShape _ _ t = pure (t, [])
 
@@ -1506,16 +1508,16 @@ checkExp (AppExp (LetFun name (tparams, params, maybe_retdecl, NoInfo, e) body l
                 loc
             )
             (Info $ AppRes body_t ext)
-checkExp (AppExp (LetWith dest src idxes ve body loc) _) =
+checkExp (AppExp (LetWith dest src slice ve body loc) _) =
   sequentially (checkIdent src) $ \src' _ -> do
-    (t, _) <- newArrayType (srclocOf src) "src" $ length idxes
+    (t, _) <- newArrayType (srclocOf src) "src" $ sliceLength slice
     unify (mkUsage loc "type of target array") t $ toStruct $ unInfo $ identType src'
 
     -- Need the fully normalised type here to get the proper aliasing information.
     src_t <- normTypeFully $ unInfo $ identType src'
 
-    idxes' <- mapM checkDimIndex idxes
-    (elemt, _) <- sliceShape (Just (loc, Nonrigid)) idxes' =<< normTypeFully t
+    slice' <- checkSlice slice
+    (elemt, _) <- sliceShape (Just (loc, Nonrigid)) slice' =<< normTypeFully t
 
     unless (unique src_t) $
       typeError loc mempty $
@@ -1543,11 +1545,11 @@ checkExp (AppExp (LetWith dest src idxes ve body loc) _) =
         (body_t, ext) <-
           unscopeType loc (M.singleton (identName dest') dest')
             =<< expTypeFully body'
-        return $ AppExp (LetWith dest' src' idxes' ve' body' loc) (Info $ AppRes body_t ext)
-checkExp (Update src idxes ve loc) = do
-  (t, _) <- newArrayType (srclocOf src) "src" $ length idxes
-  idxes' <- mapM checkDimIndex idxes
-  (elemt, _) <- sliceShape (Just (loc, Nonrigid)) idxes' =<< normTypeFully t
+        return $ AppExp (LetWith dest' src' slice' ve' body' loc) (Info $ AppRes body_t ext)
+checkExp (Update src slice ve loc) = do
+  (t, _) <- newArrayType (srclocOf src) "src" $ sliceLength slice
+  slice' <- checkSlice slice
+  (elemt, _) <- sliceShape (Just (loc, Nonrigid)) slice' =<< normTypeFully t
 
   sequentially (checkExp ve >>= unifies "type of target array" elemt) $ \ve' _ ->
     sequentially (checkExp src >>= unifies "type of target array" t) $ \src' _ -> do
@@ -1563,7 +1565,7 @@ checkExp (Update src idxes ve loc) = do
       unless (S.null $ src_als `S.intersection` aliases ve_t) $ badLetWithValue src ve loc
 
       consume loc src_als
-      return $ Update src' idxes' ve' loc
+      return $ Update src' slice' ve' loc
 
 -- Record updates are a bit hacky, because we do not have row typing
 -- (yet?).  For now, we only permit record updates where we know the
@@ -1595,20 +1597,20 @@ checkExp (RecordUpdate src fields ve NoInfo loc) = do
           </> textwrap " is not known at this point.  Add a size annotation to the original record to disambiguate."
 
 --
-checkExp (AppExp (Index e idxes loc) _) = do
-  (t, _) <- newArrayType loc "e" $ length idxes
+checkExp (AppExp (Index e slice loc) _) = do
+  (t, _) <- newArrayType loc "e" $ sliceLength slice
   e' <- unifies "being indexed at" t =<< checkExp e
-  idxes' <- mapM checkDimIndex idxes
+  slice' <- checkSlice slice
   -- XXX, the RigidSlice here will be overridden in sliceShape with a proper value.
   (t', retext) <-
-    sliceShape (Just (loc, Rigid (RigidSlice Nothing ""))) idxes'
+    sliceShape (Just (loc, Rigid (RigidSlice Nothing ""))) slice'
       =<< expTypeFully e'
 
   -- Remove aliases if the result is an overloaded type, because that
   -- will certainly not be aliased.
   t'' <- noAliasesIfOverloaded t'
 
-  return $ AppExp (Index e' idxes' loc) (Info $ AppRes t'' retext)
+  return $ AppExp (Index e' slice' loc) (Info $ AppRes t'' retext)
 checkExp (Assert e1 e2 NoInfo loc) = do
   e1' <- require "being asserted" [Bool] =<< checkExp e1
   e2' <- checkExp e2
@@ -1718,11 +1720,11 @@ checkExp (ProjectSection fields NoInfo loc) = do
   let usage = mkUsage loc "projection at"
   b <- foldM (flip $ mustHaveField usage) a fields
   return $ ProjectSection fields (Info $ Scalar $ Arrow mempty Unnamed a b) loc
-checkExp (IndexSection idxes NoInfo loc) = do
-  (t, _) <- newArrayType loc "e" $ length idxes
-  idxes' <- mapM checkDimIndex idxes
-  (t', _) <- sliceShape Nothing idxes' t
-  return $ IndexSection idxes' (Info $ fromStruct $ Scalar $ Arrow mempty Unnamed t t') loc
+checkExp (IndexSection slice NoInfo loc) = do
+  (t, _) <- newArrayType loc "e" $ sliceLength slice
+  slice' <- checkSlice slice
+  (t', _) <- sliceShape Nothing slice' t
+  return $ IndexSection slice' (Info $ fromStruct $ Scalar $ Arrow mempty Unnamed t t') loc
 checkExp (AppExp (DoLoop _ mergepat mergeexp form loopbody loc) _) =
   sequentially (checkExp mergeexp) $ \mergeexp' _ -> do
     zeroOrderType
@@ -2148,6 +2150,9 @@ checkIdent :: IdentBase NoInfo Name -> TermTypeM Ident
 checkIdent (Ident name _ loc) = do
   (QualName _ name', vt) <- lookupVar loc (qualName name)
   return $ Ident name' (Info vt) loc
+
+checkSlice :: SliceBase NoInfo Name -> TermTypeM Slice
+checkSlice (DimIndices idxs) = DimIndices <$> mapM checkDimIndex idxs
 
 checkDimIndex :: DimIndexBase NoInfo Name -> TermTypeM DimIndex
 checkDimIndex (DimFix i) =

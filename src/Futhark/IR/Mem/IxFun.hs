@@ -52,7 +52,7 @@ import Futhark.IR.Syntax
   ( DimChange (..),
     DimIndex (..),
     ShapeChange,
-    Slice,
+    Slice (..),
     dimFix,
     unitSlice,
   )
@@ -367,7 +367,7 @@ rotate (IxFun (lmad@(LMAD off dims) :| lmads) oshp cg) offs =
 sliceOneLMAD ::
   (Eq num, IntegralExp num) =>
   IxFun num ->
-  Slice num ->
+  [DimIndex num] ->
   Maybe (IxFun num)
 sliceOneLMAD (IxFun (lmad@(LMAD _ ldims) :| lmads) oshp cg) is = do
   let perm = lmadPermutation lmad
@@ -412,7 +412,7 @@ sliceOneLMAD (IxFun (lmad@(LMAD _ ldims) :| lmads) oshp cg) is = do
     harmlessRotation ::
       (Eq num, IntegralExp num) =>
       LMAD num ->
-      Slice num ->
+      [DimIndex num] ->
       Bool
     harmlessRotation (LMAD _ dims) iss =
       and $ zipWith harmlessRotation' dims iss
@@ -448,7 +448,7 @@ sliceOneLMAD (IxFun (lmad@(LMAD _ ldims) :| lmads) oshp cg) is = do
     slicePreservesContiguous ::
       (Eq num, IntegralExp num) =>
       LMAD num ->
-      Slice num ->
+      [DimIndex num] ->
       Bool
     slicePreservesContiguous (LMAD _ dims) slc =
       -- remove from the slice the LMAD dimensions that have stride 0.
@@ -497,8 +497,8 @@ slice ::
   IxFun num ->
   Slice num ->
   IxFun num
-slice _ [] = error "slice: empty slice"
-slice ixfun@(IxFun (lmad@(LMAD _ _) :| lmads) oshp cg) dim_slices
+slice _ (DimIndices []) = error "slice: empty slice"
+slice ixfun@(IxFun (lmad@(LMAD _ _) :| lmads) oshp cg) (DimIndices dim_slices)
   -- Avoid identity slicing.
   | dim_slices == map (unitSlice 0) (shape ixfun) = ixfun
   | Just ixfun' <- sliceOneLMAD ixfun dim_slices = ixfun'

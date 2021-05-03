@@ -993,6 +993,9 @@ instance Simplifiable d => Simplifiable (DimIndex d) where
   simplify (DimFix i) = DimFix <$> simplify i
   simplify (DimSlice i n s) = DimSlice <$> simplify i <*> simplify n <*> simplify s
 
+instance Simplifiable d => Simplifiable (Slice d) where
+  simplify (DimIndices idxs) = DimIndices <$> simplify idxs
+
 simplifyLambda ::
   SimplifiableLore lore =>
   Lambda lore ->

@@ -288,12 +288,15 @@ simplifyReshapeIota defOf _ (Reshape newshape v)
     Just (Iota n offset stride it, v_cs)
 simplifyReshapeIota _ _ _ = Nothing
 
-reshapeSlice :: [DimIndex d] -> [d] -> [DimIndex d]
-reshapeSlice (DimFix i : slice') scs =
-  DimFix i : reshapeSlice slice' scs
-reshapeSlice (DimSlice x _ s : slice') (d : ds') =
-  DimSlice x d s : reshapeSlice slice' ds'
-reshapeSlice _ _ = []
+reshapeSlice :: Slice d -> [d] -> Slice d
+reshapeSlice (DimIndices idxs) scs = DimIndices $ reshapeSlice' idxs scs
+
+reshapeSlice' :: [DimIndex d] -> [d] -> [DimIndex d]
+reshapeSlice' (DimFix i : slice') scs =
+  DimFix i : reshapeSlice' slice' scs
+reshapeSlice' (DimSlice x _ s : slice') (d : ds') =
+  DimSlice x d s : reshapeSlice' slice' ds'
+reshapeSlice' _ _ = []
 
 -- If we are size-coercing a slice, then we might as well just use a
 -- different slice instead.

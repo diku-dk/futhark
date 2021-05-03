@@ -610,7 +610,7 @@ soacToStream soac = do
                         Index (identName arrid) $
                           fullSlice
                             (identType arrid)
-                            [DimFix $ Futhark.Var $ identName outszm1id]
+                            (DimIndices [DimFix $ Futhark.Var $ identName outszm1id])
                 )
                 lastel_tmp_ids
                 scan0_ids

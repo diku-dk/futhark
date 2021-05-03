@@ -382,14 +382,14 @@ transformAppExp (BinOp (fname, _) (Info t) (e1, d1) (e2, d2) loc) (AppRes ret ex
         ( Var (qualName x) (Info argtype) mempty,
           Id x (Info $ fromStruct argtype) mempty
         )
-transformAppExp (LetWith id1 id2 idxs e1 body loc) res = do
-  idxs' <- mapM transformDimIndex idxs
+transformAppExp (LetWith id1 id2 slice e1 body loc) res = do
+  slice' <- transformSlice slice
   e1' <- transformExp e1
   body' <- transformExp body
-  return $ AppExp (LetWith id1 id2 idxs' e1' body' loc) (Info res)
-transformAppExp (Index e0 idxs loc) res =
+  return $ AppExp (LetWith id1 id2 slice' e1' body' loc) (Info res)
+transformAppExp (Index e0 slice loc) res =
   AppExp
-    <$> (Index <$> transformExp e0 <*> mapM transformDimIndex idxs <*> pure loc)
+    <$> (Index <$> transformExp e0 <*> transformSlice slice <*> pure loc)
     <*> pure (Info res)
 transformAppExp (Match e cs loc) res =
   AppExp
@@ -475,8 +475,8 @@ transformExp (OpSectionRight fname (Info t) e arg (Info rettype) loc) = do
     loc
 transformExp (ProjectSection fields (Info t) loc) =
   desugarProjectSection fields t loc
-transformExp (IndexSection idxs (Info t) loc) =
-  desugarIndexSection idxs t loc
+transformExp (IndexSection slice (Info t) loc) =
+  desugarIndexSection slice t loc
 transformExp (Project n e tp loc) = do
   maybe_fs <- case e of
     Var qn _ _ -> lookupRecordReplacement (qualLeaf qn)
@@ -488,8 +488,8 @@ transformExp (Project n e tp loc) = do
     _ -> do
       e' <- transformExp e
       return $ Project n e' tp loc
-transformExp (Update e1 idxs e2 loc) =
-  Update <$> transformExp e1 <*> mapM transformDimIndex idxs
+transformExp (Update e1 slice e2 loc) =
+  Update <$> transformExp e1 <*> transformSlice slice
     <*> transformExp e2
     <*> pure loc
 transformExp (RecordUpdate e1 fs e2 t loc) =
@@ -508,6 +508,9 @@ transformCase :: Case -> MonoM Case
 transformCase (CasePat p e loc) = do
   (p', rr) <- transformPattern p
   CasePat p' <$> withRecordReplacements rr (transformExp e) <*> pure loc
+
+transformSlice :: SliceBase Info VName -> MonoM (SliceBase Info VName)
+transformSlice (DimIndices idxs) = DimIndices <$> mapM transformDimIndex idxs
 
 transformDimIndex :: DimIndexBase Info VName -> MonoM (DimIndexBase Info VName)
 transformDimIndex (DimFix e) = DimFix <$> transformExp e
@@ -592,10 +595,10 @@ desugarProjectSection fields (Scalar (Arrow _ _ t1 t2)) loc = do
               ++ pretty field
 desugarProjectSection _ t _ = error $ "desugarOpSection: not a function type: " ++ pretty t
 
-desugarIndexSection :: [DimIndex] -> PatternType -> SrcLoc -> MonoM Exp
-desugarIndexSection idxs (Scalar (Arrow _ _ t1 t2)) loc = do
+desugarIndexSection :: Slice -> PatternType -> SrcLoc -> MonoM Exp
+desugarIndexSection slice (Scalar (Arrow _ _ t1 t2)) loc = do
   p <- newVName "index_i"
-  let body = AppExp (Index (Var (qualName p) (Info t1) loc) idxs loc) (Info (AppRes t2 []))
+  let body = AppExp (Index (Var (qualName p) (Info t1) loc) slice loc) (Info (AppRes t2 []))
   return $ Lambda [Id p (Info t1) mempty] body Nothing (Info (mempty, toStruct t2)) loc
 desugarIndexSection _ t _ = error $ "desugarIndexSection: not a function type: " ++ pretty t
 

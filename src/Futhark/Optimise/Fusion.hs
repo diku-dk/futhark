@@ -149,7 +149,7 @@ updateKerInPlaces res (ip_vs, other_infuse_vs) = do
 
 checkForUpdates :: FusedRes -> Exp -> FusionGM FusedRes
 checkForUpdates res (BasicOp (Update src is _)) = do
-  let ifvs = namesToList $ mconcat $ map freeIn is
+  let ifvs = namesToList $ freeIn is
   updateKerInPlaces res ([src], ifvs)
 checkForUpdates res (Op (Futhark.Scatter _ _ _ written_info)) = do
   let updt_arrs = map (\(_, _, x) -> x) written_info
@@ -718,7 +718,7 @@ fusionGatherStms
               letBindNames [paramName p] $
                 BasicOp $
                   Index (paramName a_p) $
-                    fullSlice (paramType a_p) [DimFix $ Futhark.Var j]
+                    fullSlice (paramType a_p) $ DimIndices [DimFix $ Futhark.Var j]
             letBindNames [i] $ BasicOp $ BinOp (Add it OverflowUndef) (Futhark.Var offset) (Futhark.Var j)
             return body
           eBody

@@ -43,7 +43,7 @@ module Futhark.IR.Syntax.Core
     SubExp (..),
     Param (..),
     DimIndex (..),
-    Slice,
+    Slice (..),
     dimFix,
     sliceIndices,
     sliceDims,
@@ -326,7 +326,19 @@ instance Traversable DimIndex where
 -- Whenever a function accepts a 'Slice', that slice should be total,
 -- i.e, cover all dimensions of the array.  Deviators should be
 -- indicated by taking a list of 'DimIndex'es instead.
-type Slice d = [DimIndex d]
+data Slice d
+  = DimIndices [DimIndex d]
+  deriving (Eq, Ord, Show)
+
+instance Foldable Slice where
+  foldMap = foldMapDefault
+  length (DimIndices idxs) = length idxs
+
+instance Functor Slice where
+  fmap = fmapDefault
+
+instance Traversable Slice where
+  traverse f (DimIndices idxs) = DimIndices <$> traverse (traverse f) idxs
 
 -- | If the argument is a 'DimFix', return its component.
 dimFix :: DimIndex d -> Maybe d
@@ -335,11 +347,11 @@ dimFix _ = Nothing
 
 -- | If the slice is all 'DimFix's, return the components.
 sliceIndices :: Slice d -> Maybe [d]
-sliceIndices = mapM dimFix
+sliceIndices (DimIndices idxs) = mapM dimFix idxs
 
 -- | The dimensions of the array produced by this slice.
 sliceDims :: Slice d -> [d]
-sliceDims = mapMaybe dimSlice
+sliceDims (DimIndices idxs) = mapMaybe dimSlice idxs
   where
     dimSlice (DimSlice _ d _) = Just d
     dimSlice DimFix {} = Nothing
@@ -351,22 +363,30 @@ unitSlice offset n = DimSlice offset n 1
 -- | Fix the 'DimSlice's of a slice.  The number of indexes must equal
 -- the length of 'sliceDims' for the slice.
 fixSlice :: Num d => Slice d -> [d] -> [d]
-fixSlice (DimFix j : mis') is' =
-  j : fixSlice mis' is'
-fixSlice (DimSlice orig_k _ orig_s : mis') (i : is') =
-  (orig_k + i * orig_s) : fixSlice mis' is'
-fixSlice _ _ = []
+fixSlice (DimIndices idxs) = fixDimIndices idxs
+
+-- | Fix the 'DimSlice's of a slice.  The number of indexes must equal
+-- the length of 'sliceDims' for the slice.
+fixDimIndices :: Num d => [DimIndex d] -> [d] -> [d]
+fixDimIndices (DimFix j : mis') is' =
+  j : fixDimIndices mis' is'
+fixDimIndices (DimSlice orig_k _ orig_s : mis') (i : is') =
+  (orig_k + i * orig_s) : fixDimIndices mis' is'
+fixDimIndices _ _ = []
 
 -- | Further slice the 'DimSlice's of a slice.  The number of slices
 -- must equal the length of 'sliceDims' for the slice.
 sliceSlice :: Num d => Slice d -> Slice d -> Slice d
-sliceSlice (DimFix j : js') is' =
-  DimFix j : sliceSlice js' is'
-sliceSlice (DimSlice j _ s : js') (DimFix i : is') =
-  DimFix (j + (i * s)) : sliceSlice js' is'
-sliceSlice (DimSlice j _ s0 : js') (DimSlice i n s1 : is') =
-  DimSlice (j + (s0 * i)) n (s0 * s1) : sliceSlice js' is'
-sliceSlice _ _ = []
+sliceSlice (DimIndices js) (DimIndices is) = DimIndices $ sliceSlice' js is
+
+sliceSlice' :: Num d => [DimIndex d] -> [DimIndex d] -> [DimIndex d]
+sliceSlice' (DimFix j : js') is' =
+  DimFix j : sliceSlice' js' is'
+sliceSlice' (DimSlice j _ s : js') (DimFix i : is') =
+  DimFix (j + (i * s)) : sliceSlice' js' is'
+sliceSlice' (DimSlice j _ s0 : js') (DimSlice i n s1 : is') =
+  DimSlice (j + (s0 * i)) n (s0 * s1) : sliceSlice' js' is'
+sliceSlice' _ _ = []
 
 -- | An element of a pattern - consisting of a name and an addditional
 -- parametric decoration.  This decoration is what is expected to

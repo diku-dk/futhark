@@ -68,7 +68,7 @@ prepareRedOrScan w map_lam arrs ispace inps = do
         forM_ (zip (lambdaParams map_lam) arrs) $ \(p, arr) -> do
           arr_t <- lookupType arr
           letBindNames [paramName p] $
-            BasicOp $ Index arr $ fullSlice arr_t [DimFix $ Var gtid]
+            BasicOp $ Index arr $ fullSlice arr_t $ DimIndices [DimFix $ Var gtid]
         map (Returns ResultMaySimplify) <$> bodyBind (lambdaBody map_lam)
 
   return (space, kbody)
@@ -150,7 +150,8 @@ dummyDim pat = do
         letBindNames [to] $
           BasicOp $
             Index from $
-              fullSlice from_t [DimFix $ intConst Int64 0]
+              fullSlice from_t $
+                DimIndices [DimFix $ intConst Int64 0]
     )
 
 nonSegRed ::
@@ -190,7 +191,7 @@ segHist lvl pat arr_w ispace inps ops lam arrs = runBinder_ $ do
         forM_ (zip (lambdaParams lam) arrs) $ \(p, arr) -> do
           arr_t <- lookupType arr
           letBindNames [paramName p] $
-            BasicOp $ Index arr $ fullSlice arr_t [DimFix $ Var gtid]
+            BasicOp $ Index arr $ fullSlice arr_t $ DimIndices [DimFix $ Var gtid]
         map (Returns ResultMaySimplify) <$> bodyBind (lambdaBody lam)
 
   letBind pat $ Op $ segOp $ SegHist lvl space ops (lambdaReturnType lam) kbody
@@ -251,4 +252,4 @@ readKernelInput inp = do
         SubExp $ Var $ kernelInputArray inp
       _ ->
         Index (kernelInputArray inp) $
-          fullSlice arr_t $ map DimFix $ kernelInputIndices inp
+          fullSlice arr_t $ DimIndices $ map DimFix $ kernelInputIndices inp

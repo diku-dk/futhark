@@ -169,7 +169,7 @@ updateAcc acc is vs = sComment "UpdateAcc" $ do
   -- See the ImpGen implementation of UpdateAcc for general notes.
   let is' = map toInt64Exp is
   (c, space, arrs, dims, op) <- lookupAcc acc is'
-  sWhen (inBounds (map DimFix is') dims) $
+  sWhen (inBounds (DimIndices $ map DimFix is') dims) $
     case op of
       Nothing ->
         forM_ (zip arrs vs) $ \(arr, v) -> copyDWIMFix arr is' v []
@@ -177,7 +177,7 @@ updateAcc acc is vs = sComment "UpdateAcc" $ do
         dLParams $ lambdaParams lam
         let (_x_params, y_params) =
               splitAt (length vs) $ map paramName $ lambdaParams lam
-        forM_ (zip y_params vs) $ \(yp, v) -> copyDWIM yp [] v []
+        forM_ (zip y_params vs) $ \(yp, v) -> copyDWIM yp (DimIndices []) v (DimIndices [])
         atomics <- kernelAtomics <$> askEnv
         case atomicUpdateLocking atomics lam of
           AtomicPrim f -> f space arrs is'
@@ -283,7 +283,7 @@ compileGroupExp (Pattern _ [pe]) (BasicOp (Update _ slice se))
     sOp $ Imp.Barrier Imp.FenceLocal
     ltid <- kernelLocalThreadId . kernelConstants <$> askEnv
     sWhen (ltid .==. 0) $
-      copyDWIM (patElemName pe) (map (fmap toInt64Exp) slice) se []
+      copyDWIM (patElemName pe) (fmap toInt64Exp slice) se (DimIndices [])
     sOp $ Imp.Barrier Imp.FenceLocal
 compileGroupExp dest e =
   defCompileExp dest e
@@ -491,9 +491,9 @@ compileGroupOp pat (Inner (SegOp (SegRed lvl space ops _ body))) = do
       forM_ (zip red_pes tmp_arrs) $ \(pe, arr) ->
         copyDWIM
           (patElemName pe)
-          []
+          (DimIndices [])
           (Var arr)
-          (map (unitSlice 0) (init dims') ++ [DimFix $ last dims' -1])
+          (DimIndices $ map (unitSlice 0) (init dims') ++ [DimFix $ last dims' -1])
 
       sOp $ Imp.Barrier Imp.FenceLocal
 compileGroupOp pat (Inner (SegOp (SegHist lvl space ops _ kbody))) = do
@@ -1094,15 +1094,15 @@ groupScan seg_flag arrs_full_size w lam arrs = do
 
       writeBlockResult p arr
         | primType $ paramType p =
-          copyDWIM arr [DimFix $ sExt64 block_id] (Var $ paramName p) []
+          copyDWIM arr (DimIndices [DimFix $ sExt64 block_id]) (Var $ paramName p) (DimIndices [])
         | otherwise =
-          copyDWIM arr [DimFix $ group_offset + sExt64 block_id] (Var $ paramName p) []
+          copyDWIM arr (DimIndices [DimFix $ group_offset + sExt64 block_id]) (Var $ paramName p) (DimIndices [])
 
       readPrevBlockResult p arr
         | primType $ paramType p =
-          copyDWIM (paramName p) [] (Var arr) [DimFix $ sExt64 block_id - 1]
+          copyDWIM (paramName p) (DimIndices []) (Var arr) (DimIndices [DimFix $ sExt64 block_id - 1])
         | otherwise =
-          copyDWIM (paramName p) [] (Var arr) [DimFix $ group_offset + sExt64 block_id - 1]
+          copyDWIM (paramName p) (DimIndices []) (Var arr) (DimIndices [DimFix $ group_offset + sExt64 block_id - 1])
 
   doInBlockScan seg_flag ltid_in_bounds lam
   barrier
@@ -1113,7 +1113,7 @@ groupScan seg_flag arrs_full_size w lam arrs = do
       sWhen is_first_block $
         forM_ (zip x_params arrs) $ \(x, arr) ->
           unless (primType $ paramType x) $
-            copyDWIM arr [DimFix $ arrs_full_size + group_offset + sExt64 block_size + ltid] (Var $ paramName x) []
+            copyDWIM arr (DimIndices [DimFix $ arrs_full_size + group_offset + sExt64 block_size + ltid]) (Var $ paramName x) (DimIndices [])
 
     barrier
 
@@ -1142,20 +1142,20 @@ groupScan seg_flag arrs_full_size w lam arrs = do
           unless (primType $ paramType x) $
             copyDWIM
               arr
-              [DimFix $ arrs_full_size + group_offset + ltid]
+              (DimIndices [DimFix $ arrs_full_size + group_offset + ltid])
               (Var arr)
-              [DimFix $ arrs_full_size + group_offset + sExt64 block_size + ltid]
+              (DimIndices [DimFix $ arrs_full_size + group_offset + sExt64 block_size + ltid])
 
     barrier
 
   let read_carry_in = do
         forM_ (zip x_params y_params) $ \(x, y) ->
-          copyDWIM (paramName y) [] (Var (paramName x)) []
+          copyDWIM (paramName y) (DimIndices []) (Var (paramName x)) (DimIndices [])
         zipWithM_ readPrevBlockResult x_params arrs
 
       y_to_x = forM_ (zip x_params y_params) $ \(x, y) ->
         when (primType (paramType x)) $
-          copyDWIM (paramName x) [] (Var (paramName y)) []
+          copyDWIM (paramName x) (DimIndices []) (Var (paramName y)) (DimIndices [])
 
       op_to_x
         | Nothing <- seg_flag =
@@ -1170,7 +1170,7 @@ groupScan seg_flag arrs_full_size w lam arrs = do
       write_final_result =
         forM_ (zip x_params arrs) $ \(p, arr) ->
           when (primType $ paramType p) $
-            copyDWIM arr [DimFix ltid] (Var $ paramName p) []
+            copyDWIM arr (DimIndices [DimFix ltid]) (Var $ paramName p) (DimIndices [])
 
   sComment "carry-in for every block except the first" $
     sUnless (is_first_block .||. bNot ltid_in_bounds) $ do
@@ -1184,8 +1184,8 @@ groupScan seg_flag arrs_full_size w lam arrs = do
     sWhen is_first_block $
       forM_ (zip3 x_params y_params arrs) $ \(x, y, arr) ->
         if primType (paramType y)
-          then copyDWIM arr [DimFix ltid] (Var $ paramName y) []
-          else copyDWIM (paramName x) [] (Var arr) [DimFix $ arrs_full_size + group_offset + ltid]
+          then copyDWIM arr (DimIndices [DimFix ltid]) (Var $ paramName y) (DimIndices [])
+          else copyDWIM (paramName x) (DimIndices []) (Var arr) (DimIndices [DimFix $ arrs_full_size + group_offset + ltid])
 
   barrier
 
@@ -1210,7 +1210,7 @@ inBlockScan constants seg_flag arrs_full_size lockstep_width block_size active a
       y_to_x =
         forM_ (zip x_params y_params) $ \(x, y) ->
           when (primType (paramType x)) $
-            copyDWIM (paramName x) [] (Var (paramName y)) []
+            copyDWIM (paramName x) (DimIndices []) (Var (paramName y)) (DimIndices [])
 
   -- Set initial y values
   sComment "read input for in-block scan" $
@@ -1265,22 +1265,22 @@ inBlockScan constants seg_flag arrs_full_size lockstep_width block_size active a
 
     readInitial p arr
       | primType $ paramType p =
-        copyDWIM (paramName p) [] (Var arr) [DimFix ltid]
+        copyDWIM (paramName p) (DimIndices []) (Var arr) (DimIndices [DimFix ltid])
       | otherwise =
-        copyDWIM (paramName p) [] (Var arr) [DimFix gtid]
+        copyDWIM (paramName p) (DimIndices []) (Var arr) (DimIndices [DimFix gtid])
 
     readParam behind p arr
       | primType $ paramType p =
-        copyDWIM (paramName p) [] (Var arr) [DimFix $ ltid - behind]
+        copyDWIM (paramName p) (DimIndices []) (Var arr) (DimIndices [DimFix $ ltid - behind])
       | otherwise =
-        copyDWIM (paramName p) [] (Var arr) [DimFix $ gtid - behind + arrs_full_size]
+        copyDWIM (paramName p) (DimIndices []) (Var arr) (DimIndices [DimFix $ gtid - behind + arrs_full_size])
 
     writeResult x y arr
       | primType $ paramType x = do
-        copyDWIM arr [DimFix ltid] (Var $ paramName x) []
-        copyDWIM (paramName y) [] (Var $ paramName x) []
+        copyDWIM arr (DimIndices [DimFix ltid]) (Var $ paramName x) (DimIndices [])
+        copyDWIM (paramName y) (DimIndices []) (Var $ paramName x) (DimIndices [])
       | otherwise =
-        copyDWIM (paramName y) [] (Var $ paramName x) []
+        copyDWIM (paramName y) (DimIndices []) (Var $ paramName x) (DimIndices [])
 
 computeMapKernelGroups :: Imp.TExp Int64 -> CallKernelGen (Imp.TExp Int64, Imp.TExp Int64)
 computeMapKernelGroups kernel_size = do
@@ -1416,27 +1416,29 @@ sKernel ops flatf name num_groups group_size v f = do
     f
 
 copyInGroup :: CopyCompiler KernelsMem KernelEnv Imp.KernelOp
-copyInGroup pt destloc destslice srcloc srcslice = do
+copyInGroup pt destloc (DimIndices destslice) srcloc (DimIndices srcslice) = do
   dest_space <- entryMemSpace <$> lookupMemory (memLocationName destloc)
   src_space <- entryMemSpace <$> lookupMemory (memLocationName srcloc)
 
   case (dest_space, src_space) of
     (ScalarSpace destds _, ScalarSpace srcds _) -> do
       let destslice' =
-            replicate (length destslice - length destds) (DimFix 0)
-              ++ takeLast (length destds) destslice
+            DimIndices $
+              replicate (length destslice - length destds) (DimFix 0)
+                ++ takeLast (length destds) destslice
           srcslice' =
-            replicate (length srcslice - length srcds) (DimFix 0)
-              ++ takeLast (length srcds) srcslice
+            DimIndices $
+              replicate (length srcslice - length srcds) (DimFix 0)
+                ++ takeLast (length srcds) srcslice
       copyElementWise pt destloc destslice' srcloc srcslice'
     _ -> do
-      groupCoverSpace (sliceDims destslice) $ \is ->
+      groupCoverSpace (sliceDims $ DimIndices destslice) $ \is ->
         copyElementWise
           pt
           destloc
-          (map DimFix $ fixSlice destslice is)
+          (DimIndices $ map DimFix $ fixSlice (DimIndices destslice) is)
           srcloc
-          (map DimFix $ fixSlice srcslice is)
+          (DimIndices $ map DimFix $ fixSlice (DimIndices srcslice) is)
       sOp $ Imp.Barrier Imp.FenceLocal
 
 threadOperations, groupOperations :: Operations KernelsMem KernelEnv Imp.KernelOp
@@ -1732,7 +1734,7 @@ compileGroupResult space pe (RegTileReturns dims_n_tiles what) = do
 
   localOps threadOperations $
     sLoopNest (Shape reg_tiles) $ \is_in_reg_tile -> do
-      let dest_is = fixSlice reg_tile_slices is_in_reg_tile
+      let dest_is = fixSlice (DimIndices reg_tile_slices) is_in_reg_tile
           src_is = reg_tile_is ++ is_in_reg_tile
       sWhen (foldl1 (.&&.) $ zipWith (.<.) dest_is $ map toInt64Exp dims) $
         copyDWIMFix (patElemName pe) dest_is (Var what) src_is
@@ -1772,16 +1774,16 @@ compileThreadResult _ pe (ConcatReturns SplitContiguous _ per_thread_elems what)
         toInt64Exp per_thread_elems
           * sExt64 (kernelGlobalThreadId constants)
   n <- toInt64Exp . arraySize 0 <$> lookupType what
-  copyDWIM (patElemName pe) [DimSlice offset n 1] (Var what) []
+  copyDWIM (patElemName pe) (DimIndices [DimSlice offset n 1]) (Var what) (DimIndices [])
 compileThreadResult _ pe (ConcatReturns (SplitStrided stride) _ _ what) = do
   offset <- sExt64 . kernelGlobalThreadId . kernelConstants <$> askEnv
   n <- toInt64Exp . arraySize 0 <$> lookupType what
-  copyDWIM (patElemName pe) [DimSlice offset n $ toInt64Exp stride] (Var what) []
+  copyDWIM (patElemName pe) (DimIndices [DimSlice offset n $ toInt64Exp stride]) (Var what) (DimIndices [])
 compileThreadResult _ pe (WriteReturns (Shape rws) _arr dests) = do
   constants <- kernelConstants <$> askEnv
   let rws' = map toInt64Exp rws
   forM_ dests $ \(slice, e) -> do
-    let slice' = map (fmap toInt64Exp) slice
+    let (DimIndices slice') = fmap toInt64Exp slice
         condInBounds (DimFix i) rw =
           0 .<=. i .&&. i .<. rw
         condInBounds (DimSlice i n s) rw =
@@ -1789,7 +1791,7 @@ compileThreadResult _ pe (WriteReturns (Shape rws) _arr dests) = do
         write =
           foldl (.&&.) (kernelThreadActive constants) $
             zipWith condInBounds slice' rws'
-    sWhen write $ copyDWIM (patElemName pe) slice' e []
+    sWhen write $ copyDWIM (patElemName pe) (DimIndices slice') e (DimIndices [])
 compileThreadResult _ _ TileReturns {} =
   compilerBugS "compileThreadResult: TileReturns unhandled."
 

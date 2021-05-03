@@ -85,11 +85,11 @@ instance ASTMappable (AppExpBase Info VName) where
           )
       <*> mapOnExp tv body
       <*> pure loc
-  astMap tv (LetWith dest src idxexps vexp body loc) =
+  astMap tv (LetWith dest src slice vexp body loc) =
     LetWith
       <$> astMap tv dest
       <*> astMap tv src
-      <*> mapM (astMap tv) idxexps
+      <*> astMap tv slice
       <*> mapOnExp tv vexp
       <*> mapOnExp tv body
       <*> pure loc
@@ -111,8 +111,8 @@ instance ASTMappable (AppExpBase Info VName) where
       <*> astMap tv form
       <*> mapOnExp tv loopbody
       <*> pure loc
-  astMap tv (Index arr idxexps loc) =
-    Index <$> mapOnExp tv arr <*> mapM (astMap tv) idxexps <*> pure loc
+  astMap tv (Index arr slice loc) =
+    Index <$> mapOnExp tv arr <*> astMap tv slice <*> pure loc
 
 instance ASTMappable (ExpBase Info VName) where
   astMap tv (Var name t loc) =
@@ -143,7 +143,7 @@ instance ASTMappable (ExpBase Info VName) where
   astMap tv (Negate x loc) =
     Negate <$> mapOnExp tv x <*> pure loc
   astMap tv (Update src slice v loc) =
-    Update <$> mapOnExp tv src <*> mapM (astMap tv) slice
+    Update <$> mapOnExp tv src <*> astMap tv slice
       <*> mapOnExp tv v
       <*> pure loc
   astMap tv (RecordUpdate src fs v (Info t) loc) =
@@ -187,8 +187,8 @@ instance ASTMappable (ExpBase Info VName) where
       <*> pure loc
   astMap tv (ProjectSection fields t loc) =
     ProjectSection fields <$> traverse (mapOnPatternType tv) t <*> pure loc
-  astMap tv (IndexSection idxs t loc) =
-    IndexSection <$> mapM (astMap tv) idxs
+  astMap tv (IndexSection slice t loc) =
+    IndexSection <$> astMap tv slice
       <*> traverse (mapOnPatternType tv) t
       <*> pure loc
   astMap tv (Constr name es ts loc) =
@@ -245,6 +245,9 @@ instance ASTMappable (DimIndexBase Info VName) where
       <$> maybe (return Nothing) (fmap Just . mapOnExp tv) i
       <*> maybe (return Nothing) (fmap Just . mapOnExp tv) j
       <*> maybe (return Nothing) (fmap Just . mapOnExp tv) stride
+
+instance ASTMappable (SliceBase Info VName) where
+  astMap tv (DimIndices idxs) = DimIndices <$> mapM (astMap tv) idxs
 
 instance ASTMappable Alias where
   astMap tv (AliasBound v) = AliasBound <$> mapOnName tv v
@@ -387,6 +390,9 @@ barePat (PatternAscription pat (TypeDecl t _) loc) =
 barePat (PatternLit v _ loc) = PatternLit v NoInfo loc
 barePat (PatternConstr c _ ps loc) = PatternConstr c NoInfo (map barePat ps) loc
 
+bareSlice :: SliceBase Info VName -> SliceBase NoInfo VName
+bareSlice (DimIndices idxs) = DimIndices $ fmap bareDimIndex idxs
+
 bareDimIndex :: DimIndexBase Info VName -> DimIndexBase NoInfo VName
 bareDimIndex (DimFix e) =
   DimFix $ bareExp e
@@ -418,7 +424,7 @@ bareExp (Ascript e tdecl loc) =
   Ascript (bareExp e) (bareTypeDecl tdecl) loc
 bareExp (Negate x loc) = Negate (bareExp x) loc
 bareExp (Update src slice v loc) =
-  Update (bareExp src) (map bareDimIndex slice) (bareExp v) loc
+  Update (bareExp src) (bareSlice slice) (bareExp v) loc
 bareExp (RecordUpdate src fs v _ loc) =
   RecordUpdate (bareExp src) fs (bareExp v) NoInfo loc
 bareExp (Project field e _ loc) =
@@ -433,7 +439,7 @@ bareExp (OpSectionRight name _ arg _ _ loc) =
   OpSectionRight name NoInfo (bareExp arg) (NoInfo, NoInfo) NoInfo loc
 bareExp (ProjectSection fields _ loc) = ProjectSection fields NoInfo loc
 bareExp (IndexSection slice _ loc) =
-  IndexSection (map bareDimIndex slice) NoInfo loc
+  IndexSection (bareSlice slice) NoInfo loc
 bareExp (Constr name es _ loc) =
   Constr name (map bareExp es) NoInfo loc
 bareExp (AppExp appexp _) =
@@ -455,7 +461,7 @@ bareExp (AppExp appexp _) =
           LetWith
             (Ident dest NoInfo destloc)
             (Ident src NoInfo srcloc)
-            (map bareDimIndex idxexps)
+            (bareSlice idxexps)
             (bareExp vexp)
             (bareExp body)
             loc
@@ -474,6 +480,6 @@ bareExp (AppExp appexp _) =
         Coerce e tdecl loc ->
           Coerce (bareExp e) (bareTypeDecl tdecl) loc
         Index arr slice loc ->
-          Index (bareExp arr) (map bareDimIndex slice) loc
+          Index (bareExp arr) (bareSlice slice) loc
 bareExp (Attr attr e loc) =
   Attr attr (bareExp e) loc

@@ -646,6 +646,9 @@ updateArray (IndexingSlice start end stride : is) (ValueArray shape arr) (ValueA
   fmap (ValueArray shape) $ foldM update arr $ zip arr_is $ elems v
 updateArray _ _ v = Just v
 
+evalSlice :: Env -> Slice -> EvalM [Indexing]
+evalSlice env (DimIndices idxs) = mapM (evalDimIndex env) idxs
+
 evalDimIndex :: Env -> DimIndex -> EvalM Indexing
 evalDimIndex env (DimFix x) =
   IndexingFix . asInt64 <$> eval env x
@@ -907,15 +910,15 @@ evalAppExp env (Apply f x (Info (_, ext)) loc) = do
   x' <- evalArg env x ext
   f' <- eval env f
   apply loc env f' x'
-evalAppExp env (Index e is loc) = do
-  is' <- mapM (evalDimIndex env) is
+evalAppExp env (Index e slice loc) = do
+  is' <- evalSlice env slice
   arr <- eval env e
   evalIndex loc env is' arr
-evalAppExp env (LetWith dest src is v body loc) = do
+evalAppExp env (LetWith dest src slice v body loc) = do
   let Ident src_vn (Info src_t) _ = src
   dest' <-
     maybe oob return
-      =<< updateArray <$> mapM (evalDimIndex env) is
+      =<< updateArray <$> evalSlice env slice
       <*> evalTermVar env (qualName src_vn) (toStruct src_t)
       <*> eval env v
   let t = T.BoundV [] $ toStruct $ unInfo $ identType dest
@@ -1046,9 +1049,9 @@ eval env (Negate e _) = do
     ValuePrim (FloatValue (Float32Value v)) -> return $ FloatValue $ Float32Value (- v)
     ValuePrim (FloatValue (Float64Value v)) -> return $ FloatValue $ Float64Value (- v)
     _ -> error $ "Cannot negate " ++ pretty ev
-eval env (Update src is v loc) =
+eval env (Update src slice v loc) =
   maybe oob return
-    =<< updateArray <$> mapM (evalDimIndex env) is <*> eval env src <*> eval env v
+    =<< updateArray <$> evalSlice env slice <*> eval env src <*> eval env v
   where
     oob = bad loc env "Bad update"
 eval env (RecordUpdate src all_fs v _ _) =
@@ -1077,8 +1080,8 @@ eval env (OpSectionRight qv _ e (Info _, Info (_, _, argext)) (Info t) loc) = do
     ValueFun $ \x -> do
       f <- evalTermVar env qv $ toStruct t
       apply2 loc env f x y
-eval env (IndexSection is _ loc) = do
-  is' <- mapM (evalDimIndex env) is
+eval env (IndexSection slice _ loc) = do
+  is' <- evalSlice env slice
   return $ ValueFun $ evalIndex loc env is'
 eval _ (ProjectSection ks _ _) =
   return $ ValueFun $ flip (foldM walk) ks

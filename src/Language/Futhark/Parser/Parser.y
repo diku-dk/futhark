@@ -813,12 +813,12 @@ LoopForm : for VarId '<' Exp
          | while Exp
            { While $2 }
 
-VarSlice :: { ((Name, SrcLoc), [UncheckedDimIndex], SrcLoc) }
+VarSlice :: { ((Name, SrcLoc), UncheckedSlice, SrcLoc) }
           : 'id[' DimIndices ']'
             { let L vloc (INDEXING v) = $1
               in ((v, vloc), $2, srcspan $1 $>) }
 
-QualVarSlice :: { ((QualName Name, SrcLoc), [UncheckedDimIndex], SrcLoc) }
+QualVarSlice :: { ((QualName Name, SrcLoc), UncheckedSlice, SrcLoc) }
               : VarSlice
                 { let ((v, vloc), y, loc) = $1 in ((qualName v, vloc), y, loc) }
               | 'qid[' DimIndices ']'
@@ -836,9 +836,9 @@ DimIndex :: { UncheckedDimIndex }
          | Exp2 ':'      ':' Exp2 { DimSlice (Just $1) Nothing (Just $4) }
          |      ':'      ':' Exp2 { DimSlice Nothing Nothing (Just $3) }
 
-DimIndices :: { [UncheckedDimIndex] }
-            :             { [] }
-            | DimIndices1 { fst $1 : snd $1 }
+DimIndices :: { UncheckedSlice }
+            :             { DimIndices [] }
+            | DimIndices1 { DimIndices (fst $1 : snd $1) }
 
 DimIndices1 :: { (UncheckedDimIndex, [UncheckedDimIndex]) }
              : DimIndex                 { ($1, []) }
@@ -1090,11 +1090,11 @@ applyExp all@((Constr n [] _ loc1):es) =
 applyExp es =
   foldM ap (head es) (tail es)
   where
-     ap (AppExp (Index e is floc) _) (ArrayLit xs _ xloc) =
+     ap (AppExp (Index e (DimIndices is) floc) _) (ArrayLit xs _ xloc) =
        parseErrorAt (srcspan floc xloc) $
        Just $ pretty $ "Incorrect syntax for multi-dimensional indexing." </>
        "Use" <+> align (ppr index)
-       where index = AppExp (Index e (is++map DimFix xs) xloc) NoInfo
+       where index = AppExp (Index e (DimIndices $ is++map DimFix xs) xloc) NoInfo
      ap f x =
         return $ AppExp (Apply f x NoInfo (srcspan f x)) NoInfo
 

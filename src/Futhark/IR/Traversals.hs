@@ -106,12 +106,12 @@ mapExpM tv (Apply fname args ret loc) = do
 mapExpM tv (BasicOp (Index arr slice)) =
   BasicOp
     <$> ( Index <$> mapOnVName tv arr
-            <*> mapM (traverse (mapOnSubExp tv)) slice
+            <*> traverse (mapOnSubExp tv) slice
         )
 mapExpM tv (BasicOp (Update arr slice se)) =
   BasicOp
     <$> ( Update <$> mapOnVName tv arr
-            <*> mapM (traverse (mapOnSubExp tv)) slice
+            <*> traverse (mapOnSubExp tv) slice
             <*> mapOnSubExp tv se
         )
 mapExpM tv (BasicOp (Iota n x s et)) =
@@ -283,10 +283,10 @@ walkExpM tv (If c texp fexp (IfDec ts _)) = do
 walkExpM tv (Apply _ args ret _) =
   mapM_ (walkOnSubExp tv . fst) args >> mapM_ (walkOnRetType tv) ret
 walkExpM tv (BasicOp (Index arr slice)) =
-  walkOnVName tv arr >> mapM_ (traverse_ (walkOnSubExp tv)) slice
+  walkOnVName tv arr >> traverse_ (walkOnSubExp tv) slice
 walkExpM tv (BasicOp (Update arr slice se)) =
   walkOnVName tv arr
-    >> mapM_ (traverse_ (walkOnSubExp tv)) slice
+    >> traverse_ (walkOnSubExp tv) slice
     >> walkOnSubExp tv se
 walkExpM tv (BasicOp (Iota n x s _)) =
   walkOnSubExp tv n >> walkOnSubExp tv x >> walkOnSubExp tv s

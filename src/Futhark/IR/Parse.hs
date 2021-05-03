@@ -202,7 +202,7 @@ pDimIndex =
     ]
 
 pSlice :: Parser (Slice SubExp)
-pSlice = brackets $ pDimIndex `sepBy` pComma
+pSlice = DimIndices <$> brackets (pDimIndex `sepBy` pComma)
 
 pIndex :: Parser BasicOp
 pIndex = try $ Index <$> pVName <*> pSlice

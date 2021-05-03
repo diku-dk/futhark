@@ -90,7 +90,7 @@ segScatter2D desc arr_size updt_arr lvl (dim_x, dim_y) f = do
     t_v <- subExpType res_v
     return (t_v, res_v, res_i)
 
-  let ret = WriteReturns (Shape [arr_size]) updt_arr [([DimFix res_i], res_v)]
+  let ret = WriteReturns (Shape [arr_size]) updt_arr [(DimIndices [DimFix res_i], res_v)]
   let body = KernelBody () stms [ret]
 
   letTupExp desc <=< renameExp $ Op $ SegOp $ SegMap lvl segspace [t_v] body

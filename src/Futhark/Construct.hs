@@ -323,7 +323,7 @@ eSliceArray d arr i n = do
   let skips = map (slice (constant (0 :: Int64))) $ take d $ arrayDims arr_t
   i' <- letSubExp "slice_i" =<< i
   n' <- letSubExp "slice_n" =<< n
-  return $ BasicOp $ Index arr $ fullSlice arr_t $ skips ++ [slice i' n']
+  return $ BasicOp $ Index arr $ fullSlice arr_t $ DimIndices $ skips ++ [slice i' n']
   where
     slice j m = DimSlice j m (constant (1 :: Int64))
 
@@ -370,7 +370,7 @@ eWriteArray arr is v = do
       letInPlace
         "write_out_inside_bounds"
         arr
-        (fullSlice arr_t (map DimFix is'))
+        (fullSlice arr_t $ DimIndices $ map DimFix is')
         $ BasicOp $ SubExp v'
     resultBodyM [Var res]
 
@@ -490,27 +490,27 @@ sliceDim d = DimSlice (constant (0 :: Int64)) d (constant (1 :: Int64))
 -- entire dimensions appended to the full dimensionality of @t@.  This
 -- function is used to turn incomplete indexing complete, as required
 -- by 'Index'.
-fullSlice :: Type -> [DimIndex SubExp] -> Slice SubExp
-fullSlice t slice =
-  slice ++ map sliceDim (drop (length slice) $ arrayDims t)
+fullSlice :: Type -> Slice SubExp -> Slice SubExp
+fullSlice t (DimIndices slice) =
+  DimIndices $ slice ++ map sliceDim (drop (length slice) $ arrayDims t)
 
 -- | @ sliceAt t n slice@ returns @slice@ but with 'DimSlice's of the
 -- outer @n@ dimensions prepended, and as many appended as to make it
 -- a full slice.  This is a generalisation of 'fullSlice'.
-sliceAt :: Type -> Int -> [DimIndex SubExp] -> Slice SubExp
-sliceAt t n slice =
-  fullSlice t $ map sliceDim (take n $ arrayDims t) ++ slice
+sliceAt :: Type -> Int -> Slice SubExp -> Slice SubExp
+sliceAt t n (DimIndices slice) =
+  fullSlice t $ DimIndices $ map sliceDim (take n $ arrayDims t) ++ slice
 
 -- | Like 'fullSlice', but the dimensions are simply numeric.
 fullSliceNum :: Num d => [d] -> [DimIndex d] -> Slice d
 fullSliceNum dims slice =
-  slice ++ map (\d -> DimSlice 0 d 1) (drop (length slice) dims)
+  DimIndices $ slice ++ map (\d -> DimSlice 0 d 1) (drop (length slice) dims)
 
 -- | Does the slice describe the full size of the array?  The most
 -- obvious such slice is one that 'DimSlice's the full span of every
 -- dimension, but also one that fixes all unit dimensions.
 isFullSlice :: Shape -> Slice SubExp -> Bool
-isFullSlice shape slice = and $ zipWith allOfIt (shapeDims shape) slice
+isFullSlice shape (DimIndices slice) = and $ zipWith allOfIt (shapeDims shape) slice
   where
     allOfIt (Constant v) DimFix {} = oneIsh v
     allOfIt d (DimSlice _ n _) = d == n

@@ -51,7 +51,7 @@ indexArray i (Param p t) arr =
   Let (Pattern [] [PatElem p t]) (defAux ()) . BasicOp $
     case t of
       Acc {} -> SubExp $ Var arr
-      _ -> Index arr $ DimFix (Var i) : map sliceDim (arrayDims t)
+      _ -> Index arr $ DimIndices $ DimFix (Var i) : map sliceDim (arrayDims t)
 
 mapLambdaToBody ::
   (Body SOACS -> ExtractM (Body MC)) ->
@@ -187,7 +187,7 @@ unstreamLambda attrs nes lam = do
         letSubExp "chunk" $
           BasicOp $
             Index v $
-              fullSlice v_t [DimFix $ intConst Int64 0]
+              fullSlice v_t $ DimIndices [DimFix $ intConst Int64 0]
 
       pure $ resultBody $ red_res <> map_res'
 
@@ -331,7 +331,7 @@ transformSOAC pat _ (Scatter w lam ivs dests) = do
       kres = do
         (a_w, a, is_vs) <-
           groupScatterResults dests res
-        return $ WriteReturns a_w a [(map DimFix is, v) | (is, v) <- is_vs]
+        return $ WriteReturns a_w a [(DimIndices $ map DimFix is, v) | (is, v) <- is_vs]
       kbody = KernelBody () kstms kres
   return $
     oneStm $

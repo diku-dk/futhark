@@ -93,7 +93,7 @@ freeVars expr = case expr of
   OpSectionLeft _ _ e _ _ _ -> freeVars e
   OpSectionRight _ _ e _ _ _ -> freeVars e
   ProjectSection {} -> mempty
-  IndexSection idxs _ _ -> foldMap freeDimIndex idxs
+  IndexSection slice _ _ -> freeSlice slice
   AppExp (DoLoop sparams pat e1 form e3 _) _ ->
     let (e2fv, e2ident) = formVars form
      in freeVars e1
@@ -109,11 +109,11 @@ freeVars expr = case expr of
       <> freeVars e1
       <> freeVars e2
   Project _ e _ _ -> freeVars e
-  AppExp (LetWith id1 id2 idxs e1 e2 _) _ ->
-    ident id2 <> foldMap freeDimIndex idxs <> freeVars e1
+  AppExp (LetWith id1 id2 slice e1 e2 _) _ ->
+    ident id2 <> freeSlice slice <> freeVars e1
       <> (freeVars e2 `without` S.singleton (identName id1))
-  AppExp (Index e idxs _) _ -> freeVars e <> foldMap freeDimIndex idxs
-  Update e1 idxs e2 _ -> freeVars e1 <> foldMap freeDimIndex idxs <> freeVars e2
+  AppExp (Index e slice _) _ -> freeVars e <> freeSlice slice
+  Update e1 slice e2 _ -> freeVars e1 <> freeSlice slice <> freeVars e2
   RecordUpdate e1 _ e2 _ _ -> freeVars e1 <> freeVars e2
   Assert e1 e2 _ _ -> freeVars e1 <> freeVars e2
   Constr _ es _ _ -> foldMap freeVars es
@@ -123,6 +123,9 @@ freeVars expr = case expr of
       caseFV (CasePat p eCase _) =
         (sizes (patternDimNames p) <> freeVars eCase)
           `withoutM` patternVars p
+
+freeSlice :: SliceBase Info VName -> NameSet
+freeSlice (DimIndices idxs) = foldMap freeDimIndex idxs
 
 freeDimIndex :: DimIndexBase Info VName -> NameSet
 freeDimIndex (DimFix e) = freeVars e

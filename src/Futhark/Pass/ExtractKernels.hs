@@ -558,7 +558,7 @@ transformStm _ (Let pat (StmAux cs _ _) (Op (Scatter w lam ivs as))) = runBinder
       krets = do
         (a_w, a, is_vs) <-
           groupScatterResults as $ bodyResult $ lambdaBody lam'
-        return $ WriteReturns a_w a [(map DimFix is, v) | (is, v) <- is_vs]
+        return $ WriteReturns a_w a [(DimIndices $ map DimFix is, v) | (is, v) <- is_vs]
       body = KernelBody () kstms krets
       inputs = do
         (p, p_a) <- zip (lambdaParams lam') ivs

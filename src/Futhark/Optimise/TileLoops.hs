@@ -501,7 +501,7 @@ sliceUntiled arr tile_id full_tile_size this_tile_size = do
     letSubExp "slice_offset" =<< toExp (pe64 tile_id * pe64 full_tile_size)
   let slice = DimSlice slice_offset this_tile_size (intConst Int64 1)
   letExp "untiled_slice" $
-    BasicOp $ Index arr $ fullSlice arr_t [slice]
+    BasicOp $ Index arr $ fullSlice arr_t $ DimIndices [slice]
 
 -- | Statements that we insert directly into every thread-private
 -- SegMaps.  This is for things that cannot efficiently be computed
@@ -781,7 +781,7 @@ readTile1D tile_size gid gtid num_groups group_size kind privstms tile_id inputs
           =<< toExp (pe64 tile_id * pe64 tile_size + le64 ltid)
 
       reconstructGtids1D group_size gtid gid ltid
-      addPrivStms [DimFix $ Var ltid] privstms
+      addPrivStms (DimIndices [DimFix $ Var ltid]) privstms
 
       let arrs = map fst $ tiledInputs inputs
       arr_ts <- mapM lookupType arrs
@@ -790,7 +790,7 @@ readTile1D tile_size gid gtid num_groups group_size kind privstms tile_id inputs
 
       let readTileElem arr =
             -- No need for fullSlice because we are tiling only prims.
-            letExp "tile_elem" (BasicOp $ Index arr [DimFix j])
+            letExp "tile_elem" (BasicOp $ Index arr (DimIndices [DimFix j]))
       fmap (map Var) $
         case kind of
           TilePartial ->
@@ -824,13 +824,13 @@ processTile1D gid gtid kdim tile_size num_groups group_size tile_args = do
 
   segMap1D "acc" lvl ResultPrivate $ \ltid -> do
     reconstructGtids1D group_size gtid gid ltid
-    addPrivStms [DimFix $ Var ltid] privstms
+    addPrivStms (DimIndices [DimFix $ Var ltid]) privstms
 
     -- We replace the neutral elements with the accumulators (this is
     -- OK because the parallel semantics are not used after this
     -- point).
     thread_accs <- forM accs $ \acc ->
-      letSubExp "acc" $ BasicOp $ Index acc [DimFix $ Var ltid]
+      letSubExp "acc" $ BasicOp $ Index acc (DimIndices [DimFix $ Var ltid])
     let sliceTile (InputTiled _ arr) =
           pure arr
         sliceTile (InputUntiled arr) =
@@ -900,7 +900,7 @@ processResidualTile1D gid gtid kdim tile_size num_groups group_size args = do
             let slice =
                   DimSlice (intConst Int64 0) residual_input (intConst Int64 1)
             InputTiled perm
-              <$> letExp "partial_tile" (BasicOp $ Index tile [slice])
+              <$> letExp "partial_tile" (BasicOp $ Index tile $ DimIndices [slice])
 
       tiles <- mapM sliceTile full_tiles
 
@@ -948,7 +948,7 @@ tiling1d dims_on_top initial_lvl gtid kdim w = do
       { tilingSegMap = \desc lvl' manifest f -> segMap1D desc lvl' manifest $ \ltid -> do
           letBindNames [gtid]
             =<< toExp (le64 gid * pe64 tile_size + le64 ltid)
-          f (untyped $ le64 gtid .<. pe64 kdim) [DimFix $ Var ltid],
+          f (untyped $ le64 gtid .<. pe64 kdim) $ DimIndices [DimFix $ Var ltid],
         tilingReadTile =
           readTile1D tile_size gid gtid (segNumGroups lvl) (segGroupSize lvl),
         tilingProcessTile =
@@ -1023,7 +1023,7 @@ readTile2D (kdim_x, kdim_y) (gtid_x, gtid_y) (gid_x, gid_y) tile_size num_groups
           =<< toExp (pe64 tile_id * pe64 tile_size + le64 ltid_y)
 
       reconstructGtids2D tile_size (gtid_x, gtid_y) (gid_x, gid_y) (ltid_x, ltid_y)
-      addPrivStms [DimFix $ Var ltid_x, DimFix $ Var ltid_y] privstms
+      addPrivStms (DimIndices [DimFix $ Var ltid_x, DimFix $ Var ltid_y]) privstms
 
       let arrs_and_perms = tiledInputs inputs
 
@@ -1034,7 +1034,7 @@ readTile2D (kdim_x, kdim_y) (gtid_x, gtid_y) (gid_x, gid_y) tile_size num_groups
               ( BasicOp $
                   Index
                     arr
-                    [DimFix $ last $ rearrangeShape perm [i, j]]
+                    $ DimIndices [DimFix $ last $ rearrangeShape perm [i, j]]
               )
 
           readTileElemIfInBounds (arr, perm) = do
@@ -1051,7 +1051,7 @@ readTile2D (kdim_x, kdim_y) (gtid_x, gtid_y) (gid_x, gid_y) tile_size num_groups
                       ]
             eIf
               (toExp $ pe64 idx .<. pe64 w .&&. othercheck)
-              (eBody [return $ BasicOp $ Index arr [DimFix idx]])
+              (eBody [return $ BasicOp $ Index arr $ DimIndices [DimFix idx]])
               (eBody [eBlank tile_t])
 
       fmap (map Var) $
@@ -1099,13 +1099,13 @@ processTile2D (gid_x, gid_y) (gtid_x, gtid_y) (kdim_x, kdim_y) tile_size num_gro
     $ \(ltid_x, ltid_y) -> do
       reconstructGtids2D tile_size (gtid_x, gtid_y) (gid_x, gid_y) (ltid_x, ltid_y)
 
-      addPrivStms [DimFix $ Var ltid_x, DimFix $ Var ltid_y] privstms
+      addPrivStms (DimIndices [DimFix $ Var ltid_x, DimFix $ Var ltid_y]) privstms
 
       -- We replace the neutral elements with the accumulators (this is
       -- OK because the parallel semantics are not used after this
       -- point).
       thread_accs <- forM accs $ \acc ->
-        letSubExp "acc" $ BasicOp $ Index acc [DimFix $ Var ltid_x, DimFix $ Var ltid_y]
+        letSubExp "acc" $ BasicOp $ Index acc $ DimIndices [DimFix $ Var ltid_x, DimFix $ Var ltid_y]
       let form' = redomapSOAC [Reduce red_comm red_lam thread_accs] map_lam
 
           sliceTile (InputUntiled arr) =
@@ -1114,7 +1114,7 @@ processTile2D (gid_x, gid_y) (gtid_x, gtid_y) (kdim_x, kdim_y) tile_size num_gro
             tile_t <- lookupType tile
             let idx = DimFix $ Var $ head $ rearrangeShape perm [ltid_x, ltid_y]
             letExp "tile" $
-              BasicOp $ Index tile $ sliceAt tile_t (head perm) [idx]
+              BasicOp $ Index tile $ sliceAt tile_t (head perm) (DimIndices [idx])
 
       tiles' <- mapM sliceTile tiles
 
@@ -1185,7 +1185,7 @@ processResidualTile2D
         tiles <- forM full_tile $ \case
           InputTiled perm tile' ->
             InputTiled perm
-              <$> letExp "partial_tile" (BasicOp $ Index tile' [slice, slice])
+              <$> letExp "partial_tile" (BasicOp $ Index tile' $ DimIndices [slice, slice])
           InputUntiled arr ->
             pure $ InputUntiled arr
 
@@ -1243,7 +1243,7 @@ tiling2d dims_on_top _initial_lvl (gtid_x, gtid_y) (kdim_x, kdim_y) w = do
                   le64 gtid_x .<. pe64 kdim_x
                     .&&. le64 gtid_y .<. pe64 kdim_y
               )
-              [DimFix $ Var ltid_x, DimFix $ Var ltid_y],
+              $ DimIndices [DimFix $ Var ltid_x, DimFix $ Var ltid_y],
         tilingReadTile = readTile2D (kdim_x, kdim_y) (gtid_x, gtid_y) (gid_x, gid_y) tile_size (segNumGroups lvl) (segGroupSize lvl),
         tilingProcessTile = processTile2D (gid_x, gid_y) (gtid_x, gtid_y) (kdim_x, kdim_y) tile_size (segNumGroups lvl) (segGroupSize lvl),
         tilingProcessResidualTile = processResidualTile2D (gid_x, gid_y) (gtid_x, gtid_y) (kdim_x, kdim_y) tile_size (segNumGroups lvl) (segGroupSize lvl),

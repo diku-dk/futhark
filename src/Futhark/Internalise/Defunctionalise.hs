@@ -577,26 +577,26 @@ defuncExp (Project vn e0 tp@(Info tp') loc) = do
       Nothing -> error "Invalid record projection."
     Dynamic _ -> return (Project vn e0' tp loc, Dynamic tp')
     _ -> error $ "Projection of an expression with static value " ++ show sv0
-defuncExp (AppExp (LetWith id1 id2 idxs e1 body loc) res) = do
+defuncExp (AppExp (LetWith id1 id2 slice e1 body loc) res) = do
   e1' <- defuncExp' e1
-  idxs' <- mapM defuncDimIndex idxs
+  idxs' <- defuncSlice slice
   let id1_binding = Binding Nothing $ Dynamic $ unInfo $ identType id1
   (body', sv) <-
     localEnv (M.singleton (identName id1) id1_binding) $
       defuncExp body
   return (AppExp (LetWith id1 id2 idxs' e1' body' loc) res, sv)
-defuncExp expr@(AppExp (Index e0 idxs loc) res) = do
+defuncExp expr@(AppExp (Index e0 slice loc) res) = do
   e0' <- defuncExp' e0
-  idxs' <- mapM defuncDimIndex idxs
+  slice' <- defuncSlice slice
   return
-    ( AppExp (Index e0' idxs' loc) res,
+    ( AppExp (Index e0' slice' loc) res,
       Dynamic $ typeOf expr
     )
-defuncExp (Update e1 idxs e2 loc) = do
+defuncExp (Update e1 slice e2 loc) = do
   (e1', sv) <- defuncExp e1
-  idxs' <- mapM defuncDimIndex idxs
+  slice' <- defuncSlice slice
   e2' <- defuncExp' e2
-  return (Update e1' idxs' e2' loc, sv)
+  return (Update e1' slice' e2' loc, sv)
 
 -- Note that we might change the type of the record field here.  This
 -- is not permitted in the type checker due to problems with type
@@ -725,6 +725,10 @@ etaExpand e_t e = do
     getType (Scalar (Arrow _ p t1 t2)) =
       let (ps, r) = getType t2 in ((p, t1) : ps, r)
     getType t = ([], t)
+
+-- | Defunctionalize a slicing an array.
+defuncSlice :: SliceBase Info VName -> DefM (SliceBase Info VName)
+defuncSlice (DimIndices idxs) = DimIndices <$> mapM defuncDimIndex idxs
 
 -- | Defunctionalize an indexing of a single array dimension.
 defuncDimIndex :: DimIndexBase Info VName -> DefM (DimIndexBase Info VName)

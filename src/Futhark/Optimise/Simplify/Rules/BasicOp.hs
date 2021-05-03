@@ -156,7 +156,7 @@ ruleBasicOp vtable pat _ (Update src _ (Var v))
 -- If we are writing a single-element slice from some array, and the
 -- element of that array can be computed as a PrimExp based on the
 -- index, let's just write that instead.
-ruleBasicOp vtable pat aux (Update src [DimSlice i n s] (Var v))
+ruleBasicOp vtable pat aux (Update src (DimIndices [DimSlice i n s]) (Var v))
   | isCt1 n,
     isCt1 s,
     Just (ST.Indexed cs e) <- ST.index v [intConst Int64 0] vtable =
@@ -164,7 +164,7 @@ ruleBasicOp vtable pat aux (Update src [DimSlice i n s] (Var v))
       e' <- toSubExp "update_elem" e
       auxing aux $
         certifying cs $
-          letBind pat $ BasicOp $ Update src [DimFix i] e'
+          letBind pat $ BasicOp $ Update src (DimIndices [DimFix i]) e'
 ruleBasicOp vtable pat _ (Update dest destis (Var v))
   | Just (e, _) <- ST.lookupExp v vtable,
     arrayFrom e =
@@ -272,7 +272,7 @@ ruleBasicOp vtable pat aux (Index idd slice)
             mapM (toSubExp "new_index") new_inds
           certifying idd_cs $
             auxing aux $
-              letBind pat $ BasicOp $ Index idd2 $ map DimFix new_inds'
+              letBind pat $ BasicOp $ Index idd2 $ DimIndices $ map DimFix new_inds'
 ruleBasicOp _ pat _ (BinOp (Pow t) e1 e2)
   | e1 == intConst t 2 =
     Simplify $ letBind pat $ BasicOp $ BinOp (Shl t) (intConst t 1) e2
@@ -340,9 +340,9 @@ ruleBasicOp vtable pat aux (Rotate offsets1 v)
 -- Update with a slice of that array.  This matters when the arrays
 -- are far away (on the GPU, say), because it avoids a copy of the
 -- scalar to and from the host.
-ruleBasicOp vtable pat aux (Update arr_x slice_x (Var v))
-  | Just _ <- sliceIndices slice_x,
-    Just (Index arr_y slice_y, cs_y) <- ST.lookupBasicOp v vtable,
+ruleBasicOp vtable pat aux (Update arr_x (DimIndices slice_x) (Var v))
+  | Just _ <- sliceIndices $ DimIndices slice_x,
+    Just (Index arr_y (DimIndices slice_y), cs_y) <- ST.lookupBasicOp v vtable,
     ST.available arr_y vtable,
     -- XXX: we should check for proper aliasing here instead.
     arr_y /= arr_x,
@@ -350,10 +350,10 @@ ruleBasicOp vtable pat aux (Update arr_x slice_x (Var v))
     Just (slice_y_bef, DimFix j, []) <- focusNth (length slice_y - 1) slice_y = Simplify $ do
     let slice_x' = slice_x_bef ++ [DimSlice i (intConst Int64 1) (intConst Int64 1)]
         slice_y' = slice_y_bef ++ [DimSlice j (intConst Int64 1) (intConst Int64 1)]
-    v' <- letExp (baseString v ++ "_slice") $ BasicOp $ Index arr_y slice_y'
+    v' <- letExp (baseString v ++ "_slice") $ BasicOp $ Index arr_y $ DimIndices slice_y'
     certifying cs_y $
       auxing aux $
-        letBind pat $ BasicOp $ Update arr_x slice_x' $ Var v'
+        letBind pat $ BasicOp $ Update arr_x (DimIndices slice_x') $ Var v'
 
 -- Simplify away 0<=i when 'i' is from a loop of form 'for i < n'.
 ruleBasicOp vtable pat aux (CmpOp CmpSle {} x y)

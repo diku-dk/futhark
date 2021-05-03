@@ -813,7 +813,7 @@ checkBasicOp (Index ident idxes) = do
   observe ident
   when (arrayRank vt /= length idxes) $
     bad $ SlicingError (arrayRank vt) (length idxes)
-  mapM_ checkDimIndex idxes
+  checkSlice idxes
 checkBasicOp (Update src idxes se) = do
   src_t <- checkArrIdent src
   when (arrayRank src_t /= length idxes) $
@@ -823,7 +823,7 @@ checkBasicOp (Update src idxes se) = do
   when (src `nameIn` se_aliases) $
     bad $ TypeError "The target of an Update must not alias the value to be written."
 
-  mapM_ checkDimIndex idxes
+  checkSlice idxes
   require [arrayOf (Prim (elemType src_t)) (Shape (sliceDims idxes)) NoUniqueness] se
   consume =<< lookupAliases src
 checkBasicOp (Iota e x s et) = do
@@ -1191,6 +1191,12 @@ checkPatElem ::
 checkPatElem (PatElem name dec) =
   context ("When checking pattern element " ++ pretty name) $
     checkLetBoundLore name dec
+
+checkSlice ::
+  Checkable lore =>
+  Slice SubExp ->
+  TypeM lore ()
+checkSlice (DimIndices idxs) = mapM_ checkDimIndex idxs
 
 checkDimIndex ::
   Checkable lore =>

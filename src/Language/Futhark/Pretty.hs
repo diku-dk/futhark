@@ -209,6 +209,9 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (DimIndexBase f vn) where
   ppr (DimSlice i Nothing Nothing) =
     maybe mempty ppr i <> text ":"
 
+instance (Eq vn, IsName vn, Annot f) => Pretty (SliceBase f vn) where
+  ppr (DimIndices idxs) = brackets (commasep (map ppr idxs))
+
 letBody :: (Eq vn, IsName vn, Annot f) => ExpBase f vn -> Doc
 letBody body@(AppExp LetPat {} _) = ppr body
 letBody body@(AppExp LetFun {} _) = ppr body
@@ -230,7 +233,7 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (AppExpBase f vn) where
         )
       </> indent 2 (ppr loopbody)
   pprPrec _ (Index e idxs _) =
-    pprPrec 9 e <> brackets (commasep (map ppr idxs))
+    pprPrec 9 e <> ppr idxs
   pprPrec p (LetPat pat e body _) =
     parensIf (p /= -1) $
       align $
@@ -257,14 +260,14 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (AppExpBase f vn) where
         Nothing -> mempty
   pprPrec _ (LetWith dest src idxs ve body _)
     | dest == src =
-      text "let" <+> ppr dest <> list (map ppr idxs)
+      text "let" <+> ppr dest <> ppr idxs
         <+> equals
         <+> align (ppr ve)
         </> letBody body
     | otherwise =
       text "let" <+> ppr dest <+> equals <+> ppr src
         <+> text "with"
-        <+> brackets (commasep (map ppr idxs))
+        <+> ppr idxs
         <+> text "="
         <+> align (ppr ve)
         </> letBody body
@@ -322,7 +325,7 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (ExpBase f vn) where
   pprPrec _ (Negate e _) = text "-" <> ppr e
   pprPrec _ (Update src idxs ve _) =
     ppr src <+> text "with"
-      <+> brackets (commasep (map ppr idxs))
+      <+> ppr idxs
       <+> text "="
       <+> align (ppr ve)
   pprPrec _ (RecordUpdate src fs ve _ _) =
@@ -346,7 +349,7 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (ExpBase f vn) where
     where
       p name = text "." <> ppr name
   pprPrec _ (IndexSection idxs _ _) =
-    parens $ text "." <> brackets (commasep (map ppr idxs))
+    parens $ text "." <> ppr idxs
   pprPrec _ (Constr n cs _ _) = text "#" <> ppr n <+> sep (map ppr cs)
   pprPrec _ (Attr attr e _) =
     text "#[" <> ppr attr <> text "]" </> pprPrec (-1) e

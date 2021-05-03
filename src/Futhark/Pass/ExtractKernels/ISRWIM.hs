@@ -99,7 +99,7 @@ irwim res_pat w comm red_fun red_input
           letSubExp "acc" $
             BasicOp $
               Index v $
-                fullSlice v_t [DimFix $ intConst Int64 0]
+                fullSlice v_t $ DimIndices [DimFix $ intConst Int64 0]
         indexAcc Constant {} =
           error "irwim: array accumulator is a constant."
     accs' <- mapM indexAcc accs

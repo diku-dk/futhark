@@ -290,7 +290,7 @@ intraGroupStm lvl stm@(Let pat aux e) = do
           krets = do
             (a_w, a, is_vs) <-
               groupScatterResults dests $ bodyResult $ lambdaBody lam'
-            return $ WriteReturns a_w a [(map DimFix is, v) | (is, v) <- is_vs]
+            return $ WriteReturns a_w a [(DimIndices $ map DimFix is, v) | (is, v) <- is_vs]
           inputs = do
             (p, p_a) <- zip (lambdaParams lam') ivs
             return $ KernelInput (paramName p) (paramType p) p_a [Var write_i]

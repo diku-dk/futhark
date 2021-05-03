@@ -20,7 +20,7 @@ import Futhark.IR.Syntax
   ( DimChange (..),
     DimIndex (..),
     ShapeChange,
-    Slice,
+    Slice (..),
     sliceDims,
     unitSlice,
   )
@@ -49,7 +49,7 @@ instance Pretty num => Pretty (IxFun num) where
     text "Direct" <> parens (commasep $ map ppr dims)
   ppr (Permute fun perm) = ppr fun <> ppr perm
   ppr (Rotate fun offsets) = ppr fun <> brackets (commasep $ map ((text "+" <>) . ppr) offsets)
-  ppr (Index fun is) = ppr fun <> brackets (commasep $ map ppr is)
+  ppr (Index fun is) = ppr fun <> ppr is
   ppr (Reshape fun oldshape) =
     ppr fun <> text "->reshape"
       <> parens (commasep (map ppr oldshape))
@@ -115,7 +115,7 @@ index (Rotate fun offsets) is =
   index fun $ zipWith mod (zipWith (+) is offsets) dims
   where
     dims = shape fun
-index (Index fun js) is =
+index (Index fun (DimIndices js)) is =
   index fun (adjust js is)
   where
     adjust (DimFix j : js') is' = j : adjust js' is'
@@ -127,7 +127,7 @@ index (Reshape fun newshape) is =
 index (OffsetIndex fun i) is =
   case shape fun of
     d : ds ->
-      index (Index fun (DimSlice i (d - i) 1 : map (unitSlice 0) ds)) is
+      index (Index fun (DimIndices $ DimSlice i (d - i) 1 : map (unitSlice 0) ds)) is
     [] -> error "index: OffsetIndex: underlying index function has rank zero"
 index (Rebase new_base fun) is =
   let fun' = case fun of

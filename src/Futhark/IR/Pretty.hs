@@ -176,9 +176,9 @@ instance Pretty BasicOp where
       (fromtype, totype) = convOpType conv
   ppr (UnOp op e) = ppr op <+> pprPrec 9 e
   ppr (Index v idxs) =
-    ppr v <> brackets (commasep (map ppr idxs))
+    ppr v <> ppr idxs
   ppr (Update src idxs se) =
-    ppr src <+> text "with" <+> brackets (commasep (map ppr idxs))
+    ppr src <+> text "with" <+> ppr idxs
       <+> text "="
       <+> ppr se
   ppr (Iota e x s et) = text "iota" <> et' <> apply [ppr e, ppr x, ppr s]
@@ -322,6 +322,9 @@ instance Pretty d => Pretty (DimChange d) where
 instance Pretty d => Pretty (DimIndex d) where
   ppr (DimFix i) = ppr i
   ppr (DimSlice i n s) = ppr i <+> text ":+" <+> ppr n <+> text "*" <+> ppr s
+
+instance Pretty d => Pretty (Slice d) where
+  ppr (DimIndices i) = brackets (commasep (map ppr i))
 
 ppPattern :: (Pretty a, Pretty b) => [a] -> [b] -> Doc
 ppPattern [] bs = braces $ commastack $ map ppr bs

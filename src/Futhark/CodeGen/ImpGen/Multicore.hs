@@ -58,7 +58,7 @@ updateAcc acc is vs = sComment "UpdateAcc" $ do
   -- See the ImpGen implementation of UpdateAcc for general notes.
   let is' = map toInt64Exp is
   (c, _space, arrs, dims, op) <- lookupAcc acc is'
-  sWhen (inBounds (map DimFix is') dims) $
+  sWhen (inBounds (DimIndices $ map DimFix is') dims) $
     case op of
       Nothing ->
         forM_ (zip arrs vs) $ \(arr, v) -> copyDWIMFix arr is' v []
@@ -66,7 +66,7 @@ updateAcc acc is vs = sComment "UpdateAcc" $ do
         dLParams $ lambdaParams lam
         let (_x_params, y_params) =
               splitAt (length vs) $ map paramName $ lambdaParams lam
-        forM_ (zip y_params vs) $ \(yp, v) -> copyDWIM yp [] v []
+        forM_ (zip y_params vs) $ \(yp, v) -> copyDWIM yp (DimIndices []) v (DimIndices [])
         atomics <- hostAtomics <$> askEnv
         case atomicUpdateLocking atomics lam of
           AtomicPrim f -> f arrs is'

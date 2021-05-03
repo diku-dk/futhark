@@ -968,7 +968,8 @@ allocInExp (WithAcc inputs bodylam) =
 
     mkP p pt shape u mem ixfun is =
       Param p . MemArray pt shape u . ArrayIn mem . IxFun.slice ixfun $
-        fmap (fmap pe64) $ is ++ map sliceDim (shapeDims shape)
+        DimIndices $
+          fmap (fmap pe64) $ is ++ map sliceDim (shapeDims shape)
 
     onXParam _ (Param p (Prim t)) _ =
       return $ Param p (MemPrim t)

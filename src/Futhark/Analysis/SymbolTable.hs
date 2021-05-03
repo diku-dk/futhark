@@ -332,7 +332,7 @@ indexExp table (BasicOp (Reshape newshape v)) _ is
             (map pe64 $ newDims newshape)
             is
      in index' v is' table
-indexExp table (BasicOp (Index v slice)) _ is =
+indexExp table (BasicOp (Index v (DimIndices slice))) _ is =
   index' v (adjust slice is) table
   where
     adjust (DimFix j : js') is' =

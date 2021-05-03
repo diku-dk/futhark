@@ -207,15 +207,15 @@ bodyFromStms m = do
   (,a) <$> mkBodyM stms res
 
 internaliseAppExp :: String -> E.AppExp -> InternaliseM [I.SubExp]
-internaliseAppExp desc (E.Index e idxs loc) = do
+internaliseAppExp desc (E.Index e slice loc) = do
   vs <- internaliseExpToVars "indexed" e
   dims <- case vs of
     [] -> return [] -- Will this happen?
     v : _ -> I.arrayDims <$> lookupType v
-  (idxs', cs) <- internaliseSlice loc dims idxs
+  (slice', cs) <- internaliseSlice loc dims slice
   let index v = do
         v_t <- lookupType v
-        return $ I.BasicOp $ I.Index v $ fullSlice v_t idxs'
+        return $ I.BasicOp $ I.Index v $ fullSlice v_t slice'
   certifying cs $ letSubExps desc =<< mapM index vs
 internaliseAppExp desc (E.Range start maybe_second end loc) = do
   start' <- internaliseExp1 "range_start" start
@@ -918,9 +918,9 @@ internalisePat' p ses body m = do
 internaliseSlice ::
   SrcLoc ->
   [SubExp] ->
-  [E.DimIndex] ->
-  InternaliseM ([I.DimIndex SubExp], Certificates)
-internaliseSlice loc dims idxs = do
+  E.Slice ->
+  InternaliseM (I.Slice SubExp, Certificates)
+internaliseSlice loc dims (E.DimIndices idxs) = do
   (idxs', oks, parts) <- unzip3 <$> zipWithM internaliseDimIndex dims idxs
   ok <- letSubExp "index_ok" =<< eAll oks
   let msg =
@@ -930,7 +930,7 @@ internaliseSlice loc dims idxs = do
             ++ intersperse "][" (map ErrorInt64 $ take (length idxs) dims)
             ++ ["]."]
   c <- assert "index_certs" ok msg loc
-  return (idxs', c)
+  return (I.DimIndices idxs', c)
 
 internaliseDimIndex ::
   SubExp ->
@@ -2006,7 +2006,7 @@ partitionWithSOACS k lam arrs = do
   nonempty_body <- runBodyBinder $
     fmap resultBody $
       forM all_offsets $ \offset_array ->
-        letSubExp "last_offset" $ I.BasicOp $ I.Index offset_array [I.DimFix last_index]
+        letSubExp "last_offset" $ I.BasicOp $ I.Index offset_array $ I.DimIndices [I.DimFix last_index]
   let empty_body = resultBody $ replicate k $ constant (0 :: Int64)
   is_empty <- letSubExp "is_empty" $ I.BasicOp $ I.CmpOp (CmpEq int64) w $ constant (0 :: Int64)
   sizes <-

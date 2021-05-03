@@ -828,7 +828,7 @@ segmentedScatterKernel nest perm scatter_pat cs scatter_w lam ivs dests = do
       WriteReturns
         (Shape (init ws ++ shapeDims aw))
         (kernelInputArray inp)
-        [(map DimFix $ map Var (init gtids) ++ is, v) | (is, v) <- is_vs]
+        [(DimIndices $ map DimFix $ map Var (init gtids) ++ is, v) | (is, v) <- is_vs]
       where
         (gtids, ws) = unzip ispace
 
@@ -852,10 +852,10 @@ segmentedUpdateKernel nest perm cs arr slice v = do
     -- Compute indexes into full array.
     v' <-
       certifying cs $
-        letSubExp "v" $ BasicOp $ Index v $ map (DimFix . Var) slice_gtids
+        letSubExp "v" $ BasicOp $ Index v $ DimIndices $ map (DimFix . Var) slice_gtids
     slice_is <-
       traverse (toSubExp "index") $
-        fixSlice (map (fmap pe64) slice) $ map (pe64 . Var) slice_gtids
+        fixSlice (fmap pe64 slice) $ map (pe64 . Var) slice_gtids
 
     let write_is = map (Var . fst) base_ispace ++ slice_is
         arr' =
@@ -865,7 +865,7 @@ segmentedUpdateKernel nest perm cs arr slice v = do
     v_t <- subExpType v'
     return
       ( v_t,
-        WriteReturns (arrayShape arr_t) arr' [(map DimFix write_is, v')]
+        WriteReturns (arrayShape arr_t) arr' [(DimIndices $ map DimFix write_is, v')]
       )
 
   -- Remove unused kernel inputs, since some of these might
@@ -907,7 +907,7 @@ segmentedGatherKernel nest cs arr slice = do
     slice'' <-
       subExpSlice $
         sliceSlice (primExpSlice slice) $
-          primExpSlice $ map (DimFix . Var) slice_gtids
+          primExpSlice $ DimIndices $ map (DimFix . Var) slice_gtids
     v' <- certifying cs $ letSubExp "v" $ BasicOp $ Index arr slice''
     v_t <- subExpType v'
     return (v_t, Returns ResultMaySimplify v')
@@ -1012,7 +1012,8 @@ determineReduceOp lam nes =
           BasicOp $
             Index ne_v $
               fullSlice ne_v_t $
-                replicate (shapeRank shape) $ DimFix $ intConst Int64 0
+                DimIndices $
+                  replicate (shapeRank shape) $ DimFix $ intConst Int64 0
       return (lam', nes', shape)
     Nothing ->
       return (lam, nes, mempty)

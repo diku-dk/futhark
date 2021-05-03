@@ -672,7 +672,7 @@ simplifyKnownIterationSOAC _ pat _ op
         bindMapParam p a = do
           a_t <- lookupType a
           letBindNames [paramName p] $
-            BasicOp $ Index a $ fullSlice a_t [DimFix $ constant (0 :: Int64)]
+            BasicOp $ Index a $ fullSlice a_t $ DimIndices [DimFix $ constant (0 :: Int64)]
         bindArrayResult pe se =
           letBindNames [patElemName pe] $
             BasicOp $ ArrayLit [se] $ rowType $ patElemType pe
@@ -838,13 +838,13 @@ simplifyMapIota vtable pat aux (Screma w arrs (ScremaForm scan reduce map_lam))
         zeroIsh o && oneIsh s
       _ -> False
 
-    indexesWith v (ArrayIndexing cs arr (DimFix (Var i) : _))
+    indexesWith v (ArrayIndexing cs arr (DimIndices (DimFix (Var i) : _)))
       | arr `ST.elem` vtable,
         all (`ST.elem` vtable) $ unCertificates cs =
         i == v
     indexesWith _ _ = False
 
-    mapOverArr (ArrayIndexing cs arr slice) = do
+    mapOverArr (ArrayIndexing cs arr (DimIndices slice)) = do
       arr_elem <- newVName $ baseString arr ++ "_elem"
       arr_t <- lookupType arr
       arr' <-
@@ -855,12 +855,12 @@ simplifyMapIota vtable pat aux (Screma w arrs (ScremaForm scan reduce map_lam))
               letExp (baseString arr ++ "_prefix") $
                 BasicOp $
                   Index arr $
-                    fullSlice arr_t [DimSlice (intConst Int64 0) w (intConst Int64 1)]
+                    fullSlice arr_t $ DimIndices [DimSlice (intConst Int64 0) w (intConst Int64 1)]
       return $
         Just
           ( arr',
             Param arr_elem (rowType arr_t),
-            ArrayIndexing cs arr_elem (drop 1 slice)
+            ArrayIndexing cs arr_elem $ DimIndices (drop 1 slice)
           )
     mapOverArr _ = return Nothing
 simplifyMapIota _ _ _ _ = Skip
@@ -924,8 +924,8 @@ moveTransformToInput vtable pat aux (Screma w arrs (ScremaForm scan reduce map_l
         arr_transformed <- certifying (arrayOpCerts op) $
           letExp (baseString arr ++ "_transformed") $
             case op of
-              ArrayIndexing _ _ slice ->
-                BasicOp $ Index arr $ whole_dim : slice
+              ArrayIndexing _ _ (DimIndices slice) ->
+                BasicOp $ Index arr $ DimIndices $ whole_dim : slice
               ArrayRearrange _ _ perm ->
                 BasicOp $ Rearrange (0 : map (+ 1) perm) arr
               ArrayRotate _ _ rots ->

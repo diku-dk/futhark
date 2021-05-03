@@ -34,7 +34,6 @@ module Futhark.IR.Prop.TypeOf
   )
 where
 
-import Data.Maybe
 import Futhark.IR.Prop.Constants
 import Futhark.IR.Prop.Patterns
 import Futhark.IR.Prop.Reshape
@@ -79,9 +78,7 @@ primOpType (Index ident slice) =
   result <$> lookupType ident
   where
     result t = [Prim (elemType t) `arrayOfShape` shape]
-    shape = Shape $ mapMaybe dimSize slice
-    dimSize (DimSlice _ d _) = Just d
-    dimSize DimFix {} = Nothing
+    shape = Shape $ sliceDims slice
 primOpType (Update src _ _) =
   pure <$> lookupType src
 primOpType (Iota n _ _ et) =

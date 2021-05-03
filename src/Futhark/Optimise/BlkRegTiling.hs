@@ -432,14 +432,14 @@ index se_desc arr outer_indices = do
       untouched d = DimSlice (intConst Int64 0) d (intConst Int64 1)
       inner_slices = map untouched inner_dims
       indices = map (DimFix . Var) outer_indices ++ inner_slices
-  letExp se_desc $ BasicOp $ Index arr indices
+  letExp se_desc $ BasicOp $ Index arr $ DimIndices indices
 
 update :: MonadBinder m => String -> VName -> [VName] -> VName -> m VName
 update se_desc arr indices new_elem = update' se_desc arr indices (Var new_elem)
 
 update' :: MonadBinder m => String -> VName -> [VName] -> SubExp -> m VName
 update' se_desc arr indices new_elem =
-  letExp se_desc $ BasicOp $ Update arr (map (DimFix . Var) indices) new_elem
+  letExp se_desc $ BasicOp $ Update arr (DimIndices $ map (DimFix . Var) indices) new_elem
 
 forLoop' ::
   SubExp -> -- loop var
@@ -848,7 +848,7 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
                         --y_tp  <- subExpType y_elm
                         return (y_elm, y_ind)
 
-                      let ret = WriteReturns (Shape [rz]) loc_Y_nm [([DimFix res_i], res_v)]
+                      let ret = WriteReturns (Shape [rz]) loc_Y_nm [(DimIndices [DimFix res_i], res_v)]
                       let body = KernelBody () stms [ret]
 
                       res_nms <-
@@ -929,7 +929,7 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
                   forLoop rz [rss_init] $ \i [rss] -> do
                     let slice = [DimFix $ Var i, DimFix se0, DimFix se0]
                     thread_res <- index "thread_res" res [ltid_y, ltid_x, i]
-                    rss' <- letSubExp "rss" $ BasicOp $ Update rss slice $ Var thread_res
+                    rss' <- letSubExp "rss" $ BasicOp $ Update rss (DimIndices slice) $ Var thread_res
                     resultBodyM [rss']
             else segMap3D "rssss" segthd_lvl ResultPrivate (se1, ty, tx) $ \(_ltid_z, ltid_y, ltid_x) -> do
               letBindNames [gtid_y] =<< toExp (le64 jj1 + le64 ltid_y)
@@ -957,7 +957,7 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
                       (eBody $ map eBlank kertp)
                 rss' <- forM (zip res_els rss_merge) $ \(res_el, rs_merge) -> do
                   let slice = [DimFix $ Var i, DimFix se0, DimFix se0]
-                  letSubExp "rss" $ BasicOp $ Update rs_merge slice res_el
+                  letSubExp "rss" $ BasicOp $ Update rs_merge (DimIndices slice) res_el
                 resultBodyM rss'
               return $ map Var rss
 
@@ -1000,11 +1000,11 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
       (M.Map VName (Stm Kernels), M.Map VName (PrimType, Stm Kernels)) ->
       (VName, Stm Kernels) ->
       Binder Kernels (M.Map VName (Stm Kernels), M.Map VName (PrimType, Stm Kernels))
-    insertTranspose variance (gidz, _) (tab_inn, tab_out) (p_nm, stm@(Let patt yy (BasicOp (Index arr_nm slc))))
+    insertTranspose variance (gidz, _) (tab_inn, tab_out) (p_nm, stm@(Let patt yy (BasicOp (Index arr_nm slc@(DimIndices idxs)))))
       | [p] <- patternValueElements patt,
         ptp <- elemType $ patElemType p,
         p_nm == patElemName p =
-        case L.findIndices (variantSliceDim variance gidz) slc of
+        case L.findIndices (variantSliceDim variance gidz) idxs of
           [] -> return (M.insert p_nm stm tab_inn, tab_out)
           i : _ -> do
             arr_tp <- lookupType arr_nm

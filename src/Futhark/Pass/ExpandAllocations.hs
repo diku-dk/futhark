@@ -438,14 +438,16 @@ genericExpandedInvariantAllocations getNumUsers invariant_allocs = do
           permuted_ixfun = IxFun.permute root_ixfun perm
           offset_ixfun =
             IxFun.slice permuted_ixfun $
-              map (DimFix . le64) users_id ++ map untouched old_shape
+              DimIndices $
+                map (DimFix . le64) users_id ++ map untouched old_shape
        in offset_ixfun
     newBase lvl@SegGroup {} (old_shape, _) =
       let (users_shape, users_id) = getNumUsers lvl
           root_ixfun = IxFun.iota $ map pe64 (shapeDims users_shape) ++ old_shape
           offset_ixfun =
             IxFun.slice root_ixfun $
-              map (DimFix . le64) users_id ++ map untouched old_shape
+              DimIndices $
+                map (DimFix . le64) users_id ++ map untouched old_shape
        in offset_ixfun
 
 expandedInvariantAllocations ::
@@ -515,9 +517,10 @@ expandedVariantAllocations num_threads kspace kstms variant_allocs = do
           offset_ixfun =
             IxFun.slice
               root_ixfun
-              [ DimSlice 0 num_threads' 1,
-                DimFix gtid
-              ]
+              $ DimIndices
+                [ DimSlice 0 num_threads' 1,
+                  DimFix gtid
+                ]
           shapechange =
             if length old_shape == 1
               then map DimCoercion old_shape

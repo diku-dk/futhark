@@ -661,7 +661,7 @@ compileFunDef (FunDef entry _ fname rettype params body) =
 
       let Body _ stms ses = body
       compileStms (freeIn ses) stms $
-        forM_ (zip dests ses) $ \(d, se) -> copyDWIMDest d [] se []
+        forM_ (zip dests ses) $ \(d, se) -> copyDWIMDest d (DimIndices []) se (DimIndices [])
 
       return (outparams, inparams, results, args)
 
@@ -669,12 +669,12 @@ compileBody :: (Mem lore) => Pattern lore -> Body lore -> ImpM lore r op ()
 compileBody pat (Body _ bnds ses) = do
   Destination _ dests <- destinationFromPattern pat
   compileStms (freeIn ses) bnds $
-    forM_ (zip dests ses) $ \(d, se) -> copyDWIMDest d [] se []
+    forM_ (zip dests ses) $ \(d, se) -> copyDWIMDest d (DimIndices []) se (DimIndices [])
 
 compileBody' :: [Param dec] -> Body lore -> ImpM lore r op ()
 compileBody' params (Body _ bnds ses) =
   compileStms (freeIn ses) bnds $
-    forM_ (zip params ses) $ \(param, se) -> copyDWIM (paramName param) [] se []
+    forM_ (zip params ses) $ \(param, se) -> copyDWIM (paramName param) (DimIndices []) se (DimIndices [])
 
 compileLoopBody :: Typed dec => [Param dec] -> Body lore -> ImpM lore r op ()
 compileLoopBody mergeparams (Body _ bnds ses) = do
@@ -776,7 +776,7 @@ defCompileExp pat (DoLoop ctx val form body) = do
   dFParams mergepat
   forM_ merge $ \(p, se) ->
     when ((== 0) $ arrayRank $ paramType p) $
-      copyDWIM (paramName p) [] se []
+      copyDWIM (paramName p) (DimIndices []) se (DimIndices [])
 
   let doBody = compileLoopBody mergepat body
 
@@ -784,7 +784,7 @@ defCompileExp pat (DoLoop ctx val form body) = do
     ForLoop i _ bound loopvars -> do
       let setLoopParam (p, a)
             | Prim _ <- paramType p =
-              copyDWIM (paramName p) [] (Var a) [DimFix $ Imp.vi64 i]
+              copyDWIM (paramName p) (DimIndices []) (Var a) (DimIndices [DimFix $ Imp.vi64 i])
             | otherwise =
               return ()
 
@@ -798,7 +798,7 @@ defCompileExp pat (DoLoop ctx val form body) = do
 
   Destination _ pat_dests <- destinationFromPattern pat
   forM_ (zip pat_dests $ map (Var . paramName . fst) merge) $ \(d, r) ->
-    copyDWIMDest d [] r []
+    copyDWIMDest d (DimIndices []) r (DimIndices [])
   where
     merge = ctx ++ val
     mergepat = map fst merge
@@ -811,7 +811,7 @@ defCompileExp pat (WithAcc inputs lam) = do
     let nonacc_res = drop num_accs (bodyResult (lambdaBody lam))
         nonacc_pat_names = takeLast (length nonacc_res) (patternNames pat)
     forM_ (zip nonacc_pat_names nonacc_res) $ \(v, se) ->
-      copyDWIM v [] se []
+      copyDWIM v (DimIndices []) se (DimIndices [])
   where
     num_accs = length inputs
 defCompileExp pat (Op op) = do
@@ -824,9 +824,9 @@ defCompileBasicOp ::
   BasicOp ->
   ImpM lore r op ()
 defCompileBasicOp (Pattern _ [pe]) (SubExp se) =
-  copyDWIM (patElemName pe) [] se []
+  copyDWIM (patElemName pe) (DimIndices []) se (DimIndices [])
 defCompileBasicOp (Pattern _ [pe]) (Opaque se) =
-  copyDWIM (patElemName pe) [] se []
+  copyDWIM (patElemName pe) (DimIndices []) se (DimIndices [])
 defCompileBasicOp (Pattern _ [pe]) (UnOp op e) = do
   e' <- toExp e
   patElemName pe <~~ Imp.UnOpExp op e'
@@ -851,15 +851,15 @@ defCompileBasicOp _ (Assert e msg loc) = do
     uncurry warn loc "Safety check required at run-time."
 defCompileBasicOp (Pattern _ [pe]) (Index src slice)
   | Just idxs <- sliceIndices slice =
-    copyDWIM (patElemName pe) [] (Var src) $ map (DimFix . toInt64Exp) idxs
+    copyDWIM (patElemName pe) (DimIndices []) (Var src) $ DimIndices $ map (DimFix . toInt64Exp) idxs
 defCompileBasicOp _ Index {} =
   return ()
 defCompileBasicOp (Pattern _ [pe]) (Update _ slice se) =
-  sUpdate (patElemName pe) (map (fmap toInt64Exp) slice) se
+  sUpdate (patElemName pe) (fmap toInt64Exp slice) se
 defCompileBasicOp (Pattern _ [pe]) (Replicate (Shape ds) se) = do
   ds' <- mapM toExp ds
   is <- replicateM (length ds) (newVName "i")
-  copy_elem <- collect $ copyDWIM (patElemName pe) (map (DimFix . Imp.vi64) is) se []
+  copy_elem <- collect $ copyDWIM (patElemName pe) (DimIndices $ map (DimFix . Imp.vi64) is) se (DimIndices [])
   emit $ foldl (.) id (zipWith Imp.For is ds') copy_elem
 defCompileBasicOp _ Scratch {} =
   return ()
@@ -873,11 +873,11 @@ defCompileBasicOp (Pattern [] [pe]) (Iota n e s it) = do
         TPrimExp $
           BinOpExp (Add it OverflowUndef) e' $
             BinOpExp (Mul it OverflowUndef) i' s'
-    copyDWIM (patElemName pe) [DimFix i] (Var (tvVar x)) []
+    copyDWIM (patElemName pe) (DimIndices [DimFix i]) (Var (tvVar x)) (DimIndices [])
 defCompileBasicOp (Pattern _ [pe]) (Copy src) =
-  copyDWIM (patElemName pe) [] (Var src) []
+  copyDWIM (patElemName pe) (DimIndices []) (Var src) (DimIndices [])
 defCompileBasicOp (Pattern _ [pe]) (Manifest _ src) =
-  copyDWIM (patElemName pe) [] (Var src) []
+  copyDWIM (patElemName pe) (DimIndices []) (Var src) (DimIndices [])
 defCompileBasicOp (Pattern _ [pe]) (Concat i x ys _) = do
   offs_glb <- dPrimV "tmp_offs" 0
 
@@ -889,8 +889,8 @@ defCompileBasicOp (Pattern _ [pe]) (Concat i x ys _) = do
         skip_dims = take i y_dims
         sliceAllDim d = DimSlice 0 d 1
         skip_slices = map (sliceAllDim . toInt64Exp) skip_dims
-        destslice = skip_slices ++ [DimSlice (tvExp offs_glb) rows 1]
-    copyDWIM (patElemName pe) destslice (Var y) []
+        destslice = DimIndices $ skip_slices ++ [DimSlice (tvExp offs_glb) rows 1]
+    copyDWIM (patElemName pe) destslice (Var y) (DimIndices [])
     offs_glb <-- tvExp offs_glb + rows
 defCompileBasicOp (Pattern [] [pe]) (ArrayLit es _)
   | Just vs@(v : _) <- mapM isLiteral es = do
@@ -904,11 +904,11 @@ defCompileBasicOp (Pattern [] [pe]) (ArrayLit es _)
             IxFun.iota [fromIntegral $ length es]
         entry = MemVar Nothing $ MemEntry dest_space
     addVar static_array entry
-    let slice = [DimSlice 0 (genericLength es) 1]
+    let slice = DimIndices [DimSlice 0 (genericLength es) 1]
     copy t dest_mem slice static_src slice
   | otherwise =
     forM_ (zip [0 ..] es) $ \(i, e) ->
-      copyDWIM (patElemName pe) [DimFix $ fromInteger i] e []
+      copyDWIM (patElemName pe) (DimIndices [DimFix $ fromInteger i]) e (DimIndices [])
   where
     isLiteral (Constant v) = Just v
     isLiteral _ = Nothing
@@ -931,7 +931,7 @@ defCompileBasicOp _ (UpdateAcc acc is vs) = sComment "UpdateAcc" $ do
   -- index parameters.
   (_, _, arrs, dims, op) <- lookupAcc acc is'
 
-  sWhen (inBounds (map DimFix is') dims) $
+  sWhen (inBounds (DimIndices $ map DimFix is') dims) $
     case op of
       Nothing ->
         -- Scatter-like.
@@ -946,7 +946,7 @@ defCompileBasicOp _ (UpdateAcc acc is vs) = sComment "UpdateAcc" $ do
           copyDWIMFix xp [] (Var arr) is'
 
         forM_ (zip y_params vs) $ \(yp, v) ->
-          copyDWIM yp [] v []
+          copyDWIM yp (DimIndices []) v (DimIndices [])
 
         compileStms mempty (bodyStms $ lambdaBody lam) $
           forM_ (zip arrs (bodyResult (lambdaBody lam))) $ \(arr, se) ->
@@ -1533,14 +1533,14 @@ copyArrayDWIM
 -- instead of a variable name.
 copyDWIMDest ::
   ValueDestination ->
-  [DimIndex (Imp.TExp Int64)] ->
+  Slice (Imp.TExp Int64) ->
   SubExp ->
-  [DimIndex (Imp.TExp Int64)] ->
+  Slice (Imp.TExp Int64) ->
   ImpM lore r op ()
-copyDWIMDest _ _ (Constant v) (_ : _) =
+copyDWIMDest _ _ (Constant v) (DimIndices (_ : _)) =
   error $
     unwords ["copyDWIMDest: constant source", pretty v, "cannot be indexed."]
-copyDWIMDest pat dest_slice (Constant v) [] =
+copyDWIMDest pat (DimIndices dest_slice) (Constant v) (DimIndices []) =
   case mapM dimFix dest_slice of
     Nothing ->
       error $
@@ -1561,7 +1561,7 @@ copyDWIMDest pat dest_slice (Constant v) [] =
           error "copyDWIMDest: ArrayDestination Nothing"
   where
     bt = primValueType v
-copyDWIMDest dest dest_slice (Var src) src_slice = do
+copyDWIMDest dest (DimIndices dest_slice) (Var src) (DimIndices src_slice) = do
   src_entry <- lookupVar src
   case (dest, src_entry) of
     (MemoryDestination mem, MemVar _ (MemEntry space)) ->
@@ -1629,9 +1629,9 @@ copyDWIMDest dest dest_slice (Var src) src_slice = do
 -- Thing.  Both destination and source must be in scope.
 copyDWIM ::
   VName ->
-  [DimIndex (Imp.TExp Int64)] ->
+  Slice (Imp.TExp Int64) ->
   SubExp ->
-  [DimIndex (Imp.TExp Int64)] ->
+  Slice (Imp.TExp Int64) ->
   ImpM lore r op ()
 copyDWIM dest dest_slice src src_slice = do
   dest_entry <- lookupVar dest
@@ -1656,7 +1656,7 @@ copyDWIMFix ::
   [Imp.TExp Int64] ->
   ImpM lore r op ()
 copyDWIMFix dest dest_is src src_is =
-  copyDWIM dest (map DimFix dest_is) src (map DimFix src_is)
+  copyDWIM dest (DimIndices $ map DimFix dest_is) src $ DimIndices $ map DimFix src_is
 
 -- | @compileAlloc pat size space@ allocates @n@ bytes of memory in @space@,
 -- writing the result to @dest@, which must be a single
@@ -1689,7 +1689,7 @@ typeSize t =
 -- is useful for things like scatter, which ignores out-of-bounds
 -- writes.
 inBounds :: Slice (Imp.TExp Int64) -> [Imp.TExp Int64] -> Imp.TExp Bool
-inBounds slice dims =
+inBounds (DimIndices slice) dims =
   let condInBounds (DimFix i) d =
         0 .<=. i .&&. i .<. d
       condInBounds (DimSlice i n s) d =
@@ -1804,7 +1804,7 @@ sWrite arr is v = do
   emit $ Imp.Write mem offset (primExpType v) space vol v
 
 sUpdate :: VName -> Slice (Imp.TExp Int64) -> SubExp -> ImpM lore r op ()
-sUpdate arr slice v = copyDWIM arr slice v []
+sUpdate arr slice v = copyDWIM arr slice v (DimIndices [])
 
 sLoopNest ::
   Shape ->

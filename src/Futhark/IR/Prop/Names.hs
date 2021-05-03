@@ -353,6 +353,9 @@ instance FreeIn (LParamInfo lore) => FreeIn (LoopForm lore) where
 instance FreeIn d => FreeIn (DimChange d) where
   freeIn' = Data.Foldable.foldMap freeIn'
 
+instance FreeIn d => FreeIn (Slice d) where
+  freeIn' = Data.Foldable.foldMap freeIn'
+
 instance FreeIn d => FreeIn (DimIndex d) where
   freeIn' = Data.Foldable.foldMap freeIn'
 
