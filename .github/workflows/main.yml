@@ -361,8 +361,13 @@ jobs:
 
     - uses: mymindstorm/setup-emsdk@v7
       with:
-        version: 2.0.10
+        version: 2.0.18
         actions-cache-folder: 'emsdk-cache'
+    - uses: actions/checkout@v2
+    - uses: actions/setup-node@v2
+      with:
+        node-version: '16': 
+
 
     - uses: actions/download-artifact@v2
       with:
@@ -374,6 +379,7 @@ jobs:
         make -C futhark-nightly-linux-x86_64/ install PREFIX=$HOME/.local
         echo "$HOME/.local/bin" >> $GITHUB_PATH
     - run: |
+        node --version
         futhark test -c --backend=wasm --runner=node --no-tuning --exclude=no_wasm --concurrency=1 tests examples
 
   test-tools:
