@@ -63,6 +63,5 @@ compileSegMap pat space kbody = do
 
 
 extractOutputMem :: PatternT (MemInfo d u MemBind) -> [(PrimType, VName)]
-extractOutputMem pat = do
-  let Pattern _ pat_val = pat
-  map (\(PatElem _ (MemArray out_pt _ _ (ArrayIn out_name _))) -> (out_pt, out_name)) pat_val
+extractOutputMem pat = map (\(PatElem _ (MemArray out_pt _ _ (ArrayIn out_name _))) -> (out_pt, out_name)) pat_val
+  where Pattern _ pat_val = pat
