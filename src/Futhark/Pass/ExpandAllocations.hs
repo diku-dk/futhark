@@ -160,7 +160,7 @@ transformExp (WithAcc inputs lam) = do
           -- allocations inside the update function.
           lvl = SegThread (Count $ intConst Int64 0) (Count $ intConst Int64 0) SegNoVirt
           (op_lam', lam_allocs) =
-            extractLambdaAllocations lvl bound_outside mempty op_lam
+            extractLambdaAllocations (lvl, [0]) bound_outside mempty op_lam
           variantAlloc (_, Var v, _) = not $ v `nameIn` bound_outside
           variantAlloc _ = False
           (variant_allocs, invariant_allocs) = M.partition variantAlloc lam_allocs
@@ -176,7 +176,7 @@ transformExp (WithAcc inputs lam) = do
       let num_is = shapeRank shape
           is = map paramName $ take num_is $ lambdaParams op_lam
       (alloc_stms, alloc_offsets) <-
-        genericExpandedInvariantAllocations (const (shape, is)) invariant_allocs
+        genericExpandedInvariantAllocations (const (shape, map le64 is)) invariant_allocs
 
       scope <- askScope
       let scope' = scopeOf op_lam <> scope
@@ -195,9 +195,10 @@ transformScanRed ::
   ExpandM (Stms KernelsMem, ([Lambda KernelsMem], KernelBody KernelsMem))
 transformScanRed lvl space ops kbody = do
   bound_outside <- asks $ namesFromList . M.keys
-  let (kbody', kbody_allocs) =
-        extractKernelBodyAllocations lvl bound_outside bound_in_kernel kbody
-      (ops', ops_allocs) = unzip $ map (extractLambdaAllocations lvl bound_outside mempty) ops
+  let user = (lvl, [le64 $ segFlat space])
+      (kbody', kbody_allocs) =
+        extractKernelBodyAllocations user bound_outside bound_in_kernel kbody
+      (ops', ops_allocs) = unzip $ map (extractLambdaAllocations user bound_outside mempty) ops
       variantAlloc (_, Var v, _) = not $ v `nameIn` bound_outside
       variantAlloc _ = False
       (variant_allocs, invariant_allocs) =
@@ -276,7 +277,7 @@ memoryRequirements lvl space kstms variant_allocs invariant_allocs = do
       expandedInvariantAllocations
         num_threads
         (segNumGroups lvl)
-        space
+        (segGroupSize lvl)
         invariant_allocs
 
   (variant_alloc_stms, variant_alloc_offsets) <-
@@ -292,12 +293,16 @@ memoryRequirements lvl space kstms variant_allocs invariant_allocs = do
       num_threads_stms <> invariant_alloc_stms <> variant_alloc_stms
     )
 
+-- | Identifying the spot where an allocation occurs in terms of its
+-- level and unique thread ID.
+type User = (SegLevel, [TPrimExp Int64 VName])
+
 -- | A description of allocations that have been extracted, and how
 -- much memory (and which space) is needed.
-type Extraction = M.Map VName (SegLevel, SubExp, Space)
+type Extraction = M.Map VName (User, SubExp, Space)
 
 extractKernelBodyAllocations ::
-  SegLevel ->
+  User ->
   Names ->
   Names ->
   KernelBody KernelsMem ->
@@ -309,27 +314,27 @@ extractKernelBodyAllocations lvl bound_outside bound_kernel =
     \stms kbody -> kbody {kernelBodyStms = stms}
 
 extractBodyAllocations ::
-  SegLevel ->
+  User ->
   Names ->
   Names ->
   Body KernelsMem ->
   (Body KernelsMem, Extraction)
-extractBodyAllocations lvl bound_outside bound_kernel =
-  extractGenericBodyAllocations lvl bound_outside bound_kernel bodyStms $
+extractBodyAllocations user bound_outside bound_kernel =
+  extractGenericBodyAllocations user bound_outside bound_kernel bodyStms $
     \stms body -> body {bodyStms = stms}
 
 extractLambdaAllocations ::
-  SegLevel ->
+  User ->
   Names ->
   Names ->
   Lambda KernelsMem ->
   (Lambda KernelsMem, Extraction)
-extractLambdaAllocations lvl bound_outside bound_kernel lam = (lam {lambdaBody = body'}, allocs)
+extractLambdaAllocations user bound_outside bound_kernel lam = (lam {lambdaBody = body'}, allocs)
   where
-    (body', allocs) = extractBodyAllocations lvl bound_outside bound_kernel $ lambdaBody lam
+    (body', allocs) = extractBodyAllocations user bound_outside bound_kernel $ lambdaBody lam
 
 extractGenericBodyAllocations ::
-  SegLevel ->
+  User ->
   Names ->
   Names ->
   (body -> Stms KernelsMem) ->
@@ -338,12 +343,12 @@ extractGenericBodyAllocations ::
   ( body,
     Extraction
   )
-extractGenericBodyAllocations lvl bound_outside bound_kernel get_stms set_stms body =
+extractGenericBodyAllocations user bound_outside bound_kernel get_stms set_stms body =
   let bound_kernel' = bound_kernel <> boundByStms (get_stms body)
       (stms, allocs) =
         runWriter $
           fmap catMaybes $
-            mapM (extractStmAllocations lvl bound_outside bound_kernel') $
+            mapM (extractStmAllocations user bound_outside bound_kernel') $
               stmsToList $ get_stms body
    in (set_stms (stmsFromList stms) body, allocs)
 
@@ -355,63 +360,64 @@ notScalar ScalarSpace {} = False
 notScalar _ = True
 
 extractStmAllocations ::
-  SegLevel ->
+  User ->
   Names ->
   Names ->
   Stm KernelsMem ->
   Writer Extraction (Maybe (Stm KernelsMem))
-extractStmAllocations lvl bound_outside bound_kernel (Let (Pattern [] [patElem]) _ (Op (Alloc size space)))
+extractStmAllocations user bound_outside bound_kernel (Let (Pattern [] [patElem]) _ (Op (Alloc size space)))
   | expandable space && expandableSize size
       -- FIXME: the '&& notScalar space' part is a hack because we
       -- don't otherwise hoist the sizes out far enough, and we
       -- promise to be super-duper-careful about not having variant
       -- scalar allocations.
       || (boundInKernel size && notScalar space) = do
-    tell $ M.singleton (patElemName patElem) (lvl, size, space)
+    tell $ M.singleton (patElemName patElem) (user, size, space)
     return Nothing
   where
     expandableSize (Var v) = v `nameIn` bound_outside || v `nameIn` bound_kernel
     expandableSize Constant {} = True
     boundInKernel (Var v) = v `nameIn` bound_kernel
     boundInKernel Constant {} = False
-extractStmAllocations lvl bound_outside bound_kernel stm = do
-  e <- mapExpM (expMapper lvl) $ stmExp stm
+extractStmAllocations user bound_outside bound_kernel stm = do
+  e <- mapExpM (expMapper user) $ stmExp stm
   return $ Just $ stm {stmExp = e}
   where
-    expMapper lvl' =
+    expMapper user' =
       identityMapper
-        { mapOnBody = const $ onBody lvl',
-          mapOnOp = onOp
+        { mapOnBody = const $ onBody user',
+          mapOnOp = onOp user'
         }
 
-    onBody lvl' body = do
-      let (body', allocs) = extractBodyAllocations lvl' bound_outside bound_kernel body
+    onBody user' body = do
+      let (body', allocs) = extractBodyAllocations user' bound_outside bound_kernel body
       tell allocs
       return body'
 
-    onOp (Inner (SegOp op)) =
-      Inner . SegOp <$> mapSegOpM (opMapper (segLevel op)) op
-    onOp op = return op
+    onOp (_, user_ids) (Inner (SegOp op)) =
+      Inner . SegOp <$> mapSegOpM (opMapper user'') op
+      where
+        user'' =
+          (segLevel op, user_ids ++ [le64 (segFlat (segSpace op))])
+    onOp _ op = return op
 
-    opMapper lvl' =
+    opMapper user' =
       identitySegOpMapper
-        { mapOnSegOpLambda = onLambda lvl',
-          mapOnSegOpBody = onKernelBody lvl'
+        { mapOnSegOpLambda = onLambda user',
+          mapOnSegOpBody = onKernelBody user'
         }
 
-    onKernelBody lvl' body = do
-      let (body', allocs) = extractKernelBodyAllocations lvl' bound_outside bound_kernel body
+    onKernelBody user' body = do
+      let (body', allocs) = extractKernelBodyAllocations user' bound_outside bound_kernel body
       tell allocs
       return body'
 
-    onLambda lvl' lam = do
-      body <- onBody lvl' $ lambdaBody lam
+    onLambda user' lam = do
+      body <- onBody user' $ lambdaBody lam
       return lam {lambdaBody = body}
 
 genericExpandedInvariantAllocations ::
-  (SegLevel -> (Shape, [VName])) ->
-  Extraction ->
-  ExpandM (Stms KernelsMem, RebaseMap)
+  (User -> (Shape, [TPrimExp Int64 VName])) -> Extraction -> ExpandM (Stms KernelsMem, RebaseMap)
 genericExpandedInvariantAllocations getNumUsers invariant_allocs = do
   -- We expand the invariant allocations by adding an inner dimension
   -- equal to the number of kernel threads.
@@ -419,46 +425,48 @@ genericExpandedInvariantAllocations getNumUsers invariant_allocs = do
 
   return (alloc_stms, mconcat rebases)
   where
-    expand (mem, (lvl, per_thread_size, space)) = do
-      let num_users = fst $ getNumUsers lvl
+    expand (mem, (user, per_thread_size, space)) = do
+      let num_users = fst $ getNumUsers user
           allocpat = Pattern [] [PatElem mem $ MemMem space]
       total_size <-
         letExp "total_size" <=< toExp . product $
           pe64 per_thread_size : map pe64 (shapeDims num_users)
       letBind allocpat $ Op $ Alloc (Var total_size) space
-      pure $ M.singleton mem $ newBase lvl
+      pure $ M.singleton mem $ newBase user
 
     untouched d = DimSlice 0 d 1
 
-    newBase lvl@SegThread {} (old_shape, _) =
-      let (users_shape, users_id) = getNumUsers lvl
+    newBase user@(SegThread {}, _) (old_shape, _) =
+      let (users_shape, user_ids) = getNumUsers user
           num_dims = length old_shape
           perm = [num_dims .. num_dims + shapeRank users_shape -1] ++ [0 .. num_dims -1]
           root_ixfun = IxFun.iota (old_shape ++ map pe64 (shapeDims users_shape))
           permuted_ixfun = IxFun.permute root_ixfun perm
           offset_ixfun =
             IxFun.slice permuted_ixfun $
-              map (DimFix . le64) users_id ++ map untouched old_shape
+              map DimFix user_ids ++ map untouched old_shape
        in offset_ixfun
-    newBase lvl@SegGroup {} (old_shape, _) =
-      let (users_shape, users_id) = getNumUsers lvl
+    newBase user@(SegGroup {}, _) (old_shape, _) =
+      let (users_shape, user_ids) = getNumUsers user
           root_ixfun = IxFun.iota $ map pe64 (shapeDims users_shape) ++ old_shape
           offset_ixfun =
             IxFun.slice root_ixfun $
-              map (DimFix . le64) users_id ++ map untouched old_shape
+              map DimFix user_ids ++ map untouched old_shape
        in offset_ixfun
 
 expandedInvariantAllocations ::
   SubExp ->
   Count NumGroups SubExp ->
-  SegSpace ->
+  Count GroupSize SubExp ->
   Extraction ->
   ExpandM (Stms KernelsMem, RebaseMap)
-expandedInvariantAllocations num_threads (Count num_groups) segspace =
+expandedInvariantAllocations num_threads (Count num_groups) (Count group_size) =
   genericExpandedInvariantAllocations getNumUsers
   where
-    getNumUsers SegThread {} = (Shape [num_threads], [segFlat segspace])
-    getNumUsers SegGroup {} = (Shape [num_groups], [segFlat segspace])
+    getNumUsers (SegThread {}, [gtid]) = (Shape [num_threads], [gtid])
+    getNumUsers (SegThread {}, [gid, ltid]) = (Shape [num_groups, group_size], [gid, ltid])
+    getNumUsers (SegGroup {}, [gid]) = (Shape [num_groups], [gid])
+    getNumUsers user = error $ "getNumUsers: unhandled " ++ show user
 
 expandedVariantAllocations ::
   SubExp ->
