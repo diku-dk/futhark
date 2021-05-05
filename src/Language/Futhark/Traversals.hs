@@ -248,6 +248,7 @@ instance ASTMappable (DimIndexBase Info VName) where
 
 instance ASTMappable (SliceBase Info VName) where
   astMap tv (DimIndices idxs) = DimIndices <$> mapM (astMap tv) idxs
+  astMap tv (SliceExpr e) = SliceExpr <$> astMap tv e
 
 instance ASTMappable Alias where
   astMap tv (AliasBound v) = AliasBound <$> mapOnName tv v
@@ -392,6 +393,7 @@ barePat (PatternConstr c _ ps loc) = PatternConstr c NoInfo (map barePat ps) loc
 
 bareSlice :: SliceBase Info VName -> SliceBase NoInfo VName
 bareSlice (DimIndices idxs) = DimIndices $ fmap bareDimIndex idxs
+bareSlice (SliceExpr e) = SliceExpr $ bareExp e
 
 bareDimIndex :: DimIndexBase Info VName -> DimIndexBase NoInfo VName
 bareDimIndex (DimFix e) =

@@ -161,13 +161,13 @@ test_slice_rotate_permute_slice_iota1 =
     testCase "slice . rotate . permute . slice . iota 1" $
       compareOps $
         let slice2 =
-              DimIndices $
+              DimIndices
                 [ DimSlice 0 n 1,
                   DimSlice 1 (n `P.div` 2) 2,
                   DimSlice 0 n 1
                 ]
             slice13 =
-              DimIndices $
+              DimIndices
                 [ DimSlice 2 (n `P.div` 3) 3,
                   DimSlice 0 (n `P.div` 2) 1,
                   DimSlice 1 (n `P.div` 2) 2
@@ -182,13 +182,13 @@ test_slice_rotate_permute_slice_iota2 =
     testCase "slice . rotate . permute . slice . iota 2" $
       compareOps $
         let slice2 =
-              DimIndices $
+              DimIndices
                 [ DimSlice 0 (n `P.div` 2) 1,
                   DimFix (n `P.div` 2),
                   DimSlice 0 (n `P.div` 3) 1
                 ]
             slice13 =
-              DimIndices $
+              DimIndices
                 [ DimSlice 2 (n `P.div` 3) 3,
                   DimSlice 0 n 1,
                   DimSlice 1 (n `P.div` 2) 2

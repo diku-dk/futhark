@@ -729,6 +729,7 @@ etaExpand e_t e = do
 -- | Defunctionalize a slicing an array.
 defuncSlice :: SliceBase Info VName -> DefM (SliceBase Info VName)
 defuncSlice (DimIndices idxs) = DimIndices <$> mapM defuncDimIndex idxs
+defuncSlice (SliceExpr e) = SliceExpr <$> defuncExp' e
 
 -- | Defunctionalize an indexing of a single array dimension.
 defuncDimIndex :: DimIndexBase Info VName -> DefM (DimIndexBase Info VName)

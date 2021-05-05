@@ -211,6 +211,7 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (DimIndexBase f vn) where
 
 instance (Eq vn, IsName vn, Annot f) => Pretty (SliceBase f vn) where
   ppr (DimIndices idxs) = brackets (commasep (map ppr idxs))
+  ppr (SliceExpr e) = brackets (ppr e)
 
 letBody :: (Eq vn, IsName vn, Annot f) => ExpBase f vn -> Doc
 letBody body@(AppExp LetPat {} _) = ppr body

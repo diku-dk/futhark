@@ -649,6 +649,7 @@ deriving instance Ord (DimIndexBase NoInfo VName)
 
 data SliceBase f vn
   = DimIndices [DimIndexBase f vn]
+  | SliceExpr (ExpBase f vn)
 
 deriving instance Showable f vn => Show (SliceBase f vn)
 
@@ -658,6 +659,7 @@ deriving instance Ord (SliceBase NoInfo VName)
 
 sliceLength :: SliceBase f vn -> Int
 sliceLength (DimIndices idxs) = length idxs
+sliceLength (SliceExpr _e) = undefined
 
 -- | A name qualified with a breadcrumb of module accesses.
 data QualName vn = QualName

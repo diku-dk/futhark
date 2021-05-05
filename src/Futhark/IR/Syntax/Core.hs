@@ -326,7 +326,7 @@ instance Traversable DimIndex where
 -- Whenever a function accepts a 'Slice', that slice should be total,
 -- i.e, cover all dimensions of the array.  Deviators should be
 -- indicated by taking a list of 'DimIndex'es instead.
-data Slice d
+newtype Slice d
   = DimIndices [DimIndex d]
   deriving (Eq, Ord, Show)
 

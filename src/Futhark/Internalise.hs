@@ -920,6 +920,7 @@ internaliseSlice ::
   [SubExp] ->
   E.Slice ->
   InternaliseM (I.Slice SubExp, Certificates)
+internaliseSlice _loc _dims (E.SliceExpr _e) = undefined
 internaliseSlice loc dims (E.DimIndices idxs) = do
   (idxs', oks, parts) <- unzip3 <$> zipWithM internaliseDimIndex dims idxs
   ok <- letSubExp "index_ok" =<< eAll oks

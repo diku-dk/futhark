@@ -1097,8 +1097,13 @@ sliceShape r slice t@(Array als u et (ShapeDecl orig_dims)) =
           | isJust i, isJust j = Nothing
           | otherwise = Just orig_d
 
-    adjustDims (DimIndices idxs) = adjustDims' idxs
-
+    adjustDims (DimIndices idxs) x = adjustDims' idxs x
+    adjustDims (SliceExpr e) _x = do
+      -- TODO
+      case typeOf e of
+        Array _ _ _ (ShapeDecl shp) ->
+          return shp
+        _ -> undefined
     adjustDims' (DimFix {} : idxes') (_ : dims) =
       adjustDims' idxes' dims
     -- Pattern match some known slices to be non-existential.
@@ -2152,7 +2157,17 @@ checkIdent (Ident name _ loc) = do
   return $ Ident name' (Info vt) loc
 
 checkSlice :: SliceBase NoInfo Name -> TermTypeM Slice
+checkSlice (DimIndices idxs@[DimFix e]) = do
+  e' <- checkExp e
+  t <- expType e'
+  t' <- normTypeFully $ toStruct t
+
+  case t' of
+    Array {} -> return $ SliceExpr e'
+    _ -> DimIndices <$> mapM checkDimIndex idxs
 checkSlice (DimIndices idxs) = DimIndices <$> mapM checkDimIndex idxs
+checkSlice (SliceExpr _e) = do
+  undefined
 
 checkDimIndex :: DimIndexBase NoInfo Name -> TermTypeM DimIndex
 checkDimIndex (DimFix i) =

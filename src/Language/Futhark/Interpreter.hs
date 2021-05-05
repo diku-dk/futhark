@@ -545,6 +545,20 @@ patternMatch env (PatternConstr n _ ps _) (ValueSum _ n' vs)
     foldM (\env' (p, v) -> patternMatch env' p v) env $ zip ps vs
 patternMatch _ _ _ = mzero
 
+data NewIndexing
+  = Indexing [Indexing]
+  | IndexExpr ValueShape !(Array Int Value)
+
+instance Pretty NewIndexing where
+  ppr (Indexing is) = ppr is
+  ppr (IndexExpr _ a) =
+    let elements = elems a -- [Value]
+        (x : _) = elements
+        separator = case x of
+          ValueArray _ _ -> comma <> line
+          _ -> comma <> space
+     in brackets $ cat $ punctuate separator (map ppr elements)
+
 data Indexing
   = IndexingFix Int64
   | IndexingSlice (Maybe Int64) (Maybe Int64) (Maybe Int64)
@@ -626,28 +640,47 @@ indexArray (IndexingSlice start end stride : is) (ValueArray (ShapeDim _ rowshap
   toArray' (indexShape is rowshape) <$> mapM (indexArray is . (arr !)) js
 indexArray _ v = Just v
 
-updateArray :: [Indexing] -> Value -> Value -> Maybe Value
-updateArray (IndexingFix i : is) (ValueArray shape arr) v
+updateArray :: NewIndexing -> Value -> Value -> Maybe Value
+updateArray (Indexing is) v1 v2 = updateArray' is v1 v2
+updateArray (IndexExpr _ is) arr vs =
+  return $
+    foldl' update arr $
+      zip (elems is) (snd $ fromArray vs)
+  where
+    update :: Value -> (Value, Value) -> Value
+    update arr' (idx, v) =
+      fromMaybe arr' $ updateArray (Indexing $ toIndex idx) arr' v
+    toIndex x@(ValuePrim _) = [IndexingFix $ asInt64 x]
+    toIndex (ValueRecord m) | Just is' <- areTupleFields m = map (IndexingFix . asInt64) is'
+    toIndex _ = undefined
+
+updateArray' :: [Indexing] -> Value -> Value -> Maybe Value
+updateArray' (IndexingFix i : is) (ValueArray shape arr) v
   | i >= 0,
     i < n = do
-    v' <- updateArray is (arr ! i') v
+    v' <- updateArray' is (arr ! i') v
     Just $ ValueArray shape $ arr // [(i', v')]
   | otherwise =
     Nothing
   where
     n = arrayLength arr
     i' = fromIntegral i
-updateArray (IndexingSlice start end stride : is) (ValueArray shape arr) (ValueArray _ v) = do
+updateArray' (IndexingSlice start end stride : is) (ValueArray shape arr) (ValueArray _ v) = do
   arr_is <- indexesFor start end stride $ arrayLength arr
   guard $ length arr_is == arrayLength v
   let update arr' (i, v') = do
-        x <- updateArray is (arr ! i) v'
+        x <- updateArray' is (arr ! i) v'
         return $ arr' // [(i, x)]
   fmap (ValueArray shape) $ foldM update arr $ zip arr_is $ elems v
-updateArray _ _ v = Just v
+updateArray' _ _ v = Just v
 
-evalSlice :: Env -> Slice -> EvalM [Indexing]
-evalSlice env (DimIndices idxs) = mapM (evalDimIndex env) idxs
+evalSlice :: Env -> Slice -> EvalM NewIndexing
+evalSlice env (DimIndices idxs) = Indexing <$> mapM (evalDimIndex env) idxs
+evalSlice env (SliceExpr e) = do
+  v <- eval env e
+  case v of
+    ValueArray t e' -> return $ IndexExpr t e'
+    _ -> undefined
 
 evalDimIndex :: Env -> DimIndex -> EvalM Indexing
 evalDimIndex env (DimFix x) =
@@ -657,8 +690,16 @@ evalDimIndex env (DimSlice start end stride) =
     <*> traverse (fmap asInt64 . eval env) end
     <*> traverse (fmap asInt64 . eval env) stride
 
-evalIndex :: SrcLoc -> Env -> [Indexing] -> Value -> EvalM Value
-evalIndex loc env is arr = do
+evalIndex :: SrcLoc -> Env -> NewIndexing -> Value -> EvalM Value
+evalIndex loc env (IndexExpr shp e) arr = do
+  let oob =
+        bad loc env "BAH"
+  maybe oob return $ toArray' shp <$> mapM ((`indexArray` arr) . toIndex) (elems e)
+  where
+    toIndex x@(ValuePrim _) = [IndexingFix $ asInt64 x]
+    toIndex (ValueRecord m) | Just is <- areTupleFields m = map (IndexingFix . asInt64) is
+    toIndex _ = undefined
+evalIndex loc env (Indexing is) arr = do
   let oob =
         bad loc env $
           "Index [" <> intercalate ", " (map pretty is)
@@ -1582,7 +1623,7 @@ initialCtx =
       where
         update :: Value -> (Maybe [Value], Value) -> Value
         update arr (Just idxs@[_, _], v) =
-          fromMaybe arr $ updateArray (map (IndexingFix . asInt64) idxs) arr v
+          fromMaybe arr $ updateArray (Indexing $ map (IndexingFix . asInt64) idxs) arr v
         update _ _ =
           error "scatter_2d expects 2-dimensional indices"
     def "scatter_3d" = Just $
@@ -1597,7 +1638,7 @@ initialCtx =
       where
         update :: Value -> (Maybe [Value], Value) -> Value
         update arr (Just idxs@[_, _, _], v) =
-          fromMaybe arr $ updateArray (map (IndexingFix . asInt64) idxs) arr v
+          fromMaybe arr $ updateArray (Indexing $ map (IndexingFix . asInt64) idxs) arr v
         update _ _ =
           error "scatter_3d expects 3-dimensional indices"
     def "hist" = Just $
