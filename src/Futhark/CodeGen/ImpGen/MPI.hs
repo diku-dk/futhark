@@ -52,9 +52,8 @@ compileSegOp ::
   SegOp () MCMem ->
   ImpM MCMem Env Imp.MPIOp Imp.Code
 compileSegOp pat (SegMap _ space _ kbody) = compileSegMap pat space kbody
-compileSegOp pat (SegRed _ space reds _ kbody) =
-  compileSegRed pat space reds kbody
-compileSegOp _ _ = pure Imp.Skip
+compileSegOp pat (SegRed _ space reds _ kbody) = compileSegRed pat space reds kbody
+compileSegOp _ _ = error "SegOp not implemented yet"
 
 getSpace :: SegOp () MCMem -> SegSpace
 getSpace (SegHist _ space _ _ _) = space
