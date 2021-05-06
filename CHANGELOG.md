@@ -35,6 +35,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Devious fusion bug (#1322) causing compiler crashes.
 
+  * Memory expansion bug for certain complex GPU kernels (#1328).
+
 ## [0.19.4]
 
 ### Fixed
