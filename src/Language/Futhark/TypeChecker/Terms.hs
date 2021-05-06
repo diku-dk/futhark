@@ -2265,8 +2265,10 @@ checkApply
       sizeSubst _ _ = return (AnyDim Nothing, Nothing)
 checkApply loc fname tfun@(Scalar TypeVar {}) arg = do
   tv <- newTypeVar loc "b"
+  -- Change the uniqueness of the argument type because we never want
+  -- to infer that a function is consuming.
   unify (mkUsage loc "use as function") (toStruct tfun) $
-    Scalar $ Arrow mempty Unnamed (toStruct (argType arg)) tv
+    Scalar $ Arrow mempty Unnamed (toStruct (argType arg) `setUniqueness` Nonunique) tv
   tfun' <- normPatternType tfun
   checkApply loc fname tfun' arg
 checkApply loc (fname, prev_applied) ftype (argexp, _, _, _) = do
