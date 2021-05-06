@@ -47,6 +47,7 @@ module Futhark.Util
     UserString,
     EncodedString,
     zEncodeString,
+    atMostChars,
   )
 where
 
@@ -411,3 +412,8 @@ encodeAsUnicodeCharar c =
     else '0' : hex_str
   where
     hex_str = showHex (ord c) "U"
+
+atMostChars :: Int -> String -> String
+atMostChars n s
+  | length s > n = take (n -3) s ++ "..."
+  | otherwise = s
