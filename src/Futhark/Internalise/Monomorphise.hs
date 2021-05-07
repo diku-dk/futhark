@@ -475,8 +475,9 @@ transformExp (OpSectionRight fname (Info t) e arg (Info rettype) loc) = do
     loc
 transformExp (ProjectSection fields (Info t) loc) =
   desugarProjectSection fields t loc
-transformExp (IndexSection idxs (Info t) loc) =
-  desugarIndexSection idxs t loc
+transformExp (IndexSection idxs (Info t) loc) = do
+  idxs' <- mapM transformDimIndex idxs
+  desugarIndexSection idxs' t loc
 transformExp (Project n e tp loc) = do
   maybe_fs <- case e of
     Var qn _ _ -> lookupRecordReplacement (qualLeaf qn)
