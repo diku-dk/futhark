@@ -80,7 +80,7 @@ extToString (Imp.TransparentValue (Imp.ScalarValue (IntType Int8) Imp.TypeUnsign
 extToString (Imp.TransparentValue (Imp.ScalarValue (IntType Int16) Imp.TypeUnsigned _)) = "u16"
 extToString (Imp.TransparentValue (Imp.ScalarValue (IntType Int32) Imp.TypeUnsigned _)) = "u32"
 extToString (Imp.TransparentValue (Imp.ScalarValue (IntType Int64) Imp.TypeUnsigned _)) = "u64"
-extToString (Imp.TransparentValue (Imp.ScalarValue (Bool) _ _)) = "bool"
+extToString (Imp.TransparentValue (Imp.ScalarValue Bool _ _)) = "bool"
 extToString (Imp.OpaqueValue _ _) = "opaq"
 extToString _ = "Not Reached"
 
@@ -137,7 +137,7 @@ javascriptWrapper entryPoints =
       jsValues,
       cwraps,
       cwrapsJSE entryPoints,
-      unlines $ map (cwrapEntryPoint) entryPoints,
+      unlines $ map cwrapEntryPoint entryPoints,
       initFunc,
       ptrFromWrap,
       arrWrapper,
@@ -145,11 +145,11 @@ javascriptWrapper entryPoints =
       constructor entryPoints,
       getEntryPointsFun,
       --entryDic entryPoints,
-      unlines $ concatMap (\jse -> map toFutharkArray (nub ((ret jse) ++ (parameters jse)))) entryPoints,
-      unlines $ concatMap (\jse -> map fromFutharkArrayShape (nub ((ret jse) ++ (parameters jse)))) entryPoints,
+      unlines $ concatMap (\jse -> map toFutharkArray (nub (ret jse ++ parameters jse))) entryPoints,
+      unlines $ concatMap (\jse -> map fromFutharkArrayShape (nub (ret jse ++ parameters jse))) entryPoints,
       --unlines $ concatMap (\jse -> map fromFutharkArrayRawValues (ret jse)) entryPoints,
-      unlines $ concatMap (\jse -> map fromFutharkArrayValues (nub ((ret jse) ++ (parameters jse)))) entryPoints,
-      (unlines $ map jsWrapEntryPoint entryPoints),
+      unlines $ concatMap (\jse -> map fromFutharkArrayValues (nub (ret jse ++ parameters jse))) entryPoints,
+      unlines $ map jsWrapEntryPoint entryPoints,
       endClassDef
     ]
 
@@ -247,8 +247,8 @@ arrWrapper =
           return padTyp(this.typ);
         }
       }
-        
-    } 
+
+    }
   |]
 
 cwraps :: String
@@ -264,12 +264,12 @@ cwraps =
 cwrapsJSE :: [JSEntryPoint] -> String
 cwrapsJSE jses =
   unlines $
-    map (\arg -> cwrapFun (gfn "new" arg) ((dim arg) + 2)) jses'
-      ++ map (\arg -> cwrapFun (gfn "shape" arg) ((dim arg) + 2)) jses'
-      ++ map (\arg -> cwrapFun (gfn "values_raw" arg) ((dim arg) + 2)) jses'
+    map (\arg -> cwrapFun (gfn "new" arg) (dim arg + 2)) jses'
+      ++ map (\arg -> cwrapFun (gfn "shape" arg) (dim arg + 2)) jses'
+      ++ map (\arg -> cwrapFun (gfn "values_raw" arg) (dim arg + 2)) jses'
       ++ map (\arg -> cwrapFun (gfn "values" arg) 2) jses'
   where
-    jses' = filter (\t -> dim t > 0) $ nub $ concatMap (\jse -> (parameters jse) ++ (ret jse)) jses
+    jses' = filter (\t -> dim t > 0) $ nub $ concatMap (\jse -> parameters jse ++ ret jse) jses
     gfn typ str = "futhark_" ++ typ ++ "_" ++ baseType str ++ "_" ++ show (dim str) ++ "d"
 
 emccExportNames :: [JSEntryPoint] -> [String]
@@ -281,14 +281,14 @@ emccExportNames jses =
     ++ map (\arg -> "'" ++ gfn "values" arg ++ "'") jses'
     ++ ["_futhark_context_config_new", "_futhark_context_new", "_futhark_context_sync", "_futhark_context_get_error"]
   where
-    jses' = filter (\t -> dim t > 0) $ nub $ concatMap (\jse -> (parameters jse) ++ (ret jse)) jses
+    jses' = filter (\t -> dim t > 0) $ nub $ concatMap (\jse -> parameters jse ++ ret jse) jses
     gfn typ str = "_futhark_" ++ typ ++ "_" ++ baseType str ++ "_" ++ show (dim str) ++ "d"
 
 cwrapFun :: String -> Int -> String
 cwrapFun fname numArgs =
   T.unpack
     [text|
-  ${fn} = 
+  ${fn} =
   Module.cwrap(
       '${fn}', 'number', [${args}],
     );
@@ -311,7 +311,7 @@ constructor jses =
       this.cfg = futhark_context_config_new();
       this.ctx = futhark_context_new(this.cfg);
       this.entry_points = {
-        ${entries}  
+        ${entries}
       };
     }
   |]
@@ -360,11 +360,11 @@ jsWrapEntryPoint jse =
     ]
   where
     func_name = name jse
-    alr = [0 .. (length (ret jse)) - 1]
-    alp = [0 .. (length (parameters jse)) - 1]
+    alr = [0 .. length (ret jse) - 1]
+    alp = [0 .. length (parameters jse) - 1]
     convTypes = map typeConversion $ ret jse
     initss = unlines $ map (\i -> inits i (ret jse !! i)) alr
-    results = unlines $ map (\i -> if (ret jse !! i) !! 0 == '[' then "" else resDataHeap i (convTypes !! i)) alr
+    results = unlines $ map (\i -> if head (ret jse !! i) == '[' then "" else resDataHeap i (convTypes !! i)) alr
     rets = intercalate ", " [retPtrOrOther i jse "dataHeap" ".byteOffset" ptrRes | i <- alr]
     args1 = intercalate ", " ["in" ++ show i | i <- alp]
     paramsToPtr = unlines ["  in" ++ show i ++ " = ptrFromWrap(in" ++ show i ++ ")" | i <- alp]
@@ -372,24 +372,19 @@ jsWrapEntryPoint jse =
     ptrRes i _ = "res" ++ show i
     ptrResValue i _ =
       "new ArrayWrapper([this, getValue(res" ++ show i ++ ", 'i32'), '"
-        ++ (baseType (ret jse !! i))
+        ++ baseType (ret jse !! i)
         ++ "', "
         ++ show (dim (ret jse !! i))
         ++ "])"
     retPtrOrOther i jse' pre post f =
-      if ((ret jse') !! i) !! 0 == '['
-        then f i $ (ret jse') !! i
+      if head (ret jse' !! i) == '['
+        then f i $ ret jse' !! i
         else --else "new ArrayWrapper([res" ++ show i ++ "])"
           pre ++ show i ++ post
-    retPtrOrOtherBool i jse' pre post f =
-      if ((ret jse') !! i) !! 0 == '['
-        then f i $ (ret jse') !! i
-        else --else "new ArrayWrapper([res" ++ show i ++ "])"
-
-          ( if ((ret jse') !! i) !! 0 == 'b'
-              then pre ++ show i ++ ", 'bool'" ++ post
-              else pre ++ show i ++ post
-          )
+    retPtrOrOtherBool i jse' pre post f
+      | head (ret jse' !! i) == '[' = f i $ ret jse' !! i
+      | head (ret jse' !! i) == 'b' = pre ++ show i ++ ", 'bool'" ++ post
+      | otherwise = pre ++ show i ++ post
 
 ptrFromWrap :: String
 ptrFromWrap =
@@ -408,16 +403,16 @@ ptrFromWrap =
 cwrapEntryPoint :: JSEntryPoint -> String
 cwrapEntryPoint jse =
   T.unpack
-    [text| 
-    futhark_entry_${ename} = 
+    [text|
+    futhark_entry_${ename} =
       Module.cwrap(
         'futhark_entry_${ename}', 'number', ${args}
       );
    |]
   where
     ename = T.pack $ name jse
-    arg_length = (length (parameters jse)) + (length (ret jse))
-    args = T.pack $ "['number'" ++ (concat (replicate arg_length ", 'number'")) ++ "]"
+    arg_length = length (parameters jse) + length (ret jse)
+    args = T.pack $ "['number'" ++ concat (replicate arg_length ", 'number'") ++ "]"
 
 inits :: Int -> EntryPointTyp -> String
 inits argNum ep =
@@ -444,11 +439,11 @@ baseType ('[' : ']' : end) = baseType end
 baseType typ = typ
 
 dim :: String -> Int
-dim ('[' : ']' : end) = (dim end) + 1
+dim ('[' : ']' : end) = dim end + 1
 dim _ = 0
 
 jsType :: String -> String
-jsType = (snd . retType)
+jsType = snd . retType
 
 typeConversion :: String -> String
 typeConversion typ =
@@ -486,7 +481,7 @@ toFutharkArray str =
     i = dim str
     dims = map (\j -> "dim" ++ show j) [0 .. i -1]
     --cast = map (\d -> "Number(" ++ d ++ ")") dims
-    args1 = [arr] ++ dims
+    args1 = arr : dims
     args2 = [ctx, ofs] ++ dims
     ftype = baseType str
 
