@@ -1527,9 +1527,14 @@ checkExp (AppExp (LetPat sizes pat e body loc) _) =
       bindingPattern sizes' pat (Ascribed t) $ \pat' -> do
         body' <- checkExp body
         (body_t, retext) <-
-          unscopeType loc (patternMap pat') =<< expTypeFully body'
+          unscopeType loc (sizesMap sizes' <> patternMap pat') =<< expTypeFully body'
 
         return $ AppExp (LetPat sizes' pat' e' body' loc) (Info $ AppRes body_t retext)
+  where
+    sizesMap = foldMap onSize
+    onSize size =
+      M.singleton (sizeName size) $
+        Ident (sizeName size) (Info (Scalar $ Prim $ Signed Int64)) (srclocOf size)
 checkExp (AppExp (LetFun name (tparams, params, maybe_retdecl, NoInfo, e) body loc) _) =
   sequentially (checkBinding (name, maybe_retdecl, tparams, params, e, loc)) $
     \(tparams', params', maybe_retdecl', rettype, _, e') closure -> do
