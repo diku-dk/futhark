@@ -98,13 +98,10 @@ unifyTypeArgs uf (TypeArgType t1 loc) (TypeArgType t2 _) =
 unifyTypeArgs _ _ _ =
   Nothing
 
--- | @x \`subtypeOf\` y@ is true if @x@ is a subtype of @y@ (or equal to
--- @y@), meaning @x@ is valid whenever @y@ is.
-subtypeOf ::
-  ArrayDim dim =>
-  TypeBase dim as1 ->
-  TypeBase dim as2 ->
-  Bool
+-- | @x \`subtypeOf\` y@ is true if @x@ is a subtype of @y@ (or equal
+-- to @y@), meaning @x@ is valid whenever @y@ is.  Ignores sizes.
+-- Mostly used for checking uniqueness.
+subtypeOf :: TypeBase () () -> TypeBase () () -> Bool
 subtypeOf t1 t2 = isJust $ unifyTypesU unifyUniqueness (toStruct t1) (toStruct t2)
   where
     unifyUniqueness u2 u1 = if u2 `subuniqueOf` u1 then Just u1 else Nothing
