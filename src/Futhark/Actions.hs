@@ -102,6 +102,9 @@ cmdCC = fromMaybe "cc" $ lookup "CC" unixEnvironment
 cmdCFLAGS :: [String] -> [String]
 cmdCFLAGS def = maybe def words $ lookup "CFLAGS" unixEnvironment
 
+cmdEMCFLAGS :: [String] -> [String]
+cmdEMCFLAGS def = maybe def words $ lookup "EMCFLAGS" unixEnvironment
+
 runCC :: String -> String -> [String] -> [String] -> FutharkM ()
 runCC cpath outpath cflags_def ldflags = do
   ret <-
@@ -138,6 +141,7 @@ runEMCC cpath outpath cflags_def ldflags expfuns = do
             ++ ["-s", "--post-js", "futharkClass.js"]
             ++ ["-s", "WASM_BIGINT"]
             ++ cmdCFLAGS cflags_def
+            ++ cmdEMCFLAGS [""]
             ++ [ "-s",
                  "EXPORTED_FUNCTIONS=["
                    ++ intercalate "," ("'_malloc'" : expfuns)
