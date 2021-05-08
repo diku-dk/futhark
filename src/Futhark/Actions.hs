@@ -138,11 +138,12 @@ runEMCC cpath outpath cflags_def ldflags expfuns = do
             ++ ["-s", "--post-js", "futharkClass.js"]
             ++ ["-s", "WASM_BIGINT"]
             ++ cmdCFLAGS cflags_def
-            ++ ["-s", "EXPORTED_FUNCTIONS=[" ++ 
-              intercalate "," ("'_malloc'":expfuns) ++
-              "]"]
+            ++ [ "-s",
+                 "EXPORTED_FUNCTIONS=["
+                   ++ intercalate "," ("'_malloc'" : expfuns)
+                   ++ "]"
+               ]
             ++ ["-s", "EXTRA_EXPORTED_RUNTIME_METHODS=['cwrap', 'getValue']"]
-
             -- The default LDFLAGS are always added.
             ++ ldflags
         )
@@ -200,15 +201,15 @@ compileCtoWASMAction fcfg mode outpath =
           jpath = outpath `addExtension` "js"
 
       case mode of
+        ToExecutable -> do
+          liftIO $ writeFile cpath $ SequentialC.asExecutable cprog
+          runEMCC cpath outpath [""] ["-lm"] exps
         ToLibrary -> do
           let (h, imp) = SequentialC.asLibrary cprog
           liftIO $ writeFile hpath h
           liftIO $ writeFile cpath imp
           liftIO $ writeFile "futharkClass.js" jsprog
           runEMCC cpath jpath [""] ["-lm"] exps
-        ToExecutable -> do
-          liftIO $ writeFile cpath $ SequentialC.asExecutable cprog
-          runEMCC cpath outpath [""] ["-lm"] exps
         ToServer -> do
           let (h, imp) = SequentialC.asLibrary cprog
           liftIO $ writeFile hpath h
