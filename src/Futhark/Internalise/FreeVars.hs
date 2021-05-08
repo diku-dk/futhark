@@ -71,10 +71,10 @@ freeVars expr = case expr of
   Var qn (Info t) _ -> NameSet $ M.singleton (qualLeaf qn) $ toStruct t
   Ascript e t _ -> freeVars e <> sizes (typeDimNames $ unInfo $ expandedType t)
   AppExp (Coerce e t _) _ -> freeVars e <> sizes (typeDimNames $ unInfo $ expandedType t)
-  AppExp (LetPat pat e1 e2 _) _ ->
+  AppExp (LetPat let_sizes pat e1 e2 _) _ ->
     freeVars e1
       <> ( (sizes (patternDimNames pat) <> freeVars e2)
-             `withoutM` patternVars pat
+             `withoutM` (patternVars pat <> foldMap (size . sizeName) let_sizes)
          )
   AppExp (LetFun vn (tparams, pats, _, _, e1) e2 _) _ ->
     ( (freeVars e1 <> sizes (foldMap patternDimNames pats))
