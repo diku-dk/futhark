@@ -1,7 +1,7 @@
 -- Nasty program that tries to leak memory.  If we can run this
 -- without leaking, then we're doing well.
 -- ==
--- input { [0, 1000, 42, 1001, 50000] }
+-- compiled input { [0, 1000, 42, 1001, 50000] }
 -- output { 1300103225i64 }
 
 let main [n] (a: [n]i32): i64 =
