@@ -383,7 +383,8 @@ jobs:
         echo "$HOME/.local/bin" >> $GITHUB_PATH
     - run: |
         node --version
-        CFLAGS="-s INITIAL_MEMORY=$((2147483648-64*1024))" futhark test -c --backend=wasm --runner=node --no-tuning --exclude=no_wasm --concurrency=1 tests examples
+        export CFLAGS=-sINITIAL_MEMORY=2147418112
+        futhark test -c --backend=wasm --runner=node --no-tuning --exclude=no_wasm --concurrency=1 tests examples
 
   test-tools:
     runs-on: ubuntu-20.04
