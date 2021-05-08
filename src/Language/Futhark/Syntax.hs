@@ -53,6 +53,7 @@ module Language.Futhark.Syntax
     IdentBase (..),
     Inclusiveness (..),
     DimIndexBase (..),
+    SizeBinder (..),
     AppExpBase (..),
     AppRes (..),
     ExpBase (..),
@@ -673,6 +674,14 @@ instance Foldable QualName where
 instance Traversable QualName where
   traverse f (QualName qs v) = QualName <$> traverse f qs <*> f v
 
+-- | A binding of a size in a pattern (essentially a size parameter in
+-- a @let@ expression).
+data SizeBinder vn = SizeBinder {sizeName :: !vn, sizeLoc :: !SrcLoc}
+  deriving (Eq, Ord, Show)
+
+instance Located (SizeBinder vn) where
+  locOf = locOf . sizeLoc
+
 -- | An "application expression" is a semantic (not syntactic)
 -- grouping of expressions that have "funcall-like" semantics, mostly
 -- meaning that they can return existential sizes.  In our type
@@ -697,6 +706,7 @@ data AppExpBase f vn
       (Inclusiveness (ExpBase f vn))
       SrcLoc
   | LetPat
+      [SizeBinder vn]
       (PatternBase f vn)
       (ExpBase f vn)
       (ExpBase f vn)
@@ -748,7 +758,7 @@ instance Located (AppExpBase f vn) where
   locOf (If _ _ _ loc) = locOf loc
   locOf (Coerce _ _ loc) = locOf loc
   locOf (Apply _ _ _ loc) = locOf loc
-  locOf (LetPat _ _ _ loc) = locOf loc
+  locOf (LetPat _ _ _ _ loc) = locOf loc
   locOf (LetFun _ _ _ loc) = locOf loc
   locOf (LetWith _ _ _ _ _ loc) = locOf loc
   locOf (Index _ _ loc) = locOf loc

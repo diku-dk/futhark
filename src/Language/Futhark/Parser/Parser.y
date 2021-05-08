@@ -328,6 +328,13 @@ Specs :: { [SpecBase NoInfo Name] }
        : Spec Specs { $1 : $2 }
        |            { [] }
 
+SizeBinder :: { SizeBinder Name }
+            : '[' id ']' { let L _ (ID name) = $2 in SizeBinder name (srcspan $1 $>) }
+
+SizeBinders1 :: { [SizeBinder Name] }
+             : SizeBinder SizeBinders1 { $1 : $2 }
+             | SizeBinder              { [$1] }
+
 TypeParam :: { TypeParamBase Name }
            : '[' id ']' { let L _ (ID name) = $2 in TypeParamDim name (srcspan $1 $>) }
            | '\'' id { let L _ (ID name) = $2 in TypeParamType Unlifted name (srcspan $1 $>) }
@@ -723,8 +730,10 @@ Fields1 :: { [FieldBase NoInfo Name] }
         | Field             { [$1] }
 
 LetExp :: { UncheckedExp }
-     : let Pattern '=' Exp LetBody
-       { AppExp (LetPat $2 $4 $5 (srcspan $1 $>)) NoInfo }
+     : let SizeBinders1 Pattern '=' Exp LetBody
+       { AppExp (LetPat $2 $3 $5 $6 (srcspan $1 $>)) NoInfo }
+     | let Pattern '=' Exp LetBody
+       { AppExp (LetPat [] $2 $4 $5 (srcspan $1 $>)) NoInfo }
 
      | let id TypeParams FunParams1 maybeAscription(TypeExpDecl) '=' Exp LetBody
        { let L _ (ID name) = $2

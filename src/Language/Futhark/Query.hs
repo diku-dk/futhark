@@ -44,6 +44,10 @@ boundLoc (BoundModule loc) = loc
 boundLoc (BoundModuleType loc) = loc
 boundLoc (BoundType loc) = loc
 
+sizeDefs :: SizeBinder VName -> Defs
+sizeDefs (SizeBinder v loc) =
+  M.singleton v $ DefBound $ BoundTerm (Scalar (Prim (Signed Int64))) (locOf loc)
+
 patternDefs :: Pattern -> Defs
 patternDefs (Id vn (Info t) loc) =
   M.singleton vn $ DefBound $ BoundTerm (toStruct t) (locOf loc)
@@ -87,8 +91,8 @@ expDefs e =
 
     extra =
       case e of
-        AppExp (LetPat pat _ _ _) _ ->
-          patternDefs pat
+        AppExp (LetPat sizes pat _ _ _) _ ->
+          foldMap sizeDefs sizes <> patternDefs pat
         Lambda params _ _ _ _ ->
           mconcat (map patternDefs params)
         AppExp (LetFun name (tparams, params, _, Info ret, _) _ loc) _ ->
@@ -264,7 +268,7 @@ atPosInExp (QualParens (qn, loc) _ _) pos
 atPosInExp Literal {} _ = Nothing
 atPosInExp IntLit {} _ = Nothing
 atPosInExp FloatLit {} _ = Nothing
-atPosInExp (AppExp (LetPat pat _ _ _) _) pos
+atPosInExp (AppExp (LetPat _ pat _ _ _) _) pos
   | pat `contains` pos = atPosInPattern pat pos
 atPosInExp (AppExp (LetWith a b _ _ _ _) _) pos
   | a `contains` pos = Just $ RawAtName (qualName $ identName a) (locOf a)

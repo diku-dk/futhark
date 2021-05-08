@@ -399,8 +399,8 @@ internaliseAppExp desc e@E.Apply {} = do
       | otherwise -> do
         args' <- concat . reverse <$> mapM (internaliseArg arg_desc) (reverse args)
         fst <$> funcall desc qfname args' loc
-internaliseAppExp desc (E.LetPat pat e body _) =
-  internalisePat desc pat e body (internaliseExp desc)
+internaliseAppExp desc (E.LetPat sizes pat e body _) =
+  internalisePat desc sizes pat e body (internaliseExp desc)
 internaliseAppExp _ (E.LetFun ofname _ _ _) =
   error $ "Unexpected LetFun " ++ pretty ofname
 internaliseAppExp desc (E.DoLoop sparams mergepat mergeexp form loopbody loc) = do
@@ -553,19 +553,19 @@ internaliseAppExp desc (E.LetWith name src idxs ve body loc) = do
       e = E.Update (E.Var (E.qualName $ E.identName src) src_t loc) idxs ve loc
   internaliseExp desc $
     E.AppExp
-      (E.LetPat pat e body loc)
+      (E.LetPat [] pat e body loc)
       (Info (AppRes (E.typeOf body) mempty))
 internaliseAppExp desc (E.Match e cs _) = do
   ses <- internaliseExp (desc ++ "_scrutinee") e
   case NE.uncons cs of
     (CasePat pCase eCase _, Nothing) -> do
       (_, pertinent) <- generateCond pCase ses
-      internalisePat' pCase pertinent eCase (internaliseExp desc)
+      internalisePat' [] pCase pertinent eCase (internaliseExp desc)
     (c, Just cs') -> do
       let CasePat pLast eLast _ = NE.last cs'
       bFalse <- do
         (_, pertinent) <- generateCond pLast ses
-        eLast' <- internalisePat' pLast pertinent eLast (internaliseBody desc)
+        eLast' <- internalisePat' [] pLast pertinent eLast (internaliseBody desc)
         foldM (\bf c' -> eBody $ return $ generateCaseIf ses c' bf) eLast' $
           reverse $ NE.init cs'
       letTupExp' desc =<< generateCaseIf ses c bFalse
@@ -884,33 +884,36 @@ generateCond orig_p orig_ses = do
 generateCaseIf :: [I.SubExp] -> Case -> I.Body -> InternaliseM I.Exp
 generateCaseIf ses (CasePat p eCase _) bFail = do
   (cond, pertinent) <- generateCond p ses
-  eCase' <- internalisePat' p pertinent eCase (internaliseBody "case")
+  eCase' <- internalisePat' [] p pertinent eCase (internaliseBody "case")
   eIf (eSubExp cond) (return eCase') (return bFail)
 
 internalisePat ::
   String ->
+  [E.SizeBinder VName] ->
   E.Pattern ->
   E.Exp ->
   E.Exp ->
   (E.Exp -> InternaliseM a) ->
   InternaliseM a
-internalisePat desc p e body m = do
+internalisePat desc sizes p e body m = do
   ses <- internaliseExp desc' e
-  internalisePat' p ses body m
+  internalisePat' sizes p ses body m
   where
     desc' = case S.toList $ E.patternIdents p of
       [v] -> baseString $ E.identName v
       _ -> desc
 
 internalisePat' ::
+  [E.SizeBinder VName] ->
   E.Pattern ->
   [I.SubExp] ->
   E.Exp ->
   (E.Exp -> InternaliseM a) ->
   InternaliseM a
-internalisePat' p ses body m = do
+internalisePat' sizes p ses body m = do
   ses_ts <- mapM subExpType ses
   stmPattern p ses_ts $ \pat_names -> do
+    bindExtSizes (AppRes (E.patternType p) (map E.sizeName sizes)) ses
     forM_ (zip pat_names ses) $ \(v, se) ->
       letBindNames [v] $ I.BasicOp $ I.SubExp se
     m body

@@ -436,7 +436,7 @@ literals and variables, but also more complicated forms.
       : | `exp` [ ".." `exp` ] "..<" `exp`
       : | `exp` [ ".." `exp` ] "..>" `exp`
       : | "if" `exp` "then" `exp` "else" `exp`
-      : | "let" `pat` "=" `exp` "in" `exp`
+      : | "let" `size`* `pat` "=" `exp` "in" `exp`
       : | "let" `id` "[" `index` ("," `index`)* "]" "=" `exp` "in" `exp`
       : | "let" `id` `type_param`* `pat`+ [":" `type`] "=" `exp` "in" `exp`
       : | "(" "\" `pat`+ [":" `type`] "->" `exp` ")"
@@ -449,6 +449,7 @@ literals and variables, but also more complicated forms.
       : | "match" `exp` ("case" `pat` "->" `exp`)+
    field:   `fieldid` "=" `exp`
         : | `id`
+   size : "[" `id` "]"
    pat:   `id`
       : | `literal`
       : |  "_"
@@ -864,8 +865,15 @@ Evaluate ``e`` and bind the result to the irrefutable pattern ``pat``
 (see :ref:`patterns`) while evaluating ``body``.  The ``in`` keyword
 is optional if ``body`` is a ``let`` expression.
 
+``let [n] pat = e in body``
+...........................
+
+As above, but bind sizes (here ``n``) used in the pattern (here to the
+size of the array being bound).  All sizes must be used in the
+pattern.  Roughly Equivalent to ``let f [n] pat = body in f e``.
+
 ``let a[i] = v in body``
-........................................
+........................
 
 Write ``v`` to ``a[i]`` and evaluate ``body``.  The given index need
 not be complete and can also be a slice, but in these cases, the value

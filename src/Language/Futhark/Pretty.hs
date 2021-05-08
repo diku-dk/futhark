@@ -209,6 +209,9 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (DimIndexBase f vn) where
   ppr (DimSlice i Nothing Nothing) =
     maybe mempty ppr i <> text ":"
 
+instance IsName vn => Pretty (SizeBinder vn) where
+  ppr (SizeBinder v _) = brackets $ pprName v
+
 letBody :: (Eq vn, IsName vn, Annot f) => ExpBase f vn -> Doc
 letBody body@(AppExp LetPat {} _) = ppr body
 letBody body@(AppExp LetFun {} _) = ppr body
@@ -231,10 +234,10 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (AppExpBase f vn) where
       </> indent 2 (ppr loopbody)
   pprPrec _ (Index e idxs _) =
     pprPrec 9 e <> brackets (commasep (map ppr idxs))
-  pprPrec p (LetPat pat e body _) =
+  pprPrec p (LetPat sizes pat e body _) =
     parensIf (p /= -1) $
       align $
-        text "let" <+> align (ppr pat)
+        text "let" <+> spread (map ppr sizes) <+> align (ppr pat)
           <+> ( if linebreak
                   then equals </> indent 2 (ppr e)
                   else equals <+> align (ppr e)

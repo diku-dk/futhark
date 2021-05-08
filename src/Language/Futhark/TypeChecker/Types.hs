@@ -38,17 +38,18 @@ import Language.Futhark.TypeChecker.Monad
 -- | @unifyTypes uf t1 t2@ attempts to unify @t1@ and @t2@.  If
 -- unification cannot happen, 'Nothing' is returned, otherwise a type
 -- that combines the aliasing of @t1@ and @t2@ is returned.
--- Uniqueness is unified with @uf@.
+-- Uniqueness is unified with @uf@.  Assumes sizes already match, and
+-- always picks the size of the leftmost type.
 unifyTypesU ::
   (Monoid als, ArrayDim dim) =>
   (Uniqueness -> Uniqueness -> Maybe Uniqueness) ->
   TypeBase dim als ->
   TypeBase dim als ->
   Maybe (TypeBase dim als)
-unifyTypesU uf (Array als1 u1 et1 shape1) (Array als2 u2 et2 shape2) =
+unifyTypesU uf (Array als1 u1 et1 shape1) (Array als2 u2 et2 _shape2) =
   Array (als1 <> als2) <$> uf u1 u2
     <*> unifyScalarTypes uf et1 et2
-    <*> unifyShapes shape1 shape2
+    <*> pure shape1
 unifyTypesU uf (Scalar t1) (Scalar t2) = Scalar <$> unifyScalarTypes uf t1 t2
 unifyTypesU _ _ _ = Nothing
 
@@ -61,12 +62,19 @@ unifyScalarTypes ::
 unifyScalarTypes _ (Prim t1) (Prim t2)
   | t1 == t2 = Just $ Prim t1
   | otherwise = Nothing
-unifyScalarTypes uf (TypeVar als1 u1 t1 targs1) (TypeVar als2 u2 t2 targs2)
-  | t1 == t2 = do
+unifyScalarTypes uf (TypeVar als1 u1 tv1 targs1) (TypeVar als2 u2 tv2 targs2)
+  | tv1 == tv2 = do
     u3 <- uf u1 u2
-    targs3 <- zipWithM (unifyTypeArgs uf) targs1 targs2
-    Just $ TypeVar (als1 <> als2) u3 t1 targs3
+    targs3 <- zipWithM unifyTypeArgs targs1 targs2
+    Just $ TypeVar (als1 <> als2) u3 tv1 targs3
   | otherwise = Nothing
+  where
+    unifyTypeArgs (TypeArgDim d1 loc) (TypeArgDim _d2 _) =
+      pure $ TypeArgDim d1 loc
+    unifyTypeArgs (TypeArgType t1 loc) (TypeArgType t2 _) =
+      TypeArgType <$> unifyTypesU uf t1 t2 <*> pure loc
+    unifyTypeArgs _ _ =
+      Nothing
 unifyScalarTypes uf (Record ts1) (Record ts2)
   | length ts1 == length ts2,
     sort (M.keys ts1) == sort (M.keys ts2) =
@@ -84,19 +92,6 @@ unifyScalarTypes uf (Sum cs1) (Sum cs2)
         (uncurry (zipWithM (unifyTypesU uf)))
         (M.intersectionWith (,) cs1 cs2)
 unifyScalarTypes _ _ _ = Nothing
-
-unifyTypeArgs ::
-  (ArrayDim dim) =>
-  (Uniqueness -> Uniqueness -> Maybe Uniqueness) ->
-  TypeArg dim ->
-  TypeArg dim ->
-  Maybe (TypeArg dim)
-unifyTypeArgs _ (TypeArgDim d1 loc) (TypeArgDim d2 _) =
-  TypeArgDim <$> unifyDims d1 d2 <*> pure loc
-unifyTypeArgs uf (TypeArgType t1 loc) (TypeArgType t2 _) =
-  TypeArgType <$> unifyTypesU uf t1 t2 <*> pure loc
-unifyTypeArgs _ _ _ =
-  Nothing
 
 -- | @x \`subtypeOf\` y@ is true if @x@ is a subtype of @y@ (or equal
 -- to @y@), meaning @x@ is valid whenever @y@ is.  Ignores sizes.
