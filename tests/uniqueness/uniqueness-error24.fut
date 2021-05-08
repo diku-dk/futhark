@@ -1,7 +1,7 @@
 -- Test that consumption checking is done even with no meaningful
 -- bindings.
 -- ==
--- error:
+-- error: consumed
 
 let consume(a: *[]i32): i32 = 0 -- OK.
 

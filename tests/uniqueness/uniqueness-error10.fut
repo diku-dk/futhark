@@ -1,6 +1,6 @@
 -- Don't let occurences clash just because they're function arguments.
 -- ==
--- error:
+-- error: Cannot apply "f"
 
 let f(a: *[]i32): []i32 = a
 

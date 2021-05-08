@@ -1,8 +1,8 @@
 -- Don't let curried mapees consume more than once.
 -- ==
--- error:
+-- error: consumption
 
-let f(a: *[]i32, i: i32): []i32 =
+let f(a: *[]i64) (i: i64): []i64 =
   let a[i] = 0 in a
 
 let main(): [][]i32 =
