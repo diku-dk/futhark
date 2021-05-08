@@ -746,16 +746,11 @@ evalFunction env missing_sizes (p : ps) body rettype =
     ValueFun $ \v -> do
       env' <- matchPattern env p v
       -- Fix up the last sizes, if any.
-      let env''
+      let p_t = evalType env $ patternStructType p
+          env''
             | null missing_sizes = env'
             | otherwise =
-              env'
-                <> i64Env
-                  ( resolveExistentials
-                      missing_sizes
-                      (patternStructType p)
-                      (valueShape v)
-                  )
+              env' <> i64Env (resolveExistentials missing_sizes p_t (valueShape v))
       evalFunction env'' missing_sizes ps body rettype
 
 evalFunctionBinding ::
