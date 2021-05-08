@@ -1175,7 +1175,7 @@ checkAscript loc decl e shapef = do
   -- explicitly, because uniqueness is ignored by unification.
   t' <- normTypeFully t
   decl_t' <- normTypeFully $ unInfo $ expandedType decl'
-  unless (noSizes t' `subtypeOf` noSizes decl_t') $
+  unless (toStructural t' `subtypeOf` toStructural decl_t') $
     typeError loc mempty $
       "Type" <+> pquote (ppr t') <+> "is not a subtype of"
         <+> pquote (ppr decl_t') <> "."
@@ -3043,7 +3043,7 @@ checkFunBody params body maybe_rettype loc = do
       -- explicitly, because uniqueness is ignored by unification.
       rettype' <- normTypeFully rettype
       body_t'' <- normTypeFully rettype -- Substs may have changed.
-      unless (body_t'' `subtypeOf` anySizes rettype') $
+      unless (toStructural body_t'' `subtypeOf` toStructural rettype') $
         typeError (srclocOf body) mempty $
           "Body type" </> indent 2 (ppr body_t'')
             </> "is not a subtype of annotated type"
