@@ -134,7 +134,7 @@ runEMCC cpath outpath cflags_def ldflags expfuns = do
       runProgramWithExitCode
         "emcc"
         ( [cpath, "-o", outpath]
-            ++ ["-lnodefs.js", "-s", "INITIAL_MEMORY=50331648"] -- ,"-s", "ALLOW_MEMORY_GROWTH=1"]
+            ++ ["-lnodefs.js", "-s", "INITIAL_MEMORY=201326592"] -- ,"-s", "ALLOW_MEMORY_GROWTH=1"]
             ++ ["-s", "--post-js", "futharkClass.js"]
             ++ ["-s", "WASM_BIGINT"]
             ++ cmdCFLAGS cflags_def
