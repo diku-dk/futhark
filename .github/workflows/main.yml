@@ -383,7 +383,7 @@ jobs:
         echo "$HOME/.local/bin" >> $GITHUB_PATH
     - run: |
         node --version
-        export EMCFLAGS=-sINITIAL_MEMORY=2147418112
+        export EMCFLAGS=-sINITIAL_MEMORY=2147418112 # 2gb - 64kb... largest value of memory
         futhark test -c --backend=wasm --runner=node --no-tuning --exclude=no_wasm --concurrency=1 tests examples
 
   test-tools:
