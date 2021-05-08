@@ -205,18 +205,17 @@ compileCtoWASMAction fcfg mode outpath =
           liftIO $ writeFile cpath $ SequentialC.asExecutable cprog
           runEMCC cpath outpath [""] ["-lm"] exps
         ToLibrary -> do
-          let (h, imp) = SequentialC.asLibrary cprog
-          liftIO $ writeFile hpath h
-          liftIO $ writeFile cpath imp
-          liftIO $ writeFile "futharkClass.js" jsprog
+          writeLibs cprog jsprog hpath cpath
           runEMCC cpath jpath [""] ["-lm"] exps
         ToServer -> do
-          let (h, imp) = SequentialC.asLibrary cprog
-          liftIO $ writeFile hpath h
-          liftIO $ writeFile cpath imp
-          liftIO $ writeFile "futharkClass.js" jsprog
+          writeLibs cprog jsprog hpath cpath
           liftIO $ appendFile "futharkClass.js" SequentialWASM.runServer
           runEMCC cpath outpath [""] ["-lm"] exps
+    writeLibs cprog jsprog hpath cpath = do
+      let (h, imp) = SequentialC.asLibrary cprog
+      liftIO $ writeFile hpath h
+      liftIO $ writeFile cpath imp
+      liftIO $ writeFile "futharkClass.js" jsprog
 
 -- | The @futhark opencl@ action.
 compileOpenCLAction :: FutharkConfig -> CompilerMode -> FilePath -> Action KernelsMem
