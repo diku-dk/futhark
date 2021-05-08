@@ -508,7 +508,7 @@ defuncExp (AppExp (Coerce e0 tydecl loc) res)
     (e0', sv) <- defuncExp e0
     return (AppExp (Coerce e0' tydecl loc) res, sv)
   | otherwise = defuncExp e0
-defuncExp (AppExp (LetPat pat e1 e2 loc) (Info (AppRes t retext))) = do
+defuncExp (AppExp (LetPat sizes pat e1 e2 loc) (Info (AppRes t retext))) = do
   (e1', sv1) <- defuncExp e1
   let env = matchPatternSV pat sv1
       pat' = updatePattern pat sv1
@@ -519,7 +519,7 @@ defuncExp (AppExp (LetPat pat e1 e2 loc) (Info (AppRes t retext))) = do
   let mapping = dimMapping' (typeOf e2) t
       subst v = fromMaybe v $ M.lookup v mapping
       t' = first (fmap subst) $ typeOf e2'
-  return (AppExp (LetPat pat' e1' e2' loc) (Info (AppRes t' retext)), sv2)
+  return (AppExp (LetPat sizes pat' e1' e2' loc) (Info (AppRes t' retext)), sv2)
 defuncExp (AppExp (LetFun vn _ _ _) _) =
   error $ "defuncExp: Unexpected LetFun: " ++ prettyName vn
 defuncExp (AppExp (If e1 e2 e3 loc) res) = do

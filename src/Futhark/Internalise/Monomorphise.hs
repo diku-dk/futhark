@@ -288,10 +288,10 @@ transformAppExp (Range e1 me incl loc) res = do
   return $ AppExp (Range e1' me' incl' loc) (Info res)
 transformAppExp (Coerce e tp loc) res =
   AppExp <$> (Coerce <$> transformExp e <*> pure tp <*> pure loc) <*> pure (Info res)
-transformAppExp (LetPat pat e1 e2 loc) res = do
+transformAppExp (LetPat sizes pat e1 e2 loc) res = do
   (pat', rr) <- transformPattern pat
   AppExp
-    <$> ( LetPat pat' <$> transformExp e1
+    <$> ( LetPat sizes pat' <$> transformExp e1
             <*> withRecordReplacements rr (transformExp e2)
             <*> pure loc
         )
@@ -352,10 +352,11 @@ transformAppExp (BinOp (fname, _) (Info t) (e1, d1) (e2, d2) loc) (AppRes ret ex
       return $
         AppExp
           ( LetPat
+              []
               x_param
               e1'
               ( AppExp
-                  (LetPat y_param e2' (applyOp fname' x_param_e y_param_e) loc)
+                  (LetPat [] y_param e2' (applyOp fname' x_param_e y_param_e) loc)
                   (Info $ AppRes ret mempty)
               )
               mempty
@@ -569,7 +570,7 @@ desugarBinOpSection op e_left e_right t (xp, xtype, xext) (yp, ytype, yext) (ret
     makeVarParam (Just e) argtype = do
       (v, pat, var_e) <- patAndVar argtype
       let wrap body =
-            AppExp (LetPat pat e body mempty) (Info $ AppRes (typeOf body) mempty)
+            AppExp (LetPat [] pat e body mempty) (Info $ AppRes (typeOf body) mempty)
       return (v, wrap, var_e, [])
     makeVarParam Nothing argtype = do
       (v, pat, var_e) <- patAndVar argtype
