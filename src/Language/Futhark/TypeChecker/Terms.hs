@@ -1898,18 +1898,17 @@ checkExp (AppExp (DoLoop _ mergepat mergeexp form loopbody loc) _) =
           uboundexp' <- require "being the bound in a 'for' loop" anySignedType =<< checkExp uboundexp
           bound_t <- expTypeFully uboundexp'
           bindingIdent i bound_t $ \i' ->
-            noUnique $
-              bindingPattern [] mergepat (Ascribed merge_t) $
-                \mergepat' -> onlySelfAliasing $
-                  tapOccurences $ do
-                    loopbody' <- noSizeEscape $ checkExp loopbody
-                    (sparams, mergepat'') <- checkLoopReturnSize mergepat' loopbody'
-                    return
-                      ( sparams,
-                        mergepat'',
-                        For i' uboundexp',
-                        loopbody'
-                      )
+            noUnique . bindingPattern [] mergepat (Ascribed merge_t) $
+              \mergepat' -> onlySelfAliasing $
+                tapOccurences $ do
+                  loopbody' <- noSizeEscape $ checkExp loopbody
+                  (sparams, mergepat'') <- checkLoopReturnSize mergepat' loopbody'
+                  return
+                    ( sparams,
+                      mergepat'',
+                      For i' uboundexp',
+                      loopbody'
+                    )
         ForIn xpat e -> do
           (arr_t, _) <- newArrayType (srclocOf e) "e" 1
           e' <- unifies "being iterated in a 'for-in' loop" arr_t =<< checkExp e
@@ -1918,40 +1917,36 @@ checkExp (AppExp (DoLoop _ mergepat mergeexp form loopbody loc) _) =
             _
               | Just t' <- peelArray 1 t ->
                 bindingPattern [] xpat (Ascribed t') $ \xpat' ->
-                  noUnique $
-                    bindingPattern [] mergepat (Ascribed merge_t) $
-                      \mergepat' -> onlySelfAliasing $
-                        tapOccurences $ do
-                          loopbody' <- noSizeEscape $ checkExp loopbody
-                          (sparams, mergepat'') <- checkLoopReturnSize mergepat' loopbody'
-                          return
-                            ( sparams,
-                              mergepat'',
-                              ForIn xpat' e',
-                              loopbody'
-                            )
-              | otherwise ->
-                typeError (srclocOf e) mempty $
-                  "Iteratee of a for-in loop must be an array, but expression has type"
-                    <+> ppr t
-        While cond ->
-          noUnique $
-            bindingPattern [] mergepat (Ascribed merge_t) $ \mergepat' ->
-              onlySelfAliasing $
-                tapOccurences $
-                  sequentially
-                    ( checkExp cond
-                        >>= unifies "being the condition of a 'while' loop" (Scalar $ Prim Bool)
-                    )
-                    $ \cond' _ -> do
+                  noUnique . bindingPattern [] mergepat (Ascribed merge_t) $
+                    \mergepat' -> onlySelfAliasing . tapOccurences $ do
                       loopbody' <- noSizeEscape $ checkExp loopbody
                       (sparams, mergepat'') <- checkLoopReturnSize mergepat' loopbody'
                       return
                         ( sparams,
                           mergepat'',
-                          While cond',
+                          ForIn xpat' e',
                           loopbody'
                         )
+              | otherwise ->
+                typeError (srclocOf e) mempty $
+                  "Iteratee of a for-in loop must be an array, but expression has type"
+                    <+> ppr t
+        While cond ->
+          noUnique . bindingPattern [] mergepat (Ascribed merge_t) $ \mergepat' ->
+            onlySelfAliasing . tapOccurences $
+              sequentially
+                ( checkExp cond
+                    >>= unifies "being the condition of a 'while' loop" (Scalar $ Prim Bool)
+                )
+                $ \cond' _ -> do
+                  loopbody' <- noSizeEscape $ checkExp loopbody
+                  (sparams, mergepat'') <- checkLoopReturnSize mergepat' loopbody'
+                  return
+                    ( sparams,
+                      mergepat'',
+                      While cond',
+                      loopbody'
+                    )
 
     mergepat'' <- do
       loopbody_t <- expTypeFully loopbody'
