@@ -170,7 +170,7 @@ data PrimType
   = IntType IntType
   | FloatType FloatType
   | Bool
-  | -- | A zero-size type.
+  | -- | An informationless type - still takes up space!
     Unit
   deriving (Eq, Ord, Show)
 
