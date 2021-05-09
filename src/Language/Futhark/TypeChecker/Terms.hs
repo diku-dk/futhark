@@ -1828,10 +1828,11 @@ checkExp (AppExp (DoLoop _ mergepat mergeexp form loopbody loc) _) =
           pat_t <- normTypeFully $ patternType mergepat'
           -- We are ignoring the dimensions here, because any mismatches
           -- should be turned into fresh size variables.
+
           onFailure (CheckingLoopBody (toStruct (anySizes pat_t)) (toStruct loopbody_t)) $
             expect
               (mkUsage (srclocOf loopbody) "matching loop body to loop pattern")
-              (toStruct (anySizes pat_t))
+              (toStruct (anyTheseSizes new_dims pat_t))
               (toStruct loopbody_t)
           pat_t' <- normTypeFully pat_t
           loopbody_t' <- normTypeFully loopbody_t
@@ -2004,6 +2005,12 @@ checkExp (AppExp (DoLoop _ mergepat mergeexp form loopbody loc) _) =
         (DoLoop sparams mergepat'' mergeexp' form' loopbody' loc)
         (Info $ AppRes loopt' retext)
   where
+    anyTheseSizes to_hide = first onDim
+      where
+        onDim (NamedDim (QualName _ v))
+          | v `elem` to_hide = AnyDim Nothing
+        onDim d = d
+
     convergePattern pat body_cons body_t body_loc = do
       let consumed_merge = patternNames pat `S.intersection` body_cons
 
