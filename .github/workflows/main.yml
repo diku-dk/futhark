@@ -352,11 +352,7 @@ jobs:
     - run: |
         futhark test -C --no-terminal --backend=cuda --exclude=no_opencl tests examples
 
-<<<<<<< HEAD
-  test-c:
-=======
   test-wasm:
->>>>>>> 2f97c8d84... Add wasm action
     runs-on: ubuntu-20.04
     needs: [build-linux-nix]
 
