@@ -6,8 +6,6 @@ typedef int (*writer)(FILE*, const void*);
 typedef int (*bin_reader)(void*);
 typedef int (*str_reader)(const char *, void*);
 
-FILE * STREAM;
-
 struct array_reader {
   char* elems;
   int64_t n_elems_space;
