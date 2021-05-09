@@ -33,4 +33,4 @@ test_%: test_%.c %.o
 	futhark $(FUTHARK_BACKEND) --library $^
 
 clean:
-	rm -rf test_? ?.c ?.h ?.o $(patsubst %.fut, %.c, $(wildcard *.fut))
+	rm -rf $(patsubst %.c, %, $(wildcard test_*.c)) *.h *.o $(patsubst %.fut, %.c, $(wildcard *.fut))
