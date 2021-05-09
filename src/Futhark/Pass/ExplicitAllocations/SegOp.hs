@@ -21,19 +21,17 @@ allocInKernelBody ::
   KernelBody fromlore ->
   AllocM fromlore tolore (KernelBody tolore)
 allocInKernelBody (KernelBody () stms res) =
-  allocInStms stms $ \stms' -> return $ KernelBody () stms' res
+  uncurry (flip (KernelBody ()))
+    <$> collectStms (allocInStms stms (pure res))
 
 allocInLambda ::
   Allocable fromlore tolore =>
   [LParam tolore] ->
   Body fromlore ->
-  [Type] ->
   AllocM fromlore tolore (Lambda tolore)
-allocInLambda params body rettype = do
-  body' <- localScope (scopeOfLParams params) $
-    allocInStms (bodyStms body) $ \bnds' ->
-      return $ Body () bnds' $ bodyResult body
-  return $ Lambda params body' rettype
+allocInLambda params body =
+  mkLambda params . allocInStms (bodyStms body) $
+    pure $ bodyResult body
 
 allocInBinOpParams ::
   Allocable fromlore tolore =>
@@ -98,7 +96,4 @@ allocInBinOpLambda num_threads (SegSpace flat _) lam = do
   (acc_params', arr_params') <-
     allocInBinOpParams num_threads index_x index_y acc_params arr_params
 
-  allocInLambda
-    (acc_params' ++ arr_params')
-    (lambdaBody lam)
-    (lambdaReturnType lam)
+  allocInLambda (acc_params' ++ arr_params') (lambdaBody lam)

@@ -1,5 +1,6 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeFamilies #-}
 
 -- | = Constructing Futhark ASTs
@@ -79,6 +80,8 @@ module Futhark.Construct
     resultBody,
     resultBodyM,
     insertStmsM,
+    buildBody,
+    buildBody_,
     mapResult,
     foldBinOp,
     binOpLambda,
@@ -281,10 +284,10 @@ eBody ::
   (MonadBinder m) =>
   [m (Exp (Lore m))] ->
   m (Body (Lore m))
-eBody es = insertStmsM $ do
+eBody es = buildBody_ $ do
   es' <- sequence es
   xs <- mapM (letTupExp "x") es'
-  mkBodyM mempty $ map Var $ concat xs
+  pure $ map Var $ concat xs
 
 eLambda ::
   MonadBinder m =>
@@ -363,16 +366,15 @@ eWriteArray arr is v = do
 
   outside_bounds <- letSubExp "outside_bounds" =<< eOutOfBounds arr is
 
-  outside_bounds_branch <- insertStmsM $ resultBodyM [Var arr]
+  outside_bounds_branch <- buildBody_ $ pure [Var arr]
 
-  in_bounds_branch <- insertStmsM $ do
-    res <-
+  in_bounds_branch <-
+    buildBody_ . fmap (pure . Var) $
       letInPlace
         "write_out_inside_bounds"
         arr
         (fullSlice arr_t (map DimFix is'))
-        $ BasicOp $ SubExp v'
-    resultBodyM [Var res]
+        (BasicOp $ SubExp v')
 
   return $
     If outside_bounds outside_bounds_branch in_bounds_branch $
@@ -455,9 +457,9 @@ binLambda ::
 binLambda bop arg_t ret_t = do
   x <- newVName "x"
   y <- newVName "y"
-  body <- insertStmsM $ do
-    res <- letSubExp "binlam_res" $ BasicOp $ bop (Var x) (Var y)
-    return $ resultBody [res]
+  body <-
+    buildBody_ . fmap pure $
+      letSubExp "binlam_res" $ BasicOp $ bop (Var x) (Var y)
   return
     Lambda
       { lambdaParams =
@@ -475,11 +477,10 @@ mkLambda ::
   m Result ->
   m (Lambda (Lore m))
 mkLambda params m = do
-  ((ret, res), stms) <- collectStms . localScope (scopeOfLParams params) $ do
+  (body, ret) <- buildBody . localScope (scopeOfLParams params) $ do
     res <- m
     ret <- mapM subExpType res
-    pure (ret, res)
-  body <- mkBodyM stms res
+    pure (res, ret)
   pure $ Lambda params body ret
 
 -- | Slice a full dimension of the given size.
@@ -540,6 +541,25 @@ insertStmsM ::
 insertStmsM m = do
   (Body _ bnds res, otherbnds) <- collectStms m
   mkBodyM (otherbnds <> bnds) res
+
+-- | Evaluate an action that produces a 'Result' and an auxiliary
+-- value, then return the body constructed from the 'Result' and any
+-- statements added during the action, along the auxiliary value.
+buildBody ::
+  MonadBinder m =>
+  m (Result, a) ->
+  m (Body (Lore m), a)
+buildBody m = do
+  ((res, v), stms) <- collectStms m
+  body <- mkBodyM stms res
+  pure (body, v)
+
+-- | As 'buildBody', but there is no auxiliary value.
+buildBody_ ::
+  MonadBinder m =>
+  m Result ->
+  m (Body (Lore m))
+buildBody_ m = fst <$> buildBody ((,()) <$> m)
 
 -- | Change that result where evaluation of the body would stop.  Also
 -- change type annotations at branches.
