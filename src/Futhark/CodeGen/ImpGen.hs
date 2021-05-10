@@ -1680,10 +1680,7 @@ compileAlloc pat _ _ =
 -- straightforward contiguous format, as an t'Int64' expression.
 typeSize :: Type -> Count Bytes (Imp.TExp Int64)
 typeSize t =
-  Imp.bytes $
-    elem_size * product (map toInt64Exp (arrayDims t))
-  where
-    elem_size = isInt64 $ Imp.LeafExp (Imp.SizeOf (elemType t)) int64
+  Imp.bytes $ primByteSize (elemType t) * product (map toInt64Exp (arrayDims t))
 
 -- | Is this indexing in-bounds for an array of the given shape?  This
 -- is useful for things like scatter, which ignores out-of-bounds

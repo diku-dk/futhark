@@ -330,8 +330,6 @@ data ExpLeaf
   = -- | A scalar variable.  The type is stored in the
     -- 'LeafExp' constructor itself.
     ScalarVar VName
-  | -- | The size of a primitive type.
-    SizeOf PrimType
   | -- | Reading a value from memory.  The arguments have
     -- the same meaning as with 'Write'.
     Index VName (Count Elements (TExp Int64)) PrimType Space Volatility
@@ -367,8 +365,7 @@ bytes = Count
 -- | Convert a count of elements into a count of bytes, given the
 -- per-element size.
 withElemType :: Count Elements (TExp Int64) -> PrimType -> Count Bytes (TExp Int64)
-withElemType (Count e) t =
-  bytes $ sExt64 e * isInt64 (LeafExp (SizeOf t) (IntType Int64))
+withElemType (Count e) t = bytes $ sExt64 e * primByteSize t
 
 -- | Turn a 'VName' into a 'Imp.ScalarVar'.
 var :: VName -> PrimType -> Exp
@@ -530,8 +527,6 @@ instance Pretty ExpLeaf where
       vol' = case vol of
         Volatile -> text "volatile "
         Nonvolatile -> mempty
-  ppr (SizeOf t) =
-    text "sizeof" <> parens (ppr t)
 
 instance Functor Functions where
   fmap = fmapDefault
@@ -675,7 +670,6 @@ instance FreeIn a => FreeIn (Code a) where
 instance FreeIn ExpLeaf where
   freeIn' (Index v e _ _ _) = freeIn' v <> freeIn' e
   freeIn' (ScalarVar v) = freeIn' v
-  freeIn' (SizeOf _) = mempty
 
 instance FreeIn Arg where
   freeIn' (MemArg m) = freeIn' m

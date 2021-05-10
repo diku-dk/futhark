@@ -1160,8 +1160,6 @@ compileExp = compilePrimExp compileLeaf
   where
     compileLeaf (Imp.ScalarVar vname) =
       compileVar vname
-    compileLeaf (Imp.SizeOf t) =
-      return $ simpleCall (compilePrimToNp $ IntType Int32) [Integer $ primByteSize t]
     compileLeaf (Imp.Index src (Imp.Count iexp) restype (Imp.Space space) _) =
       join $
         asks envReadScalar
@@ -1313,6 +1311,7 @@ compileCode (Imp.Copy dest (Imp.Count destoffset) destspace src (Imp.Count srcof
       <*> pure srcspace
       <*> compileExp (Imp.untyped size)
       <*> pure (IntType Int32) -- FIXME
+compileCode (Imp.Write _ _ Unit _ _ _) = pure ()
 compileCode (Imp.Write dest (Imp.Count idx) elemtype (Imp.Space space) _ elemexp) =
   join $
     asks envWriteScalar
