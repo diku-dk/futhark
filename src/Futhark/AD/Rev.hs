@@ -279,6 +279,11 @@ instance Adjoint SubExp where
   updateAdjSlice _ se@Constant {} _ = lookupAdj se
   updateAdjSlice slice (Var v) d = updateAdjSlice slice v d
 
+-- | Is this primal variable active in the AD sense?  FIXME: this is
+-- (obviously) much too conservative.
+isActive :: VName -> ADM Bool
+isActive = fmap (/= Prim Unit) . lookupType
+
 patternName :: Pattern -> ADM VName
 patternName (Pattern [] [pe]) = pure $ patElemName pe
 patternName pat = error $ "Expected single-element pattern: " ++ pretty pat
@@ -494,7 +499,7 @@ diffMap pat_adj w map_lam as = do
     mapM (newParam "map_adj_p" . rowType <=< lookupType) pat_adj
   map_lam' <- renameLambda map_lam
 
-  let free = namesToList $ freeIn map_lam'
+  free <- filterM isActive $ namesToList $ freeIn map_lam'
 
   accAdjoints free $ \free_with_adjs -> do
     free_adjs <- mapM lookupAdj free_with_adjs
