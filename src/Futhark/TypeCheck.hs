@@ -1145,6 +1145,10 @@ checkType ::
   TypeBase Shape u ->
   TypeM lore ()
 checkType (Mem (ScalarSpace d _)) = mapM_ (require [Prim int64]) d
+checkType (Acc cert shape ts _) = do
+  requireI [Prim Unit] cert
+  mapM_ (require [Prim int64]) $ shapeDims shape
+  mapM_ checkType ts
 checkType t = mapM_ checkSubExp $ arrayDims t
 
 checkExtType ::
