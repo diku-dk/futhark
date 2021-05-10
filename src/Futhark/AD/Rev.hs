@@ -483,12 +483,12 @@ classifyAdjVars = mapM f
         _ ->
           pure $ FreeNonAcc v
 
-partitionAdjVars :: [AdjVar] -> ([VName], [(VName, (Shape, PrimType))], [VName])
+partitionAdjVars :: [AdjVar] -> ([(VName, (Shape, PrimType))], [VName], [VName])
 partitionAdjVars [] = ([], [], [])
 partitionAdjVars (fv : fvs) =
   case fv of
-    FreeAcc v -> (v : xs, ys, zs)
-    FreeArr v shape t -> (xs, (v, (shape, t)) : ys, zs)
+    FreeArr v shape t -> ((v, (shape, t)) : xs, ys, zs)
+    FreeAcc v -> (xs, v : ys, zs)
     FreeNonAcc v -> (xs, ys, v : zs)
   where
     (xs, ys, zs) = partitionAdjVars fvs
@@ -555,7 +555,7 @@ diffMap pat_adj w map_lam as = do
       pure (shape, [v_adj], Just (add_lam, [zero]))
 
     accAdjoints free m = do
-      (acc_free, arr_free, nonacc_free) <-
+      (arr_free, acc_free, nonacc_free) <-
         partitionAdjVars <$> classifyAdjVars free
       arr_free' <- mapM withAccInput arr_free
       -- We only consider those input arrays that are also not free in
