@@ -1680,38 +1680,35 @@ checkExp (Assert e1 e2 NoInfo loc) = do
   e2' <- checkExp e2
   return $ Assert e1' e2' (Info (pretty e1)) loc
 checkExp (Lambda params body rettype_te NoInfo loc) =
-  removeSeminullOccurences $
-    noUnique $
-      incLevel $
-        bindingParams [] params $ \_ params' -> do
-          rettype_checked <- traverse checkTypeExp rettype_te
-          let declared_rettype =
-                case rettype_checked of
-                  Just (_, st, _) -> Just st
-                  Nothing -> Nothing
-          (body', closure) <-
-            tapOccurences $ checkFunBody params' body declared_rettype loc
-          body_t <- expTypeFully body'
+  removeSeminullOccurences . noUnique . incLevel . bindingParams [] params $ \_ params' -> do
+    rettype_checked <- traverse checkTypeExp rettype_te
+    let declared_rettype =
+          case rettype_checked of
+            Just (_, st, _) -> Just st
+            Nothing -> Nothing
+    (body', closure) <-
+      tapOccurences $ checkFunBody params' body declared_rettype loc
+    body_t <- expTypeFully body'
 
-          params'' <- mapM updateTypes params'
+    params'' <- mapM updateTypes params'
 
-          (rettype', rettype_st) <-
-            case rettype_checked of
-              Just (te, st, _) ->
-                return (Just te, st)
-              Nothing -> do
-                ret <-
-                  inferReturnSizes params'' $
-                    toStruct $
-                      inferReturnUniqueness params'' body_t
-                return (Nothing, ret)
+    (rettype', rettype_st) <-
+      case rettype_checked of
+        Just (te, st, _) ->
+          return (Just te, st)
+        Nothing -> do
+          ret <-
+            inferReturnSizes params'' $
+              toStruct $
+                inferReturnUniqueness params'' body_t
+          return (Nothing, ret)
 
-          checkGlobalAliases params' body_t loc
-          verifyFunctionParams Nothing params'
+    checkGlobalAliases params' body_t loc
+    verifyFunctionParams Nothing params'
 
-          closure' <- lexicalClosure params'' closure
+    closure' <- lexicalClosure params'' closure
 
-          return $ Lambda params'' body' rettype' (Info (closure', rettype_st)) loc
+    return $ Lambda params'' body' rettype' (Info (closure', rettype_st)) loc
   where
     -- Inferring the sizes of the return type of a lambda is a lot
     -- like let-generalisation.  We wish to remove any rigid sizes
@@ -2749,55 +2746,53 @@ checkBinding ::
       Exp
     )
 checkBinding (fname, maybe_retdecl, tparams, params, body, loc) =
-  noUnique $
-    incLevel $
-      bindingParams tparams params $ \tparams' params' -> do
-        when (null params && any isSizeParam tparams) $
-          typeError
-            loc
-            mempty
-            "Size parameters are only allowed on bindings that also have value parameters."
+  noUnique . incLevel . bindingParams tparams params $ \tparams' params' -> do
+    when (null params && any isSizeParam tparams) $
+      typeError
+        loc
+        mempty
+        "Size parameters are only allowed on bindings that also have value parameters."
 
-        maybe_retdecl' <- forM maybe_retdecl $ \retdecl -> do
-          (retdecl', ret_nodims, _) <- checkTypeExp retdecl
-          (ret, _) <- instantiateEmptyArrayDims loc "funret" Nonrigid ret_nodims
-          return (retdecl', ret)
+    maybe_retdecl' <- forM maybe_retdecl $ \retdecl -> do
+      (retdecl', ret_nodims, _) <- checkTypeExp retdecl
+      (ret, _) <- instantiateEmptyArrayDims loc "funret" Nonrigid ret_nodims
+      return (retdecl', ret)
 
-        body' <-
-          checkFunBody
-            params'
-            body
-            (snd <$> maybe_retdecl')
-            (maybe loc srclocOf maybe_retdecl)
+    body' <-
+      checkFunBody
+        params'
+        body
+        (snd <$> maybe_retdecl')
+        (maybe loc srclocOf maybe_retdecl)
 
-        params'' <- mapM updateTypes params'
-        body_t <- expTypeFully body'
+    params'' <- mapM updateTypes params'
+    body_t <- expTypeFully body'
 
-        (maybe_retdecl'', rettype) <- case maybe_retdecl' of
-          Just (retdecl', ret) -> do
-            let rettype_structural = toStructural ret
-            checkReturnAlias rettype_structural params'' body_t
+    (maybe_retdecl'', rettype) <- case maybe_retdecl' of
+      Just (retdecl', ret) -> do
+        let rettype_structural = toStructural ret
+        checkReturnAlias rettype_structural params'' body_t
 
-            when (null params) $ nothingMustBeUnique loc rettype_structural
+        when (null params) $ nothingMustBeUnique loc rettype_structural
 
-            ret' <- normTypeFully ret
+        ret' <- normTypeFully ret
 
-            return (Just retdecl', ret')
-          Nothing
-            | null params ->
-              return (Nothing, toStruct $ body_t `setUniqueness` Nonunique)
-            | otherwise -> do
-              body_t' <- inferredReturnType loc params'' body_t
-              return (Nothing, body_t')
+        return (Just retdecl', ret')
+      Nothing
+        | null params ->
+          return (Nothing, toStruct $ body_t `setUniqueness` Nonunique)
+        | otherwise -> do
+          body_t' <- inferredReturnType loc params'' body_t
+          return (Nothing, body_t')
 
-        verifyFunctionParams (Just fname) params''
+    verifyFunctionParams (Just fname) params''
 
-        (tparams'', params''', rettype'', retext) <-
-          letGeneralise fname loc tparams' params'' rettype
+    (tparams'', params''', rettype'', retext) <-
+      letGeneralise fname loc tparams' params'' rettype
 
-        checkGlobalAliases params'' body_t loc
+    checkGlobalAliases params'' body_t loc
 
-        return (tparams'', params''', maybe_retdecl'', rettype'', retext, body')
+    return (tparams'', params''', maybe_retdecl'', rettype'', retext, body')
   where
     checkReturnAlias rettp params' =
       foldM_ (checkReturnAlias' params') S.empty . returnAliasing rettp
