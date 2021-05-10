@@ -561,15 +561,15 @@ diffMap pat_adj w map_lam as = do
       -- We only consider those input arrays that are also not free in
       -- the lambda.
       let as_nonfree = filter (`notElem` free) as
-      (acc_adjs, arr_adjs, rest_adjs) <-
-        fmap (splitAt3 (length acc_free) (length arr_free)) . withAcc arr_free' $ \accs -> do
+      (arr_adjs, acc_adjs, rest_adjs) <-
+        fmap (splitAt3 (length arr_free) (length acc_free)) . withAcc arr_free' $ \accs -> do
           zipWithM_ insAdj (map fst arr_free) accs
           () <- m $ acc_free ++ map fst arr_free
           acc_free_adj <- mapM lookupAdj acc_free
           arr_free_adj <- mapM (lookupAdj . fst) arr_free
           nonacc_free_adj <- mapM lookupAdj nonacc_free
           as_nonfree_adj <- mapM lookupAdj as_nonfree
-          pure $ map Var $ acc_free_adj <> arr_free_adj <> nonacc_free_adj <> as_nonfree_adj
+          pure $ map Var $ arr_free_adj <> acc_free_adj <> nonacc_free_adj <> as_nonfree_adj
       zipWithM_ insAdj acc_free acc_adjs
       zipWithM_ insAdj (map fst arr_free) arr_adjs
       let (nonacc_adjs, as_nonfree_adjs) = splitAt (length nonacc_free) rest_adjs
