@@ -1417,7 +1417,7 @@ primByteSize :: Num a => PrimType -> a
 primByteSize (IntType t) = intByteSize t
 primByteSize (FloatType t) = floatByteSize t
 primByteSize Bool = 1
-primByteSize Unit = 1
+primByteSize Unit = 0
 
 -- | The size of a value of a given integer type in eight-bit bytes.
 intByteSize :: Num a => IntType -> a

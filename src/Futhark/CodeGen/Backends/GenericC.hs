@@ -839,7 +839,7 @@ arrayLibraryFunctions space pt signed shape = do
         resetMem [C.cexp|arr->mem|] space
         allocMem
           [C.cexp|arr->mem|]
-          [C.cexp|((size_t)$exp:arr_size) * sizeof($ty:pt')|]
+          [C.cexp|((size_t)$exp:arr_size) * $int:(primByteSize pt::Int)|]
           space
           [C.cstm|return NULL;|]
         forM_ [0 .. rank -1] $ \i ->
@@ -855,7 +855,7 @@ arrayLibraryFunctions space pt signed shape = do
       [C.cexp|data|]
       [C.cexp|0|]
       DefaultSpace
-      [C.cexp|((size_t)$exp:arr_size) * sizeof($ty:pt')|]
+      [C.cexp|((size_t)$exp:arr_size) * $int:(primByteSize pt::Int)|]
 
   new_raw_body <- collect $ do
     prepare_new
@@ -866,7 +866,7 @@ arrayLibraryFunctions space pt signed shape = do
       [C.cexp|data|]
       [C.cexp|offset|]
       space
-      [C.cexp|((size_t)$exp:arr_size) * sizeof($ty:pt')|]
+      [C.cexp|((size_t)$exp:arr_size) * $int:(primByteSize pt::Int)|]
 
   free_body <- collect $ unRefMem [C.cexp|arr->mem|] space
 
@@ -879,7 +879,7 @@ arrayLibraryFunctions space pt signed shape = do
         [C.cexp|arr->mem.mem|]
         [C.cexp|0|]
         space
-        [C.cexp|((size_t)$exp:arr_size_array) * sizeof($ty:pt')|]
+        [C.cexp|((size_t)$exp:arr_size_array) * $int:(primByteSize pt::Int)|]
 
   ctx_ty <- contextType
   ops <- asks envOperations
@@ -994,7 +994,7 @@ opaqueLibraryFunctions desc vds = do
          in ( storageSize pt rank shape',
               storeValueHeader sign pt rank shape' [C.cexp|out|]
                 ++ [C.cstms|ret |= $id:values_array(ctx, obj->$id:field, (void*)out);
-                            out += $exp:num_elems * sizeof($ty:(primTypeToCType pt));|]
+                            out += $exp:num_elems * $int:(primByteSize pt::Int);|]
             )
 
   ctx_ty <- contextType
@@ -1031,7 +1031,7 @@ opaqueLibraryFunctions desc vds = do
         stms $ loadValueHeader sign pt rank [C.cexp|$id:shapearr|] [C.cexp|src|]
         item [C.citem|const void* $id:dataptr = src;|]
         stm [C.cstm|obj->$id:field = NULL;|]
-        stm [C.cstm|src += $exp:num_elems * sizeof($ty:(primTypeToCType pt));|]
+        stm [C.cstm|src += $exp:num_elems * $int:(primByteSize pt::Int);|]
         pure
           [C.cstms|
              obj->$id:field = $id:new_array(ctx, $id:dataptr, $args:dims);
@@ -2036,6 +2036,7 @@ compileCode (Copy dest (Count destoffset) destspace src (Count srcoffset) srcspa
       <*> compileExp (untyped srcoffset)
       <*> pure srcspace
       <*> compileExp (untyped size)
+compileCode (Write _ _ Unit _ _ _) = pure ()
 compileCode (Write dest (Count idx) elemtype DefaultSpace vol elemexp) = do
   dest' <- rawMem dest
   deref <-
