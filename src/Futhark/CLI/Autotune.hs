@@ -231,17 +231,21 @@ tuneThreshold ::
   (String, Path) ->
   IO Path
 tuneThreshold opts datasets already_tuned (v, _v_path) = do
-  (_, threshold) <-
-    foldM tuneDataset (thresholdMin, thresholdMax) datasets
-  return $ (v, threshold) : already_tuned
+  tune_result <-
+    foldM tuneDataset Nothing datasets
+  case tune_result of
+    Nothing ->
+      return $ (v, thresholdMin) : already_tuned
+    Just (_, threshold) ->
+      return $ (v, threshold) : already_tuned
   where
-    tuneDataset :: (Int, Int) -> (DatasetName, RunDataset, T.Text) -> IO (Int, Int)
-    tuneDataset (tMin, tMax) (dataset_name, run, entry_point) =
+    tuneDataset :: Maybe (Int, Int) -> (DatasetName, RunDataset, T.Text) -> IO (Maybe (Int, Int))
+    tuneDataset thresholds (dataset_name, run, entry_point) =
       if not $ isPrefixOf (T.unpack entry_point ++ ".") v
         then do
           when (optVerbose opts > 0) $
             putStrLn $ unwords [v, "is irrelevant for", T.unpack entry_point]
-          return (tMin, tMax)
+          return thresholds
         else do
           putStrLn $
             unwords
@@ -253,7 +257,10 @@ tuneThreshold opts datasets already_tuned (v, _v_path) = do
                 dataset_name
               ]
 
-          sample_run <- run (optTimeout opts) ((v, tMax) : already_tuned)
+          sample_run <-
+            run
+              (optTimeout opts)
+              ((v, maybe thresholdMax snd thresholds) : already_tuned)
 
           case sample_run of
             Left err -> do
@@ -263,8 +270,9 @@ tuneThreshold opts datasets already_tuned (v, _v_path) = do
               when (optVerbose opts > 0) $
                 putStrLn $
                   "Sampling run failed:\n" ++ err
-              return (tMin, tMax)
+              return thresholds
             Right (cmps, t) -> do
+              let (tMin, tMax) = fromMaybe (thresholdMin, thresholdMax) thresholds
               let ePars =
                     S.toAscList $
                       S.map snd $
@@ -286,7 +294,7 @@ tuneThreshold opts datasets already_tuned (v, _v_path) = do
               newMax <- binarySearch runner (t, tMax) ePars
               let newMinIdx = pred <$> elemIndex newMax ePars
               let newMin = maxinum $ catMaybes [Just tMin, newMinIdx]
-              return (newMin, newMax)
+              return $ Just (newMin, newMax)
 
     bestPair :: [(Int, Int)] -> (Int, Int)
     bestPair = minimumBy (compare `on` fst)
