@@ -826,7 +826,6 @@ isConstExp ::
 isConstExp vtable size = do
   fname <- askFunction
   let onLeaf (Imp.ScalarVar name) _ = lookupConstExp name
-      onLeaf (Imp.SizeOf pt) _ = Just $ ValueExp $ IntValue $ Int32Value $ primByteSize pt
       onLeaf Imp.Index {} _ = Nothing
       lookupConstExp name =
         constExp =<< hasExp =<< M.lookup name vtable
