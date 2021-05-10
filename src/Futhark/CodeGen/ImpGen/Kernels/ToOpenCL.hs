@@ -886,4 +886,3 @@ typesInExp (UnOpExp _ e) = typesInExp e
 typesInExp (FunExp _ args t) = S.singleton t <> mconcat (map typesInExp args)
 typesInExp (LeafExp (Index _ (Count (TPrimExp e)) t _ _) _) = S.singleton t <> typesInExp e
 typesInExp (LeafExp ScalarVar {} _) = mempty
-typesInExp (LeafExp (SizeOf t) _) = S.singleton t

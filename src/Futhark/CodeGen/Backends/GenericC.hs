@@ -1849,10 +1849,6 @@ compileExp = compilePrimExp compileLeaf
     compileLeaf (Index src (Count iexp) _ ScalarSpace {} _) = do
       iexp' <- compileExp $ untyped iexp
       return [C.cexp|$id:src[$exp:iexp']|]
-    compileLeaf (SizeOf t) =
-      return [C.cexp|(typename int64_t)sizeof($ty:t')|]
-      where
-        t' = primTypeToCType t
 
 -- | Tell me how to compile a @v@, and I'll Compile any @PrimExp v@ for you.
 compilePrimExp :: Monad m => (v -> m C.Exp) -> PrimExp v -> m C.Exp
