@@ -20,7 +20,7 @@ import qualified Data.Text.Encoding as T
 import Futhark.Analysis.Metrics.Type
 import Futhark.Server
 import Futhark.Test
-import Futhark.Util (fancyTerminal)
+import Futhark.Util (atMostChars, fancyTerminal)
 import Futhark.Util.Console
 import Futhark.Util.Options
 import Futhark.Util.Pretty (prettyText)
@@ -467,11 +467,6 @@ reportTable ts = do
 
 moveCursorToTableTop :: IO ()
 moveCursorToTableTop = cursorUpLine tableLines
-
-atMostChars :: Int -> String -> String
-atMostChars n s
-  | length s > n = take (n -3) s ++ "..."
-  | otherwise = s
 
 reportText :: TestStatus -> IO ()
 reportText ts =

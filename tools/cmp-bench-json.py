@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 #
 # Compare two JSON files produced by futhark-bench's --json option.
 

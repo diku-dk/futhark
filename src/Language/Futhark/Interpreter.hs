@@ -746,16 +746,11 @@ evalFunction env missing_sizes (p : ps) body rettype =
     ValueFun $ \v -> do
       env' <- matchPattern env p v
       -- Fix up the last sizes, if any.
-      let env''
+      let p_t = evalType env $ patternStructType p
+          env''
             | null missing_sizes = env'
             | otherwise =
-              env'
-                <> i64Env
-                  ( resolveExistentials
-                      missing_sizes
-                      (patternStructType p)
-                      (valueShape v)
-                  )
+              env' <> i64Env (resolveExistentials missing_sizes p_t (valueShape v))
       evalFunction env'' missing_sizes ps body rettype
 
 evalFunctionBinding ::
@@ -867,10 +862,13 @@ evalAppExp env (Coerce e td loc) = do
           <> "` (`"
           <> pretty t
           <> "`)"
-evalAppExp env (LetPat p e body _) = do
+evalAppExp env (LetPat sizes p e body _) = do
   v <- eval env e
   env' <- matchPattern env p v
-  eval env' body
+  let p_t = evalType env $ patternStructType p
+      v_s = valueShape v
+      env'' = env' <> i64Env (resolveExistentials (map sizeName sizes) p_t v_s)
+  eval env'' body
 evalAppExp env (LetFun f (tparams, ps, _, Info ret, fbody) body _) = do
   binding <- evalFunctionBinding env tparams ps ret [] fbody
   eval (env {envTerm = M.insert f binding $ envTerm env}) body

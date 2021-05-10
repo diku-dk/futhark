@@ -51,7 +51,7 @@ transformFunDef consts_scope (FunDef entry attrs fname rettype params body) = do
   (body', _) <- modifyNameSource $ runState $ runBinderT m consts_scope
   return $ FunDef entry attrs fname rettype params body'
   where
-    m = localScope (scopeOfFParams params) $ insertStmsM $ transformBody body
+    m = localScope (scopeOfFParams params) $ transformBody body
 
 -- | First-order-transform these top-level constants.
 transformConsts ::
@@ -78,9 +78,9 @@ transformBody ::
   (Transformer m, LetDec (Lore m) ~ LetDec SOACS) =>
   Body ->
   m (AST.Body (Lore m))
-transformBody (Body () bnds res) = insertStmsM $ do
-  mapM_ transformStmRecursively bnds
-  return $ resultBody res
+transformBody (Body () stms res) = buildBody_ $ do
+  mapM_ transformStmRecursively stms
+  pure res
 
 -- | First transform any nested t'Body' or t'Lambda' elements, then
 -- apply 'transformSOAC' if the expression is a SOAC.
@@ -319,56 +319,51 @@ transformSOAC pat (Hist len ops bucket_fun imgs) = do
   let merge = loopMerge hists_out $ concatMap (map Var . histDest) ops
 
   -- Bind lambda-bodies for operators.
-  loopBody <- runBodyBinder $
-    localScope
-      ( M.insert iter (IndexName Int64) $
-          scopeOfFParams $ map fst merge
-      )
-      $ do
-        -- Bind images to parameters of bucket function.
-        imgs' <- forM imgs $ \img -> do
-          img_t <- lookupType img
-          letSubExp "pixel" $ BasicOp $ Index img $ fullSlice img_t [DimFix $ Var iter]
-        imgs'' <- bindLambda bucket_fun $ map (BasicOp . SubExp) imgs'
+  let iter_scope = M.insert iter (IndexName Int64) $ scopeOfFParams $ map fst merge
+  loopBody <- runBodyBinder . localScope iter_scope $ do
+    -- Bind images to parameters of bucket function.
+    imgs' <- forM imgs $ \img -> do
+      img_t <- lookupType img
+      letSubExp "pixel" $ BasicOp $ Index img $ fullSlice img_t [DimFix $ Var iter]
+    imgs'' <- bindLambda bucket_fun $ map (BasicOp . SubExp) imgs'
 
-        -- Split out values from bucket function.
-        let lens = length ops
-            inds = take lens imgs''
-            vals = chunks (map (length . lambdaReturnType . histOp) ops) $ drop lens imgs''
-            hists_out' =
-              chunks (map (length . lambdaReturnType . histOp) ops) $
-                map identName hists_out
+    -- Split out values from bucket function.
+    let lens = length ops
+        inds = take lens imgs''
+        vals = chunks (map (length . lambdaReturnType . histOp) ops) $ drop lens imgs''
+        hists_out' =
+          chunks (map (length . lambdaReturnType . histOp) ops) $
+            map identName hists_out
 
-        hists_out'' <- forM (zip4 hists_out' ops inds vals) $ \(hist, op, idx, val) -> do
-          -- Check whether the indexes are in-bound.  If they are not, we
-          -- return the histograms unchanged.
-          let outside_bounds_branch = insertStmsM $ resultBodyM $ map Var hist
-              oob = case hist of
-                [] -> eSubExp $ constant True
-                arr : _ -> eOutOfBounds arr [eSubExp idx]
+    hists_out'' <- forM (zip4 hists_out' ops inds vals) $ \(hist, op, idx, val) -> do
+      -- Check whether the indexes are in-bound.  If they are not, we
+      -- return the histograms unchanged.
+      let outside_bounds_branch = buildBody_ $ pure $ map Var hist
+          oob = case hist of
+            [] -> eSubExp $ constant True
+            arr : _ -> eOutOfBounds arr [eSubExp idx]
 
-          letTupExp "new_histo"
-            <=< eIf oob outside_bounds_branch
-            $ do
-              -- Read values from histogram.
-              h_val <- forM hist $ \arr -> do
-                arr_t <- lookupType arr
-                letSubExp "read_hist" $ BasicOp $ Index arr $ fullSlice arr_t [DimFix idx]
+      letTupExp "new_histo" <=< eIf oob outside_bounds_branch $
+        buildBody_ $ do
+          -- Read values from histogram.
+          h_val <- forM hist $ \arr -> do
+            arr_t <- lookupType arr
+            letSubExp "read_hist" $ BasicOp $ Index arr $ fullSlice arr_t [DimFix idx]
 
-              -- Apply operator.
-              h_val' <-
-                bindLambda (histOp op) $
-                  map (BasicOp . SubExp) $ h_val ++ val
+          -- Apply operator.
+          h_val' <-
+            bindLambda (histOp op) $
+              map (BasicOp . SubExp) $ h_val ++ val
 
-              -- Write values back to histograms.
-              hist' <- forM (zip hist h_val') $ \(arr, v) -> do
-                arr_t <- lookupType arr
-                letInPlace "hist_out" arr (fullSlice arr_t [DimFix idx]) $
-                  BasicOp $ SubExp v
+          -- Write values back to histograms.
+          hist' <- forM (zip hist h_val') $ \(arr, v) -> do
+            arr_t <- lookupType arr
+            letInPlace "hist_out" arr (fullSlice arr_t [DimFix idx]) $
+              BasicOp $ SubExp v
 
-              return $ resultBody $ map Var hist'
+          pure $ map Var hist'
 
-        return $ resultBody $ map Var $ concat hists_out''
+    return $ resultBody $ map Var $ concat hists_out''
 
   -- Wrap up the above into a for-loop.
   letBind pat $ DoLoop [] merge (ForLoop iter Int64 len []) loopBody

@@ -18,6 +18,13 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * Added `f32.epsilon` and `f64.epsilon` for the difference between
     1.0 and the next larger representable number.
 
+  * Local size bindings in `let` expressions, e.g:
+
+    ```
+    let [n] (xs': [n]i32) = filter (>0) xs
+    in ...
+    ```
+
 ### Removed
 
 ### Changed
@@ -34,6 +41,14 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * `futhark autotune` now works with the `cuda` backend (#1312).
 
   * Devious fusion bug (#1322) causing compiler crashes.
+
+  * Memory expansion bug for certain complex GPU kernels (#1328).
+
+  * Complex expressions in index sections (#1332).
+
+  * Handling of sizes in abstract types in the interpreter (#1333).
+
+  * Type checking of explicit size requirements in `loop` parameter (#1324).
 
 ## [0.19.4]
 

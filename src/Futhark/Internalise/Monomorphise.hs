@@ -288,10 +288,10 @@ transformAppExp (Range e1 me incl loc) res = do
   return $ AppExp (Range e1' me' incl' loc) (Info res)
 transformAppExp (Coerce e tp loc) res =
   AppExp <$> (Coerce <$> transformExp e <*> pure tp <*> pure loc) <*> pure (Info res)
-transformAppExp (LetPat pat e1 e2 loc) res = do
+transformAppExp (LetPat sizes pat e1 e2 loc) res = do
   (pat', rr) <- transformPattern pat
   AppExp
-    <$> ( LetPat pat' <$> transformExp e1
+    <$> ( LetPat sizes pat' <$> transformExp e1
             <*> withRecordReplacements rr (transformExp e2)
             <*> pure loc
         )
@@ -352,10 +352,11 @@ transformAppExp (BinOp (fname, _) (Info t) (e1, d1) (e2, d2) loc) (AppRes ret ex
       return $
         AppExp
           ( LetPat
+              []
               x_param
               e1'
               ( AppExp
-                  (LetPat y_param e2' (applyOp fname' x_param_e y_param_e) loc)
+                  (LetPat [] y_param e2' (applyOp fname' x_param_e y_param_e) loc)
                   (Info $ AppRes ret mempty)
               )
               mempty
@@ -475,8 +476,9 @@ transformExp (OpSectionRight fname (Info t) e arg (Info rettype) loc) = do
     loc
 transformExp (ProjectSection fields (Info t) loc) =
   desugarProjectSection fields t loc
-transformExp (IndexSection idxs (Info t) loc) =
-  desugarIndexSection idxs t loc
+transformExp (IndexSection idxs (Info t) loc) = do
+  idxs' <- mapM transformDimIndex idxs
+  desugarIndexSection idxs' t loc
 transformExp (Project n e tp loc) = do
   maybe_fs <- case e of
     Var qn _ _ -> lookupRecordReplacement (qualLeaf qn)
@@ -568,7 +570,7 @@ desugarBinOpSection op e_left e_right t (xp, xtype, xext) (yp, ytype, yext) (ret
     makeVarParam (Just e) argtype = do
       (v, pat, var_e) <- patAndVar argtype
       let wrap body =
-            AppExp (LetPat pat e body mempty) (Info $ AppRes (typeOf body) mempty)
+            AppExp (LetPat [] pat e body mempty) (Info $ AppRes (typeOf body) mempty)
       return (v, wrap, var_e, [])
     makeVarParam Nothing argtype = do
       (v, pat, var_e) <- patAndVar argtype
@@ -714,7 +716,7 @@ monomorphiseBinding entry (PolyBinding rr (name, tparams, params, rettype, retex
   replaceRecordReplacements rr $ do
     let bind_t = foldFunType (map patternStructType params) rettype
     (substs, t_shape_params) <- typeSubstsM loc (noSizes bind_t) $ noNamedParams t
-    let substs' = M.map Subst substs
+    let substs' = M.map (Subst []) substs
         rettype' = substTypesAny (`M.lookup` substs') rettype
         substPatternType =
           substTypesAny (fmap (fmap fromStruct) . (`M.lookup` substs'))
@@ -856,29 +858,29 @@ toPolyBinding (ValBind _ name _ (Info (rettype, retext)) tparams params body _ a
 -- Remove all type variables and type abbreviations from a value binding.
 removeTypeVariables :: Bool -> ValBind -> MonoM ValBind
 removeTypeVariables entry valbind@(ValBind _ _ _ (Info (rettype, retext)) _ pats body _ _ _) = do
-  subs <- asks $ M.map TypeSub . envTypeBindings
+  subs <- asks $ M.map substFromAbbr . envTypeBindings
   let mapper =
         ASTMapper
           { mapOnExp = astMap mapper,
             mapOnName = pure,
             mapOnQualName = pure,
-            mapOnStructType = pure . substituteTypes subs,
-            mapOnPatternType = pure . substituteTypes subs
+            mapOnStructType = pure . applySubst (`M.lookup` subs),
+            mapOnPatternType = pure . applySubst (`M.lookup` subs)
           }
 
   body' <- astMap mapper body
 
   return
     valbind
-      { valBindRetType = Info (substituteTypes subs rettype, retext),
-        valBindParams = map (substPattern entry $ substituteTypes subs) pats,
+      { valBindRetType = Info (applySubst (`M.lookup` subs) rettype, retext),
+        valBindParams = map (substPattern entry $ applySubst (`M.lookup` subs)) pats,
         valBindBody = body'
       }
 
 removeTypeVariablesInType :: StructType -> MonoM StructType
 removeTypeVariablesInType t = do
-  subs <- asks $ M.map TypeSub . envTypeBindings
-  return $ substituteTypes subs t
+  subs <- asks $ M.map substFromAbbr . envTypeBindings
+  return $ applySubst (`M.lookup` subs) t
 
 transformValBind :: ValBind -> MonoM Env
 transformValBind valbind = do
@@ -900,9 +902,9 @@ transformValBind valbind = do
 
 transformTypeBind :: TypeBind -> MonoM Env
 transformTypeBind (TypeBind name l tparams tydecl _ _) = do
-  subs <- asks $ M.map TypeSub . envTypeBindings
+  subs <- asks $ M.map substFromAbbr . envTypeBindings
   noticeDims $ unInfo $ expandedType tydecl
-  let tp = substituteTypes subs . unInfo $ expandedType tydecl
+  let tp = applySubst (`M.lookup` subs) . unInfo $ expandedType tydecl
       tbinding = TypeAbbr l tparams tp
   return mempty {envTypeBindings = M.singleton name tbinding}
 

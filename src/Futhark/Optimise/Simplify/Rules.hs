@@ -261,10 +261,10 @@ hoistBranchInvariant _ pat _ (cond, tb, fb, IfDec ret ifsort) = Simplify $ do
     hoisted pe (Left i) = return $ Left $ Just (i, Var $ patElemName pe)
     hoisted _ Right {} = return $ Left Nothing
 
-    reshapeBodyResults body rets = insertStmsM $ do
+    reshapeBodyResults body rets = buildBody_ $ do
       ses <- bodyBind body
       let (ctx_ses, val_ses) = splitFromEnd (length rets) ses
-      resultBodyM . (ctx_ses ++) =<< zipWithM reshapeResult val_ses rets
+      (ctx_ses ++) <$> zipWithM reshapeResult val_ses rets
     reshapeResult (Var v) t@Array {} = do
       v_t <- lookupType v
       let newshape = arrayDims $ removeExistentials t v_t

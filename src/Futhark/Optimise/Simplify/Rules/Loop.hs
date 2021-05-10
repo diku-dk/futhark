@@ -223,9 +223,9 @@ simplifyLoopVariables vtable pat aux (ctx, val, form@(ForLoop i it num_iters loo
     if maybe_loop_vars == map Just loop_vars
       then cannotSimplify
       else do
-        body' <- insertStmsM $ do
+        body' <- buildBody_ $ do
           addStms $ mconcat body_prefix_stms
-          resultBodyM =<< bodyBind body
+          bodyBind body
         auxing aux $
           letBind pat $
             DoLoop
@@ -296,10 +296,9 @@ narrowLoopType vtable pat aux (ctx, val, ForLoop i Int64 n [], body)
     Simplify $ do
       i' <- newVName $ baseString i
       let form' = ForLoop i' it' n' []
-      body' <- insertStmsM $
-        inScopeOf form' $ do
-          letBindNames [i] $ BasicOp $ ConvOp (SExt it' Int64) (Var i')
-          pure body
+      body' <- insertStmsM . inScopeOf form' $ do
+        letBindNames [i] $ BasicOp $ ConvOp (SExt it' Int64) (Var i')
+        pure body
       auxing aux $
         certifying cs $
           letBind pat $ DoLoop ctx val form' body'

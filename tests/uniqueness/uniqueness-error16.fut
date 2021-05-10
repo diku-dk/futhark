@@ -1,8 +1,8 @@
 -- Test that complex shadowing does not break alias analysis.
 -- ==
--- error:
+-- error: consumed
 
-let main(): *[]i32 =
+let main(): *[]i64 =
   let n = 10
   let a = iota(n)
   let c = let (a, b) = (2, a) let b[0] = 42 in b

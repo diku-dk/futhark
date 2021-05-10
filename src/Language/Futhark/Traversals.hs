@@ -74,8 +74,8 @@ instance ASTMappable (AppExpBase Info VName) where
     Match <$> mapOnExp tv e <*> astMap tv cases <*> pure loc
   astMap tv (Apply f arg d loc) =
     Apply <$> mapOnExp tv f <*> mapOnExp tv arg <*> pure d <*> pure loc
-  astMap tv (LetPat pat e body loc) =
-    LetPat <$> astMap tv pat <*> mapOnExp tv e <*> mapOnExp tv body <*> pure loc
+  astMap tv (LetPat sizes pat e body loc) =
+    LetPat <$> astMap tv sizes <*> astMap tv pat <*> mapOnExp tv e <*> mapOnExp tv body <*> pure loc
   astMap tv (LetFun name (fparams, params, ret, t, e) body loc) =
     LetFun <$> mapOnName tv name
       <*> ( (,,,,) <$> mapM (astMap tv) fparams <*> mapM (astMap tv) params
@@ -315,6 +315,10 @@ instance ASTMappable (IdentBase Info VName) where
   astMap tv (Ident name (Info t) loc) =
     Ident <$> mapOnName tv name <*> (Info <$> mapOnPatternType tv t) <*> pure loc
 
+instance ASTMappable (SizeBinder VName) where
+  astMap tv (SizeBinder name loc) =
+    SizeBinder <$> mapOnName tv name <*> pure loc
+
 instance ASTMappable (PatternBase Info VName) where
   astMap tv (Id name (Info t) loc) =
     Id <$> mapOnName tv name <*> (Info <$> mapOnPatternType tv t) <*> pure loc
@@ -465,8 +469,8 @@ bareExp (AppExp appexp _) =
           If (bareExp c) (bareExp texp) (bareExp fexp) loc
         Apply f arg _ loc ->
           Apply (bareExp f) (bareExp arg) NoInfo loc
-        LetPat pat e body loc ->
-          LetPat (barePat pat) (bareExp e) (bareExp body) loc
+        LetPat sizes pat e body loc ->
+          LetPat sizes (barePat pat) (bareExp e) (bareExp body) loc
         LetFun name (fparams, params, ret, _, e) body loc ->
           LetFun name (fparams, map barePat params, ret, NoInfo, bareExp e) (bareExp body) loc
         Range start next end loc ->

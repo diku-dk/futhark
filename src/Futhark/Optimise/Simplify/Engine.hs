@@ -534,11 +534,9 @@ constructBody ::
   Result ->
   SimpleM lore (Body (Wise lore))
 constructBody stms res =
-  fmap fst $
-    runBinder $
-      insertStmsM $ do
-        addStms stms
-        resultBodyM res
+  fmap fst . runBinder . buildBody_ $ do
+    addStms stms
+    pure res
 
 type SimplifiedBody lore a = ((a, UT.UsageTable), Stms (Wise lore))
 
