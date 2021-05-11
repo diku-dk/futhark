@@ -1224,6 +1224,24 @@ primFuns =
             _ -> Nothing
         )
       ),
+      ( "hypot32",
+        ( [FloatType Float32, FloatType Float32],
+          FloatType Float32,
+          \case
+            [FloatValue (Float32Value x), FloatValue (Float32Value y)] ->
+              Just $ FloatValue $ Float32Value $ sqrt (x * x + y * y)
+            _ -> Nothing
+        )
+      ),
+      ( "hypot64",
+        ( [FloatType Float64, FloatType Float64],
+          FloatType Float64,
+          \case
+            [FloatValue (Float64Value x), FloatValue (Float64Value y)] ->
+              Just $ FloatValue $ Float64Value $ sqrt (x * x + y * y)
+            _ -> Nothing
+        )
+      ),
       ( "isinf32",
         ( [FloatType Float32],
           Bool,

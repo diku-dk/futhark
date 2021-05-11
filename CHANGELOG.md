@@ -18,6 +18,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * Added `f32.epsilon` and `f64.epsilon` for the difference between
     1.0 and the next larger representable number.
 
+  * Added `f32.hypot` and `f64.hypot` for your hypothenuse needs (#1344).
+
   * Local size bindings in `let` expressions, e.g:
 
     ```

@@ -761,6 +761,10 @@ $esc:("#ifdef __OPENCL_VERSION__")
       return atan2(x,y);
     }
 
+    static inline float $id:(funName' "hypot32")(float x, float y) {
+      return hypot(x,y);
+    }
+
     static inline float $id:(funName' "gamma32")(float x) {
       return tgamma(x);
     }
@@ -861,6 +865,10 @@ $esc:("#else")
 
     static inline float $id:(funName' "atan2_32")(float x, float y) {
       return atan2f(x,y);
+    }
+
+    static inline float $id:(funName' "hypot32")(float x, float y) {
+      return hypotf(x,y);
     }
 
     static inline float $id:(funName' "gamma32")(float x) {
@@ -989,6 +997,10 @@ cFloat64Funs =
 
     static inline double $id:(funName' "atan2_64")(double x, double y) {
       return atan2(x,y);
+    }
+
+    static inline double $id:(funName' "hypot64")(double x, double y) {
+      return hypot(x,y);
     }
 
     static inline double $id:(funName' "gamma64")(double x) {
