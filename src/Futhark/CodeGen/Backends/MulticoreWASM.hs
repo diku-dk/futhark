@@ -65,7 +65,7 @@ compileProg prog = do
 
   prog'' <-
     GC.compileProg
-      "wasm-multicore"
+      "wasm_multicore"
       MC.operations
       generateContext
       ""

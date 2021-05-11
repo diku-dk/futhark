@@ -330,14 +330,15 @@ compileMulticoreToWASMAction fcfg mode outpath =
       case mode of
         ToExecutable -> do
           liftIO $ writeFile cpath $ MulticoreC.asExecutable cprog
-          runEMCC cpath outpath ["-O3"] ["-lm", "-pthread"] exps True
+          -- Can't actually run multicore-wasm in node
+          runEMCC cpath outpath ["-O3", "-s", "PTHREAD_POOL_SIZE=12"] ["-lm", "-pthread"] exps True
         ToLibrary -> do
           writeLibs cprog jsprog hpath cpath
-          runEMCC cpath jpath ["-O3"] ["-lm", "-pthread"] exps False
+          runEMCC cpath jpath ["-O3", "-s", "PTHREAD_POOL_SIZE=12"] ["-lm", "-pthread"] exps False
         ToServer -> do
           writeLibs cprog jsprog hpath cpath
           liftIO $ appendFile "futharkClass.js" MulticoreWASM.runServer
-          runEMCC cpath outpath ["-O3"] ["-lm", "-pthread"] exps False
+          runEMCC cpath outpath ["-O3", "-s", "PTHREAD_POOL_SIZE=12"] ["-lm", "-pthread"] exps False
     writeLibs cprog jsprog hpath cpath = do
       let (h, imp) = MulticoreC.asLibrary cprog
       liftIO $ writeFile hpath h
