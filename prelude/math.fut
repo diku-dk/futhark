@@ -152,6 +152,8 @@ module type real = {
 
   val atan2: t -> t -> t
 
+  val hypot: t -> t -> t
+
   val gamma: t -> t
   val lgamma: t -> t
   -- | Linear interpolation.  The third argument must be in the range
@@ -898,6 +900,7 @@ module f64: (float with t = f64 with int_t = u64) = {
   let asinh (x: f64) = intrinsics.asinh64 x
   let atanh (x: f64) = intrinsics.atanh64 x
   let atan2 (x: f64) (y: f64) = intrinsics.atan2_64 (x, y)
+  let hypot (x: f64) (y: f64) = intrinsics.hypot64 (x, y)
   let gamma = intrinsics.gamma64
   let lgamma = intrinsics.lgamma64
 
@@ -1005,6 +1008,7 @@ module f32: (float with t = f32 with int_t = u32) = {
   let asinh (x: f32) = intrinsics.asinh32 x
   let atanh (x: f32) = intrinsics.atanh32 x
   let atan2 (x: f32) (y: f32) = intrinsics.atan2_32 (x, y)
+  let hypot (x: f32) (y: f32) = intrinsics.hypot32 (x, y)
   let gamma = intrinsics.gamma32
   let lgamma = intrinsics.lgamma32
 
