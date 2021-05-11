@@ -416,6 +416,15 @@ static void cuda_size_setup(struct cuda_context *ctx)
     } else if (strstr(size_class, "threshold") == size_class) {
       // Threshold can be as large as it takes.
       default_value = ctx->cfg.default_threshold;
+    } else if (strstr(size_class, "shared_memory_SM") == size_class) {
+      default_value = device_query(ctx->dev, MAX_SHARED_MEMORY_PER_MULTIPROCESSOR);
+      max_value = default_value;
+    } else if (strstr(size_class, "registers_SM") == size_class) {
+      default_value = device_query(ctx->dev, MAX_REGISTERS_PER_MULTIPROCESSOR);
+      max_value = default_value;
+    } else if (strstr(size_class, "residents_SM") == size_class) {
+      default_value = device_query(ctx->dev, MAX_THREADS_PER_MULTIPROCESSOR);
+      max_value = default_value;
     } else {
       // Bespoke sizes have no limit or default.
     }
