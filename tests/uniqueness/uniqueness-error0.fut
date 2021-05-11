@@ -1,6 +1,6 @@
 -- Type ascription should not hide aliases.
 -- ==
--- error: previously consumed
+-- error: "b".*consumed
 
 let main(): i64 =
   let a = iota(10)

@@ -102,11 +102,11 @@ usageMap = foldl comb M.empty
 combineOccurences :: VName -> Usage -> Usage -> TermTypeM Usage
 combineOccurences _ (Observed loc) (Observed _) = return $ Observed loc
 combineOccurences name (Consumed wloc) (Observed rloc) =
-  useAfterConsume (baseName name) rloc wloc
+  useAfterConsume name rloc wloc
 combineOccurences name (Observed rloc) (Consumed wloc) =
-  useAfterConsume (baseName name) rloc wloc
+  useAfterConsume name rloc wloc
 combineOccurences name (Consumed loc1) (Consumed loc2) =
-  consumeAfterConsume (baseName name) (max loc1 loc2) (min loc1 loc2)
+  consumeAfterConsume name (max loc1 loc2) (min loc1 loc2)
 
 checkOccurences :: Occurences -> TermTypeM ()
 checkOccurences = void . M.traverseWithKey comb . usageMap
@@ -321,6 +321,19 @@ data SizeSource
       (Maybe (ExpBase NoInfo VName))
   deriving (Eq, Ord, Show)
 
+-- | A description of where an artificial compiler-generated
+-- intermediate name came from.
+data NameReason
+  = -- | Name is the result of a function application.
+    NameAppRes (Maybe (QualName VName)) SrcLoc
+
+nameReason :: SrcLoc -> NameReason -> Doc
+nameReason loc (NameAppRes Nothing apploc) =
+  "result of application at" <+> text (locStrRel loc apploc)
+nameReason loc (NameAppRes fname apploc) =
+  "result of applying" <+> pquote (ppr fname)
+    <+> parens ("at" <+> text (locStrRel loc apploc))
+
 -- | The state is a set of constraints and a counter for generating
 -- type names.  This is distinct from the usual counter we use for
 -- generating unique names, as these will be user-visible.
@@ -332,7 +345,8 @@ data TermTypeState = TermTypeState
     -- they could not be substituted directly).
     -- This happens for function arguments that are
     -- not constants or names.
-    stateDimTable :: M.Map SizeSource VName
+    stateDimTable :: M.Map SizeSource VName,
+    stateNames :: M.Map VName NameReason
   }
 
 newtype TermTypeM a
@@ -418,7 +432,7 @@ runTermTypeM (TermTypeM m) = do
             termChecking = Nothing,
             termLevel = 0
           }
-  evalRWST m initial_tenv $ TermTypeState mempty 0 mempty
+  evalRWST m initial_tenv $ TermTypeState mempty 0 mempty mempty
 
 liftTypeM :: TypeM a -> TermTypeM a
 liftTypeM = TermTypeM . lift
@@ -549,7 +563,7 @@ instance MonadTypeChecker TermTypeM where
       Nothing ->
         typeError loc mempty $
           "Unknown variable" <+> pquote (ppr qn) <> "."
-      Just (WasConsumed wloc) -> useAfterConsume (baseName name) loc wloc
+      Just (WasConsumed wloc) -> useAfterConsume name loc wloc
       Just (BoundV _ tparams t)
         | "_" `isPrefixOf` baseString name -> underscoreUse loc qn
         | otherwise -> do
@@ -683,16 +697,18 @@ newArrayType loc desc r = do
 
 --- Errors
 
-useAfterConsume :: Name -> SrcLoc -> SrcLoc -> TermTypeM a
-useAfterConsume name rloc wloc =
+useAfterConsume :: VName -> SrcLoc -> SrcLoc -> TermTypeM a
+useAfterConsume name rloc wloc = do
+  name' <- describeVar rloc name
   typeError rloc mempty $
-    "Variable" <+> pquote (pprName name) <+> "previously consumed at"
+    "Using" <+> name' <> ", but this was consumed at"
       <+> text (locStrRel rloc wloc) <> ".  (Possibly through aliasing.)"
 
-consumeAfterConsume :: Name -> SrcLoc -> SrcLoc -> TermTypeM a
-consumeAfterConsume name loc1 loc2 =
+consumeAfterConsume :: VName -> SrcLoc -> SrcLoc -> TermTypeM a
+consumeAfterConsume name loc1 loc2 = do
+  name' <- describeVar loc1 name
   typeError loc2 mempty $
-    "Variable" <+> pprName name <+> "previously consumed at"
+    "Consuming" <+> name' <> ", but this was previously consumed at"
       <+> text (locStrRel loc2 loc1) <> "."
 
 badLetWithValue :: (Pretty arr, Pretty src) => arr -> src -> SrcLoc -> TermTypeM a
@@ -1271,6 +1287,25 @@ unscopeType tloc unscoped t = do
     unAlias (AliasBound v) | v `M.member` unscoped = AliasFree v
     unAlias a = a
 
+-- When a function result is not immediately bound to a name, we need
+-- to invent a name for it so we can track it during aliasing
+-- (uniqueness-error54.fut, uniqueness-error55.fut).
+addResultAliases :: NameReason -> PatternType -> TermTypeM PatternType
+addResultAliases r (Scalar (Record fs)) =
+  Scalar . Record <$> traverse (addResultAliases r) fs
+addResultAliases r (Scalar (Sum fs)) =
+  Scalar . Sum <$> traverse (traverse (addResultAliases r)) fs
+addResultAliases r (Scalar (TypeVar as u tn targs)) = do
+  v <- newID "internal_app_result"
+  modify $ \s -> s {stateNames = M.insert v r $ stateNames s}
+  pure $ Scalar $ TypeVar (S.insert (AliasFree v) as) u tn targs
+addResultAliases _ (Scalar t@Prim {}) = pure (Scalar t)
+addResultAliases _ (Scalar t@Arrow {}) = pure (Scalar t)
+addResultAliases r (Array als u t shape) = do
+  v <- newID "internal_app_result"
+  modify $ \s -> s {stateNames = M.insert v r $ stateNames s}
+  pure $ Array (S.insert (AliasFree v) als) u t shape
+
 -- 'checkApplyExp' is like 'checkExp', but tries to find the "root
 -- function", for better error messages.
 checkApplyExp :: UncheckedExp -> TermTypeM (Exp, ApplyOp)
@@ -1279,8 +1314,11 @@ checkApplyExp (AppExp (Apply e1 e2 _ loc) _) = do
   arg <- checkArg e2
   t <- expType e1'
   (t1, rt, argext, exts) <- checkApply loc (fname, i) t arg
+  rt' <- addResultAliases (NameAppRes fname loc) rt
   return
-    ( AppExp (Apply e1' (argExp arg) (Info (diet t1, argext)) loc) (Info $ AppRes rt exts),
+    ( AppExp
+        (Apply e1' (argExp arg) (Info (diet t1, argext)) loc)
+        (Info $ AppRes rt' exts),
       (fname, i + 1)
     )
 checkApplyExp e = do
@@ -1448,7 +1486,7 @@ checkExp (AppExp (If e1 e2 e3 loc) _) =
     ((e2', e3'), dflow) <- tapOccurences $ checkExp e2 `alternative` checkExp e3
 
     (brancht, retext) <- unifyBranches loc e2' e3'
-    let t' = addAliases brancht (`S.difference` S.map AliasBound (allConsumed dflow))
+    let t' = addAliases brancht $ S.filter $ (`S.notMember` allConsumed dflow) . aliasVar
 
     zeroOrderType
       (mkUsage loc "returning value of this type from 'if' expression")
@@ -3126,6 +3164,13 @@ observe (Ident nm (Info t) loc) =
   let als = AliasBound nm `S.insert` aliases t
    in occur [observation als loc]
 
+describeVar :: SrcLoc -> VName -> TermTypeM Doc
+describeVar loc v =
+  gets $
+    maybe ("variable" <+> pquote (pprName v)) (nameReason loc)
+      . M.lookup v
+      . stateNames
+
 checkIfConsumable :: SrcLoc -> Aliasing -> TermTypeM ()
 checkIfConsumable loc als = do
   vtable <- asks $ scopeVtable . termScope
@@ -3134,12 +3179,14 @@ checkIfConsumable loc als = do
           | arrayRank t > 0 -> unique t
           | Scalar TypeVar {} <- t -> unique t
           | otherwise -> True
-        _ -> False
-  case filter (not . consumable) $ map aliasVar $ S.toList als of
-    v : _ ->
+        Just (BoundV Global _ _) -> False
+        _ -> True
+  -- The sort ensures that AliasBound vars are shown before AliasFree.
+  case map aliasVar $ sort $ filter (not . consumable . aliasVar) $ S.toList als of
+    v : _ -> do
+      v' <- describeVar loc v
       typeError loc mempty $
-        "Would consume variable" <+> pquote (pprName v)
-          <> ", which is not allowed."
+        "Would consume" <+> v' <> ", which is not allowed."
     [] -> return ()
 
 -- | Proclaim that we have written to the given variable.
@@ -3187,14 +3234,23 @@ alternative m1 m2 = pass $ do
   let usage = occurs1 `altOccurences` occurs2
   return ((x, y), const usage)
 
--- | Make all bindings nonunique.
+-- | Enter a context where nothing outside can be consumed (i.e. the
+-- body of a function definition).
 noUnique :: TermTypeM a -> TermTypeM a
-noUnique = localScope (\scope -> scope {scopeVtable = M.map set $ scopeVtable scope})
+noUnique m = pass $ do
+  (x, occs) <- listen $ localScope f m
+  checkOccurences occs
+  let (observations, _) = split occs
+  pure (x, const observations)
   where
+    f scope = scope {scopeVtable = M.map set $ scopeVtable scope}
+
     set (BoundV l tparams t) = BoundV l tparams $ t `setUniqueness` Nonunique
     set (OverloadedF ts pts rt) = OverloadedF ts pts rt
     set EqualityF = EqualityF
     set (WasConsumed loc) = WasConsumed loc
+
+    split = unzip . map (\occ -> (occ {consumed = mempty}, occ {observed = mempty}))
 
 onlySelfAliasing :: TermTypeM a -> TermTypeM a
 onlySelfAliasing = localScope (\scope -> scope {scopeVtable = M.mapWithKey set $ scopeVtable scope})
