@@ -1,5 +1,5 @@
 -- ==
--- error: previously consumed
+-- error: "a".*consumed
 
 let main(): i32 =
     let n = 10

@@ -2,7 +2,7 @@
 -- operator was not registered properly.
 --
 -- ==
--- error: previously consumed
+-- error: "b".*consumed
 
 let main [w] (row : *[w]i32) : [w]u8 =
   let b = row -- b now aliases row

@@ -1,6 +1,6 @@
 -- Make sure occurences are checked inside function parameters as well.
 -- ==
--- error: previously consumed
+-- error: consumed
 
 let f(x: i32): i32 = x
 

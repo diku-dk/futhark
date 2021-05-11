@@ -1,5 +1,5 @@
 -- ==
--- error: previously consumed
+-- error: "a".*consumed
 
 let f(t: (i32, *[]i64)): i32 =
     let (x, a) = t in

@@ -50,6 +50,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Type checking of explicit size requirements in `loop` parameter (#1324).
 
+  * Various alias checking bugs (#1300, #1340).
+
 ## [0.19.4]
 
 ### Fixed
