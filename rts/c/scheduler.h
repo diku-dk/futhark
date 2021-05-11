@@ -96,7 +96,12 @@ static inline int scheduler_execute_task(struct scheduler *scheduler,
 // For getting cpu usage of threads
 #include <mach/mach.h>
 #include <sys/resource.h>
-#elif defined(__linux__) || defined(__EMSCRIPTEN__)
+#elif defined(__linux__)
+#include <sys/sysinfo.h>
+#include <sys/resource.h>
+#include <signal.h>
+#elif defined(__EMSCRIPTEN)
+#include <emscripten/threading.h>
 #include <sys/sysinfo.h>
 #include <sys/resource.h>
 #include <signal.h>
@@ -153,7 +158,7 @@ static int num_processors()
 #elif defined(__linux__)
   return get_nprocs();
 #elif __EMSCRIPTEN__
-  return 4;
+  return emscripten_num_logical_cores();
 #else
   fprintf(stderr, "operating system not recognised\n");
   return -1;
