@@ -16,8 +16,8 @@ import Futhark.IR.KernelsMem
 import qualified Futhark.IR.Mem.IxFun as IxFun
 import Futhark.Transform.Rename
 import Futhark.Util (takeLast)
-import Futhark.Util.IntegralExp (IntegralExp (mod), divUp, quot)
-import Prelude hiding (quot, mod)
+import Futhark.Util.IntegralExp (IntegralExp (mod, rem), divUp, quot)
+import Prelude hiding (quot, mod, rem)
 
 xParams, yParams :: SegBinOp KernelsMem -> [LParam KernelsMem]
 xParams scan =
@@ -125,8 +125,6 @@ compileSegScan pat lvl space scanOp kbody = do
   regs_per_thread <- dPrimVE "regs_per_thread" $
     tvExp regs_SM `quot` tvExp active_threads
   let tys = map (\(Prim pt) -> pt) $ lambdaReturnType $ segBinOpLambda scanOp
-      --sumT :: Integer
-      --maxT :: Integer
       sumT = toInt64Exp $ intConst Int64 (foldl (\bytes typ -> bytes + primByteSize typ) 0 tys `div` 4)
       maxT = toInt64Exp $ intConst Int64 $ maximum (map primByteSize tys) `div` 4
       k_reg = sExt64 regs_per_thread
@@ -138,10 +136,6 @@ compileSegScan pat lvl space scanOp kbody = do
       group_size = toInt64Exp <$> segGroupSize lvl
       n = product $ map toInt64Exp $ segSpaceDims space
       m = tvExp m'
-      --m :: Num a => a
-      --m = coerceIntPrimExp Int64 m'
-      --m = min ((64 `div` sumT) - 6) $ max 12 sumT `div` maxT
-
       num_groups = Count (n `divUp` (unCount group_size * m))
       num_threads = unCount num_groups * unCount group_size
       (gtids, dims) = unzip $ unSegSpace space
@@ -149,7 +143,6 @@ compileSegScan pat lvl space scanOp kbody = do
       segment_size = last dims'
 
       scanOpNe = segBinOpNeutral scanOp
-      -- tys = map (\(Prim pt) -> pt) $ lambdaReturnType $ segBinOpLambda scanOp
       statusX, statusA, statusP :: Num a => a
       statusX = 0
       statusA = 1
@@ -202,7 +195,13 @@ compileSegScan pat lvl space scanOp kbody = do
     blockOff <-
       dPrimV "blockOff" $
         sExt64 (tvExp dynamicId) * m * kernelGroupSize constants
-
+    sgmIdx <- dPrimVE "sgm_idx" $ tvExp blockOff `mod` segment_size
+    boundary <-
+      dPrimVE "boundary" $
+        sExt32 $ sMin64 (m * unCount group_size) (segment_size - sgmIdx)
+    segsize_compact <-
+      dPrimVE "segsize_compact" $
+        sExt32 $ sMin64 (m * unCount group_size) (segment_size)
     privateArrays <-
       forM tys $ \ty ->
         sAllocArray
@@ -251,19 +250,19 @@ compileSegScan pat lvl space scanOp kbody = do
           copyDWIMFix priv [sExt64 i] (Var trans) [sExt64 $ tvExp sharedIdx]
       sOp localBarrier
 
-    sComment "Per thread scan" $
+    sComment "Per thread scan" $ do
       -- We don't need to touch the first element, so only m-1
       -- iterations here.
+      globalIdx <-
+        dPrimVE "gidx" $
+          (kernelLocalThreadId constants * sExt32 m) + 1
       sFor "i" (m -1) $ \i -> do
         let xs = map paramName $ xParams scanOp
             ys = map paramName $ yParams scanOp
         -- calculate global index
-        globalIdx <-
-          dPrimVE "gidx" $
-            tvExp blockOff + sExt64 (kernelLocalThreadId constants) * m + i + 1
         -- determine if start of segment
         isNewSgm <-
-          dPrimVE "new_sgm" $ globalIdx `mod` segment_size .==. 0
+          dPrimVE "new_sgm" $ (globalIdx + sExt32 i - boundary) `mod` segsize_compact .==. 0
         -- skip scan of first element in segment
         sUnless isNewSgm $ do
           forM_ (zip privateArrays $ zip3 xs ys tys) $ \(src, (x, y, ty)) -> do
@@ -283,9 +282,9 @@ compileSegScan pat lvl space scanOp kbody = do
 
     let crossesSegment =
           Just $ \from to ->
-          let from' = sExt64 from * m + tvExp blockOff + m - 1
-              to' = sExt64 to * m + tvExp blockOff + m - 1
-          in (to' - from') .>. to' `mod` segment_size
+          let from' = (from + 1) * sExt32 m - 1
+              to'   = (to   + 1) * sExt32 m - 1
+          in (to' - from') .>. (to'+segsize_compact-boundary) `mod` segsize_compact
 
     scanOp' <- renameLambda $ segBinOpLambda scanOp
 
@@ -312,7 +311,6 @@ compileSegScan pat lvl space scanOp kbody = do
     prefixes <-
       forM (zip scanOpNe tys) $ \(ne, ty) ->
         dPrimV "prefix" $ TPrimExp $ toExp' ty ne
-    sgmIdx <- dPrimVE "sgm_idx" $ tvExp blockOff `mod` segment_size
     blockNewSgm <- dPrimVE "block_new_sgm" $ sgmIdx .==. 0
     sComment "Perform lookback" $ do
       sWhen (blockNewSgm .&&. kernelLocalThreadId constants .==. 0) $ do
@@ -329,7 +327,7 @@ compileSegScan pat lvl space scanOp kbody = do
       let warpSize = kernelWaveSize constants
       sWhen (bNot blockNewSgm .&&. kernelLocalThreadId constants .<. warpSize) $ do
         sWhen (kernelLocalThreadId constants .==. 0) $ do
-          sIf (segment_size - sgmIdx .>=. unCount group_size * m)
+          sIf (boundary .==. sExt32 (unCount group_size * m))
             ( do
               everythingVolatile $
                 forM_ (zip aggregateArrays accs) $ \(aggregateArray, acc) ->
@@ -470,7 +468,7 @@ compileSegScan pat lvl space scanOp kbody = do
           let xs = map paramName $ take (length tys) $ lambdaParams scanOp''''
               ys = map paramName $ drop (length tys) $ lambdaParams scanOp''''
           sWhen
-            (unCount group_size * m .<=. segment_size - sgmIdx)
+            (boundary .==. sExt32 (unCount group_size * m))
             ( do
               forM_ (zip xs prefixes) $ \(x, prefix) -> dPrimV_ x $ tvExp prefix
               forM_ (zip ys accs) $ \(y, acc) -> dPrimV_ y $ tvExp acc
@@ -510,8 +508,7 @@ compileSegScan pat lvl space scanOp kbody = do
           dPrimV_ x' $ tvExp prefix
           dPrimV_ y' $ tvExp acc
 
-      sIf (sExt64 (kernelLocalThreadId constants) * m + 1 .<=.
-        (tvExp blockOff + sExt64 (kernelLocalThreadId constants) * m) `mod` segment_size)
+      sIf (kernelLocalThreadId constants * sExt32 m .<. boundary .&&. bNot blockNewSgm)
         (compileStms mempty (bodyStms $ lambdaBody scanOp'''''') $
           forM_ (zip3 xs tys $ bodyResult $ lambdaBody scanOp'''''') $
             \(x, ty, res) -> x <~~ toExp' ty res)
@@ -522,10 +519,9 @@ compileSegScan pat lvl space scanOp kbody = do
       -- elements left before new segment.
       stop <-
         dPrimVE "stopping_point" $
-          (tvExp blockOff + sExt64 (kernelLocalThreadId constants) * m - 1)
-            `mod` segment_size
+          segsize_compact - (kernelLocalThreadId constants * sExt32 m - 1 + segsize_compact - boundary) `rem` segsize_compact
       sFor "i" m $ \i -> do
-        sWhen (i .<. segment_size - stop - 1) $ do
+        sWhen (sExt32 i .<. stop - 1) $ do
           forM_ (zip privateArrays ys) $ \(src, y) ->
             -- only include prefix for the first segment part per thread
               copyDWIMFix y [] (Var src) [i]
