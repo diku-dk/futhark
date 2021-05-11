@@ -30,6 +30,7 @@ import qualified Futhark.CLI.REPL as REPL
 import qualified Futhark.CLI.Run as Run
 import qualified Futhark.CLI.Test as Test
 import qualified Futhark.CLI.WASM as WASM
+import qualified Futhark.CLI.MulticoreWASM as MulticoreWASM
 import Futhark.Error
 import Futhark.Util (maxinum)
 import Futhark.Util.Options
@@ -56,6 +57,7 @@ commands =
       ("python", (Python.main, "Compile to sequential Python.")),
       ("pyopencl", (PyOpenCL.main, "Compile to Python calling PyOpenCL.")),
       ("wasm", (WASM.main, "Compile to WASM with sequential C")),
+      ("wasm-multicore", (MulticoreWASM.main, "Compile to WASM with multicore C")),
       ("test", (Test.main, "Test Futhark programs.")),
       ("bench", (Bench.main, "Benchmark Futhark programs.")),
       ("dataset", (Dataset.main, "Generate random test data.")),

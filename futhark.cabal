@@ -84,6 +84,7 @@ library
       Futhark.CLI.Literate
       Futhark.CLI.Misc
       Futhark.CLI.Multicore
+      Futhark.CLI.MulticoreWASM
       Futhark.CLI.OpenCL
       Futhark.CLI.Pkg
       Futhark.CLI.PyOpenCL
@@ -106,6 +107,7 @@ library
       Futhark.CodeGen.Backends.GenericPython.Definitions
       Futhark.CodeGen.Backends.GenericPython.Options
       Futhark.CodeGen.Backends.MulticoreC
+      Futhark.CodeGen.Backends.MulticoreWASM
       Futhark.CodeGen.Backends.PyOpenCL
       Futhark.CodeGen.Backends.PyOpenCL.Boilerplate
       Futhark.CodeGen.Backends.SequentialC

@@ -14,6 +14,7 @@ module Futhark.Actions
     compileOpenCLAction,
     compileCUDAAction,
     compileMulticoreAction,
+    compileMulticoreToWASMAction
   )
 where
 
@@ -28,6 +29,7 @@ import qualified Futhark.CodeGen.Backends.COpenCL as COpenCL
 import qualified Futhark.CodeGen.Backends.MulticoreC as MulticoreC
 import qualified Futhark.CodeGen.Backends.SequentialC as SequentialC
 import qualified Futhark.CodeGen.Backends.SequentialWASM as SequentialWASM
+import qualified Futhark.CodeGen.Backends.MulticoreWASM as MulticoreWASM
 import qualified Futhark.CodeGen.ImpGen.Kernels as ImpGenKernels
 import qualified Futhark.CodeGen.ImpGen.Multicore as ImpGenMulticore
 import qualified Futhark.CodeGen.ImpGen.Sequential as ImpGenSequential
@@ -130,15 +132,15 @@ runCC cpath outpath cflags_def ldflags = do
     Right (ExitSuccess, _, _) ->
       return ()
 
-runEMCC :: String -> String -> [String] -> [String] -> [String] -> FutharkM ()
-runEMCC cpath outpath cflags_def ldflags expfuns = do
+runEMCC :: String -> String -> [String] -> [String] -> [String] -> Bool -> FutharkM ()
+runEMCC cpath outpath cflags_def ldflags expfuns exe = do
   ret <-
     liftIO $
       runProgramWithExitCode
         "emcc"
         ( [cpath, "-o", outpath]
             ++ ["-lnodefs.js"] -- "-s", "INITIAL_MEMORY=201326592"] -- ,"-s", "ALLOW_MEMORY_GROWTH=1"]
-            ++ ["-s", "--post-js", "futharkClass.js"]
+            ++ (if exe then [] else ["-s", "--post-js", "futharkClass.js"])
             ++ ["-s", "WASM_BIGINT"]
             ++ cmdCFLAGS cflags_def
             ++ cmdEMCFLAGS [""]
@@ -207,14 +209,14 @@ compileCtoWASMAction fcfg mode outpath =
       case mode of
         ToExecutable -> do
           liftIO $ writeFile cpath $ SequentialC.asExecutable cprog
-          runEMCC cpath outpath [""] ["-lm"] exps
+          runEMCC cpath outpath [""] ["-lm"] exps True
         ToLibrary -> do
           writeLibs cprog jsprog hpath cpath
-          runEMCC cpath jpath [""] ["-lm"] exps
+          runEMCC cpath jpath [""] ["-lm"] exps False
         ToServer -> do
           writeLibs cprog jsprog hpath cpath
           liftIO $ appendFile "futharkClass.js" SequentialWASM.runServer
-          runEMCC cpath outpath [""] ["-lm"] exps
+          runEMCC cpath outpath [""] ["-lm"] exps False
     writeLibs cprog jsprog hpath cpath = do
       let (h, imp) = SequentialC.asLibrary cprog
       liftIO $ writeFile hpath h
@@ -309,3 +311,35 @@ compileMulticoreAction fcfg mode outpath =
         ToServer -> do
           liftIO $ writeFile cpath $ MulticoreC.asServer cprog
           runCC cpath outpath ["-O", "-std=c99"] ["-lm", "-pthread"]
+
+
+compileMulticoreToWASMAction :: FutharkConfig -> CompilerMode -> FilePath -> Action MCMem
+compileMulticoreToWASMAction fcfg mode outpath =
+  Action
+    { actionName = "Compile to sequential C",
+      actionDescription = "Compile to sequential C",
+      actionProcedure = helper
+    }
+  where
+    helper prog = do
+      (cprog, jsprog, exps) <- handleWarnings fcfg $ MulticoreWASM.compileProg prog
+      let cpath = outpath `addExtension` "c"
+          hpath = outpath `addExtension` "h"
+          jpath = outpath `addExtension` "js"
+
+      case mode of
+        ToExecutable -> do
+          liftIO $ writeFile cpath $ MulticoreC.asExecutable cprog
+          runEMCC cpath outpath [""] ["-lm", "-pthread"] exps True
+        ToLibrary -> do
+          writeLibs cprog jsprog hpath cpath
+          runEMCC cpath jpath [""] ["-lm", "-pthread"] exps False
+        ToServer -> do
+          writeLibs cprog jsprog hpath cpath
+          liftIO $ appendFile "futharkClass.js" MulticoreWASM.runServer
+          runEMCC cpath outpath [""] ["-lm", "-pthread"] exps False
+    writeLibs cprog jsprog hpath cpath = do
+      let (h, imp) = MulticoreC.asLibrary cprog
+      liftIO $ writeFile hpath h
+      liftIO $ writeFile cpath imp
+      liftIO $ writeFile "futharkClass.js" jsprog
