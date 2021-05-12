@@ -185,7 +185,7 @@ compileSegScan pat lvl space scanOp kbody = do
         sExt32 $ sMin64 (m * unCount group_size) (segment_size - sgmIdx)
     segsize_compact <-
       dPrimVE "segsize_compact" $
-        sExt32 $ sMin64 (m * unCount group_size) (segment_size)
+        sExt32 $ sMin64 (m * unCount group_size) segment_size
     privateArrays <-
       forM tys $ \ty ->
         sAllocArray
@@ -239,14 +239,10 @@ compileSegScan pat lvl space scanOp kbody = do
       -- iterations here.
       globalIdx <-
         dPrimVE "gidx" $
-          (kernelLocalThreadId constants * sExt32 m) + 1
+          (kernelLocalThreadId constants * m) + 1
       sFor "i" (m -1) $ \i -> do
         let xs = map paramName $ xParams scanOp
             ys = map paramName $ yParams scanOp
-        -- calculate global index
-        globalIdx <-
-          dPrimVE "gidx" $
-            tvExp blockOff + sExt64 (kernelLocalThreadId constants * m) + i + 1
         -- determine if start of segment
         isNewSgm <-
           dPrimVE "new_sgm" $ (globalIdx + sExt32 i - boundary) `mod` segsize_compact .==. 0
@@ -269,8 +265,8 @@ compileSegScan pat lvl space scanOp kbody = do
 
     let crossesSegment =
           Just $ \from to ->
-          let from' = (from + 1) * sExt32 m - 1
-              to'   = (to   + 1) * sExt32 m - 1
+          let from' = (from + 1) * m - 1
+              to'   = (to   + 1) * m - 1
           in (to' - from') .>. (to'+segsize_compact-boundary) `mod` segsize_compact
 
     scanOp' <- renameLambda $ segBinOpLambda scanOp
@@ -495,7 +491,7 @@ compileSegScan pat lvl space scanOp kbody = do
           dPrimV_ x' $ tvExp prefix
           dPrimV_ y' $ tvExp acc
 
-      sIf (kernelLocalThreadId constants * sExt32 m .<. boundary .&&. bNot blockNewSgm)
+      sIf (kernelLocalThreadId constants * m .<. boundary .&&. bNot blockNewSgm)
         (compileStms mempty (bodyStms $ lambdaBody scanOp'''''') $
           forM_ (zip3 xs tys $ bodyResult $ lambdaBody scanOp'''''') $
             \(x, ty, res) -> x <~~ toExp' ty res)
@@ -506,7 +502,7 @@ compileSegScan pat lvl space scanOp kbody = do
       -- elements left before new segment.
       stop <-
         dPrimVE "stopping_point" $
-          segsize_compact - (kernelLocalThreadId constants * sExt32 m - 1 + segsize_compact - boundary) `rem` segsize_compact
+          segsize_compact - (kernelLocalThreadId constants * m - 1 + segsize_compact - boundary) `rem` segsize_compact
       sFor "i" m $ \i -> do
         sWhen (sExt32 i .<. stop - 1) $ do
           forM_ (zip privateArrays ys) $ \(src, y) ->
