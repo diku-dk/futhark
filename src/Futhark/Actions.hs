@@ -279,7 +279,7 @@ pythonCommon codegen fcfg mode outpath prog = do
     ToLibrary ->
       liftIO $ writeFile (outpath `addExtension` "py") $ pyPrependHeader pyprog
     _ -> liftIO $ do
-      writeFile outpath $ pyPrependHeader pyprog
+      writeFile outpath $ "#!/usr/bin/env python3\n" ++ pyPrependHeader pyprog
       perms <- liftIO $ getPermissions outpath
       setPermissions outpath $ setOwnerExecutable True perms
 
