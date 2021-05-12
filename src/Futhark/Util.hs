@@ -39,6 +39,8 @@ module Futhark.Util
     lgammaf,
     tgamma,
     tgammaf,
+    hypot,
+    hypotf,
     fromPOSIX,
     toPOSIX,
     trim,
@@ -277,6 +279,18 @@ tgamma = c_tgamma
 -- | The system-level @tgammaf()@ function.
 tgammaf :: Float -> Float
 tgammaf = c_tgammaf
+
+foreign import ccall "hypot" c_hypot :: Double -> Double -> Double
+
+foreign import ccall "hypotf" c_hypotf :: Float -> Float -> Float
+
+-- | The system-level @hypot@ function.
+hypot :: Double -> Double -> Double
+hypot = c_hypot
+
+-- | The system-level @hypotf@ function.
+hypotf :: Float -> Float -> Float
+hypotf = c_hypotf
 
 -- | Turn a POSIX filepath into a filepath for the native system.
 toPOSIX :: Native.FilePath -> Posix.FilePath
