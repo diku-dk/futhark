@@ -365,28 +365,23 @@ compileProg ::
 compileProg mode class_name constructor imports defines ops userstate sync options prog = do
   src <- getNameSource
   let prog' = runCompilerM ops src userstate compileProg'
-      maybe_shebang =
-        case mode of
-          ToLibrary -> ""
-          _ -> "#!/usr/bin/env python3\n"
   return $
-    maybe_shebang
-      ++ pretty
-        ( PyProg $
-            imports
-              ++ [ Import "argparse" Nothing,
-                   Assign (Var "sizes") $ Dict []
-                 ]
-              ++ defines
-              ++ [ Escape pyValues,
-                   Escape pyFunctions,
-                   Escape pyPanic,
-                   Escape pyTuning,
-                   Escape pyUtility,
-                   Escape pyServer
-                 ]
-              ++ prog'
-        )
+    pretty
+      ( PyProg $
+          imports
+            ++ [ Import "argparse" Nothing,
+                 Assign (Var "sizes") $ Dict []
+               ]
+            ++ defines
+            ++ [ Escape pyValues,
+                 Escape pyFunctions,
+                 Escape pyPanic,
+                 Escape pyTuning,
+                 Escape pyUtility,
+                 Escape pyServer
+               ]
+            ++ prog'
+      )
   where
     Imp.Definitions consts (Imp.Functions funs) = prog
     compileProg' = withConstantSubsts consts $ do
