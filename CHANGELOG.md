@@ -12,6 +12,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * `f32.hypot` and `f64.hypot` are now much more numerically exact in
     the interpreter.
 
+  * Generated code now contains a header with information about the
+    version of Futhark used (and maybe more information in the
+    future).
+
 ### Removed
 
 ### Changed
