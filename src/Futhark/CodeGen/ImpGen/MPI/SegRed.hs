@@ -105,7 +105,7 @@ compileSegRed pat space reds kbody
 
     forM_ (zip (patternNames pat) acc_vs) $ \(v, acc_v) ->
       copyDWIMFix v [] (Var acc_v) []
-compileSegRed _pat _space _reds _kbody = collect $ do emit $ Imp.Op $ Imp.CrashWithThisMessage "Not implemented yet"
+compileSegRed _pat _space _reds _kbody = error "Not implemented yet"
 
 -- | Like 'compileSegRed', but where the body is a monadic action.
 compileSegRed' ::
