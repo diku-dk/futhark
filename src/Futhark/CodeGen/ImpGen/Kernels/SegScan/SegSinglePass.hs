@@ -30,12 +30,12 @@ alignTo x a = (x `divUp` a) * a
 
 createLocalArrays ::
   Count GroupSize SubExp ->
-  Imp.TExp Int64 ->
+  SubExp ->
   [PrimType] ->
   InKernelGen (VName, [VName], [VName], VName, VName, [VName])
 createLocalArrays (Count groupSize) m types = do
   let groupSizeE = toInt64Exp groupSize
-      workSize = m * groupSizeE
+      workSize = toInt64Exp m * groupSizeE
       prefixArraysSize =
         foldl (\acc tySize -> alignTo acc tySize + tySize * groupSizeE) 0 $
           map primByteSize types
@@ -109,6 +109,7 @@ compileSegScan ::
   KernelBody KernelsMem ->
   CallKernelGen ()
 compileSegScan pat lvl space scanOp kbody = do
+<<<<<<< HEAD
   -- Calculate hardware constants to restrict thread behaviour
   fname <- askFunction
   active_threads <- dPrim "active_threads" int32 :: CallKernelGen (TV Int32)
@@ -136,13 +137,27 @@ compileSegScan pat lvl space scanOp kbody = do
       group_size = toInt64Exp <$> segGroupSize lvl
       n = product $ map toInt64Exp $ segSpaceDims space
       m = tvExp m'
+=======
+  let Pattern _ all_pes = pat
+      group_size = toInt64Exp <$> segGroupSize lvl
+      n = product $ map toInt64Exp $ segSpaceDims space
+      sumT :: Integer
+      maxT :: Integer
+      sumT = foldl (\bytes typ -> bytes + primByteSize typ) 0 tys `div` 4
+      maxT = maximum (map primByteSize tys) `div` 4
+      m :: Num a => a
+      m = fromIntegral $ min ((64 `div` sumT) - 6) $ max 12 sumT `div` maxT
+>>>>>>> parent of fc62bd6... Attempt at dynamic 'm'
       num_groups = Count (n `divUp` (unCount group_size * m))
       num_threads = unCount num_groups * unCount group_size
       (gtids, dims) = unzip $ unSegSpace space
       dims' = map toInt64Exp dims
       segment_size = last dims'
-
       scanOpNe = segBinOpNeutral scanOp
+<<<<<<< HEAD
+=======
+      tys = map (\(Prim pt) -> pt) $ lambdaReturnType $ segBinOpLambda scanOp
+>>>>>>> parent of fc62bd6... Attempt at dynamic 'm'
       statusX, statusA, statusP :: Num a => a
       statusX = 0
       statusA = 1
@@ -169,8 +184,10 @@ compileSegScan pat lvl space scanOp kbody = do
 
   sKernelThread "segscan" num_groups group_size (segFlat space) $ do
     constants <- kernelConstants <$> askEnv
+
     (sharedId, transposedArrays, prefixArrays, sharedReadOffset, warpscan, exchanges) <-
-      createLocalArrays (segGroupSize lvl) m tys
+      createLocalArrays (segGroupSize lvl) (intConst Int64 m) tys
+
     dynamicId <- dPrim "dynamic_id" int32 :: ImpM lore r op (TV Int64)
     sWhen (kernelLocalThreadId constants .==. 0) $ do
       (globalIdMem, _, globalIdOff) <- fullyIndexArray globalId [0]
@@ -207,8 +224,8 @@ compileSegScan pat lvl space scanOp kbody = do
         sAllocArray
           "private"
           ty
-          (Shape [Var $ tvVar m'])
-          (ScalarSpace [Var $ tvVar m'] ty)
+          (Shape [intConst Int64 m])
+          (ScalarSpace [intConst Int64 m] ty)
     sComment "Load and map" $
       sFor "i" m $ \i -> do
         -- The map's input index
@@ -246,7 +263,7 @@ compileSegScan pat lvl space scanOp kbody = do
           copyDWIMFix trans [sharedIdx] (Var priv) [i]
         sOp localBarrier
         sFor "i" m $ \i -> do
-          sharedIdx <- dPrimV "sharedIdx" $ sExt64 (kernelLocalThreadId constants) * m + i
+          sharedIdx <- dPrimV "sharedIdx" $ kernelLocalThreadId constants * m + i
           copyDWIMFix priv [sExt64 i] (Var trans) [sExt64 $ tvExp sharedIdx]
       sOp localBarrier
 
@@ -260,6 +277,12 @@ compileSegScan pat lvl space scanOp kbody = do
         let xs = map paramName $ xParams scanOp
             ys = map paramName $ yParams scanOp
         -- calculate global index
+<<<<<<< HEAD
+=======
+        globalIdx <-
+          dPrimVE "gidx" $
+            tvExp blockOff + sExt64 (kernelLocalThreadId constants * m) + i + 1
+>>>>>>> parent of fc62bd6... Attempt at dynamic 'm'
         -- determine if start of segment
         isNewSgm <-
           dPrimVE "new_sgm" $ (globalIdx + sExt32 i - boundary) `mod` segsize_compact .==. 0
@@ -536,7 +559,7 @@ compileSegScan pat lvl space scanOp kbody = do
         sFor "i" m $ \i -> do
           sharedIdx <-
             dPrimV "sharedIdx" $
-              sExt64 (kernelLocalThreadId constants) * m + i
+              sExt64 (kernelLocalThreadId constants * m) + i
           copyDWIMFix trans [tvExp sharedIdx] (Var priv) [i]
         sOp localBarrier
         sFor "i" m $ \i -> do

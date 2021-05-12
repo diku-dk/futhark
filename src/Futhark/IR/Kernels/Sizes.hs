@@ -13,9 +13,6 @@ module Futhark.IR.Kernels.Sizes
     NumGroups,
     GroupSize,
     NumThreads,
-    ShrMemPerSM,
-    RegsPerSM,
-    ThreadsPerSM,
   )
 where
 
@@ -50,9 +47,6 @@ data SizeClass
     SizeLocalMemory
   | -- | A bespoke size with a default.
     SizeBespoke Name Int64
-  | SizeSharedMemPerSM
-  | SizeRegsPerSM
-  | SizeActiveThreadsPerSM
   deriving (Eq, Ord, Show, Generic)
 
 instance SexpIso SizeClass where
@@ -65,11 +59,8 @@ instance SexpIso SizeClass where
               With (. Sexp.sym "reg-tile") $
                 With (. Sexp.sym "local-memory") $
                   With
-                    (. Sexp.list (Sexp.el (Sexp.sym "bespoke") >>> Sexp.el sexpIso >>> Sexp.el (iso fromIntegral fromIntegral . Sexp.int))) $
-                      With (. Sexp.sym "shared-memory-SM") $
-                        With (. Sexp.sym "registers-SM") $
-                          With (. Sexp.sym "residents-SM")
-                          End
+                    (. Sexp.list (Sexp.el (Sexp.sym "bespoke") >>> Sexp.el sexpIso >>> Sexp.el (iso fromIntegral fromIntegral . Sexp.int)))
+                    End
 
 instance Pretty SizeClass where
   ppr (SizeThreshold path _) = text $ "threshold (" ++ unwords (map pStep path) ++ ")"
@@ -82,9 +73,6 @@ instance Pretty SizeClass where
   ppr SizeRegTile = text "reg_tile_size"
   ppr SizeLocalMemory = text "local_memory"
   ppr (SizeBespoke k _) = ppr k
-  ppr SizeSharedMemPerSM = text "shared_memory_SM"
-  ppr SizeRegsPerSM = text "registers_SM"
-  ppr SizeActiveThreadsPerSM = text "residents_SM"
 
 -- | The default value for the size.  If 'Nothing', that means the backend gets to decide.
 sizeDefault :: SizeClass -> Maybe Int64
@@ -116,12 +104,3 @@ data GroupSize
 
 -- | Phantom type for number of threads.
 data NumThreads
-
--- | Phantom type for maximum shared memory per multiprocessor.
-data ShrMemPerSM
-
--- | Phantom type for maximum 32-bit registers per multiprocessor.
-data RegsPerSM
-
--- | Phantom type for maximum active threads per multiprocessor.
-data ThreadsPerSM
