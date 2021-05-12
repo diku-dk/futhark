@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+  * `f32.hypot` and `f64.hypot` are now much more numerically exact in
+    the interpreter.
+
 ### Removed
 
 ### Changed
