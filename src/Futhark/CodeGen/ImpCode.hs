@@ -154,7 +154,7 @@ data ExternalValue
 -- and results.  The latter are only used if the function is an entry
 -- point.
 data FunctionT a = Function
-  { functionEntry :: Bool,
+  { functionEntry :: Maybe Name,
     functionOutput :: [Param],
     functionInput :: [Param],
     functionBody :: Code a,

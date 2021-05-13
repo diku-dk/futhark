@@ -116,7 +116,7 @@ generateEntryPoint (E.EntryPoint e_paramts e_rettype) vb = localConstsScope $ do
   let (E.ValBind _ ofname _ (Info (rettype, _)) tparams params _ _ attrs loc) = vb
   bindingFParams tparams params $ \shapeparams params' -> do
     entry_rettype <- internaliseEntryReturnType rettype
-    let entry' = entryPoint (zip e_paramts params') (e_rettype, entry_rettype)
+    let entry' = entryPoint (baseName ofname) (zip e_paramts params') (e_rettype, entry_rettype)
         args = map (I.Var . I.paramName) $ concat params'
 
     entry_body <- buildBody_ $ do
@@ -137,19 +137,21 @@ generateEntryPoint (E.EntryPoint e_paramts e_rettype) vb = localConstsScope $ do
       I.FunDef
         (Just entry')
         (internaliseAttrs attrs)
-        (baseName ofname)
+        ("entry_" <> baseName ofname)
         (concat entry_rettype)
         (shapeparams ++ concat params')
         entry_body
 
 entryPoint ::
+  Name ->
   [(E.EntryType, [I.FParam])] ->
   ( E.EntryType,
     [[I.TypeBase ExtShape Uniqueness]]
   ) ->
   I.EntryPoint
-entryPoint params (eret, crets) =
-  ( concatMap (entryPointType . preParam) params,
+entryPoint name params (eret, crets) =
+  ( name,
+    concatMap (entryPointType . preParam) params,
     case ( isTupleRecord $ entryType eret,
            entryAscribed eret
          ) of

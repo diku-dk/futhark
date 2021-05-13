@@ -25,6 +25,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * `futhark repl` had trouble with declarations that produced unknown
     sizes (#1347).
 
+  * Entry points can now have same name as (undocumented!) compiler intrinsics.
+
 ## [0.19.5]
 
 ### Added
