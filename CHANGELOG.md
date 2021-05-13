@@ -22,6 +22,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+  * `futhark repl` had trouble with declarations that produced unknown
+    sizes (#1347).
+
 ## [0.19.5]
 
 ### Added
