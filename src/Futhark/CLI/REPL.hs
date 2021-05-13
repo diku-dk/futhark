@@ -22,7 +22,7 @@ import Data.Version
 import Futhark.Compiler
 import Futhark.MonadFreshNames
 import Futhark.Pipeline
-import Futhark.Util (toPOSIX)
+import Futhark.Util (fancyTerminal, toPOSIX)
 import Futhark.Util.Options
 import Futhark.Version
 import Language.Futhark
@@ -57,12 +57,13 @@ data StopReason = EOF | Stop | Exit | Load FilePath
 
 repl :: Maybe FilePath -> IO ()
 repl maybe_prog = do
-  putStr banner
-  putStrLn $ "Version " ++ showVersion version ++ "."
-  putStrLn "Copyright (C) DIKU, University of Copenhagen, released under the ISC license."
-  putStrLn ""
-  putStrLn "Run :help for a list of commands."
-  putStrLn ""
+  when fancyTerminal $ do
+    putStr banner
+    putStrLn $ "Version " ++ showVersion version ++ "."
+    putStrLn "Copyright (C) DIKU, University of Copenhagen, released under the ISC license."
+    putStrLn ""
+    putStrLn "Run :help for a list of commands."
+    putStrLn ""
 
   let toploop s = do
         (stop, s') <- runStateT (runExceptT $ runFutharkiM $ forever readEvalPrint) s
@@ -82,7 +83,7 @@ repl maybe_prog = do
           Right _ -> return ()
 
       finish s = do
-        quit <- confirmQuit
+        quit <- if fancyTerminal then confirmQuit else pure True
         if quit then return () else toploop s
 
   maybe_init_state <- liftIO $ newFutharkiState 0 maybe_prog
@@ -99,7 +100,8 @@ repl maybe_prog = do
       return s
   Haskeline.runInputT Haskeline.defaultSettings $ toploop s
 
-  putStrLn "Leaving 'futhark repl'."
+  when fancyTerminal $
+    putStrLn "Leaving 'futhark repl'."
 
 confirmQuit :: Haskeline.InputT IO Bool
 confirmQuit = do
