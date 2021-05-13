@@ -514,7 +514,7 @@ deriving instance Decorations lore => Ord (FunDef lore)
 -- | Information about the parameters and return value of an entry
 -- point.  The first element is for parameters, the second for return
 -- value.
-type EntryPoint = ([EntryPointType], [EntryPointType])
+type EntryPoint = (Name, [EntryPointType], [EntryPointType])
 
 -- | Every entry point argument and return value has an annotation
 -- indicating how it maps to the original source program type.

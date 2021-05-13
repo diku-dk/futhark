@@ -42,7 +42,7 @@ transposeArgs pt destmem destoffset srcmem srcoffset num_arrays m n =
 mapTransposeFunction :: Name -> PrimType -> Function op
 mapTransposeFunction fname pt =
   Function
-    False
+    Nothing
     []
     params
     ( mconcat

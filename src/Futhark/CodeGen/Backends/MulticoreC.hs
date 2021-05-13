@@ -533,7 +533,7 @@ compileOp (Segop name params seq_task par_task retvals (SchedulerInfo nsubtask e
 
   e' <- GC.compileExp e
 
-  let lexical = lexicalMemoryUsage $ Function False [] params seq_code [] []
+  let lexical = lexicalMemoryUsage $ Function Nothing [] params seq_code [] []
 
   fstruct <-
     prepareTaskStruct "task" free_args free_ctypes retval_args retval_ctypes
@@ -558,7 +558,7 @@ compileOp (Segop name params seq_task par_task retvals (SchedulerInfo nsubtask e
   -- Generate the nested segop function if available
   fnpar_task <- case par_task of
     Just (ParallelTask nested_code nested_tid) -> do
-      let lexical_nested = lexicalMemoryUsage $ Function False [] params nested_code [] []
+      let lexical_nested = lexicalMemoryUsage $ Function Nothing [] params nested_code [] []
       fnpar_task <- generateParLoopFn lexical_nested (name ++ "_nested_task") nested_code fstruct free retval nested_tid nsubtask
       GC.stm [C.cstm|$id:ftask_name.nested_fn = $id:fnpar_task;|]
       return $ zip [fnpar_task] [True]
@@ -583,7 +583,7 @@ compileOp (ParLoop s' i prebody body postbody free tid) = do
 
   let lexical =
         lexicalMemoryUsage $
-          Function False [] free (prebody <> body) [] []
+          Function Nothing [] free (prebody <> body) [] []
 
   fstruct <-
     prepareTaskStruct (s' ++ "_parloop_struct") free_args free_ctypes mempty mempty

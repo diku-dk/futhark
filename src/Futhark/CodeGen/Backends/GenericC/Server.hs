@@ -15,6 +15,7 @@ where
 import Data.Bifunctor (first, second)
 import Data.FileEmbed
 import qualified Data.Map as M
+import Data.Maybe
 import Futhark.CodeGen.Backends.GenericC.Options
 import Futhark.CodeGen.Backends.SimpleRep
 import Futhark.CodeGen.ImpCode
@@ -184,17 +185,15 @@ functionExternalValues fun = functionResult fun ++ functionArgs fun
 
 entryTypeBoilerplate :: Functions a -> ([C.Initializer], [C.Definition])
 entryTypeBoilerplate (Functions funs) =
-  second concat $
-    unzip $
-      M.elems $
-        M.fromList $
-          map valueDescBoilerplate $
-            concatMap (functionExternalValues . snd) $
-              filter (functionEntry . snd) funs
+  second concat . unzip . M.elems . M.fromList . map valueDescBoilerplate
+    . concatMap (functionExternalValues . snd)
+    . filter (isJust . functionEntry . snd)
+    $ funs
 
-oneEntryBoilerplate :: (Name, Function a) -> ([C.Definition], C.Initializer)
-oneEntryBoilerplate (name, fun) =
-  let entry_f = "futhark_entry_" ++ pretty name
+oneEntryBoilerplate :: (Name, Function a) -> Maybe ([C.Definition], C.Initializer)
+oneEntryBoilerplate (name, fun) = do
+  ename <- functionEntry fun
+  let entry_f = "futhark_entry_" ++ pretty ename
       call_f = "call_" ++ pretty name
       out_types = functionResult fun
       in_types = functionArgs fun
@@ -206,7 +205,8 @@ oneEntryBoilerplate (name, fun) =
       (in_items, in_args)
         | null in_types = ([C.citems|(void)ins;|], mempty)
         | otherwise = unzip $ zipWith loadIn [0 ..] in_types
-   in ( [C.cunit|
+  pure
+    ( [C.cunit|
                 struct type* $id:out_types_name[] = {
                   $inits:(map typeStructInit out_types),
                   NULL
@@ -221,13 +221,13 @@ oneEntryBoilerplate (name, fun) =
                   return $id:entry_f(ctx, $args:out_args, $args:in_args);
                 }
                 |],
-        [C.cinit|{
-            .name = $string:(pretty name),
+      [C.cinit|{
+            .name = $string:(pretty ename),
             .f = $id:call_f,
             .in_types = $id:in_types_name,
             .out_types = $id:out_types_name
             }|]
-      )
+    )
   where
     typeStructInit t = [C.cinit|&$id:(typeStructName t)|]
 
@@ -245,7 +245,7 @@ oneEntryBoilerplate (name, fun) =
 
 entryBoilerplate :: Functions a -> ([C.Definition], [C.Initializer])
 entryBoilerplate (Functions funs) =
-  first concat $ unzip $ map oneEntryBoilerplate $ filter (functionEntry . snd) funs
+  first concat $ unzip $ mapMaybe oneEntryBoilerplate funs
 
 mkBoilerplate ::
   Functions a ->

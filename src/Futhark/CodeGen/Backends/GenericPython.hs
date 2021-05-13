@@ -327,7 +327,7 @@ functionExternalValues fun = Imp.functionResult fun ++ Imp.functionArgs fun
 opaqueDefs :: Imp.Functions a -> M.Map String [PyExp]
 opaqueDefs (Imp.Functions funs) =
   mconcat . map evd . concatMap (functionExternalValues . snd) $
-    filter (Imp.functionEntry . snd) funs
+    filter (isJust . Imp.functionEntry . snd) funs
   where
     evd Imp.TransparentValue {} = mempty
     evd (Imp.OpaqueValue name vds) =
@@ -395,10 +395,7 @@ compileProg mode class_name constructor imports defines ops userstate sync optio
       case mode of
         ToLibrary -> do
           (entry_points, entry_point_types) <-
-            unzip
-              <$> mapM
-                (compileEntryFun sync DoNotReturnTiming)
-                (filter (Imp.functionEntry . snd) funs)
+            unzip . catMaybes <$> mapM (compileEntryFun sync DoNotReturnTiming) funs
           return
             [ ClassDef $
                 Class class_name $
@@ -410,10 +407,7 @@ compileProg mode class_name constructor imports defines ops userstate sync optio
             ]
         ToServer -> do
           (entry_points, entry_point_types) <-
-            unzip
-              <$> mapM
-                (compileEntryFun sync ReturnTiming)
-                (filter (Imp.functionEntry . snd) funs)
+            unzip . catMaybes <$> mapM (compileEntryFun sync ReturnTiming) funs
           return $
             parse_options_server
               ++ [ ClassDef
@@ -432,10 +426,7 @@ compileProg mode class_name constructor imports defines ops userstate sync optio
         ToExecutable -> do
           let classinst = Assign (Var "self") $ simpleCall class_name []
           (entry_point_defs, entry_point_names, entry_points) <-
-            unzip3
-              <$> mapM
-                (callEntryFun sync)
-                (filter (Imp.functionEntry . snd) funs)
+            unzip3 . catMaybes <$> mapM (callEntryFun sync) funs
           return $
             parse_options_executable
               ++ ClassDef
@@ -789,8 +780,7 @@ prepareEntry ::
   CompilerM
     op
     s
-    ( String,
-      [String],
+    ( [String],
       [PyStmt],
       [PyStmt],
       [PyStmt],
@@ -852,8 +842,7 @@ prepareEntry (fname, Imp.Function _ outputs inputs _ results args) = do
         ]
 
   return
-    ( nameToString fname,
-      map extValueDescName args,
+    ( map extValueDescName args,
       prepareIn,
       call argexps_lib,
       call argexps_bin,
@@ -886,40 +875,43 @@ compileEntryFun ::
   [PyStmt] ->
   ReturnTiming ->
   (Name, Imp.Function op) ->
-  CompilerM op s (PyFunDef, (PyExp, PyExp))
-compileEntryFun sync timing entry = do
-  (fname', params, prepareIn, body_lib, _, prepareOut, res, _) <- prepareEntry entry
-  let (maybe_sync, ret) =
-        case timing of
-          DoNotReturnTiming ->
-            ( [],
-              Return $ tupleOrSingle $ map snd res
-            )
-          ReturnTiming ->
-            ( sync,
-              Return $
-                Tuple
-                  [ Var "runtime",
-                    tupleOrSingle $ map snd res
-                  ]
-            )
-      (pts, rts) = entryTypes $ snd entry
+  CompilerM op s (Maybe (PyFunDef, (PyExp, PyExp)))
+compileEntryFun sync timing entry
+  | Just ename <- Imp.functionEntry $ snd entry = do
+    (params, prepareIn, body_lib, _, prepareOut, res, _) <- prepareEntry entry
+    let (maybe_sync, ret) =
+          case timing of
+            DoNotReturnTiming ->
+              ( [],
+                Return $ tupleOrSingle $ map snd res
+              )
+            ReturnTiming ->
+              ( sync,
+                Return $
+                  Tuple
+                    [ Var "runtime",
+                      tupleOrSingle $ map snd res
+                    ]
+              )
+        (pts, rts) = entryTypes $ snd entry
 
-      do_run =
-        Assign (Var "time_start") (simpleCall "time.time" []) :
-        body_lib ++ maybe_sync
-          ++ [ Assign (Var "runtime") $
-                 BinOp
-                   "-"
-                   (toMicroseconds (simpleCall "time.time" []))
-                   (toMicroseconds (Var "time_start"))
-             ]
+        do_run =
+          Assign (Var "time_start") (simpleCall "time.time" []) :
+          body_lib ++ maybe_sync
+            ++ [ Assign (Var "runtime") $
+                   BinOp
+                     "-"
+                     (toMicroseconds (simpleCall "time.time" []))
+                     (toMicroseconds (Var "time_start"))
+               ]
 
-  return
-    ( Def fname' ("self" : params) $
-        prepareIn ++ do_run ++ prepareOut ++ sync ++ [ret],
-      (String fname', Tuple [List (map String pts), List (map String rts)])
-    )
+    pure $
+      Just
+        ( Def (nameToString ename) ("self" : params) $
+            prepareIn ++ do_run ++ prepareOut ++ sync ++ [ret],
+          (String (nameToString ename), Tuple [List (map String pts), List (map String rts)])
+        )
+  | otherwise = pure Nothing
 
 entryTypes :: Imp.Function op -> ([String], [String])
 entryTypes func =
@@ -935,9 +927,10 @@ entryTypes func =
 callEntryFun ::
   [PyStmt] ->
   (Name, Imp.Function op) ->
-  CompilerM op s (PyFunDef, String, PyExp)
-callEntryFun pre_timing entry@(fname, Imp.Function _ _ _ _ _ decl_args) = do
-  (_, _, prepare_in, _, body_bin, _, res, prepare_run) <- prepareEntry entry
+  CompilerM op s (Maybe (PyFunDef, String, PyExp))
+callEntryFun _ (_, Imp.Function Nothing _ _ _ _ _) = pure Nothing
+callEntryFun pre_timing entry@(fname, Imp.Function (Just ename) _ _ _ _ decl_args) = do
+  (_, prepare_in, _, body_bin, _, res, prepare_run) <- prepareEntry entry
 
   let str_input = map readInput decl_args
       end_of_input = [Exp $ simpleCall "end_of_input" [String $ pretty fname]]
@@ -960,15 +953,16 @@ callEntryFun pre_timing entry@(fname, Imp.Function _ _ _ _ _ decl_args) = do
 
   let fname' = "entry_" ++ nameToString fname
 
-  return
-    ( Def fname' [] $
-        str_input ++ end_of_input ++ prepare_in
-          ++ [Try [do_warmup_run, do_num_runs] [except']]
-          ++ [close_runtime_file]
-          ++ str_output,
-      nameToString fname,
-      Var fname'
-    )
+  pure $
+    Just
+      ( Def fname' [] $
+          str_input ++ end_of_input ++ prepare_in
+            ++ [Try [do_warmup_run, do_num_runs] [except']]
+            ++ [close_runtime_file]
+            ++ str_output,
+        nameToString ename,
+        Var fname'
+      )
 
 addTiming :: [PyStmt] -> ([PyStmt], PyStmt)
 addTiming statements =

@@ -1245,16 +1245,16 @@ onEntryPoint ::
   [C.BlockItem] ->
   Name ->
   Function op ->
-  CompilerM op s C.Definition
-onEntryPoint get_consts fname (Function _ outputs inputs _ results args) = do
+  CompilerM op s (Maybe C.Definition)
+onEntryPoint _ _ (Function Nothing _ _ _ _ _) = pure Nothing
+onEntryPoint get_consts fname (Function (Just ename) outputs inputs _ results args) = do
   let out_args = map (\p -> [C.cexp|&$id:(paramName p)|]) outputs
       in_args = map (\p -> [C.cexp|$id:(paramName p)|]) inputs
 
   inputdecls <- collect $ mapM_ stubParam inputs
   outputdecls <- collect $ mapM_ stubParam outputs
 
-  let entry_point_name = nameToString fname
-  entry_point_function_name <- publicName $ "entry_" ++ entry_point_name
+  entry_point_function_name <- publicName $ "entry_" ++ nameToString ename
 
   (inputs', unpack_entry_inputs) <- prepareEntryInputs args
   let (entry_point_input_params, entry_point_input_checks) = unzip inputs'
@@ -1293,7 +1293,7 @@ onEntryPoint get_consts fname (Function _ outputs inputs _ results args) = do
 
   ops <- asks envOperations
 
-  return
+  pure . Just $
     [C.cedecl|
        int $id:entry_point_function_name
            ($ty:ctx_ty *ctx,
@@ -1499,7 +1499,7 @@ $edecls:entry_point_decls
       }
   where
     Definitions consts (Functions funs) = prog
-    entry_funs = filter (functionEntry . snd) funs
+    entry_funs = filter (isJust . functionEntry . snd) funs
 
     compileProg' = do
       (memstructs, memfuns, memreport) <- unzip3 <$> mapM defineMemorySpace spaces
@@ -1513,7 +1513,7 @@ $edecls:entry_point_decls
 
       mapM_ earlyDecl memstructs
       entry_points <-
-        mapM (uncurry (onEntryPoint get_consts)) $ filter (functionEntry . snd) funs
+        catMaybes <$> mapM (uncurry (onEntryPoint get_consts)) funs
 
       extra
 
