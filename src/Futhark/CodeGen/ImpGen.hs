@@ -647,7 +647,7 @@ compileFunDef ::
   FunDef lore ->
   ImpM lore r op ()
 compileFunDef (FunDef entry _ fname rettype params body) =
-  local (\env -> env {envFunction = Just fname}) $ do
+  local (\env -> env {envFunction = name_entry `mplus` Just fname}) $ do
     ((outparams, inparams, results, args), body') <- collect' compile
     emitFunction fname $ Imp.Function name_entry outparams inparams body' results args
   where
