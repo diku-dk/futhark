@@ -116,8 +116,14 @@ compileSegScan pat lvl space scanOp kbody = do
       maxT :: Integer
       sumT = foldl (\bytes typ -> bytes + primByteSize typ) 0 tys `div` 4
       maxT = maximum (map primByteSize tys) `div` 4
+      -- TODO: Make these constants dynamic by querying device
+      k_reg = 64
+      k_mem = 12
+      mem_constraint = max k_mem sumT `div` maxT
+      --reg_constraint = (k_reg `div` sumT) - 6
+      reg_constraint = (k_reg-2-sumT) `div` (2*sumT+4)
       m :: Num a => a
-      m = fromIntegral $ min ((64 `div` sumT) - 6) $ max 12 sumT `div` maxT
+      m = fromIntegral $ min mem_constraint reg_constraint
       num_groups = Count (n `divUp` (unCount group_size * m))
       num_threads = unCount num_groups * unCount group_size
       (gtids, dims) = unzip $ unSegSpace space
