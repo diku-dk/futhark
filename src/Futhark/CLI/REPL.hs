@@ -100,8 +100,7 @@ repl maybe_prog = do
       return s
   Haskeline.runInputT Haskeline.defaultSettings $ toploop s
 
-  when fancyTerminal $
-    putStrLn "Leaving 'futhark repl'."
+  putStrLn "Leaving 'futhark repl'."
 
 confirmQuit :: Haskeline.InputT IO Bool
 confirmQuit = do
