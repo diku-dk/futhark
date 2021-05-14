@@ -144,12 +144,6 @@ prettyFailure :: CmdFailure -> T.Text
 prettyFailure (CmdFailure bef aft) =
   T.unlines $ bef ++ aft
 
-cmdMaybe :: (MonadError T.Text m, MonadIO m) => IO (Maybe CmdFailure) -> m ()
-cmdMaybe m = maybe (pure ()) (throwError . prettyFailure) =<< liftIO m
-
-cmdEither :: (MonadError T.Text m, MonadIO m) => IO (Either CmdFailure a) -> m a
-cmdEither m = either (throwError . prettyFailure) pure =<< liftIO m
-
 readVar :: (MonadError T.Text m, MonadIO m) => Server -> VarName -> m V.Value
 readVar server v =
   either throwError pure <=< liftIO $

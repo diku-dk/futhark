@@ -14,8 +14,7 @@ module Futhark.Test
     FutharkExe (..),
     getValues,
     getValuesBS,
-    withValuesFile,
-    checkValueTypes,
+    valuesAsVars,
     compareValues,
     checkResult,
     testRunReferenceOutput,
@@ -147,11 +146,12 @@ data TestRun = TestRun
   }
   deriving (Show)
 
--- | Several Values - either literally, or by reference to a file, or
+-- | Several values - either literally, or by reference to a file, or
 -- to be generated on demand.
 data Values
   = Values [Value]
-  | InFile FilePath
+  | -- | Path relative to test program.
+    InFile FilePath
   | GenValues [GenValue]
   deriving (Show)
 
@@ -490,6 +490,11 @@ getValues futhark dir v = do
       InFile f -> f
       GenValues {} -> "<randomly generated>"
 
+readAndDecompress :: FilePath -> IO (Either DecompressError BS.ByteString)
+readAndDecompress file = E.try $ do
+  s <- BS.readFile file
+  E.evaluate $ decompress s
+
 -- | Extract a pretty representation of some 'Values'.  In the IO
 -- monad because this might involve reading from a file.  There is no
 -- guarantee that the resulting byte string yields a readable value.
@@ -499,54 +504,53 @@ getValuesBS _ _ (Values vs) =
 getValuesBS _ dir (InFile file) =
   case takeExtension file of
     ".gz" -> liftIO $ do
-      s <- E.try readAndDecompress
+      s <- readAndDecompress file'
       case s of
-        Left e -> fail $ show file ++ ": " ++ show (e :: DecompressError)
+        Left e -> fail $ show file ++ ": " ++ show e
         Right s' -> return s'
     _ -> liftIO $ BS.readFile file'
   where
     file' = dir </> file
-    readAndDecompress = do
-      s <- BS.readFile file'
-      E.evaluate $ decompress s
 getValuesBS futhark dir (GenValues gens) =
   mconcat <$> mapM (getGenBS futhark dir) gens
 
--- | Evaluate an IO action while the values are available in the
--- binary format in a file by some name.  The file will be removed
--- after the action is done.
-withValuesFile ::
-  MonadIO m =>
+-- | Make the provided 'Values' available as server-side variables.
+-- This may involve arbitrary server-side computation.  Error
+-- detection... dubious.
+valuesAsVars ::
+  (MonadError T.Text m, MonadIO m) =>
+  Server ->
+  [(VarName, TypeName)] ->
   FutharkExe ->
   FilePath ->
   Values ->
-  (FilePath -> IO a) ->
-  m a
-withValuesFile _ dir (InFile file) f
-  | takeExtension file /= ".gz" =
-    liftIO $ f $ dir </> file
-withValuesFile futhark dir vs f =
-  liftIO . withSystemTempFile "futhark-input" $ \tmpf tmpf_h -> do
-    mapM_ (BS.hPutStr tmpf_h . Bin.encode) =<< getValues futhark dir vs
+  m ()
+valuesAsVars server names_and_types _ dir (InFile file)
+  | takeExtension file == ".gz" = do
+    s <- liftIO $ readAndDecompress $ dir </> file
+    case s of
+      Left e ->
+        throwError $ T.pack $ show file <> ": " <> show e
+      Right s' ->
+        cmdMaybe . withSystemTempFile "futhark-input" $ \tmpf tmpf_h -> do
+          BS.hPutStr tmpf_h s'
+          hClose tmpf_h
+          cmdRestore server tmpf names_and_types
+  | otherwise =
+    cmdMaybe $ cmdRestore server (dir </> file) names_and_types
+valuesAsVars server names_and_types futhark dir (GenValues gens) = do
+  unless (length gens == length names_and_types) $
+    throwError "Mismatch between number of expected and generated values."
+  gen_fs <- mapM (getGenFile futhark dir) gens
+  forM_ (zip gen_fs names_and_types) $ \(file, (v, t)) ->
+    cmdMaybe $ cmdRestore server (dir </> file) [(v, t)]
+valuesAsVars server names_and_types _ _ (Values vs) = do
+  unless (length vs == length names_and_types) $
+    throwError "Mismatch between number of expected and provided values."
+  cmdMaybe . withSystemTempFile "futhark-input" $ \tmpf tmpf_h -> do
+    mapM_ (BS.hPutStr tmpf_h . Bin.encode) vs
     hClose tmpf_h
-    f tmpf
-
--- | Check that the file contains values of the expected types.
-checkValueTypes ::
-  (MonadError T.Text m, MonadIO m) => FilePath -> [TypeName] -> m ()
-checkValueTypes values_f input_types = do
-  maybe_vs <- liftIO $ readValues <$> BS.readFile values_f
-  case maybe_vs of
-    Nothing ->
-      throwError "Invalid input data format."
-    Just vs -> do
-      let vs_types = map (prettyValueTypeNoDims . valueType) vs
-      unless (vs_types == input_types) $
-        throwError $
-          T.unlines
-            [ "Expected input types: " <> T.unwords input_types,
-              "Provided input types: " <> T.unwords vs_types
-            ]
+    cmdRestore server tmpf names_and_types
 
 -- | There is a risk of race conditions when multiple programs have
 -- identical 'GenValues'.  In such cases, multiple threads in 'futhark
@@ -558,8 +562,8 @@ checkValueTypes values_f input_types = do
 -- approach here seems robust enough for now, but certainly it could
 -- be made even better.  The race condition that remains should mostly
 -- result in duplicate work, not crashes or data corruption.
-getGenBS :: MonadIO m => FutharkExe -> FilePath -> GenValue -> m BS.ByteString
-getGenBS futhark dir gen = do
+getGenFile :: MonadIO m => FutharkExe -> FilePath -> GenValue -> m FilePath
+getGenFile futhark dir gen = do
   liftIO $ createDirectoryIfMissing True $ dir </> "data"
   exists_and_proper_size <-
     liftIO $
@@ -575,9 +579,13 @@ getGenBS futhark dir gen = do
         hClose h -- We will be writing and reading this ourselves.
         SBS.writeFile tmpfile s
         renameFile tmpfile $ dir </> file
-  getValuesBS futhark dir $ InFile file
+  pure file
   where
     file = "data" </> genFileName gen
+
+getGenBS :: MonadIO m => FutharkExe -> FilePath -> GenValue -> m BS.ByteString
+getGenBS futhark dir gen =
+  getValuesBS futhark dir =<< (InFile <$> getGenFile futhark dir gen)
 
 genValues :: FutharkExe -> [GenValue] -> IO SBS.ByteString
 genValues (FutharkExe futhark) gens = do

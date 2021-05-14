@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 -- | Haskell code for interacting with a Futhark server program (a
@@ -17,11 +18,14 @@ module Futhark.Server
     cmdOutputs,
     cmdClear,
     cmdReport,
+    cmdMaybe,
+    cmdEither,
   )
 where
 
 import Control.Exception
 import Control.Monad
+import Control.Monad.Except
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
@@ -193,3 +197,11 @@ cmdClear s = helpCmd s ["clear"]
 
 cmdReport :: Server -> IO (Either CmdFailure [T.Text])
 cmdReport s = sendCommand s ["report"]
+
+-- | Turn a 'Maybe'-producing command into a monadic action.
+cmdMaybe :: (MonadError T.Text m, MonadIO m) => IO (Maybe CmdFailure) -> m ()
+cmdMaybe = maybe (pure ()) (throwError . T.unlines . failureMsg) <=< liftIO
+
+-- | Turn an 'Either'-producing command into a monadic action.
+cmdEither :: (MonadError T.Text m, MonadIO m) => IO (Either CmdFailure a) -> m a
+cmdEither = either (throwError . T.unlines . failureMsg) pure <=< liftIO

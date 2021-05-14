@@ -286,7 +286,7 @@ runCompiledEntry futhark server program (InputOutputs entry run_cases) = do
     dir = takeDirectory program
 
     runCompiledCase input_types outs ins run = runExceptT $ do
-      let TestRun _ inputValues _ index _ = run
+      let TestRun _ input_spec _ index _ = run
           case_ctx =
             "Entry point: " <> entry <> "; dataset: "
               <> T.pack (runDescription run)
@@ -294,11 +294,7 @@ runCompiledEntry futhark server program (InputOutputs entry run_cases) = do
       context1 case_ctx $ do
         expected <- getExpectedResult futhark program entry run
 
-        either E.throwError pure
-          <=< withValuesFile futhark dir inputValues
-          $ \values_f -> runExceptT $ do
-            checkValueTypes values_f input_types
-            liftCommand $ cmdRestore server values_f (zip ins input_types)
+        valuesAsVars server (zip ins input_types) futhark dir input_spec
 
         call_r <- liftIO $ cmdCall server entry outs ins
         liftCommand $ cmdFree server ins
