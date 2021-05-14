@@ -139,12 +139,6 @@ data RunOptions = RunOptions
     runResultAction :: Maybe (Int -> IO ())
   }
 
-cmdMaybe :: (MonadError T.Text m, MonadIO m) => IO (Maybe CmdFailure) -> m ()
-cmdMaybe = maybe (pure ()) (throwError . T.unlines . failureMsg) <=< liftIO
-
-cmdEither :: (MonadError T.Text m, MonadIO m) => IO (Either CmdFailure a) -> m a
-cmdEither = either (throwError . T.unlines . failureMsg) pure <=< liftIO
-
 -- | Run the benchmark program on the indicated dataset.
 benchmarkDataset ::
   Server ->
@@ -166,12 +160,7 @@ benchmarkDataset server opts futhark program entry input_spec expected_spec ref_
 
   cmdMaybe . liftIO $ cmdClear server
 
-  either throwError pure
-    <=< withValuesFile futhark dir input_spec
-    $ \values_f ->
-      runExceptT $ do
-        checkValueTypes values_f input_types
-        cmdMaybe $ cmdRestore server values_f (zip ins input_types)
+  valuesAsVars server (zip ins input_types) futhark dir input_spec
 
   let runtime l
         | Just l' <- T.stripPrefix "runtime: " l,

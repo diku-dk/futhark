@@ -16,6 +16,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
     version of Futhark used (and maybe more information in the
     future).
 
+  * Testing/benchmarking with large input data (including randomly
+    generated data) is much faster, as each file is now only read
+    once.
+
 ### Removed
 
 ### Changed
