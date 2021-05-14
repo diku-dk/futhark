@@ -53,7 +53,7 @@ module Language.Futhark.Syntax
     IdentBase (..),
     Inclusiveness (..),
     DimIndexBase (..),
-    SliceBase (..),
+    SliceBase,
     SizeBinder (..),
     AppExpBase (..),
     AppRes (..),
