@@ -61,9 +61,10 @@ the expression produces an *n*-element tuple, it will be unpacked and
 its components passed as *n* distinct arguments to the test function.
 
 If ``input`` is followed by an ``@`` and a file name (which must not
-contain any whitespace) instead of curly braces, values will be read
-from the indicated file.  This is recommended for large data sets.
-This notation cannot be used with ``random`` input.
+contain any whitespace) instead of curly braces, values or
+FutharkScript expression will be read from the indicated file.  This
+is recommended for large data sets.  This notation cannot be used with
+``random`` input.
 
 After the ``input`` block, the expected result of the test case is
 written as either ``output`` followed by another block of values, or

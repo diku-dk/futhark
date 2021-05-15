@@ -149,13 +149,13 @@ data TestRun = TestRun
   deriving (Show)
 
 -- | Several values - either literally, or by reference to a file, or
--- to be generated on demand.
+-- to be generated on demand.  All paths are relative to test program.
 data Values
   = Values [Value]
-  | -- | Path relative to test program.
-    InFile FilePath
+  | InFile FilePath
   | GenValues [GenValue]
   | ScriptValues Script.Exp
+  | ScriptFile FilePath
   deriving (Show)
 
 data GenValue
@@ -317,6 +317,8 @@ parseRunCases = parseRunCases' (0 :: Int)
       unwords $ map genValueType gens
     desc _ (ScriptValues e) =
       prettyOneLine e
+    desc _ (ScriptFile path) =
+      path
 
 parseExpectedResult :: Parser (ExpectedResult Success)
 parseExpectedResult =
@@ -335,7 +337,13 @@ parseExpectedError = lexeme $ do
       ThisError s <$> makeRegexOptsM blankCompOpt defaultExecOpt (T.unpack s)
 
 parseScriptValues :: Parser Values
-parseScriptValues = ScriptValues <$> braces (Script.parseExp postlexeme)
+parseScriptValues =
+  choice
+    [ ScriptValues <$> braces (Script.parseExp postlexeme),
+      ScriptFile . T.unpack <$> (lexstr "@" *> lexeme nextWord)
+    ]
+  where
+    nextWord = takeWhileP Nothing $ not . isSpace
 
 parseRandomValues :: Parser Values
 parseRandomValues = GenValues <$> braces (many parseGenValue)
@@ -501,6 +509,7 @@ getValues futhark dir v = do
       InFile f -> f
       GenValues {} -> "<randomly generated>"
       ScriptValues {} -> "<FutharkScript expression>"
+      ScriptFile f -> f
 
 readAndDecompress :: FilePath -> IO (Either DecompressError BS.ByteString)
 readAndDecompress file = E.try $ do
@@ -527,6 +536,8 @@ getValuesBS futhark dir (GenValues gens) =
   mconcat <$> mapM (getGenBS futhark dir) gens
 getValuesBS _ _ (ScriptValues e) =
   fail $ "Cannot get values from FutharkScript expression: " <> prettyOneLine e
+getValuesBS _ _ (ScriptFile f) =
+  fail $ "Cannot get values from FutharkScript file: " <> f
 
 valueAsVar ::
   (MonadError T.Text m, MonadIO m) =>
@@ -628,6 +639,12 @@ valuesAsVars server names_and_types _ _ (ScriptValues e) =
   where
     noBuiltin f _ = do
       throwError $ "Unknown builtin procedure: " <> f
+valuesAsVars server names_and_types futhark dir (ScriptFile f) = do
+  e <-
+    either (throwError . T.pack . errorBundlePretty) pure
+      . parse (Script.parseExp space) f
+      =<< liftIO (T.readFile (dir </> f))
+  valuesAsVars server names_and_types futhark dir (ScriptValues e)
 
 -- | There is a risk of race conditions when multiple programs have
 -- identical 'GenValues'.  In such cases, multiple threads in 'futhark
