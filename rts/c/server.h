@@ -425,6 +425,28 @@ void cmd_free(struct server_state *s, const char *args[]) {
   }
 }
 
+void cmd_rename(struct server_state *s, const char *args[]) {
+  const char *oldname = get_arg(args, 0);
+  const char *newname = get_arg(args, 1);
+  struct variable *old = get_variable(s, oldname);
+  struct variable *new = get_variable(s, newname);
+
+  if (old == NULL) {
+    failure();
+    printf("Unknown variable: %s\n", oldname);
+    return;
+  }
+
+  if (new != NULL) {
+    failure();
+    printf("Variable already exists: %s\n", newname);
+    return;
+  }
+
+  free(old->name);
+  old->name = strdup(newname);
+}
+
 void cmd_inputs(struct server_state *s, const char *args[]) {
   const char *name = get_arg(args, 0);
   struct entry_point *e = get_entry_point(s, name);
@@ -558,6 +580,8 @@ void process_line(struct server_state *s, char *line) {
     cmd_store(s, tokens+1);
   } else if (strcmp(command, "free") == 0) {
     cmd_free(s, tokens+1);
+  } else if (strcmp(command, "rename") == 0) {
+    cmd_rename(s, tokens+1);
   } else if (strcmp(command, "inputs") == 0) {
     cmd_inputs(s, tokens+1);
   } else if (strcmp(command, "outputs") == 0) {
