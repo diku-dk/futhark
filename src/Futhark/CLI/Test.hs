@@ -183,26 +183,21 @@ runInterpretedEntry :: FutharkExe -> FilePath -> InputOutputs -> TestM ()
 runInterpretedEntry (FutharkExe futhark) program (InputOutputs entry run_cases) =
   let dir = takeDirectory program
       runInterpretedCase run@(TestRun _ inputValues _ index _) =
-        unless ("compiled" `elem` runTags run) $
-          context
-            ( "Entry point: " <> entry
-                <> "; dataset: "
-                <> T.pack (runDescription run)
-            )
-            $ do
-              input <- T.unlines . map prettyText <$> getValues (FutharkExe futhark) dir inputValues
-              expectedResult' <- getExpectedResult (FutharkExe futhark) program entry run
-              (code, output, err) <-
-                liftIO $
-                  readProcessWithExitCode futhark ["run", "-e", T.unpack entry, program] $
-                    T.encodeUtf8 input
-              case code of
-                ExitFailure 127 ->
-                  throwError $ progNotFound $ T.pack futhark
-                _ ->
-                  liftExcept $
-                    compareResult entry index program expectedResult'
-                      =<< runResult program code output err
+        unless (any (`elem` runTags run) ["compiled", "script"]) $
+          context ("Entry point: " <> entry <> "; dataset: " <> T.pack (runDescription run)) $ do
+            input <- T.unlines . map prettyText <$> getValues (FutharkExe futhark) dir inputValues
+            expectedResult' <- getExpectedResult (FutharkExe futhark) program entry run
+            (code, output, err) <-
+              liftIO $
+                readProcessWithExitCode futhark ["run", "-e", T.unpack entry, program] $
+                  T.encodeUtf8 input
+            case code of
+              ExitFailure 127 ->
+                throwError $ progNotFound $ T.pack futhark
+              _ ->
+                liftExcept $
+                  compareResult entry index program expectedResult'
+                    =<< runResult program code output err
    in accErrors_ $ map runInterpretedCase run_cases
 
 runTestCase :: TestCase -> TestM ()

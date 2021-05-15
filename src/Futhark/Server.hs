@@ -14,6 +14,7 @@ module Futhark.Server
     cmdStore,
     cmdCall,
     cmdFree,
+    cmdRename,
     cmdInputs,
     cmdOutputs,
     cmdClear,
@@ -183,6 +184,9 @@ cmdCall s entry outs ins =
 
 cmdFree :: Server -> [VarName] -> IO (Maybe CmdFailure)
 cmdFree s vs = helpCmd s $ "free" : vs
+
+cmdRename :: Server -> VarName -> VarName -> IO (Maybe CmdFailure)
+cmdRename s oldname newname = helpCmd s ["rename", oldname, newname]
 
 cmdInputs :: Server -> EntryName -> IO (Either CmdFailure [TypeName])
 cmdInputs s entry =
