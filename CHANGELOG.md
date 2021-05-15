@@ -20,6 +20,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
     generated data) is much faster, as each file is now only read
     once.
 
+  * Test programs may now use arbitrary FutharkScript expressions to
+    produce test input, in particular expressions that produce opaque
+    values.  This affects both testing, benchmarking, and autotuning.
+
 ### Removed
 
 ### Changed

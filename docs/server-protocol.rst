@@ -82,6 +82,12 @@ Store the *N* values in variables *v1* to *vN* in *file*.
 
 Delete the given variables.
 
+``rename`` *oldname* *newname*
+..............................
+
+Rename the variable *oldname* to *newname*, which must not already
+exist.
+
 ``inputs`` *entry*
 ..................
 

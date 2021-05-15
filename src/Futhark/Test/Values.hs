@@ -27,6 +27,7 @@ module Futhark.Test.Values
     -- * Manipulating values
     valueElems,
     mkCompound,
+    unCompound,
 
     -- * Comparing Values
     compareValues,
@@ -226,6 +227,12 @@ instance Pretty v => Pretty (Compound v) where
 mkCompound :: [v] -> Compound v
 mkCompound [v] = ValueAtom v
 mkCompound vs = ValueTuple $ map ValueAtom vs
+
+-- | If the value is a tuple, extract the components, otherwise return
+-- a singleton list of the value.
+unCompound :: Compound v -> [Compound v]
+unCompound (ValueTuple vs) = vs
+unCompound v = [v]
 
 -- | Like a 'Value', but also grouped in compound ways that are not
 -- supported by raw values.  You cannot parse or read these in

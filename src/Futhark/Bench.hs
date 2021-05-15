@@ -155,12 +155,13 @@ benchmarkDataset server opts futhark program entry input_spec expected_spec ref_
   input_types <- cmdEither $ cmdInputs server entry
   let outs = ["out" <> T.pack (show i) | i <- [0 .. length output_types -1]]
       ins = ["in" <> T.pack (show i) | i <- [0 .. length input_types -1]]
-      freeOuts = cmdMaybe (cmdFree server outs)
-      freeIns = cmdMaybe (cmdFree server ins)
 
   cmdMaybe . liftIO $ cmdClear server
 
   valuesAsVars server (zip ins input_types) futhark dir input_spec
+
+  let freeOuts = cmdMaybe (cmdFree server outs)
+      freeIns = cmdMaybe (cmdFree server ins)
 
   let runtime l
         | Just l' <- T.stripPrefix "runtime: " l,

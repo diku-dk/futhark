@@ -9,6 +9,7 @@ module Futhark.Script
   ( -- * Server
     ScriptServer,
     withScriptServer,
+    withScriptServer',
 
     -- * Expressions, values, and types
     Func (..),
@@ -18,6 +19,8 @@ module Futhark.Script
     ScriptValueType (..),
     ScriptValue (..),
     scriptValueType,
+    serverVarsInValue,
+    ValOrVar (..),
     ExpValue,
 
     -- * Evaluation
@@ -56,12 +59,18 @@ import Text.Megaparsec.Char.Lexer (charLiteral)
 -- more convenient.
 data ScriptServer = ScriptServer Server (IORef Int)
 
+-- | Run an action with a 'ScriptServer' produced by an existing
+-- 'Server', without shutting it down at the end.
+withScriptServer' :: MonadIO m => Server -> (ScriptServer -> m a) -> m a
+withScriptServer' server f = do
+  counter <- liftIO $ newIORef 0
+  f $ ScriptServer server counter
+
 -- | Start a server, execute an action, then shut down the server.
 -- Similar to 'withServer'.
 withScriptServer :: FilePath -> [FilePath] -> (ScriptServer -> IO a) -> IO a
-withScriptServer prog options f = withServer prog options $ \server -> do
-  counter <- newIORef 0
-  f $ ScriptServer server counter
+withScriptServer prog options f =
+  withServer prog options $ flip withScriptServer' f
 
 -- | A function called in a 'Call' expression can be either a Futhark
 -- function or a builtin function.
@@ -206,6 +215,7 @@ instance Pretty ScriptValueType where
         [out] -> strictText out
         _ -> parens $ commasep $ map strictText outs
 
+-- | A Haskell-level value or a variable on the server.
 data ValOrVar = VVal V.Value | VVar VarName
   deriving (Show)
 
@@ -218,6 +228,7 @@ scriptValueType :: ScriptValue v -> ScriptValueType
 scriptValueType (SValue t _) = STValue t
 scriptValueType (SFun _ ins outs _) = STFun ins outs
 
+-- | The set of server-side variables in the value.
 serverVarsInValue :: ExpValue -> S.Set VarName
 serverVarsInValue = S.fromList . concatMap isVar . toList
   where
