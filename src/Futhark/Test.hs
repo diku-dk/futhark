@@ -585,7 +585,7 @@ getGenFile futhark dir gen = do
 
 getGenBS :: MonadIO m => FutharkExe -> FilePath -> GenValue -> m BS.ByteString
 getGenBS futhark dir gen =
-  getValuesBS futhark dir =<< (InFile <$> getGenFile futhark dir gen)
+  getValuesBS futhark dir . InFile =<< getGenFile futhark dir gen
 
 genValues :: FutharkExe -> [GenValue] -> IO SBS.ByteString
 genValues (FutharkExe futhark) gens = do
