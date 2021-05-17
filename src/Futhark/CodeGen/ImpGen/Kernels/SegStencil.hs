@@ -35,7 +35,7 @@ compileSegStencil pat lvl space op kbody =
           group_size_flat_subexp = unCount $ segGroupSize lvl
           group_size_flat_exp = TPrimExp . toExp' int32 $ group_size_flat_subexp
           -- stuff to reshape the group-size depending on the macro variable 'groupsize'
-          flNumT2 x = 1 + (sMin32 1 (group_size_flat_exp `quot` x))
+          flNumT2 x = 1 + sMin32 1 (group_size_flat_exp `quot` x)
           fl256t2 = flNumT2 256
           fl512t2 = flNumT2 512
           fl1024t2 = flNumT2 1024
@@ -88,7 +88,7 @@ compileSegStencil pat lvl space op kbody =
         name <- dPrim "max_shared_bytes" int32
         sOp $ Imp.GetSizeMax (tvVar name) Imp.SizeLocalMemory
         pure $ tvExp name
-      isAboveMinBlock <- dPrimVE "isAboveMinBlock" ((128 .<=. group_size_flat_exp))
+      isAboveMinBlock <- dPrimVE "isAboveMinBlock" (128 .<=. group_size_flat_exp)
       debugPrintf "isAboveMinBlock" isAboveMinBlock
       can_and_should_run_stripTile <- do
         host_strip_sizes <- mapM (dPrimVE "host_strip_sizes") $ zipWith (*) group_sizes_exp strip_multiples_exp
@@ -216,7 +216,7 @@ compileGlobalReadFlat pat lvl space op kbody = do
 
   sKernelThread "segstencil-globalRead" grid_flat group_size_flat_c (segFlat space) $ do
     constants <- kernelConstants <$> askEnv
-    (zipWithM_ dPrimV_ gids_vn) =<< (do
+    zipWithM_ dPrimV_ gids_vn =<< (do
       local_id_flat <- dPrimVE "local_id_flat" . sExt64 . kernelLocalThreadId $ constants
       group_id_flat <- dPrimVE "group_id_flat" . sExt64 . kernelGroupId $ constants
       gid_flat <- dPrimVE "global_id_flat" $ group_id_flat * group_size_flat + local_id_flat
@@ -240,10 +240,10 @@ compileGlobalReadFlat pat lvl space op kbody = do
               let ix3 = zip ixs_tup max_ixs in
               forM ix3 (\(relix, maxix) ->
                 let read_ix = gid + fromInteger relix in
-                let bounded =
-                      if relix > 0 then sMin64 maxix read_ix
-                      else if relix < 0 then sMax64 0 read_ix
-                      else read_ix
+                let bounded
+                      | relix > 0 = sMin64 maxix read_ix
+                      | relix < 0 = sMax64 0 read_ix
+                      | otherwise = read_ix
                 in dPrimVE "bound_ix" bounded
                 )
               )
@@ -311,7 +311,7 @@ compileBigTileStripMinedSingleDim pat _ space op kbody group_sizes_exp strip_mul
   in do
   -- host side evaluated variables
   host_strip_sizes <- mapM (dPrimVE "host_strip_sizes") strip_sizes_exp
-  strip_grid <- mapM (dPrimVE "strip_grid") $ map sExt32 $ zipWith divUp dims $ map sExt64 host_strip_sizes
+  strip_grid <- mapM (dPrimVE "strip_grid" . sExt32) $ zipWith divUp dims $ map sExt64 host_strip_sizes
   strip_grid_spans <- mapM (dPrimVE "strip_grid_spans") $ createSpans strip_grid
   tile_length <- dPrimV "tile_length_flat" shared_size_flat_exp
   num_groups <- Count <$> dPrimVE "num_groups" (sExt64 $ product strip_grid)
@@ -326,7 +326,7 @@ compileBigTileStripMinedSingleDim pat _ space op kbody group_sizes_exp strip_mul
     group_sizes <- mapM (dPrimVE "group_sizes") group_sizes_exp
     group_spans <- mapM (dPrimVE "group_spans") $ createSpans group_sizes
     group_size_flat <- dPrimVE "group_size_flat" $ product group_sizes
-    strip_sizes <- mapM (dPrimVE "strip_sizes") $ map sExt64 strip_sizes_exp
+    strip_sizes <- mapM (dPrimVE "strip_sizes" . sExt64) strip_sizes_exp
     shared_sizes <- mapM (dPrimVE "shared_sizes") shared_sizes_exp
     shared_size_flat <- dPrimVE "shared_size_flat" $ product shared_sizes
     -- threadId/groupId variables
@@ -345,7 +345,7 @@ compileBigTileStripMinedSingleDim pat _ space op kbody group_sizes_exp strip_mul
       loader_gids <- mapM (dPrimVE "loader_gid") $
          bound_idxs $ zipWith (+) writeSet_offsets $ map sExt64 $ zipWith (+) loader_ids a_mins
       -- if inside the bounds of the tile, perform read from input / write to tile.
-      sWhen ((bNot isLastIter) .||. loader_ids_flat .<. shared_size_flat) $
+      sWhen (bNot isLastIter .||. loader_ids_flat .<. shared_size_flat) $
         forM_ (zip tiles (stencilArrays op)) $ \(tile, input_arr) ->
           copyDWIMFix tile [sExt64 loader_ids_flat] (Var input_arr) loader_gids
 
@@ -370,8 +370,7 @@ compileBigTileStripMinedSingleDim pat _ space op kbody group_sizes_exp strip_mul
       -- create the individual indexes used to load from the tile(s).
       let tile_offsets = map (flattenIndex shared_sizes) $ transpose $ zipWith (mapM (-)) stencil_ixss a_mins
           variant_params_tuples = transpose $ chunksOf n_point_stencil variantParams
-      tile_ixs <- mapM (dPrimVE "tile_ixs")
-        $ map (+ local_id_shared_flat) (map (+ tile_ids_offs_flat) tile_offsets)
+      tile_ixs <- mapM (dPrimVE "tile_ixs" . (+ local_id_shared_flat) . (+ tile_ids_offs_flat)) tile_offsets
 
       -- check for out of bound on global id for each axis
       sWhen (foldl1 (.&&.) $ zipWith (.<=.) gids max_ixs) $ do
