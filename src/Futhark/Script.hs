@@ -366,13 +366,15 @@ evalExp builtin (ScriptServer server counter) top_level_e = do
             "Literate Futhark does not support passing script-constructed records, tuples, or functions to entry points.\n"
               <> "Create a Futhark wrapper function."
 
-        -- Careful to not require saturated application.
-        unless (and $ zipWith (==) es_types (map (V.ValueAtom . STValue) in_types)) $
-          throwError $
-            "Function \"" <> name <> "\" expects arguments of types:\n"
-              <> prettyText (V.mkCompound $ map V.ValueAtom in_types)
-              <> "\nBut called with arguments of types:\n"
-              <> prettyText (V.mkCompound $ map V.ValueAtom es_types)
+        -- Careful to not require saturated application, but do still
+        -- check for over-saturation.
+        let too_many = length es_types > length in_types
+            too_wrong = zipWith (/=) es_types (map (V.ValueAtom . STValue) in_types)
+        when (or $ too_many : too_wrong) . throwError $
+          "Function \"" <> name <> "\" expects arguments of types:\n"
+            <> prettyText (V.mkCompound $ map V.ValueAtom in_types)
+            <> "\nBut called with arguments of types:\n"
+            <> prettyText (V.mkCompound $ map V.ValueAtom es_types)
 
         ins <- mapM (interValToVar <=< evalExp' vtable) es
 

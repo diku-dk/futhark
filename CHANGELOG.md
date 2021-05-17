@@ -35,6 +35,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Entry points can now have same name as (undocumented!) compiler intrinsics.
 
+  * FutharkScript now detects too many arguments passed to functions.
+
 ## [0.19.5]
 
 ### Added
