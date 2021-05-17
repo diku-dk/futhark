@@ -56,21 +56,24 @@ compileSegStencil pat lvl space op kbody =
           a_mins_i = map minimum stencil_indexes
           a_maxs_i = map maximum stencil_indexes
           -- width of the zone of indexes that only read from and not writen to.
-          halo_widths = map (\x-> x-1) $ zipWith (-) a_maxs_i a_mins_i
+          halo_widths = zipWith (-) a_maxs_i a_mins_i
           halo_widths_exp = map fromInteger halo_widths
+
+          size_per_invars :: [Integer]
+          size_per_invars = map primByteSize lambdaInvarTypes
           -- Amount of Bytes required for a single index in tile(s).
           memory_per_elem :: Integer
-          memory_per_elem = sum $ map primByteSize lambdaInvarTypes
+          memory_per_elem = sum size_per_invars
           rescale_on_byte_size :: Integer -> Integer
           rescale_on_byte_size mult =
-            let largest_type_size = maximum $ map primByteSize lambdaInvarTypes
+            let largest_type_size = maximum size_per_invars
             in max (1 :: Integer) ((mult * 4) `Prelude.div` largest_type_size)
           strip_multiples :: [Integer]
           strip_multiples =
             case dimentionality of
-              1 -> [4]
-              2 -> [2, 2]
-              3 -> [4, 2, 1]
+              1 -> [rescale_on_byte_size 4]
+              2 -> [2, rescale_on_byte_size 2]
+              3 -> [4, 2, rescale_on_byte_size 1]
               _ -> error "not valid dimensions"
           strip_multiples_exp :: [Imp.TExp Int32]
           strip_multiples_exp = map fromInteger strip_multiples
@@ -97,7 +100,7 @@ compileSegStencil pat lvl space op kbody =
         --   However as of writing this comment, there is no support for this
         --   in the compiler, so it was simply (but incorrectly) assumed that
         --   this was of no concern.
-        canRunStripTile <- dPrimVE "canRunStripTile" $ stripTileBytes .<=. max_shared_bytes
+        canRunStripTile <- dPrimVE "canRunStripTile" $ stripTileBytes .<=. (max_shared_bytes `div` 2)
         reuseIsHighEnough <- (dPrimVE "reuseIsHighEnoughST" . (2 .<=.)) =<< computeFlatReuse host_strip_sizes halo_widths_exp
         isNotSkewed <- dPrimVE "isNotSkewedST" $ foldl1 (.&&.) $ zipWith (.<=.) host_strip_sizes dims
         forM_ group_sizes_exp $ debugPrintf "group_sizes"
@@ -106,7 +109,11 @@ compileSegStencil pat lvl space op kbody =
         debugPrintf "can_run_strips" canRunStripTile
         debugPrintf "reuseIsHighEnough_strips" reuseIsHighEnough
         debugPrintf "isNotSkewed_strips" isNotSkewed
-        dPrimVE "can_and_should_run_stripTile" $ canRunStripTile .&&. reuseIsHighEnough .&&. isNotSkewed .&&. isAboveMinBlock
+        dPrimVE "can_and_should_run_stripTile" $
+          canRunStripTile
+            .&&. reuseIsHighEnough
+            .&&. isNotSkewed
+            .&&. isAboveMinBlock
       debugPrintf "can_and_should_run_stripTile" can_and_should_run_stripTile
       sIf can_and_should_run_stripTile
         (compileBigTileStripMinedSingleDim pat lvl space op kbody group_sizes_exp strip_multiples)
@@ -187,7 +194,7 @@ compileGlobalReadFlat ::
   KernelBody KernelsMem ->
   CallKernelGen ()
 compileGlobalReadFlat pat lvl space op kbody = do
-  let (is, dims') = unzip $ unSegSpace space
+  let (gids_vn, dims') = unzip $ unSegSpace space
       dims = map toInt64Exp dims'
       group_size_flat_c = toInt64Exp <$> segGroupSize lvl
       group_size_flat = unCount group_size_flat_c
@@ -209,14 +216,16 @@ compileGlobalReadFlat pat lvl space op kbody = do
 
   sKernelThread "segstencil-globalRead" grid_flat group_size_flat_c (segFlat space) $ do
     constants <- kernelConstants <$> askEnv
-    local_id_flat <- dPrimVE "local_id_flat" . sExt64 . kernelLocalThreadId $ constants
-    group_id_flat <- dPrimVE "group_id_flat" . sExt64 . kernelGroupId $ constants
-    gid_flat <- dPrimVE "global_id_flat" $ group_id_flat * group_size_flat + local_id_flat
-    gids <- map tvExp <$> unflattenIx "global_id" size_span gid_flat
-    zipWithM_ dPrimV_ is gids
+    (zipWithM_ dPrimV_ gids_vn) =<< (do
+      local_id_flat <- dPrimVE "local_id_flat" . sExt64 . kernelLocalThreadId $ constants
+      group_id_flat <- dPrimVE "group_id_flat" . sExt64 . kernelGroupId $ constants
+      gid_flat <- dPrimVE "global_id_flat" $ group_id_flat * group_size_flat + local_id_flat
+      map tvExp <$> unflattenIx "global_id" size_span gid_flat
+      )
+    let gids = map (toInt64Exp . Var) gids_vn
 
     -- check for out of bound on global id for each axis
-    sWhen (isActive $ unSegSpace space) $ do
+    sWhen (foldl1 (.&&.) $ zipWith (.<=.) gids max_ixs) $ do
       -- compile invariant elements
       compileStms mempty (kernelBodyStms kbody) $ pure ()
 
@@ -227,14 +236,19 @@ compileGlobalReadFlat pat lvl space op kbody = do
       dLParams variantParams
 
       let fetch_ixs =
-            zipWithM (\maxix ->
-              mapM (dPrimVE "bound_ix" . sMin64 maxix . sMax64 0)
-              ) max_ixs
-            $ flip (zipWith (mapM (+))) gids
-            $ map (map fromInteger)
-            $ unique_ixs
+            forM (zip unique_ixs gids) (\(ixs_tup, gid ) ->
+              let ix3 = zip ixs_tup max_ixs in
+              forM ix3 (\(relix, maxix) ->
+                let read_ix = gid + fromInteger relix in
+                let bounded =
+                      if relix > 0 then sMin64 maxix read_ix
+                      else if relix < 0 then sMax64 0 read_ix
+                      else read_ix
+                in dPrimVE "bound_ix" bounded
+                )
+              )
       read_ixs_all <- fetch_ixs
-      let ixs_lookup = zipWith (zipWith (,)) unique_ixs read_ixs_all
+      let ixs_lookup = zipWith zip unique_ixs read_ixs_all
 
       -- load variants into lambda variant parameters
       forM_ (zip sorted_ixs sorted_params_tup) $ \(rel_ixs, pars) -> do
@@ -270,7 +284,7 @@ compileBigTileStripMinedSingleDim ::
   [Integer] ->
   CallKernelGen ()
 compileBigTileStripMinedSingleDim pat _ space op kbody group_sizes_exp strip_multiples =
-  let (is, dims') = unzip $ unSegSpace space
+  let (gids_vn, dims') = unzip $ unSegSpace space
       dims = map toInt64Exp dims'
       stencil_ixss :: [[Imp.TExp Int32]]
       stencil_ixss = map (map fromInteger) $ stencilIndexes op
@@ -303,7 +317,7 @@ compileBigTileStripMinedSingleDim pat _ space op kbody group_sizes_exp strip_mul
   num_groups <- Count <$> dPrimVE "num_groups" (sExt64 $ product strip_grid)
   max_ixs <- mapM (dPrimVE "max_ixs" . (\x->x-1)) dims
 
-  sKernelThread "segstencil-stripbigtile" num_groups block_size_c (segFlat space) $ do
+  sKernelThread "stripbigtile" num_groups block_size_c (segFlat space) $ do
     -- declaration of shared tile(s)
     tiles <- forM lamParTypes $ \ptype ->
       sAllocArray "tile" ptype (Shape [Var $ tvVar tile_length]) (Space "local")
@@ -339,23 +353,28 @@ compileBigTileStripMinedSingleDim pat _ space op kbody group_sizes_exp strip_mul
     sOp $ Imp.Barrier Imp.FenceLocal
 
     -- Phase 2: Iterate through the write-set and evaluate the lambda function and do the writes.
+    base_write_gid <- mapM (dPrimVE "base_write_gid")
+      $ zipWith (+) writeSet_offsets $ map sExt64 local_ids
+    local_id_shared_flat <- dPrimVE "local_id_shared_flat" $ flattenIndex shared_sizes local_ids
+
     let nest_shape = Shape $ map (Constant . IntValue . intValue Int64) strip_multiples
     sLoopNest nest_shape $ \local_strip_ids -> do
       -- create the centre index used to read from the tile(s).
-      tile_local_ids <- mapM (dPrimVE "tile_local_id")
-                      $ zipWith (+) local_ids
+      tile_ids_offs <- mapM (dPrimVE "tile_ids_offs")
                       $ zipWith (*) (map sExt32 local_strip_ids) group_sizes
-      tile_local_id_flat <- dPrimVE "tile_local_id_flat" $ flattenIndex shared_sizes tile_local_ids
+      tile_ids_offs_flat <- dPrimVE "tile_ids_offs_flat" $ flattenIndex shared_sizes tile_ids_offs
       -- assign the relevant values to the global-ids.
-      let gids = zipWith (+) writeSet_offsets (map sExt64 tile_local_ids)
-      zipWithM_ dPrimV_ is gids
+      zipWithM_ dPrimV_ gids_vn $ zipWith (+) base_write_gid $ map sExt64 tile_ids_offs
+      let gids = map (toInt64Exp . Var) gids_vn
 
       -- create the individual indexes used to load from the tile(s).
       let tile_offsets = map (flattenIndex shared_sizes) $ transpose $ zipWith (mapM (-)) stencil_ixss a_mins
-          tile_ixs = mapM (+) tile_offsets tile_local_id_flat
           variant_params_tuples = transpose $ chunksOf n_point_stencil variantParams
+      tile_ixs <- mapM (dPrimVE "tile_ixs")
+        $ map (+ local_id_shared_flat) (map (+ tile_ids_offs_flat) tile_offsets)
 
-      sWhen (isActive $ unSegSpace space) $ do
+      -- check for out of bound on global id for each axis
+      sWhen (foldl1 (.&&.) $ zipWith (.<=.) gids max_ixs) $ do
         -- compile invariant elements
         compileStms mempty (kernelBodyStms kbody) $ pure ()
 
