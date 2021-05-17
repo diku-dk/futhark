@@ -132,7 +132,7 @@ commandLineOptions =
       "Ignore 'unsafe' in code.",
     Option
       []
-      ["entry-points"]
+      ["entry-point"]
       ( ReqArg
           ( \arg -> Right $ \config ->
               config

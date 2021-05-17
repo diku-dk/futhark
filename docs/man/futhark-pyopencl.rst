@@ -37,8 +37,8 @@ OPTIONS
 -h
   Print help text to standard output and exit.
 
---entry NAME
-  Treat the specified top-level function as an entry point.
+--entry-point NAME
+  Treat this top-level function as an entry point.
 
 --library
   Instead of compiling to an executable program, generate a Python

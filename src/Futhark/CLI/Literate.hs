@@ -851,7 +851,7 @@ main = mainWithOptions initialOptions commandLineOptions "program" $ \args opts 
       script <- parseProgFile prog
 
       unless (scriptSkipCompilation opts) $ do
-        let entryOpt v = "--entry=" ++ T.unpack v
+        let entryOpt v = "--entry-point=" ++ T.unpack v
             compile_options =
               "--server" :
               map entryOpt (S.toList (varsInScripts script))
