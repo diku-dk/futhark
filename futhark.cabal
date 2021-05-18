@@ -106,6 +106,7 @@ library
       Futhark.CodeGen.Backends.GenericPython.AST
       Futhark.CodeGen.Backends.GenericPython.Definitions
       Futhark.CodeGen.Backends.GenericPython.Options
+      Futhark.CodeGen.Backends.GenericWASM
       Futhark.CodeGen.Backends.MulticoreC
       Futhark.CodeGen.Backends.MulticoreWASM
       Futhark.CodeGen.Backends.PyOpenCL
