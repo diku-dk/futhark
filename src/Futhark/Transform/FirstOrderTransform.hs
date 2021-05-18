@@ -251,30 +251,19 @@ transformSOAC pat (Stream w arrs _ nes lam) = do
     BasicOp $ SubExp $ intConst Int64 1
 
   loop_body <- runBodyBinder $
-    localScope
-      ( scopeOf loop_form
-          <> scopeOfFParams merge_params
-      )
-      $ do
-        let slice =
-              [DimSlice (Var i) (Var (paramName chunk_size_param)) (intConst Int64 1)]
-        forM_ (zip chunk_params arrs) $ \(p, arr) ->
-          letBindNames [paramName p] $
-            BasicOp $
-              Index arr $
-                fullSlice (paramType p) slice
+    localScope (scopeOf loop_form <> scopeOfFParams merge_params) $ do
+      let slice = [DimSlice (Var i) (Var (paramName chunk_size_param)) (intConst Int64 1)]
+      forM_ (zip chunk_params arrs) $ \(p, arr) ->
+        letBindNames [paramName p] . BasicOp . Index arr $
+          fullSlice (paramType p) slice
 
-        (res, mapout_res) <- splitAt (length nes) <$> bodyBind (lambdaBody lam)
+      (res, mapout_res) <- splitAt (length nes) <$> bodyBind (lambdaBody lam)
 
-        mapout_res' <- forM (zip mapout_params mapout_res) $ \(p, se) ->
-          letSubExp "mapout_res" $
-            BasicOp $
-              Update
-                (paramName p)
-                (fullSlice (paramType p) slice)
-                se
+      mapout_res' <- forM (zip mapout_params mapout_res) $ \(p, se) ->
+        letSubExp "mapout_res" . BasicOp $
+          Update (paramName p) (fullSlice (paramType p) slice) se
 
-        resultBodyM $ res ++ mapout_res'
+      resultBodyM $ res ++ mapout_res'
 
   letBind pat $ DoLoop [] merge loop_form loop_body
 transformSOAC pat (Scatter len lam ivs as) = do
