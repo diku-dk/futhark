@@ -237,9 +237,17 @@ transformSOAC pat (Stream w arrs _ nes lam) = do
           <$> newParam "stream_mapout" (toDecl t' Unique)
           <*> letSubExp "stream_mapout_scratch" scratch
 
-  let onType t@Acc {} = t `toDecl` Unique
-      onType t = t `toDecl` Nonunique
-      merge = zip (map (fmap onType) fold_params) nes ++ mapout_merge
+  -- We need to copy the neutral elements because they may be consumed
+  -- in the body of the Stream.
+  let copyIfArray se = do
+        se_t <- subExpType se
+        case (se_t, se) of
+          (Array {}, Var v) -> letSubExp (baseString v) $ BasicOp $ Copy v
+          _ -> pure se
+  nes' <- mapM copyIfArray nes
+
+  let onType t = t `toDecl` Unique
+      merge = zip (map (fmap onType) fold_params) nes' ++ mapout_merge
       merge_params = map fst merge
       mapout_params = map fst mapout_merge
 
