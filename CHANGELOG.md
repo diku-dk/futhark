@@ -37,6 +37,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * FutharkScript now detects too many arguments passed to functions.
 
+  * Sequentialisation bug (#1350).
+
 ## [0.19.5]
 
 ### Added
