@@ -65,7 +65,7 @@ primTypeToCType :: PrimType -> C.Type
 primTypeToCType (IntType t) = intTypeToCType t
 primTypeToCType (FloatType t) = floatTypeToCType t
 primTypeToCType Bool = [C.cty|typename bool|]
-primTypeToCType Cert = [C.cty|typename bool|]
+primTypeToCType Unit = [C.cty|typename bool|]
 
 -- | The C type corresponding to a primitive type.  Integers are
 -- assumed to have the specified sign.
@@ -174,7 +174,7 @@ instance C.ToExp PrimValue where
   toExp (FloatValue v) = C.toExp v
   toExp (BoolValue True) = C.toExp (1 :: Int8)
   toExp (BoolValue False) = C.toExp (0 :: Int8)
-  toExp Checked = C.toExp (1 :: Int8)
+  toExp UnitValue = C.toExp (1 :: Int8)
 
 instance C.ToExp SubExp where
   toExp (Var v) = C.toExp v
@@ -761,6 +761,10 @@ $esc:("#ifdef __OPENCL_VERSION__")
       return atan2(x,y);
     }
 
+    static inline float $id:(funName' "hypot32")(float x, float y) {
+      return hypot(x,y);
+    }
+
     static inline float $id:(funName' "gamma32")(float x) {
       return tgamma(x);
     }
@@ -861,6 +865,10 @@ $esc:("#else")
 
     static inline float $id:(funName' "atan2_32")(float x, float y) {
       return atan2f(x,y);
+    }
+
+    static inline float $id:(funName' "hypot32")(float x, float y) {
+      return hypotf(x,y);
     }
 
     static inline float $id:(funName' "gamma32")(float x) {
@@ -991,6 +999,10 @@ cFloat64Funs =
       return atan2(x,y);
     }
 
+    static inline double $id:(funName' "hypot64")(double x, double y) {
+      return hypot(x,y);
+    }
+
     static inline double $id:(funName' "gamma64")(double x) {
       return tgamma(x);
     }
@@ -1081,7 +1093,7 @@ typeStr :: Signedness -> PrimType -> String
 typeStr sign pt =
   case (sign, pt) of
     (_, Bool) -> "bool"
-    (_, Cert) -> "bool"
+    (_, Unit) -> "bool"
     (_, FloatType Float32) -> " f32"
     (_, FloatType Float64) -> " f64"
     (TypeDirect, IntType Int8) -> "  i8"

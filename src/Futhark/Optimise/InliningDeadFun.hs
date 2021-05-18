@@ -227,7 +227,7 @@ addLocations attrs caller_safety more_locs = fmap onStm
       Let pat (withAttrs (attrsForAssert attrs) aux) $
         case caller_safety of
           Safe -> BasicOp $ Assert cond desc (loc, locs ++ more_locs)
-          Unsafe -> BasicOp $ SubExp $ Constant Checked
+          Unsafe -> BasicOp $ SubExp $ Constant UnitValue
     onStm (Let pat aux (Op soac)) =
       Let pat (withAttrs attrs' aux) $
         Op $

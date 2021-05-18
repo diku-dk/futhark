@@ -29,6 +29,10 @@ class Server:
         if not vname in self._vars:
             raise self.Failure('Unknown variable: %s' % vname)
 
+    def _check_new_var(self, vname):
+        if vname in self._vars:
+            raise self.Failure('Variable already exists: %s' % vname)
+
     def _get_var(self, vname):
         self._check_var(vname)
         return self._vars[vname]
@@ -51,6 +55,14 @@ class Server:
             self._check_var(vname)
             del self._vars[vname]
 
+    def _cmd_rename(self, args):
+        oldname = self._get_arg(args, 0)
+        newname = self._get_arg(args, 1)
+        self._check_var(oldname)
+        self._check_new_var(newname)
+        self._vars[newname] = self._vars[oldname]
+        del self._vars[oldname]
+
     def _cmd_call(self, args):
         entry = self._get_entry_point(self._get_arg(args, 0))
         num_ins = len(entry[0])
@@ -63,8 +75,7 @@ class Server:
         out_vnames = args[1:num_outs+1]
 
         for out_vname in out_vnames:
-            if out_vname in self._vars:
-                raise self.Failure('Variable already exists: %s' % out_vname)
+            self._check_new_var(out_vname)
 
         in_vnames = args[1+num_outs:]
         ins = [ self._get_var(in_vname) for in_vname in in_vnames ]
@@ -146,6 +157,7 @@ class Server:
                   'restore': _cmd_restore,
                   'store': _cmd_store,
                   'free': _cmd_free,
+                  'rename': _cmd_rename,
                   'clear': _cmd_dummy,
                   'pause_profiling': _cmd_dummy,
                   'unpause_profiling': _cmd_dummy,

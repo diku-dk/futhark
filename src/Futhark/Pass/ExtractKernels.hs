@@ -796,84 +796,125 @@ onMap' ::
   Lambda ->
   DistribM (Out.Stms Out.Kernels)
 onMap' loopnest path mk_seq_stms mk_par_stms pat lam = do
-  let nest_ws = kernelNestWidths loopnest
-      res = map Var $ patternNames pat
-      aux = loopNestingAux $ innermostKernelNesting loopnest
-      attrs = stmAuxAttrs aux
+  -- Some of the control flow here looks a bit convoluted because we
+  -- are trying to avoid generating unneeded threshold parameters,
+  -- which means we need to do all the pruning checks up front.
 
   types <- askScope
-  ((outer_suff, outer_suff_key), outer_suff_stms) <-
-    sufficientParallelism "suff_outer_par" nest_ws path Nothing
 
   intra <-
     if onlyExploitIntra (stmAuxAttrs aux)
       || (worthIntraGroup lam && mayExploitIntra attrs)
       then flip runReaderT types $ intraGroupParallelise loopnest lam
       else return Nothing
-  seq_body <-
-    renameBody =<< mkBody
-      <$> mk_seq_stms ((outer_suff_key, True) : path) <*> pure res
-  let seq_alts =
-        [ (outer_suff, seq_body)
-          | worthSequentialising lam,
-            mayExploitOuter attrs
-        ]
 
   case intra of
-    Nothing -> do
-      par_body <-
-        renameBody =<< mkBody
-          <$> mk_par_stms ((outer_suff_key, False) : path) <*> pure res
+    _ | "sequential_inner" `inAttrs` attrs -> do
+      seq_body <- renameBody =<< mkBody <$> mk_seq_stms path <*> pure res
+      kernelAlternatives pat seq_body []
+    --
+    Nothing
+      | Just m <- mkSeqAlts -> do
+        (outer_suff, outer_suff_key, outer_suff_stms, seq_body) <- m
+        par_body <-
+          renameBody =<< mkBody
+            <$> mk_par_stms ((outer_suff_key, False) : path) <*> pure res
+        (outer_suff_stms <>) <$> kernelAlternatives pat par_body [(outer_suff, seq_body)]
+      --
+      | otherwise -> do
+        par_body <- renameBody =<< mkBody <$> mk_par_stms path <*> pure res
+        kernelAlternatives pat par_body []
+    --
+    Just intra'@(_, _, log, intra_prelude, intra_stms)
+      | onlyExploitIntra attrs -> do
+        addLog log
+        group_par_body <- renameBody $ mkBody intra_stms res
+        (intra_prelude <>) <$> kernelAlternatives pat group_par_body []
+      --
+      | otherwise -> do
+        addLog log
 
-      if "sequential_inner" `inAttrs` attrs
-        then kernelAlternatives pat seq_body []
-        else (outer_suff_stms <>) <$> kernelAlternatives pat par_body seq_alts
-    Just ((_intra_min_par, intra_avail_par), group_size, log, intra_prelude, intra_stms) -> do
-      addLog log
-      -- We must check that all intra-group parallelism fits in a group.
-      ((intra_ok, intra_suff_key), intra_suff_stms) <- do
-        ((intra_suff, suff_key), check_suff_stms) <-
-          sufficientParallelism
-            "suff_intra_par"
-            [intra_avail_par]
-            ((outer_suff_key, False) : path)
-            (Just intraMinInnerPar)
+        case mkSeqAlts of
+          Nothing -> do
+            (group_par_body, intra_ok, intra_suff_key, intra_suff_stms) <-
+              checkSuffIntraPar path intra'
 
-        runBinder $ do
-          addStms intra_prelude
+            par_body <-
+              renameBody =<< mkBody
+                <$> mk_par_stms ((intra_suff_key, False) : path) <*> pure res
 
-          max_group_size <-
-            letSubExp "max_group_size" $ Op $ SizeOp $ Out.GetSizeMax Out.SizeGroup
-          fits <-
-            letSubExp "fits" $
-              BasicOp $
-                CmpOp (CmpSle Int64) group_size max_group_size
+            (intra_suff_stms <>)
+              <$> kernelAlternatives pat par_body [(intra_ok, group_par_body)]
+          Just m -> do
+            (outer_suff, outer_suff_key, outer_suff_stms, seq_body) <- m
 
-          addStms check_suff_stms
+            (group_par_body, intra_ok, intra_suff_key, intra_suff_stms) <-
+              checkSuffIntraPar ((outer_suff_key, False) : path) intra'
 
-          intra_ok <- letSubExp "intra_suff_and_fits" $ BasicOp $ BinOp LogAnd fits intra_suff
-          return (intra_ok, suff_key)
+            par_body <-
+              renameBody =<< mkBody
+                <$> mk_par_stms
+                  ( [ (outer_suff_key, False),
+                      (intra_suff_key, False)
+                    ]
+                      ++ path
+                  )
+                  <*> pure res
 
-      group_par_body <- renameBody $ mkBody intra_stms res
+            ((outer_suff_stms <> intra_suff_stms) <>)
+              <$> kernelAlternatives
+                pat
+                par_body
+                [(outer_suff, seq_body), (intra_ok, group_par_body)]
+  where
+    nest_ws = kernelNestWidths loopnest
+    res = map Var $ patternNames pat
+    aux = loopNestingAux $ innermostKernelNesting loopnest
+    attrs = stmAuxAttrs aux
 
-      par_body <-
-        renameBody =<< mkBody
-          <$> mk_par_stms
-            ( [ (outer_suff_key, False),
-                (intra_suff_key, False)
-              ]
-                ++ path
-            )
-            <*> pure res
+    mkSeqAlts
+      | worthSequentialising lam,
+        mayExploitOuter attrs = Just $ do
+        ((outer_suff, outer_suff_key), outer_suff_stms) <- checkSuffOuterPar
+        seq_body <-
+          renameBody =<< mkBody
+            <$> mk_seq_stms ((outer_suff_key, True) : path) <*> pure res
+        pure (outer_suff, outer_suff_key, outer_suff_stms, seq_body)
+      | otherwise =
+        Nothing
 
-      if "sequential_inner" `inAttrs` attrs
-        then kernelAlternatives pat seq_body []
-        else
-          if onlyExploitIntra attrs
-            then (intra_suff_stms <>) <$> kernelAlternatives pat group_par_body []
-            else
-              ((outer_suff_stms <> intra_suff_stms) <>)
-                <$> kernelAlternatives pat par_body (seq_alts ++ [(intra_ok, group_par_body)])
+    checkSuffOuterPar =
+      sufficientParallelism "suff_outer_par" nest_ws path Nothing
+
+    checkSuffIntraPar
+      path'
+      ((_intra_min_par, intra_avail_par), group_size, _, intra_prelude, intra_stms) = do
+        -- We must check that all intra-group parallelism fits in a group.
+        ((intra_ok, intra_suff_key), intra_suff_stms) <- do
+          ((intra_suff, suff_key), check_suff_stms) <-
+            sufficientParallelism
+              "suff_intra_par"
+              [intra_avail_par]
+              path'
+              (Just intraMinInnerPar)
+
+          runBinder $ do
+            addStms intra_prelude
+
+            max_group_size <-
+              letSubExp "max_group_size" $ Op $ SizeOp $ Out.GetSizeMax Out.SizeGroup
+            fits <-
+              letSubExp "fits" $
+                BasicOp $
+                  CmpOp (CmpSle Int64) group_size max_group_size
+
+            addStms check_suff_stms
+
+            intra_ok <- letSubExp "intra_suff_and_fits" $ BasicOp $ BinOp LogAnd fits intra_suff
+            return (intra_ok, suff_key)
+
+        group_par_body <- renameBody $ mkBody intra_stms res
+        pure (group_par_body, intra_ok, intra_suff_key, intra_suff_stms)
 
 onInnerMap ::
   KernelPath ->

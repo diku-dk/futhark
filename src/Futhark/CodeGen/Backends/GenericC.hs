@@ -839,7 +839,7 @@ arrayLibraryFunctions space pt signed shape = do
         resetMem [C.cexp|arr->mem|] space
         allocMem
           [C.cexp|arr->mem|]
-          [C.cexp|((size_t)$exp:arr_size) * sizeof($ty:pt')|]
+          [C.cexp|((size_t)$exp:arr_size) * $int:(primByteSize pt::Int)|]
           space
           [C.cstm|return NULL;|]
         forM_ [0 .. rank -1] $ \i ->
@@ -855,7 +855,7 @@ arrayLibraryFunctions space pt signed shape = do
       [C.cexp|data|]
       [C.cexp|0|]
       DefaultSpace
-      [C.cexp|((size_t)$exp:arr_size) * sizeof($ty:pt')|]
+      [C.cexp|((size_t)$exp:arr_size) * $int:(primByteSize pt::Int)|]
 
   new_raw_body <- collect $ do
     prepare_new
@@ -866,7 +866,7 @@ arrayLibraryFunctions space pt signed shape = do
       [C.cexp|data|]
       [C.cexp|offset|]
       space
-      [C.cexp|((size_t)$exp:arr_size) * sizeof($ty:pt')|]
+      [C.cexp|((size_t)$exp:arr_size) * $int:(primByteSize pt::Int)|]
 
   free_body <- collect $ unRefMem [C.cexp|arr->mem|] space
 
@@ -879,7 +879,7 @@ arrayLibraryFunctions space pt signed shape = do
         [C.cexp|arr->mem.mem|]
         [C.cexp|0|]
         space
-        [C.cexp|((size_t)$exp:arr_size_array) * sizeof($ty:pt')|]
+        [C.cexp|((size_t)$exp:arr_size_array) * $int:(primByteSize pt::Int)|]
 
   ctx_ty <- contextType
   ops <- asks envOperations
@@ -994,7 +994,7 @@ opaqueLibraryFunctions desc vds = do
          in ( storageSize pt rank shape',
               storeValueHeader sign pt rank shape' [C.cexp|out|]
                 ++ [C.cstms|ret |= $id:values_array(ctx, obj->$id:field, (void*)out);
-                            out += $exp:num_elems * sizeof($ty:(primTypeToCType pt));|]
+                            out += $exp:num_elems * $int:(primByteSize pt::Int);|]
             )
 
   ctx_ty <- contextType
@@ -1031,7 +1031,7 @@ opaqueLibraryFunctions desc vds = do
         stms $ loadValueHeader sign pt rank [C.cexp|$id:shapearr|] [C.cexp|src|]
         item [C.citem|const void* $id:dataptr = src;|]
         stm [C.cstm|obj->$id:field = NULL;|]
-        stm [C.cstm|src += $exp:num_elems * sizeof($ty:(primTypeToCType pt));|]
+        stm [C.cstm|src += $exp:num_elems * $int:(primByteSize pt::Int);|]
         pure
           [C.cstms|
              obj->$id:field = $id:new_array(ctx, $id:dataptr, $args:dims);
@@ -1245,16 +1245,16 @@ onEntryPoint ::
   [C.BlockItem] ->
   Name ->
   Function op ->
-  CompilerM op s C.Definition
-onEntryPoint get_consts fname (Function _ outputs inputs _ results args) = do
+  CompilerM op s (Maybe C.Definition)
+onEntryPoint _ _ (Function Nothing _ _ _ _ _) = pure Nothing
+onEntryPoint get_consts fname (Function (Just ename) outputs inputs _ results args) = do
   let out_args = map (\p -> [C.cexp|&$id:(paramName p)|]) outputs
       in_args = map (\p -> [C.cexp|$id:(paramName p)|]) inputs
 
   inputdecls <- collect $ mapM_ stubParam inputs
   outputdecls <- collect $ mapM_ stubParam outputs
 
-  let entry_point_name = nameToString fname
-  entry_point_function_name <- publicName $ "entry_" ++ entry_point_name
+  entry_point_function_name <- publicName $ "entry_" ++ nameToString ename
 
   (inputs', unpack_entry_inputs) <- prepareEntryInputs args
   let (entry_point_input_params, entry_point_input_checks) = unzip inputs'
@@ -1293,7 +1293,7 @@ onEntryPoint get_consts fname (Function _ outputs inputs _ results args) = do
 
   ops <- asks envOperations
 
-  return
+  pure . Just $
     [C.cedecl|
        int $id:entry_point_function_name
            ($ty:ctx_ty *ctx,
@@ -1499,7 +1499,7 @@ $edecls:entry_point_decls
       }
   where
     Definitions consts (Functions funs) = prog
-    entry_funs = filter (functionEntry . snd) funs
+    entry_funs = filter (isJust . functionEntry . snd) funs
 
     compileProg' = do
       (memstructs, memfuns, memreport) <- unzip3 <$> mapM defineMemorySpace spaces
@@ -1513,7 +1513,7 @@ $edecls:entry_point_decls
 
       mapM_ earlyDecl memstructs
       entry_points <-
-        mapM (uncurry (onEntryPoint get_consts)) $ filter (functionEntry . snd) funs
+        catMaybes <$> mapM (uncurry (onEntryPoint get_consts)) funs
 
       extra
 
@@ -1791,7 +1791,7 @@ compilePrimValue (BoolValue b) =
   where
     b' :: Int
     b' = if b then 1 else 0
-compilePrimValue Checked =
+compilePrimValue UnitValue =
   [C.cexp|0|]
 
 derefPointer :: C.Exp -> C.Exp -> C.Type -> C.Exp
@@ -1849,10 +1849,6 @@ compileExp = compilePrimExp compileLeaf
     compileLeaf (Index src (Count iexp) _ ScalarSpace {} _) = do
       iexp' <- compileExp $ untyped iexp
       return [C.cexp|$id:src[$exp:iexp']|]
-    compileLeaf (SizeOf t) =
-      return [C.cexp|(typename int64_t)sizeof($ty:t')|]
-      where
-        t' = primTypeToCType t
 
 -- | Tell me how to compile a @v@, and I'll Compile any @PrimExp v@ for you.
 compilePrimExp :: Monad m => (v -> m C.Exp) -> PrimExp v -> m C.Exp
@@ -2036,6 +2032,7 @@ compileCode (Copy dest (Count destoffset) destspace src (Count srcoffset) srcspa
       <*> compileExp (untyped srcoffset)
       <*> pure srcspace
       <*> compileExp (untyped size)
+compileCode (Write _ _ Unit _ _ _) = pure ()
 compileCode (Write dest (Count idx) elemtype DefaultSpace vol elemexp) = do
   dest' <- rawMem dest
   deref <-

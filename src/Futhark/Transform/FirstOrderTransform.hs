@@ -22,7 +22,9 @@ import Control.Monad.Except
 import Control.Monad.State
 import Data.List (find, transpose, zip4)
 import qualified Data.Map.Strict as M
+import qualified Futhark.Analysis.Alias as Alias
 import qualified Futhark.IR as AST
+import Futhark.IR.Prop.Aliases
 import Futhark.IR.SOACS
 import Futhark.MonadFreshNames
 import Futhark.Tools
@@ -34,7 +36,8 @@ type FirstOrderLore lore =
   ( Bindable lore,
     BinderOps lore,
     LetDec SOACS ~ LetDec lore,
-    LParamInfo SOACS ~ LParamInfo lore
+    LParamInfo SOACS ~ LParamInfo lore,
+    CanBeAliased (Op lore)
   )
 
 -- | First-order-transform a single function, with the given scope
@@ -48,7 +51,7 @@ transformFunDef consts_scope (FunDef entry attrs fname rettype params body) = do
   (body', _) <- modifyNameSource $ runState $ runBinderT m consts_scope
   return $ FunDef entry attrs fname rettype params body'
   where
-    m = localScope (scopeOfFParams params) $ insertStmsM $ transformBody body
+    m = localScope (scopeOfFParams params) $ transformBody body
 
 -- | First-order-transform these top-level constants.
 transformConsts ::
@@ -67,16 +70,17 @@ type Transformer m =
     LocalScope (Lore m) m,
     Bindable (Lore m),
     BinderOps (Lore m),
-    LParamInfo SOACS ~ LParamInfo (Lore m)
+    LParamInfo SOACS ~ LParamInfo (Lore m),
+    CanBeAliased (Op (Lore m))
   )
 
 transformBody ::
   (Transformer m, LetDec (Lore m) ~ LetDec SOACS) =>
   Body ->
   m (AST.Body (Lore m))
-transformBody (Body () bnds res) = insertStmsM $ do
-  mapM_ transformStmRecursively bnds
-  return $ resultBody res
+transformBody (Body () stms res) = buildBody_ $ do
+  mapM_ transformStmRecursively stms
+  pure res
 
 -- | First transform any nested t'Body' or t'Lambda' elements, then
 -- apply 'transformSOAC' if the expression is a SOAC.
@@ -155,18 +159,28 @@ transformSOAC pat (Screma w arrs form@(ScremaForm scans reds map_lam)) = do
           ]
   i <- newVName "i"
   let loopform = ForLoop i Int64 w []
+      lam_cons = consumedByLambda $ Alias.analyseLambda mempty map_lam
 
   loop_body <- runBodyBinder
     . localScope (scopeOfFParams (map fst merge) <> scopeOf loopform)
     $ do
       -- Bind the parameters to the lambda.
       forM_ (zip3 (lambdaParams map_lam) arrs arr_ts) $ \(p, arr, arr_t) ->
-        letBindNames [paramName p] . BasicOp $
-          case paramForAcc arr_t of
-            Just acc_out_p ->
+        case paramForAcc arr_t of
+          Just acc_out_p ->
+            letBindNames [paramName p] . BasicOp $
               SubExp $ Var $ paramName acc_out_p
-            Nothing ->
-              Index arr $ fullSlice arr_t [DimFix $ Var i]
+          Nothing
+            | paramName p `nameIn` lam_cons -> do
+              p' <-
+                letExp (baseString (paramName p)) $
+                  BasicOp $
+                    Index arr $ fullSlice arr_t [DimFix $ Var i]
+              letBindNames [paramName p] $ BasicOp $ Copy p'
+            | otherwise ->
+              letBindNames [paramName p] $
+                BasicOp $
+                  Index arr $ fullSlice arr_t [DimFix $ Var i]
 
       -- Insert the statements of the lambda.  We have taken care to
       -- ensure that the parameters are bound at this point.
@@ -223,9 +237,17 @@ transformSOAC pat (Stream w arrs _ nes lam) = do
           <$> newParam "stream_mapout" (toDecl t' Unique)
           <*> letSubExp "stream_mapout_scratch" scratch
 
-  let onType t@Acc {} = t `toDecl` Unique
-      onType t = t `toDecl` Nonunique
-      merge = zip (map (fmap onType) fold_params) nes ++ mapout_merge
+  -- We need to copy the neutral elements because they may be consumed
+  -- in the body of the Stream.
+  let copyIfArray se = do
+        se_t <- subExpType se
+        case (se_t, se) of
+          (Array {}, Var v) -> letSubExp (baseString v) $ BasicOp $ Copy v
+          _ -> pure se
+  nes' <- mapM copyIfArray nes
+
+  let onType t = t `toDecl` Unique
+      merge = zip (map (fmap onType) fold_params) nes' ++ mapout_merge
       merge_params = map fst merge
       mapout_params = map fst mapout_merge
 
@@ -237,30 +259,19 @@ transformSOAC pat (Stream w arrs _ nes lam) = do
     BasicOp $ SubExp $ intConst Int64 1
 
   loop_body <- runBodyBinder $
-    localScope
-      ( scopeOf loop_form
-          <> scopeOfFParams merge_params
-      )
-      $ do
-        let slice =
-              [DimSlice (Var i) (Var (paramName chunk_size_param)) (intConst Int64 1)]
-        forM_ (zip chunk_params arrs) $ \(p, arr) ->
-          letBindNames [paramName p] $
-            BasicOp $
-              Index arr $
-                fullSlice (paramType p) slice
+    localScope (scopeOf loop_form <> scopeOfFParams merge_params) $ do
+      let slice = [DimSlice (Var i) (Var (paramName chunk_size_param)) (intConst Int64 1)]
+      forM_ (zip chunk_params arrs) $ \(p, arr) ->
+        letBindNames [paramName p] . BasicOp . Index arr $
+          fullSlice (paramType p) slice
 
-        (res, mapout_res) <- splitAt (length nes) <$> bodyBind (lambdaBody lam)
+      (res, mapout_res) <- splitAt (length nes) <$> bodyBind (lambdaBody lam)
 
-        mapout_res' <- forM (zip mapout_params mapout_res) $ \(p, se) ->
-          letSubExp "mapout_res" $
-            BasicOp $
-              Update
-                (paramName p)
-                (fullSlice (paramType p) slice)
-                se
+      mapout_res' <- forM (zip mapout_params mapout_res) $ \(p, se) ->
+        letSubExp "mapout_res" . BasicOp $
+          Update (paramName p) (fullSlice (paramType p) slice) se
 
-        resultBodyM $ res ++ mapout_res'
+      resultBodyM $ res ++ mapout_res'
 
   letBind pat $ DoLoop [] merge loop_form loop_body
 transformSOAC pat (Scatter len lam ivs as) = do
@@ -273,24 +284,20 @@ transformSOAC pat (Scatter len lam ivs as) = do
   -- Scatter is in-place, so we use the input array as the output array.
   let merge = loopMerge asOuts $ map Var as_vs
   loopBody <- runBodyBinder $
-    localScope
-      ( M.insert iter (IndexName Int64) $
-          scopeOfFParams $ map fst merge
-      )
-      $ do
-        ivs' <- forM ivs $ \iv -> do
-          iv_t <- lookupType iv
-          letSubExp "write_iv" $ BasicOp $ Index iv $ fullSlice iv_t [DimFix $ Var iter]
-        ivs'' <- bindLambda lam (map (BasicOp . SubExp) ivs')
+    localScope (M.insert iter (IndexName Int64) $ scopeOfFParams $ map fst merge) $ do
+      ivs' <- forM ivs $ \iv -> do
+        iv_t <- lookupType iv
+        letSubExp "write_iv" $ BasicOp $ Index iv $ fullSlice iv_t [DimFix $ Var iter]
+      ivs'' <- bindLambda lam (map (BasicOp . SubExp) ivs')
 
-        let indexes = groupScatterResults (zip3 as_ws as_ns $ map identName asOuts) ivs''
+      let indexes = groupScatterResults (zip3 as_ws as_ns $ map identName asOuts) ivs''
 
-        ress <- forM indexes $ \(_, arr, indexes') -> do
-          let saveInArray arr' (indexCur, valueCur) =
-                letExp "write_out" =<< eWriteArray arr' (map eSubExp indexCur) (eSubExp valueCur)
+      ress <- forM indexes $ \(_, arr, indexes') -> do
+        let saveInArray arr' (indexCur, valueCur) =
+              letExp "write_out" =<< eWriteArray arr' (map eSubExp indexCur) (eSubExp valueCur)
 
-          foldM saveInArray arr indexes'
-        return $ resultBody (map Var ress)
+        foldM saveInArray arr indexes'
+      return $ resultBody (map Var ress)
   letBind pat $ DoLoop [] merge (ForLoop iter Int64 len []) loopBody
 transformSOAC pat (Hist len ops bucket_fun imgs) = do
   iter <- newVName "iter"
@@ -301,56 +308,51 @@ transformSOAC pat (Hist len ops bucket_fun imgs) = do
   let merge = loopMerge hists_out $ concatMap (map Var . histDest) ops
 
   -- Bind lambda-bodies for operators.
-  loopBody <- runBodyBinder $
-    localScope
-      ( M.insert iter (IndexName Int64) $
-          scopeOfFParams $ map fst merge
-      )
-      $ do
-        -- Bind images to parameters of bucket function.
-        imgs' <- forM imgs $ \img -> do
-          img_t <- lookupType img
-          letSubExp "pixel" $ BasicOp $ Index img $ fullSlice img_t [DimFix $ Var iter]
-        imgs'' <- bindLambda bucket_fun $ map (BasicOp . SubExp) imgs'
+  let iter_scope = M.insert iter (IndexName Int64) $ scopeOfFParams $ map fst merge
+  loopBody <- runBodyBinder . localScope iter_scope $ do
+    -- Bind images to parameters of bucket function.
+    imgs' <- forM imgs $ \img -> do
+      img_t <- lookupType img
+      letSubExp "pixel" $ BasicOp $ Index img $ fullSlice img_t [DimFix $ Var iter]
+    imgs'' <- bindLambda bucket_fun $ map (BasicOp . SubExp) imgs'
 
-        -- Split out values from bucket function.
-        let lens = length ops
-            inds = take lens imgs''
-            vals = chunks (map (length . lambdaReturnType . histOp) ops) $ drop lens imgs''
-            hists_out' =
-              chunks (map (length . lambdaReturnType . histOp) ops) $
-                map identName hists_out
+    -- Split out values from bucket function.
+    let lens = length ops
+        inds = take lens imgs''
+        vals = chunks (map (length . lambdaReturnType . histOp) ops) $ drop lens imgs''
+        hists_out' =
+          chunks (map (length . lambdaReturnType . histOp) ops) $
+            map identName hists_out
 
-        hists_out'' <- forM (zip4 hists_out' ops inds vals) $ \(hist, op, idx, val) -> do
-          -- Check whether the indexes are in-bound.  If they are not, we
-          -- return the histograms unchanged.
-          let outside_bounds_branch = insertStmsM $ resultBodyM $ map Var hist
-              oob = case hist of
-                [] -> eSubExp $ constant True
-                arr : _ -> eOutOfBounds arr [eSubExp idx]
+    hists_out'' <- forM (zip4 hists_out' ops inds vals) $ \(hist, op, idx, val) -> do
+      -- Check whether the indexes are in-bound.  If they are not, we
+      -- return the histograms unchanged.
+      let outside_bounds_branch = buildBody_ $ pure $ map Var hist
+          oob = case hist of
+            [] -> eSubExp $ constant True
+            arr : _ -> eOutOfBounds arr [eSubExp idx]
 
-          letTupExp "new_histo"
-            <=< eIf oob outside_bounds_branch
-            $ do
-              -- Read values from histogram.
-              h_val <- forM hist $ \arr -> do
-                arr_t <- lookupType arr
-                letSubExp "read_hist" $ BasicOp $ Index arr $ fullSlice arr_t [DimFix idx]
+      letTupExp "new_histo" <=< eIf oob outside_bounds_branch $
+        buildBody_ $ do
+          -- Read values from histogram.
+          h_val <- forM hist $ \arr -> do
+            arr_t <- lookupType arr
+            letSubExp "read_hist" $ BasicOp $ Index arr $ fullSlice arr_t [DimFix idx]
 
-              -- Apply operator.
-              h_val' <-
-                bindLambda (histOp op) $
-                  map (BasicOp . SubExp) $ h_val ++ val
+          -- Apply operator.
+          h_val' <-
+            bindLambda (histOp op) $
+              map (BasicOp . SubExp) $ h_val ++ val
 
-              -- Write values back to histograms.
-              hist' <- forM (zip hist h_val') $ \(arr, v) -> do
-                arr_t <- lookupType arr
-                letInPlace "hist_out" arr (fullSlice arr_t [DimFix idx]) $
-                  BasicOp $ SubExp v
+          -- Write values back to histograms.
+          hist' <- forM (zip hist h_val') $ \(arr, v) -> do
+            arr_t <- lookupType arr
+            letInPlace "hist_out" arr (fullSlice arr_t [DimFix idx]) $
+              BasicOp $ SubExp v
 
-              return $ resultBody $ map Var hist'
+          pure $ map Var hist'
 
-        return $ resultBody $ map Var $ concat hists_out''
+    return $ resultBody $ map Var $ concat hists_out''
 
   -- Wrap up the above into a for-loop.
   letBind pat $ DoLoop [] merge (ForLoop iter Int64 len []) loopBody
@@ -471,7 +473,8 @@ transformLambda ::
     BinderOps lore,
     LocalScope somelore m,
     SameScope somelore lore,
-    LetDec lore ~ LetDec SOACS
+    LetDec lore ~ LetDec SOACS,
+    CanBeAliased (Op lore)
   ) =>
   Lambda ->
   m (AST.Lambda lore)

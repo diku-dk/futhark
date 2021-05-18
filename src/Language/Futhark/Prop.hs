@@ -82,8 +82,6 @@ module Language.Futhark.Prop
     isSizeParam,
     combineTypeShapes,
     matchDims,
-    unscopeType,
-    onRecordField,
     -- | Values of these types are produces by the parser.  They use
     -- unadorned names and have no type information, apart from that
     -- which is syntactically required.
@@ -93,6 +91,7 @@ module Language.Futhark.Prop
     UncheckedIdent,
     UncheckedTypeDecl,
     UncheckedDimIndex,
+    UncheckedSlice,
     UncheckedExp,
     UncheckedModExp,
     UncheckedSigExp,
@@ -550,19 +549,6 @@ unscopeType bound_here t = first onDim $ t `addAliases` S.map unbind
         AnyDim $ Just $ qualLeaf qn
     onDim d = d
 
--- | Perform some operation on a given record field.  Returns
--- 'Nothing' if that field does not exist.
-onRecordField ::
-  (TypeBase dim als -> TypeBase dim als) ->
-  [Name] ->
-  TypeBase dim als ->
-  Maybe (TypeBase dim als)
-onRecordField f [] t = Just $ f t
-onRecordField f (k : ks) (Scalar (Record m)) = do
-  t <- onRecordField f ks =<< M.lookup k m
-  Just $ Scalar $ Record $ M.insert k t m
-onRecordField _ _ _ = Nothing
-
 -- | The type of an Futhark term.  The aliasing will refer to itself, if
 -- the term is a non-tuple-typed variable.
 typeOf :: ExpBase Info VName -> PatternType
@@ -588,23 +574,13 @@ typeOf (StringLit vs _) =
     Unique
     (Prim (Unsigned Int8))
     (ShapeDecl [ConstDim $ genericLength vs])
-typeOf (Range _ _ _ (Info t, _) _) = t
-typeOf (BinOp _ _ _ _ (Info t) _ _) = t
 typeOf (Project _ _ (Info t) _) = t
-typeOf (If _ _ _ (Info t, _) _) = t
 typeOf (Var _ (Info t) _) = t
 typeOf (Ascript e _ _) = typeOf e
-typeOf (Coerce _ _ (Info t, _) _) = t
-typeOf (Apply _ _ _ (Info t, _) _) = t
 typeOf (Negate e _) = typeOf e
-typeOf (LetPat _ _ _ (Info t, _) _) = t
-typeOf (LetFun _ _ _ (Info t) _) = t
-typeOf (LetWith _ _ _ _ _ (Info t) _) = t
-typeOf (Index _ _ (Info t, _) _) = t
 typeOf (Update e _ _ _) = typeOf e `setAliases` mempty
 typeOf (RecordUpdate _ _ _ (Info t) _) = t
 typeOf (Assert _ e _ _) = typeOf e
-typeOf (DoLoop _ _ _ _ _ (Info (t, _)) _) = t
 typeOf (Lambda params _ _ (Info (als, t)) _) =
   unscopeType bound_here $ foldr (arrow . patternParam) t params `setAliases` als
   where
@@ -623,11 +599,8 @@ typeOf (OpSectionRight _ _ _ (Info (pn, pt1), _) (Info ret) _) =
 typeOf (ProjectSection _ (Info t) _) = t
 typeOf (IndexSection _ (Info t) _) = t
 typeOf (Constr _ _ (Info t) _) = t
-typeOf (Match _ cs (Info t, _) _) =
-  unscopeType (foldMap unscopeSet cs) t
-  where
-    unscopeSet (CasePat p _ _) = S.map identName $ patternIdents p
 typeOf (Attr _ e _) = typeOf e
+typeOf (AppExp _ (Info res)) = appResType res
 
 -- | @foldFunType ts ret@ creates a function type ('Arrow') that takes
 -- @ts@ as parameters and returns @ret@.
@@ -1183,7 +1156,7 @@ intrinsics =
     unPrim (Primitive.IntType t) = Signed t
     unPrim (Primitive.FloatType t) = FloatType t
     unPrim Primitive.Bool = Bool
-    unPrim Primitive.Cert = Bool
+    unPrim Primitive.Unit = Bool
 
     intrinsicPrim t = (pretty t, IntrinsicType Unlifted [] $ Scalar $ Prim t)
 
@@ -1344,6 +1317,9 @@ type UncheckedIdent = IdentBase NoInfo Name
 
 -- | An index with no type annotations.
 type UncheckedDimIndex = DimIndexBase NoInfo Name
+
+-- | A slice with no type annotations.
+type UncheckedSlice = SliceBase NoInfo Name
 
 -- | An expression with no type annotations.
 type UncheckedExp = ExpBase NoInfo Name

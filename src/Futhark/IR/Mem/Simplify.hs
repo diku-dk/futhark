@@ -137,10 +137,9 @@ unExistentialiseMemory vtable pat _ (cond, tbranch, fbranch, ifdec)
 
     -- Update the branches to contain Copy expressions putting the
     -- arrays where they are expected.
-    let updateBody body = insertStmsM $ do
+    let updateBody body = buildBody_ $ do
           res <- bodyBind body
-          resultBodyM
-            =<< zipWithM updateResult (patternElements pat) res
+          zipWithM updateResult (patternElements pat) res
         updateResult pat_elem (Var v)
           | Just mem <- lookup (patElemName pat_elem) arr_to_mem,
             (_, MemArray pt shape u (ArrayIn _ ixfun)) <- patElemDec pat_elem = do

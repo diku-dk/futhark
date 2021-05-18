@@ -27,6 +27,7 @@ module Futhark.Test.Values
     -- * Manipulating values
     valueElems,
     mkCompound,
+    unCompound,
 
     -- * Comparing Values
     compareValues,
@@ -226,6 +227,12 @@ instance Pretty v => Pretty (Compound v) where
 mkCompound :: [v] -> Compound v
 mkCompound [v] = ValueAtom v
 mkCompound vs = ValueTuple $ map ValueAtom vs
+
+-- | If the value is a tuple, extract the components, otherwise return
+-- a singleton list of the value.
+unCompound :: Compound v -> [Compound v]
+unCompound (ValueTuple vs) = vs
+unCompound v = [v]
 
 -- | Like a 'Value', but also grouped in compound ways that are not
 -- supported by raw values.  You cannot parse or read these in
@@ -496,16 +503,16 @@ readFloat32 :: ReadValue Float
 readFloat32 = readFloat lexFloat32
   where
     lexFloat32 [F32LIT x] = Just x
-    lexFloat32 [ID "f32", PROJ_FIELD "inf"] = Just $ 1 / 0
-    lexFloat32 [ID "f32", PROJ_FIELD "nan"] = Just $ 0 / 0
+    lexFloat32 [ID "f32", DOT, ID "inf"] = Just $ 1 / 0
+    lexFloat32 [ID "f32", DOT, ID "nan"] = Just $ 0 / 0
     lexFloat32 _ = Nothing
 
 readFloat64 :: ReadValue Double
 readFloat64 = readFloat lexFloat64
   where
     lexFloat64 [F64LIT x] = Just x
-    lexFloat64 [ID "f64", PROJ_FIELD "inf"] = Just $ 1 / 0
-    lexFloat64 [ID "f64", PROJ_FIELD "nan"] = Just $ 0 / 0
+    lexFloat64 [ID "f64", DOT, ID "inf"] = Just $ 1 / 0
+    lexFloat64 [ID "f64", DOT, ID "nan"] = Just $ 0 / 0
     lexFloat64 _ = Nothing
 
 readBool :: ReadValue Bool

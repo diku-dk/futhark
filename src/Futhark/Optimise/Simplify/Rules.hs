@@ -70,17 +70,18 @@ removeUnnecessaryCopy (vtable, used) (Pattern [] [d]) _ (Copy v)
   where
     -- We need to make sure we can even consume the original.  The big
     -- missing piece here is that we cannot do copy removal inside of
-    -- 'map' and other SOACs, but those cases tend to be handled in
-    -- later representations anyway.
-    consumable = case M.lookup v $ ST.toScope vtable of
-      Just (FParamName info) -> unique $ declTypeOf info
-      _ -> fromMaybe False $ do
-        e <- ST.lookup v vtable
-        pat <- stmPattern <$> ST.entryStm e
-        guard $ ST.entryDepth e == ST.loopDepth vtable
-        pe <- find ((== v) . patElemName) (patternElements pat)
-        guard $ aliasesOf pe == mempty
-        pure True
+    -- 'map' and other SOACs, but that is handled by SOAC-specific rules.
+    consumable = fromMaybe False $ do
+      e <- ST.lookup v vtable
+      guard $ ST.entryDepth e == ST.loopDepth vtable
+      consumableStm e `mplus` consumableFParam e
+    consumableFParam =
+      Just . maybe False (unique . declTypeOf) . ST.entryFParam
+    consumableStm e = do
+      pat <- stmPattern <$> ST.entryStm e
+      pe <- find ((== v) . patElemName) (patternElements pat)
+      guard $ aliasesOf pe == mempty
+      pure True
 removeUnnecessaryCopy _ _ _ _ = Skip
 
 constantFoldPrimFun :: BinderOps lore => TopDownRuleGeneric lore
@@ -260,10 +261,10 @@ hoistBranchInvariant _ pat _ (cond, tb, fb, IfDec ret ifsort) = Simplify $ do
     hoisted pe (Left i) = return $ Left $ Just (i, Var $ patElemName pe)
     hoisted _ Right {} = return $ Left Nothing
 
-    reshapeBodyResults body rets = insertStmsM $ do
+    reshapeBodyResults body rets = buildBody_ $ do
       ses <- bodyBind body
       let (ctx_ses, val_ses) = splitFromEnd (length rets) ses
-      resultBodyM . (ctx_ses ++) =<< zipWithM reshapeResult val_ses rets
+      (ctx_ses ++) <$> zipWithM reshapeResult val_ses rets
     reshapeResult (Var v) t@Array {} = do
       v_t <- lookupType v
       let newshape = arrayDims $ removeExistentials t v_t

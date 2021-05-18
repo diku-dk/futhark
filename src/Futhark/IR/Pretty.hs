@@ -36,9 +36,6 @@ class
   ppExpLore :: ExpDec lore -> Exp lore -> Maybe Doc
   ppExpLore _ _ = Nothing
 
-commastack :: [Doc] -> Doc
-commastack = align . stack . punctuate comma
-
 instance Pretty VName where
   ppr (VName vn i) = ppr vn <> text "_" <> text (show i)
 
@@ -310,9 +307,13 @@ instance PrettyLore lore => Pretty (FunDef lore) where
     where
       fun = case entry of
         Nothing -> "fun"
-        Just (p_entry, ret_entry) ->
+        Just (p_name, p_entry, ret_entry) ->
           "entry"
-            <> nestedBlock "(" ")" (ppTuple' p_entry <> comma </> ppTuple' ret_entry)
+            <> parens
+              ( "\"" <> ppr p_name <> "\"" <> comma
+                  </> ppTuple' p_entry <> comma
+                  </> ppTuple' ret_entry
+              )
 
 instance PrettyLore lore => Pretty (Prog lore) where
   ppr (Prog consts funs) =
@@ -327,8 +328,8 @@ instance Pretty d => Pretty (DimIndex d) where
   ppr (DimSlice i n s) = ppr i <+> text ":+" <+> ppr n <+> text "*" <+> ppr s
 
 ppPattern :: (Pretty a, Pretty b) => [a] -> [b] -> Doc
-ppPattern [] bs = braces $ commasep $ map ppr bs
-ppPattern as bs = braces $ commasep (map ppr as) <> semi </> commasep (map ppr bs)
+ppPattern [] bs = braces $ commastack $ map ppr bs
+ppPattern as bs = braces $ commastack (map ppr as) <> semi </> commasep (map ppr bs)
 
 -- | Like 'prettyTuple', but produces a 'Doc'.
 ppTuple' :: Pretty a => [a] -> Doc

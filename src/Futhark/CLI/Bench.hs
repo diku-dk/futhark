@@ -21,7 +21,7 @@ import qualified Data.Text as T
 import Futhark.Bench
 import Futhark.Server
 import Futhark.Test
-import Futhark.Util (fancyTerminal, maxinum, maybeNth, pmapIO)
+import Futhark.Util (atMostChars, fancyTerminal, maxinum, maybeNth, pmapIO)
 import Futhark.Util.Console
 import Futhark.Util.Options
 import System.Console.ANSI (clearLine)
@@ -92,15 +92,15 @@ runBenchmarks opts paths = do
 
   futhark <- FutharkExe . compFuthark <$> compileOptions opts
 
-  results <-
-    concat
-      <$> mapM
-        (runBenchmark opts futhark)
-        (sortBy (comparing fst) compiled_benchmarks)
+  maybe_results <-
+    mapM
+      (runBenchmark opts futhark)
+      (sortBy (comparing fst) compiled_benchmarks)
+  let results = concat $ catMaybes maybe_results
   case optJSON opts of
     Nothing -> return ()
     Just file -> LBS.writeFile file $ encodeBenchResults results
-  when (anyFailed results) exitFailure
+  when (any isNothing maybe_results || anyFailed results) exitFailure
   where
     ignored f = any (`match` f) $ optIgnoreFiles opts
 
@@ -165,7 +165,7 @@ compileBenchmark opts (program, spec) =
   where
     hasRuns (InputOutputs _ runs) = not $ null runs
 
-withProgramServer :: FilePath -> FilePath -> [String] -> (Server -> IO a) -> IO a
+withProgramServer :: FilePath -> FilePath -> [String] -> (Server -> IO a) -> IO (Maybe a)
 withProgramServer program runner extra_options f = do
   -- Explicitly prefixing the current directory is necessary for
   -- readProcessWithExitCode to find the binary when binOutputf has
@@ -177,14 +177,15 @@ withProgramServer program runner extra_options f = do
         | null runner = (binpath, extra_options)
         | otherwise = (runner, binpath : extra_options)
 
-  liftIO $ withServer to_run to_run_args f `catch` onError
+  liftIO $ (Just <$> withServer to_run to_run_args f) `catch` onError
   where
-    onError :: SomeException -> IO a
+    onError :: SomeException -> IO (Maybe a)
     onError e = do
-      hPrint stderr e
-      exitFailure
+      putStrLn $ inBold $ inRed $ "\nFailed to run " ++ program
+      putStrLn $ inRed $ show e
+      pure Nothing
 
-runBenchmark :: BenchOptions -> FutharkExe -> (FilePath, [InputOutputs]) -> IO [BenchResult]
+runBenchmark :: BenchOptions -> FutharkExe -> (FilePath, [InputOutputs]) -> IO (Maybe [BenchResult])
 runBenchmark opts futhark (program, cases) = do
   (tuning_opts, tuning_desc) <- determineTuning (optTuning opts) program
   let runopts = "-L" : optExtraOptions opts ++ tuning_opts
@@ -203,7 +204,7 @@ runBenchmark opts futhark (program, cases) = do
 
     relevant = maybe (const True) (==) (optEntryPoint opts) . T.unpack . iosEntryPoint
 
-    pad_to = foldl max 0 $ concatMap (map (length . runDescription) . iosTestRuns) cases
+    pad_to = foldl max 0 $ concatMap (map (length . atMostChars 40 . runDescription) . iosTestRuns) cases
 
 runOptions :: (Int -> IO ()) -> BenchOptions -> RunOptions
 runOptions f opts =
@@ -250,7 +251,7 @@ mkProgressPrompt runs pad_to dataset_desc
       i <- readIORef count
       let i' = if isJust us then i + 1 else i
       writeIORef count i'
-      putStr $ descString dataset_desc pad_to ++ progressBar i' runs 10
+      putStr $ descString (atMostChars 40 dataset_desc) pad_to ++ progressBar i' runs 10
       putStr " " -- Just to move the cursor away from the progress bar.
       hFlush stdout
   | otherwise = do
@@ -310,12 +311,12 @@ runBenchmarkCase server opts futhark program entry pad_to tr@(TestRun _ input_sp
   case res of
     Left err -> do
       when fancyTerminal $
-        liftIO $ putStrLn $ descString dataset_desc pad_to
+        liftIO $ putStrLn $ descString (atMostChars 40 dataset_desc) pad_to
       liftIO $ putStrLn $ inRed $ T.unpack err
       return $ Just $ DataResult dataset_desc $ Left err
     Right (runtimes, errout) -> do
       when fancyTerminal $
-        putStr $ descString dataset_desc pad_to
+        putStr $ descString (atMostChars 40 dataset_desc) pad_to
 
       reportResult runtimes
       Result runtimes (getMemoryUsage errout) errout

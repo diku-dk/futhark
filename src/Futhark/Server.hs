@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 -- | Haskell code for interacting with a Futhark server program (a
@@ -13,15 +14,19 @@ module Futhark.Server
     cmdStore,
     cmdCall,
     cmdFree,
+    cmdRename,
     cmdInputs,
     cmdOutputs,
     cmdClear,
     cmdReport,
+    cmdMaybe,
+    cmdEither,
   )
 where
 
 import Control.Exception
 import Control.Monad
+import Control.Monad.Except
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
@@ -180,6 +185,9 @@ cmdCall s entry outs ins =
 cmdFree :: Server -> [VarName] -> IO (Maybe CmdFailure)
 cmdFree s vs = helpCmd s $ "free" : vs
 
+cmdRename :: Server -> VarName -> VarName -> IO (Maybe CmdFailure)
+cmdRename s oldname newname = helpCmd s ["rename", oldname, newname]
+
 cmdInputs :: Server -> EntryName -> IO (Either CmdFailure [TypeName])
 cmdInputs s entry =
   sendCommand s ["inputs", entry]
@@ -193,3 +201,11 @@ cmdClear s = helpCmd s ["clear"]
 
 cmdReport :: Server -> IO (Either CmdFailure [T.Text])
 cmdReport s = sendCommand s ["report"]
+
+-- | Turn a 'Maybe'-producing command into a monadic action.
+cmdMaybe :: (MonadError T.Text m, MonadIO m) => IO (Maybe CmdFailure) -> m ()
+cmdMaybe = maybe (pure ()) (throwError . T.unlines . failureMsg) <=< liftIO
+
+-- | Turn an 'Either'-producing command into a monadic action.
+cmdEither :: (MonadError T.Text m, MonadIO m) => IO (Either CmdFailure a) -> m a
+cmdEither = either (throwError . T.unlines . failureMsg) pure <=< liftIO

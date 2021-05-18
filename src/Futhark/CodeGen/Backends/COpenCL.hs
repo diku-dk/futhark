@@ -25,7 +25,6 @@ import Futhark.IR.KernelsMem hiding
     GetSizeMax,
   )
 import Futhark.MonadFreshNames
-import Futhark.Util.Pretty (prettyOneLine)
 import qualified Language.C.Quote.OpenCL as C
 import qualified Language.C.Syntax as C
 
@@ -318,10 +317,7 @@ callKernel (GetSize v key) =
 callKernel (CmpSizeLe v key x) = do
   x' <- GC.compileExp x
   GC.stm [C.cstm|$id:v = ctx->sizes.$id:key <= $exp:x';|]
-  GC.stm
-    [C.cstm|if (ctx->logging) {
-    fprintf(ctx->log, "Compared %s <= %ld: %s.\n", $string:(prettyOneLine key), (long)$exp:x', $id:v ? "true" : "false");
-    }|]
+  sizeLoggingCode v key x'
 callKernel (GetSizeMax v size_class) =
   let field = "max_" ++ pretty size_class
    in GC.stm [C.cstm|$id:v = ctx->opencl.$id:field;|]

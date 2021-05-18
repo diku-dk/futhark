@@ -29,14 +29,12 @@ internaliseMapLambda internaliseLambda lam args = do
   argtypes <- mapM I.subExpType args
   let rowtypes = map I.rowType argtypes
   (params, body, rettype) <- internaliseLambda lam rowtypes
-  body' <-
-    localScope (scopeOfLParams params) $
-      ensureResultShape
-        (ErrorMsg [ErrorString "not all iterations produce same shape"])
-        (srclocOf lam)
-        rettype
-        body
-  return $ I.Lambda params body' rettype
+  mkLambda params $
+    ensureResultShape
+      (ErrorMsg [ErrorString "not all iterations produce same shape"])
+      (srclocOf lam)
+      rettype
+      =<< bodyBind body
 
 internaliseStreamMapLambda ::
   InternaliseLambda ->
@@ -55,15 +53,13 @@ internaliseStreamMapLambda internaliseLambda lam args = do
     body <- runBodyBinder $ do
       letBindNames [paramName orig_chunk_param] $ I.BasicOp $ I.SubExp $ I.Var chunk_size
       return orig_body
-    body' <- localScope (scopeOfLParams params) $
-      insertStmsM $ do
-        letBindNames [paramName orig_chunk_param] $ I.BasicOp $ I.SubExp $ I.Var chunk_size
-        ensureResultShape
-          (ErrorMsg [ErrorString "not all iterations produce same shape"])
-          (srclocOf lam)
-          (map outer rettype)
-          body
-    return $ I.Lambda (chunk_param : params) body' (map outer rettype)
+    mkLambda (chunk_param : params) $ do
+      letBindNames [paramName orig_chunk_param] $ I.BasicOp $ I.SubExp $ I.Var chunk_size
+      ensureResultShape
+        (ErrorMsg [ErrorString "not all iterations produce same shape"])
+        (srclocOf lam)
+        (map outer rettype)
+        =<< bodyBind body
 
 internaliseFoldLambda ::
   InternaliseLambda ->
@@ -79,16 +75,13 @@ internaliseFoldLambda internaliseLambda lam acctypes arrtypes = do
           | (t, shape) <- zip rettype acctypes
         ]
   -- The result of the body must have the exact same shape as the
-  -- initial accumulator.  We accomplish this with an assertion and
-  -- reshape().
-  body' <-
-    localScope (scopeOfLParams params) $
-      ensureResultShape
-        (ErrorMsg [ErrorString "shape of result does not match shape of initial value"])
-        (srclocOf lam)
-        rettype'
-        body
-  return $ I.Lambda params body' rettype'
+  -- initial accumulator.
+  mkLambda params $
+    ensureResultShape
+      (ErrorMsg [ErrorString "shape of result does not match shape of initial value"])
+      (srclocOf lam)
+      rettype'
+      =<< bodyBind body
 
 internaliseStreamLambda ::
   InternaliseLambda ->
@@ -167,11 +160,10 @@ internaliseStencilLambda internaliseLambda is lam invariant arrs = do
       arr_inptypes = map ((`arrayOfRow` p) . I.stripArray r) arr_ts
   (params, body, rettype) <-
     internaliseLambda lam $ invariant_inptypes ++ arr_inptypes
-  body' <-
+  mkLambda params $
     localScope (scopeOfLParams params) $
       ensureResultShape
         (ErrorMsg [ErrorString "not all iterations produce same shape"])
         (srclocOf lam)
         rettype
-        body
-  return $ I.Lambda params body' rettype
+        =<< bodyBind body
