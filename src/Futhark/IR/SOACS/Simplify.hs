@@ -103,8 +103,15 @@ instance Engine.Simplifiable StencilIndexes where
         StencilDynamic <$> Engine.simplify is
     where
       isStaticArray vtable v = do
-        (ArrayLit elems _, _) <- ST.lookupBasicOp v vtable
+        (e, _) <- ST.lookupBasicOp v vtable
+        elems <- isArrayLit e
         mapM isConstInt elems
+      isArrayLit (ArrayLit elems _) =
+        Just elems
+      isArrayLit (Replicate (Shape [Constant (IntValue (Int64Value n))]) x) =
+        Just $ replicate (fromIntegral n) x
+      isArrayLit _ =
+        Nothing
       isConstInt (Constant (IntValue (Int64Value x))) = Just $ fromIntegral x
       isConstInt _ = Nothing
   simplify (StencilStatic is) =
