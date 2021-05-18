@@ -31,6 +31,7 @@ import Language.Futhark.Prelude
 import Language.Futhark.Semantic
 import qualified Language.Futhark.TypeChecker as E
 import Language.Futhark.Warnings
+import System.FilePath (normalise)
 import qualified System.FilePath.Posix as Posix
 
 newtype ReaderState = ReaderState
@@ -161,8 +162,9 @@ setEntryPoints ::
   [(ImportName, E.UncheckedProg)]
 setEntryPoints extra_eps fps = map onProg
   where
+    fps' = map normalise fps
     onProg (name, prog)
-      | includeToFilePath name `elem` fps =
+      | includeToFilePath name `elem` fps' =
         (name, prog {E.progDecs = map onDec (E.progDecs prog)})
       | otherwise =
         (name, prog)
