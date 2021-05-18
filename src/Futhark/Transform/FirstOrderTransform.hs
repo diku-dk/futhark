@@ -276,24 +276,20 @@ transformSOAC pat (Scatter len lam ivs as) = do
   -- Scatter is in-place, so we use the input array as the output array.
   let merge = loopMerge asOuts $ map Var as_vs
   loopBody <- runBodyBinder $
-    localScope
-      ( M.insert iter (IndexName Int64) $
-          scopeOfFParams $ map fst merge
-      )
-      $ do
-        ivs' <- forM ivs $ \iv -> do
-          iv_t <- lookupType iv
-          letSubExp "write_iv" $ BasicOp $ Index iv $ fullSlice iv_t [DimFix $ Var iter]
-        ivs'' <- bindLambda lam (map (BasicOp . SubExp) ivs')
+    localScope (M.insert iter (IndexName Int64) $ scopeOfFParams $ map fst merge) $ do
+      ivs' <- forM ivs $ \iv -> do
+        iv_t <- lookupType iv
+        letSubExp "write_iv" $ BasicOp $ Index iv $ fullSlice iv_t [DimFix $ Var iter]
+      ivs'' <- bindLambda lam (map (BasicOp . SubExp) ivs')
 
-        let indexes = groupScatterResults (zip3 as_ws as_ns $ map identName asOuts) ivs''
+      let indexes = groupScatterResults (zip3 as_ws as_ns $ map identName asOuts) ivs''
 
-        ress <- forM indexes $ \(_, arr, indexes') -> do
-          let saveInArray arr' (indexCur, valueCur) =
-                letExp "write_out" =<< eWriteArray arr' (map eSubExp indexCur) (eSubExp valueCur)
+      ress <- forM indexes $ \(_, arr, indexes') -> do
+        let saveInArray arr' (indexCur, valueCur) =
+              letExp "write_out" =<< eWriteArray arr' (map eSubExp indexCur) (eSubExp valueCur)
 
-          foldM saveInArray arr indexes'
-        return $ resultBody (map Var ress)
+        foldM saveInArray arr indexes'
+      return $ resultBody (map Var ress)
   letBind pat $ DoLoop [] merge (ForLoop iter Int64 len []) loopBody
 transformSOAC pat (Hist len ops bucket_fun imgs) = do
   iter <- newVName "iter"
