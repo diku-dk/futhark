@@ -123,8 +123,8 @@ compileSegScan pat lvl space scanOp kbody = do
       -- k_reg = 64
       -- k_mem = 48 --12*4
       -- GTX 780 Ti constants (CC 3.5)
-      k_reg = 32
-      k_mem = 24 --6*4
+      k_reg = 64
+      k_mem = 36 --9*4
       mem_constraint = max k_mem sumT `div` maxT
       --reg_constraint = (k_reg `div` sumT) - 6
       reg_constraint = (k_reg-1-sumT') `div` (2*sumT'+3)
