@@ -32,10 +32,15 @@ compileSegStencil pat lvl space op kbody =
       let dims = map (TPrimExp . toExp' int32 . snd) $ unSegSpace space
           stencil_indexes = stencilIndexes op
           dimentionality = length stencil_indexes
-          group_size_flat_subexp = unCount $ segGroupSize lvl
-          group_size_flat_exp = TPrimExp . toExp' int32 $ group_size_flat_subexp
+          group_size_flat_subexp = unCount $
+            segGroupSize lvl
+          group_size_flat_exp = TPrimExp .
+            toExp' int32 $ group_size_flat_subexp
           -- stuff to reshape the group-size depending on the macro variable 'groupsize'
-          flNumT2 x = 1 + sMin32 1 (group_size_flat_exp `quot` x)
+          flNumT2 x = 1 +
+            sMin32 1 (group_size_flat_exp `quot` x)
+          fl64t2 = flNumT2 64
+          fl128t2 = flNumT2 128
           fl256t2 = flNumT2 256
           fl512t2 = flNumT2 512
           fl1024t2 = flNumT2 1024
@@ -43,8 +48,13 @@ compileSegStencil pat lvl space op kbody =
           group_sizes_exp =
               case dimentionality of
                   1 -> [group_size_flat_exp]
-                  2 -> [8 * fl256t2 * fl512t2 * fl1024t2, 32]
-                  3 -> [2*fl1024t2, 2*fl256t2*fl512t2, 32]
+                  2 -> [fl64t2 *fl128t2
+                       *fl256t2*fl512t2
+                       *fl1024t2, 32]
+                  3 -> [ fl256t2*fl1024t2
+                        ,fl128t2*fl256t2
+                         *fl512t2
+                        , 32]
                   _ -> error "not valid dimensions"
           n_point_stencil = length $ head stencil_indexes
           n_invarElems = length $ map kernelResultSubExp $ kernelBodyResult kbody
@@ -88,8 +98,6 @@ compileSegStencil pat lvl space op kbody =
         name <- dPrim "max_shared_bytes" int32
         sOp $ Imp.GetSizeMax (tvVar name) Imp.SizeLocalMemory
         pure $ tvExp name
-      isAboveMinBlock <- dPrimVE "isAboveMinBlock" (128 .<=. group_size_flat_exp)
-      debugPrintf "isAboveMinBlock" isAboveMinBlock
       can_and_should_run_stripTile <- do
         host_strip_sizes <- mapM (dPrimVE "host_strip_sizes") $ zipWith (*) group_sizes_exp strip_multiples_exp
         stripTileElems <- dPrimVE "stripTileElems" $ product $ zipWith (+) halo_widths_exp host_strip_sizes
@@ -113,7 +121,6 @@ compileSegStencil pat lvl space op kbody =
           canRunStripTile
             .&&. reuseIsHighEnough
             .&&. isNotSkewed
-            .&&. isAboveMinBlock
       debugPrintf "can_and_should_run_stripTile" can_and_should_run_stripTile
       sIf can_and_should_run_stripTile
         (compileBigTileStripMinedSingleDim pat lvl space op kbody group_sizes_exp strip_multiples)
@@ -324,11 +331,19 @@ compileBigTileStripMinedSingleDim pat _ space op kbody group_sizes_exp strip_mul
       sAllocArray "tile" ptype (Shape [Var $ tvVar tile_length]) (Space "local")
     constants <- kernelConstants <$> askEnv
     -- compile-time constant variables
-    group_sizes <- mapM (dPrimVE "group_sizes") group_sizes_exp
-    group_spans <- mapM (dPrimVE "group_spans") $ createSpans group_sizes
-    group_size_flat <- dPrimVE "group_size_flat" $ product group_sizes
-    strip_sizes <- mapM (dPrimVE "strip_sizes" . sExt64) strip_sizes_exp
-    shared_sizes <- mapM (dPrimVE "shared_sizes") shared_sizes_exp
+    group_sizes <- mapM (dPrimVE "group_sizes")
+      group_sizes_exp
+    group_spans <- mapM (dPrimVE "group_spans") $
+      createSpans group_sizes
+    group_size_flat <- dPrimVE "group_size_flat" $
+      product group_sizes
+
+    strip_sizes <- mapM (dPrimVE "strip_sizes")
+      $ zipWith (*) strip_multiples_exp group_sizes
+
+    shared_sizes <- mapM (dPrimVE "shared_sizes") $
+      zipWith (+) strip_sizes $ zipWith (-) a_maxs a_mins
+
     shared_size_flat <- dPrimVE "shared_size_flat" $ product shared_sizes
     -- threadId/groupId variables
     local_id_flat <- dPrimVE "local_id_flat" . kernelLocalThreadId $ constants
