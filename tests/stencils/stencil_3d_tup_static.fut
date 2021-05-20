@@ -1,4 +1,4 @@
--- Testing for static stencil index in 3D
+-- Testing for static stencil index for tuples in 3D
 -- ==
 --
 -- input {
@@ -31,6 +31,7 @@
 --   [890u64, 113u64, 1864u64, 2047u64],
 --   [1600u64, 279u64, 430u64, 661u64]]]
 -- }
+-- compiled random input { [33][65][65]u32 [33][65][65]u64 [33][65][65]u8 } auto output
 
 
 let main [n][m][k] (xsss : [n][m][k]u32) (ysss : [n][m][k]u64) (zsss : [n][m][k]u8) : [n][m][k]u64 =

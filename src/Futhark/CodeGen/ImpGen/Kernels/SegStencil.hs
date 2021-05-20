@@ -235,20 +235,21 @@ compileGlobalReadFlat pat lvl space op kbody = do
       -- declare variant elements
       dLParams variantParams
 
-      let fetch_ixs =
-            forM (zip unique_ixs gids) (\(ixs_tup, gid ) ->
-              let ix3 = zip ixs_tup max_ixs in
-              forM ix3 (\(relix, maxix) ->
-                let read_ix = gid + fromInteger relix in
-                let bounded
-                      | relix > 0 = sMin64 maxix read_ix
-                      | relix < 0 = sMax64 0 read_ix
-                      | otherwise = read_ix
-                in dPrimVE "bound_ix" bounded
-                )
-              )
-      read_ixs_all <- fetch_ixs
-      let ixs_lookup = zipWith zip unique_ixs read_ixs_all
+      -- create and bound each index for each axis only once, and create lookup-list.
+      -- The manual bounding is valid as the gids themselves are inbounds.
+      ixs_lookup <-
+        forM (zip3 unique_ixs gids max_ixs) (\(ixs_tup, gid, maxix) ->
+          forM ixs_tup (\relix ->
+            let read_ix = gid + fromInteger relix in
+            let bounded
+                  | relix > 0 = sMin64 maxix read_ix
+                  | relix < 0 = sMax64 0 read_ix
+                  | otherwise = read_ix
+            in do
+              gix <- dPrimVE "bound_ix" bounded
+              pure (relix, gix)
+            )
+          )
 
       -- load variants into lambda variant parameters
       forM_ (zip sorted_ixs sorted_params_tup) $ \(rel_ixs, pars) -> do

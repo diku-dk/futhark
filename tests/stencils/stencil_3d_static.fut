@@ -15,7 +15,7 @@
 --              [231i64, 233i64, 236i64, 238i64],
 --              [251i64, 253i64, 256i64, 258i64]]]
 --        }
-
+-- compiled random input { [33][65][65]i64 } auto output
 
 let main [n][m][k] (arr : [n][m][k]i64) : [n][m][k]i64 =
   let f _ xs = xs[0] + xs[1] + xs[2]

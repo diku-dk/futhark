@@ -6,6 +6,7 @@
 --  [27u8,28u8,29u8,30u8,31u8]
 -- }
 -- output { [238u64, 239u64, 233u64, 251u64, 250u64] }
+-- compiled random input { [257]u64 [257]i32 [257]u8 } auto output
 
 let xor_add (xs: [](u64,i32,u8)) =
   let f () xss =
