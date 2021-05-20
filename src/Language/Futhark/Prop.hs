@@ -1008,7 +1008,9 @@ intrinsics =
                    [ shape [k]
                        `array` Record
                          ( M.fromList $
-                             zip tupleFieldNames [Scalar (Prim (Signed Int64)), Scalar (Prim (Signed Int64))]
+                             zip tupleFieldNames
+                                   [Scalar (Prim (Signed Int64)),
+                                    Scalar (Prim (Signed Int64))]
                          ),
                      Scalar t_c `arr` ((shape [k] `array` t_a) `arr` Scalar t_b),
                      shape [n, m] `array` t_c,

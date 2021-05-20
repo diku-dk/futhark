@@ -1704,8 +1704,9 @@ isOverloadedFunction qname args loc = do
       inv' <- internaliseExpToVars "stencil_arr" inv
       arr' <- internaliseExpToVars "stencil_arr" arr
       lam' <- internaliseStencilLambda internaliseLambda is' lam inv' arr'
-      w1 <- arraysSize 0 <$> mapM lookupType arr'
-      w2 <- arraysSize 1 <$> mapM lookupType arr'
+      let arr_type = mapM lookupType arr'
+      w1 <- arraysSize 0 <$> arr_type
+      w2 <- arraysSize 1 <$> arr_type
       p <- arraysSize 0 <$> mapM lookupType is'
       letTupExp' desc $
         I.Op $
@@ -1715,9 +1716,10 @@ isOverloadedFunction qname args loc = do
       inv' <- internaliseExpToVars "stencil_arr" inv
       arr' <- internaliseExpToVars "stencil_arr" arr
       lam' <- internaliseStencilLambda internaliseLambda is' lam inv' arr'
-      w1 <- arraysSize 0 <$> mapM lookupType arr'
-      w2 <- arraysSize 1 <$> mapM lookupType arr'
-      w3 <- arraysSize 2 <$> mapM lookupType arr'
+      let arr_type = mapM lookupType arr'
+      w1 <- arraysSize 0 <$> arr_type
+      w2 <- arraysSize 1 <$> arr_type
+      w3 <- arraysSize 2 <$> arr_type
       p <- arraysSize 0 <$> mapM lookupType is'
       letTupExp' desc . I.Op $
         I.Stencil [w1, w2, w3] p (StencilDynamic is') lam' (map ([],) inv') arr'
