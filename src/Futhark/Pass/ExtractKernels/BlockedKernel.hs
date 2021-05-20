@@ -21,7 +21,6 @@ where
 
 import Control.Monad
 import Control.Monad.Writer
-import Data.List ()
 import Futhark.Analysis.PrimExp
 import Futhark.IR
 import Futhark.IR.Prop.Aliases
