@@ -647,12 +647,17 @@ compileFunDef ::
   FunDef lore ->
   ImpM lore r op ()
 compileFunDef (FunDef entry _ fname rettype params body) =
-  local (\env -> env {envFunction = Just fname}) $ do
+  local (\env -> env {envFunction = name_entry `mplus` Just fname}) $ do
     ((outparams, inparams, results, args), body') <- collect' compile
-    emitFunction fname $ Imp.Function (isJust entry) outparams inparams body' results args
+    emitFunction fname $ Imp.Function name_entry outparams inparams body' results args
   where
-    params_entry = maybe (replicate (length params) TypeDirect) fst entry
-    ret_entry = maybe (replicate (length rettype) TypeDirect) snd entry
+    (name_entry, params_entry, ret_entry) = case entry of
+      Nothing ->
+        ( Nothing,
+          replicate (length params) TypeDirect,
+          replicate (length rettype) TypeDirect
+        )
+      Just (x, y, z) -> (Just x, y, z)
     compile = do
       (inparams, arrayds, args) <- compileInParams params params_entry
       (results, outparams, Destination _ dests) <- compileOutParams rettype ret_entry
@@ -1680,10 +1685,7 @@ compileAlloc pat _ _ =
 -- straightforward contiguous format, as an t'Int64' expression.
 typeSize :: Type -> Count Bytes (Imp.TExp Int64)
 typeSize t =
-  Imp.bytes $
-    elem_size * product (map toInt64Exp (arrayDims t))
-  where
-    elem_size = isInt64 $ Imp.LeafExp (Imp.SizeOf (elemType t)) int64
+  Imp.bytes $ primByteSize (elemType t) * product (map toInt64Exp (arrayDims t))
 
 -- | Is this indexing in-bounds for an array of the given shape?  This
 -- is useful for things like scatter, which ignores out-of-bounds
@@ -1840,7 +1842,7 @@ function fname outputs inputs m = local newFunction $ do
   body <- collect $ do
     mapM_ addParam $ outputs ++ inputs
     m
-  emitFunction fname $ Imp.Function False outputs inputs body [] []
+  emitFunction fname $ Imp.Function Nothing outputs inputs body [] []
   where
     addParam (Imp.MemParam name space) =
       addVar name $ MemVar Nothing $ MemEntry space

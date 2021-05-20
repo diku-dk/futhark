@@ -52,8 +52,8 @@ All variables have types, and all entry points accept inputs and
 produce outputs of defined types.  The notion of transparent and
 opaque types are the same as in the C API: primitives and array of
 primitives are directly supported, and everything else is treated as
-opaque.  When printed, types follow basic Futhark type syntax
-*without* sizes (e.g. ``[][]i32``).
+opaque.  See also :ref:`valuemapping`. When printed, types
+follow basic Futhark type syntax *without* sizes (e.g. ``[][]i32``).
 
 Commands
 --------
@@ -81,6 +81,12 @@ Store the *N* values in variables *v1* to *vN* in *file*.
 ......................
 
 Delete the given variables.
+
+``rename`` *oldname* *newname*
+..............................
+
+Rename the variable *oldname* to *newname*, which must not already
+exist.
 
 ``inputs`` *entry*
 ..................

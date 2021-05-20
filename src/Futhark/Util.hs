@@ -39,6 +39,8 @@ module Futhark.Util
     lgammaf,
     tgamma,
     tgammaf,
+    hypot,
+    hypotf,
     fromPOSIX,
     toPOSIX,
     trim,
@@ -47,6 +49,7 @@ module Futhark.Util
     UserString,
     EncodedString,
     zEncodeString,
+    atMostChars,
   )
 where
 
@@ -277,6 +280,18 @@ tgamma = c_tgamma
 tgammaf :: Float -> Float
 tgammaf = c_tgammaf
 
+foreign import ccall "hypot" c_hypot :: Double -> Double -> Double
+
+foreign import ccall "hypotf" c_hypotf :: Float -> Float -> Float
+
+-- | The system-level @hypot@ function.
+hypot :: Double -> Double -> Double
+hypot = c_hypot
+
+-- | The system-level @hypotf@ function.
+hypotf :: Float -> Float -> Float
+hypotf = c_hypotf
+
 -- | Turn a POSIX filepath into a filepath for the native system.
 toPOSIX :: Native.FilePath -> Posix.FilePath
 toPOSIX = Posix.joinPath . Native.splitDirectories
@@ -411,3 +426,8 @@ encodeAsUnicodeCharar c =
     else '0' : hex_str
   where
     hex_str = showHex (ord c) "U"
+
+atMostChars :: Int -> String -> String
+atMostChars n s
+  | length s > n = take (n -3) s ++ "..."
+  | otherwise = s

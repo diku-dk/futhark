@@ -135,9 +135,9 @@ internaliseTypeM orig_t =
     E.Scalar (E.Prim bt) ->
       return [I.Prim $ internalisePrimType bt]
     E.Scalar (E.Record ets)
-      -- XXX: we map empty records to bools, because otherwise
+      -- XXX: we map empty records to units, because otherwise
       -- arrays of unit will lose their sizes.
-      | null ets -> return [I.Prim I.Bool]
+      | null ets -> return [I.Prim I.Unit]
       | otherwise ->
         concat <$> mapM (internaliseTypeM . snd) (E.sortFields ets)
     E.Scalar (E.TypeVar _ u tn [E.TypeArgType arr_t _])

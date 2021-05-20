@@ -372,6 +372,7 @@ useAsParam (ScalarUse name bt) =
   let ctp = case bt of
         -- OpenCL does not permit bool as a kernel parameter type.
         Bool -> [C.cty|unsigned char|]
+        Unit -> [C.cty|unsigned char|]
         _ -> GC.primTypeToCType bt
    in Just [C.cparam|$ty:ctp $id:name|]
 useAsParam (MemoryUse name) =
@@ -885,4 +886,3 @@ typesInExp (UnOpExp _ e) = typesInExp e
 typesInExp (FunExp _ args t) = S.singleton t <> mconcat (map typesInExp args)
 typesInExp (LeafExp (Index _ (Count (TPrimExp e)) t _ _) _) = S.singleton t <> typesInExp e
 typesInExp (LeafExp ScalarVar {} _) = mempty
-typesInExp (LeafExp (SizeOf t) _) = S.singleton t

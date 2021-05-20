@@ -20,7 +20,7 @@ import qualified Data.Text.Encoding as T
 import Futhark.Analysis.Metrics.Type
 import Futhark.Server
 import Futhark.Test
-import Futhark.Util (fancyTerminal)
+import Futhark.Util (atMostChars, fancyTerminal)
 import Futhark.Util.Console
 import Futhark.Util.Options
 import Futhark.Util.Pretty (prettyText)
@@ -183,26 +183,21 @@ runInterpretedEntry :: FutharkExe -> FilePath -> InputOutputs -> TestM ()
 runInterpretedEntry (FutharkExe futhark) program (InputOutputs entry run_cases) =
   let dir = takeDirectory program
       runInterpretedCase run@(TestRun _ inputValues _ index _) =
-        unless ("compiled" `elem` runTags run) $
-          context
-            ( "Entry point: " <> entry
-                <> "; dataset: "
-                <> T.pack (runDescription run)
-            )
-            $ do
-              input <- T.unlines . map prettyText <$> getValues (FutharkExe futhark) dir inputValues
-              expectedResult' <- getExpectedResult (FutharkExe futhark) program entry run
-              (code, output, err) <-
-                liftIO $
-                  readProcessWithExitCode futhark ["run", "-e", T.unpack entry, program] $
-                    T.encodeUtf8 input
-              case code of
-                ExitFailure 127 ->
-                  throwError $ progNotFound $ T.pack futhark
-                _ ->
-                  liftExcept $
-                    compareResult entry index program expectedResult'
-                      =<< runResult program code output err
+        unless (any (`elem` runTags run) ["compiled", "script"]) $
+          context ("Entry point: " <> entry <> "; dataset: " <> T.pack (runDescription run)) $ do
+            input <- T.unlines . map prettyText <$> getValues (FutharkExe futhark) dir inputValues
+            expectedResult' <- getExpectedResult (FutharkExe futhark) program entry run
+            (code, output, err) <-
+              liftIO $
+                readProcessWithExitCode futhark ["run", "-e", T.unpack entry, program] $
+                  T.encodeUtf8 input
+            case code of
+              ExitFailure 127 ->
+                throwError $ progNotFound $ T.pack futhark
+              _ ->
+                liftExcept $
+                  compareResult entry index program expectedResult'
+                    =<< runResult program code output err
    in accErrors_ $ map runInterpretedCase run_cases
 
 runTestCase :: TestCase -> TestM ()
@@ -286,7 +281,7 @@ runCompiledEntry futhark server program (InputOutputs entry run_cases) = do
     dir = takeDirectory program
 
     runCompiledCase input_types outs ins run = runExceptT $ do
-      let TestRun _ inputValues _ index _ = run
+      let TestRun _ input_spec _ index _ = run
           case_ctx =
             "Entry point: " <> entry <> "; dataset: "
               <> T.pack (runDescription run)
@@ -294,11 +289,7 @@ runCompiledEntry futhark server program (InputOutputs entry run_cases) = do
       context1 case_ctx $ do
         expected <- getExpectedResult futhark program entry run
 
-        either E.throwError pure
-          <=< withValuesFile futhark dir inputValues
-          $ \values_f -> runExceptT $ do
-            checkValueTypes values_f input_types
-            liftCommand $ cmdRestore server values_f (zip ins input_types)
+        valuesAsVars server (zip ins input_types) futhark dir input_spec
 
         call_r <- liftIO $ cmdCall server entry outs ins
         liftCommand $ cmdFree server ins
@@ -467,11 +458,6 @@ reportTable ts = do
 
 moveCursorToTableTop :: IO ()
 moveCursorToTableTop = cursorUpLine tableLines
-
-atMostChars :: Int -> String -> String
-atMostChars n s
-  | length s > n = take (n -3) s ++ "..."
-  | otherwise = s
 
 reportText :: TestStatus -> IO ()
 reportText ts =

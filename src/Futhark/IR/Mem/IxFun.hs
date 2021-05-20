@@ -156,7 +156,7 @@ instance Pretty num => Pretty (IxFun num) where
       semisep
         [ "base: " <> brackets (commasep $ map ppr oshp),
           "contiguous: " <> if cg then "true" else "false",
-          "LMADs: " <> brackets (commasep $ NE.toList $ NE.map ppr lmads)
+          "LMADs: " <> brackets (commastack $ NE.toList $ NE.map ppr lmads)
         ]
 
 instance Substitute num => Substitute (LMAD num) where
@@ -384,24 +384,15 @@ sliceOneLMAD (IxFun (lmad@(LMAD _ ldims) :| lmads) oshp cg) is = do
 
   return $ IxFun (setLMADPermutation perm' lmad' :| lmads) oshp cg'
   where
-    updatePerm ps inds = foldl (\acc p -> acc ++ decrease p) [] ps
+    updatePerm ps inds = concatMap decrease ps
       where
         decrease p =
-          let d =
-                foldl
-                  ( \n i ->
-                      if i == p
-                        then -1
-                        else
-                          if i > p
-                            then n
-                            else
-                              if n /= -1
-                                then n + 1
-                                else n
-                  )
-                  0
-                  inds
+          let f n i
+                | i == p = -1
+                | i > p = n
+                | n /= -1 = n + 1
+                | otherwise = n
+              d = foldl f 0 inds
            in [p - d | d /= -1]
 
     harmlessRotation' ::
@@ -993,18 +984,6 @@ existentialize (IxFun (lmad :| []) oshp True)
       stride' <- existentializeExp str
       shape' <- existentializeExp shp
       return $ LMADDim stride' (fmap Free rot) shape' perm mon
-
--- oshp' = LeafExp (Ext 0)
--- lmad' = LMAD lmadOffset' lmadDims'
--- lmadOffset' = LeafExp (Ext 1)
--- (_, lmadDims', lmadDimSubsts) = foldr generalizeDim (2, [], []) $ lmadDims lmad
--- substs = oshp : lmadOffset lmad' : lmadDimSubsts
-
--- generalizeDim :: (Int, [LMADDim num]) -> LMADDim num -> (Int, [LMADDim num])
--- generalizeDim (i, acc) (LMADDim stride rotate shape perm mon) =
---   (i + 3,
---    LMADDim (LeafExp $ Ext i) (LeafExp $ Ext $ i + 1) (LeafExp $ Ext $ i + 2) perm mon,
---    [stride, rotate, shape])
 existentialize _ = return Nothing
 
 -- | When comparing index functions as part of the type check in KernelsMem,

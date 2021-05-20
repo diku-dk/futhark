@@ -702,17 +702,17 @@ explicitAllocationsGeneric handleOp hints =
   Pass "explicit allocations" "Transform program to explicit memory representation" $
     intraproceduralTransformationWithConsts onStms allocInFun
   where
-    onStms stms = runAllocM handleOp hints $ allocInStms stms pure
+    onStms stms =
+      runAllocM handleOp hints $ collectStms_ $ allocInStms stms $ pure ()
 
     allocInFun consts (FunDef entry attrs fname rettype params fbody) =
       runAllocM handleOp hints $
         inScopeOf consts $
           allocInFParams (zip params $ repeat DefaultSpace) $ \params' -> do
             fbody' <-
-              insertStmsM $
-                allocInFunBody
-                  (map (const $ Just DefaultSpace) rettype)
-                  fbody
+              allocInFunBody
+                (map (const $ Just DefaultSpace) rettype)
+                fbody
             return $ FunDef entry attrs fname (memoryInDeclExtType rettype) params' fbody'
 
 explicitAllocationsInStmsGeneric ::
@@ -726,7 +726,8 @@ explicitAllocationsInStmsGeneric ::
   m (Stms tolore)
 explicitAllocationsInStmsGeneric handleOp hints stms = do
   scope <- askScope
-  runAllocM handleOp hints $ localScope scope $ allocInStms stms return
+  runAllocM handleOp hints $
+    localScope scope $ collectStms_ $ allocInStms stms $ pure ()
 
 memoryInDeclExtType :: [DeclExtType] -> [FunReturns]
 memoryInDeclExtType dets = evalState (mapM addMem dets) $ startOfFreeIDRange dets
@@ -767,13 +768,11 @@ allocInFunBody ::
   Body fromlore ->
   AllocM fromlore tolore (Body tolore)
 allocInFunBody space_oks (Body _ bnds res) =
-  allocInStms bnds $ \bnds' -> do
-    (res'', allocs) <- collectStms $ do
-      res' <- zipWithM ensureDirect space_oks' res
-      let (ctx_res, val_res) = splitFromEnd num_vals res'
-      mem_ctx_res <- concat <$> mapM bodyReturnMemCtx val_res
-      return $ ctx_res <> mem_ctx_res <> val_res
-    return $ Body () (bnds' <> allocs) res''
+  buildBody_ . allocInStms bnds $ do
+    res' <- zipWithM ensureDirect space_oks' res
+    let (ctx_res, val_res) = splitFromEnd num_vals res'
+    mem_ctx_res <- concat <$> mapM bodyReturnMemCtx val_res
+    pure $ ctx_res <> mem_ctx_res <> val_res
   where
     num_vals = length space_oks
     space_oks' = replicate (length res - num_vals) Nothing ++ space_oks
@@ -795,25 +794,22 @@ ensureDirect space_ok se = do
 allocInStms ::
   (Allocable fromlore tolore) =>
   Stms fromlore ->
-  (Stms tolore -> AllocM fromlore tolore a) ->
+  AllocM fromlore tolore a ->
   AllocM fromlore tolore a
-allocInStms origstms m = allocInStms' (stmsToList origstms) mempty
+allocInStms origstms m = allocInStms' $ stmsToList origstms
   where
-    allocInStms' [] stms' =
-      m stms'
-    allocInStms' (x : xs) stms' = do
-      allocstms <- allocInStm' x
-      localScope (scopeOf allocstms) $ do
-        let stms_substs = foldMap sizeSubst allocstms
-            stms_consts = foldMap stmConsts allocstms
-            f env =
-              env
-                { chunkMap = stms_substs <> chunkMap env,
-                  envConsts = stms_consts <> envConsts env
-                }
-        local f $ allocInStms' xs (stms' <> allocstms)
-    allocInStm' stm =
-      collectStms_ $ auxing (stmAux stm) $ allocInStm stm
+    allocInStms' [] = m
+    allocInStms' (stm : stms) = do
+      allocstms <- collectStms_ $ auxing (stmAux stm) $ allocInStm stm
+      addStms allocstms
+      let stms_substs = foldMap sizeSubst allocstms
+          stms_consts = foldMap stmConsts allocstms
+          f env =
+            env
+              { chunkMap = stms_substs <> chunkMap env,
+                envConsts = stms_consts <> envConsts env
+              }
+      local f $ allocInStms' stms
 
 allocInStm ::
   (Allocable fromlore tolore, Allocator tolore (AllocM fromlore tolore)) =>
@@ -830,13 +826,10 @@ allocInLambda ::
   Allocable fromlore tolore =>
   [LParam tolore] ->
   Body fromlore ->
-  [Type] ->
   AllocM fromlore tolore (Lambda tolore)
-allocInLambda params body rettype = do
-  body' <- localScope (scopeOfLParams params) $
-    allocInStms (bodyStms body) $ \bnds' ->
-      return $ Body () bnds' $ bodyResult body
-  return $ Lambda params body' rettype
+allocInLambda params body =
+  mkLambda params . allocInStms (bodyStms body) $
+    pure $ bodyResult body
 
 allocInExp ::
   (Allocable fromlore tolore, Allocator tolore (AllocM fromlore tolore)) =>
@@ -849,10 +842,10 @@ allocInExp (DoLoop ctx val form (Body () bodybnds bodyres)) =
         form' <- allocInLoopForm form
         localScope (scopeOf form') $ do
           (valinit_ctx, valinit') <- mk_loop_val valinit
-          body' <- insertStmsM $
-            allocInStms bodybnds $ \bodybnds' -> do
-              ((val_ses, valres'), val_retbnds) <- collectStms $ mk_loop_val valres
-              return $ Body () (bodybnds' <> val_retbnds) (ctxres ++ val_ses ++ valres')
+          body' <-
+            buildBody_ . allocInStms bodybnds $ do
+              (val_ses, valres') <- mk_loop_val valres
+              pure $ ctxres ++ val_ses ++ valres'
           return $
             DoLoop
               (zip (ctxparams' ++ new_ctx_params) (ctxinit ++ valinit_ctx))
@@ -932,20 +925,20 @@ allocInExp (If cond tbranch0 fbranch0 (IfDec rets ifsort)) = do
       Body fromlore ->
       AllocM fromlore tolore (Body tolore, [Maybe IxFun])
     allocInIfBody num_vals (Body _ bnds res) =
-      allocInStms bnds $ \bnds' -> do
+      buildBody . allocInStms bnds $ do
         let (_, val_res) = splitFromEnd num_vals res
         mem_ixfs <- mapM subExpIxFun val_res
-        return (Body () bnds' res, mem_ixfs)
+        pure (res, mem_ixfs)
 allocInExp (WithAcc inputs bodylam) =
   WithAcc <$> mapM onInput inputs <*> onLambda bodylam
   where
     onLambda lam = do
       params <- forM (lambdaParams lam) $ \(Param pv t) ->
         case t of
-          Prim Cert -> pure $ Param pv $ MemPrim Cert
+          Prim Unit -> pure $ Param pv $ MemPrim Unit
           Acc acc ispace ts u -> pure $ Param pv $ MemAcc acc ispace ts u
           _ -> error $ "Unexpected WithAcc lambda param: " ++ pretty (Param pv t)
-      allocInLambda params (lambdaBody lam) (lambdaReturnType lam)
+      allocInLambda params (lambdaBody lam)
 
     onInput (shape, arrs, op) =
       (shape,arrs,) <$> traverse (onOp shape arrs) op
@@ -963,7 +956,6 @@ allocInExp (WithAcc inputs bodylam) =
         allocInLambda
           (i_params' <> x_params' <> y_params')
           (lambdaBody lam)
-          (lambdaReturnType lam)
       return (lam', nes)
 
     mkP p pt shape u mem ixfun is =

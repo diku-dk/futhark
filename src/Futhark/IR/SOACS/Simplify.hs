@@ -103,8 +103,15 @@ instance Engine.Simplifiable StencilIndexes where
         StencilDynamic <$> Engine.simplify is
     where
       isStaticArray vtable v = do
-        (ArrayLit elems _, _) <- ST.lookupBasicOp v vtable
+        (e, _) <- ST.lookupBasicOp v vtable
+        elems <- isArrayLit e
         mapM isConstInt elems
+      isArrayLit (ArrayLit elems _) =
+        Just elems
+      isArrayLit (Replicate (Shape [Constant (IntValue (Int64Value n))]) x) =
+        Just $ replicate (fromIntegral n) x
+      isArrayLit _ =
+        Nothing
       isConstInt (Constant (IntValue (Int64Value x))) = Just $ fromIntegral x
       isConstInt _ = Nothing
   simplify (StencilStatic is) =
@@ -743,6 +750,7 @@ data ArrayOp
   = ArrayIndexing Certificates VName (Slice SubExp)
   | ArrayRearrange Certificates VName [Int]
   | ArrayRotate Certificates VName [SubExp]
+  | ArrayCopy Certificates VName
   | -- | Never constructed.
     ArrayVar Certificates VName
   deriving (Eq, Ord, Show)
@@ -751,12 +759,14 @@ arrayOpArr :: ArrayOp -> VName
 arrayOpArr (ArrayIndexing _ arr _) = arr
 arrayOpArr (ArrayRearrange _ arr _) = arr
 arrayOpArr (ArrayRotate _ arr _) = arr
+arrayOpArr (ArrayCopy _ arr) = arr
 arrayOpArr (ArrayVar _ arr) = arr
 
 arrayOpCerts :: ArrayOp -> Certificates
 arrayOpCerts (ArrayIndexing cs _ _) = cs
 arrayOpCerts (ArrayRearrange cs _ _) = cs
 arrayOpCerts (ArrayRotate cs _ _) = cs
+arrayOpCerts (ArrayCopy cs _) = cs
 arrayOpCerts (ArrayVar cs _) = cs
 
 isArrayOp :: Certificates -> AST.Exp (Wise SOACS) -> Maybe ArrayOp
@@ -766,6 +776,8 @@ isArrayOp cs (BasicOp (Rearrange perm arr)) =
   Just $ ArrayRearrange cs arr perm
 isArrayOp cs (BasicOp (Rotate rots arr)) =
   Just $ ArrayRotate cs arr rots
+isArrayOp cs (BasicOp (Copy arr)) =
+  Just $ ArrayCopy cs arr
 isArrayOp _ _ =
   Nothing
 
@@ -773,6 +785,7 @@ fromArrayOp :: ArrayOp -> (Certificates, AST.Exp (Wise SOACS))
 fromArrayOp (ArrayIndexing cs arr slice) = (cs, BasicOp $ Index arr slice)
 fromArrayOp (ArrayRearrange cs arr perm) = (cs, BasicOp $ Rearrange perm arr)
 fromArrayOp (ArrayRotate cs arr rots) = (cs, BasicOp $ Rotate rots arr)
+fromArrayOp (ArrayCopy cs arr) = (cs, BasicOp $ Copy arr)
 fromArrayOp (ArrayVar cs arr) = (cs, BasicOp $ SubExp $ Var arr)
 
 arrayOps :: AST.Body (Wise SOACS) -> S.Set (AST.Pattern (Wise SOACS), ArrayOp)
@@ -934,6 +947,9 @@ moveTransformToInput vtable pat aux (Screma w arrs (ScremaForm scan reduce map_l
     arrayIsMapParam (_, ArrayRotate cs arr rots) =
       arr `elem` map_param_names
         && all (`ST.elem` vtable) (namesToList $ freeIn cs <> freeIn rots)
+    arrayIsMapParam (_, ArrayCopy cs arr) =
+      arr `elem` map_param_names
+        && all (`ST.elem` vtable) (namesToList $ freeIn cs)
     arrayIsMapParam (_, ArrayVar {}) =
       False
 
@@ -950,6 +966,8 @@ moveTransformToInput vtable pat aux (Screma w arrs (ScremaForm scan reduce map_l
                 BasicOp $ Rearrange (0 : map (+ 1) perm) arr
               ArrayRotate _ _ rots ->
                 BasicOp $ Rotate (intConst Int64 0 : rots) arr
+              ArrayCopy {} ->
+                BasicOp $ Copy arr
               ArrayVar {} ->
                 BasicOp $ SubExp $ Var arr
         arr_transformed_t <- lookupType arr_transformed

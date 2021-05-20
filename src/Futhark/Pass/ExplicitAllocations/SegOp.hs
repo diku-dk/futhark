@@ -22,19 +22,17 @@ allocInKernelBody ::
   KernelBody fromlore ->
   AllocM fromlore tolore (KernelBody tolore)
 allocInKernelBody (KernelBody () stms res) =
-  allocInStms stms $ \stms' -> return $ KernelBody () stms' res
+  uncurry (flip (KernelBody ()))
+    <$> collectStms (allocInStms stms (pure res))
 
 allocInLambda ::
   Allocable fromlore tolore =>
   [LParam tolore] ->
   Body fromlore ->
-  [Type] ->
   AllocM fromlore tolore (Lambda tolore)
-allocInLambda params body rettype = do
-  body' <- localScope (scopeOfLParams params) $
-    allocInStms (bodyStms body) $ \bnds' ->
-      return $ Body () bnds' $ bodyResult body
-  return $ Lambda params body' rettype
+allocInLambda params body =
+  mkLambda params . allocInStms (bodyStms body) $
+    pure $ bodyResult body
 
 allocInBinOpParams ::
   Allocable fromlore tolore =>
@@ -99,10 +97,7 @@ allocInBinOpLambda num_threads (SegSpace flat _) lam = do
   (acc_params', arr_params') <-
     allocInBinOpParams num_threads index_x index_y acc_params arr_params
 
-  allocInLambda
-    (acc_params' ++ arr_params')
-    (lambdaBody lam)
-    (lambdaReturnType lam)
+  allocInLambda (acc_params' ++ arr_params') (lambdaBody lam)
 
 allocInStencilOpLambda ::
   Allocable fromlore tolore =>
@@ -111,10 +106,7 @@ allocInStencilOpLambda ::
   Lambda fromlore ->
   AllocM fromlore tolore (Lambda tolore)
 allocInStencilOpLambda _num_threads (SegSpace _flat _) lam =
-  allocInLambda
-    (map (fmap onParamType) (lambdaParams lam))
-    (lambdaBody lam)
-    (lambdaReturnType lam)
+  allocInLambda (map (fmap onParamType) (lambdaParams lam)) (lambdaBody lam)
   where
     onParamType (Prim pt) = MemPrim pt
     onParamType t = error $ "stencil onParamType: unexpected " ++ pretty t

@@ -513,7 +513,11 @@ pBody pr =
     pResult = braces $ pSubExp `sepBy` pComma
 
 pEntry :: Parser EntryPoint
-pEntry = parens $ (,) <$> pEntryPointTypes <* pComma <*> pEntryPointTypes
+pEntry =
+  parens $
+    (,,) <$> (nameFromString <$> pStringLiteral)
+      <* pComma <*> pEntryPointTypes
+      <* pComma <*> pEntryPointTypes
   where
     pEntryPointTypes = braces (pEntryPointType `sepBy` pComma)
     pEntryPointType =
