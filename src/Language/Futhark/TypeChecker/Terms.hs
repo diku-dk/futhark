@@ -2540,6 +2540,9 @@ causalityCheck binding_body = do
       onExp known (ProjectSection _ (Info t) loc)
         | Just bad <- checkCausality "projection section" known t loc =
           bad
+      onExp known (IndexSection _ (Info t) loc)
+        | Just bad <- checkCausality "projection section" known t loc =
+          bad
       onExp known (OpSectionRight _ (Info t) _ _ _ loc)
         | Just bad <- checkCausality "operator section" known t loc =
           bad
