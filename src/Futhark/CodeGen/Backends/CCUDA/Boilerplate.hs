@@ -41,12 +41,12 @@ profilingEnclosure name =
         pevents = cuda_get_events(&ctx->cuda,
                                   &ctx->$id:(kernelRuns name),
                                   &ctx->$id:(kernelRuntime name));
-        CUDA_SUCCEED(cudaEventRecord(pevents[0], 0));
+        CUDA_SUCCEED_FATAL(cudaEventRecord(pevents[0], 0));
       }
       |],
     [C.citems|
       if (pevents != NULL) {
-        CUDA_SUCCEED(cudaEventRecord(pevents[1], 0));
+        CUDA_SUCCEED_FATAL(cudaEventRecord(pevents[1], 0));
       }
       |]
   )
@@ -77,7 +77,7 @@ generateBoilerplate cuda_program cuda_prelude cost_centres kernels sizes failure
   cfg <- generateConfigFuns sizes
   generateContextFuns cfg cost_centres kernels sizes failures
 
-  GC.profileReport [C.citem|CUDA_SUCCEED(cuda_tally_profiling_records(&ctx->cuda));|]
+  GC.profileReport [C.citem|CUDA_SUCCEED_FATAL(cuda_tally_profiling_records(&ctx->cuda));|]
   mapM_ GC.profileReport $ costCentreReport $ cost_centres ++ M.keys kernels
   where
     cuda_h = $(embedStringFile "rts/c/cuda.h")
@@ -309,10 +309,10 @@ generateContextFuns cfg cost_centres kernels sizes failures = do
 
       forKernel name =
         ( [C.csdecl|typename CUfunction $id:name;|],
-          [C.cstm|CUDA_SUCCEED(cuModuleGetFunction(
-                                &ctx->$id:name,
-                                ctx->cuda.module,
-                                $string:(pretty (C.toIdent name mempty))));|]
+          [C.cstm|CUDA_SUCCEED_FATAL(cuModuleGetFunction(
+                                     &ctx->$id:name,
+                                     ctx->cuda.module,
+                                     $string:(pretty (C.toIdent name mempty))));|]
         ) :
         forCostCentre name
 
@@ -384,10 +384,10 @@ generateContextFuns cfg cost_centres kernels sizes failures = do
                  cuda_setup(&ctx->cuda, cuda_program, cfg->nvrtc_opts);
 
                  typename int32_t no_error = -1;
-                 CUDA_SUCCEED(cuMemAlloc(&ctx->global_failure, sizeof(no_error)));
-                 CUDA_SUCCEED(cuMemcpyHtoD(ctx->global_failure, &no_error, sizeof(no_error)));
+                 CUDA_SUCCEED_FATAL(cuMemAlloc(&ctx->global_failure, sizeof(no_error)));
+                 CUDA_SUCCEED_FATAL(cuMemcpyHtoD(ctx->global_failure, &no_error, sizeof(no_error)));
                  // The +1 is to avoid zero-byte allocations.
-                 CUDA_SUCCEED(cuMemAlloc(&ctx->global_failure_args, sizeof(int64_t)*($int:max_failure_args+1)));
+                 CUDA_SUCCEED_FATAL(cuMemAlloc(&ctx->global_failure_args, sizeof(int64_t)*($int:max_failure_args+1)));
 
                  $stms:init_kernel_fields
 
@@ -396,7 +396,7 @@ generateContextFuns cfg cost_centres kernels sizes failures = do
 
                  init_constants(ctx);
                  // Clear the free list of any deallocations that occurred while initialising constants.
-                 CUDA_SUCCEED(cuda_free_all(&ctx->cuda));
+                 CUDA_SUCCEED_FATAL(cuda_free_all(&ctx->cuda));
 
                  futhark_context_sync(ctx);
 
@@ -417,12 +417,12 @@ generateContextFuns cfg cost_centres kernels sizes failures = do
   GC.publicDef_ "context_sync" GC.MiscDecl $ \s ->
     ( [C.cedecl|int $id:s(struct $id:ctx* ctx);|],
       [C.cedecl|int $id:s(struct $id:ctx* ctx) {
-                 CUDA_SUCCEED(cuCtxPushCurrent(ctx->cuda.cu_ctx));
-                 CUDA_SUCCEED(cuCtxSynchronize());
+                 CUDA_SUCCEED_OR_RETURN(cuCtxPushCurrent(ctx->cuda.cu_ctx));
+                 CUDA_SUCCEED_OR_RETURN(cuCtxSynchronize());
                  if (ctx->failure_is_an_option) {
                    // Check for any delayed error.
                    typename int32_t failure_idx;
-                   CUDA_SUCCEED(
+                   CUDA_SUCCEED_OR_RETURN(
                      cuMemcpyDtoH(&failure_idx,
                                   ctx->global_failure,
                                   sizeof(int32_t)));
@@ -432,13 +432,13 @@ generateContextFuns cfg cost_centres kernels sizes failures = do
                      // We have to clear global_failure so that the next entry point
                      // is not considered a failure from the start.
                      typename int32_t no_failure = -1;
-                     CUDA_SUCCEED(
+                     CUDA_SUCCEED_OR_RETURN(
                        cuMemcpyHtoD(ctx->global_failure,
                                     &no_failure,
                                     sizeof(int32_t)));
 
                      typename int64_t args[$int:max_failure_args+1];
-                     CUDA_SUCCEED(
+                     CUDA_SUCCEED_OR_RETURN(
                        cuMemcpyDtoH(&args,
                                     ctx->global_failure_args,
                                     sizeof(args)));
@@ -448,12 +448,12 @@ generateContextFuns cfg cost_centres kernels sizes failures = do
                      return 1;
                    }
                  }
-                 CUDA_SUCCEED(cuCtxPopCurrent(&ctx->cuda.cu_ctx));
+                 CUDA_SUCCEED_OR_RETURN(cuCtxPopCurrent(&ctx->cuda.cu_ctx));
                  return 0;
                }|]
     )
 
   GC.onClear
     [C.citem|if (ctx->error == NULL) {
-               CUDA_SUCCEED(cuda_free_all(&ctx->cuda));
+               CUDA_SUCCEED_NONFATAL(cuda_free_all(&ctx->cuda));
              }|]
