@@ -1,9 +1,28 @@
 // Start of cuda.h.
 
-#define CUDA_SUCCEED(x) cuda_api_succeed(x, #x, __FILE__, __LINE__)
+#define CUDA_SUCCEED_FATAL(x) cuda_api_succeed_fatal(x, #x, __FILE__, __LINE__)
+#define CUDA_SUCCEED_NONFATAL(x) cuda_api_succeed_nonfatal(x, #x, __FILE__, __LINE__)
 #define NVRTC_SUCCEED(x) nvrtc_api_succeed(x, #x, __FILE__, __LINE__)
 
-static inline void cuda_api_succeed(CUresult res, const char *call,
+#define CUDA_SUCCEED_OR_RETURN(e) {             \
+    char *serror = CUDA_SUCCEED_NONFATAL(e);    \
+    if (serror) {                                 \
+      if (!ctx->error) {                          \
+        ctx->error = serror;                      \
+        return bad;                               \
+      } else {                                    \
+        free(serror);                             \
+      }                                           \
+    }                                             \
+  }
+
+// CUDA_SUCCEED_OR_RETURN returns the value of the variable 'bad' in
+// scope.  By default, it will be this one.  Create a local variable
+// of some other type if needed.  This is a bit of a hack, but it
+// saves effort in the code generator.
+static const int bad = 1;
+
+static inline void cuda_api_succeed_fatal(CUresult res, const char *call,
     const char *file, int line) {
   if (res != CUDA_SUCCESS) {
     const char *err_str;
@@ -11,6 +30,19 @@ static inline void cuda_api_succeed(CUresult res, const char *call,
     if (err_str == NULL) { err_str = "Unknown"; }
     futhark_panic(-1, "%s:%d: CUDA call\n  %s\nfailed with error code %d (%s)\n",
         file, line, call, res, err_str);
+  }
+}
+
+static char* cuda_api_succeed_nonfatal(CUresult res, const char *call,
+    const char *file, int line) {
+  if (res != CUDA_SUCCESS) {
+    const char *err_str;
+    cuGetErrorString(res, &err_str);
+    if (err_str == NULL) { err_str = "Unknown"; }
+    return msgprintf("%s:%d: CUDA call\n  %s\nfailed with error code %d (%s)\n",
+        file, line, call, res, err_str);
+  } else {
+    return NULL;
   }
 }
 
@@ -119,7 +151,7 @@ struct cuda_context {
 #define device_query(dev,attrib) _device_query(dev, CU_DEV_ATTR(attrib))
 static int _device_query(CUdevice dev, CUdevice_attribute attrib) {
   int val;
-  CUDA_SUCCEED(cuDeviceGetAttribute(&val, attrib, dev));
+  CUDA_SUCCEED_FATAL(cuDeviceGetAttribute(&val, attrib, dev));
   return val;
 }
 
@@ -127,7 +159,7 @@ static int _device_query(CUdevice dev, CUdevice_attribute attrib) {
 #define function_query(fn,attrib) _function_query(dev, CU_FUN_ATTR(attrib))
 static int _function_query(CUfunction dev, CUfunction_attribute attrib) {
   int val;
-  CUDA_SUCCEED(cuFuncGetAttribute(&val, attrib, dev));
+  CUDA_SUCCEED_FATAL(cuFuncGetAttribute(&val, attrib, dev));
   return val;
 }
 
@@ -154,7 +186,7 @@ static int cuda_device_setup(struct cuda_context *ctx) {
   int cc_major, cc_minor;
   CUdevice dev;
 
-  CUDA_SUCCEED(cuDeviceGetCount(&count));
+  CUDA_SUCCEED_FATAL(cuDeviceGetCount(&count));
   if (count == 0) { return 1; }
 
   int num_device_matches = 0;
@@ -164,12 +196,12 @@ static int cuda_device_setup(struct cuda_context *ctx) {
   // This should maybe be changed, since greater compute capability is not
   // necessarily an indicator of better performance.
   for (int i = 0; i < count; i++) {
-    CUDA_SUCCEED(cuDeviceGet(&dev, i));
+    CUDA_SUCCEED_FATAL(cuDeviceGet(&dev, i));
 
     cc_major = device_query(dev, COMPUTE_CAPABILITY_MAJOR);
     cc_minor = device_query(dev, COMPUTE_CAPABILITY_MINOR);
 
-    CUDA_SUCCEED(cuDeviceGetName(name, sizeof(name) - 1, dev));
+    CUDA_SUCCEED_FATAL(cuDeviceGetName(name, sizeof(name) - 1, dev));
     name[sizeof(name) - 1] = 0;
 
     if (ctx->cfg.debugging) {
@@ -205,7 +237,7 @@ static int cuda_device_setup(struct cuda_context *ctx) {
     fprintf(stderr, "Using device #%d\n", chosen);
   }
 
-  CUDA_SUCCEED(cuDeviceGet(&ctx->dev, chosen));
+  CUDA_SUCCEED_FATAL(cuDeviceGet(&ctx->dev, chosen));
   return 0;
 }
 
@@ -463,7 +495,7 @@ static void cuda_module_setup(struct cuda_context *ctx,
     dump_file(ctx->cfg.dump_ptx_to, ptx, strlen(ptx));
   }
 
-  CUDA_SUCCEED(cuModuleLoadData(&ctx->module, ptx));
+  CUDA_SUCCEED_FATAL(cuModuleLoadData(&ctx->module, ptx));
 
   free(ptx);
   if (src != NULL) {
@@ -472,12 +504,12 @@ static void cuda_module_setup(struct cuda_context *ctx,
 }
 
 static void cuda_setup(struct cuda_context *ctx, const char *src_fragments[], const char *extra_opts[]) {
-  CUDA_SUCCEED(cuInit(0));
+  CUDA_SUCCEED_FATAL(cuInit(0));
 
   if (cuda_device_setup(ctx) != 0) {
     futhark_panic(-1, "No suitable CUDA device found.\n");
   }
-  CUDA_SUCCEED(cuCtxCreate(&ctx->cu_ctx, 0, ctx->dev));
+  CUDA_SUCCEED_FATAL(cuCtxCreate(&ctx->cu_ctx, 0, ctx->dev));
 
   free_list_init(&ctx->free_list);
 
@@ -546,11 +578,11 @@ static cudaEvent_t* cuda_get_events(struct cuda_context *ctx, int *runs, int64_t
 static CUresult cuda_free_all(struct cuda_context *ctx);
 
 static void cuda_cleanup(struct cuda_context *ctx) {
-  CUDA_SUCCEED(cuda_free_all(ctx));
+  CUDA_SUCCEED_FATAL(cuda_free_all(ctx));
   (void)cuda_tally_profiling_records(ctx);
   free(ctx->profiling_records);
-  CUDA_SUCCEED(cuModuleUnload(ctx->module));
-  CUDA_SUCCEED(cuCtxDestroy(ctx->cu_ctx));
+  CUDA_SUCCEED_FATAL(cuModuleUnload(ctx->module));
+  CUDA_SUCCEED_FATAL(cuCtxDestroy(ctx->cu_ctx));
 }
 
 static CUresult cuda_alloc(struct cuda_context *ctx, size_t min_size,
