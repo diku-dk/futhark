@@ -44,7 +44,8 @@ compileSegStencil pat lvl space op kbody =
           fl256t2 = flNumT2 256
           fl512t2 = flNumT2 512
           fl1024t2 = flNumT2 1024
-          group_sizes_exp :: [Imp.TExp Int32]
+          group_sizes_exp :: 
+            [Imp.TExp Int32]
           group_sizes_exp =
               case dimentionality of
                   1 -> [group_size_flat_exp]
@@ -53,8 +54,7 @@ compileSegStencil pat lvl space op kbody =
                        *fl1024t2, 32]
                   3 -> [ fl256t2*fl1024t2
                         ,fl128t2*fl256t2
-                         *fl512t2
-                        , 32]
+                         *fl512t2, 32]
                   _ -> error "not valid dimensions"
           n_point_stencil = length $ head stencil_indexes
           n_invarElems = length $ map kernelResultSubExp $ kernelBodyResult kbody
@@ -83,7 +83,7 @@ compileSegStencil pat lvl space op kbody =
             case dimentionality of
               1 -> [rescale_on_byte_size 4]
               2 -> [2, rescale_on_byte_size 2]
-              3 -> [4, 2, rescale_on_byte_size 1]
+              3 -> [2, 2, rescale_on_byte_size 1]
               _ -> error "not valid dimensions"
           strip_multiples_exp :: [Imp.TExp Int32]
           strip_multiples_exp = map fromInteger strip_multiples
@@ -315,7 +315,6 @@ compileBigTileStripMinedSingleDim pat _ space op kbody group_sizes_exp strip_mul
       strip_sizes_exp = zipWith (*) strip_multiples_exp group_sizes_exp
       shared_sizes_exp = zipWith (+) strip_sizes_exp $ zipWith (-) a_maxs a_mins
       shared_size_flat_exp = product shared_sizes_exp
-      block_size_c = Count $ sExt64 $ product group_sizes_exp
   in do
   -- host side evaluated variables
   host_strip_sizes <- mapM (dPrimVE "host_strip_sizes") strip_sizes_exp
@@ -324,11 +323,15 @@ compileBigTileStripMinedSingleDim pat _ space op kbody group_sizes_exp strip_mul
   tile_length <- dPrimV "tile_length_flat" shared_size_flat_exp
   num_groups <- Count <$> dPrimVE "num_groups" (sExt64 $ product strip_grid)
   max_ixs <- mapM (dPrimVE "max_ixs" . (\x->x-1)) dims
+  blocksize <- dPrimVE "blocksize" $ sExt64 $ product group_sizes_exp
 
-  sKernelThread "stripbigtile" num_groups block_size_c (segFlat space) $ do
+  sKernelThread "stripbigtile" num_groups (Count blocksize) (segFlat space) $ do
     -- declaration of shared tile(s)
     tiles <- forM lamParTypes $ \ptype ->
-      sAllocArray "tile" ptype (Shape [Var $ tvVar tile_length]) (Space "local")
+      sAllocArray "tile" ptype
+        (Shape [Var $ tvVar tile_length]) 
+          (Space "local")
+
     constants <- kernelConstants <$> askEnv
     -- compile-time constant variables
     group_sizes <- mapM (dPrimVE "group_sizes")
@@ -356,14 +359,29 @@ compileBigTileStripMinedSingleDim pat _ space op kbody group_sizes_exp strip_mul
     writeSet_offsets <- mapM (dPrimVE "writeSet_offset") $
       zipWith (*) (map sExt64 strip_ids) (map sExt64 strip_sizes)
     -- iterate through the read-set and do reads.
-    sForUnflatten shared_sizes local_id_flat group_size_flat $ \(loader_ids, loader_ids_flat, isLastIter) -> do
-      -- bounded indexes used for loading elements into the tile.
-      loader_gids <- mapM (dPrimVE "loader_gid") $
-         bound_idxs $ zipWith (+) writeSet_offsets $ map sExt64 $ zipWith (+) loader_ids a_mins
-      -- if inside the bounds of the tile, perform read from input / write to tile.
-      sWhen (bNot isLastIter .||. loader_ids_flat .<. shared_size_flat) $
-        forM_ (zip tiles (stencilArrays op)) $ \(tile, input_arr) ->
-          copyDWIMFix tile [sExt64 loader_ids_flat] (Var input_arr) loader_gids
+    sForUnflatten shared_sizes local_id_flat 
+      group_size_flat 
+        $ \(loader_ids, 
+            loader_ids_flat, 
+            isLastIter) -> do
+
+      loader_gids <- 
+        mapM (dPrimVE "loader_gid") $
+          bound_idxs $ 
+            zipWith (+) writeSet_offsets 
+              $ map sExt64 $ 
+                zipWith (+) loader_ids 
+                  a_mins
+
+      sWhen (bNot isLastIter .||. 
+             loader_ids_flat .<. 
+             shared_size_flat) $
+        forM_ (zip tiles (stencilArrays op)) 
+        $ \(tile, input_arr) ->
+          copyDWIMFix tile 
+            [sExt64 loader_ids_flat] 
+            (Var input_arr) 
+            loader_gids
 
     -- end of phase 1. Wait for all elements to be loaded.
     sOp $ Imp.Barrier Imp.FenceLocal
