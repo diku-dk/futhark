@@ -109,6 +109,7 @@ module Futhark.CodeGen.ImpGen
     sWrite,
     sUpdate,
     sLoopNest,
+    sLoopNestSE,
     (<--),
     (<~~),
     function,
@@ -1156,6 +1157,9 @@ class ToExp a where
   toInt64Exp :: a -> Imp.TExp Int64
   toInt64Exp = TPrimExp . toExp' int64
 
+  toInt32Exp :: a -> Imp.TExp Int32
+  toInt32Exp = TPrimExp . toExp' int32
+
   toBoolExp :: a -> Imp.TExp Bool
   toBoolExp = TPrimExp . toExp' Bool
 
@@ -1817,6 +1821,16 @@ sLoopNest = sLoopNest' [] . shapeDims
     sLoopNest' is [] f = f $ reverse is
     sLoopNest' is (d : ds) f =
       sFor "nest_i" (toInt64Exp d) $ \i -> sLoopNest' (i : is) ds f
+
+sLoopNestSE ::
+  [SubExp] ->
+  ([Imp.TExp Int32] -> ImpM lore r op ()) ->
+  ImpM lore r op ()
+sLoopNestSE x y = sLoopNestSE' [] x y
+  where
+    sLoopNestSE' is [] f = f $ reverse is
+    sLoopNestSE' is (d : ds) f =
+      sFor "nest_i" (toInt32Exp d) $ \i -> sLoopNestSE' (i : is) ds f
 
 -- | Untyped assignment.
 (<~~) :: VName -> Imp.Exp -> ImpM lore r op ()

@@ -53,8 +53,8 @@ compileSegStencil pat lvl space op kbody =
                        *fl256t2*fl512t2
                        *fl1024t2, 32]
                   3 -> [ fl256t2*fl1024t2
-                        ,fl128t2*fl256t2
-                         *fl512t2, 32]
+                        ,fl64t2*fl128t2*fl512t2
+                        , 32]
                   _ -> error "not valid dimensions"
           n_point_stencil = length $ head stencil_indexes
           n_invarElems = length $ map kernelResultSubExp $ kernelBodyResult kbody
@@ -391,11 +391,11 @@ compileBigTileStripMinedSingleDim pat _ space op kbody group_sizes_exp strip_mul
       $ zipWith (+) writeSet_offsets $ map sExt64 local_ids
     local_id_shared_flat <- dPrimVE "local_id_shared_flat" $ flattenIndex shared_sizes local_ids
 
-    let nest_shape = Shape $ map (Constant . IntValue . intValue Int64) strip_multiples
-    sLoopNest nest_shape $ \local_strip_ids -> do
+    let nest_shape = map (Constant . IntValue . intValue Int32) strip_multiples
+    sLoopNestSE nest_shape $ \local_strip_ids -> do
       -- create the centre index used to read from the tile(s).
       tile_ids_offs <- mapM (dPrimVE "tile_ids_offs")
-                      $ zipWith (*) (map sExt32 local_strip_ids) group_sizes
+                      $ zipWith (*) group_sizes local_strip_ids
       tile_ids_offs_flat <- dPrimVE "tile_ids_offs_flat" $ flattenIndex shared_sizes tile_ids_offs
       -- assign the relevant values to the global-ids.
       zipWithM_ dPrimV_ gids_vn $ zipWith (+) base_write_gid $ map sExt64 tile_ids_offs
