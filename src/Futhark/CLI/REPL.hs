@@ -168,14 +168,9 @@ newFutharkiState count maybe_file = runExceptT $ do
 
       -- Then make the prelude available in the type checker.
       (tenv, d, src') <-
-        badOnLeft pretty $
-          snd $
-            T.checkDec
-              imports
-              src
-              T.initialEnv
-              (T.mkInitialImport ".")
-              $ mkOpen "/prelude/prelude"
+        badOnLeft pretty . snd $
+          T.checkDec imports src T.initialEnv (T.mkInitialImport ".") $
+            mkOpen "/prelude/prelude"
       -- Then in the interpreter.
       ienv' <- badOnLeft show =<< runInterpreter' (I.interpretDec ienv d)
       return (imports, src', tenv, ienv')
@@ -194,15 +189,11 @@ newFutharkiState count maybe_file = runExceptT $ do
         foldM (\ctx -> badOnLeft show <=< runInterpreter' . I.interpretImport ctx) I.initialCtx $
           map (fmap fileProg) imports
       (tenv1, d1, src') <-
-        badOnLeft pretty $
-          snd $
-            T.checkDec imports src T.initialEnv imp $
-              mkOpen "/prelude/prelude"
+        badOnLeft pretty . snd . T.checkDec imports src T.initialEnv imp $
+          mkOpen "/prelude/prelude"
       (tenv2, d2, src'') <-
-        badOnLeft pretty $
-          snd $
-            T.checkDec imports src' tenv1 imp $
-              mkOpen $ toPOSIX $ dropExtension file
+        badOnLeft pretty . snd . T.checkDec imports src' tenv1 imp $
+          mkOpen $ toPOSIX $ dropExtension file
       ienv2 <- badOnLeft show =<< runInterpreter' (I.interpretDec ienv1 d1)
       ienv3 <- badOnLeft show =<< runInterpreter' (I.interpretDec ienv2 d2)
       return (imports, src'', tenv2, ienv3)
@@ -258,10 +249,9 @@ readEvalPrint = do
         [] -> liftIO $ T.putStrLn $ "Unknown command '" <> cmdname <> "'"
         [(_, (cmdf, _))] -> cmdf arg
         matches ->
-          liftIO $
-            T.putStrLn $
-              "Ambiguous command; could be one of "
-                <> mconcat (intersperse ", " (map fst matches))
+          liftIO . T.putStrLn $
+            "Ambiguous command; could be one of "
+              <> mconcat (intersperse ", " (map fst matches))
     _ -> do
       -- Read a declaration or expression.
       maybe_dec_or_e <- parseDecOrExpIncrM (inputLine "  ") prompt line
@@ -378,16 +368,14 @@ runInterpreter m = runF m (return . Right) intOp
         -- Note the cleverness to preserve the Haskeline session (for
         -- line history and such).
         (stop, s') <-
-          FutharkiM $
-            lift $
-              lift $
-                runStateT
-                  (runExceptT $ runFutharkiM $ forever readEvalPrint)
-                  s
-                    { futharkiEnv = (tenv, ctx),
-                      futharkiCount = futharkiCount s + 1,
-                      futharkiBreaking = Just breaking
-                    }
+          FutharkiM . lift . lift $
+            runStateT
+              (runExceptT $ runFutharkiM $ forever readEvalPrint)
+              s
+                { futharkiEnv = (tenv, ctx),
+                  futharkiCount = futharkiCount s + 1,
+                  futharkiBreaking = Just breaking
+                }
 
         case stop of
           Left (Load file) -> throwError $ Load file
