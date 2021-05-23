@@ -44,7 +44,7 @@ compileSegStencil pat lvl space op kbody =
           fl256t2 = flNumT2 256
           fl512t2 = flNumT2 512
           fl1024t2 = flNumT2 1024
-          group_sizes_exp :: 
+          group_sizes_exp ::
             [Imp.TExp Int32]
           group_sizes_exp =
               case dimentionality of
@@ -159,6 +159,8 @@ chunksOf len xs =
 --    flat_ix <- dPrimVE "flat_ix" $ (i * added_flat) + start_flat
 --    ixs <- unflattenIndex "ixs" sizes flat_ix
 --    () <- body (ixs, flat_ix)
+--
+-- assumes that (0 < product sizes) aka. not an empty range.
 sForUnflatten ::
   IntExp t =>
   [Imp.TExp t] ->
@@ -168,7 +170,8 @@ sForUnflatten ::
   ImpM lore r op ()
 sForUnflatten sizes start_flat added_flat body = do
   size_span <- mapM (dPrimVE "size_span") $ createSpans sizes
-  iterations <- dPrimVE "iterations" $ divUp (product sizes) added_flat
+  flat_size <- dPrimVE "flat_size" $ product sizes
+  iterations <- dPrimVE "iterations" ((divUp flat_size added_flat) - 1)
   starts <- unflattenIx "start" size_span start_flat
   adds <- unflattenIx "added" size_span added_flat
   sizes_const <- mapM (dPrimVE "size") sizes
@@ -186,9 +189,10 @@ sForUnflatten sizes start_flat added_flat body = do
         start_flat_var <-- (tvExp start_flat_var + added_flat_var)
         zipWithM_ (\b ng -> b <-- (tvExp b + tvExp ng)) starts adds
         forM_ ls add_carry
-  sFor "i" iterations $ \i -> do
-    () <- body (map tvExp starts, tvExp start_flat_var, i .==. (iterations-1))
+  sFor "i" iterations $ \_ -> do
+    () <- body (map tvExp starts, tvExp start_flat_var, toBoolExp (Constant (BoolValue True)))
     prepareNextIter
+  void $ body (map tvExp starts, tvExp start_flat_var, toBoolExp (Constant (BoolValue False)))
 
 -- Kernel for evaluating a single stencil.
 -- This is equivalent to just making a nest of maps and finding the neighbours from there.
@@ -329,7 +333,7 @@ compileBigTileStripMinedSingleDim pat _ space op kbody group_sizes_exp strip_mul
     -- declaration of shared tile(s)
     tiles <- forM lamParTypes $ \ptype ->
       sAllocArray "tile" ptype
-        (Shape [Var $ tvVar tile_length]) 
+        (Shape [Var $ tvVar tile_length])
           (Space "local")
 
     constants <- kernelConstants <$> askEnv
@@ -359,28 +363,28 @@ compileBigTileStripMinedSingleDim pat _ space op kbody group_sizes_exp strip_mul
     writeSet_offsets <- mapM (dPrimVE "writeSet_offset") $
       zipWith (*) (map sExt64 strip_ids) (map sExt64 strip_sizes)
     -- iterate through the read-set and do reads.
-    sForUnflatten shared_sizes local_id_flat 
-      group_size_flat 
-        $ \(loader_ids, 
-            loader_ids_flat, 
-            isLastIter) -> do
+    sForUnflatten shared_sizes local_id_flat
+      group_size_flat
+        $ \(loader_ids,
+            loader_ids_flat,
+            isNotLastIter) -> do
 
-      loader_gids <- 
+      loader_gids <-
         mapM (dPrimVE "loader_gid") $
-          bound_idxs $ 
-            zipWith (+) writeSet_offsets 
-              $ map sExt64 $ 
-                zipWith (+) loader_ids 
+          bound_idxs $
+            zipWith (+) writeSet_offsets
+              $ map sExt64 $
+                zipWith (+) loader_ids
                   a_mins
 
-      sWhen (bNot isLastIter .||. 
-             loader_ids_flat .<. 
+      sWhen (isNotLastIter .||.
+             loader_ids_flat .<.
              shared_size_flat) $
-        forM_ (zip tiles (stencilArrays op)) 
+        forM_ (zip tiles (stencilArrays op))
         $ \(tile, input_arr) ->
-          copyDWIMFix tile 
-            [sExt64 loader_ids_flat] 
-            (Var input_arr) 
+          copyDWIMFix tile
+            [sExt64 loader_ids_flat]
+            (Var input_arr)
             loader_gids
 
     -- end of phase 1. Wait for all elements to be loaded.
