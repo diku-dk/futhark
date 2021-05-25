@@ -425,8 +425,10 @@ greedyFuse rem_bnds lam_used_nms res (out_idds, aux, orig_soac, consumed) = do
   --
   -- (ii) check whether fusing @soac@ will violate any in-place update
   --      restriction, e.g., would move an input array past its in-place update.
-  let all_used_names = namesToList $ mconcat [lam_used_nms, namesFromList inp_nms, namesFromList other_nms]
-      has_inplace ker = any (`nameIn` inplace ker) all_used_names
+  all_used_names <-
+    fmap mconcat . mapM varAliases . namesToList $
+      mconcat [lam_used_nms, namesFromList inp_nms, namesFromList other_nms]
+  let has_inplace ker = inplace ker `namesIntersect` all_used_names
       ok_inplace = not $ any has_inplace old_kers
   --
   -- (iii)  there are some kernels that use some of `out_idds' as inputs

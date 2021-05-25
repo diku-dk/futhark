@@ -43,6 +43,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * `futhark test` now reports mismatches using proper indexes (#1356).
 
+  * Missing alias checking in fusion could lead to compiler crash (#1358).
+
 ## [0.19.5]
 
 ### Added
