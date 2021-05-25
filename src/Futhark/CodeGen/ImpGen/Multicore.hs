@@ -10,6 +10,7 @@ where
 
 import Control.Monad
 import qualified Data.Map as M
+import Data.List (inits, tails, zip4)
 import qualified Futhark.CodeGen.ImpCode.Multicore as Imp
 import Futhark.CodeGen.ImpGen
 import Futhark.CodeGen.ImpGen.Multicore.Base
@@ -22,6 +23,8 @@ import Futhark.IR.MCMem
 import Futhark.MonadFreshNames
 import Futhark.Util.IntegralExp (rem)
 import Prelude hiding (quot, rem)
+
+import Debug.Trace (trace)
 
 -- GCC supported primitve atomic Operations
 -- TODO: Add support for 1, 2, and 16 bytes too
@@ -121,6 +124,102 @@ compileMCOp ::
   MCOp MCMem () ->
   ImpM MCMem HostEnv Imp.Multicore ()
 compileMCOp _ (OtherOp ()) = pure ()
+compileMCOp pat (ParOp par_op op@(SegStencil _ _ sten _ kbody)) = do
+  let space = getSpace op
+      ns = map (toInt64Exp . snd) $ unSegSpace space
+      numDims = length ns
+      tds = map toInt64Exp $ tileDims (length ns)
+      idxs = stencilIndexes sten
+      bounds = map (\xs -> (fromInteger (minimum xs), fromInteger (maximum xs))) idxs
+      nsInner = zipWith (\(mi, ma) n -> n + mi - ma) bounds ns
+      nsLower = zipWith (++) (map init $ tail $ inits nsInner)
+                             (zipWith (:) (map (negate . fst) bounds) $ tail $ tails ns)
+      nsUpper = zipWith (++) (map init $ tail $ inits nsInner)
+                                    (zipWith (:) (map snd bounds) $ tail $ tails ns)
+      offsetsLower = init $ zipWith (++) (inits (map (negate . fst) bounds))
+                                         (tails (replicate numDims 0))
+      offsetsUpper = zipWith (++) (inits (map (negate . fst) bounds))
+                                  (zipWith (:) (zipWith (+) nsInner (map (negate . fst) bounds)) $ tail $ tails (replicate numDims 0))
+--      offsetsUpper = init $ zipWith (++) (inits (map (negate . fst) bounds))
+--                                         (tails $ init $ 0 : zipWith (+) nsInner (map (negate . fst) bounds))
+--      offsetsUpper = tail $ zipWith (++) (inits $ zipWith (+) nsInner (map (negate . fst) bounds))
+--                                         (tails (replicate numDims 0))
+      -- dims = zipWith (\(mi, ma) n -> (negate mi, n, ma)) bounds ns'
+      innerLoopOffsets = trace (show offsetsUpper) $ map (negate . fst) bounds
+      toIters n td = TPrimExp $ BinOpExp (SDiv Int64 Unsafe) (untyped $ n + td - 1)
+                                                             (untyped td)
+      innerIterations = product $ zipWith toIters nsInner tds :: Imp.TExp Int64
+
+      --boundaryLoopDims = flip map [0..numDims-1] $ \i ->
+      --  (zipWith (\(l, m, _) j -> if i == j then l else m) dims [0..],
+      --   zipWith (\(_, m, r) j -> if i == j then r else m) dims [0..],
+      --   zipWith (\(l, m, _) j -> if i == j then l + m else 0) dims [0..])
+
+  nsubtasks <- dPrim "num_tasks" $ IntType Int32
+  retvals <- getReturnParams pat op
+  s <- segOpString op
+
+  -- For each dimension, we need 2 loops (one at each boundary of the array)
+  forM_ (zip4 nsLower offsetsLower nsUpper offsetsUpper) $
+    \(loopStart, offsetsStart, loopEnd, offsetsEnd) -> do
+      -- Loop for the "lower" boundary
+      loop_lower_ns <- replicateM numDims (newVName "idx_lower")
+      zipWithM_ dPrimV_ loop_lower_ns loopStart
+
+      let loopStartSpace = SegSpace (segFlat space) $ zip (map fst $ unSegSpace space)
+                                                    $ map Var loop_lower_ns
+      codeStart <- compileStencilBoundaryLoop pat loopStartSpace offsetsStart ns sten kbody
+      let iterationsStart = product loopStart
+          schedulingInfoStart = Imp.SchedulerInfo (tvVar nsubtasks) (untyped iterationsStart)
+          nonFreeStart = segFlat loopStartSpace :
+                         tvVar nsubtasks :
+                         map Imp.paramName retvals
+      freeParamsStart <- freeParams codeStart nonFreeStart
+      let taskStart = Imp.ParallelTask codeStart (segFlat loopStartSpace)
+      emit $ Imp.Op
+           $ Imp.Segop s freeParamsStart taskStart Nothing retvals
+           $ schedulingInfoStart (decideScheduling' op codeStart)
+
+      -- loop for the "upper" boundary
+      -- Loop for the "lower" boundary
+      loop_upper_ns <- replicateM numDims (newVName "idx_upper")
+      zipWithM_ dPrimV_ loop_upper_ns loopEnd
+
+      let loopEndSpace = SegSpace (segFlat space) $ zip (map fst $ unSegSpace space)
+                                                  $ map Var loop_upper_ns
+      codeEnd <- compileStencilBoundaryLoop pat loopStartSpace offsetsEnd ns sten kbody
+      let iterationsEnd = product loopEnd
+          schedulingInfoEnd = Imp.SchedulerInfo (tvVar nsubtasks) (untyped iterationsEnd)
+          nonFreeEnd = segFlat loopEndSpace :
+                         tvVar nsubtasks :
+                         map Imp.paramName retvals
+      freeParamsEnd <- freeParams codeEnd nonFreeEnd
+      let taskEnd = Imp.ParallelTask codeEnd (segFlat loopEndSpace)
+      emit $ Imp.Op
+           $ Imp.Segop s freeParamsEnd taskEnd Nothing retvals
+           $ schedulingInfoEnd (decideScheduling' op codeEnd)
+
+  inner_ns <- replicateM numDims (newVName "idx_inner")
+  zipWithM_ dPrimV_ inner_ns $ zipWith (\o n -> n + o) innerLoopOffsets nsInner
+
+  let innerSpace = SegSpace (segFlat space) $ zip (map fst $ unSegSpace space)
+                                            $ map Var inner_ns
+  -- This is the loop that processes the inner part of the array, and thus doesn't need
+  -- to do any boundary checking. This loop is the only one that's tiled.
+  code <- compileSegStencilInner pat innerSpace innerLoopOffsets sten kbody
+
+  let scheduling_info_inner = Imp.SchedulerInfo (tvVar nsubtasks) (untyped innerIterations)
+
+  let non_free = segFlat innerSpace :
+                 tvVar nsubtasks :
+                 map Imp.paramName retvals
+
+  free_params <- freeParams code non_free
+  let inner_task = Imp.ParallelTask code (segFlat innerSpace)
+  emit $ Imp.Op
+       $ Imp.Segop s free_params inner_task Nothing retvals
+       $ scheduling_info_inner (decideScheduling' op code)
+
 compileMCOp pat (ParOp par_op op) = do
   let space = getSpace op
   dPrimV_ (segFlat space) (0 :: Imp.TExp Int64)
@@ -169,5 +268,5 @@ compileSegOp pat (SegRed _ space reds _ kbody) ntasks =
   compileSegRed pat space reds kbody ntasks
 compileSegOp pat (SegMap _ space _ kbody) _ =
   compileSegMap pat space kbody
-compileSegOp pat (SegStencil _ space sten _ kbody) _ =
-  compileSegStencil pat space sten kbody
+compileSegOp _ (SegStencil _ _ _ _ _) _ =
+  pure $ Imp.DebugPrint "Impossible: compileSegOp got a SegStencil" Nothing

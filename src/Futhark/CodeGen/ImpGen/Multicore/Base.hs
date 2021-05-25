@@ -93,15 +93,6 @@ getIterationDomain SegMap {} space = do
   let ns = map snd $ unSegSpace space
       ns_64 = map toInt64Exp ns
   return $ product ns_64
-getIterationDomain SegStencil {} space = do
-  let ns = map (toInt64Exp . snd) $ unSegSpace space
-      tds = map toInt64Exp $ tileDims (length ns)
-      toIters :: Imp.TExp Int64 -> Imp.TExp Int64 -> Imp.TExp Int64
-      toIters n td = TPrimExp $ BinOpExp (SDiv Int64 Unsafe) (untyped $ n + td - 1)
-                                                             (untyped td)
-      iters = zipWith toIters ns tds
-  emit $ Imp.DebugPrint "Iterations" $ Just $ untyped $ product iters
-  return $ product iters
 getIterationDomain _ space = do
   let ns = map snd $ unSegSpace space
       ns_64 = map toInt64Exp ns
