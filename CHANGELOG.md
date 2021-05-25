@@ -41,6 +41,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Missing causality check for index sections.
 
+  * `futhark test` now reports mismatches using proper indexes (#1356).
+
 ## [0.19.5]
 
 ### Added
