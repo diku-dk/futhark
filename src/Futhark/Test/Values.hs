@@ -48,6 +48,7 @@ import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy.Char8 as LBS
 import Data.Char (chr, isSpace, ord)
 import Data.Int (Int16, Int32, Int64, Int8)
+import Data.List (intercalate)
 import qualified Data.Map as M
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
@@ -59,6 +60,8 @@ import qualified Data.Vector.Unboxed as UVec
 import qualified Data.Vector.Unboxed.Mutable as UMVec
 import Futhark.IR.Primitive (PrimValue)
 import Futhark.IR.Prop.Constants (IsValue (..))
+import Futhark.IR.Prop.Reshape (unflattenIndex)
+import Futhark.Util.IntegralExp
 import Futhark.Util.Loc (Pos (..))
 import Futhark.Util.Pretty
 import qualified Futhark.Util.Pretty as PP
@@ -609,25 +612,27 @@ readValues = readValues' . dropSpaces
 data Mismatch
   = -- | The position the value number and a flat index
     -- into the array.
-    PrimValueMismatch (Int, Int) PrimValue PrimValue
+    PrimValueMismatch Int [Int] PrimValue PrimValue
   | ArrayShapeMismatch Int [Int] [Int]
   | TypeMismatch Int String String
   | ValueCountMismatch Int Int
 
 instance Show Mismatch where
-  show (PrimValueMismatch (i, j) got expected) =
-    explainMismatch (i, j) "" got expected
+  show (PrimValueMismatch vi [] got expected) =
+    explainMismatch (show vi) "" got expected
+  show (PrimValueMismatch vi js got expected) =
+    explainMismatch (show vi ++ " index [" ++ intercalate "," (map show js) ++ "]") "" got expected
   show (ArrayShapeMismatch i got expected) =
-    explainMismatch i "array of shape " got expected
+    explainMismatch (show i) "array of shape " got expected
   show (TypeMismatch i got expected) =
-    explainMismatch i "value of type " got expected
+    explainMismatch (show i) "value of type " got expected
   show (ValueCountMismatch got expected) =
     "Expected " ++ show expected ++ " values, got " ++ show got
 
 -- | A human-readable description of how two values are not the same.
-explainMismatch :: (Show i, PP.Pretty a) => i -> String -> a -> a -> String
+explainMismatch :: (PP.Pretty a) => String -> String -> a -> a -> String
 explainMismatch i what got expected =
-  "Value " ++ show i ++ " expected " ++ what ++ PP.pretty expected ++ ", got " ++ PP.pretty got
+  "Value #" ++ i ++ ": expected " ++ what ++ PP.pretty expected ++ ", got " ++ PP.pretty got
 
 -- | Compare two sets of Futhark values for equality.  Shapes and
 -- types must also match.
@@ -670,6 +675,9 @@ compareValue i got_v expected_v
   | otherwise =
     [ArrayShapeMismatch i (valueShape got_v) (valueShape expected_v)]
   where
+    unflatten =
+      map wrappedValue . unflattenIndex (map Wrapped (valueShape got_v)) . Wrapped
+
     {-# INLINE compareGen #-}
     {-# INLINE compareNum #-}
     {-# INLINE compareFloat #-}
@@ -693,7 +701,7 @@ compareValue i got_v expected_v
 
     compareElement tol j got expected
       | comparePrimValue tol got expected = Nothing
-      | otherwise = Just $ PrimValueMismatch (i, j) (value got) (value expected)
+      | otherwise = Just $ PrimValueMismatch i (unflatten j) (value got) (value expected)
 
     compareFloatElement tol j got expected
       | isNaN got,
@@ -708,7 +716,7 @@ compareValue i got_v expected_v
 
     compareBool j got expected
       | got == expected = Nothing
-      | otherwise = Just $ PrimValueMismatch (i, j) (value got) (value expected)
+      | otherwise = Just $ PrimValueMismatch i (unflatten j) (value got) (value expected)
 
 comparePrimValue ::
   (Ord num, Num num) =>
