@@ -45,6 +45,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Missing alias checking in fusion could lead to compiler crash (#1358).
 
+  * The absolute value of NaN is no longer infinity in the interpreter (#1359).
+
 ## [0.19.5]
 
 ### Added
