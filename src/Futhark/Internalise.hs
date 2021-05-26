@@ -992,7 +992,7 @@ internaliseDimIndex w (E.DimSlice i j s) = do
   -- operands.
   let divRounding x y =
         eBinOp
-          (SQuot Int64 Unsafe)
+          (SQuot Int64 Safe)
           ( eBinOp
               (Add Int64 I.OverflowWrap)
               x
@@ -1000,6 +1000,9 @@ internaliseDimIndex w (E.DimSlice i j s) = do
           )
           y
   n <- letSubExp "n" =<< divRounding (toExp j_m_i) (toExp s')
+
+  zero_stride <- letSubExp "zero_stride" $ I.BasicOp $ I.CmpOp (CmpEq int64) s_sign zero
+  nonzero_stride <- letSubExp "nonzero_stride" $ I.BasicOp $ I.UnOp Not zero_stride
 
   -- Bounds checks depend on whether we are slicing forwards or
   -- backwards.  If forwards, we must check '0 <= i && i <= j'.  If
@@ -1040,9 +1043,14 @@ internaliseDimIndex w (E.DimSlice i j s) = do
         (resultBody [backwards_ok])
         (resultBody [forwards_ok])
         $ ifCommon [I.Prim I.Bool]
+
   ok_or_empty <-
     letSubExp "ok_or_empty" $
       I.BasicOp $ I.BinOp I.LogOr empty_slice slice_ok
+
+  acceptable <-
+    letSubExp "slice_acceptable" $
+      I.BasicOp $ I.BinOp I.LogAnd nonzero_stride ok_or_empty
 
   let parts = case (i, j, s) of
         (_, _, Just {}) ->
@@ -1060,7 +1068,7 @@ internaliseDimIndex w (E.DimSlice i j s) = do
             ++ maybe mempty (const [":", ErrorInt64 s']) s
         (_, Nothing, Nothing) ->
           [ErrorInt64 i', ":"]
-  return (I.DimSlice i' n s', ok_or_empty, parts)
+  return (I.DimSlice i' n s', acceptable, parts)
   where
     zero = constant (0 :: Int64)
     negone = constant (-1 :: Int64)
