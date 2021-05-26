@@ -120,3 +120,11 @@ Corresponds to :c:func:`futhark_context_unpause_profiling`.
 ..........
 
 Corresponds to :c:func:`futhark_context_report`.
+
+Environment Variables
+---------------------
+
+``FUTHARK_COMPILER_DEBUGGING``
+..............................
+
+Turns on debugging output for the server when set to 1.
