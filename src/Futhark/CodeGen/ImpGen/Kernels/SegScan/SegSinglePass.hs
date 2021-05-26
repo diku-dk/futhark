@@ -128,14 +128,20 @@ compileSegScan pat lvl space scanOp kbody = do
       n = product $ map toInt64Exp $ segSpaceDims space
       sumT :: Integer
       maxT :: Integer
-      sumT = foldl (\bytes typ -> bytes + primByteSize typ) 0 tys `div` 4
-      maxT = maximum (map primByteSize tys) `div` 4
+      sumT = foldl (\bytes typ -> bytes + primByteSize typ) 0 tys
+      primByteSize' = max 4 . primByteSize
+      sumT' = foldl (\bytes typ -> bytes + primByteSize' typ) 0 tys `div` 4
+      maxT = maximum (map primByteSize tys)
       -- TODO: Make these constants dynamic by querying device
+      -- RTX 2080 Ti constants (CC 7.5)
+      -- k_reg = 64
+      -- k_mem = 48 --12*4
+      -- GTX 780 Ti constants (CC 3.5)
       k_reg = 64
-      k_mem = 12
+      k_mem = 36 --9*4
       mem_constraint = max k_mem sumT `div` maxT
       --reg_constraint = (k_reg `div` sumT) - 6
-      reg_constraint = (k_reg-2-sumT) `div` (2*sumT+4)
+      reg_constraint = (k_reg-1-sumT') `div` (2*sumT'+3)
       m :: Num a => a
       m = fromIntegral $ min mem_constraint reg_constraint
       num_groups = Count (n `divUp` (unCount group_size * m))
