@@ -1833,6 +1833,8 @@ compileExp = compilePrimExp compileLeaf
   where
     compileLeaf (ScalarVar src) =
       return [C.cexp|$id:src|]
+    compileLeaf (Index _ _ Unit __ _) =
+      return $ compilePrimValue UnitValue
     compileLeaf (Index src (Count iexp) restype DefaultSpace vol) = do
       src' <- rawMem src
       derefPointer src'
