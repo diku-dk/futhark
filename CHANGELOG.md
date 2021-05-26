@@ -47,6 +47,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * The absolute value of NaN is no longer infinity in the interpreter (#1359).
 
+  * Proper detection of zero strides in compiler (#1360).
+
 ## [0.19.5]
 
 ### Added
