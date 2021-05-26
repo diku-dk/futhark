@@ -32,7 +32,7 @@ createLocalArrays ::
   Count GroupSize SubExp ->
   SubExp ->
   [PrimType] ->
-  InKernelGen (VName, [VName], [VName], VName, VName, [VName])
+  InKernelGen (VName, [VName], [VName], VName, VName, [VName], VName, VName, VName, VName)
 createLocalArrays (Count groupSize) m types = do
   let groupSizeE = toInt64Exp groupSize
       workSize = toInt64Exp m * groupSizeE
@@ -70,6 +70,10 @@ createLocalArrays (Count groupSize) m types = do
 
   sharedId <- sArrayInMem "shared_id" int32 (Shape [constant (1 :: Int32)]) localMem
   sharedReadOffset <- sArrayInMem "shared_read_offset" int32 (Shape [constant (1 :: Int32)]) localMem
+  blockOffset <- sArrayInMem "block_offset" int64 (Shape [constant (1 :: Int32)]) localMem
+  sgmIdx <- sArrayInMem "sgm_index" int64 (Shape [constant (1 :: Int32)]) localMem
+  boundary <- sArrayInMem "boundary_idx" int32 (Shape [constant (1 :: Int32)]) localMem
+  segsizeC <- sArrayInMem "sgm_sizeC" int32 (Shape [constant (1 :: Int32)]) localMem
 
   transposedArrays <-
     forM types $ \ty ->
@@ -98,7 +102,17 @@ createLocalArrays (Count groupSize) m types = do
         (Shape [constant (warpSize :: Int64)])
         $ ArrayIn localMem $ IxFun.iotaOffset off' [warpSize]
 
-  return (sharedId, transposedArrays, prefixArrays, sharedReadOffset, warpscan, warpExchanges)
+  return (
+    sharedId,
+    transposedArrays,
+    prefixArrays,
+    sharedReadOffset,
+    warpscan,
+    warpExchanges,
+    blockOffset,
+    sgmIdx,
+    boundary,
+    segsizeC)
 -- | Compile 'SegScan' instance to host-level code with calls to a
 -- single-pass kernel.
 compileSegScan ::
@@ -152,8 +166,18 @@ compileSegScan pat lvl space scanOp kbody = do
   sKernelThread "segscan" num_groups group_size (segFlat space) $ do
     constants <- kernelConstants <$> askEnv
 
-    (sharedId, transposedArrays, prefixArrays, sharedReadOffset, warpscan, exchanges) <-
-      createLocalArrays (segGroupSize lvl) (intConst Int64 m) tys
+    ( sharedId,
+      transposedArrays,
+      prefixArrays,
+      sharedReadOffset,
+      warpscan,
+      exchanges,
+      blockOffset,
+      sgmIndex,
+      boundaryIndex,
+      segsizeCompact
+      )
+      <- createLocalArrays (segGroupSize lvl) (intConst Int64 m) tys
 
     dynamicId <- dPrim "dynamic_id" int32 :: ImpM lore r op (TV Int64)
     sWhen (kernelLocalThreadId constants .==. 0) $ do
@@ -176,16 +200,34 @@ compileSegScan pat lvl space scanOp kbody = do
     copyDWIMFix (tvVar dynamicId) [] (Var sharedId) [0]
     sOp localBarrier
 
-    blockOff <-
-      dPrimV "blockOff" $
-        sExt64 (tvExp dynamicId) * m * kernelGroupSize constants
-    sgmIdx <- dPrimVE "sgm_idx" $ tvExp blockOff `mod` segment_size
-    boundary <-
-      dPrimVE "boundary" $
-        sExt32 $ sMin64 (m * unCount group_size) (segment_size - sgmIdx)
-    segsize_compact <-
-      dPrimVE "segsize_compact" $
-        sExt32 $ sMin64 (m * unCount group_size) segment_size
+    sWhen (kernelLocalThreadId constants .==. 0) $ do
+      blockOff <-
+        dPrimV "blockOff" $
+          sExt64 (tvExp dynamicId) * m * kernelGroupSize constants
+      sgmIdx <- dPrimV "sgm_idx" $ tvExp blockOff `mod` segment_size
+      boundary <-
+        dPrimV "boundary" $
+          sExt32 $ sMin64 (m * unCount group_size) (segment_size - tvExp sgmIdx)
+      segsize_compact <-
+        dPrimV "segsize_compact" $
+          sExt32 $ sMin64 (m * unCount group_size) segment_size
+      copyDWIMFix blockOffset [0] (Var $ tvVar blockOff) []
+      copyDWIMFix sgmIndex [1] (Var $ tvVar sgmIdx) []
+      copyDWIMFix boundaryIndex [4] (Var $ tvVar boundary) []
+      copyDWIMFix segsizeCompact [5] (Var $ tvVar segsize_compact) []
+    blockOff <- dPrim "blockOff" int64
+    sgmIdxV <- dPrim "sgm_idx" int64
+    boundaryV <- dPrim "boundary" int32
+    segsize_compactV <- dPrim "segsize_compact" int32
+    sOp localBarrier
+    copyDWIMFix (tvVar blockOff) [] (Var blockOffset) [0]
+    copyDWIMFix (tvVar sgmIdxV) [] (Var sgmIndex) [1]
+    copyDWIMFix (tvVar boundaryV) [] (Var boundaryIndex) [4]
+    copyDWIMFix (tvVar segsize_compactV) [] (Var segsizeCompact) [5]
+    sOp localBarrier
+    let sgmIdx = tvExp sgmIdxV
+        boundary = tvExp boundaryV
+        segsize_compact = tvExp segsize_compactV
     privateArrays <-
       forM tys $ \ty ->
         sAllocArray
