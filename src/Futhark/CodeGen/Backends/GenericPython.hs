@@ -1149,6 +1149,8 @@ compileExp = compilePrimExp compileLeaf
   where
     compileLeaf (Imp.ScalarVar vname) =
       compileVar vname
+    compileLeaf (Imp.Index _ _ Unit _ _) =
+      return $ compilePrimValue UnitValue
     compileLeaf (Imp.Index src (Imp.Count iexp) restype (Imp.Space space) _) =
       join $
         asks envReadScalar

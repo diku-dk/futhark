@@ -49,6 +49,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Proper detection of zero strides in compiler (#1360).
 
+  * Invalid memory accesses related to internal bookkeeping of bounds checking.
+
 ## [0.19.5]
 
 ### Added
