@@ -19,11 +19,9 @@ compileSegStencil ::
   KernelBody MCMem ->
   MulticoreGen Imp.Code
 compileSegStencil pat space sten kbody = collect $ do
-  emit $ Imp.DebugPrint "SegStencil" Nothing
   let sten_idxs = stencilIndexes sten
       sten_lam = stencilOp sten
       arrs = stencilArrays sten
-      -- [ret_tp]   = lambdaReturnType sten_lam
       kbres = map kernelResultSubExp $ kernelBodyResult kbody
       (const_params, sten_params) = splitAt (length kbres) (lambdaParams sten_lam)
       (is, ns) = unzip $ unSegSpace space
