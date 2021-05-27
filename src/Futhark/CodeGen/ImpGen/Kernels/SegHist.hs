@@ -1145,5 +1145,7 @@ compileSegHist (Pattern _ pes) num_groups group_size space ops kbody = do
                 map Imp.vi64 $
                   map fst segment_dims ++ [subhistogram_id, bucket_id] ++ vector_ids
               )
+
+  emit $ Imp.DebugPrint "" Nothing
   where
     segment_dims = init $ unSegSpace space
