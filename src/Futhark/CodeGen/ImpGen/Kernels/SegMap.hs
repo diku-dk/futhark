@@ -28,9 +28,9 @@ compileSegMap pat lvl space kbody = do
       num_groups' = toInt64Exp <$> segNumGroups lvl
       group_size' = toInt64Exp <$> segGroupSize lvl
 
+  emit $ Imp.DebugPrint "\n# SegMap" Nothing
   case lvl of
     SegThread {} -> do
-      emit $ Imp.DebugPrint "\n# SegMap" Nothing
       let virt_num_groups =
             sExt32 $ product dims' `divUp` unCount group_size'
       sKernelThread "segmap" num_groups' group_size' (segFlat space) $
@@ -57,3 +57,4 @@ compileSegMap pat lvl space kbody = do
             compileStms mempty (kernelBodyStms kbody) $
               zipWithM_ (compileGroupResult space) (patternElements pat) $
                 kernelBodyResult kbody
+  emit $ Imp.DebugPrint "" Nothing

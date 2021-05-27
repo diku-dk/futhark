@@ -248,6 +248,8 @@ nonsegmentedReduction segred_pat num_groups group_size space reds body = do
           group_res_arrs
           red_arrs
 
+  emit $ Imp.DebugPrint "" Nothing
+
 smallSegmentsReduction ::
   Pattern KernelsMem ->
   Count NumGroups SubExp ->
@@ -354,6 +356,8 @@ smallSegmentsReduction (Pattern _ segred_pes) num_groups group_size space reds b
       -- Finally another barrier, because we will be writing to the
       -- local memory array first thing in the next iteration.
       sOp $ Imp.Barrier Imp.FenceLocal
+
+  emit $ Imp.DebugPrint "" Nothing
 
 largeSegmentsReduction ::
   Pattern KernelsMem ->
@@ -495,6 +499,8 @@ largeSegmentsReduction segred_pat num_groups group_size space reds body = do
                     copyDWIMFix (patElemName v) (map Imp.vi64 segment_gtids) (Var acc) acc_is
 
       sIf (groups_per_segment .==. 1) one_group_per_segment multiple_groups_per_segment
+
+  emit $ Imp.DebugPrint "" Nothing
 
 -- Careful to avoid division by zero here.  We have at least one group
 -- per segment.
