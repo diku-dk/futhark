@@ -124,36 +124,29 @@ compileMCOp ::
   MCOp MCMem () ->
   ImpM MCMem HostEnv Imp.Multicore ()
 compileMCOp _ (OtherOp ()) = pure ()
-compileMCOp pat (ParOp par_op op@(SegStencil _ _ sten _ kbody)) = do
+compileMCOp pat (ParOp _ op@(SegStencil _ _ sten _ kbody)) = do
   let space = getSpace op
       ns = map (toInt64Exp . snd) $ unSegSpace space
       numDims = length ns
       tds = map toInt64Exp $ tileDims (length ns)
       idxs = stencilIndexes sten
       bounds = map (\xs -> (fromInteger (minimum xs), fromInteger (maximum xs))) idxs
+      lBounds = map (negate . fst) bounds
       nsInner = zipWith (\(mi, ma) n -> n + mi - ma) bounds ns
       nsLower = zipWith (++) (map init $ tail $ inits nsInner)
-                             (zipWith (:) (map (negate . fst) bounds) $ tail $ tails ns)
+                             (zipWith (:) lBounds $ tail $ tails ns)
       nsUpper = zipWith (++) (map init $ tail $ inits nsInner)
-                                    (zipWith (:) (map snd bounds) $ tail $ tails ns)
-      offsetsLower = init $ zipWith (++) (inits (map (negate . fst) bounds))
+                             (zipWith (:) (map snd bounds) $ tail $ tails ns)
+      offsetsLower = init $ zipWith (++) (inits lBounds)
                                          (tails (replicate numDims 0))
-      offsetsUpper = zipWith (++) (inits (map (negate . fst) bounds))
-                                  (zipWith (:) (zipWith (+) nsInner (map (negate . fst) bounds)) $ tail $ tails (replicate numDims 0))
---      offsetsUpper = init $ zipWith (++) (inits (map (negate . fst) bounds))
---                                         (tails $ init $ 0 : zipWith (+) nsInner (map (negate . fst) bounds))
---      offsetsUpper = tail $ zipWith (++) (inits $ zipWith (+) nsInner (map (negate . fst) bounds))
---                                         (tails (replicate numDims 0))
-      -- dims = zipWith (\(mi, ma) n -> (negate mi, n, ma)) bounds ns'
-      innerLoopOffsets = trace (show offsetsUpper) $ map (negate . fst) bounds
+      offsetsUpper = zipWith (++)
+        (inits lBounds)
+        (zipWith (:) (zipWith (+) nsInner lBounds)
+                     (tails (replicate (numDims-1) 0)))
+      innerLoopOffsets = trace (show offsetsUpper) lBounds
       toIters n td = TPrimExp $ BinOpExp (SDiv Int64 Unsafe) (untyped $ n + td - 1)
                                                              (untyped td)
       innerIterations = product $ zipWith toIters nsInner tds :: Imp.TExp Int64
-
-      --boundaryLoopDims = flip map [0..numDims-1] $ \i ->
-      --  (zipWith (\(l, m, _) j -> if i == j then l else m) dims [0..],
-      --   zipWith (\(_, m, r) j -> if i == j then r else m) dims [0..],
-      --   zipWith (\(l, m, _) j -> if i == j then l + m else 0) dims [0..])
 
   nsubtasks <- dPrim "num_tasks" $ IntType Int32
   retvals <- getReturnParams pat op
@@ -181,7 +174,6 @@ compileMCOp pat (ParOp par_op op@(SegStencil _ _ sten _ kbody)) = do
            $ schedulingInfoStart (decideScheduling' op codeStart)
 
       -- loop for the "upper" boundary
-      -- Loop for the "lower" boundary
       loop_upper_ns <- replicateM numDims (newVName "idx_upper")
       zipWithM_ dPrimV_ loop_upper_ns loopEnd
 

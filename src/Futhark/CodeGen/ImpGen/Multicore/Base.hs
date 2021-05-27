@@ -84,7 +84,7 @@ getSpace (SegStencil _ space _ _ _) = space
 tileDims :: Int -> [SubExp]
 tileDims dims = map (Constant . IntValue . Int64Value) $ tileDims' dims
   where tileDims' 1 = [65536]
-        tileDims' 2 = [256, 256]
+        tileDims' 2 = [100, 140]
         tileDims' 3 = [16, 64, 64]
         tileDims' _ = repeat 16
 
