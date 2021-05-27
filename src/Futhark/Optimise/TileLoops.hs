@@ -260,9 +260,17 @@ partitionPrelude variance prestms private used_after =
         v : _ -> not $ any (`nameIn` names) $ namesToList $ M.findWithDefault mempty v variance
 
     consumed v = v `nameIn` consumed_in_prestms
+    consumedStm stm = any consumed (patternNames (stmPattern stm))
+
+    later_consumed =
+      namesFromList $
+        concatMap (patternNames . stmPattern) $
+          stmsToList $ Seq.filter consumedStm prestms
 
     groupInvariant stm =
-      invariantTo private stm && not (any consumed (patternNames (stmPattern stm)))
+      invariantTo private stm
+        && not (any (`nameIn` later_consumed) (patternNames (stmPattern stm)))
+        && invariantTo later_consumed stm
     (invariant_prestms, variant_prestms) =
       Seq.partition groupInvariant prestms
 
