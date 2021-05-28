@@ -200,8 +200,11 @@ internaliseSumType cs =
 
 -- | How many core language values are needed to represent one source
 -- language value of the given type?
-internalisedTypeSize :: E.TypeBase (E.DimDecl VName) () -> InternaliseM Int
-internalisedTypeSize = fmap length . internaliseType
+internalisedTypeSize :: E.TypeBase (E.DimDecl VName) als -> InternaliseM Int
+-- A few special cases for performance.
+internalisedTypeSize (E.Scalar (E.Prim _)) = pure 1
+internalisedTypeSize (E.Array _ _ (E.Prim _) _) = pure 1
+internalisedTypeSize t = length <$> internaliseType (t `E.setAliases` ())
 
 -- | Convert an external primitive to an internal primitive.
 internalisePrimType :: E.PrimType -> I.PrimType

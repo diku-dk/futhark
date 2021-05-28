@@ -1,4 +1,5 @@
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE Strict #-}
 
 -- | Internalising bindings.
 module Futhark.Internalise.Bindings
@@ -83,30 +84,23 @@ processFlatPattern x y = processFlatPattern' [] x y
   where
     processFlatPattern' pat [] _ = do
       let (vs, substs) = unzip pat
-          substs' = M.fromList substs
-          idents = reverse vs
-      return (idents, substs')
+      return (reverse vs, M.fromList substs)
     processFlatPattern' pat (p : rest) ts = do
-      (ps, subst, rest_ts) <- handleMapping ts <$> internaliseBindee p
-      processFlatPattern' ((ps, (E.identName p, map (I.Var . I.paramName) subst)) : pat) rest rest_ts
+      (ps, rest_ts) <- handleMapping ts <$> internaliseBindee p
+      processFlatPattern' ((ps, (E.identName p, map (I.Var . I.paramName) ps)) : pat) rest rest_ts
 
     handleMapping ts [] =
-      ([], [], ts)
-    handleMapping ts (r : rs) =
-      let (ps, reps, ts') = handleMapping' ts r
-          (pss, repss, ts'') = handleMapping ts' rs
-       in (ps ++ pss, reps : repss, ts'')
-
-    handleMapping' (t : ts) vname =
-      let v' = I.Param vname t
-       in ([v'], v', ts)
-    handleMapping' [] _ =
-      error $ "processFlatPattern: insufficient identifiers in pattern." ++ show (x, y)
+      ([], ts)
+    handleMapping (t : ts) (r : rs) =
+      let (ps, ts') = handleMapping ts rs
+       in (I.Param r t : ps, ts')
+    handleMapping [] _ =
+      error $ "handleMapping: insufficient identifiers in pattern." ++ show (x, y)
 
     internaliseBindee :: E.Ident -> InternaliseM [VName]
     internaliseBindee bindee = do
       let name = E.identName bindee
-      n <- internalisedTypeSize $ flip E.setAliases () $ E.unInfo $ E.identType bindee
+      n <- internalisedTypeSize $ E.unInfo $ E.identType bindee
       case n of
         1 -> return [name]
         _ -> replicateM n $ newVName $ baseString name
@@ -122,8 +116,7 @@ bindingFlatPattern idents ts m = do
   local (\env -> env {envSubsts = substs `M.union` envSubsts env}) $
     m ps
 
--- | Flatten a pattern.  Returns a list of identifiers.  The
--- structural type of each identifier is returned separately.
+-- | Flatten a pattern.  Returns a list of identifiers.
 flattenPattern :: MonadFreshNames m => E.Pattern -> m [E.Ident]
 flattenPattern = flattenPattern'
   where
@@ -157,6 +150,4 @@ stmPattern ::
   InternaliseM a
 stmPattern pat ts m = do
   pat' <- flattenPattern pat
-  let addShapeStms l =
-        m (map I.paramName $ concat l)
-  bindingFlatPattern pat' ts addShapeStms
+  bindingFlatPattern pat' ts $ m . map I.paramName . concat
