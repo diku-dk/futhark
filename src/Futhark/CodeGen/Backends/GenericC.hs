@@ -1925,6 +1925,13 @@ compilePrimExp f (FunExp h args _) = do
   args' <- mapM (compilePrimExp f) args
   return [C.cexp|$id:(funName (nameFromString h))($args:args')|]
 
+linearCode :: Code op -> [Code op]
+linearCode = reverse . go []
+  where
+    go acc (x :>>: y) =
+      go (go acc x) y
+    go acc x = x : acc
+
 compileCode :: Code op -> CompilerM op s ()
 compileCode (Op op) =
   join $ asks envOpCompiler <*> pure op
@@ -1953,13 +1960,18 @@ compileCode (DebugPrint s Nothing) =
     [C.cstm|if (ctx->debugging) {
           fprintf(ctx->log, "%s\n", $exp:s);
        }|]
-compileCode c
-  | Just (name, vol, t, e, c') <- declareAndSet c = do
-    let ct = primTypeToCType t
-    e' <- compileExp e
-    item [C.citem|$tyquals:(volQuals vol) $ty:ct $id:name = $exp:e';|]
-    compileCode c'
-compileCode (c1 :>>: c2) = compileCode c1 >> compileCode c2
+-- :>>: is treated in a special way to detect declare-set pairs in
+-- order to generate prettier code.
+compileCode (c1 :>>: c2) = go (linearCode (c1 :>>: c2))
+  where
+    go (DeclareScalar name vol t : SetScalar dest e : code)
+      | name == dest = do
+        let ct = primTypeToCType t
+        e' <- compileExp e
+        item [C.citem|$tyquals:(volQuals vol) $ty:ct $id:name = $exp:e';|]
+        go code
+    go (x : xs) = compileCode x >> go xs
+    go [] = pure ()
 compileCode (Assert e msg (loc, locs)) = do
   e' <- compileExp e
   err <-
@@ -2140,21 +2152,6 @@ compileFunBody output_ptrs outputs code = do
       setMem [C.cexp|*$exp:p|] name space
     setRetVal' p (ScalarParam name _) =
       stm [C.cstm|*$exp:p = $id:name;|]
-
-declareAndSet :: Code op -> Maybe (VName, Volatility, PrimType, Exp, Code op)
-declareAndSet code = do
-  (DeclareScalar name vol t, code') <- nextCode code
-  (SetScalar dest e, code'') <- nextCode code'
-  guard $ name == dest
-  Just (name, vol, t, e, code'')
-
-nextCode :: Code op -> Maybe (Code op, Code op)
-nextCode (x :>>: y)
-  | Just (x_a, x_b) <- nextCode x =
-    Just (x_a, x_b <> y)
-  | otherwise =
-    Just (x, y)
-nextCode _ = Nothing
 
 assignmentOperator :: BinOp -> Maybe (VName -> C.Exp -> C.Exp)
 assignmentOperator Add {} = Just $ \d e -> [C.cexp|$id:d += $exp:e|]
