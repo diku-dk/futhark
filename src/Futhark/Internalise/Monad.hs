@@ -29,7 +29,8 @@ module Futhark.Internalise.Monad
 where
 
 import Control.Monad.Except
-import Control.Monad.RWS
+import Control.Monad.Reader
+import Control.Monad.State
 import qualified Data.Map.Strict as M
 import Futhark.IR.SOACS
 import Futhark.MonadFreshNames
@@ -60,29 +61,13 @@ data InternaliseState = InternaliseState
   { stateNameSource :: VNameSource,
     stateFunTable :: FunTable,
     stateConstSubsts :: VarSubstitutions,
-    stateConstScope :: Scope SOACS
+    stateConstScope :: Scope SOACS,
+    stateFuns :: [FunDef SOACS]
   }
-
-data InternaliseResult = InternaliseResult (Stms SOACS) [FunDef SOACS]
-
-instance Semigroup InternaliseResult where
-  InternaliseResult xs1 ys1 <> InternaliseResult xs2 ys2 =
-    InternaliseResult (xs1 <> xs2) (ys1 <> ys2)
-
-instance Monoid InternaliseResult where
-  mempty = InternaliseResult mempty mempty
 
 newtype InternaliseM a
   = InternaliseM
-      ( BinderT
-          SOACS
-          ( RWS
-              InternaliseEnv
-              InternaliseResult
-              InternaliseState
-          )
-          a
-      )
+      (BinderT SOACS (ReaderT InternaliseEnv (State InternaliseState)) a)
   deriving
     ( Functor,
       Applicative,
@@ -94,7 +79,7 @@ newtype InternaliseM a
       LocalScope SOACS
     )
 
-instance (Monoid w, Monad m) => MonadFreshNames (RWST r w InternaliseState m) where
+instance MonadFreshNames (State InternaliseState) where
   getNameSource = gets stateNameSource
   putNameSource src = modify $ \s -> s {stateNameSource = src}
 
@@ -114,9 +99,9 @@ runInternaliseM ::
   m (Stms SOACS, [FunDef SOACS])
 runInternaliseM safe (InternaliseM m) =
   modifyNameSource $ \src ->
-    let ((_, consts), s, InternaliseResult _ funs) =
-          runRWS (runBinderT m mempty) newEnv (newState src)
-     in ((consts, funs), stateNameSource s)
+    let ((_, consts), s) =
+          runState (runReaderT (runBinderT m mempty) newEnv) (newState src)
+     in ((consts, reverse $ stateFuns s), stateNameSource s)
   where
     newEnv =
       InternaliseEnv
@@ -130,7 +115,8 @@ runInternaliseM safe (InternaliseM m) =
         { stateNameSource = src,
           stateFunTable = mempty,
           stateConstSubsts = mempty,
-          stateConstScope = mempty
+          stateConstScope = mempty,
+          stateFuns = mempty
         }
 
 substitutingVars :: VarSubstitutions -> InternaliseM a -> InternaliseM a
@@ -144,8 +130,7 @@ lookupSubst v = do
 
 -- | Add a function definition to the program being constructed.
 addFunDef :: FunDef SOACS -> InternaliseM ()
-addFunDef fd =
-  InternaliseM $ lift $ tell $ InternaliseResult mempty [fd]
+addFunDef fd = modify $ \s -> s {stateFuns = fd : stateFuns s}
 
 lookupFunction' :: VName -> InternaliseM (Maybe FunInfo)
 lookupFunction' fname = gets $ M.lookup fname . stateFunTable
