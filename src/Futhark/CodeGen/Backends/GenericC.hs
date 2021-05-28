@@ -81,7 +81,8 @@ module Futhark.CodeGen.Backends.GenericC
 where
 
 import Control.Monad.Identity
-import Control.Monad.RWS
+import Control.Monad.Reader
+import Control.Monad.State
 import Data.Bifunctor (first)
 import qualified Data.DList as DL
 import Data.FileEmbed
@@ -110,7 +111,8 @@ data CompilerState s = CompilerState
     compCtxFields :: DL.DList (C.Id, C.Type, Maybe C.Exp),
     compProfileItems :: DL.DList C.BlockItem,
     compClearItems :: DL.DList C.BlockItem,
-    compDeclaredMem :: [(VName, Space)]
+    compDeclaredMem :: [(VName, Space)],
+    compItems :: DL.DList C.BlockItem
   }
 
 newCompilerState :: VNameSource -> s -> CompilerState s
@@ -127,7 +129,8 @@ newCompilerState src s =
       compCtxFields = mempty,
       compProfileItems = mempty,
       compClearItems = mempty,
-      compDeclaredMem = mempty
+      compDeclaredMem = mempty,
+      compItems = mempty
     }
 
 -- | In which part of the header file we put the declaration.  This is
@@ -288,17 +291,6 @@ data CompilerEnv op s = CompilerEnv
     envCachedMem :: M.Map C.Exp VName
   }
 
-newtype CompilerAcc op s = CompilerAcc
-  { accItems :: DL.DList C.BlockItem
-  }
-
-instance Semigroup (CompilerAcc op s) where
-  CompilerAcc items1 <> CompilerAcc items2 =
-    CompilerAcc (items1 <> items2)
-
-instance Monoid (CompilerAcc op s) where
-  mempty = CompilerAcc mempty
-
 envOpCompiler :: CompilerEnv op s -> OpCompiler op s
 envOpCompiler = opsCompiler . envOperations
 
@@ -360,20 +352,13 @@ contextFinalInits :: CompilerM op s [C.Stm]
 contextFinalInits = gets compInit
 
 newtype CompilerM op s a
-  = CompilerM
-      ( RWS
-          (CompilerEnv op s)
-          (CompilerAcc op s)
-          (CompilerState s)
-          a
-      )
+  = CompilerM (ReaderT (CompilerEnv op s) (State (CompilerState s)) a)
   deriving
     ( Functor,
       Applicative,
       Monad,
       MonadState (CompilerState s),
-      MonadReader (CompilerEnv op s),
-      MonadWriter (CompilerAcc op s)
+      MonadReader (CompilerEnv op s)
     )
 
 instance MonadFreshNames (CompilerM op s) where
@@ -387,8 +372,9 @@ runCompilerM ::
   CompilerM op s a ->
   (a, CompilerState s)
 runCompilerM ops src userstate (CompilerM m) =
-  let (x, s, _) = runRWS m (CompilerEnv ops mempty) (newCompilerState src userstate)
-   in (x, s)
+  runState
+    (runReaderT m (CompilerEnv ops mempty))
+    (newCompilerState src userstate)
 
 getUserState :: CompilerM op s s
 getUserState = gets compUserState
@@ -405,12 +391,13 @@ collect :: CompilerM op s () -> CompilerM op s [C.BlockItem]
 collect m = snd <$> collect' m
 
 collect' :: CompilerM op s a -> CompilerM op s (a, [C.BlockItem])
-collect' m = pass $ do
-  (x, w) <- listen m
-  return
-    ( (x, DL.toList $ accItems w),
-      const w {accItems = mempty}
-    )
+collect' m = do
+  old <- gets compItems
+  modify $ \s -> s {compItems = mempty}
+  x <- m
+  new <- gets compItems
+  modify $ \s -> s {compItems = old}
+  pure (x, DL.toList new)
 
 -- | Used when we, inside an existing 'CompilerM' action, want to
 -- generate code for a new function.  Use this so that the compiler
@@ -429,10 +416,10 @@ inNewFunction keep_cached m = do
       | otherwise = env {envCachedMem = mempty}
 
 item :: C.BlockItem -> CompilerM op s ()
-item x = tell $ mempty {accItems = DL.singleton x}
+item x = modify $ \s -> s {compItems = DL.snoc (compItems s) x}
 
 items :: [C.BlockItem] -> CompilerM op s ()
-items = mapM_ item
+items xs = modify $ \s -> s {compItems = DL.append (compItems s) (DL.fromList xs)}
 
 fatMemory :: Space -> CompilerM op s Bool
 fatMemory ScalarSpace {} = return False
@@ -2126,10 +2113,7 @@ blockScope = fmap snd . blockScope'
 blockScope' :: CompilerM op s a -> CompilerM op s (a, [C.BlockItem])
 blockScope' m = do
   old_allocs <- gets compDeclaredMem
-  (x, xs) <- pass $ do
-    (x, w) <- listen m
-    let xs = DL.toList $ accItems w
-    return ((x, xs), const mempty)
+  (x, xs) <- collect' m
   new_allocs <- gets $ filter (`notElem` old_allocs) . compDeclaredMem
   modify $ \s -> s {compDeclaredMem = old_allocs}
   releases <- collect $ mapM_ (uncurry unRefMem) new_allocs
