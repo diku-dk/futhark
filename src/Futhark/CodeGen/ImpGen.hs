@@ -91,6 +91,7 @@ module Futhark.CodeGen.ImpGen
     dPrimV_,
     dPrimV,
     dPrimVE,
+    dIndexSpace,
     sFor,
     sWhile,
     sComment,
@@ -144,8 +145,10 @@ import Futhark.IR.Mem
 import qualified Futhark.IR.Mem.IxFun as IxFun
 import Futhark.IR.SOACS (SOACS)
 import Futhark.Util
+import Futhark.Util.IntegralExp
 import Futhark.Util.Loc (noLoc)
 import Language.Futhark.Warnings
+import Prelude hiding (quot)
 
 -- | How to compile an t'Op'.
 type OpCompiler lore r op = Pattern lore -> Op lore -> ImpM lore r op ()
@@ -1849,3 +1852,30 @@ function fname outputs inputs m = local newFunction $ do
     addParam (Imp.ScalarParam name bt) =
       addVar name $ ScalarVar Nothing $ ScalarEntry bt
     newFunction env = env {envFunction = Just fname}
+
+dSlices :: [Imp.TExp Int64] -> ImpM lore r op [Imp.TExp Int64]
+dSlices = fmap (drop 1 . snd) . dSlices'
+  where
+    dSlices' [] = pure (1, [1])
+    dSlices' (n : ns) = do
+      (prod, ns') <- dSlices' ns
+      n' <- dPrimVE "slice" $ n * prod
+      pure (n', n' : ns')
+
+-- | @dIndexSpace f dims i@ computes a list of indices into an
+-- array with dimension @dims@ given the flat index @i@.  The
+-- resulting list will have the same size as @dims@.  Intermediate
+-- results are passed to @f@.
+dIndexSpace ::
+  [(VName, Imp.TExp Int64)] ->
+  Imp.TExp Int64 ->
+  ImpM lore r op ()
+dIndexSpace vs_ds j = do
+  slices <- dSlices (map snd vs_ds)
+  loop (zip (map fst vs_ds) slices) j
+  where
+    loop ((v, size) : rest) i = do
+      dPrimV_ v (i `quot` size)
+      i' <- dPrimVE "remnant" $ i - Imp.vi64 v * size
+      loop rest i'
+    loop _ _ = pure ()
