@@ -21,9 +21,8 @@ module Language.Futhark.TypeChecker.Terms
 where
 
 import Control.Monad.Except
-import Control.Monad.RWS hiding (Sum)
+import Control.Monad.Reader
 import Control.Monad.State
-import Control.Monad.Writer hiding (Sum)
 import Data.Bifunctor
 import Data.Bitraversable
 import Data.Char (isAscii)
@@ -346,24 +345,17 @@ data TermTypeState = TermTypeState
     -- This happens for function arguments that are
     -- not constants or names.
     stateDimTable :: M.Map SizeSource VName,
-    stateNames :: M.Map VName NameReason
+    stateNames :: M.Map VName NameReason,
+    stateOccs :: Occurences
   }
 
 newtype TermTypeM a
-  = TermTypeM
-      ( RWST
-          TermEnv
-          Occurences
-          TermTypeState
-          TypeM
-          a
-      )
+  = TermTypeM (ReaderT TermEnv (StateT TermTypeState TypeM) a)
   deriving
     ( Monad,
       Functor,
       Applicative,
       MonadReader TermEnv,
-      MonadWriter Occurences,
       MonadState TermTypeState,
       MonadError TypeError
     )
@@ -432,10 +424,13 @@ runTermTypeM (TermTypeM m) = do
             termChecking = Nothing,
             termLevel = 0
           }
-  evalRWST m initial_tenv $ TermTypeState mempty 0 mempty mempty
+  second stateOccs
+    <$> runStateT
+      (runReaderT m initial_tenv)
+      (TermTypeState mempty 0 mempty mempty mempty)
 
 liftTypeM :: TypeM a -> TermTypeM a
-liftTypeM = TermTypeM . lift
+liftTypeM = TermTypeM . lift . lift
 
 localScope :: (TermScope -> TermScope) -> TermTypeM a -> TermTypeM a
 localScope f = local $ \tenv -> tenv {termScope = f $ termScope tenv}
@@ -997,10 +992,11 @@ binding bnds = check . handleVars
 
     -- Collect and remove all occurences in @bnds@.  This relies
     -- on the fact that no variables shadow any other.
-    collectBindingsOccurences m = pass $ do
-      (x, usage) <- listen m
+    collectBindingsOccurences m = do
+      (x, usage) <- collectOccurences m
       let (relevant, rest) = split usage
-      return ((x, relevant), const rest)
+      occur rest
+      pure (x, relevant)
       where
         split =
           unzip
@@ -1141,7 +1137,7 @@ sliceShape ::
   TypeBase (DimDecl VName) as ->
   TermTypeM (TypeBase (DimDecl VName) as, [VName])
 sliceShape r slice t@(Array als u et (ShapeDecl orig_dims)) =
-  runWriterT $ setDims <$> adjustDims slice orig_dims
+  runStateT (setDims <$> adjustDims slice orig_dims) []
   where
     setDims [] = stripArray (length orig_dims) t
     setDims dims' = Array als u et $ ShapeDecl dims'
@@ -1162,7 +1158,7 @@ sliceShape r slice t@(Array als u et (ShapeDecl orig_dims)) =
             lift $
               extSize loc $
                 SourceSlice orig_d' (bareExp <$> i) (bareExp <$> j) (bareExp <$> stride)
-          tell $ maybeToList ext
+          modify (maybeToList ext ++)
           return d
         Just (loc, Nonrigid) ->
           lift $ NamedDim . qualName <$> newDimVar loc Nonrigid "slice_dim"
@@ -1897,12 +1893,12 @@ checkExp (AppExp (DoLoop _ mergepat mergeexp form loopbody loc) _) =
                       | d' == d ->
                         return $ Just (qualLeaf v, SizeSubst d)
                     _ -> do
-                      tell [qualLeaf v]
+                      modify (qualLeaf v :)
                       return Nothing
               mismatchSubst _ = return Nothing
 
               (init_substs', sparams) =
-                runWriter $
+                (`runState` mempty) $
                   M.fromList . catMaybes
                     <$> mapM
                       mismatchSubst
@@ -2998,11 +2994,14 @@ verifyFunctionParams fname params =
 -- Returns the sizes of the immediate type produced,
 -- the sizes of parameter types, and the sizes of return types.
 dimUses :: StructType -> (Names, Names, Names)
-dimUses = execWriter . traverseDims f
+dimUses = (`execState` mempty) . traverseDims f
   where
-    f _ PosImmediate (NamedDim v) = tell (S.singleton (qualLeaf v), mempty, mempty)
-    f _ PosParam (NamedDim v) = tell (mempty, S.singleton (qualLeaf v), mempty)
-    f _ PosReturn (NamedDim v) = tell (mempty, mempty, S.singleton (qualLeaf v))
+    f _ PosImmediate (NamedDim v) =
+      modify (<> (S.singleton (qualLeaf v), mempty, mempty))
+    f _ PosParam (NamedDim v) =
+      modify (<> (mempty, S.singleton (qualLeaf v), mempty))
+    f _ PosReturn (NamedDim v) =
+      modify (<> (mempty, mempty, S.singleton (qualLeaf v)))
     f _ _ _ = return ()
 
 -- | Find all type variables in the given type that are covered by the
@@ -3166,7 +3165,7 @@ checkFunBody params body maybe_rettype loc = do
 --- Consumption
 
 occur :: Occurences -> TermTypeM ()
-occur = tell
+occur occs = modify $ \s -> s {stateOccs = stateOccs s <> occs}
 
 -- | Proclaim that we have made read-only use of the given variable.
 observe :: Ident -> TermTypeM ()
@@ -3217,15 +3216,25 @@ consuming (Ident name (Info t) loc) m = do
       scope {scopeVtable = M.insert name (WasConsumed loc) $ scopeVtable scope}
 
 collectOccurences :: TermTypeM a -> TermTypeM (a, Occurences)
-collectOccurences m = pass $ do
-  (x, dataflow) <- listen m
-  return ((x, dataflow), const mempty)
+collectOccurences m = do
+  old <- gets stateOccs
+  modify $ \s -> s {stateOccs = mempty}
+  x <- m
+  new <- gets stateOccs
+  modify $ \s -> s {stateOccs = old}
+  pure (x, new)
 
 tapOccurences :: TermTypeM a -> TermTypeM (a, Occurences)
-tapOccurences = listen
+tapOccurences m = do
+  (x, occs) <- collectOccurences m
+  occur occs
+  pure (x, occs)
 
 removeSeminullOccurences :: TermTypeM a -> TermTypeM a
-removeSeminullOccurences = censor $ filter $ not . seminullOccurence
+removeSeminullOccurences m = do
+  (x, occs) <- collectOccurences m
+  occur $ filter (not . seminullOccurence) occs
+  pure x
 
 checkIfUsed :: Occurences -> Ident -> TermTypeM ()
 checkIfUsed occs v
@@ -3236,22 +3245,22 @@ checkIfUsed occs v
     return ()
 
 alternative :: TermTypeM a -> TermTypeM b -> TermTypeM (a, b)
-alternative m1 m2 = pass $ do
-  (x, occurs1) <- listen $ noSizeEscape m1
-  (y, occurs2) <- listen $ noSizeEscape m2
+alternative m1 m2 = do
+  (x, occurs1) <- collectOccurences $ noSizeEscape m1
+  (y, occurs2) <- collectOccurences $ noSizeEscape m2
   checkOccurences occurs1
   checkOccurences occurs2
-  let usage = occurs1 `altOccurences` occurs2
-  return ((x, y), const usage)
+  occur $ occurs1 `altOccurences` occurs2
+  pure (x, y)
 
 -- | Enter a context where nothing outside can be consumed (i.e. the
 -- body of a function definition).
 noUnique :: TermTypeM a -> TermTypeM a
-noUnique m = pass $ do
-  (x, occs) <- listen $ localScope f m
+noUnique m = do
+  (x, occs) <- collectOccurences $ localScope f m
   checkOccurences occs
-  let (observations, _) = split occs
-  pure (x, const observations)
+  occur $ fst $ split occs
+  pure x
   where
     f scope = scope {scopeVtable = M.map set $ scopeVtable scope}
 
