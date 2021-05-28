@@ -54,8 +54,10 @@ module Futhark.TypeCheck
   )
 where
 
-import Control.Monad.RWS.Strict
+import Control.Monad.Reader
+import Control.Monad.State.Strict
 import Control.Parallel.Strategies
+import Data.Bifunctor (second)
 import Data.List (find, intercalate, isPrefixOf, sort)
 import qualified Data.Map.Strict as M
 import Data.Maybe
@@ -276,14 +278,17 @@ data Env lore = Env
     envContext :: [String]
   }
 
+data TState = TState
+  { stateNames :: Names,
+    stateCons :: Consumption
+  }
+
 -- | The type checker runs in this monad.
 newtype TypeM lore a
   = TypeM
-      ( RWST
-          (Env lore) -- Reader
-          Consumption -- Writer
-          Names -- State
-          (Either (TypeError lore)) -- Inner monad
+      ( ReaderT
+          (Env lore)
+          (StateT TState (Either (TypeError lore)))
           a
       )
   deriving
@@ -291,8 +296,7 @@ newtype TypeM lore a
       Functor,
       Applicative,
       MonadReader (Env lore),
-      MonadWriter Consumption,
-      MonadState Names
+      MonadState TState
     )
 
 instance
@@ -308,12 +312,16 @@ runTypeM ::
   Env lore ->
   TypeM lore a ->
   Either (TypeError lore) (a, Consumption)
-runTypeM env (TypeM m) = evalRWST m env mempty
+runTypeM env (TypeM m) =
+  second stateCons <$> runStateT (runReaderT m env) (TState mempty mempty)
 
 bad :: ErrorCase lore -> TypeM lore a
 bad e = do
   messages <- asks envContext
-  TypeM $ lift $ Left $ Error (reverse messages) e
+  TypeM $ lift $ lift $ Left $ Error (reverse messages) e
+
+tell :: Consumption -> TypeM lore ()
+tell cons = modify $ \s -> s {stateCons = stateCons s <> cons}
 
 -- | Add information about what is being type-checked to the current
 -- context.  Liberal use of this combinator makes it easier to track
@@ -338,10 +346,10 @@ message s x =
 -- the program, report a type error.
 bound :: VName -> TypeM lore ()
 bound name = do
-  already_seen <- gets $ nameIn name
+  already_seen <- gets $ nameIn name . stateNames
   when already_seen $
     bad $ TypeError $ "Name " ++ pretty name ++ " bound twice"
-  modify (<> oneName name)
+  modify $ \s -> s {stateNames = oneName name <> stateNames s}
 
 occur :: Occurences -> TypeM lore ()
 occur = tell . Consumption . filter (not . nullOccurence)
@@ -365,10 +373,14 @@ consume als = do
   occur [consumption $ namesFromList $ filter isArray $ namesToList als]
 
 collectOccurences :: TypeM lore a -> TypeM lore (a, Occurences)
-collectOccurences m = pass $ do
-  (x, c) <- listen m
-  o <- checkConsumption c
-  return ((x, o), const mempty)
+collectOccurences m = do
+  old <- gets stateCons
+  modify $ \s -> s {stateCons = mempty}
+  x <- m
+  new <- gets stateCons
+  modify $ \s -> s {stateCons = old}
+  o <- checkConsumption new
+  pure (x, o)
 
 checkOpWith ::
   (OpWithAliases (Op lore) -> TypeM lore ()) ->
@@ -381,13 +393,11 @@ checkConsumption (ConsumptionError e) = bad $ TypeError e
 checkConsumption (Consumption os) = return os
 
 alternative :: TypeM lore a -> TypeM lore b -> TypeM lore (a, b)
-alternative m1 m2 = pass $ do
-  (x, c1) <- listen m1
-  (y, c2) <- listen m2
-  os1 <- checkConsumption c1
-  os2 <- checkConsumption c2
-  let usage = Consumption $ os1 `altOccurences` os2
-  return ((x, y), const usage)
+alternative m1 m2 = do
+  (x, os1) <- collectOccurences m1
+  (y, os2) <- collectOccurences m2
+  tell $ Consumption $ os1 `altOccurences` os2
+  pure (x, y)
 
 -- | Permit consumption of only the specified names.  If one of these
 -- names is consumed, the consumption will be rewritten to be a
