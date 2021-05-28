@@ -6,11 +6,10 @@
 module Futhark.Compiler
   ( runPipelineOnProgram,
     runCompilerOnProgram,
-    FutharkConfig (..),
-    newFutharkConfig,
     dumpError,
     handleWarnings,
     module Futhark.Compiler.Program,
+    module Futhark.Compiler.Config,
     readProgram,
     readProgramOrDie,
     readUntypedProgram,
@@ -23,6 +22,7 @@ import Control.Monad.Except
 import Data.Bifunctor (first)
 import qualified Data.Text.IO as T
 import qualified Futhark.Analysis.Alias as Alias
+import Futhark.Compiler.Config
 import Futhark.Compiler.Program
 import Futhark.IR
 import qualified Futhark.IR.SOACS as I
@@ -37,36 +37,6 @@ import Language.Futhark.Semantic (includeToString)
 import Language.Futhark.Warnings
 import System.Exit (ExitCode (..), exitWith)
 import System.IO
-
--- | The compiler configuration.  This only contains options related
--- to core compiler functionality, such as reading the initial program
--- and running passes.  Options related to code generation are handled
--- elsewhere.
-data FutharkConfig = FutharkConfig
-  { futharkVerbose :: (Verbosity, Maybe FilePath),
-    -- | Warn if True.
-    futharkWarn :: Bool,
-    -- | If true, error on any warnings.
-    futharkWerror :: Bool,
-    -- | If True, ignore @unsafe@.
-    futharkSafe :: Bool,
-    -- | Additional functions that should be exposed as entry points.
-    futharkEntryPoints :: [Name],
-    -- | If false, disable type-checking
-    futharkTypeCheck :: Bool
-  }
-
--- | The default compiler configuration.
-newFutharkConfig :: FutharkConfig
-newFutharkConfig =
-  FutharkConfig
-    { futharkVerbose = (NotVerbose, Nothing),
-      futharkWarn = True,
-      futharkWerror = False,
-      futharkSafe = False,
-      futharkEntryPoints = [],
-      futharkTypeCheck = True
-    }
 
 -- | Print a compiler error to stdout.  The 'FutharkConfig' controls
 -- to which degree auxiliary information (e.g. the failing program) is
@@ -137,9 +107,7 @@ runPipelineOnProgram config pipeline file = do
         <$> readProgram (futharkEntryPoints config) file
 
   putNameSource namesrc
-  when (pipelineVerbose pipeline_config) $
-    logMsg ("Internalising program" :: String)
-  int_prog <- internaliseProg (futharkSafe config) prog_imports
+  int_prog <- internaliseProg config prog_imports
   when (pipelineVerbose pipeline_config) $
     logMsg ("Type-checking internalised program" :: String)
   typeCheckInternalProgram int_prog
