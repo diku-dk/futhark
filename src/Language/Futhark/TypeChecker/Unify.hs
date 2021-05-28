@@ -39,9 +39,7 @@ module Language.Futhark.TypeChecker.Unify
 where
 
 import Control.Monad.Except
-import Control.Monad.RWS.Strict hiding (Sum)
 import Control.Monad.State
-import Control.Monad.Writer hiding (Sum)
 import Data.Bifoldable (biany)
 import Data.Bifunctor
 import Data.Char (isAscii)
@@ -1067,12 +1065,12 @@ anyDimOnMismatch ::
   TypeBase (DimDecl VName) as ->
   TypeBase (DimDecl VName) as ->
   (TypeBase (DimDecl VName) as, [(DimDecl VName, DimDecl VName)])
-anyDimOnMismatch t1 t2 = runWriter $ matchDims onDims t1 t2
+anyDimOnMismatch t1 t2 = runState (matchDims onDims t1 t2) []
   where
     onDims d1 d2
       | d1 == d2 = return d1
       | otherwise = do
-        tell [(d1, d2)]
+        modify ((d1, d2) :)
         return $ AnyDim undefined
 
 newDimOnMismatch ::
