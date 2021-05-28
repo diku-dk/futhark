@@ -45,7 +45,7 @@ compileSegMapBody flat_idx pat space (KernelBody _ kstms kres) = do
   kstms' <- mapM renameStm kstms
   collect $ do
     emit $ Imp.DebugPrint "SegMap fbody" Nothing
-    zipWithM_ dPrimV_ is $ map sExt64 $ unflattenIndex ns' $ tvExp flat_idx
+    dIndexSpace (zip is ns') $ tvExp flat_idx
     compileStms (freeIn kres) kstms' $
       zipWithM_ (writeResult is) (patternElements pat) kres
 

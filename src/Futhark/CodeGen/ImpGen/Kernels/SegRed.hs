@@ -297,7 +297,7 @@ smallSegmentsReduction (Pattern _ segred_pes) num_groups group_size space reds b
               + (sExt64 group_id' * sExt64 segments_per_group)
           index_within_segment = ltid `rem` segment_size
 
-      zipWithM_ dPrimV_ (init gtids) $ unflattenIndex (init dims') segment_index
+      dIndexSpace (zip (init gtids) (init dims')) segment_index
       dPrimV_ (last gtids) index_within_segment
 
       let out_of_bounds =
@@ -442,9 +442,7 @@ largeSegmentsReduction segred_pat num_groups group_size space reds body = do
             `rem` (sExt64 (unCount group_size') * groups_per_segment)
 
       let first_group_for_segment = sExt64 flat_segment_id * groups_per_segment
-
-      zipWithM_ dPrimV_ segment_gtids $
-        unflattenIndex (init dims') $ sExt64 flat_segment_id
+      dIndexSpace (zip segment_gtids (init dims')) $sExt64 flat_segment_id
       dPrim_ (last gtids) int64
       let num_elements = Imp.elements $ toInt64Exp w
 
