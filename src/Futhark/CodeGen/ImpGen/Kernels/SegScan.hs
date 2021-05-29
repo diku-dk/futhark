@@ -64,7 +64,7 @@ compileSegScan pat lvl space scans kbody = sWhen (0 .<. n) $ do
     CUDA
       | Just scan' <- canBeSinglePass space scans ->
         SinglePass.compileSegScan pat lvl space scan' kbody
-      | [_,_] <- unSegSpace space, all ok scans ->
+      | all ok scans ->
         SegSinglePass.compileSegScan pat lvl space (combineScans scans) kbody
       where
         ok op =
