@@ -3,7 +3,7 @@
 # Construct PNG graphs of compile- and run-time performance for
 # historical versions of the Futhark compiler.  The legend is almost
 # useless, so manual investigation is needed to get something usable
-# outo f this.
+# out of this.
 #
 # This program is quite naive in its construction of commands passed
 # to os.system, so don't run it from a directory with interesting
