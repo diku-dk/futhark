@@ -29,6 +29,12 @@ jobs:
         VERSION: ${{ steps.metadata.outputs.VERSION }}
       run: nix-build --argstr suffix $VERSION-linux-x86_64 --argstr commit $GITHUB_SHA
 
+    - name: Extract release changes
+      env:
+        VERSION: ${{ steps.metadata.outputs.VERSION }}
+      run:
+        sh tools/changelog.sh $VERSION < CHANGELOG.md > release_changes.md
+
     - name: Create release
       id: create_release
       uses: actions/create-release@v1
@@ -37,6 +43,7 @@ jobs:
       with:
         tag_name: ${{ github.ref }}
         release_name: ${{ steps.metadata.outputs.VERSION }}
+        body_path: release_changes.md
         draft: false
         prerelease: false
 
