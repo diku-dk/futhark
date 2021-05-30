@@ -36,9 +36,6 @@ corresponds exactly to the state of the Git repository at some point.
 
  * Wait for GitHub Actions to create the new release.
 
- * Go to `https://github.com/diku-dk/futhark/releases` and copy
-   release notes from `CHANGELOG.md`.
-
 You're done!  Congratulations!  Increment the version number in
 `futhark.cabal` (such that Z=0), make room for a new release in
 `CHANGELOG.md`, and go hack some more on the compiler.
@@ -53,6 +50,10 @@ Some of them are supposed to be automatic.
 
  * **This is done automatically by a CI job**: Run
    `tools/release/hackage.sh`.
+
+ * **This is done automatically by a CI job**: Go to
+   `https://github.com/diku-dk/futhark/releases` and copy release
+   notes from `CHANGELOG.md`.
 
  * Update the Homebrew formula with `brew bump-formula-pr
    --url=https://github.com/diku-dk/futhark/archive/vX.Y.Z.tar.gz
