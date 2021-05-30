@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
-## [0.20.0]
+## [0.19.6]
 
 ### Added
 
@@ -25,10 +25,6 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
     values.  This affects both testing, benchmarking, and autotuning.
 
   * Compilation is about 10% faster, especially for large programs.
-
-### Removed
-
-### Changed
 
 ### Fixed
 
