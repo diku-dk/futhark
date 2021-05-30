@@ -24,6 +24,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
     produce test input, in particular expressions that produce opaque
     values.  This affects both testing, benchmarking, and autotuning.
 
+  * Compilation is about 10% faster, especially for large programs.
+
 ### Removed
 
 ### Changed
