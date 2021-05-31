@@ -261,7 +261,8 @@ basicFwd pat aux op = do
     Manifest ds arr -> do
       arr_tan <- tangent arr
       addStm $ Let pat_tan aux $ BasicOp $ Manifest ds arr_tan
-    Iota {} -> return ()
+    Iota n _ _ it -> do
+      addStm $ Let pat_tan aux $ BasicOp $ Replicate (Shape [n]) (intConst it 0)
     Replicate n x -> do
       x_tan <- tangent x
       addStm $ Let pat_tan aux $ BasicOp $ Replicate n x_tan
@@ -280,6 +281,10 @@ basicFwd pat aux op = do
 fwdLambda :: Lambda -> ADM Lambda
 fwdLambda l@(Lambda params body ret) =
   Lambda <$> bundleNew params <*> inScopeOf l (fwdBody body) <*> bundleTan ret
+
+fwdStreamLambda :: Lambda -> ADM Lambda
+fwdStreamLambda l@(Lambda params body ret) =
+  Lambda <$> ((take 1 params ++) <$> bundleNew (drop 1 params)) <*> inScopeOf l (fwdBody body) <*> bundleTan ret
 
 interleave :: [a] -> [a] -> [a]
 interleave xs ys = concat $ transpose [xs, ys]
@@ -322,7 +327,7 @@ fwdSOAC pat aux (Screma size xs (ScremaForm scs reds f)) = do
           }
 fwdSOAC pat aux (Stream size xs form nes lam) = do
   pat' <- bundleNew pat
-  lam' <- fwdLambda lam
+  lam' <- fwdStreamLambda lam
   xs' <- bundleTan xs
   nes_tan <- mapM (fmap Var . zeroFromSubExp) nes
   let nes' = interleave nes nes_tan
@@ -420,7 +425,9 @@ fwdStm (Let pat aux (DoLoop l_ctx val_pats loop@(ForLoop i it bound loop_vars) b
   val_pats' <- bundleNew val_pats
   loop_vars' <- bundleNew loop_vars
   inScopeOf loop $ do
-    body' <- fwdBody body
+    body' <-
+      localScope (scopeOfFParams (map fst $ l_ctx ++ val_pats) <> scopeOf loop) $
+        fwdBody body
     addStm $
       Let pat' aux $
         DoLoop l_ctx val_pats' (ForLoop i it bound loop_vars') body'
@@ -446,24 +453,19 @@ fwdStm stm =
   error $ "unhandled forward mode AD for Stm: " ++ pretty stm ++ "\n" ++ show stm
 
 fwdBody :: Body -> ADM Body
-fwdBody (Body _ stms res) = do
-  (res', stms') <- collectStms $ do
-    mapM_ fwdStm stms
-    bundleTan res
-  return $ mkBody stms' res'
+fwdBody (Body _ stms res) = buildBody_ $ do
+  mapM_ fwdStm stms
+  bundleTan res
 
 fwdBodyOnlyTangents :: Body -> ADM Body
-fwdBodyOnlyTangents (Body _ stms res) = do
-  (res', stms') <- collectStms $ do
-    mapM_ fwdStm stms
-    tangent res
-  return $ mkBody stms' res'
+fwdBodyOnlyTangents (Body _ stms res) = buildBody_ $ do
+  mapM_ fwdStm stms
+  tangent res
 
 fwdJVP :: MonadFreshNames m => Scope SOACS -> Lambda -> m Lambda
 fwdJVP scope l@(Lambda params body ret) =
-  runADM . localScope scope $
-    inScopeOf l $ do
-      params_tan <- newTan params
-      body_tan <- fwdBodyOnlyTangents body
-      ret_tan <- tangent ret
-      return $ Lambda (params ++ params_tan) body_tan (ret ++ ret_tan)
+  runADM . localScope scope . inScopeOf l $ do
+    params_tan <- newTan params
+    body_tan <- fwdBodyOnlyTangents body
+    ret_tan <- tangent ret
+    return $ Lambda (params ++ params_tan) body_tan (ret ++ ret_tan)
