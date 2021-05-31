@@ -66,6 +66,7 @@ pdBinOp (SDiv it _) a b =
   intBinOp derivs derivs derivs derivs it a b
   where
     derivs x y = (1 `quot` y, negate (x `quot` (y * y)))
+pdBinOp (SMod it _) _ _ = (iConst it 1, iConst it 0) -- FIXME
 --
 pdBinOp (FAdd ft) _ _ = (fConst ft 1, fConst ft 1)
 pdBinOp (FSub ft) _ _ = (fConst ft 1, fConst ft (-1))
