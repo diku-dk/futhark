@@ -98,32 +98,32 @@ compileSegStencil pat lvl space op kbody =
         name <- dPrim "max_shared_bytes" int32
         sOp $ Imp.GetSizeMax (tvVar name) Imp.SizeLocalMemory
         pure $ tvExp name
-      can_and_should_run_stripTile <- do
-        host_strip_sizes <- mapM (dPrimVE "host_strip_sizes") $ zipWith (*) group_sizes_exp work_multiples_exp
-        stripTileElems <- dPrimVE "stripTileElems" $ product $ zipWith (+) halo_widths_exp host_strip_sizes
-        stripTileBytes <- dPrimVE "stripTileBytes" $ stripTileElems * fromInteger memory_per_elem
+      can_and_should_run_multiWrite <- do
+        host_multiWrite_sizes <- mapM (dPrimVE "host_multiWrite_sizes") $ zipWith (*) group_sizes_exp work_multiples_exp
+        multiWriteElems <- dPrimVE "multiWriteElems" $ product $ zipWith (+) halo_widths_exp host_multiWrite_sizes
+        multiWriteBytes <- dPrimVE "multiWriteBytes" $ multiWriteElems * fromInteger memory_per_elem
         -- There should also be a check for whether the amount of shared
         --   memory required per thread-block would harm the occupancy too
         --   much for the stripmineBigTile design to be meaningfully run.
         --   However as of writing this comment, there is no support for this
         --   in the compiler, so it was simply (but incorrectly) assumed that
         --   this was of no concern.
-        canRunStripTile <- dPrimVE "canRunStripTile" $ stripTileBytes .<=. (max_shared_bytes `div` 2)
-        reuseIsHighEnough <- (dPrimVE "reuseIsHighEnoughST" . (2 .<=.)) =<< computeFlatReuse host_strip_sizes halo_widths_exp
-        isNotSkewed <- dPrimVE "isNotSkewedST" $ foldl1 (.&&.) $ zipWith (.<=.) host_strip_sizes dims
+        canRunmultiWrite <- dPrimVE "canRunmultiWrite" $ multiWriteBytes .<=. (max_shared_bytes `div` 2)
+        reuseIsHighEnough <- (dPrimVE "reuseIsHighEnoughST" . (2 .<=.)) =<< computeFlatReuse host_multiWrite_sizes halo_widths_exp
+        isNotSkewed <- dPrimVE "isNotSkewedST" $ foldl1 (.&&.) $ zipWith (.<=.) host_multiWrite_sizes dims
         forM_ group_sizes_exp $ debugPrintf "group_sizes"
         debugPrintf "shared_size_max" max_shared_bytes
-        debugPrintf "stripTileBytes" stripTileBytes
-        debugPrintf "can_run_strips" canRunStripTile
-        debugPrintf "reuseIsHighEnough_strips" reuseIsHighEnough
-        debugPrintf "isNotSkewed_strips" isNotSkewed
-        dPrimVE "can_and_should_run_stripTile" $
-          canRunStripTile
+        debugPrintf "multiWriteBytes" multiWriteBytes
+        debugPrintf "can_run_multiWrite" canRunmultiWrite
+        debugPrintf "reuseIsHighEnough_multiWrite" reuseIsHighEnough
+        debugPrintf "isNotSkewed_multiWrite" isNotSkewed
+        dPrimVE "can_and_should_run_multiWrite" $
+          canRunmultiWrite
             .&&. reuseIsHighEnough
             .&&. isNotSkewed
-      debugPrintf "can_and_should_run_stripTile" can_and_should_run_stripTile
-      sIf can_and_should_run_stripTile
-        (compileBigTileStripMinedSingleDim pat lvl space op kbody group_sizes_exp work_multiples)
+      debugPrintf "can_and_should_run_multiWrite" can_and_should_run_multiWrite
+      sIf can_and_should_run_multiWrite
+        (compileBigTileMultiWriteSingleDim pat lvl space op kbody group_sizes_exp work_multiples)
         (compileGlobalReadFlat pat lvl space op kbody)
 
 -- Creates the size spans given a list of sizes.
@@ -287,7 +287,7 @@ compileGlobalReadFlat pat lvl space op kbody = do
 --   In phase 1 it loads the entire read-set into the tile(s).
 --   In phase 2 it iterates through the write-set and evaluated the lambda
 --     function and performs writes.
-compileBigTileStripMinedSingleDim ::
+compileBigTileMultiWriteSingleDim ::
   Pattern KernelsMem ->
   SegLevel ->
   SegSpace ->
@@ -296,7 +296,7 @@ compileBigTileStripMinedSingleDim ::
   [Imp.TExp Int32] ->
   [Integer] ->
   CallKernelGen ()
-compileBigTileStripMinedSingleDim pat _ space op kbody group_sizes_exp work_multiples =
+compileBigTileMultiWriteSingleDim pat _ space op kbody group_sizes_exp work_multiples =
   let (gids_vn, dims') = unzip $ unSegSpace space
       dims = map toInt64Exp dims'
       stencil_ixss :: [[Imp.TExp Int32]]
