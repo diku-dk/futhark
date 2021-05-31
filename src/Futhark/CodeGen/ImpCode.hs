@@ -102,9 +102,11 @@ data Definitions a = Definitions
   { defConsts :: Constants a,
     defFuns :: Functions a
   }
+  deriving (Show)
 
 -- | A collection of imperative functions.
 newtype Functions a = Functions [(Name, Function a)]
+  deriving (Show)
 
 instance Semigroup (Functions a) where
   Functions x <> Functions y = Functions $ x ++ y
@@ -120,6 +122,7 @@ data Constants a = Constants
     -- contain declarations of the names defined in 'constsDecl'.
     constsInit :: Code a
   }
+  deriving (Show)
 
 -- | Since the core language does not care for signedness, but the
 -- source language does, entry point input/output information has
@@ -154,7 +157,7 @@ data ExternalValue
 -- and results.  The latter are only used if the function is an entry
 -- point.
 data FunctionT a = Function
-  { functionEntry :: Bool,
+  { functionEntry :: Maybe Name,
     functionOutput :: [Param],
     functionInput :: [Param],
     functionBody :: Code a,

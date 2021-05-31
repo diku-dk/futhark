@@ -5,7 +5,7 @@
 -- that we don't try to handle both the textual and binary format -
 -- only the former.  On the other hand, this parser has (much) better
 -- error messages and can be easily used by other parsers (like the
--- ones for FutharkScript or test blocks.
+-- ones for FutharkScript or test blocks).
 module Futhark.Test.Values.Parser
   ( parsePrimType,
     parseType,

@@ -1756,7 +1756,13 @@ interpretExp ctx e = runEvalM (ctxImports ctx) $ eval (ctxEnv ctx) e
 
 interpretDec :: Ctx -> Dec -> F ExtOp Ctx
 interpretDec ctx d = do
-  env <- runEvalM (ctxImports ctx) $ evalDec (ctxEnv ctx) d
+  env <- runEvalM (ctxImports ctx) $ do
+    env <- evalDec (ctxEnv ctx) d
+    -- We need to extract any new existential sizes and add them as
+    -- ordinary bindings to the context, or we will not be able to
+    -- look up their values later.
+    sizes <- extSizeEnv
+    pure $ env <> sizes
   return ctx {ctxEnv = env}
 
 interpretImport :: Ctx -> (FilePath, Prog) -> F ExtOp Ctx

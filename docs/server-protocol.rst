@@ -82,6 +82,12 @@ Store the *N* values in variables *v1* to *vN* in *file*.
 
 Delete the given variables.
 
+``rename`` *oldname* *newname*
+..............................
+
+Rename the variable *oldname* to *newname*, which must not already
+exist.
+
 ``inputs`` *entry*
 ..................
 
@@ -114,3 +120,11 @@ Corresponds to :c:func:`futhark_context_unpause_profiling`.
 ..........
 
 Corresponds to :c:func:`futhark_context_report`.
+
+Environment Variables
+---------------------
+
+``FUTHARK_COMPILER_DEBUGGING``
+..............................
+
+Turns on debugging output for the server when set to 1.

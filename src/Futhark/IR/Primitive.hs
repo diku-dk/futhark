@@ -121,6 +121,8 @@ import Futhark.Util
     ceilFloat,
     floorDouble,
     floorFloat,
+    hypot,
+    hypotf,
     lgamma,
     lgammaf,
     roundDouble,
@@ -626,7 +628,8 @@ doAbs v = intValue (intValueType v) $ abs $ intToInt64 v
 
 -- | @abs(-2.0) = 2.0@.
 doFAbs :: FloatValue -> FloatValue
-doFAbs v = floatValue (floatValueType v) $ abs $ floatToDouble v
+doFAbs (Float32Value x) = Float32Value $ abs x
+doFAbs (Float64Value x) = Float64Value $ abs x
 
 -- | @ssignum(-2)@ = -1.
 doSSignum :: IntValue -> IntValue
@@ -1221,6 +1224,24 @@ primFuns =
           \case
             [FloatValue (Float64Value x), FloatValue (Float64Value y)] ->
               Just $ FloatValue $ Float64Value $ atan2 x y
+            _ -> Nothing
+        )
+      ),
+      ( "hypot32",
+        ( [FloatType Float32, FloatType Float32],
+          FloatType Float32,
+          \case
+            [FloatValue (Float32Value x), FloatValue (Float32Value y)] ->
+              Just $ FloatValue $ Float32Value $ hypotf x y
+            _ -> Nothing
+        )
+      ),
+      ( "hypot64",
+        ( [FloatType Float64, FloatType Float64],
+          FloatType Float64,
+          \case
+            [FloatValue (Float64Value x), FloatValue (Float64Value y)] ->
+              Just $ FloatValue $ Float64Value $ hypot x y
             _ -> Nothing
         )
       ),

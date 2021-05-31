@@ -1,7 +1,7 @@
 -- Test whether multiple references within the same sequence are
 -- detected.
 -- ==
--- error: previously consumed
+-- error: "b".*consumed
 
 let main(): i32 =
     let n = 10

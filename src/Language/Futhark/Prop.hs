@@ -91,6 +91,7 @@ module Language.Futhark.Prop
     UncheckedIdent,
     UncheckedTypeDecl,
     UncheckedDimIndex,
+    UncheckedSlice,
     UncheckedExp,
     UncheckedModExp,
     UncheckedSigExp,
@@ -1266,6 +1267,9 @@ type UncheckedIdent = IdentBase NoInfo Name
 
 -- | An index with no type annotations.
 type UncheckedDimIndex = DimIndexBase NoInfo Name
+
+-- | A slice with no type annotations.
+type UncheckedSlice = SliceBase NoInfo Name
 
 -- | An expression with no type annotations.
 type UncheckedExp = ExpBase NoInfo Name

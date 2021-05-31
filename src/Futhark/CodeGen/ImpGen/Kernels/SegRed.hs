@@ -209,12 +209,8 @@ nonsegmentedReduction segred_pat num_groups group_size space reds body = do
             `divUp` Imp.elements (sExt64 (kernelNumThreads constants))
 
     slugs <-
-      mapM
-        ( segBinOpSlug
-            (kernelLocalThreadId constants)
-            (kernelGroupId constants)
-        )
-        $ zip3 reds reds_arrs reds_group_res_arrs
+      mapM (segBinOpSlug (kernelLocalThreadId constants) (kernelGroupId constants)) $
+        zip3 reds reds_arrs reds_group_res_arrs
     reds_op_renamed <-
       reductionStageOne
         constants
@@ -229,44 +225,30 @@ nonsegmentedReduction segred_pat num_groups group_size space reds body = do
     let segred_pes =
           chunks (map (length . segBinOpNeutral) reds) $
             patternElements segred_pat
-    forM_
-      ( zip7
-          reds
-          reds_arrs
-          reds_group_res_arrs
-          segred_pes
-          slugs
-          reds_op_renamed
-          [0 ..]
-      )
-      $ \( SegBinOp _ red_op nes _,
-           red_arrs,
-           group_res_arrs,
-           pes,
-           slug,
-           red_op_renamed,
-           i
-           ) -> do
-          let (red_x_params, red_y_params) = splitAt (length nes) $ lambdaParams red_op
-          reductionStageTwo
-            constants
-            pes
-            (kernelGroupId constants)
-            0
-            [0]
-            0
-            (sExt64 $ kernelNumGroups constants)
-            slug
-            red_x_params
-            red_y_params
-            red_op_renamed
-            nes
-            1
-            counter
-            (fromInteger i)
-            sync_arr
-            group_res_arrs
-            red_arrs
+    forM_ (zip7 reds reds_arrs reds_group_res_arrs segred_pes slugs reds_op_renamed [0 ..]) $
+      \(SegBinOp _ red_op nes _, red_arrs, group_res_arrs, pes, slug, red_op_renamed, i) -> do
+        let (red_x_params, red_y_params) = splitAt (length nes) $ lambdaParams red_op
+        reductionStageTwo
+          constants
+          pes
+          (kernelGroupId constants)
+          0
+          [0]
+          0
+          (sExt64 $ kernelNumGroups constants)
+          slug
+          red_x_params
+          red_y_params
+          red_op_renamed
+          nes
+          1
+          counter
+          (fromInteger i)
+          sync_arr
+          group_res_arrs
+          red_arrs
+
+  emit $ Imp.DebugPrint "" Nothing
 
 smallSegmentsReduction ::
   Pattern KernelsMem ->
@@ -315,7 +297,7 @@ smallSegmentsReduction (Pattern _ segred_pes) num_groups group_size space reds b
               + (sExt64 group_id' * sExt64 segments_per_group)
           index_within_segment = ltid `rem` segment_size
 
-      zipWithM_ dPrimV_ (init gtids) $ unflattenIndex (init dims') segment_index
+      dIndexSpace (zip (init gtids) (init dims')) segment_index
       dPrimV_ (last gtids) index_within_segment
 
       let out_of_bounds =
@@ -374,6 +356,8 @@ smallSegmentsReduction (Pattern _ segred_pes) num_groups group_size space reds b
       -- Finally another barrier, because we will be writing to the
       -- local memory array first thing in the next iteration.
       sOp $ Imp.Barrier Imp.FenceLocal
+
+  emit $ Imp.DebugPrint "" Nothing
 
 largeSegmentsReduction ::
   Pattern KernelsMem ->
@@ -458,9 +442,7 @@ largeSegmentsReduction segred_pat num_groups group_size space reds body = do
             `rem` (sExt64 (unCount group_size') * groups_per_segment)
 
       let first_group_for_segment = sExt64 flat_segment_id * groups_per_segment
-
-      zipWithM_ dPrimV_ segment_gtids $
-        unflattenIndex (init dims') $ sExt64 flat_segment_id
+      dIndexSpace (zip segment_gtids (init dims')) $sExt64 flat_segment_id
       dPrim_ (last gtids) int64
       let num_elements = Imp.elements $ toInt64Exp w
 
@@ -483,45 +465,29 @@ largeSegmentsReduction segred_pat num_groups group_size space reds body = do
               patternElements segred_pat
 
           multiple_groups_per_segment =
-            forM_
-              ( zip7
-                  reds
-                  reds_arrs
-                  reds_group_res_arrs
-                  segred_pes
-                  slugs
-                  reds_op_renamed
-                  [0 ..]
-              )
-              $ \( SegBinOp _ red_op nes _,
-                   red_arrs,
-                   group_res_arrs,
-                   pes,
-                   slug,
-                   red_op_renamed,
-                   i
-                   ) -> do
-                  let (red_x_params, red_y_params) =
-                        splitAt (length nes) $ lambdaParams red_op
-                  reductionStageTwo
-                    constants
-                    pes
-                    group_id
-                    flat_segment_id
-                    (map Imp.vi64 segment_gtids)
-                    (sExt64 first_group_for_segment)
-                    groups_per_segment
-                    slug
-                    red_x_params
-                    red_y_params
-                    red_op_renamed
-                    nes
-                    (fromIntegral num_counters)
-                    counter
-                    (fromInteger i)
-                    sync_arr
-                    group_res_arrs
-                    red_arrs
+            forM_ (zip7 reds reds_arrs reds_group_res_arrs segred_pes slugs reds_op_renamed [0 ..]) $
+              \(SegBinOp _ red_op nes _, red_arrs, group_res_arrs, pes, slug, red_op_renamed, i) -> do
+                let (red_x_params, red_y_params) =
+                      splitAt (length nes) $ lambdaParams red_op
+                reductionStageTwo
+                  constants
+                  pes
+                  group_id
+                  flat_segment_id
+                  (map Imp.vi64 segment_gtids)
+                  (sExt64 first_group_for_segment)
+                  groups_per_segment
+                  slug
+                  red_x_params
+                  red_y_params
+                  red_op_renamed
+                  nes
+                  (fromIntegral num_counters)
+                  counter
+                  (fromInteger i)
+                  sync_arr
+                  group_res_arrs
+                  red_arrs
 
           one_group_per_segment =
             comment "first thread in group saves final result to memory" $
@@ -531,6 +497,8 @@ largeSegmentsReduction segred_pat num_groups group_size space reds body = do
                     copyDWIMFix (patElemName v) (map Imp.vi64 segment_gtids) (Var acc) acc_is
 
       sIf (groups_per_segment .==. 1) one_group_per_segment multiple_groups_per_segment
+
+  emit $ Imp.DebugPrint "" Nothing
 
 -- Careful to avoid division by zero here.  We have at least one group
 -- per segment.

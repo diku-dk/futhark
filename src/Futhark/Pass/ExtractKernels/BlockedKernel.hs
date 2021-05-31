@@ -21,7 +21,6 @@ where
 
 import Control.Monad
 import Control.Monad.Writer
-import Data.List ()
 import Futhark.Analysis.PrimExp
 import Futhark.IR
 import Futhark.IR.Prop.Aliases
@@ -244,11 +243,11 @@ readKernelInput ::
   m ()
 readKernelInput inp = do
   let pe = PatElem (kernelInputName inp) $ kernelInputType inp
-  arr_t <- lookupType $ kernelInputArray inp
   letBind (Pattern [] [pe]) . BasicOp $
-    case arr_t of
+    case kernelInputType inp of
       Acc {} ->
         SubExp $ Var $ kernelInputArray inp
       _ ->
         Index (kernelInputArray inp) $
-          fullSlice arr_t $ map DimFix $ kernelInputIndices inp
+          map DimFix (kernelInputIndices inp)
+            ++ map sliceDim (arrayDims (kernelInputType inp))

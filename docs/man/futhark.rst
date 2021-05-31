@@ -45,7 +45,7 @@ futhark dataget PROGRAM DATASET
 
 Find the test dataset whose description contains ``DATASET``
 (e.g. ``#1``) and print it in binary representation to standard
-output.
+output.  This does not work for ``script`` datasets.
 
 futhark dev options... PROGRAM
 ------------------------------

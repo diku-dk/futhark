@@ -241,9 +241,17 @@ transformSOAC pat (Stream w arrs _ nes lam) = do
           <$> newParam "stream_mapout" (toDecl t' Unique)
           <*> letSubExp "stream_mapout_scratch" scratch
 
-  let onType t@Acc {} = t `toDecl` Unique
-      onType t = t `toDecl` Nonunique
-      merge = zip (map (fmap onType) fold_params) nes ++ mapout_merge
+  -- We need to copy the neutral elements because they may be consumed
+  -- in the body of the Stream.
+  let copyIfArray se = do
+        se_t <- subExpType se
+        case (se_t, se) of
+          (Array {}, Var v) -> letSubExp (baseString v) $ BasicOp $ Copy v
+          _ -> pure se
+  nes' <- mapM copyIfArray nes
+
+  let onType t = t `toDecl` Unique
+      merge = zip (map (fmap onType) fold_params) nes' ++ mapout_merge
       merge_params = map fst merge
       mapout_params = map fst mapout_merge
 
@@ -255,30 +263,19 @@ transformSOAC pat (Stream w arrs _ nes lam) = do
     BasicOp $ SubExp $ intConst Int64 1
 
   loop_body <- runBodyBinder $
-    localScope
-      ( scopeOf loop_form
-          <> scopeOfFParams merge_params
-      )
-      $ do
-        let slice =
-              [DimSlice (Var i) (Var (paramName chunk_size_param)) (intConst Int64 1)]
-        forM_ (zip chunk_params arrs) $ \(p, arr) ->
-          letBindNames [paramName p] $
-            BasicOp $
-              Index arr $
-                fullSlice (paramType p) slice
+    localScope (scopeOf loop_form <> scopeOfFParams merge_params) $ do
+      let slice = [DimSlice (Var i) (Var (paramName chunk_size_param)) (intConst Int64 1)]
+      forM_ (zip chunk_params arrs) $ \(p, arr) ->
+        letBindNames [paramName p] . BasicOp . Index arr $
+          fullSlice (paramType p) slice
 
-        (res, mapout_res) <- splitAt (length nes) <$> bodyBind (lambdaBody lam)
+      (res, mapout_res) <- splitAt (length nes) <$> bodyBind (lambdaBody lam)
 
-        mapout_res' <- forM (zip mapout_params mapout_res) $ \(p, se) ->
-          letSubExp "mapout_res" $
-            BasicOp $
-              Update
-                (paramName p)
-                (fullSlice (paramType p) slice)
-                se
+      mapout_res' <- forM (zip mapout_params mapout_res) $ \(p, se) ->
+        letSubExp "mapout_res" . BasicOp $
+          Update (paramName p) (fullSlice (paramType p) slice) se
 
-        resultBodyM $ res ++ mapout_res'
+      resultBodyM $ res ++ mapout_res'
 
   letBind pat $ DoLoop [] merge loop_form loop_body
 transformSOAC pat (Scatter len lam ivs as) = do
@@ -291,24 +288,20 @@ transformSOAC pat (Scatter len lam ivs as) = do
   -- Scatter is in-place, so we use the input array as the output array.
   let merge = loopMerge asOuts $ map Var as_vs
   loopBody <- runBodyBinder $
-    localScope
-      ( M.insert iter (IndexName Int64) $
-          scopeOfFParams $ map fst merge
-      )
-      $ do
-        ivs' <- forM ivs $ \iv -> do
-          iv_t <- lookupType iv
-          letSubExp "write_iv" $ BasicOp $ Index iv $ fullSlice iv_t [DimFix $ Var iter]
-        ivs'' <- bindLambda lam (map (BasicOp . SubExp) ivs')
+    localScope (M.insert iter (IndexName Int64) $ scopeOfFParams $ map fst merge) $ do
+      ivs' <- forM ivs $ \iv -> do
+        iv_t <- lookupType iv
+        letSubExp "write_iv" $ BasicOp $ Index iv $ fullSlice iv_t [DimFix $ Var iter]
+      ivs'' <- bindLambda lam (map (BasicOp . SubExp) ivs')
 
-        let indexes = groupScatterResults (zip3 as_ws as_ns $ map identName asOuts) ivs''
+      let indexes = groupScatterResults (zip3 as_ws as_ns $ map identName asOuts) ivs''
 
-        ress <- forM indexes $ \(_, arr, indexes') -> do
-          let saveInArray arr' (indexCur, valueCur) =
-                letExp "write_out" =<< eWriteArray arr' (map eSubExp indexCur) (eSubExp valueCur)
+      ress <- forM indexes $ \(_, arr, indexes') -> do
+        let saveInArray arr' (indexCur, valueCur) =
+              letExp "write_out" =<< eWriteArray arr' (map eSubExp indexCur) (eSubExp valueCur)
 
-          foldM saveInArray arr indexes'
-        return $ resultBody (map Var ress)
+        foldM saveInArray arr indexes'
+      return $ resultBody (map Var ress)
   letBind pat $ DoLoop [] merge (ForLoop iter Int64 len []) loopBody
 transformSOAC pat (Hist len ops bucket_fun imgs) = do
   iter <- newVName "iter"

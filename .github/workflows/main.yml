@@ -188,6 +188,28 @@ jobs:
           nix-shell --pure --run "cabal update"
           nix-shell --pure --run "cabal test"
 
+  build-docs:
+    runs-on: ubuntu-20.04
+
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Install Nix
+      uses: cachix/install-nix-action@v12
+
+    - uses: actions/cache@v2
+      name: Cache ~/.cabal/packages, ~/.cabal/store and dist-newstyle
+      with:
+        path: |
+          ~/.cabal/packages
+          ~/.cabal/store
+          dist-newstyle
+        key: ${{ runner.os }}-${{ hashFiles('nix/sources.json') }}-haddock
+
+    - name: Run haddock
+      run: |
+          nix-shell --pure --run "cabal update"
+          nix-shell --pure --run "cabal haddock"
 
   test-interpreter:
     runs-on: ubuntu-20.04
@@ -377,6 +399,9 @@ jobs:
 
     - run: |
         cd tests_literate && sh test.sh
+
+    - run: |
+        cd tests_repl && sh test.sh
 
     - run: |
         futhark doc -o prelude-docs prelude

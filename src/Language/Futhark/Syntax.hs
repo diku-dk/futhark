@@ -53,6 +53,7 @@ module Language.Futhark.Syntax
     IdentBase (..),
     Inclusiveness (..),
     DimIndexBase (..),
+    SliceBase,
     SizeBinder (..),
     AppExpBase (..),
     AppRes (..),
@@ -646,6 +647,9 @@ deriving instance Eq (DimIndexBase NoInfo VName)
 
 deriving instance Ord (DimIndexBase NoInfo VName)
 
+-- | A slicing of an array (potentially multiple dimensions).
+type SliceBase f vn = [DimIndexBase f vn]
+
 -- | A name qualified with a breadcrumb of module accesses.
 data QualName vn = QualName
   { qualQuals :: ![vn],
@@ -738,11 +742,11 @@ data AppExpBase f vn
   | LetWith
       (IdentBase f vn)
       (IdentBase f vn)
-      [DimIndexBase f vn]
+      (SliceBase f vn)
       (ExpBase f vn)
       (ExpBase f vn)
       SrcLoc
-  | Index (ExpBase f vn) [DimIndexBase f vn] SrcLoc
+  | Index (ExpBase f vn) (SliceBase f vn) SrcLoc
   | -- | A match expression.
     Match (ExpBase f vn) (NE.NonEmpty (CaseBase f vn)) SrcLoc
 
@@ -813,7 +817,7 @@ data ExpBase f vn
     Assert (ExpBase f vn) (ExpBase f vn) (f String) SrcLoc
   | -- | An n-ary value constructor.
     Constr Name [ExpBase f vn] (f PatternType) SrcLoc
-  | Update (ExpBase f vn) [DimIndexBase f vn] (ExpBase f vn) SrcLoc
+  | Update (ExpBase f vn) (SliceBase f vn) (ExpBase f vn) SrcLoc
   | RecordUpdate (ExpBase f vn) [Name] (ExpBase f vn) (f PatternType) SrcLoc
   | Lambda
       [PatternBase f vn]
@@ -842,7 +846,7 @@ data ExpBase f vn
   | -- | Field projection as a section: @(.x.y.z)@.
     ProjectSection [Name] (f PatternType) SrcLoc
   | -- | Array indexing as a section: @(.[i,j])@.
-    IndexSection [DimIndexBase f vn] (f PatternType) SrcLoc
+    IndexSection (SliceBase f vn) (f PatternType) SrcLoc
   | -- | Type ascription: @e : t@.
     Ascript (ExpBase f vn) (TypeDeclBase f vn) SrcLoc
   | AppExp (AppExpBase f vn) (f AppRes)

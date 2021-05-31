@@ -11,7 +11,9 @@ import Control.Monad.State
 import qualified Data.Map.Strict as M
 import Data.Maybe (mapMaybe)
 import qualified Data.Sequence as Seq
+import qualified Futhark.Analysis.Alias as Alias
 import Futhark.IR.Kernels
+import Futhark.IR.Prop.Aliases (consumedInStm)
 import Futhark.MonadFreshNames
 import Futhark.Optimise.BlkRegTiling
 import Futhark.Optimise.TileLoops.Shared
@@ -255,13 +257,25 @@ partitionPrelude variance prestms private used_after =
     invariantTo names stm =
       case patternNames (stmPattern stm) of
         [] -> True -- Does not matter.
-        v : _ ->
-          not $
-            any (`nameIn` names) $
-              namesToList $
-                M.findWithDefault mempty v variance
+        v : _ -> not $ any (`nameIn` names) $ namesToList $ M.findWithDefault mempty v variance
+
+    consumed v = v `nameIn` consumed_in_prestms
+    consumedStm stm = any consumed (patternNames (stmPattern stm))
+
+    later_consumed =
+      namesFromList $
+        concatMap (patternNames . stmPattern) $
+          stmsToList $ Seq.filter consumedStm prestms
+
+    groupInvariant stm =
+      invariantTo private stm
+        && not (any (`nameIn` later_consumed) (patternNames (stmPattern stm)))
+        && invariantTo later_consumed stm
     (invariant_prestms, variant_prestms) =
-      Seq.partition (invariantTo private) prestms
+      Seq.partition groupInvariant prestms
+
+    consumed_in_prestms =
+      foldMap consumedInStm $ fst $ Alias.analyseStms mempty prestms
 
     mustBeInlinedExp (BasicOp (Index _ slice)) = not $ null $ sliceDims slice
     mustBeInlinedExp (BasicOp Rotate {}) = True

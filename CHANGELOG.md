@@ -9,6 +9,60 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+### Removed
+
+### Changed
+
+### Fixed
+
+## [0.19.6]
+
+### Added
+
+  * `f32.hypot` and `f64.hypot` are now much more numerically exact in
+    the interpreter.
+
+  * Generated code now contains a header with information about the
+    version of Futhark used (and maybe more information in the
+    future).
+
+  * Testing/benchmarking with large input data (including randomly
+    generated data) is much faster, as each file is now only read
+    once.
+
+  * Test programs may now use arbitrary FutharkScript expressions to
+    produce test input, in particular expressions that produce opaque
+    values.  This affects both testing, benchmarking, and autotuning.
+
+  * Compilation is about 10% faster, especially for large programs.
+
+### Fixed
+
+  * `futhark repl` had trouble with declarations that produced unknown
+    sizes (#1347).
+
+  * Entry points can now have same name as (undocumented!) compiler intrinsics.
+
+  * FutharkScript now detects too many arguments passed to functions.
+
+  * Sequentialisation bug (#1350).
+
+  * Missing causality check for index sections.
+
+  * `futhark test` now reports mismatches using proper indexes (#1356).
+
+  * Missing alias checking in fusion could lead to compiler crash (#1358).
+
+  * The absolute value of NaN is no longer infinity in the interpreter (#1359).
+
+  * Proper detection of zero strides in compiler (#1360).
+
+  * Invalid memory accesses related to internal bookkeeping of bounds checking.
+
+## [0.19.5]
+
+### Added
+
   * Initial work on granting programmers more control over existential
     sizes, starting with making type abbreviations function as
     existential quantifiers (#1301).
@@ -18,16 +72,14 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * Added `f32.epsilon` and `f64.epsilon` for the difference between
     1.0 and the next larger representable number.
 
+  * Added `f32.hypot` and `f64.hypot` for your hypothenuse needs (#1344).
+
   * Local size bindings in `let` expressions, e.g:
 
     ```
     let [n] (xs': [n]i32) = filter (>0) xs
     in ...
     ```
-
-### Removed
-
-### Changed
 
 ### Fixed
 
@@ -49,6 +101,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * Handling of sizes in abstract types in the interpreter (#1333).
 
   * Type checking of explicit size requirements in `loop` parameter (#1324).
+
+  * Various alias checking bugs (#1300, #1340).
 
 ## [0.19.4]
 
