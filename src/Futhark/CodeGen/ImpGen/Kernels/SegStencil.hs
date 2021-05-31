@@ -78,15 +78,15 @@ compileSegStencil pat lvl space op kbody =
           rescale_on_byte_size mult =
             let largest_type_size = maximum size_per_invars
             in max (1 :: Integer) ((mult * 4) `Prelude.div` largest_type_size)
-          strip_multiples :: [Integer]
-          strip_multiples =
+          work_multiples :: [Integer]
+          work_multiples =
             case dimentionality of
               1 -> [rescale_on_byte_size 4]
-              2 -> [2, rescale_on_byte_size 2]
+              2 -> [2, rescale_on_byte_size 2] 
               3 -> [2, 2, rescale_on_byte_size 1]
               _ -> error "not valid dimensions"
-          strip_multiples_exp :: [Imp.TExp Int32]
-          strip_multiples_exp = map fromInteger strip_multiples
+          work_multiples_exp :: [Imp.TExp Int32]
+          work_multiples_exp = map fromInteger work_multiples
           debugPrintf :: String -> Imp.TExp t -> ImpM lore r op ()
           debugPrintf text = emit . Imp.DebugPrint text . Just . untyped
           computeFlatReuse works hws =
@@ -99,7 +99,7 @@ compileSegStencil pat lvl space op kbody =
         sOp $ Imp.GetSizeMax (tvVar name) Imp.SizeLocalMemory
         pure $ tvExp name
       can_and_should_run_stripTile <- do
-        host_strip_sizes <- mapM (dPrimVE "host_strip_sizes") $ zipWith (*) group_sizes_exp strip_multiples_exp
+        host_strip_sizes <- mapM (dPrimVE "host_strip_sizes") $ zipWith (*) group_sizes_exp work_multiples_exp
         stripTileElems <- dPrimVE "stripTileElems" $ product $ zipWith (+) halo_widths_exp host_strip_sizes
         stripTileBytes <- dPrimVE "stripTileBytes" $ stripTileElems * fromInteger memory_per_elem
         -- There should also be a check for whether the amount of shared
@@ -123,12 +123,13 @@ compileSegStencil pat lvl space op kbody =
             .&&. isNotSkewed
       debugPrintf "can_and_should_run_stripTile" can_and_should_run_stripTile
       sIf can_and_should_run_stripTile
-        (compileBigTileStripMinedSingleDim pat lvl space op kbody group_sizes_exp strip_multiples)
+        (compileBigTileStripMinedSingleDim pat lvl space op kbody group_sizes_exp work_multiples)
         (compileGlobalReadFlat pat lvl space op kbody)
 
 -- Creates the size spans given a list of sizes.
 createSpans :: Num a => [a] -> [a]
 createSpans = scanr1 (*) . tail
+
 
 -- 'unflattenIndex' has a ton of common subexpressions,
 -- and manully calculate 'rem' so a new one was made.
@@ -291,7 +292,7 @@ compileBigTileStripMinedSingleDim ::
   [Imp.TExp Int32] ->
   [Integer] ->
   CallKernelGen ()
-compileBigTileStripMinedSingleDim pat _ space op kbody group_sizes_exp strip_multiples =
+compileBigTileStripMinedSingleDim pat _ space op kbody group_sizes_exp work_multiples =
   let (gids_vn, dims') = unzip $ unSegSpace space
       dims = map toInt64Exp dims'
       stencil_ixss :: [[Imp.TExp Int32]]
@@ -310,22 +311,22 @@ compileBigTileStripMinedSingleDim pat _ space op kbody group_sizes_exp strip_mul
       a_maxs = map fromInteger a_maxs_i
       n_point_stencil = length $ head stencil_ixss
       lamParTypes = map (elemType . paramType . head) $ chunksOf n_point_stencil variantParams
-      strip_multiples_exp :: [Imp.TExp Int32]
-      strip_multiples_exp = map fromInteger strip_multiples
-      strip_sizes_exp = zipWith (*) strip_multiples_exp group_sizes_exp
-      shared_sizes_exp = zipWith (+) strip_sizes_exp $ zipWith (-) a_maxs a_mins
+      work_multiples_exp :: [Imp.TExp Int32]
+      work_multiples_exp = map fromInteger work_multiples
+      work_sizes_exp = zipWith (*) work_multiples_exp group_sizes_exp
+      shared_sizes_exp = zipWith (+) work_sizes_exp $ zipWith (-) a_maxs a_mins
       shared_size_flat_exp = product shared_sizes_exp
   in do
   -- host side evaluated variables
-  host_strip_sizes <- mapM (dPrimVE "host_strip_sizes") strip_sizes_exp
-  strip_grid <- mapM (dPrimVE "strip_grid" . sExt32) $ zipWith divUp dims $ map sExt64 host_strip_sizes
-  strip_grid_spans <- mapM (dPrimVE "strip_grid_spans") $ createSpans strip_grid
+  host_work_sizes <- mapM (dPrimVE "host_work_sizes") work_sizes_exp
+  work_grid <- mapM (dPrimVE "work_grid" . sExt32) $ zipWith divUp dims $ map sExt64 host_work_sizes
+  work_grid_spans <- mapM (dPrimVE "work_grid_spans") $ createSpans work_grid
   tile_length <- dPrimV "tile_length_flat" shared_size_flat_exp
-  num_groups <- Count <$> dPrimVE "num_groups" (sExt64 $ product strip_grid)
+  num_groups <- Count <$> dPrimVE "num_groups" (sExt64 $ product work_grid)
   max_ixs <- mapM (dPrimVE "max_ixs" . (\x->x-1)) dims
   blocksize <- dPrimVE "blocksize" $ sExt64 $ product group_sizes_exp
 
-  sKernelThread "stripbigtile" num_groups (Count blocksize) (segFlat space) $ do
+  sKernelThread "multiWriteBigTile" num_groups (Count blocksize) (segFlat space) $ do
     -- declaration of shared tile(s)
     tiles <- forM lamParTypes $ \ptype ->
       sAllocArray "tile" ptype
@@ -341,23 +342,23 @@ compileBigTileStripMinedSingleDim pat _ space op kbody group_sizes_exp strip_mul
     group_size_flat <- dPrimVE "group_size_flat" $
       product group_sizes
 
-    strip_sizes <- mapM (dPrimVE "strip_sizes")
-      $ zipWith (*) strip_multiples_exp group_sizes
+    work_sizes <- mapM (dPrimVE "work_sizes")
+      $ zipWith (*) work_multiples_exp group_sizes
 
     shared_sizes <- mapM (dPrimVE "shared_sizes") $
-      zipWith (+) strip_sizes $ zipWith (-) a_maxs a_mins
+      zipWith (+) work_sizes $ zipWith (-) a_maxs a_mins
 
     shared_size_flat <- dPrimVE "shared_size_flat" $ product shared_sizes
     -- threadId/groupId variables
     local_id_flat <- dPrimVE "local_id_flat" . kernelLocalThreadId $ constants
     local_ids <- map tvExp <$> unflattenIx "local_id" group_spans local_id_flat
-    strip_id_flat <- dPrimVE "strip_id_flat" . kernelGroupId $ constants
-    strip_ids <- map tvExp <$> unflattenIx "strip_id" strip_grid_spans strip_id_flat
+    work_id_flat <- dPrimVE "work_id_flat" . kernelGroupId $ constants
+    work_ids <- map tvExp <$> unflattenIx "work_id" work_grid_spans work_id_flat
 
     -- Phase 1: load the read-set into the tile(s).
     let bound_idxs = zipWith sMin64 max_ixs . map (sMax64 0)
     writeSet_offsets <- mapM (dPrimVE "writeSet_offset") $
-      zipWith (*) (map sExt64 strip_ids) (map sExt64 strip_sizes)
+      zipWith (*) (map sExt64 work_ids) (map sExt64 work_sizes)
     -- iterate through the read-set and do reads.
     sForUnflatten shared_sizes local_id_flat 
       group_size_flat 
@@ -391,11 +392,11 @@ compileBigTileStripMinedSingleDim pat _ space op kbody group_sizes_exp strip_mul
       $ zipWith (+) writeSet_offsets $ map sExt64 local_ids
     local_id_shared_flat <- dPrimVE "local_id_shared_flat" $ flattenIndex shared_sizes local_ids
 
-    let nest_shape = map (Constant . IntValue . intValue Int32) strip_multiples
-    sLoopNestSE nest_shape $ \local_strip_ids -> do
+    let nest_shape = map (Constant . IntValue . intValue Int32) work_multiples
+    sLoopNestSE nest_shape $ \local_work_ids -> do
       -- create the centre index used to read from the tile(s).
       tile_ids_offs <- mapM (dPrimVE "tile_ids_offs")
-                      $ zipWith (*) group_sizes local_strip_ids
+                      $ zipWith (*) group_sizes local_work_ids
       tile_ids_offs_flat <- dPrimVE "tile_ids_offs_flat" $ flattenIndex shared_sizes tile_ids_offs
       -- assign the relevant values to the global-ids.
       zipWithM_ dPrimV_ gids_vn $ zipWith (+) base_write_gid $ map sExt64 tile_ids_offs

@@ -1826,7 +1826,7 @@ sLoopNestSE ::
   [SubExp] ->
   ([Imp.TExp Int32] -> ImpM lore r op ()) ->
   ImpM lore r op ()
-sLoopNestSE x y = sLoopNestSE' [] x y
+sLoopNestSE = sLoopNestSE' []
   where
     sLoopNestSE' is [] f = f $ reverse is
     sLoopNestSE' is (d : ds) f =
