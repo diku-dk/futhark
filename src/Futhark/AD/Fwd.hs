@@ -372,6 +372,10 @@ fwdSOAC (Pattern ctx pes) aux (Scatter len lam ivs as) = do
       let indices = concat $ replicate 2 $ take n_indices res
           res' = indices ++ drop n_indices res ++ res_tan
       return $ mkBody stms' res'
+fwdSOAC _ _ JVP {} =
+  error "fwdSOAC: nested JVP not allowed."
+fwdSOAC _ _ VJP {} =
+  error "fwdSOAC: nested VJP not allowed."
 
 fwdStm :: Stm -> ADM ()
 fwdStm (Let pat aux (BasicOp (UpdateAcc acc i x))) = do
