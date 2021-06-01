@@ -74,7 +74,7 @@ pdBinOp (FMul _) x y = (y, x)
 pdBinOp (FDiv ft) a b =
   floatBinOp derivs derivs ft a b
   where
-    derivs x y = (1 / x, negate (x / (y ** 2)))
+    derivs x y = (1 / y, negate (x / (y ** 2)))
 pdBinOp (FPow ft) a b =
   floatBinOp derivs derivs ft a b
   where
