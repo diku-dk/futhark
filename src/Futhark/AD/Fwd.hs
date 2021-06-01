@@ -108,15 +108,6 @@ instance (Monoid (Bundled a), TanBinder a) => TanBinder [a] where
   newTan = mapM newTan
   bundleNew = fmap mconcat . mapM bundleNew
 
-instance TanBinder VName where
-  newTan v = do
-    v' <- tanVName v
-    insertTan v v'
-    return v'
-  bundleNew v = do
-    void $ newTan v
-    bundleTan v
-
 instance TanBinder (PatElemT (TypeBase s u)) where
   newTan (PatElem p t)
     | isAcc t = do
@@ -186,9 +177,7 @@ instance Tangent VName where
       Just v_tan -> return v_tan
       Nothing -> do
         t <- lookupType v
-        v_tan <- newTan v
-        letBindNames [v_tan] $ zeroExp t
-        return v_tan
+        letExp (baseString v <> "_implicit_tan") $ zeroExp t
   bundleTan v = do
     t <- lookupType v
     if isAcc t
