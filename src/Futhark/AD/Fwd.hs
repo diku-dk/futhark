@@ -156,7 +156,7 @@ instance Tangent a => TanBinder (Param (TypeBase s u), a) where
   bundleNew (p, x) = do
     b <- bundleNew p
     x_tan <- tangent x
-    return $ reverse $ zip (reverse b) [x_tan, x]
+    return $ zip b [x, x_tan]
 
 class Tangent a where
   type BundledTan a :: Data.Kind.Type
