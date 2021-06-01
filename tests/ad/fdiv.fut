@@ -1,7 +1,7 @@
 -- ==
 -- entry: f_jvp f_vjp
 -- compiled input { 5.0 7.0 }
--- output { 0.2 -0.102041 }
+-- output { 0.14285 -0.102041 }
 
 let f (x,y) = x / y : f64
 
