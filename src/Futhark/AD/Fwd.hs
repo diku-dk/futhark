@@ -415,22 +415,21 @@ fwdStm (Let pat aux (If cond t f (IfDec ret ifsort))) = do
   pat' <- bundleNew pat
   ret' <- bundleTan ret
   addStm $ Let pat' aux $ If cond t' f' $ IfDec ret' ifsort
-fwdStm (Let pat aux (DoLoop l_ctx val_pats (WhileLoop v) body)) = do
+fwdStm (Let pat aux (DoLoop l_ctx val_pats loop@(WhileLoop v) body)) = do
   val_pats' <- bundleNew val_pats
   pat' <- bundleNew pat
-  body' <- fwdBody body
+  body' <-
+    localScope (scopeOfFParams (map fst $ l_ctx ++ val_pats) <> scopeOf loop) $
+      slocal' $ fwdBody body
   addStm $ Let pat' aux $ DoLoop l_ctx val_pats' (WhileLoop v) body'
 fwdStm (Let pat aux (DoLoop l_ctx val_pats loop@(ForLoop i it bound loop_vars) body)) = do
   pat' <- bundleNew pat
   val_pats' <- bundleNew val_pats
   loop_vars' <- bundleNew loop_vars
-  inScopeOf loop $ do
-    body' <-
-      localScope (scopeOfFParams (map fst $ l_ctx ++ val_pats) <> scopeOf loop) $
-        fwdBody body
-    addStm $
-      Let pat' aux $
-        DoLoop l_ctx val_pats' (ForLoop i it bound loop_vars') body'
+  body' <-
+    localScope (scopeOfFParams (map fst $ l_ctx ++ val_pats) <> scopeOf loop) $
+      slocal' $ fwdBody body
+  addStm $ Let pat' aux $ DoLoop l_ctx val_pats' (ForLoop i it bound loop_vars') body'
 fwdStm (Let pat aux (WithAcc inputs lam)) = do
   inputs' <- forM inputs $ \(shape, arrs, op) -> do
     arrs_tan <- tangent arrs
