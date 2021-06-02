@@ -397,13 +397,15 @@ pIf pr =
 
 pApply :: PR lore -> Parser (Exp lore)
 pApply pr =
-  keyword "apply"
-    $> Apply
-    <*> pName
-    <*> parens (pArg `sepBy` pComma) <* pColon
-    <*> pRetTypes pr
-    <*> pure (Safe, mempty, mempty)
+  keyword "apply" *> (p =<< choice [lexeme "<unsafe>" $> Unsafe, pure Safe])
   where
+    p safety =
+      Apply
+        <$> pName
+        <*> parens (pArg `sepBy` pComma) <* pColon
+        <*> pRetTypes pr
+        <*> pure (safety, mempty, mempty)
+
     pArg =
       choice
         [ lexeme "*" $> (,Consume) <*> pSubExp,
