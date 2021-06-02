@@ -12,6 +12,7 @@ import Data.Maybe
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import Futhark.Actions
+import qualified Futhark.Analysis.Alias as Alias
 import Futhark.Analysis.Metrics (OpMetrics)
 import Futhark.Compiler.CLI
 import Futhark.IR (ASTLore, Op, Prog, pretty)
@@ -46,7 +47,7 @@ import Futhark.Pass.FirstOrderTransform
 import Futhark.Pass.KernelBabysitting
 import Futhark.Pass.Simplify
 import Futhark.Passes
-import Futhark.TypeCheck (Checkable)
+import Futhark.TypeCheck (Checkable, checkProg)
 import Futhark.Util.Log
 import Futhark.Util.Options
 import qualified Futhark.Util.Pretty as PP
@@ -637,7 +638,10 @@ main = mainWithOptions newConfig commandLineOptions "options... program" compile
                 input <- liftIO $ T.readFile file
                 case parse file input of
                   Left err -> externalErrorS $ T.unpack err
-                  Right prog -> runPolyPasses config base $ construct prog
+                  Right prog ->
+                    case checkProg $ Alias.aliasAnalysis prog of
+                      Left err -> externalErrorS $ show err
+                      Right () -> runPolyPasses config base $ construct prog
 
               handlers =
                 [ ( ".fut",
