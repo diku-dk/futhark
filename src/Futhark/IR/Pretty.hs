@@ -229,18 +229,17 @@ instance PrettyLore lore => Pretty (Exp lore) where
         | otherwise = nestedBlock "{" "}" $ ppr b
   ppr (BasicOp op) = ppr op
   ppr (Apply fname args ret (safety, _, _)) =
-    text "apply"
+    applykw
       <+> text (nameToString fname)
-      <> safety'
       <> apply (map (align . pprArg) args)
       </> colon
       <+> braces (commasep $ map ppr ret)
     where
       pprArg (arg, Consume) = text "*" <> ppr arg
       pprArg (arg, _) = ppr arg
-      safety' = case safety of
-        Unsafe -> text "<unsafe>"
-        Safe -> mempty
+      applykw = case safety of
+        Unsafe -> text "apply <unsafe>"
+        Safe -> text "apply"
   ppr (Op op) = ppr op
   ppr (DoLoop ctx val form loopbody) =
     text "loop" <+> ppPattern ctxparams valparams
