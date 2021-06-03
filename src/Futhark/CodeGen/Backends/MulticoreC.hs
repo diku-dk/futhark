@@ -647,9 +647,9 @@ compileOp (Atomic aop) =
   atomicOps aop
 
 doAtomic ::
-  (C.ToIdent a1, C.ToIdent a2) =>
+  (C.ToIdent a1) =>
   a1 ->
-  a2 ->
+  VName ->
   Count u (TExp Int32) ->
   Exp ->
   String ->
@@ -658,15 +658,17 @@ doAtomic ::
 doAtomic old arr ind val op ty = do
   ind' <- GC.compileExp $ untyped $ unCount ind
   val' <- GC.compileExp val
-  GC.stm [C.cstm|$id:old = $id:op(&(($ty:ty*)$id:arr.mem)[$exp:ind'], ($ty:ty) $exp:val', __ATOMIC_RELAXED);|]
+  arr' <- GC.rawMem arr
+  GC.stm [C.cstm|$id:old = $id:op(&(($ty:ty*)$exp:arr')[$exp:ind'], ($ty:ty) $exp:val', __ATOMIC_RELAXED);|]
 
 atomicOps :: AtomicOp -> GC.CompilerM op s ()
 atomicOps (AtomicCmpXchg t old arr ind res val) = do
   ind' <- GC.compileExp $ untyped $ unCount ind
   new_val' <- GC.compileExp val
   let cast = [C.cty|$ty:(GC.primTypeToCType t)*|]
+  arr' <- GC.rawMem arr
   GC.stm
-    [C.cstm|$id:res = $id:op(&(($ty:cast)$id:arr.mem)[$exp:ind'],
+    [C.cstm|$id:res = $id:op(&(($ty:cast)$exp:arr')[$exp:ind'],
                 ($ty:cast)&$id:old,
                  $exp:new_val',
                  0, __ATOMIC_SEQ_CST, __ATOMIC_RELAXED);|]
