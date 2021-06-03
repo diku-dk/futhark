@@ -272,7 +272,7 @@ instance PrettyLore lore => Pretty (Exp lore) where
       pprLoopVar (p, a) = ppr p <+> text "in" <+> ppr a
   ppr (WithAcc inputs lam) =
     text "with_acc"
-      <> parens (braces (commasep $ map ppInput inputs) <> comma </> ppr lam)
+      <> parens (braces (commastack $ map ppInput inputs) <> comma </> ppr lam)
     where
       ppInput (shape, arrs, op) =
         parens
