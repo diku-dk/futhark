@@ -271,12 +271,16 @@ liftCommand m = do
 
 runCompiledEntry :: FutharkExe -> Server -> FilePath -> InputOutputs -> IO [TestResult]
 runCompiledEntry futhark server program (InputOutputs entry run_cases) = do
-  Right output_types <- cmdOutputs server entry
-  Right input_types <- cmdInputs server entry
-  let outs = ["out" <> T.pack (show i) | i <- [0 .. length output_types -1]]
-      ins = ["in" <> T.pack (show i) | i <- [0 .. length input_types -1]]
-      onRes = either (Failure . pure) (const Success)
-  mapM (fmap onRes . runCompiledCase input_types outs ins) run_cases
+  output_types <- cmdOutputs server entry
+  input_types <- cmdInputs server entry
+  case (,) <$> output_types <*> input_types of
+    Left (CmdFailure _ err) ->
+      pure [Failure err]
+    Right (output_types', input_types') -> do
+      let outs = ["out" <> T.pack (show i) | i <- [0 .. length output_types' -1]]
+          ins = ["in" <> T.pack (show i) | i <- [0 .. length input_types' -1]]
+          onRes = either (Failure . pure) (const Success)
+      mapM (fmap onRes . runCompiledCase input_types' outs ins) run_cases
   where
     dir = takeDirectory program
 
