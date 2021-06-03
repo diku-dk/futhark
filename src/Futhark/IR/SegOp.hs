@@ -14,6 +14,7 @@ module Futhark.IR.SegOp
   ( SegOp (..),
     SegVirt (..),
     segLevel,
+    segBody,
     segSpace,
     typeCheckSegOp,
     SegSpace (..),
@@ -517,6 +518,15 @@ segSpace (SegMap _ lvl _ _) = lvl
 segSpace (SegRed _ lvl _ _ _) = lvl
 segSpace (SegScan _ lvl _ _ _) = lvl
 segSpace (SegHist _ lvl _ _ _) = lvl
+
+-- | The body of a 'SegOp'.
+segBody :: SegOp lvl lore -> KernelBody lore
+segBody segop =
+  case segop of
+    SegMap _ _ _ body -> body
+    SegRed _ _ _ _ body -> body
+    SegScan _ _ _ _ body -> body
+    SegHist _ _ _ _ body -> body
 
 segResultShape :: SegSpace -> Type -> KernelResult -> Type
 segResultShape _ t (WriteReturns shape _ _) =
