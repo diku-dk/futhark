@@ -3,10 +3,10 @@ module Futhark.Optimise.ReuseAllocations.GreedyColoring (colorGraph, Coloring) w
 
 import Data.Function ((&))
 import Data.Map (Map, (!?))
-import qualified Data.Map as Map
+import qualified Data.Map as M
 import Data.Maybe (fromMaybe)
 import Data.Set (Set)
-import qualified Data.Set as Set
+import qualified Data.Set as S
 import qualified Futhark.Analysis.Interference as Interference
 
 -- | A map of values to their color, identified by an integer.
@@ -18,19 +18,19 @@ type Neighbors a = Map a (Set a)
 -- | Computes the neighbor map of a graph.
 neighbors :: Ord a => Interference.Graph a -> Neighbors a
 neighbors =
-  Set.foldr
+  S.foldr
     ( \(x, y) acc ->
         acc
-          & Map.insertWith Set.union x (Set.singleton y)
-          & Map.insertWith Set.union y (Set.singleton x)
+          & M.insertWith S.union x (S.singleton y)
+          & M.insertWith S.union y (S.singleton x)
     )
-    Map.empty
+    M.empty
 
 firstAvailable :: Eq space => Map Int space -> Set Int -> Int -> space -> (Map Int space, Int)
 firstAvailable spaces xs i sp =
-  case (i `Set.member` xs, spaces !? i) of
+  case (i `S.member` xs, spaces !? i) of
     (False, Just sp') | sp' == sp -> (spaces, i)
-    (False, Nothing) -> (Map.insert i sp spaces, i)
+    (False, Nothing) -> (M.insert i sp spaces, i)
     _ -> firstAvailable spaces xs (i + 1) sp
 
 colorNode ::
@@ -41,10 +41,10 @@ colorNode ::
   (Map Int space, Coloring a)
 colorNode nbs (x, sp) (spaces, coloring) =
   let nb_colors =
-        foldMap (maybe Set.empty Set.singleton . (coloring !?)) $
+        foldMap (maybe S.empty S.singleton . (coloring !?)) $
           fromMaybe mempty (nbs !? x)
       (spaces', color) = firstAvailable spaces nb_colors 0 sp
-   in (spaces', Map.insert x color coloring)
+   in (spaces', M.insert x color coloring)
 
 -- | Graph coloring that takes into account the `space` of values. Two values
 -- can only share the same color if they live in the same space. The result is
@@ -56,6 +56,6 @@ colorGraph ::
   Interference.Graph a ->
   (Map Int space, Coloring a)
 colorGraph spaces graph =
-  let nodes = Set.fromList $ Map.toList spaces
+  let nodes = S.fromList $ M.toList spaces
       nbs = neighbors graph
-   in Set.foldr (colorNode nbs) mempty nodes
+   in S.foldr (colorNode nbs) mempty nodes

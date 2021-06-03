@@ -13,9 +13,9 @@ import Control.Monad.Reader
 import Control.Monad.State.Strict
 import Data.Function ((&))
 import Data.Map (Map, (!))
-import qualified Data.Map as Map
+import qualified Data.Map as M
 import Data.Set (Set)
-import qualified Data.Set as Set
+import qualified Data.Set as S
 import qualified Futhark.Analysis.Interference as Interference
 import qualified Futhark.Analysis.LastUse as LastUse
 import Futhark.Binder.Class
@@ -31,7 +31,7 @@ type Allocs = Map VName (SubExp, Space)
 
 getAllocsStm :: Stm KernelsMem -> Allocs
 getAllocsStm (Let (Pattern [] [PatElem name _]) _ (Op (Alloc se sp))) =
-  Map.singleton name (se, sp)
+  M.singleton name (se, sp)
 getAllocsStm (Let _ _ (Op (Alloc _ _))) = error "impossible"
 getAllocsStm (Let _ _ (Op (Inner (SegOp segop)))) = getAllocsSegOp segop
 getAllocsStm (Let _ _ (If _ then_body else_body _)) =
@@ -53,7 +53,7 @@ getAllocsSegOp (SegHist _ _ _ _ body) =
 
 setAllocsStm :: Map VName SubExp -> Stm KernelsMem -> Stm KernelsMem
 setAllocsStm m stm@(Let (Pattern [] [PatElem name _]) _ (Op (Alloc _ _)))
-  | Just s <- Map.lookup name m =
+  | Just s <- M.lookup name m =
     stm {stmExp = BasicOp $ SubExp s}
 setAllocsStm _ stm@(Let _ _ (Op (Alloc _ _))) = stm
 setAllocsStm m stm@(Let _ _ (Op (Inner (SegOp segop)))) =
@@ -96,7 +96,7 @@ setAllocsSegOp m (SegHist lvl sp segbinops tps body) =
     body {kernelBodyStms = setAllocsStm m <$> kernelBodyStms body}
 
 maxSubExp :: MonadBinder m => Set SubExp -> m SubExp
-maxSubExp = helper . Set.toList
+maxSubExp = helper . S.toList
   where
     helper (s1 : s2 : sexps) = do
       z <- letSubExp "maxSubHelper" $ BasicOp $ BinOp (UMax Int64) s1 s2
@@ -120,7 +120,7 @@ definedInStm Let {stmPattern = Pattern ctx vals, stmExp} =
   let definedInside =
         ctx <> vals
           & fmap patElemName
-          & Set.fromList
+          & S.fromList
    in definedInExp stmExp <> definedInside
 
 definedInSegOp :: SegOp lvl KernelsMem -> Set VName
@@ -135,7 +135,7 @@ definedInSegOp (SegHist _ _ _ _ body) =
 
 isKernelInvariant :: SegOp lvl KernelsMem -> (SubExp, space) -> Bool
 isKernelInvariant segop (Var vname, _) =
-  not $ vname `Set.member` definedInSegOp segop
+  not $ vname `S.member` definedInSegOp segop
 isKernelInvariant _ _ = True
 
 -- | This is the actual optimiser. Given an interference graph and a `SegOp`,
@@ -147,18 +147,18 @@ optimiseKernel ::
   SegOp lvl KernelsMem ->
   m (SegOp lvl KernelsMem)
 optimiseKernel graph segop = do
-  let allocs = Map.filter (isKernelInvariant segop) $ getAllocsSegOp segop
+  let allocs = M.filter (isKernelInvariant segop) $ getAllocsSegOp segop
       (colorspaces, coloring) =
         GreedyColoring.colorGraph
           (fmap snd allocs)
           graph
   (maxes, maxstms) <-
     invertMap coloring
-      & Map.elems
-      & mapM (maxSubExp . Set.map (fst . (allocs !)))
+      & M.elems
+      & mapM (maxSubExp . S.map (fst . (allocs !)))
       & collectStms
   (colors, stms) <-
-    assert (length maxes == Map.size colorspaces) maxes
+    assert (length maxes == M.size colorspaces) maxes
       & zip [0 ..]
       & mapM (\(i, x) -> letSubExp "color" $ Op $ Alloc x $ colorspaces ! i)
       & collectStms

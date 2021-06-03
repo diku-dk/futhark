@@ -393,5 +393,4 @@ test-suite unit
     , tasty-hunit
     , tasty-quickcheck
     , text
-    , utf8-string
   default-language: Haskell2010
