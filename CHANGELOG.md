@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+  * `futhark test` now provides better error message when asked to
+    test an undefined entry point (#1367).
+
 ## [0.19.6]
 
 ### Added
