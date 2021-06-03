@@ -344,7 +344,16 @@ doInit = cmdMain "PKGPATH" $ \args cfg ->
     [p] -> Just $ runPkgM cfg $ doCreate' $ T.pack p
     _ -> Nothing
   where
+    validPkgPath p =
+      not $ any (`elem` [".", ".."]) $ splitDirectories $ T.unpack p
+
     doCreate' p = do
+      unless (validPkgPath p) . liftIO $ do
+        T.putStrLn $ "Not a valid package path: " <> p
+        T.putStrLn "Note: package paths are usually URIs."
+        T.putStrLn "Note: 'futhark init' is only needed when creating a package, not to use packages."
+        exitFailure
+
       exists <- liftIO $ (||) <$> doesFileExist futharkPkg <*> doesDirectoryExist futharkPkg
       when exists $
         liftIO $ do
