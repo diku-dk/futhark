@@ -10,10 +10,10 @@ import Data.Foldable (toList)
 import Data.Function ((&))
 import Data.Functor ((<&>))
 import Data.Map (Map)
-import qualified Data.Map as Map
+import qualified Data.Map as M
 import Data.Maybe (catMaybes, fromMaybe)
 import Data.Set (Set)
-import qualified Data.Set as Set
+import qualified Data.Set as S
 import Futhark.Analysis.LastUse (LastUseMap)
 import Futhark.IR.KernelsMem
 import Futhark.Util (invertMap)
@@ -35,7 +35,7 @@ type Graph a = Set (a, a)
 makeEdge :: Ord a => a -> a -> Graph a
 makeEdge v1 v2
   | v1 == v2 = mempty
-  | otherwise = Set.singleton (min v1 v2, max v1 v2)
+  | otherwise = S.singleton (min v1 v2, max v1 v2)
 
 -- | Compute the cartesian product of two foldable collections, using the given
 -- combinator function.
@@ -72,7 +72,7 @@ analyseStm lumap inuse0 stm =
     (inuse, lus, graph) <- analyseExp lumap inuse_outside (stmExp stm)
 
     last_use_mems <-
-      Map.lookup pat_name lumap
+      M.lookup pat_name lumap
         & fromMaybe mempty
         & namesToList
         & mapM memInfo
@@ -133,14 +133,11 @@ analyseStms ::
   Stms KernelsMem ->
   m (InUse, LastUsed, Graph VName)
 analyseStms lumap inuse0 stms = do
-  inScopeOf stms $ do
-    foldM
-      ( \(inuse, lus, graph) stm -> do
-          (inuse', lus', graph') <- analyseStm lumap inuse stm
-          return (inuse', lus' <> lus, graph' <> graph)
-      )
-      (inuse0, mempty, mempty)
-      $ stmsToList stms
+  inScopeOf stms $ foldM helper (inuse0, mempty, mempty) $ stmsToList stms
+  where
+    helper (inuse, lus, graph) stm = do
+      (inuse', lus', graph') <- analyseStm lumap inuse stm
+      return (inuse', lus' <> lus, graph' <> graph)
 
 analyseSegOp ::
   LocalScope KernelsMem m =>
@@ -212,12 +209,16 @@ analyseKernels ::
   m (Graph VName)
 analyseKernels lumap stms = do
   (_, _, graph) <- analyseKernels' lumap stms
-  -- Now, we need to insert edges between memory blocks which differ in size, if
-  -- they are in DefaultSpace.
-  spaces <- Map.filter (== DefaultSpace) <$> memSpaces stms
+  -- We need to insert edges between memory blocks which differ in size, if they
+  -- are in DefaultSpace. The problem is that during memory expansion,
+  -- DefaultSpace arrays in kernels are interleaved. If the element sizes of two
+  -- merged memory blocks are different, threads might try to read and write to
+  -- overlapping memory positions. More information here:
+  -- https://munksgaard.me/technical-diary/2020-12-30.html#org210775b
+  spaces <- M.filter (== DefaultSpace) <$> memSpaces stms
   inv_size_map <-
     memSizes stms
-      <&> flip Map.restrictKeys (Set.fromList $ Map.keys spaces)
+      <&> flip M.restrictKeys (S.fromList $ M.keys spaces)
       <&> invertMap
   let new_edges =
         cartesian
@@ -259,7 +260,7 @@ memSpaces stms =
   where
     getSpacesStm :: Stm KernelsMem -> Map VName Space
     getSpacesStm (Let (Pattern [] [PatElem name _]) _ (Op (Alloc _ sp))) =
-      Map.singleton name sp
+      M.singleton name sp
     getSpacesStm (Let _ _ (Op (Alloc _ _))) = error "impossible"
     getSpacesStm (Let _ _ (Op (Inner (SegOp segop)))) =
       foldMap getSpacesStm $ kernelBodyStms $ segopBody segop
@@ -313,7 +314,7 @@ nameInfoToMemInfo info =
 
 memInfo :: LocalScope KernelsMem m => VName -> m (Maybe VName)
 memInfo vname = do
-  summary <- asksScope (fmap nameInfoToMemInfo . Map.lookup vname)
+  summary <- asksScope (fmap nameInfoToMemInfo . M.lookup vname)
   case summary of
     Just (MemArray _ _ _ (ArrayIn mem _)) ->
       return $ Just mem
@@ -325,9 +326,9 @@ memInfo vname = do
 -- the memory block of that array to element size of the array.
 memElemSize :: LocalScope KernelsMem m => VName -> m (Map VName Int)
 memElemSize vname = do
-  summary <- asksScope (fmap nameInfoToMemInfo . Map.lookup vname)
+  summary <- asksScope (fmap nameInfoToMemInfo . M.lookup vname)
   case summary of
     Just (MemArray pt _ _ (ArrayIn mem _)) ->
-      return $ Map.singleton mem (primByteSize pt)
+      return $ M.singleton mem (primByteSize pt)
     _ ->
       return mempty

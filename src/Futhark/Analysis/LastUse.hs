@@ -4,11 +4,11 @@
 -- | Provides last-use analysis for Futhark programs.
 module Futhark.Analysis.LastUse (LastUseMap, analyseProg) where
 
-import Control.Arrow (first)
+import Data.Bifunctor (first)
 import Data.Foldable
 import Data.Function ((&))
 import Data.Map (Map)
-import qualified Data.Map as Map
+import qualified Data.Map as M
 import Data.Tuple
 import Futhark.Analysis.Alias (aliasAnalysis)
 import Futhark.IR.Aliases
@@ -50,21 +50,18 @@ analyseStms lumap used stms = foldr analyseStm (lumap, used) $ stmsToList stms
 
 analyseStm :: Stm (Aliases KernelsMem) -> (LastUse, Used) -> (LastUse, Used)
 analyseStm (Let pat _ e) (lumap0, used0) =
-  let (lumap', used') =
-        patternValueElements pat
-          & foldl
-            ( \(lumap_acc, used_acc) (PatElem name (aliases, _)) ->
-                -- Any aliases of `name` should have the same last-use as `name`
-                ( case Map.lookup name lumap_acc of
-                    Just name' ->
-                      insertNames name' (unAliases aliases) lumap_acc
-                    Nothing -> lumap_acc,
-                  used_acc <> unAliases aliases
-                )
-            )
-            (lumap0, used0)
+  let (lumap', used') = patternValueElements pat & foldl helper (lumap0, used0)
    in analyseExp (lumap', used') e
   where
+    helper (lumap_acc, used_acc) (PatElem name (aliases, _)) =
+      -- Any aliases of `name` should have the same last-use as `name`
+      ( case M.lookup name lumap_acc of
+          Just name' ->
+            insertNames name' (unAliases aliases) lumap_acc
+          Nothing -> lumap_acc,
+        used_acc <> unAliases aliases
+      )
+
     pat_name = patElemName $ head $ patternValueElements pat
     analyseExp :: (LastUse, Used) -> Exp (Aliases KernelsMem) -> (LastUse, Used)
     analyseExp (lumap, used) (BasicOp _) =
@@ -155,10 +152,10 @@ analyseLambda (lumap, used) (Lambda params body ret) =
 
 flipMap :: Map VName VName -> Map VName Names
 flipMap m =
-  Map.toList m
+  M.toList m
     & fmap (swap . first oneName)
-    & foldr (uncurry $ Map.insertWith (<>)) mempty
+    & foldr (uncurry $ M.insertWith (<>)) mempty
 
 insertNames :: VName -> Names -> LastUse -> LastUse
 insertNames name names lumap =
-  foldr (flip (Map.insertWith $ \_ x -> x) name) lumap $ namesToList names
+  foldr (flip (M.insertWith $ \_ x -> x) name) lumap $ namesToList names
