@@ -16,7 +16,9 @@ module Futhark.AD.Rev (revVJP) where
 import Control.Monad
 import Control.Monad.State.Strict
 import Data.Bifunctor (first, second)
+import Data.List (foldl')
 import qualified Data.Map as M
+import Data.Maybe
 import Futhark.AD.Derivatives
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.Binder
@@ -132,6 +134,22 @@ zeroExp t = error $ "zeroExp: " ++ pretty t
 insAdj :: VName -> VName -> ADM ()
 insAdj v v_adj = modify $ \env ->
   env {stateAdjs = M.insert v v_adj $ stateAdjs env}
+
+-- While evaluationg this action, pretend these variables have no
+-- adjoints.  Restore current adjoints afterwards.  This is used for
+-- handling certain nested operations. XXX: feels like this should
+-- really be part of subAD, somehow.  Main challenge is that we don't
+-- want to blank out Accumulator adjoints.  Also, might be inefficient
+-- to blank out array adjoints.
+noAdjsFor :: Names -> ADM a -> ADM a
+noAdjsFor names m = do
+  old <- gets $ \env -> mapMaybe (`M.lookup` stateAdjs env) names'
+  modify $ \env -> env {stateAdjs = foldl' (flip M.delete) (stateAdjs env) names'}
+  x <- m
+  modify $ \env -> env {stateAdjs = M.fromList (zip names' old) <> stateAdjs env}
+  pure x
+  where
+    names' = namesToList names
 
 newAdj :: VName -> ADM VName
 newAdj v = do
@@ -501,7 +519,7 @@ diffMap pat_adj w map_lam as = do
 
   free <- filterM isActive $ namesToList $ freeIn map_lam'
 
-  accAdjoints free $ \free_with_adjs -> do
+  accAdjoints free $ \free_with_adjs free_without_adjs -> do
     free_adjs <- mapM lookupAdj free_with_adjs
     free_adjs_ts <- mapM lookupType free_adjs
     free_adjs_params <- mapM (newParam "free_adj_p") free_adjs_ts
@@ -510,10 +528,11 @@ diffMap pat_adj w map_lam as = do
         adjs_for = map paramName (lambdaParams map_lam') ++ free
     lam_rev <-
       mkLambda lam_rev_params $
-        subAD $ do
-          zipWithM_ insAdj free_with_adjs $ map paramName free_adjs_params
-          bodyBind . lambdaBody
-            =<< diffLambda (map paramName pat_adj_params) adjs_for map_lam'
+        subAD $
+          noAdjsFor free_without_adjs $ do
+            zipWithM_ insAdj free_with_adjs $ map paramName free_adjs_params
+            bodyBind . lambdaBody
+              =<< diffLambda (map paramName pat_adj_params) adjs_for map_lam'
 
     (param_contribs, free_contribs) <-
       fmap (splitAt (length (lambdaParams map_lam'))) $
@@ -564,7 +583,7 @@ diffMap pat_adj w map_lam as = do
       (arr_adjs, acc_adjs, rest_adjs) <-
         fmap (splitAt3 (length arr_free) (length acc_free)) . withAcc arr_free' $ \accs -> do
           zipWithM_ insAdj (map fst arr_free) accs
-          () <- m $ acc_free ++ map fst arr_free
+          () <- m (acc_free ++ map fst arr_free) (namesFromList nonacc_free)
           acc_free_adj <- mapM lookupAdj acc_free
           arr_free_adj <- mapM (lookupAdj . fst) arr_free
           nonacc_free_adj <- mapM lookupAdj nonacc_free
