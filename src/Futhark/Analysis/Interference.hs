@@ -240,7 +240,7 @@ memSizes stms =
       return $ arraySizes <> arraySizes'
     memSizesExp :: LocalScope KernelsMem m => Exp KernelsMem -> m (Map VName Int)
     memSizesExp (Op (Inner (SegOp segop))) =
-      let body = segopBody segop
+      let body = segBody segop
        in inScopeOf (kernelBodyStms body) $
             fmap mconcat
               <$> mapM memSizesStm
@@ -263,21 +263,13 @@ memSpaces stms =
       M.singleton name sp
     getSpacesStm (Let _ _ (Op (Alloc _ _))) = error "impossible"
     getSpacesStm (Let _ _ (Op (Inner (SegOp segop)))) =
-      foldMap getSpacesStm $ kernelBodyStms $ segopBody segop
+      foldMap getSpacesStm $ kernelBodyStms $ segBody segop
     getSpacesStm (Let _ _ (If _ then_body else_body _)) =
       foldMap getSpacesStm (bodyStms then_body)
         <> foldMap getSpacesStm (bodyStms else_body)
     getSpacesStm (Let _ _ (DoLoop _ _ _ body)) =
       foldMap getSpacesStm (bodyStms body)
     getSpacesStm _ = mempty
-
-segopBody :: SegOp lvl lore -> KernelBody lore
-segopBody segop =
-  case segop of
-    SegMap _ _ _ body -> body
-    SegRed _ _ _ _ body -> body
-    SegScan _ _ _ _ body -> body
-    SegHist _ _ _ _ body -> body
 
 analyseKernels' ::
   LocalScope KernelsMem m =>
