@@ -199,8 +199,8 @@ memoryBlockMerging prg = do
   putStrLn $ "COALESCING RESULT:" ++ pretty (length coaltab)
   let coal_info = map (\env ->
                             ( dstmem env, dstind env, namesToList $ alsmem env, M.toList $ optdeps env
-                            , map (\ (k,Coalesced _ (MemBlock _ _ b indfun) invfun sbst) ->
-                                    (k,(b,indfun,invfun,M.toList sbst))
+                            , map (\ (k,Coalesced _ (MemBlock _ _ b indfun) sbst) ->
+                                    (k,(b,indfun,M.toList sbst))
                                   ) $ M.toList $ vartab env
                             )
                       ) $ M.elems coaltab

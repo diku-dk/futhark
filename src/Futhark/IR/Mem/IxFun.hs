@@ -27,6 +27,8 @@ module Futhark.IR.Mem.IxFun
     existentialize,
     closeEnough,
     invIxFun,
+    hasOneLmad,
+    permuteInv,
   )
 where
 
@@ -275,6 +277,11 @@ isDirect ixfun@(IxFun (LMAD offset dims :| []) oshp True) =
           )
           (zip4 dims [0 .. length dims - 1] oshp strides_expected)
 isDirect _ = False
+
+-- | Is index function "analyzable", i.e., consists of one LMAD
+hasOneLmad :: IxFun num -> Bool
+hasOneLmad (IxFun (_ :| []) _ _) = True
+hasOneLmad _ = False
 
 -- | Does the index function have an ascending permutation?
 hasContiguousPerm :: IxFun num -> Bool
@@ -1052,6 +1059,9 @@ closeEnough ixf1 ixf2 =
 --         In other words, @ixf_c' = rebase ixf_0 ixf_c@,
 --           which ensures the sanity rebasing condition:
 --                @base ixf_c == shape ixf_0@
+--         Even simpler: @ixf_c' = alias ixf_b'
+--          where ixf_b' = the new index function of b after
+--          being rebased in @y[slc]@
 -- Case 2: @b = alias a@
 --         Originally: @ixf_b = ixf_alias o ixf_a@
 --         After the merge of @m_b@ in @m_{y_i}@:

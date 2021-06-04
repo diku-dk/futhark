@@ -5,7 +5,7 @@ module Futhark.Optimise.MemBlockCoalesce.DataStructs
        , CoalsEntry(..), FreeVarSubsts
        , aliasTransClos, updateAliasing, getNamesFromSubExps, unionCoalsEntry
        , getArrMemAssocFParam, createsAliasedArrOK, getScopeMemInfo, prettyCoalTab
-       , createsNewArrOK, getArrMemAssoc, getUniqueMemFParam )
+       , createsNewArrOK, getArrMemAssoc, getUniqueMemFParam, getAliasFromExp )
        where
 
 
@@ -17,6 +17,7 @@ import qualified Data.Map.Strict as M
 
 import Futhark.IR.Aliases
 import qualified Futhark.IR.SeqMem as ExpMem
+import qualified Futhark.IR.Mem.IxFun as IxFun
 
 data CoalescedKind = Ccopy -- let x    = copy b^{lu}
                    | InPl  -- let x[i] = b^{lu}
@@ -29,8 +30,8 @@ type FreeVarSubsts = M.Map VName (ExpMem.PrimExp VName)
 -- | Coalesced Access Entry
 data Coalesced = Coalesced CoalescedKind -- the kind of coalescing
                            ArrayMemBound -- destination mem_block info @f_m_x[i]@ (must be ArrayMem)
-                           (Maybe ExpMem.IxFun) -- the inverse ixfun of a coalesced array, such that
-                                                --  ixfuns can be correctly constructed for aliases; 
+                           -- (Maybe ExpMem.IxFun) -- the inverse ixfun of a coalesced array, such that
+                           --                     --  ixfuns can be correctly constructed for aliases; 
                            FreeVarSubsts -- substitutions for free vars in index function
 
 data CoalsEntry = CoalsEntry{ dstmem :: VName
@@ -39,16 +40,13 @@ data CoalsEntry = CoalsEntry{ dstmem :: VName
                             -- ^ index function of the destination (used for rebasing)
                             , alsmem :: Names
                             -- ^ aliased destination memory blocks can appear
-                            --   due to repeated (optimistical) coalescing.
+                            --   due to repeated (optimistic) coalescing.
                             , vartab :: M.Map VName Coalesced
                             -- ^ per variable-name coalesced entries
                             , optdeps:: M.Map VName VName
                             -- ^ keys are variable names, values are memblock names;
-                            --   it records optimistically added coalesced nodes,
-                            --   e.g., in the case of if-then-else expressions
-                            --   The case below cannot happen because an in-place
-                            --   assigned expression must create a new array,
-                            --   but it is good for the purpose of exposition.
+                            --   it records optimistically added coalesced nodes, e.g.,
+                            --   in the case of if-then-else expressions. For example:
                             --       @x    = map f a@
                             --       @.. use of y ..@
                             --       @b    = map g a@
@@ -61,8 +59,11 @@ data CoalsEntry = CoalsEntry{ dstmem :: VName
                             --   of @x = map f@. Hence @optdeps@ of the @m_b@ CoalsEntry
                             --   records @x -> m_x@ and at the end of analysis it is removed
                             --   from the successfully coalesced table if @m_x@ is
-                            --   unsuccessful. Ok, this case cannot happen because
-                            --   you need a copying.
+                            --   unsuccessful. 
+                            --   Storing @m_x@ would probably be sufficient if memory would
+                            --     not be reused--e.g., by register allocation on arrays--the
+                            --     @x@ discriminates between memory being reused across semantically
+                            --     different arrays (searched in @vartab@ field).
                             }
 
 type AllocTab = Names--M.Map VName SubExp
@@ -176,6 +177,14 @@ createsNewArrOK (Op _) = True
 --KernelsMem
 createsNewArrOK _ = False
 
+getAliasFromExp :: Exp (Aliases ExpMem.SeqMem) -> Maybe (VName, ExpMem.IxFun -> ExpMem.IxFun)
+getAliasFromExp (BasicOp (Reshape shp_chg x)) = Just (x, (`IxFun.reshape` (map (fmap ExpMem.pe64) shp_chg)))
+getAliasFromExp (BasicOp (Rearrange perm x)) = Just (x, (`IxFun.permute` perm))
+getAliasFromExp (BasicOp (Rotate rs x)) = Just (x, (`IxFun.rotate` (fmap ExpMem.pe64 rs)))
+getAliasFromExp (BasicOp (Index x slc)) = Just (x, (`IxFun.slice` (map (fmap ExpMem.pe64) slc)))
+getAliasFromExp _ = Nothing
+
+
 {--
 createsNewArrIK :: Exp (Aliases ExpMem.InKernel) -> Bool
 createsNewArrIK (Op (ExpMem.Inner ExpMem.GroupReduce{})) = True
@@ -194,7 +203,7 @@ createsNewArrIK _ = False
 
 -- | While Rearrange and Rotate create aliased arrays, we
 --   do not yet support them because it would mean we have
---   to "revers" the index function, for example to support
+--   to "reverse" the index function, for example to support
 --   coalescing in the case below,
 --       @let a = map f a0   @
 --       @let b = transpose a@
@@ -203,12 +212,17 @@ createsNewArrIK _ = False
 --   inverse of the transpose, such that, when creating @b@
 --   by transposition we get a directly-mapped array, which
 --   is expected by the copying in y[4].
-createsAliasedArrOK :: Exp (Aliases ExpMem.SeqMem) -> Maybe VName --ExpMem.IxFun
-createsAliasedArrOK (BasicOp (Reshape _ arr_nm)) = Just arr_nm
-createsAliasedArrOK (BasicOp (SubExp (Var arr_nm))) = Just arr_nm
-createsAliasedArrOK (BasicOp (Rearrange _ arr_nm))  = Just arr_nm
-createsAliasedArrOK (BasicOp (Rotate    _ arr_nm))  = Just arr_nm
-createsAliasedArrOK (BasicOp (Opaque (Var arr_nm))) = Just arr_nm
+--   For the moment we support only transposition and VName-expressions,
+--     but rotations and full slices could also be supported.
+createsAliasedArrOK :: Exp (Aliases ExpMem.SeqMem) ->
+                       Maybe (VName, ExpMem.IxFun -> ExpMem.IxFun)
+createsAliasedArrOK (BasicOp (SubExp (Var arr_nm))) = Just (arr_nm, id)
+createsAliasedArrOK (BasicOp (Opaque (Var arr_nm))) = Just (arr_nm, id)
+createsAliasedArrOK (BasicOp (Rearrange perm arr_nm))  =
+  let perm' = IxFun.permuteInv perm [0..length perm - 1]
+  in  Just (arr_nm, (`IxFun.permute` perm'))
+-- createsAliasedArrOK (BasicOp (Rotate    _ arr_nm))  = Just arr_nm
+-- createsAliasedArrOK (BasicOp (Reshape _ arr_nm))    = Just arr_nm
 -- ToDo: very important is to treat Index, i.e., array slices!
 createsAliasedArrOK _ = Nothing
 
