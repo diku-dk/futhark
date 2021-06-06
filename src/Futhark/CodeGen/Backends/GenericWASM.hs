@@ -234,6 +234,7 @@ cwrapsJSE jses =
 emccExportNames :: [JSEntryPoint] -> [String]
 emccExportNames jses =
   map (\jse -> "'_futhark_entry_" ++ name jse ++ "'") jses
+    ++ map (\jse -> "'_" ++ name jse ++ "'") jses
     ++ map (\arg -> "'" ++ gfn "new" arg ++ "'") jses'
     ++ map (\arg -> "'" ++ gfn "shape" arg ++ "'") jses'
     ++ map (\arg -> "'" ++ gfn "values_raw" arg ++ "'") jses'
