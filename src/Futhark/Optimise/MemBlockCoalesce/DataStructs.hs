@@ -2,22 +2,30 @@
 module Futhark.Optimise.MemBlockCoalesce.DataStructs
        ( Coalesced(..),CoalescedKind(..), ArrayMemBound(..), AllocTab
        , V2MemTab, AliasTab, LUTabFun, LUTabPrg, ScalarTab,  CoalsTab
-       , CoalsEntry(..), FreeVarSubsts
+       , CoalsEntry(..), FreeVarSubsts, MemRefs(..)
        , aliasTransClos, updateAliasing, getNamesFromSubExps, unionCoalsEntry
        , getArrMemAssocFParam, createsAliasedArrOK, getScopeMemInfo, prettyCoalTab
-       , createsNewArrOK, getArrMemAssoc, getUniqueMemFParam, getAliasFromExp )
+       , createsNewArrOK, getArrMemAssoc, getUniqueMemFParam
+       , getTransitiveAlias )
        where
 
 
 import Prelude
 import Data.Maybe
 import qualified Data.Map.Strict as M
+import qualified Data.Set as S
 
 --import Debug.Trace
 
 import Futhark.IR.Aliases
 import qualified Futhark.IR.SeqMem as ExpMem
 import qualified Futhark.IR.Mem.IxFun as IxFun
+
+type LmadRef = IxFun.LMAD (ExpMem.TPrimExp Int64 VName)
+
+data MemRefs = MemRefs { dstrefs :: S.Set LmadRef
+                       , srcwrts :: S.Set LmadRef
+                       }
 
 data CoalescedKind = Ccopy -- let x    = copy b^{lu}
                    | InPl  -- let x[i] = b^{lu}
@@ -64,6 +72,7 @@ data CoalsEntry = CoalsEntry{ dstmem :: VName
                             --     not be reused--e.g., by register allocation on arrays--the
                             --     @x@ discriminates between memory being reused across semantically
                             --     different arrays (searched in @vartab@ field).
+                            , memrefs :: MemRefs
                             }
 
 type AllocTab = Names--M.Map VName SubExp
@@ -82,13 +91,18 @@ type CoalsTab = M.Map VName CoalsEntry
 -- ^ maps a memory-block name to a Map in which each variable
 --   associated to that memory block is bound to its @Coalesced@ info.
 
+unionMemRefs :: MemRefs -> MemRefs -> MemRefs
+unionMemRefs (MemRefs d1 s1) (MemRefs d2 s2) =
+  MemRefs (S.union d1 d2) (S.union s1 s2)
 unionCoalsEntry :: CoalsEntry -> CoalsEntry -> CoalsEntry
-unionCoalsEntry etry1 (CoalsEntry dstmem2 dstind2  alsmem2 vartab2 optdeps2) =
+unionCoalsEntry etry1 (CoalsEntry dstmem2 dstind2  alsmem2 vartab2 optdeps2 memrefs2) =
   if dstmem etry1 /= dstmem2 || dstind etry1 /= dstind2
   then etry1
   else etry1 { alsmem = alsmem  etry1 <> alsmem2
              , optdeps= optdeps etry1 `M.union` optdeps2
-             , vartab = vartab  etry1 `M.union` vartab2 }
+             , vartab = vartab  etry1 `M.union` vartab2
+             , memrefs= unionMemRefs (memrefs etry1) memrefs2
+             }
 
 getNamesFromSubExps :: [SubExp] -> [VName]
 getNamesFromSubExps = mapMaybe var2Maybe
@@ -177,13 +191,6 @@ createsNewArrOK (Op _) = True
 --KernelsMem
 createsNewArrOK _ = False
 
-getAliasFromExp :: Exp (Aliases ExpMem.SeqMem) -> Maybe (VName, ExpMem.IxFun -> ExpMem.IxFun)
-getAliasFromExp (BasicOp (Reshape shp_chg x)) = Just (x, (`IxFun.reshape` (map (fmap ExpMem.pe64) shp_chg)))
-getAliasFromExp (BasicOp (Rearrange perm x)) = Just (x, (`IxFun.permute` perm))
-getAliasFromExp (BasicOp (Rotate rs x)) = Just (x, (`IxFun.rotate` (fmap ExpMem.pe64 rs)))
-getAliasFromExp (BasicOp (Index x slc)) = Just (x, (`IxFun.slice` (map (fmap ExpMem.pe64) slc)))
-getAliasFromExp _ = Nothing
-
 
 {--
 createsNewArrIK :: Exp (Aliases ExpMem.InKernel) -> Bool
@@ -226,9 +233,29 @@ createsAliasedArrOK (BasicOp (Rearrange perm arr_nm))  =
 -- ToDo: very important is to treat Index, i.e., array slices!
 createsAliasedArrOK _ = Nothing
 
+
+getTransitiveAlias :: M.Map VName (VName, ExpMem.IxFun -> ExpMem.IxFun) ->
+                      (M.Map VName Coalesced) -> VName -> (ExpMem.IxFun -> ExpMem.IxFun)
+                   -> Maybe ExpMem.IxFun
+getTransitiveAlias _ vtab b ixfn
+  | Just (Coalesced _ (MemBlock _ _ _ b_indfun) _) <- M.lookup b vtab =
+    Just (ixfn b_indfun)
+getTransitiveAlias alias_tab vtab b ixfn
+  | Just (x,alias_fn) <- M.lookup b alias_tab =
+  -- ^ 1. case: @b = alias x@;
+  --   we find a potential alias of @b@, named @(x,ixfn0)@, by lookup in @td_env@
+  case M.lookup x vtab of
+    Just (Coalesced _ (MemBlock _ _ _ x_indfun) _) ->
+      -- ^ 2. if @x@ is in @vtab@, then we know the root index function
+      --      and we can compose it with the remaining ixfuns to compute
+      --      the index function of @b@
+      Just ((ixfn . alias_fn) x_indfun)
+    Nothing -> getTransitiveAlias alias_tab vtab x (ixfn . alias_fn)
+getTransitiveAlias _ _ _ _ = Nothing
+
 prettyCoalTab :: CoalsTab -> String
 prettyCoalTab tab =
-  let list_tups = map (\(m_b, CoalsEntry md _ als vtab deps) ->
-                          (m_b, md, namesToList als, M.keys vtab, M.toList deps)
+  let list_tups = map (\(m_b, CoalsEntry md _ als vtab deps (MemRefs d s)) ->
+                          (m_b, md, namesToList als, M.keys vtab, M.toList deps, (d,s))
                       ) $ M.toList tab
   in  pretty list_tups

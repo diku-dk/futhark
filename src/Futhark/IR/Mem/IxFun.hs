@@ -89,6 +89,25 @@ data LMADDim num = LMADDim
   }
   deriving (Show, Eq)
 
+instance Ord Monotonicity where
+  (<=) _ Inc = True
+  (<=) Unknown _ = True
+  (<=) _ Unknown = False
+  (<=) Inc Dec = False
+  (<=) _   Dec = True
+
+instance Ord num => Ord (LMADDim num) where
+    (<=)  (LMADDim s1 r1 q1 p1 m1) (LMADDim s2 r2 q2 p2 m2) =
+      if [q1,s1,r1] < [q2,s2,r2]
+      then True
+      else  if [q1,s1,r1] == [q2,s2,r2]
+            then if p1 < p2
+                 then True
+                 else if p1 == p2
+                      then (<=) m1 m2
+                      else False
+            else False
+
 -- | LMAD's representation consists of a general offset and for each dimension a
 -- stride, rotate factor, number of elements (or shape), permutation, and
 -- monotonicity. Note that the permutation is not strictly necessary in that the
@@ -119,7 +138,7 @@ data LMAD num = LMAD
   { lmadOffset :: num,
     lmadDims :: [LMADDim num]
   }
-  deriving (Show, Eq)
+  deriving (Show, Eq, Ord)
 
 -- | An index function is a mapping from a multidimensional array
 -- index space (the domain) to a one-dimensional memory index space.
