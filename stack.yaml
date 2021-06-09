@@ -2,8 +2,6 @@ resolver: nightly-2021-04-19
 packages:
 - .
 
-extra-deps: []
-
 flags: {}
 
 extra-package-dbs: []
@@ -18,3 +16,4 @@ ghc-options:
 
 extra-deps:
 - versions-5.0.0
+- futhark-data-1.0.0.0

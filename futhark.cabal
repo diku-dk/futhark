@@ -254,7 +254,6 @@ library
       Futhark.Server
       Futhark.Test
       Futhark.Test.Values
-      Futhark.Test.Values.Parser
       Futhark.Tools
       Futhark.Transform.CopyPropagate
       Futhark.Transform.FirstOrderTransform
@@ -318,6 +317,7 @@ library
     , file-embed >=0.0.9
     , filepath >=1.4.1.1
     , free >=4.12.4
+    , futhark-data
     , gitrev >=1.2.0
     , hashable
     , haskeline

@@ -46,9 +46,9 @@ import qualified Data.Set as S
 import qualified Data.Text as T
 import Data.Traversable
 import Data.Void
+import qualified Futhark.Data.Parser as V
 import Futhark.Server
 import qualified Futhark.Test.Values as V
-import qualified Futhark.Test.Values.Parser as V
 import Futhark.Util (nubOrd)
 import Futhark.Util.Pretty hiding (float, line, sep, string, (</>), (<|>))
 import System.IO
@@ -101,7 +101,7 @@ instance Pretty Func where
 instance Pretty Exp where
   ppr = pprPrec 0
   pprPrec _ (ServerVar _ v) = "$" <> ppr v
-  pprPrec _ (Const v) = ppr v
+  pprPrec _ (Const v) = strictText $ V.valueText v
   pprPrec i (Let pat e1 e2) =
     parensIf (i > 0) $ "let" <+> pat' <+> equals <+> ppr e1 <+> "in" <+> ppr e2
     where
@@ -199,7 +199,7 @@ writeVar server v val =
     -- We are not using prettyprinting for the type, because we don't
     -- want the sizes of the dimensions.
     let V.ValueType dims t = V.valueType val
-        t' = mconcat (map (const "[]") dims) <> prettyText t
+        t' = mconcat (map (const "[]") dims) <> V.primTypeText t
     cmdRestore server tmpf [(v, t')]
 
 -- | A ScriptValue is either a base value or a partially applied
@@ -327,7 +327,7 @@ evalExp builtin (ScriptServer server counter) top_level_e = do
 
       valToInterVal :: V.CompoundValue -> ExpValue
       valToInterVal = fmap $ \v ->
-        SValue (V.prettyValueTypeNoDims (V.valueType v)) $ VVal v
+        SValue (V.valueTypeTextNoDims (V.valueType v)) $ VVal v
 
       simpleType (V.ValueAtom (STValue _)) = True
       simpleType _ = False
@@ -382,17 +382,17 @@ evalExp builtin (ScriptServer server counter) top_level_e = do
           then do
             outs <- replicateM (length out_types) $ newVar "out"
             void $ cmdEither $ cmdCall server name outs ins
-            pure $ V.mkCompound $ zipWith SValue out_types $ map VVar outs
+            pure $ V.mkCompound $ map V.ValueAtom $ zipWith SValue out_types $ map VVar outs
           else
             pure . V.ValueAtom . SFun name in_types out_types $
               zipWith SValue in_types $ map VVar ins
       evalExp' _ (StringLit s) =
         case V.putValue s of
           Just s' ->
-            pure $ V.ValueAtom $ SValue (prettyText (V.valueType s')) $ VVal s'
+            pure $ V.ValueAtom $ SValue (V.valueTypeText (V.valueType s')) $ VVal s'
           Nothing -> error $ "Unable to write value " ++ pretty s
       evalExp' _ (Const val) =
-        pure $ V.ValueAtom $ SValue (V.prettyValueTypeNoDims (V.valueType val)) $ VVal val
+        pure $ V.ValueAtom $ SValue (V.valueTypeTextNoDims (V.valueType val)) $ VVal val
       evalExp' vtable (Tuple es) =
         V.ValueTuple <$> mapM (evalExp' vtable) es
       evalExp' vtable e@(Record m) = do

@@ -23,7 +23,6 @@ import Futhark.Test
 import Futhark.Util (atMostChars, fancyTerminal)
 import Futhark.Util.Console
 import Futhark.Util.Options
-import Futhark.Util.Pretty (prettyText)
 import Futhark.Util.Table
 import System.Console.ANSI
 import qualified System.Console.Terminal.Size as Terminal
@@ -185,7 +184,7 @@ runInterpretedEntry (FutharkExe futhark) program (InputOutputs entry run_cases) 
       runInterpretedCase run@(TestRun _ inputValues _ index _) =
         unless (any (`elem` runTags run) ["compiled", "script"]) $
           context ("Entry point: " <> entry <> "; dataset: " <> T.pack (runDescription run)) $ do
-            input <- T.unlines . map prettyText <$> getValues (FutharkExe futhark) dir inputValues
+            input <- T.unlines . map valueText <$> getValues (FutharkExe futhark) dir inputValues
             expectedResult' <- getExpectedResult (FutharkExe futhark) program entry run
             (code, output, err) <-
               liftIO $
