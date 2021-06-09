@@ -5,7 +5,8 @@ module Futhark.CLI.Datacmp (main) where
 
 import Control.Exception
 import qualified Data.ByteString.Lazy.Char8 as BS
-import Futhark.Test.Values
+import Futhark.Data.Compare
+import Futhark.Data.Reader
 import Futhark.Util.Options
 import System.Exit
 import System.IO
@@ -41,7 +42,7 @@ main = mainWithOptions () [] "<file> <file>" f
               hPutStrLn stderr $ "Error reading values from " ++ file_b
               exitFailure
             (Just vs_a, Just vs_b) ->
-              case compareValues vs_a vs_b of
+              case compareSeveralValues (Tolerance 0.002) vs_a vs_b of
                 [] -> return ()
                 es -> do
                   mapM_ print es

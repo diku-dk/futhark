@@ -1,5 +1,4 @@
 cabal-version: 2.4
--- Run 'cabal2nix . >futhark.nix' after adding deps.
 name:           futhark
 version:        0.20.0
 synopsis:       An optimising compiler for a functional, array-oriented language.
@@ -61,6 +60,8 @@ library
       Futhark.Analysis.DataDependencies
       Futhark.Analysis.HORep.MapNest
       Futhark.Analysis.HORep.SOAC
+      Futhark.Analysis.Interference
+      Futhark.Analysis.LastUse
       Futhark.Analysis.Metrics
       Futhark.Analysis.Metrics.Type
       Futhark.Analysis.PrimExp
@@ -210,6 +211,8 @@ library
       Futhark.Optimise.InPlaceLowering.LowerIntoStm
       Futhark.Optimise.InPlaceLowering.SubstituteIndices
       Futhark.Optimise.InliningDeadFun
+      Futhark.Optimise.ReuseAllocations
+      Futhark.Optimise.ReuseAllocations.GreedyColoring
       Futhark.Optimise.Simplify
       Futhark.Optimise.Simplify.Engine
       Futhark.Optimise.Simplify.Lore
@@ -254,7 +257,6 @@ library
       Futhark.Server
       Futhark.Test
       Futhark.Test.Values
-      Futhark.Test.Values.Parser
       Futhark.Tools
       Futhark.Transform.CopyPropagate
       Futhark.Transform.FirstOrderTransform
@@ -318,6 +320,7 @@ library
     , file-embed >=0.0.9
     , filepath >=1.4.1.1
     , free >=4.12.4
+    , futhark-data >= 1.0.0.1
     , gitrev >=1.2.0
     , hashable
     , haskeline
@@ -376,6 +379,7 @@ test-suite unit
       Futhark.IR.PrimitiveTests
       Language.Futhark.CoreTests
       Language.Futhark.SyntaxTests
+      Futhark.Optimise.ReuseAllocations.GreedyColoringTests
       Paths_futhark
   hs-source-dirs:
       unittests
