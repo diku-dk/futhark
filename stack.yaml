@@ -16,4 +16,4 @@ ghc-options:
 
 extra-deps:
 - versions-5.0.0
-- futhark-data-1.0.0.0
+- futhark-data-1.0.0.1
