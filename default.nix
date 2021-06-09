@@ -29,7 +29,7 @@ let
           futhark =
             pkgs.haskell.lib.overrideCabal
               (pkgs.haskell.lib.addBuildTools
-                (haskellPackagesNew.callPackage ./futhark.nix { })
+                (haskellPackagesNew.callCabal2nix "futhark" ./. { })
                 [ pkgs.python37Packages.sphinx ])
               ( _drv: {
                 isLibrary = false;
