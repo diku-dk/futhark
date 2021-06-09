@@ -4,8 +4,8 @@
 }:
 mkDerivation {
   pname = "futhark-data";
-  version = "1.0.0.0";
-  sha256 = "c42b58809777358ef7e253e79ec691311daedf7ccd3f190056152602d353e615";
+  version = "1.0.0.1";
+  sha256 = "95ebad0fc7a459b756533471b3637ac4ece1f5de7e7239896c5481995f3ccb88";
   libraryHaskellDepends = [
     base binary bytestring bytestring-to-vector containers megaparsec
     mtl text vector vector-binary-instances
