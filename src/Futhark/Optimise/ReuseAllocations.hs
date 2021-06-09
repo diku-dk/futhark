@@ -33,7 +33,6 @@ getAllocsStm :: Stm KernelsMem -> Allocs
 getAllocsStm (Let (Pattern [] [PatElem name _]) _ (Op (Alloc se sp))) =
   M.singleton name (se, sp)
 getAllocsStm (Let _ _ (Op (Alloc _ _))) = error "impossible"
-getAllocsStm (Let _ _ (Op (Inner (SegOp segop)))) = getAllocsSegOp segop
 getAllocsStm (Let _ _ (If _ then_body else_body _)) =
   foldMap getAllocsStm (bodyStms then_body)
     <> foldMap getAllocsStm (bodyStms else_body)
@@ -138,6 +137,24 @@ isKernelInvariant segop (Var vname, _) =
   not $ vname `S.member` definedInSegOp segop
 isKernelInvariant _ _ = True
 
+onKernelBodyStms ::
+  MonadBinder m =>
+  SegOp lvl KernelsMem ->
+  (Stms KernelsMem -> m (Stms KernelsMem)) ->
+  m (SegOp lvl KernelsMem)
+onKernelBodyStms (SegMap lvl space ts body) f = do
+  stms <- f $ kernelBodyStms body
+  return $ SegMap lvl space ts $ body {kernelBodyStms = stms}
+onKernelBodyStms (SegRed lvl space binops ts body) f = do
+  stms <- f $ kernelBodyStms body
+  return $ SegRed lvl space binops ts $ body {kernelBodyStms = stms}
+onKernelBodyStms (SegScan lvl space binops ts body) f = do
+  stms <- f $ kernelBodyStms body
+  return $ SegScan lvl space binops ts $ body {kernelBodyStms = stms}
+onKernelBodyStms (SegHist lvl space binops ts body) f = do
+  stms <- f $ kernelBodyStms body
+  return $ SegHist lvl space binops ts $ body {kernelBodyStms = stms}
+
 -- | This is the actual optimiser. Given an interference graph and a `SegOp`,
 -- replace allocations and references to memory blocks inside with a (hopefully)
 -- reduced number of allocations.
@@ -146,7 +163,8 @@ optimiseKernel ::
   Interference.Graph VName ->
   SegOp lvl KernelsMem ->
   m (SegOp lvl KernelsMem)
-optimiseKernel graph segop = do
+optimiseKernel graph segop0 = do
+  segop <- onKernelBodyStms segop0 $ onKernels $ optimiseKernel graph
   let allocs = M.filter (isKernelInvariant segop) $ getAllocsSegOp segop
       (colorspaces, coloring) =
         GreedyColoring.colorGraph
