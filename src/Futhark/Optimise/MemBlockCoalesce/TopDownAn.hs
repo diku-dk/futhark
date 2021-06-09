@@ -82,6 +82,7 @@ topDownLoop td_env (Let pat _ (DoLoop arginis_ctx arginis lform body)) =
           then tab
           else M.insert m m_al' tab
     --
+    -- This is perhaps not ideal for many reasons, so Philip is gonna figure it out.
     foldfun scopetab m_tab (p_el, (f_el, i_se), r_se)
       | (ExpMem.MemArray _ptp _shp _u (ExpMem.ArrayIn m_p _p_ixfn)) <- snd (patElemDec p_el),
         Var f0 <- i_se,
