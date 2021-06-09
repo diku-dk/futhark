@@ -1338,7 +1338,12 @@ disableWarnings :: String
 disableWarnings =
   pretty
     [C.cunit|
-$esc:("#ifdef __GNUC__")
+$esc:("#ifdef __clang__")
+$esc:("#pragma clang diagnostic ignored \"-Wunused-function\"")
+$esc:("#pragma clang diagnostic ignored \"-Wunused-variable\"")
+$esc:("#pragma clang diagnostic ignored \"-Wparentheses\"")
+$esc:("#pragma clang diagnostic ignored \"-Wunused-label\"")
+$esc:("#elif __GNUC__")
 $esc:("#pragma GCC diagnostic ignored \"-Wunused-function\"")
 $esc:("#pragma GCC diagnostic ignored \"-Wunused-variable\"")
 $esc:("#pragma GCC diagnostic ignored \"-Wparentheses\"")
@@ -1346,12 +1351,6 @@ $esc:("#pragma GCC diagnostic ignored \"-Wunused-label\"")
 $esc:("#pragma GCC diagnostic ignored \"-Wunused-but-set-variable\"")
 $esc:("#endif")
 
-$esc:("#ifdef __clang__")
-$esc:("#pragma clang diagnostic ignored \"-Wunused-function\"")
-$esc:("#pragma clang diagnostic ignored \"-Wunused-variable\"")
-$esc:("#pragma clang diagnostic ignored \"-Wparentheses\"")
-$esc:("#pragma clang diagnostic ignored \"-Wunused-label\"")
-$esc:("#endif")
 |]
 
 -- | Produce header and implementation files.
