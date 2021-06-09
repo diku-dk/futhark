@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+  * A new memory reuse optimisation has been added.  This results in
+    slightly lower footprint for many programs.
+
 ### Removed
 
 ### Changed
