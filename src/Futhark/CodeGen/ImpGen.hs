@@ -1332,15 +1332,10 @@ fullyIndexArray' ::
   ImpM lore r op (VName, Imp.Space, Count Elements (Imp.TExp Int64))
 fullyIndexArray' (MemLocation mem _ ixfun) indices = do
   space <- entryMemSpace <$> lookupMemory mem
-  let indices' = case space of
-        ScalarSpace ds _ ->
-          let (zero_is, is) = splitFromEnd (length ds) indices
-           in map (const 0) zero_is ++ is
-        _ -> indices
   return
     ( mem,
       space,
-      elements $ IxFun.index ixfun indices'
+      elements $ IxFun.index ixfun indices
     )
 
 -- More complicated read/write operations that use index functions.
