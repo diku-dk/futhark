@@ -23,6 +23,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * `futhark pkg` now detects some nonsensical package paths (#1364).
 
+  * FutharkScript now parses `f x y` as applying `f` to `x` and `y`,
+    rather than as `f (x y)`.
+
 ## [0.19.6]
 
 ### Added

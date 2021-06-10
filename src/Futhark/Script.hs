@@ -137,11 +137,8 @@ parseExp sep =
         <*> pPattern <* lexeme sep "="
         <*> parseExp sep <* lexeme sep "in"
         <*> parseExp sep,
-      inParens sep (mkTuple <$> (parseExp sep `sepBy` pComma)),
-      inBraces sep (Record <$> (pField `sepBy` pComma)),
-      Call <$> parseFunc <*> many (parseExp sep),
-      Const <$> V.parseValue sep,
-      StringLit . T.pack <$> lexeme sep ("\"" *> manyTill charLiteral "\"")
+      try $ Call <$> parseFunc <*> many pAtom,
+      pAtom
     ]
     <?> "expression"
   where
@@ -150,6 +147,16 @@ parseExp sep =
     pComma = lexeme sep ","
     mkTuple [v] = v
     mkTuple vs = Tuple vs
+
+    pAtom =
+      choice
+        [ try $ inParens sep (mkTuple <$> (parseExp sep `sepBy` pComma)),
+          inParens sep $ parseExp sep,
+          inBraces sep (Record <$> (pField `sepBy` pComma)),
+          Const <$> V.parseValue sep,
+          StringLit . T.pack <$> lexeme sep ("\"" *> manyTill charLiteral "\""),
+          Call <$> parseFunc <*> pure []
+        ]
 
     pPattern =
       choice
