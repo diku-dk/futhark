@@ -83,7 +83,7 @@ OPTIONS
 DIRECTIVES
 ==========
 
-A directive is a way to show the result of running a funtion.
+A directive is a way to show the result of running a function.
 Depending on the directive, this can be as simple as printing the
 textual representation of the result, or as complex as running an
 external plotting program and referencing a generated image.
@@ -205,7 +205,7 @@ Only an extremely limited subset of Futhark is supported:
 Note that empty arrays must be written using the ``empty(t)``
 notation, e.g. ``empty([0]i32)``.
 
-Function applications are either of Futhark funtions or *builtin
+Function applications are either of Futhark functions or *builtin
 functions*.  The latter are prefixed with ``$`` and are magical
 (usually impure) functions that could not possibly be implemented in
 Futhark.  The following builtins are supported:
