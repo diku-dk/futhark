@@ -26,6 +26,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * FutharkScript now parses `f x y` as applying `f` to `x` and `y`,
     rather than as `f (x y)`.
 
+  * Some internal array utility functions would not be generated if
+    entry points exposed both unit arrays and boolean arrays (#1374).
+
 ## [0.19.6]
 
 ### Added

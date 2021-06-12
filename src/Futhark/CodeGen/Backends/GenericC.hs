@@ -100,7 +100,7 @@ import qualified Language.C.Quote.OpenCL as C
 import qualified Language.C.Syntax as C
 
 data CompilerState s = CompilerState
-  { compArrayStructs :: [((C.Type, Int), (C.Type, [C.Definition]))],
+  { compArrayStructs :: [((Signedness, PrimType, Int), (C.Type, [C.Definition]))],
     compOpaqueStructs :: [(String, (C.Type, [C.Definition]))],
     compEarlyDecls :: DL.DList C.Definition,
     compInit :: [C.Stm],
@@ -1082,7 +1082,7 @@ valueDescToCType (ScalarValue pt signed _) =
 valueDescToCType (ArrayValue mem space pt signed shape) = do
   let pt' = signedPrimTypeToCType signed pt
       rank = length shape
-  exists <- gets $ lookup (pt', rank) . compArrayStructs
+  exists <- gets $ lookup (signed, pt, rank) . compArrayStructs
   case exists of
     Just (cty, _) -> return cty
     Nothing -> do
@@ -1094,7 +1094,7 @@ valueDescToCType (ArrayValue mem space pt signed shape) = do
       modify $ \s ->
         s
           { compArrayStructs =
-              ((pt', rank), (stype, struct : library)) : compArrayStructs s
+              ((signed, pt, rank), (stype, struct : library)) : compArrayStructs s
           }
       return stype
 
