@@ -1080,8 +1080,7 @@ valueDescToCType :: ValueDesc -> CompilerM op s C.Type
 valueDescToCType (ScalarValue pt signed _) =
   return $ signedPrimTypeToCType signed pt
 valueDescToCType (ArrayValue mem space pt signed shape) = do
-  let pt' = signedPrimTypeToCType signed pt
-      rank = length shape
+  let rank = length shape
   exists <- gets $ lookup (signed, pt, rank) . compArrayStructs
   case exists of
     Just (cty, _) -> return cty
