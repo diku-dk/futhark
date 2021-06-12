@@ -6,8 +6,8 @@ module Futhark.CodeGen.ImpGen.Kernels.SegScan (compileSegScan) where
 import qualified Futhark.CodeGen.ImpCode.Kernels as Imp
 import Futhark.CodeGen.ImpGen hiding (compileProg)
 import Futhark.CodeGen.ImpGen.Kernels.Base
-import qualified Futhark.CodeGen.ImpGen.Kernels.SegScan.SinglePass as SinglePass
 import qualified Futhark.CodeGen.ImpGen.Kernels.SegScan.SegSinglePass as SegSinglePass
+import qualified Futhark.CodeGen.ImpGen.Kernels.SegScan.SinglePass as SinglePass
 import qualified Futhark.CodeGen.ImpGen.Kernels.SegScan.TwoPass as TwoPass
 import Futhark.IR.KernelsMem
 

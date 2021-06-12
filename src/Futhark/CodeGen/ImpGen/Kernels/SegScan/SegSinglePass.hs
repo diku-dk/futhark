@@ -17,7 +17,7 @@ import qualified Futhark.IR.Mem.IxFun as IxFun
 import Futhark.Transform.Rename
 import Futhark.Util (takeLast)
 import Futhark.Util.IntegralExp (IntegralExp (mod, rem), divUp, quot)
-import Prelude hiding (quot, mod, rem)
+import Prelude hiding (mod, quot, rem)
 
 xParams, yParams :: SegBinOp KernelsMem -> [LParam KernelsMem]
 xParams scan =
@@ -99,6 +99,7 @@ createLocalArrays (Count groupSize) m types = do
         $ ArrayIn localMem $ IxFun.iotaOffset off' [warpSize]
 
   return (sharedId, transposedArrays, prefixArrays, sharedReadOffset, warpscan, warpExchanges)
+
 -- | Compile 'SegScan' instance to host-level code with calls to a
 -- single-pass kernel.
 compileSegScan ::
@@ -127,7 +128,7 @@ compileSegScan pat lvl space scanOp kbody = do
       k_mem = 36 --9*4
       mem_constraint = max k_mem sumT `div` maxT
       --reg_constraint = (k_reg `div` sumT) - 6
-      reg_constraint = (k_reg-1-sumT') `div` (2*sumT'+3)
+      reg_constraint = (k_reg -1 - sumT') `div` (2 * sumT' + 3)
       m :: Num a => a
       m = fromIntegral $ max 1 $ min mem_constraint reg_constraint
       num_groups = Count (n `divUp` (unCount group_size * m))
@@ -208,9 +209,10 @@ compileSegScan pat lvl space scanOp kbody = do
     sComment "Load and map" $
       sFor "i" m $ \i -> do
         -- The map's input index
-        phys_tid <- dPrimVE "phys_tid" $
-          tvExp blockOff + sExt64 (kernelLocalThreadId constants)
-            + i * kernelGroupSize constants
+        phys_tid <-
+          dPrimVE "phys_tid" $
+            tvExp blockOff + sExt64 (kernelLocalThreadId constants)
+              + i * kernelGroupSize constants
         zipWithM_ dPrimV_ gtids $ unflattenIndex dims' phys_tid
         -- Perform the map
         let in_bounds =
@@ -277,9 +279,9 @@ compileSegScan pat lvl space scanOp kbody = do
 
     let crossesSegment =
           Just $ \from to ->
-          let from' = (from + 1) * m - 1
-              to'   = (to   + 1) * m - 1
-          in (to' - from') .>. (to'+segsize_compact-boundary) `mod` segsize_compact
+            let from' = (from + 1) * m - 1
+                to' = (to + 1) * m - 1
+             in (to' - from') .>. (to' + segsize_compact - boundary) `mod` segsize_compact
 
     scanOp' <- renameLambda $ segBinOpLambda scanOp
 
@@ -322,23 +324,23 @@ compileSegScan pat lvl space scanOp kbody = do
       let warpSize = kernelWaveSize constants
       sWhen (bNot blockNewSgm .&&. kernelLocalThreadId constants .<. warpSize) $ do
         sWhen (kernelLocalThreadId constants .==. 0) $ do
-          sIf (boundary .==. sExt32 (unCount group_size * m))
+          sIf
+            (boundary .==. sExt32 (unCount group_size * m))
             ( do
-              everythingVolatile $
-                forM_ (zip aggregateArrays accs) $ \(aggregateArray, acc) ->
-                  copyDWIMFix aggregateArray [tvExp dynamicId] (tvSize acc) []
-              sOp globalFence
-              everythingVolatile $
-                copyDWIMFix statusFlags [tvExp dynamicId] (intConst Int8 statusA) []
+                everythingVolatile $
+                  forM_ (zip aggregateArrays accs) $ \(aggregateArray, acc) ->
+                    copyDWIMFix aggregateArray [tvExp dynamicId] (tvSize acc) []
+                sOp globalFence
+                everythingVolatile $
+                  copyDWIMFix statusFlags [tvExp dynamicId] (intConst Int8 statusA) []
             )
-            (
-              do
-              everythingVolatile $
-                forM_ (zip incprefixArrays accs) $ \(incprefixArray, acc) ->
-                  copyDWIMFix incprefixArray [tvExp dynamicId] (tvSize acc) []
-              sOp globalFence
-              everythingVolatile $
-                copyDWIMFix statusFlags [tvExp dynamicId] (intConst Int8 statusP) []
+            ( do
+                everythingVolatile $
+                  forM_ (zip incprefixArrays accs) $ \(incprefixArray, acc) ->
+                    copyDWIMFix incprefixArray [tvExp dynamicId] (tvSize acc) []
+                sOp globalFence
+                everythingVolatile $
+                  copyDWIMFix statusFlags [tvExp dynamicId] (intConst Int8 statusP) []
             )
           copyDWIMFix warpscan [0] (Var statusFlags) [tvExp dynamicId - 1]
         -- sWhen
@@ -361,7 +363,7 @@ compileSegScan pat lvl space scanOp kbody = do
               let loopStop = warpSize * (-1)
                   sameSegment readIdx =
                     let startIdx = sExt64 (tvExp readIdx + 1) * kernelGroupSize constants * m - 1
-                    in tvExp blockOff - startIdx .<=. sgmIdx
+                     in tvExp blockOff - startIdx .<=. sgmIdx
               sWhile (tvExp readOffset .>. loopStop) $ do
                 readI <- dPrimV "read_i" $ tvExp readOffset + kernelLocalThreadId constants
                 aggrs <- forM (zip scanOpNe tys) $ \(ne, ty) ->
@@ -369,21 +371,24 @@ compileSegScan pat lvl space scanOp kbody = do
                 flag <- dPrimV "flag" statusX
                 used <- dPrimV "used" (0 :: Imp.TExp Int8)
                 everythingVolatile $
-                  sIf (tvExp readI .>=. 0 .&&. sameSegment readI)
-                    (do
-                    copyDWIMFix (tvVar flag) [] (Var statusFlags) [sExt64 $ tvExp readI]
-                    sIf
-                      (tvExp flag .==. statusP)
-                      ( forM_ (zip incprefixArrays aggrs) $ \(incprefix, aggr) ->
-                          copyDWIMFix (tvVar aggr) [] (Var incprefix) [sExt64 $ tvExp readI]
-                      )
-                      ( sWhen (tvExp flag .==. statusA) $ do
-                          forM_ (zip aggrs aggregateArrays) $ \(aggr, aggregate) ->
-                            copyDWIMFix (tvVar aggr) [] (Var aggregate) [sExt64 $ tvExp readI]
-                          used <-- (1 :: Imp.TExp Int8)
-                      ))
-                    (sWhen (tvExp readI .>=. 0) $
-                      copyDWIMFix (tvVar flag) [] (intConst Int8 statusP) [])
+                  sIf
+                    (tvExp readI .>=. 0 .&&. sameSegment readI)
+                    ( do
+                        copyDWIMFix (tvVar flag) [] (Var statusFlags) [sExt64 $ tvExp readI]
+                        sIf
+                          (tvExp flag .==. statusP)
+                          ( forM_ (zip incprefixArrays aggrs) $ \(incprefix, aggr) ->
+                              copyDWIMFix (tvVar aggr) [] (Var incprefix) [sExt64 $ tvExp readI]
+                          )
+                          ( sWhen (tvExp flag .==. statusA) $ do
+                              forM_ (zip aggrs aggregateArrays) $ \(aggr, aggregate) ->
+                                copyDWIMFix (tvVar aggr) [] (Var aggregate) [sExt64 $ tvExp readI]
+                              used <-- (1 :: Imp.TExp Int8)
+                          )
+                    )
+                    ( sWhen (tvExp readI .>=. 0) $
+                        copyDWIMFix (tvVar flag) [] (intConst Int8 statusP) []
+                    )
                 -- end sIf
                 -- end sWhen
                 forM_ (zip exchanges aggrs) $ \(exchange, aggr) ->
@@ -465,14 +470,14 @@ compileSegScan pat lvl space scanOp kbody = do
           sWhen
             (boundary .==. sExt32 (unCount group_size * m))
             ( do
-              forM_ (zip xs prefixes) $ \(x, prefix) -> dPrimV_ x $ tvExp prefix
-              forM_ (zip ys accs) $ \(y, acc) -> dPrimV_ y $ tvExp acc
-              compileStms mempty (bodyStms $ lambdaBody scanOp'''') $
-                everythingVolatile $
-                  forM_ (zip incprefixArrays $ bodyResult $ lambdaBody scanOp'''') $
-                    \(incprefixArray, res) -> copyDWIMFix incprefixArray [tvExp dynamicId] res []
-              sOp globalFence
-              everythingVolatile $ copyDWIMFix statusFlags [tvExp dynamicId] (intConst Int8 statusP) []
+                forM_ (zip xs prefixes) $ \(x, prefix) -> dPrimV_ x $ tvExp prefix
+                forM_ (zip ys accs) $ \(y, acc) -> dPrimV_ y $ tvExp acc
+                compileStms mempty (bodyStms $ lambdaBody scanOp'''') $
+                  everythingVolatile $
+                    forM_ (zip incprefixArrays $ bodyResult $ lambdaBody scanOp'''') $
+                      \(incprefixArray, res) -> copyDWIMFix incprefixArray [tvExp dynamicId] res []
+                sOp globalFence
+                everythingVolatile $ copyDWIMFix statusFlags [tvExp dynamicId] (intConst Int8 statusP) []
             )
           forM_ (zip exchanges prefixes) $ \(exchange, prefix) ->
             copyDWIMFix exchange [0] (tvSize prefix) []
@@ -503,13 +508,16 @@ compileSegScan pat lvl space scanOp kbody = do
           dPrimV_ x' $ tvExp prefix
           dPrimV_ y' $ tvExp acc
 
-      sIf (kernelLocalThreadId constants * m .<. boundary .&&. bNot blockNewSgm)
-        (compileStms mempty (bodyStms $ lambdaBody scanOp'''''') $
-          forM_ (zip3 xs tys $ bodyResult $ lambdaBody scanOp'''''') $
-            \(x, ty, res) -> x <~~ toExp' ty res)
-        (forM_ (zip xs accs) $
-          \(x, acc) ->
-            do copyDWIMFix x [] (Var $ tvVar acc) [])
+      sIf
+        (kernelLocalThreadId constants * m .<. boundary .&&. bNot blockNewSgm)
+        ( compileStms mempty (bodyStms $ lambdaBody scanOp'''''') $
+            forM_ (zip3 xs tys $ bodyResult $ lambdaBody scanOp'''''') $
+              \(x, ty, res) -> x <~~ toExp' ty res
+        )
+        ( forM_ (zip xs accs) $
+            \(x, acc) ->
+              do copyDWIMFix x [] (Var $ tvVar acc) []
+        )
       -- calculate where previous thread stopped, to determine number of
       -- elements left before new segment.
       stop <-
@@ -519,7 +527,7 @@ compileSegScan pat lvl space scanOp kbody = do
         sWhen (sExt32 i .<. stop - 1) $ do
           forM_ (zip privateArrays ys) $ \(src, y) ->
             -- only include prefix for the first segment part per thread
-              copyDWIMFix y [] (Var src) [i]
+            copyDWIMFix y [] (Var src) [i]
           compileStms mempty (bodyStms $ lambdaBody scanOp''''') $
             forM_ (zip privateArrays $ bodyResult $ lambdaBody scanOp''''') $
               \(dest, res) ->
@@ -543,15 +551,15 @@ compileSegScan pat lvl space scanOp kbody = do
       sOp localBarrier
 
     sComment "Write block scan results to global memory" $
-        sFor "i" m $ \i -> do
-          flat_idx <-
-            dPrimVE "flat_idx" $
-              tvExp blockOff + kernelGroupSize constants * i
-                + sExt64 (kernelLocalThreadId constants)
-          zipWithM_ dPrimV_ gtids $ unflattenIndex dims' flat_idx
-          sWhen (flat_idx .<. n) $ do
-            forM_ (zip (map patElemName all_pes) privateArrays) $ \(dest, src) ->
-              copyDWIMFix dest (map Imp.vi64 gtids) (Var src) [i]
+      sFor "i" m $ \i -> do
+        flat_idx <-
+          dPrimVE "flat_idx" $
+            tvExp blockOff + kernelGroupSize constants * i
+              + sExt64 (kernelLocalThreadId constants)
+        zipWithM_ dPrimV_ gtids $ unflattenIndex dims' flat_idx
+        sWhen (flat_idx .<. n) $ do
+          forM_ (zip (map patElemName all_pes) privateArrays) $ \(dest, src) ->
+            copyDWIMFix dest (map Imp.vi64 gtids) (Var src) [i]
 
     sComment "If this is the last block, reset the dynamicId" $
       sWhen (tvExp dynamicId .==. unCount num_groups - 1) $
