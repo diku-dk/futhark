@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * A new memory reuse optimisation has been added.  This results in
     slightly lower footprint for many programs.
 
+  * The `cuda` backend now uses a fast single-pass implementation for
+    segmented `scan`s, due to Morten Tychsen Clausen (#1375).
+
 ### Removed
 
 ### Changed
