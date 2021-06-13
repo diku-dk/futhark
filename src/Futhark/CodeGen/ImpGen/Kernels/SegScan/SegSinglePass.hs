@@ -375,9 +375,9 @@ compileSegScan pat lvl space scanOp kbody = do
                   dPrimV "aggr" $ TPrimExp $ toExp' ty ne
                 flag <- dPrimV "flag" statusX
                 used <- dPrimV "used" 0
-                everythingVolatile $
+                everythingVolatile . sWhen (tvExp readI .>=. 0) $ do
                   sIf
-                    (tvExp readI .>=. 0 .&&. sameSegment readI)
+                    (sameSegment readI)
                     ( do
                         copyDWIMFix (tvVar flag) [] (Var statusFlags) [sExt64 $ tvExp readI]
                         sIf
@@ -391,9 +391,7 @@ compileSegScan pat lvl space scanOp kbody = do
                               used <-- 1
                           )
                     )
-                    ( sWhen (tvExp readI .>=. 0) $
-                        copyDWIMFix (tvVar flag) [] (intConst Int8 statusP) []
-                    )
+                    (copyDWIMFix (tvVar flag) [] (intConst Int8 statusP) [])
                 -- end sIf
                 -- end sWhen
                 forM_ (zip exchanges aggrs) $ \(exchange, aggr) ->
