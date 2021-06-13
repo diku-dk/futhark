@@ -120,6 +120,7 @@ compileSegScan pat lvl space scanOp kbody = do
       (gtids, dims) = unzip $ unSegSpace space
       dims' = map toInt64Exp dims
       segmented = length dims' > 1
+      not_segmented_e = if segmented then false else true
       segment_size = last dims'
       scanOpNe = segBinOpNeutral scanOp
       tys = map (\(Prim pt) -> pt) $ lambdaReturnType $ segBinOpLambda scanOp
@@ -328,7 +329,7 @@ compileSegScan pat lvl space scanOp kbody = do
       sWhen (bNot blockNewSgm .&&. kernelLocalThreadId constants .<. warpSize) $ do
         sWhen (kernelLocalThreadId constants .==. 0) $ do
           sIf
-            (boundary .==. sExt32 (unCount group_size * m))
+            (not_segmented_e .||. boundary .==. sExt32 (unCount group_size * m))
             ( do
                 everythingVolatile $
                   forM_ (zip aggregateArrays accs) $ \(aggregateArray, acc) ->
