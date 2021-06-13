@@ -120,6 +120,7 @@ compileSegScan pat lvl space scanOp kbody = do
       (gtids, dims) = unzip $ unSegSpace space
       dims' = map toInt64Exp dims
       segmented = length dims' > 1
+      segmentedE = if segmented then true else false
       segment_size = last dims'
       scanOpNe = segBinOpNeutral scanOp
       tys = map (\(Prim pt) -> pt) $ lambdaReturnType $ segBinOpLambda scanOp
@@ -258,7 +259,10 @@ compileSegScan pat lvl space scanOp kbody = do
             ys = map paramName $ yParams scanOp
         -- determine if start of segment
         new_sgm <-
-          dPrimVE "new_sgm" $ (globalIdx + sExt32 i - boundary) `mod` segsize_compact .==. 0
+          dPrimVE "new_sgm" $
+            if segmented
+              then (globalIdx + sExt32 i - boundary) `mod` segsize_compact .==. 0
+              else false
         -- skip scan of first element in segment
         sUnless new_sgm $ do
           forM_ (zip privateArrays $ zip3 xs ys tys) $ \(src, (x, y, ty)) -> do
@@ -326,7 +330,7 @@ compileSegScan pat lvl space scanOp kbody = do
       sWhen (bNot blockNewSgm .&&. kernelLocalThreadId constants .<. warpSize) $ do
         sWhen (kernelLocalThreadId constants .==. 0) $ do
           sIf
-            (boundary .==. sExt32 (unCount group_size * m))
+            (segmentedE .&&. boundary .==. sExt32 (unCount group_size * m))
             ( do
                 everythingVolatile $
                   forM_ (zip aggregateArrays accs) $ \(aggregateArray, acc) ->
@@ -374,24 +378,20 @@ compileSegScan pat lvl space scanOp kbody = do
                 flag <- dPrimV "flag" statusX
                 used <- dPrimV "used" (0 :: Imp.TExp Int8)
                 everythingVolatile $
-                  sIf
-                    (tvExp readI .>=. 0 .&&. sameSegment readI)
-                    ( do
-                        copyDWIMFix (tvVar flag) [] (Var statusFlags) [sExt64 $ tvExp readI]
-                        sIf
-                          (tvExp flag .==. statusP)
-                          ( forM_ (zip incprefixArrays aggrs) $ \(incprefix, aggr) ->
-                              copyDWIMFix (tvVar aggr) [] (Var incprefix) [sExt64 $ tvExp readI]
-                          )
-                          ( sWhen (tvExp flag .==. statusA) $ do
-                              forM_ (zip aggrs aggregateArrays) $ \(aggr, aggregate) ->
-                                copyDWIMFix (tvVar aggr) [] (Var aggregate) [sExt64 $ tvExp readI]
-                              used <-- (1 :: Imp.TExp Int8)
-                          )
-                    )
-                    ( sWhen (tvExp readI .>=. 0) $
-                        copyDWIMFix (tvVar flag) [] (intConst Int8 statusP) []
-                    )
+                  sWhen (tvExp readI .>=. 0) $ do
+                    sWhen (sameSegment readI) $ do
+                      copyDWIMFix (tvVar flag) [] (Var statusFlags) [sExt64 $ tvExp readI]
+                      sIf
+                        (tvExp flag .==. statusP)
+                        ( forM_ (zip incprefixArrays aggrs) $ \(incprefix, aggr) ->
+                            copyDWIMFix (tvVar aggr) [] (Var incprefix) [sExt64 $ tvExp readI]
+                        )
+                        ( sWhen (tvExp flag .==. statusA) $ do
+                            forM_ (zip aggrs aggregateArrays) $ \(aggr, aggregate) ->
+                              copyDWIMFix (tvVar aggr) [] (Var aggregate) [sExt64 $ tvExp readI]
+                            used <-- (1 :: Imp.TExp Int8)
+                        )
+                    copyDWIMFix (tvVar flag) [] (intConst Int8 statusP) []
                 -- end sIf
                 -- end sWhen
                 forM_ (zip exchanges aggrs) $ \(exchange, aggr) ->
@@ -509,7 +509,7 @@ compileSegScan pat lvl space scanOp kbody = do
           dPrimV_ y' $ tvExp acc
 
       sIf
-        (kernelLocalThreadId constants * m .<. boundary .&&. bNot blockNewSgm)
+        (segmentedE .||. (kernelLocalThreadId constants * m .<. boundary .&&. bNot blockNewSgm))
         ( compileStms mempty (bodyStms $ lambdaBody scanOp'''''') $
             forM_ (zip3 xs tys $ bodyResult $ lambdaBody scanOp'''''') $
               \(x, ty, res) -> x <~~ toExp' ty res
