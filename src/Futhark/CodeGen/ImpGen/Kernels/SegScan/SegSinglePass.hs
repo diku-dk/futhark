@@ -214,7 +214,7 @@ compileSegScan pat lvl space scanOp kbody = do
           dPrimVE "phys_tid" $
             tvExp blockOff + sExt64 (kernelLocalThreadId constants)
               + i * kernelGroupSize constants
-        zipWithM_ dPrimV_ gtids $ unflattenIndex dims' phys_tid
+        dIndexSpace (zip gtids dims') phys_tid
         -- Perform the map
         let in_bounds =
               compileStms mempty (kernelBodyStms kbody) $ do
@@ -558,7 +558,7 @@ compileSegScan pat lvl space scanOp kbody = do
           dPrimVE "flat_idx" $
             tvExp blockOff + kernelGroupSize constants * i
               + sExt64 (kernelLocalThreadId constants)
-        zipWithM_ dPrimV_ gtids $ unflattenIndex dims' flat_idx
+        dIndexSpace (zip gtids dims') flat_idx
         sWhen (flat_idx .<. n) $ do
           forM_ (zip (map patElemName all_pes) privateArrays) $ \(dest, src) ->
             copyDWIMFix dest (map Imp.vi64 gtids) (Var src) [i]
