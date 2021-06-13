@@ -113,22 +113,6 @@ compileSegScan pat lvl space scanOp kbody = do
   let Pattern _ all_pes = pat
       group_size = toInt64Exp <$> segGroupSize lvl
       n = product $ map toInt64Exp $ segSpaceDims space
-      sumT :: Integer
-      maxT :: Integer
-      sumT = foldl (\bytes typ -> bytes + primByteSize typ) 0 tys
-      primByteSize' = max 4 . primByteSize
-      sumT' = foldl (\bytes typ -> bytes + primByteSize' typ) 0 tys `div` 4
-      maxT = maximum (map primByteSize tys)
-      -- TODO: Make these constants dynamic by querying device
-      -- RTX 2080 Ti constants (CC 7.5)
-      -- k_reg = 64
-      -- k_mem = 48 --12*4
-      -- GTX 780 Ti constants (CC 3.5)
-      k_reg = 64
-      k_mem = 36 --9*4
-      mem_constraint = max k_mem sumT `div` maxT
-      --reg_constraint = (k_reg `div` sumT) - 6
-      reg_constraint = (k_reg -1 - sumT') `div` (2 * sumT' + 3)
       m :: Num a => a
       m = fromIntegral $ max 1 $ min mem_constraint reg_constraint
       num_groups = Count (n `divUp` (unCount group_size * m))
@@ -147,10 +131,26 @@ compileSegScan pat lvl space scanOp kbody = do
       unmakeStatusUsed flagUsed flag used = do
         used <-- tvExp flagUsed .>>. 2
         flag <-- tvExp flagUsed .&. 3
+      sumT :: Integer
+      maxT :: Integer
+      sumT = foldl (\bytes typ -> bytes + primByteSize typ) 0 tys
+      primByteSize' = max 4 . primByteSize
+      sumT' = foldl (\bytes typ -> bytes + primByteSize' typ) 0 tys `div` 4
+      maxT = maximum (map primByteSize tys)
+      -- TODO: Make these constants dynamic by querying device
+      -- RTX 2080 Ti constants (CC 7.5)
+      -- k_reg = 64
+      -- k_mem = 48 --12*4
+      -- GTX 780 Ti constants (CC 3.5)
+      k_reg = 64
+      k_mem = 36 --9*4
+      mem_constraint = max k_mem sumT `div` maxT
+      --reg_constraint = (k_reg `div` sumT) - 6
+      reg_constraint = (k_reg -1 - sumT') `div` (2 * sumT' + 3)
 
   -- Allocate the shared memory for output component
-  numGroups <- dPrimV "numGroups" $ unCount num_groups
   numThreads <- dPrimV "numThreads" num_threads
+  numGroups <- dPrimV "numGroups" $ unCount num_groups
 
   globalId <- sStaticArray "id_counter" (Space "device") int32 $ Imp.ArrayZeros 1
   statusFlags <- sAllocArray "status_flags" int8 (Shape [tvSize numGroups]) (Space "device")
@@ -168,7 +168,7 @@ compileSegScan pat lvl space scanOp kbody = do
     (sharedId, transposedArrays, prefixArrays, sharedReadOffset, warpscan, exchanges) <-
       createLocalArrays (segGroupSize lvl) (intConst Int64 m) tys
 
-    dynamicId <- dPrim "dynamic_id" int32 :: ImpM lore r op (TV Int64)
+    dynamicId <- dPrim "dynamic_id" int32
     sWhen (kernelLocalThreadId constants .==. 0) $ do
       (globalIdMem, _, globalIdOff) <- fullyIndexArray globalId [0]
       sOp $
@@ -206,6 +206,7 @@ compileSegScan pat lvl space scanOp kbody = do
           ty
           (Shape [intConst Int64 m])
           (ScalarSpace [intConst Int64 m] ty)
+
     sComment "Load and map" $
       sFor "i" m $ \i -> do
         -- The map's input index
@@ -295,6 +296,7 @@ compileSegScan pat lvl space scanOp kbody = do
         prefixArrays
 
       sOp localBarrier
+
       let firstThread acc prefixes =
             copyDWIMFix (tvVar acc) [] (Var prefixes) [sExt64 (kernelGroupSize constants) - 1]
           notFirstThread acc prefixes =
