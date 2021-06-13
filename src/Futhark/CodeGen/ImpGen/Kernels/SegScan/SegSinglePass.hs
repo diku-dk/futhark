@@ -140,11 +140,8 @@ compileSegScan pat lvl space scanOp kbody = do
       maxT = maximum (map primByteSize tys)
       -- TODO: Make these constants dynamic by querying device
       -- RTX 2080 Ti constants (CC 7.5)
-      -- k_reg = 64
-      -- k_mem = 48 --12*4
-      -- GTX 780 Ti constants (CC 3.5)
       k_reg = 64
-      k_mem = 36 --9*4
+      k_mem = 48 --12*4
       mem_constraint = max k_mem sumT `div` maxT
       --reg_constraint = (k_reg `div` sumT) - 6
       reg_constraint = (k_reg -1 - sumT') `div` (2 * sumT' + 3)
@@ -309,9 +306,9 @@ compileSegScan pat lvl space scanOp kbody = do
         (zipWithM_ notFirstThread accs prefixArrays)
 
       sOp localBarrier
-    prefixes <-
-      forM (zip scanOpNe tys) $ \(ne, ty) ->
-        dPrimV "prefix" $ TPrimExp $ toExp' ty ne
+
+    prefixes <- forM (zip scanOpNe tys) $ \(ne, ty) ->
+      dPrimV "prefix" $ TPrimExp $ toExp' ty ne
     blockNewSgm <- dPrimVE "block_new_sgm" $ sgmIdx .==. 0
     sComment "Perform lookback" $ do
       sWhen (blockNewSgm .&&. kernelLocalThreadId constants .==. 0) $ do
@@ -473,18 +470,15 @@ compileSegScan pat lvl space scanOp kbody = do
           scanOp'''' <- renameLambda scanOp'
           let xs = map paramName $ take (length tys) $ lambdaParams scanOp''''
               ys = map paramName $ drop (length tys) $ lambdaParams scanOp''''
-          sWhen
-            (boundary .==. sExt32 (unCount group_size * m))
-            ( do
-                forM_ (zip xs prefixes) $ \(x, prefix) -> dPrimV_ x $ tvExp prefix
-                forM_ (zip ys accs) $ \(y, acc) -> dPrimV_ y $ tvExp acc
-                compileStms mempty (bodyStms $ lambdaBody scanOp'''') $
-                  everythingVolatile $
-                    forM_ (zip incprefixArrays $ bodyResult $ lambdaBody scanOp'''') $
-                      \(incprefixArray, res) -> copyDWIMFix incprefixArray [tvExp dynamicId] res []
-                sOp globalFence
-                everythingVolatile $ copyDWIMFix statusFlags [tvExp dynamicId] (intConst Int8 statusP) []
-            )
+          sWhen (boundary .==. sExt32 (unCount group_size * m)) $ do
+            forM_ (zip xs prefixes) $ \(x, prefix) -> dPrimV_ x $ tvExp prefix
+            forM_ (zip ys accs) $ \(y, acc) -> dPrimV_ y $ tvExp acc
+            compileStms mempty (bodyStms $ lambdaBody scanOp'''') $
+              everythingVolatile $
+                forM_ (zip incprefixArrays $ bodyResult $ lambdaBody scanOp'''') $
+                  \(incprefixArray, res) -> copyDWIMFix incprefixArray [tvExp dynamicId] res []
+            sOp globalFence
+            everythingVolatile $ copyDWIMFix statusFlags [tvExp dynamicId] (intConst Int8 statusP) []
           forM_ (zip exchanges prefixes) $ \(exchange, prefix) ->
             copyDWIMFix exchange [0] (tvSize prefix) []
           forM_ (zip3 accs tys scanOpNe) $ \(acc, ty, ne) ->
@@ -520,10 +514,7 @@ compileSegScan pat lvl space scanOp kbody = do
             forM_ (zip3 xs tys $ bodyResult $ lambdaBody scanOp'''''') $
               \(x, ty, res) -> x <~~ toExp' ty res
         )
-        ( forM_ (zip xs accs) $
-            \(x, acc) ->
-              do copyDWIMFix x [] (Var $ tvVar acc) []
-        )
+        (forM_ (zip xs accs) $ \(x, acc) -> copyDWIMFix x [] (Var $ tvVar acc) [])
       -- calculate where previous thread stopped, to determine number of
       -- elements left before new segment.
       stop <-
