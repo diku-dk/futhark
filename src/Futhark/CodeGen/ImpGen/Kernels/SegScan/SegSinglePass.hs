@@ -374,7 +374,7 @@ compileSegScan pat lvl space scanOp kbody = do
                 aggrs <- forM (zip scanOpNe tys) $ \(ne, ty) ->
                   dPrimV "aggr" $ TPrimExp $ toExp' ty ne
                 flag <- dPrimV "flag" statusX
-                used <- dPrimV "used" (0 :: Imp.TExp Int8)
+                used <- dPrimV "used" 0
                 everythingVolatile . sWhen (tvExp readI .>=. 0) $ do
                   sWhen (sameSegment readI) $ do
                     copyDWIMFix (tvVar flag) [] (Var statusFlags) [sExt64 $ tvExp readI]
@@ -386,7 +386,7 @@ compileSegScan pat lvl space scanOp kbody = do
                       ( sWhen (tvExp flag .==. statusA) $ do
                           forM_ (zip aggrs aggregateArrays) $ \(aggr, aggregate) ->
                             copyDWIMFix (tvVar aggr) [] (Var aggregate) [sExt64 $ tvExp readI]
-                          used <-- (1 :: Imp.TExp Int8)
+                          used <-- 1
                       )
                   copyDWIMFix (tvVar flag) [] (intConst Int8 statusP) []
                 -- end sIf
@@ -414,7 +414,7 @@ compileSegScan pat lvl space scanOp kbody = do
 
                         flag1 <- dPrimV "flag1" statusX
                         flag2 <- dPrim "flag2" int8
-                        used1 <- dPrimV "used1" (0 :: Imp.TExp Int8)
+                        used1 <- dPrimV "used1" 0
                         used2 <- dPrim "used2" int8
                         sFor "i" warpSize $ \i -> do
                           copyDWIMFix (tvVar flag2) [] (Var warpscan) [sExt64 i]
