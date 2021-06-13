@@ -258,7 +258,9 @@ compileSegScan pat lvl space scanOp kbody = do
             ys = map paramName $ yParams scanOp
         -- determine if start of segment
         new_sgm <-
-          dPrimVE "new_sgm" $ (globalIdx + sExt32 i - boundary) `mod` segsize_compact .==. 0
+          if segmented
+            then dPrimVE "new_sgm" $ (globalIdx + sExt32 i - boundary) `mod` segsize_compact .==. 0
+            else pure false
         -- skip scan of first element in segment
         sUnless new_sgm $ do
           forM_ (zip privateArrays $ zip3 xs ys tys) $ \(src, (x, y, ty)) -> do
