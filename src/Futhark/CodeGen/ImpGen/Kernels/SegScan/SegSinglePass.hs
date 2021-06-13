@@ -119,6 +119,7 @@ compileSegScan pat lvl space scanOp kbody = do
       num_threads = unCount num_groups * unCount group_size
       (gtids, dims) = unzip $ unSegSpace space
       dims' = map toInt64Exp dims
+      segmented = length dims' > 1
       segment_size = last dims'
       scanOpNe = segBinOpNeutral scanOp
       tys = map (\(Prim pt) -> pt) $ lambdaReturnType $ segBinOpLambda scanOp
@@ -259,10 +260,10 @@ compileSegScan pat lvl space scanOp kbody = do
         let xs = map paramName $ xParams scanOp
             ys = map paramName $ yParams scanOp
         -- determine if start of segment
-        isNewSgm <-
+        new_sgm <-
           dPrimVE "new_sgm" $ (globalIdx + sExt32 i - boundary) `mod` segsize_compact .==. 0
         -- skip scan of first element in segment
-        sUnless isNewSgm $ do
+        sUnless new_sgm $ do
           forM_ (zip privateArrays $ zip3 xs ys tys) $ \(src, (x, y, ty)) -> do
             dPrim_ x ty
             dPrim_ y ty
@@ -278,7 +279,8 @@ compileSegScan pat lvl space scanOp kbody = do
         copyDWIMFix dest [sExt64 $ kernelLocalThreadId constants] (Var src) [m - 1]
       sOp localBarrier
 
-    let crossesSegment =
+    let crossesSegment = do
+          guard segmented
           Just $ \from to ->
             let from' = (from + 1) * m - 1
                 to' = (to + 1) * m - 1
@@ -363,9 +365,11 @@ compileSegScan pat lvl space scanOp kbody = do
                 dPrimV "readOffset" $
                   sExt32 $ tvExp dynamicId - sExt64 (kernelWaveSize constants)
               let loopStop = warpSize * (-1)
-                  sameSegment readIdx =
-                    let startIdx = sExt64 (tvExp readIdx + 1) * kernelGroupSize constants * m - 1
-                     in tvExp blockOff - startIdx .<=. sgmIdx
+                  sameSegment readIdx
+                    | segmented =
+                      let startIdx = sExt64 (tvExp readIdx + 1) * kernelGroupSize constants * m - 1
+                       in tvExp blockOff - startIdx .<=. sgmIdx
+                    | otherwise = true
               sWhile (tvExp readOffset .>. loopStop) $ do
                 readI <- dPrimV "read_i" $ tvExp readOffset + kernelLocalThreadId constants
                 aggrs <- forM (zip scanOpNe tys) $ \(ne, ty) ->
