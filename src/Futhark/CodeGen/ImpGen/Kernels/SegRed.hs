@@ -147,10 +147,11 @@ intermediateArrays (Count group_size) num_threads (SegBinOp _ red_op nes _) = do
 
 -- | Arrays for storing group results.
 --
--- The group-result arrays have an extra dimension (of size groupsize)
--- because they are also used for keeping vectorised accumulators for
--- first-stage reduction, if necessary.  When actually storing group
--- results, the first index is set to 0.
+-- The group-result arrays have an extra dimension because they are
+-- also used for keeping vectorised accumulators for first-stage
+-- reduction, if necessary.  If necessary, this dimension has size
+-- group_size, and otherwise 1.  When actually storing group results,
+-- the first index is set to 0.
 groupResultArrays ::
   Count NumGroups SubExp ->
   Count GroupSize SubExp ->
@@ -160,11 +161,14 @@ groupResultArrays (Count virt_num_groups) (Count group_size) reds =
   forM reds $ \(SegBinOp _ lam _ shape) ->
     forM (lambdaReturnType lam) $ \t -> do
       let pt = elemType t
-          full_shape = Shape [group_size, virt_num_groups] <> shape <> arrayShape t
+          extra_dim
+            | primType t = intConst Int64 1
+            | otherwise = group_size
+          full_shape = Shape [extra_dim, virt_num_groups] <> shape <> arrayShape t
           -- Move the groupsize dimension last to ensure coalesced
           -- memory access.
           perm = [1 .. shapeRank full_shape -1] ++ [0]
-      sAllocArrayPerm "group_res_arr" pt full_shape (Space "device") perm
+      sAllocArrayPerm "segred_tmp" pt full_shape (Space "device") perm
 
 nonsegmentedReduction ::
   Pattern KernelsMem ->
