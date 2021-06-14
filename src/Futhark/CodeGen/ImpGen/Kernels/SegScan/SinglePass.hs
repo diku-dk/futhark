@@ -113,8 +113,6 @@ compileSegScan pat lvl space scanOp kbody = do
   let Pattern _ all_pes = pat
       group_size = toInt64Exp <$> segGroupSize lvl
       n = product $ map toInt64Exp $ segSpaceDims space
-      m :: Num a => a
-      m = fromIntegral $ max 1 $ min mem_constraint reg_constraint
       num_groups = Count (n `divUp` (unCount group_size * m))
       num_threads = unCount num_groups * unCount group_size
       (gtids, dims) = unzip $ unSegSpace space
@@ -124,6 +122,7 @@ compileSegScan pat lvl space scanOp kbody = do
       segment_size = last dims'
       scanOpNe = segBinOpNeutral scanOp
       tys = map (\(Prim pt) -> pt) $ lambdaReturnType $ segBinOpLambda scanOp
+
       statusX, statusA, statusP :: Num a => a
       statusX = 0
       statusA = 1
@@ -133,6 +132,7 @@ compileSegScan pat lvl space scanOp kbody = do
       unmakeStatusUsed flagUsed flag used = do
         used <-- tvExp flagUsed .>>. 2
         flag <-- tvExp flagUsed .&. 3
+
       sumT :: Integer
       maxT :: Integer
       sumT = foldl (\bytes typ -> bytes + primByteSize typ) 0 tys
@@ -144,8 +144,9 @@ compileSegScan pat lvl space scanOp kbody = do
       k_reg = 64
       k_mem = 48 --12*4
       mem_constraint = max k_mem sumT `div` maxT
-      --reg_constraint = (k_reg `div` sumT) - 6
       reg_constraint = (k_reg -1 - sumT') `div` (2 * sumT' + 3)
+      m :: Num a => a
+      m = fromIntegral $ max 1 $ min mem_constraint reg_constraint
 
   -- Allocate the shared memory for output component
   numThreads <- dPrimV "numThreads" num_threads
