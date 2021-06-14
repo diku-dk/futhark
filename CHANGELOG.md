@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * A new memory reuse optimisation has been added.  This results in
     slightly lower footprint for many programs.
 
+  * The `cuda` backend now uses a fast single-pass implementation for
+    segmented `scan`s, due to Morten Tychsen Clausen (#1375).
+
 ### Removed
 
 ### Changed
@@ -22,6 +25,15 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
     test an undefined entry point (#1367).
 
   * `futhark pkg` now detects some nonsensical package paths (#1364).
+
+  * FutharkScript now parses `f x y` as applying `f` to `x` and `y`,
+    rather than as `f (x y)`.
+
+  * Some internal array utility functions would not be generated if
+    entry points exposed both unit arrays and boolean arrays (#1374).
+
+  * Nested reductions used (much) more memory for intermediate results
+    than strictly needed.
 
 ## [0.19.6]
 
