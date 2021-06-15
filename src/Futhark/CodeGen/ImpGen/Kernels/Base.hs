@@ -36,7 +36,7 @@ module Futhark.CodeGen.ImpGen.Kernels.Base
 where
 
 import Control.Monad.Except
-import Data.List (elemIndex, find, zip4)
+import Data.List (zip4)
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import qualified Data.Set as S
@@ -47,7 +47,7 @@ import Futhark.IR.KernelsMem
 import qualified Futhark.IR.Mem.IxFun as IxFun
 import Futhark.MonadFreshNames
 import Futhark.Transform.Rename
-import Futhark.Util (chunks, dropLast, mapAccumLM, maybeNth, nubOrd, takeLast)
+import Futhark.Util (chunks, dropLast, mapAccumLM, nubOrd, takeLast)
 import Futhark.Util.IntegralExp (divUp, quot, rem)
 import Prelude hiding (quot, rem)
 
@@ -591,7 +591,7 @@ atomicUpdateLocking ::
   Lambda KernelsMem ->
   AtomicUpdate KernelsMem KernelEnv
 atomicUpdateLocking atomicBinOp lam
-  | Just ops_and_ts <- splitOp lam,
+  | Just ops_and_ts <- lamIsBinOp lam,
     all (\(_, t, _, _) -> primBitSize t `elem` [32, 64]) ops_and_ts =
     primOrCas ops_and_ts $ \space arrs bucket ->
       -- If the operator is a vectorised binary operator on 32/64-bit
@@ -774,24 +774,6 @@ atomicUpdateCAS space t arr old bucket x do_op = do
     old <~~ fromBits old_bits
     let won = CmpOpExp (CmpEq int) (toBits (Imp.var assumed t)) old_bits
     sWhen (isBool won) (run_loop <-- false)
-
--- | Horizontally fission a lambda that models a binary operator.
-splitOp :: ASTLore lore => Lambda lore -> Maybe [(BinOp, PrimType, VName, VName)]
-splitOp lam = mapM splitStm $ bodyResult $ lambdaBody lam
-  where
-    n = length $ lambdaReturnType lam
-    splitStm (Var res) = do
-      Let (Pattern [] [pe]) _ (BasicOp (BinOp op (Var x) (Var y))) <-
-        find (([res] ==) . patternNames . stmPattern) $
-          stmsToList $ bodyStms $ lambdaBody lam
-      i <- Var res `elemIndex` bodyResult (lambdaBody lam)
-      xp <- maybeNth i $ lambdaParams lam
-      yp <- maybeNth (n + i) $ lambdaParams lam
-      guard $ paramName xp == x
-      guard $ paramName yp == y
-      Prim t <- Just $ patElemType pe
-      return (op, t, paramName xp, paramName yp)
-    splitStm _ = Nothing
 
 computeKernelUses ::
   FreeIn a =>
