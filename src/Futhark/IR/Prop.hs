@@ -35,13 +35,15 @@ module Futhark.IR.Prop
     certify,
     expExtTypesFromPattern,
     attrsForAssert,
+    lamIsBinOp,
     ASTConstraints,
     IsOp (..),
     ASTLore (..),
   )
 where
 
-import Data.List (find)
+import Control.Monad
+import Data.List (elemIndex, find)
 import qualified Data.Map.Strict as M
 import Data.Maybe (isJust, mapMaybe)
 import qualified Data.Set as S
@@ -57,6 +59,7 @@ import Futhark.IR.RetType
 import Futhark.IR.Syntax
 import Futhark.Transform.Rename (Rename, Renameable)
 import Futhark.Transform.Substitute (Substitutable, Substitute)
+import Futhark.Util (maybeNth)
 import Futhark.Util.Pretty
 
 -- | @isBuiltInFunction k@ is 'True' if @k@ is an element of 'builtInFunctions'.
@@ -244,3 +247,21 @@ attrsForAssert (Attrs attrs) =
   Attrs $ S.filter attrForAssert attrs
   where
     attrForAssert = (== AttrComp "warn" ["safety_checks"])
+
+-- | Horizontally fission a lambda that models a binary operator.
+lamIsBinOp :: ASTLore lore => Lambda lore -> Maybe [(BinOp, PrimType, VName, VName)]
+lamIsBinOp lam = mapM splitStm $ bodyResult $ lambdaBody lam
+  where
+    n = length $ lambdaReturnType lam
+    splitStm (Var res) = do
+      Let (Pattern [] [pe]) _ (BasicOp (BinOp op (Var x) (Var y))) <-
+        find (([res] ==) . patternNames . stmPattern) $
+          stmsToList $ bodyStms $ lambdaBody lam
+      i <- Var res `elemIndex` bodyResult (lambdaBody lam)
+      xp <- maybeNth i $ lambdaParams lam
+      yp <- maybeNth (n + i) $ lambdaParams lam
+      guard $ paramName xp == x
+      guard $ paramName yp == y
+      Prim t <- Just $ patElemType pe
+      return (op, t, paramName xp, paramName yp)
+    splitStm _ = Nothing

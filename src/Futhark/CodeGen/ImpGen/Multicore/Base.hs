@@ -23,7 +23,6 @@ where
 
 import Control.Monad
 import Data.Bifunctor
-import Data.List (elemIndex, find)
 import qualified Data.Map as M
 import Data.Maybe
 import qualified Futhark.CodeGen.ImpCode.Multicore as Imp
@@ -31,7 +30,6 @@ import Futhark.CodeGen.ImpGen
 import Futhark.Error
 import Futhark.IR.MCMem
 import Futhark.Transform.Rename
-import Futhark.Util (maybeNth)
 import Prelude hiding (quot, rem)
 
 -- | Is there an atomic t'BinOp' corresponding to this t'BinOp'?
@@ -262,7 +260,7 @@ atomicUpdateLocking ::
   Lambda MCMem ->
   AtomicUpdate MCMem ()
 atomicUpdateLocking atomicBinOp lam
-  | Just ops_and_ts <- splitOp lam,
+  | Just ops_and_ts <- lamIsBinOp lam,
     all (\(_, t, _, _) -> supportedPrims $ primBitSize t) ops_and_ts =
     primOrCas ops_and_ts $ \arrs bucket ->
       -- If the operator is a vectorised binary operator on 32-bit values,
@@ -408,24 +406,6 @@ atomicUpdateCAS t arr old bucket x do_op = do
           (sExt32 <$> bucket_offset)
           (tvVar run_loop)
           (toBits (Imp.var x t))
-
--- | Horizontally fission a lambda that models a binary operator.
-splitOp :: ASTLore lore => Lambda lore -> Maybe [(BinOp, PrimType, VName, VName)]
-splitOp lam = mapM splitStm $ bodyResult $ lambdaBody lam
-  where
-    n = length $ lambdaReturnType lam
-    splitStm (Var res) = do
-      Let (Pattern [] [pe]) _ (BasicOp (BinOp op (Var x) (Var y))) <-
-        find (([res] ==) . patternNames . stmPattern) $
-          stmsToList $ bodyStms $ lambdaBody lam
-      i <- Var res `elemIndex` bodyResult (lambdaBody lam)
-      xp <- maybeNth i $ lambdaParams lam
-      yp <- maybeNth (n + i) $ lambdaParams lam
-      guard $ paramName xp == x
-      guard $ paramName yp == y
-      Prim t <- Just $ patElemType pe
-      return (op, t, paramName xp, paramName yp)
-    splitStm _ = Nothing
 
 -- TODO for supporting 8 and 16 bits (and 128)
 -- we need a functions for converting to and from bits

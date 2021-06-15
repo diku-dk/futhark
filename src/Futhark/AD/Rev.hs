@@ -609,6 +609,17 @@ diffMap pat_adj w map_lam as = do
           void $ updateAdj v contrib_sum
 
 diffReduce :: [VName] -> SubExp -> [VName] -> Reduce SOACS -> ADM ()
+diffReduce [adj] w [a] red
+  | Just [(op, _, _, _)] <- lamIsBinOp $ redLambda red,
+    isAdd op = do
+    adj_rep <-
+      letExp (baseString adj <> "_rep") $
+        BasicOp $ Replicate (Shape [w]) $ Var adj
+    void $ updateAdj a adj_rep
+  where
+    isAdd FAdd {} = True
+    isAdd Add {} = True
+    isAdd _ = False
 diffReduce pat_adj w as red = do
   red' <- renameRed red
   flip_red <- renameRed =<< flipReduce red
