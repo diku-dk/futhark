@@ -141,16 +141,16 @@ matches (Usages x) (Usages y) = x == (x .&. y)
 withoutU :: Usages -> Usages -> Usages
 withoutU (Usages x) (Usages y) = Usages $ x .&. complement y
 
-usageInBody :: Aliased lore => Body lore -> UsageTable
+usageInBody :: Aliased rep => Body rep -> UsageTable
 usageInBody = foldMap consumedUsage . namesToList . consumedInBody
 
 -- | Produce a usage table reflecting the use of the free variables in
 -- a single statement.
-usageInStm :: (ASTLore lore, Aliased lore) => Stm lore -> UsageTable
-usageInStm (Let pat lore e) =
+usageInStm :: (ASTRep rep, Aliased rep) => Stm rep -> UsageTable
+usageInStm (Let pat rep e) =
   mconcat
     [ usageInPat,
-      usageInExpLore,
+      usageInExpDec,
       usageInExp e,
       usages (freeIn e)
     ]
@@ -161,10 +161,10 @@ usageInStm (Let pat lore e) =
             `namesSubtract` namesFromList (patternNames pat)
         )
         <> sizeUsages (foldMap (freeIn . patElemType) (patternElements pat))
-    usageInExpLore =
-      usages $ freeIn lore
+    usageInExpDec =
+      usages $ freeIn rep
 
-usageInExp :: Aliased lore => Exp lore -> UsageTable
+usageInExp :: Aliased rep => Exp rep -> UsageTable
 usageInExp (Apply _ args _ _) =
   mconcat
     [ mconcat $

@@ -20,7 +20,7 @@ import qualified Futhark.IR.Kernels.Simplify as Kernels
 import Futhark.IR.KernelsMem
 import qualified Futhark.IR.Mem.IxFun as IxFun
 import Futhark.MonadFreshNames
-import Futhark.Optimise.Simplify.Lore (addScopeWisdom)
+import Futhark.Optimise.Simplify.Rep (addScopeWisdom)
 import Futhark.Pass
 import Futhark.Pass.ExplicitAllocations.Kernels (explicitAllocationsInStms)
 import Futhark.Pass.ExtractKernels.BlockedKernel (nonSegRed)

@@ -1075,7 +1075,7 @@ readTile2D (kdim_x, kdim_y) (gtid_x, gtid_y) (gid_x, gid_y) tile_size num_groups
           TileFull ->
             mapM readTileElem arrs_and_perms
 
-findTileSize :: HasScope lore m => [InputTile] -> m SubExp
+findTileSize :: HasScope rep m => [InputTile] -> m SubExp
 findTileSize tiles =
   case mapMaybe isTiled tiles of
     v : _ -> arraySize 0 <$> lookupType v

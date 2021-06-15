@@ -29,7 +29,7 @@ import qualified Futhark.TypeCheck as TC
 
 data MCMem
 
-instance Decorations MCMem where
+instance RepTypes MCMem where
   type LetDec MCMem = LetDecMem
   type FParamInfo MCMem = FParamMem
   type LParamInfo MCMem = LParamMem
@@ -37,7 +37,7 @@ instance Decorations MCMem where
   type BranchType MCMem = BranchTypeMem
   type Op MCMem = MemOp (MCOp MCMem ())
 
-instance ASTLore MCMem where
+instance ASTRep MCMem where
   expTypesFromPattern = return . map snd . snd . bodyReturnsFromPattern
 
 instance OpReturns MCMem where
@@ -45,7 +45,7 @@ instance OpReturns MCMem where
   opReturns (Inner (ParOp _ op)) = segOpReturns op
   opReturns (Inner (OtherOp ())) = pure []
 
-instance PrettyLore MCMem
+instance PrettyRep MCMem
 
 instance TC.CheckableOp MCMem where
   checkOp = typeCheckMemoryOp
@@ -56,9 +56,9 @@ instance TC.CheckableOp MCMem where
         typeCheckMCOp pure op
 
 instance TC.Checkable MCMem where
-  checkFParamLore = checkMemInfo
-  checkLParamLore = checkMemInfo
-  checkLetBoundLore = checkMemInfo
+  checkFParamDec = checkMemInfo
+  checkLParamDec = checkMemInfo
+  checkLetBoundDec = checkMemInfo
   checkRetType = mapM_ (TC.checkExtType . declExtTypeOf)
   primFParam name t = return $ Param name (MemPrim t)
   matchPattern = matchPatternToExp

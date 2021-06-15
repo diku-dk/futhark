@@ -21,7 +21,7 @@ import qualified Futhark.IR.SOACS.Simplify as SOAC
 import Futhark.MonadFreshNames
 import qualified Futhark.Optimise.Simplify as Simplify
 import qualified Futhark.Optimise.Simplify.Engine as Engine
-import Futhark.Optimise.Simplify.Lore
+import Futhark.Optimise.Simplify.Rep
 import Futhark.Optimise.Simplify.Rule
 import Futhark.Optimise.Simplify.Rules
 import Futhark.Pass
@@ -43,12 +43,12 @@ simplifyLambda =
   Simplify.simplifyLambda simpleKernels kernelRules Engine.noExtraHoistBlockers
 
 simplifyKernelOp ::
-  ( Engine.SimplifiableLore lore,
-    BodyDec lore ~ ()
+  ( Engine.SimplifiableRep rep,
+    BodyDec rep ~ ()
   ) =>
-  Simplify.SimplifyOp lore op ->
-  HostOp lore op ->
-  Engine.SimpleM lore (HostOp (Wise lore) (OpWithWisdom op), Stms (Wise lore))
+  Simplify.SimplifyOp rep op ->
+  HostOp rep op ->
+  Engine.SimpleM rep (HostOp (Wise rep) (OpWithWisdom op), Stms (Wise rep))
 simplifyKernelOp f (OtherOp op) = do
   (op', stms) <- f op
   return (OtherOp op', stms)
