@@ -608,25 +608,23 @@ diffMap pat_adj w map_lam as = do
               Op $ Screma w [contribs] reduce
           void $ updateAdj v contrib_sum
 
-diffSOAC :: Pattern -> StmAux () -> SOAC SOACS -> ADM () -> ADM ()
-diffSOAC pat aux soac@(Screma w as form) m
-  | Just red <- singleReduce <$> isReduceSOAC form = do
-    pat_adj <- commonSOAC pat aux soac m
-    red' <- renameRed red
-    flip_red <- renameRed =<< flipReduce red
-    ls <- scanExc "ls" (redToScan red') as
-    rs <-
-      mapM eReverse
-        =<< scanExc "ls" (redToScan flip_red)
-        =<< mapM eReverse as
+diffReduce :: [VName] -> SubExp -> [VName] -> Reduce SOACS -> ADM ()
+diffReduce pat_adj w as red = do
+  red' <- renameRed red
+  flip_red <- renameRed =<< flipReduce red
+  ls <- scanExc "ls" (redToScan red') as
+  rs <-
+    mapM eReverse
+      =<< scanExc "ls" (redToScan flip_red)
+      =<< mapM eReverse as
 
-    (as_params, f) <- mkF $ redLambda red
+  (as_params, f) <- mkF $ redLambda red
 
-    f_adj <- diffLambda pat_adj as_params f
+  f_adj <- diffLambda pat_adj as_params f
 
-    as_adj <- letTupExp "adjs" $ Op $ Screma w (ls ++ as ++ rs) (mapSOAC f_adj)
+  as_adj <- letTupExp "adjs" $ Op $ Screma w (ls ++ as ++ rs) (mapSOAC f_adj)
 
-    zipWithM_ updateAdj as as_adj
+  zipWithM_ updateAdj as as_adj
   where
     renameRed (Reduce comm lam nes) =
       Reduce comm <$> renameLambda lam <*> pure nes
@@ -650,12 +648,16 @@ diffSOAC pat aux soac@(Screma w as form) m
           letBindNames [paramName ip] $ BasicOp $ SubExp se
         bodyBind $ lambdaBody lam_r
       pure (map paramName aps, lam')
---
+
+diffSOAC :: Pattern -> StmAux () -> SOAC SOACS -> ADM () -> ADM ()
+diffSOAC pat aux soac@(Screma w as form) m
+  | Just red <- singleReduce <$> isReduceSOAC form = do
+    pat_adj <- commonSOAC pat aux soac m
+    diffReduce pat_adj w as red
 diffSOAC pat aux soac@(Screma w as form) m
   | Just lam <- isMapSOAC form = do
     pat_adj <- commonSOAC pat aux soac m
     diffMap pat_adj w lam as
---
 diffSOAC pat _aux (Screma w as form) m
   | Just (Reduce comm red_lam nes, map_lam) <-
       first singleReduce <$> isRedomapSOAC form = do
