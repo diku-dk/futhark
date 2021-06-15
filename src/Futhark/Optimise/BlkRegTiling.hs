@@ -416,7 +416,7 @@ mmBlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kbo
     return $ Just (host_stms, new_kernel)
 mmBlkRegTiling _ = return Nothing
 
-ceilDiv :: MonadBinder m => SubExp -> SubExp -> m (Exp (Lore m))
+ceilDiv :: MonadBinder m => SubExp -> SubExp -> m (Exp (Rep m))
 ceilDiv x y = pure $ BasicOp $ BinOp (SDivUp Int64 Unsafe) x y
 
 scratch :: MonadBinder m => String -> PrimType -> [SubExp] -> m VName

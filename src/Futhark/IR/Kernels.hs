@@ -3,8 +3,7 @@
 
 -- | A representation with flat parallelism via GPU-oriented kernels.
 module Futhark.IR.Kernels
-  ( -- * The Lore definition
-    Kernels,
+  ( Kernels,
 
     -- * Module re-exports
     module Futhark.IR.Prop,
@@ -31,10 +30,10 @@ import qualified Futhark.TypeCheck as TypeCheck
 -- | The phantom data type for the kernels representation.
 data Kernels
 
-instance Decorations Kernels where
+instance RepTypes Kernels where
   type Op Kernels = HostOp Kernels (SOAC Kernels)
 
-instance ASTLore Kernels where
+instance ASTRep Kernels where
   expTypesFromPattern = return . expExtTypesFromPattern
 
 instance TypeCheck.CheckableOp Kernels where
@@ -53,7 +52,7 @@ instance Bindable Kernels where
 
 instance BinderOps Kernels
 
-instance PrettyLore Kernels
+instance PrettyRep Kernels
 
 instance HasSegOp Kernels where
   type SegOpLevel Kernels = SegLevel

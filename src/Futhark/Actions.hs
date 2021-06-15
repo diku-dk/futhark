@@ -46,7 +46,7 @@ import System.FilePath
 import qualified System.Info
 
 -- | Print the result to stdout.
-printAction :: ASTLore lore => Action lore
+printAction :: ASTRep rep => Action rep
 printAction =
   Action
     { actionName = "Prettyprint",
@@ -55,7 +55,7 @@ printAction =
     }
 
 -- | Print the result to stdout, alias annotations.
-printAliasesAction :: (ASTLore lore, CanBeAliased (Op lore)) => Action lore
+printAliasesAction :: (ASTRep rep, CanBeAliased (Op rep)) => Action rep
 printAliasesAction =
   Action
     { actionName = "Prettyprint",
@@ -64,7 +64,7 @@ printAliasesAction =
     }
 
 -- | Print metrics about AST node counts to stdout.
-metricsAction :: OpMetrics (Op lore) => Action lore
+metricsAction :: OpMetrics (Op rep) => Action rep
 metricsAction =
   Action
     { actionName = "Compute metrics",

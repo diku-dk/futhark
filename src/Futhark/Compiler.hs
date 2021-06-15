@@ -70,8 +70,8 @@ dumpError config err =
 -- 'Pipeline', and finish up with the given 'Action'.
 runCompilerOnProgram ::
   FutharkConfig ->
-  Pipeline I.SOACS lore ->
-  Action lore ->
+  Pipeline I.SOACS rep ->
+  Action rep ->
   FilePath ->
   IO ()
 runCompilerOnProgram config pipeline action file = do
@@ -95,9 +95,9 @@ runCompilerOnProgram config pipeline action file = do
 -- 'Pipeline', and return it.
 runPipelineOnProgram ::
   FutharkConfig ->
-  Pipeline I.SOACS tolore ->
+  Pipeline I.SOACS torep ->
   FilePath ->
-  FutharkM (Prog tolore)
+  FutharkM (Prog torep)
 runPipelineOnProgram config pipeline file = do
   when (pipelineVerbose pipeline_config) $
     logMsg ("Reading and type-checking source program" :: String)

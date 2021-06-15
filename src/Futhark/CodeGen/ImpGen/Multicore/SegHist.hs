@@ -30,7 +30,7 @@ compileSegHist pat space histops kbody nsubtasks
 
 -- | Split some list into chunks equal to the number of values
 -- returned by each 'SegBinOp'
-segHistOpChunks :: [HistOp lore] -> [a] -> [[a]]
+segHistOpChunks :: [HistOp rep] -> [a] -> [[a]]
 segHistOpChunks = chunks . map (length . histNeutral)
 
 nonsegmentedHist ::

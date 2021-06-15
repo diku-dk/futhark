@@ -155,7 +155,7 @@ splitSpace ::
   w ->
   i ->
   elems_per_thread ->
-  ImpM lore r op ()
+  ImpM rep r op ()
 splitSpace (Pattern [] [size]) o w i elems_per_thread = do
   num_elements <- Imp.elements . TPrimExp <$> toExp w
   let i' = toInt64Exp i
@@ -566,19 +566,19 @@ data Locking = Locking
 
 -- | A function for generating code for an atomic update.  Assumes
 -- that the bucket is in-bounds.
-type DoAtomicUpdate lore r =
-  Space -> [VName] -> [Imp.TExp Int64] -> ImpM lore r Imp.KernelOp ()
+type DoAtomicUpdate rep r =
+  Space -> [VName] -> [Imp.TExp Int64] -> ImpM rep r Imp.KernelOp ()
 
 -- | The mechanism that will be used for performing the atomic update.
 -- Approximates how efficient it will be.  Ordered from most to least
 -- efficient.
-data AtomicUpdate lore r
+data AtomicUpdate rep r
   = -- | Supported directly by primitive.
-    AtomicPrim (DoAtomicUpdate lore r)
+    AtomicPrim (DoAtomicUpdate rep r)
   | -- | Can be done by efficient swaps.
-    AtomicCAS (DoAtomicUpdate lore r)
+    AtomicCAS (DoAtomicUpdate rep r)
   | -- | Requires explicit locking.
-    AtomicLocking (Locking -> DoAtomicUpdate lore r)
+    AtomicLocking (Locking -> DoAtomicUpdate rep r)
 
 -- | Is there an atomic t'BinOp' corresponding to this t'BinOp'?
 type AtomicBinOp =
@@ -804,7 +804,7 @@ readsFromSet free =
 isConstExp ::
   VTable KernelsMem ->
   Imp.Exp ->
-  ImpM lore r op (Maybe Imp.KernelConstExp)
+  ImpM rep r op (Maybe Imp.KernelConstExp)
 isConstExp vtable size = do
   fname <- askFunction
   let onLeaf (Imp.ScalarVar name) _ = lookupConstExp name
@@ -827,7 +827,7 @@ computeThreadChunkSize ::
   Imp.Count Imp.Elements (Imp.TExp Int64) ->
   Imp.Count Imp.Elements (Imp.TExp Int64) ->
   TV Int64 ->
-  ImpM lore r op ()
+  ImpM rep r op ()
 computeThreadChunkSize (SplitStrided stride) thread_index elements_per_thread num_elements chunk_var =
   chunk_var
     <-- sMin64

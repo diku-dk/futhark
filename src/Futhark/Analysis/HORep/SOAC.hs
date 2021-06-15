@@ -226,7 +226,7 @@ combineTransforms _ _ = Nothing
 -- an input transformation of an array variable.  If so, return the
 -- variable and the transformation.  Only 'Rearrange' and 'Reshape'
 -- are possible to express this way.
-transformFromExp :: Certificates -> Exp lore -> Maybe (VName, ArrayTransform)
+transformFromExp :: Certificates -> Exp rep -> Maybe (VName, ArrayTransform)
 transformFromExp cs (BasicOp (Futhark.Rearrange perm v)) =
   Just (v, Rearrange cs perm)
 transformFromExp cs (BasicOp (Futhark.Reshape shape v)) =
@@ -374,11 +374,11 @@ transposeInput k n inp =
   addTransform (Rearrange mempty $ transposeIndex k n [0 .. inputRank inp -1]) inp
 
 -- | A definite representation of a SOAC expression.
-data SOAC lore
-  = Stream SubExp (StreamForm lore) (Lambda lore) [SubExp] [Input]
-  | Scatter SubExp (Lambda lore) [Input] [(Shape, Int, VName)]
-  | Screma SubExp (ScremaForm lore) [Input]
-  | Hist SubExp [HistOp lore] (Lambda lore) [Input]
+data SOAC rep
+  = Stream SubExp (StreamForm rep) (Lambda rep) [SubExp] [Input]
+  | Scatter SubExp (Lambda rep) [Input] [(Shape, Int, VName)]
+  | Screma SubExp (ScremaForm rep) [Input]
+  | Hist SubExp [HistOp rep] (Lambda rep) [Input]
   deriving (Eq, Show)
 
 instance PP.Pretty Input where
@@ -395,21 +395,21 @@ instance PP.Pretty Input where
       f e (Replicate cs ne) =
         text "replicate" <> ppr cs <> PP.apply [ppr ne, e]
 
-instance PrettyLore lore => PP.Pretty (SOAC lore) where
+instance PrettyRep rep => PP.Pretty (SOAC rep) where
   ppr (Screma w form arrs) = Futhark.ppScrema w arrs form
   ppr (Hist len ops bucket_fun imgs) =
     Futhark.ppHist len ops bucket_fun imgs
   ppr soac = text $ show soac
 
 -- | Returns the inputs used in a SOAC.
-inputs :: SOAC lore -> [Input]
+inputs :: SOAC rep -> [Input]
 inputs (Stream _ _ _ _ arrs) = arrs
 inputs (Scatter _len _lam ivs _as) = ivs
 inputs (Screma _ _ arrs) = arrs
 inputs (Hist _ _ _ inps) = inps
 
 -- | Set the inputs to a SOAC.
-setInputs :: [Input] -> SOAC lore -> SOAC lore
+setInputs :: [Input] -> SOAC rep -> SOAC rep
 setInputs arrs (Stream w form lam nes _) =
   Stream (newWidth arrs w) form lam nes arrs
 setInputs arrs (Scatter w lam _ivs as) =
@@ -424,14 +424,14 @@ newWidth [] w = w
 newWidth (inp : _) _ = arraySize 0 $ inputType inp
 
 -- | The lambda used in a given SOAC.
-lambda :: SOAC lore -> Lambda lore
+lambda :: SOAC rep -> Lambda rep
 lambda (Stream _ _ lam _ _) = lam
 lambda (Scatter _len lam _ivs _as) = lam
 lambda (Screma _ (ScremaForm _ _ lam) _) = lam
 lambda (Hist _ _ lam _) = lam
 
 -- | Set the lambda used in the SOAC.
-setLambda :: Lambda lore -> SOAC lore -> SOAC lore
+setLambda :: Lambda rep -> SOAC rep -> SOAC rep
 setLambda lam (Stream w form _ nes arrs) =
   Stream w form lam nes arrs
 setLambda lam (Scatter len _lam ivs as) =
@@ -442,7 +442,7 @@ setLambda lam (Hist w ops _ inps) =
   Hist w ops lam inps
 
 -- | The return type of a SOAC.
-typeOf :: SOAC lore -> [Type]
+typeOf :: SOAC rep -> [Type]
 typeOf (Stream w _ lam nes _) =
   let accrtps = take (length nes) $ lambdaReturnType lam
       arrtps =
@@ -464,7 +464,7 @@ typeOf (Hist _ ops _ _) = do
 
 -- | The "width" of a SOAC is the expected outer size of its array
 -- inputs _after_ input-transforms have been carried out.
-width :: SOAC lore -> SubExp
+width :: SOAC rep -> SubExp
 width (Stream w _ _ _ _) = w
 width (Scatter len _lam _ivs _as) = len
 width (Screma w _ _) = w
@@ -472,16 +472,16 @@ width (Hist w _ _ _) = w
 
 -- | Convert a SOAC to the corresponding expression.
 toExp ::
-  (MonadBinder m, Op (Lore m) ~ Futhark.SOAC (Lore m)) =>
-  SOAC (Lore m) ->
-  m (Exp (Lore m))
+  (MonadBinder m, Op (Rep m) ~ Futhark.SOAC (Rep m)) =>
+  SOAC (Rep m) ->
+  m (Exp (Rep m))
 toExp soac = Op <$> toSOAC soac
 
 -- | Convert a SOAC to a Futhark-level SOAC.
 toSOAC ::
   MonadBinder m =>
-  SOAC (Lore m) ->
-  m (Futhark.SOAC (Lore m))
+  SOAC (Rep m) ->
+  m (Futhark.SOAC (Rep m))
 toSOAC (Stream w form lam nes inps) =
   Futhark.Stream w <$> inputsToSubExps inps <*> pure form <*> pure nes <*> pure lam
 toSOAC (Scatter len lam ivs dests) = do
@@ -503,9 +503,9 @@ data NotSOAC
 -- representation, or a reason why the expression does not have the
 -- valid form.
 fromExp ::
-  (Op lore ~ Futhark.SOAC lore, HasScope lore m) =>
-  Exp lore ->
-  m (Either NotSOAC (SOAC lore))
+  (Op rep ~ Futhark.SOAC rep, HasScope rep m) =>
+  Exp rep ->
+  m (Either NotSOAC (SOAC rep))
 fromExp (Op (Futhark.Stream w as form nes lam)) =
   Right . Stream w form lam nes <$> traverse varInput as
 fromExp (Op (Futhark.Scatter len lam ivs as)) =
@@ -520,9 +520,9 @@ fromExp _ = pure $ Left NotSOAC
 --   Returns the Stream SOAC and the
 --   extra-accumulator body-result ident if any.
 soacToStream ::
-  (MonadFreshNames m, Bindable lore, Op lore ~ Futhark.SOAC lore) =>
-  SOAC lore ->
-  m (SOAC lore, [Ident])
+  (MonadFreshNames m, Bindable rep, Op rep ~ Futhark.SOAC rep) =>
+  SOAC rep ->
+  m (SOAC rep, [Ident])
 soacToStream soac = do
   chunk_param <- newParam "chunk" $ Prim int64
   let chvar = Futhark.Var $ paramName chunk_param
@@ -690,10 +690,10 @@ soacToStream soac = do
     _ -> return (soac, [])
   where
     mkMapPlusAccLam ::
-      (MonadFreshNames m, Bindable lore) =>
+      (MonadFreshNames m, Bindable rep) =>
       [SubExp] ->
-      Lambda lore ->
-      m (Lambda lore)
+      Lambda rep ->
+      m (Lambda rep)
     mkMapPlusAccLam accs plus = do
       let (accpars, rempars) = splitAt (length accs) $ lambdaParams plus
           parbnds =
@@ -715,10 +715,10 @@ soacToStream soac = do
       renameLambda $ Lambda rempars newlambdy $ lambdaReturnType plus
 
     mkPlusBnds ::
-      (MonadFreshNames m, Bindable lore) =>
-      Lambda lore ->
+      (MonadFreshNames m, Bindable rep) =>
+      Lambda rep ->
       [SubExp] ->
-      m (Body lore)
+      m (Body rep)
     mkPlusBnds plus accels = do
       plus' <- renameLambda plus
       let parbnds =

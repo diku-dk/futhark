@@ -132,16 +132,16 @@ fvNames :: Names -> FV
 fvNames = FV
 
 freeWalker ::
-  ( FreeDec (ExpDec lore),
-    FreeDec (BodyDec lore),
-    FreeIn (FParamInfo lore),
-    FreeIn (LParamInfo lore),
-    FreeIn (LetDec lore),
-    FreeIn (RetType lore),
-    FreeIn (BranchType lore),
-    FreeIn (Op lore)
+  ( FreeDec (ExpDec rep),
+    FreeDec (BodyDec rep),
+    FreeIn (FParamInfo rep),
+    FreeIn (LParamInfo rep),
+    FreeIn (LetDec rep),
+    FreeIn (RetType rep),
+    FreeIn (BranchType rep),
+    FreeIn (Op rep)
   ) =>
-  Walker lore (State FV)
+  Walker rep (State FV)
 freeWalker =
   Walker
     { walkOnSubExp = modify . (<>) . freeIn',
@@ -160,16 +160,16 @@ freeWalker =
 -- statements and result.  Filters away the names that are bound by
 -- the statements.
 freeInStmsAndRes ::
-  ( FreeIn (Op lore),
-    FreeIn (LetDec lore),
-    FreeIn (LParamInfo lore),
-    FreeIn (FParamInfo lore),
-    FreeDec (BodyDec lore),
-    FreeIn (RetType lore),
-    FreeIn (BranchType lore),
-    FreeDec (ExpDec lore)
+  ( FreeIn (Op rep),
+    FreeIn (LetDec rep),
+    FreeIn (LParamInfo rep),
+    FreeIn (FParamInfo rep),
+    FreeDec (BodyDec rep),
+    FreeIn (RetType rep),
+    FreeIn (BranchType rep),
+    FreeDec (ExpDec rep)
   ) =>
-  Stms lore ->
+  Stms rep ->
   Result ->
   FV
 freeInStmsAndRes stms res =
@@ -207,63 +207,63 @@ instance FreeIn a => FreeIn [a] where
   freeIn' = foldMap freeIn'
 
 instance
-  ( FreeDec (ExpDec lore),
-    FreeDec (BodyDec lore),
-    FreeIn (FParamInfo lore),
-    FreeIn (LParamInfo lore),
-    FreeIn (LetDec lore),
-    FreeIn (RetType lore),
-    FreeIn (BranchType lore),
-    FreeIn (Op lore)
+  ( FreeDec (ExpDec rep),
+    FreeDec (BodyDec rep),
+    FreeIn (FParamInfo rep),
+    FreeIn (LParamInfo rep),
+    FreeIn (LetDec rep),
+    FreeIn (RetType rep),
+    FreeIn (BranchType rep),
+    FreeIn (Op rep)
   ) =>
-  FreeIn (FunDef lore)
+  FreeIn (FunDef rep)
   where
   freeIn' (FunDef _ _ _ rettype params body) =
     fvBind (namesFromList $ map paramName params) $
       freeIn' rettype <> freeIn' params <> freeIn' body
 
 instance
-  ( FreeDec (ExpDec lore),
-    FreeDec (BodyDec lore),
-    FreeIn (FParamInfo lore),
-    FreeIn (LParamInfo lore),
-    FreeIn (LetDec lore),
-    FreeIn (RetType lore),
-    FreeIn (BranchType lore),
-    FreeIn (Op lore)
+  ( FreeDec (ExpDec rep),
+    FreeDec (BodyDec rep),
+    FreeIn (FParamInfo rep),
+    FreeIn (LParamInfo rep),
+    FreeIn (LetDec rep),
+    FreeIn (RetType rep),
+    FreeIn (BranchType rep),
+    FreeIn (Op rep)
   ) =>
-  FreeIn (Lambda lore)
+  FreeIn (Lambda rep)
   where
   freeIn' (Lambda params body rettype) =
     fvBind (namesFromList $ map paramName params) $
       freeIn' rettype <> freeIn' params <> freeIn' body
 
 instance
-  ( FreeDec (ExpDec lore),
-    FreeDec (BodyDec lore),
-    FreeIn (FParamInfo lore),
-    FreeIn (LParamInfo lore),
-    FreeIn (LetDec lore),
-    FreeIn (RetType lore),
-    FreeIn (BranchType lore),
-    FreeIn (Op lore)
+  ( FreeDec (ExpDec rep),
+    FreeDec (BodyDec rep),
+    FreeIn (FParamInfo rep),
+    FreeIn (LParamInfo rep),
+    FreeIn (LetDec rep),
+    FreeIn (RetType rep),
+    FreeIn (BranchType rep),
+    FreeIn (Op rep)
   ) =>
-  FreeIn (Body lore)
+  FreeIn (Body rep)
   where
   freeIn' (Body dec stms res) =
     precomputed dec $ freeIn' dec <> freeInStmsAndRes stms res
 
 instance
-  ( FreeDec (ExpDec lore),
-    FreeDec (BodyDec lore),
-    FreeIn (FParamInfo lore),
-    FreeIn (LParamInfo lore),
-    FreeIn (LetDec lore),
-    FreeIn (RetType lore),
-    FreeIn (BranchType lore),
-    FreeIn (Op lore)
+  ( FreeDec (ExpDec rep),
+    FreeDec (BodyDec rep),
+    FreeIn (FParamInfo rep),
+    FreeIn (LParamInfo rep),
+    FreeIn (LetDec rep),
+    FreeIn (RetType rep),
+    FreeIn (BranchType rep),
+    FreeIn (Op rep)
   ) =>
-  FreeIn (Exp lore)
+  FreeIn (Exp rep)
   where
   freeIn' (DoLoop ctxmerge valmerge form loopbody) =
     let (ctxparams, ctxinits) = unzip ctxmerge
@@ -282,22 +282,22 @@ instance
   freeIn' e = execState (walkExpM freeWalker e) mempty
 
 instance
-  ( FreeDec (ExpDec lore),
-    FreeDec (BodyDec lore),
-    FreeIn (FParamInfo lore),
-    FreeIn (LParamInfo lore),
-    FreeIn (LetDec lore),
-    FreeIn (RetType lore),
-    FreeIn (BranchType lore),
-    FreeIn (Op lore)
+  ( FreeDec (ExpDec rep),
+    FreeDec (BodyDec rep),
+    FreeIn (FParamInfo rep),
+    FreeIn (LParamInfo rep),
+    FreeIn (LetDec rep),
+    FreeIn (RetType rep),
+    FreeIn (BranchType rep),
+    FreeIn (Op rep)
   ) =>
-  FreeIn (Stm lore)
+  FreeIn (Stm rep)
   where
   freeIn' (Let pat (StmAux cs attrs dec) e) =
     freeIn' cs <> freeIn' attrs
       <> precomputed dec (freeIn' dec <> freeIn' e <> freeIn' pat)
 
-instance FreeIn (Stm lore) => FreeIn (Stms lore) where
+instance FreeIn (Stm rep) => FreeIn (Stms rep) where
   freeIn' = foldMap freeIn'
 
 instance FreeIn Names where
@@ -346,7 +346,7 @@ instance FreeIn dec => FreeIn (Param dec) where
 instance FreeIn dec => FreeIn (PatElemT dec) where
   freeIn' (PatElem _ dec) = freeIn' dec
 
-instance FreeIn (LParamInfo lore) => FreeIn (LoopForm lore) where
+instance FreeIn (LParamInfo rep) => FreeIn (LoopForm rep) where
   freeIn' (ForLoop _ _ bound loop_vars) = freeIn' bound <> freeIn' loop_vars
   freeIn' (WhileLoop cond) = freeIn' cond
 
@@ -398,17 +398,17 @@ instance FreeDec Names where
   precomputed _ fv = fv
 
 -- | The names bound by the bindings immediately in a t'Body'.
-boundInBody :: Body lore -> Names
+boundInBody :: Body rep -> Names
 boundInBody = boundByStms . bodyStms
 
 -- | The names bound by a binding.
-boundByStm :: Stm lore -> Names
+boundByStm :: Stm rep -> Names
 boundByStm = namesFromList . patternNames . stmPattern
 
 -- | The names bound by the bindings.
-boundByStms :: Stms lore -> Names
+boundByStms :: Stms rep -> Names
 boundByStms = foldMap boundByStm
 
 -- | The names of the lambda parameters plus the index parameter.
-boundByLambda :: Lambda lore -> [VName]
+boundByLambda :: Lambda rep -> [VName]
 boundByLambda lam = map paramName (lambdaParams lam)

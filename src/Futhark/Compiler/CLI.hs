@@ -32,13 +32,13 @@ compilerMain ::
   -- | The longer action description.
   String ->
   -- | The pipeline to use.
-  Pipeline SOACS lore ->
+  Pipeline SOACS rep ->
   -- | The action to take on the result of the pipeline.
   ( FutharkConfig ->
     cfg ->
     CompilerMode ->
     FilePath ->
-    Prog lore ->
+    Prog rep ->
     FutharkM ()
   ) ->
   -- | Program name

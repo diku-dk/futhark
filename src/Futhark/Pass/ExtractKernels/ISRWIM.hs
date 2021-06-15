@@ -18,7 +18,7 @@ import Futhark.Tools
 -- | Interchange Scan With Inner Map. Tries to turn a @scan(map)@ into a
 -- @map(scan)
 iswim ::
-  (MonadBinder m, Lore m ~ SOACS) =>
+  (MonadBinder m, Rep m ~ SOACS) =>
   Pattern ->
   SubExp ->
   Lambda ->
@@ -81,7 +81,7 @@ iswim res_pat w scan_fun scan_input
 -- | Interchange Reduce With Inner Map. Tries to turn a @reduce(map)@ into a
 -- @map(reduce)
 irwim ::
-  (MonadBinder m, Lore m ~ SOACS) =>
+  (MonadBinder m, Rep m ~ SOACS) =>
   Pattern ->
   SubExp ->
   Commutativity ->

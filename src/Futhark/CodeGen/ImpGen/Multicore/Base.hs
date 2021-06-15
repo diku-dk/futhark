@@ -154,10 +154,10 @@ isLoadBalanced Imp.While {} = False
 isLoadBalanced (Imp.Op (Imp.ParLoop _ _ _ code _ _ _)) = isLoadBalanced code
 isLoadBalanced _ = True
 
-segBinOpComm' :: [SegBinOp lore] -> Commutativity
+segBinOpComm' :: [SegBinOp rep] -> Commutativity
 segBinOpComm' = mconcat . map segBinOpComm
 
-decideScheduling' :: SegOp () lore -> Imp.Code -> Imp.Scheduling
+decideScheduling' :: SegOp () rep -> Imp.Code -> Imp.Scheduling
 decideScheduling' SegHist {} _ = Imp.Static
 decideScheduling' SegScan {} _ = Imp.Static
 decideScheduling' (SegRed _ _ reds _ _) code =
@@ -242,18 +242,18 @@ data Locking = Locking
 
 -- | A function for generating code for an atomic update.  Assumes
 -- that the bucket is in-bounds.
-type DoAtomicUpdate lore r =
+type DoAtomicUpdate rep r =
   [VName] -> [Imp.TExp Int64] -> MulticoreGen ()
 
 -- | The mechanism that will be used for performing the atomic update.
 -- Approximates how efficient it will be.  Ordered from most to least
 -- efficient.
-data AtomicUpdate lore r
-  = AtomicPrim (DoAtomicUpdate lore r)
+data AtomicUpdate rep r
+  = AtomicPrim (DoAtomicUpdate rep r)
   | -- | Can be done by efficient swaps.
-    AtomicCAS (DoAtomicUpdate lore r)
+    AtomicCAS (DoAtomicUpdate rep r)
   | -- | Requires explicit locking.
-    AtomicLocking (Locking -> DoAtomicUpdate lore r)
+    AtomicLocking (Locking -> DoAtomicUpdate rep r)
 
 atomicUpdateLocking ::
   AtomicBinOp ->

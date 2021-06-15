@@ -25,9 +25,9 @@ type IndexSubstitution dec = (Certificates, VName, dec, Slice SubExp)
 type IndexSubstitutions dec = [(VName, IndexSubstitution dec)]
 
 typeEnvFromSubstitutions ::
-  LetDec lore ~ dec =>
+  LetDec rep ~ dec =>
   IndexSubstitutions dec ->
-  Scope lore
+  Scope rep
 typeEnvFromSubstitutions = M.fromList . map (fromSubstitution . snd)
   where
     fromSubstitution (_, name, t, _) =
@@ -36,42 +36,42 @@ typeEnvFromSubstitutions = M.fromList . map (fromSubstitution . snd)
 -- | Perform the substitution.
 substituteIndices ::
   ( MonadFreshNames m,
-    BinderOps lore,
-    Bindable lore,
-    Aliased lore,
-    LetDec lore ~ dec
+    BinderOps rep,
+    Bindable rep,
+    Aliased rep,
+    LetDec rep ~ dec
   ) =>
   IndexSubstitutions dec ->
-  Stms lore ->
-  m (IndexSubstitutions dec, Stms lore)
+  Stms rep ->
+  m (IndexSubstitutions dec, Stms rep)
 substituteIndices substs bnds =
   runBinderT (substituteIndicesInStms substs bnds) types
   where
     types = typeEnvFromSubstitutions substs
 
 substituteIndicesInStms ::
-  (MonadBinder m, Bindable (Lore m), Aliased (Lore m)) =>
-  IndexSubstitutions (LetDec (Lore m)) ->
-  Stms (Lore m) ->
-  m (IndexSubstitutions (LetDec (Lore m)))
+  (MonadBinder m, Bindable (Rep m), Aliased (Rep m)) =>
+  IndexSubstitutions (LetDec (Rep m)) ->
+  Stms (Rep m) ->
+  m (IndexSubstitutions (LetDec (Rep m)))
 substituteIndicesInStms = foldM substituteIndicesInStm
 
 substituteIndicesInStm ::
-  (MonadBinder m, Bindable (Lore m), Aliased (Lore m)) =>
-  IndexSubstitutions (LetDec (Lore m)) ->
-  Stm (Lore m) ->
-  m (IndexSubstitutions (LetDec (Lore m)))
-substituteIndicesInStm substs (Let pat lore e) = do
+  (MonadBinder m, Bindable (Rep m), Aliased (Rep m)) =>
+  IndexSubstitutions (LetDec (Rep m)) ->
+  Stm (Rep m) ->
+  m (IndexSubstitutions (LetDec (Rep m)))
+substituteIndicesInStm substs (Let pat rep e) = do
   e' <- substituteIndicesInExp substs e
   (substs', pat') <- substituteIndicesInPattern substs pat
-  addStm $ Let pat' lore e'
+  addStm $ Let pat' rep e'
   return substs'
 
 substituteIndicesInPattern ::
-  (MonadBinder m, LetDec (Lore m) ~ dec) =>
-  IndexSubstitutions (LetDec (Lore m)) ->
+  (MonadBinder m, LetDec (Rep m) ~ dec) =>
+  IndexSubstitutions (LetDec (Rep m)) ->
   PatternT dec ->
-  m (IndexSubstitutions (LetDec (Lore m)), PatternT dec)
+  m (IndexSubstitutions (LetDec (Rep m)), PatternT dec)
 substituteIndicesInPattern substs pat = do
   (substs', context) <- mapAccumLM sub substs $ patternContextElements pat
   (substs'', values) <- mapAccumLM sub substs' $ patternValueElements pat
@@ -81,13 +81,13 @@ substituteIndicesInPattern substs pat = do
 
 substituteIndicesInExp ::
   ( MonadBinder m,
-    Bindable (Lore m),
-    Aliased (Lore m),
-    LetDec (Lore m) ~ dec
+    Bindable (Rep m),
+    Aliased (Rep m),
+    LetDec (Rep m) ~ dec
   ) =>
-  IndexSubstitutions (LetDec (Lore m)) ->
-  Exp (Lore m) ->
-  m (Exp (Lore m))
+  IndexSubstitutions (LetDec (Rep m)) ->
+  Exp (Rep m) ->
+  m (Exp (Rep m))
 substituteIndicesInExp substs (Op op) = do
   let used_in_op = filter ((`nameIn` freeIn op) . fst) substs
   var_substs <- fmap mconcat $
@@ -137,7 +137,7 @@ substituteIndicesInExp substs e = do
 
 substituteIndicesInSubExp ::
   MonadBinder m =>
-  IndexSubstitutions (LetDec (Lore m)) ->
+  IndexSubstitutions (LetDec (Rep m)) ->
   SubExp ->
   m SubExp
 substituteIndicesInSubExp substs (Var v) =
@@ -147,7 +147,7 @@ substituteIndicesInSubExp _ se =
 
 substituteIndicesInVar ::
   MonadBinder m =>
-  IndexSubstitutions (LetDec (Lore m)) ->
+  IndexSubstitutions (LetDec (Rep m)) ->
   VName ->
   m VName
 substituteIndicesInVar substs v
@@ -161,10 +161,10 @@ substituteIndicesInVar substs v
     return v
 
 substituteIndicesInBody ::
-  (MonadBinder m, Bindable (Lore m), Aliased (Lore m)) =>
-  IndexSubstitutions (LetDec (Lore m)) ->
-  Body (Lore m) ->
-  m (Body (Lore m))
+  (MonadBinder m, Bindable (Rep m), Aliased (Rep m)) =>
+  IndexSubstitutions (LetDec (Rep m)) ->
+  Body (Rep m) ->
+  m (Body (Rep m))
 substituteIndicesInBody substs (Body _ stms res) = do
   (substs', stms') <-
     inScopeOf stms $

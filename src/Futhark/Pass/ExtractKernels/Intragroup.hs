@@ -136,7 +136,7 @@ intraGroupParallelise knest lam = runMaybeT $ do
     aux = loopNestingAux first_nest
 
 readGroupKernelInput ::
-  (DistLore (Lore m), MonadBinder m) =>
+  (DistRep (Rep m), MonadBinder m) =>
   KernelInput ->
   m ()
 readGroupKernelInput inp

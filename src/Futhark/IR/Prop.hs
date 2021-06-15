@@ -38,7 +38,7 @@ module Futhark.IR.Prop
     lamIsBinOp,
     ASTConstraints,
     IsOp (..),
-    ASTLore (..),
+    ASTRep (..),
   )
 where
 
@@ -73,7 +73,7 @@ builtInFunctions = M.fromList $ map namify $ M.toList primFuns
     namify (k, (paramts, ret, _)) = (nameFromString k, (ret, paramts))
 
 -- | If the expression is a t'BasicOp', return it, otherwise 'Nothing'.
-asBasicOp :: Exp lore -> Maybe BasicOp
+asBasicOp :: Exp rep -> Maybe BasicOp
 asBasicOp (BasicOp op) = Just op
 asBasicOp _ = Nothing
 
@@ -81,7 +81,7 @@ asBasicOp _ = Nothing
 -- any required certificates have been checked) in any context.  For
 -- example, array indexing is not safe, as the index may be out of
 -- bounds.  On the other hand, adding two numbers cannot fail.
-safeExp :: IsOp (Op lore) => Exp lore -> Bool
+safeExp :: IsOp (Op rep) => Exp rep -> Bool
 safeExp (BasicOp op) = safeBasicOp op
   where
     safeBasicOp (BinOp (SDiv _ Safe) _ _) = True
@@ -134,7 +134,7 @@ safeExp (If _ tbranch fbranch _) =
 safeExp WithAcc {} = True -- Although unlikely to matter.
 safeExp (Op op) = safeOp op
 
-safeBody :: IsOp (Op lore) => Body lore -> Bool
+safeBody :: IsOp (Op rep) => Body rep -> Bool
 safeBody = all (safeExp . stmExp) . bodyStms
 
 -- | Return the variable names used in 'Var' subexpressions.  May contain
@@ -151,7 +151,7 @@ subExpVar Constant {} = Nothing
 -- Based on pattern matching and checking whether the lambda
 -- represents a known arithmetic operator; don't expect anything
 -- clever here.
-commutativeLambda :: Lambda lore -> Bool
+commutativeLambda :: Lambda rep -> Bool
 commutativeLambda lam =
   let body = lambdaBody lam
       n2 = length (lambdaParams lam) `div` 2
@@ -183,11 +183,11 @@ defAux :: dec -> StmAux dec
 defAux = StmAux mempty mempty
 
 -- | The certificates associated with a statement.
-stmCerts :: Stm lore -> Certificates
+stmCerts :: Stm rep -> Certificates
 stmCerts = stmAuxCerts . stmAux
 
 -- | Add certificates to a statement.
-certify :: Certificates -> Stm lore -> Stm lore
+certify :: Certificates -> Stm rep -> Stm rep
 certify cs1 (Let pat (StmAux cs2 attrs dec) e) =
   Let pat (StmAux (cs2 <> cs1) attrs dec) e
 
@@ -208,31 +208,31 @@ instance IsOp () where
   safeOp () = True
   cheapOp () = True
 
--- | Lore-specific attributes; also means the lore supports some basic
--- facilities.
+-- | Representation-specific attributes; also means the rep supports
+-- some basic facilities.
 class
-  ( Decorations lore,
-    PrettyLore lore,
-    Renameable lore,
-    Substitutable lore,
-    FreeDec (ExpDec lore),
-    FreeIn (LetDec lore),
-    FreeDec (BodyDec lore),
-    FreeIn (FParamInfo lore),
-    FreeIn (LParamInfo lore),
-    FreeIn (RetType lore),
-    FreeIn (BranchType lore),
-    IsOp (Op lore)
+  ( RepTypes rep,
+    PrettyRep rep,
+    Renameable rep,
+    Substitutable rep,
+    FreeDec (ExpDec rep),
+    FreeIn (LetDec rep),
+    FreeDec (BodyDec rep),
+    FreeIn (FParamInfo rep),
+    FreeIn (LParamInfo rep),
+    FreeIn (RetType rep),
+    FreeIn (BranchType rep),
+    IsOp (Op rep)
   ) =>
-  ASTLore lore
+  ASTRep rep
   where
   -- | Given a pattern, construct the type of a body that would match
-  -- it.  An implementation for many lores would be
+  -- it.  An implementation for many representations would be
   -- 'expExtTypesFromPattern'.
   expTypesFromPattern ::
-    (HasScope lore m, Monad m) =>
-    Pattern lore ->
-    m [BranchType lore]
+    (HasScope rep m, Monad m) =>
+    Pattern rep ->
+    m [BranchType rep]
 
 -- | Construct the type of an expression that would match the pattern.
 expExtTypesFromPattern :: Typed dec => PatternT dec -> [ExtType]
@@ -249,7 +249,7 @@ attrsForAssert (Attrs attrs) =
     attrForAssert = (== AttrComp "warn" ["safety_checks"])
 
 -- | Horizontally fission a lambda that models a binary operator.
-lamIsBinOp :: ASTLore lore => Lambda lore -> Maybe [(BinOp, PrimType, VName, VName)]
+lamIsBinOp :: ASTRep rep => Lambda rep -> Maybe [(BinOp, PrimType, VName, VName)]
 lamIsBinOp lam = mapM splitStm $ bodyResult $ lambdaBody lam
   where
     n = length $ lambdaReturnType lam
