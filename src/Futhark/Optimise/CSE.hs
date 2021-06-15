@@ -46,7 +46,7 @@ import Futhark.IR.Aliases
     removeProgAliases,
     removeStmAliases,
   )
-import qualified Futhark.IR.Kernels.Kernel as Kernel
+import qualified Futhark.IR.GPU.Kernel as Kernel
 import qualified Futhark.IR.MC as MC
 import qualified Futhark.IR.Mem as Memory
 import Futhark.IR.Prop.Aliases

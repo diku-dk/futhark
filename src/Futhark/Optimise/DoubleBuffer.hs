@@ -22,7 +22,7 @@
 -- value.  This has the effect of making the memory block returned by
 -- the array non-existential, which is important for later memory
 -- expansion to work.
-module Futhark.Optimise.DoubleBuffer (doubleBufferKernels, doubleBufferMC) where
+module Futhark.Optimise.DoubleBuffer (doubleBufferGPU, doubleBufferMC) where
 
 import Control.Monad.Reader
 import Control.Monad.State
@@ -31,17 +31,17 @@ import Data.List (find)
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import Futhark.Construct
-import Futhark.IR.KernelsMem as Kernels
+import Futhark.IR.GPUMem as GPU
 import Futhark.IR.MCMem as MC
 import qualified Futhark.IR.Mem.IxFun as IxFun
 import Futhark.Pass
 import Futhark.Pass.ExplicitAllocations (arraySizeInBytesExp)
-import Futhark.Pass.ExplicitAllocations.Kernels ()
+import Futhark.Pass.ExplicitAllocations.GPU ()
 import Futhark.Util (maybeHead)
 
 -- | The pass for GPU kernels.
-doubleBufferKernels :: Pass KernelsMem KernelsMem
-doubleBufferKernels = doubleBuffer optimiseKernelsOp
+doubleBufferGPU :: Pass GPUMem GPUMem
+doubleBufferGPU = doubleBuffer optimiseGPUOp
 
 -- | The pass for multicore
 doubleBufferMC :: Pass MCMem MCMem
@@ -129,8 +129,8 @@ optimiseStm (Let pat aux e) = do
           mapOnOp = onOp
         }
 
-optimiseKernelsOp :: OptimiseOp KernelsMem
-optimiseKernelsOp (Inner (SegOp op)) =
+optimiseGPUOp :: OptimiseOp GPUMem
+optimiseGPUOp (Inner (SegOp op)) =
   local inSegOp $ Inner . SegOp <$> mapSegOpM mapper op
   where
     mapper =
@@ -139,7 +139,7 @@ optimiseKernelsOp (Inner (SegOp op)) =
           mapOnSegOpBody = optimiseKernelBody
         }
     inSegOp env = env {envOptimiseLoop = optimiseLoop}
-optimiseKernelsOp op = return op
+optimiseGPUOp op = return op
 
 optimiseMCOp :: OptimiseOp MCMem
 optimiseMCOp (Inner (ParOp par_op op)) =

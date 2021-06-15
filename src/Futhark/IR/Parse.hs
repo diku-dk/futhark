@@ -5,8 +5,8 @@
 -- | Parser for the Futhark core language.
 module Futhark.IR.Parse
   ( parseSOACS,
-    parseKernels,
-    parseKernelsMem,
+    parseGPU,
+    parseGPUMem,
     parseMC,
     parseMCMem,
     parseSeq,
@@ -23,9 +23,9 @@ import qualified Data.Text as T
 import Data.Void
 import Futhark.Analysis.PrimExp.Parse
 import Futhark.IR
-import Futhark.IR.Kernels (Kernels)
-import qualified Futhark.IR.Kernels.Kernel as Kernel
-import Futhark.IR.KernelsMem (KernelsMem)
+import Futhark.IR.GPU (GPU)
+import qualified Futhark.IR.GPU.Kernel as Kernel
+import Futhark.IR.GPUMem (GPUMem)
 import Futhark.IR.MC (MC)
 import qualified Futhark.IR.MC.Op as MC
 import Futhark.IR.MCMem (MCMem)
@@ -946,17 +946,17 @@ prSeqMem =
   where
     op = pMemOp empty
 
-prKernels :: PR Kernels
-prKernels =
+prGPU :: PR GPU
+prGPU =
   PR pDeclExtType pExtType pDeclType pType pType op () ()
   where
-    op = pHostOp prKernels (pSOAC prKernels)
+    op = pHostOp prGPU (pSOAC prGPU)
 
-prKernelsMem :: PR KernelsMem
-prKernelsMem =
+prGPUMem :: PR GPUMem
+prGPUMem =
   PR pRetTypeMem pBranchTypeMem pFParamMem pLParamMem pLetDecMem op () ()
   where
-    op = pMemOp $ pHostOp prKernelsMem empty
+    op = pMemOp $ pHostOp prGPUMem empty
 
 prMC :: PR MC
 prMC =
@@ -984,11 +984,11 @@ parseSeq = parseRep prSeq
 parseSeqMem :: FilePath -> T.Text -> Either T.Text (Prog SeqMem)
 parseSeqMem = parseRep prSeqMem
 
-parseKernels :: FilePath -> T.Text -> Either T.Text (Prog Kernels)
-parseKernels = parseRep prKernels
+parseGPU :: FilePath -> T.Text -> Either T.Text (Prog GPU)
+parseGPU = parseRep prGPU
 
-parseKernelsMem :: FilePath -> T.Text -> Either T.Text (Prog KernelsMem)
-parseKernelsMem = parseRep prKernelsMem
+parseGPUMem :: FilePath -> T.Text -> Either T.Text (Prog GPUMem)
+parseGPUMem = parseRep prGPUMem
 
 parseMC :: FilePath -> T.Text -> Either T.Text (Prog MC)
 parseMC = parseRep prMC

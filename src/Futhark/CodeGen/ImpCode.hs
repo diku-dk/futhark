@@ -55,7 +55,7 @@ module Futhark.CodeGen.ImpCode
     module Language.Futhark.Core,
     module Futhark.IR.Primitive,
     module Futhark.Analysis.PrimExp,
-    module Futhark.IR.Kernels.Sizes,
+    module Futhark.IR.GPU.Sizes,
     module Futhark.IR.Prop.Names,
   )
 where
@@ -65,7 +65,7 @@ import qualified Data.Map as M
 import qualified Data.Set as S
 import Data.Traversable
 import Futhark.Analysis.PrimExp
-import Futhark.IR.Kernels.Sizes (Count (..))
+import Futhark.IR.GPU.Sizes (Count (..))
 import Futhark.IR.Pretty ()
 import Futhark.IR.Primitive
 import Futhark.IR.Prop.Names

@@ -24,13 +24,13 @@ import qualified Data.List as L
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import qualified Data.Sequence as Seq
-import Futhark.IR.Kernels
+import Futhark.IR.GPU
 import Futhark.MonadFreshNames
 import Futhark.Optimise.TileLoops.Shared
 import Futhark.Tools
 import Futhark.Transform.Rename
 
-mmBlkRegTiling :: Stm Kernels -> TileM (Maybe (Stms Kernels, Stm Kernels))
+mmBlkRegTiling :: Stm GPU -> TileM (Maybe (Stms GPU, Stm GPU))
 mmBlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kbody))))
   | KernelBody () kstms [Returns ResultMaySimplify (Var res_nm)] <- old_kbody,
     -- check kernel has one result of primitive type
@@ -446,9 +446,9 @@ forLoop' ::
   [VName] -> -- loop inits
   ( VName ->
     [VName] -> -- (loop var -> loop inits -> loop body)
-    Binder Kernels (Body Kernels)
+    Binder GPU (Body GPU)
   ) ->
-  Binder Kernels [VName]
+  Binder GPU [VName]
 forLoop' i_bound merge body = do
   i <- newVName "i" -- could give this as arg to the function
   let loop_form = ForLoop i Int64 i_bound []
@@ -466,8 +466,8 @@ forLoop' i_bound merge body = do
 forLoop ::
   SubExp ->
   [VName] ->
-  (VName -> [VName] -> Binder Kernels (Body Kernels)) ->
-  Binder Kernels VName
+  (VName -> [VName] -> Binder GPU (Body GPU)) ->
+  Binder GPU VName
 forLoop i_bound merge body = do
   res_list <- forLoop' i_bound merge body
   return $ head res_list
@@ -479,10 +479,10 @@ forLoop i_bound merge body = do
 --   creates Stms corresponding to binding of new_params,
 --   lambda body, and binding of lambda result to res_name.
 rebindLambda ::
-  Lambda Kernels ->
+  Lambda GPU ->
   [VName] ->
   [VName] ->
-  Stms Kernels
+  Stms GPU
 rebindLambda lam new_params res_names =
   stmsFromList
     ( zipWith
@@ -513,8 +513,8 @@ rebindLambda lam new_params res_names =
 -- | Tries to identify the following pattern:
 --   code followed by some Screma followed by more code.
 matchCodeStreamCode ::
-  Stms Kernels ->
-  (Stms Kernels, Maybe (Stm Kernels), Stms Kernels)
+  Stms GPU ->
+  (Stms GPU, Maybe (Stm GPU), Stms GPU)
 matchCodeStreamCode kstms =
   let (code1, screma, code2) =
         foldl
@@ -568,9 +568,9 @@ isInvarTo1of2InnerDims branch_variant kspace variance arrs =
 processIndirections ::
   Names -> -- input arrays to redomap
   Names -> -- variables on which the result of redomap depends on.
-  Maybe (Stms Kernels, M.Map VName (Stm Kernels)) ->
-  Stm Kernels ->
-  Maybe (Stms Kernels, M.Map VName (Stm Kernels))
+  Maybe (Stms GPU, M.Map VName (Stm GPU)) ->
+  Stm GPU ->
+  Maybe (Stms GPU, M.Map VName (Stm GPU))
 processIndirections arrs _ acc stm@(Let patt _ (BasicOp (Index _ _)))
   | Just (ss, tab) <- acc,
     [p] <- patternValueElements patt,
@@ -599,7 +599,7 @@ se4 = intConst Int64 4
 se8 :: SubExp
 se8 = intConst Int64 8
 
-getParTiles :: (String, String) -> (Name, Name) -> SubExp -> Binder Kernels (SubExp, SubExp)
+getParTiles :: (String, String) -> (Name, Name) -> SubExp -> Binder GPU (SubExp, SubExp)
 getParTiles (t_str, r_str) (t_name, r_name) len_dim =
   case len_dim of
     Constant (IntValue (Int64Value 8)) ->
@@ -613,7 +613,7 @@ getParTiles (t_str, r_str) (t_name, r_name) len_dim =
       r <- letSubExp r_str $ Op $ SizeOp $ GetSize r_name SizeRegTile
       return (t, r)
 
-getSeqTile :: String -> Name -> SubExp -> SubExp -> SubExp -> Binder Kernels SubExp
+getSeqTile :: String -> Name -> SubExp -> SubExp -> SubExp -> Binder GPU SubExp
 getSeqTile tk_str tk_name len_dim ty tx =
   case (tx, ty) of
     (Constant (IntValue (Int64Value v_x)), Constant (IntValue (Int64Value v_y))) ->
@@ -695,9 +695,9 @@ isInvarTo2of3InnerDims branch_variant kspace variance arrs =
 --          a) each of the statements is a slice that produces one of the
 --             streamed arrays
 --
--- mmBlkRegTiling :: Stm Kernels -> TileM (Maybe (Stms Kernels, Stm Kernels))
+-- mmBlkRegTiling :: Stm GPU -> TileM (Maybe (Stms GPU, Stm GPU))
 -- mmBlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old_kbody))))
-doRegTiling3D :: Stm Kernels -> TileM (Maybe (Stms Kernels, Stm Kernels))
+doRegTiling3D :: Stm GPU -> TileM (Maybe (Stms GPU, Stm GPU))
 doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
   | SegMap SegThread {} space kertp (KernelBody () kstms kres) <- old_kernel,
     -- build the variance table, that records, for
@@ -992,14 +992,14 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
     getResNm (Returns ResultMaySimplify (Var res_nm)) = Just res_nm
     getResNm _ = Nothing
 
-    limitTile :: String -> SubExp -> SubExp -> Binder Kernels SubExp
+    limitTile :: String -> SubExp -> SubExp -> Binder GPU SubExp
     limitTile t_str t d_K = letSubExp t_str $ BasicOp $ BinOp (SMin Int64) t d_K
     insertTranspose ::
       VarianceTable ->
       (VName, SubExp) ->
-      (M.Map VName (Stm Kernels), M.Map VName (PrimType, Stm Kernels)) ->
-      (VName, Stm Kernels) ->
-      Binder Kernels (M.Map VName (Stm Kernels), M.Map VName (PrimType, Stm Kernels))
+      (M.Map VName (Stm GPU), M.Map VName (PrimType, Stm GPU)) ->
+      (VName, Stm GPU) ->
+      Binder GPU (M.Map VName (Stm GPU), M.Map VName (PrimType, Stm GPU))
     insertTranspose variance (gidz, _) (tab_inn, tab_out) (p_nm, stm@(Let patt yy (BasicOp (Index arr_nm slc))))
       | [p] <- patternValueElements patt,
         ptp <- elemType $ patElemType p,
