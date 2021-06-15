@@ -98,7 +98,7 @@ javascriptWrapper entryPoints =
       cwrapsJSE entryPoints,
       unlines $ map cwrapEntryPoint entryPoints,
       initFunc,
-      ptrFromWrap,
+      ptrOrScalar,
       arrWrapper,
       classDef,
       constructor entryPoints,
@@ -127,83 +127,61 @@ arrWrapper =
       }
     }
 
-    class ArrayWrapper {
-      // array has one element if scalar
-      // else it has 4
-      constructor(arr) {
-        if (arr.length == 1) {
-          this.scalar_constructor(arr[0]);
-        } else if (arr.length == 2) {
-          this.bool_constructor(arr[0], arr[1]);
-        } else {
-          this.arr_constructor(arr[0], arr[1], arr[2], arr[3]);
-        }
-      }
+    class FutharkValue {
 
-
-      arr_constructor(fc, ptr, typ, dim) {
-        this.dim = dim;
-        this.typ = typ;
+      constructor(futctx, ptr, typ, dim) {
+        this.futctx = futctx;
         this.ptr = ptr;
-        this.fc = fc;
-        this.arr = this.fc[this.func_name('values')].apply(this.fc, [this.ptr]);
-        this.shapey = this.fc[this.func_name('shape')].apply(this.fc, [this.ptr]);
-        this.arr_init = false;
-        this.shape_init = true;
+        this.typ = typ;
+        this.dim = dim;
         this.is_scalar = false;
-        this.is_arr = false;
-        this.value = this.arr;
+        this.shape_init = false;
+        this.values_init = false;
       }
 
-      // should only be called with one element array
-      scalar_constructor(arr) {
-        this.shape_init = true;
-        this.shapey = [];
+      constructor(vals, typ) {
+        this.typ = typ;
         this.is_scalar = true;
-        this.arr = arr;
+        this.shape_init = true;
+        this.shape_ = [];
+        this.values_init = true;
+        this.values_ = vals;
       }
 
-      bool_constructor(v1, v2) {
-        this.typ = "bool";
-        this.scalar_constructor(v1);
-      }
-
-
-
-      func_name(fname) {
-        return 'from_futhark_' + fname + '_' + this.typ + '_' + this.dim + 'd_arr';
-      }
-
-      shape() {
-        if (this.shape_init) {
-          return this.shapey;
-        } else {
-          this.shapey = this.fc[this.func_name('shape')].apply(this.fc, [this.ptr]);
-          this.shape_init = true;
-          return this.shapey;
-       }
-     }
-
-      values() {
-        return this.arr;
-      }
-
-      bytes_per_element() {
-        if (this.typ == "bool") {
-          return 1;
-        } else {
-          return this.arr.BYTES_PER_ELEMENT;
-        }
+      lookup(fname) {
+        var func_name = 'from_futhark_' + fname + '_' + this.typ + '_' + this.dim + 'd_arr';
+        return this.futctx[func_name].apply(this.futctx, [this.ptr]);
       }
 
       str_type() {
-        if (this.typ == "bool") {
-          return "bool";
+        return padTyp(this.typ);
+      }
+
+      shape() {
+        if (!this.shape_init) {
+          this.shape_ = this.lookup('shape');
+          this.shape_init = true;
         }
+        return this.shape_;
+      }
+ 
+      values() {
+        if (!this.values_init) {
+          this.values_ = this.lookup('values');
+          this.values_init = true;
+        }
+        return this.values_;
+      }
+
+      bytes_per_element() {
+        return this.values().BYTES_PER_ELEMENT;
+      }
+
+      ptr_or_scalar() {
         if (this.is_scalar) {
-          return padTyp(type_strs[this.arr.constructor.name]);
+          return this.values_[0];
         } else {
-          return padTyp(this.typ);
+          this.ptr;
         }
       }
 
@@ -326,35 +304,32 @@ jsWrapEntryPoint jse =
     results = unlines $ map (\i -> if head (ret jse !! i) == '[' then "" else resDataHeap i (convTypes !! i)) alr
     rets = intercalate ", " [retPtrOrOther i jse "dataHeap" ".byteOffset" ptrRes | i <- alr]
     args1 = intercalate ", " ["in" ++ show i | i <- alp]
-    paramsToPtr = unlines ["  in" ++ show i ++ " = ptrFromWrap(in" ++ show i ++ ")" | i <- alp]
-    res = intercalate ", " [retPtrOrOtherBool i jse "new ArrayWrapper([res" "])" ptrResValue | i <- alr]
+    paramsToPtr = unlines ["  in" ++ show i ++ " = ptrOrScalar(in" ++ show i ++ ")" | i <- alp]
+    res = intercalate ", " [retPtrOrOtherBool i jse "new FutharkValue([res" "])" ptrResValue | i <- alr]
     ptrRes i _ = "res" ++ show i
     ptrResValue i _ =
-      "new ArrayWrapper([this, getValue(res" ++ show i ++ ", 'i32'), '"
+      "new FutharkValue(this, getValue(res" ++ show i ++ ", 'i32'), '"
         ++ baseType (ret jse !! i)
         ++ "', "
         ++ show (dim (ret jse !! i))
-        ++ "])"
+        ++ ")"
     retPtrOrOther i jse' pre post f =
       if head (ret jse' !! i) == '['
         then f i $ ret jse' !! i
-        else --else "new ArrayWrapper([res" ++ show i ++ "])"
-          pre ++ show i ++ post
+        else pre ++ show i ++ post
     retPtrOrOtherBool i jse' pre post f
       | head (ret jse' !! i) == '[' = f i $ ret jse' !! i
-      | head (ret jse' !! i) == 'b' = pre ++ show i ++ ", 'bool'" ++ post
-      | otherwise = pre ++ show i ++ post
+      | otherwise = pre ++ show i ++ ", '" ++ (ret jse' !! i) ++ "'" ++ post
 
-ptrFromWrap :: String
-ptrFromWrap =
+ptrOrScalar :: String
+ptrOrScalar =
   T.unpack
     [text|
-    function ptrFromWrap(x) {
-      if (typeof x == 'number' || typeof x == 'bigint') {
+    function ptrOrScalar(x) {
+      if (x.constructor.name == "FutharkValue") {
+        return x.ptr_or_scalar();
+      } else {
         return x;
-      }
-      if (x.constructor.name == "ArrayWrapper") {
-        return x.ptr;
       }
     }
   |]
