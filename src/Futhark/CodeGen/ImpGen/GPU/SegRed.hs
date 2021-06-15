@@ -42,7 +42,7 @@
 --   cases, we would allocate a /whole/ group per segment with the
 --   large strategy, but at most 50% of the threads in the group would
 --   have any element to read, which becomes highly inefficient.
-module Futhark.CodeGen.ImpGen.Kernels.SegRed
+module Futhark.CodeGen.ImpGen.GPU.SegRed
   ( compileSegRed,
     compileSegRed',
     DoSegBody,
@@ -52,11 +52,11 @@ where
 import Control.Monad.Except
 import Data.List (genericLength, zip7)
 import Data.Maybe
-import qualified Futhark.CodeGen.ImpCode.Kernels as Imp
+import qualified Futhark.CodeGen.ImpCode.GPU as Imp
 import Futhark.CodeGen.ImpGen
-import Futhark.CodeGen.ImpGen.Kernels.Base
+import Futhark.CodeGen.ImpGen.GPU.Base
 import Futhark.Error
-import Futhark.IR.KernelsMem
+import Futhark.IR.GPUMem
 import qualified Futhark.IR.Mem.IxFun as IxFun
 import Futhark.Transform.Rename
 import Futhark.Util (chunks)
@@ -77,11 +77,11 @@ type DoSegBody = ([(SubExp, [Imp.TExp Int64])] -> InKernelGen ()) -> InKernelGen
 -- | Compile 'SegRed' instance to host-level code with calls to
 -- various kernels.
 compileSegRed ::
-  Pattern KernelsMem ->
+  Pattern GPUMem ->
   SegLevel ->
   SegSpace ->
-  [SegBinOp KernelsMem] ->
-  KernelBody KernelsMem ->
+  [SegBinOp GPUMem] ->
+  KernelBody GPUMem ->
   CallKernelGen ()
 compileSegRed pat lvl space reds body =
   compileSegRed' pat lvl space reds $ \red_cont ->
@@ -96,10 +96,10 @@ compileSegRed pat lvl space reds body =
 
 -- | Like 'compileSegRed', but where the body is a monadic action.
 compileSegRed' ::
-  Pattern KernelsMem ->
+  Pattern GPUMem ->
   SegLevel ->
   SegSpace ->
-  [SegBinOp KernelsMem] ->
+  [SegBinOp GPUMem] ->
   DoSegBody ->
   CallKernelGen ()
 compileSegRed' pat lvl space reds body
@@ -129,7 +129,7 @@ compileSegRed' pat lvl space reds body
 intermediateArrays ::
   Count GroupSize SubExp ->
   SubExp ->
-  SegBinOp KernelsMem ->
+  SegBinOp GPUMem ->
   InKernelGen [VName]
 intermediateArrays (Count group_size) num_threads (SegBinOp _ red_op nes _) = do
   let red_op_params = lambdaParams red_op
@@ -155,7 +155,7 @@ intermediateArrays (Count group_size) num_threads (SegBinOp _ red_op nes _) = do
 groupResultArrays ::
   Count NumGroups SubExp ->
   Count GroupSize SubExp ->
-  [SegBinOp KernelsMem] ->
+  [SegBinOp GPUMem] ->
   CallKernelGen [[VName]]
 groupResultArrays (Count virt_num_groups) (Count group_size) reds =
   forM reds $ \(SegBinOp _ lam _ shape) ->
@@ -171,11 +171,11 @@ groupResultArrays (Count virt_num_groups) (Count group_size) reds =
       sAllocArrayPerm "segred_tmp" pt full_shape (Space "device") perm
 
 nonsegmentedReduction ::
-  Pattern KernelsMem ->
+  Pattern GPUMem ->
   Count NumGroups SubExp ->
   Count GroupSize SubExp ->
   SegSpace ->
-  [SegBinOp KernelsMem] ->
+  [SegBinOp GPUMem] ->
   DoSegBody ->
   CallKernelGen ()
 nonsegmentedReduction segred_pat num_groups group_size space reds body = do
@@ -255,11 +255,11 @@ nonsegmentedReduction segred_pat num_groups group_size space reds body = do
   emit $ Imp.DebugPrint "" Nothing
 
 smallSegmentsReduction ::
-  Pattern KernelsMem ->
+  Pattern GPUMem ->
   Count NumGroups SubExp ->
   Count GroupSize SubExp ->
   SegSpace ->
-  [SegBinOp KernelsMem] ->
+  [SegBinOp GPUMem] ->
   DoSegBody ->
   CallKernelGen ()
 smallSegmentsReduction (Pattern _ segred_pes) num_groups group_size space reds body = do
@@ -364,11 +364,11 @@ smallSegmentsReduction (Pattern _ segred_pes) num_groups group_size space reds b
   emit $ Imp.DebugPrint "" Nothing
 
 largeSegmentsReduction ::
-  Pattern KernelsMem ->
+  Pattern GPUMem ->
   Count NumGroups SubExp ->
   Count GroupSize SubExp ->
   SegSpace ->
-  [SegBinOp KernelsMem] ->
+  [SegBinOp GPUMem] ->
   DoSegBody ->
   CallKernelGen ()
 largeSegmentsReduction segred_pat num_groups group_size space reds body = do
@@ -526,7 +526,7 @@ groupsPerSegmentAndElementsPerThread segment_size num_segments num_groups_hint g
 
 -- | A SegBinOp with auxiliary information.
 data SegBinOpSlug = SegBinOpSlug
-  { slugOp :: SegBinOp KernelsMem,
+  { slugOp :: SegBinOp GPUMem,
     -- | The arrays used for computing the intra-group reduction
     -- (either local or global memory).
     slugArrs :: [VName],
@@ -534,10 +534,10 @@ data SegBinOpSlug = SegBinOpSlug
     slugAccs :: [(VName, [Imp.TExp Int64])]
   }
 
-slugBody :: SegBinOpSlug -> Body KernelsMem
+slugBody :: SegBinOpSlug -> Body GPUMem
 slugBody = lambdaBody . segBinOpLambda . slugOp
 
-slugParams :: SegBinOpSlug -> [LParam KernelsMem]
+slugParams :: SegBinOpSlug -> [LParam GPUMem]
 slugParams = lambdaParams . segBinOpLambda . slugOp
 
 slugNeutral :: SegBinOpSlug -> [SubExp]
@@ -549,11 +549,11 @@ slugShape = segBinOpShape . slugOp
 slugsComm :: [SegBinOpSlug] -> Commutativity
 slugsComm = mconcat . map (segBinOpComm . slugOp)
 
-accParams, nextParams :: SegBinOpSlug -> [LParam KernelsMem]
+accParams, nextParams :: SegBinOpSlug -> [LParam GPUMem]
 accParams slug = take (length (slugNeutral slug)) $ slugParams slug
 nextParams slug = drop (length (slugNeutral slug)) $ slugParams slug
 
-segBinOpSlug :: Imp.TExp Int32 -> Imp.TExp Int32 -> (SegBinOp KernelsMem, [VName], [VName]) -> InKernelGen SegBinOpSlug
+segBinOpSlug :: Imp.TExp Int32 -> Imp.TExp Int32 -> (SegBinOp GPUMem, [VName], [VName]) -> InKernelGen SegBinOpSlug
 segBinOpSlug local_tid group_id (op, group_res_arrs, param_arrs) =
   SegBinOpSlug op group_res_arrs
     <$> zipWithM mkAcc (lambdaParams (segBinOpLambda op)) param_arrs
@@ -575,7 +575,7 @@ reductionStageZero ::
   VName ->
   [SegBinOpSlug] ->
   DoSegBody ->
-  InKernelGen ([Lambda KernelsMem], InKernelGen ())
+  InKernelGen ([Lambda GPUMem], InKernelGen ())
 reductionStageZero constants ispace num_elements global_tid elems_per_thread threads_per_segment slugs body = do
   let (gtids, _dims) = unzip ispace
       gtid = mkTV (last gtids) int64
@@ -689,7 +689,7 @@ reductionStageOne ::
   VName ->
   [SegBinOpSlug] ->
   DoSegBody ->
-  InKernelGen [Lambda KernelsMem]
+  InKernelGen [Lambda GPUMem]
 reductionStageOne constants ispace num_elements global_tid elems_per_thread threads_per_segment slugs body = do
   (slugs_op_renamed, doTheReduction) <-
     reductionStageZero constants ispace num_elements global_tid elems_per_thread threads_per_segment slugs body
@@ -705,16 +705,16 @@ reductionStageOne constants ispace num_elements global_tid elems_per_thread thre
 
 reductionStageTwo ::
   KernelConstants ->
-  [PatElem KernelsMem] ->
+  [PatElem GPUMem] ->
   Imp.TExp Int32 ->
   Imp.TExp Int32 ->
   [Imp.TExp Int64] ->
   Imp.TExp Int64 ->
   Imp.TExp Int64 ->
   SegBinOpSlug ->
-  [LParam KernelsMem] ->
-  [LParam KernelsMem] ->
-  Lambda KernelsMem ->
+  [LParam GPUMem] ->
+  [LParam GPUMem] ->
+  Lambda GPUMem ->
   [SubExp] ->
   Imp.TExp Int32 ->
   VName ->

@@ -4,24 +4,24 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE TypeFamilies #-}
 
-module Futhark.IR.KernelsMem
-  ( KernelsMem,
+module Futhark.IR.GPUMem
+  ( GPUMem,
 
     -- * Simplification
     simplifyProg,
     simplifyStms,
-    simpleKernelsMem,
+    simpleGPUMem,
 
     -- * Module re-exports
     module Futhark.IR.Mem,
-    module Futhark.IR.Kernels.Kernel,
+    module Futhark.IR.GPU.Kernel,
   )
 where
 
 import Futhark.Analysis.PrimExp.Convert
 import qualified Futhark.Analysis.UsageTable as UT
-import Futhark.IR.Kernels.Kernel
-import Futhark.IR.Kernels.Simplify (simplifyKernelOp)
+import Futhark.IR.GPU.Kernel
+import Futhark.IR.GPU.Simplify (simplifyKernelOp)
 import Futhark.IR.Mem
 import Futhark.IR.Mem.Simplify
 import Futhark.MonadFreshNames
@@ -30,28 +30,28 @@ import Futhark.Pass
 import Futhark.Pass.ExplicitAllocations (BinderOps (..), mkLetNamesB', mkLetNamesB'')
 import qualified Futhark.TypeCheck as TC
 
-data KernelsMem
+data GPUMem
 
-instance RepTypes KernelsMem where
-  type LetDec KernelsMem = LetDecMem
-  type FParamInfo KernelsMem = FParamMem
-  type LParamInfo KernelsMem = LParamMem
-  type RetType KernelsMem = RetTypeMem
-  type BranchType KernelsMem = BranchTypeMem
-  type Op KernelsMem = MemOp (HostOp KernelsMem ())
+instance RepTypes GPUMem where
+  type LetDec GPUMem = LetDecMem
+  type FParamInfo GPUMem = FParamMem
+  type LParamInfo GPUMem = LParamMem
+  type RetType GPUMem = RetTypeMem
+  type BranchType GPUMem = BranchTypeMem
+  type Op GPUMem = MemOp (HostOp GPUMem ())
 
-instance ASTRep KernelsMem where
+instance ASTRep GPUMem where
   expTypesFromPattern = return . map snd . snd . bodyReturnsFromPattern
 
-instance OpReturns KernelsMem where
+instance OpReturns GPUMem where
   opReturns (Alloc _ space) =
     return [MemMem space]
   opReturns (Inner (SegOp op)) = segOpReturns op
   opReturns k = extReturns <$> opType k
 
-instance PrettyRep KernelsMem
+instance PrettyRep GPUMem
 
-instance TC.CheckableOp KernelsMem where
+instance TC.CheckableOp GPUMem where
   checkOp = typeCheckMemoryOp Nothing
     where
       typeCheckMemoryOp _ (Alloc size _) =
@@ -59,7 +59,7 @@ instance TC.CheckableOp KernelsMem where
       typeCheckMemoryOp lvl (Inner op) =
         typeCheckHostOp (typeCheckMemoryOp . Just) lvl (const $ return ()) op
 
-instance TC.Checkable KernelsMem where
+instance TC.Checkable GPUMem where
   checkFParamDec = checkMemInfo
   checkLParamDec = checkMemInfo
   checkLetBoundDec = checkMemInfo
@@ -70,30 +70,30 @@ instance TC.Checkable KernelsMem where
   matchBranchType = matchBranchReturnType
   matchLoopResult = matchLoopResultMem
 
-instance BinderOps KernelsMem where
+instance BinderOps GPUMem where
   mkExpDecB _ _ = return ()
   mkBodyB stms res = return $ Body () stms res
   mkLetNamesB = mkLetNamesB' ()
 
-instance BinderOps (Engine.Wise KernelsMem) where
+instance BinderOps (Engine.Wise GPUMem) where
   mkExpDecB pat e = return $ Engine.mkWiseExpDec pat () e
   mkBodyB stms res = return $ Engine.mkWiseBody () stms res
   mkLetNamesB = mkLetNamesB''
 
-simplifyProg :: Prog KernelsMem -> PassM (Prog KernelsMem)
-simplifyProg = simplifyProgGeneric simpleKernelsMem
+simplifyProg :: Prog GPUMem -> PassM (Prog GPUMem)
+simplifyProg = simplifyProgGeneric simpleGPUMem
 
 simplifyStms ::
-  (HasScope KernelsMem m, MonadFreshNames m) =>
-  Stms KernelsMem ->
+  (HasScope GPUMem m, MonadFreshNames m) =>
+  Stms GPUMem ->
   m
-    ( Engine.SymbolTable (Engine.Wise KernelsMem),
-      Stms KernelsMem
+    ( Engine.SymbolTable (Engine.Wise GPUMem),
+      Stms GPUMem
     )
-simplifyStms = simplifyStmsGeneric simpleKernelsMem
+simplifyStms = simplifyStmsGeneric simpleGPUMem
 
-simpleKernelsMem :: Engine.SimpleOps KernelsMem
-simpleKernelsMem =
+simpleGPUMem :: Engine.SimpleOps GPUMem
+simpleGPUMem =
   simpleGeneric usage $ simplifyKernelOp $ const $ return ((), mempty)
   where
     -- Slightly hackily, we look at the inside of SegGroup operations

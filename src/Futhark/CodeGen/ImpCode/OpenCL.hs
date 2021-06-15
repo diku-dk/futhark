@@ -19,14 +19,14 @@ module Futhark.CodeGen.ImpCode.OpenCL
     KernelTarget (..),
     FailureMsg (..),
     module Futhark.CodeGen.ImpCode,
-    module Futhark.IR.Kernels.Sizes,
+    module Futhark.IR.GPU.Sizes,
   )
 where
 
 import qualified Data.Map as M
 import Futhark.CodeGen.ImpCode hiding (Code, Function)
 import qualified Futhark.CodeGen.ImpCode as Imp
-import Futhark.IR.Kernels.Sizes
+import Futhark.IR.GPU.Sizes
 import Futhark.Util.Pretty
 
 -- | An program calling OpenCL kernels.

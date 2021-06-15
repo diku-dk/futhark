@@ -20,7 +20,7 @@ import qualified Futhark.Analysis.Interference as Interference
 import qualified Futhark.Analysis.LastUse as LastUse
 import Futhark.Binder.Class
 import Futhark.Construct
-import Futhark.IR.KernelsMem
+import Futhark.IR.GPUMem
 import qualified Futhark.Optimise.ReuseAllocations.GreedyColoring as GreedyColoring
 import Futhark.Pass (Pass (..), PassM)
 import qualified Futhark.Pass as Pass
@@ -29,7 +29,7 @@ import Futhark.Util (invertMap)
 -- | A mapping from allocation names to their size and space.
 type Allocs = Map VName (SubExp, Space)
 
-getAllocsStm :: Stm KernelsMem -> Allocs
+getAllocsStm :: Stm GPUMem -> Allocs
 getAllocsStm (Let (Pattern [] [PatElem name _]) _ (Op (Alloc se sp))) =
   M.singleton name (se, sp)
 getAllocsStm (Let _ _ (Op (Alloc _ _))) = error "impossible"
@@ -40,7 +40,7 @@ getAllocsStm (Let _ _ (DoLoop _ _ _ body)) =
   foldMap getAllocsStm (bodyStms body)
 getAllocsStm _ = mempty
 
-getAllocsSegOp :: SegOp lvl KernelsMem -> Allocs
+getAllocsSegOp :: SegOp lvl GPUMem -> Allocs
 getAllocsSegOp (SegMap _ _ _ body) =
   foldMap getAllocsStm (kernelBodyStms body)
 getAllocsSegOp (SegRed _ _ _ _ body) =
@@ -50,7 +50,7 @@ getAllocsSegOp (SegScan _ _ _ _ body) =
 getAllocsSegOp (SegHist _ _ _ _ body) =
   foldMap getAllocsStm (kernelBodyStms body)
 
-setAllocsStm :: Map VName SubExp -> Stm KernelsMem -> Stm KernelsMem
+setAllocsStm :: Map VName SubExp -> Stm GPUMem -> Stm GPUMem
 setAllocsStm m stm@(Let (Pattern [] [PatElem name _]) _ (Op (Alloc _ _)))
   | Just s <- M.lookup name m =
     stm {stmExp = BasicOp $ SubExp s}
@@ -79,8 +79,8 @@ setAllocsStm _ stm = stm
 
 setAllocsSegOp ::
   Map VName SubExp ->
-  SegOp lvl KernelsMem ->
-  SegOp lvl KernelsMem
+  SegOp lvl GPUMem ->
+  SegOp lvl GPUMem
 setAllocsSegOp m (SegMap lvl sp tps body) =
   SegMap lvl sp tps $
     body {kernelBodyStms = setAllocsStm m <$> kernelBodyStms body}
@@ -104,7 +104,7 @@ maxSubExp = helper . S.toList
       return s
     helper [] = error "impossible"
 
-definedInExp :: Exp KernelsMem -> Set VName
+definedInExp :: Exp GPUMem -> Set VName
 definedInExp (Op (Inner (SegOp segop))) =
   definedInSegOp segop
 definedInExp (If _ then_body else_body _) =
@@ -114,7 +114,7 @@ definedInExp (DoLoop _ _ _ body) =
   foldMap definedInStm $ bodyStms body
 definedInExp _ = mempty
 
-definedInStm :: Stm KernelsMem -> Set VName
+definedInStm :: Stm GPUMem -> Set VName
 definedInStm Let {stmPattern = Pattern ctx vals, stmExp} =
   let definedInside =
         ctx <> vals
@@ -122,7 +122,7 @@ definedInStm Let {stmPattern = Pattern ctx vals, stmExp} =
           & S.fromList
    in definedInExp stmExp <> definedInside
 
-definedInSegOp :: SegOp lvl KernelsMem -> Set VName
+definedInSegOp :: SegOp lvl GPUMem -> Set VName
 definedInSegOp (SegMap _ _ _ body) =
   foldMap definedInStm $ kernelBodyStms body
 definedInSegOp (SegRed _ _ _ _ body) =
@@ -132,16 +132,16 @@ definedInSegOp (SegScan _ _ _ _ body) =
 definedInSegOp (SegHist _ _ _ _ body) =
   foldMap definedInStm $ kernelBodyStms body
 
-isKernelInvariant :: SegOp lvl KernelsMem -> (SubExp, space) -> Bool
+isKernelInvariant :: SegOp lvl GPUMem -> (SubExp, space) -> Bool
 isKernelInvariant segop (Var vname, _) =
   not $ vname `S.member` definedInSegOp segop
 isKernelInvariant _ _ = True
 
 onKernelBodyStms ::
   MonadBinder m =>
-  SegOp lvl KernelsMem ->
-  (Stms KernelsMem -> m (Stms KernelsMem)) ->
-  m (SegOp lvl KernelsMem)
+  SegOp lvl GPUMem ->
+  (Stms GPUMem -> m (Stms GPUMem)) ->
+  m (SegOp lvl GPUMem)
 onKernelBodyStms (SegMap lvl space ts body) f = do
   stms <- f $ kernelBodyStms body
   return $ SegMap lvl space ts $ body {kernelBodyStms = stms}
@@ -159,10 +159,10 @@ onKernelBodyStms (SegHist lvl space binops ts body) f = do
 -- replace allocations and references to memory blocks inside with a (hopefully)
 -- reduced number of allocations.
 optimiseKernel ::
-  (MonadBinder m, Rep m ~ KernelsMem) =>
+  (MonadBinder m, Rep m ~ GPUMem) =>
   Interference.Graph VName ->
-  SegOp lvl KernelsMem ->
-  m (SegOp lvl KernelsMem)
+  SegOp lvl GPUMem ->
+  m (SegOp lvl GPUMem)
 optimiseKernel graph segop0 = do
   segop <- onKernelBodyStms segop0 $ onKernels $ optimiseKernel graph
   let allocs = M.filter (isKernelInvariant segop) $ getAllocsSegOp segop
@@ -197,10 +197,10 @@ optimiseKernel graph segop0 = do
 
 -- | Helper function that modifies kernels found inside some statements.
 onKernels ::
-  LocalScope KernelsMem m =>
-  (SegOp SegLevel KernelsMem -> m (SegOp SegLevel KernelsMem)) ->
-  Stms KernelsMem ->
-  m (Stms KernelsMem)
+  LocalScope GPUMem m =>
+  (SegOp SegLevel GPUMem -> m (SegOp SegLevel GPUMem)) ->
+  Stms GPUMem ->
+  m (Stms GPUMem)
 onKernels f =
   mapM helper
   where
@@ -229,7 +229,7 @@ onKernels f =
       inScopeOf stm $ return stm
 
 -- | Perform the reuse-allocations optimization.
-optimise :: Pass KernelsMem KernelsMem
+optimise :: Pass GPUMem GPUMem
 optimise =
   Pass "reuse allocations" "reuse allocations" $ \prog ->
     let (lumap, _) = LastUse.analyseProg prog
@@ -237,7 +237,7 @@ optimise =
           foldMap
             ( \f ->
                 runReader
-                  ( Interference.analyseKernels lumap $
+                  ( Interference.analyseGPU lumap $
                       bodyStms $ funDefBody f
                   )
                   $ scopeOf f
@@ -247,9 +247,9 @@ optimise =
   where
     onStms ::
       Interference.Graph VName ->
-      Scope KernelsMem ->
-      Stms KernelsMem ->
-      PassM (Stms KernelsMem)
+      Scope GPUMem ->
+      Stms GPUMem ->
+      PassM (Stms GPUMem)
     onStms graph scope stms = do
       let m = localScope scope $ optimiseKernel graph `onKernels` stms
       fmap fst $ modifyNameSource $ runState (runBinderT m mempty)

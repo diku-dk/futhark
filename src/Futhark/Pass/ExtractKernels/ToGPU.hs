@@ -2,12 +2,12 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
 
-module Futhark.Pass.ExtractKernels.ToKernels
+module Futhark.Pass.ExtractKernels.ToGPU
   ( getSize,
     segThread,
-    soacsLambdaToKernels,
-    soacsStmToKernels,
-    scopeForKernels,
+    soacsLambdaToGPU,
+    soacsStmToGPU,
+    scopeForGPU,
     scopeForSOACs,
     injectSOACS,
   )
@@ -17,7 +17,7 @@ import Control.Monad.Identity
 import Data.List ()
 import Futhark.Analysis.Rephrase
 import Futhark.IR
-import Futhark.IR.Kernels
+import Futhark.IR.GPU
 import Futhark.IR.SOACS (SOACS)
 import qualified Futhark.IR.SOACS.SOAC as SOAC
 import Futhark.Tools
@@ -72,14 +72,14 @@ injectSOACS f =
           SOAC.mapOnSOACLambda = rephraseLambda $ injectSOACS f
         }
 
-soacsStmToKernels :: Stm SOACS -> Stm Kernels
-soacsStmToKernels = runIdentity . rephraseStm (injectSOACS OtherOp)
+soacsStmToGPU :: Stm SOACS -> Stm GPU
+soacsStmToGPU = runIdentity . rephraseStm (injectSOACS OtherOp)
 
-soacsLambdaToKernels :: Lambda SOACS -> Lambda Kernels
-soacsLambdaToKernels = runIdentity . rephraseLambda (injectSOACS OtherOp)
+soacsLambdaToGPU :: Lambda SOACS -> Lambda GPU
+soacsLambdaToGPU = runIdentity . rephraseLambda (injectSOACS OtherOp)
 
-scopeForSOACs :: Scope Kernels -> Scope SOACS
+scopeForSOACs :: Scope GPU -> Scope SOACS
 scopeForSOACs = castScope
 
-scopeForKernels :: Scope SOACS -> Scope Kernels
-scopeForKernels = castScope
+scopeForGPU :: Scope SOACS -> Scope GPU
+scopeForGPU = castScope

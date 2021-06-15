@@ -9,7 +9,7 @@ module Futhark.Pass.ExplicitAllocations.SegOp
   )
 where
 
-import Futhark.IR.KernelsMem
+import Futhark.IR.GPUMem
 import qualified Futhark.IR.Mem.IxFun as IxFun
 import Futhark.Pass.ExplicitAllocations
 
