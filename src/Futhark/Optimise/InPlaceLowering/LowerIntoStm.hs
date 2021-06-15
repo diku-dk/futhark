@@ -2,7 +2,7 @@
 {-# LANGUAGE TypeFamilies #-}
 
 module Futhark.Optimise.InPlaceLowering.LowerIntoStm
-  ( lowerUpdateKernels,
+  ( lowerUpdateGPU,
     lowerUpdate,
     LowerUpdate,
     DesiredUpdate (..),
@@ -17,7 +17,7 @@ import Data.Maybe (isNothing, mapMaybe)
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.Construct
 import Futhark.IR.Aliases
-import Futhark.IR.Kernels
+import Futhark.IR.GPU
 import Futhark.Optimise.InPlaceLowering.SubstituteIndices
 
 data DesiredUpdate dec = DesiredUpdate
@@ -76,8 +76,8 @@ lowerUpdate
 lowerUpdate _ _ _ =
   Nothing
 
-lowerUpdateKernels :: MonadFreshNames m => LowerUpdate Kernels m
-lowerUpdateKernels
+lowerUpdateGPU :: MonadFreshNames m => LowerUpdate GPU m
+lowerUpdateGPU
   scope
   (Let pat aux (Op (SegOp (SegMap lvl space ts kbody))))
   updates
@@ -99,20 +99,20 @@ lowerUpdateKernels
       source_used_in_kbody =
         mconcat (map (`lookupAliases` scope) (namesToList (freeIn kbody)))
           `namesIntersect` mconcat (map ((`lookupAliases` scope) . updateSource) updates)
-lowerUpdateKernels scope stm updates = lowerUpdate scope stm updates
+lowerUpdateGPU scope stm updates = lowerUpdate scope stm updates
 
 lowerUpdatesIntoSegMap ::
   MonadFreshNames m =>
-  Scope (Aliases Kernels) ->
-  Pattern (Aliases Kernels) ->
-  [DesiredUpdate (LetDec (Aliases Kernels))] ->
+  Scope (Aliases GPU) ->
+  Pattern (Aliases GPU) ->
+  [DesiredUpdate (LetDec (Aliases GPU))] ->
   SegSpace ->
-  KernelBody (Aliases Kernels) ->
+  KernelBody (Aliases GPU) ->
   Maybe
     ( m
-        ( Pattern (Aliases Kernels),
-          KernelBody (Aliases Kernels),
-          Stms (Aliases Kernels)
+        ( Pattern (Aliases GPU),
+          KernelBody (Aliases GPU),
+          Stms (Aliases GPU)
         )
     )
 lowerUpdatesIntoSegMap scope pat updates kspace kbody = do

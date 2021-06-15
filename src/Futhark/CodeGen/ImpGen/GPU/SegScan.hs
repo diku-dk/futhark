@@ -1,18 +1,18 @@
 -- | Code generation for 'SegScan'.  Dispatches to either a
 -- single-pass or two-pass implementation, depending on the nature of
 -- the scan and the chosen abckend.
-module Futhark.CodeGen.ImpGen.Kernels.SegScan (compileSegScan) where
+module Futhark.CodeGen.ImpGen.GPU.SegScan (compileSegScan) where
 
-import qualified Futhark.CodeGen.ImpCode.Kernels as Imp
+import qualified Futhark.CodeGen.ImpCode.GPU as Imp
 import Futhark.CodeGen.ImpGen hiding (compileProg)
-import Futhark.CodeGen.ImpGen.Kernels.Base
-import qualified Futhark.CodeGen.ImpGen.Kernels.SegScan.SinglePass as SinglePass
-import qualified Futhark.CodeGen.ImpGen.Kernels.SegScan.TwoPass as TwoPass
-import Futhark.IR.KernelsMem
+import Futhark.CodeGen.ImpGen.GPU.Base
+import qualified Futhark.CodeGen.ImpGen.GPU.SegScan.SinglePass as SinglePass
+import qualified Futhark.CodeGen.ImpGen.GPU.SegScan.TwoPass as TwoPass
+import Futhark.IR.GPUMem
 
 -- The single-pass scan does not support multiple operators, so jam
 -- them together here.
-combineScans :: [SegBinOp KernelsMem] -> SegBinOp KernelsMem
+combineScans :: [SegBinOp GPUMem] -> SegBinOp GPUMem
 combineScans ops =
   SegBinOp
     { segBinOpComm = mconcat (map segBinOpComm ops),
@@ -35,7 +35,7 @@ combineScans ops =
               (concatMap (bodyResult . lambdaBody) lams)
         }
 
-canBeSinglePass :: SegSpace -> [SegBinOp KernelsMem] -> Maybe (SegBinOp KernelsMem)
+canBeSinglePass :: SegSpace -> [SegBinOp GPUMem] -> Maybe (SegBinOp GPUMem)
 canBeSinglePass space ops
   | [_] <- unSegSpace space,
     all ok ops =
@@ -50,11 +50,11 @@ canBeSinglePass space ops
 -- | Compile 'SegScan' instance to host-level code with calls to
 -- various kernels.
 compileSegScan ::
-  Pattern KernelsMem ->
+  Pattern GPUMem ->
   SegLevel ->
   SegSpace ->
-  [SegBinOp KernelsMem] ->
-  KernelBody KernelsMem ->
+  [SegBinOp GPUMem] ->
+  KernelBody GPUMem ->
   CallKernelGen ()
 compileSegScan pat lvl space scans kbody = sWhen (0 .<. n) $ do
   emit $ Imp.DebugPrint "\n# SegScan" Nothing

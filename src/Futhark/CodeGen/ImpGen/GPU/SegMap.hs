@@ -5,22 +5,22 @@
 -- trick is virtualisation in case the physical number of threads is
 -- not sufficient to cover the logical thread space.  This is handled
 -- by having actual workgroups run a loop to imitate multiple workgroups.
-module Futhark.CodeGen.ImpGen.Kernels.SegMap (compileSegMap) where
+module Futhark.CodeGen.ImpGen.GPU.SegMap (compileSegMap) where
 
 import Control.Monad.Except
-import qualified Futhark.CodeGen.ImpCode.Kernels as Imp
+import qualified Futhark.CodeGen.ImpCode.GPU as Imp
 import Futhark.CodeGen.ImpGen
-import Futhark.CodeGen.ImpGen.Kernels.Base
-import Futhark.IR.KernelsMem
+import Futhark.CodeGen.ImpGen.GPU.Base
+import Futhark.IR.GPUMem
 import Futhark.Util.IntegralExp (divUp)
 import Prelude hiding (quot, rem)
 
 -- | Compile 'SegMap' instance code.
 compileSegMap ::
-  Pattern KernelsMem ->
+  Pattern GPUMem ->
   SegLevel ->
   SegSpace ->
-  KernelBody KernelsMem ->
+  KernelBody GPUMem ->
   CallKernelGen ()
 compileSegMap pat lvl space kbody = do
   let (is, dims) = unzip $ unSegSpace space

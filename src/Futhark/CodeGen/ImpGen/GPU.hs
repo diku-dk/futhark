@@ -3,11 +3,11 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeFamilies #-}
 
--- | Compile a 'KernelsMem' program to imperative code with kernels.
+-- | Compile a 'GPUMem' program to imperative code with kernels.
 -- This is mostly (but not entirely) the same process no matter if we
 -- are targeting OpenCL or CUDA.  The important distinctions (the host
 -- level code) are introduced later.
-module Futhark.CodeGen.ImpGen.Kernels
+module Futhark.CodeGen.ImpGen.GPU
   ( compileProgOpenCL,
     compileProgCUDA,
     Warnings,
@@ -19,25 +19,25 @@ import Data.Bifunctor (second)
 import Data.List (foldl')
 import qualified Data.Map as M
 import Data.Maybe
-import Futhark.CodeGen.ImpCode.Kernels (bytes)
-import qualified Futhark.CodeGen.ImpCode.Kernels as Imp
+import Futhark.CodeGen.ImpCode.GPU (bytes)
+import qualified Futhark.CodeGen.ImpCode.GPU as Imp
 import Futhark.CodeGen.ImpGen hiding (compileProg)
 import qualified Futhark.CodeGen.ImpGen
-import Futhark.CodeGen.ImpGen.Kernels.Base
-import Futhark.CodeGen.ImpGen.Kernels.SegHist
-import Futhark.CodeGen.ImpGen.Kernels.SegMap
-import Futhark.CodeGen.ImpGen.Kernels.SegRed
-import Futhark.CodeGen.ImpGen.Kernels.SegScan
-import Futhark.CodeGen.ImpGen.Kernels.Transpose
+import Futhark.CodeGen.ImpGen.GPU.Base
+import Futhark.CodeGen.ImpGen.GPU.SegHist
+import Futhark.CodeGen.ImpGen.GPU.SegMap
+import Futhark.CodeGen.ImpGen.GPU.SegRed
+import Futhark.CodeGen.ImpGen.GPU.SegScan
+import Futhark.CodeGen.ImpGen.GPU.Transpose
 import Futhark.CodeGen.SetDefaultSpace
 import Futhark.Error
-import Futhark.IR.KernelsMem
+import Futhark.IR.GPUMem
 import qualified Futhark.IR.Mem.IxFun as IxFun
 import Futhark.MonadFreshNames
 import Futhark.Util.IntegralExp (IntegralExp, divUp, quot, rem)
 import Prelude hiding (quot, rem)
 
-callKernelOperations :: Operations KernelsMem HostEnv Imp.HostOp
+callKernelOperations :: Operations GPUMem HostEnv Imp.HostOp
 callKernelOperations =
   Operations
     { opsExpCompiler = expCompiler,
@@ -80,23 +80,23 @@ openclAtomics, cudaAtomics :: AtomicBinOp
 compileProg ::
   MonadFreshNames m =>
   HostEnv ->
-  Prog KernelsMem ->
+  Prog GPUMem ->
   m (Warnings, Imp.Program)
 compileProg env prog =
   second (setDefaultSpace (Imp.Space "device"))
     <$> Futhark.CodeGen.ImpGen.compileProg env callKernelOperations (Imp.Space "device") prog
 
--- | Compile a 'KernelsMem' program to low-level parallel code, with
+-- | Compile a 'GPUMem' program to low-level parallel code, with
 -- either CUDA or OpenCL characteristics.
 compileProgOpenCL,
   compileProgCUDA ::
-    MonadFreshNames m => Prog KernelsMem -> m (Warnings, Imp.Program)
+    MonadFreshNames m => Prog GPUMem -> m (Warnings, Imp.Program)
 compileProgOpenCL = compileProg $ HostEnv openclAtomics OpenCL mempty
 compileProgCUDA = compileProg $ HostEnv cudaAtomics CUDA mempty
 
 opCompiler ::
-  Pattern KernelsMem ->
-  Op KernelsMem ->
+  Pattern GPUMem ->
+  Op GPUMem ->
   CallKernelGen ()
 opCompiler dest (Alloc e space) =
   compileAlloc dest e space
@@ -147,8 +147,8 @@ sizeClassWithEntryPoint fname (Imp.SizeThreshold path def) =
 sizeClassWithEntryPoint _ size_class = size_class
 
 segOpCompiler ::
-  Pattern KernelsMem ->
-  SegOp SegLevel KernelsMem ->
+  Pattern GPUMem ->
+  SegOp SegLevel GPUMem ->
   CallKernelGen ()
 segOpCompiler pat (SegMap lvl space _ kbody) =
   compileSegMap pat lvl space kbody
@@ -170,7 +170,7 @@ segOpCompiler pat segop =
 checkLocalMemoryReqs :: Imp.Code -> CallKernelGen (Maybe (Imp.TExp Bool))
 checkLocalMemoryReqs code = do
   scope <- askScope
-  let alloc_sizes = map (sum . map alignedSize . localAllocSizes . Imp.kernelBody) $ getKernels code
+  let alloc_sizes = map (sum . map alignedSize . localAllocSizes . Imp.kernelBody) $ getGPU code
 
   -- If any of the sizes involve a variable that is not known at this
   -- point, then we cannot check the requirements.
@@ -186,7 +186,7 @@ checkLocalMemoryReqs code = do
             unCount size .<=. local_memory_capacity_64
       return $ Just $ foldl' (.&&.) true (map fits alloc_sizes)
   where
-    getKernels = foldMap getKernel
+    getGPU = foldMap getKernel
     getKernel (Imp.CallKernel k) = [k]
     getKernel _ = []
 
@@ -200,9 +200,9 @@ checkLocalMemoryReqs code = do
     alignedSize x = x + ((8 - (x `rem` 8)) `rem` 8)
 
 withAcc ::
-  Pattern KernelsMem ->
-  [(Shape, [VName], Maybe (Lambda KernelsMem, [SubExp]))] ->
-  Lambda KernelsMem ->
+  Pattern GPUMem ->
+  [(Shape, [VName], Maybe (Lambda GPUMem, [SubExp]))] ->
+  Lambda GPUMem ->
   CallKernelGen ()
 withAcc pat inputs lam = do
   atomics <- hostAtomics <$> askEnv
@@ -224,7 +224,7 @@ withAcc pat inputs lam = do
       | otherwise =
         locksForInputs atomics inputs'
 
-expCompiler :: ExpCompiler KernelsMem HostEnv Imp.HostOp
+expCompiler :: ExpCompiler GPUMem HostEnv Imp.HostOp
 -- We generate a simple kernel for itoa and replicate.
 expCompiler (Pattern _ [pe]) (BasicOp (Iota n x s et)) = do
   x' <- toExp x
@@ -254,7 +254,7 @@ expCompiler dest (If cond tbranch fbranch (IfDec _ IfEquiv)) = do
 expCompiler dest e =
   defCompileExp dest e
 
-callKernelCopy :: CopyCompiler KernelsMem HostEnv Imp.HostOp
+callKernelCopy :: CopyCompiler GPUMem HostEnv Imp.HostOp
 callKernelCopy
   bt
   destloc@(MemLocation destmem _ destIxFun)

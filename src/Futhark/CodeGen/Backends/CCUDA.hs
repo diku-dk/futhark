@@ -20,7 +20,7 @@ import qualified Futhark.CodeGen.Backends.GenericC as GC
 import Futhark.CodeGen.Backends.GenericC.Options
 import Futhark.CodeGen.ImpCode.OpenCL
 import qualified Futhark.CodeGen.ImpGen.CUDA as ImpGen
-import Futhark.IR.KernelsMem hiding
+import Futhark.IR.GPUMem hiding
   ( CmpSizeLe,
     GetSize,
     GetSizeMax,
@@ -29,7 +29,7 @@ import Futhark.MonadFreshNames
 import qualified Language.C.Quote.OpenCL as C
 
 -- | Compile the program to C with calls to CUDA.
-compileProg :: MonadFreshNames m => Prog KernelsMem -> m (ImpGen.Warnings, GC.CParts)
+compileProg :: MonadFreshNames m => Prog GPUMem -> m (ImpGen.Warnings, GC.CParts)
 compileProg prog = do
   (ws, Program cuda_code cuda_prelude kernels _ sizes failures prog') <-
     ImpGen.compileProg prog

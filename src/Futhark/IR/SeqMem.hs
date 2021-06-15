@@ -13,12 +13,10 @@ module Futhark.IR.SeqMem
 
     -- * Module re-exports
     module Futhark.IR.Mem,
-    module Futhark.IR.Kernels.Kernel,
   )
 where
 
 import Futhark.Analysis.PrimExp.Convert
-import Futhark.IR.Kernels.Kernel
 import Futhark.IR.Mem
 import Futhark.IR.Mem.Simplify
 import qualified Futhark.Optimise.Simplify.Engine as Engine

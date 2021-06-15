@@ -62,7 +62,7 @@
 -- FIXME: the implementation is not finished yet.  Specifically, not
 -- all of the above conditions are checked.
 module Futhark.Optimise.InPlaceLowering
-  ( inPlaceLoweringKernels,
+  ( inPlaceLoweringGPU,
     inPlaceLoweringSeq,
     inPlaceLoweringMC,
   )
@@ -73,15 +73,15 @@ import qualified Data.Map.Strict as M
 import Futhark.Analysis.Alias
 import Futhark.Binder
 import Futhark.IR.Aliases
-import Futhark.IR.Kernels
+import Futhark.IR.GPU
 import Futhark.IR.MC
 import Futhark.IR.Seq (Seq)
 import Futhark.Optimise.InPlaceLowering.LowerIntoStm
 import Futhark.Pass
 
 -- | Apply the in-place lowering optimisation to the given program.
-inPlaceLoweringKernels :: Pass Kernels Kernels
-inPlaceLoweringKernels = inPlaceLowering onKernelOp lowerUpdateKernels
+inPlaceLoweringGPU :: Pass GPU GPU
+inPlaceLoweringGPU = inPlaceLowering onKernelOp lowerUpdateGPU
 
 -- | Apply the in-place lowering optimisation to the given program.
 inPlaceLoweringSeq :: Pass Seq Seq
@@ -217,7 +217,7 @@ onMCOp :: OnOp MC
 onMCOp (ParOp par_op op) = ParOp <$> traverse onSegOp par_op <*> onSegOp op
 onMCOp op = return op
 
-onKernelOp :: OnOp Kernels
+onKernelOp :: OnOp GPU
 onKernelOp (SegOp op) = SegOp <$> onSegOp op
 onKernelOp op = return op
 

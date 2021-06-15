@@ -62,9 +62,9 @@ library
       Futhark.Analysis.Metrics
       Futhark.Analysis.Metrics.Type
       Futhark.Analysis.PrimExp
-      Futhark.Analysis.PrimExp.Parse
       Futhark.Analysis.PrimExp.Convert
       Futhark.Analysis.PrimExp.Generalize
+      Futhark.Analysis.PrimExp.Parse
       Futhark.Analysis.PrimExp.Simplify
       Futhark.Analysis.Rephrase
       Futhark.Analysis.SymbolTable
@@ -98,8 +98,8 @@ library
       Futhark.CodeGen.Backends.COpenCL.Boilerplate
       Futhark.CodeGen.Backends.GenericC
       Futhark.CodeGen.Backends.GenericC.CLI
-      Futhark.CodeGen.Backends.GenericC.Server
       Futhark.CodeGen.Backends.GenericC.Options
+      Futhark.CodeGen.Backends.GenericC.Server
       Futhark.CodeGen.Backends.GenericPython
       Futhark.CodeGen.Backends.GenericPython.AST
       Futhark.CodeGen.Backends.GenericPython.Definitions
@@ -112,22 +112,22 @@ library
       Futhark.CodeGen.Backends.SequentialPython
       Futhark.CodeGen.Backends.SimpleRep
       Futhark.CodeGen.ImpCode
-      Futhark.CodeGen.ImpCode.Kernels
+      Futhark.CodeGen.ImpCode.GPU
       Futhark.CodeGen.ImpCode.Multicore
       Futhark.CodeGen.ImpCode.OpenCL
       Futhark.CodeGen.ImpCode.Sequential
       Futhark.CodeGen.ImpGen
       Futhark.CodeGen.ImpGen.CUDA
-      Futhark.CodeGen.ImpGen.Kernels
-      Futhark.CodeGen.ImpGen.Kernels.Base
-      Futhark.CodeGen.ImpGen.Kernels.SegHist
-      Futhark.CodeGen.ImpGen.Kernels.SegMap
-      Futhark.CodeGen.ImpGen.Kernels.SegRed
-      Futhark.CodeGen.ImpGen.Kernels.SegScan
-      Futhark.CodeGen.ImpGen.Kernels.SegScan.SinglePass
-      Futhark.CodeGen.ImpGen.Kernels.SegScan.TwoPass
-      Futhark.CodeGen.ImpGen.Kernels.ToOpenCL
-      Futhark.CodeGen.ImpGen.Kernels.Transpose
+      Futhark.CodeGen.ImpGen.GPU
+      Futhark.CodeGen.ImpGen.GPU.Base
+      Futhark.CodeGen.ImpGen.GPU.SegHist
+      Futhark.CodeGen.ImpGen.GPU.SegMap
+      Futhark.CodeGen.ImpGen.GPU.SegRed
+      Futhark.CodeGen.ImpGen.GPU.SegScan
+      Futhark.CodeGen.ImpGen.GPU.SegScan.SinglePass
+      Futhark.CodeGen.ImpGen.GPU.SegScan.TwoPass
+      Futhark.CodeGen.ImpGen.GPU.ToOpenCL
+      Futhark.CodeGen.ImpGen.GPU.Transpose
       Futhark.CodeGen.ImpGen.Multicore
       Futhark.CodeGen.ImpGen.Multicore.Base
       Futhark.CodeGen.ImpGen.Multicore.SegHist
@@ -149,19 +149,18 @@ library
       Futhark.FreshNames
       Futhark.IR
       Futhark.IR.Aliases
-      Futhark.IR.Rep
-      Futhark.IR.Parse
-      Futhark.IR.Kernels
-      Futhark.IR.Kernels.Kernel
-      Futhark.IR.Kernels.Simplify
-      Futhark.IR.Kernels.Sizes
-      Futhark.IR.KernelsMem
+      Futhark.IR.GPU
+      Futhark.IR.GPU.Kernel
+      Futhark.IR.GPU.Simplify
+      Futhark.IR.GPU.Sizes
+      Futhark.IR.GPUMem
       Futhark.IR.MC
       Futhark.IR.MC.Op
       Futhark.IR.MCMem
       Futhark.IR.Mem
       Futhark.IR.Mem.IxFun
       Futhark.IR.Mem.Simplify
+      Futhark.IR.Parse
       Futhark.IR.Pretty
       Futhark.IR.Primitive
       Futhark.IR.Primitive.Parse
@@ -175,6 +174,7 @@ library
       Futhark.IR.Prop.Scope
       Futhark.IR.Prop.TypeOf
       Futhark.IR.Prop.Types
+      Futhark.IR.Rep
       Futhark.IR.RetType
       Futhark.IR.SOACS
       Futhark.IR.SOACS.SOAC
@@ -227,10 +227,10 @@ library
       Futhark.Pass
       Futhark.Pass.ExpandAllocations
       Futhark.Pass.ExplicitAllocations
-      Futhark.Pass.ExplicitAllocations.Kernels
+      Futhark.Pass.ExplicitAllocations.GPU
+      Futhark.Pass.ExplicitAllocations.MC
       Futhark.Pass.ExplicitAllocations.SegOp
       Futhark.Pass.ExplicitAllocations.Seq
-      Futhark.Pass.ExplicitAllocations.MC
       Futhark.Pass.ExtractKernels
       Futhark.Pass.ExtractKernels.BlockedKernel
       Futhark.Pass.ExtractKernels.DistributeNests
@@ -239,7 +239,7 @@ library
       Futhark.Pass.ExtractKernels.Interchange
       Futhark.Pass.ExtractKernels.Intragroup
       Futhark.Pass.ExtractKernels.StreamKernel
-      Futhark.Pass.ExtractKernels.ToKernels
+      Futhark.Pass.ExtractKernels.ToGPU
       Futhark.Pass.ExtractMulticore
       Futhark.Pass.FirstOrderTransform
       Futhark.Pass.KernelBabysitting

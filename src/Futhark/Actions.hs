@@ -29,12 +29,12 @@ import qualified Futhark.CodeGen.Backends.MulticoreC as MulticoreC
 import qualified Futhark.CodeGen.Backends.PyOpenCL as PyOpenCL
 import qualified Futhark.CodeGen.Backends.SequentialC as SequentialC
 import qualified Futhark.CodeGen.Backends.SequentialPython as SequentialPy
-import qualified Futhark.CodeGen.ImpGen.Kernels as ImpGenKernels
+import qualified Futhark.CodeGen.ImpGen.GPU as ImpGenGPU
 import qualified Futhark.CodeGen.ImpGen.Multicore as ImpGenMulticore
 import qualified Futhark.CodeGen.ImpGen.Sequential as ImpGenSequential
 import Futhark.Compiler.CLI
 import Futhark.IR
-import Futhark.IR.KernelsMem (KernelsMem)
+import Futhark.IR.GPUMem (GPUMem)
 import Futhark.IR.MCMem (MCMem)
 import Futhark.IR.Prop.Aliases
 import Futhark.IR.SeqMem (SeqMem)
@@ -82,12 +82,12 @@ impCodeGenAction =
     }
 
 -- | Convert the program to GPU ImpCode and print it to stdout.
-kernelImpCodeGenAction :: Action KernelsMem
+kernelImpCodeGenAction :: Action GPUMem
 kernelImpCodeGenAction =
   Action
     { actionName = "Compile imperative kernels",
       actionDescription = "Translate program into imperative IL with kernels and write it on standard output.",
-      actionProcedure = liftIO . putStrLn . pretty . snd <=< ImpGenKernels.compileProgOpenCL
+      actionProcedure = liftIO . putStrLn . pretty . snd <=< ImpGenGPU.compileProgOpenCL
     }
 
 -- | Convert the program to CPU multicore ImpCode and print it to stdout.
@@ -173,7 +173,7 @@ compileCAction fcfg mode outpath =
           runCC cpath outpath ["-O3", "-std=c99"] ["-lm"]
 
 -- | The @futhark opencl@ action.
-compileOpenCLAction :: FutharkConfig -> CompilerMode -> FilePath -> Action KernelsMem
+compileOpenCLAction :: FutharkConfig -> CompilerMode -> FilePath -> Action GPUMem
 compileOpenCLAction fcfg mode outpath =
   Action
     { actionName = "Compile to OpenCL",
@@ -206,7 +206,7 @@ compileOpenCLAction fcfg mode outpath =
           runCC cpath outpath ["-O", "-std=c99"] ("-lm" : extra_options)
 
 -- | The @futhark cuda@ action.
-compileCUDAAction :: FutharkConfig -> CompilerMode -> FilePath -> Action KernelsMem
+compileCUDAAction :: FutharkConfig -> CompilerMode -> FilePath -> Action GPUMem
 compileCUDAAction fcfg mode outpath =
   Action
     { actionName = "Compile to CUDA",
@@ -291,7 +291,7 @@ compilePythonAction fcfg mode outpath =
       actionProcedure = pythonCommon SequentialPy.compileProg fcfg mode outpath
     }
 
-compilePyOpenCLAction :: FutharkConfig -> CompilerMode -> FilePath -> Action KernelsMem
+compilePyOpenCLAction :: FutharkConfig -> CompilerMode -> FilePath -> Action GPUMem
 compilePyOpenCLAction fcfg mode outpath =
   Action
     { actionName = "Compile to PyOpenCL",

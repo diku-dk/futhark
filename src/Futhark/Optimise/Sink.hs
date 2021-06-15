@@ -40,10 +40,10 @@
 -- you ever see this pass as being a compilation speed bottleneck,
 -- start by caching that a bit.
 --
--- This pass is defined on the Kernels representation.  This is not
--- because we do anything kernel-specific here, but simply because
--- more explicit indexing is going on after SOACs are gone.
-module Futhark.Optimise.Sink (sinkKernels, sinkMC) where
+-- This pass is defined on post-SOACS representations.  This is not
+-- because we do anything GPU-specific here, but simply because more
+-- explicit indexing is going on after SOACs are gone.
+module Futhark.Optimise.Sink (sinkGPU, sinkMC) where
 
 import Control.Monad.State
 import Data.Bifunctor
@@ -52,7 +52,7 @@ import qualified Data.Map as M
 import qualified Futhark.Analysis.Alias as Alias
 import qualified Futhark.Analysis.SymbolTable as ST
 import Futhark.IR.Aliases
-import Futhark.IR.Kernels
+import Futhark.IR.GPU
 import Futhark.IR.MC
 import Futhark.Pass
 
@@ -235,10 +235,10 @@ sink onOp =
             namesFromList $ M.keys $ scopeOf consts
 
 -- | Sinking in GPU kernels.
-sinkKernels :: Pass Kernels Kernels
-sinkKernels = sink onHostOp
+sinkGPU :: Pass GPU GPU
+sinkGPU = sink onHostOp
   where
-    onHostOp :: Sinker (SinkRep Kernels) (Op (SinkRep Kernels))
+    onHostOp :: Sinker (SinkRep GPU) (Op (SinkRep GPU))
     onHostOp vtable sinking (SegOp op) =
       first SegOp $ optimiseSegOp onHostOp vtable sinking op
     onHostOp _ _ op = (op, mempty)

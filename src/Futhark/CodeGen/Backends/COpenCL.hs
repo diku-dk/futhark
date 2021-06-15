@@ -19,7 +19,7 @@ import qualified Futhark.CodeGen.Backends.GenericC as GC
 import Futhark.CodeGen.Backends.GenericC.Options
 import Futhark.CodeGen.ImpCode.OpenCL
 import qualified Futhark.CodeGen.ImpGen.OpenCL as ImpGen
-import Futhark.IR.KernelsMem hiding
+import Futhark.IR.GPUMem hiding
   ( CmpSizeLe,
     GetSize,
     GetSizeMax,
@@ -29,7 +29,7 @@ import qualified Language.C.Quote.OpenCL as C
 import qualified Language.C.Syntax as C
 
 -- | Compile the program to C with calls to OpenCL.
-compileProg :: MonadFreshNames m => Prog KernelsMem -> m (ImpGen.Warnings, GC.CParts)
+compileProg :: MonadFreshNames m => Prog GPUMem -> m (ImpGen.Warnings, GC.CParts)
 compileProg prog = do
   ( ws,
     Program

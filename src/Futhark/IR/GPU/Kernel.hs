@@ -7,7 +7,7 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
 
-module Futhark.IR.Kernels.Kernel
+module Futhark.IR.GPU.Kernel
   ( -- * Size operations
     SizeOp (..),
 
@@ -19,7 +19,7 @@ module Futhark.IR.Kernels.Kernel
     SegLevel (..),
 
     -- * Reexports
-    module Futhark.IR.Kernels.Sizes,
+    module Futhark.IR.GPU.Sizes,
     module Futhark.IR.SegOp,
   )
 where
@@ -28,7 +28,7 @@ import Futhark.Analysis.Metrics
 import qualified Futhark.Analysis.SymbolTable as ST
 import Futhark.IR
 import Futhark.IR.Aliases (Aliases)
-import Futhark.IR.Kernels.Sizes
+import Futhark.IR.GPU.Sizes
 import Futhark.IR.Prop.Aliases
 import Futhark.IR.SegOp
 import qualified Futhark.Optimise.Simplify.Engine as Engine

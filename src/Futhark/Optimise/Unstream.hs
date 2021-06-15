@@ -18,13 +18,13 @@
 -- simplified away, but only *before* they are turned into loops.  In
 -- principle this pass could be split into multiple, but for now it is
 -- kept together.
-module Futhark.Optimise.Unstream (unstreamKernels, unstreamMC) where
+module Futhark.Optimise.Unstream (unstreamGPU, unstreamMC) where
 
 import Control.Monad.Reader
 import Control.Monad.State
-import Futhark.IR.Kernels
-import qualified Futhark.IR.Kernels as Kernels
-import Futhark.IR.Kernels.Simplify (simplifyKernels)
+import Futhark.IR.GPU
+import qualified Futhark.IR.GPU as GPU
+import Futhark.IR.GPU.Simplify (simplifyGPU)
 import Futhark.IR.MC
 import qualified Futhark.IR.MC as MC
 import Futhark.MonadFreshNames
@@ -33,8 +33,8 @@ import Futhark.Tools
 import qualified Futhark.Transform.FirstOrderTransform as FOT
 
 -- | The pass for GPU kernels.
-unstreamKernels :: Pass Kernels Kernels
-unstreamKernels = unstream onHostOp simplifyKernels
+unstreamGPU :: Pass GPU GPU
+unstreamGPU = unstream onHostOp simplifyGPU
 
 -- | The pass for multicore.
 unstreamMC :: Pass MC MC
@@ -155,8 +155,8 @@ sequentialise SeqStreams Stream {} = True
 sequentialise SeqStreams _ = False
 sequentialise SeqAll _ = True
 
-onHostOp :: Stage -> OnOp Kernels
-onHostOp stage pat aux (Kernels.OtherOp soac)
+onHostOp :: Stage -> OnOp GPU
+onHostOp stage pat aux (GPU.OtherOp soac)
   | sequentialise stage soac = do
     stms <- runBinder_ $ FOT.transformSOAC pat soac
     fmap concat $
@@ -164,7 +164,7 @@ onHostOp stage pat aux (Kernels.OtherOp soac)
         mapM (optimiseStm (onHostOp stage)) $ stmsToList stms
   | otherwise =
     -- Still sequentialise whatever's inside.
-    pure <$> (Let pat aux . Op . Kernels.OtherOp <$> mapSOACM optimise soac)
+    pure <$> (Let pat aux . Op . GPU.OtherOp <$> mapSOACM optimise soac)
   where
     optimise =
       identitySOACMapper

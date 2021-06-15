@@ -1,13 +1,13 @@
 -- | Carefully optimised implementations of GPU transpositions.
 -- Written in ImpCode so we can compile it to both CUDA and OpenCL.
-module Futhark.CodeGen.ImpGen.Kernels.Transpose
+module Futhark.CodeGen.ImpGen.GPU.Transpose
   ( TransposeType (..),
     TransposeArgs,
     mapTransposeKernel,
   )
 where
 
-import Futhark.CodeGen.ImpCode.Kernels
+import Futhark.CodeGen.ImpCode.GPU
 import Futhark.IR.Prop.Types
 import Futhark.Util.IntegralExp (divUp, quot, rem)
 import Prelude hiding (quot, rem)

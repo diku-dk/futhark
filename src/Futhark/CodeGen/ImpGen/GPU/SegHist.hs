@@ -37,17 +37,17 @@
 --   use local memory
 -- else
 --   use global memory
-module Futhark.CodeGen.ImpGen.Kernels.SegHist (compileSegHist) where
+module Futhark.CodeGen.ImpGen.GPU.SegHist (compileSegHist) where
 
 import Control.Monad.Except
 import Data.List (foldl', genericLength, zip4, zip6)
 import Data.Maybe
-import qualified Futhark.CodeGen.ImpCode.Kernels as Imp
+import qualified Futhark.CodeGen.ImpCode.GPU as Imp
 import Futhark.CodeGen.ImpGen
-import Futhark.CodeGen.ImpGen.Kernels.Base
-import Futhark.CodeGen.ImpGen.Kernels.SegRed (compileSegRed')
+import Futhark.CodeGen.ImpGen.GPU.Base
+import Futhark.CodeGen.ImpGen.GPU.SegRed (compileSegRed')
 import Futhark.Construct (fullSliceNum)
-import Futhark.IR.KernelsMem
+import Futhark.IR.GPUMem
 import qualified Futhark.IR.Mem.IxFun as IxFun
 import Futhark.MonadFreshNames
 import Futhark.Pass.ExplicitAllocations ()
@@ -61,14 +61,14 @@ data SubhistosInfo = SubhistosInfo
   }
 
 data SegHistSlug = SegHistSlug
-  { slugOp :: HistOp KernelsMem,
+  { slugOp :: HistOp GPUMem,
     slugNumSubhistos :: TV Int64,
     slugSubhistos :: [SubhistosInfo],
-    slugAtomicUpdate :: AtomicUpdate KernelsMem KernelEnv
+    slugAtomicUpdate :: AtomicUpdate GPUMem KernelEnv
   }
 
 histoSpaceUsage ::
-  HistOp KernelsMem ->
+  HistOp GPUMem ->
   Imp.Count Imp.Bytes (Imp.TExp Int64)
 histoSpaceUsage op =
   sum $
@@ -84,7 +84,7 @@ histoSpaceUsage op =
 -- information.
 computeHistoUsage ::
   SegSpace ->
-  HistOp KernelsMem ->
+  HistOp GPUMem ->
   CallKernelGen
     ( Imp.Count Imp.Bytes (Imp.TExp Int64),
       Imp.Count Imp.Bytes (Imp.TExp Int64),
@@ -197,7 +197,7 @@ prepareAtomicUpdateGlobal l dests slug =
 -- multiple times.
 data Passage = MustBeSinglePass | MayBeMultiPass deriving (Eq, Ord)
 
-bodyPassage :: KernelBody KernelsMem -> Passage
+bodyPassage :: KernelBody GPUMem -> Passage
 bodyPassage kbody
   | mempty == consumedInKernelBody (aliasAnalyseKernelBody mempty kbody) =
     MayBeMultiPass
@@ -383,12 +383,12 @@ prepareIntermediateArraysGlobal passage hist_T hist_N slugs = do
       return (l', do_op')
 
 histKernelGlobalPass ::
-  [PatElem KernelsMem] ->
+  [PatElem GPUMem] ->
   Count NumGroups (Imp.TExp Int64) ->
   Count GroupSize (Imp.TExp Int64) ->
   SegSpace ->
   [SegHistSlug] ->
-  KernelBody KernelsMem ->
+  KernelBody GPUMem ->
   [[Imp.TExp Int64] -> InKernelGen ()] ->
   Imp.TExp Int32 ->
   Imp.TExp Int32 ->
@@ -472,12 +472,12 @@ histKernelGlobalPass map_pes num_groups group_size space slugs kbody histograms 
                       do_op (bucket_is ++ is)
 
 histKernelGlobal ::
-  [PatElem KernelsMem] ->
+  [PatElem GPUMem] ->
   Count NumGroups SubExp ->
   Count GroupSize SubExp ->
   SegSpace ->
   [SegHistSlug] ->
-  KernelBody KernelsMem ->
+  KernelBody GPUMem ->
   CallKernelGen ()
 histKernelGlobal map_pes num_groups group_size space slugs kbody = do
   let num_groups' = fmap toInt64Exp num_groups
@@ -584,12 +584,12 @@ prepareIntermediateArraysLocal num_subhistos_per_group groups_per_segment space 
 histKernelLocalPass ::
   TV Int32 ->
   Count NumGroups (Imp.TExp Int64) ->
-  [PatElem KernelsMem] ->
+  [PatElem GPUMem] ->
   Count NumGroups (Imp.TExp Int64) ->
   Count GroupSize (Imp.TExp Int64) ->
   SegSpace ->
   [SegHistSlug] ->
-  KernelBody KernelsMem ->
+  KernelBody GPUMem ->
   InitLocalHistograms ->
   Imp.TExp Int32 ->
   Imp.TExp Int32 ->
@@ -824,13 +824,13 @@ histKernelLocalPass
 histKernelLocal ::
   TV Int32 ->
   Count NumGroups (Imp.TExp Int64) ->
-  [PatElem KernelsMem] ->
+  [PatElem GPUMem] ->
   Count NumGroups SubExp ->
   Count GroupSize SubExp ->
   SegSpace ->
   Imp.TExp Int32 ->
   [SegHistSlug] ->
-  KernelBody KernelsMem ->
+  KernelBody GPUMem ->
   CallKernelGen ()
 histKernelLocal num_subhistos_per_group_var groups_per_segment map_pes num_groups group_size space hist_S slugs kbody = do
   let num_groups' = fmap toInt64Exp num_groups
@@ -868,7 +868,7 @@ slugMaxLocalMemPasses slug =
     AtomicLocking _ -> 6
 
 localMemoryCase ::
-  [PatElem KernelsMem] ->
+  [PatElem GPUMem] ->
   Imp.TExp Int32 ->
   SegSpace ->
   Imp.TExp Int64 ->
@@ -876,7 +876,7 @@ localMemoryCase ::
   Imp.TExp Int64 ->
   Imp.TExp Int32 ->
   [SegHistSlug] ->
-  KernelBody KernelsMem ->
+  KernelBody GPUMem ->
   CallKernelGen (Imp.TExp Bool, CallKernelGen ())
 localMemoryCase map_pes hist_T space hist_H hist_el_size hist_N _ slugs kbody = do
   let space_sizes = segSpaceDims space
@@ -1023,12 +1023,12 @@ localMemoryCase map_pes hist_T space hist_H hist_el_size hist_N _ slugs kbody = 
 
 -- | Generate code for a segmented histogram called from the host.
 compileSegHist ::
-  Pattern KernelsMem ->
+  Pattern GPUMem ->
   Count NumGroups SubExp ->
   Count GroupSize SubExp ->
   SegSpace ->
-  [HistOp KernelsMem] ->
-  KernelBody KernelsMem ->
+  [HistOp GPUMem] ->
+  KernelBody GPUMem ->
   CallKernelGen ()
 compileSegHist (Pattern _ pes) num_groups group_size space ops kbody = do
   -- Most of this function is not the histogram part itself, but

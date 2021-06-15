@@ -4,7 +4,7 @@
 
 -- | This module defines a translation from imperative code with
 -- kernels to imperative code with OpenCL calls.
-module Futhark.CodeGen.ImpGen.Kernels.ToOpenCL
+module Futhark.CodeGen.ImpGen.GPU.ToOpenCL
   ( kernelsToOpenCL,
     kernelsToCUDA,
   )
@@ -19,8 +19,8 @@ import Data.Maybe
 import qualified Data.Set as S
 import qualified Futhark.CodeGen.Backends.GenericC as GC
 import Futhark.CodeGen.Backends.SimpleRep
-import Futhark.CodeGen.ImpCode.Kernels hiding (Program)
-import qualified Futhark.CodeGen.ImpCode.Kernels as ImpKernels
+import Futhark.CodeGen.ImpCode.GPU hiding (Program)
+import qualified Futhark.CodeGen.ImpCode.GPU as ImpGPU
 import Futhark.CodeGen.ImpCode.OpenCL hiding (Program)
 import qualified Futhark.CodeGen.ImpCode.OpenCL as ImpOpenCL
 import Futhark.Error (compilerLimitationS)
@@ -32,23 +32,23 @@ import qualified Language.C.Quote.CUDA as CUDAC
 import qualified Language.C.Quote.OpenCL as C
 import qualified Language.C.Syntax as C
 
-kernelsToCUDA, kernelsToOpenCL :: ImpKernels.Program -> ImpOpenCL.Program
-kernelsToCUDA = translateKernels TargetCUDA
-kernelsToOpenCL = translateKernels TargetOpenCL
+kernelsToCUDA, kernelsToOpenCL :: ImpGPU.Program -> ImpOpenCL.Program
+kernelsToCUDA = translateGPU TargetCUDA
+kernelsToOpenCL = translateGPU TargetOpenCL
 
 -- | Translate a kernels-program to an OpenCL-program.
-translateKernels ::
+translateGPU ::
   KernelTarget ->
-  ImpKernels.Program ->
+  ImpGPU.Program ->
   ImpOpenCL.Program
-translateKernels target prog =
+translateGPU target prog =
   let ( prog',
         ToOpenCL kernels device_funs used_types sizes failures
         ) =
           (`runState` initialOpenCL) . (`runReaderT` defFuns prog) $ do
-            let ImpKernels.Definitions
-                  (ImpKernels.Constants ps consts)
-                  (ImpKernels.Functions funs) = prog
+            let ImpGPU.Definitions
+                  (ImpGPU.Constants ps consts)
+                  (ImpGPU.Functions funs) = prog
             consts' <- traverse (onHostOp target) consts
             funs' <- forM funs $ \(fname, fun) ->
               (fname,) <$> traverse (onHostOp target) fun
@@ -121,7 +121,7 @@ errorLabel :: KernelState -> String
 errorLabel = ("error_" ++) . show . kernelNextSync
 
 data ToOpenCL = ToOpenCL
-  { clKernels :: M.Map KernelName (KernelSafety, C.Func),
+  { clGPU :: M.Map KernelName (KernelSafety, C.Func),
     clDevFuns :: M.Map Name (C.Definition, C.Func),
     clUsedTypes :: S.Set PrimType,
     clSizes :: M.Map Name SizeClass,
@@ -131,10 +131,10 @@ data ToOpenCL = ToOpenCL
 initialOpenCL :: ToOpenCL
 initialOpenCL = ToOpenCL mempty mempty mempty mempty mempty
 
-type AllFunctions = ImpKernels.Functions ImpKernels.HostOp
+type AllFunctions = ImpGPU.Functions ImpGPU.HostOp
 
-lookupFunction :: Name -> AllFunctions -> Maybe ImpKernels.Function
-lookupFunction fname (ImpKernels.Functions fs) = lookup fname fs
+lookupFunction :: Name -> AllFunctions -> Maybe ImpGPU.Function
+lookupFunction fname (ImpGPU.Functions fs) = lookup fname fs
 
 type OnKernelM = ReaderT AllFunctions (State ToOpenCL)
 
@@ -144,13 +144,13 @@ addSize key sclass =
 
 onHostOp :: KernelTarget -> HostOp -> OnKernelM OpenCL
 onHostOp target (CallKernel k) = onKernel target k
-onHostOp _ (ImpKernels.GetSize v key size_class) = do
+onHostOp _ (ImpGPU.GetSize v key size_class) = do
   addSize key size_class
   return $ ImpOpenCL.GetSize v key
-onHostOp _ (ImpKernels.CmpSizeLe v key size_class x) = do
+onHostOp _ (ImpGPU.CmpSizeLe v key size_class x) = do
   addSize key size_class
   return $ ImpOpenCL.CmpSizeLe v key x
-onHostOp _ (ImpKernels.GetSizeMax v size_class) =
+onHostOp _ (ImpGPU.GetSizeMax v size_class) =
   return $ ImpOpenCL.GetSizeMax v size_class
 
 genGPUCode ::
@@ -167,7 +167,7 @@ genGPUCode mode body failures =
 
 -- Compilation of a device function that is not not invoked from the
 -- host, but is invoked by (perhaps multiple) kernels.
-generateDeviceFun :: Name -> ImpKernels.Function -> OnKernelM ()
+generateDeviceFun :: Name -> ImpGPU.Function -> OnKernelM ()
 generateDeviceFun fname host_func = do
   -- Functions are a priori always considered host-level, so we have
   -- to convert them to device code.  This is where most of our
@@ -208,12 +208,12 @@ generateDeviceFun fname host_func = do
 
 -- Ensure that this device function is available, but don't regenerate
 -- it if it already exists.
-ensureDeviceFun :: Name -> ImpKernels.Function -> OnKernelM ()
+ensureDeviceFun :: Name -> ImpGPU.Function -> OnKernelM ()
 ensureDeviceFun fname host_func = do
   exists <- gets $ M.member fname . clDevFuns
   unless exists $ generateDeviceFun fname host_func
 
-ensureDeviceFuns :: ImpKernels.KernelCode -> OnKernelM [Name]
+ensureDeviceFuns :: ImpGPU.KernelCode -> OnKernelM [Name]
 ensureDeviceFuns code = do
   let called = calledFuncs code
   fmap catMaybes $
@@ -335,7 +335,7 @@ onKernel target kernel = do
                 }|]
   modify $ \s ->
     s
-      { clKernels = M.insert name (safety, kernel_fun) $ clKernels s,
+      { clGPU = M.insert name (safety, kernel_fun) $ clGPU s,
         clUsedTypes = typesInKernel kernel <> clUsedTypes s,
         clFailures = kernelFailures kstate
       }
@@ -605,7 +605,7 @@ pendingError :: Bool -> GC.CompilerM KernelOp KernelState ()
 pendingError b =
   GC.modifyUserState $ \s -> s {kernelSyncPending = b}
 
-hasCommunication :: ImpKernels.KernelCode -> Bool
+hasCommunication :: ImpGPU.KernelCode -> Bool
 hasCommunication = any communicates
   where
     communicates ErrorSync {} = True
@@ -619,7 +619,7 @@ data OpsMode = KernelMode | FunMode deriving (Eq)
 
 inKernelOperations ::
   OpsMode ->
-  ImpKernels.KernelCode ->
+  ImpGPU.KernelCode ->
   GC.Operations KernelOp KernelState
 inKernelOperations mode body =
   GC.Operations
@@ -839,7 +839,7 @@ inKernelOperations mode body =
 typesInKernel :: Kernel -> S.Set PrimType
 typesInKernel kernel = typesInCode $ kernelBody kernel
 
-typesInCode :: ImpKernels.KernelCode -> S.Set PrimType
+typesInCode :: ImpGPU.KernelCode -> S.Set PrimType
 typesInCode Skip = mempty
 typesInCode (c1 :>>: c2) = typesInCode c1 <> typesInCode c2
 typesInCode (For _ e c) = typesInExp e <> typesInCode c

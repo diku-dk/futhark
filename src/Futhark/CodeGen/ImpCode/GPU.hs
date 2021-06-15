@@ -3,7 +3,7 @@
 
 -- | Variation of "Futhark.CodeGen.ImpCode" that contains the notion
 -- of a kernel invocation.
-module Futhark.CodeGen.ImpCode.Kernels
+module Futhark.CodeGen.ImpCode.GPU
   ( Program,
     Function,
     FunctionT (Function),
@@ -18,13 +18,13 @@ module Futhark.CodeGen.ImpCode.Kernels
     Kernel (..),
     KernelUse (..),
     module Futhark.CodeGen.ImpCode,
-    module Futhark.IR.Kernels.Sizes,
+    module Futhark.IR.GPU.Sizes,
   )
 where
 
 import Futhark.CodeGen.ImpCode hiding (Code, Function)
 import qualified Futhark.CodeGen.ImpCode as Imp
-import Futhark.IR.Kernels.Sizes
+import Futhark.IR.GPU.Sizes
 import Futhark.IR.Pretty ()
 import Futhark.Util.Pretty
 
