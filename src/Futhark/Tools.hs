@@ -31,19 +31,19 @@ import Futhark.Util
 -- Only handles a pattern with an empty 'patternContextElements'.
 redomapToMapAndReduce ::
   ( MonadFreshNames m,
-    Bindable lore,
-    ExpDec lore ~ (),
-    Op lore ~ SOAC lore
+    Bindable rep,
+    ExpDec rep ~ (),
+    Op rep ~ SOAC rep
   ) =>
-  Pattern lore ->
+  Pattern rep ->
   ( SubExp,
     Commutativity,
-    LambdaT lore,
-    LambdaT lore,
+    LambdaT rep,
+    LambdaT rep,
     [SubExp],
     [VName]
   ) ->
-  m (Stm lore, Stm lore)
+  m (Stm rep, Stm rep)
 redomapToMapAndReduce
   (Pattern [] patelems)
   (w, comm, redlam, map_lam, accs, arrs) = do
@@ -62,7 +62,7 @@ splitScanOrRedomap ::
   (Typed dec, MonadFreshNames m) =>
   [PatElemT dec] ->
   SubExp ->
-  LambdaT lore ->
+  LambdaT rep ->
   [SubExp] ->
   m ([Ident], PatternT dec, [(SubExp, VName)])
 splitScanOrRedomap patelems w map_lam accs = do
@@ -84,12 +84,12 @@ splitScanOrRedomap patelems w map_lam accs = do
 -- In essense, what happens is the opposite of horisontal fusion.
 dissectScrema ::
   ( MonadBinder m,
-    Op (Lore m) ~ SOAC (Lore m),
-    Bindable (Lore m)
+    Op (Rep m) ~ SOAC (Rep m),
+    Bindable (Rep m)
   ) =>
-  Pattern (Lore m) ->
+  Pattern (Rep m) ->
   SubExp ->
-  ScremaForm (Lore m) ->
+  ScremaForm (Rep m) ->
   [VName] ->
   m ()
 dissectScrema pat w (ScremaForm scans reds map_lam) arrs = do
@@ -110,11 +110,11 @@ dissectScrema pat w (ScremaForm scans reds map_lam) arrs = do
 -- | Turn a stream SOAC into statements that apply the stream lambda
 -- to the entire input.
 sequentialStreamWholeArray ::
-  (MonadBinder m, Bindable (Lore m)) =>
-  Pattern (Lore m) ->
+  (MonadBinder m, Bindable (Rep m)) =>
+  Pattern (Rep m) ->
   SubExp ->
   [SubExp] ->
-  LambdaT (Lore m) ->
+  LambdaT (Rep m) ->
   [VName] ->
   m ()
 sequentialStreamWholeArray pat w nes lam arrs = do

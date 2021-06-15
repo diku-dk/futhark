@@ -296,7 +296,7 @@ analyseKernels' lumap stms =
     helper stm =
       inScopeOf stm $ return mempty
 
-nameInfoToMemInfo :: Mem lore => NameInfo lore -> MemBound NoUniqueness
+nameInfoToMemInfo :: Mem rep => NameInfo rep -> MemBound NoUniqueness
 nameInfoToMemInfo info =
   case info of
     FParamName summary -> noUniquenessReturns summary

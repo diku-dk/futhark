@@ -15,31 +15,31 @@ import qualified Futhark.Analysis.SymbolTable as ST
 import Futhark.IR
 import Futhark.MonadFreshNames
 import Futhark.Optimise.Simplify
-import Futhark.Optimise.Simplify.Lore (Wise)
+import Futhark.Optimise.Simplify.Rep (Wise)
 import Futhark.Pass
 
 -- | Run copy propagation on an entire program.
 copyPropagateInProg ::
-  SimplifiableLore lore =>
-  SimpleOps lore ->
-  Prog lore ->
-  PassM (Prog lore)
+  SimplifiableRep rep =>
+  SimpleOps rep ->
+  Prog rep ->
+  PassM (Prog rep)
 copyPropagateInProg simpl = simplifyProg simpl mempty neverHoist
 
 -- | Run copy propagation on some statements.
 copyPropagateInStms ::
-  (MonadFreshNames m, SimplifiableLore lore) =>
-  SimpleOps lore ->
-  Scope lore ->
-  Stms lore ->
-  m (ST.SymbolTable (Wise lore), Stms lore)
+  (MonadFreshNames m, SimplifiableRep rep) =>
+  SimpleOps rep ->
+  Scope rep ->
+  Stms rep ->
+  m (ST.SymbolTable (Wise rep), Stms rep)
 copyPropagateInStms simpl = simplifyStms simpl mempty neverHoist
 
 -- | Run copy propagation on a function.
 copyPropagateInFun ::
-  (MonadFreshNames m, SimplifiableLore lore) =>
-  SimpleOps lore ->
-  ST.SymbolTable (Wise lore) ->
-  FunDef lore ->
-  m (FunDef lore)
+  (MonadFreshNames m, SimplifiableRep rep) =>
+  SimpleOps rep ->
+  ST.SymbolTable (Wise rep) ->
+  FunDef rep ->
+  m (FunDef rep)
 copyPropagateInFun simpl = simplifyFun simpl mempty neverHoist

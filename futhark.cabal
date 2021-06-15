@@ -149,7 +149,7 @@ library
       Futhark.FreshNames
       Futhark.IR
       Futhark.IR.Aliases
-      Futhark.IR.Decorations
+      Futhark.IR.Rep
       Futhark.IR.Parse
       Futhark.IR.Kernels
       Futhark.IR.Kernels.Kernel
@@ -212,7 +212,7 @@ library
       Futhark.Optimise.ReuseAllocations.GreedyColoring
       Futhark.Optimise.Simplify
       Futhark.Optimise.Simplify.Engine
-      Futhark.Optimise.Simplify.Lore
+      Futhark.Optimise.Simplify.Rep
       Futhark.Optimise.Simplify.Rule
       Futhark.Optimise.Simplify.Rules
       Futhark.Optimise.Simplify.Rules.BasicOp

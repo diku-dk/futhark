@@ -429,7 +429,7 @@ fuseSOACwithKer unfus_set outVars soac_p soac_p_consumed ker = do
               (body_p, body_c) = (lambdaBody lam_p, lambdaBody lam_c)
               body' =
                 Body
-                  { bodyDec = bodyDec body_p, -- body_p and body_c have the same lores
+                  { bodyDec = bodyDec body_p, -- body_p and body_c have the same decorations
                     bodyStms = bodyStms body_p <> bodyStms body_c,
                     bodyResult =
                       take c_num_buckets (bodyResult body_c)
@@ -461,7 +461,7 @@ fuseSOACwithKer unfus_set outVars soac_p soac_p_consumed ker = do
           let (body_p, body_c) = (lambdaBody lam_p, lambdaBody lam_c)
           let body' =
                 Body
-                  { bodyDec = bodyDec body_p, -- body_p and body_c have the same lores
+                  { bodyDec = bodyDec body_p, -- body_p and body_c have the same decorations
                     bodyStms = bodyStms body_p <> bodyStms body_c,
                     bodyResult = zipW as_c (bodyResult body_c) as_p (bodyResult body_p)
                   }
@@ -547,7 +547,7 @@ fuseSOACwithKer unfus_set outVars soac_p soac_p_consumed ker = do
     ---------------------------------
     _ -> fail "Cannot fuse"
 
-getStreamOrder :: StreamForm lore -> StreamOrd
+getStreamOrder :: StreamForm rep -> StreamOrd
 getStreamOrder (Parallel o _ _) = o
 getStreamOrder Sequential = InOrder
 

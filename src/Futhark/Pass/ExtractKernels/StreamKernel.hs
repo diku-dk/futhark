@@ -43,7 +43,7 @@ data KernelSize = KernelSize
   deriving (Eq, Ord, Show)
 
 numberOfGroups ::
-  (MonadBinder m, Op (Lore m) ~ HostOp (Lore m) inner) =>
+  (MonadBinder m, Op (Rep m) ~ HostOp (Rep m) inner) =>
   String ->
   SubExp ->
   SubExp ->
@@ -59,7 +59,7 @@ numberOfGroups desc w group_size = do
   return (num_groups, num_threads)
 
 blockedKernelSize ::
-  (MonadBinder m, Lore m ~ Kernels) =>
+  (MonadBinder m, Rep m ~ Kernels) =>
   String ->
   SubExp ->
   m KernelSize
@@ -75,7 +75,7 @@ blockedKernelSize desc w = do
   return $ KernelSize per_thread_elements num_threads
 
 splitArrays ::
-  (MonadBinder m, Lore m ~ Kernels) =>
+  (MonadBinder m, Rep m ~ Kernels) =>
   VName ->
   [VName] ->
   SplitOrdering ->
@@ -113,12 +113,12 @@ partitionChunkedKernelFoldParameters _ _ =
   error "partitionChunkedKernelFoldParameters: lambda takes too few parameters"
 
 blockedPerThread ::
-  (MonadBinder m, Lore m ~ Kernels) =>
+  (MonadBinder m, Rep m ~ Kernels) =>
   VName ->
   SubExp ->
   KernelSize ->
   StreamOrd ->
-  Lambda (Lore m) ->
+  Lambda (Rep m) ->
   Int ->
   [VName] ->
   m ([PatElemT Type], [PatElemT Type])
@@ -197,7 +197,7 @@ kerneliseLambda nes lam = do
       }
 
 prepareStream ::
-  (MonadBinder m, Lore m ~ Kernels) =>
+  (MonadBinder m, Rep m ~ Kernels) =>
   KernelSize ->
   [(VName, SubExp)] ->
   SubExp ->

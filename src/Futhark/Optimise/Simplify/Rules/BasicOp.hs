@@ -35,7 +35,7 @@ data ConcatArg
   | ArgReplicate [SubExp] SubExp
   | ArgVar VName
 
-toConcatArg :: ST.SymbolTable lore -> VName -> (ConcatArg, Certificates)
+toConcatArg :: ST.SymbolTable rep -> VName -> (ConcatArg, Certificates)
 toConcatArg vtable v =
   case ST.lookupBasicOp v vtable of
     Just (ArrayLit ses _, cs) ->
@@ -79,7 +79,7 @@ fuseConcatArg ((ArgReplicate x_ws x_se, x_cs) : xs) (ArgReplicate y_ws y_se, y_c
 fuseConcatArg xs y =
   y : xs
 
-simplifyConcat :: BinderOps lore => BottomUpRuleBasicOp lore
+simplifyConcat :: BinderOps rep => BottomUpRuleBasicOp rep
 -- concat@1(transpose(x),transpose(y)) == transpose(concat@0(x,y))
 simplifyConcat (vtable, _) pat _ (Concat i x xs new_d)
   | Just r <- arrayRank <$> ST.lookupType x vtable,
@@ -142,7 +142,7 @@ simplifyConcat (vtable, _) pat aux (Concat 0 x xs outer_w)
     forSingleArray ys = ys
 simplifyConcat _ _ _ _ = Skip
 
-ruleBasicOp :: BinderOps lore => TopDownRuleBasicOp lore
+ruleBasicOp :: BinderOps rep => TopDownRuleBasicOp rep
 ruleBasicOp vtable pat aux op
   | Just (op', cs) <- applySimpleRules defOf seType op =
     Simplify $ certifying (cs <> stmAuxCerts aux) $ letBind pat $ BasicOp op'
@@ -375,17 +375,17 @@ ruleBasicOp vtable pat aux (CmpOp CmpSlt {} (Var x) y)
 ruleBasicOp _ _ _ _ =
   Skip
 
-topDownRules :: BinderOps lore => [TopDownRule lore]
+topDownRules :: BinderOps rep => [TopDownRule rep]
 topDownRules =
   [ RuleBasicOp ruleBasicOp
   ]
 
-bottomUpRules :: BinderOps lore => [BottomUpRule lore]
+bottomUpRules :: BinderOps rep => [BottomUpRule rep]
 bottomUpRules =
   [ RuleBasicOp simplifyConcat
   ]
 
 -- | A set of simplification rules for 'BasicOp's.  Includes rules
 -- from "Futhark.Optimise.Simplify.Rules.Simple".
-basicOpRules :: (BinderOps lore, Aliased lore) => RuleBook lore
+basicOpRules :: (BinderOps rep, Aliased rep) => RuleBook rep
 basicOpRules = ruleBook topDownRules bottomUpRules <> loopRules

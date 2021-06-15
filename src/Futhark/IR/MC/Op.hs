@@ -24,7 +24,7 @@ import Futhark.IR.Prop.Aliases
 import Futhark.IR.SegOp
 import qualified Futhark.Optimise.Simplify as Simplify
 import qualified Futhark.Optimise.Simplify.Engine as Engine
-import Futhark.Optimise.Simplify.Lore
+import Futhark.Optimise.Simplify.Rep
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
 import qualified Futhark.TypeCheck as TC
@@ -40,45 +40,45 @@ import Prelude hiding (id, (.))
 -- | An operation for the multicore representation.  Feel free to
 -- extend this on an ad hoc basis as needed.  Parameterised with some
 -- other operation.
-data MCOp lore op
+data MCOp rep op
   = -- | The first 'SegOp' (if it exists) contains nested parallelism,
     -- while the second one has a fully sequential body.  They are
     -- semantically fully equivalent.
     ParOp
-      (Maybe (SegOp () lore))
-      (SegOp () lore)
+      (Maybe (SegOp () rep))
+      (SegOp () rep)
   | -- | Something else (in practice often a SOAC).
     OtherOp op
   deriving (Eq, Ord, Show)
 
-instance (ASTLore lore, Substitute op) => Substitute (MCOp lore op) where
+instance (ASTRep rep, Substitute op) => Substitute (MCOp rep op) where
   substituteNames substs (ParOp par_op op) =
     ParOp (substituteNames substs <$> par_op) (substituteNames substs op)
   substituteNames substs (OtherOp op) =
     OtherOp $ substituteNames substs op
 
-instance (ASTLore lore, Rename op) => Rename (MCOp lore op) where
+instance (ASTRep rep, Rename op) => Rename (MCOp rep op) where
   rename (ParOp par_op op) = ParOp <$> rename par_op <*> rename op
   rename (OtherOp op) = OtherOp <$> rename op
 
-instance (ASTLore lore, FreeIn op) => FreeIn (MCOp lore op) where
+instance (ASTRep rep, FreeIn op) => FreeIn (MCOp rep op) where
   freeIn' (ParOp par_op op) = freeIn' par_op <> freeIn' op
   freeIn' (OtherOp op) = freeIn' op
 
-instance (ASTLore lore, IsOp op) => IsOp (MCOp lore op) where
+instance (ASTRep rep, IsOp op) => IsOp (MCOp rep op) where
   safeOp (ParOp _ op) = safeOp op
   safeOp (OtherOp op) = safeOp op
 
   cheapOp (ParOp _ op) = cheapOp op
   cheapOp (OtherOp op) = cheapOp op
 
-instance TypedOp op => TypedOp (MCOp lore op) where
+instance TypedOp op => TypedOp (MCOp rep op) where
   opType (ParOp _ op) = opType op
   opType (OtherOp op) = opType op
 
 instance
-  (Aliased lore, AliasedOp op, ASTLore lore) =>
-  AliasedOp (MCOp lore op)
+  (Aliased rep, AliasedOp op, ASTRep rep) =>
+  AliasedOp (MCOp rep op)
   where
   opAliases (ParOp _ op) = opAliases op
   opAliases (OtherOp op) = opAliases op
@@ -87,10 +87,10 @@ instance
   consumedInOp (OtherOp op) = consumedInOp op
 
 instance
-  (CanBeAliased (Op lore), CanBeAliased op, ASTLore lore) =>
-  CanBeAliased (MCOp lore op)
+  (CanBeAliased (Op rep), CanBeAliased op, ASTRep rep) =>
+  CanBeAliased (MCOp rep op)
   where
-  type OpWithAliases (MCOp lore op) = MCOp (Aliases lore) (OpWithAliases op)
+  type OpWithAliases (MCOp rep op) = MCOp (Aliases rep) (OpWithAliases op)
 
   addOpAliases aliases (ParOp par_op op) =
     ParOp (addOpAliases aliases <$> par_op) (addOpAliases aliases op)
@@ -103,36 +103,36 @@ instance
     OtherOp $ removeOpAliases op
 
 instance
-  (CanBeWise (Op lore), CanBeWise op, ASTLore lore) =>
-  CanBeWise (MCOp lore op)
+  (CanBeWise (Op rep), CanBeWise op, ASTRep rep) =>
+  CanBeWise (MCOp rep op)
   where
-  type OpWithWisdom (MCOp lore op) = MCOp (Wise lore) (OpWithWisdom op)
+  type OpWithWisdom (MCOp rep op) = MCOp (Wise rep) (OpWithWisdom op)
 
   removeOpWisdom (ParOp par_op op) =
     ParOp (removeOpWisdom <$> par_op) (removeOpWisdom op)
   removeOpWisdom (OtherOp op) =
     OtherOp $ removeOpWisdom op
 
-instance (ASTLore lore, ST.IndexOp op) => ST.IndexOp (MCOp lore op) where
+instance (ASTRep rep, ST.IndexOp op) => ST.IndexOp (MCOp rep op) where
   indexOp vtable k (ParOp _ op) is = ST.indexOp vtable k op is
   indexOp vtable k (OtherOp op) is = ST.indexOp vtable k op is
 
-instance (PrettyLore lore, Pretty op) => Pretty (MCOp lore op) where
+instance (PrettyRep rep, Pretty op) => Pretty (MCOp rep op) where
   ppr (ParOp Nothing op) = ppr op
   ppr (ParOp (Just par_op) op) =
     "par" <+> nestedBlock "{" "}" (ppr par_op)
       </> "seq" <+> nestedBlock "{" "}" (ppr op)
   ppr (OtherOp op) = ppr op
 
-instance (OpMetrics (Op lore), OpMetrics op) => OpMetrics (MCOp lore op) where
+instance (OpMetrics (Op rep), OpMetrics op) => OpMetrics (MCOp rep op) where
   opMetrics (ParOp par_op op) = opMetrics par_op >> opMetrics op
   opMetrics (OtherOp op) = opMetrics op
 
 typeCheckMCOp ::
-  TC.Checkable lore =>
-  (op -> TC.TypeM lore ()) ->
-  MCOp (Aliases lore) op ->
-  TC.TypeM lore ()
+  TC.Checkable rep =>
+  (op -> TC.TypeM rep ()) ->
+  MCOp (Aliases rep) op ->
+  TC.TypeM rep ()
 typeCheckMCOp _ (ParOp (Just par_op) op) = do
   -- It is valid for the same array to be consumed in both par_op and op.
   _ <- typeCheckSegOp return par_op `TC.alternative` typeCheckSegOp return op
@@ -142,12 +142,12 @@ typeCheckMCOp _ (ParOp Nothing op) =
 typeCheckMCOp f (OtherOp op) = f op
 
 simplifyMCOp ::
-  ( Engine.SimplifiableLore lore,
-    BodyDec lore ~ ()
+  ( Engine.SimplifiableRep rep,
+    BodyDec rep ~ ()
   ) =>
-  Simplify.SimplifyOp lore op ->
-  MCOp lore op ->
-  Engine.SimpleM lore (MCOp (Wise lore) (OpWithWisdom op), Stms (Wise lore))
+  Simplify.SimplifyOp rep op ->
+  MCOp rep op ->
+  Engine.SimpleM rep (MCOp (Wise rep) (OpWithWisdom op), Stms (Wise rep))
 simplifyMCOp f (OtherOp op) = do
   (op', stms) <- f op
   return (OtherOp op', stms)

@@ -3,8 +3,7 @@
 
 -- | A simple representation with SOACs and nested parallelism.
 module Futhark.IR.SOACS
-  ( -- * The Lore definition
-    SOACS,
+  ( SOACS,
 
     -- * Syntax types
     Body,
@@ -54,13 +53,13 @@ import qualified Futhark.TypeCheck as TypeCheck
 -- like Standard ML.  Instead, we have to abuse the namespace/module
 -- system.
 
--- | The lore for the basic representation.
+-- | The rep for the basic representation.
 data SOACS
 
-instance Decorations SOACS where
+instance RepTypes SOACS where
   type Op SOACS = SOAC SOACS
 
-instance ASTLore SOACS where
+instance ASTRep SOACS where
   expTypesFromPattern = return . expExtTypesFromPattern
 
 type Exp = AST.Exp SOACS
@@ -94,4 +93,4 @@ instance Bindable SOACS where
 
 instance BinderOps SOACS
 
-instance PrettyLore SOACS
+instance PrettyRep SOACS

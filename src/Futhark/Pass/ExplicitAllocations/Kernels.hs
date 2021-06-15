@@ -18,7 +18,7 @@ import qualified Futhark.IR.Mem.IxFun as IxFun
 import Futhark.Pass.ExplicitAllocations
 import Futhark.Pass.ExplicitAllocations.SegOp
 
-instance SizeSubst (HostOp lore op) where
+instance SizeSubst (HostOp rep op) where
   opSizeSubst (Pattern _ [size]) (SizeOp (SplitSpace _ _ _ elems_per_thread)) =
     M.singleton (patElemName size) elems_per_thread
   opSizeSubst _ _ = mempty
@@ -27,7 +27,7 @@ instance SizeSubst (HostOp lore op) where
   opIsConst (SizeOp GetSizeMax {}) = True
   opIsConst _ = False
 
-allocAtLevel :: SegLevel -> AllocM fromlore tlore a -> AllocM fromlore tlore a
+allocAtLevel :: SegLevel -> AllocM fromrep trep a -> AllocM fromrep trep a
 allocAtLevel lvl = local $ \env ->
   env
     { allocSpace = space,
@@ -95,7 +95,7 @@ kernelExpHints e =
   return $ replicate (expExtTypeSize e) NoHint
 
 mapResultHint ::
-  Allocator lore m =>
+  Allocator rep m =>
   SegLevel ->
   SegSpace ->
   Type ->

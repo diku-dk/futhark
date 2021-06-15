@@ -3,7 +3,7 @@
 {-# LANGUAGE Strict #-}
 
 -- | Definition of a polymorphic (generic) pass that can work with
--- programs of any lore.
+-- programs of any rep.
 module Futhark.Pass
   ( PassM,
     runPassM,
@@ -58,9 +58,9 @@ liftEither (Right v) = return v
 liftEitherM :: Show err => PassM (Either err a) -> PassM a
 liftEitherM m = liftEither =<< m
 
--- | A compiler pass transforming a 'Prog' of a given lore to a 'Prog'
--- of another lore.
-data Pass fromlore tolore = Pass
+-- | A compiler pass transforming a 'Prog' of a given rep to a 'Prog'
+-- of another rep.
+data Pass fromrep torep = Pass
   { -- | Name of the pass.  Keep this short and simple.  It will
     -- be used to automatically generate a command-line option
     -- name via 'passLongOption'.
@@ -68,12 +68,12 @@ data Pass fromlore tolore = Pass
     -- | A slightly longer description, which will show up in the
     -- command-line help text.
     passDescription :: String,
-    passFunction :: Prog fromlore -> PassM (Prog tolore)
+    passFunction :: Prog fromrep -> PassM (Prog torep)
   }
 
 -- | Take the name of the pass, turn spaces into dashes, and make all
 -- characters lowercase.
-passLongOption :: Pass fromlore tolore -> String
+passLongOption :: Pass fromrep torep -> String
 passLongOption = map (spaceToDash . toLower) . passName
   where
     spaceToDash ' ' = '-'
@@ -101,10 +101,10 @@ parPass f as = do
 -- The function definition transformations are run in parallel (with
 -- 'parPass'), since they cannot affect each other.
 intraproceduralTransformationWithConsts ::
-  (Stms fromlore -> PassM (Stms tolore)) ->
-  (Stms tolore -> FunDef fromlore -> PassM (FunDef tolore)) ->
-  Prog fromlore ->
-  PassM (Prog tolore)
+  (Stms fromrep -> PassM (Stms torep)) ->
+  (Stms torep -> FunDef fromrep -> PassM (FunDef torep)) ->
+  Prog fromrep ->
+  PassM (Prog torep)
 intraproceduralTransformationWithConsts ct ft (Prog consts funs) = do
   consts' <- ct consts
   funs' <- parPass (ft consts') funs
@@ -113,9 +113,9 @@ intraproceduralTransformationWithConsts ct ft (Prog consts funs) = do
 -- | Like 'intraproceduralTransformationWithConsts', but do not change
 -- the top-level constants, and simply pass along their 'Scope'.
 intraproceduralTransformation ::
-  (Scope lore -> Stms lore -> PassM (Stms lore)) ->
-  Prog lore ->
-  PassM (Prog lore)
+  (Scope rep -> Stms rep -> PassM (Stms rep)) ->
+  Prog rep ->
+  PassM (Prog rep)
 intraproceduralTransformation f =
   intraproceduralTransformationWithConsts (f mempty) f'
   where

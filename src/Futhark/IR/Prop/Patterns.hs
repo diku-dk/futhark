@@ -12,7 +12,7 @@ module Futhark.IR.Prop.Patterns
     -- * Pattern elements
     patElemIdent,
     patElemType,
-    setPatElemLore,
+    setPatElemDec,
     patternElements,
     patternIdents,
     patternContextIdents,
@@ -52,9 +52,9 @@ patElemIdent pelem = Ident (patElemName pelem) (typeOf pelem)
 patElemType :: Typed dec => PatElemT dec -> Type
 patElemType = typeOf
 
--- | Set the lore of a t'PatElem'.
-setPatElemLore :: PatElemT oldattr -> newattr -> PatElemT newattr
-setPatElemLore pe x = fmap (const x) pe
+-- | Set the rep of a t'PatElem'.
+setPatElemDec :: PatElemT oldattr -> newattr -> PatElemT newattr
+setPatElemDec pe x = fmap (const x) pe
 
 -- | All pattern elements in the pattern - context first, then values.
 patternElements :: PatternT dec -> [PatElemT dec]

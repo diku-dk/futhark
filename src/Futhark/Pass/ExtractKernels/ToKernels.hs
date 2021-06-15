@@ -23,7 +23,7 @@ import qualified Futhark.IR.SOACS.SOAC as SOAC
 import Futhark.Tools
 
 getSize ::
-  (MonadBinder m, Op (Lore m) ~ HostOp (Lore m) inner) =>
+  (MonadBinder m, Op (Rep m) ~ HostOp (Rep m) inner) =>
   String ->
   SizeClass ->
   m SubExp
@@ -32,7 +32,7 @@ getSize desc size_class = do
   letSubExp desc $ Op $ SizeOp $ GetSize size_key size_class
 
 segThread ::
-  (MonadBinder m, Op (Lore m) ~ HostOp (Lore m) inner) =>
+  (MonadBinder m, Op (Rep m) ~ HostOp (Rep m) inner) =>
   String ->
   m SegLevel
 segThread desc =
@@ -54,11 +54,11 @@ injectSOACS ::
   Rephraser m from to
 injectSOACS f =
   Rephraser
-    { rephraseExpLore = return,
-      rephraseBodyLore = return,
-      rephraseLetBoundLore = return,
-      rephraseFParamLore = return,
-      rephraseLParamLore = return,
+    { rephraseExpDec = return,
+      rephraseBodyDec = return,
+      rephraseLetBoundDec = return,
+      rephraseFParamDec = return,
+      rephraseLParamDec = return,
       rephraseOp = fmap f . onSOAC,
       rephraseRetType = return,
       rephraseBranchType = return

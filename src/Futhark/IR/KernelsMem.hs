@@ -32,7 +32,7 @@ import qualified Futhark.TypeCheck as TC
 
 data KernelsMem
 
-instance Decorations KernelsMem where
+instance RepTypes KernelsMem where
   type LetDec KernelsMem = LetDecMem
   type FParamInfo KernelsMem = FParamMem
   type LParamInfo KernelsMem = LParamMem
@@ -40,7 +40,7 @@ instance Decorations KernelsMem where
   type BranchType KernelsMem = BranchTypeMem
   type Op KernelsMem = MemOp (HostOp KernelsMem ())
 
-instance ASTLore KernelsMem where
+instance ASTRep KernelsMem where
   expTypesFromPattern = return . map snd . snd . bodyReturnsFromPattern
 
 instance OpReturns KernelsMem where
@@ -49,7 +49,7 @@ instance OpReturns KernelsMem where
   opReturns (Inner (SegOp op)) = segOpReturns op
   opReturns k = extReturns <$> opType k
 
-instance PrettyLore KernelsMem
+instance PrettyRep KernelsMem
 
 instance TC.CheckableOp KernelsMem where
   checkOp = typeCheckMemoryOp Nothing
@@ -60,9 +60,9 @@ instance TC.CheckableOp KernelsMem where
         typeCheckHostOp (typeCheckMemoryOp . Just) lvl (const $ return ()) op
 
 instance TC.Checkable KernelsMem where
-  checkFParamLore = checkMemInfo
-  checkLParamLore = checkMemInfo
-  checkLetBoundLore = checkMemInfo
+  checkFParamDec = checkMemInfo
+  checkLParamDec = checkMemInfo
+  checkLetBoundDec = checkMemInfo
   checkRetType = mapM_ $ TC.checkExtType . declExtTypeOf
   primFParam name t = return $ Param name (MemPrim t)
   matchPattern = matchPatternToExp

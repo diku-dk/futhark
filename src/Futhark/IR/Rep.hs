@@ -1,10 +1,10 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
 
--- | The core Futhark AST is parameterised by a @lore@ type parameter,
+-- | The core Futhark AST is parameterised by a @rep@ type parameter,
 -- which is then used to invoke the type families defined here.
-module Futhark.IR.Decorations
-  ( Decorations (..),
+module Futhark.IR.Rep
+  ( RepTypes (..),
     module Futhark.IR.RetType,
   )
 where
@@ -14,9 +14,9 @@ import Futhark.IR.Prop.Types
 import Futhark.IR.RetType
 import Futhark.IR.Syntax.Core
 
--- | A collection of type families, along with constraints specifying
--- that the types they map to should satisfy some minimal
--- requirements.
+-- | A collection of type families giving various common types for a
+-- representation, along with constraints specifying that the types
+-- they map to should satisfy some minimal requirements.
 class
   ( Show (LetDec l),
     Show (ExpDec l),
@@ -49,7 +49,7 @@ class
     Typed (LetDec l),
     DeclTyped (FParamInfo l)
   ) =>
-  Decorations l
+  RepTypes l
   where
   -- | Decoration for every let-pattern element.
   type LetDec l :: Data.Kind.Type

@@ -43,10 +43,10 @@ unstreamMC = unstream onMCOp MC.simplifyProg
 data Stage = SeqStreams | SeqAll
 
 unstream ::
-  ASTLore lore =>
-  (Stage -> OnOp lore) ->
-  (Prog lore -> PassM (Prog lore)) ->
-  Pass lore lore
+  ASTRep rep =>
+  (Stage -> OnOp rep) ->
+  (Prog rep -> PassM (Prog rep)) ->
+  Pass rep rep
 unstream onOp simplify =
   Pass "unstream" "sequentialise remaining SOACs" $
     intraproceduralTransformation (optimise SeqStreams)
@@ -58,33 +58,33 @@ unstream onOp simplify =
         runState $
           runReaderT (optimiseStms (onOp stage) stms) scope
 
-type UnstreamM lore = ReaderT (Scope lore) (State VNameSource)
+type UnstreamM rep = ReaderT (Scope rep) (State VNameSource)
 
-type OnOp lore =
-  Pattern lore -> StmAux (ExpDec lore) -> Op lore -> UnstreamM lore [Stm lore]
+type OnOp rep =
+  Pattern rep -> StmAux (ExpDec rep) -> Op rep -> UnstreamM rep [Stm rep]
 
 optimiseStms ::
-  ASTLore lore =>
-  OnOp lore ->
-  Stms lore ->
-  UnstreamM lore (Stms lore)
+  ASTRep rep =>
+  OnOp rep ->
+  Stms rep ->
+  UnstreamM rep (Stms rep)
 optimiseStms onOp stms =
   localScope (scopeOf stms) $
     stmsFromList . concat <$> mapM (optimiseStm onOp) (stmsToList stms)
 
 optimiseBody ::
-  ASTLore lore =>
-  OnOp lore ->
-  Body lore ->
-  UnstreamM lore (Body lore)
+  ASTRep rep =>
+  OnOp rep ->
+  Body rep ->
+  UnstreamM rep (Body rep)
 optimiseBody onOp (Body aux stms res) =
   Body aux <$> optimiseStms onOp stms <*> pure res
 
 optimiseKernelBody ::
-  ASTLore lore =>
-  OnOp lore ->
-  KernelBody lore ->
-  UnstreamM lore (KernelBody lore)
+  ASTRep rep =>
+  OnOp rep ->
+  KernelBody rep ->
+  UnstreamM rep (KernelBody rep)
 optimiseKernelBody onOp (KernelBody attr stms res) =
   localScope (scopeOf stms) $
     KernelBody attr
@@ -92,19 +92,19 @@ optimiseKernelBody onOp (KernelBody attr stms res) =
       <*> pure res
 
 optimiseLambda ::
-  ASTLore lore =>
-  OnOp lore ->
-  Lambda lore ->
-  UnstreamM lore (Lambda lore)
+  ASTRep rep =>
+  OnOp rep ->
+  Lambda rep ->
+  UnstreamM rep (Lambda rep)
 optimiseLambda onOp lam = localScope (scopeOfLParams $ lambdaParams lam) $ do
   body <- optimiseBody onOp $ lambdaBody lam
   return lam {lambdaBody = body}
 
 optimiseStm ::
-  ASTLore lore =>
-  OnOp lore ->
-  Stm lore ->
-  UnstreamM lore [Stm lore]
+  ASTRep rep =>
+  OnOp rep ->
+  Stm rep ->
+  UnstreamM rep [Stm rep]
 optimiseStm onOp (Let pat aux (Op op)) =
   onOp pat aux op
 optimiseStm onOp (Let pat aux e) =
@@ -117,10 +117,10 @@ optimiseStm onOp (Let pat aux e) =
         }
 
 optimiseSegOp ::
-  ASTLore lore =>
-  OnOp lore ->
-  SegOp lvl lore ->
-  UnstreamM lore (SegOp lvl lore)
+  ASTRep rep =>
+  OnOp rep ->
+  SegOp lvl rep ->
+  UnstreamM rep (SegOp lvl rep)
 optimiseSegOp onOp op =
   localScope (scopeOfSegSpace $ segSpace op) $ mapSegOpM optimise op
   where
@@ -150,7 +150,7 @@ onMCOp stage pat aux (MC.OtherOp soac)
         { mapOnSOACLambda = optimiseLambda (onMCOp stage)
         }
 
-sequentialise :: Stage -> SOAC lore -> Bool
+sequentialise :: Stage -> SOAC rep -> Bool
 sequentialise SeqStreams Stream {} = True
 sequentialise SeqStreams _ = False
 sequentialise SeqAll _ = True

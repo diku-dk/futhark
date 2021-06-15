@@ -24,10 +24,10 @@ module Futhark.Pass.FirstOrderTransform (firstOrderTransform) where
 
 import Futhark.IR.SOACS (SOACS, scopeOf)
 import Futhark.Pass
-import Futhark.Transform.FirstOrderTransform (FirstOrderLore, transformConsts, transformFunDef)
+import Futhark.Transform.FirstOrderTransform (FirstOrderRep, transformConsts, transformFunDef)
 
 -- | The first-order transformation pass.
-firstOrderTransform :: FirstOrderLore lore => Pass SOACS lore
+firstOrderTransform :: FirstOrderRep rep => Pass SOACS rep
 firstOrderTransform =
   Pass
     "first order transform"

@@ -84,7 +84,7 @@ instance MonadFreshNames (State InternaliseState) where
   putNameSource src = modify $ \s -> s {stateNameSource = src}
 
 instance MonadBinder InternaliseM where
-  type Lore InternaliseM = SOACS
+  type Rep InternaliseM = SOACS
   mkExpDecM pat e = InternaliseM $ mkExpDecM pat e
   mkBodyM bnds res = InternaliseM $ mkBodyM bnds res
   mkLetNamesM pat e = InternaliseM $ mkLetNamesM pat e

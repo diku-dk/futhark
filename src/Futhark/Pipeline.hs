@@ -37,7 +37,7 @@ import qualified Data.Text.IO as T
 import Data.Time.Clock
 import qualified Futhark.Analysis.Alias as Alias
 import Futhark.Error
-import Futhark.IR (PrettyLore, Prog)
+import Futhark.IR (PrettyRep, Prog)
 import Futhark.MonadFreshNames
 import Futhark.Pass
 import Futhark.TypeCheck
@@ -103,10 +103,10 @@ runFutharkM (FutharkM m) verbose = do
     newEnv = FutharkEnv verbose
 
 -- | A compilation always ends with some kind of action.
-data Action lore = Action
+data Action rep = Action
   { actionName :: String,
     actionDescription :: String,
-    actionProcedure :: Prog lore -> FutharkM ()
+    actionProcedure :: Prog rep -> FutharkM ()
   }
 
 -- | Configuration object for running a compiler pipeline.
@@ -118,7 +118,7 @@ data PipelineConfig = PipelineConfig
 -- | A compiler pipeline is conceptually a function from programs to
 -- programs, where the actual representation may change.  Pipelines
 -- can be composed using their 'Category' instance.
-newtype Pipeline fromlore tolore = Pipeline {unPipeline :: PipelineConfig -> Prog fromlore -> FutharkM (Prog tolore)}
+newtype Pipeline fromrep torep = Pipeline {unPipeline :: PipelineConfig -> Prog fromrep -> FutharkM (Prog torep)}
 
 instance Category Pipeline where
   id = Pipeline $ const return
@@ -129,17 +129,17 @@ instance Category Pipeline where
 
 -- | Run the pipeline on the given program.
 runPipeline ::
-  Pipeline fromlore tolore ->
+  Pipeline fromrep torep ->
   PipelineConfig ->
-  Prog fromlore ->
-  FutharkM (Prog tolore)
+  Prog fromrep ->
+  FutharkM (Prog torep)
 runPipeline = unPipeline
 
 -- | Construct a pipeline from a single compiler pass.
 onePass ::
-  Checkable tolore =>
-  Pass fromlore tolore ->
-  Pipeline fromlore tolore
+  Checkable torep =>
+  Pass fromrep torep ->
+  Pipeline fromrep torep
 onePass pass = Pipeline perform
   where
     perform cfg prog = do
@@ -156,15 +156,15 @@ onePass pass = Pipeline perform
 
 -- | Create a pipeline from a list of passes.
 passes ::
-  Checkable lore =>
-  [Pass lore lore] ->
-  Pipeline lore lore
+  Checkable rep =>
+  [Pass rep rep] ->
+  Pipeline rep rep
 passes = foldl (>>>) id . map onePass
 
 validationError ::
-  PrettyLore lore =>
-  Pass fromlore tolore ->
-  Prog lore ->
+  PrettyRep rep =>
+  Pass fromrep torep ->
+  Prog rep ->
   String ->
   FutharkM a
 validationError pass prog err =
@@ -173,9 +173,9 @@ validationError pass prog err =
     msg = "Type error after pass '" <> T.pack (passName pass) <> "':\n" <> T.pack err
 
 runPass ::
-  Pass fromlore tolore ->
-  Prog fromlore ->
-  FutharkM (Prog tolore)
+  Pass fromrep torep ->
+  Prog fromrep ->
+  FutharkM (Prog torep)
 runPass pass prog = do
   (prog', logged) <- runPassM (passFunction pass prog)
   verb <- asks $ (>= VeryVerbose) . futharkVerbose

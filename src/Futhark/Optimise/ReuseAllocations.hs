@@ -159,7 +159,7 @@ onKernelBodyStms (SegHist lvl space binops ts body) f = do
 -- replace allocations and references to memory blocks inside with a (hopefully)
 -- reduced number of allocations.
 optimiseKernel ::
-  (MonadBinder m, Lore m ~ KernelsMem) =>
+  (MonadBinder m, Rep m ~ KernelsMem) =>
   Interference.Graph VName ->
   SegOp lvl KernelsMem ->
   m (SegOp lvl KernelsMem)

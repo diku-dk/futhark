@@ -18,13 +18,13 @@ import Futhark.IR
 type Dependencies = M.Map VName Names
 
 -- | Compute the data dependencies for an entire body.
-dataDependencies :: ASTLore lore => Body lore -> Dependencies
+dataDependencies :: ASTRep rep => Body rep -> Dependencies
 dataDependencies = dataDependencies' M.empty
 
 dataDependencies' ::
-  ASTLore lore =>
+  ASTRep rep =>
   Dependencies ->
-  Body lore ->
+  Body rep ->
   Dependencies
 dataDependencies' startdeps = foldl grow startdeps . bodyStms
   where

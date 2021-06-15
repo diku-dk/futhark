@@ -185,7 +185,7 @@ withAccStm (WithAccStm _ pat inputs lam) =
   Let pat (defAux ()) $ WithAcc inputs lam
 
 interchangeWithAcc1 ::
-  (MonadBinder m, Lore m ~ SOACS) =>
+  (MonadBinder m, Rep m ~ SOACS) =>
   WithAccStm ->
   LoopNesting ->
   m WithAccStm

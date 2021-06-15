@@ -33,7 +33,7 @@ data IndexResult
 -- | Try to simplify an index operation.
 simplifyIndexing ::
   MonadBinder m =>
-  ST.SymbolTable (Lore m) ->
+  ST.SymbolTable (Rep m) ->
   TypeLookup ->
   VName ->
   Slice SubExp ->

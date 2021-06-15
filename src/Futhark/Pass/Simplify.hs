@@ -23,8 +23,8 @@ import Futhark.IR.Syntax
 import Futhark.Pass
 
 simplify ::
-  (Prog lore -> PassM (Prog lore)) ->
-  Pass lore lore
+  (Prog rep -> PassM (Prog rep)) ->
+  Pass rep rep
 simplify = Pass "simplify" "Perform simple enabling optimisations."
 
 simplifySOACS :: Pass SOACS.SOACS SOACS.SOACS

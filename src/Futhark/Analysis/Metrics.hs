@@ -80,7 +80,7 @@ inside what m = seen what >> censor addWhat m
     addWhat' (ctx, k) = (what : ctx, k)
 
 -- | Compute the metrics for a program.
-progMetrics :: OpMetrics (Op lore) => Prog lore -> AstMetrics
+progMetrics :: OpMetrics (Op rep) => Prog rep -> AstMetrics
 progMetrics prog =
   actualMetrics $
     execWriter $
@@ -88,17 +88,17 @@ progMetrics prog =
         mapM_ funDefMetrics $ progFuns prog
         mapM_ stmMetrics $ progConsts prog
 
-funDefMetrics :: OpMetrics (Op lore) => FunDef lore -> MetricsM ()
+funDefMetrics :: OpMetrics (Op rep) => FunDef rep -> MetricsM ()
 funDefMetrics = bodyMetrics . funDefBody
 
-bodyMetrics :: OpMetrics (Op lore) => Body lore -> MetricsM ()
+bodyMetrics :: OpMetrics (Op rep) => Body rep -> MetricsM ()
 bodyMetrics = mapM_ stmMetrics . bodyStms
 
 -- | Compute metrics for this statement.
-stmMetrics :: OpMetrics (Op lore) => Stm lore -> MetricsM ()
+stmMetrics :: OpMetrics (Op rep) => Stm rep -> MetricsM ()
 stmMetrics = expMetrics . stmExp
 
-expMetrics :: OpMetrics (Op lore) => Exp lore -> MetricsM ()
+expMetrics :: OpMetrics (Op rep) => Exp rep -> MetricsM ()
 expMetrics (BasicOp op) =
   seen "BasicOp" >> primOpMetrics op
 expMetrics (DoLoop _ _ ForLoop {} body) =
@@ -139,5 +139,5 @@ primOpMetrics Rotate {} = seen "Rotate"
 primOpMetrics UpdateAcc {} = seen "UpdateAcc"
 
 -- | Compute metrics for this lambda.
-lambdaMetrics :: OpMetrics (Op lore) => Lambda lore -> MetricsM ()
+lambdaMetrics :: OpMetrics (Op rep) => Lambda rep -> MetricsM ()
 lambdaMetrics = bodyMetrics . lambdaBody

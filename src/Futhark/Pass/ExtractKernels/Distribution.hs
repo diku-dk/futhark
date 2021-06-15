@@ -53,7 +53,7 @@ import Futhark.IR
 import Futhark.IR.SegOp
 import Futhark.MonadFreshNames
 import Futhark.Pass.ExtractKernels.BlockedKernel
-  ( DistLore,
+  ( DistRep,
     KernelInput (..),
     MkSegLevel,
     mapKernel,
@@ -112,10 +112,10 @@ popInnerTarget (Targets t ts) =
     x : xs -> Just (t, Targets x $ reverse xs)
     [] -> Nothing
 
-targetScope :: DistLore lore => Target -> Scope lore
+targetScope :: DistRep rep => Target -> Scope rep
 targetScope = scopeOfPattern . fst
 
-targetsScope :: DistLore lore => Targets -> Scope lore
+targetsScope :: DistRep rep => Targets -> Scope rep
 targetsScope (Targets t ts) = mconcat $ map targetScope $ t : ts
 
 data LoopNesting = MapNesting
@@ -126,7 +126,7 @@ data LoopNesting = MapNesting
   }
   deriving (Show)
 
-scopeOfLoopNesting :: DistLore lore => LoopNesting -> Scope lore
+scopeOfLoopNesting :: DistRep rep => LoopNesting -> Scope rep
 scopeOfLoopNesting = scopeOfLParams . map fst . loopNestingParamsAndArrs
 
 ppLoopNesting :: LoopNesting -> String
@@ -249,11 +249,11 @@ kernelNestWidths :: KernelNest -> [SubExp]
 kernelNestWidths = map loopNestingWidth . kernelNestLoops
 
 constructKernel ::
-  (DistLore lore, MonadFreshNames m, LocalScope lore m) =>
-  MkSegLevel lore m ->
+  (DistRep rep, MonadFreshNames m, LocalScope rep m) =>
+  MkSegLevel rep m ->
   KernelNest ->
-  Body lore ->
-  m (Stm lore, Stms lore)
+  Body rep ->
+  m (Stm rep, Stms rep)
 constructKernel mk_lvl kernel_nest inner_body = runBinderT' $ do
   (ispace, inps) <- flatKernel kernel_nest
   let aux = loopNestingAux first_nest
@@ -331,9 +331,9 @@ distributionInnerPattern :: DistributionBody -> PatternT Type
 distributionInnerPattern = fst . innerTarget . distributionTarget
 
 distributionBodyFromStms ::
-  ASTLore lore =>
+  ASTRep rep =>
   Targets ->
-  Stms lore ->
+  Stms rep ->
   (DistributionBody, Result)
 distributionBodyFromStms (Targets (inner_pat, inner_res) targets) stms =
   let bound_by_stms = namesFromList $ M.keys $ scopeOf stms
@@ -349,16 +349,16 @@ distributionBodyFromStms (Targets (inner_pat, inner_res) targets) stms =
       )
 
 distributionBodyFromStm ::
-  ASTLore lore =>
+  ASTRep rep =>
   Targets ->
-  Stm lore ->
+  Stm rep ->
   (DistributionBody, Result)
 distributionBodyFromStm targets bnd =
   distributionBodyFromStms targets $ oneStm bnd
 
 createKernelNest ::
-  forall lore m.
-  (MonadFreshNames m, HasScope lore m) =>
+  forall rep m.
+  (MonadFreshNames m, HasScope rep m) =>
   Nestings ->
   DistributionBody ->
   m (Maybe (Targets, KernelNest))
@@ -551,16 +551,16 @@ removeIdentityMappingFromNesting bound_in_nesting pat res =
    in (pat', res', identity_map, expand_target)
 
 tryDistribute ::
-  ( DistLore lore,
+  ( DistRep rep,
     MonadFreshNames m,
-    LocalScope lore m,
+    LocalScope rep m,
     MonadLogger m
   ) =>
-  MkSegLevel lore m ->
+  MkSegLevel rep m ->
   Nestings ->
   Targets ->
-  Stms lore ->
-  m (Maybe (Targets, Stms lore))
+  Stms rep ->
+  m (Maybe (Targets, Stms rep))
 tryDistribute _ _ targets stms
   | null stms =
     -- No point in distributing an empty kernel.
@@ -590,10 +590,10 @@ tryDistribute mk_lvl nest targets stms =
     (dist_body, inner_body_res) = distributionBodyFromStms targets stms
 
 tryDistributeStm ::
-  (MonadFreshNames m, HasScope t m, ASTLore lore) =>
+  (MonadFreshNames m, HasScope t m, ASTRep rep) =>
   Nestings ->
   Targets ->
-  Stm lore ->
+  Stm rep ->
   m (Maybe (Result, Targets, KernelNest))
 tryDistributeStm nest targets bnd =
   fmap addRes <$> createKernelNest nest dist_body

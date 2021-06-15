@@ -26,7 +26,7 @@ import Futhark.IR.SOACS.Simplify
     simplifyFun,
   )
 import Futhark.Optimise.CSE
-import Futhark.Optimise.Simplify.Lore (addScopeWisdom)
+import Futhark.Optimise.Simplify.Rep (addScopeWisdom)
 import Futhark.Pass
 import Futhark.Transform.CopyPropagate
   ( copyPropagateInFun,

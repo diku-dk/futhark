@@ -3,8 +3,7 @@
 
 -- | A sequential representation.
 module Futhark.IR.Seq
-  ( -- * The Lore definition
-    Seq,
+  ( Seq,
 
     -- * Simplification
     simplifyProg,
@@ -32,10 +31,10 @@ import qualified Futhark.TypeCheck as TypeCheck
 -- | The phantom type for the Seq representation.
 data Seq
 
-instance Decorations Seq where
+instance RepTypes Seq where
   type Op Seq = ()
 
-instance ASTLore Seq where
+instance ASTRep Seq where
   expTypesFromPattern = return . expExtTypesFromPattern
 
 instance TypeCheck.CheckableOp Seq where
@@ -51,7 +50,7 @@ instance Bindable Seq where
 
 instance BinderOps Seq
 
-instance PrettyLore Seq
+instance PrettyRep Seq
 
 instance BinderOps (Engine.Wise Seq)
 

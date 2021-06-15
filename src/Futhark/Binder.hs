@@ -42,44 +42,44 @@ import Futhark.Binder.Class
 import Futhark.IR
 
 -- | A 'BinderT' (and by extension, a 'Binder') is only an instance of
--- 'MonadBinder' for lores that implement this type class, which
--- contains methods for constructing statements.
-class ASTLore lore => BinderOps lore where
+-- 'MonadBinder' for representations that implement this type class,
+-- which contains methods for constructing statements.
+class ASTRep rep => BinderOps rep where
   mkExpDecB ::
-    (MonadBinder m, Lore m ~ lore) =>
-    Pattern lore ->
-    Exp lore ->
-    m (ExpDec lore)
+    (MonadBinder m, Rep m ~ rep) =>
+    Pattern rep ->
+    Exp rep ->
+    m (ExpDec rep)
   mkBodyB ::
-    (MonadBinder m, Lore m ~ lore) =>
-    Stms lore ->
+    (MonadBinder m, Rep m ~ rep) =>
+    Stms rep ->
     Result ->
-    m (Body lore)
+    m (Body rep)
   mkLetNamesB ::
-    (MonadBinder m, Lore m ~ lore) =>
+    (MonadBinder m, Rep m ~ rep) =>
     [VName] ->
-    Exp lore ->
-    m (Stm lore)
+    Exp rep ->
+    m (Stm rep)
 
   default mkExpDecB ::
-    (MonadBinder m, Bindable lore) =>
-    Pattern lore ->
-    Exp lore ->
-    m (ExpDec lore)
+    (MonadBinder m, Bindable rep) =>
+    Pattern rep ->
+    Exp rep ->
+    m (ExpDec rep)
   mkExpDecB pat e = return $ mkExpDec pat e
 
   default mkBodyB ::
-    (MonadBinder m, Bindable lore) =>
-    Stms lore ->
+    (MonadBinder m, Bindable rep) =>
+    Stms rep ->
     Result ->
-    m (Body lore)
+    m (Body rep)
   mkBodyB stms res = return $ mkBody stms res
 
   default mkLetNamesB ::
-    (MonadBinder m, Lore m ~ lore, Bindable lore) =>
+    (MonadBinder m, Rep m ~ rep, Bindable rep) =>
     [VName] ->
-    Exp lore ->
-    m (Stm lore)
+    Exp rep ->
+    m (Stm rep)
   mkLetNamesB = mkLetNames
 
 -- | A monad transformer that tracks statements and provides a
@@ -88,22 +88,22 @@ class ASTLore lore => BinderOps lore where
 -- constructing statements (possibly as part of a larger monad stack).
 -- If you find yourself needing to implement 'MonadBinder' from
 -- scratch, then it is likely that you are making a mistake.
-newtype BinderT lore m a = BinderT (StateT (Stms lore, Scope lore) m a)
+newtype BinderT rep m a = BinderT (StateT (Stms rep, Scope rep) m a)
   deriving (Functor, Monad, Applicative)
 
-instance MonadTrans (BinderT lore) where
+instance MonadTrans (BinderT rep) where
   lift = BinderT . lift
 
 -- | The most commonly used binder monad.
-type Binder lore = BinderT lore (State VNameSource)
+type Binder rep = BinderT rep (State VNameSource)
 
-instance MonadFreshNames m => MonadFreshNames (BinderT lore m) where
+instance MonadFreshNames m => MonadFreshNames (BinderT rep m) where
   getNameSource = lift getNameSource
   putNameSource = lift . putNameSource
 
 instance
-  (ASTLore lore, Monad m) =>
-  HasScope lore (BinderT lore m)
+  (ASTRep rep, Monad m) =>
+  HasScope rep (BinderT rep m)
   where
   lookupType name = do
     t <- BinderT $ gets $ M.lookup name . snd
@@ -113,8 +113,8 @@ instance
   askScope = BinderT $ gets snd
 
 instance
-  (ASTLore lore, Monad m) =>
-  LocalScope lore (BinderT lore m)
+  (ASTRep rep, Monad m) =>
+  LocalScope rep (BinderT rep m)
   where
   localScope types (BinderT m) = BinderT $ do
     modify $ second (M.union types)
@@ -123,10 +123,10 @@ instance
     return x
 
 instance
-  (ASTLore lore, MonadFreshNames m, BinderOps lore) =>
-  MonadBinder (BinderT lore m)
+  (ASTRep rep, MonadFreshNames m, BinderOps rep) =>
+  MonadBinder (BinderT rep m)
   where
-  type Lore (BinderT lore m) = lore
+  type Rep (BinderT rep m) = rep
   mkExpDecM = mkExpDecB
   mkBodyM = mkBodyB
   mkLetNamesM = mkLetNamesB
@@ -148,9 +148,9 @@ instance
 -- the statements added ('addStm') during the action.
 runBinderT ::
   MonadFreshNames m =>
-  BinderT lore m a ->
-  Scope lore ->
-  m (a, Stms lore)
+  BinderT rep m a ->
+  Scope rep ->
+  m (a, Stms rep)
 runBinderT (BinderT m) scope = do
   (x, (stms, _)) <- runStateT m (mempty, scope)
   return (x, stms)
@@ -158,17 +158,17 @@ runBinderT (BinderT m) scope = do
 -- | Like 'runBinderT', but return only the statements.
 runBinderT_ ::
   MonadFreshNames m =>
-  BinderT lore m () ->
-  Scope lore ->
-  m (Stms lore)
+  BinderT rep m () ->
+  Scope rep ->
+  m (Stms rep)
 runBinderT_ m = fmap snd . runBinderT m
 
 -- | Like 'runBinderT', but get the initial scope from the current
 -- monad.
 runBinderT' ::
-  (MonadFreshNames m, HasScope somelore m, SameScope somelore lore) =>
-  BinderT lore m a ->
-  m (a, Stms lore)
+  (MonadFreshNames m, HasScope somerep m, SameScope somerep rep) =>
+  BinderT rep m a ->
+  m (a, Stms rep)
 runBinderT' m = do
   scope <- askScope
   runBinderT m $ castScope scope
@@ -176,9 +176,9 @@ runBinderT' m = do
 -- | Like 'runBinderT_', but get the initial scope from the current
 -- monad.
 runBinderT'_ ::
-  (MonadFreshNames m, HasScope somelore m, SameScope somelore lore) =>
-  BinderT lore m a ->
-  m (Stms lore)
+  (MonadFreshNames m, HasScope somerep m, SameScope somerep rep) =>
+  BinderT rep m a ->
+  m (Stms rep)
 runBinderT'_ = fmap snd . runBinderT'
 
 -- | Run a binder action, returning a value and the statements added
@@ -186,11 +186,11 @@ runBinderT'_ = fmap snd . runBinderT'
 -- provides initial scope and name source.
 runBinder ::
   ( MonadFreshNames m,
-    HasScope somelore m,
-    SameScope somelore lore
+    HasScope somerep m,
+    SameScope somerep rep
   ) =>
-  Binder lore a ->
-  m (a, Stms lore)
+  Binder rep a ->
+  m (a, Stms rep)
 runBinder m = do
   types <- askScope
   modifyNameSource $ runState $ runBinderT m $ castScope types
@@ -199,23 +199,23 @@ runBinder m = do
 -- added statements.
 runBinder_ ::
   ( MonadFreshNames m,
-    HasScope somelore m,
-    SameScope somelore lore
+    HasScope somerep m,
+    SameScope somerep rep
   ) =>
-  Binder lore a ->
-  m (Stms lore)
+  Binder rep a ->
+  m (Stms rep)
 runBinder_ = fmap snd . runBinder
 
 -- | Run a binder that produces a t'Body', and prefix that t'Body' by
 -- the statements produced during execution of the action.
 runBodyBinder ::
-  ( Bindable lore,
+  ( Bindable rep,
     MonadFreshNames m,
-    HasScope somelore m,
-    SameScope somelore lore
+    HasScope somerep m,
+    SameScope somerep rep
   ) =>
-  Binder lore (Body lore) ->
-  m (Body lore)
+  Binder rep (Body rep) ->
+  m (Body rep)
 runBodyBinder = fmap (uncurry $ flip insertStms) . runBinder
 
 -- Utility instance defintions for MTL classes.  These require
@@ -223,26 +223,26 @@ runBodyBinder = fmap (uncurry $ flip insertStms) . runBinder
 
 mapInner ::
   Monad m =>
-  ( m (a, (Stms lore, Scope lore)) ->
-    m (b, (Stms lore, Scope lore))
+  ( m (a, (Stms rep, Scope rep)) ->
+    m (b, (Stms rep, Scope rep))
   ) ->
-  BinderT lore m a ->
-  BinderT lore m b
+  BinderT rep m a ->
+  BinderT rep m b
 mapInner f (BinderT m) = BinderT $ do
   s <- get
   (x, s') <- lift $ f $ runStateT m s
   put s'
   return x
 
-instance MonadReader r m => MonadReader r (BinderT lore m) where
+instance MonadReader r m => MonadReader r (BinderT rep m) where
   ask = BinderT $ lift ask
   local f = mapInner $ local f
 
-instance MonadState s m => MonadState s (BinderT lore m) where
+instance MonadState s m => MonadState s (BinderT rep m) where
   get = BinderT $ lift get
   put = BinderT . lift . put
 
-instance MonadWriter w m => MonadWriter w (BinderT lore m) where
+instance MonadWriter w m => MonadWriter w (BinderT rep m) where
   tell = BinderT . lift . tell
   pass = mapInner $ \m -> pass $ do
     ((x, f), s) <- m
@@ -251,7 +251,7 @@ instance MonadWriter w m => MonadWriter w (BinderT lore m) where
     ((x, s), y) <- listen m
     return ((x, y), s)
 
-instance MonadError e m => MonadError e (BinderT lore m) where
+instance MonadError e m => MonadError e (BinderT rep m) where
   throwError = lift . throwError
   catchError (BinderT m) f =
     BinderT $ catchError m $ unBinder . f

@@ -15,7 +15,7 @@ import Futhark.Actions
 import qualified Futhark.Analysis.Alias as Alias
 import Futhark.Analysis.Metrics (OpMetrics)
 import Futhark.Compiler.CLI
-import Futhark.IR (ASTLore, Op, Prog, pretty)
+import Futhark.IR (ASTRep, Op, Prog, pretty)
 import qualified Futhark.IR.Kernels as Kernels
 import qualified Futhark.IR.KernelsMem as KernelsMem
 import qualified Futhark.IR.MC as MC
@@ -145,12 +145,12 @@ data UntypedAction
   | MCMemAction (FilePath -> Action MCMem.MCMem)
   | SeqMemAction (FilePath -> Action SeqMem.SeqMem)
   | PolyAction
-      ( forall lore.
-        ( ASTLore lore,
-          (CanBeAliased (Op lore)),
-          (OpMetrics (Op lore))
+      ( forall rep.
+        ( ASTRep rep,
+          (CanBeAliased (Op rep)),
+          (OpMetrics (Op rep))
         ) =>
-        Action lore
+        Action rep
       )
 
 untypedActionName :: UntypedAction -> String
@@ -222,10 +222,10 @@ kernelsProg name rep =
     "Pass " ++ name ++ " expects Kernels representation, but got " ++ representation rep
 
 typedPassOption ::
-  Checkable tolore =>
-  (String -> UntypedPassState -> FutharkM (Prog fromlore)) ->
-  (Prog tolore -> UntypedPassState) ->
-  Pass fromlore tolore ->
+  Checkable torep =>
+  (String -> UntypedPassState -> FutharkM (Prog fromrep)) ->
+  (Prog torep -> UntypedPassState) ->
+  Pass fromrep torep ->
   String ->
   FutharkOption
 typedPassOption getProg putProg pass short =
@@ -334,11 +334,11 @@ cseOption short =
     pass = performCSE True :: Pass SOACS.SOACS SOACS.SOACS
 
 pipelineOption ::
-  (UntypedPassState -> Maybe (Prog fromlore)) ->
+  (UntypedPassState -> Maybe (Prog fromrep)) ->
   String ->
-  (Prog tolore -> UntypedPassState) ->
+  (Prog torep -> UntypedPassState) ->
   String ->
-  Pipeline fromlore tolore ->
+  Pipeline fromrep torep ->
   String ->
   [String] ->
   FutharkOption
