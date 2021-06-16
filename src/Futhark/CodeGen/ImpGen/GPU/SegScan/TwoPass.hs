@@ -3,16 +3,16 @@
 
 -- | Code generation for segmented and non-segmented scans.  Uses a
 -- fairly inefficient two-pass algorithm, but can handle anything.
-module Futhark.CodeGen.ImpGen.Kernels.SegScan.TwoPass (compileSegScan) where
+module Futhark.CodeGen.ImpGen.GPU.SegScan.TwoPass (compileSegScan) where
 
 import Control.Monad.Except
 import Control.Monad.State
 import Data.List (delete, find, foldl', zip4)
 import Data.Maybe
-import qualified Futhark.CodeGen.ImpCode.Kernels as Imp
+import qualified Futhark.CodeGen.ImpCode.GPU as Imp
 import Futhark.CodeGen.ImpGen
-import Futhark.CodeGen.ImpGen.Kernels.Base
-import Futhark.IR.KernelsMem
+import Futhark.CodeGen.ImpGen.GPU.Base
+import Futhark.IR.GPUMem
 import qualified Futhark.IR.Mem.IxFun as IxFun
 import Futhark.Transform.Rename
 import Futhark.Util (takeLast)
@@ -24,7 +24,7 @@ import Prelude hiding (quot, rem)
 makeLocalArrays ::
   Count GroupSize SubExp ->
   SubExp ->
-  [SegBinOp KernelsMem] ->
+  [SegBinOp GPUMem] ->
   InKernelGen [[VName]]
 makeLocalArrays (Count group_size) num_threads scans = do
   (arrs, mems_and_sizes) <- runStateT (mapM onScan scans) mempty
@@ -77,7 +77,7 @@ localArrayIndex constants t =
     then sExt64 (kernelLocalThreadId constants)
     else sExt64 (kernelGlobalThreadId constants)
 
-barrierFor :: Lambda KernelsMem -> (Bool, Imp.Fence, InKernelGen ())
+barrierFor :: Lambda GPUMem -> (Bool, Imp.Fence, InKernelGen ())
 barrierFor scan_op = (array_scan, fence, sOp $ Imp.Barrier fence)
   where
     array_scan = not $ all primType $ lambdaReturnType scan_op
@@ -85,7 +85,7 @@ barrierFor scan_op = (array_scan, fence, sOp $ Imp.Barrier fence)
       | array_scan = Imp.FenceGlobal
       | otherwise = Imp.FenceLocal
 
-xParams, yParams :: SegBinOp KernelsMem -> [LParam KernelsMem]
+xParams, yParams :: SegBinOp GPUMem -> [LParam GPUMem]
 xParams scan =
   take (length (segBinOpNeutral scan)) (lambdaParams (segBinOpLambda scan))
 yParams scan =
@@ -93,7 +93,7 @@ yParams scan =
 
 writeToScanValues ::
   [VName] ->
-  ([PatElem KernelsMem], SegBinOp KernelsMem, [KernelResult]) ->
+  ([PatElem GPUMem], SegBinOp GPUMem, [KernelResult]) ->
   InKernelGen ()
 writeToScanValues gtids (pes, scan, scan_res)
   | shapeRank (segBinOpShape scan) > 0 =
@@ -109,8 +109,8 @@ writeToScanValues gtids (pes, scan, scan_res)
 
 readToScanValues ::
   [Imp.TExp Int64] ->
-  [PatElem KernelsMem] ->
-  SegBinOp KernelsMem ->
+  [PatElem GPUMem] ->
+  SegBinOp GPUMem ->
   InKernelGen ()
 readToScanValues is pes scan
   | shapeRank (segBinOpShape scan) > 0 =
@@ -123,8 +123,8 @@ readCarries ::
   Imp.TExp Int64 ->
   [Imp.TExp Int64] ->
   [Imp.TExp Int64] ->
-  [PatElem KernelsMem] ->
-  SegBinOp KernelsMem ->
+  [PatElem GPUMem] ->
+  SegBinOp GPUMem ->
   InKernelGen ()
 readCarries chunk_offset dims' vec_is pes scan
   | shapeRank (segBinOpShape scan) > 0 = do
@@ -146,12 +146,12 @@ readCarries chunk_offset dims' vec_is pes scan
 
 -- | Produce partially scanned intervals; one per workgroup.
 scanStage1 ::
-  Pattern KernelsMem ->
+  Pattern GPUMem ->
   Count NumGroups SubExp ->
   Count GroupSize SubExp ->
   SegSpace ->
-  [SegBinOp KernelsMem] ->
-  KernelBody KernelsMem ->
+  [SegBinOp GPUMem] ->
+  KernelBody GPUMem ->
   CallKernelGen (TV Int32, Imp.TExp Int64, CrossesSegment)
 scanStage1 (Pattern _ all_pes) num_groups group_size space scans kbody = do
   let num_groups' = fmap toInt64Exp num_groups
@@ -314,13 +314,13 @@ scanStage1 (Pattern _ all_pes) num_groups group_size space scans kbody = do
   return (num_threads, elems_per_group, crossesSegment)
 
 scanStage2 ::
-  Pattern KernelsMem ->
+  Pattern GPUMem ->
   TV Int32 ->
   Imp.TExp Int64 ->
   Count NumGroups SubExp ->
   CrossesSegment ->
   SegSpace ->
-  [SegBinOp KernelsMem] ->
+  [SegBinOp GPUMem] ->
   CallKernelGen ()
 scanStage2 (Pattern _ all_pes) stage1_num_threads elems_per_group num_groups crossesSegment space scans = do
   let (gtids, dims) = unzip $ unSegSpace space
@@ -391,13 +391,13 @@ scanStage2 (Pattern _ all_pes) stage1_num_threads elems_per_group num_groups cro
                   [localArrayIndex constants t]
 
 scanStage3 ::
-  Pattern KernelsMem ->
+  Pattern GPUMem ->
   Count NumGroups SubExp ->
   Count GroupSize SubExp ->
   Imp.TExp Int64 ->
   CrossesSegment ->
   SegSpace ->
-  [SegBinOp KernelsMem] ->
+  [SegBinOp GPUMem] ->
   CallKernelGen ()
 scanStage3 (Pattern _ all_pes) num_groups group_size elems_per_group crossesSegment space scans = do
   let num_groups' = fmap toInt64Exp num_groups
@@ -478,11 +478,11 @@ scanStage3 (Pattern _ all_pes) num_groups group_size elems_per_group crossesSegm
 -- | Compile 'SegScan' instance to host-level code with calls to
 -- various kernels.
 compileSegScan ::
-  Pattern KernelsMem ->
+  Pattern GPUMem ->
   SegLevel ->
   SegSpace ->
-  [SegBinOp KernelsMem] ->
-  KernelBody KernelsMem ->
+  [SegBinOp GPUMem] ->
+  KernelBody GPUMem ->
   CallKernelGen ()
 compileSegScan pat lvl space scans kbody = do
   -- Since stage 2 involves a group size equal to the number of groups

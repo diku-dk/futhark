@@ -3,8 +3,8 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 
--- | Facilities for converting a 'Kernels' program to 'KernelsMem'.
-module Futhark.Pass.ExplicitAllocations.Kernels
+-- | Facilities for converting a 'GPU' program to 'GPUMem'.
+module Futhark.Pass.ExplicitAllocations.GPU
   ( explicitAllocations,
     explicitAllocationsInStms,
   )
@@ -12,13 +12,13 @@ where
 
 import qualified Data.Map as M
 import qualified Data.Set as S
-import Futhark.IR.Kernels
-import Futhark.IR.KernelsMem
+import Futhark.IR.GPU
+import Futhark.IR.GPUMem
 import qualified Futhark.IR.Mem.IxFun as IxFun
 import Futhark.Pass.ExplicitAllocations
 import Futhark.Pass.ExplicitAllocations.SegOp
 
-instance SizeSubst (HostOp lore op) where
+instance SizeSubst (HostOp rep op) where
   opSizeSubst (Pattern _ [size]) (SizeOp (SplitSpace _ _ _ elems_per_thread)) =
     M.singleton (patElemName size) elems_per_thread
   opSizeSubst _ _ = mempty
@@ -27,7 +27,7 @@ instance SizeSubst (HostOp lore op) where
   opIsConst (SizeOp GetSizeMax {}) = True
   opIsConst _ = False
 
-allocAtLevel :: SegLevel -> AllocM fromlore tlore a -> AllocM fromlore tlore a
+allocAtLevel :: SegLevel -> AllocM fromrep trep a -> AllocM fromrep trep a
 allocAtLevel lvl = local $ \env ->
   env
     { allocSpace = space,
@@ -39,8 +39,8 @@ allocAtLevel lvl = local $ \env ->
       SegGroup {} -> Space "local"
 
 handleSegOp ::
-  SegOp SegLevel Kernels ->
-  AllocM Kernels KernelsMem (SegOp SegLevel KernelsMem)
+  SegOp SegLevel GPU ->
+  AllocM GPU GPUMem (SegOp SegLevel GPUMem)
 handleSegOp op = do
   num_threads <-
     letSubExp "num_threads" $
@@ -68,8 +68,8 @@ handleSegOp op = do
     inGroup env = env {envExpHints = inGroupExpHints}
 
 handleHostOp ::
-  HostOp Kernels (SOAC Kernels) ->
-  AllocM Kernels KernelsMem (MemOp (HostOp KernelsMem ()))
+  HostOp GPU (SOAC GPU) ->
+  AllocM GPU GPUMem (MemOp (HostOp GPUMem ()))
 handleHostOp (SizeOp op) =
   return $ Inner $ SizeOp op
 handleHostOp (OtherOp op) =
@@ -77,7 +77,7 @@ handleHostOp (OtherOp op) =
 handleHostOp (SegOp op) =
   Inner . SegOp <$> handleSegOp op
 
-kernelExpHints :: Allocator KernelsMem m => Exp KernelsMem -> m [ExpHint]
+kernelExpHints :: Allocator GPUMem m => Exp GPUMem -> m [ExpHint]
 kernelExpHints (BasicOp (Manifest perm v)) = do
   dims <- arrayDims <$> lookupType v
   let perm_inv = rearrangeInverse perm
@@ -95,7 +95,7 @@ kernelExpHints e =
   return $ replicate (expExtTypeSize e) NoHint
 
 mapResultHint ::
-  Allocator lore m =>
+  Allocator rep m =>
   SegLevel ->
   SegSpace ->
   Type ->
@@ -144,7 +144,7 @@ semiStatic :: S.Set VName -> SubExp -> Bool
 semiStatic _ Constant {} = True
 semiStatic consts (Var v) = v `S.member` consts
 
-inGroupExpHints :: Allocator KernelsMem m => Exp KernelsMem -> m [ExpHint]
+inGroupExpHints :: Allocator GPUMem m => Exp GPUMem -> m [ExpHint]
 inGroupExpHints (Op (Inner (SegOp (SegMap _ space ts body))))
   | any private $ kernelBodyResult body = do
     consts <- askConsts
@@ -167,7 +167,7 @@ inGroupExpHints (Op (Inner (SegOp (SegMap _ space ts body))))
     private _ = False
 inGroupExpHints e = return $ replicate (expExtTypeSize e) NoHint
 
-inThreadExpHints :: Allocator KernelsMem m => Exp KernelsMem -> m [ExpHint]
+inThreadExpHints :: Allocator GPUMem m => Exp GPUMem -> m [ExpHint]
 inThreadExpHints e = do
   consts <- askConsts
   mapM (maybePrivate consts) =<< expExtType e
@@ -180,13 +180,13 @@ inThreadExpHints e = do
       | otherwise =
         return NoHint
 
--- | The pass from 'Kernels' to 'KernelsMem'.
-explicitAllocations :: Pass Kernels KernelsMem
+-- | The pass from 'GPU' to 'GPUMem'.
+explicitAllocations :: Pass GPU GPUMem
 explicitAllocations = explicitAllocationsGeneric handleHostOp kernelExpHints
 
--- | Convert some 'Kernels' stms to 'KernelsMem'.
+-- | Convert some 'GPU' stms to 'GPUMem'.
 explicitAllocationsInStms ::
-  (MonadFreshNames m, HasScope KernelsMem m) =>
-  Stms Kernels ->
-  m (Stms KernelsMem)
+  (MonadFreshNames m, HasScope GPUMem m) =>
+  Stms GPU ->
+  m (Stms GPUMem)
 explicitAllocationsInStms = explicitAllocationsInStmsGeneric handleHostOp kernelExpHints

@@ -2,12 +2,12 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
 
-module Futhark.Pass.ExtractKernels.ToKernels
+module Futhark.Pass.ExtractKernels.ToGPU
   ( getSize,
     segThread,
-    soacsLambdaToKernels,
-    soacsStmToKernels,
-    scopeForKernels,
+    soacsLambdaToGPU,
+    soacsStmToGPU,
+    scopeForGPU,
     scopeForSOACs,
     injectSOACS,
   )
@@ -17,13 +17,13 @@ import Control.Monad.Identity
 import Data.List ()
 import Futhark.Analysis.Rephrase
 import Futhark.IR
-import Futhark.IR.Kernels
+import Futhark.IR.GPU
 import Futhark.IR.SOACS (SOACS)
 import qualified Futhark.IR.SOACS.SOAC as SOAC
 import Futhark.Tools
 
 getSize ::
-  (MonadBinder m, Op (Lore m) ~ HostOp (Lore m) inner) =>
+  (MonadBinder m, Op (Rep m) ~ HostOp (Rep m) inner) =>
   String ->
   SizeClass ->
   m SubExp
@@ -32,7 +32,7 @@ getSize desc size_class = do
   letSubExp desc $ Op $ SizeOp $ GetSize size_key size_class
 
 segThread ::
-  (MonadBinder m, Op (Lore m) ~ HostOp (Lore m) inner) =>
+  (MonadBinder m, Op (Rep m) ~ HostOp (Rep m) inner) =>
   String ->
   m SegLevel
 segThread desc =
@@ -54,11 +54,11 @@ injectSOACS ::
   Rephraser m from to
 injectSOACS f =
   Rephraser
-    { rephraseExpLore = return,
-      rephraseBodyLore = return,
-      rephraseLetBoundLore = return,
-      rephraseFParamLore = return,
-      rephraseLParamLore = return,
+    { rephraseExpDec = return,
+      rephraseBodyDec = return,
+      rephraseLetBoundDec = return,
+      rephraseFParamDec = return,
+      rephraseLParamDec = return,
       rephraseOp = fmap f . onSOAC,
       rephraseRetType = return,
       rephraseBranchType = return
@@ -72,14 +72,14 @@ injectSOACS f =
           SOAC.mapOnSOACLambda = rephraseLambda $ injectSOACS f
         }
 
-soacsStmToKernels :: Stm SOACS -> Stm Kernels
-soacsStmToKernels = runIdentity . rephraseStm (injectSOACS OtherOp)
+soacsStmToGPU :: Stm SOACS -> Stm GPU
+soacsStmToGPU = runIdentity . rephraseStm (injectSOACS OtherOp)
 
-soacsLambdaToKernels :: Lambda SOACS -> Lambda Kernels
-soacsLambdaToKernels = runIdentity . rephraseLambda (injectSOACS OtherOp)
+soacsLambdaToGPU :: Lambda SOACS -> Lambda GPU
+soacsLambdaToGPU = runIdentity . rephraseLambda (injectSOACS OtherOp)
 
-scopeForSOACs :: Scope Kernels -> Scope SOACS
+scopeForSOACs :: Scope GPU -> Scope SOACS
 scopeForSOACs = castScope
 
-scopeForKernels :: Scope SOACS -> Scope Kernels
-scopeForKernels = castScope
+scopeForGPU :: Scope SOACS -> Scope GPU
+scopeForGPU = castScope

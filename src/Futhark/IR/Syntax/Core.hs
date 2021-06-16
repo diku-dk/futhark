@@ -5,7 +5,7 @@
 
 -- | The most primitive ("core") aspects of the AST.  Split out of
 -- "Futhark.IR.Syntax" in order for
--- "Futhark.IR.Decorations" to use these definitions.  This
+-- "Futhark.IR.Rep" to use these definitions.  This
 -- module is re-exported from "Futhark.IR.Syntax" and
 -- there should be no reason to include it explicitly.
 module Futhark.IR.Syntax.Core

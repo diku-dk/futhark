@@ -44,7 +44,7 @@ eRotate :: MonadBinder m => [SubExp] -> VName -> m VName
 eRotate rots arr = letExp (baseString arr <> "_rot") $ BasicOp $ Rotate rots arr
 
 scanExc ::
-  (MonadBinder m, Lore m ~ SOACS) =>
+  (MonadBinder m, Rep m ~ SOACS) =>
   String ->
   Scan SOACS ->
   [VName] ->
@@ -101,7 +101,7 @@ newtype ADM a = ADM (BinderT SOACS (State RState) a)
     )
 
 instance MonadBinder ADM where
-  type Lore ADM = SOACS
+  type Rep ADM = SOACS
   mkExpDecM pat e = ADM $ mkExpDecM pat e
   mkBodyM bnds res = ADM $ mkBodyM bnds res
   mkLetNamesM pat e = ADM $ mkLetNamesM pat e

@@ -70,7 +70,7 @@ newtype ADM a = ADM (BinderT SOACS (State RState) a)
     )
 
 instance MonadBinder ADM where
-  type Lore ADM = SOACS
+  type Rep ADM = SOACS
   mkExpDecM pat e = ADM $ mkExpDecM pat e
   mkBodyM bnds res = ADM $ mkBodyM bnds res
   mkLetNamesM pat e = ADM $ mkLetNamesM pat e

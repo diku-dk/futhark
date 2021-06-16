@@ -5,15 +5,15 @@ module Futhark.Pass.Simplify
     simplifySOACS,
     simplifySeq,
     simplifyMC,
-    simplifyKernels,
-    simplifyKernelsMem,
+    simplifyGPU,
+    simplifyGPUMem,
     simplifySeqMem,
     simplifyMCMem,
   )
 where
 
-import qualified Futhark.IR.Kernels.Simplify as Kernels
-import qualified Futhark.IR.KernelsMem as KernelsMem
+import qualified Futhark.IR.GPU.Simplify as GPU
+import qualified Futhark.IR.GPUMem as GPUMem
 import qualified Futhark.IR.MC as MC
 import qualified Futhark.IR.MCMem as MCMem
 import qualified Futhark.IR.SOACS.Simplify as SOACS
@@ -23,15 +23,15 @@ import Futhark.IR.Syntax
 import Futhark.Pass
 
 simplify ::
-  (Prog lore -> PassM (Prog lore)) ->
-  Pass lore lore
+  (Prog rep -> PassM (Prog rep)) ->
+  Pass rep rep
 simplify = Pass "simplify" "Perform simple enabling optimisations."
 
 simplifySOACS :: Pass SOACS.SOACS SOACS.SOACS
 simplifySOACS = simplify SOACS.simplifySOACS
 
-simplifyKernels :: Pass Kernels.Kernels Kernels.Kernels
-simplifyKernels = simplify Kernels.simplifyKernels
+simplifyGPU :: Pass GPU.GPU GPU.GPU
+simplifyGPU = simplify GPU.simplifyGPU
 
 simplifySeq :: Pass Seq.Seq Seq.Seq
 simplifySeq = simplify Seq.simplifyProg
@@ -39,8 +39,8 @@ simplifySeq = simplify Seq.simplifyProg
 simplifyMC :: Pass MC.MC MC.MC
 simplifyMC = simplify MC.simplifyProg
 
-simplifyKernelsMem :: Pass KernelsMem.KernelsMem KernelsMem.KernelsMem
-simplifyKernelsMem = simplify KernelsMem.simplifyProg
+simplifyGPUMem :: Pass GPUMem.GPUMem GPUMem.GPUMem
+simplifyGPUMem = simplify GPUMem.simplifyProg
 
 simplifySeqMem :: Pass SeqMem.SeqMem SeqMem.SeqMem
 simplifySeqMem = simplify SeqMem.simplifyProg

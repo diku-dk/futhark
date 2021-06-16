@@ -2,7 +2,7 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE TypeFamilies #-}
 
-module Futhark.CodeGen.ImpGen.Kernels.Base
+module Futhark.CodeGen.ImpGen.GPU.Base
   ( KernelConstants (..),
     keyWithEntryPoint,
     CallKernelGen,
@@ -40,10 +40,10 @@ import Data.List (zip4)
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import qualified Data.Set as S
-import qualified Futhark.CodeGen.ImpCode.Kernels as Imp
+import qualified Futhark.CodeGen.ImpCode.GPU as Imp
 import Futhark.CodeGen.ImpGen
 import Futhark.Error
-import Futhark.IR.KernelsMem
+import Futhark.IR.GPUMem
 import qualified Futhark.IR.Mem.IxFun as IxFun
 import Futhark.MonadFreshNames
 import Futhark.Transform.Rename
@@ -75,9 +75,9 @@ data KernelEnv = KernelEnv
     kernelLocks :: M.Map VName Locks
   }
 
-type CallKernelGen = ImpM KernelsMem HostEnv Imp.HostOp
+type CallKernelGen = ImpM GPUMem HostEnv Imp.HostOp
 
-type InKernelGen = ImpM KernelsMem KernelEnv Imp.KernelOp
+type InKernelGen = ImpM GPUMem KernelEnv Imp.KernelOp
 
 data KernelConstants = KernelConstants
   { kernelGlobalThreadId :: Imp.TExp Int32,
@@ -96,7 +96,7 @@ data KernelConstants = KernelConstants
     kernelLocalIdMap :: M.Map [SubExp] [Imp.TExp Int32]
   }
 
-segOpSizes :: Stms KernelsMem -> S.Set [SubExp]
+segOpSizes :: Stms GPUMem -> S.Set [SubExp]
 segOpSizes = onStms
   where
     onStms = foldMap (onExp . stmExp)
@@ -108,7 +108,7 @@ segOpSizes = onStms
       onStms (bodyStms body)
     onExp _ = mempty
 
-precomputeSegOpIDs :: Stms KernelsMem -> InKernelGen a -> InKernelGen a
+precomputeSegOpIDs :: Stms GPUMem -> InKernelGen a -> InKernelGen a
 precomputeSegOpIDs stms m = do
   ltid <- kernelLocalThreadId . kernelConstants <$> askEnv
   new_ids <- M.fromList <$> mapM (mkMap ltid) (S.toList (segOpSizes stms))
@@ -128,12 +128,12 @@ keyWithEntryPoint :: Maybe Name -> Name -> Name
 keyWithEntryPoint fname key =
   nameFromString $ maybe "" ((++ ".") . nameToString) fname ++ nameToString key
 
-allocLocal :: AllocCompiler KernelsMem r Imp.KernelOp
+allocLocal :: AllocCompiler GPUMem r Imp.KernelOp
 allocLocal mem size =
   sOp $ Imp.LocalAlloc mem size
 
 kernelAlloc ::
-  Pattern KernelsMem ->
+  Pattern GPUMem ->
   SubExp ->
   Space ->
   InKernelGen ()
@@ -150,12 +150,12 @@ kernelAlloc dest _ _ =
 
 splitSpace ::
   (ToExp w, ToExp i, ToExp elems_per_thread) =>
-  Pattern KernelsMem ->
+  Pattern GPUMem ->
   SplitOrdering ->
   w ->
   i ->
   elems_per_thread ->
-  ImpM lore r op ()
+  ImpM rep r op ()
 splitSpace (Pattern [] [size]) o w i elems_per_thread = do
   num_elements <- Imp.elements . TPrimExp <$> toExp w
   let i' = toInt64Exp i
@@ -193,7 +193,7 @@ updateAcc acc is vs = sComment "UpdateAcc" $ do
               Nothing ->
                 error $ "Missing locks for " ++ pretty acc
 
-compileThreadExp :: ExpCompiler KernelsMem KernelEnv Imp.KernelOp
+compileThreadExp :: ExpCompiler GPUMem KernelEnv Imp.KernelOp
 compileThreadExp (Pattern _ [dest]) (BasicOp (ArrayLit es _)) =
   forM_ (zip [0 ..] es) $ \(i, e) ->
     copyDWIMFix (patElemName dest) [fromIntegral (i :: Int64)] e []
@@ -249,7 +249,7 @@ groupCoverSpace ::
 groupCoverSpace ds f =
   groupLoop (product ds) $ f . unflattenIndex ds
 
-compileGroupExp :: ExpCompiler KernelsMem KernelEnv Imp.KernelOp
+compileGroupExp :: ExpCompiler GPUMem KernelEnv Imp.KernelOp
 -- The static arrays stuff does not work inside kernels.
 compileGroupExp (Pattern _ [dest]) (BasicOp (ArrayLit es _)) =
   forM_ (zip [0 ..] es) $ \(i, e) ->
@@ -314,7 +314,7 @@ compileGroupSpace lvl space = do
 -- Construct the necessary lock arrays for an intra-group histogram.
 prepareIntraGroupSegHist ::
   Count GroupSize SubExp ->
-  [HistOp KernelsMem] ->
+  [HistOp GPUMem] ->
   InKernelGen [[Imp.TExp Int64] -> InKernelGen ()]
 prepareIntraGroupSegHist group_size =
   fmap snd . mapAccumLM onOp Nothing
@@ -360,7 +360,7 @@ whenActive lvl space m
       then m
       else sWhen (isActive $ unSegSpace space) m
 
-compileGroupOp :: OpCompiler KernelsMem KernelEnv Imp.KernelOp
+compileGroupOp :: OpCompiler GPUMem KernelEnv Imp.KernelOp
 compileGroupOp pat (Alloc size space) =
   kernelAlloc pat size space
 compileGroupOp pat (Inner (SizeOp (SplitSpace o w i elems_per_thread))) =
@@ -540,7 +540,7 @@ compileGroupOp pat (Inner (SegOp (SegHist lvl space ops _ kbody))) = do
 compileGroupOp pat _ =
   compilerBugS $ "compileGroupOp: cannot compile rhs of binding " ++ pretty pat
 
-compileThreadOp :: OpCompiler KernelsMem KernelEnv Imp.KernelOp
+compileThreadOp :: OpCompiler GPUMem KernelEnv Imp.KernelOp
 compileThreadOp pat (Alloc size space) =
   kernelAlloc pat size space
 compileThreadOp pat (Inner (SizeOp (SplitSpace o w i elems_per_thread))) =
@@ -566,19 +566,19 @@ data Locking = Locking
 
 -- | A function for generating code for an atomic update.  Assumes
 -- that the bucket is in-bounds.
-type DoAtomicUpdate lore r =
-  Space -> [VName] -> [Imp.TExp Int64] -> ImpM lore r Imp.KernelOp ()
+type DoAtomicUpdate rep r =
+  Space -> [VName] -> [Imp.TExp Int64] -> ImpM rep r Imp.KernelOp ()
 
 -- | The mechanism that will be used for performing the atomic update.
 -- Approximates how efficient it will be.  Ordered from most to least
 -- efficient.
-data AtomicUpdate lore r
+data AtomicUpdate rep r
   = -- | Supported directly by primitive.
-    AtomicPrim (DoAtomicUpdate lore r)
+    AtomicPrim (DoAtomicUpdate rep r)
   | -- | Can be done by efficient swaps.
-    AtomicCAS (DoAtomicUpdate lore r)
+    AtomicCAS (DoAtomicUpdate rep r)
   | -- | Requires explicit locking.
-    AtomicLocking (Locking -> DoAtomicUpdate lore r)
+    AtomicLocking (Locking -> DoAtomicUpdate rep r)
 
 -- | Is there an atomic t'BinOp' corresponding to this t'BinOp'?
 type AtomicBinOp =
@@ -588,8 +588,8 @@ type AtomicBinOp =
 -- | Do an atomic update corresponding to a binary operator lambda.
 atomicUpdateLocking ::
   AtomicBinOp ->
-  Lambda KernelsMem ->
-  AtomicUpdate KernelsMem KernelEnv
+  Lambda GPUMem ->
+  AtomicUpdate GPUMem KernelEnv
 atomicUpdateLocking atomicBinOp lam
   | Just ops_and_ts <- lamIsBinOp lam,
     all (\(_, t, _, _) -> primBitSize t `elem` [32, 64]) ops_and_ts =
@@ -802,9 +802,9 @@ readsFromSet free =
             Nothing -> return $ Just $ Imp.ScalarUse var bt
 
 isConstExp ::
-  VTable KernelsMem ->
+  VTable GPUMem ->
   Imp.Exp ->
-  ImpM lore r op (Maybe Imp.KernelConstExp)
+  ImpM rep r op (Maybe Imp.KernelConstExp)
 isConstExp vtable size = do
   fname <- askFunction
   let onLeaf (Imp.ScalarVar name) _ = lookupConstExp name
@@ -827,7 +827,7 @@ computeThreadChunkSize ::
   Imp.Count Imp.Elements (Imp.TExp Int64) ->
   Imp.Count Imp.Elements (Imp.TExp Int64) ->
   TV Int64 ->
-  ImpM lore r op ()
+  ImpM rep r op ()
 computeThreadChunkSize (SplitStrided stride) thread_index elements_per_thread num_elements chunk_var =
   chunk_var
     <-- sMin64
@@ -925,7 +925,7 @@ makeAllMemoryGlobal =
 
 groupReduce ::
   Imp.TExp Int32 ->
-  Lambda KernelsMem ->
+  Lambda GPUMem ->
   [VName] ->
   InKernelGen ()
 groupReduce w lam arrs = do
@@ -935,7 +935,7 @@ groupReduce w lam arrs = do
 groupReduceWithOffset ::
   TV Int32 ->
   Imp.TExp Int32 ->
-  Lambda KernelsMem ->
+  Lambda GPUMem ->
   [VName] ->
   InKernelGen ()
 groupReduceWithOffset offset w lam arrs = do
@@ -1025,7 +1025,7 @@ groupScan ::
   Maybe (Imp.TExp Int32 -> Imp.TExp Int32 -> Imp.TExp Bool) ->
   Imp.TExp Int64 ->
   Imp.TExp Int64 ->
-  Lambda KernelsMem ->
+  Lambda GPUMem ->
   [VName] ->
   InKernelGen ()
 groupScan seg_flag arrs_full_size w lam arrs = do
@@ -1179,7 +1179,7 @@ inBlockScan ::
   Imp.TExp Bool ->
   [VName] ->
   InKernelGen () ->
-  Lambda KernelsMem ->
+  Lambda GPUMem ->
   InKernelGen ()
 inBlockScan constants seg_flag arrs_full_size lockstep_width block_size active arrs barrier scan_lam = everythingVolatile $ do
   skip_threads <- dPrim "skip_threads" int32
@@ -1358,7 +1358,7 @@ sKernelGroup = sKernel groupOperations kernelGroupId
 
 sKernelFailureTolerant ::
   Bool ->
-  Operations KernelsMem KernelEnv Imp.KernelOp ->
+  Operations GPUMem KernelEnv Imp.KernelOp ->
   KernelConstants ->
   Name ->
   InKernelGen () ->
@@ -1380,7 +1380,7 @@ sKernelFailureTolerant tol ops constants name m = do
           }
 
 sKernel ::
-  Operations KernelsMem KernelEnv Imp.KernelOp ->
+  Operations GPUMem KernelEnv Imp.KernelOp ->
   (KernelConstants -> Imp.TExp Int32) ->
   String ->
   Count NumGroups (Imp.TExp Int64) ->
@@ -1396,7 +1396,7 @@ sKernel ops flatf name num_groups group_size v f = do
     dPrimV_ v $ flatf constants
     f
 
-copyInGroup :: CopyCompiler KernelsMem KernelEnv Imp.KernelOp
+copyInGroup :: CopyCompiler GPUMem KernelEnv Imp.KernelOp
 copyInGroup pt destloc destslice srcloc srcslice = do
   dest_space <- entryMemSpace <$> lookupMemory (memLocationName destloc)
   src_space <- entryMemSpace <$> lookupMemory (memLocationName srcloc)
@@ -1420,7 +1420,7 @@ copyInGroup pt destloc destslice srcloc srcslice = do
           (map DimFix $ fixSlice srcslice is)
       sOp $ Imp.Barrier Imp.FenceLocal
 
-threadOperations, groupOperations :: Operations KernelsMem KernelEnv Imp.KernelOp
+threadOperations, groupOperations :: Operations GPUMem KernelEnv Imp.KernelOp
 threadOperations =
   (defaultOperations compileThreadOp)
     { opsCopyCompiler = copyElementWise,
@@ -1606,7 +1606,7 @@ sIota arr n x s et = do
           [Imp.MemArg arr_mem, Imp.ExpArg $ untyped n, Imp.ExpArg x, Imp.ExpArg s]
     else sIotaKernel arr n x s et
 
-sCopy :: CopyCompiler KernelsMem HostEnv Imp.HostOp
+sCopy :: CopyCompiler GPUMem HostEnv Imp.HostOp
 sCopy
   bt
   destloc@(MemLocation destmem _ _)
@@ -1646,7 +1646,7 @@ sCopy
 
 compileGroupResult ::
   SegSpace ->
-  PatElem KernelsMem ->
+  PatElem GPUMem ->
   KernelResult ->
   InKernelGen ()
 compileGroupResult _ pe (TileReturns [(w, per_group_elems)] what) = do
@@ -1739,7 +1739,7 @@ compileGroupResult _ _ ConcatReturns {} =
 
 compileThreadResult ::
   SegSpace ->
-  PatElem KernelsMem ->
+  PatElem GPUMem ->
   KernelResult ->
   InKernelGen ()
 compileThreadResult _ _ RegTileReturns {} =

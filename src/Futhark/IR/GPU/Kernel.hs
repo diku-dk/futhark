@@ -7,7 +7,7 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
 
-module Futhark.IR.Kernels.Kernel
+module Futhark.IR.GPU.Kernel
   ( -- * Size operations
     SizeOp (..),
 
@@ -19,7 +19,7 @@ module Futhark.IR.Kernels.Kernel
     SegLevel (..),
 
     -- * Reexports
-    module Futhark.IR.Kernels.Sizes,
+    module Futhark.IR.GPU.Sizes,
     module Futhark.IR.SegOp,
   )
 where
@@ -28,11 +28,11 @@ import Futhark.Analysis.Metrics
 import qualified Futhark.Analysis.SymbolTable as ST
 import Futhark.IR
 import Futhark.IR.Aliases (Aliases)
-import Futhark.IR.Kernels.Sizes
+import Futhark.IR.GPU.Sizes
 import Futhark.IR.Prop.Aliases
 import Futhark.IR.SegOp
 import qualified Futhark.Optimise.Simplify.Engine as Engine
-import Futhark.Optimise.Simplify.Lore
+import Futhark.Optimise.Simplify.Rep
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
 import qualified Futhark.TypeCheck as TC
@@ -220,7 +220,7 @@ instance OpMetrics SizeOp where
   opMetrics CmpSizeLe {} = seen "CmpSizeLe"
   opMetrics CalcNumGroups {} = seen "CalcNumGroups"
 
-typeCheckSizeOp :: TC.Checkable lore => SizeOp -> TC.TypeM lore ()
+typeCheckSizeOp :: TC.Checkable rep => SizeOp -> TC.TypeM rep ()
 typeCheckSizeOp (SplitSpace o w i elems_per_thread) = do
   case o of
     SplitContiguous -> return ()
@@ -234,14 +234,14 @@ typeCheckSizeOp (CalcNumGroups w _ group_size) = do
   TC.require [Prim int64] group_size
 
 -- | A host-level operation; parameterised by what else it can do.
-data HostOp lore op
+data HostOp rep op
   = -- | A segmented operation.
-    SegOp (SegOp SegLevel lore)
+    SegOp (SegOp SegLevel rep)
   | SizeOp SizeOp
   | OtherOp op
   deriving (Eq, Ord, Show)
 
-instance (ASTLore lore, Substitute op) => Substitute (HostOp lore op) where
+instance (ASTRep rep, Substitute op) => Substitute (HostOp rep op) where
   substituteNames substs (SegOp op) =
     SegOp $ substituteNames substs op
   substituteNames substs (OtherOp op) =
@@ -249,12 +249,12 @@ instance (ASTLore lore, Substitute op) => Substitute (HostOp lore op) where
   substituteNames substs (SizeOp op) =
     SizeOp $ substituteNames substs op
 
-instance (ASTLore lore, Rename op) => Rename (HostOp lore op) where
+instance (ASTRep rep, Rename op) => Rename (HostOp rep op) where
   rename (SegOp op) = SegOp <$> rename op
   rename (OtherOp op) = OtherOp <$> rename op
   rename (SizeOp op) = SizeOp <$> rename op
 
-instance (ASTLore lore, IsOp op) => IsOp (HostOp lore op) where
+instance (ASTRep rep, IsOp op) => IsOp (HostOp rep op) where
   safeOp (SegOp op) = safeOp op
   safeOp (OtherOp op) = safeOp op
   safeOp (SizeOp op) = safeOp op
@@ -263,12 +263,12 @@ instance (ASTLore lore, IsOp op) => IsOp (HostOp lore op) where
   cheapOp (OtherOp op) = cheapOp op
   cheapOp (SizeOp op) = cheapOp op
 
-instance TypedOp op => TypedOp (HostOp lore op) where
+instance TypedOp op => TypedOp (HostOp rep op) where
   opType (SegOp op) = opType op
   opType (OtherOp op) = opType op
   opType (SizeOp op) = opType op
 
-instance (Aliased lore, AliasedOp op, ASTLore lore) => AliasedOp (HostOp lore op) where
+instance (Aliased rep, AliasedOp op, ASTRep rep) => AliasedOp (HostOp rep op) where
   opAliases (SegOp op) = opAliases op
   opAliases (OtherOp op) = opAliases op
   opAliases (SizeOp op) = opAliases op
@@ -277,13 +277,13 @@ instance (Aliased lore, AliasedOp op, ASTLore lore) => AliasedOp (HostOp lore op
   consumedInOp (OtherOp op) = consumedInOp op
   consumedInOp (SizeOp op) = consumedInOp op
 
-instance (ASTLore lore, FreeIn op) => FreeIn (HostOp lore op) where
+instance (ASTRep rep, FreeIn op) => FreeIn (HostOp rep op) where
   freeIn' (SegOp op) = freeIn' op
   freeIn' (OtherOp op) = freeIn' op
   freeIn' (SizeOp op) = freeIn' op
 
-instance (CanBeAliased (Op lore), CanBeAliased op, ASTLore lore) => CanBeAliased (HostOp lore op) where
-  type OpWithAliases (HostOp lore op) = HostOp (Aliases lore) (OpWithAliases op)
+instance (CanBeAliased (Op rep), CanBeAliased op, ASTRep rep) => CanBeAliased (HostOp rep op) where
+  type OpWithAliases (HostOp rep op) = HostOp (Aliases rep) (OpWithAliases op)
 
   addOpAliases aliases (SegOp op) = SegOp $ addOpAliases aliases op
   addOpAliases aliases (OtherOp op) = OtherOp $ addOpAliases aliases op
@@ -293,33 +293,33 @@ instance (CanBeAliased (Op lore), CanBeAliased op, ASTLore lore) => CanBeAliased
   removeOpAliases (OtherOp op) = OtherOp $ removeOpAliases op
   removeOpAliases (SizeOp op) = SizeOp op
 
-instance (CanBeWise (Op lore), CanBeWise op, ASTLore lore) => CanBeWise (HostOp lore op) where
-  type OpWithWisdom (HostOp lore op) = HostOp (Wise lore) (OpWithWisdom op)
+instance (CanBeWise (Op rep), CanBeWise op, ASTRep rep) => CanBeWise (HostOp rep op) where
+  type OpWithWisdom (HostOp rep op) = HostOp (Wise rep) (OpWithWisdom op)
 
   removeOpWisdom (SegOp op) = SegOp $ removeOpWisdom op
   removeOpWisdom (OtherOp op) = OtherOp $ removeOpWisdom op
   removeOpWisdom (SizeOp op) = SizeOp op
 
-instance (ASTLore lore, ST.IndexOp op) => ST.IndexOp (HostOp lore op) where
+instance (ASTRep rep, ST.IndexOp op) => ST.IndexOp (HostOp rep op) where
   indexOp vtable k (SegOp op) is = ST.indexOp vtable k op is
   indexOp vtable k (OtherOp op) is = ST.indexOp vtable k op is
   indexOp _ _ _ _ = Nothing
 
-instance (PrettyLore lore, PP.Pretty op) => PP.Pretty (HostOp lore op) where
+instance (PrettyRep rep, PP.Pretty op) => PP.Pretty (HostOp rep op) where
   ppr (SegOp op) = ppr op
   ppr (OtherOp op) = ppr op
   ppr (SizeOp op) = ppr op
 
-instance (OpMetrics (Op lore), OpMetrics op) => OpMetrics (HostOp lore op) where
+instance (OpMetrics (Op rep), OpMetrics op) => OpMetrics (HostOp rep op) where
   opMetrics (SegOp op) = opMetrics op
   opMetrics (OtherOp op) = opMetrics op
   opMetrics (SizeOp op) = opMetrics op
 
 checkSegLevel ::
-  TC.Checkable lore =>
+  TC.Checkable rep =>
   Maybe SegLevel ->
   SegLevel ->
-  TC.TypeM lore ()
+  TC.TypeM rep ()
 checkSegLevel Nothing lvl = do
   TC.require [Prim int64] $ unCount $ segNumGroups lvl
   TC.require [Prim int64] $ unCount $ segGroupSize lvl
@@ -333,12 +333,12 @@ checkSegLevel (Just x) y
     return ()
 
 typeCheckHostOp ::
-  TC.Checkable lore =>
-  (SegLevel -> OpWithAliases (Op lore) -> TC.TypeM lore ()) ->
+  TC.Checkable rep =>
+  (SegLevel -> OpWithAliases (Op rep) -> TC.TypeM rep ()) ->
   Maybe SegLevel ->
-  (op -> TC.TypeM lore ()) ->
-  HostOp (Aliases lore) op ->
-  TC.TypeM lore ()
+  (op -> TC.TypeM rep ()) ->
+  HostOp (Aliases rep) op ->
+  TC.TypeM rep ()
 typeCheckHostOp checker lvl _ (SegOp op) =
   TC.checkOpWith (checker $ segLevel op) $
     typeCheckSegOp (checkSegLevel lvl) op

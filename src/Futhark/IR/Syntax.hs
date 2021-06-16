@@ -71,37 +71,36 @@
 -- in {b_13}
 -- @
 --
--- == Lores
+-- == Representations
 --
 -- Most AST types ('Stm', 'ExpT', t'Prog', etc) are parameterised by a
--- type parameter with the somewhat silly name @lore@.  The lore
--- specifies how to fill out various polymorphic parts of the AST.
--- For example, 'ExpT' has a constructor v'Op' whose payload depends
--- on @lore@, via the use of a type family called t'Op' (a kind of
--- type-level function) which is applied to the @lore@.  The SOACS
--- representation ("Futhark.IR.SOACS") thus uses a lore
--- called @SOACS@, and defines that @Op SOACS@ is a SOAC, while the
--- Kernels representation ("Futhark.IR.Kernels") defines
--- @Op Kernels@ as some kind of kernel construct.  Similarly, various
--- other decorations (e.g. what information we store in a t'PatElemT')
--- are also type families.
+-- type parameter @rep@.  The representation specifies how to fill out
+-- various polymorphic parts of the AST.  For example, 'ExpT' has a
+-- constructor v'Op' whose payload depends on @rep@, via the use of a
+-- type family called t'Op' (a kind of type-level function) which is
+-- applied to the @rep@.  The SOACS representation
+-- ("Futhark.IR.SOACS") thus uses a rep called @SOACS@, and defines
+-- that @Op SOACS@ is a SOAC, while the Kernels representation
+-- ("Futhark.IR.Kernels") defines @Op Kernels@ as some kind of kernel
+-- construct.  Similarly, various other decorations (e.g. what
+-- information we store in a t'PatElemT') are also type families.
 --
 -- The full list of possible decorations is defined as part of the
--- type class 'Decorations' (although other type families are also
+-- type class 'RepTypes' (although other type families are also
 -- used elsewhere in the compiler on an ad hoc basis).
 --
--- Essentially, the @lore@ type parameter functions as a kind of
+-- Essentially, the @rep@ type parameter functions as a kind of
 -- proxy, saving us from having to parameterise the AST type with all
 -- the different forms of decorations that we desire (it would easily
 -- become a type with a dozen type parameters).
 --
--- Defining a new representation (or /lore/) thus requires you to
+-- Defining a new representation (or /rep/) thus requires you to
 -- define an empty datatype and implement a handful of type class
 -- instances for it.  See the source of "Futhark.IR.Seq"
 -- for what is likely the simplest example.
 module Futhark.IR.Syntax
   ( module Language.Futhark.Core,
-    module Futhark.IR.Decorations,
+    module Futhark.IR.Rep,
     module Futhark.IR.Syntax.Core,
 
     -- * Types
@@ -173,7 +172,7 @@ import qualified Data.Sequence as Seq
 import qualified Data.Set as S
 import Data.String
 import Data.Traversable (fmapDefault, foldMapDefault)
-import Futhark.IR.Decorations
+import Futhark.IR.Rep
 import Futhark.IR.Syntax.Core
 import Language.Futhark.Core
 import Prelude hiding (id, (.))
@@ -205,7 +204,7 @@ withoutAttrs :: Attrs -> Attrs -> Attrs
 withoutAttrs (Attrs x) (Attrs y) = Attrs $ x `S.difference` y
 
 -- | A type alias for namespace control.
-type PatElem lore = PatElemT (LetDec lore)
+type PatElem rep = PatElemT (LetDec rep)
 
 -- | A pattern is conceptually just a list of names and their types.
 data PatternT dec = Pattern
@@ -233,7 +232,7 @@ instance Traversable PatternT where
     Pattern <$> traverse (traverse f) ctx <*> traverse (traverse f) vals
 
 -- | A type alias for namespace control.
-type Pattern lore = PatternT (LetDec lore)
+type Pattern rep = PatternT (LetDec rep)
 
 -- | Auxilliary Information associated with a statement.
 data StmAux dec = StmAux
@@ -248,38 +247,38 @@ instance Semigroup dec => Semigroup (StmAux dec) where
     StmAux (cs1 <> cs2) (attrs1 <> attrs2) (dec1 <> dec2)
 
 -- | A local variable binding.
-data Stm lore = Let
+data Stm rep = Let
   { -- | Pattern.
-    stmPattern :: Pattern lore,
+    stmPattern :: Pattern rep,
     -- | Auxiliary information statement.
-    stmAux :: StmAux (ExpDec lore),
+    stmAux :: StmAux (ExpDec rep),
     -- | Expression.
-    stmExp :: Exp lore
+    stmExp :: Exp rep
   }
 
-deriving instance Decorations lore => Ord (Stm lore)
+deriving instance RepTypes rep => Ord (Stm rep)
 
-deriving instance Decorations lore => Show (Stm lore)
+deriving instance RepTypes rep => Show (Stm rep)
 
-deriving instance Decorations lore => Eq (Stm lore)
+deriving instance RepTypes rep => Eq (Stm rep)
 
 -- | A sequence of statements.
-type Stms lore = Seq.Seq (Stm lore)
+type Stms rep = Seq.Seq (Stm rep)
 
 -- | A single statement.
-oneStm :: Stm lore -> Stms lore
+oneStm :: Stm rep -> Stms rep
 oneStm = Seq.singleton
 
 -- | Convert a statement list to a statement sequence.
-stmsFromList :: [Stm lore] -> Stms lore
+stmsFromList :: [Stm rep] -> Stms rep
 stmsFromList = Seq.fromList
 
 -- | Convert a statement sequence to a statement list.
-stmsToList :: Stms lore -> [Stm lore]
+stmsToList :: Stms rep -> [Stm rep]
 stmsToList = toList
 
 -- | The first statement in the sequence, if any.
-stmsHead :: Stms lore -> Maybe (Stm lore, Stms lore)
+stmsHead :: Stms rep -> Maybe (Stm rep, Stms rep)
 stmsHead stms = case Seq.viewl stms of
   stm Seq.:< stms' -> Just (stm, stms')
   Seq.EmptyL -> Nothing
@@ -295,17 +294,17 @@ type Result = [SubExp]
 
 -- | A body consists of a number of bindings, terminating in a result
 -- (essentially a tuple literal).
-data BodyT lore = Body
-  { bodyDec :: BodyDec lore,
-    bodyStms :: Stms lore,
+data BodyT rep = Body
+  { bodyDec :: BodyDec rep,
+    bodyStms :: Stms rep,
     bodyResult :: Result
   }
 
-deriving instance Decorations lore => Ord (BodyT lore)
+deriving instance RepTypes rep => Ord (BodyT rep)
 
-deriving instance Decorations lore => Show (BodyT lore)
+deriving instance RepTypes rep => Show (BodyT rep)
 
-deriving instance Decorations lore => Eq (BodyT lore)
+deriving instance RepTypes rep => Eq (BodyT rep)
 
 -- | Type alias for namespace reasons.
 type Body = BodyT
@@ -412,42 +411,42 @@ data BasicOp
   deriving (Eq, Ord, Show)
 
 -- | The root Futhark expression type.  The v'Op' constructor contains
--- a lore-specific operation.  Do-loops, branches and function calls
+-- a rep-specific operation.  Do-loops, branches and function calls
 -- are special.  Everything else is a simple t'BasicOp'.
-data ExpT lore
+data ExpT rep
   = -- | A simple (non-recursive) operation.
     BasicOp BasicOp
-  | Apply Name [(SubExp, Diet)] [RetType lore] (Safety, SrcLoc, [SrcLoc])
-  | If SubExp (BodyT lore) (BodyT lore) (IfDec (BranchType lore))
+  | Apply Name [(SubExp, Diet)] [RetType rep] (Safety, SrcLoc, [SrcLoc])
+  | If SubExp (BodyT rep) (BodyT rep) (IfDec (BranchType rep))
   | -- | @loop {a} = {v} (for i < n|while b) do b@.  The merge
     -- parameters are divided into context and value part.
-    DoLoop [(FParam lore, SubExp)] [(FParam lore, SubExp)] (LoopForm lore) (BodyT lore)
+    DoLoop [(FParam rep, SubExp)] [(FParam rep, SubExp)] (LoopForm rep) (BodyT rep)
   | -- | Create accumulators backed by the given arrays (which are
     -- consumed) and pass them to the lambda, which must return the
     -- updated accumulators and possibly some extra values.  The
     -- accumulators are turned back into arrays.  The 'Shape' is the
     -- write index space.  The corresponding arrays must all have this
     -- shape outermost.  This construct is not part of 'BasicOp'
-    -- because we need the @lore@ parameter.
-    WithAcc [(Shape, [VName], Maybe (Lambda lore, [SubExp]))] (Lambda lore)
-  | Op (Op lore)
+    -- because we need the @rep@ parameter.
+    WithAcc [(Shape, [VName], Maybe (Lambda rep, [SubExp]))] (Lambda rep)
+  | Op (Op rep)
 
-deriving instance Decorations lore => Eq (ExpT lore)
+deriving instance RepTypes rep => Eq (ExpT rep)
 
-deriving instance Decorations lore => Show (ExpT lore)
+deriving instance RepTypes rep => Show (ExpT rep)
 
-deriving instance Decorations lore => Ord (ExpT lore)
+deriving instance RepTypes rep => Ord (ExpT rep)
 
 -- | For-loop or while-loop?
-data LoopForm lore
-  = ForLoop VName IntType SubExp [(LParam lore, VName)]
+data LoopForm rep
+  = ForLoop VName IntType SubExp [(LParam rep, VName)]
   | WhileLoop VName
 
-deriving instance Decorations lore => Eq (LoopForm lore)
+deriving instance RepTypes rep => Eq (LoopForm rep)
 
-deriving instance Decorations lore => Show (LoopForm lore)
+deriving instance RepTypes rep => Show (LoopForm rep)
 
-deriving instance Decorations lore => Ord (LoopForm lore)
+deriving instance RepTypes rep => Ord (LoopForm rep)
 
 -- | Data associated with a branch.
 data IfDec rt = IfDec
@@ -479,44 +478,44 @@ data IfSort
 type Exp = ExpT
 
 -- | Anonymous function for use in a SOAC.
-data LambdaT lore = Lambda
-  { lambdaParams :: [LParam lore],
-    lambdaBody :: BodyT lore,
+data LambdaT rep = Lambda
+  { lambdaParams :: [LParam rep],
+    lambdaBody :: BodyT rep,
     lambdaReturnType :: [Type]
   }
 
-deriving instance Decorations lore => Eq (LambdaT lore)
+deriving instance RepTypes rep => Eq (LambdaT rep)
 
-deriving instance Decorations lore => Show (LambdaT lore)
+deriving instance RepTypes rep => Show (LambdaT rep)
 
-deriving instance Decorations lore => Ord (LambdaT lore)
+deriving instance RepTypes rep => Ord (LambdaT rep)
 
 -- | Type alias for namespacing reasons.
 type Lambda = LambdaT
 
 -- | A function and loop parameter.
-type FParam lore = Param (FParamInfo lore)
+type FParam rep = Param (FParamInfo rep)
 
 -- | A lambda parameter.
-type LParam lore = Param (LParamInfo lore)
+type LParam rep = Param (LParamInfo rep)
 
 -- | Function Declarations
-data FunDef lore = FunDef
+data FunDef rep = FunDef
   { -- | Contains a value if this function is
     -- an entry point.
     funDefEntryPoint :: Maybe EntryPoint,
     funDefAttrs :: Attrs,
     funDefName :: Name,
-    funDefRetType :: [RetType lore],
-    funDefParams :: [FParam lore],
-    funDefBody :: BodyT lore
+    funDefRetType :: [RetType rep],
+    funDefParams :: [FParam rep],
+    funDefBody :: BodyT rep
   }
 
-deriving instance Decorations lore => Eq (FunDef lore)
+deriving instance RepTypes rep => Eq (FunDef rep)
 
-deriving instance Decorations lore => Show (FunDef lore)
+deriving instance RepTypes rep => Show (FunDef rep)
 
-deriving instance Decorations lore => Ord (FunDef lore)
+deriving instance RepTypes rep => Ord (FunDef rep)
 
 -- | Information about the parameters and return value of an entry
 -- point.  The first element is for parameters, the second for return
@@ -538,14 +537,14 @@ data EntryPointType
   deriving (Eq, Show, Ord)
 
 -- | An entire Futhark program.
-data Prog lore = Prog
+data Prog rep = Prog
   { -- | Top-level constants that are computed at program startup, and
     -- which are in scope inside all functions.
-    progConsts :: Stms lore,
+    progConsts :: Stms rep,
     -- | The functions comprising the program.  All funtions are also
     -- available in scope in the definitions of the constants, so be
     -- careful not to introduce circular dependencies (not currently
     -- checked).
-    progFuns :: [FunDef lore]
+    progFuns :: [FunDef rep]
   }
   deriving (Eq, Ord, Show)

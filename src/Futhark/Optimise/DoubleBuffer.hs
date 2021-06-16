@@ -22,7 +22,7 @@
 -- value.  This has the effect of making the memory block returned by
 -- the array non-existential, which is important for later memory
 -- expansion to work.
-module Futhark.Optimise.DoubleBuffer (doubleBufferKernels, doubleBufferMC) where
+module Futhark.Optimise.DoubleBuffer (doubleBufferGPU, doubleBufferMC) where
 
 import Control.Monad.Reader
 import Control.Monad.State
@@ -31,24 +31,24 @@ import Data.List (find)
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import Futhark.Construct
-import Futhark.IR.KernelsMem as Kernels
+import Futhark.IR.GPUMem as GPU
 import Futhark.IR.MCMem as MC
 import qualified Futhark.IR.Mem.IxFun as IxFun
 import Futhark.Pass
 import Futhark.Pass.ExplicitAllocations (arraySizeInBytesExp)
-import Futhark.Pass.ExplicitAllocations.Kernels ()
+import Futhark.Pass.ExplicitAllocations.GPU ()
 import Futhark.Util (maybeHead)
 
 -- | The pass for GPU kernels.
-doubleBufferKernels :: Pass KernelsMem KernelsMem
-doubleBufferKernels = doubleBuffer optimiseKernelsOp
+doubleBufferGPU :: Pass GPUMem GPUMem
+doubleBufferGPU = doubleBuffer optimiseGPUOp
 
 -- | The pass for multicore
 doubleBufferMC :: Pass MCMem MCMem
 doubleBufferMC = doubleBuffer optimiseMCOp
 
 -- | The double buffering pass definition.
-doubleBuffer :: Mem lore => OptimiseOp lore -> Pass lore lore
+doubleBuffer :: Mem rep => OptimiseOp rep -> Pass rep rep
 doubleBuffer onOp =
   Pass
     { passName = "Double buffer",
@@ -66,51 +66,51 @@ doubleBuffer onOp =
     env = Env mempty doNotTouchLoop onOp
     doNotTouchLoop ctx val body = return (mempty, ctx, val, body)
 
-type OptimiseLoop lore =
-  [(FParam lore, SubExp)] ->
-  [(FParam lore, SubExp)] ->
-  Body lore ->
+type OptimiseLoop rep =
+  [(FParam rep, SubExp)] ->
+  [(FParam rep, SubExp)] ->
+  Body rep ->
   DoubleBufferM
-    lore
-    ( [Stm lore],
-      [(FParam lore, SubExp)],
-      [(FParam lore, SubExp)],
-      Body lore
+    rep
+    ( [Stm rep],
+      [(FParam rep, SubExp)],
+      [(FParam rep, SubExp)],
+      Body rep
     )
 
-type OptimiseOp lore =
-  Op lore -> DoubleBufferM lore (Op lore)
+type OptimiseOp rep =
+  Op rep -> DoubleBufferM rep (Op rep)
 
-data Env lore = Env
-  { envScope :: Scope lore,
-    envOptimiseLoop :: OptimiseLoop lore,
-    envOptimiseOp :: OptimiseOp lore
+data Env rep = Env
+  { envScope :: Scope rep,
+    envOptimiseLoop :: OptimiseLoop rep,
+    envOptimiseOp :: OptimiseOp rep
   }
 
-newtype DoubleBufferM lore a = DoubleBufferM
-  { runDoubleBufferM :: ReaderT (Env lore) (State VNameSource) a
+newtype DoubleBufferM rep a = DoubleBufferM
+  { runDoubleBufferM :: ReaderT (Env rep) (State VNameSource) a
   }
-  deriving (Functor, Applicative, Monad, MonadReader (Env lore), MonadFreshNames)
+  deriving (Functor, Applicative, Monad, MonadReader (Env rep), MonadFreshNames)
 
-instance ASTLore lore => HasScope lore (DoubleBufferM lore) where
+instance ASTRep rep => HasScope rep (DoubleBufferM rep) where
   askScope = asks envScope
 
-instance ASTLore lore => LocalScope lore (DoubleBufferM lore) where
+instance ASTRep rep => LocalScope rep (DoubleBufferM rep) where
   localScope scope = local $ \env -> env {envScope = envScope env <> scope}
 
-optimiseBody :: ASTLore lore => Body lore -> DoubleBufferM lore (Body lore)
+optimiseBody :: ASTRep rep => Body rep -> DoubleBufferM rep (Body rep)
 optimiseBody body = do
   bnds' <- optimiseStms $ stmsToList $ bodyStms body
   return $ body {bodyStms = stmsFromList bnds'}
 
-optimiseStms :: ASTLore lore => [Stm lore] -> DoubleBufferM lore [Stm lore]
+optimiseStms :: ASTRep rep => [Stm rep] -> DoubleBufferM rep [Stm rep]
 optimiseStms [] = return []
 optimiseStms (e : es) = do
   e_es <- optimiseStm e
   es' <- localScope (castScope $ scopeOf e_es) $ optimiseStms es
   return $ e_es ++ es'
 
-optimiseStm :: forall lore. ASTLore lore => Stm lore -> DoubleBufferM lore [Stm lore]
+optimiseStm :: forall rep. ASTRep rep => Stm rep -> DoubleBufferM rep [Stm rep]
 optimiseStm (Let pat aux (DoLoop ctx val form body)) = do
   body' <-
     localScope (scopeOf form <> scopeOfFParams (map fst $ ctx ++ val)) $
@@ -125,12 +125,12 @@ optimiseStm (Let pat aux e) = do
     optimise onOp =
       identityMapper
         { mapOnBody = \_ x ->
-            optimiseBody x :: DoubleBufferM lore (Body lore),
+            optimiseBody x :: DoubleBufferM rep (Body rep),
           mapOnOp = onOp
         }
 
-optimiseKernelsOp :: OptimiseOp KernelsMem
-optimiseKernelsOp (Inner (SegOp op)) =
+optimiseGPUOp :: OptimiseOp GPUMem
+optimiseGPUOp (Inner (SegOp op)) =
   local inSegOp $ Inner . SegOp <$> mapSegOpM mapper op
   where
     mapper =
@@ -139,7 +139,7 @@ optimiseKernelsOp (Inner (SegOp op)) =
           mapOnSegOpBody = optimiseKernelBody
         }
     inSegOp env = env {envOptimiseLoop = optimiseLoop}
-optimiseKernelsOp op = return op
+optimiseGPUOp op = return op
 
 optimiseMCOp :: OptimiseOp MCMem
 optimiseMCOp (Inner (ParOp par_op op)) =
@@ -156,34 +156,34 @@ optimiseMCOp (Inner (ParOp par_op op)) =
 optimiseMCOp op = return op
 
 optimiseKernelBody ::
-  ASTLore lore =>
-  KernelBody lore ->
-  DoubleBufferM lore (KernelBody lore)
+  ASTRep rep =>
+  KernelBody rep ->
+  DoubleBufferM rep (KernelBody rep)
 optimiseKernelBody kbody = do
   stms' <- optimiseStms $ stmsToList $ kernelBodyStms kbody
   return $ kbody {kernelBodyStms = stmsFromList stms'}
 
 optimiseLambda ::
-  ASTLore lore =>
-  Lambda lore ->
-  DoubleBufferM lore (Lambda lore)
+  ASTRep rep =>
+  Lambda rep ->
+  DoubleBufferM rep (Lambda rep)
 optimiseLambda lam = do
   body <- localScope (castScope $ scopeOf lam) $ optimiseBody $ lambdaBody lam
   return lam {lambdaBody = body}
 
-type Constraints lore =
-  ( ASTLore lore,
-    FParamInfo lore ~ FParamMem,
-    LParamInfo lore ~ LParamMem,
-    RetType lore ~ RetTypeMem,
-    LetDec lore ~ LetDecMem,
-    BranchType lore ~ BranchTypeMem,
-    ExpDec lore ~ (),
-    BodyDec lore ~ (),
-    OpReturns lore
+type Constraints rep =
+  ( ASTRep rep,
+    FParamInfo rep ~ FParamMem,
+    LParamInfo rep ~ LParamMem,
+    RetType rep ~ RetTypeMem,
+    LetDec rep ~ LetDecMem,
+    BranchType rep ~ BranchTypeMem,
+    ExpDec rep ~ (),
+    BodyDec rep ~ (),
+    OpReturns rep
   )
 
-optimiseLoop :: (Constraints lore, Op lore ~ MemOp inner, BinderOps lore) => OptimiseLoop lore
+optimiseLoop :: (Constraints rep, Op rep ~ MemOp inner, BinderOps rep) => OptimiseLoop rep
 optimiseLoop ctx val body = do
   -- We start out by figuring out which of the merge variables should
   -- be double-buffered.
@@ -273,10 +273,10 @@ doubleBufferMergeParams ctx_and_res val_params bound_in_loop =
       _ -> return NoBuffer
 
 allocStms ::
-  (Constraints lore, Op lore ~ MemOp inner, BinderOps lore) =>
-  [(FParam lore, SubExp)] ->
+  (Constraints rep, Op rep ~ MemOp inner, BinderOps rep) =>
+  [(FParam rep, SubExp)] ->
   [DoubleBuffer] ->
-  DoubleBufferM lore ([(FParam lore, SubExp)], [Stm lore])
+  DoubleBufferM rep ([(FParam rep, SubExp)], [Stm rep])
 allocStms merge = runWriterT . zipWithM allocation merge
   where
     allocation m@(Param pname _, _) (BufferAlloc name size space b) = do
@@ -310,11 +310,11 @@ allocStms merge = runWriterT . zipWithM allocation merge
       return (f, se)
 
 doubleBufferResult ::
-  (Constraints lore) =>
-  [FParam lore] ->
+  (Constraints rep) =>
+  [FParam rep] ->
   [DoubleBuffer] ->
-  Body lore ->
-  Body lore
+  Body rep ->
+  Body rep
 doubleBufferResult valparams buffered (Body _ bnds res) =
   let (ctx_res, val_res) = splitAt (length res - length valparams) res
       (copybnds, val_res') =

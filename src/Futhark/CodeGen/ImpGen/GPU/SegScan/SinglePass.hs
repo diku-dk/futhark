@@ -4,22 +4,22 @@
 -- | Code generation for segmented and non-segmented scans.  Uses a
 -- fast single-pass algorithm, but which only works on NVIDIA GPUs and
 -- with some constraints on the operator.  We use this when we can.
-module Futhark.CodeGen.ImpGen.Kernels.SegScan.SinglePass (compileSegScan) where
+module Futhark.CodeGen.ImpGen.GPU.SegScan.SinglePass (compileSegScan) where
 
 import Control.Monad.Except
 import Data.List (zip4)
 import Data.Maybe
-import qualified Futhark.CodeGen.ImpCode.Kernels as Imp
+import qualified Futhark.CodeGen.ImpCode.GPU as Imp
 import Futhark.CodeGen.ImpGen
-import Futhark.CodeGen.ImpGen.Kernels.Base
-import Futhark.IR.KernelsMem
+import Futhark.CodeGen.ImpGen.GPU.Base
+import Futhark.IR.GPUMem
 import qualified Futhark.IR.Mem.IxFun as IxFun
 import Futhark.Transform.Rename
 import Futhark.Util (takeLast)
 import Futhark.Util.IntegralExp (IntegralExp (mod, rem), divUp, quot)
 import Prelude hiding (mod, quot, rem)
 
-xParams, yParams :: SegBinOp KernelsMem -> [LParam KernelsMem]
+xParams, yParams :: SegBinOp GPUMem -> [LParam GPUMem]
 xParams scan =
   take (length (segBinOpNeutral scan)) (lambdaParams (segBinOpLambda scan))
 yParams scan =
@@ -103,11 +103,11 @@ createLocalArrays (Count groupSize) m types = do
 -- | Compile 'SegScan' instance to host-level code with calls to a
 -- single-pass kernel.
 compileSegScan ::
-  Pattern KernelsMem ->
+  Pattern GPUMem ->
   SegLevel ->
   SegSpace ->
-  SegBinOp KernelsMem ->
-  KernelBody KernelsMem ->
+  SegBinOp GPUMem ->
+  KernelBody GPUMem ->
   CallKernelGen ()
 compileSegScan pat lvl space scanOp kbody = do
   let Pattern _ all_pes = pat

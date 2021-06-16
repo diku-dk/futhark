@@ -25,7 +25,7 @@ import qualified Futhark.IR.SOACS as SOACS
 import qualified Futhark.IR.SOACS.Simplify as SOACS
 import Futhark.Pass
 import Futhark.Pass.ExtractKernels.DistributeNests
-import Futhark.Pass.ExtractKernels.ToKernels (injectSOACS)
+import Futhark.Pass.ExtractKernels.ToGPU (injectSOACS)
 import Futhark.Tools
 import qualified Futhark.Transform.FirstOrderTransform as FOT
 import Futhark.Transform.Rename (Rename, renameSomething)

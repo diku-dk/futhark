@@ -11,7 +11,7 @@ import Futhark.IR.SOACS
 import Futhark.Pass
 
 bindLambda ::
-  (MonadBinder m, Lore m ~ SOACS) =>
+  (MonadBinder m, Rep m ~ SOACS) =>
   Pattern ->
   StmAux (ExpDec SOACS) ->
   Lambda ->
