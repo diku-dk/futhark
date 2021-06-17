@@ -415,7 +415,7 @@ tileDoLoop initial_space variance prestms used_in_body (host_stms, tiling, tiled
               PrivStms mempty indexMergeParams <> privstms <> inloop_privstms
 
         loopbody' <-
-          runBodyBinder $
+          localScope (scopeOfFParams mergeparams') . runBodyBinder $
             resultBody . map Var
               <$> tiledBody private' privstms'
         accs' <-
@@ -752,28 +752,6 @@ is1DTileable gtid variance arr
     InputTile [0] arr
   | otherwise =
     InputDontTile arr
-
-segMap1D ::
-  String ->
-  SegLevel ->
-  ResultManifest ->
-  (VName -> Binder GPU [SubExp]) ->
-  Binder GPU [VName]
-segMap1D desc lvl manifest f = do
-  ltid <- newVName "ltid"
-  ltid_flat <- newVName "ltid_flat"
-  let space = SegSpace ltid_flat [(ltid, unCount $ segGroupSize lvl)]
-
-  ((ts, res), stms) <- runBinder $ do
-    res <- f ltid
-    ts <- mapM subExpType res
-    return (ts, res)
-  Body _ stms' res' <- renameBody $ mkBody stms res
-
-  letTupExp desc $
-    Op $
-      SegOp $
-        SegMap lvl space ts $ KernelBody () stms' $ map (Returns manifest) res'
 
 reconstructGtids1D ::
   Count GroupSize SubExp ->
