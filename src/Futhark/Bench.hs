@@ -197,7 +197,7 @@ benchmarkDataset server opts futhark program entry input_spec expected_spec ref_
 
   report <- cmdEither $ cmdReport server
 
-  vs <- readResults server outs program <* freeOuts
+  vs <- readResults server outs <* freeOuts
 
   maybe_expected <-
     liftIO $ maybe (return Nothing) (fmap Just . getExpectedValues) expected_spec
