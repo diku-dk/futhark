@@ -96,7 +96,7 @@ withProgramServer program runner extra_options f = do
         "Running " <> T.pack (unwords $ binpath : extra_options)
 
   context prog_ctx $
-    pureTestResults $ liftIO $ withServer to_run to_run_args f
+    pureTestResults $ liftIO $ withServer (futharkServerCfg to_run to_run_args) f
 
 data TestCase = TestCase
   { _testCaseMode :: TestMode,
@@ -302,7 +302,7 @@ runCompiledEntry futhark server program (InputOutputs entry run_cases) = do
             pure $ ErrorResult $ T.unlines err
           Right _ ->
             SuccessResult
-              <$> readResults server outs program
+              <$> readResults server outs
                 <* liftCommand (cmdFree server outs)
 
         compareResult entry index program expected res

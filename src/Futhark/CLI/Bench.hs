@@ -177,7 +177,7 @@ withProgramServer program runner extra_options f = do
         | null runner = (binpath, extra_options)
         | otherwise = (runner, binpath : extra_options)
 
-  liftIO $ (Just <$> withServer to_run to_run_args f) `catch` onError
+  liftIO $ (Just <$> withServer (futharkServerCfg to_run to_run_args) f) `catch` onError
   where
     onError :: SomeException -> IO (Maybe a)
     onError e = do

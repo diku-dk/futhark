@@ -879,8 +879,9 @@ main = mainWithOptions initialOptions commandLineOptions "program" $ \args opts 
       let mdfile = fromMaybe (prog `replaceExtension` "md") $ scriptOutput opts
           imgdir = dropExtension mdfile <> "-img"
           run_options = scriptExtraOptions opts
+          cfg = futharkServerCfg ("." </> dropExtension prog) run_options
 
-      withScriptServer ("." </> dropExtension prog) run_options $ \server -> do
+      withScriptServer cfg $ \server -> do
         let env =
               Env
                 { envServer = server,

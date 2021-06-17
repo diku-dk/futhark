@@ -141,7 +141,7 @@ prepare opts futhark prog = do
       -- run, but unfortunately we can only set threshold parameters
       -- on startup.
       let progbin = "." </> dropExtension prog
-      withServer progbin (serverOptions path opts) $ \server ->
+      withServer (futharkServerCfg progbin (serverOptions path opts)) $ \server ->
         either (Left . T.unpack) (Right . bestRuntime)
           <$> benchmarkDataset
             server

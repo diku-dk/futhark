@@ -25,6 +25,7 @@ module Futhark.Test
     ensureReferenceOutput,
     determineTuning,
     binaryName,
+    futharkServerCfg,
     V.Mismatch,
     ProgramTest (..),
     StructureTest (..),
@@ -67,8 +68,9 @@ import Futhark.Data.Parser
 import qualified Futhark.Data.Parser as V
 import qualified Futhark.Script as Script
 import Futhark.Server
+import Futhark.Server.Values
 import qualified Futhark.Test.Values as V
-import Futhark.Util (directoryContents, pmapIO)
+import Futhark.Util (directoryContents, isEnvVarAtLeast, pmapIO)
 import Futhark.Util.Pretty (prettyOneLine, prettyText, prettyTextOneLine)
 import System.Directory
 import System.Exit
@@ -542,14 +544,10 @@ valueAsVar ::
   (MonadError T.Text m, MonadIO m) =>
   Server ->
   VarName ->
-  TypeName ->
   V.Value ->
   m ()
-valueAsVar server v t val = do
-  cmdMaybe . withSystemTempFile "futhark-input" $ \tmpf tmpf_h -> do
-    BS.hPutStr tmpf_h $ Bin.encode val
-    hClose tmpf_h
-    cmdRestore server tmpf [(v, t)]
+valueAsVar server v val =
+  cmdMaybe $ putValue server v val
 
 -- Frees the expression on error.
 scriptValueAsVars ::
@@ -570,7 +568,7 @@ scriptValueAsVars server names_and_types val
           Script.VVar oldname ->
             cmdMaybe $ cmdRename server oldname v
           Script.VVal sval' ->
-            valueAsVar server v t0 sval'
+            valueAsVar server v sval'
     f _ _ = Nothing
 scriptValueAsVars server names_and_types val = do
   cmdMaybe $ cmdFree server $ S.toList $ Script.serverVarsInValue val
@@ -816,23 +814,9 @@ readResults ::
   (MonadIO m, MonadError T.Text m) =>
   Server ->
   [VarName] ->
-  FilePath ->
   m [V.Value]
-readResults server outs program =
-  join . liftIO . withSystemTempFile "futhark-output" $ \outputf outputh -> do
-    hClose outputh
-    store_r <- cmdStore server outputf outs
-    case store_r of
-      Just (CmdFailure _ err) ->
-        pure $ throwError $ T.unlines err
-      Nothing -> do
-        bytes <- BS.readFile outputf
-        case valuesFromByteString "output" bytes of
-          Left e -> do
-            let actualf = program `addExtension` "actual"
-            liftIO $ BS.writeFile actualf bytes
-            pure $ throwError $ T.pack e <> "\n(See " <> T.pack actualf <> ")"
-          Right vs -> pure $ pure vs
+readResults server =
+  mapM (either throwError pure <=< liftIO . getValue server)
 
 -- | Ensure that any reference output files exist, or create them (by
 -- compiling the program with the reference compiler and running it on
@@ -924,3 +908,11 @@ checkResult program expected_vs actual_vs =
             else "\n...and " <> prettyText (length mismatches) <> " other mismatches."
     [] ->
       return ()
+
+-- | Create a Futhark server configuration suitable for use when
+-- testing/benchmarking Futhark programs.
+futharkServerCfg :: FilePath -> [String] -> ServerCfg
+futharkServerCfg prog opts =
+  (newServerCfg prog opts)
+    { cfgDebug = isEnvVarAtLeast "FUTHARK_COMPILER_DEBUGGING" 1
+    }
