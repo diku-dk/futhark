@@ -423,7 +423,8 @@ diffBasicOp pat aux e m =
       ne <- letSubExp "zero" $ zeroExp x_t
       n <- letSubExp "rep_size" =<< foldBinOp (Mul Int64 OverflowUndef) (intConst Int64 1) ns
       pat_adj_flat <-
-        letExp (baseString pat_adj <> "_flat") $ BasicOp $ Reshape [DimNew n] pat_adj
+        letExp (baseString pat_adj <> "_flat") $
+          BasicOp $ Reshape (map DimNew $ n : arrayDims x_t) pat_adj
       reduce <- reduceSOAC [Reduce Commutative lam [ne]]
       void $
         updateAdj x
