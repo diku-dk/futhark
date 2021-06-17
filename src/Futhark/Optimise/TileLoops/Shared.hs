@@ -1,5 +1,6 @@
 module Futhark.Optimise.TileLoops.Shared
   ( TileM,
+    segMap1D,
     segMap2D,
     segMap3D,
     segScatter2D,
@@ -20,6 +21,28 @@ import Futhark.Transform.Rename
 
 type TileM = ReaderT (Scope GPU) (State VNameSource)
 
+segMap1D ::
+  String ->
+  SegLevel ->
+  ResultManifest ->
+  (VName -> Binder GPU [SubExp]) ->
+  Binder GPU [VName]
+segMap1D desc lvl manifest f = do
+  ltid <- newVName "ltid"
+  ltid_flat <- newVName "ltid_flat"
+  let space = SegSpace ltid_flat [(ltid, unCount $ segGroupSize lvl)]
+
+  ((ts, res), stms) <- localScope (scopeOfSegSpace space) . runBinder $ do
+    res <- f ltid
+    ts <- mapM subExpType res
+    return (ts, res)
+  Body _ stms' res' <- renameBody $ mkBody stms res
+
+  letTupExp desc $
+    Op $
+      SegOp $
+        SegMap lvl space ts $ KernelBody () stms' $ map (Returns manifest) res'
+
 segMap2D ::
   String -> -- desc
   SegLevel -> -- lvl
@@ -35,7 +58,7 @@ segMap2D desc lvl manifest (dim_y, dim_x) f = do
   ltid_yy <- newVName "ltid_y"
   let segspace = SegSpace ltid_flat [(ltid_yy, dim_y), (ltid_xx, dim_x)]
 
-  ((ts, res), stms) <- runBinder $ do
+  ((ts, res), stms) <- localScope (scopeOfSegSpace segspace) . runBinder $ do
     res <- f (ltid_yy, ltid_xx)
     ts <- mapM subExpType res
     return (ts, res)
@@ -61,7 +84,7 @@ segMap3D desc lvl manifest (dim_z, dim_y, dim_x) f = do
   ltid_z <- newVName "ltid_z"
   let segspace = SegSpace ltid_flat [(ltid_z, dim_z), (ltid_y, dim_y), (ltid_x, dim_x)]
 
-  ((ts, res), stms) <- runBinder $ do
+  ((ts, res), stms) <- localScope (scopeOfSegSpace segspace) . runBinder $ do
     res <- f (ltid_z, ltid_y, ltid_x)
     ts <- mapM subExpType res
     return (ts, res)
