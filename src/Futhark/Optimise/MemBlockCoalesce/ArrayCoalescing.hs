@@ -327,7 +327,7 @@ mkCoalsTabBnd lutab (Let patt _ (If _ body_then body_else _)) td_env bu_env =
 --mkCoalsTabBnd lutab (Let pat _ (Op (ExpMem.Inner (ExpMem.Kernel str cs ker_space tps ker_bdy)))) td_env bu_env =
 --  bu_env
 
-mkCoalsTabBnd lutab lstm@(Let pat _ (DoLoop arginis_ctx arginis lform body)) td_env bu_env =
+mkCoalsTabBnd lutab lstm@(Let pat _ (DoLoop arginis_ctx arginis _lform body)) td_env bu_env =
   let pat_val_elms  = patternValueElements pat
       -- I'm assuming that the result of an if-then-else cannot be assigned in place
       not_ip_pat = True -- all notInPlace pat_val_elms
@@ -531,7 +531,7 @@ mkCoalsTabBnd lutab (Let pat _ e) td_env bu_env =
                         -- where @alias@ can be @transpose@, @slice@, @rotate@, @reshape@.
                         -- We use getTransitiveAlias helper function to track the aliasing
                         --    through the td_env, and to find the updated ixfun of @b@:
-                        case getTransitiveAlias (v_alias td_env) vtab b id of
+                        case getDirAliasedIxfn td_env a_acc b of
                           Nothing -> (failed, s_acc)
                           Just b_indfun' ->
                             case translateIndFunFreeVar (scope td_env) (scals bu_env) (Just b_indfun') of
@@ -543,42 +543,24 @@ mkCoalsTabBnd lutab (Let pat _ e) td_env bu_env =
             Just (Coalesced k mblk@(MemBlock _ _ _ new_indfun) _) ->
               -- we are at the definition of the coalesced variable @b@
               -- if 2,4,5 hold promote it to successful coalesced table,
-              -- or if e = reshape/transpose/rotate then postpone decision
-              --    for later on
+              -- or if e = transpose, etc. then postpone decision for later on
               let safe_2 = nameIn x_mem (alloc td_env)
                   (safe_5, fv_subst) = translateIndFunFreeVar (scope td_env) (scals bu_env) (Just new_indfun)
-                  alias_var = createsAliasedArrOK e
-              in  case (safe_2, safe_4, safe_5, alias_var) of
-                    (True, True, True, Nothing) ->
-                      -- great, new array creation point AND safety conditions
-                      --  2,4,5 hold => promote and append
-                      let mem_info = Coalesced k mblk fv_subst
-                          info' = info { vartab = M.insert b mem_info vtab }
-                          (a_acc',s_acc') = markSuccessCoal (a_acc,s_acc) mb info'
-                      in  trace ("COALESCING: successfull promote: "++pretty b++" "++pretty mb)
-                            ((a_acc',inhb), s_acc')
-                    (True, _, True, Just (b_al, alias_fn)) ->
-                      -- Here we treat the "invertible" aliasing cases
-                      --   @let a    = if cond then e1 else e2@
-                      --   @let b    = alias a@
-                      --   @let c    = alias b@
-                      --   @let x[i] = c@
-                      -- Supporting aliases are rotate and transpose, but
-                      --  we could extend it also to some complete slices,
-                      --  such as reverse.
-                      let new_indfun_b_al = alias_fn new_indfun
-                          mem_info = Coalesced k mblk fv_subst
-                          info' = info { vartab = M.insert b mem_info vtab }
-                      in  case getScopeMemInfo b_al (scope td_env) of
-                            Nothing -> Exc.assert False (failed, s_acc)
-                            Just (MemBlock b_al_tp b_al_shp m_b_al _) ->
-                              -- create a new entry for the aliased of b (@b_al@)
-                              -- promoted when @b_al@ definition is validated or recursively.
-                              let mem_info_al = Coalesced Trans (MemBlock b_al_tp b_al_shp x_mem new_indfun_b_al) M.empty
-                                  info'' = info' { vartab = M.insert b_al mem_info_al vtab }
-                              in  trace ("COALESCING: postponed promotion: "++pretty b) $
-                                    Exc.assert (m_b_al == mb) ((M.insert mb info'' a_acc,inhb), s_acc)
-                    _ -> (failed, s_acc) -- conservatively remove from active
+              in  if safe_2 && safe_5
+                  then  let mem_info = Coalesced k mblk fv_subst
+                            info' = info { vartab = M.insert b mem_info vtab }
+                        in  if safe_4
+                            then -- array creation point, successful coalescing verified!
+                                 let (a_acc',s_acc') = markSuccessCoal (a_acc,s_acc) mb info'
+                                 in  trace ("COALESCING: successfull promote: "++pretty b++" "++pretty mb)
+                                      ((a_acc',inhb), s_acc')
+                            else -- this is an invertible alias case of the kind
+                                 -- @ let b    = alias a @
+                                 -- @ let x[i] = b @
+                                 -- do not promote, but update the index function
+                                 trace ("COALESCING: postponed promotion: "++pretty b)
+                                  ((M.insert mb info' a_acc,inhb), s_acc)
+                  else  (failed, s_acc) -- fail!
 
 -- | 1. Filters @activeCoals@ by the 3rd safety condition, namely:
 --      "there is no use of the left-hand side memory block @m_y@
@@ -614,20 +596,6 @@ mkCoalsHelper1FilterActive pat inner_free_vars scope_tab _scals_tab active_tab i
 
       -- Cosmin does not thinks that the code below is necessary!
       (active_tab2, inhibit_tab2) = (active_tab1, inhibit_tab1)
-{--
-      (active_tab2, inhibit_tab2) =
-        foldl (\(act_tab,inhb_tab) (b, MemBlock _ _ mem_nm _) ->
-                case M.lookup mem_nm active_tab of
-                  Nothing -> (act_tab,inhb_tab)
-                  Just _info@(CoalsEntry _ _ _ vtab _) ->
-                    let failed = markFailedCoal (act_tab,inhb_tab) mem_nm
-                    in
-                     case M.lookup b vtab of
-                      Nothing -> Exc.assert False $ failed
-                        -- ToDo: this is not an impossible case.
-                      Just _ -> (act_tab,inhb_tab)
-              ) (active_tab1,inhibit_tab1) memasoc
---}
   in  (active_tab2, inhibit_tab2)
 
 -- | Check safety conditions 2 and 5 and update new substitutions:
@@ -673,16 +641,17 @@ mkCoalsHelper3PatternMatch pat e lutab td_env successCoals_tab activeCoals_tab i
     where
       processNewCoalesce acc (knd,alias_fn,x,m_x,ind_x, b,m_b,_,tp_b,shp_b) =
         -- test whether we are in a transitive coalesced case, i.e.,
+        --      @let b = scratch ...@
+        --      @.....@
         --      @let x[j] = b@
         --      @let y[i] = x@
         -- and compose the index function of @x@ with that of @y@,
-        -- and update aliasing with @m_y@ and @m_x@, i.e.,
-        -- validity condition 3) should check that @m_y@ and @m_x@ ...
-        -- are not used during the liveness of @b@.
+        -- and update aliasing of the @m_b@ entry to also contain @m_y@
+        -- on top of @m_x@, i.e., transitively, any use of @m_y@ should
+        -- be checked for the lifetime of @b@.
         let proper_coals_tab = case knd of
                                 InPl -> activeCoals_tab
                                 _    -> successCoals_tab
-            -- SIMPLIFICATION: get rid of rebase (?) use slices instead
             (m_yx, ind_yx, mem_yx_al, x_deps) =
               case M.lookup m_x proper_coals_tab of
                 Nothing ->
@@ -690,23 +659,35 @@ mkCoalsHelper3PatternMatch pat e lutab td_env successCoals_tab activeCoals_tab i
                 Just (CoalsEntry m_y ind_y y_al _ x_deps0 _) ->
                   (m_y, alias_fn ind_y, oneName m_x <> y_al, x_deps0)      
             success0 = IxFun.hasOneLmad ind_yx
-        in  case (success0, m_b /= m_yx, nameIn m_yx (alloc td_env)) of
+            m_b_aliased_m_yx = areAnyAliased td_env m_b [m_yx] -- m_b \= m_yx
+        in  case (success0, not m_b_aliased_m_yx, nameIn m_yx (alloc td_env)) of
               (True, True, True) ->
-                -- finally update the @activeCoals@ table with a fresh
-                -- binding for @m_b@; if such one exists then overwrite.
+                -- Finally update the @activeCoals@ table with a fresh
+                --   binding for @m_b@; if such one exists then overwrite.
+                -- Also, add all variables from the alias chain of @b@ to
+                --   @vartab@, for example, in the case of a sequence:
+                --   @ b0 = if cond then ... else ... @
+                --   @ b1 = alias0 b0 @
+                --   @ b  = alias1 b1 @
+                --   @ x[j] = b @
+                -- Then @b1@ and @b0@ should also be added to @vartab@ if
+                --   @alias1@ and @alias0@ are invertible, otherwise fail early!
                 let mem_info  = Coalesced knd (MemBlock tp_b shp_b m_yx ind_yx) M.empty
-                    -- coalescing is dependent on the coalescing
-                    -- success of the parent node (if any)
                     opts' = if m_yx == m_x then M.empty
                             else M.insert x m_x x_deps
-                    coal_etry = CoalsEntry m_yx ind_yx mem_yx_al (M.singleton b mem_info)
-                                           opts' (MemRefs mempty mempty)
-                                  
-                    updt_acc  = M.insert m_b coal_etry acc
-                in  case M.lookup m_b inhibit_tab of
-                      Nothing -> updt_acc
-                      Just nms-> if nameIn m_yx nms then acc -- inhibited coalescing.
-                                 else updt_acc
+                    vtab = M.singleton b mem_info
+                    mvtab= addInvAliassesVarTab td_env vtab b
+                    
+                    is_inhibited = case M.lookup m_b inhibit_tab of
+                                    Just nms -> nameIn m_yx nms
+                                    Nothing  -> False
+                in  case (is_inhibited, mvtab) of
+                      (True, _)    -> acc -- fail due to inhibited
+                      (_, Nothing) -> acc -- fail early due to non-invertible aliasing
+                      (_, Just vtab') ->  -- successfully adding a new coalesced entry
+                        let coal_etry = CoalsEntry m_yx ind_yx mem_yx_al vtab'
+                                                    opts' (MemRefs mempty mempty)
+                        in  M.insert m_b coal_etry acc
               _ -> acc
 mkCoalsHelper3PatternMatch _ _ _ _ _ _ _ =
   error "In ArrayCoalescing.hs, fun mkCoalsHelper3PatternMatch: Unreachable!!!"
@@ -778,14 +759,6 @@ appendCoalsInfo mb info_new coalstab =
   case M.lookup mb coalstab of
     Nothing       -> M.insert mb info_new coalstab
     Just info_old -> M.insert mb (unionCoalsEntry info_old info_new) coalstab
-
-tryRebase :: ExpMem.IxFun -> ExpMem.IxFun -> Maybe ExpMem.IxFun
-tryRebase x_indfun b_indfun =
-  let new_fun = IxFun.rebase x_indfun b_indfun
-  in  if IxFun.rank x_indfun == length (IxFun.base b_indfun)
-      then Just new_fun
-      else Nothing
-
 
 -- | Results in pairs of pattern-blockresult pairs of (var name, mem block)
 --   for those if-patterns that are candidates for coalescing.

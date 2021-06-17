@@ -4,9 +4,9 @@ module Futhark.Optimise.MemBlockCoalesce.DataStructs
        , V2MemTab, AliasTab, LUTabFun, LUTabPrg, ScalarTab,  CoalsTab
        , CoalsEntry(..), FreeVarSubsts, MemRefs(..)
        , aliasTransClos, updateAliasing, getNamesFromSubExps, unionCoalsEntry
-       , getArrMemAssocFParam, createsAliasedArrOK, getScopeMemInfo, prettyCoalTab
+       , getArrMemAssocFParam, getScopeMemInfo, prettyCoalTab
        , createsNewArrOK, getArrMemAssoc, getUniqueMemFParam
-       , getTransitiveAlias )
+       )
        where
 
 
@@ -207,51 +207,6 @@ createsNewArrIK (BasicOp Concat{}) = True
 createsNewArrIK (BasicOp ArrayLit{}) = True
 createsNewArrIK _ = False
 --}
-
--- | While Rearrange and Rotate create aliased arrays, we
---   do not yet support them because it would mean we have
---   to "reverse" the index function, for example to support
---   coalescing in the case below,
---       @let a = map f a0   @
---       @let b = transpose a@
---       @let y[4] = copy(b) @
---   we would need to assign to @a@ as index function, the
---   inverse of the transpose, such that, when creating @b@
---   by transposition we get a directly-mapped array, which
---   is expected by the copying in y[4].
---   For the moment we support only transposition and VName-expressions,
---     but rotations and full slices could also be supported.
-createsAliasedArrOK :: Exp (Aliases ExpMem.SeqMem) ->
-                       Maybe (VName, ExpMem.IxFun -> ExpMem.IxFun)
-createsAliasedArrOK (BasicOp (SubExp (Var arr_nm))) = Just (arr_nm, id)
-createsAliasedArrOK (BasicOp (Opaque (Var arr_nm))) = Just (arr_nm, id)
-createsAliasedArrOK (BasicOp (Rearrange perm arr_nm))  =
-  let perm' = IxFun.permuteInv perm [0..length perm - 1]
-  in  Just (arr_nm, (`IxFun.permute` perm'))
--- createsAliasedArrOK (BasicOp (Rotate    _ arr_nm))  = Just arr_nm
--- createsAliasedArrOK (BasicOp (Reshape _ arr_nm))    = Just arr_nm
--- ToDo: very important is to treat Index, i.e., array slices!
-createsAliasedArrOK _ = Nothing
-
-
-getTransitiveAlias :: M.Map VName (VName, ExpMem.IxFun -> ExpMem.IxFun) ->
-                      (M.Map VName Coalesced) -> VName -> (ExpMem.IxFun -> ExpMem.IxFun)
-                   -> Maybe ExpMem.IxFun
-getTransitiveAlias _ vtab b ixfn
-  | Just (Coalesced _ (MemBlock _ _ _ b_indfun) _) <- M.lookup b vtab =
-    Just (ixfn b_indfun)
-getTransitiveAlias alias_tab vtab b ixfn
-  | Just (x,alias_fn) <- M.lookup b alias_tab =
-  -- ^ 1. case: @b = alias x@;
-  --   we find a potential alias of @b@, named @(x,ixfn0)@, by lookup in @td_env@
-  case M.lookup x vtab of
-    Just (Coalesced _ (MemBlock _ _ _ x_indfun) _) ->
-      -- ^ 2. if @x@ is in @vtab@, then we know the root index function
-      --      and we can compose it with the remaining ixfuns to compute
-      --      the index function of @b@
-      Just ((ixfn . alias_fn) x_indfun)
-    Nothing -> getTransitiveAlias alias_tab vtab x (ixfn . alias_fn)
-getTransitiveAlias _ _ _ _ = Nothing
 
 prettyCoalTab :: CoalsTab -> String
 prettyCoalTab tab =
