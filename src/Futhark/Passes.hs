@@ -57,11 +57,15 @@ standardPipeline =
       performCSE True,
       simplifySOACS,
       removeDeadFunctions,
-      -- TODO: we sould skip the AD pass if the program contains no AD
-      -- constructs.
+      -- TODO: we sould skip the AD pass and its subsequent extra
+      -- optimisation passes if the program contains no AD constructs.
       algebraicDifferentiation,
       simplifySOACS,
       performCSE True,
+      fuseSOACs,
+      performCSE True,
+      simplifySOACS,
+      fuseSOACs,
       simplifySOACS
     ]
 
