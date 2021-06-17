@@ -51,7 +51,7 @@ optimiseStm stm@(Let pat aux (Op (SegOp (SegMap lvl@SegThread {} space ts kbody)
       blkRegTiling_res <- mmBlkRegTiling stm
       case blkRegTiling_res of
         Just (extra_bnds, stmt') -> return (extra_bnds <> oneStm stmt')
-        Nothing -> do
+        Nothing -> localScope (scopeOfSegSpace space) $ do
           (host_stms, (lvl', space', kbody')) <- tileInKernelBody mempty initial_variance lvl space ts kbody
           return $ host_stms <> oneStm (Let pat aux $ Op $ SegOp $ SegMap lvl' space' ts kbody')
   where
@@ -439,15 +439,10 @@ doPrelude tiling privstms prestms prestms_live =
     \in_bounds slice -> do
       ts <- mapM lookupType prestms_live
       fmap (map Var) $
-        letTupExp "pre"
-          =<< eIf
-            (toExp in_bounds)
-            ( do
-                addPrivStms slice privstms
-                addStms prestms
-                resultBodyM $ map Var prestms_live
-            )
-            (eBody $ map eBlank ts)
+        protectOutOfBounds "pre" in_bounds ts $ do
+          addPrivStms slice privstms
+          addStms prestms
+          pure $ map Var prestms_live
 
 liveSet :: FreeIn a => Stms GPU -> a -> Names
 liveSet stms after =
@@ -610,8 +605,23 @@ protectOutOfBounds ::
   [Type] ->
   Binder GPU [SubExp] ->
   Binder GPU [VName]
-protectOutOfBounds desc in_bounds ts m =
-  letTupExp desc =<< eIf (toExp in_bounds) (resultBody <$> m) (eBody $ map eBlank ts)
+protectOutOfBounds desc in_bounds ts m = do
+  -- This is more complicated than you might expect, because we need
+  -- to be able to produce a blank accumulator, which eBlank cannot
+  -- do.  By the linear type rules of accumulators, the body returns
+  -- an accumulator of type 'acc_t', then a unique variable of type
+  -- 'acc_t' must also be free in the body.  This means we can find it
+  -- based just on the type.
+  m_body <- insertStmsM $ resultBody <$> m
+  let m_body_free = namesToList $ freeIn m_body
+  t_to_v <-
+    filter (isAcc . fst)
+      <$> (zip <$> mapM lookupType m_body_free <*> pure m_body_free)
+  let blank t = maybe (eBlank t) (pure . BasicOp . SubExp . Var) $ lookup t t_to_v
+  letTupExp desc =<< eIf (toExp in_bounds) (pure m_body) (eBody $ map blank ts)
+  where
+    isAcc Acc {} = True
+    isAcc _ = False
 
 postludeGeneric ::
   Tiling ->
@@ -726,11 +736,11 @@ mkReadPreludeValues prestms_live_arrs prestms_live slice =
 tileReturns :: [(VName, SubExp)] -> [(SubExp, SubExp)] -> VName -> Binder GPU KernelResult
 tileReturns dims_on_top dims arr = do
   let unit_dims = replicate (length dims_on_top) (intConst Int64 1)
+  arr_t <- lookupType arr
   arr' <-
-    if null dims_on_top
+    if null dims_on_top || null (arrayDims arr_t) -- Second check is for accumulators.
       then return arr
       else do
-        arr_t <- lookupType arr
         let new_shape = unit_dims ++ arrayDims arr_t
         letExp (baseString arr) $ BasicOp $ Reshape (map DimNew new_shape) arr
   let tile_dims = zip (map snd dims_on_top) unit_dims ++ dims
