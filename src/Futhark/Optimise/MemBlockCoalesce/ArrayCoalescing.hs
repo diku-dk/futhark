@@ -19,6 +19,7 @@ import qualified Futhark.IR.SeqMem as ExpMem
 import qualified Futhark.IR.Mem.IxFun as IxFun
 import Futhark.Optimise.MemBlockCoalesce.DataStructs
 import Futhark.Optimise.MemBlockCoalesce.TopDownAn
+import Futhark.Optimise.MemBlockCoalesce.MemRefAggreg
 import Futhark.Optimise.MemBlockCoalesce.LastUse
 
 data BotUpEnv = BotUpEnv { scals :: ScalarTab
@@ -533,7 +534,7 @@ mkCoalsTabBnd lutab (Let pat _ e) td_env bu_env =
                         --    through the td_env, and to find the updated ixfun of @b@:
                         case getDirAliasedIxfn td_env a_acc b of
                           Nothing -> (failed, s_acc)
-                          Just b_indfun' ->
+                          Just (_, _, b_indfun') ->
                             case translateIndFunFreeVar (scope td_env) (scals bu_env) (Just b_indfun') of
                               (False, _) -> (failed, s_acc)
                               (True, fv_subst) ->
@@ -593,10 +594,7 @@ mkCoalsHelper1FilterActive pat inner_free_vars scope_tab _scals_tab active_tab i
       active_tab1 = M.filter (\etry -> mempty == namesIntersection all_mems (alsmem etry)) active_tab
       failed_tab  = M.difference active_tab active_tab1
       (_,inhibit_tab1) = foldl markFailedCoal (failed_tab,inhibit_tab) (M.keys failed_tab)
-
-      -- Cosmin does not thinks that the code below is necessary!
-      (active_tab2, inhibit_tab2) = (active_tab1, inhibit_tab1)
-  in  (active_tab2, inhibit_tab2)
+  in  (active_tab1, inhibit_tab1)
 
 -- | Check safety conditions 2 and 5 and update new substitutions:
 --   called on the pat-elements of loop and if-then-else expressions.
@@ -715,6 +713,12 @@ genCoalStmtInfo lutab scopetab pat (BasicOp (Update x slice_x (Var b)))
         else -- let ind_x_slice = updateIndFunSlice ind_x slice_x
              Just [(InPl,(`updateIndFunSlice` slice_x), x,m_x,ind_x,b,m_b,ind_b,tpb,shpb)]
       _ -> Nothing
+  where
+    updateIndFunSlice :: ExpMem.IxFun -> Slice SubExp -> ExpMem.IxFun
+    updateIndFunSlice ind_fun slc_x =
+      let slc_x' = map (fmap pe64) slc_x
+      in  IxFun.slice ind_fun slc_x'
+
 -- CASE b) @let x = concat(a, b^{lu})@
 genCoalStmtInfo lutab scopetab pat (BasicOp (Concat 0 b0 bs _))
   | Pattern _ [PatElem x (_,ExpMem.MemArray _ _ _ (ExpMem.ArrayIn m_x ind_x))] <- pat =
@@ -818,9 +822,3 @@ transferCoalsToBody activeCoals_tab (m_b, b, r, m_r) =
                                     
                    in  M.insert m_b (etry {optdeps = opts_x_new} ) $
                        M.insert m_r coal_etry activeCoals_tab
-
-
-updateIndFunSlice :: ExpMem.IxFun -> Slice SubExp -> ExpMem.IxFun
-updateIndFunSlice ind_fun slice_x =
-  let slice_x' = map (fmap pe64) slice_x
-  in  IxFun.slice ind_fun slice_x'

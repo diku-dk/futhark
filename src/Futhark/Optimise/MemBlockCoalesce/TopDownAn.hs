@@ -177,27 +177,30 @@ getTransitiveAlias alias_tab vtab b ixfn
 getTransitiveAlias _ _ _ _ = Nothing
 --}
 
-getDirAliasedIxfn :: TopDnEnv -> CoalsTab -> VName -> Maybe ExpMem.IxFun
+getDirAliasedIxfn :: TopDnEnv -> CoalsTab -> VName -> Maybe (VName, VName, ExpMem.IxFun)
 getDirAliasedIxfn td_env coals_tab x =
   case getScopeMemInfo x (scope td_env) of
     Just (MemBlock _ _ m_x orig_ixfun) ->
       case M.lookup m_x coals_tab of
-        Nothing -> Just orig_ixfun
+        Nothing -> Just (x, m_x, orig_ixfun)
                     -- fine, this is not subject to a coalesced point
                     -- just return the original index function
-        Just coal_etry -> walkAliasTab (v_alias td_env) (vartab coal_etry) x
-    Nothing -> Exc.assert False Nothing
+        Just coal_etry ->
+          case walkAliasTab (v_alias td_env) (vartab coal_etry) x of
+            Nothing -> Nothing
+            Just (m, ixf) -> Just (x, m, ixf)
+    Nothing -> Nothing
 
 walkAliasTab :: VarAliasTab -> M.Map VName Coalesced -> VName
-             -> Maybe ExpMem.IxFun
+             -> Maybe (VName, ExpMem.IxFun)
 walkAliasTab _ vtab x
-  | Just (Coalesced _ (MemBlock _ _ _ new_ixfun) _subs) <- M.lookup x vtab =
-    Just new_ixfun -- ^ @x@ is in @vartab@ together with its new ixfun
+  | Just (Coalesced _ (MemBlock _ _ new_mem new_ixfun) _subs) <- M.lookup x vtab =
+    Just (new_mem, new_ixfun) -- ^ @x@ is in @vartab@ together with its new ixfun
 walkAliasTab alias_tab vtab x
   | Just (x0, alias0, _) <- M.lookup x alias_tab,
-    Just ixfn0 <- walkAliasTab alias_tab vtab x0 =
+    Just (m, ixfn0) <- walkAliasTab alias_tab vtab x0 =
         -- ^ x = alias0 x0, the new ixfun of @x0@ is recorded in @vartab@ as ixfn0
-        Just $ alias0 ixfn0
+        Just (m, alias0 ixfn0)
 walkAliasTab _ _ _ = Exc.assert False Nothing
 
 -- | We assume @x@ is in @vartab@ and we add the variables that @x@ aliases
