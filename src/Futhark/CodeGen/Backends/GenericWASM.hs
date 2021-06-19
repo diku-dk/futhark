@@ -93,14 +93,12 @@ javascriptWrapper entryPoints =
       initFunc,
       ptrOrScalar,
       arrWrapper,
+      unlines $ concatMap (\jse -> map fromFutharkArrayShape (nub (ret jse ++ parameters jse))) entryPoints,
+      unlines $ concatMap (\jse -> map fromFutharkArrayValues (nub (ret jse ++ parameters jse))) entryPoints,
       classDef,
       constructor entryPoints,
       getEntryPointsFun,
-      --entryDic entryPoints,
       unlines $ concatMap (\jse -> map toFutharkArray (nub (ret jse ++ parameters jse))) entryPoints,
-      unlines $ concatMap (\jse -> map fromFutharkArrayShape (nub (ret jse ++ parameters jse))) entryPoints,
-      --unlines $ concatMap (\jse -> map fromFutharkArrayRawValues (ret jse)) entryPoints,
-      unlines $ concatMap (\jse -> map fromFutharkArrayValues (nub (ret jse ++ parameters jse))) entryPoints,
       unlines $ map jsWrapEntryPoint entryPoints,
       endClassDef
     ]
@@ -122,18 +120,14 @@ arrWrapper =
 
     class FutharkArray {
 
-      constructor(futctx, ptr, typ, dim) {
+      constructor(futctx, ptr, typ, fshape, fvalues) {
         this.futctx = futctx;
         this.ptr = ptr;
         this.typ = typ;
-        this.dim = dim;
+        this.fshape = fshape;
+        this.fvalues = fvalues;
         this.shape_init = false;
         this.values_init = false;
-      }
-
-      lookup(fname) {
-        var func_name = 'from_futhark_' + fname + '_' + this.typ + '_' + this.dim + 'd_arr';
-        return this.futctx[func_name].apply(this.futctx, [this.ptr]);
       }
 
       str_type() {
@@ -142,7 +136,7 @@ arrWrapper =
 
       shape() {
         if (!this.shape_init) {
-          this.shape_ = this.lookup('shape');
+          this.shape_ = this.fshape(this.futctx, this.ptr);
           this.shape_init = true;
         }
         return this.shape_;
@@ -150,7 +144,7 @@ arrWrapper =
  
       values() {
         if (!this.values_init) {
-          this.values_ = this.lookup('values');
+          this.values_ = this.fvalues(this.futctx, this.shape(), this.ptr);
           this.values_init = true;
         }
         return this.values_;
@@ -292,14 +286,15 @@ jsWrapEntryPoint jse =
       then "res" ++ show i
       else "dataHeap" ++ show i ++ ".byteOffset"
 
-
 makeFutharkArray :: Int -> String -> String
 makeFutharkArray i typ =
   "    var result" ++ show i ++ " = new FutharkArray(this, getValue(res" ++ show i ++ ", 'i32'), '"
     ++ baseType typ
-    ++ "', "
-    ++ show (dim typ)
-    ++ ")"
+    ++ "', " ++ fname "shape" 
+    ++ ", " ++ fname "values"
+    ++ ");"
+    where
+      fname foo = "from_futhark_" ++ foo ++ "_" ++ baseType typ  ++ "_" ++ show (dim typ) ++ "d_arr"
 
 resDataHeap :: Int -> String -> String
 resDataHeap i typ =
@@ -413,7 +408,7 @@ fromFutharkArrayShape str =
     then ""
     else
       unlines
-        [ "from_futhark_shape_" ++ ftype ++ "_" ++ show i ++ "d_arr(futhark_arr) {",
+        [ "function from_futhark_shape_" ++ ftype ++ "_" ++ show i ++ "d_arr(ctx, fut_arr_ptr) {",
           "  var ptr = futhark_shape_" ++ ftype ++ "_" ++ show i ++ "d(" ++ intercalate ", " args1 ++ ");",
           "  var dataHeap = new Uint8Array(Module.HEAPU8.buffer, ptr, 8 * " ++ show i ++ ");",
           " var result = new BigUint64Array(dataHeap.buffer, dataHeap.byteOffset, " ++ show i ++ ");",
@@ -421,8 +416,8 @@ fromFutharkArrayShape str =
           "}"
         ]
   where
-    ctx = "this.ctx"
-    arr = "futhark_arr"
+    ctx = "ctx"
+    arr = "fut_arr_ptr"
     args1 = [ctx, arr]
     i = dim str
     ftype = baseType str
@@ -433,9 +428,7 @@ fromFutharkArrayValues str =
     then ""
     else
       unlines
-        [ "from_futhark_values_" ++ ftype ++ "_" ++ show i ++ "d_arr(" ++ intercalate ", " args1 ++ ") {",
-          -- Possibly do sanity check that dimensions dim0 * dimn == arr.length",
-          "  var dims = this.from_futhark_shape_" ++ ftype ++ "_" ++ show i ++ "d_arr(fut_arr);",
+        [ "function from_futhark_values_" ++ ftype ++ "_" ++ show i ++ "d_arr(ctx, dims, fut_arr_ptr) {",
           "  var length = Number(dims.reduce((a, b) => a * b));",
           "  var dataHeap = initData(new " ++ arrType ++ "(length));",
           "  var res = futhark_values_raw_" ++ ftype ++ "_" ++ show i ++ "d(" ++ intercalate ", " args2 ++ ");",
@@ -444,10 +437,8 @@ fromFutharkArrayValues str =
           "}"
         ]
   where
-    ctx = "this.ctx"
-    fut_arr = "fut_arr"
-    -- ofs = "dataHeap.byteOffset"
-    args1 = [fut_arr]
+    ctx = "ctx"
+    fut_arr = "fut_arr_ptr"
     args2 = [ctx, fut_arr]
     i = dim str
     ftype = baseType str
