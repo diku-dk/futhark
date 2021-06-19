@@ -82,13 +82,6 @@ dataHeapConv :: String -> String -> String
 dataHeapConv size arrType =
   "    var dataHeapRes = new " ++ arrType ++ "(dataHeap.buffer, res, " ++ size ++ ");"
 
-resDataHeap :: Int -> String -> String
-resDataHeap idx arrType =
-  "    var res" ++ show idx ++ " = new " ++ arrType ++ "(dataHeap" ++ show idx ++ ".buffer,"
-    ++ " dataHeap"
-    ++ show idx
-    ++ ".byteOffset, 1);"
-
 javascriptWrapper :: [JSEntryPoint] -> String
 javascriptWrapper entryPoints =
   unlines
@@ -127,25 +120,15 @@ arrWrapper =
       }
     }
 
-    class FutharkValue {
+    class FutharkArray {
 
       constructor(futctx, ptr, typ, dim) {
         this.futctx = futctx;
         this.ptr = ptr;
         this.typ = typ;
         this.dim = dim;
-        this.is_scalar = false;
         this.shape_init = false;
         this.values_init = false;
-      }
-
-      constructor(vals, typ) {
-        this.typ = typ;
-        this.is_scalar = true;
-        this.shape_init = true;
-        this.shape_ = [];
-        this.values_init = true;
-        this.values_ = vals;
       }
 
       lookup(fname) {
@@ -177,14 +160,9 @@ arrWrapper =
         return this.values().BYTES_PER_ELEMENT;
       }
 
-      ptr_or_scalar() {
-        if (this.is_scalar) {
-          return this.values_[0];
-        } else {
-          this.ptr;
-        }
+      pointer() {
+        return this.ptr;
       }
-
     }
   |]
 
@@ -292,42 +270,52 @@ jsWrapEntryPoint jse =
       "    }",
       results,
       "    futhark_context_sync(this.ctx);",
-      "    return [" ++ res ++ "];",
+      "    return " ++ res ++ ";",
       "  }"
     ]
   where
     func_name = name jse
-    alr = [0 .. length (ret jse) - 1]
     alp = [0 .. length (parameters jse) - 1]
-    convTypes = map typeConversion $ ret jse
-    initss = unlines $ map (\i -> inits i (ret jse !! i)) alr
-    results = unlines $ map (\i -> if head (ret jse !! i) == '[' then "" else resDataHeap i (convTypes !! i)) alr
-    rets = intercalate ", " [retPtrOrOther i jse "dataHeap" ".byteOffset" ptrRes | i <- alr]
     args1 = intercalate ", " ["in" ++ show i | i <- alp]
     paramsToPtr = unlines ["  in" ++ show i ++ " = ptrOrScalar(in" ++ show i ++ ")" | i <- alp]
-    res = intercalate ", " [retPtrOrOtherBool i jse "new FutharkValue([res" "])" ptrResValue | i <- alr]
-    ptrRes i _ = "res" ++ show i
-    ptrResValue i _ =
-      "new FutharkValue(this, getValue(res" ++ show i ++ ", 'i32'), '"
-        ++ baseType (ret jse !! i)
-        ++ "', "
-        ++ show (dim (ret jse !! i))
-        ++ ")"
-    retPtrOrOther i jse' pre post f =
-      if head (ret jse' !! i) == '['
-        then f i $ ret jse' !! i
-        else pre ++ show i ++ post
-    retPtrOrOtherBool i jse' pre post f
-      | head (ret jse' !! i) == '[' = f i $ ret jse' !! i
-      | otherwise = pre ++ show i ++ ", '" ++ (ret jse' !! i) ++ "'" ++ post
+
+    alr = [0 .. length (ret jse) - 1]
+    initss = unlines [inits i $ ret jse !! i | i  <- alr]
+    results = unlines [if head (ret jse !! i) == '[' 
+                       then makeFutharkArray i $ ret jse !! i
+                       else resDataHeap i $ ret jse !! i | i <- alr]
+    rets = intercalate ", " [retPtrOrOther i | i <- alr]
+    res_array = intercalate ", " ["result" ++ show i | i <- alr]
+    res = if length (ret jse) == 1 then "result0" else ("[" ++ res_array ++ "]")
+    retPtrOrOther i =
+      if head (ret jse !! i) == '['
+      then "res" ++ show i
+      else "dataHeap" ++ show i ++ ".byteOffset"
+
+
+makeFutharkArray :: Int -> String -> String
+makeFutharkArray i typ =
+  "    var result" ++ show i ++ " = new FutharkArray(this, getValue(res" ++ show i ++ ", 'i32'), '"
+    ++ baseType typ
+    ++ "', "
+    ++ show (dim typ)
+    ++ ")"
+
+resDataHeap :: Int -> String -> String
+resDataHeap i typ =
+  "    var result" ++ show i ++ " = new " ++ typeConversion typ ++ "(dataHeap" ++ show i ++ ".buffer,"
+    ++ " dataHeap"
+    ++ show i
+    ++ ".byteOffset, 1)[0]" ++ if typ == "bool" then "!==0;" else ";"
+  
 
 ptrOrScalar :: String
 ptrOrScalar =
   T.unpack
     [text|
     function ptrOrScalar(x) {
-      if (x.constructor.name == "FutharkValue") {
-        return x.ptr_or_scalar();
+      if (x.constructor.name == "FutharkArray") {
+        return x.pointer();
       } else {
         return x;
       }
