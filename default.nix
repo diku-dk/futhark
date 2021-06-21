@@ -26,6 +26,9 @@ let
           futhark-data =
             haskellPackagesNew.callPackage ./nix/futhark-data.nix { };
 
+          futhark-server =
+            haskellPackagesNew.callPackage ./nix/futhark-server.nix { };
+
           futhark =
             pkgs.haskell.lib.overrideCabal
               (pkgs.haskell.lib.addBuildTools

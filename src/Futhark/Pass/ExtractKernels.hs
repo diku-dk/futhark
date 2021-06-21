@@ -654,6 +654,8 @@ worthSequentialising lam = bodyInterest (lambdaBody lam) > 1
         0 -- Basically a map.
       | DoLoop _ _ ForLoop {} body <- stmExp stm =
         bodyInterest body * 10
+      | WithAcc _ withacc_lam <- stmExp stm =
+        bodyInterest (lambdaBody withacc_lam)
       | Op (Screma _ _ form@(ScremaForm _ _ lam')) <- stmExp stm =
         1 + bodyInterest (lambdaBody lam')
           +
