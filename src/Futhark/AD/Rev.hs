@@ -661,11 +661,91 @@ diffReduce pat_adj w as red = do
         bodyBind $ lambdaBody lam_r
       pure (map paramName aps, lam')
 
+--
+-- Special case of reduce with min/max:
+--    let x = reduce minmax ne as
+-- Forward trace (assuming w = length as):
+--    let (x, x_ind) =
+--      reduce (\ acc_v acc_i v i ->
+--                 if (acc_v == v) then (acc_v, min acc_i i)
+--                 else if (acc_v == minmax acc_v v)
+--                      then (acc_v, acc_i)
+--                      else (v, i))
+--             (ne_min, -1)
+--             (zip as (iota w))
+-- Reverse trace:
+--    num_elems = i64.bool (0 <= x_ind)
+--    m_bar_repl = replicate num_elems m_bar
+--    as_bar[x_ind:num_elems:1] += m_bar_repl
+diffMinMaxRed ::
+  VName -> StmAux () -> SubExp -> BinOp -> SubExp -> VName -> ADM () -> ADM ()
+diffMinMaxRed x aux w minmax ne as m = do
+  let t = binOpType minmax
+
+  acc_v_p <- newParam "acc_v" $ Prim t
+  acc_i_p <- newParam "acc_i" $ Prim int64
+  v_p <- newParam "v" $ Prim t
+  i_p <- newParam "i" $ Prim int64
+  red_lam <-
+    mkLambda [acc_v_p, acc_i_p, v_p, i_p] $
+      fmap (map Var) . letTupExp "idx_res"
+        =<< eIf
+          (eCmpOp (CmpEq t) (eParam acc_v_p) (eParam v_p))
+          ( eBody
+              [ eParam acc_v_p,
+                eBinOp (SMin Int64) (eParam acc_i_p) (eParam i_p)
+              ]
+          )
+          ( eBody
+              [ eIf
+                  ( eCmpOp
+                      (CmpEq t)
+                      (eParam acc_v_p)
+                      (eBinOp minmax (eParam acc_v_p) (eParam v_p))
+                  )
+                  (eBody [eParam acc_v_p, eParam acc_i_p])
+                  (eBody [eParam v_p, eParam i_p])
+              ]
+          )
+
+  red_iota <-
+    letExp "red_iota" $
+      BasicOp $ Iota w (intConst Int64 0) (intConst Int64 1) Int64
+  form <- reduceSOAC [Reduce Commutative red_lam [ne, intConst Int64 (-1)]]
+  x_ind <- newVName (baseString x <> "_ind")
+  auxing aux $ letBindNames [x, x_ind] $ Op $ Screma w [as, red_iota] form
+  num_elems <-
+    letSubExp "num_elems"
+      =<< eConvOp
+        (BToI Int64)
+        (eCmpOp (CmpSle Int64) (eSubExp (intConst Int64 0)) (eSubExp (Var x_ind)))
+
+  m
+
+  x_adj <- lookupAdj x
+  rep_adj <- letExp "minmax_rep_adj" $ BasicOp $ Replicate (Shape [num_elems]) $ Var x_adj
+  void $ updateAdjSlice [DimSlice (Var x_ind) num_elems $ intConst Int64 1] as rep_adj
+
 diffSOAC :: Pattern -> StmAux () -> SOAC SOACS -> ADM () -> ADM ()
 diffSOAC pat aux soac@(Screma w as form) m
+  | Just red <- singleReduce <$> isReduceSOAC form,
+    [x] <- patternNames pat,
+    [ne] <- redNeutral red,
+    [a] <- as,
+    Just [(op, _, _, _)] <- lamIsBinOp $ redLambda red,
+    isMinMaxOp op =
+    diffMinMaxRed x aux w op ne a m
   | Just red <- singleReduce <$> isReduceSOAC form = do
     pat_adj <- commonSOAC pat aux soac m
     diffReduce pat_adj w as red
+  where
+    isMinMaxOp (SMin _) = True
+    isMinMaxOp (UMin _) = True
+    isMinMaxOp (FMin _) = True
+    isMinMaxOp (SMax _) = True
+    isMinMaxOp (UMax _) = True
+    isMinMaxOp (FMax _) = True
+    isMinMaxOp _ = False
 diffSOAC pat aux soac@(Screma w as form) m
   | Just lam <- isMapSOAC form = do
     pat_adj <- commonSOAC pat aux soac m

@@ -60,6 +60,7 @@ module Futhark.Construct
     letTupExp',
     letInPlace,
     eSubExp,
+    eParam,
     eIf,
     eIf',
     eBinOp,
@@ -183,6 +184,12 @@ eSubExp ::
   SubExp ->
   m (Exp (Rep m))
 eSubExp = pure . BasicOp . SubExp
+
+eParam ::
+  MonadBinder m =>
+  Param t ->
+  m (Exp (Rep m))
+eParam = eSubExp . Var . paramName
 
 eIf ::
   (MonadBinder m, BranchType (Rep m) ~ ExtType) =>
