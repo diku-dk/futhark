@@ -82,11 +82,11 @@ pdBinOp (FPow ft) a b =
 pdBinOp (FMax ft) a b =
   floatBinOp derivs derivs ft a b
   where
-    derivs x y = (fromBoolExp (x .>. y), fromBoolExp (x .<. y))
+    derivs x y = (fromBoolExp (x .>=. y), fromBoolExp (x .<. y))
 pdBinOp (FMin ft) a b =
   floatBinOp derivs derivs ft a b
   where
-    derivs x y = (fromBoolExp (x .<. y), fromBoolExp (x .>. y))
+    derivs x y = (fromBoolExp (x .<=. y), fromBoolExp (x .>. y))
 pdBinOp LogAnd a b = (b, a)
 pdBinOp LogOr _ _ = (ValueExp $ BoolValue True, ValueExp $ BoolValue False)
 pdBinOp op _ _ = error $ "pdBinOp: missing case: " ++ pretty op
