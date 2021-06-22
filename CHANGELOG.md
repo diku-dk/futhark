@@ -35,6 +35,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * Nested reductions used (much) more memory for intermediate results
     than strictly needed.
 
+  * Size propagation bug in defunctionalisation (#1384).
+
 ## [0.19.6]
 
 ### Added
