@@ -1251,9 +1251,14 @@ defuncValBind valbind@(ValBind _ name retdecl (Info (rettype, retext)) tparams p
         ++ "but the defunctionaliser expects a monomorphic input program."
   (tparams', params', body', sv) <-
     defuncLet (map typeParamName tparams) params body rettype
-  let rettype' = combineTypeShapes rettype $ anySizes $ toStruct $ typeOf body'
   globals <- asks fst
-  let bound_sizes = S.fromList tparams' <> globals
+  let bound_sizes = foldMap patternNames params' <> S.fromList tparams' <> globals
+      rettype' =
+        -- FIXME: dubious that we cannot assume that all sizes in the
+        -- body are in scope.  This is because when we insert
+        -- applications of lifted functions, we don't properly update
+        -- the types in the return type annotation.
+        combineTypeShapes rettype $ first (anyDimIfNotBound bound_sizes) $ toStruct $ typeOf body'
   (missing_dims, params'') <- sizesForAll bound_sizes params'
   return
     ( valbind
@@ -1284,6 +1289,10 @@ defuncValBind valbind@(ValBind _ name retdecl (Info (rettype, retext)) tparams p
         Dynamic {} -> True
         _ -> False
     )
+  where
+    anyDimIfNotBound bound_sizes (NamedDim v)
+      | qualLeaf v `S.notMember` bound_sizes = AnyDim $ Just $ qualLeaf v
+    anyDimIfNotBound _ d = d
 
 -- | Defunctionalize a list of top-level declarations.
 defuncVals :: [ValBind] -> DefM ()
