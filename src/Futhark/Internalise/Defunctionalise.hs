@@ -1091,11 +1091,9 @@ typeFromSV :: StaticVal -> PatternType
 typeFromSV (Dynamic tp) =
   tp
 typeFromSV (LambdaSV _ _ _ env) =
-  Scalar $
-    Record $
-      M.fromList $
-        map (bimap (nameFromString . pretty) (typeFromSV . bindingSV)) $
-          M.toList env
+  Scalar . Record . M.fromList $
+    map (bimap (nameFromString . pretty) (typeFromSV . bindingSV)) $
+      M.toList env
 typeFromSV (RecordSV ls) =
   let ts = map (fmap typeFromSV) ls
    in Scalar $ Record $ M.fromList ts
@@ -1174,13 +1172,7 @@ updatePattern (RecordPattern ps loc) (RecordSV svs)
   | ps' <- sortOn fst ps,
     svs' <- sortOn fst svs =
     RecordPattern
-      ( zipWith
-          ( \(n, p) (_, sv) ->
-              (n, updatePattern p sv)
-          )
-          ps'
-          svs'
-      )
+      (zipWith (\(n, p) (_, sv) -> (n, updatePattern p sv)) ps' svs')
       loc
 updatePattern (PatternParens pat loc) sv =
   PatternParens (updatePattern pat sv) loc
@@ -1277,12 +1269,7 @@ defuncValBind valbind@(ValBind _ name retdecl (Info (rettype, retext)) tparams p
         },
       M.singleton name $
         Binding
-          ( Just
-              ( first
-                  (map typeParamName)
-                  (valBindTypeScheme valbind)
-              )
-          )
+          (Just (first (map typeParamName) (valBindTypeScheme valbind)))
           sv,
       case sv of
         DynamicFun {} -> True
