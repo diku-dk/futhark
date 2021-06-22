@@ -25,7 +25,7 @@ description:    Futhark is a small programming language designed to be compiled 
                 .
                 <<docs/assets/ohyes.png You too can go fast once you rewrite your program in Futhark.>>
 
-category:       Language
+category:       Futhark
 homepage:       https://futhark-lang.org
 bug-reports:    https://github.com/diku-dk/futhark/issues
 maintainer:     Troels Henriksen athas@sigkill.dk
