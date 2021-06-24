@@ -146,7 +146,7 @@ runEMCC cpath outpath cflags_def ldflags expfuns exe = do
             ++ cmdEMCFLAGS [""]
             ++ [ "-s",
                  "EXPORTED_FUNCTIONS=["
-                   ++ intercalate "," ("'_malloc'" : expfuns)
+                   ++ intercalate "," ("'_malloc'" : "'_free'" : expfuns)
                    ++ if exe then ",_main]" else "]"
                ]
             ++ ["-s", "EXTRA_EXPORTED_RUNTIME_METHODS=['cwrap', 'getValue']"]

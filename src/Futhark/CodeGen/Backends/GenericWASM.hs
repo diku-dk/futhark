@@ -2,7 +2,7 @@
 {-# LANGUAGE TemplateHaskell #-}
 
 module Futhark.CodeGen.Backends.GenericWASM
-  ( 
+  (
     runServer,
     GC.CParts (..),
     GC.asLibrary,
@@ -43,11 +43,6 @@ extToString (Imp.TransparentValue (Imp.ScalarValue Bool _ _)) = "bool"
 extToString (Imp.OpaqueValue _ _) = "opaq"
 extToString _ = "Not Reached"
 
--- TODO 32
--- Handle Booleans
--- Hhandle OpaqueTypes
-
---type EntryPointName = String
 type EntryPointTyp = String
 
 data JSEntryPoint = JSEntryPoint
@@ -62,26 +57,6 @@ jsServer = $(embedStringFile "rts/javascript/server.js")
 jsValues :: String
 jsValues = $(embedStringFile "rts/javascript/values.js")
 
-initFunc :: String
-initFunc =
-  T.unpack
-    [text|
-   function initData(data) {
-      var nDataBytes = data.length * data.BYTES_PER_ELEMENT;
-      var dataPtr = Module._malloc(nDataBytes);
-      var dataHeap = new Uint8Array(Module.HEAPU8.buffer, dataPtr, nDataBytes);
-      dataHeap.set(new Uint8Array(data.buffer));
-      return dataHeap
-  }
-  |]
-
--- initDataHeap :: Int -> String -> String
--- initDataHeap idx arrType = "    var dataHeap" ++ show idx ++ " = initData(new " ++ arrType ++ "(1));"
-
-dataHeapConv :: String -> String -> String
-dataHeapConv size arrType =
-  "    var dataHeapRes = new " ++ arrType ++ "(dataHeap.buffer, res, " ++ size ++ ");"
-
 javascriptWrapper :: [JSEntryPoint] -> String
 javascriptWrapper entryPoints =
   unlines
@@ -90,74 +65,58 @@ javascriptWrapper entryPoints =
       cwraps,
       cwrapsJSE entryPoints,
       unlines $ map cwrapEntryPoint entryPoints,
-      initFunc,
-      ptrOrScalar,
-      arrWrapper,
-      unlines $ concatMap (\jse -> map fromFutharkArrayShape (nub (ret jse ++ parameters jse))) entryPoints,
-      unlines $ concatMap (\jse -> map fromFutharkArrayValues (nub (ret jse ++ parameters jse))) entryPoints,
+      heapFuns,
+      classFutharkArray,
+      "class FutharkOpaque { constructor(ptr) { this.ptr = ptr; } }",
       classDef,
       constructor entryPoints,
       getEntryPointsFun,
+      getErrorFun,
       unlines $ concatMap (\jse -> map toFutharkArray (nub (ret jse ++ parameters jse))) entryPoints,
       unlines $ map jsWrapEntryPoint entryPoints,
       endClassDef
     ]
 
---TODO Figure out if this needs arguements
-arrWrapper :: String
-arrWrapper =
+classFutharkArray :: String
+classFutharkArray =
   T.unpack
     [text|
-    function padTyp(typ) {
-      if (typ.length == 3) {
-        return " " + typ;
-      } else if (typ.length == 2) {
-        return "  " + typ;
-      } else {
-        return typ;
-      }
+  class FutharkArray {
+    constructor(ctx, ptr, type_name, dim, array_type, fshape, fvalues, ffree) {
+      this.ctx = ctx;
+      this.ptr = ptr;
+      this.type_name = type_name;
+      this.dim = dim;
+      this.array_type = array_type;
+      this.fshape = fshape;
+      this.fvalues = fvalues;
+      this.ffree = ffree;
     }
-
-    class FutharkArray {
-
-      constructor(futctx, ptr, typ, fshape, fvalues) {
-        this.futctx = futctx;
-        this.ptr = ptr;
-        this.typ = typ;
-        this.fshape = fshape;
-        this.fvalues = fvalues;
-        this.shape_init = false;
-        this.values_init = false;
-      }
-
-      str_type() {
-        return padTyp(this.typ);
-      }
-
-      shape() {
-        if (!this.shape_init) {
-          this.shape_ = this.fshape(this.futctx, this.ptr);
-          this.shape_init = true;
-        }
-        return this.shape_;
-      }
- 
-      values() {
-        if (!this.values_init) {
-          this.values_ = this.fvalues(this.futctx, this.shape(), this.ptr);
-          this.values_init = true;
-        }
-        return this.values_;
-      }
-
-      bytes_per_element() {
-        return this.values().BYTES_PER_ELEMENT;
-      }
-
-      pointer() {
-        return this.ptr;
-      }
+    futharkType() { return this.type_name; }
+    free() { this.ffree(this.ctx, this.ptr); }
+    shape() {
+      var s = this.fshape(this.ctx, this.ptr);
+      return Array.from(viewHeap(s, BigUint64Array, this.dim));
     }
+    toTypedArray(dims = this.shape()) {
+      var length = Number(dims.reduce((a, b) => a * b));
+      var v = this.fvalues(this.ctx, this.ptr);
+      return viewHeap(v, this.array_type, length);
+    }
+    toArray() {
+      var dims = this.shape();
+      var ta = this.toTypedArray(dims);
+      return (function nest(offs, ds) {
+        var d0 = Number(ds[0]);
+        if (ds.length === 1) {
+          return Array.from(ta.subarray(offs, offs + d0));
+        } else {
+          var d1 = Number(ds[1]);
+          return Array.from(Array(d0), (x,i) => nest(offs + i * d1, ds.slice(1)));
+        }
+      })(0, dims);
+    }
+  }
   |]
 
 cwraps :: String
@@ -174,9 +133,9 @@ cwrapsJSE :: [JSEntryPoint] -> String
 cwrapsJSE jses =
   unlines $
     map (\arg -> cwrapFun (gfn "new" arg) (dim arg + 2)) jses'
-      ++ map (\arg -> cwrapFun (gfn "shape" arg) (dim arg + 2)) jses'
-      ++ map (\arg -> cwrapFun (gfn "values_raw" arg) (dim arg + 2)) jses'
-      ++ map (\arg -> cwrapFun (gfn "values" arg) 2) jses'
+      ++ map (\arg -> cwrapFun (gfn "free" arg) 2) jses'
+      ++ map (\arg -> cwrapFun (gfn "shape" arg) 2) jses'
+      ++ map (\arg -> cwrapFun (gfn "values_raw" arg) 2) jses'
   where
     jses' = filter (\t -> dim t > 0) $ nub $ concatMap (\jse -> parameters jse ++ ret jse) jses
     gfn typ str = "futhark_" ++ typ ++ "_" ++ baseType str ++ "_" ++ show (dim str) ++ "d"
@@ -185,6 +144,7 @@ emccExportNames :: [JSEntryPoint] -> [String]
 emccExportNames jses =
   map (\jse -> "'_futhark_entry_" ++ name jse ++ "'") jses
     ++ map (\arg -> "'" ++ gfn "new" arg ++ "'") jses'
+    ++ map (\arg -> "'" ++ gfn "free" arg ++ "'") jses'
     ++ map (\arg -> "'" ++ gfn "shape" arg ++ "'") jses'
     ++ map (\arg -> "'" ++ gfn "values_raw" arg ++ "'") jses'
     ++ map (\arg -> "'" ++ gfn "values" arg ++ "'") jses'
@@ -206,6 +166,21 @@ cwrapFun fname numArgs =
     fn = T.pack fname
     args = T.pack $ intercalate ", " $ replicate numArgs "'number'"
 
+heapFuns :: String
+heapFuns =
+  T.unpack
+    [text|
+  function viewHeap(ptr, array_type, length) {
+    return new array_type(Module.HEAPU8.buffer, ptr, length);
+  }
+  function copyToHeap(ta) {
+    var bytes = new Uint8Array(ta.buffer, ta.byteOffset, ta.byteLength);
+    var ptr = Module._malloc(bytes.length);
+    Module.HEAPU8.set(bytes, ptr);
+    return ptr;
+  }
+  |]
+
 classDef :: String
 classDef = "class FutharkContext {"
 
@@ -216,13 +191,13 @@ constructor :: [JSEntryPoint] -> String
 constructor jses =
   T.unpack
     [text|
-    constructor() {
-      this.cfg = futhark_context_config_new();
-      this.ctx = futhark_context_new(this.cfg);
-      this.entry_points = {
-        ${entries}
-      };
-    }
+  constructor() {
+    this.cfg = futhark_context_config_new();
+    this.ctx = futhark_context_new(this.cfg);
+    this.entry_points = {
+      ${entries}
+    };
+  }
   |]
   where
     entries = T.pack $ intercalate "," $ map dicEntry jses
@@ -231,9 +206,24 @@ getEntryPointsFun :: String
 getEntryPointsFun =
   T.unpack
     [text|
-    get_entry_points() {
-      return this.entry_points;
+  get_entry_points() {
+    return this.entry_points;
+  }
+  |]
+
+getErrorFun :: String
+getErrorFun =
+  T.unpack
+    [text|
+  get_error() {
+    var error_ptr = futhark_context_get_error(this.ctx);
+    var error_msg = '';
+    var next_char;
+    for (var i = 0; 0 != (next_char = getValue(i + error_ptr, 'i8')); i++) {
+      error_msg += String.fromCharCode(next_char);
     }
+    return error_msg;
+  }
   |]
 
 dicEntry :: JSEntryPoint -> String
@@ -250,72 +240,60 @@ dicEntry jse =
 jsWrapEntryPoint :: JSEntryPoint -> String
 jsWrapEntryPoint jse =
   unlines
-    [ "  " ++ func_name ++ "(" ++ args1 ++ ") {",
-      initss,
+    [ func_name ++ "(" ++ inparams ++ ") {",
+      "  var out = [" ++ outparams ++ "].map(n => Module._malloc(n));",
+      "  var to_free = [];",
+      "  var do_free = () => { out.forEach(Module._free); to_free.forEach(f => f.free()); };",
       paramsToPtr,
-      "    if (futhark_entry_" ++ func_name ++ "(this.ctx, " ++ rets ++ ", " ++ args1 ++ ") > 0) {",
-      "     var error_ptr = futhark_context_get_error(this.ctx);",
-      "     var error_msg = '';",
-      "     var next_char;",
-      "     for (var i=0; 0 != (next_char=getValue(i + error_ptr, 'i8')); i++) {",
-      "       error_msg = error_msg + String.fromCharCode(next_char);",
-      "     }",
-      "     throw error_msg;",
-      "    }",
+      "  if (futhark_entry_" ++ func_name ++ "(this.ctx, ...out, " ++ ins ++ ") > 0) {",
+      "    do_free();",
+      "    throw this.get_error();",
+      "  }",
       results,
-      "    futhark_context_sync(this.ctx);",
-      "    return " ++ res ++ ";",
-      "  }"
+      "  do_free();",
+      "  return " ++ res ++ ";",
+      "}"
     ]
   where
     func_name = name jse
+
     alp = [0 .. length (parameters jse) - 1]
-    args1 = intercalate ", " ["in" ++ show i | i <- alp]
-    paramsToPtr = unlines ["  in" ++ show i ++ " = ptrOrScalar(in" ++ show i ++ ")" | i <- alp]
+    inparams = intercalate ", " ["in" ++ show i | i <- alp]
+    ins = intercalate ", " [maybeDerefence ("in" ++ show i) $ parameters jse !! i | i <- alp]
+    paramsToPtr = unlines $ filter ("" /=) [arrayPointer ("in" ++ show i) $ parameters jse !! i | i <- alp]
 
     alr = [0 .. length (ret jse) - 1]
-    initss = unlines [inits i $ ret jse !! i | i  <- alr]
-    results = unlines [if head (ret jse !! i) == '[' 
-                       then makeFutharkArray i $ ret jse !! i
-                       else resDataHeap i $ ret jse !! i | i <- alr]
-    rets = intercalate ", " [retPtrOrOther i | i <- alr]
+    outparams = intercalate ", " [show $ typeSize $ ret jse !! i | i  <- alr]
+    results = unlines [makeResult i $ ret jse !! i | i <- alr]
     res_array = intercalate ", " ["result" ++ show i | i <- alr]
     res = if length (ret jse) == 1 then "result0" else ("[" ++ res_array ++ "]")
-    retPtrOrOther i =
-      if head (ret jse !! i) == '['
-      then "res" ++ show i
-      else "dataHeap" ++ show i ++ ".byteOffset"
 
-makeFutharkArray :: Int -> String -> String
-makeFutharkArray i typ =
-  "    var result" ++ show i ++ " = new FutharkArray(this, getValue(res" ++ show i ++ ", 'i32'), '"
-    ++ baseType typ
-    ++ "', " ++ fname "shape" 
-    ++ ", " ++ fname "values"
-    ++ ");"
-    where
-      fname foo = "from_futhark_" ++ foo ++ "_" ++ baseType typ  ++ "_" ++ show (dim typ) ++ "d_arr"
+maybeDerefence :: String -> String -> String
+maybeDerefence arg typ =
+  if head typ == '[' || typ == "opaq" then arg ++ ".ptr" else arg
 
-resDataHeap :: Int -> String -> String
-resDataHeap i typ =
-  "    var result" ++ show i ++ " = new " ++ typeConversion typ ++ "(dataHeap" ++ show i ++ ".buffer,"
-    ++ " dataHeap"
-    ++ show i
-    ++ ".byteOffset, 1)[0]" ++ if typ == "bool" then "!==0;" else ";"
-  
+arrayPointer :: String -> String -> String
+arrayPointer arg typ =
+  if head typ == '['
+  then "  if (" ++ arg ++ " instanceof Array) { " ++ reassign ++ "; to_free.push(" ++ arg ++ "); }"
+  else ""
+  where
+    reassign = arg ++ " = this.new_" ++ signature ++ "_from_jsarray(" ++ arg ++ ")"
+    signature = baseType typ  ++ "_" ++ show (dim typ) ++ "d"
 
-ptrOrScalar :: String
-ptrOrScalar =
-  T.unpack
-    [text|
-    function ptrOrScalar(x) {
-      if (x.constructor.name == "FutharkArray") {
-        return x.pointer();
-      } else {
-        return x;
-      }
-    }
-  |]
+makeResult :: Int -> String -> String
+makeResult i typ =
+  "  var result" ++ show i ++ " = " ++
+    if head typ == '['
+    then "this.new_" ++ signature ++ "_from_ptr(getValue(" ++ res ++ ", 'i32'));"
+    else
+      if typ == "opaq"
+      then "new FutharkOpaque(getValue(" ++ res ++ ", 'i32'));"
+      else "viewHeap(" ++ res ++ ", " ++ typeConversion typ ++ ", 1)[0]"
+             ++ if typ == "bool" then "!==0;" else ";"
+  where
+    res = "out[" ++ show i ++ "]"
+    signature = baseType typ  ++ "_" ++ show (dim typ) ++ "d"
 
 cwrapEntryPoint :: JSEntryPoint -> String
 cwrapEntryPoint jse =
@@ -331,26 +309,6 @@ cwrapEntryPoint jse =
     arg_length = length (parameters jse) + length (ret jse)
     args = T.pack $ "['number'" ++ concat (replicate arg_length ", 'number'") ++ "]"
 
-inits :: Int -> EntryPointTyp -> String
-inits argNum ep =
-  let (i, typ) = retType ep
-   in if i == 0
-        then initNotPtr argNum typ
-        else makePtr argNum
-
-initNotPtr :: Int -> String -> String
-initNotPtr i typ =
-  "var dataHeap" ++ show i ++ " = initData(new " ++ typeConversion typ ++ "(1));"
-
-makePtr :: Int -> String
-makePtr i = "    var res" ++ show i ++ " = Module._malloc(8);"
-
-retType :: String -> (Integer, String)
-retType ('[' : ']' : end) =
-  let (val, typ) = retType end
-   in (val + 1, typ)
-retType typ = (0, typeConversion typ)
-
 baseType :: String -> String
 baseType ('[' : ']' : end) = baseType end
 baseType typ = typ
@@ -358,9 +316,6 @@ baseType typ = typ
 dim :: String -> Int
 dim ('[' : ']' : end) = dim end + 1
 dim _ = 0
-
-jsType :: String -> String
-jsType = snd . retType
 
 typeConversion :: String -> String
 typeConversion typ =
@@ -376,73 +331,59 @@ typeConversion typ =
     "f32" -> "Float32Array"
     "f64" -> "Float64Array"
     "bool" -> "Int8Array"
+    "opaq" -> "Int32Array"
     _ -> typ
+
+typeSize :: String -> Integer
+typeSize typ =
+  case typ of
+    "i8" -> 1
+    "i16" -> 2
+    "i32" -> 4
+    "i64" -> 8
+    "u8" -> 1
+    "u16" -> 2
+    "u32" -> 4
+    "u64" -> 8
+    "f32" -> 4
+    "f64" -> 8
+    "bool" -> 1
+    _ -> 4
 
 toFutharkArray :: String -> String
 toFutharkArray str =
   if dim str == 0
-    then ""
-    else
-      unlines
-        [ "to_futhark_" ++ ftype ++ "_" ++ show i ++ "d_arr(" ++ intercalate ", " args1 ++ ") {",
-          -- "  // Possibly do sanity check that dimensions dim0 * dimn == arr.length",
-          "  var dataHeap = initData(arr);",
-          "  var fut_arr = futhark_new_" ++ ftype ++ "_" ++ show i ++ "d(" ++ intercalate ", " args2 ++ ");",
-          "  return fut_arr;",
-          "}"
-        ]
+  then ""
+  else unlines [
+    new ++ "(typedArray, " ++ dims ++ ") {",
+    -- "  // Possibly do sanity check that dimensions dim0 * dimn == arr.length",
+    "  var copy = copyToHeap(typedArray);",
+    "  var ptr = " ++ fnew ++ "(this.ctx, copy, " ++ bigint_dims ++ ");",
+    "  Module._free(copy);",
+    "  return this." ++ new ++ "_from_ptr(ptr);",
+    "}",
+    new ++ "_from_jsarray(a) {",
+    "  return this." ++ new ++ "(" ++ atype ++ ".from(a.flat()), " ++ a_dims ++ ");",
+    "}",
+    new ++ "_from_ptr(ptr) {",
+    "  return new FutharkArray(this.ctx, ptr, "
+      ++ intercalate ", " ["'" ++ ftype ++ "'", show d, atype, fshape, fvalues, ffree] ++ ");",
+    "}"
+  ]
   where
-    ctx = "this.ctx"
-    arr = "arr"
-    ofs = "dataHeap.byteOffset"
-    i = dim str
-    dims = map (\j -> "dim" ++ show j) [0 .. i -1]
-    --cast = map (\d -> "Number(" ++ d ++ ")") dims
-    args1 = arr : dims
-    args2 = [ctx, ofs] ++ dims
+    d = dim str
     ftype = baseType str
-
-fromFutharkArrayShape :: String -> String
-fromFutharkArrayShape str =
-  if dim str == 0
-    then ""
-    else
-      unlines
-        [ "function from_futhark_shape_" ++ ftype ++ "_" ++ show i ++ "d_arr(ctx, fut_arr_ptr) {",
-          "  var ptr = futhark_shape_" ++ ftype ++ "_" ++ show i ++ "d(" ++ intercalate ", " args1 ++ ");",
-          "  var dataHeap = new Uint8Array(Module.HEAPU8.buffer, ptr, 8 * " ++ show i ++ ");",
-          " var result = new BigUint64Array(dataHeap.buffer, dataHeap.byteOffset, " ++ show i ++ ");",
-          " return result;",
-          "}"
-        ]
-  where
-    ctx = "ctx"
-    arr = "fut_arr_ptr"
-    args1 = [ctx, arr]
-    i = dim str
-    ftype = baseType str
-
-fromFutharkArrayValues :: String -> String
-fromFutharkArrayValues str =
-  if dim str == 0
-    then ""
-    else
-      unlines
-        [ "function from_futhark_values_" ++ ftype ++ "_" ++ show i ++ "d_arr(ctx, dims, fut_arr_ptr) {",
-          "  var length = Number(dims.reduce((a, b) => a * b));",
-          "  var dataHeap = initData(new " ++ arrType ++ "(length));",
-          "  var res = futhark_values_raw_" ++ ftype ++ "_" ++ show i ++ "d(" ++ intercalate ", " args2 ++ ");",
-          dataHeapConv "length" arrType,
-          "  return dataHeapRes;",
-          "}"
-        ]
-  where
-    ctx = "ctx"
-    fut_arr = "fut_arr_ptr"
-    args2 = [ctx, fut_arr]
-    i = dim str
-    ftype = baseType str
-    arrType = jsType str
+    atype = typeConversion ftype
+    signature = ftype ++ "_" ++ show d ++ "d"
+    new = "new_" ++ signature
+    fnew = "futhark_new_" ++ signature
+    fshape = "futhark_shape_" ++ signature
+    fvalues = "futhark_values_raw_" ++ signature
+    ffree = "futhark_free_" ++ signature
+    dims = intercalate ", " [ "d" ++ show i | i <- [0..d-1] ]
+    bigint_dims = intercalate ", " [ "BigInt(d" ++ show i ++ ")" | i <- [0..d-1] ]
+    a_dims = intercalate ", " [ "a" ++ mult i "[0]" ++ ".length" | i <- [0..d-1] ]
+    mult i s = concat $ replicate i s
 
 runServer :: String
 runServer =
