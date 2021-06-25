@@ -52,6 +52,7 @@ module Futhark.CodeGen.ImpCode
     withElemType,
 
     -- * Re-exports from other modules.
+    pretty,
     module Language.Futhark.Core,
     module Futhark.IR.Primitive,
     module Futhark.Analysis.PrimExp,

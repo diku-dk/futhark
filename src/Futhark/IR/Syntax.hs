@@ -100,6 +100,7 @@
 -- for what is likely the simplest example.
 module Futhark.IR.Syntax
   ( module Language.Futhark.Core,
+    pretty,
     module Futhark.IR.Rep,
     module Futhark.IR.Syntax.Core,
 
@@ -173,6 +174,7 @@ import Data.String
 import Data.Traversable (fmapDefault, foldMapDefault)
 import Futhark.IR.Rep
 import Futhark.IR.Syntax.Core
+import Futhark.Util.Pretty (pretty)
 import Language.Futhark.Core
 import Prelude hiding (id, (.))
 

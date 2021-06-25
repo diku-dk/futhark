@@ -12,6 +12,7 @@
 -- module may be a little hard to understand.
 module Language.Futhark.Syntax
   ( module Language.Futhark.Core,
+    pretty,
 
     -- * Types
     Uniqueness (..),

@@ -59,6 +59,7 @@ import Futhark.IR.Prop (isBuiltInFunction, subExpVars)
 import Futhark.IR.Syntax (Space (..))
 import Futhark.MonadFreshNames
 import Futhark.Util (zEncodeString)
+import Futhark.Util.Pretty (pretty)
 
 -- | A substitute expression compiler, tried before the main
 -- compilation function.

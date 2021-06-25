@@ -7,7 +7,6 @@
 -- representation.
 module Language.Futhark.Core
   ( Uniqueness (..),
-    Commutativity (..),
 
     -- * Location utilities
     SrcLoc,
@@ -28,7 +27,6 @@ module Language.Futhark.Core
     baseTag,
     baseName,
     baseString,
-    pretty,
     quote,
     pquote,
 
@@ -75,19 +73,6 @@ instance Monoid Uniqueness where
 instance Pretty Uniqueness where
   ppr Unique = star
   ppr Nonunique = empty
-
--- | Whether some operator is commutative or not.  The 'Monoid'
--- instance returns the least commutative of its arguments.
-data Commutativity
-  = Noncommutative
-  | Commutative
-  deriving (Eq, Ord, Show)
-
-instance Semigroup Commutativity where
-  (<>) = min
-
-instance Monoid Commutativity where
-  mempty = Commutative
 
 -- | The name of the default program entry point (main).
 defaultEntryPoint :: Name
