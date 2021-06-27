@@ -140,7 +140,7 @@ runEMCC cpath outpath cflags_def ldflags expfuns exe = do
         "emcc"
         ( [cpath, "-o", outpath]
             ++ ["-lnodefs.js"] -- "-s", "INITIAL_MEMORY=201326592"] -- ,"-s", "ALLOW_MEMORY_GROWTH=1"]
-            ++ (if exe then [] else ["-s", "--post-js", "futharkClass.js"])
+            ++ (if exe then [] else ["-s", "--post-js", "futharkClass.js", "-s", "EXPORT_NAME=createFutharkModule", "-s", "MODULARIZE"])
             ++ ["-s", "WASM_BIGINT"]
             ++ cmdCFLAGS cflags_def
             ++ cmdEMCFLAGS [""]
@@ -149,7 +149,6 @@ runEMCC cpath outpath cflags_def ldflags expfuns exe = do
                    ++ intercalate "," ("'_malloc'" : "'_free'" : expfuns)
                    ++ if exe then ",_main]" else "]"
                ]
-            ++ ["-s", "EXTRA_EXPORTED_RUNTIME_METHODS=['cwrap', 'getValue']"]
             -- The default LDFLAGS are always added.
             ++ ldflags
         )
