@@ -64,10 +64,9 @@ prepareRedOrScan w map_lam arrs ispace inps = do
     runBinder $
       localScope (scopeOfSegSpace space) $ do
         mapM_ readKernelInput inps
-        forM_ (zip (lambdaParams map_lam) arrs) $ \(p, arr) -> do
-          arr_t <- lookupType arr
-          letBindNames [paramName p] $
-            BasicOp $ Index arr $ fullSlice arr_t [DimFix $ Var gtid]
+        mapM_ readKernelInput $ do
+          (p, arr) <- zip (lambdaParams map_lam) arrs
+          pure $ KernelInput (paramName p) (paramType p) arr [Var gtid]
         map (Returns ResultMaySimplify) <$> bodyBind (lambdaBody map_lam)
 
   return (space, kbody)
