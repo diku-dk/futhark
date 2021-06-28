@@ -21,8 +21,10 @@ if [ "$TESTPARSER_WORKER" ]; then
         shift; shift
         out=$dir/${f}_${suffix}
         mkdir -p $(dirname $out)
-        futhark dev -w "$@" $f > $out
-        futhark dev $out >/dev/null
+        if ! ( futhark dev -w "$@" $f > $out && futhark dev $out >/dev/null); then
+            echo "^- $f"
+            exit 1
+        fi
     }
     for f in "$@"; do
         if futhark check $f 2>/dev/null; then
