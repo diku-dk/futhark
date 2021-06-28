@@ -68,7 +68,7 @@ toParam :: VName -> TypeBase shape u -> MulticoreGen [Imp.Param]
 toParam name (Prim pt) = return [Imp.ScalarParam name pt]
 toParam name (Mem space) = return [Imp.MemParam name space]
 toParam name Array {} = pure <$> arrParam name
-toParam name Acc {} = error $ "toParam Acc: " ++ pretty name
+toParam _name Acc {} = pure [] -- FIXME?  Are we sure this works?
 
 getSpace :: SegOp () MCMem -> SegSpace
 getSpace (SegHist _ space _ _ _) = space
