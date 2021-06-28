@@ -165,8 +165,8 @@ import Control.Monad.RWS.Strict
 import Control.Monad.Reader
 import Data.Bifunctor (first)
 import Data.Maybe
-import qualified Futhark.IR.Kernels as Out
-import Futhark.IR.Kernels.Kernel
+import qualified Futhark.IR.GPU as Out
+import Futhark.IR.GPU.Kernel
 import Futhark.IR.SOACS
 import Futhark.IR.SOACS.Simplify (simplifyStms)
 import Futhark.MonadFreshNames
@@ -177,7 +177,7 @@ import Futhark.Pass.ExtractKernels.Distribution
 import Futhark.Pass.ExtractKernels.ISRWIM
 import Futhark.Pass.ExtractKernels.Intragroup
 import Futhark.Pass.ExtractKernels.StreamKernel
-import Futhark.Pass.ExtractKernels.ToKernels
+import Futhark.Pass.ExtractKernels.ToGPU
 import Futhark.Tools
 import qualified Futhark.Transform.FirstOrderTransform as FOT
 import Futhark.Transform.Rename
@@ -187,7 +187,7 @@ import Prelude hiding (log)
 
 -- | Transform a program using SOACs to a program using explicit
 -- kernels, using the kernel extraction transformation.
-extractKernels :: Pass SOACS Out.Kernels
+extractKernels :: Pass SOACS Out.GPU
 extractKernels =
   Pass
     { passName = "extract kernels",
@@ -195,7 +195,7 @@ extractKernels =
       passFunction = transformProg
     }
 
-transformProg :: Prog SOACS -> PassM (Prog Out.Kernels)
+transformProg :: Prog SOACS -> PassM (Prog Out.GPU)
 transformProg (Prog consts funs) = do
   consts' <- runDistribM $ transformStms mempty $ stmsToList consts
   funs' <- mapM (transformFunDef $ scopeOf consts') funs
@@ -209,13 +209,13 @@ data State = State
     stateThresholdCounter :: Int
   }
 
-newtype DistribM a = DistribM (RWS (Scope Out.Kernels) Log State a)
+newtype DistribM a = DistribM (RWS (Scope Out.GPU) Log State a)
   deriving
     ( Functor,
       Applicative,
       Monad,
-      HasScope Out.Kernels,
-      LocalScope Out.Kernels,
+      HasScope Out.GPU,
+      LocalScope Out.GPU,
       MonadState State,
       MonadLogger
     )
@@ -237,23 +237,23 @@ runDistribM (DistribM m) = do
 
 transformFunDef ::
   (MonadFreshNames m, MonadLogger m) =>
-  Scope Out.Kernels ->
+  Scope Out.GPU ->
   FunDef SOACS ->
-  m (Out.FunDef Out.Kernels)
+  m (Out.FunDef Out.GPU)
 transformFunDef scope (FunDef entry attrs name rettype params body) = runDistribM $ do
   body' <-
     localScope (scope <> scopeOfFParams params) $
       transformBody mempty body
   return $ FunDef entry attrs name rettype params body'
 
-type KernelsStms = Stms Out.Kernels
+type GPUStms = Stms Out.GPU
 
-transformBody :: KernelPath -> Body -> DistribM (Out.Body Out.Kernels)
+transformBody :: KernelPath -> Body -> DistribM (Out.Body Out.GPU)
 transformBody path body = do
   bnds <- transformStms path $ stmsToList $ bodyStms body
   return $ mkBody bnds $ bodyResult body
 
-transformStms :: KernelPath -> [Stm] -> DistribM KernelsStms
+transformStms :: KernelPath -> [Stm] -> DistribM GPUStms
 transformStms _ [] =
   return mempty
 transformStms path (bnd : bnds) =
@@ -309,7 +309,7 @@ cmpSizeLe ::
   String ->
   Out.SizeClass ->
   [SubExp] ->
-  DistribM ((SubExp, Name), Out.Stms Out.Kernels)
+  DistribM ((SubExp, Name), Out.Stms Out.GPU)
 cmpSizeLe desc size_class to_what = do
   x <- gets stateThresholdCounter
   modify $ \s -> s {stateThresholdCounter = x + 1}
@@ -322,11 +322,11 @@ cmpSizeLe desc size_class to_what = do
     return (cmp_res, size_key)
 
 kernelAlternatives ::
-  (MonadFreshNames m, HasScope Out.Kernels m) =>
-  Out.Pattern Out.Kernels ->
-  Out.Body Out.Kernels ->
-  [(SubExp, Out.Body Out.Kernels)] ->
-  m (Out.Stms Out.Kernels)
+  (MonadFreshNames m, HasScope Out.GPU m) =>
+  Out.Pattern Out.GPU ->
+  Out.Body Out.GPU ->
+  [(SubExp, Out.Body Out.GPU)] ->
+  m (Out.Stms Out.GPU)
 kernelAlternatives pat default_body [] = runBinder_ $ do
   ses <- bodyBind default_body
   forM_ (zip (patternNames pat) ses) $ \(name, se) ->
@@ -344,13 +344,13 @@ kernelAlternatives pat default_body ((cond, alt) : alts) = runBinder_ $ do
     If cond alt alt_body $
       IfDec (staticShapes (patternTypes pat)) IfEquiv
 
-transformLambda :: KernelPath -> Lambda -> DistribM (Out.Lambda Out.Kernels)
+transformLambda :: KernelPath -> Lambda -> DistribM (Out.Lambda Out.GPU)
 transformLambda path (Lambda params body ret) =
   Lambda params
     <$> localScope (scopeOfLParams params) (transformBody path body)
     <*> pure ret
 
-transformStm :: KernelPath -> Stm -> DistribM KernelsStms
+transformStm :: KernelPath -> Stm -> DistribM GPUStms
 transformStm _ stm
   | "sequential" `inAttrs` stmAuxAttrs (stmAux stm) =
     runBinder_ $ FOT.transformStmRecursively stm
@@ -367,7 +367,7 @@ transformStm path (Let pat aux (WithAcc inputs lam)) =
     <$> (WithAcc (map transformInput inputs) <$> transformLambda path lam)
   where
     transformInput (shape, arrs, op) =
-      (shape, arrs, fmap (first soacsLambdaToKernels) op)
+      (shape, arrs, fmap (first soacsLambdaToGPU) op)
 transformStm path (Let pat aux (DoLoop ctx val form body)) =
   localScope
     ( castScope (scopeOf form)
@@ -393,9 +393,9 @@ transformStm path (Let res_pat (StmAux cs _ _) (Op (Screma w arrs form)))
   | Just (scans, map_lam) <- isScanomapSOAC form = runBinder_ $ do
     scan_ops <- forM scans $ \(Scan scan_lam nes) -> do
       (scan_lam', nes', shape) <- determineReduceOp scan_lam nes
-      let scan_lam'' = soacsLambdaToKernels scan_lam'
+      let scan_lam'' = soacsLambdaToGPU scan_lam'
       return $ SegBinOp Noncommutative scan_lam'' nes' shape
-    let map_lam_sequential = soacsLambdaToKernels map_lam
+    let map_lam_sequential = soacsLambdaToGPU map_lam
     lvl <- segThreadCapped [w] "segscan" $ NoRecommendation SegNoVirt
     addStms . fmap (certify cs)
       =<< segScan lvl res_pat w scan_ops map_lam_sequential arrs [] []
@@ -416,9 +416,9 @@ transformStm path (Let pat aux@(StmAux cs _ _) (Op (Screma w arrs form)))
             let comm'
                   | commutativeLambda red_lam' = Commutative
                   | otherwise = comm
-                red_lam'' = soacsLambdaToKernels red_lam'
+                red_lam'' = soacsLambdaToGPU red_lam'
             return $ SegBinOp comm' red_lam'' nes' shape
-          let map_lam_sequential = soacsLambdaToKernels map_lam
+          let map_lam_sequential = soacsLambdaToGPU map_lam
           lvl <- segThreadCapped [w] "segred" $ NoRecommendation SegNoVirt
           addStms . fmap (certify cs)
             =<< nonSegRed lvl pat w red_ops map_lam_sequential arrs
@@ -483,7 +483,7 @@ transformStm path (Let pat aux@(StmAux cs _ _) (Op (Stream w arrs (Parallel o co
       | not $ all primType $ lambdaReturnType red_fun = do
         -- Split into a chunked map and a reduction, with the latter
         -- further transformed.
-        let fold_fun' = soacsLambdaToKernels fold_fun
+        let fold_fun' = soacsLambdaToGPU fold_fun
 
         let (red_pat_elems, concat_pat_elems) =
               splitAt (length nes) $ patternValueElements pat
@@ -510,8 +510,8 @@ transformStm path (Let pat aux@(StmAux cs _ _) (Op (Stream w arrs (Parallel o co
                   Op (Screma num_threads red_results reduce_soac)
             )
       | otherwise = do
-        let red_fun_sequential = soacsLambdaToKernels red_fun
-            fold_fun_sequential = soacsLambdaToKernels fold_fun
+        let red_fun_sequential = soacsLambdaToGPU red_fun
+            fold_fun_sequential = soacsLambdaToGPU fold_fun
         fmap (certify cs)
           <$> streamRed
             segThreadCapped
@@ -552,7 +552,7 @@ transformStm path (Let pat _ (Op (Stream w arrs Sequential nes fold_fun))) = do
   transformStms path . stmsToList . snd
     =<< runBinderT (sequentialStreamWholeArray pat w nes fold_fun arrs) types
 transformStm _ (Let pat (StmAux cs _ _) (Op (Scatter w lam ivs as))) = runBinder_ $ do
-  let lam' = soacsLambdaToKernels lam
+  let lam' = soacsLambdaToGPU lam
   write_i <- newVName "write_i"
   let (as_ws, _, _) = unzip3 as
       kstms = bodyStms $ lambdaBody lam'
@@ -575,7 +575,7 @@ transformStm _ (Let pat (StmAux cs _ _) (Op (Scatter w lam ivs as))) = runBinder
     addStms stms
     letBind pat $ Op $ SegOp kernel
 transformStm _ (Let orig_pat (StmAux cs _ _) (Op (Hist w ops bucket_fun imgs))) = do
-  let bfun' = soacsLambdaToKernels bucket_fun
+  let bfun' = soacsLambdaToGPU bucket_fun
 
   -- It is important not to launch unnecessarily many threads for
   -- histograms, because it may mean we unnecessarily need to reduce
@@ -584,7 +584,7 @@ transformStm _ (Let orig_pat (StmAux cs _ _) (Op (Hist w ops bucket_fun imgs))) 
     lvl <- segThreadCapped [w] "seghist" $ NoRecommendation SegNoVirt
     addStms =<< histKernel onLambda lvl orig_pat [] [] cs w ops bfun' imgs
   where
-    onLambda = pure . soacsLambdaToKernels
+    onLambda = pure . soacsLambdaToGPU
 --
 transformStm _ (Let pat (StmAux cs _ _) (Op (Stencil ws _p (StencilStatic stencil_is) lam inv_arrs arrs))) =
   runBinder_ . certifying cs $ do
@@ -595,7 +595,7 @@ transformStm _ (Let pat (StmAux cs _ _) (Op (Stencil ws _p (StencilStatic stenci
 
     ((lam_params, lam_body_res), lam_body_stms) <- runBinder $ do
       let (inv_params, stencil_params) = splitAt (length inv_arrs) $ lambdaParams lam
-          body = lambdaBody $ soacsLambdaToKernels lam
+          body = lambdaBody $ soacsLambdaToGPU lam
           p = maybe 0 length $ maybeHead stencil_is
 
       stencil_params' <- fmap concat $
@@ -646,7 +646,7 @@ sufficientParallelism ::
   [SubExp] ->
   KernelPath ->
   Maybe Int64 ->
-  DistribM ((SubExp, Name), Out.Stms Out.Kernels)
+  DistribM ((SubExp, Name), Out.Stms Out.GPU)
 sufficientParallelism desc ws path def =
   cmpSizeLe desc (Out.SizeThreshold path def) ws
 
@@ -708,6 +708,8 @@ worthSequentialising lam = bodyInterest (lambdaBody lam) > 1
         0 -- Basically a map.
       | DoLoop _ _ ForLoop {} body <- stmExp stm =
         bodyInterest body * 10
+      | WithAcc _ withacc_lam <- stmExp stm =
+        bodyInterest (lambdaBody withacc_lam)
       | Op (Screma _ _ form@(ScremaForm _ _ lam')) <- stmExp stm =
         1 + bodyInterest (lambdaBody lam')
           +
@@ -726,11 +728,11 @@ worthSequentialising lam = bodyInterest (lambdaBody lam) > 1
 onTopLevelStms ::
   KernelPath ->
   Stms SOACS ->
-  DistNestT Out.Kernels DistribM KernelsStms
+  DistNestT Out.GPU DistribM GPUStms
 onTopLevelStms path stms =
   liftInner $ transformStms path $ stmsToList stms
 
-onMap :: KernelPath -> MapLoop -> DistribM KernelsStms
+onMap :: KernelPath -> MapLoop -> DistribM GPUStms
 onMap path (MapLoop pat aux w lam arrs) = do
   types <- askScope
   let loopnest = MapNesting pat aux w $ zip (lambdaParams lam) arrs
@@ -739,20 +741,20 @@ onMap path (MapLoop pat aux w lam arrs) = do
           { distNest = singleNesting (Nesting mempty loopnest),
             distScope =
               scopeOfPattern pat
-                <> scopeForKernels (scopeOf lam)
+                <> scopeForGPU (scopeOf lam)
                 <> types,
             distOnInnerMap = onInnerMap path',
             distOnTopLevelStms = onTopLevelStms path',
             distSegLevel = segThreadCapped,
-            distOnSOACSStms = pure . oneStm . soacsStmToKernels,
-            distOnSOACSLambda = pure . soacsLambdaToKernels
+            distOnSOACSStms = pure . oneStm . soacsStmToGPU,
+            distOnSOACSLambda = pure . soacsLambdaToGPU
           }
       exploitInnerParallelism path' =
         runDistNestT (env path') $
           distributeMapBodyStms acc (bodyStms $ lambdaBody lam)
 
   let exploitOuterParallelism path' = do
-        let lam' = soacsLambdaToKernels lam
+        let lam' = soacsLambdaToGPU lam
         runDistNestT (env path') $
           distribute $
             addStmsToAcc (bodyStms $ lambdaBody lam') acc
@@ -790,11 +792,11 @@ intraMinInnerPar = 32 -- One NVIDIA warp
 onMap' ::
   KernelNest ->
   KernelPath ->
-  (KernelPath -> DistribM (Out.Stms Out.Kernels)) ->
-  (KernelPath -> DistribM (Out.Stms Out.Kernels)) ->
+  (KernelPath -> DistribM (Out.Stms Out.GPU)) ->
+  (KernelPath -> DistribM (Out.Stms Out.GPU)) ->
   Pattern ->
   Lambda ->
-  DistribM (Out.Stms Out.Kernels)
+  DistribM (Out.Stms Out.GPU)
 onMap' loopnest path mk_seq_stms mk_par_stms pat lam = do
   -- Some of the control flow here looks a bit convoluted because we
   -- are trying to avoid generating unneeded threshold parameters,
@@ -919,8 +921,8 @@ onMap' loopnest path mk_seq_stms mk_par_stms pat lam = do
 onInnerMap ::
   KernelPath ->
   MapLoop ->
-  DistAcc Out.Kernels ->
-  DistNestT Out.Kernels DistribM (DistAcc Out.Kernels)
+  DistAcc Out.GPU ->
+  DistNestT Out.GPU DistribM (DistAcc Out.GPU)
 onInnerMap path maploop@(MapLoop pat aux w lam arrs) acc
   | unbalancedLambda lam,
     lambdaContainsParallelism lam =
@@ -974,7 +976,7 @@ onInnerMap path maploop@(MapLoop pat aux w lam arrs) acc
           -- versioning does not take place down that branch (it currently
           -- does not).
           (sequentialised_kernel, nestw_bnds) <- localScope extra_scope $ do
-            let sequentialised_lam = soacsLambdaToKernels lam'
+            let sequentialised_lam = soacsLambdaToGPU lam'
             constructKernel segThreadCapped nest' $ lambdaBody sequentialised_lam
 
           let outer_pat = loopNestingPattern $ fst nest

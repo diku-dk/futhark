@@ -13,12 +13,10 @@ module Futhark.IR.SeqMem
 
     -- * Module re-exports
     module Futhark.IR.Mem,
-    module Futhark.IR.Kernels.Kernel,
   )
 where
 
 import Futhark.Analysis.PrimExp.Convert
-import Futhark.IR.Kernels.Kernel
 import Futhark.IR.Mem
 import Futhark.IR.Mem.Simplify
 import qualified Futhark.Optimise.Simplify.Engine as Engine
@@ -28,7 +26,7 @@ import qualified Futhark.TypeCheck as TC
 
 data SeqMem
 
-instance Decorations SeqMem where
+instance RepTypes SeqMem where
   type LetDec SeqMem = LetDecMem
   type FParamInfo SeqMem = FParamMem
   type LParamInfo SeqMem = LParamMem
@@ -36,14 +34,14 @@ instance Decorations SeqMem where
   type BranchType SeqMem = BranchTypeMem
   type Op SeqMem = MemOp ()
 
-instance ASTLore SeqMem where
+instance ASTRep SeqMem where
   expTypesFromPattern = return . map snd . snd . bodyReturnsFromPattern
 
 instance OpReturns SeqMem where
   opReturns (Alloc _ space) = return [MemMem space]
   opReturns (Inner ()) = pure []
 
-instance PrettyLore SeqMem
+instance PrettyRep SeqMem
 
 instance TC.CheckableOp SeqMem where
   checkOp (Alloc size _) =
@@ -52,9 +50,9 @@ instance TC.CheckableOp SeqMem where
     pure ()
 
 instance TC.Checkable SeqMem where
-  checkFParamLore = checkMemInfo
-  checkLParamLore = checkMemInfo
-  checkLetBoundLore = checkMemInfo
+  checkFParamDec = checkMemInfo
+  checkLParamDec = checkMemInfo
+  checkLetBoundDec = checkMemInfo
   checkRetType = mapM_ (TC.checkExtType . declExtTypeOf)
   primFParam name t = return $ Param name (MemPrim t)
   matchPattern = matchPatternToExp

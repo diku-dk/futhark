@@ -34,8 +34,6 @@ module Futhark.Script
 where
 
 import Control.Monad.Except
-import qualified Data.Binary as Bin
-import qualified Data.ByteString.Lazy.Char8 as LBS
 import Data.Char
 import Data.Foldable (toList)
 import Data.Functor
@@ -46,13 +44,12 @@ import qualified Data.Set as S
 import qualified Data.Text as T
 import Data.Traversable
 import Data.Void
+import qualified Futhark.Data.Parser as V
 import Futhark.Server
+import Futhark.Server.Values (getValue, putValue)
 import qualified Futhark.Test.Values as V
-import qualified Futhark.Test.Values.Parser as V
 import Futhark.Util (nubOrd)
 import Futhark.Util.Pretty hiding (float, line, sep, string, (</>), (<|>))
-import System.IO
-import System.IO.Temp
 import Text.Megaparsec
 import Text.Megaparsec.Char.Lexer (charLiteral)
 
@@ -69,9 +66,9 @@ withScriptServer' server f = do
 
 -- | Start a server, execute an action, then shut down the server.
 -- Similar to 'withServer'.
-withScriptServer :: FilePath -> [FilePath] -> (ScriptServer -> IO a) -> IO a
-withScriptServer prog options f =
-  withServer prog options $ flip withScriptServer' f
+withScriptServer :: ServerCfg -> (ScriptServer -> IO a) -> IO a
+withScriptServer cfg f =
+  withServer cfg $ flip withScriptServer' f
 
 -- | A function called in a 'Call' expression can be either a Futhark
 -- function or a builtin function.
@@ -101,7 +98,7 @@ instance Pretty Func where
 instance Pretty Exp where
   ppr = pprPrec 0
   pprPrec _ (ServerVar _ v) = "$" <> ppr v
-  pprPrec _ (Const v) = ppr v
+  pprPrec _ (Const v) = strictText $ V.valueText v
   pprPrec i (Let pat e1 e2) =
     parensIf (i > 0) $ "let" <+> pat' <+> equals <+> ppr e1 <+> "in" <+> ppr e2
     where
@@ -137,11 +134,8 @@ parseExp sep =
         <*> pPattern <* lexeme sep "="
         <*> parseExp sep <* lexeme sep "in"
         <*> parseExp sep,
-      inParens sep (mkTuple <$> (parseExp sep `sepBy` pComma)),
-      inBraces sep (Record <$> (pField `sepBy` pComma)),
-      Call <$> parseFunc <*> many (parseExp sep),
-      Const <$> V.parseValue sep,
-      StringLit . T.pack <$> lexeme sep ("\"" *> manyTill charLiteral "\"")
+      try $ Call <$> parseFunc <*> many pAtom,
+      pAtom
     ]
     <?> "expression"
   where
@@ -150,6 +144,16 @@ parseExp sep =
     pComma = lexeme sep ","
     mkTuple [v] = v
     mkTuple vs = Tuple vs
+
+    pAtom =
+      choice
+        [ try $ inParens sep (mkTuple <$> (parseExp sep `sepBy` pComma)),
+          inParens sep $ parseExp sep,
+          inBraces sep (Record <$> (pField `sepBy` pComma)),
+          Const <$> V.parseValue sep,
+          StringLit . T.pack <$> lexeme sep ("\"" *> manyTill charLiteral "\""),
+          Call <$> parseFunc <*> pure []
+        ]
 
     pPattern =
       choice
@@ -172,35 +176,13 @@ parseExp sep =
       where
         constituent c = isAlphaNum c || c == '_'
 
-prettyFailure :: CmdFailure -> T.Text
-prettyFailure (CmdFailure bef aft) =
-  T.unlines $ bef ++ aft
-
 readVar :: (MonadError T.Text m, MonadIO m) => Server -> VarName -> m V.Value
 readVar server v =
-  either throwError pure <=< liftIO $
-    withSystemTempFile "futhark-server-read" $ \tmpf tmpf_h -> do
-      hClose tmpf_h
-      store_res <- cmdStore server tmpf [v]
-      case store_res of
-        Just err -> pure $ Left $ prettyFailure err
-        Nothing -> do
-          s <- LBS.readFile tmpf
-          case V.readValues s of
-            Just [val] -> pure $ Right val
-            Just [] -> pure $ Left "Cannot read opaque value from Futhark server."
-            _ -> pure $ Left "Invalid data file produced by Futhark server."
+  either throwError pure =<< liftIO (getValue server v)
 
 writeVar :: (MonadError T.Text m, MonadIO m) => Server -> VarName -> V.Value -> m ()
 writeVar server v val =
-  cmdMaybe . liftIO . withSystemTempFile "futhark-server-write" $ \tmpf tmpf_h -> do
-    LBS.hPutStr tmpf_h $ Bin.encode val
-    hClose tmpf_h
-    -- We are not using prettyprinting for the type, because we don't
-    -- want the sizes of the dimensions.
-    let V.ValueType dims t = V.valueType val
-        t' = mconcat (map (const "[]") dims) <> prettyText t
-    cmdRestore server tmpf [(v, t')]
+  cmdMaybe $ liftIO (putValue server v val)
 
 -- | A ScriptValue is either a base value or a partially applied
 -- function.  We don't have real first-class functions in
@@ -327,7 +309,7 @@ evalExp builtin (ScriptServer server counter) top_level_e = do
 
       valToInterVal :: V.CompoundValue -> ExpValue
       valToInterVal = fmap $ \v ->
-        SValue (V.prettyValueTypeNoDims (V.valueType v)) $ VVal v
+        SValue (V.valueTypeTextNoDims (V.valueType v)) $ VVal v
 
       simpleType (V.ValueAtom (STValue _)) = True
       simpleType _ = False
@@ -382,17 +364,17 @@ evalExp builtin (ScriptServer server counter) top_level_e = do
           then do
             outs <- replicateM (length out_types) $ newVar "out"
             void $ cmdEither $ cmdCall server name outs ins
-            pure $ V.mkCompound $ zipWith SValue out_types $ map VVar outs
+            pure $ V.mkCompound $ map V.ValueAtom $ zipWith SValue out_types $ map VVar outs
           else
             pure . V.ValueAtom . SFun name in_types out_types $
               zipWith SValue in_types $ map VVar ins
       evalExp' _ (StringLit s) =
         case V.putValue s of
           Just s' ->
-            pure $ V.ValueAtom $ SValue (prettyText (V.valueType s')) $ VVal s'
+            pure $ V.ValueAtom $ SValue (V.valueTypeText (V.valueType s')) $ VVal s'
           Nothing -> error $ "Unable to write value " ++ pretty s
       evalExp' _ (Const val) =
-        pure $ V.ValueAtom $ SValue (V.prettyValueTypeNoDims (V.valueType val)) $ VVal val
+        pure $ V.ValueAtom $ SValue (V.valueTypeTextNoDims (V.valueType val)) $ VVal val
       evalExp' vtable (Tuple es) =
         V.ValueTuple <$> mapM (evalExp' vtable) es
       evalExp' vtable e@(Record m) = do

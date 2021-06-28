@@ -52,10 +52,11 @@ module Futhark.CodeGen.ImpCode
     withElemType,
 
     -- * Re-exports from other modules.
+    pretty,
     module Language.Futhark.Core,
     module Futhark.IR.Primitive,
     module Futhark.Analysis.PrimExp,
-    module Futhark.IR.Kernels.Sizes,
+    module Futhark.IR.GPU.Sizes,
     module Futhark.IR.Prop.Names,
   )
 where
@@ -65,7 +66,7 @@ import qualified Data.Map as M
 import qualified Data.Set as S
 import Data.Traversable
 import Futhark.Analysis.PrimExp
-import Futhark.IR.Kernels.Sizes (Count (..))
+import Futhark.IR.GPU.Sizes (Count (..))
 import Futhark.IR.Pretty ()
 import Futhark.IR.Primitive
 import Futhark.IR.Prop.Names
@@ -102,9 +103,11 @@ data Definitions a = Definitions
   { defConsts :: Constants a,
     defFuns :: Functions a
   }
+  deriving (Show)
 
 -- | A collection of imperative functions.
 newtype Functions a = Functions [(Name, Function a)]
+  deriving (Show)
 
 instance Semigroup (Functions a) where
   Functions x <> Functions y = Functions $ x ++ y
@@ -120,6 +123,7 @@ data Constants a = Constants
     -- contain declarations of the names defined in 'constsDecl'.
     constsInit :: Code a
   }
+  deriving (Show)
 
 -- | Since the core language does not care for signedness, but the
 -- source language does, entry point input/output information has

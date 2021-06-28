@@ -9,6 +9,38 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+  * A new memory reuse optimisation has been added.  This results in
+    slightly lower footprint for many programs.
+
+  * The `cuda` backend now uses a fast single-pass implementation for
+    segmented `scan`s, due to Morten Tychsen Clausen (#1375).
+
+### Removed
+
+### Changed
+
+### Fixed
+
+  * `futhark test` now provides better error message when asked to
+    test an undefined entry point (#1367).
+
+  * `futhark pkg` now detects some nonsensical package paths (#1364).
+
+  * FutharkScript now parses `f x y` as applying `f` to `x` and `y`,
+    rather than as `f (x y)`.
+
+  * Some internal array utility functions would not be generated if
+    entry points exposed both unit arrays and boolean arrays (#1374).
+
+  * Nested reductions used (much) more memory for intermediate results
+    than strictly needed.
+
+  * Size propagation bug in defunctionalisation (#1384).
+
+## [0.19.6]
+
+### Added
+
   * `f32.hypot` and `f64.hypot` are now much more numerically exact in
     the interpreter.
 
@@ -24,9 +56,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
     produce test input, in particular expressions that produce opaque
     values.  This affects both testing, benchmarking, and autotuning.
 
-### Removed
-
-### Changed
+  * Compilation is about 10% faster, especially for large programs.
 
 ### Fixed
 
@@ -38,6 +68,18 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * FutharkScript now detects too many arguments passed to functions.
 
   * Sequentialisation bug (#1350).
+
+  * Missing causality check for index sections.
+
+  * `futhark test` now reports mismatches using proper indexes (#1356).
+
+  * Missing alias checking in fusion could lead to compiler crash (#1358).
+
+  * The absolute value of NaN is no longer infinity in the interpreter (#1359).
+
+  * Proper detection of zero strides in compiler (#1360).
+
+  * Invalid memory accesses related to internal bookkeeping of bounds checking.
 
 ## [0.19.5]
 

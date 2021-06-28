@@ -10,7 +10,7 @@
 module Futhark.Transform.FirstOrderTransform
   ( transformFunDef,
     transformConsts,
-    FirstOrderLore,
+    FirstOrderRep,
     Transformer,
     transformStmRecursively,
     transformLambda,
@@ -30,23 +30,23 @@ import Futhark.MonadFreshNames
 import Futhark.Tools
 import Futhark.Util (chunks, splitAt3)
 
--- | The constraints that must hold for a lore in order to be the
+-- | The constraints that must hold for a rep in order to be the
 -- target of first-order transformation.
-type FirstOrderLore lore =
-  ( Bindable lore,
-    BinderOps lore,
-    LetDec SOACS ~ LetDec lore,
-    LParamInfo SOACS ~ LParamInfo lore,
-    CanBeAliased (Op lore)
+type FirstOrderRep rep =
+  ( Bindable rep,
+    BinderOps rep,
+    LetDec SOACS ~ LetDec rep,
+    LParamInfo SOACS ~ LParamInfo rep,
+    CanBeAliased (Op rep)
   )
 
 -- | First-order-transform a single function, with the given scope
 -- provided by top-level constants.
 transformFunDef ::
-  (MonadFreshNames m, FirstOrderLore tolore) =>
-  Scope tolore ->
+  (MonadFreshNames m, FirstOrderRep torep) =>
+  Scope torep ->
   FunDef SOACS ->
-  m (AST.FunDef tolore)
+  m (AST.FunDef torep)
 transformFunDef consts_scope (FunDef entry attrs fname rettype params body) = do
   (body', _) <- modifyNameSource $ runState $ runBinderT m consts_scope
   return $ FunDef entry attrs fname rettype params body'
@@ -55,9 +55,9 @@ transformFunDef consts_scope (FunDef entry attrs fname rettype params body) = do
 
 -- | First-order-transform these top-level constants.
 transformConsts ::
-  (MonadFreshNames m, FirstOrderLore tolore) =>
+  (MonadFreshNames m, FirstOrderRep torep) =>
   Stms SOACS ->
-  m (AST.Stms tolore)
+  m (AST.Stms torep)
 transformConsts stms =
   fmap snd $ modifyNameSource $ runState $ runBinderT m mempty
   where
@@ -67,17 +67,17 @@ transformConsts stms =
 -- first-order transformation.
 type Transformer m =
   ( MonadBinder m,
-    LocalScope (Lore m) m,
-    Bindable (Lore m),
-    BinderOps (Lore m),
-    LParamInfo SOACS ~ LParamInfo (Lore m),
-    CanBeAliased (Op (Lore m))
+    LocalScope (Rep m) m,
+    Bindable (Rep m),
+    BinderOps (Rep m),
+    LParamInfo SOACS ~ LParamInfo (Rep m),
+    CanBeAliased (Op (Rep m))
   )
 
 transformBody ::
-  (Transformer m, LetDec (Lore m) ~ LetDec SOACS) =>
+  (Transformer m, LetDec (Rep m) ~ LetDec SOACS) =>
   Body ->
-  m (AST.Body (Lore m))
+  m (AST.Body (Rep m))
 transformBody (Body () stms res) = buildBody_ $ do
   mapM_ transformStmRecursively stms
   pure res
@@ -85,7 +85,7 @@ transformBody (Body () stms res) = buildBody_ $ do
 -- | First transform any nested t'Body' or t'Lambda' elements, then
 -- apply 'transformSOAC' if the expression is a SOAC.
 transformStmRecursively ::
-  (Transformer m, LetDec (Lore m) ~ LetDec SOACS) =>
+  (Transformer m, LetDec (Rep m) ~ LetDec SOACS) =>
   Stm ->
   m ()
 transformStmRecursively (Let pat aux (Op soac)) =
@@ -119,11 +119,11 @@ resultArray arrs ts = do
 
 -- | Transform a single 'SOAC' into a do-loop.  The body of the lambda
 -- is untouched, and may or may not contain further 'SOAC's depending
--- on the given lore.
+-- on the given rep.
 transformSOAC ::
   Transformer m =>
-  AST.Pattern (Lore m) ->
-  SOAC (Lore m) ->
+  AST.Pattern (Rep m) ->
+  SOAC (Rep m) ->
   m ()
 transformSOAC pat (Screma w arrs form@(ScremaForm scans reds map_lam)) = do
   -- See Note [Translation of Screma].
@@ -377,51 +377,62 @@ transformSOAC pat (Stencil inputShape neighboursLen iss lam invariants variants)
   let returns_tp = map (`arrayOfShape` variant_shp) returns_elem_tp
 
   map_arrs <- resultArray [] returns_tp
-  let (invariantParams, variantParams) = splitAt (length invariants)
-        $ map paramName (lambdaParams lam)
+  let (invariantParams, variantParams) =
+        splitAt (length invariants) $
+          map paramName (lambdaParams lam)
 
   let boundIx li max_index ix_off = do
         -- does not handle overflow.
-        relix <- letSubExp "index" $ BasicOp
-          $ BinOp (Add Int64 OverflowUndef) ix_off li
+        relix <-
+          letSubExp "index" $
+            BasicOp $
+              BinOp (Add Int64 OverflowUndef) ix_off li
         lower_bounded_index <-
-          letSubExp "lower_bounded_index" $ BasicOp
-            $ BinOp (SMax Int64) relix (intConst Int64 0)
-        letSubExp "upper_bounded_index" $ BasicOp
-          $ BinOp (SMin Int64) lower_bounded_index max_index
+          letSubExp "lower_bounded_index" $
+            BasicOp $
+              BinOp (SMax Int64) relix (intConst Int64 0)
+        letSubExp "upper_bounded_index" $
+          BasicOp $
+            BinOp (SMin Int64) lower_bounded_index max_index
   let load_elements ixs =
         forM (zip variants variants_tp) $ \(vname, tp) ->
-          letSubExp "input_element" $ BasicOp
-            $ Index vname $ fullSlice tp $ map DimFix ixs
+          letSubExp "input_element" $
+            BasicOp $
+              Index vname $ fullSlice tp $ map DimFix ixs
 
   let innerBody out_pars list_of_index list_of_max_ix = do
         forM_ (zip invariantParams invariants) $ \(p, (_, arr)) -> do
           arr_t <- lookupType arr
-          letBindNames [p] $ BasicOp $
-            Index arr $ fullSlice arr_t $ map DimFix list_of_index
+          letBindNames [p] $
+            BasicOp $
+              Index arr $ fullSlice arr_t $ map DimFix list_of_index
 
         temp_array <- temporaryArray temp_tp
 
         exps <- case iss of
           StencilDynamic is -> do
-            temp_params <- mapM
-              (newParam "temporaryArray" . flip toDecl Unique) temp_tp
+            temp_params <-
+              mapM
+                (newParam "temporaryArray" . flip toDecl Unique)
+                temp_tp
             let merge_inner = zip temp_params $ map Var temp_array
             j <- newVName "j"
             let inner_loop_form = ForLoop j Int64 neighboursLen []
             inner_loop_body <- runBodyBinder $
               localScope (scopeOf inner_loop_form <> scopeOfFParams temp_params) $ do
                 relative_offset <- forM (zip is neighbours_tp) $ \(vname, tp) ->
-                  letSubExp "relative_offset" $ BasicOp $
-                    Index vname $ fullSlice tp [DimFix $ Var j]
-                index <- forM (zip3 relative_offset list_of_index list_of_max_ix)
-                  $ \(rel, gix, imax) -> boundIx gix imax rel
+                  letSubExp "relative_offset" $
+                    BasicOp $
+                      Index vname $ fullSlice tp [DimFix $ Var j]
+                index <- forM (zip3 relative_offset list_of_index list_of_max_ix) $
+                  \(rel, gix, imax) -> boundIx gix imax rel
                 input_element <- load_elements index
                 tmp <-
                   letwith (map paramName temp_params) (Var j) input_element
                 resultBodyM $ map Var tmp
-            vars <- letTupExp' "vars" $
-              DoLoop [] merge_inner inner_loop_form inner_loop_body
+            vars <-
+              letTupExp' "vars" $
+                DoLoop [] merge_inner inner_loop_form inner_loop_body
             pure $ map (BasicOp . SubExp) vars
           StencilStatic is -> do
             let ixs_len = toInteger $ length $ head is
@@ -457,9 +468,14 @@ transformSOAC pat (Stencil inputShape neighboursLen iss lam invariants variants)
         loop_body <-
           runBodyBinder $
             localScope (scopeOf loop_form <> scopeOfFParams out_pars) $
-              resultBody <$>
-                loopNestBuilder g (map paramName out_pars) out_pars xs
-                  (Var i : list_of_index) (max_index : list_of_max_ix)
+              resultBody
+                <$> loopNestBuilder
+                  g
+                  (map paramName out_pars)
+                  out_pars
+                  xs
+                  (Var i : list_of_index)
+                  (max_index : list_of_max_ix)
         pure $ DoLoop [] it_vars loop_form loop_body
       loopNestBuilder g _ out_pars [] list_of_index list_of_max_ix =
         g out_pars (reverse list_of_index) (reverse list_of_max_ix)
@@ -475,8 +491,14 @@ transformSOAC pat (Stencil inputShape neighboursLen iss lam invariants variants)
         loop_body <-
           runBodyBinder $
             localScope (scopeOf loop_form <> scopeOfFParams out_pars) $
-              resultBody <$> loopNestBuilder g (map paramName out_pars) out_pars xs
-                (Var i : list_of_index) (max_index : list_of_max_ix)
+              resultBody
+                <$> loopNestBuilder
+                  g
+                  (map paramName out_pars)
+                  out_pars
+                  xs
+                  (Var i : list_of_index)
+                  (max_index : list_of_max_ix)
         letTupExp' "res" $ DoLoop [] it_vars loop_form loop_body
   outer_loops <- loopNest innerBody map_arrs [] inputShape [] []
   letBind pat outer_loops
@@ -484,15 +506,15 @@ transformSOAC pat (Stencil inputShape neighboursLen iss lam invariants variants)
 -- | Recursively first-order-transform a lambda.
 transformLambda ::
   ( MonadFreshNames m,
-    Bindable lore,
-    BinderOps lore,
-    LocalScope somelore m,
-    SameScope somelore lore,
-    LetDec lore ~ LetDec SOACS,
-    CanBeAliased (Op lore)
+    Bindable rep,
+    BinderOps rep,
+    LocalScope somerep m,
+    SameScope somerep rep,
+    LetDec rep ~ LetDec SOACS,
+    CanBeAliased (Op rep)
   ) =>
   Lambda ->
-  m (AST.Lambda lore)
+  m (AST.Lambda rep)
 transformLambda (Lambda params body rettype) = do
   body' <-
     runBodyBinder $
@@ -526,8 +548,8 @@ letwithNDim ks is vs = do
 
 bindLambda ::
   Transformer m =>
-  AST.Lambda (Lore m) ->
-  [AST.Exp (Lore m)] ->
+  AST.Lambda (Rep m) ->
+  [AST.Exp (Rep m)] ->
   m [SubExp]
 bindLambda (Lambda params body _) args = do
   forM_ (zip params args) $ \(param, arg) ->

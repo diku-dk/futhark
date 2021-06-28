@@ -628,7 +628,8 @@ doAbs v = intValue (intValueType v) $ abs $ intToInt64 v
 
 -- | @abs(-2.0) = 2.0@.
 doFAbs :: FloatValue -> FloatValue
-doFAbs v = floatValue (floatValueType v) $ abs $ floatToDouble v
+doFAbs (Float32Value x) = Float32Value $ abs x
+doFAbs (Float64Value x) = Float64Value $ abs x
 
 -- | @ssignum(-2)@ = -1.
 doSSignum :: IntValue -> IntValue

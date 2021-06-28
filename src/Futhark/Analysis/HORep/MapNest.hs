@@ -24,7 +24,7 @@ import Futhark.IR hiding (typeOf)
 import qualified Futhark.IR.SOACS.SOAC as Futhark
 import Futhark.Transform.Substitute
 
-data Nesting lore = Nesting
+data Nesting rep = Nesting
   { nestingParamNames :: [VName],
     nestingResult :: [VName],
     nestingReturnType :: [Type],
@@ -32,25 +32,25 @@ data Nesting lore = Nesting
   }
   deriving (Eq, Ord, Show)
 
-data MapNest lore = MapNest SubExp (Lambda lore) [Nesting lore] [SOAC.Input]
+data MapNest rep = MapNest SubExp (Lambda rep) [Nesting rep] [SOAC.Input]
   deriving (Show)
 
-typeOf :: MapNest lore -> [Type]
+typeOf :: MapNest rep -> [Type]
 typeOf (MapNest w lam [] _) =
   map (`arrayOfRow` w) $ lambdaReturnType lam
 typeOf (MapNest w _ (nest : _) _) =
   map (`arrayOfRow` w) $ nestingReturnType nest
 
-params :: MapNest lore -> [VName]
+params :: MapNest rep -> [VName]
 params (MapNest _ lam [] _) =
   map paramName $ lambdaParams lam
 params (MapNest _ _ (nest : _) _) =
   nestingParamNames nest
 
-inputs :: MapNest lore -> [SOAC.Input]
+inputs :: MapNest rep -> [SOAC.Input]
 inputs (MapNest _ _ _ inps) = inps
 
-setInputs :: [SOAC.Input] -> MapNest lore -> MapNest lore
+setInputs :: [SOAC.Input] -> MapNest rep -> MapNest rep
 setInputs [] (MapNest w body ns _) = MapNest w body ns []
 setInputs (inp : inps) (MapNest _ body ns _) = MapNest w body ns' (inp : inps)
   where
@@ -60,24 +60,24 @@ setInputs (inp : inps) (MapNest _ body ns _) = MapNest w body ns' (inp : inps)
     setDepth n nw = n {nestingWidth = nw}
 
 fromSOAC ::
-  ( Bindable lore,
+  ( Bindable rep,
     MonadFreshNames m,
-    LocalScope lore m,
-    Op lore ~ Futhark.SOAC lore
+    LocalScope rep m,
+    Op rep ~ Futhark.SOAC rep
   ) =>
-  SOAC lore ->
-  m (Maybe (MapNest lore))
+  SOAC rep ->
+  m (Maybe (MapNest rep))
 fromSOAC = fromSOAC' mempty
 
 fromSOAC' ::
-  ( Bindable lore,
+  ( Bindable rep,
     MonadFreshNames m,
-    LocalScope lore m,
-    Op lore ~ Futhark.SOAC lore
+    LocalScope rep m,
+    Op rep ~ Futhark.SOAC rep
   ) =>
   [Ident] ->
-  SOAC lore ->
-  m (Maybe (MapNest lore))
+  SOAC rep ->
+  m (Maybe (MapNest rep))
 fromSOAC' bound (SOAC.Screma w (SOAC.ScremaForm [] [] lam) inps) = do
   maybenest <- case ( stmsToList $ bodyStms $ lambdaBody lam,
                       bodyResult $ lambdaBody lam
@@ -142,13 +142,13 @@ fromSOAC' _ _ = return Nothing
 
 toSOAC ::
   ( MonadFreshNames m,
-    HasScope lore m,
-    Bindable lore,
-    BinderOps lore,
-    Op lore ~ Futhark.SOAC lore
+    HasScope rep m,
+    Bindable rep,
+    BinderOps rep,
+    Op rep ~ Futhark.SOAC rep
   ) =>
-  MapNest lore ->
-  m (SOAC lore)
+  MapNest rep ->
+  m (SOAC rep)
 toSOAC (MapNest w lam [] inps) =
   return $ SOAC.Screma w (Futhark.mapSOAC lam) inps
 toSOAC (MapNest w lam (Nesting npnames nres nrettype nw : ns) inps) = do

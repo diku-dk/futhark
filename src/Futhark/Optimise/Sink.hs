@@ -40,10 +40,10 @@
 -- you ever see this pass as being a compilation speed bottleneck,
 -- start by caching that a bit.
 --
--- This pass is defined on the Kernels representation.  This is not
--- because we do anything kernel-specific here, but simply because
--- more explicit indexing is going on after SOACs are gone.
-module Futhark.Optimise.Sink (sinkKernels, sinkMC) where
+-- This pass is defined on post-SOACS representations.  This is not
+-- because we do anything GPU-specific here, but simply because more
+-- explicit indexing is going on after SOACs are gone.
+module Futhark.Optimise.Sink (sinkGPU, sinkMC) where
 
 import Control.Monad.State
 import Data.Bifunctor
@@ -52,28 +52,28 @@ import qualified Data.Map as M
 import qualified Futhark.Analysis.Alias as Alias
 import qualified Futhark.Analysis.SymbolTable as ST
 import Futhark.IR.Aliases
-import Futhark.IR.Kernels
+import Futhark.IR.GPU
 import Futhark.IR.MC
 import Futhark.Pass
 
-type SymbolTable lore = ST.SymbolTable lore
+type SymbolTable rep = ST.SymbolTable rep
 
-type Sinking lore = M.Map VName (Stm lore)
+type Sinking rep = M.Map VName (Stm rep)
 
 type Sunk = Names
 
-type Sinker lore a = SymbolTable lore -> Sinking lore -> a -> (a, Sunk)
+type Sinker rep a = SymbolTable rep -> Sinking rep -> a -> (a, Sunk)
 
-type Constraints lore =
-  ( ASTLore lore,
-    Aliased lore,
-    ST.IndexOp (Op lore)
+type Constraints rep =
+  ( ASTRep rep,
+    Aliased rep,
+    ST.IndexOp (Op rep)
   )
 
 -- | Given a statement, compute how often each of its free variables
 -- are used.  Not accurate: what we care about are only 1, and greater
 -- than 1.
-multiplicity :: Constraints lore => Stm lore -> M.Map VName Int
+multiplicity :: Constraints rep => Stm rep -> M.Map VName Int
 multiplicity stm =
   case stmExp stm of
     If cond tbranch fbranch _ ->
@@ -86,9 +86,9 @@ multiplicity stm =
     comb = M.unionWith (+)
 
 optimiseBranch ::
-  Constraints lore =>
-  Sinker lore (Op lore) ->
-  Sinker lore (Body lore)
+  Constraints rep =>
+  Sinker rep (Op rep) ->
+  Sinker rep (Body rep)
 optimiseBranch onOp vtable sinking (Body dec stms res) =
   let (stms', stms_sunk) = optimiseStms onOp vtable sinking' (sunk_stms <> stms) $ freeIn res
    in ( Body dec stms' res,
@@ -104,13 +104,13 @@ optimiseBranch onOp vtable sinking (Body dec stms res) =
     sunk = namesFromList $ foldMap (patternNames . stmPattern) sunk_stms
 
 optimiseStms ::
-  Constraints lore =>
-  Sinker lore (Op lore) ->
-  SymbolTable lore ->
-  Sinking lore ->
-  Stms lore ->
+  Constraints rep =>
+  Sinker rep (Op rep) ->
+  SymbolTable rep ->
+  Sinking rep ->
+  Stms rep ->
   Names ->
-  (Stms lore, Sunk)
+  (Stms rep, Sunk)
 optimiseStms onOp init_vtable init_sinking all_stms free_in_res =
   let (all_stms', sunk) =
         optimiseStms' init_vtable init_sinking $ stmsToList all_stms
@@ -168,25 +168,25 @@ optimiseStms onOp init_vtable init_sinking all_stms free_in_res =
             }
 
 optimiseBody ::
-  Constraints lore =>
-  Sinker lore (Op lore) ->
-  Sinker lore (Body lore)
+  Constraints rep =>
+  Sinker rep (Op rep) ->
+  Sinker rep (Body rep)
 optimiseBody onOp vtable sinking (Body attr stms res) =
   let (stms', sunk) = optimiseStms onOp vtable sinking stms $ freeIn res
    in (Body attr stms' res, sunk)
 
 optimiseKernelBody ::
-  Constraints lore =>
-  Sinker lore (Op lore) ->
-  Sinker lore (KernelBody lore)
+  Constraints rep =>
+  Sinker rep (Op rep) ->
+  Sinker rep (KernelBody rep)
 optimiseKernelBody onOp vtable sinking (KernelBody attr stms res) =
   let (stms', sunk) = optimiseStms onOp vtable sinking stms $ freeIn res
    in (KernelBody attr stms' res, sunk)
 
 optimiseSegOp ::
-  Constraints lore =>
-  Sinker lore (Op lore) ->
-  Sinker lore (SegOp lvl lore)
+  Constraints rep =>
+  Sinker rep (Op rep) ->
+  Sinker rep (SegOp lvl rep)
 optimiseSegOp onOp vtable sinking op =
   let scope = scopeOfSegSpace $ segSpace op
    in runState (mapSegOpM (opMapper scope) op) mempty
@@ -208,15 +208,15 @@ optimiseSegOp onOp vtable sinking op =
       where
         op_vtable = ST.fromScope scope <> vtable
 
-type SinkLore lore = Aliases lore
+type SinkRep rep = Aliases rep
 
 sink ::
-  ( ASTLore lore,
-    CanBeAliased (Op lore),
-    ST.IndexOp (OpWithAliases (Op lore))
+  ( ASTRep rep,
+    CanBeAliased (Op rep),
+    ST.IndexOp (OpWithAliases (Op rep))
   ) =>
-  Sinker (SinkLore lore) (Op (SinkLore lore)) ->
-  Pass lore lore
+  Sinker (SinkRep rep) (Op (SinkRep rep)) ->
+  Pass rep rep
 sink onOp =
   Pass "sink" "move memory loads closer to their uses" $
     fmap removeProgAliases
@@ -235,10 +235,10 @@ sink onOp =
             namesFromList $ M.keys $ scopeOf consts
 
 -- | Sinking in GPU kernels.
-sinkKernels :: Pass Kernels Kernels
-sinkKernels = sink onHostOp
+sinkGPU :: Pass GPU GPU
+sinkGPU = sink onHostOp
   where
-    onHostOp :: Sinker (SinkLore Kernels) (Op (SinkLore Kernels))
+    onHostOp :: Sinker (SinkRep GPU) (Op (SinkRep GPU))
     onHostOp vtable sinking (SegOp op) =
       first SegOp $ optimiseSegOp onHostOp vtable sinking op
     onHostOp _ _ op = (op, mempty)
@@ -247,7 +247,7 @@ sinkKernels = sink onHostOp
 sinkMC :: Pass MC MC
 sinkMC = sink onHostOp
   where
-    onHostOp :: Sinker (SinkLore MC) (Op (SinkLore MC))
+    onHostOp :: Sinker (SinkRep MC) (Op (SinkRep MC))
     onHostOp vtable sinking (ParOp par_op op) =
       let (par_op', par_sunk) =
             maybe

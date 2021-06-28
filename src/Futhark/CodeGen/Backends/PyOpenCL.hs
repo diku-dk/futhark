@@ -15,16 +15,17 @@ import Futhark.CodeGen.Backends.GenericPython.Options
 import Futhark.CodeGen.Backends.PyOpenCL.Boilerplate
 import qualified Futhark.CodeGen.ImpCode.OpenCL as Imp
 import qualified Futhark.CodeGen.ImpGen.OpenCL as ImpGen
-import Futhark.IR.KernelsMem (KernelsMem, Prog)
+import Futhark.IR.GPUMem (GPUMem, Prog)
 import Futhark.MonadFreshNames
 import Futhark.Util (zEncodeString)
+import Futhark.Util.Pretty (pretty)
 
 -- | Compile the program to Python with calls to OpenCL.
 compileProg ::
   MonadFreshNames m =>
   Py.CompilerMode ->
   String ->
-  Prog KernelsMem ->
+  Prog GPUMem ->
   m (ImpGen.Warnings, String)
 compileProg mode class_name prog = do
   ( ws,

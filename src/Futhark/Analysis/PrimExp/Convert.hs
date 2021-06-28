@@ -60,9 +60,9 @@ instance ToExp v => ToExp (TPrimExp t v) where
 -- This includes constants and variable names, which are passed as
 -- t'SubExp's.
 primExpFromExp ::
-  (Fail.MonadFail m, Decorations lore) =>
+  (Fail.MonadFail m, RepTypes rep) =>
   (VName -> m (PrimExp v)) ->
-  Exp lore ->
+  Exp rep ->
   m (PrimExp v)
 primExpFromExp f (BasicOp (BinOp op x y)) =
   BinOpExp op <$> primExpFromSubExpM f x <*> primExpFromSubExpM f y

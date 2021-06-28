@@ -81,7 +81,8 @@ module Futhark.CodeGen.Backends.GenericC
 where
 
 import Control.Monad.Identity
-import Control.Monad.RWS
+import Control.Monad.Reader
+import Control.Monad.State
 import Data.Bifunctor (first)
 import qualified Data.DList as DL
 import Data.FileEmbed
@@ -99,7 +100,7 @@ import qualified Language.C.Quote.OpenCL as C
 import qualified Language.C.Syntax as C
 
 data CompilerState s = CompilerState
-  { compArrayStructs :: [((C.Type, Int), (C.Type, [C.Definition]))],
+  { compArrayStructs :: [((Signedness, PrimType, Int), (C.Type, [C.Definition]))],
     compOpaqueStructs :: [(String, (C.Type, [C.Definition]))],
     compEarlyDecls :: DL.DList C.Definition,
     compInit :: [C.Stm],
@@ -110,7 +111,8 @@ data CompilerState s = CompilerState
     compCtxFields :: DL.DList (C.Id, C.Type, Maybe C.Exp),
     compProfileItems :: DL.DList C.BlockItem,
     compClearItems :: DL.DList C.BlockItem,
-    compDeclaredMem :: [(VName, Space)]
+    compDeclaredMem :: [(VName, Space)],
+    compItems :: DL.DList C.BlockItem
   }
 
 newCompilerState :: VNameSource -> s -> CompilerState s
@@ -127,7 +129,8 @@ newCompilerState src s =
       compCtxFields = mempty,
       compProfileItems = mempty,
       compClearItems = mempty,
-      compDeclaredMem = mempty
+      compDeclaredMem = mempty,
+      compItems = mempty
     }
 
 -- | In which part of the header file we put the declaration.  This is
@@ -288,17 +291,6 @@ data CompilerEnv op s = CompilerEnv
     envCachedMem :: M.Map C.Exp VName
   }
 
-newtype CompilerAcc op s = CompilerAcc
-  { accItems :: DL.DList C.BlockItem
-  }
-
-instance Semigroup (CompilerAcc op s) where
-  CompilerAcc items1 <> CompilerAcc items2 =
-    CompilerAcc (items1 <> items2)
-
-instance Monoid (CompilerAcc op s) where
-  mempty = CompilerAcc mempty
-
 envOpCompiler :: CompilerEnv op s -> OpCompiler op s
 envOpCompiler = opsCompiler . envOperations
 
@@ -360,20 +352,13 @@ contextFinalInits :: CompilerM op s [C.Stm]
 contextFinalInits = gets compInit
 
 newtype CompilerM op s a
-  = CompilerM
-      ( RWS
-          (CompilerEnv op s)
-          (CompilerAcc op s)
-          (CompilerState s)
-          a
-      )
+  = CompilerM (ReaderT (CompilerEnv op s) (State (CompilerState s)) a)
   deriving
     ( Functor,
       Applicative,
       Monad,
       MonadState (CompilerState s),
-      MonadReader (CompilerEnv op s),
-      MonadWriter (CompilerAcc op s)
+      MonadReader (CompilerEnv op s)
     )
 
 instance MonadFreshNames (CompilerM op s) where
@@ -387,8 +372,9 @@ runCompilerM ::
   CompilerM op s a ->
   (a, CompilerState s)
 runCompilerM ops src userstate (CompilerM m) =
-  let (x, s, _) = runRWS m (CompilerEnv ops mempty) (newCompilerState src userstate)
-   in (x, s)
+  runState
+    (runReaderT m (CompilerEnv ops mempty))
+    (newCompilerState src userstate)
 
 getUserState :: CompilerM op s s
 getUserState = gets compUserState
@@ -405,12 +391,13 @@ collect :: CompilerM op s () -> CompilerM op s [C.BlockItem]
 collect m = snd <$> collect' m
 
 collect' :: CompilerM op s a -> CompilerM op s (a, [C.BlockItem])
-collect' m = pass $ do
-  (x, w) <- listen m
-  return
-    ( (x, DL.toList $ accItems w),
-      const w {accItems = mempty}
-    )
+collect' m = do
+  old <- gets compItems
+  modify $ \s -> s {compItems = mempty}
+  x <- m
+  new <- gets compItems
+  modify $ \s -> s {compItems = old}
+  pure (x, DL.toList new)
 
 -- | Used when we, inside an existing 'CompilerM' action, want to
 -- generate code for a new function.  Use this so that the compiler
@@ -429,10 +416,10 @@ inNewFunction keep_cached m = do
       | otherwise = env {envCachedMem = mempty}
 
 item :: C.BlockItem -> CompilerM op s ()
-item x = tell $ mempty {accItems = DL.singleton x}
+item x = modify $ \s -> s {compItems = DL.snoc (compItems s) x}
 
 items :: [C.BlockItem] -> CompilerM op s ()
-items = mapM_ item
+items xs = modify $ \s -> s {compItems = DL.append (compItems s) (DL.fromList xs)}
 
 fatMemory :: Space -> CompilerM op s Bool
 fatMemory ScalarSpace {} = return False
@@ -1093,9 +1080,8 @@ valueDescToCType :: ValueDesc -> CompilerM op s C.Type
 valueDescToCType (ScalarValue pt signed _) =
   return $ signedPrimTypeToCType signed pt
 valueDescToCType (ArrayValue mem space pt signed shape) = do
-  let pt' = signedPrimTypeToCType signed pt
-      rank = length shape
-  exists <- gets $ lookup (pt', rank) . compArrayStructs
+  let rank = length shape
+  exists <- gets $ lookup (signed, pt, rank) . compArrayStructs
   case exists of
     Just (cty, _) -> return cty
     Nothing -> do
@@ -1107,7 +1093,7 @@ valueDescToCType (ArrayValue mem space pt signed shape) = do
       modify $ \s ->
         s
           { compArrayStructs =
-              ((pt', rank), (stype, struct : library)) : compArrayStructs s
+              ((signed, pt, rank), (stype, struct : library)) : compArrayStructs s
           }
       return stype
 
@@ -1351,7 +1337,12 @@ disableWarnings :: String
 disableWarnings =
   pretty
     [C.cunit|
-$esc:("#ifdef __GNUC__")
+$esc:("#ifdef __clang__")
+$esc:("#pragma clang diagnostic ignored \"-Wunused-function\"")
+$esc:("#pragma clang diagnostic ignored \"-Wunused-variable\"")
+$esc:("#pragma clang diagnostic ignored \"-Wparentheses\"")
+$esc:("#pragma clang diagnostic ignored \"-Wunused-label\"")
+$esc:("#elif __GNUC__")
 $esc:("#pragma GCC diagnostic ignored \"-Wunused-function\"")
 $esc:("#pragma GCC diagnostic ignored \"-Wunused-variable\"")
 $esc:("#pragma GCC diagnostic ignored \"-Wparentheses\"")
@@ -1359,12 +1350,6 @@ $esc:("#pragma GCC diagnostic ignored \"-Wunused-label\"")
 $esc:("#pragma GCC diagnostic ignored \"-Wunused-but-set-variable\"")
 $esc:("#endif")
 
-$esc:("#ifdef __clang__")
-$esc:("#pragma clang diagnostic ignored \"-Wunused-function\"")
-$esc:("#pragma clang diagnostic ignored \"-Wunused-variable\"")
-$esc:("#pragma clang diagnostic ignored \"-Wparentheses\"")
-$esc:("#pragma clang diagnostic ignored \"-Wunused-label\"")
-$esc:("#endif")
 |]
 
 -- | Produce header and implementation files.
@@ -1833,6 +1818,8 @@ compileExp = compilePrimExp compileLeaf
   where
     compileLeaf (ScalarVar src) =
       return [C.cexp|$id:src|]
+    compileLeaf (Index _ _ Unit __ _) =
+      return $ compilePrimValue UnitValue
     compileLeaf (Index src (Count iexp) restype DefaultSpace vol) = do
       src' <- rawMem src
       derefPointer src'
@@ -1923,6 +1910,13 @@ compilePrimExp f (FunExp h args _) = do
   args' <- mapM (compilePrimExp f) args
   return [C.cexp|$id:(funName (nameFromString h))($args:args')|]
 
+linearCode :: Code op -> [Code op]
+linearCode = reverse . go []
+  where
+    go acc (x :>>: y) =
+      go (go acc x) y
+    go acc x = x : acc
+
 compileCode :: Code op -> CompilerM op s ()
 compileCode (Op op) =
   join $ asks envOpCompiler <*> pure op
@@ -1951,13 +1945,18 @@ compileCode (DebugPrint s Nothing) =
     [C.cstm|if (ctx->debugging) {
           fprintf(ctx->log, "%s\n", $exp:s);
        }|]
-compileCode c
-  | Just (name, vol, t, e, c') <- declareAndSet c = do
-    let ct = primTypeToCType t
-    e' <- compileExp e
-    item [C.citem|$tyquals:(volQuals vol) $ty:ct $id:name = $exp:e';|]
-    compileCode c'
-compileCode (c1 :>>: c2) = compileCode c1 >> compileCode c2
+-- :>>: is treated in a special way to detect declare-set pairs in
+-- order to generate prettier code.
+compileCode (c1 :>>: c2) = go (linearCode (c1 :>>: c2))
+  where
+    go (DeclareScalar name vol t : SetScalar dest e : code)
+      | name == dest = do
+        let ct = primTypeToCType t
+        e' <- compileExp e
+        item [C.citem|$tyquals:(volQuals vol) $ty:ct $id:name = $exp:e';|]
+        go code
+    go (x : xs) = compileCode x >> go xs
+    go [] = pure ()
 compileCode (Assert e msg (loc, locs)) = do
   e' <- compileExp e
   err <-
@@ -2112,10 +2111,7 @@ blockScope = fmap snd . blockScope'
 blockScope' :: CompilerM op s a -> CompilerM op s (a, [C.BlockItem])
 blockScope' m = do
   old_allocs <- gets compDeclaredMem
-  (x, xs) <- pass $ do
-    (x, w) <- listen m
-    let xs = DL.toList $ accItems w
-    return ((x, xs), const mempty)
+  (x, xs) <- collect' m
   new_allocs <- gets $ filter (`notElem` old_allocs) . compDeclaredMem
   modify $ \s -> s {compDeclaredMem = old_allocs}
   releases <- collect $ mapM_ (uncurry unRefMem) new_allocs
@@ -2138,21 +2134,6 @@ compileFunBody output_ptrs outputs code = do
       setMem [C.cexp|*$exp:p|] name space
     setRetVal' p (ScalarParam name _) =
       stm [C.cstm|*$exp:p = $id:name;|]
-
-declareAndSet :: Code op -> Maybe (VName, Volatility, PrimType, Exp, Code op)
-declareAndSet code = do
-  (DeclareScalar name vol t, code') <- nextCode code
-  (SetScalar dest e, code'') <- nextCode code'
-  guard $ name == dest
-  Just (name, vol, t, e, code'')
-
-nextCode :: Code op -> Maybe (Code op, Code op)
-nextCode (x :>>: y)
-  | Just (x_a, x_b) <- nextCode x =
-    Just (x_a, x_b <> y)
-  | otherwise =
-    Just (x, y)
-nextCode _ = Nothing
 
 assignmentOperator :: BinOp -> Maybe (VName -> C.Exp -> C.Exp)
 assignmentOperator Add {} = Just $ \d e -> [C.cexp|$id:d += $exp:e|]

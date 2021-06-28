@@ -23,7 +23,6 @@ import Futhark.Test
 import Futhark.Util (atMostChars, fancyTerminal)
 import Futhark.Util.Console
 import Futhark.Util.Options
-import Futhark.Util.Pretty (prettyText)
 import Futhark.Util.Table
 import System.Console.ANSI
 import qualified System.Console.Terminal.Size as Terminal
@@ -97,7 +96,7 @@ withProgramServer program runner extra_options f = do
         "Running " <> T.pack (unwords $ binpath : extra_options)
 
   context prog_ctx $
-    pureTestResults $ liftIO $ withServer to_run to_run_args f
+    pureTestResults $ liftIO $ withServer (futharkServerCfg to_run to_run_args) f
 
 data TestCase = TestCase
   { _testCaseMode :: TestMode,
@@ -185,7 +184,7 @@ runInterpretedEntry (FutharkExe futhark) program (InputOutputs entry run_cases) 
       runInterpretedCase run@(TestRun _ inputValues _ index _) =
         unless (any (`elem` runTags run) ["compiled", "script"]) $
           context ("Entry point: " <> entry <> "; dataset: " <> T.pack (runDescription run)) $ do
-            input <- T.unlines . map prettyText <$> getValues (FutharkExe futhark) dir inputValues
+            input <- T.unlines . map valueText <$> getValues (FutharkExe futhark) dir inputValues
             expectedResult' <- getExpectedResult (FutharkExe futhark) program entry run
             (code, output, err) <-
               liftIO $
@@ -271,12 +270,16 @@ liftCommand m = do
 
 runCompiledEntry :: FutharkExe -> Server -> FilePath -> InputOutputs -> IO [TestResult]
 runCompiledEntry futhark server program (InputOutputs entry run_cases) = do
-  Right output_types <- cmdOutputs server entry
-  Right input_types <- cmdInputs server entry
-  let outs = ["out" <> T.pack (show i) | i <- [0 .. length output_types -1]]
-      ins = ["in" <> T.pack (show i) | i <- [0 .. length input_types -1]]
-      onRes = either (Failure . pure) (const Success)
-  mapM (fmap onRes . runCompiledCase input_types outs ins) run_cases
+  output_types <- cmdOutputs server entry
+  input_types <- cmdInputs server entry
+  case (,) <$> output_types <*> input_types of
+    Left (CmdFailure _ err) ->
+      pure [Failure err]
+    Right (output_types', input_types') -> do
+      let outs = ["out" <> T.pack (show i) | i <- [0 .. length output_types' -1]]
+          ins = ["in" <> T.pack (show i) | i <- [0 .. length input_types' -1]]
+          onRes = either (Failure . pure) (const Success)
+      mapM (fmap onRes . runCompiledCase input_types' outs ins) run_cases
   where
     dir = takeDirectory program
 
@@ -299,7 +302,7 @@ runCompiledEntry futhark server program (InputOutputs entry run_cases) = do
             pure $ ErrorResult $ T.unlines err
           Right _ ->
             SuccessResult
-              <$> readResults server outs program
+              <$> readResults server outs
                 <* liftCommand (cmdFree server outs)
 
         compareResult entry index program expected res

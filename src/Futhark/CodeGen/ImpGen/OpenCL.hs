@@ -7,11 +7,11 @@ where
 
 import Data.Bifunctor (second)
 import qualified Futhark.CodeGen.ImpCode.OpenCL as OpenCL
-import Futhark.CodeGen.ImpGen.Kernels
-import Futhark.CodeGen.ImpGen.Kernels.ToOpenCL
-import Futhark.IR.KernelsMem
+import Futhark.CodeGen.ImpGen.GPU
+import Futhark.CodeGen.ImpGen.GPU.ToOpenCL
+import Futhark.IR.GPUMem
 import Futhark.MonadFreshNames
 
 -- | Compile the program to ImpCode with OpenCL kernels.
-compileProg :: MonadFreshNames m => Prog KernelsMem -> m (Warnings, OpenCL.Program)
+compileProg :: MonadFreshNames m => Prog GPUMem -> m (Warnings, OpenCL.Program)
 compileProg prog = second kernelsToOpenCL <$> compileProgOpenCL prog

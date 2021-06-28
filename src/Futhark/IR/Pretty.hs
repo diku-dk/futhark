@@ -11,7 +11,7 @@
 module Futhark.IR.Pretty
   ( prettyTuple,
     pretty,
-    PrettyLore (..),
+    PrettyRep (..),
     ppTuple',
   )
 where
@@ -21,30 +21,30 @@ import Data.Maybe
 import Futhark.IR.Syntax
 import Futhark.Util.Pretty
 
--- | The class of lores whose annotations can be prettyprinted.
+-- | The class of representations whose annotations can be prettyprinted.
 class
-  ( Decorations lore,
-    Pretty (RetType lore),
-    Pretty (BranchType lore),
-    Pretty (FParamInfo lore),
-    Pretty (LParamInfo lore),
-    Pretty (LetDec lore),
-    Pretty (Op lore)
+  ( RepTypes rep,
+    Pretty (RetType rep),
+    Pretty (BranchType rep),
+    Pretty (FParamInfo rep),
+    Pretty (LParamInfo rep),
+    Pretty (LetDec rep),
+    Pretty (Op rep)
   ) =>
-  PrettyLore lore
+  PrettyRep rep
   where
-  ppExpLore :: ExpDec lore -> Exp lore -> Maybe Doc
-  ppExpLore _ _ = Nothing
+  ppExpDec :: ExpDec rep -> Exp rep -> Maybe Doc
+  ppExpDec _ _ = Nothing
 
 instance Pretty VName where
   ppr (VName vn i) = ppr vn <> text "_" <> text (show i)
 
-instance Pretty NoUniqueness where
-  ppr _ = mempty
-
 instance Pretty Commutativity where
   ppr Commutative = text "commutative"
   ppr Noncommutative = text "noncommutative"
+
+instance Pretty NoUniqueness where
+  ppr _ = mempty
 
 instance Pretty Shape where
   ppr = mconcat . map (brackets . ppr) . shapeDims
@@ -96,10 +96,10 @@ instance Pretty Certificates where
   ppr (Certificates []) = empty
   ppr (Certificates cs) = text "#" <> braces (commasep (map ppr cs))
 
-instance PrettyLore lore => Pretty (Stms lore) where
+instance PrettyRep rep => Pretty (Stms rep) where
   ppr = stack . map ppr . stmsToList
 
-instance PrettyLore lore => Pretty (Body lore) where
+instance PrettyRep rep => Pretty (Body rep) where
   ppr (Body _ stms res)
     | null stms = braces (commasep $ map ppr res)
     | otherwise =
@@ -115,7 +115,7 @@ attrAnnots = map f . toList . unAttrs
   where
     f v = text "#[" <> ppr v <> text "]"
 
-stmAttrAnnots :: Stm lore -> [Doc]
+stmAttrAnnots :: Stm rep -> [Doc]
 stmAttrAnnots = attrAnnots . stmAuxAttrs . stmAux
 
 certAnnots :: Certificates -> [Doc]
@@ -123,7 +123,7 @@ certAnnots cs
   | cs == mempty = []
   | otherwise = [ppr cs]
 
-stmCertAnnots :: Stm lore -> [Doc]
+stmCertAnnots :: Stm rep -> [Doc]
 stmCertAnnots = certAnnots . stmAuxCerts . stmAux
 
 instance Pretty (PatElemT dec) => Pretty (PatternT dec) where
@@ -135,7 +135,7 @@ instance Pretty t => Pretty (PatElemT t) where
 instance Pretty t => Pretty (Param t) where
   ppr (Param name t) = ppr name <+> colon <+> align (ppr t)
 
-instance PrettyLore lore => Pretty (Stm lore) where
+instance PrettyRep rep => Pretty (Stm rep) where
   ppr bnd@(Let pat aux e) =
     align . hang 2 $
       text "let" <+> align (ppr pat)
@@ -154,7 +154,7 @@ instance PrettyLore lore => Pretty (Stm lore) where
 
       stmannot =
         concat
-          [ maybeToList (ppExpLore (stmAuxDec aux) e),
+          [ maybeToList (ppExpDec (stmAuxDec aux) e),
             stmAttrAnnots bnd,
             stmCertAnnots bnd
           ]
@@ -210,7 +210,7 @@ instance Pretty a => Pretty (ErrorMsg a) where
       p (ErrorInt32 x) = ppr x <+> colon <+> text "i32"
       p (ErrorInt64 x) = ppr x <+> colon <+> text "i64"
 
-instance PrettyLore lore => Pretty (Exp lore) where
+instance PrettyRep rep => Pretty (Exp rep) where
   ppr (If c t f (IfDec ret ifsort)) =
     text "if" <+> info' <+> ppr c
       </> text "then"
@@ -229,18 +229,17 @@ instance PrettyLore lore => Pretty (Exp lore) where
         | otherwise = nestedBlock "{" "}" $ ppr b
   ppr (BasicOp op) = ppr op
   ppr (Apply fname args ret (safety, _, _)) =
-    text "apply"
+    applykw
       <+> text (nameToString fname)
-      <> safety'
       <> apply (map (align . pprArg) args)
       </> colon
       <+> braces (commasep $ map ppr ret)
     where
       pprArg (arg, Consume) = text "*" <> ppr arg
       pprArg (arg, _) = ppr arg
-      safety' = case safety of
-        Unsafe -> text "<unsafe>"
-        Safe -> mempty
+      applykw = case safety of
+        Unsafe -> text "apply <unsafe>"
+        Safe -> text "apply"
   ppr (Op op) = ppr op
   ppr (DoLoop ctx val form loopbody) =
     text "loop" <+> ppPattern ctxparams valparams
@@ -273,7 +272,7 @@ instance PrettyLore lore => Pretty (Exp lore) where
       pprLoopVar (p, a) = ppr p <+> text "in" <+> ppr a
   ppr (WithAcc inputs lam) =
     text "with_acc"
-      <> parens (braces (commasep $ map ppInput inputs) <> comma </> ppr lam)
+      <> parens (braces (commastack $ map ppInput inputs) <> comma </> ppr lam)
     where
       ppInput (shape, arrs, op) =
         parens
@@ -284,10 +283,10 @@ instance PrettyLore lore => Pretty (Exp lore) where
                   comma </> parens (ppr op' <> comma </> ppTuple' (map ppr nes))
           )
 
-instance PrettyLore lore => Pretty (Lambda lore) where
+instance PrettyRep rep => Pretty (Lambda rep) where
   ppr (Lambda [] (Body _ stms []) []) | stms == mempty = text "nilFn"
   ppr (Lambda params body rettype) =
-    text "\\" <> ppTuple' params
+    text "\\" <+> ppTuple' params
       <+/> colon <+> ppTuple' rettype <+> text "->"
       </> indent 2 (ppr body)
 
@@ -296,7 +295,7 @@ instance Pretty EntryPointType where
   ppr TypeUnsigned = "unsigned"
   ppr (TypeOpaque desc n) = "opaque" <> apply [ppr (show desc), ppr n]
 
-instance PrettyLore lore => Pretty (FunDef lore) where
+instance PrettyRep rep => Pretty (FunDef rep) where
   ppr (FunDef entry attrs name rettype fparams body) =
     annot (attrAnnots attrs) $
       fun <+> text (nameToString name)
@@ -315,7 +314,7 @@ instance PrettyLore lore => Pretty (FunDef lore) where
                   </> ppTuple' ret_entry
               )
 
-instance PrettyLore lore => Pretty (Prog lore) where
+instance PrettyRep rep => Pretty (Prog rep) where
   ppr (Prog consts funs) =
     stack $ punctuate line $ ppr consts : map ppr funs
 

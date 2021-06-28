@@ -12,11 +12,12 @@ import Data.Maybe
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import Futhark.Actions
+import qualified Futhark.Analysis.Alias as Alias
 import Futhark.Analysis.Metrics (OpMetrics)
 import Futhark.Compiler.CLI
-import Futhark.IR (ASTLore, Op, Prog, pretty)
-import qualified Futhark.IR.Kernels as Kernels
-import qualified Futhark.IR.KernelsMem as KernelsMem
+import Futhark.IR (ASTRep, Op, Prog, pretty)
+import qualified Futhark.IR.GPU as GPU
+import qualified Futhark.IR.GPUMem as GPUMem
 import qualified Futhark.IR.MC as MC
 import qualified Futhark.IR.MCMem as MCMem
 import Futhark.IR.Parse
@@ -33,12 +34,13 @@ import Futhark.Optimise.DoubleBuffer
 import Futhark.Optimise.Fusion
 import Futhark.Optimise.InPlaceLowering
 import Futhark.Optimise.InliningDeadFun
+import qualified Futhark.Optimise.ReuseAllocations as ReuseAllocations
 import Futhark.Optimise.Sink
 import Futhark.Optimise.TileLoops
 import Futhark.Optimise.Unstream
 import Futhark.Pass
 import Futhark.Pass.ExpandAllocations
-import qualified Futhark.Pass.ExplicitAllocations.Kernels as Kernels
+import qualified Futhark.Pass.ExplicitAllocations.GPU as GPU
 import qualified Futhark.Pass.ExplicitAllocations.Seq as Seq
 import Futhark.Pass.ExtractKernels
 import Futhark.Pass.ExtractMulticore
@@ -46,7 +48,7 @@ import Futhark.Pass.FirstOrderTransform
 import Futhark.Pass.KernelBabysitting
 import Futhark.Pass.Simplify
 import Futhark.Passes
-import Futhark.TypeCheck (Checkable)
+import Futhark.TypeCheck (Checkable, checkProg)
 import Futhark.Util.Log
 import Futhark.Util.Options
 import qualified Futhark.Util.Pretty as PP
@@ -95,10 +97,10 @@ getFutharkPipeline = toPipeline . futharkPipeline
 
 data UntypedPassState
   = SOACS (Prog SOACS.SOACS)
-  | Kernels (Prog Kernels.Kernels)
+  | GPU (Prog GPU.GPU)
   | MC (Prog MC.MC)
   | Seq (Prog Seq.Seq)
-  | KernelsMem (Prog KernelsMem.KernelsMem)
+  | GPUMem (Prog GPUMem.GPUMem)
   | MCMem (Prog MCMem.MCMem)
   | SeqMem (Prog SeqMem.SeqMem)
 
@@ -113,21 +115,21 @@ class Representation s where
 
 instance Representation UntypedPassState where
   representation (SOACS _) = "SOACS"
-  representation (Kernels _) = "Kernels"
+  representation (GPU _) = "GPU"
   representation (MC _) = "MC"
   representation (Seq _) = "Seq"
-  representation (KernelsMem _) = "KernelsMem"
+  representation (GPUMem _) = "GPUMem"
   representation (MCMem _) = "MCMem"
   representation (SeqMem _) = "SeqMEm"
 
 instance PP.Pretty UntypedPassState where
   ppr (SOACS prog) = PP.ppr prog
-  ppr (Kernels prog) = PP.ppr prog
+  ppr (GPU prog) = PP.ppr prog
   ppr (MC prog) = PP.ppr prog
   ppr (Seq prog) = PP.ppr prog
   ppr (SeqMem prog) = PP.ppr prog
   ppr (MCMem prog) = PP.ppr prog
-  ppr (KernelsMem prog) = PP.ppr prog
+  ppr (GPUMem prog) = PP.ppr prog
 
 newtype UntypedPass
   = UntypedPass
@@ -138,31 +140,31 @@ newtype UntypedPass
 
 data UntypedAction
   = SOACSAction (Action SOACS.SOACS)
-  | KernelsAction (Action Kernels.Kernels)
-  | KernelsMemAction (FilePath -> Action KernelsMem.KernelsMem)
+  | GPUAction (Action GPU.GPU)
+  | GPUMemAction (FilePath -> Action GPUMem.GPUMem)
   | MCMemAction (FilePath -> Action MCMem.MCMem)
   | SeqMemAction (FilePath -> Action SeqMem.SeqMem)
   | PolyAction
-      ( forall lore.
-        ( ASTLore lore,
-          (CanBeAliased (Op lore)),
-          (OpMetrics (Op lore))
+      ( forall rep.
+        ( ASTRep rep,
+          (CanBeAliased (Op rep)),
+          (OpMetrics (Op rep))
         ) =>
-        Action lore
+        Action rep
       )
 
 untypedActionName :: UntypedAction -> String
 untypedActionName (SOACSAction a) = actionName a
-untypedActionName (KernelsAction a) = actionName a
+untypedActionName (GPUAction a) = actionName a
 untypedActionName (SeqMemAction a) = actionName $ a ""
-untypedActionName (KernelsMemAction a) = actionName $ a ""
+untypedActionName (GPUMemAction a) = actionName $ a ""
 untypedActionName (MCMemAction a) = actionName $ a ""
 untypedActionName (PolyAction a) = actionName (a :: Action SOACS.SOACS)
 
 instance Representation UntypedAction where
   representation (SOACSAction _) = "SOACS"
-  representation (KernelsAction _) = "Kernels"
-  representation (KernelsMemAction _) = "KernelsMem"
+  representation (GPUAction _) = "GPU"
+  representation (GPUMemAction _) = "GPUMem"
   representation (MCMemAction _) = "MCMem"
   representation (SeqMemAction _) = "SeqMem"
   representation PolyAction {} = "<any>"
@@ -194,13 +196,13 @@ passOption desc pass short long =
 kernelsMemProg ::
   String ->
   UntypedPassState ->
-  FutharkM (Prog KernelsMem.KernelsMem)
-kernelsMemProg _ (KernelsMem prog) =
+  FutharkM (Prog GPUMem.GPUMem)
+kernelsMemProg _ (GPUMem prog) =
   return prog
 kernelsMemProg name rep =
   externalErrorS $
     "Pass " ++ name
-      ++ " expects KernelsMem representation, but got "
+      ++ " expects GPUMem representation, but got "
       ++ representation rep
 
 soacsProg :: String -> UntypedPassState -> FutharkM (Prog SOACS.SOACS)
@@ -212,18 +214,18 @@ soacsProg name rep =
       ++ " expects SOACS representation, but got "
       ++ representation rep
 
-kernelsProg :: String -> UntypedPassState -> FutharkM (Prog Kernels.Kernels)
-kernelsProg _ (Kernels prog) =
+kernelsProg :: String -> UntypedPassState -> FutharkM (Prog GPU.GPU)
+kernelsProg _ (GPU prog) =
   return prog
 kernelsProg name rep =
   externalErrorS $
-    "Pass " ++ name ++ " expects Kernels representation, but got " ++ representation rep
+    "Pass " ++ name ++ " expects GPU representation, but got " ++ representation rep
 
 typedPassOption ::
-  Checkable tolore =>
-  (String -> UntypedPassState -> FutharkM (Prog fromlore)) ->
-  (Prog tolore -> UntypedPassState) ->
-  Pass fromlore tolore ->
+  Checkable torep =>
+  (String -> UntypedPassState -> FutharkM (Prog fromrep)) ->
+  (Prog torep -> UntypedPassState) ->
+  Pass fromrep torep ->
   String ->
   FutharkOption
 typedPassOption getProg putProg pass short =
@@ -240,18 +242,18 @@ soacsPassOption =
   typedPassOption soacsProg SOACS
 
 kernelsPassOption ::
-  Pass Kernels.Kernels Kernels.Kernels ->
+  Pass GPU.GPU GPU.GPU ->
   String ->
   FutharkOption
 kernelsPassOption =
-  typedPassOption kernelsProg Kernels
+  typedPassOption kernelsProg GPU
 
 kernelsMemPassOption ::
-  Pass KernelsMem.KernelsMem KernelsMem.KernelsMem ->
+  Pass GPUMem.GPUMem GPUMem.GPUMem ->
   String ->
   FutharkOption
 kernelsMemPassOption =
-  typedPassOption kernelsMemProg KernelsMem
+  typedPassOption kernelsMemProg GPUMem
 
 simplifyOption :: String -> FutharkOption
 simplifyOption short =
@@ -259,16 +261,16 @@ simplifyOption short =
   where
     perform (SOACS prog) config =
       SOACS <$> runPipeline (onePass simplifySOACS) config prog
-    perform (Kernels prog) config =
-      Kernels <$> runPipeline (onePass simplifyKernels) config prog
+    perform (GPU prog) config =
+      GPU <$> runPipeline (onePass simplifyGPU) config prog
     perform (MC prog) config =
       MC <$> runPipeline (onePass simplifyMC) config prog
     perform (Seq prog) config =
       Seq <$> runPipeline (onePass simplifySeq) config prog
     perform (SeqMem prog) config =
       SeqMem <$> runPipeline (onePass simplifySeqMem) config prog
-    perform (KernelsMem prog) config =
-      KernelsMem <$> runPipeline (onePass simplifyKernelsMem) config prog
+    perform (GPUMem prog) config =
+      GPUMem <$> runPipeline (onePass simplifyGPUMem) config prog
     perform (MCMem prog) config =
       MCMem <$> runPipeline (onePass simplifyMCMem) config prog
 
@@ -279,9 +281,9 @@ allocateOption :: String -> FutharkOption
 allocateOption short =
   passOption (passDescription pass) (UntypedPass perform) short long
   where
-    perform (Kernels prog) config =
-      KernelsMem
-        <$> runPipeline (onePass Kernels.explicitAllocations) config prog
+    perform (GPU prog) config =
+      GPUMem
+        <$> runPipeline (onePass GPU.explicitAllocations) config prog
     perform (Seq prog) config =
       SeqMem
         <$> runPipeline (onePass Seq.explicitAllocations) config prog
@@ -296,9 +298,9 @@ iplOption :: String -> FutharkOption
 iplOption short =
   passOption (passDescription pass) (UntypedPass perform) short long
   where
-    perform (Kernels prog) config =
-      Kernels
-        <$> runPipeline (onePass inPlaceLoweringKernels) config prog
+    perform (GPU prog) config =
+      GPU
+        <$> runPipeline (onePass inPlaceLoweringGPU) config prog
     perform (Seq prog) config =
       Seq
         <$> runPipeline (onePass inPlaceLoweringSeq) config prog
@@ -315,16 +317,16 @@ cseOption short =
   where
     perform (SOACS prog) config =
       SOACS <$> runPipeline (onePass $ performCSE True) config prog
-    perform (Kernels prog) config =
-      Kernels <$> runPipeline (onePass $ performCSE True) config prog
+    perform (GPU prog) config =
+      GPU <$> runPipeline (onePass $ performCSE True) config prog
     perform (MC prog) config =
       MC <$> runPipeline (onePass $ performCSE True) config prog
     perform (Seq prog) config =
       Seq <$> runPipeline (onePass $ performCSE True) config prog
     perform (SeqMem prog) config =
       SeqMem <$> runPipeline (onePass $ performCSE False) config prog
-    perform (KernelsMem prog) config =
-      KernelsMem <$> runPipeline (onePass $ performCSE False) config prog
+    perform (GPUMem prog) config =
+      GPUMem <$> runPipeline (onePass $ performCSE False) config prog
     perform (MCMem prog) config =
       MCMem <$> runPipeline (onePass $ performCSE False) config prog
 
@@ -332,11 +334,11 @@ cseOption short =
     pass = performCSE True :: Pass SOACS.SOACS SOACS.SOACS
 
 pipelineOption ::
-  (UntypedPassState -> Maybe (Prog fromlore)) ->
+  (UntypedPassState -> Maybe (Prog fromrep)) ->
   String ->
-  (Prog tolore -> UntypedPassState) ->
+  (Prog torep -> UntypedPassState) ->
   String ->
-  Pipeline fromlore tolore ->
+  Pipeline fromrep torep ->
   String ->
   [String] ->
   FutharkOption
@@ -413,7 +415,7 @@ commandLineOptions =
       ["compile-imperative-kernels"]
       ( NoArg $
           Right $ \opts ->
-            opts {futharkAction = KernelsMemAction $ const kernelImpCodeGenAction}
+            opts {futharkAction = GPUMemAction $ const kernelImpCodeGenAction}
       )
       "Translate program into the imperative IL with kernels and write it on standard output.",
     Option
@@ -429,7 +431,7 @@ commandLineOptions =
       ["compile-opencl"]
       ( NoArg $
           Right $ \opts ->
-            opts {futharkAction = KernelsMemAction $ compileOpenCLAction newFutharkConfig ToExecutable}
+            opts {futharkAction = GPUMemAction $ compileOpenCLAction newFutharkConfig ToExecutable}
       )
       "Compile the program using the OpenCL backend.",
     Option
@@ -503,14 +505,15 @@ commandLineOptions =
     soacsPassOption inlineFunctions [],
     kernelsPassOption babysitKernels [],
     kernelsPassOption tileLoops [],
-    kernelsPassOption unstreamKernels [],
-    kernelsPassOption sinkKernels [],
-    typedPassOption soacsProg Kernels extractKernels [],
+    kernelsPassOption unstreamGPU [],
+    kernelsPassOption sinkGPU [],
+    typedPassOption soacsProg GPU extractKernels [],
     typedPassOption soacsProg MC extractMulticore [],
     iplOption [],
     allocateOption "a",
-    kernelsMemPassOption doubleBufferKernels [],
+    kernelsMemPassOption doubleBufferGPU [],
     kernelsMemPassOption expandAllocations [],
+    kernelsMemPassOption ReuseAllocations.optimise [],
     cseOption [],
     simplifyOption "e",
     soacsPipelineOption
@@ -520,23 +523,23 @@ commandLineOptions =
       ["standard"],
     pipelineOption
       getSOACSProg
-      "Kernels"
-      Kernels
+      "GPU"
+      GPU
       "Run the default optimised kernels pipeline"
       kernelsPipeline
       []
       ["kernels"],
     pipelineOption
       getSOACSProg
-      "KernelsMem"
-      KernelsMem
+      "GPUMem"
+      GPUMem
       "Run the full GPU compilation pipeline"
       gpuPipeline
       []
       ["gpu"],
     pipelineOption
       getSOACSProg
-      "KernelsMem"
+      "GPUMem"
       SeqMem
       "Run the sequential CPU compilation pipeline"
       sequentialCpuPipeline
@@ -637,7 +640,10 @@ main = mainWithOptions newConfig commandLineOptions "options... program" compile
                 input <- liftIO $ T.readFile file
                 case parse file input of
                   Left err -> externalErrorS $ T.unpack err
-                  Right prog -> runPolyPasses config base $ construct prog
+                  Right prog ->
+                    case checkProg $ Alias.aliasAnalysis prog of
+                      Left err -> externalErrorS $ show err
+                      Right () -> runPolyPasses config base $ construct prog
 
               handlers =
                 [ ( ".fut",
@@ -648,8 +654,8 @@ main = mainWithOptions newConfig commandLineOptions "options... program" compile
                   (".fut_soacs", readCore parseSOACS SOACS),
                   (".fut_seq", readCore parseSeq Seq),
                   (".fut_seq_mem", readCore parseSeqMem SeqMem),
-                  (".fut_kernels", readCore parseKernels Kernels),
-                  (".fut_kernels_mem", readCore parseKernelsMem KernelsMem),
+                  (".fut_kernels", readCore parseGPU GPU),
+                  (".fut_kernels_mem", readCore parseGPUMem GPUMem),
                   (".fut_mc", readCore parseMC MC),
                   (".fut_mc_mem", readCore parseMCMem MCMem)
                 ]
@@ -675,23 +681,23 @@ runPolyPasses config base initial_prog = do
   case (end_prog, futharkAction config) of
     (SOACS prog, SOACSAction action) ->
       actionProcedure action prog
-    (Kernels prog, KernelsAction action) ->
+    (GPU prog, GPUAction action) ->
       actionProcedure action prog
     (SeqMem prog, SeqMemAction action) ->
       actionProcedure (action base) prog
-    (KernelsMem prog, KernelsMemAction action) ->
+    (GPUMem prog, GPUMemAction action) ->
       actionProcedure (action base) prog
     (MCMem prog, MCMemAction action) ->
       actionProcedure (action base) prog
     (SOACS soacs_prog, PolyAction acs) ->
       actionProcedure acs soacs_prog
-    (Kernels kernels_prog, PolyAction acs) ->
+    (GPU kernels_prog, PolyAction acs) ->
       actionProcedure acs kernels_prog
     (MC mc_prog, PolyAction acs) ->
       actionProcedure acs mc_prog
     (Seq seq_prog, PolyAction acs) ->
       actionProcedure acs seq_prog
-    (KernelsMem mem_prog, PolyAction acs) ->
+    (GPUMem mem_prog, PolyAction acs) ->
       actionProcedure acs mem_prog
     (SeqMem mem_prog, PolyAction acs) ->
       actionProcedure acs mem_prog
