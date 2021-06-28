@@ -39,12 +39,12 @@ class
 instance Pretty VName where
   ppr (VName vn i) = ppr vn <> text "_" <> text (show i)
 
-instance Pretty NoUniqueness where
-  ppr _ = mempty
-
 instance Pretty Commutativity where
   ppr Commutative = text "commutative"
   ppr Noncommutative = text "noncommutative"
+
+instance Pretty NoUniqueness where
+  ppr _ = mempty
 
 instance Pretty Shape where
   ppr = mconcat . map (brackets . ppr) . shapeDims

@@ -12,6 +12,7 @@ import Data.Bifunctor (bimap)
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.IR.Syntax.Core
 import Futhark.Util.IntegralExp
+import Futhark.Util.Pretty (pretty)
 import Prelude hiding (quot)
 
 iConst :: IntType -> Integer -> PrimExp VName

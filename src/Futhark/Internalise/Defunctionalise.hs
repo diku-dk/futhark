@@ -1091,11 +1091,9 @@ typeFromSV :: StaticVal -> PatternType
 typeFromSV (Dynamic tp) =
   tp
 typeFromSV (LambdaSV _ _ _ env) =
-  Scalar $
-    Record $
-      M.fromList $
-        map (bimap (nameFromString . pretty) (typeFromSV . bindingSV)) $
-          M.toList env
+  Scalar . Record . M.fromList $
+    map (bimap (nameFromString . pretty) (typeFromSV . bindingSV)) $
+      M.toList env
 typeFromSV (RecordSV ls) =
   let ts = map (fmap typeFromSV) ls
    in Scalar $ Record $ M.fromList ts
@@ -1174,13 +1172,7 @@ updatePattern (RecordPattern ps loc) (RecordSV svs)
   | ps' <- sortOn fst ps,
     svs' <- sortOn fst svs =
     RecordPattern
-      ( zipWith
-          ( \(n, p) (_, sv) ->
-              (n, updatePattern p sv)
-          )
-          ps'
-          svs'
-      )
+      (zipWith (\(n, p) (_, sv) -> (n, updatePattern p sv)) ps' svs')
       loc
 updatePattern (PatternParens pat loc) sv =
   PatternParens (updatePattern pat sv) loc
@@ -1251,9 +1243,14 @@ defuncValBind valbind@(ValBind _ name retdecl (Info (rettype, retext)) tparams p
         ++ "but the defunctionaliser expects a monomorphic input program."
   (tparams', params', body', sv) <-
     defuncLet (map typeParamName tparams) params body rettype
-  let rettype' = combineTypeShapes rettype $ anySizes $ toStruct $ typeOf body'
   globals <- asks fst
-  let bound_sizes = S.fromList tparams' <> globals
+  let bound_sizes = foldMap patternNames params' <> S.fromList tparams' <> globals
+      rettype' =
+        -- FIXME: dubious that we cannot assume that all sizes in the
+        -- body are in scope.  This is because when we insert
+        -- applications of lifted functions, we don't properly update
+        -- the types in the return type annotation.
+        combineTypeShapes rettype $ first (anyDimIfNotBound bound_sizes) $ toStruct $ typeOf body'
   (missing_dims, params'') <- sizesForAll bound_sizes params'
   return
     ( valbind
@@ -1272,18 +1269,17 @@ defuncValBind valbind@(ValBind _ name retdecl (Info (rettype, retext)) tparams p
         },
       M.singleton name $
         Binding
-          ( Just
-              ( first
-                  (map typeParamName)
-                  (valBindTypeScheme valbind)
-              )
-          )
+          (Just (first (map typeParamName) (valBindTypeScheme valbind)))
           sv,
       case sv of
         DynamicFun {} -> True
         Dynamic {} -> True
         _ -> False
     )
+  where
+    anyDimIfNotBound bound_sizes (NamedDim v)
+      | qualLeaf v `S.notMember` bound_sizes = AnyDim $ Just $ qualLeaf v
+    anyDimIfNotBound _ d = d
 
 -- | Defunctionalize a list of top-level declarations.
 defuncVals :: [ValBind] -> DefM ()

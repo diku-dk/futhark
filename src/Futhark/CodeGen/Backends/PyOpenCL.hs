@@ -18,6 +18,7 @@ import qualified Futhark.CodeGen.ImpGen.OpenCL as ImpGen
 import Futhark.IR.GPUMem (GPUMem, Prog)
 import Futhark.MonadFreshNames
 import Futhark.Util (zEncodeString)
+import Futhark.Util.Pretty (pretty)
 
 -- | Compile the program to Python with calls to OpenCL.
 compileProg ::
