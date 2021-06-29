@@ -132,7 +132,7 @@ data Constants a = Constants
 data Signedness
   = TypeUnsigned
   | TypeDirect
-  deriving (Eq, Show)
+  deriving (Eq, Ord, Show)
 
 -- | A description of an externally meaningful value.
 data ValueDesc

@@ -37,6 +37,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Size propagation bug in defunctionalisation (#1384).
 
+  * In the C FFI, array types used only internally to implement opaque
+    types are no longer exposed (#1387).
+
 ## [0.19.6]
 
 ### Added
