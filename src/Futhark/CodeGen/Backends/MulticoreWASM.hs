@@ -44,7 +44,7 @@ compileProg prog = do
       MC.cliOptions
       prog'
     
-  pure (ws, (prog'', javascriptWrapper (fRepMyRep prog'), emccExportNames (fRepMyRep prog')))
+  pure (ws, (prog'', javascriptWrapper (fRepMyRep prog'), "_futhark_context_config_set_num_threads":(emccExportNames (fRepMyRep prog'))))
   where
     generateContext = do
       let scheduler_h = $(embedStringFile "rts/c/scheduler.h")
