@@ -99,9 +99,17 @@ import Futhark.MonadFreshNames
 import qualified Language.C.Quote.OpenCL as C
 import qualified Language.C.Syntax as C
 
+-- How public an array type definition sould be.  Public types show up
+-- in the generated API, while private types are used only to
+-- implement the members of opaques.
+data Publicness = Private | Public
+  deriving (Eq, Ord, Show)
+
+type ArrayType = (Space, Signedness, PrimType, Int)
+
 data CompilerState s = CompilerState
-  { compArrayStructs :: [((Signedness, PrimType, Int), (C.Type, [C.Definition]))],
-    compOpaqueStructs :: [(String, (C.Type, [C.Definition]))],
+  { compArrayTypes :: M.Map ArrayType Publicness,
+    compOpaqueTypes :: M.Map String [ValueDesc],
     compEarlyDecls :: DL.DList C.Definition,
     compInit :: [C.Stm],
     compNameSrc :: VNameSource,
@@ -118,8 +126,8 @@ data CompilerState s = CompilerState
 newCompilerState :: VNameSource -> s -> CompilerState s
 newCompilerState src s =
   CompilerState
-    { compArrayStructs = [],
-      compOpaqueStructs = [],
+    { compArrayTypes = mempty,
+      compOpaqueTypes = mempty,
       compEarlyDecls = mempty,
       compInit = [],
       compNameSrc = src,
@@ -317,10 +325,6 @@ envStaticArray = opsStaticArray . envOperations
 
 envFatMemory :: CompilerEnv op s -> Bool
 envFatMemory = opsFatMemory . envOperations
-
-arrayDefinitions, opaqueDefinitions :: CompilerState s -> [C.Definition]
-arrayDefinitions = concatMap (snd . snd) . compArrayStructs
-opaqueDefinitions = concatMap (snd . snd) . compOpaqueStructs
 
 initDecls, arrayDecls, opaqueDecls, entryDecls, miscDecls :: CompilerState s -> [C.Definition]
 initDecls = concatMap (DL.toList . snd) . filter ((== InitDecl) . fst) . M.toList . compHeaderDecls
@@ -795,14 +799,14 @@ criticalSection ops x =
            |]
 
 arrayLibraryFunctions ::
+  Publicness ->
   Space ->
   PrimType ->
   Signedness ->
-  [DimSize] ->
+  Int ->
   CompilerM op s [C.Definition]
-arrayLibraryFunctions space pt signed shape = do
-  let rank = length shape
-      pt' = signedPrimTypeToCType signed pt
+arrayLibraryFunctions pub space pt signed rank = do
+  let pt' = signedPrimTypeToCType signed pt
       name = arrayName pt signed rank
       arr_name = "futhark_" ++ name
       array_type = [C.cty|struct $id:arr_name|]
@@ -871,26 +875,23 @@ arrayLibraryFunctions space pt signed shape = do
   ctx_ty <- contextType
   ops <- asks envOperations
 
-  headerDecl
-    (ArrayDecl name)
+  let proto = case pub of
+        Public -> headerDecl (ArrayDecl name)
+        Private -> libDecl
+
+  proto
     [C.cedecl|struct $id:arr_name;|]
-  headerDecl
-    (ArrayDecl name)
+  proto
     [C.cedecl|$ty:array_type* $id:new_array($ty:ctx_ty *ctx, const $ty:pt' *data, $params:shape_params);|]
-  headerDecl
-    (ArrayDecl name)
+  proto
     [C.cedecl|$ty:array_type* $id:new_raw_array($ty:ctx_ty *ctx, const $ty:memty data, int offset, $params:shape_params);|]
-  headerDecl
-    (ArrayDecl name)
+  proto
     [C.cedecl|int $id:free_array($ty:ctx_ty *ctx, $ty:array_type *arr);|]
-  headerDecl
-    (ArrayDecl name)
+  proto
     [C.cedecl|int $id:values_array($ty:ctx_ty *ctx, $ty:array_type *arr, $ty:pt' *data);|]
-  headerDecl
-    (ArrayDecl name)
+  proto
     [C.cedecl|$ty:memty $id:values_raw_array($ty:ctx_ty *ctx, $ty:array_type *arr);|]
-  headerDecl
-    (ArrayDecl name)
+  proto
     [C.cedecl|const typename int64_t* $id:shape_array($ty:ctx_ty *ctx, $ty:array_type *arr);|]
 
   return
@@ -1033,6 +1034,9 @@ opaqueLibraryFunctions desc vds = do
 
   headerDecl
     (OpaqueDecl desc)
+    [C.cedecl|struct $id:name;|]
+  headerDecl
+    (OpaqueDecl desc)
     [C.cedecl|int $id:free_opaque($ty:ctx_ty *ctx, $ty:opaque_type *obj);|]
   headerDecl
     (OpaqueDecl desc)
@@ -1076,52 +1080,47 @@ opaqueLibraryFunctions desc vds = do
           }
     |]
 
-valueDescToCType :: ValueDesc -> CompilerM op s C.Type
-valueDescToCType (ScalarValue pt signed _) =
+valueDescToCType :: Publicness -> ValueDesc -> CompilerM op s C.Type
+valueDescToCType _ (ScalarValue pt signed _) =
   return $ signedPrimTypeToCType signed pt
-valueDescToCType (ArrayValue mem space pt signed shape) = do
+valueDescToCType pub (ArrayValue _ space pt signed shape) = do
   let rank = length shape
-  exists <- gets $ lookup (signed, pt, rank) . compArrayStructs
-  case exists of
-    Just (cty, _) -> return cty
-    Nothing -> do
-      memty <- memToCType mem space
-      name <- publicName $ arrayName pt signed rank
-      let struct = [C.cedecl|struct $id:name { $ty:memty mem; typename int64_t shape[$int:rank]; };|]
-          stype = [C.cty|struct $id:name|]
-      library <- arrayLibraryFunctions space pt signed shape
-      modify $ \s ->
-        s
-          { compArrayStructs =
-              ((signed, pt, rank), (stype, struct : library)) : compArrayStructs s
-          }
-      return stype
+  name <- publicName $ arrayName pt signed rank
+  let add = M.insertWith max (space, signed, pt, rank) pub
+  modify $ \s -> s {compArrayTypes = add $ compArrayTypes s}
+  pure [C.cty|struct $id:name|]
 
 opaqueToCType :: String -> [ValueDesc] -> CompilerM op s C.Type
 opaqueToCType desc vds = do
   name <- publicName $ opaqueName desc vds
-  exists <- gets $ lookup name . compOpaqueStructs
-  case exists of
-    Just (ty, _) -> return ty
-    Nothing -> do
-      members <- zipWithM field vds [(0 :: Int) ..]
-      let struct = [C.cedecl|struct $id:name { $sdecls:members };|]
-          stype = [C.cty|struct $id:name|]
-      headerDecl (OpaqueDecl desc) [C.cedecl|struct $id:name;|]
-      library <- opaqueLibraryFunctions desc vds
-      modify $ \s ->
-        s
-          { compOpaqueStructs =
-              (name, (stype, struct : library)) :
-              compOpaqueStructs s
-          }
-      return stype
+  let add = M.insert desc vds
+  modify $ \s -> s {compOpaqueTypes = add $ compOpaqueTypes s}
+  -- Now ensure that the constituent array types will exist.
+  mapM_ (valueDescToCType Private) vds
+  pure [C.cty|struct $id:name|]
+
+generateAPITypes :: CompilerM op s ()
+generateAPITypes = do
+  mapM_ generateArray . M.toList =<< gets compArrayTypes
+  mapM_ generateOpaque . M.toList =<< gets compOpaqueTypes
   where
+    generateArray ((space, signed, pt, rank), pub) = do
+      name <- publicName $ arrayName pt signed rank
+      let memty = fatMemType space
+      libDecl [C.cedecl|struct $id:name { $ty:memty mem; typename int64_t shape[$int:rank]; };|]
+      mapM libDecl =<< arrayLibraryFunctions pub space pt signed rank
+
+    generateOpaque (desc, vds) = do
+      name <- publicName $ opaqueName desc vds
+      members <- zipWithM field vds [(0 :: Int) ..]
+      libDecl [C.cedecl|struct $id:name { $sdecls:members };|]
+      mapM libDecl =<< opaqueLibraryFunctions desc vds
+
     field vd@ScalarValue {} i = do
-      ct <- valueDescToCType vd
+      ct <- valueDescToCType Private vd
       return [C.csdecl|$ty:ct $id:(tupleField i);|]
     field vd i = do
-      ct <- valueDescToCType vd
+      ct <- valueDescToCType Private vd
       return [C.csdecl|$ty:ct *$id:(tupleField i);|]
 
 allTrue :: [C.Exp] -> C.Exp
@@ -1142,7 +1141,7 @@ prepareEntryInputs args = collect' $ zipWithM prepare [(0 :: Int) ..] args
 
     prepare pno (TransparentValue vd) = do
       let pname = "in" ++ show pno
-      (ty, check) <- prepareValue [C.cexp|$id:pname|] vd
+      (ty, check) <- prepareValue Public [C.cexp|$id:pname|] vd
       return
         ( [C.cparam|const $ty:ty $id:pname|],
           allTrue check
@@ -1152,18 +1151,18 @@ prepareEntryInputs args = collect' $ zipWithM prepare [(0 :: Int) ..] args
       let pname = "in" ++ show pno
           field i ScalarValue {} = [C.cexp|$id:pname->$id:(tupleField i)|]
           field i ArrayValue {} = [C.cexp|$id:pname->$id:(tupleField i)|]
-      checks <- map snd <$> zipWithM prepareValue (zipWith field [0 ..] vds) vds
+      checks <- map snd <$> zipWithM (prepareValue Private) (zipWith field [0 ..] vds) vds
       return
         ( [C.cparam|const $ty:ty *$id:pname|],
           allTrue $ concat checks
         )
 
-    prepareValue src (ScalarValue pt signed name) = do
+    prepareValue _ src (ScalarValue pt signed name) = do
       let pt' = signedPrimTypeToCType signed pt
       stm [C.cstm|$id:name = $exp:src;|]
       return (pt', [])
-    prepareValue src vd@(ArrayValue mem _ _ _ shape) = do
-      ty <- valueDescToCType vd
+    prepareValue pub src vd@(ArrayValue mem _ _ _ shape) = do
+      ty <- valueDescToCType pub vd
 
       stm [C.cstm|$exp:mem = $exp:src->mem;|]
 
@@ -1189,7 +1188,7 @@ prepareEntryOutputs = collect' . zipWithM prepare [(0 :: Int) ..]
   where
     prepare pno (TransparentValue vd) = do
       let pname = "out" ++ show pno
-      ty <- valueDescToCType vd
+      ty <- valueDescToCType Public vd
 
       case vd of
         ArrayValue {} -> do
@@ -1202,7 +1201,7 @@ prepareEntryOutputs = collect' . zipWithM prepare [(0 :: Int) ..]
     prepare pno (OpaqueValue desc vds) = do
       let pname = "out" ++ show pno
       ty <- opaqueToCType desc vds
-      vd_ts <- mapM valueDescToCType vds
+      vd_ts <- mapM (valueDescToCType Private) vds
 
       stm [C.cstm|assert((*$id:pname = ($ty:ty*) malloc(sizeof($ty:ty))) != NULL);|]
 
@@ -1465,11 +1464,7 @@ $edecls:prototypes
 
 $edecls:lib_decls
 
-$edecls:(map funcToDef definitions)
-
-$edecls:(arrayDefinitions endstate)
-
-$edecls:(opaqueDefinitions endstate)
+$edecls:definitions
 
 $edecls:entry_point_decls
   |]
@@ -1493,7 +1488,7 @@ $edecls:entry_point_decls
 
       ctx_ty <- contextType
 
-      (prototypes, definitions) <-
+      (prototypes, functions) <-
         unzip <$> mapM (compileFun get_consts [[C.cparam|$ty:ctx_ty *ctx|]]) funs
 
       mapM_ earlyDecl memstructs
@@ -1506,7 +1501,7 @@ $edecls:entry_point_decls
 
       commonLibFuns memreport
 
-      return (prototypes, definitions, entry_points)
+      return (prototypes, map funcToDef functions, entry_points)
 
     funcToDef func = C.FuncDef func loc
       where
@@ -1525,6 +1520,7 @@ $edecls:entry_point_decls
 
 commonLibFuns :: [C.BlockItem] -> CompilerM op s ()
 commonLibFuns memreport = do
+  generateAPITypes
   ctx <- contextType
   ops <- asks envOperations
   profilereport <- gets $ DL.toList . compProfileItems
