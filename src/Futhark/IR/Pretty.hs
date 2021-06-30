@@ -298,7 +298,8 @@ instance Pretty EntryPointType where
 instance PrettyRep rep => Pretty (FunDef rep) where
   ppr (FunDef entry attrs name rettype fparams body) =
     annot (attrAnnots attrs) $
-      fun <+> text (nameToString name)
+      fun
+        </> indent 2 (text (nameToString name))
         <+> apply (map ppr fparams)
         </> indent 2 (colon <+> align (ppTuple' rettype))
         <+> equals
