@@ -2,7 +2,7 @@
 module Futhark.Optimise.MemBlockCoalesce.DataStructs
        ( Coalesced(..),CoalescedKind(..), ArrayMemBound(..), AllocTab
        , V2MemTab, AliasTab, LUTabFun, LUTabPrg, ScalarTab,  CoalsTab
-       , CoalsEntry(..), FreeVarSubsts, MemRefs(..)
+       , CoalsEntry(..), FreeVarSubsts, LmadRef, MemRefs(..)
        , aliasTransClos, updateAliasing, getNamesFromSubExps, unionCoalsEntry
        , getArrMemAssocFParam, getScopeMemInfo, prettyCoalTab
        , createsNewArrOK, getArrMemAssoc, getUniqueMemFParam

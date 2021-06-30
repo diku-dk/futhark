@@ -1,14 +1,15 @@
 {-# LANGUAGE TypeFamilies, FlexibleContexts #-}
 module Futhark.Optimise.MemBlockCoalesce.MemRefAggreg
-       ( recordDstUses )
+       ( recordMemRefUses, markFailedCoal )
        where
 
 
 import Prelude
 import Data.Maybe
 import qualified Data.Map.Strict as M
---import qualified Data.Set as S
+import qualified Data.Set as S
 import qualified Control.Exception.Base as Exc
+import Data.List.NonEmpty (NonEmpty (..))
 
 --import Debug.Trace
 
@@ -23,151 +24,155 @@ mem_empty :: MemRefs
 mem_empty = MemRefs mempty mempty
 
 
-{--
-addName :: VName -> Maybe (VName, ExpMem.IxFun)
-        -> Maybe (VName, VName, ExpMem.IxFun)
-addName _ Nothing = Nothing
-addName x (Just (a, b)) = Just (x, a, b)
---}
-
-getUseSumFromExp :: TopDnEnv -> CoalsTab
-                 -> Exp (Aliases ExpMem.SeqMem)
-                 -> [(VName, VName, ExpMem.IxFun)]
-getUseSumFromExp td_env coal_tab (BasicOp (Index arr slc))
+-- This function computes the written and read memory references for the current statement
+getUseSumFromStm :: TopDnEnv -> CoalsTab
+                 -> Stm (Aliases ExpMem.SeqMem)
+                 -> ([(VName, VName, ExpMem.IxFun)],[(VName, VName, ExpMem.IxFun)])
+getUseSumFromStm td_env coal_tab (Let (Pattern{}) _ (BasicOp (Index arr slc)))
   | Just (MemBlock _ shp _ _) <- getScopeMemInfo arr (scope td_env),
     length slc == length (shapeDims shp) && all isFix slc =
       case getDirAliasedIxfn td_env coal_tab arr of
-        Nothing -> []
+        Nothing -> ([],[])
         Just (_, mem_arr, ixfn_arr) ->
-            [(arr, mem_arr, IxFun.slice ixfn_arr $ map (fmap pe64) slc)]
+            ([],[(arr, mem_arr, IxFun.slice ixfn_arr $ map (fmap pe64) slc)])
   where
     isFix (DimFix{}) = True
     isFix _ = False
-getUseSumFromExp _ _ (BasicOp (Index{})) = [] -- incomplete slices
-getUseSumFromExp td_env coal_tab (BasicOp (ArrayLit ses _)) =
-  mapMaybe (getDirAliasedIxfn td_env coal_tab) $ mapMaybe seName ses
+getUseSumFromStm _ _ (Let (Pattern{}) _ (BasicOp (Index{}))) = ([],[]) -- incomplete slices
+getUseSumFromStm td_env coal_tab (Let (Pattern [] pes) _ (BasicOp (ArrayLit ses _))) =
+  let rds  = mapMaybe (getDirAliasedIxfn td_env coal_tab) $ mapMaybe seName ses
+      wrts = mapMaybe (getDirAliasedIxfn td_env coal_tab) $ map patElemName pes
+  in  (wrts, wrts++rds)
   where
     seName (Var a)      = Just a
     seName (Constant _) = Nothing
 -- In place update @x[slc] <- a@. In the "in-place update" case,
 --   summaries should be added after the old variable @x@ has
 --   been added in the active coalesced table.
-getUseSumFromExp td_env coal_tab (BasicOp (Update x slc a_se))
-  | Just (_, m_x, x_ixfn) <- getDirAliasedIxfn td_env coal_tab x =
+getUseSumFromStm td_env coal_tab (Let (Pattern [] [x']) _ (BasicOp (Update x slc a_se)))
+  | Just (_, m_x, x_ixfn) <- getDirAliasedIxfn td_env coal_tab (patElemName x') =
     let x_ixfn_slc = IxFun.slice x_ixfn $ map (fmap pe64) slc
         r1 = (x, m_x, x_ixfn_slc)
     in  case a_se of
-          Constant _ -> [r1]
+          Constant _ -> ([r1], [r1])
           Var a -> case getDirAliasedIxfn td_env coal_tab a of
-                    Nothing -> [r1]
-                    Just r2 -> [r1, r2]
-getUseSumFromExp _ _ (BasicOp (Update{})) = Exc.assert False []
--- copy case
-getUseSumFromExp td_env coal_tab (BasicOp (Copy x)) =
-  case getDirAliasedIxfn td_env coal_tab x of
-    Just r -> [r]
-    Nothing -> Exc.assert False [] -- should not happen as @x@ should be an array
+                    Nothing -> ([r1], [r1])
+                    Just r2 -> ([r1], [r1, r2])
+getUseSumFromStm _ _ (Let (Pattern{}) _ (BasicOp (Update{}))) = Exc.assert False ([],[])
+-- y = copy x
+getUseSumFromStm td_env coal_tab (Let (Pattern [] [y]) _  (BasicOp (Copy x))) =
+  let wrt = getDirAliasedIxfn td_env coal_tab $ patElemName y
+      rd  = getDirAliasedIxfn td_env coal_tab x
+  in  case (wrt, rd) of
+        (Just w, Just r) -> ([w], [w, r])
+        _ -> Exc.assert False ([],[]) -- should not happen as @x@ should be an array
+getUseSumFromStm _ _ (Let (Pattern{}) _ (BasicOp (Copy{}))) = Exc.assert False ([],[])
 -- concat
-getUseSumFromExp td_env coal_tab (BasicOp (Concat _i a bs _ses)) =
-  mapMaybe (getDirAliasedIxfn td_env coal_tab) (a : bs)
-getUseSumFromExp td_env coal_tab (BasicOp (Manifest _perm x)) =
-  mapMaybe (getDirAliasedIxfn td_env coal_tab) [x]
-getUseSumFromExp td_env coal_tab (BasicOp (Replicate _shp (Var x))) =
-  mapMaybe (getDirAliasedIxfn td_env coal_tab) [x]
+getUseSumFromStm td_env coal_tab (Let (Pattern _ ys) _  (BasicOp (Concat _i a bs _ses))) =
+  let ws = mapMaybe (getDirAliasedIxfn td_env coal_tab) $ map patElemName ys
+      rs = mapMaybe (getDirAliasedIxfn td_env coal_tab) (a : bs)
+  in  (ws, ws++rs)
+getUseSumFromStm td_env coal_tab (Let (Pattern _ ys) _  (BasicOp (Manifest _perm x))) =
+  let ws = mapMaybe (getDirAliasedIxfn td_env coal_tab) $ map patElemName ys
+      rs = mapMaybe (getDirAliasedIxfn td_env coal_tab) [x]
+  in  (ws, ws++rs)
+getUseSumFromStm td_env coal_tab (Let (Pattern _ ys) _  (BasicOp (Replicate _shp se))) =
+  let ws = mapMaybe (getDirAliasedIxfn td_env coal_tab) $ map patElemName ys
+  in  case se of
+        Constant _ -> (ws, ws)
+        Var x -> (ws, ws ++ mapMaybe (getDirAliasedIxfn td_env coal_tab) [x])
 -- UnAcc, UpdateAcc are not supported
---getUseSumFromExp td_env coal_tab (BasicOp (UnAcc{})) =
+--getUseSumFromStm td_env coal_tab (BasicOp (UnAcc{})) =
 --  error "UnAcc is not supported yet!"
---getUseSumFromExp td_env coal_tab (BasicOp (UpdateAcc{})) =
+--getUseSumFromStm td_env coal_tab (BasicOp (UpdateAcc{})) =
 --  error "UpdateAcc is not supported yet!"
 -- SubExp, Scratch, reshape, rearrange, rotate and scalar ops
 --   do not require an array access.
-getUseSumFromExp _ _ (BasicOp{}) = []
+getUseSumFromStm _ _ (Let (Pattern{}) _ (BasicOp{})) = ([],[])
 -- if-then-else, loops are supposed to be treated separately,
 -- calls are not supported, and Ops are not yet supported
-getUseSumFromExp _ _ e =
-  error ("In MemRefAggreg.hs, getUseSumFromExp, unsuported case of exp being: " ++ pretty e)
+getUseSumFromStm _ _ stm =
+  error ("In MemRefAggreg.hs, getUseSumFromStm, unsuported case of stm being: " ++ pretty stm)
 
-{--
-getUseSumFromExp :: Exp (Aliases ExpMem.SeqMem)
-                 -> M.Map VName Names
-                 -> [(VName, VName, ExpMem.IxFun)]
-getUseSumFromExp (Index arr slc) v_alias m_alias 
-  | Just (MemBlock tp shp m ixfn) <- getScopeMemInfo arr scope_tab =
-    if length slc == length (shapeDims shp) && all isFix slc
-    then case M.lookup m actv_tab of
-            Just info@(CoalsEntry x_mem _ _ vtab _ _) ->
-                case M.lookup arr (vartab info) of
-                    Just (Coalesced k mblk@(MemBlock _ _ _ new_indfun) _) ->
-                        [(arr, dstmem info, new_indfun)]
-                    Nothing -> -- search in v_alias
-                        case getTransitiveAlias v_alias (vartab info) arr id of
-                            Nothing -> error "can't happen ??"
-            Nothing ->
-    else [] -- not full slice, so the actual access manifests later
-    where
-      isFix (DimFix _) = True
-      isFix _ = False
-getUseSumFromExp (Index arr slc) m_alias =
-  error "Can't Happen in MemRefAggreg.hs, fun getUseSumFromExp"
---}
-
-
-
-{--
-getMemRefsStm :: TopDnEnv -> BotUpEnv -> Stm (Aliases ExpMem.SeqMem) -> MemRefs
-getMemRefsStm td_env bu_env (Let (Pattern [] [pe]) _ (BasicOp (SubExp (Var v)))) = mem_empty
-getMemRefsStm td_env bu_env (Let (Pattern [] [pe]) _ (BasicOp (Opaque (Var v)))) = mem_empty
-getMemRefsStm td_env bu_env (Let (Pattern [] [pe]) _ (BasicOp (ArrayLit ses _tp))) =
-  let nms = mapMaybe se2Maybe ses
-      mb_ixfs = map (\(MemBlock _ _ m ixf) -> (m,ixf)) $
-      				mapMaybe (`getScopeMemInfo` (scope td_env)) nms
-  	  act_tab' = M.map (\etry -> ) act_tab 
-  where
-  	se2Maybe (Var nm) = Just nm
-  	se2Maybe (Constant _) = Nothing
-  	updateCoalEtry :: [(VName,ExpMem.IxFun)] -> CoalsEntry -> CoalsEntry
-  	updateCoalEtry mb_ixfs etry =
-
---  | Just primexp <- primExpFromExp (basePMconv (scope td_env) (scals bu_env)) e =
-
-getMemIxfun x scope_td act_tab
-  | Nothing <- getScopeMemInfo x scope_td = Nothing
-getMemIxfun x
-  | Just (MemBlock _ptp _shp m ixfn) <- getScopeMemInfo x scope_td,
-  	Just coal_etry <- M.lookup m act_tab =
---}
-
-recordDstUses :: Pattern (Aliases ExpMem.SeqMem)
-              -> Exp (Aliases ExpMem.SeqMem)
-              -> TopDnEnv -> CoalsTab -> InhibitTab
+-- | This function:
+--     1. computes the written and read memory references for the current statement
+--          (by calling getUseSumFromStm)
+--     2. fails the entries in active coalesced table for which the 
+recordMemRefUses:: TopDnEnv -> CoalsTab -> InhibitTab
+              -> Stm (Aliases ExpMem.SeqMem)
               -> (CoalsTab,InhibitTab)
-recordDstUses pat e td_env active_tab inhibit_tab =
-  let inner_free_vars = freeIn e
-      uses = getUseSumFromExp td_env active_tab
-      e_mems  = mapMaybe (`getScopeMemInfo` (scope td_env)) $ namesToList inner_free_vars
-      -- ToDo: understand why the memory block of pattern must be filtered:
-      --       this definitely needs to be relaxed, e.g., because the src
-      --       and sink can be created in the same loop.
-      memasoc = getArrMemAssoc pat
-      -- get memory-block names that are used in the current stmt.
-      stm_mems= namesFromList $ map (\(MemBlock _ _ mnm _) -> mnm) $
-                e_mems ++ map snd memasoc
+recordMemRefUses td_env active_tab inhibit_tab stm =
+  let (stm_wrts0, stm_uses0) = getUseSumFromStm td_env active_tab stm
+      (stm_wrts,  stm_uses)  = (map getLast2 stm_wrts0, map getLast2 stm_uses0)
 
-      -- BIG BUG/ToDo: take the aliasing transitive closure of @all_mems@
-      all_mems = stm_mems
+      active_etries = M.toList active_tab
+
+      mb_wrts = map
+        (\(m_b,etry) ->
+          let all_aliases = addNames mempty m_b
+              ixfns = map snd $ filter ((`nameIn` all_aliases) . fst) stm_wrts
+              wrt_lmads = mapMaybe mbLmad ixfns
+              prev_uses = (dstrefs . memrefs) etry
+              no_overlap = noMemOverlap prev_uses $ S.fromList wrt_lmads
+          in  if length wrt_lmads == length ixfns && no_overlap
+              then Just (S.fromList wrt_lmads)
+              else Nothing
+        ) active_etries
+
+      mb_lmads = map
+        (\(_,etry) -> 
+          let all_aliases = foldl addNames mempty $ namesToList $ alsmem etry
+              ixfns = map snd $ filter ((`nameIn` all_aliases) . fst) stm_uses
+              lmads = mapMaybe mbLmad ixfns
+          in  if length lmads == length ixfns
+              then Just (S.fromList lmads)
+              else Nothing
+        ) active_etries
 
       -- keep only the entries that do not overlap with the memory
       -- blocks defined in @pat@ or @inner_free_vars@.
       -- the others must be recorded in @inhibit_tab@ because
       -- they violate the 3rd safety condition.
-      active_tab1 = M.filter (\etry -> mempty == namesIntersection all_mems (alsmem etry)) active_tab
-      failed_tab  = M.difference active_tab active_tab1
+      active_tab1 = M.fromList $ map (\(wrts, uses, (k,etry)) -> (k,addLmads wrts uses etry)) $
+                      filter okMemRef $ zip3 mb_wrts mb_lmads active_etries
+      failed_tab  = M.fromList $ map thrd $ filter (not . okMemRef) $
+                      zip3 mb_wrts mb_lmads active_etries
       (_,inhibit_tab1) = foldl markFailedCoal (failed_tab,inhibit_tab) (M.keys failed_tab)
-
   in  (active_tab1, inhibit_tab1)
+  where
+    thrd (_, _, c) = c
+    okMemRef (Nothing, _, _) = False
+    okMemRef (_, Nothing, _) = False
+    okMemRef (_, _, _)       = True
+    getLast2 (_, a, b) = (a,b) 
+    addNames acc m =
+      case M.lookup m (m_alias td_env) of
+        Nothing -> acc
+        Just nms-> nms <> acc
+    mbLmad (IxFun.IxFun (lmad :| []) _ _) = Just lmad
+    mbLmad _ = Nothing
+    addLmads (Just wrts) (Just uses) etry =
+      let memref = memrefs etry
+          memrefs' = memref { srcwrts = wrts `S.union` (srcwrts memref)
+                            , dstrefs = uses `S.union` (dstrefs memref)
+                            }
+      in  etry { memrefs = memrefs'}
+    addLmads _ _ _ =
+        error "Impossible case reached because we have filtered Nothings before"
 
+-- ToDo: implement this function as precise as possible
+noMemOverlap :: S.Set LmadRef -> S.Set LmadRef -> Bool
+noMemOverlap mr1 mr2 =
+  if mr1 == mempty || mr2 == mempty
+  then True
+  else False
 
--- redundant, also in ArrayCoalescing.hs; please get rid of it
+-- | Memory-block removal from active-coalescing table
+--   should only be handled via this function, it is easy
+--   to run into infinite execution problem; i.e., the
+--   fix-pointed iteration of coalescing transformation
+--   assumes that whenever a coalescing fails it is
+--   recorded in the @inhibit@ table.
 markFailedCoal :: (CoalsTab, InhibitTab)
                -> VName
                -> (CoalsTab, InhibitTab)
