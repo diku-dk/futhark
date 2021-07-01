@@ -522,13 +522,13 @@ type EntryPoint = (Name, [EntryPointType], [EntryPointType])
 data EntryPointType
   = -- | Is an unsigned integer or array of unsigned
     -- integers.
-    TypeUnsigned
+    TypeUnsigned Uniqueness
   | -- | A black box type comprising this many core
     -- values.  The string is a human-readable
     -- description with no other semantics.
-    TypeOpaque String Int
+    TypeOpaque Uniqueness String Int
   | -- | Maps directly.
-    TypeDirect
+    TypeDirect Uniqueness
   deriving (Eq, Show, Ord)
 
 -- | An entire Futhark program.
