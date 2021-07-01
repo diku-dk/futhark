@@ -52,8 +52,19 @@ All variables have types, and all entry points accept inputs and
 produce outputs of defined types.  The notion of transparent and
 opaque types are the same as in the C API: primitives and array of
 primitives are directly supported, and everything else is treated as
-opaque.  See also :ref:`valuemapping`. When printed, types
-follow basic Futhark type syntax *without* sizes (e.g. ``[][]i32``).
+opaque.  See also :ref:`valuemapping`. When printed, types follow
+basic Futhark type syntax *without* sizes (e.g. ``[][]i32``).
+Uniqueness is not part of the types, but is indicated with an asterisk
+in the ``inputs`` and ``outputs`` commands (see below).
+
+Consumption and aliasing
+------------------------
+
+Since the server protocol closely models the C API, the same rules
+apply to entry points that consume their arguments (see
+:ref:`api-consumption`).  In particular, consumed variables must still
+be freed with the ``free`` command - but this is the only operation
+that may be used on consumed variables.
 
 Commands
 --------
@@ -92,13 +103,14 @@ exist.
 ..................
 
 Print the types of inputs accepted by the given entry point, one per
-line.
+line.  If the given input is consumed, the type is prefixed by `*`.
 
 ``outputs`` *entry*
 ...................
 
 Print the types of outputs produced by the given entry point, one per
-line.
+line.  If the given output is guaranteed to be unique (does not alias
+any inputs), the type is prefixed by `*`.
 
 ``clear``
 .........

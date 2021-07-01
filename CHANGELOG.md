@@ -40,6 +40,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * In the C FFI, array types used only internally to implement opaque
     types are no longer exposed (#1387).
 
+  * `futhark bench` now copes with test programs that consume their
+    input (#1386).  This required an extension of the server protocol
+    as well.
+
 ## [0.19.6]
 
 ### Added
