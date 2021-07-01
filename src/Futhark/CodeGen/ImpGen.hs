@@ -548,17 +548,18 @@ compileInParams params orig_epts = do
           _ ->
             Nothing
 
-      mkExts (TypeOpaque desc n : epts) fparams =
+      mkExts (TypeOpaque u desc n : epts) fparams =
         let (fparams', rest) = splitAt n fparams
          in Imp.OpaqueValue
+              u
               desc
               (mapMaybe (`mkValueDesc` Imp.TypeDirect) fparams') :
             mkExts epts rest
-      mkExts (TypeUnsigned : epts) (fparam : fparams) =
-        maybeToList (Imp.TransparentValue <$> mkValueDesc fparam Imp.TypeUnsigned)
+      mkExts (TypeUnsigned u : epts) (fparam : fparams) =
+        maybeToList (Imp.TransparentValue u <$> mkValueDesc fparam Imp.TypeUnsigned)
           ++ mkExts epts fparams
-      mkExts (TypeDirect : epts) (fparam : fparams) =
-        maybeToList (Imp.TransparentValue <$> mkValueDesc fparam Imp.TypeDirect)
+      mkExts (TypeDirect u : epts) (fparam : fparams) =
+        maybeToList (Imp.TransparentValue u <$> mkValueDesc fparam Imp.TypeDirect)
           ++ mkExts epts fparams
       mkExts _ _ = []
 
@@ -579,26 +580,26 @@ compileOutParams orig_rts orig_epts = do
   where
     imp = lift . lift
 
-    mkExts (TypeOpaque desc n : epts) rts = do
+    mkExts (TypeOpaque u desc n : epts) rts = do
       let (rts', rest) = splitAt n rts
       (evs, dests) <- unzip <$> zipWithM mkParam rts' (repeat Imp.TypeDirect)
       (more_values, more_dests) <- mkExts epts rest
       return
-        ( Imp.OpaqueValue desc evs : more_values,
+        ( Imp.OpaqueValue u desc evs : more_values,
           dests ++ more_dests
         )
-    mkExts (TypeUnsigned : epts) (rt : rts) = do
+    mkExts (TypeUnsigned u : epts) (rt : rts) = do
       (ev, dest) <- mkParam rt Imp.TypeUnsigned
       (more_values, more_dests) <- mkExts epts rts
       return
-        ( Imp.TransparentValue ev : more_values,
+        ( Imp.TransparentValue u ev : more_values,
           dest : more_dests
         )
-    mkExts (TypeDirect : epts) (rt : rts) = do
+    mkExts (TypeDirect u : epts) (rt : rts) = do
       (ev, dest) <- mkParam rt Imp.TypeDirect
       (more_values, more_dests) <- mkExts epts rts
       return
-        ( Imp.TransparentValue ev : more_values,
+        ( Imp.TransparentValue u ev : more_values,
           dest : more_dests
         )
     mkExts _ _ = return ([], [])
@@ -657,8 +658,8 @@ compileFunDef (FunDef entry _ fname rettype params body) =
     (name_entry, params_entry, ret_entry) = case entry of
       Nothing ->
         ( Nothing,
-          replicate (length params) TypeDirect,
-          replicate (length rettype) TypeDirect
+          replicate (length params) (TypeDirect mempty),
+          replicate (length rettype) (TypeDirect mempty)
         )
       Just (x, y, z) -> (Just x, y, z)
     compile = do

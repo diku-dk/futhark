@@ -1134,19 +1134,19 @@ prepareEntryInputs ::
 prepareEntryInputs args = collect' $ zipWithM prepare [(0 :: Int) ..] args
   where
     arg_names = namesFromList $ concatMap evNames args
-    evNames (OpaqueValue _ vds) = map vdName vds
-    evNames (TransparentValue vd) = [vdName vd]
+    evNames (OpaqueValue _ _ vds) = map vdName vds
+    evNames (TransparentValue _ vd) = [vdName vd]
     vdName (ArrayValue v _ _ _ _) = v
     vdName (ScalarValue _ _ v) = v
 
-    prepare pno (TransparentValue vd) = do
+    prepare pno (TransparentValue _ vd) = do
       let pname = "in" ++ show pno
       (ty, check) <- prepareValue Public [C.cexp|$id:pname|] vd
       return
         ( [C.cparam|const $ty:ty $id:pname|],
           allTrue check
         )
-    prepare pno (OpaqueValue desc vds) = do
+    prepare pno (OpaqueValue _ desc vds) = do
       ty <- opaqueToCType desc vds
       let pname = "in" ++ show pno
           field i ScalarValue {} = [C.cexp|$id:pname->$id:(tupleField i)|]
@@ -1186,7 +1186,7 @@ prepareEntryInputs args = collect' $ zipWithM prepare [(0 :: Int) ..] args
 prepareEntryOutputs :: [ExternalValue] -> CompilerM op s ([C.Param], [C.BlockItem])
 prepareEntryOutputs = collect' . zipWithM prepare [(0 :: Int) ..]
   where
-    prepare pno (TransparentValue vd) = do
+    prepare pno (TransparentValue _ vd) = do
       let pname = "out" ++ show pno
       ty <- valueDescToCType Public vd
 
@@ -1198,7 +1198,7 @@ prepareEntryOutputs = collect' . zipWithM prepare [(0 :: Int) ..]
         ScalarValue {} -> do
           prepareValue [C.cexp|*$id:pname|] vd
           return [C.cparam|$ty:ty *$id:pname|]
-    prepare pno (OpaqueValue desc vds) = do
+    prepare pno (OpaqueValue _ desc vds) = do
       let pname = "out" ++ show pno
       ty <- opaqueToCType desc vds
       vd_ts <- mapM (valueDescToCType Private) vds

@@ -38,10 +38,10 @@ setParamSpace _ param =
   param
 
 setExtValueSpace :: Space -> ExternalValue -> ExternalValue
-setExtValueSpace space (OpaqueValue desc vs) =
-  OpaqueValue desc $ map (setValueSpace space) vs
-setExtValueSpace space (TransparentValue v) =
-  TransparentValue $ setValueSpace space v
+setExtValueSpace space (OpaqueValue u desc vs) =
+  OpaqueValue u desc $ map (setValueSpace space) vs
+setExtValueSpace space (TransparentValue u v) =
+  TransparentValue u $ setValueSpace space v
 
 setValueSpace :: Space -> ValueDesc -> ValueDesc
 setValueSpace space (ArrayValue mem _ bt ept shape) =

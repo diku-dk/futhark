@@ -145,12 +145,14 @@ data ValueDesc
 
 -- | ^ An externally visible value.  This can be an opaque value
 -- (covering several physical internal values), or a single value that
--- can be used externally.
+-- can be used externally.  We record the uniqueness because it is
+-- important to the external interface as well.
 data ExternalValue
-  = -- | The string is a human-readable description
-    -- with no other semantics.
-    OpaqueValue String [ValueDesc]
-  | TransparentValue ValueDesc
+  = -- | The string is a human-readable description with no other
+    -- semantics.
+    -- not matter.
+    OpaqueValue Uniqueness String [ValueDesc]
+  | TransparentValue Uniqueness ValueDesc
   deriving (Show)
 
 -- | A imperative function, containing the body as well as its
@@ -439,9 +441,9 @@ instance Pretty ValueDesc where
         TypeDirect -> mempty
 
 instance Pretty ExternalValue where
-  ppr (TransparentValue v) = ppr v
-  ppr (OpaqueValue desc vs) =
-    text "opaque" <+> text desc
+  ppr (TransparentValue u v) = ppr u <> ppr v
+  ppr (OpaqueValue u desc vs) =
+    ppr u <> text "opaque" <+> text desc
       <+> nestedBlock "{" "}" (stack $ map ppr vs)
 
 instance Pretty ArrayContents where
@@ -626,8 +628,8 @@ instance FreeIn ValueDesc where
   freeIn' ScalarValue {} = mempty
 
 instance FreeIn ExternalValue where
-  freeIn' (TransparentValue vd) = freeIn' vd
-  freeIn' (OpaqueValue _ vds) = foldMap freeIn' vds
+  freeIn' (TransparentValue _ vd) = freeIn' vd
+  freeIn' (OpaqueValue _ _ vds) = foldMap freeIn' vds
 
 instance FreeIn a => FreeIn (Code a) where
   freeIn' (x :>>: y) =

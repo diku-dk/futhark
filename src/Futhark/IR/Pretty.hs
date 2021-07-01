@@ -291,9 +291,9 @@ instance PrettyRep rep => Pretty (Lambda rep) where
       </> indent 2 (ppr body)
 
 instance Pretty EntryPointType where
-  ppr TypeDirect = "direct"
-  ppr TypeUnsigned = "unsigned"
-  ppr (TypeOpaque desc n) = "opaque" <> apply [ppr (show desc), ppr n]
+  ppr (TypeDirect u) = ppr u <> "direct"
+  ppr (TypeUnsigned u) = ppr u <> "unsigned"
+  ppr (TypeOpaque u desc n) = ppr u <> "opaque" <> apply [ppr (show desc), ppr n]
 
 instance PrettyRep rep => Pretty (FunDef rep) where
   ppr (FunDef entry attrs name rettype fparams body) =

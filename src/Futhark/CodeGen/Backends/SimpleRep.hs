@@ -127,11 +127,11 @@ opaqueName s vds = "opaque_" ++ hash (zipWith xor [0 ..] $ map ord (s ++ concatM
 -- | The type used to expose a Futhark value in the C API.  A pointer
 -- in the case of arrays and opaques.
 externalValueType :: ExternalValue -> C.Type
-externalValueType (OpaqueValue desc vds) =
+externalValueType (OpaqueValue _ desc vds) =
   [C.cty|struct $id:("futhark_" ++ opaqueName desc vds)*|]
-externalValueType (TransparentValue (ArrayValue _ _ pt signed shape)) =
+externalValueType (TransparentValue _ (ArrayValue _ _ pt signed shape)) =
   [C.cty|struct $id:("futhark_" ++ arrayName pt signed (length shape))*|]
-externalValueType (TransparentValue (ScalarValue pt signed _)) =
+externalValueType (TransparentValue _ (ScalarValue pt signed _)) =
   signedPrimTypeToCType signed pt
 
 -- | Return an expression multiplying together the given expressions.

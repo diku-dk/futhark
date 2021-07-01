@@ -337,8 +337,8 @@ evalExp builtin (ScriptServer server counter) top_level_e = do
             throwError $ "Locally bound name cannot be invoked as a function: " <> prettyText name
           pure e
       evalExp' vtable (Call (FuncFut name) es) = do
-        in_types <- cmdEither $ cmdInputs server name
-        out_types <- cmdEither $ cmdOutputs server name
+        in_types <- fmap (map inputType) $ cmdEither $ cmdInputs server name
+        out_types <- fmap (map outputType) $ cmdEither $ cmdOutputs server name
 
         es' <- mapM (evalExp' vtable) es
         let es_types = map (fmap scriptValueType) es'

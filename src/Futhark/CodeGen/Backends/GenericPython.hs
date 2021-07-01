@@ -331,7 +331,7 @@ opaqueDefs (Imp.Functions funs) =
     filter (isJust . Imp.functionEntry . snd) funs
   where
     evd Imp.TransparentValue {} = mempty
-    evd (Imp.OpaqueValue name vds) =
+    evd (Imp.OpaqueValue _ name vds) =
       M.singleton name $ map (String . vd) vds
     vd (Imp.ScalarValue pt s _) =
       readTypeEnum pt s
@@ -539,18 +539,18 @@ unpackDim arr_name (Imp.Var var) i = do
       ]
 
 entryPointOutput :: Imp.ExternalValue -> CompilerM op s PyExp
-entryPointOutput (Imp.OpaqueValue desc vs) =
+entryPointOutput (Imp.OpaqueValue u desc vs) =
   simpleCall "opaque" . (String (pretty desc) :)
-    <$> mapM (entryPointOutput . Imp.TransparentValue) vs
-entryPointOutput (Imp.TransparentValue (Imp.ScalarValue bt ept name)) = do
+    <$> mapM (entryPointOutput . Imp.TransparentValue u) vs
+entryPointOutput (Imp.TransparentValue _ (Imp.ScalarValue bt ept name)) = do
   name' <- compileVar name
   return $ simpleCall tf [name']
   where
     tf = compilePrimToExtNp bt ept
-entryPointOutput (Imp.TransparentValue (Imp.ArrayValue mem (Imp.Space sid) bt ept dims)) = do
+entryPointOutput (Imp.TransparentValue _ (Imp.ArrayValue mem (Imp.Space sid) bt ept dims)) = do
   pack_output <- asks envEntryOutput
   pack_output mem sid bt ept dims
-entryPointOutput (Imp.TransparentValue (Imp.ArrayValue mem _ bt ept dims)) = do
+entryPointOutput (Imp.TransparentValue _ (Imp.ArrayValue mem _ bt ept dims)) = do
   mem' <- compileVar mem
   let cast = Cast mem' (compilePrimTypeExt bt ept)
   dims' <- mapM compileDim dims
@@ -616,14 +616,14 @@ badInputDim i e typ dimf =
 declEntryPointInputSizes :: [Imp.ExternalValue] -> CompilerM op s ()
 declEntryPointInputSizes = mapM_ onSize . concatMap sizes
   where
-    sizes (Imp.TransparentValue v) = valueSizes v
-    sizes (Imp.OpaqueValue _ vs) = concatMap valueSizes vs
+    sizes (Imp.TransparentValue _ v) = valueSizes v
+    sizes (Imp.OpaqueValue _ _ vs) = concatMap valueSizes vs
     valueSizes (Imp.ArrayValue _ _ _ _ dims) = subExpVars dims
     valueSizes Imp.ScalarValue {} = []
     onSize v = stm $ Assign (Var (compileName v)) None
 
 entryPointInput :: (Int, Imp.ExternalValue, PyExp) -> CompilerM op s ()
-entryPointInput (i, Imp.OpaqueValue desc vs, e) = do
+entryPointInput (i, Imp.OpaqueValue u desc vs, e) = do
   let type_is_ok =
         BinOp
           "and"
@@ -631,9 +631,9 @@ entryPointInput (i, Imp.OpaqueValue desc vs, e) = do
           (BinOp "==" (Field e "desc") (String desc))
   stm $ If (UnOp "not" type_is_ok) [badInput i e desc] []
   mapM_ entryPointInput $
-    zip3 (repeat i) (map Imp.TransparentValue vs) $
+    zip3 (repeat i) (map (Imp.TransparentValue u) vs) $
       map (Index (Field e "data") . IdxExp . Integer) [0 ..]
-entryPointInput (i, Imp.TransparentValue (Imp.ScalarValue bt s name), e) = do
+entryPointInput (i, Imp.TransparentValue _ (Imp.ScalarValue bt s name), e) = do
   vname' <- compileVar name
   let -- HACK: A Numpy int64 will signal an OverflowError if we pass
       -- it a number bigger than 2**63.  This does not happen if we
@@ -651,7 +651,7 @@ entryPointInput (i, Imp.TransparentValue (Imp.ScalarValue bt s name), e) = do
           (Tuple [Var "TypeError", Var "AssertionError"])
           [badInput i e $ prettySigned (s == Imp.TypeUnsigned) bt]
       ]
-entryPointInput (i, Imp.TransparentValue (Imp.ArrayValue mem (Imp.Space sid) bt ept dims), e) = do
+entryPointInput (i, Imp.TransparentValue _ (Imp.ArrayValue mem (Imp.Space sid) bt ept dims), e) = do
   unpack_input <- asks envEntryInput
   mem' <- compileVar mem
   unpack <- collect $ unpack_input mem' sid bt ept dims e
@@ -665,7 +665,7 @@ entryPointInput (i, Imp.TransparentValue (Imp.ArrayValue mem (Imp.Space sid) bt 
                 ++ prettySigned (ept == Imp.TypeUnsigned) bt
           ]
       ]
-entryPointInput (i, Imp.TransparentValue (Imp.ArrayValue mem _ t s dims), e) = do
+entryPointInput (i, Imp.TransparentValue _ (Imp.ArrayValue mem _ t s dims), e) = do
   let type_is_wrong = UnOp "not" $ BinOp "in" (simpleCall "type" [e]) $ List [Var "np.ndarray"]
   let dtype_is_wrong = UnOp "not" $ BinOp "==" (Field e "dtype") $ Var $ compilePrimToExtNp t s
   let dim_is_wrong = UnOp "not" $ BinOp "==" (Field e "ndim") $ Integer $ toInteger $ length dims
@@ -701,9 +701,9 @@ entryPointInput (i, Imp.TransparentValue (Imp.ArrayValue mem _ t s dims), e) = d
   stm $ Assign dest unwrap_call
 
 extValueDescName :: Imp.ExternalValue -> String
-extValueDescName (Imp.TransparentValue v) = extName $ valueDescName v
-extValueDescName (Imp.OpaqueValue desc []) = extName $ zEncodeString desc
-extValueDescName (Imp.OpaqueValue desc (v : _)) =
+extValueDescName (Imp.TransparentValue _ v) = extName $ valueDescName v
+extValueDescName (Imp.OpaqueValue _ desc []) = extName $ zEncodeString desc
+extValueDescName (Imp.OpaqueValue _ desc (v : _)) =
   extName $ zEncodeString desc ++ "_" ++ pretty (baseTag (valueDescVName v))
 
 extName :: String -> String
@@ -732,15 +732,15 @@ readTypeEnum Imp.Bool _ = "bool"
 readTypeEnum Unit _ = "bool"
 
 readInput :: Imp.ExternalValue -> PyStmt
-readInput (Imp.OpaqueValue desc _) =
+readInput (Imp.OpaqueValue _ desc _) =
   Raise $
     simpleCall
       "Exception"
       [String $ "Cannot read argument of type " ++ desc ++ "."]
-readInput decl@(Imp.TransparentValue (Imp.ScalarValue bt ept _)) =
+readInput decl@(Imp.TransparentValue _ (Imp.ScalarValue bt ept _)) =
   let type_name = readTypeEnum bt ept
    in Assign (Var $ extValueDescName decl) $ simpleCall "read_value" [String type_name]
-readInput decl@(Imp.TransparentValue (Imp.ArrayValue _ _ bt ept dims)) =
+readInput decl@(Imp.TransparentValue _ (Imp.ArrayValue _ _ bt ept dims)) =
   let type_name = readTypeEnum bt ept
    in Assign (Var $ extValueDescName decl) $
         simpleCall
@@ -755,17 +755,17 @@ printValue = fmap concat . mapM (uncurry printValue')
     -- that returns an equivalent Numpy array.  This works for PyOpenCL,
     -- but we will probably need yet another plugin mechanism here in
     -- the future.
-    printValue' (Imp.OpaqueValue desc _) _ =
+    printValue' (Imp.OpaqueValue _ desc _) _ =
       return
         [ Exp $
             simpleCall
               "sys.stdout.write"
               [String $ "#<opaque " ++ desc ++ ">"]
         ]
-    printValue' (Imp.TransparentValue (Imp.ArrayValue mem (Space _) bt ept shape)) e =
-      printValue' (Imp.TransparentValue (Imp.ArrayValue mem DefaultSpace bt ept shape)) $
+    printValue' (Imp.TransparentValue u (Imp.ArrayValue mem (Space _) bt ept shape)) e =
+      printValue' (Imp.TransparentValue u (Imp.ArrayValue mem DefaultSpace bt ept shape)) $
         simpleCall (pretty e ++ ".get") []
-    printValue' (Imp.TransparentValue _) e =
+    printValue' (Imp.TransparentValue _ _) e =
       return
         [ Exp $
             Call
@@ -920,10 +920,10 @@ entryTypes func =
     map desc $ Imp.functionResult func
   )
   where
-    desc (Imp.OpaqueValue d _) = d
-    desc (Imp.TransparentValue (Imp.ScalarValue pt s _)) = readTypeEnum pt s
-    desc (Imp.TransparentValue (Imp.ArrayValue _ _ pt s dims)) =
-      concat (replicate (length dims) "[]") ++ readTypeEnum pt s
+    desc (Imp.OpaqueValue u d _) = pretty u <> d
+    desc (Imp.TransparentValue u (Imp.ScalarValue pt s _)) = pretty u <> readTypeEnum pt s
+    desc (Imp.TransparentValue u (Imp.ArrayValue _ _ pt s dims)) =
+      pretty u <> concat (replicate (length dims) "[]") <> readTypeEnum pt s
 
 callEntryFun ::
   [PyStmt] ->
