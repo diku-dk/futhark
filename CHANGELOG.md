@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * The `cuda` backend now uses a fast single-pass implementation for
     segmented `scan`s, due to Morten Tychsen Clausen (#1375).
 
+  * `futhark bench` now prints interim results while it is running.
+
 ### Removed
 
 ### Changed
