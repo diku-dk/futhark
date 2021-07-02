@@ -162,7 +162,7 @@ entryPoint name params (eret, crets) =
       | otherwise =
         [I.TypeOpaque u desc $ length ts]
       where
-        u = foldl max mempty $ map I.uniqueness ts
+        u = foldl max Nonunique $ map I.uniqueness ts
         desc = maybe (prettyOneLine t') typeExpOpaqueName $ E.entryAscribed t
         t' = noSizes (E.entryType t) `E.setUniqueness` Nonunique
     typeExpOpaqueName (TEApply te TypeArgExpDim {} _) =
