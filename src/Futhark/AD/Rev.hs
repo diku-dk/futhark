@@ -194,13 +194,6 @@ noAdjsFor names m = do
   where
     names' = namesToList names
 
-class Adjoint a where
-  lookupAdj :: a -> ADM Adj
-  lookupAdjVal :: a -> ADM VName
-  lookupAdjVal v = adjVal =<< lookupAdj v
-  updateAdj :: a -> VName -> ADM VName
-  updateAdjSlice :: Slice SubExp -> a -> VName -> ADM VName
-
 addBinOp :: PrimType -> BinOp
 addBinOp (IntType it) = Add it OverflowWrap
 addBinOp (FloatType ft) = FAdd ft
@@ -259,59 +252,64 @@ addExp x y = do
     _ ->
       error $ "addExp: unexpected type: " ++ pretty x_t
 
-instance Adjoint VName where
-  lookupAdj v = do
-    maybeAdj <- gets $ M.lookup v . stateAdjs
-    case maybeAdj of
-      Nothing -> do
-        v_t <- lookupType v
-        pure $ AdjZero (arrayShape v_t) (elemType v_t)
-      Just v_adj -> pure v_adj
+lookupAdj :: VName -> ADM Adj
+lookupAdj v = do
+  maybeAdj <- gets $ M.lookup v . stateAdjs
+  case maybeAdj of
+    Nothing -> do
+      v_t <- lookupType v
+      pure $ AdjZero (arrayShape v_t) (elemType v_t)
+    Just v_adj -> pure v_adj
 
-  updateAdj v d = do
-    maybeAdj <- gets $ M.lookup v . stateAdjs
-    case maybeAdj of
-      Nothing -> do
-        insAdj v d
-        pure d
-      Just adj -> do
-        v_adj <- adjVal adj
-        v_adj_t <- lookupType v_adj
-        case v_adj_t of
-          Acc {} -> do
-            dims <- arrayDims <$> lookupType d
-            ~[v_adj'] <-
-              tabNest (length dims) [d, v_adj] $ \is [d', v_adj'] ->
-                letTupExp "acc" $
-                  BasicOp $ UpdateAcc v_adj' (map Var is) [Var d']
-            insAdj v v_adj'
-            pure v_adj'
-          _ -> do
-            v_adj' <- letExp (baseString v <> "_adj") =<< addExp v_adj d
-            insAdj v v_adj'
-            pure v_adj'
+lookupAdjVal :: VName -> ADM VName
+lookupAdjVal v = adjVal =<< lookupAdj v
 
-  updateAdjSlice slice v d = do
-    t <- lookupType v
-    v_adj <- lookupAdjVal v
-    let isDimFix (DimFix i) = i
-        isDimFix _ =
-          error $ "Invalid slice for accumulator update: " ++ pretty slice
-    v_adj_t <- lookupType v_adj
-    v_adj' <- case v_adj_t of
-      Acc {} ->
-        letExp (baseString v_adj) . BasicOp $
-          UpdateAcc v_adj (map isDimFix slice) [Var d]
-      _ -> do
-        v_adjslice <-
-          if primType t
-            then return v_adj
-            else
-              letExp (baseString v ++ "_slice") $
-                BasicOp $ Index v_adj slice
-        letInPlace "updated_adj" v_adj slice =<< addExp v_adjslice d
-    insAdj v v_adj'
-    pure v_adj'
+updateAdj :: VName -> VName -> ADM VName
+updateAdj v d = do
+  maybeAdj <- gets $ M.lookup v . stateAdjs
+  case maybeAdj of
+    Nothing -> do
+      insAdj v d
+      pure d
+    Just adj -> do
+      v_adj <- adjVal adj
+      v_adj_t <- lookupType v_adj
+      case v_adj_t of
+        Acc {} -> do
+          dims <- arrayDims <$> lookupType d
+          ~[v_adj'] <-
+            tabNest (length dims) [d, v_adj] $ \is [d', v_adj'] ->
+              letTupExp "acc" $
+                BasicOp $ UpdateAcc v_adj' (map Var is) [Var d']
+          insAdj v v_adj'
+          pure v_adj'
+        _ -> do
+          v_adj' <- letExp (baseString v <> "_adj") =<< addExp v_adj d
+          insAdj v v_adj'
+          pure v_adj'
+
+updateAdjSlice :: Slice SubExp -> VName -> VName -> ADM VName
+updateAdjSlice slice v d = do
+  t <- lookupType v
+  v_adj <- lookupAdjVal v
+  let isDimFix (DimFix i) = i
+      isDimFix _ =
+        error $ "Invalid slice for accumulator update: " ++ pretty slice
+  v_adj_t <- lookupType v_adj
+  v_adj' <- case v_adj_t of
+    Acc {} ->
+      letExp (baseString v_adj) . BasicOp $
+        UpdateAcc v_adj (map isDimFix slice) [Var d]
+    _ -> do
+      v_adjslice <-
+        if primType t
+          then return v_adj
+          else
+            letExp (baseString v ++ "_slice") $
+              BasicOp $ Index v_adj slice
+      letInPlace "updated_adj" v_adj slice =<< addExp v_adjslice d
+  insAdj v v_adj'
+  pure v_adj'
 
 updateSubExpAdj :: SubExp -> VName -> ADM ()
 updateSubExpAdj Constant {} _ = pure ()
