@@ -152,16 +152,17 @@ entryPoint name params (eret, crets) =
 
     entryPointType (t, ts)
       | E.Scalar (E.Prim E.Unsigned {}) <- E.entryType t =
-        [I.TypeUnsigned]
+        [I.TypeUnsigned u]
       | E.Array _ _ (E.Prim E.Unsigned {}) _ <- E.entryType t =
-        [I.TypeUnsigned]
+        [I.TypeUnsigned u]
       | E.Scalar E.Prim {} <- E.entryType t =
-        [I.TypeDirect]
+        [I.TypeDirect u]
       | E.Array _ _ E.Prim {} _ <- E.entryType t =
-        [I.TypeDirect]
+        [I.TypeDirect u]
       | otherwise =
-        [I.TypeOpaque desc $ length ts]
+        [I.TypeOpaque u desc $ length ts]
       where
+        u = foldl max Nonunique $ map I.uniqueness ts
         desc = maybe (prettyOneLine t') typeExpOpaqueName $ E.entryAscribed t
         t' = noSizes (E.entryType t) `E.setUniqueness` Nonunique
     typeExpOpaqueName (TEApply te TypeArgExpDim {} _) =

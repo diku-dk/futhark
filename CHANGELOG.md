@@ -9,15 +9,23 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+### Removed
+
+### Changed
+
+### Fixed
+
+## [0.19.7]
+
+### Added
+
   * A new memory reuse optimisation has been added.  This results in
     slightly lower footprint for many programs.
 
   * The `cuda` backend now uses a fast single-pass implementation for
     segmented `scan`s, due to Morten Tychsen Clausen (#1375).
 
-### Removed
-
-### Changed
+  * `futhark bench` now prints interim results while it is running.
 
 ### Fixed
 
@@ -39,6 +47,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * In the C FFI, array types used only internally to implement opaque
     types are no longer exposed (#1387).
+
+  * `futhark bench` now copes with test programs that consume their
+    input (#1386).  This required an extension of the server protocol
+    as well.
 
 ## [0.19.6]
 

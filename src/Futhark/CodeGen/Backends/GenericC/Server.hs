@@ -101,22 +101,22 @@ genericOptions =
   ]
 
 typeStructName :: ExternalValue -> String
-typeStructName (TransparentValue (ScalarValue pt signed _)) =
+typeStructName (TransparentValue _ (ScalarValue pt signed _)) =
   let name = prettySigned (signed == TypeUnsigned) pt
    in "type_" ++ name
-typeStructName (TransparentValue (ArrayValue _ _ pt signed shape)) =
+typeStructName (TransparentValue _ (ArrayValue _ _ pt signed shape)) =
   let rank = length shape
       name = arrayName pt signed rank
    in "type_" ++ name
-typeStructName (OpaqueValue name vds) =
+typeStructName (OpaqueValue _ name vds) =
   "type_" ++ opaqueName name vds
 
 valueDescBoilerplate :: ExternalValue -> (String, (C.Initializer, [C.Definition]))
-valueDescBoilerplate ev@(TransparentValue (ScalarValue pt signed _)) =
+valueDescBoilerplate ev@(TransparentValue _ (ScalarValue pt signed _)) =
   let name = prettySigned (signed == TypeUnsigned) pt
       type_name = typeStructName ev
    in (name, ([C.cinit|&$id:type_name|], mempty))
-valueDescBoilerplate ev@(TransparentValue (ArrayValue _ _ pt signed shape)) =
+valueDescBoilerplate ev@(TransparentValue _ (ArrayValue _ _ pt signed shape)) =
   let rank = length shape
       name = arrayName pt signed rank
       pt_name = prettySigned (signed == TypeUnsigned) pt
@@ -156,7 +156,7 @@ valueDescBoilerplate ev@(TransparentValue (ArrayValue _ _ pt signed shape)) =
               };|]
         )
       )
-valueDescBoilerplate ev@(OpaqueValue name vds) =
+valueDescBoilerplate ev@(OpaqueValue _ name vds) =
   let type_name = typeStructName ev
       aux_name = type_name ++ "_aux"
       opaque_free = "futhark_free_" ++ opaqueName name vds
@@ -199,6 +199,8 @@ oneEntryBoilerplate (name, fun) = do
       in_types = functionArgs fun
       out_types_name = pretty name ++ "_out_types"
       in_types_name = pretty name ++ "_in_types"
+      out_unique_name = pretty name ++ "_out_unique"
+      in_unique_name = pretty name ++ "_in_unique"
       (out_items, out_args)
         | null out_types = ([C.citems|(void)outs;|], mempty)
         | otherwise = unzip $ zipWith loadOut [0 ..] out_types
@@ -211,9 +213,15 @@ oneEntryBoilerplate (name, fun) = do
                   $inits:(map typeStructInit out_types),
                   NULL
                 };
+                bool $id:out_unique_name[] = {
+                  $inits:(map typeUniqueInit out_types)
+                };
                 struct type* $id:in_types_name[] = {
                   $inits:(map typeStructInit in_types),
                   NULL
+                };
+                bool $id:in_unique_name[] = {
+                  $inits:(map typeUniqueInit in_types)
                 };
                 int $id:call_f(struct futhark_context *ctx, void **outs, void **ins) {
                   $items:out_items
@@ -225,11 +233,20 @@ oneEntryBoilerplate (name, fun) = do
             .name = $string:(pretty ename),
             .f = $id:call_f,
             .in_types = $id:in_types_name,
-            .out_types = $id:out_types_name
+            .out_types = $id:out_types_name,
+            .in_unique = $id:in_unique_name,
+            .out_unique = $id:out_unique_name
             }|]
     )
   where
     typeStructInit t = [C.cinit|&$id:(typeStructName t)|]
+    typeUniqueInit t =
+      case typeUnique t of
+        Unique -> [C.cinit|true|]
+        Nonunique -> [C.cinit|false|]
+
+    typeUnique (TransparentValue u _) = u
+    typeUnique (OpaqueValue u _ _) = u
 
     loadOut i ev =
       let v = "out" ++ show (i :: Int)

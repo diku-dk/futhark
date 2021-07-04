@@ -519,11 +519,12 @@ pEntry =
       <* pComma <*> pEntryPointTypes
   where
     pEntryPointTypes = braces (pEntryPointType `sepBy` pComma)
-    pEntryPointType =
+    pEntryPointType = do
+      u <- pUniqueness
       choice
-        [ "direct" $> TypeDirect,
-          "unsigned" $> TypeUnsigned,
-          "opaque" *> parens (TypeOpaque <$> pStringLiteral <* pComma <*> pInt)
+        [ "direct" $> TypeDirect u,
+          "unsigned" $> TypeUnsigned u,
+          "opaque" *> parens (TypeOpaque u <$> pStringLiteral <* pComma <*> pInt)
         ]
 
 pFunDef :: PR rep -> Parser (FunDef rep)

@@ -292,7 +292,7 @@ runCompiledEntry futhark server program (InputOutputs entry run_cases) = do
       context1 case_ctx $ do
         expected <- getExpectedResult futhark program entry run
 
-        valuesAsVars server (zip ins input_types) futhark dir input_spec
+        valuesAsVars server (zip ins (map inputType input_types)) futhark dir input_spec
 
         call_r <- liftIO $ cmdCall server entry outs ins
         liftCommand $ cmdFree server ins

@@ -320,7 +320,7 @@ library
     , filepath >=1.4.1.1
     , free >=4.12.4
     , futhark-data >= 1.0.0.1
-    , futhark-server >= 1.0.0.0
+    , futhark-server >= 1.1.0.0
     , gitrev >=1.2.0
     , hashable
     , haskeline
