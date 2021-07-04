@@ -87,8 +87,47 @@ scanExc desc scan arrs = do
 
 --- Now comes the AD.
 
+zeroExp :: Type -> ExpT rep
+zeroExp (Prim pt) =
+  BasicOp $ SubExp $ Constant $ blankPrimValue pt
+zeroExp (Array pt shape _) =
+  BasicOp $ Replicate shape $ Constant $ blankPrimValue pt
+zeroExp t = error $ "zeroExp: " ++ pretty t
+
+-- | A symbolic representation of an array that is all zeroes, except at one
+-- index.
+data Sparse = Sparse
+  { -- | The shape of the array.
+    sparseShape :: Shape,
+    -- | Location of the nonzero value.  This index may be negative,
+    -- in which case the array is entirely zero.
+    sparseIdx :: SubExp,
+    -- | The nonzero value.
+    sparseVal :: VName
+  }
+  deriving (Eq, Ord, Show)
+
+-- | The adjoint of a variable.
+data Adj
+  = AdjSparse Sparse
+  | AdjVal VName
+  | AdjZero Shape PrimType
+  deriving (Eq, Ord, Show)
+
+zeroArray :: MonadBinder m => Shape -> Type -> m VName
+zeroArray shape t = do
+  zero <- letSubExp "zero" $ zeroExp t
+  attributing (oneAttr "sequential") $
+    letExp "zeroes" $ BasicOp $ Replicate shape zero
+
+sparseArray :: (MonadBinder m, Rep m ~ SOACS) => Sparse -> m VName
+sparseArray (Sparse shape i v) = do
+  t <- lookupType v
+  zeroes <- zeroArray shape t
+  letExp "sparse" =<< eWriteArray zeroes [eSubExp i] (eSubExp $ Var v)
+
 data RState = RState
-  { stateAdjs :: M.Map VName VName,
+  { stateAdjs :: M.Map VName Adj,
     stateNameSource :: VNameSource
   }
 
@@ -127,16 +166,17 @@ runADM (ADM m) =
 adjVName :: VName -> ADM VName
 adjVName v = newVName (baseString v <> "_adj")
 
-zeroExp :: Type -> Exp
-zeroExp (Prim pt) =
-  BasicOp $ SubExp $ Constant $ blankPrimValue pt
-zeroExp (Array pt shape _) =
-  BasicOp $ Replicate shape $ Constant $ blankPrimValue pt
-zeroExp t = error $ "zeroExp: " ++ pretty t
+adjVal :: Adj -> ADM VName
+adjVal (AdjVal v) = pure v
+adjVal (AdjSparse sparse) = sparseArray sparse
+adjVal (AdjZero shape t) = zeroArray shape $ Prim t
+
+setAdj :: VName -> Adj -> ADM ()
+setAdj v v_adj = modify $ \env ->
+  env {stateAdjs = M.insert v v_adj $ stateAdjs env}
 
 insAdj :: VName -> VName -> ADM ()
-insAdj v v_adj = modify $ \env ->
-  env {stateAdjs = M.insert v v_adj $ stateAdjs env}
+insAdj v = setAdj v . AdjVal
 
 -- While evaluationg this action, pretend these variables have no
 -- adjoints.  Restore current adjoints afterwards.  This is used for
@@ -154,18 +194,10 @@ noAdjsFor names m = do
   where
     names' = namesToList names
 
-newAdj :: VName -> ADM VName
-newAdj v = do
-  v_adj <- adjVName v
-  t <- lookupType v
-  insAdj v v_adj
-  -- It is (probably) important not to parallelise any Replicates we
-  -- create here.
-  attributing (oneAttr "sequential") $ letBindNames [v_adj] $ zeroExp t
-  pure v_adj
-
 class Adjoint a where
-  lookupAdj :: a -> ADM VName
+  lookupAdj :: a -> ADM Adj
+  lookupAdjVal :: a -> ADM VName
+  lookupAdjVal v = adjVal =<< lookupAdj v
   updateAdj :: a -> VName -> ADM VName
   updateAdjSlice :: Slice SubExp -> a -> VName -> ADM VName
 
@@ -227,25 +259,23 @@ addExp x y = do
     _ ->
       error $ "addExp: unexpected type: " ++ pretty x_t
 
-setAdj :: VName -> Exp -> ADM VName
-setAdj v e = do
-  v_adj <- adjVName v
-  letBindNames [v_adj] e
-  insAdj v v_adj
-  return v_adj
-
 instance Adjoint VName where
   lookupAdj v = do
     maybeAdj <- gets $ M.lookup v . stateAdjs
     case maybeAdj of
-      Nothing -> newAdj v
-      Just v_adj -> return v_adj
+      Nothing -> do
+        v_t <- lookupType v
+        pure $ AdjZero (arrayShape v_t) (elemType v_t)
+      Just v_adj -> pure v_adj
 
   updateAdj v d = do
     maybeAdj <- gets $ M.lookup v . stateAdjs
     case maybeAdj of
-      Nothing -> setAdj v $ BasicOp $ SubExp $ Var d
-      Just v_adj -> do
+      Nothing -> do
+        insAdj v d
+        pure d
+      Just adj -> do
+        v_adj <- adjVal adj
         v_adj_t <- lookupType v_adj
         case v_adj_t of
           Acc {} -> do
@@ -262,43 +292,46 @@ instance Adjoint VName where
             pure v_adj'
 
   updateAdjSlice slice v d = do
-    maybeAdj <- gets $ M.lookup v . stateAdjs
     t <- lookupType v
-    case maybeAdj of
-      Nothing -> do
-        void $ lookupAdj v -- Initialise adjoint.
-        updateAdjSlice slice v d
-      Just v_adj -> do
-        let isDimFix (DimFix i) = i
-            isDimFix _ =
-              error $ "Invalid slice for accumulator update: " ++ pretty slice
-        v_adj_t <- lookupType v_adj
-        v_adj' <- case v_adj_t of
-          Acc {} ->
-            letExp (baseString v_adj) . BasicOp $
-              UpdateAcc v_adj (map isDimFix slice) [Var d]
-          _ -> do
-            v_adjslice <-
-              if primType t
-                then return v_adj
-                else
-                  letExp (baseString v ++ "_slice") $
-                    BasicOp $ Index v_adj slice
-            letInPlace "updated_adj" v_adj slice =<< addExp v_adjslice d
-        insAdj v v_adj'
-        pure v_adj'
+    v_adj <- lookupAdjVal v
+    let isDimFix (DimFix i) = i
+        isDimFix _ =
+          error $ "Invalid slice for accumulator update: " ++ pretty slice
+    v_adj_t <- lookupType v_adj
+    v_adj' <- case v_adj_t of
+      Acc {} ->
+        letExp (baseString v_adj) . BasicOp $
+          UpdateAcc v_adj (map isDimFix slice) [Var d]
+      _ -> do
+        v_adjslice <-
+          if primType t
+            then return v_adj
+            else
+              letExp (baseString v ++ "_slice") $
+                BasicOp $ Index v_adj slice
+        letInPlace "updated_adj" v_adj slice =<< addExp v_adjslice d
+    insAdj v v_adj'
+    pure v_adj'
 
-instance Adjoint SubExp where
-  lookupAdj (Constant c) =
-    letExp "const_adj" $
-      BasicOp $ SubExp $ Constant $ blankPrimValue $ primValueType c
-  lookupAdj (Var v) = lookupAdj v
+updateSubExpAdj :: SubExp -> VName -> ADM ()
+updateSubExpAdj Constant {} _ = pure ()
+updateSubExpAdj (Var v) d = void $ updateAdj v d
 
-  updateAdj se@Constant {} _ = lookupAdj se
-  updateAdj (Var v) d = updateAdj v d
-
-  updateAdjSlice _ se@Constant {} _ = lookupAdj se
-  updateAdjSlice slice (Var v) d = updateAdjSlice slice v d
+-- The index may be negative, in which case the update has no effect.
+updateAdjIndex :: VName -> SubExp -> VName -> ADM ()
+updateAdjIndex v i se = do
+  maybeAdj <- gets $ M.lookup v . stateAdjs
+  t <- lookupType v
+  case maybeAdj of
+    Nothing -> do
+      setAdj v $ AdjSparse $ Sparse (arrayShape t) i se
+    Just AdjZero {} ->
+      setAdj v $ AdjSparse $ Sparse (arrayShape t) i se
+    Just adj -> do
+      v_adj <- adjVal adj
+      insAdj v
+        =<< letExp (baseString v_adj)
+        =<< eWriteArray v_adj [eSubExp i] (eSubExp $ Var se)
 
 -- | Is this primal variable active in the AD sense?  FIXME: this is
 -- (obviously) much too conservative.
@@ -333,7 +366,7 @@ commonBasicOp pat aux op m = do
   addStm $ Let pat aux $ BasicOp op
   m
   pat_v <- patternName pat
-  pat_adj <- lookupAdj pat_v
+  pat_adj <- lookupAdjVal pat_v
   pure (pat_v, pat_adj)
 
 diffBasicOp :: Pattern -> StmAux () -> BasicOp -> ADM () -> ADM ()
@@ -343,8 +376,8 @@ diffBasicOp pat aux e m =
       (_pat_v, pat_adj) <- commonBasicOp pat aux e m
       let t = cmpOpType cmp
           update contrib = do
-            void $ updateAdj x contrib
-            void $ updateAdj y contrib
+            void $ updateSubExpAdj x contrib
+            void $ updateSubExpAdj y contrib
 
       case t of
         FloatType ft ->
@@ -365,7 +398,7 @@ diffBasicOp pat aux e m =
       (_pat_v, pat_adj) <- commonBasicOp pat aux e m
       contrib <-
         letExp "contrib" $ BasicOp $ ConvOp (flipConvOp op) $ Var pat_adj
-      void $ updateAdj x contrib
+      updateSubExpAdj x contrib
     --
     UnOp op x -> do
       (_pat_v, pat_adj) <- commonBasicOp pat aux e m
@@ -377,7 +410,7 @@ diffBasicOp pat aux e m =
             dx = pdUnOp op x_pe
         letExp "contrib" <=< toExp $ pat_adj' ~*~ dx
 
-      void $ updateAdj x contrib
+      updateSubExpAdj x contrib
     --
     BinOp op x y -> do
       (_pat_v, pat_adj) <- commonBasicOp pat aux e m
@@ -390,12 +423,12 @@ diffBasicOp pat aux e m =
 
       adj_x <- letExp "binop_x_adj" <=< toExp $ pat_adj' ~*~ wrt_x
       adj_y <- letExp "binop_y_adj" <=< toExp $ pat_adj' ~*~ wrt_y
-      void $ updateAdj x adj_x
-      void $ updateAdj y adj_y
+      updateSubExpAdj x adj_x
+      updateSubExpAdj y adj_y
     --
     SubExp se -> do
       (_pat_v, pat_adj) <- commonBasicOp pat aux e m
-      void $ updateAdj se pat_adj
+      updateSubExpAdj se pat_adj
     --
     Assert {} ->
       void $ commonBasicOp pat aux e m
@@ -404,7 +437,7 @@ diffBasicOp pat aux e m =
       (_pat_v, pat_adj) <- commonBasicOp pat aux e m
       forM_ (zip [(0 :: Int64) ..] elems) $ \(i, se) -> do
         let slice = fullSlice t [DimFix (constant i)]
-        updateAdj se <=< letExp "elem_adj" $ BasicOp $ Index pat_adj slice
+        updateSubExpAdj se <=< letExp "elem_adj" $ BasicOp $ Index pat_adj slice
     --
     Index arr slice -> do
       (_pat_v, pat_adj) <- commonBasicOp pat aux e m
@@ -412,7 +445,7 @@ diffBasicOp pat aux e m =
     --
     Opaque se -> do
       (_pat_v, pat_adj) <- commonBasicOp pat aux e m
-      void $ updateAdj se pat_adj
+      updateSubExpAdj se pat_adj
     --
     Reshape _ arr -> do
       (_pat_v, pat_adj) <- commonBasicOp pat aux e m
@@ -445,9 +478,8 @@ diffBasicOp pat aux e m =
         letExp (baseString pat_adj <> "_flat") $
           BasicOp $ Reshape (map DimNew $ n : arrayDims x_t) pat_adj
       reduce <- reduceSOAC [Reduce Commutative lam [ne]]
-      void $
-        updateAdj x
-          =<< letExp "rep_contrib" (Op $ Screma n [pat_adj_flat] reduce)
+      updateSubExpAdj x
+        =<< letExp "rep_contrib" (Op $ Screma n [pat_adj_flat] reduce)
     --
     Concat d arr arrs _ -> do
       (_pat_v, pat_adj) <- commonBasicOp pat aux e m
@@ -483,14 +515,13 @@ diffBasicOp pat aux e m =
       ne <- letSubExp "zero" $ zeroExp $ Prim $ IntType t
       lam <- addLambda $ Prim $ IntType t
       reduce <- reduceSOAC [Reduce Commutative lam [ne]]
-      void $
-        updateAdj n
-          =<< letExp "iota_contrib" (Op $ Screma n [pat_adj] reduce)
+      updateSubExpAdj n
+        =<< letExp "iota_contrib" (Op $ Screma n [pat_adj] reduce)
     --
     Update arr slice v -> do
       (_pat_v, pat_adj) <- commonBasicOp pat aux e m
       v_adj <- letExp "update_val_adj" $ BasicOp $ Index pat_adj slice
-      void $ updateAdj v v_adj
+      updateSubExpAdj v v_adj
       zeroes <- letSubExp "update_zero" . zeroExp =<< subExpType v
       pat_adj_copy <- letExp (baseString pat_adj <> "_copy") $ BasicOp $ Copy pat_adj
       void $
@@ -499,7 +530,7 @@ diffBasicOp pat aux e m =
     --
     UpdateAcc {} -> error "Reverse-mode UpdateAcc not handled yet."
 
-commonSOAC :: Pattern -> StmAux () -> SOAC SOACS -> ADM () -> ADM [VName]
+commonSOAC :: Pattern -> StmAux () -> SOAC SOACS -> ADM () -> ADM [Adj]
 commonSOAC pat aux soac m = do
   addStm $ Let pat aux $ Op soac
   m
@@ -520,7 +551,7 @@ classifyAdjVars :: [VName] -> ADM [AdjVar]
 classifyAdjVars = mapM f
   where
     f v = do
-      v_adj <- lookupAdj v
+      v_adj <- lookupAdjVal v
       v_adj_t <- lookupType v_adj
       case v_adj_t of
         Array pt shape _ ->
@@ -540,16 +571,49 @@ partitionAdjVars (fv : fvs) =
   where
     (xs, ys, zs) = partitionAdjVars fvs
 
-diffMap :: [VName] -> SubExp -> Lambda -> [VName] -> Substitutions -> ADM ()
+diffMap :: [Adj] -> SubExp -> Lambda -> [VName] -> Substitutions -> ADM ()
+diffMap [AdjSparse (Sparse shape adj_i adj_v)] w map_lam as substs
+  | shapeDims shape == [w] = do
+    -- Since at most only a single adjoint is nonzero (adj_i), there
+    -- is no need for the return sweep code to contain a Map at all.
+
+    free <- filterM isActive $ namesToList $ freeIn map_lam
+    free_ts <- mapM lookupType free
+    let adjs_for = map paramName (lambdaParams map_lam) ++ free
+
+    -- Values for the out-of-bounds case does not matter, as we will
+    -- be writing to an out-of-bounds index anyway (which is ignored.
+    let ooBounds =
+          eBody
+            ( map (pure . zeroExp) $
+                map paramType (lambdaParams map_lam) ++ free_ts
+            )
+        inBounds = renameBody <=< buildBody_ $ do
+          -- Generate a single iteration of the map function.
+          forM_ (zip (lambdaParams map_lam) $ substituteNames substs as) $ \(p, a) -> do
+            a_t <- lookupType a
+            letBindNames [paramName p] $
+              BasicOp $ Index a $ fullSlice a_t [DimFix adj_i]
+          bodyBind . lambdaBody
+            =<< diffLambda [adj_v] adjs_for map_lam
+
+    as_adj_elems <-
+      letTupExp "map_adj_elem"
+        =<< eIf (eOutOfBounds (head as) [eSubExp adj_i]) ooBounds inBounds
+
+    forM_ (zip as as_adj_elems) $ \(a, a_adj_elem) ->
+      updateAdjIndex a adj_i a_adj_elem
+--
 diffMap pat_adj w map_lam as substs = do
+  pat_adj_vals <- mapM adjVal pat_adj
   pat_adj_params <-
-    mapM (newParam "map_adj_p" . rowType <=< lookupType) pat_adj
+    mapM (newParam "map_adj_p" . rowType <=< lookupType) pat_adj_vals
   map_lam' <- renameLambda map_lam
 
   free <- filterM isActive $ namesToList $ freeIn map_lam'
 
   accAdjoints free $ \free_with_adjs free_without_adjs -> do
-    free_adjs <- mapM lookupAdj free_with_adjs
+    free_adjs <- mapM lookupAdjVal free_with_adjs
     free_adjs_ts <- mapM lookupType free_adjs
     free_adjs_params <- mapM (newParam "free_adj_p") free_adjs_ts
     let lam_rev_params =
@@ -566,7 +630,7 @@ diffMap pat_adj w map_lam as substs = do
     (param_contribs, free_contribs) <-
       fmap (splitAt (length (lambdaParams map_lam'))) $
         letTupExp "map_adjs" . Op $
-          Screma w (substituteNames substs as ++ pat_adj ++ free_adjs) (mapSOAC lam_rev)
+          Screma w (substituteNames substs as ++ pat_adj_vals ++ free_adjs) (mapSOAC lam_rev)
 
     -- Crucial that we handle the free contribs first in case 'free'
     -- and 'as' intersect.
@@ -597,7 +661,7 @@ diffMap pat_adj w map_lam as substs = do
       letTupExp "withacc_res" $ WithAcc inputs acc_lam
 
     withAccInput (v, (shape, pt)) = do
-      v_adj <- lookupAdj v
+      v_adj <- lookupAdjVal v
       add_lam <- accAddLambda (shapeRank shape) $ Prim pt
       zero <- letSubExp "zero" $ zeroExp $ Prim pt
       pure (shape, [v_adj], Just (add_lam, [zero]))
@@ -613,10 +677,10 @@ diffMap pat_adj w map_lam as substs = do
         fmap (splitAt3 (length arr_free) (length acc_free)) . withAcc arr_free' $ \accs -> do
           zipWithM_ insAdj (map fst arr_free) accs
           () <- m (acc_free ++ map fst arr_free) (namesFromList nonacc_free)
-          acc_free_adj <- mapM lookupAdj acc_free
-          arr_free_adj <- mapM (lookupAdj . fst) arr_free
-          nonacc_free_adj <- mapM lookupAdj nonacc_free
-          as_nonfree_adj <- mapM lookupAdj as_nonfree
+          acc_free_adj <- mapM lookupAdjVal acc_free
+          arr_free_adj <- mapM (lookupAdjVal . fst) arr_free
+          nonacc_free_adj <- mapM lookupAdjVal nonacc_free
+          as_nonfree_adj <- mapM lookupAdjVal as_nonfree
           pure $ map Var $ arr_free_adj <> acc_free_adj <> nonacc_free_adj <> as_nonfree_adj
       zipWithM_ insAdj acc_free acc_adjs
       zipWithM_ insAdj (map fst arr_free) arr_adjs
@@ -742,17 +806,11 @@ diffMinMaxRed x aux w minmax ne as m = do
   form <- reduceSOAC [Reduce Commutative red_lam [ne, intConst Int64 (-1)]]
   x_ind <- newVName (baseString x <> "_ind")
   auxing aux $ letBindNames [x, x_ind] $ Op $ Screma w [as, red_iota] form
-  num_elems <-
-    letSubExp "num_elems"
-      =<< eConvOp
-        (BToI Int64)
-        (eCmpOp (CmpSle Int64) (eSubExp (intConst Int64 0)) (eSubExp (Var x_ind)))
 
   m
 
-  x_adj <- lookupAdj x
-  rep_adj <- letExp "minmax_rep_adj" $ BasicOp $ Replicate (Shape [num_elems]) $ Var x_adj
-  void $ updateAdjSlice [DimSlice (Var x_ind) num_elems $ intConst Int64 1] as rep_adj
+  x_adj <- lookupAdjVal x
+  updateAdjIndex as (Var x_ind) x_adj
 
 diffSOAC :: Pattern -> StmAux () -> SOAC SOACS -> ADM () -> ADM ()
 diffSOAC pat aux soac@(Screma w as form) m
@@ -764,7 +822,7 @@ diffSOAC pat aux soac@(Screma w as form) m
     isMinMaxOp op =
     diffMinMaxRed x aux w op ne a m
   | Just red <- singleReduce <$> isReduceSOAC form = do
-    pat_adj <- commonSOAC pat aux soac m
+    pat_adj <- mapM adjVal =<< commonSOAC pat aux soac m
     diffReduce pat_adj w as red
   where
     isMinMaxOp (SMin _) = True
@@ -796,7 +854,7 @@ diffStm stm@(Let pat _ (Apply f args _ _)) m
     addStm stm
     m
 
-    pat_adj <- lookupAdj =<< patternName pat
+    pat_adj <- lookupAdjVal =<< patternName pat
     let arg_pes = zipWith primExpFromSubExp argts (map fst args)
         pat_adj' = primExpFromSubExp ret (Var pat_adj)
 
@@ -807,7 +865,7 @@ diffStm stm@(Let pat _ (Apply f args _ _)) m
         Just derivs ->
           mapM (letExp "contrib" <=< toExp . (pat_adj' ~*~)) derivs
 
-    zipWithM_ updateAdj (map fst args) contribs
+    zipWithM_ updateSubExpAdj (map fst args) contribs
 diffStm stm@(Let pat _ e@(If cond tbody fbody _)) m = do
   copy_substs <- copyConsumedArrs e
   addStm stm
@@ -817,7 +875,7 @@ diffStm stm@(Let pat _ e@(If cond tbody fbody _)) m = do
       fbody_free = freeIn fbody
       branches_free = namesToList $ tbody_free <> fbody_free
 
-  adjs <- mapM lookupAdj $ patternValueNames pat
+  adjs <- mapM lookupAdjVal $ patternValueNames pat
 
   -- We need to discard any context, as this never contributes to
   -- adjoints.
@@ -857,7 +915,7 @@ diffBody res_adjs get_adjs_for (Body () stms res) = subAD $ do
   (adjs, stms') <- collectStms $ do
     zipWithM_ onResult (takeLast (length res_adjs) res) res_adjs
     diffStms stms
-    mapM lookupAdj get_adjs_for
+    mapM lookupAdjVal get_adjs_for
   pure $ Body () stms' $ res <> map Var adjs
 
 diffLambda :: [VName] -> [VName] -> Lambda -> ADM Lambda
