@@ -15,7 +15,7 @@ module Futhark.AD.Rev (revVJP) where
 
 import Control.Monad
 import Control.Monad.State.Strict
-import Data.Bifunctor (first, second)
+import Data.Bifunctor (second)
 import Data.List (foldl')
 import qualified Data.Map as M
 import Data.Maybe
@@ -28,7 +28,7 @@ import Futhark.IR.SOACS
 import Futhark.Tools
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
-import Futhark.Util (splitAt3, takeLast)
+import Futhark.Util (chunks, splitAt3, takeLast)
 
 --- First some general utility functions that are not specific to AD.
 
@@ -99,11 +99,11 @@ zeroExp t = error $ "zeroExp: " ++ pretty t
 data Sparse = Sparse
   { -- | The shape of the array.
     sparseShape :: Shape,
-    -- | Location of the nonzero value.  This index may be negative,
-    -- in which case the array is entirely zero.
-    sparseIdx :: SubExp,
-    -- | The nonzero value.
-    sparseVal :: SubExp
+    -- | Element type of the array.
+    sparseType :: PrimType,
+    -- | Locations and values of nonzero values.  Indexes may be
+    -- negative, in which case the value is ignored.
+    sparseIdxVals :: [(SubExp, SubExp)]
   }
   deriving (Eq, Ord, Show)
 
@@ -121,10 +121,11 @@ zeroArray shape t = do
     letExp "zeroes" $ BasicOp $ Replicate shape zero
 
 sparseArray :: (MonadBinder m, Rep m ~ SOACS) => Sparse -> m VName
-sparseArray (Sparse shape i se) = do
-  t <- subExpType se
-  zeroes <- zeroArray shape t
-  letExp "sparse" =<< eWriteArray zeroes [eSubExp i] (eSubExp se)
+sparseArray (Sparse shape t ivs) = do
+  flip (foldM f) ivs =<< zeroArray shape (Prim t)
+  where
+    f arr (i, se) =
+      letExp "sparse" =<< eWriteArray arr [eSubExp i] (eSubExp se)
 
 adjFromVar :: VName -> Adj
 adjFromVar = AdjVal . Var
@@ -322,9 +323,11 @@ updateAdjIndex v i se = do
   t <- lookupType v
   case maybeAdj of
     Nothing -> do
-      setAdj v $ AdjSparse $ Sparse (arrayShape t) i se
+      setAdj v $ AdjSparse $ Sparse (arrayShape t) (elemType t) [(i, se)]
     Just AdjZero {} ->
-      setAdj v $ AdjSparse $ Sparse (arrayShape t) i se
+      setAdj v $ AdjSparse $ Sparse (arrayShape t) (elemType t) [(i, se)]
+    Just (AdjSparse (Sparse shape pt ivs)) ->
+      setAdj v $ AdjSparse $ Sparse shape pt $ (i, se) : ivs
     Just adj -> do
       v_adj <- adjVal adj
       insAdj v
@@ -570,37 +573,63 @@ partitionAdjVars (fv : fvs) =
     (xs, ys, zs) = partitionAdjVars fvs
 
 diffMap :: [Adj] -> SubExp -> Lambda -> [VName] -> Substitutions -> ADM ()
-diffMap [AdjSparse (Sparse shape adj_i adj_v)] w map_lam as substs
-  | shapeDims shape == [w] = do
-    -- Since at most only a single adjoint is nonzero (adj_i), there
-    -- is no need for the return sweep code to contain a Map at all.
+diffMap res_adjs w map_lam as substs
+  | Just res_ivs <- mapM isSparse res_adjs,
+    freeIn map_lam == mempty, -- FIXME? Too conservative.
+    M.null substs = do
+    -- Since at most only a constant number of adjoint are nonzero
+    -- (length adj_ivs), there is no need for the return sweep code to
+    -- contain a Map at all.
 
     free <- filterM isActive $ namesToList $ freeIn map_lam
     free_ts <- mapM lookupType free
     let adjs_for = map paramName (lambdaParams map_lam) ++ free
 
-    -- Values for the out-of-bounds case does not matter, as we will
-    -- be writing to an out-of-bounds index anyway (which is ignored.
-    let ooBounds =
+    let oneHot res_i adj_v = zipWith f [0 :: Int ..] $ lambdaReturnType map_lam
+          where
+            f j t
+              | res_i == j = adj_v
+              | otherwise = AdjZero (arrayShape t) (elemType t)
+        -- Values for the out-of-bounds case does not matter, as we will
+        -- be writing to an out-of-bounds index anyway (which is ignored.
+        ooBounds =
           eBody
             ( map (pure . zeroExp) $
                 map paramType (lambdaParams map_lam) ++ free_ts
             )
-        inBounds = renameBody <=< buildBody_ $ do
-          -- Generate a single iteration of the map function.
-          forM_ (zip (lambdaParams map_lam) $ substituteNames substs as) $ \(p, a) -> do
+        inBounds res_i adj_i adj_v = renameBody <=< buildBody_ $ do
+          forM_ (zip (lambdaParams map_lam) as) $ \(p, a) -> do
             a_t <- lookupType a
             letBindNames [paramName p] $
               BasicOp $ Index a $ fullSlice a_t [DimFix adj_i]
           bodyBind . lambdaBody
-            =<< diffLambda [AdjVal adj_v] adjs_for map_lam
+            =<< diffLambda (oneHot res_i (AdjVal adj_v)) adjs_for map_lam
 
-    as_adj_elems <-
-      letTupExp "map_adj_elem"
-        =<< eIf (eOutOfBounds (head as) [eSubExp adj_i]) ooBounds inBounds
+        -- Generate an iteration of the map function for every
+        -- position.  This is a bit inefficient - probably we could do
+        -- some deduplication.
+        forPos res_i (adj_i, adj_v) = do
+          as_adj_elems <-
+            letTupExp "map_adj_elem"
+              =<< eIf
+                (eOutOfBounds (head as) [eSubExp adj_i])
+                ooBounds
+                (inBounds res_i adj_i adj_v)
 
-    forM_ (zip as as_adj_elems) $ \(a, a_adj_elem) ->
-      updateAdjIndex a adj_i $ Var a_adj_elem
+          forM_ (zip as as_adj_elems) $ \(a, a_adj_elem) ->
+            updateAdjIndex a adj_i $ Var a_adj_elem
+
+        -- Generate an iteration of the map function for every result.
+        forRes res_i ivs =
+          mapM_ (forPos res_i) ivs
+
+    zipWithM_ forRes [0 ..] res_ivs
+  where
+    isSparse (AdjSparse (Sparse shape _ ivs)) = do
+      guard $ shapeDims shape == [w]
+      Just ivs
+    isSparse _ =
+      Nothing
 --
 diffMap pat_adj w map_lam as substs = do
   pat_adj_vals <- mapM adjVal pat_adj
@@ -812,7 +841,21 @@ diffMinMaxRed x aux w minmax ne as m = do
 
 diffSOAC :: Pattern -> StmAux () -> SOAC SOACS -> ADM () -> ADM ()
 diffSOAC pat aux soac@(Screma w as form) m
-  | Just red <- singleReduce <$> isReduceSOAC form,
+  | Just reds <- isReduceSOAC form,
+    length reds > 1 = do
+    -- We split any horizontally reduction into multiple reductions
+    -- so we can detect special cases.  Post-AD, the result may be
+    -- fused again.
+    let ks = map (length . redNeutral) reds
+        pat_per_red = map (Pattern []) $ chunks ks $ patternElements pat
+        as_per_red = chunks ks as
+        onReds (red : reds') (red_pat : red_pats') (red_as : red_as') = do
+          red_form <- reduceSOAC [red]
+          diffSOAC red_pat aux (Screma w red_as red_form) $
+            onReds reds' red_pats' red_as'
+        onReds _ _ _ = m
+    onReds reds pat_per_red as_per_red
+  | Just [red] <- isReduceSOAC form,
     [x] <- patternNames pat,
     [ne] <- redNeutral red,
     [a] <- as,
@@ -836,10 +879,10 @@ diffSOAC pat aux soac@(Screma w as form) m
     pat_adj <- commonSOAC pat aux soac m
     diffMap pat_adj w lam as copy_substs
 diffSOAC pat _aux (Screma w as form) m
-  | Just (Reduce comm red_lam nes, map_lam) <-
-      first singleReduce <$> isRedomapSOAC form = do
+  | Just (reds, map_lam) <-
+      isRedomapSOAC form = do
     (mapstm, redstm) <-
-      redomapToMapAndReduce pat (w, comm, red_lam, map_lam, nes, as)
+      redomapToMapAndReduce pat (w, reds, map_lam, as)
     diffStm mapstm $ diffStm redstm m
 diffSOAC _ _ soac _ =
   error $ "diffSOAC unhandled:\n" ++ pretty soac

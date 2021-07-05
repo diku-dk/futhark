@@ -37,24 +37,21 @@ redomapToMapAndReduce ::
   ) =>
   Pattern rep ->
   ( SubExp,
-    Commutativity,
+    [Reduce rep],
     LambdaT rep,
-    LambdaT rep,
-    [SubExp],
     [VName]
   ) ->
   m (Stm rep, Stm rep)
 redomapToMapAndReduce
   (Pattern [] patelems)
-  (w, comm, redlam, map_lam, accs, arrs) = do
-    (map_pat, red_pat, red_args) <-
-      splitScanOrRedomap patelems w map_lam accs
-    let map_bnd = mkLet [] map_pat $ Op $ Screma w arrs (mapSOAC map_lam)
-        (nes, red_arrs) = unzip red_args
-    red_bnd <-
+  (w, reds, map_lam, arrs) = do
+    (map_pat, red_pat, red_arrs) <-
+      splitScanOrRedomap patelems w map_lam $ map redNeutral reds
+    let map_stm = mkLet [] map_pat $ Op $ Screma w arrs (mapSOAC map_lam)
+    red_stm <-
       Let red_pat (defAux ()) . Op
-        <$> (Screma w red_arrs <$> reduceSOAC [Reduce comm redlam nes])
-    return (map_bnd, red_bnd)
+        <$> (Screma w red_arrs <$> reduceSOAC reds)
+    return (map_stm, red_stm)
 redomapToMapAndReduce _ _ =
   error "redomapToMapAndReduce does not handle a non-empty 'patternContextElements'"
 
@@ -63,16 +60,17 @@ splitScanOrRedomap ::
   [PatElemT dec] ->
   SubExp ->
   LambdaT rep ->
-  [SubExp] ->
-  m ([Ident], PatternT dec, [(SubExp, VName)])
-splitScanOrRedomap patelems w map_lam accs = do
-  let (acc_patelems, arr_patelems) = splitAt (length accs) patelems
-      (acc_ts, _arr_ts) = splitAt (length accs) $ lambdaReturnType map_lam
+  [[SubExp]] ->
+  m ([Ident], PatternT dec, [VName])
+splitScanOrRedomap patelems w map_lam nes = do
+  let (acc_patelems, arr_patelems) =
+        splitAt (length $ concat nes) patelems
+      (acc_ts, _arr_ts) =
+        splitAt (length (concat nes)) $ lambdaReturnType map_lam
   map_accpat <- zipWithM accMapPatElem acc_patelems acc_ts
   map_arrpat <- mapM arrMapPatElem arr_patelems
   let map_pat = map_accpat ++ map_arrpat
-      red_args = zip accs $ map identName map_accpat
-  return (map_pat, Pattern [] acc_patelems, red_args)
+  return (map_pat, Pattern [] acc_patelems, map identName map_accpat)
   where
     accMapPatElem pe acc_t =
       newIdent (baseString (patElemName pe) ++ "_map_acc") $ acc_t `arrayOfRow` w
