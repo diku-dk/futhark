@@ -94,6 +94,11 @@ zeroExp (Array pt shape _) =
   BasicOp $ Replicate shape $ Constant $ blankPrimValue pt
 zeroExp t = error $ "zeroExp: " ++ pretty t
 
+-- | Whether 'Sparse' should check bounds or assume they are correct.
+-- The latter results in simpler code.
+data InBounds = CheckBounds | AssumeBounds
+  deriving (Eq, Ord, Show)
+
 -- | A symbolic representation of an array that is all zeroes, except at one
 -- index.
 data Sparse = Sparse
@@ -102,8 +107,9 @@ data Sparse = Sparse
     -- | Element type of the array.
     sparseType :: PrimType,
     -- | Locations and values of nonzero values.  Indexes may be
-    -- negative, in which case the value is ignored.
-    sparseIdxVals :: [(SubExp, SubExp)]
+    -- negative, in which case the value is ignored (unless
+    -- 'AssumeBounds' is used).
+    sparseIdxVals :: [(InBounds, SubExp, SubExp)]
   }
   deriving (Eq, Ord, Show)
 
@@ -124,8 +130,13 @@ sparseArray :: (MonadBinder m, Rep m ~ SOACS) => Sparse -> m VName
 sparseArray (Sparse shape t ivs) = do
   flip (foldM f) ivs =<< zeroArray shape (Prim t)
   where
-    f arr (i, se) =
+    arr_t = Prim t `arrayOfShape` shape
+    f arr (CheckBounds, i, se) =
       letExp "sparse" =<< eWriteArray arr [eSubExp i] (eSubExp se)
+    f arr (AssumeBounds, i, se) =
+      letExp "sparse" $
+        BasicOp $
+          Update arr (fullSlice arr_t [DimFix i]) se
 
 adjFromVar :: VName -> Adj
 adjFromVar = AdjVal . Var
@@ -289,7 +300,9 @@ updateAdj v d = do
           v_adj' <- letExp (baseString v <> "_adj") =<< addExp v_adj d
           insAdj v v_adj'
 
-updateAdjSlice :: Slice SubExp -> VName -> VName -> ADM VName
+updateAdjSlice :: Slice SubExp -> VName -> VName -> ADM ()
+updateAdjSlice [DimFix i] v d =
+  updateAdjIndex v (AssumeBounds, i) (Var d)
 updateAdjSlice slice v d = do
   t <- lookupType v
   v_adj <- lookupAdjVal v
@@ -310,24 +323,24 @@ updateAdjSlice slice v d = do
               BasicOp $ Index v_adj slice
       letInPlace "updated_adj" v_adj slice =<< addExp v_adjslice d
   insAdj v v_adj'
-  pure v_adj'
 
 updateSubExpAdj :: SubExp -> VName -> ADM ()
 updateSubExpAdj Constant {} _ = pure ()
 updateSubExpAdj (Var v) d = void $ updateAdj v d
 
 -- The index may be negative, in which case the update has no effect.
-updateAdjIndex :: VName -> SubExp -> SubExp -> ADM ()
-updateAdjIndex v i se = do
+updateAdjIndex :: VName -> (InBounds, SubExp) -> SubExp -> ADM ()
+updateAdjIndex v (check, i) se = do
   maybeAdj <- gets $ M.lookup v . stateAdjs
   t <- lookupType v
+  let iv = (check, i, se)
   case maybeAdj of
     Nothing -> do
-      setAdj v $ AdjSparse $ Sparse (arrayShape t) (elemType t) [(i, se)]
+      setAdj v $ AdjSparse $ Sparse (arrayShape t) (elemType t) [iv]
     Just AdjZero {} ->
-      setAdj v $ AdjSparse $ Sparse (arrayShape t) (elemType t) [(i, se)]
+      setAdj v $ AdjSparse $ Sparse (arrayShape t) (elemType t) [iv]
     Just (AdjSparse (Sparse shape pt ivs)) ->
-      setAdj v $ AdjSparse $ Sparse shape pt $ (i, se) : ivs
+      setAdj v $ AdjSparse $ Sparse shape pt $ iv : ivs
     Just adj -> do
       v_adj <- adjVal adj
       insAdj v
@@ -608,16 +621,20 @@ diffMap res_adjs w map_lam as substs
         -- Generate an iteration of the map function for every
         -- position.  This is a bit inefficient - probably we could do
         -- some deduplication.
-        forPos res_i (adj_i, adj_v) = do
+        forPos res_i (check, adj_i, adj_v) = do
           as_adj_elems <-
-            letTupExp "map_adj_elem"
-              =<< eIf
-                (eOutOfBounds (head as) [eSubExp adj_i])
-                ooBounds
-                (inBounds res_i adj_i adj_v)
+            case check of
+              CheckBounds ->
+                fmap (map Var) . letTupExp "map_adj_elem"
+                  =<< eIf
+                    (eOutOfBounds (head as) [eSubExp adj_i])
+                    ooBounds
+                    (inBounds res_i adj_i adj_v)
+              AssumeBounds ->
+                bodyBind =<< inBounds res_i adj_i adj_v
 
           forM_ (zip as as_adj_elems) $ \(a, a_adj_elem) ->
-            updateAdjIndex a adj_i $ Var a_adj_elem
+            updateAdjIndex a (check, adj_i) a_adj_elem
 
         -- Generate an iteration of the map function for every result.
         forRes res_i ivs =
@@ -837,7 +854,7 @@ diffMinMaxRed x aux w minmax ne as m = do
   m
 
   x_adj <- lookupAdjVal x
-  updateAdjIndex as (Var x_ind) (Var x_adj)
+  updateAdjIndex as (CheckBounds, Var x_ind) (Var x_adj)
 
 diffSOAC :: Pattern -> StmAux () -> SOAC SOACS -> ADM () -> ADM ()
 diffSOAC pat aux soac@(Screma w as form) m
