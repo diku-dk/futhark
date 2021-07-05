@@ -341,11 +341,18 @@ updateAdjIndex v (check, i) se = do
       setAdj v $ AdjSparse $ Sparse (arrayShape t) (elemType t) [iv]
     Just (AdjSparse (Sparse shape pt ivs)) ->
       setAdj v $ AdjSparse $ Sparse shape pt $ iv : ivs
-    Just adj -> do
+    Just adj@AdjVal {} -> do
       v_adj <- adjVal adj
+      v_adj_t <- lookupType v_adj
       insAdj v
-        =<< letExp (baseString v_adj)
-        =<< eWriteArray v_adj [eSubExp i] (eSubExp se)
+        =<< case v_adj_t of
+          Acc {} ->
+            letExp (baseString v_adj) . BasicOp $ UpdateAcc v_adj [i] [se]
+          _ ->
+            letExp (baseString v_adj)
+              =<< case check of
+                CheckBounds -> eWriteArray v_adj [eSubExp i] (eSubExp se)
+                AssumeBounds -> pure $ BasicOp $ Update v_adj (fullSlice v_adj_t [DimFix i]) se
 
 -- | Is this primal variable active in the AD sense?  FIXME: this is
 -- (obviously) much too conservative.
