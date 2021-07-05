@@ -428,17 +428,12 @@ transformStm path (Let pat aux@(StmAux cs _ _) (Op (Screma w arrs form)))
 
         paralleliseInner path' = do
           (mapstm, redstm) <-
-            redomapToMapAndReduce pat (w, comm', red_lam, map_lam, nes, arrs)
+            redomapToMapAndReduce pat (w, reds, map_lam, arrs)
           types <- asksScope scopeForSOACs
           transformStms path' . stmsToList <=< (`runBinderT_` types) $ do
             (_, stms) <-
               simplifyStms (stmsFromList [certify cs mapstm, certify cs redstm])
             addStms stms
-          where
-            comm'
-              | commutativeLambda red_lam = Commutative
-              | otherwise = comm
-            (Reduce comm red_lam nes) = singleReduce reds
 
         innerParallelBody path' =
           renameBody
