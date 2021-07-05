@@ -103,14 +103,14 @@ data Sparse = Sparse
     -- in which case the array is entirely zero.
     sparseIdx :: SubExp,
     -- | The nonzero value.
-    sparseVal :: VName
+    sparseVal :: SubExp
   }
   deriving (Eq, Ord, Show)
 
 -- | The adjoint of a variable.
 data Adj
   = AdjSparse Sparse
-  | AdjVal VName
+  | AdjVal SubExp
   | AdjZero Shape PrimType
   deriving (Eq, Ord, Show)
 
@@ -121,10 +121,13 @@ zeroArray shape t = do
     letExp "zeroes" $ BasicOp $ Replicate shape zero
 
 sparseArray :: (MonadBinder m, Rep m ~ SOACS) => Sparse -> m VName
-sparseArray (Sparse shape i v) = do
-  t <- lookupType v
+sparseArray (Sparse shape i se) = do
+  t <- subExpType se
   zeroes <- zeroArray shape t
-  letExp "sparse" =<< eWriteArray zeroes [eSubExp i] (eSubExp $ Var v)
+  letExp "sparse" =<< eWriteArray zeroes [eSubExp i] (eSubExp se)
+
+adjFromVar :: VName -> Adj
+adjFromVar = AdjVal . Var
 
 data RState = RState
   { stateAdjs :: M.Map VName Adj,
@@ -167,7 +170,7 @@ adjVName :: VName -> ADM VName
 adjVName v = newVName (baseString v <> "_adj")
 
 adjVal :: Adj -> ADM VName
-adjVal (AdjVal v) = pure v
+adjVal (AdjVal se) = letExp "const_adj" $ BasicOp $ SubExp se
 adjVal (AdjSparse sparse) = sparseArray sparse
 adjVal (AdjZero shape t) = zeroArray shape $ Prim t
 
@@ -176,7 +179,7 @@ setAdj v v_adj = modify $ \env ->
   env {stateAdjs = M.insert v v_adj $ stateAdjs env}
 
 insAdj :: VName -> VName -> ADM ()
-insAdj v = setAdj v . AdjVal
+insAdj v = setAdj v . AdjVal . Var
 
 -- While evaluationg this action, pretend these variables have no
 -- adjoints.  Restore current adjoints afterwards.  This is used for
@@ -264,13 +267,12 @@ lookupAdj v = do
 lookupAdjVal :: VName -> ADM VName
 lookupAdjVal v = adjVal =<< lookupAdj v
 
-updateAdj :: VName -> VName -> ADM VName
+updateAdj :: VName -> VName -> ADM ()
 updateAdj v d = do
   maybeAdj <- gets $ M.lookup v . stateAdjs
   case maybeAdj of
-    Nothing -> do
+    Nothing ->
       insAdj v d
-      pure d
     Just adj -> do
       v_adj <- adjVal adj
       v_adj_t <- lookupType v_adj
@@ -282,11 +284,9 @@ updateAdj v d = do
               letTupExp "acc" $
                 BasicOp $ UpdateAcc v_adj' (map Var is) [Var d']
           insAdj v v_adj'
-          pure v_adj'
         _ -> do
           v_adj' <- letExp (baseString v <> "_adj") =<< addExp v_adj d
           insAdj v v_adj'
-          pure v_adj'
 
 updateAdjSlice :: Slice SubExp -> VName -> VName -> ADM VName
 updateAdjSlice slice v d = do
@@ -316,7 +316,7 @@ updateSubExpAdj Constant {} _ = pure ()
 updateSubExpAdj (Var v) d = void $ updateAdj v d
 
 -- The index may be negative, in which case the update has no effect.
-updateAdjIndex :: VName -> SubExp -> VName -> ADM ()
+updateAdjIndex :: VName -> SubExp -> SubExp -> ADM ()
 updateAdjIndex v i se = do
   maybeAdj <- gets $ M.lookup v . stateAdjs
   t <- lookupType v
@@ -329,7 +329,7 @@ updateAdjIndex v i se = do
       v_adj <- adjVal adj
       insAdj v
         =<< letExp (baseString v_adj)
-        =<< eWriteArray v_adj [eSubExp i] (eSubExp $ Var se)
+        =<< eWriteArray v_adj [eSubExp i] (eSubExp se)
 
 -- | Is this primal variable active in the AD sense?  FIXME: this is
 -- (obviously) much too conservative.
@@ -593,14 +593,14 @@ diffMap [AdjSparse (Sparse shape adj_i adj_v)] w map_lam as substs
             letBindNames [paramName p] $
               BasicOp $ Index a $ fullSlice a_t [DimFix adj_i]
           bodyBind . lambdaBody
-            =<< diffLambda [adj_v] adjs_for map_lam
+            =<< diffLambda [AdjVal adj_v] adjs_for map_lam
 
     as_adj_elems <-
       letTupExp "map_adj_elem"
         =<< eIf (eOutOfBounds (head as) [eSubExp adj_i]) ooBounds inBounds
 
     forM_ (zip as as_adj_elems) $ \(a, a_adj_elem) ->
-      updateAdjIndex a adj_i a_adj_elem
+      updateAdjIndex a adj_i $ Var a_adj_elem
 --
 diffMap pat_adj w map_lam as substs = do
   pat_adj_vals <- mapM adjVal pat_adj
@@ -623,7 +623,7 @@ diffMap pat_adj w map_lam as substs = do
           noAdjsFor free_without_adjs $ do
             zipWithM_ insAdj free_with_adjs $ map paramName free_adjs_params
             bodyBind . lambdaBody
-              =<< diffLambda (map paramName pat_adj_params) adjs_for map_lam'
+              =<< diffLambda (map (adjFromVar . paramName) pat_adj_params) adjs_for map_lam'
 
     (param_contribs, free_contribs) <-
       fmap (splitAt (length (lambdaParams map_lam'))) $
@@ -722,7 +722,7 @@ diffReduce pat_adj w as red = do
 
   (as_params, f) <- mkF $ redLambda red
 
-  f_adj <- diffLambda pat_adj as_params f
+  f_adj <- diffLambda (map adjFromVar pat_adj) as_params f
 
   as_adj <- letTupExp "adjs" $ Op $ Screma w (ls ++ as ++ rs) (mapSOAC f_adj)
 
@@ -808,7 +808,7 @@ diffMinMaxRed x aux w minmax ne as m = do
   m
 
   x_adj <- lookupAdjVal x
-  updateAdjIndex as (Var x_ind) x_adj
+  updateAdjIndex as (Var x_ind) (Var x_adj)
 
 diffSOAC :: Pattern -> StmAux () -> SOAC SOACS -> ADM () -> ADM ()
 diffSOAC pat aux soac@(Screma w as form) m
@@ -873,7 +873,7 @@ diffStm stm@(Let pat _ e@(If cond tbody fbody _)) m = do
       fbody_free = freeIn fbody
       branches_free = namesToList $ tbody_free <> fbody_free
 
-  adjs <- mapM lookupAdjVal $ patternValueNames pat
+  adjs <- mapM lookupAdj $ patternValueNames pat
 
   -- We need to discard any context, as this never contributes to
   -- adjoints.
@@ -906,17 +906,17 @@ subAD m = do
   modify $ \s -> s {stateAdjs = old_state_adjs}
   pure x
 
-diffBody :: [VName] -> [VName] -> Body -> ADM Body
+diffBody :: [Adj] -> [VName] -> Body -> ADM Body
 diffBody res_adjs get_adjs_for (Body () stms res) = subAD $ do
   let onResult (Constant _) _ = pure ()
-      onResult (Var v) v_adj = void $ updateAdj v v_adj
+      onResult (Var v) v_adj = void $ updateAdj v =<< adjVal v_adj
   (adjs, stms') <- collectStms $ do
     zipWithM_ onResult (takeLast (length res_adjs) res) res_adjs
     diffStms stms
     mapM lookupAdjVal get_adjs_for
   pure $ Body () stms' $ res <> map Var adjs
 
-diffLambda :: [VName] -> [VName] -> Lambda -> ADM Lambda
+diffLambda :: [Adj] -> [VName] -> Lambda -> ADM Lambda
 diffLambda res_adjs get_adjs_for (Lambda params body _) =
   localScope (scopeOfLParams params) $ do
     Body () stms res <- diffBody res_adjs get_adjs_for body
@@ -932,7 +932,10 @@ revVJP scope (Lambda params body ts) =
 
     Body () stms res <-
       localScope (scopeOfLParams params_adj) $
-        diffBody (map paramName params_adj) (map paramName params) body
+        diffBody
+          (map (adjFromVar . paramName) params_adj)
+          (map paramName params)
+          body
     let body' = Body () stms $ takeLast (length params) res
 
     pure $ Lambda (params ++ params_adj) body' (map paramType params)
