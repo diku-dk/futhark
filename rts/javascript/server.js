@@ -107,7 +107,7 @@ class Server {
       for (var i = 0; i < out_vnames.length; i++) {
         this._vars[out_vnames[i]] = vals[i];
       }
-    //}
+    }
   }
 
 
