@@ -3,7 +3,7 @@ module Futhark.Optimise.MemBlockCoalesce.TopDownAn
        ( TopDnEnv(..), ScopeTab, InhibitTab
        , topdwnTravBinding, topDownLoop
        , getDirAliasedIxfn, addInvAliassesVarTab
-       , areAnyAliased )
+       , areAnyAliased, safety2 )
        where
 
 import qualified Data.Map.Strict as M
@@ -45,6 +45,13 @@ data TopDnEnv = TopDnEnv { alloc   :: AllocTab
                          -- ^ keeps track of memory block aliasing.
                          --   this needs to be implemented
                          }
+
+safety2 :: TopDnEnv -> VName -> Bool
+safety2 td_env m =
+--  nameIn m (alloc td_env)
+  case M.lookup m (scope td_env) of
+    (Just _) -> True
+    Nothing  -> False
 
 getDirAliasFromExp :: Exp (Aliases ExpMem.SeqMem) -> Maybe (VName, ExpMem.IxFun -> ExpMem.IxFun)
 getDirAliasFromExp (BasicOp (SubExp (Var x))) = Just (x, id)
