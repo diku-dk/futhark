@@ -436,6 +436,14 @@ commandLineOptions =
       "Compile the program using the OpenCL backend.",
     Option
       []
+      ["compile-opencl-server"]
+      ( NoArg $
+          Right $ \opts ->
+            opts {futharkAction = GPUMemAction $ compileOpenCLAction newFutharkConfig ToServer}
+      )
+      "Compile the program into a futhark server using the OpenCL backend.",
+    Option
+      []
       ["compile-c"]
       ( NoArg $
           Right $ \opts ->
