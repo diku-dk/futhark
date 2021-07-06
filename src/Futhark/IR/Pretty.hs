@@ -177,10 +177,14 @@ instance Pretty BasicOp where
   ppr (UnOp op e) = ppr op <+> pprPrec 9 e
   ppr (Index v idxs) =
     ppr v <> brackets (commasep (map ppr idxs))
-  ppr (Update src idxs se) =
-    ppr src <+> text "with" <+> brackets (commasep (map ppr idxs))
+  ppr (Update safety src idxs se) =
+    ppr src <+> with <+> brackets (commasep (map ppr idxs))
       <+> text "="
       <+> ppr se
+    where
+      with = case safety of
+        Unsafe -> text "with"
+        Safe -> text "with?"
   ppr (Iota e x s et) = text "iota" <> et' <> apply [ppr e, ppr x, ppr s]
     where
       et' = text $ show $ primBitSize $ IntType et

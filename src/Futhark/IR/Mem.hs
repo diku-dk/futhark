@@ -1085,7 +1085,7 @@ expReturns (BasicOp (Index v slice)) = do
     MemPrim pt -> return [MemPrim pt]
     MemAcc acc ispace ts u -> return [MemAcc acc ispace ts u]
     MemMem space -> return [MemMem space]
-expReturns (BasicOp (Update v _ _)) =
+expReturns (BasicOp (Update _ v _ _)) =
   pure <$> varReturns v
 expReturns (BasicOp op) =
   extReturns . staticShapes <$> primOpType op

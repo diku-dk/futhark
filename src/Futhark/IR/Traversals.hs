@@ -108,9 +108,9 @@ mapExpM tv (BasicOp (Index arr slice)) =
     <$> ( Index <$> mapOnVName tv arr
             <*> mapM (traverse (mapOnSubExp tv)) slice
         )
-mapExpM tv (BasicOp (Update arr slice se)) =
+mapExpM tv (BasicOp (Update safety arr slice se)) =
   BasicOp
-    <$> ( Update <$> mapOnVName tv arr
+    <$> ( Update safety <$> mapOnVName tv arr
             <*> mapM (traverse (mapOnSubExp tv)) slice
             <*> mapOnSubExp tv se
         )
@@ -284,7 +284,7 @@ walkExpM tv (Apply _ args ret _) =
   mapM_ (walkOnSubExp tv . fst) args >> mapM_ (walkOnRetType tv) ret
 walkExpM tv (BasicOp (Index arr slice)) =
   walkOnVName tv arr >> mapM_ (traverse_ (walkOnSubExp tv)) slice
-walkExpM tv (BasicOp (Update arr slice se)) =
+walkExpM tv (BasicOp (Update _ arr slice se)) =
   walkOnVName tv arr
     >> mapM_ (traverse_ (walkOnSubExp tv)) slice
     >> walkOnSubExp tv se

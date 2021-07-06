@@ -150,13 +150,13 @@ ruleBasicOp vtable pat aux op
     defOf = (`ST.lookupExp` vtable)
     seType (Var v) = ST.lookupType v vtable
     seType (Constant v) = Just $ Prim $ primValueType v
-ruleBasicOp vtable pat _ (Update src _ (Var v))
+ruleBasicOp vtable pat _ (Update _ src _ (Var v))
   | Just (BasicOp Scratch {}, _) <- ST.lookupExp v vtable =
     Simplify $ letBind pat $ BasicOp $ SubExp $ Var src
 -- If we are writing a single-element slice from some array, and the
 -- element of that array can be computed as a PrimExp based on the
 -- index, let's just write that instead.
-ruleBasicOp vtable pat aux (Update src [DimSlice i n s] (Var v))
+ruleBasicOp vtable pat aux (Update safety src [DimSlice i n s] (Var v))
   | isCt1 n,
     isCt1 s,
     Just (ST.Indexed cs e) <- ST.index v [intConst Int64 0] vtable =
@@ -164,8 +164,8 @@ ruleBasicOp vtable pat aux (Update src [DimSlice i n s] (Var v))
       e' <- toSubExp "update_elem" e
       auxing aux $
         certifying cs $
-          letBind pat $ BasicOp $ Update src [DimFix i] e'
-ruleBasicOp vtable pat _ (Update dest destis (Var v))
+          letBind pat $ BasicOp $ Update safety src [DimFix i] e'
+ruleBasicOp vtable pat _ (Update _ dest destis (Var v))
   | Just (e, _) <- ST.lookupExp v vtable,
     arrayFrom e =
     Simplify $ letBind pat $ BasicOp $ SubExp $ Var dest
@@ -182,7 +182,7 @@ ruleBasicOp vtable pat _ (Update dest destis (Var v))
         True
     arrayFrom _ =
       False
-ruleBasicOp vtable pat _ (Update dest is se)
+ruleBasicOp vtable pat _ (Update _ dest is se)
   | Just dest_t <- ST.lookupType dest vtable,
     isFullSlice (arrayShape dest_t) is = Simplify $
     case se of
@@ -192,8 +192,8 @@ ruleBasicOp vtable pat _ (Update dest is se)
             BasicOp $ Reshape (map DimNew $ arrayDims dest_t) v
         letBind pat $ BasicOp $ Copy v_reshaped
       _ -> letBind pat $ BasicOp $ ArrayLit [se] $ rowType dest_t
-ruleBasicOp vtable pat (StmAux cs1 attrs _) (Update dest1 is1 (Var v1))
-  | Just (Update dest2 is2 se2, cs2) <- ST.lookupBasicOp v1 vtable,
+ruleBasicOp vtable pat (StmAux cs1 attrs _) (Update safety1 dest1 is1 (Var v1))
+  | Just (Update safety2 dest2 is2 se2, cs2) <- ST.lookupBasicOp v1 vtable,
     Just (Copy v3, cs3) <- ST.lookupBasicOp dest2 vtable,
     Just (Index v4 is4, cs4) <- ST.lookupBasicOp v3 vtable,
     is4 == is1,
@@ -201,7 +201,7 @@ ruleBasicOp vtable pat (StmAux cs1 attrs _) (Update dest1 is1 (Var v1))
     Simplify $
       certifying (cs1 <> cs2 <> cs3 <> cs4) $ do
         is5 <- subExpSlice $ sliceSlice (primExpSlice is1) (primExpSlice is2)
-        attributing attrs $ letBind pat $ BasicOp $ Update dest1 is5 se2
+        attributing attrs $ letBind pat $ BasicOp $ Update (max safety1 safety2) dest1 is5 se2
 ruleBasicOp vtable pat _ (CmpOp (CmpEq t) se1 se2)
   | Just m <- simplifyWith se1 se2 = Simplify m
   | Just m <- simplifyWith se2 se1 = Simplify m
@@ -340,7 +340,7 @@ ruleBasicOp vtable pat aux (Rotate offsets1 v)
 -- Update with a slice of that array.  This matters when the arrays
 -- are far away (on the GPU, say), because it avoids a copy of the
 -- scalar to and from the host.
-ruleBasicOp vtable pat aux (Update arr_x slice_x (Var v))
+ruleBasicOp vtable pat aux (Update safety arr_x slice_x (Var v))
   | Just _ <- sliceIndices slice_x,
     Just (Index arr_y slice_y, cs_y) <- ST.lookupBasicOp v vtable,
     ST.available arr_y vtable,
@@ -353,7 +353,7 @@ ruleBasicOp vtable pat aux (Update arr_x slice_x (Var v))
     v' <- letExp (baseString v ++ "_slice") $ BasicOp $ Index arr_y slice_y'
     certifying cs_y $
       auxing aux $
-        letBind pat $ BasicOp $ Update arr_x slice_x' $ Var v'
+        letBind pat $ BasicOp $ Update safety arr_x slice_x' $ Var v'
 
 -- Simplify away 0<=i when 'i' is from a loop of form 'for i < n'.
 ruleBasicOp vtable pat aux (CmpOp CmpSle {} x y)

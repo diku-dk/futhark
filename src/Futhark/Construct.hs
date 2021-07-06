@@ -75,7 +75,6 @@ module Futhark.Construct
     eBlank,
     eAll,
     eOutOfBounds,
-    eWriteArray,
     asIntZ,
     asIntS,
     resultBody,
@@ -149,7 +148,7 @@ letInPlace ::
   m VName
 letInPlace desc src slice e = do
   tmp <- letSubExp (desc ++ "_tmp") e
-  letExp desc $ BasicOp $ Update src slice tmp
+  letExp desc $ BasicOp $ Update Unsafe src slice tmp
 
 letSubExps ::
   MonadBuilder m =>
@@ -357,35 +356,6 @@ eOutOfBounds arr is = do
         letSubExp "outside_bounds_dim" $
           BasicOp $ BinOp LogOr less_than_zero greater_than_size
   foldBinOp LogOr (constant False) =<< zipWithM checkDim ws is'
-
--- | Write to an index of the array, if within bounds.  Otherwise,
--- nothing.  Produces the updated array.
-eWriteArray ::
-  (MonadBuilder m, BranchType (Rep m) ~ ExtType) =>
-  VName ->
-  [m (Exp (Rep m))] ->
-  m (Exp (Rep m)) ->
-  m (Exp (Rep m))
-eWriteArray arr is v = do
-  arr_t <- lookupType arr
-  is' <- mapM (letSubExp "write_i") =<< sequence is
-  v' <- letSubExp "write_v" =<< v
-
-  outside_bounds <- letSubExp "outside_bounds" =<< eOutOfBounds arr is
-
-  outside_bounds_branch <- buildBody_ $ pure [Var arr]
-
-  in_bounds_branch <-
-    buildBody_ . fmap (pure . Var) $
-      letInPlace
-        "write_out_inside_bounds"
-        arr
-        (fullSlice arr_t (map DimFix is'))
-        (BasicOp $ SubExp v')
-
-  return $
-    If outside_bounds outside_bounds_branch in_bounds_branch $
-      ifCommon [arr_t]
 
 -- | Construct an unspecified value of the given type.
 eBlank :: MonadBuilder m => Type -> m (Exp (Rep m))

@@ -367,8 +367,9 @@ data BasicOp
     -- | The certificates for bounds-checking are part of the 'Stm'.
     Index VName (Slice SubExp)
   | -- | An in-place update of the given array at the given position.
-    -- Consumes the array.
-    Update VName (Slice SubExp) SubExp
+    -- Consumes the array.  If 'Safe', perform a run-time bounds check
+    -- and ignore the write if out of bounds (like @Scatter@).
+    Update Safety VName (Slice SubExp) SubExp
   | -- | @concat@0([1],[2, 3, 4]) = [1, 2, 3, 4]@.
     Concat Int VName [VName] SubExp
   | -- | Copy the given array.  The result will not alias anything.
