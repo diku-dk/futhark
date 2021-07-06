@@ -19,7 +19,10 @@ bindLambda ::
   m ()
 bindLambda pat aux (Lambda params body _) args = do
   auxing aux . forM_ (zip params args) $ \(param, arg) ->
-    letBindNames [paramName param] $ BasicOp $ SubExp arg
+    letBindNames [paramName param] $
+      BasicOp $ case (paramType param, arg) of
+        (Array {}, Var v) -> Copy v
+        _ -> SubExp arg
   res <- bodyBind body
   forM_ (zip (patternNames pat) res) $ \(v, se) ->
     letBindNames [v] $ BasicOp $ SubExp se

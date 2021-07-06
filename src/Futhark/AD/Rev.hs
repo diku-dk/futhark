@@ -545,10 +545,9 @@ diffBasicOp pat aux e m =
       v_adj <- letExp "update_val_adj" $ BasicOp $ Index pat_adj slice
       updateSubExpAdj v v_adj
       zeroes <- letSubExp "update_zero" . zeroExp =<< subExpType v
-      pat_adj_copy <- letExp (baseString pat_adj <> "_copy") $ BasicOp $ Copy pat_adj
       void $
         updateAdj arr
-          =<< letExp "update_src_adj" (BasicOp $ Update safety pat_adj_copy slice zeroes)
+          =<< letExp "update_src_adj" (BasicOp $ Update safety pat_adj slice zeroes)
     --
     UpdateAcc {} -> error "Reverse-mode UpdateAcc not handled yet."
 
