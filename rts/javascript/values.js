@@ -111,7 +111,9 @@ var typToSize = {
 //  return array[0];
 //}
 
-  
+function toU8(ta) {
+  return new Uint8Array(ta.buffer, ta.byteOffset, ta.byteLength);
+}
 
 
 function construct_binary_value(v, typ) {
@@ -129,15 +131,18 @@ function construct_binary_value(v, typ) {
     dims = shape.length;
     payload_bytes = da.byteLength + ta.byteLength;
     filler = (bytes) => {
-      bytes.set(new Uint8Array(da.buffer, da.byteOffset, da.byteLength), 7);
-      bytes.set(new Uint8Array(ta.buffer, ta.byteOffset, ta.byteLength), 7 + da.byteLength);
+      bytes.set(toU8(da), 7);
+      bytes.set(toU8(ta), 7 + da.byteLength);
     }
   } else {
     var ftype = "    ".slice(typ.length) + typ;
     dims = 0;
     payload_bytes = typToSize[ftype];
+    console.log("Testing", ftype, v, typ, payload_bytes, typToType[ftype]);
     filler = (bytes) => {
-      bytes.set(new (typToType[ftype])([v]), 7);
+      var scalar = new (typToType[ftype])([v]);
+      bytes.set(toU8(scalar), 7);
+      console.log(bytes);
     }
   }
   var total_bytes = 7 + payload_bytes;
