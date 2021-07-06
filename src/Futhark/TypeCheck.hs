@@ -824,7 +824,7 @@ checkBasicOp (Index ident idxes) = do
   when (arrayRank vt /= length idxes) $
     bad $ SlicingError (arrayRank vt) (length idxes)
   mapM_ checkDimIndex idxes
-checkBasicOp (Update src idxes se) = do
+checkBasicOp (Update _ src idxes se) = do
   src_t <- checkArrIdent src
   when (arrayRank src_t /= length idxes) $
     bad $ SlicingError (arrayRank src_t) (length idxes)

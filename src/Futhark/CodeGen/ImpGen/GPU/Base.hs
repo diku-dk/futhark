@@ -278,13 +278,19 @@ compileGroupExp (Pattern _ [dest]) (BasicOp (Iota n e s it)) = do
 -- sure that only one thread performs the write.  When writing an
 -- array, the group-level copy code will take care of doing the right
 -- thing.
-compileGroupExp (Pattern _ [pe]) (BasicOp (Update _ slice se))
+compileGroupExp (Pattern _ [pe]) (BasicOp (Update safety _ slice se))
   | null $ sliceDims slice = do
     sOp $ Imp.Barrier Imp.FenceLocal
     ltid <- kernelLocalThreadId . kernelConstants <$> askEnv
     sWhen (ltid .==. 0) $
-      copyDWIM (patElemName pe) (map (fmap toInt64Exp) slice) se []
+      case safety of
+        Unsafe -> write
+        Safe -> sWhen (inBounds slice' dims) write
     sOp $ Imp.Barrier Imp.FenceLocal
+  where
+    slice' = map (fmap toInt64Exp) slice
+    dims = map toInt64Exp $ arrayDims $ patElemType pe
+    write = copyDWIM (patElemName pe) slice' se []
 compileGroupExp dest e =
   defCompileExp dest e
 

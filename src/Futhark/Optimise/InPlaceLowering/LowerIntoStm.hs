@@ -71,7 +71,7 @@ lowerUpdate
             return
               [ certify (stmAuxCerts aux <> cs) $
                   mkLet [] [Ident bindee_nm $ typeOf bindee_dec] $
-                    BasicOp $ Update v is' $ Var val
+                    BasicOp $ Update Unsafe v is' $ Var val
               ]
 lowerUpdate _ _ _ =
   Nothing
@@ -256,18 +256,17 @@ lowerUpdateIntoLoop scope updates pat ctx val form body = do
                 (updateValue update)
                 (source_t `setArrayDims` sliceDims (updateIndices update))
         tell
-          ( [ mkLet [] [Ident source source_t] $
-                BasicOp $
-                  Update
-                    (updateSource update)
-                    (fullSlice source_t $ updateIndices update)
-                    $ snd $ mergeParam summary
+          ( [ mkLet [] [Ident source source_t] . BasicOp $
+                Update
+                  Unsafe
+                  (updateSource update)
+                  (fullSlice source_t $ updateIndices update)
+                  $ snd $ mergeParam summary
             ],
-            [ mkLet [] [elmident] $
-                BasicOp $
-                  Index
-                    (updateName update)
-                    (fullSlice source_t $ updateIndices update)
+            [ mkLet [] [elmident] . BasicOp $
+                Index
+                  (updateName update)
+                  (fullSlice source_t $ updateIndices update)
             ]
           )
         return $
@@ -373,9 +372,7 @@ manipulateResult summaries substs = do
     substRes res_se (_, (cs, nm, dec, is)) = do
       v' <- newIdent' (++ "_updated") $ Ident nm $ typeOf dec
       tell
-        [ certify cs $
-            mkLet [] [v'] $
-              BasicOp $
-                Update nm (fullSlice (typeOf dec) is) res_se
+        [ certify cs . mkLet [] [v'] . BasicOp $
+            Update Unsafe nm (fullSlice (typeOf dec) is) res_se
         ]
       return $ Var $ identName v'

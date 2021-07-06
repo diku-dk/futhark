@@ -269,7 +269,7 @@ transformSOAC pat (Stream w arrs _ nes lam) = do
 
       mapout_res' <- forM (zip mapout_params mapout_res) $ \(p, se) ->
         letSubExp "mapout_res" . BasicOp $
-          Update (paramName p) (fullSlice (paramType p) slice) se
+          Update Unsafe (paramName p) (fullSlice (paramType p) slice) se
 
       resultBodyM $ res ++ mapout_res'
 
@@ -293,8 +293,10 @@ transformSOAC pat (Scatter len lam ivs as) = do
       let indexes = groupScatterResults (zip3 as_ws as_ns $ map identName asOuts) ivs''
 
       ress <- forM indexes $ \(_, arr, indexes') -> do
+        arr_t <- lookupType arr
         let saveInArray arr' (indexCur, valueCur) =
-              letExp "write_out" =<< eWriteArray arr' (map eSubExp indexCur) (eSubExp valueCur)
+              letExp "write_out" $
+                BasicOp $ Update Safe arr' (fullSlice arr_t $ map DimFix indexCur) valueCur
 
         foldM saveInArray arr indexes'
       return $ resultBody (map Var ress)
