@@ -258,7 +258,9 @@ runTestCase (TestCase mode program testcase progs) = do
             context "Running compiled program" $
               withProgramServer program runner extra_options $ \server -> do
                 let run = runCompiledEntry (FutharkExe futhark) server program
-                concat <$> mapM run ios
+                toReturn <- concat <$> mapM run ios
+                terminate server
+                return toReturn
 
       unless (mode == Compile || mode == Compiled) $
         context "Interpreting" $
@@ -281,9 +283,7 @@ runCompiledEntry futhark server program (InputOutputs entry run_cases) = do
   let outs = ["out" <> T.pack (show i) | i <- [0 .. length output_types -1]]
       ins = ["in" <> T.pack (show i) | i <- [0 .. length input_types -1]]
       onRes = either (Failure . pure) (const Success)
-  tstress <- mapM (fmap onRes . runCompiledCase input_types outs ins) run_cases
-  terminate server
-  return tstress
+  mapM (fmap onRes . runCompiledCase input_types outs ins) run_cases
   where
     dir = takeDirectory program
 
