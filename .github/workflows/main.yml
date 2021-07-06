@@ -382,7 +382,7 @@ jobs:
         export EMCFLAGS=-sINITIAL_MEMORY=2147418112 # 2gb - 64kb... largest value of memory
         futhark test -c --backend=wasm --runner=./tools/node-simd.sh --no-tuning --exclude=no_wasm --concurrency=1 tests examples
 
-  test-wasm:
+  test-wasm-multicore:
     runs-on: ubuntu-20.04
     needs: [build-linux-nix]
 
