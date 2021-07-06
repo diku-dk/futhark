@@ -1769,13 +1769,7 @@ compileThreadResult _ pe (WriteReturns (Shape rws) _arr dests) = do
   let rws' = map toInt64Exp rws
   forM_ dests $ \(slice, e) -> do
     let slice' = map (fmap toInt64Exp) slice
-        condInBounds (DimFix i) rw =
-          0 .<=. i .&&. i .<. rw
-        condInBounds (DimSlice i n s) rw =
-          0 .<=. i .&&. i + n * s .<. rw
-        write =
-          foldl (.&&.) (kernelThreadActive constants) $
-            zipWith condInBounds slice' rws'
+        write = kernelThreadActive constants .&&. inBounds slice' rws'
     sWhen write $ copyDWIM (patElemName pe) slice' e []
 compileThreadResult _ _ TileReturns {} =
   compilerBugS "compileThreadResult: TileReturns unhandled."
