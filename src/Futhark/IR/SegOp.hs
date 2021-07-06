@@ -1054,7 +1054,7 @@ mkWiseKernelBody dec bnds res =
     res_vs = map kernelResultSubExp res
 
 mkKernelBodyM ::
-  MonadBinder m =>
+  MonadBuilder m =>
   Stms (Rep m) ->
   [KernelResult] ->
   m (KernelBody (Rep m))
@@ -1200,13 +1200,13 @@ class HasSegOp rep where
 
 -- | Simplification rules for simplifying 'SegOp's.
 segOpRules ::
-  (HasSegOp rep, BinderOps rep, Bindable rep) =>
+  (HasSegOp rep, BuilderOps rep, Buildable rep) =>
   RuleBook rep
 segOpRules =
   ruleBook [RuleOp segOpRuleTopDown] [RuleOp segOpRuleBottomUp]
 
 segOpRuleTopDown ::
-  (HasSegOp rep, BinderOps rep, Bindable rep) =>
+  (HasSegOp rep, BuilderOps rep, Buildable rep) =>
   TopDownRuleOp rep
 segOpRuleTopDown vtable pat dec op
   | Just op' <- asSegOp op =
@@ -1215,7 +1215,7 @@ segOpRuleTopDown vtable pat dec op
     Skip
 
 segOpRuleBottomUp ::
-  (HasSegOp rep, BinderOps rep) =>
+  (HasSegOp rep, BuilderOps rep) =>
   BottomUpRuleOp rep
 segOpRuleBottomUp vtable pat dec op
   | Just op' <- asSegOp op =
@@ -1224,7 +1224,7 @@ segOpRuleBottomUp vtable pat dec op
     Skip
 
 topDownSegOp ::
-  (HasSegOp rep, BinderOps rep, Bindable rep) =>
+  (HasSegOp rep, BuilderOps rep, Buildable rep) =>
   ST.SymbolTable rep ->
   Pattern rep ->
   StmAux (ExpDec rep) ->
@@ -1334,7 +1334,7 @@ segOpGuts (SegHist lvl space ops kts body) =
   (kts, body, sum $ map (length . histDest) ops, SegHist lvl space ops)
 
 bottomUpSegOp ::
-  (HasSegOp rep, BinderOps rep) =>
+  (HasSegOp rep, BuilderOps rep) =>
   (ST.SymbolTable rep, UT.UsageTable) ->
   Pattern rep ->
   StmAux (ExpDec rep) ->

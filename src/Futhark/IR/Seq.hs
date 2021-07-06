@@ -16,7 +16,7 @@ module Futhark.IR.Seq
   )
 where
 
-import Futhark.Binder
+import Futhark.Builder
 import Futhark.Construct
 import Futhark.IR.Pretty
 import Futhark.IR.Prop
@@ -42,17 +42,17 @@ instance TypeCheck.CheckableOp Seq where
 
 instance TypeCheck.Checkable Seq
 
-instance Bindable Seq where
+instance Buildable Seq where
   mkBody = Body ()
   mkExpPat ctx val _ = basicPattern ctx val
   mkExpDec _ _ = ()
   mkLetNames = simpleMkLetNames
 
-instance BinderOps Seq
+instance BuilderOps Seq
 
 instance PrettyRep Seq
 
-instance BinderOps (Engine.Wise Seq)
+instance BuilderOps (Engine.Wise Seq)
 
 simpleSeq :: Simplify.SimpleOps Seq
 simpleSeq = Simplify.bindableSimpleOps (const $ pure ((), mempty))

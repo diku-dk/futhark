@@ -40,9 +40,9 @@ babysitKernels =
   where
     onStms scope stms = do
       let m = localScope scope $ transformStms mempty stms
-      fmap fst $ modifyNameSource $ runState (runBinderT m M.empty)
+      fmap fst $ modifyNameSource $ runState (runBuilderT m M.empty)
 
-type BabysitM = Binder GPU
+type BabysitM = Builder GPU
 
 transformStms :: ExpMap -> Stms GPU -> BabysitM (Stms GPU)
 transformStms expmap stms = collectStms_ $ foldM_ transformStm expmap stms
@@ -225,7 +225,7 @@ traverseKernelBodyArrayIndexes free_ker_vars thread_variant outer_scope f (Kerne
 type Replacements = M.Map (VName, Slice SubExp) VName
 
 ensureCoalescedAccess ::
-  MonadBinder m =>
+  MonadBuilder m =>
   ExpMap ->
   [(VName, SubExp)] ->
   SubExp ->
@@ -418,7 +418,7 @@ coalescingPermutation num_is rank =
   [num_is .. rank -1] ++ [0 .. num_is -1]
 
 rearrangeInput ::
-  MonadBinder m =>
+  MonadBuilder m =>
   Maybe (Maybe [Int]) ->
   [Int] ->
   VName ->
@@ -441,7 +441,7 @@ rearrangeInput manifest perm arr = do
     BasicOp $ Manifest perm manifested
 
 rowMajorArray ::
-  MonadBinder m =>
+  MonadBuilder m =>
   VName ->
   m VName
 rowMajorArray arr = do
@@ -449,7 +449,7 @@ rowMajorArray arr = do
   letExp (baseString arr ++ "_rowmajor") $ BasicOp $ Manifest [0 .. rank -1] arr
 
 rearrangeSlice ::
-  MonadBinder m =>
+  MonadBuilder m =>
   Int ->
   SubExp ->
   PrimExp VName ->
@@ -498,7 +498,7 @@ rearrangeSlice d w num_chunks arr = do
         =<< eSliceArray d arr_inv_tr (eSubExp $ constant (0 :: Int64)) (eSubExp w)
 
 paddedScanReduceInput ::
-  MonadBinder m =>
+  MonadBuilder m =>
   SubExp ->
   SubExp ->
   m (SubExp, SubExp)

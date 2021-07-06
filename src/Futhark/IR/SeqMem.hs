@@ -21,7 +21,7 @@ import Futhark.IR.Mem
 import Futhark.IR.Mem.Simplify
 import qualified Futhark.Optimise.Simplify.Engine as Engine
 import Futhark.Pass
-import Futhark.Pass.ExplicitAllocations (BinderOps (..), mkLetNamesB', mkLetNamesB'')
+import Futhark.Pass.ExplicitAllocations (BuilderOps (..), mkLetNamesB', mkLetNamesB'')
 import qualified Futhark.TypeCheck as TC
 
 data SeqMem
@@ -60,12 +60,12 @@ instance TC.Checkable SeqMem where
   matchBranchType = matchBranchReturnType
   matchLoopResult = matchLoopResultMem
 
-instance BinderOps SeqMem where
+instance BuilderOps SeqMem where
   mkExpDecB _ _ = return ()
   mkBodyB stms res = return $ Body () stms res
   mkLetNamesB = mkLetNamesB' ()
 
-instance BinderOps (Engine.Wise SeqMem) where
+instance BuilderOps (Engine.Wise SeqMem) where
   mkExpDecB pat e = return $ Engine.mkWiseExpDec pat () e
   mkBodyB stms res = return $ Engine.mkWiseBody () stms res
   mkLetNamesB = mkLetNamesB''

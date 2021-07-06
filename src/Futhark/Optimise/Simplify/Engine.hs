@@ -127,7 +127,7 @@ data SimpleOps rep = SimpleOps
     -- | Make a hoisted Op safe.  The SubExp is a boolean
     -- that is true when the value of the statement will
     -- actually be used.
-    protectHoistedOpS :: Protect (Binder (Wise rep)),
+    protectHoistedOpS :: Protect (Builder (Wise rep)),
     opUsageS :: Op (Wise rep) -> UT.UsageTable,
     simplifyOpS :: SimplifyOp rep (Op rep)
   }
@@ -135,7 +135,7 @@ data SimpleOps rep = SimpleOps
 type SimplifyOp rep op = op -> SimpleM rep (OpWithWisdom op, Stms (Wise rep))
 
 bindableSimpleOps ::
-  (SimplifiableRep rep, Bindable rep) =>
+  (SimplifiableRep rep, Buildable rep) =>
   SimplifyOp rep (Op rep) ->
   SimpleOps rep
 bindableSimpleOps =
@@ -269,7 +269,7 @@ protectIfHoisted ::
 protectIfHoisted cond side m = do
   (x, stms) <- m
   ops <- asks $ protectHoistedOpS . fst
-  runBinder $ do
+  runBuilder $ do
     if not $ all (safeExp . stmExp) stms
       then do
         cond' <-
@@ -295,7 +295,7 @@ protectLoopHoisted ::
 protectLoopHoisted ctx val form m = do
   (x, stms) <- m
   ops <- asks $ protectHoistedOpS . fst
-  runBinder $ do
+  runBuilder $ do
     if not $ all (safeExp . stmExp) stms
       then do
         is_nonempty <- checkIfNonEmpty
@@ -315,7 +315,7 @@ protectLoopHoisted ctx val form m = do
             BasicOp $ CmpOp (CmpSlt it) (intConst it 0) bound
 
 protectIf ::
-  MonadBinder m =>
+  MonadBuilder m =>
   Protect m ->
   (Exp (Rep m) -> Bool) ->
   SubExp ->
@@ -382,7 +382,7 @@ makeSafe (BasicOp (BinOp (UMod t _) x y)) =
 makeSafe _ =
   Nothing
 
-emptyOfType :: MonadBinder m => [VName] -> Type -> m (Exp (Rep m))
+emptyOfType :: MonadBuilder m => [VName] -> Type -> m (Exp (Rep m))
 emptyOfType _ Mem {} =
   error "emptyOfType: Cannot hoist non-existential memory."
 emptyOfType _ Acc {} =
@@ -534,7 +534,7 @@ constructBody ::
   Result ->
   SimpleM rep (Body (Wise rep))
 constructBody stms res =
-  fmap fst . runBinder . buildBody_ $ do
+  fmap fst . runBuilder . buildBody_ $ do
     addStms stms
     pure res
 
@@ -896,7 +896,7 @@ type SimplifiableRep rep =
     Simplifiable (BranchType rep),
     CanBeWise (Op rep),
     ST.IndexOp (OpWithWisdom (Op rep)),
-    BinderOps (Wise rep),
+    BuilderOps (Wise rep),
     IsOp (Op rep)
   )
 

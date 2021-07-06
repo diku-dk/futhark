@@ -79,8 +79,8 @@ data DistEnv rep m = DistEnv
       MapLoop ->
       DistAcc rep ->
       DistNestT rep m (DistAcc rep),
-    distOnSOACSStms :: Stm SOACS -> Binder rep (Stms rep),
-    distOnSOACSLambda :: Lambda SOACS -> Binder rep (Lambda rep),
+    distOnSOACSStms :: Stm SOACS -> Builder rep (Stms rep),
+    distOnSOACSLambda :: Lambda SOACS -> Builder rep (Lambda rep),
     distSegLevel :: MkSegLevel rep m
   }
 
@@ -123,7 +123,7 @@ addStmToAcc ::
   DistNestT rep m (DistAcc rep)
 addStmToAcc stm acc = do
   onSoacs <- asks distOnSOACSStms
-  (stm', _) <- runBinder $ onSoacs stm
+  (stm', _) <- runBuilder $ onSoacs stm
   return acc {distStms = stm' <> distStms acc}
 
 soacsLambda ::
@@ -132,7 +132,7 @@ soacsLambda ::
   DistNestT rep m (Lambda rep)
 soacsLambda lam = do
   onLambda <- asks distOnSOACSLambda
-  fst <$> runBinder (onLambda lam)
+  fst <$> runBuilder (onLambda lam)
 
 newtype DistNestT rep m a
   = DistNestT (ReaderT (DistEnv rep m) (WriterT (DistRes rep) m) a)
@@ -251,7 +251,7 @@ leavingNesting acc =
                   lambdaReturnType = map rowType $ patternTypes pat
                 }
         stms <-
-          runBinder_ . auxing aux . FOT.transformSOAC pat $
+          runBuilder_ . auxing aux . FOT.transformSOAC pat $
             Screma w used_arrs $ mapSOAC lam'
 
         return $ acc {distTargets = newtargets, distStms = stms}
@@ -344,7 +344,7 @@ distributeMapBodyStms orig_acc = distribute <=< onStms orig_acc . stmsToList
     onStms acc (Let pat (StmAux cs _ _) (Op (Stream w arrs Sequential accs lam)) : stms) = do
       types <- asksScope scopeForSOACs
       stream_stms <-
-        snd <$> runBinderT (sequentialStreamWholeArray pat w accs lam arrs) types
+        snd <$> runBuilderT (sequentialStreamWholeArray pat w accs lam arrs) types
       (_, stream_stms') <-
         runReaderT (copyPropagateInStms simpleSOACS types stream_stms) types
       onStms acc $ stmsToList (fmap (certify cs) stream_stms') ++ stms
@@ -375,7 +375,7 @@ maybeDistributeStm stm acc
 maybeDistributeStm (Let pat aux (Op soac)) acc
   | "sequential_outer" `inAttrs` stmAuxAttrs aux =
     distributeMapBodyStms acc . fmap (certify (stmAuxCerts aux))
-      =<< runBinder_ (FOT.transformSOAC pat soac)
+      =<< runBuilder_ (FOT.transformSOAC pat soac)
 maybeDistributeStm stm@(Let pat _ (Op (Screma w arrs form))) acc
   | Just lam <- isMapSOAC form =
     -- Only distribute inside the map if we can distribute everything
@@ -468,7 +468,7 @@ maybeDistributeStm (Let pat aux (Op (Screma w arrs form))) acc
   | Just [Reduce comm lam nes] <- isReduceSOAC form,
     Just m <- irwim pat w comm lam $ zip nes arrs = do
     types <- asksScope scopeForSOACs
-    (_, bnds) <- runBinderT (auxing aux m) types
+    (_, bnds) <- runBuilderT (auxing aux m) types
     distributeMapBodyStms acc bnds
 
 -- Parallelise segmented scatters.
@@ -571,7 +571,7 @@ maybeDistributeStm (Let pat (StmAux cs _ _) (Op (Screma w arrs form))) acc = do
   -- anything, so split it up and try again.
   scope <- asksScope scopeForSOACs
   distributeMapBodyStms acc . fmap (certify cs) . snd
-    =<< runBinderT (dissectScrema pat w form arrs) scope
+    =<< runBuilderT (dissectScrema pat w form arrs) scope
 maybeDistributeStm (Let pat aux (BasicOp (Replicate (Shape (d : ds)) v))) acc
   | [t] <- patternTypes pat = do
     tmp <- newVName "tmp"
@@ -694,7 +694,7 @@ mkSegLevel ::
 mkSegLevel = do
   mk_lvl <- asks distSegLevel
   return $ \w desc r -> do
-    (lvl, stms) <- lift $ liftInner $ runBinderT' $ mk_lvl w desc r
+    (lvl, stms) <- lift $ liftInner $ runBuilderT' $ mk_lvl w desc r
     addStms stms
     return lvl
 
@@ -792,7 +792,7 @@ segmentedScatterKernel nest perm scatter_pat cs scatter_w lam ivs dests = do
       (is, vs) = splitAt (sum indexes) $ bodyResult $ lambdaBody lam
 
   -- Maybe add certificates to the indices.
-  (is', k_body_stms) <- runBinder $ do
+  (is', k_body_stms) <- runBuilder $ do
     addStms $ bodyStms $ lambdaBody lam
     forM is $ \i ->
       if cs == mempty
@@ -810,7 +810,7 @@ segmentedScatterKernel nest perm scatter_pat cs scatter_w lam ivs dests = do
 
   (k, k_bnds) <- mapKernel mk_lvl ispace kernel_inps' rts k_body
 
-  traverse renameStm <=< runBinder_ $ do
+  traverse renameStm <=< runBuilder_ $ do
     addStms k_bnds
 
     let pat =
@@ -848,7 +848,7 @@ segmentedUpdateKernel nest perm cs arr slice v = do
 
   let ispace = base_ispace ++ zip slice_gtids slice_dims
 
-  ((res_t, res), kstms) <- runBinder $ do
+  ((res_t, res), kstms) <- runBuilder $ do
     -- Compute indexes into full array.
     v' <-
       certifying cs $
@@ -878,7 +878,7 @@ segmentedUpdateKernel nest perm cs arr slice v = do
     mapKernel mk_lvl ispace kernel_inps' [res_t] $
       KernelBody () kstms [res]
 
-  traverse renameStm <=< runBinder_ $ do
+  traverse renameStm <=< runBuilder_ $ do
     addStms prestms
 
     let pat =
@@ -902,7 +902,7 @@ segmentedGatherKernel nest cs arr slice = do
   (base_ispace, kernel_inps) <- flatKernel nest
   let ispace = base_ispace ++ zip slice_gtids slice_dims
 
-  ((res_t, res), kstms) <- runBinder $ do
+  ((res_t, res), kstms) <- runBuilder $ do
     -- Compute indexes into full array.
     slice'' <-
       subExpSlice $
@@ -917,7 +917,7 @@ segmentedGatherKernel nest cs arr slice = do
     mapKernel mk_lvl ispace kernel_inps [res_t] $
       KernelBody () kstms [res]
 
-  traverse renameStm <=< runBinder_ $ do
+  traverse renameStm <=< runBuilder_ $ do
     addStms prestms
 
     let pat = Pattern [] $ patternValueElements $ loopNestingPattern $ fst nest
@@ -955,9 +955,9 @@ segmentedHistKernel nest perm cs hist_w ops lam arrs = do
 
   mk_lvl <- asks distSegLevel
   onLambda <- asks distOnSOACSLambda
-  let onLambda' = fmap fst . runBinder . onLambda
+  let onLambda' = fmap fst . runBuilder . onLambda
   liftInner $
-    runBinderT'_ $ do
+    runBuilderT'_ $ do
       -- It is important not to launch unnecessarily many threads for
       -- histograms, because it may mean we unnecessarily need to reduce
       -- subhistograms as well.
@@ -970,7 +970,7 @@ segmentedHistKernel nest perm cs hist_w ops lam arrs = do
     bad = error "Ill-typed nested Hist encountered."
 
 histKernel ::
-  (MonadBinder m, DistRep (Rep m)) =>
+  (MonadBuilder m, DistRep (Rep m)) =>
   (Lambda SOACS -> m (Lambda (Rep m))) ->
   SegOpLevel (Rep m) ->
   PatternT Type ->
@@ -982,7 +982,7 @@ histKernel ::
   Lambda (Rep m) ->
   [VName] ->
   m (Stms (Rep m))
-histKernel onLambda lvl orig_pat ispace inputs cs hist_w ops lam arrs = runBinderT'_ $ do
+histKernel onLambda lvl orig_pat ispace inputs cs hist_w ops lam arrs = runBuilderT'_ $ do
   ops' <- forM ops $ \(SOACS.HistOp num_bins rf dests nes op) -> do
     (op', nes', shape) <- determineReduceOp op nes
     op'' <- lift $ onLambda op'
@@ -996,7 +996,7 @@ histKernel onLambda lvl orig_pat ispace inputs cs hist_w ops lam arrs = runBinde
       =<< segHist lvl orig_pat hist_w ispace inputs' ops' lam arrs
 
 determineReduceOp ::
-  MonadBinder m =>
+  MonadBuilder m =>
   Lambda SOACS ->
   [SubExp] ->
   m (Lambda SOACS, [SubExp], Shape)
@@ -1080,7 +1080,7 @@ isSegmentedOp ::
     [KernelInput] ->
     [SubExp] ->
     [VName] ->
-    BinderT rep m ()
+    BuilderT rep m ()
   ) ->
   DistNestT rep m (Maybe (Stms rep))
 isSegmentedOp nest perm free_in_op _free_in_fold_op nes arrs m = runMaybeT $ do
@@ -1129,7 +1129,7 @@ isSegmentedOp nest perm free_in_op _free_in_fold_op nes arrs m = runMaybeT $ do
 
   lift $
     liftInner $
-      runBinderT'_ $ do
+      runBuilderT'_ $ do
         nested_arrs <- sequence mk_arrs
 
         let pat =

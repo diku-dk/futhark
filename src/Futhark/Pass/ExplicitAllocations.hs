@@ -66,7 +66,7 @@ data AllocStm
   deriving (Eq, Ord, Show)
 
 bindAllocStm ::
-  (MonadBinder m, Op (Rep m) ~ MemOp inner) =>
+  (MonadBuilder m, Op (Rep m) ~ MemOp inner) =>
   AllocStm ->
   m ()
 bindAllocStm (SizeComputation name pe) =
@@ -149,7 +149,7 @@ type Allocable fromrep torep =
     BodyDec torep ~ (),
     ExpDec torep ~ (),
     SizeSubst (Op torep),
-    BinderOps torep
+    BuilderOps torep
   )
 
 -- | A mapping from chunk names to their maximum size.  XXX FIXME
@@ -176,7 +176,7 @@ data AllocEnv fromrep torep = AllocEnv
 
 -- | Monad for adding allocations to an entire program.
 newtype AllocM fromrep torep a
-  = AllocM (BinderT torep (ReaderT (AllocEnv fromrep torep) (State VNameSource)) a)
+  = AllocM (BuilderT torep (ReaderT (AllocEnv fromrep torep) (State VNameSource)) a)
   deriving
     ( Applicative,
       Functor,
@@ -189,7 +189,7 @@ newtype AllocM fromrep torep a
 
 instance
   (Allocable fromrep torep, Allocator torep (AllocM fromrep torep)) =>
-  MonadBinder (AllocM fromrep torep)
+  MonadBuilder (AllocM fromrep torep)
   where
   type Rep (AllocM fromrep torep) = torep
 
@@ -222,7 +222,7 @@ runAllocM ::
   AllocM fromrep torep a ->
   m a
 runAllocM handleOp hints (AllocM m) =
-  fmap fst $ modifyNameSource $ runState $ runReaderT (runBinderT m mempty) env
+  fmap fst $ modifyNameSource $ runState $ runReaderT (runBuilderT m mempty) env
   where
     env =
       AllocEnv
@@ -1164,7 +1164,7 @@ stmConsts _ = mempty
 
 mkLetNamesB' ::
   ( Op (Rep m) ~ MemOp inner,
-    MonadBinder m,
+    MonadBuilder m,
     ExpDec (Rep m) ~ (),
     Allocator (Rep m) (PatAllocM (Rep m))
   ) =>
@@ -1182,7 +1182,7 @@ mkLetNamesB'' ::
     ExpDec rep ~ (),
     HasScope (Engine.Wise rep) m,
     Allocator rep (PatAllocM rep),
-    MonadBinder m,
+    MonadBuilder m,
     Engine.CanBeWise (Op rep)
   ) =>
   [VName] ->
@@ -1237,7 +1237,7 @@ simplifiable innerUsage simplifyInnerOp =
       return (Inner k', hoisted)
 
 bindPatternWithAllocations ::
-  ( MonadBinder m,
+  ( MonadBuilder m,
     ExpDec rep ~ (),
     Op (Rep m) ~ MemOp inner,
     Allocator rep (PatAllocM rep)

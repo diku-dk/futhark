@@ -75,7 +75,7 @@ simplifyKernelOp _ (SizeOp (CalcNumGroups w max_num_groups group_size)) = do
   w' <- Engine.simplify w
   return (SizeOp $ CalcNumGroups w' max_num_groups group_size, mempty)
 
-instance BinderOps (Wise GPU)
+instance BuilderOps (Wise GPU)
 
 instance HasSegOp (Wise GPU) where
   type SegOpLevel (Wise GPU) = SegLevel

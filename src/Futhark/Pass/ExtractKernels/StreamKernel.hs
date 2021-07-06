@@ -43,7 +43,7 @@ data KernelSize = KernelSize
   deriving (Eq, Ord, Show)
 
 numberOfGroups ::
-  (MonadBinder m, Op (Rep m) ~ HostOp (Rep m) inner) =>
+  (MonadBuilder m, Op (Rep m) ~ HostOp (Rep m) inner) =>
   String ->
   SubExp ->
   SubExp ->
@@ -59,7 +59,7 @@ numberOfGroups desc w group_size = do
   return (num_groups, num_threads)
 
 blockedKernelSize ::
-  (MonadBinder m, Rep m ~ GPU) =>
+  (MonadBuilder m, Rep m ~ GPU) =>
   String ->
   SubExp ->
   m KernelSize
@@ -75,7 +75,7 @@ blockedKernelSize desc w = do
   return $ KernelSize per_thread_elements num_threads
 
 splitArrays ::
-  (MonadBinder m, Rep m ~ GPU) =>
+  (MonadBuilder m, Rep m ~ GPU) =>
   VName ->
   [VName] ->
   SplitOrdering ->
@@ -113,7 +113,7 @@ partitionChunkedKernelFoldParameters _ _ =
   error "partitionChunkedKernelFoldParameters: lambda takes too few parameters"
 
 blockedPerThread ::
-  (MonadBinder m, Rep m ~ GPU) =>
+  (MonadBuilder m, Rep m ~ GPU) =>
   VName ->
   SubExp ->
   KernelSize ->
@@ -197,7 +197,7 @@ kerneliseLambda nes lam = do
       }
 
 prepareStream ::
-  (MonadBinder m, Rep m ~ GPU) =>
+  (MonadBuilder m, Rep m ~ GPU) =>
   KernelSize ->
   [(VName, SubExp)] ->
   SubExp ->
@@ -218,7 +218,7 @@ prepareStream size ispace w comm fold_lam nes arrs = do
   gtid <- newVName "gtid"
   space <- mkSegSpace $ ispace ++ [(gtid, num_threads)]
   kbody <- fmap (uncurry (flip (KernelBody ()))) $
-    runBinder $
+    runBuilder $
       localScope (scopeOfSegSpace space) $ do
         (chunk_red_pes, chunk_map_pes) <-
           blockedPerThread gtid w size ordering fold_lam' (length nes) arrs
@@ -245,7 +245,7 @@ streamRed ::
   [SubExp] ->
   [VName] ->
   m (Stms GPU)
-streamRed mk_lvl pat w comm red_lam fold_lam nes arrs = runBinderT'_ $ do
+streamRed mk_lvl pat w comm red_lam fold_lam nes arrs = runBuilderT'_ $ do
   -- The strategy here is to rephrase the stream reduction as a
   -- non-segmented SegRed that does explicit chunking within its body.
   -- First, figure out how many threads to use for this.
@@ -282,7 +282,7 @@ streamMap ::
   [SubExp] ->
   [VName] ->
   m ((SubExp, [VName]), Stms GPU)
-streamMap mk_lvl out_desc mapout_pes w comm fold_lam nes arrs = runBinderT' $ do
+streamMap mk_lvl out_desc mapout_pes w comm fold_lam nes arrs = runBuilderT' $ do
   size <- blockedKernelSize "stream_map" w
 
   (threads, kspace, ts, kbody) <- prepareStream size [] w comm fold_lam nes arrs

@@ -254,7 +254,7 @@ constructKernel ::
   KernelNest ->
   Body rep ->
   m (Stm rep, Stms rep)
-constructKernel mk_lvl kernel_nest inner_body = runBinderT' $ do
+constructKernel mk_lvl kernel_nest inner_body = runBuilderT' $ do
   (ispace, inps) <- flatKernel kernel_nest
   let aux = loopNestingAux first_nest
       ispace_scope = M.fromList $ zip (map fst ispace) $ repeat $ IndexName Int64
@@ -262,7 +262,7 @@ constructKernel mk_lvl kernel_nest inner_body = runBinderT' $ do
       rts = map (stripArray (length ispace)) $ patternTypes pat
 
   inner_body' <- fmap (uncurry (flip (KernelBody ()))) $
-    runBinder $
+    runBuilder $
       localScope ispace_scope $ do
         mapM_ readKernelInput $ filter inputIsUsed inps
         map (Returns ResultMaySimplify) <$> bodyBind inner_body

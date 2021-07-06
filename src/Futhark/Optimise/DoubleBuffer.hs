@@ -183,7 +183,7 @@ type Constraints rep =
     OpReturns rep
   )
 
-optimiseLoop :: (Constraints rep, Op rep ~ MemOp inner, BinderOps rep) => OptimiseLoop rep
+optimiseLoop :: (Constraints rep, Op rep ~ MemOp inner, BuilderOps rep) => OptimiseLoop rep
 optimiseLoop ctx val body = do
   -- We start out by figuring out which of the merge variables should
   -- be double-buffered.
@@ -273,7 +273,7 @@ doubleBufferMergeParams ctx_and_res val_params bound_in_loop =
       _ -> return NoBuffer
 
 allocStms ::
-  (Constraints rep, Op rep ~ MemOp inner, BinderOps rep) =>
+  (Constraints rep, Op rep ~ MemOp inner, BuilderOps rep) =>
   [(FParam rep, SubExp)] ->
   [DoubleBuffer] ->
   DoubleBufferM rep ([(FParam rep, SubExp)], [Stm rep])
@@ -281,7 +281,7 @@ allocStms merge = runWriterT . zipWithM allocation merge
   where
     allocation m@(Param pname _, _) (BufferAlloc name size space b) = do
       stms <- lift $
-        runBinder_ $ do
+        runBuilder_ $ do
           size' <- toSubExp "double_buffer_size" size
           letBindNames [name] $ Op $ Alloc size' space
       tell $ stmsToList stms

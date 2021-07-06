@@ -152,15 +152,15 @@ simplifySOAC (Screma w arrs (ScremaForm scans reds map_lam)) = do
         )
     <*> pure (mconcat scans_hoisted <> mconcat reds_hoisted <> map_lam_hoisted)
 
-instance BinderOps (Wise SOACS)
+instance BuilderOps (Wise SOACS)
 
 fixLambdaParams ::
-  (MonadBinder m, Bindable (Rep m), BinderOps (Rep m)) =>
+  (MonadBuilder m, Buildable (Rep m), BuilderOps (Rep m)) =>
   AST.Lambda (Rep m) ->
   [Maybe SubExp] ->
   m (AST.Lambda (Rep m))
 fixLambdaParams lam fixes = do
-  body <- runBodyBinder $
+  body <- runBodyBuilder $
     localScope (scopeOfLParams $ lambdaParams lam) $ do
       zipWithM_ maybeFix (lambdaParams lam) fixes'
       return $ lambdaBody lam
@@ -257,7 +257,7 @@ hoistCertificates _ _ _ _ =
 
 liftIdentityMapping ::
   forall rep.
-  (Bindable rep, Simplify.SimplifiableRep rep, HasSOAC (Wise rep)) =>
+  (Buildable rep, Simplify.SimplifiableRep rep, HasSOAC (Wise rep)) =>
   TopDownRuleOp (Wise rep)
 liftIdentityMapping _ pat aux op
   | Just (Screma w arrs form :: SOAC (Wise rep)) <- asSOAC op,
@@ -339,7 +339,7 @@ liftIdentityStreaming _ _ _ _ = Skip
 -- | Remove all arguments to the map that are simply replicates.
 -- These can be turned into free variables instead.
 removeReplicateMapping ::
-  (Bindable rep, Simplify.SimplifiableRep rep, HasSOAC (Wise rep)) =>
+  (Buildable rep, Simplify.SimplifiableRep rep, HasSOAC (Wise rep)) =>
   TopDownRuleOp (Wise rep)
 removeReplicateMapping vtable pat aux op
   | Just (Screma w arrs form) <- asSOAC op,
@@ -659,7 +659,7 @@ simplifyClosedFormReduce _ _ _ _ = Skip
 
 -- For now we just remove singleton SOACs.
 simplifyKnownIterationSOAC ::
-  (Bindable rep, Simplify.SimplifiableRep rep, HasSOAC (Wise rep)) =>
+  (Buildable rep, Simplify.SimplifiableRep rep, HasSOAC (Wise rep)) =>
   TopDownRuleOp (Wise rep)
 simplifyKnownIterationSOAC _ pat _ op
   | Just (Screma (Constant k) arrs (ScremaForm scans reds map_lam)) <- asSOAC op,

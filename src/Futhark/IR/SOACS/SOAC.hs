@@ -161,7 +161,7 @@ data ScremaForm rep
       (Lambda rep)
   deriving (Eq, Ord, Show)
 
-singleBinOp :: Bindable rep => [Lambda rep] -> Lambda rep
+singleBinOp :: Buildable rep => [Lambda rep] -> Lambda rep
 singleBinOp lams =
   Lambda
     { lambdaParams = concatMap xParams lams ++ concatMap yParams lams,
@@ -187,7 +187,7 @@ scanResults :: [Scan rep] -> Int
 scanResults = sum . map (length . scanNeutral)
 
 -- | Combine multiple scan operators to a single operator.
-singleScan :: Bindable rep => [Scan rep] -> Scan rep
+singleScan :: Buildable rep => [Scan rep] -> Scan rep
 singleScan scans =
   let scan_nes = concatMap scanNeutral scans
       scan_lam = singleBinOp $ map scanLambda scans
@@ -206,7 +206,7 @@ redResults :: [Reduce rep] -> Int
 redResults = sum . map (length . redNeutral)
 
 -- | Combine multiple reduction operators to a single operator.
-singleReduce :: Bindable rep => [Reduce rep] -> Reduce rep
+singleReduce :: Buildable rep => [Reduce rep] -> Reduce rep
 singleReduce reds =
   let red_nes = concatMap redNeutral reds
       red_lam = singleBinOp $ map redLambda reds
@@ -227,7 +227,7 @@ scremaType w (ScremaForm scans reds map_lam) =
 -- | Construct a lambda that takes parameters of the given types and
 -- simply returns them unchanged.
 mkIdentityLambda ::
-  (Bindable rep, MonadFreshNames m) =>
+  (Buildable rep, MonadFreshNames m) =>
   [Type] ->
   m (Lambda rep)
 mkIdentityLambda ts = do
@@ -246,7 +246,7 @@ isIdentityLambda lam =
     == map (Var . paramName) (lambdaParams lam)
 
 -- | A lambda with no parameters that returns no values.
-nilFn :: Bindable rep => Lambda rep
+nilFn :: Buildable rep => Lambda rep
 nilFn = Lambda mempty (mkBody mempty mempty) mempty
 
 -- | Construct a Screma with possibly multiple scans, and
@@ -262,7 +262,7 @@ redomapSOAC = ScremaForm []
 -- | Construct a Screma with possibly multiple scans, and identity map
 -- function.
 scanSOAC ::
-  (Bindable rep, MonadFreshNames m) =>
+  (Buildable rep, MonadFreshNames m) =>
   [Scan rep] ->
   m (ScremaForm rep)
 scanSOAC scans = scanomapSOAC scans <$> mkIdentityLambda ts
@@ -272,7 +272,7 @@ scanSOAC scans = scanomapSOAC scans <$> mkIdentityLambda ts
 -- | Construct a Screma with possibly multiple reductions, and
 -- identity map function.
 reduceSOAC ::
-  (Bindable rep, MonadFreshNames m) =>
+  (Buildable rep, MonadFreshNames m) =>
   [Reduce rep] ->
   m (ScremaForm rep)
 reduceSOAC reds = redomapSOAC reds <$> mkIdentityLambda ts

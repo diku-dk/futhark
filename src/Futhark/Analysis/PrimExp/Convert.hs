@@ -167,5 +167,5 @@ primExpSlice :: Slice SubExp -> Slice (TPrimExp Int64 VName)
 primExpSlice = map $ fmap pe64
 
 -- | Convert a 'PrimExp' slice to a 'SubExp' slice.
-subExpSlice :: MonadBinder m => Slice (TPrimExp Int64 VName) -> m (Slice SubExp)
+subExpSlice :: MonadBuilder m => Slice (TPrimExp Int64 VName) -> m (Slice SubExp)
 subExpSlice = mapM $ traverse $ toSubExp "slice"

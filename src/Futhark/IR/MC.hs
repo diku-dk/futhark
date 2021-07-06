@@ -20,7 +20,7 @@ module Futhark.IR.MC
   )
 where
 
-import Futhark.Binder
+import Futhark.Builder
 import Futhark.Construct
 import Futhark.IR.MC.Op
 import Futhark.IR.Pretty
@@ -49,15 +49,15 @@ instance TypeCheck.CheckableOp MC where
 
 instance TypeCheck.Checkable MC
 
-instance Bindable MC where
+instance Buildable MC where
   mkBody = Body ()
   mkExpPat ctx val _ = basicPattern ctx val
   mkExpDec _ _ = ()
   mkLetNames = simpleMkLetNames
 
-instance BinderOps MC
+instance BuilderOps MC
 
-instance BinderOps (Engine.Wise MC)
+instance BuilderOps (Engine.Wise MC)
 
 instance PrettyRep MC
 

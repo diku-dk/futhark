@@ -60,7 +60,7 @@ setInputs (inp : inps) (MapNest _ body ns _) = MapNest w body ns' (inp : inps)
     setDepth n nw = n {nestingWidth = nw}
 
 fromSOAC ::
-  ( Bindable rep,
+  ( Buildable rep,
     MonadFreshNames m,
     LocalScope rep m,
     Op rep ~ Futhark.SOAC rep
@@ -70,7 +70,7 @@ fromSOAC ::
 fromSOAC = fromSOAC' mempty
 
 fromSOAC' ::
-  ( Bindable rep,
+  ( Buildable rep,
     MonadFreshNames m,
     LocalScope rep m,
     Op rep ~ Futhark.SOAC rep
@@ -143,8 +143,8 @@ fromSOAC' _ _ = return Nothing
 toSOAC ::
   ( MonadFreshNames m,
     HasScope rep m,
-    Bindable rep,
-    BinderOps rep,
+    Buildable rep,
+    BuilderOps rep,
     Op rep ~ Futhark.SOAC rep
   ) =>
   MapNest rep ->
@@ -153,7 +153,7 @@ toSOAC (MapNest w lam [] inps) =
   return $ SOAC.Screma w (Futhark.mapSOAC lam) inps
 toSOAC (MapNest w lam (Nesting npnames nres nrettype nw : ns) inps) = do
   let nparams = zipWith Param npnames $ map SOAC.inputRowType inps
-  body <- runBodyBinder $
+  body <- runBodyBuilder $
     localScope (scopeOfLParams nparams) $ do
       letBindNames nres =<< SOAC.toExp
         =<< toSOAC (MapNest nw lam ns $ map (SOAC.identInput . paramIdent) nparams)

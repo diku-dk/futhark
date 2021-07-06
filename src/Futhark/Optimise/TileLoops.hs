@@ -77,7 +77,7 @@ tileInKernelBody branch_variant initial_variance lvl initial_kspace ts kbody
     case maybe_tiled of
       Just (host_stms, tiling, tiledBody) -> do
         (res', stms') <-
-          runBinder $ mapM (tilingTileReturns tiling) =<< tiledBody mempty mempty
+          runBuilder $ mapM (tilingTileReturns tiling) =<< tiledBody mempty mempty
         return
           ( host_stms,
             ( tilingLevel tiling,
@@ -415,7 +415,7 @@ tileDoLoop initial_space variance prestms used_in_body (host_stms, tiling, tiled
               PrivStms mempty indexMergeParams <> privstms <> inloop_privstms
 
         loopbody' <-
-          localScope (scopeOfFParams mergeparams') . runBodyBinder $
+          localScope (scopeOfFParams mergeparams') . runBodyBuilder $
             resultBody . map Var
               <$> tiledBody private' privstms'
         accs' <-
@@ -432,7 +432,7 @@ tileDoLoop initial_space variance prestms used_in_body (host_stms, tiling, tiled
           filter (`notElem` unSegSpace (tilingSpace tiling)) $
             unSegSpace initial_space
 
-doPrelude :: Tiling -> PrivStms -> Stms GPU -> [VName] -> Binder GPU [VName]
+doPrelude :: Tiling -> PrivStms -> Stms GPU -> [VName] -> Builder GPU [VName]
 doPrelude tiling privstms prestms prestms_live =
   -- Create a SegMap that takes care of the prelude for every thread.
   tilingSegMap tiling "prelude" (scalarLevel tiling) ResultPrivate $
@@ -498,7 +498,7 @@ inputsToTiles _ _ = []
 -- The atual tile size may be smaller for the last tile, so we have to
 -- be careful now.
 sliceUntiled ::
-  MonadBinder m =>
+  MonadBuilder m =>
   VName ->
   SubExp ->
   SubExp ->
@@ -521,7 +521,7 @@ data PrivStms = PrivStms (Stms GPU) ReadPrelude
 privStms :: Stms GPU -> PrivStms
 privStms stms = PrivStms stms $ const $ return ()
 
-addPrivStms :: Slice SubExp -> PrivStms -> Binder GPU ()
+addPrivStms :: Slice SubExp -> PrivStms -> Builder GPU ()
 addPrivStms local_slice (PrivStms stms readPrelude) = do
   readPrelude local_slice
   addStms stms
@@ -536,7 +536,7 @@ instance Semigroup PrivStms where
 instance Monoid PrivStms where
   mempty = privStms mempty
 
-type ReadPrelude = Slice SubExp -> Binder GPU ()
+type ReadPrelude = Slice SubExp -> Builder GPU ()
 
 data ProcessTileArgs = ProcessTileArgs
   { processPrivStms :: PrivStms,
@@ -567,8 +567,8 @@ data Tiling = Tiling
       String ->
       SegLevel ->
       ResultManifest ->
-      (PrimExp VName -> Slice SubExp -> Binder GPU [SubExp]) ->
-      Binder GPU [VName],
+      (PrimExp VName -> Slice SubExp -> Builder GPU [SubExp]) ->
+      Builder GPU [VName],
     -- The boolean PrimExp indicates whether they are in-bounds.
 
     tilingReadTile ::
@@ -576,22 +576,22 @@ data Tiling = Tiling
       PrivStms ->
       SubExp ->
       [InputArray] ->
-      Binder GPU [InputTile],
+      Builder GPU [InputTile],
     tilingProcessTile ::
       ProcessTileArgs ->
-      Binder GPU [VName],
+      Builder GPU [VName],
     tilingProcessResidualTile ::
       ResidualTileArgs ->
-      Binder GPU [VName],
-    tilingTileReturns :: VName -> Binder GPU KernelResult,
+      Builder GPU [VName],
+    tilingTileReturns :: VName -> Builder GPU KernelResult,
     tilingSpace :: SegSpace,
     tilingTileShape :: Shape,
     tilingLevel :: SegLevel,
-    tilingNumWholeTiles :: Binder GPU SubExp
+    tilingNumWholeTiles :: Builder GPU SubExp
   }
 
 type DoTiling gtids kdims =
-  SegLevel -> gtids -> kdims -> SubExp -> Binder GPU Tiling
+  SegLevel -> gtids -> kdims -> SubExp -> Builder GPU Tiling
 
 scalarLevel :: Tiling -> SegLevel
 scalarLevel tiling =
@@ -603,8 +603,8 @@ protectOutOfBounds ::
   String ->
   PrimExp VName ->
   [Type] ->
-  Binder GPU [SubExp] ->
-  Binder GPU [VName]
+  Builder GPU [SubExp] ->
+  Builder GPU [VName]
 protectOutOfBounds desc in_bounds ts m = do
   -- This is more complicated than you might expect, because we need
   -- to be able to produce a blank accumulator, which eBlank cannot
@@ -631,7 +631,7 @@ postludeGeneric ::
   Stms GPU ->
   Result ->
   [Type] ->
-  Binder GPU [VName]
+  Builder GPU [VName]
 postludeGeneric tiling privstms pat accs' poststms poststms_res res_ts =
   tilingSegMap tiling "thread_res" (scalarLevel tiling) ResultPrivate $ \in_bounds slice -> do
     -- Read our per-thread result from the tiled loop.
@@ -650,7 +650,7 @@ postludeGeneric tiling privstms pat accs' poststms poststms_res res_ts =
           addStms poststms
           return poststms_res
 
-type TiledBody = Names -> PrivStms -> Binder GPU [VName]
+type TiledBody = Names -> PrivStms -> Builder GPU [VName]
 
 tileGeneric ::
   DoTiling gtids kdims ->
@@ -666,13 +666,13 @@ tileGeneric ::
   Result ->
   TileM (Stms GPU, Tiling, TiledBody)
 tileGeneric doTiling initial_lvl res_ts pat gtids kdims w form inputs poststms poststms_res = do
-  (tiling, tiling_stms) <- runBinder $ doTiling initial_lvl gtids kdims w
+  (tiling, tiling_stms) <- runBuilder $ doTiling initial_lvl gtids kdims w
 
   return (tiling_stms, tiling, tiledBody tiling)
   where
     (red_comm, red_lam, red_nes, map_lam) = form
 
-    tiledBody :: Tiling -> Names -> PrivStms -> Binder GPU [VName]
+    tiledBody :: Tiling -> Names -> PrivStms -> Builder GPU [VName]
     tiledBody tiling _private privstms = do
       let tile_shape = tilingTileShape tiling
 
@@ -698,7 +698,7 @@ tileGeneric doTiling initial_lvl res_ts pat gtids kdims w form inputs poststms p
 
       tile_id <- newVName "tile_id"
       let loopform = ForLoop tile_id Int64 num_whole_tiles []
-      loopbody <- renameBody <=< runBodyBinder $
+      loopbody <- renameBody <=< runBodyBuilder $
         inScopeOf loopform $
           localScope (scopeOfFParams $ map fst merge) $ do
             -- Collectively read a tile.
@@ -733,7 +733,7 @@ mkReadPreludeValues prestms_live_arrs prestms_live slice =
       arr_t <- lookupType arr
       letBindNames [v] $ BasicOp $ Index arr $ fullSlice arr_t slice
 
-tileReturns :: [(VName, SubExp)] -> [(SubExp, SubExp)] -> VName -> Binder GPU KernelResult
+tileReturns :: [(VName, SubExp)] -> [(SubExp, SubExp)] -> VName -> Builder GPU KernelResult
 tileReturns dims_on_top dims arr = do
   let unit_dims = replicate (length dims_on_top) (intConst Int64 1)
   arr_t <- lookupType arr
@@ -758,7 +758,7 @@ reconstructGtids1D ::
   VName ->
   VName ->
   VName ->
-  Binder GPU ()
+  Builder GPU ()
 reconstructGtids1D group_size gtid gid ltid =
   letBindNames [gtid]
     =<< toExp (le64 gid * pe64 (unCount group_size) + le64 ltid)
@@ -773,7 +773,7 @@ readTile1D ::
   PrivStms ->
   SubExp ->
   [InputArray] ->
-  Binder GPU [InputTile]
+  Builder GPU [InputTile]
 readTile1D tile_size gid gtid num_groups group_size kind privstms tile_id inputs =
   fmap (inputsToTiles inputs)
     . segMap1D "full_tile" lvl ResultNoSimplify
@@ -814,7 +814,7 @@ processTile1D ::
   Count NumGroups SubExp ->
   Count GroupSize SubExp ->
   ProcessTileArgs ->
-  Binder GPU [VName]
+  Builder GPU [VName]
 processTile1D gid gtid kdim tile_size num_groups group_size tile_args = do
   let red_comm = processComm tile_args
       privstms = processPrivStms tile_args
@@ -858,7 +858,7 @@ processResidualTile1D ::
   Count NumGroups SubExp ->
   Count GroupSize SubExp ->
   ResidualTileArgs ->
-  Binder GPU [VName]
+  Builder GPU [VName]
 processResidualTile1D gid gtid kdim tile_size num_groups group_size args = do
   -- The number of residual elements that are not covered by
   -- the whole tiles.
@@ -881,7 +881,7 @@ processResidualTile1D gid gtid kdim tile_size num_groups group_size args = do
     num_whole_tiles = residualNumWholeTiles args
     w = residualInputSize args
 
-    nonemptyTile residual_input = runBodyBinder $ do
+    nonemptyTile residual_input = runBodyBuilder $ do
       -- Collectively construct a tile.  Threads that are out-of-bounds
       -- provide a blank dummy value.
       full_tiles <-
@@ -989,7 +989,7 @@ reconstructGtids2D ::
   (VName, VName) ->
   (VName, VName) ->
   (VName, VName) ->
-  Binder GPU ()
+  Builder GPU ()
 reconstructGtids2D tile_size (gtid_x, gtid_y) (gid_x, gid_y) (ltid_x, ltid_y) = do
   -- Reconstruct the original gtids from gid_x/gid_y and ltid_x/ltid_y.
   letBindNames [gtid_x]
@@ -1008,7 +1008,7 @@ readTile2D ::
   PrivStms ->
   SubExp ->
   [InputArray] ->
-  Binder GPU [InputTile]
+  Builder GPU [InputTile]
 readTile2D (kdim_x, kdim_y) (gtid_x, gtid_y) (gid_x, gid_y) tile_size num_groups group_size kind privstms tile_id inputs =
   fmap (inputsToTiles inputs)
     . segMap2D
@@ -1080,7 +1080,7 @@ processTile2D ::
   Count NumGroups SubExp ->
   Count GroupSize SubExp ->
   ProcessTileArgs ->
-  Binder GPU [VName]
+  Builder GPU [VName]
 processTile2D (gid_x, gid_y) (gtid_x, gtid_y) (kdim_x, kdim_y) tile_size num_groups group_size tile_args = do
   let privstms = processPrivStms tile_args
       red_comm = processComm tile_args
@@ -1136,7 +1136,7 @@ processResidualTile2D ::
   Count NumGroups SubExp ->
   Count GroupSize SubExp ->
   ResidualTileArgs ->
-  Binder GPU [VName]
+  Builder GPU [VName]
 processResidualTile2D
   gids
   gtids
@@ -1166,7 +1166,7 @@ processResidualTile2D
       num_whole_tiles = residualNumWholeTiles args
       w = residualInputSize args
 
-      nonemptyTile residual_input = renameBody <=< runBodyBinder $ do
+      nonemptyTile residual_input = renameBody <=< runBodyBuilder $ do
         -- Collectively construct a tile.  Threads that are out-of-bounds
         -- provide a blank dummy value.
         full_tile <-

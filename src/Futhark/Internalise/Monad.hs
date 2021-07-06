@@ -67,7 +67,7 @@ data InternaliseState = InternaliseState
 
 newtype InternaliseM a
   = InternaliseM
-      (BinderT SOACS (ReaderT InternaliseEnv (State InternaliseState)) a)
+      (BuilderT SOACS (ReaderT InternaliseEnv (State InternaliseState)) a)
   deriving
     ( Functor,
       Applicative,
@@ -83,7 +83,7 @@ instance MonadFreshNames (State InternaliseState) where
   getNameSource = gets stateNameSource
   putNameSource src = modify $ \s -> s {stateNameSource = src}
 
-instance MonadBinder InternaliseM where
+instance MonadBuilder InternaliseM where
   type Rep InternaliseM = SOACS
   mkExpDecM pat e = InternaliseM $ mkExpDecM pat e
   mkBodyM bnds res = InternaliseM $ mkBodyM bnds res
@@ -100,7 +100,7 @@ runInternaliseM ::
 runInternaliseM safe (InternaliseM m) =
   modifyNameSource $ \src ->
     let ((_, consts), s) =
-          runState (runReaderT (runBinderT m mempty) newEnv) (newState src)
+          runState (runReaderT (runBuilderT m mempty) newEnv) (newState src)
      in ((consts, reverse $ stateFuns s), stateNameSource s)
   where
     newEnv =

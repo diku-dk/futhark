@@ -102,7 +102,7 @@ type SimplifyMemory rep =
     BodyDec rep ~ (),
     AllocOp (Op (Wise rep)),
     CanBeWise (Op rep),
-    BinderOps (Wise rep),
+    BuilderOps (Wise rep),
     Mem rep
   )
 
@@ -192,7 +192,7 @@ unExistentialiseMemory _ _ _ _ = Skip
 -- | If we are copying something that is itself a copy, just copy the
 -- original one instead.
 copyCopyToCopy ::
-  ( BinderOps rep,
+  ( BuilderOps rep,
     LetDec rep ~ (VarWisdom, MemBound u)
   ) =>
   TopDownRuleBasicOp rep
@@ -218,7 +218,7 @@ copyCopyToCopy _ _ _ _ = Skip
 -- | If the destination of a copy is the same as the source, just
 -- remove it.
 removeIdentityCopy ::
-  ( BinderOps rep,
+  ( BuilderOps rep,
     LetDec rep ~ (VarWisdom, MemBound u)
   ) =>
   TopDownRuleBasicOp rep

@@ -36,8 +36,8 @@ typeEnvFromSubstitutions = M.fromList . map (fromSubstitution . snd)
 -- | Perform the substitution.
 substituteIndices ::
   ( MonadFreshNames m,
-    BinderOps rep,
-    Bindable rep,
+    BuilderOps rep,
+    Buildable rep,
     Aliased rep,
     LetDec rep ~ dec
   ) =>
@@ -45,19 +45,19 @@ substituteIndices ::
   Stms rep ->
   m (IndexSubstitutions dec, Stms rep)
 substituteIndices substs bnds =
-  runBinderT (substituteIndicesInStms substs bnds) types
+  runBuilderT (substituteIndicesInStms substs bnds) types
   where
     types = typeEnvFromSubstitutions substs
 
 substituteIndicesInStms ::
-  (MonadBinder m, Bindable (Rep m), Aliased (Rep m)) =>
+  (MonadBuilder m, Buildable (Rep m), Aliased (Rep m)) =>
   IndexSubstitutions (LetDec (Rep m)) ->
   Stms (Rep m) ->
   m (IndexSubstitutions (LetDec (Rep m)))
 substituteIndicesInStms = foldM substituteIndicesInStm
 
 substituteIndicesInStm ::
-  (MonadBinder m, Bindable (Rep m), Aliased (Rep m)) =>
+  (MonadBuilder m, Buildable (Rep m), Aliased (Rep m)) =>
   IndexSubstitutions (LetDec (Rep m)) ->
   Stm (Rep m) ->
   m (IndexSubstitutions (LetDec (Rep m)))
@@ -68,7 +68,7 @@ substituteIndicesInStm substs (Let pat rep e) = do
   return substs'
 
 substituteIndicesInPattern ::
-  (MonadBinder m, LetDec (Rep m) ~ dec) =>
+  (MonadBuilder m, LetDec (Rep m) ~ dec) =>
   IndexSubstitutions (LetDec (Rep m)) ->
   PatternT dec ->
   m (IndexSubstitutions (LetDec (Rep m)), PatternT dec)
@@ -80,8 +80,8 @@ substituteIndicesInPattern substs pat = do
     sub substs' patElem = return (substs', patElem)
 
 substituteIndicesInExp ::
-  ( MonadBinder m,
-    Bindable (Rep m),
+  ( MonadBuilder m,
+    Buildable (Rep m),
     Aliased (Rep m),
     LetDec (Rep m) ~ dec
   ) =>
@@ -136,7 +136,7 @@ substituteIndicesInExp substs e = do
        in foldM consumingSubst substs . namesToList . consumedInExp
 
 substituteIndicesInSubExp ::
-  MonadBinder m =>
+  MonadBuilder m =>
   IndexSubstitutions (LetDec (Rep m)) ->
   SubExp ->
   m SubExp
@@ -146,7 +146,7 @@ substituteIndicesInSubExp _ se =
   return se
 
 substituteIndicesInVar ::
-  MonadBinder m =>
+  MonadBuilder m =>
   IndexSubstitutions (LetDec (Rep m)) ->
   VName ->
   m VName
@@ -161,7 +161,7 @@ substituteIndicesInVar substs v
     return v
 
 substituteIndicesInBody ::
-  (MonadBinder m, Bindable (Rep m), Aliased (Rep m)) =>
+  (MonadBuilder m, Buildable (Rep m), Aliased (Rep m)) =>
   IndexSubstitutions (LetDec (Rep m)) ->
   Body (Rep m) ->
   m (Body (Rep m))
