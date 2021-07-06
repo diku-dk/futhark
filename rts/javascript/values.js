@@ -138,11 +138,9 @@ function construct_binary_value(v, typ) {
     var ftype = "    ".slice(typ.length) + typ;
     dims = 0;
     payload_bytes = typToSize[ftype];
-    console.log("Testing", ftype, v, typ, payload_bytes, typToType[ftype]);
     filler = (bytes) => {
       var scalar = new (typToType[ftype])([v]);
       bytes.set(toU8(scalar), 7);
-      console.log(bytes);
     }
   }
   var total_bytes = 7 + payload_bytes;

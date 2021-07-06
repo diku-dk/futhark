@@ -90,7 +90,6 @@ class Server {
 
   _cmd_call(args) {
     var entry = this._get_entry_point(this._get_arg(args, 0));
-    console.log("entry log", entry);
     var num_ins = entry[0].length;
     var num_outs = entry[1].length;
     var expected_len = 1 + num_outs + num_ins
@@ -133,8 +132,6 @@ class Server {
       //TODO right this more elengantly
       //TODO make sure file is open in binary mode
       var fs = require("fs");
-      console.log("state", this._vars);
-      console.log("lets see", this._vars[vname]);
       var bin_val = construct_binary_value(value, typ);
       fs.appendFileSync(fname, bin_val, 'binary')
     }
@@ -189,11 +186,7 @@ class Server {
           var dim = dimtyp[0];
           var typ = dimtyp[1];
           var arg_list = [arr, ...shape];
-          console.log("yo", shape, dim, typ);
           var fnam = "new_" + typ + "_" + dim + "d";
-          //var fnam = "to_futhark_" + typ + "_" + dim + "d_arr";
-          //arg_list = [arr, 4];
-          console.log("yo2", fnam, arg_list);
           var ptr = this.ctx[fnam].apply(this.ctx, arg_list);
           this._set_var(vname, ptr, typename);
         }
