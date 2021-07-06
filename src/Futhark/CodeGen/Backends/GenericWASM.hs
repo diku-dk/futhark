@@ -336,7 +336,7 @@ typeHeap typ =
     "u8"   -> "HEAPU8"
     "u16"  -> "HEAPU16"
     "u32"  -> "HEAPU32"
-    "u64"  -> "HEAPU64"
+    "u64"  -> "(new BigUint64Array(HEAP64.buffer))"
     "f32"  -> "HEAPF32"
     "f64"  -> "HEAPF64"
     "bool" -> "HEAP8"
