@@ -114,50 +114,43 @@ var typToSize = {
   
 
 
-function construct_binary_value(v) {
-  var byte_len = v.bytes_per_element();
-  var shape = v.shape();
-  var values = v.values();
-  var elems = 1;
-  if (shape != 0) {
-    for (var i = 0; i < shape.length; i++) {
-      elems = elems * Number(shape[i]);
+function construct_binary_value(v, typ) {
+  var dims;
+  var payload_bytes;
+  var filler;
+  if (v instanceof FutharkOpaque) {
+    throw "Opaques are not supported";
+  } else if (v instanceof FutharkArray) {
+    var t = v.futharkType();
+    var ftype = "    ".slice(t.length) + t;
+    var shape = v.shape();
+    var ta = v.toTypedArray(shape);
+    var da = new BigInt64Array(shape);
+    dims = shape.length;
+    payload_bytes = da.byteLength + ta.byteLength;
+    filler = (bytes) => {
+      bytes.set(new Uint8Array(da.buffer, da.byteOffset, da.byteLength), 7);
+      bytes.set(new Uint8Array(ta.buffer, ta.byteOffset, ta.byteLength), 7 + da.byteLength);
+    }
+  } else {
+    var ftype = "    ".slice(typ.length) + typ;
+    dims = 0;
+    payload_bytes = typToSize[ftype];
+    filler = (bytes) => {
+      bytes.set(new (typToType[ftype])([v]), 7);
     }
   }
-  var num_bytes = 1 + 1 + 1 + 4 + (shape.length) * 8 + elems * byte_len * (values.length > 0);
-
-  var bytes = new Uint8Array(num_bytes);
+  var total_bytes = 7 + payload_bytes;
+  var bytes = new Uint8Array(total_bytes);
   bytes[0] = Buffer.from('b').readUInt8();
   bytes[1] = 2; // Not sure why this
-  bytes[2] = shape.length
-
-  var ftype = v.str_type();
-
+  bytes[2] = dims;
   for (var i = 0; i < 4; i++) {
     bytes[3+i] = ftype.charCodeAt(i);
   }
-
-  if (shape.length > 0) {
-    var sizes = new BigUint64Array(shape.length);
-    for (var i = 0; i < shape.length; i++) {
-      sizes[i] = BigInt(shape[i]);
-    }
-    var size_bytes = new Uint8Array(sizes.buffer);
-    bytes.set(size_bytes, 7);
-  }
-
-  if (values.length == 0) {
-    return Buffer.from(bytes);
-  }
-
-  var val_bytes = new Uint8Array(values.buffer, values.byteOffset, byte_len * values.length);
-
-  bytes.set(val_bytes, 7 + (shape.length * 8));
-  
-  //return a buffer needed by appendFile instead of a uint8array
+  filler(bytes);
   return Buffer.from(bytes);
 }
-
 
 class Reader {
   constructor(f) {

@@ -6,6 +6,7 @@ class Server {
   constructor(ctx) {
     this.ctx = ctx;
     this._vars = {};
+    this._types = {};
     this._commands = [ 'inputs',
                 'outputs',
                 'call',
@@ -44,6 +45,16 @@ class Server {
     }
   }
 
+  _set_var(vname, v, t) {
+    this._vars[vname] = v;
+    this._types[vname] = t;
+  }
+
+  _get_type(vname) {
+    this._check_var(vname);
+    return this._types[vname];
+  }
+
   _get_var(vname) {
     this._check_var(vname);
     return this._vars[vname];
@@ -79,6 +90,7 @@ class Server {
 
   _cmd_call(args) {
     var entry = this._get_entry_point(this._get_arg(args, 0));
+    console.log("entry log", entry);
     var num_ins = entry[0].length;
     var num_outs = entry[1].length;
     var expected_len = 1 + num_outs + num_ins
@@ -102,10 +114,10 @@ class Server {
     // Call entry point function from string name
     var vals = this.ctx[args[0]].apply(this.ctx, ins);
     if (num_outs == 1) {
-      this._vars[out_vnames[0]] = vals;
+      this._set_var(out_vnames[0], vals, entry[1][0]);
     } else {
       for (var i = 0; i < out_vnames.length; i++) {
-        this._vars[out_vnames[i]] = vals[i];
+        this._set_var(out_vnames[i], vals[i], entry[1][i]);
       }
     }
   }
@@ -116,10 +128,14 @@ class Server {
     for (var i = 1; i < args.length; i++) {
       var vname = args[i];
       var value = this._get_var(vname);
+      var typ = this._get_type(vname);
+
       //TODO right this more elengantly
       //TODO make sure file is open in binary mode
       var fs = require("fs");
-      var bin_val = construct_binary_value(this._vars[vname]);
+      console.log("state", this._vars);
+      console.log("lets see", this._vars[vname]);
+      var bin_val = construct_binary_value(value, typ);
       fs.appendFileSync(fname, bin_val, 'binary')
     }
   }
@@ -164,7 +180,7 @@ class Server {
       try {
         var value = read_value(typename, reader);
         if (typeof value == 'number' || typeof value == 'bigint') {
-          this._vars[vname] = value;
+          this._set_var(vname, value, typename);
         } else {
           // We are working with an array and need to create to convert [shape, arr] to futhark ptr
           var shape= value[0];
@@ -173,10 +189,13 @@ class Server {
           var dim = dimtyp[0];
           var typ = dimtyp[1];
           var arg_list = [arr, ...shape];
-          var fnam = "to_futhark_" + typ + "_" + dim + "d_arr";
+          console.log("yo", shape, dim, typ);
+          var fnam = "new_" + typ + "_" + dim + "d";
+          //var fnam = "to_futhark_" + typ + "_" + dim + "d_arr";
           //arg_list = [arr, 4];
+          console.log("yo2", fnam, arg_list);
           var ptr = this.ctx[fnam].apply(this.ctx, arg_list);
-          this._vars[vname] = ptr;
+          this._set_var(vname, ptr, typename);
         }
       } catch (err) {
         var err_msg = "Failed to restore variable " + vname + ".\nPossibly malformed data in " + fname + ".\n";
