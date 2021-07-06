@@ -56,7 +56,7 @@ intraGroupParallelise knest lam = runMaybeT $ do
 
   (num_groups, w_stms) <-
     lift $
-      runBinder $
+      runBuilder $
         letSubExp "intra_num_groups"
           =<< foldBinOp (Mul Int64 OverflowUndef) (intConst Int64 1) (map snd ispace)
 
@@ -80,7 +80,7 @@ intraGroupParallelise knest lam = runMaybeT $ do
     fail "Irregular parallelism"
 
   ((intra_avail_par, kspace, read_input_stms), prelude_stms) <- lift $
-    runBinder $ do
+    runBuilder $ do
       let foldBinOp' _ [] = eSubExp $ intConst Int64 0
           foldBinOp' bop (x : xs) = foldBinOp bop x xs
       ws_min <-
@@ -110,7 +110,7 @@ intraGroupParallelise knest lam = runMaybeT $ do
           used_inps = filter inputIsUsed inps
 
       addStms w_stms
-      read_input_stms <- runBinder_ $ mapM readGroupKernelInput used_inps
+      read_input_stms <- runBuilder_ $ mapM readGroupKernelInput used_inps
       space <- mkSegSpace ispace
       return (intra_avail_par, space, read_input_stms)
 
@@ -136,7 +136,7 @@ intraGroupParallelise knest lam = runMaybeT $ do
     aux = loopNestingAux first_nest
 
 readGroupKernelInput ::
-  (DistRep (Rep m), MonadBinder m) =>
+  (DistRep (Rep m), MonadBuilder m) =>
   KernelInput ->
   m ()
 readGroupKernelInput inp
@@ -161,7 +161,7 @@ instance Monoid IntraAcc where
   mempty = IntraAcc mempty mempty mempty
 
 type IntraGroupM =
-  BinderT Out.GPU (RWS () IntraAcc VNameSource)
+  BuilderT Out.GPU (RWS () IntraAcc VNameSource)
 
 instance MonadLogger IntraGroupM where
   addLog log = tell mempty {accLog = log}
@@ -173,7 +173,7 @@ runIntraGroupM ::
 runIntraGroupM m = do
   scope <- castScope <$> askScope
   modifyNameSource $ \src ->
-    let (((), kstms), src', acc) = runRWS (runBinderT m scope) () src
+    let (((), kstms), src', acc) = runRWS (runBuilderT m scope) () src
      in ((acc, kstms), src')
 
 parallelMin :: [SubExp] -> IntraGroupM ()
@@ -213,7 +213,7 @@ intraGroupStm lvl stm@(Let pat aux e) = do
     Op soac
       | "sequential_outer" `inAttrs` stmAuxAttrs aux ->
         intraGroupStms lvl . fmap (certify (stmAuxCerts aux))
-          =<< runBinder_ (FOT.transformSOAC pat soac)
+          =<< runBuilder_ (FOT.transformSOAC pat soac)
     Op (Screma w arrs form)
       | Just lam <- isMapSOAC form -> do
         let loopnest = MapNesting pat aux w $ zip (lambdaParams lam) arrs
@@ -275,7 +275,7 @@ intraGroupStm lvl stm@(Let pat aux e) = do
       | chunk_size_param : _ <- lambdaParams lam -> do
         types <- asksScope castScope
         ((), stream_bnds) <-
-          runBinderT (sequentialStreamWholeArray pat w accs lam arrs) types
+          runBuilderT (sequentialStreamWholeArray pat w accs lam arrs) types
         let replace (Var v) | v == paramName chunk_size_param = w
             replace se = se
             replaceSets (IntraAcc x y log) =
@@ -295,7 +295,7 @@ intraGroupStm lvl stm@(Let pat aux e) = do
             (p, p_a) <- zip (lambdaParams lam') ivs
             return $ KernelInput (paramName p) (paramType p) p_a [Var write_i]
 
-      kstms <- runBinder_ $
+      kstms <- runBuilder_ $
         localScope (scopeOfSegSpace space) $ do
           mapM_ readKernelInput inputs
           addStms $ bodyStms $ lambdaBody lam'

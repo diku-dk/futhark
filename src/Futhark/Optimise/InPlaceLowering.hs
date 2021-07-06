@@ -71,7 +71,7 @@ where
 import Control.Monad.RWS
 import qualified Data.Map.Strict as M
 import Futhark.Analysis.Alias
-import Futhark.Binder
+import Futhark.Builder
 import Futhark.IR.Aliases
 import Futhark.IR.GPU
 import Futhark.IR.MC
@@ -119,7 +119,7 @@ inPlaceLowering onOp lower =
     descend [] m = m
     descend (stm : stms) m = bindingStm stm $ descend stms m
 
-type Constraints rep = (Bindable rep, CanBeAliased (Op rep))
+type Constraints rep = (Buildable rep, CanBeAliased (Op rep))
 
 optimiseBody ::
   Constraints rep =>
@@ -199,7 +199,7 @@ optimiseExp e = mapExpM optimise e
         }
 
 onSegOp ::
-  (Bindable rep, CanBeAliased (Op rep)) =>
+  (Buildable rep, CanBeAliased (Op rep)) =>
   SegOp lvl (Aliases rep) ->
   ForwardingM rep (SegOp lvl (Aliases rep))
 onSegOp op =

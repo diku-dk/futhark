@@ -31,7 +31,7 @@ import Futhark.Util
 -- Only handles a pattern with an empty 'patternContextElements'.
 redomapToMapAndReduce ::
   ( MonadFreshNames m,
-    Bindable rep,
+    Buildable rep,
     ExpDec rep ~ (),
     Op rep ~ SOAC rep
   ) =>
@@ -81,9 +81,9 @@ splitScanOrRedomap patelems w map_lam nes = do
 -- that we cannot directly generate efficient parallel code for them.
 -- In essense, what happens is the opposite of horisontal fusion.
 dissectScrema ::
-  ( MonadBinder m,
+  ( MonadBuilder m,
     Op (Rep m) ~ SOAC (Rep m),
-    Bindable (Rep m)
+    Buildable (Rep m)
   ) =>
   Pattern (Rep m) ->
   SubExp ->
@@ -108,7 +108,7 @@ dissectScrema pat w (ScremaForm scans reds map_lam) arrs = do
 -- | Turn a stream SOAC into statements that apply the stream lambda
 -- to the entire input.
 sequentialStreamWholeArray ::
-  (MonadBinder m, Bindable (Rep m)) =>
+  (MonadBuilder m, Buildable (Rep m)) =>
   Pattern (Rep m) ->
   SubExp ->
   [SubExp] ->

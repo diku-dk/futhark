@@ -58,11 +58,11 @@ where
 import Control.Monad.State
 import qualified Futhark.Analysis.SymbolTable as ST
 import qualified Futhark.Analysis.UsageTable as UT
-import Futhark.Binder
+import Futhark.Builder
 import Futhark.IR
 
 -- | The monad in which simplification rules are evaluated.
-newtype RuleM rep a = RuleM (BinderT rep (StateT VNameSource Maybe) a)
+newtype RuleM rep a = RuleM (BuilderT rep (StateT VNameSource Maybe) a)
   deriving
     ( Functor,
       Applicative,
@@ -72,7 +72,7 @@ newtype RuleM rep a = RuleM (BinderT rep (StateT VNameSource Maybe) a)
       LocalScope rep
     )
 
-instance (ASTRep rep, BinderOps rep) => MonadBinder (RuleM rep) where
+instance (ASTRep rep, BuilderOps rep) => MonadBuilder (RuleM rep) where
   type Rep (RuleM rep) = rep
   mkExpDecM pat e = RuleM $ mkExpDecM pat e
   mkBodyM bnds res = RuleM $ mkBodyM bnds res
@@ -90,7 +90,7 @@ simplify ::
   Maybe (Stms rep, VNameSource)
 simplify _ _ Skip = Nothing
 simplify scope src (Simplify (RuleM m)) =
-  runStateT (runBinderT_ m scope) src
+  runStateT (runBuilderT_ m scope) src
 
 cannotSimplify :: RuleM rep a
 cannotSimplify = RuleM $ lift $ lift Nothing

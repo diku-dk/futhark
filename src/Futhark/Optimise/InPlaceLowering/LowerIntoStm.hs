@@ -46,7 +46,7 @@ type LowerUpdate rep m =
 
 lowerUpdate ::
   ( MonadFreshNames m,
-    Bindable rep,
+    Buildable rep,
     LetDec rep ~ Type,
     CanBeAliased (Op rep)
   ) =>
@@ -147,7 +147,7 @@ lowerUpdatesIntoSegMap scope pat updates kspace kbody = do
 
         Just $ do
           (slice', bodystms) <-
-            flip runBinderT scope $
+            flip runBuilderT scope $
               traverse (toSubExp "index") $
                 fixSlice (map (fmap pe64) slice) $
                   map (pe64 . Var) gtids
@@ -167,8 +167,8 @@ lowerUpdatesIntoSegMap scope pat updates kspace kbody = do
       Just $ return (pe, mempty, ret, mempty)
 
 lowerUpdateIntoLoop ::
-  ( Bindable rep,
-    BinderOps rep,
+  ( Buildable rep,
+    BuilderOps rep,
     Aliased rep,
     LetDec rep ~ (als, Type),
     MonadFreshNames m
@@ -239,7 +239,7 @@ lowerUpdateIntoLoop scope updates pat ctx val form body = do
     resmap = zip (bodyResult body) $ patternValueIdents pat
 
     mkMerges ::
-      (MonadFreshNames m, Bindable rep) =>
+      (MonadFreshNames m, Buildable rep) =>
       [LoopResultSummary (als, Type)] ->
       m ([(Param DeclType, SubExp)], [Stm rep], [Stm rep])
     mkMerges summaries = do
@@ -354,7 +354,7 @@ indexSubstitutions = mapMaybe getSubstitution
       return (name, (cs, nm, dec, is))
 
 manipulateResult ::
-  (Bindable rep, MonadFreshNames m) =>
+  (Buildable rep, MonadFreshNames m) =>
   [LoopResultSummary (LetDec rep)] ->
   IndexSubstitutions (LetDec rep) ->
   m (Result, Stms rep)

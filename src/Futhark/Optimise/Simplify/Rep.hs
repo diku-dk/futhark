@@ -30,7 +30,7 @@ import Control.Monad.Reader
 import qualified Data.Kind
 import qualified Data.Map.Strict as M
 import Futhark.Analysis.Rephrase
-import Futhark.Binder
+import Futhark.Builder
 import Futhark.IR
 import Futhark.IR.Aliases
   ( AliasDec (..),
@@ -243,10 +243,10 @@ mkWiseExpDec pat expdec e =
   )
 
 instance
-  ( Bindable rep,
+  ( Buildable rep,
     CanBeWise (Op rep)
   ) =>
-  Bindable (Wise rep)
+  Buildable (Wise rep)
   where
   mkExpPat ctx val e =
     addWisdomToPattern (mkExpPat ctx val $ removeExpWisdom e) e

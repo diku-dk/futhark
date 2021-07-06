@@ -266,7 +266,7 @@ memoryRequirements ::
   ExpandM (RebaseMap, Stms GPUMem)
 memoryRequirements lvl space kstms variant_allocs invariant_allocs = do
   (num_threads, num_threads_stms) <-
-    runBinder . letSubExp "num_threads" . BasicOp $
+    runBuilder . letSubExp "num_threads" . BasicOp $
       BinOp
         (Mul Int64 OverflowUndef)
         (unCount $ segNumGroups lvl)
@@ -421,7 +421,7 @@ genericExpandedInvariantAllocations ::
 genericExpandedInvariantAllocations getNumUsers invariant_allocs = do
   -- We expand the invariant allocations by adding an inner dimension
   -- equal to the number of kernel threads.
-  (rebases, alloc_stms) <- runBinder $ mapM expand $ M.toList invariant_allocs
+  (rebases, alloc_stms) <- runBuilder $ mapM expand $ M.toList invariant_allocs
 
   return (alloc_stms, mconcat rebases)
   where
@@ -793,7 +793,7 @@ sliceKernelSizes num_threads sizes space kstms = do
 
   kernels_scope <- asks unAllocScope
 
-  (max_lam, _) <- flip runBinderT kernels_scope $ do
+  (max_lam, _) <- flip runBuilderT kernels_scope $ do
     xs <- replicateM num_sizes $ newParam "x" (Prim int64)
     ys <- replicateM num_sizes $ newParam "y" (Prim int64)
     (zs, stms) <- localScope (scopeOfLParams $ xs ++ ys) $
@@ -804,7 +804,7 @@ sliceKernelSizes num_threads sizes space kstms = do
 
   flat_gtid_lparam <- Param <$> newVName "flat_gtid" <*> pure (Prim (IntType Int64))
 
-  (size_lam', _) <- flip runBinderT kernels_scope $ do
+  (size_lam', _) <- flip runBuilderT kernels_scope $ do
     params <- replicateM num_sizes $ newParam "x" (Prim int64)
     (zs, stms) <- localScope
       ( scopeOfLParams params
@@ -827,7 +827,7 @@ sliceKernelSizes num_threads sizes space kstms = do
     localScope (scopeOfSegSpace space) $
       GPU.simplifyLambda (Lambda [flat_gtid_lparam] (Body () stms zs) i64s)
 
-  ((maxes_per_thread, size_sums), slice_stms) <- flip runBinderT kernels_scope $ do
+  ((maxes_per_thread, size_sums), slice_stms) <- flip runBuilderT kernels_scope $ do
     pat <-
       basicPattern []
         <$> replicateM
