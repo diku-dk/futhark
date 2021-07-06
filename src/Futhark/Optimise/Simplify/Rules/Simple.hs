@@ -309,13 +309,13 @@ simplifyReshapeIndex _ _ _ = Nothing
 -- If we are updating a slice with the result of a size coercion, we
 -- instead use the original array and update the slice dimensions.
 simplifyUpdateReshape :: SimpleRule rep
-simplifyUpdateReshape defOf seType (Update dest slice (Var v))
+simplifyUpdateReshape defOf seType (Update safety dest slice (Var v))
   | Just (BasicOp (Reshape newshape v'), v_cs) <- defOf v,
     Just _ <- shapeCoercion newshape,
     Just ds <- arrayDims <$> seType (Var v'),
     slice' <- reshapeSlice slice ds,
     slice' /= slice =
-    Just (Update dest slice' $ Var v', v_cs)
+    Just (Update safety dest slice' $ Var v', v_cs)
 simplifyUpdateReshape _ _ _ = Nothing
 
 improveReshape :: SimpleRule rep

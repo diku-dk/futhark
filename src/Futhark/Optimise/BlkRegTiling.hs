@@ -439,7 +439,7 @@ update se_desc arr indices new_elem = update' se_desc arr indices (Var new_elem)
 
 update' :: MonadBuilder m => String -> VName -> [VName] -> SubExp -> m VName
 update' se_desc arr indices new_elem =
-  letExp se_desc $ BasicOp $ Update arr (map (DimFix . Var) indices) new_elem
+  letExp se_desc $ BasicOp $ Update Unsafe arr (map (DimFix . Var) indices) new_elem
 
 forLoop' ::
   SubExp -> -- loop var
@@ -929,7 +929,7 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
                   forLoop rz [rss_init] $ \i [rss] -> do
                     let slice = [DimFix $ Var i, DimFix se0, DimFix se0]
                     thread_res <- index "thread_res" res [ltid_y, ltid_x, i]
-                    rss' <- letSubExp "rss" $ BasicOp $ Update rss slice $ Var thread_res
+                    rss' <- letSubExp "rss" $ BasicOp $ Update Unsafe rss slice $ Var thread_res
                     resultBodyM [rss']
             else segMap3D "rssss" segthd_lvl ResultPrivate (se1, ty, tx) $ \(_ltid_z, ltid_y, ltid_x) -> do
               letBindNames [gtid_y] =<< toExp (le64 jj1 + le64 ltid_y)
@@ -957,7 +957,7 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
                       (eBody $ map eBlank kertp)
                 rss' <- forM (zip res_els rss_merge) $ \(res_el, rs_merge) -> do
                   let slice = [DimFix $ Var i, DimFix se0, DimFix se0]
-                  letSubExp "rss" $ BasicOp $ Update rs_merge slice res_el
+                  letSubExp "rss" $ BasicOp $ Update Unsafe rs_merge slice res_el
                 resultBodyM rss'
               return $ map Var rss
 

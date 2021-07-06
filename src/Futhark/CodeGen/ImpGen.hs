@@ -863,8 +863,14 @@ defCompileBasicOp (Pattern _ [pe]) (Index src slice)
     copyDWIM (patElemName pe) [] (Var src) $ map (DimFix . toInt64Exp) idxs
 defCompileBasicOp _ Index {} =
   return ()
-defCompileBasicOp (Pattern _ [pe]) (Update _ slice se) =
-  sUpdate (patElemName pe) (map (fmap toInt64Exp) slice) se
+defCompileBasicOp (Pattern _ [pe]) (Update safety _ slice se) =
+  case safety of
+    Unsafe -> write
+    Safe -> sWhen (inBounds slice' dims) write
+  where
+    slice' = map (fmap toInt64Exp) slice
+    dims = map toInt64Exp $ arrayDims $ patElemType pe
+    write = sUpdate (patElemName pe) slice' se
 defCompileBasicOp (Pattern _ [pe]) (Replicate (Shape ds) se) = do
   ds' <- mapM toExp ds
   is <- replicateM (length ds) (newVName "i")
@@ -1694,7 +1700,7 @@ inBounds slice dims =
   let condInBounds (DimFix i) d =
         0 .<=. i .&&. i .<. d
       condInBounds (DimSlice i n s) d =
-        0 .<=. i .&&. i + n * s .<. d
+        0 .<=. i .&&. i + (n -1) * s .<. d
    in foldl1 (.&&.) $ zipWith condInBounds slice dims
 
 --- Building blocks for constructing code.

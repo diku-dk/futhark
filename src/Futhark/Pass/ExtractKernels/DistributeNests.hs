@@ -619,7 +619,7 @@ maybeDistributeStm stm@(Let _ aux (BasicOp (Rotate rots stm_arr))) acc =
   distributeSingleUnaryStm acc stm stm_arr $ \nest outerpat arr -> do
     let rots' = map (const $ intConst Int64 0) (kernelNestWidths nest) ++ rots
     return $ oneStm $ Let outerpat aux $ BasicOp $ Rotate rots' arr
-maybeDistributeStm stm@(Let pat aux (BasicOp (Update arr slice (Var v)))) acc
+maybeDistributeStm stm@(Let pat aux (BasicOp (Update _ arr slice (Var v)))) acc
   | not $ null $ sliceDims slice =
     distributeSingleStm acc stm >>= \case
       Just (kernels, res, nest, acc')

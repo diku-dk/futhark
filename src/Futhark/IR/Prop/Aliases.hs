@@ -166,7 +166,7 @@ consumedInExp (WithAcc inputs lam) =
        )
   where
     inputConsumed (_, arrs, _) = namesFromList arrs
-consumedInExp (BasicOp (Update src _ _)) = oneName src
+consumedInExp (BasicOp (Update _ src _ _)) = oneName src
 consumedInExp (BasicOp (UpdateAcc acc _ _)) = oneName acc
 consumedInExp (BasicOp _) = mempty
 consumedInExp (Op op) = consumedInOp op

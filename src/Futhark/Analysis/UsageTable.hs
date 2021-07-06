@@ -181,7 +181,7 @@ usageInExp (WithAcc inputs lam) =
   foldMap inputUsage inputs <> usageInBody (lambdaBody lam)
   where
     inputUsage (_, arrs, _) = foldMap consumedUsage arrs
-usageInExp (BasicOp (Update src _ _)) =
+usageInExp (BasicOp (Update _ src _ _)) =
   consumedUsage src
 usageInExp (Op op) =
   mconcat $ map consumedUsage (namesToList $ consumedInOp op)
