@@ -281,7 +281,9 @@ runCompiledEntry futhark server program (InputOutputs entry run_cases) = do
   let outs = ["out" <> T.pack (show i) | i <- [0 .. length output_types -1]]
       ins = ["in" <> T.pack (show i) | i <- [0 .. length input_types -1]]
       onRes = either (Failure . pure) (const Success)
-  mapM (fmap onRes . runCompiledCase input_types outs ins) run_cases
+  tstress <- mapM (fmap onRes . runCompiledCase input_types outs ins) run_cases
+  terminate server
+  return tstress
   where
     dir = takeDirectory program
 

@@ -17,6 +17,7 @@ module Futhark.Server
     cmdOutputs,
     cmdClear,
     cmdReport,
+    terminate
   )
 where
 
@@ -160,6 +161,9 @@ type TypeName = Text
 
 -- | The name of an entry point.
 type EntryName = Text
+
+terminate :: Server -> IO ()
+terminate s = P.terminateProcess $ serverProc s
 
 helpCmd :: Server -> [Text] -> IO (Maybe CmdFailure)
 helpCmd s cmd =
