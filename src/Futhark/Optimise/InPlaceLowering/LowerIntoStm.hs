@@ -46,7 +46,7 @@ type LowerUpdate rep m =
 
 lowerUpdate ::
   ( MonadFreshNames m,
-    Bindable rep,
+    Buildable rep,
     LetDec rep ~ Type,
     CanBeAliased (Op rep)
   ) =>
@@ -71,7 +71,7 @@ lowerUpdate
             return
               [ certify (stmAuxCerts aux <> cs) $
                   mkLet [] [Ident bindee_nm $ typeOf bindee_dec] $
-                    BasicOp $ Update v is' $ Var val
+                    BasicOp $ Update Unsafe v is' $ Var val
               ]
 lowerUpdate _ _ _ =
   Nothing
@@ -147,7 +147,7 @@ lowerUpdatesIntoSegMap scope pat updates kspace kbody = do
 
         Just $ do
           (slice', bodystms) <-
-            flip runBinderT scope $
+            flip runBuilderT scope $
               traverse (toSubExp "index") $
                 fixSlice (map (fmap pe64) slice) $
                   map (pe64 . Var) gtids
@@ -167,8 +167,8 @@ lowerUpdatesIntoSegMap scope pat updates kspace kbody = do
       Just $ return (pe, mempty, ret, mempty)
 
 lowerUpdateIntoLoop ::
-  ( Bindable rep,
-    BinderOps rep,
+  ( Buildable rep,
+    BuilderOps rep,
     Aliased rep,
     LetDec rep ~ (als, Type),
     MonadFreshNames m
@@ -239,7 +239,7 @@ lowerUpdateIntoLoop scope updates pat ctx val form body = do
     resmap = zip (bodyResult body) $ patternValueIdents pat
 
     mkMerges ::
-      (MonadFreshNames m, Bindable rep) =>
+      (MonadFreshNames m, Buildable rep) =>
       [LoopResultSummary (als, Type)] ->
       m ([(Param DeclType, SubExp)], [Stm rep], [Stm rep])
     mkMerges summaries = do
@@ -256,18 +256,17 @@ lowerUpdateIntoLoop scope updates pat ctx val form body = do
                 (updateValue update)
                 (source_t `setArrayDims` sliceDims (updateIndices update))
         tell
-          ( [ mkLet [] [Ident source source_t] $
-                BasicOp $
-                  Update
-                    (updateSource update)
-                    (fullSlice source_t $ updateIndices update)
-                    $ snd $ mergeParam summary
+          ( [ mkLet [] [Ident source source_t] . BasicOp $
+                Update
+                  Unsafe
+                  (updateSource update)
+                  (fullSlice source_t $ updateIndices update)
+                  $ snd $ mergeParam summary
             ],
-            [ mkLet [] [elmident] $
-                BasicOp $
-                  Index
-                    (updateName update)
-                    (fullSlice source_t $ updateIndices update)
+            [ mkLet [] [elmident] . BasicOp $
+                Index
+                  (updateName update)
+                  (fullSlice source_t $ updateIndices update)
             ]
           )
         return $
@@ -354,7 +353,7 @@ indexSubstitutions = mapMaybe getSubstitution
       return (name, (cs, nm, dec, is))
 
 manipulateResult ::
-  (Bindable rep, MonadFreshNames m) =>
+  (Buildable rep, MonadFreshNames m) =>
   [LoopResultSummary (LetDec rep)] ->
   IndexSubstitutions (LetDec rep) ->
   m (Result, Stms rep)
@@ -373,9 +372,7 @@ manipulateResult summaries substs = do
     substRes res_se (_, (cs, nm, dec, is)) = do
       v' <- newIdent' (++ "_updated") $ Ident nm $ typeOf dec
       tell
-        [ certify cs $
-            mkLet [] [v'] $
-              BasicOp $
-                Update nm (fullSlice (typeOf dec) is) res_se
+        [ certify cs . mkLet [] [v'] . BasicOp $
+            Update Unsafe nm (fullSlice (typeOf dec) is) res_se
         ]
       return $ Var $ identName v'

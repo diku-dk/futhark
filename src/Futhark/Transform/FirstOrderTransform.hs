@@ -33,8 +33,8 @@ import Futhark.Util (chunks, splitAt3)
 -- | The constraints that must hold for a rep in order to be the
 -- target of first-order transformation.
 type FirstOrderRep rep =
-  ( Bindable rep,
-    BinderOps rep,
+  ( Buildable rep,
+    BuilderOps rep,
     LetDec SOACS ~ LetDec rep,
     LParamInfo SOACS ~ LParamInfo rep,
     CanBeAliased (Op rep)
@@ -48,7 +48,7 @@ transformFunDef ::
   FunDef SOACS ->
   m (AST.FunDef torep)
 transformFunDef consts_scope (FunDef entry attrs fname rettype params body) = do
-  (body', _) <- modifyNameSource $ runState $ runBinderT m consts_scope
+  (body', _) <- modifyNameSource $ runState $ runBuilderT m consts_scope
   return $ FunDef entry attrs fname rettype params body'
   where
     m = localScope (scopeOfFParams params) $ transformBody body
@@ -59,17 +59,17 @@ transformConsts ::
   Stms SOACS ->
   m (AST.Stms torep)
 transformConsts stms =
-  fmap snd $ modifyNameSource $ runState $ runBinderT m mempty
+  fmap snd $ modifyNameSource $ runState $ runBuilderT m mempty
   where
     m = mapM_ transformStmRecursively stms
 
 -- | The constraints that a monad must uphold in order to be used for
 -- first-order transformation.
 type Transformer m =
-  ( MonadBinder m,
+  ( MonadBuilder m,
     LocalScope (Rep m) m,
-    Bindable (Rep m),
-    BinderOps (Rep m),
+    Buildable (Rep m),
+    BuilderOps (Rep m),
     LParamInfo SOACS ~ LParamInfo (Rep m),
     CanBeAliased (Op (Rep m))
   )
@@ -165,7 +165,7 @@ transformSOAC pat (Screma w arrs form@(ScremaForm scans reds map_lam)) = do
   let loopform = ForLoop i Int64 w []
       lam_cons = consumedByLambda $ Alias.analyseLambda mempty map_lam
 
-  loop_body <- runBodyBinder
+  loop_body <- runBodyBuilder
     . localScope (scopeOfFParams (map fst merge) <> scopeOf loopform)
     $ do
       -- Bind the parameters to the lambda.
@@ -262,7 +262,7 @@ transformSOAC pat (Stream w arrs _ nes lam) = do
   letBindNames [paramName chunk_size_param] $
     BasicOp $ SubExp $ intConst Int64 1
 
-  loop_body <- runBodyBinder $
+  loop_body <- runBodyBuilder $
     localScope (scopeOf loop_form <> scopeOfFParams merge_params) $ do
       let slice = [DimSlice (Var i) (Var (paramName chunk_size_param)) (intConst Int64 1)]
       forM_ (zip chunk_params arrs) $ \(p, arr) ->
@@ -273,7 +273,7 @@ transformSOAC pat (Stream w arrs _ nes lam) = do
 
       mapout_res' <- forM (zip mapout_params mapout_res) $ \(p, se) ->
         letSubExp "mapout_res" . BasicOp $
-          Update (paramName p) (fullSlice (paramType p) slice) se
+          Update Unsafe (paramName p) (fullSlice (paramType p) slice) se
 
       resultBodyM $ res ++ mapout_res'
 
@@ -287,7 +287,7 @@ transformSOAC pat (Scatter len lam ivs as) = do
 
   -- Scatter is in-place, so we use the input array as the output array.
   let merge = loopMerge asOuts $ map Var as_vs
-  loopBody <- runBodyBinder $
+  loopBody <- runBodyBuilder $
     localScope (M.insert iter (IndexName Int64) $ scopeOfFParams $ map fst merge) $ do
       ivs' <- forM ivs $ \iv -> do
         iv_t <- lookupType iv
@@ -297,8 +297,10 @@ transformSOAC pat (Scatter len lam ivs as) = do
       let indexes = groupScatterResults (zip3 as_ws as_ns $ map identName asOuts) ivs''
 
       ress <- forM indexes $ \(_, arr, indexes') -> do
+        arr_t <- lookupType arr
         let saveInArray arr' (indexCur, valueCur) =
-              letExp "write_out" =<< eWriteArray arr' (map eSubExp indexCur) (eSubExp valueCur)
+              letExp "write_out" $
+                BasicOp $ Update Safe arr' (fullSlice arr_t $ map DimFix indexCur) valueCur
 
         foldM saveInArray arr indexes'
       return $ resultBody (map Var ress)
@@ -313,7 +315,7 @@ transformSOAC pat (Hist len ops bucket_fun imgs) = do
 
   -- Bind lambda-bodies for operators.
   let iter_scope = M.insert iter (IndexName Int64) $ scopeOfFParams $ map fst merge
-  loopBody <- runBodyBinder . localScope iter_scope $ do
+  loopBody <- runBodyBuilder . localScope iter_scope $ do
     -- Bind images to parameters of bucket function.
     imgs' <- forM imgs $ \img -> do
       img_t <- lookupType img
@@ -364,8 +366,8 @@ transformSOAC pat (Hist len ops bucket_fun imgs) = do
 -- | Recursively first-order-transform a lambda.
 transformLambda ::
   ( MonadFreshNames m,
-    Bindable rep,
-    BinderOps rep,
+    Buildable rep,
+    BuilderOps rep,
     LocalScope somerep m,
     SameScope somerep rep,
     LetDec rep ~ LetDec SOACS,
@@ -375,7 +377,7 @@ transformLambda ::
   m (AST.Lambda rep)
 transformLambda (Lambda params body rettype) = do
   body' <-
-    runBodyBinder $
+    runBodyBuilder $
       localScope (scopeOfLParams params) $
         transformBody body
   return $ Lambda params body' rettype

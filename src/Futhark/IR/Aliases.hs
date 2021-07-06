@@ -50,7 +50,7 @@ import Control.Monad.Reader
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import Futhark.Analysis.Rephrase
-import Futhark.Binder
+import Futhark.Builder
 import Futhark.IR.Pretty
 import Futhark.IR.Prop
 import Futhark.IR.Prop.Aliases
@@ -379,7 +379,7 @@ mkAliasedLetStm pat (StmAux cs attrs dec) e =
     (StmAux cs attrs (AliasDec $ consumedInExp e, dec))
     e
 
-instance (Bindable rep, CanBeAliased (Op rep)) => Bindable (Aliases rep) where
+instance (Buildable rep, CanBeAliased (Op rep)) => Buildable (Aliases rep) where
   mkExpDec pat e =
     let dec = mkExpDec (removePatternAliases pat) $ removeExpAliases e
      in (AliasDec $ consumedInExp e, dec)
@@ -397,4 +397,4 @@ instance (Bindable rep, CanBeAliased (Op rep)) => Bindable (Aliases rep) where
     let Body bodyrep _ _ = mkBody (fmap removeStmAliases bnds) res
      in mkAliasedBody bodyrep bnds res
 
-instance (ASTRep (Aliases rep), Bindable (Aliases rep)) => BinderOps (Aliases rep)
+instance (ASTRep (Aliases rep), Buildable (Aliases rep)) => BuilderOps (Aliases rep)

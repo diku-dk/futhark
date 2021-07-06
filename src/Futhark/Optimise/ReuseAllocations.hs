@@ -18,7 +18,7 @@ import Data.Set (Set)
 import qualified Data.Set as S
 import qualified Futhark.Analysis.Interference as Interference
 import qualified Futhark.Analysis.LastUse as LastUse
-import Futhark.Binder.Class
+import Futhark.Builder.Class
 import Futhark.Construct
 import Futhark.IR.GPUMem
 import qualified Futhark.Optimise.ReuseAllocations.GreedyColoring as GreedyColoring
@@ -94,7 +94,7 @@ setAllocsSegOp m (SegHist lvl sp segbinops tps body) =
   SegHist lvl sp segbinops tps $
     body {kernelBodyStms = setAllocsStm m <$> kernelBodyStms body}
 
-maxSubExp :: MonadBinder m => Set SubExp -> m SubExp
+maxSubExp :: MonadBuilder m => Set SubExp -> m SubExp
 maxSubExp = helper . S.toList
   where
     helper (s1 : s2 : sexps) = do
@@ -138,7 +138,7 @@ isKernelInvariant segop (Var vname, _) =
 isKernelInvariant _ _ = True
 
 onKernelBodyStms ::
-  MonadBinder m =>
+  MonadBuilder m =>
   SegOp lvl GPUMem ->
   (Stms GPUMem -> m (Stms GPUMem)) ->
   m (SegOp lvl GPUMem)
@@ -159,7 +159,7 @@ onKernelBodyStms (SegHist lvl space binops ts body) f = do
 -- replace allocations and references to memory blocks inside with a (hopefully)
 -- reduced number of allocations.
 optimiseKernel ::
-  (MonadBinder m, Rep m ~ GPUMem) =>
+  (MonadBuilder m, Rep m ~ GPUMem) =>
   Interference.Graph VName ->
   SegOp lvl GPUMem ->
   m (SegOp lvl GPUMem)
@@ -252,4 +252,4 @@ optimise =
       PassM (Stms GPUMem)
     onStms graph scope stms = do
       let m = localScope scope $ optimiseKernel graph `onKernels` stms
-      fmap fst $ modifyNameSource $ runState (runBinderT m mempty)
+      fmap fst $ modifyNameSource $ runState (runBuilderT m mempty)

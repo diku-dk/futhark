@@ -71,10 +71,10 @@ Commands
 
 The following commands are supported.
 
-``call`` *entry* *o1* ... *oN* *i1* ... *oM*
+``call`` *entry* *o1* ... *oN* *i1* ... *iM*
 ............................................
 
-Call the given entry point with input from the variables *i1* to *oM*.
+Call the given entry point with input from the variables *i1* to *iM*.
 The results are stored in *o1* to *oN*, which must not already exist.
 
 ``restore`` *file* *v1* *t1* ... *vN* *tN*

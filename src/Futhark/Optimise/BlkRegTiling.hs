@@ -90,7 +90,7 @@ mmBlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kbo
     red_t <- subExpType red_ne
 
     ---- in this binder: host code and outer seggroup (ie. the new kernel) ----
-    (new_kernel, host_stms) <- runBinder $ do
+    (new_kernel, host_stms) <- runBuilder $ do
       -- host code
 
       tk_name <- nameFromString . pretty <$> newVName "Tk"
@@ -132,7 +132,7 @@ mmBlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kbo
       gid_flat <- newVName "gid_flat"
 
       ---- in this binder: outer seggroup ----
-      (ret_seggroup, stms_seggroup) <- runBinder $ do
+      (ret_seggroup, stms_seggroup) <- runBuilder $ do
         iii <- letExp "iii" =<< toExp (le64 gid_y * pe64 ty_ry)
         jjj <- letExp "jjj" =<< toExp (le64 gid_x * pe64 tx_rx)
 
@@ -416,15 +416,15 @@ mmBlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kbo
     return $ Just (host_stms, new_kernel)
 mmBlkRegTiling _ = return Nothing
 
-ceilDiv :: MonadBinder m => SubExp -> SubExp -> m (Exp (Rep m))
+ceilDiv :: MonadBuilder m => SubExp -> SubExp -> m (Exp (Rep m))
 ceilDiv x y = pure $ BasicOp $ BinOp (SDivUp Int64 Unsafe) x y
 
-scratch :: MonadBinder m => String -> PrimType -> [SubExp] -> m VName
+scratch :: MonadBuilder m => String -> PrimType -> [SubExp] -> m VName
 scratch se_name t shape = letExp se_name $ BasicOp $ Scratch t shape
 
 -- index an array with indices given in outer_indices; any inner
 -- dims of arr not indexed by outer_indices are sliced entirely
-index :: MonadBinder m => String -> VName -> [VName] -> m VName
+index :: MonadBuilder m => String -> VName -> [VName] -> m VName
 index se_desc arr outer_indices = do
   arr_t <- lookupType arr
   let shape = arrayShape arr_t
@@ -434,21 +434,21 @@ index se_desc arr outer_indices = do
       indices = map (DimFix . Var) outer_indices ++ inner_slices
   letExp se_desc $ BasicOp $ Index arr indices
 
-update :: MonadBinder m => String -> VName -> [VName] -> VName -> m VName
+update :: MonadBuilder m => String -> VName -> [VName] -> VName -> m VName
 update se_desc arr indices new_elem = update' se_desc arr indices (Var new_elem)
 
-update' :: MonadBinder m => String -> VName -> [VName] -> SubExp -> m VName
+update' :: MonadBuilder m => String -> VName -> [VName] -> SubExp -> m VName
 update' se_desc arr indices new_elem =
-  letExp se_desc $ BasicOp $ Update arr (map (DimFix . Var) indices) new_elem
+  letExp se_desc $ BasicOp $ Update Unsafe arr (map (DimFix . Var) indices) new_elem
 
 forLoop' ::
   SubExp -> -- loop var
   [VName] -> -- loop inits
   ( VName ->
     [VName] -> -- (loop var -> loop inits -> loop body)
-    Binder GPU (Body GPU)
+    Builder GPU (Body GPU)
   ) ->
-  Binder GPU [VName]
+  Builder GPU [VName]
 forLoop' i_bound merge body = do
   i <- newVName "i" -- could give this as arg to the function
   let loop_form = ForLoop i Int64 i_bound []
@@ -457,7 +457,7 @@ forLoop' i_bound merge body = do
   loop_inits <- mapM (\merge_t -> newParam "merge" $ toDecl merge_t Unique) merge_ts
 
   loop_body <-
-    runBodyBinder . inScopeOf loop_form . localScope (scopeOfFParams loop_inits) $
+    runBodyBuilder . inScopeOf loop_form . localScope (scopeOfFParams loop_inits) $
       body i $ map paramName loop_inits
 
   letTupExp "loop" $
@@ -466,8 +466,8 @@ forLoop' i_bound merge body = do
 forLoop ::
   SubExp ->
   [VName] ->
-  (VName -> [VName] -> Binder GPU (Body GPU)) ->
-  Binder GPU VName
+  (VName -> [VName] -> Builder GPU (Body GPU)) ->
+  Builder GPU VName
 forLoop i_bound merge body = do
   res_list <- forLoop' i_bound merge body
   return $ head res_list
@@ -599,7 +599,7 @@ se4 = intConst Int64 4
 se8 :: SubExp
 se8 = intConst Int64 8
 
-getParTiles :: (String, String) -> (Name, Name) -> SubExp -> Binder GPU (SubExp, SubExp)
+getParTiles :: (String, String) -> (Name, Name) -> SubExp -> Builder GPU (SubExp, SubExp)
 getParTiles (t_str, r_str) (t_name, r_name) len_dim =
   case len_dim of
     Constant (IntValue (Int64Value 8)) ->
@@ -613,7 +613,7 @@ getParTiles (t_str, r_str) (t_name, r_name) len_dim =
       r <- letSubExp r_str $ Op $ SizeOp $ GetSize r_name SizeRegTile
       return (t, r)
 
-getSeqTile :: String -> Name -> SubExp -> SubExp -> SubExp -> Binder GPU SubExp
+getSeqTile :: String -> Name -> SubExp -> SubExp -> SubExp -> Builder GPU SubExp
 getSeqTile tk_str tk_name len_dim ty tx =
   case (tx, ty) of
     (Constant (IntValue (Int64Value v_x)), Constant (IntValue (Int64Value v_y))) ->
@@ -755,7 +755,7 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
     all primType kertp,
     all (variantToDim variance gtid_z) ker_res_nms = do
     -- HERE STARTS THE IMPLEMENTATION:
-    (new_kernel, host_stms) <- runBinder $ do
+    (new_kernel, host_stms) <- runBuilder $ do
       -- host code
       -- process the z-variant arrays that need transposition;
       -- these "manifest" statements should come before the kernel
@@ -791,7 +791,7 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
       gid_flat <- newVName "gid_flat"
 
       ---- in this binder: outer seggroup ----
-      (ret_seggroup, stms_seggroup) <- runBinder $ do
+      (ret_seggroup, stms_seggroup) <- runBuilder $ do
         ii <- letExp "ii" =<< toExp (le64 gid_z * pe64 rz)
         jj1 <- letExp "jj1" =<< toExp (le64 gid_y * pe64 ty)
         jj2 <- letExp "jj2" =<< toExp (le64 gid_x * pe64 tx)
@@ -824,7 +824,7 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
                       ltid_flat <- newVName "ltid_flat"
                       ltid <- newVName "ltid"
                       let segspace = SegSpace ltid_flat [(ltid, group_size)]
-                      ((res_v, res_i), stms) <- runBinder $ do
+                      ((res_v, res_i), stms) <- runBuilder $ do
                         offs <- letExp "offs" =<< toExp (pe64 group_size * le64 tt)
                         loc_ind <- letExp "loc_ind" =<< toExp (le64 ltid + le64 offs)
                         letBindNames [gtid_z] =<< toExp (le64 ii + le64 loc_ind)
@@ -929,7 +929,7 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
                   forLoop rz [rss_init] $ \i [rss] -> do
                     let slice = [DimFix $ Var i, DimFix se0, DimFix se0]
                     thread_res <- index "thread_res" res [ltid_y, ltid_x, i]
-                    rss' <- letSubExp "rss" $ BasicOp $ Update rss slice $ Var thread_res
+                    rss' <- letSubExp "rss" $ BasicOp $ Update Unsafe rss slice $ Var thread_res
                     resultBodyM [rss']
             else segMap3D "rssss" segthd_lvl ResultPrivate (se1, ty, tx) $ \(_ltid_z, ltid_y, ltid_x) -> do
               letBindNames [gtid_y] =<< toExp (le64 jj1 + le64 ltid_y)
@@ -957,7 +957,7 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
                       (eBody $ map eBlank kertp)
                 rss' <- forM (zip res_els rss_merge) $ \(res_el, rs_merge) -> do
                   let slice = [DimFix $ Var i, DimFix se0, DimFix se0]
-                  letSubExp "rss" $ BasicOp $ Update rs_merge slice res_el
+                  letSubExp "rss" $ BasicOp $ Update Unsafe rs_merge slice res_el
                 resultBodyM rss'
               return $ map Var rss
 
@@ -980,26 +980,26 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
               letExp "res_reshaped" $ BasicOp $ Reshape (map DimNew new_shape) res
 
         return $ map (RegTileReturns regtile_ret_dims) epilogue_res'
-      -- END (ret_seggroup, stms_seggroup) <- runBinder $ do
+      -- END (ret_seggroup, stms_seggroup) <- runBuilder $ do
       let level' = SegGroup (Count grid_size) (Count group_size) SegNoVirt
           space' = SegSpace gid_flat (rem_outer_dims ++ [(gid_z, gridDim_z), (gid_y, gridDim_y), (gid_x, gridDim_x)])
           kbody' = KernelBody () stms_seggroup ret_seggroup
 
       return $ Let pat aux $ Op $ SegOp $ SegMap level' space' kertp kbody'
-    -- END (new_kernel, host_stms) <- runBinder $ do
+    -- END (new_kernel, host_stms) <- runBuilder $ do
     return $ Just (host_stms, new_kernel)
   where
     getResNm (Returns ResultMaySimplify (Var res_nm)) = Just res_nm
     getResNm _ = Nothing
 
-    limitTile :: String -> SubExp -> SubExp -> Binder GPU SubExp
+    limitTile :: String -> SubExp -> SubExp -> Builder GPU SubExp
     limitTile t_str t d_K = letSubExp t_str $ BasicOp $ BinOp (SMin Int64) t d_K
     insertTranspose ::
       VarianceTable ->
       (VName, SubExp) ->
       (M.Map VName (Stm GPU), M.Map VName (PrimType, Stm GPU)) ->
       (VName, Stm GPU) ->
-      Binder GPU (M.Map VName (Stm GPU), M.Map VName (PrimType, Stm GPU))
+      Builder GPU (M.Map VName (Stm GPU), M.Map VName (PrimType, Stm GPU))
     insertTranspose variance (gidz, _) (tab_inn, tab_out) (p_nm, stm@(Let patt yy (BasicOp (Index arr_nm slc))))
       | [p] <- patternValueElements patt,
         ptp <- elemType $ patElemType p,

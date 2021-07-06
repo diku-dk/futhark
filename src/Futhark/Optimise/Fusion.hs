@@ -148,7 +148,7 @@ updateKerInPlaces res (ip_vs, other_infuse_vs) = do
   return res' {kernels = M.map inspectKer $ kernels res'}
 
 checkForUpdates :: FusedRes -> Exp -> FusionGM FusedRes
-checkForUpdates res (BasicOp (Update src is _)) = do
+checkForUpdates res (BasicOp (Update _ src is _)) = do
   let ifvs = namesToList $ mconcat $ map freeIn is
   updateKerInPlaces res ([src], ifvs)
 checkForUpdates res (Op (Futhark.Scatter _ _ _ written_info)) = do
@@ -711,11 +711,11 @@ fusionGatherStms
 
       let lam_params = chunk_param : acc_params ++ [offset_param] ++ chunked_params
 
-      lam_body <- runBodyBinder $
+      lam_body <- runBodyBuilder $
         localScope (scopeOfLParams lam_params) $ do
           let merge' = zip merge_params $ map (Futhark.Var . paramName) acc_params
           j <- newVName "j"
-          loop_body <- runBodyBinder $ do
+          loop_body <- runBodyBuilder $ do
             forM_ (zip loop_params chunked_params) $ \(p, a_p) ->
               letBindNames [paramName p] $
                 BasicOp $
@@ -958,7 +958,7 @@ replaceSOAC pat@(Pattern _ (patElem : _)) aux e = do
 insertKerSOAC :: StmAux () -> [VName] -> FusedKer -> FusionGM (Stms SOACS)
 insertKerSOAC aux names ker = do
   new_soac' <- finaliseSOAC $ fsoac ker
-  runBinder_ $ do
+  runBuilder_ $ do
     f_soac <- SOAC.toSOAC new_soac'
     -- The fused kernel may consume more than the original SOACs (see
     -- issue #224).  We insert copy expressions to fix it.
@@ -1003,7 +1003,7 @@ simplifyAndFuseInLambda lam = do
 copyNewlyConsumed ::
   Names ->
   Futhark.SOAC (Aliases.Aliases SOACS) ->
-  Binder SOACS (Futhark.SOAC SOACS)
+  Builder SOACS (Futhark.SOAC SOACS)
 copyNewlyConsumed was_consumed soac =
   case soac of
     Futhark.Screma w arrs (Futhark.ScremaForm scans reds map_lam) -> do

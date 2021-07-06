@@ -17,7 +17,7 @@ import Data.List (transpose)
 import qualified Data.Map as M
 import Futhark.AD.Derivatives
 import Futhark.Analysis.PrimExp.Convert
-import Futhark.Binder
+import Futhark.Builder
 import Futhark.Construct
 import Futhark.IR.SOACS
 
@@ -58,7 +58,7 @@ data RState = RState
     stateNameSource :: VNameSource
   }
 
-newtype ADM a = ADM (BinderT SOACS (State RState) a)
+newtype ADM a = ADM (BuilderT SOACS (State RState) a)
   deriving
     ( Functor,
       Applicative,
@@ -69,7 +69,7 @@ newtype ADM a = ADM (BinderT SOACS (State RState) a)
       LocalScope SOACS
     )
 
-instance MonadBinder ADM where
+instance MonadBuilder ADM where
   type Rep ADM = SOACS
   mkExpDecM pat e = ADM $ mkExpDecM pat e
   mkBodyM bnds res = ADM $ mkBodyM bnds res
@@ -87,7 +87,7 @@ runADM (ADM m) =
   modifyNameSource $ \vn ->
     second stateNameSource $
       runState
-        (fst <$> runBinderT m mempty)
+        (fst <$> runBuilderT m mempty)
         (RState mempty vn)
 
 tanVName :: VName -> ADM VName
@@ -97,18 +97,18 @@ insertTan :: VName -> VName -> ADM ()
 insertTan v v' =
   modify $ \env -> env {stateTans = M.insert v v' (stateTans env)}
 
-class TanBinder a where
+class TanBuilder a where
   type Bundled a :: Data.Kind.Type
   type Bundled a = [a]
   newTan :: a -> ADM a
   bundleNew :: a -> ADM (Bundled a)
 
-instance (Monoid (Bundled a), TanBinder a) => TanBinder [a] where
+instance (Monoid (Bundled a), TanBuilder a) => TanBuilder [a] where
   type Bundled [a] = Bundled a
   newTan = mapM newTan
   bundleNew = fmap mconcat . mapM bundleNew
 
-instance TanBinder (PatElemT (TypeBase s u)) where
+instance TanBuilder (PatElemT (TypeBase s u)) where
   newTan (PatElem p t)
     | isAcc t = do
       insertTan p p
@@ -125,12 +125,12 @@ instance TanBinder (PatElemT (TypeBase s u)) where
       then return [pe']
       else return [pe, pe']
 
-instance TanBinder (PatternT (TypeBase s u)) where
+instance TanBuilder (PatternT (TypeBase s u)) where
   type Bundled (PatternT (TypeBase s u)) = (PatternT (TypeBase s u))
   newTan (Pattern ctx pes) = Pattern ctx <$> newTan pes
   bundleNew (Pattern ctx pes) = Pattern ctx <$> bundleNew pes
 
-instance TanBinder (Param (TypeBase s u)) where
+instance TanBuilder (Param (TypeBase s u)) where
   newTan (Param p t) = do
     PatElem p' t' <- newTan $ PatElem p t
     return $ Param p' t'
@@ -142,7 +142,7 @@ instance TanBinder (Param (TypeBase s u)) where
       then return [param']
       else return [param, param']
 
-instance Tangent a => TanBinder (Param (TypeBase s u), a) where
+instance Tangent a => TanBuilder (Param (TypeBase s u), a) where
   newTan (p, x) = (,) <$> newTan p <*> tangent x
   bundleNew (p, x) = do
     b <- bundleNew p
@@ -236,10 +236,10 @@ basicFwd pat aux op = do
     Index arr slice -> do
       arr_tan <- tangent arr
       addStm $ Let pat_tan aux $ BasicOp $ Index arr_tan slice
-    Update arr slice se -> do
+    Update safety arr slice se -> do
       arr_tan <- tangent arr
       se_tan <- tangent se
-      addStm $ Let pat_tan aux $ BasicOp $ Update arr_tan slice se_tan
+      addStm $ Let pat_tan aux $ BasicOp $ Update safety arr_tan slice se_tan
     Concat d arr arrs w -> do
       arr_tan <- tangent arr
       arrs_tans <- tangent arrs

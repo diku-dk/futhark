@@ -288,7 +288,7 @@ addInitialTransforms ts (Input ots a t) = Input (ts <> ots) a t
 
 -- | Convert SOAC inputs to the corresponding expressions.
 inputsToSubExps ::
-  (MonadBinder m) =>
+  (MonadBuilder m) =>
   [Input] ->
   m [VName]
 inputsToSubExps = mapM inputToExp'
@@ -472,14 +472,14 @@ width (Hist w _ _ _) = w
 
 -- | Convert a SOAC to the corresponding expression.
 toExp ::
-  (MonadBinder m, Op (Rep m) ~ Futhark.SOAC (Rep m)) =>
+  (MonadBuilder m, Op (Rep m) ~ Futhark.SOAC (Rep m)) =>
   SOAC (Rep m) ->
   m (Exp (Rep m))
 toExp soac = Op <$> toSOAC soac
 
 -- | Convert a SOAC to a Futhark-level SOAC.
 toSOAC ::
-  MonadBinder m =>
+  MonadBuilder m =>
   SOAC (Rep m) ->
   m (Futhark.SOAC (Rep m))
 toSOAC (Stream w form lam nes inps) =
@@ -520,7 +520,7 @@ fromExp _ = pure $ Left NotSOAC
 --   Returns the Stream SOAC and the
 --   extra-accumulator body-result ident if any.
 soacToStream ::
-  (MonadFreshNames m, Bindable rep, Op rep ~ Futhark.SOAC rep) =>
+  (MonadFreshNames m, Buildable rep, Op rep ~ Futhark.SOAC rep) =>
   SOAC rep ->
   m (SOAC rep, [Ident])
 soacToStream soac = do
@@ -690,7 +690,7 @@ soacToStream soac = do
     _ -> return (soac, [])
   where
     mkMapPlusAccLam ::
-      (MonadFreshNames m, Bindable rep) =>
+      (MonadFreshNames m, Buildable rep) =>
       [SubExp] ->
       Lambda rep ->
       m (Lambda rep)
@@ -715,7 +715,7 @@ soacToStream soac = do
       renameLambda $ Lambda rempars newlambdy $ lambdaReturnType plus
 
     mkPlusBnds ::
-      (MonadFreshNames m, Bindable rep) =>
+      (MonadFreshNames m, Buildable rep) =>
       Lambda rep ->
       [SubExp] ->
       m (Body rep)

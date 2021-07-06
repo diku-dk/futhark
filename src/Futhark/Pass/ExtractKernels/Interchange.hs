@@ -40,7 +40,7 @@ seqLoopStm (SeqLoop _ pat merge form body) =
   Let pat (defAux ()) $ DoLoop [] merge form body
 
 interchangeLoop ::
-  (MonadBinder m, LocalScope SOACS m) =>
+  (MonadBuilder m, LocalScope SOACS m) =>
   (VName -> Maybe VName) ->
   SeqLoop ->
   LoopNesting ->
@@ -68,7 +68,7 @@ interchangeLoop
     -- it is not used anymore.  This might happen if the parameter was
     -- used just as the inital value of a merge parameter.
     ((params', arrs'), pre_copy_bnds) <-
-      runBinder $
+      runBuilder $
         localScope (scopeOfLParams new_params) $
           unzip . catMaybes <$> mapM copyOrRemoveParam params_and_arrs
 
@@ -122,7 +122,7 @@ interchangeLoops ::
   m (Stms SOACS)
 interchangeLoops nest loop = do
   (loop', bnds) <-
-    runBinder $
+    runBuilder $
       foldM (interchangeLoop isMapParameter) loop $
         reverse $ kernelNestLoops nest
   return $ bnds <> oneStm (seqLoopStm loop')
@@ -139,7 +139,7 @@ branchStm (Branch _ pat cond tbranch fbranch ret) =
   Let pat (defAux ()) $ If cond tbranch fbranch ret
 
 interchangeBranch1 ::
-  (MonadBinder m) =>
+  (MonadBuilder m) =>
   Branch ->
   LoopNesting ->
   m Branch
@@ -174,7 +174,7 @@ interchangeBranch ::
   m (Stms SOACS)
 interchangeBranch nest loop = do
   (loop', bnds) <-
-    runBinder $ foldM interchangeBranch1 loop $ reverse $ kernelNestLoops nest
+    runBuilder $ foldM interchangeBranch1 loop $ reverse $ kernelNestLoops nest
   return $ bnds <> oneStm (branchStm loop')
 
 data WithAccStm
@@ -185,7 +185,7 @@ withAccStm (WithAccStm _ pat inputs lam) =
   Let pat (defAux ()) $ WithAcc inputs lam
 
 interchangeWithAcc1 ::
-  (MonadBinder m, Rep m ~ SOACS) =>
+  (MonadBuilder m, Rep m ~ SOACS) =>
   WithAccStm ->
   LoopNesting ->
   m WithAccStm
@@ -284,5 +284,5 @@ interchangeWithAcc ::
   m (Stms SOACS)
 interchangeWithAcc nest withacc = do
   (withacc', stms) <-
-    runBinder $ foldM interchangeWithAcc1 withacc $ reverse $ kernelNestLoops nest
+    runBuilder $ foldM interchangeWithAcc1 withacc $ reverse $ kernelNestLoops nest
   return $ stms <> oneStm (withAccStm withacc')

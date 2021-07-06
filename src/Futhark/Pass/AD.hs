@@ -6,12 +6,12 @@ module Futhark.Pass.AD (algebraicDifferentiation) where
 import Control.Monad
 import Futhark.AD.Fwd (fwdJVP)
 import Futhark.AD.Rev (revVJP)
-import Futhark.Binder
+import Futhark.Builder
 import Futhark.IR.SOACS
 import Futhark.Pass
 
 bindLambda ::
-  (MonadBinder m, Rep m ~ SOACS) =>
+  (MonadBuilder m, Rep m ~ SOACS) =>
   Pattern ->
   StmAux (ExpDec SOACS) ->
   Lambda ->
@@ -27,10 +27,10 @@ bindLambda pat aux (Lambda params body _) args = do
 onStm :: Scope SOACS -> Stm -> PassM (Stms SOACS)
 onStm scope (Let pat aux (Op (VJP lam args vec))) = do
   lam' <- revVJP scope =<< onLambda scope lam
-  runBinderT_ (bindLambda pat aux lam' $ args ++ vec) scope
+  runBuilderT_ (bindLambda pat aux lam' $ args ++ vec) scope
 onStm scope (Let pat aux (Op (JVP lam args vec))) = do
   lam' <- fwdJVP scope =<< onLambda scope lam
-  runBinderT_ (bindLambda pat aux lam' $ args ++ vec) scope
+  runBuilderT_ (bindLambda pat aux lam' $ args ++ vec) scope
 onStm scope (Let pat aux e) = oneStm . Let pat aux <$> mapExpM mapper e
   where
     mapper =

@@ -76,7 +76,7 @@ transformOutput ::
   SOAC.ArrayTransforms ->
   [VName] ->
   [Ident] ->
-  Binder SOACS ()
+  Builder SOACS ()
 transformOutput ts names = descend ts
   where
     descend ts' validents =
@@ -857,7 +857,7 @@ pullReshape (SOAC.Screma _ form inps) ots
               stripArray (length shape - length outershape) inpt
 
           inner_body <-
-            runBodyBinder $
+            runBodyBuilder $
               eBody [SOAC.toExp $ inner $ map (SOAC.identInput . paramIdent) ps]
           let inner_fun =
                 Lambda

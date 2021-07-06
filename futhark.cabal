@@ -73,8 +73,8 @@ library
       Futhark.Analysis.SymbolTable
       Futhark.Analysis.UsageTable
       Futhark.Bench
-      Futhark.Binder
-      Futhark.Binder.Class
+      Futhark.Builder
+      Futhark.Builder.Class
       Futhark.CLI.Autotune
       Futhark.CLI.Bench
       Futhark.CLI.C

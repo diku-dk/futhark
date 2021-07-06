@@ -283,8 +283,9 @@ pBasicOp =
           Concat d <$> pVName <*> many (pComma *> pVName) <*> pure w,
       pIota,
       try $
-        Update
+        flip Update
           <$> pVName <* keyword "with"
+          <*> choice [lexeme "?" $> Safe, pure Unsafe]
           <*> pSlice <* lexeme "="
           <*> pSubExp,
       ArrayLit

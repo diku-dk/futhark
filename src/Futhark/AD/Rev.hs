@@ -22,7 +22,7 @@ import Data.Maybe
 import Futhark.AD.Derivatives
 import qualified Futhark.Analysis.Alias as Alias
 import Futhark.Analysis.PrimExp.Convert
-import Futhark.Binder
+import Futhark.Builder
 import Futhark.IR.Prop.Aliases
 import Futhark.IR.SOACS
 import Futhark.Tools
@@ -32,7 +32,7 @@ import Futhark.Util (chunks, splitAt3, takeLast)
 
 --- First some general utility functions that are not specific to AD.
 
-eReverse :: MonadBinder m => VName -> m VName
+eReverse :: MonadBuilder m => VName -> m VName
 eReverse arr = do
   arr_t <- lookupType arr
   let w = arraySize 0 arr_t
@@ -43,11 +43,11 @@ eReverse arr = do
       slice = fullSlice arr_t [DimSlice start w stride]
   letExp (baseString arr <> "_rev") $ BasicOp $ Index arr slice
 
-eRotate :: MonadBinder m => [SubExp] -> VName -> m VName
+eRotate :: MonadBuilder m => [SubExp] -> VName -> m VName
 eRotate rots arr = letExp (baseString arr <> "_rot") $ BasicOp $ Rotate rots arr
 
 scanExc ::
-  (MonadBinder m, Rep m ~ SOACS) =>
+  (MonadBuilder m, Rep m ~ SOACS) =>
   String ->
   Scan SOACS ->
   [VName] ->
@@ -66,7 +66,7 @@ scanExc desc scan arrs = do
   vparams <- mapM (newParam "vp") ts
   let params = iparam : vparams
 
-  body <- runBodyBinder . localScope (scopeOfLParams params) $ do
+  body <- runBodyBuilder . localScope (scopeOfLParams params) $ do
     let first_elem =
           eCmpOp
             (CmpEq int64)
@@ -120,23 +120,23 @@ data Adj
   | AdjZero Shape PrimType
   deriving (Eq, Ord, Show)
 
-zeroArray :: MonadBinder m => Shape -> Type -> m VName
+zeroArray :: MonadBuilder m => Shape -> Type -> m VName
 zeroArray shape t = do
   zero <- letSubExp "zero" $ zeroExp t
   attributing (oneAttr "sequential") $
     letExp "zeroes" $ BasicOp $ Replicate shape zero
 
-sparseArray :: (MonadBinder m, Rep m ~ SOACS) => Sparse -> m VName
+sparseArray :: (MonadBuilder m, Rep m ~ SOACS) => Sparse -> m VName
 sparseArray (Sparse shape t ivs) = do
   flip (foldM f) ivs =<< zeroArray shape (Prim t)
   where
     arr_t = Prim t `arrayOfShape` shape
-    f arr (CheckBounds, i, se) =
-      letExp "sparse" =<< eWriteArray arr [eSubExp i] (eSubExp se)
-    f arr (AssumeBounds, i, se) =
-      letExp "sparse" $
-        BasicOp $
-          Update arr (fullSlice arr_t [DimFix i]) se
+    f arr (check, i, se) = do
+      let safety = case check of
+            AssumeBounds -> Unsafe
+            CheckBounds -> Safe
+      letExp "sparse" . BasicOp $
+        Update safety arr (fullSlice arr_t [DimFix i]) se
 
 adjFromVar :: VName -> Adj
 adjFromVar = AdjVal . Var
@@ -146,7 +146,7 @@ data RState = RState
     stateNameSource :: VNameSource
   }
 
-newtype ADM a = ADM (BinderT SOACS (State RState) a)
+newtype ADM a = ADM (BuilderT SOACS (State RState) a)
   deriving
     ( Functor,
       Applicative,
@@ -157,7 +157,7 @@ newtype ADM a = ADM (BinderT SOACS (State RState) a)
       LocalScope SOACS
     )
 
-instance MonadBinder ADM where
+instance MonadBuilder ADM where
   type Rep ADM = SOACS
   mkExpDecM pat e = ADM $ mkExpDecM pat e
   mkBodyM bnds res = ADM $ mkBodyM bnds res
@@ -175,7 +175,7 @@ runADM (ADM m) =
   modifyNameSource $ \vn ->
     second stateNameSource $
       runState
-        (fst <$> runBinderT m mempty)
+        (fst <$> runBuilderT m mempty)
         (RState mempty vn)
 
 adjVName :: VName -> ADM VName
@@ -348,11 +348,12 @@ updateAdjIndex v (check, i) se = do
         =<< case v_adj_t of
           Acc {} ->
             letExp (baseString v_adj) . BasicOp $ UpdateAcc v_adj [i] [se]
-          _ ->
-            letExp (baseString v_adj)
-              =<< case check of
-                CheckBounds -> eWriteArray v_adj [eSubExp i] (eSubExp se)
-                AssumeBounds -> pure $ BasicOp $ Update v_adj (fullSlice v_adj_t [DimFix i]) se
+          _ -> do
+            let safety = case check of
+                  CheckBounds -> Safe
+                  AssumeBounds -> Unsafe
+            letExp (baseString v_adj) $
+              BasicOp $ Update safety v_adj (fullSlice v_adj_t [DimFix i]) se
 
 -- | Is this primal variable active in the AD sense?  FIXME: this is
 -- (obviously) much too conservative.
@@ -539,7 +540,7 @@ diffBasicOp pat aux e m =
       updateSubExpAdj n
         =<< letExp "iota_contrib" (Op $ Screma n [pat_adj] reduce)
     --
-    Update arr slice v -> do
+    Update safety arr slice v -> do
       (_pat_v, pat_adj) <- commonBasicOp pat aux e m
       v_adj <- letExp "update_val_adj" $ BasicOp $ Index pat_adj slice
       updateSubExpAdj v v_adj
@@ -547,7 +548,7 @@ diffBasicOp pat aux e m =
       pat_adj_copy <- letExp (baseString pat_adj <> "_copy") $ BasicOp $ Copy pat_adj
       void $
         updateAdj arr
-          =<< letExp "update_src_adj" (BasicOp $ Update pat_adj_copy slice zeroes)
+          =<< letExp "update_src_adj" (BasicOp $ Update safety pat_adj_copy slice zeroes)
     --
     UpdateAcc {} -> error "Reverse-mode UpdateAcc not handled yet."
 

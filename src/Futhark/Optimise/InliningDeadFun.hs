@@ -18,7 +18,7 @@ import Data.Maybe
 import qualified Data.Set as S
 import Futhark.Analysis.CallGraph
 import qualified Futhark.Analysis.SymbolTable as ST
-import Futhark.Binder
+import Futhark.Builder
 import Futhark.IR.SOACS
 import Futhark.IR.SOACS.Simplify
   ( simpleSOACS,

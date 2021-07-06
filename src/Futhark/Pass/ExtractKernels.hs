@@ -300,7 +300,7 @@ sequentialisedUnbalancedStm (Let pat _ (Op soac@(Screma _ _ form)))
     unbalancedLambda lam2,
     lambdaContainsParallelism lam2 = do
     types <- asksScope scopeForSOACs
-    Just . snd <$> runBinderT (FOT.transformSOAC pat soac) types
+    Just . snd <$> runBuilderT (FOT.transformSOAC pat soac) types
 sequentialisedUnbalancedStm _ =
   return Nothing
 
@@ -313,7 +313,7 @@ cmpSizeLe desc size_class to_what = do
   x <- gets stateThresholdCounter
   modify $ \s -> s {stateThresholdCounter = x + 1}
   let size_key = nameFromString $ desc ++ "_" ++ show x
-  runBinder $ do
+  runBuilder $ do
     to_what' <-
       letSubExp "comparatee"
         =<< foldBinOp (Mul Int64 OverflowUndef) (intConst Int64 1) to_what
@@ -326,11 +326,11 @@ kernelAlternatives ::
   Out.Body Out.GPU ->
   [(SubExp, Out.Body Out.GPU)] ->
   m (Out.Stms Out.GPU)
-kernelAlternatives pat default_body [] = runBinder_ $ do
+kernelAlternatives pat default_body [] = runBuilder_ $ do
   ses <- bodyBind default_body
   forM_ (zip (patternNames pat) ses) $ \(name, se) ->
     letBindNames [name] $ BasicOp $ SubExp se
-kernelAlternatives pat default_body ((cond, alt) : alts) = runBinder_ $ do
+kernelAlternatives pat default_body ((cond, alt) : alts) = runBuilder_ $ do
   alts_pat <- fmap (Pattern []) $
     forM (patternElements pat) $ \pe -> do
       name <- newVName $ baseString $ patElemName pe
@@ -352,11 +352,11 @@ transformLambda path (Lambda params body ret) =
 transformStm :: KernelPath -> Stm -> DistribM GPUStms
 transformStm _ stm
   | "sequential" `inAttrs` stmAuxAttrs (stmAux stm) =
-    runBinder_ $ FOT.transformStmRecursively stm
+    runBuilder_ $ FOT.transformStmRecursively stm
 transformStm path (Let pat aux (Op soac))
   | "sequential_outer" `inAttrs` stmAuxAttrs aux =
     transformStms path . stmsToList . fmap (certify (stmAuxCerts aux))
-      =<< runBinder_ (FOT.transformSOAC pat soac)
+      =<< runBuilder_ (FOT.transformSOAC pat soac)
 transformStm path (Let pat aux (If c tb fb rt)) = do
   tb' <- transformBody path tb
   fb' <- transformBody path fb
@@ -388,8 +388,8 @@ transformStm path (Let res_pat (StmAux cs _ _) (Op (Screma w arrs form)))
     Scan scan_lam nes <- singleScan scans,
     Just do_iswim <- iswim res_pat w scan_lam $ zip nes arrs = do
     types <- asksScope scopeForSOACs
-    transformStms path . stmsToList . snd =<< runBinderT (certifying cs do_iswim) types
-  | Just (scans, map_lam) <- isScanomapSOAC form = runBinder_ $ do
+    transformStms path . stmsToList . snd =<< runBuilderT (certifying cs do_iswim) types
+  | Just (scans, map_lam) <- isScanomapSOAC form = runBuilder_ $ do
     scan_ops <- forM scans $ \(Scan scan_lam nes) -> do
       (scan_lam', nes', shape) <- determineReduceOp scan_lam nes
       let scan_lam'' = soacsLambdaToGPU scan_lam'
@@ -405,11 +405,11 @@ transformStm path (Let res_pat aux (Op (Screma w arrs form)))
           | otherwise = comm,
     Just do_irwim <- irwim res_pat w comm' red_fun $ zip nes arrs = do
     types <- asksScope scopeForSOACs
-    (_, bnds) <- fst <$> runBinderT (simplifyStms =<< collectStms_ (auxing aux do_irwim)) types
+    (_, bnds) <- fst <$> runBuilderT (simplifyStms =<< collectStms_ (auxing aux do_irwim)) types
     transformStms path $ stmsToList bnds
 transformStm path (Let pat aux@(StmAux cs _ _) (Op (Screma w arrs form)))
   | Just (reds, map_lam) <- isRedomapSOAC form = do
-    let paralleliseOuter = runBinder_ $ do
+    let paralleliseOuter = runBuilder_ $ do
           red_ops <- forM reds $ \(Reduce comm red_lam nes) -> do
             (red_lam', nes', shape) <- determineReduceOp red_lam nes
             let comm'
@@ -430,7 +430,7 @@ transformStm path (Let pat aux@(StmAux cs _ _) (Op (Screma w arrs form)))
           (mapstm, redstm) <-
             redomapToMapAndReduce pat (w, reds, map_lam, arrs)
           types <- asksScope scopeForSOACs
-          transformStms path' . stmsToList <=< (`runBinderT_` types) $ do
+          transformStms path' . stmsToList <=< (`runBuilderT_` types) $ do
             (_, stms) <-
               simplifyStms (stmsFromList [certify cs mapstm, certify cs redstm])
             addStms stms
@@ -459,7 +459,7 @@ transformStm path (Let pat aux@(StmAux cs _ _) (Op (Stream w arrs Parallel {} []
     -- parallel.  It will be distributed.
     types <- asksScope scopeForSOACs
     transformStms path . stmsToList . snd
-      =<< runBinderT (certifying cs $ sequentialStreamWholeArray pat w [] map_fun arrs) types
+      =<< runBuilderT (certifying cs $ sequentialStreamWholeArray pat w [] map_fun arrs) types
 transformStm path (Let pat aux@(StmAux cs _ _) (Op (Stream w arrs (Parallel o comm red_fun) nes fold_fun)))
   | "sequential_inner" `inAttrs` stmAuxAttrs aux =
     paralleliseOuter path
@@ -524,7 +524,7 @@ transformStm path (Let pat aux@(StmAux cs _ _) (Op (Stream w arrs (Parallel o co
     paralleliseInner path' = do
       types <- asksScope scopeForSOACs
       transformStms path' . fmap (certify cs) . stmsToList . snd
-        =<< runBinderT (sequentialStreamWholeArray pat w nes fold_fun arrs) types
+        =<< runBuilderT (sequentialStreamWholeArray pat w nes fold_fun arrs) types
 
     innerParallelBody path' =
       renameBody
@@ -538,14 +538,14 @@ transformStm path (Let pat (StmAux cs _ _) (Op (Screma w arrs form))) = do
   -- anything, so split it up and try again.
   scope <- asksScope scopeForSOACs
   transformStms path . map (certify cs) . stmsToList . snd
-    =<< runBinderT (dissectScrema pat w form arrs) scope
+    =<< runBuilderT (dissectScrema pat w form arrs) scope
 transformStm path (Let pat _ (Op (Stream w arrs Sequential nes fold_fun))) = do
   -- Remove the stream and leave the body parallel.  It will be
   -- distributed.
   types <- asksScope scopeForSOACs
   transformStms path . stmsToList . snd
-    =<< runBinderT (sequentialStreamWholeArray pat w nes fold_fun arrs) types
-transformStm _ (Let pat (StmAux cs _ _) (Op (Scatter w lam ivs as))) = runBinder_ $ do
+    =<< runBuilderT (sequentialStreamWholeArray pat w nes fold_fun arrs) types
+transformStm _ (Let pat (StmAux cs _ _) (Op (Scatter w lam ivs as))) = runBuilder_ $ do
   let lam' = soacsLambdaToGPU lam
   write_i <- newVName "write_i"
   let (as_ws, _, _) = unzip3 as
@@ -574,13 +574,13 @@ transformStm _ (Let orig_pat (StmAux cs _ _) (Op (Hist w ops bucket_fun imgs))) 
   -- It is important not to launch unnecessarily many threads for
   -- histograms, because it may mean we unnecessarily need to reduce
   -- subhistograms as well.
-  runBinder_ $ do
+  runBuilder_ $ do
     lvl <- segThreadCapped [w] "seghist" $ NoRecommendation SegNoVirt
     addStms =<< histKernel onLambda lvl orig_pat [] [] cs w ops bfun' imgs
   where
     onLambda = pure . soacsLambdaToGPU
 transformStm _ bnd =
-  runBinder_ $ FOT.transformStmRecursively bnd
+  runBuilder_ $ FOT.transformStmRecursively bnd
 
 sufficientParallelism ::
   String ->
@@ -841,7 +841,7 @@ onMap' loopnest path mk_seq_stms mk_par_stms pat lam = do
               path'
               (Just intraMinInnerPar)
 
-          runBinder $ do
+          runBuilder $ do
             addStms intra_prelude
 
             max_group_size <-

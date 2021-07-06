@@ -1593,7 +1593,7 @@ isOverloadedFunction qname args loc = do
               dims_match <- forM (zip x_dims y_dims) $ \(x_dim, y_dim) ->
                 letSubExp "dim_eq" $ I.BasicOp $ I.CmpOp (I.CmpEq int64) x_dim y_dim
               shapes_match <- letSubExp "shapes_match" =<< eAll dims_match
-              compare_elems_body <- runBodyBinder $ do
+              compare_elems_body <- runBodyBuilder $ do
                 -- Flatten both x and y.
                 x_num_elems <-
                   letSubExp "x_num_elems"
@@ -1973,7 +1973,7 @@ partitionWithSOACS k lam arrs = do
     replicateM k $ I.Param <$> newVName "x" <*> pure (I.Prim int64)
   add_lam_y_params <-
     replicateM k $ I.Param <$> newVName "y" <*> pure (I.Prim int64)
-  add_lam_body <- runBodyBinder $
+  add_lam_body <- runBodyBuilder $
     localScope (scopeOfLParams $ add_lam_x_params ++ add_lam_y_params) $
       fmap resultBody $
         forM (zip add_lam_x_params add_lam_y_params) $ \(x, y) ->
@@ -1998,7 +1998,7 @@ partitionWithSOACS k lam arrs = do
   -- the total sizes, which are the last elements in the offests.  We
   -- just have to be careful in case the array is empty.
   last_index <- letSubExp "last_index" $ I.BasicOp $ I.BinOp (I.Sub Int64 OverflowUndef) w $ constant (1 :: Int64)
-  nonempty_body <- runBodyBinder $
+  nonempty_body <- runBodyBuilder $
     fmap resultBody $
       forM all_offsets $ \offset_array ->
         letSubExp "last_offset" $ I.BasicOp $ I.Index offset_array [I.DimFix last_index]

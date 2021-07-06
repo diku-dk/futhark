@@ -278,13 +278,19 @@ compileGroupExp (Pattern _ [dest]) (BasicOp (Iota n e s it)) = do
 -- sure that only one thread performs the write.  When writing an
 -- array, the group-level copy code will take care of doing the right
 -- thing.
-compileGroupExp (Pattern _ [pe]) (BasicOp (Update _ slice se))
+compileGroupExp (Pattern _ [pe]) (BasicOp (Update safety _ slice se))
   | null $ sliceDims slice = do
     sOp $ Imp.Barrier Imp.FenceLocal
     ltid <- kernelLocalThreadId . kernelConstants <$> askEnv
     sWhen (ltid .==. 0) $
-      copyDWIM (patElemName pe) (map (fmap toInt64Exp) slice) se []
+      case safety of
+        Unsafe -> write
+        Safe -> sWhen (inBounds slice' dims) write
     sOp $ Imp.Barrier Imp.FenceLocal
+  where
+    slice' = map (fmap toInt64Exp) slice
+    dims = map toInt64Exp $ arrayDims $ patElemType pe
+    write = copyDWIM (patElemName pe) slice' se []
 compileGroupExp dest e =
   defCompileExp dest e
 
@@ -1763,13 +1769,7 @@ compileThreadResult _ pe (WriteReturns (Shape rws) _arr dests) = do
   let rws' = map toInt64Exp rws
   forM_ dests $ \(slice, e) -> do
     let slice' = map (fmap toInt64Exp) slice
-        condInBounds (DimFix i) rw =
-          0 .<=. i .&&. i .<. rw
-        condInBounds (DimSlice i n s) rw =
-          0 .<=. i .&&. i + n * s .<. rw
-        write =
-          foldl (.&&.) (kernelThreadActive constants) $
-            zipWith condInBounds slice' rws'
+        write = kernelThreadActive constants .&&. inBounds slice' rws'
     sWhen write $ copyDWIM (patElemName pe) slice' e []
 compileThreadResult _ _ TileReturns {} =
   compilerBugS "compileThreadResult: TileReturns unhandled."

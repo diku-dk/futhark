@@ -29,7 +29,7 @@ module Futhark.IR.SOACS
   )
 where
 
-import Futhark.Binder
+import Futhark.Builder
 import Futhark.Construct
 import Futhark.IR.Pretty
 import Futhark.IR.Prop
@@ -85,12 +85,12 @@ instance TypeCheck.CheckableOp SOACS where
 
 instance TypeCheck.Checkable SOACS
 
-instance Bindable SOACS where
+instance Buildable SOACS where
   mkBody = AST.Body ()
   mkExpPat ctx val _ = basicPattern ctx val
   mkExpDec _ _ = ()
   mkLetNames = simpleMkLetNames
 
-instance BinderOps SOACS
+instance BuilderOps SOACS
 
 instance PrettyRep SOACS
