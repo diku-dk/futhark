@@ -15,7 +15,8 @@ class Server {
                        'clear',
                        'pause_profiling',
                        'unpause_profiling',
-                       'report'
+                       'report',
+                       'rename'
                      ];
   }
 
@@ -85,6 +86,18 @@ class Server {
       this._check_var(vname);
       delete this._vars[vname];
     }
+  }
+
+  _cmd_rename(args) {
+    var oldname = this._get_arg(args, 0)
+    var newname = this._get_arg(args, 1)
+    if (newname in this._vars) {
+      throw "Variable already exists: " + newname;
+    }
+    this._vars[newname] = this._vars[oldname];
+    this._types[newname] = this._types[oldname];
+    delete this._vars[oldname];
+    delete this._types[oldname];
   }
 
   _cmd_call(args) {
@@ -220,6 +233,7 @@ class Server {
         case 'pause_profiling': this._cmd_dummy(args); break
         case 'unpause_profiling': this._cmd_dummy(args); break
         case 'report': this._cmd_dummy(args); break
+        case 'rename': this._cmd_rename(args); break
         }
       } else {
         throw "Unknown command: " + cmd;
