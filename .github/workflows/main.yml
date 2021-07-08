@@ -399,7 +399,9 @@ jobs:
         tar xvf futhark-nightly-linux-x86_64.tar.xz
         make -C futhark-nightly-linux-x86_64/ install PREFIX=$HOME/.local
         echo "$HOME/.local/bin" >> $GITHUB_PATH
-    - run: |
+
+    - name: Run tests
+      run: |
         node --version
         export EMCFLAGS=-sINITIAL_MEMORY=2147418112 # 2gb - 64kb... largest value of memory
         futhark test -c --backend=wasm --runner=./tools/node-simd.sh --no-tuning --exclude=no_wasm tests examples
@@ -429,7 +431,9 @@ jobs:
         tar xvf futhark-nightly-linux-x86_64.tar.xz
         make -C futhark-nightly-linux-x86_64/ install PREFIX=$HOME/.local
         echo "$HOME/.local/bin" >> $GITHUB_PATH
-    - run: |
+
+    - name: Run tests
+      run: |
         node --version
         export EMCFLAGS="-sINITIAL_MEMORY=2147418112 -s PTHREAD_POOL_SIZE=12" # 2gb - 64kb... largest value of memory
         futhark test -c --backend=wasm-multicore --runner=./tools/node-threaded.sh --no-tuning --exclude=no_wasm tests examples
