@@ -21,6 +21,7 @@ import qualified Futhark.CLI.Doc as Doc
 import qualified Futhark.CLI.Literate as Literate
 import qualified Futhark.CLI.Misc as Misc
 import qualified Futhark.CLI.Multicore as Multicore
+import qualified Futhark.CLI.MulticoreWASM as MulticoreWASM
 import qualified Futhark.CLI.OpenCL as OpenCL
 import qualified Futhark.CLI.Pkg as Pkg
 import qualified Futhark.CLI.PyOpenCL as PyOpenCL
@@ -30,7 +31,6 @@ import qualified Futhark.CLI.REPL as REPL
 import qualified Futhark.CLI.Run as Run
 import qualified Futhark.CLI.Test as Test
 import qualified Futhark.CLI.WASM as WASM
-import qualified Futhark.CLI.MulticoreWASM as MulticoreWASM
 import Futhark.Error
 import Futhark.Util (maxinum)
 import Futhark.Util.Options
