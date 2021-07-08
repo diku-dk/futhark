@@ -3,8 +3,7 @@
 
 -- | A sequential representation.
 module Futhark.IR.Seq
-  ( -- * The Lore definition
-    Seq,
+  ( Seq,
 
     -- * Simplification
     simplifyProg,
@@ -17,7 +16,7 @@ module Futhark.IR.Seq
   )
 where
 
-import Futhark.Binder
+import Futhark.Builder
 import Futhark.Construct
 import Futhark.IR.Pretty
 import Futhark.IR.Prop
@@ -32,10 +31,10 @@ import qualified Futhark.TypeCheck as TypeCheck
 -- | The phantom type for the Seq representation.
 data Seq
 
-instance Decorations Seq where
+instance RepTypes Seq where
   type Op Seq = ()
 
-instance ASTLore Seq where
+instance ASTRep Seq where
   expTypesFromPattern = return . expExtTypesFromPattern
 
 instance TypeCheck.CheckableOp Seq where
@@ -43,17 +42,17 @@ instance TypeCheck.CheckableOp Seq where
 
 instance TypeCheck.Checkable Seq
 
-instance Bindable Seq where
+instance Buildable Seq where
   mkBody = Body ()
   mkExpPat ctx val _ = basicPattern ctx val
   mkExpDec _ _ = ()
   mkLetNames = simpleMkLetNames
 
-instance BinderOps Seq
+instance BuilderOps Seq
 
-instance PrettyLore Seq
+instance PrettyRep Seq
 
-instance BinderOps (Engine.Wise Seq)
+instance BuilderOps (Engine.Wise Seq)
 
 simpleSeq :: Simplify.SimpleOps Seq
 simpleSeq = Simplify.bindableSimpleOps (const $ pure ((), mempty))

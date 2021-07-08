@@ -37,7 +37,7 @@ import Futhark.Optimise.Simplify.Rules.Index
 import Futhark.Optimise.Simplify.Rules.Loop
 import Futhark.Util
 
-topDownRules :: BinderOps lore => [TopDownRule lore]
+topDownRules :: BuilderOps rep => [TopDownRule rep]
 topDownRules =
   [ RuleGeneric constantFoldPrimFun,
     RuleIf ruleIf,
@@ -45,7 +45,7 @@ topDownRules =
     RuleGeneric withAccTopDown
   ]
 
-bottomUpRules :: BinderOps lore => [BottomUpRule lore]
+bottomUpRules :: BuilderOps rep => [BottomUpRule rep]
 bottomUpRules =
   [ RuleIf removeDeadBranchResult,
     RuleGeneric withAccBottomUp,
@@ -55,14 +55,14 @@ bottomUpRules =
 -- | A set of standard simplification rules.  These assume pure
 -- functional semantics, and so probably should not be applied after
 -- memory block merging.
-standardRules :: (BinderOps lore, Aliased lore) => RuleBook lore
+standardRules :: (BuilderOps rep, Aliased rep) => RuleBook rep
 standardRules = ruleBook topDownRules bottomUpRules <> loopRules <> basicOpRules
 
 -- | Turn @copy(x)@ into @x@ iff @x@ is not used after this copy
 -- statement and it can be consumed.
 --
 -- This simplistic rule is only valid before we introduce memory.
-removeUnnecessaryCopy :: (BinderOps lore, Aliased lore) => BottomUpRuleBasicOp lore
+removeUnnecessaryCopy :: (BuilderOps rep, Aliased rep) => BottomUpRuleBasicOp rep
 removeUnnecessaryCopy (vtable, used) (Pattern [] [d]) _ (Copy v)
   | not (v `UT.isConsumed` used),
     (not (v `UT.used` used) && consumable) || not (patElemName d `UT.isConsumed` used) =
@@ -84,7 +84,7 @@ removeUnnecessaryCopy (vtable, used) (Pattern [] [d]) _ (Copy v)
       pure True
 removeUnnecessaryCopy _ _ _ _ = Skip
 
-constantFoldPrimFun :: BinderOps lore => TopDownRuleGeneric lore
+constantFoldPrimFun :: BuilderOps rep => TopDownRuleGeneric rep
 constantFoldPrimFun _ (Let pat (StmAux cs attrs _) (Apply fname args _ _))
   | Just args' <- mapM (isConst . fst) args,
     Just (_, _, fun) <- M.lookup (nameToString fname) primFuns,
@@ -98,7 +98,7 @@ constantFoldPrimFun _ (Let pat (StmAux cs attrs _) (Apply fname args _ _))
     isConst _ = Nothing
 constantFoldPrimFun _ _ = Skip
 
-simplifyIndex :: BinderOps lore => BottomUpRuleBasicOp lore
+simplifyIndex :: BuilderOps rep => BottomUpRuleBasicOp rep
 simplifyIndex (vtable, used) pat@(Pattern [] [pe]) (StmAux cs attrs _) (Index idd inds)
   | Just m <- simplifyIndexing vtable seType idd inds consumed = Simplify $ do
     res <- m
@@ -115,7 +115,7 @@ simplifyIndex (vtable, used) pat@(Pattern [] [pe]) (StmAux cs attrs _) (Index id
     seType (Constant v) = Just $ Prim $ primValueType v
 simplifyIndex _ _ _ _ = Skip
 
-ruleIf :: BinderOps lore => TopDownRuleIf lore
+ruleIf :: BuilderOps rep => TopDownRuleIf rep
 ruleIf _ pat _ (e1, tb, fb, IfDec _ ifsort)
   | Just branch <- checkBranch,
     ifsort /= IfFallback || isCt1 e1 = Simplify $ do
@@ -194,7 +194,7 @@ ruleIf _ _ _ _ = Skip
 -- | Move out results of a conditional expression whose computation is
 -- either invariant to the branches (only done for results in the
 -- context), or the same in both branches.
-hoistBranchInvariant :: BinderOps lore => TopDownRuleIf lore
+hoistBranchInvariant :: BuilderOps rep => TopDownRuleIf rep
 hoistBranchInvariant _ pat _ (cond, tb, fb, IfDec ret ifsort) = Simplify $ do
   let tses = bodyResult tb
       fses = bodyResult fb
@@ -278,7 +278,7 @@ hoistBranchInvariant _ pat _ (cond, tb, fb, IfDec ret ifsort) = Simplify $ do
 -- after a branch.  Standard dead code removal can remove the branch
 -- if *none* of the return values are used, but this rule is more
 -- precise.
-removeDeadBranchResult :: BinderOps lore => BottomUpRuleIf lore
+removeDeadBranchResult :: BuilderOps rep => BottomUpRuleIf rep
 removeDeadBranchResult (_, used) pat _ (e1, tb, fb, IfDec rettype ifsort)
   | -- Only if there is no existential context...
     patternSize pat == length rettype,
@@ -300,7 +300,7 @@ removeDeadBranchResult (_, used) pat _ (e1, tb, fb, IfDec rettype ifsort)
      in Simplify $ letBind (Pattern [] pat') $ If e1 tb' fb' $ IfDec rettype' ifsort
   | otherwise = Skip
 
-withAccTopDown :: BinderOps lore => TopDownRuleGeneric lore
+withAccTopDown :: BuilderOps rep => TopDownRuleGeneric rep
 -- A WithAcc with no accumulators is sent to Valhalla.
 withAccTopDown _ (Let pat aux (WithAcc [] lam)) = Simplify . auxing aux $ do
   lam_res <- bodyBind $ lambdaBody lam
@@ -359,7 +359,7 @@ withAccTopDown vtable (Let pat aux (WithAcc inputs lam)) = Simplify . auxing aux
       pure $ Just x
 withAccTopDown _ _ = Skip
 
-withAccBottomUp :: BinderOps lore => BottomUpRuleGeneric lore
+withAccBottomUp :: BuilderOps rep => BottomUpRuleGeneric rep
 -- Eliminate dead results.
 withAccBottomUp (_, utable) (Let pat aux (WithAcc inputs lam))
   | not $ all (`UT.used` utable) $ patternNames pat = Simplify $ do

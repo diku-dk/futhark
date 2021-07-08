@@ -1,6 +1,6 @@
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE Trustworthy #-}
 {-# LANGUAGE TupleSections #-}
 
 -- | Defunctionalization of typed, monomorphic Futhark programs without modules.
@@ -8,7 +8,7 @@ module Futhark.Internalise.Defunctionalise (transformProg) where
 
 import qualified Control.Arrow as Arrow
 import Control.Monad.Identity
-import Control.Monad.RWS hiding (Sum)
+import Control.Monad.Reader
 import Control.Monad.State
 import Data.Bifunctor
 import Data.Bitraversable
@@ -17,7 +17,6 @@ import Data.List (partition, sortOn, tails)
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as M
 import Data.Maybe
-import qualified Data.Sequence as Seq
 import qualified Data.Set as S
 import Futhark.IR.Pretty ()
 import qualified Futhark.Internalise.FreeVars as FV
@@ -203,7 +202,7 @@ replaceStaticValSizes globals orig_substs sv =
 -- | Returns the defunctionalization environment restricted
 -- to the given set of variable names and types.
 restrictEnvTo :: FV.NameSet -> DefM Env
-restrictEnvTo (FV.NameSet m) = restrict <$> ask
+restrictEnvTo (FV.NameSet m) = asks restrict
   where
     restrict (globals, env) = M.mapMaybeWithKey keep env
       where
@@ -230,25 +229,29 @@ restrictEnvTo (FV.NameSet m) = restrict <$> ask
 -- the current Env as well as the set of globally defined dynamic
 -- functions.  This is used to avoid unnecessarily large closure
 -- environments.
-newtype DefM a = DefM (RWS (S.Set VName, Env) (Seq.Seq ValBind) VNameSource a)
+newtype DefM a
+  = DefM (ReaderT (S.Set VName, Env) (State ([ValBind], VNameSource)) a)
   deriving
     ( Functor,
       Applicative,
       Monad,
       MonadReader (S.Set VName, Env),
-      MonadWriter (Seq.Seq ValBind),
-      MonadFreshNames
+      MonadState ([ValBind], VNameSource)
     )
+
+instance MonadFreshNames DefM where
+  putNameSource src = modify $ \(x, _) -> (x, src)
+  getNameSource = gets snd
 
 -- | Run a computation in the defunctionalization monad. Returns the result of
 -- the computation, a new name source, and a list of lifted function declations.
-runDefM :: VNameSource -> DefM a -> (a, VNameSource, Seq.Seq ValBind)
-runDefM src (DefM m) = runRWS m mempty src
+runDefM :: VNameSource -> DefM a -> (a, VNameSource, [ValBind])
+runDefM src (DefM m) =
+  let (x, (vbs, src')) = runState (runReaderT m mempty) (mempty, src)
+   in (x, src', reverse vbs)
 
-collectFuns :: DefM a -> DefM (a, Seq.Seq ValBind)
-collectFuns m = pass $ do
-  (x, decs) <- listen m
-  return ((x, decs), const mempty)
+addValBind :: ValBind -> DefM ()
+addValBind vb = modify $ first (vb :)
 
 -- | Looks up the associated static value for a given name in the environment.
 lookupVar :: StructType -> VName -> DefM StaticVal
@@ -1011,7 +1014,7 @@ envFromDimNames = M.fromList . flip zip (repeat d)
 -- | Create a new top-level value declaration with the given function name,
 -- return type, list of parameters, and body expression.
 liftValDec :: VName -> PatternType -> [VName] -> [Pattern] -> Exp -> DefM ()
-liftValDec fname rettype dims pats body = tell $ Seq.singleton dec
+liftValDec fname rettype dims pats body = addValBind dec
   where
     dims' = map (`TypeParamDim` mempty) dims
     -- FIXME: this pass is still not correctly size-preserving, so
@@ -1088,11 +1091,9 @@ typeFromSV :: StaticVal -> PatternType
 typeFromSV (Dynamic tp) =
   tp
 typeFromSV (LambdaSV _ _ _ env) =
-  Scalar $
-    Record $
-      M.fromList $
-        map (bimap (nameFromString . pretty) (typeFromSV . bindingSV)) $
-          M.toList env
+  Scalar . Record . M.fromList $
+    map (bimap (nameFromString . pretty) (typeFromSV . bindingSV)) $
+      M.toList env
 typeFromSV (RecordSV ls) =
   let ts = map (fmap typeFromSV) ls
    in Scalar $ Record $ M.fromList ts
@@ -1171,13 +1172,7 @@ updatePattern (RecordPattern ps loc) (RecordSV svs)
   | ps' <- sortOn fst ps,
     svs' <- sortOn fst svs =
     RecordPattern
-      ( zipWith
-          ( \(n, p) (_, sv) ->
-              (n, updatePattern p sv)
-          )
-          ps'
-          svs'
-      )
+      (zipWith (\(n, p) (_, sv) -> (n, updatePattern p sv)) ps' svs')
       loc
 updatePattern (PatternParens pat loc) sv =
   PatternParens (updatePattern pat sv) loc
@@ -1248,9 +1243,14 @@ defuncValBind valbind@(ValBind _ name retdecl (Info (rettype, retext)) tparams p
         ++ "but the defunctionaliser expects a monomorphic input program."
   (tparams', params', body', sv) <-
     defuncLet (map typeParamName tparams) params body rettype
-  let rettype' = combineTypeShapes rettype $ anySizes $ toStruct $ typeOf body'
   globals <- asks fst
-  let bound_sizes = S.fromList tparams' <> globals
+  let bound_sizes = foldMap patternNames params' <> S.fromList tparams' <> globals
+      rettype' =
+        -- FIXME: dubious that we cannot assume that all sizes in the
+        -- body are in scope.  This is because when we insert
+        -- applications of lifted functions, we don't properly update
+        -- the types in the return type annotation.
+        combineTypeShapes rettype $ first (anyDimIfNotBound bound_sizes) $ toStruct $ typeOf body'
   (missing_dims, params'') <- sizesForAll bound_sizes params'
   return
     ( valbind
@@ -1269,30 +1269,28 @@ defuncValBind valbind@(ValBind _ name retdecl (Info (rettype, retext)) tparams p
         },
       M.singleton name $
         Binding
-          ( Just
-              ( first
-                  (map typeParamName)
-                  (valBindTypeScheme valbind)
-              )
-          )
+          (Just (first (map typeParamName) (valBindTypeScheme valbind)))
           sv,
       case sv of
         DynamicFun {} -> True
         Dynamic {} -> True
         _ -> False
     )
+  where
+    anyDimIfNotBound bound_sizes (NamedDim v)
+      | qualLeaf v `S.notMember` bound_sizes = AnyDim $ Just $ qualLeaf v
+    anyDimIfNotBound _ d = d
 
 -- | Defunctionalize a list of top-level declarations.
-defuncVals :: [ValBind] -> DefM (Seq.Seq ValBind)
-defuncVals [] = return mempty
+defuncVals :: [ValBind] -> DefM ()
+defuncVals [] = pure ()
 defuncVals (valbind : ds) = do
-  ((valbind', env, dyn), defs) <- collectFuns $ defuncValBind valbind
-  ds' <-
-    localEnv env $
-      if dyn
-        then isGlobal (valBindName valbind') $ defuncVals ds
-        else defuncVals ds
-  return $ defs <> Seq.singleton valbind' <> ds'
+  (valbind', env, dyn) <- defuncValBind valbind
+  addValBind valbind'
+  localEnv env $
+    if dyn
+      then isGlobal (valBindName valbind') $ defuncVals ds
+      else defuncVals ds
 
 {-# NOINLINE transformProg #-}
 
@@ -1301,5 +1299,5 @@ defuncVals (valbind : ds) = do
 -- resulting list of declarations.
 transformProg :: MonadFreshNames m => [ValBind] -> m [ValBind]
 transformProg decs = modifyNameSource $ \namesrc ->
-  let (decs', namesrc', liftedDecs) = runDefM namesrc $ defuncVals decs
-   in (toList $ liftedDecs <> decs', namesrc')
+  let ((), namesrc', decs') = runDefM namesrc $ defuncVals decs
+   in (decs', namesrc')

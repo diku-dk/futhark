@@ -39,6 +39,8 @@ module Futhark.Util
     lgammaf,
     tgamma,
     tgammaf,
+    hypot,
+    hypotf,
     fromPOSIX,
     toPOSIX,
     trim,
@@ -48,22 +50,30 @@ module Futhark.Util
     EncodedString,
     zEncodeString,
     atMostChars,
+    invertMap,
   )
 where
 
+import Control.Arrow (first)
 import Control.Concurrent
 import Control.Exception
 import Control.Monad
 import qualified Data.ByteString as BS
 import Data.Char
 import Data.Either
+import Data.Function ((&))
 import Data.List (foldl', genericDrop, genericSplitAt, sort)
 import qualified Data.List.NonEmpty as NE
+import Data.Map (Map)
+import qualified Data.Map as Map
 import Data.Maybe
+import Data.Set (Set)
+import qualified Data.Set as Set
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import qualified Data.Text.Encoding.Error as T
 import qualified Data.Text.IO as T
+import Data.Tuple (swap)
 import Numeric
 import qualified System.Directory.Tree as Dir
 import System.Environment
@@ -278,6 +288,18 @@ tgamma = c_tgamma
 tgammaf :: Float -> Float
 tgammaf = c_tgammaf
 
+foreign import ccall "hypot" c_hypot :: Double -> Double -> Double
+
+foreign import ccall "hypotf" c_hypotf :: Float -> Float -> Float
+
+-- | The system-level @hypot@ function.
+hypot :: Double -> Double -> Double
+hypot = c_hypot
+
+-- | The system-level @hypotf@ function.
+hypotf :: Float -> Float -> Float
+hypotf = c_hypotf
+
 -- | Turn a POSIX filepath into a filepath for the native system.
 toPOSIX :: Native.FilePath -> Posix.FilePath
 toPOSIX = Posix.joinPath . Native.splitDirectories
@@ -417,3 +439,9 @@ atMostChars :: Int -> String -> String
 atMostChars n s
   | length s > n = take (n -3) s ++ "..."
   | otherwise = s
+
+invertMap :: (Ord v, Ord k) => Map k v -> Map v (Set k)
+invertMap m =
+  Map.toList m
+    & fmap (swap . first Set.singleton)
+    & foldr (uncurry $ Map.insertWith (<>)) mempty

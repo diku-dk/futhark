@@ -40,7 +40,7 @@ seqLoopStm (SeqLoop _ pat merge form body) =
   Let pat (defAux ()) $ DoLoop [] merge form body
 
 interchangeLoop ::
-  (MonadBinder m, LocalScope SOACS m) =>
+  (MonadBuilder m, LocalScope SOACS m) =>
   (VName -> Maybe VName) ->
   SeqLoop ->
   LoopNesting ->
@@ -68,7 +68,7 @@ interchangeLoop
     -- it is not used anymore.  This might happen if the parameter was
     -- used just as the inital value of a merge parameter.
     ((params', arrs'), pre_copy_bnds) <-
-      runBinder $
+      runBuilder $
         localScope (scopeOfLParams new_params) $
           unzip . catMaybes <$> mapM copyOrRemoveParam params_and_arrs
 
@@ -122,7 +122,7 @@ interchangeLoops ::
   m (Stms SOACS)
 interchangeLoops nest loop = do
   (loop', bnds) <-
-    runBinder $
+    runBuilder $
       foldM (interchangeLoop isMapParameter) loop $
         reverse $ kernelNestLoops nest
   return $ bnds <> oneStm (seqLoopStm loop')
@@ -139,7 +139,7 @@ branchStm (Branch _ pat cond tbranch fbranch ret) =
   Let pat (defAux ()) $ If cond tbranch fbranch ret
 
 interchangeBranch1 ::
-  (MonadBinder m) =>
+  (MonadBuilder m) =>
   Branch ->
   LoopNesting ->
   m Branch
@@ -174,7 +174,7 @@ interchangeBranch ::
   m (Stms SOACS)
 interchangeBranch nest loop = do
   (loop', bnds) <-
-    runBinder $ foldM interchangeBranch1 loop $ reverse $ kernelNestLoops nest
+    runBuilder $ foldM interchangeBranch1 loop $ reverse $ kernelNestLoops nest
   return $ bnds <> oneStm (branchStm loop')
 
 data WithAccStm
@@ -185,7 +185,7 @@ withAccStm (WithAccStm _ pat inputs lam) =
   Let pat (defAux ()) $ WithAcc inputs lam
 
 interchangeWithAcc1 ::
-  (MonadBinder m, Lore m ~ SOACS) =>
+  (MonadBuilder m, Rep m ~ SOACS) =>
   WithAccStm ->
   LoopNesting ->
   m WithAccStm
@@ -193,21 +193,30 @@ interchangeWithAcc1
   (WithAccStm perm _withacc_pat inputs acc_lam)
   (MapNesting map_pat map_aux w params_and_arrs) = do
     inputs' <- mapM onInput inputs
-    let lam_params = lambdaParams acc_lam
+    lam_params' <- newAccLamParams $ lambdaParams acc_lam
     iota_p <- newParam "iota_p" $ Prim int64
-    acc_lam' <- trLam (Var (paramName iota_p)) <=< mkLambda lam_params $ do
+    acc_lam' <- trLam (Var (paramName iota_p)) <=< mkLambda lam_params' $ do
+      let acc_params = drop (length inputs) lam_params'
+          orig_acc_params = drop (length inputs) $ lambdaParams acc_lam
       iota_w <-
         letExp "acc_inter_iota" . BasicOp $
           Iota w (intConst Int64 0) (intConst Int64 1) Int64
       let (params, arrs) = unzip params_and_arrs
           maplam_ret = lambdaReturnType acc_lam
-          maplam = Lambda (iota_p : params) (lambdaBody acc_lam) maplam_ret
+          maplam = Lambda (iota_p : orig_acc_params ++ params) (lambdaBody acc_lam) maplam_ret
       auxing map_aux . letTupExp' "withacc_inter" $
-        Op $ Screma w (iota_w : arrs) (mapSOAC maplam)
+        Op $ Screma w (iota_w : map paramName acc_params ++ arrs) (mapSOAC maplam)
     let pat = Pattern [] $ rearrangeShape perm $ patternValueElements map_pat
         perm' = [0 .. patternSize pat -1]
     pure $ WithAccStm perm' pat inputs' acc_lam'
     where
+      newAccLamParams ps = do
+        let (cert_ps, acc_ps) = splitAt (length ps `div` 2) ps
+        -- Should not rename the certificates.
+        acc_ps' <- forM acc_ps $ \(Param v t) ->
+          newParam (baseString v) t
+        pure $ cert_ps <> acc_ps'
+
       num_accs = length inputs
       acc_certs = map paramName $ take num_accs $ lambdaParams acc_lam
       onArr v =
@@ -275,5 +284,5 @@ interchangeWithAcc ::
   m (Stms SOACS)
 interchangeWithAcc nest withacc = do
   (withacc', stms) <-
-    runBinder $ foldM interchangeWithAcc1 withacc $ reverse $ kernelNestLoops nest
+    runBuilder $ foldM interchangeWithAcc1 withacc $ reverse $ kernelNestLoops nest
   return $ stms <> oneStm (withAccStm withacc')

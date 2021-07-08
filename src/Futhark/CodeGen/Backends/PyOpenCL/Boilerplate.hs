@@ -26,7 +26,7 @@ import Futhark.CodeGen.ImpCode.OpenCL
     untyped,
   )
 import Futhark.CodeGen.OpenCL.Heuristics
-import Futhark.Util.Pretty (prettyText)
+import Futhark.Util.Pretty (pretty, prettyText)
 import NeatInterpolation (text)
 
 errorMsgNumArgs :: ErrorMsg a -> Int

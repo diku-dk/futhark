@@ -41,7 +41,7 @@ import Futhark.IR.SOACS
 import Futhark.MonadFreshNames
 import qualified Futhark.Optimise.Simplify as Simplify
 import qualified Futhark.Optimise.Simplify.Engine as Engine
-import Futhark.Optimise.Simplify.Lore
+import Futhark.Optimise.Simplify.Rep
 import Futhark.Optimise.Simplify.Rule
 import Futhark.Optimise.Simplify.Rules
 import Futhark.Optimise.Simplify.Rules.ClosedForm
@@ -93,8 +93,8 @@ simplifyConsts =
   Simplify.simplifyStms simpleSOACS soacRules Engine.noExtraHoistBlockers mempty
 
 simplifySOAC ::
-  Simplify.SimplifiableLore lore =>
-  Simplify.SimplifyOp lore (SOAC lore)
+  Simplify.SimplifiableRep rep =>
+  Simplify.SimplifyOp rep (SOAC rep)
 simplifySOAC (Stream outerdim arr form nes lam) = do
   outerdim' <- Engine.simplify outerdim
   (form', form_hoisted) <- simplifyStreamForm form
@@ -152,15 +152,15 @@ simplifySOAC (Screma w arrs (ScremaForm scans reds map_lam)) = do
         )
     <*> pure (mconcat scans_hoisted <> mconcat reds_hoisted <> map_lam_hoisted)
 
-instance BinderOps (Wise SOACS)
+instance BuilderOps (Wise SOACS)
 
 fixLambdaParams ::
-  (MonadBinder m, Bindable (Lore m), BinderOps (Lore m)) =>
-  AST.Lambda (Lore m) ->
+  (MonadBuilder m, Buildable (Rep m), BuilderOps (Rep m)) =>
+  AST.Lambda (Rep m) ->
   [Maybe SubExp] ->
-  m (AST.Lambda (Lore m))
+  m (AST.Lambda (Rep m))
 fixLambdaParams lam fixes = do
-  body <- runBodyBinder $
+  body <- runBodyBuilder $
     localScope (scopeOfLParams $ lambdaParams lam) $ do
       zipWithM_ maybeFix (lambdaParams lam) fixes'
       return $ lambdaBody lam
@@ -177,7 +177,7 @@ fixLambdaParams lam fixes = do
     maybeFix p (Just x) = letBindNames [paramName p] $ BasicOp $ SubExp x
     maybeFix _ Nothing = return ()
 
-removeLambdaResults :: [Bool] -> AST.Lambda lore -> AST.Lambda lore
+removeLambdaResults :: [Bool] -> AST.Lambda rep -> AST.Lambda rep
 removeLambdaResults keep lam =
   lam
     { lambdaBody = lam_body',
@@ -193,11 +193,11 @@ removeLambdaResults keep lam =
 soacRules :: RuleBook (Wise SOACS)
 soacRules = standardRules <> ruleBook topDownRules bottomUpRules
 
--- | Does this lore contain 'SOAC's in its t'Op's?  A lore must be an
+-- | Does this rep contain 'SOAC's in its t'Op's?  A rep must be an
 -- instance of this class for the simplification rules to work.
-class HasSOAC lore where
-  asSOAC :: Op lore -> Maybe (SOAC lore)
-  soacOp :: SOAC lore -> Op lore
+class HasSOAC rep where
+  asSOAC :: Op rep -> Maybe (SOAC rep)
+  soacOp :: SOAC rep -> Op rep
 
 instance HasSOAC (Wise SOACS) where
   asSOAC = Just
@@ -256,11 +256,11 @@ hoistCertificates _ _ _ _ =
   Skip
 
 liftIdentityMapping ::
-  forall lore.
-  (Bindable lore, Simplify.SimplifiableLore lore, HasSOAC (Wise lore)) =>
-  TopDownRuleOp (Wise lore)
+  forall rep.
+  (Buildable rep, Simplify.SimplifiableRep rep, HasSOAC (Wise rep)) =>
+  TopDownRuleOp (Wise rep)
 liftIdentityMapping _ pat aux op
-  | Just (Screma w arrs form :: SOAC (Wise lore)) <- asSOAC op,
+  | Just (Screma w arrs form :: SOAC (Wise rep)) <- asSOAC op,
     Just fun <- isMapSOAC form = do
     let inputMap = M.fromList $ zip (map paramName $ lambdaParams fun) arrs
         free = freeIn $ lambdaBody fun
@@ -339,8 +339,8 @@ liftIdentityStreaming _ _ _ _ = Skip
 -- | Remove all arguments to the map that are simply replicates.
 -- These can be turned into free variables instead.
 removeReplicateMapping ::
-  (Bindable lore, Simplify.SimplifiableLore lore, HasSOAC (Wise lore)) =>
-  TopDownRuleOp (Wise lore)
+  (Buildable rep, Simplify.SimplifiableRep rep, HasSOAC (Wise rep)) =>
+  TopDownRuleOp (Wise rep)
 removeReplicateMapping vtable pat aux op
   | Just (Screma w arrs form) <- asSOAC op,
     Just fun <- isMapSOAC form,
@@ -358,13 +358,13 @@ removeReplicateWrite vtable pat aux (Scatter len lam ivs as)
 removeReplicateWrite _ _ _ _ = Skip
 
 removeReplicateInput ::
-  Aliased lore =>
-  ST.SymbolTable lore ->
-  AST.Lambda lore ->
+  Aliased rep =>
+  ST.SymbolTable rep ->
+  AST.Lambda rep ->
   [VName] ->
   Maybe
-    ( [([VName], Certificates, AST.Exp lore)],
-      AST.Lambda lore,
+    ( [([VName], Certificates, AST.Exp rep)],
+      AST.Lambda rep,
       [VName]
     )
 removeReplicateInput vtable fun arrs
@@ -659,8 +659,8 @@ simplifyClosedFormReduce _ _ _ _ = Skip
 
 -- For now we just remove singleton SOACs.
 simplifyKnownIterationSOAC ::
-  (Bindable lore, Simplify.SimplifiableLore lore, HasSOAC (Wise lore)) =>
-  TopDownRuleOp (Wise lore)
+  (Buildable rep, Simplify.SimplifiableRep rep, HasSOAC (Wise rep)) =>
+  TopDownRuleOp (Wise rep)
 simplifyKnownIterationSOAC _ pat _ op
   | Just (Screma (Constant k) arrs (ScremaForm scans reds map_lam)) <- asSOAC op,
     oneIsh k = Simplify $ do

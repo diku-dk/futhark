@@ -27,6 +27,7 @@ import qualified Data.Vector.Storable as SVec
 import qualified Data.Vector.Storable.ByteString as SVec
 import Data.Void
 import Data.Word (Word32, Word8)
+import Futhark.Data
 import Futhark.Script
 import Futhark.Server
 import Futhark.Test
@@ -345,19 +346,19 @@ vecToBMP h w = BMP.renderBMP . BMP.packRGBA32ToBMP24 w h . SVec.vectorToByteStri
        in fromIntegral c :: Word8
 
 valueToBMP :: Value -> Maybe LBS.ByteString
-valueToBMP v@(Word32Value _ bytes)
+valueToBMP v@(U32Value _ bytes)
   | [h, w] <- valueShape v =
     Just $ vecToBMP h w bytes
-valueToBMP v@(Int32Value _ bytes)
+valueToBMP v@(I32Value _ bytes)
   | [h, w] <- valueShape v =
     Just $ vecToBMP h w $ SVec.map fromIntegral bytes
-valueToBMP v@(Float32Value _ bytes)
+valueToBMP v@(F32Value _ bytes)
   | [h, w] <- valueShape v =
     Just $ vecToBMP h w $ greyFloatToImg bytes
-valueToBMP v@(Word8Value _ bytes)
+valueToBMP v@(U8Value _ bytes)
   | [h, w] <- valueShape v =
     Just $ vecToBMP h w $ greyByteToImg bytes
-valueToBMP v@(Float64Value _ bytes)
+valueToBMP v@(F64Value _ bytes)
   | [h, w] <- valueShape v =
     Just $ vecToBMP h w $ greyFloatToImg bytes
 valueToBMP v@(BoolValue _ bytes)
@@ -454,7 +455,7 @@ loadBMP bmpfile = do
                 b = fromIntegral $ bmp_bs `BS.index` (l' * 4 + 2)
                 a = fromIntegral $ bmp_bs `BS.index` (l' * 4 + 3)
              in (a `shiftL` 24) .|. (r `shiftL` 16) .|. (g `shiftL` 8) .|. b
-      pure $ ValueAtom $ Word32Value shape $ SVec.generate (w * h) pix
+      pure $ ValueAtom $ U32Value shape $ SVec.generate (w * h) pix
 
 loadImage :: FilePath -> ScriptM (Compound Value)
 loadImage imgfile =
@@ -851,7 +852,7 @@ main = mainWithOptions initialOptions commandLineOptions "program" $ \args opts 
       script <- parseProgFile prog
 
       unless (scriptSkipCompilation opts) $ do
-        let entryOpt v = "--entry=" ++ T.unpack v
+        let entryOpt v = "--entry-point=" ++ T.unpack v
             compile_options =
               "--server" :
               map entryOpt (S.toList (varsInScripts script))
@@ -878,8 +879,9 @@ main = mainWithOptions initialOptions commandLineOptions "program" $ \args opts 
       let mdfile = fromMaybe (prog `replaceExtension` "md") $ scriptOutput opts
           imgdir = dropExtension mdfile <> "-img"
           run_options = scriptExtraOptions opts
+          cfg = futharkServerCfg ("." </> dropExtension prog) run_options
 
-      withScriptServer ("." </> dropExtension prog) run_options $ \server -> do
+      withScriptServer cfg $ \server -> do
         let env =
               Env
                 { envServer = server,

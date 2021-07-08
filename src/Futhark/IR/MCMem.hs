@@ -24,12 +24,12 @@ import Futhark.IR.Mem.Simplify
 import Futhark.IR.SegOp
 import qualified Futhark.Optimise.Simplify.Engine as Engine
 import Futhark.Pass
-import Futhark.Pass.ExplicitAllocations (BinderOps (..), mkLetNamesB', mkLetNamesB'')
+import Futhark.Pass.ExplicitAllocations (BuilderOps (..), mkLetNamesB', mkLetNamesB'')
 import qualified Futhark.TypeCheck as TC
 
 data MCMem
 
-instance Decorations MCMem where
+instance RepTypes MCMem where
   type LetDec MCMem = LetDecMem
   type FParamInfo MCMem = FParamMem
   type LParamInfo MCMem = LParamMem
@@ -37,7 +37,7 @@ instance Decorations MCMem where
   type BranchType MCMem = BranchTypeMem
   type Op MCMem = MemOp (MCOp MCMem ())
 
-instance ASTLore MCMem where
+instance ASTRep MCMem where
   expTypesFromPattern = return . map snd . snd . bodyReturnsFromPattern
 
 instance OpReturns MCMem where
@@ -45,7 +45,7 @@ instance OpReturns MCMem where
   opReturns (Inner (ParOp _ op)) = segOpReturns op
   opReturns (Inner (OtherOp ())) = pure []
 
-instance PrettyLore MCMem
+instance PrettyRep MCMem
 
 instance TC.CheckableOp MCMem where
   checkOp = typeCheckMemoryOp
@@ -56,9 +56,9 @@ instance TC.CheckableOp MCMem where
         typeCheckMCOp pure op
 
 instance TC.Checkable MCMem where
-  checkFParamLore = checkMemInfo
-  checkLParamLore = checkMemInfo
-  checkLetBoundLore = checkMemInfo
+  checkFParamDec = checkMemInfo
+  checkLParamDec = checkMemInfo
+  checkLetBoundDec = checkMemInfo
   checkRetType = mapM_ (TC.checkExtType . declExtTypeOf)
   primFParam name t = return $ Param name (MemPrim t)
   matchPattern = matchPatternToExp
@@ -66,12 +66,12 @@ instance TC.Checkable MCMem where
   matchBranchType = matchBranchReturnType
   matchLoopResult = matchLoopResultMem
 
-instance BinderOps MCMem where
+instance BuilderOps MCMem where
   mkExpDecB _ _ = return ()
   mkBodyB stms res = return $ Body () stms res
   mkLetNamesB = mkLetNamesB' ()
 
-instance BinderOps (Engine.Wise MCMem) where
+instance BuilderOps (Engine.Wise MCMem) where
   mkExpDecB pat e = return $ Engine.mkWiseExpDec pat () e
   mkBodyB stms res = return $ Engine.mkWiseBody () stms res
   mkLetNamesB = mkLetNamesB''

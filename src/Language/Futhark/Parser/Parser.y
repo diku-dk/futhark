@@ -822,12 +822,12 @@ LoopForm : for VarId '<' Exp
          | while Exp
            { While $2 }
 
-VarSlice :: { ((Name, SrcLoc), [UncheckedDimIndex], SrcLoc) }
+VarSlice :: { ((Name, SrcLoc), UncheckedSlice, SrcLoc) }
           : 'id[' DimIndices ']'
             { let L vloc (INDEXING v) = $1
               in ((v, vloc), $2, srcspan $1 $>) }
 
-QualVarSlice :: { ((QualName Name, SrcLoc), [UncheckedDimIndex], SrcLoc) }
+QualVarSlice :: { ((QualName Name, SrcLoc), UncheckedSlice, SrcLoc) }
               : VarSlice
                 { let ((v, vloc), y, loc) = $1 in ((qualName v, vloc), y, loc) }
               | 'qid[' DimIndices ']'

@@ -14,7 +14,7 @@ import Control.Monad.Writer
 import Data.List ()
 import Futhark.Analysis.PrimExp
 import Futhark.IR
-import Futhark.IR.Kernels hiding
+import Futhark.IR.GPU hiding
   ( BasicOp,
     Body,
     Exp,
@@ -30,7 +30,7 @@ import Futhark.IR.Kernels hiding
   )
 import Futhark.MonadFreshNames
 import Futhark.Pass.ExtractKernels.BlockedKernel
-import Futhark.Pass.ExtractKernels.ToKernels
+import Futhark.Pass.ExtractKernels.ToGPU
 import Futhark.Tools
 import Prelude hiding (quot)
 
@@ -43,7 +43,7 @@ data KernelSize = KernelSize
   deriving (Eq, Ord, Show)
 
 numberOfGroups ::
-  (MonadBinder m, Op (Lore m) ~ HostOp (Lore m) inner) =>
+  (MonadBuilder m, Op (Rep m) ~ HostOp (Rep m) inner) =>
   String ->
   SubExp ->
   SubExp ->
@@ -59,7 +59,7 @@ numberOfGroups desc w group_size = do
   return (num_groups, num_threads)
 
 blockedKernelSize ::
-  (MonadBinder m, Lore m ~ Kernels) =>
+  (MonadBuilder m, Rep m ~ GPU) =>
   String ->
   SubExp ->
   m KernelSize
@@ -75,7 +75,7 @@ blockedKernelSize desc w = do
   return $ KernelSize per_thread_elements num_threads
 
 splitArrays ::
-  (MonadBinder m, Lore m ~ Kernels) =>
+  (MonadBuilder m, Rep m ~ GPU) =>
   VName ->
   [VName] ->
   SplitOrdering ->
@@ -113,12 +113,12 @@ partitionChunkedKernelFoldParameters _ _ =
   error "partitionChunkedKernelFoldParameters: lambda takes too few parameters"
 
 blockedPerThread ::
-  (MonadBinder m, Lore m ~ Kernels) =>
+  (MonadBuilder m, Rep m ~ GPU) =>
   VName ->
   SubExp ->
   KernelSize ->
   StreamOrd ->
-  Lambda (Lore m) ->
+  Lambda (Rep m) ->
   Int ->
   [VName] ->
   m ([PatElemT Type], [PatElemT Type])
@@ -172,8 +172,8 @@ blockedPerThread thread_gtid w kernel_size ordering lam num_nonconcat arrs = do
 kerneliseLambda ::
   MonadFreshNames m =>
   [SubExp] ->
-  Lambda Kernels ->
-  m (Lambda Kernels)
+  Lambda GPU ->
+  m (Lambda GPU)
 kerneliseLambda nes lam = do
   thread_index <- newVName "thread_index"
   let thread_index_param = Param thread_index $ Prim int64
@@ -197,15 +197,15 @@ kerneliseLambda nes lam = do
       }
 
 prepareStream ::
-  (MonadBinder m, Lore m ~ Kernels) =>
+  (MonadBuilder m, Rep m ~ GPU) =>
   KernelSize ->
   [(VName, SubExp)] ->
   SubExp ->
   Commutativity ->
-  Lambda Kernels ->
+  Lambda GPU ->
   [SubExp] ->
   [VName] ->
-  m (SubExp, SegSpace, [Type], KernelBody Kernels)
+  m (SubExp, SegSpace, [Type], KernelBody GPU)
 prepareStream size ispace w comm fold_lam nes arrs = do
   let (KernelSize elems_per_thread num_threads) = size
   let (ordering, split_ordering) =
@@ -218,7 +218,7 @@ prepareStream size ispace w comm fold_lam nes arrs = do
   gtid <- newVName "gtid"
   space <- mkSegSpace $ ispace ++ [(gtid, num_threads)]
   kbody <- fmap (uncurry (flip (KernelBody ()))) $
-    runBinder $
+    runBuilder $
       localScope (scopeOfSegSpace space) $ do
         (chunk_red_pes, chunk_map_pes) <-
           blockedPerThread gtid w size ordering fold_lam' (length nes) arrs
@@ -235,17 +235,17 @@ prepareStream size ispace w comm fold_lam nes arrs = do
   return (num_threads, space, ts, kbody)
 
 streamRed ::
-  (MonadFreshNames m, HasScope Kernels m) =>
-  MkSegLevel Kernels m ->
-  Pattern Kernels ->
+  (MonadFreshNames m, HasScope GPU m) =>
+  MkSegLevel GPU m ->
+  Pattern GPU ->
   SubExp ->
   Commutativity ->
-  Lambda Kernels ->
-  Lambda Kernels ->
+  Lambda GPU ->
+  Lambda GPU ->
   [SubExp] ->
   [VName] ->
-  m (Stms Kernels)
-streamRed mk_lvl pat w comm red_lam fold_lam nes arrs = runBinderT'_ $ do
+  m (Stms GPU)
+streamRed mk_lvl pat w comm red_lam fold_lam nes arrs = runBuilderT'_ $ do
   -- The strategy here is to rephrase the stream reduction as a
   -- non-segmented SegRed that does explicit chunking within its body.
   -- First, figure out how many threads to use for this.
@@ -272,17 +272,17 @@ streamRed mk_lvl pat w comm red_lam fold_lam nes arrs = runBinderT'_ $ do
 
 -- Similar to streamRed, but without the last reduction.
 streamMap ::
-  (MonadFreshNames m, HasScope Kernels m) =>
-  MkSegLevel Kernels m ->
+  (MonadFreshNames m, HasScope GPU m) =>
+  MkSegLevel GPU m ->
   [String] ->
-  [PatElem Kernels] ->
+  [PatElem GPU] ->
   SubExp ->
   Commutativity ->
-  Lambda Kernels ->
+  Lambda GPU ->
   [SubExp] ->
   [VName] ->
-  m ((SubExp, [VName]), Stms Kernels)
-streamMap mk_lvl out_desc mapout_pes w comm fold_lam nes arrs = runBinderT' $ do
+  m ((SubExp, [VName]), Stms GPU)
+streamMap mk_lvl out_desc mapout_pes w comm fold_lam nes arrs = runBuilderT' $ do
   size <- blockedKernelSize "stream_map" w
 
   (threads, kspace, ts, kbody) <- prepareStream size [] w comm fold_lam nes arrs
@@ -301,7 +301,7 @@ streamMap mk_lvl out_desc mapout_pes w comm fold_lam nes arrs = runBinderT' $ do
 -- | Like 'segThread', but cap the thread count to the input size.
 -- This is more efficient for small kernels, e.g. summing a small
 -- array.
-segThreadCapped :: MonadFreshNames m => MkSegLevel Kernels m
+segThreadCapped :: MonadFreshNames m => MkSegLevel GPU m
 segThreadCapped ws desc r = do
   w <-
     letSubExp "nest_size"

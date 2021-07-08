@@ -2,8 +2,7 @@
 {-# LANGUAGE TemplateHaskell #-}
 
 module Futhark.CodeGen.Backends.GenericWASM
-  (
-    runServer,
+  ( runServer,
     GC.CParts (..),
     GC.asLibrary,
     GC.asExecutable,
@@ -11,7 +10,7 @@ module Futhark.CodeGen.Backends.GenericWASM
     JSEntryPoint (..),
     emccExportNames,
     javascriptWrapper,
-    extToString
+    extToString,
   )
 where
 
@@ -25,20 +24,21 @@ import Futhark.IR.Primitive
 import NeatInterpolation (text)
 
 extToString :: Imp.ExternalValue -> String
-extToString (Imp.TransparentValue (Imp.ArrayValue vn _ pt s dimSize)) = concat (replicate (length dimSize) "[]") ++ extToString (Imp.TransparentValue (Imp.ScalarValue pt s vn))
-extToString (Imp.TransparentValue (Imp.ScalarValue (FloatType Float32) _ _)) = "f32"
-extToString (Imp.TransparentValue (Imp.ScalarValue (FloatType Float64) _ _)) = "f64"
-extToString (Imp.TransparentValue (Imp.ScalarValue (IntType Int8) Imp.TypeDirect _)) = "i8"
-extToString (Imp.TransparentValue (Imp.ScalarValue (IntType Int16) Imp.TypeDirect _)) = "i16"
-extToString (Imp.TransparentValue (Imp.ScalarValue (IntType Int32) Imp.TypeDirect _)) = "i32"
-extToString (Imp.TransparentValue (Imp.ScalarValue (IntType Int64) Imp.TypeDirect _)) = "i64"
-extToString (Imp.TransparentValue (Imp.ScalarValue (IntType Int8) Imp.TypeUnsigned _)) = "u8"
-extToString (Imp.TransparentValue (Imp.ScalarValue (IntType Int16) Imp.TypeUnsigned _)) = "u16"
-extToString (Imp.TransparentValue (Imp.ScalarValue (IntType Int32) Imp.TypeUnsigned _)) = "u32"
-extToString (Imp.TransparentValue (Imp.ScalarValue (IntType Int64) Imp.TypeUnsigned _)) = "u64"
-extToString (Imp.TransparentValue (Imp.ScalarValue Bool _ _)) = "bool"
-extToString (Imp.OpaqueValue oname vds) = opaqueName oname vds
-extToString _ = "Not Reached"
+extToString (Imp.TransparentValue u (Imp.ArrayValue vn _ pt s dimSize)) =
+  concat (replicate (length dimSize) "[]") ++ extToString (Imp.TransparentValue u (Imp.ScalarValue pt s vn))
+extToString (Imp.TransparentValue _ (Imp.ScalarValue (FloatType Float32) _ _)) = "f32"
+extToString (Imp.TransparentValue _ (Imp.ScalarValue (FloatType Float64) _ _)) = "f64"
+extToString (Imp.TransparentValue _ (Imp.ScalarValue (IntType Int8) Imp.TypeDirect _)) = "i8"
+extToString (Imp.TransparentValue _ (Imp.ScalarValue (IntType Int16) Imp.TypeDirect _)) = "i16"
+extToString (Imp.TransparentValue _ (Imp.ScalarValue (IntType Int32) Imp.TypeDirect _)) = "i32"
+extToString (Imp.TransparentValue _ (Imp.ScalarValue (IntType Int64) Imp.TypeDirect _)) = "i64"
+extToString (Imp.TransparentValue _ (Imp.ScalarValue (IntType Int8) Imp.TypeUnsigned _)) = "u8"
+extToString (Imp.TransparentValue _ (Imp.ScalarValue (IntType Int16) Imp.TypeUnsigned _)) = "u16"
+extToString (Imp.TransparentValue _ (Imp.ScalarValue (IntType Int32) Imp.TypeUnsigned _)) = "u32"
+extToString (Imp.TransparentValue _ (Imp.ScalarValue (IntType Int64) Imp.TypeUnsigned _)) = "u64"
+extToString (Imp.TransparentValue _ (Imp.ScalarValue Bool _ _)) = "bool"
+extToString (Imp.OpaqueValue _ oname vds) = opaqueName oname vds
+extToString ev = error $ "extToString: missing case: " ++ show ev
 
 type EntryPointTyp = String
 
@@ -57,9 +57,12 @@ emccExportNames jses =
     ++ map (\arg -> "'" ++ gfn "values_raw" arg ++ "'") arrays
     ++ map (\arg -> "'" ++ gfn "values" arg ++ "'") arrays
     ++ map (\arg -> "'" ++ "_futhark_free_" ++ arg ++ "'") opaques
-    ++ ["_futhark_context_config_new", "_futhark_context_config_free",
-        "_futhark_context_new", "_futhark_context_free",
-        "_futhark_context_get_error"]
+    ++ [ "_futhark_context_config_new",
+         "_futhark_context_config_free",
+         "_futhark_context_new",
+         "_futhark_context_free",
+         "_futhark_context_get_error"
+       ]
   where
     arrays = filter isArray typs
     opaques = filter isOpaque typs
@@ -68,13 +71,13 @@ emccExportNames jses =
 
 javascriptWrapper :: [JSEntryPoint] -> String
 javascriptWrapper entryPoints =
-  unlines [
-    jsServer,
-    jsValues,
-    classFutharkOpaque,
-    classFutharkArray,
-    classFutharkContext entryPoints
-  ]
+  unlines
+    [ jsServer,
+      jsValues,
+      classFutharkOpaque,
+      classFutharkArray,
+      classFutharkContext entryPoints
+    ]
 
 jsServer :: String
 jsServer = $(embedStringFile "rts/javascript/server.js")
@@ -139,17 +142,17 @@ classFutharkArray =
 
 classFutharkContext :: [JSEntryPoint] -> String
 classFutharkContext entryPoints =
-  unlines [
-    classDef,
-    constructor entryPoints,
-    getFreeFun,
-    getEntryPointsFun,
-    getErrorFun,
-    unlines $ map toFutharkArray arrays,
-    unlines $ map jsWrapEntryPoint entryPoints,
-    endClassDef,
-    "Module['FutharkContext'] = FutharkContext;"
-  ]
+  unlines
+    [ classDef,
+      constructor entryPoints,
+      getFreeFun,
+      getEntryPointsFun,
+      getErrorFun,
+      unlines $ map toFutharkArray arrays,
+      unlines $ map jsWrapEntryPoint entryPoints,
+      endClassDef,
+      "Module['FutharkContext'] = FutharkContext;"
+    ]
   where
     arrays = filter isArray typs
     typs = nub $ concatMap (\jse -> parameters jse ++ ret jse) entryPoints
@@ -245,37 +248,37 @@ jsWrapEntryPoint jse =
     paramsToPtr = unlines $ filter ("" /=) [arrayPointer ("in" ++ show i) $ parameters jse !! i | i <- alp]
 
     alr = [0 .. length (ret jse) - 1]
-    outparams = intercalate ", " [show $ typeSize $ ret jse !! i | i  <- alr]
+    outparams = intercalate ", " [show $ typeSize $ ret jse !! i | i <- alr]
     results = unlines [makeResult i $ ret jse !! i | i <- alr]
     res_array = intercalate ", " ["result" ++ show i | i <- alr]
-    res = if length (ret jse) == 1 then "result0" else ("[" ++ res_array ++ "]")
+    res = if length (ret jse) == 1 then "result0" else "[" ++ res_array ++ "]"
 
 maybeDerefence :: String -> String -> String
 maybeDerefence arg typ =
-  if isScalar typ then arg else (arg ++ ".ptr")
+  if isScalar typ then arg else arg ++ ".ptr"
 
 arrayPointer :: String -> String -> String
 arrayPointer arg typ =
   if isArray typ
-  then "  if (" ++ arg ++ " instanceof Array) { " ++ reassign ++ "; to_free.push(" ++ arg ++ "); }"
-  else ""
+    then "  if (" ++ arg ++ " instanceof Array) { " ++ reassign ++ "; to_free.push(" ++ arg ++ "); }"
+    else ""
   where
     reassign = arg ++ " = this.new_" ++ signature ++ "_from_jsarray(" ++ arg ++ ")"
-    signature = baseType typ  ++ "_" ++ show (dim typ) ++ "d"
+    signature = baseType typ ++ "_" ++ show (dim typ) ++ "d"
 
 makeResult :: Int -> String -> String
 makeResult i typ =
-  "  var result" ++ show i ++ " = " ++
-    if isArray typ
-    then "this.new_" ++ signature ++ "_from_ptr(" ++ readout ++ ");"
-    else
-      if isOpaque typ
-      then "new FutharkOpaque(this.ctx, " ++ readout ++ ", _futhark_free_" ++ typ ++ ");"
-      else readout ++ if typ == "bool" then "!==0;" else ";"
+  "  var result" ++ show i ++ " = "
+    ++ if isArray typ
+      then "this.new_" ++ signature ++ "_from_ptr(" ++ readout ++ ");"
+      else
+        if isOpaque typ
+          then "new FutharkOpaque(this.ctx, " ++ readout ++ ", _futhark_free_" ++ typ ++ ");"
+          else readout ++ if typ == "bool" then "!==0;" else ";"
   where
     res = "out[" ++ show i ++ "]"
     readout = typeHeap typ ++ "[" ++ res ++ " >> " ++ show (typeShift typ) ++ "]"
-    signature = baseType typ  ++ "_" ++ show (dim typ) ++ "d"
+    signature = baseType typ ++ "_" ++ show (dim typ) ++ "d"
 
 baseType :: String -> String
 baseType ('[' : ']' : end) = baseType end
@@ -297,70 +300,71 @@ isScalar typ = not (isArray typ || isOpaque typ)
 typeSize :: String -> Integer
 typeSize typ =
   case typ of
-    "i8"   -> 1
-    "i16"  -> 2
-    "i32"  -> 4
-    "i64"  -> 8
-    "u8"   -> 1
-    "u16"  -> 2
-    "u32"  -> 4
-    "u64"  -> 8
-    "f32"  -> 4
-    "f64"  -> 8
+    "i8" -> 1
+    "i16" -> 2
+    "i32" -> 4
+    "i64" -> 8
+    "u8" -> 1
+    "u16" -> 2
+    "u32" -> 4
+    "u64" -> 8
+    "f32" -> 4
+    "f64" -> 8
     "bool" -> 1
-    _      -> 4
+    _ -> 4
 
 typeShift :: String -> Integer
 typeShift typ =
   case typ of
-    "i8"   -> 0
-    "i16"  -> 1
-    "i32"  -> 2
-    "i64"  -> 3
-    "u8"   -> 0
-    "u16"  -> 1
-    "u32"  -> 2
-    "u64"  -> 3
-    "f32"  -> 2
-    "f64"  -> 3
+    "i8" -> 0
+    "i16" -> 1
+    "i32" -> 2
+    "i64" -> 3
+    "u8" -> 0
+    "u16" -> 1
+    "u32" -> 2
+    "u64" -> 3
+    "f32" -> 2
+    "f64" -> 3
     "bool" -> 0
-    _      -> 2
+    _ -> 2
 
 typeHeap :: String -> String
 typeHeap typ =
   case typ of
-    "i8"   -> "HEAP8"
-    "i16"  -> "HEAP16"
-    "i32"  -> "HEAP32"
-    "i64"  -> "HEAP64"
-    "u8"   -> "HEAPU8"
-    "u16"  -> "HEAPU16"
-    "u32"  -> "HEAPU32"
-    "u64"  -> "(new BigUint64Array(HEAP64.buffer))"
-    "f32"  -> "HEAPF32"
-    "f64"  -> "HEAPF64"
+    "i8" -> "HEAP8"
+    "i16" -> "HEAP16"
+    "i32" -> "HEAP32"
+    "i64" -> "HEAP64"
+    "u8" -> "HEAPU8"
+    "u16" -> "HEAPU16"
+    "u32" -> "HEAPU32"
+    "u64" -> "(new BigUint64Array(HEAP64.buffer))"
+    "f32" -> "HEAPF32"
+    "f64" -> "HEAPF64"
     "bool" -> "HEAP8"
-    _      -> "HEAP32"
+    _ -> "HEAP32"
 
 toFutharkArray :: String -> String
 toFutharkArray typ =
-  unlines [
-    new ++ "_from_jsarray(" ++ arraynd ++ ") {",
-    "  return this." ++ new ++ "(" ++ arraynd_flat ++ ", " ++ arraynd_dims ++ ");",
-    "}",
-    new ++ "(array, " ++ dims ++ ") {",
-    "  console.assert(array.length === " ++ dims_multiplied ++ ", 'len=%s,dims=%s', array.length, [" ++ dims ++ "].toString());",
-    "  var copy = _malloc(array.length << " ++ show (typeShift ftype) ++ ");",
-    "  " ++ typeHeap ftype ++ ".set(array, copy >> " ++ show (typeShift ftype) ++ ");",
-    "  var ptr = " ++ fnew ++ "(this.ctx, copy, " ++ bigint_dims ++ ");",
-    "  _free(copy);",
-    "  return this." ++ new ++ "_from_ptr(ptr);",
-    "}",
-    new ++ "_from_ptr(ptr) {",
-    "  return new FutharkArray(this.ctx, ptr, "
-      ++ intercalate ", " ["'" ++ ftype ++ "'", show d, heap, fshape, fvalues, ffree] ++ ");",
-    "}"
-  ]
+  unlines
+    [ new ++ "_from_jsarray(" ++ arraynd ++ ") {",
+      "  return this." ++ new ++ "(" ++ arraynd_flat ++ ", " ++ arraynd_dims ++ ");",
+      "}",
+      new ++ "(array, " ++ dims ++ ") {",
+      "  console.assert(array.length === " ++ dims_multiplied ++ ", 'len=%s,dims=%s', array.length, [" ++ dims ++ "].toString());",
+      "  var copy = _malloc(array.length << " ++ show (typeShift ftype) ++ ");",
+      "  " ++ typeHeap ftype ++ ".set(array, copy >> " ++ show (typeShift ftype) ++ ");",
+      "  var ptr = " ++ fnew ++ "(this.ctx, copy, " ++ bigint_dims ++ ");",
+      "  _free(copy);",
+      "  return this." ++ new ++ "_from_ptr(ptr);",
+      "}",
+      new ++ "_from_ptr(ptr) {",
+      "  return new FutharkArray(this.ctx, ptr, "
+        ++ intercalate ", " ["'" ++ ftype ++ "'", show d, heap, fshape, fvalues, ffree]
+        ++ ");",
+      "}"
+    ]
   where
     d = dim typ
     ftype = baseType typ
@@ -373,10 +377,10 @@ toFutharkArray typ =
     ffree = "_futhark_free_" ++ signature
     arraynd = "array" ++ show d ++ "d"
     arraynd_flat = if d > 1 then arraynd ++ ".flat()" else arraynd
-    arraynd_dims = intercalate ", " [ arraynd ++ mult i "[0]" ++ ".length" | i <- [0..d-1] ]
-    dims = intercalate ", " [ "d" ++ show i | i <- [0..d-1] ]
-    dims_multiplied = intercalate "*" [ "d" ++ show i | i <- [0..d-1] ]
-    bigint_dims = intercalate ", " [ "BigInt(d" ++ show i ++ ")" | i <- [0..d-1] ]
+    arraynd_dims = intercalate ", " [arraynd ++ mult i "[0]" ++ ".length" | i <- [0 .. d -1]]
+    dims = intercalate ", " ["d" ++ show i | i <- [0 .. d -1]]
+    dims_multiplied = intercalate "*" ["d" ++ show i | i <- [0 .. d -1]]
+    bigint_dims = intercalate ", " ["BigInt(d" ++ show i ++ ")" | i <- [0 .. d -1]]
     mult i s = concat $ replicate i s
 
 runServer :: String

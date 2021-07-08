@@ -14,14 +14,14 @@ import Futhark.Analysis.PrimExp.Convert
 import Futhark.IR
 
 -- | A function that, given a variable name, returns its definition.
-type VarLookup lore = VName -> Maybe (Exp lore, Certificates)
+type VarLookup rep = VName -> Maybe (Exp rep, Certificates)
 
 -- | A function that, given a subexpression, returns its type.
 type TypeLookup = SubExp -> Maybe Type
 
 -- | A simple rule is a top-down rule that can be expressed as a pure
 -- function.
-type SimpleRule lore = VarLookup lore -> TypeLookup -> BasicOp -> Maybe (BasicOp, Certificates)
+type SimpleRule rep = VarLookup rep -> TypeLookup -> BasicOp -> Maybe (BasicOp, Certificates)
 
 isCt1 :: SubExp -> Bool
 isCt1 (Constant v) = oneIsh v
@@ -31,7 +31,7 @@ isCt0 :: SubExp -> Bool
 isCt0 (Constant v) = zeroIsh v
 isCt0 _ = False
 
-simplifyCmpOp :: SimpleRule lore
+simplifyCmpOp :: SimpleRule rep
 simplifyCmpOp _ _ (CmpOp cmp e1 e2)
   | e1 == e2 = constRes $
     BoolValue $
@@ -55,7 +55,7 @@ simplifyCmpOp look _ (CmpOp CmpEq {} (Constant (IntValue x)) (Var v))
       _ -> Just (SubExp (Constant (BoolValue False)), cs)
 simplifyCmpOp _ _ _ = Nothing
 
-simplifyBinOp :: SimpleRule lore
+simplifyBinOp :: SimpleRule rep
 simplifyBinOp _ _ (BinOp op (Constant v1) (Constant v2))
   | Just res <- doBinOp op v1 v2 =
     constRes res
@@ -204,7 +204,7 @@ constRes = Just . (,mempty) . SubExp . Constant
 subExpRes :: SubExp -> Maybe (BasicOp, Certificates)
 subExpRes = Just . (,mempty) . SubExp
 
-simplifyUnOp :: SimpleRule lore
+simplifyUnOp :: SimpleRule rep
 simplifyUnOp _ _ (UnOp op (Constant v)) =
   constRes =<< doUnOp op v
 simplifyUnOp defOf _ (UnOp Not (Var v))
@@ -213,7 +213,7 @@ simplifyUnOp defOf _ (UnOp Not (Var v))
 simplifyUnOp _ _ _ =
   Nothing
 
-simplifyConvOp :: SimpleRule lore
+simplifyConvOp :: SimpleRule rep
 simplifyConvOp _ _ (ConvOp op (Constant v)) =
   constRes =<< doConvOp op v
 simplifyConvOp _ _ (ConvOp op se)
@@ -244,13 +244,13 @@ simplifyConvOp _ _ _ =
   Nothing
 
 -- If expression is true then just replace assertion.
-simplifyAssert :: SimpleRule lore
+simplifyAssert :: SimpleRule rep
 simplifyAssert _ _ (Assert (Constant (BoolValue True)) _ _) =
   constRes UnitValue
 simplifyAssert _ _ _ =
   Nothing
 
-simplifyIdentityReshape :: SimpleRule lore
+simplifyIdentityReshape :: SimpleRule rep
 simplifyIdentityReshape _ seType (Reshape newshape v)
   | Just t <- seType $ Var v,
     newDims newshape == arrayDims t -- No-op reshape.
@@ -258,19 +258,19 @@ simplifyIdentityReshape _ seType (Reshape newshape v)
     subExpRes $ Var v
 simplifyIdentityReshape _ _ _ = Nothing
 
-simplifyReshapeReshape :: SimpleRule lore
+simplifyReshapeReshape :: SimpleRule rep
 simplifyReshapeReshape defOf _ (Reshape newshape v)
   | Just (BasicOp (Reshape oldshape v2), v_cs) <- defOf v =
     Just (Reshape (fuseReshape oldshape newshape) v2, v_cs)
 simplifyReshapeReshape _ _ _ = Nothing
 
-simplifyReshapeScratch :: SimpleRule lore
+simplifyReshapeScratch :: SimpleRule rep
 simplifyReshapeScratch defOf _ (Reshape newshape v)
   | Just (BasicOp (Scratch bt _), v_cs) <- defOf v =
     Just (Scratch bt $ newDims newshape, v_cs)
 simplifyReshapeScratch _ _ _ = Nothing
 
-simplifyReshapeReplicate :: SimpleRule lore
+simplifyReshapeReplicate :: SimpleRule rep
 simplifyReshapeReplicate defOf seType (Reshape newshape v)
   | Just (BasicOp (Replicate _ se), v_cs) <- defOf v,
     Just oldshape <- arrayShape <$> seType se,
@@ -281,7 +281,7 @@ simplifyReshapeReplicate defOf seType (Reshape newshape v)
      in Just (Replicate (Shape new) se, v_cs)
 simplifyReshapeReplicate _ _ _ = Nothing
 
-simplifyReshapeIota :: SimpleRule lore
+simplifyReshapeIota :: SimpleRule rep
 simplifyReshapeIota defOf _ (Reshape newshape v)
   | Just (BasicOp (Iota _ offset stride it), v_cs) <- defOf v,
     [n] <- newDims newshape =
@@ -297,7 +297,7 @@ reshapeSlice _ _ = []
 
 -- If we are size-coercing a slice, then we might as well just use a
 -- different slice instead.
-simplifyReshapeIndex :: SimpleRule lore
+simplifyReshapeIndex :: SimpleRule rep
 simplifyReshapeIndex defOf _ (Reshape newshape v)
   | Just ds <- shapeCoercion newshape,
     Just (BasicOp (Index v' slice), v_cs) <- defOf v,
@@ -308,17 +308,17 @@ simplifyReshapeIndex _ _ _ = Nothing
 
 -- If we are updating a slice with the result of a size coercion, we
 -- instead use the original array and update the slice dimensions.
-simplifyUpdateReshape :: SimpleRule lore
-simplifyUpdateReshape defOf seType (Update dest slice (Var v))
+simplifyUpdateReshape :: SimpleRule rep
+simplifyUpdateReshape defOf seType (Update safety dest slice (Var v))
   | Just (BasicOp (Reshape newshape v'), v_cs) <- defOf v,
     Just _ <- shapeCoercion newshape,
     Just ds <- arrayDims <$> seType (Var v'),
     slice' <- reshapeSlice slice ds,
     slice' /= slice =
-    Just (Update dest slice' $ Var v', v_cs)
+    Just (Update safety dest slice' $ Var v', v_cs)
 simplifyUpdateReshape _ _ _ = Nothing
 
-improveReshape :: SimpleRule lore
+improveReshape :: SimpleRule rep
 improveReshape _ seType (Reshape newshape v)
   | Just t <- seType $ Var v,
     newshape' <- informReshape (arrayDims t) newshape,
@@ -328,7 +328,7 @@ improveReshape _ _ _ = Nothing
 
 -- | If we are copying a scratch array (possibly indirectly), just turn it into a scratch by
 -- itself.
-copyScratchToScratch :: SimpleRule lore
+copyScratchToScratch :: SimpleRule rep
 copyScratchToScratch defOf seType (Copy src) = do
   t <- seType $ Var src
   if isActuallyScratch src
@@ -344,7 +344,7 @@ copyScratchToScratch defOf seType (Copy src) = do
 copyScratchToScratch _ _ _ =
   Nothing
 
-simpleRules :: [SimpleRule lore]
+simpleRules :: [SimpleRule rep]
 simpleRules =
   [ simplifyBinOp,
     simplifyCmpOp,
@@ -366,7 +366,7 @@ simpleRules =
 -- and certificates that it must depend on.
 {-# NOINLINE applySimpleRules #-}
 applySimpleRules ::
-  VarLookup lore ->
+  VarLookup rep ->
   TypeLookup ->
   BasicOp ->
   Maybe (BasicOp, Certificates)

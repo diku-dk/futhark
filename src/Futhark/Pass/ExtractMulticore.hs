@@ -25,7 +25,7 @@ import qualified Futhark.IR.SOACS as SOACS
 import qualified Futhark.IR.SOACS.Simplify as SOACS
 import Futhark.Pass
 import Futhark.Pass.ExtractKernels.DistributeNests
-import Futhark.Pass.ExtractKernels.ToKernels (injectSOACS)
+import Futhark.Pass.ExtractKernels.ToGPU (injectSOACS)
 import Futhark.Tools
 import qualified Futhark.Transform.FirstOrderTransform as FOT
 import Futhark.Transform.Rename (Rename, renameSomething)
@@ -76,19 +76,19 @@ mapLambdaToKernelBody onBody i lam arrs = do
 
 reduceToSegBinOp :: Reduce SOACS -> ExtractM (Stms MC, SegBinOp MC)
 reduceToSegBinOp (Reduce comm lam nes) = do
-  ((lam', nes', shape), stms) <- runBinder $ determineReduceOp lam nes
+  ((lam', nes', shape), stms) <- runBuilder $ determineReduceOp lam nes
   lam'' <- transformLambda lam'
   return (stms, SegBinOp comm lam'' nes' shape)
 
 scanToSegBinOp :: Scan SOACS -> ExtractM (Stms MC, SegBinOp MC)
 scanToSegBinOp (Scan lam nes) = do
-  ((lam', nes', shape), stms) <- runBinder $ determineReduceOp lam nes
+  ((lam', nes', shape), stms) <- runBuilder $ determineReduceOp lam nes
   lam'' <- transformLambda lam'
   return (stms, SegBinOp Noncommutative lam'' nes' shape)
 
 histToSegBinOp :: SOACS.HistOp SOACS -> ExtractM (Stms MC, MC.HistOp MC)
 histToSegBinOp (SOACS.HistOp num_bins rf dests nes op) = do
-  ((op', nes', shape), stms) <- runBinder $ determineReduceOp op nes
+  ((op', nes', shape), stms) <- runBuilder $ determineReduceOp op nes
   op'' <- transformLambda op'
   return (stms, MC.HistOp num_bins rf dests nes' shape op'')
 
@@ -167,7 +167,7 @@ unstreamLambda attrs nes lam = do
   inp_params <- forM slice_params $ \(Param p t) ->
     newParam (baseString p) (rowType t)
 
-  body <- runBodyBinder $
+  body <- runBodyBuilder $
     localScope (scopeOfLParams inp_params) $ do
       letBindNames [paramName chunk_param] $
         BasicOp $ SubExp $ intConst Int64 1
@@ -321,7 +321,7 @@ transformSOAC pat _ (Screma w arrs form)
     -- This screma is too complicated for us to immediately do
     -- anything, so split it up and try again.
     scope <- castScope <$> askScope
-    transformStms =<< runBinderT_ (dissectScrema pat w form arrs) scope
+    transformStms =<< runBuilderT_ (dissectScrema pat w form arrs) scope
 transformSOAC pat _ (Scatter w lam ivs dests) = do
   (gtid, space) <- mkSegSpace w
 
@@ -383,7 +383,7 @@ transformSOAC pat _ (Stream w arrs _ nes lam) = do
   -- Just remove the stream and transform the resulting stms.
   soacs_scope <- castScope <$> askScope
   stream_stms <-
-    flip runBinderT_ soacs_scope $
+    flip runBuilderT_ soacs_scope $
       sequentialStreamWholeArray pat w nes lam arrs
   transformStms stream_stms
 

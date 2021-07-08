@@ -22,7 +22,7 @@ import qualified Futhark.IR.Mem.IxFun as IxFun
 import qualified Futhark.IR.Syntax as AST
 import qualified Futhark.Optimise.Simplify as Simplify
 import qualified Futhark.Optimise.Simplify.Engine as Engine
-import Futhark.Optimise.Simplify.Lore
+import Futhark.Optimise.Simplify.Rep
 import Futhark.Optimise.Simplify.Rule
 import Futhark.Optimise.Simplify.Rules
 import Futhark.Pass
@@ -30,17 +30,17 @@ import Futhark.Pass.ExplicitAllocations (simplifiable)
 import Futhark.Util
 
 simpleGeneric ::
-  (SimplifyMemory lore, Op lore ~ MemOp inner) =>
+  (SimplifyMemory rep, Op rep ~ MemOp inner) =>
   (OpWithWisdom inner -> UT.UsageTable) ->
-  Simplify.SimplifyOp lore inner ->
-  Simplify.SimpleOps lore
+  Simplify.SimplifyOp rep inner ->
+  Simplify.SimpleOps rep
 simpleGeneric = simplifiable
 
 simplifyProgGeneric ::
-  (SimplifyMemory lore, Op lore ~ MemOp inner) =>
-  Simplify.SimpleOps lore ->
-  Prog lore ->
-  PassM (Prog lore)
+  (SimplifyMemory rep, Op rep ~ MemOp inner) =>
+  Simplify.SimpleOps rep ->
+  Prog rep ->
+  PassM (Prog rep)
 simplifyProgGeneric ops =
   Simplify.simplifyProg
     ops
@@ -59,14 +59,14 @@ simplifyProgGeneric ops =
       not $ all primType $ patternTypes pat
 
 simplifyStmsGeneric ::
-  ( HasScope lore m,
+  ( HasScope rep m,
     MonadFreshNames m,
-    SimplifyMemory lore,
-    Op lore ~ MemOp inner
+    SimplifyMemory rep,
+    Op rep ~ MemOp inner
   ) =>
-  Simplify.SimpleOps lore ->
-  Stms lore ->
-  m (ST.SymbolTable (Wise lore), Stms lore)
+  Simplify.SimpleOps rep ->
+  Stms rep ->
+  m (ST.SymbolTable (Wise rep), Stms rep)
 simplifyStmsGeneric ops stms = do
   scope <- askScope
   Simplify.simplifyStms
@@ -76,18 +76,18 @@ simplifyStmsGeneric ops stms = do
     scope
     stms
 
-isResultAlloc :: Op lore ~ MemOp op => Engine.BlockPred lore
+isResultAlloc :: Op rep ~ MemOp op => Engine.BlockPred rep
 isResultAlloc _ usage (Let (AST.Pattern [] [bindee]) _ (Op Alloc {})) =
   UT.isInResult (patElemName bindee) usage
 isResultAlloc _ _ _ = False
 
-isAlloc :: Op lore ~ MemOp op => Engine.BlockPred lore
+isAlloc :: Op rep ~ MemOp op => Engine.BlockPred rep
 isAlloc _ _ (Let _ _ (Op Alloc {})) = True
 isAlloc _ _ _ = False
 
 blockers ::
-  (Op lore ~ MemOp inner) =>
-  Simplify.HoistBlockers lore
+  (Op rep ~ MemOp inner) =>
+  Simplify.HoistBlockers rep
 blockers =
   Engine.noExtraHoistBlockers
     { Engine.blockHoistPar = isAlloc,
@@ -96,17 +96,17 @@ blockers =
     }
 
 -- | Some constraints that must hold for the simplification rules to work.
-type SimplifyMemory lore =
-  ( Simplify.SimplifiableLore lore,
-    ExpDec lore ~ (),
-    BodyDec lore ~ (),
-    AllocOp (Op (Wise lore)),
-    CanBeWise (Op lore),
-    BinderOps (Wise lore),
-    Mem lore
+type SimplifyMemory rep =
+  ( Simplify.SimplifiableRep rep,
+    ExpDec rep ~ (),
+    BodyDec rep ~ (),
+    AllocOp (Op (Wise rep)),
+    CanBeWise (Op rep),
+    BuilderOps (Wise rep),
+    Mem rep
   )
 
-callKernelRules :: SimplifyMemory lore => RuleBook (Wise lore)
+callKernelRules :: SimplifyMemory rep => RuleBook (Wise rep)
 callKernelRules =
   standardRules
     <> ruleBook
@@ -121,7 +121,7 @@ callKernelRules =
 -- the array is not existential, and the index function of the array
 -- does not refer to any names in the pattern, then we can create a
 -- block of the proper size and always return there.
-unExistentialiseMemory :: SimplifyMemory lore => TopDownRuleIf (Wise lore)
+unExistentialiseMemory :: SimplifyMemory rep => TopDownRuleIf (Wise rep)
 unExistentialiseMemory vtable pat _ (cond, tbranch, fbranch, ifdec)
   | ST.simplifyMemory vtable,
     fixable <- foldl hasConcretisableMemory mempty $ patternElements pat,
@@ -192,10 +192,10 @@ unExistentialiseMemory _ _ _ _ = Skip
 -- | If we are copying something that is itself a copy, just copy the
 -- original one instead.
 copyCopyToCopy ::
-  ( BinderOps lore,
-    LetDec lore ~ (VarWisdom, MemBound u)
+  ( BuilderOps rep,
+    LetDec rep ~ (VarWisdom, MemBound u)
   ) =>
-  TopDownRuleBasicOp lore
+  TopDownRuleBasicOp rep
 copyCopyToCopy vtable pat@(Pattern [] [pat_elem]) _ (Copy v1)
   | Just (BasicOp (Copy v2), v1_cs) <- ST.lookupExp v1 vtable,
     Just (_, MemArray _ _ _ (ArrayIn srcmem src_ixfun)) <-
@@ -218,10 +218,10 @@ copyCopyToCopy _ _ _ _ = Skip
 -- | If the destination of a copy is the same as the source, just
 -- remove it.
 removeIdentityCopy ::
-  ( BinderOps lore,
-    LetDec lore ~ (VarWisdom, MemBound u)
+  ( BuilderOps rep,
+    LetDec rep ~ (VarWisdom, MemBound u)
   ) =>
-  TopDownRuleBasicOp lore
+  TopDownRuleBasicOp rep
 removeIdentityCopy vtable pat@(Pattern [] [pe]) _ (Copy v)
   | (_, MemArray _ _ _ (ArrayIn dest_mem dest_ixfun)) <- patElemDec pe,
     Just (_, MemArray _ _ _ (ArrayIn src_mem src_ixfun)) <-
@@ -234,7 +234,7 @@ removeIdentityCopy _ _ _ _ = Skip
 -- If an allocation is statically known to be safe, then we can remove
 -- the certificates on it.  This can help hoist things that would
 -- otherwise be stuck inside loops or branches.
-decertifySafeAlloc :: SimplifyMemory lore => TopDownRuleOp (Wise lore)
+decertifySafeAlloc :: SimplifyMemory rep => TopDownRuleOp (Wise rep)
 decertifySafeAlloc _ pat (StmAux cs attrs _) op
   | cs /= mempty,
     [Mem _] <- patternTypes pat,

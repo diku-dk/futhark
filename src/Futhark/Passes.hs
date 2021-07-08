@@ -13,8 +13,8 @@ module Futhark.Passes
 where
 
 import Control.Category ((>>>))
-import Futhark.IR.Kernels (Kernels)
-import Futhark.IR.KernelsMem (KernelsMem)
+import Futhark.IR.GPU (GPU)
+import Futhark.IR.GPUMem (GPUMem)
 import Futhark.IR.MC (MC)
 import Futhark.IR.MCMem (MCMem)
 import Futhark.IR.SOACS (SOACS)
@@ -25,11 +25,12 @@ import Futhark.Optimise.DoubleBuffer
 import Futhark.Optimise.Fusion
 import Futhark.Optimise.InPlaceLowering
 import Futhark.Optimise.InliningDeadFun
+import qualified Futhark.Optimise.ReuseAllocations as ReuseAllocations
 import Futhark.Optimise.Sink
 import Futhark.Optimise.TileLoops
 import Futhark.Optimise.Unstream
 import Futhark.Pass.ExpandAllocations
-import qualified Futhark.Pass.ExplicitAllocations.Kernels as Kernels
+import qualified Futhark.Pass.ExplicitAllocations.GPU as GPU
 import qualified Futhark.Pass.ExplicitAllocations.MC as MC
 import qualified Futhark.Pass.ExplicitAllocations.Seq as Seq
 import Futhark.Pass.ExtractKernels
@@ -57,19 +58,19 @@ standardPipeline =
       removeDeadFunctions
     ]
 
-kernelsPipeline :: Pipeline SOACS Kernels
+kernelsPipeline :: Pipeline SOACS GPU
 kernelsPipeline =
   standardPipeline
     >>> onePass extractKernels
     >>> passes
-      [ simplifyKernels,
+      [ simplifyGPU,
         babysitKernels,
         tileLoops,
-        unstreamKernels,
+        unstreamGPU,
         performCSE True,
-        simplifyKernels,
-        sinkKernels,
-        inPlaceLoweringKernels
+        simplifyGPU,
+        sinkGPU,
+        inPlaceLoweringGPU
       ]
 
 sequentialPipeline :: Pipeline SOACS Seq
@@ -91,18 +92,20 @@ sequentialCpuPipeline =
         simplifySeqMem
       ]
 
-gpuPipeline :: Pipeline SOACS KernelsMem
+gpuPipeline :: Pipeline SOACS GPUMem
 gpuPipeline =
   kernelsPipeline
-    >>> onePass Kernels.explicitAllocations
+    >>> onePass GPU.explicitAllocations
     >>> passes
-      [ simplifyKernelsMem,
+      [ simplifyGPUMem,
         performCSE False,
-        simplifyKernelsMem,
-        doubleBufferKernels,
-        simplifyKernelsMem,
+        simplifyGPUMem,
+        doubleBufferGPU,
+        simplifyGPUMem,
+        ReuseAllocations.optimise,
+        simplifyGPUMem,
         expandAllocations,
-        simplifyKernelsMem
+        simplifyGPUMem
       ]
 
 mcPipeline :: Pipeline SOACS MC
