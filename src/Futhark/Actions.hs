@@ -154,15 +154,15 @@ runCC cpath outpath cflags_def ldflags = do
     Right (ExitSuccess, _, _) ->
       return ()
 
-runEMCC :: String -> String -> [String] -> [String] -> [String] -> Bool -> Bool -> FutharkM ()
-runEMCC cpath outpath cflags_def ldflags expfuns rts lib = do
+runEMCC :: String -> String -> FilePath -> [String] -> [String] -> [String] -> Bool -> Bool -> FutharkM ()
+runEMCC cpath outpath classpath cflags_def ldflags expfuns rts lib = do
   ret <-
     liftIO $
       runProgramWithExitCode
         "emcc"
         ( [cpath, "-o", outpath]
             ++ ["-lnodefs.js"] -- "-s", "INITIAL_MEMORY=201326592"] -- ,"-s", "ALLOW_MEMORY_GROWTH=1"]
-            ++ (if rts then ["-s", "--post-js", "futharkClass.js"] else [])
+            ++ (if rts then ["-s", "--post-js", classpath] else [])
             ++ (if lib then ["-s", "EXPORT_NAME=createFutharkModule", "-s", "MODULARIZE"] else [])
             ++ ["-s", "WASM_BIGINT"]
             ++ cmdCFLAGS cflags_def
@@ -224,26 +224,27 @@ compileCtoWASMAction fcfg mode outpath =
   where
     helper prog = do
       (cprog, jsprog, exps) <- handleWarnings fcfg $ SequentialWASM.compileProg prog
-      let cpath = outpath `addExtension` "c"
-          hpath = outpath `addExtension` "h"
-          jpath = outpath `addExtension` "js"
-
       case mode of
         ToExecutable -> do
           liftIO $ writeFile cpath $ SequentialC.asExecutable cprog
-          runEMCC cpath outpath ["-O3", "-msimd128"] ["-lm"] ("_main" : exps) False False
+          runEMCC cpath outpath classpath ["-O3", "-msimd128"] ["-lm"] ("_main" : exps) False False
         ToLibrary -> do
-          writeLibs cprog jsprog hpath cpath
-          runEMCC cpath jpath ["-O3", "-msimd128"] ["-lm"] exps True True
+          writeLibs cprog jsprog
+          runEMCC cpath jpath classpath ["-O3", "-msimd128"] ["-lm"] exps True True
         ToServer -> do
-          writeLibs cprog jsprog hpath cpath
-          liftIO $ appendFile "futharkClass.js" SequentialWASM.runServer
-          runEMCC cpath outpath ["-O3", "-msimd128"] ["-lm"] exps True False
-    writeLibs cprog jsprog hpath cpath = do
+          writeLibs cprog jsprog
+          liftIO $ appendFile classpath SequentialWASM.runServer
+          runEMCC cpath outpath classpath ["-O3", "-msimd128"] ["-lm"] exps True False
+    writeLibs cprog jsprog = do
       let (h, imp) = SequentialC.asLibrary cprog
       liftIO $ writeFile hpath h
       liftIO $ writeFile cpath imp
-      liftIO $ writeFile "futharkClass.js" jsprog
+      liftIO $ writeFile classpath jsprog
+
+    cpath = outpath `addExtension` "c"
+    hpath = outpath `addExtension` "h"
+    jpath = outpath `addExtension` "js"
+    classpath = outpath `addExtension` ".class.js"
 
 -- | The @futhark opencl@ action.
 compileOpenCLAction :: FutharkConfig -> CompilerMode -> FilePath -> Action GPUMem
@@ -344,27 +345,30 @@ compileMulticoreToWASMAction fcfg mode outpath =
   where
     helper prog = do
       (cprog, jsprog, exps) <- handleWarnings fcfg $ MulticoreWASM.compileProg prog
-      let cpath = outpath `addExtension` "c"
-          hpath = outpath `addExtension` "h"
-          jpath = outpath `addExtension` "js"
 
       case mode of
         ToExecutable -> do
           liftIO $ writeFile cpath $ MulticoreC.asExecutable cprog
           -- Can't actually run multicore-wasm in node
-          runEMCC cpath outpath ["-O3", "-msimd128"] ["-lm", "-pthread"] ("_main" : exps) False False
+          runEMCC cpath outpath classpath ["-O3", "-msimd128"] ["-lm", "-pthread"] ("_main" : exps) False False
         ToLibrary -> do
-          writeLibs cprog jsprog hpath cpath
-          runEMCC cpath jpath ["-O3", "-msimd128"] ["-lm", "-pthread"] exps True True
+          writeLibs cprog jsprog
+          runEMCC cpath jpath classpath ["-O3", "-msimd128"] ["-lm", "-pthread"] exps True True
         ToServer -> do
-          writeLibs cprog jsprog hpath cpath
-          liftIO $ appendFile "futharkClass.js" MulticoreWASM.runServer
-          runEMCC cpath outpath ["-O3", "-msimd128"] ["-lm", "-pthread"] exps True False
-    writeLibs cprog jsprog hpath cpath = do
+          writeLibs cprog jsprog
+          liftIO $ appendFile classpath MulticoreWASM.runServer
+          runEMCC cpath outpath classpath ["-O3", "-msimd128"] ["-lm", "-pthread"] exps True False
+
+    writeLibs cprog jsprog = do
       let (h, imp) = MulticoreC.asLibrary cprog
       liftIO $ writeFile hpath h
       liftIO $ writeFile cpath imp
-      liftIO $ writeFile "futharkClass.js" jsprog
+      liftIO $ writeFile classpath jsprog
+
+    cpath = outpath `addExtension` "c"
+    hpath = outpath `addExtension` "h"
+    jpath = outpath `addExtension` "js"
+    classpath = outpath `addExtension` ".class.js"
 
 pythonCommon ::
   (CompilerMode -> String -> prog -> FutharkM (Warnings, String)) ->
