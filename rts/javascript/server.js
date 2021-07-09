@@ -257,7 +257,7 @@ class Server {
         console.log(err);
         console.log('%%% OK');
       }
-    });
+    }).on('close', () => { process.exit(0); });
   }
 }
 
