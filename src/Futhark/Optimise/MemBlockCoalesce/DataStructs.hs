@@ -1,11 +1,12 @@
-{-# LANGUAGE TypeFamilies, FlexibleContexts #-}
+{-# LANGUAGE TypeFamilies, FlexibleContexts, OverloadedStrings #-}
 module Futhark.Optimise.MemBlockCoalesce.DataStructs
        ( Coalesced(..),CoalescedKind(..), ArrayMemBound(..), AllocTab
        , V2MemTab, AliasTab, LUTabFun, LUTabPrg, ScalarTab,  CoalsTab
-       , CoalsEntry(..), FreeVarSubsts, LmadRef, MemRefs(..)
+       , CoalsEntry(..), FreeVarSubsts, LmadRef, MemRefs(..), AccsSum(..)
+       , BotUpEnv(..), InhibitTab
        , aliasTransClos, updateAliasing, getNamesFromSubExps, unionCoalsEntry
-       , getArrMemAssocFParam, getScopeMemInfo, prettyCoalTab
-       , createsNewArrOK, getArrMemAssoc, getUniqueMemFParam
+       , getArrMemAssocFParam, getScopeMemInfo, prettyCoalTab, mem_empty
+       , createsNewArrOK, getArrMemAssoc, getUniqueMemFParam, unionMemRefs
        )
        where
 
@@ -14,6 +15,7 @@ import Prelude
 import Data.Maybe
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
+import Futhark.Util.Pretty hiding (float, line, sep, string, (</>), (<|>))
 
 --import Debug.Trace
 
@@ -22,10 +24,15 @@ import qualified Futhark.IR.SeqMem as ExpMem
 import qualified Futhark.IR.Mem.IxFun as IxFun
 
 type LmadRef = IxFun.LMAD (ExpMem.TPrimExp Int64 VName)
+data AccsSum = Top | Over (S.Set LmadRef)
 
-data MemRefs = MemRefs { dstrefs :: S.Set LmadRef
-                       , srcwrts :: S.Set LmadRef
+data MemRefs = MemRefs { dstrefs :: AccsSum
+                       , srcwrts :: AccsSum
                        }
+
+mem_empty :: MemRefs
+mem_empty = MemRefs (Over mempty) (Over mempty)
+
 
 data CoalescedKind = Ccopy -- let x    = copy b^{lu}
                    | InPl  -- let x[i] = b^{lu}
@@ -33,7 +40,7 @@ data CoalescedKind = Ccopy -- let x    = copy b^{lu}
                    | Trans -- transitive, i.e., other variables aliased with b.
 data ArrayMemBound = MemBlock PrimType Shape VName ExpMem.IxFun
 
-type FreeVarSubsts = M.Map VName (ExpMem.PrimExp VName)
+type FreeVarSubsts = M.Map VName (ExpMem.TPrimExp Int64 VName) --(ExpMem.PrimExp VName)
 
 -- | Coalesced Access Entry
 data Coalesced = Coalesced CoalescedKind -- the kind of coalescing
@@ -91,9 +98,40 @@ type CoalsTab = M.Map VName CoalsEntry
 -- ^ maps a memory-block name to a Map in which each variable
 --   associated to that memory block is bound to its @Coalesced@ info.
 
+type InhibitTab = M.Map VName Names
+-- ^ inhibited memory-block mergings from the key (memory block)
+--   to the value (set of memory blocks)
+
+data BotUpEnv = BotUpEnv { scals :: ScalarTab
+                         -- ^ maps scalar variables to theirs PrimExp expansion
+                         , activeCoals :: CoalsTab
+                         -- ^ optimistic coalescing info
+                         , successCoals :: CoalsTab
+                         -- ^ committed (successfull) coalescing info
+                         , inhibit :: InhibitTab
+                         -- ^ the coalescing failures from this pass
+                         }
+
+
+instance Pretty (AccsSum) where
+  --show :: AccsSum -> String
+  ppr Top = "Top"
+  ppr (Over a) = "Access-Overestimate: " <> ppr a
+
+instance Pretty (MemRefs) where
+  --show :: MemRefs -> String
+  ppr (MemRefs a b) = "( Use-Sum:" <+> ppr a <+> "Write-Sum:" <+> ppr b <> ")"
+
 unionMemRefs :: MemRefs -> MemRefs -> MemRefs
 unionMemRefs (MemRefs d1 s1) (MemRefs d2 s2) =
-  MemRefs (S.union d1 d2) (S.union s1 s2)
+  MemRefs (unionAccss d1 d2) (unionAccss s1 s2)
+  where
+    unionAccss :: AccsSum -> AccsSum -> AccsSum
+    unionAccss Top _ = Top
+    unionAccss _ Top = Top
+    unionAccss (Over a) (Over b) =
+      Over $ S.union a b
+
 unionCoalsEntry :: CoalsEntry -> CoalsEntry -> CoalsEntry
 unionCoalsEntry etry1 (CoalsEntry dstmem2 dstind2  alsmem2 vartab2 optdeps2 memrefs2) =
   if dstmem etry1 /= dstmem2 || dstind etry1 /= dstind2
@@ -140,7 +178,6 @@ getArrMemAssoc :: Pattern (Aliases ExpMem.SeqMem) -> [(VName,ArrayMemBound)]
 getArrMemAssoc pat =
   mapMaybe (\patel -> case snd $ patElemDec patel of
                         (ExpMem.MemArray tp shp _ (ExpMem.ArrayIn mem_nm indfun) ) ->
-                            -- let mem_nm' = trace ("MemLore: "++(pretty (patElemName patel))++" is ArrayMem: "++pretty tp++" , "++pretty shp++" , "++pretty u++" , "++pretty mem_nm++" , "++pretty indfun++" ("++pretty l1++") ") mem_nm
                             Just (patElemName patel, MemBlock tp shp mem_nm indfun)
                         ExpMem.MemMem _  -> Nothing
                         ExpMem.MemPrim _ -> Nothing

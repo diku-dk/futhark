@@ -1,6 +1,6 @@
 {-# LANGUAGE TypeFamilies, FlexibleContexts #-}
 module Futhark.Optimise.MemBlockCoalesce.TopDownAn
-       ( TopDnEnv(..), ScopeTab, InhibitTab
+       ( TopDnEnv(..), ScopeTab, InhibitTab, RangeTab
        , topdwnTravBinding, topDownLoop
        , getDirAliasedIxfn, addInvAliassesVarTab
        , areAnyAliased, safety2 )
@@ -10,6 +10,7 @@ import qualified Data.Map.Strict as M
 import qualified Control.Exception.Base as Exc
 
 import Futhark.IR.Aliases
+import Futhark.Analysis.PrimExp.Convert
 import qualified Futhark.IR.SeqMem as ExpMem
 --import qualified Futhark.IR.Mem.IxFun as IxFun
 import Futhark.Optimise.MemBlockCoalesce.DataStructs
@@ -20,12 +21,9 @@ type ScopeTab = Scope (Aliases ExpMem.SeqMem)
 -- ^ maps array-variable names to various info, including
 --   types, memory block and index function, etc.
 
-type InhibitTab = M.Map VName Names
--- ^ inhibited memory-block mergings from the key (memory block)
---   to the value (set of memory blocks)
-
 type DirAlias = ExpMem.IxFun -> ExpMem.IxFun
 type InvAlias = Maybe (ExpMem.IxFun -> ExpMem.IxFun)
+type RangeTab = M.Map VName (PrimExp VName, PrimExp VName)
 type VarAliasTab = M.Map VName (VName, DirAlias, InvAlias)
 type MemAliasTab = M.Map VName Names
 
@@ -35,6 +33,8 @@ data TopDnEnv = TopDnEnv { alloc   :: AllocTab
                          -- ^ variable info, including var-to-memblock assocs
                          , inhibited :: InhibitTab
                          -- ^ the inherited inhibitions from the previous try
+                         , ranges :: RangeTab
+                         -- ^ table holding closed ranges for i64-integral scalars
                          , v_alias :: VarAliasTab
                          -- ^ for statements such as transpose, reshape, index, etc., that alias
                          --   an array variable: maps var-names to pair of aliased var name
@@ -112,7 +112,7 @@ topDownLoop td_env (Let pat _ (DoLoop arginis_ctx arginis lform body)) =
       bdy_ress = drop (length arginis_ctx) $ bodyResult body
       m_alias' = foldl (foldfun scopetab_loop) (m_alias td_env) $
                   zip3 (patternValueElements pat) arginis bdy_ress
-  in  td_env { scope = scopetab, m_alias = m_alias' }
+  in  td_env { scope = scopetab_loop, m_alias = m_alias' }
   where
     updateAlias (m, m_al) tab =
       let m_al' = case M.lookup m tab of
