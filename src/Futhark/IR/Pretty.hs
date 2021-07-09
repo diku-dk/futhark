@@ -337,4 +337,4 @@ ppPattern as bs = braces $ commastack (map ppr as) <> semi </> commasep (map ppr
 
 -- | Like 'prettyTuple', but produces a 'Doc'.
 ppTuple' :: Pretty a => [a] -> Doc
-ppTuple' ets = braces $ commasep $ map ppr ets
+ppTuple' ets = braces $ commasep $ map (align . ppr) ets
