@@ -403,7 +403,7 @@ jobs:
     - name: Run tests
       run: |
         node --version
-        export EMCFLAGS=-sINITIAL_MEMORY=2147418112 # 2gb - 64kb... largest value of memory
+        export EMCFLAGS="-sINITIAL_MEMORY=2147418112 -O1" # 2gb - 64kb... largest value of memory
         futhark test -c --backend=wasm --runner=./tools/node-simd.sh --no-tuning --exclude=no_wasm tests examples
 
   test-wasm-multicore:
@@ -435,7 +435,7 @@ jobs:
     - name: Run tests
       run: |
         node --version
-        export EMCFLAGS="-sINITIAL_MEMORY=2147418112 -s PTHREAD_POOL_SIZE=12" # 2gb - 64kb... largest value of memory
+        export EMCFLAGS="-sINITIAL_MEMORY=2147418112 -O1 -s PTHREAD_POOL_SIZE=12" # 2gb - 64kb... largest value of memory
         futhark test -c --backend=wasm-multicore --runner=./tools/node-threaded.sh --no-tuning --exclude=no_wasm tests examples
 
   test-tools:
