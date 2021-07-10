@@ -7,6 +7,7 @@ module Futhark.Optimise.MemBlockCoalesce.DataStructs
        , aliasTransClos, updateAliasing, getNamesFromSubExps, unionCoalsEntry
        , getArrMemAssocFParam, getScopeMemInfo, prettyCoalTab, mem_empty
        , createsNewArrOK, getArrMemAssoc, getUniqueMemFParam, unionMemRefs
+       , markFailedCoal
        )
        where
 
@@ -245,6 +246,26 @@ createsNewArrIK (BasicOp ArrayLit{}) = True
 createsNewArrIK _ = False
 --}
 
+-- | Memory-block removal from active-coalescing table
+--   should only be handled via this function, it is easy
+--   to run into infinite execution problem; i.e., the
+--   fix-pointed iteration of coalescing transformation
+--   assumes that whenever a coalescing fails it is
+--   recorded in the @inhibit@ table.
+markFailedCoal :: (CoalsTab, InhibitTab)
+               -> VName
+               -> (CoalsTab, InhibitTab)
+markFailedCoal (coal_tab,inhb_tab) src_mem =
+  case M.lookup src_mem coal_tab of
+         Nothing   -> (coal_tab,inhb_tab)
+         Just coale->
+           let failed_set = case M.lookup src_mem inhb_tab of
+                              Nothing  -> oneName (dstmem coale)
+                              Just fld -> fld <> oneName (dstmem coale)
+           in  ( M.delete src_mem coal_tab
+               , M.insert src_mem failed_set inhb_tab )
+
+-- | A poor attempt at a pretty printer of the Coalescing Table
 prettyCoalTab :: CoalsTab -> String
 prettyCoalTab tab =
   let list_tups = map (\(m_b, CoalsEntry md _ als vtab deps (MemRefs d s)) ->

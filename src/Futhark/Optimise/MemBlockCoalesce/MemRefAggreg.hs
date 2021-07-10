@@ -1,6 +1,8 @@
 {-# LANGUAGE TypeFamilies, FlexibleContexts #-}
 module Futhark.Optimise.MemBlockCoalesce.MemRefAggreg
-       ( recordMemRefUses, markFailedCoal, translateIndFunFreeVar )
+       ( recordMemRefUses, translateIndFunFreeVar
+       , aggSummaryLoopTotal, aggSummaryLoopPartial
+       , noMemOverlap )
        where
 
 
@@ -19,6 +21,59 @@ import qualified Futhark.IR.SeqMem as ExpMem
 import qualified Futhark.IR.Mem.IxFun as IxFun
 import Futhark.Optimise.MemBlockCoalesce.DataStructs
 import Futhark.Optimise.MemBlockCoalesce.TopDownAn
+
+se1 :: SubExp
+se1 = intConst Int64 1
+
+-----------------------------------------------------
+-- Some translations of Accesses and Ixfuns        --
+-----------------------------------------------------
+fakeIxfunFromLmads :: [LmadRef] -> ExpMem.IxFun
+fakeIxfunFromLmads [] = error "Fun fakeIxfunFromLmads should only be called on non-empty lists!"
+fakeIxfunFromLmads (lmad:lmads) =
+  IxFun.IxFun (lmad NE.:| lmads) ([pe64 se1]) False
+
+-- | Checks whether the index function can be translated at the
+--     current program point and also returns the substitutions.
+--     It comes down to answering the question: "can one perform
+--     enough substitutions (from the bottom-up scalar table) until
+--     all vars appearing in the index function are defined in the
+--     current scope?"
+--   Please fix: needs a form of fix-point iteration!
+translateIndFunFreeVar :: ScopeTab -> ScalarTab -> (Maybe ExpMem.IxFun)
+                       -> (Bool,FreeVarSubsts)
+translateIndFunFreeVar _ _ Nothing = (True, M.empty)
+translateIndFunFreeVar scope0 scals0 (Just indfun) =
+  translateHelper M.empty $ freeIn indfun
+  where
+    translateHelper :: FreeVarSubsts -> Names -> (Bool,FreeVarSubsts)
+    translateHelper substs nms
+      | mempty == nms = (True, substs)
+    translateHelper subst0 cur_fvs =
+      let fv_trans_vars = filter (\x -> not $ M.member x scope0) $ namesToList cur_fvs
+          (subs, new_fvs_2) = unzip $ mapMaybe getSubst fv_trans_vars
+          new_fvs = foldl (<>) mempty new_fvs_2
+      in  if length fv_trans_vars == length subs
+          then translateHelper (M.union subst0 $ M.fromList subs) new_fvs
+          else (False, M.empty)
+    getSubst v
+      | Just pe <- M.lookup v scals0,
+        IntType Int64 <- primExpType pe =
+          Just ((v, isInt64 pe), freeIn pe)
+    getSubst _ = Nothing
+
+-- mbAccess
+translateAccess :: ScopeTab -> ScalarTab -> AccsSum -> AccsSum
+translateAccess _ _ Top = Top
+translateAccess _ _ (Over l)
+  | l == mempty = Over mempty
+translateAccess scope0 scals0 (Over slmads)
+  | lmad:lmads <- S.toList slmads,
+    fake_ixfn <- fakeIxfunFromLmads (lmad:lmads),
+    (True, subst) <- translateIndFunFreeVar scope0 scals0 (Just fake_ixfn) =
+      Over $ S.fromList $ NE.toList $ IxFun.ixfunLMADs $
+                IxFun.substituteInIxFun subst fake_ixfn
+translateAccess _ _ _ = Top
 
 -- | This function computes the written and read memory references for the current statement
 getUseSumFromStm :: TopDnEnv -> CoalsTab
@@ -118,8 +173,9 @@ recordMemRefUses td_env bu_env stm =
                 if length wrt_tmps == length ixfns
                 then Over $ S.fromList wrt_tmps
                 else Top
-              prev_use = mbAccess $ (dstrefs . memrefs) etry
-              no_overlap = noMemOverlap (ranges td_env) prev_use wrt_lmads
+              prev_use = translateAccess (scope td_env) (scals bu_env) $
+                                         (dstrefs . memrefs) etry
+              no_overlap = noMemOverlap td_env prev_use wrt_lmads
           in  if no_overlap
               then (Just wrt_lmads, prev_use)
               else (Nothing, prev_use)
@@ -164,22 +220,18 @@ recordMemRefUses td_env bu_env stm =
         (IxFun.IxFun (lmad NE.:| []) _ _) <- IxFun.substituteInIxFun subst indfun =
           Just lmad
     mbLmad _ = Nothing
-    mbAccess Top = Top
-    mbAccess (Over l)
-      | l == mempty = Over mempty
-    mbAccess (Over slmads)
-      | lmad:lmads <- S.toList slmads,
-        fake_ixfn <- IxFun.IxFun (lmad NE.:| lmads) ([pe64 $ intConst Int64 1]) False,
-        (True, subst) <- translateIndFunFreeVar (scope td_env) (scals bu_env) (Just fake_ixfn) =
-        Over $ S.fromList $ NE.toList $ IxFun.ixfunLMADs $ IxFun.substituteInIxFun subst fake_ixfn
-    mbAccess _ = Top
     addLmads (Just wrts) uses etry =
       etry { memrefs = unionMemRefs (MemRefs uses wrts) (memrefs etry) }
     addLmads _ _ _ =
         error "Impossible case reached because we have filtered Nothings before"
 
--- ToDo: implement this function as precise as possible
-noMemOverlap :: RangeTab -> AccsSum -> AccsSum -> Bool
+-------------------------------------------------------------
+-- Helper Functions for Partial and Total Loop Aggregation --
+--  of memory references. Please implement as precise as   --
+--  possible. Currently the implementations are dummy      --
+--  aiming to be useful only when one of the sets is empty.--
+-------------------------------------------------------------
+noMemOverlap :: TopDnEnv -> AccsSum -> AccsSum -> Bool
 noMemOverlap _ _ (Over mr)
   | mr == mempty = True
 noMemOverlap _ (Over mr) _
@@ -190,50 +242,39 @@ noMemOverlap _ (Over _) (Over _) =
   False
   -- ^ add non-trivial implementation, please
 
--- | Checks whether the index function can be translated at the
---     current program point and also returns the substitutions.
---     It comes down to answering the question: "can one perform
---     enough substitutions (from the bottom-up scalar table) until
---     all vars appearing in the index function are defined in the
---     current scope?"
---   Please fix: needs a form of fix-point iteration!
-translateIndFunFreeVar :: ScopeTab -> ScalarTab -> (Maybe ExpMem.IxFun)
-                       -> (Bool,FreeVarSubsts)
-translateIndFunFreeVar _ _ Nothing = (True, M.empty)
-translateIndFunFreeVar scope0 scals0 (Just indfun) =
-  translateHelper M.empty $ freeIn indfun
-  where
-    translateHelper :: FreeVarSubsts -> Names -> (Bool,FreeVarSubsts)
-    translateHelper substs nms
-      | mempty == nms = (True, substs)
-    translateHelper subst0 cur_fvs =
-      let fv_trans_vars = filter (\x -> not $ M.member x scope0) $ namesToList cur_fvs
-          (subs, new_fvs_2) = unzip $ mapMaybe getSubst fv_trans_vars
-          new_fvs = foldl (<>) mempty new_fvs_2
-      in  if length fv_trans_vars == length subs
-          then translateHelper (M.union subst0 $ M.fromList subs) new_fvs
-          else (False, M.empty)
-    getSubst v
-      | Just pe <- M.lookup v scals0,
-        IntType Int64 <- primExpType pe =
-          Just ((v,isInt64 pe), freeIn pe)
-    getSubst _ = Nothing
+-- | Suppossed to aggregate the iteration-level summaries
+--     across a loop of index i = 0 .. n-1
+--   The current implementation is naive, in that it
+--     treats the case when the summary is loop-invariant,
+--     and returns Top in the other cases.
+--   The current implementation is good for while, but needs
+--     to be refined for @for i < n@ loops 
+aggSummaryLoopTotal :: ScopeTab -> ScopeTab -> ScalarTab 
+                    -> Maybe (VName, (ExpMem.TPrimExp Int64 VName,ExpMem.TPrimExp Int64 VName))
+                    -> AccsSum
+                    -> AccsSum
+aggSummaryLoopTotal _ _ _ _ Top = Top
+aggSummaryLoopTotal _ _ _ _ (Over l)
+  | l == mempty = Over mempty
+aggSummaryLoopTotal scope_bef scope_loop scals_loop _ access
+  | Over ls <- translateAccess scope_loop scals_loop access,
+    nms <- foldl (<>) mempty $ map freeIn $ S.toList ls,
+    all inBeforeScope (namesToList nms) =
+      Over ls
+    where
+      inBeforeScope v =
+        case M.lookup v scope_bef of
+          Nothing -> False
+          Just _  -> True
+aggSummaryLoopTotal _ _ _ _ _ = Top
 
--- | Memory-block removal from active-coalescing table
---   should only be handled via this function, it is easy
---   to run into infinite execution problem; i.e., the
---   fix-pointed iteration of coalescing transformation
---   assumes that whenever a coalescing fails it is
---   recorded in the @inhibit@ table.
-markFailedCoal :: (CoalsTab, InhibitTab)
-               -> VName
-               -> (CoalsTab, InhibitTab)
-markFailedCoal (coal_tab,inhb_tab) src_mem =
-  case M.lookup src_mem coal_tab of
-         Nothing   -> (coal_tab,inhb_tab)
-         Just coale->
-           let failed_set = case M.lookup src_mem inhb_tab of
-                              Nothing  -> oneName (dstmem coale)
-                              Just fld -> fld <> oneName (dstmem coale)
-           in  ( M.delete src_mem coal_tab
-               , M.insert src_mem failed_set inhb_tab )
+-- | Suppossed to partially aggregate the iteration-level summaries
+--     across a loop of index i = 0 .. n-1. This means that it
+--     computes the summary: Union_{j=0..i-1} Access_j 
+--   The current implementation is naive in that it treats only
+--     the loop invariant case (same as function @aggSummaryLoopTotal@).
+aggSummaryLoopPartial :: ScopeTab -> ScopeTab -> ScalarTab 
+                    -> Maybe (VName, (ExpMem.TPrimExp Int64 VName,ExpMem.TPrimExp Int64 VName))
+                    -> AccsSum
+                    -> AccsSum
+aggSummaryLoopPartial = aggSummaryLoopTotal

@@ -313,35 +313,21 @@ mkCoalsTabBnd lutab (Let patt _ (If _ body_then body_else _)) td_env bu_env =
       -- hence remove the coalescing of the result.
       trace ("COALESCING: if-then-else fails "++pretty b++pretty m_b)
             (markFailedCoal (act,inhb) m_b, succc)
-{--
-    mkSubsPE (a, Var v)
-      | (_,ExpMem.MemPrim (IntType Int64)) <- patElemDec a =
-        Just (patElemName a, LeafExp v (IntType Int64))
-    mkSubsPE (a, Constant v@(IntValue (Int64Value _))) =
-        Just (patElemName a, ValueExp v)
-    mkSubsPE _ = Nothing
---}
 --
 --mkCoalsTabBnd lutab (Let pat _ (Op (ExpMem.Inner (ExpMem.Kernel str cs ker_space tps ker_bdy)))) td_env bu_env =
 --  bu_env
 --
-mkCoalsTabBnd lutab lstm@(Let pat _ (DoLoop arginis_ctx arginis _lform body)) td_env bu_env =
+-- | Loop case:
+--   ToDo: treat the case of a streaming DoLoop, i.e., @ForLoop@ form with array inputs,
+--         maybe by adding "let a = as[i]" stms to the body, where @i@ is the loop's index.
+mkCoalsTabBnd lutab lstm@(Let pat _ (DoLoop arginis_ctx arginis lform body)) td_env bu_env =
   let pat_val_elms  = patternValueElements pat
-
-  --  i) Filter @activeCoals@ by the 2nd, 3rd AND 5th safety conditions:
-      (activeCoals00,inhibit00) =
-        filterSafetyCond2and5 (activeCoals bu_env) (inhibit bu_env) (scals bu_env)
-                              td_env pat_val_elms
-  --  this should probably dissapear, i.e., be replaced with code that analyse
-  --    whether lmads overlap.
-      loop_fv = freeIn body <>
-                  namesFromList (mapMaybe justVars arginis)
-      (actv0,inhibit0) =
-        mkCoalsHelper1FilterActive pat loop_fv (scope td_env)
-                                   (scals bu_env) activeCoals00 inhibit00
-
       td_env' = topDownLoop td_env lstm
 
+  --  i) Filter @activeCoals@ by the 2nd, 3rd AND 5th safety conditions:
+      (actv0,inhibit0) =
+        filterSafetyCond2and5 (activeCoals bu_env) (inhibit bu_env) (scals bu_env)
+                              td_env pat_val_elms
   -- ii) Extend @activeCoals@ by transfering the pattern-elements bindings
   --     existent in @activeCoals@ to the loop-body results, but only if:
   --       (a) the pattern element is a candidate for coalescing,        &&
@@ -385,32 +371,71 @@ mkCoalsTabBnd lutab lstm@(Let pat _ (DoLoop arginis_ctx arginis _lform body)) td
       -- ToDo: check that an optimistic dependency is placed on the ini.
       actv2 = foldl (transferCoalsToBody M.empty) actv1 (res_mem_bdy++res_mem_arg++res_mem_ini)
       -- The code below adds an aliasing relation to the loop-arg memory
-      --   so that to prevent, for example an iterative stencil to be
-      --   coalesced, you need a buffer for the result and a separate
-      --   one for the stencil.
+      --   so that to prevent, e.g., the coalescing of an iterative stencil
+      --   (you need a buffer for the result and a separate one for the stencil).
+      -- @ let b =               @
+      -- @    loop (a) for i<N do@
+      -- @        stencil a      @
+      -- @  ...                  @
+      -- @  y[slc_y] = b         @
+      -- This should fail coalescing because we are aliasing @m_a@ with
+      --   the memory block of the result.
       actv3 = foldl (\ tab ((_,_,_,m_r),(_,_,_,m_a)) ->
                         if m_r == m_a then tab
                         else case M.lookup m_r tab of
                                 Nothing   -> tab
                                 Just etry -> M.insert m_r (etry { alsmem = alsmem etry <> oneName m_a }) tab
                     ) actv2 (zip res_mem_bdy res_mem_arg)
-
+      -- analysing the loop body starts from a null memory-reference set;
+      --  the results of the loop body iteration are aggregated later
+      actv4 = M.map (\etry -> etry {memrefs = mem_empty} ) actv3
       res_env_body = mkCoalsTabBdy lutab body td_env'
-                                    (bu_env { activeCoals = actv3
+                                    (bu_env { activeCoals = actv4
                                             , inhibit = inhibit1  })
-  -- ToDo: add code to aggregate memory references across loop
-  --       and to filter insuccessful coalescing relations.
+      scals_loop = scals res_env_body
+      (res_actv0, res_succ0, res_inhb0) = (activeCoals res_env_body, successCoals res_env_body, inhibit res_env_body)
+  -- iv) Aggregate memory references across loop and filter unsound coalescing
+      -- a) Filter the active-table by the FIRST SOUNDNESS condition, namely:
+      --     W_i does not overlap with Union_{j=0..i-1} U_j,
+      --     where W_i corresponds to the Write set of src mem-block m_b,
+      --     and U_j correspond to the uses of the destination
+      --     mem-block m_y, in which m_b is coalesced into.
+      --     W_i and U_j correspond to the accesses within the loop body.
+      res_actv1 = M.filter (loopSoundness1Entry (scope td_env') scals_loop mb_loop_idx) res_actv0
 
-  -- iv) optimistically mark the pattern succesful if there is any chance to succeed
-      (res_actv, res_succ, res_inhb) = (activeCoals res_env_body, successCoals res_env_body, inhibit res_env_body)
+      -- b) Update the memory-reference summaries across loop:
+      --   W = Union_{i=0..n-1} W_i Union W_{before-loop}
+      --   U = Union_{i=0..n-1} U_i Union U_{before-loop}
+      mb_loop_idx = mbLoopIndexRange lform
+      res_actv2 = M.map (aggAcrossLoopEntry (scope td_env') scals_loop mb_loop_idx) res_actv1
+
+      -- c) check soundness of the successful promotions for:
+      --      - the entries that have been promoted to success during the loop-body pass
+      --      - for all the entries of active table
+      --    Filter the entries by the SECOND SOUNDNESS CONDITION, namely:
+      --      Union_{i=1..n-1} W_i does not overlap the before-the-loop uses
+      --        of the destination memory block. 
+      tmp_succ = M.filterWithKey (okLookup actv3) $
+                 M.difference res_succ0 (successCoals bu_env)
+      ver_succ = M.filterWithKey (loopSoundness2Entry actv3) tmp_succ
+      suc_fail = M.difference tmp_succ ver_succ
+      (res_succ, res_inhb1) = foldl markFailedCoal (res_succ0,res_inhb0) $ M.keys suc_fail
+      --
+      res_actv3 = M.filterWithKey (loopSoundness2Entry actv3) res_actv2
+      act_fail = M.difference res_actv0 res_actv3
+      (_, res_inhb) = foldl markFailedCoal (res_actv0,res_inhb1) $ M.keys act_fail
+      res_actv = M.mapWithKey (addBeforeLoop actv3) res_actv3
+      
+  -- v) optimistically mark the pattern succesful if there is any chance to succeed
       ((fin_actv1,fin_inhb1), fin_succ1) =
         optimPromotion argmems resmems inimems $
         optimPromotion patmems resmems inimems ((res_actv,res_inhb),res_succ)
 
   in bu_env { activeCoals = fin_actv1, successCoals = fin_succ1, inhibit = fin_inhb1 }
   where
-    justVars (_,Var v) = Just v
-    justVars _         = Nothing
+    okLookup tab m _
+      | Just _ <- M.lookup m tab = True
+    okLookup _ _ _ = False
     --
     mapmbFun td_env' actv0 (patel, (arg,ini), bdyres)
       | b <- patElemName patel,
@@ -450,11 +475,55 @@ mkCoalsTabBnd lutab lstm@(Let pat _ (DoLoop arginis_ctx arginis _lform body)) td
                       -- but I feel lazy so we will carry them around.
                       then trace ("COALESCING: optimistic loop fails "++pretty has_no_chance)
                                  (failed, succc)
-                      else  let info' = info { optdeps = M.insert r m_r $ optdeps info }
+                      else  -- ToDo: make sure that ixfun translates and update substitutions!
+                            let info' = info { optdeps = M.insert r m_r $ optdeps info }
                                 (act1, succc1) = markSuccessCoal (act,succc) m_b info'
                             in  trace ("COALESCING: optimistic loop promotion: "++pretty b++" "++pretty m_b)
                                       ((act1,inhb), succc1)
             ) ((actv_tab,inhb_tab), succ_tab) (zip3 othmems resmems inimems)
+    se0 = intConst Int64 0
+    se1 = intConst Int64 1
+    mbLoopIndexRange :: LoopForm (Aliases ExpMem.SeqMem)
+                     -> Maybe (VName, (ExpMem.TPrimExp Int64 VName,ExpMem.TPrimExp Int64 VName))
+    mbLoopIndexRange (WhileLoop _) = Nothing
+    mbLoopIndexRange (ForLoop inm _inttp seN _) = Just (inm, (pe64 se0, pe64 seN - pe64 se1))
+    addBeforeLoop actv_bef m_b etry =
+      case M.lookup m_b actv_bef of
+        Nothing -> etry
+        Just etry0 ->
+          etry { memrefs = unionMemRefs (memrefs etry0) (memrefs etry)}
+    aggAcrossLoopEntry :: ScopeTab -> ScalarTab
+                       -> Maybe (VName, (ExpMem.TPrimExp Int64 VName,ExpMem.TPrimExp Int64 VName))
+                       -> CoalsEntry -> CoalsEntry
+    aggAcrossLoopEntry scope_loop scal_tab idx etry =
+      let wrts = aggSummaryLoopTotal (scope td_env) scope_loop scal_tab idx $
+                                     (srcwrts . memrefs) etry
+          uses = aggSummaryLoopTotal (scope td_env) scope_loop scal_tab idx $
+                                     (dstrefs . memrefs) etry
+      in  etry { memrefs = MemRefs uses wrts }
+    loopSoundness1Entry :: ScopeTab -> ScalarTab
+                        -> Maybe (VName, (ExpMem.TPrimExp Int64 VName,ExpMem.TPrimExp Int64 VName))
+                        -> CoalsEntry
+                        -> Bool
+    loopSoundness1Entry scope_loop scal_tab idx etry =
+      let wrt_i = (srcwrts . memrefs) etry
+          use_p = aggSummaryLoopPartial (scope td_env) scope_loop scal_tab idx $
+                                        (dstrefs . memrefs) etry
+      in  noMemOverlap td_env wrt_i use_p
+    -- | Assumes it is being called after the entry summary (last param) has
+    --     been aggregated across the loop.
+    loopSoundness2Entry :: CoalsTab -> VName -> CoalsEntry -> Bool
+    loopSoundness2Entry old_actv m_b etry =
+      case M.lookup m_b old_actv of
+        Nothing -> True
+        Just etry0 ->
+          let uses_before = (dstrefs . memrefs) etry0
+              uses_loop   = (srcwrts . memrefs) etry
+          in  noMemOverlap td_env uses_loop uses_before
+
+
+
+
 -- The case of in-place update:
 --   @let x' = x with slice <- elm@
 mkCoalsTabBnd lutab stm@(Let pat@(Pattern [] [x']) _ e@(BasicOp (Update x _ _elm))) td_env bu_env
