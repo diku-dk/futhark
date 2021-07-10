@@ -221,8 +221,8 @@ instance PrettyRep rep => Pretty (Exp rep) where
       <+> maybeNest t
       <+> text "else"
       <+> maybeNest f
-      <+> colon
-      <+> braces (commasep $ map ppr ret)
+      </> colon
+      <+> ppTuple' ret
     where
       info' = case ifsort of
         IfNormal -> mempty
