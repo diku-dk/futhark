@@ -23,8 +23,6 @@ results are written to ``foo.fut.tuning``, which will then
 automatically be picked up by subsequent uses of
 :ref:`futhark-bench(1)` and :ref:`futhark-test(1)`.
 
-Currently, only the entry point named ``main`` is tuned.
-
 
 OPTIONS
 =======

@@ -14,9 +14,8 @@ module Futhark.Test
     FutharkExe (..),
     getValues,
     getValuesBS,
-    withValuesFile,
-    checkValueTypes,
-    compareValues,
+    valuesAsVars,
+    V.compareValues,
     checkResult,
     testRunReferenceOutput,
     getExpectedResult,
@@ -26,7 +25,8 @@ module Futhark.Test
     ensureReferenceOutput,
     determineTuning,
     binaryName,
-    Mismatch,
+    futharkServerCfg,
+    V.Mismatch,
     ProgramTest (..),
     StructureTest (..),
     StructurePipeline (..),
@@ -38,7 +38,8 @@ module Futhark.Test
     ExpectedResult (..),
     Success (..),
     Values (..),
-    Value,
+    V.Value,
+    V.valueText,
   )
 where
 
@@ -57,19 +58,20 @@ import Data.Functor
 import Data.List (foldl')
 import qualified Data.Map.Strict as M
 import Data.Maybe
+import qualified Data.Set as S
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import qualified Data.Text.IO as T
 import Data.Void
 import Futhark.Analysis.Metrics.Type
-import Futhark.IR.Primitive (floatByteSize, intByteSize)
+import Futhark.Data.Parser
+import qualified Futhark.Data.Parser as V
+import qualified Futhark.Script as Script
 import Futhark.Server
-import Futhark.Test.Values
-import Futhark.Test.Values.Parser
-import Futhark.Util (directoryContents, pmapIO)
-import Futhark.Util.Pretty (pretty, prettyText)
-import Language.Futhark.Prop (primByteSize, primValueType)
-import Language.Futhark.Syntax (PrimType (..), PrimValue (..))
+import Futhark.Server.Values
+import qualified Futhark.Test.Values as V
+import Futhark.Util (directoryContents, isEnvVarAtLeast, pmapIO)
+import Futhark.Util.Pretty (prettyOneLine, prettyText, prettyTextOneLine)
 import System.Directory
 import System.Exit
 import System.FilePath
@@ -147,29 +149,31 @@ data TestRun = TestRun
   }
   deriving (Show)
 
--- | Several Values - either literally, or by reference to a file, or
--- to be generated on demand.
+-- | Several values - either literally, or by reference to a file, or
+-- to be generated on demand.  All paths are relative to test program.
 data Values
-  = Values [Value]
+  = Values [V.Value]
   | InFile FilePath
   | GenValues [GenValue]
+  | ScriptValues Script.Exp
+  | ScriptFile FilePath
   deriving (Show)
 
 data GenValue
   = -- | Generate a value of the given rank and primitive
     -- type.  Scalars are considered 0-ary arrays.
-    GenValue ValueType
+    GenValue V.ValueType
   | -- | A fixed non-randomised primitive value.
-    GenPrim PrimValue
+    GenPrim V.Value
   deriving (Show)
 
 -- | A prettyprinted representation of type of value produced by a
 -- 'GenValue'.
 genValueType :: GenValue -> String
-genValueType (GenValue (ValueType ds t)) =
-  concatMap (\d -> "[" ++ show d ++ "]") ds ++ pretty t
+genValueType (GenValue (V.ValueType ds t)) =
+  concatMap (\d -> "[" ++ show d ++ "]") ds ++ T.unpack (V.primTypeText t)
 genValueType (GenPrim v) =
-  pretty v
+  T.unpack $ V.valueText v
 
 -- | How a test case is expected to terminate.
 data ExpectedResult values
@@ -287,7 +291,10 @@ parseRunCases = parseRunCases' (0 :: Int)
       input <-
         if "random" `elem` tags
           then parseRandomValues
-          else parseValues
+          else
+            if "script" `elem` tags
+              then parseScriptValues
+              else parseValues
       expr <- parseExpectedResult
       return $ TestRun tags input expr i $ desc i input
 
@@ -303,12 +310,16 @@ parseRunCases = parseRunCases' (0 :: Int)
       -- Turn linebreaks into space.
       "#" ++ show i ++ " (\"" ++ unwords (lines vs') ++ "\")"
       where
-        vs' = case unwords (map pretty vs) of
+        vs' = case unwords $ map (T.unpack . V.valueText) vs of
           s
             | length s > 50 -> take 50 s ++ "..."
             | otherwise -> s
     desc _ (GenValues gens) =
       unwords $ map genValueType gens
+    desc _ (ScriptValues e) =
+      prettyOneLine e
+    desc _ (ScriptFile path) =
+      path
 
 parseExpectedResult :: Parser (ExpectedResult Success)
 parseExpectedResult =
@@ -326,14 +337,23 @@ parseExpectedError = lexeme $ do
     -- newlines like ordinary characters, which is what we want.
       ThisError s <$> makeRegexOptsM blankCompOpt defaultExecOpt (T.unpack s)
 
+parseScriptValues :: Parser Values
+parseScriptValues =
+  choice
+    [ ScriptValues <$> braces (Script.parseExp postlexeme),
+      ScriptFile . T.unpack <$> (lexstr "@" *> lexeme nextWord)
+    ]
+  where
+    nextWord = takeWhileP Nothing $ not . isSpace
+
 parseRandomValues :: Parser Values
-parseRandomValues = GenValues <$> between (lexstr "{") (lexstr "}") (many parseGenValue)
+parseRandomValues = GenValues <$> braces (many parseGenValue)
 
 parseGenValue :: Parser GenValue
 parseGenValue =
   choice
     [ GenValue <$> lexeme parseType,
-      GenPrim <$> lexeme parsePrimValue
+      GenPrim <$> lexeme V.parsePrimValue
     ]
 
 parseValues :: Parser Values
@@ -462,9 +482,9 @@ testPrograms dir = filter isFut <$> directoryContents dir
 
 -- | Try to parse a several values from a byte string.  The 'String'
 -- parameter is used for error messages.
-valuesFromByteString :: String -> BS.ByteString -> Either String [Value]
+valuesFromByteString :: String -> BS.ByteString -> Either String [V.Value]
 valuesFromByteString srcname =
-  maybe (Left $ "Cannot parse values from '" ++ srcname ++ "'") Right . readValues
+  maybe (Left $ "Cannot parse values from '" ++ srcname ++ "'") Right . V.readValues
 
 -- | The @futhark@ executable we are using.  This is merely a wrapper
 -- around the underlying file path, because we will be using a lot of
@@ -476,7 +496,7 @@ newtype FutharkExe = FutharkExe FilePath
 -- specification.  The first 'FilePath' is the path of the @futhark@
 -- executable, and the second is the directory which file paths are
 -- read relative to.
-getValues :: (MonadFail m, MonadIO m) => FutharkExe -> FilePath -> Values -> m [Value]
+getValues :: (MonadFail m, MonadIO m) => FutharkExe -> FilePath -> Values -> m [V.Value]
 getValues _ _ (Values vs) =
   return vs
 getValues futhark dir v = do
@@ -489,64 +509,139 @@ getValues futhark dir v = do
       Values {} -> "<values>"
       InFile f -> f
       GenValues {} -> "<randomly generated>"
+      ScriptValues {} -> "<FutharkScript expression>"
+      ScriptFile f -> f
+
+readAndDecompress :: FilePath -> IO (Either DecompressError BS.ByteString)
+readAndDecompress file = E.try $ do
+  s <- BS.readFile file
+  E.evaluate $ decompress s
 
 -- | Extract a pretty representation of some 'Values'.  In the IO
 -- monad because this might involve reading from a file.  There is no
 -- guarantee that the resulting byte string yields a readable value.
-getValuesBS :: MonadIO m => FutharkExe -> FilePath -> Values -> m BS.ByteString
+getValuesBS :: (MonadFail m, MonadIO m) => FutharkExe -> FilePath -> Values -> m BS.ByteString
 getValuesBS _ _ (Values vs) =
-  return $ BS.fromStrict $ T.encodeUtf8 $ T.unlines $ map prettyText vs
+  return $ BS.fromStrict $ T.encodeUtf8 $ T.unlines $ map V.valueText vs
 getValuesBS _ dir (InFile file) =
   case takeExtension file of
     ".gz" -> liftIO $ do
-      s <- E.try readAndDecompress
+      s <- readAndDecompress file'
       case s of
-        Left e -> fail $ show file ++ ": " ++ show (e :: DecompressError)
+        Left e -> fail $ show file ++ ": " ++ show e
         Right s' -> return s'
     _ -> liftIO $ BS.readFile file'
   where
     file' = dir </> file
-    readAndDecompress = do
-      s <- BS.readFile file'
-      E.evaluate $ decompress s
 getValuesBS futhark dir (GenValues gens) =
   mconcat <$> mapM (getGenBS futhark dir) gens
+getValuesBS _ _ (ScriptValues e) =
+  fail $ "Cannot get values from FutharkScript expression: " <> prettyOneLine e
+getValuesBS _ _ (ScriptFile f) =
+  fail $ "Cannot get values from FutharkScript file: " <> f
 
--- | Evaluate an IO action while the values are available in the
--- binary format in a file by some name.  The file will be removed
--- after the action is done.
-withValuesFile ::
-  MonadIO m =>
+valueAsVar ::
+  (MonadError T.Text m, MonadIO m) =>
+  Server ->
+  VarName ->
+  V.Value ->
+  m ()
+valueAsVar server v val =
+  cmdMaybe $ putValue server v val
+
+-- Frees the expression on error.
+scriptValueAsVars ::
+  (MonadError T.Text m, MonadIO m) =>
+  Server ->
+  [(VarName, TypeName)] ->
+  Script.ExpValue ->
+  m ()
+scriptValueAsVars server names_and_types val
+  | vals <- V.unCompound val,
+    length names_and_types == length vals,
+    Just loads <- zipWithM f names_and_types vals =
+    sequence_ loads
+  where
+    f (v, t0) (V.ValueAtom (Script.SValue t1 sval))
+      | t0 == t1 =
+        Just $ case sval of
+          Script.VVar oldname ->
+            cmdMaybe $ cmdRename server oldname v
+          Script.VVal sval' ->
+            valueAsVar server v sval'
+    f _ _ = Nothing
+scriptValueAsVars server names_and_types val = do
+  cmdMaybe $ cmdFree server $ S.toList $ Script.serverVarsInValue val
+  throwError $
+    "Expected value of type: "
+      <> prettyTextOneLine (V.mkCompound (map (V.ValueAtom . snd) names_and_types))
+      <> "\nBut got value of type:  "
+      <> prettyTextOneLine (fmap Script.scriptValueType val)
+      <> notes
+  where
+    notes = mconcat $ mapMaybe note names_and_types
+    note (_, t)
+      | "(" `T.isPrefixOf` t =
+        Just $
+          "\nNote: expected type " <> prettyText t <> " is an opaque tuple that cannot be constructed\n"
+            <> "in FutharkScript.  Consider using type annotations to give it a proper name."
+      | "{" `T.isPrefixOf` t =
+        Just $
+          "\nNote: expected type " <> prettyText t <> " is an opaque record that cannot be constructed\n"
+            <> "in FutharkScript.  Consider using type annotations to give it a proper name."
+      | otherwise =
+        Nothing
+
+-- | Make the provided 'Values' available as server-side variables.
+-- This may involve arbitrary server-side computation.  Error
+-- detection... dubious.
+valuesAsVars ::
+  (MonadError T.Text m, MonadIO m) =>
+  Server ->
+  [(VarName, TypeName)] ->
   FutharkExe ->
   FilePath ->
   Values ->
-  (FilePath -> IO a) ->
-  m a
-withValuesFile _ dir (InFile file) f
-  | takeExtension file /= ".gz" =
-    liftIO $ f $ dir </> file
-withValuesFile futhark dir vs f =
-  liftIO . withSystemTempFile "futhark-input" $ \tmpf tmpf_h -> do
-    mapM_ (BS.hPutStr tmpf_h . Bin.encode) =<< getValues futhark dir vs
+  m ()
+valuesAsVars server names_and_types _ dir (InFile file)
+  | takeExtension file == ".gz" = do
+    s <- liftIO $ readAndDecompress $ dir </> file
+    case s of
+      Left e ->
+        throwError $ T.pack $ show file <> ": " <> show e
+      Right s' ->
+        cmdMaybe . withSystemTempFile "futhark-input" $ \tmpf tmpf_h -> do
+          BS.hPutStr tmpf_h s'
+          hClose tmpf_h
+          cmdRestore server tmpf names_and_types
+  | otherwise =
+    cmdMaybe $ cmdRestore server (dir </> file) names_and_types
+valuesAsVars server names_and_types futhark dir (GenValues gens) = do
+  unless (length gens == length names_and_types) $
+    throwError "Mismatch between number of expected and generated values."
+  gen_fs <- mapM (getGenFile futhark dir) gens
+  forM_ (zip gen_fs names_and_types) $ \(file, (v, t)) ->
+    cmdMaybe $ cmdRestore server (dir </> file) [(v, t)]
+valuesAsVars server names_and_types _ _ (Values vs) = do
+  unless (length vs == length names_and_types) $
+    throwError "Mismatch between number of expected and provided values."
+  cmdMaybe . withSystemTempFile "futhark-input" $ \tmpf tmpf_h -> do
+    mapM_ (BS.hPutStr tmpf_h . Bin.encode) vs
     hClose tmpf_h
-    f tmpf
-
--- | Check that the file contains values of the expected types.
-checkValueTypes ::
-  (MonadError T.Text m, MonadIO m) => FilePath -> [TypeName] -> m ()
-checkValueTypes values_f input_types = do
-  maybe_vs <- liftIO $ readValues <$> BS.readFile values_f
-  case maybe_vs of
-    Nothing ->
-      throwError "Invalid input data format."
-    Just vs -> do
-      let vs_types = map (prettyValueTypeNoDims . valueType) vs
-      unless (vs_types == input_types) $
-        throwError $
-          T.unlines
-            [ "Expected input types: " <> T.unwords input_types,
-              "Provided input types: " <> T.unwords vs_types
-            ]
+    cmdRestore server tmpf names_and_types
+valuesAsVars server names_and_types _ _ (ScriptValues e) =
+  Script.withScriptServer' server $ \server' -> do
+    e_v <- Script.evalExp noBuiltin server' e
+    scriptValueAsVars server names_and_types e_v
+  where
+    noBuiltin f _ = do
+      throwError $ "Unknown builtin procedure: " <> f
+valuesAsVars server names_and_types futhark dir (ScriptFile f) = do
+  e <-
+    either (throwError . T.pack . errorBundlePretty) pure
+      . parse (Script.parseExp space) f
+      =<< liftIO (T.readFile (dir </> f))
+  valuesAsVars server names_and_types futhark dir (ScriptValues e)
 
 -- | There is a risk of race conditions when multiple programs have
 -- identical 'GenValues'.  In such cases, multiple threads in 'futhark
@@ -558,8 +653,8 @@ checkValueTypes values_f input_types = do
 -- approach here seems robust enough for now, but certainly it could
 -- be made even better.  The race condition that remains should mostly
 -- result in duplicate work, not crashes or data corruption.
-getGenBS :: MonadIO m => FutharkExe -> FilePath -> GenValue -> m BS.ByteString
-getGenBS futhark dir gen = do
+getGenFile :: MonadIO m => FutharkExe -> FilePath -> GenValue -> m FilePath
+getGenFile futhark dir gen = do
   liftIO $ createDirectoryIfMissing True $ dir </> "data"
   exists_and_proper_size <-
     liftIO $
@@ -575,9 +670,12 @@ getGenBS futhark dir gen = do
         hClose h -- We will be writing and reading this ourselves.
         SBS.writeFile tmpfile s
         renameFile tmpfile $ dir </> file
-  getValuesBS futhark dir $ InFile file
+  pure file
   where
     file = "data" </> genFileName gen
+
+getGenBS :: MonadIO m => FutharkExe -> FilePath -> GenValue -> m BS.ByteString
+getGenBS futhark dir gen = liftIO . BS.readFile . (dir </>) =<< getGenFile futhark dir gen
 
 genValues :: FutharkExe -> [GenValue] -> IO SBS.ByteString
 genValues (FutharkExe futhark) gens = do
@@ -602,16 +700,12 @@ genFileSize :: GenValue -> Integer
 genFileSize = genSize
   where
     header_size = 1 + 1 + 1 + 4 -- 'b' <version> <num_dims> <type>
-    genSize (GenValue (ValueType ds t)) =
-      header_size + toInteger (length ds) * 8
-        + product (map toInteger ds) * primSize t
+    genSize (GenValue (V.ValueType ds t)) =
+      toInteger $
+        header_size + length ds * 8
+          + product ds * V.primTypeBytes t
     genSize (GenPrim v) =
-      header_size + primByteSize (primValueType v)
-
-    primSize (Signed it) = intByteSize it
-    primSize (Unsigned it) = intByteSize it
-    primSize (FloatType ft) = floatByteSize ft
-    primSize Bool = 1
+      toInteger $ header_size + product (V.valueShape v) * V.primTypeBytes (V.valueElemType v)
 
 -- | When/if generating a reference output file for this run, what
 -- should it be called?  Includes the "data/" folder.
@@ -636,7 +730,7 @@ getExpectedResult ::
   FilePath ->
   T.Text ->
   TestRun ->
-  m (ExpectedResult [Value])
+  m (ExpectedResult [V.Value])
 getExpectedResult futhark prog entry tr =
   case runExpectedResult tr of
     (Succeeds (Just (SuccessValues vals))) ->
@@ -720,23 +814,9 @@ readResults ::
   (MonadIO m, MonadError T.Text m) =>
   Server ->
   [VarName] ->
-  FilePath ->
-  m [Value]
-readResults server outs program =
-  join . liftIO . withSystemTempFile "futhark-output" $ \outputf outputh -> do
-    hClose outputh
-    store_r <- cmdStore server outputf outs
-    case store_r of
-      Just (CmdFailure _ err) ->
-        pure $ throwError $ T.unlines err
-      Nothing -> do
-        bytes <- BS.readFile outputf
-        case valuesFromByteString "output" bytes of
-          Left e -> do
-            let actualf = program `addExtension` "actual"
-            liftIO $ BS.writeFile actualf bytes
-            pure $ throwError $ T.pack e <> "\n(See " <> T.pack actualf <> ")"
-          Right vs -> pure $ pure vs
+  m [V.Value]
+readResults server =
+  mapM (either throwError pure <=< liftIO . getValue server)
 
 -- | Ensure that any reference output files exist, or create them (by
 -- compiling the program with the reference compiler and running it on
@@ -809,11 +889,11 @@ determineTuning (Just ext) program = do
 checkResult ::
   (MonadError T.Text m, MonadIO m) =>
   FilePath ->
-  [Value] ->
-  [Value] ->
+  [V.Value] ->
+  [V.Value] ->
   m ()
 checkResult program expected_vs actual_vs =
-  case compareValues actual_vs expected_vs of
+  case V.compareSeveralValues (V.Tolerance 0.002) actual_vs expected_vs of
     mismatch : mismatches -> do
       let actualf = program <.> "actual"
           expectedf = program <.> "expected"
@@ -828,3 +908,11 @@ checkResult program expected_vs actual_vs =
             else "\n...and " <> prettyText (length mismatches) <> " other mismatches."
     [] ->
       return ()
+
+-- | Create a Futhark server configuration suitable for use when
+-- testing/benchmarking Futhark programs.
+futharkServerCfg :: FilePath -> [String] -> ServerCfg
+futharkServerCfg prog opts =
+  (newServerCfg prog opts)
+    { cfgDebug = isEnvVarAtLeast "FUTHARK_COMPILER_DEBUGGING" 1
+    }

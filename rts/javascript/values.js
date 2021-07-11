@@ -1,33 +1,30 @@
 // Start of values.js
-//
-//
-
 
 var type_strs = { "Int8Array" : '  i8',
-              "Int16Array" : ' i16',
-              "Int32Array" : ' i32',
-              "BigInt64Array" : ' i64',
-              "Uint8Array" : '  u8',
-              "Uint16Array" :  ' u16',
-              "Uint32Array" :  ' u32',
-              "BigUint64Array" :  ' u64',
-              "Float32Array" : ' f32',
-              "Float64Array" : ' f64',
-              // TODO implement bool here
-             };
+                  "Int16Array" : ' i16',
+                  "Int32Array" : ' i32',
+                  "BigInt64Array" : ' i64',
+                  "Uint8Array" : '  u8',
+                  "Uint16Array" :  ' u16',
+                  "Uint32Array" :  ' u32',
+                  "BigUint64Array" :  ' u64',
+                  "Float32Array" : ' f32',
+                  "Float64Array" : ' f64',
+                  // TODO implement bool here
+                };
 var typToType = { '  i8' : Int8Array ,
-              ' i16' : Int16Array ,
-              ' i32' : Int32Array ,
-              ' i64' : BigInt64Array ,
-              '  u8' : Uint8Array ,
-              ' u16' :  Uint16Array ,
-              ' u32' :  Uint32Array ,
-              ' u64' :  BigUint64Array ,
-              ' f32' : Float32Array ,
-              ' f64' : Float64Array ,
-              'bool' : Uint8Array
-              // TODO implement bool here
-             };
+                  ' i16' : Int16Array ,
+                  ' i32' : Int32Array ,
+                  ' i64' : BigInt64Array ,
+                  '  u8' : Uint8Array ,
+                  ' u16' :  Uint16Array ,
+                  ' u32' :  Uint32Array ,
+                  ' u64' :  BigUint64Array ,
+                  ' f32' : Float32Array ,
+                  ' f64' : Float64Array ,
+                  'bool' : Uint8Array
+                  // TODO implement bool here
+                };
 
 function binToStringArray(buff, array) {
   for (var i = 0; i < array.length; i++) {
@@ -236,3 +233,5 @@ function read_value(typename, reader) {
   var val = reader.read_binary();
   return val;
 }
+
+// End of values.js

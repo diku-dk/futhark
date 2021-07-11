@@ -2,22 +2,22 @@
 
 class Server {
 
-    
   constructor(ctx) {
     this.ctx = ctx;
     this._vars = {};
     this._types = {};
     this._commands = [ 'inputs',
-                'outputs',
-                'call',
-                'restore',
-                'store',
-                'free',
-                'clear',
-                'pause_profiling',
-                'unpause_profiling',
-                'report'
-               ];
+                       'outputs',
+                       'call',
+                       'restore',
+                       'store',
+                       'free',
+                       'clear',
+                       'pause_profiling',
+                       'unpause_profiling',
+                       'report',
+                       'rename'
+                     ];
   }
 
   _get_arg(args, i) {
@@ -27,7 +27,7 @@ class Server {
       throw 'Insufficient command args';
     }
   }
-  
+
   _get_entry_point(entry) {
     // TODO Context contains a list of entry points, my implementation does not
     // Seems to be a dictionary
@@ -88,6 +88,18 @@ class Server {
     }
   }
 
+  _cmd_rename(args) {
+    var oldname = this._get_arg(args, 0)
+    var newname = this._get_arg(args, 1)
+    if (newname in this._vars) {
+      throw "Variable already exists: " + newname;
+    }
+    this._vars[newname] = this._vars[oldname];
+    this._types[newname] = this._types[oldname];
+    delete this._vars[oldname];
+    delete this._types[oldname];
+  }
+
   _cmd_call(args) {
     var entry = this._get_entry_point(this._get_arg(args, 0));
     var num_ins = entry[0].length;
@@ -121,7 +133,6 @@ class Server {
     }
   }
 
-
   _cmd_store(args) {
     var fname = this._get_arg(args, 0);
     for (var i = 1; i < args.length; i++) {
@@ -146,23 +157,24 @@ class Server {
     }
     return [count, type];
   }
+
   _cmd_restore(args) {
     if (args.length % 2 == 0) {
       throw "Invalid argument count";
     }
 
     var fname = args[0];
-    // TODO make sure this is legal 
+    // TODO make sure this is legal
     var args = args.slice(1);
-    
+
     // Reading from file is part of values.js
     ///////////////////////////////////////////
-//
-//    var fs = require("fs");
-//    fs.copyFile(fname, 'destination.txt', (err) => {
-//  if (err) throw err;
-//  console.log('source.txt was copied to destination.txt');
-//});
+    //
+    //    var fs = require("fs");
+    //    fs.copyFile(fname, 'destination.txt', (err) => {
+    //  if (err) throw err;
+    //  console.log('source.txt was copied to destination.txt');
+    //});
     ///////////////////////////////////////////
     var as = args;
     var reader = new Reader(fname);
@@ -170,7 +182,7 @@ class Server {
       var vname = as[0];
       var typename = as[1];
       as = as.slice(2);
-      
+
       if (vname in this._vars) {
         throw "Variable already exists: " + vname;
       }
@@ -201,9 +213,6 @@ class Server {
     }
   }
 
-
-
-
   _process_line(line) {
     // TODO make sure it splits on anywhite space
     var words = line.split(" ");
@@ -214,17 +223,18 @@ class Server {
       var args = words.splice(1);
       if (this._commands.includes(cmd)) {
         switch (cmd) {
-          case 'inputs': this._cmd_inputs(args); break;
-          case 'outputs': this._cmd_outputs(args); break
-          case 'call': this._cmd_call(args); break
-          case 'restore': this._cmd_restore(args); break
-          case 'store': this._cmd_store(args); break
-          case 'free': this._cmd_free(args); break
-          case 'clear': this._cmd_dummy(args); break
-          case 'pause_profiling': this._cmd_dummy(args); break
-          case 'unpause_profiling': this._cmd_dummy(args); break
-          case 'report': this._cmd_dummy(args); break
-       }
+        case 'inputs': this._cmd_inputs(args); break;
+        case 'outputs': this._cmd_outputs(args); break
+        case 'call': this._cmd_call(args); break
+        case 'restore': this._cmd_restore(args); break
+        case 'store': this._cmd_store(args); break
+        case 'free': this._cmd_free(args); break
+        case 'clear': this._cmd_dummy(args); break
+        case 'pause_profiling': this._cmd_dummy(args); break
+        case 'unpause_profiling': this._cmd_dummy(args); break
+        case 'report': this._cmd_dummy(args); break
+        case 'rename': this._cmd_rename(args); break
+        }
       } else {
         throw "Unknown command: " + cmd;
       }
@@ -247,6 +257,8 @@ class Server {
         console.log(err);
         console.log('%%% OK');
       }
-    });
+    }).on('close', () => { process.exit(0); });
   }
 }
+
+// End of server.js

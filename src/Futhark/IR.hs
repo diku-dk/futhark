@@ -1,7 +1,4 @@
--- | A convenient re-export of basic AST modules.  Note that
--- "Futhark.IR.Lore" is not exported, as this would
--- cause name clashes.  You are advised to use a qualified import of
--- the lore module, if you need it.
+-- | A convenient re-export of basic AST modules.
 module Futhark.IR
   ( module Futhark.IR.Prop,
     module Futhark.IR.Traversals,

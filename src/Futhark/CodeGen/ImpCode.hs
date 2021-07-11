@@ -52,10 +52,11 @@ module Futhark.CodeGen.ImpCode
     withElemType,
 
     -- * Re-exports from other modules.
+    pretty,
     module Language.Futhark.Core,
     module Futhark.IR.Primitive,
     module Futhark.Analysis.PrimExp,
-    module Futhark.IR.Kernels.Sizes,
+    module Futhark.IR.GPU.Sizes,
     module Futhark.IR.Prop.Names,
   )
 where
@@ -65,7 +66,7 @@ import qualified Data.Map as M
 import qualified Data.Set as S
 import Data.Traversable
 import Futhark.Analysis.PrimExp
-import Futhark.IR.Kernels.Sizes (Count (..))
+import Futhark.IR.GPU.Sizes (Count (..))
 import Futhark.IR.Pretty ()
 import Futhark.IR.Primitive
 import Futhark.IR.Prop.Names
@@ -102,9 +103,11 @@ data Definitions a = Definitions
   { defConsts :: Constants a,
     defFuns :: Functions a
   }
+  deriving (Show)
 
 -- | A collection of imperative functions.
 newtype Functions a = Functions [(Name, Function a)]
+  deriving (Show)
 
 instance Semigroup (Functions a) where
   Functions x <> Functions y = Functions $ x ++ y
@@ -120,6 +123,7 @@ data Constants a = Constants
     -- contain declarations of the names defined in 'constsDecl'.
     constsInit :: Code a
   }
+  deriving (Show)
 
 -- | Since the core language does not care for signedness, but the
 -- source language does, entry point input/output information has
@@ -128,7 +132,7 @@ data Constants a = Constants
 data Signedness
   = TypeUnsigned
   | TypeDirect
-  deriving (Eq, Show)
+  deriving (Eq, Ord, Show)
 
 -- | A description of an externally meaningful value.
 data ValueDesc
@@ -141,12 +145,14 @@ data ValueDesc
 
 -- | ^ An externally visible value.  This can be an opaque value
 -- (covering several physical internal values), or a single value that
--- can be used externally.
+-- can be used externally.  We record the uniqueness because it is
+-- important to the external interface as well.
 data ExternalValue
-  = -- | The string is a human-readable description
-    -- with no other semantics.
-    OpaqueValue String [ValueDesc]
-  | TransparentValue ValueDesc
+  = -- | The string is a human-readable description with no other
+    -- semantics.
+    -- not matter.
+    OpaqueValue Uniqueness String [ValueDesc]
+  | TransparentValue Uniqueness ValueDesc
   deriving (Show)
 
 -- | A imperative function, containing the body as well as its
@@ -154,7 +160,7 @@ data ExternalValue
 -- and results.  The latter are only used if the function is an entry
 -- point.
 data FunctionT a = Function
-  { functionEntry :: Bool,
+  { functionEntry :: Maybe Name,
     functionOutput :: [Param],
     functionInput :: [Param],
     functionBody :: Code a,
@@ -328,8 +334,6 @@ data ExpLeaf
   = -- | A scalar variable.  The type is stored in the
     -- 'LeafExp' constructor itself.
     ScalarVar VName
-  | -- | The size of a primitive type.
-    SizeOf PrimType
   | -- | Reading a value from memory.  The arguments have
     -- the same meaning as with 'Write'.
     Index VName (Count Elements (TExp Int64)) PrimType Space Volatility
@@ -365,8 +369,7 @@ bytes = Count
 -- | Convert a count of elements into a count of bytes, given the
 -- per-element size.
 withElemType :: Count Elements (TExp Int64) -> PrimType -> Count Bytes (TExp Int64)
-withElemType (Count e) t =
-  bytes $ sExt64 e * isInt64 (LeafExp (SizeOf t) (IntType Int64))
+withElemType (Count e) t = bytes $ sExt64 e * primByteSize t
 
 -- | Turn a 'VName' into a 'Imp.ScalarVar'.
 var :: VName -> PrimType -> Exp
@@ -438,9 +441,9 @@ instance Pretty ValueDesc where
         TypeDirect -> mempty
 
 instance Pretty ExternalValue where
-  ppr (TransparentValue v) = ppr v
-  ppr (OpaqueValue desc vs) =
-    text "opaque" <+> text desc
+  ppr (TransparentValue u v) = ppr u <> ppr v
+  ppr (OpaqueValue u desc vs) =
+    ppr u <> text "opaque" <+> text desc
       <+> nestedBlock "{" "}" (stack $ map ppr vs)
 
 instance Pretty ArrayContents where
@@ -528,8 +531,6 @@ instance Pretty ExpLeaf where
       vol' = case vol of
         Volatile -> text "volatile "
         Nonvolatile -> mempty
-  ppr (SizeOf t) =
-    text "sizeof" <> parens (ppr t)
 
 instance Functor Functions where
   fmap = fmapDefault
@@ -627,8 +628,8 @@ instance FreeIn ValueDesc where
   freeIn' ScalarValue {} = mempty
 
 instance FreeIn ExternalValue where
-  freeIn' (TransparentValue vd) = freeIn' vd
-  freeIn' (OpaqueValue _ vds) = foldMap freeIn' vds
+  freeIn' (TransparentValue _ vd) = freeIn' vd
+  freeIn' (OpaqueValue _ _ vds) = foldMap freeIn' vds
 
 instance FreeIn a => FreeIn (Code a) where
   freeIn' (x :>>: y) =
@@ -673,7 +674,6 @@ instance FreeIn a => FreeIn (Code a) where
 instance FreeIn ExpLeaf where
   freeIn' (Index v e _ _ _) = freeIn' v <> freeIn' e
   freeIn' (ScalarVar v) = freeIn' v
-  freeIn' (SizeOf _) = mempty
 
 instance FreeIn Arg where
   freeIn' (MemArg m) = freeIn' m

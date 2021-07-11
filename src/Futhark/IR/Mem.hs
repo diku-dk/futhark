@@ -128,7 +128,7 @@ import Futhark.IR.Prop.Aliases
 import Futhark.IR.Syntax
 import Futhark.IR.Traversals
 import qualified Futhark.Optimise.Simplify.Engine as Engine
-import Futhark.Optimise.Simplify.Lore
+import Futhark.Optimise.Simplify.Rep
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
 import qualified Futhark.TypeCheck as TC
@@ -151,16 +151,15 @@ type BranchTypeMem = BodyReturns
 class AllocOp op where
   allocOp :: SubExp -> Space -> op
 
-type Mem lore =
-  ( AllocOp (Op lore),
-    FParamInfo lore ~ FParamMem,
-    LParamInfo lore ~ LParamMem,
-    LetDec lore ~ LetDecMem,
-    RetType lore ~ RetTypeMem,
-    BranchType lore ~ BranchTypeMem,
-    ASTLore lore,
-    Decorations lore,
-    OpReturns lore
+type Mem rep =
+  ( AllocOp (Op rep),
+    FParamInfo rep ~ FParamMem,
+    LParamInfo rep ~ LParamMem,
+    LetDec rep ~ LetDecMem,
+    RetType rep ~ RetTypeMem,
+    BranchType rep ~ BranchTypeMem,
+    ASTRep rep,
+    OpReturns rep
   )
 
 instance IsRetType FunReturns where
@@ -324,15 +323,15 @@ instance (Substitute d, Substitute ret) => Rename (MemInfo d u ret) where
   rename = substituteRename
 
 simplifyIxFun ::
-  Engine.SimplifiableLore lore =>
+  Engine.SimplifiableRep rep =>
   IxFun ->
-  Engine.SimpleM lore IxFun
+  Engine.SimpleM rep IxFun
 simplifyIxFun = traverse $ fmap isInt64 . simplifyPrimExp . untyped
 
 simplifyExtIxFun ::
-  Engine.SimplifiableLore lore =>
+  Engine.SimplifiableRep rep =>
   ExtIxFun ->
-  Engine.SimpleM lore ExtIxFun
+  Engine.SimpleM rep ExtIxFun
 simplifyExtIxFun = traverse $ fmap isInt64 . simplifyExtPrimExp . untyped
 
 isStaticIxFun :: ExtIxFun -> Maybe IxFun
@@ -533,20 +532,20 @@ bodyReturnsToExpReturns :: BodyReturns -> ExpReturns
 bodyReturnsToExpReturns = noUniquenessReturns . maybeReturns
 
 matchRetTypeToResult ::
-  (Mem lore, TC.Checkable lore) =>
+  (Mem rep, TC.Checkable rep) =>
   [FunReturns] ->
   Result ->
-  TC.TypeM lore ()
+  TC.TypeM rep ()
 matchRetTypeToResult rettype result = do
   scope <- askScope
   result_ts <- runReaderT (mapM subExpMemInfo result) $ removeScopeAliases scope
   matchReturnType rettype result result_ts
 
 matchFunctionReturnType ::
-  (Mem lore, TC.Checkable lore) =>
+  (Mem rep, TC.Checkable rep) =>
   [FunReturns] ->
   Result ->
-  TC.TypeM lore ()
+  TC.TypeM rep ()
 matchFunctionReturnType rettype result = do
   matchRetTypeToResult rettype result
   mapM_ checkResultSubExp result
@@ -570,11 +569,11 @@ matchFunctionReturnType rettype result = do
                   ++ pretty ixfun
 
 matchLoopResultMem ::
-  (Mem lore, TC.Checkable lore) =>
-  [FParam (Aliases lore)] ->
-  [FParam (Aliases lore)] ->
+  (Mem rep, TC.Checkable rep) =>
+  [FParam (Aliases rep)] ->
+  [FParam (Aliases rep)] ->
   [SubExp] ->
-  TC.TypeM lore ()
+  TC.TypeM rep ()
 matchLoopResultMem ctx val = matchRetTypeToResult rettype
   where
     ctx_names = map paramName ctx
@@ -607,10 +606,10 @@ matchLoopResultMem ctx val = matchRetTypeToResult rettype
         ixfun' = existentialiseIxFun ctx_names ixfun
 
 matchBranchReturnType ::
-  (Mem lore, TC.Checkable lore) =>
+  (Mem rep, TC.Checkable rep) =>
   [BodyReturns] ->
-  Body (Aliases lore) ->
-  TC.TypeM lore ()
+  Body (Aliases rep) ->
+  TC.TypeM rep ()
 matchBranchReturnType rettype (Body _ stms res) = do
   scope <- askScope
   ts <- runReaderT (mapM subExpMemInfo res) $ removeScopeAliases (scope <> scopeOf stms)
@@ -649,7 +648,7 @@ matchReturnType ::
   [MemInfo ExtSize u MemReturn] ->
   [SubExp] ->
   [MemInfo SubExp NoUniqueness MemBind] ->
-  TC.TypeM lore ()
+  TC.TypeM rep ()
 matchReturnType rettype res ts = do
   let (ctx_ts, val_ts) = splitFromEnd (length rettype) ts
       (ctx_res, _val_res) = splitFromEnd (length rettype) res
@@ -769,7 +768,7 @@ matchReturnType rettype res ts = do
               pretty y
             ]
 
-      bad :: String -> TC.TypeM lore a
+      bad :: String -> TC.TypeM rep a
       bad s =
         TC.bad $
           TC.TypeError $
@@ -792,10 +791,10 @@ matchReturnType rettype res ts = do
   either bad return =<< runExceptT (zipWithM_ checkReturn rettype val_ts)
 
 matchPatternToExp ::
-  (Mem lore, TC.Checkable lore) =>
-  Pattern (Aliases lore) ->
-  Exp (Aliases lore) ->
-  TC.TypeM lore ()
+  (Mem rep, TC.Checkable rep) =>
+  Pattern (Aliases rep) ->
+  Exp (Aliases rep) ->
+  TC.TypeM rep ()
 matchPatternToExp pat e = do
   scope <- asksScope removeScopeAliases
   rt <- runReaderT (expReturns $ removeExpAliases e) scope
@@ -866,9 +865,9 @@ extInIxFn :: ExtIxFun -> S.Set Int
 extInIxFn ixfun = S.fromList $ concatMap (mapMaybe isExt . toList) ixfun
 
 varMemInfo ::
-  Mem lore =>
+  Mem rep =>
   VName ->
-  TC.TypeM lore (MemInfo SubExp NoUniqueness MemBind)
+  TC.TypeM rep (MemInfo SubExp NoUniqueness MemBind)
 varMemInfo name = do
   dec <- TC.lookupVar name
 
@@ -878,7 +877,7 @@ varMemInfo name = do
     LParamName summary -> return summary
     IndexName it -> return $ MemPrim $ IntType it
 
-nameInfoToMemInfo :: Mem lore => NameInfo lore -> MemBound NoUniqueness
+nameInfoToMemInfo :: Mem rep => NameInfo rep -> MemBound NoUniqueness
 nameInfoToMemInfo info =
   case info of
     FParamName summary -> noUniquenessReturns summary
@@ -887,20 +886,20 @@ nameInfoToMemInfo info =
     IndexName it -> MemPrim $ IntType it
 
 lookupMemInfo ::
-  (HasScope lore m, Mem lore) =>
+  (HasScope rep m, Mem rep) =>
   VName ->
   m (MemInfo SubExp NoUniqueness MemBind)
 lookupMemInfo = fmap nameInfoToMemInfo . lookupInfo
 
 subExpMemInfo ::
-  (HasScope lore m, Monad m, Mem lore) =>
+  (HasScope rep m, Monad m, Mem rep) =>
   SubExp ->
   m (MemInfo SubExp NoUniqueness MemBind)
 subExpMemInfo (Var v) = lookupMemInfo v
 subExpMemInfo (Constant v) = return $ MemPrim $ primValueType v
 
 lookupArraySummary ::
-  (Mem lore, HasScope lore m, Monad m) =>
+  (Mem rep, HasScope rep m, Monad m) =>
   VName ->
   m (VName, IxFun.IxFun (TPrimExp Int64 VName))
 lookupArraySummary name = do
@@ -912,10 +911,10 @@ lookupArraySummary name = do
       error $ "Variable " ++ pretty name ++ " does not look like an array."
 
 checkMemInfo ::
-  TC.Checkable lore =>
+  TC.Checkable rep =>
   VName ->
   MemInfo SubExp u MemBind ->
-  TC.TypeM lore ()
+  TC.TypeM rep ()
 checkMemInfo _ (MemPrim _) = return ()
 checkMemInfo _ (MemMem (ScalarSpace d _)) = mapM_ (TC.require [Prim int64]) d
 checkMemInfo _ (MemMem _) = return ()
@@ -1002,7 +1001,7 @@ extReturns ets =
     convert (Free v) = Free <$> pe64 v
 
 arrayVarReturns ::
-  (HasScope lore m, Monad m, Mem lore) =>
+  (HasScope rep m, Monad m, Mem rep) =>
   VName ->
   m (PrimType, Shape, VName, IxFun)
 arrayVarReturns v = do
@@ -1014,7 +1013,7 @@ arrayVarReturns v = do
       error $ "arrayVarReturns: " ++ pretty v ++ " is not an array."
 
 varReturns ::
-  (HasScope lore m, Monad m, Mem lore) =>
+  (HasScope rep m, Monad m, Mem rep) =>
   VName ->
   m ExpReturns
 varReturns v = do
@@ -1031,7 +1030,7 @@ varReturns v = do
     MemAcc acc ispace ts u ->
       return $ MemAcc acc ispace ts u
 
-subExpReturns :: (HasScope lore m, Monad m, Mem lore) => SubExp -> m ExpReturns
+subExpReturns :: (HasScope rep m, Monad m, Mem rep) => SubExp -> m ExpReturns
 subExpReturns (Var v) =
   varReturns v
 subExpReturns (Constant v) =
@@ -1041,10 +1040,10 @@ subExpReturns (Constant v) =
 -- "return type with memory annotations" of the expression.
 expReturns ::
   ( Monad m,
-    LocalScope lore m,
-    Mem lore
+    LocalScope rep m,
+    Mem rep
   ) =>
-  Exp lore ->
+  Exp rep ->
   m [ExpReturns]
 expReturns (BasicOp (SubExp se)) =
   pure <$> subExpReturns se
@@ -1086,7 +1085,7 @@ expReturns (BasicOp (Index v slice)) = do
     MemPrim pt -> return [MemPrim pt]
     MemAcc acc ispace ts u -> return [MemAcc acc ispace ts u]
     MemMem space -> return [MemMem space]
-expReturns (BasicOp (Update v _ _)) =
+expReturns (BasicOp (Update _ v _ _)) =
   pure <$> varReturns v
 expReturns (BasicOp op) =
   extReturns . staticShapes <$> primOpType op
@@ -1137,7 +1136,7 @@ expReturns (WithAcc inputs lam) =
     num_accs = length inputs
 
 sliceInfo ::
-  (Monad m, HasScope lore m, Mem lore) =>
+  (Monad m, HasScope rep m, Mem rep) =>
   VName ->
   Slice SubExp ->
   m (MemInfo SubExp NoUniqueness MemBind)
@@ -1153,10 +1152,10 @@ sliceInfo v slice = do
               ixfun
               (map (fmap (isInt64 . primExpFromSubExp int64)) slice)
 
-class TypedOp (Op lore) => OpReturns lore where
+class TypedOp (Op rep) => OpReturns rep where
   opReturns ::
-    (Monad m, HasScope lore m) =>
-    Op lore ->
+    (Monad m, HasScope rep m) =>
+    Op rep ->
     m [ExpReturns]
   opReturns op = extReturns <$> opType op
 

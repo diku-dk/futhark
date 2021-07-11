@@ -21,7 +21,7 @@ import Data.List (mapAccumL)
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import qualified Futhark.Analysis.HORep.SOAC as SOAC
-import Futhark.Binder (Bindable (..), insertStm, insertStms, mkLet)
+import Futhark.Builder (Buildable (..), insertStm, insertStms, mkLet)
 import Futhark.Construct (mapResult)
 import Futhark.IR
 import Futhark.Util (dropLast, splitAt3, takeLast)
@@ -44,11 +44,11 @@ import Futhark.Util (dropLast, splitAt3, takeLast)
 -- The result is the fused function, and a list of the array inputs
 -- expected by the SOAC containing the fused function.
 fuseMaps ::
-  Bindable lore =>
+  Buildable rep =>
   -- | The producer var names that still need to be returned
   Names ->
   -- | Function of SOAC to be fused.
-  Lambda lore ->
+  Lambda rep ->
   -- | Input of SOAC to be fused.
   [SOAC.Input] ->
   -- | Output of SOAC to be fused.  The
@@ -58,12 +58,12 @@ fuseMaps ::
   -- bind a single element of that output.
   [(VName, Ident)] ->
   -- | Function to be fused with.
-  Lambda lore ->
+  Lambda rep ->
   -- | Input of SOAC to be fused with.
   [SOAC.Input] ->
   -- | The fused lambda and the inputs of
   -- the resulting SOAC.
-  (Lambda lore, [SOAC.Input])
+  (Lambda rep, [SOAC.Input])
 fuseMaps unfus_nms lam1 inp1 out1 lam2 inp2 = (lam2', M.elems inputmap)
   where
     lam2' =
@@ -96,19 +96,19 @@ fuseMaps unfus_nms lam1 inp1 out1 lam2 inp2 = (lam2', M.elems inputmap)
 --(unfus_accpat, unfus_arrpat) = splitAt (length unfus_accs) unfus_pat
 
 fuseInputs ::
-  Bindable lore =>
+  Buildable rep =>
   Names ->
-  Lambda lore ->
+  Lambda rep ->
   [SOAC.Input] ->
   [(VName, Ident)] ->
-  Lambda lore ->
+  Lambda rep ->
   [SOAC.Input] ->
   ( [Ident],
     [Ident],
     [Ident],
     M.Map Ident SOAC.Input,
-    Body lore -> Body lore,
-    Body lore -> Body lore
+    Body rep -> Body rep,
+    Body rep -> Body rep
   )
 fuseInputs unfus_nms lam1 inp1 out1 lam2 inp2 =
   (lam2redparams, unfus_vars, outbnds, inputmap, makeCopies, makeCopiesInner)
@@ -172,9 +172,9 @@ filterOutParams out1 outins =
         _ -> (m, ra)
 
 removeDuplicateInputs ::
-  Bindable lore =>
+  Buildable rep =>
   M.Map Ident SOAC.Input ->
-  (M.Map Ident SOAC.Input, Body lore -> Body lore)
+  (M.Map Ident SOAC.Input, Body rep -> Body rep)
 removeDuplicateInputs = fst . M.foldlWithKey' comb ((M.empty, id), M.empty)
   where
     comb ((parmap, inner), arrmap) par arr =
@@ -192,19 +192,19 @@ removeDuplicateInputs = fst . M.foldlWithKey' comb ((M.empty, id), M.empty)
         `insertStm` b
 
 fuseRedomap ::
-  Bindable lore =>
+  Buildable rep =>
   Names ->
   [VName] ->
-  Lambda lore ->
+  Lambda rep ->
   [SubExp] ->
   [SubExp] ->
   [SOAC.Input] ->
   [(VName, Ident)] ->
-  Lambda lore ->
+  Lambda rep ->
   [SubExp] ->
   [SubExp] ->
   [SOAC.Input] ->
-  (Lambda lore, [SOAC.Input])
+  (Lambda rep, [SOAC.Input])
 fuseRedomap
   unfus_nms
   outVars
@@ -282,7 +282,7 @@ fuseRedomap
             }
      in (res_lam', new_inp)
 
-mergeReduceOps :: Lambda lore -> Lambda lore -> Lambda lore
+mergeReduceOps :: Lambda rep -> Lambda rep -> Lambda rep
 mergeReduceOps (Lambda par1 bdy1 rtp1) (Lambda par2 bdy2 rtp2) =
   let body' =
         Body

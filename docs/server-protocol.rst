@@ -52,18 +52,29 @@ All variables have types, and all entry points accept inputs and
 produce outputs of defined types.  The notion of transparent and
 opaque types are the same as in the C API: primitives and array of
 primitives are directly supported, and everything else is treated as
-opaque.  See also :ref:`valuemapping`. When printed, types
-follow basic Futhark type syntax *without* sizes (e.g. ``[][]i32``).
+opaque.  See also :ref:`valuemapping`. When printed, types follow
+basic Futhark type syntax *without* sizes (e.g. ``[][]i32``).
+Uniqueness is not part of the types, but is indicated with an asterisk
+in the ``inputs`` and ``outputs`` commands (see below).
+
+Consumption and aliasing
+------------------------
+
+Since the server protocol closely models the C API, the same rules
+apply to entry points that consume their arguments (see
+:ref:`api-consumption`).  In particular, consumed variables must still
+be freed with the ``free`` command - but this is the only operation
+that may be used on consumed variables.
 
 Commands
 --------
 
 The following commands are supported.
 
-``call`` *entry* *o1* ... *oN* *i1* ... *oM*
+``call`` *entry* *o1* ... *oN* *i1* ... *iM*
 ............................................
 
-Call the given entry point with input from the variables *i1* to *oM*.
+Call the given entry point with input from the variables *i1* to *iM*.
 The results are stored in *o1* to *oN*, which must not already exist.
 
 ``restore`` *file* *v1* *t1* ... *vN* *tN*
@@ -82,17 +93,24 @@ Store the *N* values in variables *v1* to *vN* in *file*.
 
 Delete the given variables.
 
+``rename`` *oldname* *newname*
+..............................
+
+Rename the variable *oldname* to *newname*, which must not already
+exist.
+
 ``inputs`` *entry*
 ..................
 
 Print the types of inputs accepted by the given entry point, one per
-line.
+line.  If the given input is consumed, the type is prefixed by `*`.
 
 ``outputs`` *entry*
 ...................
 
 Print the types of outputs produced by the given entry point, one per
-line.
+line.  If the given output is guaranteed to be unique (does not alias
+any inputs), the type is prefixed by `*`.
 
 ``clear``
 .........
@@ -114,3 +132,11 @@ Corresponds to :c:func:`futhark_context_unpause_profiling`.
 ..........
 
 Corresponds to :c:func:`futhark_context_report`.
+
+Environment Variables
+---------------------
+
+``FUTHARK_COMPILER_DEBUGGING``
+..............................
+
+Turns on debugging output for the server when set to 1.

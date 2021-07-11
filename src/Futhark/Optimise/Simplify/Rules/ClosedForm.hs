@@ -39,13 +39,13 @@ Motivation:
 -- | @foldClosedForm look foldfun accargs arrargs@ determines whether
 -- each of the results of @foldfun@ can be expressed in a closed form.
 foldClosedForm ::
-  (ASTLore lore, BinderOps lore) =>
-  VarLookup lore ->
-  Pattern lore ->
-  Lambda lore ->
+  (ASTRep rep, BuilderOps rep) =>
+  VarLookup rep ->
+  Pattern rep ->
+  Lambda rep ->
   [SubExp] ->
   [VName] ->
-  RuleM lore ()
+  RuleM rep ()
 foldClosedForm look pat lam accs arrs = do
   inputsize <- arraysSize 0 <$> mapM lookupType arrs
 
@@ -78,14 +78,14 @@ foldClosedForm look pat lam accs arrs = do
 -- | @loopClosedForm pat respat merge bound bodys@ determines whether
 -- the do-loop can be expressed in a closed form.
 loopClosedForm ::
-  (ASTLore lore, BinderOps lore) =>
-  Pattern lore ->
-  [(FParam lore, SubExp)] ->
+  (ASTRep rep, BuilderOps rep) =>
+  Pattern rep ->
+  [(FParam rep, SubExp)] ->
   Names ->
   IntType ->
   SubExp ->
-  Body lore ->
-  RuleM lore ()
+  Body rep ->
+  RuleM rep ()
 loopClosedForm pat merge i it bound body = do
   t <- case patternTypes pat of
     [Prim t] -> return t
@@ -118,7 +118,7 @@ loopClosedForm pat merge i it bound body = do
     knownBnds = M.fromList $ zip mergenames mergeexp
 
 checkResults ::
-  BinderOps lore =>
+  BuilderOps rep =>
   [VName] ->
   SubExp ->
   Names ->
@@ -126,9 +126,9 @@ checkResults ::
   M.Map VName SubExp ->
   -- | Lambda-bound
   [VName] ->
-  Body lore ->
+  Body rep ->
   [SubExp] ->
-  RuleM lore (Body lore)
+  RuleM rep (Body rep)
 checkResults pat size untouchable it knownBnds params body accs = do
   ((), bnds) <-
     collectStms $
@@ -191,8 +191,8 @@ checkResults pat size untouchable it knownBnds params body accs = do
           BasicOp $ ConvOp (SIToFP it t) size
 
 determineKnownBindings ::
-  VarLookup lore ->
-  Lambda lore ->
+  VarLookup rep ->
+  Lambda rep ->
   [SubExp] ->
   [VName] ->
   M.Map VName SubExp
@@ -215,7 +215,7 @@ determineKnownBindings look lam accs arrs =
         Just (p, ve)
     isReplicate _ = Nothing
 
-makeBindMap :: Body lore -> M.Map VName (Exp lore)
+makeBindMap :: Body rep -> M.Map VName (Exp rep)
 makeBindMap = M.fromList . mapMaybe isSingletonStm . stmsToList . bodyStms
   where
     isSingletonStm (Let pat _ e) = case patternNames pat of

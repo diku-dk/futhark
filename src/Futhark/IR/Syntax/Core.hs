@@ -5,7 +5,7 @@
 
 -- | The most primitive ("core") aspects of the AST.  Split out of
 -- "Futhark.IR.Syntax" in order for
--- "Futhark.IR.Decorations" to use these definitions.  This
+-- "Futhark.IR.Rep" to use these definitions.  This
 -- module is re-exported from "Futhark.IR.Syntax" and
 -- there should be no reason to include it explicitly.
 module Futhark.IR.Syntax.Core
@@ -13,6 +13,7 @@ module Futhark.IR.Syntax.Core
     module Futhark.IR.Primitive,
 
     -- * Types
+    Commutativity (..),
     Uniqueness (..),
     NoUniqueness (..),
     ShapeBase (..),
@@ -66,6 +67,19 @@ import Data.Traversable (fmapDefault, foldMapDefault)
 import Futhark.IR.Primitive
 import Language.Futhark.Core
 import Prelude hiding (id, (.))
+
+-- | Whether some operator is commutative or not.  The 'Monoid'
+-- instance returns the least commutative of its arguments.
+data Commutativity
+  = Noncommutative
+  | Commutative
+  deriving (Eq, Ord, Show)
+
+instance Semigroup Commutativity where
+  (<>) = min
+
+instance Monoid Commutativity where
+  mempty = Commutative
 
 -- | The size of an array type as a list of its dimension sizes, with
 -- the type of sizes being parametric.

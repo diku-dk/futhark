@@ -46,7 +46,7 @@ import Futhark.IR.Aliases
     removeProgAliases,
     removeStmAliases,
   )
-import qualified Futhark.IR.Kernels.Kernel as Kernel
+import qualified Futhark.IR.GPU.Kernel as Kernel
 import qualified Futhark.IR.MC as MC
 import qualified Futhark.IR.Mem as Memory
 import Futhark.IR.Prop.Aliases
@@ -54,22 +54,22 @@ import qualified Futhark.IR.SOACS.SOAC as SOAC
 import Futhark.Pass
 import Futhark.Transform.Substitute
 
-consumedInStms :: Aliased lore => Stms lore -> Names
+consumedInStms :: Aliased rep => Stms rep -> Names
 consumedInStms = snd . flip mkStmsAliases []
 
 -- | Perform CSE on every function in a program.
 --
 -- If the boolean argument is false, the pass will not perform CSE on
--- expressions producing arrays. This should be disabled when the lore has
+-- expressions producing arrays. This should be disabled when the rep has
 -- memory information, since at that point arrays have identity beyond their
 -- value.
 performCSE ::
-  ( ASTLore lore,
-    CanBeAliased (Op lore),
-    CSEInOp (OpWithAliases (Op lore))
+  ( ASTRep rep,
+    CanBeAliased (Op rep),
+    CSEInOp (OpWithAliases (Op rep))
   ) =>
   Bool ->
-  Pass lore lore
+  Pass rep rep
 performCSE cse_arrays =
   Pass "CSE" "Combine common subexpressions." $
     fmap removeProgAliases
@@ -87,34 +87,34 @@ performCSE cse_arrays =
 -- | Perform CSE on a single function.
 --
 -- If the boolean argument is false, the pass will not perform CSE on
--- expressions producing arrays. This should be disabled when the lore has
+-- expressions producing arrays. This should be disabled when the rep has
 -- memory information, since at that point arrays have identity beyond their
 -- value.
 performCSEOnFunDef ::
-  ( ASTLore lore,
-    CanBeAliased (Op lore),
-    CSEInOp (OpWithAliases (Op lore))
+  ( ASTRep rep,
+    CanBeAliased (Op rep),
+    CSEInOp (OpWithAliases (Op rep))
   ) =>
   Bool ->
-  FunDef lore ->
-  FunDef lore
+  FunDef rep ->
+  FunDef rep
 performCSEOnFunDef cse_arrays =
   removeFunDefAliases . cseInFunDef cse_arrays . analyseFun
 
 -- | Perform CSE on some statements.
 --
 -- If the boolean argument is false, the pass will not perform CSE on
--- expressions producing arrays. This should be disabled when the lore has
+-- expressions producing arrays. This should be disabled when the rep has
 -- memory information, since at that point arrays have identity beyond their
 -- value.
 performCSEOnStms ::
-  ( ASTLore lore,
-    CanBeAliased (Op lore),
-    CSEInOp (OpWithAliases (Op lore))
+  ( ASTRep rep,
+    CanBeAliased (Op rep),
+    CSEInOp (OpWithAliases (Op rep))
   ) =>
   Bool ->
-  Stms lore ->
-  Stms lore
+  Stms rep ->
+  Stms rep
 performCSEOnStms cse_arrays =
   fmap removeStmAliases . f . fst . analyseStms mempty
   where
@@ -129,10 +129,10 @@ performCSEOnStms cse_arrays =
           (newCSEState cse_arrays)
 
 cseInFunDef ::
-  (ASTLore lore, Aliased lore, CSEInOp (Op lore)) =>
+  (ASTRep rep, Aliased rep, CSEInOp (Op rep)) =>
   Bool ->
-  FunDef lore ->
-  FunDef lore
+  FunDef rep ->
+  FunDef rep
 cseInFunDef cse_arrays fundec =
   fundec
     { funDefBody =
@@ -150,13 +150,13 @@ cseInFunDef cse_arrays fundec =
       | primType $ declExtTypeOf t = Observe
       | otherwise = Consume
 
-type CSEM lore = Reader (CSEState lore)
+type CSEM rep = Reader (CSEState rep)
 
 cseInBody ::
-  (ASTLore lore, Aliased lore, CSEInOp (Op lore)) =>
+  (ASTRep rep, Aliased rep, CSEInOp (Op rep)) =>
   [Diet] ->
-  Body lore ->
-  CSEM lore (Body lore)
+  Body rep ->
+  CSEM rep (Body rep)
 cseInBody ds (Body bodydec stms res) = do
   (stms', res') <-
     cseInStms (res_cons <> stms_cons) (stmsToList stms) $ do
@@ -170,19 +170,19 @@ cseInBody ds (Body bodydec stms res) = do
     consumeResult _ _ = mempty
 
 cseInLambda ::
-  (ASTLore lore, Aliased lore, CSEInOp (Op lore)) =>
-  Lambda lore ->
-  CSEM lore (Lambda lore)
+  (ASTRep rep, Aliased rep, CSEInOp (Op rep)) =>
+  Lambda rep ->
+  CSEM rep (Lambda rep)
 cseInLambda lam = do
   body' <- cseInBody (map (const Observe) $ lambdaReturnType lam) $ lambdaBody lam
   return lam {lambdaBody = body'}
 
 cseInStms ::
-  (ASTLore lore, Aliased lore, CSEInOp (Op lore)) =>
+  (ASTRep rep, Aliased rep, CSEInOp (Op rep)) =>
   Names ->
-  [Stm lore] ->
-  CSEM lore a ->
-  CSEM lore (Stms lore, a)
+  [Stm rep] ->
+  CSEM rep a ->
+  CSEM rep (Stms rep, a)
 cseInStms _ [] m = do
   a <- m
   return (mempty, a)
@@ -208,11 +208,11 @@ cseInStms consumed (bnd : bnds) m =
       | otherwise = Observe
 
 cseInStm ::
-  ASTLore lore =>
+  ASTRep rep =>
   Names ->
-  Stm lore ->
-  ([Stm lore] -> CSEM lore a) ->
-  CSEM lore a
+  Stm rep ->
+  ([Stm rep] -> CSEM rep a) ->
+  CSEM rep a
 cseInStm consumed (Let pat (StmAux cs attrs edec) e) m = do
   CSEState (esubsts, nsubsts) cse_arrays <- ask
   let e' = substituteNames nsubsts e
@@ -239,70 +239,70 @@ cseInStm consumed (Let pat (StmAux cs attrs edec) e) m = do
       | patElemName pe `nameIn` consumed = True
       | otherwise = False
 
-type ExpressionSubstitutions lore =
+type ExpressionSubstitutions rep =
   M.Map
-    (ExpDec lore, Exp lore)
-    (Pattern lore)
+    (ExpDec rep, Exp rep)
+    (Pattern rep)
 
 type NameSubstitutions = M.Map VName VName
 
-data CSEState lore = CSEState
-  { _cseSubstitutions :: (ExpressionSubstitutions lore, NameSubstitutions),
+data CSEState rep = CSEState
+  { _cseSubstitutions :: (ExpressionSubstitutions rep, NameSubstitutions),
     _cseArrays :: Bool
   }
 
-newCSEState :: Bool -> CSEState lore
+newCSEState :: Bool -> CSEState rep
 newCSEState = CSEState (M.empty, M.empty)
 
 mkSubsts :: PatternT dec -> PatternT dec -> M.Map VName VName
 mkSubsts pat vs = M.fromList $ zip (patternNames pat) (patternNames vs)
 
-addNameSubst :: PatternT dec -> PatternT dec -> CSEState lore -> CSEState lore
+addNameSubst :: PatternT dec -> PatternT dec -> CSEState rep -> CSEState rep
 addNameSubst pat subpat (CSEState (esubsts, nsubsts) cse_arrays) =
   CSEState (esubsts, mkSubsts pat subpat `M.union` nsubsts) cse_arrays
 
 addExpSubst ::
-  ASTLore lore =>
-  Pattern lore ->
-  ExpDec lore ->
-  Exp lore ->
-  CSEState lore ->
-  CSEState lore
+  ASTRep rep =>
+  Pattern rep ->
+  ExpDec rep ->
+  Exp rep ->
+  CSEState rep ->
+  CSEState rep
 addExpSubst pat edec e (CSEState (esubsts, nsubsts) cse_arrays) =
   CSEState (M.insert (edec, e) pat esubsts, nsubsts) cse_arrays
 
 -- | The operations that permit CSE.
 class CSEInOp op where
   -- | Perform CSE within any nested expressions.
-  cseInOp :: op -> CSEM lore op
+  cseInOp :: op -> CSEM rep op
 
 instance CSEInOp () where
   cseInOp () = return ()
 
-subCSE :: CSEM lore r -> CSEM otherlore r
+subCSE :: CSEM rep r -> CSEM otherrep r
 subCSE m = do
   CSEState _ cse_arrays <- ask
   return $ runReader m $ newCSEState cse_arrays
 
 instance
-  ( ASTLore lore,
-    Aliased lore,
-    CSEInOp (Op lore),
+  ( ASTRep rep,
+    Aliased rep,
+    CSEInOp (Op rep),
     CSEInOp op
   ) =>
-  CSEInOp (Kernel.HostOp lore op)
+  CSEInOp (Kernel.HostOp rep op)
   where
   cseInOp (Kernel.SegOp op) = Kernel.SegOp <$> cseInOp op
   cseInOp (Kernel.OtherOp op) = Kernel.OtherOp <$> cseInOp op
   cseInOp x = return x
 
 instance
-  ( ASTLore lore,
-    Aliased lore,
-    CSEInOp (Op lore),
+  ( ASTRep rep,
+    Aliased rep,
+    CSEInOp (Op rep),
     CSEInOp op
   ) =>
-  CSEInOp (MC.MCOp lore op)
+  CSEInOp (MC.MCOp rep op)
   where
   cseInOp (MC.ParOp par_op op) =
     MC.ParOp <$> traverse cseInOp par_op <*> cseInOp op
@@ -310,8 +310,8 @@ instance
     MC.OtherOp <$> cseInOp op
 
 instance
-  (ASTLore lore, Aliased lore, CSEInOp (Op lore)) =>
-  CSEInOp (Kernel.SegOp lvl lore)
+  (ASTRep rep, Aliased rep, CSEInOp (Op rep)) =>
+  CSEInOp (Kernel.SegOp lvl rep)
   where
   cseInOp =
     subCSE
@@ -319,9 +319,9 @@ instance
         (Kernel.SegOpMapper return cseInLambda cseInKernelBody return return)
 
 cseInKernelBody ::
-  (ASTLore lore, Aliased lore, CSEInOp (Op lore)) =>
-  Kernel.KernelBody lore ->
-  CSEM lore (Kernel.KernelBody lore)
+  (ASTRep rep, Aliased rep, CSEInOp (Op rep)) =>
+  Kernel.KernelBody rep ->
+  CSEM rep (Kernel.KernelBody rep)
 cseInKernelBody (Kernel.KernelBody bodydec bnds res) = do
   Body _ bnds' _ <- cseInBody (map (const Observe) res) $ Body bodydec bnds []
   return $ Kernel.KernelBody bodydec bnds' res
@@ -331,10 +331,10 @@ instance CSEInOp op => CSEInOp (Memory.MemOp op) where
   cseInOp (Memory.Inner k) = Memory.Inner <$> subCSE (cseInOp k)
 
 instance
-  ( ASTLore lore,
-    CanBeAliased (Op lore),
-    CSEInOp (OpWithAliases (Op lore))
+  ( ASTRep rep,
+    CanBeAliased (Op rep),
+    CSEInOp (OpWithAliases (Op rep))
   ) =>
-  CSEInOp (SOAC.SOAC (Aliases lore))
+  CSEInOp (SOAC.SOAC (Aliases rep))
   where
   cseInOp = subCSE . SOAC.mapSOACM (SOAC.SOACMapper return cseInLambda return)

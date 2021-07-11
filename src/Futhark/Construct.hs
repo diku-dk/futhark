@@ -16,29 +16,29 @@
 -- own bespoke source of unique names) to manually construct
 -- expressions, statements, and entire ASTs.  In practice, this would
 -- be very tedious.  Instead, we have defined a collection of building
--- blocks (centered around the 'MonadBinder' type class) that permits
+-- blocks (centered around the 'MonadBuilder' type class) that permits
 -- a more abstract way of generating code.
 --
 -- Constructing ASTs with these building blocks requires you to ensure
 -- that all free variables are in scope.  See
 -- "Futhark.IR.Prop.Scope".
 --
--- == 'MonadBinder'
+-- == 'MonadBuilder'
 --
--- A monad that implements 'MonadBinder' tracks the statements added
+-- A monad that implements 'MonadBuilder' tracks the statements added
 -- so far, the current names in scope, and allows you to add
 -- additional statements with 'addStm'.  Any monad that implements
--- 'MonadBinder' also implements the t'Lore' type family, which
--- indicates which lore it works with.  Inside a 'MonadBinder' we can
+-- 'MonadBuilder' also implements the t'REp' type family, which
+-- indicates which rep it works with.  Inside a 'MonadBuilder' we can
 -- use 'collectStms' to gather up the 'Stms' added with 'addStm' in
 -- some nested computation.
 --
--- The 'BinderT' monad (and its convenient 'Binder' version) provides
--- the simplest implementation of 'MonadBinder'.
+-- The 'BuilderT' monad (and its convenient 'Builder' version) provides
+-- the simplest implementation of 'MonadBuilder'.
 --
 -- == Higher-level building blocks
 --
--- On top of the raw facilities provided by 'MonadBinder', we have
+-- On top of the raw facilities provided by 'MonadBuilder', we have
 -- more convenient facilities.  For example, 'letSubExp' lets us
 -- conveniently create a 'Stm' for an 'Exp' that produces a /single/
 -- value, and returns the (fresh) name for the resulting variable:
@@ -60,6 +60,7 @@ module Futhark.Construct
     letTupExp',
     letInPlace,
     eSubExp,
+    eParam,
     eIf,
     eIf',
     eBinOp,
@@ -74,7 +75,6 @@ module Futhark.Construct
     eBlank,
     eAll,
     eOutOfBounds,
-    eWriteArray,
     asIntZ,
     asIntS,
     resultBody,
@@ -93,7 +93,7 @@ module Futhark.Construct
     isFullSlice,
     sliceAt,
     ifCommon,
-    module Futhark.Binder,
+    module Futhark.Builder,
 
     -- * Result types
     instantiateShapes,
@@ -113,21 +113,21 @@ import Control.Monad.Writer
 import Data.Bifunctor (second)
 import Data.List (sortOn)
 import qualified Data.Map.Strict as M
-import Futhark.Binder
+import Futhark.Builder
 import Futhark.IR
 
 letSubExp ::
-  MonadBinder m =>
+  MonadBuilder m =>
   String ->
-  Exp (Lore m) ->
+  Exp (Rep m) ->
   m SubExp
 letSubExp _ (BasicOp (SubExp se)) = return se
 letSubExp desc e = Var <$> letExp desc e
 
 letExp ::
-  MonadBinder m =>
+  MonadBuilder m =>
   String ->
-  Exp (Lore m) ->
+  Exp (Rep m) ->
   m VName
 letExp _ (BasicOp (SubExp (Var v))) =
   return v
@@ -140,27 +140,27 @@ letExp desc e = do
     _ -> error $ "letExp: tuple-typed expression given:\n" ++ pretty e
 
 letInPlace ::
-  MonadBinder m =>
+  MonadBuilder m =>
   String ->
   VName ->
   Slice SubExp ->
-  Exp (Lore m) ->
+  Exp (Rep m) ->
   m VName
 letInPlace desc src slice e = do
   tmp <- letSubExp (desc ++ "_tmp") e
-  letExp desc $ BasicOp $ Update src slice tmp
+  letExp desc $ BasicOp $ Update Unsafe src slice tmp
 
 letSubExps ::
-  MonadBinder m =>
+  MonadBuilder m =>
   String ->
-  [Exp (Lore m)] ->
+  [Exp (Rep m)] ->
   m [SubExp]
 letSubExps desc = mapM $ letSubExp desc
 
 letTupExp ::
-  (MonadBinder m) =>
+  (MonadBuilder m) =>
   String ->
-  Exp (Lore m) ->
+  Exp (Rep m) ->
   m [VName]
 letTupExp _ (BasicOp (SubExp (Var v))) =
   return [v]
@@ -171,35 +171,41 @@ letTupExp name e = do
   return names
 
 letTupExp' ::
-  (MonadBinder m) =>
+  (MonadBuilder m) =>
   String ->
-  Exp (Lore m) ->
+  Exp (Rep m) ->
   m [SubExp]
 letTupExp' _ (BasicOp (SubExp se)) = return [se]
 letTupExp' name ses = map Var <$> letTupExp name ses
 
 eSubExp ::
-  MonadBinder m =>
+  MonadBuilder m =>
   SubExp ->
-  m (Exp (Lore m))
+  m (Exp (Rep m))
 eSubExp = pure . BasicOp . SubExp
 
+eParam ::
+  MonadBuilder m =>
+  Param t ->
+  m (Exp (Rep m))
+eParam = eSubExp . Var . paramName
+
 eIf ::
-  (MonadBinder m, BranchType (Lore m) ~ ExtType) =>
-  m (Exp (Lore m)) ->
-  m (Body (Lore m)) ->
-  m (Body (Lore m)) ->
-  m (Exp (Lore m))
+  (MonadBuilder m, BranchType (Rep m) ~ ExtType) =>
+  m (Exp (Rep m)) ->
+  m (Body (Rep m)) ->
+  m (Body (Rep m)) ->
+  m (Exp (Rep m))
 eIf ce te fe = eIf' ce te fe IfNormal
 
 -- | As 'eIf', but an 'IfSort' can be given.
 eIf' ::
-  (MonadBinder m, BranchType (Lore m) ~ ExtType) =>
-  m (Exp (Lore m)) ->
-  m (Body (Lore m)) ->
-  m (Body (Lore m)) ->
+  (MonadBuilder m, BranchType (Rep m) ~ ExtType) =>
+  m (Exp (Rep m)) ->
+  m (Body (Rep m)) ->
+  m (Body (Rep m)) ->
   IfSort ->
-  m (Exp (Lore m))
+  m (Exp (Rep m))
 eIf' ce te fe if_sort = do
   ce' <- letSubExp "cond" =<< ce
   te' <- insertStmsM te
@@ -222,7 +228,7 @@ eIf' ce te fe if_sort = do
 
 -- The type of a body.  Watch out: this only works for the degenerate
 -- case where the body does not already return its context.
-bodyExtType :: (HasScope lore m, Monad m) => Body lore -> m [ExtType]
+bodyExtType :: (HasScope rep m, Monad m) => Body rep -> m [ExtType]
 bodyExtType (Body _ stms res) =
   existentialiseExtTypes (M.keys stmsscope) . staticShapes
     <$> extendedScope (traverse subExpType res) stmsscope
@@ -230,40 +236,40 @@ bodyExtType (Body _ stms res) =
     stmsscope = scopeOf stms
 
 eBinOp ::
-  MonadBinder m =>
+  MonadBuilder m =>
   BinOp ->
-  m (Exp (Lore m)) ->
-  m (Exp (Lore m)) ->
-  m (Exp (Lore m))
+  m (Exp (Rep m)) ->
+  m (Exp (Rep m)) ->
+  m (Exp (Rep m))
 eBinOp op x y = do
   x' <- letSubExp "x" =<< x
   y' <- letSubExp "y" =<< y
   return $ BasicOp $ BinOp op x' y'
 
 eCmpOp ::
-  MonadBinder m =>
+  MonadBuilder m =>
   CmpOp ->
-  m (Exp (Lore m)) ->
-  m (Exp (Lore m)) ->
-  m (Exp (Lore m))
+  m (Exp (Rep m)) ->
+  m (Exp (Rep m)) ->
+  m (Exp (Rep m))
 eCmpOp op x y = do
   x' <- letSubExp "x" =<< x
   y' <- letSubExp "y" =<< y
   return $ BasicOp $ CmpOp op x' y'
 
 eConvOp ::
-  MonadBinder m =>
+  MonadBuilder m =>
   ConvOp ->
-  m (Exp (Lore m)) ->
-  m (Exp (Lore m))
+  m (Exp (Rep m)) ->
+  m (Exp (Rep m))
 eConvOp op x = do
   x' <- letSubExp "x" =<< x
   return $ BasicOp $ ConvOp op x'
 
 eSignum ::
-  MonadBinder m =>
-  m (Exp (Lore m)) ->
-  m (Exp (Lore m))
+  MonadBuilder m =>
+  m (Exp (Rep m)) ->
+  m (Exp (Rep m))
 eSignum em = do
   e <- em
   e' <- letSubExp "signum_arg" e
@@ -275,24 +281,24 @@ eSignum em = do
       error $ "eSignum: operand " ++ pretty e ++ " has invalid type."
 
 eCopy ::
-  MonadBinder m =>
-  m (Exp (Lore m)) ->
-  m (Exp (Lore m))
+  MonadBuilder m =>
+  m (Exp (Rep m)) ->
+  m (Exp (Rep m))
 eCopy e = BasicOp . Copy <$> (letExp "copy_arg" =<< e)
 
 eBody ::
-  (MonadBinder m) =>
-  [m (Exp (Lore m))] ->
-  m (Body (Lore m))
+  (MonadBuilder m) =>
+  [m (Exp (Rep m))] ->
+  m (Body (Rep m))
 eBody es = buildBody_ $ do
   es' <- sequence es
   xs <- mapM (letTupExp "x") es'
   pure $ map Var $ concat xs
 
 eLambda ::
-  MonadBinder m =>
-  Lambda (Lore m) ->
-  [m (Exp (Lore m))] ->
+  MonadBuilder m =>
+  Lambda (Rep m) ->
+  [m (Exp (Rep m))] ->
   m [SubExp]
 eLambda lam args = do
   zipWithM_ bindParam (lambdaParams lam) args
@@ -301,11 +307,11 @@ eLambda lam args = do
     bindParam param arg = letBindNames [paramName param] =<< arg
 
 eRoundToMultipleOf ::
-  MonadBinder m =>
+  MonadBuilder m =>
   IntType ->
-  m (Exp (Lore m)) ->
-  m (Exp (Lore m)) ->
-  m (Exp (Lore m))
+  m (Exp (Rep m)) ->
+  m (Exp (Rep m)) ->
+  m (Exp (Rep m))
 eRoundToMultipleOf t x d =
   ePlus x (eMod (eMinus d (eMod x d)) d)
   where
@@ -315,12 +321,12 @@ eRoundToMultipleOf t x d =
 
 -- | Construct an 'Index' expressions that slices an array with unit stride.
 eSliceArray ::
-  MonadBinder m =>
+  MonadBuilder m =>
   Int ->
   VName ->
-  m (Exp (Lore m)) ->
-  m (Exp (Lore m)) ->
-  m (Exp (Lore m))
+  m (Exp (Rep m)) ->
+  m (Exp (Rep m)) ->
+  m (Exp (Rep m))
 eSliceArray d arr i n = do
   arr_t <- lookupType arr
   let skips = map (slice (constant (0 :: Int64))) $ take d $ arrayDims arr_t
@@ -332,10 +338,10 @@ eSliceArray d arr i n = do
 
 -- | Are these indexes out-of-bounds for the array?
 eOutOfBounds ::
-  MonadBinder m =>
+  MonadBuilder m =>
   VName ->
-  [m (Exp (Lore m))] ->
-  m (Exp (Lore m))
+  [m (Exp (Rep m))] ->
+  m (Exp (Rep m))
 eOutOfBounds arr is = do
   arr_t <- lookupType arr
   let ws = arrayDims arr_t
@@ -351,52 +357,23 @@ eOutOfBounds arr is = do
           BasicOp $ BinOp LogOr less_than_zero greater_than_size
   foldBinOp LogOr (constant False) =<< zipWithM checkDim ws is'
 
--- | Write to an index of the array, if within bounds.  Otherwise,
--- nothing.  Produces the updated array.
-eWriteArray ::
-  (MonadBinder m, BranchType (Lore m) ~ ExtType) =>
-  VName ->
-  [m (Exp (Lore m))] ->
-  m (Exp (Lore m)) ->
-  m (Exp (Lore m))
-eWriteArray arr is v = do
-  arr_t <- lookupType arr
-  is' <- mapM (letSubExp "write_i") =<< sequence is
-  v' <- letSubExp "write_v" =<< v
-
-  outside_bounds <- letSubExp "outside_bounds" =<< eOutOfBounds arr is
-
-  outside_bounds_branch <- buildBody_ $ pure [Var arr]
-
-  in_bounds_branch <-
-    buildBody_ . fmap (pure . Var) $
-      letInPlace
-        "write_out_inside_bounds"
-        arr
-        (fullSlice arr_t (map DimFix is'))
-        (BasicOp $ SubExp v')
-
-  return $
-    If outside_bounds outside_bounds_branch in_bounds_branch $
-      ifCommon [arr_t]
-
 -- | Construct an unspecified value of the given type.
-eBlank :: MonadBinder m => Type -> m (Exp (Lore m))
+eBlank :: MonadBuilder m => Type -> m (Exp (Rep m))
 eBlank (Prim t) = return $ BasicOp $ SubExp $ Constant $ blankPrimValue t
 eBlank (Array t shape _) = return $ BasicOp $ Scratch t $ shapeDims shape
 eBlank Acc {} = error "eBlank: cannot create blank accumulator"
 eBlank Mem {} = error "eBlank: cannot create blank memory"
 
 -- | Sign-extend to the given integer type.
-asIntS :: MonadBinder m => IntType -> SubExp -> m SubExp
+asIntS :: MonadBuilder m => IntType -> SubExp -> m SubExp
 asIntS = asInt SExt
 
 -- | Zero-extend to the given integer type.
-asIntZ :: MonadBinder m => IntType -> SubExp -> m SubExp
+asIntZ :: MonadBuilder m => IntType -> SubExp -> m SubExp
 asIntZ = asInt ZExt
 
 asInt ::
-  MonadBinder m =>
+  MonadBuilder m =>
   (IntType -> IntType -> ConvOp) ->
   IntType ->
   SubExp ->
@@ -415,18 +392,18 @@ asInt ext to_it e = do
 
 -- | Apply a binary operator to several subexpressions.  A left-fold.
 foldBinOp ::
-  MonadBinder m =>
+  MonadBuilder m =>
   BinOp ->
   SubExp ->
   [SubExp] ->
-  m (Exp (Lore m))
+  m (Exp (Rep m))
 foldBinOp _ ne [] =
   return $ BasicOp $ SubExp ne
 foldBinOp bop ne (e : es) =
   eBinOp bop (pure $ BasicOp $ SubExp e) (foldBinOp bop ne es)
 
 -- | True if all operands are true.
-eAll :: MonadBinder m => [SubExp] -> m (Exp (Lore m))
+eAll :: MonadBuilder m => [SubExp] -> m (Exp (Rep m))
 eAll [] = pure $ BasicOp $ SubExp $ constant True
 eAll (x : xs) = foldBinOp LogAnd x xs
 
@@ -435,25 +412,25 @@ eAll (x : xs) = foldBinOp LogAnd x xs
 -- result types are the same.  (This assumption should be fixed at
 -- some point.)
 binOpLambda ::
-  (MonadBinder m, Bindable (Lore m)) =>
+  (MonadBuilder m, Buildable (Rep m)) =>
   BinOp ->
   PrimType ->
-  m (Lambda (Lore m))
+  m (Lambda (Rep m))
 binOpLambda bop t = binLambda (BinOp bop) t t
 
 -- | As 'binOpLambda', but for t'CmpOp's.
 cmpOpLambda ::
-  (MonadBinder m, Bindable (Lore m)) =>
+  (MonadBuilder m, Buildable (Rep m)) =>
   CmpOp ->
-  m (Lambda (Lore m))
+  m (Lambda (Rep m))
 cmpOpLambda cop = binLambda (CmpOp cop) (cmpOpType cop) Bool
 
 binLambda ::
-  (MonadBinder m, Bindable (Lore m)) =>
+  (MonadBuilder m, Buildable (Rep m)) =>
   (SubExp -> SubExp -> BasicOp) ->
   PrimType ->
   PrimType ->
-  m (Lambda (Lore m))
+  m (Lambda (Rep m))
 binLambda bop arg_t ret_t = do
   x <- newVName "x"
   y <- newVName "y"
@@ -470,12 +447,12 @@ binLambda bop arg_t ret_t = do
         lambdaBody = body
       }
 
--- | Easily construct a 'Lambda' within a 'MonadBinder'.
+-- | Easily construct a 'Lambda' within a 'MonadBuilder'.
 mkLambda ::
-  MonadBinder m =>
-  [LParam (Lore m)] ->
+  MonadBuilder m =>
+  [LParam (Rep m)] ->
   m Result ->
-  m (Lambda (Lore m))
+  m (Lambda (Rep m))
 mkLambda params m = do
   (body, ret) <- buildBody . localScope (scopeOfLParams params) $ do
     res <- m
@@ -521,23 +498,23 @@ ifCommon :: [Type] -> IfDec ExtType
 ifCommon ts = IfDec (staticShapes ts) IfNormal
 
 -- | Conveniently construct a body that contains no bindings.
-resultBody :: Bindable lore => [SubExp] -> Body lore
+resultBody :: Buildable rep => [SubExp] -> Body rep
 resultBody = mkBody mempty
 
 -- | Conveniently construct a body that contains no bindings - but
 -- this time, monadically!
 resultBodyM ::
-  MonadBinder m =>
+  MonadBuilder m =>
   [SubExp] ->
-  m (Body (Lore m))
+  m (Body (Rep m))
 resultBodyM = mkBodyM mempty
 
 -- | Evaluate the action, producing a body, then wrap it in all the
 -- bindings it created using 'addStm'.
 insertStmsM ::
-  (MonadBinder m) =>
-  m (Body (Lore m)) ->
-  m (Body (Lore m))
+  (MonadBuilder m) =>
+  m (Body (Rep m)) ->
+  m (Body (Rep m))
 insertStmsM m = do
   (Body _ bnds res, otherbnds) <- collectStms m
   mkBodyM (otherbnds <> bnds) res
@@ -546,9 +523,9 @@ insertStmsM m = do
 -- value, then return the body constructed from the 'Result' and any
 -- statements added during the action, along the auxiliary value.
 buildBody ::
-  MonadBinder m =>
+  MonadBuilder m =>
   m (Result, a) ->
-  m (Body (Lore m), a)
+  m (Body (Rep m), a)
 buildBody m = do
   ((res, v), stms) <- collectStms m
   body <- mkBodyM stms res
@@ -556,18 +533,18 @@ buildBody m = do
 
 -- | As 'buildBody', but there is no auxiliary value.
 buildBody_ ::
-  MonadBinder m =>
+  MonadBuilder m =>
   m Result ->
-  m (Body (Lore m))
+  m (Body (Rep m))
 buildBody_ m = fst <$> buildBody ((,()) <$> m)
 
 -- | Change that result where evaluation of the body would stop.  Also
 -- change type annotations at branches.
 mapResult ::
-  Bindable lore =>
-  (Result -> Body lore) ->
-  Body lore ->
-  Body lore
+  Buildable rep =>
+  (Result -> Body rep) ->
+  Body rep ->
+  Body rep
 mapResult f (Body _ bnds res) =
   let Body _ bnds2 newres = f res
    in mkBody (bnds <> bnds2) newres
@@ -622,18 +599,18 @@ removeExistentials t1 t2 =
     nonExistential (Ext _) dim = dim
     nonExistential (Free dim) _ = dim
 
--- | Can be used as the definition of 'mkLetNames' for a 'Bindable'
+-- | Can be used as the definition of 'mkLetNames' for a 'Buildable'
 -- instance for simple representations.
 simpleMkLetNames ::
-  ( ExpDec lore ~ (),
-    LetDec lore ~ Type,
+  ( ExpDec rep ~ (),
+    LetDec rep ~ Type,
     MonadFreshNames m,
-    TypedOp (Op lore),
-    HasScope lore m
+    TypedOp (Op rep),
+    HasScope rep m
   ) =>
   [VName] ->
-  Exp lore ->
-  m (Stm lore)
+  Exp rep ->
+  m (Stm rep)
 simpleMkLetNames names e = do
   et <- expExtType e
   (ts, shapes) <- instantiateShapes' et
@@ -642,9 +619,9 @@ simpleMkLetNames names e = do
   return $ Let (Pattern shapeElems valElems) (defAux ()) e
 
 -- | Instances of this class can be converted to Futhark expressions
--- within a 'MonadBinder'.
+-- within a 'MonadBuilder'.
 class ToExp a where
-  toExp :: MonadBinder m => a -> m (Exp (Lore m))
+  toExp :: MonadBuilder m => a -> m (Exp (Rep m))
 
 instance ToExp SubExp where
   toExp = return . BasicOp . SubExp
@@ -653,5 +630,5 @@ instance ToExp VName where
   toExp = return . BasicOp . SubExp . Var
 
 -- | A convenient composition of 'letSubExp' and 'toExp'.
-toSubExp :: (MonadBinder m, ToExp a) => String -> a -> m SubExp
+toSubExp :: (MonadBuilder m, ToExp a) => String -> a -> m SubExp
 toSubExp s e = letSubExp s =<< toExp e
