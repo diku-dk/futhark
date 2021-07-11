@@ -169,7 +169,7 @@ reductionStage2 ::
   [SegBinOpSlug] ->
   MulticoreGen ()
 reductionStage2 pat space nsubtasks slugs = do
-  let per_red_pes = segBinOpChunks (map slugOp slugs) $ patternValueElements pat
+  let per_red_pes = segBinOpChunks (map slugOp slugs) $ patternElements pat
       phys_id = Imp.vi64 (segFlat space)
   sComment "neutral-initialise the output" $
     forM_ (zip (map slugOp slugs) per_red_pes) $ \(red, red_res) ->
@@ -226,7 +226,7 @@ compileSegRedBody n_segments pat space reds kbody = do
       inner_bound = last ns_64
       n_segments' = tvExp n_segments
 
-  let per_red_pes = segBinOpChunks reds $ patternValueElements pat
+  let per_red_pes = segBinOpChunks reds $ patternElements pat
   -- Perform sequential reduce on inner most dimension
   collect $ do
     flat_idx <- dPrimVE "flat_idx" $ n_segments' * inner_bound

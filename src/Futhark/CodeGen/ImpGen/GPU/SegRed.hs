@@ -262,7 +262,7 @@ smallSegmentsReduction ::
   [SegBinOp GPUMem] ->
   DoSegBody ->
   CallKernelGen ()
-smallSegmentsReduction (Pattern _ segred_pes) num_groups group_size space reds body = do
+smallSegmentsReduction (Pattern segred_pes) num_groups group_size space reds body = do
   let (gtids, dims) = unzip $ unSegSpace space
       dims' = map toInt64Exp dims
       segment_size = last dims'

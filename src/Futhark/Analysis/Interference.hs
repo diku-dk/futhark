@@ -52,11 +52,11 @@ analyseStm ::
   m (InUse, LastUsed, Graph VName)
 analyseStm lumap inuse0 stm =
   inScopeOf stm $ do
-    let pat_name = patElemName $ head $ patternValueElements $ stmPattern stm
+    let pat_name = patElemName $ head $ patternElements $ stmPattern stm
 
     new_mems <-
       stmPattern stm
-        & patternValueElements
+        & patternElements
         & mapM (memInfo . patElemName)
         <&> catMaybes
         <&> namesFromList
@@ -103,7 +103,7 @@ analyseExp lumap inuse_outside expr =
       res1 <- analyseBody lumap inuse_outside then_body
       res2 <- analyseBody lumap inuse_outside else_body
       return $ res1 <> res2
-    DoLoop _ _ _ body -> do
+    DoLoop _ _ body -> do
       analyseBody lumap inuse_outside body
     Op (Inner (SegOp segop)) -> do
       analyseSegOp lumap inuse_outside segop
@@ -249,7 +249,7 @@ memSizes stms =
       then_res <- memSizes $ bodyStms then_body
       else_res <- memSizes $ bodyStms else_body
       return $ then_res <> else_res
-    memSizesExp (DoLoop _ _ _ body) =
+    memSizesExp (DoLoop _ _ body) =
       memSizes $ bodyStms body
     memSizesExp _ = return mempty
 
@@ -259,7 +259,7 @@ memSpaces stms =
   return $ foldMap getSpacesStm stms
   where
     getSpacesStm :: Stm GPUMem -> Map VName Space
-    getSpacesStm (Let (Pattern [] [PatElem name _]) _ (Op (Alloc _ sp))) =
+    getSpacesStm (Let (Pattern [PatElem name _]) _ (Op (Alloc _ sp))) =
       M.singleton name sp
     getSpacesStm (Let _ _ (Op (Alloc _ _))) = error "impossible"
     getSpacesStm (Let _ _ (Op (Inner (SegOp segop)))) =
@@ -267,7 +267,7 @@ memSpaces stms =
     getSpacesStm (Let _ _ (If _ then_body else_body _)) =
       foldMap getSpacesStm (bodyStms then_body)
         <> foldMap getSpacesStm (bodyStms else_body)
-    getSpacesStm (Let _ _ (DoLoop _ _ _ body)) =
+    getSpacesStm (Let _ _ (DoLoop _ _ body)) =
       foldMap getSpacesStm (bodyStms body)
     getSpacesStm _ = mempty
 
@@ -290,7 +290,7 @@ analyseGPU' lumap stms =
         res1 <- analyseGPU' lumap (bodyStms then_body)
         res2 <- analyseGPU' lumap (bodyStms else_body)
         return (res1 <> res2)
-    helper stm@Let {stmExp = DoLoop _ _ _ body} =
+    helper stm@Let {stmExp = DoLoop _ _ body} =
       inScopeOf stm $
         analyseGPU' lumap $ bodyStms body
     helper stm =

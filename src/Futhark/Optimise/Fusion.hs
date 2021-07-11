@@ -106,9 +106,7 @@ gatherStmPattern :: Pattern -> Exp -> FusionGM FusedRes -> FusionGM FusedRes
 gatherStmPattern pat e = binding $ zip idents aliases
   where
     idents = patternIdents pat
-    aliases =
-      replicate (length (patternContextNames pat)) mempty
-        ++ expAliases (Alias.analyseExp mempty e)
+    aliases = expAliases (Alias.analyseExp mempty e)
 
 bindingPat :: Pattern -> FusionGM a -> FusionGM a
 bindingPat = binding . (`zip` repeat mempty) . patternIdents
@@ -686,12 +684,7 @@ fusionGatherStms :: FusedRes -> [Stm] -> Result -> FusionGM FusedRes
 -- be considered a stream, to avoid infinite recursion.
 fusionGatherStms
   fres
-  ( Let
-      (Pattern [] pes)
-      bndtp
-      (DoLoop [] merge (ForLoop i it w loop_vars) body)
-      : bnds
-    )
+  (Let (Pattern pes) bndtp (DoLoop merge (ForLoop i it w loop_vars) body) : bnds)
   res
     | not $ null loop_vars = do
       let (merge_params, merge_init) = unzip merge
@@ -725,7 +718,7 @@ fusionGatherStms
             return body
           eBody
             [ pure $
-                DoLoop [] merge' (ForLoop j it (Futhark.Var chunk_size) []) loop_body,
+                DoLoop merge' (ForLoop j it (Futhark.Var chunk_size) []) loop_body,
               pure $
                 BasicOp $ BinOp (Add Int64 OverflowUndef) (Futhark.Var offset) (Futhark.Var chunk_size)
             ]
@@ -745,7 +738,7 @@ fusionGatherStms
 
       fusionGatherStms
         fres
-        (Let (Pattern [] (pes <> [discard_pe])) bndtp (Op stream) : bnds)
+        (Let (Pattern (pes <> [discard_pe])) bndtp (Op stream) : bnds)
         res
 fusionGatherStms fres (bnd@(Let pat _ e) : bnds) res = do
   maybesoac <- SOAC.fromExp e
@@ -777,7 +770,7 @@ fusionGatherStms fres (bnd@(Let pat _ e) : bnds) res = do
             Sequential -> [lam]
       reduceLike soac lambdas nes
     _
-      | [pe] <- patternValueElements pat,
+      | Pattern [pe] <- pat,
         Just (src, trns) <- SOAC.transformFromExp (stmCerts bnd) e ->
         bindingTransform pe src trns $ fusionGatherStms fres bnds res
       | otherwise -> do
@@ -806,8 +799,8 @@ fusionGatherStms fres [] res =
   foldM fusionGatherExp fres $ map (BasicOp . SubExp . resSubExp) res
 
 fusionGatherExp :: FusedRes -> Exp -> FusionGM FusedRes
-fusionGatherExp fres (DoLoop ctx val form loop_body) = do
-  fres' <- addNamesToInfusible fres $ freeIn form <> freeIn ctx <> freeIn val
+fusionGatherExp fres (DoLoop merge form loop_body) = do
+  fres' <- addNamesToInfusible fres $ freeIn form <> freeIn merge
   let form_idents =
         case form of
           ForLoop i it _ loopvars ->
@@ -815,11 +808,8 @@ fusionGatherExp fres (DoLoop ctx val form loop_body) = do
           WhileLoop {} -> []
 
   new_res <-
-    binding
-      ( zip (form_idents ++ map (paramIdent . fst) (ctx <> val)) $
-          repeat mempty
-      )
-      $ fusionGatherBody mempty loop_body
+    binding (zip (form_idents ++ map (paramIdent . fst) merge) $ repeat mempty) $
+      fusionGatherBody mempty loop_body
   -- make the inpArr infusible, so that they
   -- cannot be fused from outside the loop:
   let (inp_arrs, _) = unzip $ M.toList $ inpArr new_res
@@ -902,10 +892,10 @@ fuseInBody (Body _ stms res) =
 fuseInExp :: Exp -> FusionGM Exp
 -- Handle loop specially because we need to bind the types of the
 -- merge variables.
-fuseInExp (DoLoop ctx val form loopbody) =
+fuseInExp (DoLoop merge form loopbody) =
   binding (zip form_idents $ repeat mempty) $
-    bindingParams (map fst $ ctx ++ val) $
-      DoLoop ctx val form <$> fuseInBody loopbody
+    bindingParams (map fst merge) $
+      DoLoop merge form <$> fuseInBody loopbody
   where
     form_idents = case form of
       WhileLoop {} -> []
@@ -927,8 +917,8 @@ fuseInLambda (Lambda params body rtp) = do
   return $ Lambda params body' rtp
 
 replaceSOAC :: Pattern -> StmAux () -> Exp -> FusionGM (Stms SOACS)
-replaceSOAC (Pattern _ []) _ _ = return mempty
-replaceSOAC pat@(Pattern _ (patElem : _)) aux e = do
+replaceSOAC (Pattern []) _ _ = return mempty
+replaceSOAC pat@(Pattern (patElem : _)) aux e = do
   fres <- asks fusedRes
   let pat_nm = patElemName patElem
       names = patternIdents pat
@@ -963,7 +953,7 @@ insertKerSOAC aux names ker = do
     -- issue #224).  We insert copy expressions to fix it.
     f_soac' <- copyNewlyConsumed (fusedConsumed ker) $ addOpAliases mempty f_soac
     validents <- zipWithM newIdent (map baseString names) $ SOAC.typeOf new_soac'
-    auxing (kerAux ker <> aux) $ letBind (basicPattern [] validents) $ Op f_soac'
+    auxing (kerAux ker <> aux) $ letBind (basicPattern validents) $ Op f_soac'
     transformOutput (outputTransform ker) names validents
 
 -- | Perform simplification and fusion inside the lambda(s) of a SOAC.

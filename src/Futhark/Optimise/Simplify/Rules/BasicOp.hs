@@ -229,12 +229,9 @@ ruleBasicOp vtable pat _ (CmpOp (CmpEq t) se1 se2)
       Nothing
 
     returns v ifpat tbranch fbranch =
-      fmap snd $
-        find ((== v) . patElemName . fst) $
-          zip (patternValueElements ifpat) $
-            zip
-              (map resSubExp (bodyResult tbranch))
-              (map resSubExp (bodyResult fbranch))
+      fmap snd . find ((== v) . patElemName . fst) $
+        zip (patternElements ifpat) $
+          zip (map resSubExp (bodyResult tbranch)) (map resSubExp (bodyResult fbranch))
 ruleBasicOp _ pat _ (Replicate (Shape []) se@Constant {}) =
   Simplify $ letBind pat $ BasicOp $ SubExp se
 ruleBasicOp _ pat _ (Replicate (Shape []) (Var v)) = Simplify $ do
@@ -374,6 +371,16 @@ ruleBasicOp vtable pat aux (CmpOp CmpSlt {} (Var x) y)
   | isCt0 y,
     maybe False ST.entryIsSize $ ST.lookup x vtable =
     Simplify $ auxing aux $ letBind pat $ BasicOp $ SubExp $ constant False
+-- Remove certificates for variables whose definition already contain
+-- that certificate.
+ruleBasicOp vtable pat aux (SubExp (Var v))
+  | cs <- unCertificates $ stmAuxCerts aux,
+    not $ null cs,
+    Just v_cs <- unCertificates . stmCerts <$> ST.lookupStm v vtable,
+    cs' <- filter (`notElem` v_cs) cs,
+    cs' /= cs =
+    Simplify . certifying (Certificates cs') $
+      letBind pat $ BasicOp $ SubExp $ Var v
 ruleBasicOp _ _ _ _ =
   Skip
 

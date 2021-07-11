@@ -37,7 +37,7 @@ data SeqLoop = SeqLoop [Int] Pattern [(FParam, SubExp)] (LoopForm SOACS) Body
 
 seqLoopStm :: SeqLoop -> Stm
 seqLoopStm (SeqLoop _ pat merge form body) =
-  Let pat (defAux ()) $ DoLoop [] merge form body
+  Let pat (defAux ()) $ DoLoop merge form body
 
 interchangeLoop ::
   (MonadBuilder m, LocalScope SOACS m) =>
@@ -54,11 +54,9 @@ interchangeLoop
         mapM expand merge
 
     let loop_pat_expanded =
-          Pattern [] $ map expandPatElem $ patternElements loop_pat
+          Pattern $ map expandPatElem $ patternElements loop_pat
         new_params =
-          [ Param pname $ fromDecl ptype
-            | (Param pname ptype, _) <- merge
-          ]
+          [Param pname $ fromDecl ptype | (Param pname ptype, _) <- merge]
         new_arrs = map (paramName . fst) merge_expanded
         rettype = map rowType $ patternTypes loop_pat_expanded
 
@@ -77,7 +75,7 @@ interchangeLoop
           Let loop_pat_expanded aux $
             Op $ Screma w (arrs' <> new_arrs) (mapSOAC lam)
         res = varsRes $ patternNames loop_pat_expanded
-        pat' = Pattern [] $ rearrangeShape perm $ patternValueElements pat
+        pat' = Pattern $ rearrangeShape perm $ patternElements pat
 
     return $
       SeqLoop perm pat' merge_expanded form $
@@ -147,13 +145,13 @@ interchangeBranch1
   (Branch perm branch_pat cond tbranch fbranch (IfDec ret if_sort))
   (MapNesting pat aux w params_and_arrs) = do
     let ret' = map (`arrayOfRow` Free w) ret
-        pat' = Pattern [] $ rearrangeShape perm $ patternValueElements pat
+        pat' = Pattern $ rearrangeShape perm $ patternElements pat
 
         (params, arrs) = unzip params_and_arrs
         lam_ret = rearrangeShape perm $ map rowType $ patternTypes pat
 
         branch_pat' =
-          Pattern [] $ map (fmap (`arrayOfRow` w)) $ patternElements branch_pat
+          Pattern $ map (fmap (`arrayOfRow` w)) $ patternElements branch_pat
 
         mkBranch branch = (renameBody =<<) $ do
           let lam = Lambda params branch lam_ret
@@ -206,7 +204,7 @@ interchangeWithAcc1
           maplam = Lambda (iota_p : orig_acc_params ++ params) (lambdaBody acc_lam) maplam_ret
       auxing map_aux . fmap subExpsRes . letTupExp' "withacc_inter" $
         Op $ Screma w (iota_w : map paramName acc_params ++ arrs) (mapSOAC maplam)
-    let pat = Pattern [] $ rearrangeShape perm $ patternValueElements map_pat
+    let pat = Pattern $ rearrangeShape perm $ patternElements map_pat
         perm' = [0 .. patternSize pat -1]
     pure $ WithAccStm perm' pat inputs' acc_lam'
     where

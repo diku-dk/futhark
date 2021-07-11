@@ -547,7 +547,7 @@ soacToStream soac = do
         let insoac =
               Futhark.Screma chvar (map paramName strm_inpids) $
                 Futhark.mapSOAC lam'
-            insbnd = mkLet [] strm_resids $ Op insoac
+            insbnd = mkLet strm_resids $ Op insoac
             strmbdy = mkBody (oneStm insbnd) $ map (subExpRes . Futhark.Var . identName) strm_resids
             strmpar = chunk_param : strm_inpids
             strmlam = Lambda strmpar strmbdy loutps
@@ -582,40 +582,36 @@ soacToStream soac = do
         outszm1id <- newIdent "szm1" $ Prim int64
         -- 1. let (scan0_ids,map_resids)  = scanomap(scan_lam,nes,map_lam,a_ch)
         let insbnd =
-              mkLet [] (scan0_ids ++ map_resids) $
-                Op $
-                  Futhark.Screma chvar (map paramName strm_inpids) $
-                    Futhark.scanomapSOAC [Futhark.Scan scan_lam nes] lam'
+              mkLet (scan0_ids ++ map_resids) . Op $
+                Futhark.Screma chvar (map paramName strm_inpids) $
+                  Futhark.scanomapSOAC [Futhark.Scan scan_lam nes] lam'
             -- 2. let outerszm1id = chunksize - 1
             outszm1bnd =
-              mkLet [] [outszm1id] $
-                BasicOp $
-                  BinOp
-                    (Sub Int64 OverflowUndef)
-                    (Futhark.Var $ paramName chunk_param)
-                    (constant (1 :: Int64))
+              mkLet [outszm1id] . BasicOp $
+                BinOp
+                  (Sub Int64 OverflowUndef)
+                  (Futhark.Var $ paramName chunk_param)
+                  (constant (1 :: Int64))
             -- 3. let lasteel_ids = ...
             empty_arr_bnd =
-              mkLet [] [empty_arr] $
-                BasicOp $
-                  CmpOp
-                    (CmpSlt Int64)
-                    (Futhark.Var $ identName outszm1id)
-                    (constant (0 :: Int64))
+              mkLet [empty_arr] . BasicOp $
+                CmpOp
+                  (CmpSlt Int64)
+                  (Futhark.Var $ identName outszm1id)
+                  (constant (0 :: Int64))
             leltmpbnds =
               zipWith
                 ( \lid arrid ->
-                    mkLet [] [lid] $
-                      BasicOp $
-                        Index (identName arrid) $
-                          fullSlice
-                            (identType arrid)
-                            [DimFix $ Futhark.Var $ identName outszm1id]
+                    mkLet [lid] . BasicOp $
+                      Index (identName arrid) $
+                        fullSlice
+                          (identType arrid)
+                          [DimFix $ Futhark.Var $ identName outszm1id]
                 )
                 lastel_tmp_ids
                 scan0_ids
             lelbnd =
-              mkLet [] lastel_ids $
+              mkLet lastel_ids $
                 If
                   (Futhark.Var $ identName empty_arr)
                   (mkBody mempty $ subExpsRes nes)
@@ -626,12 +622,8 @@ soacToStream soac = do
         -- 4. let strm_resids = map (acc `+`,nes, scan0_ids)
         maplam <- mkMapPlusAccLam (map (Futhark.Var . paramName) inpacc_ids) scan_lam
         let mapbnd =
-              mkLet [] strm_resids $
-                Op $
-                  Futhark.Screma
-                    chvar
-                    (map identName scan0_ids)
-                    (Futhark.mapSOAC maplam)
+              mkLet strm_resids . Op $
+                Futhark.Screma chvar (map identName scan0_ids) (Futhark.mapSOAC maplam)
         -- 5. let acc'        = acc + lasteel_ids
         addlelbdy <-
           mkPlusBnds scan_lam $
@@ -670,7 +662,7 @@ soacToStream soac = do
                 chvar
                 (map paramName strm_inpids)
                 $ Futhark.redomapSOAC [Futhark.Reduce comm lamin nes] foldlam
-            insbnd = mkLet [] (acc0_ids ++ strm_resids) $ Op insoac
+            insbnd = mkLet (acc0_ids ++ strm_resids) $ Op insoac
         -- 2. let acc'     = acc + acc0_ids    in
         addaccbdy <-
           mkPlusBnds lamin $
@@ -698,12 +690,7 @@ soacToStream soac = do
       let (accpars, rempars) = splitAt (length accs) $ lambdaParams plus
           parbnds =
             zipWith
-              ( \par se ->
-                  mkLet
-                    []
-                    [paramIdent par]
-                    (BasicOp $ SubExp se)
-              )
+              (\par se -> mkLet [paramIdent par] (BasicOp $ SubExp se))
               accpars
               accs
           plus_bdy = lambdaBody plus
@@ -723,12 +710,7 @@ soacToStream soac = do
       plus' <- renameLambda plus
       let parbnds =
             zipWith
-              ( \par se ->
-                  mkLet
-                    []
-                    [paramIdent par]
-                    (BasicOp $ SubExp se)
-              )
+              (\par se -> mkLet [paramIdent par] (BasicOp $ SubExp se))
               (lambdaParams plus')
               accels
           body = lambdaBody plus'

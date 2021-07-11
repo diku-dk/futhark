@@ -157,14 +157,6 @@ pSubExps = braces (pSubExp `sepBy` pComma)
 pVNames :: Parser [VName]
 pVNames = braces (pVName `sepBy` pComma)
 
-pPatternLike :: Parser a -> Parser ([a], [a])
-pPatternLike p = braces $ do
-  xs <- p `sepBy` pComma
-  choice
-    [ pSemi *> ((xs,) <$> (p `sepBy` pComma)),
-      pure (mempty, xs)
-    ]
-
 pConvOp ::
   T.Text -> (t1 -> t2 -> ConvOp) -> Parser t1 -> Parser t2 -> Parser BasicOp
 pConvOp s op t1 t2 =
@@ -373,7 +365,7 @@ pPatElem pr =
   (PatElem <$> pVName <*> (pColon *> pLetDec pr)) <?> "pattern element"
 
 pPattern :: PR rep -> Parser (Pattern rep)
-pPattern pr = uncurry Pattern <$> pPatternLike (pPatElem pr)
+pPattern pr = Pattern <$> braces (pPatElem pr `sepBy` pComma)
 
 pResult :: Parser Result
 pResult = braces $ pSubExpRes `sepBy` pComma
@@ -418,17 +410,16 @@ pApply pr =
 
 pLoop :: PR rep -> Parser (Exp rep)
 pLoop pr =
-  keyword "loop" $> uncurry DoLoop
+  keyword "loop" $> DoLoop
     <*> pLoopParams
     <*> pLoopForm <* keyword "do"
     <*> braces (pBody pr)
   where
     pLoopParams = do
-      (ctx, val) <- pPatternLike (pFParam pr)
+      params <- braces $ pFParam pr `sepBy` pComma
       void $ lexeme "="
-      (ctx_init, val_init) <-
-        splitAt (length ctx) <$> braces (pSubExp `sepBy` pComma)
-      pure (zip ctx ctx_init, zip val val_init)
+      args <- braces (pSubExp `sepBy` pComma)
+      pure (zip params args)
 
     pLoopForm =
       choice

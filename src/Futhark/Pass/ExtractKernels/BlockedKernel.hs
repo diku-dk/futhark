@@ -245,7 +245,7 @@ readKernelInput ::
   m ()
 readKernelInput inp = do
   let pe = PatElem (kernelInputName inp) $ kernelInputType inp
-  letBind (Pattern [] [pe]) . BasicOp $
+  letBind (Pattern [pe]) . BasicOp $
     case kernelInputType inp of
       Acc {} ->
         SubExp $ Var $ kernelInputArray inp

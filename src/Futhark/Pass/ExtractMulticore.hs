@@ -48,7 +48,7 @@ instance MonadLogger ExtractM where
 
 indexArray :: VName -> LParam SOACS -> VName -> Stm MC
 indexArray i (Param p t) arr =
-  Let (Pattern [] [PatElem p t]) (defAux ()) . BasicOp $
+  Let (Pattern [PatElem p t]) (defAux ()) . BasicOp $
     case t of
       Acc {} -> SubExp $ Var arr
       _ -> Index arr $ DimFix (Var i) : map sliceDim (arrayDims t)
@@ -109,16 +109,12 @@ transformStm (Let pat aux (BasicOp op)) =
   pure $ oneStm $ Let pat aux $ BasicOp op
 transformStm (Let pat aux (Apply f args ret info)) =
   pure $ oneStm $ Let pat aux $ Apply f args ret info
-transformStm (Let pat aux (DoLoop ctx val form body)) = do
+transformStm (Let pat aux (DoLoop merge form body)) = do
   let form' = transformLoopForm form
   body' <-
-    localScope
-      ( scopeOfFParams (map fst ctx)
-          <> scopeOfFParams (map fst val)
-          <> scopeOf form'
-      )
-      $ transformBody body
-  return $ oneStm $ Let pat aux $ DoLoop ctx val form' body'
+    localScope (scopeOfFParams (map fst merge) <> scopeOf form') $
+      transformBody body
+  return $ oneStm $ Let pat aux $ DoLoop merge form' body'
 transformStm (Let pat aux (If cond tbranch fbranch ret)) =
   oneStm . Let pat aux
     <$> (If cond <$> transformBody tbranch <*> transformBody fbranch <*> pure ret)

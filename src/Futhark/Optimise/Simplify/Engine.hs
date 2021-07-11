@@ -77,7 +77,7 @@ import Futhark.IR
 import Futhark.IR.Prop.Aliases
 import Futhark.Optimise.Simplify.Rep
 import Futhark.Optimise.Simplify.Rule
-import Futhark.Util (nubOrd, splitFromEnd)
+import Futhark.Util (nubOrd)
 
 data HoistBlockers rep = HoistBlockers
   { -- | Blocker for hoisting out of parallel loops.
@@ -288,11 +288,10 @@ protectIfHoisted cond side m = do
 protectLoopHoisted ::
   SimplifiableRep rep =>
   [(FParam (Wise rep), SubExp)] ->
-  [(FParam (Wise rep), SubExp)] ->
   LoopForm (Wise rep) ->
   SimpleM rep (a, Stms (Wise rep)) ->
   SimpleM rep (a, Stms (Wise rep))
-protectLoopHoisted ctx val form m = do
+protectLoopHoisted merge form m = do
   (x, stms) <- m
   ops <- asks $ protectHoistedOpS . fst
   runBuilder $ do
@@ -307,7 +306,7 @@ protectLoopHoisted ctx val form m = do
       case form of
         WhileLoop cond
           | Just (_, cond_init) <-
-              find ((== cond) . paramName . fst) $ ctx ++ val ->
+              find ((== cond) . paramName . fst) merge ->
             return cond_init
           | otherwise -> return $ constant True -- infinite loop
         ForLoop _ it bound _ ->
@@ -321,20 +320,10 @@ protectIf ::
   SubExp ->
   Stm (Rep m) ->
   m ()
-protectIf
-  _
-  _
-  taken
-  ( Let
-      pat
-      aux
-      (If cond taken_body untaken_body (IfDec if_ts IfFallback))
-    ) = do
-    cond' <- letSubExp "protect_cond_conj" $ BasicOp $ BinOp LogAnd taken cond
-    auxing aux $
-      letBind pat $
-        If cond' taken_body untaken_body $
-          IfDec if_ts IfFallback
+protectIf _ _ taken (Let pat aux (If cond taken_body untaken_body (IfDec if_ts IfFallback))) = do
+  cond' <- letSubExp "protect_cond_conj" $ BasicOp $ BinOp LogAnd taken cond
+  auxing aux . letBind pat $
+    If cond' taken_body untaken_body $ IfDec if_ts IfFallback
 protectIf _ _ taken (Let pat aux (BasicOp (Assert cond msg loc))) = do
   not_taken <- letSubExp "loop_not_taken" $ BasicOp $ UnOp Not taken
   cond' <- letSubExp "protect_assert_disj" $ BasicOp $ BinOp LogOr not_taken cond
@@ -350,15 +339,10 @@ protectIf _ f taken (Let pat aux e)
       Nothing -> do
         taken_body <- eBody [pure e]
         untaken_body <-
-          eBody $
-            map
-              (emptyOfType $ patternContextNames pat)
-              (patternValueTypes pat)
+          eBody $ map (emptyOfType $ patternNames pat) (patternTypes pat)
         if_ts <- expTypesFromPattern pat
-        auxing aux $
-          letBind pat $
-            If taken taken_body untaken_body $
-              IfDec if_ts IfFallback
+        auxing aux . letBind pat $
+          If taken taken_body untaken_body $ IfDec if_ts IfFallback
 protectIf _ _ _ stm =
   addStm stm
 
@@ -675,17 +659,10 @@ simplifyBody ds (Body _ bnds res) =
 -- | Simplify a single 'Result'.  The @[Diet]@ only covers the value
 -- elements, because the context cannot be consumed.
 simplifyResult ::
-  SimplifiableRep rep =>
-  [Diet] ->
-  Result ->
-  SimpleM rep (Result, UT.UsageTable)
+  SimplifiableRep rep => [Diet] -> Result -> SimpleM rep (Result, UT.UsageTable)
 simplifyResult ds res = do
-  let (ctx_res, val_res) = splitFromEnd (length ds) res
-  ctx_res' <- mapM simplify ctx_res
-  val_res' <- mapM simplify val_res
-
-  let consumption = consumeResult $ zip ds val_res'
-      res' = ctx_res' <> val_res'
+  res' <- mapM simplify res
+  let consumption = consumeResult $ zip ds res'
   return (res', UT.usages (freeIn res') <> consumption)
 
 isDoLoopResult :: Result -> UT.UsageTable
@@ -761,16 +738,12 @@ simplifyExp (If cond tbranch fbranch (IfDec ts ifsort)) = do
   fbranch' <- simplifyBody ds fbranch
   (tbranch'', fbranch'', hoisted) <- hoistCommon cond' ifsort tbranch' fbranch'
   return (If cond' tbranch'' fbranch'' $ IfDec ts' ifsort, hoisted)
-simplifyExp (DoLoop ctx val form loopbody) = do
-  let (ctxparams, ctxinit) = unzip ctx
-      (valparams, valinit) = unzip val
-  ctxparams' <- mapM (traverse simplify) ctxparams
-  ctxinit' <- mapM simplify ctxinit
-  valparams' <- mapM (traverse simplify) valparams
-  valinit' <- mapM simplify valinit
-  let ctx' = zip ctxparams' ctxinit'
-      val' = zip valparams' valinit'
-      diets = map (diet . paramDeclType) valparams'
+simplifyExp (DoLoop merge form loopbody) = do
+  let (params, args) = unzip merge
+  params' <- mapM (traverse simplify) params
+  args' <- mapM simplify args
+  let merge' = zip params' args'
+      diets = map (diet . paramDeclType) params'
   (form', boundnames, wrapbody) <- case form of
     ForLoop loopvar it boundexp loopvars -> do
       boundexp' <- simplify boundexp
@@ -782,7 +755,7 @@ simplifyExp (DoLoop ctx val form loopbody) = do
         ( form',
           namesFromList (loopvar : map paramName loop_params') <> fparamnames,
           bindLoopVar loopvar it boundexp'
-            . protectLoopHoisted ctx' val' form'
+            . protectLoopHoisted merge' form'
             . bindArrayLParams loop_params'
         )
     WhileLoop cond -> do
@@ -790,31 +763,30 @@ simplifyExp (DoLoop ctx val form loopbody) = do
       return
         ( WhileLoop cond',
           fparamnames,
-          protectLoopHoisted ctx' val' (WhileLoop cond')
+          protectLoopHoisted merge' (WhileLoop cond')
         )
   seq_blocker <- asksEngineEnv $ blockHoistSeq . envHoistBlockers
   ((loopstms, loopres), hoisted) <-
-    enterLoop $
-      consumeMerge $
-        bindMerge (zipWith withRes (ctx' ++ val') (bodyResult loopbody)) $
-          wrapbody $
-            blockIf
-              ( hasFree boundnames `orIf` isConsumed
-                  `orIf` seq_blocker
-                  `orIf` notWorthHoisting
-              )
-              $ do
-                ((res, uses), stms) <- simplifyBody diets loopbody
-                return ((res, uses <> isDoLoopResult res), stms)
+    enterLoop . consumeMerge $
+      bindMerge (zipWith withRes merge' (bodyResult loopbody)) $
+        wrapbody $
+          blockIf
+            ( hasFree boundnames `orIf` isConsumed
+                `orIf` seq_blocker
+                `orIf` notWorthHoisting
+            )
+            $ do
+              ((res, uses), stms) <- simplifyBody diets loopbody
+              return ((res, uses <> isDoLoopResult res), stms)
   loopbody' <- constructBody loopstms loopres
-  return (DoLoop ctx' val' form' loopbody', hoisted)
+  return (DoLoop merge' form' loopbody', hoisted)
   where
     fparamnames =
-      namesFromList (map (paramName . fst) $ ctx ++ val)
+      namesFromList (map (paramName . fst) merge)
     consumeMerge =
       localVtable $ flip (foldl' (flip ST.consume)) $ namesToList consumed_by_merge
     consumed_by_merge =
-      freeIn $ map snd $ filter (unique . paramDeclType . fst) val
+      freeIn $ map snd $ filter (unique . paramDeclType . fst) merge
     withRes (p, x) y = (p, x, y)
 simplifyExp (Op op) = do
   (op', stms) <- simplifyOp op
@@ -932,10 +904,8 @@ simplifyPattern ::
   (SimplifiableRep rep, Simplifiable dec) =>
   PatternT dec ->
   SimpleM rep (PatternT dec)
-simplifyPattern pat =
-  Pattern
-    <$> mapM inspect (patternContextElements pat)
-    <*> mapM inspect (patternValueElements pat)
+simplifyPattern (Pattern xs) =
+  Pattern <$> mapM inspect xs
   where
     inspect (PatElem name rep) = PatElem name <$> simplify rep
 
