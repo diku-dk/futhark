@@ -42,7 +42,7 @@ class
   ) =>
   Buildable rep
   where
-  mkExpPat :: [Ident] -> [Ident] -> Exp rep -> Pattern rep
+  mkExpPat :: [Ident] -> Exp rep -> Pattern rep
   mkExpDec :: Pattern rep -> Exp rep -> ExpDec rep
   mkBody :: Stms rep -> Result -> Body rep
   mkLetNames ::
@@ -135,17 +135,17 @@ letBind pat e =
 
 -- | Construct a 'Stm' from identifiers for the context- and value
 -- part of the pattern, as well as the expression.
-mkLet :: Buildable rep => [Ident] -> [Ident] -> Exp rep -> Stm rep
-mkLet ctx val e =
-  let pat = mkExpPat ctx val e
+mkLet :: Buildable rep => [Ident] -> Exp rep -> Stm rep
+mkLet ids e =
+  let pat = mkExpPat ids e
       dec = mkExpDec pat e
    in Let pat (defAux dec) e
 
 -- | Like mkLet, but also take attributes and certificates from the
 -- given 'StmAux'.
-mkLet' :: Buildable rep => [Ident] -> [Ident] -> StmAux a -> Exp rep -> Stm rep
-mkLet' ctx val (StmAux cs attrs _) e =
-  let pat = mkExpPat ctx val e
+mkLet' :: Buildable rep => [Ident] -> StmAux a -> Exp rep -> Stm rep
+mkLet' ids (StmAux cs attrs _) e =
+  let pat = mkExpPat ids e
       dec = mkExpDec pat e
    in Let pat (StmAux cs attrs dec) e
 

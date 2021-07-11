@@ -142,7 +142,8 @@ checkResults pat size untouchable it knownBnds params body accs = do
     nonFree = boundInBody body <> namesFromList params <> untouchable
 
     checkResult (p, SubExpRes _ (Var v)) (accparam, acc)
-      | Just (BasicOp (BinOp bop x y)) <- M.lookup v bndMap = do
+      | Just (BasicOp (BinOp bop x y)) <- M.lookup v bndMap,
+        x /= y = do
         -- One of x,y must be *this* accumulator, and the other must
         -- be something that is free in the body.
         let isThisAccum = (== Var accparam)
@@ -157,8 +158,8 @@ checkResults pat size untouchable it knownBnds params body accs = do
         case bop of
           LogAnd ->
             letBindNames [p] $ BasicOp $ BinOp LogAnd this el
-          Add t w | Just properly_typed_size <- properIntSize t -> do
-            size' <- properly_typed_size
+          Add t w -> do
+            size' <- asIntS t size
             letBindNames [p]
               =<< eBinOp
                 (Add t w)
@@ -178,12 +179,6 @@ checkResults pat size untouchable it knownBnds params body accs = do
     asFreeSubExp (Var v)
       | v `nameIn` nonFree = M.lookup v knownBnds
     asFreeSubExp se = Just se
-
-    properIntSize Int64 = Just $ return size
-    properIntSize t =
-      Just $
-        letSubExp "converted_size" $
-          BasicOp $ ConvOp (SExt it t) size
 
     properFloatSize t =
       Just $

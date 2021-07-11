@@ -100,19 +100,19 @@ opCompiler ::
   CallKernelGen ()
 opCompiler dest (Alloc e space) =
   compileAlloc dest e space
-opCompiler (Pattern _ [pe]) (Inner (SizeOp (GetSize key size_class))) = do
+opCompiler (Pattern [pe]) (Inner (SizeOp (GetSize key size_class))) = do
   fname <- askFunction
   sOp $
     Imp.GetSize (patElemName pe) (keyWithEntryPoint fname key) $
       sizeClassWithEntryPoint fname size_class
-opCompiler (Pattern _ [pe]) (Inner (SizeOp (CmpSizeLe key size_class x))) = do
+opCompiler (Pattern [pe]) (Inner (SizeOp (CmpSizeLe key size_class x))) = do
   fname <- askFunction
   let size_class' = sizeClassWithEntryPoint fname size_class
   sOp . Imp.CmpSizeLe (patElemName pe) (keyWithEntryPoint fname key) size_class'
     =<< toExp x
-opCompiler (Pattern _ [pe]) (Inner (SizeOp (GetSizeMax size_class))) =
+opCompiler (Pattern [pe]) (Inner (SizeOp (GetSizeMax size_class))) =
   sOp $ Imp.GetSizeMax (patElemName pe) size_class
-opCompiler (Pattern _ [pe]) (Inner (SizeOp (CalcNumGroups w64 max_num_groups_key group_size))) = do
+opCompiler (Pattern [pe]) (Inner (SizeOp (CalcNumGroups w64 max_num_groups_key group_size))) = do
   fname <- askFunction
   max_num_groups :: TV Int32 <- dPrim "max_num_groups" int32
   sOp $
@@ -226,12 +226,12 @@ withAcc pat inputs lam = do
 
 expCompiler :: ExpCompiler GPUMem HostEnv Imp.HostOp
 -- We generate a simple kernel for itoa and replicate.
-expCompiler (Pattern _ [pe]) (BasicOp (Iota n x s et)) = do
+expCompiler (Pattern [pe]) (BasicOp (Iota n x s et)) = do
   x' <- toExp x
   s' <- toExp s
 
   sIota (patElemName pe) (toInt64Exp n) x' s' et
-expCompiler (Pattern _ [pe]) (BasicOp (Replicate _ se)) =
+expCompiler (Pattern [pe]) (BasicOp (Replicate _ se)) =
   sReplicate (patElemName pe) se
 -- Allocation in the "local" space is just a placeholder.
 expCompiler _ (Op (Alloc _ (Space "local"))) =

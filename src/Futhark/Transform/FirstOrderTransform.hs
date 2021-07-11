@@ -221,7 +221,7 @@ transformSOAC pat (Screma w arrs form@(ScremaForm scans reds map_lam)) = do
   names <-
     (++ patternNames pat)
       <$> replicateM (length scanacc_params) (newVName "discard")
-  letBindNames names $ DoLoop [] merge loopform loop_body
+  letBindNames names $ DoLoop merge loopform loop_body
 transformSOAC pat (Stream w arrs _ nes lam) = do
   -- Create a loop that repeatedly applies the lambda body to a
   -- chunksize of 1.  Hopefully this will lead to this outer loop
@@ -273,7 +273,7 @@ transformSOAC pat (Stream w arrs _ nes lam) = do
 
       mkBodyM mempty $ res ++ subExpsRes mapout_res'
 
-  letBind pat $ DoLoop [] merge loop_form loop_body
+  letBind pat $ DoLoop merge loop_form loop_body
 transformSOAC pat (Scatter len lam ivs as) = do
   iter <- newVName "write_iter"
 
@@ -300,7 +300,7 @@ transformSOAC pat (Scatter len lam ivs as) = do
 
         foldM saveInArray arr indexes'
       return $ resultBody (map Var ress)
-  letBind pat $ DoLoop [] merge (ForLoop iter Int64 len []) loopBody
+  letBind pat $ DoLoop merge (ForLoop iter Int64 len []) loopBody
 transformSOAC pat (Hist len ops bucket_fun imgs) = do
   iter <- newVName "iter"
 
@@ -357,7 +357,7 @@ transformSOAC pat (Hist len ops bucket_fun imgs) = do
     return $ resultBody $ map Var $ concat hists_out''
 
   -- Wrap up the above into a for-loop.
-  letBind pat $ DoLoop [] merge (ForLoop iter Int64 len []) loopBody
+  letBind pat $ DoLoop merge (ForLoop iter Int64 len []) loopBody
 
 -- | Recursively first-order-transform a lambda.
 transformLambda ::

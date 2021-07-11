@@ -103,7 +103,7 @@ pushInnerTarget (pat, res) (Targets inner_target targets) =
   Targets (pat', res') (targets ++ [inner_target])
   where
     (pes', res') = unzip $ filter (used . fst) $ zip (patternElements pat) res
-    pat' = Pattern [] pes'
+    pat' = Pattern pes'
     inner_used = freeIn $ snd inner_target
     used pe = patElemName pe `nameIn` inner_used
 
@@ -220,11 +220,11 @@ pushInnerKernelNesting target newnest (nest, nests) =
 
 fixNestingPatternOrder :: LoopNesting -> Target -> PatternT Type -> LoopNesting
 fixNestingPatternOrder nest (_, res) inner_pat =
-  nest {loopNestingPattern = basicPattern [] pat'}
+  nest {loopNestingPattern = basicPattern pat'}
   where
     pat = loopNestingPattern nest
     pat' = map fst fixed_target
-    fixed_target = sortOn posInInnerPat $ zip (patternValueIdents pat) res
+    fixed_target = sortOn posInInnerPat $ zip (patternIdents pat) res
     posInInnerPat (_, SubExpRes _ (Var v)) = fromMaybe 0 $ elemIndex v $ patternNames inner_pat
     posInInnerPat _ = 0
 
@@ -433,9 +433,7 @@ createKernelNest (inner_nest, nests) distrib_body = do
                       )
 
         let free_arrs_pat =
-              basicPattern [] $
-                map snd $
-                  filter fst $ zip bind_in_target free_arrs
+              basicPattern $ map snd $ filter fst $ zip bind_in_target free_arrs
             free_params_pat =
               map snd $ filter fst $ zip bind_in_target free_params
 
@@ -521,12 +519,12 @@ removeIdentityMappingGeneral bound pat res =
       (not_identity_patElems, not_identity_res) = unzip not_identities
       (identity_patElems, identity_res) = unzip identities
       expandTarget (tpat, tres) =
-        ( Pattern [] $ patternElements tpat ++ identity_patElems,
+        ( Pattern $ patternElements tpat ++ identity_patElems,
           tres ++ map (uncurry SubExpRes . second Var) identity_res
         )
       identity_map =
         M.fromList $ zip (map snd identity_res) $ map patElemIdent identity_patElems
-   in ( Pattern [] not_identity_patElems,
+   in ( Pattern not_identity_patElems,
         not_identity_res,
         identity_map,
         expandTarget

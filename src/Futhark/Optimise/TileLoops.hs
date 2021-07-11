@@ -156,7 +156,7 @@ tileInBody branch_variant initial_variance initial_lvl initial_space res_ts (Bod
             poststms'
             stms_res
       -- Tiling inside for-loop.
-      | DoLoop [] merge (ForLoop i it bound []) loopbody <- stmExp stm_to_tile,
+      | DoLoop merge (ForLoop i it bound []) loopbody <- stmExp stm_to_tile,
         (prestms', poststms') <-
           preludeToPostlude variance prestms stm_to_tile (stmsFromList poststms) = do
         let branch_variant' =
@@ -420,7 +420,7 @@ tileDoLoop initial_space variance prestms used_in_body (host_stms, tiling, tiled
               <$> tiledBody private' privstms'
         accs' <-
           letTupExp "tiled_inside_loop" $
-            DoLoop [] merge' (ForLoop i it bound []) loopbody'
+            DoLoop merge' (ForLoop i it bound []) loopbody'
 
         postludeGeneric tiling (privstms <> inloop_privstms) pat accs' poststms poststms_res res_ts
 
@@ -712,7 +712,7 @@ tileGeneric doTiling initial_lvl res_ts pat gtids kdims w form inputs poststms p
                   ProcessTileArgs privstms red_comm red_lam map_lam tile accs (Var tile_id)
             resultBody . map Var <$> tilingProcessTile tiling tile_args
 
-      accs <- letTupExp "accs" $ DoLoop [] merge loopform loopbody
+      accs <- letTupExp "accs" $ DoLoop merge loopform loopbody
 
       -- We possibly have to traverse a residual tile.
       red_lam' <- renameLambda red_lam

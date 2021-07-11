@@ -1030,7 +1030,7 @@ compileSegHist ::
   [HistOp GPUMem] ->
   KernelBody GPUMem ->
   CallKernelGen ()
-compileSegHist (Pattern _ pes) num_groups group_size space ops kbody = do
+compileSegHist (Pattern pes) num_groups group_size space ops kbody = do
   -- Most of this function is not the histogram part itself, but
   -- rather figuring out whether to use a local or global memory
   -- strategy, as well as collapsing the subhistograms produced (which
@@ -1138,7 +1138,7 @@ compileSegHist (Pattern _ pes) num_groups group_size space ops kbody = do
                   ++ [(subhistogram_id, Var $ tvVar num_histos)]
 
         let segred_op = SegBinOp Commutative (histOp op) (histNeutral op) mempty
-        compileSegRed' (Pattern [] red_pes) lvl segred_space [segred_op] $ \red_cont ->
+        compileSegRed' (Pattern red_pes) lvl segred_space [segred_op] $ \red_cont ->
           red_cont $
             flip map subhistos $ \subhisto ->
               ( Var subhisto,

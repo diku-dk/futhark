@@ -41,7 +41,7 @@ instance RepTypes GPUMem where
   type Op GPUMem = MemOp (HostOp GPUMem ())
 
 instance ASTRep GPUMem where
-  expTypesFromPattern = return . map snd . snd . bodyReturnsFromPattern
+  expTypesFromPattern = return . map snd . bodyReturnsFromPattern
 
 instance OpReturns GPUMem where
   opReturns (Alloc _ space) =

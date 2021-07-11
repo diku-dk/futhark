@@ -265,18 +265,12 @@ instance
   ) =>
   FreeIn (Exp rep)
   where
-  freeIn' (DoLoop ctxmerge valmerge form loopbody) =
-    let (ctxparams, ctxinits) = unzip ctxmerge
-        (valparams, valinits) = unzip valmerge
+  freeIn' (DoLoop merge form loopbody) =
+    let (params, args) = unzip merge
         bound_here =
-          namesFromList $
-            M.keys $
-              scopeOf form
-                <> scopeOfFParams (ctxparams ++ valparams)
+          namesFromList $ M.keys $ scopeOf form <> scopeOfFParams params
      in fvBind bound_here $
-          freeIn' (ctxinits ++ valinits) <> freeIn' form
-            <> freeIn' (ctxparams ++ valparams)
-            <> freeIn' loopbody
+          freeIn' args <> freeIn' form <> freeIn' params <> freeIn' loopbody
   freeIn' (WithAcc inputs lam) =
     freeIn' inputs <> freeIn' lam
   freeIn' e = execState (walkExpM freeWalker e) mempty
@@ -360,10 +354,10 @@ instance FreeIn SubExpRes where
   freeIn' (SubExpRes cs se) = freeIn' cs <> freeIn' se
 
 instance FreeIn dec => FreeIn (PatternT dec) where
-  freeIn' (Pattern context values) =
-    fvBind bound_here $ freeIn' $ context ++ values
+  freeIn' (Pattern xs) =
+    fvBind bound_here $ freeIn' xs
     where
-      bound_here = namesFromList $ map patElemName $ context ++ values
+      bound_here = namesFromList $ map patElemName xs
 
 instance FreeIn Certificates where
   freeIn' (Certificates cs) = freeIn' cs

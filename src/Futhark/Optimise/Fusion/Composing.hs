@@ -76,7 +76,7 @@ fuseMaps unfus_nms lam1 inp1 out1 lam2 inp2 = (lam2', M.elems inputmap)
         }
     new_body2 =
       let bnds res =
-            [ certify cs $ mkLet [] [p] $ BasicOp $ SubExp e
+            [ certify cs $ mkLet [p] $ BasicOp $ SubExp e
               | (p, SubExpRes cs e) <- zip pat res
             ]
           bindLambda res =
@@ -184,8 +184,7 @@ removeDuplicateInputs = fst . M.foldlWithKey' comb ((M.empty, id), M.empty)
             arrmap
           )
     forward to from b =
-      mkLet [] [to] (BasicOp $ SubExp $ Var from)
-        `insertStm` b
+      mkLet [to] (BasicOp $ SubExp $ Var from) `insertStm` b
 
 fuseRedomap ::
   Buildable rep =>

@@ -125,7 +125,7 @@ safeExp (BasicOp op) = safeBasicOp op
     safeBasicOp Replicate {} = True
     safeBasicOp Copy {} = True
     safeBasicOp _ = False
-safeExp (DoLoop _ _ _ body) = safeBody body
+safeExp (DoLoop _ _ body) = safeBody body
 safeExp (Apply fname _ _ _) =
   isBuiltInFunction fname
 safeExp (If _ tbranch fbranch _) =
@@ -160,7 +160,7 @@ commutativeLambda lam =
       okComponent c = isJust $ find (okBinOp c) $ bodyStms body
       okBinOp
         (xp, yp, SubExpRes _ (Var r))
-        (Let (Pattern [] [pe]) _ (BasicOp (BinOp op (Var x) (Var y)))) =
+        (Let (Pattern [pe]) _ (BasicOp (BinOp op (Var x) (Var y)))) =
           patElemName pe == r
             && commutativeBinOp op
             && ( (x == paramName xp && y == paramName yp)
@@ -239,8 +239,8 @@ class
 -- | Construct the type of an expression that would match the pattern.
 expExtTypesFromPattern :: Typed dec => PatternT dec -> [ExtType]
 expExtTypesFromPattern pat =
-  existentialiseExtTypes (patternContextNames pat) $
-    staticShapes $ map patElemType $ patternValueElements pat
+  existentialiseExtTypes (patternNames pat) $
+    staticShapes $ map patElemType $ patternElements pat
 
 -- | Keep only those attributes that are relevant for 'Assert'
 -- expressions.
@@ -257,7 +257,7 @@ lamIsBinOp lam = mapM splitStm $ bodyResult $ lambdaBody lam
     n = length $ lambdaReturnType lam
     splitStm (SubExpRes cs (Var res)) = do
       guard $ cs == mempty
-      Let (Pattern [] [pe]) _ (BasicOp (BinOp op (Var x) (Var y))) <-
+      Let (Pattern [pe]) _ (BasicOp (BinOp op (Var x) (Var y))) <-
         find (([res] ==) . patternNames . stmPattern) $
           stmsToList $ bodyStms $ lambdaBody lam
       i <- Var res `elemIndex` map resSubExp (bodyResult (lambdaBody lam))

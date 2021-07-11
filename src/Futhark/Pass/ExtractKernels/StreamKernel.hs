@@ -156,11 +156,11 @@ blockedPerThread thread_gtid w kernel_size ordering lam num_nonconcat arrs = do
   addStms $
     bodyStms (lambdaBody lam)
       <> stmsFromList
-        [ certify cs $ Let (Pattern [] [pe]) (defAux ()) $ BasicOp $ SubExp se
+        [ certify cs $ Let (Pattern [pe]) (defAux ()) $ BasicOp $ SubExp se
           | (pe, SubExpRes cs se) <- zip chunk_red_pes chunk_red_ses
         ]
       <> stmsFromList
-        [ certify cs $ Let (Pattern [] [pe]) (defAux ()) $ BasicOp $ SubExp se
+        [ certify cs $ Let (Pattern [pe]) (defAux ()) $ BasicOp $ SubExp se
           | (pe, SubExpRes cs se) <- zip chunk_map_pes chunk_map_ses
         ]
 
@@ -182,18 +182,13 @@ kerneliseLambda nes lam = do
 
       mkAccInit p (Var v)
         | not $ primType $ paramType p =
-          mkLet [] [paramIdent p] $ BasicOp $ Copy v
-      mkAccInit p x = mkLet [] [paramIdent p] $ BasicOp $ SubExp x
+          mkLet [paramIdent p] $ BasicOp $ Copy v
+      mkAccInit p x = mkLet [paramIdent p] $ BasicOp $ SubExp x
       acc_init_bnds = stmsFromList $ zipWith mkAccInit fold_acc_params nes
   return
     lam
-      { lambdaBody =
-          insertStms acc_init_bnds $
-            lambdaBody lam,
-        lambdaParams =
-          thread_index_param :
-          fold_chunk_param :
-          fold_inp_params
+      { lambdaBody = insertStms acc_init_bnds $ lambdaBody lam,
+        lambdaParams = thread_index_param : fold_chunk_param : fold_inp_params
       }
 
 prepareStream ::
@@ -252,21 +247,14 @@ streamRed mk_lvl pat w comm red_lam fold_lam nes arrs = runBuilderT'_ $ do
   size <- blockedKernelSize "stream_red" w
 
   let (redout_pes, mapout_pes) = splitAt (length nes) $ patternElements pat
-  (redout_pat, ispace, read_dummy) <- dummyDim $ Pattern [] redout_pes
-  let pat' = Pattern [] $ patternElements redout_pat ++ mapout_pes
+  (redout_pat, ispace, read_dummy) <- dummyDim $ Pattern redout_pes
+  let pat' = Pattern $ patternElements redout_pat ++ mapout_pes
 
   (_, kspace, ts, kbody) <- prepareStream size ispace w comm fold_lam nes arrs
 
   lvl <- mk_lvl [w] "stream_red" $ NoRecommendation SegNoVirt
-  letBind pat' $
-    Op $
-      SegOp $
-        SegRed
-          lvl
-          kspace
-          [SegBinOp comm red_lam nes mempty]
-          ts
-          kbody
+  letBind pat' . Op . SegOp $
+    SegRed lvl kspace [SegBinOp comm red_lam nes mempty] ts kbody
 
   read_dummy
 
@@ -292,7 +280,7 @@ streamMap mk_lvl out_desc mapout_pes w comm fold_lam nes arrs = runBuilderT' $ d
   redout_pes <- forM (zip out_desc redout_ts) $ \(desc, t) ->
     PatElem <$> newVName desc <*> pure (t `arrayOfRow` threads)
 
-  let pat = Pattern [] $ redout_pes ++ mapout_pes
+  let pat = Pattern $ redout_pes ++ mapout_pes
   lvl <- mk_lvl [w] "stream_map" $ NoRecommendation SegNoVirt
   letBind pat $ Op $ SegOp $ SegMap lvl kspace ts kbody
 

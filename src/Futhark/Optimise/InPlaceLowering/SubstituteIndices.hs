@@ -73,9 +73,8 @@ substituteIndicesInPattern ::
   PatternT dec ->
   m (IndexSubstitutions (LetDec (Rep m)), PatternT dec)
 substituteIndicesInPattern substs pat = do
-  (substs', context) <- mapAccumLM sub substs $ patternContextElements pat
-  (substs'', values) <- mapAccumLM sub substs' $ patternValueElements pat
-  return (substs'', Pattern context values)
+  (substs', pes) <- mapAccumLM sub substs $ patternElements pat
+  return (substs', Pattern pes)
   where
     sub substs' patElem = return (substs', patElem)
 

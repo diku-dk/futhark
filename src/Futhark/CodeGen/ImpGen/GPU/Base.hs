@@ -104,7 +104,7 @@ segOpSizes = onStms
       S.singleton $ map snd $ unSegSpace $ segSpace op
     onExp (If _ tbranch fbranch _) =
       onStms (bodyStms tbranch) <> onStms (bodyStms fbranch)
-    onExp (DoLoop _ _ _ body) =
+    onExp (DoLoop _ _ body) =
       onStms (bodyStms body)
     onExp _ = mempty
 
@@ -137,13 +137,13 @@ kernelAlloc ::
   SubExp ->
   Space ->
   InKernelGen ()
-kernelAlloc (Pattern _ [_]) _ ScalarSpace {} =
+kernelAlloc (Pattern [_]) _ ScalarSpace {} =
   -- Handled by the declaration of the memory block, which is then
   -- translated to an actual scalar variable during C code generation.
   return ()
-kernelAlloc (Pattern _ [mem]) size (Space "local") =
+kernelAlloc (Pattern [mem]) size (Space "local") =
   allocLocal (patElemName mem) $ Imp.bytes $ toInt64Exp size
-kernelAlloc (Pattern _ [mem]) _ _ =
+kernelAlloc (Pattern [mem]) _ _ =
   compilerLimitationS $ "Cannot allocate memory block " ++ pretty mem ++ " in kernel."
 kernelAlloc dest _ _ =
   error $ "Invalid target for in-kernel allocation: " ++ show dest
@@ -156,7 +156,7 @@ splitSpace ::
   i ->
   elems_per_thread ->
   ImpM rep r op ()
-splitSpace (Pattern [] [size]) o w i elems_per_thread = do
+splitSpace (Pattern [size]) o w i elems_per_thread = do
   num_elements <- Imp.elements . TPrimExp <$> toExp w
   let i' = toInt64Exp i
   elems_per_thread' <- Imp.elements . TPrimExp <$> toExp elems_per_thread
@@ -194,7 +194,7 @@ updateAcc acc is vs = sComment "UpdateAcc" $ do
                 error $ "Missing locks for " ++ pretty acc
 
 compileThreadExp :: ExpCompiler GPUMem KernelEnv Imp.KernelOp
-compileThreadExp (Pattern _ [dest]) (BasicOp (ArrayLit es _)) =
+compileThreadExp (Pattern [dest]) (BasicOp (ArrayLit es _)) =
   forM_ (zip [0 ..] es) $ \(i, e) ->
     copyDWIMFix (patElemName dest) [fromIntegral (i :: Int64)] e []
 compileThreadExp _ (BasicOp (UpdateAcc acc is vs)) =
@@ -251,17 +251,17 @@ groupCoverSpace ds f =
 
 compileGroupExp :: ExpCompiler GPUMem KernelEnv Imp.KernelOp
 -- The static arrays stuff does not work inside kernels.
-compileGroupExp (Pattern _ [dest]) (BasicOp (ArrayLit es _)) =
+compileGroupExp (Pattern [dest]) (BasicOp (ArrayLit es _)) =
   forM_ (zip [0 ..] es) $ \(i, e) ->
     copyDWIMFix (patElemName dest) [fromIntegral (i :: Int64)] e []
 compileGroupExp _ (BasicOp (UpdateAcc acc is vs)) =
   updateAcc acc is vs
-compileGroupExp (Pattern _ [dest]) (BasicOp (Replicate ds se)) = do
+compileGroupExp (Pattern [dest]) (BasicOp (Replicate ds se)) = do
   let ds' = map toInt64Exp $ shapeDims ds
   groupCoverSpace ds' $ \is ->
     copyDWIMFix (patElemName dest) is se (drop (shapeRank ds) is)
   sOp $ Imp.Barrier Imp.FenceLocal
-compileGroupExp (Pattern _ [dest]) (BasicOp (Iota n e s it)) = do
+compileGroupExp (Pattern [dest]) (BasicOp (Iota n e s it)) = do
   n' <- toExp n
   e' <- toExp e
   s' <- toExp s
@@ -278,7 +278,7 @@ compileGroupExp (Pattern _ [dest]) (BasicOp (Iota n e s it)) = do
 -- sure that only one thread performs the write.  When writing an
 -- array, the group-level copy code will take care of doing the right
 -- thing.
-compileGroupExp (Pattern _ [pe]) (BasicOp (Update safety _ slice se))
+compileGroupExp (Pattern [pe]) (BasicOp (Update safety _ slice se))
   | null $ sliceDims slice = do
     sOp $ Imp.Barrier Imp.FenceLocal
     ltid <- kernelLocalThreadId . kernelConstants <$> askEnv

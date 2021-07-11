@@ -60,7 +60,7 @@ mmBlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kbo
     -- exactly one of the two innermost dimensions of the kernel
     Just var_dims <- isInvarTo1of2InnerDims mempty seg_space variance arrs,
     -- get the variables on which the first result of redomap depends on
-    [redomap_orig_res] <- patternValueElements pat_redomap,
+    [redomap_orig_res] <- patternElements pat_redomap,
     Just res_red_var <- M.lookup (patElemName redomap_orig_res) variance, -- variance of the reduce result
 
     -- we furthermore check that code1 is only formed by
@@ -462,7 +462,7 @@ forLoop' i_bound merge body = do
       body i $ map paramName loop_inits
 
   letTupExp "loop" $
-    DoLoop [] (zip loop_inits $ map Var merge) loop_form loop_body
+    DoLoop (zip loop_inits $ map Var merge) loop_form loop_body
 
 forLoop ::
   SubExp ->
@@ -487,9 +487,7 @@ rebindLambda ::
 rebindLambda lam new_params res_names =
   stmsFromList
     ( zipWith
-        ( \ident new_param ->
-            mkLet [] [ident] $ BasicOp $ SubExp $ Var new_param
-        )
+        (\ident new_param -> mkLet [ident] $ BasicOp $ SubExp $ Var new_param)
         idents
         new_params
     )
@@ -505,7 +503,7 @@ rebindLambda lam new_params res_names =
     res_cpy_stms =
       zipWith
         ( \res_name (SubExpRes cs lam_res) ->
-            certify cs $ mkLet [] [Ident res_name lam_ret_type] $ BasicOp $ SubExp lam_res
+            certify cs $ mkLet [Ident res_name lam_ret_type] $ BasicOp $ SubExp lam_res
         )
         res_names
         lam_ress
@@ -574,13 +572,13 @@ processIndirections ::
   Maybe (Stms GPU, M.Map VName (Stm GPU))
 processIndirections arrs _ acc stm@(Let patt _ (BasicOp (Index _ _)))
   | Just (ss, tab) <- acc,
-    [p] <- patternValueElements patt,
+    [p] <- patternElements patt,
     p_nm <- patElemName p,
     nameIn p_nm arrs =
     Just (ss, M.insert p_nm stm tab)
 processIndirections _ res_red_var acc stm'@(Let patt _ _)
   | Just (ss, tab) <- acc,
-    ps <- patternValueElements patt,
+    ps <- patternElements patt,
     all (\p -> not (nameIn (patElemName p) res_red_var)) ps =
     Just (ss Seq.|> stm', tab)
   | otherwise = Nothing
@@ -729,7 +727,7 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
     -- exactly one of the two innermost dimensions of the kernel
     Just _ <- isInvarTo2of3InnerDims mempty space variance inp_soac_arrs,
     -- get the free variables on which the result of redomap depends on
-    redomap_orig_res <- patternValueElements pat_redomap,
+    redomap_orig_res <- patternElements pat_redomap,
     res_red_var <- -- variance of the reduce result
       mconcat $ mapMaybe ((`M.lookup` variance) . patElemName) redomap_orig_res,
     mempty /= res_red_var,
@@ -752,7 +750,6 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
     -- (for sanity sake, they should be)
     ker_res_nms <- mapMaybe getResNm kres,
     length ker_res_nms == length kres,
-    Pattern [] _ <- pat,
     all primType kertp,
     all (variantToDim variance gtid_z) ker_res_nms = do
     -- HERE STARTS THE IMPLEMENTATION:
@@ -1002,7 +999,7 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
       (VName, Stm GPU) ->
       Builder GPU (M.Map VName (Stm GPU), M.Map VName (PrimType, Stm GPU))
     insertTranspose variance (gidz, _) (tab_inn, tab_out) (p_nm, stm@(Let patt yy (BasicOp (Index arr_nm slc))))
-      | [p] <- patternValueElements patt,
+      | [p] <- patternElements patt,
         ptp <- elemType $ patElemType p,
         p_nm == patElemName p =
         case L.findIndices (variantSliceDim variance gidz) slc of
