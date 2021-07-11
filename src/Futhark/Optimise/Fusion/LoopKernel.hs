@@ -86,7 +86,7 @@ transformOutput ts names = descend ts
             letBindNames [k] $ BasicOp $ SubExp $ Var $ identName valident
         t SOAC.:< ts'' -> do
           let (es, css) = unzip $ map (applyTransform t) validents
-              mkPat (Ident nm tp) = Pattern [] [PatElem nm tp]
+              mkPat (Ident nm tp) = Pattern [PatElem nm tp]
           opts <- concat <$> mapM primOpType es
           newIds <- forM (zip names opts) $ \(k, opt) ->
             newIdent (baseString k) opt

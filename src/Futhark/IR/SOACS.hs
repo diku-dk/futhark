@@ -87,7 +87,7 @@ instance TypeCheck.Checkable SOACS
 
 instance Buildable SOACS where
   mkBody = AST.Body ()
-  mkExpPat ctx val _ = basicPattern ctx val
+  mkExpPat merge _ = basicPattern merge
   mkExpDec _ _ = ()
   mkLetNames = simpleMkLetNames
 

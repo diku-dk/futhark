@@ -331,13 +331,12 @@ kernelAlternatives pat default_body [] = runBuilder_ $ do
   forM_ (zip (patternNames pat) ses) $ \(name, SubExpRes cs se) ->
     certifying cs $ letBindNames [name] $ BasicOp $ SubExp se
 kernelAlternatives pat default_body ((cond, alt) : alts) = runBuilder_ $ do
-  alts_pat <- fmap (Pattern []) $
-    forM (patternElements pat) $ \pe -> do
-      name <- newVName $ baseString $ patElemName pe
-      return pe {patElemName = name}
+  alts_pat <- fmap Pattern . forM (patternElements pat) $ \pe -> do
+    name <- newVName $ baseString $ patElemName pe
+    return pe {patElemName = name}
 
   alt_stms <- kernelAlternatives alts_pat default_body alts
-  let alt_body = mkBody alt_stms $ varsRes $ patternValueNames alts_pat
+  let alt_body = mkBody alt_stms $ varsRes $ patternNames alts_pat
 
   letBind pat $
     If cond alt alt_body $
@@ -367,14 +366,11 @@ transformStm path (Let pat aux (WithAcc inputs lam)) =
   where
     transformInput (shape, arrs, op) =
       (shape, arrs, fmap (first soacsLambdaToGPU) op)
-transformStm path (Let pat aux (DoLoop ctx val form body)) =
-  localScope
-    ( castScope (scopeOf form)
-        <> scopeOfFParams mergeparams
-    )
-    $ oneStm . Let pat aux . DoLoop ctx val form' <$> transformBody path body
+transformStm path (Let pat aux (DoLoop merge form body)) =
+  localScope (castScope (scopeOf form) <> scopeOfFParams params) $
+    oneStm . Let pat aux . DoLoop merge form' <$> transformBody path body
   where
-    mergeparams = map fst $ ctx ++ val
+    params = map fst merge
     form' = case form of
       WhileLoop cond ->
         WhileLoop cond
@@ -480,8 +476,8 @@ transformStm path (Let pat aux@(StmAux cs _ _) (Op (Stream w arrs (Parallel o co
         let fold_fun' = soacsLambdaToGPU fold_fun
 
         let (red_pat_elems, concat_pat_elems) =
-              splitAt (length nes) $ patternValueElements pat
-            red_pat = Pattern [] red_pat_elems
+              splitAt (length nes) $ patternElements pat
+            red_pat = Pattern red_pat_elems
 
         ((num_threads, red_results), stms) <-
           streamMap
@@ -610,7 +606,7 @@ worthIntraGroup lam = bodyInterest (lambdaBody lam) > 1
         mapLike w lam'
       | Op (Scatter w lam' _ _) <- stmExp stm =
         mapLike w lam'
-      | DoLoop _ _ _ body <- stmExp stm =
+      | DoLoop _ _ body <- stmExp stm =
         bodyInterest body * 10
       | If _ tbody fbody _ <- stmExp stm =
         max (bodyInterest tbody) (bodyInterest fbody)
@@ -650,7 +646,7 @@ worthSequentialising lam = bodyInterest (lambdaBody lam) > 1
           else bodyInterest (lambdaBody lam')
       | Op Scatter {} <- stmExp stm =
         0 -- Basically a map.
-      | DoLoop _ _ ForLoop {} body <- stmExp stm =
+      | DoLoop _ ForLoop {} body <- stmExp stm =
         bodyInterest body * 10
       | WithAcc _ withacc_lam <- stmExp stm =
         bodyInterest (lambdaBody withacc_lam)

@@ -97,7 +97,7 @@ transformStm (Let pat aux (If cond tbranch fbranch (IfDec ts IfEquiv))) = do
       throwError e
   where
     bindRes pe (SubExpRes cs se) =
-      certify cs $ Let (Pattern [] [pe]) (defAux ()) $ BasicOp $ SubExp se
+      certify cs $ Let (Pattern [pe]) (defAux ()) $ BasicOp $ SubExp se
 
     useBranch b =
       bodyStms b
@@ -366,7 +366,7 @@ extractStmAllocations ::
   Names ->
   Stm GPUMem ->
   Writer Extraction (Maybe (Stm GPUMem))
-extractStmAllocations user bound_outside bound_kernel (Let (Pattern [] [patElem]) _ (Op (Alloc size space)))
+extractStmAllocations user bound_outside bound_kernel (Let (Pattern [patElem]) _ (Op (Alloc size space)))
   | expandable space && expandableSize size
       -- FIXME: the '&& notScalar space' part is a hack because we
       -- don't otherwise hoist the sizes out far enough, and we
@@ -428,7 +428,7 @@ genericExpandedInvariantAllocations getNumUsers invariant_allocs = do
   where
     expand (mem, (user, per_thread_size, space)) = do
       let num_users = fst $ getNumUsers user
-          allocpat = Pattern [] [PatElem mem $ MemMem space]
+          allocpat = Pattern [PatElem mem $ MemMem space]
       total_size <-
         letExp "total_size" <=< toExp . product $
           pe64 per_thread_size : map pe64 (shapeDims num_users)
@@ -506,7 +506,7 @@ expandedVariantAllocations num_threads kspace kstms variant_allocs = do
   return (slice_stms' <> stmsFromList alloc_bnds, mconcat rebases)
   where
     expand (mem, (offset, total_size, space)) = do
-      let allocpat = Pattern [] [PatElem mem $ MemMem space]
+      let allocpat = Pattern [PatElem mem $ MemMem space]
       return
         ( Let allocpat (defAux ()) $ Op $ Alloc total_size space,
           M.singleton mem $ newBase offset
@@ -594,10 +594,7 @@ offsetMemoryInStm (Let pat dec e) = do
   -- Try to recompute the index function.  Fall back to creating rebase
   -- operations with the RebaseMap.
   rts <- runReaderT (expReturns e') scope
-  let pat'' =
-        Pattern
-          (patternContextElements pat')
-          (zipWith pick (patternValueElements pat') rts)
+  let pat'' = Pattern $ zipWith pick (patternElements pat') rts
       stm = Let pat'' dec e'
   let scope' = scopeOf stm <> scope
   return (scope', stm)
@@ -620,23 +617,12 @@ offsetMemoryInStm (Let pat dec e) = do
         inst (Free x) = return x
 
 offsetMemoryInPattern :: Pattern GPUMem -> OffsetM (Pattern GPUMem)
-offsetMemoryInPattern (Pattern ctx vals) = do
-  mapM_ inspectCtx ctx
-  Pattern ctx <$> mapM inspectVal vals
+offsetMemoryInPattern (Pattern pes) = do
+  Pattern <$> mapM inspectVal pes
   where
     inspectVal patElem = do
       new_dec <- offsetMemoryInMemBound $ patElemDec patElem
       return patElem {patElemDec = new_dec}
-    inspectCtx patElem
-      | Mem space <- patElemType patElem,
-        expandable space =
-        throwError $
-          unwords
-            [ "Cannot deal with existential memory block",
-              pretty (patElemName patElem),
-              "when expanding inside kernels."
-            ]
-      | otherwise = return ()
 
 offsetMemoryInParam :: Param (MemBound u) -> OffsetM (Param (MemBound u))
 offsetMemoryInParam fparam = do
@@ -646,23 +632,19 @@ offsetMemoryInParam fparam = do
 offsetMemoryInMemBound :: MemBound u -> OffsetM (MemBound u)
 offsetMemoryInMemBound summary@(MemArray pt shape u (ArrayIn mem ixfun)) = do
   new_base <- lookupNewBase mem (IxFun.base ixfun, pt)
-  return $
-    fromMaybe summary $ do
-      new_base' <- new_base
-      return $ MemArray pt shape u $ ArrayIn mem $ IxFun.rebase new_base' ixfun
+  return . fromMaybe summary $ do
+    new_base' <- new_base
+    return $ MemArray pt shape u $ ArrayIn mem $ IxFun.rebase new_base' ixfun
 offsetMemoryInMemBound summary = return summary
 
 offsetMemoryInBodyReturns :: BodyReturns -> OffsetM BodyReturns
 offsetMemoryInBodyReturns br@(MemArray pt shape u (ReturnsInBlock mem ixfun))
   | Just ixfun' <- isStaticIxFun ixfun = do
     new_base <- lookupNewBase mem (IxFun.base ixfun', pt)
-    return $
-      fromMaybe br $ do
-        new_base' <- new_base
-        return $
-          MemArray pt shape u $
-            ReturnsInBlock mem $
-              IxFun.rebase (fmap (fmap Free) new_base') ixfun
+    return . fromMaybe br $ do
+      new_base' <- new_base
+      return . MemArray pt shape u . ReturnsInBlock mem $
+        IxFun.rebase (fmap (fmap Free) new_base') ixfun
 offsetMemoryInBodyReturns br = return br
 
 offsetMemoryInLambda :: Lambda GPUMem -> OffsetM (Lambda GPUMem)
@@ -671,13 +653,11 @@ offsetMemoryInLambda lam = inScopeOf lam $ do
   return $ lam {lambdaBody = body}
 
 offsetMemoryInExp :: Exp GPUMem -> OffsetM (Exp GPUMem)
-offsetMemoryInExp (DoLoop ctx val form body) = do
-  let (ctxparams, ctxinit) = unzip ctx
-      (valparams, valinit) = unzip val
-  ctxparams' <- mapM offsetMemoryInParam ctxparams
-  valparams' <- mapM offsetMemoryInParam valparams
-  body' <- localScope (scopeOfFParams ctxparams' <> scopeOfFParams valparams' <> scopeOf form) (offsetMemoryInBody body)
-  return $ DoLoop (zip ctxparams' ctxinit) (zip valparams' valinit) form body'
+offsetMemoryInExp (DoLoop merge form body) = do
+  let (params, args) = unzip merge
+  params' <- mapM offsetMemoryInParam params
+  body' <- localScope (scopeOfFParams params' <> scopeOf form) (offsetMemoryInBody body)
+  return $ DoLoop (zip params' args) form body'
 offsetMemoryInExp e = mapExpM recurse e
   where
     recurse =
@@ -722,9 +702,8 @@ unAllocGPUStms = unAllocStms False
 
     unParams = mapMaybe $ traverse unMem
 
-    unAllocPattern pat@(Pattern ctx val) =
-      Pattern <$> maybe bad return (mapM (rephrasePatElem unMem) ctx)
-        <*> maybe bad return (mapM (rephrasePatElem unMem) val)
+    unAllocPattern pat@(Pattern merge) =
+      Pattern <$> maybe bad return (mapM (rephrasePatElem unMem) merge)
       where
         bad = Left $ "Cannot handle memory in pattern " ++ pretty pat
 
@@ -829,10 +808,7 @@ sliceKernelSizes num_threads sizes space kstms = do
 
   ((maxes_per_thread, size_sums), slice_stms) <- flip runBuilderT kernels_scope $ do
     pat <-
-      basicPattern []
-        <$> replicateM
-          num_sizes
-          (newIdent "max_per_thread" $ Prim int64)
+      basicPattern <$> replicateM num_sizes (newIdent "max_per_thread" $ Prim int64)
 
     w <-
       letSubExp "size_slice_w"

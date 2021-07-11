@@ -42,18 +42,14 @@ redomapToMapAndReduce ::
     [VName]
   ) ->
   m (Stm rep, Stm rep)
-redomapToMapAndReduce
-  (Pattern [] patelems)
-  (w, reds, map_lam, arrs) = do
-    (map_pat, red_pat, red_arrs) <-
-      splitScanOrRedomap patelems w map_lam $ map redNeutral reds
-    let map_stm = mkLet [] map_pat $ Op $ Screma w arrs (mapSOAC map_lam)
-    red_stm <-
-      Let red_pat (defAux ()) . Op
-        <$> (Screma w red_arrs <$> reduceSOAC reds)
-    return (map_stm, red_stm)
-redomapToMapAndReduce _ _ =
-  error "redomapToMapAndReduce does not handle a non-empty 'patternContextElements'"
+redomapToMapAndReduce (Pattern pes) (w, reds, map_lam, arrs) = do
+  (map_pat, red_pat, red_arrs) <-
+    splitScanOrRedomap pes w map_lam $ map redNeutral reds
+  let map_stm = mkLet map_pat $ Op $ Screma w arrs (mapSOAC map_lam)
+  red_stm <-
+    Let red_pat (defAux ()) . Op
+      <$> (Screma w red_arrs <$> reduceSOAC reds)
+  return (map_stm, red_stm)
 
 splitScanOrRedomap ::
   (Typed dec, MonadFreshNames m) =>
@@ -62,15 +58,15 @@ splitScanOrRedomap ::
   LambdaT rep ->
   [[SubExp]] ->
   m ([Ident], PatternT dec, [VName])
-splitScanOrRedomap patelems w map_lam nes = do
-  let (acc_patelems, arr_patelems) =
-        splitAt (length $ concat nes) patelems
+splitScanOrRedomap pes w map_lam nes = do
+  let (acc_pes, arr_pes) =
+        splitAt (length $ concat nes) pes
       (acc_ts, _arr_ts) =
         splitAt (length (concat nes)) $ lambdaReturnType map_lam
-  map_accpat <- zipWithM accMapPatElem acc_patelems acc_ts
-  map_arrpat <- mapM arrMapPatElem arr_patelems
+  map_accpat <- zipWithM accMapPatElem acc_pes acc_ts
+  map_arrpat <- mapM arrMapPatElem arr_pes
   let map_pat = map_accpat ++ map_arrpat
-  return (map_pat, Pattern [] acc_patelems, map identName map_accpat)
+  return (map_pat, Pattern acc_pes, map identName map_accpat)
   where
     accMapPatElem pe acc_t =
       newIdent (baseString (patElemName pe) ++ "_map_acc") $ acc_t `arrayOfRow` w

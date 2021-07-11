@@ -110,7 +110,7 @@ compileSegScan ::
   KernelBody GPUMem ->
   CallKernelGen ()
 compileSegScan pat lvl space scanOp kbody = do
-  let Pattern _ all_pes = pat
+  let Pattern all_pes = pat
       group_size = toInt64Exp <$> segGroupSize lvl
       n = product $ map toInt64Exp $ segSpaceDims space
       num_groups = Count (n `divUp` (unCount group_size * m))

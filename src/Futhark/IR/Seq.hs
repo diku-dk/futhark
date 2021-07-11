@@ -44,7 +44,7 @@ instance TypeCheck.Checkable Seq
 
 instance Buildable Seq where
   mkBody = Body ()
-  mkExpPat ctx val _ = basicPattern ctx val
+  mkExpPat idents _ = basicPattern idents
   mkExpDec _ _ = ()
   mkLetNames = simpleMkLetNames
 

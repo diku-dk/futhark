@@ -30,13 +30,13 @@ import Futhark.Util (invertMap)
 type Allocs = Map VName (SubExp, Space)
 
 getAllocsStm :: Stm GPUMem -> Allocs
-getAllocsStm (Let (Pattern [] [PatElem name _]) _ (Op (Alloc se sp))) =
+getAllocsStm (Let (Pattern [PatElem name _]) _ (Op (Alloc se sp))) =
   M.singleton name (se, sp)
 getAllocsStm (Let _ _ (Op (Alloc _ _))) = error "impossible"
 getAllocsStm (Let _ _ (If _ then_body else_body _)) =
   foldMap getAllocsStm (bodyStms then_body)
     <> foldMap getAllocsStm (bodyStms else_body)
-getAllocsStm (Let _ _ (DoLoop _ _ _ body)) =
+getAllocsStm (Let _ _ (DoLoop _ _ body)) =
   foldMap getAllocsStm (bodyStms body)
 getAllocsStm _ = mempty
 
@@ -51,7 +51,7 @@ getAllocsSegOp (SegHist _ _ _ _ body) =
   foldMap getAllocsStm (kernelBodyStms body)
 
 setAllocsStm :: Map VName SubExp -> Stm GPUMem -> Stm GPUMem
-setAllocsStm m stm@(Let (Pattern [] [PatElem name _]) _ (Op (Alloc _ _)))
+setAllocsStm m stm@(Let (Pattern [PatElem name _]) _ (Op (Alloc _ _)))
   | Just s <- M.lookup name m =
     stm {stmExp = BasicOp $ SubExp s}
 setAllocsStm _ stm@(Let _ _ (Op (Alloc _ _))) = stm
@@ -66,14 +66,10 @@ setAllocsStm m stm@(Let _ _ (If cse then_body else_body dec)) =
           (else_body {bodyStms = setAllocsStm m <$> bodyStms else_body})
           dec
     }
-setAllocsStm m stm@(Let _ _ (DoLoop ctx vals form body)) =
+setAllocsStm m stm@(Let _ _ (DoLoop merge form body)) =
   stm
     { stmExp =
-        DoLoop
-          ctx
-          vals
-          form
-          (body {bodyStms = setAllocsStm m <$> bodyStms body})
+        DoLoop merge form (body {bodyStms = setAllocsStm m <$> bodyStms body})
     }
 setAllocsStm _ stm = stm
 
@@ -110,16 +106,13 @@ definedInExp (Op (Inner (SegOp segop))) =
 definedInExp (If _ then_body else_body _) =
   foldMap definedInStm (bodyStms then_body)
     <> foldMap definedInStm (bodyStms else_body)
-definedInExp (DoLoop _ _ _ body) =
+definedInExp (DoLoop _ _ body) =
   foldMap definedInStm $ bodyStms body
 definedInExp _ = mempty
 
 definedInStm :: Stm GPUMem -> Set VName
-definedInStm Let {stmPattern = Pattern ctx vals, stmExp} =
-  let definedInside =
-        ctx <> vals
-          & fmap patElemName
-          & S.fromList
+definedInStm Let {stmPattern = Pattern merge, stmExp} =
+  let definedInside = merge & fmap patElemName & S.fromList
    in definedInExp stmExp <> definedInside
 
 definedInSegOp :: SegOp lvl GPUMem -> Set VName
@@ -221,10 +214,10 @@ onKernels f =
                   (else_body {bodyStms = else_body_stms})
                   dec
             }
-    helper stm@Let {stmExp = DoLoop ctx vals form body} =
+    helper stm@Let {stmExp = DoLoop merge form body} =
       inScopeOf stm $ do
         stms <- f `onKernels` bodyStms body
-        return $ stm {stmExp = DoLoop ctx vals form (body {bodyStms = stms})}
+        return $ stm {stmExp = DoLoop merge form (body {bodyStms = stms})}
     helper stm =
       inScopeOf stm $ return stm
 

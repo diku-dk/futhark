@@ -63,7 +63,7 @@ standardRules = ruleBook topDownRules bottomUpRules <> loopRules <> basicOpRules
 --
 -- This simplistic rule is only valid before we introduce memory.
 removeUnnecessaryCopy :: (BuilderOps rep, Aliased rep) => BottomUpRuleBasicOp rep
-removeUnnecessaryCopy (vtable, used) (Pattern [] [d]) _ (Copy v)
+removeUnnecessaryCopy (vtable, used) (Pattern [d]) _ (Copy v)
   | not (v `UT.isConsumed` used),
     (not (v `UT.used` used) && consumable) || not (patElemName d `UT.isConsumed` used) =
     Simplify $ letBindNames [patElemName d] $ BasicOp $ SubExp $ Var v
@@ -99,7 +99,7 @@ constantFoldPrimFun _ (Let pat (StmAux cs attrs _) (Apply fname args _ _))
 constantFoldPrimFun _ _ = Skip
 
 simplifyIndex :: BuilderOps rep => BottomUpRuleBasicOp rep
-simplifyIndex (vtable, used) pat@(Pattern [] [pe]) (StmAux cs attrs _) (Index idd inds)
+simplifyIndex (vtable, used) pat@(Pattern [pe]) (StmAux cs attrs _) (Index idd inds)
   | Just m <- simplifyIndexing vtable seType idd inds consumed = Simplify $ do
     res <- m
     attributing attrs $ case res of
@@ -168,8 +168,7 @@ ruleIf _ pat _ (cond, tb, fb, IfDec ts _)
         )
     certifying (tcs <> fcs) $ letBind pat e
 ruleIf _ pat _ (_, tbranch, _, IfDec _ IfFallback)
-  | null $ patternContextNames pat,
-    all (safeExp . stmExp) $ bodyStms tbranch = Simplify $ do
+  | all (safeExp . stmExp) $ bodyStms tbranch = Simplify $ do
     let ses = bodyResult tbranch
     addStms $ bodyStms tbranch
     sequence_
@@ -192,54 +191,41 @@ ruleIf _ pat _ (cond, tb, fb, _)
 ruleIf _ _ _ _ = Skip
 
 -- | Move out results of a conditional expression whose computation is
--- either invariant to the branches (only done for results in the
--- context), or the same in both branches.
+-- either invariant to the branches (only done for results used for
+-- existentials), or the same in both branches.
 hoistBranchInvariant :: BuilderOps rep => TopDownRuleIf rep
 hoistBranchInvariant _ pat _ (cond, tb, fb, IfDec ret ifsort) = Simplify $ do
   let tses = bodyResult tb
       fses = bodyResult fb
   (hoistings, (pes, ts, res)) <-
-    fmap (fmap unzip3 . partitionEithers) $
-      mapM branchInvariant $
-        zip3
-          (patternElements pat)
-          (map Left [0 .. num_ctx -1] ++ map Right ret)
-          (zip tses fses)
+    fmap (fmap unzip3 . partitionEithers) . mapM branchInvariant $
+      zip4 [0 ..] (patternElements pat) ret (zip tses fses)
   let ctx_fixes = catMaybes hoistings
       (tses', fses') = unzip res
       tb' = tb {bodyResult = tses'}
       fb' = fb {bodyResult = fses'}
-      ret' = foldr (uncurry fixExt) (rights ts) ctx_fixes
-      (ctx_pes, val_pes) = splitFromEnd (length ret') pes
+      ret' = foldr (uncurry fixExt) ts ctx_fixes
   if not $ null hoistings -- Was something hoisted?
     then do
       -- We may have to add some reshapes if we made the type
       -- less existential.
       tb'' <- reshapeBodyResults tb' $ map extTypeOf ret'
       fb'' <- reshapeBodyResults fb' $ map extTypeOf ret'
-      letBind (Pattern ctx_pes val_pes) $
-        If cond tb'' fb'' (IfDec ret' ifsort)
+      letBind (Pattern pes) $ If cond tb'' fb'' (IfDec ret' ifsort)
     else cannotSimplify
   where
-    num_ctx = length $ patternContextElements pat
     bound_in_branches =
-      namesFromList $
-        concatMap (patternNames . stmPattern) $
-          bodyStms tb <> bodyStms fb
-    mem_sizes = freeIn $ filter (isMem . patElemType) $ patternElements pat
+      namesFromList . concatMap (patternNames . stmPattern) $
+        bodyStms tb <> bodyStms fb
     invariant Constant {} = True
     invariant (Var v) = not $ v `nameIn` bound_in_branches
 
-    isMem Mem {} = True
-    isMem _ = False
-    sizeOfMem v = v `nameIn` mem_sizes
-
-    branchInvariant (pe, t, (tse, fse))
+    branchInvariant (i, pe, t, (tse, fse))
       -- Do both branches return the same value?
       | tse == fse = do
         certifying (resCerts tse <> resCerts fse) $
           letBindNames [patElemName pe] $ BasicOp $ SubExp $ resSubExp tse
-        hoisted pe t
+        hoisted i pe
 
       -- Do both branches return values that are free in the
       -- branch, and are we not the only pattern element?  The
@@ -247,21 +233,18 @@ hoistBranchInvariant _ pat _ (cond, tb, fb, IfDec ret ifsort) = Simplify $ do
       | invariant $ resSubExp tse,
         invariant $ resSubExp fse,
         patternSize pat > 1,
-        Prim _ <- patElemType pe,
-        not $ sizeOfMem $ patElemName pe = do
-        bt <- expTypesFromPattern $ Pattern [] [pe]
-        certifying (resCerts tse <> resCerts fse) $
-          letBindNames [patElemName pe]
-            =<< ( If cond <$> resultBodyM [resSubExp tse]
-                    <*> resultBodyM [resSubExp fse]
-                    <*> pure (IfDec bt ifsort)
-                )
-        hoisted pe t
+        Prim _ <- patElemType pe = do
+        bt <- expTypesFromPattern $ Pattern [pe]
+        letBindNames [patElemName pe]
+          =<< ( If cond <$> resultBodyM [resSubExp tse]
+                  <*> resultBodyM [resSubExp fse]
+                  <*> pure (IfDec bt ifsort)
+              )
+        hoisted i pe
       | otherwise =
-        return $ Right (pe, t, (tse, fse))
+        pure $ Right (pe, t, (tse, fse))
 
-    hoisted pe (Left i) = return $ Left $ Just (i, Var $ patElemName pe)
-    hoisted _ Right {} = return $ Left Nothing
+    hoisted i pe = pure $ Left $ Just (i, Var $ patElemName pe)
 
     reshapeBodyResults body rets = buildBody_ $ do
       ses <- bodyBind body
@@ -283,8 +266,8 @@ hoistBranchInvariant _ pat _ (cond, tb, fb, IfDec ret ifsort) = Simplify $ do
 -- precise.
 removeDeadBranchResult :: BuilderOps rep => BottomUpRuleIf rep
 removeDeadBranchResult (_, used) pat _ (e1, tb, fb, IfDec rettype ifsort)
-  | -- Only if there is no existential context...
-    patternSize pat == length rettype,
+  | -- Only if there is no existential binding...
+    not $ any (`nameIn` foldMap freeIn (patternElements pat)) (patternNames pat),
     -- Figure out which of the names in 'pat' are used...
     patused <- map (`UT.isUsedDirectly` used) $ patternNames pat,
     -- If they are not all used, then this rule applies.
@@ -300,7 +283,7 @@ removeDeadBranchResult (_, used) pat _ (e1, tb, fb, IfDec rettype ifsort)
         fb' = fb {bodyResult = pick fses}
         pat' = pick $ patternElements pat
         rettype' = pick rettype
-     in Simplify $ letBind (Pattern [] pat') $ If e1 tb' fb' $ IfDec rettype' ifsort
+     in Simplify $ letBind (Pattern pat') $ If e1 tb' fb' $ IfDec rettype' ifsort
   | otherwise = Skip
 
 withAccTopDown :: BuilderOps rep => TopDownRuleGeneric rep
@@ -338,7 +321,7 @@ withAccTopDown vtable (Let pat aux (WithAcc inputs lam)) = Simplify . auxing aux
     mkLambda (cert_params' ++ acc_params') $
       bodyBind $ (lambdaBody lam) {bodyResult = acc_res' <> nonacc_res'}
 
-  letBind (Pattern [] (concat acc_pes' <> nonacc_pes')) $ WithAcc inputs' lam'
+  letBind (Pattern (concat acc_pes' <> nonacc_pes')) $ WithAcc inputs' lam'
   where
     num_nonaccs = length (lambdaReturnType lam) - length inputs
     inputArrs (_, arrs, _) = length arrs
@@ -398,7 +381,7 @@ withAccBottomUp (_, utable) (Let pat aux (WithAcc inputs lam))
       void $ bodyBind $ lambdaBody lam
       pure $ acc_res' ++ nonacc_res'
 
-    auxing aux $ letBind (Pattern [] pes') $ WithAcc inputs' lam'
+    auxing aux $ letBind (Pattern pes') $ WithAcc inputs' lam'
   where
     num_nonaccs = length (lambdaReturnType lam) - length inputs
     inputArrs (_, arrs, _) = length arrs

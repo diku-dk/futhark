@@ -100,8 +100,8 @@ instance Substitute SubExpRes where
     SubExpRes (substituteNames substs cs) (substituteNames substs se)
 
 instance Substitute dec => Substitute (PatternT dec) where
-  substituteNames substs (Pattern context values) =
-    Pattern (substituteNames substs context) (substituteNames substs values)
+  substituteNames substs (Pattern xs) =
+    Pattern (substituteNames substs xs)
 
 instance Substitute Certificates where
   substituteNames substs (Certificates cs) =

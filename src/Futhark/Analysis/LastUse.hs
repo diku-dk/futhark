@@ -34,7 +34,7 @@ analyseProg :: Prog GPUMem -> (LastUseMap, Used)
 analyseProg prog =
   let consts =
         progConsts prog
-          & concatMap (toList . fmap patElemName . patternValueElements . stmPattern)
+          & concatMap (toList . fmap patElemName . patternElements . stmPattern)
           & namesFromList
       funs = progFuns $ aliasAnalysis prog
       (lus, used) = foldMap (analyseFun mempty consts) funs
@@ -50,7 +50,7 @@ analyseStms lumap used stms = foldr analyseStm (lumap, used) $ stmsToList stms
 
 analyseStm :: Stm (Aliases GPUMem) -> (LastUse, Used) -> (LastUse, Used)
 analyseStm (Let pat _ e) (lumap0, used0) =
-  let (lumap', used') = patternValueElements pat & foldl helper (lumap0, used0)
+  let (lumap', used') = patternElements pat & foldl helper (lumap0, used0)
    in analyseExp (lumap', used') e
   where
     helper (lumap_acc, used_acc) (PatElem name (aliases, _)) =
@@ -62,7 +62,7 @@ analyseStm (Let pat _ e) (lumap0, used0) =
         used_acc <> unAliases aliases
       )
 
-    pat_name = patElemName $ head $ patternValueElements pat
+    pat_name = patElemName $ head $ patternElements pat
     analyseExp :: (LastUse, Used) -> Exp (Aliases GPUMem) -> (LastUse, Used)
     analyseExp (lumap, used) (BasicOp _) =
       let nms = freeIn e `namesSubtract` used
@@ -76,9 +76,9 @@ analyseStm (Let pat _ e) (lumap0, used0) =
           used' = used_then <> used_else
           nms = ((freeIn cse <> freeIn dec) `namesSubtract` used')
        in (insertNames pat_name nms (lumap_then <> lumap_else), used' <> nms)
-    analyseExp (lumap, used) (DoLoop ctx vals form body) =
+    analyseExp (lumap, used) (DoLoop merge form body) =
       let (lumap', used') = analyseBody lumap used body
-          nms = (freeIn ctx <> freeIn vals <> freeIn form) `namesSubtract` used'
+          nms = (freeIn merge <> freeIn form) `namesSubtract` used'
        in (insertNames pat_name nms lumap', used' <> nms)
     analyseExp (lumap, used) (Op (Alloc se sp)) =
       let nms = (freeIn se <> freeIn sp) `namesSubtract` used

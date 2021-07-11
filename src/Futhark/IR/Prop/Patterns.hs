@@ -15,13 +15,8 @@ module Futhark.IR.Prop.Patterns
     setPatElemDec,
     patternElements,
     patternIdents,
-    patternContextIdents,
-    patternValueIdents,
     patternNames,
-    patternValueNames,
-    patternContextNames,
     patternTypes,
-    patternValueTypes,
     patternSize,
 
     -- * Pattern construction
@@ -56,49 +51,25 @@ patElemType = typeOf
 setPatElemDec :: PatElemT oldattr -> newattr -> PatElemT newattr
 setPatElemDec pe x = fmap (const x) pe
 
--- | All pattern elements in the pattern - context first, then values.
-patternElements :: PatternT dec -> [PatElemT dec]
-patternElements pat = patternContextElements pat ++ patternValueElements pat
-
 -- | Return a list of the 'Ident's bound by the t'Pattern'.
 patternIdents :: Typed dec => PatternT dec -> [Ident]
-patternIdents pat = patternContextIdents pat ++ patternValueIdents pat
-
--- | Return a list of the context 'Ident's bound by the t'Pattern'.
-patternContextIdents :: Typed dec => PatternT dec -> [Ident]
-patternContextIdents = map patElemIdent . patternContextElements
-
--- | Return a list of the value 'Ident's bound by the t'Pattern'.
-patternValueIdents :: Typed dec => PatternT dec -> [Ident]
-patternValueIdents = map patElemIdent . patternValueElements
+patternIdents = map patElemIdent . patternElements
 
 -- | Return a list of the 'Name's bound by the t'Pattern'.
 patternNames :: PatternT dec -> [VName]
 patternNames = map patElemName . patternElements
 
--- | Return a list of the 'Name's bound by the context part of the t'Pattern'.
-patternContextNames :: PatternT dec -> [VName]
-patternContextNames = map patElemName . patternContextElements
-
--- | Return a list of the 'Name's bound by the value part of the t'Pattern'.
-patternValueNames :: PatternT dec -> [VName]
-patternValueNames = map patElemName . patternValueElements
-
 -- | Return a list of the typess bound by the pattern.
 patternTypes :: Typed dec => PatternT dec -> [Type]
 patternTypes = map identType . patternIdents
 
--- | Return a list of the typess bound by the value part of the pattern.
-patternValueTypes :: Typed dec => PatternT dec -> [Type]
-patternValueTypes = map identType . patternValueIdents
-
 -- | Return the number of names bound by the pattern.
 patternSize :: PatternT dec -> Int
-patternSize (Pattern context values) = length context + length values
+patternSize (Pattern xs) = length xs
 
 -- | Create a pattern using 'Type' as the attribute.
-basicPattern :: [Ident] -> [Ident] -> PatternT Type
-basicPattern context values =
-  Pattern (map patElem context) (map patElem values)
+basicPattern :: [Ident] -> PatternT Type
+basicPattern values =
+  Pattern $ map patElem values
   where
     patElem (Ident name t) = PatElem name t

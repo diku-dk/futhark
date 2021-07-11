@@ -135,25 +135,20 @@ instance (ASTRep rep, CanBeAliased (Op rep)) => Aliased (Aliases rep) where
 
 instance (ASTRep rep, CanBeAliased (Op rep)) => PrettyRep (Aliases rep) where
   ppExpDec (consumed, inner) e =
-    maybeComment $
-      catMaybes
-        [ exp_dec,
-          merge_dec,
-          ppExpDec inner $ removeExpAliases e
-        ]
+    maybeComment . catMaybes $
+      [exp_dec, merge_dec, ppExpDec inner $ removeExpAliases e]
     where
       merge_dec =
         case e of
-          DoLoop _ merge _ body ->
+          DoLoop merge _ body ->
             let mergeParamAliases fparam als
                   | primType (paramType fparam) =
                     Nothing
                   | otherwise =
                     resultAliasComment (paramName fparam) als
-             in maybeComment $
-                  catMaybes $
-                    zipWith mergeParamAliases (map fst merge) $
-                      bodyAliases body
+             in maybeComment . catMaybes $
+                  zipWith mergeParamAliases (map fst merge) $
+                    bodyAliases body
           _ -> Nothing
 
       exp_dec = case namesToList $ unAliases consumed of
@@ -239,7 +234,7 @@ addAliasesToPattern ::
   Exp (Aliases rep) ->
   PatternT (VarAliases, dec)
 addAliasesToPattern pat e =
-  uncurry Pattern $ mkPatternAliases pat e
+  Pattern $ mkPatternAliases pat e
 
 mkAliasedBody ::
   (ASTRep rep, CanBeAliased (Op rep)) =>
@@ -254,22 +249,15 @@ mkPatternAliases ::
   (Aliased rep, Typed dec) =>
   PatternT dec ->
   Exp rep ->
-  ( [PatElemT (VarAliases, dec)],
-    [PatElemT (VarAliases, dec)]
-  )
+  [PatElemT (VarAliases, dec)]
 mkPatternAliases pat e =
-  -- Some part of the pattern may be the context.  This does not have
-  -- aliases from expAliases, so we use a hack to compute aliases of
-  -- the context.
-  let als = expAliases e ++ repeat mempty -- In case the pattern has
-  -- more elements (this
-  -- implies a type error).
-      context_als = mkContextAliases pat e
-   in ( zipWith annotateBindee (patternContextElements pat) context_als,
-        zipWith annotateBindee (patternValueElements pat) als
-      )
+  let als = expAliases e ++ repeat mempty
+   in -- In case the pattern has
+      -- more elements (this
+      -- implies a type error).
+      zipWith annotatePatElem (patternElements pat) als
   where
-    annotateBindee bindee names =
+    annotatePatElem bindee names =
       bindee `setPatElemDec` (AliasDec names', patElemDec bindee)
       where
         names' =
@@ -277,31 +265,6 @@ mkPatternAliases pat e =
             Array {} -> names
             Mem _ -> names
             _ -> mempty
-
-mkContextAliases ::
-  Aliased rep =>
-  PatternT dec ->
-  Exp rep ->
-  [Names]
-mkContextAliases pat (DoLoop ctxmerge valmerge _ body) =
-  let ctx = map fst ctxmerge
-      init_als = zip mergenames $ map (subExpAliases . snd) $ ctxmerge ++ valmerge
-      expand als = als <> mconcat (mapMaybe (`lookup` init_als) (namesToList als))
-      merge_als =
-        zip mergenames $
-          map ((`namesSubtract` mergenames_set) . expand) $
-            bodyAliases body
-   in if length ctx == length (patternContextElements pat)
-        then map (fromMaybe mempty . flip lookup merge_als . paramName) ctx
-        else map (const mempty) $ patternContextElements pat
-  where
-    mergenames = map (paramName . fst) $ ctxmerge ++ valmerge
-    mergenames_set = namesFromList mergenames
-mkContextAliases pat (If _ tbranch fbranch _) =
-  take (length $ patternContextNames pat) $
-    zipWith (<>) (bodyAliases tbranch) (bodyAliases fbranch)
-mkContextAliases pat _ =
-  replicate (length $ patternContextElements pat) mempty
 
 mkBodyAliases ::
   Aliased rep =>
@@ -383,8 +346,8 @@ instance (Buildable rep, CanBeAliased (Op rep)) => Buildable (Aliases rep) where
     let dec = mkExpDec (removePatternAliases pat) $ removeExpAliases e
      in (AliasDec $ consumedInExp e, dec)
 
-  mkExpPat ctx val e =
-    addAliasesToPattern (mkExpPat ctx val $ removeExpAliases e) e
+  mkExpPat ids e =
+    addAliasesToPattern (mkExpPat ids $ removeExpAliases e) e
 
   mkLetNames names e = do
     env <- asksScope removeScopeAliases

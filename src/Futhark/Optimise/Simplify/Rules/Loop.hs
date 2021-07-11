@@ -27,17 +27,12 @@ import Futhark.Transform.Rename
 -- perfect, but it should suffice for many cases, and should never
 -- generate wrong code.
 removeRedundantMergeVariables :: BuilderOps rep => BottomUpRuleDoLoop rep
-removeRedundantMergeVariables (_, used) pat aux (ctx, val, form, body)
-  | not $ all (usedAfterLoop . fst) val,
-    null ctx -- FIXME: things get tricky if we can remove all vals
-    -- but some ctxs are still used.  We take the easy way
-    -- out for now.
-    =
-    let (ctx_es, val_es) = splitAt (length ctx) $ bodyResult body
-        necessaryForReturned =
+removeRedundantMergeVariables (_, used) pat aux (merge, form, body)
+  | not $ all (usedAfterLoop . fst) merge =
+    let necessaryForReturned =
           findNecessaryForReturned
             usedAfterLoopOrInForm
-            (zip (map fst $ ctx ++ val) $ map resSubExp $ ctx_es ++ val_es)
+            (zip (map fst merge) (map resSubExp $ bodyResult body))
             (dataDependencies body)
 
         resIsNecessary ((v, _), _) =
@@ -46,33 +41,18 @@ removeRedundantMergeVariables (_, used) pat aux (ctx, val, form, body)
             || referencedInPat v
             || referencedInForm v
 
-        (keep_ctx, discard_ctx) =
-          partition resIsNecessary $ zip ctx ctx_es
         (keep_valpart, discard_valpart) =
           partition (resIsNecessary . snd) $
-            zip (patternValueElements pat) $ zip val val_es
+            zip (patternElements pat) $ zip merge $ bodyResult body
 
         (keep_valpatelems, keep_val) = unzip keep_valpart
         (_discard_valpatelems, discard_val) = unzip discard_valpart
-        (ctx', ctx_es') = unzip keep_ctx
-        (val', val_es') = unzip keep_val
+        (merge', val_es') = unzip keep_val
 
-        body' = body {bodyResult = ctx_es' ++ val_es'}
-        free_in_keeps = freeIn keep_valpatelems
+        body' = body {bodyResult = val_es'}
 
-        stillUsedContext pat_elem =
-          patElemName pat_elem
-            `nameIn` ( free_in_keeps
-                         <> freeIn (filter (/= pat_elem) $ patternContextElements pat)
-                     )
-
-        pat' =
-          pat
-            { patternValueElements = keep_valpatelems,
-              patternContextElements =
-                filter stillUsedContext $ patternContextElements pat
-            }
-     in if ctx' ++ val' == ctx ++ val
+        pat' = Pattern keep_valpatelems
+     in if merge' == merge
           then Skip
           else Simplify $ do
             -- We can't just remove the bindings in 'discard', since the loop
@@ -81,17 +61,16 @@ removeRedundantMergeVariables (_, used) pat aux (ctx, val, form, body)
             -- removal will eventually get rid of them.  Some care is
             -- necessary to handle unique bindings.
             body'' <- insertStmsM $ do
-              mapM_ (uncurry letBindNames) $ dummyStms discard_ctx
               mapM_ (uncurry letBindNames) $ dummyStms discard_val
-              return body'
-            auxing aux $ letBind pat' $ DoLoop ctx' val' form body''
+              pure body'
+            auxing aux $ letBind pat' $ DoLoop merge' form body''
   where
-    pat_used = map (`UT.isUsedDirectly` used) $ patternValueNames pat
-    used_vals = map fst $ filter snd $ zip (map (paramName . fst) val) pat_used
+    pat_used = map (`UT.isUsedDirectly` used) $ patternNames pat
+    used_vals = map fst $ filter snd $ zip (map (paramName . fst) merge) pat_used
     usedAfterLoop = flip elem used_vals . paramName
     usedAfterLoopOrInForm p =
       usedAfterLoop p || paramName p `nameIn` freeIn form
-    patAnnotNames = freeIn $ map fst $ ctx ++ val
+    patAnnotNames = freeIn $ map fst merge
     referencedInPat = (`nameIn` patAnnotNames) . paramName
     referencedInForm = (`nameIn` freeIn form) . paramName
 
@@ -107,9 +86,10 @@ removeRedundantMergeVariables _ _ _ _ =
 -- We may change the type of the loop if we hoist out a shape
 -- annotation, in which case we also need to tweak the bound pattern.
 hoistLoopInvariantMergeVariables :: BuilderOps rep => TopDownRuleDoLoop rep
-hoistLoopInvariantMergeVariables vtable pat aux (ctx, val, form, loopbody) =
+hoistLoopInvariantMergeVariables vtable pat aux (merge, form, loopbody) = do
   -- Figure out which of the elements of loopresult are
   -- loop-invariant, and hoist them out.
+  let explpat = zip (patternElements pat) $ map (paramName . fst) merge
   case foldr checkInvariance ([], explpat, [], []) $
     zip3 (patternNames pat) merge res of
     ([], _, _, _) ->
@@ -118,32 +98,14 @@ hoistLoopInvariantMergeVariables vtable pat aux (ctx, val, form, loopbody) =
     (invariant, explpat', merge', res') -> Simplify $ do
       -- We have moved something invariant out of the loop.
       let loopbody' = loopbody {bodyResult = res'}
-          invariantShape :: (a, VName) -> Bool
-          invariantShape (_, shapemerge) =
-            shapemerge
-              `elem` map (paramName . fst) merge'
-          (implpat', implinvariant) = partition invariantShape implpat
-          implinvariant' = [(patElemIdent p, Var v) | (p, v) <- implinvariant]
-          implpat'' = map fst implpat'
           explpat'' = map fst explpat'
-          (ctx', val') = splitAt (length implpat') merge'
-      forM_ (invariant ++ implinvariant') $ \(v1, v2) ->
+      forM_ invariant $ \(v1, v2) ->
         letBindNames [identName v1] $ BasicOp $ SubExp v2
-      auxing aux $
-        letBind (Pattern implpat'' explpat'') $
-          DoLoop ctx' val' form loopbody'
+      auxing aux $ letBind (Pattern explpat'') $ DoLoop merge' form loopbody'
   where
-    merge = ctx ++ val
     res = bodyResult loopbody
 
-    implpat =
-      zip (patternContextElements pat) $
-        map (paramName . fst) ctx
-    explpat =
-      zip (patternValueElements pat) $
-        map (paramName . fst) val
-
-    namesOfMergeParams = namesFromList $ map (paramName . fst) $ ctx ++ val
+    namesOfMergeParams = namesFromList $ map (paramName . fst) merge
 
     removeFromResult (mergeParam, mergeInit) explpat' =
       case partition ((== paramName mergeParam) . snd) explpat' of
@@ -208,12 +170,12 @@ hoistLoopInvariantMergeVariables vtable pat aux (ctx, val, form, loopbody) =
         || name `nameIn` namesOfInvariant
 
 simplifyClosedFormLoop :: BuilderOps rep => TopDownRuleDoLoop rep
-simplifyClosedFormLoop _ pat _ ([], val, ForLoop i it bound [], body) =
+simplifyClosedFormLoop _ pat _ (val, ForLoop i it bound [], body) =
   Simplify $ loopClosedForm pat val (oneName i) it bound body
 simplifyClosedFormLoop _ _ _ _ = Skip
 
 simplifyLoopVariables :: (BuilderOps rep, Aliased rep) => TopDownRuleDoLoop rep
-simplifyLoopVariables vtable pat aux (ctx, val, form@(ForLoop i it num_iters loop_vars), body)
+simplifyLoopVariables vtable pat aux (merge, form@(ForLoop i it num_iters loop_vars), body)
   | simplifiable <- map checkIfSimplifiable loop_vars,
     not $ all isNothing simplifiable = Simplify $ do
     -- Check if the simplifications throw away more information than
@@ -227,13 +189,8 @@ simplifyLoopVariables vtable pat aux (ctx, val, form@(ForLoop i it num_iters loo
         body' <- buildBody_ $ do
           addStms $ mconcat body_prefix_stms
           bodyBind body
-        auxing aux $
-          letBind pat $
-            DoLoop
-              ctx
-              val
-              (ForLoop i it num_iters $ catMaybes maybe_loop_vars)
-              body'
+        let form' = ForLoop i it num_iters $ catMaybes maybe_loop_vars
+        auxing aux $ letBind pat $ DoLoop merge form' body'
   where
     seType (Var v)
       | v == i = Just $ Prim $ IntType it
@@ -292,7 +249,7 @@ simplifyLoopVariables _ _ _ _ = Skip
 -- This addresses loops of the form @for i in x..<y@ in the source
 -- language.
 narrowLoopType :: (BuilderOps rep) => TopDownRuleDoLoop rep
-narrowLoopType vtable pat aux (ctx, val, ForLoop i Int64 n [], body)
+narrowLoopType vtable pat aux (merge, ForLoop i Int64 n [], body)
   | Just (n', it', cs) <- smallerType =
     Simplify $ do
       i' <- newVName $ baseString i
@@ -300,9 +257,7 @@ narrowLoopType vtable pat aux (ctx, val, ForLoop i Int64 n [], body)
       body' <- insertStmsM . inScopeOf form' $ do
         letBindNames [i] $ BasicOp $ ConvOp (SExt it' Int64) (Var i')
         pure body
-      auxing aux $
-        certifying cs $
-          letBind pat $ DoLoop ctx val form' body'
+      auxing aux $ certifying cs $ letBind pat $ DoLoop merge form' body'
   where
     smallerType
       | Var n' <- n,
@@ -350,10 +305,10 @@ unroll n merge (iv, it, i) loop_vars body
     unroll n merge' (iv, it, i + 1) loop_vars body
 
 simplifyKnownIterationLoop :: BuilderOps rep => TopDownRuleDoLoop rep
-simplifyKnownIterationLoop _ pat aux (ctx, val, ForLoop i it (Constant iters) loop_vars, body)
+simplifyKnownIterationLoop _ pat aux (merge, ForLoop i it (Constant iters) loop_vars, body)
   | IntValue n <- iters,
     zeroIshInt n || oneIshInt n || "unroll" `inAttrs` stmAuxAttrs aux = Simplify $ do
-    res <- unroll (valueIntegral n) (map (second subExpRes) (ctx ++ val)) (i, it, 0) loop_vars body
+    res <- unroll (valueIntegral n) (map (second subExpRes) merge) (i, it, 0) loop_vars body
     forM_ (zip (patternNames pat) res) $ \(v, SubExpRes cs se) ->
       certifying cs $ letBindNames [v] $ BasicOp $ SubExp se
 simplifyKnownIterationLoop _ _ _ _ =

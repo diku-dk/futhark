@@ -38,7 +38,7 @@ instance RepTypes MCMem where
   type Op MCMem = MemOp (MCOp MCMem ())
 
 instance ASTRep MCMem where
-  expTypesFromPattern = return . map snd . snd . bodyReturnsFromPattern
+  expTypesFromPattern = return . map snd . bodyReturnsFromPattern
 
 instance OpReturns MCMem where
   opReturns (Alloc _ space) = return [MemMem space]

@@ -72,7 +72,7 @@ scanStage1 ::
 scanStage1 pat space scan_ops kbody = do
   let (all_scan_res, map_res) = splitAt (segBinOpResults scan_ops) $ kernelBodyResult kbody
       per_scan_res = segBinOpChunks scan_ops all_scan_res
-      per_scan_pes = segBinOpChunks scan_ops $ patternValueElements pat
+      per_scan_pes = segBinOpChunks scan_ops $ patternElements pat
   let (is, ns) = unzip $ unSegSpace space
       ns' = map toInt64Exp ns
   iter <- dPrim "iter" $ IntType Int64
@@ -138,7 +138,7 @@ scanStage2 pat nsubtasks space scan_ops kbody = do
   emit $ Imp.DebugPrint "nonsegmentedScan stage 2" Nothing
   let (is, ns) = unzip $ unSegSpace space
       ns_64 = map toInt64Exp ns
-      per_scan_pes = segBinOpChunks scan_ops $ patternValueElements pat
+      per_scan_pes = segBinOpChunks scan_ops $ patternElements pat
       nsubtasks' = tvExp nsubtasks
 
   dScope Nothing $ scopeOfLParams $ concatMap (lambdaParams . segBinOpLambda) scan_ops
@@ -195,7 +195,7 @@ scanStage3 pat space scan_ops kbody = do
   let (is, ns) = unzip $ unSegSpace space
       all_scan_res = take (segBinOpResults scan_ops) $ kernelBodyResult kbody
       per_scan_res = segBinOpChunks scan_ops all_scan_res
-      per_scan_pes = segBinOpChunks scan_ops $ patternValueElements pat
+      per_scan_pes = segBinOpChunks scan_ops $ patternElements pat
       ns' = map toInt64Exp ns
 
   iter <- dPrimV "iter" (0 :: Imp.TExp Int64)
@@ -276,7 +276,7 @@ compileSegScanBody segment_i pat space scan_ops kbody = do
   let (is, ns) = unzip $ unSegSpace space
       ns_64 = map toInt64Exp ns
 
-  let per_scan_pes = segBinOpChunks scan_ops $ patternValueElements pat
+  let per_scan_pes = segBinOpChunks scan_ops $ patternElements pat
   collect $
     forM_ (zip scan_ops per_scan_pes) $ \(scan_op, scan_pes) -> do
       dScope Nothing $ scopeOfLParams $ lambdaParams $ segBinOpLambda scan_op

@@ -196,9 +196,8 @@ addWisdomToPattern ::
   Exp (Wise rep) ->
   Pattern (Wise rep)
 addWisdomToPattern pat e =
-  Pattern (map f ctx) (map f val)
+  Pattern $ map f $ Aliases.mkPatternAliases pat e
   where
-    (ctx, val) = Aliases.mkPatternAliases pat e
     f pe =
       let (als, dec) = patElemDec pe
        in pe `setPatElemDec` (VarWisdom als, dec)
@@ -242,14 +241,9 @@ mkWiseExpDec pat expdec e =
     expdec
   )
 
-instance
-  ( Buildable rep,
-    CanBeWise (Op rep)
-  ) =>
-  Buildable (Wise rep)
-  where
-  mkExpPat ctx val e =
-    addWisdomToPattern (mkExpPat ctx val $ removeExpWisdom e) e
+instance (Buildable rep, CanBeWise (Op rep)) => Buildable (Wise rep) where
+  mkExpPat ids e =
+    addWisdomToPattern (mkExpPat ids $ removeExpWisdom e) e
 
   mkExpDec pat e =
     mkWiseExpDec pat (mkExpDec (removePatternWisdom pat) $ removeExpWisdom e) e

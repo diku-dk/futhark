@@ -279,9 +279,8 @@ index' name is vtable = do
   case entryType entry of
     LetBound entry'
       | Just k <-
-          elemIndex name $
-            patternValueNames $
-              stmPattern $ letBoundStm entry' ->
+          elemIndex name . patternNames . stmPattern $
+            letBoundStm entry' ->
         letBoundIndex entry' k is
     FreeVar entry' ->
       freeVarIndex entry' name is

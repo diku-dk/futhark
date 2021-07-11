@@ -63,7 +63,10 @@ internaliseValBind fb@(E.ValBind entry fname retdecl (Info (rettype, _)) tparams
         let rettype' = zeroExts rettype_bad
         body_res' <-
           ensureResultExtShape msg loc (map I.fromDecl rettype') $ subExpsRes body_res
-        pure (body_res', rettype')
+        pure
+          ( body_res',
+            replicate (length (shapeContext rettype')) (I.Prim int64) ++ rettype'
+          )
 
       let all_params = shapeparams ++ concat params'
 
@@ -102,7 +105,7 @@ generateEntryPoint (E.EntryPoint e_paramts e_rettype) vb = localConstsScope $ do
     let entry' = entryPoint (baseName ofname) (zip e_paramts params') (e_rettype, entry_rettype)
         args = map (I.Var . I.paramName) $ concat params'
 
-    entry_body <- buildBody_ $ do
+    (entry_body, ctx_ts) <- buildBody $ do
       -- Special case the (rare) situation where the entry point is
       -- not a function.
       maybe_const <- lookupConst ofname
@@ -114,14 +117,14 @@ generateEntryPoint (E.EntryPoint e_paramts e_rettype) vb = localConstsScope $ do
       ctx <-
         extractShapeContext (concat entry_rettype)
           <$> mapM (fmap I.arrayDims . subExpType) vals
-      pure $ subExpsRes $ ctx ++ vals
+      pure (subExpsRes $ ctx ++ vals, map (const (I.Prim int64)) ctx)
 
     addFunDef $
       I.FunDef
         (Just entry')
         (internaliseAttrs attrs)
         ("entry_" <> baseName ofname)
-        (concat entry_rettype)
+        (ctx_ts ++ concat entry_rettype)
         (shapeparams ++ concat params')
         entry_body
 
@@ -427,7 +430,7 @@ internaliseAppExp desc (E.DoLoop sparams mergepat mergeexp form loopbody loc) = 
   map I.Var . dropCond
     <$> attributing
       attrs
-      (letTupExp desc (I.DoLoop ctxmerge valmerge form' loopbody''))
+      (letTupExp desc (I.DoLoop (ctxmerge <> valmerge) form' loopbody''))
   where
     sparams' = map (`TypeParamDim` mempty) sparams
 

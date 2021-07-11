@@ -945,15 +945,14 @@ checkBasicOp (UpdateAcc acc is ses) = do
 matchLoopResultExt ::
   Checkable rep =>
   [Param DeclType] ->
-  [Param DeclType] ->
   Result ->
   TypeM rep ()
-matchLoopResultExt ctx val loopres = do
+matchLoopResultExt merge loopres = do
   let rettype_ext =
-        existentialiseExtTypes (map paramName ctx) $
-          staticShapes $ map typeOf $ ctx ++ val
+        existentialiseExtTypes (map paramName merge) $
+          staticShapes $ map typeOf merge
 
-  bodyt <- mapM (subExpType . resSubExp) loopres
+  bodyt <- mapM subExpResType loopres
 
   case instantiateShapes (fmap resSubExp . (`maybeNth` loopres)) rettype_ext of
     Nothing ->
@@ -986,27 +985,18 @@ checkExp (Apply fname args rettype_annot _) = do
   (rettype_derived, paramtypes) <- lookupFun fname $ map fst args
   argflows <- mapM (checkArg . fst) args
   when (rettype_derived /= rettype_annot) $
-    bad $
-      TypeError $
-        "Expected apply result type " ++ pretty rettype_derived
-          ++ " but annotation is "
-          ++ pretty rettype_annot
+    bad . TypeError . pretty $
+      "Expected apply result type:"
+        </> indent 2 (ppr rettype_derived)
+        </> "But annotation is:"
+        </> indent 2 (ppr rettype_annot)
   consumeArgs paramtypes argflows
-checkExp (DoLoop ctxmerge valmerge form loopbody) = do
-  let merge = ctxmerge ++ valmerge
-      (mergepat, mergeexps) = unzip merge
+checkExp (DoLoop merge form loopbody) = do
+  let (mergepat, mergeexps) = unzip merge
   mergeargs <- mapM checkArg mergeexps
 
-  let val_free = freeIn $ map fst valmerge
-      usedInVal p = paramName p `nameIn` val_free
-  case find (not . usedInVal . fst) ctxmerge of
-    Just p ->
-      bad $ TypeError $ "Loop context parameter " ++ pretty p ++ " unused."
-    Nothing ->
-      return ()
-
   binding (scopeOf form) $ do
-    form_consumable <- checkForm merge mergeargs form
+    form_consumable <- checkForm mergeargs form
 
     let rettype = map paramDeclType mergepat
         consumable =
@@ -1031,8 +1021,7 @@ checkExp (DoLoop ctxmerge valmerge form loopbody) = do
             checkResult $ bodyResult loopbody
 
             context "When matching result of body with loop parameters" $
-              matchLoopResult (map fst ctxmerge) (map fst valmerge) $
-                bodyResult loopbody
+              matchLoopResult (map fst merge) $ bodyResult loopbody
 
             let bound_here =
                   namesFromList $
@@ -1063,7 +1052,7 @@ checkExp (DoLoop ctxmerge valmerge form loopbody) = do
               "Cannot loop over " ++ pretty a
                 ++ " of type "
                 ++ pretty a_t
-    checkForm merge mergeargs (ForLoop loopvar it boundexp loopvars) = do
+    checkForm mergeargs (ForLoop loopvar it boundexp loopvars) = do
       iparam <- primFParam loopvar $ IntType it
       let mergepat = map fst merge
           funparams = iparam : mergepat
@@ -1073,7 +1062,7 @@ checkExp (DoLoop ctxmerge valmerge form loopbody) = do
       boundarg <- checkArg boundexp
       checkFuncall Nothing paramts $ boundarg : mergeargs
       pure consumable
-    checkForm merge mergeargs (WhileLoop cond) = do
+    checkForm mergeargs (WhileLoop cond) = do
       case find ((== cond) . paramName . fst) merge of
         Just (condparam, _) ->
           unless (paramType condparam == Prim Bool) $
@@ -1292,32 +1281,16 @@ matchExtReturns rettype res ts = do
                 "  " ++ prettyTuple ts
               ]
 
-  let (ctx_res, val_res) = splitFromEnd (length rettype) res
-      (ctx_ts, val_ts) = splitFromEnd (length rettype) ts
+  unless (length res == length rettype) problem
 
-  unless (length val_res == length rettype) problem
-
-  let num_exts =
-        length $
-          S.fromList $
-            concatMap (mapMaybe isExt . arrayExtDims) rettype
-  unless (num_exts == length ctx_res) $
-    bad $
-      TypeError $
-        "Number of context results does not match number of existentials in the return type.\n"
-          ++ "Type:\n  "
-          ++ prettyTuple rettype
-          ++ "\ncannot match context parameters:\n  "
-          ++ prettyTuple ctx_res
-
-  let ctx_vals = zip ctx_res ctx_ts
+  let ctx_vals = zip res ts
       instantiateExt i = case maybeNth i ctx_vals of
         Just (SubExpRes _ se, Prim (IntType Int64)) -> return se
         _ -> problem
 
   rettype' <- instantiateShapes instantiateExt rettype
 
-  unless (rettype' == val_ts) problem
+  unless (rettype' == ts) problem
 
 validApply ::
   ArrayShape shape =>
@@ -1475,7 +1448,7 @@ class (ASTRep rep, CanBeAliased (Op rep), CheckableOp rep) => Checkable rep wher
   primFParam :: VName -> PrimType -> TypeM rep (FParam (Aliases rep))
   matchReturnType :: [RetType rep] -> Result -> TypeM rep ()
   matchBranchType :: [BranchType rep] -> Body (Aliases rep) -> TypeM rep ()
-  matchLoopResult :: [FParam (Aliases rep)] -> [FParam (Aliases rep)] -> Result -> TypeM rep ()
+  matchLoopResult :: [FParam (Aliases rep)] -> Result -> TypeM rep ()
 
   default checkExpDec :: ExpDec rep ~ () => ExpDec rep -> TypeM rep ()
   checkExpDec = return
@@ -1509,7 +1482,6 @@ class (ASTRep rep, CanBeAliased (Op rep), CheckableOp rep) => Checkable rep wher
 
   default matchLoopResult ::
     FParamInfo rep ~ DeclType =>
-    [FParam (Aliases rep)] ->
     [FParam (Aliases rep)] ->
     Result ->
     TypeM rep ()

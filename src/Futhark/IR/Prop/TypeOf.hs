@@ -37,7 +37,6 @@ where
 
 import Data.Maybe
 import Futhark.IR.Prop.Constants
-import Futhark.IR.Prop.Patterns
 import Futhark.IR.Prop.Reshape
 import Futhark.IR.Prop.Scope
 import Futhark.IR.Prop.Types
@@ -132,8 +131,8 @@ expExtType ::
   m [ExtType]
 expExtType (Apply _ _ rt _) = pure $ map (fromDecl . declExtTypeOf) rt
 expExtType (If _ _ _ rt) = pure $ map extTypeOf $ ifReturns rt
-expExtType (DoLoop ctxmerge valmerge _ _) =
-  pure $ loopExtType (map (paramIdent . fst) ctxmerge) (map (paramIdent . fst) valmerge)
+expExtType (DoLoop merge _ _) =
+  pure $ loopExtType $ map fst merge
 expExtType (BasicOp op) = staticShapes <$> primOpType op
 expExtType (WithAcc inputs lam) =
   fmap staticShapes $
@@ -166,13 +165,12 @@ instance RepTypes rep => HasScope rep (FeelBad rep) where
   lookupType = const $ pure $ Prim $ IntType Int64
   askScope = pure mempty
 
--- | Given the context and value merge parameters of a Futhark @loop@,
--- produce the return type.
-loopExtType :: [Ident] -> [Ident] -> [ExtType]
-loopExtType ctx val =
-  existentialiseExtTypes inaccessible $ staticShapes $ map identType val
+-- | Given the parameters of a loop, produce the return type.
+loopExtType :: Typed dec => [Param dec] -> [ExtType]
+loopExtType params =
+  existentialiseExtTypes inaccessible $ staticShapes $ map typeOf params
   where
-    inaccessible = map identName ctx
+    inaccessible = map paramName params
 
 -- | Any operation must define an instance of this class, which
 -- describes the type of the operation (at the value level).

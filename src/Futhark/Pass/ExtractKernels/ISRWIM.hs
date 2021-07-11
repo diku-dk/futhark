@@ -58,24 +58,19 @@ iswim res_pat w scan_fun scan_input
         map_fun' = Lambda map_params map_body map_rettype
 
     res_pat' <-
-      fmap (basicPattern []) $
+      fmap basicPattern $
         mapM (newIdent' (<> "_transposed") . transposeIdentType) $
-          patternValueIdents res_pat
+          patternIdents res_pat
 
     addStm $
       Let res_pat' (StmAux map_cs mempty ()) $
         Op $ Screma map_w map_arrs' (mapSOAC map_fun')
 
-    forM_
-      ( zip
-          (patternValueIdents res_pat)
-          (patternValueIdents res_pat')
-      )
-      $ \(to, from) -> do
-        let perm = [1, 0] ++ [2 .. arrayRank (identType from) -1]
-        addStm $
-          Let (basicPattern [] [to]) (defAux ()) $
-            BasicOp $ Rearrange perm $ identName from
+    forM_ (zip (patternIdents res_pat) (patternIdents res_pat')) $ \(to, from) -> do
+      let perm = [1, 0] ++ [2 .. arrayRank (identType from) -1]
+      addStm $
+        Let (basicPattern [to]) (defAux ()) $
+          BasicOp $ Rearrange perm $ identName from
   | otherwise = Nothing
 
 -- | Interchange Reduce With Inner Map. Tries to turn a @reduce(map)@ into a
@@ -182,7 +177,7 @@ setOuterDimTo w t =
 
 setPatternOuterDimTo :: SubExp -> Pattern -> Pattern
 setPatternOuterDimTo w pat =
-  basicPattern [] $ map (setIdentOuterDimTo w) $ patternValueIdents pat
+  basicPattern $ map (setIdentOuterDimTo w) $ patternIdents pat
 
 transposeIdentType :: Ident -> Ident
 transposeIdentType ident =
@@ -194,4 +189,4 @@ stripIdentOuterDim ident =
 
 stripPatternOuterDim :: Pattern -> Pattern
 stripPatternOuterDim pat =
-  basicPattern [] $ map stripIdentOuterDim $ patternValueIdents pat
+  basicPattern $ map stripIdentOuterDim $ patternIdents pat

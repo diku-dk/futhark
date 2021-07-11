@@ -153,7 +153,7 @@ scanStage1 ::
   [SegBinOp GPUMem] ->
   KernelBody GPUMem ->
   CallKernelGen (TV Int32, Imp.TExp Int64, CrossesSegment)
-scanStage1 (Pattern _ all_pes) num_groups group_size space scans kbody = do
+scanStage1 (Pattern all_pes) num_groups group_size space scans kbody = do
   let num_groups' = fmap toInt64Exp num_groups
       group_size' = fmap toInt64Exp group_size
   num_threads <- dPrimV "num_threads" $ sExt32 $ unCount num_groups' * unCount group_size'
@@ -322,7 +322,7 @@ scanStage2 ::
   SegSpace ->
   [SegBinOp GPUMem] ->
   CallKernelGen ()
-scanStage2 (Pattern _ all_pes) stage1_num_threads elems_per_group num_groups crossesSegment space scans = do
+scanStage2 (Pattern all_pes) stage1_num_threads elems_per_group num_groups crossesSegment space scans = do
   let (gtids, dims) = unzip $ unSegSpace space
       dims' = map toInt64Exp dims
 
@@ -399,7 +399,7 @@ scanStage3 ::
   SegSpace ->
   [SegBinOp GPUMem] ->
   CallKernelGen ()
-scanStage3 (Pattern _ all_pes) num_groups group_size elems_per_group crossesSegment space scans = do
+scanStage3 (Pattern all_pes) num_groups group_size elems_per_group crossesSegment space scans = do
   let num_groups' = fmap toInt64Exp num_groups
       group_size' = fmap toInt64Exp group_size
       (gtids, dims) = unzip $ unSegSpace space

@@ -434,12 +434,9 @@ extractShapeContext ts shapes =
           return $ Just v
     extract' (Free _) _ = return Nothing
 
--- | The set of identifiers used for the shape context in the given
--- 'ExtType's.
+-- | The 'Ext' integers used for existential sizes in the given types.
 shapeContext :: [TypeBase ExtShape u] -> S.Set Int
-shapeContext =
-  S.fromList
-    . concatMap (mapMaybe ext . shapeDims . arrayShape)
+shapeContext = S.fromList . concatMap (mapMaybe ext . shapeDims . arrayShape)
   where
     ext (Ext x) = Just x
     ext (Free _) = Nothing
@@ -475,11 +472,7 @@ generaliseExtTypes rt1 rt2 =
         put (n + 1, m)
         return $ Ext n
     unifyExtDims (Ext x) (Ext y)
-      | x == y =
-        Ext
-          <$> ( maybe (new x) return
-                  =<< gets (M.lookup x . snd)
-              )
+      | x == y = Ext <$> (maybe (new x) return =<< gets (M.lookup x . snd))
     unifyExtDims (Ext x) _ = Ext <$> new x
     unifyExtDims _ (Ext x) = Ext <$> new x
     new x = do

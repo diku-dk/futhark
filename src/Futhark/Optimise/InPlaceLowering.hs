@@ -171,7 +171,7 @@ optimiseStms (bnd : bnds) m = do
     boundHere = patternNames $ stmPattern bnd
 
     checkIfForwardableUpdate (Let pat (StmAux cs _ _) e)
-      | Pattern [] [PatElem v dec] <- pat,
+      | Pattern [PatElem v dec] <- pat,
         BasicOp (Update Unsafe src slice (Var ve)) <- e =
         maybeForward ve v dec cs src slice
     checkIfForwardableUpdate _ = return ()
@@ -181,10 +181,9 @@ optimiseInStm (Let pat dec e) =
   Let pat dec <$> optimiseExp e
 
 optimiseExp :: Constraints rep => Exp (Aliases rep) -> ForwardingM rep (Exp (Aliases rep))
-optimiseExp (DoLoop ctx val form body) =
-  bindingScope (scopeOf form) $
-    bindingFParams (map fst $ ctx ++ val) $
-      DoLoop ctx val form <$> optimiseBody body
+optimiseExp (DoLoop merge form body) =
+  bindingScope (scopeOf form) . bindingFParams (map fst merge) $
+    DoLoop merge form <$> optimiseBody body
 optimiseExp (Op op) = do
   f <- asks topOnOp
   Op <$> f op

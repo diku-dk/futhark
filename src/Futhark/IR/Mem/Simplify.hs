@@ -14,12 +14,12 @@ where
 
 import Control.Monad
 import Data.List (find)
+import Debug.Trace
 import qualified Futhark.Analysis.SymbolTable as ST
 import qualified Futhark.Analysis.UsageTable as UT
 import Futhark.Construct
 import Futhark.IR.Mem
 import qualified Futhark.IR.Mem.IxFun as IxFun
-import qualified Futhark.IR.Syntax as AST
 import qualified Futhark.Optimise.Simplify as Simplify
 import qualified Futhark.Optimise.Simplify.Engine as Engine
 import Futhark.Optimise.Simplify.Rep
@@ -77,8 +77,8 @@ simplifyStmsGeneric ops stms = do
     stms
 
 isResultAlloc :: Op rep ~ MemOp op => Engine.BlockPred rep
-isResultAlloc _ usage (Let (AST.Pattern [] [bindee]) _ (Op Alloc {})) =
-  UT.isInResult (patElemName bindee) usage
+isResultAlloc _ usage (Let (Pattern [pe]) _ (Op Alloc {})) =
+  UT.isInResult (patElemName pe) usage
 isResultAlloc _ _ _ = False
 
 isAlloc :: Op rep ~ MemOp op => Engine.BlockPred rep
@@ -145,11 +145,7 @@ unExistentialiseMemory vtable pat _ (cond, tbranch, fbranch, ifdec)
             (_, MemArray pt shape u (ArrayIn _ ixfun)) <- patElemDec pat_elem = do
             v_copy <- newVName $ baseString v <> "_nonext_copy"
             let v_pat =
-                  Pattern
-                    []
-                    [ PatElem v_copy $
-                        MemArray pt shape u $ ArrayIn mem ixfun
-                    ]
+                  Pattern [PatElem v_copy $ MemArray pt shape u $ ArrayIn mem ixfun]
             addStm $ mkWiseLetStm v_pat (defAux ()) $ BasicOp (Copy v)
             return $ SubExpRes cs $ Var v_copy
           | Just mem <- lookup (patElemName pat_elem) oldmem_to_mem =
@@ -158,16 +154,15 @@ unExistentialiseMemory vtable pat _ (cond, tbranch, fbranch, ifdec)
           return se
     tbranch' <- updateBody tbranch
     fbranch' <- updateBody fbranch
+    traceM "unExistentialiseMemory"
     letBind pat $ If cond tbranch' fbranch' ifdec
   where
     onlyUsedIn name here =
-      not $
-        any ((name `nameIn`) . freeIn) $
-          filter ((/= here) . patElemName) $
-            patternValueElements pat
+      not . any ((name `nameIn`) . freeIn) . filter ((/= here) . patElemName) $
+        patternElements pat
     knownSize Constant {} = True
     knownSize (Var v) = not $ inContext v
-    inContext = (`elem` patternContextNames pat)
+    inContext = (`elem` patternNames pat)
 
     hasConcretisableMemory fixable pat_elem
       | (_, MemArray pt shape _ (ArrayIn mem ixfun)) <- patElemDec pat_elem,
@@ -196,7 +191,7 @@ copyCopyToCopy ::
     LetDec rep ~ (VarWisdom, MemBound u)
   ) =>
   TopDownRuleBasicOp rep
-copyCopyToCopy vtable pat@(Pattern [] [pat_elem]) _ (Copy v1)
+copyCopyToCopy vtable pat@(Pattern [pat_elem]) _ (Copy v1)
   | Just (BasicOp (Copy v2), v1_cs) <- ST.lookupExp v1 vtable,
     Just (_, MemArray _ _ _ (ArrayIn srcmem src_ixfun)) <-
       ST.entryLetBoundDec =<< ST.lookup v1 vtable,
@@ -222,7 +217,7 @@ removeIdentityCopy ::
     LetDec rep ~ (VarWisdom, MemBound u)
   ) =>
   TopDownRuleBasicOp rep
-removeIdentityCopy vtable pat@(Pattern [] [pe]) _ (Copy v)
+removeIdentityCopy vtable pat@(Pattern [pe]) _ (Copy v)
   | (_, MemArray _ _ _ (ArrayIn dest_mem dest_ixfun)) <- patElemDec pe,
     Just (_, MemArray _ _ _ (ArrayIn src_mem src_ixfun)) <-
       ST.entryLetBoundDec =<< ST.lookup v vtable,

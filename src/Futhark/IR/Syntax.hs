@@ -57,9 +57,7 @@
 -- the values of the variables indicated by the result.
 --
 -- A statement ('Stm') consists of a t'Pattern' alongside an
--- expression 'ExpT'.  A pattern contains a "context" part and a
--- "value" part.  The context is used for things like the size of
--- arrays in the value part whose size is existential.
+-- expression 'ExpT'.  A pattern is a sequence of name/type pairs.
 --
 -- For example, the source language expression @let z = x + y - 1 in
 -- z@ would in the core language be represented (in prettyprinted
@@ -213,19 +211,14 @@ withoutAttrs (Attrs x) (Attrs y) = Attrs $ x `S.difference` y
 type PatElem rep = PatElemT (LetDec rep)
 
 -- | A pattern is conceptually just a list of names and their types.
-data PatternT dec = Pattern
-  { -- | existential context (sizes and memory blocks)
-    patternContextElements :: [PatElemT dec],
-    -- | "real" values
-    patternValueElements :: [PatElemT dec]
-  }
+newtype PatternT dec = Pattern {patternElements :: [PatElemT dec]}
   deriving (Ord, Show, Eq)
 
 instance Semigroup (PatternT dec) where
-  Pattern cs1 vs1 <> Pattern cs2 vs2 = Pattern (cs1 ++ cs2) (vs1 ++ vs2)
+  Pattern xs <> Pattern ys = Pattern (xs <> ys)
 
 instance Monoid (PatternT dec) where
-  mempty = Pattern [] []
+  mempty = Pattern mempty
 
 instance Functor PatternT where
   fmap = fmapDefault
@@ -234,8 +227,8 @@ instance Foldable PatternT where
   foldMap = foldMapDefault
 
 instance Traversable PatternT where
-  traverse f (Pattern ctx vals) =
-    Pattern <$> traverse (traverse f) ctx <*> traverse (traverse f) vals
+  traverse f (Pattern xs) =
+    Pattern <$> traverse (traverse f) xs
 
 -- | A type alias for namespace control.
 type Pattern rep = PatternT (LetDec rep)
@@ -442,9 +435,8 @@ data ExpT rep
     BasicOp BasicOp
   | Apply Name [(SubExp, Diet)] [RetType rep] (Safety, SrcLoc, [SrcLoc])
   | If SubExp (BodyT rep) (BodyT rep) (IfDec (BranchType rep))
-  | -- | @loop {a} = {v} (for i < n|while b) do b@.  The merge
-    -- parameters are divided into context and value part.
-    DoLoop [(FParam rep, SubExp)] [(FParam rep, SubExp)] (LoopForm rep) (BodyT rep)
+  | -- | @loop {a} = {v} (for i < n|while b) do b@.
+    DoLoop [(FParam rep, SubExp)] (LoopForm rep) (BodyT rep)
   | -- | Create accumulators backed by the given arrays (which are
     -- consumed) and pass them to the lambda, which must return the
     -- updated accumulators and possibly some extra values.  The

@@ -35,7 +35,7 @@ instance RepTypes SeqMem where
   type Op SeqMem = MemOp ()
 
 instance ASTRep SeqMem where
-  expTypesFromPattern = return . map snd . snd . bodyReturnsFromPattern
+  expTypesFromPattern = return . map snd . bodyReturnsFromPattern
 
 instance OpReturns SeqMem where
   opReturns (Alloc _ space) = return [MemMem space]
