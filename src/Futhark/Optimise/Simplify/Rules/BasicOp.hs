@@ -35,7 +35,7 @@ data ConcatArg
   | ArgReplicate [SubExp] SubExp
   | ArgVar VName
 
-toConcatArg :: ST.SymbolTable rep -> VName -> (ConcatArg, Certificates)
+toConcatArg :: ST.SymbolTable rep -> VName -> (ConcatArg, Certs)
 toConcatArg vtable v =
   case ST.lookupBasicOp v vtable of
     Just (ArrayLit ses _, cs) ->
@@ -48,7 +48,7 @@ toConcatArg vtable v =
 fromConcatArg ::
   MonadBuilder m =>
   Type ->
-  (ConcatArg, Certificates) ->
+  (ConcatArg, Certs) ->
   m VName
 fromConcatArg t (ArgArrayLit ses, cs) =
   certifying cs $ letExp "concat_lit" $ BasicOp $ ArrayLit ses $ rowType t
@@ -61,9 +61,9 @@ fromConcatArg _ (ArgVar v, _) =
   pure v
 
 fuseConcatArg ::
-  [(ConcatArg, Certificates)] ->
-  (ConcatArg, Certificates) ->
-  [(ConcatArg, Certificates)]
+  [(ConcatArg, Certs)] ->
+  (ConcatArg, Certs) ->
+  [(ConcatArg, Certs)]
 fuseConcatArg xs (ArgArrayLit [], _) =
   xs
 fuseConcatArg xs (ArgReplicate [w] se, cs)
@@ -374,12 +374,12 @@ ruleBasicOp vtable pat aux (CmpOp CmpSlt {} (Var x) y)
 -- Remove certificates for variables whose definition already contain
 -- that certificate.
 ruleBasicOp vtable pat aux (SubExp (Var v))
-  | cs <- unCertificates $ stmAuxCerts aux,
+  | cs <- unCerts $ stmAuxCerts aux,
     not $ null cs,
-    Just v_cs <- unCertificates . stmCerts <$> ST.lookupStm v vtable,
+    Just v_cs <- unCerts . stmCerts <$> ST.lookupStm v vtable,
     cs' <- filter (`notElem` v_cs) cs,
     cs' /= cs =
-    Simplify . certifying (Certificates cs') $
+    Simplify . certifying (Certs cs') $
       letBind pat $ BasicOp $ SubExp $ Var v
 ruleBasicOp _ _ _ _ =
   Skip

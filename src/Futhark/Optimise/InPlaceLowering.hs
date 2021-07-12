@@ -390,7 +390,7 @@ maybeForward ::
   VName ->
   VName ->
   LetDec (Aliases rep) ->
-  Certificates ->
+  Certs ->
   VName ->
   Slice SubExp ->
   ForwardingM rep ()

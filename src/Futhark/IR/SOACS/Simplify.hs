@@ -205,7 +205,7 @@ instance HasSOAC (Wise SOACS) where
 
 topDownRules :: [TopDownRule (Wise SOACS)]
 topDownRules =
-  [ RuleOp hoistCertificates,
+  [ RuleOp hoistCerts,
     RuleOp removeReplicateMapping,
     RuleOp removeReplicateWrite,
     RuleOp removeUnusedSOACInput,
@@ -230,8 +230,8 @@ bottomUpRules =
 
 -- Any certificates attached to a trivial Stm in the body might as
 -- well be applied to the SOAC itself.
-hoistCertificates :: TopDownRuleOp (Wise SOACS)
-hoistCertificates vtable pat aux soac
+hoistCerts :: TopDownRuleOp (Wise SOACS)
+hoistCerts vtable pat aux soac
   | (soac', hoisted) <- runState (mapSOACM mapper soac) mempty,
     hoisted /= mempty =
     Simplify $ auxing aux $ certifying hoisted $ letBind pat $ Op soac'
@@ -247,12 +247,12 @@ hoistCertificates vtable pat aux soac
     onStm (Let se_pat se_aux (BasicOp (SubExp se))) = do
       let (invariant, variant) =
             partition (`ST.elem` vtable) $
-              unCertificates $ stmAuxCerts se_aux
-          se_aux' = se_aux {stmAuxCerts = Certificates variant}
-      modify (Certificates invariant <>)
+              unCerts $ stmAuxCerts se_aux
+          se_aux' = se_aux {stmAuxCerts = Certs variant}
+      modify (Certs invariant <>)
       return $ Let se_pat se_aux' $ BasicOp $ SubExp se
     onStm stm = return stm
-hoistCertificates _ _ _ _ =
+hoistCerts _ _ _ _ =
   Skip
 
 liftIdentityMapping ::
@@ -363,7 +363,7 @@ removeReplicateInput ::
   AST.Lambda rep ->
   [VName] ->
   Maybe
-    ( [([VName], Certificates, AST.Exp rep)],
+    ( [([VName], Certs, AST.Exp rep)],
       AST.Lambda rep,
       [VName]
     )
@@ -515,7 +515,7 @@ isMapWithOp ::
   SOAC (Wise SOACS) ->
   Maybe
     ( PatElemT dec,
-      Certificates,
+      Certs,
       SubExp,
       AST.Exp (Wise SOACS),
       [Param Type],
@@ -708,12 +708,12 @@ simplifyKnownIterationSOAC _ pat _ op
 simplifyKnownIterationSOAC _ _ _ _ = Skip
 
 data ArrayOp
-  = ArrayIndexing Certificates VName (Slice SubExp)
-  | ArrayRearrange Certificates VName [Int]
-  | ArrayRotate Certificates VName [SubExp]
-  | ArrayCopy Certificates VName
+  = ArrayIndexing Certs VName (Slice SubExp)
+  | ArrayRearrange Certs VName [Int]
+  | ArrayRotate Certs VName [SubExp]
+  | ArrayCopy Certs VName
   | -- | Never constructed.
-    ArrayVar Certificates VName
+    ArrayVar Certs VName
   deriving (Eq, Ord, Show)
 
 arrayOpArr :: ArrayOp -> VName
@@ -723,14 +723,14 @@ arrayOpArr (ArrayRotate _ arr _) = arr
 arrayOpArr (ArrayCopy _ arr) = arr
 arrayOpArr (ArrayVar _ arr) = arr
 
-arrayOpCerts :: ArrayOp -> Certificates
+arrayOpCerts :: ArrayOp -> Certs
 arrayOpCerts (ArrayIndexing cs _ _) = cs
 arrayOpCerts (ArrayRearrange cs _ _) = cs
 arrayOpCerts (ArrayRotate cs _ _) = cs
 arrayOpCerts (ArrayCopy cs _) = cs
 arrayOpCerts (ArrayVar cs _) = cs
 
-isArrayOp :: Certificates -> AST.Exp (Wise SOACS) -> Maybe ArrayOp
+isArrayOp :: Certs -> AST.Exp (Wise SOACS) -> Maybe ArrayOp
 isArrayOp cs (BasicOp (Index arr slice)) =
   Just $ ArrayIndexing cs arr slice
 isArrayOp cs (BasicOp (Rearrange perm arr)) =
@@ -742,7 +742,7 @@ isArrayOp cs (BasicOp (Copy arr)) =
 isArrayOp _ _ =
   Nothing
 
-fromArrayOp :: ArrayOp -> (Certificates, AST.Exp (Wise SOACS))
+fromArrayOp :: ArrayOp -> (Certs, AST.Exp (Wise SOACS))
 fromArrayOp (ArrayIndexing cs arr slice) = (cs, BasicOp $ Index arr slice)
 fromArrayOp (ArrayRearrange cs arr perm) = (cs, BasicOp $ Rearrange perm arr)
 fromArrayOp (ArrayRotate cs arr rots) = (cs, BasicOp $ Rotate rots arr)
@@ -836,7 +836,7 @@ simplifyMapIota vtable pat aux (Screma w arrs (ScremaForm scan reduce map_lam))
 
     indexesWith v (ArrayIndexing cs arr (DimFix (Var i) : _))
       | arr `ST.elem` vtable,
-        all (`ST.elem` vtable) $ unCertificates cs =
+        all (`ST.elem` vtable) $ unCerts cs =
         i == v
     indexesWith _ _ = False
 

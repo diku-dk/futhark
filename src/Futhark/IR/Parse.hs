@@ -482,10 +482,10 @@ pExp pr =
       BasicOp <$> pBasicOp
     ]
 
-pCerts :: Parser Certificates
+pCerts :: Parser Certs
 pCerts =
   choice
-    [ lexeme "#" *> braces (Certificates <$> pVName `sepBy` pComma)
+    [ lexeme "#" *> braces (Certs <$> pVName `sepBy` pComma)
         <?> "certificates",
       pure mempty
     ]

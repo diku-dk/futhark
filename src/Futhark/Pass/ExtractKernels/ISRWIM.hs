@@ -137,7 +137,7 @@ irwim res_pat w comm red_fun red_input
 -- does that map look like?
 rwimPossible ::
   Lambda ->
-  Maybe (Pattern, Certificates, SubExp, Lambda)
+  Maybe (Pattern, Certs, SubExp, Lambda)
 rwimPossible fun
   | Body _ stms res <- lambdaBody fun,
     [bnd] <- stmsToList stms, -- Body has a single binding

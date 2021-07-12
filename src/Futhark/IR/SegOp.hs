@@ -207,27 +207,27 @@ data KernelResult
   = -- | Each "worker" in the kernel returns this.
     -- Whether this is a result-per-thread or a
     -- result-per-group depends on where the 'SegOp' occurs.
-    Returns ResultManifest Certificates SubExp
+    Returns ResultManifest Certs SubExp
   | WriteReturns
-      Certificates
+      Certs
       Shape -- Size of array.  Must match number of dims.
       VName -- Which array
       [(Slice SubExp, SubExp)]
   | -- Arbitrary number of index/value pairs.
     ConcatReturns
-      Certificates
+      Certs
       SplitOrdering -- Permuted?
       SubExp -- The final size.
       SubExp -- Per-thread/group (max) chunk size.
       VName -- Chunk by this worker.
   | TileReturns
-      Certificates
+      Certs
       [(SubExp, SubExp)] -- Total/tile for each dimension
       VName -- Tile written by this worker.
       -- The TileReturns must not expect more than one
       -- result to be written per physical thread.
   | RegTileReturns
-      Certificates
+      Certs
       -- For each dim of result:
       [ ( SubExp, -- size of this dim.
           SubExp, -- block tile size for this dim.
@@ -238,7 +238,7 @@ data KernelResult
   deriving (Eq, Show, Ord)
 
 -- | Get the certs for this 'KernelResult'.
-kernelResultCerts :: KernelResult -> Certificates
+kernelResultCerts :: KernelResult -> Certs
 kernelResultCerts (Returns _ cs _) = cs
 kernelResultCerts (WriteReturns cs _ _ _) = cs
 kernelResultCerts (ConcatReturns cs _ _ _ _) = cs
@@ -441,7 +441,7 @@ instance PrettyRep rep => Pretty (KernelBody rep) where
     PP.stack (map ppr (stmsToList stms))
       </> text "return" <+> PP.braces (PP.commasep $ map ppr res)
 
-certAnnots :: Certificates -> [PP.Doc]
+certAnnots :: Certs -> [PP.Doc]
 certAnnots cs
   | cs == mempty = []
   | otherwise = [ppr cs]

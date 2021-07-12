@@ -359,8 +359,8 @@ instance FreeIn dec => FreeIn (PatternT dec) where
     where
       bound_here = namesFromList $ map patElemName xs
 
-instance FreeIn Certificates where
-  freeIn' (Certificates cs) = freeIn' cs
+instance FreeIn Certs where
+  freeIn' (Certs cs) = freeIn' cs
 
 instance FreeIn Attrs where
   freeIn' (Attrs _) = mempty

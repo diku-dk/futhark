@@ -226,8 +226,8 @@ instance Rename dec => Rename (PatternT dec) where
 instance Rename dec => Rename (PatElemT dec) where
   rename (PatElem ident dec) = PatElem <$> rename ident <*> rename dec
 
-instance Rename Certificates where
-  rename (Certificates cs) = Certificates <$> rename cs
+instance Rename Certs where
+  rename (Certs cs) = Certs <$> rename cs
 
 instance Rename Attrs where
   rename = pure

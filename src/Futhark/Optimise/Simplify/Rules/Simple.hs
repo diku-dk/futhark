@@ -14,14 +14,14 @@ import Futhark.Analysis.PrimExp.Convert
 import Futhark.IR
 
 -- | A function that, given a variable name, returns its definition.
-type VarLookup rep = VName -> Maybe (Exp rep, Certificates)
+type VarLookup rep = VName -> Maybe (Exp rep, Certs)
 
 -- | A function that, given a subexpression, returns its type.
 type TypeLookup = SubExp -> Maybe Type
 
 -- | A simple rule is a top-down rule that can be expressed as a pure
 -- function.
-type SimpleRule rep = VarLookup rep -> TypeLookup -> BasicOp -> Maybe (BasicOp, Certificates)
+type SimpleRule rep = VarLookup rep -> TypeLookup -> BasicOp -> Maybe (BasicOp, Certs)
 
 isCt1 :: SubExp -> Bool
 isCt1 (Constant v) = oneIsh v
@@ -198,10 +198,10 @@ simplifyBinOp defOf _ (BinOp (SMax it) e1 e2)
     Just (BinOp (SMax it) e2_1 e1, v2_cs)
 simplifyBinOp _ _ _ = Nothing
 
-constRes :: PrimValue -> Maybe (BasicOp, Certificates)
+constRes :: PrimValue -> Maybe (BasicOp, Certs)
 constRes = Just . (,mempty) . SubExp . Constant
 
-resIsSubExp :: SubExp -> Maybe (BasicOp, Certificates)
+resIsSubExp :: SubExp -> Maybe (BasicOp, Certs)
 resIsSubExp = Just . (,mempty) . SubExp
 
 simplifyUnOp :: SimpleRule rep
@@ -369,6 +369,6 @@ applySimpleRules ::
   VarLookup rep ->
   TypeLookup ->
   BasicOp ->
-  Maybe (BasicOp, Certificates)
+  Maybe (BasicOp, Certs)
 applySimpleRules defOf seType op =
   msum [rule defOf seType op | rule <- simpleRules]
