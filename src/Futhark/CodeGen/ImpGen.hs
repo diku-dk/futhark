@@ -226,17 +226,6 @@ data VarEntry rep
   | AccVar (Maybe (Exp rep)) (VName, Shape, [Type])
   deriving (Show)
 
--- | When compiling an expression, this is a description of where the
--- result should end up.  The integer is a reference to the construct
--- that gave rise to this destination (for patterns, this will be the
--- tag of the first name in the pattern).  This can be used to make
--- the generated code easier to relate to the original code.
-data Destination = Destination
-  { destinationTag :: Maybe Int,
-    valueDestinations :: [ValueDestination]
-  }
-  deriving (Show)
-
 data ValueDestination
   = ScalarDestination VName
   | MemoryDestination VName
@@ -632,13 +621,13 @@ compileOutParams ::
   Mem rep =>
   [RetType rep] ->
   Maybe [EntryPointType] ->
-  ImpM rep r op ([Imp.ExternalValue], [Imp.Param], Destination)
+  ImpM rep r op ([Imp.ExternalValue], [Imp.Param], [ValueDestination])
 compileOutParams orig_rts maybe_orig_epts = do
   (maybe_params, dests) <- unzip <$> mapM compileOutParam orig_rts
   evs <- case maybe_orig_epts of
     Just orig_epts -> compileExternalValues orig_rts orig_epts maybe_params
     Nothing -> pure []
-  return (evs, catMaybes maybe_params, Destination Nothing dests)
+  return (evs, catMaybes maybe_params, dests)
 
 compileFunDef ::
   Mem rep =>
@@ -658,7 +647,7 @@ compileFunDef (FunDef entry _ fname rettype params body) =
       Just (x, y, z) -> (Just x, y, Just z)
     compile = do
       (inparams, arrayds, args) <- compileInParams params params_entry
-      (results, outparams, Destination _ dests) <- compileOutParams rettype ret_entry
+      (results, outparams, dests) <- compileOutParams rettype ret_entry
       addFParams params
       addArrays arrayds
 
@@ -670,7 +659,7 @@ compileFunDef (FunDef entry _ fname rettype params body) =
 
 compileBody :: (Mem rep) => Pat rep -> Body rep -> ImpM rep r op ()
 compileBody pat (Body _ bnds ses) = do
-  Destination _ dests <- destinationFromPat pat
+  dests <- destinationFromPat pat
   compileStms (freeIn ses) bnds $
     forM_ (zip dests ses) $ \(d, SubExpRes _ se) -> copyDWIMDest d [] se []
 
@@ -799,7 +788,7 @@ defCompileExp pat (DoLoop merge form body) = do
     WhileLoop cond ->
       sWhile (TPrimExp $ Imp.var cond Bool) doBody
 
-  Destination _ pat_dests <- destinationFromPat pat
+  pat_dests <- destinationFromPat pat
   forM_ (zip pat_dests $ map (Var . paramName . fst) merge) $ \(d, r) ->
     copyDWIMDest d [] r []
   where
@@ -1111,8 +1100,8 @@ everythingVolatile :: ImpM rep r op a -> ImpM rep r op a
 everythingVolatile = local $ \env -> env {envVolatility = Imp.Volatile}
 
 -- | Remove the array targets.
-funcallTargets :: Destination -> ImpM rep r op [VName]
-funcallTargets (Destination _ dests) =
+funcallTargets :: [ValueDestination] -> ImpM rep r op [VName]
+funcallTargets dests =
   concat <$> mapM funcallTarget dests
   where
     funcallTarget (ScalarDestination name) =
@@ -1300,13 +1289,11 @@ lookupAcc name is = do
           error $ "ImpGen.lookupAcc: unlisted accumulator: " ++ pretty name
     _ -> error $ "ImpGen.lookupAcc: not an accumulator: " ++ pretty name
 
-destinationFromPat :: Mem rep => Pat rep -> ImpM rep r op Destination
-destinationFromPat pat =
-  fmap (Destination (baseTag <$> maybeHead (patNames pat))) . mapM inspect $
-    patElements pat
+destinationFromPat :: Mem rep => Pat rep -> ImpM rep r op [ValueDestination]
+destinationFromPat = mapM inspect . patElements
   where
-    inspect patElem = do
-      let name = patElemName patElem
+    inspect pe = do
+      let name = patElemName pe
       entry <- lookupVar name
       case entry of
         ArrayVar _ (ArrayEntry MemLocation {} _) ->
