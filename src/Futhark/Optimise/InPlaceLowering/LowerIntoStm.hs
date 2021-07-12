@@ -25,7 +25,7 @@ data DesiredUpdate dec = DesiredUpdate
     updateName :: VName,
     -- | Type of result.
     updateType :: dec,
-    updateCertificates :: Certificates,
+    updateCerts :: Certs,
     updateSource :: VName,
     updateIndices :: Slice SubExp,
     updateValue :: VName
@@ -86,7 +86,7 @@ lowerUpdateGPU
       mk <- lowerUpdatesIntoSegMap scope pat updates space kbody
       Just $ do
         (pat', kbody', poststms) <- mk
-        let cs = stmAuxCerts aux <> foldMap updateCertificates updates
+        let cs = stmAuxCerts aux <> foldMap updateCerts updates
         return $
           certify cs (Let pat' aux $ Op $ SegOp $ SegMap lvl space ts kbody') :
           stmsToList poststms

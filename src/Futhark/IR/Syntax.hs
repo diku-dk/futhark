@@ -235,7 +235,7 @@ type Pattern rep = PatternT (LetDec rep)
 
 -- | Auxilliary Information associated with a statement.
 data StmAux dec = StmAux
-  { stmAuxCerts :: !Certificates,
+  { stmAuxCerts :: !Certs,
     stmAuxAttrs :: Attrs,
     stmAuxDec :: dec
   }
@@ -284,7 +284,7 @@ stmsHead stms = case Seq.viewl stms of
 
 -- | A pairing of a subexpression and some certificates.
 data SubExpRes = SubExpRes
-  { resCerts :: Certificates,
+  { resCerts :: Certs,
     resSubExp :: SubExp
   }
   deriving (Eq, Ord, Show)

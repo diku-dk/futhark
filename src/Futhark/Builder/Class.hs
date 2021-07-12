@@ -89,7 +89,7 @@ class
 
   -- | Add the provided certificates to any statements added during
   -- execution of the action.
-  certifying :: Certificates -> m a -> m a
+  certifying :: Certs -> m a -> m a
   certifying = censorStms . fmap . certify
 
 -- | Apply a function to the statements added by this action.

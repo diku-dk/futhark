@@ -180,16 +180,16 @@ entryPointSize (TypeOpaque _ _ x) = x
 entryPointSize (TypeUnsigned _) = 1
 entryPointSize (TypeDirect _) = 1
 
--- | A 'StmAux' with empty 'Certificates'.
+-- | A 'StmAux' with empty 'Certs'.
 defAux :: dec -> StmAux dec
 defAux = StmAux mempty mempty
 
 -- | The certificates associated with a statement.
-stmCerts :: Stm rep -> Certificates
+stmCerts :: Stm rep -> Certs
 stmCerts = stmAuxCerts . stmAux
 
 -- | Add certificates to a statement.
-certify :: Certificates -> Stm rep -> Stm rep
+certify :: Certs -> Stm rep -> Stm rep
 certify cs1 (Let pat (StmAux cs2 attrs dec) e) =
   Let pat (StmAux (cs2 <> cs1) attrs dec) e
 

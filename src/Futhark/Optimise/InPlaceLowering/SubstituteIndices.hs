@@ -20,7 +20,7 @@ import Futhark.IR.Prop.Aliases
 import Futhark.Transform.Substitute
 import Futhark.Util
 
-type IndexSubstitution dec = (Certificates, VName, dec, Slice SubExp)
+type IndexSubstitution dec = (Certs, VName, dec, Slice SubExp)
 
 type IndexSubstitutions dec = [(VName, IndexSubstitution dec)]
 

@@ -621,7 +621,7 @@ instance RepTypes rep => ST.IndexOp (SOAC rep) where
         | [v] <- patternNames $ stmPattern stm,
           Just (pe, cs) <-
             runWriterT $ primExpFromExp (asPrimExp table) $ stmExp stm,
-          all (`ST.elem` vtable) (unCertificates $ stmCerts stm) =
+          all (`ST.elem` vtable) (unCerts $ stmCerts stm) =
           M.insert v (pe, stmCerts stm <> cs) table
         | otherwise =
           table

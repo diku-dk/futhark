@@ -744,7 +744,7 @@ segmentedScatterKernel ::
   KernelNest ->
   [Int] ->
   PatternT Type ->
-  Certificates ->
+  Certs ->
   SubExp ->
   Lambda rep ->
   [VName] ->
@@ -825,7 +825,7 @@ segmentedUpdateKernel ::
   (MonadFreshNames m, LocalScope rep m, DistRep rep) =>
   KernelNest ->
   [Int] ->
-  Certificates ->
+  Certs ->
   VName ->
   Slice SubExp ->
   VName ->
@@ -879,7 +879,7 @@ segmentedUpdateKernel nest perm cs arr slice v = do
 segmentedGatherKernel ::
   (MonadFreshNames m, LocalScope rep m, DistRep rep) =>
   KernelNest ->
-  Certificates ->
+  Certs ->
   VName ->
   Slice SubExp ->
   DistNestT rep m (Stms rep)
@@ -916,7 +916,7 @@ segmentedHistKernel ::
   (MonadFreshNames m, LocalScope rep m, DistRep rep) =>
   KernelNest ->
   [Int] ->
-  Certificates ->
+  Certs ->
   SubExp ->
   [SOACS.HistOp SOACS] ->
   Lambda rep ->
@@ -963,7 +963,7 @@ histKernel ::
   PatternT Type ->
   [(VName, SubExp)] ->
   [KernelInput] ->
-  Certificates ->
+  Certs ->
   SubExp ->
   [SOACS.HistOp SOACS] ->
   Lambda (Rep m) ->
@@ -1167,7 +1167,7 @@ expandKernelNest pes (outer_nest, inner_nests) = do
 
 kernelOrNot ::
   (MonadFreshNames m, DistRep rep) =>
-  Certificates ->
+  Certs ->
   Stm SOACS ->
   DistAcc rep ->
   PostStms rep ->

@@ -94,7 +94,7 @@ transformOutput ts names = descend ts
             certifying cs $ letBind (mkPat ids) (BasicOp e)
           descend ts'' newIds
 
-applyTransform :: SOAC.ArrayTransform -> Ident -> (BasicOp, Certificates)
+applyTransform :: SOAC.ArrayTransform -> Ident -> (BasicOp, Certs)
 applyTransform (SOAC.Rearrange cs perm) v =
   (Rearrange perm' $ identName v, cs)
   where

@@ -27,8 +27,8 @@ isCt0 _ = False
 -- others produce another index expression (which may be further
 -- simplifiable).
 data IndexResult
-  = IndexResult Certificates VName (Slice SubExp)
-  | SubExpResult Certificates SubExp
+  = IndexResult Certs VName (Slice SubExp)
+  | SubExpResult Certs SubExp
 
 -- | Try to simplify an index operation.
 simplifyIndexing ::
@@ -48,12 +48,12 @@ simplifyIndexing vtable seType idd inds consuming =
       | Just inds' <- sliceIndices inds,
         Just (ST.Indexed cs e) <- ST.index idd inds' vtable,
         worthInlining e,
-        all (`ST.elem` vtable) (unCertificates cs) ->
+        all (`ST.elem` vtable) (unCerts cs) ->
         Just $ SubExpResult cs <$> toSubExp "index_primexp" e
       | Just inds' <- sliceIndices inds,
         Just (ST.IndexedArray cs arr inds'') <- ST.index idd inds' vtable,
         all (worthInlining . untyped) inds'',
-        all (`ST.elem` vtable) (unCertificates cs) ->
+        all (`ST.elem` vtable) (unCerts cs) ->
         Just $
           IndexResult cs arr . map DimFix
             <$> mapM (toSubExp "index_primexp") inds''

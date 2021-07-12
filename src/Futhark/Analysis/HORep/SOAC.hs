@@ -99,15 +99,15 @@ import qualified Futhark.Util.Pretty as PP
 -- create a list, use 'ArrayTransforms' instead.
 data ArrayTransform
   = -- | A permutation of an otherwise valid input.
-    Rearrange Certificates [Int]
+    Rearrange Certs [Int]
   | -- | A reshaping of an otherwise valid input.
-    Reshape Certificates (ShapeChange SubExp)
+    Reshape Certs (ShapeChange SubExp)
   | -- | A reshaping of the outer dimension.
-    ReshapeOuter Certificates (ShapeChange SubExp)
+    ReshapeOuter Certs (ShapeChange SubExp)
   | -- | A reshaping of everything but the outer dimension.
-    ReshapeInner Certificates (ShapeChange SubExp)
+    ReshapeInner Certs (ShapeChange SubExp)
   | -- | Replicate the rows of the array a number of times.
-    Replicate Certificates Shape
+    Replicate Certs Shape
   deriving (Show, Eq, Ord)
 
 instance Substitute ArrayTransform where
@@ -226,7 +226,7 @@ combineTransforms _ _ = Nothing
 -- an input transformation of an array variable.  If so, return the
 -- variable and the transformation.  Only 'Rearrange' and 'Reshape'
 -- are possible to express this way.
-transformFromExp :: Certificates -> Exp rep -> Maybe (VName, ArrayTransform)
+transformFromExp :: Certs -> Exp rep -> Maybe (VName, ArrayTransform)
 transformFromExp cs (BasicOp (Futhark.Rearrange perm v)) =
   Just (v, Rearrange cs perm)
 transformFromExp cs (BasicOp (Futhark.Reshape shape v)) =

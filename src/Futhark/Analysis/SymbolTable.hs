@@ -109,12 +109,12 @@ deepen vtable =
 data Indexed
   = -- | A PrimExp based on the indexes (that is, without
     -- accessing any actual array).
-    Indexed Certificates (PrimExp VName)
+    Indexed Certs (PrimExp VName)
   | -- | The indexing corresponds to another (perhaps more
     -- advantageous) array.
-    IndexedArray Certificates VName [TPrimExp Int64 VName]
+    IndexedArray Certs VName [TPrimExp Int64 VName]
 
-indexedAddCerts :: Certificates -> Indexed -> Indexed
+indexedAddCerts :: Certs -> Indexed -> Indexed
 indexedAddCerts cs1 (Indexed cs2 v) = Indexed (cs1 <> cs2) v
 indexedAddCerts cs1 (IndexedArray cs2 arr v) = IndexedArray (cs1 <> cs2) arr v
 
@@ -210,10 +210,10 @@ lookup name = M.lookup name . bindings
 lookupStm :: VName -> SymbolTable rep -> Maybe (Stm rep)
 lookupStm name vtable = entryStm =<< lookup name vtable
 
-lookupExp :: VName -> SymbolTable rep -> Maybe (Exp rep, Certificates)
+lookupExp :: VName -> SymbolTable rep -> Maybe (Exp rep, Certs)
 lookupExp name vtable = (stmExp &&& stmCerts) <$> lookupStm name vtable
 
-lookupBasicOp :: VName -> SymbolTable rep -> Maybe (BasicOp, Certificates)
+lookupBasicOp :: VName -> SymbolTable rep -> Maybe (BasicOp, Certs)
 lookupBasicOp name vtable = case lookupExp name vtable of
   Just (BasicOp e, cs) -> Just (e, cs)
   _ -> Nothing
@@ -225,7 +225,7 @@ lookupSubExpType :: ASTRep rep => SubExp -> SymbolTable rep -> Maybe Type
 lookupSubExpType (Var v) = lookupType v
 lookupSubExpType (Constant v) = const $ Just $ Prim $ primValueType v
 
-lookupSubExp :: VName -> SymbolTable rep -> Maybe (SubExp, Certificates)
+lookupSubExp :: VName -> SymbolTable rep -> Maybe (SubExp, Certs)
 lookupSubExp name vtable = do
   (e, cs) <- lookupExp name vtable
   case e of
@@ -554,4 +554,4 @@ hideIf hide vtable = vtable {bindings = M.map maybeHide $ bindings vtable}
 hideCertified :: Names -> SymbolTable rep -> SymbolTable rep
 hideCertified to_hide = hideIf $ maybe False hide . entryStm
   where
-    hide = any (`nameIn` to_hide) . unCertificates . stmCerts
+    hide = any (`nameIn` to_hide) . unCerts . stmCerts

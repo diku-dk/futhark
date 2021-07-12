@@ -92,9 +92,9 @@ instance Pretty SubExp where
   ppr (Var v) = ppr v
   ppr (Constant v) = ppr v
 
-instance Pretty Certificates where
-  ppr (Certificates []) = empty
-  ppr (Certificates cs) = text "#" <> braces (commasep (map ppr cs))
+instance Pretty Certs where
+  ppr (Certs []) = empty
+  ppr (Certs cs) = text "#" <> braces (commasep (map ppr cs))
 
 instance PrettyRep rep => Pretty (Stms rep) where
   ppr = stack . map ppr . stmsToList
@@ -121,7 +121,7 @@ attrAnnots = map f . toList . unAttrs
 stmAttrAnnots :: Stm rep -> [Doc]
 stmAttrAnnots = attrAnnots . stmAuxAttrs . stmAux
 
-certAnnots :: Certificates -> [Doc]
+certAnnots :: Certs -> [Doc]
 certAnnots cs
   | cs == mempty = []
   | otherwise = [ppr cs]

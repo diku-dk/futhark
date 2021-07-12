@@ -103,9 +103,9 @@ instance Substitute dec => Substitute (PatternT dec) where
   substituteNames substs (Pattern xs) =
     Pattern (substituteNames substs xs)
 
-instance Substitute Certificates where
-  substituteNames substs (Certificates cs) =
-    Certificates $ substituteNames substs cs
+instance Substitute Certs where
+  substituteNames substs (Certs cs) =
+    Certs $ substituteNames substs cs
 
 instance Substitutable rep => Substitute (Stm rep) where
   substituteNames substs (Let pat annot e) =

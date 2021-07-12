@@ -149,7 +149,7 @@ newtype SimpleM rep a
   = SimpleM
       ( ReaderT
           (SimpleOps rep, Env rep)
-          (State (VNameSource, Bool, Certificates))
+          (State (VNameSource, Bool, Certs))
           a
       )
   deriving
@@ -157,7 +157,7 @@ newtype SimpleM rep a
       Functor,
       Monad,
       MonadReader (SimpleOps rep, Env rep),
-      MonadState (VNameSource, Bool, Certificates)
+      MonadState (VNameSource, Bool, Certs)
     )
 
 instance MonadFreshNames (SimpleM rep) where
@@ -207,7 +207,7 @@ localVtable ::
   SimpleM rep a
 localVtable f = local $ \(ops, env) -> (ops, env {envVtable = f $ envVtable env})
 
-collectCerts :: SimpleM rep a -> SimpleM rep (a, Certificates)
+collectCerts :: SimpleM rep a -> SimpleM rep (a, Certs)
 collectCerts m = do
   x <- m
   (a, b, cs) <- get
@@ -219,7 +219,7 @@ collectCerts m = do
 changed :: SimpleM rep ()
 changed = modify $ \(src, _, cs) -> (src, True, cs)
 
-usedCerts :: Certificates -> SimpleM rep ()
+usedCerts :: Certs -> SimpleM rep ()
 usedCerts cs = modify $ \(a, b, c) -> (a, b, cs <> c)
 
 -- | Indicate in the symbol table that we have descended into a loop.
@@ -989,13 +989,13 @@ consumeResult = mconcat . map inspect
       mconcat $ map UT.consumedUsage $ namesToList $ subExpAliases se
     inspect _ = mempty
 
-instance Simplifiable Certificates where
-  simplify (Certificates ocs) = Certificates . nubOrd . concat <$> mapM check ocs
+instance Simplifiable Certs where
+  simplify (Certs ocs) = Certs . nubOrd . concat <$> mapM check ocs
     where
       check idd = do
         vv <- ST.lookupSubExp idd <$> askVtable
         case vv of
-          Just (Constant _, Certificates cs) -> return cs
+          Just (Constant _, Certs cs) -> return cs
           Just (Var idd', _) -> return [idd']
           _ -> return [idd]
 
