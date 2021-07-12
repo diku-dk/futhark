@@ -75,7 +75,7 @@ prepareRedOrScan w map_lam arrs ispace inps = do
 segRed ::
   (MonadFreshNames m, DistRep rep, HasScope rep m) =>
   SegOpLevel rep ->
-  Pattern rep ->
+  Pat rep ->
   SubExp -> -- segment size
   [SegBinOp rep] ->
   Lambda rep ->
@@ -93,7 +93,7 @@ segRed lvl pat w ops map_lam arrs ispace inps = runBuilder_ $ do
 segScan ::
   (MonadFreshNames m, DistRep rep, HasScope rep m) =>
   SegOpLevel rep ->
-  Pattern rep ->
+  Pat rep ->
   SubExp -> -- segment size
   [SegBinOp rep] ->
   Lambda rep ->
@@ -111,7 +111,7 @@ segScan lvl pat w ops map_lam arrs ispace inps = runBuilder_ $ do
 segMap ::
   (MonadFreshNames m, DistRep rep, HasScope rep m) =>
   SegOpLevel rep ->
-  Pattern rep ->
+  Pat rep ->
   SubExp -> -- segment size
   Lambda rep ->
   [VName] ->
@@ -127,8 +127,8 @@ segMap lvl pat w map_lam arrs ispace inps = runBuilder_ $ do
 
 dummyDim ::
   (MonadFreshNames m, MonadBuilder m, DistRep (Rep m)) =>
-  Pattern (Rep m) ->
-  m (Pattern (Rep m), [(VName, SubExp)], m ())
+  Pat (Rep m) ->
+  m (Pat (Rep m), [(VName, SubExp)], m ())
 dummyDim pat = do
   -- We add a unit-size segment on top to ensure that the result
   -- of the SegRed is an array, which we then immediately index.
@@ -137,14 +137,14 @@ dummyDim pat = do
   -- host-device copy (scalars are kept on the host, but arrays
   -- may be on the device).
   let addDummyDim t = t `arrayOfRow` intConst Int64 1
-  pat' <- fmap addDummyDim <$> renamePattern pat
+  pat' <- fmap addDummyDim <$> renamePat pat
   dummy <- newVName "dummy"
   let ispace = [(dummy, intConst Int64 1)]
 
   return
     ( pat',
       ispace,
-      forM_ (zip (patternNames pat') (patternNames pat)) $ \(from, to) -> do
+      forM_ (zip (patNames pat') (patNames pat)) $ \(from, to) -> do
         from_t <- lookupType from
         letBindNames [to] $
           BasicOp $
@@ -155,7 +155,7 @@ dummyDim pat = do
 nonSegRed ::
   (MonadFreshNames m, DistRep rep, HasScope rep m) =>
   SegOpLevel rep ->
-  Pattern rep ->
+  Pat rep ->
   SubExp ->
   [SegBinOp rep] ->
   Lambda rep ->
@@ -169,7 +169,7 @@ nonSegRed lvl pat w ops map_lam arrs = runBuilder_ $ do
 segHist ::
   (DistRep rep, MonadFreshNames m, HasScope rep m) =>
   SegOpLevel rep ->
-  Pattern rep ->
+  Pat rep ->
   SubExp ->
   -- | Segment indexes and sizes.
   [(VName, SubExp)] ->
@@ -245,7 +245,7 @@ readKernelInput ::
   m ()
 readKernelInput inp = do
   let pe = PatElem (kernelInputName inp) $ kernelInputType inp
-  letBind (Pattern [pe]) . BasicOp $
+  letBind (Pat [pe]) . BasicOp $
     case kernelInputType inp of
       Acc {} ->
         SubExp $ Var $ kernelInputArray inp

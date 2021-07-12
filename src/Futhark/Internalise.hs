@@ -9,7 +9,7 @@ module Futhark.Internalise (internaliseProg) where
 
 import qualified Data.Text as T
 import Futhark.Compiler.Config
-import Futhark.IR.SOACS as I hiding (stmPattern)
+import Futhark.IR.SOACS as I hiding (stmPat)
 import Futhark.Internalise.Defunctionalise as Defunctionalise
 import Futhark.Internalise.Defunctorise as Defunctorise
 import qualified Futhark.Internalise.Exps as Exps

@@ -388,7 +388,7 @@ sliceSlice _ _ = []
 data PatElemT dec = PatElem
   { -- | The name being bound.
     patElemName :: VName,
-    -- | Pattern element decoration.
+    -- | Pat element decoration.
     patElemDec :: dec
   }
   deriving (Ord, Show, Eq)

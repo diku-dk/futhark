@@ -8,7 +8,7 @@ module Language.Futhark
     Slice,
     AppExp,
     Exp,
-    Pattern,
+    Pat,
     ModExp,
     ModParam,
     SigExp,
@@ -47,7 +47,7 @@ type Exp = ExpBase Info VName
 type AppExp = AppExpBase Info VName
 
 -- | A pattern with type information.
-type Pattern = PatternBase Info VName
+type Pat = PatBase Info VName
 
 -- | An constant declaration with type information.
 type ValBind = ValBindBase Info VName

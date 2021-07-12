@@ -48,20 +48,20 @@ sizeDefs :: SizeBinder VName -> Defs
 sizeDefs (SizeBinder v loc) =
   M.singleton v $ DefBound $ BoundTerm (Scalar (Prim (Signed Int64))) (locOf loc)
 
-patternDefs :: Pattern -> Defs
+patternDefs :: Pat -> Defs
 patternDefs (Id vn (Info t) loc) =
   M.singleton vn $ DefBound $ BoundTerm (toStruct t) (locOf loc)
-patternDefs (TuplePattern pats _) =
+patternDefs (TuplePat pats _) =
   mconcat $ map patternDefs pats
-patternDefs (RecordPattern fields _) =
+patternDefs (RecordPat fields _) =
   mconcat $ map (patternDefs . snd) fields
-patternDefs (PatternParens pat _) =
+patternDefs (PatParens pat _) =
   patternDefs pat
 patternDefs Wildcard {} = mempty
-patternDefs PatternLit {} = mempty
-patternDefs (PatternAscription pat _ _) =
+patternDefs PatLit {} = mempty
+patternDefs (PatAscription pat _ _) =
   patternDefs pat
-patternDefs (PatternConstr _ _ pats _) =
+patternDefs (PatConstr _ _ pats _) =
   mconcat $ map patternDefs pats
 
 typeParamDefs :: TypeParamBase VName -> Defs
@@ -80,7 +80,7 @@ expDefs e =
           mapOnName = pure,
           mapOnQualName = pure,
           mapOnStructType = pure,
-          mapOnPatternType = pure
+          mapOnPatType = pure
         }
     onExp e' = do
       modify (<> expDefs e')
@@ -241,22 +241,22 @@ atPosInTypeExp te pos =
       Just $ RawAtName qn $ locOf loc
     inDim _ = Nothing
 
-atPosInPattern :: Pattern -> Pos -> Maybe RawAtPos
-atPosInPattern (Id vn _ loc) pos = do
+atPosInPat :: Pat -> Pos -> Maybe RawAtPos
+atPosInPat (Id vn _ loc) pos = do
   guard $ loc `contains` pos
   Just $ RawAtName (qualName vn) $ locOf loc
-atPosInPattern (TuplePattern pats _) pos =
-  msum $ map (`atPosInPattern` pos) pats
-atPosInPattern (RecordPattern fields _) pos =
-  msum $ map ((`atPosInPattern` pos) . snd) fields
-atPosInPattern (PatternParens pat _) pos =
-  atPosInPattern pat pos
-atPosInPattern (PatternAscription pat tdecl _) pos =
-  atPosInPattern pat pos `mplus` atPosInTypeExp (declaredType tdecl) pos
-atPosInPattern (PatternConstr _ _ pats _) pos =
-  msum $ map (`atPosInPattern` pos) pats
-atPosInPattern PatternLit {} _ = Nothing
-atPosInPattern Wildcard {} _ = Nothing
+atPosInPat (TuplePat pats _) pos =
+  msum $ map (`atPosInPat` pos) pats
+atPosInPat (RecordPat fields _) pos =
+  msum $ map ((`atPosInPat` pos) . snd) fields
+atPosInPat (PatParens pat _) pos =
+  atPosInPat pat pos
+atPosInPat (PatAscription pat tdecl _) pos =
+  atPosInPat pat pos `mplus` atPosInTypeExp (declaredType tdecl) pos
+atPosInPat (PatConstr _ _ pats _) pos =
+  msum $ map (`atPosInPat` pos) pats
+atPosInPat PatLit {} _ = Nothing
+atPosInPat Wildcard {} _ = Nothing
 
 atPosInExp :: Exp -> Pos -> Maybe RawAtPos
 atPosInExp (Var qn _ loc) pos = do
@@ -269,12 +269,12 @@ atPosInExp Literal {} _ = Nothing
 atPosInExp IntLit {} _ = Nothing
 atPosInExp FloatLit {} _ = Nothing
 atPosInExp (AppExp (LetPat _ pat _ _ _) _) pos
-  | pat `contains` pos = atPosInPattern pat pos
+  | pat `contains` pos = atPosInPat pat pos
 atPosInExp (AppExp (LetWith a b _ _ _ _) _) pos
   | a `contains` pos = Just $ RawAtName (qualName $ identName a) (locOf a)
   | b `contains` pos = Just $ RawAtName (qualName $ identName b) (locOf b)
 atPosInExp (AppExp (DoLoop _ merge _ _ _ _) _) pos
-  | merge `contains` pos = atPosInPattern merge pos
+  | merge `contains` pos = atPosInPat merge pos
 atPosInExp (Ascript _ tdecl _) pos
   | tdecl `contains` pos = atPosInTypeExp (declaredType tdecl) pos
 atPosInExp (AppExp (Coerce _ tdecl _) _) pos
@@ -293,7 +293,7 @@ atPosInExp e pos = do
           mapOnName = pure,
           mapOnQualName = pure,
           mapOnStructType = pure,
-          mapOnPatternType = pure
+          mapOnPatType = pure
         }
     onExp e' =
       case atPosInExp e' pos of
@@ -339,7 +339,7 @@ atPosInSigExp se pos =
 
 atPosInValBind :: ValBind -> Pos -> Maybe RawAtPos
 atPosInValBind vbind pos =
-  msum (map (`atPosInPattern` pos) (valBindParams vbind))
+  msum (map (`atPosInPat` pos) (valBindParams vbind))
     `mplus` atPosInExp (valBindBody vbind) pos
     `mplus` join (atPosInTypeExp <$> valBindRetDecl vbind <*> pure pos)
 

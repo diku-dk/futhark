@@ -322,25 +322,25 @@ cmpSizeLe desc size_class to_what = do
 
 kernelAlternatives ::
   (MonadFreshNames m, HasScope Out.GPU m) =>
-  Out.Pattern Out.GPU ->
+  Out.Pat Out.GPU ->
   Out.Body Out.GPU ->
   [(SubExp, Out.Body Out.GPU)] ->
   m (Out.Stms Out.GPU)
 kernelAlternatives pat default_body [] = runBuilder_ $ do
   ses <- bodyBind default_body
-  forM_ (zip (patternNames pat) ses) $ \(name, SubExpRes cs se) ->
+  forM_ (zip (patNames pat) ses) $ \(name, SubExpRes cs se) ->
     certifying cs $ letBindNames [name] $ BasicOp $ SubExp se
 kernelAlternatives pat default_body ((cond, alt) : alts) = runBuilder_ $ do
-  alts_pat <- fmap Pattern . forM (patternElements pat) $ \pe -> do
+  alts_pat <- fmap Pat . forM (patElements pat) $ \pe -> do
     name <- newVName $ baseString $ patElemName pe
     return pe {patElemName = name}
 
   alt_stms <- kernelAlternatives alts_pat default_body alts
-  let alt_body = mkBody alt_stms $ varsRes $ patternNames alts_pat
+  let alt_body = mkBody alt_stms $ varsRes $ patNames alts_pat
 
   letBind pat $
     If cond alt alt_body $
-      IfDec (staticShapes (patternTypes pat)) IfEquiv
+      IfDec (staticShapes (patTypes pat)) IfEquiv
 
 transformLambda :: KernelPath -> Lambda -> DistribM (Out.Lambda Out.GPU)
 transformLambda path (Lambda params body ret) =
@@ -420,7 +420,7 @@ transformStm path (Let pat aux@(StmAux cs _ _) (Op (Screma w arrs form)))
 
         outerParallelBody =
           renameBody
-            =<< (mkBody <$> paralleliseOuter <*> pure (varsRes (patternNames pat)))
+            =<< (mkBody <$> paralleliseOuter <*> pure (varsRes (patNames pat)))
 
         paralleliseInner path' = do
           (mapstm, redstm) <-
@@ -433,7 +433,7 @@ transformStm path (Let pat aux@(StmAux cs _ _) (Op (Screma w arrs form)))
 
         innerParallelBody path' =
           renameBody
-            =<< (mkBody <$> paralleliseInner path' <*> pure (varsRes (patternNames pat)))
+            =<< (mkBody <$> paralleliseInner path' <*> pure (varsRes (patNames pat)))
 
     if not (lambdaContainsParallelism map_lam)
       || "sequential_inner" `inAttrs` stmAuxAttrs aux
@@ -476,8 +476,8 @@ transformStm path (Let pat aux@(StmAux cs _ _) (Op (Stream w arrs (Parallel o co
         let fold_fun' = soacsLambdaToGPU fold_fun
 
         let (red_pat_elems, concat_pat_elems) =
-              splitAt (length nes) $ patternElements pat
-            red_pat = Pattern red_pat_elems
+              splitAt (length nes) $ patElements pat
+            red_pat = Pat red_pat_elems
 
         ((num_threads, red_results), stms) <-
           streamMap
@@ -515,7 +515,7 @@ transformStm path (Let pat aux@(StmAux cs _ _) (Op (Stream w arrs (Parallel o co
 
     outerParallelBody path' =
       renameBody
-        =<< (mkBody <$> paralleliseOuter path' <*> pure (varsRes (patternNames pat)))
+        =<< (mkBody <$> paralleliseOuter path' <*> pure (varsRes (patNames pat)))
 
     paralleliseInner path' = do
       types <- asksScope scopeForSOACs
@@ -524,7 +524,7 @@ transformStm path (Let pat aux@(StmAux cs _ _) (Op (Stream w arrs (Parallel o co
 
     innerParallelBody path' =
       renameBody
-        =<< (mkBody <$> paralleliseInner path' <*> pure (varsRes (patternNames pat)))
+        =<< (mkBody <$> paralleliseInner path' <*> pure (varsRes (patNames pat)))
 
     comm'
       | commutativeLambda red_fun, o /= InOrder = Commutative
@@ -562,7 +562,7 @@ transformStm _ (Let pat (StmAux cs _ _) (Op (Scatter w lam ivs as))) = runBuilde
       segThreadCapped
       [(write_i, w)]
       inputs
-      (zipWith (stripArray . length) as_ws $ patternTypes pat)
+      (zipWith (stripArray . length) as_ws $ patTypes pat)
       body
   certifying cs $ do
     addStms stms
@@ -680,7 +680,7 @@ onMap path (MapLoop pat aux w lam arrs) = do
         DistEnv
           { distNest = singleNesting (Nesting mempty loopnest),
             distScope =
-              scopeOfPattern pat
+              scopeOfPat pat
                 <> scopeForGPU (scopeOf lam)
                 <> types,
             distOnInnerMap = onInnerMap path',
@@ -734,7 +734,7 @@ onMap' ::
   KernelPath ->
   (KernelPath -> DistribM (Out.Stms Out.GPU)) ->
   (KernelPath -> DistribM (Out.Stms Out.GPU)) ->
-  Pattern ->
+  Pat ->
   Lambda ->
   DistribM (Out.Stms Out.GPU)
 onMap' loopnest path mk_seq_stms mk_par_stms pat lam = do
@@ -810,7 +810,7 @@ onMap' loopnest path mk_seq_stms mk_par_stms pat lam = do
                 [(outer_suff, seq_body), (intra_ok, group_par_body)]
   where
     nest_ws = kernelNestWidths loopnest
-    res = varsRes $ patternNames pat
+    res = varsRes $ patNames pat
     aux = loopNestingAux $ innermostKernelNesting loopnest
     attrs = stmAuxAttrs aux
 
@@ -919,7 +919,7 @@ onInnerMap path maploop@(MapLoop pat aux w lam arrs) acc
             let sequentialised_lam = soacsLambdaToGPU lam'
             constructKernel segThreadCapped nest' $ lambdaBody sequentialised_lam
 
-          let outer_pat = loopNestingPattern $ fst nest
+          let outer_pat = loopNestingPat $ fst nest
           (nestw_bnds <>)
             <$> onMap'
               nest'

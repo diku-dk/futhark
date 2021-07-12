@@ -63,7 +63,7 @@ data PolyBinding
       RecordReplacements
       ( VName,
         [TypeParam],
-        [Pattern],
+        [Pat],
         StructType,
         [VName],
         Exp,
@@ -76,7 +76,7 @@ data PolyBinding
 -- record patterns.
 type RecordReplacements = M.Map VName RecordReplacement
 
-type RecordReplacement = M.Map Name (VName, PatternType)
+type RecordReplacement = M.Map Name (VName, PatType)
 
 -- Monomorphization environment mapping names of polymorphic functions
 -- to a representation of their corresponding function bindings.
@@ -264,12 +264,12 @@ transformType t = do
       then second (mconcat . map replace . S.toList) t
       else t
 
-sizesForPat :: MonadFreshNames m => Pattern -> m ([VName], Pattern)
+sizesForPat :: MonadFreshNames m => Pat -> m ([VName], Pat)
 sizesForPat pat = do
   (params', sizes) <- runStateT (astMap tv pat) []
   return (sizes, params')
   where
-    tv = identityMapper {mapOnPatternType = bitraverse onDim pure}
+    tv = identityMapper {mapOnPatType = bitraverse onDim pure}
     onDim (AnyDim _) = do
       v <- lift $ newVName "size"
       modify (v :)
@@ -289,7 +289,7 @@ transformAppExp (Range e1 me incl loc) res = do
 transformAppExp (Coerce e tp loc) res =
   AppExp <$> (Coerce <$> transformExp e <*> pure tp <*> pure loc) <*> pure (Info res)
 transformAppExp (LetPat sizes pat e1 e2 loc) res = do
-  (pat', rr) <- transformPattern pat
+  (pat', rr) <- transformPat pat
   AppExp
     <$> ( LetPat sizes pat' <$> transformExp e1
             <*> withRecordReplacements rr (transformExp e2)
@@ -508,7 +508,7 @@ transformExp (Attr info e loc) =
 
 transformCase :: Case -> MonoM Case
 transformCase (CasePat p e loc) = do
-  (p', rr) <- transformPattern p
+  (p', rr) <- transformPat p
   CasePat p' <$> withRecordReplacements rr (transformExp e) <*> pure loc
 
 transformDimIndex :: DimIndexBase Info VName -> MonoM (DimIndexBase Info VName)
@@ -523,10 +523,10 @@ desugarBinOpSection ::
   Exp ->
   Maybe Exp ->
   Maybe Exp ->
-  PatternType ->
+  PatType ->
   (PName, StructType, Maybe VName) ->
   (PName, StructType, Maybe VName) ->
-  (PatternType, [VName]) ->
+  (PatType, [VName]) ->
   SrcLoc ->
   MonoM Exp
 desugarBinOpSection op e_left e_right t (xp, xtype, xext) (yp, ytype, yext) (rettype, retext) loc = do
@@ -576,7 +576,7 @@ desugarBinOpSection op e_left e_right t (xp, xtype, xext) (yp, ytype, yext) (ret
       (v, pat, var_e) <- patAndVar argtype
       return (v, id, var_e, [pat])
 
-desugarProjectSection :: [Name] -> PatternType -> SrcLoc -> MonoM Exp
+desugarProjectSection :: [Name] -> PatType -> SrcLoc -> MonoM Exp
 desugarProjectSection fields (Scalar (Arrow _ _ t1 t2)) loc = do
   p <- newVName "project_p"
   let body = foldl project (Var (qualName p) (Info t1) mempty) fields
@@ -594,7 +594,7 @@ desugarProjectSection fields (Scalar (Arrow _ _ t1 t2)) loc = do
               ++ pretty field
 desugarProjectSection _ t _ = error $ "desugarOpSection: not a function type: " ++ pretty t
 
-desugarIndexSection :: [DimIndex] -> PatternType -> SrcLoc -> MonoM Exp
+desugarIndexSection :: [DimIndex] -> PatType -> SrcLoc -> MonoM Exp
 desugarIndexSection idxs (Scalar (Arrow _ _ t1 t2)) loc = do
   p <- newVName "index_i"
   let body = AppExp (Index (Var (qualName p) (Info t1) loc) idxs loc) (Info (AppRes t2 []))
@@ -617,43 +617,43 @@ unfoldLetFuns (ValBind _ fname _ (Info (rettype, _)) dim_params params body _ _ 
     e' = unfoldLetFuns rest e
     e_t = typeOf e'
 
-transformPattern :: Pattern -> MonoM (Pattern, RecordReplacements)
-transformPattern (Id v (Info (Scalar (Record fs))) loc) = do
+transformPat :: Pat -> MonoM (Pat, RecordReplacements)
+transformPat (Id v (Info (Scalar (Record fs))) loc) = do
   let fs' = M.toList fs
   (fs_ks, fs_ts) <- fmap unzip $
     forM fs' $ \(f, ft) ->
       (,) <$> newVName (nameToString f) <*> transformType ft
   return
-    ( RecordPattern
+    ( RecordPat
         (zip (map fst fs') (zipWith3 Id fs_ks (map Info fs_ts) $ repeat loc))
         loc,
       M.singleton v $ M.fromList $ zip (map fst fs') $ zip fs_ks fs_ts
     )
-transformPattern (Id v t loc) = return (Id v t loc, mempty)
-transformPattern (TuplePattern pats loc) = do
-  (pats', rrs) <- unzip <$> mapM transformPattern pats
-  return (TuplePattern pats' loc, mconcat rrs)
-transformPattern (RecordPattern fields loc) = do
+transformPat (Id v t loc) = return (Id v t loc, mempty)
+transformPat (TuplePat pats loc) = do
+  (pats', rrs) <- unzip <$> mapM transformPat pats
+  return (TuplePat pats' loc, mconcat rrs)
+transformPat (RecordPat fields loc) = do
   let (field_names, field_pats) = unzip fields
-  (field_pats', rrs) <- unzip <$> mapM transformPattern field_pats
-  return (RecordPattern (zip field_names field_pats') loc, mconcat rrs)
-transformPattern (PatternParens pat loc) = do
-  (pat', rr) <- transformPattern pat
-  return (PatternParens pat' loc, rr)
-transformPattern (Wildcard (Info t) loc) = do
+  (field_pats', rrs) <- unzip <$> mapM transformPat field_pats
+  return (RecordPat (zip field_names field_pats') loc, mconcat rrs)
+transformPat (PatParens pat loc) = do
+  (pat', rr) <- transformPat pat
+  return (PatParens pat' loc, rr)
+transformPat (Wildcard (Info t) loc) = do
   t' <- transformType t
   return (wildcard t' loc, mempty)
-transformPattern (PatternAscription pat td loc) = do
-  (pat', rr) <- transformPattern pat
-  return (PatternAscription pat' td loc, rr)
-transformPattern (PatternLit e t loc) = return (PatternLit e t loc, mempty)
-transformPattern (PatternConstr name t all_ps loc) = do
-  (all_ps', rrs) <- unzip <$> mapM transformPattern all_ps
-  return (PatternConstr name t all_ps' loc, mconcat rrs)
+transformPat (PatAscription pat td loc) = do
+  (pat', rr) <- transformPat pat
+  return (PatAscription pat' td loc, rr)
+transformPat (PatLit e t loc) = return (PatLit e t loc, mempty)
+transformPat (PatConstr name t all_ps loc) = do
+  (all_ps', rrs) <- unzip <$> mapM transformPat all_ps
+  return (PatConstr name t all_ps' loc, mconcat rrs)
 
-wildcard :: PatternType -> SrcLoc -> Pattern
+wildcard :: PatType -> SrcLoc -> Pat
 wildcard (Scalar (Record fs)) loc =
-  RecordPattern (zip (M.keys fs) $ map ((`Wildcard` loc) . Info) $ M.elems fs) loc
+  RecordPat (zip (M.keys fs) $ map ((`Wildcard` loc) . Info) $ M.elems fs) loc
 wildcard t loc =
   Wildcard (Info t) loc
 
@@ -718,15 +718,15 @@ monomorphiseBinding entry (PolyBinding rr (name, tparams, params, rettype, retex
     (substs, t_shape_params) <- typeSubstsM loc (noSizes bind_t) $ noNamedParams t
     let substs' = M.map (Subst []) substs
         rettype' = substTypesAny (`M.lookup` substs') rettype
-        substPatternType =
+        substPatType =
           substTypesAny (fmap (fmap fromStruct) . (`M.lookup` substs'))
-        params' = map (substPattern entry substPatternType) params
+        params' = map (substPat entry substPatType) params
         bind_t' = substTypesAny (`M.lookup` substs') bind_t
         (shape_params_explicit, shape_params_implicit) =
           partition ((`S.member` mustBeExplicit bind_t') . typeParamName) $
             shape_params ++ t_shape_params
 
-    (params'', rrs) <- unzip <$> mapM transformPattern params'
+    (params'', rrs) <- unzip <$> mapM transformPat params'
 
     mapM_ noticeDims $ rettype : map patternStructType params''
 
@@ -763,7 +763,7 @@ monomorphiseBinding entry (PolyBinding rr (name, tparams, params, rettype, retex
           mapOnName = pure,
           mapOnQualName = pure,
           mapOnStructType = pure . applySubst substs,
-          mapOnPatternType = pure . applySubst substs
+          mapOnPatType = pure . applySubst substs
         }
 
     shapeParam tp = Id (typeParamName tp) (Info i64) $ srclocOf tp
@@ -836,20 +836,20 @@ typeSubstsM loc orig_t1 orig_t2 =
     onDim (MonoAnon v) = pure $ AnyDim v
 
 -- Perform a given substitution on the types in a pattern.
-substPattern :: Bool -> (PatternType -> PatternType) -> Pattern -> Pattern
-substPattern entry f pat = case pat of
-  TuplePattern pats loc -> TuplePattern (map (substPattern entry f) pats) loc
-  RecordPattern fs loc -> RecordPattern (map substField fs) loc
+substPat :: Bool -> (PatType -> PatType) -> Pat -> Pat
+substPat entry f pat = case pat of
+  TuplePat pats loc -> TuplePat (map (substPat entry f) pats) loc
+  RecordPat fs loc -> RecordPat (map substField fs) loc
     where
-      substField (n, p) = (n, substPattern entry f p)
-  PatternParens p loc -> PatternParens (substPattern entry f p) loc
+      substField (n, p) = (n, substPat entry f p)
+  PatParens p loc -> PatParens (substPat entry f p) loc
   Id vn (Info tp) loc -> Id vn (Info $ f tp) loc
   Wildcard (Info tp) loc -> Wildcard (Info $ f tp) loc
-  PatternAscription p td loc
-    | entry -> PatternAscription (substPattern False f p) td loc
-    | otherwise -> substPattern False f p
-  PatternLit e (Info tp) loc -> PatternLit e (Info $ f tp) loc
-  PatternConstr n (Info tp) ps loc -> PatternConstr n (Info $ f tp) ps loc
+  PatAscription p td loc
+    | entry -> PatAscription (substPat False f p) td loc
+    | otherwise -> substPat False f p
+  PatLit e (Info tp) loc -> PatLit e (Info $ f tp) loc
+  PatConstr n (Info tp) ps loc -> PatConstr n (Info $ f tp) ps loc
 
 toPolyBinding :: ValBind -> PolyBinding
 toPolyBinding (ValBind _ name _ (Info (rettype, retext)) tparams params body _ attrs loc) =
@@ -865,7 +865,7 @@ removeTypeVariables entry valbind@(ValBind _ _ _ (Info (rettype, retext)) _ pats
             mapOnName = pure,
             mapOnQualName = pure,
             mapOnStructType = pure . applySubst (`M.lookup` subs),
-            mapOnPatternType = pure . applySubst (`M.lookup` subs)
+            mapOnPatType = pure . applySubst (`M.lookup` subs)
           }
 
   body' <- astMap mapper body
@@ -873,7 +873,7 @@ removeTypeVariables entry valbind@(ValBind _ _ _ (Info (rettype, retext)) _ pats
   return
     valbind
       { valBindRetType = Info (applySubst (`M.lookup` subs) rettype, retext),
-        valBindParams = map (substPattern entry $ applySubst (`M.lookup` subs)) pats,
+        valBindParams = map (substPat entry $ applySubst (`M.lookup` subs)) pats,
         valBindBody = body'
       }
 

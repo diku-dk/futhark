@@ -133,30 +133,30 @@ allocLocal mem size =
   sOp $ Imp.LocalAlloc mem size
 
 kernelAlloc ::
-  Pattern GPUMem ->
+  Pat GPUMem ->
   SubExp ->
   Space ->
   InKernelGen ()
-kernelAlloc (Pattern [_]) _ ScalarSpace {} =
+kernelAlloc (Pat [_]) _ ScalarSpace {} =
   -- Handled by the declaration of the memory block, which is then
   -- translated to an actual scalar variable during C code generation.
   return ()
-kernelAlloc (Pattern [mem]) size (Space "local") =
+kernelAlloc (Pat [mem]) size (Space "local") =
   allocLocal (patElemName mem) $ Imp.bytes $ toInt64Exp size
-kernelAlloc (Pattern [mem]) _ _ =
+kernelAlloc (Pat [mem]) _ _ =
   compilerLimitationS $ "Cannot allocate memory block " ++ pretty mem ++ " in kernel."
 kernelAlloc dest _ _ =
   error $ "Invalid target for in-kernel allocation: " ++ show dest
 
 splitSpace ::
   (ToExp w, ToExp i, ToExp elems_per_thread) =>
-  Pattern GPUMem ->
+  Pat GPUMem ->
   SplitOrdering ->
   w ->
   i ->
   elems_per_thread ->
   ImpM rep r op ()
-splitSpace (Pattern [size]) o w i elems_per_thread = do
+splitSpace (Pat [size]) o w i elems_per_thread = do
   num_elements <- Imp.elements . TPrimExp <$> toExp w
   let i' = toInt64Exp i
   elems_per_thread' <- Imp.elements . TPrimExp <$> toExp elems_per_thread
@@ -194,7 +194,7 @@ updateAcc acc is vs = sComment "UpdateAcc" $ do
                 error $ "Missing locks for " ++ pretty acc
 
 compileThreadExp :: ExpCompiler GPUMem KernelEnv Imp.KernelOp
-compileThreadExp (Pattern [dest]) (BasicOp (ArrayLit es _)) =
+compileThreadExp (Pat [dest]) (BasicOp (ArrayLit es _)) =
   forM_ (zip [0 ..] es) $ \(i, e) ->
     copyDWIMFix (patElemName dest) [fromIntegral (i :: Int64)] e []
 compileThreadExp _ (BasicOp (UpdateAcc acc is vs)) =
@@ -251,17 +251,17 @@ groupCoverSpace ds f =
 
 compileGroupExp :: ExpCompiler GPUMem KernelEnv Imp.KernelOp
 -- The static arrays stuff does not work inside kernels.
-compileGroupExp (Pattern [dest]) (BasicOp (ArrayLit es _)) =
+compileGroupExp (Pat [dest]) (BasicOp (ArrayLit es _)) =
   forM_ (zip [0 ..] es) $ \(i, e) ->
     copyDWIMFix (patElemName dest) [fromIntegral (i :: Int64)] e []
 compileGroupExp _ (BasicOp (UpdateAcc acc is vs)) =
   updateAcc acc is vs
-compileGroupExp (Pattern [dest]) (BasicOp (Replicate ds se)) = do
+compileGroupExp (Pat [dest]) (BasicOp (Replicate ds se)) = do
   let ds' = map toInt64Exp $ shapeDims ds
   groupCoverSpace ds' $ \is ->
     copyDWIMFix (patElemName dest) is se (drop (shapeRank ds) is)
   sOp $ Imp.Barrier Imp.FenceLocal
-compileGroupExp (Pattern [dest]) (BasicOp (Iota n e s it)) = do
+compileGroupExp (Pat [dest]) (BasicOp (Iota n e s it)) = do
   n' <- toExp n
   e' <- toExp e
   s' <- toExp s
@@ -278,7 +278,7 @@ compileGroupExp (Pattern [dest]) (BasicOp (Iota n e s it)) = do
 -- sure that only one thread performs the write.  When writing an
 -- array, the group-level copy code will take care of doing the right
 -- thing.
-compileGroupExp (Pattern [pe]) (BasicOp (Update safety _ slice se))
+compileGroupExp (Pat [pe]) (BasicOp (Update safety _ slice se))
   | null $ sliceDims slice = do
     sOp $ Imp.Barrier Imp.FenceLocal
     ltid <- kernelLocalThreadId . kernelConstants <$> askEnv
@@ -377,7 +377,7 @@ compileGroupOp pat (Inner (SegOp (SegMap lvl space _ body))) = do
   whenActive lvl space $
     localOps threadOperations $
       compileStms mempty (kernelBodyStms body) $
-        zipWithM_ (compileThreadResult space) (patternElements pat) $
+        zipWithM_ (compileThreadResult space) (patElements pat) $
           kernelBodyResult body
 
   sOp $ Imp.ErrorSync Imp.FenceLocal
@@ -388,7 +388,7 @@ compileGroupOp pat (Inner (SegOp (SegScan lvl space scans _ body))) = do
 
   whenActive lvl space $
     compileStms mempty (kernelBodyStms body) $
-      forM_ (zip (patternNames pat) $ kernelBodyResult body) $ \(dest, res) ->
+      forM_ (zip (patNames pat) $ kernelBodyResult body) $ \(dest, res) ->
         copyDWIMFix
           dest
           (map Imp.vi64 ltids)
@@ -419,7 +419,7 @@ compileGroupOp pat (Inner (SegOp (SegScan lvl space scans _ body))) = do
 
       num_scan_results = sum $ map (length . segBinOpNeutral) scans
 
-  arrs_flat <- mapM flattened $ take num_scan_results $ patternElements pat
+  arrs_flat <- mapM flattened $ take num_scan_results $ patElements pat
 
   forM_ scans $ \scan -> do
     let scan_op = segBinOpLambda scan
@@ -429,7 +429,7 @@ compileGroupOp pat (Inner (SegOp (SegRed lvl space ops _ body))) = do
 
   let (ltids, dims) = unzip $ unSegSpace space
       (red_pes, map_pes) =
-        splitAt (segBinOpResults ops) $ patternElements pat
+        splitAt (segBinOpResults ops) $ patElements pat
 
       dims' = map toInt64Exp dims
 
@@ -511,7 +511,7 @@ compileGroupOp pat (Inner (SegOp (SegHist lvl space ops _ kbody))) = do
   -- the ops.
   let num_red_res = length ops + sum (map (length . histNeutral) ops)
       (_red_pes, map_pes) =
-        splitAt num_red_res $ patternElements pat
+        splitAt num_red_res $ patElements pat
 
   ops' <- prepareIntraGroupSegHist (segGroupSize lvl) ops
 

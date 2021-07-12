@@ -254,7 +254,7 @@ transformNames x = do
           mapOnQualName = \v ->
             return $ fst $ lookupSubstInScope v scope,
           mapOnStructType = astMap (substituter scope),
-          mapOnPatternType = astMap (substituter scope)
+          mapOnPatType = astMap (substituter scope)
         }
     onExp scope e =
       -- One expression is tricky, because it interacts with scoping rules.

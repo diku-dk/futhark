@@ -110,7 +110,7 @@ type RuleGeneric rep a = a -> Stm rep -> Rule rep
 
 type RuleBasicOp rep a =
   ( a ->
-    Pattern rep ->
+    Pat rep ->
     StmAux (ExpDec rep) ->
     BasicOp ->
     Rule rep
@@ -118,7 +118,7 @@ type RuleBasicOp rep a =
 
 type RuleIf rep a =
   a ->
-  Pattern rep ->
+  Pat rep ->
   StmAux (ExpDec rep) ->
   ( SubExp,
     BodyT rep,
@@ -129,7 +129,7 @@ type RuleIf rep a =
 
 type RuleDoLoop rep a =
   a ->
-  Pattern rep ->
+  Pat rep ->
   StmAux (ExpDec rep) ->
   ( [(FParam rep, SubExp)],
     LoopForm rep,
@@ -139,7 +139,7 @@ type RuleDoLoop rep a =
 
 type RuleOp rep a =
   a ->
-  Pattern rep ->
+  Pat rep ->
   StmAux (ExpDec rep) ->
   Op rep ->
   Rule rep

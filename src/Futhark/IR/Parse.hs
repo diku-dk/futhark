@@ -364,8 +364,8 @@ pPatElem :: PR rep -> Parser (PatElem rep)
 pPatElem pr =
   (PatElem <$> pVName <*> (pColon *> pLetDec pr)) <?> "pattern element"
 
-pPattern :: PR rep -> Parser (Pattern rep)
-pPattern pr = Pattern <$> braces (pPatElem pr `sepBy` pComma)
+pPat :: PR rep -> Parser (Pat rep)
+pPat pr = Pat <$> braces (pPatElem pr `sepBy` pComma)
 
 pResult :: Parser Result
 pResult = braces $ pSubExpRes `sepBy` pComma
@@ -495,7 +495,7 @@ pSubExpRes = SubExpRes <$> pCerts <*> pSubExp
 
 pStm :: PR rep -> Parser (Stm rep)
 pStm pr =
-  keyword "let" $> Let <*> pPattern pr <* pEqual <*> pStmAux <*> pExp pr
+  keyword "let" $> Let <*> pPat pr <* pEqual <*> pStmAux <*> pExp pr
   where
     pStmAux = flip StmAux <$> pAttrs <*> pCerts <*> pure (pExpDec pr)
 

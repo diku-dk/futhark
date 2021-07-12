@@ -151,13 +151,13 @@ import Language.Futhark.Warnings
 import Prelude hiding (quot)
 
 -- | How to compile an t'Op'.
-type OpCompiler rep r op = Pattern rep -> Op rep -> ImpM rep r op ()
+type OpCompiler rep r op = Pat rep -> Op rep -> ImpM rep r op ()
 
 -- | How to compile some 'Stms'.
 type StmsCompiler rep r op = Names -> Stms rep -> ImpM rep r op () -> ImpM rep r op ()
 
 -- | How to compile an 'Exp'.
-type ExpCompiler rep r op = Pattern rep -> Exp rep -> ImpM rep r op ()
+type ExpCompiler rep r op = Pat rep -> Exp rep -> ImpM rep r op ()
 
 type CopyCompiler rep r op =
   PrimType ->
@@ -429,7 +429,7 @@ constsVTable :: Mem rep => Stms rep -> VTable rep
 constsVTable = foldMap stmVtable
   where
     stmVtable (Let pat _ e) =
-      foldMap (peVtable e) $ patternElements pat
+      foldMap (peVtable e) $ patElements pat
     peVtable e (PatElem name dec) =
       M.singleton name $ memBoundToVarEntry (Just e) dec
 
@@ -668,9 +668,9 @@ compileFunDef (FunDef entry _ fname rettype params body) =
 
       return (outparams, inparams, results, args)
 
-compileBody :: (Mem rep) => Pattern rep -> Body rep -> ImpM rep r op ()
+compileBody :: (Mem rep) => Pat rep -> Body rep -> ImpM rep r op ()
 compileBody pat (Body _ bnds ses) = do
-  Destination _ dests <- destinationFromPattern pat
+  Destination _ dests <- destinationFromPat pat
   compileStms (freeIn ses) bnds $
     forM_ (zip dests ses) $ \(d, SubExpRes _ se) -> copyDWIMDest d [] se []
 
@@ -721,7 +721,7 @@ defCompileStms alive_after_stms all_stms m =
   void $ compileStms' mempty $ stmsToList all_stms
   where
     compileStms' allocs (Let pat aux e : bs) = do
-      dVars (Just e) (patternElements pat)
+      dVars (Just e) (patElements pat)
 
       e_code <-
         localAttrs (stmAuxAttrs aux) $
@@ -742,25 +742,25 @@ defCompileStms alive_after_stms all_stms m =
       emit code
       return $ freeIn code <> alive_after_stms
 
-    patternAllocs = S.fromList . mapMaybe isMemPatElem . patternElements
+    patternAllocs = S.fromList . mapMaybe isMemPatElem . patElements
     isMemPatElem pe = case patElemType pe of
       Mem space -> Just (patElemName pe, space)
       _ -> Nothing
 
-compileExp :: Pattern rep -> Exp rep -> ImpM rep r op ()
+compileExp :: Pat rep -> Exp rep -> ImpM rep r op ()
 compileExp pat e = do
   ec <- asks envExpCompiler
   ec pat e
 
 defCompileExp ::
   (Mem rep) =>
-  Pattern rep ->
+  Pat rep ->
   Exp rep ->
   ImpM rep r op ()
 defCompileExp pat (If cond tbranch fbranch _) =
   sIf (toBoolExp cond) (compileBody pat tbranch) (compileBody pat fbranch)
 defCompileExp pat (Apply fname args _ _) = do
-  dest <- destinationFromPattern pat
+  dest <- destinationFromPat pat
   targets <- funcallTargets dest
   args' <- catMaybes <$> mapM compileArg args
   emit $ Imp.Call targets fname args'
@@ -799,7 +799,7 @@ defCompileExp pat (DoLoop merge form body) = do
     WhileLoop cond ->
       sWhile (TPrimExp $ Imp.var cond Bool) doBody
 
-  Destination _ pat_dests <- destinationFromPattern pat
+  Destination _ pat_dests <- destinationFromPat pat
   forM_ (zip pat_dests $ map (Var . paramName . fst) merge) $ \(d, r) ->
     copyDWIMDest d [] r []
   where
@@ -811,7 +811,7 @@ defCompileExp pat (WithAcc inputs lam) = do
       s {stateAccs = M.insert (paramName p) (arrs, op) $ stateAccs s}
   compileStms mempty (bodyStms $ lambdaBody lam) $ do
     let nonacc_res = drop num_accs (bodyResult (lambdaBody lam))
-        nonacc_pat_names = takeLast (length nonacc_res) (patternNames pat)
+        nonacc_pat_names = takeLast (length nonacc_res) (patNames pat)
     forM_ (zip nonacc_pat_names nonacc_res) $ \(v, SubExpRes _ se) ->
       copyDWIM v [] se []
   where
@@ -822,24 +822,24 @@ defCompileExp pat (Op op) = do
 
 defCompileBasicOp ::
   Mem rep =>
-  Pattern rep ->
+  Pat rep ->
   BasicOp ->
   ImpM rep r op ()
-defCompileBasicOp (Pattern [pe]) (SubExp se) =
+defCompileBasicOp (Pat [pe]) (SubExp se) =
   copyDWIM (patElemName pe) [] se []
-defCompileBasicOp (Pattern [pe]) (Opaque se) =
+defCompileBasicOp (Pat [pe]) (Opaque se) =
   copyDWIM (patElemName pe) [] se []
-defCompileBasicOp (Pattern [pe]) (UnOp op e) = do
+defCompileBasicOp (Pat [pe]) (UnOp op e) = do
   e' <- toExp e
   patElemName pe <~~ Imp.UnOpExp op e'
-defCompileBasicOp (Pattern [pe]) (ConvOp conv e) = do
+defCompileBasicOp (Pat [pe]) (ConvOp conv e) = do
   e' <- toExp e
   patElemName pe <~~ Imp.ConvOpExp conv e'
-defCompileBasicOp (Pattern [pe]) (BinOp bop x y) = do
+defCompileBasicOp (Pat [pe]) (BinOp bop x y) = do
   x' <- toExp x
   y' <- toExp y
   patElemName pe <~~ Imp.BinOpExp bop x' y'
-defCompileBasicOp (Pattern [pe]) (CmpOp bop x y) = do
+defCompileBasicOp (Pat [pe]) (CmpOp bop x y) = do
   x' <- toExp x
   y' <- toExp y
   patElemName pe <~~ Imp.CmpOpExp bop x' y'
@@ -851,12 +851,12 @@ defCompileBasicOp _ (Assert e msg loc) = do
   attrs <- askAttrs
   when (AttrComp "warn" ["safety_checks"] `inAttrs` attrs) $
     uncurry warn loc "Safety check required at run-time."
-defCompileBasicOp (Pattern [pe]) (Index src slice)
+defCompileBasicOp (Pat [pe]) (Index src slice)
   | Just idxs <- sliceIndices slice =
     copyDWIM (patElemName pe) [] (Var src) $ map (DimFix . toInt64Exp) idxs
 defCompileBasicOp _ Index {} =
   return ()
-defCompileBasicOp (Pattern [pe]) (Update safety _ slice se) =
+defCompileBasicOp (Pat [pe]) (Update safety _ slice se) =
   case safety of
     Unsafe -> write
     Safe -> sWhen (inBounds slice' dims) write
@@ -864,14 +864,14 @@ defCompileBasicOp (Pattern [pe]) (Update safety _ slice se) =
     slice' = map (fmap toInt64Exp) slice
     dims = map toInt64Exp $ arrayDims $ patElemType pe
     write = sUpdate (patElemName pe) slice' se
-defCompileBasicOp (Pattern [pe]) (Replicate (Shape ds) se) = do
+defCompileBasicOp (Pat [pe]) (Replicate (Shape ds) se) = do
   ds' <- mapM toExp ds
   is <- replicateM (length ds) (newVName "i")
   copy_elem <- collect $ copyDWIM (patElemName pe) (map (DimFix . Imp.vi64) is) se []
   emit $ foldl (.) id (zipWith Imp.For is ds') copy_elem
 defCompileBasicOp _ Scratch {} =
   return ()
-defCompileBasicOp (Pattern [pe]) (Iota n e s it) = do
+defCompileBasicOp (Pat [pe]) (Iota n e s it) = do
   e' <- toExp e
   s' <- toExp s
   sFor "i" (toInt64Exp n) $ \i -> do
@@ -882,11 +882,11 @@ defCompileBasicOp (Pattern [pe]) (Iota n e s it) = do
           BinOpExp (Add it OverflowUndef) e' $
             BinOpExp (Mul it OverflowUndef) i' s'
     copyDWIM (patElemName pe) [DimFix i] (Var (tvVar x)) []
-defCompileBasicOp (Pattern [pe]) (Copy src) =
+defCompileBasicOp (Pat [pe]) (Copy src) =
   copyDWIM (patElemName pe) [] (Var src) []
-defCompileBasicOp (Pattern [pe]) (Manifest _ src) =
+defCompileBasicOp (Pat [pe]) (Manifest _ src) =
   copyDWIM (patElemName pe) [] (Var src) []
-defCompileBasicOp (Pattern [pe]) (Concat i x ys _) = do
+defCompileBasicOp (Pat [pe]) (Concat i x ys _) = do
   offs_glb <- dPrimV "tmp_offs" 0
 
   forM_ (x : ys) $ \y -> do
@@ -900,7 +900,7 @@ defCompileBasicOp (Pattern [pe]) (Concat i x ys _) = do
         destslice = skip_slices ++ [DimSlice (tvExp offs_glb) rows 1]
     copyDWIM (patElemName pe) destslice (Var y) []
     offs_glb <-- tvExp offs_glb + rows
-defCompileBasicOp (Pattern [pe]) (ArrayLit es _)
+defCompileBasicOp (Pat [pe]) (ArrayLit es _)
   | Just vs@(v : _) <- mapM isLiteral es = do
     dest_mem <- entryArrayLocation <$> lookupArray (patElemName pe)
     dest_space <- entryMemSpace <$> lookupMemory (memLocationName dest_mem)
@@ -1300,10 +1300,10 @@ lookupAcc name is = do
           error $ "ImpGen.lookupAcc: unlisted accumulator: " ++ pretty name
     _ -> error $ "ImpGen.lookupAcc: not an accumulator: " ++ pretty name
 
-destinationFromPattern :: Mem rep => Pattern rep -> ImpM rep r op Destination
-destinationFromPattern pat =
-  fmap (Destination (baseTag <$> maybeHead (patternNames pat))) . mapM inspect $
-    patternElements pat
+destinationFromPat :: Mem rep => Pat rep -> ImpM rep r op Destination
+destinationFromPat pat =
+  fmap (Destination (baseTag <$> maybeHead (patNames pat))) . mapM inspect $
+    patElements pat
   where
     inspect patElem = do
       let name = patElemName patElem
@@ -1666,11 +1666,11 @@ copyDWIMFix dest dest_is src src_is =
 -- 'MemoryDestination',
 compileAlloc ::
   Mem rep =>
-  Pattern rep ->
+  Pat rep ->
   SubExp ->
   Space ->
   ImpM rep r op ()
-compileAlloc (Pattern [mem]) e space = do
+compileAlloc (Pat [mem]) e space = do
   let e' = Imp.bytes $ toInt64Exp e
   allocator <- asks $ M.lookup space . envAllocCompilers
   case allocator of

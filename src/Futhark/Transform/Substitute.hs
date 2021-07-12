@@ -99,9 +99,9 @@ instance Substitute SubExpRes where
   substituteNames substs (SubExpRes cs se) =
     SubExpRes (substituteNames substs cs) (substituteNames substs se)
 
-instance Substitute dec => Substitute (PatternT dec) where
-  substituteNames substs (Pattern xs) =
-    Pattern (substituteNames substs xs)
+instance Substitute dec => Substitute (PatT dec) where
+  substituteNames substs (Pat xs) =
+    Pat (substituteNames substs xs)
 
 instance Substitute Certs where
   substituteNames substs (Certs cs) =

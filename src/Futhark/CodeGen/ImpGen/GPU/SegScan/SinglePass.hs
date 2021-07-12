@@ -103,14 +103,14 @@ createLocalArrays (Count groupSize) m types = do
 -- | Compile 'SegScan' instance to host-level code with calls to a
 -- single-pass kernel.
 compileSegScan ::
-  Pattern GPUMem ->
+  Pat GPUMem ->
   SegLevel ->
   SegSpace ->
   SegBinOp GPUMem ->
   KernelBody GPUMem ->
   CallKernelGen ()
 compileSegScan pat lvl space scanOp kbody = do
-  let Pattern all_pes = pat
+  let Pat all_pes = pat
       group_size = toInt64Exp <$> segGroupSize lvl
       n = product $ map toInt64Exp $ segSpaceDims space
       num_groups = Count (n `divUp` (unCount group_size * m))

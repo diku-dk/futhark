@@ -35,14 +35,14 @@ redomapToMapAndReduce ::
     ExpDec rep ~ (),
     Op rep ~ SOAC rep
   ) =>
-  Pattern rep ->
+  Pat rep ->
   ( SubExp,
     [Reduce rep],
     LambdaT rep,
     [VName]
   ) ->
   m (Stm rep, Stm rep)
-redomapToMapAndReduce (Pattern pes) (w, reds, map_lam, arrs) = do
+redomapToMapAndReduce (Pat pes) (w, reds, map_lam, arrs) = do
   (map_pat, red_pat, red_arrs) <-
     splitScanOrRedomap pes w map_lam $ map redNeutral reds
   let map_stm = mkLet map_pat $ Op $ Screma w arrs (mapSOAC map_lam)
@@ -57,7 +57,7 @@ splitScanOrRedomap ::
   SubExp ->
   LambdaT rep ->
   [[SubExp]] ->
-  m ([Ident], PatternT dec, [VName])
+  m ([Ident], PatT dec, [VName])
 splitScanOrRedomap pes w map_lam nes = do
   let (acc_pes, arr_pes) =
         splitAt (length $ concat nes) pes
@@ -66,7 +66,7 @@ splitScanOrRedomap pes w map_lam nes = do
   map_accpat <- zipWithM accMapPatElem acc_pes acc_ts
   map_arrpat <- mapM arrMapPatElem arr_pes
   let map_pat = map_accpat ++ map_arrpat
-  return (map_pat, Pattern acc_pes, map identName map_accpat)
+  return (map_pat, Pat acc_pes, map identName map_accpat)
   where
     accMapPatElem pe acc_t =
       newIdent (baseString (patElemName pe) ++ "_map_acc") $ acc_t `arrayOfRow` w
@@ -81,7 +81,7 @@ dissectScrema ::
     Op (Rep m) ~ SOAC (Rep m),
     Buildable (Rep m)
   ) =>
-  Pattern (Rep m) ->
+  Pat (Rep m) ->
   SubExp ->
   ScremaForm (Rep m) ->
   [VName] ->
@@ -90,7 +90,7 @@ dissectScrema pat w (ScremaForm scans reds map_lam) arrs = do
   let num_reds = redResults reds
       num_scans = scanResults scans
       (scan_res, red_res, map_res) =
-        splitAt3 num_scans num_reds $ patternNames pat
+        splitAt3 num_scans num_reds $ patNames pat
 
   to_red <- replicateM num_reds $ newVName "to_red"
 
@@ -105,7 +105,7 @@ dissectScrema pat w (ScremaForm scans reds map_lam) arrs = do
 -- to the entire input.
 sequentialStreamWholeArray ::
   (MonadBuilder m, Buildable (Rep m)) =>
-  Pattern (Rep m) ->
+  Pat (Rep m) ->
   SubExp ->
   [SubExp] ->
   LambdaT (Rep m) ->
@@ -137,7 +137,7 @@ sequentialStreamWholeArray pat w nes lam arrs = do
   -- The number of results in the body matches exactly the size (and
   -- order) of 'pat', so we bind them up here, again with a reshape to
   -- make the types work out.
-  forM_ (zip (patternElements pat) $ bodyResult $ lambdaBody lam) $ \(pe, SubExpRes cs se) ->
+  forM_ (zip (patElements pat) $ bodyResult $ lambdaBody lam) $ \(pe, SubExpRes cs se) ->
     certifying cs $ case (arrayDims $ patElemType pe, se) of
       (dims, Var v)
         | not $ null dims ->

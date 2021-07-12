@@ -353,8 +353,8 @@ instance FreeIn d => FreeIn (DimIndex d) where
 instance FreeIn SubExpRes where
   freeIn' (SubExpRes cs se) = freeIn' cs <> freeIn' se
 
-instance FreeIn dec => FreeIn (PatternT dec) where
-  freeIn' (Pattern xs) =
+instance FreeIn dec => FreeIn (PatT dec) where
+  freeIn' (Pat xs) =
     fvBind bound_here $ freeIn' xs
     where
       bound_here = namesFromList $ map patElemName xs
@@ -400,7 +400,7 @@ boundInBody = boundByStms . bodyStms
 
 -- | The names bound by a binding.
 boundByStm :: Stm rep -> Names
-boundByStm = namesFromList . patternNames . stmPattern
+boundByStm = namesFromList . patNames . stmPat
 
 -- | The names bound by the bindings.
 boundByStms :: Stms rep -> Names

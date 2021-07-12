@@ -52,11 +52,11 @@ analyseStm ::
   m (InUse, LastUsed, Graph VName)
 analyseStm lumap inuse0 stm =
   inScopeOf stm $ do
-    let pat_name = patElemName $ head $ patternElements $ stmPattern stm
+    let pat_name = patElemName $ head $ patElements $ stmPat stm
 
     new_mems <-
-      stmPattern stm
-        & patternElements
+      stmPat stm
+        & patElements
         & mapM (memInfo . patElemName)
         <&> catMaybes
         <&> namesFromList
@@ -235,7 +235,7 @@ memSizes stms =
   where
     memSizesStm :: LocalScope GPUMem m => Stm GPUMem -> m (Map VName Int)
     memSizesStm (Let pat _ e) = do
-      arraySizes <- fmap mconcat <$> mapM memElemSize $ patternNames pat
+      arraySizes <- fmap mconcat <$> mapM memElemSize $ patNames pat
       arraySizes' <- memSizesExp e
       return $ arraySizes <> arraySizes'
     memSizesExp :: LocalScope GPUMem m => Exp GPUMem -> m (Map VName Int)
@@ -259,7 +259,7 @@ memSpaces stms =
   return $ foldMap getSpacesStm stms
   where
     getSpacesStm :: Stm GPUMem -> Map VName Space
-    getSpacesStm (Let (Pattern [PatElem name _]) _ (Op (Alloc _ sp))) =
+    getSpacesStm (Let (Pat [PatElem name _]) _ (Op (Alloc _ sp))) =
       M.singleton name sp
     getSpacesStm (Let _ _ (Op (Alloc _ _))) = error "impossible"
     getSpacesStm (Let _ _ (Op (Inner (SegOp segop)))) =

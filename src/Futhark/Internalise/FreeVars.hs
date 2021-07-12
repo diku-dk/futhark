@@ -8,7 +8,7 @@ module Futhark.Internalise.FreeVars
     size,
     sizes,
     NameSet (..),
-    patternVars,
+    patVars,
   )
 where
 
@@ -74,11 +74,11 @@ freeVars expr = case expr of
   AppExp (LetPat let_sizes pat e1 e2 _) _ ->
     freeVars e1
       <> ( (sizes (patternDimNames pat) <> freeVars e2)
-             `withoutM` (patternVars pat <> foldMap (size . sizeName) let_sizes)
+             `withoutM` (patVars pat <> foldMap (size . sizeName) let_sizes)
          )
   AppExp (LetFun vn (tparams, pats, _, _, e1) e2 _) _ ->
     ( (freeVars e1 <> sizes (foldMap patternDimNames pats))
-        `without` ( S.map identName (foldMap patternIdents pats)
+        `without` ( S.map identName (foldMap patIdents pats)
                       <> S.fromList (map typeParamName tparams)
                   )
     )
@@ -88,7 +88,7 @@ freeVars expr = case expr of
   Negate e _ -> freeVars e
   Lambda pats e0 _ (Info (_, t)) _ ->
     (sizes (foldMap patternDimNames pats) <> freeVars e0 <> sizes (typeDimNames t))
-      `withoutM` foldMap patternVars pats
+      `withoutM` foldMap patVars pats
   OpSection {} -> mempty
   OpSectionLeft _ _ e _ _ _ -> freeVars e
   OpSectionRight _ _ e _ _ _ -> freeVars e
@@ -98,11 +98,11 @@ freeVars expr = case expr of
     let (e2fv, e2ident) = formVars form
      in freeVars e1
           <> ( (e2fv <> freeVars e3)
-                 `withoutM` (sizes (S.fromList sparams) <> patternVars pat <> e2ident)
+                 `withoutM` (sizes (S.fromList sparams) <> patVars pat <> e2ident)
              )
     where
       formVars (For v e2) = (freeVars e2, ident v)
-      formVars (ForIn p e2) = (freeVars e2, patternVars p)
+      formVars (ForIn p e2) = (freeVars e2, patVars p)
       formVars (While e2) = (freeVars e2, mempty)
   AppExp (BinOp (qn, _) (Info qn_t) (e1, _) (e2, _) _) _ ->
     NameSet (M.singleton (qualLeaf qn) $ toStruct qn_t)
@@ -122,7 +122,7 @@ freeVars expr = case expr of
     where
       caseFV (CasePat p eCase _) =
         (sizes (patternDimNames p) <> freeVars eCase)
-          `withoutM` patternVars p
+          `withoutM` patVars p
 
 freeDimIndex :: DimIndexBase Info VName -> NameSet
 freeDimIndex (DimFix e) = freeVars e
@@ -130,5 +130,5 @@ freeDimIndex (DimSlice me1 me2 me3) =
   foldMap (foldMap freeVars) [me1, me2, me3]
 
 -- | Extract all the variable names bound in a pattern.
-patternVars :: Pattern -> NameSet
-patternVars = mconcat . map ident . S.toList . patternIdents
+patVars :: Pat -> NameSet
+patVars = mconcat . map ident . S.toList . patIdents

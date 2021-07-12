@@ -509,30 +509,30 @@ apply2 loc env f x y = stacking loc env $ do
   f' <- apply noLoc mempty f x
   apply noLoc mempty f' y
 
-matchPattern :: Env -> Pattern -> Value -> EvalM Env
-matchPattern env p v = do
+matchPat :: Env -> Pat -> Value -> EvalM Env
+matchPat env p v = do
   m <- runMaybeT $ patternMatch env p v
   case m of
-    Nothing -> error $ "matchPattern: missing case for " ++ pretty p ++ " and " ++ pretty v
+    Nothing -> error $ "matchPat: missing case for " ++ pretty p ++ " and " ++ pretty v
     Just env' -> return env'
 
-patternMatch :: Env -> Pattern -> Value -> MaybeT EvalM Env
+patternMatch :: Env -> Pat -> Value -> MaybeT EvalM Env
 patternMatch env (Id v (Info t) _) val =
   lift $
     pure $
       valEnv (M.singleton v (Just $ T.BoundV [] $ toStruct t, val)) <> env
 patternMatch env Wildcard {} _ =
   lift $ pure env
-patternMatch env (TuplePattern ps _) (ValueRecord vs) =
+patternMatch env (TuplePat ps _) (ValueRecord vs) =
   foldM (\env' (p, v) -> patternMatch env' p v) env $
     zip ps (map snd $ sortFields vs)
-patternMatch env (RecordPattern ps _) (ValueRecord vs) =
+patternMatch env (RecordPat ps _) (ValueRecord vs) =
   foldM (\env' (p, v) -> patternMatch env' p v) env $
     M.intersectionWith (,) (M.fromList ps) vs
-patternMatch env (PatternParens p _) v = patternMatch env p v
-patternMatch env (PatternAscription p _ _) v =
+patternMatch env (PatParens p _) v = patternMatch env p v
+patternMatch env (PatAscription p _ _) v =
   patternMatch env p v
-patternMatch env (PatternLit l t _) v = do
+patternMatch env (PatLit l t _) v = do
   l' <- case l of
     PatLitInt x -> lift $ eval env $ IntLit x t mempty
     PatLitFloat x -> lift $ eval env $ FloatLit x t mempty
@@ -540,7 +540,7 @@ patternMatch env (PatternLit l t _) v = do
   if v == l'
     then pure env
     else mzero
-patternMatch env (PatternConstr n _ ps _) (ValueSum _ n' vs)
+patternMatch env (PatConstr n _ ps _) (ValueSum _ n' vs)
   | n == n' =
     foldM (\env' (p, v) -> patternMatch env' p v) env $ zip ps vs
 patternMatch _ _ _ = mzero
@@ -723,7 +723,7 @@ typeValueShape env t = do
     dim (ConstDim x) = Just $ fromIntegral x
     dim _ = Nothing
 
-evalFunction :: Env -> [VName] -> [Pattern] -> Exp -> StructType -> EvalM Value
+evalFunction :: Env -> [VName] -> [Pat] -> Exp -> StructType -> EvalM Value
 -- We treat zero-parameter lambdas as simply an expression to
 -- evaluate immediately.  Note that this is *not* the same as a lambda
 -- that takes an empty tuple '()' as argument!  Zero-parameter lambdas
@@ -736,7 +736,7 @@ evalFunction env _ [] body rettype =
     etaExpand vs env' (Scalar (Arrow _ _ pt rt)) =
       return $
         ValueFun $ \v -> do
-          env'' <- matchPattern env' (Wildcard (Info $ fromStruct pt) noLoc) v
+          env'' <- matchPat env' (Wildcard (Info $ fromStruct pt) noLoc) v
           etaExpand (v : vs) env'' rt
     etaExpand vs env' _ = do
       f <- eval env' body
@@ -744,7 +744,7 @@ evalFunction env _ [] body rettype =
 evalFunction env missing_sizes (p : ps) body rettype =
   return $
     ValueFun $ \v -> do
-      env' <- matchPattern env p v
+      env' <- matchPat env p v
       -- Fix up the last sizes, if any.
       let p_t = evalType env $ patternStructType p
           env''
@@ -756,7 +756,7 @@ evalFunction env missing_sizes (p : ps) body rettype =
 evalFunctionBinding ::
   Env ->
   [TypeParam] ->
-  [Pattern] ->
+  [Pat] ->
   StructType ->
   [VName] ->
   Exp ->
@@ -864,7 +864,7 @@ evalAppExp env (Coerce e td loc) = do
           <> "`)"
 evalAppExp env (LetPat sizes p e body _) = do
   v <- eval env e
-  env' <- matchPattern env p v
+  env' <- matchPat env p v
   let p_t = evalType env $ patternStructType p
       v_s = valueShape v
       env'' = env' <> i64Env (resolveExistentials (map sizeName sizes) p_t v_s)
@@ -938,7 +938,7 @@ evalAppExp env (DoLoop sparams pat init_e form body _) = do
               sparams
               (patternStructType pat)
               (valueShape v)
-       in matchPattern (i64Env sparams' <> env) pat v
+       in matchPat (i64Env sparams' <> env) pat v
 
     inc = (`P.doAdd` Int64Value 1)
     zero = (`P.doMul` Int64Value 0)
@@ -969,14 +969,14 @@ evalAppExp env (DoLoop sparams pat init_e form body _) = do
 
     forInLoop in_pat v in_v = do
       env' <- withLoopParams v
-      env'' <- matchPattern env' in_pat in_v
+      env'' <- matchPat env' in_pat in_v
       eval env'' body
 evalAppExp env (Match e cs _) = do
   v <- eval env e
   match v (NE.toList cs)
   where
     match _ [] =
-      error "Pattern match failure."
+      error "Pat match failure."
     match v (c : cs') = do
       c' <- evalCase v env c
       case c' of

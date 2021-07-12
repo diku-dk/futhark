@@ -25,7 +25,7 @@ module Futhark.IR.Prop.Scope
     inScopeOf,
     scopeOfLParams,
     scopeOfFParams,
-    scopeOfPattern,
+    scopeOfPat,
     scopeOfPatElem,
     SameScope,
     castScope,
@@ -165,7 +165,7 @@ instance Scoped rep (Stms rep) where
   scopeOf = foldMap scopeOf
 
 instance Scoped rep (Stm rep) where
-  scopeOf = scopeOfPattern . stmPattern
+  scopeOf = scopeOfPat . stmPat
 
 instance Scoped rep (FunDef rep) where
   scopeOf = scopeOfFParams . funDefParams
@@ -179,9 +179,9 @@ instance Scoped rep (LoopForm rep) where
     M.insert i (IndexName it) $ scopeOfLParams (map fst xs)
 
 -- | The scope of a pattern.
-scopeOfPattern :: LetDec rep ~ dec => PatternT dec -> Scope rep
-scopeOfPattern =
-  mconcat . map scopeOfPatElem . patternElements
+scopeOfPat :: LetDec rep ~ dec => PatT dec -> Scope rep
+scopeOfPat =
+  mconcat . map scopeOfPatElem . patElements
 
 -- | The scope of a pattern element.
 scopeOfPatElem :: LetDec rep ~ dec => PatElemT dec -> Scope rep

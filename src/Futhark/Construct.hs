@@ -609,7 +609,7 @@ simpleMkLetNames ::
 simpleMkLetNames names e = do
   et <- expExtType e
   let ts = instantiateShapes' names et
-  return $ Let (Pattern $ zipWith PatElem names ts) (defAux ()) e
+  return $ Let (Pat $ zipWith PatElem names ts) (defAux ()) e
 
 -- | Instances of this class can be converted to Futhark expressions
 -- within a 'MonadBuilder'.

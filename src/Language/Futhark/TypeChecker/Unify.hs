@@ -27,7 +27,7 @@ module Language.Futhark.TypeChecker.Unify
     mustHaveField,
     mustBeOneOf,
     equalityType,
-    normPatternType,
+    normPatType,
     normTypeFully,
     instantiateEmptyArrayDims,
     unify,
@@ -312,14 +312,14 @@ normType t@(Scalar (TypeVar _ _ (TypeName [] v) [])) = do
 normType t = return t
 
 -- | Replace any top-level type variable with its substitution.
-normPatternType :: MonadUnify m => PatternType -> m PatternType
-normPatternType t@(Scalar (TypeVar als u (TypeName [] v) [])) = do
+normPatType :: MonadUnify m => PatType -> m PatType
+normPatType t@(Scalar (TypeVar als u (TypeName [] v) [])) = do
   constraints <- getConstraints
   case snd <$> M.lookup v constraints of
     Just (Constraint t' _) ->
-      normPatternType $ t' `setUniqueness` u `setAliases` als
+      normPatType $ t' `setUniqueness` u `setAliases` als
     _ -> return t
-normPatternType t = return t
+normPatType t = return t
 
 rigidConstraint :: Constraint -> Bool
 rigidConstraint ParamType {} = True
@@ -1017,8 +1017,8 @@ mustHaveFieldWith ::
   Usage ->
   BreadCrumbs ->
   Name ->
-  PatternType ->
-  m PatternType
+  PatType ->
+  m PatType
 mustHaveFieldWith onDims usage bcs l t = do
   constraints <- getConstraints
   l_type <- newTypeVar (srclocOf usage) "t"
@@ -1055,8 +1055,8 @@ mustHaveField ::
   MonadUnify m =>
   Usage ->
   Name ->
-  PatternType ->
-  m PatternType
+  PatType ->
+  m PatType
 mustHaveField usage = mustHaveFieldWith (unifyDims usage) usage noBreadCrumbs
 
 -- | Replace dimension mismatches with AnyDim.
@@ -1102,9 +1102,9 @@ newDimOnMismatch loc t1 t2 = do
 unifyMostCommon ::
   MonadUnify m =>
   Usage ->
-  PatternType ->
-  PatternType ->
-  m (PatternType, [VName])
+  PatType ->
+  PatType ->
+  m (PatType, [VName])
 unifyMostCommon usage t1 t2 = do
   -- We are ignoring the dimensions here, because any mismatches
   -- should be turned into fresh size variables.

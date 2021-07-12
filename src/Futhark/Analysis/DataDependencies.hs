@@ -42,14 +42,14 @@ dataDependencies' startdeps = foldl grow startdeps . bodyStms
             M.fromList $
               map comb $
                 zip3
-                  (patternElements pat)
+                  (patElements pat)
                   (bodyResult tb)
                   (bodyResult fb)
        in M.unions [branchdeps, deps, tdeps, fdeps]
     grow deps (Let pat _ e) =
       let free = freeIn pat <> freeIn e
           freeDeps = mconcat $ map (depsOfVar deps) $ namesToList free
-       in M.fromList [(name, freeDeps) | name <- patternNames pat] `M.union` deps
+       in M.fromList [(name, freeDeps) | name <- patNames pat] `M.union` deps
 
 depsOf :: Dependencies -> SubExp -> Names
 depsOf _ (Constant _) = mempty

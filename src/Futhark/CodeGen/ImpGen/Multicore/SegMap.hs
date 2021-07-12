@@ -35,7 +35,7 @@ writeResult _ _ res =
 
 compileSegMapBody ::
   TV Int64 ->
-  Pattern MCMem ->
+  Pat MCMem ->
   SegSpace ->
   KernelBody MCMem ->
   MulticoreGen Imp.Code
@@ -47,10 +47,10 @@ compileSegMapBody flat_idx pat space (KernelBody _ kstms kres) = do
     emit $ Imp.DebugPrint "SegMap fbody" Nothing
     dIndexSpace (zip is ns') $ tvExp flat_idx
     compileStms (freeIn kres) kstms' $
-      zipWithM_ (writeResult is) (patternElements pat) kres
+      zipWithM_ (writeResult is) (patElements pat) kres
 
 compileSegMap ::
-  Pattern MCMem ->
+  Pat MCMem ->
   SegSpace ->
   KernelBody MCMem ->
   MulticoreGen Imp.Code

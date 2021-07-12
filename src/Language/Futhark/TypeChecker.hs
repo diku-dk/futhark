@@ -559,16 +559,16 @@ checkTypeBind (TypeBind name l tps td doc loc) =
           TypeBind name' l tps' td' doc loc
         )
 
-entryPoint :: [Pattern] -> Maybe (TypeExp VName) -> StructType -> EntryPoint
+entryPoint :: [Pat] -> Maybe (TypeExp VName) -> StructType -> EntryPoint
 entryPoint params orig_ret_te orig_ret =
   EntryPoint (map patternEntry params ++ more_params) rettype'
   where
     (more_params, rettype') =
       onRetType orig_ret_te orig_ret
 
-    patternEntry (PatternParens p _) =
+    patternEntry (PatParens p _) =
       patternEntry p
-    patternEntry (PatternAscription _ tdecl _) =
+    patternEntry (PatAscription _ tdecl _) =
       EntryType (unInfo (expandedType tdecl)) (Just (declaredType tdecl))
     patternEntry p =
       EntryType (patternStructType p) Nothing
@@ -659,11 +659,11 @@ nastyReturnType te t
     nastyType' (Just te') _ | niceTypeExp te' = False
     nastyType' _ t' = nastyType t'
 
-nastyParameter :: Pattern -> Bool
+nastyParameter :: Pat -> Bool
 nastyParameter p = nastyType (patternType p) && not (ascripted p)
   where
-    ascripted (PatternAscription _ (TypeDecl te _) _) = niceTypeExp te
-    ascripted (PatternParens p' _) = ascripted p'
+    ascripted (PatAscription _ (TypeDecl te _) _) = niceTypeExp te
+    ascripted (PatParens p' _) = ascripted p'
     ascripted _ = False
 
 niceTypeExp :: TypeExp VName -> Bool

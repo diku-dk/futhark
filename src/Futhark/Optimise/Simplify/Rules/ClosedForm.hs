@@ -41,7 +41,7 @@ Motivation:
 foldClosedForm ::
   (ASTRep rep, BuilderOps rep) =>
   VarLookup rep ->
-  Pattern rep ->
+  Pat rep ->
   Lambda rep ->
   [SubExp] ->
   [VName] ->
@@ -49,13 +49,13 @@ foldClosedForm ::
 foldClosedForm look pat lam accs arrs = do
   inputsize <- arraysSize 0 <$> mapM lookupType arrs
 
-  t <- case patternTypes pat of
+  t <- case patTypes pat of
     [Prim t] -> return t
     _ -> cannotSimplify
 
   closedBody <-
     checkResults
-      (patternNames pat)
+      (patNames pat)
       inputsize
       mempty
       Int64
@@ -79,7 +79,7 @@ foldClosedForm look pat lam accs arrs = do
 -- the do-loop can be expressed in a closed form.
 loopClosedForm ::
   (ASTRep rep, BuilderOps rep) =>
-  Pattern rep ->
+  Pat rep ->
   [(FParam rep, SubExp)] ->
   Names ->
   IntType ->
@@ -87,7 +87,7 @@ loopClosedForm ::
   Body rep ->
   RuleM rep ()
 loopClosedForm pat merge i it bound body = do
-  t <- case patternTypes pat of
+  t <- case patTypes pat of
     [Prim t] -> return t
     _ -> cannotSimplify
 
@@ -213,6 +213,6 @@ determineKnownBindings look lam accs arrs =
 makeBindMap :: Body rep -> M.Map VName (Exp rep)
 makeBindMap = M.fromList . mapMaybe isSingletonStm . stmsToList . bodyStms
   where
-    isSingletonStm (Let pat _ e) = case patternNames pat of
+    isSingletonStm (Let pat _ e) = case patNames pat of
       [v] -> Just (v, e)
       _ -> Nothing

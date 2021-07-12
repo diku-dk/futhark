@@ -101,7 +101,7 @@ optimiseBranch onOp vtable sinking (Body dec stms res) =
     sunkHere v stm =
       v `nameIn` free_in_stms
         && all (`ST.available` vtable) (namesToList (freeIn stm))
-    sunk = namesFromList $ foldMap (patternNames . stmPattern) sunk_stms
+    sunk = namesFromList $ foldMap (patNames . stmPat) sunk_stms
 
 optimiseStms ::
   Constraints rep =>
@@ -125,7 +125,7 @@ optimiseStms onOp init_vtable init_sinking all_stms free_in_res =
     optimiseStms' _ _ [] = ([], mempty)
     optimiseStms' vtable sinking (stm : stms)
       | BasicOp Index {} <- stmExp stm,
-        [pe] <- patternElements (stmPattern stm),
+        [pe] <- patElements (stmPat stm),
         primType $ patElemType pe,
         maybe True (== 1) $ M.lookup (patElemName pe) multiplicities =
         let (stms', sunk) =

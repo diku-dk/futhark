@@ -196,7 +196,7 @@ instance
   mkExpDecM _ _ = return ()
 
   mkLetNamesM names e = do
-    pat <- patternWithAllocations names e
+    pat <- patWithAllocations names e
     return $ Let pat (defAux ()) e
 
   mkBodyM bnds res = return $ Body () bnds res
@@ -304,17 +304,17 @@ allocsForStm ::
 allocsForStm idents e = do
   rts <- expReturns e
   hints <- expHints e
-  pes <- allocsForPattern idents rts hints
-  return $ Let (Pattern pes) (defAux ()) e
+  pes <- allocsForPat idents rts hints
+  return $ Let (Pat pes) (defAux ()) e
 
-patternWithAllocations ::
+patWithAllocations ::
   (Allocator rep m, ExpDec rep ~ ()) =>
   [VName] ->
   Exp rep ->
-  m (Pattern rep)
-patternWithAllocations names e = do
+  m (Pat rep)
+patWithAllocations names e = do
   ts' <- instantiateShapes' names <$> expExtType e
-  stmPattern <$> allocsForStm (zipWith Ident names ts') e
+  stmPat <$> allocsForStm (zipWith Ident names ts') e
 
 mkMissingIdents :: MonadFreshNames m => [Ident] -> [ExpReturns] -> m [Ident]
 mkMissingIdents idents rts =
@@ -324,9 +324,9 @@ mkMissingIdents idents rts =
     f (MemMem space) Nothing = newIdent "ext_mem" $ Mem space
     f _ Nothing = newIdent "ext" $ Prim int64
 
-allocsForPattern ::
+allocsForPat ::
   Allocator rep m => [Ident] -> [ExpReturns] -> [ExpHint] -> m [PatElem rep]
-allocsForPattern some_idents rts hints = do
+allocsForPat some_idents rts hints = do
   idents <- mkMissingIdents some_idents rts
 
   forM (zip3 idents rts hints) $ \(ident, rt, hint) -> do
@@ -350,7 +350,7 @@ allocsForPattern some_idents rts hints = do
           ArrayIn (getIdent idents i) ixfn
       MemAcc acc ispace ts u ->
         pure $ PatElem (identName ident) $ MemAcc acc ispace ts u
-      _ -> error "Impossible case reached in allocsForPattern!"
+      _ -> error "Impossible case reached in allocsForPat!"
   where
     knownShape = mapM known . shapeDims
     known (Free v) = Just v
@@ -597,7 +597,7 @@ allocLinearArray space s v = do
       mem <- allocForArray t space
       v' <- newIdent (s ++ "_linear") t
       let ixfun = directIxFun pt shape u mem t
-          pat = Pattern [PatElem (identName v') ixfun]
+          pat = Pat [PatElem (identName v') ixfun]
       addStm $ Let pat (defAux ()) $ BasicOp $ Copy v
       return (mem, Var $ identName v')
     _ ->
@@ -758,7 +758,7 @@ allocInStm ::
   (Allocable fromrep torep, Allocator torep (AllocM fromrep torep)) =>
   Stm fromrep ->
   AllocM fromrep torep ()
-allocInStm (Let (Pattern pes) _ e) = do
+allocInStm (Let (Pat pes) _ e) = do
   e' <- allocInExp e
   let idents = map patElemIdent pes
   stm <- allocsForStm idents e'
@@ -1070,7 +1070,7 @@ allocInLoopForm (ForLoop i it n loopvars) =
           return (p {paramDec = MemAcc acc ispace ts u}, a)
 
 class SizeSubst op where
-  opSizeSubst :: PatternT dec -> op -> ChunkMap
+  opSizeSubst :: PatT dec -> op -> ChunkMap
   opIsConst :: op -> Bool
   opIsConst = const False
 
@@ -1090,7 +1090,7 @@ sizeSubst _ = mempty
 
 stmConsts :: SizeSubst (Op rep) => Stm rep -> S.Set VName
 stmConsts (Let pat _ (Op op))
-  | opIsConst op = S.fromList $ patternNames pat
+  | opIsConst op = S.fromList $ patNames pat
 stmConsts _ = mempty
 
 mkLetNamesB' ::
@@ -1105,7 +1105,7 @@ mkLetNamesB' ::
   m (Stm (Rep m))
 mkLetNamesB' dec names e = do
   scope <- askScope
-  pat <- bindPatternWithAllocations scope names e
+  pat <- bindPatWithAllocations scope names e
   return $ Let pat (defAux dec) e
 
 mkLetNamesB'' ::
@@ -1121,9 +1121,9 @@ mkLetNamesB'' ::
   m (Stm (Engine.Wise rep))
 mkLetNamesB'' names e = do
   scope <- Engine.removeScopeWisdom <$> askScope
-  (pat, prestms) <- runPatAllocM (patternWithAllocations names $ Engine.removeExpWisdom e) scope
+  (pat, prestms) <- runPatAllocM (patWithAllocations names $ Engine.removeExpWisdom e) scope
   mapM_ bindAllocStm prestms
-  let pat' = Engine.addWisdomToPattern pat e
+  let pat' = Engine.addWisdomToPat pat e
       dec = Engine.mkWiseExpDec pat' () e
   return $ Let pat' (defAux dec) e
 
@@ -1167,7 +1167,7 @@ simplifiable innerUsage simplifyInnerOp =
       (k', hoisted) <- simplifyInnerOp k
       return (Inner k', hoisted)
 
-bindPatternWithAllocations ::
+bindPatWithAllocations ::
   ( MonadBuilder m,
     ExpDec rep ~ (),
     Op (Rep m) ~ MemOp inner,
@@ -1176,9 +1176,9 @@ bindPatternWithAllocations ::
   Scope rep ->
   [VName] ->
   Exp rep ->
-  m (Pattern rep)
-bindPatternWithAllocations types names e = do
-  (pat, prebnds) <- runPatAllocM (patternWithAllocations names e) types
+  m (Pat rep)
+bindPatWithAllocations types names e = do
+  (pat, prebnds) <- runPatAllocM (patWithAllocations names e) types
   mapM_ bindAllocStm prebnds
   return pat
 

@@ -42,7 +42,7 @@ instance RepTypes MC where
   type Op MC = MCOp MC (SOAC MC)
 
 instance ASTRep MC where
-  expTypesFromPattern = return . expExtTypesFromPattern
+  expTypesFromPat = return . expExtTypesFromPat
 
 instance TypeCheck.CheckableOp MC where
   checkOp = typeCheckMCOp typeCheckSOAC
@@ -51,7 +51,7 @@ instance TypeCheck.Checkable MC
 
 instance Buildable MC where
   mkBody = Body ()
-  mkExpPat idents _ = basicPattern idents
+  mkExpPat idents _ = basicPat idents
   mkExpDec _ _ = ()
   mkLetNames = simpleMkLetNames
 

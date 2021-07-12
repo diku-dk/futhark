@@ -30,7 +30,7 @@ import Futhark.Util (invertMap)
 type Allocs = Map VName (SubExp, Space)
 
 getAllocsStm :: Stm GPUMem -> Allocs
-getAllocsStm (Let (Pattern [PatElem name _]) _ (Op (Alloc se sp))) =
+getAllocsStm (Let (Pat [PatElem name _]) _ (Op (Alloc se sp))) =
   M.singleton name (se, sp)
 getAllocsStm (Let _ _ (Op (Alloc _ _))) = error "impossible"
 getAllocsStm (Let _ _ (If _ then_body else_body _)) =
@@ -51,7 +51,7 @@ getAllocsSegOp (SegHist _ _ _ _ body) =
   foldMap getAllocsStm (kernelBodyStms body)
 
 setAllocsStm :: Map VName SubExp -> Stm GPUMem -> Stm GPUMem
-setAllocsStm m stm@(Let (Pattern [PatElem name _]) _ (Op (Alloc _ _)))
+setAllocsStm m stm@(Let (Pat [PatElem name _]) _ (Op (Alloc _ _)))
   | Just s <- M.lookup name m =
     stm {stmExp = BasicOp $ SubExp s}
 setAllocsStm _ stm@(Let _ _ (Op (Alloc _ _))) = stm
@@ -111,7 +111,7 @@ definedInExp (DoLoop _ _ body) =
 definedInExp _ = mempty
 
 definedInStm :: Stm GPUMem -> Set VName
-definedInStm Let {stmPattern = Pattern merge, stmExp} =
+definedInStm Let {stmPat = Pat merge, stmExp} =
   let definedInside = merge & fmap patElemName & S.fromList
    in definedInExp stmExp <> definedInside
 

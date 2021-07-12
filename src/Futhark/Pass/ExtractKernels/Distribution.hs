@@ -65,7 +65,7 @@ import Futhark.Transform.Rename
 import Futhark.Util
 import Futhark.Util.Log
 
-type Target = (PatternT Type, Result)
+type Target = (PatT Type, Result)
 
 -- | First pair element is the very innermost ("current") target.  In
 -- the list, the outermost target comes first.  Invariant: Every
@@ -102,8 +102,8 @@ pushInnerTarget :: Target -> Targets -> Targets
 pushInnerTarget (pat, res) (Targets inner_target targets) =
   Targets (pat', res') (targets ++ [inner_target])
   where
-    (pes', res') = unzip $ filter (used . fst) $ zip (patternElements pat) res
-    pat' = Pattern pes'
+    (pes', res') = unzip $ filter (used . fst) $ zip (patElements pat) res
+    pat' = Pat pes'
     inner_used = freeIn $ snd inner_target
     used pe = patElemName pe `nameIn` inner_used
 
@@ -114,13 +114,13 @@ popInnerTarget (Targets t ts) =
     [] -> Nothing
 
 targetScope :: DistRep rep => Target -> Scope rep
-targetScope = scopeOfPattern . fst
+targetScope = scopeOfPat . fst
 
 targetsScope :: DistRep rep => Targets -> Scope rep
 targetsScope (Targets t ts) = mconcat $ map targetScope $ t : ts
 
 data LoopNesting = MapNesting
-  { loopNestingPattern :: PatternT Type,
+  { loopNestingPat :: PatT Type,
     loopNestingAux :: StmAux (),
     loopNestingWidth :: SubExp,
     loopNestingParamsAndArrs :: [(Param Type, VName)]
@@ -203,7 +203,7 @@ innermostKernelNesting (nest, nests) =
 -- list, also taking care to swap patterns if necessary.
 pushKernelNesting :: Target -> LoopNesting -> KernelNest -> KernelNest
 pushKernelNesting target newnest (nest, nests) =
-  ( fixNestingPatternOrder newnest target (loopNestingPattern nest),
+  ( fixNestingPatOrder newnest target (loopNestingPat nest),
     nest : nests
   )
 
@@ -212,20 +212,20 @@ pushKernelNesting target newnest (nest, nests) =
 -- (non-permuted compared to what is expected by the outer nests).
 pushInnerKernelNesting :: Target -> LoopNesting -> KernelNest -> KernelNest
 pushInnerKernelNesting target newnest (nest, nests) =
-  (nest, nests ++ [fixNestingPatternOrder newnest target (loopNestingPattern innermost)])
+  (nest, nests ++ [fixNestingPatOrder newnest target (loopNestingPat innermost)])
   where
     innermost = case reverse nests of
       [] -> nest
       n : _ -> n
 
-fixNestingPatternOrder :: LoopNesting -> Target -> PatternT Type -> LoopNesting
-fixNestingPatternOrder nest (_, res) inner_pat =
-  nest {loopNestingPattern = basicPattern pat'}
+fixNestingPatOrder :: LoopNesting -> Target -> PatT Type -> LoopNesting
+fixNestingPatOrder nest (_, res) inner_pat =
+  nest {loopNestingPat = basicPat pat'}
   where
-    pat = loopNestingPattern nest
+    pat = loopNestingPat nest
     pat' = map fst fixed_target
-    fixed_target = sortOn posInInnerPat $ zip (patternIdents pat) res
-    posInInnerPat (_, SubExpRes _ (Var v)) = fromMaybe 0 $ elemIndex v $ patternNames inner_pat
+    fixed_target = sortOn posInInnerPat $ zip (patIdents pat) res
+    posInInnerPat (_, SubExpRes _ (Var v)) = fromMaybe 0 $ elemIndex v $ patNames inner_pat
     posInInnerPat _ = 0
 
 newKernel :: LoopNesting -> KernelNest
@@ -259,8 +259,8 @@ constructKernel mk_lvl kernel_nest inner_body = runBuilderT' $ do
   (ispace, inps) <- flatKernel kernel_nest
   let aux = loopNestingAux first_nest
       ispace_scope = M.fromList $ zip (map fst ispace) $ repeat $ IndexName Int64
-      pat = loopNestingPattern first_nest
-      rts = map (stripArray (length ispace)) $ patternTypes pat
+      pat = loopNestingPat first_nest
+      rts = map (stripArray (length ispace)) $ patTypes pat
 
   inner_body' <- fmap (uncurry (flip (KernelBody ()))) $
     runBuilder $
@@ -329,8 +329,8 @@ data DistributionBody = DistributionBody
     distributionExpandTarget :: Target -> Target
   }
 
-distributionInnerPattern :: DistributionBody -> PatternT Type
-distributionInnerPattern = fst . innerTarget . distributionTarget
+distributionInnerPat :: DistributionBody -> PatT Type
+distributionInnerPat = fst . innerTarget . distributionTarget
 
 distributionBodyFromStms ::
   ASTRep rep =>
@@ -384,7 +384,7 @@ createKernelNest (inner_nest, nests) distrib_body = do
 
     distributeAtNesting ::
       Nesting ->
-      PatternT Type ->
+      PatT Type ->
       (LoopNesting -> KernelNest, Names) ->
       M.Map VName Ident ->
       [Ident] ->
@@ -433,7 +433,7 @@ createKernelNest (inner_nest, nests) distrib_body = do
                       )
 
         let free_arrs_pat =
-              basicPattern $ map snd $ filter fst $ zip bind_in_target free_arrs
+              basicPat $ map snd $ filter fst $ zip bind_in_target free_arrs
             free_params_pat =
               map snd $ filter fst $ zip bind_in_target free_params
 
@@ -468,7 +468,7 @@ createKernelNest (inner_nest, nests) distrib_body = do
     recurse [] =
       distributeAtNesting
         inner_nest
-        (distributionInnerPattern distrib_body)
+        (distributionInnerPat distrib_body)
         ( newKernel,
           distributionFreeInBody distrib_body `namesIntersection` bound_in_nest
         )
@@ -480,7 +480,7 @@ createKernelNest (inner_nest, nests) distrib_body = do
 
       let (pat', res', identity_map, expand_target) =
             removeIdentityMappingFromNesting
-              (namesFromList $ patternNames $ loopNestingPattern outer)
+              (namesFromList $ patNames $ loopNestingPat outer)
               pat
               res
 
@@ -491,7 +491,7 @@ createKernelNest (inner_nest, nests) distrib_body = do
           kernel_free
         )
         identity_map
-        (patternIdents $ fst $ outerTarget kernel_targets)
+        (patIdents $ fst $ outerTarget kernel_targets)
         ((`pushOuterTarget` kernel_targets) . expand_target)
 
 removeUnusedNestingParts :: Names -> LoopNesting -> LoopNesting
@@ -506,25 +506,25 @@ removeUnusedNestingParts used (MapNesting pat aux w params_and_arrs) =
 
 removeIdentityMappingGeneral ::
   Names ->
-  PatternT Type ->
+  PatT Type ->
   Result ->
-  ( PatternT Type,
+  ( PatT Type,
     Result,
     M.Map VName Ident,
     Target -> Target
   )
 removeIdentityMappingGeneral bound pat res =
   let (identities, not_identities) =
-        mapEither isIdentity $ zip (patternElements pat) res
+        mapEither isIdentity $ zip (patElements pat) res
       (not_identity_patElems, not_identity_res) = unzip not_identities
       (identity_patElems, identity_res) = unzip identities
       expandTarget (tpat, tres) =
-        ( Pattern $ patternElements tpat ++ identity_patElems,
+        ( Pat $ patElements tpat ++ identity_patElems,
           tres ++ map (uncurry SubExpRes . second Var) identity_res
         )
       identity_map =
         M.fromList $ zip (map snd identity_res) $ map patElemIdent identity_patElems
-   in ( Pattern not_identity_patElems,
+   in ( Pat not_identity_patElems,
         not_identity_res,
         identity_map,
         expandTarget
@@ -536,9 +536,9 @@ removeIdentityMappingGeneral bound pat res =
 
 removeIdentityMappingFromNesting ::
   Names ->
-  PatternT Type ->
+  PatT Type ->
   Result ->
-  ( PatternT Type,
+  ( PatT Type,
     Result,
     M.Map VName Ident,
     Target -> Target

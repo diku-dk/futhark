@@ -518,14 +518,14 @@ DimExp :: { DimExp Name }
           { let L loc (INTLIT n) = $1
             in DimExpConst (fromIntegral n) loc }
 
-FunParam :: { PatternBase NoInfo Name }
-FunParam : InnerPattern { $1 }
+FunParam :: { PatBase NoInfo Name }
+FunParam : InnerPat { $1 }
 
-FunParams1 :: { (PatternBase NoInfo Name, [PatternBase NoInfo Name]) }
+FunParams1 :: { (PatBase NoInfo Name, [PatBase NoInfo Name]) }
 FunParams1 : FunParam            { ($1, []) }
            | FunParam FunParams1 { ($1, fst $2 : snd $2) }
 
-FunParams :: { [PatternBase NoInfo Name] }
+FunParams :: { [PatBase NoInfo Name] }
 FunParams :                     { [] }
            | FunParam FunParams { $1 : $2 }
 
@@ -549,10 +549,10 @@ Exp2 :: { UncheckedExp }
      : if Exp then Exp else Exp %prec ifprec
                       { AppExp (If $2 $4 $6 (srcspan $1 $>)) NoInfo }
 
-     | loop Pattern LoopForm do Exp %prec ifprec
+     | loop Pat LoopForm do Exp %prec ifprec
          {% fmap (\t -> AppExp (DoLoop [] $2 t $3 $5 (srcspan $1 $>)) NoInfo) (patternExp $2) }
 
-     | loop Pattern '=' Exp LoopForm do Exp %prec ifprec
+     | loop Pat '=' Exp LoopForm do Exp %prec ifprec
          { AppExp (DoLoop [] $2 $4 $5 $7 (srcspan $1 $>)) NoInfo }
 
      | LetExp %prec letprec { $1 }
@@ -730,9 +730,9 @@ Fields1 :: { [FieldBase NoInfo Name] }
         | Field             { [$1] }
 
 LetExp :: { UncheckedExp }
-     : let SizeBinders1 Pattern '=' Exp LetBody
+     : let SizeBinders1 Pat '=' Exp LetBody
        { AppExp (LetPat $2 $3 $5 $6 (srcspan $1 $>)) NoInfo }
-     | let Pattern '=' Exp LetBody
+     | let Pat '=' Exp LetBody
        { AppExp (LetPat [] $2 $4 $5 (srcspan $1 $>)) NoInfo }
 
      | let id TypeParams FunParams1 maybeAscription(TypeExpDecl) '=' Exp LetBody
@@ -760,52 +760,52 @@ Cases :: { NE.NonEmpty (CaseBase NoInfo Name) }
        | Case Cases           { NE.cons $1 $2 }
 
 Case :: { CaseBase NoInfo Name }
-      : case CPattern '->' Exp
+      : case CPat '->' Exp
         { let loc = srcspan $1 $> in CasePat $2 $> loc }
 
-CPattern :: { PatternBase NoInfo Name }
-          : CInnerPattern ':' TypeExpDecl { PatternAscription $1 $3 (srcspan $1 $>) }
-          | CInnerPattern                 { $1 }
+CPat :: { PatBase NoInfo Name }
+          : CInnerPat ':' TypeExpDecl { PatAscription $1 $3 (srcspan $1 $>) }
+          | CInnerPat                 { $1 }
           | Constr ConstrFields           { let (n, loc) = $1;
                                                 loc' = srcspan loc $>
-                                            in PatternConstr n NoInfo $2 loc'}
+                                            in PatConstr n NoInfo $2 loc'}
 
-CPatterns1 :: { [PatternBase NoInfo Name] }
-           : CPattern               { [$1] }
-           | CPattern ',' CPatterns1 { $1 : $3 }
+CPats1 :: { [PatBase NoInfo Name] }
+           : CPat               { [$1] }
+           | CPat ',' CPats1 { $1 : $3 }
 
-CInnerPattern :: { PatternBase NoInfo Name }
+CInnerPat :: { PatBase NoInfo Name }
                : id                                 { let L loc (ID name) = $1 in Id name NoInfo loc }
                | '(' BindingBinOp ')'               { Id $2 NoInfo (srcspan $1 $>) }
                | '(' BindingUnOp ')'                { Id $2 NoInfo (srcspan $1 $>) }
                | '_'                                { Wildcard NoInfo $1 }
-               | '(' ')'                            { TuplePattern [] (srcspan $1 $>) }
-               | '(' CPattern ')'                   { PatternParens $2 (srcspan $1 $>) }
-               | '(' CPattern ',' CPatterns1 ')'    { TuplePattern ($2:$4) (srcspan $1 $>) }
-               | '{' CFieldPatterns '}'             { RecordPattern $2 (srcspan $1 $>) }
-               | CaseLiteral                        { PatternLit (fst $1) NoInfo (snd $1) }
+               | '(' ')'                            { TuplePat [] (srcspan $1 $>) }
+               | '(' CPat ')'                   { PatParens $2 (srcspan $1 $>) }
+               | '(' CPat ',' CPats1 ')'    { TuplePat ($2:$4) (srcspan $1 $>) }
+               | '{' CFieldPats '}'             { RecordPat $2 (srcspan $1 $>) }
+               | CaseLiteral                        { PatLit (fst $1) NoInfo (snd $1) }
                | Constr                             { let (n, loc) = $1
-                                                      in PatternConstr n NoInfo [] loc }
+                                                      in PatConstr n NoInfo [] loc }
 
-ConstrFields :: { [PatternBase NoInfo Name] }
-              : CInnerPattern                { [$1] }
-              | ConstrFields CInnerPattern   { $1 ++ [$2] }
+ConstrFields :: { [PatBase NoInfo Name] }
+              : CInnerPat                { [$1] }
+              | ConstrFields CInnerPat   { $1 ++ [$2] }
 
-CFieldPattern :: { (Name, PatternBase NoInfo Name) }
-               : FieldId '=' CPattern
+CFieldPat :: { (Name, PatBase NoInfo Name) }
+               : FieldId '=' CPat
                { (fst $1, $3) }
                | FieldId ':' TypeExpDecl
-               { (fst $1, PatternAscription (Id (fst $1) NoInfo (snd $1)) $3 (srcspan (snd $1) $>)) }
+               { (fst $1, PatAscription (Id (fst $1) NoInfo (snd $1)) $3 (srcspan (snd $1) $>)) }
                | FieldId
                { (fst $1, Id (fst $1) NoInfo (snd $1)) }
 
-CFieldPatterns :: { [(Name, PatternBase NoInfo Name)] }
-                : CFieldPatterns1 { $1 }
+CFieldPats :: { [(Name, PatBase NoInfo Name)] }
+                : CFieldPats1 { $1 }
                 |                { [] }
 
-CFieldPatterns1 :: { [(Name, PatternBase NoInfo Name)] }
-                 : CFieldPattern ',' CFieldPatterns1 { $1 : $3 }
-                 | CFieldPattern                    { [$1] }
+CFieldPats1 :: { [(Name, PatBase NoInfo Name)] }
+                 : CFieldPat ',' CFieldPats1 { $1 : $3 }
+                 | CFieldPat                    { [$1] }
 
 CaseLiteral :: { (PatLit, SrcLoc) }
              : PrimLit  { (PatLitPrim (fst $1), snd $1) }
@@ -817,7 +817,7 @@ CaseLiteral :: { (PatLit, SrcLoc) }
 LoopForm :: { LoopFormBase NoInfo Name }
 LoopForm : for VarId '<' Exp
            { For $2 $4 }
-         | for Pattern in Exp
+         | for Pat in Exp
            { ForIn $2 $4 }
          | while Exp
            { While $2 }
@@ -860,39 +860,39 @@ FieldId :: { (Name, SrcLoc) }
          : id     { let L loc (ID name) = $1 in (name, loc) }
          | intlit { let L loc (INTLIT n) = $1 in (nameFromString (show n), loc) }
 
-Pattern :: { PatternBase NoInfo Name }
-Pattern : InnerPattern ':' TypeExpDecl { PatternAscription $1 $3 (srcspan $1 $>) }
-        | InnerPattern                 { $1 }
+Pat :: { PatBase NoInfo Name }
+Pat : InnerPat ':' TypeExpDecl { PatAscription $1 $3 (srcspan $1 $>) }
+        | InnerPat                 { $1 }
 
-Patterns1 :: { [PatternBase NoInfo Name] }
-           : Pattern               { [$1] }
-           | Pattern ',' Patterns1 { $1 : $3 }
+Pats1 :: { [PatBase NoInfo Name] }
+           : Pat               { [$1] }
+           | Pat ',' Pats1 { $1 : $3 }
 
-InnerPattern :: { PatternBase NoInfo Name }
-InnerPattern : id                               { let L loc (ID name) = $1 in Id name NoInfo loc }
+InnerPat :: { PatBase NoInfo Name }
+InnerPat : id                               { let L loc (ID name) = $1 in Id name NoInfo loc }
              | '(' BindingBinOp ')'             { Id $2 NoInfo (srcspan $1 $>) }
              | '(' BindingUnOp ')'              { Id $2 NoInfo (srcspan $1 $>) }
              | '_'                              { Wildcard NoInfo $1 }
-             | '(' ')'                          { TuplePattern [] (srcspan $1 $>) }
-             | '(' Pattern ')'                  { PatternParens $2 (srcspan $1 $>) }
-             | '(' Pattern ',' Patterns1 ')'    { TuplePattern ($2:$4) (srcspan $1 $>) }
-             | '{' FieldPatterns '}'            { RecordPattern $2 (srcspan $1 $>) }
+             | '(' ')'                          { TuplePat [] (srcspan $1 $>) }
+             | '(' Pat ')'                  { PatParens $2 (srcspan $1 $>) }
+             | '(' Pat ',' Pats1 ')'    { TuplePat ($2:$4) (srcspan $1 $>) }
+             | '{' FieldPats '}'            { RecordPat $2 (srcspan $1 $>) }
 
-FieldPattern :: { (Name, PatternBase NoInfo Name) }
-              : FieldId '=' Pattern
+FieldPat :: { (Name, PatBase NoInfo Name) }
+              : FieldId '=' Pat
                 { (fst $1, $3) }
               | FieldId ':' TypeExpDecl
-                { (fst $1, PatternAscription (Id (fst $1) NoInfo (snd $1)) $3 (srcspan (snd $1) $>)) }
+                { (fst $1, PatAscription (Id (fst $1) NoInfo (snd $1)) $3 (srcspan (snd $1) $>)) }
               | FieldId
                 { (fst $1, Id (fst $1) NoInfo (snd $1)) }
 
-FieldPatterns :: { [(Name, PatternBase NoInfo Name)] }
-               : FieldPatterns1 { $1 }
+FieldPats :: { [(Name, PatBase NoInfo Name)] }
+               : FieldPats1 { $1 }
                |                { [] }
 
-FieldPatterns1 :: { [(Name, PatternBase NoInfo Name)] }
-               : FieldPattern ',' FieldPatterns1 { $1 : $3 }
-               | FieldPattern                    { [$1] }
+FieldPats1 :: { [(Name, PatBase NoInfo Name)] }
+               : FieldPat ',' FieldPats1 { $1 : $3 }
+               | FieldPat                    { [$1] }
 
 
 maybeAscription(p) : ':' p { Just $2 }
@@ -1107,13 +1107,13 @@ applyExp es =
      ap f x =
         return $ AppExp (Apply f x NoInfo (srcspan f x)) NoInfo
 
-patternExp :: UncheckedPattern -> ParserMonad UncheckedExp
+patternExp :: UncheckedPat -> ParserMonad UncheckedExp
 patternExp (Id v _ loc) = return $ Var (qualName v) NoInfo loc
-patternExp (TuplePattern pats loc) = TupLit <$> (mapM patternExp pats) <*> return loc
+patternExp (TuplePat pats loc) = TupLit <$> (mapM patternExp pats) <*> return loc
 patternExp (Wildcard _ loc) = parseErrorAt loc $ Just "cannot have wildcard here."
-patternExp (PatternAscription pat _ _) = patternExp pat
-patternExp (PatternParens pat _) = patternExp pat
-patternExp (RecordPattern fs loc) = RecordLit <$> mapM field fs <*> pure loc
+patternExp (PatAscription pat _ _) = patternExp pat
+patternExp (PatParens pat _) = patternExp pat
+patternExp (RecordPat fs loc) = RecordLit <$> mapM field fs <*> pure loc
   where field (name, pat) = RecordFieldExplicit name <$> patternExp pat <*> pure loc
 
 eof :: Pos -> L Token

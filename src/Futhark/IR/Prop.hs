@@ -33,7 +33,7 @@ module Futhark.IR.Prop
     defAux,
     stmCerts,
     certify,
-    expExtTypesFromPattern,
+    expExtTypesFromPat,
     attrsForAssert,
     lamIsBinOp,
     ASTConstraints,
@@ -160,7 +160,7 @@ commutativeLambda lam =
       okComponent c = isJust $ find (okBinOp c) $ bodyStms body
       okBinOp
         (xp, yp, SubExpRes _ (Var r))
-        (Let (Pattern [pe]) _ (BasicOp (BinOp op (Var x) (Var y)))) =
+        (Let (Pat [pe]) _ (BasicOp (BinOp op (Var x) (Var y)))) =
           patElemName pe == r
             && commutativeBinOp op
             && ( (x == paramName xp && y == paramName yp)
@@ -230,17 +230,17 @@ class
   where
   -- | Given a pattern, construct the type of a body that would match
   -- it.  An implementation for many representations would be
-  -- 'expExtTypesFromPattern'.
-  expTypesFromPattern ::
+  -- 'expExtTypesFromPat'.
+  expTypesFromPat ::
     (HasScope rep m, Monad m) =>
-    Pattern rep ->
+    Pat rep ->
     m [BranchType rep]
 
 -- | Construct the type of an expression that would match the pattern.
-expExtTypesFromPattern :: Typed dec => PatternT dec -> [ExtType]
-expExtTypesFromPattern pat =
-  existentialiseExtTypes (patternNames pat) $
-    staticShapes $ map patElemType $ patternElements pat
+expExtTypesFromPat :: Typed dec => PatT dec -> [ExtType]
+expExtTypesFromPat pat =
+  existentialiseExtTypes (patNames pat) $
+    staticShapes $ map patElemType $ patElements pat
 
 -- | Keep only those attributes that are relevant for 'Assert'
 -- expressions.
@@ -257,8 +257,8 @@ lamIsBinOp lam = mapM splitStm $ bodyResult $ lambdaBody lam
     n = length $ lambdaReturnType lam
     splitStm (SubExpRes cs (Var res)) = do
       guard $ cs == mempty
-      Let (Pattern [pe]) _ (BasicOp (BinOp op (Var x) (Var y))) <-
-        find (([res] ==) . patternNames . stmPattern) $
+      Let (Pat [pe]) _ (BasicOp (BinOp op (Var x) (Var y))) <-
+        find (([res] ==) . patNames . stmPat) $
           stmsToList $ bodyStms $ lambdaBody lam
       i <- Var res `elemIndex` map resSubExp (bodyResult (lambdaBody lam))
       xp <- maybeNth i $ lambdaParams lam

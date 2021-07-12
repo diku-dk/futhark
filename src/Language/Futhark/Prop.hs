@@ -31,8 +31,8 @@ module Language.Futhark.Prop
     funType,
 
     -- * Queries on patterns and params
-    patternIdents,
-    patternNames,
+    patIdents,
+    patNames,
     patternMap,
     patternType,
     patternStructType,
@@ -96,7 +96,7 @@ module Language.Futhark.Prop
     UncheckedModExp,
     UncheckedSigExp,
     UncheckedTypeParam,
-    UncheckedPattern,
+    UncheckedPat,
     UncheckedValBind,
     UncheckedDec,
     UncheckedSpec,
@@ -539,7 +539,7 @@ primByteSize Bool = 1
 -- | The type is leaving a scope, so clean up any aliases that
 -- reference the bound variables, and turn any dimensions that name
 -- them into AnyDim instead.
-unscopeType :: S.Set VName -> PatternType -> PatternType
+unscopeType :: S.Set VName -> PatType -> PatType
 unscopeType bound_here t = first onDim $ t `addAliases` S.map unbind
   where
     unbind (AliasBound v) | v `S.member` bound_here = AliasFree v
@@ -551,7 +551,7 @@ unscopeType bound_here t = first onDim $ t `addAliases` S.map unbind
 
 -- | The type of an Futhark term.  The aliasing will refer to itself, if
 -- the term is a non-tuple-typed variable.
-typeOf :: ExpBase Info VName -> PatternType
+typeOf :: ExpBase Info VName -> PatType
 typeOf (Literal val _) = Scalar $ Prim $ primValueType val
 typeOf (IntLit _ (Info t) _) = t
 typeOf (FloatLit _ (Info t) _) = t
@@ -585,7 +585,7 @@ typeOf (Lambda params _ _ (Info (als, t)) _) =
   unscopeType bound_here $ foldr (arrow . patternParam) t params `setAliases` als
   where
     bound_here =
-      S.map identName (mconcat $ map patternIdents params)
+      S.map identName (mconcat $ map patIdents params)
         `S.difference` S.fromList (mapMaybe (named . patternParam) params)
     arrow (px, tx) y = Scalar $ Arrow () px tx y
     named (Named x, _) = Just x
@@ -626,7 +626,7 @@ valBindTypeScheme vb =
   )
 
 -- | The type of a function with the given parameters and return type.
-funType :: [PatternBase Info VName] -> StructType -> StructType
+funType :: [PatBase Info VName] -> StructType -> StructType
 funType params ret = foldr (arrow . patternParam) ret params
   where
     arrow (xp, xt) yt = Scalar $ Arrow () xp xt yt
@@ -659,16 +659,16 @@ orderZero (Scalar Arrow {}) = False
 orderZero (Scalar (Sum cs)) = all (all orderZero) cs
 
 -- | Extract all the shape names that occur in a given pattern.
-patternDimNames :: PatternBase Info VName -> S.Set VName
-patternDimNames (TuplePattern ps _) = foldMap patternDimNames ps
-patternDimNames (RecordPattern fs _) = foldMap (patternDimNames . snd) fs
-patternDimNames (PatternParens p _) = patternDimNames p
+patternDimNames :: PatBase Info VName -> S.Set VName
+patternDimNames (TuplePat ps _) = foldMap patternDimNames ps
+patternDimNames (RecordPat fs _) = foldMap (patternDimNames . snd) fs
+patternDimNames (PatParens p _) = patternDimNames p
 patternDimNames (Id _ (Info tp) _) = typeDimNames tp
 patternDimNames (Wildcard (Info tp) _) = typeDimNames tp
-patternDimNames (PatternAscription p (TypeDecl _ (Info t)) _) =
+patternDimNames (PatAscription p (TypeDecl _ (Info t)) _) =
   patternDimNames p <> typeDimNames t
-patternDimNames (PatternLit _ (Info tp) _) = typeDimNames tp
-patternDimNames (PatternConstr _ _ ps _) = foldMap patternDimNames ps
+patternDimNames (PatLit _ (Info tp) _) = typeDimNames tp
+patternDimNames (PatConstr _ _ ps _) = foldMap patternDimNames ps
 
 -- | Extract all the shape names that occur in a given type.
 typeDimNames :: TypeBase (DimDecl VName) als -> S.Set VName
@@ -680,67 +680,67 @@ typeDimNames = foldMap dimName . nestedDims
 
 -- | @patternOrderZero pat@ is 'True' if all of the types in the given pattern
 -- have order 0.
-patternOrderZero :: PatternBase Info vn -> Bool
+patternOrderZero :: PatBase Info vn -> Bool
 patternOrderZero pat = case pat of
-  TuplePattern ps _ -> all patternOrderZero ps
-  RecordPattern fs _ -> all (patternOrderZero . snd) fs
-  PatternParens p _ -> patternOrderZero p
+  TuplePat ps _ -> all patternOrderZero ps
+  RecordPat fs _ -> all (patternOrderZero . snd) fs
+  PatParens p _ -> patternOrderZero p
   Id _ (Info t) _ -> orderZero t
   Wildcard (Info t) _ -> orderZero t
-  PatternAscription p _ _ -> patternOrderZero p
-  PatternLit _ (Info t) _ -> orderZero t
-  PatternConstr _ _ ps _ -> all patternOrderZero ps
+  PatAscription p _ _ -> patternOrderZero p
+  PatLit _ (Info t) _ -> orderZero t
+  PatConstr _ _ ps _ -> all patternOrderZero ps
 
 -- | The set of identifiers bound in a pattern.
-patternIdents :: (Functor f, Ord vn) => PatternBase f vn -> S.Set (IdentBase f vn)
-patternIdents (Id v t loc) = S.singleton $ Ident v t loc
-patternIdents (PatternParens p _) = patternIdents p
-patternIdents (TuplePattern pats _) = mconcat $ map patternIdents pats
-patternIdents (RecordPattern fs _) = mconcat $ map (patternIdents . snd) fs
-patternIdents Wildcard {} = mempty
-patternIdents (PatternAscription p _ _) = patternIdents p
-patternIdents PatternLit {} = mempty
-patternIdents (PatternConstr _ _ ps _) = mconcat $ map patternIdents ps
+patIdents :: (Functor f, Ord vn) => PatBase f vn -> S.Set (IdentBase f vn)
+patIdents (Id v t loc) = S.singleton $ Ident v t loc
+patIdents (PatParens p _) = patIdents p
+patIdents (TuplePat pats _) = mconcat $ map patIdents pats
+patIdents (RecordPat fs _) = mconcat $ map (patIdents . snd) fs
+patIdents Wildcard {} = mempty
+patIdents (PatAscription p _ _) = patIdents p
+patIdents PatLit {} = mempty
+patIdents (PatConstr _ _ ps _) = mconcat $ map patIdents ps
 
 -- | The set of names bound in a pattern.
-patternNames :: (Functor f, Ord vn) => PatternBase f vn -> S.Set vn
-patternNames (Id v _ _) = S.singleton v
-patternNames (PatternParens p _) = patternNames p
-patternNames (TuplePattern pats _) = mconcat $ map patternNames pats
-patternNames (RecordPattern fs _) = mconcat $ map (patternNames . snd) fs
-patternNames Wildcard {} = mempty
-patternNames (PatternAscription p _ _) = patternNames p
-patternNames PatternLit {} = mempty
-patternNames (PatternConstr _ _ ps _) = mconcat $ map patternNames ps
+patNames :: (Functor f, Ord vn) => PatBase f vn -> S.Set vn
+patNames (Id v _ _) = S.singleton v
+patNames (PatParens p _) = patNames p
+patNames (TuplePat pats _) = mconcat $ map patNames pats
+patNames (RecordPat fs _) = mconcat $ map (patNames . snd) fs
+patNames Wildcard {} = mempty
+patNames (PatAscription p _ _) = patNames p
+patNames PatLit {} = mempty
+patNames (PatConstr _ _ ps _) = mconcat $ map patNames ps
 
 -- | A mapping from names bound in a map to their identifier.
-patternMap :: (Functor f) => PatternBase f VName -> M.Map VName (IdentBase f VName)
+patternMap :: (Functor f) => PatBase f VName -> M.Map VName (IdentBase f VName)
 patternMap pat =
   M.fromList $ zip (map identName idents) idents
   where
-    idents = S.toList $ patternIdents pat
+    idents = S.toList $ patIdents pat
 
 -- | The type of values bound by the pattern.
-patternType :: PatternBase Info VName -> PatternType
+patternType :: PatBase Info VName -> PatType
 patternType (Wildcard (Info t) _) = t
-patternType (PatternParens p _) = patternType p
+patternType (PatParens p _) = patternType p
 patternType (Id _ (Info t) _) = t
-patternType (TuplePattern pats _) = tupleRecord $ map patternType pats
-patternType (RecordPattern fs _) = Scalar $ Record $ patternType <$> M.fromList fs
-patternType (PatternAscription p _ _) = patternType p
-patternType (PatternLit _ (Info t) _) = t
-patternType (PatternConstr _ (Info t) _ _) = t
+patternType (TuplePat pats _) = tupleRecord $ map patternType pats
+patternType (RecordPat fs _) = Scalar $ Record $ patternType <$> M.fromList fs
+patternType (PatAscription p _ _) = patternType p
+patternType (PatLit _ (Info t) _) = t
+patternType (PatConstr _ (Info t) _ _) = t
 
 -- | The type matched by the pattern, including shape declarations if present.
-patternStructType :: PatternBase Info VName -> StructType
+patternStructType :: PatBase Info VName -> StructType
 patternStructType = toStruct . patternType
 
 -- | When viewed as a function parameter, does this pattern correspond
 -- to a named parameter of some type?
-patternParam :: PatternBase Info VName -> (PName, StructType)
-patternParam (PatternParens p _) =
+patternParam :: PatBase Info VName -> (PName, StructType)
+patternParam (PatParens p _) =
   patternParam p
-patternParam (PatternAscription (Id v _ _) td _) =
+patternParam (PatAscription (Id v _ _) td _) =
   (Named v, unInfo $ expandedType td)
 patternParam (Id v (Info t) _) =
   (Named v, toStruct t)
@@ -1266,7 +1266,7 @@ type UncheckedSigExp = SigExpBase NoInfo Name
 type UncheckedTypeParam = TypeParamBase Name
 
 -- | A pattern with no type annotations.
-type UncheckedPattern = PatternBase NoInfo Name
+type UncheckedPat = PatBase NoInfo Name
 
 -- | A function declaration with no type annotations.
 type UncheckedValBind = ValBindBase NoInfo Name

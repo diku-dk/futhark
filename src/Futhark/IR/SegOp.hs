@@ -1014,11 +1014,11 @@ instance ASTRep rep => ST.IndexOp (SegOp lvl rep) where
       excess_is = drop (length gtids) is
 
       expandIndexedTable table stm
-        | [v] <- patternNames $ stmPattern stm,
+        | [v] <- patNames $ stmPat stm,
           Just (pe, cs) <-
             runWriterT $ primExpFromExp (asPrimExp table) $ stmExp stm =
           M.insert v (ST.Indexed (stmCerts stm <> cs) pe) table
-        | [v] <- patternNames $ stmPattern stm,
+        | [v] <- patNames $ stmPat stm,
           BasicOp (Index arr slice) <- stmExp stm,
           length (sliceDims slice) == length excess_is,
           arr `ST.elem` vtable,
@@ -1269,13 +1269,13 @@ segOpRuleBottomUp vtable pat dec op
 topDownSegOp ::
   (HasSegOp rep, BuilderOps rep, Buildable rep) =>
   ST.SymbolTable rep ->
-  Pattern rep ->
+  Pat rep ->
   StmAux (ExpDec rep) ->
   SegOp (SegOpLevel rep) rep ->
   Rule rep
 -- If a SegOp produces something invariant to the SegOp, turn it
 -- into a replicate.
-topDownSegOp vtable (Pattern kpes) dec (SegMap lvl space ts (KernelBody _ kstms kres)) = Simplify $ do
+topDownSegOp vtable (Pat kpes) dec (SegMap lvl space ts (KernelBody _ kstms kres)) = Simplify $ do
   (ts', kpes', kres') <-
     unzip3 <$> filterM checkForInvarianceResult (zip3 ts kpes kres)
 
@@ -1284,7 +1284,7 @@ topDownSegOp vtable (Pattern kpes) dec (SegMap lvl space ts (KernelBody _ kstms 
 
   kbody <- mkKernelBodyM kstms kres'
   addStm $
-    Let (Pattern kpes') dec $ Op $ segOp $ SegMap lvl space ts' kbody
+    Let (Pat kpes') dec $ Op $ segOp $ SegMap lvl space ts' kbody
   where
     isInvariant Constant {} = True
     isInvariant (Var v) = isJust $ ST.lookup v vtable
@@ -1302,7 +1302,7 @@ topDownSegOp vtable (Pattern kpes) dec (SegMap lvl space ts (KernelBody _ kstms 
 -- If a SegRed contains two reduction operations that have the same
 -- vector shape, merge them together.  This saves on communication
 -- overhead, but can in principle lead to more local memory usage.
-topDownSegOp _ (Pattern pes) _ (SegRed lvl space ops ts kbody)
+topDownSegOp _ (Pat pes) _ (SegRed lvl space ops ts kbody)
   | length ops > 1,
     op_groupings <-
       groupBy sameShape $
@@ -1315,7 +1315,7 @@ topDownSegOp _ (Pattern pes) _ (SegRed lvl space ops ts kbody)
         pes' = red_pes' ++ map_pes
         ts' = red_ts' ++ map_ts
         kbody' = kbody {kernelBodyResult = red_res' ++ map_res}
-    letBind (Pattern pes') $ Op $ segOp $ SegRed lvl space ops' ts' kbody'
+    letBind (Pat pes') $ Op $ segOp $ SegRed lvl space ops' ts' kbody'
   where
     (red_pes, map_pes) = splitAt (segBinOpResults ops) pes
     (red_ts, map_ts) = splitAt (segBinOpResults ops) ts
@@ -1375,13 +1375,13 @@ segOpGuts (SegHist lvl space ops kts body) =
 bottomUpSegOp ::
   (HasSegOp rep, BuilderOps rep) =>
   (ST.SymbolTable rep, UT.UsageTable) ->
-  Pattern rep ->
+  Pat rep ->
   StmAux (ExpDec rep) ->
   SegOp (SegOpLevel rep) rep ->
   Rule rep
 -- Some SegOp results can be moved outside the SegOp, which can
 -- simplify further analysis.
-bottomUpSegOp (vtable, used) (Pattern kpes) dec segop = Simplify $ do
+bottomUpSegOp (vtable, used) (Pat kpes) dec segop = Simplify $ do
   -- Iterate through the bindings.  For each, we check whether it is
   -- in kres and can be moved outside.  If so, we remove it from kres
   -- and kpes and make it a binding outside.  We have to be careful
@@ -1400,7 +1400,7 @@ bottomUpSegOp (vtable, used) (Pattern kpes) dec segop = Simplify $ do
     localScope (scopeOfSegSpace space) $
       mkKernelBodyM kstms' kres'
 
-  addStm $ Let (Pattern kpes') dec $ Op $ segOp $ mk_segop kts' kbody
+  addStm $ Let (Pat kpes') dec $ Op $ segOp $ mk_segop kts' kbody
   where
     (kts, KernelBody _ kstms kres, num_nonmap_results, mk_segop) =
       segOpGuts segop
@@ -1420,7 +1420,7 @@ bottomUpSegOp (vtable, used) (Pattern kpes) dec segop = Simplify $ do
         Nothing
 
     distribute (kpes', kts', kres', kstms') stm
-      | Let (Pattern [pe]) _ _ <- stm,
+      | Let (Pat [pe]) _ _ <- stm,
         Just (remaining_slice, arr) <- sliceWithGtidsFixed stm,
         Just (kpe, kpes'', kts'', kres'') <- isResult kpes' kts' kres' pe = do
         let outer_slice =

@@ -210,7 +210,7 @@ ruleBasicOp vtable pat _ (CmpOp (CmpEq t) se1 se2)
       | Just bnd <- ST.lookupStm v vtable,
         If p tbranch fbranch _ <- stmExp bnd,
         Just (y, z) <-
-          returns v (stmPattern bnd) tbranch fbranch,
+          returns v (stmPat bnd) tbranch fbranch,
         not $ boundInBody tbranch `namesIntersect` freeIn y,
         not $ boundInBody fbranch `namesIntersect` freeIn z = Just $ do
         eq_x_y <-
@@ -230,7 +230,7 @@ ruleBasicOp vtable pat _ (CmpOp (CmpEq t) se1 se2)
 
     returns v ifpat tbranch fbranch =
       fmap snd . find ((== v) . patElemName . fst) $
-        zip (patternElements ifpat) $
+        zip (patElements ifpat) $
           zip (map resSubExp (bodyResult tbranch)) (map resSubExp (bodyResult fbranch))
 ruleBasicOp _ pat _ (Replicate (Shape []) se@Constant {}) =
   Simplify $ letBind pat $ BasicOp $ SubExp se

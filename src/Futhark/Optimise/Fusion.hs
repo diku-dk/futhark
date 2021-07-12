@@ -102,14 +102,14 @@ bindVars = foldl bindVar
 binding :: [(Ident, Names)] -> FusionGM a -> FusionGM a
 binding vs = local (`bindVars` vs)
 
-gatherStmPattern :: Pattern -> Exp -> FusionGM FusedRes -> FusionGM FusedRes
-gatherStmPattern pat e = binding $ zip idents aliases
+gatherStmPat :: Pat -> Exp -> FusionGM FusedRes -> FusionGM FusedRes
+gatherStmPat pat e = binding $ zip idents aliases
   where
-    idents = patternIdents pat
+    idents = patIdents pat
     aliases = expAliases (Alias.analyseExp mempty e)
 
-bindingPat :: Pattern -> FusionGM a -> FusionGM a
-bindingPat = binding . (`zip` repeat mempty) . patternIdents
+bindingPat :: Pat -> FusionGM a -> FusionGM a
+bindingPat = binding . (`zip` repeat mempty) . patIdents
 
 bindingParams :: Typed t => [Param t] -> FusionGM a -> FusionGM a
 bindingParams = binding . (`zip` repeat mempty) . map paramIdent
@@ -159,11 +159,11 @@ checkForUpdates res _ = return res
 --   variables in scope (map) by inserting each (pattern-array) name.
 --   Finally, if the binding is an in-place update, then the @inplace@ field
 --   of each (result) kernel is updated with the new in-place updates.
-bindingFamily :: Pattern -> FusionGM FusedRes -> FusionGM FusedRes
+bindingFamily :: Pat -> FusionGM FusedRes -> FusionGM FusedRes
 bindingFamily pat = local bind
   where
-    idents = patternIdents pat
-    family = patternNames pat
+    idents = patIdents pat
+    family = patNames pat
     bind env = foldl (bindingFamilyVar family) env idents
 
 bindingTransform :: PatElem -> VName -> SOAC.ArrayTransform -> FusionGM a -> FusionGM a
@@ -395,13 +395,13 @@ greedyFuse ::
   [Stm] ->
   Names ->
   FusedRes ->
-  (Pattern, StmAux (), SOAC, Names) ->
+  (Pat, StmAux (), SOAC, Names) ->
   FusionGM FusedRes
 greedyFuse rem_bnds lam_used_nms res (out_idds, aux, orig_soac, consumed) = do
   soac <- inlineSOACInputs orig_soac
   (inp_nms, other_nms) <- soacInputs soac
   -- Assumption: the free vars in lambda are already in @infusible res@.
-  let out_nms = patternNames out_idds
+  let out_nms = patNames out_idds
       isInfusible = (`nameIn` infusible res)
       is_screma = case orig_soac of
         SOAC.Screma _ form _ ->
@@ -450,7 +450,7 @@ greedyFuse rem_bnds lam_used_nms res (out_idds, aux, orig_soac, consumed) = do
   let comb = M.unionWith S.union
 
   if not fusible_ker
-    then addNewKerWithInfusible res (patternIdents out_idds, aux, soac, consumed) ufs
+    then addNewKerWithInfusible res (patIdents out_idds, aux, soac, consumed) ufs
     else do
       -- Need to suitably update `inpArr':
       --   (i) first remove the inpArr bindings of the old kernel
@@ -494,10 +494,10 @@ greedyFuse rem_bnds lam_used_nms res (out_idds, aux, orig_soac, consumed) = do
 
 prodconsGreedyFuse ::
   FusedRes ->
-  (Pattern, StmAux (), SOAC, Names) ->
+  (Pat, StmAux (), SOAC, Names) ->
   FusionGM (Bool, [FusedKer], [KernName], [FusedKer], [KernName])
 prodconsGreedyFuse res (out_idds, aux, soac, consumed) = do
-  let out_nms = patternNames out_idds -- Extract VNames from output patterns
+  let out_nms = patNames out_idds -- Extract VNames from output patterns
       to_fuse_knmSet = getKersWithInpArrs res out_nms -- Find kernels which consume outputs
       to_fuse_knms = S.toList to_fuse_knmSet
       lookup_kern k = case M.lookup k (kernels res) of
@@ -513,7 +513,7 @@ prodconsGreedyFuse res (out_idds, aux, soac, consumed) = do
   (ok_kers_compat, fused_kers) <- do
     kers <-
       forM to_fuse_kers $
-        attemptFusion mempty (patternNames out_idds) soac consumed
+        attemptFusion mempty (patNames out_idds) soac consumed
     case sequence kers of
       Nothing -> return (False, [])
       Just kers' -> return (True, map certifyKer kers')
@@ -524,11 +524,11 @@ prodconsGreedyFuse res (out_idds, aux, soac, consumed) = do
 horizontGreedyFuse ::
   [Stm] ->
   FusedRes ->
-  (Pattern, StmAux (), SOAC, Names) ->
+  (Pat, StmAux (), SOAC, Names) ->
   FusionGM (Bool, [FusedKer], [KernName], [FusedKer], [KernName])
 horizontGreedyFuse rem_bnds res (out_idds, aux, soac, consumed) = do
   (inp_nms, _) <- soacInputs soac
-  let out_nms = patternNames out_idds
+  let out_nms = patNames out_idds
       infusible_nms = namesFromList $ filter (`nameIn` infusible res) out_nms
       out_arr_nms = case soac of
         -- the accumulator result cannot be fused!
@@ -552,7 +552,7 @@ horizontGreedyFuse rem_bnds res (out_idds, aux, soac, consumed) = do
   -- located and sort based on the index so that partial fusion may
   -- succeed.  We use the last position where one of the kernel
   -- outputs occur.
-  let bnd_nms = map (patternNames . stmPattern) rem_bnds
+  let bnd_nms = map (patNames . stmPat) rem_bnds
   kernminds <- forM to_fuse_knms $ \ker_nm -> do
     ker <- lookupKernel ker_nm
     case mapMaybe (\out_nm -> L.findIndex (elem out_nm) bnd_nms) (outNames ker) of
@@ -617,7 +617,7 @@ horizontGreedyFuse rem_bnds res (out_idds, aux, soac, consumed) = do
                           not
                             ( null $
                                 curker_outnms
-                                  `L.intersect` patternNames (stmPattern bnd)
+                                  `L.intersect` patNames (stmPat bnd)
                             )
                     )
                     True
@@ -684,7 +684,7 @@ fusionGatherStms :: FusedRes -> [Stm] -> Result -> FusionGM FusedRes
 -- be considered a stream, to avoid infinite recursion.
 fusionGatherStms
   fres
-  (Let (Pattern pes) bndtp (DoLoop merge (ForLoop i it w loop_vars) body) : bnds)
+  (Let (Pat pes) bndtp (DoLoop merge (ForLoop i it w loop_vars) body) : bnds)
   res
     | not $ null loop_vars = do
       let (merge_params, merge_init) = unzip merge
@@ -738,7 +738,7 @@ fusionGatherStms
 
       fusionGatherStms
         fres
-        (Let (Pattern (pes <> [discard_pe])) bndtp (Op stream) : bnds)
+        (Let (Pat (pes <> [discard_pe])) bndtp (Op stream) : bnds)
         res
 fusionGatherStms fres (bnd@(Let pat _ e) : bnds) res = do
   maybesoac <- SOAC.fromExp e
@@ -747,14 +747,14 @@ fusionGatherStms fres (bnd@(Let pat _ e) : bnds) res = do
       -- We put the variables produced by Scatter into the infusible
       -- set to force horizontal fusion.  It is not possible to
       -- producer/consumer-fuse Scatter anyway.
-      fres' <- addNamesToInfusible fres $ namesFromList $ patternNames pat
+      fres' <- addNamesToInfusible fres $ namesFromList $ patNames pat
       fres'' <- mapLike fres' soac lam
       checkForUpdates fres'' e
     Right soac@(SOAC.Hist _ _ lam _) -> do
       -- We put the variables produced by Hist into the infusible
       -- set to force horizontal fusion.  It is not possible to
       -- producer/consumer-fuse Hist anyway.
-      fres' <- addNamesToInfusible fres $ namesFromList $ patternNames pat
+      fres' <- addNamesToInfusible fres $ namesFromList $ patNames pat
       mapLike fres' soac lam
     Right soac@(SOAC.Screma _ (ScremaForm scans reds map_lam) _) ->
       reduceLike soac (map scanLambda scans <> map redLambda reds <> [map_lam]) $
@@ -770,12 +770,12 @@ fusionGatherStms fres (bnd@(Let pat _ e) : bnds) res = do
             Sequential -> [lam]
       reduceLike soac lambdas nes
     _
-      | Pattern [pe] <- pat,
+      | Pat [pe] <- pat,
         Just (src, trns) <- SOAC.transformFromExp (stmCerts bnd) e ->
         bindingTransform pe src trns $ fusionGatherStms fres bnds res
       | otherwise -> do
-        let pat_vars = map (BasicOp . SubExp . Var) $ patternNames pat
-        bres <- gatherStmPattern pat e $ fusionGatherStms fres bnds res
+        let pat_vars = map (BasicOp . SubExp . Var) $ patNames pat
+        bres <- gatherStmPat pat e $ fusionGatherStms fres bnds res
         bres' <- checkForUpdates bres e
         foldM fusionGatherExp bres' (e : pat_vars)
   where
@@ -916,12 +916,12 @@ fuseInLambda (Lambda params body rtp) = do
   body' <- bindingParams params $ fuseInBody body
   return $ Lambda params body' rtp
 
-replaceSOAC :: Pattern -> StmAux () -> Exp -> FusionGM (Stms SOACS)
-replaceSOAC (Pattern []) _ _ = return mempty
-replaceSOAC pat@(Pattern (patElem : _)) aux e = do
+replaceSOAC :: Pat -> StmAux () -> Exp -> FusionGM (Stms SOACS)
+replaceSOAC (Pat []) _ _ = return mempty
+replaceSOAC pat@(Pat (patElem : _)) aux e = do
   fres <- asks fusedRes
   let pat_nm = patElemName patElem
-      names = patternIdents pat
+      names = patIdents pat
   case M.lookup pat_nm (outArr fres) of
     Nothing ->
       oneStm . Let pat aux <$> fuseInExp e
@@ -953,7 +953,7 @@ insertKerSOAC aux names ker = do
     -- issue #224).  We insert copy expressions to fix it.
     f_soac' <- copyNewlyConsumed (fusedConsumed ker) $ addOpAliases mempty f_soac
     validents <- zipWithM newIdent (map baseString names) $ SOAC.typeOf new_soac'
-    auxing (kerAux ker <> aux) $ letBind (basicPattern validents) $ Op f_soac'
+    auxing (kerAux ker <> aux) $ letBind (basicPat validents) $ Op f_soac'
     transformOutput (outputTransform ker) names validents
 
 -- | Perform simplification and fusion inside the lambda(s) of a SOAC.

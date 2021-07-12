@@ -618,7 +618,7 @@ instance RepTypes rep => ST.IndexOp (SOAC rep) where
         return (paramName p, (pe, cs))
 
       expandPrimExpTable table stm
-        | [v] <- patternNames $ stmPattern stm,
+        | [v] <- patNames $ stmPat stm,
           Just (pe, cs) <-
             runWriterT $ primExpFromExp (asPrimExp table) $ stmExp stm,
           all (`ST.elem` vtable) (unCerts $ stmCerts stm) =

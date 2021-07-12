@@ -56,7 +56,7 @@
 -- t'Body' consists of executing all of the statements, then returning
 -- the values of the variables indicated by the result.
 --
--- A statement ('Stm') consists of a t'Pattern' alongside an
+-- A statement ('Stm') consists of a t'Pat' alongside an
 -- expression 'ExpT'.  A pattern is a sequence of name/type pairs.
 --
 -- For example, the source language expression @let z = x + y - 1 in
@@ -123,8 +123,8 @@ module Futhark.IR.Syntax
     SubExp (..),
     PatElem,
     PatElemT (..),
-    PatternT (..),
-    Pattern,
+    PatT (..),
+    Pat,
     StmAux (..),
     Stm (..),
     Stms,
@@ -211,27 +211,27 @@ withoutAttrs (Attrs x) (Attrs y) = Attrs $ x `S.difference` y
 type PatElem rep = PatElemT (LetDec rep)
 
 -- | A pattern is conceptually just a list of names and their types.
-newtype PatternT dec = Pattern {patternElements :: [PatElemT dec]}
+newtype PatT dec = Pat {patElements :: [PatElemT dec]}
   deriving (Ord, Show, Eq)
 
-instance Semigroup (PatternT dec) where
-  Pattern xs <> Pattern ys = Pattern (xs <> ys)
+instance Semigroup (PatT dec) where
+  Pat xs <> Pat ys = Pat (xs <> ys)
 
-instance Monoid (PatternT dec) where
-  mempty = Pattern mempty
+instance Monoid (PatT dec) where
+  mempty = Pat mempty
 
-instance Functor PatternT where
+instance Functor PatT where
   fmap = fmapDefault
 
-instance Foldable PatternT where
+instance Foldable PatT where
   foldMap = foldMapDefault
 
-instance Traversable PatternT where
-  traverse f (Pattern xs) =
-    Pattern <$> traverse (traverse f) xs
+instance Traversable PatT where
+  traverse f (Pat xs) =
+    Pat <$> traverse (traverse f) xs
 
 -- | A type alias for namespace control.
-type Pattern rep = PatternT (LetDec rep)
+type Pat rep = PatT (LetDec rep)
 
 -- | Auxilliary Information associated with a statement.
 data StmAux dec = StmAux
@@ -247,8 +247,8 @@ instance Semigroup dec => Semigroup (StmAux dec) where
 
 -- | A local variable binding.
 data Stm rep = Let
-  { -- | Pattern.
-    stmPattern :: Pattern rep,
+  { -- | Pat.
+    stmPat :: Pat rep,
     -- | Auxiliary information statement.
     stmAux :: StmAux (ExpDec rep),
     -- | Expression.

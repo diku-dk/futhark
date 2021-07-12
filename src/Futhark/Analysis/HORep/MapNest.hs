@@ -83,7 +83,7 @@ fromSOAC' bound (SOAC.Screma w (SOAC.ScremaForm [] [] lam) inps) = do
                       bodyResult $ lambdaBody lam
                     ) of
     ([Let pat _ e], res)
-      | map resSubExp res == map Var (patternNames pat) ->
+      | map resSubExp res == map Var (patNames pat) ->
         localScope (scopeOfLParams $ lambdaParams lam) $
           SOAC.fromExp e
             >>= either (return . Left) (fmap (Right . fmap (pat,)) . fromSOAC' bound')
@@ -102,7 +102,7 @@ fromSOAC' bound (SOAC.Screma w (SOAC.ScremaForm [] [] lam) inps) = do
       let n' =
             Nesting
               { nestingParamNames = ps,
-                nestingResult = patternNames pat,
+                nestingResult = patNames pat,
                 nestingReturnType = typeOf mn,
                 nestingWidth = inner_w
               }

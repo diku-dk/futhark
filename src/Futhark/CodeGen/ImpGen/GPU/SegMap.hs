@@ -17,7 +17,7 @@ import Prelude hiding (quot, rem)
 
 -- | Compile 'SegMap' instance code.
 compileSegMap ::
-  Pattern GPUMem ->
+  Pat GPUMem ->
   SegLevel ->
   SegSpace ->
   KernelBody GPUMem ->
@@ -46,7 +46,7 @@ compileSegMap pat lvl space kbody = do
 
           sWhen (isActive $ unSegSpace space) $
             compileStms mempty (kernelBodyStms kbody) $
-              zipWithM_ (compileThreadResult space) (patternElements pat) $
+              zipWithM_ (compileThreadResult space) (patElements pat) $
                 kernelBodyResult kbody
     SegGroup {} ->
       sKernelGroup "segmap_intragroup" num_groups' group_size' (segFlat space) $ do
@@ -56,6 +56,6 @@ compileSegMap pat lvl space kbody = do
             dIndexSpace (zip is dims') $ sExt64 group_id
 
             compileStms mempty (kernelBodyStms kbody) $
-              zipWithM_ (compileGroupResult space) (patternElements pat) $
+              zipWithM_ (compileGroupResult space) (patElements pat) $
                 kernelBodyResult kbody
   emit $ Imp.DebugPrint "" Nothing

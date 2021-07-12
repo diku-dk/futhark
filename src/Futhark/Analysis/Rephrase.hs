@@ -9,7 +9,7 @@ module Futhark.Analysis.Rephrase
     rephraseBody,
     rephraseStm,
     rephraseLambda,
-    rephrasePattern,
+    rephrasePat,
     rephrasePatElem,
     Rephraser (..),
   )
@@ -56,17 +56,17 @@ rephraseExp = mapExpM . mapper
 rephraseStm :: Monad m => Rephraser m from to -> Stm from -> m (Stm to)
 rephraseStm rephraser (Let pat (StmAux cs attrs dec) e) =
   Let
-    <$> rephrasePattern (rephraseLetBoundDec rephraser) pat
+    <$> rephrasePat (rephraseLetBoundDec rephraser) pat
     <*> (StmAux cs attrs <$> rephraseExpDec rephraser dec)
     <*> rephraseExp rephraser e
 
 -- | Rephrase a pattern.
-rephrasePattern ::
+rephrasePat ::
   Monad m =>
   (from -> m to) ->
-  PatternT from ->
-  m (PatternT to)
-rephrasePattern = traverse
+  PatT from ->
+  m (PatT to)
+rephrasePat = traverse
 
 -- | Rephrase a pattern element.
 rephrasePatElem :: Monad m => (from -> m to) -> PatElemT from -> m (PatElemT to)

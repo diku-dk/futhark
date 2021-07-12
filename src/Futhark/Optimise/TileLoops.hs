@@ -125,7 +125,7 @@ tileInBody branch_variant initial_variance initial_lvl initial_space res_ts (Bod
             (tiling2d $ reverse $ zip top_gtids_rev top_kdims_rev)
             initial_lvl
             res_ts
-            (stmPattern stm_to_tile)
+            (stmPat stm_to_tile)
             (gtid_x, gtid_y)
             (kdim_x, kdim_y)
             w
@@ -147,7 +147,7 @@ tileInBody branch_variant initial_variance initial_lvl initial_space res_ts (Bod
             (tiling1d $ reverse top_space_rev)
             initial_lvl
             res_ts
-            (stmPattern stm_to_tile)
+            (stmPat stm_to_tile)
             gtid
             kdim
             w
@@ -189,7 +189,7 @@ tileInBody branch_variant initial_variance initial_lvl initial_space res_ts (Bod
                 (freeIn loopbody <> freeIn merge)
                 tiled
                 res_ts
-                (stmPattern stm_to_tile)
+                (stmPat stm_to_tile)
                 (stmAux stm_to_tile)
                 merge
                 i
@@ -224,7 +224,7 @@ preludeToPostlude variance prelude stm_to_tile postlude =
 
     used stm =
       any (`nameIn` used_in_stm_variant) $
-        patternNames $ stmPattern stm
+        patNames $ stmPat stm
 
     (prelude_used, prelude_not_used) =
       Seq.partition used prelude
@@ -255,21 +255,21 @@ partitionPrelude variance prestms private used_after =
   (invariant_prestms, precomputed_variant_prestms, recomputed_variant_prestms)
   where
     invariantTo names stm =
-      case patternNames (stmPattern stm) of
+      case patNames (stmPat stm) of
         [] -> True -- Does not matter.
         v : _ -> not $ any (`nameIn` names) $ namesToList $ M.findWithDefault mempty v variance
 
     consumed v = v `nameIn` consumed_in_prestms
-    consumedStm stm = any consumed (patternNames (stmPattern stm))
+    consumedStm stm = any consumed (patNames (stmPat stm))
 
     later_consumed =
       namesFromList $
-        concatMap (patternNames . stmPattern) $
+        concatMap (patNames . stmPat) $
           stmsToList $ Seq.filter consumedStm prestms
 
     groupInvariant stm =
       invariantTo private stm
-        && not (any (`nameIn` later_consumed) (patternNames (stmPattern stm)))
+        && not (any (`nameIn` later_consumed) (patNames (stmPat stm)))
         && invariantTo later_consumed stm
     (invariant_prestms, variant_prestms) =
       Seq.partition groupInvariant prestms
@@ -284,14 +284,14 @@ partitionPrelude variance prestms private used_after =
     mustBeInlinedExp _ = False
     mustBeInlined stm =
       mustBeInlinedExp (stmExp stm)
-        && any (`nameIn` used_after) (patternNames (stmPattern stm))
+        && any (`nameIn` used_after) (patNames (stmPat stm))
 
     must_be_inlined =
       namesFromList $
-        concatMap (patternNames . stmPattern) $
+        concatMap (patNames . stmPat) $
           stmsToList $ Seq.filter mustBeInlined variant_prestms
     recompute stm =
-      any (`nameIn` must_be_inlined) (patternNames (stmPattern stm))
+      any (`nameIn` must_be_inlined) (patNames (stmPat stm))
         || not (invariantTo must_be_inlined stm)
     (recomputed_variant_prestms, precomputed_variant_prestms) =
       Seq.partition recompute variant_prestms
@@ -342,7 +342,7 @@ tileDoLoop ::
   Names ->
   (Stms GPU, Tiling, TiledBody) ->
   [Type] ->
-  Pattern GPU ->
+  Pat GPU ->
   StmAux (ExpDec GPU) ->
   [(FParam GPU, SubExp)] ->
   VName ->
@@ -446,7 +446,7 @@ doPrelude tiling privstms prestms prestms_live =
 
 liveSet :: FreeIn a => Stms GPU -> a -> Names
 liveSet stms after =
-  namesFromList (concatMap (patternNames . stmPattern) stms)
+  namesFromList (concatMap (patNames . stmPat) stms)
     `namesIntersection` freeIn after
 
 tileable ::
@@ -626,7 +626,7 @@ protectOutOfBounds desc in_bounds ts m = do
 postludeGeneric ::
   Tiling ->
   PrivStms ->
-  Pattern GPU ->
+  Pat GPU ->
   [VName] ->
   Stms GPU ->
   Result ->
@@ -635,7 +635,7 @@ postludeGeneric ::
 postludeGeneric tiling privstms pat accs' poststms poststms_res res_ts =
   tilingSegMap tiling "thread_res" (scalarLevel tiling) ResultPrivate $ \in_bounds slice -> do
     -- Read our per-thread result from the tiled loop.
-    forM_ (zip (patternNames pat) accs') $ \(us, everyone) -> do
+    forM_ (zip (patNames pat) accs') $ \(us, everyone) -> do
       everyone_t <- lookupType everyone
       letBindNames [us] $ BasicOp $ Index everyone $ fullSlice everyone_t slice
 
@@ -656,7 +656,7 @@ tileGeneric ::
   DoTiling gtids kdims ->
   SegLevel ->
   [Type] ->
-  Pattern GPU ->
+  Pat GPU ->
   gtids ->
   kdims ->
   SubExp ->

@@ -279,7 +279,7 @@ index' name is vtable = do
   case entryType entry of
     LetBound entry'
       | Just k <-
-          elemIndex name . patternNames . stmPattern $
+          elemIndex name . patNames . stmPat $
             letBoundStm entry' ->
         letBoundIndex entry' k is
     FreeVar entry' ->
@@ -366,7 +366,7 @@ bindingEntries ::
   SymbolTable rep ->
   [LetBoundEntry rep]
 bindingEntries bnd@(Let pat _ _) vtable = do
-  pat_elem <- patternElements pat
+  pat_elem <- patElements pat
   return $ defBndEntry vtable pat_elem (Aliases.aliasesOf pat_elem) bnd
 
 adjustSeveral :: Ord k => (v -> v) -> [k] -> M.Map k v -> M.Map k v
@@ -411,10 +411,10 @@ insertStm ::
   SymbolTable rep
 insertStm stm vtable =
   flip (foldl' $ flip consume) (namesToList stm_consumed) $
-    flip (foldl' addRevAliases) (patternElements $ stmPattern stm) $
+    flip (foldl' addRevAliases) (patElements $ stmPat stm) $
       insertEntries (zip names $ map LetBound $ bindingEntries stm vtable) vtable
   where
-    names = patternNames $ stmPattern stm
+    names = patNames $ stmPat stm
     stm_consumed = expandAliases (Aliases.consumedInStm stm) vtable
     addRevAliases vtable' pe =
       vtable' {bindings = adjustSeveral update inedges $ bindings vtable'}

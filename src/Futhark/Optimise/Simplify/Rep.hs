@@ -12,11 +12,11 @@ module Futhark.Optimise.Simplify.Rep
     removeLambdaWisdom,
     removeFunDefWisdom,
     removeExpWisdom,
-    removePatternWisdom,
+    removePatWisdom,
     removeBodyWisdom,
     removeScopeWisdom,
     addScopeWisdom,
-    addWisdomToPattern,
+    addWisdomToPat,
     mkWiseBody,
     mkWiseLetStm,
     mkWiseExpDec,
@@ -127,8 +127,8 @@ withoutWisdom m = do
   runReaderT m scope
 
 instance (ASTRep rep, CanBeWise (Op rep)) => ASTRep (Wise rep) where
-  expTypesFromPattern =
-    withoutWisdom . expTypesFromPattern . removePatternWisdom
+  expTypesFromPat =
+    withoutWisdom . expTypesFromPat . removePatWisdom
 
 instance Pretty VarWisdom where
   ppr _ = ppr ()
@@ -187,16 +187,16 @@ removeBodyWisdom = runIdentity . rephraseBody removeWisdom
 removeExpWisdom :: CanBeWise (Op rep) => Exp (Wise rep) -> Exp rep
 removeExpWisdom = runIdentity . rephraseExp removeWisdom
 
-removePatternWisdom :: PatternT (VarWisdom, a) -> PatternT a
-removePatternWisdom = runIdentity . rephrasePattern (return . snd)
+removePatWisdom :: PatT (VarWisdom, a) -> PatT a
+removePatWisdom = runIdentity . rephrasePat (return . snd)
 
-addWisdomToPattern ::
+addWisdomToPat ::
   (ASTRep rep, CanBeWise (Op rep)) =>
-  Pattern rep ->
+  Pat rep ->
   Exp (Wise rep) ->
-  Pattern (Wise rep)
-addWisdomToPattern pat e =
-  Pattern $ map f $ Aliases.mkPatternAliases pat e
+  Pat (Wise rep)
+addWisdomToPat pat e =
+  Pat $ map f $ Aliases.mkPatAliases pat e
   where
     f pe =
       let (als, dec) = patElemDec pe
@@ -220,17 +220,17 @@ mkWiseBody dec bnds res =
 
 mkWiseLetStm ::
   (ASTRep rep, CanBeWise (Op rep)) =>
-  Pattern rep ->
+  Pat rep ->
   StmAux (ExpDec rep) ->
   Exp (Wise rep) ->
   Stm (Wise rep)
 mkWiseLetStm pat (StmAux cs attrs dec) e =
-  let pat' = addWisdomToPattern pat e
+  let pat' = addWisdomToPat pat e
    in Let pat' (StmAux cs attrs $ mkWiseExpDec pat' dec e) e
 
 mkWiseExpDec ::
   (ASTRep rep, CanBeWise (Op rep)) =>
-  Pattern (Wise rep) ->
+  Pat (Wise rep) ->
   ExpDec rep ->
   Exp (Wise rep) ->
   ExpDec (Wise rep)
@@ -243,10 +243,10 @@ mkWiseExpDec pat expdec e =
 
 instance (Buildable rep, CanBeWise (Op rep)) => Buildable (Wise rep) where
   mkExpPat ids e =
-    addWisdomToPattern (mkExpPat ids $ removeExpWisdom e) e
+    addWisdomToPat (mkExpPat ids $ removeExpWisdom e) e
 
   mkExpDec pat e =
-    mkWiseExpDec pat (mkExpDec (removePatternWisdom pat) $ removeExpWisdom e) e
+    mkWiseExpDec pat (mkExpDec (removePatWisdom pat) $ removeExpWisdom e) e
 
   mkLetNames names e = do
     env <- asksScope removeScopeWisdom
