@@ -90,7 +90,7 @@ tileInKernelBody branch_variant initial_variance lvl initial_kspace ts kbody
   | otherwise =
     return (mempty, (lvl, initial_kspace, kbody))
   where
-    isSimpleResult (Returns _ se) = Just se
+    isSimpleResult (Returns _ cs se) = Just $ SubExpRes cs se
     isSimpleResult _ = Nothing
 
 tileInBody ::
@@ -125,7 +125,7 @@ tileInBody branch_variant initial_variance initial_lvl initial_space res_ts (Bod
             (tiling2d $ reverse $ zip top_gtids_rev top_kdims_rev)
             initial_lvl
             res_ts
-            (stmPattern stm_to_tile)
+            (stmPat stm_to_tile)
             (gtid_x, gtid_y)
             (kdim_x, kdim_y)
             w
@@ -147,7 +147,7 @@ tileInBody branch_variant initial_variance initial_lvl initial_space res_ts (Bod
             (tiling1d $ reverse top_space_rev)
             initial_lvl
             res_ts
-            (stmPattern stm_to_tile)
+            (stmPat stm_to_tile)
             gtid
             kdim
             w
@@ -156,7 +156,7 @@ tileInBody branch_variant initial_variance initial_lvl initial_space res_ts (Bod
             poststms'
             stms_res
       -- Tiling inside for-loop.
-      | DoLoop [] merge (ForLoop i it bound []) loopbody <- stmExp stm_to_tile,
+      | DoLoop merge (ForLoop i it bound []) loopbody <- stmExp stm_to_tile,
         (prestms', poststms') <-
           preludeToPostlude variance prestms stm_to_tile (stmsFromList poststms) = do
         let branch_variant' =
@@ -189,7 +189,7 @@ tileInBody branch_variant initial_variance initial_lvl initial_space res_ts (Bod
                 (freeIn loopbody <> freeIn merge)
                 tiled
                 res_ts
-                (stmPattern stm_to_tile)
+                (stmPat stm_to_tile)
                 (stmAux stm_to_tile)
                 merge
                 i
@@ -224,7 +224,7 @@ preludeToPostlude variance prelude stm_to_tile postlude =
 
     used stm =
       any (`nameIn` used_in_stm_variant) $
-        patternNames $ stmPattern stm
+        patNames $ stmPat stm
 
     (prelude_used, prelude_not_used) =
       Seq.partition used prelude
@@ -255,21 +255,21 @@ partitionPrelude variance prestms private used_after =
   (invariant_prestms, precomputed_variant_prestms, recomputed_variant_prestms)
   where
     invariantTo names stm =
-      case patternNames (stmPattern stm) of
+      case patNames (stmPat stm) of
         [] -> True -- Does not matter.
         v : _ -> not $ any (`nameIn` names) $ namesToList $ M.findWithDefault mempty v variance
 
     consumed v = v `nameIn` consumed_in_prestms
-    consumedStm stm = any consumed (patternNames (stmPattern stm))
+    consumedStm stm = any consumed (patNames (stmPat stm))
 
     later_consumed =
       namesFromList $
-        concatMap (patternNames . stmPattern) $
+        concatMap (patNames . stmPat) $
           stmsToList $ Seq.filter consumedStm prestms
 
     groupInvariant stm =
       invariantTo private stm
-        && not (any (`nameIn` later_consumed) (patternNames (stmPattern stm)))
+        && not (any (`nameIn` later_consumed) (patNames (stmPat stm)))
         && invariantTo later_consumed stm
     (invariant_prestms, variant_prestms) =
       Seq.partition groupInvariant prestms
@@ -284,14 +284,14 @@ partitionPrelude variance prestms private used_after =
     mustBeInlinedExp _ = False
     mustBeInlined stm =
       mustBeInlinedExp (stmExp stm)
-        && any (`nameIn` used_after) (patternNames (stmPattern stm))
+        && any (`nameIn` used_after) (patNames (stmPat stm))
 
     must_be_inlined =
       namesFromList $
-        concatMap (patternNames . stmPattern) $
+        concatMap (patNames . stmPat) $
           stmsToList $ Seq.filter mustBeInlined variant_prestms
     recompute stm =
-      any (`nameIn` must_be_inlined) (patternNames (stmPattern stm))
+      any (`nameIn` must_be_inlined) (patNames (stmPat stm))
         || not (invariantTo must_be_inlined stm)
     (recomputed_variant_prestms, precomputed_variant_prestms) =
       Seq.partition recompute variant_prestms
@@ -342,7 +342,7 @@ tileDoLoop ::
   Names ->
   (Stms GPU, Tiling, TiledBody) ->
   [Type] ->
-  Pattern GPU ->
+  Pat GPU ->
   StmAux (ExpDec GPU) ->
   [(FParam GPU, SubExp)] ->
   VName ->
@@ -392,11 +392,11 @@ tileDoLoop initial_space variance prestms used_in_body (host_stms, tiling, tiled
             certifying (stmAuxCerts aux) $
               tilingSegMap tiling "tiled_loopinit" (scalarLevel tiling) ResultPrivate $
                 \in_bounds slice ->
-                  fmap (map Var) $
+                  fmap varsRes $
                     protectOutOfBounds "loopinit" in_bounds merge_ts $ do
                       addPrivStms slice inloop_privstms
                       addPrivStms slice privstms
-                      return mergeinits
+                      return $ subExpsRes mergeinits
 
         let merge' = zip mergeparams' mergeinit'
 
@@ -420,7 +420,7 @@ tileDoLoop initial_space variance prestms used_in_body (host_stms, tiling, tiled
               <$> tiledBody private' privstms'
         accs' <-
           letTupExp "tiled_inside_loop" $
-            DoLoop [] merge' (ForLoop i it bound []) loopbody'
+            DoLoop merge' (ForLoop i it bound []) loopbody'
 
         postludeGeneric tiling (privstms <> inloop_privstms) pat accs' poststms poststms_res res_ts
 
@@ -438,15 +438,15 @@ doPrelude tiling privstms prestms prestms_live =
   tilingSegMap tiling "prelude" (scalarLevel tiling) ResultPrivate $
     \in_bounds slice -> do
       ts <- mapM lookupType prestms_live
-      fmap (map Var) $
+      fmap varsRes $
         protectOutOfBounds "pre" in_bounds ts $ do
           addPrivStms slice privstms
           addStms prestms
-          pure $ map Var prestms_live
+          pure $ varsRes prestms_live
 
 liveSet :: FreeIn a => Stms GPU -> a -> Names
 liveSet stms after =
-  namesFromList (concatMap (patternNames . stmPattern) stms)
+  namesFromList (concatMap (patNames . stmPat) stms)
     `namesIntersection` freeIn after
 
 tileable ::
@@ -567,7 +567,7 @@ data Tiling = Tiling
       String ->
       SegLevel ->
       ResultManifest ->
-      (PrimExp VName -> Slice SubExp -> Builder GPU [SubExp]) ->
+      (PrimExp VName -> Slice SubExp -> Builder GPU Result) ->
       Builder GPU [VName],
     -- The boolean PrimExp indicates whether they are in-bounds.
 
@@ -603,7 +603,7 @@ protectOutOfBounds ::
   String ->
   PrimExp VName ->
   [Type] ->
-  Builder GPU [SubExp] ->
+  Builder GPU Result ->
   Builder GPU [VName]
 protectOutOfBounds desc in_bounds ts m = do
   -- This is more complicated than you might expect, because we need
@@ -612,7 +612,7 @@ protectOutOfBounds desc in_bounds ts m = do
   -- an accumulator of type 'acc_t', then a unique variable of type
   -- 'acc_t' must also be free in the body.  This means we can find it
   -- based just on the type.
-  m_body <- insertStmsM $ resultBody <$> m
+  m_body <- insertStmsM $ mkBody mempty <$> m
   let m_body_free = namesToList $ freeIn m_body
   t_to_v <-
     filter (isAcc . fst)
@@ -626,7 +626,7 @@ protectOutOfBounds desc in_bounds ts m = do
 postludeGeneric ::
   Tiling ->
   PrivStms ->
-  Pattern GPU ->
+  Pat GPU ->
   [VName] ->
   Stms GPU ->
   Result ->
@@ -635,7 +635,7 @@ postludeGeneric ::
 postludeGeneric tiling privstms pat accs' poststms poststms_res res_ts =
   tilingSegMap tiling "thread_res" (scalarLevel tiling) ResultPrivate $ \in_bounds slice -> do
     -- Read our per-thread result from the tiled loop.
-    forM_ (zip (patternNames pat) accs') $ \(us, everyone) -> do
+    forM_ (zip (patNames pat) accs') $ \(us, everyone) -> do
       everyone_t <- lookupType everyone
       letBindNames [us] $ BasicOp $ Index everyone $ fullSlice everyone_t slice
 
@@ -644,7 +644,7 @@ postludeGeneric tiling privstms pat accs' poststms poststms_res res_ts =
         -- The privstms may still be necessary for the result.
         addPrivStms slice privstms
         return poststms_res
-      else fmap (map Var) $
+      else fmap varsRes $
         protectOutOfBounds "postlude" in_bounds res_ts $ do
           addPrivStms slice privstms
           addStms poststms
@@ -656,7 +656,7 @@ tileGeneric ::
   DoTiling gtids kdims ->
   SegLevel ->
   [Type] ->
-  Pattern GPU ->
+  Pat GPU ->
   gtids ->
   kdims ->
   SubExp ->
@@ -683,11 +683,11 @@ tileGeneric doTiling initial_lvl res_ts pat gtids kdims w form inputs poststms p
       mergeinits <- tilingSegMap tiling "mergeinit" (scalarLevel tiling) ResultPrivate $ \in_bounds slice ->
         -- Constant neutral elements (a common case) do not need protection from OOB.
         if freeIn red_nes == mempty
-          then return red_nes
-          else fmap (map Var) $
+          then return $ subExpsRes red_nes
+          else fmap varsRes $
             protectOutOfBounds "neutral" in_bounds (lambdaReturnType red_lam) $ do
               addPrivStms slice privstms
-              return red_nes
+              return $ subExpsRes red_nes
 
       merge <- forM (zip (lambdaParams red_lam) mergeinits) $ \(p, mergeinit) ->
         (,)
@@ -712,7 +712,7 @@ tileGeneric doTiling initial_lvl res_ts pat gtids kdims w form inputs poststms p
                   ProcessTileArgs privstms red_comm red_lam map_lam tile accs (Var tile_id)
             resultBody . map Var <$> tilingProcessTile tiling tile_args
 
-      accs <- letTupExp "accs" $ DoLoop [] merge loopform loopbody
+      accs <- letTupExp "accs" $ DoLoop merge loopform loopbody
 
       -- We possibly have to traverse a residual tile.
       red_lam' <- renameLambda red_lam
@@ -744,7 +744,7 @@ tileReturns dims_on_top dims arr = do
         let new_shape = unit_dims ++ arrayDims arr_t
         letExp (baseString arr) $ BasicOp $ Reshape (map DimNew new_shape) arr
   let tile_dims = zip (map snd dims_on_top) unit_dims ++ dims
-  return $ TileReturns tile_dims arr'
+  return $ TileReturns mempty tile_dims arr'
 
 is1DTileable :: VName -> M.Map VName Names -> VName -> InputArray
 is1DTileable gtid variance arr
@@ -793,7 +793,7 @@ readTile1D tile_size gid gtid num_groups group_size kind privstms tile_id inputs
       let readTileElem arr =
             -- No need for fullSlice because we are tiling only prims.
             letExp "tile_elem" (BasicOp $ Index arr [DimFix j])
-      fmap (map Var) $
+      fmap varsRes $
         case kind of
           TilePartial ->
             letTupExp "pre"
@@ -841,7 +841,7 @@ processTile1D gid gtid kdim tile_size num_groups group_size tile_args = do
     tiles' <- mapM sliceTile tiles
 
     let form' = redomapSOAC [Reduce red_comm red_lam thread_accs] map_lam
-    fmap (map Var) $
+    fmap varsRes $
       letTupExp "acc"
         =<< eIf
           (toExp $ le64 gtid .<. pe64 kdim)
@@ -1056,7 +1056,7 @@ readTile2D (kdim_x, kdim_y) (gtid_x, gtid_y) (gid_x, gid_y) tile_size num_groups
               (eBody [return $ BasicOp $ Index arr [DimFix idx]])
               (eBody [eBlank tile_t])
 
-      fmap (map Var) $
+      fmap varsRes $
         case kind of
           TilePartial ->
             mapM (letExp "pre" <=< readTileElemIfInBounds) arrs_and_perms
@@ -1120,7 +1120,7 @@ processTile2D (gid_x, gid_y) (gtid_x, gtid_y) (kdim_x, kdim_y) tile_size num_gro
 
       tiles' <- mapM sliceTile tiles
 
-      fmap (map Var) $
+      fmap varsRes $
         letTupExp "acc"
           =<< eIf
             ( toExp $ le64 gtid_x .<. pe64 kdim_x .&&. le64 gtid_y .<. pe64 kdim_y

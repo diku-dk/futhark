@@ -38,7 +38,7 @@ instance RepTypes MCMem where
   type Op MCMem = MemOp (MCOp MCMem ())
 
 instance ASTRep MCMem where
-  expTypesFromPattern = return . map snd . snd . bodyReturnsFromPattern
+  expTypesFromPat = return . map snd . bodyReturnsFromPat
 
 instance OpReturns MCMem where
   opReturns (Alloc _ space) = return [MemMem space]
@@ -61,7 +61,7 @@ instance TC.Checkable MCMem where
   checkLetBoundDec = checkMemInfo
   checkRetType = mapM_ (TC.checkExtType . declExtTypeOf)
   primFParam name t = return $ Param name (MemPrim t)
-  matchPattern = matchPatternToExp
+  matchPat = matchPatToExp
   matchReturnType = matchFunctionReturnType
   matchBranchType = matchBranchReturnType
   matchLoopResult = matchLoopResultMem

@@ -140,5 +140,5 @@ internalisePartitionLambda internaliseLambda k lam args = do
 
     lambdaWithIncrement :: I.Body -> InternaliseM I.Body
     lambdaWithIncrement lam_body = runBodyBuilder $ do
-      eq_class <- head <$> bodyBind lam_body
+      eq_class <- resSubExp . head <$> bodyBind lam_body
       resultBody <$> mkResult eq_class 0

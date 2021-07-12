@@ -33,7 +33,7 @@ module Futhark.IR.Prop
     defAux,
     stmCerts,
     certify,
-    expExtTypesFromPattern,
+    expExtTypesFromPat,
     attrsForAssert,
     lamIsBinOp,
     ASTConstraints,
@@ -125,7 +125,7 @@ safeExp (BasicOp op) = safeBasicOp op
     safeBasicOp Replicate {} = True
     safeBasicOp Copy {} = True
     safeBasicOp _ = False
-safeExp (DoLoop _ _ _ body) = safeBody body
+safeExp (DoLoop _ _ body) = safeBody body
 safeExp (Apply fname _ _ _) =
   isBuiltInFunction fname
 safeExp (If _ tbranch fbranch _) =
@@ -158,12 +158,14 @@ commutativeLambda lam =
       (xps, yps) = splitAt n2 (lambdaParams lam)
 
       okComponent c = isJust $ find (okBinOp c) $ bodyStms body
-      okBinOp (xp, yp, Var r) (Let (Pattern [] [pe]) _ (BasicOp (BinOp op (Var x) (Var y)))) =
-        patElemName pe == r
-          && commutativeBinOp op
-          && ( (x == paramName xp && y == paramName yp)
-                 || (y == paramName xp && x == paramName yp)
-             )
+      okBinOp
+        (xp, yp, SubExpRes _ (Var r))
+        (Let (Pat [pe]) _ (BasicOp (BinOp op (Var x) (Var y)))) =
+          patElemName pe == r
+            && commutativeBinOp op
+            && ( (x == paramName xp && y == paramName yp)
+                   || (y == paramName xp && x == paramName yp)
+               )
       okBinOp _ _ = False
    in n2 * 2 == length (lambdaParams lam)
         && n2 == length (bodyResult body)
@@ -178,16 +180,16 @@ entryPointSize (TypeOpaque _ _ x) = x
 entryPointSize (TypeUnsigned _) = 1
 entryPointSize (TypeDirect _) = 1
 
--- | A 'StmAux' with empty 'Certificates'.
+-- | A 'StmAux' with empty 'Certs'.
 defAux :: dec -> StmAux dec
 defAux = StmAux mempty mempty
 
 -- | The certificates associated with a statement.
-stmCerts :: Stm rep -> Certificates
+stmCerts :: Stm rep -> Certs
 stmCerts = stmAuxCerts . stmAux
 
 -- | Add certificates to a statement.
-certify :: Certificates -> Stm rep -> Stm rep
+certify :: Certs -> Stm rep -> Stm rep
 certify cs1 (Let pat (StmAux cs2 attrs dec) e) =
   Let pat (StmAux (cs2 <> cs1) attrs dec) e
 
@@ -228,17 +230,17 @@ class
   where
   -- | Given a pattern, construct the type of a body that would match
   -- it.  An implementation for many representations would be
-  -- 'expExtTypesFromPattern'.
-  expTypesFromPattern ::
+  -- 'expExtTypesFromPat'.
+  expTypesFromPat ::
     (HasScope rep m, Monad m) =>
-    Pattern rep ->
+    Pat rep ->
     m [BranchType rep]
 
 -- | Construct the type of an expression that would match the pattern.
-expExtTypesFromPattern :: Typed dec => PatternT dec -> [ExtType]
-expExtTypesFromPattern pat =
-  existentialiseExtTypes (patternContextNames pat) $
-    staticShapes $ map patElemType $ patternValueElements pat
+expExtTypesFromPat :: Typed dec => PatT dec -> [ExtType]
+expExtTypesFromPat pat =
+  existentialiseExtTypes (patNames pat) $
+    staticShapes $ map patElemType $ patElements pat
 
 -- | Keep only those attributes that are relevant for 'Assert'
 -- expressions.
@@ -253,11 +255,12 @@ lamIsBinOp :: ASTRep rep => Lambda rep -> Maybe [(BinOp, PrimType, VName, VName)
 lamIsBinOp lam = mapM splitStm $ bodyResult $ lambdaBody lam
   where
     n = length $ lambdaReturnType lam
-    splitStm (Var res) = do
-      Let (Pattern [] [pe]) _ (BasicOp (BinOp op (Var x) (Var y))) <-
-        find (([res] ==) . patternNames . stmPattern) $
+    splitStm (SubExpRes cs (Var res)) = do
+      guard $ cs == mempty
+      Let (Pat [pe]) _ (BasicOp (BinOp op (Var x) (Var y))) <-
+        find (([res] ==) . patNames . stmPat) $
           stmsToList $ bodyStms $ lambdaBody lam
-      i <- Var res `elemIndex` bodyResult (lambdaBody lam)
+      i <- Var res `elemIndex` map resSubExp (bodyResult (lambdaBody lam))
       xp <- maybeNth i $ lambdaParams lam
       yp <- maybeNth (n + i) $ lambdaParams lam
       guard $ paramName xp == x

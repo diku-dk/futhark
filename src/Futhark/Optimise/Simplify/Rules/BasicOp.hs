@@ -35,7 +35,7 @@ data ConcatArg
   | ArgReplicate [SubExp] SubExp
   | ArgVar VName
 
-toConcatArg :: ST.SymbolTable rep -> VName -> (ConcatArg, Certificates)
+toConcatArg :: ST.SymbolTable rep -> VName -> (ConcatArg, Certs)
 toConcatArg vtable v =
   case ST.lookupBasicOp v vtable of
     Just (ArrayLit ses _, cs) ->
@@ -48,7 +48,7 @@ toConcatArg vtable v =
 fromConcatArg ::
   MonadBuilder m =>
   Type ->
-  (ConcatArg, Certificates) ->
+  (ConcatArg, Certs) ->
   m VName
 fromConcatArg t (ArgArrayLit ses, cs) =
   certifying cs $ letExp "concat_lit" $ BasicOp $ ArrayLit ses $ rowType t
@@ -61,9 +61,9 @@ fromConcatArg _ (ArgVar v, _) =
   pure v
 
 fuseConcatArg ::
-  [(ConcatArg, Certificates)] ->
-  (ConcatArg, Certificates) ->
-  [(ConcatArg, Certificates)]
+  [(ConcatArg, Certs)] ->
+  (ConcatArg, Certs) ->
+  [(ConcatArg, Certs)]
 fuseConcatArg xs (ArgArrayLit [], _) =
   xs
 fuseConcatArg xs (ArgReplicate [w] se, cs)
@@ -210,7 +210,7 @@ ruleBasicOp vtable pat _ (CmpOp (CmpEq t) se1 se2)
       | Just bnd <- ST.lookupStm v vtable,
         If p tbranch fbranch _ <- stmExp bnd,
         Just (y, z) <-
-          returns v (stmPattern bnd) tbranch fbranch,
+          returns v (stmPat bnd) tbranch fbranch,
         not $ boundInBody tbranch `namesIntersect` freeIn y,
         not $ boundInBody fbranch `namesIntersect` freeIn z = Just $ do
         eq_x_y <-
@@ -229,10 +229,9 @@ ruleBasicOp vtable pat _ (CmpOp (CmpEq t) se1 se2)
       Nothing
 
     returns v ifpat tbranch fbranch =
-      fmap snd $
-        find ((== v) . patElemName . fst) $
-          zip (patternValueElements ifpat) $
-            zip (bodyResult tbranch) (bodyResult fbranch)
+      fmap snd . find ((== v) . patElemName . fst) $
+        zip (patElements ifpat) $
+          zip (map resSubExp (bodyResult tbranch)) (map resSubExp (bodyResult fbranch))
 ruleBasicOp _ pat _ (Replicate (Shape []) se@Constant {}) =
   Simplify $ letBind pat $ BasicOp $ SubExp se
 ruleBasicOp _ pat _ (Replicate (Shape []) (Var v)) = Simplify $ do
@@ -372,6 +371,16 @@ ruleBasicOp vtable pat aux (CmpOp CmpSlt {} (Var x) y)
   | isCt0 y,
     maybe False ST.entryIsSize $ ST.lookup x vtable =
     Simplify $ auxing aux $ letBind pat $ BasicOp $ SubExp $ constant False
+-- Remove certificates for variables whose definition already contain
+-- that certificate.
+ruleBasicOp vtable pat aux (SubExp (Var v))
+  | cs <- unCerts $ stmAuxCerts aux,
+    not $ null cs,
+    Just v_cs <- unCerts . stmCerts <$> ST.lookupStm v vtable,
+    cs' <- filter (`notElem` v_cs) cs,
+    cs' /= cs =
+    Simplify . certifying (Certs cs') $
+      letBind pat $ BasicOp $ SubExp $ Var v
 ruleBasicOp _ _ _ _ =
   Skip
 

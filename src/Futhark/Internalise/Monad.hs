@@ -153,7 +153,7 @@ bindConstant cname fd = do
   let stms = bodyStms $ funDefBody fd
       substs =
         takeLast (length (funDefRetType fd)) $
-          bodyResult $ funDefBody fd
+          map resSubExp $ bodyResult $ funDefBody fd
   addStms stms
   modify $ \s ->
     s
@@ -174,7 +174,7 @@ assert ::
   SubExp ->
   ErrorMsg SubExp ->
   SrcLoc ->
-  InternaliseM Certificates
+  InternaliseM Certs
 assert desc se msg loc = assertingOne $ do
   attrs <- asks $ attrsForAssert . envAttrs
   attributing attrs $
@@ -184,8 +184,8 @@ assert desc se msg loc = assertingOne $ do
 -- | Execute the given action if 'envDoBoundsChecks' is true, otherwise
 -- just return an empty list.
 asserting ::
-  InternaliseM Certificates ->
-  InternaliseM Certificates
+  InternaliseM Certs ->
+  InternaliseM Certs
 asserting m = do
   doBoundsChecks <- asks envDoBoundsChecks
   if doBoundsChecks
@@ -196,5 +196,5 @@ asserting m = do
 -- just return an empty list.
 assertingOne ::
   InternaliseM VName ->
-  InternaliseM Certificates
-assertingOne m = asserting $ Certificates . pure <$> m
+  InternaliseM Certs
+assertingOne m = asserting $ Certs . pure <$> m

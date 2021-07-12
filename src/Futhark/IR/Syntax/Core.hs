@@ -40,7 +40,7 @@ module Futhark.IR.Syntax.Core
 
     -- * Abstract syntax tree
     Ident (..),
-    Certificates (..),
+    Certs (..),
     SubExp (..),
     Param (..),
     DimIndex (..),
@@ -281,14 +281,14 @@ instance Ord Ident where
   x `compare` y = identName x `compare` identName y
 
 -- | A list of names used for certificates in some expressions.
-newtype Certificates = Certificates {unCertificates :: [VName]}
+newtype Certs = Certs {unCerts :: [VName]}
   deriving (Eq, Ord, Show)
 
-instance Semigroup Certificates where
-  Certificates x <> Certificates y = Certificates (x <> y)
+instance Semigroup Certs where
+  Certs x <> Certs y = Certs (x <> y)
 
-instance Monoid Certificates where
-  mempty = Certificates mempty
+instance Monoid Certs where
+  mempty = Certs mempty
 
 -- | A subexpression is either a scalar constant or a variable.  One
 -- important property is that evaluation of a subexpression is
@@ -388,7 +388,7 @@ sliceSlice _ _ = []
 data PatElemT dec = PatElem
   { -- | The name being bound.
     patElemName :: VName,
-    -- | Pattern element decoration.
+    -- | Pat element decoration.
     patElemDec :: dec
   }
   deriving (Ord, Show, Eq)

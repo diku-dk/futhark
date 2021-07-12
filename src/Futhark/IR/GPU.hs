@@ -34,7 +34,7 @@ instance RepTypes GPU where
   type Op GPU = HostOp GPU (SOAC GPU)
 
 instance ASTRep GPU where
-  expTypesFromPattern = return . expExtTypesFromPattern
+  expTypesFromPat = return . expExtTypesFromPat
 
 instance TypeCheck.CheckableOp GPU where
   checkOp = typeCheckGPUOp Nothing
@@ -46,7 +46,7 @@ instance TypeCheck.Checkable GPU
 
 instance Buildable GPU where
   mkBody = Body ()
-  mkExpPat ctx val _ = basicPattern ctx val
+  mkExpPat idents _ = basicPat idents
   mkExpDec _ _ = ()
   mkLetNames = simpleMkLetNames
 

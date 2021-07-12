@@ -56,10 +56,8 @@
 -- t'Body' consists of executing all of the statements, then returning
 -- the values of the variables indicated by the result.
 --
--- A statement ('Stm') consists of a t'Pattern' alongside an
--- expression 'ExpT'.  A pattern contains a "context" part and a
--- "value" part.  The context is used for things like the size of
--- arrays in the value part whose size is existential.
+-- A statement ('Stm') consists of a t'Pat' alongside an
+-- expression 'ExpT'.  A pattern is a sequence of name/type pairs.
 --
 -- For example, the source language expression @let z = x + y - 1 in
 -- z@ would in the core language be represented (in prettyprinted
@@ -125,11 +123,12 @@ module Futhark.IR.Syntax
     SubExp (..),
     PatElem,
     PatElemT (..),
-    PatternT (..),
-    Pattern,
+    PatT (..),
+    Pat,
     StmAux (..),
     Stm (..),
     Stms,
+    SubExpRes (..),
     Result,
     BodyT (..),
     Body,
@@ -163,6 +162,10 @@ module Futhark.IR.Syntax
     stmsFromList,
     stmsToList,
     stmsHead,
+    subExpRes,
+    subExpsRes,
+    varRes,
+    varsRes,
   )
 where
 
@@ -208,36 +211,31 @@ withoutAttrs (Attrs x) (Attrs y) = Attrs $ x `S.difference` y
 type PatElem rep = PatElemT (LetDec rep)
 
 -- | A pattern is conceptually just a list of names and their types.
-data PatternT dec = Pattern
-  { -- | existential context (sizes and memory blocks)
-    patternContextElements :: [PatElemT dec],
-    -- | "real" values
-    patternValueElements :: [PatElemT dec]
-  }
+newtype PatT dec = Pat {patElements :: [PatElemT dec]}
   deriving (Ord, Show, Eq)
 
-instance Semigroup (PatternT dec) where
-  Pattern cs1 vs1 <> Pattern cs2 vs2 = Pattern (cs1 ++ cs2) (vs1 ++ vs2)
+instance Semigroup (PatT dec) where
+  Pat xs <> Pat ys = Pat (xs <> ys)
 
-instance Monoid (PatternT dec) where
-  mempty = Pattern [] []
+instance Monoid (PatT dec) where
+  mempty = Pat mempty
 
-instance Functor PatternT where
+instance Functor PatT where
   fmap = fmapDefault
 
-instance Foldable PatternT where
+instance Foldable PatT where
   foldMap = foldMapDefault
 
-instance Traversable PatternT where
-  traverse f (Pattern ctx vals) =
-    Pattern <$> traverse (traverse f) ctx <*> traverse (traverse f) vals
+instance Traversable PatT where
+  traverse f (Pat xs) =
+    Pat <$> traverse (traverse f) xs
 
 -- | A type alias for namespace control.
-type Pattern rep = PatternT (LetDec rep)
+type Pat rep = PatT (LetDec rep)
 
 -- | Auxilliary Information associated with a statement.
 data StmAux dec = StmAux
-  { stmAuxCerts :: !Certificates,
+  { stmAuxCerts :: !Certs,
     stmAuxAttrs :: Attrs,
     stmAuxDec :: dec
   }
@@ -249,8 +247,8 @@ instance Semigroup dec => Semigroup (StmAux dec) where
 
 -- | A local variable binding.
 data Stm rep = Let
-  { -- | Pattern.
-    stmPattern :: Pattern rep,
+  { -- | Pat.
+    stmPat :: Pat rep,
     -- | Auxiliary information statement.
     stmAux :: StmAux (ExpDec rep),
     -- | Expression.
@@ -284,8 +282,31 @@ stmsHead stms = case Seq.viewl stms of
   stm Seq.:< stms' -> Just (stm, stms')
   Seq.EmptyL -> Nothing
 
+-- | A pairing of a subexpression and some certificates.
+data SubExpRes = SubExpRes
+  { resCerts :: Certs,
+    resSubExp :: SubExp
+  }
+  deriving (Eq, Ord, Show)
+
+-- | Construct a 'SubExpRes' with no certificates.
+subExpRes :: SubExp -> SubExpRes
+subExpRes = SubExpRes mempty
+
+-- | Construct a 'SubExpRes' from a variable name.
+varRes :: VName -> SubExpRes
+varRes = subExpRes . Var
+
+-- | Construct a 'Result' from subexpressions.
+subExpsRes :: [SubExp] -> Result
+subExpsRes = map subExpRes
+
+-- | Construct a 'Result' from variable names.
+varsRes :: [VName] -> Result
+varsRes = map varRes
+
 -- | The result of a body is a sequence of subexpressions.
-type Result = [SubExp]
+type Result = [SubExpRes]
 
 -- | A body consists of a number of bindings, terminating in a result
 -- (essentially a tuple literal).
@@ -414,9 +435,8 @@ data ExpT rep
     BasicOp BasicOp
   | Apply Name [(SubExp, Diet)] [RetType rep] (Safety, SrcLoc, [SrcLoc])
   | If SubExp (BodyT rep) (BodyT rep) (IfDec (BranchType rep))
-  | -- | @loop {a} = {v} (for i < n|while b) do b@.  The merge
-    -- parameters are divided into context and value part.
-    DoLoop [(FParam rep, SubExp)] [(FParam rep, SubExp)] (LoopForm rep) (BodyT rep)
+  | -- | @loop {a} = {v} (for i < n|while b) do b@.
+    DoLoop [(FParam rep, SubExp)] (LoopForm rep) (BodyT rep)
   | -- | Create accumulators backed by the given arrays (which are
     -- consumed) and pass them to the lambda, which must return the
     -- updated accumulators and possibly some extra values.  The

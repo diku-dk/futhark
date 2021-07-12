@@ -42,8 +42,8 @@ class
   ) =>
   Buildable rep
   where
-  mkExpPat :: [Ident] -> [Ident] -> Exp rep -> Pattern rep
-  mkExpDec :: Pattern rep -> Exp rep -> ExpDec rep
+  mkExpPat :: [Ident] -> Exp rep -> Pat rep
+  mkExpDec :: Pat rep -> Exp rep -> ExpDec rep
   mkBody :: Stms rep -> Result -> Body rep
   mkLetNames ::
     (MonadFreshNames m, HasScope rep m) =>
@@ -72,7 +72,7 @@ class
   MonadBuilder m
   where
   type Rep m :: Data.Kind.Type
-  mkExpDecM :: Pattern (Rep m) -> Exp (Rep m) -> m (ExpDec (Rep m))
+  mkExpDecM :: Pat (Rep m) -> Exp (Rep m) -> m (ExpDec (Rep m))
   mkBodyM :: Stms (Rep m) -> Result -> m (Body (Rep m))
   mkLetNamesM :: [VName] -> Exp (Rep m) -> m (Stm (Rep m))
 
@@ -89,7 +89,7 @@ class
 
   -- | Add the provided certificates to any statements added during
   -- execution of the action.
-  certifying :: Certificates -> m a -> m a
+  certifying :: Certs -> m a -> m a
   certifying = censorStms . fmap . certify
 
 -- | Apply a function to the statements added by this action.
@@ -127,7 +127,7 @@ auxing (StmAux cs attrs _) = censorStms $ fmap onStm
 -- | Add a statement with the given pattern and expression.
 letBind ::
   MonadBuilder m =>
-  Pattern (Rep m) ->
+  Pat (Rep m) ->
   Exp (Rep m) ->
   m ()
 letBind pat e =
@@ -135,17 +135,17 @@ letBind pat e =
 
 -- | Construct a 'Stm' from identifiers for the context- and value
 -- part of the pattern, as well as the expression.
-mkLet :: Buildable rep => [Ident] -> [Ident] -> Exp rep -> Stm rep
-mkLet ctx val e =
-  let pat = mkExpPat ctx val e
+mkLet :: Buildable rep => [Ident] -> Exp rep -> Stm rep
+mkLet ids e =
+  let pat = mkExpPat ids e
       dec = mkExpDec pat e
    in Let pat (defAux dec) e
 
 -- | Like mkLet, but also take attributes and certificates from the
 -- given 'StmAux'.
-mkLet' :: Buildable rep => [Ident] -> [Ident] -> StmAux a -> Exp rep -> Stm rep
-mkLet' ctx val (StmAux cs attrs _) e =
-  let pat = mkExpPat ctx val e
+mkLet' :: Buildable rep => [Ident] -> StmAux a -> Exp rep -> Stm rep
+mkLet' ids (StmAux cs attrs _) e =
+  let pat = mkExpPat ids e
       dec = mkExpDec pat e
    in Let pat (StmAux cs attrs dec) e
 
@@ -159,10 +159,10 @@ collectStms_ :: MonadBuilder m => m a -> m (Stms (Rep m))
 collectStms_ = fmap snd . collectStms
 
 -- | Add the statements of the body, then return the body result.
-bodyBind :: MonadBuilder m => Body (Rep m) -> m [SubExp]
-bodyBind (Body _ stms es) = do
+bodyBind :: MonadBuilder m => Body (Rep m) -> m Result
+bodyBind (Body _ stms res) = do
   addStms stms
-  return es
+  pure res
 
 -- | Add several bindings at the outermost level of a t'Body'.
 insertStms :: Buildable rep => Stms rep -> Body rep -> Body rep
