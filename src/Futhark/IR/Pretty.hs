@@ -325,6 +325,7 @@ instance Pretty d => Pretty (DimIndex d) where
 
 instance Pretty d => Pretty (Slice d) where
   ppr (DimIndices i) = brackets (commasep (map ppr i))
+  ppr (DimArrs arrs) = brackets (commasep (map ppr arrs))
 
 ppPattern :: (Pretty a, Pretty b) => [a] -> [b] -> Doc
 ppPattern [] bs = braces $ commastack $ map ppr bs

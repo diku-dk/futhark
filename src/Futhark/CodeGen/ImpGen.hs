@@ -1695,6 +1695,7 @@ inBounds (DimIndices slice) dims =
       condInBounds (DimSlice i n s) d =
         0 .<=. i .&&. i + n * s .<. d
    in foldl1 (.&&.) $ zipWith condInBounds slice dims
+inBounds (DimArrs arrs) dims = undefined
 
 --- Building blocks for constructing code.
 

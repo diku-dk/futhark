@@ -326,19 +326,22 @@ instance Traversable DimIndex where
 -- Whenever a function accepts a 'Slice', that slice should be total,
 -- i.e, cover all dimensions of the array.  Deviators should be
 -- indicated by taking a list of 'DimIndex'es instead.
-newtype Slice d
+data Slice d
   = DimIndices [DimIndex d]
+  | DimArrs [d]
   deriving (Eq, Ord, Show)
 
 instance Foldable Slice where
   foldMap = foldMapDefault
   length (DimIndices idxs) = length idxs
+  length (DimArrs arrs) = undefined -- TODO, given by type of arrs
 
 instance Functor Slice where
   fmap = fmapDefault
 
 instance Traversable Slice where
   traverse f (DimIndices idxs) = DimIndices <$> traverse (traverse f) idxs
+  traverse f (DimArrs arrs) = DimArrs <$> traverse f arrs
 
 -- | If the argument is a 'DimFix', return its component.
 dimFix :: DimIndex d -> Maybe d
@@ -348,6 +351,7 @@ dimFix _ = Nothing
 -- | If the slice is all 'DimFix's, return the components.
 sliceIndices :: Slice d -> Maybe [d]
 sliceIndices (DimIndices idxs) = mapM dimFix idxs
+sliceIndices (DimArrs arrs) = Nothing
 
 -- | The dimensions of the array produced by this slice.
 sliceDims :: Slice d -> [d]
@@ -355,6 +359,7 @@ sliceDims (DimIndices idxs) = mapMaybe dimSlice idxs
   where
     dimSlice (DimSlice _ d _) = Just d
     dimSlice DimFix {} = Nothing
+sliceDims (DimArrs arrs) = undefined
 
 -- | A slice with a stride of one.
 unitSlice :: Num d => d -> d -> DimIndex d
@@ -364,6 +369,7 @@ unitSlice offset n = DimSlice offset n 1
 -- the length of 'sliceDims' for the slice.
 fixSlice :: Num d => Slice d -> [d] -> [d]
 fixSlice (DimIndices idxs) = fixDimIndices idxs
+fixSlice (DimArrs arrs) = undefined
 
 -- | Fix the 'DimSlice's of a slice.  The number of indexes must equal
 -- the length of 'sliceDims' for the slice.

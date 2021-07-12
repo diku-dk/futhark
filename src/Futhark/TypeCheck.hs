@@ -1197,6 +1197,19 @@ checkSlice ::
   Slice SubExp ->
   TypeM lore ()
 checkSlice (DimIndices idxs) = mapM_ checkDimIndex idxs
+checkSlice (DimArrs ((Var vname) : as)) = do
+  t <- lookupType vname
+  case t of
+    Array (IntType Int64) shp u ->
+      mapM_ (require [Array int64 shp u]) as
+    _ -> bad $ TypeError $ unlines ["Invalid type for array indexing " ++ pretty t]
+checkSlice (DimArrs arrs) =
+  bad $
+    TypeError $
+      unlines
+        [ "Array indexing should be a list of int64 arrays with the same shape, but got",
+          "  " ++ pretty arrs
+        ]
 
 checkDimIndex ::
   Checkable lore =>

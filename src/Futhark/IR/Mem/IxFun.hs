@@ -507,6 +507,13 @@ slice ixfun@(IxFun (lmad@(LMAD _ _) :| lmads) oshp cg) (DimIndices dim_slices)
       Just (IxFun (lmad' :| []) _ cg') ->
         IxFun (lmad' :| lmad : lmads) oshp (cg && cg')
       _ -> error "slice: reached impossible case"
+slice ixfun@(IxFun (lmad :| lmads)oshp cg) (DimArrs arrs) =
+  let ts = mapM_ typeOf
+  let cg' = cg && slicePreservesContiguous lmad is'
+      perm = lmadPermutation lmad
+      is' = permuteInv perm is
+
+undefined
 
 -- | Handle the simple case where all reshape dimensions are coercions.
 reshapeCoercion ::
