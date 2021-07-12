@@ -63,7 +63,7 @@ standardRules = ruleBook topDownRules bottomUpRules <> loopRules <> basicOpRules
 --
 -- This simplistic rule is only valid before we introduce memory.
 removeUnnecessaryCopy :: (BuilderOps rep, Aliased rep) => BottomUpRuleBasicOp rep
-removeUnnecessaryCopy (vtable, used) (Pattern [d]) _ (Copy v)
+removeUnnecessaryCopy (vtable, used) (Pat [d]) _ (Copy v)
   | not (v `UT.isConsumed` used),
     (not (v `UT.used` used) && consumable) || not (patElemName d `UT.isConsumed` used) =
     Simplify $ letBindNames [patElemName d] $ BasicOp $ SubExp $ Var v
@@ -78,8 +78,8 @@ removeUnnecessaryCopy (vtable, used) (Pattern [d]) _ (Copy v)
     consumableFParam =
       Just . maybe False (unique . declTypeOf) . ST.entryFParam
     consumableStm e = do
-      pat <- stmPattern <$> ST.entryStm e
-      pe <- find ((== v) . patElemName) (patternElements pat)
+      pat <- stmPat <$> ST.entryStm e
+      pe <- find ((== v) . patElemName) (patElements pat)
       guard $ aliasesOf pe == mempty
       pure True
 removeUnnecessaryCopy _ _ _ _ = Skip
@@ -99,16 +99,16 @@ constantFoldPrimFun _ (Let pat (StmAux cs attrs _) (Apply fname args _ _))
 constantFoldPrimFun _ _ = Skip
 
 simplifyIndex :: BuilderOps rep => BottomUpRuleBasicOp rep
-simplifyIndex (vtable, used) pat@(Pattern [pe]) (StmAux cs attrs _) (Index idd inds)
+simplifyIndex (vtable, used) pat@(Pat [pe]) (StmAux cs attrs _) (Index idd inds)
   | Just m <- simplifyIndexing vtable seType idd inds consumed = Simplify $ do
     res <- m
     attributing attrs $ case res of
       SubExpResult cs' se ->
         certifying (cs <> cs') $
-          letBindNames (patternNames pat) $ BasicOp $ SubExp se
+          letBindNames (patNames pat) $ BasicOp $ SubExp se
       IndexResult extra_cs idd' inds' ->
         certifying (cs <> extra_cs) $
-          letBindNames (patternNames pat) $ BasicOp $ Index idd' inds'
+          letBindNames (patNames pat) $ BasicOp $ Index idd' inds'
   where
     consumed = patElemName pe `UT.isConsumed` used
     seType (Var v) = ST.lookupType v vtable
@@ -123,7 +123,7 @@ ruleIf _ pat _ (e1, tb, fb, IfDec _ ifsort)
     addStms $ bodyStms branch
     sequence_
       [ certifying cs $ letBindNames [patElemName p] $ BasicOp $ SubExp se
-        | (p, SubExpRes cs se) <- zip (patternElements pat) ses
+        | (p, SubExpRes cs se) <- zip (patElements pat) ses
       ]
   where
     checkBranch
@@ -173,7 +173,7 @@ ruleIf _ pat _ (_, tbranch, _, IfDec _ IfFallback)
     addStms $ bodyStms tbranch
     sequence_
       [ certifying cs $ letBindNames [patElemName p] $ BasicOp $ SubExp se
-        | (p, SubExpRes cs se) <- zip (patternElements pat) ses
+        | (p, SubExpRes cs se) <- zip (patElements pat) ses
       ]
 ruleIf _ pat _ (cond, tb, fb, _)
   | Body _ _ [SubExpRes tcs (Constant (IntValue t))] <- tb,
@@ -199,7 +199,7 @@ hoistBranchInvariant _ pat _ (cond, tb, fb, IfDec ret ifsort) = Simplify $ do
       fses = bodyResult fb
   (hoistings, (pes, ts, res)) <-
     fmap (fmap unzip3 . partitionEithers) . mapM branchInvariant $
-      zip4 [0 ..] (patternElements pat) ret (zip tses fses)
+      zip4 [0 ..] (patElements pat) ret (zip tses fses)
   let ctx_fixes = catMaybes hoistings
       (tses', fses') = unzip res
       tb' = tb {bodyResult = tses'}
@@ -211,11 +211,11 @@ hoistBranchInvariant _ pat _ (cond, tb, fb, IfDec ret ifsort) = Simplify $ do
       -- less existential.
       tb'' <- reshapeBodyResults tb' $ map extTypeOf ret'
       fb'' <- reshapeBodyResults fb' $ map extTypeOf ret'
-      letBind (Pattern pes) $ If cond tb'' fb'' (IfDec ret' ifsort)
+      letBind (Pat pes) $ If cond tb'' fb'' (IfDec ret' ifsort)
     else cannotSimplify
   where
     bound_in_branches =
-      namesFromList . concatMap (patternNames . stmPattern) $
+      namesFromList . concatMap (patNames . stmPat) $
         bodyStms tb <> bodyStms fb
     invariant Constant {} = True
     invariant (Var v) = not $ v `nameIn` bound_in_branches
@@ -232,9 +232,9 @@ hoistBranchInvariant _ pat _ (cond, tb, fb, IfDec ret ifsort) = Simplify $ do
       -- latter is to avoid infinite application of this rule.
       | invariant $ resSubExp tse,
         invariant $ resSubExp fse,
-        patternSize pat > 1,
+        patSize pat > 1,
         Prim _ <- patElemType pe = do
-        bt <- expTypesFromPattern $ Pattern [pe]
+        bt <- expTypesFromPat $ Pat [pe]
         letBindNames [patElemName pe]
           =<< ( If cond <$> resultBodyM [resSubExp tse]
                   <*> resultBodyM [resSubExp fse]
@@ -267,9 +267,9 @@ hoistBranchInvariant _ pat _ (cond, tb, fb, IfDec ret ifsort) = Simplify $ do
 removeDeadBranchResult :: BuilderOps rep => BottomUpRuleIf rep
 removeDeadBranchResult (_, used) pat _ (e1, tb, fb, IfDec rettype ifsort)
   | -- Only if there is no existential binding...
-    not $ any (`nameIn` foldMap freeIn (patternElements pat)) (patternNames pat),
+    not $ any (`nameIn` foldMap freeIn (patElements pat)) (patNames pat),
     -- Figure out which of the names in 'pat' are used...
-    patused <- map (`UT.isUsedDirectly` used) $ patternNames pat,
+    patused <- map (`UT.isUsedDirectly` used) $ patNames pat,
     -- If they are not all used, then this rule applies.
     not (and patused) =
     -- Remove the parts of the branch-results that correspond to dead
@@ -281,16 +281,16 @@ removeDeadBranchResult (_, used) pat _ (e1, tb, fb, IfDec rettype ifsort)
         pick = map snd . filter fst . zip patused
         tb' = tb {bodyResult = pick tses}
         fb' = fb {bodyResult = pick fses}
-        pat' = pick $ patternElements pat
+        pat' = pick $ patElements pat
         rettype' = pick rettype
-     in Simplify $ letBind (Pattern pat') $ If e1 tb' fb' $ IfDec rettype' ifsort
+     in Simplify $ letBind (Pat pat') $ If e1 tb' fb' $ IfDec rettype' ifsort
   | otherwise = Skip
 
 withAccTopDown :: BuilderOps rep => TopDownRuleGeneric rep
 -- A WithAcc with no accumulators is sent to Valhalla.
 withAccTopDown _ (Let pat aux (WithAcc [] lam)) = Simplify . auxing aux $ do
   lam_res <- bodyBind $ lambdaBody lam
-  forM_ (zip (patternNames pat) lam_res) $ \(v, SubExpRes cs se) ->
+  forM_ (zip (patNames pat) lam_res) $ \(v, SubExpRes cs se) ->
     certifying cs $ letBindNames [v] $ BasicOp $ SubExp se
 -- Identify those results in 'lam' that are free and move them out.
 withAccTopDown vtable (Let pat aux (WithAcc inputs lam)) = Simplify . auxing aux $ do
@@ -299,7 +299,7 @@ withAccTopDown vtable (Let pat aux (WithAcc inputs lam)) = Simplify . auxing aux
       (acc_res, nonacc_res) =
         splitFromEnd num_nonaccs $ bodyResult $ lambdaBody lam
       (acc_pes, nonacc_pes) =
-        splitFromEnd num_nonaccs $ patternElements pat
+        splitFromEnd num_nonaccs $ patElements pat
 
   -- Look at accumulator results.
   (acc_pes', inputs', params', acc_res') <-
@@ -321,7 +321,7 @@ withAccTopDown vtable (Let pat aux (WithAcc inputs lam)) = Simplify . auxing aux
     mkLambda (cert_params' ++ acc_params') $
       bodyBind $ (lambdaBody lam) {bodyResult = acc_res' <> nonacc_res'}
 
-  letBind (Pattern (concat acc_pes' <> nonacc_pes')) $ WithAcc inputs' lam'
+  letBind (Pat (concat acc_pes' <> nonacc_pes')) $ WithAcc inputs' lam'
   where
     num_nonaccs = length (lambdaReturnType lam) - length inputs
     inputArrs (_, arrs, _) = length arrs
@@ -351,11 +351,11 @@ withAccTopDown _ _ = Skip
 withAccBottomUp :: BuilderOps rep => BottomUpRuleGeneric rep
 -- Eliminate dead results.
 withAccBottomUp (_, utable) (Let pat aux (WithAcc inputs lam))
-  | not $ all (`UT.used` utable) $ patternNames pat = Simplify $ do
+  | not $ all (`UT.used` utable) $ patNames pat = Simplify $ do
     let (acc_res, nonacc_res) =
           splitFromEnd num_nonaccs $ bodyResult $ lambdaBody lam
         (acc_pes, nonacc_pes) =
-          splitFromEnd num_nonaccs $ patternElements pat
+          splitFromEnd num_nonaccs $ patElements pat
         (cert_params, acc_params) =
           splitAt (length inputs) $ lambdaParams lam
 
@@ -381,7 +381,7 @@ withAccBottomUp (_, utable) (Let pat aux (WithAcc inputs lam))
       void $ bodyBind $ lambdaBody lam
       pure $ acc_res' ++ nonacc_res'
 
-    auxing aux $ letBind (Pattern pes') $ WithAcc inputs' lam'
+    auxing aux $ letBind (Pat pes') $ WithAcc inputs' lam'
   where
     num_nonaccs = length (lambdaReturnType lam) - length inputs
     inputArrs (_, arrs, _) = length arrs

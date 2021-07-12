@@ -19,8 +19,8 @@ import Futhark.IR.GPU hiding
     FunDef,
     LParam,
     Lambda,
+    Pat,
     PatElem,
-    Pattern,
     Prog,
     RetType,
     Stm,
@@ -70,7 +70,7 @@ nonlinearInMemory name m =
       nonlinear
         =<< find
           ((== name) . patElemName . fst)
-          (zip (patternElements pat) ts)
+          (zip (patElements pat) ts)
     _ -> Nothing
   where
     nonlinear (pe, t)
@@ -95,12 +95,12 @@ transformStm expmap (Let pat aux (Op (SegOp op)))
     op' <- mapSegOpM mapper op
     let stm' = Let pat aux $ Op $ SegOp op'
     addStm stm'
-    return $ M.fromList [(name, stm') | name <- patternNames pat] <> expmap
+    return $ M.fromList [(name, stm') | name <- patNames pat] <> expmap
 transformStm expmap (Let pat aux e) = do
   e' <- mapExpM (transform expmap) e
   let bnd' = Let pat aux e'
   addStm bnd'
-  return $ M.fromList [(name, bnd') | name <- patternNames pat] <> expmap
+  return $ M.fromList [(name, bnd') | name <- patNames pat] <> expmap
 
 transform :: ExpMap -> Mapper GPU GPU BabysitM
 transform expmap =
@@ -218,7 +218,7 @@ traverseKernelBodyArrayIndexes free_ker_vars thread_variant outer_scope f (Kerne
 
     mkSizeSubsts = foldMap mkStmSizeSubst
       where
-        mkStmSizeSubst (Let (Pattern [pe]) _ (Op (SizeOp (SplitSpace _ _ _ elems_per_i)))) =
+        mkStmSizeSubst (Let (Pat [pe]) _ (Op (SizeOp (SplitSpace _ _ _ elems_per_i)))) =
           M.singleton (patElemName pe) elems_per_i
         mkStmSizeSubst _ = mempty
 
@@ -518,7 +518,7 @@ varianceInStms t = foldl varianceInStm t . stmsToList
 
 varianceInStm :: VarianceTable -> Stm GPU -> VarianceTable
 varianceInStm variance bnd =
-  foldl' add variance $ patternNames $ stmPattern bnd
+  foldl' add variance $ patNames $ stmPat bnd
   where
     add variance' v = M.insert v binding_variance variance'
     look variance' v = oneName v <> M.findWithDefault mempty v variance'

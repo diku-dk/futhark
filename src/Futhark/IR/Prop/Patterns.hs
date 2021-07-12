@@ -1,7 +1,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
 
--- | Inspecing and modifying t'Pattern's, function parameters and
+-- | Inspecing and modifying t'Pat's, function parameters and
 -- pattern elements.
 module Futhark.IR.Prop.Patterns
   ( -- * Function parameters
@@ -9,18 +9,18 @@ module Futhark.IR.Prop.Patterns
     paramType,
     paramDeclType,
 
-    -- * Pattern elements
+    -- * Pat elements
     patElemIdent,
     patElemType,
     setPatElemDec,
-    patternElements,
-    patternIdents,
-    patternNames,
-    patternTypes,
-    patternSize,
+    patElements,
+    patIdents,
+    patNames,
+    patTypes,
+    patSize,
 
-    -- * Pattern construction
-    basicPattern,
+    -- * Pat construction
+    basicPat,
   )
 where
 
@@ -51,25 +51,25 @@ patElemType = typeOf
 setPatElemDec :: PatElemT oldattr -> newattr -> PatElemT newattr
 setPatElemDec pe x = fmap (const x) pe
 
--- | Return a list of the 'Ident's bound by the t'Pattern'.
-patternIdents :: Typed dec => PatternT dec -> [Ident]
-patternIdents = map patElemIdent . patternElements
+-- | Return a list of the 'Ident's bound by the t'Pat'.
+patIdents :: Typed dec => PatT dec -> [Ident]
+patIdents = map patElemIdent . patElements
 
--- | Return a list of the 'Name's bound by the t'Pattern'.
-patternNames :: PatternT dec -> [VName]
-patternNames = map patElemName . patternElements
+-- | Return a list of the 'Name's bound by the t'Pat'.
+patNames :: PatT dec -> [VName]
+patNames = map patElemName . patElements
 
 -- | Return a list of the typess bound by the pattern.
-patternTypes :: Typed dec => PatternT dec -> [Type]
-patternTypes = map identType . patternIdents
+patTypes :: Typed dec => PatT dec -> [Type]
+patTypes = map identType . patIdents
 
 -- | Return the number of names bound by the pattern.
-patternSize :: PatternT dec -> Int
-patternSize (Pattern xs) = length xs
+patSize :: PatT dec -> Int
+patSize (Pat xs) = length xs
 
 -- | Create a pattern using 'Type' as the attribute.
-basicPattern :: [Ident] -> PatternT Type
-basicPattern values =
-  Pattern $ map patElem values
+basicPat :: [Ident] -> PatT Type
+basicPat values =
+  Pat $ map patElem values
   where
     patElem (Ident name t) = PatElem name t

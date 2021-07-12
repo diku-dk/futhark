@@ -97,11 +97,11 @@ transformStm (Let pat aux (If cond tbranch fbranch (IfDec ts IfEquiv))) = do
       throwError e
   where
     bindRes pe (SubExpRes cs se) =
-      certify cs $ Let (Pattern [pe]) (defAux ()) $ BasicOp $ SubExp se
+      certify cs $ Let (Pat [pe]) (defAux ()) $ BasicOp $ SubExp se
 
     useBranch b =
       bodyStms b
-        <> stmsFromList (zipWith bindRes (patternElements pat) (bodyResult b))
+        <> stmsFromList (zipWith bindRes (patElements pat) (bodyResult b))
 transformStm (Let pat aux e) = do
   (bnds, e') <- transformExp =<< mapExpM transform e
   return $ bnds <> oneStm (Let pat aux e')
@@ -366,7 +366,7 @@ extractStmAllocations ::
   Names ->
   Stm GPUMem ->
   Writer Extraction (Maybe (Stm GPUMem))
-extractStmAllocations user bound_outside bound_kernel (Let (Pattern [patElem]) _ (Op (Alloc size space)))
+extractStmAllocations user bound_outside bound_kernel (Let (Pat [patElem]) _ (Op (Alloc size space)))
   | expandable space && expandableSize size
       -- FIXME: the '&& notScalar space' part is a hack because we
       -- don't otherwise hoist the sizes out far enough, and we
@@ -428,7 +428,7 @@ genericExpandedInvariantAllocations getNumUsers invariant_allocs = do
   where
     expand (mem, (user, per_thread_size, space)) = do
       let num_users = fst $ getNumUsers user
-          allocpat = Pattern [PatElem mem $ MemMem space]
+          allocpat = Pat [PatElem mem $ MemMem space]
       total_size <-
         letExp "total_size" <=< toExp . product $
           pe64 per_thread_size : map pe64 (shapeDims num_users)
@@ -506,7 +506,7 @@ expandedVariantAllocations num_threads kspace kstms variant_allocs = do
   return (slice_stms' <> stmsFromList alloc_bnds, mconcat rebases)
   where
     expand (mem, (offset, total_size, space)) = do
-      let allocpat = Pattern [PatElem mem $ MemMem space]
+      let allocpat = Pat [PatElem mem $ MemMem space]
       return
         ( Let allocpat (defAux ()) $ Op $ Alloc total_size space,
           M.singleton mem $ newBase offset
@@ -588,13 +588,13 @@ offsetMemoryInBody (Body dec stms res) = do
 
 offsetMemoryInStm :: Stm GPUMem -> OffsetM (Scope GPUMem, Stm GPUMem)
 offsetMemoryInStm (Let pat dec e) = do
-  pat' <- offsetMemoryInPattern pat
-  e' <- localScope (scopeOfPattern pat') $ offsetMemoryInExp e
+  pat' <- offsetMemoryInPat pat
+  e' <- localScope (scopeOfPat pat') $ offsetMemoryInExp e
   scope <- askScope
   -- Try to recompute the index function.  Fall back to creating rebase
   -- operations with the RebaseMap.
   rts <- runReaderT (expReturns e') scope
-  let pat'' = Pattern $ zipWith pick (patternElements pat') rts
+  let pat'' = Pat $ zipWith pick (patElements pat') rts
       stm = Let pat'' dec e'
   let scope' = scopeOf stm <> scope
   return (scope', stm)
@@ -616,9 +616,9 @@ offsetMemoryInStm (Let pat dec e) = do
         inst Ext {} = Nothing
         inst (Free x) = return x
 
-offsetMemoryInPattern :: Pattern GPUMem -> OffsetM (Pattern GPUMem)
-offsetMemoryInPattern (Pattern pes) = do
-  Pattern <$> mapM inspectVal pes
+offsetMemoryInPat :: Pat GPUMem -> OffsetM (Pat GPUMem)
+offsetMemoryInPat (Pat pes) = do
+  Pat <$> mapM inspectVal pes
   where
     inspectVal patElem = do
       new_dec <- offsetMemoryInMemBound $ patElemDec patElem
@@ -695,15 +695,15 @@ unAllocGPUStms = unAllocStms False
       | nested = throwError $ "Cannot handle nested allocation: " ++ pretty stm
       | otherwise = return Nothing
     unAllocStm _ (Let pat dec e) =
-      Just <$> (Let <$> unAllocPattern pat <*> pure dec <*> mapExpM unAlloc' e)
+      Just <$> (Let <$> unAllocPat pat <*> pure dec <*> mapExpM unAlloc' e)
 
     unAllocLambda (Lambda params body ret) =
       Lambda (unParams params) <$> unAllocBody body <*> pure ret
 
     unParams = mapMaybe $ traverse unMem
 
-    unAllocPattern pat@(Pattern merge) =
-      Pattern <$> maybe bad return (mapM (rephrasePatElem unMem) merge)
+    unAllocPat pat@(Pat merge) =
+      Pat <$> maybe bad return (mapM (rephrasePatElem unMem) merge)
       where
         bad = Left $ "Cannot handle memory in pattern " ++ pretty pat
 
@@ -808,7 +808,7 @@ sliceKernelSizes num_threads sizes space kstms = do
 
   ((maxes_per_thread, size_sums), slice_stms) <- flip runBuilderT kernels_scope $ do
     pat <-
-      basicPattern <$> replicateM num_sizes (newIdent "max_per_thread" $ Prim int64)
+      basicPat <$> replicateM num_sizes (newIdent "max_per_thread" $ Prim int64)
 
     w <-
       letSubExp "size_slice_w"
@@ -829,10 +829,10 @@ sliceKernelSizes num_threads sizes space kstms = do
     addStms =<< mapM renameStm
       =<< nonSegRed lvl pat w [red_op] size_lam' [thread_space_iota]
 
-    size_sums <- forM (patternNames pat) $ \threads_max ->
+    size_sums <- forM (patNames pat) $ \threads_max ->
       letExp "size_sum" $
         BasicOp $ BinOp (Mul Int64 OverflowUndef) (Var threads_max) num_threads
 
-    return (patternNames pat, size_sums)
+    return (patNames pat, size_sums)
 
   return (slice_stms, maxes_per_thread, size_sums)

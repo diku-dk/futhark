@@ -8,7 +8,7 @@ module Futhark.IR.SOACS
     -- * Syntax types
     Body,
     Stm,
-    Pattern,
+    Pat,
     Exp,
     Lambda,
     FParam,
@@ -24,7 +24,7 @@ module Futhark.IR.SOACS
     module Futhark.IR.SOACS.SOAC,
     AST.LambdaT (Lambda),
     AST.BodyT (Body),
-    AST.PatternT (Pattern),
+    AST.PatT (Pat),
     AST.PatElemT (PatElem),
   )
 where
@@ -40,8 +40,8 @@ import Futhark.IR.Syntax hiding
     FParam,
     LParam,
     Lambda,
+    Pat,
     PatElem,
-    Pattern,
     RetType,
     Stm,
   )
@@ -60,7 +60,7 @@ instance RepTypes SOACS where
   type Op SOACS = SOAC SOACS
 
 instance ASTRep SOACS where
-  expTypesFromPattern = return . expExtTypesFromPattern
+  expTypesFromPat = return . expExtTypesFromPat
 
 type Exp = AST.Exp SOACS
 
@@ -68,7 +68,7 @@ type Body = AST.Body SOACS
 
 type Stm = AST.Stm SOACS
 
-type Pattern = AST.Pattern SOACS
+type Pat = AST.Pat SOACS
 
 type Lambda = AST.Lambda SOACS
 
@@ -87,7 +87,7 @@ instance TypeCheck.Checkable SOACS
 
 instance Buildable SOACS where
   mkBody = AST.Body ()
-  mkExpPat merge _ = basicPattern merge
+  mkExpPat merge _ = basicPat merge
   mkExpDec _ _ = ()
   mkLetNames = simpleMkLetNames
 

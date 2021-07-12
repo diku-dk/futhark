@@ -22,8 +22,8 @@ import Futhark.IR.GPU hiding
     FunDef,
     LParam,
     Lambda,
+    Pat,
     PatElem,
-    Pattern,
     Prog,
     RetType,
     Stm,
@@ -156,11 +156,11 @@ blockedPerThread thread_gtid w kernel_size ordering lam num_nonconcat arrs = do
   addStms $
     bodyStms (lambdaBody lam)
       <> stmsFromList
-        [ certify cs $ Let (Pattern [pe]) (defAux ()) $ BasicOp $ SubExp se
+        [ certify cs $ Let (Pat [pe]) (defAux ()) $ BasicOp $ SubExp se
           | (pe, SubExpRes cs se) <- zip chunk_red_pes chunk_red_ses
         ]
       <> stmsFromList
-        [ certify cs $ Let (Pattern [pe]) (defAux ()) $ BasicOp $ SubExp se
+        [ certify cs $ Let (Pat [pe]) (defAux ()) $ BasicOp $ SubExp se
           | (pe, SubExpRes cs se) <- zip chunk_map_pes chunk_map_ses
         ]
 
@@ -232,7 +232,7 @@ prepareStream size ispace w comm fold_lam nes arrs = do
 streamRed ::
   (MonadFreshNames m, HasScope GPU m) =>
   MkSegLevel GPU m ->
-  Pattern GPU ->
+  Pat GPU ->
   SubExp ->
   Commutativity ->
   Lambda GPU ->
@@ -246,9 +246,9 @@ streamRed mk_lvl pat w comm red_lam fold_lam nes arrs = runBuilderT'_ $ do
   -- First, figure out how many threads to use for this.
   size <- blockedKernelSize "stream_red" w
 
-  let (redout_pes, mapout_pes) = splitAt (length nes) $ patternElements pat
-  (redout_pat, ispace, read_dummy) <- dummyDim $ Pattern redout_pes
-  let pat' = Pattern $ patternElements redout_pat ++ mapout_pes
+  let (redout_pes, mapout_pes) = splitAt (length nes) $ patElements pat
+  (redout_pat, ispace, read_dummy) <- dummyDim $ Pat redout_pes
+  let pat' = Pat $ patElements redout_pat ++ mapout_pes
 
   (_, kspace, ts, kbody) <- prepareStream size ispace w comm fold_lam nes arrs
 
@@ -280,7 +280,7 @@ streamMap mk_lvl out_desc mapout_pes w comm fold_lam nes arrs = runBuilderT' $ d
   redout_pes <- forM (zip out_desc redout_ts) $ \(desc, t) ->
     PatElem <$> newVName desc <*> pure (t `arrayOfRow` threads)
 
-  let pat = Pattern $ redout_pes ++ mapout_pes
+  let pat = Pat $ redout_pes ++ mapout_pes
   lvl <- mk_lvl [w] "stream_map" $ NoRecommendation SegNoVirt
   letBind pat $ Op $ SegOp $ SegMap lvl kspace ts kbody
 

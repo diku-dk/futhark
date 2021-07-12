@@ -11,7 +11,7 @@ import Data.List (find, intercalate, intersperse, transpose)
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
-import Futhark.IR.SOACS as I hiding (stmPattern)
+import Futhark.IR.SOACS as I hiding (stmPat)
 import Futhark.Internalise.AccurateSizes
 import Futhark.Internalise.Bindings
 import Futhark.Internalise.Lambdas
@@ -808,14 +808,14 @@ internaliseArg desc (arg, argdim) = do
 subExpPrimType :: I.SubExp -> InternaliseM I.PrimType
 subExpPrimType = fmap I.elemType . subExpType
 
-generateCond :: E.Pattern -> [I.SubExp] -> InternaliseM (I.SubExp, [I.SubExp])
+generateCond :: E.Pat -> [I.SubExp] -> InternaliseM (I.SubExp, [I.SubExp])
 generateCond orig_p orig_ses = do
   (cmps, pertinent, _) <- compares orig_p orig_ses
   cmp <- letSubExp "matches" =<< eAll cmps
   return (cmp, pertinent)
   where
     -- Literals are always primitive values.
-    compares (E.PatternLit l t _) (se : ses) = do
+    compares (E.PatLit l t _) (se : ses) = do
       e' <- case l of
         PatLitPrim v -> pure $ constant $ internalisePrimValue v
         PatLitInt x -> internaliseExp1 "constant" $ E.IntLit x t mempty
@@ -823,7 +823,7 @@ generateCond orig_p orig_ses = do
       t' <- subExpPrimType se
       cmp <- letSubExp "match_lit" $ I.BasicOp $ I.CmpOp (I.CmpEq t') e' se
       return ([cmp], [se], ses)
-    compares (E.PatternConstr c (Info (E.Scalar (E.Sum fs))) pats _) (se : ses) = do
+    compares (E.PatConstr c (Info (E.Scalar (E.Sum fs))) pats _) (se : ses) = do
       (payload_ts, m) <- internaliseSumType $ M.map (map toStruct) fs
       case M.lookup c m of
         Just (i, payload_is) -> do
@@ -834,26 +834,26 @@ generateCond orig_p orig_ses = do
           return (cmp : cmps, pertinent, ses')
         Nothing ->
           error "generateCond: missing constructor"
-    compares (E.PatternConstr _ (Info t) _ _) _ =
-      error $ "generateCond: PatternConstr has nonsensical type: " ++ pretty t
+    compares (E.PatConstr _ (Info t) _ _) _ =
+      error $ "generateCond: PatConstr has nonsensical type: " ++ pretty t
     compares (E.Id _ t loc) ses =
       compares (E.Wildcard t loc) ses
     compares (E.Wildcard (Info t) _) ses = do
       n <- internalisedTypeSize $ E.toStruct t
       let (id_ses, rest_ses) = splitAt n ses
       return ([], id_ses, rest_ses)
-    compares (E.PatternParens pat _) ses =
+    compares (E.PatParens pat _) ses =
       compares pat ses
     -- XXX: treat empty tuples and records as bool.
-    compares (E.TuplePattern [] loc) ses =
+    compares (E.TuplePat [] loc) ses =
       compares (E.Wildcard (Info $ E.Scalar $ E.Prim E.Bool) loc) ses
-    compares (E.RecordPattern [] loc) ses =
+    compares (E.RecordPat [] loc) ses =
       compares (E.Wildcard (Info $ E.Scalar $ E.Prim E.Bool) loc) ses
-    compares (E.TuplePattern pats _) ses =
+    compares (E.TuplePat pats _) ses =
       comparesMany pats ses
-    compares (E.RecordPattern fs _) ses =
+    compares (E.RecordPat fs _) ses =
       comparesMany (map snd $ E.sortFields $ M.fromList fs) ses
-    compares (E.PatternAscription pat _ _) ses =
+    compares (E.PatAscription pat _ _) ses =
       compares pat ses
     compares pat [] =
       error $ "generateCond: No values left for pattern " ++ pretty pat
@@ -877,7 +877,7 @@ generateCaseIf ses (CasePat p eCase _) bFail = do
 internalisePat ::
   String ->
   [E.SizeBinder VName] ->
-  E.Pattern ->
+  E.Pat ->
   E.Exp ->
   E.Exp ->
   (E.Exp -> InternaliseM a) ->
@@ -886,20 +886,20 @@ internalisePat desc sizes p e body m = do
   ses <- internaliseExp desc' e
   internalisePat' sizes p ses body m
   where
-    desc' = case S.toList $ E.patternIdents p of
+    desc' = case S.toList $ E.patIdents p of
       [v] -> baseString $ E.identName v
       _ -> desc
 
 internalisePat' ::
   [E.SizeBinder VName] ->
-  E.Pattern ->
+  E.Pat ->
   [I.SubExp] ->
   E.Exp ->
   (E.Exp -> InternaliseM a) ->
   InternaliseM a
 internalisePat' sizes p ses body m = do
   ses_ts <- mapM subExpType ses
-  stmPattern p ses_ts $ \pat_names -> do
+  stmPat p ses_ts $ \pat_names -> do
     bindExtSizes (AppRes (E.patternType p) (map E.sizeName sizes)) ses
     forM_ (zip pat_names ses) $ \(v, se) ->
       letBindNames [v] $ I.BasicOp $ I.SubExp se

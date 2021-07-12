@@ -41,7 +41,7 @@ instance RepTypes GPUMem where
   type Op GPUMem = MemOp (HostOp GPUMem ())
 
 instance ASTRep GPUMem where
-  expTypesFromPattern = return . map snd . bodyReturnsFromPattern
+  expTypesFromPat = return . map snd . bodyReturnsFromPat
 
 instance OpReturns GPUMem where
   opReturns (Alloc _ space) =
@@ -65,7 +65,7 @@ instance TC.Checkable GPUMem where
   checkLetBoundDec = checkMemInfo
   checkRetType = mapM_ $ TC.checkExtType . declExtTypeOf
   primFParam name t = return $ Param name (MemPrim t)
-  matchPattern = matchPatternToExp
+  matchPat = matchPatToExp
   matchReturnType = matchFunctionReturnType
   matchBranchType = matchBranchReturnType
   matchLoopResult = matchLoopResultMem

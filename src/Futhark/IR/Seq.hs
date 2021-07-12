@@ -35,7 +35,7 @@ instance RepTypes Seq where
   type Op Seq = ()
 
 instance ASTRep Seq where
-  expTypesFromPattern = return . expExtTypesFromPattern
+  expTypesFromPat = return . expExtTypesFromPat
 
 instance TypeCheck.CheckableOp Seq where
   checkOp = pure
@@ -44,7 +44,7 @@ instance TypeCheck.Checkable Seq
 
 instance Buildable Seq where
   mkBody = Body ()
-  mkExpPat idents _ = basicPattern idents
+  mkExpPat idents _ = basicPat idents
   mkExpDec _ _ = ()
   mkLetNames = simpleMkLetNames
 

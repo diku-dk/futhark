@@ -122,7 +122,7 @@ resultArray arrs ts = do
 -- on the given rep.
 transformSOAC ::
   Transformer m =>
-  AST.Pattern (Rep m) ->
+  AST.Pat (Rep m) ->
   SOAC (Rep m) ->
   m ()
 transformSOAC pat (Screma w arrs form@(ScremaForm scans reds map_lam)) = do
@@ -219,7 +219,7 @@ transformSOAC pat (Screma w arrs form@(ScremaForm scans reds map_lam)) = do
   -- We need to discard the final scan accumulators, as they are not
   -- bound in the original pattern.
   names <-
-    (++ patternNames pat)
+    (++ patNames pat)
       <$> replicateM (length scanacc_params) (newVName "discard")
   letBindNames names $ DoLoop merge loopform loop_body
 transformSOAC pat (Stream w arrs _ nes lam) = do

@@ -16,7 +16,7 @@ import Futhark.Util.IntegralExp (rem)
 import Prelude hiding (quot, rem)
 
 compileSegHist ::
-  Pattern MCMem ->
+  Pat MCMem ->
   SegSpace ->
   [HistOp MCMem] ->
   KernelBody MCMem ->
@@ -34,7 +34,7 @@ segHistOpChunks :: [HistOp rep] -> [a] -> [[a]]
 segHistOpChunks = chunks . map (length . histNeutral)
 
 nonsegmentedHist ::
-  Pattern MCMem ->
+  Pat MCMem ->
   SegSpace ->
   [HistOp MCMem] ->
   KernelBody MCMem ->
@@ -91,7 +91,7 @@ onOpAtomic op = do
       return $ f l'
 
 atomicHistogram ::
-  Pattern MCMem ->
+  Pat MCMem ->
   TV Int64 ->
   SegSpace ->
   [HistOp MCMem] ->
@@ -101,7 +101,7 @@ atomicHistogram pat flat_idx space histops kbody = do
   let (is, ns) = unzip $ unSegSpace space
       ns_64 = map toInt64Exp ns
   let num_red_res = length histops + sum (map (length . histNeutral) histops)
-      (all_red_pes, map_pes) = splitAt num_red_res $ patternElements pat
+      (all_red_pes, map_pes) = splitAt num_red_res $ patElements pat
 
   atomicOps <- mapM onOpAtomic histops
 
@@ -159,7 +159,7 @@ updateHisto op arrs bucket = do
 -- across the histogram indicies.
 -- This is expected to be fast if len(histDest) is small
 subHistogram ::
-  Pattern MCMem ->
+  Pat MCMem ->
   TV Int64 ->
   SegSpace ->
   [HistOp MCMem] ->
@@ -172,10 +172,10 @@ subHistogram pat flat_idx space histops num_histos kbody = do
   let (is, ns) = unzip $ unSegSpace space
       ns_64 = map toInt64Exp ns
 
-  let pes = patternElements pat
+  let pes = patElements pat
       num_red_res = length histops + sum (map (length . histNeutral) histops)
       map_pes = drop num_red_res pes
-      per_red_pes = segHistOpChunks histops $ patternElements pat
+      per_red_pes = segHistOpChunks histops $ patElements pat
 
   -- Allocate array of subhistograms in the calling thread.  Each
   -- tasks will work in its own private allocations (to avoid false
@@ -270,7 +270,7 @@ subHistogram pat flat_idx space histops num_histos kbody = do
         segred_op = SegBinOp Noncommutative (histOp op) (histNeutral op) (histShape op)
 
     nsubtasks_red <- dPrim "num_tasks" $ IntType Int32
-    red_code <- compileSegRed' (Pattern red_pes) segred_space [segred_op] nsubtasks_red $ \red_cont ->
+    red_code <- compileSegRed' (Pat red_pes) segred_space [segred_op] nsubtasks_red $ \red_cont ->
       red_cont $
         flip map hists $ \subhisto ->
           ( Var subhisto,
@@ -291,7 +291,7 @@ subHistogram pat flat_idx space histops num_histos kbody = do
 -- parallelize over the segments,
 -- where each segment is updated sequentially.
 segmentedHist ::
-  Pattern MCMem ->
+  Pat MCMem ->
   SegSpace ->
   [HistOp MCMem] ->
   KernelBody MCMem ->
@@ -308,7 +308,7 @@ segmentedHist pat space histops kbody = do
 
 compileSegHistBody ::
   Imp.TExp Int64 ->
-  Pattern MCMem ->
+  Pat MCMem ->
   SegSpace ->
   [HistOp MCMem] ->
   KernelBody MCMem ->
@@ -318,8 +318,8 @@ compileSegHistBody idx pat space histops kbody = do
       ns_64 = map toInt64Exp ns
 
   let num_red_res = length histops + sum (map (length . histNeutral) histops)
-      map_pes = drop num_red_res $ patternElements pat
-      per_red_pes = segHistOpChunks histops $ patternElements pat
+      map_pes = drop num_red_res $ patElements pat
+      per_red_pes = segHistOpChunks histops $ patElements pat
 
   collect $ do
     let inner_bound = last ns_64

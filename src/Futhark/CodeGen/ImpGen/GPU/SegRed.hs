@@ -77,7 +77,7 @@ type DoSegBody = ([(SubExp, [Imp.TExp Int64])] -> InKernelGen ()) -> InKernelGen
 -- | Compile 'SegRed' instance to host-level code with calls to
 -- various kernels.
 compileSegRed ::
-  Pattern GPUMem ->
+  Pat GPUMem ->
   SegLevel ->
   SegSpace ->
   [SegBinOp GPUMem] ->
@@ -89,14 +89,14 @@ compileSegRed pat lvl space reds body =
       let (red_res, map_res) = splitAt (segBinOpResults reds) $ kernelBodyResult body
 
       sComment "save map-out results" $ do
-        let map_arrs = drop (segBinOpResults reds) $ patternElements pat
+        let map_arrs = drop (segBinOpResults reds) $ patElements pat
         zipWithM_ (compileThreadResult space) map_arrs map_res
 
       red_cont $ zip (map kernelResultSubExp red_res) $ repeat []
 
 -- | Like 'compileSegRed', but where the body is a monadic action.
 compileSegRed' ::
-  Pattern GPUMem ->
+  Pat GPUMem ->
   SegLevel ->
   SegSpace ->
   [SegBinOp GPUMem] ->
@@ -171,7 +171,7 @@ groupResultArrays (Count virt_num_groups) (Count group_size) reds =
       sAllocArrayPerm "segred_tmp" pt full_shape (Space "device") perm
 
 nonsegmentedReduction ::
-  Pattern GPUMem ->
+  Pat GPUMem ->
   Count NumGroups SubExp ->
   Count GroupSize SubExp ->
   SegSpace ->
@@ -228,7 +228,7 @@ nonsegmentedReduction segred_pat num_groups group_size space reds body = do
 
     let segred_pes =
           chunks (map (length . segBinOpNeutral) reds) $
-            patternElements segred_pat
+            patElements segred_pat
     forM_ (zip7 reds reds_arrs reds_group_res_arrs segred_pes slugs reds_op_renamed [0 ..]) $
       \(SegBinOp _ red_op nes _, red_arrs, group_res_arrs, pes, slug, red_op_renamed, i) -> do
         let (red_x_params, red_y_params) = splitAt (length nes) $ lambdaParams red_op
@@ -255,14 +255,14 @@ nonsegmentedReduction segred_pat num_groups group_size space reds body = do
   emit $ Imp.DebugPrint "" Nothing
 
 smallSegmentsReduction ::
-  Pattern GPUMem ->
+  Pat GPUMem ->
   Count NumGroups SubExp ->
   Count GroupSize SubExp ->
   SegSpace ->
   [SegBinOp GPUMem] ->
   DoSegBody ->
   CallKernelGen ()
-smallSegmentsReduction (Pattern segred_pes) num_groups group_size space reds body = do
+smallSegmentsReduction (Pat segred_pes) num_groups group_size space reds body = do
   let (gtids, dims) = unzip $ unSegSpace space
       dims' = map toInt64Exp dims
       segment_size = last dims'
@@ -364,7 +364,7 @@ smallSegmentsReduction (Pattern segred_pes) num_groups group_size space reds bod
   emit $ Imp.DebugPrint "" Nothing
 
 largeSegmentsReduction ::
-  Pattern GPUMem ->
+  Pat GPUMem ->
   Count NumGroups SubExp ->
   Count GroupSize SubExp ->
   SegSpace ->
@@ -466,7 +466,7 @@ largeSegmentsReduction segred_pat num_groups group_size space reds body = do
 
       let segred_pes =
             chunks (map (length . segBinOpNeutral) reds) $
-              patternElements segred_pat
+              patElements segred_pat
 
           multiple_groups_per_segment =
             forM_ (zip7 reds reds_arrs reds_group_res_arrs segred_pes slugs reds_op_renamed [0 ..]) $

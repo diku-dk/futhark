@@ -14,7 +14,7 @@
 module Futhark.IR.Prop.Aliases
   ( subExpAliases,
     expAliases,
-    patternAliases,
+    patAliases,
     lookupAliases,
     Aliased (..),
     AliasesOf (..),
@@ -175,8 +175,8 @@ consumedByLambda :: Aliased rep => Lambda rep -> Names
 consumedByLambda = consumedInBody . lambdaBody
 
 -- | The aliases of each pattern element (including the context).
-patternAliases :: AliasesOf dec => PatternT dec -> [Names]
-patternAliases = map (aliasesOf . patElemDec) . patternElements
+patAliases :: AliasesOf dec => PatT dec -> [Names]
+patAliases = map (aliasesOf . patElemDec) . patElements
 
 -- | Something that contains alias information.
 class AliasesOf a where

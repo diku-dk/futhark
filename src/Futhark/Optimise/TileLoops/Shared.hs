@@ -148,7 +148,7 @@ isTileableRedomap stm
 
 defVarianceInStm :: VarianceTable -> Stm GPU -> VarianceTable
 defVarianceInStm variance bnd =
-  foldl' add variance $ patternNames $ stmPattern bnd
+  foldl' add variance $ patNames $ stmPat bnd
   where
     add variance' v = M.insert v binding_variance variance'
     look variance' v = oneName v <> M.findWithDefault mempty v variance'

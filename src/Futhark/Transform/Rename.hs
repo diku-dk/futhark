@@ -19,7 +19,7 @@ module Futhark.Transform.Rename
     renameStm,
     renameBody,
     renameLambda,
-    renamePattern,
+    renamePat,
     renameSomething,
 
     -- * Renaming annotations
@@ -105,13 +105,13 @@ renameLambda = modifyNameSource . runRenamer . rename
 
 -- | Produce an equivalent pattern but with each pattern element given
 -- a new name.
-renamePattern ::
+renamePat ::
   (Rename dec, MonadFreshNames m) =>
-  PatternT dec ->
-  m (PatternT dec)
-renamePattern = modifyNameSource . runRenamer . rename'
+  PatT dec ->
+  m (PatT dec)
+renamePat = modifyNameSource . runRenamer . rename'
   where
-    rename' pat = bind (patternNames pat) $ rename pat
+    rename' pat = bind (patNames pat) $ rename pat
 
 -- | Rename the bound variables in something (does not affect free variables).
 renameSomething ::
@@ -201,7 +201,7 @@ renamingStms stms m = descend mempty stms
   where
     descend stms' rem_stms = case stmsHead rem_stms of
       Nothing -> m stms'
-      Just (stm, rem_stms') -> bind (patternNames $ stmPattern stm) $ do
+      Just (stm, rem_stms') -> bind (patNames $ stmPat stm) $ do
         stm' <- rename stm
         descend (stms' <> oneStm stm') rem_stms'
 
@@ -220,8 +220,8 @@ instance Rename SubExp where
 instance Rename dec => Rename (Param dec) where
   rename (Param name dec) = Param <$> rename name <*> rename dec
 
-instance Rename dec => Rename (PatternT dec) where
-  rename (Pattern xs) = Pattern <$> rename xs
+instance Rename dec => Rename (PatT dec) where
+  rename (Pat xs) = Pat <$> rename xs
 
 instance Rename dec => Rename (PatElemT dec) where
   rename (PatElem ident dec) = PatElem <$> rename ident <*> rename dec

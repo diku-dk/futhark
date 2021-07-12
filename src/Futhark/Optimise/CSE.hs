@@ -199,7 +199,7 @@ cseInStms consumed (stm : stms) m =
       let ds =
             case stmExp stm' of
               DoLoop merge _ _ -> map (diet . declTypeOf . fst) merge
-              _ -> map patElemDiet $ patternElements $ stmPattern stm'
+              _ -> map patElemDiet $ patElements $ stmPat stm'
       e <- mapExpM (cse ds) $ stmExp stm'
       return stm' {stmExp = e}
 
@@ -223,15 +223,15 @@ cseInStm consumed (Let pat (StmAux cs attrs edec) e) m = do
   CSEState (esubsts, nsubsts) cse_arrays <- ask
   let e' = substituteNames nsubsts e
       pat' = substituteNames nsubsts pat
-  if any (bad cse_arrays) $ patternElements pat
+  if any (bad cse_arrays) $ patElements pat
     then m [Let pat' (StmAux cs attrs edec) e']
     else case M.lookup (edec, e') esubsts of
       Just subpat ->
         local (addNameSubst pat' subpat) $ do
           let lets =
-                [ Let (Pattern [patElem']) (StmAux cs attrs edec) $
+                [ Let (Pat [patElem']) (StmAux cs attrs edec) $
                     BasicOp $ SubExp $ Var $ patElemName patElem
-                  | (name, patElem) <- zip (patternNames pat') $ patternElements subpat,
+                  | (name, patElem) <- zip (patNames pat') $ patElements subpat,
                     let patElem' = patElem {patElemName = name}
                 ]
           m lets
@@ -248,7 +248,7 @@ cseInStm consumed (Let pat (StmAux cs attrs edec) e) m = do
 type ExpressionSubstitutions rep =
   M.Map
     (ExpDec rep, Exp rep)
-    (Pattern rep)
+    (Pat rep)
 
 type NameSubstitutions = M.Map VName VName
 
@@ -260,16 +260,16 @@ data CSEState rep = CSEState
 newCSEState :: Bool -> CSEState rep
 newCSEState = CSEState (M.empty, M.empty)
 
-mkSubsts :: PatternT dec -> PatternT dec -> M.Map VName VName
-mkSubsts pat vs = M.fromList $ zip (patternNames pat) (patternNames vs)
+mkSubsts :: PatT dec -> PatT dec -> M.Map VName VName
+mkSubsts pat vs = M.fromList $ zip (patNames pat) (patNames vs)
 
-addNameSubst :: PatternT dec -> PatternT dec -> CSEState rep -> CSEState rep
+addNameSubst :: PatT dec -> PatT dec -> CSEState rep -> CSEState rep
 addNameSubst pat subpat (CSEState (esubsts, nsubsts) cse_arrays) =
   CSEState (esubsts, mkSubsts pat subpat `M.union` nsubsts) cse_arrays
 
 addExpSubst ::
   ASTRep rep =>
-  Pattern rep ->
+  Pat rep ->
   ExpDec rep ->
   Exp rep ->
   CSEState rep ->

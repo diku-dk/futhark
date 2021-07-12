@@ -87,10 +87,10 @@ module Futhark.IR.Mem
 
     -- * Type checking parts
     matchBranchReturnType,
-    matchPatternToExp,
+    matchPatToExp,
     matchFunctionReturnType,
     matchLoopResultMem,
-    bodyReturnsFromPattern,
+    bodyReturnsFromPat,
     checkMemInfo,
 
     -- * Module re-exports
@@ -117,7 +117,7 @@ import qualified Futhark.Analysis.SymbolTable as ST
 import Futhark.IR.Aliases
   ( Aliases,
     removeExpAliases,
-    removePatternAliases,
+    removePatAliases,
     removeScopeAliases,
   )
 import qualified Futhark.IR.Mem.IxFun as IxFun
@@ -739,16 +739,16 @@ matchReturnType rettype res ts = do
 
   either bad return =<< runExceptT (zipWithM_ checkReturn rettype ts)
 
-matchPatternToExp ::
+matchPatToExp ::
   (Mem rep, TC.Checkable rep) =>
-  Pattern (Aliases rep) ->
+  Pat (Aliases rep) ->
   Exp (Aliases rep) ->
   TC.TypeM rep ()
-matchPatternToExp pat e = do
+matchPatToExp pat e = do
   scope <- asksScope removeScopeAliases
   rt <- runReaderT (expReturns $ removeExpAliases e) scope
 
-  let (ctx_ids, val_ts) = unzip $ bodyReturnsFromPattern $ removePatternAliases pat
+  let (ctx_ids, val_ts) = unzip $ bodyReturnsFromPat $ removePatAliases pat
       (ctx_map_ids, ctx_map_exts) = getExtMaps $ zip ctx_ids [0 .. 1]
 
   unless
@@ -874,12 +874,12 @@ checkMemInfo name (MemArray _ shape _ (ArrayIn v ixfun)) = do
             ++ show ident_rank
             ++ ")"
 
-bodyReturnsFromPattern ::
-  PatternT (MemBound NoUniqueness) -> [(VName, BodyReturns)]
-bodyReturnsFromPattern pat =
-  map asReturns $ patternElements pat
+bodyReturnsFromPat ::
+  PatT (MemBound NoUniqueness) -> [(VName, BodyReturns)]
+bodyReturnsFromPat pat =
+  map asReturns $ patElements pat
   where
-    ctx = patternElements pat
+    ctx = patElements pat
 
     ext (Var v)
       | Just (i, _) <- find ((== v) . patElemName . snd) $ zip [0 ..] ctx =

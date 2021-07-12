@@ -23,10 +23,10 @@ module Futhark.IR.Aliases
     module Futhark.IR.Syntax,
 
     -- * Adding aliases
-    addAliasesToPattern,
+    addAliasesToPat,
     mkAliasedLetStm,
     mkAliasedBody,
-    mkPatternAliases,
+    mkPatAliases,
     mkBodyAliases,
 
     -- * Removing aliases
@@ -35,7 +35,7 @@ module Futhark.IR.Aliases
     removeExpAliases,
     removeStmAliases,
     removeLambdaAliases,
-    removePatternAliases,
+    removePatAliases,
     removeScopeAliases,
 
     -- * Tracking aliases
@@ -126,8 +126,8 @@ withoutAliases m = do
   runReaderT m scope
 
 instance (ASTRep rep, CanBeAliased (Op rep)) => ASTRep (Aliases rep) where
-  expTypesFromPattern =
-    withoutAliases . expTypesFromPattern . removePatternAliases
+  expTypesFromPat =
+    withoutAliases . expTypesFromPat . removePatAliases
 
 instance (ASTRep rep, CanBeAliased (Op rep)) => Aliased (Aliases rep) where
   bodyAliases = map unAliases . fst . fst . bodyDec
@@ -223,18 +223,18 @@ removeLambdaAliases ::
   Lambda rep
 removeLambdaAliases = runIdentity . rephraseLambda removeAliases
 
-removePatternAliases ::
-  PatternT (AliasDec, a) ->
-  PatternT a
-removePatternAliases = runIdentity . rephrasePattern (return . snd)
+removePatAliases ::
+  PatT (AliasDec, a) ->
+  PatT a
+removePatAliases = runIdentity . rephrasePat (return . snd)
 
-addAliasesToPattern ::
+addAliasesToPat ::
   (ASTRep rep, CanBeAliased (Op rep), Typed dec) =>
-  PatternT dec ->
+  PatT dec ->
   Exp (Aliases rep) ->
-  PatternT (VarAliases, dec)
-addAliasesToPattern pat e =
-  Pattern $ mkPatternAliases pat e
+  PatT (VarAliases, dec)
+addAliasesToPat pat e =
+  Pat $ mkPatAliases pat e
 
 mkAliasedBody ::
   (ASTRep rep, CanBeAliased (Op rep)) =>
@@ -245,17 +245,17 @@ mkAliasedBody ::
 mkAliasedBody dec bnds res =
   Body (mkBodyAliases bnds res, dec) bnds res
 
-mkPatternAliases ::
+mkPatAliases ::
   (Aliased rep, Typed dec) =>
-  PatternT dec ->
+  PatT dec ->
   Exp rep ->
   [PatElemT (VarAliases, dec)]
-mkPatternAliases pat e =
+mkPatAliases pat e =
   let als = expAliases e ++ repeat mempty
    in -- In case the pattern has
       -- more elements (this
       -- implies a type error).
-      zipWith annotatePatElem (patternElements pat) als
+      zipWith annotatePatElem (patElements pat) als
   where
     annotatePatElem bindee names =
       bindee `setPatElemDec` (AliasDec names', patElemDec bindee)
@@ -277,7 +277,7 @@ mkBodyAliases bnds res =
   -- closure of the alias map (within bnds), then removing anything
   -- bound in bnds.
   let (aliases, consumed) = mkStmsAliases bnds res
-      boundNames = foldMap (namesFromList . patternNames . stmPattern) bnds
+      boundNames = foldMap (namesFromList . patNames . stmPat) bnds
       aliases' = map (`namesSubtract` boundNames) aliases
       consumed' = consumed `namesSubtract` boundNames
    in (map AliasDec aliases', AliasDec consumed')
@@ -313,9 +313,9 @@ trackAliases ::
   Stm rep ->
   AliasesAndConsumed
 trackAliases (aliasmap, consumed) stm =
-  let pat = stmPattern stm
+  let pat = stmPat stm
       pe_als =
-        zip (patternNames pat) $ map addAliasesOfAliases $ patternAliases pat
+        zip (patNames pat) $ map addAliasesOfAliases $ patAliases pat
       als = M.fromList pe_als
       rev_als = foldMap revAls pe_als
       revAls (v, v_als) =
@@ -331,23 +331,23 @@ trackAliases (aliasmap, consumed) stm =
 
 mkAliasedLetStm ::
   (ASTRep rep, CanBeAliased (Op rep)) =>
-  Pattern rep ->
+  Pat rep ->
   StmAux (ExpDec rep) ->
   Exp (Aliases rep) ->
   Stm (Aliases rep)
 mkAliasedLetStm pat (StmAux cs attrs dec) e =
   Let
-    (addAliasesToPattern pat e)
+    (addAliasesToPat pat e)
     (StmAux cs attrs (AliasDec $ consumedInExp e, dec))
     e
 
 instance (Buildable rep, CanBeAliased (Op rep)) => Buildable (Aliases rep) where
   mkExpDec pat e =
-    let dec = mkExpDec (removePatternAliases pat) $ removeExpAliases e
+    let dec = mkExpDec (removePatAliases pat) $ removeExpAliases e
      in (AliasDec $ consumedInExp e, dec)
 
   mkExpPat ids e =
-    addAliasesToPattern (mkExpPat ids $ removeExpAliases e) e
+    addAliasesToPat (mkExpPat ids $ removeExpAliases e) e
 
   mkLetNames names e = do
     env <- asksScope removeScopeAliases

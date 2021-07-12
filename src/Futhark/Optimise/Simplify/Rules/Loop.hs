@@ -43,7 +43,7 @@ removeRedundantMergeVariables (_, used) pat aux (merge, form, body)
 
         (keep_valpart, discard_valpart) =
           partition (resIsNecessary . snd) $
-            zip (patternElements pat) $ zip merge $ bodyResult body
+            zip (patElements pat) $ zip merge $ bodyResult body
 
         (keep_valpatelems, keep_val) = unzip keep_valpart
         (_discard_valpatelems, discard_val) = unzip discard_valpart
@@ -51,7 +51,7 @@ removeRedundantMergeVariables (_, used) pat aux (merge, form, body)
 
         body' = body {bodyResult = val_es'}
 
-        pat' = Pattern keep_valpatelems
+        pat' = Pat keep_valpatelems
      in if merge' == merge
           then Skip
           else Simplify $ do
@@ -65,7 +65,7 @@ removeRedundantMergeVariables (_, used) pat aux (merge, form, body)
               pure body'
             auxing aux $ letBind pat' $ DoLoop merge' form body''
   where
-    pat_used = map (`UT.isUsedDirectly` used) $ patternNames pat
+    pat_used = map (`UT.isUsedDirectly` used) $ patNames pat
     used_vals = map fst $ filter snd $ zip (map (paramName . fst) merge) pat_used
     usedAfterLoop = flip elem used_vals . paramName
     usedAfterLoopOrInForm p =
@@ -89,9 +89,9 @@ hoistLoopInvariantMergeVariables :: BuilderOps rep => TopDownRuleDoLoop rep
 hoistLoopInvariantMergeVariables vtable pat aux (merge, form, loopbody) = do
   -- Figure out which of the elements of loopresult are
   -- loop-invariant, and hoist them out.
-  let explpat = zip (patternElements pat) $ map (paramName . fst) merge
+  let explpat = zip (patElements pat) $ map (paramName . fst) merge
   case foldr checkInvariance ([], explpat, [], []) $
-    zip3 (patternNames pat) merge res of
+    zip3 (patNames pat) merge res of
     ([], _, _, _) ->
       -- Nothing is invariant.
       Skip
@@ -101,7 +101,7 @@ hoistLoopInvariantMergeVariables vtable pat aux (merge, form, loopbody) = do
           explpat'' = map fst explpat'
       forM_ invariant $ \(v1, v2) ->
         letBindNames [identName v1] $ BasicOp $ SubExp v2
-      auxing aux $ letBind (Pattern explpat'') $ DoLoop merge' form loopbody'
+      auxing aux $ letBind (Pat explpat'') $ DoLoop merge' form loopbody'
   where
     res = bodyResult loopbody
 
@@ -309,7 +309,7 @@ simplifyKnownIterationLoop _ pat aux (merge, ForLoop i it (Constant iters) loop_
   | IntValue n <- iters,
     zeroIshInt n || oneIshInt n || "unroll" `inAttrs` stmAuxAttrs aux = Simplify $ do
     res <- unroll (valueIntegral n) (map (second subExpRes) merge) (i, it, 0) loop_vars body
-    forM_ (zip (patternNames pat) res) $ \(v, SubExpRes cs se) ->
+    forM_ (zip (patNames pat) res) $ \(v, SubExpRes cs se) ->
       certifying cs $ letBindNames [v] $ BasicOp $ SubExp se
 simplifyKnownIterationLoop _ _ _ _ =
   Skip

@@ -93,9 +93,9 @@ getIterationDomain _ space = do
 
 -- When the SegRed's return value is a scalar
 -- we perform a call by value-result in the segop function
-getReturnParams :: Pattern MCMem -> SegOp () MCMem -> MulticoreGen [Imp.Param]
+getReturnParams :: Pat MCMem -> SegOp () MCMem -> MulticoreGen [Imp.Param]
 getReturnParams pat SegRed {} = do
-  let retvals = map patElemName $ patternElements pat
+  let retvals = map patElemName $ patElements pat
   retvals_ts <- mapM lookupType retvals
   concat <$> zipWithM toParam retvals retvals_ts
 getReturnParams _ _ = return mempty

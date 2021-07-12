@@ -18,7 +18,7 @@ import Futhark.IR.SOACS hiding
     Exp,
     LParam,
     Lambda,
-    Pattern,
+    Pat,
     Stm,
   )
 import qualified Futhark.IR.SOACS as SOACS
@@ -48,7 +48,7 @@ instance MonadLogger ExtractM where
 
 indexArray :: VName -> LParam SOACS -> VName -> Stm MC
 indexArray i (Param p t) arr =
-  Let (Pattern [PatElem p t]) (defAux ()) . BasicOp $
+  Let (Pat [PatElem p t]) (defAux ()) . BasicOp $
     case t of
       Acc {} -> SubExp $ Var arr
       _ -> Index arr $ DimFix (Var i) : map sliceDim (arrayDims t)
@@ -277,7 +277,7 @@ transformParStream rename onBody w comm red_lam red_nes map_lam arrs = do
       SegRed () space [red] (lambdaReturnType map_lam) kbody
   return (red_stms, op)
 
-transformSOAC :: Pattern SOACS -> Attrs -> SOAC SOACS -> ExtractM (Stms MC)
+transformSOAC :: Pat SOACS -> Attrs -> SOAC SOACS -> ExtractM (Stms MC)
 transformSOAC pat _ (Screma w arrs form)
   | Just lam <- isMapSOAC form = do
     seq_op <- transformMap DoNotRename sequentialiseBody w lam arrs

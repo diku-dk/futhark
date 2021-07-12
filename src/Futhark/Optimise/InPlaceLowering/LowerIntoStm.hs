@@ -65,7 +65,7 @@ lowerUpdate
   _
   (Let pat aux (BasicOp (SubExp (Var v))))
   [DesiredUpdate bindee_nm bindee_dec cs src is val]
-    | patternNames pat == [src] =
+    | patNames pat == [src] =
       let is' = fullSlice (typeOf bindee_dec) is
        in Just $
             return
@@ -81,7 +81,7 @@ lowerUpdateGPU
   scope
   (Let pat aux (Op (SegOp (SegMap lvl space ts kbody))))
   updates
-    | all ((`elem` patternNames pat) . updateValue) updates,
+    | all ((`elem` patNames pat) . updateValue) updates,
       not source_used_in_kbody = do
       mk <- lowerUpdatesIntoSegMap scope pat updates space kbody
       Just $ do
@@ -104,13 +104,13 @@ lowerUpdateGPU scope stm updates = lowerUpdate scope stm updates
 lowerUpdatesIntoSegMap ::
   MonadFreshNames m =>
   Scope (Aliases GPU) ->
-  Pattern (Aliases GPU) ->
+  Pat (Aliases GPU) ->
   [DesiredUpdate (LetDec (Aliases GPU))] ->
   SegSpace ->
   KernelBody (Aliases GPU) ->
   Maybe
     ( m
-        ( Pattern (Aliases GPU),
+        ( Pat (Aliases GPU),
           KernelBody (Aliases GPU),
           Stms (Aliases GPU)
         )
@@ -118,11 +118,11 @@ lowerUpdatesIntoSegMap ::
 lowerUpdatesIntoSegMap scope pat updates kspace kbody = do
   -- The updates are all-or-nothing.  Being more liberal would require
   -- changes to the in-place-lowering pass itself.
-  mk <- zipWithM onRet (patternElements pat) (kernelBodyResult kbody)
+  mk <- zipWithM onRet (patElements pat) (kernelBodyResult kbody)
   return $ do
     (pes, bodystms, krets, poststms) <- unzip4 <$> sequence mk
     return
-      ( Pattern pes,
+      ( Pat pes,
         kbody
           { kernelBodyStms = kernelBodyStms kbody <> mconcat bodystms,
             kernelBodyResult = krets
@@ -175,7 +175,7 @@ lowerUpdateIntoLoop ::
   ) =>
   Scope rep ->
   [DesiredUpdate (LetDec rep)] ->
-  Pattern rep ->
+  Pat rep ->
   [(FParam rep, SubExp)] ->
   LoopForm rep ->
   Body rep ->
@@ -233,7 +233,7 @@ lowerUpdateIntoLoop scope updates pat val form body = do
   where
     usedInBody =
       mconcat $ map (`lookupAliases` scope) $ namesToList $ freeIn body <> freeIn form
-    resmap = zip (bodyResult body) $ patternIdents pat
+    resmap = zip (bodyResult body) $ patIdents pat
 
     mkMerges ::
       (MonadFreshNames m, Buildable rep) =>
@@ -283,7 +283,7 @@ lowerUpdateIntoLoop scope updates pat val form body = do
       | Just (update, _, _) <- relatedUpdate summary =
         Right (Ident (updateName update) (snd $ updateType update))
       | otherwise =
-        Left (inPatternAs summary)
+        Left (inPatAs summary)
 
 summariseLoop ::
   ( Aliased rep,
@@ -310,7 +310,7 @@ summariseLoop scope updates usedInBody resmap merge =
                 return
                   LoopResultSummary
                     { resultSubExp = se,
-                      inPatternAs = v,
+                      inPatAs = v,
                       mergeParam = (fparam, mergeinit),
                       relatedUpdate =
                         Just
@@ -331,7 +331,7 @@ summariseLoop scope updates usedInBody resmap merge =
 
 data LoopResultSummary dec = LoopResultSummary
   { resultSubExp :: SubExpRes,
-    inPatternAs :: Ident,
+    inPatAs :: Ident,
     mergeParam :: (Param DeclType, SubExp),
     relatedUpdate :: Maybe (DesiredUpdate dec, VName, dec)
   }

@@ -35,7 +35,7 @@ instance RepTypes SeqMem where
   type Op SeqMem = MemOp ()
 
 instance ASTRep SeqMem where
-  expTypesFromPattern = return . map snd . bodyReturnsFromPattern
+  expTypesFromPat = return . map snd . bodyReturnsFromPat
 
 instance OpReturns SeqMem where
   opReturns (Alloc _ space) = return [MemMem space]
@@ -55,7 +55,7 @@ instance TC.Checkable SeqMem where
   checkLetBoundDec = checkMemInfo
   checkRetType = mapM_ (TC.checkExtType . declExtTypeOf)
   primFParam name t = return $ Param name (MemPrim t)
-  matchPattern = matchPatternToExp
+  matchPat = matchPatToExp
   matchReturnType = matchFunctionReturnType
   matchBranchType = matchBranchReturnType
   matchLoopResult = matchLoopResultMem

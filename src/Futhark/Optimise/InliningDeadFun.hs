@@ -129,7 +129,7 @@ inlineInFunDef fdmap (FunDef entry attrs name rtp args body) =
 
 inlineFunction ::
   MonadFreshNames m =>
-  Pattern ->
+  Pat ->
   StmAux dec ->
   [(SubExp, Diet)] ->
   (Safety, SrcLoc, [SrcLoc]) ->
@@ -141,7 +141,7 @@ inlineFunction pat aux args (safety, loc, locs) fun = do
       mkBody
         (stmsFromList param_stms <> stmsFromList body_stms)
         (bodyResult (funDefBody fun))
-  pure $ stmsToList stms <> zipWith bindSubExpRes (patternIdents pat) res
+  pure $ stmsToList stms <> zipWith bindSubExpRes (patIdents pat) res
   where
     param_stms =
       certify (stmAuxCerts aux)

@@ -63,18 +63,18 @@ substituteIndicesInStm ::
   m (IndexSubstitutions (LetDec (Rep m)))
 substituteIndicesInStm substs (Let pat rep e) = do
   e' <- substituteIndicesInExp substs e
-  (substs', pat') <- substituteIndicesInPattern substs pat
+  (substs', pat') <- substituteIndicesInPat substs pat
   addStm $ Let pat' rep e'
   return substs'
 
-substituteIndicesInPattern ::
+substituteIndicesInPat ::
   (MonadBuilder m, LetDec (Rep m) ~ dec) =>
   IndexSubstitutions (LetDec (Rep m)) ->
-  PatternT dec ->
-  m (IndexSubstitutions (LetDec (Rep m)), PatternT dec)
-substituteIndicesInPattern substs pat = do
-  (substs', pes) <- mapAccumLM sub substs $ patternElements pat
-  return (substs', Pattern pes)
+  PatT dec ->
+  m (IndexSubstitutions (LetDec (Rep m)), PatT dec)
+substituteIndicesInPat substs pat = do
+  (substs', pes) <- mapAccumLM sub substs $ patElements pat
+  return (substs', Pat pes)
   where
     sub substs' patElem = return (substs', patElem)
 

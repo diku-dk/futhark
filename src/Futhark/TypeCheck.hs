@@ -39,7 +39,7 @@ module Futhark.TypeCheck
     checkStm,
     checkType,
     checkExtType,
-    matchExtPattern,
+    matchExtPat,
     matchExtBranchType,
     argType,
     argAliases,
@@ -77,8 +77,8 @@ data ErrorCase rep
   | ReturnTypeError Name [ExtType] [ExtType]
   | DupDefinitionError Name
   | DupParamError Name VName
-  | DupPatternError VName
-  | InvalidPatternError (Pattern (Aliases rep)) [ExtType] (Maybe String)
+  | DupPatError VName
+  | InvalidPatError (Pat (Aliases rep)) [ExtType] (Maybe String)
   | UnknownVariableError VName
   | UnknownFunctionError Name
   | ParameterMismatch (Maybe Name) [Type] [Type]
@@ -117,10 +117,10 @@ instance Checkable rep => Show (ErrorCase rep) where
       ++ " mentioned multiple times in argument list of function "
       ++ nameToString funname
       ++ "."
-  show (DupPatternError name) =
+  show (DupPatError name) =
     "Variable " ++ pretty name ++ " bound twice in pattern."
-  show (InvalidPatternError pat t desc) =
-    "Pattern\n" ++ pretty pat
+  show (InvalidPatError pat t desc) =
+    "Pat\n" ++ pretty pat
       ++ "\ncannot match value of type\n"
       ++ prettyTuple t
       ++ end
@@ -1220,9 +1220,9 @@ checkStm stm@(Let pat (StmAux (Certs cs) _ (_, dec)) e) m = do
   context "When checking certificates" $ mapM_ (requireI [Prim Unit]) cs
   context "When checking expression annotation" $ checkExpDec dec
   context ("When matching\n" ++ message "  " pat ++ "\nwith\n" ++ message "  " e) $
-    matchPattern pat e
+    matchPat pat e
   binding (maybeWithoutAliases $ scopeOf stm) $ do
-    mapM_ checkPatElem (patternElements $ removePatternAliases pat)
+    mapM_ checkPatElem (patElements $ removePatAliases pat)
     m
   where
     -- FIXME: this is wrong.  However, the core language type system
@@ -1239,14 +1239,14 @@ checkStm stm@(Let pat (StmAux (Certs cs) _ (_, dec)) e) m = do
     withoutAliases (LetName (_, ldec)) = LetName (mempty, ldec)
     withoutAliases info = info
 
-matchExtPattern ::
+matchExtPat ::
   Checkable rep =>
-  Pattern (Aliases rep) ->
+  Pat (Aliases rep) ->
   [ExtType] ->
   TypeM rep ()
-matchExtPattern pat ts =
-  unless (expExtTypesFromPattern pat == ts) $
-    bad $ InvalidPatternError pat ts Nothing
+matchExtPat pat ts =
+  unless (expExtTypesFromPat pat == ts) $
+    bad $ InvalidPatError pat ts Nothing
 
 matchExtReturnType ::
   Checkable rep =>
@@ -1444,7 +1444,7 @@ class (ASTRep rep, CanBeAliased (Op rep), CheckableOp rep) => Checkable rep wher
   checkLParamDec :: VName -> LParamInfo rep -> TypeM rep ()
   checkLetBoundDec :: VName -> LetDec rep -> TypeM rep ()
   checkRetType :: [RetType rep] -> TypeM rep ()
-  matchPattern :: Pattern (Aliases rep) -> Exp (Aliases rep) -> TypeM rep ()
+  matchPat :: Pat (Aliases rep) -> Exp (Aliases rep) -> TypeM rep ()
   primFParam :: VName -> PrimType -> TypeM rep (FParam (Aliases rep))
   matchReturnType :: [RetType rep] -> Result -> TypeM rep ()
   matchBranchType :: [BranchType rep] -> Body (Aliases rep) -> TypeM rep ()
@@ -1468,8 +1468,8 @@ class (ASTRep rep, CanBeAliased (Op rep), CheckableOp rep) => Checkable rep wher
   default checkRetType :: RetType rep ~ DeclExtType => [RetType rep] -> TypeM rep ()
   checkRetType = mapM_ $ checkExtType . declExtTypeOf
 
-  default matchPattern :: Pattern (Aliases rep) -> Exp (Aliases rep) -> TypeM rep ()
-  matchPattern pat = matchExtPattern pat <=< expExtType
+  default matchPat :: Pat (Aliases rep) -> Exp (Aliases rep) -> TypeM rep ()
+  matchPat pat = matchExtPat pat <=< expExtType
 
   default primFParam :: FParamInfo rep ~ DeclType => VName -> PrimType -> TypeM rep (FParam (Aliases rep))
   primFParam name t = return $ Param name (Prim t)

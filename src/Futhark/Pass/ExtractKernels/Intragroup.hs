@@ -116,8 +116,8 @@ intraGroupParallelise knest lam = runMaybeT $ do
 
   let kbody' = kbody {kernelBodyStms = read_input_stms <> kernelBodyStms kbody}
 
-  let nested_pat = loopNestingPattern first_nest
-      rts = map (length ispace `stripArray`) $ patternTypes nested_pat
+  let nested_pat = loopNestingPat first_nest
+      rts = map (length ispace `stripArray`) $ patTypes nested_pat
       lvl = SegGroup (Count num_groups) (Count $ Var group_size) SegNoVirt
       kstm =
         Let nested_pat aux $
@@ -222,7 +222,7 @@ intraGroupStm lvl stm@(Let pat aux e) = do
                 { distNest =
                     singleNesting $ Nesting mempty loopnest,
                   distScope =
-                    scopeOfPattern pat
+                    scopeOfPat pat
                       <> scopeForGPU (scopeOf lam)
                       <> scope,
                   distOnInnerMap =
@@ -305,7 +305,7 @@ intraGroupStm lvl stm@(Let pat aux e) = do
           addStms $ bodyStms $ lambdaBody lam'
 
       certifying (stmAuxCerts aux) $ do
-        let ts = zipWith (stripArray . length) dests_ws $ patternTypes pat
+        let ts = zipWith (stripArray . length) dests_ws $ patTypes pat
             body = KernelBody () kstms krets
         letBind pat $ Op $ SegOp $ SegMap lvl' space ts body
 

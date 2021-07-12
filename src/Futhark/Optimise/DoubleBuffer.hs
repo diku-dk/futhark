@@ -288,7 +288,7 @@ allocStms merge = runWriterT . zipWithM allocation merge
           shape = arrayShape $ paramType f
           bound = MemArray bt shape NoUniqueness $ ArrayIn mem v_ixfun
       tell
-        [ Let (Pattern [PatElem v_copy bound]) (defAux ()) $
+        [ Let (Pat [PatElem v_copy bound]) (defAux ()) $
             BasicOp $ Copy v
         ]
       -- It is important that we treat this as a consumption, to
@@ -322,7 +322,7 @@ doubleBufferResult valparams buffered (Body _ bnds res) =
       let t = resultType $ paramType fparam
           summary = MemArray (elemType t) (arrayShape t) NoUniqueness $ ArrayIn bufname ixfun
           copybnd =
-            Let (Pattern [PatElem copyname summary]) (defAux ()) $
+            Let (Pat [PatElem copyname summary]) (defAux ()) $
               BasicOp $ Copy v
        in (Just copybnd, SubExpRes cs (Var copyname))
     buffer _ _ se =

@@ -111,12 +111,12 @@ emptyEnv rules blockers =
       envVtable = mempty
     }
 
-type Protect m = SubExp -> Pattern (Rep m) -> Op (Rep m) -> Maybe (m ())
+type Protect m = SubExp -> Pat (Rep m) -> Op (Rep m) -> Maybe (m ())
 
 data SimpleOps rep = SimpleOps
   { mkExpDecS ::
       ST.SymbolTable (Wise rep) ->
-      Pattern (Wise rep) ->
+      Pat (Wise rep) ->
       Exp (Wise rep) ->
       SimpleM rep (ExpDec (Wise rep)),
     mkBodyS ::
@@ -339,8 +339,8 @@ protectIf _ f taken (Let pat aux e)
       Nothing -> do
         taken_body <- eBody [pure e]
         untaken_body <-
-          eBody $ map (emptyOfType $ patternNames pat) (patternTypes pat)
-        if_ts <- expTypesFromPattern pat
+          eBody $ map (emptyOfType $ patNames pat) (patTypes pat)
+        if_ts <- expTypesFromPat pat
         auxing aux . letBind pat $
           If taken taken_body untaken_body $ IfDec if_ts IfFallback
 protectIf _ _ _ stm =
@@ -385,7 +385,7 @@ emptyOfType ctx_names (Array et shape _) = do
 -- further optimisation..
 notWorthHoisting :: ASTRep rep => BlockPred rep
 notWorthHoisting _ _ (Let pat _ e) =
-  not (safeExp e) && any ((> 0) . arrayRank) (patternTypes pat)
+  not (safeExp e) && any ((> 0) . arrayRank) (patTypes pat)
 
 hoistStms ::
   SimplifiableRep rep =>
@@ -463,7 +463,7 @@ blockUnhoistedDeps = snd . mapAccumL block mempty
         (blocked, Right need)
 
 provides :: Stm rep -> [VName]
-provides = patternNames . stmPattern
+provides = patNames . stmPat
 
 expandUsage ::
   (ASTRep rep, Aliased rep) =>
@@ -474,7 +474,7 @@ expandUsage ::
   UT.UsageTable
 expandUsage usageInStm vtable utable stm@(Let pat _ e) =
   UT.expand (`ST.lookupAliases` vtable) (usageInStm stm <> usageThroughAliases)
-    <> ( if any (`UT.isSize` utable) (patternNames pat)
+    <> ( if any (`UT.isSize` utable) (patNames pat)
            then UT.sizeUsages (freeIn e)
            else mempty
        )
@@ -483,7 +483,7 @@ expandUsage usageInStm vtable utable stm@(Let pat _ e) =
     usageThroughAliases =
       mconcat $
         mapMaybe usageThroughBindeeAliases $
-          zip (patternNames pat) (patternAliases pat)
+          zip (patNames pat) (patAliases pat)
     usageThroughBindeeAliases (name, aliases) = do
       uses <- UT.lookup name utable
       return $ mconcat $ map (`UT.usage` uses) $ namesToList aliases
@@ -506,7 +506,7 @@ andAlso :: BlockPred rep -> BlockPred rep -> BlockPred rep
 andAlso p1 p2 body vtable need = p1 body vtable need && p2 body vtable need
 
 isConsumed :: BlockPred rep
-isConsumed _ utable = any (`UT.isConsumed` utable) . patternNames . stmPattern
+isConsumed _ utable = any (`UT.isConsumed` utable) . patNames . stmPat
 
 isOp :: BlockPred rep
 isOp _ _ (Let _ _ Op {}) = True
@@ -618,7 +618,7 @@ hoistCommon cond ifsort ((res1, usages1), stms1) ((res2, usages2), stms2) = do
       isNotHoistableBnd _ _ (Let _ _ (BasicOp ArrayLit {})) = False
       isNotHoistableBnd _ _ (Let _ _ (BasicOp SubExp {})) = False
       isNotHoistableBnd _ usages (Let pat _ _)
-        | any (`UT.isSize` usages) $ patternNames pat =
+        | any (`UT.isSize` usages) $ patNames pat =
           False
       isNotHoistableBnd _ _ stm
         | is_alloc_fun stm = False
@@ -682,7 +682,7 @@ simplifyStms stms m =
     Just (Let pat (StmAux stm_cs attrs dec) e, stms') -> do
       stm_cs' <- simplify stm_cs
       ((e', e_stms), e_cs) <- collectCerts $ simplifyExp e
-      (pat', pat_cs) <- collectCerts $ simplifyPattern pat
+      (pat', pat_cs) <- collectCerts $ simplifyPat pat
       let cs = stm_cs' <> e_cs <> pat_cs
       inspectStms e_stms $
         inspectStm (mkWiseLetStm pat' (StmAux cs attrs dec) e') $
@@ -900,12 +900,12 @@ instance Simplifiable SubExpRes where
     (se', se_cs) <- collectCerts $ simplify se
     pure $ SubExpRes (se_cs <> cs') se'
 
-simplifyPattern ::
+simplifyPat ::
   (SimplifiableRep rep, Simplifiable dec) =>
-  PatternT dec ->
-  SimpleM rep (PatternT dec)
-simplifyPattern (Pattern xs) =
-  Pattern <$> mapM inspect xs
+  PatT dec ->
+  SimpleM rep (PatT dec)
+simplifyPat (Pat xs) =
+  Pat <$> mapM inspect xs
   where
     inspect (PatElem name rep) = PatElem name <$> simplify rep
 

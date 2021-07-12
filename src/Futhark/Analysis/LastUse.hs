@@ -34,7 +34,7 @@ analyseProg :: Prog GPUMem -> (LastUseMap, Used)
 analyseProg prog =
   let consts =
         progConsts prog
-          & concatMap (toList . fmap patElemName . patternElements . stmPattern)
+          & concatMap (toList . fmap patElemName . patElements . stmPat)
           & namesFromList
       funs = progFuns $ aliasAnalysis prog
       (lus, used) = foldMap (analyseFun mempty consts) funs
@@ -50,7 +50,7 @@ analyseStms lumap used stms = foldr analyseStm (lumap, used) $ stmsToList stms
 
 analyseStm :: Stm (Aliases GPUMem) -> (LastUse, Used) -> (LastUse, Used)
 analyseStm (Let pat _ e) (lumap0, used0) =
-  let (lumap', used') = patternElements pat & foldl helper (lumap0, used0)
+  let (lumap', used') = patElements pat & foldl helper (lumap0, used0)
    in analyseExp (lumap', used') e
   where
     helper (lumap_acc, used_acc) (PatElem name (aliases, _)) =
@@ -62,7 +62,7 @@ analyseStm (Let pat _ e) (lumap0, used0) =
         used_acc <> unAliases aliases
       )
 
-    pat_name = patElemName $ head $ patternElements pat
+    pat_name = patElemName $ head $ patElements pat
     analyseExp :: (LastUse, Used) -> Exp (Aliases GPUMem) -> (LastUse, Used)
     analyseExp (lumap, used) (BasicOp _) =
       let nms = freeIn e `namesSubtract` used
