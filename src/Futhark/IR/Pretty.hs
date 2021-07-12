@@ -221,8 +221,8 @@ instance PrettyRep rep => Pretty (Exp rep) where
       <+> maybeNest t
       <+> text "else"
       <+> maybeNest f
-      <+> colon
-      <+> braces (commasep $ map ppr ret)
+      </> colon
+      <+> ppTuple' ret
     where
       info' = case ifsort of
         IfNormal -> mempty
@@ -337,4 +337,4 @@ ppPattern as bs = braces $ commastack (map ppr as) <> semi </> commasep (map ppr
 
 -- | Like 'prettyTuple', but produces a 'Doc'.
 ppTuple' :: Pretty a => [a] -> Doc
-ppTuple' ets = braces $ commasep $ map ppr ets
+ppTuple' ets = braces $ commasep $ map (align . ppr) ets
