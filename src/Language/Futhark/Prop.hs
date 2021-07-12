@@ -53,7 +53,6 @@ module Language.Futhark.Prop
     foldFunType,
     typeVars,
     typeDimNames,
-    primByteSize,
 
     -- * Operations on types
     peelArray,
@@ -528,13 +527,6 @@ primValueType BoolValue {} = Bool
 valueType :: Value -> ValueType
 valueType (PrimValue bv) = Scalar $ Prim $ primValueType bv
 valueType (ArrayValue _ t) = t
-
--- | The size of values of this type, in bytes.
-primByteSize :: Num a => PrimType -> a
-primByteSize (Signed it) = Primitive.intByteSize it
-primByteSize (Unsigned it) = Primitive.intByteSize it
-primByteSize (FloatType ft) = Primitive.floatByteSize ft
-primByteSize Bool = 1
 
 -- | The type is leaving a scope, so clean up any aliases that
 -- reference the bound variables, and turn any dimensions that name

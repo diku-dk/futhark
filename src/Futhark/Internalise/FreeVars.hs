@@ -3,7 +3,6 @@
 module Futhark.Internalise.FreeVars
   ( freeVars,
     without,
-    member,
     ident,
     size,
     sizes,
@@ -35,10 +34,6 @@ without (NameSet x) y = NameSet $ M.filterWithKey keep x
 
 withoutM :: NameSet -> NameSet -> NameSet
 withoutM (NameSet x) (NameSet y) = NameSet $ x `M.difference` y
-
--- | Is this name in the 'NameSet'?
-member :: VName -> NameSet -> Bool
-member v (NameSet m) = v `M.member` m
 
 -- | A 'NameSet' with a single 'Nonunique' name.
 ident :: Ident -> NameSet

@@ -15,13 +15,11 @@ module Language.Futhark.TypeChecker.Types
     Subst (..),
     substFromAbbr,
     TypeSubs,
-    unionSubs,
     Substitutable (..),
     substTypesAny,
   )
 where
 
-import Control.Applicative
 import Control.Monad.Identity
 import Control.Monad.Reader
 import Control.Monad.State
@@ -389,10 +387,6 @@ substFromAbbr (TypeAbbr _ ps t) = Subst ps t
 
 -- | Substitutions to apply in a type.
 type TypeSubs = VName -> Maybe (Subst StructType)
-
--- | Additively combine two non-intersecting substitutions.
-unionSubs :: TypeSubs -> TypeSubs -> TypeSubs
-unionSubs f g v = g v <|> f v
 
 instance Functor Subst where
   fmap f (Subst ps t) = Subst ps $ f t
