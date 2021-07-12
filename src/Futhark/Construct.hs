@@ -109,12 +109,12 @@ where
 
 import Control.Monad.Identity
 import Control.Monad.State
-import Control.Monad.Writer
-import Data.Bifunctor (second)
 import Data.List (sortOn)
 import qualified Data.Map.Strict as M
+import qualified Data.Set as S
 import Futhark.Builder
 import Futhark.IR
+import Futhark.Util (maybeNth)
 
 letSubExp ::
   MonadBuilder m =>
@@ -157,6 +157,8 @@ letSubExps ::
   m [SubExp]
 letSubExps desc = mapM $ letSubExp desc
 
+-- | Only returns those pattern names that are not used in the pattern
+-- itself (the "non-existential" part, you could say).
 letTupExp ::
   (MonadBuilder m) =>
   String ->
@@ -165,10 +167,11 @@ letTupExp ::
 letTupExp _ (BasicOp (SubExp (Var v))) =
   return [v]
 letTupExp name e = do
-  numValues <- length <$> expExtType e
-  names <- replicateM numValues $ newVName name
+  e_t <- expExtType e
+  names <- replicateM (length e_t) $ newVName name
   letBindNames names e
-  return names
+  let ctx = shapeContext e_t
+  pure $ map fst $ filter ((`S.notMember` ctx) . snd) $ zip names [0 ..]
 
 letTupExp' ::
   (MonadBuilder m) =>
@@ -214,15 +217,14 @@ eIf' ce te fe if_sort = do
   ts <- generaliseExtTypes <$> bodyExtType te' <*> bodyExtType fe'
   te'' <- addContextForBranch ts te'
   fe'' <- addContextForBranch ts fe'
-  return $ If ce' te'' fe'' $ IfDec ts if_sort
+  let ts' = replicate (length (shapeContext ts)) (Prim int64) ++ ts
+  return $ If ce' te'' fe'' $ IfDec ts' if_sort
   where
     addContextForBranch ts (Body _ stms val_res) = do
-      body_ts <- extendedScope (traverse subExpType val_res) stmsscope
+      body_ts <- extendedScope (traverse subExpResType val_res) stmsscope
       let ctx_res =
-            map snd $
-              sortOn fst $
-                M.toList $ shapeExtMapping ts body_ts
-      mkBodyM stms $ ctx_res ++ val_res
+            map snd $ sortOn fst $ M.toList $ shapeExtMapping ts body_ts
+      mkBodyM stms $ subExpsRes ctx_res ++ val_res
       where
         stmsscope = scopeOf stms
 
@@ -231,7 +233,7 @@ eIf' ce te fe if_sort = do
 bodyExtType :: (HasScope rep m, Monad m) => Body rep -> m [ExtType]
 bodyExtType (Body _ stms res) =
   existentialiseExtTypes (M.keys stmsscope) . staticShapes
-    <$> extendedScope (traverse subExpType res) stmsscope
+    <$> extendedScope (traverse subExpResType res) stmsscope
   where
     stmsscope = scopeOf stms
 
@@ -293,13 +295,13 @@ eBody ::
 eBody es = buildBody_ $ do
   es' <- sequence es
   xs <- mapM (letTupExp "x") es'
-  pure $ map Var $ concat xs
+  pure $ varsRes $ concat xs
 
 eLambda ::
   MonadBuilder m =>
   Lambda (Rep m) ->
   [m (Exp (Rep m))] ->
-  m [SubExp]
+  m [SubExpRes]
 eLambda lam args = do
   zipWithM_ bindParam (lambdaParams lam) args
   bodyBind $ lambdaBody lam
@@ -435,7 +437,7 @@ binLambda bop arg_t ret_t = do
   x <- newVName "x"
   y <- newVName "y"
   body <-
-    buildBody_ . fmap pure $
+    buildBody_ . fmap (pure . subExpRes) $
       letSubExp "binlam_res" $ BasicOp $ bop (Var x) (Var y)
   return
     Lambda
@@ -456,7 +458,7 @@ mkLambda ::
 mkLambda params m = do
   (body, ret) <- buildBody . localScope (scopeOfLParams params) $ do
     res <- m
-    ret <- mapM subExpType res
+    ret <- mapM subExpResType res
     pure (res, ret)
   pure $ Lambda params body ret
 
@@ -499,15 +501,12 @@ ifCommon ts = IfDec (staticShapes ts) IfNormal
 
 -- | Conveniently construct a body that contains no bindings.
 resultBody :: Buildable rep => [SubExp] -> Body rep
-resultBody = mkBody mempty
+resultBody = mkBody mempty . subExpsRes
 
 -- | Conveniently construct a body that contains no bindings - but
 -- this time, monadically!
-resultBodyM ::
-  MonadBuilder m =>
-  [SubExp] ->
-  m (Body (Rep m))
-resultBodyM = mkBodyM mempty
+resultBodyM :: MonadBuilder m => [SubExp] -> m (Body (Rep m))
+resultBodyM = mkBodyM mempty . subExpsRes
 
 -- | Evaluate the action, producing a body, then wrap it in all the
 -- bindings it created using 'addStm'.
@@ -573,20 +572,16 @@ instantiateShapes f ts = evalStateT (mapM instantiate ts) M.empty
           return se
     instantiate' (Free se) = return se
 
-instantiateShapes' ::
-  MonadFreshNames m =>
-  [TypeBase ExtShape u] ->
-  m ([TypeBase Shape u], [Ident])
-instantiateShapes' ts =
+instantiateShapes' :: [VName] -> [TypeBase ExtShape u] -> [TypeBase Shape u]
+instantiateShapes' names ts =
   -- Carefully ensure that the order of idents we produce corresponds
   -- to their existential index.
-  second (map snd . sortOn fst)
-    <$> runWriterT (instantiateShapes instantiate ts)
+  runIdentity $ instantiateShapes instantiate ts
   where
-    instantiate x = do
-      v <- lift $ newIdent "size" $ Prim int64
-      tell [(x, v)]
-      return $ Var $ identName v
+    instantiate x =
+      case maybeNth x names of
+        Nothing -> error $ "instantiateShapes': " ++ pretty names ++ ", " ++ show x
+        Just name -> pure $ Var name
 
 removeExistentials :: ExtType -> Type -> Type
 removeExistentials t1 t2 =
@@ -613,10 +608,8 @@ simpleMkLetNames ::
   m (Stm rep)
 simpleMkLetNames names e = do
   et <- expExtType e
-  (ts, shapes) <- instantiateShapes' et
-  let shapeElems = [PatElem shape shapet | Ident shape shapet <- shapes]
-  let valElems = zipWith PatElem names ts
-  return $ Let (Pattern shapeElems valElems) (defAux ()) e
+  let ts = instantiateShapes' names et
+  return $ Let (Pat $ zipWith PatElem names ts) (defAux ()) e
 
 -- | Instances of this class can be converted to Futhark expressions
 -- within a 'MonadBuilder'.

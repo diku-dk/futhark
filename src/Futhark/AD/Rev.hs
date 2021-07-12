@@ -231,7 +231,7 @@ tabNest = tabNest' []
       ((ret, res), stms) <- collectStms . localScope (scopeOfLParams (iparam : params)) $ do
         res <- tabNest' (paramName iparam : is) (n -1) (map paramName params) f
         ret <- mapM lookupType res
-        pure (ret, map Var res)
+        pure (ret, varsRes res)
       let lam = Lambda (iparam : params) (Body () stms res) ret
       letTupExp "tab" $ Op $ Screma w (iota : vs) (mapSOAC lam)
 
@@ -376,22 +376,22 @@ copyConsumedArrs e =
         Array {} -> M.singleton v <$> letExp (baseString v <> "_ad_copy") (BasicOp $ Copy v)
         _ -> pure mempty
 
-patternName :: Pattern -> ADM VName
-patternName (Pattern [] [pe]) = pure $ patElemName pe
-patternName pat = error $ "Expected single-element pattern: " ++ pretty pat
+patName :: Pat -> ADM VName
+patName (Pat [pe]) = pure $ patElemName pe
+patName pat = error $ "Expected single-element pattern: " ++ pretty pat
 
 -- The vast majority of BasicOps require no special treatment in the
 -- forward pass and produce one value (and hence once adjoint).  We
 -- deal with that case here.
-commonBasicOp :: Pattern -> StmAux () -> BasicOp -> ADM () -> ADM (VName, VName)
+commonBasicOp :: Pat -> StmAux () -> BasicOp -> ADM () -> ADM (VName, VName)
 commonBasicOp pat aux op m = do
   addStm $ Let pat aux $ BasicOp op
   m
-  pat_v <- patternName pat
+  pat_v <- patName pat
   pat_adj <- lookupAdjVal pat_v
   pure (pat_v, pat_adj)
 
-diffBasicOp :: Pattern -> StmAux () -> BasicOp -> ADM () -> ADM ()
+diffBasicOp :: Pat -> StmAux () -> BasicOp -> ADM () -> ADM ()
 diffBasicOp pat aux e m =
   case e of
     CmpOp cmp x y -> do
@@ -551,11 +551,11 @@ diffBasicOp pat aux e m =
     --
     UpdateAcc {} -> error "Reverse-mode UpdateAcc not handled yet."
 
-commonSOAC :: Pattern -> StmAux () -> SOAC SOACS -> ADM () -> ADM [Adj]
+commonSOAC :: Pat -> StmAux () -> SOAC SOACS -> ADM () -> ADM [Adj]
 commonSOAC pat aux soac m = do
   addStm $ Let pat aux $ Op soac
   m
-  mapM lookupAdj $ patternNames pat
+  mapM lookupAdj $ patNames pat
 
 -- | A classification of a free variable based on its adjoint.  The
 -- 'VName' stored is *not* the adjoint, but the primal variable.
@@ -638,7 +638,7 @@ diffMap res_adjs w map_lam as substs
                     ooBounds
                     (inBounds res_i adj_i adj_v)
               AssumeBounds ->
-                bodyBind =<< inBounds res_i adj_i adj_v
+                map resSubExp <$> (bodyBind =<< inBounds res_i adj_i adj_v)
 
           forM_ (zip as as_adj_elems) $ \(a, a_adj_elem) ->
             updateAdjIndex a (check, adj_i) a_adj_elem
@@ -699,7 +699,7 @@ diffMap pat_adj w map_lam as substs = do
       ([VName] -> ADM Result) ->
       ADM [VName]
     withAcc [] m =
-      mapM (letExp "withacc_res" . BasicOp . SubExp) =<< m []
+      mapM (letExp "withacc_res" . BasicOp . SubExp . resSubExp) =<< m []
     withAcc inputs m = do
       (cert_params, acc_params) <- fmap unzip $
         forM inputs $ \(shape, arrs, _) -> do
@@ -732,7 +732,7 @@ diffMap pat_adj w map_lam as substs = do
           arr_free_adj <- mapM (lookupAdjVal . fst) arr_free
           nonacc_free_adj <- mapM lookupAdjVal nonacc_free
           as_nonfree_adj <- mapM lookupAdjVal as_nonfree
-          pure $ map Var $ arr_free_adj <> acc_free_adj <> nonacc_free_adj <> as_nonfree_adj
+          pure $ varsRes $ arr_free_adj <> acc_free_adj <> nonacc_free_adj <> as_nonfree_adj
       zipWithM_ insAdj acc_free acc_adjs
       zipWithM_ insAdj (map fst arr_free) arr_adjs
       let (nonacc_adjs, as_nonfree_adjs) = splitAt (length nonacc_free) rest_adjs
@@ -799,8 +799,8 @@ diffReduce pat_adj w as red = do
           (ips, rps) = splitAt n $ lambdaParams lam_r
       lam' <- mkLambda (lps <> aps <> rps) $ do
         lam_l_res <- bodyBind $ lambdaBody lam_l
-        forM_ (zip ips lam_l_res) $ \(ip, se) ->
-          letBindNames [paramName ip] $ BasicOp $ SubExp se
+        forM_ (zip ips lam_l_res) $ \(ip, SubExpRes cs se) ->
+          certifying cs $ letBindNames [paramName ip] $ BasicOp $ SubExp se
         bodyBind $ lambdaBody lam_r
       pure (map paramName aps, lam')
 
@@ -831,7 +831,7 @@ diffMinMaxRed x aux w minmax ne as m = do
   i_p <- newParam "i" $ Prim int64
   red_lam <-
     mkLambda [acc_v_p, acc_i_p, v_p, i_p] $
-      fmap (map Var) . letTupExp "idx_res"
+      fmap varsRes . letTupExp "idx_res"
         =<< eIf
           (eCmpOp (CmpEq t) (eParam acc_v_p) (eParam v_p))
           ( eBody
@@ -863,7 +863,7 @@ diffMinMaxRed x aux w minmax ne as m = do
   x_adj <- lookupAdjVal x
   updateAdjIndex as (CheckBounds, Var x_ind) (Var x_adj)
 
-diffSOAC :: Pattern -> StmAux () -> SOAC SOACS -> ADM () -> ADM ()
+diffSOAC :: Pat -> StmAux () -> SOAC SOACS -> ADM () -> ADM ()
 diffSOAC pat aux soac@(Screma w as form) m
   | Just reds <- isReduceSOAC form,
     length reds > 1 = do
@@ -871,7 +871,7 @@ diffSOAC pat aux soac@(Screma w as form) m
     -- so we can detect special cases.  Post-AD, the result may be
     -- fused again.
     let ks = map (length . redNeutral) reds
-        pat_per_red = map (Pattern []) $ chunks ks $ patternElements pat
+        pat_per_red = map Pat $ chunks ks $ patElements pat
         as_per_red = chunks ks as
         onReds (red : reds') (red_pat : red_pats') (red_as : red_as') = do
           red_form <- reduceSOAC [red]
@@ -880,7 +880,7 @@ diffSOAC pat aux soac@(Screma w as form) m
         onReds _ _ _ = m
     onReds reds pat_per_red as_per_red
   | Just [red] <- isReduceSOAC form,
-    [x] <- patternNames pat,
+    [x] <- patNames pat,
     [ne] <- redNeutral red,
     [a] <- as,
     Just [(op, _, _, _)] <- lamIsBinOp $ redLambda red,
@@ -919,7 +919,7 @@ diffStm stm@(Let pat _ (Apply f args _ _)) m
     addStm stm
     m
 
-    pat_adj <- lookupAdjVal =<< patternName pat
+    pat_adj <- lookupAdjVal =<< patName pat
     let arg_pes = zipWith primExpFromSubExp argts (map fst args)
         pat_adj' = primExpFromSubExp ret (Var pat_adj)
 
@@ -940,10 +940,8 @@ diffStm stm@(Let pat _ e@(If cond tbody fbody _)) m = do
       fbody_free = freeIn fbody
       branches_free = namesToList $ tbody_free <> fbody_free
 
-  adjs <- mapM lookupAdj $ patternValueNames pat
+  adjs <- mapM lookupAdj $ patNames pat
 
-  -- We need to discard any context, as this never contributes to
-  -- adjoints.
   branches_free_adj <-
     ( pure . takeLast (length branches_free)
         <=< letTupExp "branch_adj"
@@ -975,13 +973,13 @@ subAD m = do
 
 diffBody :: [Adj] -> [VName] -> Body -> ADM Body
 diffBody res_adjs get_adjs_for (Body () stms res) = subAD $ do
-  let onResult (Constant _) _ = pure ()
-      onResult (Var v) v_adj = void $ updateAdj v =<< adjVal v_adj
+  let onResult (SubExpRes _ (Constant _)) _ = pure ()
+      onResult (SubExpRes _ (Var v)) v_adj = void $ updateAdj v =<< adjVal v_adj
   (adjs, stms') <- collectStms $ do
     zipWithM_ onResult (takeLast (length res_adjs) res) res_adjs
     diffStms stms
     mapM lookupAdjVal get_adjs_for
-  pure $ Body () stms' $ res <> map Var adjs
+  pure $ Body () stms' $ res <> varsRes adjs
 
 diffLambda :: [Adj] -> [VName] -> Lambda -> ADM Lambda
 diffLambda res_adjs get_adjs_for (Lambda params body _) =
@@ -994,7 +992,7 @@ diffLambda res_adjs get_adjs_for (Lambda params body _) =
 revVJP :: MonadFreshNames m => Scope SOACS -> Lambda -> m Lambda
 revVJP scope (Lambda params body ts) =
   runADM . localScope (scope <> scopeOfLParams params) $ do
-    params_adj <- forM (zip (bodyResult body) ts) $ \(se, t) ->
+    params_adj <- forM (zip (map resSubExp (bodyResult body)) ts) $ \(se, t) ->
       Param <$> maybe (newVName "const_adj") adjVName (subExpVar se) <*> pure t
 
     Body () stms res <-

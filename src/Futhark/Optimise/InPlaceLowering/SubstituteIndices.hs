@@ -20,7 +20,7 @@ import Futhark.IR.Prop.Aliases
 import Futhark.Transform.Substitute
 import Futhark.Util
 
-type IndexSubstitution dec = (Certificates, VName, dec, Slice SubExp)
+type IndexSubstitution dec = (Certs, VName, dec, Slice SubExp)
 
 type IndexSubstitutions dec = [(VName, IndexSubstitution dec)]
 
@@ -63,19 +63,18 @@ substituteIndicesInStm ::
   m (IndexSubstitutions (LetDec (Rep m)))
 substituteIndicesInStm substs (Let pat rep e) = do
   e' <- substituteIndicesInExp substs e
-  (substs', pat') <- substituteIndicesInPattern substs pat
+  (substs', pat') <- substituteIndicesInPat substs pat
   addStm $ Let pat' rep e'
   return substs'
 
-substituteIndicesInPattern ::
+substituteIndicesInPat ::
   (MonadBuilder m, LetDec (Rep m) ~ dec) =>
   IndexSubstitutions (LetDec (Rep m)) ->
-  PatternT dec ->
-  m (IndexSubstitutions (LetDec (Rep m)), PatternT dec)
-substituteIndicesInPattern substs pat = do
-  (substs', context) <- mapAccumLM sub substs $ patternContextElements pat
-  (substs'', values) <- mapAccumLM sub substs' $ patternValueElements pat
-  return (substs'', Pattern context values)
+  PatT dec ->
+  m (IndexSubstitutions (LetDec (Rep m)), PatT dec)
+substituteIndicesInPat substs pat = do
+  (substs', pes) <- mapAccumLM sub substs $ patElements pat
+  return (substs', Pat pes)
   where
     sub substs' patElem = return (substs', patElem)
 
@@ -171,8 +170,11 @@ substituteIndicesInBody substs (Body _ stms res) = do
       collectStms $ substituteIndicesInStms substs stms
   (res', res_stms) <-
     inScopeOf stms' $
-      collectStms $ mapM (substituteIndicesInSubExp substs') res
+      collectStms $ mapM (onSubExpRes substs') res
   mkBodyM (stms' <> res_stms) res'
+  where
+    onSubExpRes substs' (SubExpRes cs se) =
+      SubExpRes cs <$> substituteIndicesInSubExp substs' se
 
 update ::
   VName ->

@@ -11,7 +11,7 @@ import Data.List (find, intercalate, intersperse, transpose)
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
-import Futhark.IR.SOACS as I hiding (stmPattern)
+import Futhark.IR.SOACS as I hiding (stmPat)
 import Futhark.Internalise.AccurateSizes
 import Futhark.Internalise.Bindings
 import Futhark.Internalise.Lambdas
@@ -62,8 +62,11 @@ internaliseValBind fb@(E.ValBind entry fname retdecl (Info (rettype, _)) tparams
           internaliseReturnType rettype =<< mapM subExpType body_res
         let rettype' = zeroExts rettype_bad
         body_res' <-
-          ensureResultExtShape msg loc (map I.fromDecl rettype') body_res
-        pure (body_res', rettype')
+          ensureResultExtShape msg loc (map I.fromDecl rettype') $ subExpsRes body_res
+        pure
+          ( body_res',
+            replicate (length (shapeContext rettype')) (I.Prim int64) ++ rettype'
+          )
 
       let all_params = shapeparams ++ concat params'
 
@@ -102,7 +105,7 @@ generateEntryPoint (E.EntryPoint e_paramts e_rettype) vb = localConstsScope $ do
     let entry' = entryPoint (baseName ofname) (zip e_paramts params') (e_rettype, entry_rettype)
         args = map (I.Var . I.paramName) $ concat params'
 
-    entry_body <- buildBody_ $ do
+    (entry_body, ctx_ts) <- buildBody $ do
       -- Special case the (rare) situation where the entry point is
       -- not a function.
       maybe_const <- lookupConst ofname
@@ -114,14 +117,14 @@ generateEntryPoint (E.EntryPoint e_paramts e_rettype) vb = localConstsScope $ do
       ctx <-
         extractShapeContext (concat entry_rettype)
           <$> mapM (fmap I.arrayDims . subExpType) vals
-      pure $ ctx ++ vals
+      pure (subExpsRes $ ctx ++ vals, map (const (I.Prim int64)) ctx)
 
     addFunDef $
       I.FunDef
         (Just entry')
         (internaliseAttrs attrs)
         ("entry_" <> baseName ofname)
-        (concat entry_rettype)
+        (ctx_ts ++ concat entry_rettype)
         (shapeparams ++ concat params')
         entry_body
 
@@ -182,7 +185,7 @@ entryPoint name params (eret, crets) =
 
 internaliseBody :: String -> E.Exp -> InternaliseM Body
 internaliseBody desc e =
-  buildBody_ $ internaliseExp (desc <> "_res") e
+  buildBody_ $ subExpsRes <$> internaliseExp (desc <> "_res") e
 
 bodyFromStms ::
   InternaliseM (Result, a) ->
@@ -414,18 +417,20 @@ internaliseAppExp desc (E.DoLoop sparams mergepat mergeexp form loopbody loc) = 
       merge_ts = map (I.paramType . fst) merge
   loopbody'' <-
     localScope (scopeOfFParams $ map fst merge) . inScopeOf form' . buildBody_ $
-      ensureArgShapes
-        "shape of loop result does not match shapes in loop parameter"
-        loc
-        (map (I.paramName . fst) ctxmerge)
-        merge_ts
+      fmap subExpsRes
+        . ensureArgShapes
+          "shape of loop result does not match shapes in loop parameter"
+          loc
+          (map (I.paramName . fst) ctxmerge)
+          merge_ts
+        . map resSubExp
         =<< bodyBind loopbody'
 
   attrs <- asks envAttrs
   map I.Var . dropCond
     <$> attributing
       attrs
-      (letTupExp desc (I.DoLoop ctxmerge valmerge form' loopbody''))
+      (letTupExp desc (I.DoLoop (ctxmerge <> valmerge) form' loopbody''))
   where
     sparams' = map (`TypeParamDim` mempty) sparams
 
@@ -436,7 +441,7 @@ internaliseAppExp desc (E.DoLoop sparams mergepat mergeexp form loopbody loc) = 
           sets <- mapM subExpType ses
           shapeargs <- argShapes (map I.paramName shapepat) mergepat' sets
           return
-            ( shapeargs ++ ses,
+            ( subExpsRes $ shapeargs ++ ses,
               ( form',
                 shapepat,
                 mergepat',
@@ -518,11 +523,11 @@ internaliseAppExp desc (E.DoLoop sparams mergepat mergeexp form loopbody loc) = 
                         | not $ primType $ paramType p ->
                           Reshape (map DimCoercion $ arrayDims $ paramType p) v
                       _ -> SubExp se
-            internaliseExp "loop_cond" cond
+            subExpsRes <$> internaliseExp "loop_cond" cond
           loop_end_cond <- bodyBind loop_end_cond_body
 
           return
-            ( shapeargs ++ loop_end_cond ++ ses,
+            ( subExpsRes shapeargs ++ loop_end_cond ++ subExpsRes ses,
               ( I.WhileLoop $ I.paramName loop_while,
                 shapepat,
                 loop_while : mergepat',
@@ -803,14 +808,14 @@ internaliseArg desc (arg, argdim) = do
 subExpPrimType :: I.SubExp -> InternaliseM I.PrimType
 subExpPrimType = fmap I.elemType . subExpType
 
-generateCond :: E.Pattern -> [I.SubExp] -> InternaliseM (I.SubExp, [I.SubExp])
+generateCond :: E.Pat -> [I.SubExp] -> InternaliseM (I.SubExp, [I.SubExp])
 generateCond orig_p orig_ses = do
   (cmps, pertinent, _) <- compares orig_p orig_ses
   cmp <- letSubExp "matches" =<< eAll cmps
   return (cmp, pertinent)
   where
     -- Literals are always primitive values.
-    compares (E.PatternLit l t _) (se : ses) = do
+    compares (E.PatLit l t _) (se : ses) = do
       e' <- case l of
         PatLitPrim v -> pure $ constant $ internalisePrimValue v
         PatLitInt x -> internaliseExp1 "constant" $ E.IntLit x t mempty
@@ -818,7 +823,7 @@ generateCond orig_p orig_ses = do
       t' <- subExpPrimType se
       cmp <- letSubExp "match_lit" $ I.BasicOp $ I.CmpOp (I.CmpEq t') e' se
       return ([cmp], [se], ses)
-    compares (E.PatternConstr c (Info (E.Scalar (E.Sum fs))) pats _) (se : ses) = do
+    compares (E.PatConstr c (Info (E.Scalar (E.Sum fs))) pats _) (se : ses) = do
       (payload_ts, m) <- internaliseSumType $ M.map (map toStruct) fs
       case M.lookup c m of
         Just (i, payload_is) -> do
@@ -829,26 +834,26 @@ generateCond orig_p orig_ses = do
           return (cmp : cmps, pertinent, ses')
         Nothing ->
           error "generateCond: missing constructor"
-    compares (E.PatternConstr _ (Info t) _ _) _ =
-      error $ "generateCond: PatternConstr has nonsensical type: " ++ pretty t
+    compares (E.PatConstr _ (Info t) _ _) _ =
+      error $ "generateCond: PatConstr has nonsensical type: " ++ pretty t
     compares (E.Id _ t loc) ses =
       compares (E.Wildcard t loc) ses
     compares (E.Wildcard (Info t) _) ses = do
       n <- internalisedTypeSize $ E.toStruct t
       let (id_ses, rest_ses) = splitAt n ses
       return ([], id_ses, rest_ses)
-    compares (E.PatternParens pat _) ses =
+    compares (E.PatParens pat _) ses =
       compares pat ses
     -- XXX: treat empty tuples and records as bool.
-    compares (E.TuplePattern [] loc) ses =
+    compares (E.TuplePat [] loc) ses =
       compares (E.Wildcard (Info $ E.Scalar $ E.Prim E.Bool) loc) ses
-    compares (E.RecordPattern [] loc) ses =
+    compares (E.RecordPat [] loc) ses =
       compares (E.Wildcard (Info $ E.Scalar $ E.Prim E.Bool) loc) ses
-    compares (E.TuplePattern pats _) ses =
+    compares (E.TuplePat pats _) ses =
       comparesMany pats ses
-    compares (E.RecordPattern fs _) ses =
+    compares (E.RecordPat fs _) ses =
       comparesMany (map snd $ E.sortFields $ M.fromList fs) ses
-    compares (E.PatternAscription pat _ _) ses =
+    compares (E.PatAscription pat _ _) ses =
       compares pat ses
     compares pat [] =
       error $ "generateCond: No values left for pattern " ++ pretty pat
@@ -872,7 +877,7 @@ generateCaseIf ses (CasePat p eCase _) bFail = do
 internalisePat ::
   String ->
   [E.SizeBinder VName] ->
-  E.Pattern ->
+  E.Pat ->
   E.Exp ->
   E.Exp ->
   (E.Exp -> InternaliseM a) ->
@@ -881,20 +886,20 @@ internalisePat desc sizes p e body m = do
   ses <- internaliseExp desc' e
   internalisePat' sizes p ses body m
   where
-    desc' = case S.toList $ E.patternIdents p of
+    desc' = case S.toList $ E.patIdents p of
       [v] -> baseString $ E.identName v
       _ -> desc
 
 internalisePat' ::
   [E.SizeBinder VName] ->
-  E.Pattern ->
+  E.Pat ->
   [I.SubExp] ->
   E.Exp ->
   (E.Exp -> InternaliseM a) ->
   InternaliseM a
 internalisePat' sizes p ses body m = do
   ses_ts <- mapM subExpType ses
-  stmPattern p ses_ts $ \pat_names -> do
+  stmPat p ses_ts $ \pat_names -> do
     bindExtSizes (AppRes (E.patternType p) (map E.sizeName sizes)) ses
     forM_ (zip pat_names ses) $ \(v, se) ->
       letBindNames [v] $ I.BasicOp $ I.SubExp se
@@ -904,7 +909,7 @@ internaliseSlice ::
   SrcLoc ->
   [SubExp] ->
   [E.DimIndex] ->
-  InternaliseM ([I.DimIndex SubExp], Certificates)
+  InternaliseM ([I.DimIndex SubExp], Certs)
 internaliseSlice loc dims idxs = do
   (idxs', oks, parts) <- unzip3 <$> zipWithM internaliseDimIndex dims idxs
   ok <- letSubExp "index_ok" =<< eAll oks
@@ -1119,7 +1124,7 @@ internaliseHist desc rf hist op ne buckets img loc = do
   img_params <- mapM (newParam "img_p" . rowType) =<< mapM lookupType img'
   let params = bucket_param : img_params
       rettype = I.Prim int64 : ne_ts
-      body = mkBody mempty $ map (I.Var . paramName) params
+      body = mkBody mempty $ varsRes $ map paramName params
   lam' <-
     mkLambda params $
       ensureResultShape
@@ -1191,7 +1196,7 @@ internaliseStreamRed desc o comm lam0 lam arr = do
           I.arrayDims $ I.paramType p
   nes <- bodyBind =<< renameBody lam_body
 
-  nes_ts <- mapM I.subExpType nes
+  nes_ts <- mapM I.subExpResType nes
   outsz <- arraysSize 0 <$> mapM lookupType arrs
   let acc_arr_tps = [I.arrayOf t (I.Shape [outsz]) NoUniqueness | t <- nes_ts]
   lam0' <- internaliseFoldLambda internaliseLambda lam0 nes_ts acc_arr_tps
@@ -1212,7 +1217,7 @@ internaliseStreamRed desc o comm lam0 lam arr = do
         (srclocOf lam)
         []
         (map I.typeOf $ I.lambdaParams lam0')
-        lam_res
+        (map resSubExp lam_res)
     ensureResultShape
       "shape of result does not match shape of initial value"
       (srclocOf lam0)
@@ -1223,7 +1228,7 @@ internaliseStreamRed desc o comm lam0 lam arr = do
 
   let form = I.Parallel o comm lam0'
   w <- arraysSize 0 <$> mapM lookupType arrs
-  letTupExp' desc $ I.Op $ I.Stream w arrs form nes lam'
+  letTupExp' desc $ I.Op $ I.Stream w arrs form (map resSubExp nes) lam'
 
 internaliseStreamAcc ::
   String ->
@@ -1246,7 +1251,8 @@ internaliseStreamAcc desc dest op lam bs = do
       internaliseMapLambda internaliseLambda lam $
         map I.Var $ paramName acc_p : bs'
     w <- arraysSize 0 <$> mapM lookupType bs'
-    letTupExp' "acc_res" $ I.Op $ I.Screma w (paramName acc_p : bs') (I.mapSOAC lam')
+    fmap subExpsRes . letTupExp' "acc_res" $
+      I.Op $ I.Screma w (paramName acc_p : bs') (I.mapSOAC lam')
 
   op' <-
     case op of
@@ -1493,7 +1499,7 @@ findFuncall e =
 bodyExtType :: Body -> InternaliseM [ExtType]
 bodyExtType (Body _ stms res) =
   existentialiseExtTypes (M.keys stmsscope) . staticShapes
-    <$> extendedScope (traverse subExpType res) stmsscope
+    <$> extendedScope (traverse subExpResType res) stmsscope
   where
     stmsscope = scopeOf stms
 
@@ -1873,7 +1879,7 @@ isOverloadedFunction qname args loc = do
           "scatter value has wrong size"
           loc
           bodyTypes
-          results
+          (subExpsRes results)
 
       let lam =
             I.Lambda
@@ -2038,8 +2044,8 @@ partitionWithSOACS k lam arrs = do
               ++ map I.rowType arr_ts,
           I.lambdaBody =
             mkBody offset_stms $
-              replicate (length arr_ts) offset
-                ++ map (I.Var . I.paramName) value_params
+              replicate (length arr_ts) (subExpRes offset)
+                ++ I.varsRes (map I.paramName value_params)
         }
   results <-
     letTupExp "partition_res" $

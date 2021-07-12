@@ -22,8 +22,8 @@ import Futhark.IR.GPU hiding
     FunDef,
     LParam,
     Lambda,
+    Pat,
     PatElem,
-    Pattern,
     Prog,
     RetType,
     Stm,
@@ -156,12 +156,12 @@ blockedPerThread thread_gtid w kernel_size ordering lam num_nonconcat arrs = do
   addStms $
     bodyStms (lambdaBody lam)
       <> stmsFromList
-        [ Let (Pattern [] [pe]) (defAux ()) $ BasicOp $ SubExp se
-          | (pe, se) <- zip chunk_red_pes chunk_red_ses
+        [ certify cs $ Let (Pat [pe]) (defAux ()) $ BasicOp $ SubExp se
+          | (pe, SubExpRes cs se) <- zip chunk_red_pes chunk_red_ses
         ]
       <> stmsFromList
-        [ Let (Pattern [] [pe]) (defAux ()) $ BasicOp $ SubExp se
-          | (pe, se) <- zip chunk_map_pes chunk_map_ses
+        [ certify cs $ Let (Pat [pe]) (defAux ()) $ BasicOp $ SubExp se
+          | (pe, SubExpRes cs se) <- zip chunk_map_pes chunk_map_ses
         ]
 
   return (chunk_red_pes, chunk_map_pes)
@@ -182,18 +182,13 @@ kerneliseLambda nes lam = do
 
       mkAccInit p (Var v)
         | not $ primType $ paramType p =
-          mkLet [] [paramIdent p] $ BasicOp $ Copy v
-      mkAccInit p x = mkLet [] [paramIdent p] $ BasicOp $ SubExp x
+          mkLet [paramIdent p] $ BasicOp $ Copy v
+      mkAccInit p x = mkLet [paramIdent p] $ BasicOp $ SubExp x
       acc_init_bnds = stmsFromList $ zipWith mkAccInit fold_acc_params nes
   return
     lam
-      { lambdaBody =
-          insertStms acc_init_bnds $
-            lambdaBody lam,
-        lambdaParams =
-          thread_index_param :
-          fold_chunk_param :
-          fold_inp_params
+      { lambdaBody = insertStms acc_init_bnds $ lambdaBody lam,
+        lambdaParams = thread_index_param : fold_chunk_param : fold_inp_params
       }
 
 prepareStream ::
@@ -223,9 +218,9 @@ prepareStream size ispace w comm fold_lam nes arrs = do
         (chunk_red_pes, chunk_map_pes) <-
           blockedPerThread gtid w size ordering fold_lam' (length nes) arrs
         let concatReturns pe =
-              ConcatReturns split_ordering w elems_per_thread $ patElemName pe
+              ConcatReturns mempty split_ordering w elems_per_thread $ patElemName pe
         return
-          ( map (Returns ResultMaySimplify . Var . patElemName) chunk_red_pes
+          ( map (Returns ResultMaySimplify mempty . Var . patElemName) chunk_red_pes
               ++ map concatReturns chunk_map_pes
           )
 
@@ -237,7 +232,7 @@ prepareStream size ispace w comm fold_lam nes arrs = do
 streamRed ::
   (MonadFreshNames m, HasScope GPU m) =>
   MkSegLevel GPU m ->
-  Pattern GPU ->
+  Pat GPU ->
   SubExp ->
   Commutativity ->
   Lambda GPU ->
@@ -251,22 +246,15 @@ streamRed mk_lvl pat w comm red_lam fold_lam nes arrs = runBuilderT'_ $ do
   -- First, figure out how many threads to use for this.
   size <- blockedKernelSize "stream_red" w
 
-  let (redout_pes, mapout_pes) = splitAt (length nes) $ patternElements pat
-  (redout_pat, ispace, read_dummy) <- dummyDim $ Pattern [] redout_pes
-  let pat' = Pattern [] $ patternElements redout_pat ++ mapout_pes
+  let (redout_pes, mapout_pes) = splitAt (length nes) $ patElements pat
+  (redout_pat, ispace, read_dummy) <- dummyDim $ Pat redout_pes
+  let pat' = Pat $ patElements redout_pat ++ mapout_pes
 
   (_, kspace, ts, kbody) <- prepareStream size ispace w comm fold_lam nes arrs
 
   lvl <- mk_lvl [w] "stream_red" $ NoRecommendation SegNoVirt
-  letBind pat' $
-    Op $
-      SegOp $
-        SegRed
-          lvl
-          kspace
-          [SegBinOp comm red_lam nes mempty]
-          ts
-          kbody
+  letBind pat' . Op . SegOp $
+    SegRed lvl kspace [SegBinOp comm red_lam nes mempty] ts kbody
 
   read_dummy
 
@@ -292,7 +280,7 @@ streamMap mk_lvl out_desc mapout_pes w comm fold_lam nes arrs = runBuilderT' $ d
   redout_pes <- forM (zip out_desc redout_ts) $ \(desc, t) ->
     PatElem <$> newVName desc <*> pure (t `arrayOfRow` threads)
 
-  let pat = Pattern [] $ redout_pes ++ mapout_pes
+  let pat = Pat $ redout_pes ++ mapout_pes
   lvl <- mk_lvl [w] "stream_map" $ NoRecommendation SegNoVirt
   letBind pat $ Op $ SegOp $ SegMap lvl kspace ts kbody
 

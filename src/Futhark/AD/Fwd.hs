@@ -125,10 +125,10 @@ instance TanBuilder (PatElemT (TypeBase s u)) where
       then return [pe']
       else return [pe, pe']
 
-instance TanBuilder (PatternT (TypeBase s u)) where
-  type Bundled (PatternT (TypeBase s u)) = (PatternT (TypeBase s u))
-  newTan (Pattern ctx pes) = Pattern ctx <$> newTan pes
-  bundleNew (Pattern ctx pes) = Pattern ctx <$> bundleNew pes
+instance TanBuilder (PatT (TypeBase s u)) where
+  type Bundled (PatT (TypeBase s u)) = PatT (TypeBase s u)
+  newTan (Pat pes) = Pat <$> newTan pes
+  bundleNew (Pat pes) = Pat <$> bundleNew pes
 
 instance TanBuilder (Param (TypeBase s u)) where
   newTan (Param p t) = do
@@ -194,14 +194,13 @@ instance Tangent SubExp where
     return [c, c_tan]
   bundleTan (Var v) = fmap Var <$> bundleTan v
 
-patNames :: Pattern -> ADM [VName]
-patNames (Pattern [] pes) = pure $ map patElemName pes
-patNames _ = error "patNames: non-empty context."
+instance Tangent SubExpRes where
+  tangent (SubExpRes cs se) = SubExpRes cs <$> tangent se
+  bundleTan (SubExpRes cs se) = map (SubExpRes cs) <$> bundleTan se
 
-basicFwd :: Pattern -> StmAux () -> BasicOp -> ADM ()
+basicFwd :: Pat -> StmAux () -> BasicOp -> ADM ()
 basicFwd pat aux op = do
   pat_tan <- newTan pat
-  pat_v_tan <- patNames pat_tan
   case op of
     SubExp se -> do
       se_tan <- tangent se
@@ -217,7 +216,7 @@ basicFwd pat aux op = do
           x_pe = primExpFromSubExp t x
           dx = pdUnOp unop x_pe
       x_tan <- primExpFromSubExp t <$> tangent x
-      auxing aux $ letBindNames pat_v_tan <=< toExp $ x_tan ~*~ dx
+      auxing aux $ letBindNames (patNames pat_tan) <=< toExp $ x_tan ~*~ dx
     BinOp bop x y -> do
       let t = binOpType bop
       x_tan <- primExpFromSubExp t <$> tangent x
@@ -225,7 +224,7 @@ basicFwd pat aux op = do
       let (wrt_x, wrt_y) =
             pdBinOp bop (primExpFromSubExp t x) (primExpFromSubExp t y)
       auxing aux $
-        letBindNames pat_v_tan <=< toExp $
+        letBindNames (patNames pat_tan) <=< toExp $
           x_tan ~*~ wrt_x ~+~ y_tan ~*~ wrt_y
     CmpOp {} ->
       addStm $ Let pat_tan aux $ BasicOp op
@@ -286,7 +285,7 @@ zeroFromSubExp (Var v) = do
   t <- lookupType v
   letExp "zero" $ zeroExp t
 
-fwdSOAC :: Pattern -> StmAux () -> SOAC SOACS -> ADM ()
+fwdSOAC :: Pat -> StmAux () -> SOAC SOACS -> ADM ()
 fwdSOAC pat aux (Screma size xs (ScremaForm scs reds f)) = do
   pat' <- bundleNew pat
   xs' <- bundleTan xs
@@ -346,14 +345,14 @@ fwdSOAC pat aux (Hist len ops bucket_fun imgs) = do
             histNeutral = interleave nes nes_tan,
             histOp = op'
           }
-fwdSOAC (Pattern ctx pes) aux (Scatter len lam ivs as) = do
+fwdSOAC (Pat pes) aux (Scatter len lam ivs as) = do
   as_tan <- mapM (\(s, n, a) -> do a_tan <- tangent a; return (s, n, a_tan)) as
   pes_tan <- newTan pes
   ivs' <- bundleTan ivs
   let (as_ws, as_ns, _as_vs) = unzip3 as
       n_indices = sum $ zipWith (*) as_ns $ map length as_ws
   lam' <- fwdScatterLambda n_indices lam
-  let s = Let (Pattern ctx (pes ++ pes_tan)) aux $ Op $ Scatter len lam' ivs' $ as ++ as_tan
+  let s = Let (Pat (pes ++ pes_tan)) aux $ Op $ Scatter len lam' ivs' $ as ++ as_tan
   addStm s
   where
     fwdScatterLambda :: Int -> Lambda -> ADM Lambda
@@ -385,7 +384,7 @@ fwdStm (Let pat aux (BasicOp (UpdateAcc acc i x))) = do
   addStm $ Let pat' aux $ BasicOp $ UpdateAcc acc_tan i x'
 fwdStm stm@(Let pat aux (BasicOp e)) = do
   -- XXX: this has to be too naive.
-  unless (any isAcc $ patternTypes pat) $
+  unless (any isAcc $ patTypes pat) $
     addStm stm
   basicFwd pat aux e
 fwdStm stm@(Let pat _ (Apply f args _ _))
@@ -394,13 +393,12 @@ fwdStm stm@(Let pat _ (Apply f args _ _))
     arg_tans <-
       zipWith primExpFromSubExp argts <$> mapM (tangent . fst) args
     pat_tan <- newTan pat
-    pat_v_tan <- patNames pat_tan
     let arg_pes = zipWith primExpFromSubExp argts (map fst args)
     case pdBuiltin f arg_pes of
       Nothing ->
         error $ "No partial derivative defined for builtin function: " ++ pretty f
       Just derivs ->
-        zipWithM_ (letBindNames . pure) pat_v_tan
+        zipWithM_ (letBindNames . pure) (patNames pat_tan)
           =<< mapM toExp (zipWith (~*~) arg_tans derivs)
 fwdStm (Let pat aux (If cond t f (IfDec ret ifsort))) = do
   t' <- slocal' $ fwdBody t
@@ -408,21 +406,21 @@ fwdStm (Let pat aux (If cond t f (IfDec ret ifsort))) = do
   pat' <- bundleNew pat
   ret' <- bundleTan ret
   addStm $ Let pat' aux $ If cond t' f' $ IfDec ret' ifsort
-fwdStm (Let pat aux (DoLoop l_ctx val_pats loop@(WhileLoop v) body)) = do
+fwdStm (Let pat aux (DoLoop val_pats loop@(WhileLoop v) body)) = do
   val_pats' <- bundleNew val_pats
   pat' <- bundleNew pat
   body' <-
-    localScope (scopeOfFParams (map fst $ l_ctx ++ val_pats) <> scopeOf loop) $
+    localScope (scopeOfFParams (map fst val_pats) <> scopeOf loop) $
       slocal' $ fwdBody body
-  addStm $ Let pat' aux $ DoLoop l_ctx val_pats' (WhileLoop v) body'
-fwdStm (Let pat aux (DoLoop l_ctx val_pats loop@(ForLoop i it bound loop_vars) body)) = do
+  addStm $ Let pat' aux $ DoLoop val_pats' (WhileLoop v) body'
+fwdStm (Let pat aux (DoLoop val_pats loop@(ForLoop i it bound loop_vars) body)) = do
   pat' <- bundleNew pat
   val_pats' <- bundleNew val_pats
   loop_vars' <- bundleNew loop_vars
   body' <-
-    localScope (scopeOfFParams (map fst $ l_ctx ++ val_pats) <> scopeOf loop) $
+    localScope (scopeOfFParams (map fst val_pats) <> scopeOf loop) $
       slocal' $ fwdBody body
-  addStm $ Let pat' aux $ DoLoop l_ctx val_pats' (ForLoop i it bound loop_vars') body'
+  addStm $ Let pat' aux $ DoLoop val_pats' (ForLoop i it bound loop_vars') body'
 fwdStm (Let pat aux (WithAcc inputs lam)) = do
   inputs' <- forM inputs $ \(shape, arrs, op) -> do
     arrs_tan <- tangent arrs

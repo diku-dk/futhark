@@ -37,6 +37,7 @@ where
 
 import Control.Monad.Reader
 import qualified Data.Map.Strict as M
+import Data.Maybe (isJust)
 import Futhark.Analysis.Alias
 import Futhark.IR
 import Futhark.IR.Aliases
@@ -139,13 +140,15 @@ cseInFunDef cse_arrays fundec =
         runReader (cseInBody ds $ funDefBody fundec) $ newCSEState cse_arrays
     }
   where
-    -- XXX: we treat every result as a consumption here, because we
+    -- XXX: we treat every non-entry result as a consumption here, because we
     -- our core language is not strong enough to fully capture the
     -- aliases we want, so we are turning some parts off (see #803,
     -- #1241, and the related comment in TypeCheck.hs).  This is not a
     -- practical problem while we still perform such aggressive
     -- inlining.
-    ds = map retDiet $ funDefRetType fundec
+    ds
+      | isJust $ funDefEntryPoint fundec = map (diet . declExtTypeOf) $ funDefRetType fundec
+      | otherwise = map retDiet $ funDefRetType fundec
     retDiet t
       | primType $ declExtTypeOf t = Observe
       | otherwise = Consume
@@ -186,16 +189,19 @@ cseInStms ::
 cseInStms _ [] m = do
   a <- m
   return (mempty, a)
-cseInStms consumed (bnd : bnds) m =
-  cseInStm consumed bnd $ \bnd' -> do
-    (bnds', a) <- cseInStms consumed bnds m
-    bnd'' <- mapM nestedCSE bnd'
-    return (stmsFromList bnd'' <> bnds', a)
+cseInStms consumed (stm : stms) m =
+  cseInStm consumed stm $ \stm' -> do
+    (stms', a) <- cseInStms consumed stms m
+    stm'' <- mapM nestedCSE stm'
+    return (stmsFromList stm'' <> stms', a)
   where
-    nestedCSE bnd' = do
-      let ds = map patElemDiet $ patternValueElements $ stmPattern bnd'
-      e <- mapExpM (cse ds) $ stmExp bnd'
-      return bnd' {stmExp = e}
+    nestedCSE stm' = do
+      let ds =
+            case stmExp stm' of
+              DoLoop merge _ _ -> map (diet . declTypeOf . fst) merge
+              _ -> map patElemDiet $ patElements $ stmPat stm'
+      e <- mapExpM (cse ds) $ stmExp stm'
+      return stm' {stmExp = e}
 
     cse ds =
       identityMapper
@@ -224,15 +230,15 @@ cseInStm consumed (Let pat (StmAux cs attrs edec) e) m = do
   CSEState (esubsts, nsubsts) cse_arrays <- ask
   let e' = normExp $substituteNames nsubsts e
       pat' = substituteNames nsubsts pat
-  if any (bad cse_arrays) $ patternValueElements pat
+  if any (bad cse_arrays) $ patElements pat
     then m [Let pat' (StmAux cs attrs edec) e']
     else case M.lookup (edec, e') esubsts of
       Just subpat ->
         local (addNameSubst pat' subpat) $ do
           let lets =
-                [ Let (Pattern [] [patElem']) (StmAux cs attrs edec) $
+                [ Let (Pat [patElem']) (StmAux cs attrs edec) $
                     BasicOp $ SubExp $ Var $ patElemName patElem
-                  | (name, patElem) <- zip (patternNames pat') $ patternElements subpat,
+                  | (name, patElem) <- zip (patNames pat') $ patElements subpat,
                     let patElem' = patElem {patElemName = name}
                 ]
           m lets
@@ -249,7 +255,7 @@ cseInStm consumed (Let pat (StmAux cs attrs edec) e) m = do
 type ExpressionSubstitutions rep =
   M.Map
     (ExpDec rep, Exp rep)
-    (Pattern rep)
+    (Pat rep)
 
 type NameSubstitutions = M.Map VName VName
 
@@ -261,16 +267,16 @@ data CSEState rep = CSEState
 newCSEState :: Bool -> CSEState rep
 newCSEState = CSEState (M.empty, M.empty)
 
-mkSubsts :: PatternT dec -> PatternT dec -> M.Map VName VName
-mkSubsts pat vs = M.fromList $ zip (patternNames pat) (patternNames vs)
+mkSubsts :: PatT dec -> PatT dec -> M.Map VName VName
+mkSubsts pat vs = M.fromList $ zip (patNames pat) (patNames vs)
 
-addNameSubst :: PatternT dec -> PatternT dec -> CSEState rep -> CSEState rep
+addNameSubst :: PatT dec -> PatT dec -> CSEState rep -> CSEState rep
 addNameSubst pat subpat (CSEState (esubsts, nsubsts) cse_arrays) =
   CSEState (esubsts, mkSubsts pat subpat `M.union` nsubsts) cse_arrays
 
 addExpSubst ::
   ASTRep rep =>
-  Pattern rep ->
+  Pat rep ->
   ExpDec rep ->
   Exp rep ->
   CSEState rep ->

@@ -32,7 +32,8 @@ import Futhark.Transform.Rename
 
 mmBlkRegTiling :: Stm GPU -> TileM (Maybe (Stms GPU, Stm GPU))
 mmBlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kbody))))
-  | KernelBody () kstms [Returns ResultMaySimplify (Var res_nm)] <- old_kbody,
+  | KernelBody () kstms [Returns ResultMaySimplify cs (Var res_nm)] <- old_kbody,
+    cs == mempty,
     -- check kernel has one result of primitive type
     [res_tp] <- ts,
     primType res_tp,
@@ -59,7 +60,7 @@ mmBlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kbo
     -- exactly one of the two innermost dimensions of the kernel
     Just var_dims <- isInvarTo1of2InnerDims mempty seg_space variance arrs,
     -- get the variables on which the first result of redomap depends on
-    [redomap_orig_res] <- patternValueElements pat_redomap,
+    [redomap_orig_res] <- patElements pat_redomap,
     Just res_red_var <- M.lookup (patElemName redomap_orig_res) variance, -- variance of the reduce result
 
     -- we furthermore check that code1 is only formed by
@@ -144,7 +145,7 @@ mmBlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kbo
               css'' <- update' "css" css_merge' [i, j] red_ne
               resultBodyM [Var css'']
             resultBodyM [Var css']
-          return [Var css]
+          return [varRes css]
         let [cssss] = cssss_list
 
         a_loc_init <- scratch "A_loc" map_t1 [a_loc_sz]
@@ -278,7 +279,7 @@ mmBlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kbo
                                 index "B_loc_elem" b_loc [b_loc_ind]
                                   >>= update "bsss" bsss_merge [j]
                               resultBodyM [Var bsss]
-                            return $ map Var [asss, bsss]
+                            return $ varsRes [asss, bsss]
 
                         let [asss, bsss] = reg_mem
 
@@ -323,7 +324,7 @@ mmBlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kbo
                                     )
                                     (resultBodyM [Var css_merge'])
                               resultBodyM [Var css]
-                            return [Var css]
+                            return [varRes css]
 
                         resultBodyM $ map Var redomap_res
                     )
@@ -388,7 +389,7 @@ mmBlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kbo
                     rss'' <- update' "rss" rss_merge' [i, j] res_el
                     resultBodyM [Var rss'']
                   resultBodyM [Var rss']
-                return [Var rss]
+                return [varRes rss]
               let rssss : _ = rssss_list
               return rssss
 
@@ -407,7 +408,7 @@ mmBlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kbo
                   new_shape = concat [ones, block_dims, ones, rest_dims]
               letExp "res_reshaped" $ BasicOp $ Reshape (map DimNew new_shape) epilogue_res
 
-        return [RegTileReturns regtile_ret_dims epilogue_res']
+        return [RegTileReturns mempty regtile_ret_dims epilogue_res']
 
       let level' = SegGroup (Count grid_size) (Count group_size) SegNoVirt
           space' = SegSpace gid_flat (rem_outer_dims ++ [(gid_y, gridDim_y), (gid_x, gridDim_x)])
@@ -461,7 +462,7 @@ forLoop' i_bound merge body = do
       body i $ map paramName loop_inits
 
   letTupExp "loop" $
-    DoLoop [] (zip loop_inits $ map Var merge) loop_form loop_body
+    DoLoop (zip loop_inits $ map Var merge) loop_form loop_body
 
 forLoop ::
   SubExp ->
@@ -486,9 +487,7 @@ rebindLambda ::
 rebindLambda lam new_params res_names =
   stmsFromList
     ( zipWith
-        ( \ident new_param ->
-            mkLet [] [ident] $ BasicOp $ SubExp $ Var new_param
-        )
+        (\ident new_param -> mkLet [ident] $ BasicOp $ SubExp $ Var new_param)
         idents
         new_params
     )
@@ -503,8 +502,8 @@ rebindLambda lam new_params res_names =
         lam_params
     res_cpy_stms =
       zipWith
-        ( \res_name lam_res ->
-            mkLet [] [Ident res_name lam_ret_type] $ BasicOp $ SubExp lam_res
+        ( \res_name (SubExpRes cs lam_res) ->
+            certify cs $ mkLet [Ident res_name lam_ret_type] $ BasicOp $ SubExp lam_res
         )
         res_names
         lam_ress
@@ -573,13 +572,13 @@ processIndirections ::
   Maybe (Stms GPU, M.Map VName (Stm GPU))
 processIndirections arrs _ acc stm@(Let patt _ (BasicOp (Index _ _)))
   | Just (ss, tab) <- acc,
-    [p] <- patternValueElements patt,
+    [p] <- patElements patt,
     p_nm <- patElemName p,
     nameIn p_nm arrs =
     Just (ss, M.insert p_nm stm tab)
 processIndirections _ res_red_var acc stm'@(Let patt _ _)
   | Just (ss, tab) <- acc,
-    ps <- patternValueElements patt,
+    ps <- patElements patt,
     all (\p -> not (nameIn (patElemName p) res_red_var)) ps =
     Just (ss Seq.|> stm', tab)
   | otherwise = Nothing
@@ -728,7 +727,7 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
     -- exactly one of the two innermost dimensions of the kernel
     Just _ <- isInvarTo2of3InnerDims mempty space variance inp_soac_arrs,
     -- get the free variables on which the result of redomap depends on
-    redomap_orig_res <- patternValueElements pat_redomap,
+    redomap_orig_res <- patElements pat_redomap,
     res_red_var <- -- variance of the reduce result
       mconcat $ mapMaybe ((`M.lookup` variance) . patElemName) redomap_orig_res,
     mempty /= res_red_var,
@@ -751,7 +750,6 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
     -- (for sanity sake, they should be)
     ker_res_nms <- mapMaybe getResNm kres,
     length ker_res_nms == length kres,
-    Pattern [] _ <- pat,
     all primType kertp,
     all (variantToDim variance gtid_z) ker_res_nms = do
     -- HERE STARTS THE IMPLEMENTATION:
@@ -803,7 +801,7 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
             css <- forLoop rz [css_init] $ \i [css_merge] -> do
               css' <- update' "css" css_merge [i] red_ne
               resultBodyM [Var css']
-            return $ Var css
+            return $ varRes css
 
         -- scratch the shared-memory arrays corresponding to the arrays that are
         --   input to the redomap and are invariant to the outermost parallel dimension.
@@ -848,7 +846,7 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
                         --y_tp  <- subExpType y_elm
                         return (y_elm, y_ind)
 
-                      let ret = WriteReturns (Shape [rz]) loc_Y_nm [([DimFix res_i], res_v)]
+                      let ret = WriteReturns mempty (Shape [rz]) loc_Y_nm [([DimFix res_i], res_v)]
                       let body = KernelBody () stms [ret]
 
                       res_nms <-
@@ -865,7 +863,7 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
                     letBindNames [gtid_x] =<< toExp (le64 jj2 + le64 ltid_x)
                     reg_arr_merge_nms_slc <- forM reg_arr_merge_nms $ \reg_arr_nm ->
                       index "res_reg_slc" reg_arr_nm [ltid_y, ltid_x]
-                    letTupExp' "redomap_guarded"
+                    fmap subExpsRes . letTupExp' "redomap_guarded"
                       =<< eIf
                         (toExp $ le64 gtid_y .<. pe64 d_Ky .&&. le64 gtid_x .<. pe64 d_Kx)
                         ( do
@@ -925,7 +923,7 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
             segMap3D "rssss" segthd_lvl ResultPrivate (se1, ty, tx) $ \(_ltid_z, ltid_y, ltid_x) ->
               forM (zip kertp redomap_res) $ \(res_tp, res) -> do
                 rss_init <- scratch "rss_init" (elemType res_tp) [rz, se1, se1]
-                fmap Var $
+                fmap varRes $
                   forLoop rz [rss_init] $ \i [rss] -> do
                     let slice = [DimFix $ Var i, DimFix se0, DimFix se0]
                     thread_res <- index "thread_res" res [ltid_y, ltid_x, i]
@@ -959,7 +957,7 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
                   let slice = [DimFix $ Var i, DimFix se0, DimFix se0]
                   letSubExp "rss" $ BasicOp $ Update Unsafe rs_merge slice res_el
                 resultBodyM rss'
-              return $ map Var rss
+              return $ varsRes rss
 
         ----------------------------------------------------------------
         -- Finally, reshape the result arrays for the RegTileReturn  ---
@@ -979,7 +977,7 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
                   new_shape = concat [ones, block_dims, ones, rest_dims]
               letExp "res_reshaped" $ BasicOp $ Reshape (map DimNew new_shape) res
 
-        return $ map (RegTileReturns regtile_ret_dims) epilogue_res'
+        return $ map (RegTileReturns mempty regtile_ret_dims) epilogue_res'
       -- END (ret_seggroup, stms_seggroup) <- runBuilder $ do
       let level' = SegGroup (Count grid_size) (Count group_size) SegNoVirt
           space' = SegSpace gid_flat (rem_outer_dims ++ [(gid_z, gridDim_z), (gid_y, gridDim_y), (gid_x, gridDim_x)])
@@ -989,7 +987,7 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
     -- END (new_kernel, host_stms) <- runBuilder $ do
     return $ Just (host_stms, new_kernel)
   where
-    getResNm (Returns ResultMaySimplify (Var res_nm)) = Just res_nm
+    getResNm (Returns ResultMaySimplify _ (Var res_nm)) = Just res_nm
     getResNm _ = Nothing
 
     limitTile :: String -> SubExp -> SubExp -> Builder GPU SubExp
@@ -1001,7 +999,7 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
       (VName, Stm GPU) ->
       Builder GPU (M.Map VName (Stm GPU), M.Map VName (PrimType, Stm GPU))
     insertTranspose variance (gidz, _) (tab_inn, tab_out) (p_nm, stm@(Let patt yy (BasicOp (Index arr_nm slc))))
-      | [p] <- patternValueElements patt,
+      | [p] <- patElements patt,
         ptp <- elemType $ patElemType p,
         p_nm == patElemName p =
         case L.findIndices (variantSliceDim variance gidz) slc of

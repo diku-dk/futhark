@@ -50,7 +50,7 @@ canBeSinglePass space ops
 -- | Compile 'SegScan' instance to host-level code with calls to
 -- various kernels.
 compileSegScan ::
-  Pattern GPUMem ->
+  Pat GPUMem ->
   SegLevel ->
   SegSpace ->
   [SegBinOp GPUMem] ->

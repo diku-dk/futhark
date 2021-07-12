@@ -46,7 +46,7 @@ import Futhark.IR
 class ASTRep rep => BuilderOps rep where
   mkExpDecB ::
     (MonadBuilder m, Rep m ~ rep) =>
-    Pattern rep ->
+    Pat rep ->
     Exp rep ->
     m (ExpDec rep)
   mkBodyB ::
@@ -62,7 +62,7 @@ class ASTRep rep => BuilderOps rep where
 
   default mkExpDecB ::
     (MonadBuilder m, Buildable rep) =>
-    Pattern rep ->
+    Pat rep ->
     Exp rep ->
     m (ExpDec rep)
   mkExpDecB pat e = return $ mkExpDec pat e
@@ -100,10 +100,7 @@ instance MonadFreshNames m => MonadFreshNames (BuilderT rep m) where
   getNameSource = lift getNameSource
   putNameSource = lift . putNameSource
 
-instance
-  (ASTRep rep, Monad m) =>
-  HasScope rep (BuilderT rep m)
-  where
+instance (ASTRep rep, Monad m) => HasScope rep (BuilderT rep m) where
   lookupType name = do
     t <- BuilderT $ gets $ M.lookup name . snd
     case t of
@@ -111,10 +108,7 @@ instance
       Just t' -> return $ typeOf t'
   askScope = BuilderT $ gets snd
 
-instance
-  (ASTRep rep, Monad m) =>
-  LocalScope rep (BuilderT rep m)
-  where
+instance (ASTRep rep, Monad m) => LocalScope rep (BuilderT rep m) where
   localScope types (BuilderT m) = BuilderT $ do
     modify $ second (M.union types)
     x <- m
@@ -184,10 +178,7 @@ runBuilderT'_ = fmap snd . runBuilderT'
 -- ('addStm') during the action.  Assumes that the current monad
 -- provides initial scope and name source.
 runBuilder ::
-  ( MonadFreshNames m,
-    HasScope somerep m,
-    SameScope somerep rep
-  ) =>
+  (MonadFreshNames m, HasScope somerep m, SameScope somerep rep) =>
   Builder rep a ->
   m (a, Stms rep)
 runBuilder m = do
@@ -197,10 +188,7 @@ runBuilder m = do
 -- | Like 'runBuilder', but throw away the result and just return the
 -- added statements.
 runBuilder_ ::
-  ( MonadFreshNames m,
-    HasScope somerep m,
-    SameScope somerep rep
-  ) =>
+  (MonadFreshNames m, HasScope somerep m, SameScope somerep rep) =>
   Builder rep a ->
   m (Stms rep)
 runBuilder_ = fmap snd . runBuilder

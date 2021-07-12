@@ -12,7 +12,7 @@ import Futhark.Pass
 
 bindLambda ::
   (MonadBuilder m, Rep m ~ SOACS) =>
-  Pattern ->
+  Pat ->
   StmAux (ExpDec SOACS) ->
   Lambda ->
   [SubExp] ->
@@ -24,8 +24,8 @@ bindLambda pat aux (Lambda params body _) args = do
         (Array {}, Var v) -> Copy v
         _ -> SubExp arg
   res <- bodyBind body
-  forM_ (zip (patternNames pat) res) $ \(v, se) ->
-    letBindNames [v] $ BasicOp $ SubExp se
+  forM_ (zip (patNames pat) res) $ \(v, SubExpRes cs se) ->
+    certifying cs $ letBindNames [v] $ BasicOp $ SubExp se
 
 onStm :: Scope SOACS -> Stm -> PassM (Stms SOACS)
 onStm scope (Let pat aux (Op (VJP lam args vec))) = do

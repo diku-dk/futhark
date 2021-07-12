@@ -116,8 +116,8 @@ intraGroupParallelise knest lam = runMaybeT $ do
 
   let kbody' = kbody {kernelBodyStms = read_input_stms <> kernelBodyStms kbody}
 
-  let nested_pat = loopNestingPattern first_nest
-      rts = map (length ispace `stripArray`) $ patternTypes nested_pat
+  let nested_pat = loopNestingPat first_nest
+      rts = map (length ispace `stripArray`) $ patTypes nested_pat
       lvl = SegGroup (Count num_groups) (Count $ Var group_size) SegNoVirt
       kstm =
         Let nested_pat aux $
@@ -195,12 +195,12 @@ intraGroupStm lvl stm@(Let pat aux e) = do
   let lvl' = SegThread (segNumGroups lvl) (segGroupSize lvl) SegNoVirt
 
   case e of
-    DoLoop ctx val form loopbody ->
+    DoLoop merge form loopbody ->
       localScope (scopeOf form') $
-        localScope (scopeOfFParams $ map fst $ ctx ++ val) $ do
+        localScope (scopeOfFParams $ map fst merge) $ do
           loopbody' <- intraGroupBody lvl loopbody
           certifying (stmAuxCerts aux) $
-            letBind pat $ DoLoop ctx val form' loopbody'
+            letBind pat $ DoLoop merge form' loopbody'
       where
         form' = case form of
           ForLoop i it bound inps -> ForLoop i it bound inps
@@ -222,7 +222,7 @@ intraGroupStm lvl stm@(Let pat aux e) = do
                 { distNest =
                     singleNesting $ Nesting mempty loopnest,
                   distScope =
-                    scopeOfPattern pat
+                    scopeOfPat pat
                       <> scopeForGPU (scopeOf lam)
                       <> scope,
                   distOnInnerMap =
@@ -290,7 +290,11 @@ intraGroupStm lvl stm@(Let pat aux e) = do
           krets = do
             (a_w, a, is_vs) <-
               groupScatterResults dests $ bodyResult $ lambdaBody lam'
-            return $ WriteReturns a_w a [(map DimFix is, v) | (is, v) <- is_vs]
+            let cs =
+                  foldMap (foldMap resCerts . fst) is_vs
+                    <> foldMap (resCerts . snd) is_vs
+                is_vs' = [(map (DimFix . resSubExp) is, resSubExp v) | (is, v) <- is_vs]
+            return $ WriteReturns cs a_w a is_vs'
           inputs = do
             (p, p_a) <- zip (lambdaParams lam') ivs
             return $ KernelInput (paramName p) (paramType p) p_a [Var write_i]
@@ -301,7 +305,7 @@ intraGroupStm lvl stm@(Let pat aux e) = do
           addStms $ bodyStms $ lambdaBody lam'
 
       certifying (stmAuxCerts aux) $ do
-        let ts = zipWith (stripArray . length) dests_ws $ patternTypes pat
+        let ts = zipWith (stripArray . length) dests_ws $ patTypes pat
             body = KernelBody () kstms krets
         letBind pat $ Op $ SegOp $ SegMap lvl' space ts body
 
@@ -324,5 +328,7 @@ intraGroupParalleliseBody lvl body = do
     ( S.toList min_ws,
       S.toList avail_ws,
       log,
-      KernelBody () kstms $ map (Returns ResultMaySimplify) $ bodyResult body
+      KernelBody () kstms $ map ret $ bodyResult body
     )
+  where
+    ret (SubExpRes cs se) = Returns ResultMaySimplify cs se

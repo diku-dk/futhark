@@ -146,14 +146,14 @@ readCarries chunk_offset dims' vec_is pes scan
 
 -- | Produce partially scanned intervals; one per workgroup.
 scanStage1 ::
-  Pattern GPUMem ->
+  Pat GPUMem ->
   Count NumGroups SubExp ->
   Count GroupSize SubExp ->
   SegSpace ->
   [SegBinOp GPUMem] ->
   KernelBody GPUMem ->
   CallKernelGen (TV Int32, Imp.TExp Int64, CrossesSegment)
-scanStage1 (Pattern _ all_pes) num_groups group_size space scans kbody = do
+scanStage1 (Pat all_pes) num_groups group_size space scans kbody = do
   let num_groups' = fmap toInt64Exp num_groups
       group_size' = fmap toInt64Exp group_size
   num_threads <- dPrimV "num_threads" $ sExt32 $ unCount num_groups' * unCount group_size'
@@ -241,7 +241,7 @@ scanStage1 (Pattern _ all_pes) num_groups group_size space scans kbody = do
 
               sComment "combine with carry and write to local memory" $
                 compileStms mempty (bodyStms $ lambdaBody scan_op) $
-                  forM_ (zip3 rets local_arrs (bodyResult $ lambdaBody scan_op)) $
+                  forM_ (zip3 rets local_arrs $ map resSubExp $ bodyResult $ lambdaBody scan_op) $
                     \(t, arr, se) ->
                       copyDWIMFix arr [localArrayIndex constants t] se []
 
@@ -314,7 +314,7 @@ scanStage1 (Pattern _ all_pes) num_groups group_size space scans kbody = do
   return (num_threads, elems_per_group, crossesSegment)
 
 scanStage2 ::
-  Pattern GPUMem ->
+  Pat GPUMem ->
   TV Int32 ->
   Imp.TExp Int64 ->
   Count NumGroups SubExp ->
@@ -322,7 +322,7 @@ scanStage2 ::
   SegSpace ->
   [SegBinOp GPUMem] ->
   CallKernelGen ()
-scanStage2 (Pattern _ all_pes) stage1_num_threads elems_per_group num_groups crossesSegment space scans = do
+scanStage2 (Pat all_pes) stage1_num_threads elems_per_group num_groups crossesSegment space scans = do
   let (gtids, dims) = unzip $ unSegSpace space
       dims' = map toInt64Exp dims
 
@@ -391,7 +391,7 @@ scanStage2 (Pattern _ all_pes) stage1_num_threads elems_per_group num_groups cro
                   [localArrayIndex constants t]
 
 scanStage3 ::
-  Pattern GPUMem ->
+  Pat GPUMem ->
   Count NumGroups SubExp ->
   Count GroupSize SubExp ->
   Imp.TExp Int64 ->
@@ -399,7 +399,7 @@ scanStage3 ::
   SegSpace ->
   [SegBinOp GPUMem] ->
   CallKernelGen ()
-scanStage3 (Pattern _ all_pes) num_groups group_size elems_per_group crossesSegment space scans = do
+scanStage3 (Pat all_pes) num_groups group_size elems_per_group crossesSegment space scans = do
   let num_groups' = fmap toInt64Exp num_groups
       group_size' = fmap toInt64Exp group_size
       (gtids, dims) = unzip $ unSegSpace space
@@ -478,7 +478,7 @@ scanStage3 (Pattern _ all_pes) num_groups group_size elems_per_group crossesSegm
 -- | Compile 'SegScan' instance to host-level code with calls to
 -- various kernels.
 compileSegScan ::
-  Pattern GPUMem ->
+  Pat GPUMem ->
   SegLevel ->
   SegSpace ->
   [SegBinOp GPUMem] ->

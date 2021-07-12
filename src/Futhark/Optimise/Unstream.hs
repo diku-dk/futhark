@@ -61,7 +61,7 @@ unstream onOp simplify =
 type UnstreamM rep = ReaderT (Scope rep) (State VNameSource)
 
 type OnOp rep =
-  Pattern rep -> StmAux (ExpDec rep) -> Op rep -> UnstreamM rep [Stm rep]
+  Pat rep -> StmAux (ExpDec rep) -> Op rep -> UnstreamM rep [Stm rep]
 
 optimiseStms ::
   ASTRep rep =>

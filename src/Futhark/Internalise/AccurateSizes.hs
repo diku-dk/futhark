@@ -75,9 +75,9 @@ ensureResultExtShape ::
   InternaliseM Result
 ensureResultExtShape msg loc rettype res = do
   res' <- ensureResultExtShapeNoCtx msg loc rettype res
-  ts <- mapM subExpType res'
+  ts <- mapM subExpResType res'
   let ctx = extractShapeContext rettype $ map arrayDims ts
-  pure $ ctx ++ res'
+  pure $ subExpsRes ctx ++ res'
 
 ensureResultExtShapeNoCtx ::
   ErrorMsg SubExp ->
@@ -86,12 +86,12 @@ ensureResultExtShapeNoCtx ::
   Result ->
   InternaliseM Result
 ensureResultExtShapeNoCtx msg loc rettype es = do
-  es_ts <- mapM subExpType es
+  es_ts <- mapM subExpResType es
   let ext_mapping = shapeExtMapping rettype es_ts
       rettype' = foldr (uncurry fixExt) rettype $ M.toList ext_mapping
-      assertProperShape t se =
+      assertProperShape t (SubExpRes cs se) =
         let name = "result_proper_shape"
-         in ensureExtShape msg loc t name se
+         in SubExpRes cs <$> ensureExtShape msg loc t name se
   zipWithM assertProperShape rettype' es
 
 ensureExtShape ::
