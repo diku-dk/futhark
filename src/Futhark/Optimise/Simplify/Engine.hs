@@ -244,7 +244,7 @@ bindArrayLParams params =
 
 bindMerge ::
   SimplifiableRep rep =>
-  [(FParam (Wise rep), SubExp, SubExp)] ->
+  [(FParam (Wise rep), SubExp, SubExpRes)] ->
   SimpleM rep a ->
   SimpleM rep a
 bindMerge = localVtable . ST.insertLoopMerge
@@ -681,34 +681,17 @@ simplifyResult ::
   SimpleM rep (Result, UT.UsageTable)
 simplifyResult ds res = do
   let (ctx_res, val_res) = splitFromEnd (length ds) res
-  -- Copy propagation is a little trickier here, because there is no
-  -- place to put the certificates when copy-propagating a certified
-  -- statement.  However, for results in the *context*, it is OK to
-  -- just throw away the certificates, because for the program to be
-  -- type-correct, those statements must anyway be used (or
-  -- copy-propagated into) the statements producing the value result.
-  (ctx_res', _ctx_res_cs) <- collectCerts $ mapM simplify ctx_res
-  val_res' <- mapM simplify' val_res
+  ctx_res' <- mapM simplify ctx_res
+  val_res' <- mapM simplify val_res
 
   let consumption = consumeResult $ zip ds val_res'
       res' = ctx_res' <> val_res'
   return (res', UT.usages (freeIn res') <> consumption)
-  where
-    simplify' (Var name) = do
-      bnd <- ST.lookupSubExp name <$> askVtable
-      case bnd of
-        Just (Constant v, cs)
-          | cs == mempty -> return $ Constant v
-        Just (Var id', cs)
-          | cs == mempty -> return $ Var id'
-        _ -> return $ Var name
-    simplify' (Constant v) =
-      return $ Constant v
 
 isDoLoopResult :: Result -> UT.UsageTable
 isDoLoopResult = mconcat . map checkForVar
   where
-    checkForVar (Var ident) = UT.inResultUsage ident
+    checkForVar (SubExpRes _ (Var ident)) = UT.inResultUsage ident
     checkForVar _ = mempty
 
 simplifyStms ::
@@ -939,6 +922,12 @@ instance Simplifiable SubExp where
   simplify (Constant v) =
     return $ Constant v
 
+instance Simplifiable SubExpRes where
+  simplify (SubExpRes cs se) = do
+    cs' <- simplify cs
+    (se', se_cs) <- collectCerts $ simplify se
+    pure $ SubExpRes (se_cs <> cs') se'
+
 simplifyPattern ::
   (SimplifiableRep rep, Simplifiable dec) =>
   PatternT dec ->
@@ -1023,10 +1012,10 @@ simplifyLambdaMaybeHoist blocked lam@(Lambda params body rettype) = do
   rettype' <- simplify rettype
   return (Lambda params' body' rettype', hoisted)
 
-consumeResult :: [(Diet, SubExp)] -> UT.UsageTable
+consumeResult :: [(Diet, SubExpRes)] -> UT.UsageTable
 consumeResult = mconcat . map inspect
   where
-    inspect (Consume, se) =
+    inspect (Consume, SubExpRes _ se) =
       mconcat $ map UT.consumedUsage $ namesToList $ subExpAliases se
     inspect _ = mempty
 

@@ -223,7 +223,7 @@ fuseSOACs =
 
 fuseConsts :: Names -> Stms SOACS -> PassM (Stms SOACS)
 fuseConsts used_consts consts =
-  fuseStms mempty consts $ map Var $ namesToList used_consts
+  fuseStms mempty consts $ varsRes $ namesToList used_consts
 
 fuseFun :: Stms SOACS -> FunDef SOACS -> PassM (FunDef SOACS)
 fuseFun consts fun = do
@@ -803,7 +803,7 @@ fusionGatherStms fres (bnd@(Let pat _ e) : bnds) res = do
       consumed' <- varsAliases consumed
       greedyFuse rem_bnds used_lam blres (pat, aux, soac, consumed')
 fusionGatherStms fres [] res =
-  foldM fusionGatherExp fres $ map (BasicOp . SubExp) res
+  foldM fusionGatherExp fres $ map (BasicOp . SubExp . resSubExp) res
 
 fusionGatherExp :: FusedRes -> Exp -> FusionGM FusedRes
 fusionGatherExp fres (DoLoop ctx val form loop_body) = do

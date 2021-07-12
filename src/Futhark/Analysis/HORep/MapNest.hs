@@ -83,7 +83,7 @@ fromSOAC' bound (SOAC.Screma w (SOAC.ScremaForm [] [] lam) inps) = do
                       bodyResult $ lambdaBody lam
                     ) of
     ([Let pat _ e], res)
-      | res == map Var (patternNames pat) ->
+      | map resSubExp res == map Var (patternNames pat) ->
         localScope (scopeOfLParams $ lambdaParams lam) $
           SOAC.fromExp e
             >>= either (return . Left) (fmap (Right . fmap (pat,)) . fromSOAC' bound')

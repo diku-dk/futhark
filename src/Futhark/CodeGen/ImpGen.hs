@@ -670,7 +670,7 @@ compileFunDef (FunDef entry _ fname rettype params body) =
 
       let Body _ stms ses = body
       compileStms (freeIn ses) stms $
-        forM_ (zip dests ses) $ \(d, se) -> copyDWIMDest d [] se []
+        forM_ (zip dests ses) $ \(d, SubExpRes _ se) -> copyDWIMDest d [] se []
 
       return (outparams, inparams, results, args)
 
@@ -678,12 +678,12 @@ compileBody :: (Mem rep) => Pattern rep -> Body rep -> ImpM rep r op ()
 compileBody pat (Body _ bnds ses) = do
   Destination _ dests <- destinationFromPattern pat
   compileStms (freeIn ses) bnds $
-    forM_ (zip dests ses) $ \(d, se) -> copyDWIMDest d [] se []
+    forM_ (zip dests ses) $ \(d, SubExpRes _ se) -> copyDWIMDest d [] se []
 
 compileBody' :: [Param dec] -> Body rep -> ImpM rep r op ()
 compileBody' params (Body _ bnds ses) =
   compileStms (freeIn ses) bnds $
-    forM_ (zip params ses) $ \(param, se) -> copyDWIM (paramName param) [] se []
+    forM_ (zip params ses) $ \(param, SubExpRes _ se) -> copyDWIM (paramName param) [] se []
 
 compileLoopBody :: Typed dec => [Param dec] -> Body rep -> ImpM rep r op ()
 compileLoopBody mergeparams (Body _ bnds ses) = do
@@ -695,7 +695,7 @@ compileLoopBody mergeparams (Body _ bnds ses) = do
   -- operations are all scalar operations.
   tmpnames <- mapM (newVName . (++ "_tmp") . baseString . paramName) mergeparams
   compileStms (freeIn ses) bnds $ do
-    copy_to_merge_params <- forM (zip3 mergeparams tmpnames ses) $ \(p, tmp, se) ->
+    copy_to_merge_params <- forM (zip3 mergeparams tmpnames ses) $ \(p, tmp, SubExpRes _ se) ->
       case typeOf p of
         Prim pt -> do
           emit $ Imp.DeclareScalar tmp Imp.Nonvolatile pt
@@ -819,7 +819,7 @@ defCompileExp pat (WithAcc inputs lam) = do
   compileStms mempty (bodyStms $ lambdaBody lam) $ do
     let nonacc_res = drop num_accs (bodyResult (lambdaBody lam))
         nonacc_pat_names = takeLast (length nonacc_res) (patternNames pat)
-    forM_ (zip nonacc_pat_names nonacc_res) $ \(v, se) ->
+    forM_ (zip nonacc_pat_names nonacc_res) $ \(v, SubExpRes _ se) ->
       copyDWIM v [] se []
   where
     num_accs = length inputs
@@ -964,7 +964,7 @@ defCompileBasicOp _ (UpdateAcc acc is vs) = sComment "UpdateAcc" $ do
           copyDWIM yp [] v []
 
         compileStms mempty (bodyStms $ lambdaBody lam) $
-          forM_ (zip arrs (bodyResult (lambdaBody lam))) $ \(arr, se) ->
+          forM_ (zip arrs (bodyResult (lambdaBody lam))) $ \(arr, SubExpRes _ se) ->
             copyDWIMFix arr is' se []
 defCompileBasicOp pat e =
   error $

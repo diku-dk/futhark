@@ -143,7 +143,7 @@ inlineFunction pat aux args (safety, loc, locs) fun = do
         (bodyResult (funDefBody fun))
   let res_stms =
         certify (stmAuxCerts aux)
-          <$> zipWith bindSubExp (patternIdents pat) res
+          <$> zipWith bindSubExpRes (patternIdents pat) res
   pure $ stmsToList stms <> res_stms
   where
     param_stms =
@@ -162,6 +162,9 @@ inlineFunction pat aux args (safety, loc, locs) fun = do
     -- the type checker sees this!
     bindSubExp ident se =
       mkLet [] [ident] $ BasicOp $ SubExp se
+
+    bindSubExpRes ident (SubExpRes cs se) =
+      certify cs $ bindSubExp ident se
 
     notmempty = (/= mempty) . locOf
 

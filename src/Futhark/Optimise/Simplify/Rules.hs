@@ -122,8 +122,8 @@ ruleIf _ pat _ (e1, tb, fb, IfDec _ ifsort)
     let ses = bodyResult branch
     addStms $ bodyStms branch
     sequence_
-      [ letBindNames [patElemName p] $ BasicOp $ SubExp se
-        | (p, se) <- zip (patternElements pat) ses
+      [ certifying cs $ letBindNames [patElemName p] $ BasicOp $ SubExp se
+        | (p, SubExpRes cs se) <- zip (patternElements pat) ses
       ]
   where
     checkBranch
@@ -141,18 +141,18 @@ ruleIf
   pat
   _
   ( cond,
-    Body _ tstms [Constant (BoolValue True)],
-    Body _ fstms [se],
+    Body _ tstms [SubExpRes tcs (Constant (BoolValue True))],
+    Body _ fstms [SubExpRes fcs se],
     IfDec ts _
     )
     | null tstms,
       null fstms,
       [Prim Bool] <- map extTypeOf ts =
-      Simplify $ letBind pat $ BasicOp $ BinOp LogOr cond se
+      Simplify $ certifying (tcs <> fcs) $ letBind pat $ BasicOp $ BinOp LogOr cond se
 -- When type(x)==bool, if c then x else y == (c && x) || (!c && y)
 ruleIf _ pat _ (cond, tb, fb, IfDec ts _)
-  | Body _ tstms [tres] <- tb,
-    Body _ fstms [fres] <- fb,
+  | Body _ tstms [SubExpRes tcs tres] <- tb,
+    Body _ fstms [SubExpRes fcs fres] <- fb,
     all (safeExp . stmExp) $ tstms <> fstms,
     all ((== Prim Bool) . extTypeOf) ts = Simplify $ do
     addStms tstms
@@ -166,20 +166,20 @@ ruleIf _ pat _ (cond, tb, fb, IfDec ts _)
             (pure $ BasicOp $ UnOp Not cond)
             (pure $ BasicOp $ SubExp fres)
         )
-    letBind pat e
+    certifying (tcs <> fcs) $ letBind pat e
 ruleIf _ pat _ (_, tbranch, _, IfDec _ IfFallback)
   | null $ patternContextNames pat,
     all (safeExp . stmExp) $ bodyStms tbranch = Simplify $ do
     let ses = bodyResult tbranch
     addStms $ bodyStms tbranch
     sequence_
-      [ letBindNames [patElemName p] $ BasicOp $ SubExp se
-        | (p, se) <- zip (patternElements pat) ses
+      [ certifying cs $ letBindNames [patElemName p] $ BasicOp $ SubExp se
+        | (p, SubExpRes cs se) <- zip (patternElements pat) ses
       ]
 ruleIf _ pat _ (cond, tb, fb, _)
-  | Body _ _ [Constant (IntValue t)] <- tb,
-    Body _ _ [Constant (IntValue f)] <- fb =
-    if oneIshInt t && zeroIshInt f
+  | Body _ _ [SubExpRes tcs (Constant (IntValue t))] <- tb,
+    Body _ _ [SubExpRes fcs (Constant (IntValue f))] <- fb =
+    if oneIshInt t && zeroIshInt f && tcs == mempty && fcs == mempty
       then
         Simplify $
           letBind pat $ BasicOp $ ConvOp (BToI (intValueType t)) cond
@@ -237,23 +237,25 @@ hoistBranchInvariant _ pat _ (cond, tb, fb, IfDec ret ifsort) = Simplify $ do
     branchInvariant (pe, t, (tse, fse))
       -- Do both branches return the same value?
       | tse == fse = do
-        letBindNames [patElemName pe] $ BasicOp $ SubExp tse
+        certifying (resCerts tse <> resCerts fse) $
+          letBindNames [patElemName pe] $ BasicOp $ SubExp $ resSubExp tse
         hoisted pe t
 
       -- Do both branches return values that are free in the
       -- branch, and are we not the only pattern element?  The
       -- latter is to avoid infinite application of this rule.
-      | invariant tse,
-        invariant fse,
+      | invariant $ resSubExp tse,
+        invariant $ resSubExp fse,
         patternSize pat > 1,
         Prim _ <- patElemType pe,
         not $ sizeOfMem $ patElemName pe = do
         bt <- expTypesFromPattern $ Pattern [] [pe]
-        letBindNames [patElemName pe]
-          =<< ( If cond <$> resultBodyM [tse]
-                  <*> resultBodyM [fse]
-                  <*> pure (IfDec bt ifsort)
-              )
+        certifying (resCerts tse <> resCerts fse) $
+          letBindNames [patElemName pe]
+            =<< ( If cond <$> resultBodyM [resSubExp tse]
+                    <*> resultBodyM [resSubExp fse]
+                    <*> pure (IfDec bt ifsort)
+                )
         hoisted pe t
       | otherwise =
         return $ Right (pe, t, (tse, fse))
@@ -265,12 +267,13 @@ hoistBranchInvariant _ pat _ (cond, tb, fb, IfDec ret ifsort) = Simplify $ do
       ses <- bodyBind body
       let (ctx_ses, val_ses) = splitFromEnd (length rets) ses
       (ctx_ses ++) <$> zipWithM reshapeResult val_ses rets
-    reshapeResult (Var v) t@Array {} = do
+    reshapeResult (SubExpRes cs (Var v)) t@Array {} = do
       v_t <- lookupType v
       let newshape = arrayDims $ removeExistentials t v_t
-      if newshape /= arrayDims v_t
-        then letSubExp "branch_ctx_reshaped" $ shapeCoerce newshape v
-        else return $ Var v
+      SubExpRes cs
+        <$> if newshape /= arrayDims v_t
+          then letSubExp "branch_ctx_reshaped" (shapeCoerce newshape v)
+          else pure $ Var v
     reshapeResult se _ =
       return se
 
@@ -304,8 +307,8 @@ withAccTopDown :: BuilderOps rep => TopDownRuleGeneric rep
 -- A WithAcc with no accumulators is sent to Valhalla.
 withAccTopDown _ (Let pat aux (WithAcc [] lam)) = Simplify . auxing aux $ do
   lam_res <- bodyBind $ lambdaBody lam
-  forM_ (zip (patternNames pat) lam_res) $ \(v, se) ->
-    letBindNames [v] $ BasicOp $ SubExp se
+  forM_ (zip (patternNames pat) lam_res) $ \(v, SubExpRes cs se) ->
+    certifying cs $ letBindNames [v] $ BasicOp $ SubExp se
 -- Identify those results in 'lam' that are free and move them out.
 withAccTopDown vtable (Let pat aux (WithAcc inputs lam)) = Simplify . auxing aux $ do
   let (cert_params, acc_params) =
@@ -340,21 +343,24 @@ withAccTopDown vtable (Let pat aux (WithAcc inputs lam)) = Simplify . auxing aux
     num_nonaccs = length (lambdaReturnType lam) - length inputs
     inputArrs (_, arrs, _) = length arrs
 
-    tryMoveAcc (pes, (_, arrs, _), (_, acc_p), Var v)
-      | paramName acc_p == v = do
+    tryMoveAcc (pes, (_, arrs, _), (_, acc_p), SubExpRes cs (Var v))
+      | paramName acc_p == v,
+        cs == mempty = do
         forM_ (zip pes arrs) $ \(pe, arr) ->
           letBindNames [patElemName pe] $ BasicOp $ SubExp $ Var arr
         pure Nothing
     tryMoveAcc x =
       pure $ Just x
 
-    tryMoveNonAcc (pe, Var v)
-      | v `ST.elem` vtable = do
+    tryMoveNonAcc (pe, SubExpRes cs (Var v))
+      | v `ST.elem` vtable,
+        cs == mempty = do
         letBindNames [patElemName pe] $ BasicOp $ SubExp $ Var v
         pure Nothing
-    tryMoveNonAcc (pe, Constant v) = do
-      letBindNames [patElemName pe] $ BasicOp $ SubExp $ Constant v
-      pure Nothing
+    tryMoveNonAcc (pe, SubExpRes cs (Constant v))
+      | cs == mempty = do
+        letBindNames [patElemName pe] $ BasicOp $ SubExp $ Constant v
+        pure Nothing
     tryMoveNonAcc x =
       pure $ Just x
 withAccTopDown _ _ = Skip

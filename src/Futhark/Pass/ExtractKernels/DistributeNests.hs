@@ -178,9 +178,8 @@ runDistNestT env (DistNestT m) = do
   -- There may be a few final targets remaining - these correspond to
   -- arrays that are identity mapped, and must have statements
   -- inserted here.
-  return $
-    unPostStms (accPostStms res)
-      <> identityStms (outerTarget $ distTargets acc)
+  pure $
+    unPostStms (accPostStms res) <> identityStms (outerTarget $ distTargets acc)
   where
     outermost = nestingLoop $
       case distNest env of
@@ -192,13 +191,12 @@ runDistNestT env (DistNestT m) = do
 
     identityStms (rem_pat, res) =
       stmsFromList $ zipWith identityStm (patternValueElements rem_pat) res
-    identityStm pe (Var v)
+    identityStm pe (SubExpRes cs (Var v))
       | Just arr <- lookup v params_to_arrs =
-        Let (Pattern [] [pe]) (defAux ()) $ BasicOp $ Copy arr
-    identityStm pe se =
-      Let (Pattern [] [pe]) (defAux ()) $
-        BasicOp $
-          Replicate (Shape [loopNestingWidth outermost]) se
+        certify cs $ Let (Pattern [] [pe]) (defAux ()) $ BasicOp $ Copy arr
+    identityStm pe (SubExpRes cs se) =
+      certify cs . Let (Pattern [] [pe]) (defAux ()) . BasicOp $
+        Replicate (Shape [loopNestingWidth outermost]) se
 
 addPostStms :: Monad m => PostStms rep -> DistNestT rep m ()
 addPostStms ks = tell $ mempty {accPostStms = ks}
@@ -264,13 +262,11 @@ leavingNesting acc =
             aux = loopNestingAux inner_nesting
             inps = loopNestingParamsAndArrs inner_nesting
 
-            remnantStm pe (Var v)
+            remnantStm pe (SubExpRes cs (Var v))
               | Just (_, arr) <- find ((== v) . paramName . fst) inps =
-                Let (Pattern [] [pe]) aux $
-                  BasicOp $ Copy arr
-            remnantStm pe se =
-              Let (Pattern [] [pe]) aux $
-                BasicOp $ Replicate (Shape [w]) se
+                certify cs $ Let (Pattern [] [pe]) aux $ BasicOp $ Copy arr
+            remnantStm pe (SubExpRes cs se) =
+              certify cs $ Let (Pattern [] [pe]) aux $ BasicOp $ Replicate (Shape [w]) se
 
             stms =
               stmsFromList $ zipWith remnantStm (patternElements pat) res
@@ -508,7 +504,7 @@ maybeDistributeStm
         )
   acc
     | not $ null $ sliceDims slice,
-      Var (patElemName pe) `elem` snd (innerTarget (distTargets acc)) =
+      Var (patElemName pe) `elem` map resSubExp (snd (innerTarget (distTargets acc))) =
       distributeSingleStm acc stm >>= \case
         Just (kernels, _res, nest, acc') ->
           localScope (typeEnvFromDistAcc acc') $ do
@@ -584,7 +580,7 @@ maybeDistributeStm (Let pat aux (BasicOp (Replicate (Shape (d : ds)) v))) acc
           Lambda
             { lambdaReturnType = [rowt],
               lambdaParams = [],
-              lambdaBody = mkBody (oneStm tmpbnd) [Var tmp]
+              lambdaBody = mkBody (oneStm tmpbnd) [varRes tmp]
             }
     maybeDistributeStm newbnd acc
 maybeDistributeStm stm@(Let _ aux (BasicOp (Copy stm_arr))) acc =
@@ -623,7 +619,7 @@ maybeDistributeStm stm@(Let pat aux (BasicOp (Update _ arr slice (Var v)))) acc
   | not $ null $ sliceDims slice =
     distributeSingleStm acc stm >>= \case
       Just (kernels, res, nest, acc')
-        | res == map Var (patternNames $ stmPattern stm),
+        | map resSubExp res == map Var (patternNames $ stmPattern stm),
           Just (perm, pat_unused) <- permutationAndMissing pat res -> do
           addPostStms kernels
           localScope (typeEnvFromDistAcc acc') $ do
@@ -659,7 +655,7 @@ distributeSingleUnaryStm ::
 distributeSingleUnaryStm acc stm stm_arr f =
   distributeSingleStm acc stm >>= \case
     Just (kernels, res, nest, acc')
-      | res == map Var (patternNames $ stmPattern stm),
+      | map resSubExp res == map Var (patternNames $ stmPattern stm),
         (outer, _) <- nest,
         [(arr_p, arr)] <- loopNestingParamsAndArrs outer,
         boundInKernelNest nest `namesIntersection` freeIn stm
@@ -791,13 +787,9 @@ segmentedScatterKernel nest perm scatter_pat cs scatter_w lam ivs dests = do
             drop (sum indexes) $ lambdaReturnType lam
       (is, vs) = splitAt (sum indexes) $ bodyResult $ lambdaBody lam
 
-  -- Maybe add certificates to the indices.
   (is', k_body_stms) <- runBuilder $ do
     addStms $ bodyStms $ lambdaBody lam
-    forM is $ \i ->
-      if cs == mempty
-        then return i
-        else certifying cs $ letSubExp "scatter_i" $ BasicOp $ SubExp i
+    pure is
 
   let k_body =
         groupScatterResults (zip3 as_ws as_ns as_inps) (is' ++ vs)
@@ -826,9 +818,14 @@ segmentedScatterKernel nest perm scatter_pat cs scatter_w lam ivs dests = do
 
     inPlaceReturn ispace (aw, inp, is_vs) =
       WriteReturns
+        ( foldMap (foldMap resCerts . fst) is_vs
+            <> foldMap (resCerts . snd) is_vs
+        )
         (Shape (init ws ++ shapeDims aw))
         (kernelInputArray inp)
-        [(map DimFix $ map Var (init gtids) ++ is, v) | (is, v) <- is_vs]
+        [ (map DimFix $ map Var (init gtids) ++ map resSubExp is, resSubExp v)
+          | (is, v) <- is_vs
+        ]
       where
         (gtids, ws) = unzip ispace
 
@@ -865,7 +862,7 @@ segmentedUpdateKernel nest perm cs arr slice v = do
     v_t <- subExpType v'
     return
       ( v_t,
-        WriteReturns (arrayShape arr_t) arr' [(map DimFix write_is, v')]
+        WriteReturns mempty (arrayShape arr_t) arr' [(map DimFix write_is, v')]
       )
 
   -- Remove unused kernel inputs, since some of these might
@@ -910,7 +907,7 @@ segmentedGatherKernel nest cs arr slice = do
           primExpSlice $ map (DimFix . Var) slice_gtids
     v' <- certifying cs $ letSubExp "v" $ BasicOp $ Index arr slice''
     v_t <- subExpType v'
-    return (v_t, Returns ResultMaySimplify v')
+    return (v_t, Returns ResultMaySimplify mempty v')
 
   mk_lvl <- mkSegLevel
   (k, prestms) <-
@@ -1021,7 +1018,7 @@ isVectorMap :: Lambda SOACS -> (Shape, Lambda SOACS)
 isVectorMap lam
   | [Let (Pattern [] pes) _ (Op (Screma w arrs form))] <-
       stmsToList $ bodyStms $ lambdaBody lam,
-    bodyResult (lambdaBody lam) == map (Var . patElemName) pes,
+    map resSubExp (bodyResult (lambdaBody lam)) == map (Var . patElemName) pes,
     Just map_lam <- isMapSOAC form,
     arrs == map paramName (lambdaParams lam) =
     let (shape, lam') = isVectorMap map_lam
@@ -1139,12 +1136,13 @@ isSegmentedOp nest perm free_in_op _free_in_fold_op nes arrs m = runMaybeT $ do
 
         m pat ispace kernel_inps nes' nested_arrs
 
-permutationAndMissing :: PatternT Type -> [SubExp] -> Maybe ([Int], [PatElemT Type])
+permutationAndMissing :: PatternT Type -> Result -> Maybe ([Int], [PatElemT Type])
 permutationAndMissing pat res = do
   let pes = patternValueElements pat
+      res' = map resSubExp res
       (_used, unused) =
-        partition ((`nameIn` freeIn res) . patElemName) pes
-      res_expanded = res ++ map (Var . patElemName) unused
+        partition ((`nameIn` freeIn res') . patElemName) pes
+      res_expanded = res' ++ map (Var . patElemName) unused
   perm <- map (Var . patElemName) pes `isPermutationOf` res_expanded
   return (perm, unused)
 

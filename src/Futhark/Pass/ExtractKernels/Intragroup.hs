@@ -290,7 +290,11 @@ intraGroupStm lvl stm@(Let pat aux e) = do
           krets = do
             (a_w, a, is_vs) <-
               groupScatterResults dests $ bodyResult $ lambdaBody lam'
-            return $ WriteReturns a_w a [(map DimFix is, v) | (is, v) <- is_vs]
+            let cs =
+                  foldMap (foldMap resCerts . fst) is_vs
+                    <> foldMap (resCerts . snd) is_vs
+                is_vs' = [(map (DimFix . resSubExp) is, resSubExp v) | (is, v) <- is_vs]
+            return $ WriteReturns cs a_w a is_vs'
           inputs = do
             (p, p_a) <- zip (lambdaParams lam') ivs
             return $ KernelInput (paramName p) (paramType p) p_a [Var write_i]
@@ -324,5 +328,7 @@ intraGroupParalleliseBody lvl body = do
     ( S.toList min_ws,
       S.toList avail_ws,
       log,
-      KernelBody () kstms $ map (Returns ResultMaySimplify) $ bodyResult body
+      KernelBody () kstms $ map ret $ bodyResult body
     )
+  where
+    ret (SubExpRes cs se) = Returns ResultMaySimplify cs se

@@ -141,8 +141,8 @@ sequentialStreamWholeArray pat w nes lam arrs = do
   -- The number of results in the body matches exactly the size (and
   -- order) of 'pat', so we bind them up here, again with a reshape to
   -- make the types work out.
-  forM_ (zip (patternElements pat) $ bodyResult $ lambdaBody lam) $ \(pe, se) ->
-    case (arrayDims $ patElemType pe, se) of
+  forM_ (zip (patternElements pat) $ bodyResult $ lambdaBody lam) $ \(pe, SubExpRes cs se) ->
+    certifying cs $ case (arrayDims $ patElemType pe, se) of
       (dims, Var v)
         | not $ null dims ->
           letBindNames [patElemName pe] $ BasicOp $ Reshape (map DimCoercion dims) v

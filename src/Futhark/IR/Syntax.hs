@@ -130,6 +130,7 @@ module Futhark.IR.Syntax
     StmAux (..),
     Stm (..),
     Stms,
+    SubExpRes (..),
     Result,
     BodyT (..),
     Body,
@@ -163,6 +164,10 @@ module Futhark.IR.Syntax
     stmsFromList,
     stmsToList,
     stmsHead,
+    subExpRes,
+    subExpsRes,
+    varRes,
+    varsRes,
   )
 where
 
@@ -284,8 +289,31 @@ stmsHead stms = case Seq.viewl stms of
   stm Seq.:< stms' -> Just (stm, stms')
   Seq.EmptyL -> Nothing
 
+-- | A pairing of a subexpression and some certificates.
+data SubExpRes = SubExpRes
+  { resCerts :: Certificates,
+    resSubExp :: SubExp
+  }
+  deriving (Eq, Ord, Show)
+
+-- | Construct a 'SubExpRes' with no certificates.
+subExpRes :: SubExp -> SubExpRes
+subExpRes = SubExpRes mempty
+
+-- | Construct a 'SubExpRes' from a variable name.
+varRes :: VName -> SubExpRes
+varRes = subExpRes . Var
+
+-- | Construct a 'Result' from subexpressions.
+subExpsRes :: [SubExp] -> Result
+subExpsRes = map subExpRes
+
+-- | Construct a 'Result' from variable names.
+varsRes :: [VName] -> Result
+varsRes = map varRes
+
 -- | The result of a body is a sequence of subexpressions.
-type Result = [SubExp]
+type Result = [SubExpRes]
 
 -- | A body consists of a number of bindings, terminating in a result
 -- (essentially a tuple literal).

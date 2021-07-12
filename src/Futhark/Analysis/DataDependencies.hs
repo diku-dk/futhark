@@ -32,7 +32,7 @@ dataDependencies' startdeps = foldl grow startdeps . bodyStms
       let tdeps = dataDependencies' deps tb
           fdeps = dataDependencies' deps fb
           cdeps = depsOf deps c
-          comb (pe, tres, fres) =
+          comb (pe, SubExpRes _ tres, SubExpRes _ fres) =
             ( patElemName pe,
               mconcat $
                 [freeIn pe, cdeps, depsOf tdeps tres, depsOf fdeps fres]

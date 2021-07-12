@@ -236,6 +236,9 @@ instance Rename dec => Rename (StmAux dec) where
   rename (StmAux cs attrs dec) =
     StmAux <$> rename cs <*> rename attrs <*> rename dec
 
+instance Rename SubExpRes where
+  rename (SubExpRes cs se) = SubExpRes <$> rename cs <*> rename se
+
 instance Renameable rep => Rename (Body rep) where
   rename (Body dec stms res) = do
     dec' <- rename dec

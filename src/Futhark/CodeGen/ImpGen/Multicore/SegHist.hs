@@ -144,7 +144,7 @@ updateHisto op arrs bucket = do
           copyDWIMFix (paramName acc_p) [] (Var arr) bucket
       op_body = compileBody' [] $ lambdaBody $ histOp op
       writeArray arr val = copyDWIMFix arr bucket val []
-      do_hist = zipWithM_ writeArray arrs $ bodyResult $ lambdaBody $ histOp op
+      do_hist = zipWithM_ writeArray arrs $ map resSubExp $ bodyResult $ lambdaBody $ histOp op
 
   sComment "Start of body" $ do
     dLParams acc_params
@@ -357,5 +357,5 @@ compileSegHistBody idx pat space histops kbody = do
                   forM_ (zip vs_params vs') $ \(p, v) ->
                     copyDWIMFix (paramName p) [] v vec_is
                   compileStms mempty (bodyStms $ lambdaBody lam) $
-                    forM_ (zip red_pes $ bodyResult $ lambdaBody lam) $
+                    forM_ (zip red_pes $ map resSubExp $ bodyResult $ lambdaBody lam) $
                       \(pe, se) -> copyDWIMFix (patElemName pe) (map Imp.vi64 (init is) ++ [buck] ++ vec_is) se []

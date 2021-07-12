@@ -217,12 +217,12 @@ eIf' ce te fe if_sort = do
   return $ If ce' te'' fe'' $ IfDec ts if_sort
   where
     addContextForBranch ts (Body _ stms val_res) = do
-      body_ts <- extendedScope (traverse subExpType val_res) stmsscope
+      body_ts <- extendedScope (traverse subExpResType val_res) stmsscope
       let ctx_res =
             map snd $
               sortOn fst $
                 M.toList $ shapeExtMapping ts body_ts
-      mkBodyM stms $ ctx_res ++ val_res
+      mkBodyM stms $ subExpsRes ctx_res ++ val_res
       where
         stmsscope = scopeOf stms
 
@@ -231,7 +231,7 @@ eIf' ce te fe if_sort = do
 bodyExtType :: (HasScope rep m, Monad m) => Body rep -> m [ExtType]
 bodyExtType (Body _ stms res) =
   existentialiseExtTypes (M.keys stmsscope) . staticShapes
-    <$> extendedScope (traverse subExpType res) stmsscope
+    <$> extendedScope (traverse subExpResType res) stmsscope
   where
     stmsscope = scopeOf stms
 
@@ -293,13 +293,13 @@ eBody ::
 eBody es = buildBody_ $ do
   es' <- sequence es
   xs <- mapM (letTupExp "x") es'
-  pure $ map Var $ concat xs
+  pure $ varsRes $ concat xs
 
 eLambda ::
   MonadBuilder m =>
   Lambda (Rep m) ->
   [m (Exp (Rep m))] ->
-  m [SubExp]
+  m [SubExpRes]
 eLambda lam args = do
   zipWithM_ bindParam (lambdaParams lam) args
   bodyBind $ lambdaBody lam
@@ -435,7 +435,7 @@ binLambda bop arg_t ret_t = do
   x <- newVName "x"
   y <- newVName "y"
   body <-
-    buildBody_ . fmap pure $
+    buildBody_ . fmap (pure . subExpRes) $
       letSubExp "binlam_res" $ BasicOp $ bop (Var x) (Var y)
   return
     Lambda
@@ -456,7 +456,7 @@ mkLambda ::
 mkLambda params m = do
   (body, ret) <- buildBody . localScope (scopeOfLParams params) $ do
     res <- m
-    ret <- mapM subExpType res
+    ret <- mapM subExpResType res
     pure (res, ret)
   pure $ Lambda params body ret
 
@@ -499,15 +499,12 @@ ifCommon ts = IfDec (staticShapes ts) IfNormal
 
 -- | Conveniently construct a body that contains no bindings.
 resultBody :: Buildable rep => [SubExp] -> Body rep
-resultBody = mkBody mempty
+resultBody = mkBody mempty . subExpsRes
 
 -- | Conveniently construct a body that contains no bindings - but
 -- this time, monadically!
-resultBodyM ::
-  MonadBuilder m =>
-  [SubExp] ->
-  m (Body (Rep m))
-resultBodyM = mkBodyM mempty
+resultBodyM :: MonadBuilder m => [SubExp] -> m (Body (Rep m))
+resultBodyM = mkBodyM mempty . subExpsRes
 
 -- | Evaluate the action, producing a body, then wrap it in all the
 -- bindings it created using 'addStm'.

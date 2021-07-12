@@ -99,6 +99,9 @@ instance Pretty Certificates where
 instance PrettyRep rep => Pretty (Stms rep) where
   ppr = stack . map ppr . stmsToList
 
+instance Pretty SubExpRes where
+  ppr (SubExpRes cs se) = spread $ certAnnots cs ++ [ppr se]
+
 instance PrettyRep rep => Pretty (Body rep) where
   ppr (Body _ stms res)
     | null stms = braces (commasep $ map ppr res)

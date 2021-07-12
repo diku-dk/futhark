@@ -140,7 +140,7 @@ unExistentialiseMemory vtable pat _ (cond, tbranch, fbranch, ifdec)
     let updateBody body = buildBody_ $ do
           res <- bodyBind body
           zipWithM updateResult (patternElements pat) res
-        updateResult pat_elem (Var v)
+        updateResult pat_elem (SubExpRes cs (Var v))
           | Just mem <- lookup (patElemName pat_elem) arr_to_mem,
             (_, MemArray pt shape u (ArrayIn _ ixfun)) <- patElemDec pat_elem = do
             v_copy <- newVName $ baseString v <> "_nonext_copy"
@@ -151,9 +151,9 @@ unExistentialiseMemory vtable pat _ (cond, tbranch, fbranch, ifdec)
                         MemArray pt shape u $ ArrayIn mem ixfun
                     ]
             addStm $ mkWiseLetStm v_pat (defAux ()) $ BasicOp (Copy v)
-            return $ Var v_copy
+            return $ SubExpRes cs $ Var v_copy
           | Just mem <- lookup (patElemName pat_elem) oldmem_to_mem =
-            return $ Var mem
+            return $ SubExpRes cs $ Var mem
         updateResult _ se =
           return se
     tbranch' <- updateBody tbranch

@@ -215,7 +215,7 @@ data DoubleBuffer
 
 doubleBufferMergeParams ::
   MonadFreshNames m =>
-  [(Param FParamMem, SubExp)] ->
+  [(Param FParamMem, SubExpRes)] ->
   [Param FParamMem] ->
   Names ->
   m [DoubleBuffer]
@@ -230,9 +230,9 @@ doubleBufferMergeParams ctx_and_res val_params bound_in_loop =
       Just (Constant v, True)
     loopInvariantSize (Var v) =
       case find ((== v) . paramName . fst) ctx_and_res of
-        Just (_, Constant val) ->
+        Just (_, SubExpRes _ (Constant val)) ->
           Just (Constant val, False)
-        Just (_, Var v')
+        Just (_, SubExpRes _ (Var v'))
           | not $ loopVariant v' ->
             Just (Var v', False)
         Just _ ->
@@ -321,9 +321,9 @@ doubleBufferResult valparams buffered (Body _ bnds res) =
         unzip $ zipWith3 buffer valparams buffered val_res
    in Body () (bnds <> stmsFromList (catMaybes copybnds)) $ ctx_res ++ val_res'
   where
-    buffer _ (BufferAlloc bufname _ _ _) _ =
-      (Nothing, Var bufname)
-    buffer fparam (BufferCopy bufname ixfun copyname _) (Var v) =
+    buffer _ (BufferAlloc bufname _ _ _) se =
+      (Nothing, se {resSubExp = Var bufname})
+    buffer fparam (BufferCopy bufname ixfun copyname _) (SubExpRes cs (Var v)) =
       -- To construct the copy we will need to figure out its type
       -- based on the type of the function parameter.
       let t = resultType $ paramType fparam
@@ -331,11 +331,11 @@ doubleBufferResult valparams buffered (Body _ bnds res) =
           copybnd =
             Let (Pattern [] [PatElem copyname summary]) (defAux ()) $
               BasicOp $ Copy v
-       in (Just copybnd, Var copyname)
+       in (Just copybnd, SubExpRes cs (Var copyname))
     buffer _ _ se =
       (Nothing, se)
 
-    parammap = M.fromList $ zip (map paramName valparams) res
+    parammap = M.fromList $ zip (map paramName valparams) $ map resSubExp res
 
     resultType t = t `setArrayDims` map substitute (arrayDims t)
 

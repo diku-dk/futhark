@@ -184,9 +184,9 @@ simplifyIndexing vtable seType idd inds consuming =
               (thisres, thisbnds) <- collectStms $ do
                 i' <- letSubExp "index_concat_i" $ BasicOp $ BinOp (Sub Int64 OverflowWrap) i start
                 letSubExp "index_concat" $ BasicOp $ Index x' $ ibef ++ DimFix i' : iaft
-              thisbody <- mkBodyM thisbnds [thisres]
+              thisbody <- mkBodyM thisbnds [subExpRes thisres]
               (altres, altbnds) <- collectStms $ mkBranch xs_and_starts'
-              altbody <- mkBodyM altbnds [altres]
+              altbody <- mkBodyM altbnds [subExpRes altres]
               letSubExp "index_concat_branch" $
                 If cmp thisbody altbody $
                   IfDec [primBodyType res_t] IfNormal

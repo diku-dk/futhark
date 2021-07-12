@@ -117,10 +117,10 @@ mapResultHint lvl space = hint
         let space_dims = segSpaceDims space
         t_dims <- mapM dimAllocationSize $ arrayDims t
         return $ Hint (innermost space_dims t_dims) DefaultSpace
-    hint t (ConcatReturns SplitStrided {} w _ _) = do
+    hint t (ConcatReturns _ SplitStrided {} w _ _) = do
       t_dims <- mapM dimAllocationSize $ arrayDims t
       return $ Hint (innermost [w] t_dims) DefaultSpace
-    hint Prim {} (ConcatReturns SplitContiguous w elems_per_thread _) = do
+    hint Prim {} (ConcatReturns _ SplitContiguous w elems_per_thread _) = do
       let ixfun_base = IxFun.iota [sExt64 num_threads, pe64 elems_per_thread]
           ixfun_tr = IxFun.permute ixfun_base [1, 0]
           ixfun = IxFun.reshape ixfun_tr $ map (DimNew . pe64) [w]
@@ -163,7 +163,7 @@ inGroupExpHints (Op (Inner (SegOp (SegMap _ space ts body))))
                   $ ScalarSpace (arrayDims t) $ elemType t
           else NoHint
   where
-    private (Returns ResultPrivate _) = True
+    private (Returns ResultPrivate _ _) = True
     private _ = False
 inGroupExpHints e = return $ replicate (expExtTypeSize e) NoHint
 

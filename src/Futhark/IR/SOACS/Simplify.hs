@@ -270,13 +270,13 @@ liftIdentityMapping _ pat aux op
         freeOrConst (Var v) = v `nameIn` free
         freeOrConst Constant {} = True
 
-        checkInvariance (outId, Var v, _) (invariant, mapresult, rettype')
+        checkInvariance (outId, SubExpRes _ (Var v), _) (invariant, mapresult, rettype')
           | Just inp <- M.lookup v inputMap =
             ( (Pattern [] [outId], BasicOp (Copy inp)) : invariant,
               mapresult,
               rettype'
             )
-        checkInvariance (outId, e, t) (invariant, mapresult, rettype')
+        checkInvariance (outId, SubExpRes _ e, t) (invariant, mapresult, rettype')
           | freeOrConst e =
             ( (Pattern [] [outId], BasicOp $ Replicate (Shape [w]) e) : invariant,
               mapresult,
@@ -295,7 +295,7 @@ liftIdentityMapping _ pat aux op
         let (pat', ses') = unzip mapresult
             fun' =
               fun
-                { lambdaBody = (lambdaBody fun) {bodyResult = ses'},
+                { lambdaBody = (lambdaBody fun) {bodyResult = subExpsRes ses'},
                   lambdaReturnType = rettype'
                 }
         mapM_ (uncurry letBind) invariant
@@ -329,7 +329,7 @@ liftIdentityStreaming _ (Pattern [] pes) aux (Stream w arrs form nes lam)
     (fold_res, map_res) = splitAt num_folds lam_res
     params_to_arrs = zip (map paramName $ drop (1 + num_folds) $ lambdaParams lam) arrs
 
-    isInvariantRes (_, pe, Var v)
+    isInvariantRes (_, pe, SubExpRes _ (Var v))
       | Just arr <- lookup v params_to_arrs =
         Right (pe, arr)
     isInvariantRes x =
@@ -454,8 +454,8 @@ removeDuplicateMapOutput _ pat aux (Screma w arrs form)
               letBind (Pattern [] [to]) $ BasicOp $ Copy $ patElemName from
   where
     checkForDuplicates (ses_ts_pes', copies) (se, t, pe)
-      | Just (_, _, pe') <- find (\(x, _, _) -> x == se) ses_ts_pes' =
-        -- This subexp has been returned before, producing the
+      | Just (_, _, pe') <- find (\(x, _, _) -> resSubExp x == resSubExp se) ses_ts_pes' =
+        -- This result has been returned before, producing the
         -- array pe'.
         (ses_ts_pes', (pe', pe) : copies)
       | otherwise = (ses_ts_pes' ++ [(se, t, pe)], copies)
@@ -530,7 +530,7 @@ isMapWithOp pat e
     Just map_lam <- isMapSOAC form,
     [Let (Pattern [] [pe]) aux2 e'] <-
       stmsToList $ bodyStms $ lambdaBody map_lam,
-    [Var r] <- bodyResult $ lambdaBody map_lam,
+    [SubExpRes _ (Var r)] <- bodyResult $ lambdaBody map_lam,
     r == patElemName pe =
     Just (map_pe, stmAuxCerts aux2, w, e', lambdaParams map_lam, arrs)
   | otherwise = Nothing
@@ -554,7 +554,7 @@ removeDeadReduction (_, used) pat aux (Screma w arrs form)
     let necessary =
           findNecessaryForReturned
             (`elem` used_after)
-            (zip redlam_params $ redlam_res <> redlam_res)
+            (zip redlam_params $ map resSubExp $ redlam_res <> redlam_res)
             redlam_deps,
     let alive_mask = map ((`nameIn` necessary) . paramName) redlam_params,
     not $ all (== True) alive_mask = Simplify $ do
@@ -673,18 +673,18 @@ simplifyKnownIterationSOAC _ pat _ op
           a_t <- lookupType a
           letBindNames [paramName p] $
             BasicOp $ Index a $ fullSlice a_t [DimFix $ constant (0 :: Int64)]
-        bindArrayResult pe se =
-          letBindNames [patElemName pe] $
+        bindArrayResult pe (SubExpRes cs se) =
+          certifying cs . letBindNames [patElemName pe] $
             BasicOp $ ArrayLit [se] $ rowType $ patElemType pe
-        bindResult pe se =
-          letBindNames [patElemName pe] $ BasicOp $ SubExp se
+        bindResult pe (SubExpRes cs se) =
+          certifying cs $ letBindNames [patElemName pe] $ BasicOp $ SubExp se
 
     zipWithM_ bindMapParam (lambdaParams map_lam) arrs
     (to_scan, to_red, map_res) <-
       splitAt3 (length scan_nes) (length red_nes)
         <$> bodyBind (lambdaBody map_lam)
-    scan_res <- eLambda scan_lam $ map eSubExp $ scan_nes ++ to_scan
-    red_res <- eLambda red_lam $ map eSubExp $ red_nes ++ to_red
+    scan_res <- eLambda scan_lam $ map eSubExp $ scan_nes ++ map resSubExp to_scan
+    red_res <- eLambda red_lam $ map eSubExp $ red_nes ++ map resSubExp to_red
 
     zipWithM_ bindArrayResult scan_pes scan_res
     zipWithM_ bindResult red_pes red_res
@@ -706,8 +706,8 @@ simplifyKnownIterationSOAC _ pat _ op
 
     res <- bodyBind $ lambdaBody fold_lam
 
-    forM_ (zip (patternNames pat) res) $ \(v, se) ->
-      letBindNames [v] $ BasicOp $ SubExp se
+    forM_ (zip (patternNames pat) res) $ \(v, SubExpRes cs se) ->
+      certifying cs $ letBindNames [v] $ BasicOp $ SubExp se
 simplifyKnownIterationSOAC _ _ _ _ = Skip
 
 data ArrayOp

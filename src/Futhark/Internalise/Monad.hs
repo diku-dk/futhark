@@ -153,7 +153,7 @@ bindConstant cname fd = do
   let stms = bodyStms $ funDefBody fd
       substs =
         takeLast (length (funDefRetType fd)) $
-          bodyResult $ funDefBody fd
+          map resSubExp $ bodyResult $ funDefBody fd
   addStms stms
   modify $ \s ->
     s

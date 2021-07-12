@@ -20,6 +20,7 @@ module Futhark.IR.Prop.TypeOf
   ( expExtType,
     expExtTypeSize,
     subExpType,
+    subExpResType,
     primOpType,
     mapType,
 
@@ -47,6 +48,11 @@ import Futhark.IR.Syntax
 subExpType :: HasScope t m => SubExp -> m Type
 subExpType (Constant val) = pure $ Prim $ primValueType val
 subExpType (Var name) = lookupType name
+
+-- | Type type of a 'SubExpRes' - not that this might refer to names
+-- bound in the body containing the result.
+subExpResType :: HasScope t m => SubExpRes -> m Type
+subExpResType = subExpType . resSubExp
 
 -- | @mapType f arrts@ wraps each element in the return type of @f@ in
 -- an array with size equal to the outermost dimension of the first

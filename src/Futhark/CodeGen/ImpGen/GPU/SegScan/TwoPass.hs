@@ -241,7 +241,7 @@ scanStage1 (Pattern _ all_pes) num_groups group_size space scans kbody = do
 
               sComment "combine with carry and write to local memory" $
                 compileStms mempty (bodyStms $ lambdaBody scan_op) $
-                  forM_ (zip3 rets local_arrs (bodyResult $ lambdaBody scan_op)) $
+                  forM_ (zip3 rets local_arrs $ map resSubExp $ bodyResult $ lambdaBody scan_op) $
                     \(t, arr, se) ->
                       copyDWIMFix arr [localArrayIndex constants t] se []
 

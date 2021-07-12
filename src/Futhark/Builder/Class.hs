@@ -159,10 +159,10 @@ collectStms_ :: MonadBuilder m => m a -> m (Stms (Rep m))
 collectStms_ = fmap snd . collectStms
 
 -- | Add the statements of the body, then return the body result.
-bodyBind :: MonadBuilder m => Body (Rep m) -> m [SubExp]
-bodyBind (Body _ stms es) = do
+bodyBind :: MonadBuilder m => Body (Rep m) -> m Result
+bodyBind (Body _ stms res) = do
   addStms stms
-  return es
+  pure res
 
 -- | Add several bindings at the outermost level of a t'Body'.
 insertStms :: Buildable rep => Stms rep -> Body rep -> Body rep

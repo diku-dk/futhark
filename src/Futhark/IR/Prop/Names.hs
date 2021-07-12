@@ -356,6 +356,9 @@ instance FreeIn d => FreeIn (DimChange d) where
 instance FreeIn d => FreeIn (DimIndex d) where
   freeIn' = Data.Foldable.foldMap freeIn'
 
+instance FreeIn SubExpRes where
+  freeIn' (SubExpRes cs se) = freeIn' cs <> freeIn' se
+
 instance FreeIn dec => FreeIn (PatternT dec) where
   freeIn' (Pattern context values) =
     fvBind bound_here $ freeIn' $ context ++ values

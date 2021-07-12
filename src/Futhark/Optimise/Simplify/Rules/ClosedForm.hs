@@ -133,7 +133,7 @@ checkResults pat size untouchable it knownBnds params body accs = do
   ((), bnds) <-
     collectStms $
       zipWithM_ checkResult (zip pat res) (zip accparams accs)
-  mkBodyM bnds $ map Var pat
+  mkBodyM bnds $ varsRes pat
   where
     bndMap = makeBindMap body
     (accparams, _) = splitAt (length accs) params
@@ -141,7 +141,7 @@ checkResults pat size untouchable it knownBnds params body accs = do
 
     nonFree = boundInBody body <> namesFromList params <> untouchable
 
-    checkResult (p, Var v) (accparam, acc)
+    checkResult (p, SubExpRes _ (Var v)) (accparam, acc)
       | Just (BasicOp (BinOp bop x y)) <- M.lookup v bndMap = do
         -- One of x,y must be *this* accumulator, and the other must
         -- be something that is free in the body.

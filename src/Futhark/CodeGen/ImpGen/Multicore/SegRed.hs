@@ -149,7 +149,7 @@ reductionStage1 space slugs kbody = do
 
           sComment "Red body" $
             compileStms mempty (bodyStms $ slugBody slug) $
-              forM_ (zip local_accs (bodyResult $ slugBody slug)) $
+              forM_ (zip local_accs $ map resSubExp $ bodyResult $ slugBody slug) $
                 \(local_acc, se) ->
                   copyDWIMFix local_acc vec_is se []
 
@@ -192,7 +192,7 @@ reductionStage2 pat space nsubtasks slugs = do
               copyDWIMFix (paramName p) [] (Var acc) (phys_id : vec_is)
           sComment "red body" $
             compileStms mempty (bodyStms $ slugBody slug) $
-              forM_ (zip red_res (bodyResult $ slugBody slug)) $
+              forM_ (zip red_res $ map resSubExp $ bodyResult $ slugBody slug) $
                 \(pe, se') -> copyDWIMFix (patElemName pe) vec_is se' []
 
 -- Each thread reduces over the number of segments
@@ -263,5 +263,5 @@ compileSegRedBody n_segments pat space reds kbody = do
                 let lbody = (lambdaBody . segBinOpLambda) red
                 compileStms mempty (bodyStms lbody) $
                   sComment "write back to res" $
-                    forM_ (zip pes (bodyResult lbody)) $
+                    forM_ (zip pes $ map resSubExp $ bodyResult lbody) $
                       \(pe, se') -> copyDWIMFix (patElemName pe) (map Imp.vi64 (init is) ++ vec_is) se' []
