@@ -101,9 +101,9 @@ stmMetrics = expMetrics . stmExp
 expMetrics :: OpMetrics (Op rep) => Exp rep -> MetricsM ()
 expMetrics (BasicOp op) =
   seen "BasicOp" >> primOpMetrics op
-expMetrics (DoLoop _ _ ForLoop {} body) =
+expMetrics (DoLoop _ ForLoop {} body) =
   inside "DoLoop" $ seen "ForLoop" >> bodyMetrics body
-expMetrics (DoLoop _ _ WhileLoop {} body) =
+expMetrics (DoLoop _ WhileLoop {} body) =
   inside "DoLoop" $ seen "WhileLoop" >> bodyMetrics body
 expMetrics (If _ tb fb _) =
   inside "If" $ do

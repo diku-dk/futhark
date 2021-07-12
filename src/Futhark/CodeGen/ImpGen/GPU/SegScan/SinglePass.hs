@@ -103,14 +103,14 @@ createLocalArrays (Count groupSize) m types = do
 -- | Compile 'SegScan' instance to host-level code with calls to a
 -- single-pass kernel.
 compileSegScan ::
-  Pattern GPUMem ->
+  Pat GPUMem ->
   SegLevel ->
   SegSpace ->
   SegBinOp GPUMem ->
   KernelBody GPUMem ->
   CallKernelGen ()
 compileSegScan pat lvl space scanOp kbody = do
-  let Pattern _ all_pes = pat
+  let Pat all_pes = pat
       group_size = toInt64Exp <$> segGroupSize lvl
       n = product $ map toInt64Exp $ segSpaceDims space
       num_groups = Count (n `divUp` (unCount group_size * m))
@@ -272,7 +272,7 @@ compileSegScan pat lvl space scanOp kbody = do
             copyDWIMFix y [] (Var src) [i + 1]
 
           compileStms mempty (bodyStms $ lambdaBody $ segBinOpLambda scanOp) $
-            forM_ (zip privateArrays $ bodyResult $ lambdaBody $ segBinOpLambda scanOp) $ \(dest, res) ->
+            forM_ (zip privateArrays $ map resSubExp $ bodyResult $ lambdaBody $ segBinOpLambda scanOp) $ \(dest, res) ->
               copyDWIMFix dest [i + 1] res []
 
     sComment "Publish results in shared memory" $ do
@@ -437,7 +437,7 @@ compileSegScan pat lvl space scanOp kbody = do
                             ( do
                                 used1 <-- tvExp used1 + tvExp used2
                                 compileStms mempty (bodyStms $ lambdaBody scanOp'') $
-                                  forM_ (zip3 agg1s tys $ bodyResult $ lambdaBody scanOp'') $
+                                  forM_ (zip3 agg1s tys $ map resSubExp $ bodyResult $ lambdaBody scanOp'') $
                                     \(agg1, ty, res) -> agg1 <~~ toExp' ty res
                             )
                         flag <-- tvExp flag1
@@ -460,7 +460,7 @@ compileSegScan pat lvl space scanOp kbody = do
                   forM_ (zip xs aggrs) $ \(x, aggr) -> dPrimV_ x (tvExp aggr)
                   forM_ (zip ys prefixes) $ \(y, prefix) -> dPrimV_ y (tvExp prefix)
                   compileStms mempty (bodyStms $ lambdaBody scanOp''') $
-                    forM_ (zip3 prefixes tys $ bodyResult $ lambdaBody scanOp''') $
+                    forM_ (zip3 prefixes tys $ map resSubExp $ bodyResult $ lambdaBody scanOp''') $
                       \(prefix, ty, res) -> prefix <-- TPrimExp (toExp' ty res)
                 -- end sWhen
                 sOp localFence
@@ -477,7 +477,7 @@ compileSegScan pat lvl space scanOp kbody = do
             forM_ (zip ys accs) $ \(y, acc) -> dPrimV_ y $ tvExp acc
             compileStms mempty (bodyStms $ lambdaBody scanOp'''') $
               everythingVolatile $
-                forM_ (zip incprefixArrays $ bodyResult $ lambdaBody scanOp'''') $
+                forM_ (zip incprefixArrays $ map resSubExp $ bodyResult $ lambdaBody scanOp'''') $
                   \(incprefixArray, res) -> copyDWIMFix incprefixArray [tvExp dynamicId] res []
             sOp globalFence
             everythingVolatile $ copyDWIMFix statusFlags [tvExp dynamicId] (intConst Int8 statusP) []
@@ -513,7 +513,7 @@ compileSegScan pat lvl space scanOp kbody = do
       sIf
         (kernelLocalThreadId constants * m .<. boundary .&&. bNot blockNewSgm)
         ( compileStms mempty (bodyStms $ lambdaBody scanOp'''''') $
-            forM_ (zip3 xs tys $ bodyResult $ lambdaBody scanOp'''''') $
+            forM_ (zip3 xs tys $ map resSubExp $ bodyResult $ lambdaBody scanOp'''''') $
               \(x, ty, res) -> x <~~ toExp' ty res
         )
         (forM_ (zip xs accs) $ \(x, acc) -> copyDWIMFix x [] (Var $ tvVar acc) [])
@@ -528,7 +528,7 @@ compileSegScan pat lvl space scanOp kbody = do
             -- only include prefix for the first segment part per thread
             copyDWIMFix y [] (Var src) [i]
           compileStms mempty (bodyStms $ lambdaBody scanOp''''') $
-            forM_ (zip privateArrays $ bodyResult $ lambdaBody scanOp''''') $
+            forM_ (zip privateArrays $ map resSubExp $ bodyResult $ lambdaBody scanOp''''') $
               \(dest, res) ->
                 copyDWIMFix dest [i] res []
 

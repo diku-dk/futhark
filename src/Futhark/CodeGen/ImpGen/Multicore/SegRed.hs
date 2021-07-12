@@ -16,7 +16,7 @@ type DoSegBody = (([(SubExp, [Imp.TExp Int64])] -> MulticoreGen ()) -> Multicore
 
 -- | Generate code for a SegRed construct
 compileSegRed ::
-  Pattern MCMem ->
+  Pat MCMem ->
   SegSpace ->
   [SegBinOp MCMem] ->
   KernelBody MCMem ->
@@ -28,14 +28,14 @@ compileSegRed pat space reds kbody nsubtasks =
       let (red_res, map_res) = splitAt (segBinOpResults reds) $ kernelBodyResult kbody
 
       sComment "save map-out results" $ do
-        let map_arrs = drop (segBinOpResults reds) $ patternElements pat
+        let map_arrs = drop (segBinOpResults reds) $ patElements pat
         zipWithM_ (compileThreadResult space) map_arrs map_res
 
       red_cont $ zip (map kernelResultSubExp red_res) $ repeat []
 
 -- | Like 'compileSegRed', but where the body is a monadic action.
 compileSegRed' ::
-  Pattern MCMem ->
+  Pat MCMem ->
   SegSpace ->
   [SegBinOp MCMem] ->
   TV Int32 ->
@@ -72,7 +72,7 @@ accParams slug = take (length (slugNeutral slug)) $ slugParams slug
 nextParams slug = drop (length (slugNeutral slug)) $ slugParams slug
 
 nonsegmentedReduction ::
-  Pattern MCMem ->
+  Pat MCMem ->
   SegSpace ->
   [SegBinOp MCMem] ->
   TV Int32 ->
@@ -149,7 +149,7 @@ reductionStage1 space slugs kbody = do
 
           sComment "Red body" $
             compileStms mempty (bodyStms $ slugBody slug) $
-              forM_ (zip local_accs (bodyResult $ slugBody slug)) $
+              forM_ (zip local_accs $ map resSubExp $ bodyResult $ slugBody slug) $
                 \(local_acc, se) ->
                   copyDWIMFix local_acc vec_is se []
 
@@ -163,13 +163,13 @@ reductionStage1 space slugs kbody = do
   emit $ Imp.Op $ Imp.ParLoop "segred_stage_1" (tvVar flat_idx) (body_allocs <> prebody) fbody' postbody free_params $ segFlat space
 
 reductionStage2 ::
-  Pattern MCMem ->
+  Pat MCMem ->
   SegSpace ->
   Imp.TExp Int32 ->
   [SegBinOpSlug] ->
   MulticoreGen ()
 reductionStage2 pat space nsubtasks slugs = do
-  let per_red_pes = segBinOpChunks (map slugOp slugs) $ patternValueElements pat
+  let per_red_pes = segBinOpChunks (map slugOp slugs) $ patElements pat
       phys_id = Imp.vi64 (segFlat space)
   sComment "neutral-initialise the output" $
     forM_ (zip (map slugOp slugs) per_red_pes) $ \(red, red_res) ->
@@ -192,7 +192,7 @@ reductionStage2 pat space nsubtasks slugs = do
               copyDWIMFix (paramName p) [] (Var acc) (phys_id : vec_is)
           sComment "red body" $
             compileStms mempty (bodyStms $ slugBody slug) $
-              forM_ (zip red_res (bodyResult $ slugBody slug)) $
+              forM_ (zip red_res $ map resSubExp $ bodyResult $ slugBody slug) $
                 \(pe, se') -> copyDWIMFix (patElemName pe) vec_is se' []
 
 -- Each thread reduces over the number of segments
@@ -200,7 +200,7 @@ reductionStage2 pat space nsubtasks slugs = do
 -- Maybe we should select the work of the inner loop
 -- based on n_segments and dimensions etc.
 segmentedReduction ::
-  Pattern MCMem ->
+  Pat MCMem ->
   SegSpace ->
   [SegBinOp MCMem] ->
   DoSegBody ->
@@ -215,7 +215,7 @@ segmentedReduction pat space reds kbody =
 
 compileSegRedBody ::
   TV Int64 ->
-  Pattern MCMem ->
+  Pat MCMem ->
   SegSpace ->
   [SegBinOp MCMem] ->
   DoSegBody ->
@@ -226,7 +226,7 @@ compileSegRedBody n_segments pat space reds kbody = do
       inner_bound = last ns_64
       n_segments' = tvExp n_segments
 
-  let per_red_pes = segBinOpChunks reds $ patternValueElements pat
+  let per_red_pes = segBinOpChunks reds $ patElements pat
   -- Perform sequential reduce on inner most dimension
   collect $ do
     flat_idx <- dPrimVE "flat_idx" $ n_segments' * inner_bound
@@ -263,5 +263,5 @@ compileSegRedBody n_segments pat space reds kbody = do
                 let lbody = (lambdaBody . segBinOpLambda) red
                 compileStms mempty (bodyStms lbody) $
                   sComment "write back to res" $
-                    forM_ (zip pes (bodyResult lbody)) $
+                    forM_ (zip pes $ map resSubExp $ bodyResult lbody) $
                       \(pe, se') -> copyDWIMFix (patElemName pe) (map Imp.vi64 (init is) ++ vec_is) se' []

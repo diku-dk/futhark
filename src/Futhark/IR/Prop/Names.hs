@@ -265,18 +265,12 @@ instance
   ) =>
   FreeIn (Exp rep)
   where
-  freeIn' (DoLoop ctxmerge valmerge form loopbody) =
-    let (ctxparams, ctxinits) = unzip ctxmerge
-        (valparams, valinits) = unzip valmerge
+  freeIn' (DoLoop merge form loopbody) =
+    let (params, args) = unzip merge
         bound_here =
-          namesFromList $
-            M.keys $
-              scopeOf form
-                <> scopeOfFParams (ctxparams ++ valparams)
+          namesFromList $ M.keys $ scopeOf form <> scopeOfFParams params
      in fvBind bound_here $
-          freeIn' (ctxinits ++ valinits) <> freeIn' form
-            <> freeIn' (ctxparams ++ valparams)
-            <> freeIn' loopbody
+          freeIn' args <> freeIn' form <> freeIn' params <> freeIn' loopbody
   freeIn' (WithAcc inputs lam) =
     freeIn' inputs <> freeIn' lam
   freeIn' e = execState (walkExpM freeWalker e) mempty
@@ -356,14 +350,17 @@ instance FreeIn d => FreeIn (DimChange d) where
 instance FreeIn d => FreeIn (DimIndex d) where
   freeIn' = Data.Foldable.foldMap freeIn'
 
-instance FreeIn dec => FreeIn (PatternT dec) where
-  freeIn' (Pattern context values) =
-    fvBind bound_here $ freeIn' $ context ++ values
-    where
-      bound_here = namesFromList $ map patElemName $ context ++ values
+instance FreeIn SubExpRes where
+  freeIn' (SubExpRes cs se) = freeIn' cs <> freeIn' se
 
-instance FreeIn Certificates where
-  freeIn' (Certificates cs) = freeIn' cs
+instance FreeIn dec => FreeIn (PatT dec) where
+  freeIn' (Pat xs) =
+    fvBind bound_here $ freeIn' xs
+    where
+      bound_here = namesFromList $ map patElemName xs
+
+instance FreeIn Certs where
+  freeIn' (Certs cs) = freeIn' cs
 
 instance FreeIn Attrs where
   freeIn' (Attrs _) = mempty
@@ -403,7 +400,7 @@ boundInBody = boundByStms . bodyStms
 
 -- | The names bound by a binding.
 boundByStm :: Stm rep -> Names
-boundByStm = namesFromList . patternNames . stmPattern
+boundByStm = namesFromList . patNames . stmPat
 
 -- | The names bound by the bindings.
 boundByStms :: Stms rep -> Names

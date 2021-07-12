@@ -1023,14 +1023,14 @@ localMemoryCase map_pes hist_T space hist_H hist_el_size hist_N _ slugs kbody = 
 
 -- | Generate code for a segmented histogram called from the host.
 compileSegHist ::
-  Pattern GPUMem ->
+  Pat GPUMem ->
   Count NumGroups SubExp ->
   Count GroupSize SubExp ->
   SegSpace ->
   [HistOp GPUMem] ->
   KernelBody GPUMem ->
   CallKernelGen ()
-compileSegHist (Pattern _ pes) num_groups group_size space ops kbody = do
+compileSegHist (Pat pes) num_groups group_size space ops kbody = do
   -- Most of this function is not the histogram part itself, but
   -- rather figuring out whether to use a local or global memory
   -- strategy, as well as collapsing the subhistograms produced (which
@@ -1138,7 +1138,7 @@ compileSegHist (Pattern _ pes) num_groups group_size space ops kbody = do
                   ++ [(subhistogram_id, Var $ tvVar num_histos)]
 
         let segred_op = SegBinOp Commutative (histOp op) (histNeutral op) mempty
-        compileSegRed' (Pattern [] red_pes) lvl segred_space [segred_op] $ \red_cont ->
+        compileSegRed' (Pat red_pes) lvl segred_space [segred_op] $ \red_cont ->
           red_cont $
             flip map subhistos $ \subhisto ->
               ( Var subhisto,

@@ -235,14 +235,14 @@ mkIdentityLambda ts = do
   return
     Lambda
       { lambdaParams = params,
-        lambdaBody = mkBody mempty $ map (Var . paramName) params,
+        lambdaBody = mkBody mempty $ varsRes $ map paramName params,
         lambdaReturnType = ts
       }
 
 -- | Is the given lambda an identity lambda?
 isIdentityLambda :: Lambda rep -> Bool
 isIdentityLambda lam =
-  bodyResult (lambdaBody lam)
+  map resSubExp (bodyResult (lambdaBody lam))
     == map (Var . paramName) (lambdaParams lam)
 
 -- | A lambda with no parameters that returns no values.
@@ -601,7 +601,7 @@ instance RepTypes rep => ST.IndexOp (SOAC rep) where
     let arr_indexes = M.fromList $ catMaybes $ zipWith arrIndex arr_params arrs
         arr_indexes' = foldl expandPrimExpTable arr_indexes $ bodyStms $ lambdaBody lam
     case se of
-      Var v -> uncurry (flip ST.Indexed) <$> M.lookup v arr_indexes'
+      SubExpRes _ (Var v) -> uncurry (flip ST.Indexed) <$> M.lookup v arr_indexes'
       _ -> Nothing
     where
       lambdaAndSubExp (Screma _ arrs (ScremaForm scans reds map_lam)) =
@@ -618,10 +618,10 @@ instance RepTypes rep => ST.IndexOp (SOAC rep) where
         return (paramName p, (pe, cs))
 
       expandPrimExpTable table stm
-        | [v] <- patternNames $ stmPattern stm,
+        | [v] <- patNames $ stmPat stm,
           Just (pe, cs) <-
             runWriterT $ primExpFromExp (asPrimExp table) $ stmExp stm,
-          all (`ST.elem` vtable) (unCertificates $ stmCerts stm) =
+          all (`ST.elem` vtable) (unCerts $ stmCerts stm) =
           M.insert v (pe, stmCerts stm <> cs) table
         | otherwise =
           table

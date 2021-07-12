@@ -110,7 +110,7 @@ type RuleGeneric rep a = a -> Stm rep -> Rule rep
 
 type RuleBasicOp rep a =
   ( a ->
-    Pattern rep ->
+    Pat rep ->
     StmAux (ExpDec rep) ->
     BasicOp ->
     Rule rep
@@ -118,7 +118,7 @@ type RuleBasicOp rep a =
 
 type RuleIf rep a =
   a ->
-  Pattern rep ->
+  Pat rep ->
   StmAux (ExpDec rep) ->
   ( SubExp,
     BodyT rep,
@@ -129,10 +129,9 @@ type RuleIf rep a =
 
 type RuleDoLoop rep a =
   a ->
-  Pattern rep ->
+  Pat rep ->
   StmAux (ExpDec rep) ->
   ( [(FParam rep, SubExp)],
-    [(FParam rep, SubExp)],
     LoopForm rep,
     BodyT rep
   ) ->
@@ -140,7 +139,7 @@ type RuleDoLoop rep a =
 
 type RuleOp rep a =
   a ->
-  Pattern rep ->
+  Pat rep ->
   StmAux (ExpDec rep) ->
   Op rep ->
   Rule rep
@@ -290,8 +289,8 @@ rulesForStm stm = case stmExp stm of
 applyRule :: SimplificationRule rep a -> a -> Stm rep -> Rule rep
 applyRule (RuleGeneric f) a stm = f a stm
 applyRule (RuleBasicOp f) a (Let pat aux (BasicOp e)) = f a pat aux e
-applyRule (RuleDoLoop f) a (Let pat aux (DoLoop ctx val form body)) =
-  f a pat aux (ctx, val, form, body)
+applyRule (RuleDoLoop f) a (Let pat aux (DoLoop merge form body)) =
+  f a pat aux (merge, form, body)
 applyRule (RuleIf f) a (Let pat aux (If cond tbody fbody ifsort)) =
   f a pat aux (cond, tbody, fbody, ifsort)
 applyRule (RuleOp f) a (Let pat aux (Op op)) =

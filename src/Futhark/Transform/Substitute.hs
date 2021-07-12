@@ -95,13 +95,17 @@ instance Substitute dec => Substitute (Param dec) where
       (substituteNames substs name)
       (substituteNames substs dec)
 
-instance Substitute dec => Substitute (PatternT dec) where
-  substituteNames substs (Pattern context values) =
-    Pattern (substituteNames substs context) (substituteNames substs values)
+instance Substitute SubExpRes where
+  substituteNames substs (SubExpRes cs se) =
+    SubExpRes (substituteNames substs cs) (substituteNames substs se)
 
-instance Substitute Certificates where
-  substituteNames substs (Certificates cs) =
-    Certificates $ substituteNames substs cs
+instance Substitute dec => Substitute (PatT dec) where
+  substituteNames substs (Pat xs) =
+    Pat (substituteNames substs xs)
+
+instance Substitute Certs where
+  substituteNames substs (Certs cs) =
+    Certs $ substituteNames substs cs
 
 instance Substitutable rep => Substitute (Stm rep) where
   substituteNames substs (Let pat annot e) =

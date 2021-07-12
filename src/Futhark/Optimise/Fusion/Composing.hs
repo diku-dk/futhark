@@ -76,19 +76,15 @@ fuseMaps unfus_nms lam1 inp1 out1 lam2 inp2 = (lam2', M.elems inputmap)
         }
     new_body2 =
       let bnds res =
-            [ mkLet [] [p] $ BasicOp $ SubExp e
-              | (p, e) <- zip pat res
+            [ certify cs $ mkLet [p] $ BasicOp $ SubExp e
+              | (p, SubExpRes cs e) <- zip pat res
             ]
           bindLambda res =
             stmsFromList (bnds res) `insertStms` makeCopiesInner (lambdaBody lam2)
        in makeCopies $ mapResult bindLambda (lambdaBody lam1)
     new_body2_rses = bodyResult new_body2
     new_body2' =
-      new_body2
-        { bodyResult =
-            new_body2_rses
-              ++ map (Var . identName) unfus_pat
-        }
+      new_body2 {bodyResult = new_body2_rses ++ map (varRes . identName) unfus_pat}
     -- infusible variables are added at the end of the result/pattern/type
     (lam2redparams, unfus_pat, pat, inputmap, makeCopies, makeCopiesInner) =
       fuseInputs unfus_nms lam1 inp1 out1 lam2 inp2
@@ -188,8 +184,7 @@ removeDuplicateInputs = fst . M.foldlWithKey' comb ((M.empty, id), M.empty)
             arrmap
           )
     forward to from b =
-      mkLet [] [to] (BasicOp $ SubExp $ Var from)
-        `insertStm` b
+      mkLet [to] (BasicOp $ SubExp $ Var from) `insertStm` b
 
 fuseRedomap ::
   Buildable rep =>
