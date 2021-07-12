@@ -118,7 +118,7 @@ scanStage1 pat space scan_ops kbody = do
                 copyDWIMFix (paramName p) [] (kernelResultSubExp se) vec_is
 
             compileStms mempty (bodyStms $ lamBody scan_op) $
-              forM_ (zip3 acc pes (bodyResult $ lamBody scan_op)) $
+              forM_ (zip3 acc pes $ map resSubExp $ bodyResult $ lamBody scan_op) $
                 \(acc', pe, se) -> do
                   copyDWIMFix (patElemName pe) (map Imp.vi64 is ++ vec_is) se []
                   copyDWIMFix acc' vec_is se []
@@ -178,7 +178,7 @@ scanStage2 pat nsubtasks space scan_ops kbody = do
               copyDWIMFix (paramName p) [] (Var $ patElemName pe) ((offset_index' - 1) : vec_is)
 
           compileStms mempty (bodyStms $ lamBody scan_op) $
-            forM_ (zip3 acc pes (bodyResult $ lamBody scan_op)) $
+            forM_ (zip3 acc pes $ map resSubExp $ bodyResult $ lamBody scan_op) $
               \(acc', pe, se) -> do
                 copyDWIMFix (patElemName pe) ((offset_index' - 1) : vec_is) se []
                 copyDWIMFix acc' vec_is se []
@@ -238,7 +238,7 @@ scanStage3 pat space scan_ops kbody = do
               copyDWIMFix (paramName p) [] (kernelResultSubExp se) vec_is
 
             compileStms mempty (bodyStms $ lamBody scan_op) $
-              forM_ (zip3 pes (bodyResult $ lamBody scan_op) acc) $
+              forM_ (zip3 pes (map resSubExp $ bodyResult $ lamBody scan_op) acc) $
                 \(pe, se, acc') -> do
                   copyDWIMFix (patElemName pe) (map Imp.vi64 is ++ vec_is) se []
                   copyDWIMFix acc' vec_is se []
@@ -302,6 +302,6 @@ compileSegScanBody segment_i pat space scan_ops kbody = do
 
           sComment "combine with carry and write to memory" $
             compileStms mempty (bodyStms $ lambdaBody $ segBinOpLambda scan_op) $
-              forM_ (zip3 scan_x_params scan_pes (bodyResult $ lambdaBody $ segBinOpLambda scan_op)) $ \(p, pe, se) -> do
+              forM_ (zip3 scan_x_params scan_pes $ map resSubExp $ bodyResult $ lambdaBody $ segBinOpLambda scan_op) $ \(p, pe, se) -> do
                 copyDWIMFix (patElemName pe) (map Imp.vi64 is) se []
                 copyDWIMFix (paramName p) [] se []

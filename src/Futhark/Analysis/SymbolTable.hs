@@ -490,12 +490,12 @@ insertLParam param = insertEntry name bind
 -- parameters.
 insertLoopMerge ::
   ASTRep rep =>
-  [(AST.FParam rep, SubExp, SubExp)] ->
+  [(AST.FParam rep, SubExp, SubExpRes)] ->
   SymbolTable rep ->
   SymbolTable rep
 insertLoopMerge = flip $ foldl' $ flip bind
   where
-    bind (p, initial, res) =
+    bind (p, initial, SubExpRes _ res) =
       insertEntry (paramName p) $
         FParam
           FParamEntry

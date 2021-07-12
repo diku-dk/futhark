@@ -687,7 +687,7 @@ iswim _ (SOAC.Screma w form arrs) ots
                 Let (setPatternOuterDimTo w map_pat) (defAux ()) $
                   Op $ Futhark.Screma w arrs' scan_form
             )
-            $ map Var $ patternNames map_pat
+            $ varsRes $ patternNames map_pat
         map_fun' = Lambda map_params map_body map_rettype
         perm = case lambdaReturnType map_fun of
           [] -> []

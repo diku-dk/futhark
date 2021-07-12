@@ -90,7 +90,7 @@ tileInKernelBody branch_variant initial_variance lvl initial_kspace ts kbody
   | otherwise =
     return (mempty, (lvl, initial_kspace, kbody))
   where
-    isSimpleResult (Returns _ se) = Just se
+    isSimpleResult (Returns _ cs se) = Just $ SubExpRes cs se
     isSimpleResult _ = Nothing
 
 tileInBody ::
@@ -392,11 +392,11 @@ tileDoLoop initial_space variance prestms used_in_body (host_stms, tiling, tiled
             certifying (stmAuxCerts aux) $
               tilingSegMap tiling "tiled_loopinit" (scalarLevel tiling) ResultPrivate $
                 \in_bounds slice ->
-                  fmap (map Var) $
+                  fmap varsRes $
                     protectOutOfBounds "loopinit" in_bounds merge_ts $ do
                       addPrivStms slice inloop_privstms
                       addPrivStms slice privstms
-                      return mergeinits
+                      return $ subExpsRes mergeinits
 
         let merge' = zip mergeparams' mergeinit'
 
@@ -438,11 +438,11 @@ doPrelude tiling privstms prestms prestms_live =
   tilingSegMap tiling "prelude" (scalarLevel tiling) ResultPrivate $
     \in_bounds slice -> do
       ts <- mapM lookupType prestms_live
-      fmap (map Var) $
+      fmap varsRes $
         protectOutOfBounds "pre" in_bounds ts $ do
           addPrivStms slice privstms
           addStms prestms
-          pure $ map Var prestms_live
+          pure $ varsRes prestms_live
 
 liveSet :: FreeIn a => Stms GPU -> a -> Names
 liveSet stms after =
@@ -567,7 +567,7 @@ data Tiling = Tiling
       String ->
       SegLevel ->
       ResultManifest ->
-      (PrimExp VName -> Slice SubExp -> Builder GPU [SubExp]) ->
+      (PrimExp VName -> Slice SubExp -> Builder GPU Result) ->
       Builder GPU [VName],
     -- The boolean PrimExp indicates whether they are in-bounds.
 
@@ -603,7 +603,7 @@ protectOutOfBounds ::
   String ->
   PrimExp VName ->
   [Type] ->
-  Builder GPU [SubExp] ->
+  Builder GPU Result ->
   Builder GPU [VName]
 protectOutOfBounds desc in_bounds ts m = do
   -- This is more complicated than you might expect, because we need
@@ -612,7 +612,7 @@ protectOutOfBounds desc in_bounds ts m = do
   -- an accumulator of type 'acc_t', then a unique variable of type
   -- 'acc_t' must also be free in the body.  This means we can find it
   -- based just on the type.
-  m_body <- insertStmsM $ resultBody <$> m
+  m_body <- insertStmsM $ mkBody mempty <$> m
   let m_body_free = namesToList $ freeIn m_body
   t_to_v <-
     filter (isAcc . fst)
@@ -644,7 +644,7 @@ postludeGeneric tiling privstms pat accs' poststms poststms_res res_ts =
         -- The privstms may still be necessary for the result.
         addPrivStms slice privstms
         return poststms_res
-      else fmap (map Var) $
+      else fmap varsRes $
         protectOutOfBounds "postlude" in_bounds res_ts $ do
           addPrivStms slice privstms
           addStms poststms
@@ -683,11 +683,11 @@ tileGeneric doTiling initial_lvl res_ts pat gtids kdims w form inputs poststms p
       mergeinits <- tilingSegMap tiling "mergeinit" (scalarLevel tiling) ResultPrivate $ \in_bounds slice ->
         -- Constant neutral elements (a common case) do not need protection from OOB.
         if freeIn red_nes == mempty
-          then return red_nes
-          else fmap (map Var) $
+          then return $ subExpsRes red_nes
+          else fmap varsRes $
             protectOutOfBounds "neutral" in_bounds (lambdaReturnType red_lam) $ do
               addPrivStms slice privstms
-              return red_nes
+              return $ subExpsRes red_nes
 
       merge <- forM (zip (lambdaParams red_lam) mergeinits) $ \(p, mergeinit) ->
         (,)
@@ -744,7 +744,7 @@ tileReturns dims_on_top dims arr = do
         let new_shape = unit_dims ++ arrayDims arr_t
         letExp (baseString arr) $ BasicOp $ Reshape (map DimNew new_shape) arr
   let tile_dims = zip (map snd dims_on_top) unit_dims ++ dims
-  return $ TileReturns tile_dims arr'
+  return $ TileReturns mempty tile_dims arr'
 
 is1DTileable :: VName -> M.Map VName Names -> VName -> InputArray
 is1DTileable gtid variance arr
@@ -793,7 +793,7 @@ readTile1D tile_size gid gtid num_groups group_size kind privstms tile_id inputs
       let readTileElem arr =
             -- No need for fullSlice because we are tiling only prims.
             letExp "tile_elem" (BasicOp $ Index arr [DimFix j])
-      fmap (map Var) $
+      fmap varsRes $
         case kind of
           TilePartial ->
             letTupExp "pre"
@@ -841,7 +841,7 @@ processTile1D gid gtid kdim tile_size num_groups group_size tile_args = do
     tiles' <- mapM sliceTile tiles
 
     let form' = redomapSOAC [Reduce red_comm red_lam thread_accs] map_lam
-    fmap (map Var) $
+    fmap varsRes $
       letTupExp "acc"
         =<< eIf
           (toExp $ le64 gtid .<. pe64 kdim)
@@ -1056,7 +1056,7 @@ readTile2D (kdim_x, kdim_y) (gtid_x, gtid_y) (gid_x, gid_y) tile_size num_groups
               (eBody [return $ BasicOp $ Index arr [DimFix idx]])
               (eBody [eBlank tile_t])
 
-      fmap (map Var) $
+      fmap varsRes $
         case kind of
           TilePartial ->
             mapM (letExp "pre" <=< readTileElemIfInBounds) arrs_and_perms
@@ -1120,7 +1120,7 @@ processTile2D (gid_x, gid_y) (gtid_x, gtid_y) (kdim_x, kdim_y) tile_size num_gro
 
       tiles' <- mapM sliceTile tiles
 
-      fmap (map Var) $
+      fmap varsRes $
         letTupExp "acc"
           =<< eIf
             ( toExp $ le64 gtid_x .<. pe64 kdim_x .&&. le64 gtid_y .<. pe64 kdim_y

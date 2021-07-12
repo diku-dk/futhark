@@ -95,6 +95,10 @@ instance Substitute dec => Substitute (Param dec) where
       (substituteNames substs name)
       (substituteNames substs dec)
 
+instance Substitute SubExpRes where
+  substituteNames substs (SubExpRes cs se) =
+    SubExpRes (substituteNames substs cs) (substituteNames substs se)
+
 instance Substitute dec => Substitute (PatternT dec) where
   substituteNames substs (Pattern context values) =
     Pattern (substituteNames substs context) (substituteNames substs values)

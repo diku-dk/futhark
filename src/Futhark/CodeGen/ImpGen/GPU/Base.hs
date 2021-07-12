@@ -1655,7 +1655,7 @@ compileGroupResult ::
   PatElem GPUMem ->
   KernelResult ->
   InKernelGen ()
-compileGroupResult _ pe (TileReturns [(w, per_group_elems)] what) = do
+compileGroupResult _ pe (TileReturns _ [(w, per_group_elems)] what) = do
   n <- toInt64Exp . arraySize 0 <$> lookupType what
 
   constants <- kernelConstants <$> askEnv
@@ -1675,7 +1675,7 @@ compileGroupResult _ pe (TileReturns [(w, per_group_elems)] what) = do
         j <- dPrimVE "j" $ kernelGroupSize constants * i + ltid
         sWhen (j + offset .<. toInt64Exp w) $
           copyDWIMFix (patElemName pe) [j + offset] (Var what) [j]
-compileGroupResult space pe (TileReturns dims what) = do
+compileGroupResult space pe (TileReturns _ dims what) = do
   let gids = map fst $ unSegSpace space
       out_tile_sizes = map (toInt64Exp . snd) dims
       group_is = zipWith (*) (map Imp.vi64 gids) out_tile_sizes
@@ -1687,7 +1687,7 @@ compileGroupResult space pe (TileReturns dims what) = do
   localOps threadOperations $
     sWhen (isActive $ zip (map tvVar is_for_thread) $ map fst dims) $
       copyDWIMFix (patElemName pe) (map tvExp is_for_thread) (Var what) local_is
-compileGroupResult space pe (RegTileReturns dims_n_tiles what) = do
+compileGroupResult space pe (RegTileReturns _ dims_n_tiles what) = do
   constants <- kernelConstants <$> askEnv
 
   let gids = map fst $ unSegSpace space
@@ -1723,7 +1723,7 @@ compileGroupResult space pe (RegTileReturns dims_n_tiles what) = do
           src_is = reg_tile_is ++ is_in_reg_tile
       sWhen (foldl1 (.&&.) $ zipWith (.<.) dest_is $ map toInt64Exp dims) $
         copyDWIMFix (patElemName pe) dest_is (Var what) src_is
-compileGroupResult space pe (Returns _ what) = do
+compileGroupResult space pe (Returns _ _ what) = do
   constants <- kernelConstants <$> askEnv
   in_local_memory <- arrayInLocalMemory what
   let gids = map (Imp.vi64 . fst) $ unSegSpace space
@@ -1750,21 +1750,21 @@ compileThreadResult ::
   InKernelGen ()
 compileThreadResult _ _ RegTileReturns {} =
   compilerLimitationS "compileThreadResult: RegTileReturns not yet handled."
-compileThreadResult space pe (Returns _ what) = do
+compileThreadResult space pe (Returns _ _ what) = do
   let is = map (Imp.vi64 . fst) $ unSegSpace space
   copyDWIMFix (patElemName pe) is what []
-compileThreadResult _ pe (ConcatReturns SplitContiguous _ per_thread_elems what) = do
+compileThreadResult _ pe (ConcatReturns _ SplitContiguous _ per_thread_elems what) = do
   constants <- kernelConstants <$> askEnv
   let offset =
         toInt64Exp per_thread_elems
           * sExt64 (kernelGlobalThreadId constants)
   n <- toInt64Exp . arraySize 0 <$> lookupType what
   copyDWIM (patElemName pe) [DimSlice offset n 1] (Var what) []
-compileThreadResult _ pe (ConcatReturns (SplitStrided stride) _ _ what) = do
+compileThreadResult _ pe (ConcatReturns _ (SplitStrided stride) _ _ what) = do
   offset <- sExt64 . kernelGlobalThreadId . kernelConstants <$> askEnv
   n <- toInt64Exp . arraySize 0 <$> lookupType what
   copyDWIM (patElemName pe) [DimSlice offset n $ toInt64Exp stride] (Var what) []
-compileThreadResult _ pe (WriteReturns (Shape rws) _arr dests) = do
+compileThreadResult _ pe (WriteReturns _ (Shape rws) _arr dests) = do
   constants <- kernelConstants <$> askEnv
   let rws' = map toInt64Exp rws
   forM_ dests $ \(slice, e) -> do

@@ -171,8 +171,11 @@ substituteIndicesInBody substs (Body _ stms res) = do
       collectStms $ substituteIndicesInStms substs stms
   (res', res_stms) <-
     inScopeOf stms' $
-      collectStms $ mapM (substituteIndicesInSubExp substs') res
+      collectStms $ mapM (onSubExpRes substs') res
   mkBodyM (stms' <> res_stms) res'
+  where
+    onSubExpRes substs' (SubExpRes cs se) =
+      SubExpRes cs <$> substituteIndicesInSubExp substs' se
 
 update ::
   VName ->

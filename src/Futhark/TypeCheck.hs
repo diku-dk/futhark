@@ -33,6 +33,7 @@ module Futhark.TypeCheck
     requireI,
     requirePrimExp,
     checkSubExp,
+    checkCerts,
     checkExp,
     checkStms,
     checkStm,
@@ -705,6 +706,14 @@ checkSubExp (Var ident) = context ("In subexp " ++ pretty ident) $ do
   observe ident
   lookupType ident
 
+checkCerts :: Checkable rep => Certificates -> TypeM rep ()
+checkCerts (Certificates cs) = mapM_ (requireI [Prim Unit]) cs
+
+checkSubExpRes :: Checkable rep => SubExpRes -> TypeM rep Type
+checkSubExpRes (SubExpRes cs se) = do
+  checkCerts cs
+  checkSubExp se
+
 checkStms ::
   Checkable rep =>
   Stms (Aliases rep) ->
@@ -724,7 +733,7 @@ checkResult ::
   Checkable rep =>
   Result ->
   TypeM rep ()
-checkResult = mapM_ checkSubExp
+checkResult = mapM_ checkSubExpRes
 
 checkFunBody ::
   Checkable rep =>
@@ -737,7 +746,7 @@ checkFunBody rt (Body (_, rep) bnds res) = do
     context "When checking body result" $ checkResult res
     context "When matching declared return type to result of body" $
       matchReturnType rt res
-    map (`namesSubtract` bound_here) <$> mapM subExpAliasesM res
+    map (`namesSubtract` bound_here) <$> mapM (subExpAliasesM . resSubExp) res
   where
     bound_here = namesFromList $ M.keys $ scopeOf bnds
 
@@ -750,7 +759,7 @@ checkLambdaBody ret (Body (_, rep) bnds res) = do
   checkBodyDec rep
   checkStms bnds $ do
     checkLambdaResult ret res
-    map (`namesSubtract` bound_here) <$> mapM subExpAliasesM res
+    map (`namesSubtract` bound_here) <$> mapM (subExpAliasesM . resSubExp) res
   where
     bound_here = namesFromList $ M.keys $ scopeOf bnds
 
@@ -771,7 +780,7 @@ checkLambdaResult ts es
           ++ " values: "
           ++ prettyTuple es
   | otherwise = forM_ (zip ts es) $ \(t, e) -> do
-    et <- checkSubExp e
+    et <- checkSubExpRes e
     unless (et == t) $
       bad $
         TypeError $
@@ -787,7 +796,7 @@ checkBody (Body (_, rep) bnds res) = do
   checkBodyDec rep
   checkStms bnds $ do
     checkResult res
-    map (`namesSubtract` bound_here) <$> mapM subExpAliasesM res
+    map (`namesSubtract` bound_here) <$> mapM (subExpAliasesM . resSubExp) res
   where
     bound_here = namesFromList $ M.keys $ scopeOf bnds
 
@@ -937,16 +946,16 @@ matchLoopResultExt ::
   Checkable rep =>
   [Param DeclType] ->
   [Param DeclType] ->
-  [SubExp] ->
+  Result ->
   TypeM rep ()
 matchLoopResultExt ctx val loopres = do
   let rettype_ext =
         existentialiseExtTypes (map paramName ctx) $
           staticShapes $ map typeOf $ ctx ++ val
 
-  bodyt <- mapM subExpType loopres
+  bodyt <- mapM (subExpType . resSubExp) loopres
 
-  case instantiateShapes (`maybeNth` loopres) rettype_ext of
+  case instantiateShapes (fmap resSubExp . (`maybeNth` loopres)) rettype_ext of
     Nothing ->
       bad $
         ReturnTypeError
@@ -1030,7 +1039,7 @@ checkExp (DoLoop ctxmerge valmerge form loopbody) = do
                     M.keys $
                       scopeOf $ bodyStms loopbody
             map (`namesSubtract` bound_here)
-              <$> mapM subExpAliasesM (bodyResult loopbody)
+              <$> mapM (subExpAliasesM . resSubExp) (bodyResult loopbody)
   where
     checkLoopVar (p, a) = do
       a_t <- lookupType a
@@ -1256,7 +1265,7 @@ matchExtReturnType ::
   Result ->
   TypeM rep ()
 matchExtReturnType rettype res = do
-  ts <- mapM subExpType res
+  ts <- mapM subExpResType res
   matchExtReturns rettype res ts
 
 matchExtBranchType ::
@@ -1265,7 +1274,7 @@ matchExtBranchType ::
   Body (Aliases rep) ->
   TypeM rep ()
 matchExtBranchType rettype (Body _ stms res) = do
-  ts <- extendedScope (traverse subExpType res) stmscope
+  ts <- extendedScope (traverse subExpResType res) stmscope
   matchExtReturns rettype res ts
   where
     stmscope = scopeOf stms
@@ -1303,7 +1312,7 @@ matchExtReturns rettype res ts = do
 
   let ctx_vals = zip ctx_res ctx_ts
       instantiateExt i = case maybeNth i ctx_vals of
-        Just (se, Prim (IntType Int64)) -> return se
+        Just (SubExpRes _ se, Prim (IntType Int64)) -> return se
         _ -> problem
 
   rettype' <- instantiateShapes instantiateExt rettype
@@ -1466,11 +1475,7 @@ class (ASTRep rep, CanBeAliased (Op rep), CheckableOp rep) => Checkable rep wher
   primFParam :: VName -> PrimType -> TypeM rep (FParam (Aliases rep))
   matchReturnType :: [RetType rep] -> Result -> TypeM rep ()
   matchBranchType :: [BranchType rep] -> Body (Aliases rep) -> TypeM rep ()
-  matchLoopResult ::
-    [FParam (Aliases rep)] ->
-    [FParam (Aliases rep)] ->
-    [SubExp] ->
-    TypeM rep ()
+  matchLoopResult :: [FParam (Aliases rep)] -> [FParam (Aliases rep)] -> Result -> TypeM rep ()
 
   default checkExpDec :: ExpDec rep ~ () => ExpDec rep -> TypeM rep ()
   checkExpDec = return
@@ -1506,6 +1511,6 @@ class (ASTRep rep, CanBeAliased (Op rep), CheckableOp rep) => Checkable rep wher
     FParamInfo rep ~ DeclType =>
     [FParam (Aliases rep)] ->
     [FParam (Aliases rep)] ->
-    [SubExp] ->
+    Result ->
     TypeM rep ()
   matchLoopResult = matchLoopResultExt

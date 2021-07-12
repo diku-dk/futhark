@@ -135,7 +135,7 @@ lowerUpdatesIntoSegMap scope pat updates kspace kbody = do
     onRet (PatElem v v_dec) ret
       | Just (DesiredUpdate bindee_nm bindee_dec _cs src slice _val) <-
           find ((== v) . updateValue) updates = do
-        Returns _ se <- Just ret
+        Returns _ cs se <- Just ret
 
         -- The slice we're writing per thread must fully cover the
         -- underlying dimensions.
@@ -153,7 +153,7 @@ lowerUpdatesIntoSegMap scope pat updates kspace kbody = do
                   map (pe64 . Var) gtids
 
           let res_dims = arrayDims $ snd bindee_dec
-              ret' = WriteReturns (Shape res_dims) src [(map DimFix slice', se)]
+              ret' = WriteReturns cs (Shape res_dims) src [(map DimFix slice', se)]
 
           return
             ( PatElem bindee_nm bindee_dec,
@@ -297,7 +297,7 @@ summariseLoop ::
   Scope rep ->
   [DesiredUpdate (als, Type)] ->
   Names ->
-  [(SubExp, Ident)] ->
+  [(SubExpRes, Ident)] ->
   [(Param DeclType, SubExp)] ->
   Maybe (m [LoopResultSummary (als, Type)])
 summariseLoop scope updates usedInBody resmap merge =
@@ -335,7 +335,7 @@ summariseLoop scope updates usedInBody resmap merge =
     loopInvariant Constant {} = True
 
 data LoopResultSummary dec = LoopResultSummary
-  { resultSubExp :: SubExp,
+  { resultSubExp :: SubExpRes,
     inPatternAs :: Ident,
     mergeParam :: (Param DeclType, SubExp),
     relatedUpdate :: Maybe (DesiredUpdate dec, VName, dec)
@@ -360,19 +360,19 @@ manipulateResult ::
 manipulateResult summaries substs = do
   let (orig_ses, updated_ses) = partitionEithers $ map unchangedRes summaries
   (subst_ses, res_bnds) <- runWriterT $ zipWithM substRes updated_ses substs
-  return (orig_ses ++ subst_ses, stmsFromList res_bnds)
+  pure (orig_ses ++ subst_ses, stmsFromList res_bnds)
   where
     unchangedRes summary =
       case relatedUpdate summary of
         Nothing -> Left $ resultSubExp summary
         Just _ -> Right $ resultSubExp summary
-    substRes (Var res_v) (subst_v, (_, nm, _, _))
+    substRes (SubExpRes res_cs (Var res_v)) (subst_v, (_, nm, _, _))
       | res_v == subst_v =
-        return $ Var nm
-    substRes res_se (_, (cs, nm, dec, is)) = do
+        pure $ SubExpRes res_cs $ Var nm
+    substRes (SubExpRes res_cs res_se) (_, (cs, nm, dec, is)) = do
       v' <- newIdent' (++ "_updated") $ Ident nm $ typeOf dec
       tell
-        [ certify cs . mkLet [] [v'] . BasicOp $
+        [ certify (res_cs <> cs) . mkLet [] [v'] . BasicOp $
             Update Unsafe nm (fullSlice (typeOf dec) is) res_se
         ]
-      return $ Var $ identName v'
+      pure $ varRes $ identName v'

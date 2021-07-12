@@ -76,7 +76,7 @@ interchangeLoop
         map_bnd =
           Let loop_pat_expanded aux $
             Op $ Screma w (arrs' <> new_arrs) (mapSOAC lam)
-        res = map Var $ patternNames loop_pat_expanded
+        res = varsRes $ patternNames loop_pat_expanded
         pat' = Pattern [] $ rearrangeShape perm $ patternValueElements pat
 
     return $
@@ -157,7 +157,7 @@ interchangeBranch1
 
         mkBranch branch = (renameBody =<<) $ do
           let lam = Lambda params branch lam_ret
-              res = map Var $ patternNames branch_pat'
+              res = varsRes $ patternNames branch_pat'
               map_bnd = Let branch_pat' aux $ Op $ Screma w arrs $ mapSOAC lam
           return $ mkBody (oneStm map_bnd) res
 
@@ -204,7 +204,7 @@ interchangeWithAcc1
       let (params, arrs) = unzip params_and_arrs
           maplam_ret = lambdaReturnType acc_lam
           maplam = Lambda (iota_p : orig_acc_params ++ params) (lambdaBody acc_lam) maplam_ret
-      auxing map_aux . letTupExp' "withacc_inter" $
+      auxing map_aux . fmap subExpsRes . letTupExp' "withacc_inter" $
         Op $ Screma w (iota_w : map paramName acc_params ++ arrs) (mapSOAC maplam)
     let pat = Pattern [] $ rearrangeShape perm $ patternValueElements map_pat
         perm' = [0 .. patternSize pat -1]

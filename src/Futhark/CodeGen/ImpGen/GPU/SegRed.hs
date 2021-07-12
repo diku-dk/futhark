@@ -661,7 +661,7 @@ reductionStageZero constants ispace num_elements global_tid elems_per_thread thr
                     forM_
                       ( zip
                           (slugAccs slug)
-                          (bodyResult $ slugBody slug)
+                          (map resSubExp $ bodyResult $ slugBody slug)
                       )
                       $ \((acc, acc_is), se) ->
                         copyDWIMFix acc (acc_is ++ vec_is) se []
@@ -820,7 +820,7 @@ reductionStageTwo
                     ([0, index_of_group_res] ++ vec_is)
 
               compileStms mempty (bodyStms $ slugBody slug) $
-                forM_ (zip red_x_params (bodyResult $ slugBody slug)) $ \(p, se) ->
+                forM_ (zip red_x_params $ map resSubExp $ bodyResult $ slugBody slug) $ \(p, se) ->
                   copyDWIMFix (paramName p) [] se []
 
         forM_ (zip red_x_params red_arrs) $ \(p, arr) ->

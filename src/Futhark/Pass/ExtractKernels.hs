@@ -328,8 +328,8 @@ kernelAlternatives ::
   m (Out.Stms Out.GPU)
 kernelAlternatives pat default_body [] = runBuilder_ $ do
   ses <- bodyBind default_body
-  forM_ (zip (patternNames pat) ses) $ \(name, se) ->
-    letBindNames [name] $ BasicOp $ SubExp se
+  forM_ (zip (patternNames pat) ses) $ \(name, SubExpRes cs se) ->
+    certifying cs $ letBindNames [name] $ BasicOp $ SubExp se
 kernelAlternatives pat default_body ((cond, alt) : alts) = runBuilder_ $ do
   alts_pat <- fmap (Pattern []) $
     forM (patternElements pat) $ \pe -> do
@@ -337,7 +337,7 @@ kernelAlternatives pat default_body ((cond, alt) : alts) = runBuilder_ $ do
       return pe {patElemName = name}
 
   alt_stms <- kernelAlternatives alts_pat default_body alts
-  let alt_body = mkBody alt_stms $ map Var $ patternValueNames alts_pat
+  let alt_body = mkBody alt_stms $ varsRes $ patternValueNames alts_pat
 
   letBind pat $
     If cond alt alt_body $
@@ -424,7 +424,7 @@ transformStm path (Let pat aux@(StmAux cs _ _) (Op (Screma w arrs form)))
 
         outerParallelBody =
           renameBody
-            =<< (mkBody <$> paralleliseOuter <*> pure (map Var (patternNames pat)))
+            =<< (mkBody <$> paralleliseOuter <*> pure (varsRes (patternNames pat)))
 
         paralleliseInner path' = do
           (mapstm, redstm) <-
@@ -437,7 +437,7 @@ transformStm path (Let pat aux@(StmAux cs _ _) (Op (Screma w arrs form)))
 
         innerParallelBody path' =
           renameBody
-            =<< (mkBody <$> paralleliseInner path' <*> pure (map Var (patternNames pat)))
+            =<< (mkBody <$> paralleliseInner path' <*> pure (varsRes (patternNames pat)))
 
     if not (lambdaContainsParallelism map_lam)
       || "sequential_inner" `inAttrs` stmAuxAttrs aux
@@ -519,7 +519,7 @@ transformStm path (Let pat aux@(StmAux cs _ _) (Op (Stream w arrs (Parallel o co
 
     outerParallelBody path' =
       renameBody
-        =<< (mkBody <$> paralleliseOuter path' <*> pure (map Var (patternNames pat)))
+        =<< (mkBody <$> paralleliseOuter path' <*> pure (varsRes (patternNames pat)))
 
     paralleliseInner path' = do
       types <- asksScope scopeForSOACs
@@ -528,7 +528,7 @@ transformStm path (Let pat aux@(StmAux cs _ _) (Op (Stream w arrs (Parallel o co
 
     innerParallelBody path' =
       renameBody
-        =<< (mkBody <$> paralleliseInner path' <*> pure (map Var (patternNames pat)))
+        =<< (mkBody <$> paralleliseInner path' <*> pure (varsRes (patternNames pat)))
 
     comm'
       | commutativeLambda red_fun, o /= InOrder = Commutative
@@ -551,9 +551,12 @@ transformStm _ (Let pat (StmAux cs _ _) (Op (Scatter w lam ivs as))) = runBuilde
   let (as_ws, _, _) = unzip3 as
       kstms = bodyStms $ lambdaBody lam'
       krets = do
-        (a_w, a, is_vs) <-
-          groupScatterResults as $ bodyResult $ lambdaBody lam'
-        return $ WriteReturns a_w a [(map DimFix is, v) | (is, v) <- is_vs]
+        (a_w, a, is_vs) <- groupScatterResults as $ bodyResult $ lambdaBody lam'
+        let res_cs =
+              foldMap (foldMap resCerts . fst) is_vs
+                <> foldMap (resCerts . snd) is_vs
+            is_vs' = [(map (DimFix . resSubExp) is, resSubExp v) | (is, v) <- is_vs]
+        return $ WriteReturns res_cs a_w a is_vs'
       body = KernelBody () kstms krets
       inputs = do
         (p, p_a) <- zip (lambdaParams lam') ivs
@@ -811,7 +814,7 @@ onMap' loopnest path mk_seq_stms mk_par_stms pat lam = do
                 [(outer_suff, seq_body), (intra_ok, group_par_body)]
   where
     nest_ws = kernelNestWidths loopnest
-    res = map Var $ patternNames pat
+    res = varsRes $ patternNames pat
     aux = loopNestingAux $ innermostKernelNesting loopnest
     attrs = stmAuxAttrs aux
 

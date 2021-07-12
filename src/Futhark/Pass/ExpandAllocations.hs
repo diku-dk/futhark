@@ -96,7 +96,8 @@ transformStm (Let pat aux (If cond tbranch fbranch (IfDec ts IfEquiv))) = do
     (Left e, _) ->
       throwError e
   where
-    bindRes pe se = Let (Pattern [] [pe]) (defAux ()) $ BasicOp $ SubExp se
+    bindRes pe (SubExpRes cs se) =
+      certify cs $ Let (Pattern [] [pe]) (defAux ()) $ BasicOp $ SubExp se
 
     useBranch b =
       bodyStms b
@@ -799,7 +800,8 @@ sliceKernelSizes num_threads sizes space kstms = do
     (zs, stms) <- localScope (scopeOfLParams $ xs ++ ys) $
       collectStms $
         forM (zip xs ys) $ \(x, y) ->
-          letSubExp "z" $ BasicOp $ BinOp (SMax Int64) (Var $ paramName x) (Var $ paramName y)
+          fmap subExpRes . letSubExp "z" . BasicOp $
+            BinOp (SMax Int64) (Var $ paramName x) (Var $ paramName y)
     return $ Lambda (xs ++ ys) (mkBody stms zs) i64s
 
   flat_gtid_lparam <- Param <$> newVName "flat_gtid" <*> pure (Prim (IntType Int64))
@@ -807,9 +809,7 @@ sliceKernelSizes num_threads sizes space kstms = do
   (size_lam', _) <- flip runBuilderT kernels_scope $ do
     params <- replicateM num_sizes $ newParam "x" (Prim int64)
     (zs, stms) <- localScope
-      ( scopeOfLParams params
-          <> scopeOfLParams [flat_gtid_lparam]
-      )
+      (scopeOfLParams params <> scopeOfLParams [flat_gtid_lparam])
       $ collectStms $ do
         -- Even though this SegRed is one-dimensional, we need to
         -- provide indexes corresponding to the original potentially
@@ -822,7 +822,7 @@ sliceKernelSizes num_threads sizes space kstms = do
         zipWithM_ letBindNames (map pure kspace_gtids) =<< mapM toExp new_inds
 
         mapM_ addStm kstms'
-        return sizes
+        return $ subExpsRes sizes
 
     localScope (scopeOfSegSpace space) $
       GPU.simplifyLambda (Lambda [flat_gtid_lparam] (Body () stms zs) i64s)

@@ -4,6 +4,7 @@
 module Futhark.Optimise.Simplify.Rules.Loop (loopRules) where
 
 import Control.Monad
+import Data.Bifunctor (second)
 import Data.List (partition)
 import Data.Maybe
 import Futhark.Analysis.DataDependencies
@@ -36,7 +37,7 @@ removeRedundantMergeVariables (_, used) pat aux (ctx, val, form, body)
         necessaryForReturned =
           findNecessaryForReturned
             usedAfterLoopOrInForm
-            (zip (map fst $ ctx ++ val) $ ctx_es ++ val_es)
+            (zip (map fst $ ctx ++ val) $ map resSubExp $ ctx_es ++ val_es)
             (dataDependencies body)
 
         resIsNecessary ((v, _), _) =
@@ -174,13 +175,13 @@ hoistLoopInvariantMergeVariables vtable pat aux (ctx, val, form, loopbody) =
           -- parameter, where all existential parameters are already
           -- known to be invariant
           isInvariant
-            | Var v2 <- resExp,
+            | Var v2 <- resSubExp resExp,
               paramName mergeParam == v2 =
               allExistentialInvariant
                 (namesFromList $ map (identName . fst) invariant)
                 mergeParam
             -- (1) The result is identical to the initial parameter value.
-            | mergeInit == resExp = True
+            | mergeInit == resSubExp resExp = True
             -- (2) The initial parameter value is equal to an outer
             -- loop parameter 'P', where the initial value of 'P' is
             -- equal to 'resExp', AND 'resExp' ultimately becomes the
@@ -189,7 +190,7 @@ hoistLoopInvariantMergeVariables vtable pat aux (ctx, val, form, loopbody) =
             -- would not be too hard to generalise.
             | Var init_v <- mergeInit,
               Just (p_init, p_res) <- ST.lookupLoopParam init_v vtable,
-              p_init == resExp,
+              p_init == resSubExp resExp,
               p_res == Var pat_name =
               True
             | otherwise = False
@@ -317,18 +318,18 @@ narrowLoopType _ _ _ _ = Skip
 unroll ::
   BuilderOps rep =>
   Integer ->
-  [(FParam rep, SubExp)] ->
+  [(FParam rep, SubExpRes)] ->
   (VName, IntType, Integer) ->
   [(LParam rep, VName)] ->
   Body rep ->
-  RuleM rep [SubExp]
+  RuleM rep [SubExpRes]
 unroll n merge (iv, it, i) loop_vars body
   | i >= n =
     return $ map snd merge
   | otherwise = do
     iter_body <- insertStmsM $ do
-      forM_ merge $ \(mergevar, mergeinit) ->
-        letBindNames [paramName mergevar] $ BasicOp $ SubExp mergeinit
+      forM_ merge $ \(mergevar, SubExpRes cs mergeinit) ->
+        certifying cs $ letBindNames [paramName mergevar] $ BasicOp $ SubExp mergeinit
 
       letBindNames [iv] $ BasicOp $ SubExp $ intConst it i
 
@@ -352,9 +353,9 @@ simplifyKnownIterationLoop :: BuilderOps rep => TopDownRuleDoLoop rep
 simplifyKnownIterationLoop _ pat aux (ctx, val, ForLoop i it (Constant iters) loop_vars, body)
   | IntValue n <- iters,
     zeroIshInt n || oneIshInt n || "unroll" `inAttrs` stmAuxAttrs aux = Simplify $ do
-    res <- unroll (valueIntegral n) (ctx ++ val) (i, it, 0) loop_vars body
-    forM_ (zip (patternNames pat) res) $ \(v, se) ->
-      letBindNames [v] $ BasicOp $ SubExp se
+    res <- unroll (valueIntegral n) (map (second subExpRes) (ctx ++ val)) (i, it, 0) loop_vars body
+    forM_ (zip (patternNames pat) res) $ \(v, SubExpRes cs se) ->
+      certifying cs $ letBindNames [v] $ BasicOp $ SubExp se
 simplifyKnownIterationLoop _ _ _ _ =
   Skip
 

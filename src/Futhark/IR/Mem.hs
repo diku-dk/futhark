@@ -538,8 +538,8 @@ matchRetTypeToResult ::
   TC.TypeM rep ()
 matchRetTypeToResult rettype result = do
   scope <- askScope
-  result_ts <- runReaderT (mapM subExpMemInfo result) $ removeScopeAliases scope
-  matchReturnType rettype result result_ts
+  result_ts <- runReaderT (mapM (subExpMemInfo . resSubExp) result) $ removeScopeAliases scope
+  matchReturnType rettype (map resSubExp result) result_ts
 
 matchFunctionReturnType ::
   (Mem rep, TC.Checkable rep) =>
@@ -548,7 +548,7 @@ matchFunctionReturnType ::
   TC.TypeM rep ()
 matchFunctionReturnType rettype result = do
   matchRetTypeToResult rettype result
-  mapM_ checkResultSubExp result
+  mapM_ (checkResultSubExp . resSubExp) result
   where
     checkResultSubExp Constant {} =
       return ()
@@ -572,7 +572,7 @@ matchLoopResultMem ::
   (Mem rep, TC.Checkable rep) =>
   [FParam (Aliases rep)] ->
   [FParam (Aliases rep)] ->
-  [SubExp] ->
+  Result ->
   TC.TypeM rep ()
 matchLoopResultMem ctx val = matchRetTypeToResult rettype
   where
@@ -612,8 +612,8 @@ matchBranchReturnType ::
   TC.TypeM rep ()
 matchBranchReturnType rettype (Body _ stms res) = do
   scope <- askScope
-  ts <- runReaderT (mapM subExpMemInfo res) $ removeScopeAliases (scope <> scopeOf stms)
-  matchReturnType rettype res ts
+  ts <- runReaderT (mapM (subExpMemInfo . resSubExp) res) $ removeScopeAliases (scope <> scopeOf stms)
+  matchReturnType rettype (map resSubExp res) ts
 
 -- | Helper function for index function unification.
 --

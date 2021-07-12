@@ -193,28 +193,28 @@ transformSOAC pat (Screma w arrs form@(ScremaForm scans reds map_lam)) = do
       scan_res' <-
         eLambda scan_lam $
           map (pure . BasicOp . SubExp) $
-            map (Var . paramName) scanacc_params ++ scan_res
+            map (Var . paramName) scanacc_params ++ map resSubExp scan_res
       red_res' <-
         eLambda red_lam $
           map (pure . BasicOp . SubExp) $
-            map (Var . paramName) redout_params ++ red_res
+            map (Var . paramName) redout_params ++ map resSubExp red_res
 
       -- Write the scan accumulator to the scan result arrays.
       scan_outarrs <-
-        letwith (map paramName scanout_params) (Var i) scan_res'
+        certifying (foldMap resCerts scan_res) $
+          letwith (map paramName scanout_params) (Var i) $ map resSubExp scan_res'
 
       -- Write the map results to the map result arrays.
       map_outarrs <-
-        letwith (map paramName mapout_params) (Var i) map_res
+        certifying (foldMap resCerts map_res) $
+          letwith (map paramName mapout_params) (Var i) $ map resSubExp map_res
 
-      return $
-        resultBody $
-          concat
-            [ scan_res',
-              map Var scan_outarrs,
-              red_res',
-              map Var map_outarrs
-            ]
+      return . mkBody mempty . concat $
+        [ scan_res',
+          varsRes scan_outarrs,
+          red_res',
+          varsRes map_outarrs
+        ]
 
   -- We need to discard the final scan accumulators, as they are not
   -- bound in the original pattern.
@@ -267,11 +267,11 @@ transformSOAC pat (Stream w arrs _ nes lam) = do
 
       (res, mapout_res) <- splitAt (length nes) <$> bodyBind (lambdaBody lam)
 
-      mapout_res' <- forM (zip mapout_params mapout_res) $ \(p, se) ->
-        letSubExp "mapout_res" . BasicOp $
+      mapout_res' <- forM (zip mapout_params mapout_res) $ \(p, SubExpRes cs se) ->
+        certifying cs . letSubExp "mapout_res" . BasicOp $
           Update Unsafe (paramName p) (fullSlice (paramType p) slice) se
 
-      resultBodyM $ res ++ mapout_res'
+      mkBodyM mempty $ res ++ subExpsRes mapout_res'
 
   letBind pat $ DoLoop [] merge loop_form loop_body
 transformSOAC pat (Scatter len lam ivs as) = do
@@ -294,9 +294,9 @@ transformSOAC pat (Scatter len lam ivs as) = do
 
       ress <- forM indexes $ \(_, arr, indexes') -> do
         arr_t <- lookupType arr
-        let saveInArray arr' (indexCur, valueCur) =
-              letExp "write_out" $
-                BasicOp $ Update Safe arr' (fullSlice arr_t $ map DimFix indexCur) valueCur
+        let saveInArray arr' (indexCur, SubExpRes value_cs valueCur) =
+              certifying (foldMap resCerts indexCur <> value_cs) . letExp "write_out" $
+                BasicOp $ Update Safe arr' (fullSlice arr_t $ map (DimFix . resSubExp) indexCur) valueCur
 
         foldM saveInArray arr indexes'
       return $ resultBody (map Var ress)
@@ -316,7 +316,7 @@ transformSOAC pat (Hist len ops bucket_fun imgs) = do
     imgs' <- forM imgs $ \img -> do
       img_t <- lookupType img
       letSubExp "pixel" $ BasicOp $ Index img $ fullSlice img_t [DimFix $ Var iter]
-    imgs'' <- bindLambda bucket_fun $ map (BasicOp . SubExp) imgs'
+    imgs'' <- map resSubExp <$> bindLambda bucket_fun (map (BasicOp . SubExp) imgs')
 
     -- Split out values from bucket function.
     let lens = length ops
@@ -329,7 +329,7 @@ transformSOAC pat (Hist len ops bucket_fun imgs) = do
     hists_out'' <- forM (zip4 hists_out' ops inds vals) $ \(hist, op, idx, val) -> do
       -- Check whether the indexes are in-bound.  If they are not, we
       -- return the histograms unchanged.
-      let outside_bounds_branch = buildBody_ $ pure $ map Var hist
+      let outside_bounds_branch = buildBody_ $ pure $ varsRes hist
           oob = case hist of
             [] -> eSubExp $ constant True
             arr : _ -> eOutOfBounds arr [eSubExp idx]
@@ -347,12 +347,12 @@ transformSOAC pat (Hist len ops bucket_fun imgs) = do
               map (BasicOp . SubExp) $ h_val ++ val
 
           -- Write values back to histograms.
-          hist' <- forM (zip hist h_val') $ \(arr, v) -> do
+          hist' <- forM (zip hist h_val') $ \(arr, SubExpRes cs v) -> do
             arr_t <- lookupType arr
-            letInPlace "hist_out" arr (fullSlice arr_t [DimFix idx]) $
+            certifying cs . letInPlace "hist_out" arr (fullSlice arr_t [DimFix idx]) $
               BasicOp $ SubExp v
 
-          pure $ map Var hist'
+          pure $ varsRes hist'
 
     return $ resultBody $ map Var $ concat hists_out''
 
@@ -393,7 +393,7 @@ bindLambda ::
   Transformer m =>
   AST.Lambda (Rep m) ->
   [AST.Exp (Rep m)] ->
-  m [SubExp]
+  m Result
 bindLambda (Lambda params body _) args = do
   forM_ (zip params args) $ \(param, arg) ->
     if primType $ paramType param

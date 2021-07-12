@@ -314,8 +314,7 @@ mkBodyAliases bnds res =
   -- closure of the alias map (within bnds), then removing anything
   -- bound in bnds.
   let (aliases, consumed) = mkStmsAliases bnds res
-      boundNames =
-        foldMap (namesFromList . patternNames . stmPattern) bnds
+      boundNames = foldMap (namesFromList . patternNames . stmPattern) bnds
       aliases' = map (`namesSubtract` boundNames) aliases
       consumed' = consumed `namesSubtract` boundNames
    in (map AliasDec aliases', AliasDec consumed')
@@ -325,12 +324,12 @@ mkBodyAliases bnds res =
 mkStmsAliases ::
   Aliased rep =>
   Stms rep ->
-  [SubExp] ->
+  Result ->
   ([Names], Names)
 mkStmsAliases bnds res = delve mempty $ stmsToList bnds
   where
     delve (aliasmap, consumed) [] =
-      ( map (aliasClosure aliasmap . subExpAliases) res,
+      ( map (aliasClosure aliasmap . subExpAliases . resSubExp) res,
         consumed
       )
     delve (aliasmap, consumed) (bnd : bnds') =

@@ -67,7 +67,8 @@ prepareRedOrScan w map_lam arrs ispace inps = do
         mapM_ readKernelInput $ do
           (p, arr) <- zip (lambdaParams map_lam) arrs
           pure $ KernelInput (paramName p) (paramType p) arr [Var gtid]
-        map (Returns ResultMaySimplify) <$> bodyBind (lambdaBody map_lam)
+        res <- bodyBind (lambdaBody map_lam)
+        forM res $ \(SubExpRes cs se) -> pure $ Returns ResultMaySimplify cs se
 
   return (space, kbody)
 
@@ -189,7 +190,9 @@ segHist lvl pat arr_w ispace inps ops lam arrs = runBuilder_ $ do
           arr_t <- lookupType arr
           letBindNames [paramName p] $
             BasicOp $ Index arr $ fullSlice arr_t [DimFix $ Var gtid]
-        map (Returns ResultMaySimplify) <$> bodyBind (lambdaBody lam)
+        res <- bodyBind (lambdaBody lam)
+        forM res $ \(SubExpRes cs se) ->
+          pure $ Returns ResultMaySimplify cs se
 
   letBind pat $ Op $ segOp $ SegHist lvl space ops (lambdaReturnType lam) kbody
 

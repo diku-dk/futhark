@@ -548,7 +548,7 @@ soacToStream soac = do
               Futhark.Screma chvar (map paramName strm_inpids) $
                 Futhark.mapSOAC lam'
             insbnd = mkLet [] strm_resids $ Op insoac
-            strmbdy = mkBody (oneStm insbnd) $ map (Futhark.Var . identName) strm_resids
+            strmbdy = mkBody (oneStm insbnd) $ map (subExpRes . Futhark.Var . identName) strm_resids
             strmpar = chunk_param : strm_inpids
             strmlam = Lambda strmpar strmbdy loutps
             empty_lam = Lambda [] (mkBody mempty []) []
@@ -618,9 +618,9 @@ soacToStream soac = do
               mkLet [] lastel_ids $
                 If
                   (Futhark.Var $ identName empty_arr)
-                  (mkBody mempty nes)
+                  (mkBody mempty $ subExpsRes nes)
                   ( mkBody (stmsFromList leltmpbnds) $
-                      map (Futhark.Var . identName) lastel_tmp_ids
+                      varsRes $ map identName lastel_tmp_ids
                   )
                   $ ifCommon $ map identType lastel_tmp_ids
         -- 4. let strm_resids = map (acc `+`,nes, scan0_ids)
@@ -641,7 +641,7 @@ soacToStream soac = do
         let (addlelbnd, addlelres) = (bodyStms addlelbdy, bodyResult addlelbdy)
             strmbdy =
               mkBody (stmsFromList [insbnd, outszm1bnd, empty_arr_bnd, lelbnd, mapbnd] <> addlelbnd) $
-                addlelres ++ map (Futhark.Var . identName) (strm_resids ++ map_resids)
+                addlelres ++ map (subExpRes . Futhark.Var . identName) (strm_resids ++ map_resids)
             strmpar = chunk_param : inpacc_ids ++ strm_inpids
             strmlam = Lambda strmpar strmbdy (accrtps ++ loutps)
         return
@@ -680,7 +680,7 @@ soacToStream soac = do
         let (addaccbnd, addaccres) = (bodyStms addaccbdy, bodyResult addaccbdy)
             strmbdy =
               mkBody (oneStm insbnd <> addaccbnd) $
-                addaccres ++ map (Futhark.Var . identName) strm_resids
+                addaccres ++ map (subExpRes . Futhark.Var . identName) strm_resids
             strmpar = chunk_param : inpacc_ids ++ strm_inpids
             strmlam = Lambda strmpar strmbdy (accrtps ++ loutps')
         lam0 <- renameLambda lamin

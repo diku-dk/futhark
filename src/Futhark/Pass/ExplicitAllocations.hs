@@ -774,8 +774,8 @@ allocInFunBody space_oks (Body _ bnds res) =
   buildBody_ . allocInStms bnds $ do
     res' <- zipWithM ensureDirect space_oks' res
     let (ctx_res, val_res) = splitFromEnd num_vals res'
-    mem_ctx_res <- concat <$> mapM bodyReturnMemCtx val_res
-    pure $ ctx_res <> mem_ctx_res <> val_res
+    mem_ctx_res <- concat <$> mapM (bodyReturnMemCtx . resSubExp) val_res
+    pure $ ctx_res <> subExpsRes mem_ctx_res <> val_res
   where
     num_vals = length space_oks
     space_oks' = replicate (length res - num_vals) Nothing ++ space_oks
@@ -783,16 +783,16 @@ allocInFunBody space_oks (Body _ bnds res) =
 ensureDirect ::
   (Allocable fromrep torep, Allocator torep (AllocM fromrep torep)) =>
   Maybe Space ->
-  SubExp ->
-  AllocM fromrep torep SubExp
-ensureDirect space_ok se = do
+  SubExpRes ->
+  AllocM fromrep torep SubExpRes
+ensureDirect space_ok (SubExpRes cs se) = do
   se_info <- subExpMemInfo se
-  case (se_info, se) of
+  SubExpRes cs <$> case (se_info, se) of
     (MemArray {}, Var v) -> do
       (_, v') <- ensureDirectArray space_ok v
-      return v'
+      pure v'
     _ ->
-      return se
+      pure se
 
 allocInStms ::
   (Allocable fromrep torep) =>
@@ -847,8 +847,10 @@ allocInExp (DoLoop ctx val form (Body () bodybnds bodyres)) =
           (valinit_ctx, valinit') <- mk_loop_val valinit
           body' <-
             buildBody_ . allocInStms bodybnds $ do
-              (val_ses, valres') <- mk_loop_val valres
-              pure $ ctxres ++ val_ses ++ valres'
+              (val_ses, valres') <- mk_loop_val $ map resSubExp valres
+              pure $
+                ctxres ++ subExpsRes val_ses
+                  ++ zipWith SubExpRes (map resCerts valres) valres'
           return $
             DoLoop
               (zip (ctxparams' ++ new_ctx_params) (ctxinit ++ valinit_ctx))
@@ -892,7 +894,7 @@ allocInExp (If cond tbranch0 fbranch0 (IfDec rets ifsort)) = do
               (\(se, _, i) k -> (i - k, se))
               ind_ses0
               [0 .. length ind_ses0 - 1]
-          rets'' = foldl (\acc (i, se) -> fixExt i se acc) trets ind_ses
+          rets'' = foldl (\acc (i, SubExpRes _ se) -> fixExt i se acc) trets ind_ses
           tbranch'' = tbranch' {bodyResult = r_then_ext ++ drop size_ext res_then}
           fbranch'' = fbranch' {bodyResult = r_else_ext ++ drop size_ext res_else}
           res_if_expr = If cond tbranch'' fbranch'' $ IfDec rets'' ifsort
@@ -930,7 +932,7 @@ allocInExp (If cond tbranch0 fbranch0 (IfDec rets ifsort)) = do
     allocInIfBody num_vals (Body _ bnds res) =
       buildBody . allocInStms bnds $ do
         let (_, val_res) = splitFromEnd num_vals res
-        mem_ixfs <- mapM subExpIxFun val_res
+        mem_ixfs <- mapM (subExpIxFun . resSubExp) val_res
         pure (res, mem_ixfs)
 allocInExp (WithAcc inputs bodylam) =
   WithAcc <$> mapM onInput inputs <*> onLambda bodylam
@@ -1037,12 +1039,12 @@ addResCtxInIfBody ifrets (Body _ bnds res) spaces substs = do
         Nothing -> do
           -- does NOT generalize/antiunify; ensure direct
           r' <- ensureDirect sp r
-          mem_ctx_r <- bodyReturnMemCtx r'
+          mem_ctx_r <- bodyReturnMemCtx $ resSubExp r'
           let body_ret = inspect ifr sp
           return
             ( res_acc ++ [r'],
               ext_acc,
-              ctx_acc ++ mem_ctx_r,
+              ctx_acc ++ subExpsRes mem_ctx_r,
               br_acc ++ [body_ret],
               k
             )
@@ -1050,7 +1052,7 @@ addResCtxInIfBody ifrets (Body _ bnds res) spaces substs = do
           -- generalizes
           let i = length m
           ext_ses <- mapM (toSubExp "ixfn_exist") m
-          mem_ctx_r <- bodyReturnMemCtx r
+          mem_ctx_r <- bodyReturnMemCtx $ resSubExp r
           let sp' = fromMaybe DefaultSpace sp
               ixfn' = fmap (adjustExtPE k) ixfn
               exttp = case ifr of
@@ -1060,8 +1062,8 @@ addResCtxInIfBody ifrets (Body _ bnds res) spaces substs = do
                 _ -> error "Impossible case reached in addResCtxInIfBody"
           return
             ( res_acc ++ [r],
-              ext_acc ++ ext_ses,
-              ctx_acc ++ mem_ctx_r,
+              ext_acc ++ subExpsRes ext_ses,
+              ctx_acc ++ subExpsRes mem_ctx_r,
               br_acc ++ [exttp],
               k + i
             )
@@ -1098,8 +1100,7 @@ mkSpaceOks ::
   Body torep ->
   m [Maybe Space]
 mkSpaceOks num_vals (Body _ stms res) =
-  inScopeOf stms $
-    mapM mkSpaceOK $ takeLast num_vals res
+  inScopeOf stms $ mapM (mkSpaceOK . resSubExp) $ takeLast num_vals res
   where
     mkSpaceOK (Var v) = do
       v_info <- lookupMemInfo v

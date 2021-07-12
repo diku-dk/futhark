@@ -158,12 +158,14 @@ commutativeLambda lam =
       (xps, yps) = splitAt n2 (lambdaParams lam)
 
       okComponent c = isJust $ find (okBinOp c) $ bodyStms body
-      okBinOp (xp, yp, Var r) (Let (Pattern [] [pe]) _ (BasicOp (BinOp op (Var x) (Var y)))) =
-        patElemName pe == r
-          && commutativeBinOp op
-          && ( (x == paramName xp && y == paramName yp)
-                 || (y == paramName xp && x == paramName yp)
-             )
+      okBinOp
+        (xp, yp, SubExpRes _ (Var r))
+        (Let (Pattern [] [pe]) _ (BasicOp (BinOp op (Var x) (Var y)))) =
+          patElemName pe == r
+            && commutativeBinOp op
+            && ( (x == paramName xp && y == paramName yp)
+                   || (y == paramName xp && x == paramName yp)
+               )
       okBinOp _ _ = False
    in n2 * 2 == length (lambdaParams lam)
         && n2 == length (bodyResult body)
@@ -253,11 +255,12 @@ lamIsBinOp :: ASTRep rep => Lambda rep -> Maybe [(BinOp, PrimType, VName, VName)
 lamIsBinOp lam = mapM splitStm $ bodyResult $ lambdaBody lam
   where
     n = length $ lambdaReturnType lam
-    splitStm (Var res) = do
+    splitStm (SubExpRes cs (Var res)) = do
+      guard $ cs == mempty
       Let (Pattern [] [pe]) _ (BasicOp (BinOp op (Var x) (Var y))) <-
         find (([res] ==) . patternNames . stmPattern) $
           stmsToList $ bodyStms $ lambdaBody lam
-      i <- Var res `elemIndex` bodyResult (lambdaBody lam)
+      i <- Var res `elemIndex` map resSubExp (bodyResult (lambdaBody lam))
       xp <- maybeNth i $ lambdaParams lam
       yp <- maybeNth (n + i) $ lambdaParams lam
       guard $ paramName xp == x

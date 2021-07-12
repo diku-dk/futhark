@@ -111,7 +111,7 @@ compileThreadResult ::
   PatElem MCMem ->
   KernelResult ->
   MulticoreGen ()
-compileThreadResult space pe (Returns _ what) = do
+compileThreadResult space pe (Returns _ _ what) = do
   let is = map (Imp.vi64 . fst) $ unSegSpace space
   copyDWIMFix (patElemName pe) is what []
 compileThreadResult _ _ ConcatReturns {} =

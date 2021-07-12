@@ -126,10 +126,7 @@ optimiseBody ::
   Body (Aliases rep) ->
   ForwardingM rep (Body (Aliases rep))
 optimiseBody (Body als bnds res) = do
-  bnds' <-
-    deepen $
-      optimiseStms (stmsToList bnds) $
-        mapM_ seen res
+  bnds' <- deepen $ optimiseStms (stmsToList bnds) $ mapM_ (seen . resSubExp) res
   return $ Body als (stmsFromList bnds') res
   where
     seen Constant {} = return ()

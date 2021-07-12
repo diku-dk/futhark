@@ -156,12 +156,12 @@ blockedPerThread thread_gtid w kernel_size ordering lam num_nonconcat arrs = do
   addStms $
     bodyStms (lambdaBody lam)
       <> stmsFromList
-        [ Let (Pattern [] [pe]) (defAux ()) $ BasicOp $ SubExp se
-          | (pe, se) <- zip chunk_red_pes chunk_red_ses
+        [ certify cs $ Let (Pattern [] [pe]) (defAux ()) $ BasicOp $ SubExp se
+          | (pe, SubExpRes cs se) <- zip chunk_red_pes chunk_red_ses
         ]
       <> stmsFromList
-        [ Let (Pattern [] [pe]) (defAux ()) $ BasicOp $ SubExp se
-          | (pe, se) <- zip chunk_map_pes chunk_map_ses
+        [ certify cs $ Let (Pattern [] [pe]) (defAux ()) $ BasicOp $ SubExp se
+          | (pe, SubExpRes cs se) <- zip chunk_map_pes chunk_map_ses
         ]
 
   return (chunk_red_pes, chunk_map_pes)
@@ -223,9 +223,9 @@ prepareStream size ispace w comm fold_lam nes arrs = do
         (chunk_red_pes, chunk_map_pes) <-
           blockedPerThread gtid w size ordering fold_lam' (length nes) arrs
         let concatReturns pe =
-              ConcatReturns split_ordering w elems_per_thread $ patElemName pe
+              ConcatReturns mempty split_ordering w elems_per_thread $ patElemName pe
         return
-          ( map (Returns ResultMaySimplify . Var . patElemName) chunk_red_pes
+          ( map (Returns ResultMaySimplify mempty . Var . patElemName) chunk_red_pes
               ++ map concatReturns chunk_map_pes
           )
 

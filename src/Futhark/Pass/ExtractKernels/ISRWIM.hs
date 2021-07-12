@@ -54,7 +54,7 @@ iswim res_pat w scan_fun scan_input
                 Let (setPatternOuterDimTo w map_pat) (defAux ()) $
                   Op $ Screma w scan_arrs scan_soac
             )
-            $ map Var $ patternNames map_pat
+            $ varsRes $ patternNames map_pat
         map_fun' = Lambda map_params map_body map_rettype
 
     res_pat' <-
@@ -126,10 +126,10 @@ irwim res_pat w comm red_fun red_input
                   Let red_pat (defAux ()) $
                     Op $ Screma w (map snd red_input') reduce_soac
               )
-              $ map Var $ patternNames map_pat
+              $ varsRes $ patternNames map_pat
         Just m -> localScope (scopeOfLParams map_params) $ do
           map_body_bnds <- collectStms_ m
-          return $ mkBody map_body_bnds $ map Var $ patternNames map_pat
+          return $ mkBody map_body_bnds $ varsRes $ patternNames map_pat
 
     let map_fun' = Lambda map_params map_body map_rettype
 
@@ -147,7 +147,7 @@ rwimPossible fun
   | Body _ stms res <- lambdaBody fun,
     [bnd] <- stmsToList stms, -- Body has a single binding
     map_pat <- stmPattern bnd,
-    map Var (patternNames map_pat) == res, -- Returned verbatim
+    map Var (patternNames map_pat) == map resSubExp res, -- Returned verbatim
     Op (Screma map_w map_arrs form) <- stmExp bnd,
     Just map_fun <- isMapSOAC form,
     map paramName (lambdaParams fun) == map_arrs =

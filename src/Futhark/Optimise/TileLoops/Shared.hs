@@ -25,7 +25,7 @@ segMap1D ::
   String ->
   SegLevel ->
   ResultManifest ->
-  (VName -> Builder GPU [SubExp]) ->
+  (VName -> Builder GPU Result) ->
   Builder GPU [VName]
 segMap1D desc lvl manifest f = do
   ltid <- newVName "ltid"
@@ -34,14 +34,14 @@ segMap1D desc lvl manifest f = do
 
   ((ts, res), stms) <- localScope (scopeOfSegSpace space) . runBuilder $ do
     res <- f ltid
-    ts <- mapM subExpType res
+    ts <- mapM subExpResType res
     return (ts, res)
   Body _ stms' res' <- renameBody $ mkBody stms res
 
+  let ret (SubExpRes cs se) = Returns manifest cs se
   letTupExp desc $
-    Op $
-      SegOp $
-        SegMap lvl space ts $ KernelBody () stms' $ map (Returns manifest) res'
+    Op . SegOp $
+      SegMap lvl space ts $ KernelBody () stms' $ map ret res'
 
 segMap2D ::
   String -> -- desc
@@ -49,7 +49,7 @@ segMap2D ::
   ResultManifest -> -- manifest
   (SubExp, SubExp) -> -- (dim_x, dim_y)
   ( (VName, VName) -> -- f
-    Builder GPU [SubExp]
+    Builder GPU Result
   ) ->
   Builder GPU [VName]
 segMap2D desc lvl manifest (dim_y, dim_x) f = do
@@ -60,13 +60,13 @@ segMap2D desc lvl manifest (dim_y, dim_x) f = do
 
   ((ts, res), stms) <- localScope (scopeOfSegSpace segspace) . runBuilder $ do
     res <- f (ltid_yy, ltid_xx)
-    ts <- mapM subExpType res
+    ts <- mapM subExpResType res
     return (ts, res)
 
+  let ret (SubExpRes cs se) = Returns manifest cs se
   letTupExp desc <=< renameExp $
-    Op $
-      SegOp $
-        SegMap lvl segspace ts $ KernelBody () stms $ map (Returns manifest) res
+    Op . SegOp $
+      SegMap lvl segspace ts $ KernelBody () stms $ map ret res
 
 segMap3D ::
   String -> -- desc
@@ -74,7 +74,7 @@ segMap3D ::
   ResultManifest -> -- manifest
   (SubExp, SubExp, SubExp) -> -- (dim_z, dim_y, dim_x)
   ( (VName, VName, VName) -> -- f
-    Builder GPU [SubExp]
+    Builder GPU Result
   ) ->
   Builder GPU [VName]
 segMap3D desc lvl manifest (dim_z, dim_y, dim_x) f = do
@@ -86,13 +86,13 @@ segMap3D desc lvl manifest (dim_z, dim_y, dim_x) f = do
 
   ((ts, res), stms) <- localScope (scopeOfSegSpace segspace) . runBuilder $ do
     res <- f (ltid_z, ltid_y, ltid_x)
-    ts <- mapM subExpType res
+    ts <- mapM subExpResType res
     return (ts, res)
 
+  let ret (SubExpRes cs se) = Returns manifest cs se
   letTupExp desc <=< renameExp $
-    Op $
-      SegOp $
-        SegMap lvl segspace ts $ KernelBody () stms $ map (Returns manifest) res
+    Op . SegOp $
+      SegMap lvl segspace ts $ KernelBody () stms $ map ret res
 
 segScatter2D ::
   String -> -- desc
@@ -113,7 +113,7 @@ segScatter2D desc arr_size updt_arr lvl (dim_x, dim_y) f = do
     t_v <- subExpType res_v
     return (t_v, res_v, res_i)
 
-  let ret = WriteReturns (Shape [arr_size]) updt_arr [([DimFix res_i], res_v)]
+  let ret = WriteReturns mempty (Shape [arr_size]) updt_arr [([DimFix res_i], res_v)]
   let body = KernelBody () stms [ret]
 
   letTupExp desc <=< renameExp $ Op $ SegOp $ SegMap lvl segspace [t_v] body

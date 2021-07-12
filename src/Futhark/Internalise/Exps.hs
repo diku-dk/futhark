@@ -62,7 +62,7 @@ internaliseValBind fb@(E.ValBind entry fname retdecl (Info (rettype, _)) tparams
           internaliseReturnType rettype =<< mapM subExpType body_res
         let rettype' = zeroExts rettype_bad
         body_res' <-
-          ensureResultExtShape msg loc (map I.fromDecl rettype') body_res
+          ensureResultExtShape msg loc (map I.fromDecl rettype') $ subExpsRes body_res
         pure (body_res', rettype')
 
       let all_params = shapeparams ++ concat params'
@@ -114,7 +114,7 @@ generateEntryPoint (E.EntryPoint e_paramts e_rettype) vb = localConstsScope $ do
       ctx <-
         extractShapeContext (concat entry_rettype)
           <$> mapM (fmap I.arrayDims . subExpType) vals
-      pure $ ctx ++ vals
+      pure $ subExpsRes $ ctx ++ vals
 
     addFunDef $
       I.FunDef
@@ -182,7 +182,7 @@ entryPoint name params (eret, crets) =
 
 internaliseBody :: String -> E.Exp -> InternaliseM Body
 internaliseBody desc e =
-  buildBody_ $ internaliseExp (desc <> "_res") e
+  buildBody_ $ subExpsRes <$> internaliseExp (desc <> "_res") e
 
 bodyFromStms ::
   InternaliseM (Result, a) ->
@@ -414,11 +414,13 @@ internaliseAppExp desc (E.DoLoop sparams mergepat mergeexp form loopbody loc) = 
       merge_ts = map (I.paramType . fst) merge
   loopbody'' <-
     localScope (scopeOfFParams $ map fst merge) . inScopeOf form' . buildBody_ $
-      ensureArgShapes
-        "shape of loop result does not match shapes in loop parameter"
-        loc
-        (map (I.paramName . fst) ctxmerge)
-        merge_ts
+      fmap subExpsRes
+        . ensureArgShapes
+          "shape of loop result does not match shapes in loop parameter"
+          loc
+          (map (I.paramName . fst) ctxmerge)
+          merge_ts
+        . map resSubExp
         =<< bodyBind loopbody'
 
   attrs <- asks envAttrs
@@ -436,7 +438,7 @@ internaliseAppExp desc (E.DoLoop sparams mergepat mergeexp form loopbody loc) = 
           sets <- mapM subExpType ses
           shapeargs <- argShapes (map I.paramName shapepat) mergepat' sets
           return
-            ( shapeargs ++ ses,
+            ( subExpsRes $ shapeargs ++ ses,
               ( form',
                 shapepat,
                 mergepat',
@@ -518,11 +520,11 @@ internaliseAppExp desc (E.DoLoop sparams mergepat mergeexp form loopbody loc) = 
                         | not $ primType $ paramType p ->
                           Reshape (map DimCoercion $ arrayDims $ paramType p) v
                       _ -> SubExp se
-            internaliseExp "loop_cond" cond
+            subExpsRes <$> internaliseExp "loop_cond" cond
           loop_end_cond <- bodyBind loop_end_cond_body
 
           return
-            ( shapeargs ++ loop_end_cond ++ ses,
+            ( subExpsRes shapeargs ++ loop_end_cond ++ subExpsRes ses,
               ( I.WhileLoop $ I.paramName loop_while,
                 shapepat,
                 loop_while : mergepat',
@@ -1119,7 +1121,7 @@ internaliseHist desc rf hist op ne buckets img loc = do
   img_params <- mapM (newParam "img_p" . rowType) =<< mapM lookupType img'
   let params = bucket_param : img_params
       rettype = I.Prim int64 : ne_ts
-      body = mkBody mempty $ map (I.Var . paramName) params
+      body = mkBody mempty $ varsRes $ map paramName params
   lam' <-
     mkLambda params $
       ensureResultShape
@@ -1191,7 +1193,7 @@ internaliseStreamRed desc o comm lam0 lam arr = do
           I.arrayDims $ I.paramType p
   nes <- bodyBind =<< renameBody lam_body
 
-  nes_ts <- mapM I.subExpType nes
+  nes_ts <- mapM I.subExpResType nes
   outsz <- arraysSize 0 <$> mapM lookupType arrs
   let acc_arr_tps = [I.arrayOf t (I.Shape [outsz]) NoUniqueness | t <- nes_ts]
   lam0' <- internaliseFoldLambda internaliseLambda lam0 nes_ts acc_arr_tps
@@ -1212,7 +1214,7 @@ internaliseStreamRed desc o comm lam0 lam arr = do
         (srclocOf lam)
         []
         (map I.typeOf $ I.lambdaParams lam0')
-        lam_res
+        (map resSubExp lam_res)
     ensureResultShape
       "shape of result does not match shape of initial value"
       (srclocOf lam0)
@@ -1223,7 +1225,7 @@ internaliseStreamRed desc o comm lam0 lam arr = do
 
   let form = I.Parallel o comm lam0'
   w <- arraysSize 0 <$> mapM lookupType arrs
-  letTupExp' desc $ I.Op $ I.Stream w arrs form nes lam'
+  letTupExp' desc $ I.Op $ I.Stream w arrs form (map resSubExp nes) lam'
 
 internaliseStreamAcc ::
   String ->
@@ -1246,7 +1248,8 @@ internaliseStreamAcc desc dest op lam bs = do
       internaliseMapLambda internaliseLambda lam $
         map I.Var $ paramName acc_p : bs'
     w <- arraysSize 0 <$> mapM lookupType bs'
-    letTupExp' "acc_res" $ I.Op $ I.Screma w (paramName acc_p : bs') (I.mapSOAC lam')
+    fmap subExpsRes . letTupExp' "acc_res" $
+      I.Op $ I.Screma w (paramName acc_p : bs') (I.mapSOAC lam')
 
   op' <-
     case op of
@@ -1493,7 +1496,7 @@ findFuncall e =
 bodyExtType :: Body -> InternaliseM [ExtType]
 bodyExtType (Body _ stms res) =
   existentialiseExtTypes (M.keys stmsscope) . staticShapes
-    <$> extendedScope (traverse subExpType res) stmsscope
+    <$> extendedScope (traverse subExpResType res) stmsscope
   where
     stmsscope = scopeOf stms
 
@@ -1859,7 +1862,7 @@ isOverloadedFunction qname args loc = do
           "scatter value has wrong size"
           loc
           bodyTypes
-          results
+          (subExpsRes results)
 
       let lam =
             I.Lambda
@@ -2024,8 +2027,8 @@ partitionWithSOACS k lam arrs = do
               ++ map I.rowType arr_ts,
           I.lambdaBody =
             mkBody offset_stms $
-              replicate (length arr_ts) offset
-                ++ map (I.Var . I.paramName) value_params
+              replicate (length arr_ts) (subExpRes offset)
+                ++ I.varsRes (map I.paramName value_params)
         }
   results <-
     letTupExp "partition_res" $

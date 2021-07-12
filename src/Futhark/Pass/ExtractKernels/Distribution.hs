@@ -45,6 +45,7 @@ where
 
 import Control.Monad.RWS.Strict
 import Control.Monad.Trans.Maybe
+import Data.Bifunctor (second)
 import Data.Foldable
 import Data.List (elemIndex, sortOn)
 import qualified Data.Map.Strict as M
@@ -224,7 +225,7 @@ fixNestingPatternOrder nest (_, res) inner_pat =
     pat = loopNestingPattern nest
     pat' = map fst fixed_target
     fixed_target = sortOn posInInnerPat $ zip (patternValueIdents pat) res
-    posInInnerPat (_, Var v) = fromMaybe 0 $ elemIndex v $ patternNames inner_pat
+    posInInnerPat (_, SubExpRes _ (Var v)) = fromMaybe 0 $ elemIndex v $ patternNames inner_pat
     posInInnerPat _ = 0
 
 newKernel :: LoopNesting -> KernelNest
@@ -265,7 +266,8 @@ constructKernel mk_lvl kernel_nest inner_body = runBuilderT' $ do
     runBuilder $
       localScope ispace_scope $ do
         mapM_ readKernelInput $ filter inputIsUsed inps
-        map (Returns ResultMaySimplify) <$> bodyBind inner_body
+        res <- bodyBind inner_body
+        forM res $ \(SubExpRes cs se) -> pure $ Returns ResultMaySimplify cs se
 
   (segop, aux_stms) <- lift $ mapKernel mk_lvl ispace [] rts inner_body'
 
@@ -459,7 +461,7 @@ createKernelNest (inner_nest, nests) distrib_body = do
         return
           ( add_to_kernel nest'',
             free_in_kernel'',
-            addTarget (free_arrs_pat, map (Var . paramName) free_params_pat)
+            addTarget (free_arrs_pat, varsRes $ map paramName free_params_pat)
           )
 
     recurse ::
@@ -520,20 +522,18 @@ removeIdentityMappingGeneral bound pat res =
       (identity_patElems, identity_res) = unzip identities
       expandTarget (tpat, tres) =
         ( Pattern [] $ patternElements tpat ++ identity_patElems,
-          tres ++ map Var identity_res
+          tres ++ map (uncurry SubExpRes . second Var) identity_res
         )
       identity_map =
-        M.fromList $
-          zip identity_res $
-            map patElemIdent identity_patElems
+        M.fromList $ zip (map snd identity_res) $ map patElemIdent identity_patElems
    in ( Pattern [] not_identity_patElems,
         not_identity_res,
         identity_map,
         expandTarget
       )
   where
-    isIdentity (patElem, Var v)
-      | not (v `nameIn` bound) = Left (patElem, v)
+    isIdentity (patElem, SubExpRes cs (Var v))
+      | not (v `nameIn` bound) = Left (patElem, (cs, v))
     isIdentity x = Right x
 
 removeIdentityMappingFromNesting ::
