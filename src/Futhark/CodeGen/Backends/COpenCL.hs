@@ -380,6 +380,8 @@ launchKernel kernel_name num_workgroups workgroup_dims local_bytes = do
   time_diff <- newVName "time_diff"
   local_work_size <- newVName "local_work_size"
 
+  let (debug_str, debug_args) = debugPrint global_work_size local_work_size
+
   GC.stm
     [C.cstm|
     if ($exp:total_elements != 0) {
@@ -387,11 +389,7 @@ launchKernel kernel_name num_workgroups workgroup_dims local_bytes = do
       const size_t $id:local_work_size[$int:kernel_rank] = {$inits:workgroup_dims'};
       typename int64_t $id:time_start = 0, $id:time_end = 0;
       if (ctx->debugging) {
-        fprintf(ctx->log, "Launching %s with global work size [", $string:(pretty kernel_name));
-        $stms:(printKernelSize global_work_size)
-        fprintf(ctx->log, "] and local work size [");
-        $stms:(printKernelSize local_work_size)
-        fprintf(ctx->log, "]; local memory parameters sum to %d bytes.\n", (int)$exp:local_bytes);
+        fprintf(ctx->log, $string:debug_str, $args:debug_args);
         $id:time_start = get_wall_time();
       }
       OPENCL_SUCCEED_OR_RETURN(
@@ -417,9 +415,18 @@ launchKernel kernel_name num_workgroups workgroup_dims local_bytes = do
     multExp x y = [C.cexp|$exp:x * $exp:y|]
     toSize e = [C.cexp|(size_t)$exp:e|]
 
-    printKernelSize :: VName -> [C.Stm]
-    printKernelSize work_size =
-      intercalate [[C.cstm|fprintf(ctx->log, ", ");|]] $
-        map (printKernelDim work_size) [0 .. kernel_rank -1]
-    printKernelDim global_work_size i =
-      [[C.cstm|fprintf(ctx->log, "%zu", $id:global_work_size[$int:i]);|]]
+    debugPrint :: VName -> VName -> (String, [C.Exp])
+    debugPrint global_work_size local_work_size =
+      ( "Launching %s with global work size "
+          ++ dims
+          ++ " and local work size "
+          ++ dims
+          ++ "]; local memory: %d bytes.\n",
+        [C.cexp|$string:(pretty kernel_name)|] :
+        map (kernelDim global_work_size) [0 .. kernel_rank -1]
+          ++ map (kernelDim local_work_size) [0 .. kernel_rank -1]
+          ++ [[C.cexp|(int)$exp:local_bytes|]]
+      )
+      where
+        dims = "[" ++ intercalate ", " (replicate kernel_rank "%zu") ++ "]"
+        kernelDim arr i = [C.cexp|$id:arr[$int:i]|]
