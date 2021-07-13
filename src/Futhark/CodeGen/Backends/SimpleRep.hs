@@ -697,7 +697,7 @@ $esc:("#ifdef __OPENCL_VERSION__")
       return fabs(x);
     }
     static inline float fmax32(float x, float y) {
-      return fmax(x, x);
+      return fmax(x, y);
     }
     static inline float fmin32(float x, float y) {
       return fmin(x, y);
