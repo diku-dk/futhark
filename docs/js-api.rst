@@ -40,6 +40,7 @@ complex types (records, nested tuples, etc) are represented by the
 FutharkArray
 ------------
 ``FutharkArray`` has the following API
+
 .. js:function:: toArray()
 
    Returns a nested JavaScript array
