@@ -1845,9 +1845,6 @@ compilePrimExp f (UnOpExp Complement {} x) = do
 compilePrimExp f (UnOpExp Not {} x) = do
   x' <- compilePrimExp f x
   return [C.cexp|!$exp:x'|]
-compilePrimExp f (UnOpExp Abs {} x) = do
-  x' <- compilePrimExp f x
-  return [C.cexp|abs($exp:x')|]
 compilePrimExp f (UnOpExp (FAbs Float32) x) = do
   x' <- compilePrimExp f x
   return [C.cexp|(float)fabs($exp:x')|]
@@ -1860,12 +1857,9 @@ compilePrimExp f (UnOpExp SSignum {} x) = do
 compilePrimExp f (UnOpExp USignum {} x) = do
   x' <- compilePrimExp f x
   return [C.cexp|($exp:x' > 0) - ($exp:x' < 0) != 0|]
-compilePrimExp f (UnOpExp (FSignum Float32) x) = do
+compilePrimExp f (UnOpExp op x) = do
   x' <- compilePrimExp f x
-  return [C.cexp|fsignum32($exp:x')|]
-compilePrimExp f (UnOpExp (FSignum Float64) x) = do
-  x' <- compilePrimExp f x
-  return [C.cexp|fsignum32($exp:x')|]
+  return [C.cexp|$id:(pretty op)($exp:x')|]
 compilePrimExp f (CmpOpExp cmp x y) = do
   x' <- compilePrimExp f x
   y' <- compilePrimExp f y
