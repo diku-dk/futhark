@@ -8,6 +8,7 @@ module Futhark.Optimise.MemBlockCoalesce.TopDownAn
 
 import qualified Data.Map.Strict as M
 import qualified Control.Exception.Base as Exc
+import Debug.Trace
 
 import Futhark.IR.Aliases
 import Futhark.Analysis.PrimExp.Convert
@@ -87,8 +88,8 @@ getInvAliasFromExp _ = Nothing
 
 -- | fills in the TopDnEnv table
 topdwnTravBinding :: TopDnEnv -> Stm (Aliases ExpMem.SeqMem) -> TopDnEnv
-topdwnTravBinding env (Let (Pattern [] [pe]) _ (Op (ExpMem.Alloc _ _)) ) =
-  env { alloc = (alloc env) <> (oneName (patElemName pe)) }
+topdwnTravBinding env stm@(Let (Pattern [] [pe]) _ (Op (ExpMem.Alloc _ _)) ) =
+  env { alloc = (alloc env) <> (oneName (patElemName pe)), scope = scope env <> scopeOf stm }
 topdwnTravBinding env stm@(Let (Pattern [] [pe]) _ e)
   | Just (x, ixfn) <- getDirAliasFromExp e =
     let ixfn_inv = case getInvAliasFromExp e of
@@ -110,8 +111,9 @@ topDownLoop td_env (Let pat _ (DoLoop arginis_ctx arginis lform body)) =
                  scopeOf lform )) --scopeOfLoopForm lform))
       scopetab_loop = scopetab <> scopeOf (bodyStms body)
       bdy_ress = drop (length arginis_ctx) $ bodyResult body
-      m_alias' = foldl (foldfun scopetab_loop) (m_alias td_env) $
-                  zip3 (patternValueElements pat) arginis bdy_ress
+      m_alias' = m_alias td_env
+                  -- foldl (foldfun scopetab_loop) (m_alias td_env) $
+                  --   zip3 (patternValueElements pat) arginis bdy_ress
   in  td_env { scope = scopetab_loop, m_alias = m_alias' }
   where
     updateAlias (m, m_al) tab =
@@ -189,13 +191,13 @@ getDirAliasedIxfn td_env coals_tab x =
   case getScopeMemInfo x (scope td_env) of
     Just (MemBlock _ _ m_x orig_ixfun) ->
       case M.lookup m_x coals_tab of
-        Nothing -> Just (x, m_x, orig_ixfun)
+        Nothing -> Just (m_x, m_x, orig_ixfun)
                     -- fine, this is not subject to a coalesced point
                     -- just return the original index function
         Just coal_etry ->
           case walkAliasTab (v_alias td_env) (vartab coal_etry) x of
-            Nothing -> Nothing
-            Just (m, ixf) -> Just (x, m, ixf)
+            Nothing -> Exc.assert False Nothing
+            Just (m, ixf) -> Just (m_x, m, ixf)
     Nothing -> Nothing
 
 walkAliasTab :: VarAliasTab -> M.Map VName Coalesced -> VName

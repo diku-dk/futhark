@@ -196,7 +196,8 @@ memoryBlockMerging prg = do
   putStrLn $ unlines (map ("  "++) $ lines $ pretty $ concatMap (map (Control.Arrow.second namesToList) . M.toList . intrf) (M.elems envtab))
 
   let coaltab = mkCoalsTab $ AnlAls.aliasAnalysis prg
-  putStrLn $ "COALESCING RESULT:" ++ pretty (length coaltab)
+  putStrLn $ "COALESCING RESULT:" ++ pretty (length coaltab) ++ "\n" ++ pretty coaltab
+{--  
   let coal_info = map (\env ->
                             ( dstmem env, dstind env, namesToList $ alsmem env, M.toList $ optdeps env
                             , map (\ (k,Coalesced _ (MemBlock _ _ b indfun) sbst) ->
@@ -205,7 +206,7 @@ memoryBlockMerging prg = do
                             )
                       ) $ M.elems coaltab
   putStrLn $ unlines (map ("  "++) $ lines $ pretty coal_info)
-
+--}
 
 lookAtFunction :: ExpMem.FunDef ExpMem.SeqMem -> IO ()
 lookAtFunction fdef = do

@@ -5,9 +5,7 @@
 -- structure cpu { Alloc 2 }
 -- structure gpu { Alloc 2 }
 
-import "/futlib/array"
-
-let main [n] (ns: [n]i32): []i32 =
+let main [n] (ns: [n]i64): []i64 =
   let t0 = map (+ 1) ns
 
   -- Create an array whose memory block allocation depends on the *value* of t0,

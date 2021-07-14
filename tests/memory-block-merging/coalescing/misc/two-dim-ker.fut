@@ -12,7 +12,7 @@
 -- structure cpu { Alloc 1 }
 -- structure gpu { Alloc 3 }
 
-let main [n] (xsss: [n][n][n]i32): [][n][n]i32 =
+let main [n] (xsss: [n][n][n]i64): [][n][n]i64 =
   let (_,asss) = split (1) xsss
   in  map (\ass ->
                 map (\as ->

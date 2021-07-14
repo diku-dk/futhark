@@ -18,7 +18,7 @@ import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 import Futhark.Util.Pretty hiding (float, line, sep, string, (</>), (<|>))
 
---import Debug.Trace
+import Debug.Trace
 
 import Futhark.IR.Aliases
 import qualified Futhark.IR.SeqMem as ExpMem
@@ -122,6 +122,28 @@ instance Pretty (AccsSum) where
 instance Pretty (MemRefs) where
   --show :: MemRefs -> String
   ppr (MemRefs a b) = "( Use-Sum:" <+> ppr a <+> "Write-Sum:" <+> ppr b <> ")"
+
+instance Pretty (CoalescedKind) where
+  ppr Ccopy = "Cpy" <> mempty
+  ppr InPl  = "InPl" <> mempty
+  ppr Conc  = "Concat" <> mempty
+  ppr Trans = "Trans" <> mempty
+
+instance Pretty (ArrayMemBound) where
+  ppr (MemBlock ptp shp m_nm ixfn) =
+    "{"<> ppr ptp<>", "<>ppr shp<>", "<>ppr m_nm<>", "<>ppr ixfn<>"}"<>mempty
+
+instance Pretty (Coalesced) where
+  ppr (Coalesced knd mbd subs) =
+    "(Kind: "<>ppr knd<>", membds: "<>ppr mbd<>", subs: "<>ppr subs<>") "<> mempty
+
+instance Pretty (CoalsEntry) where
+  ppr etry = "{Dstmem: "<>ppr (dstmem etry)<>
+             ", AliasMems: " <> ppr (alsmem etry)<>
+             ", optdeps: " <> ppr (optdeps etry)<>
+             ", memrefs: " <> ppr (memrefs etry)<>
+             ", vartab: " <> ppr (vartab etry)<>
+             "}" <> mempty
 
 unionMemRefs :: MemRefs -> MemRefs -> MemRefs
 unionMemRefs (MemRefs d1 s1) (MemRefs d2 s2) =
@@ -262,8 +284,9 @@ markFailedCoal (coal_tab,inhb_tab) src_mem =
            let failed_set = case M.lookup src_mem inhb_tab of
                               Nothing  -> oneName (dstmem coale)
                               Just fld -> fld <> oneName (dstmem coale)
-           in  ( M.delete src_mem coal_tab
-               , M.insert src_mem failed_set inhb_tab )
+           in  trace ("Failed Coalesce: "++pretty src_mem++"->"++pretty (dstmem coale)) $
+                ( M.delete src_mem coal_tab
+                , M.insert src_mem failed_set inhb_tab )
 
 -- | A poor attempt at a pretty printer of the Coalescing Table
 prettyCoalTab :: CoalsTab -> String
