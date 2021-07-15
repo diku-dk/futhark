@@ -224,34 +224,36 @@ dicEntry jse =
 
 jsWrapEntryPoint :: JSEntryPoint -> String
 jsWrapEntryPoint jse =
-  unlines
-    [ func_name ++ "(" ++ inparams ++ ") {",
-      "  var out = [" ++ outparams ++ "].map(n => _malloc(n));",
-      "  var to_free = [];",
-      "  var do_free = () => { out.forEach(_free); to_free.forEach(f => f.free()); };",
-      paramsToPtr,
-      "  if (_futhark_entry_" ++ func_name ++ "(this.ctx, ...out, " ++ ins ++ ") > 0) {",
-      "    do_free();",
-      "    throw this.get_error();",
-      "  }",
-      results,
-      "  do_free();",
-      "  return " ++ res ++ ";",
-      "}"
-    ]
+  T.unpack
+    [text|
+  ${func_name}(${inparams}) {
+    var out = [${outparams}].map(n => _malloc(n));
+    var to_free = [];
+    var do_free = () => { out.forEach(_free); to_free.forEach(f => f.free()); };
+    ${paramsToPtr}
+    if (_futhark_entry_${func_name}(this.ctx, ...out, ${ins}) > 0) {
+      do_free();
+      throw this.get_error();
+    }
+    ${results}
+    do_free();
+    return ${res};
+  }
+  |]
+
   where
-    func_name = name jse
+    func_name = T.pack $ name jse
 
     alp = [0 .. length (parameters jse) - 1]
-    inparams = intercalate ", " ["in" ++ show i | i <- alp]
-    ins = intercalate ", " [maybeDerefence ("in" ++ show i) $ parameters jse !! i | i <- alp]
-    paramsToPtr = unlines $ filter ("" /=) [arrayPointer ("in" ++ show i) $ parameters jse !! i | i <- alp]
+    inparams = T.pack $ intercalate ", " ["in" ++ show i | i <- alp]
+    ins = T.pack $ intercalate ", " [maybeDerefence ("in" ++ show i) $ parameters jse !! i | i <- alp]
+    paramsToPtr = T.pack $ unlines $ filter ("" /=) [arrayPointer ("in" ++ show i) $ parameters jse !! i | i <- alp]
 
     alr = [0 .. length (ret jse) - 1]
-    outparams = intercalate ", " [show $ typeSize $ ret jse !! i | i <- alr]
-    results = unlines [makeResult i $ ret jse !! i | i <- alr]
+    outparams = T.pack $ intercalate ", " [show $ typeSize $ ret jse !! i | i <- alr]
+    results = T.pack $ unlines [makeResult i $ ret jse !! i | i <- alr]
     res_array = intercalate ", " ["result" ++ show i | i <- alr]
-    res = if length (ret jse) == 1 then "result0" else "[" ++ res_array ++ "]"
+    res = T.pack $ if length (ret jse) == 1 then "result0" else "[" ++ res_array ++ "]"
 
 maybeDerefence :: String -> String -> String
 maybeDerefence arg typ =
