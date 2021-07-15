@@ -453,6 +453,11 @@ commandLineOptions =
       (NoArg $ Right $ \opts -> opts {futharkAction = PolyAction printAliasesAction})
       "Print the resulting IR with aliases.",
     Option
+      []
+      ["mem-aliases"]
+      (NoArg $ Right $ \opts -> opts {futharkAction = GPUMemAction $ const memAliasesAction})
+      "Print memory aliases.",
+    Option
       "m"
       ["metrics"]
       (NoArg $ Right $ \opts -> opts {futharkAction = PolyAction metricsAction})

@@ -5,6 +5,7 @@
 module Futhark.Actions
   ( printAction,
     printAliasesAction,
+    memAliasesAction,
     impCodeGenAction,
     kernelImpCodeGenAction,
     multicoreImpCodeGenAction,
@@ -22,6 +23,7 @@ import Control.Monad
 import Control.Monad.IO.Class
 import Data.Maybe (fromMaybe)
 import Futhark.Analysis.Alias
+import qualified Futhark.Analysis.MemAlias as MA
 import Futhark.Analysis.Metrics
 import qualified Futhark.CodeGen.Backends.CCUDA as CCUDA
 import qualified Futhark.CodeGen.Backends.COpenCL as COpenCL
@@ -61,6 +63,15 @@ printAliasesAction =
     { actionName = "Prettyprint",
       actionDescription = "Prettyprint the resulting internal representation on standard output.",
       actionProcedure = liftIO . putStrLn . pretty . aliasAnalysis
+    }
+
+-- | Print the result to stdout, alias annotations.
+memAliasesAction :: Action GPUMem
+memAliasesAction =
+  Action
+    { actionName = "mem alias",
+      actionDescription = "Print memory aliases on standard output.",
+      actionProcedure = liftIO . putStrLn . pretty . MA.analyze
     }
 
 -- | Print metrics about AST node counts to stdout.

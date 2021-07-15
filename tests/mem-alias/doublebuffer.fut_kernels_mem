@@ -1,0 +1,234 @@
+entry("main",
+      {*direct},
+      {direct})
+  entry_main (xss_mem_5544 : mem, m_5428 : i64, n_5429 : i64,
+              xss_5430 : *[m_5428][n_5429]i64 @ xss_mem_5544 ->
+                         {base: [m_5428, n_5429]; contiguous: true;
+                          LMADs: [{offset: 0i64; strides: [n_5429, 1i64];
+                                   rotates: [0i64, 0i64];
+                                   shape: [m_5428, n_5429]; permutation: [0, 1];
+                                   monotonicity: [Inc, Inc]}]})
+  : {[m_5428][n_5429]i64 @ ?0->
+     {base: [m_5428, n_5429]; contiguous: true; LMADs: [{offset: 0i64;
+                                                         strides: [n_5429, 1i64];
+                                                         rotates: [0i64, 0i64];
+                                                         shape: [m_5428, n_5429];
+                                                         permutation: [0, 1];
+                                                         monotonicity: [Inc, Inc]}]}} = {
+  let {j_5431 : i64} = sub64(n_5429, 1i64)
+  let {binop_x_5586 : i64} =
+    #[incremental_flattening(only_intra)]
+    mul_nw64(m_5428, n_5429)
+  let {binop_y_5587 : i64} =
+    #[incremental_flattening(only_intra)]
+    mul_nw64(8i64, binop_x_5586)
+  let {bytes_5585 : i64} =
+    #[incremental_flattening(only_intra)]
+    smax64(0i64, binop_y_5587)
+  let {mem_5588 : mem} =
+    #[incremental_flattening(only_intra)]
+    alloc(bytes_5585)
+  let {binop_y_5547 : i64} = mul_nw64(8i64, n_5429)
+  let {bytes_5546 : i64} = smax64(0i64, binop_y_5547)
+  let {defunc_3_map_res_5504 : [m_5428][n_5429]i64 @ mem_5588 ->
+                               {base: [m_5428, n_5429]; contiguous: true;
+                                LMADs: [{offset: 0i64; strides: [n_5429, 1i64];
+                                         rotates: [0i64, 0i64];
+                                         shape: [m_5428, n_5429];
+                                         permutation: [0, 1];
+                                         monotonicity: [Inc, Inc]}]}} =
+    #[incremental_flattening(only_intra)]
+    segmap(group; #groups=m_5428; groupsize=n_5429)
+    (gtid_5471 < m_5428) (~phys_tid_5503) : {[n_5429]i64} {
+      let {xss_transformed_row_5505 : [n_5429]i64 @ xss_mem_5544 ->
+                                      {base: [m_5428, n_5429]; contiguous: true;
+                                       LMADs: [{offset: mul_nw64 (gtid_5471) (n_5429);
+                                                strides: [1i64];
+                                                rotates: [0i64];
+                                                shape: [n_5429];
+                                                permutation: [0];
+                                                monotonicity: [Inc]}]}} =
+        xss_5430[gtid_5471, 0i64 :+ n_5429 * 1i64]
+      let {mem_5548 : mem@local} =
+        alloc(bytes_5546, @local)
+      let {xss_transformed_row_5506 : [n_5429]i64 @ mem_5548 ->
+                                      {base: [n_5429]; contiguous: true;
+                                       LMADs: [{offset: 0i64; strides: [1i64];
+                                                rotates: [0i64];
+                                                shape: [n_5429];
+                                                permutation: [0];
+                                                monotonicity: [Inc]}]}} =
+        copy(xss_transformed_row_5505)
+      let {mem_5551 : mem@local} =
+        alloc(bytes_5546, @local)
+      let {defunc_1_map_res_5507 : [n_5429]i64 @ mem_5551 ->
+                                   {base: [n_5429]; contiguous: true;
+                                    LMADs: [{offset: 0i64; strides: [1i64];
+                                             rotates: [0i64]; shape: [n_5429];
+                                             permutation: [0];
+                                             monotonicity: [Inc]}]}} =
+        replicate([n_5429], 0i64)
+      let {mem_5569 : mem@local} =
+        alloc(bytes_5546, @local)
+      let {mem_5573 : mem@local} =
+        alloc(bytes_5546, @local)
+      let {mem_5593 : mem@local} =
+        alloc(binop_y_5547, @local)
+      let {res_ixfn_5575 : i64,
+           res_ixfn_5576 : i64,
+           res_ixfn_5577 : i64,
+           res_ixfn_5578 : i64,
+           res_ixfn_5580 : i64,
+           res_ixfn_5581 : i64,
+           res_ixfn_5582 : i64,
+           res_ixfn_5583 : i64,
+           res_mem_5579 : mem@local,
+           res_mem_5584 : mem@local;
+           res_5508 : [n_5429]i64 @ res_mem_5579 ->
+                      {base: [res_ixfn_5575]; contiguous: true;
+                       LMADs: [{offset: res_ixfn_5576; strides: [res_ixfn_5577];
+                                rotates: [0i64]; shape: [res_ixfn_5578];
+                                permutation: [0]; monotonicity: [Inc]}]},
+           res_5509 : [n_5429]i64 @ res_mem_5584 ->
+                      {base: [res_ixfn_5580]; contiguous: true;
+                       LMADs: [{offset: res_ixfn_5581; strides: [res_ixfn_5582];
+                                rotates: [0i64]; shape: [res_ixfn_5583];
+                                permutation: [0]; monotonicity: [Inc]}]}} =
+        loop {ctx_param_ext_5552 : i64,
+              ctx_param_ext_5553 : i64,
+              ctx_param_ext_5554 : i64,
+              ctx_param_ext_5555 : i64,
+              ctx_param_ext_5557 : i64,
+              ctx_param_ext_5558 : i64,
+              ctx_param_ext_5559 : i64,
+              ctx_param_ext_5560 : i64,
+              mem_param_5556 : mem@local,
+              mem_param_5561 : mem@local;
+              a_5511 : *[n_5429]i64 @ mem_param_5556 ->
+                       {base: [ctx_param_ext_5552]; contiguous: true;
+                        LMADs: [{offset: ctx_param_ext_5553;
+                                 strides: [ctx_param_ext_5554]; rotates: [0i64];
+                                 shape: [ctx_param_ext_5555]; permutation: [0];
+                                 monotonicity: [Inc]}]},
+              b_5512 : *[n_5429]i64 @ mem_param_5561 ->
+                       {base: [ctx_param_ext_5557]; contiguous: true;
+                        LMADs: [{offset: ctx_param_ext_5558;
+                                 strides: [ctx_param_ext_5559]; rotates: [0i64];
+                                 shape: [ctx_param_ext_5560]; permutation: [0];
+                                 monotonicity: [Inc]}]}} = {n_5429, 0i64, 1i64,
+                                                            n_5429, n_5429,
+                                                            0i64, 1i64, n_5429,
+                                                            mem_5548, mem_5551,
+                                                            xss_transformed_row_5506,
+                                                            defunc_1_map_res_5507}
+        for i_5510:i32 < 10i32 do {
+          let {k_5513 : i32} = smod32(i_5510, 2i32)
+          let {cond_5514 : bool} = eq_i32(k_5513, 0i32)
+          let {c_5515 : [n_5429]i64 @ mem_5593 ->
+                        {base: [n_5429]; contiguous: true;
+                         LMADs: [{offset: 0i64; strides: [1i64];
+                                  rotates: [0i64]; shape: [n_5429];
+                                  permutation: [0]; monotonicity: [Inc]}]}} =
+            if cond_5514
+            then {
+              let {defunc_1_map_res_5516 : [n_5429]i64 @ mem_5569 ->
+                                           {base: [n_5429]; contiguous: true;
+                                            LMADs: [{offset: 0i64;
+                                                     strides: [1i64];
+                                                     rotates: [0i64];
+                                                     shape: [n_5429];
+                                                     permutation: [0];
+                                                     monotonicity: [Inc]}]}} =
+                segmap(thread; #groups=m_5428; groupsize=n_5429)
+                (gtid_5474 < n_5429) (~phys_tid_5475) : {i64} {
+                  let {x_5517 : i64} =
+                    a_5511[gtid_5474]
+                  let {i_5518 : i64} = smod64(x_5517, n_5429)
+                  let {x_5519 : i64} =
+                    b_5512[i_5518]
+                  let {x_5520 : i64} = sub64(x_5517, 1i64)
+                  let {i_5521 : i64} = smod64(x_5520, n_5429)
+                  let {y_5522 : i64} =
+                    b_5512[i_5521]
+                  let {x_5523 : i64} = add64(x_5519, y_5522)
+                  let {x_5524 : i64} = add64(1i64, x_5517)
+                  let {i_5525 : i64} = smod64(x_5524, n_5429)
+                  let {y_5526 : i64} =
+                    b_5512[i_5525]
+                  let {x_5527 : i64} = add64(x_5523, y_5526)
+                  let {defunc_0_f_res_5528 : i64} = add64(x_5517, x_5527)
+                  return {returns defunc_0_f_res_5528}
+                }
+              let {defunc_1_map_res_nonext_copy_5594 : [n_5429]i64 @ mem_5593 ->
+                                                       {base: [n_5429];
+                                                        contiguous: true;
+                                                        LMADs: [{offset: 0i64;
+                                                                 strides: [1i64];
+                                                                 rotates: [0i64];
+                                                                 shape: [n_5429];
+                                                                 permutation: [0];
+                                                                 monotonicity: [Inc]}]}} =
+                copy(defunc_1_map_res_5516)
+              in {defunc_1_map_res_nonext_copy_5594}
+            } else {
+              let {defunc_1_map_res_5529 : [n_5429]i64 @ mem_5573 ->
+                                           {base: [n_5429]; contiguous: true;
+                                            LMADs: [{offset: 0i64;
+                                                     strides: [1i64];
+                                                     rotates: [0i64];
+                                                     shape: [n_5429];
+                                                     permutation: [0];
+                                                     monotonicity: [Inc]}]}} =
+                segmap(thread; #groups=m_5428; groupsize=n_5429)
+                (gtid_5488 < n_5429) (~phys_tid_5489) : {i64} {
+                  let {x_5530 : i64} =
+                    a_5511[gtid_5488]
+                  let {i_5531 : i64} = smod64(x_5530, n_5429)
+                  let {x_5532 : i64} =
+                    b_5512[i_5531]
+                  let {x_5533 : i64} = sub64(x_5530, 2i64)
+                  let {i_5534 : i64} = smod64(x_5533, n_5429)
+                  let {y_5535 : i64} =
+                    b_5512[i_5534]
+                  let {x_5536 : i64} = add64(x_5532, y_5535)
+                  let {x_5537 : i64} = add64(2i64, x_5530)
+                  let {i_5538 : i64} = smod64(x_5537, n_5429)
+                  let {y_5539 : i64} =
+                    b_5512[i_5538]
+                  let {x_5540 : i64} = add64(x_5536, y_5539)
+                  let {defunc_0_f_res_5541 : i64} = add64(x_5530, x_5540)
+                  return {returns defunc_0_f_res_5541}
+                }
+              let {defunc_1_map_res_nonext_copy_5595 : [n_5429]i64 @ mem_5593 ->
+                                                       {base: [n_5429];
+                                                        contiguous: true;
+                                                        LMADs: [{offset: 0i64;
+                                                                 strides: [1i64];
+                                                                 rotates: [0i64];
+                                                                 shape: [n_5429];
+                                                                 permutation: [0];
+                                                                 monotonicity: [Inc]}]}} =
+                copy(defunc_1_map_res_5529)
+              in {defunc_1_map_res_nonext_copy_5595}
+            } : {[n_5429]i64 @ (mem_5593 ->
+                                {base: [n_5429]; contiguous: true;
+                                 LMADs: [{offset: 0i64; strides: [1i64];
+                                          rotates: [0i64]; shape: [n_5429];
+                                          permutation: [0];
+                                          monotonicity: [Inc]}]})}
+          let {a_5543 : [n_5429]i64 @ mem_param_5556 ->
+                        {base: [ctx_param_ext_5552]; contiguous: true;
+                         LMADs: [{offset: ctx_param_ext_5553;
+                                  strides: [ctx_param_ext_5554];
+                                  rotates: [0i64]; shape: [ctx_param_ext_5555];
+                                  permutation: [0]; monotonicity: [Inc]}]}} =
+            a_5511 with [0i64 :+ n_5429 * 1i64] = c_5515
+          in {ctx_param_ext_5557, ctx_param_ext_5558, ctx_param_ext_5559,
+              ctx_param_ext_5560, ctx_param_ext_5552, ctx_param_ext_5553,
+              ctx_param_ext_5554, ctx_param_ext_5555, mem_param_5561,
+              mem_param_5556, b_5512, a_5543}
+        }
+      return {returns res_5509}
+    }
+  in {mem_5588, defunc_3_map_res_5504}
+}
