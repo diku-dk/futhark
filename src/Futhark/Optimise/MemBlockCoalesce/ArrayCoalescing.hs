@@ -434,9 +434,8 @@ mkCoalsTabBnd lutab lstm@(Let pat _ (DoLoop arginis_ctx arginis lform body)) td_
       
   -- v) optimistically mark the pattern succesful if there is any chance to succeed
       ((fin_actv1,fin_inhb1), fin_succ1) =
-        optimPromotion patmems argmems resmems inimems
-                       ((res_actv,res_inhb),res_succ)
-
+        foldl foldFunOptimPromotion ((res_actv,res_inhb),res_succ) $
+                          L.zip4 patmems argmems resmems inimems
   in bu_env { activeCoals = fin_actv1, successCoals = fin_succ1, inhibit = fin_inhb1 }
   where
     getAllocs tab ( Let (Pattern [] [pe]) _ (Op (ExpMem.Alloc _ _)) ) =
@@ -462,41 +461,42 @@ mkCoalsTabBnd lutab lstm@(Let pat _ (DoLoop arginis_ctx arginis lform body)) td_
         nameIn m_r (alloc td_env') =
           trace ("COALESCING loop candidate: "++pretty b++" "++pretty m_b++" "++pretty r++" "++pretty m_r) $
                 Just ((b,m_b), (a,m_a), (a0,m_a0), (r,m_r))
-    mapmbFun _ _ (patel, (arg,ini), bdyres) =
-      trace ("COALESCING loop FAILED "++pretty patel++" "++pretty arg ++ pretty ini ++ pretty bdyres)
-            Nothing
+    mapmbFun _ _ (_patel, (_arg,_ini), _bdyres) = Nothing
+        --trace ("COALESCING loop FAILED "++pretty patel++" "++pretty arg ++ pretty ini ++ pretty bdyres)
     --
-    optimPromotion patmems argmems resmems inimems ((actv_tab,inhb_tab),succ_tab) =
-      -- the use of @inimems@ and the test for @m_i@ are probably redundant
-      foldl (\ ((act,inhb),succc) ((b,m_b), (a,m_a), (_r,m_r), (b_i,m_i)) ->
-              if m_r == m_i
-              then Exc.assert (m_r == m_b && m_a == m_b) ((act,inhb), succc)
-                   -- ^ will be promoted at creation of m_i
-              else
-                let failed = foldl markFailedCoal (act,inhb) [m_b, m_a, m_r, m_i]
-                in case (M.lookup m_b act, M.lookup m_a act, M.lookup m_i act, M.member m_r succc) of
-                    (Just info_b0, Just info_a0, Just info_i, True) ->
+    foldFunOptimPromotion :: ((CoalsTab,InhibitTab),CoalsTab)
+                          -> ((VName, VName), (VName, VName), (VName, VName), (VName, VName))
+                          -> ((CoalsTab,InhibitTab),CoalsTab)
+    foldFunOptimPromotion ((act,inhb),succc) ((b,m_b), (a,m_a), (_r,m_r), (b_i,m_i))
+      | m_r == m_i,
+        Just info <- M.lookup m_i act,
+        Just vtab_i <- addInvAliassesVarTab td_env (vartab info) b_i =
+           Exc.assert (m_r == m_b && m_a == m_b)
+            ((M.insert m_b (info {vartab = vtab_i}) act, inhb), succc)
+      | m_r == m_i =
+          Exc.assert (m_r == m_b && m_a == m_b)
+            (markFailedCoal (act,inhb) m_b, succc)
+      | Just info_b0 <- M.lookup m_b act,
+        Just info_a0 <- M.lookup m_a act,
+        Just info_i  <- M.lookup m_i act,
+        M.member m_r succc,
+        Just vtab_i <- addInvAliassesVarTab td_env (vartab info_i) b_i,
+        [Just info_b, Just info_a] <- map translateIxFnInScope [(b, info_b0), (a, info_a0)] =
+          let info_b' = info_b { optdeps = M.insert b_i m_i $ optdeps info_b }
+              info_a' = info_a { optdeps = M.insert b_i m_i $ optdeps info_a }
+              info_i' = info_i { optdeps = M.insert b m_b $ optdeps info_i
+                               , memrefs = mem_empty, vartab = vtab_i }
+              act' = M.insert m_i info_i' act
+              (act1, succc1) = foldl (\acc (m, info) -> markSuccessCoal acc m info)
+                                     (act',succc) [(m_b, info_b'), (m_a, info_a')]
+              -- ToDo: make sure that ixfun translates and update substitutions (?)
+              in  trace ("COALESCING: optimistic loop promotion: "++pretty b++" "++pretty m_b) $
+                        ((act1,inhb), succc1)
+    foldFunOptimPromotion ((act,inhb),succc) ((b,m_b), (_a,m_a), (_r,m_r), (_b_i,m_i)) =
+      trace ("COALESCING: optimistic loop fails for "++pretty (b,m_b)) $
+        Exc.assert (m_r /= m_i) $
+          (foldl markFailedCoal (act,inhb) [m_b, m_a, m_r, m_i], succc)
 
-                      case ( addInvAliassesVarTab td_env (vartab info_i) b_i
-                           , map translateIxFnInScope [(b, info_b0), (a, info_a0)]) of
-                        (Just vtab_i, [Just info_b, Just info_a]) ->
-                          -- promote m_b and m_a to successfull
-                          let info_b' = info_b { optdeps = M.insert b_i m_i $ optdeps info_b }
-                              info_a' = info_a { optdeps = M.insert b_i m_i $ optdeps info_a }
-                              info_i' = info_i { optdeps = M.insert b m_b $ optdeps info_i
-                                               , memrefs = mem_empty, vartab = vtab_i }
-                              act' = M.insert m_i info_i' act
-                              (act1, succc1) = foldl (\acc (m, info) -> markSuccessCoal acc m info)
-                                                     (act',succc) [(m_b, info_b'), (m_a, info_a')]
-                          -- ToDo: make sure that ixfun translates and update substitutions (?)
-                          in  trace ("COALESCING: optimistic loop promotion: "++pretty b++" "++pretty m_b)
-                                    ((act1,inhb), succc1)
-                        _ -> trace ("COALESCING: optimistic loop fails: failed invert or translate ixfuns") (failed,succc)
-                    _ -> trace ("COALESCING: optimistic loop fails for "++pretty m_b ++ " " ++ pretty (M.member b_i act))
-                               (failed, succc)
--- let (safe_5, fv_subst) = translateIndFunFreeVar (scope td_env) scals_env (Just new_indfun)
---     safe_2 = safety2 td_env x_mem
-            ) ((actv_tab,inhb_tab), succ_tab) (L.zip4 patmems argmems resmems inimems)
     translateIxFnInScope (x, info)
       | Just (Coalesced knd mbd@(MemBlock _ _ _ ixfn) _subs0) <- M.lookup x (vartab info),
         safety2 td_env (dstmem info) =
@@ -539,7 +539,7 @@ mkCoalsTabBnd lutab lstm@(Let pat _ (DoLoop arginis_ctx arginis lform body)) td_
                                         (dstrefs . memrefs) etry
       in  if noMemOverlap td_env wrt_i use_p
           then True
-          else trace "Soundess1 fails" False
+          else trace ("Soundess1 fails "++pretty wrt_i++" AND "++pretty (dstrefs (memrefs etry))) False
     -- | Assumes it is being called after the entry summary (last param) has
     --     been aggregated across the loop.
     loopSoundness2Entry :: CoalsTab -> VName -> CoalsEntry -> Bool
@@ -639,7 +639,8 @@ mkCoalsTabBnd lutab stm@(Let pat _ e) td_env bu_env =
                               (True, fv_subst) ->
                                 let mem_info = Coalesced Trans (MemBlock tp shp x_mem b_indfun') fv_subst
                                     info' = info { vartab = M.insert b mem_info vtab }
-                                in  ((M.insert mb info' a_acc,inhb), s_acc)
+                                in  trace ("COALESCING: postponed promotion (dir-alias): "++pretty (b, mb))
+                                      ((M.insert mb info' a_acc,inhb), s_acc)
             Just (Coalesced k mblk@(MemBlock _ _ _ new_indfun) _) ->
               -- we are at the definition of the coalesced variable @b@
               -- if 2,4,5 hold promote it to successful coalesced table,
@@ -652,48 +653,15 @@ mkCoalsTabBnd lutab stm@(Let pat _ e) td_env bu_env =
                         in  if safe_4
                             then -- array creation point, successful coalescing verified!
                                  let (a_acc',s_acc') = markSuccessCoal (a_acc,s_acc) mb info'
-                                 in  trace ("COALESCING: successfull promote: "++pretty b++" "++pretty mb)
+                                 in  trace ("COALESCING: successfull promote: "++pretty (b, mb))
                                       ((a_acc',inhb), s_acc')
                             else -- this is an invertible alias case of the kind
                                  -- @ let b    = alias a @
                                  -- @ let x[i] = b @
                                  -- do not promote, but update the index function
-                                 trace ("COALESCING: postponed promotion: "++pretty b)
+                                 trace ("COALESCING: postponed promotion (inv-alias): "++pretty (b, mb))
                                   ((M.insert mb info' a_acc,inhb), s_acc)
                   else  trace ("JUST FAIL! "++pretty safe_2++" "++pretty safe_5) $ (failed, s_acc) -- fail!
-
--- | 1. Filters @activeCoals@ by the 3rd safety condition, namely:
---      "there is no use of the left-hand side memory block @m_y@
---       during the liveness of right-hand side @b@, i.e., in between
---       its creation and its last use."
---   2. Treats pattern in-place updates by updating the optdeps field
---       of the dst variable with the info of the fist.
---   3. Returns a new pair of active-coalescing table and inhibited table
-mkCoalsHelper1FilterActive :: Pattern (Aliases ExpMem.SeqMem)
-                           -> Names
-                           -> ScopeTab -> ScalarTab -> CoalsTab -> InhibitTab
-                           -> (CoalsTab,InhibitTab)
-mkCoalsHelper1FilterActive pat inner_free_vars scope_tab _scals_tab active_tab inhibit_tab =
-  let e_mems  = mapMaybe (`getScopeMemInfo` scope_tab) $ namesToList inner_free_vars
-      -- ToDo: understand why the memory block of pattern must be filtered:
-      --       this definitely needs to be relaxed, e.g., because the src
-      --       and sink can be created in the same loop.
-      memasoc = getArrMemAssoc pat
-      -- get memory-block names that are used in the current stmt.
-      stm_mems= namesFromList $ map (\(MemBlock _ _ mnm _) -> mnm) $
-                e_mems ++ map snd memasoc
-
-      -- BIG BUG/ToDo: take the aliasing transitive closure of @all_mems@
-      all_mems = stm_mems
-
-      -- keep only the entries that do not overlap with the memory
-      -- blocks defined in @pat@ or @inner_free_vars@.
-      -- the others must be recorded in @inhibit_tab@ because
-      -- they violate the 3rd safety condition.
-      active_tab1 = M.filter (\etry -> mempty == namesIntersection all_mems (alsmem etry)) active_tab
-      failed_tab  = M.difference active_tab active_tab1
-      (_,inhibit_tab1) = foldl markFailedCoal (failed_tab,inhibit_tab) (M.keys failed_tab)
-  in  (active_tab1, inhibit_tab1)
 
 -- | Check safety conditions 2 and 5 and update new substitutions:
 --   called on the pat-elements of loop and if-then-else expressions.
@@ -713,10 +681,10 @@ filterSafetyCond2and5 act_coal inhb_coal scals_env td_env =
                      Nothing -> -- trace ("Too drastic case: "++pretty (b,m_b,x_mem)) failed
                         -- ^ This is not too drastic, because it applies to the patelems of loop/if-then-else
                           case getDirAliasedIxfn td_env acc b of
-                            Nothing -> trace ("failed translate safety 2 & 5 11111111"++pretty b++" @ "++pretty m_b) $ failed
+                            Nothing -> trace ("failed getting direct-alias ixfn: "++pretty b++" @ "++pretty m_b) $ failed
                             Just (_, _, b_indfun') ->
                               case translateIndFunFreeVar (scope td_env) scals_env (Just b_indfun') of
-                                (False, _) -> trace ("failed translate safety 2 & 5"++pretty b++" @ "++pretty m_b) $ failed
+                                (False, _) -> trace ("failed translating ixfn subs: "++pretty b++" @ "++pretty m_b) $ failed
                                 (True, fv_subst) ->
                                   let mem_info = Coalesced Trans (MemBlock tp0 shp0 x_mem b_indfun') fv_subst
                                       info' = info { vartab = M.insert b mem_info vtab }
@@ -728,7 +696,7 @@ filterSafetyCond2and5 act_coal inhb_coal scals_env td_env =
                            then let mem_info = Coalesced k mblk fv_subst
                                     info' = info { vartab = M.insert b mem_info vtab }
                                 in  (M.insert m_b info' acc, inhb)
-                           else trace ("Safety 2 and 5 of coalescing failed: "++pretty m_b++"->"++pretty x_mem ++ " "++pretty safe_2++" "++pretty safe_5) $
+                           else trace ("Safety 2 and 5 of coalescing Failed: "++pretty m_b++"->"++pretty x_mem ++ " "++pretty safe_2++" "++pretty safe_5) $
                                       failed
              _ -> (acc,inhb)
         ) (act_coal,inhb_coal)
@@ -810,7 +778,7 @@ genCoalStmtInfo lutab scopetab pat (BasicOp (Copy b))
   | Pattern _ [PatElem x (_,ExpMem.MemArray _ _ _ (ExpMem.ArrayIn m_x ind_x))] <- pat =
     case (M.lookup x lutab, getScopeMemInfo b scopetab) of
       (Just last_uses, Just (MemBlock tpb shpb m_b ind_b)) ->
-        if trace ("COALESCING: copy pattern found for "++pretty b) $ not (nameIn b last_uses) then Nothing
+        if trace ("COALESCING: copy pattern found: "++pretty x++" = copy "++pretty b) $ not (nameIn b last_uses) then Nothing
         else Just [(Ccopy,id,x,m_x,ind_x,b,m_b,ind_b,tpb,shpb)]
       _ -> Nothing
 -- CASE c) @let x[i] = b^{lu}@
@@ -818,10 +786,10 @@ genCoalStmtInfo lutab scopetab pat (BasicOp (Update x slice_x (Var b)))
   | Pattern _ [PatElem x' (_,ExpMem.MemArray _ _ _ (ExpMem.ArrayIn m_x ind_x))] <- pat =
     case (M.lookup x' lutab, getScopeMemInfo b scopetab) of
       (Just last_uses, Just (MemBlock tpb shpb m_b ind_b)) ->
-        if trace ("COALESCING: in-place pattern found for "++pretty b) $ not (nameIn b last_uses)
+        if not (nameIn b last_uses)
         then Nothing
-        else -- let ind_x_slice = updateIndFunSlice ind_x slice_x
-             Just [(InPl,(`updateIndFunSlice` slice_x), x,m_x,ind_x,b,m_b,ind_b,tpb,shpb)]
+        else trace ("COALESCING: in-place pattern found: "++pretty x'++"[]="++pretty b) $
+              Just [(InPl,(`updateIndFunSlice` slice_x), x,m_x,ind_x,b,m_b,ind_b,tpb,shpb)]
       _ -> Nothing
   where
     updateIndFunSlice :: ExpMem.IxFun -> Slice SubExp -> ExpMem.IxFun

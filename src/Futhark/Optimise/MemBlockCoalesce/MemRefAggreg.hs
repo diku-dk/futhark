@@ -13,7 +13,7 @@ import qualified Data.Set as S
 import qualified Control.Exception.Base as Exc
 import qualified Data.List.NonEmpty as NE
 
-import Debug.Trace
+--import Debug.Trace
 
 import Futhark.IR.Aliases
 import Futhark.Analysis.PrimExp.Convert
@@ -83,10 +83,10 @@ getUseSumFromStm td_env coal_tab (Let (Pattern{}) _ (BasicOp (Index arr slc)))
   | Just (MemBlock _ shp _ _) <- getScopeMemInfo arr (scope td_env),
     length slc == length (shapeDims shp) && all isFix slc =
       case getDirAliasedIxfn td_env coal_tab arr of
-        Nothing -> ([],[])
-        Just (_, mem_arr, ixfn_arr) ->
+        Nothing -> Exc.assert False ([],[])
+        Just (mem_b, mem_arr, ixfn_arr) ->
             let new_ixfn = IxFun.slice ixfn_arr $ map (fmap pe64) slc
-            in ([],[(arr, mem_arr, new_ixfn)])
+            in ([],[(mem_b, mem_arr, new_ixfn)])
   where
     isFix (DimFix{}) = True
     isFix _ = False
@@ -149,7 +149,7 @@ getUseSumFromStm _ _ stm =
 
 -- | This function:
 --     1. computes the written and read memory references for the current statement
---          (by calling getUseSumFromStm)
+--          (by calling @getUseSumFromStm@)
 --     2. fails the entries in active coalesced table for which the write set
 --          overlaps the uses of the destination (to that point)
 --   ToDo: a) the @noMemOverlap@ test probably requires the @scals@ field
@@ -196,7 +196,7 @@ recordMemRefUses td_env bu_env stm =
                 stm_uses' = filter (not . (`nameIn` alias_m_b) . tupFst) $ stm_uses
                 all_aliases = foldl getAliases mempty $ namesToList $ alsmem etry
                 ixfns = map tupThd $ filter ((`nameIn` all_aliases) . tupSnd) stm_uses'
-                lmads = -- trace ("MemRefUses: "++pretty ixfns) $
+                lmads = --trace ("MemRefUses for: "++pretty (m_b,dstmem etry)++" "++pretty stm_uses') $
                         mapMaybe mbLmad ixfns
             in  if length lmads == length ixfns
                 then Over (S.fromList lmads)

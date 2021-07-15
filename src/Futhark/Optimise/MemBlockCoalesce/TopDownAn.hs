@@ -49,7 +49,7 @@ data TopDnEnv = TopDnEnv { alloc   :: AllocTab
 
 safety2 :: TopDnEnv -> VName -> Bool
 safety2 td_env m =
---  nameIn m (alloc td_env)
+  --  nameIn m (alloc td_env)
   case M.lookup m (scope td_env) of
     (Just _) -> True
     Nothing  -> False
@@ -61,6 +61,7 @@ getDirAliasFromExp (BasicOp (Reshape shp_chg x)) = Just (x, (`IxFun.reshape` (ma
 getDirAliasFromExp (BasicOp (Rearrange perm x)) = Just (x, (`IxFun.permute` perm))
 getDirAliasFromExp (BasicOp (Rotate rs x)) = Just (x, (`IxFun.rotate` (fmap ExpMem.pe64 rs)))
 getDirAliasFromExp (BasicOp (Index x slc)) = Just (x, (`IxFun.slice` (map (fmap ExpMem.pe64) slc)))
+getDirAliasFromExp (BasicOp (Update x _ _elm)) = Just (x, id)
 getDirAliasFromExp _ = Nothing
 
 -- | This was former @createsAliasedArrOK@ from DataStructs
@@ -80,6 +81,7 @@ getDirAliasFromExp _ = Nothing
 getInvAliasFromExp :: Exp (Aliases ExpMem.SeqMem) -> Maybe (VName, ExpMem.IxFun -> ExpMem.IxFun)
 getInvAliasFromExp (BasicOp (SubExp (Var x))) = Just (x, id)
 getInvAliasFromExp (BasicOp (Opaque (Var x))) = Just (x, id)
+getInvAliasFromExp (BasicOp (Update x _ _elm))= Just (x, id)
 getInvAliasFromExp (BasicOp (Rearrange perm arr_nm)) =
   let perm' = IxFun.permuteInv perm [0..length perm - 1]
   in  Just (arr_nm, (`IxFun.permute` perm'))
@@ -104,17 +106,18 @@ topdwnTravBinding env stm =
 
 
 topDownLoop :: TopDnEnv -> Stm (Aliases ExpMem.SeqMem) -> TopDnEnv
-topDownLoop td_env (Let pat _ (DoLoop arginis_ctx arginis lform body)) =
+topDownLoop td_env (Let _pat _ (DoLoop arginis_ctx arginis lform body)) =
   let scopetab = scope td_env                              <>
                  (scopeOfFParams (fst $ unzip arginis_ctx) <>
                  (scopeOfFParams (fst $ unzip arginis    ) <>
                  scopeOf lform )) --scopeOfLoopForm lform))
       scopetab_loop = scopetab <> scopeOf (bodyStms body)
-      bdy_ress = drop (length arginis_ctx) $ bodyResult body
+      _bdy_ress = drop (length arginis_ctx) $ bodyResult body
       m_alias' = m_alias td_env
                   -- foldl (foldfun scopetab_loop) (m_alias td_env) $
                   --   zip3 (patternValueElements pat) arginis bdy_ress
   in  td_env { scope = scopetab_loop, m_alias = m_alias' }
+{--
   where
     updateAlias (m, m_al) tab =
       let m_al' = case M.lookup m tab of
@@ -155,6 +158,7 @@ topDownLoop td_env (Let pat _ (DoLoop arginis_ctx arginis lform body)) =
                 in  m_alias'
             (_, _, _) -> error "Impossible case reached in file MemBlockCoalesce.TopDownAn.hs, fun topDownLoop!"
     foldfun _ m_tab _ = m_tab
+--}
 topDownLoop _ _ =
   error "MemBlockCoalesce.TopDownAn: function topDownLoop should only be called on Loops!"
 
@@ -229,7 +233,7 @@ addInvAliassesVarTab td_env vtab x
   | Just (Coalesced _ (MemBlock _ _ m_y x_ixfun) fv_subs) <- M.lookup x vtab =
     case M.lookup x (v_alias td_env) of
       Nothing -> Just vtab
-      Just (_, _, Nothing) -> Nothing -- can't invert ixfun, conservatively fail!
+      Just (nm, _, Nothing) -> trace ("Fails Inversion: "++pretty(x, nm, M.keys (v_alias td_env))) Nothing -- can't invert ixfun, conservatively fail!
       Just (x0, _, Just inv_alias0) ->
         let x_ixfn0 = inv_alias0 x_ixfun
         in case getScopeMemInfo x0 (scope td_env) of

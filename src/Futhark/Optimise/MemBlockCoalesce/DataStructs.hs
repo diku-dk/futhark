@@ -285,8 +285,8 @@ markFailedCoal (coal_tab,inhb_tab) src_mem =
                               Nothing  -> oneName (dstmem coale)
                               Just fld -> fld <> oneName (dstmem coale)
            in  trace ("Failed Coalesce: "++pretty src_mem++"->"++pretty (dstmem coale)) $
-                ( M.delete src_mem coal_tab
-                , M.insert src_mem failed_set inhb_tab )
+                 ( M.delete src_mem coal_tab
+                 , M.insert src_mem failed_set inhb_tab )
 
 -- | A poor attempt at a pretty printer of the Coalescing Table
 prettyCoalTab :: CoalsTab -> String

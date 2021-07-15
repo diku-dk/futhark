@@ -174,7 +174,7 @@ getLastUseMem v2mem0 =
 --- Printer/Tester Main Program
 ----------------------------------------------------------------
 
--- run it with: `futhark dev --cpu --merge-mem test.fut`
+-- run it with:  `futhark dev --cpu --merge-mem test.fut`
 memoryBlockMerging :: ExpMem.Prog ExpMem.SeqMem -> IO ()
 memoryBlockMerging prg = do
   mapM_ lookAtFunction (progFuns prg)
