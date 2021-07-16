@@ -117,7 +117,7 @@ data BotUpEnv = BotUpEnv { scals :: ScalarTab
 instance Pretty (AccsSum) where
   --show :: AccsSum -> String
   ppr Top = "Top"
-  ppr (Over a) = "Access-Overestimate: " <> ppr a
+  ppr (Over a) = "Access-Overestimate:" <+/> ppr a <+/> " "
 
 instance Pretty (MemRefs) where
   --show :: MemRefs -> String
@@ -131,19 +131,19 @@ instance Pretty (CoalescedKind) where
 
 instance Pretty (ArrayMemBound) where
   ppr (MemBlock ptp shp m_nm ixfn) =
-    "{"<> ppr ptp<>", "<>ppr shp<>", "<>ppr m_nm<>", "<>ppr ixfn<>"}"<>mempty
+    "{"<> ppr ptp<>","<+>ppr shp<>","<+>ppr m_nm<>","<+/>ppr ixfn<>"}"<>mempty
 
 instance Pretty (Coalesced) where
   ppr (Coalesced knd mbd subs) =
-    "(Kind: "<>ppr knd<>", membds: "<>ppr mbd<>", subs: "<>ppr subs<>") "<> mempty
+    "(Kind:"<+>ppr knd<>", membds:"<+>ppr mbd<>", subs:"<+>ppr subs<>")"<+> "\n"
 
 instance Pretty (CoalsEntry) where
-  ppr etry = "{Dstmem: "<>ppr (dstmem etry)<>
-             ", AliasMems: " <> ppr (alsmem etry)<>
-             ", optdeps: " <> ppr (optdeps etry)<>
-             ", memrefs: " <> ppr (memrefs etry)<>
-             ", vartab: " <> ppr (vartab etry)<>
-             "}" <> mempty
+  ppr etry = "{"<+/>"Dstmem:"<+>ppr (dstmem etry)<>
+             ", AliasMems:" <+> ppr (alsmem etry)<+/>
+             ", optdeps:" <+> ppr (optdeps etry)<+/>
+             ", memrefs:" <+> ppr (memrefs etry)<+/>
+             ", vartab:" <+> ppr (vartab etry)<+/>
+             "}" <+/> "\n"
 
 unionMemRefs :: MemRefs -> MemRefs -> MemRefs
 unionMemRefs (MemRefs d1 s1) (MemRefs d2 s2) =
