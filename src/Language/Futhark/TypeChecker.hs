@@ -103,7 +103,9 @@ checkModExp ::
   ModExpBase NoInfo Name ->
   (Warnings, Either TypeError (MTy, ModExpBase Info VName))
 checkModExp files src env me =
-  second (fmap fst) $ runTypeM env files' (mkInitialImport "") src $ checkOneModExp me
+  second (fmap fst) . runTypeM env files' (mkInitialImport "") src $ do
+    (_abs, mty, me') <- checkOneModExp me
+    pure (mty, me')
   where
     files' = M.map fileEnv $ M.fromList files
 
@@ -359,15 +361,18 @@ checkSigBind (SigBind name e doc loc) = do
         SigBind name' e' doc loc
       )
 
-checkOneModExp :: ModExpBase NoInfo Name -> TypeM (MTy, ModExpBase Info VName)
+checkOneModExp ::
+  ModExpBase NoInfo Name ->
+  TypeM (TySet, MTy, ModExpBase Info VName)
 checkOneModExp (ModParens e loc) = do
-  (mty, e') <- checkOneModExp e
-  return (mty, ModParens e' loc)
+  (abs, mty, e') <- checkOneModExp e
+  return (abs, mty, ModParens e' loc)
 checkOneModExp (ModDecs decs loc) = do
   checkForDuplicateDecs decs
   (abstypes, env, decs') <- checkDecs decs
   return
-    ( MTy abstypes $ ModEnv env,
+    ( abstypes,
+      MTy abstypes $ ModEnv env,
       ModDecs decs' loc
     )
 checkOneModExp (ModVar v loc) = do
@@ -377,40 +382,47 @@ checkOneModExp (ModVar v loc) = do
         && baseTag (qualLeaf v') <= maxIntrinsicTag
     )
     $ typeError loc mempty "The 'intrinsics' module may not be used in module expressions."
-  return (MTy mempty env, ModVar v' loc)
+  return (mempty, MTy mempty env, ModVar v' loc)
 checkOneModExp (ModImport name NoInfo loc) = do
   (name', env) <- lookupImport loc name
   return
-    ( MTy mempty $ ModEnv env,
+    ( mempty,
+      MTy mempty $ ModEnv env,
       ModImport name (Info name') loc
     )
 checkOneModExp (ModApply f e NoInfo NoInfo loc) = do
-  (f_mty, f') <- checkOneModExp f
+  (f_abs, f_mty, f') <- checkOneModExp f
   case mtyMod f_mty of
     ModFun functor -> do
-      (e_mty, e') <- checkOneModExp e
+      (e_abs, e_mty, e') <- checkOneModExp e
       (mty, psubsts, rsubsts) <- applyFunctor loc functor e_mty
-      return (mty, ModApply f' e' (Info psubsts) (Info rsubsts) loc)
+      return
+        ( mtyAbs mty <> f_abs <> e_abs,
+          mty,
+          ModApply f' e' (Info psubsts) (Info rsubsts) loc
+        )
     _ ->
       typeError loc mempty "Cannot apply non-parametric module."
 checkOneModExp (ModAscript me se NoInfo loc) = do
-  (me_mod, me') <- checkOneModExp me
+  (me_abs, me_mod, me') <- checkOneModExp me
   (se_mty, se') <- checkSigExp se
   match_subst <- badOnLeft $ matchMTys me_mod se_mty loc
-  return (se_mty, ModAscript me' se' (Info match_subst) loc)
+  return (mtyAbs se_mty <> me_abs, se_mty, ModAscript me' se' (Info match_subst) loc)
 checkOneModExp (ModLambda param maybe_fsig_e body_e loc) =
   withModParam param $ \param' param_abs param_mod -> do
-    (maybe_fsig_e', body_e', mty) <- checkModBody (fst <$> maybe_fsig_e) body_e loc
+    (abs, maybe_fsig_e', body_e', mty) <-
+      checkModBody (fst <$> maybe_fsig_e) body_e loc
     return
-      ( MTy mempty $ ModFun $ FunSig param_abs param_mod mty,
+      ( abs,
+        MTy mempty $ ModFun $ FunSig param_abs param_mod mty,
         ModLambda param' maybe_fsig_e' body_e' loc
       )
 
 checkOneModExpToEnv :: ModExpBase NoInfo Name -> TypeM (TySet, Env, ModExpBase Info VName)
 checkOneModExpToEnv e = do
-  (MTy abs mod, e') <- checkOneModExp e
+  (e_abs, MTy abs mod, e') <- checkOneModExp e
   case mod of
-    ModEnv env -> return (abs, env, e')
+    ModEnv env -> pure (e_abs <> abs, env, e')
     ModFun {} -> unappliedFunctor $ srclocOf e
 
 withModParam ::
@@ -439,27 +451,38 @@ checkModBody ::
   ModExpBase NoInfo Name ->
   SrcLoc ->
   TypeM
-    ( Maybe (SigExp, Info (M.Map VName VName)),
+    ( TySet,
+      Maybe (SigExp, Info (M.Map VName VName)),
       ModExp,
       MTy
     )
 checkModBody maybe_fsig_e body_e loc = do
-  (body_mty, body_e') <- checkOneModExp body_e
+  (body_e_abs, body_mty, body_e') <- checkOneModExp body_e
   case maybe_fsig_e of
     Nothing ->
-      return (Nothing, body_e', body_mty)
+      return
+        ( mtyAbs body_mty <> body_e_abs,
+          Nothing,
+          body_e',
+          body_mty
+        )
     Just fsig_e -> do
       (fsig_mty, fsig_e') <- checkSigExp fsig_e
       fsig_subst <- badOnLeft $ matchMTys body_mty fsig_mty loc
-      return (Just (fsig_e', Info fsig_subst), body_e', fsig_mty)
+      return
+        ( mtyAbs body_mty <> mtyAbs fsig_mty <> body_e_abs,
+          Just (fsig_e', Info fsig_subst),
+          body_e',
+          fsig_mty
+        )
 
 checkModBind :: ModBindBase NoInfo Name -> TypeM (TySet, Env, ModBindBase Info VName)
 checkModBind (ModBind name [] maybe_fsig_e e doc loc) = do
-  (maybe_fsig_e', e', mty) <- checkModBody (fst <$> maybe_fsig_e) e loc
+  (e_abs, maybe_fsig_e', e', mty) <- checkModBody (fst <$> maybe_fsig_e) e loc
   bindSpaced [(Term, name)] $ do
     name' <- checkName Term name loc
     return
-      ( mtyAbs mty,
+      ( e_abs,
         mempty
           { envModTable = M.singleton name' $ mtyMod mty,
             envNameMap = M.singleton (Term, name) $ qualName name'
@@ -467,22 +490,23 @@ checkModBind (ModBind name [] maybe_fsig_e e doc loc) = do
         ModBind name' [] maybe_fsig_e' e' doc loc
       )
 checkModBind (ModBind name (p : ps) maybe_fsig_e body_e doc loc) = do
-  (params', maybe_fsig_e', body_e', funsig) <-
+  (abs, params', maybe_fsig_e', body_e', funsig) <-
     withModParam p $ \p' p_abs p_mod ->
       withModParams ps $ \params_stuff -> do
         let (ps', ps_abs, ps_mod) = unzip3 params_stuff
-        (maybe_fsig_e', body_e', mty) <- checkModBody (fst <$> maybe_fsig_e) body_e loc
+        (abs, maybe_fsig_e', body_e', mty) <- checkModBody (fst <$> maybe_fsig_e) body_e loc
         let addParam (x, y) mty' = MTy mempty $ ModFun $ FunSig x y mty'
         return
-          ( p' : ps',
+          ( abs,
+            p' : ps',
             maybe_fsig_e',
             body_e',
             FunSig p_abs p_mod $ foldr addParam mty $ zip ps_abs ps_mod
           )
   bindSpaced [(Term, name)] $ do
     name' <- checkName Term name loc
-    return
-      ( mempty,
+    pure
+      ( abs,
         mempty
           { envModTable =
               M.singleton name' $ ModFun funsig,

@@ -198,7 +198,7 @@ refineEnv loc tset env tname ps t
       then
         return
           ( tname',
-            QualName qs v `M.delete` tset,
+            tset,
             substituteTypesInEnv
               (flip M.lookup $ M.fromList [(qualLeaf tname', Subst cur_ps t), (v, Subst ps t)])
               env
@@ -208,7 +208,7 @@ refineEnv loc tset env tname ps t
           "Cannot refine a type having"
             <+> tpMsg ps <> " with a type having " <> tpMsg cur_ps <> "."
   | otherwise =
-    typeError loc mempty $ ppr tname <+> "is not an abstract type in the module type."
+    typeError loc mempty $ pquote (ppr tname) <+> "is not an abstract type in the module type."
   where
     tpMsg [] = "no type parameters"
     tpMsg xs = "type parameters" <+> spread (map ppr xs)
