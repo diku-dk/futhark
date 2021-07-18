@@ -143,10 +143,7 @@ newtype TypeM a
   = TypeM
       ( ReaderT
           Context
-          ( StateT
-              TypeState
-              (Except (Warnings, TypeError))
-          )
+          (StateT TypeState (Except (Warnings, TypeError)))
           a
       )
   deriving
