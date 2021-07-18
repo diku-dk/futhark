@@ -14,7 +14,6 @@ where
 
 import Control.Monad
 import Data.List (find)
-import Debug.Trace
 import qualified Futhark.Analysis.SymbolTable as ST
 import qualified Futhark.Analysis.UsageTable as UT
 import Futhark.Construct
@@ -154,7 +153,6 @@ unExistentialiseMemory vtable pat _ (cond, tbranch, fbranch, ifdec)
           return se
     tbranch' <- updateBody tbranch
     fbranch' <- updateBody fbranch
-    traceM "unExistentialiseMemory"
     letBind pat $ If cond tbranch' fbranch' ifdec
   where
     onlyUsedIn name here =
