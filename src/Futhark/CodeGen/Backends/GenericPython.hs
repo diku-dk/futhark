@@ -1166,8 +1166,20 @@ compileExp = compilePrimExp compileLeaf
       src' <- compileVar src
       return $ simpleCall "indexArray" [src', iexp', Var bt', Var nptype]
 
+errorMsgString :: Imp.ErrorMsg Imp.Exp -> CompilerM op s (String, [PyExp])
+errorMsgString (Imp.ErrorMsg parts) = do
+  let onPart (Imp.ErrorString s) = return ("%s", String s)
+      onPart (Imp.ErrorVal IntType {} x) = ("%d",) <$> compileExp x
+      onPart (Imp.ErrorVal FloatType {} x) = ("%f",) <$> compileExp x
+      onPart (Imp.ErrorVal Imp.Bool x) = ("%r",) <$> compileExp x
+      onPart (Imp.ErrorVal Unit {} x) = ("%r",) <$> compileExp x
+  (formatstrs, formatargs) <- unzip <$> mapM onPart parts
+  pure (mconcat formatstrs, formatargs)
+
 compileCode :: Imp.Code op -> CompilerM op s ()
 compileCode Imp.DebugPrint {} =
+  return ()
+compileCode Imp.TracePrint {} =
   return ()
 compileCode (Imp.Op op) =
   join $ asks envOpCompiler <*> pure op
@@ -1236,18 +1248,15 @@ compileCode (Imp.DeclareArray name _ t vs) = do
 compileCode (Imp.Comment s code) = do
   code' <- collect $ compileCode code
   stm $ Comment s code'
-compileCode (Imp.Assert e (Imp.ErrorMsg parts) (loc, locs)) = do
+compileCode (Imp.Assert e msg (loc, locs)) = do
   e' <- compileExp e
-  let onPart (Imp.ErrorString s) = return ("%s", String s)
-      onPart (Imp.ErrorInt32 x) = ("%d",) <$> compileExp x
-      onPart (Imp.ErrorInt64 x) = ("%d",) <$> compileExp x
-  (formatstrs, formatargs) <- unzip <$> mapM onPart parts
+  (formatstr, formatargs) <- errorMsgString msg
   stm $
     Assert
       e'
       ( BinOp
           "%"
-          (String $ "Error: " ++ concat formatstrs ++ "\n\nBacktrace:\n" ++ stacktrace)
+          (String $ "Error: " ++ formatstr ++ "\n\nBacktrace:\n" ++ stacktrace)
           (Tuple formatargs)
       )
   where

@@ -223,16 +223,29 @@ data Operations op s = Operations
     opsCritical :: ([C.BlockItem], [C.BlockItem])
   }
 
-defError :: ErrorCompiler op s
-defError (ErrorMsg parts) stacktrace = do
-  free_all_mem <- collect $ mapM_ (uncurry unRefMem) =<< gets compDeclaredMem
-  let onPart (ErrorString s) = return ("%s", [C.cexp|$string:s|])
-      onPart (ErrorInt32 x) = ("%d",) <$> compileExp x
-      onPart (ErrorInt64 x) = ("%lld",) <$> compileExp x
+errorMsgString :: ErrorMsg Exp -> CompilerM op s (String, [C.Exp])
+errorMsgString (ErrorMsg parts) = do
+  let boolStr e = [C.cexp|($exp:e) ? "true" : "false"|]
+      asLongLong e = [C.cexp|(long long int)$exp:e|]
+      onPart (ErrorString s) = return ("%s", [C.cexp|$string:s|])
+      onPart (ErrorVal Bool x) = ("%s",) . boolStr <$> compileExp x
+      onPart (ErrorVal Unit _) = pure ("%s", [C.cexp|"()"|])
+      onPart (ErrorVal (IntType Int8) x) = ("%hhd",) <$> compileExp x
+      onPart (ErrorVal (IntType Int16) x) = ("%hd",) <$> compileExp x
+      onPart (ErrorVal (IntType Int32) x) = ("%d",) <$> compileExp x
+      onPart (ErrorVal (IntType Int64) x) = ("%lld",) . asLongLong <$> compileExp x
+      onPart (ErrorVal (FloatType Float32) x) = ("%f",) <$> compileExp x
+      onPart (ErrorVal (FloatType Float64) x) = ("%f",) <$> compileExp x
   (formatstrs, formatargs) <- unzip <$> mapM onPart parts
-  let formatstr = "Error: " ++ concat formatstrs ++ "\n\nBacktrace:\n%s"
+  pure (mconcat formatstrs, formatargs)
+
+defError :: ErrorCompiler op s
+defError msg stacktrace = do
+  free_all_mem <- collect $ mapM_ (uncurry unRefMem) =<< gets compDeclaredMem
+  (formatstr, formatargs) <- errorMsgString msg
+  let formatstr' = "Error: " <> formatstr <> "\n\nBacktrace:\n%s"
   items
-    [C.citems|ctx->error = msgprintf($string:formatstr, $args:formatargs, $string:stacktrace);
+    [C.citems|ctx->error = msgprintf($string:formatstr', $args:formatargs, $string:stacktrace);
                   $items:free_all_mem
                   return 1;|]
 
@@ -1927,6 +1940,9 @@ compileCode (Comment s code) = do
     [C.cstm|$comment:comment
               { $items:xs }
              |]
+compileCode (TracePrint msg) = do
+  (formatstr, formatargs) <- errorMsgString msg
+  stm [C.cstm|fprintf(ctx->log, $string:formatstr, $args:formatargs);|]
 compileCode (DebugPrint s (Just e)) = do
   e' <- compileExp e
   stm
@@ -1959,9 +1975,8 @@ compileCode (c1 :>>: c2) = go (linearCode (c1 :>>: c2))
 compileCode (Assert e msg (loc, locs)) = do
   e' <- compileExp e
   err <-
-    collect $
-      join $
-        asks (opsError . envOperations) <*> pure msg <*> pure stacktrace
+    collect . join $
+      asks (opsError . envOperations) <*> pure msg <*> pure stacktrace
   stm [C.cstm|if (!$exp:e') { $items:err }|]
   where
     stacktrace = prettyStacktrace 0 $ map locStr $ loc : locs

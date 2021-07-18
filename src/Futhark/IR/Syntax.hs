@@ -137,6 +137,7 @@ module Futhark.IR.Syntax
     BinOp (..),
     CmpOp (..),
     ConvOp (..),
+    OpaqueOp (..),
     DimChange (..),
     ShapeChange,
     ExpT (..),
@@ -359,16 +360,26 @@ instance Traversable DimChange where
 -- | A list of 'DimChange's, indicating the new dimensions of an array.
 type ShapeChange d = [DimChange d]
 
+-- | Apart from being Opaque, what else is going on here?
+data OpaqueOp
+  = -- | No special operation.
+    OpaqueNil
+  | -- | Print the argument, prefixed by this string.
+    OpaqueTrace String
+  deriving (Eq, Ord, Show)
+
 -- | A primitive operation that returns something of known size and
 -- does not itself contain any bindings.
 data BasicOp
   = -- | A variable or constant.
     SubExp SubExp
   | -- | Semantically and operationally just identity, but is
-    -- invisible/impenetrable to optimisations (hopefully).  This is
-    -- just a hack to avoid optimisation (so, to work around compiler
-    -- limitations).
-    Opaque SubExp
+    -- invisible/impenetrable to optimisations (hopefully).  This
+    -- partially a hack to avoid optimisation (so, to work around
+    -- compiler limitations), but is also used to implement tracing
+    -- and other operations that are semantically invisible, but have
+    -- some sort of effect (brrr).
+    Opaque OpaqueOp SubExp
   | -- | Array literals, e.g., @[ [1+x, 3], [2, 1+4] ]@.
     -- Second arg is the element type of the rows of the array.
     ArrayLit [SubExp] Type

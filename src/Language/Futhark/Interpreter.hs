@@ -70,12 +70,12 @@ data BreakReason
 
 data ExtOp a
   = ExtOpTrace Loc String a
-  | ExtOpBreak BreakReason (NE.NonEmpty StackFrame) a
+  | ExtOpBreak Loc BreakReason (NE.NonEmpty StackFrame) a
   | ExtOpError InterpreterError
 
 instance Functor ExtOp where
   fmap f (ExtOpTrace w s x) = ExtOpTrace w s $ f x
-  fmap f (ExtOpBreak why backtrace x) = ExtOpBreak why backtrace $ f x
+  fmap f (ExtOpBreak w why backtrace x) = ExtOpBreak w why backtrace $ f x
   fmap _ (ExtOpError err) = ExtOpError err
 
 type Stack = [StackFrame]
@@ -455,13 +455,9 @@ bad loc env s = stacking loc env $ do
   ss <- map (locStr . srclocOf) <$> stacktrace
   liftF $ ExtOpError $ InterpreterError $ "Error at\n" ++ prettyStacktrace 0 ss ++ s
 
-trace :: Value -> EvalM ()
-trace v = do
-  -- We take the second-to-top element of the stack, because any
-  -- actual call to 'implicits.trace' is going to be in the trace
-  -- function in the prelude, which is not interesting.
-  top <- fromMaybe noLoc . maybeHead . drop 1 <$> stacktrace
-  liftF $ ExtOpTrace top (prettyOneLine v) ()
+trace :: Loc -> Value -> EvalM ()
+trace loc v = do
+  liftF $ ExtOpTrace loc (prettyOneLine v) ()
 
 typeCheckerEnv :: Env -> T.Env
 typeCheckerEnv env =
@@ -477,16 +473,12 @@ typeCheckerEnv env =
           T.envVtable = vtable
         }
 
-break :: EvalM ()
-break = do
-  -- We don't want the env of the function that is calling
-  -- intrinsics.break, since that is just going to be the boring
-  -- wrapper function (intrinsics are never called directly).
-  -- This is why we go a step up the stack.
-  backtrace <- asks $ drop 1 . fst
+break :: Loc -> EvalM ()
+break loc = do
+  backtrace <- asks fst
   case NE.nonEmpty backtrace of
     Nothing -> return ()
-    Just backtrace' -> liftF $ ExtOpBreak BreakPoint backtrace' ()
+    Just backtrace' -> liftF $ ExtOpBreak loc BreakPoint backtrace' ()
 
 fromArray :: Value -> (ValueShape, [Value])
 fromArray (ValueArray shape as) = (shape, elems as)
@@ -1097,7 +1089,13 @@ eval env (Constr c es (Info t) _) = do
   vs <- mapM (eval env) es
   shape <- typeValueShape env $ toStruct t
   return $ ValueSum shape c vs
-eval env (Attr _ e _) = eval env e
+eval env (Attr attr e loc) = do
+  v <- eval env e
+  case attr of
+    AttrAtom "trace" -> trace (locOf loc) v
+    AttrAtom "break" -> break (locOf loc)
+    _ -> pure ()
+  pure v
 
 evalCase ::
   Value ->
@@ -1227,7 +1225,9 @@ breakOnNaN inputs result
     backtrace <- asks fst
     case NE.nonEmpty backtrace of
       Nothing -> return ()
-      Just backtrace' -> liftF $ ExtOpBreak BreakNaN backtrace' ()
+      Just backtrace' ->
+        let loc = stackFrameLoc $ NE.head backtrace'
+         in liftF $ ExtOpBreak loc BreakNaN backtrace' ()
 breakOnNaN _ _ =
   return ()
 
@@ -1729,11 +1729,6 @@ initialCtx =
             shape = ShapeDim (asInt64 n) rowshape
         return $ toArray shape $ map (toArray rowshape) $ chunk (asInt m) xs'
     def "opaque" = Just $ fun1 return
-    def "trace" = Just $ fun1 $ \v -> trace v >> return v
-    def "break" = Just $
-      fun1 $ \v -> do
-        break
-        return v
     def "acc" = Nothing
     def s | nameFromString s `M.member` namesToPrimTypes = Nothing
     def s = error $ "Missing intrinsic: " ++ s

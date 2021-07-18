@@ -809,6 +809,20 @@ defCompileExp pat (Op op) = do
   opc <- asks envOpCompiler
   opc pat op
 
+tracePrim :: String -> PrimType -> SubExp -> ImpM rep r op ()
+tracePrim s t se =
+  emit . Imp.TracePrint $
+    ErrorMsg [ErrorString (s <> ": "), ErrorVal t (toExp' t se), ErrorString "\n"]
+
+traceArray :: String -> PrimType -> Shape -> SubExp -> ImpM rep r op ()
+traceArray s t shape se = do
+  emit . Imp.TracePrint $ ErrorMsg [ErrorString (s <> ": ")]
+  sLoopNest shape $ \is -> do
+    arr_elem <- dPrim "arr_elem" t
+    copyDWIMFix (tvVar arr_elem) [] se is
+    emit . Imp.TracePrint $ ErrorMsg [ErrorVal t (untyped (tvExp arr_elem)), " "]
+  emit . Imp.TracePrint $ ErrorMsg ["\n"]
+
 defCompileBasicOp ::
   Mem rep =>
   Pat rep ->
@@ -816,8 +830,18 @@ defCompileBasicOp ::
   ImpM rep r op ()
 defCompileBasicOp (Pat [pe]) (SubExp se) =
   copyDWIM (patElemName pe) [] se []
-defCompileBasicOp (Pat [pe]) (Opaque se) =
+defCompileBasicOp (Pat [pe]) (Opaque op se) = do
   copyDWIM (patElemName pe) [] se []
+  case op of
+    OpaqueNil -> pure ()
+    OpaqueTrace s -> comment ("Trace: " <> s) $ do
+      se_t <- subExpType se
+      case se_t of
+        Prim t -> tracePrim s t se
+        Array t shape _ -> traceArray s t shape se
+        _ ->
+          warn [mempty :: SrcLoc] mempty $
+            s ++ ": cannot trace value of this (core) type: " <> pretty se_t
 defCompileBasicOp (Pat [pe]) (UnOp op e) = do
   e' <- toExp e
   patElemName pe <~~ Imp.UnOpExp op e'
