@@ -79,7 +79,7 @@ processFlatPat ::
   Show t =>
   [E.Ident] ->
   [t] ->
-  InternaliseM ([[I.Param t]], VarSubstitutions)
+  InternaliseM ([[I.Param t]], VarSubsts)
 processFlatPat x y = processFlatPat' [] x y
   where
     processFlatPat' pat [] _ = do
