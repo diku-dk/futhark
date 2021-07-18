@@ -191,14 +191,14 @@ refineEnv ::
   StructType ->
   TypeM (QualName VName, TySet, Env)
 refineEnv loc tset env tname ps t
-  | Just (tname', TypeAbbr _ cur_ps (Scalar (TypeVar () _ (TypeName _qs v) _))) <-
+  | Just (tname', TypeAbbr _ cur_ps (Scalar (TypeVar () _ (TypeName qs v) _))) <-
       findTypeDef tname (ModEnv env),
     QualName (qualQuals tname') v `M.member` tset =
     if paramsMatch cur_ps ps
       then
         return
           ( tname',
-            tset,
+            QualName qs v `M.delete` tset,
             substituteTypesInEnv
               (flip M.lookup $ M.fromList [(qualLeaf tname', Subst cur_ps t), (v, Subst ps t)])
               env
