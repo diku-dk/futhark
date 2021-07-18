@@ -9,7 +9,7 @@ module Futhark.Internalise.Monad
   ( InternaliseM,
     runInternaliseM,
     throwError,
-    VarSubstitutions,
+    VarSubsts,
     InternaliseEnv (..),
     FunInfo,
     substitutingVars,
@@ -48,10 +48,10 @@ type FunTable = M.Map VName FunInfo
 
 -- | A mapping from external variable names to the corresponding
 -- internalised subexpressions.
-type VarSubstitutions = M.Map VName [SubExp]
+type VarSubsts = M.Map VName [SubExp]
 
 data InternaliseEnv = InternaliseEnv
-  { envSubsts :: VarSubstitutions,
+  { envSubsts :: VarSubsts,
     envDoBoundsChecks :: Bool,
     envSafe :: Bool,
     envAttrs :: Attrs
@@ -60,7 +60,7 @@ data InternaliseEnv = InternaliseEnv
 data InternaliseState = InternaliseState
   { stateNameSource :: VNameSource,
     stateFunTable :: FunTable,
-    stateConstSubsts :: VarSubstitutions,
+    stateConstSubsts :: VarSubsts,
     stateConstScope :: Scope SOACS,
     stateFuns :: [FunDef SOACS]
   }
@@ -119,7 +119,7 @@ runInternaliseM safe (InternaliseM m) =
           stateFuns = mempty
         }
 
-substitutingVars :: VarSubstitutions -> InternaliseM a -> InternaliseM a
+substitutingVars :: VarSubsts -> InternaliseM a -> InternaliseM a
 substitutingVars substs = local $ \env -> env {envSubsts = substs <> envSubsts env}
 
 lookupSubst :: VName -> InternaliseM (Maybe [SubExp])
