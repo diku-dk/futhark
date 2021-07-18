@@ -41,6 +41,4 @@ module bar = k_means_mixture foo
 module baz = bar : mixture
 module k_means_em = em baz
 
-entry test_bbc_em_k_means [nnz] (values: [nnz]f32) =
-  let values = map k_means_em.mixture.V.f32 values
-  in values
+let main (x: k_means_em.mixture.V.t) = x
