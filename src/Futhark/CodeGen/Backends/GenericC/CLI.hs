@@ -304,10 +304,8 @@ printResult = concatMap f
     f (v, e) = [printStm v e, [C.cstm|printf("\n");|]]
 
 cliEntryPoint ::
-  Name ->
-  FunctionT a ->
-  Maybe (C.Definition, C.Initializer)
-cliEntryPoint fname fun@(Function _ _ _ _ results args) = do
+  FunctionT a -> Maybe (C.Definition, C.Initializer)
+cliEntryPoint fun@(Function _ _ _ _ results args) = do
   entry_point_name <- nameToString <$> functionEntry fun
   let (input_items, pack_input, free_input, free_parsed, input_args) =
         unzip5 $ readInputs args
@@ -376,7 +374,7 @@ cliEntryPoint fname fun@(Function _ _ _ _ results args) = do
      $items:(mconcat input_items)
 
      if (end_of_input(stdin) != 0) {
-       futhark_panic(1, "Expected EOF on stdin after reading input for %s.\n", $string:(quote (pretty fname)));
+       futhark_panic(1, "Expected EOF on stdin after reading input for \"%s\".\n", $string:(pretty entry_point_name));
      }
 
      $items:output_decls
@@ -423,7 +421,7 @@ cliDefs options (Functions funs) =
       option_parser =
         generateOptionParser "parse_options" $ genericOptions ++ options
       (cli_entry_point_decls, entry_point_inits) =
-        unzip $ mapMaybe (uncurry cliEntryPoint) funs
+        unzip $ mapMaybe (cliEntryPoint . snd) funs
    in [C.cunit|
 $esc:("#include <getopt.h>")
 $esc:("#include <ctype.h>")
