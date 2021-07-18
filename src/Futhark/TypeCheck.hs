@@ -803,7 +803,7 @@ checkBody (Body (_, rep) bnds res) = do
 checkBasicOp :: Checkable rep => BasicOp -> TypeM rep ()
 checkBasicOp (SubExp es) =
   void $ checkSubExp es
-checkBasicOp (Opaque es) =
+checkBasicOp (Opaque _ es) =
   void $ checkSubExp es
 checkBasicOp (ArrayLit [] _) =
   return ()
@@ -916,8 +916,7 @@ checkBasicOp (Assert e (ErrorMsg parts) _) = do
   mapM_ checkPart parts
   where
     checkPart ErrorString {} = return ()
-    checkPart (ErrorInt32 x) = require [Prim int32] x
-    checkPart (ErrorInt64 x) = require [Prim int64] x
+    checkPart (ErrorVal t x) = require [Prim t] x
 checkBasicOp (UpdateAcc acc is ses) = do
   (shape, ts) <- checkAccIdent acc
 

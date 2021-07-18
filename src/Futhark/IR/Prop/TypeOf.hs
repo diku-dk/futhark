@@ -66,7 +66,7 @@ mapType outersize f =
 primOpType :: HasScope rep m => BasicOp -> m [Type]
 primOpType (SubExp se) =
   pure <$> subExpType se
-primOpType (Opaque se) =
+primOpType (Opaque _ se) =
   pure <$> subExpType se
 primOpType (ArrayLit es rt) =
   pure [arrayOf rt (Shape [n]) NoUniqueness]

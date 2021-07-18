@@ -1657,6 +1657,25 @@ unspecified which attributes take precedence.
 
 The following expression attributes are supported.
 
+``trace``
+.........
+
+Print the value produced by the attributed expression.  Used for
+debugging.  Somewhat unreliable outside of the interpreter, and in
+particular does not work for GPU device code.
+
+``trace(tag)``
+..............
+
+Like ``trace``, but prefix output with *tag*, which must lexically be
+an identifier.
+
+``break``
+.........
+
+In the interpreter, pause execution after evaluating the expression.
+No effect for compiled code.
+
 ``incremental_flattening(no_outer)``
 ....................................
 
