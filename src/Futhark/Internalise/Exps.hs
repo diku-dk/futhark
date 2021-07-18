@@ -378,12 +378,7 @@ internaliseAppExp desc e@E.Apply {} = do
         let tag ses = [(se, I.Observe) | se <- ses]
         args' <- reverse <$> mapM (internaliseArg arg_desc) (reverse args)
         let args'' = concatMap tag args'
-        letTupExp' desc $
-          I.Apply
-            fname
-            args''
-            [I.Prim rettype]
-            (Safe, loc, [])
+        letTupExp' desc $ I.Apply fname args'' [I.Prim rettype] (Safe, loc, [])
       | otherwise -> do
         args' <- concat . reverse <$> mapM (internaliseArg arg_desc) (reverse args)
         fst <$> funcall desc qfname args' loc
