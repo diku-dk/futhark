@@ -688,8 +688,10 @@ instance Located (SizeBinder vn) where
 -- need, so we can pretend that an application expression was really
 -- bound to a name.
 data AppExpBase f vn
-  = -- | The @Maybe VName@ is a possible existential size
-    -- that is instantiated by this argument..
+  = -- | The @Maybe VName@ is a possible existential size that is
+    -- instantiated by this argument.  May have duplicates across the
+    -- program, but they will all produce the same value (the
+    -- expressions will be identical).
     Apply
       (ExpBase f vn)
       (ExpBase f vn)
