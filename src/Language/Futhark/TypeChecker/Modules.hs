@@ -191,7 +191,7 @@ refineEnv ::
   StructType ->
   TypeM (QualName VName, TySet, Env)
 refineEnv loc tset env tname ps t
-  | Just (tname', TypeAbbr _ cur_ps (Scalar (TypeVar () _ (TypeName qs v) _))) <-
+  | Just (tname', TypeAbbr _ cur_ps (Scalar (TypeVar () _ (TypeName _qs v) _))) <-
       findTypeDef tname (ModEnv env),
     QualName (qualQuals tname') v `M.member` tset =
     if paramsMatch cur_ps ps
