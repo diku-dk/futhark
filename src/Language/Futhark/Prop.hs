@@ -1014,9 +1014,7 @@ intrinsics =
                      arr_b $ shape [n]
                    ]
                    $ uarr_a $ shape [k]
-               ),
-               ("trace", IntrinsicPolyFun [tp_a] [Scalar t_a] $ Scalar t_a),
-               ("break", IntrinsicPolyFun [tp_a] [Scalar t_a] $ Scalar t_a)
+               )
              ]
   where
     [a, b, n, m, k, l, p] = zipWith VName (map nameFromString ["a", "b", "n", "m", "k", "l", "p"]) [0 ..]

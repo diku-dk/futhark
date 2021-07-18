@@ -102,9 +102,11 @@ setBodySpace space (Call dests fname args) =
     setArgSpace (MemArg m) = MemArg m
     setArgSpace (ExpArg e) = ExpArg $ setExpSpace space e
 setBodySpace space (Assert e msg loc) =
-  Assert (setExpSpace space e) msg loc
+  Assert (setExpSpace space e) (fmap (setExpSpace space) msg) loc
 setBodySpace space (DebugPrint s v) =
   DebugPrint s $ fmap (setExpSpace space) v
+setBodySpace space (TracePrint msg) =
+  TracePrint $ fmap (setExpSpace space) msg
 setBodySpace _ (Op op) =
   Op op
 

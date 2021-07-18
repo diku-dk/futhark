@@ -224,17 +224,17 @@ internaliseAppExp desc (E.Range start maybe_second end loc) = do
   let errmsg =
         errorMsg $
           ["Range "]
-            ++ [ErrorInt64 start'_i64]
+            ++ [ErrorVal int64 start'_i64]
             ++ ( case maybe_second'_i64 of
                    Nothing -> []
-                   Just second_i64 -> ["..", ErrorInt64 second_i64]
+                   Just second_i64 -> ["..", ErrorVal int64 second_i64]
                )
             ++ ( case end of
                    DownToExclusive {} -> ["..>"]
                    ToInclusive {} -> ["..."]
                    UpToExclusive {} -> ["..<"]
                )
-            ++ [ErrorInt64 end'_i64, " is invalid."]
+            ++ [ErrorVal int64 end'_i64, " is invalid."]
 
   (it, le_op, lt_op) <-
     case E.typeOf start of
@@ -351,7 +351,7 @@ internaliseAppExp desc (E.Coerce e (TypeDecl dt (Info et)) loc) = do
     dims <- arrayDims <$> subExpType e'
     let parts =
           ["Value of (core language) shape ("]
-            ++ intersperse ", " (map ErrorInt64 dims)
+            ++ intersperse ", " (map (ErrorVal int64) dims)
             ++ [") cannot match shape of type `"]
             ++ dt'
             ++ ["`."]
@@ -707,16 +707,25 @@ internaliseExp desc (E.RecordUpdate src fields ve _ _) = do
         src'' <- replace t fs ve' to_update
         return $ bef ++ src'' ++ aft
     replace _ _ ve' _ = return ve'
-internaliseExp desc (E.Attr attr e _) =
-  local f $ internaliseExp desc e
+internaliseExp desc (E.Attr attr e loc) = do
+  e' <- local f $ internaliseExp desc e
+  case attr' of
+    "trace" ->
+      traceRes (locStr loc) e'
+    I.AttrComp "trace" [I.AttrAtom tag] ->
+      traceRes (nameToString tag) e'
+    _ ->
+      pure e'
   where
-    attrs = oneAttr $ internaliseAttr attr
+    traceRes tag' e' =
+      mapM (letSubExp desc . BasicOp . Opaque (OpaqueTrace tag')) e'
+    attr' = internaliseAttr attr
     f env
-      | "unsafe" `inAttrs` attrs,
+      | attr' == "unsafe",
         not $ envSafe env =
         env {envDoBoundsChecks = False}
       | otherwise =
-        env {envAttrs = envAttrs env <> attrs}
+        env {envAttrs = envAttrs env <> oneAttr attr'}
 internaliseExp desc (E.Assert e1 e2 (Info check) loc) = do
   e1' <- internaliseExp1 "assert_cond" e1
   c <- assert "assert_c" e1' (errorMsg [ErrorString $ "Assertion is false: " <> check]) loc
@@ -917,7 +926,7 @@ internaliseSlice loc dims idxs = do
         errorMsg $
           ["Index ["] ++ intercalate [", "] parts
             ++ ["] out of bounds for array of shape ["]
-            ++ intersperse "][" (map ErrorInt64 $ take (length idxs) dims)
+            ++ intersperse "][" (map (ErrorVal int64) $ take (length idxs) dims)
             ++ ["]."]
   c <- assert "index_certs" ok msg loc
   return (idxs', c)
@@ -935,7 +944,7 @@ internaliseDimIndex w (E.DimFix i) = do
         I.BasicOp $
           I.CmpOp (I.CmpSlt I.Int64) i' w
   ok <- letSubExp "bounds_check" =<< eBinOp I.LogAnd (pure lowerBound) (pure upperBound)
-  return (I.DimFix i', ok, [ErrorInt64 i'])
+  return (I.DimFix i', ok, [ErrorVal int64 i'])
 
 -- Special-case an important common case that otherwise leads to horrible code.
 internaliseDimIndex
@@ -1043,20 +1052,20 @@ internaliseDimIndex w (E.DimSlice i j s) = do
 
   let parts = case (i, j, s) of
         (_, _, Just {}) ->
-          [ maybe "" (const $ ErrorInt64 i') i,
+          [ maybe "" (const $ ErrorVal int64 i') i,
             ":",
-            maybe "" (const $ ErrorInt64 j') j,
+            maybe "" (const $ ErrorVal int64 j') j,
             ":",
-            ErrorInt64 s'
+            ErrorVal int64 s'
           ]
         (_, Just {}, _) ->
-          [ maybe "" (const $ ErrorInt64 i') i,
+          [ maybe "" (const $ ErrorVal int64 i') i,
             ":",
-            ErrorInt64 j'
+            ErrorVal int64 j'
           ]
-            ++ maybe mempty (const [":", ErrorInt64 s']) s
+            ++ maybe mempty (const [":", ErrorVal int64 s']) s
         (_, Nothing, Nothing) ->
-          [ErrorInt64 i', ":"]
+          [ErrorVal int64 i', ":"]
   return (I.DimSlice i' n s', acceptable, parts)
   where
     zero = constant (0 :: Int64)
@@ -1694,7 +1703,7 @@ isOverloadedFunction qname args loc = do
 
     handleRest [x] "!" = Just $ complementF x
     handleRest [x] "opaque" = Just $ \desc ->
-      mapM (letSubExp desc . BasicOp . Opaque) =<< internaliseExp "opaque_arg" x
+      mapM (letSubExp desc . BasicOp . Opaque OpaqueNil) =<< internaliseExp "opaque_arg" x
     handleRest [E.TupLit [a, si, v] _] "scatter" = Just $ scatterF 1 a si v
     handleRest [E.TupLit [a, si, v] _] "scatter_2d" = Just $ scatterF 2 a si v
     handleRest [E.TupLit [a, si, v] _] "scatter_3d" = Just $ scatterF 3 a si v
@@ -1766,8 +1775,6 @@ isOverloadedFunction qname args loc = do
                 <*> internaliseExpToVars (desc ++ "_zip_y") y
             )
     handleRest [x] "unzip" = Just $ flip internaliseExp x
-    handleRest [x] "trace" = Just $ flip internaliseExp x
-    handleRest [x] "break" = Just $ flip internaliseExp x
     handleRest _ _ = Nothing
 
     toSigned int_to e desc = do
@@ -2117,7 +2124,7 @@ dimExpForError (DimExpNamed d _) = do
   d' <- case substs of
     Just [v] -> return v
     _ -> return $ I.Var $ E.qualLeaf d
-  return $ ErrorInt64 d'
+  return $ ErrorVal int64 d'
 dimExpForError (DimExpConst d _) =
   return $ ErrorString $ pretty d
 dimExpForError DimExpAny = return ""

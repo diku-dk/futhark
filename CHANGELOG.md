@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+  * The `#[trace]` and `#[break]` attributes now replace the `trace`
+    and `break` functions (although they are still present in
+    slightly-reduced but compatible form).
+
+  * Tracing now works in compiled code, albeit with several caveats
+    (mainly, it does not work for code running on the GPU).
+
 ### Removed
 
 ### Changed

@@ -971,7 +971,7 @@ expReturns ::
   m [ExpReturns]
 expReturns (BasicOp (SubExp se)) =
   pure <$> subExpReturns se
-expReturns (BasicOp (Opaque (Var v))) =
+expReturns (BasicOp (Opaque _ (Var v))) =
   pure <$> varReturns v
 expReturns (BasicOp (Reshape newshape v)) = do
   (et, _, mem, ixfun) <- arrayVarReturns v

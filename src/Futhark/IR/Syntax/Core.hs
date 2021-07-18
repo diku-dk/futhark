@@ -415,10 +415,8 @@ instance IsString (ErrorMsg a) where
 data ErrorMsgPart a
   = -- | A literal string.
     ErrorString String
-  | -- | A run-time integer value.
-    ErrorInt32 a
-  | -- | A bigger run-time integer value.
-    ErrorInt64 a
+  | -- | A run-time value.
+    ErrorVal PrimType a
   deriving (Eq, Ord, Show)
 
 instance IsString (ErrorMsgPart a) where
@@ -434,19 +432,14 @@ instance Traversable ErrorMsg where
   traverse f (ErrorMsg parts) = ErrorMsg <$> traverse (traverse f) parts
 
 instance Functor ErrorMsgPart where
-  fmap _ (ErrorString s) = ErrorString s
-  fmap f (ErrorInt32 a) = ErrorInt32 $ f a
-  fmap f (ErrorInt64 a) = ErrorInt64 $ f a
+  fmap = fmapDefault
 
 instance Foldable ErrorMsgPart where
-  foldMap _ ErrorString {} = mempty
-  foldMap f (ErrorInt32 a) = f a
-  foldMap f (ErrorInt64 a) = f a
+  foldMap = foldMapDefault
 
 instance Traversable ErrorMsgPart where
   traverse _ (ErrorString s) = pure $ ErrorString s
-  traverse f (ErrorInt32 a) = ErrorInt32 <$> f a
-  traverse f (ErrorInt64 a) = ErrorInt64 <$> f a
+  traverse f (ErrorVal t a) = ErrorVal t <$> f a
 
 -- | How many non-constant parts does the error message have, and what
 -- is their type?
@@ -454,5 +447,4 @@ errorMsgArgTypes :: ErrorMsg a -> [PrimType]
 errorMsgArgTypes (ErrorMsg parts) = mapMaybe onPart parts
   where
     onPart ErrorString {} = Nothing
-    onPart ErrorInt32 {} = Just $ IntType Int32
-    onPart ErrorInt64 {} = Just $ IntType Int64
+    onPart (ErrorVal t _) = Just t

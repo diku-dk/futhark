@@ -164,7 +164,8 @@ instance PrettyRep rep => Pretty (Stm rep) where
 
 instance Pretty BasicOp where
   ppr (SubExp se) = ppr se
-  ppr (Opaque e) = text "opaque" <> apply [ppr e]
+  ppr (Opaque OpaqueNil e) = text "opaque" <> apply [ppr e]
+  ppr (Opaque (OpaqueTrace s) e) = text "trace" <> apply [ppr (show s), ppr e]
   ppr (ArrayLit es rt) =
     case rt of
       Array {} -> brackets $ commastack $ map ppr es
@@ -214,8 +215,7 @@ instance Pretty a => Pretty (ErrorMsg a) where
   ppr (ErrorMsg parts) = braces $ align $ commasep $ map p parts
     where
       p (ErrorString s) = text $ show s
-      p (ErrorInt32 x) = ppr x <+> colon <+> text "i32"
-      p (ErrorInt64 x) = ppr x <+> colon <+> text "i64"
+      p (ErrorVal t x) = ppr x <+> colon <+> ppr t
 
 instance PrettyRep rep => Pretty (Exp rep) where
   ppr (If c t f (IfDec ret ifsort)) =

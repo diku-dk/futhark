@@ -194,6 +194,9 @@ updateAcc acc is vs = sComment "UpdateAcc" $ do
                 error $ "Missing locks for " ++ pretty acc
 
 compileThreadExp :: ExpCompiler GPUMem KernelEnv Imp.KernelOp
+compileThreadExp (Pat [pe]) (BasicOp (Opaque _ se)) =
+  -- Cannot print in GPU code.
+  copyDWIM (patElemName pe) [] se []
 compileThreadExp (Pat [dest]) (BasicOp (ArrayLit es _)) =
   forM_ (zip [0 ..] es) $ \(i, e) ->
     copyDWIMFix (patElemName dest) [fromIntegral (i :: Int64)] e []
@@ -250,6 +253,9 @@ groupCoverSpace ds f =
   groupLoop (product ds) $ f . unflattenIndex ds
 
 compileGroupExp :: ExpCompiler GPUMem KernelEnv Imp.KernelOp
+compileGroupExp (Pat [pe]) (BasicOp (Opaque _ se)) =
+  -- Cannot print in GPU code.
+  copyDWIM (patElemName pe) [] se []
 -- The static arrays stuff does not work inside kernels.
 compileGroupExp (Pat [dest]) (BasicOp (ArrayLit es _)) =
   forM_ (zip [0 ..] es) $ \(i, e) ->

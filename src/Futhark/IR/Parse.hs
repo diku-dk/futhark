@@ -203,11 +203,7 @@ pErrorMsgPart :: Parser (ErrorMsgPart SubExp)
 pErrorMsgPart =
   choice
     [ ErrorString <$> pStringLiteral,
-      flip ($) <$> (pSubExp <* pColon)
-        <*> choice
-          [ keyword "i32" $> ErrorInt32,
-            keyword "i64" $> ErrorInt64
-          ]
+      flip ErrorVal <$> (pSubExp <* pColon) <*> pPrimType
     ]
 
 pErrorMsg :: Parser (ErrorMsg SubExp)
@@ -245,7 +241,9 @@ pIota =
 pBasicOp :: Parser BasicOp
 pBasicOp =
   choice
-    [ keyword "opaque" $> Opaque <*> parens pSubExp,
+    [ keyword "opaque" $> Opaque OpaqueNil <*> parens pSubExp,
+      keyword "trace" $> uncurry (Opaque . OpaqueTrace)
+        <*> parens ((,) <$> lexeme pStringLiteral <* pComma <*> pSubExp),
       keyword "copy" $> Copy <*> parens pVName,
       keyword "assert"
         *> parens

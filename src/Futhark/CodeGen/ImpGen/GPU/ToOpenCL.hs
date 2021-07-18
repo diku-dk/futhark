@@ -816,14 +816,11 @@ inKernelOperations mode body =
         s {kernelFailures = kernelFailures s ++ [FailureMsg msg backtrace]}
       let setArgs _ [] = return []
           setArgs i (ErrorString {} : parts') = setArgs i parts'
-          setArgs i (ErrorInt32 x : parts') = do
+          -- FIXME: bogus for non-ints.
+          setArgs i (ErrorVal _ x : parts') = do
             x' <- GC.compileExp x
             stms <- setArgs (i + 1) parts'
             return $ [C.cstm|global_failure_args[$int:i] = (typename int64_t)$exp:x';|] : stms
-          setArgs i (ErrorInt64 x : parts') = do
-            x' <- GC.compileExp x
-            stms <- setArgs (i + 1) parts'
-            return $ [C.cstm|global_failure_args[$int:i] = $exp:x';|] : stms
       argstms <- setArgs (0 :: Int) parts
 
       what_next <- whatNext
@@ -873,6 +870,7 @@ typesInCode (If (TPrimExp e) c1 c2) =
 typesInCode (Assert e _ _) = typesInExp e
 typesInCode (Comment _ c) = typesInCode c
 typesInCode (DebugPrint _ v) = maybe mempty typesInExp v
+typesInCode (TracePrint msg) = foldMap typesInExp msg
 typesInCode Op {} = mempty
 
 typesInExp :: Exp -> S.Set PrimType

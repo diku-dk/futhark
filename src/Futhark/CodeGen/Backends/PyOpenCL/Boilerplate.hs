@@ -82,8 +82,7 @@ formatFailure (FailureMsg (ErrorMsg parts) backtrace) =
        in concatMap escapeChar
 
     onPart (ErrorString s) = formatEscape s
-    onPart ErrorInt32 {} = "{}"
-    onPart ErrorInt64 {} = "{}"
+    onPart ErrorVal {} = "{}"
 
 sizeClassesToPython :: M.Map Name SizeClass -> PyExp
 sizeClassesToPython = Dict . map f . M.toList

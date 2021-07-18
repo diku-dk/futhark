@@ -581,7 +581,7 @@ maybeDistributeStm stm@(Let _ aux (BasicOp (Copy stm_arr))) acc =
     return $ oneStm $ Let outerpat aux $ BasicOp $ Copy arr
 -- Opaques are applied to the full array, because otherwise they can
 -- drastically inhibit parallelisation in some cases.
-maybeDistributeStm stm@(Let (Pat [pe]) aux (BasicOp (Opaque (Var stm_arr)))) acc
+maybeDistributeStm stm@(Let (Pat [pe]) aux (BasicOp (Opaque _ (Var stm_arr)))) acc
   | not $ primType $ typeOf pe =
     distributeSingleUnaryStm acc stm stm_arr $ \_ outerpat arr ->
       return $ oneStm $ Let outerpat aux $ BasicOp $ Copy arr

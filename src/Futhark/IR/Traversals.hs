@@ -143,8 +143,8 @@ mapExpM tv (BasicOp (Manifest perm e)) =
   BasicOp <$> (Manifest perm <$> mapOnVName tv e)
 mapExpM tv (BasicOp (Assert e msg loc)) =
   BasicOp <$> (Assert <$> mapOnSubExp tv e <*> traverse (mapOnSubExp tv) msg <*> pure loc)
-mapExpM tv (BasicOp (Opaque e)) =
-  BasicOp <$> (Opaque <$> mapOnSubExp tv e)
+mapExpM tv (BasicOp (Opaque op e)) =
+  BasicOp <$> (Opaque op <$> mapOnSubExp tv e)
 mapExpM tv (BasicOp (UpdateAcc v is ses)) =
   BasicOp
     <$> ( UpdateAcc
@@ -305,7 +305,7 @@ walkExpM tv (BasicOp (Manifest _ e)) =
   walkOnVName tv e
 walkExpM tv (BasicOp (Assert e msg _)) =
   walkOnSubExp tv e >> traverse_ (walkOnSubExp tv) msg
-walkExpM tv (BasicOp (Opaque e)) =
+walkExpM tv (BasicOp (Opaque _ e)) =
   walkOnSubExp tv e
 walkExpM tv (BasicOp (UpdateAcc v is ses)) = do
   walkOnVName tv v
