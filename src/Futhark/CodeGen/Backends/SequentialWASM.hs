@@ -12,8 +12,6 @@ module Futhark.CodeGen.Backends.SequentialWASM
   )
 where
 
---import Language.Futhark.Core (nameToString) -- TODO (see if might be useful later)
-
 import Data.Maybe
 import qualified Futhark.CodeGen.Backends.GenericC as GC
 import Futhark.CodeGen.Backends.GenericWASM
