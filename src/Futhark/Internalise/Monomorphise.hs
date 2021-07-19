@@ -511,6 +511,12 @@ transformCase (CasePat p e loc) = do
 
 transformSlice :: SliceBase Info VName -> MonoM (SliceBase Info VName)
 transformSlice (DimIndices idxs) = DimIndices <$> mapM transformDimIndex idxs
+transformSlice (DimFlat offset idxs) =
+  DimFlat <$> transformExp offset <*> mapM transformDimFlatIndex idxs
+
+transformDimFlatIndex :: DimFlatIndexBase Info VName -> MonoM (DimFlatIndexBase Info VName)
+transformDimFlatIndex (DimFlatSlice n s) =
+  DimFlatSlice <$> transformExp n <*> transformExp s
 
 transformDimIndex :: DimIndexBase Info VName -> MonoM (DimIndexBase Info VName)
 transformDimIndex (DimFix e) = DimFix <$> transformExp e

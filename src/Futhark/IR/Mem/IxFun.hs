@@ -50,6 +50,7 @@ import qualified Futhark.Analysis.PrimExp.Generalize as PEG
 import Futhark.IR.Prop
 import Futhark.IR.Syntax
   ( DimChange (..),
+    DimFlatIndex (..),
     DimIndex (..),
     ShapeChange,
     Slice (..),
@@ -507,6 +508,27 @@ slice ixfun@(IxFun (lmad@(LMAD _ _) :| lmads) oshp cg) (DimIndices dim_slices)
       Just (IxFun (lmad' :| []) _ cg') ->
         IxFun (lmad' :| lmad : lmads) oshp (cg && cg')
       _ -> error "slice: reached impossible case"
+slice (IxFun (LMAD offset [dim] :| []) oshp True) (DimFlat new_offset is)
+  | ldRotate dim == 0,
+    ldMon dim == Inc =
+    IxFun
+      ( LMAD
+          (offset + new_offset * ldStride dim)
+          (map helper is)
+          :| []
+      )
+      oshp
+      True
+  where
+    helper (DimFlatSlice n s) =
+      LMADDim
+        (ldStride dim * s)
+        0
+        n
+        0
+        Inc
+slice _ _ =
+  error "slice: reached impossible case when handling flat slices"
 
 -- | Handle the simple case where all reshape dimensions are coercions.
 reshapeCoercion ::

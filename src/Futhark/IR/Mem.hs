@@ -107,6 +107,7 @@ import Control.Monad.Except
 import Control.Monad.Reader
 import Control.Monad.State
 import Data.Foldable (toList, traverse_)
+import Data.Function ((&))
 import Data.List (elemIndex, find)
 import qualified Data.Map.Strict as M
 import Data.Maybe
@@ -1152,6 +1153,17 @@ sliceInfo v slice@(DimIndices idxs) = do
             IxFun.slice
               ixfun
               $ DimIndices (map (fmap (isInt64 . primExpFromSubExp int64)) idxs)
+sliceInfo v slice@(DimFlat offset idxs) = do
+  (et, _, mem, ixfun) <- arrayVarReturns v
+  case sliceDims slice of
+    [] -> return $ MemPrim et
+    dims ->
+      map (fmap (isInt64 . primExpFromSubExp int64)) idxs
+        & DimFlat (isInt64 $ primExpFromSubExp int64 offset)
+        & IxFun.slice ixfun
+        & ArrayIn mem
+        & MemArray et (Shape dims) NoUniqueness
+        & return
 
 class TypedOp (Op lore) => OpReturns lore where
   opReturns ::

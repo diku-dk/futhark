@@ -323,8 +323,12 @@ instance Pretty d => Pretty (DimIndex d) where
   ppr (DimFix i) = ppr i
   ppr (DimSlice i n s) = ppr i <+> text ":+" <+> ppr n <+> text "*" <+> ppr s
 
+instance Pretty d => Pretty (DimFlatIndex d) where
+  ppr (DimFlatSlice n s) = ppr n <+> text ":" <+> ppr s
+
 instance Pretty d => Pretty (Slice d) where
   ppr (DimIndices i) = brackets (commasep (map ppr i))
+  ppr (DimFlat offset i) = brackets (ppr offset <+> text ";" <+> commasep (map ppr i))
 
 ppPattern :: (Pretty a, Pretty b) => [a] -> [b] -> Doc
 ppPattern [] bs = braces $ commastack $ map ppr bs

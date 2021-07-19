@@ -493,6 +493,7 @@ sliceDim d = DimSlice (constant (0 :: Int64)) d (constant (1 :: Int64))
 fullSlice :: Type -> Slice SubExp -> Slice SubExp
 fullSlice t (DimIndices slice) =
   DimIndices $ slice ++ map sliceDim (drop (length slice) $ arrayDims t)
+fullSlice _ d@(DimFlat _ _) = d
 
 -- | @ sliceAt t n slice@ returns @slice@ but with 'DimSlice's of the
 -- outer @n@ dimensions prepended, and as many appended as to make it
@@ -500,6 +501,7 @@ fullSlice t (DimIndices slice) =
 sliceAt :: Type -> Int -> Slice SubExp -> Slice SubExp
 sliceAt t n (DimIndices slice) =
   fullSlice t $ DimIndices $ map sliceDim (take n $ arrayDims t) ++ slice
+sliceAt _ _ d@(DimFlat _ _) = d
 
 -- | Like 'fullSlice', but the dimensions are simply numeric.
 fullSliceNum :: Num d => [d] -> [DimIndex d] -> Slice d
@@ -515,6 +517,7 @@ isFullSlice shape (DimIndices slice) = and $ zipWith allOfIt (shapeDims shape) s
     allOfIt (Constant v) DimFix {} = oneIsh v
     allOfIt d (DimSlice _ n _) = d == n
     allOfIt _ _ = False
+isFullSlice _ (DimFlat _ _) = True
 
 ifCommon :: [Type] -> IfDec ExtType
 ifCommon ts = IfDec (staticShapes ts) IfNormal

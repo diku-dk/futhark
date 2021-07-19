@@ -931,6 +931,28 @@ internaliseSlice loc dims (E.DimIndices idxs) = do
             ++ ["]."]
   c <- assert "index_certs" ok msg loc
   return (I.DimIndices idxs', c)
+internaliseSlice loc (d : _ds) (E.DimFlat offset idxs) = do
+  offset' <- internaliseExp1 "offset" offset
+  let lowerBound =
+        I.BasicOp $
+          I.CmpOp (I.CmpSle I.Int64) (I.constant (0 :: I.Int64)) offset'
+      upperBound = I.BasicOp $ I.CmpOp (I.CmpSlt I.Int64) offset' d
+  ok <- letSubExp "bounds_check_2" =<< eBinOp I.LogAnd (pure lowerBound) (pure upperBound)
+  let msg =
+        errorMsg
+          [ErrorString $ "Offset " ++ pretty offset ++ " out of bounds for array of shape [" ++ pretty d ++ "]"]
+  c <- assert "index_certs" ok msg loc
+  idxs' <- mapM internaliseDimFlat idxs
+  return (I.DimFlat offset' idxs', c)
+internaliseSlice _ [] (E.DimFlat _ _) =
+  undefined -- TODO
+
+internaliseDimFlat ::
+  E.DimFlatIndex ->
+  InternaliseM (I.DimFlatIndex SubExp)
+internaliseDimFlat (E.DimFlatSlice n s) =
+  -- TODO probably add some more tests here, make sure that the indexing doesn't go out of bounds?
+  I.DimFlatSlice <$> internaliseExp1 "n" n <*> internaliseExp1 "s" s
 
 internaliseDimIndex ::
   SubExp ->

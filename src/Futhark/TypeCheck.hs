@@ -808,12 +808,18 @@ checkBasicOp (UnOp op e) = require [Prim $ unOpType op] e
 checkBasicOp (BinOp op e1 e2) = checkBinOpArgs (binOpType op) e1 e2
 checkBasicOp (CmpOp op e1 e2) = checkCmpOp op e1 e2
 checkBasicOp (ConvOp op e) = require [Prim $ fst $ convOpType op] e
-checkBasicOp (Index ident idxes) = do
+checkBasicOp (Index ident (DimFlat offset idxes)) = do
+  vt <- lookupType ident
+  observe ident
+  when (arrayRank vt /= 1) $
+    bad $ SlicingError (arrayRank vt) 1
+  checkSlice (DimFlat offset idxes)
+checkBasicOp (Index ident (DimIndices idxes)) = do
   vt <- lookupType ident
   observe ident
   when (arrayRank vt /= length idxes) $
     bad $ SlicingError (arrayRank vt) (length idxes)
-  checkSlice idxes
+  checkSlice (DimIndices idxes)
 checkBasicOp (Update src idxes se) = do
   src_t <- checkArrIdent src
   when (arrayRank src_t /= length idxes) $
@@ -1197,6 +1203,15 @@ checkSlice ::
   Slice SubExp ->
   TypeM lore ()
 checkSlice (DimIndices idxs) = mapM_ checkDimIndex idxs
+checkSlice (DimFlat offset idxs) = do
+  require [Prim int64] offset
+  mapM_ checkDimFlatIndex idxs
+
+checkDimFlatIndex ::
+  Checkable lore =>
+  DimFlatIndex SubExp ->
+  TypeM lore ()
+checkDimFlatIndex (DimFlatSlice n s) = mapM_ (require [Prim int64]) [n, s]
 
 checkDimIndex ::
   Checkable lore =>

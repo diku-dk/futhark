@@ -151,6 +151,7 @@ import Futhark.Util.Loc hiding (L) -- Lexer has replacements.
       '->'            { L $$ RIGHT_ARROW }
       ':'             { L $$ COLON }
       ':>'            { L $$ COLON_GT }
+      ';'             { L $$ SEMICOLON }
       for             { L $$ FOR }
       do              { L $$ DO }
       with            { L $$ WITH }
@@ -836,13 +837,27 @@ DimIndex :: { UncheckedDimIndex }
          | Exp2 ':'      ':' Exp2 { DimSlice (Just $1) Nothing (Just $4) }
          |      ':'      ':' Exp2 { DimSlice Nothing Nothing (Just $3) }
 
-DimIndices :: { UncheckedSlice }
-            :             { DimIndices [] }
-            | DimIndices1 { DimIndices (fst $1 : snd $1) }
+DimFlatIndex :: { UncheckedDimFlatIndex }
+             : Exp2 ':' Exp2 { DimFlatSlice $1 $3 }
+
+DimFlatIndices :: { UncheckedSlice }
+               : Exp2 ';' DimFlatIndices1 { DimFlat $1 $3 }
+
+DimFlatIndices1 :: { [UncheckedDimFlatIndex] }
+                : DimFlatIndex                     { [$1] }
+                | DimFlatIndex ',' DimFlatIndices1 { $1 : $3 }
+
+DimIndices0 :: { UncheckedSlice }
+             :             { DimIndices [] }
+             | DimIndices1 { DimIndices (fst $1 : snd $1) }
 
 DimIndices1 :: { (UncheckedDimIndex, [UncheckedDimIndex]) }
              : DimIndex                 { ($1, []) }
              | DimIndex ',' DimIndices1 { ($1, fst $3 : snd $3) }
+
+DimIndices :: { UncheckedSlice }
+DimIndices  : DimIndices0    { $1 }
+            | DimFlatIndices { $1 }
 
 VarId :: { IdentBase NoInfo Name }
 VarId : id { let L loc (ID name) = $1 in Ident name NoInfo loc }

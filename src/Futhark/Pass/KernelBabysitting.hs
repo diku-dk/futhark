@@ -269,7 +269,8 @@ ensureCoalescedAccess
           inner_gid <- last thread_gids,
           length slice >= length perm,
           slice' <- case slice of
-            DimIndices idxs -> map (idxs !!) perm,
+            DimIndices idxs -> map (idxs !!) perm
+            DimFlat _ _ -> undefined, -- TODO
           DimFix inner_ind <- last slice',
           not $ null thread_gids,
           isGidVariant inner_gid inner_ind ->
@@ -361,6 +362,7 @@ splitSlice (DimIndices idxs) =
     splitSlice' [] = ([], [])
     splitSlice' (DimFix i : is) = first (i :) $ splitSlice' is
     splitSlice' is = ([], is)
+splitSlice s@(DimFlat _ _) = ([], s)
 
 allDimAreSlice :: Slice SubExp -> Bool
 allDimAreSlice (DimIndices idxs) = allDimAreSlice' idxs
@@ -368,6 +370,7 @@ allDimAreSlice (DimIndices idxs) = allDimAreSlice' idxs
     allDimAreSlice' [] = True
     allDimAreSlice' (DimFix _ : _) = False
     allDimAreSlice' (_ : is) = allDimAreSlice' is
+allDimAreSlice (DimFlat _ _) = False
 
 -- Try to move thread indexes into their proper position.
 coalescedIndexes :: Names -> (VName -> SubExp -> Bool) -> [SubExp] -> [SubExp] -> Maybe [SubExp]

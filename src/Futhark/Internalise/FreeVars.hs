@@ -126,6 +126,10 @@ freeVars expr = case expr of
 
 freeSlice :: SliceBase Info VName -> NameSet
 freeSlice (DimIndices idxs) = foldMap freeDimIndex idxs
+freeSlice (DimFlat offset idxs) = freeVars offset <> foldMap freeDimFlatIndex idxs
+
+freeDimFlatIndex :: DimFlatIndexBase Info VName -> NameSet
+freeDimFlatIndex (DimFlatSlice n s) = freeVars n <> freeVars s
 
 freeDimIndex :: DimIndexBase Info VName -> NameSet
 freeDimIndex (DimFix e) = freeVars e

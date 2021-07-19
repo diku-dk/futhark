@@ -246,8 +246,15 @@ instance ASTMappable (DimIndexBase Info VName) where
       <*> maybe (return Nothing) (fmap Just . mapOnExp tv) j
       <*> maybe (return Nothing) (fmap Just . mapOnExp tv) stride
 
+instance ASTMappable (DimFlatIndexBase Info VName) where
+  astMap tv (DimFlatSlice n s) =
+    DimFlatSlice
+      <$> mapOnExp tv n
+      <*> mapOnExp tv s
+
 instance ASTMappable (SliceBase Info VName) where
   astMap tv (DimIndices idxs) = DimIndices <$> mapM (astMap tv) idxs
+  astMap tv (DimFlat offset idxs) = DimFlat <$> astMap tv offset <*> mapM (astMap tv) idxs
 
 instance ASTMappable Alias where
   astMap tv (AliasBound v) = AliasBound <$> mapOnName tv v
@@ -392,6 +399,10 @@ barePat (PatternConstr c _ ps loc) = PatternConstr c NoInfo (map barePat ps) loc
 
 bareSlice :: SliceBase Info VName -> SliceBase NoInfo VName
 bareSlice (DimIndices idxs) = DimIndices $ fmap bareDimIndex idxs
+bareSlice (DimFlat offset idxs) = DimFlat (bareExp offset) $ fmap bareDimFlat idxs
+
+bareDimFlat :: DimFlatIndexBase Info VName -> DimFlatIndexBase NoInfo VName
+bareDimFlat (DimFlatSlice n s) = DimFlatSlice (bareExp n) (bareExp s)
 
 bareDimIndex :: DimIndexBase Info VName -> DimIndexBase NoInfo VName
 bareDimIndex (DimFix e) =

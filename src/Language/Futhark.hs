@@ -5,6 +5,7 @@ module Language.Futhark
     module Language.Futhark.Pretty,
     Ident,
     DimIndex,
+    DimFlatIndex,
     Slice,
     AppExp,
     Exp,
@@ -36,6 +37,9 @@ type Ident = IdentBase Info VName
 
 -- | An index with type information.
 type DimIndex = DimIndexBase Info VName
+
+-- | An flat index with type information.
+type DimFlatIndex = DimFlatIndexBase Info VName
 
 -- | An index with type information.
 type Slice = SliceBase Info VName

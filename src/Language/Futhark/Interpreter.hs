@@ -35,7 +35,6 @@ import Data.List
   ( find,
     foldl',
     genericLength,
-    intercalate,
     isPrefixOf,
     transpose,
   )
@@ -52,6 +51,7 @@ import Language.Futhark hiding (Value, matchDims)
 import qualified Language.Futhark as F
 import qualified Language.Futhark.Semantic as T
 import Prelude hiding (break, mod)
+import qualified Prelude
 
 data StackFrame = StackFrame
   { stackFrameLoc :: Loc,
@@ -549,6 +549,13 @@ data Indexing
   = IndexingFix Int64
   | IndexingSlice (Maybe Int64) (Maybe Int64) (Maybe Int64)
 
+data FlatIndexing
+  = FlatSlice Int64 Int64
+
+data Slicing
+  = Indexing [Indexing]
+  | FlatIndexing Int64 [FlatIndexing]
+
 instance Pretty Indexing where
   ppr (IndexingFix i) = ppr i
   ppr (IndexingSlice i j (Just s)) =
@@ -562,6 +569,13 @@ instance Pretty Indexing where
       <> maybe mempty ((text ":" <>) . ppr) s
   ppr (IndexingSlice i Nothing Nothing) =
     maybe mempty ppr i <> text ":"
+
+instance Pretty FlatIndexing where
+  ppr (FlatSlice n s) = ppr n <> text ":" <> ppr s
+
+instance Pretty Slicing where
+  ppr (Indexing is) = ppr is
+  ppr (FlatIndexing offset is) = brackets $ ppr offset <> text ";" <> commasep (map ppr is)
 
 indexesFor ::
   Maybe Int64 ->
@@ -612,42 +626,97 @@ indexShape (IndexingSlice start end stride : is) (ShapeDim d shape) =
 indexShape _ shape =
   shape
 
-indexArray :: [Indexing] -> Value -> Maybe Value
-indexArray (IndexingFix i : is) (ValueArray _ arr)
+flatIndexShape :: [FlatIndexing] -> ValueShape -> ValueShape
+flatIndexShape [] shape = shape
+flatIndexShape (FlatSlice n _ : is) shape =
+  ShapeDim n $ flatIndexShape is shape
+
+indexArray' :: [Indexing] -> Value -> Maybe Value
+indexArray' (IndexingFix i : is) (ValueArray _ arr)
   | i >= 0,
     i < n =
-    indexArray is $ arr ! fromIntegral i
+    indexArray' is $ arr ! fromIntegral i
   | otherwise =
     Nothing
   where
     n = arrayLength arr
-indexArray (IndexingSlice start end stride : is) (ValueArray (ShapeDim _ rowshape) arr) = do
+indexArray' (IndexingSlice start end stride : is) (ValueArray (ShapeDim _ rowshape) arr) = do
   js <- indexesFor start end stride $ arrayLength arr
-  toArray' (indexShape is rowshape) <$> mapM (indexArray is . (arr !)) js
-indexArray _ v = Just v
+  toArray' (indexShape is rowshape) <$> mapM (indexArray' is . (arr !)) js
+indexArray' _ v = Just v
 
-updateArray :: [Indexing] -> Value -> Value -> Maybe Value
-updateArray (IndexingFix i : is) (ValueArray shape arr) v
+indexArray :: Slicing -> Value -> Maybe Value
+indexArray (Indexing is) v = indexArray' is v
+indexArray (FlatIndexing offset is) v = return $ flatIndex is v offset
+
+flatIndex :: [FlatIndexing] -> Value -> Int64 -> Value
+flatIndex [] (ValueArray (ShapeDim n shp') arr) offset
+  | offset < n = arr ! fromIntegral offset
+  | otherwise =
+    let l = flatSize shp'
+     in flatIndex [] (arr ! fromIntegral (offset `div` l)) (offset `Prelude.mod` l)
+flatIndex (FlatSlice n s : is) v@(ValueArray (ShapeDim _ rowshape) _) offset =
+  toArray' (flatIndexShape is rowshape) $
+    map (flatIndex is v) [offset, offset + s .. offset + (n - 1) * s]
+flatIndex _ v _ = v
+
+updateArray' :: [Indexing] -> Value -> Value -> Maybe Value
+updateArray' (IndexingFix i : is) (ValueArray shape arr) v
   | i >= 0,
     i < n = do
-    v' <- updateArray is (arr ! i') v
+    v' <- updateArray' is (arr ! i') v
     Just $ ValueArray shape $ arr // [(i', v')]
   | otherwise =
     Nothing
   where
     n = arrayLength arr
     i' = fromIntegral i
-updateArray (IndexingSlice start end stride : is) (ValueArray shape arr) (ValueArray _ v) = do
+updateArray' (IndexingSlice start end stride : is) (ValueArray shape arr) (ValueArray _ v) = do
   arr_is <- indexesFor start end stride $ arrayLength arr
   guard $ length arr_is == arrayLength v
   let update arr' (i, v') = do
-        x <- updateArray is (arr ! i) v'
+        x <- updateArray' is (arr ! i) v'
         return $ arr' // [(i, x)]
   fmap (ValueArray shape) $ foldM update arr $ zip arr_is $ elems v
-updateArray _ _ v = Just v
+updateArray' _ _ v = Just v
 
-evalSlice :: Env -> Slice -> EvalM [Indexing]
-evalSlice env (DimIndices idxs) = mapM (evalDimIndex env) idxs
+flatSize :: ValueShape -> Int64
+flatSize (ShapeDim n d) = n * flatSize d
+flatSize _ = 1
+
+updateArrayFlat :: Int64 -> [FlatIndexing] -> Value -> Value -> Value
+updateArrayFlat offset [] (ValueArray shp arr) v =
+  ValueArray shp $ arr // [(fromIntegral offset, v)]
+-- updateArrayFlat offset [FlatSlice n s] (ValueArray shp arr) (ValueArray _ v) =
+--   ValueArray
+--     shp
+--     ( arr
+--         // zip
+--           ( fmap
+--               fromIntegral
+--               [offset, offset + s .. offset + (n - 1) * s]
+--           )
+--           (elems v)
+--     )
+updateArrayFlat offset (FlatSlice n s : is) v (ValueArray _ new_elems) =
+  let idxs = [offset, offset + s .. offset + (n - 1) * s]
+   in foldl extraHelper v $ zip idxs $ elems new_elems
+  where
+    extraHelper arr' (i, v') =
+      updateArrayFlat (fromIntegral i) is arr' v'
+updateArrayFlat _ _ _ v = v
+
+updateArray :: Slicing -> Value -> Value -> Maybe Value
+updateArray (Indexing is) arr v = updateArray' is arr v
+updateArray (FlatIndexing offset is) arr v =
+  Just $ updateArrayFlat offset is arr v
+
+evalSlice :: Env -> Slice -> EvalM Slicing
+evalSlice env (DimIndices idxs) = Indexing <$> mapM (evalDimIndex env) idxs
+evalSlice env (DimFlat offset idxs) = do
+  offset' <- asInt64 <$> eval env offset
+  idxs' <- mapM (evalDimFlatIndex env) idxs
+  return $ FlatIndexing offset' idxs'
 
 evalDimIndex :: Env -> DimIndex -> EvalM Indexing
 evalDimIndex env (DimFix x) =
@@ -657,12 +726,17 @@ evalDimIndex env (DimSlice start end stride) =
     <*> traverse (fmap asInt64 . eval env) end
     <*> traverse (fmap asInt64 . eval env) stride
 
-evalIndex :: SrcLoc -> Env -> [Indexing] -> Value -> EvalM Value
+evalDimFlatIndex :: Env -> DimFlatIndex -> EvalM FlatIndexing
+evalDimFlatIndex env (DimFlatSlice n s) = do
+  n' <- asInt64 <$> eval env n
+  s' <- asInt64 <$> eval env s
+  return $ FlatSlice n' s'
+
+evalIndex :: SrcLoc -> Env -> Slicing -> Value -> EvalM Value
 evalIndex loc env is arr = do
   let oob =
         bad loc env $
-          "Index [" <> intercalate ", " (map pretty is)
-            <> "] out of bounds for array of shape "
+          "Index " <> pretty is <> " out of bounds for array of shape "
             <> pretty (valueShape arr)
             <> "."
   maybe oob return $ indexArray is arr
@@ -1582,7 +1656,7 @@ initialCtx =
       where
         update :: Value -> (Maybe [Value], Value) -> Value
         update arr (Just idxs@[_, _], v) =
-          fromMaybe arr $ updateArray (map (IndexingFix . asInt64) idxs) arr v
+          fromMaybe arr $ updateArray (Indexing $ map (IndexingFix . asInt64) idxs) arr v
         update _ _ =
           error "scatter_2d expects 2-dimensional indices"
     def "scatter_3d" = Just $
@@ -1597,7 +1671,7 @@ initialCtx =
       where
         update :: Value -> (Maybe [Value], Value) -> Value
         update arr (Just idxs@[_, _, _], v) =
-          fromMaybe arr $ updateArray (map (IndexingFix . asInt64) idxs) arr v
+          fromMaybe arr $ updateArray (Indexing $ map (IndexingFix . asInt64) idxs) arr v
         update _ _ =
           error "scatter_3d expects 3-dimensional indices"
     def "hist" = Just $

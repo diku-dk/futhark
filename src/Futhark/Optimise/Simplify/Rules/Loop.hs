@@ -251,6 +251,8 @@ simplifyLoopVariables vtable pat aux (ctx, val, form@(ForLoop i it num_iters loo
             arr
             (DimIndices $ DimFix (Var i) : idxs)
             $ paramName p `nameIn` consumed_in_body
+        DimFlat _ _ ->
+          undefined -- TODO
 
     -- We only want this simplification if the result does not refer
     -- to 'i' at all, or does not contain accesses.
