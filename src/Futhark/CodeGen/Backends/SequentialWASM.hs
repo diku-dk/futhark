@@ -39,18 +39,12 @@ compileProg prog = do
       prog'
   pure (ws, (prog'', javascriptWrapper (fRepMyRep prog'), emccExportNames (fRepMyRep prog')))
   where
-    -- pure (ws, (prog'', undefined)
 
     operations :: GC.Operations Imp.Sequential ()
     operations =
       GC.defaultOperations
         { GC.opsCompiler = const $ return ()
         }
-
--- What do we need
--- Go from
--- prog' :: Imp.Program :: Imp.Definitions Sequential :: Definitions a :: Functions a :: Functions [(Name, Function a)] ... where Function a is Function
---
 
 fRepMyRep :: Imp.Program -> [JSEntryPoint]
 fRepMyRep prog =

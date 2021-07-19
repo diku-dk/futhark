@@ -1,8 +1,6 @@
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE TemplateHaskell #-}
 
---
-
 -- | C code generator.  This module can convert a correct ImpCode
 -- program to an equivalent C program.  This C program is expected to
 -- be converted to WebAssembly, so we also produce the intended
@@ -16,8 +14,6 @@ module Futhark.CodeGen.Backends.MulticoreWASM
     GC.asServer,
   )
 where
-
---import Language.Futhark.Core (nameToString) -- TODO (see if might be useful later)
 
 import Data.FileEmbed
 import Data.Maybe
