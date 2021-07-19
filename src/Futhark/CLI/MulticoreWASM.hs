@@ -1,6 +1,6 @@
 {-# LANGUAGE FlexibleContexts #-}
 
--- | @futhark wasm@
+-- | @futhark wasm-multicore@
 module Futhark.CLI.MulticoreWASM (main) where
 
 import Futhark.Actions (compileMulticoreToWASMAction)
