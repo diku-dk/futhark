@@ -161,7 +161,7 @@ runEMCC cpath outpath classpath cflags_def ldflags expfuns rts lib = do
       runProgramWithExitCode
         "emcc"
         ( [cpath, "-o", outpath]
-            ++ ["-lnodefs.js"] -- "-s", "INITIAL_MEMORY=201326592"] -- ,"-s", "ALLOW_MEMORY_GROWTH=1"]
+            ++ ["-lnodefs.js"]
             ++ (if rts then ["-s", "--post-js", classpath] else [])
             ++ (if lib then ["-s", "EXPORT_NAME=createFutharkModule", "-s", "MODULARIZE"] else [])
             ++ ["-s", "WASM_BIGINT"]
@@ -179,12 +179,12 @@ runEMCC cpath outpath classpath cflags_def ldflags expfuns rts lib = do
   case ret of
     Left err ->
       externalErrorS $ "Failed to run emcc: " ++ show err
-    Right (ExitFailure code, _, gccerr) ->
+    Right (ExitFailure code, _, emccerr) ->
       externalErrorS $
         "emcc failed with code "
           ++ show code
           ++ ":\n"
-          ++ gccerr -- possibly need to change this to emccerr
+          ++ emccerr
     Right (ExitSuccess, _, _) ->
       return ()
 
