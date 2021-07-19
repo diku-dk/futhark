@@ -63,7 +63,7 @@ ENVIRONMENT VARIABLES
 
 ``CFLAGS``
 
-  Space-separated list of options passed to ``emcc`.  Defaults
+  Space-separated list of options passed to ``emcc``.  Defaults
   to ``-O3 -std=c99`` if unset.
 
 ``EMCFLAGS``
