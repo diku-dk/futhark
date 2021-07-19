@@ -29,15 +29,12 @@ class Server {
   }
 
   _get_entry_point(entry) {
-    // TODO Context contains a list of entry points, my implementation does not
-    // Seems to be a dictionary
     if (entry in this.ctx.get_entry_points()) {
       return this.ctx.get_entry_points()[entry];
     } else {
       throw "Unkown entry point: " + entry;
     }
   }
-
 
   _check_var(vname) {
     if (!(vname in this._vars)) {
@@ -139,9 +136,6 @@ class Server {
       var vname = args[i];
       var value = this._get_var(vname);
       var typ = this._get_type(vname);
-
-      //TODO right this more elengantly
-      //TODO make sure file is open in binary mode
       var fs = require("fs");
       var bin_val = construct_binary_value(value, typ);
       fs.appendFileSync(fname, bin_val, 'binary')
@@ -164,18 +158,8 @@ class Server {
     }
 
     var fname = args[0];
-    // TODO make sure this is legal
     var args = args.slice(1);
 
-    // Reading from file is part of values.js
-    ///////////////////////////////////////////
-    //
-    //    var fs = require("fs");
-    //    fs.copyFile(fname, 'destination.txt', (err) => {
-    //  if (err) throw err;
-    //  console.log('source.txt was copied to destination.txt');
-    //});
-    ///////////////////////////////////////////
     var as = args;
     var reader = new Reader(fname);
     while (as.length != 0) {

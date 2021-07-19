@@ -10,8 +10,8 @@ var type_strs = { "Int8Array" : '  i8',
                   "BigUint64Array" :  ' u64',
                   "Float32Array" : ' f32',
                   "Float64Array" : ' f64',
-                  // TODO implement bool here
                 };
+
 var typToType = { '  i8' : Int8Array ,
                   ' i16' : Int16Array ,
                   ' i32' : Int32Array ,
@@ -23,7 +23,6 @@ var typToType = { '  i8' : Int8Array ,
                   ' f32' : Float32Array ,
                   ' f64' : Float64Array ,
                   'bool' : Uint8Array
-                  // TODO implement bool here
                 };
 
 function binToStringArray(buff, array) {
@@ -35,7 +34,6 @@ function binToStringArray(buff, array) {
 function fileToBuff(fname) {
   var readline = require('readline');
   var fs = require('fs');
-  // TODO set decoding flag so there is no wack byte reading
   var buff =  fs.readFileSync(fname);
   return buff;
 }
@@ -80,33 +78,6 @@ var typToSize = {
   " i64" : 8,
   " f64" : 8,
 }
-
-//function read_bin_array(buff, num_dim, typ) {
-//  var u8_array = new Uint8Array(num_dim * 8);
-//  binToStringArray(buff.slice(0, num_dim * 8), u8_array);
-//  shape = new BigInt64Array(u8_array.buffer);
-//  var length = shape[0];
-//  for (var i = 1; i < shape.length; i++) {
-//    length = length * shape[i];
-//  }
-//  length = Number(length);
-//  var dbytes = typToSize[typ];
-//  var u8_data = new Uint8Array(length * dbytes);
-//  binToStringArray(buff.slice(num_dim * 8, num_dim * 8 + dbytes * length), u8_data);
-//  var data  = new (typToType[typ])(u8_data.buffer);
-//  // TODO figure out what to return
-//  // Pair with (shape, data)
-//  // A class?
-//  return data;
-//}
-//
-//function read_bin_scalar(buff, typ) {
-//  var size = typToSize[typ];
-//  var u8_array = new Uint8Array(size);
-//  binToStringArray(buff, u8_array);
-//  var array = new (typToType[typ])(u8_array.buffer);
-//  return array[0];
-//}
 
 function toU8(ta) {
   return new Uint8Array(ta.buffer, ta.byteOffset, ta.byteLength);
@@ -175,10 +146,7 @@ class Reader {
     var data  = new (typToType[typ])(u8_data.buffer);
     var tmp_buff = this.buff.slice(num_dim * 8, num_dim * 8 + dbytes * length);
     this.buff = this.buff.slice(num_dim * 8 + dbytes * length);
-    // TODO figure out what to return
-    // Pair with (shape, data)
-    // A class?
-    return [shape, data];
+   return [shape, data];
   }
 
   read_bin_scalar(typ) {
