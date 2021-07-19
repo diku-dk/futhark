@@ -352,13 +352,11 @@ compileCtoWASMAction fcfg mode outpath =
     helper prog = do
       (cprog, jsprog, exps) <- handleWarnings fcfg $ SequentialWASM.compileProg prog
       case mode of
-        ToExecutable -> do
-          liftIO $ writeFile cpath $ SequentialC.asExecutable cprog
-          runEMCC cpath outpath classpath ["-O3", "-msimd128"] ["-lm"] ("_main" : exps) False False
         ToLibrary -> do
           writeLibs cprog jsprog
           runEMCC cpath jpath classpath ["-O3", "-msimd128"] ["-lm"] exps True True
-        ToServer -> do
+        _ -> do
+          -- Non-server executables are not supported.
           writeLibs cprog jsprog
           liftIO $ appendFile classpath SequentialWASM.runServer
           runEMCC cpath outpath classpath ["-O3", "-msimd128"] ["-lm"] exps True False
@@ -385,13 +383,11 @@ compileMulticoreToWASMAction fcfg mode outpath =
       (cprog, jsprog, exps) <- handleWarnings fcfg $ MulticoreWASM.compileProg prog
 
       case mode of
-        ToExecutable -> do
-          liftIO $ writeFile cpath $ MulticoreWASM.asExecutable cprog
-          runEMCC cpath outpath classpath ["-O3", "-msimd128"] ["-lm", "-pthread"] ("_main" : exps) False False
         ToLibrary -> do
           writeLibs cprog jsprog
           runEMCC cpath jpath classpath ["-O3", "-msimd128"] ["-lm", "-pthread"] exps True True
-        ToServer -> do
+        _ -> do
+          -- Non-server executables are not supported.
           writeLibs cprog jsprog
           liftIO $ appendFile classpath MulticoreWASM.runServer
           runEMCC cpath outpath classpath ["-O3", "-msimd128"] ["-lm", "-pthread"] exps True False
