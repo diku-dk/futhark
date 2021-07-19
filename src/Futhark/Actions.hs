@@ -329,10 +329,10 @@ compileMulticoreAction fcfg mode outpath =
           liftIO $ writeFile hpath $ cPrependHeader header
           liftIO $ writeFile cpath $ cPrependHeader impl
         ToExecutable -> do
-          liftIO $ writeFile cpath $ MulticoreC.asExecutable cprog
+          liftIO $ writeFile cpath $ cPrependHeader $ MulticoreC.asExecutable cprog
           runCC cpath outpath ["-O3", "-std=c99"] ["-lm", "-pthread"]
         ToServer -> do
-          liftIO $ writeFile cpath $ MulticoreC.asServer cprog
+          liftIO $ writeFile cpath $ cPrependHeader $ MulticoreC.asServer cprog
           runCC cpath outpath ["-O3", "-std=c99"] ["-lm", "-pthread"]
 
 compileMulticoreToWASMAction :: FutharkConfig -> CompilerMode -> FilePath -> Action MCMem
