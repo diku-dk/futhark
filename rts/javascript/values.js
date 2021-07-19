@@ -98,9 +98,7 @@ function construct_binary_value(v, typ) {
 class Reader {
   constructor(f) {
     this.f = f;
-    // TODO update this buff when value is read
     this.buff = fileToBuff(f);
-    this.old_buff = this.buff;
   }
 
   read_bin_array(num_dim, typ) {
