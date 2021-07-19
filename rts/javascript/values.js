@@ -38,33 +38,6 @@ function fileToBuff(fname) {
   return buff;
 }
 
-function fileToValue(fname) {
-  var str = fileToBuff(fname);
-  return read_binary(str);
-}
-
-function read_binary(buff) {
-  // Skip leading white space
-  while (buff.slice(0, 1).toString().trim() == "") {
-    buff = this.buff.slice(1);
-  }
-  if (buff[0] != 'b'.charCodeAt(0)) {
-    throw "Not in binary format"
-  }
-  var version = buff[1];
-  if (version != 2) {
-    throw "Not version 2";
-  }
-  var num_dim = buff[2];
-  var typ = buff.slice(3, 7);
-  buff = buff.slice(7);
-  if (num_dim == 0) {
-    return read_bin_scalar(buff, typ);
-  } else {
-    return read_bin_array(buff, num_dim, typ);
-  }
-}
-
 var typToSize = {
   "bool" : 1,
   "  u8" : 1,
@@ -82,7 +55,6 @@ var typToSize = {
 function toU8(ta) {
   return new Uint8Array(ta.buffer, ta.byteOffset, ta.byteLength);
 }
-
 
 function construct_binary_value(v, typ) {
   var dims;
@@ -114,7 +86,7 @@ function construct_binary_value(v, typ) {
   var total_bytes = 7 + payload_bytes;
   var bytes = new Uint8Array(total_bytes);
   bytes[0] = Buffer.from('b').readUInt8();
-  bytes[1] = 2; // Not sure why this
+  bytes[1] = 2;
   bytes[2] = dims;
   for (var i = 0; i < 4; i++) {
     bytes[3+i] = ftype.charCodeAt(i);
