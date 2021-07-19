@@ -74,8 +74,7 @@ javascriptWrapper entryPoints =
   unlines
     [ jsServer,
       jsValues,
-      classFutharkOpaque,
-      classFutharkArray,
+      jsClasses,
       classFutharkContext entryPoints
     ]
 
@@ -85,11 +84,8 @@ jsServer = $(embedStringFile "rts/javascript/server.js")
 jsValues :: String
 jsValues = $(embedStringFile "rts/javascript/values.js")
 
-classFutharkOpaque :: String
-classFutharkOpaque = $(embedStringFile "rts/javascript/opaque.js")
-
-classFutharkArray :: String
-classFutharkArray = $(embedStringFile "rts/javascript/array.js")
+jsClasses :: String
+jsClasses = $(embedStringFile "rts/javascript/wrapperClasses.js")
 
 classFutharkContext :: [JSEntryPoint] -> String
 classFutharkContext entryPoints =

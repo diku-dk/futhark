@@ -1,4 +1,4 @@
-// Start of array.js
+// Start of wrapperclasses.js
 
 class FutharkArray {
   constructor(ctx, ptr, type_name, dim, heap, fshape, fvalues, ffree) {
@@ -37,6 +37,16 @@ class FutharkArray {
     })(0, dims);
   }
 }
+
+class FutharkOpaque {
+  constructor(ctx, ptr, ffree) { this.ctx = ctx; this.ptr = ptr; this.ffree = ffree; }
+  free() { this.ffree(this.ctx, this.ptr); }
+}
+
 Module['FutharkArray'] = FutharkArray;
 
-// End of array.js
+Module['FutharkOpaque'] = FutharkOpaque;
+
+// End of opaque.js
+
+// Start of wrapperclasses.js
