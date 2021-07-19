@@ -143,8 +143,7 @@ classFutharkArray =
 classFutharkContext :: [JSEntryPoint] -> String
 classFutharkContext entryPoints =
   unlines
-    [
-      "class FutharkContext {",
+    [ "class FutharkContext {",
       constructor entryPoints,
       getFreeFun,
       getEntryPointsFun,

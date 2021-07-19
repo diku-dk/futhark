@@ -39,7 +39,6 @@ compileProg prog = do
       prog'
   pure (ws, (prog'', javascriptWrapper (fRepMyRep prog'), emccExportNames (fRepMyRep prog')))
   where
-
     operations :: GC.Operations Imp.Sequential ()
     operations =
       GC.defaultOperations
