@@ -47,6 +47,4 @@ Module['FutharkArray'] = FutharkArray;
 
 Module['FutharkOpaque'] = FutharkOpaque;
 
-// End of opaque.js
-
-// Start of wrapperclasses.js
+// End of wrapperclasses.js
