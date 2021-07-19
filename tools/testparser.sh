@@ -30,10 +30,10 @@ if [ "$TESTPARSER_WORKER" ]; then
         if futhark check $f 2>/dev/null; then
             testwith $f soacs -s
             testwith $f mc -s --extract-multicore
-            testwith $f kernels --kernels
-            testwith $f mc_mem --cpu
+            testwith $f gpu --gpu
+            testwith $f mc_mem --mc-mem
             if ! grep -q no_opencl $f; then
-                testwith $f kernels_mem --gpu
+                testwith $f gpu_mem --gpu-mem
             fi
         fi
     done
