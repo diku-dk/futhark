@@ -240,7 +240,6 @@ jsWrapEntryPoint jse =
     return ${res};
   }
   |]
-
   where
     func_name = T.pack $ name jse
 
@@ -349,24 +348,24 @@ typeHeap typ =
 
 toFutharkArray :: String -> String
 toFutharkArray typ =
-  unlines
-    [ new ++ "_from_jsarray(" ++ arraynd ++ ") {",
-      "  return this." ++ new ++ "(" ++ arraynd_flat ++ ", " ++ arraynd_dims ++ ");",
-      "}",
-      new ++ "(array, " ++ dims ++ ") {",
-      "  console.assert(array.length === " ++ dims_multiplied ++ ", 'len=%s,dims=%s', array.length, [" ++ dims ++ "].toString());",
-      "  var copy = _malloc(array.length << " ++ show (typeShift ftype) ++ ");",
-      "  " ++ typeHeap ftype ++ ".set(array, copy >> " ++ show (typeShift ftype) ++ ");",
-      "  var ptr = " ++ fnew ++ "(this.ctx, copy, " ++ bigint_dims ++ ");",
-      "  _free(copy);",
-      "  return this." ++ new ++ "_from_ptr(ptr);",
-      "}",
-      new ++ "_from_ptr(ptr) {",
-      "  return new FutharkArray(this.ctx, ptr, "
-        ++ intercalate ", " ["'" ++ ftype ++ "'", show d, heap, fshape, fvalues, ffree]
-        ++ ");",
-      "}"
-    ]
+  T.unppack
+    [text|
+  ${new}_from_jsarray(${arraynd}) {
+    return this.${new}(${arraynd_flat}, ${arraynd_dims});
+  }
+  ${new}(array, ${dims}) {
+    console.assert(array.length === ${dims_multiplied}, 'len=%s,dims=%s', array.length, [${dims}].toString());
+      var copy = _malloc(array.length << ${show (typeShift ftype)});
+      ${typeHeap ftype}.set(array, copy >> ${show (typeShift ftype)});
+      var ptr = ${fnew}(this.ctx, copy, ${bigint_dims});
+      _free(copy);
+      return this.${new}_from_ptr(ptr);
+    }
+
+    ${new}_from_ptr(ptr) {
+      return new FutharkArray(this.ctx, ptr, ${args});
+    }
+    |]
   where
     d = dim typ
     ftype = baseType typ
@@ -384,6 +383,7 @@ toFutharkArray typ =
     dims_multiplied = intercalate "*" ["d" ++ show i | i <- [0 .. d -1]]
     bigint_dims = intercalate ", " ["BigInt(d" ++ show i ++ ")" | i <- [0 .. d -1]]
     mult i s = concat $ replicate i s
+    args = intercalate ", " ["'" ++ ftype ++ "'", show d, heap, fshape, fvalues, ffree]
 
 runServer :: String
 runServer =
