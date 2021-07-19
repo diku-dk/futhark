@@ -120,7 +120,9 @@ class Server {
       ins.push(this._get_var(in_vnames[i]));
     }
     // Call entry point function from string name
+    var bef = performance.now()*1000;
     var vals = this.ctx[args[0]].apply(this.ctx, ins);
+    var aft = performance.now()*1000;
     if (num_outs == 1) {
       this._set_var(out_vnames[0], vals, entry[1][0]);
     } else {
@@ -128,6 +130,7 @@ class Server {
         this._set_var(out_vnames[i], vals[i], entry[1][i]);
       }
     }
+    console.log("runtime: " + Math.round(aft-bef));
   }
 
   _cmd_store(args) {
