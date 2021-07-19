@@ -40,12 +40,12 @@ extToString (Imp.TransparentValue _ (Imp.ScalarValue Bool _ _)) = "bool"
 extToString (Imp.OpaqueValue _ oname vds) = opaqueName oname vds
 extToString ev = error $ "extToString: missing case: " ++ show ev
 
-type EntryPointTyp = String
+type EntryPointType = String
 
 data JSEntryPoint = JSEntryPoint
   { name :: String,
-    parameters :: [EntryPointTyp],
-    ret :: [EntryPointTyp]
+    parameters :: [EntryPointType],
+    ret :: [EntryPointType]
   }
 
 emccExportNames :: [JSEntryPoint] -> [String]
@@ -143,25 +143,20 @@ classFutharkArray =
 classFutharkContext :: [JSEntryPoint] -> String
 classFutharkContext entryPoints =
   unlines
-    [ classDef,
+    [
+      "class FutharkContext {",
       constructor entryPoints,
       getFreeFun,
       getEntryPointsFun,
       getErrorFun,
       unlines $ map toFutharkArray arrays,
       unlines $ map jsWrapEntryPoint entryPoints,
-      endClassDef,
+      "}",
       "Module['FutharkContext'] = FutharkContext;"
     ]
   where
     arrays = filter isArray typs
     typs = nub $ concatMap (\jse -> parameters jse ++ ret jse) entryPoints
-
-classDef :: String
-classDef = "class FutharkContext {"
-
-endClassDef :: String
-endClassDef = "}"
 
 constructor :: [JSEntryPoint] -> String
 constructor jses =
