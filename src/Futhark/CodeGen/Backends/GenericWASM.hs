@@ -348,10 +348,10 @@ typeHeap typ =
 
 toFutharkArray :: String -> String
 toFutharkArray typ =
-  T.unppack
+  T.unpack
     [text|
-  ${new}_from_jsarray(${arraynd}) {
-    return this.${new}(${arraynd_flat}, ${arraynd_dims});
+  ${new}_from_jsarray(${T.pack arraynd}) {
+    return this.${new}(${T.pack arraynd_flat}, ${T.pack arraynd_dims});
   }
   ${new}(array, ${dims}) {
     console.assert(array.length === ${dims_multiplied}, 'len=%s,dims=%s', array.length, [${dims}].toString());
@@ -371,19 +371,19 @@ toFutharkArray typ =
     ftype = baseType typ
     heap = typeHeap ftype
     signature = ftype ++ "_" ++ show d ++ "d"
-    new = "new_" ++ signature
-    fnew = "_futhark_new_" ++ signature
+    new = T.pack $ "new_" ++ signature
+    fnew = T.pack $ "_futhark_new_" ++ signature
     fshape = "_futhark_shape_" ++ signature
     fvalues = "_futhark_values_raw_" ++ signature
     ffree = "_futhark_free_" ++ signature
     arraynd = "array" ++ show d ++ "d"
     arraynd_flat = if d > 1 then arraynd ++ ".flat()" else arraynd
     arraynd_dims = intercalate ", " [arraynd ++ mult i "[0]" ++ ".length" | i <- [0 .. d -1]]
-    dims = intercalate ", " ["d" ++ show i | i <- [0 .. d -1]]
-    dims_multiplied = intercalate "*" ["d" ++ show i | i <- [0 .. d -1]]
-    bigint_dims = intercalate ", " ["BigInt(d" ++ show i ++ ")" | i <- [0 .. d -1]]
+    dims = T.pack $ intercalate ", " ["d" ++ show i | i <- [0 .. d -1]]
+    dims_multiplied = T.pack $ intercalate "*" ["d" ++ show i | i <- [0 .. d -1]]
+    bigint_dims = T.pack $ intercalate ", " ["BigInt(d" ++ show i ++ ")" | i <- [0 .. d -1]]
     mult i s = concat $ replicate i s
-    args = intercalate ", " ["'" ++ ftype ++ "'", show d, heap, fshape, fvalues, ffree]
+    args = T.pack $ intercalate ", " ["'" ++ ftype ++ "'", show d, heap, fshape, fvalues, ffree]
 
 runServer :: String
 runServer =
