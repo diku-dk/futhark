@@ -281,7 +281,7 @@ For example, this Futhark entry point::
 
 Results in the following C function:
 
-.. c:function:: int futhark_entry_main(struct futhark_context *ctx, int32_t *out0, const struct futhark_i32_1d *in0)
+.. c:function:: int futhark_entry_sum(struct futhark_context *ctx, int32_t *out0, const struct futhark_i32_1d *in0)
 
    Asynchronously call the entry point with the given arguments.  Make
    sure to call :c:func:`futhark_context_sync` before using the value
