@@ -76,7 +76,7 @@ FutharkArray
 from JavaScript arrays, and typed arrays for each array type that appears
 in an entry point.
 All array types share similar API methods on the FutharkContext,
-which is illustrated here forthe case of the type ``[]i32``.
+which is illustrated here for the case of the type ``[]i32``.
 
 .. js:function:: new_i32_1d_from_jsarray(jsarray)
 
