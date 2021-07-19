@@ -85,7 +85,7 @@ jsValues :: String
 jsValues = $(embedStringFile "rts/javascript/values.js")
 
 jsClasses :: String
-jsClasses = $(embedStringFile "rts/javascript/wrapperClasses.js")
+jsClasses = $(embedStringFile "rts/javascript/wrapperclasses.js")
 
 classFutharkContext :: [JSEntryPoint] -> String
 classFutharkContext entryPoints =
