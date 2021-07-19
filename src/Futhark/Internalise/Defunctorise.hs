@@ -169,10 +169,8 @@ extendAbsTypes ascript_substs m = do
   -- we need to make them visible, because substitutions involving
   -- abstract types must be lifted out in transformModBind.
   let subst_abs =
-        S.fromList $
-          map snd $
-            filter ((`S.member` abs) . fst) $
-              M.toList ascript_substs
+        S.fromList . map snd . filter ((`S.member` abs) . fst) $
+          M.toList ascript_substs
   bindingAbs subst_abs m
 
 evalModExp :: ModExp -> TransformM Mod

@@ -378,12 +378,7 @@ internaliseAppExp desc e@E.Apply {} = do
         let tag ses = [(se, I.Observe) | se <- ses]
         args' <- reverse <$> mapM (internaliseArg arg_desc) (reverse args)
         let args'' = concatMap tag args'
-        letTupExp' desc $
-          I.Apply
-            fname
-            args''
-            [I.Prim rettype]
-            (Safe, loc, [])
+        letTupExp' desc $ I.Apply fname args'' [I.Prim rettype] (Safe, loc, [])
       | otherwise -> do
         args' <- concat . reverse <$> mapM (internaliseArg arg_desc) (reverse args)
         fst <$> funcall desc qfname args' loc
@@ -799,11 +794,16 @@ internaliseExp _ e@E.IndexSection {} =
 
 internaliseArg :: String -> (E.Exp, Maybe VName) -> InternaliseM [SubExp]
 internaliseArg desc (arg, argdim) = do
-  arg' <- internaliseExp desc arg
-  case (arg', argdim) of
-    ([se], Just d) -> letBindNames [d] $ BasicOp $ SubExp se
-    _ -> return ()
-  return arg'
+  exists <- askScope
+  case argdim of
+    Just d | d `M.member` exists -> pure [I.Var d]
+    _ -> do
+      arg' <- internaliseExp desc arg
+      case (arg', argdim) of
+        ([se], Just d) -> do
+          letBindNames [d] $ BasicOp $ SubExp se
+        _ -> return ()
+      pure arg'
 
 subExpPrimType :: I.SubExp -> InternaliseM I.PrimType
 subExpPrimType = fmap I.elemType . subExpType

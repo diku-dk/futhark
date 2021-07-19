@@ -462,7 +462,7 @@ extSize loc e = do
     Just d ->
       return
         ( NamedDim $ qualName d,
-          Nothing
+          Just d
         )
 
 -- Any argument sizes created with 'extSize' inside the given action

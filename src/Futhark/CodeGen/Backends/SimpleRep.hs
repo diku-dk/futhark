@@ -354,6 +354,25 @@ cIntOps =
 cIntPrimFuns :: [C.Definition]
 cIntPrimFuns =
   [C.cunit|
+   static typename int8_t abs8(typename int8_t x) {
+     return abs(x);
+   }
+   static typename int16_t abs16(typename int16_t x) {
+     return abs(x);
+   }
+   static typename int32_t abs32(typename int32_t x) {
+     return abs(x);
+   }
+$esc:("#if defined(__OPENCL_VERSION__)")
+   static typename int64_t abs64(typename int64_t x) {
+     return abs(x);
+   }
+$esc:("#else")
+   static typename int64_t abs64(typename int64_t x) {
+     return llabs(x);
+   }
+$esc:("#endif")
+
 $esc:("#if defined(__OPENCL_VERSION__)")
    static typename int32_t $id:(funName' "popc8") (typename int8_t x) {
       return popcount(x);
@@ -649,7 +668,7 @@ cFloatConvOps :: [C.Definition]
     convOp s from to = s ++ "_" ++ pretty from ++ "_" ++ pretty to
 
     mkOps =
-      [mkFDiv, mkFAdd, mkFSub, mkFMul, mkFMin, mkFMax, mkPow, mkCmpLt, mkCmpLe]
+      [mkFDiv, mkFAdd, mkFSub, mkFMul, mkCmpLt, mkCmpLe]
         ++ map (mkFPConvIF "sitofp") [minBound .. maxBound]
         ++ map (mkFPConvUF "uitofp") [minBound .. maxBound]
         ++ map (flip $ mkFPConvFI "fptosi") [minBound .. maxBound]
@@ -659,15 +678,8 @@ cFloatConvOps :: [C.Definition]
     mkFAdd = simpleFloatOp "fadd" [C.cexp|x + y|]
     mkFSub = simpleFloatOp "fsub" [C.cexp|x - y|]
     mkFMul = simpleFloatOp "fmul" [C.cexp|x * y|]
-    mkFMin = simpleFloatOp "fmin" [C.cexp|fmin(x, y)|]
-    mkFMax = simpleFloatOp "fmax" [C.cexp|fmax(x, y)|]
     mkCmpLt = floatCmpOp "cmplt" [C.cexp|x < y|]
     mkCmpLe = floatCmpOp "cmple" [C.cexp|x <= y|]
-
-    mkPow Float32 =
-      [C.cedecl|static inline float fpow32(float x, float y) { return pow(x, y); }|]
-    mkPow Float64 =
-      [C.cedecl|static inline double fpow64(double x, double y) { return pow(x, y); }|]
 
     mkFPConv from_f to_f s from_t to_t =
       [C.cedecl|static inline $ty:to_ct
@@ -694,6 +706,34 @@ cFloatConvOps :: [C.Definition]
 cFloat32Funs :: [C.Definition]
 cFloat32Funs =
   [C.cunit|
+$esc:("#ifdef __OPENCL_VERSION__")
+    static inline float fabs32(float x) {
+      return fabs(x);
+    }
+    static inline float fmax32(float x, float y) {
+      return fmax(x, y);
+    }
+    static inline float fmin32(float x, float y) {
+      return fmin(x, y);
+    }
+    static inline float fpow32(float x, float y) {
+      return pow(x, y);
+    }
+$esc:("#else")
+    static inline float fabs32(float x) {
+      return fabsf(x);
+    }
+    static inline float fmax32(float x, float y) {
+      return fmaxf(x, y);
+    }
+    static inline float fmin32(float x, float y) {
+      return fminf(x, y);
+    }
+    static inline float fpow32(float x, float y) {
+      return powf(x, y);
+    }
+$esc:("#endif")
+
     static inline typename bool $id:(funName' "isnan32")(float x) {
       return isnan(x);
     }
@@ -941,6 +981,22 @@ $esc:("#endif")
 cFloat64Funs :: [C.Definition]
 cFloat64Funs =
   [C.cunit|
+    static inline double fabs64(double x) {
+      return fabs(x);
+    }
+
+    static inline float fmax64(double x, double y) {
+      return fmax(x, y);
+    }
+
+    static inline float fmin64(double x, double y) {
+      return fmin(x, y);
+    }
+
+    static inline double fpow64(double x, double y) {
+      return pow(x, y);
+    }
+
     static inline double $id:(funName' "log64")(double x) {
       return log(x);
     }

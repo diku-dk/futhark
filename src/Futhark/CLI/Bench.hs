@@ -230,12 +230,7 @@ progressBar cur bound steps =
     cell i
       | i' * step_size <= cur' = char 9
       | otherwise =
-        char
-          ( floor
-              ( ((cur' - (i' -1) * step_size) * num_chars)
-                  / step_size
-              )
-          )
+        char (floor (((cur' - (i' -1) * step_size) * num_chars) / step_size))
       where
         i' = fromIntegral i
 

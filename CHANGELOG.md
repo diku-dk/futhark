@@ -15,6 +15,13 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+  * `i64.abs` was wrong for arguments that did not fit in an `i32`.
+
+  * Some `f32` operations (`**`, `abs`, `max`) would be done in double
+    precision on the CUDA backend.
+
+  * Yet another defunctorisation bug (#1397).
+
 ## [0.19.7]
 
 ### Added

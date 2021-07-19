@@ -1130,7 +1130,7 @@ allTrue (x : xs) = [C.cexp|$exp:x && $exp:(allTrue xs)|]
 
 prepareEntryInputs ::
   [ExternalValue] ->
-  CompilerM op s ([(C.Param, C.Exp)], [C.BlockItem])
+  CompilerM op s ([(C.Param, Maybe C.Exp)], [C.BlockItem])
 prepareEntryInputs args = collect' $ zipWithM prepare [(0 :: Int) ..] args
   where
     arg_names = namesFromList $ concatMap evNames args
@@ -1144,7 +1144,7 @@ prepareEntryInputs args = collect' $ zipWithM prepare [(0 :: Int) ..] args
       (ty, check) <- prepareValue Public [C.cexp|$id:pname|] vd
       return
         ( [C.cparam|const $ty:ty $id:pname|],
-          allTrue check
+          if null check then Nothing else Just $ allTrue check
         )
     prepare pno (OpaqueValue _ desc vds) = do
       ty <- opaqueToCType desc vds
@@ -1154,7 +1154,9 @@ prepareEntryInputs args = collect' $ zipWithM prepare [(0 :: Int) ..] args
       checks <- map snd <$> zipWithM (prepareValue Private) (zipWith field [0 ..] vds) vds
       return
         ( [C.cparam|const $ty:ty *$id:pname|],
-          allTrue $ concat checks
+          if null $ concat checks
+            then Nothing
+            else Just $ allTrue $ concat checks
         )
 
     prepareValue _ src (ScalarValue pt signed name) = do
@@ -1256,18 +1258,25 @@ onEntryPoint get_consts fname (Function (Just ename) outputs inputs _ results ar
                                       $params:entry_point_output_params,
                                       $params:entry_point_input_params);|]
 
-  let critical =
-        [C.citems|
-         $items:unpack_entry_inputs
-
-         if (!($exp:(allTrue entry_point_input_checks))) {
+  let checks = catMaybes entry_point_input_checks
+      check_input =
+        if null checks
+          then []
+          else
+            [C.citems|
+         if (!($exp:(allTrue (catMaybes entry_point_input_checks)))) {
            ret = 1;
            if (!ctx->error) {
              ctx->error = msgprintf("Error: entry point arguments have invalid sizes.\n");
            }
-         } else {
-           ret = $id:(funName fname)(ctx, $args:out_args, $args:in_args);
+         }|]
 
+      critical =
+        [C.citems|
+         $items:unpack_entry_inputs
+         $items:check_input
+         if (ret == 0) {
+           ret = $id:(funName fname)(ctx, $args:out_args, $args:in_args);
            if (ret == 0) {
              $items:get_consts
 
@@ -1845,9 +1854,6 @@ compilePrimExp f (UnOpExp Complement {} x) = do
 compilePrimExp f (UnOpExp Not {} x) = do
   x' <- compilePrimExp f x
   return [C.cexp|!$exp:x'|]
-compilePrimExp f (UnOpExp Abs {} x) = do
-  x' <- compilePrimExp f x
-  return [C.cexp|abs($exp:x')|]
 compilePrimExp f (UnOpExp (FAbs Float32) x) = do
   x' <- compilePrimExp f x
   return [C.cexp|(float)fabs($exp:x')|]
@@ -1860,12 +1866,9 @@ compilePrimExp f (UnOpExp SSignum {} x) = do
 compilePrimExp f (UnOpExp USignum {} x) = do
   x' <- compilePrimExp f x
   return [C.cexp|($exp:x' > 0) - ($exp:x' < 0) != 0|]
-compilePrimExp f (UnOpExp (FSignum Float32) x) = do
+compilePrimExp f (UnOpExp op x) = do
   x' <- compilePrimExp f x
-  return [C.cexp|fsignum32($exp:x')|]
-compilePrimExp f (UnOpExp (FSignum Float64) x) = do
-  x' <- compilePrimExp f x
-  return [C.cexp|fsignum32($exp:x')|]
+  return [C.cexp|$id:(pretty op)($exp:x')|]
 compilePrimExp f (CmpOpExp cmp x y) = do
   x' <- compilePrimExp f x
   y' <- compilePrimExp f y

@@ -12,7 +12,6 @@ module Futhark.CodeGen.Backends.CCUDA
 where
 
 import Control.Monad
-import Data.List (intercalate)
 import Data.Maybe (catMaybes)
 import Futhark.CodeGen.Backends.CCUDA.Boilerplate
 import Futhark.CodeGen.Backends.COpenCL.Boilerplate (commonOptions, sizeLoggingCode)
@@ -322,11 +321,11 @@ callKernel (LaunchKernel safety kernel_name args num_blocks block_size) = do
       void *$id:args_arr[] = { $inits:args'' };
       typename int64_t $id:time_start = 0, $id:time_end = 0;
       if (ctx->debugging) {
-        fprintf(ctx->log, "Launching %s with grid size (", $string:(pretty kernel_name));
-        $stms:(printSizes [grid_x, grid_y, grid_z])
-        fprintf(ctx->log, ") and block size (");
-        $stms:(printSizes [block_x, block_y, block_z])
-        fprintf(ctx->log, ").\n");
+        fprintf(ctx->log, "Launching %s with grid size [%ld, %ld, %ld] and block size [%ld, %ld, %ld]; shared memory: %d bytes.\n",
+                $string:(pretty kernel_name),
+                (long int)$exp:grid_x, (long int)$exp:grid_y, (long int)$exp:grid_z,
+                (long int)$exp:block_x, (long int)$exp:block_y, (long int)$exp:block_z,
+                (int)$exp:shared_tot);
         $id:time_start = get_wall_time();
       }
       $items:bef
@@ -371,8 +370,3 @@ callKernel (LaunchKernel safety kernel_name args num_blocks block_size) = do
       offset <- newVName "shared_offset"
       GC.decl [C.cdecl|unsigned int $id:size = $exp:num_bytes;|]
       return (offset, Just (size, offset))
-
-    printSizes =
-      intercalate [[C.cstm|fprintf(ctx->log, ", ");|]] . map printSize
-    printSize e =
-      [[C.cstm|fprintf(ctx->log, "%ld", (long int)$exp:e);|]]
