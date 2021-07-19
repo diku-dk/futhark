@@ -125,11 +125,11 @@ optimisedProgramMetrics programs pipeline program =
     SOACSPipeline ->
       check ["-s"]
     KernelsPipeline ->
-      check ["--kernels"]
-    SequentialCpuPipeline ->
-      check ["--cpu"]
-    GpuPipeline ->
       check ["--gpu"]
+    SequentialCpuPipeline ->
+      check ["--seq-mem"]
+    GpuPipeline ->
+      check ["--gpu-mem"]
     NoPipeline ->
       check []
   where
