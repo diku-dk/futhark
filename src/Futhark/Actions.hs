@@ -316,7 +316,7 @@ runEMCC cpath outpath classpath cflags_def ldflags expfuns rts lib = do
         ( [cpath, "-o", outpath]
             ++ ["-lnodefs.js"]
             ++ (if rts then ["-s", "--post-js", classpath] else [])
-            ++ (if lib then ["-s", "EXPORT_NAME=createFutharkModule", "-s", "MODULARIZE"] else [])
+            ++ (if lib then ["-s", "EXPORT_NAME=createFutharkModule", "-s", "MODULARIZE=1"] else [])
             ++ ["-s", "WASM_BIGINT"]
             ++ cmdCFLAGS cflags_def
             ++ cmdEMCFLAGS [""]
