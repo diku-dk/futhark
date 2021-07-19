@@ -188,7 +188,7 @@ class Server {
         }
       } catch (err) {
         var err_msg = "Failed to restore variable " + vname + ".\nPossibly malformed data in " + fname + ".\n";
-        throw "Failed to restore variable " + err_msg;
+        throw err_msg;
       }
     }
     skip_spaces(reader);
