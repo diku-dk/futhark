@@ -926,6 +926,8 @@ moveTransformToInput vtable pat aux (Screma w arrs (ScremaForm scan reduce map_l
             case op of
               ArrayIndexing _ _ (DimIndices slice) ->
                 BasicOp $ Index arr $ DimIndices $ whole_dim : slice
+              ArrayIndexing _ _ (DimFlat _ _) ->
+                undefined -- TODO: No idea what's going on here.
               ArrayRearrange _ _ perm ->
                 BasicOp $ Rearrange (0 : map (+ 1) perm) arr
               ArrayRotate _ _ rots ->

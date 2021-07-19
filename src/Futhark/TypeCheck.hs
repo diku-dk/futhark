@@ -1197,6 +1197,15 @@ checkSlice ::
   Slice SubExp ->
   TypeM lore ()
 checkSlice (DimIndices idxs) = mapM_ checkDimIndex idxs
+checkSlice (DimFlat offset idxs) = do
+  require [Prim int64] offset
+  mapM_ checkDimFlatIndex idxs
+
+checkDimFlatIndex ::
+  Checkable lore =>
+  DimFlatIndex SubExp ->
+  TypeM lore ()
+checkDimFlatIndex (DimFlatSlice n s) = mapM_ (require [Prim int64]) [n, s]
 
 checkDimIndex ::
   Checkable lore =>

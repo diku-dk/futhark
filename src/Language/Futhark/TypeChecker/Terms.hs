@@ -3,6 +3,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE Trustworthy #-}
 {-# LANGUAGE TupleSections #-}
 
@@ -1059,13 +1060,16 @@ patternDims (PatternAscription p (TypeDecl _ (Info t)) _) =
 patternDims _ = []
 
 sliceShape ::
-  Maybe (SrcLoc, Rigidity) ->
+  forall as.
+  SrcLoc ->
+  Maybe Rigidity ->
   Slice ->
   TypeBase (DimDecl VName) as ->
   TermTypeM (TypeBase (DimDecl VName) as, [VName])
-sliceShape r slice t@(Array als u et (ShapeDecl orig_dims)) =
+sliceShape loc r slice t@(Array als u et (ShapeDecl orig_dims)) =
   runWriterT $ setDims <$> adjustDims slice orig_dims
   where
+    setDims :: [DimDecl VName] -> TypeBase (DimDecl VName) as
     setDims [] = stripArray (length orig_dims) t
     setDims dims' = Array als u et $ ShapeDecl dims'
 
@@ -1076,18 +1080,18 @@ sliceShape r slice t@(Array als u et (ShapeDecl orig_dims)) =
     -- e.g. tests/inplace5.fut.
     isRigid Rigid {} = True
     isRigid _ = False
-    refine_sizes = maybe False (isRigid . snd) r
+    refine_sizes = maybe False isRigid r
 
     sliceSize orig_d i j stride =
       case r of
-        Just (loc, Rigid _) -> do
+        Just (Rigid _) -> do
           (d, ext) <-
             lift $
               extSize loc $
                 SourceSlice orig_d' (bareExp <$> i) (bareExp <$> j) (bareExp <$> stride)
           tell $ maybeToList ext
           return d
-        Just (loc, Nonrigid) ->
+        Just Nonrigid ->
           lift $ NamedDim . qualName <$> newDimVar loc Nonrigid "slice_dim"
         Nothing ->
           pure $ AnyDim Nothing
@@ -1097,7 +1101,19 @@ sliceShape r slice t@(Array als u et (ShapeDecl orig_dims)) =
           | isJust i, isJust j = Nothing
           | otherwise = Just orig_d
 
+    adjustDims :: SliceBase Info VName -> [DimDecl VName] -> WriterT [VName] TermTypeM [DimDecl VName]
     adjustDims (DimIndices idxs) = adjustDims' idxs
+    adjustDims (DimFlat offset idxs) = adjustFlatDims offset idxs
+
+    adjustFlatDims :: Exp -> [DimFlatIndex] -> [DimDecl VName] -> WriterT [VName] TermTypeM [DimDecl VName]
+    adjustFlatDims _offset idxs [_] =
+      -- Return new dimensions based on the slicing, shouldn't be too hard.
+      -- if length idxs < dims
+      --   then fail "Flat slice must be full or larger"
+      --   else
+      return $ fmap (\(DimFlatSlice n _) -> fromJust $ maybeDimFromExp n) idxs
+    adjustFlatDims _ _ _ =
+      lift $ typeError loc mempty "LMAD slicing is only allowed on one-dimensional arrays."
 
     adjustDims' (DimFix {} : idxes') (_ : dims) =
       adjustDims' idxes' dims
@@ -1116,7 +1132,7 @@ sliceShape r slice t@(Array als u et (ShapeDecl orig_dims)) =
       (:) <$> sliceSize d i j stride <*> adjustDims' idxes' dims
     adjustDims' _ dims =
       pure dims
-sliceShape _ _ t = pure (t, [])
+sliceShape _ _ _ t = pure (t, [])
 
 --- Main checkers
 
@@ -1510,14 +1526,17 @@ checkExp (AppExp (LetFun name (tparams, params, maybe_retdecl, NoInfo, e) body l
             (Info $ AppRes body_t ext)
 checkExp (AppExp (LetWith dest src slice ve body loc) _) =
   sequentially (checkIdent src) $ \src' _ -> do
-    (t, _) <- newArrayType (srclocOf src) "src" $ sliceLength slice
+    (t, _) <-
+      newArrayType (srclocOf src) "src" $
+        if isFlatSlice slice then 1 else sliceLength slice
+    (t', _) <- newArrayType (srclocOf src) "src" $ sliceLength slice
     unify (mkUsage loc "type of target array") t $ toStruct $ unInfo $ identType src'
 
     -- Need the fully normalised type here to get the proper aliasing information.
     src_t <- normTypeFully $ unInfo $ identType src'
 
     slice' <- checkSlice slice
-    (elemt, _) <- sliceShape (Just (loc, Nonrigid)) slice' =<< normTypeFully t
+    (elemt, _) <- sliceShape loc (Just Nonrigid) slice' =<< normTypeFully t'
 
     unless (unique src_t) $
       typeError loc mempty $
@@ -1547,9 +1566,11 @@ checkExp (AppExp (LetWith dest src slice ve body loc) _) =
             =<< expTypeFully body'
         return $ AppExp (LetWith dest' src' slice' ve' body' loc) (Info $ AppRes body_t ext)
 checkExp (Update src slice ve loc) = do
-  (t, _) <- newArrayType (srclocOf src) "src" $ sliceLength slice
+  (t, _) <-
+    newArrayType (srclocOf src) "src" $
+      if isFlatSlice slice then 1 else sliceLength slice
   slice' <- checkSlice slice
-  (elemt, _) <- sliceShape (Just (loc, Nonrigid)) slice' =<< normTypeFully t
+  (elemt, _) <- sliceShape loc (Just Nonrigid) slice' =<< normTypeFully t
 
   sequentially (checkExp ve >>= unifies "type of target array" elemt) $ \ve' _ ->
     sequentially (checkExp src >>= unifies "type of target array" t) $ \src' _ -> do
@@ -1598,12 +1619,16 @@ checkExp (RecordUpdate src fields ve NoInfo loc) = do
 
 --
 checkExp (AppExp (Index e slice loc) _) = do
-  (t, _) <- newArrayType loc "e" $ sliceLength slice
-  e' <- unifies "being indexed at" t =<< checkExp e
+  e' <- do
+    (t, _) <-
+      newArrayType loc "e" $
+        if isFlatSlice slice then 1 else sliceLength slice
+    unifies "being indexed at" t =<< checkExp e
+
   slice' <- checkSlice slice
   -- XXX, the RigidSlice here will be overridden in sliceShape with a proper value.
   (t', retext) <-
-    sliceShape (Just (loc, Rigid (RigidSlice Nothing ""))) slice'
+    sliceShape loc (Just (Rigid (RigidSlice Nothing ""))) slice'
       =<< expTypeFully e'
 
   -- Remove aliases if the result is an overloaded type, because that
@@ -1723,7 +1748,7 @@ checkExp (ProjectSection fields NoInfo loc) = do
 checkExp (IndexSection slice NoInfo loc) = do
   (t, _) <- newArrayType loc "e" $ sliceLength slice
   slice' <- checkSlice slice
-  (t', _) <- sliceShape Nothing slice' t
+  (t', _) <- sliceShape loc Nothing slice' t
   return $ IndexSection slice' (Info $ fromStruct $ Scalar $ Arrow mempty Unnamed t t') loc
 checkExp (AppExp (DoLoop _ mergepat mergeexp form loopbody loc) _) =
   sequentially (checkExp mergeexp) $ \mergeexp' _ -> do
@@ -2153,6 +2178,12 @@ checkIdent (Ident name _ loc) = do
 
 checkSlice :: SliceBase NoInfo Name -> TermTypeM Slice
 checkSlice (DimIndices idxs) = DimIndices <$> mapM checkDimIndex idxs
+checkSlice (DimFlat offset idxs) = DimFlat <$> (require "use as index" anySignedType =<< checkExp offset) <*> mapM checkDimFlatIndex idxs
+
+checkDimFlatIndex :: DimFlatIndexBase NoInfo Name -> TermTypeM DimFlatIndex
+checkDimFlatIndex (DimFlatSlice n s) =
+  DimFlatSlice <$> (require "use as index" anySignedType =<< checkExp n)
+    <*> (require "use as index" anySignedType =<< checkExp s)
 
 checkDimIndex :: DimIndexBase NoInfo Name -> TermTypeM DimIndex
 checkDimIndex (DimFix i) =

@@ -993,8 +993,12 @@ instance Simplifiable d => Simplifiable (DimIndex d) where
   simplify (DimFix i) = DimFix <$> simplify i
   simplify (DimSlice i n s) = DimSlice <$> simplify i <*> simplify n <*> simplify s
 
+instance Simplifiable d => Simplifiable (DimFlatIndex d) where
+  simplify (DimFlatSlice n s) = DimFlatSlice <$> simplify n <*> simplify s
+
 instance Simplifiable d => Simplifiable (Slice d) where
   simplify (DimIndices idxs) = DimIndices <$> simplify idxs
+  simplify (DimFlat o idxs) = DimFlat <$> simplify o <*> simplify idxs
 
 simplifyLambda ::
   SimplifiableLore lore =>

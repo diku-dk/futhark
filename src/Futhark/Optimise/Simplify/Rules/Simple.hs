@@ -290,6 +290,13 @@ simplifyReshapeIota _ _ _ = Nothing
 
 reshapeSlice :: Slice d -> [d] -> Slice d
 reshapeSlice (DimIndices idxs) scs = DimIndices $ reshapeSlice' idxs scs
+reshapeSlice (DimFlat offset idxs) scs = DimFlat offset $ reshapeFlatSlice idxs scs
+
+reshapeFlatSlice :: [DimFlatIndex d] -> [d] -> [DimFlatIndex d]
+reshapeFlatSlice (DimFlatSlice _ s : slice') (d : ds') =
+  DimFlatSlice d s : reshapeFlatSlice slice' ds'
+reshapeFlatSlice [] [] = []
+reshapeFlatSlice _ _ = undefined
 
 reshapeSlice' :: [DimIndex d] -> [d] -> [DimIndex d]
 reshapeSlice' (DimFix i : slice') scs =

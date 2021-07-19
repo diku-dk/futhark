@@ -82,6 +82,7 @@ tokens :-
   "->"                     { tokenC RIGHT_ARROW }
   ":"                      { tokenC COLON }
   ":>"                     { tokenC COLON_GT }
+  ";"                      { tokenC SEMICOLON }
   "\"                      { tokenC BACKSLASH }
   "~"                      { tokenC TILDE }
   "'"                      { tokenC APOSTROPHE }
@@ -310,6 +311,7 @@ data Token = ID Name
 
            | COLON
            | COLON_GT
+           | SEMICOLON
            | BACKSLASH
            | APOSTROPHE
            | APOSTROPHE_THEN_HAT

@@ -43,6 +43,7 @@ module Futhark.IR.Syntax.Core
     SubExp (..),
     Param (..),
     DimIndex (..),
+    DimFlatIndex (..),
     Slice (..),
     dimFix,
     sliceIndices,
@@ -322,23 +323,41 @@ instance Traversable DimIndex where
   traverse f (DimFix d) = DimFix <$> f d
   traverse f (DimSlice i j s) = DimSlice <$> f i <*> f j <*> f s
 
+data DimFlatIndex d
+  = DimFlatSlice d d
+  deriving (Eq, Ord, Show)
+
+instance Functor DimFlatIndex where
+  fmap f (DimFlatSlice n s) = DimFlatSlice (f n) (f s)
+
+instance Foldable DimFlatIndex where
+  foldMap f (DimFlatSlice n s) = f n <> f s
+
+instance Traversable DimFlatIndex where
+  traverse f (DimFlatSlice n s) = DimFlatSlice <$> f n <*> f s
+
 -- | A list of 'DimFix's, indicating how an array should be sliced.
 -- Whenever a function accepts a 'Slice', that slice should be total,
 -- i.e, cover all dimensions of the array.  Deviators should be
 -- indicated by taking a list of 'DimIndex'es instead.
 data Slice d
   = DimIndices [DimIndex d]
+  | DimFlat d [DimFlatIndex d]
   deriving (Eq, Ord, Show)
 
 instance Foldable Slice where
   foldMap = foldMapDefault
+
   length (DimIndices idxs) = length idxs
+  length (DimFlat _ idxs) = length idxs
 
 instance Functor Slice where
   fmap = fmapDefault
 
 instance Traversable Slice where
   traverse f (DimIndices idxs) = DimIndices <$> traverse (traverse f) idxs
+  traverse f (DimFlat offset idxs) =
+    DimFlat <$> f offset <*> traverse (traverse f) idxs
 
 -- | If the argument is a 'DimFix', return its component.
 dimFix :: DimIndex d -> Maybe d
@@ -348,6 +367,7 @@ dimFix _ = Nothing
 -- | If the slice is all 'DimFix's, return the components.
 sliceIndices :: Slice d -> Maybe [d]
 sliceIndices (DimIndices idxs) = mapM dimFix idxs
+sliceIndices (DimFlat _ _) = Nothing
 
 -- | The dimensions of the array produced by this slice.
 sliceDims :: Slice d -> [d]
@@ -355,6 +375,9 @@ sliceDims (DimIndices idxs) = mapMaybe dimSlice idxs
   where
     dimSlice (DimSlice _ d _) = Just d
     dimSlice DimFix {} = Nothing
+sliceDims (DimFlat _ idxs) = fmap dimSlice idxs
+  where
+    dimSlice (DimFlatSlice n _) = n
 
 -- | A slice with a stride of one.
 unitSlice :: Num d => d -> d -> DimIndex d
@@ -364,6 +387,7 @@ unitSlice offset n = DimSlice offset n 1
 -- the length of 'sliceDims' for the slice.
 fixSlice :: Num d => Slice d -> [d] -> [d]
 fixSlice (DimIndices idxs) = fixDimIndices idxs
+fixSlice (DimFlat _ _) = undefined -- TODO
 
 -- | Fix the 'DimSlice's of a slice.  The number of indexes must equal
 -- the length of 'sliceDims' for the slice.
@@ -378,6 +402,11 @@ fixDimIndices _ _ = []
 -- must equal the length of 'sliceDims' for the slice.
 sliceSlice :: Num d => Slice d -> Slice d -> Slice d
 sliceSlice (DimIndices js) (DimIndices is) = DimIndices $ sliceSlice' js is
+sliceSlice (DimFlat offset is) (DimIndices [DimSlice i _ s]) =
+  DimFlat (i * s + offset * s) $
+    map (\(DimFlatSlice n' s') -> DimFlatSlice n' $ s' * s) is
+sliceSlice _ _ =
+  undefined -- Not supported(?)
 
 sliceSlice' :: Num d => [DimIndex d] -> [DimIndex d] -> [DimIndex d]
 sliceSlice' (DimFix j : js') is' =

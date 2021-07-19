@@ -209,8 +209,13 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (DimIndexBase f vn) where
   ppr (DimSlice i Nothing Nothing) =
     maybe mempty ppr i <> text ":"
 
+instance (Eq vn, IsName vn, Annot f) => Pretty (DimFlatIndexBase f vn) where
+  ppr (DimFlatSlice i j) =
+    ppr i <> text ":" <> ppr j
+
 instance (Eq vn, IsName vn, Annot f) => Pretty (SliceBase f vn) where
   ppr (DimIndices idxs) = brackets (commasep (map ppr idxs))
+  ppr (DimFlat offset idxs) = brackets (ppr offset <> text ";" <> commasep (map ppr idxs))
 
 letBody :: (Eq vn, IsName vn, Annot f) => ExpBase f vn -> Doc
 letBody body@(AppExp LetPat {} _) = ppr body

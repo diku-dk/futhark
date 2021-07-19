@@ -53,8 +53,10 @@ module Language.Futhark.Syntax
     IdentBase (..),
     Inclusiveness (..),
     DimIndexBase (..),
+    DimFlatIndexBase (..),
     SliceBase (..),
     sliceLength,
+    isFlatSlice,
     AppExpBase (..),
     AppRes (..),
     ExpBase (..),
@@ -647,8 +649,26 @@ deriving instance Eq (DimIndexBase NoInfo VName)
 
 deriving instance Ord (DimIndexBase NoInfo VName)
 
+-- | An indexing of a single dimension.
+data DimFlatIndexBase f vn
+  = DimFlatSlice
+      (ExpBase f vn)
+      -- ^ Number of elemens
+      (ExpBase f vn)
+      -- ^ Stride in flat representation
+
+deriving instance Showable f vn => Show (DimFlatIndexBase f vn)
+
+deriving instance Eq (DimFlatIndexBase NoInfo VName)
+
+deriving instance Ord (DimFlatIndexBase NoInfo VName)
+
 data SliceBase f vn
   = DimIndices [DimIndexBase f vn]
+  | DimFlat
+      (ExpBase f vn)
+      -- ^ Offset
+      [DimFlatIndexBase f vn]
 
 deriving instance Showable f vn => Show (SliceBase f vn)
 
@@ -656,8 +676,15 @@ deriving instance Eq (SliceBase NoInfo VName)
 
 deriving instance Ord (SliceBase NoInfo VName)
 
+isFlatSlice :: SliceBase f vn -> Bool
+isFlatSlice (DimFlat _ _) = True
+isFlatSlice _ = False
+
 sliceLength :: SliceBase f vn -> Int
 sliceLength (DimIndices idxs) = length idxs
+sliceLength (DimFlat _ idxs) =
+  -- TODO: Figure out which are extra dimensions and which aren't
+  length idxs
 
 -- | A name qualified with a breadcrumb of module accesses.
 data QualName vn = QualName
