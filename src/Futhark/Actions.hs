@@ -348,8 +348,7 @@ compileMulticoreToWASMAction fcfg mode outpath =
 
       case mode of
         ToExecutable -> do
-          liftIO $ writeFile cpath $ MulticoreC.asExecutable cprog
-          -- Can't actually run multicore-wasm in node
+          liftIO $ writeFile cpath $ MulticoreWASM.asExecutable cprog
           runEMCC cpath outpath classpath ["-O3", "-msimd128"] ["-lm", "-pthread"] ("_main" : exps) False False
         ToLibrary -> do
           writeLibs cprog jsprog
