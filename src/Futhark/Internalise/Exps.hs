@@ -714,6 +714,8 @@ internaliseExp desc (E.Attr attr e loc) = do
       traceRes (locStr loc) e'
     I.AttrComp "trace" [I.AttrAtom tag] ->
       traceRes (nameToString tag) e'
+    "opaque" ->
+      mapM (letSubExp desc . BasicOp . Opaque OpaqueNil) e'
     _ ->
       pure e'
   where

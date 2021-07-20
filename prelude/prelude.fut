@@ -20,8 +20,9 @@ let t64 (x: f64): i32 = i32.f64 x
 -- inhibitor.  The compiler will treat this function as a black box.
 -- You can use this to work around optimisation deficiencies (or
 -- bugs), although it should hopefully rarely be necessary.
+-- Deprecated: use `#[opaque]` attribute instead.
 let opaque 't (x: t): t =
-  intrinsics.opaque x
+  #[opaque] x
 
 -- | Semantically just identity, but at runtime, the argument value
 -- will be printed.  Deprecated: use `#[trace]` attribute instead.

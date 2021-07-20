@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
     and `break` functions (although they are still present in
     slightly-reduced but compatible form).
 
+  * The `#[opaque]` attribute replaces the `opaque` function, which is
+    now deprecated.
+
   * Tracing now works in compiled code, albeit with several caveats
     (mainly, it does not work for code running on the GPU).
 

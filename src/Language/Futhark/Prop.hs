@@ -782,7 +782,6 @@ intrinsics =
     M.fromList $
       zipWith namify [20 ..] $
         map primFun (M.toList Primitive.primFuns)
-          ++ [("opaque", IntrinsicPolyFun [tp_a] [Scalar t_a] $ Scalar t_a)]
           ++ map unOpFun Primitive.allUnOps
           ++ map binOpFun Primitive.allBinOps
           ++ map cmpOpFun Primitive.allCmpOps
