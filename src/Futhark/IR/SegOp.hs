@@ -57,6 +57,7 @@ import Control.Monad.State.Strict
 import Control.Monad.Writer hiding (mapM_)
 import Data.Bifunctor (first)
 import Data.Bitraversable
+import Data.Foldable (traverse_)
 import Data.List
   ( elemIndex,
     foldl',
@@ -384,7 +385,7 @@ checkKernelBody ts (KernelBody (_, dec) stms kres) = do
       mapM_ (TC.require [Prim int64]) $ shapeDims shape
       arr_t <- lookupType arr
       forM_ res $ \(slice, e) -> do
-        mapM_ (traverse $ TC.require [Prim int64]) slice
+        traverse_ (TC.require [Prim int64]) slice
         TC.require [t] e
         unless (arr_t == t `arrayOfShape` shape) $
           TC.bad $
@@ -460,8 +461,7 @@ instance Pretty KernelResult where
                </> "with" <+> PP.apply (map ppRes res)
            ]
     where
-      ppRes (slice, e) =
-        PP.brackets (commasep (map ppr slice)) <+> text "=" <+> ppr e
+      ppRes (slice, e) = ppr slice <+> text "=" <+> ppr e
   ppr (ConcatReturns cs SplitContiguous w per_thread_elems v) =
     PP.spread $
       certAnnots cs
@@ -1027,13 +1027,13 @@ instance ASTRep rep => ST.IndexOp (SegOp lvl rep) where
                 ST.IndexedArray
                   (stmCerts stm <> cs)
                   arr
-                  (fixSlice (map (fmap isInt64) slice') excess_is)
+                  (fixSlice (fmap isInt64 slice') excess_is)
            in M.insert v idx table
         | otherwise =
           table
 
       asPrimExpSlice table =
-        runWriterT . mapM (traverse (primExpFromSubExpM (asPrimExp table)))
+        runWriterT . traverse (primExpFromSubExpM (asPrimExp table))
 
       asPrimExp table v
         | Just (ST.Indexed cs e) <- M.lookup v table = tell cs >> return e
@@ -1410,8 +1410,8 @@ bottomUpSegOp (vtable, used) (Pat kpes) dec segop = Simplify $ do
     sliceWithGtidsFixed stm
       | Let _ _ (BasicOp (Index arr slice)) <- stm,
         space_slice <- map (DimFix . Var . fst) $ unSegSpace space,
-        space_slice `isPrefixOf` slice,
-        remaining_slice <- drop (length space_slice) slice,
+        space_slice `isPrefixOf` unSlice slice,
+        remaining_slice <- Slice $ drop (length space_slice) (unSlice slice),
         all (isJust . flip ST.lookup vtable) $
           namesToList $
             freeIn arr <> freeIn remaining_slice =
@@ -1421,7 +1421,7 @@ bottomUpSegOp (vtable, used) (Pat kpes) dec segop = Simplify $ do
 
     distribute (kpes', kts', kres', kstms') stm
       | Let (Pat [pe]) _ _ <- stm,
-        Just (remaining_slice, arr) <- sliceWithGtidsFixed stm,
+        Just (Slice remaining_slice, arr) <- sliceWithGtidsFixed stm,
         Just (kpe, kpes'', kts'', kres'') <- isResult kpes' kts' kres' pe = do
         let outer_slice =
               map
@@ -1434,7 +1434,7 @@ bottomUpSegOp (vtable, used) (Pat kpes) dec segop = Simplify $ do
                 $ segSpaceDims space
             index kpe' =
               letBindNames [patElemName kpe'] . BasicOp . Index arr $
-                outer_slice <> remaining_slice
+                Slice $ outer_slice <> remaining_slice
         if patElemName kpe `UT.isConsumed` used
           then do
             precopy <- newVName $ baseString (patElemName kpe) <> "_precopy"

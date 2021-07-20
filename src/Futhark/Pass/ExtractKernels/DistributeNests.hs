@@ -815,7 +815,7 @@ segmentedScatterKernel nest perm scatter_pat cs scatter_w lam ivs dests = do
         )
         (Shape (init ws ++ shapeDims aw))
         (kernelInputArray inp)
-        [ (map DimFix $ map Var (init gtids) ++ map resSubExp is, resSubExp v)
+        [ (Slice $ map DimFix $ map Var (init gtids) ++ map resSubExp is, resSubExp v)
           | (is, v) <- is_vs
         ]
       where
@@ -841,10 +841,10 @@ segmentedUpdateKernel nest perm cs arr slice v = do
     -- Compute indexes into full array.
     v' <-
       certifying cs $
-        letSubExp "v" $ BasicOp $ Index v $ map (DimFix . Var) slice_gtids
+        letSubExp "v" $ BasicOp $ Index v $ Slice $ map (DimFix . Var) slice_gtids
     slice_is <-
       traverse (toSubExp "index") $
-        fixSlice (map (fmap pe64) slice) $ map (pe64 . Var) slice_gtids
+        fixSlice (fmap pe64 slice) $ map (pe64 . Var) slice_gtids
 
     let write_is = map (Var . fst) base_ispace ++ slice_is
         arr' =
@@ -854,7 +854,7 @@ segmentedUpdateKernel nest perm cs arr slice v = do
     v_t <- subExpType v'
     return
       ( v_t,
-        WriteReturns mempty (arrayShape arr_t) arr' [(map DimFix write_is, v')]
+        WriteReturns mempty (arrayShape arr_t) arr' [(Slice $ map DimFix write_is, v')]
       )
 
   -- Remove unused kernel inputs, since some of these might
@@ -893,9 +893,8 @@ segmentedGatherKernel nest cs arr slice = do
   ((res_t, res), kstms) <- runBuilder $ do
     -- Compute indexes into full array.
     slice'' <-
-      subExpSlice $
-        sliceSlice (primExpSlice slice) $
-          primExpSlice $ map (DimFix . Var) slice_gtids
+      subExpSlice . sliceSlice (primExpSlice slice) $
+        primExpSlice $ Slice $ map (DimFix . Var) slice_gtids
     v' <- certifying cs $ letSubExp "v" $ BasicOp $ Index arr slice''
     v_t <- subExpType v'
     return (v_t, Returns ResultMaySimplify mempty v')

@@ -827,13 +827,13 @@ checkBasicOp (UnOp op e) = require [Prim $ unOpType op] e
 checkBasicOp (BinOp op e1 e2) = checkBinOpArgs (binOpType op) e1 e2
 checkBasicOp (CmpOp op e1 e2) = checkCmpOp op e1 e2
 checkBasicOp (ConvOp op e) = require [Prim $ fst $ convOpType op] e
-checkBasicOp (Index ident idxes) = do
+checkBasicOp (Index ident (Slice idxes)) = do
   vt <- lookupType ident
   observe ident
   when (arrayRank vt /= length idxes) $
     bad $ SlicingError (arrayRank vt) (length idxes)
   mapM_ checkDimIndex idxes
-checkBasicOp (Update _ src idxes se) = do
+checkBasicOp (Update _ src (Slice idxes) se) = do
   src_t <- checkArrIdent src
   when (arrayRank src_t /= length idxes) $
     bad $ SlicingError (arrayRank src_t) (length idxes)
@@ -843,7 +843,7 @@ checkBasicOp (Update _ src idxes se) = do
     bad $ TypeError "The target of an Update must not alias the value to be written."
 
   mapM_ checkDimIndex idxes
-  require [arrayOf (Prim (elemType src_t)) (Shape (sliceDims idxes)) NoUniqueness] se
+  require [arrayOf (Prim (elemType src_t)) (Shape (sliceDims (Slice idxes))) NoUniqueness] se
   consume =<< lookupAliases src
 checkBasicOp (Iota e x s et) = do
   require [Prim int64] e

@@ -90,7 +90,7 @@ substituteIndicesInExp ::
 substituteIndicesInExp substs (Op op) = do
   let used_in_op = filter ((`nameIn` freeIn op) . fst) substs
   var_substs <- fmap mconcat $
-    forM used_in_op $ \(v, (cs, src, src_dec, is)) -> do
+    forM used_in_op $ \(v, (cs, src, src_dec, Slice is)) -> do
       v' <-
         certifying cs $
           letExp "idx" $ BasicOp $ Index src $ fullSlice (typeOf src_dec) is
@@ -113,10 +113,9 @@ substituteIndicesInExp substs e = do
               row <-
                 certifying cs2 $
                   letExp (baseString v ++ "_row") $
-                    BasicOp $ Index src2 $ fullSlice (typeOf src2dec) is2
+                    BasicOp $ Index src2 $ fullSlice (typeOf src2dec) (unSlice is2)
               row_copy <-
-                letExp (baseString v ++ "_row_copy") $
-                  BasicOp $ Copy row
+                letExp (baseString v ++ "_row_copy") $ BasicOp $ Copy row
               return $
                 update
                   v
@@ -127,7 +126,7 @@ substituteIndicesInExp substs e = do
                       `setType` ( typeOf src2dec
                                     `setArrayDims` sliceDims is2
                                 ),
-                    []
+                    Slice []
                   )
                   substs'
           consumingSubst substs' _ =
@@ -150,10 +149,10 @@ substituteIndicesInVar ::
   VName ->
   m VName
 substituteIndicesInVar substs v
-  | Just (cs2, src2, _, []) <- lookup v substs =
+  | Just (cs2, src2, _, Slice []) <- lookup v substs =
     certifying cs2 $
       letExp (baseString src2) $ BasicOp $ SubExp $ Var src2
-  | Just (cs2, src2, src2_dec, is2) <- lookup v substs =
+  | Just (cs2, src2, src2_dec, Slice is2) <- lookup v substs =
     certifying cs2 $
       letExp "idx" $ BasicOp $ Index src2 $ fullSlice (typeOf src2_dec) is2
   | otherwise =

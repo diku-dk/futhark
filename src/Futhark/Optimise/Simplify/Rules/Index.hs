@@ -39,26 +39,27 @@ simplifyIndexing ::
   Slice SubExp ->
   Bool ->
   Maybe (m IndexResult)
-simplifyIndexing vtable seType idd inds consuming =
+simplifyIndexing vtable seType idd (Slice inds) consuming =
   case defOf idd of
     _
       | Just t <- seType (Var idd),
-        inds == fullSlice t [] ->
+        Slice inds == fullSlice t [] ->
         Just $ pure $ SubExpResult mempty $ Var idd
-      | Just inds' <- sliceIndices inds,
+      | Just inds' <- sliceIndices (Slice inds),
         Just (ST.Indexed cs e) <- ST.index idd inds' vtable,
         worthInlining e,
         all (`ST.elem` vtable) (unCerts cs) ->
         Just $ SubExpResult cs <$> toSubExp "index_primexp" e
-      | Just inds' <- sliceIndices inds,
+      | Just inds' <- sliceIndices (Slice inds),
         Just (ST.IndexedArray cs arr inds'') <- ST.index idd inds' vtable,
         all (worthInlining . untyped) inds'',
         all (`ST.elem` vtable) (unCerts cs) ->
         Just $
-          IndexResult cs arr . map DimFix
+          IndexResult cs arr . Slice . map DimFix
             <$> mapM (toSubExp "index_primexp") inds''
     Nothing -> Nothing
-    Just (SubExp (Var v), cs) -> Just $ pure $ IndexResult cs v inds
+    Just (SubExp (Var v), cs) ->
+      Just $ pure $ IndexResult cs v $ Slice inds
     Just (Iota _ x s to_it, cs)
       | [DimFix ii] <- inds,
         Just (Prim (IntType from_it)) <- seType ii ->
@@ -101,17 +102,19 @@ simplifyIndexing vtable seType idd inds consuming =
               DimFix <$> adjustI i o d
             adjust (DimSlice i n s, o, d) =
               DimSlice <$> adjustI i o d <*> pure n <*> pure s
-        IndexResult cs a <$> mapM adjust (zip3 inds offsets dims)
+        IndexResult cs a . Slice <$> mapM adjust (zip3 inds offsets dims)
       where
         rotateAndSlice r DimSlice {} = not $ isCt0 r
         rotateAndSlice _ _ = False
     Just (Index aa ais, cs) ->
       Just $
         IndexResult cs aa
-          <$> subExpSlice (sliceSlice (primExpSlice ais) (primExpSlice inds))
+          <$> subExpSlice (sliceSlice (primExpSlice ais) (primExpSlice (Slice inds)))
     Just (Replicate (Shape [_]) (Var vv), cs)
       | [DimFix {}] <- inds, not consuming -> Just $ pure $ SubExpResult cs $ Var vv
-      | DimFix {} : is' <- inds, not consuming -> Just $ pure $ IndexResult cs vv is'
+      | DimFix {} : is' <- inds,
+        not consuming ->
+        Just $ pure $ IndexResult cs vv $ Slice is'
     Just (Replicate (Shape [_]) val@(Constant _), cs)
       | [DimFix {}] <- inds, not consuming -> Just $ pure $ SubExpResult cs val
     Just (Replicate (Shape ds) v, cs)
@@ -120,14 +123,14 @@ simplifyIndexing vtable seType idd inds consuming =
         ds' /= ds ->
         Just $ do
           arr <- letExp "smaller_replicate" $ BasicOp $ Replicate (Shape ds') v
-          return $ IndexResult cs arr $ ds_inds' ++ rest_inds
+          return $ IndexResult cs arr $ Slice $ ds_inds' ++ rest_inds
       where
         index DimFix {} = Nothing
         index (DimSlice _ n s) = Just (n, DimSlice (constant (0 :: Int64)) n s)
     Just (Rearrange perm src, cs)
       | rearrangeReach perm <= length (takeWhile isIndex inds) ->
         let inds' = rearrangeShape (rearrangeInverse perm) inds
-         in Just $ pure $ IndexResult cs src inds'
+         in Just $ pure $ IndexResult cs src $ Slice inds'
       where
         isIndex DimFix {} = True
         isIndex _ = False
@@ -140,21 +143,21 @@ simplifyIndexing vtable seType idd inds consuming =
         Just _ <- mapM dimFix inds,
         not consuming,
         ST.available src vtable ->
-        Just $ pure $ IndexResult cs src inds
+        Just $ pure $ IndexResult cs src $ Slice inds
     Just (Reshape newshape src, cs)
       | Just newdims <- shapeCoercion newshape,
         Just olddims <- arrayDims <$> seType (Var src),
         changed_dims <- zipWith (/=) newdims olddims,
         not $ or $ drop (length inds) changed_dims ->
-        Just $ pure $ IndexResult cs src inds
+        Just $ pure $ IndexResult cs src $ Slice inds
       | Just newdims <- shapeCoercion newshape,
         Just olddims <- arrayDims <$> seType (Var src),
         length newshape == length inds,
         length olddims == length newdims ->
-        Just $ pure $ IndexResult cs src inds
+        Just $ pure $ IndexResult cs src $ Slice inds
     Just (Reshape [_] v2, cs)
       | Just [_] <- arrayDims <$> seType (Var v2) ->
-        Just $ pure $ IndexResult cs v2 inds
+        Just $ pure $ IndexResult cs v2 $ Slice inds
     Just (Concat d x xs _, cs)
       | -- HACK: simplifying the indexing of an N-array concatenation
         -- is going to produce an N-deep if expression, which is bad
@@ -166,7 +169,7 @@ simplifyIndexing vtable seType idd inds consuming =
         not $ any isConcat $ x : xs,
         Just (ibef, DimFix i, iaft) <- focusNth d inds,
         Just (Prim res_t) <-
-          (`setArrayDims` sliceDims inds)
+          (`setArrayDims` sliceDims (Slice inds))
             <$> ST.lookupType x vtable -> Just $ do
         x_len <- arraySize d <$> lookupType x
         xs_lens <- mapM (fmap (arraySize d) . lookupType) xs
@@ -178,12 +181,13 @@ simplifyIndexing vtable seType idd inds consuming =
         let xs_and_starts = reverse $ zip xs starts
 
         let mkBranch [] =
-              letSubExp "index_concat" $ BasicOp $ Index x $ ibef ++ DimFix i : iaft
+              letSubExp "index_concat" $ BasicOp $ Index x $ Slice $ ibef ++ DimFix i : iaft
             mkBranch ((x', start) : xs_and_starts') = do
               cmp <- letSubExp "index_concat_cmp" $ BasicOp $ CmpOp (CmpSle Int64) start i
               (thisres, thisbnds) <- collectStms $ do
                 i' <- letSubExp "index_concat_i" $ BasicOp $ BinOp (Sub Int64 OverflowWrap) i start
-                letSubExp "index_concat" $ BasicOp $ Index x' $ ibef ++ DimFix i' : iaft
+                letSubExp "index_concat" . BasicOp . Index x' $
+                  Slice $ ibef ++ DimFix i' : iaft
               thisbody <- mkBodyM thisbnds [subExpRes thisres]
               (altres, altbnds) <- collectStms $ mkBranch xs_and_starts'
               altbody <- mkBodyM altbnds [subExpRes altres]
@@ -196,7 +200,7 @@ simplifyIndexing vtable seType idd inds consuming =
         Just se <- maybeNth i ses ->
         case inds' of
           [] -> Just $ pure $ SubExpResult cs se
-          _ | Var v2 <- se -> Just $ pure $ IndexResult cs v2 inds'
+          _ | Var v2 <- se -> Just $ pure $ IndexResult cs v2 $ Slice inds'
           _ -> Nothing
     -- Indexing single-element arrays.  We know the index must be 0.
     _
@@ -204,7 +208,7 @@ simplifyIndexing vtable seType idd inds consuming =
         isCt1 $ arraySize 0 t,
         DimFix i : inds' <- inds,
         not $ isCt0 i ->
-        Just . pure . IndexResult mempty idd $
+        Just . pure . IndexResult mempty idd . Slice $
           DimFix (constant (0 :: Int64)) : inds'
     _ -> Nothing
   where

@@ -52,7 +52,7 @@ import Futhark.IR.Syntax
   ( DimChange (..),
     DimIndex (..),
     ShapeChange,
-    Slice,
+    Slice (..),
     dimFix,
     unitSlice,
   )
@@ -369,11 +369,11 @@ sliceOneLMAD ::
   IxFun num ->
   Slice num ->
   Maybe (IxFun num)
-sliceOneLMAD (IxFun (lmad@(LMAD _ ldims) :| lmads) oshp cg) is = do
+sliceOneLMAD (IxFun (lmad@(LMAD _ ldims) :| lmads) oshp cg) (Slice is) = do
   let perm = lmadPermutation lmad
       is' = permuteInv perm is
-      cg' = cg && slicePreservesContiguous lmad is'
-  guard $ harmlessRotation lmad is'
+      cg' = cg && slicePreservesContiguous lmad (Slice is')
+  guard $ harmlessRotation lmad (Slice is')
   let lmad' = foldl sliceOne (LMAD (lmadOffset lmad) []) $ zip is' ldims
       -- need to remove the fixed dims from the permutation
       perm' =
@@ -414,7 +414,7 @@ sliceOneLMAD (IxFun (lmad@(LMAD _ ldims) :| lmads) oshp cg) is = do
       LMAD num ->
       Slice num ->
       Bool
-    harmlessRotation (LMAD _ dims) iss =
+    harmlessRotation (LMAD _ dims) (Slice iss) =
       and $ zipWith harmlessRotation' dims iss
 
     -- XXX: TODO: what happens to r on a negative-stride slice; is there
@@ -450,7 +450,7 @@ sliceOneLMAD (IxFun (lmad@(LMAD _ ldims) :| lmads) oshp cg) is = do
       LMAD num ->
       Slice num ->
       Bool
-    slicePreservesContiguous (LMAD _ dims) slc =
+    slicePreservesContiguous (LMAD _ dims) (Slice slc) =
       -- remove from the slice the LMAD dimensions that have stride 0.
       -- If the LMAD was contiguous in mem, then these dims will not
       -- influence the contiguousness of the result.
@@ -497,10 +497,9 @@ slice ::
   IxFun num ->
   Slice num ->
   IxFun num
-slice _ [] = error "slice: empty slice"
 slice ixfun@(IxFun (lmad@(LMAD _ _) :| lmads) oshp cg) dim_slices
   -- Avoid identity slicing.
-  | dim_slices == map (unitSlice 0) (shape ixfun) = ixfun
+  | unSlice dim_slices == map (unitSlice 0) (shape ixfun) = ixfun
   | Just ixfun' <- sliceOneLMAD ixfun dim_slices = ixfun'
   | otherwise =
     case sliceOneLMAD (iota (lmadShape lmad)) dim_slices of

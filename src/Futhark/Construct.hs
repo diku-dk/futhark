@@ -472,7 +472,7 @@ sliceDim d = DimSlice (constant (0 :: Int64)) d (constant (1 :: Int64))
 -- by 'Index'.
 fullSlice :: Type -> [DimIndex SubExp] -> Slice SubExp
 fullSlice t slice =
-  slice ++ map sliceDim (drop (length slice) $ arrayDims t)
+  Slice $ slice ++ map sliceDim (drop (length slice) $ arrayDims t)
 
 -- | @ sliceAt t n slice@ returns @slice@ but with 'DimSlice's of the
 -- outer @n@ dimensions prepended, and as many appended as to make it
@@ -484,13 +484,13 @@ sliceAt t n slice =
 -- | Like 'fullSlice', but the dimensions are simply numeric.
 fullSliceNum :: Num d => [d] -> [DimIndex d] -> Slice d
 fullSliceNum dims slice =
-  slice ++ map (\d -> DimSlice 0 d 1) (drop (length slice) dims)
+  Slice $ slice ++ map (\d -> DimSlice 0 d 1) (drop (length slice) dims)
 
 -- | Does the slice describe the full size of the array?  The most
 -- obvious such slice is one that 'DimSlice's the full span of every
 -- dimension, but also one that fixes all unit dimensions.
 isFullSlice :: Shape -> Slice SubExp -> Bool
-isFullSlice shape slice = and $ zipWith allOfIt (shapeDims shape) slice
+isFullSlice shape slice = and $ zipWith allOfIt (shapeDims shape) (unSlice slice)
   where
     allOfIt (Constant v) DimFix {} = oneIsh v
     allOfIt d (DimSlice _ n _) = d == n

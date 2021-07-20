@@ -293,7 +293,7 @@ intraGroupStm lvl stm@(Let pat aux e) = do
             let cs =
                   foldMap (foldMap resCerts . fst) is_vs
                     <> foldMap (resCerts . snd) is_vs
-                is_vs' = [(map (DimFix . resSubExp) is, resSubExp v) | (is, v) <- is_vs]
+                is_vs' = [(Slice $ map (DimFix . resSubExp) is, resSubExp v) | (is, v) <- is_vs]
             return $ WriteReturns cs a_w a is_vs'
           inputs = do
             (p, p_a) <- zip (lambdaParams lam') ivs
