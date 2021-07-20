@@ -86,6 +86,13 @@ primOpType (Index ident slice) =
     shape = Shape $ sliceDims slice
 primOpType (Update _ src _ _) =
   pure <$> lookupType src
+primOpType (FlatIndex ident slice) =
+  result <$> lookupType ident
+  where
+    result t = [Prim (elemType t) `arrayOfShape` shape]
+    shape = Shape $ flatSliceDims slice
+primOpType (FlatUpdate src _ _) =
+  pure <$> lookupType src
 primOpType (Iota n _ _ et) =
   pure [arrayOf (Prim (IntType et)) (Shape [n]) NoUniqueness]
 primOpType (Replicate (Shape []) e) =

@@ -52,6 +52,11 @@ module Futhark.IR.Syntax.Core
     fixSlice,
     sliceSlice,
     PatElemT (..),
+
+    -- * Flat (LMAD) slices
+    FlatSlice (..),
+    FlatDimIndex (..),
+    flatSliceDims,
   )
 where
 
@@ -395,6 +400,41 @@ sliceSlice (Slice jslice) (Slice islice) = Slice $ sliceSlice' jslice islice
     sliceSlice' (DimSlice j _ s0 : js') (DimSlice i n s1 : is') =
       DimSlice (j + (s0 * i)) n (s0 * s1) : sliceSlice' js' is'
     sliceSlice' _ _ = []
+
+data FlatDimIndex d
+  = FlatDimIndex
+      d
+      -- ^ Number of elements in dimension
+      d
+      -- ^ Stride of dimension
+  deriving (Eq, Ord, Show)
+
+instance Traversable FlatDimIndex where
+  traverse f (FlatDimIndex n s) = FlatDimIndex <$> f n <*> f s
+
+instance Functor FlatDimIndex where
+  fmap = fmapDefault
+
+instance Foldable FlatDimIndex where
+  foldMap = foldMapDefault
+
+data FlatSlice d = FlatSlice d [FlatDimIndex d]
+  deriving (Eq, Ord, Show)
+
+instance Traversable FlatSlice where
+  traverse f (FlatSlice offset is) =
+    FlatSlice <$> f offset <*> traverse (traverse f) is
+
+instance Functor FlatSlice where
+  fmap = fmapDefault
+
+instance Foldable FlatSlice where
+  foldMap = foldMapDefault
+
+flatSliceDims :: FlatSlice d -> [d]
+flatSliceDims (FlatSlice _ ds) = map dimSlice ds
+  where
+    dimSlice (FlatDimIndex n _) = n
 
 -- | An element of a pattern - consisting of a name and an addditional
 -- parametric decoration.  This decoration is what is expected to

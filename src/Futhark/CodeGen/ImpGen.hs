@@ -872,6 +872,8 @@ defCompileBasicOp (Pat [pe]) (Index src slice)
     copyDWIM (patElemName pe) [] (Var src) $ map (DimFix . toInt64Exp) idxs
 defCompileBasicOp _ Index {} =
   return ()
+defCompileBasicOp _ FlatIndex {} =
+  pure ()
 defCompileBasicOp (Pat [pe]) (Update safety _ slice se) =
   case safety of
     Unsafe -> write
