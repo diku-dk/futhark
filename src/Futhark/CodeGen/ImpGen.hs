@@ -1636,6 +1636,8 @@ copyDWIMDest dest (DimIndices dest_slice) (Var src) (DimIndices src_slice) = do
       -- somewhere.
     (_, AccVar {}) ->
       return () -- Nothing to do; accumulators are phantoms.
+copyDWIMDest _ _ _ _ =
+  undefined -- TODO Handle DimFlat
 
 -- | Copy from here to there; both destination and source be
 -- indexeded.  If so, they better be arrays of enough dimensions.
@@ -1706,6 +1708,12 @@ inBounds (DimIndices slice) dims =
       condInBounds (DimSlice i n s) d =
         0 .<=. i .&&. i + (n -1) * s .<. d
    in foldl1 (.&&.) $ zipWith condInBounds slice dims
+inBounds (DimFlat offset _) (d : _) =
+  -- TODO add some more checks here
+  0 .<=. offset .&&. offset .<. d
+inBounds (DimFlat _ _) [] =
+  -- TODO how to handle this?
+  undefined
 
 --- Building blocks for constructing code.
 

@@ -106,7 +106,7 @@ import Control.Category
 import Control.Monad.Except
 import Control.Monad.Reader
 import Control.Monad.State
-import Data.Foldable (toList, traverse_)
+import Data.Foldable (traverse_)
 import Data.Function ((&))
 import Data.List (elemIndex, find)
 import qualified Data.Map.Strict as M

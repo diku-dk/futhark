@@ -33,6 +33,8 @@ import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import qualified Data.Set as S
+import qualified Debug.Trace as Trace
+import Futhark.IR.Pretty
 import Futhark.IR.Primitive (intByteSize)
 import Futhark.Util (nubOrd)
 import Futhark.Util.Pretty hiding (bool, group, space)
@@ -46,6 +48,9 @@ import Language.Futhark.TypeChecker.Types hiding (checkTypeDecl)
 import qualified Language.Futhark.TypeChecker.Types as Types
 import Language.Futhark.TypeChecker.Unify hiding (Usage)
 import Prelude hiding (mod)
+
+traceWith :: Pretty a => String -> a -> a
+traceWith s a = Trace.trace (s <> ": " <> pretty a) a
 
 --- Uniqueness
 
@@ -316,9 +321,13 @@ data SizeSource
   | SourceBound (ExpBase NoInfo VName)
   | SourceSlice
       (Maybe (DimDecl VName))
-      (Maybe (ExpBase NoInfo VName))
-      (Maybe (ExpBase NoInfo VName))
-      (Maybe (ExpBase NoInfo VName))
+      ( Either
+          ( Maybe (ExpBase NoInfo VName),
+            Maybe (ExpBase NoInfo VName),
+            Maybe (ExpBase NoInfo VName)
+          )
+          (ExpBase NoInfo VName, ExpBase NoInfo VName)
+      )
   deriving (Eq, Ord, Show)
 
 -- | A description of where an artificial compiler-generated
@@ -452,8 +461,10 @@ extSize loc e = do
               RigidArg fname $ prettyOneLine e'
             SourceBound e' ->
               RigidBound $ prettyOneLine e'
-            SourceSlice d i j s ->
+            SourceSlice d (Left (i, j, s)) ->
               RigidSlice d $ prettyOneLine $ DimSlice i j s
+            SourceSlice d (Right (_n, _s)) ->
+              RigidSlice d $ "blablablabl" -- TODO
       d <- newDimVar loc (Rigid rsrc) "n"
       modify $ \s -> s {stateDimTable = M.insert e d $ stateDimTable s}
       return
@@ -1161,7 +1172,7 @@ sliceShape loc r slice t@(Array als u et (ShapeDecl orig_dims)) =
           (d, ext) <-
             lift $
               extSize loc $
-                SourceSlice orig_d' (bareExp <$> i) (bareExp <$> j) (bareExp <$> stride)
+                SourceSlice orig_d' $ Left ((bareExp <$> i), (bareExp <$> j), (bareExp <$> stride))
           modify (maybeToList ext ++)
           return d
         Just Nonrigid ->
@@ -1179,14 +1190,30 @@ sliceShape loc r slice t@(Array als u et (ShapeDecl orig_dims)) =
     adjustDims (DimFlat offset idxs) = adjustFlatDims offset idxs
 
     adjustFlatDims :: Exp -> [DimFlatIndex] -> [DimDecl VName] -> StateT [VName] TermTypeM [DimDecl VName]
-    adjustFlatDims _offset idxs [_] =
+    adjustFlatDims _offset idxs [d] =
       -- Return new dimensions based on the slicing, shouldn't be too hard.
       -- if length idxs < dims
       --   then fail "Flat slice must be full or larger"
       --   else
-      return $ fmap (\(DimFlatSlice n _) -> fromJust $ maybeDimFromExp n) idxs
-    adjustFlatDims _ _ _ =
-      lift $ typeError loc mempty "LMAD slicing is only allowed on one-dimensional arrays."
+      mapM
+        ( \(DimFlatSlice n _) -> do
+            (d', retext) <- lift $ dimFromExp (SourceBound . bareExp) $ traceWith "n" n
+            return $ Trace.trace ("retext: " <> pretty retext <> "\nd': " <> pretty d') d'
+        )
+        $ Trace.trace ("d:" <> pretty d) idxs
+    adjustFlatDims offset idxs ds =
+      lift $
+        typeError loc mempty $
+          text $
+            unwords
+              [ "LMAD slicing is only allowed on one-dimensional arrays.",
+                "offset",
+                pretty offset,
+                "idxs",
+                pretty idxs,
+                "ds",
+                pretty ds
+              ]
 
     adjustDims' (DimFix {} : idxes') (_ : dims) =
       adjustDims' idxes' dims
@@ -2434,7 +2461,7 @@ maybeDimFromExp :: Exp -> Maybe (DimDecl VName)
 maybeDimFromExp (Var v _ _) = Just $ NamedDim v
 maybeDimFromExp (Parens e _) = maybeDimFromExp e
 maybeDimFromExp (QualParens _ e _) = maybeDimFromExp e
-maybeDimFromExp e = ConstDim . fromIntegral <$> isInt64 e
+maybeDimFromExp e = ConstDim . fromIntegral <$> (traceWith "isInt" $ isInt64 $ traceWith "e" e)
 
 dimFromExp :: (Exp -> SizeSource) -> Exp -> TermTypeM (DimDecl VName, Maybe VName)
 dimFromExp rf (Parens e _) = dimFromExp rf e

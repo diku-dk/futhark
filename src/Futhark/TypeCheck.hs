@@ -827,12 +827,30 @@ checkBasicOp (UnOp op e) = require [Prim $ unOpType op] e
 checkBasicOp (BinOp op e1 e2) = checkBinOpArgs (binOpType op) e1 e2
 checkBasicOp (CmpOp op e1 e2) = checkCmpOp op e1 e2
 checkBasicOp (ConvOp op e) = require [Prim $ fst $ convOpType op] e
-checkBasicOp (Index ident idxes) = do
+checkBasicOp (Index ident (DimFlat offset idxes)) = do
+  vt <- lookupType ident
+  observe ident
+  when (arrayRank vt /= 1) $
+    bad $ SlicingError (arrayRank vt) 1
+  checkSlice (DimFlat offset idxes)
+checkBasicOp (Index ident (DimIndices idxes)) = do
   vt <- lookupType ident
   observe ident
   when (arrayRank vt /= length idxes) $
     bad $ SlicingError (arrayRank vt) (length idxes)
+  checkSlice (DimIndices idxes)
+checkBasicOp (Update _ src idxes@(DimFlat _ _) se) = do
+  src_t <- checkArrIdent src
+  when (arrayRank src_t /= 1) $
+    bad $ SlicingError (arrayRank src_t) 1
+
+  se_aliases <- subExpAliasesM se
+  when (src `nameIn` se_aliases) $
+    bad $ TypeError "The target of an Update must not alias the value to be written."
+
   checkSlice idxes
+  require [arrayOf (Prim (elemType src_t)) (Shape (sliceDims idxes)) NoUniqueness] se
+  consume =<< lookupAliases src
 checkBasicOp (Update _ src idxes se) = do
   src_t <- checkArrIdent src
   when (arrayRank src_t /= length idxes) $
@@ -1204,18 +1222,18 @@ checkPatElem (PatElem name dec) =
     checkLetBoundDec name dec
 
 checkSlice ::
-  Checkable lore =>
+  Checkable rep =>
   Slice SubExp ->
-  TypeM lore ()
+  TypeM rep ()
 checkSlice (DimIndices idxs) = mapM_ checkDimIndex idxs
 checkSlice (DimFlat offset idxs) = do
   require [Prim int64] offset
   mapM_ checkDimFlatIndex idxs
 
 checkDimFlatIndex ::
-  Checkable lore =>
+  Checkable rep =>
   DimFlatIndex SubExp ->
-  TypeM lore ()
+  TypeM rep ()
 checkDimFlatIndex (DimFlatSlice n s) = mapM_ (require [Prim int64]) [n, s]
 
 checkDimIndex ::

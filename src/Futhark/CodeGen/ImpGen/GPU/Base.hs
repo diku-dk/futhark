@@ -1433,6 +1433,8 @@ copyInGroup pt destloc (DimIndices destslice) srcloc (DimIndices srcslice) = do
           srcloc
           (DimIndices $ map DimFix $ fixSlice (DimIndices srcslice) is)
       sOp $ Imp.Barrier Imp.FenceLocal
+copyInGroup _ _ _ _ _ =
+  undefined -- TODO handle DimFlat
 
 threadOperations, groupOperations :: Operations GPUMem KernelEnv Imp.KernelOp
 threadOperations =

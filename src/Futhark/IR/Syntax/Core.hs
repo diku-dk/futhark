@@ -65,6 +65,7 @@ import qualified Data.Map.Strict as M
 import Data.Maybe
 import Data.String
 import Data.Traversable (fmapDefault, foldMapDefault)
+import qualified Debug.Trace as Trace
 import Futhark.IR.Primitive
 import Language.Futhark.Core
 import Prelude hiding (id, (.))
@@ -338,7 +339,11 @@ instance Traversable DimIndex where
   traverse f (DimSlice i j s) = DimSlice <$> f i <*> f j <*> f s
 
 data DimFlatIndex d
-  = DimFlatSlice d d
+  = DimFlatSlice
+      d
+      -- ^ Number of elements in dimension
+      d
+      -- ^ Stride of dimension
   deriving (Eq, Ord, Show)
 
 instance Functor DimFlatIndex where
@@ -356,7 +361,11 @@ instance Traversable DimFlatIndex where
 -- indicated by taking a list of 'DimIndex'es instead.
 data Slice d
   = DimIndices [DimIndex d]
-  | DimFlat d [DimFlatIndex d]
+  | DimFlat
+      d
+      -- ^ Offset
+      [DimFlatIndex d]
+      -- ^ Dimensions
   deriving (Eq, Ord, Show)
 
 instance Foldable Slice where
@@ -414,13 +423,18 @@ fixDimIndices _ _ = []
 
 -- | Further slice the 'DimSlice's of a slice.  The number of slices
 -- must equal the length of 'sliceDims' for the slice.
-sliceSlice :: Num d => Slice d -> Slice d -> Slice d
+sliceSlice :: (Num d, Show d) => Slice d -> Slice d -> Slice d
 sliceSlice (DimIndices js) (DimIndices is) = DimIndices $ sliceSlice' js is
-sliceSlice (DimFlat offset is) (DimIndices [DimSlice i _ s]) =
+sliceSlice (DimIndices [DimSlice i _ s]) (DimFlat offset is) =
   DimFlat (i * s + offset * s) $
     map (\(DimFlatSlice n' s') -> DimFlatSlice n' $ s' * s) is
-sliceSlice _ _ =
-  undefined -- Not supported(?)
+sliceSlice (DimFlat offset is) js0
+  | Just js <- sliceIndices js0,
+    length is == length js =
+    let offset' = foldl (\acc (DimFlatSlice _ s, j) -> acc + s * j) offset $ zip is js
+     in DimFlat offset' (take (length is) $ repeat $ DimFlatSlice 1 1)
+sliceSlice s1 s2 =
+  Trace.trace ("s1: " <> show s1 <> "\ns2: " <> show s2) undefined -- Not supported(?)
 
 sliceSlice' :: Num d => [DimIndex d] -> [DimIndex d] -> [DimIndex d]
 sliceSlice' (DimFix j : js') is' =
