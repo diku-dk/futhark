@@ -69,7 +69,7 @@ data BreakReason
     BreakNaN
 
 data ExtOp a
-  = ExtOpTrace Loc String a
+  = ExtOpTrace String String a
   | ExtOpBreak Loc BreakReason (NE.NonEmpty StackFrame) a
   | ExtOpError InterpreterError
 
@@ -455,9 +455,9 @@ bad loc env s = stacking loc env $ do
   ss <- map (locStr . srclocOf) <$> stacktrace
   liftF $ ExtOpError $ InterpreterError $ "Error at\n" ++ prettyStacktrace 0 ss ++ s
 
-trace :: Loc -> Value -> EvalM ()
-trace loc v = do
-  liftF $ ExtOpTrace loc (prettyOneLine v) ()
+trace :: String -> Value -> EvalM ()
+trace w v = do
+  liftF $ ExtOpTrace w (prettyOneLine v) ()
 
 typeCheckerEnv :: Env -> T.Env
 typeCheckerEnv env =
@@ -1089,13 +1089,19 @@ eval env (Constr c es (Info t) _) = do
   vs <- mapM (eval env) es
   shape <- typeValueShape env $ toStruct t
   return $ ValueSum shape c vs
-eval env (Attr attr e loc) = do
+eval env (Attr (AttrAtom "break") e loc) = do
+  break (locOf loc)
+  eval env e
+eval env (Attr (AttrAtom "trace") e loc) = do
   v <- eval env e
-  case attr of
-    AttrAtom "trace" -> trace (locOf loc) v
-    AttrAtom "break" -> break (locOf loc)
-    _ -> pure ()
+  trace (locStr (locOf loc)) v
   pure v
+eval env (Attr (AttrComp "trace" [AttrAtom tag]) e _) = do
+  v <- eval env e
+  trace (nameToString tag) v
+  pure v
+eval env (Attr _ e _) =
+  eval env e
 
 evalCase ::
   Value ->

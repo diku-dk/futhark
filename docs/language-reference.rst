@@ -1673,7 +1673,7 @@ an identifier.
 ``break``
 .........
 
-In the interpreter, pause execution after evaluating the expression.
+In the interpreter, pause execution *before* evaluating the expression.
 No effect for compiled code.
 
 ``incremental_flattening(no_outer)``

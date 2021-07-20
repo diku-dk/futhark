@@ -346,7 +346,7 @@ runInterpreter m = runF m (return . Right) intOp
     intOp (I.ExtOpError err) =
       return $ Left err
     intOp (I.ExtOpTrace w v c) = do
-      liftIO $ putStrLn $ "Trace at " ++ locStr (srclocOf w) ++ ": " ++ v
+      liftIO $ putStrLn $ w ++ ": " ++ v
       c
     intOp (I.ExtOpBreak w why callstack c) = do
       s <- get
@@ -398,7 +398,7 @@ runInterpreter' m = runF m (return . Right) intOp
   where
     intOp (I.ExtOpError err) = return $ Left err
     intOp (I.ExtOpTrace w v c) = do
-      liftIO $ putStrLn $ "Trace at " ++ locStr w ++ ": " ++ v
+      liftIO $ putStrLn $ w ++ ": " ++ v
       c
     intOp (I.ExtOpBreak _ _ _ c) = c
 
