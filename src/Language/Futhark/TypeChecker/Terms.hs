@@ -33,7 +33,6 @@ import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import qualified Data.Set as S
-import qualified Debug.Trace as Trace
 import Futhark.IR.Pretty
 import Futhark.IR.Primitive (intByteSize)
 import Futhark.Util (nubOrd)
@@ -48,9 +47,6 @@ import Language.Futhark.TypeChecker.Types hiding (checkTypeDecl)
 import qualified Language.Futhark.TypeChecker.Types as Types
 import Language.Futhark.TypeChecker.Unify hiding (Usage)
 import Prelude hiding (mod)
-
-traceWith :: Pretty a => String -> a -> a
-traceWith s a = Trace.trace (s <> ": " <> pretty a) a
 
 --- Uniqueness
 
@@ -1197,10 +1193,10 @@ sliceShape loc r slice t@(Array als u et (ShapeDecl orig_dims)) =
       --   else
       mapM
         ( \(DimFlatSlice n _) -> do
-            (d', retext) <- lift $ dimFromExp (SourceBound . bareExp) $ traceWith "n" n
-            return $ Trace.trace ("retext: " <> pretty retext <> "\nd': " <> pretty d') d'
+            (d', retext) <- lift $ dimFromExp (SourceBound . bareExp) n
+            return d'
         )
-        $ Trace.trace ("d:" <> pretty d) idxs
+        idxs
     adjustFlatDims offset idxs ds =
       lift $
         typeError loc mempty $
@@ -2461,7 +2457,7 @@ maybeDimFromExp :: Exp -> Maybe (DimDecl VName)
 maybeDimFromExp (Var v _ _) = Just $ NamedDim v
 maybeDimFromExp (Parens e _) = maybeDimFromExp e
 maybeDimFromExp (QualParens _ e _) = maybeDimFromExp e
-maybeDimFromExp e = ConstDim . fromIntegral <$> (traceWith "isInt" $ isInt64 $ traceWith "e" e)
+maybeDimFromExp e = ConstDim . fromIntegral <$> isInt64 e
 
 dimFromExp :: (Exp -> SizeSource) -> Exp -> TermTypeM (DimDecl VName, Maybe VName)
 dimFromExp rf (Parens e _) = dimFromExp rf e
