@@ -872,8 +872,6 @@ defCompileBasicOp (Pat [pe]) (Index src slice)
     copyDWIM (patElemName pe) [] (Var src) $ map (DimFix . toInt64Exp) idxs
 defCompileBasicOp _ Index {} =
   return ()
-defCompileBasicOp _ FlatIndex {} =
-  pure ()
 defCompileBasicOp (Pat [pe]) (Update safety _ slice se) =
   case safety of
     Unsafe -> write
@@ -882,6 +880,8 @@ defCompileBasicOp (Pat [pe]) (Update safety _ slice se) =
     slice' = fmap toInt64Exp slice
     dims = map toInt64Exp $ arrayDims $ patElemType pe
     write = sUpdate (patElemName pe) slice' se
+defCompileBasicOp _ FlatIndex {} =
+  pure ()
 defCompileBasicOp (Pat [pe]) (Replicate (Shape ds) se) = do
   ds' <- mapM toExp ds
   is <- replicateM (length ds) (newVName "i")

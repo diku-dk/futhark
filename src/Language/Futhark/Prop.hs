@@ -1015,6 +1015,35 @@ intrinsics =
                    $ uarr_a $ shape [k]
                )
              ]
+          ++
+          -- Experimental LMAD ones.
+          [ ( "flat_index_3d",
+              IntrinsicPolyFun
+                [tp_a, sp_n]
+                [ arr_a $ shape [n],
+                  Scalar (Prim $ Signed Int64),
+                  Scalar (Prim $ Signed Int64),
+                  Scalar (Prim $ Signed Int64),
+                  Scalar (Prim $ Signed Int64),
+                  Scalar (Prim $ Signed Int64),
+                  Scalar (Prim $ Signed Int64),
+                  Scalar (Prim $ Signed Int64)
+                ]
+                $ arr_a $ ShapeDecl [AnyDim Nothing, AnyDim Nothing, AnyDim Nothing]
+            ),
+            ( "flat_update_3d",
+              IntrinsicPolyFun
+                [tp_a, sp_n, sp_k, sp_l, sp_p]
+                [ uarr_a $ shape [n],
+                  Scalar (Prim $ Signed Int64),
+                  Scalar (Prim $ Signed Int64),
+                  Scalar (Prim $ Signed Int64),
+                  Scalar (Prim $ Signed Int64),
+                  arr_a $ shape [k, l, p]
+                ]
+                $ uarr_a $ shape [n]
+            )
+          ]
   where
     [a, b, n, m, k, l, p] = zipWith VName (map nameFromString ["a", "b", "n", "m", "k", "l", "p"]) [0 ..]
 
@@ -1028,7 +1057,7 @@ intrinsics =
     uarr_b = Array () Unique t_b
     tp_b = TypeParamType Unlifted b mempty
 
-    [sp_n, sp_m, sp_k, sp_l, _sp_p] = map (`TypeParamDim` mempty) [n, m, k, l, p]
+    [sp_n, sp_m, sp_k, sp_l, sp_p] = map (`TypeParamDim` mempty) [n, m, k, l, p]
 
     shape = ShapeDecl . map (NamedDim . qualName)
 
