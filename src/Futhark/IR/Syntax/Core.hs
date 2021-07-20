@@ -432,7 +432,7 @@ sliceSlice (DimFlat offset is) js0
   | Just js <- sliceIndices js0,
     length is == length js =
     let offset' = foldl (\acc (DimFlatSlice _ s, j) -> acc + s * j) offset $ zip is js
-     in DimFlat offset' (take (length is) $ repeat $ DimFlatSlice 1 1)
+     in DimIndices [DimFix offset']
 sliceSlice s1 s2 =
   Trace.trace ("s1: " <> show s1 <> "\ns2: " <> show s2) undefined -- Not supported(?)
 
