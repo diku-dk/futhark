@@ -1676,6 +1676,13 @@ an identifier.
 In the interpreter, pause execution *before* evaluating the expression.
 No effect for compiled code.
 
+``opaque``
+..........
+
+The compiler will treat the attributed expression as a black box.
+This is used to work around optimisation deficiencies (or bugs),
+although it should hopefully rarely be necessary.
+
 ``incremental_flattening(no_outer)``
 ....................................
 
