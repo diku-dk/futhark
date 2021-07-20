@@ -820,6 +820,18 @@ checkBasicOp (Index ident (DimIndices idxes)) = do
   when (arrayRank vt /= length idxes) $
     bad $ SlicingError (arrayRank vt) (length idxes)
   checkSlice (DimIndices idxes)
+checkBasicOp (Update src idxes@(DimFlat _ _) se) = do
+  src_t <- checkArrIdent src
+  when (arrayRank src_t /= 1) $
+    bad $ SlicingError (arrayRank src_t) 1
+
+  se_aliases <- subExpAliasesM se
+  when (src `nameIn` se_aliases) $
+    bad $ TypeError "The target of an Update must not alias the value to be written."
+
+  checkSlice idxes
+  require [arrayOf (Prim (elemType src_t)) (Shape (sliceDims idxes)) NoUniqueness] se
+  consume =<< lookupAliases src
 checkBasicOp (Update src idxes se) = do
   src_t <- checkArrIdent src
   when (arrayRank src_t /= length idxes) $
