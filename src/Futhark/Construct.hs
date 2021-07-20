@@ -497,7 +497,7 @@ isFullSlice shape (DimIndices slice) = and $ zipWith allOfIt (shapeDims shape) s
     allOfIt (Constant v) DimFix {} = oneIsh v
     allOfIt d (DimSlice _ n _) = d == n
     allOfIt _ _ = False
-isFullSlice _ (DimFlat _ _) = True
+isFullSlice _ (DimFlat _ _) = False
 
 ifCommon :: [Type] -> IfDec ExtType
 ifCommon ts = IfDec (staticShapes ts) IfNormal
