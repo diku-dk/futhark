@@ -1067,11 +1067,8 @@ sliceInfo v slice = do
     [] -> return $ MemPrim et
     dims ->
       return $
-        MemArray et (Shape dims) NoUniqueness $
-          ArrayIn mem $
-            IxFun.slice
-              ixfun
-              (map (fmap (isInt64 . primExpFromSubExp int64)) slice)
+        MemArray et (Shape dims) NoUniqueness . ArrayIn mem $
+          IxFun.slice ixfun (fmap pe64 slice)
 
 class TypedOp (Op rep) => OpReturns rep where
   opReturns ::

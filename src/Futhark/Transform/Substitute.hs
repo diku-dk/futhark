@@ -188,6 +188,9 @@ instance Substitute d => Substitute (DimChange d) where
 instance Substitute d => Substitute (DimIndex d) where
   substituteNames substs = fmap $ substituteNames substs
 
+instance Substitute d => Substitute (Slice d) where
+  substituteNames substs = fmap $ substituteNames substs
+
 instance Substitute v => Substitute (PrimExp v) where
   substituteNames substs = fmap $ substituteNames substs
 

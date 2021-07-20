@@ -874,7 +874,7 @@ defCompileBasicOp (Pat [pe]) (Update safety _ slice se) =
     Unsafe -> write
     Safe -> sWhen (inBounds slice' dims) write
   where
-    slice' = map (fmap toInt64Exp) slice
+    slice' = fmap toInt64Exp slice
     dims = map toInt64Exp $ arrayDims $ patElemType pe
     write = sUpdate (patElemName pe) slice' se
 defCompileBasicOp (Pat [pe]) (Replicate (Shape ds) se) = do
@@ -925,7 +925,7 @@ defCompileBasicOp (Pat [pe]) (ArrayLit es _)
             IxFun.iota [fromIntegral $ length es]
         entry = MemVar Nothing $ MemEntry dest_space
     addVar static_array entry
-    let slice = [DimSlice 0 (genericLength es) 1]
+    let slice = Slice [DimSlice 0 (genericLength es) 1]
     copy t dest_mem slice static_src slice
   | otherwise =
     forM_ (zip [0 ..] es) $ \(i, e) ->
@@ -952,7 +952,7 @@ defCompileBasicOp _ (UpdateAcc acc is vs) = sComment "UpdateAcc" $ do
   -- index parameters.
   (_, _, arrs, dims, op) <- lookupAcc acc is'
 
-  sWhen (inBounds (map DimFix is') dims) $
+  sWhen (inBounds (Slice (map DimFix is')) dims) $
     case op of
       Nothing ->
         -- Scatter-like.
@@ -1700,7 +1700,7 @@ typeSize t =
 -- is useful for things like scatter, which ignores out-of-bounds
 -- writes.
 inBounds :: Slice (Imp.TExp Int64) -> [Imp.TExp Int64] -> Imp.TExp Bool
-inBounds slice dims =
+inBounds (Slice slice) dims =
   let condInBounds (DimFix i) d =
         0 .<=. i .&&. i .<. d
       condInBounds (DimSlice i n s) d =
@@ -1815,7 +1815,7 @@ sWrite arr is v = do
   emit $ Imp.Write mem offset (primExpType v) space vol v
 
 sUpdate :: VName -> Slice (Imp.TExp Int64) -> SubExp -> ImpM rep r op ()
-sUpdate arr slice v = copyDWIM arr slice v []
+sUpdate arr slice v = copyDWIM arr (unSlice slice) v []
 
 sLoopNest ::
   Shape ->

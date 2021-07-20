@@ -162,6 +162,9 @@ instance PrettyRep rep => Pretty (Stm rep) where
             stmCertAnnots bnd
           ]
 
+instance Pretty a => Pretty (Slice a) where
+  ppr (Slice xs) = brackets (commasep (map ppr xs))
+
 instance Pretty BasicOp where
   ppr (SubExp se) = ppr se
   ppr (Opaque OpaqueNil e) = text "opaque" <> apply [ppr e]
@@ -179,12 +182,9 @@ instance Pretty BasicOp where
     where
       (fromtype, totype) = convOpType conv
   ppr (UnOp op e) = ppr op <+> pprPrec 9 e
-  ppr (Index v idxs) =
-    ppr v <> brackets (commasep (map ppr idxs))
-  ppr (Update safety src idxs se) =
-    ppr src <+> with <+> brackets (commasep (map ppr idxs))
-      <+> text "="
-      <+> ppr se
+  ppr (Index v slice) = ppr v <> ppr slice
+  ppr (Update safety src slice se) =
+    ppr src <+> with <+> ppr slice <+> text "=" <+> ppr se
     where
       with = case safety of
         Unsafe -> text "with"

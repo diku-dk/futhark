@@ -51,7 +51,7 @@ indexArray i (Param p t) arr =
   Let (Pat [PatElem p t]) (defAux ()) . BasicOp $
     case t of
       Acc {} -> SubExp $ Var arr
-      _ -> Index arr $ DimFix (Var i) : map sliceDim (arrayDims t)
+      _ -> Index arr $ Slice $ DimFix (Var i) : map sliceDim (arrayDims t)
 
 mapLambdaToBody ::
   (Body SOACS -> ExtractM (Body MC)) ->
@@ -328,7 +328,7 @@ transformSOAC pat _ (Scatter w lam ivs dests) = do
         let cs =
               foldMap (foldMap resCerts . fst) is_vs
                 <> foldMap (resCerts . snd) is_vs
-            is_vs' = [(map (DimFix . resSubExp) is, resSubExp v) | (is, v) <- is_vs]
+            is_vs' = [(Slice $ map (DimFix . resSubExp) is, resSubExp v) | (is, v) <- is_vs]
         return $ WriteReturns cs a_w a is_vs'
       kbody = KernelBody () kstms kres
   return $

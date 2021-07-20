@@ -834,7 +834,7 @@ simplifyMapIota vtable pat aux (Screma w arrs (ScremaForm scan reduce map_lam))
         zeroIsh o && oneIsh s
       _ -> False
 
-    indexesWith v (ArrayIndexing cs arr (DimFix (Var i) : _))
+    indexesWith v (ArrayIndexing cs arr (Slice (DimFix (Var i) : _)))
       | arr `ST.elem` vtable,
         all (`ST.elem` vtable) $ unCerts cs =
         i == v
@@ -847,16 +847,13 @@ simplifyMapIota vtable pat aux (Screma w arrs (ScremaForm scan reduce map_lam))
         if arraySize 0 arr_t == w
           then return arr
           else
-            certifying cs $
-              letExp (baseString arr ++ "_prefix") $
-                BasicOp $
-                  Index arr $
-                    fullSlice arr_t [DimSlice (intConst Int64 0) w (intConst Int64 1)]
+            certifying cs . letExp (baseString arr ++ "_prefix") . BasicOp . Index arr $
+              fullSlice arr_t [DimSlice (intConst Int64 0) w (intConst Int64 1)]
       return $
         Just
           ( arr',
             Param arr_elem (rowType arr_t),
-            ArrayIndexing cs arr_elem (drop 1 slice)
+            ArrayIndexing cs arr_elem (Slice (drop 1 (unSlice slice)))
           )
     mapOverArr _ = return Nothing
 simplifyMapIota _ _ _ _ = Skip
@@ -920,8 +917,8 @@ moveTransformToInput vtable pat aux (Screma w arrs (ScremaForm scan reduce map_l
         arr_transformed <- certifying (arrayOpCerts op) $
           letExp (baseString arr ++ "_transformed") $
             case op of
-              ArrayIndexing _ _ slice ->
-                BasicOp $ Index arr $ whole_dim : slice
+              ArrayIndexing _ _ (Slice slice) ->
+                BasicOp $ Index arr $ Slice $ whole_dim : slice
               ArrayRearrange _ _ perm ->
                 BasicOp $ Rearrange (0 : map (+ 1) perm) arr
               ArrayRotate _ _ rots ->

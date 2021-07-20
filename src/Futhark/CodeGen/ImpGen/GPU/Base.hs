@@ -169,7 +169,7 @@ updateAcc acc is vs = sComment "UpdateAcc" $ do
   -- See the ImpGen implementation of UpdateAcc for general notes.
   let is' = map toInt64Exp is
   (c, space, arrs, dims, op) <- lookupAcc acc is'
-  sWhen (inBounds (map DimFix is') dims) $
+  sWhen (inBounds (Slice (map DimFix is')) dims) $
     case op of
       Nothing ->
         forM_ (zip arrs vs) $ \(arr, v) -> copyDWIMFix arr is' v []
@@ -294,9 +294,9 @@ compileGroupExp (Pat [pe]) (BasicOp (Update safety _ slice se))
         Safe -> sWhen (inBounds slice' dims) write
     sOp $ Imp.Barrier Imp.FenceLocal
   where
-    slice' = map (fmap toInt64Exp) slice
+    slice' = fmap toInt64Exp slice
     dims = map toInt64Exp $ arrayDims $ patElemType pe
-    write = copyDWIM (patElemName pe) slice' se []
+    write = copyDWIM (patElemName pe) (unSlice slice') se []
 compileGroupExp dest e =
   defCompileExp dest e
 
@@ -1416,20 +1416,22 @@ copyInGroup pt destloc destslice srcloc srcslice = do
   case (dest_space, src_space) of
     (ScalarSpace destds _, ScalarSpace srcds _) -> do
       let destslice' =
-            replicate (length destslice - length destds) (DimFix 0)
-              ++ takeLast (length destds) destslice
+            Slice $
+              replicate (length (unSlice destslice) - length destds) (DimFix 0)
+                ++ takeLast (length destds) (unSlice destslice)
           srcslice' =
-            replicate (length srcslice - length srcds) (DimFix 0)
-              ++ takeLast (length srcds) srcslice
+            Slice $
+              replicate (length (unSlice srcslice) - length srcds) (DimFix 0)
+                ++ takeLast (length srcds) (unSlice srcslice)
       copyElementWise pt destloc destslice' srcloc srcslice'
     _ -> do
       groupCoverSpace (sliceDims destslice) $ \is ->
         copyElementWise
           pt
           destloc
-          (map DimFix $ fixSlice destslice is)
+          (Slice $ map DimFix $ fixSlice destslice is)
           srcloc
-          (map DimFix $ fixSlice srcslice is)
+          (Slice $ map DimFix $ fixSlice srcslice is)
       sOp $ Imp.Barrier Imp.FenceLocal
 
 threadOperations, groupOperations :: Operations GPUMem KernelEnv Imp.KernelOp
@@ -1718,10 +1720,11 @@ compileGroupResult space pe (RegTileReturns _ dims_n_tiles what) = do
             reg_tile * (group_tile * group_tile_i + reg_tile_i)
         return $ DimSlice tile_dim_start reg_tile 1
   reg_tile_slices <-
-    zipWithM
-      regTileSliceDim
-      (zip group_tiles' group_tile_is)
-      (zip reg_tiles' reg_tile_is)
+    Slice
+      <$> zipWithM
+        regTileSliceDim
+        (zip group_tiles' group_tile_is)
+        (zip reg_tiles' reg_tile_is)
 
   localOps threadOperations $
     sLoopNest (Shape reg_tiles) $ \is_in_reg_tile -> do
@@ -1774,9 +1777,9 @@ compileThreadResult _ pe (WriteReturns _ (Shape rws) _arr dests) = do
   constants <- kernelConstants <$> askEnv
   let rws' = map toInt64Exp rws
   forM_ dests $ \(slice, e) -> do
-    let slice' = map (fmap toInt64Exp) slice
+    let slice' = fmap toInt64Exp slice
         write = kernelThreadActive constants .&&. inBounds slice' rws'
-    sWhen write $ copyDWIM (patElemName pe) slice' e []
+    sWhen write $ copyDWIM (patElemName pe) (unSlice slice') e []
 compileThreadResult _ _ TileReturns {} =
   compilerBugS "compileThreadResult: TileReturns unhandled."
 

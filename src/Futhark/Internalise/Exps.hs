@@ -2000,7 +2000,7 @@ partitionWithSOACS k lam arrs = do
   nonempty_body <- runBodyBuilder $
     fmap resultBody $
       forM all_offsets $ \offset_array ->
-        letSubExp "last_offset" $ I.BasicOp $ I.Index offset_array [I.DimFix last_index]
+        letSubExp "last_offset" $ I.BasicOp $ I.Index offset_array $ Slice [I.DimFix last_index]
   let empty_body = resultBody $ replicate k $ constant (0 :: Int64)
   is_empty <- letSubExp "is_empty" $ I.BasicOp $ I.CmpOp (CmpEq int64) w $ constant (0 :: Int64)
   sizes <-

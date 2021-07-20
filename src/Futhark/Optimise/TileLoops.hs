@@ -403,10 +403,8 @@ tileDoLoop initial_space variance prestms used_in_body (host_stms, tiling, tiled
         let indexMergeParams slice =
               localScope (scopeOfFParams mergeparams') $
                 forM_ (zip mergeparams mergeparams') $ \(to, from) ->
-                  letBindNames [paramName to] $
-                    BasicOp $
-                      Index (paramName from) $
-                        fullSlice (paramType from) slice
+                  letBindNames [paramName to] . BasicOp . Index (paramName from) $
+                    fullSlice (paramType from) slice
 
             private' =
               private <> namesFromList (map paramName mergeparams ++ map paramName mergeparams')
@@ -521,7 +519,7 @@ data PrivStms = PrivStms (Stms GPU) ReadPrelude
 privStms :: Stms GPU -> PrivStms
 privStms stms = PrivStms stms $ const $ return ()
 
-addPrivStms :: Slice SubExp -> PrivStms -> Builder GPU ()
+addPrivStms :: [DimIndex SubExp] -> PrivStms -> Builder GPU ()
 addPrivStms local_slice (PrivStms stms readPrelude) = do
   readPrelude local_slice
   addStms stms
@@ -536,7 +534,7 @@ instance Semigroup PrivStms where
 instance Monoid PrivStms where
   mempty = privStms mempty
 
-type ReadPrelude = Slice SubExp -> Builder GPU ()
+type ReadPrelude = [DimIndex SubExp] -> Builder GPU ()
 
 data ProcessTileArgs = ProcessTileArgs
   { processPrivStms :: PrivStms,
@@ -567,7 +565,7 @@ data Tiling = Tiling
       String ->
       SegLevel ->
       ResultManifest ->
-      (PrimExp VName -> Slice SubExp -> Builder GPU Result) ->
+      (PrimExp VName -> [DimIndex SubExp] -> Builder GPU Result) ->
       Builder GPU [VName],
     -- The boolean PrimExp indicates whether they are in-bounds.
 
@@ -792,7 +790,7 @@ readTile1D tile_size gid gtid num_groups group_size kind privstms tile_id inputs
 
       let readTileElem arr =
             -- No need for fullSlice because we are tiling only prims.
-            letExp "tile_elem" (BasicOp $ Index arr [DimFix j])
+            letExp "tile_elem" (BasicOp $ Index arr $ Slice [DimFix j])
       fmap varsRes $
         case kind of
           TilePartial ->
@@ -832,7 +830,7 @@ processTile1D gid gtid kdim tile_size num_groups group_size tile_args = do
     -- OK because the parallel semantics are not used after this
     -- point).
     thread_accs <- forM accs $ \acc ->
-      letSubExp "acc" $ BasicOp $ Index acc [DimFix $ Var ltid]
+      letSubExp "acc" $ BasicOp $ Index acc $ Slice [DimFix $ Var ltid]
     let sliceTile (InputTiled _ arr) =
           pure arr
         sliceTile (InputUntiled arr) =
@@ -902,7 +900,7 @@ processResidualTile1D gid gtid kdim tile_size num_groups group_size args = do
             let slice =
                   DimSlice (intConst Int64 0) residual_input (intConst Int64 1)
             InputTiled perm
-              <$> letExp "partial_tile" (BasicOp $ Index tile [slice])
+              <$> letExp "partial_tile" (BasicOp $ Index tile $ Slice [slice])
 
       tiles <- mapM sliceTile full_tiles
 
@@ -1033,10 +1031,8 @@ readTile2D (kdim_x, kdim_y) (gtid_x, gtid_y) (gid_x, gid_y) tile_size num_groups
             -- No need for fullSlice because we are tiling only prims.
             letExp
               "tile_elem"
-              ( BasicOp $
-                  Index
-                    arr
-                    [DimFix $ last $ rearrangeShape perm [i, j]]
+              ( BasicOp . Index arr $
+                  Slice [DimFix $ last $ rearrangeShape perm [i, j]]
               )
 
           readTileElemIfInBounds (arr, perm) = do
@@ -1053,7 +1049,7 @@ readTile2D (kdim_x, kdim_y) (gtid_x, gtid_y) (gid_x, gid_y) tile_size num_groups
                       ]
             eIf
               (toExp $ pe64 idx .<. pe64 w .&&. othercheck)
-              (eBody [return $ BasicOp $ Index arr [DimFix idx]])
+              (eBody [return $ BasicOp $ Index arr $ Slice [DimFix idx]])
               (eBody [eBlank tile_t])
 
       fmap varsRes $
@@ -1107,7 +1103,7 @@ processTile2D (gid_x, gid_y) (gtid_x, gtid_y) (kdim_x, kdim_y) tile_size num_gro
       -- OK because the parallel semantics are not used after this
       -- point).
       thread_accs <- forM accs $ \acc ->
-        letSubExp "acc" $ BasicOp $ Index acc [DimFix $ Var ltid_x, DimFix $ Var ltid_y]
+        letSubExp "acc" $ BasicOp $ Index acc $ Slice [DimFix $ Var ltid_x, DimFix $ Var ltid_y]
       let form' = redomapSOAC [Reduce red_comm red_lam thread_accs] map_lam
 
           sliceTile (InputUntiled arr) =
@@ -1187,7 +1183,7 @@ processResidualTile2D
         tiles <- forM full_tile $ \case
           InputTiled perm tile' ->
             InputTiled perm
-              <$> letExp "partial_tile" (BasicOp $ Index tile' [slice, slice])
+              <$> letExp "partial_tile" (BasicOp $ Index tile' (Slice [slice, slice]))
           InputUntiled arr ->
             pure $ InputUntiled arr
 
@@ -1242,8 +1238,7 @@ tiling2d dims_on_top _initial_lvl (gtid_x, gtid_y) (kdim_x, kdim_y) w = do
             reconstructGtids2D tile_size (gtid_x, gtid_y) (gid_x, gid_y) (ltid_x, ltid_y)
             f
               ( untyped $
-                  le64 gtid_x .<. pe64 kdim_x
-                    .&&. le64 gtid_y .<. pe64 kdim_y
+                  le64 gtid_x .<. pe64 kdim_x .&&. le64 gtid_y .<. pe64 kdim_y
               )
               [DimFix $ Var ltid_x, DimFix $ Var ltid_y],
         tilingReadTile = readTile2D (kdim_x, kdim_y) (gtid_x, gtid_y) (gid_x, gid_y) tile_size (segNumGroups lvl) (segGroupSize lvl),

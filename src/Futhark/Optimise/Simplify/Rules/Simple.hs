@@ -301,7 +301,7 @@ simplifyReshapeIndex :: SimpleRule rep
 simplifyReshapeIndex defOf _ (Reshape newshape v)
   | Just ds <- shapeCoercion newshape,
     Just (BasicOp (Index v' slice), v_cs) <- defOf v,
-    slice' <- reshapeSlice slice ds,
+    slice' <- Slice $ reshapeSlice (unSlice slice) ds,
     slice' /= slice =
     Just (Index v' slice', v_cs)
 simplifyReshapeIndex _ _ _ = Nothing
@@ -313,7 +313,7 @@ simplifyUpdateReshape defOf seType (Update safety dest slice (Var v))
   | Just (BasicOp (Reshape newshape v'), v_cs) <- defOf v,
     Just _ <- shapeCoercion newshape,
     Just ds <- arrayDims <$> seType (Var v'),
-    slice' <- reshapeSlice slice ds,
+    slice' <- Slice $ reshapeSlice (unSlice slice) ds,
     slice' /= slice =
     Just (Update safety dest slice' $ Var v', v_cs)
 simplifyUpdateReshape _ _ _ = Nothing
