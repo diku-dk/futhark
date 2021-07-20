@@ -1186,14 +1186,11 @@ sliceShape loc r slice t@(Array als u et (ShapeDecl orig_dims)) =
     adjustDims (DimFlat offset idxs) = adjustFlatDims offset idxs
 
     adjustFlatDims :: Exp -> [DimFlatIndex] -> [DimDecl VName] -> StateT [VName] TermTypeM [DimDecl VName]
-    adjustFlatDims _offset idxs [d] =
+    adjustFlatDims _offset idxs [_] =
       -- Return new dimensions based on the slicing, shouldn't be too hard.
-      -- if length idxs < dims
-      --   then fail "Flat slice must be full or larger"
-      --   else
       mapM
         ( \(DimFlatSlice n _) -> do
-            (d', retext) <- lift $ dimFromExp (SourceBound . bareExp) n
+            (d', _retext) <- lift $ dimFromExp (SourceBound . bareExp) n
             return d'
         )
         idxs
