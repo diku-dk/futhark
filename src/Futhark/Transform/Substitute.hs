@@ -37,7 +37,7 @@ class Substitute a where
 instance Substitute a => Substitute [a] where
   substituteNames substs = map $ substituteNames substs
 
-instance Substitute (Stm lore) => Substitute (Stms lore) where
+instance Substitute (Stm rep) => Substitute (Stms rep) where
   substituteNames substs = fmap $ substituteNames substs
 
 instance (Substitute a, Substitute b) => Substitute (a, b) where
@@ -72,7 +72,7 @@ instance Substitute SubExp where
   substituteNames substs (Var v) = Var $ substituteNames substs v
   substituteNames _ (Constant v) = Constant v
 
-instance Substitutable lore => Substitute (Exp lore) where
+instance Substitutable rep => Substitute (Exp rep) where
   substituteNames substs = mapExp $ replace substs
 
 instance Substitute dec => Substitute (PatElemT dec) where
@@ -95,29 +95,33 @@ instance Substitute dec => Substitute (Param dec) where
       (substituteNames substs name)
       (substituteNames substs dec)
 
-instance Substitute dec => Substitute (PatternT dec) where
-  substituteNames substs (Pattern context values) =
-    Pattern (substituteNames substs context) (substituteNames substs values)
+instance Substitute SubExpRes where
+  substituteNames substs (SubExpRes cs se) =
+    SubExpRes (substituteNames substs cs) (substituteNames substs se)
 
-instance Substitute Certificates where
-  substituteNames substs (Certificates cs) =
-    Certificates $ substituteNames substs cs
+instance Substitute dec => Substitute (PatT dec) where
+  substituteNames substs (Pat xs) =
+    Pat (substituteNames substs xs)
 
-instance Substitutable lore => Substitute (Stm lore) where
+instance Substitute Certs where
+  substituteNames substs (Certs cs) =
+    Certs $ substituteNames substs cs
+
+instance Substitutable rep => Substitute (Stm rep) where
   substituteNames substs (Let pat annot e) =
     Let
       (substituteNames substs pat)
       (substituteNames substs annot)
       (substituteNames substs e)
 
-instance Substitutable lore => Substitute (Body lore) where
+instance Substitutable rep => Substitute (Body rep) where
   substituteNames substs (Body dec stms res) =
     Body
       (substituteNames substs dec)
       (substituteNames substs stms)
       (substituteNames substs res)
 
-replace :: Substitutable lore => M.Map VName VName -> Mapper lore lore Identity
+replace :: Substitutable rep => M.Map VName VName -> Mapper rep rep Identity
 replace substs =
   Mapper
     { mapOnVName = return . substituteNames substs,
@@ -164,7 +168,7 @@ instance Substitute shape => Substitute (TypeBase shape u) where
   substituteNames _ (Mem space) =
     Mem space
 
-instance Substitutable lore => Substitute (Lambda lore) where
+instance Substitutable rep => Substitute (Lambda rep) where
   substituteNames substs (Lambda params body rettype) =
     Lambda
       (substituteNames substs params)
@@ -194,7 +198,7 @@ instance Substitute v => Substitute (TPrimExp t v) where
   substituteNames substs =
     TPrimExp . fmap (substituteNames substs) . untyped
 
-instance Substitutable lore => Substitute (NameInfo lore) where
+instance Substitutable rep => Substitute (NameInfo rep) where
   substituteNames subst (LetName dec) =
     LetName $ substituteNames subst dec
   substituteNames subst (FParamName dec) =
@@ -207,16 +211,16 @@ instance Substitutable lore => Substitute (NameInfo lore) where
 instance Substitute FV where
   substituteNames subst = fvNames . substituteNames subst . freeIn
 
--- | Lores in which all annotations support name
+-- | Representations in which all annotations support name
 -- substitution.
-type Substitutable lore =
-  ( Decorations lore,
-    Substitute (ExpDec lore),
-    Substitute (BodyDec lore),
-    Substitute (LetDec lore),
-    Substitute (FParamInfo lore),
-    Substitute (LParamInfo lore),
-    Substitute (RetType lore),
-    Substitute (BranchType lore),
-    Substitute (Op lore)
+type Substitutable rep =
+  ( RepTypes rep,
+    Substitute (ExpDec rep),
+    Substitute (BodyDec rep),
+    Substitute (LetDec rep),
+    Substitute (FParamInfo rep),
+    Substitute (LParamInfo rep),
+    Substitute (RetType rep),
+    Substitute (BranchType rep),
+    Substitute (Op rep)
   )

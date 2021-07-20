@@ -2,7 +2,7 @@
 {-# LANGUAGE TypeFamilies #-}
 
 module Futhark.Optimise.InPlaceLowering.LowerIntoStm
-  ( lowerUpdateKernels,
+  ( lowerUpdateGPU,
     lowerUpdate,
     LowerUpdate,
     DesiredUpdate (..),
@@ -17,7 +17,7 @@ import Data.Maybe (isNothing, mapMaybe)
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.Construct
 import Futhark.IR.Aliases
-import Futhark.IR.Kernels
+import Futhark.IR.GPU
 import Futhark.Optimise.InPlaceLowering.SubstituteIndices
 
 data DesiredUpdate dec = DesiredUpdate
@@ -25,7 +25,7 @@ data DesiredUpdate dec = DesiredUpdate
     updateName :: VName,
     -- | Type of result.
     updateType :: dec,
-    updateCertificates :: Certificates,
+    updateCerts :: Certs,
     updateSource :: VName,
     updateIndices :: Slice SubExp,
     updateValue :: VName
@@ -38,55 +38,55 @@ instance Functor DesiredUpdate where
 updateHasValue :: VName -> DesiredUpdate dec -> Bool
 updateHasValue name = (name ==) . updateValue
 
-type LowerUpdate lore m =
-  Scope (Aliases lore) ->
-  Stm (Aliases lore) ->
-  [DesiredUpdate (LetDec (Aliases lore))] ->
-  Maybe (m [Stm (Aliases lore)])
+type LowerUpdate rep m =
+  Scope (Aliases rep) ->
+  Stm (Aliases rep) ->
+  [DesiredUpdate (LetDec (Aliases rep))] ->
+  Maybe (m [Stm (Aliases rep)])
 
 lowerUpdate ::
   ( MonadFreshNames m,
-    Bindable lore,
-    LetDec lore ~ Type,
-    CanBeAliased (Op lore)
+    Buildable rep,
+    LetDec rep ~ Type,
+    CanBeAliased (Op rep)
   ) =>
-  LowerUpdate lore m
-lowerUpdate scope (Let pat aux (DoLoop ctx val form body)) updates = do
-  canDo <- lowerUpdateIntoLoop scope updates pat ctx val form body
+  LowerUpdate rep m
+lowerUpdate scope (Let pat aux (DoLoop merge form body)) updates = do
+  canDo <- lowerUpdateIntoLoop scope updates pat merge form body
   Just $ do
-    (prebnds, postbnds, ctxpat, valpat, ctx', val', body') <- canDo
+    (prebnds, postbnds, pat', merge', body') <- canDo
     return $
       prebnds
         ++ [ certify (stmAuxCerts aux) $
-               mkLet ctxpat valpat $ DoLoop ctx' val' form body'
+               mkLet pat' $ DoLoop merge' form body'
            ]
         ++ postbnds
 lowerUpdate
   _
   (Let pat aux (BasicOp (SubExp (Var v))))
   [DesiredUpdate bindee_nm bindee_dec cs src is val]
-    | patternNames pat == [src] =
+    | patNames pat == [src] =
       let is' = fullSlice (typeOf bindee_dec) is
        in Just $
             return
               [ certify (stmAuxCerts aux <> cs) $
-                  mkLet [] [Ident bindee_nm $ typeOf bindee_dec] $
-                    BasicOp $ Update v is' $ Var val
+                  mkLet [Ident bindee_nm $ typeOf bindee_dec] $
+                    BasicOp $ Update Unsafe v is' $ Var val
               ]
 lowerUpdate _ _ _ =
   Nothing
 
-lowerUpdateKernels :: MonadFreshNames m => LowerUpdate Kernels m
-lowerUpdateKernels
+lowerUpdateGPU :: MonadFreshNames m => LowerUpdate GPU m
+lowerUpdateGPU
   scope
   (Let pat aux (Op (SegOp (SegMap lvl space ts kbody))))
   updates
-    | all ((`elem` patternNames pat) . updateValue) updates,
+    | all ((`elem` patNames pat) . updateValue) updates,
       not source_used_in_kbody = do
       mk <- lowerUpdatesIntoSegMap scope pat updates space kbody
       Just $ do
         (pat', kbody', poststms) <- mk
-        let cs = stmAuxCerts aux <> foldMap updateCertificates updates
+        let cs = stmAuxCerts aux <> foldMap updateCerts updates
         return $
           certify cs (Let pat' aux $ Op $ SegOp $ SegMap lvl space ts kbody') :
           stmsToList poststms
@@ -99,30 +99,30 @@ lowerUpdateKernels
       source_used_in_kbody =
         mconcat (map (`lookupAliases` scope) (namesToList (freeIn kbody)))
           `namesIntersect` mconcat (map ((`lookupAliases` scope) . updateSource) updates)
-lowerUpdateKernels scope stm updates = lowerUpdate scope stm updates
+lowerUpdateGPU scope stm updates = lowerUpdate scope stm updates
 
 lowerUpdatesIntoSegMap ::
   MonadFreshNames m =>
-  Scope (Aliases Kernels) ->
-  Pattern (Aliases Kernels) ->
-  [DesiredUpdate (LetDec (Aliases Kernels))] ->
+  Scope (Aliases GPU) ->
+  Pat (Aliases GPU) ->
+  [DesiredUpdate (LetDec (Aliases GPU))] ->
   SegSpace ->
-  KernelBody (Aliases Kernels) ->
+  KernelBody (Aliases GPU) ->
   Maybe
     ( m
-        ( Pattern (Aliases Kernels),
-          KernelBody (Aliases Kernels),
-          Stms (Aliases Kernels)
+        ( Pat (Aliases GPU),
+          KernelBody (Aliases GPU),
+          Stms (Aliases GPU)
         )
     )
 lowerUpdatesIntoSegMap scope pat updates kspace kbody = do
   -- The updates are all-or-nothing.  Being more liberal would require
   -- changes to the in-place-lowering pass itself.
-  mk <- zipWithM onRet (patternElements pat) (kernelBodyResult kbody)
+  mk <- zipWithM onRet (patElements pat) (kernelBodyResult kbody)
   return $ do
     (pes, bodystms, krets, poststms) <- unzip4 <$> sequence mk
     return
-      ( Pattern [] pes,
+      ( Pat pes,
         kbody
           { kernelBodyStms = kernelBodyStms kbody <> mconcat bodystms,
             kernelBodyResult = krets
@@ -136,7 +136,7 @@ lowerUpdatesIntoSegMap scope pat updates kspace kbody = do
       | Just (DesiredUpdate bindee_nm bindee_dec _cs src slice _val) <-
           find ((== v) . updateValue) updates,
         DimIndices idxs <- slice = do
-        Returns _ se <- Just ret
+        Returns _ cs se <- Just ret
 
         -- The slice we're writing per thread must fully cover the
         -- underlying dimensions.
@@ -148,51 +148,48 @@ lowerUpdatesIntoSegMap scope pat updates kspace kbody = do
 
         Just $ do
           (slice', bodystms) <-
-            flip runBinderT scope $
+            flip runBuilderT scope $
               traverse (toSubExp "index") $
                 fixSlice (fmap pe64 slice) $
                   map (pe64 . Var) gtids
 
           let res_dims = arrayDims $ snd bindee_dec
-              ret' = WriteReturns (Shape res_dims) src [(DimIndices $ map DimFix slice', se)]
+              ret' = WriteReturns cs (Shape res_dims) src [(DimIndices $ map DimFix slice', se)]
 
           return
             ( PatElem bindee_nm bindee_dec,
               bodystms,
               ret',
               oneStm $
-                mkLet [] [Ident v $ typeOf v_dec] $
+                mkLet [Ident v $ typeOf v_dec] $
                   BasicOp $ Index bindee_nm slice
             )
     onRet pe ret =
       Just $ return (pe, mempty, ret, mempty)
 
 lowerUpdateIntoLoop ::
-  ( Bindable lore,
-    BinderOps lore,
-    Aliased lore,
-    LetDec lore ~ (als, Type),
+  ( Buildable rep,
+    BuilderOps rep,
+    Aliased rep,
+    LetDec rep ~ (als, Type),
     MonadFreshNames m
   ) =>
-  Scope lore ->
-  [DesiredUpdate (LetDec lore)] ->
-  Pattern lore ->
-  [(FParam lore, SubExp)] ->
-  [(FParam lore, SubExp)] ->
-  LoopForm lore ->
-  Body lore ->
+  Scope rep ->
+  [DesiredUpdate (LetDec rep)] ->
+  Pat rep ->
+  [(FParam rep, SubExp)] ->
+  LoopForm rep ->
+  Body rep ->
   Maybe
     ( m
-        ( [Stm lore],
-          [Stm lore],
+        ( [Stm rep],
+          [Stm rep],
           [Ident],
-          [Ident],
-          [(FParam lore, SubExp)],
-          [(FParam lore, SubExp)],
-          Body lore
+          [(FParam rep, SubExp)],
+          Body rep
         )
     )
-lowerUpdateIntoLoop scope updates pat ctx val form body = do
+lowerUpdateIntoLoop scope updates pat val form body = do
   -- Algorithm:
   --
   --   0) Map each result of the loop body to a corresponding in-place
@@ -228,21 +225,21 @@ lowerUpdateIntoLoop scope updates pat ctx val form body = do
   Just $ do
     in_place_map <- mk_in_place_map
     (val', prebnds, postbnds) <- mkMerges in_place_map
-    let (ctxpat, valpat) = mkResAndPat in_place_map
+    let valpat = mkResAndPat in_place_map
         idxsubsts = indexSubstitutions in_place_map
     (idxsubsts', newbnds) <- substituteIndices idxsubsts $ bodyStms body
     (body_res, res_bnds) <- manipulateResult in_place_map idxsubsts'
     let body' = mkBody (newbnds <> res_bnds) body_res
-    return (prebnds, postbnds, ctxpat, valpat, ctx, val', body')
+    return (prebnds, postbnds, valpat, val', body')
   where
     usedInBody =
       mconcat $ map (`lookupAliases` scope) $ namesToList $ freeIn body <> freeIn form
-    resmap = zip (bodyResult body) $ patternValueIdents pat
+    resmap = zip (bodyResult body) $ patIdents pat
 
     mkMerges ::
-      (MonadFreshNames m, Bindable lore) =>
+      (MonadFreshNames m, Buildable rep) =>
       [LoopResultSummary (als, Type)] ->
-      m ([(Param DeclType, SubExp)], [Stm lore], [Stm lore])
+      m ([(Param DeclType, SubExp)], [Stm rep], [Stm rep])
     mkMerges summaries = do
       ((origmerge, extramerge), (prebnds, postbnds)) <-
         runWriterT $ partitionEithers <$> mapM mkMerge summaries
@@ -257,18 +254,17 @@ lowerUpdateIntoLoop scope updates pat ctx val form body = do
                 (updateValue update)
                 (source_t `setArrayDims` sliceDims (updateIndices update))
         tell
-          ( [ mkLet [] [Ident source source_t] $
-                BasicOp $
-                  Update
-                    (updateSource update)
-                    (fullSlice source_t $ updateIndices update)
-                    $ snd $ mergeParam summary
+          ( [ mkLet [Ident source source_t] . BasicOp $
+                Update
+                  Unsafe
+                  (updateSource update)
+                  (fullSlice source_t $ updateIndices update)
+                  $ snd $ mergeParam summary
             ],
-            [ mkLet [] [elmident] $
-                BasicOp $
-                  Index
-                    (updateName update)
-                    (fullSlice source_t $ updateIndices update)
+            [ mkLet [elmident] . BasicOp $
+                Index
+                  (updateName update)
+                  (fullSlice source_t $ updateIndices update)
             ]
           )
         return $
@@ -282,24 +278,22 @@ lowerUpdateIntoLoop scope updates pat ctx val form body = do
 
     mkResAndPat summaries =
       let (origpat, extrapat) = partitionEithers $ map mkResAndPat' summaries
-       in ( patternContextIdents pat,
-            origpat ++ extrapat
-          )
+       in origpat ++ extrapat
 
     mkResAndPat' summary
       | Just (update, _, _) <- relatedUpdate summary =
         Right (Ident (updateName update) (snd $ updateType update))
       | otherwise =
-        Left (inPatternAs summary)
+        Left (inPatAs summary)
 
 summariseLoop ::
-  ( Aliased lore,
+  ( Aliased rep,
     MonadFreshNames m
   ) =>
-  Scope lore ->
+  Scope rep ->
   [DesiredUpdate (als, Type)] ->
   Names ->
-  [(SubExp, Ident)] ->
+  [(SubExpRes, Ident)] ->
   [(Param DeclType, SubExp)] ->
   Maybe (m [LoopResultSummary (als, Type)])
 summariseLoop scope updates usedInBody resmap merge =
@@ -317,7 +311,7 @@ summariseLoop scope updates usedInBody resmap merge =
                 return
                   LoopResultSummary
                     { resultSubExp = se,
-                      inPatternAs = v,
+                      inPatAs = v,
                       mergeParam = (fparam, mergeinit),
                       relatedUpdate =
                         Just
@@ -337,8 +331,8 @@ summariseLoop scope updates usedInBody resmap merge =
     loopInvariant Constant {} = True
 
 data LoopResultSummary dec = LoopResultSummary
-  { resultSubExp :: SubExp,
-    inPatternAs :: Ident,
+  { resultSubExp :: SubExpRes,
+    inPatAs :: Ident,
     mergeParam :: (Param DeclType, SubExp),
     relatedUpdate :: Maybe (DesiredUpdate dec, VName, dec)
   }
@@ -355,28 +349,26 @@ indexSubstitutions = mapMaybe getSubstitution
       return (name, (cs, nm, dec, is))
 
 manipulateResult ::
-  (Bindable lore, MonadFreshNames m) =>
-  [LoopResultSummary (LetDec lore)] ->
-  IndexSubstitutions (LetDec lore) ->
-  m (Result, Stms lore)
+  (Buildable rep, MonadFreshNames m) =>
+  [LoopResultSummary (LetDec rep)] ->
+  IndexSubstitutions (LetDec rep) ->
+  m (Result, Stms rep)
 manipulateResult summaries substs = do
   let (orig_ses, updated_ses) = partitionEithers $ map unchangedRes summaries
   (subst_ses, res_bnds) <- runWriterT $ zipWithM substRes updated_ses substs
-  return (orig_ses ++ subst_ses, stmsFromList res_bnds)
+  pure (orig_ses ++ subst_ses, stmsFromList res_bnds)
   where
     unchangedRes summary =
       case relatedUpdate summary of
         Nothing -> Left $ resultSubExp summary
         Just _ -> Right $ resultSubExp summary
-    substRes (Var res_v) (subst_v, (_, nm, _, _))
+    substRes (SubExpRes res_cs (Var res_v)) (subst_v, (_, nm, _, _))
       | res_v == subst_v =
-        return $ Var nm
-    substRes res_se (_, (cs, nm, dec, is)) = do
+        pure $ SubExpRes res_cs $ Var nm
+    substRes (SubExpRes res_cs res_se) (_, (cs, nm, dec, is)) = do
       v' <- newIdent' (++ "_updated") $ Ident nm $ typeOf dec
       tell
-        [ certify cs $
-            mkLet [] [v'] $
-              BasicOp $
-                Update nm (fullSlice (typeOf dec) is) res_se
+        [ certify (res_cs <> cs) . mkLet [v'] . BasicOp $
+            Update Unsafe nm (fullSlice (typeOf dec) is) res_se
         ]
-      return $ Var $ identName v'
+      pure $ varRes $ identName v'

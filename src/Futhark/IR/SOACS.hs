@@ -3,13 +3,12 @@
 
 -- | A simple representation with SOACs and nested parallelism.
 module Futhark.IR.SOACS
-  ( -- * The Lore definition
-    SOACS,
+  ( SOACS,
 
     -- * Syntax types
     Body,
     Stm,
-    Pattern,
+    Pat,
     Exp,
     Lambda,
     FParam,
@@ -25,12 +24,12 @@ module Futhark.IR.SOACS
     module Futhark.IR.SOACS.SOAC,
     AST.LambdaT (Lambda),
     AST.BodyT (Body),
-    AST.PatternT (Pattern),
+    AST.PatT (Pat),
     AST.PatElemT (PatElem),
   )
 where
 
-import Futhark.Binder
+import Futhark.Builder
 import Futhark.Construct
 import Futhark.IR.Pretty
 import Futhark.IR.Prop
@@ -41,8 +40,8 @@ import Futhark.IR.Syntax hiding
     FParam,
     LParam,
     Lambda,
+    Pat,
     PatElem,
-    Pattern,
     RetType,
     Stm,
   )
@@ -54,14 +53,14 @@ import qualified Futhark.TypeCheck as TypeCheck
 -- like Standard ML.  Instead, we have to abuse the namespace/module
 -- system.
 
--- | The lore for the basic representation.
+-- | The rep for the basic representation.
 data SOACS
 
-instance Decorations SOACS where
+instance RepTypes SOACS where
   type Op SOACS = SOAC SOACS
 
-instance ASTLore SOACS where
-  expTypesFromPattern = return . expExtTypesFromPattern
+instance ASTRep SOACS where
+  expTypesFromPat = return . expExtTypesFromPat
 
 type Exp = AST.Exp SOACS
 
@@ -69,7 +68,7 @@ type Body = AST.Body SOACS
 
 type Stm = AST.Stm SOACS
 
-type Pattern = AST.Pattern SOACS
+type Pat = AST.Pat SOACS
 
 type Lambda = AST.Lambda SOACS
 
@@ -86,12 +85,12 @@ instance TypeCheck.CheckableOp SOACS where
 
 instance TypeCheck.Checkable SOACS
 
-instance Bindable SOACS where
+instance Buildable SOACS where
   mkBody = AST.Body ()
-  mkExpPat ctx val _ = basicPattern ctx val
+  mkExpPat merge _ = basicPat merge
   mkExpDec _ _ = ()
   mkLetNames = simpleMkLetNames
 
-instance BinderOps SOACS
+instance BuilderOps SOACS
 
-instance PrettyLore SOACS
+instance PrettyRep SOACS

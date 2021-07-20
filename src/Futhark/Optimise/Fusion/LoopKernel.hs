@@ -76,7 +76,7 @@ transformOutput ::
   SOAC.ArrayTransforms ->
   [VName] ->
   [Ident] ->
-  Binder SOACS ()
+  Builder SOACS ()
 transformOutput ts names = descend ts
   where
     descend ts' validents =
@@ -86,7 +86,7 @@ transformOutput ts names = descend ts
             letBindNames [k] $ BasicOp $ SubExp $ Var $ identName valident
         t SOAC.:< ts'' -> do
           let (es, css) = unzip $ map (applyTransform t) validents
-              mkPat (Ident nm tp) = Pattern [] [PatElem nm tp]
+              mkPat (Ident nm tp) = Pat [PatElem nm tp]
           opts <- concat <$> mapM primOpType es
           newIds <- forM (zip names opts) $ \(k, opt) ->
             newIdent (baseString k) opt
@@ -94,7 +94,7 @@ transformOutput ts names = descend ts
             certifying cs $ letBind (mkPat ids) (BasicOp e)
           descend ts'' newIds
 
-applyTransform :: SOAC.ArrayTransform -> Ident -> (BasicOp, Certificates)
+applyTransform :: SOAC.ArrayTransform -> Ident -> (BasicOp, Certs)
 applyTransform (SOAC.Rearrange cs perm) v =
   (Rearrange perm' $ identName v, cs)
   where
@@ -429,7 +429,7 @@ fuseSOACwithKer unfus_set outVars soac_p soac_p_consumed ker = do
               (body_p, body_c) = (lambdaBody lam_p, lambdaBody lam_c)
               body' =
                 Body
-                  { bodyDec = bodyDec body_p, -- body_p and body_c have the same lores
+                  { bodyDec = bodyDec body_p, -- body_p and body_c have the same decorations
                     bodyStms = bodyStms body_p <> bodyStms body_c,
                     bodyResult =
                       take c_num_buckets (bodyResult body_c)
@@ -461,7 +461,7 @@ fuseSOACwithKer unfus_set outVars soac_p soac_p_consumed ker = do
           let (body_p, body_c) = (lambdaBody lam_p, lambdaBody lam_c)
           let body' =
                 Body
-                  { bodyDec = bodyDec body_p, -- body_p and body_c have the same lores
+                  { bodyDec = bodyDec body_p, -- body_p and body_c have the same decorations
                     bodyStms = bodyStms body_p <> bodyStms body_c,
                     bodyResult = zipW as_c (bodyResult body_c) as_p (bodyResult body_p)
                   }
@@ -547,7 +547,7 @@ fuseSOACwithKer unfus_set outVars soac_p soac_p_consumed ker = do
     ---------------------------------
     _ -> fail "Cannot fuse"
 
-getStreamOrder :: StreamForm lore -> StreamOrd
+getStreamOrder :: StreamForm rep -> StreamOrd
 getStreamOrder (Parallel o _ _) = o
 getStreamOrder Sequential = InOrder
 
@@ -684,10 +684,10 @@ iswim _ (SOAC.Screma w form arrs) ots
     let map_body =
           mkBody
             ( oneStm $
-                Let (setPatternOuterDimTo w map_pat) (defAux ()) $
+                Let (setPatOuterDimTo w map_pat) (defAux ()) $
                   Op $ Futhark.Screma w arrs' scan_form
             )
-            $ map Var $ patternNames map_pat
+            $ varsRes $ patNames map_pat
         map_fun' = Lambda map_params map_body map_rettype
         perm = case lambdaReturnType map_fun of
           [] -> []
@@ -710,8 +710,8 @@ setParamOuterDimTo w param =
   let t = paramType param `setOuterSize` w
    in param {paramDec = t}
 
-setPatternOuterDimTo :: SubExp -> Pattern -> Pattern
-setPatternOuterDimTo w = fmap (`setOuterSize` w)
+setPatOuterDimTo :: SubExp -> Pat -> Pat
+setPatOuterDimTo w = fmap (`setOuterSize` w)
 
 -- Now for fiddling with transpositions...
 
@@ -857,7 +857,7 @@ pullReshape (SOAC.Screma _ form inps) ots
               stripArray (length shape - length outershape) inpt
 
           inner_body <-
-            runBodyBinder $
+            runBodyBuilder $
               eBody [SOAC.toExp $ inner $ map (SOAC.identInput . paramIdent) ps]
           let inner_fun =
                 Lambda

@@ -12,10 +12,9 @@ module Language.Futhark.TypeChecker.Types
     checkForDuplicateNames,
     checkTypeParams,
     typeParamToArg,
-    TypeSub (..),
-    TypeSubs,
-    substituteTypes,
     Subst (..),
+    substFromAbbr,
+    TypeSubs,
     Substitutable (..),
     substTypesAny,
   )
@@ -29,7 +28,7 @@ import Data.List (foldl', sort)
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import Futhark.Util (nubOrd)
-import Futhark.Util.Pretty
+import Futhark.Util.Pretty hiding ((<|>))
 import Language.Futhark
 import Language.Futhark.Traversals
 import Language.Futhark.TypeChecker.Monad
@@ -37,17 +36,18 @@ import Language.Futhark.TypeChecker.Monad
 -- | @unifyTypes uf t1 t2@ attempts to unify @t1@ and @t2@.  If
 -- unification cannot happen, 'Nothing' is returned, otherwise a type
 -- that combines the aliasing of @t1@ and @t2@ is returned.
--- Uniqueness is unified with @uf@.
+-- Uniqueness is unified with @uf@.  Assumes sizes already match, and
+-- always picks the size of the leftmost type.
 unifyTypesU ::
   (Monoid als, ArrayDim dim) =>
   (Uniqueness -> Uniqueness -> Maybe Uniqueness) ->
   TypeBase dim als ->
   TypeBase dim als ->
   Maybe (TypeBase dim als)
-unifyTypesU uf (Array als1 u1 et1 shape1) (Array als2 u2 et2 shape2) =
+unifyTypesU uf (Array als1 u1 et1 shape1) (Array als2 u2 et2 _shape2) =
   Array (als1 <> als2) <$> uf u1 u2
     <*> unifyScalarTypes uf et1 et2
-    <*> unifyShapes shape1 shape2
+    <*> pure shape1
 unifyTypesU uf (Scalar t1) (Scalar t2) = Scalar <$> unifyScalarTypes uf t1 t2
 unifyTypesU _ _ _ = Nothing
 
@@ -60,12 +60,19 @@ unifyScalarTypes ::
 unifyScalarTypes _ (Prim t1) (Prim t2)
   | t1 == t2 = Just $ Prim t1
   | otherwise = Nothing
-unifyScalarTypes uf (TypeVar als1 u1 t1 targs1) (TypeVar als2 u2 t2 targs2)
-  | t1 == t2 = do
+unifyScalarTypes uf (TypeVar als1 u1 tv1 targs1) (TypeVar als2 u2 tv2 targs2)
+  | tv1 == tv2 = do
     u3 <- uf u1 u2
-    targs3 <- zipWithM (unifyTypeArgs uf) targs1 targs2
-    Just $ TypeVar (als1 <> als2) u3 t1 targs3
+    targs3 <- zipWithM unifyTypeArgs targs1 targs2
+    Just $ TypeVar (als1 <> als2) u3 tv1 targs3
   | otherwise = Nothing
+  where
+    unifyTypeArgs (TypeArgDim d1 loc) (TypeArgDim _d2 _) =
+      pure $ TypeArgDim d1 loc
+    unifyTypeArgs (TypeArgType t1 loc) (TypeArgType t2 _) =
+      TypeArgType <$> unifyTypesU uf t1 t2 <*> pure loc
+    unifyTypeArgs _ _ =
+      Nothing
 unifyScalarTypes uf (Record ts1) (Record ts2)
   | length ts1 == length ts2,
     sort (M.keys ts1) == sort (M.keys ts2) =
@@ -84,26 +91,10 @@ unifyScalarTypes uf (Sum cs1) (Sum cs2)
         (M.intersectionWith (,) cs1 cs2)
 unifyScalarTypes _ _ _ = Nothing
 
-unifyTypeArgs ::
-  (ArrayDim dim) =>
-  (Uniqueness -> Uniqueness -> Maybe Uniqueness) ->
-  TypeArg dim ->
-  TypeArg dim ->
-  Maybe (TypeArg dim)
-unifyTypeArgs _ (TypeArgDim d1 loc) (TypeArgDim d2 _) =
-  TypeArgDim <$> unifyDims d1 d2 <*> pure loc
-unifyTypeArgs uf (TypeArgType t1 loc) (TypeArgType t2 _) =
-  TypeArgType <$> unifyTypesU uf t1 t2 <*> pure loc
-unifyTypeArgs _ _ _ =
-  Nothing
-
--- | @x \`subtypeOf\` y@ is true if @x@ is a subtype of @y@ (or equal to
--- @y@), meaning @x@ is valid whenever @y@ is.
-subtypeOf ::
-  ArrayDim dim =>
-  TypeBase dim as1 ->
-  TypeBase dim as2 ->
-  Bool
+-- | @x \`subtypeOf\` y@ is true if @x@ is a subtype of @y@ (or equal
+-- to @y@), meaning @x@ is valid whenever @y@ is.  Ignores sizes.
+-- Mostly used for checking uniqueness.
+subtypeOf :: TypeBase () () -> TypeBase () () -> Bool
 subtypeOf t1 t2 = isJust $ unifyTypesU unifyUniqueness (toStruct t1) (toStruct t2)
   where
     unifyUniqueness u2 u1 = if u2 `subuniqueOf` u1 then Just u1 else Nothing
@@ -221,7 +212,7 @@ checkTypeExp ote@TEApply {} = do
       (targs', substs) <- unzip <$> zipWithM checkArgApply ps targs
       return
         ( foldl (\x y -> TEApply x y tloc) (TEVar tname' tname_loc) targs',
-          substituteTypes (mconcat substs) t,
+          applySubst (`M.lookup` mconcat substs) t,
           l
         )
   where
@@ -240,24 +231,24 @@ checkTypeExp ote@TEApply {} = do
       v' <- checkNamedDim loc v
       return
         ( TypeArgExpDim (DimExpNamed v' dloc) loc,
-          M.singleton pv $ DimSub $ NamedDim v'
+          M.singleton pv $ SizeSubst $ NamedDim v'
         )
     checkArgApply (TypeParamDim pv _) (TypeArgExpDim (DimExpConst x dloc) loc) =
       return
         ( TypeArgExpDim (DimExpConst x dloc) loc,
-          M.singleton pv $ DimSub $ ConstDim x
+          M.singleton pv $ SizeSubst $ ConstDim x
         )
     checkArgApply (TypeParamDim pv _) (TypeArgExpDim DimExpAny loc) = do
       d <- newID "d"
       return
         ( TypeArgExpDim DimExpAny loc,
-          M.singleton pv $ DimSub $ AnyDim $ Just d
+          M.singleton pv $ SizeSubst $ AnyDim $ Just d
         )
-    checkArgApply (TypeParamType l pv _) (TypeArgExpType te) = do
+    checkArgApply (TypeParamType _ pv _) (TypeArgExpType te) = do
       (te', st, _) <- checkTypeExp te
       return
         ( TypeArgExpType te',
-          M.singleton pv $ TypeSub $ TypeAbbr l [] st
+          M.singleton pv $ Subst [] st
         )
     checkArgApply p a =
       typeError tloc mempty $
@@ -286,18 +277,18 @@ checkTypeExp t@(TESum cs loc) = do
 -- a description of all names used in the pattern group.
 checkForDuplicateNames ::
   MonadTypeChecker m =>
-  [UncheckedPattern] ->
+  [UncheckedPat] ->
   m ()
 checkForDuplicateNames = (`evalStateT` mempty) . mapM_ check
   where
     check (Id v _ loc) = seen v loc
-    check (PatternParens p _) = check p
+    check (PatParens p _) = check p
     check Wildcard {} = return ()
-    check (TuplePattern ps _) = mapM_ check ps
-    check (RecordPattern fs _) = mapM_ (check . snd) fs
-    check (PatternAscription p _ _) = check p
-    check PatternLit {} = return ()
-    check (PatternConstr _ _ ps _) = mapM_ check ps
+    check (TuplePat ps _) = mapM_ check ps
+    check (RecordPat fs _) = mapM_ (check . snd) fs
+    check (PatAscription p _ _) = check p
+    check PatLit {} = return ()
+    check (PatConstr _ _ ps _) = mapM_ check ps
 
     seen v loc = do
       already <- gets $ M.lookup v
@@ -384,84 +375,28 @@ typeParamToArg (TypeParamDim v ploc) =
 typeParamToArg (TypeParamType _ v ploc) =
   TypeArgType (Scalar $ TypeVar () Nonunique (typeName v) []) ploc
 
--- | A substitution for when using 'substituteTypes'.
-data TypeSub
-  = TypeSub TypeBinding
-  | DimSub (DimDecl VName)
-  deriving (Show)
-
--- | A collection of type substitutions.
-type TypeSubs = M.Map VName TypeSub
-
--- | Apply type substitutions to the given type.
-substituteTypes :: Monoid als => TypeSubs -> TypeBase (DimDecl VName) als -> TypeBase (DimDecl VName) als
-substituteTypes substs ot = case ot of
-  Array als u at shape ->
-    arrayOf
-      (substituteTypes substs (Scalar at) `setAliases` mempty)
-      (substituteInShape shape)
-      u
-      `addAliases` (<> als)
-  Scalar (Prim t) -> Scalar $ Prim t
-  Scalar (TypeVar als u v targs)
-    | Just (TypeSub (TypeAbbr _ ps t)) <-
-        M.lookup (qualLeaf (qualNameFromTypeName v)) substs ->
-      applyType ps (t `setAliases` mempty) (map substituteInTypeArg targs)
-        `setUniqueness` u `addAliases` (<> als)
-    | otherwise -> Scalar $ TypeVar als u v $ map substituteInTypeArg targs
-  Scalar (Record ts) ->
-    Scalar $ Record $ fmap (substituteTypes substs) ts
-  Scalar (Arrow als v t1 t2) ->
-    Scalar $ Arrow als v (substituteTypes substs t1) (substituteTypes substs t2)
-  Scalar (Sum cs) ->
-    Scalar $ Sum $ (fmap . fmap) (substituteTypes substs) cs
-  where
-    substituteInTypeArg (TypeArgDim d loc) =
-      TypeArgDim (substituteInDim d) loc
-    substituteInTypeArg (TypeArgType t loc) =
-      TypeArgType (substituteTypes substs t) loc
-
-    substituteInShape (ShapeDecl ds) =
-      ShapeDecl $ map substituteInDim ds
-
-    substituteInDim (NamedDim v)
-      | Just (DimSub d) <- M.lookup (qualLeaf v) substs = d
-    substituteInDim d = d
-
-applyType ::
-  Monoid als =>
-  [TypeParam] ->
-  TypeBase (DimDecl VName) als ->
-  [StructTypeArg] ->
-  TypeBase (DimDecl VName) als
-applyType ps t args =
-  substituteTypes substs t
-  where
-    substs = M.fromList $ zipWith mkSubst ps args
-    -- We are assuming everything has already been type-checked for correctness.
-    mkSubst (TypeParamDim pv _) (TypeArgDim d _) =
-      (pv, DimSub d)
-    mkSubst (TypeParamType l pv _) (TypeArgType at _) =
-      (pv, TypeSub $ TypeAbbr l [] at)
-    mkSubst p a =
-      error $ "applyType mkSubst: cannot substitute " ++ pretty a ++ " for " ++ pretty p
-
 -- | A type substituion may be a substitution or a yet-unknown
 -- substitution (but which is certainly an overloaded primitive
 -- type!).  The latter is used to remove aliases from types that are
 -- yet-unknown but that we know cannot carry aliases (see issue #682).
-data Subst t = Subst t | PrimSubst | SizeSubst (DimDecl VName)
+data Subst t = Subst [TypeParam] t | PrimSubst | SizeSubst (DimDecl VName)
   deriving (Show)
 
+substFromAbbr :: TypeBinding -> Subst StructType
+substFromAbbr (TypeAbbr _ ps t) = Subst ps t
+
+-- | Substitutions to apply in a type.
+type TypeSubs = VName -> Maybe (Subst StructType)
+
 instance Functor Subst where
-  fmap f (Subst t) = Subst $ f t
+  fmap f (Subst ps t) = Subst ps $ f t
   fmap _ PrimSubst = PrimSubst
   fmap _ (SizeSubst v) = SizeSubst v
 
 -- | Class of types which allow for substitution of types with no
 -- annotations for type variable names.
 class Substitutable a where
-  applySubst :: (VName -> Maybe (Subst StructType)) -> a -> a
+  applySubst :: TypeSubs -> a -> a
 
 instance Substitutable (TypeBase (DimDecl VName) ()) where
   applySubst = substTypesAny
@@ -477,7 +412,7 @@ instance Substitutable (DimDecl VName) where
 instance Substitutable d => Substitutable (ShapeDecl d) where
   applySubst f = fmap $ applySubst f
 
-instance Substitutable Pattern where
+instance Substitutable Pat where
   applySubst f = runIdentity . astMap mapper
     where
       mapper =
@@ -486,8 +421,25 @@ instance Substitutable Pattern where
             mapOnName = return,
             mapOnQualName = return,
             mapOnStructType = return . applySubst f,
-            mapOnPatternType = return . applySubst f
+            mapOnPatType = return . applySubst f
           }
+
+applyType ::
+  Monoid als =>
+  [TypeParam] ->
+  TypeBase (DimDecl VName) als ->
+  [StructTypeArg] ->
+  TypeBase (DimDecl VName) als
+applyType ps t args = substTypesAny (`M.lookup` substs) t
+  where
+    substs = M.fromList $ zipWith mkSubst ps args
+    -- We are assuming everything has already been type-checked for correctness.
+    mkSubst (TypeParamDim pv _) (TypeArgDim d _) =
+      (pv, SizeSubst d)
+    mkSubst (TypeParamType _ pv _) (TypeArgType at _) =
+      (pv, Subst [] $ second mempty at)
+    mkSubst p a =
+      error $ "applyType mkSubst: cannot substitute " ++ pretty a ++ " for " ++ pretty p
 
 -- | Perform substitutions, from type names to types, on a type. Works
 -- regardless of what shape and uniqueness information is attached to the type.
@@ -504,13 +456,14 @@ substTypesAny lookupSubst ot = case ot of
       u
       `setAliases` als
   Scalar (Prim t) -> Scalar $ Prim t
-  -- We only substitute for a type variable with no arguments, since
-  -- type parameters cannot have higher kind.
   Scalar (TypeVar als u v targs) ->
-    case lookupSubst $ qualLeaf (qualNameFromTypeName v) of
-      Just (Subst t) -> substTypesAny lookupSubst $ t `setUniqueness` u `addAliases` (<> als)
-      Just PrimSubst -> Scalar $ TypeVar mempty u v $ map subsTypeArg targs
-      _ -> Scalar $ TypeVar als u v $ map subsTypeArg targs
+    let targs' = map subsTypeArg targs
+     in case lookupSubst $ qualLeaf (qualNameFromTypeName v) of
+          Just (Subst ps t) ->
+            applyType ps (t `setAliases` mempty) targs'
+              `setUniqueness` u `addAliases` (<> als)
+          Just PrimSubst -> Scalar $ TypeVar mempty u v targs'
+          _ -> Scalar $ TypeVar als u v targs'
   Scalar (Record ts) -> Scalar $ Record $ fmap (substTypesAny lookupSubst) ts
   Scalar (Arrow als v t1 t2) ->
     Scalar $ Arrow als v (substTypesAny lookupSubst t1) (substTypesAny lookupSubst t2)

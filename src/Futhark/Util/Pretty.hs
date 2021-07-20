@@ -1,4 +1,3 @@
-{-# LANGUAGE Trustworthy #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 
 -- | A re-export of the prettyprinting library, along with some convenience functions.
@@ -48,7 +47,7 @@ prettyDoc :: Int -> Doc -> String
 prettyDoc = PP.pretty
 
 ppTuple' :: Pretty a => [a] -> Doc
-ppTuple' ets = braces $ commasep $ map ppr ets
+ppTuple' ets = braces $ commasep $ map (align . ppr) ets
 
 -- | Prettyprint a list enclosed in curly braces.
 prettyTuple :: Pretty a => [a] -> String

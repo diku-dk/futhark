@@ -14,6 +14,7 @@ module Futhark.IR.SegOp
   ( SegOp (..),
     SegVirt (..),
     segLevel,
+    segBody,
     segSpace,
     typeCheckSegOp,
     SegSpace (..),
@@ -31,6 +32,7 @@ module Futhark.IR.SegOp
     consumedInKernelBody,
     ResultManifest (..),
     KernelResult (..),
+    kernelResultCerts,
     kernelResultSubExp,
     SplitOrdering (..),
 
@@ -80,7 +82,7 @@ import Futhark.IR.Aliases
 import Futhark.IR.Mem
 import Futhark.IR.Prop.Aliases
 import qualified Futhark.Optimise.Simplify.Engine as Engine
-import Futhark.Optimise.Simplify.Lore
+import Futhark.Optimise.Simplify.Rep
 import Futhark.Optimise.Simplify.Rule
 import Futhark.Tools
 import Futhark.Transform.Rename
@@ -122,7 +124,7 @@ instance Rename SplitOrdering where
     SplitStrided <$> rename stride
 
 -- | An operator for 'SegHist'.
-data HistOp lore = HistOp
+data HistOp rep = HistOp
   { histWidth :: SubExp,
     histRaceFactor :: SubExp,
     histDest :: [VName],
@@ -133,14 +135,14 @@ data HistOp lore = HistOp
     -- "dimensions".  This is used to generate more efficient
     -- code.
     histShape :: Shape,
-    histOp :: Lambda lore
+    histOp :: Lambda rep
   }
   deriving (Eq, Ord, Show)
 
 -- | The type of a histogram produced by a 'HistOp'.  This can be
 -- different from the type of the 'histDest's in case we are
 -- dealing with a segmented histogram.
-histType :: HistOp lore -> [Type]
+histType :: HistOp rep -> [Type]
 histType op =
   map
     ( (`arrayOfRow` histWidth op)
@@ -149,9 +151,9 @@ histType op =
     $ lambdaReturnType $ histOp op
 
 -- | An operator for 'SegScan' and 'SegRed'.
-data SegBinOp lore = SegBinOp
+data SegBinOp rep = SegBinOp
   { segBinOpComm :: Commutativity,
-    segBinOpLambda :: Lambda lore,
+    segBinOpLambda :: Lambda rep,
     segBinOpNeutral :: [SubExp],
     -- | In case this operator is semantically a vectorised
     -- operator (corresponding to a perfect map nest in the
@@ -163,26 +165,26 @@ data SegBinOp lore = SegBinOp
   deriving (Eq, Ord, Show)
 
 -- | How many reduction results are produced by these 'SegBinOp's?
-segBinOpResults :: [SegBinOp lore] -> Int
+segBinOpResults :: [SegBinOp rep] -> Int
 segBinOpResults = sum . map (length . segBinOpNeutral)
 
 -- | Split some list into chunks equal to the number of values
 -- returned by each 'SegBinOp'
-segBinOpChunks :: [SegBinOp lore] -> [a] -> [[a]]
+segBinOpChunks :: [SegBinOp rep] -> [a] -> [[a]]
 segBinOpChunks = chunks . map (length . segBinOpNeutral)
 
 -- | The body of a 'SegOp'.
-data KernelBody lore = KernelBody
-  { kernelBodyLore :: BodyDec lore,
-    kernelBodyStms :: Stms lore,
+data KernelBody rep = KernelBody
+  { kernelBodyDec :: BodyDec rep,
+    kernelBodyStms :: Stms rep,
     kernelBodyResult :: [KernelResult]
   }
 
-deriving instance Decorations lore => Ord (KernelBody lore)
+deriving instance RepTypes rep => Ord (KernelBody rep)
 
-deriving instance Decorations lore => Show (KernelBody lore)
+deriving instance RepTypes rep => Show (KernelBody rep)
 
-deriving instance Decorations lore => Eq (KernelBody lore)
+deriving instance RepTypes rep => Eq (KernelBody rep)
 
 -- | Metadata about whether there is a subtle point to this
 -- 'KernelResult'.  This is used to protect things like tiling, which
@@ -206,23 +208,27 @@ data KernelResult
   = -- | Each "worker" in the kernel returns this.
     -- Whether this is a result-per-thread or a
     -- result-per-group depends on where the 'SegOp' occurs.
-    Returns ResultManifest SubExp
+    Returns ResultManifest Certs SubExp
   | WriteReturns
+      Certs
       Shape -- Size of array.  Must match number of dims.
       VName -- Which array
       [(Slice SubExp, SubExp)]
   | -- Arbitrary number of index/value pairs.
     ConcatReturns
+      Certs
       SplitOrdering -- Permuted?
       SubExp -- The final size.
       SubExp -- Per-thread/group (max) chunk size.
       VName -- Chunk by this worker.
   | TileReturns
+      Certs
       [(SubExp, SubExp)] -- Total/tile for each dimension
       VName -- Tile written by this worker.
       -- The TileReturns must not expect more than one
       -- result to be written per physical thread.
   | RegTileReturns
+      Certs
       -- For each dim of result:
       [ ( SubExp, -- size of this dim.
           SubExp, -- block tile size for this dim.
@@ -232,31 +238,39 @@ data KernelResult
       VName -- Tile returned by this worker/group.
   deriving (Eq, Show, Ord)
 
+-- | Get the certs for this 'KernelResult'.
+kernelResultCerts :: KernelResult -> Certs
+kernelResultCerts (Returns _ cs _) = cs
+kernelResultCerts (WriteReturns cs _ _ _) = cs
+kernelResultCerts (ConcatReturns cs _ _ _ _) = cs
+kernelResultCerts (TileReturns cs _ _) = cs
+kernelResultCerts (RegTileReturns cs _ _) = cs
+
 -- | Get the root t'SubExp' corresponding values for a 'KernelResult'.
 kernelResultSubExp :: KernelResult -> SubExp
-kernelResultSubExp (Returns _ se) = se
-kernelResultSubExp (WriteReturns _ arr _) = Var arr
-kernelResultSubExp (ConcatReturns _ _ _ v) = Var v
-kernelResultSubExp (TileReturns _ v) = Var v
-kernelResultSubExp (RegTileReturns _ v) = Var v
+kernelResultSubExp (Returns _ _ se) = se
+kernelResultSubExp (WriteReturns _ _ arr _) = Var arr
+kernelResultSubExp (ConcatReturns _ _ _ _ v) = Var v
+kernelResultSubExp (TileReturns _ _ v) = Var v
+kernelResultSubExp (RegTileReturns _ _ v) = Var v
 
 instance FreeIn KernelResult where
-  freeIn' (Returns _ what) = freeIn' what
-  freeIn' (WriteReturns rws arr res) = freeIn' rws <> freeIn' arr <> freeIn' res
-  freeIn' (ConcatReturns o w per_thread_elems v) =
-    freeIn' o <> freeIn' w <> freeIn' per_thread_elems <> freeIn' v
-  freeIn' (TileReturns dims v) =
-    freeIn' dims <> freeIn' v
-  freeIn' (RegTileReturns dims_n_tiles v) =
-    freeIn' dims_n_tiles <> freeIn' v
+  freeIn' (Returns _ cs what) = freeIn' cs <> freeIn' what
+  freeIn' (WriteReturns cs rws arr res) = freeIn' cs <> freeIn' rws <> freeIn' arr <> freeIn' res
+  freeIn' (ConcatReturns cs o w per_thread_elems v) =
+    freeIn' cs <> freeIn' o <> freeIn' w <> freeIn' per_thread_elems <> freeIn' v
+  freeIn' (TileReturns cs dims v) =
+    freeIn' cs <> freeIn' dims <> freeIn' v
+  freeIn' (RegTileReturns cs dims_n_tiles v) =
+    freeIn' cs <> freeIn' dims_n_tiles <> freeIn' v
 
-instance ASTLore lore => FreeIn (KernelBody lore) where
+instance ASTRep rep => FreeIn (KernelBody rep) where
   freeIn' (KernelBody dec stms res) =
     fvBind bound_in_stms $ freeIn' dec <> freeIn' stms <> freeIn' res
     where
       bound_in_stms = foldMap boundByStm stms
 
-instance ASTLore lore => Substitute (KernelBody lore) where
+instance ASTRep rep => Substitute (KernelBody rep) where
   substituteNames subst (KernelBody dec stms res) =
     KernelBody
       (substituteNames subst dec)
@@ -264,27 +278,33 @@ instance ASTLore lore => Substitute (KernelBody lore) where
       (substituteNames subst res)
 
 instance Substitute KernelResult where
-  substituteNames subst (Returns manifest se) =
-    Returns manifest (substituteNames subst se)
-  substituteNames subst (WriteReturns rws arr res) =
+  substituteNames subst (Returns manifest cs se) =
+    Returns manifest (substituteNames subst cs) (substituteNames subst se)
+  substituteNames subst (WriteReturns cs rws arr res) =
     WriteReturns
+      (substituteNames subst cs)
       (substituteNames subst rws)
       (substituteNames subst arr)
       (substituteNames subst res)
-  substituteNames subst (ConcatReturns o w per_thread_elems v) =
+  substituteNames subst (ConcatReturns cs o w per_thread_elems v) =
     ConcatReturns
+      (substituteNames subst cs)
       (substituteNames subst o)
       (substituteNames subst w)
       (substituteNames subst per_thread_elems)
       (substituteNames subst v)
-  substituteNames subst (TileReturns dims v) =
-    TileReturns (substituteNames subst dims) (substituteNames subst v)
-  substituteNames subst (RegTileReturns dims_n_tiles v) =
+  substituteNames subst (TileReturns cs dims v) =
+    TileReturns
+      (substituteNames subst cs)
+      (substituteNames subst dims)
+      (substituteNames subst v)
+  substituteNames subst (RegTileReturns cs dims_n_tiles v) =
     RegTileReturns
+      (substituteNames subst cs)
       (substituteNames subst dims_n_tiles)
       (substituteNames subst v)
 
-instance ASTLore lore => Rename (KernelBody lore) where
+instance ASTRep rep => Rename (KernelBody rep) where
   rename (KernelBody dec stms res) = do
     dec' <- rename dec
     renamingStms stms $ \stms' ->
@@ -295,49 +315,49 @@ instance Rename KernelResult where
 
 -- | Perform alias analysis on a 'KernelBody'.
 aliasAnalyseKernelBody ::
-  ( ASTLore lore,
-    CanBeAliased (Op lore)
+  ( ASTRep rep,
+    CanBeAliased (Op rep)
   ) =>
   AliasTable ->
-  KernelBody lore ->
-  KernelBody (Aliases lore)
+  KernelBody rep ->
+  KernelBody (Aliases rep)
 aliasAnalyseKernelBody aliases (KernelBody dec stms res) =
   let Body dec' stms' _ = Alias.analyseBody aliases $ Body dec stms []
    in KernelBody dec' stms' res
 
 removeKernelBodyAliases ::
-  CanBeAliased (Op lore) =>
-  KernelBody (Aliases lore) ->
-  KernelBody lore
+  CanBeAliased (Op rep) =>
+  KernelBody (Aliases rep) ->
+  KernelBody rep
 removeKernelBodyAliases (KernelBody (_, dec) stms res) =
   KernelBody dec (fmap removeStmAliases stms) res
 
 removeKernelBodyWisdom ::
-  CanBeWise (Op lore) =>
-  KernelBody (Wise lore) ->
-  KernelBody lore
+  CanBeWise (Op rep) =>
+  KernelBody (Wise rep) ->
+  KernelBody rep
 removeKernelBodyWisdom (KernelBody dec stms res) =
   let Body dec' stms' _ = removeBodyWisdom $ Body dec stms []
    in KernelBody dec' stms' res
 
 -- | The variables consumed in the kernel body.
 consumedInKernelBody ::
-  Aliased lore =>
-  KernelBody lore ->
+  Aliased rep =>
+  KernelBody rep ->
   Names
 consumedInKernelBody (KernelBody dec stms res) =
   consumedInBody (Body dec stms []) <> mconcat (map consumedByReturn res)
   where
-    consumedByReturn (WriteReturns _ a _) = oneName a
+    consumedByReturn (WriteReturns _ _ a _) = oneName a
     consumedByReturn _ = mempty
 
 checkKernelBody ::
-  TC.Checkable lore =>
+  TC.Checkable rep =>
   [Type] ->
-  KernelBody (Aliases lore) ->
-  TC.TypeM lore ()
+  KernelBody (Aliases rep) ->
+  TC.TypeM rep ()
 checkKernelBody ts (KernelBody (_, dec) stms kres) = do
-  TC.checkBodyLore dec
+  TC.checkBodyDec dec
   -- We consume the kernel results (when applicable) before
   -- type-checking the stms, so we will get an error if a statement
   -- uses an array that is written to in a result.
@@ -352,14 +372,16 @@ checkKernelBody ts (KernelBody (_, dec) stms kres) = do
             ++ " values."
     zipWithM_ checkKernelResult kres ts
   where
-    consumeKernelResult (WriteReturns _ arr _) =
+    consumeKernelResult (WriteReturns _ _ arr _) =
       TC.consume =<< TC.lookupAliases arr
     consumeKernelResult _ =
       pure ()
 
-    checkKernelResult (Returns _ what) t =
+    checkKernelResult (Returns _ cs what) t = do
+      TC.checkCerts cs
       TC.require [t] what
-    checkKernelResult (WriteReturns shape arr res) t = do
+    checkKernelResult (WriteReturns cs shape arr res) t = do
+      TC.checkCerts cs
       mapM_ (TC.require [Prim int64]) $ shapeDims shape
       arr_t <- lookupType arr
       forM_ res $ \(slice, e) -> do
@@ -376,7 +398,8 @@ checkKernelBody ts (KernelBody (_, dec) stms kres) = do
                 ++ pretty shape
                 ++ ", but destination array has type "
                 ++ pretty arr_t
-    checkKernelResult (ConcatReturns o w per_thread_elems v) t = do
+    checkKernelResult (ConcatReturns cs o w per_thread_elems v) t = do
+      TC.checkCerts cs
       case o of
         SplitContiguous -> return ()
         SplitStrided stride -> TC.require [Prim int64] stride
@@ -385,14 +408,16 @@ checkKernelBody ts (KernelBody (_, dec) stms kres) = do
       vt <- lookupType v
       unless (vt == t `arrayOfRow` arraySize 0 vt) $
         TC.bad $ TC.TypeError $ "Invalid type for ConcatReturns " ++ pretty v
-    checkKernelResult (TileReturns dims v) t = do
+    checkKernelResult (TileReturns cs dims v) t = do
+      TC.checkCerts cs
       forM_ dims $ \(dim, tile) -> do
         TC.require [Prim int64] dim
         TC.require [Prim int64] tile
       vt <- lookupType v
       unless (vt == t `arrayOfShape` Shape (map snd dims)) $
         TC.bad $ TC.TypeError $ "Invalid type for TileReturns " ++ pretty v
-    checkKernelResult (RegTileReturns dims_n_tiles arr) t = do
+    checkKernelResult (RegTileReturns cs dims_n_tiles arr) t = do
+      TC.checkCerts cs
       mapM_ (TC.require [Prim int64]) dims
       mapM_ (TC.require [Prim int64]) blk_tiles
       mapM_ (TC.require [Prim int64]) reg_tiles
@@ -409,39 +434,53 @@ checkKernelBody ts (KernelBody (_, dec) stms kres) = do
         (dims, blk_tiles, reg_tiles) = unzip3 dims_n_tiles
         expected = t `arrayOfShape` Shape (blk_tiles ++ reg_tiles)
 
-kernelBodyMetrics :: OpMetrics (Op lore) => KernelBody lore -> MetricsM ()
+kernelBodyMetrics :: OpMetrics (Op rep) => KernelBody rep -> MetricsM ()
 kernelBodyMetrics = mapM_ stmMetrics . kernelBodyStms
 
-instance PrettyLore lore => Pretty (KernelBody lore) where
+instance PrettyRep rep => Pretty (KernelBody rep) where
   ppr (KernelBody _ stms res) =
     PP.stack (map ppr (stmsToList stms))
       </> text "return" <+> PP.braces (PP.commasep $ map ppr res)
 
+certAnnots :: Certs -> [PP.Doc]
+certAnnots cs
+  | cs == mempty = []
+  | otherwise = [ppr cs]
+
 instance Pretty KernelResult where
-  ppr (Returns ResultNoSimplify what) =
-    text "returns (manifest)" <+> ppr what
-  ppr (Returns ResultPrivate what) =
-    text "returns (private)" <+> ppr what
-  ppr (Returns ResultMaySimplify what) =
-    text "returns" <+> ppr what
-  ppr (WriteReturns shape arr res) =
-    ppr arr <+> PP.colon <+> ppr shape
-      </> text "with" <+> PP.apply (map ppRes res)
+  ppr (Returns ResultNoSimplify cs what) =
+    PP.spread $ certAnnots cs ++ ["returns (manifest)" <+> ppr what]
+  ppr (Returns ResultPrivate cs what) =
+    PP.spread $ certAnnots cs ++ ["returns (private)" <+> ppr what]
+  ppr (Returns ResultMaySimplify cs what) =
+    PP.spread $ certAnnots cs ++ ["returns" <+> ppr what]
+  ppr (WriteReturns cs shape arr res) =
+    PP.spread $
+      certAnnots cs
+        ++ [ ppr arr <+> PP.colon <+> ppr shape
+               </> "with" <+> PP.apply (map ppRes res)
+           ]
     where
       ppRes (slice, e) =
         ppr slice <+> text "=" <+> ppr e
-  ppr (ConcatReturns SplitContiguous w per_thread_elems v) =
-    text "concat"
-      <> parens (commasep [ppr w, ppr per_thread_elems]) <+> ppr v
-  ppr (ConcatReturns (SplitStrided stride) w per_thread_elems v) =
-    text "concat_strided"
-      <> parens (commasep [ppr stride, ppr w, ppr per_thread_elems]) <+> ppr v
-  ppr (TileReturns dims v) =
-    "tile" <> parens (commasep $ map onDim dims) <+> ppr v
+  ppr (ConcatReturns cs SplitContiguous w per_thread_elems v) =
+    PP.spread $
+      certAnnots cs
+        ++ [ "concat"
+               <> parens (commasep [ppr w, ppr per_thread_elems]) <+> ppr v
+           ]
+  ppr (ConcatReturns cs (SplitStrided stride) w per_thread_elems v) =
+    PP.spread $
+      certAnnots cs
+        ++ [ "concat_strided"
+               <> parens (commasep [ppr stride, ppr w, ppr per_thread_elems]) <+> ppr v
+           ]
+  ppr (TileReturns cs dims v) =
+    PP.spread $ certAnnots cs ++ ["tile" <> parens (commasep $ map onDim dims) <+> ppr v]
     where
       onDim (dim, tile) = ppr dim <+> "/" <+> ppr tile
-  ppr (RegTileReturns dims_n_tiles v) =
-    "blkreg_tile" <> parens (commasep $ map onDim dims_n_tiles) <+> ppr v
+  ppr (RegTileReturns cs dims_n_tiles v) =
+    PP.spread $ certAnnots cs ++ ["blkreg_tile" <> parens (commasep $ map onDim dims_n_tiles) <+> ppr v]
     where
       onDim (dim, blk_tile, reg_tile) =
         ppr dim <+> "/" <+> parens (ppr blk_tile <+> "*" <+> ppr reg_tile)
@@ -478,11 +517,11 @@ segSpaceDims (SegSpace _ space) = map snd space
 
 -- | A 'Scope' containing all the identifiers brought into scope by
 -- this 'SegSpace'.
-scopeOfSegSpace :: SegSpace -> Scope lore
+scopeOfSegSpace :: SegSpace -> Scope rep
 scopeOfSegSpace (SegSpace phys space) =
   M.fromList $ zip (phys : map fst space) $ repeat $ IndexName Int64
 
-checkSegSpace :: TC.Checkable lore => SegSpace -> TC.TypeM lore ()
+checkSegSpace :: TC.Checkable rep => SegSpace -> TC.TypeM rep ()
 checkSegSpace (SegSpace _ dims) =
   mapM_ (TC.require [Prim int64] . snd) dims
 
@@ -496,43 +535,52 @@ checkSegSpace (SegSpace _ dims) =
 -- of information.  For example, in GPU backends, it is used to
 -- indicate whether the 'SegOp' is expected to run at the thread-level
 -- or the group-level.
-data SegOp lvl lore
-  = SegMap lvl SegSpace [Type] (KernelBody lore)
+data SegOp lvl rep
+  = SegMap lvl SegSpace [Type] (KernelBody rep)
   | -- | The KernelSpace must always have at least two dimensions,
     -- implying that the result of a SegRed is always an array.
-    SegRed lvl SegSpace [SegBinOp lore] [Type] (KernelBody lore)
-  | SegScan lvl SegSpace [SegBinOp lore] [Type] (KernelBody lore)
-  | SegHist lvl SegSpace [HistOp lore] [Type] (KernelBody lore)
+    SegRed lvl SegSpace [SegBinOp rep] [Type] (KernelBody rep)
+  | SegScan lvl SegSpace [SegBinOp rep] [Type] (KernelBody rep)
+  | SegHist lvl SegSpace [HistOp rep] [Type] (KernelBody rep)
   deriving (Eq, Ord, Show)
 
 -- | The level of a 'SegOp'.
-segLevel :: SegOp lvl lore -> lvl
+segLevel :: SegOp lvl rep -> lvl
 segLevel (SegMap lvl _ _ _) = lvl
 segLevel (SegRed lvl _ _ _ _) = lvl
 segLevel (SegScan lvl _ _ _ _) = lvl
 segLevel (SegHist lvl _ _ _ _) = lvl
 
 -- | The space of a 'SegOp'.
-segSpace :: SegOp lvl lore -> SegSpace
+segSpace :: SegOp lvl rep -> SegSpace
 segSpace (SegMap _ lvl _ _) = lvl
 segSpace (SegRed _ lvl _ _ _) = lvl
 segSpace (SegScan _ lvl _ _ _) = lvl
 segSpace (SegHist _ lvl _ _ _) = lvl
 
+-- | The body of a 'SegOp'.
+segBody :: SegOp lvl rep -> KernelBody rep
+segBody segop =
+  case segop of
+    SegMap _ _ _ body -> body
+    SegRed _ _ _ _ body -> body
+    SegScan _ _ _ _ body -> body
+    SegHist _ _ _ _ body -> body
+
 segResultShape :: SegSpace -> Type -> KernelResult -> Type
-segResultShape _ t (WriteReturns shape _ _) =
+segResultShape _ t (WriteReturns _ shape _ _) =
   t `arrayOfShape` shape
-segResultShape space t (Returns _ _) =
+segResultShape space t Returns {} =
   foldr (flip arrayOfRow) t $ segSpaceDims space
-segResultShape _ t (ConcatReturns _ w _ _) =
+segResultShape _ t (ConcatReturns _ _ w _ _) =
   t `arrayOfRow` w
-segResultShape _ t (TileReturns dims _) =
+segResultShape _ t (TileReturns _ dims _) =
   t `arrayOfShape` Shape (map fst dims)
-segResultShape _ t (RegTileReturns dims_n_tiles _) =
+segResultShape _ t (RegTileReturns _ dims_n_tiles _) =
   t `arrayOfShape` Shape (map (\(dim, _, _) -> dim) dims_n_tiles)
 
 -- | The return type of a 'SegOp'.
-segOpType :: SegOp lvl lore -> [Type]
+segOpType :: SegOp lvl rep -> [Type]
 segOpType (SegMap _ space ts kbody) =
   zipWith (segResultShape space) ts $ kernelBodyResult kbody
 segOpType (SegRed _ space reds ts kbody) =
@@ -568,12 +616,12 @@ segOpType (SegHist _ space ops _ _) = do
     dims = segSpaceDims space
     segment_dims = init dims
 
-instance TypedOp (SegOp lvl lore) where
+instance TypedOp (SegOp lvl rep) where
   opType = pure . staticShapes . segOpType
 
 instance
-  (ASTLore lore, Aliased lore, ASTConstraints lvl) =>
-  AliasedOp (SegOp lvl lore)
+  (ASTRep rep, Aliased rep, ASTConstraints lvl) =>
+  AliasedOp (SegOp lvl rep)
   where
   opAliases = map (const mempty) . segOpType
 
@@ -588,10 +636,10 @@ instance
 
 -- | Type check a 'SegOp', given a checker for its level.
 typeCheckSegOp ::
-  TC.Checkable lore =>
-  (lvl -> TC.TypeM lore ()) ->
-  SegOp lvl (Aliases lore) ->
-  TC.TypeM lore ()
+  TC.Checkable rep =>
+  (lvl -> TC.TypeM rep ()) ->
+  SegOp lvl (Aliases rep) ->
+  TC.TypeM rep ()
 typeCheckSegOp checkLvl (SegMap lvl space ts kbody) = do
   checkLvl lvl
   checkScanRed space [] ts kbody
@@ -661,12 +709,12 @@ typeCheckSegOp checkLvl (SegHist lvl space ops ts kbody) = do
     segment_dims = init $ segSpaceDims space
 
 checkScanRed ::
-  TC.Checkable lore =>
+  TC.Checkable rep =>
   SegSpace ->
-  [(Lambda (Aliases lore), [SubExp], Shape)] ->
+  [(Lambda (Aliases rep), [SubExp], Shape)] ->
   [Type] ->
-  KernelBody (Aliases lore) ->
-  TC.TypeM lore ()
+  KernelBody (Aliases rep) ->
+  TC.TypeM rep ()
 checkScanRed space ops ts kbody = do
   checkSegSpace space
   mapM_ TC.checkType ts
@@ -699,16 +747,16 @@ checkScanRed space ops ts kbody = do
     checkKernelBody ts kbody
 
 -- | Like 'Mapper', but just for 'SegOp's.
-data SegOpMapper lvl flore tlore m = SegOpMapper
+data SegOpMapper lvl frep trep m = SegOpMapper
   { mapOnSegOpSubExp :: SubExp -> m SubExp,
-    mapOnSegOpLambda :: Lambda flore -> m (Lambda tlore),
-    mapOnSegOpBody :: KernelBody flore -> m (KernelBody tlore),
+    mapOnSegOpLambda :: Lambda frep -> m (Lambda trep),
+    mapOnSegOpBody :: KernelBody frep -> m (KernelBody trep),
     mapOnSegOpVName :: VName -> m VName,
     mapOnSegOpLevel :: lvl -> m lvl
   }
 
 -- | A mapper that simply returns the 'SegOp' verbatim.
-identitySegOpMapper :: Monad m => SegOpMapper lvl lore lore m
+identitySegOpMapper :: Monad m => SegOpMapper lvl rep rep m
 identitySegOpMapper =
   SegOpMapper
     { mapOnSegOpSubExp = return,
@@ -720,7 +768,7 @@ identitySegOpMapper =
 
 mapOnSegSpace ::
   Monad f =>
-  SegOpMapper lvl flore tlore f ->
+  SegOpMapper lvl frep trep f ->
   SegSpace ->
   f SegSpace
 mapOnSegSpace tv (SegSpace phys dims) =
@@ -728,9 +776,9 @@ mapOnSegSpace tv (SegSpace phys dims) =
 
 mapSegBinOp ::
   Monad m =>
-  SegOpMapper lvl flore tlore m ->
-  SegBinOp flore ->
-  m (SegBinOp tlore)
+  SegOpMapper lvl frep trep m ->
+  SegBinOp frep ->
+  m (SegBinOp trep)
 mapSegBinOp tv (SegBinOp comm red_op nes shape) =
   SegBinOp comm
     <$> mapOnSegOpLambda tv red_op
@@ -740,9 +788,9 @@ mapSegBinOp tv (SegBinOp comm red_op nes shape) =
 -- | Apply a 'SegOpMapper' to the given 'SegOp'.
 mapSegOpM ::
   (Applicative m, Monad m) =>
-  SegOpMapper lvl flore tlore m ->
-  SegOp lvl flore ->
-  m (SegOp lvl tlore)
+  SegOpMapper lvl frep trep m ->
+  SegOp lvl frep ->
+  m (SegOp lvl trep)
 mapSegOpM tv (SegMap lvl space ts body) =
   SegMap
     <$> mapOnSegOpLevel tv lvl
@@ -781,7 +829,7 @@ mapSegOpM tv (SegHist lvl space ops ts body) =
 
 mapOnSegOpType ::
   Monad m =>
-  SegOpMapper lvl flore tlore m ->
+  SegOpMapper lvl frep trep m ->
   Type ->
   m Type
 mapOnSegOpType _tv t@Prim {} = pure t
@@ -796,8 +844,8 @@ mapOnSegOpType tv (Array et shape u) =
 mapOnSegOpType _tv (Mem s) = pure $ Mem s
 
 instance
-  (ASTLore lore, Substitute lvl) =>
-  Substitute (SegOp lvl lore)
+  (ASTRep rep, Substitute lvl) =>
+  Substitute (SegOp lvl rep)
   where
   substituteNames subst = runIdentity . mapSegOpM substitute
     where
@@ -811,16 +859,16 @@ instance
           }
 
 instance
-  (ASTLore lore, ASTConstraints lvl) =>
-  Rename (SegOp lvl lore)
+  (ASTRep rep, ASTConstraints lvl) =>
+  Rename (SegOp lvl rep)
   where
   rename = mapSegOpM renamer
     where
       renamer = SegOpMapper rename rename rename rename rename
 
 instance
-  (ASTLore lore, FreeIn (LParamInfo lore), FreeIn lvl) =>
-  FreeIn (SegOp lvl lore)
+  (ASTRep rep, FreeIn (LParamInfo rep), FreeIn lvl) =>
+  FreeIn (SegOp lvl rep)
   where
   freeIn' e = flip execState mempty $ mapSegOpM free e
     where
@@ -834,7 +882,7 @@ instance
             mapOnSegOpLevel = walk freeIn'
           }
 
-instance OpMetrics (Op lore) => OpMetrics (SegOp lvl lore) where
+instance OpMetrics (Op rep) => OpMetrics (SegOp lvl rep) where
   opMetrics (SegMap _ _ _ body) =
     inside "SegMap" $ kernelBodyMetrics body
   opMetrics (SegRed _ _ reds _ body) =
@@ -859,7 +907,7 @@ instance Pretty SegSpace where
       )
       <+> parens (text "~" <> ppr phys)
 
-instance PrettyLore lore => Pretty (SegBinOp lore) where
+instance PrettyRep rep => Pretty (SegBinOp rep) where
   ppr (SegBinOp comm lam nes shape) =
     PP.braces (PP.commasep $ map ppr nes) <> PP.comma
       </> ppr shape <> PP.comma
@@ -869,7 +917,7 @@ instance PrettyLore lore => Pretty (SegBinOp lore) where
         Commutative -> text "commutative "
         Noncommutative -> mempty
 
-instance (PrettyLore lore, PP.Pretty lvl) => PP.Pretty (SegOp lvl lore) where
+instance (PrettyRep rep, PP.Pretty lvl) => PP.Pretty (SegOp lvl rep) where
   ppr (SegMap lvl space ts body) =
     text "segmap" <> ppr lvl
       </> PP.align (ppr space)
@@ -906,14 +954,14 @@ instance (PrettyLore lore, PP.Pretty lvl) => PP.Pretty (SegOp lvl lore) where
           </> ppr op
 
 instance
-  ( ASTLore lore,
-    ASTLore (Aliases lore),
-    CanBeAliased (Op lore),
+  ( ASTRep rep,
+    ASTRep (Aliases rep),
+    CanBeAliased (Op rep),
     ASTConstraints lvl
   ) =>
-  CanBeAliased (SegOp lvl lore)
+  CanBeAliased (SegOp lvl rep)
   where
-  type OpWithAliases (SegOp lvl lore) = SegOp lvl (Aliases lore)
+  type OpWithAliases (SegOp lvl rep) = SegOp lvl (Aliases rep)
 
   addOpAliases aliases = runIdentity . mapSegOpM alias
     where
@@ -936,10 +984,10 @@ instance
           return
 
 instance
-  (CanBeWise (Op lore), ASTLore lore, ASTConstraints lvl) =>
-  CanBeWise (SegOp lvl lore)
+  (CanBeWise (Op rep), ASTRep rep, ASTConstraints lvl) =>
+  CanBeWise (SegOp lvl rep)
   where
-  type OpWithWisdom (SegOp lvl lore) = SegOp lvl (Wise lore)
+  type OpWithWisdom (SegOp lvl rep) = SegOp lvl (Wise rep)
 
   removeOpWisdom = runIdentity . mapSegOpM remove
     where
@@ -951,9 +999,9 @@ instance
           return
           return
 
-instance ASTLore lore => ST.IndexOp (SegOp lvl lore) where
+instance ASTRep rep => ST.IndexOp (SegOp lvl rep) where
   indexOp vtable k (SegMap _ space _ kbody) is = do
-    Returns ResultMaySimplify se <- maybeNth k $ kernelBodyResult kbody
+    Returns ResultMaySimplify _ se <- maybeNth k $ kernelBodyResult kbody
     guard $ length gtids <= length is
     let idx_table = M.fromList $ zip gtids $ map (ST.Indexed mempty . untyped) is
         idx_table' = foldl' expandIndexedTable idx_table $ kernelBodyStms kbody
@@ -967,11 +1015,11 @@ instance ASTLore lore => ST.IndexOp (SegOp lvl lore) where
       excess_is = drop (length gtids) is
 
       expandIndexedTable table stm
-        | [v] <- patternNames $ stmPattern stm,
+        | [v] <- patNames $ stmPat stm,
           Just (pe, cs) <-
             runWriterT $ primExpFromExp (asPrimExp table) $ stmExp stm =
           M.insert v (ST.Indexed (stmCerts stm <> cs) pe) table
-        | [v] <- patternNames $ stmPattern stm,
+        | [v] <- patNames $ stmPat stm,
           BasicOp (Index arr slice) <- stmExp stm,
           length (sliceDims slice) == length excess_is,
           arr `ST.elem` vtable,
@@ -996,8 +1044,8 @@ instance ASTLore lore => ST.IndexOp (SegOp lvl lore) where
   indexOp _ _ _ _ = Nothing
 
 instance
-  (ASTLore lore, ASTConstraints lvl) =>
-  IsOp (SegOp lvl lore)
+  (ASTRep rep, ASTConstraints lvl) =>
+  IsOp (SegOp lvl rep)
   where
   cheapOp _ = False
   safeOp _ = True
@@ -1015,51 +1063,56 @@ instance Engine.Simplifiable SegSpace where
     SegSpace phys <$> mapM (traverse Engine.simplify) dims
 
 instance Engine.Simplifiable KernelResult where
-  simplify (Returns manifest what) =
-    Returns manifest <$> Engine.simplify what
-  simplify (WriteReturns ws a res) =
-    WriteReturns <$> Engine.simplify ws <*> Engine.simplify a <*> Engine.simplify res
-  simplify (ConcatReturns o w pte what) =
+  simplify (Returns manifest cs what) =
+    Returns manifest <$> Engine.simplify cs <*> Engine.simplify what
+  simplify (WriteReturns cs ws a res) =
+    WriteReturns <$> Engine.simplify cs
+      <*> Engine.simplify ws
+      <*> Engine.simplify a
+      <*> Engine.simplify res
+  simplify (ConcatReturns cs o w pte what) =
     ConcatReturns
-      <$> Engine.simplify o
+      <$> Engine.simplify cs
+      <*> Engine.simplify o
       <*> Engine.simplify w
       <*> Engine.simplify pte
       <*> Engine.simplify what
-  simplify (TileReturns dims what) =
-    TileReturns <$> Engine.simplify dims <*> Engine.simplify what
-  simplify (RegTileReturns dims_n_tiles what) =
+  simplify (TileReturns cs dims what) =
+    TileReturns <$> Engine.simplify cs <*> Engine.simplify dims <*> Engine.simplify what
+  simplify (RegTileReturns cs dims_n_tiles what) =
     RegTileReturns
-      <$> Engine.simplify dims_n_tiles
+      <$> Engine.simplify cs
+      <*> Engine.simplify dims_n_tiles
       <*> Engine.simplify what
 
 mkWiseKernelBody ::
-  (ASTLore lore, CanBeWise (Op lore)) =>
-  BodyDec lore ->
-  Stms (Wise lore) ->
+  (ASTRep rep, CanBeWise (Op rep)) =>
+  BodyDec rep ->
+  Stms (Wise rep) ->
   [KernelResult] ->
-  KernelBody (Wise lore)
+  KernelBody (Wise rep)
 mkWiseKernelBody dec bnds res =
-  let Body dec' _ _ = mkWiseBody dec bnds res_vs
+  let Body dec' _ _ = mkWiseBody dec bnds $ subExpsRes res_vs
    in KernelBody dec' bnds res
   where
     res_vs = map kernelResultSubExp res
 
 mkKernelBodyM ::
-  MonadBinder m =>
-  Stms (Lore m) ->
+  MonadBuilder m =>
+  Stms (Rep m) ->
   [KernelResult] ->
-  m (KernelBody (Lore m))
+  m (KernelBody (Rep m))
 mkKernelBodyM stms kres = do
-  Body dec' _ _ <- mkBodyM stms res_ses
+  Body dec' _ _ <- mkBodyM stms $ subExpsRes res_ses
   return $ KernelBody dec' stms kres
   where
     res_ses = map kernelResultSubExp kres
 
 simplifyKernelBody ::
-  (Engine.SimplifiableLore lore, BodyDec lore ~ ()) =>
+  (Engine.SimplifiableRep rep, BodyDec rep ~ ()) =>
   SegSpace ->
-  KernelBody lore ->
-  Engine.SimpleM lore (KernelBody (Wise lore), Stms (Wise lore))
+  KernelBody rep ->
+  Engine.SimpleM rep (KernelBody (Wise rep), Stms (Wise rep))
 simplifyKernelBody space (KernelBody _ stms res) = do
   par_blocker <- Engine.asksEngineEnv $ Engine.blockHoistPar . Engine.envHoistBlockers
 
@@ -1086,21 +1139,21 @@ simplifyKernelBody space (KernelBody _ stms res) = do
     scope_vtable = segSpaceSymbolTable space
     bound_here = namesFromList $ M.keys $ scopeOfSegSpace space
 
-    consumedInResult (WriteReturns _ arr _) =
+    consumedInResult (WriteReturns _ _ arr _) =
       [arr]
     consumedInResult _ =
       []
 
-segSpaceSymbolTable :: ASTLore lore => SegSpace -> ST.SymbolTable lore
+segSpaceSymbolTable :: ASTRep rep => SegSpace -> ST.SymbolTable rep
 segSpaceSymbolTable (SegSpace flat gtids_and_dims) =
   foldl' f (ST.fromScope $ M.singleton flat $ IndexName Int64) gtids_and_dims
   where
     f vtable (gtid, dim) = ST.insertLoopVar gtid Int64 dim vtable
 
 simplifySegBinOp ::
-  Engine.SimplifiableLore lore =>
-  SegBinOp lore ->
-  Engine.SimpleM lore (SegBinOp (Wise lore), Stms (Wise lore))
+  Engine.SimplifiableRep rep =>
+  SegBinOp rep ->
+  Engine.SimpleM rep (SegBinOp (Wise rep), Stms (Wise rep))
 simplifySegBinOp (SegBinOp comm lam nes shape) = do
   (lam', hoisted) <-
     Engine.localVtable (\vtable -> vtable {ST.simplifyMemory = True}) $
@@ -1111,12 +1164,12 @@ simplifySegBinOp (SegBinOp comm lam nes shape) = do
 
 -- | Simplify the given 'SegOp'.
 simplifySegOp ::
-  ( Engine.SimplifiableLore lore,
-    BodyDec lore ~ (),
+  ( Engine.SimplifiableRep rep,
+    BodyDec rep ~ (),
     Engine.Simplifiable lvl
   ) =>
-  SegOp lvl lore ->
-  Engine.SimpleM lore (SegOp lvl (Wise lore), Stms (Wise lore))
+  SegOp lvl rep ->
+  Engine.SimpleM rep (SegOp lvl (Wise rep), Stms (Wise rep))
 simplifySegOp (SegMap lvl space ts kbody) = do
   (lvl', space', ts') <- Engine.simplify (lvl, space, ts)
   (kbody', body_hoisted) <- simplifyKernelBody space kbody
@@ -1182,23 +1235,23 @@ simplifySegOp (SegHist lvl space ops ts kbody) = do
     scope = scopeOfSegSpace space
     scope_vtable = ST.fromScope scope
 
--- | Does this lore contain 'SegOp's in its t'Op's?  A lore must be an
+-- | Does this rep contain 'SegOp's in its t'Op's?  A rep must be an
 -- instance of this class for the simplification rules to work.
-class HasSegOp lore where
-  type SegOpLevel lore
-  asSegOp :: Op lore -> Maybe (SegOp (SegOpLevel lore) lore)
-  segOp :: SegOp (SegOpLevel lore) lore -> Op lore
+class HasSegOp rep where
+  type SegOpLevel rep
+  asSegOp :: Op rep -> Maybe (SegOp (SegOpLevel rep) rep)
+  segOp :: SegOp (SegOpLevel rep) rep -> Op rep
 
 -- | Simplification rules for simplifying 'SegOp's.
 segOpRules ::
-  (HasSegOp lore, BinderOps lore, Bindable lore) =>
-  RuleBook lore
+  (HasSegOp rep, BuilderOps rep, Buildable rep) =>
+  RuleBook rep
 segOpRules =
   ruleBook [RuleOp segOpRuleTopDown] [RuleOp segOpRuleBottomUp]
 
 segOpRuleTopDown ::
-  (HasSegOp lore, BinderOps lore, Bindable lore) =>
-  TopDownRuleOp lore
+  (HasSegOp rep, BuilderOps rep, Buildable rep) =>
+  TopDownRuleOp rep
 segOpRuleTopDown vtable pat dec op
   | Just op' <- asSegOp op =
     topDownSegOp vtable pat dec op'
@@ -1206,8 +1259,8 @@ segOpRuleTopDown vtable pat dec op
     Skip
 
 segOpRuleBottomUp ::
-  (HasSegOp lore, BinderOps lore) =>
-  BottomUpRuleOp lore
+  (HasSegOp rep, BuilderOps rep) =>
+  BottomUpRuleOp rep
 segOpRuleBottomUp vtable pat dec op
   | Just op' <- asSegOp op =
     bottomUpSegOp vtable pat dec op'
@@ -1215,35 +1268,31 @@ segOpRuleBottomUp vtable pat dec op
     Skip
 
 topDownSegOp ::
-  (HasSegOp lore, BinderOps lore, Bindable lore) =>
-  ST.SymbolTable lore ->
-  Pattern lore ->
-  StmAux (ExpDec lore) ->
-  SegOp (SegOpLevel lore) lore ->
-  Rule lore
+  (HasSegOp rep, BuilderOps rep, Buildable rep) =>
+  ST.SymbolTable rep ->
+  Pat rep ->
+  StmAux (ExpDec rep) ->
+  SegOp (SegOpLevel rep) rep ->
+  Rule rep
 -- If a SegOp produces something invariant to the SegOp, turn it
 -- into a replicate.
-topDownSegOp vtable (Pattern [] kpes) dec (SegMap lvl space ts (KernelBody _ kstms kres)) = Simplify $ do
+topDownSegOp vtable (Pat kpes) dec (SegMap lvl space ts (KernelBody _ kstms kres)) = Simplify $ do
   (ts', kpes', kres') <-
     unzip3 <$> filterM checkForInvarianceResult (zip3 ts kpes kres)
 
   -- Check if we did anything at all.
-  when
-    (kres == kres')
-    cannotSimplify
+  when (kres == kres') cannotSimplify
 
   kbody <- mkKernelBodyM kstms kres'
   addStm $
-    Let (Pattern [] kpes') dec $
-      Op $
-        segOp $
-          SegMap lvl space ts' kbody
+    Let (Pat kpes') dec $ Op $ segOp $ SegMap lvl space ts' kbody
   where
     isInvariant Constant {} = True
     isInvariant (Var v) = isJust $ ST.lookup v vtable
 
-    checkForInvarianceResult (_, pe, Returns rm se)
-      | rm == ResultMaySimplify,
+    checkForInvarianceResult (_, pe, Returns rm cs se)
+      | cs == mempty,
+        rm == ResultMaySimplify,
         isInvariant se = do
         letBindNames [patElemName pe] $
           BasicOp $ Replicate (Shape $ segSpaceDims space) se
@@ -1254,7 +1303,7 @@ topDownSegOp vtable (Pattern [] kpes) dec (SegMap lvl space ts (KernelBody _ kst
 -- If a SegRed contains two reduction operations that have the same
 -- vector shape, merge them together.  This saves on communication
 -- overhead, but can in principle lead to more local memory usage.
-topDownSegOp _ (Pattern [] pes) _ (SegRed lvl space ops ts kbody)
+topDownSegOp _ (Pat pes) _ (SegRed lvl space ops ts kbody)
   | length ops > 1,
     op_groupings <-
       groupBy sameShape $
@@ -1267,7 +1316,7 @@ topDownSegOp _ (Pattern [] pes) _ (SegRed lvl space ops ts kbody)
         pes' = red_pes' ++ map_pes
         ts' = red_ts' ++ map_ts
         kbody' = kbody {kernelBodyResult = red_res' ++ map_res}
-    letBind (Pattern [] pes') $ Op $ segOp $ SegRed lvl space ops' ts' kbody'
+    letBind (Pat pes') $ Op $ segOp $ SegRed lvl space ops' ts' kbody'
   where
     (red_pes, map_pes) = splitAt (segBinOpResults ops) pes
     (red_ts, map_ts) = splitAt (segBinOpResults ops) ts
@@ -1309,11 +1358,11 @@ topDownSegOp _ _ _ _ = Skip
 -- A convenient way of operating on the type and body of a SegOp,
 -- without worrying about exactly what kind it is.
 segOpGuts ::
-  SegOp (SegOpLevel lore) lore ->
+  SegOp (SegOpLevel rep) rep ->
   ( [Type],
-    KernelBody lore,
+    KernelBody rep,
     Int,
-    [Type] -> KernelBody lore -> SegOp (SegOpLevel lore) lore
+    [Type] -> KernelBody rep -> SegOp (SegOpLevel rep) rep
   )
 segOpGuts (SegMap lvl space kts body) =
   (kts, body, 0, SegMap lvl space)
@@ -1325,15 +1374,15 @@ segOpGuts (SegHist lvl space ops kts body) =
   (kts, body, sum $ map (length . histDest) ops, SegHist lvl space ops)
 
 bottomUpSegOp ::
-  (HasSegOp lore, BinderOps lore) =>
-  (ST.SymbolTable lore, UT.UsageTable) ->
-  Pattern lore ->
-  StmAux (ExpDec lore) ->
-  SegOp (SegOpLevel lore) lore ->
-  Rule lore
+  (HasSegOp rep, BuilderOps rep) =>
+  (ST.SymbolTable rep, UT.UsageTable) ->
+  Pat rep ->
+  StmAux (ExpDec rep) ->
+  SegOp (SegOpLevel rep) rep ->
+  Rule rep
 -- Some SegOp results can be moved outside the SegOp, which can
 -- simplify further analysis.
-bottomUpSegOp (vtable, used) (Pattern [] kpes) dec segop = Simplify $ do
+bottomUpSegOp (vtable, used) (Pat kpes) dec segop = Simplify $ do
   -- Iterate through the bindings.  For each, we check whether it is
   -- in kres and can be moved outside.  If so, we remove it from kres
   -- and kpes and make it a binding outside.  We have to be careful
@@ -1352,7 +1401,7 @@ bottomUpSegOp (vtable, used) (Pattern [] kpes) dec segop = Simplify $ do
     localScope (scopeOfSegSpace space) $
       mkKernelBodyM kstms' kres'
 
-  addStm $ Let (Pattern [] kpes') dec $ Op $ segOp $ mk_segop kts' kbody
+  addStm $ Let (Pat kpes') dec $ Op $ segOp $ mk_segop kts' kbody
   where
     (kts, KernelBody _ kstms kres, num_nonmap_results, mk_segop) =
       segOpGuts segop
@@ -1372,7 +1421,7 @@ bottomUpSegOp (vtable, used) (Pattern [] kpes) dec segop = Simplify $ do
         Nothing
 
     distribute (kpes', kts', kres', kstms') stm
-      | Let (Pattern [] [pe]) _ _ <- stm,
+      | Let (Pat [pe]) _ _ <- stm,
         Just (remaining_slice, arr) <- sliceWithGtidsFixed stm,
         Just (kpe, kpes'', kts'', kres'') <- isResult kpes' kts' kres' pe = do
         let outer_slice =
@@ -1413,26 +1462,25 @@ bottomUpSegOp (vtable, used) (Pattern [] kpes) dec segop = Simplify $ do
             Just (kpe, kpes'', kts'', kres'')
         _ -> Nothing
       where
-        matches (_, _, Returns _ (Var v)) = v == patElemName pe
+        matches (_, _, Returns _ _ (Var v)) = v == patElemName pe
         matches _ = False
-bottomUpSegOp _ _ _ _ = Skip
 
 --- Memory
 
 kernelBodyReturns ::
-  (Mem lore, HasScope lore m, Monad m) =>
-  KernelBody lore ->
+  (Mem rep, HasScope rep m, Monad m) =>
+  KernelBody rep ->
   [ExpReturns] ->
   m [ExpReturns]
 kernelBodyReturns = zipWithM correct . kernelBodyResult
   where
-    correct (WriteReturns _ arr _) _ = varReturns arr
+    correct (WriteReturns _ _ arr _) _ = varReturns arr
     correct _ ret = return ret
 
 -- | Like 'segOpType', but for memory representations.
 segOpReturns ::
-  (Mem lore, Monad m, HasScope lore m) =>
-  SegOp lvl lore ->
+  (Mem rep, Monad m, HasScope rep m) =>
+  SegOp lvl rep ->
   m [ExpReturns]
 segOpReturns k@(SegMap _ _ _ kbody) =
   kernelBodyReturns kbody . extReturns =<< opType k

@@ -18,14 +18,14 @@ import Futhark.IR.SOACS hiding
     Exp,
     LParam,
     Lambda,
-    Pattern,
+    Pat,
     Stm,
   )
 import qualified Futhark.IR.SOACS as SOACS
 import qualified Futhark.IR.SOACS.Simplify as SOACS
 import Futhark.Pass
 import Futhark.Pass.ExtractKernels.DistributeNests
-import Futhark.Pass.ExtractKernels.ToKernels (injectSOACS)
+import Futhark.Pass.ExtractKernels.ToGPU (injectSOACS)
 import Futhark.Tools
 import qualified Futhark.Transform.FirstOrderTransform as FOT
 import Futhark.Transform.Rename (Rename, renameSomething)
@@ -48,7 +48,7 @@ instance MonadLogger ExtractM where
 
 indexArray :: VName -> LParam SOACS -> VName -> Stm MC
 indexArray i (Param p t) arr =
-  Let (Pattern [] [PatElem p t]) (defAux ()) . BasicOp $
+  Let (Pat [PatElem p t]) (defAux ()) . BasicOp $
     case t of
       Acc {} -> SubExp $ Var arr
       _ -> Index arr $ DimIndices $ DimFix (Var i) : map sliceDim (arrayDims t)
@@ -72,23 +72,24 @@ mapLambdaToKernelBody ::
   ExtractM (KernelBody MC)
 mapLambdaToKernelBody onBody i lam arrs = do
   Body () stms res <- mapLambdaToBody onBody i lam arrs
-  return $ KernelBody () stms $ map (Returns ResultMaySimplify) res
+  let ret (SubExpRes cs se) = Returns ResultMaySimplify cs se
+  return $ KernelBody () stms $ map ret res
 
 reduceToSegBinOp :: Reduce SOACS -> ExtractM (Stms MC, SegBinOp MC)
 reduceToSegBinOp (Reduce comm lam nes) = do
-  ((lam', nes', shape), stms) <- runBinder $ determineReduceOp lam nes
+  ((lam', nes', shape), stms) <- runBuilder $ determineReduceOp lam nes
   lam'' <- transformLambda lam'
   return (stms, SegBinOp comm lam'' nes' shape)
 
 scanToSegBinOp :: Scan SOACS -> ExtractM (Stms MC, SegBinOp MC)
 scanToSegBinOp (Scan lam nes) = do
-  ((lam', nes', shape), stms) <- runBinder $ determineReduceOp lam nes
+  ((lam', nes', shape), stms) <- runBuilder $ determineReduceOp lam nes
   lam'' <- transformLambda lam'
   return (stms, SegBinOp Noncommutative lam'' nes' shape)
 
 histToSegBinOp :: SOACS.HistOp SOACS -> ExtractM (Stms MC, MC.HistOp MC)
 histToSegBinOp (SOACS.HistOp num_bins rf dests nes op) = do
-  ((op', nes', shape), stms) <- runBinder $ determineReduceOp op nes
+  ((op', nes', shape), stms) <- runBuilder $ determineReduceOp op nes
   op'' <- transformLambda op'
   return (stms, MC.HistOp num_bins rf dests nes' shape op'')
 
@@ -108,16 +109,12 @@ transformStm (Let pat aux (BasicOp op)) =
   pure $ oneStm $ Let pat aux $ BasicOp op
 transformStm (Let pat aux (Apply f args ret info)) =
   pure $ oneStm $ Let pat aux $ Apply f args ret info
-transformStm (Let pat aux (DoLoop ctx val form body)) = do
+transformStm (Let pat aux (DoLoop merge form body)) = do
   let form' = transformLoopForm form
   body' <-
-    localScope
-      ( scopeOfFParams (map fst ctx)
-          <> scopeOfFParams (map fst val)
-          <> scopeOf form'
-      )
-      $ transformBody body
-  return $ oneStm $ Let pat aux $ DoLoop ctx val form' body'
+    localScope (scopeOfFParams (map fst merge) <> scopeOf form') $
+      transformBody body
+  return $ oneStm $ Let pat aux $ DoLoop merge form' body'
 transformStm (Let pat aux (If cond tbranch fbranch ret)) =
   oneStm . Let pat aux
     <$> (If cond <$> transformBody tbranch <*> transformBody fbranch <*> pure ret)
@@ -167,7 +164,7 @@ unstreamLambda attrs nes lam = do
   inp_params <- forM slice_params $ \(Param p t) ->
     newParam (baseString p) (rowType t)
 
-  body <- runBodyBinder $
+  body <- runBodyBuilder $
     localScope (scopeOfLParams inp_params) $ do
       letBindNames [paramName chunk_param] $
         BasicOp $ SubExp $ intConst Int64 1
@@ -181,15 +178,13 @@ unstreamLambda attrs nes lam = do
 
       (red_res, map_res) <- splitAt (length nes) <$> bodyBind (lambdaBody lam)
 
-      map_res' <- forM map_res $ \se -> do
+      map_res' <- forM map_res $ \(SubExpRes cs se) -> do
         v <- letExp "map_res" $ BasicOp $ SubExp se
         v_t <- lookupType v
-        letSubExp "chunk" $
-          BasicOp $
-            Index v $
-              fullSlice v_t $ DimIndices [DimFix $ intConst Int64 0]
+        certifying cs . letSubExp "chunk" . BasicOp $
+          Index v $ fullSlice v_t $ DimIndices [DimFix $ intConst Int64 0]
 
-      pure $ resultBody $ red_res <> map_res'
+      pure $ mkBody mempty $ red_res <> subExpsRes map_res'
 
   let (red_ts, map_ts) = splitAt (length nes) $ lambdaReturnType lam
       map_lam =
@@ -282,7 +277,7 @@ transformParStream rename onBody w comm red_lam red_nes map_lam arrs = do
       SegRed () space [red] (lambdaReturnType map_lam) kbody
   return (red_stms, op)
 
-transformSOAC :: Pattern SOACS -> Attrs -> SOAC SOACS -> ExtractM (Stms MC)
+transformSOAC :: Pat SOACS -> Attrs -> SOAC SOACS -> ExtractM (Stms MC)
 transformSOAC pat _ (Screma w arrs form)
   | Just lam <- isMapSOAC form = do
     seq_op <- transformMap DoNotRename sequentialiseBody w lam arrs
@@ -321,7 +316,7 @@ transformSOAC pat _ (Screma w arrs form)
     -- This screma is too complicated for us to immediately do
     -- anything, so split it up and try again.
     scope <- castScope <$> askScope
-    transformStms =<< runBinderT_ (dissectScrema pat w form arrs) scope
+    transformStms =<< runBuilderT_ (dissectScrema pat w form arrs) scope
 transformSOAC pat _ (Scatter w lam ivs dests) = do
   (gtid, space) <- mkSegSpace w
 
@@ -329,9 +324,12 @@ transformSOAC pat _ (Scatter w lam ivs dests) = do
 
   let rets = takeLast (length dests) $ lambdaReturnType lam
       kres = do
-        (a_w, a, is_vs) <-
-          groupScatterResults dests res
-        return $ WriteReturns a_w a [(DimIndices $ map DimFix is, v) | (is, v) <- is_vs]
+        (a_w, a, is_vs) <- groupScatterResults dests res
+        let cs =
+              foldMap (foldMap resCerts . fst) is_vs
+                <> foldMap (resCerts . snd) is_vs
+            is_vs' = [(DimIndices $ map (DimFix . resSubExp) is, resSubExp v) | (is, v) <- is_vs]
+        return $ WriteReturns cs a_w a is_vs'
       kbody = KernelBody () kstms kres
   return $
     oneStm $
@@ -383,7 +381,7 @@ transformSOAC pat _ (Stream w arrs _ nes lam) = do
   -- Just remove the stream and transform the resulting stms.
   soacs_scope <- castScope <$> askScope
   stream_stms <-
-    flip runBinderT_ soacs_scope $
+    flip runBuilderT_ soacs_scope $
       sequentialStreamWholeArray pat w nes lam arrs
   transformStms stream_stms
 

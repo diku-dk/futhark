@@ -5,7 +5,7 @@
 
 -- | The most primitive ("core") aspects of the AST.  Split out of
 -- "Futhark.IR.Syntax" in order for
--- "Futhark.IR.Decorations" to use these definitions.  This
+-- "Futhark.IR.Rep" to use these definitions.  This
 -- module is re-exported from "Futhark.IR.Syntax" and
 -- there should be no reason to include it explicitly.
 module Futhark.IR.Syntax.Core
@@ -13,6 +13,7 @@ module Futhark.IR.Syntax.Core
     module Futhark.IR.Primitive,
 
     -- * Types
+    Commutativity (..),
     Uniqueness (..),
     NoUniqueness (..),
     ShapeBase (..),
@@ -39,7 +40,7 @@ module Futhark.IR.Syntax.Core
 
     -- * Abstract syntax tree
     Ident (..),
-    Certificates (..),
+    Certs (..),
     SubExp (..),
     Param (..),
     DimIndex (..),
@@ -67,6 +68,19 @@ import Data.Traversable (fmapDefault, foldMapDefault)
 import Futhark.IR.Primitive
 import Language.Futhark.Core
 import Prelude hiding (id, (.))
+
+-- | Whether some operator is commutative or not.  The 'Monoid'
+-- instance returns the least commutative of its arguments.
+data Commutativity
+  = Noncommutative
+  | Commutative
+  deriving (Eq, Ord, Show)
+
+instance Semigroup Commutativity where
+  (<>) = min
+
+instance Monoid Commutativity where
+  mempty = Commutative
 
 -- | The size of an array type as a list of its dimension sizes, with
 -- the type of sizes being parametric.
@@ -268,14 +282,14 @@ instance Ord Ident where
   x `compare` y = identName x `compare` identName y
 
 -- | A list of names used for certificates in some expressions.
-newtype Certificates = Certificates {unCertificates :: [VName]}
+newtype Certs = Certs {unCerts :: [VName]}
   deriving (Eq, Ord, Show)
 
-instance Semigroup Certificates where
-  Certificates x <> Certificates y = Certificates (x <> y)
+instance Semigroup Certs where
+  Certs x <> Certs y = Certs (x <> y)
 
-instance Monoid Certificates where
-  mempty = Certificates mempty
+instance Monoid Certs where
+  mempty = Certs mempty
 
 -- | A subexpression is either a scalar constant or a variable.  One
 -- important property is that evaluation of a subexpression is
@@ -423,7 +437,7 @@ sliceSlice' _ _ = []
 data PatElemT dec = PatElem
   { -- | The name being bound.
     patElemName :: VName,
-    -- | Pattern element decoration.
+    -- | Pat element decoration.
     patElemDec :: dec
   }
   deriving (Ord, Show, Eq)
@@ -450,10 +464,8 @@ instance IsString (ErrorMsg a) where
 data ErrorMsgPart a
   = -- | A literal string.
     ErrorString String
-  | -- | A run-time integer value.
-    ErrorInt32 a
-  | -- | A bigger run-time integer value.
-    ErrorInt64 a
+  | -- | A run-time value.
+    ErrorVal PrimType a
   deriving (Eq, Ord, Show)
 
 instance IsString (ErrorMsgPart a) where
@@ -469,19 +481,14 @@ instance Traversable ErrorMsg where
   traverse f (ErrorMsg parts) = ErrorMsg <$> traverse (traverse f) parts
 
 instance Functor ErrorMsgPart where
-  fmap _ (ErrorString s) = ErrorString s
-  fmap f (ErrorInt32 a) = ErrorInt32 $ f a
-  fmap f (ErrorInt64 a) = ErrorInt64 $ f a
+  fmap = fmapDefault
 
 instance Foldable ErrorMsgPart where
-  foldMap _ ErrorString {} = mempty
-  foldMap f (ErrorInt32 a) = f a
-  foldMap f (ErrorInt64 a) = f a
+  foldMap = foldMapDefault
 
 instance Traversable ErrorMsgPart where
   traverse _ (ErrorString s) = pure $ ErrorString s
-  traverse f (ErrorInt32 a) = ErrorInt32 <$> f a
-  traverse f (ErrorInt64 a) = ErrorInt64 <$> f a
+  traverse f (ErrorVal t a) = ErrorVal t <$> f a
 
 -- | How many non-constant parts does the error message have, and what
 -- is their type?
@@ -489,5 +496,4 @@ errorMsgArgTypes :: ErrorMsg a -> [PrimType]
 errorMsgArgTypes (ErrorMsg parts) = mapMaybe onPart parts
   where
     onPart ErrorString {} = Nothing
-    onPart ErrorInt32 {} = Just $ IntType Int32
-    onPart ErrorInt64 {} = Just $ IntType Int64
+    onPart (ErrorVal t _) = Just t

@@ -16,9 +16,9 @@ writeResult ::
   PatElemT dec ->
   KernelResult ->
   MulticoreGen ()
-writeResult is pe (Returns _ se) =
+writeResult is pe (Returns _ _ se) =
   copyDWIMFix (patElemName pe) (map Imp.vi64 is) se []
-writeResult _ pe (WriteReturns (Shape rws) _ idx_vals) = do
+writeResult _ pe (WriteReturns _ (Shape rws) _ idx_vals) = do
   let (iss, vs) = unzip idx_vals
       rws' = map toInt64Exp rws
   forM_ (zip iss vs) $ \(slice, v) -> do
@@ -35,7 +35,7 @@ writeResult _ _ res =
 
 compileSegMapBody ::
   TV Int64 ->
-  Pattern MCMem ->
+  Pat MCMem ->
   SegSpace ->
   KernelBody MCMem ->
   MulticoreGen Imp.Code
@@ -45,12 +45,12 @@ compileSegMapBody flat_idx pat space (KernelBody _ kstms kres) = do
   kstms' <- mapM renameStm kstms
   collect $ do
     emit $ Imp.DebugPrint "SegMap fbody" Nothing
-    zipWithM_ dPrimV_ is $ map sExt64 $ unflattenIndex ns' $ tvExp flat_idx
+    dIndexSpace (zip is ns') $ tvExp flat_idx
     compileStms (freeIn kres) kstms' $
-      zipWithM_ (writeResult is) (patternElements pat) kres
+      zipWithM_ (writeResult is) (patElements pat) kres
 
 compileSegMap ::
-  Pattern MCMem ->
+  Pat MCMem ->
   SegSpace ->
   KernelBody MCMem ->
   MulticoreGen Imp.Code

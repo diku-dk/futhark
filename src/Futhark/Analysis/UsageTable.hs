@@ -141,30 +141,30 @@ matches (Usages x) (Usages y) = x == (x .&. y)
 withoutU :: Usages -> Usages -> Usages
 withoutU (Usages x) (Usages y) = Usages $ x .&. complement y
 
-usageInBody :: Aliased lore => Body lore -> UsageTable
+usageInBody :: Aliased rep => Body rep -> UsageTable
 usageInBody = foldMap consumedUsage . namesToList . consumedInBody
 
 -- | Produce a usage table reflecting the use of the free variables in
 -- a single statement.
-usageInStm :: (ASTLore lore, Aliased lore) => Stm lore -> UsageTable
-usageInStm (Let pat lore e) =
+usageInStm :: (ASTRep rep, Aliased rep) => Stm rep -> UsageTable
+usageInStm (Let pat rep e) =
   mconcat
     [ usageInPat,
-      usageInExpLore,
+      usageInExpDec,
       usageInExp e,
       usages (freeIn e)
     ]
   where
     usageInPat =
       usages
-        ( mconcat (map freeIn $ patternElements pat)
-            `namesSubtract` namesFromList (patternNames pat)
+        ( mconcat (map freeIn $ patElements pat)
+            `namesSubtract` namesFromList (patNames pat)
         )
-        <> sizeUsages (foldMap (freeIn . patElemType) (patternElements pat))
-    usageInExpLore =
-      usages $ freeIn lore
+        <> sizeUsages (foldMap (freeIn . patElemType) (patElements pat))
+    usageInExpDec =
+      usages $ freeIn rep
 
-usageInExp :: Aliased lore => Exp lore -> UsageTable
+usageInExp :: Aliased rep => Exp rep -> UsageTable
 usageInExp (Apply _ args _ _) =
   mconcat
     [ mconcat $
@@ -181,7 +181,7 @@ usageInExp (WithAcc inputs lam) =
   foldMap inputUsage inputs <> usageInBody (lambdaBody lam)
   where
     inputUsage (_, arrs, _) = foldMap consumedUsage arrs
-usageInExp (BasicOp (Update src _ _)) =
+usageInExp (BasicOp (Update _ src _ _)) =
   consumedUsage src
 usageInExp (Op op) =
   mconcat $ map consumedUsage (namesToList $ consumedInOp op)

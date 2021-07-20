@@ -217,6 +217,9 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (SliceBase f vn) where
   ppr (DimIndices idxs) = brackets (commasep (map ppr idxs))
   ppr (DimFlat offset idxs) = brackets (ppr offset <> text ";" <> commasep (map ppr idxs))
 
+instance IsName vn => Pretty (SizeBinder vn) where
+  ppr (SizeBinder v _) = brackets $ pprName v
+
 letBody :: (Eq vn, IsName vn, Annot f) => ExpBase f vn -> Doc
 letBody body@(AppExp LetPat {} _) = ppr body
 letBody body@(AppExp LetFun {} _) = ppr body
@@ -239,10 +242,10 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (AppExpBase f vn) where
       </> indent 2 (ppr loopbody)
   pprPrec _ (Index e idxs _) =
     pprPrec 9 e <> ppr idxs
-  pprPrec p (LetPat pat e body _) =
+  pprPrec p (LetPat sizes pat e body _) =
     parensIf (p /= -1) $
       align $
-        text "let" <+> align (ppr pat)
+        text "let" <+> spread (map ppr sizes) <+> align (ppr pat)
           <+> ( if linebreak
                   then equals </> indent 2 (ppr e)
                   else equals <+> align (ppr e)
@@ -384,21 +387,21 @@ instance Pretty PatLit where
   ppr (PatLitFloat f) = ppr f
   ppr (PatLitPrim v) = ppr v
 
-instance (Eq vn, IsName vn, Annot f) => Pretty (PatternBase f vn) where
-  ppr (PatternAscription p t _) = ppr p <> colon <+> align (ppr t)
-  ppr (PatternParens p _) = parens $ ppr p
+instance (Eq vn, IsName vn, Annot f) => Pretty (PatBase f vn) where
+  ppr (PatAscription p t _) = ppr p <> colon <+> align (ppr t)
+  ppr (PatParens p _) = parens $ ppr p
   ppr (Id v t _) = case unAnnot t of
     Just t' -> parens $ pprName v <> colon <+> align (ppr t')
     Nothing -> pprName v
-  ppr (TuplePattern pats _) = parens $ commasep $ map ppr pats
-  ppr (RecordPattern fs _) = braces $ commasep $ map ppField fs
+  ppr (TuplePat pats _) = parens $ commasep $ map ppr pats
+  ppr (RecordPat fs _) = braces $ commasep $ map ppField fs
     where
       ppField (name, t) = text (nameToString name) <> equals <> ppr t
   ppr (Wildcard t _) = case unAnnot t of
     Just t' -> parens $ text "_" <> colon <+> ppr t'
     Nothing -> text "_"
-  ppr (PatternLit e _ _) = ppr e
-  ppr (PatternConstr n _ ps _) = text "#" <> ppr n <+> sep (map ppr ps)
+  ppr (PatLit e _ _) = ppr e
+  ppr (PatConstr n _ ps _) = text "#" <> ppr n <+> sep (map ppr ps)
 
 ppAscription :: Pretty t => Maybe t -> Doc
 ppAscription Nothing = mempty

@@ -38,10 +38,10 @@ setParamSpace _ param =
   param
 
 setExtValueSpace :: Space -> ExternalValue -> ExternalValue
-setExtValueSpace space (OpaqueValue desc vs) =
-  OpaqueValue desc $ map (setValueSpace space) vs
-setExtValueSpace space (TransparentValue v) =
-  TransparentValue $ setValueSpace space v
+setExtValueSpace space (OpaqueValue u desc vs) =
+  OpaqueValue u desc $ map (setValueSpace space) vs
+setExtValueSpace space (TransparentValue u v) =
+  TransparentValue u $ setValueSpace space v
 
 setValueSpace :: Space -> ValueDesc -> ValueDesc
 setValueSpace space (ArrayValue mem _ bt ept shape) =
@@ -102,9 +102,11 @@ setBodySpace space (Call dests fname args) =
     setArgSpace (MemArg m) = MemArg m
     setArgSpace (ExpArg e) = ExpArg $ setExpSpace space e
 setBodySpace space (Assert e msg loc) =
-  Assert (setExpSpace space e) msg loc
+  Assert (setExpSpace space e) (fmap (setExpSpace space) msg) loc
 setBodySpace space (DebugPrint s v) =
   DebugPrint s $ fmap (setExpSpace space) v
+setBodySpace space (TracePrint msg) =
+  TracePrint $ fmap (setExpSpace space) msg
 setBodySpace _ (Op op) =
   Op op
 

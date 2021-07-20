@@ -436,7 +436,7 @@ literals and variables, but also more complicated forms.
       : | `exp` [ ".." `exp` ] "..<" `exp`
       : | `exp` [ ".." `exp` ] "..>" `exp`
       : | "if" `exp` "then" `exp` "else" `exp`
-      : | "let" `pat` "=" `exp` "in" `exp`
+      : | "let" `size`* `pat` "=" `exp` "in" `exp`
       : | "let" `id` "[" `index` ("," `index`)* "]" "=" `exp` "in" `exp`
       : | "let" `id` `type_param`* `pat`+ [":" `type`] "=" `exp` "in" `exp`
       : | "(" "\" `pat`+ [":" `type`] "->" `exp` ")"
@@ -449,6 +449,7 @@ literals and variables, but also more complicated forms.
       : | "match" `exp` ("case" `pat` "->" `exp`)+
    field:   `fieldid` "=" `exp`
         : | `id`
+   size : "[" `id` "]"
    pat:   `id`
       : | `literal`
       : |  "_"
@@ -864,8 +865,15 @@ Evaluate ``e`` and bind the result to the irrefutable pattern ``pat``
 (see :ref:`patterns`) while evaluating ``body``.  The ``in`` keyword
 is optional if ``body`` is a ``let`` expression.
 
+``let [n] pat = e in body``
+...........................
+
+As above, but bind sizes (here ``n``) used in the pattern (here to the
+size of the array being bound).  All sizes must be used in the
+pattern.  Roughly Equivalent to ``let f [n] pat = body in f e``.
+
 ``let a[i] = v in body``
-........................................
+........................
 
 Write ``v`` to ``a[i]`` and evaluate ``body``.  The given index need
 not be complete and can also be a slice, but in these cases, the value
@@ -1393,7 +1401,7 @@ Module System
 .. productionlist::
    mod_bind: "module" `id` `mod_param`* "=" [":" mod_type_exp] "=" `mod_exp`
    mod_param: "(" `id` ":" `mod_type_exp` ")"
-   mod_type_bind: "module" "type" `id` `type_param`* "=" `mod_type_exp`
+   mod_type_bind: "module" "type" `id` "=" `mod_type_exp`
 
 Futhark supports an ML-style higher-order module system.  *Modules*
 can contain types, functions, and other modules and module types.
@@ -1648,6 +1656,25 @@ contradictory attributes are combined through fusion, it is
 unspecified which attributes take precedence.
 
 The following expression attributes are supported.
+
+``trace``
+.........
+
+Print the value produced by the attributed expression.  Used for
+debugging.  Somewhat unreliable outside of the interpreter, and in
+particular does not work for GPU device code.
+
+``trace(tag)``
+..............
+
+Like ``trace``, but prefix output with *tag*, which must lexically be
+an identifier.
+
+``break``
+.........
+
+In the interpreter, pause execution after evaluating the expression.
+No effect for compiled code.
 
 ``incremental_flattening(no_outer)``
 ....................................

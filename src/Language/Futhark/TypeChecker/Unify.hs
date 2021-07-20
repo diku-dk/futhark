@@ -27,7 +27,7 @@ module Language.Futhark.TypeChecker.Unify
     mustHaveField,
     mustBeOneOf,
     equalityType,
-    normPatternType,
+    normPatType,
     normTypeFully,
     instantiateEmptyArrayDims,
     unify,
@@ -39,9 +39,7 @@ module Language.Futhark.TypeChecker.Unify
 where
 
 import Control.Monad.Except
-import Control.Monad.RWS.Strict hiding (Sum)
 import Control.Monad.State
-import Control.Monad.Writer hiding (Sum)
 import Data.Bifoldable (biany)
 import Data.Bifunctor
 import Data.Char (isAscii)
@@ -165,7 +163,7 @@ type Constraints = M.Map VName (Level, Constraint)
 
 lookupSubst :: VName -> Constraints -> Maybe (Subst StructType)
 lookupSubst v constraints = case snd <$> M.lookup v constraints of
-  Just (Constraint t _) -> Just $ Subst t
+  Just (Constraint t _) -> Just $ Subst [] $ applySubst (`lookupSubst` constraints) t
   Just Overloaded {} -> Just PrimSubst
   Just (Size (Just d) _) ->
     Just $ SizeSubst $ applySubst (`lookupSubst` constraints) d
@@ -314,14 +312,14 @@ normType t@(Scalar (TypeVar _ _ (TypeName [] v) [])) = do
 normType t = return t
 
 -- | Replace any top-level type variable with its substitution.
-normPatternType :: MonadUnify m => PatternType -> m PatternType
-normPatternType t@(Scalar (TypeVar als u (TypeName [] v) [])) = do
+normPatType :: MonadUnify m => PatType -> m PatType
+normPatType t@(Scalar (TypeVar als u (TypeName [] v) [])) = do
   constraints <- getConstraints
   case snd <$> M.lookup v constraints of
     Just (Constraint t' _) ->
-      normPatternType $ t' `setUniqueness` u `setAliases` als
+      normPatType $ t' `setUniqueness` u `setAliases` als
     _ -> return t
-normPatternType t = return t
+normPatType t = return t
 
 rigidConstraint :: Constraint -> Bool
 rigidConstraint ParamType {} = True
@@ -666,8 +664,7 @@ linkVarToType onDims usage bcs vn lvl tp = do
   scopeCheck usage bcs vn lvl tp
 
   constraints <- getConstraints
-  let tp' = removeUniqueness tp
-  modifyConstraints $ M.insert vn (lvl, Constraint tp' usage)
+  modifyConstraints $ M.insert vn (lvl, Constraint tp usage)
   case snd <$> M.lookup vn constraints of
     Just (NoConstraint Unlifted unlift_usage) -> do
       let bcs' =
@@ -679,18 +676,18 @@ linkVarToType onDims usage bcs vn lvl tp = do
               )
               bcs
 
-      arrayElemTypeWith usage bcs' tp'
-      when (hasEmptyDims tp') $
+      arrayElemTypeWith usage bcs' tp
+      when (hasEmptyDims tp) $
         unifyError usage mempty bcs $
           "Type variable" <+> pprName vn
             <+> "cannot be instantiated with type containing anonymous sizes:"
             </> indent 2 (ppr tp)
             </> textwrap "This is usually because the size of an array returned by a higher-order function argument cannot be determined statically.  This can also be due to the return size being a value parameter.  Add type annotation to clarify."
     Just (Equality _) ->
-      equalityType usage tp'
+      equalityType usage tp
     Just (Overloaded ts old_usage)
       | tp `notElem` map (Scalar . Prim) ts ->
-        case tp' of
+        case tp of
           Scalar (TypeVar _ _ (TypeName [] v) [])
             | not $ isRigid v constraints ->
               linkVarToTypes usage v ts
@@ -794,15 +791,6 @@ linkVarToDim usage bcs vn lvl dim = do
     _ -> return ()
 
   modifyConstraints $ M.insert vn (lvl, Size (Just dim) usage)
-
-removeUniqueness :: TypeBase dim as -> TypeBase dim as
-removeUniqueness (Scalar (Record ets)) =
-  Scalar $ Record $ fmap removeUniqueness ets
-removeUniqueness (Scalar (Arrow als p t1 t2)) =
-  Scalar $ Arrow als p (removeUniqueness t1) (removeUniqueness t2)
-removeUniqueness (Scalar (Sum cs)) =
-  Scalar $ Sum $ (fmap . fmap) removeUniqueness cs
-removeUniqueness t = t `setUniqueness` Nonunique
 
 -- | Assert that this type must be one of the given primitive types.
 mustBeOneOf :: MonadUnify m => [PrimType] -> Usage -> StructType -> m ()
@@ -1029,8 +1017,8 @@ mustHaveFieldWith ::
   Usage ->
   BreadCrumbs ->
   Name ->
-  PatternType ->
-  m PatternType
+  PatType ->
+  m PatType
 mustHaveFieldWith onDims usage bcs l t = do
   constraints <- getConstraints
   l_type <- newTypeVar (srclocOf usage) "t"
@@ -1067,8 +1055,8 @@ mustHaveField ::
   MonadUnify m =>
   Usage ->
   Name ->
-  PatternType ->
-  m PatternType
+  PatType ->
+  m PatType
 mustHaveField usage = mustHaveFieldWith (unifyDims usage) usage noBreadCrumbs
 
 -- | Replace dimension mismatches with AnyDim.
@@ -1077,12 +1065,12 @@ anyDimOnMismatch ::
   TypeBase (DimDecl VName) as ->
   TypeBase (DimDecl VName) as ->
   (TypeBase (DimDecl VName) as, [(DimDecl VName, DimDecl VName)])
-anyDimOnMismatch t1 t2 = runWriter $ matchDims onDims t1 t2
+anyDimOnMismatch t1 t2 = runState (matchDims onDims t1 t2) []
   where
     onDims d1 d2
       | d1 == d2 = return d1
       | otherwise = do
-        tell [(d1, d2)]
+        modify ((d1, d2) :)
         return $ AnyDim undefined
 
 newDimOnMismatch ::
@@ -1114,9 +1102,9 @@ newDimOnMismatch loc t1 t2 = do
 unifyMostCommon ::
   MonadUnify m =>
   Usage ->
-  PatternType ->
-  PatternType ->
-  m (PatternType, [VName])
+  PatType ->
+  PatType ->
+  m (PatType, [VName])
 unifyMostCommon usage t1 t2 = do
   -- We are ignoring the dimensions here, because any mismatches
   -- should be turned into fresh size variables.

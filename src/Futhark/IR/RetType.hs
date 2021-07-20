@@ -43,8 +43,8 @@ class (Show rt, Eq rt, Ord rt, DeclExtTyped rt) => IsRetType rt where
     [(SubExp, Type)] ->
     Maybe [rt]
 
--- | Given shape parameter names and value parameter types, produce the
--- types of arguments accepted.
+-- | Given shape parameter names and types, produce the types of
+-- arguments accepted.
 expectedTypes :: Typed t => [VName] -> [t] -> [SubExp] -> [Type]
 expectedTypes shapes value_ts args = map (correctDims . typeOf) value_ts
   where

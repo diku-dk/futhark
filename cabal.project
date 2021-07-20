@@ -1,7 +1,5 @@
 packages: futhark.cabal
-index-state: 2021-04-15T09:02:06Z
+index-state: 2021-07-01T13:04:15Z
 
 package futhark
-  ghc-options: -Werror -j
-
-allow-newer: vector-binary-instances:base
+  ghc-options: -Werror -j -fwrite-ide-info

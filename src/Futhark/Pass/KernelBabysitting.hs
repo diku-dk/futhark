@@ -11,7 +11,7 @@ import Data.List (elemIndex, isPrefixOf, sort)
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import Futhark.IR
-import Futhark.IR.Kernels hiding
+import Futhark.IR.GPU hiding
   ( BasicOp,
     Body,
     Exp,
@@ -19,8 +19,8 @@ import Futhark.IR.Kernels hiding
     FunDef,
     LParam,
     Lambda,
+    Pat,
     PatElem,
-    Pattern,
     Prog,
     RetType,
     Stm,
@@ -31,7 +31,7 @@ import Futhark.Tools
 import Futhark.Util
 
 -- | The pass definition.
-babysitKernels :: Pass Kernels Kernels
+babysitKernels :: Pass GPU GPU
 babysitKernels =
   Pass
     "babysit kernels"
@@ -40,14 +40,14 @@ babysitKernels =
   where
     onStms scope stms = do
       let m = localScope scope $ transformStms mempty stms
-      fmap fst $ modifyNameSource $ runState (runBinderT m M.empty)
+      fmap fst $ modifyNameSource $ runState (runBuilderT m M.empty)
 
-type BabysitM = Binder Kernels
+type BabysitM = Builder GPU
 
-transformStms :: ExpMap -> Stms Kernels -> BabysitM (Stms Kernels)
+transformStms :: ExpMap -> Stms GPU -> BabysitM (Stms GPU)
 transformStms expmap stms = collectStms_ $ foldM_ transformStm expmap stms
 
-transformBody :: ExpMap -> Body Kernels -> BabysitM (Body Kernels)
+transformBody :: ExpMap -> Body GPU -> BabysitM (Body GPU)
 transformBody expmap (Body () stms res) = do
   stms' <- transformStms expmap stms
   return $ Body () stms' res
@@ -57,12 +57,12 @@ transformBody expmap (Body () stms res) = do
 -- funky in memory (and we'd prefer it not to be).  If we cannot find
 -- it in the map, we just assume it's all good.  HACK and FIXME, I
 -- suppose.  We really should do this at the memory level.
-type ExpMap = M.Map VName (Stm Kernels)
+type ExpMap = M.Map VName (Stm GPU)
 
 nonlinearInMemory :: VName -> ExpMap -> Maybe (Maybe [Int])
 nonlinearInMemory name m =
   case M.lookup name m of
-    Just (Let _ _ (BasicOp (Opaque (Var arr)))) -> nonlinearInMemory arr m
+    Just (Let _ _ (BasicOp (Opaque _ (Var arr)))) -> nonlinearInMemory arr m
     Just (Let _ _ (BasicOp (Rearrange perm _))) -> Just $ Just $ rearrangeInverse perm
     Just (Let _ _ (BasicOp (Reshape _ arr))) -> nonlinearInMemory arr m
     Just (Let _ _ (BasicOp (Manifest perm _))) -> Just $ Just perm
@@ -70,7 +70,7 @@ nonlinearInMemory name m =
       nonlinear
         =<< find
           ((== name) . patElemName . fst)
-          (zip (patternElements pat) ts)
+          (zip (patElements pat) ts)
     _ -> Nothing
   where
     nonlinear (pe, t)
@@ -80,7 +80,7 @@ nonlinearInMemory name m =
         return $ Just $ rearrangeInverse $ [inner_r .. inner_r + outer_r -1] ++ [0 .. inner_r -1]
       | otherwise = Nothing
 
-transformStm :: ExpMap -> Stm Kernels -> BabysitM ExpMap
+transformStm :: ExpMap -> Stm GPU -> BabysitM ExpMap
 transformStm expmap (Let pat aux (Op (SegOp op)))
   -- FIXME: We only make coalescing optimisations for SegThread
   -- SegOps, because that's what the analysis assumes.  For SegGroup
@@ -95,14 +95,14 @@ transformStm expmap (Let pat aux (Op (SegOp op)))
     op' <- mapSegOpM mapper op
     let stm' = Let pat aux $ Op $ SegOp op'
     addStm stm'
-    return $ M.fromList [(name, stm') | name <- patternNames pat] <> expmap
+    return $ M.fromList [(name, stm') | name <- patNames pat] <> expmap
 transformStm expmap (Let pat aux e) = do
   e' <- mapExpM (transform expmap) e
   let bnd' = Let pat aux e'
   addStm bnd'
-  return $ M.fromList [(name, bnd') | name <- patternNames pat] <> expmap
+  return $ M.fromList [(name, bnd') | name <- patNames pat] <> expmap
 
-transform :: ExpMap -> Mapper Kernels Kernels BabysitM
+transform :: ExpMap -> Mapper GPU GPU BabysitM
 transform expmap =
   identityMapper {mapOnBody = \scope -> localScope scope . transformBody expmap}
 
@@ -110,8 +110,8 @@ transformKernelBody ::
   ExpMap ->
   SegLevel ->
   SegSpace ->
-  KernelBody Kernels ->
-  BabysitM (KernelBody Kernels)
+  KernelBody GPU ->
+  BabysitM (KernelBody GPU)
 transformKernelBody expmap lvl space kbody = do
   -- Go spelunking for accesses to arrays that are defined outside the
   -- kernel body and where the indices are kernel thread indices.
@@ -143,7 +143,7 @@ type ArrayIndexTransform m =
   (VName -> Bool) -> -- thread local?
   (VName -> SubExp -> Bool) -> -- variant to a certain gid (given as first param)?
   (SubExp -> Maybe SubExp) -> -- split substitution?
-  Scope Kernels -> -- type environment
+  Scope GPU -> -- type environment
   VName ->
   Slice SubExp ->
   m (Maybe (VName, Slice SubExp))
@@ -152,10 +152,10 @@ traverseKernelBodyArrayIndexes ::
   (Applicative f, Monad f) =>
   Names ->
   Names ->
-  Scope Kernels ->
+  Scope GPU ->
   ArrayIndexTransform f ->
-  KernelBody Kernels ->
-  f (KernelBody Kernels)
+  KernelBody GPU ->
+  f (KernelBody GPU)
 traverseKernelBodyArrayIndexes free_ker_vars thread_variant outer_scope f (KernelBody () kstms kres) =
   KernelBody () . stmsFromList
     <$> mapM
@@ -218,14 +218,14 @@ traverseKernelBodyArrayIndexes free_ker_vars thread_variant outer_scope f (Kerne
 
     mkSizeSubsts = foldMap mkStmSizeSubst
       where
-        mkStmSizeSubst (Let (Pattern [] [pe]) _ (Op (SizeOp (SplitSpace _ _ _ elems_per_i)))) =
+        mkStmSizeSubst (Let (Pat [pe]) _ (Op (SizeOp (SplitSpace _ _ _ elems_per_i)))) =
           M.singleton (patElemName pe) elems_per_i
         mkStmSizeSubst _ = mempty
 
 type Replacements = M.Map (VName, Slice SubExp) VName
 
 ensureCoalescedAccess ::
-  MonadBinder m =>
+  MonadBuilder m =>
   ExpMap ->
   [(VName, SubExp)] ->
   SubExp ->
@@ -429,7 +429,7 @@ coalescingPermutation num_is rank =
   [num_is .. rank -1] ++ [0 .. num_is -1]
 
 rearrangeInput ::
-  MonadBinder m =>
+  MonadBuilder m =>
   Maybe (Maybe [Int]) ->
   [Int] ->
   VName ->
@@ -452,7 +452,7 @@ rearrangeInput manifest perm arr = do
     BasicOp $ Manifest perm manifested
 
 rowMajorArray ::
-  MonadBinder m =>
+  MonadBuilder m =>
   VName ->
   m VName
 rowMajorArray arr = do
@@ -460,7 +460,7 @@ rowMajorArray arr = do
   letExp (baseString arr ++ "_rowmajor") $ BasicOp $ Manifest [0 .. rank -1] arr
 
 rearrangeSlice ::
-  MonadBinder m =>
+  MonadBuilder m =>
   Int ->
   SubExp ->
   PrimExp VName ->
@@ -509,7 +509,7 @@ rearrangeSlice d w num_chunks arr = do
         =<< eSliceArray d arr_inv_tr (eSubExp $ constant (0 :: Int64)) (eSubExp w)
 
 paddedScanReduceInput ::
-  MonadBinder m =>
+  MonadBuilder m =>
   SubExp ->
   SubExp ->
   m (SubExp, SubExp)
@@ -524,12 +524,12 @@ paddedScanReduceInput w stride = do
 
 type VarianceTable = M.Map VName Names
 
-varianceInStms :: VarianceTable -> Stms Kernels -> VarianceTable
+varianceInStms :: VarianceTable -> Stms GPU -> VarianceTable
 varianceInStms t = foldl varianceInStm t . stmsToList
 
-varianceInStm :: VarianceTable -> Stm Kernels -> VarianceTable
+varianceInStm :: VarianceTable -> Stm GPU -> VarianceTable
 varianceInStm variance bnd =
-  foldl' add variance $ patternNames $ stmPattern bnd
+  foldl' add variance $ patNames $ stmPat bnd
   where
     add variance' v = M.insert v binding_variance variance'
     look variance' v = oneName v <> M.findWithDefault mempty v variance'

@@ -45,6 +45,7 @@ where
 
 import Control.Monad.RWS.Strict
 import Control.Monad.Trans.Maybe
+import Data.Bifunctor (second)
 import Data.Foldable
 import Data.List (elemIndex, sortOn)
 import qualified Data.Map.Strict as M
@@ -53,7 +54,7 @@ import Futhark.IR
 import Futhark.IR.SegOp
 import Futhark.MonadFreshNames
 import Futhark.Pass.ExtractKernels.BlockedKernel
-  ( DistLore,
+  ( DistRep,
     KernelInput (..),
     MkSegLevel,
     mapKernel,
@@ -64,7 +65,7 @@ import Futhark.Transform.Rename
 import Futhark.Util
 import Futhark.Util.Log
 
-type Target = (PatternT Type, Result)
+type Target = (PatT Type, Result)
 
 -- | First pair element is the very innermost ("current") target.  In
 -- the list, the outermost target comes first.  Invariant: Every
@@ -101,8 +102,8 @@ pushInnerTarget :: Target -> Targets -> Targets
 pushInnerTarget (pat, res) (Targets inner_target targets) =
   Targets (pat', res') (targets ++ [inner_target])
   where
-    (pes', res') = unzip $ filter (used . fst) $ zip (patternElements pat) res
-    pat' = Pattern [] pes'
+    (pes', res') = unzip $ filter (used . fst) $ zip (patElements pat) res
+    pat' = Pat pes'
     inner_used = freeIn $ snd inner_target
     used pe = patElemName pe `nameIn` inner_used
 
@@ -112,21 +113,21 @@ popInnerTarget (Targets t ts) =
     x : xs -> Just (t, Targets x $ reverse xs)
     [] -> Nothing
 
-targetScope :: DistLore lore => Target -> Scope lore
-targetScope = scopeOfPattern . fst
+targetScope :: DistRep rep => Target -> Scope rep
+targetScope = scopeOfPat . fst
 
-targetsScope :: DistLore lore => Targets -> Scope lore
+targetsScope :: DistRep rep => Targets -> Scope rep
 targetsScope (Targets t ts) = mconcat $ map targetScope $ t : ts
 
 data LoopNesting = MapNesting
-  { loopNestingPattern :: PatternT Type,
+  { loopNestingPat :: PatT Type,
     loopNestingAux :: StmAux (),
     loopNestingWidth :: SubExp,
     loopNestingParamsAndArrs :: [(Param Type, VName)]
   }
   deriving (Show)
 
-scopeOfLoopNesting :: DistLore lore => LoopNesting -> Scope lore
+scopeOfLoopNesting :: DistRep rep => LoopNesting -> Scope rep
 scopeOfLoopNesting = scopeOfLParams . map fst . loopNestingParamsAndArrs
 
 ppLoopNesting :: LoopNesting -> String
@@ -202,7 +203,7 @@ innermostKernelNesting (nest, nests) =
 -- list, also taking care to swap patterns if necessary.
 pushKernelNesting :: Target -> LoopNesting -> KernelNest -> KernelNest
 pushKernelNesting target newnest (nest, nests) =
-  ( fixNestingPatternOrder newnest target (loopNestingPattern nest),
+  ( fixNestingPatOrder newnest target (loopNestingPat nest),
     nest : nests
   )
 
@@ -211,20 +212,20 @@ pushKernelNesting target newnest (nest, nests) =
 -- (non-permuted compared to what is expected by the outer nests).
 pushInnerKernelNesting :: Target -> LoopNesting -> KernelNest -> KernelNest
 pushInnerKernelNesting target newnest (nest, nests) =
-  (nest, nests ++ [fixNestingPatternOrder newnest target (loopNestingPattern innermost)])
+  (nest, nests ++ [fixNestingPatOrder newnest target (loopNestingPat innermost)])
   where
     innermost = case reverse nests of
       [] -> nest
       n : _ -> n
 
-fixNestingPatternOrder :: LoopNesting -> Target -> PatternT Type -> LoopNesting
-fixNestingPatternOrder nest (_, res) inner_pat =
-  nest {loopNestingPattern = basicPattern [] pat'}
+fixNestingPatOrder :: LoopNesting -> Target -> PatT Type -> LoopNesting
+fixNestingPatOrder nest (_, res) inner_pat =
+  nest {loopNestingPat = basicPat pat'}
   where
-    pat = loopNestingPattern nest
+    pat = loopNestingPat nest
     pat' = map fst fixed_target
-    fixed_target = sortOn posInInnerPat $ zip (patternValueIdents pat) res
-    posInInnerPat (_, Var v) = fromMaybe 0 $ elemIndex v $ patternNames inner_pat
+    fixed_target = sortOn posInInnerPat $ zip (patIdents pat) res
+    posInInnerPat (_, SubExpRes _ (Var v)) = fromMaybe 0 $ elemIndex v $ patNames inner_pat
     posInInnerPat _ = 0
 
 newKernel :: LoopNesting -> KernelNest
@@ -249,23 +250,24 @@ kernelNestWidths :: KernelNest -> [SubExp]
 kernelNestWidths = map loopNestingWidth . kernelNestLoops
 
 constructKernel ::
-  (DistLore lore, MonadFreshNames m, LocalScope lore m) =>
-  MkSegLevel lore m ->
+  (DistRep rep, MonadFreshNames m, LocalScope rep m) =>
+  MkSegLevel rep m ->
   KernelNest ->
-  Body lore ->
-  m (Stm lore, Stms lore)
-constructKernel mk_lvl kernel_nest inner_body = runBinderT' $ do
+  Body rep ->
+  m (Stm rep, Stms rep)
+constructKernel mk_lvl kernel_nest inner_body = runBuilderT' $ do
   (ispace, inps) <- flatKernel kernel_nest
   let aux = loopNestingAux first_nest
       ispace_scope = M.fromList $ zip (map fst ispace) $ repeat $ IndexName Int64
-      pat = loopNestingPattern first_nest
-      rts = map (stripArray (length ispace)) $ patternTypes pat
+      pat = loopNestingPat first_nest
+      rts = map (stripArray (length ispace)) $ patTypes pat
 
   inner_body' <- fmap (uncurry (flip (KernelBody ()))) $
-    runBinder $
+    runBuilder $
       localScope ispace_scope $ do
         mapM_ readKernelInput $ filter inputIsUsed inps
-        map (Returns ResultMaySimplify) <$> bodyBind inner_body
+        res <- bodyBind inner_body
+        forM res $ \(SubExpRes cs se) -> pure $ Returns ResultMaySimplify cs se
 
   (segop, aux_stms) <- lift $ mapKernel mk_lvl ispace [] rts inner_body'
 
@@ -327,13 +329,13 @@ data DistributionBody = DistributionBody
     distributionExpandTarget :: Target -> Target
   }
 
-distributionInnerPattern :: DistributionBody -> PatternT Type
-distributionInnerPattern = fst . innerTarget . distributionTarget
+distributionInnerPat :: DistributionBody -> PatT Type
+distributionInnerPat = fst . innerTarget . distributionTarget
 
 distributionBodyFromStms ::
-  ASTLore lore =>
+  ASTRep rep =>
   Targets ->
-  Stms lore ->
+  Stms rep ->
   (DistributionBody, Result)
 distributionBodyFromStms (Targets (inner_pat, inner_res) targets) stms =
   let bound_by_stms = namesFromList $ M.keys $ scopeOf stms
@@ -349,16 +351,16 @@ distributionBodyFromStms (Targets (inner_pat, inner_res) targets) stms =
       )
 
 distributionBodyFromStm ::
-  ASTLore lore =>
+  ASTRep rep =>
   Targets ->
-  Stm lore ->
+  Stm rep ->
   (DistributionBody, Result)
 distributionBodyFromStm targets bnd =
   distributionBodyFromStms targets $ oneStm bnd
 
 createKernelNest ::
-  forall lore m.
-  (MonadFreshNames m, HasScope lore m) =>
+  forall rep m.
+  (MonadFreshNames m, HasScope rep m) =>
   Nestings ->
   DistributionBody ->
   m (Maybe (Targets, KernelNest))
@@ -382,7 +384,7 @@ createKernelNest (inner_nest, nests) distrib_body = do
 
     distributeAtNesting ::
       Nesting ->
-      PatternT Type ->
+      PatT Type ->
       (LoopNesting -> KernelNest, Names) ->
       M.Map VName Ident ->
       [Ident] ->
@@ -431,9 +433,7 @@ createKernelNest (inner_nest, nests) distrib_body = do
                       )
 
         let free_arrs_pat =
-              basicPattern [] $
-                map snd $
-                  filter fst $ zip bind_in_target free_arrs
+              basicPat $ map snd $ filter fst $ zip bind_in_target free_arrs
             free_params_pat =
               map snd $ filter fst $ zip bind_in_target free_params
 
@@ -459,7 +459,7 @@ createKernelNest (inner_nest, nests) distrib_body = do
         return
           ( add_to_kernel nest'',
             free_in_kernel'',
-            addTarget (free_arrs_pat, map (Var . paramName) free_params_pat)
+            addTarget (free_arrs_pat, varsRes $ map paramName free_params_pat)
           )
 
     recurse ::
@@ -468,7 +468,7 @@ createKernelNest (inner_nest, nests) distrib_body = do
     recurse [] =
       distributeAtNesting
         inner_nest
-        (distributionInnerPattern distrib_body)
+        (distributionInnerPat distrib_body)
         ( newKernel,
           distributionFreeInBody distrib_body `namesIntersection` bound_in_nest
         )
@@ -480,7 +480,7 @@ createKernelNest (inner_nest, nests) distrib_body = do
 
       let (pat', res', identity_map, expand_target) =
             removeIdentityMappingFromNesting
-              (namesFromList $ patternNames $ loopNestingPattern outer)
+              (namesFromList $ patNames $ loopNestingPat outer)
               pat
               res
 
@@ -491,7 +491,7 @@ createKernelNest (inner_nest, nests) distrib_body = do
           kernel_free
         )
         identity_map
-        (patternIdents $ fst $ outerTarget kernel_targets)
+        (patIdents $ fst $ outerTarget kernel_targets)
         ((`pushOuterTarget` kernel_targets) . expand_target)
 
 removeUnusedNestingParts :: Names -> LoopNesting -> LoopNesting
@@ -506,41 +506,39 @@ removeUnusedNestingParts used (MapNesting pat aux w params_and_arrs) =
 
 removeIdentityMappingGeneral ::
   Names ->
-  PatternT Type ->
+  PatT Type ->
   Result ->
-  ( PatternT Type,
+  ( PatT Type,
     Result,
     M.Map VName Ident,
     Target -> Target
   )
 removeIdentityMappingGeneral bound pat res =
   let (identities, not_identities) =
-        mapEither isIdentity $ zip (patternElements pat) res
+        mapEither isIdentity $ zip (patElements pat) res
       (not_identity_patElems, not_identity_res) = unzip not_identities
       (identity_patElems, identity_res) = unzip identities
       expandTarget (tpat, tres) =
-        ( Pattern [] $ patternElements tpat ++ identity_patElems,
-          tres ++ map Var identity_res
+        ( Pat $ patElements tpat ++ identity_patElems,
+          tres ++ map (uncurry SubExpRes . second Var) identity_res
         )
       identity_map =
-        M.fromList $
-          zip identity_res $
-            map patElemIdent identity_patElems
-   in ( Pattern [] not_identity_patElems,
+        M.fromList $ zip (map snd identity_res) $ map patElemIdent identity_patElems
+   in ( Pat not_identity_patElems,
         not_identity_res,
         identity_map,
         expandTarget
       )
   where
-    isIdentity (patElem, Var v)
-      | not (v `nameIn` bound) = Left (patElem, v)
+    isIdentity (patElem, SubExpRes cs (Var v))
+      | not (v `nameIn` bound) = Left (patElem, (cs, v))
     isIdentity x = Right x
 
 removeIdentityMappingFromNesting ::
   Names ->
-  PatternT Type ->
+  PatT Type ->
   Result ->
-  ( PatternT Type,
+  ( PatT Type,
     Result,
     M.Map VName Ident,
     Target -> Target
@@ -551,16 +549,16 @@ removeIdentityMappingFromNesting bound_in_nesting pat res =
    in (pat', res', identity_map, expand_target)
 
 tryDistribute ::
-  ( DistLore lore,
+  ( DistRep rep,
     MonadFreshNames m,
-    LocalScope lore m,
+    LocalScope rep m,
     MonadLogger m
   ) =>
-  MkSegLevel lore m ->
+  MkSegLevel rep m ->
   Nestings ->
   Targets ->
-  Stms lore ->
-  m (Maybe (Targets, Stms lore))
+  Stms rep ->
+  m (Maybe (Targets, Stms rep))
 tryDistribute _ _ targets stms
   | null stms =
     -- No point in distributing an empty kernel.
@@ -590,10 +588,10 @@ tryDistribute mk_lvl nest targets stms =
     (dist_body, inner_body_res) = distributionBodyFromStms targets stms
 
 tryDistributeStm ::
-  (MonadFreshNames m, HasScope t m, ASTLore lore) =>
+  (MonadFreshNames m, HasScope t m, ASTRep rep) =>
   Nestings ->
   Targets ->
-  Stm lore ->
+  Stm rep ->
   m (Maybe (Result, Targets, KernelNest))
 tryDistributeStm nest targets bnd =
   fmap addRes <$> createKernelNest nest dist_body

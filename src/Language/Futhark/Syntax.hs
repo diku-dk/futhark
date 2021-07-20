@@ -12,6 +12,7 @@
 -- module may be a little hard to understand.
 module Language.Futhark.Syntax
   ( module Language.Futhark.Core,
+    pretty,
 
     -- * Types
     Uniqueness (..),
@@ -23,7 +24,6 @@ module Language.Futhark.Syntax
     ShapeDecl (..),
     shapeRank,
     stripDims,
-    unifyShapes,
     TypeName (..),
     typeNameFromQualName,
     qualNameFromTypeName,
@@ -34,7 +34,7 @@ module Language.Futhark.Syntax
     TypeArgExp (..),
     PName (..),
     ScalarTypeBase (..),
-    PatternType,
+    PatType,
     StructType,
     ValueType,
     Diet (..),
@@ -57,6 +57,7 @@ module Language.Futhark.Syntax
     SliceBase (..),
     sliceLength,
     isFlatSlice,
+    SizeBinder (..),
     AppExpBase (..),
     AppRes (..),
     ExpBase (..),
@@ -64,7 +65,7 @@ module Language.Futhark.Syntax
     CaseBase (..),
     LoopFormBase (..),
     PatLit (..),
-    PatternBase (..),
+    PatBase (..),
 
     -- * Module language
     SpecBase (..),
@@ -129,8 +130,8 @@ class
     Show (f String),
     Show (f [VName]),
     Show (f ([VName], [VName])),
-    Show (f PatternType),
-    Show (f (PatternType, [VName])),
+    Show (f PatType),
+    Show (f (PatType, [VName])),
     Show (f (StructType, [VName])),
     Show (f EntryPoint),
     Show (f StructType),
@@ -317,13 +318,6 @@ stripDims i (ShapeDecl l)
   | i < length l = Just $ ShapeDecl $ drop i l
   | otherwise = Nothing
 
--- | @unifyShapes x y@ combines @x@ and @y@ to contain their maximum
--- common information, and fails if they conflict.
-unifyShapes :: ArrayDim dim => ShapeDecl dim -> ShapeDecl dim -> Maybe (ShapeDecl dim)
-unifyShapes (ShapeDecl xs) (ShapeDecl ys) = do
-  guard $ length xs == length ys
-  ShapeDecl <$> zipWithM unifyDims xs ys
-
 -- | A type name consists of qualifiers (for error messages) and a
 -- 'VName' (for equality checking).
 data TypeName = TypeName {typeQuals :: [VName], typeLeaf :: VName}
@@ -434,7 +428,7 @@ type Aliasing = S.Set Alias
 
 -- | A type with aliasing information and shape annotations, used for
 -- describing the type patterns and expressions.
-type PatternType = TypeBase (DimDecl VName) Aliasing
+type PatType = TypeBase (DimDecl VName) Aliasing
 
 -- | A "structural" type with shape annotations and no aliasing
 -- information, used for declarations.
@@ -557,7 +551,7 @@ data Value
 -- bound to the identifier.
 data IdentBase f vn = Ident
   { identName :: vn,
-    identType :: f PatternType,
+    identType :: f PatType,
     identSrcLoc :: SrcLoc
   }
 
@@ -663,6 +657,7 @@ deriving instance Eq (DimFlatIndexBase NoInfo VName)
 
 deriving instance Ord (DimFlatIndexBase NoInfo VName)
 
+-- | A slicing of an array (potentially multiple dimensions).
 data SliceBase f vn
   = DimIndices [DimIndexBase f vn]
   | DimFlat
@@ -714,6 +709,14 @@ instance Foldable QualName where
 instance Traversable QualName where
   traverse f (QualName qs v) = QualName <$> traverse f qs <*> f v
 
+-- | A binding of a size in a pattern (essentially a size parameter in
+-- a @let@ expression).
+data SizeBinder vn = SizeBinder {sizeName :: !vn, sizeLoc :: !SrcLoc}
+  deriving (Eq, Ord, Show)
+
+instance Located (SizeBinder vn) where
+  locOf = locOf . sizeLoc
+
 -- | An "application expression" is a semantic (not syntactic)
 -- grouping of expressions that have "funcall-like" semantics, mostly
 -- meaning that they can return existential sizes.  In our type
@@ -723,8 +726,10 @@ instance Traversable QualName where
 -- need, so we can pretend that an application expression was really
 -- bound to a name.
 data AppExpBase f vn
-  = -- | The @Maybe VName@ is a possible existential size
-    -- that is instantiated by this argument..
+  = -- | The @Maybe VName@ is a possible existential size that is
+    -- instantiated by this argument.  May have duplicates across the
+    -- program, but they will all produce the same value (the
+    -- expressions will be identical).
     Apply
       (ExpBase f vn)
       (ExpBase f vn)
@@ -738,14 +743,15 @@ data AppExpBase f vn
       (Inclusiveness (ExpBase f vn))
       SrcLoc
   | LetPat
-      (PatternBase f vn)
+      [SizeBinder vn]
+      (PatBase f vn)
       (ExpBase f vn)
       (ExpBase f vn)
       SrcLoc
   | LetFun
       vn
       ( [TypeParamBase vn],
-        [PatternBase f vn],
+        [PatBase f vn],
         Maybe (TypeExp vn),
         f StructType,
         ExpBase f vn
@@ -755,14 +761,14 @@ data AppExpBase f vn
   | If (ExpBase f vn) (ExpBase f vn) (ExpBase f vn) SrcLoc
   | DoLoop
       [VName] -- Size parameters.
-      (PatternBase f vn) -- Merge variable pattern.
+      (PatBase f vn) -- Merge variable pattern.
       (ExpBase f vn) -- Initial values of merge variables.
       (LoopFormBase f vn) -- Do or while loop.
       (ExpBase f vn) -- Loop body.
       SrcLoc
   | BinOp
       (QualName vn, SrcLoc)
-      (f PatternType)
+      (f PatType)
       (ExpBase f vn, f (StructType, Maybe VName))
       (ExpBase f vn, f (StructType, Maybe VName))
       SrcLoc
@@ -789,7 +795,7 @@ instance Located (AppExpBase f vn) where
   locOf (If _ _ _ loc) = locOf loc
   locOf (Coerce _ _ loc) = locOf loc
   locOf (Apply _ _ _ loc) = locOf loc
-  locOf (LetPat _ _ _ loc) = locOf loc
+  locOf (LetPat _ _ _ _ loc) = locOf loc
   locOf (LetFun _ _ _ loc) = locOf loc
   locOf (LetWith _ _ _ _ _ loc) = locOf loc
   locOf (Index _ _ loc) = locOf loc
@@ -801,7 +807,7 @@ instance Located (AppExpBase f vn) where
 -- annotation encodes the result type, as well as any existential
 -- sizes that are generated here.
 data AppRes = AppRes
-  { appResType :: PatternType,
+  { appResType :: PatType,
     appResExt :: [VName]
   }
   deriving (Eq, Ord, Show)
@@ -816,13 +822,13 @@ data AppRes = AppRes
 data ExpBase f vn
   = Literal PrimValue SrcLoc
   | -- | A polymorphic integral literal.
-    IntLit Integer (f PatternType) SrcLoc
+    IntLit Integer (f PatType) SrcLoc
   | -- | A polymorphic decimal literal.
-    FloatLit Double (f PatternType) SrcLoc
+    FloatLit Double (f PatType) SrcLoc
   | -- | A string literal is just a fancy syntax for an array
     -- of bytes.
     StringLit [Word8] SrcLoc
-  | Var (QualName vn) (f PatternType) SrcLoc
+  | Var (QualName vn) (f PatType) SrcLoc
   | -- | A parenthesized expression.
     Parens (ExpBase f vn) SrcLoc
   | QualParens (QualName vn, SrcLoc) (ExpBase f vn) SrcLoc
@@ -832,10 +838,10 @@ data ExpBase f vn
     RecordLit [FieldBase f vn] SrcLoc
   | -- | Array literals, e.g., @[ [1+x, 3], [2, 1+4] ]@.
     -- Second arg is the row type of the rows of the array.
-    ArrayLit [ExpBase f vn] (f PatternType) SrcLoc
+    ArrayLit [ExpBase f vn] (f PatType) SrcLoc
   | -- | An attribute applied to the following expression.
     Attr AttrInfo (ExpBase f vn) SrcLoc
-  | Project Name (ExpBase f vn) (f PatternType) SrcLoc
+  | Project Name (ExpBase f vn) (f PatType) SrcLoc
   | -- | Numeric negation (ugly special case; Haskell did it first).
     Negate (ExpBase f vn) SrcLoc
   | -- | Fail if the first expression does not return true,
@@ -843,37 +849,37 @@ data ExpBase f vn
     -- does.
     Assert (ExpBase f vn) (ExpBase f vn) (f String) SrcLoc
   | -- | An n-ary value constructor.
-    Constr Name [ExpBase f vn] (f PatternType) SrcLoc
+    Constr Name [ExpBase f vn] (f PatType) SrcLoc
   | Update (ExpBase f vn) (SliceBase f vn) (ExpBase f vn) SrcLoc
-  | RecordUpdate (ExpBase f vn) [Name] (ExpBase f vn) (f PatternType) SrcLoc
+  | RecordUpdate (ExpBase f vn) [Name] (ExpBase f vn) (f PatType) SrcLoc
   | Lambda
-      [PatternBase f vn]
+      [PatBase f vn]
       (ExpBase f vn)
       (Maybe (TypeExp vn))
       (f (Aliasing, StructType))
       SrcLoc
   | -- | @+@; first two types are operands, third is result.
-    OpSection (QualName vn) (f PatternType) SrcLoc
+    OpSection (QualName vn) (f PatType) SrcLoc
   | -- | @2+@; first type is operand, second is result.
     OpSectionLeft
       (QualName vn)
-      (f PatternType)
+      (f PatType)
       (ExpBase f vn)
       (f (PName, StructType, Maybe VName), f (PName, StructType))
-      (f PatternType, f [VName])
+      (f PatType, f [VName])
       SrcLoc
   | -- | @+2@; first type is operand, second is result.
     OpSectionRight
       (QualName vn)
-      (f PatternType)
+      (f PatType)
       (ExpBase f vn)
       (f (PName, StructType), f (PName, StructType, Maybe VName))
-      (f PatternType)
+      (f PatType)
       SrcLoc
   | -- | Field projection as a section: @(.x.y.z)@.
-    ProjectSection [Name] (f PatternType) SrcLoc
+    ProjectSection [Name] (f PatType) SrcLoc
   | -- | Array indexing as a section: @(.[i,j])@.
-    IndexSection (SliceBase f vn) (f PatternType) SrcLoc
+    IndexSection (SliceBase f vn) (f PatType) SrcLoc
   | -- | Type ascription: @e : t@.
     Ascript (ExpBase f vn) (TypeDeclBase f vn) SrcLoc
   | AppExp (AppExpBase f vn) (f AppRes)
@@ -914,7 +920,7 @@ instance Located (ExpBase f vn) where
 -- | An entry in a record literal.
 data FieldBase f vn
   = RecordFieldExplicit Name (ExpBase f vn) SrcLoc
-  | RecordFieldImplicit vn (f PatternType) SrcLoc
+  | RecordFieldImplicit vn (f PatType) SrcLoc
 
 deriving instance Showable f vn => Show (FieldBase f vn)
 
@@ -927,7 +933,7 @@ instance Located (FieldBase f vn) where
   locOf (RecordFieldImplicit _ _ loc) = locOf loc
 
 -- | A case in a match expression.
-data CaseBase f vn = CasePat (PatternBase f vn) (ExpBase f vn) SrcLoc
+data CaseBase f vn = CasePat (PatBase f vn) (ExpBase f vn) SrcLoc
 
 deriving instance Showable f vn => Show (CaseBase f vn)
 
@@ -941,7 +947,7 @@ instance Located (CaseBase f vn) where
 -- | Whether the loop is a @for@-loop or a @while@-loop.
 data LoopFormBase f vn
   = For (IdentBase f vn) (ExpBase f vn)
-  | ForIn (PatternBase f vn) (ExpBase f vn)
+  | ForIn (PatBase f vn) (ExpBase f vn)
   | While (ExpBase f vn)
 
 deriving instance Showable f vn => Show (LoopFormBase f vn)
@@ -959,31 +965,31 @@ data PatLit
 
 -- | A pattern as used most places where variables are bound (function
 -- parameters, @let@ expressions, etc).
-data PatternBase f vn
-  = TuplePattern [PatternBase f vn] SrcLoc
-  | RecordPattern [(Name, PatternBase f vn)] SrcLoc
-  | PatternParens (PatternBase f vn) SrcLoc
-  | Id vn (f PatternType) SrcLoc
-  | Wildcard (f PatternType) SrcLoc -- Nothing, i.e. underscore.
-  | PatternAscription (PatternBase f vn) (TypeDeclBase f vn) SrcLoc
-  | PatternLit PatLit (f PatternType) SrcLoc
-  | PatternConstr Name (f PatternType) [PatternBase f vn] SrcLoc
+data PatBase f vn
+  = TuplePat [PatBase f vn] SrcLoc
+  | RecordPat [(Name, PatBase f vn)] SrcLoc
+  | PatParens (PatBase f vn) SrcLoc
+  | Id vn (f PatType) SrcLoc
+  | Wildcard (f PatType) SrcLoc -- Nothing, i.e. underscore.
+  | PatAscription (PatBase f vn) (TypeDeclBase f vn) SrcLoc
+  | PatLit PatLit (f PatType) SrcLoc
+  | PatConstr Name (f PatType) [PatBase f vn] SrcLoc
 
-deriving instance Showable f vn => Show (PatternBase f vn)
+deriving instance Showable f vn => Show (PatBase f vn)
 
-deriving instance Eq (PatternBase NoInfo VName)
+deriving instance Eq (PatBase NoInfo VName)
 
-deriving instance Ord (PatternBase NoInfo VName)
+deriving instance Ord (PatBase NoInfo VName)
 
-instance Located (PatternBase f vn) where
-  locOf (TuplePattern _ loc) = locOf loc
-  locOf (RecordPattern _ loc) = locOf loc
-  locOf (PatternParens _ loc) = locOf loc
+instance Located (PatBase f vn) where
+  locOf (TuplePat _ loc) = locOf loc
+  locOf (RecordPat _ loc) = locOf loc
+  locOf (PatParens _ loc) = locOf loc
   locOf (Id _ _ loc) = locOf loc
   locOf (Wildcard _ loc) = locOf loc
-  locOf (PatternAscription _ _ loc) = locOf loc
-  locOf (PatternLit _ _ loc) = locOf loc
-  locOf (PatternConstr _ _ _ loc) = locOf loc
+  locOf (PatAscription _ _ loc) = locOf loc
+  locOf (PatLit _ _ loc) = locOf loc
+  locOf (PatConstr _ _ _ loc) = locOf loc
 
 -- | Documentation strings, including source location.
 data DocComment = DocComment String SrcLoc
@@ -1022,7 +1028,7 @@ data ValBindBase f vn = ValBind
     valBindRetDecl :: Maybe (TypeExp vn),
     valBindRetType :: f (StructType, [VName]),
     valBindTypeParams :: [TypeParamBase vn],
-    valBindParams :: [PatternBase f vn],
+    valBindParams :: [PatBase f vn],
     valBindBody :: ExpBase f vn,
     valBindDoc :: Maybe DocComment,
     valBindAttrs :: [AttrInfo],

@@ -9,7 +9,7 @@ module Language.Futhark
     Slice,
     AppExp,
     Exp,
-    Pattern,
+    Pat,
     ModExp,
     ModParam,
     SigExp,
@@ -41,7 +41,7 @@ type DimIndex = DimIndexBase Info VName
 -- | An flat index with type information.
 type DimFlatIndex = DimFlatIndexBase Info VName
 
--- | An index with type information.
+-- | A slice with type information.
 type Slice = SliceBase Info VName
 
 -- | An expression with type information.
@@ -51,7 +51,7 @@ type Exp = ExpBase Info VName
 type AppExp = AppExpBase Info VName
 
 -- | A pattern with type information.
-type Pattern = PatternBase Info VName
+type Pat = PatBase Info VName
 
 -- | An constant declaration with type information.
 type ValBind = ValBindBase Info VName

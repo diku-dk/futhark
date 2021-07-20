@@ -5,8 +5,8 @@
 -- | Parser for the Futhark core language.
 module Futhark.IR.Parse
   ( parseSOACS,
-    parseKernels,
-    parseKernelsMem,
+    parseGPU,
+    parseGPUMem,
     parseMC,
     parseMCMem,
     parseSeq,
@@ -23,9 +23,9 @@ import qualified Data.Text as T
 import Data.Void
 import Futhark.Analysis.PrimExp.Parse
 import Futhark.IR
-import Futhark.IR.Kernels (Kernels)
-import qualified Futhark.IR.Kernels.Kernel as Kernel
-import Futhark.IR.KernelsMem (KernelsMem)
+import Futhark.IR.GPU (GPU)
+import qualified Futhark.IR.GPU.Kernel as Kernel
+import Futhark.IR.GPUMem (GPUMem)
 import Futhark.IR.MC (MC)
 import qualified Futhark.IR.MC.Op as MC
 import Futhark.IR.MCMem (MCMem)
@@ -157,14 +157,6 @@ pSubExps = braces (pSubExp `sepBy` pComma)
 pVNames :: Parser [VName]
 pVNames = braces (pVName `sepBy` pComma)
 
-pPatternLike :: Parser a -> Parser ([a], [a])
-pPatternLike p = braces $ do
-  xs <- p `sepBy` pComma
-  choice
-    [ pSemi *> ((xs,) <$> (p `sepBy` pComma)),
-      pure (mempty, xs)
-    ]
-
 pConvOp ::
   T.Text -> (t1 -> t2 -> ConvOp) -> Parser t1 -> Parser t2 -> Parser BasicOp
 pConvOp s op t1 t2 =
@@ -211,11 +203,7 @@ pErrorMsgPart :: Parser (ErrorMsgPart SubExp)
 pErrorMsgPart =
   choice
     [ ErrorString <$> pStringLiteral,
-      flip ($) <$> (pSubExp <* pColon)
-        <*> choice
-          [ keyword "i32" $> ErrorInt32,
-            keyword "i64" $> ErrorInt64
-          ]
+      flip ErrorVal <$> (pSubExp <* pColon) <*> pPrimType
     ]
 
 pErrorMsg :: Parser (ErrorMsg SubExp)
@@ -253,7 +241,9 @@ pIota =
 pBasicOp :: Parser BasicOp
 pBasicOp =
   choice
-    [ keyword "opaque" $> Opaque <*> parens pSubExp,
+    [ keyword "opaque" $> Opaque OpaqueNil <*> parens pSubExp,
+      keyword "trace" $> uncurry (Opaque . OpaqueTrace)
+        <*> parens ((,) <$> lexeme pStringLiteral <* pComma <*> pSubExp),
       keyword "copy" $> Copy <*> parens pVName,
       keyword "assert"
         *> parens
@@ -283,8 +273,9 @@ pBasicOp =
           Concat d <$> pVName <*> many (pComma *> pVName) <*> pure w,
       pIota,
       try $
-        Update
+        flip Update
           <$> pVName <* keyword "with"
+          <*> choice [lexeme "?" $> Safe, pure Unsafe]
           <*> pSlice <* lexeme "="
           <*> pSubExp,
       ArrayLit
@@ -335,46 +326,49 @@ pComm =
 -- bits.  Essentially a manually passed-around type class dictionary,
 -- because ambiguities make it impossible to write this with actual
 -- type classes.
-data PR lore = PR
-  { pRetType :: Parser (RetType lore),
-    pBranchType :: Parser (BranchType lore),
-    pFParamInfo :: Parser (FParamInfo lore),
-    pLParamInfo :: Parser (LParamInfo lore),
-    pLetDec :: Parser (LetDec lore),
-    pOp :: Parser (Op lore),
-    pBodyDec :: BodyDec lore,
-    pExpDec :: ExpDec lore
+data PR rep = PR
+  { pRetType :: Parser (RetType rep),
+    pBranchType :: Parser (BranchType rep),
+    pFParamInfo :: Parser (FParamInfo rep),
+    pLParamInfo :: Parser (LParamInfo rep),
+    pLetDec :: Parser (LetDec rep),
+    pOp :: Parser (Op rep),
+    pBodyDec :: BodyDec rep,
+    pExpDec :: ExpDec rep
   }
 
-pRetTypes :: PR lore -> Parser [RetType lore]
+pRetTypes :: PR rep -> Parser [RetType rep]
 pRetTypes pr = braces $ pRetType pr `sepBy` pComma
 
-pBranchTypes :: PR lore -> Parser [BranchType lore]
+pBranchTypes :: PR rep -> Parser [BranchType rep]
 pBranchTypes pr = braces $ pBranchType pr `sepBy` pComma
 
 pParam :: Parser t -> Parser (Param t)
 pParam p = Param <$> pVName <*> (pColon *> p)
 
-pFParam :: PR lore -> Parser (FParam lore)
+pFParam :: PR rep -> Parser (FParam rep)
 pFParam = pParam . pFParamInfo
 
-pFParams :: PR lore -> Parser [FParam lore]
+pFParams :: PR rep -> Parser [FParam rep]
 pFParams pr = parens $ pFParam pr `sepBy` pComma
 
-pLParam :: PR lore -> Parser (LParam lore)
+pLParam :: PR rep -> Parser (LParam rep)
 pLParam = pParam . pLParamInfo
 
-pLParams :: PR lore -> Parser [LParam lore]
+pLParams :: PR rep -> Parser [LParam rep]
 pLParams pr = braces $ pLParam pr `sepBy` pComma
 
-pPatElem :: PR lore -> Parser (PatElem lore)
+pPatElem :: PR rep -> Parser (PatElem rep)
 pPatElem pr =
   (PatElem <$> pVName <*> (pColon *> pLetDec pr)) <?> "pattern element"
 
-pPattern :: PR lore -> Parser (Pattern lore)
-pPattern pr = uncurry Pattern <$> pPatternLike (pPatElem pr)
+pPat :: PR rep -> Parser (Pat rep)
+pPat pr = Pat <$> braces (pPatElem pr `sepBy` pComma)
 
-pIf :: PR lore -> Parser (Exp lore)
+pResult :: Parser Result
+pResult = braces $ pSubExpRes `sepBy` pComma
+
+pIf :: PR rep -> Parser (Exp rep)
 pIf pr =
   keyword "if" $> f <*> pSort <*> pSubExp
     <*> (keyword "then" *> pBranchBody)
@@ -391,38 +385,39 @@ pIf pr =
       If cond tbranch fbranch $ IfDec t sort
     pBranchBody =
       choice
-        [ try $ braces $ Body (pBodyDec pr) mempty <$> pSubExp `sepBy` pComma,
+        [ try $ Body (pBodyDec pr) mempty <$> pResult,
           braces (pBody pr)
         ]
 
-pApply :: PR lore -> Parser (Exp lore)
+pApply :: PR rep -> Parser (Exp rep)
 pApply pr =
-  keyword "apply"
-    $> Apply
-    <*> pName
-    <*> parens (pArg `sepBy` pComma) <* pColon
-    <*> pRetTypes pr
-    <*> pure (Safe, mempty, mempty)
+  keyword "apply" *> (p =<< choice [lexeme "<unsafe>" $> Unsafe, pure Safe])
   where
+    p safety =
+      Apply
+        <$> pName
+        <*> parens (pArg `sepBy` pComma) <* pColon
+        <*> pRetTypes pr
+        <*> pure (safety, mempty, mempty)
+
     pArg =
       choice
         [ lexeme "*" $> (,Consume) <*> pSubExp,
           (,Observe) <$> pSubExp
         ]
 
-pLoop :: PR lore -> Parser (Exp lore)
+pLoop :: PR rep -> Parser (Exp rep)
 pLoop pr =
-  keyword "loop" $> uncurry DoLoop
+  keyword "loop" $> DoLoop
     <*> pLoopParams
     <*> pLoopForm <* keyword "do"
     <*> braces (pBody pr)
   where
     pLoopParams = do
-      (ctx, val) <- pPatternLike (pFParam pr)
+      params <- braces $ pFParam pr `sepBy` pComma
       void $ lexeme "="
-      (ctx_init, val_init) <-
-        splitAt (length ctx) <$> braces (pSubExp `sepBy` pComma)
-      pure (zip ctx ctx_init, zip val val_init)
+      args <- braces (pSubExp `sepBy` pComma)
+      pure (zip params args)
 
     pLoopForm =
       choice
@@ -434,7 +429,7 @@ pLoop pr =
           keyword "while" $> WhileLoop <*> pVName
         ]
 
-pLambda :: PR lore -> Parser (Lambda lore)
+pLambda :: PR rep -> Parser (Lambda rep)
 pLambda pr =
   choice
     [ lexeme "\\"
@@ -447,20 +442,20 @@ pLambda pr =
   where
     lam params ret body = Lambda params body ret
 
-pReduce :: PR lore -> Parser (SOAC.Reduce lore)
+pReduce :: PR rep -> Parser (SOAC.Reduce rep)
 pReduce pr =
   SOAC.Reduce
     <$> pComm
     <*> pLambda pr <* pComma
     <*> braces (pSubExp `sepBy` pComma)
 
-pScan :: PR lore -> Parser (SOAC.Scan lore)
+pScan :: PR rep -> Parser (SOAC.Scan rep)
 pScan pr =
   SOAC.Scan
     <$> pLambda pr <* pComma
     <*> braces (pSubExp `sepBy` pComma)
 
-pWithAcc :: PR lore -> Parser (Exp lore)
+pWithAcc :: PR rep -> Parser (Exp rep)
 pWithAcc pr =
   keyword "with_acc"
     *> parens (WithAcc <$> braces (pInput `sepBy` pComma) <* pComma <*> pLambda pr)
@@ -474,7 +469,7 @@ pWithAcc pr =
         )
     pCombFun = parens ((,) <$> pLambda pr <* pComma <*> pSubExps)
 
-pExp :: PR lore -> Parser (Exp lore)
+pExp :: PR rep -> Parser (Exp rep)
 pExp pr =
   choice
     [ pIf pr,
@@ -485,42 +480,50 @@ pExp pr =
       BasicOp <$> pBasicOp
     ]
 
-pStm :: PR lore -> Parser (Stm lore)
+pCerts :: Parser Certs
+pCerts =
+  choice
+    [ lexeme "#" *> braces (Certs <$> pVName `sepBy` pComma)
+        <?> "certificates",
+      pure mempty
+    ]
+
+pSubExpRes :: Parser SubExpRes
+pSubExpRes = SubExpRes <$> pCerts <*> pSubExp
+
+pStm :: PR rep -> Parser (Stm rep)
 pStm pr =
-  keyword "let" $> Let <*> pPattern pr <* pEqual <*> pStmAux <*> pExp pr
+  keyword "let" $> Let <*> pPat pr <* pEqual <*> pStmAux <*> pExp pr
   where
     pStmAux = flip StmAux <$> pAttrs <*> pCerts <*> pure (pExpDec pr)
-    pCerts =
-      choice
-        [ lexeme "#" *> braces (Certificates <$> pVName `sepBy` pComma)
-            <?> "certificates",
-          pure mempty
-        ]
 
-pStms :: PR lore -> Parser (Stms lore)
+pStms :: PR rep -> Parser (Stms rep)
 pStms pr = stmsFromList <$> many (pStm pr)
 
-pBody :: PR lore -> Parser (Body lore)
+pBody :: PR rep -> Parser (Body rep)
 pBody pr =
   choice
     [ Body (pBodyDec pr) <$> pStms pr <* keyword "in" <*> pResult,
       Body (pBodyDec pr) mempty <$> pResult
     ]
-  where
-    pResult = braces $ pSubExp `sepBy` pComma
 
 pEntry :: Parser EntryPoint
-pEntry = parens $ (,) <$> pEntryPointTypes <* pComma <*> pEntryPointTypes
+pEntry =
+  parens $
+    (,,) <$> (nameFromString <$> pStringLiteral)
+      <* pComma <*> pEntryPointTypes
+      <* pComma <*> pEntryPointTypes
   where
     pEntryPointTypes = braces (pEntryPointType `sepBy` pComma)
-    pEntryPointType =
+    pEntryPointType = do
+      u <- pUniqueness
       choice
-        [ "direct" $> TypeDirect,
-          "unsigned" $> TypeUnsigned,
-          "opaque" *> parens (TypeOpaque <$> pStringLiteral <* pComma <*> pInt)
+        [ "direct" $> TypeDirect u,
+          "unsigned" $> TypeUnsigned u,
+          "opaque" *> parens (TypeOpaque u <$> pStringLiteral <* pComma <*> pInt)
         ]
 
-pFunDef :: PR lore -> Parser (FunDef lore)
+pFunDef :: PR rep -> Parser (FunDef rep)
 pFunDef pr = do
   attrs <- pAttrs
   entry <-
@@ -534,10 +537,10 @@ pFunDef pr = do
   FunDef entry attrs fname ret fparams
     <$> (pEqual *> braces (pBody pr))
 
-pProg :: PR lore -> Parser (Prog lore)
+pProg :: PR rep -> Parser (Prog rep)
 pProg pr = Prog <$> pStms pr <*> many (pFunDef pr)
 
-pSOAC :: PR lore -> Parser (SOAC.SOAC lore)
+pSOAC :: PR rep -> Parser (SOAC.SOAC rep)
 pSOAC pr =
   choice
     [ keyword "map" *> pScrema pMapForm,
@@ -694,7 +697,8 @@ pSegSpace =
     pDim = (,) <$> pVName <* lexeme "<" <*> pSubExp
 
 pKernelResult :: Parser SegOp.KernelResult
-pKernelResult =
+pKernelResult = do
+  cs <- pCerts
   choice
     [ keyword "returns" $> SegOp.Returns
         <*> choice
@@ -702,26 +706,27 @@ pKernelResult =
             keyword "(private)" $> SegOp.ResultPrivate,
             pure SegOp.ResultMaySimplify
           ]
+        <*> pure cs
         <*> pSubExp,
       try $
-        flip SegOp.WriteReturns
+        flip (SegOp.WriteReturns cs)
           <$> pVName <* pColon
           <*> pShape <* keyword "with"
           <*> parens (pWrite `sepBy` pComma),
       try "tile"
-        *> parens (SegOp.TileReturns <$> (pTile `sepBy` pComma)) <*> pVName,
+        *> parens (SegOp.TileReturns cs <$> (pTile `sepBy` pComma)) <*> pVName,
       try "blkreg_tile"
-        *> parens (SegOp.RegTileReturns <$> (pRegTile `sepBy` pComma)) <*> pVName,
+        *> parens (SegOp.RegTileReturns cs <$> (pRegTile `sepBy` pComma)) <*> pVName,
       keyword "concat"
         *> parens
-          ( SegOp.ConcatReturns SegOp.SplitContiguous
+          ( SegOp.ConcatReturns cs SegOp.SplitContiguous
               <$> pSubExp <* pComma
               <*> pSubExp
           )
         <*> pVName,
       keyword "concat_strided"
         *> parens
-          ( SegOp.ConcatReturns
+          ( SegOp.ConcatReturns cs
               <$> (SegOp.SplitStrided <$> pSubExp) <* pComma
               <*> pSubExp <* pComma
               <*> pSubExp
@@ -738,13 +743,13 @@ pKernelResult =
         pure (dim, blk_tile, reg_tile)
     pWrite = (,) <$> pSlice <* pEqual <*> pSubExp
 
-pKernelBody :: PR lore -> Parser (SegOp.KernelBody lore)
+pKernelBody :: PR rep -> Parser (SegOp.KernelBody rep)
 pKernelBody pr =
   SegOp.KernelBody (pBodyDec pr)
     <$> pStms pr <* keyword "return"
     <*> braces (pKernelResult `sepBy` pComma)
 
-pSegOp :: PR lore -> Parser lvl -> Parser (SegOp.SegOp lvl lore)
+pSegOp :: PR rep -> Parser lvl -> Parser (SegOp.SegOp lvl rep)
 pSegOp pr pLvl =
   choice
     [ keyword "segmap" *> pSegMap,
@@ -801,7 +806,7 @@ pSegLevel =
           pure SegOp.SegNoVirt
         ]
 
-pHostOp :: PR lore -> Parser op -> Parser (Kernel.HostOp lore op)
+pHostOp :: PR rep -> Parser op -> Parser (Kernel.HostOp rep op)
 pHostOp pr pOther =
   choice
     [ Kernel.SegOp <$> pSegOp pr pSegLevel,
@@ -809,7 +814,7 @@ pHostOp pr pOther =
       Kernel.OtherOp <$> pOther
     ]
 
-pMCOp :: PR lore -> Parser op -> Parser (MC.MCOp lore op)
+pMCOp :: PR rep -> Parser op -> Parser (MC.MCOp rep op)
 pMCOp pr pOther =
   choice
     [ MC.ParOp . Just
@@ -940,17 +945,17 @@ prSeqMem =
   where
     op = pMemOp empty
 
-prKernels :: PR Kernels
-prKernels =
+prGPU :: PR GPU
+prGPU =
   PR pDeclExtType pExtType pDeclType pType pType op () ()
   where
-    op = pHostOp prKernels (pSOAC prKernels)
+    op = pHostOp prGPU (pSOAC prGPU)
 
-prKernelsMem :: PR KernelsMem
-prKernelsMem =
+prGPUMem :: PR GPUMem
+prGPUMem =
   PR pRetTypeMem pBranchTypeMem pFParamMem pLParamMem pLetDecMem op () ()
   where
-    op = pMemOp $ pHostOp prKernelsMem empty
+    op = pMemOp $ pHostOp prGPUMem empty
 
 prMC :: PR MC
 prMC =
@@ -964,28 +969,28 @@ prMCMem =
   where
     op = pMemOp $ pMCOp prMCMem empty
 
-parseLore :: PR lore -> FilePath -> T.Text -> Either T.Text (Prog lore)
-parseLore pr fname s =
+parseRep :: PR rep -> FilePath -> T.Text -> Either T.Text (Prog rep)
+parseRep pr fname s =
   either (Left . T.pack . errorBundlePretty) Right $
     parse (whitespace *> pProg pr <* eof) fname s
 
 parseSOACS :: FilePath -> T.Text -> Either T.Text (Prog SOACS)
-parseSOACS = parseLore prSOACS
+parseSOACS = parseRep prSOACS
 
 parseSeq :: FilePath -> T.Text -> Either T.Text (Prog Seq)
-parseSeq = parseLore prSeq
+parseSeq = parseRep prSeq
 
 parseSeqMem :: FilePath -> T.Text -> Either T.Text (Prog SeqMem)
-parseSeqMem = parseLore prSeqMem
+parseSeqMem = parseRep prSeqMem
 
-parseKernels :: FilePath -> T.Text -> Either T.Text (Prog Kernels)
-parseKernels = parseLore prKernels
+parseGPU :: FilePath -> T.Text -> Either T.Text (Prog GPU)
+parseGPU = parseRep prGPU
 
-parseKernelsMem :: FilePath -> T.Text -> Either T.Text (Prog KernelsMem)
-parseKernelsMem = parseLore prKernelsMem
+parseGPUMem :: FilePath -> T.Text -> Either T.Text (Prog GPUMem)
+parseGPUMem = parseRep prGPUMem
 
 parseMC :: FilePath -> T.Text -> Either T.Text (Prog MC)
-parseMC = parseLore prMC
+parseMC = parseRep prMC
 
 parseMCMem :: FilePath -> T.Text -> Either T.Text (Prog MCMem)
-parseMCMem = parseLore prMCMem
+parseMCMem = parseRep prMCMem

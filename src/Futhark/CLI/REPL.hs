@@ -22,7 +22,7 @@ import Data.Version
 import Futhark.Compiler
 import Futhark.MonadFreshNames
 import Futhark.Pipeline
-import Futhark.Util (toPOSIX)
+import Futhark.Util (fancyTerminal, toPOSIX)
 import Futhark.Util.Options
 import Futhark.Version
 import Language.Futhark
@@ -57,12 +57,13 @@ data StopReason = EOF | Stop | Exit | Load FilePath
 
 repl :: Maybe FilePath -> IO ()
 repl maybe_prog = do
-  putStr banner
-  putStrLn $ "Version " ++ showVersion version ++ "."
-  putStrLn "Copyright (C) DIKU, University of Copenhagen, released under the ISC license."
-  putStrLn ""
-  putStrLn "Run :help for a list of commands."
-  putStrLn ""
+  when fancyTerminal $ do
+    putStr banner
+    putStrLn $ "Version " ++ showVersion version ++ "."
+    putStrLn "Copyright (C) DIKU, University of Copenhagen, released under the ISC license."
+    putStrLn ""
+    putStrLn "Run :help for a list of commands."
+    putStrLn ""
 
   let toploop s = do
         (stop, s') <- runStateT (runExceptT $ runFutharkiM $ forever readEvalPrint) s
@@ -82,7 +83,7 @@ repl maybe_prog = do
           Right _ -> return ()
 
       finish s = do
-        quit <- confirmQuit
+        quit <- if fancyTerminal then confirmQuit else pure True
         if quit then return () else toploop s
 
   maybe_init_state <- liftIO $ newFutharkiState 0 maybe_prog
@@ -167,14 +168,9 @@ newFutharkiState count maybe_file = runExceptT $ do
 
       -- Then make the prelude available in the type checker.
       (tenv, d, src') <-
-        badOnLeft pretty $
-          snd $
-            T.checkDec
-              imports
-              src
-              T.initialEnv
-              (T.mkInitialImport ".")
-              $ mkOpen "/prelude/prelude"
+        badOnLeft pretty . snd $
+          T.checkDec imports src T.initialEnv (T.mkInitialImport ".") $
+            mkOpen "/prelude/prelude"
       -- Then in the interpreter.
       ienv' <- badOnLeft show =<< runInterpreter' (I.interpretDec ienv d)
       return (imports, src', tenv, ienv')
@@ -193,15 +189,11 @@ newFutharkiState count maybe_file = runExceptT $ do
         foldM (\ctx -> badOnLeft show <=< runInterpreter' . I.interpretImport ctx) I.initialCtx $
           map (fmap fileProg) imports
       (tenv1, d1, src') <-
-        badOnLeft pretty $
-          snd $
-            T.checkDec imports src T.initialEnv imp $
-              mkOpen "/prelude/prelude"
+        badOnLeft pretty . snd . T.checkDec imports src T.initialEnv imp $
+          mkOpen "/prelude/prelude"
       (tenv2, d2, src'') <-
-        badOnLeft pretty $
-          snd $
-            T.checkDec imports src' tenv1 imp $
-              mkOpen $ toPOSIX $ dropExtension file
+        badOnLeft pretty . snd . T.checkDec imports src' tenv1 imp $
+          mkOpen $ toPOSIX $ dropExtension file
       ienv2 <- badOnLeft show =<< runInterpreter' (I.interpretDec ienv1 d1)
       ienv3 <- badOnLeft show =<< runInterpreter' (I.interpretDec ienv2 d2)
       return (imports, src'', tenv2, ienv3)
@@ -257,10 +249,9 @@ readEvalPrint = do
         [] -> liftIO $ T.putStrLn $ "Unknown command '" <> cmdname <> "'"
         [(_, (cmdf, _))] -> cmdf arg
         matches ->
-          liftIO $
-            T.putStrLn $
-              "Ambiguous command; could be one of "
-                <> mconcat (intersperse ", " (map fst matches))
+          liftIO . T.putStrLn $
+            "Ambiguous command; could be one of "
+              <> mconcat (intersperse ", " (map fst matches))
     _ -> do
       -- Read a declaration or expression.
       maybe_dec_or_e <- parseDecOrExpIncrM (inputLine "  ") prompt line
@@ -357,7 +348,7 @@ runInterpreter m = runF m (return . Right) intOp
     intOp (I.ExtOpTrace w v c) = do
       liftIO $ putStrLn $ "Trace at " ++ locStr (srclocOf w) ++ ": " ++ v
       c
-    intOp (I.ExtOpBreak why callstack c) = do
+    intOp (I.ExtOpBreak w why callstack c) = do
       s <- get
 
       let why' = case why of
@@ -370,23 +361,21 @@ runInterpreter m = runF m (return . Right) intOp
 
       -- Are we supposed to respect this breakpoint?
       when (breakForReason s top why) $ do
-        liftIO $ putStrLn $ why' <> " at " ++ locStr top
+        liftIO $ putStrLn $ why' <> " at " ++ locStr w
         liftIO $ putStrLn $ prettyBreaking breaking
         liftIO $ putStrLn "<Enter> to continue."
 
         -- Note the cleverness to preserve the Haskeline session (for
         -- line history and such).
         (stop, s') <-
-          FutharkiM $
-            lift $
-              lift $
-                runStateT
-                  (runExceptT $ runFutharkiM $ forever readEvalPrint)
-                  s
-                    { futharkiEnv = (tenv, ctx),
-                      futharkiCount = futharkiCount s + 1,
-                      futharkiBreaking = Just breaking
-                    }
+          FutharkiM . lift . lift $
+            runStateT
+              (runExceptT $ runFutharkiM $ forever readEvalPrint)
+              s
+                { futharkiEnv = (tenv, ctx),
+                  futharkiCount = futharkiCount s + 1,
+                  futharkiBreaking = Just breaking
+                }
 
         case stop of
           Left (Load file) -> throwError $ Load file
@@ -411,7 +400,7 @@ runInterpreter' m = runF m (return . Right) intOp
     intOp (I.ExtOpTrace w v c) = do
       liftIO $ putStrLn $ "Trace at " ++ locStr w ++ ": " ++ v
       c
-    intOp (I.ExtOpBreak _ _ c) = c
+    intOp (I.ExtOpBreak _ _ _ c) = c
 
 type Command = T.Text -> FutharkiM ()
 

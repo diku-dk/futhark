@@ -39,23 +39,23 @@ Motivation:
 -- | @foldClosedForm look foldfun accargs arrargs@ determines whether
 -- each of the results of @foldfun@ can be expressed in a closed form.
 foldClosedForm ::
-  (ASTLore lore, BinderOps lore) =>
-  VarLookup lore ->
-  Pattern lore ->
-  Lambda lore ->
+  (ASTRep rep, BuilderOps rep) =>
+  VarLookup rep ->
+  Pat rep ->
+  Lambda rep ->
   [SubExp] ->
   [VName] ->
-  RuleM lore ()
+  RuleM rep ()
 foldClosedForm look pat lam accs arrs = do
   inputsize <- arraysSize 0 <$> mapM lookupType arrs
 
-  t <- case patternTypes pat of
+  t <- case patTypes pat of
     [Prim t] -> return t
     _ -> cannotSimplify
 
   closedBody <-
     checkResults
-      (patternNames pat)
+      (patNames pat)
       inputsize
       mempty
       Int64
@@ -78,16 +78,16 @@ foldClosedForm look pat lam accs arrs = do
 -- | @loopClosedForm pat respat merge bound bodys@ determines whether
 -- the do-loop can be expressed in a closed form.
 loopClosedForm ::
-  (ASTLore lore, BinderOps lore) =>
-  Pattern lore ->
-  [(FParam lore, SubExp)] ->
+  (ASTRep rep, BuilderOps rep) =>
+  Pat rep ->
+  [(FParam rep, SubExp)] ->
   Names ->
   IntType ->
   SubExp ->
-  Body lore ->
-  RuleM lore ()
+  Body rep ->
+  RuleM rep ()
 loopClosedForm pat merge i it bound body = do
-  t <- case patternTypes pat of
+  t <- case patTypes pat of
     [Prim t] -> return t
     _ -> cannotSimplify
 
@@ -118,7 +118,7 @@ loopClosedForm pat merge i it bound body = do
     knownBnds = M.fromList $ zip mergenames mergeexp
 
 checkResults ::
-  BinderOps lore =>
+  BuilderOps rep =>
   [VName] ->
   SubExp ->
   Names ->
@@ -126,14 +126,14 @@ checkResults ::
   M.Map VName SubExp ->
   -- | Lambda-bound
   [VName] ->
-  Body lore ->
+  Body rep ->
   [SubExp] ->
-  RuleM lore (Body lore)
+  RuleM rep (Body rep)
 checkResults pat size untouchable it knownBnds params body accs = do
   ((), bnds) <-
     collectStms $
       zipWithM_ checkResult (zip pat res) (zip accparams accs)
-  mkBodyM bnds $ map Var pat
+  mkBodyM bnds $ varsRes pat
   where
     bndMap = makeBindMap body
     (accparams, _) = splitAt (length accs) params
@@ -141,8 +141,9 @@ checkResults pat size untouchable it knownBnds params body accs = do
 
     nonFree = boundInBody body <> namesFromList params <> untouchable
 
-    checkResult (p, Var v) (accparam, acc)
-      | Just (BasicOp (BinOp bop x y)) <- M.lookup v bndMap = do
+    checkResult (p, SubExpRes _ (Var v)) (accparam, acc)
+      | Just (BasicOp (BinOp bop x y)) <- M.lookup v bndMap,
+        x /= y = do
         -- One of x,y must be *this* accumulator, and the other must
         -- be something that is free in the body.
         let isThisAccum = (== Var accparam)
@@ -157,8 +158,8 @@ checkResults pat size untouchable it knownBnds params body accs = do
         case bop of
           LogAnd ->
             letBindNames [p] $ BasicOp $ BinOp LogAnd this el
-          Add t w | Just properly_typed_size <- properIntSize t -> do
-            size' <- properly_typed_size
+          Add t w -> do
+            size' <- asIntS t size
             letBindNames [p]
               =<< eBinOp
                 (Add t w)
@@ -179,20 +180,14 @@ checkResults pat size untouchable it knownBnds params body accs = do
       | v `nameIn` nonFree = M.lookup v knownBnds
     asFreeSubExp se = Just se
 
-    properIntSize Int64 = Just $ return size
-    properIntSize t =
-      Just $
-        letSubExp "converted_size" $
-          BasicOp $ ConvOp (SExt it t) size
-
     properFloatSize t =
       Just $
         letSubExp "converted_size" $
           BasicOp $ ConvOp (SIToFP it t) size
 
 determineKnownBindings ::
-  VarLookup lore ->
-  Lambda lore ->
+  VarLookup rep ->
+  Lambda rep ->
   [SubExp] ->
   [VName] ->
   M.Map VName SubExp
@@ -215,9 +210,9 @@ determineKnownBindings look lam accs arrs =
         Just (p, ve)
     isReplicate _ = Nothing
 
-makeBindMap :: Body lore -> M.Map VName (Exp lore)
+makeBindMap :: Body rep -> M.Map VName (Exp rep)
 makeBindMap = M.fromList . mapMaybe isSingletonStm . stmsToList . bodyStms
   where
-    isSingletonStm (Let pat _ e) = case patternNames pat of
+    isSingletonStm (Let pat _ e) = case patNames pat of
       [v] -> Just (v, e)
       _ -> Nothing

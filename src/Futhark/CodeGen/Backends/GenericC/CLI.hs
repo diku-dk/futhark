@@ -14,6 +14,7 @@ where
 
 import Data.FileEmbed
 import Data.List (unzip5)
+import Data.Maybe
 import Futhark.CodeGen.Backends.GenericC.Options
 import Futhark.CodeGen.Backends.SimpleRep
 import Futhark.CodeGen.ImpCode
@@ -155,8 +156,8 @@ opaqueToCType desc vds =
    in [C.cty|struct $id:name|]
 
 externalValueToCType :: ExternalValue -> C.Type
-externalValueToCType (TransparentValue vd) = valueDescToCType vd
-externalValueToCType (OpaqueValue desc vds) = opaqueToCType desc vds
+externalValueToCType (TransparentValue _ vd) = valueDescToCType vd
+externalValueToCType (OpaqueValue _ desc vds) = opaqueToCType desc vds
 
 primTypeInfo :: PrimType -> Signedness -> C.Exp
 primTypeInfo (IntType it) t = case (it, t) of
@@ -183,14 +184,14 @@ readPrimStm place i t ept =
           }|]
 
 readInput :: Int -> ExternalValue -> ([C.BlockItem], C.Stm, C.Stm, C.Stm, C.Exp)
-readInput i (OpaqueValue desc _) =
+readInput i (OpaqueValue _ desc _) =
   ( [C.citems|futhark_panic(1, "Cannot read input #%d of type %s\n", $int:i, $string:desc);|],
     [C.cstm|;|],
     [C.cstm|;|],
     [C.cstm|;|],
     [C.cexp|NULL|]
   )
-readInput i (TransparentValue (ScalarValue t ept _)) =
+readInput i (TransparentValue _ (ScalarValue t ept _)) =
   let dest = "read_value_" ++ show i
    in ( [C.citems|$ty:(primTypeToCType t) $id:dest;
                   $stm:(readPrimStm dest i t ept);|],
@@ -199,7 +200,7 @@ readInput i (TransparentValue (ScalarValue t ept _)) =
         [C.cstm|;|],
         [C.cexp|$id:dest|]
       )
-readInput i (TransparentValue (ArrayValue _ _ t ept dims)) =
+readInput i (TransparentValue _ (ArrayValue _ _ t ept dims)) =
   let dest = "read_value_" ++ show i
       shape = "read_shape_" ++ show i
       arr = "read_arr_" ++ show i
@@ -251,19 +252,19 @@ prepareOutputs = zipWith prepareResult [(0 :: Int) ..]
           result = "result_" ++ show i
 
       case ev of
-        TransparentValue ScalarValue {} ->
+        TransparentValue _ ScalarValue {} ->
           ( [C.citem|$ty:ty $id:result;|],
             [C.cexp|$id:result|],
             [C.cstm|;|]
           )
-        TransparentValue (ArrayValue _ _ t ept dims) ->
+        TransparentValue _ (ArrayValue _ _ t ept dims) ->
           let name = arrayName t ept $ length dims
               free_array = "futhark_free_" ++ name
            in ( [C.citem|$ty:ty *$id:result;|],
                 [C.cexp|$id:result|],
                 [C.cstm|assert($id:free_array(ctx, $id:result) == 0);|]
               )
-        OpaqueValue desc vds ->
+        OpaqueValue _ desc vds ->
           let free_opaque = "futhark_free_" ++ opaqueName desc vds
            in ( [C.citem|$ty:ty *$id:result;|],
                 [C.cexp|$id:result|],
@@ -276,11 +277,11 @@ printPrimStm dest val bt ept =
 
 -- | Return a statement printing the given external value.
 printStm :: ExternalValue -> C.Exp -> C.Stm
-printStm (OpaqueValue desc _) _ =
+printStm (OpaqueValue _ desc _) _ =
   [C.cstm|printf("#<opaque %s>", $string:desc);|]
-printStm (TransparentValue (ScalarValue bt ept _)) e =
+printStm (TransparentValue _ (ScalarValue bt ept _)) e =
   printPrimStm [C.cexp|stdout|] e bt ept
-printStm (TransparentValue (ArrayValue _ _ bt ept shape)) e =
+printStm (TransparentValue _ (ArrayValue _ _ bt ept shape)) e =
   let values_array = "futhark_values_" ++ name
       shape_array = "futhark_shape_" ++ name
       num_elems = cproduct [[C.cexp|$id:shape_array(ctx, $exp:e)[$int:i]|] | i <- [0 .. rank -1]]
@@ -303,10 +304,9 @@ printResult = concatMap f
     f (v, e) = [printStm v e, [C.cstm|printf("\n");|]]
 
 cliEntryPoint ::
-  Name ->
-  FunctionT a ->
-  (C.Definition, C.Initializer)
-cliEntryPoint fname (Function _ _ _ _ results args) =
+  FunctionT a -> Maybe (C.Definition, C.Initializer)
+cliEntryPoint fun@(Function _ _ _ _ results args) = do
+  entry_point_name <- nameToString <$> functionEntry fun
   let (input_items, pack_input, free_input, free_parsed, input_args) =
         unzip5 $ readInputs args
 
@@ -319,7 +319,6 @@ cliEntryPoint fname (Function _ _ _ _ results args) =
       sync_ctx = "futhark_context_sync" :: Name
       error_ctx = "futhark_context_get_error" :: Name
 
-      entry_point_name = nameToString fname
       cli_entry_point_function_name = "futrts_cli_entry_" ++ entry_point_name
       entry_point_function_name = "futhark_entry_" ++ entry_point_name
 
@@ -330,85 +329,86 @@ cliEntryPoint fname (Function _ _ _ _ results args) =
 
       run_it =
         [C.citems|
-                  int r;
-                  // Run the program once.
-                  $stms:pack_input
-                  if ($id:sync_ctx(ctx) != 0) {
-                    futhark_panic(1, "%s", $id:error_ctx(ctx));
-                  };
-                  // Only profile last run.
-                  if (profile_run) {
-                    $id:unpause_profiling(ctx);
-                  }
-                  t_start = get_wall_time();
-                  r = $id:entry_point_function_name(ctx,
-                                                    $args:(map addrOf output_vals),
-                                                    $args:input_args);
-                  if (r != 0) {
-                    futhark_panic(1, "%s", $id:error_ctx(ctx));
-                  }
-                  if ($id:sync_ctx(ctx) != 0) {
-                    futhark_panic(1, "%s", $id:error_ctx(ctx));
-                  };
-                  if (profile_run) {
-                    $id:pause_profiling(ctx);
-                  }
-                  t_end = get_wall_time();
-                  long int elapsed_usec = t_end - t_start;
-                  if (time_runs && runtime_file != NULL) {
-                    fprintf(runtime_file, "%lld\n", (long long) elapsed_usec);
-                    fflush(runtime_file);
-                  }
-                  $stms:free_input
-                |]
-   in ( [C.cedecl|
-  static void $id:cli_entry_point_function_name($ty:ctx_ty *ctx) {
-    typename int64_t t_start, t_end;
-    int time_runs = 0, profile_run = 0;
+                int r;
+                // Run the program once.
+                $stms:pack_input
+                if ($id:sync_ctx(ctx) != 0) {
+                  futhark_panic(1, "%s", $id:error_ctx(ctx));
+                };
+                // Only profile last run.
+                if (profile_run) {
+                  $id:unpause_profiling(ctx);
+                }
+                t_start = get_wall_time();
+                r = $id:entry_point_function_name(ctx,
+                                                  $args:(map addrOf output_vals),
+                                                  $args:input_args);
+                if (r != 0) {
+                  futhark_panic(1, "%s", $id:error_ctx(ctx));
+                }
+                if ($id:sync_ctx(ctx) != 0) {
+                  futhark_panic(1, "%s", $id:error_ctx(ctx));
+                };
+                if (profile_run) {
+                  $id:pause_profiling(ctx);
+                }
+                t_end = get_wall_time();
+                long int elapsed_usec = t_end - t_start;
+                if (time_runs && runtime_file != NULL) {
+                  fprintf(runtime_file, "%lld\n", (long long) elapsed_usec);
+                  fflush(runtime_file);
+                }
+                $stms:free_input
+              |]
+  Just
+    ( [C.cedecl|
+   static void $id:cli_entry_point_function_name($ty:ctx_ty *ctx) {
+     typename int64_t t_start, t_end;
+     int time_runs = 0, profile_run = 0;
 
-    // We do not want to profile all the initialisation.
-    $id:pause_profiling(ctx);
+     // We do not want to profile all the initialisation.
+     $id:pause_profiling(ctx);
 
-    // Declare and read input.
-    set_binary_mode(stdin);
-    $items:(mconcat input_items)
+     // Declare and read input.
+     set_binary_mode(stdin);
+     $items:(mconcat input_items)
 
-    if (end_of_input(stdin) != 0) {
-      futhark_panic(1, "Expected EOF on stdin after reading input for %s.\n", $string:(quote (pretty fname)));
-    }
+     if (end_of_input(stdin) != 0) {
+       futhark_panic(1, "Expected EOF on stdin after reading input for \"%s\".\n", $string:(pretty entry_point_name));
+     }
 
-    $items:output_decls
+     $items:output_decls
 
-    // Warmup run
-    if (perform_warmup) {
-      $items:run_it
-      $stms:free_outputs
-    }
-    time_runs = 1;
-    // Proper run.
-    for (int run = 0; run < num_runs; run++) {
-      // Only profile last run.
-      profile_run = run == num_runs -1;
-      $items:run_it
-      if (run < num_runs-1) {
-        $stms:free_outputs
-      }
-    }
+     // Warmup run
+     if (perform_warmup) {
+       $items:run_it
+       $stms:free_outputs
+     }
+     time_runs = 1;
+     // Proper run.
+     for (int run = 0; run < num_runs; run++) {
+       // Only profile last run.
+       profile_run = run == num_runs -1;
+       $items:run_it
+       if (run < num_runs-1) {
+         $stms:free_outputs
+       }
+     }
 
-    // Free the parsed input.
-    $stms:free_parsed
+     // Free the parsed input.
+     $stms:free_parsed
 
-    // Print the final result.
-    if (binary_output) {
-      set_binary_mode(stdout);
-    }
-    $stms:printstms
+     // Print the final result.
+     if (binary_output) {
+       set_binary_mode(stdout);
+     }
+     $stms:printstms
 
-    $stms:free_outputs
-  }|],
-        [C.cinit|{ .name = $string:entry_point_name,
-                      .fun = $id:cli_entry_point_function_name }|]
-      )
+     $stms:free_outputs
+   }|],
+      [C.cinit|{ .name = $string:entry_point_name,
+                       .fun = $id:cli_entry_point_function_name }|]
+    )
 
 {-# NOINLINE cliDefs #-}
 
@@ -421,7 +421,7 @@ cliDefs options (Functions funs) =
       option_parser =
         generateOptionParser "parse_options" $ genericOptions ++ options
       (cli_entry_point_decls, entry_point_inits) =
-        unzip $ map (uncurry cliEntryPoint) funs
+        unzip $ mapMaybe (cliEntryPoint . snd) funs
    in [C.cunit|
 $esc:("#include <getopt.h>")
 $esc:("#include <ctype.h>")

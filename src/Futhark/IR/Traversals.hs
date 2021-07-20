@@ -46,21 +46,21 @@ import Futhark.IR.Syntax
 -- | Express a monad mapping operation on a syntax node.  Each element
 -- of this structure expresses the operation to be performed on a
 -- given child.
-data Mapper flore tlore m = Mapper
+data Mapper frep trep m = Mapper
   { mapOnSubExp :: SubExp -> m SubExp,
     -- | Most bodies are enclosed in a scope, which is passed along
     -- for convenience.
-    mapOnBody :: Scope tlore -> Body flore -> m (Body tlore),
+    mapOnBody :: Scope trep -> Body frep -> m (Body trep),
     mapOnVName :: VName -> m VName,
-    mapOnRetType :: RetType flore -> m (RetType tlore),
-    mapOnBranchType :: BranchType flore -> m (BranchType tlore),
-    mapOnFParam :: FParam flore -> m (FParam tlore),
-    mapOnLParam :: LParam flore -> m (LParam tlore),
-    mapOnOp :: Op flore -> m (Op tlore)
+    mapOnRetType :: RetType frep -> m (RetType trep),
+    mapOnBranchType :: BranchType frep -> m (BranchType trep),
+    mapOnFParam :: FParam frep -> m (FParam trep),
+    mapOnLParam :: LParam frep -> m (LParam trep),
+    mapOnOp :: Op frep -> m (Op trep)
   }
 
 -- | A mapper that simply returns the tree verbatim.
-identityMapper :: Monad m => Mapper lore lore m
+identityMapper :: Monad m => Mapper rep rep m
 identityMapper =
   Mapper
     { mapOnSubExp = return,
@@ -78,9 +78,9 @@ identityMapper =
 -- into subexpressions.  The mapping is done left-to-right.
 mapExpM ::
   (Applicative m, Monad m) =>
-  Mapper flore tlore m ->
-  Exp flore ->
-  m (Exp tlore)
+  Mapper frep trep m ->
+  Exp frep ->
+  m (Exp trep)
 mapExpM tv (BasicOp (SubExp se)) =
   BasicOp <$> (SubExp <$> mapOnSubExp tv se)
 mapExpM tv (BasicOp (ArrayLit els rowt)) =
@@ -108,9 +108,9 @@ mapExpM tv (BasicOp (Index arr slice)) =
     <$> ( Index <$> mapOnVName tv arr
             <*> traverse (mapOnSubExp tv) slice
         )
-mapExpM tv (BasicOp (Update arr slice se)) =
+mapExpM tv (BasicOp (Update safety arr slice se)) =
   BasicOp
-    <$> ( Update <$> mapOnVName tv arr
+    <$> ( Update safety <$> mapOnVName tv arr
             <*> traverse (mapOnSubExp tv) slice
             <*> mapOnSubExp tv se
         )
@@ -143,8 +143,8 @@ mapExpM tv (BasicOp (Manifest perm e)) =
   BasicOp <$> (Manifest perm <$> mapOnVName tv e)
 mapExpM tv (BasicOp (Assert e msg loc)) =
   BasicOp <$> (Assert <$> mapOnSubExp tv e <*> traverse (mapOnSubExp tv) msg <*> pure loc)
-mapExpM tv (BasicOp (Opaque e)) =
-  BasicOp <$> (Opaque <$> mapOnSubExp tv e)
+mapExpM tv (BasicOp (Opaque op e)) =
+  BasicOp <$> (Opaque op <$> mapOnSubExp tv e)
 mapExpM tv (BasicOp (UpdateAcc v is ses)) =
   BasicOp
     <$> ( UpdateAcc
@@ -158,30 +158,27 @@ mapExpM tv (WithAcc inputs lam) =
     onInput (shape, vs, op) =
       (,,) <$> mapOnShape tv shape <*> mapM (mapOnVName tv) vs
         <*> traverse (bitraverse (mapOnLambda tv) (mapM (mapOnSubExp tv))) op
-mapExpM tv (DoLoop ctxmerge valmerge form loopbody) = do
-  ctxparams' <- mapM (mapOnFParam tv) ctxparams
-  valparams' <- mapM (mapOnFParam tv) valparams
+mapExpM tv (DoLoop merge form loopbody) = do
+  params' <- mapM (mapOnFParam tv) params
   form' <- mapOnLoopForm tv form
-  let scope = scopeOf form' <> scopeOfFParams (ctxparams' ++ valparams')
+  let scope = scopeOf form' <> scopeOfFParams params'
   DoLoop
-    <$> (zip ctxparams' <$> mapM (mapOnSubExp tv) ctxinits)
-    <*> (zip valparams' <$> mapM (mapOnSubExp tv) valinits)
+    <$> (zip params' <$> mapM (mapOnSubExp tv) args)
     <*> pure form'
     <*> mapOnBody tv scope loopbody
   where
-    (ctxparams, ctxinits) = unzip ctxmerge
-    (valparams, valinits) = unzip valmerge
+    (params, args) = unzip merge
 mapExpM tv (Op op) =
   Op <$> mapOnOp tv op
 
-mapOnShape :: Monad m => Mapper flore tlore m -> Shape -> m Shape
+mapOnShape :: Monad m => Mapper frep trep m -> Shape -> m Shape
 mapOnShape tv (Shape ds) = Shape <$> mapM (mapOnSubExp tv) ds
 
 mapOnLoopForm ::
   Monad m =>
-  Mapper flore tlore m ->
-  LoopForm flore ->
-  m (LoopForm tlore)
+  Mapper frep trep m ->
+  LoopForm frep ->
+  m (LoopForm trep)
 mapOnLoopForm tv (ForLoop i it bound loop_vars) =
   ForLoop <$> mapOnVName tv i <*> pure it <*> mapOnSubExp tv bound
     <*> (zip <$> mapM (mapOnLParam tv) loop_lparams <*> mapM (mapOnVName tv) loop_arrs)
@@ -192,9 +189,9 @@ mapOnLoopForm tv (WhileLoop cond) =
 
 mapOnLambda ::
   Monad m =>
-  Mapper flore tlore m ->
-  Lambda flore ->
-  m (Lambda tlore)
+  Mapper frep trep m ->
+  Lambda frep ->
+  m (Lambda trep)
 mapOnLambda tv (Lambda params body ret) = do
   params' <- mapM (mapOnLParam tv) params
   Lambda params'
@@ -202,25 +199,25 @@ mapOnLambda tv (Lambda params body ret) = do
     <*> mapM (mapOnType (mapOnSubExp tv)) ret
 
 -- | Like 'mapExpM', but in the 'Identity' monad.
-mapExp :: Mapper flore tlore Identity -> Exp flore -> Exp tlore
+mapExp :: Mapper frep trep Identity -> Exp frep -> Exp trep
 mapExp m = runIdentity . mapExpM m
 
 -- | Express a monad expression on a syntax node.  Each element of
 -- this structure expresses the action to be performed on a given
 -- child.
-data Walker lore m = Walker
+data Walker rep m = Walker
   { walkOnSubExp :: SubExp -> m (),
-    walkOnBody :: Scope lore -> Body lore -> m (),
+    walkOnBody :: Scope rep -> Body rep -> m (),
     walkOnVName :: VName -> m (),
-    walkOnRetType :: RetType lore -> m (),
-    walkOnBranchType :: BranchType lore -> m (),
-    walkOnFParam :: FParam lore -> m (),
-    walkOnLParam :: LParam lore -> m (),
-    walkOnOp :: Op lore -> m ()
+    walkOnRetType :: RetType rep -> m (),
+    walkOnBranchType :: BranchType rep -> m (),
+    walkOnFParam :: FParam rep -> m (),
+    walkOnLParam :: LParam rep -> m (),
+    walkOnOp :: Op rep -> m ()
   }
 
 -- | A no-op traversal.
-identityWalker :: Monad m => Walker lore m
+identityWalker :: Monad m => Walker rep m
 identityWalker =
   Walker
     { walkOnSubExp = const $ return (),
@@ -233,10 +230,10 @@ identityWalker =
       walkOnOp = const $ return ()
     }
 
-walkOnShape :: Monad m => Walker lore m -> Shape -> m ()
+walkOnShape :: Monad m => Walker rep m -> Shape -> m ()
 walkOnShape tv (Shape ds) = mapM_ (walkOnSubExp tv) ds
 
-walkOnType :: Monad m => Walker lore m -> Type -> m ()
+walkOnType :: Monad m => Walker rep m -> Type -> m ()
 walkOnType _ Prim {} = return ()
 walkOnType tv (Acc acc ispace ts _) = do
   walkOnVName tv acc
@@ -245,7 +242,7 @@ walkOnType tv (Acc acc ispace ts _) = do
 walkOnType _ Mem {} = return ()
 walkOnType tv (Array _ shape _) = walkOnShape tv shape
 
-walkOnLoopForm :: Monad m => Walker lore m -> LoopForm lore -> m ()
+walkOnLoopForm :: Monad m => Walker rep m -> LoopForm rep -> m ()
 walkOnLoopForm tv (ForLoop i _ bound loop_vars) =
   walkOnVName tv i >> walkOnSubExp tv bound
     >> mapM_ (walkOnLParam tv) loop_lparams
@@ -255,14 +252,14 @@ walkOnLoopForm tv (ForLoop i _ bound loop_vars) =
 walkOnLoopForm tv (WhileLoop cond) =
   walkOnVName tv cond
 
-walkOnLambda :: Monad m => Walker lore m -> Lambda lore -> m ()
+walkOnLambda :: Monad m => Walker rep m -> Lambda rep -> m ()
 walkOnLambda tv (Lambda params body ret) = do
   mapM_ (walkOnLParam tv) params
   walkOnBody tv (scopeOfLParams params) body
   mapM_ (walkOnType tv) ret
 
 -- | As 'mapExpM', but do not construct a result AST.
-walkExpM :: Monad m => Walker lore m -> Exp lore -> m ()
+walkExpM :: Monad m => Walker rep m -> Exp rep -> m ()
 walkExpM tv (BasicOp (SubExp se)) =
   walkOnSubExp tv se
 walkExpM tv (BasicOp (ArrayLit els rowt)) =
@@ -284,7 +281,7 @@ walkExpM tv (Apply _ args ret _) =
   mapM_ (walkOnSubExp tv . fst) args >> mapM_ (walkOnRetType tv) ret
 walkExpM tv (BasicOp (Index arr slice)) =
   walkOnVName tv arr >> traverse_ (walkOnSubExp tv) slice
-walkExpM tv (BasicOp (Update arr slice se)) =
+walkExpM tv (BasicOp (Update _ arr slice se)) =
   walkOnVName tv arr
     >> traverse_ (walkOnSubExp tv) slice
     >> walkOnSubExp tv se
@@ -308,7 +305,7 @@ walkExpM tv (BasicOp (Manifest _ e)) =
   walkOnVName tv e
 walkExpM tv (BasicOp (Assert e msg _)) =
   walkOnSubExp tv e >> traverse_ (walkOnSubExp tv) msg
-walkExpM tv (BasicOp (Opaque e)) =
+walkExpM tv (BasicOp (Opaque _ e)) =
   walkOnSubExp tv e
 walkExpM tv (BasicOp (UpdateAcc v is ses)) = do
   walkOnVName tv v
@@ -320,16 +317,13 @@ walkExpM tv (WithAcc inputs lam) = do
     mapM_ (walkOnVName tv) vs
     traverse_ (bitraverse (walkOnLambda tv) (mapM (walkOnSubExp tv))) op
   walkOnLambda tv lam
-walkExpM tv (DoLoop ctxmerge valmerge form loopbody) = do
-  mapM_ (walkOnFParam tv) ctxparams
-  mapM_ (walkOnFParam tv) valparams
+walkExpM tv (DoLoop merge form loopbody) = do
+  mapM_ (walkOnFParam tv) params
   walkOnLoopForm tv form
-  mapM_ (walkOnSubExp tv) ctxinits
-  mapM_ (walkOnSubExp tv) valinits
-  let scope = scopeOfFParams (ctxparams ++ valparams) <> scopeOf form
+  mapM_ (walkOnSubExp tv) args
+  let scope = scopeOfFParams params <> scopeOf form
   walkOnBody tv scope loopbody
   where
-    (ctxparams, ctxinits) = unzip ctxmerge
-    (valparams, valinits) = unzip valmerge
+    (params, args) = unzip merge
 walkExpM tv (Op op) =
   walkOnOp tv op

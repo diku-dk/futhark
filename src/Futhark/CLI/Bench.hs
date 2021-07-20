@@ -21,7 +21,7 @@ import qualified Data.Text as T
 import Futhark.Bench
 import Futhark.Server
 import Futhark.Test
-import Futhark.Util (fancyTerminal, maxinum, maybeNth, pmapIO)
+import Futhark.Util (atMostChars, fancyTerminal, maxinum, maybeNth, pmapIO)
 import Futhark.Util.Console
 import Futhark.Util.Options
 import System.Console.ANSI (clearLine)
@@ -177,7 +177,7 @@ withProgramServer program runner extra_options f = do
         | null runner = (binpath, extra_options)
         | otherwise = (runner, binpath : extra_options)
 
-  liftIO $ (Just <$> withServer to_run to_run_args f) `catch` onError
+  liftIO $ (Just <$> withServer (futharkServerCfg to_run to_run_args) f) `catch` onError
   where
     onError :: SomeException -> IO (Maybe a)
     onError e = do
@@ -204,7 +204,7 @@ runBenchmark opts futhark (program, cases) = do
 
     relevant = maybe (const True) (==) (optEntryPoint opts) . T.unpack . iosEntryPoint
 
-    pad_to = foldl max 0 $ concatMap (map (length . runDescription) . iosTestRuns) cases
+    pad_to = foldl max 0 $ concatMap (map (length . atMostChars 40 . runDescription) . iosTestRuns) cases
 
 runOptions :: (Int -> IO ()) -> BenchOptions -> RunOptions
 runOptions f opts =
@@ -230,28 +230,37 @@ progressBar cur bound steps =
     cell i
       | i' * step_size <= cur' = char 9
       | otherwise =
-        char
-          ( floor
-              ( ((cur' - (i' -1) * step_size) * num_chars)
-                  / step_size
-              )
-          )
+        char (floor (((cur' - (i' -1) * step_size) * num_chars) / step_size))
       where
         i' = fromIntegral i
 
 descString :: String -> Int -> String
 descString desc pad_to = desc ++ ": " ++ replicate (pad_to - length desc) ' '
 
+interimResult :: Int -> Int -> Int -> String
+interimResult us_sum i runs =
+  printf "%10.0fμs " avg ++ progressBar i runs 10
+  where
+    avg :: Double
+    avg = fromIntegral us_sum / fromIntegral i
+
 mkProgressPrompt :: Int -> Int -> String -> IO (Maybe Int -> IO ())
 mkProgressPrompt runs pad_to dataset_desc
   | fancyTerminal = do
-    count <- newIORef (0 :: Int)
+    count <- newIORef (0, 0)
     return $ \us -> do
       putStr "\r" -- Go to start of line.
-      i <- readIORef count
-      let i' = if isJust us then i + 1 else i
-      writeIORef count i'
-      putStr $ descString dataset_desc pad_to ++ progressBar i' runs 10
+      let p s =
+            putStr $
+              descString (atMostChars 40 dataset_desc) pad_to ++ s
+      (us_sum, i) <- readIORef count
+      case us of
+        Nothing -> p $ replicate 13 ' ' ++ progressBar i runs 10
+        Just us' -> do
+          let us_sum' = us_sum + us'
+              i' = i + 1
+          writeIORef count (us_sum', i')
+          p $ interimResult us_sum' i' runs
       putStr " " -- Just to move the cursor away from the progress bar.
       hFlush stdout
   | otherwise = do
@@ -260,17 +269,19 @@ mkProgressPrompt runs pad_to dataset_desc
     return $ const $ return ()
 
 reportResult :: [RunResult] -> IO ()
-reportResult results = do
-  let runtimes = map (fromIntegral . runMicroseconds) results
-      avg = sum runtimes / fromIntegral (length runtimes)
-      rsd = stddevp runtimes / mean runtimes :: Double
-  putStrLn $
-    printf
-      "%10.0fμs (RSD: %.3f; min: %3.0f%%; max: %+3.0f%%)"
-      avg
-      rsd
-      ((minimum runtimes / avg - 1) * 100)
-      ((maxinum runtimes / avg - 1) * 100)
+reportResult = putStrLn . reportString
+  where
+    reportString results =
+      printf
+        "%10.0fμs (RSD: %.3f; min: %3.0f%%; max: %+3.0f%%)"
+        avg
+        rsd
+        ((minimum runtimes / avg - 1) * 100)
+        ((maxinum runtimes / avg - 1) * 100)
+      where
+        runtimes = map (fromIntegral . runMicroseconds) results
+        avg = sum runtimes / fromIntegral (length runtimes)
+        rsd = stddevp runtimes / mean runtimes :: Double
 
 runBenchmarkCase ::
   Server ->
@@ -311,12 +322,12 @@ runBenchmarkCase server opts futhark program entry pad_to tr@(TestRun _ input_sp
   case res of
     Left err -> do
       when fancyTerminal $
-        liftIO $ putStrLn $ descString dataset_desc pad_to
+        liftIO $ putStrLn $ descString (atMostChars 40 dataset_desc) pad_to
       liftIO $ putStrLn $ inRed $ T.unpack err
       return $ Just $ DataResult dataset_desc $ Left err
     Right (runtimes, errout) -> do
       when fancyTerminal $
-        putStr $ descString dataset_desc pad_to
+        putStr $ descString (atMostChars 40 dataset_desc) pad_to
 
       reportResult runtimes
       Result runtimes (getMemoryUsage errout) errout

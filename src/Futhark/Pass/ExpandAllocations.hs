@@ -16,15 +16,15 @@ import Futhark.Analysis.Rephrase
 import qualified Futhark.Analysis.SymbolTable as ST
 import Futhark.Error
 import Futhark.IR
-import qualified Futhark.IR.Kernels.Simplify as Kernels
-import Futhark.IR.KernelsMem
+import qualified Futhark.IR.GPU.Simplify as GPU
+import Futhark.IR.GPUMem
 import qualified Futhark.IR.Mem.IxFun as IxFun
 import Futhark.MonadFreshNames
-import Futhark.Optimise.Simplify.Lore (addScopeWisdom)
+import Futhark.Optimise.Simplify.Rep (addScopeWisdom)
 import Futhark.Pass
-import Futhark.Pass.ExplicitAllocations.Kernels (explicitAllocationsInStms)
+import Futhark.Pass.ExplicitAllocations.GPU (explicitAllocationsInStms)
 import Futhark.Pass.ExtractKernels.BlockedKernel (nonSegRed)
-import Futhark.Pass.ExtractKernels.ToKernels (segThread)
+import Futhark.Pass.ExtractKernels.ToGPU (segThread)
 import Futhark.Tools
 import Futhark.Transform.CopyPropagate (copyPropagateInFun)
 import Futhark.Transform.Rename (renameStm)
@@ -33,7 +33,7 @@ import Futhark.Util.IntegralExp
 import Prelude hiding (quot)
 
 -- | The memory expansion pass definition.
-expandAllocations :: Pass KernelsMem KernelsMem
+expandAllocations :: Pass GPUMem GPUMem
 expandAllocations =
   Pass "expand allocations" "Expand allocations" $
     \(Prog consts funs) -> do
@@ -45,19 +45,19 @@ expandAllocations =
 -- duplicate size keys (which are not fixed by renamer, and size
 -- keys must currently be globally unique).
 
-type ExpandM = ReaderT (Scope KernelsMem) (StateT VNameSource (Either String))
+type ExpandM = ReaderT (Scope GPUMem) (StateT VNameSource (Either String))
 
 limitationOnLeft :: Either String a -> a
 limitationOnLeft = either compilerLimitationS id
 
 transformFunDef ::
-  Scope KernelsMem ->
-  FunDef KernelsMem ->
-  PassM (FunDef KernelsMem)
+  Scope GPUMem ->
+  FunDef GPUMem ->
+  PassM (FunDef GPUMem)
 transformFunDef scope fundec = do
   body' <- modifyNameSource $ limitationOnLeft . runStateT (runReaderT m mempty)
   copyPropagateInFun
-    simpleKernelsMem
+    simpleGPUMem
     (ST.fromScope (addScopeWisdom scope))
     fundec {funDefBody = body'}
   where
@@ -66,20 +66,20 @@ transformFunDef scope fundec = do
         inScopeOf fundec $
           transformBody $ funDefBody fundec
 
-transformBody :: Body KernelsMem -> ExpandM (Body KernelsMem)
+transformBody :: Body GPUMem -> ExpandM (Body GPUMem)
 transformBody (Body () stms res) = Body () <$> transformStms stms <*> pure res
 
-transformLambda :: Lambda KernelsMem -> ExpandM (Lambda KernelsMem)
+transformLambda :: Lambda GPUMem -> ExpandM (Lambda GPUMem)
 transformLambda (Lambda params body ret) =
   Lambda params
     <$> localScope (scopeOfLParams params) (transformBody body)
     <*> pure ret
 
-transformStms :: Stms KernelsMem -> ExpandM (Stms KernelsMem)
+transformStms :: Stms GPUMem -> ExpandM (Stms GPUMem)
 transformStms stms =
   inScopeOf stms $ mconcat <$> mapM transformStm (stmsToList stms)
 
-transformStm :: Stm KernelsMem -> ExpandM (Stms KernelsMem)
+transformStm :: Stm GPUMem -> ExpandM (Stms GPUMem)
 -- It is possible that we are unable to expand allocations in some
 -- code versions.  If so, we can remove the offending branch.  Only if
 -- both versions fail do we propagate the error.
@@ -96,11 +96,12 @@ transformStm (Let pat aux (If cond tbranch fbranch (IfDec ts IfEquiv))) = do
     (Left e, _) ->
       throwError e
   where
-    bindRes pe se = Let (Pattern [] [pe]) (defAux ()) $ BasicOp $ SubExp se
+    bindRes pe (SubExpRes cs se) =
+      certify cs $ Let (Pat [pe]) (defAux ()) $ BasicOp $ SubExp se
 
     useBranch b =
       bodyStms b
-        <> stmsFromList (zipWith bindRes (patternElements pat) (bodyResult b))
+        <> stmsFromList (zipWith bindRes (patElements pat) (bodyResult b))
 transformStm (Let pat aux e) = do
   (bnds, e') <- transformExp =<< mapExpM transform e
   return $ bnds <> oneStm (Let pat aux e')
@@ -110,7 +111,7 @@ transformStm (Let pat aux e) = do
         { mapOnBody = \scope -> localScope scope . transformBody
         }
 
-transformExp :: Exp KernelsMem -> ExpandM (Stms KernelsMem, Exp KernelsMem)
+transformExp :: Exp GPUMem -> ExpandM (Stms GPUMem, Exp GPUMem)
 transformExp (Op (Inner (SegOp (SegMap lvl space ts kbody)))) = do
   (alloc_stms, (_, kbody')) <- transformScanRed lvl space [] kbody
   return
@@ -160,7 +161,7 @@ transformExp (WithAcc inputs lam) = do
           -- allocations inside the update function.
           lvl = SegThread (Count $ intConst Int64 0) (Count $ intConst Int64 0) SegNoVirt
           (op_lam', lam_allocs) =
-            extractLambdaAllocations lvl bound_outside mempty op_lam
+            extractLambdaAllocations (lvl, [0]) bound_outside mempty op_lam
           variantAlloc (_, Var v, _) = not $ v `nameIn` bound_outside
           variantAlloc _ = False
           (variant_allocs, invariant_allocs) = M.partition variantAlloc lam_allocs
@@ -176,7 +177,7 @@ transformExp (WithAcc inputs lam) = do
       let num_is = shapeRank shape
           is = map paramName $ take num_is $ lambdaParams op_lam
       (alloc_stms, alloc_offsets) <-
-        genericExpandedInvariantAllocations (const (shape, is)) invariant_allocs
+        genericExpandedInvariantAllocations (const (shape, map le64 is)) invariant_allocs
 
       scope <- askScope
       let scope' = scopeOf op_lam <> scope
@@ -190,14 +191,15 @@ transformExp e =
 transformScanRed ::
   SegLevel ->
   SegSpace ->
-  [Lambda KernelsMem] ->
-  KernelBody KernelsMem ->
-  ExpandM (Stms KernelsMem, ([Lambda KernelsMem], KernelBody KernelsMem))
+  [Lambda GPUMem] ->
+  KernelBody GPUMem ->
+  ExpandM (Stms GPUMem, ([Lambda GPUMem], KernelBody GPUMem))
 transformScanRed lvl space ops kbody = do
   bound_outside <- asks $ namesFromList . M.keys
-  let (kbody', kbody_allocs) =
-        extractKernelBodyAllocations lvl bound_outside bound_in_kernel kbody
-      (ops', ops_allocs) = unzip $ map (extractLambdaAllocations lvl bound_outside mempty) ops
+  let user = (lvl, [le64 $ segFlat space])
+      (kbody', kbody_allocs) =
+        extractKernelBodyAllocations user bound_outside bound_in_kernel kbody
+      (ops', ops_allocs) = unzip $ map (extractLambdaAllocations user bound_outside mempty) ops
       variantAlloc (_, Var v, _) = not $ v `nameIn` bound_outside
       variantAlloc _ = False
       (variant_allocs, invariant_allocs) =
@@ -229,7 +231,7 @@ transformScanRed lvl space ops kbody = do
       namesFromList (M.keys $ scopeOfSegSpace space)
         <> boundInKernelBody kbody
 
-boundInKernelBody :: KernelBody KernelsMem -> Names
+boundInKernelBody :: KernelBody GPUMem -> Names
 boundInKernelBody = namesFromList . M.keys . scopeOf . kernelBodyStms
 
 allocsForBody ::
@@ -237,8 +239,8 @@ allocsForBody ::
   Extraction ->
   SegLevel ->
   SegSpace ->
-  KernelBody KernelsMem ->
-  (Stms KernelsMem -> KernelBody KernelsMem -> OffsetM b) ->
+  KernelBody GPUMem ->
+  (Stms GPUMem -> KernelBody GPUMem -> OffsetM b) ->
   ExpandM b
 allocsForBody variant_allocs invariant_allocs lvl space kbody' m = do
   (alloc_offsets, alloc_stms) <-
@@ -259,13 +261,13 @@ allocsForBody variant_allocs invariant_allocs lvl space kbody' m = do
 memoryRequirements ::
   SegLevel ->
   SegSpace ->
-  Stms KernelsMem ->
+  Stms GPUMem ->
   Extraction ->
   Extraction ->
-  ExpandM (RebaseMap, Stms KernelsMem)
+  ExpandM (RebaseMap, Stms GPUMem)
 memoryRequirements lvl space kstms variant_allocs invariant_allocs = do
   (num_threads, num_threads_stms) <-
-    runBinder . letSubExp "num_threads" . BasicOp $
+    runBuilder . letSubExp "num_threads" . BasicOp $
       BinOp
         (Mul Int64 OverflowUndef)
         (unCount $ segNumGroups lvl)
@@ -276,7 +278,7 @@ memoryRequirements lvl space kstms variant_allocs invariant_allocs = do
       expandedInvariantAllocations
         num_threads
         (segNumGroups lvl)
-        space
+        (segGroupSize lvl)
         invariant_allocs
 
   (variant_alloc_stms, variant_alloc_offsets) <-
@@ -292,16 +294,20 @@ memoryRequirements lvl space kstms variant_allocs invariant_allocs = do
       num_threads_stms <> invariant_alloc_stms <> variant_alloc_stms
     )
 
+-- | Identifying the spot where an allocation occurs in terms of its
+-- level and unique thread ID.
+type User = (SegLevel, [TPrimExp Int64 VName])
+
 -- | A description of allocations that have been extracted, and how
 -- much memory (and which space) is needed.
-type Extraction = M.Map VName (SegLevel, SubExp, Space)
+type Extraction = M.Map VName (User, SubExp, Space)
 
 extractKernelBodyAllocations ::
-  SegLevel ->
+  User ->
   Names ->
   Names ->
-  KernelBody KernelsMem ->
-  ( KernelBody KernelsMem,
+  KernelBody GPUMem ->
+  ( KernelBody GPUMem,
     Extraction
   )
 extractKernelBodyAllocations lvl bound_outside bound_kernel =
@@ -309,41 +315,41 @@ extractKernelBodyAllocations lvl bound_outside bound_kernel =
     \stms kbody -> kbody {kernelBodyStms = stms}
 
 extractBodyAllocations ::
-  SegLevel ->
+  User ->
   Names ->
   Names ->
-  Body KernelsMem ->
-  (Body KernelsMem, Extraction)
-extractBodyAllocations lvl bound_outside bound_kernel =
-  extractGenericBodyAllocations lvl bound_outside bound_kernel bodyStms $
+  Body GPUMem ->
+  (Body GPUMem, Extraction)
+extractBodyAllocations user bound_outside bound_kernel =
+  extractGenericBodyAllocations user bound_outside bound_kernel bodyStms $
     \stms body -> body {bodyStms = stms}
 
 extractLambdaAllocations ::
-  SegLevel ->
+  User ->
   Names ->
   Names ->
-  Lambda KernelsMem ->
-  (Lambda KernelsMem, Extraction)
-extractLambdaAllocations lvl bound_outside bound_kernel lam = (lam {lambdaBody = body'}, allocs)
+  Lambda GPUMem ->
+  (Lambda GPUMem, Extraction)
+extractLambdaAllocations user bound_outside bound_kernel lam = (lam {lambdaBody = body'}, allocs)
   where
-    (body', allocs) = extractBodyAllocations lvl bound_outside bound_kernel $ lambdaBody lam
+    (body', allocs) = extractBodyAllocations user bound_outside bound_kernel $ lambdaBody lam
 
 extractGenericBodyAllocations ::
-  SegLevel ->
+  User ->
   Names ->
   Names ->
-  (body -> Stms KernelsMem) ->
-  (Stms KernelsMem -> body -> body) ->
+  (body -> Stms GPUMem) ->
+  (Stms GPUMem -> body -> body) ->
   body ->
   ( body,
     Extraction
   )
-extractGenericBodyAllocations lvl bound_outside bound_kernel get_stms set_stms body =
+extractGenericBodyAllocations user bound_outside bound_kernel get_stms set_stms body =
   let bound_kernel' = bound_kernel <> boundByStms (get_stms body)
       (stms, allocs) =
         runWriter $
           fmap catMaybes $
-            mapM (extractStmAllocations lvl bound_outside bound_kernel') $
+            mapM (extractStmAllocations user bound_outside bound_kernel') $
               stmsToList $ get_stms body
    in (set_stms (stmsFromList stms) body, allocs)
 
@@ -355,119 +361,121 @@ notScalar ScalarSpace {} = False
 notScalar _ = True
 
 extractStmAllocations ::
-  SegLevel ->
+  User ->
   Names ->
   Names ->
-  Stm KernelsMem ->
-  Writer Extraction (Maybe (Stm KernelsMem))
-extractStmAllocations lvl bound_outside bound_kernel (Let (Pattern [] [patElem]) _ (Op (Alloc size space)))
+  Stm GPUMem ->
+  Writer Extraction (Maybe (Stm GPUMem))
+extractStmAllocations user bound_outside bound_kernel (Let (Pat [patElem]) _ (Op (Alloc size space)))
   | expandable space && expandableSize size
       -- FIXME: the '&& notScalar space' part is a hack because we
       -- don't otherwise hoist the sizes out far enough, and we
       -- promise to be super-duper-careful about not having variant
       -- scalar allocations.
       || (boundInKernel size && notScalar space) = do
-    tell $ M.singleton (patElemName patElem) (lvl, size, space)
+    tell $ M.singleton (patElemName patElem) (user, size, space)
     return Nothing
   where
     expandableSize (Var v) = v `nameIn` bound_outside || v `nameIn` bound_kernel
     expandableSize Constant {} = True
     boundInKernel (Var v) = v `nameIn` bound_kernel
     boundInKernel Constant {} = False
-extractStmAllocations lvl bound_outside bound_kernel stm = do
-  e <- mapExpM (expMapper lvl) $ stmExp stm
+extractStmAllocations user bound_outside bound_kernel stm = do
+  e <- mapExpM (expMapper user) $ stmExp stm
   return $ Just $ stm {stmExp = e}
   where
-    expMapper lvl' =
+    expMapper user' =
       identityMapper
-        { mapOnBody = const $ onBody lvl',
-          mapOnOp = onOp
+        { mapOnBody = const $ onBody user',
+          mapOnOp = onOp user'
         }
 
-    onBody lvl' body = do
-      let (body', allocs) = extractBodyAllocations lvl' bound_outside bound_kernel body
+    onBody user' body = do
+      let (body', allocs) = extractBodyAllocations user' bound_outside bound_kernel body
       tell allocs
       return body'
 
-    onOp (Inner (SegOp op)) =
-      Inner . SegOp <$> mapSegOpM (opMapper (segLevel op)) op
-    onOp op = return op
+    onOp (_, user_ids) (Inner (SegOp op)) =
+      Inner . SegOp <$> mapSegOpM (opMapper user'') op
+      where
+        user'' =
+          (segLevel op, user_ids ++ [le64 (segFlat (segSpace op))])
+    onOp _ op = return op
 
-    opMapper lvl' =
+    opMapper user' =
       identitySegOpMapper
-        { mapOnSegOpLambda = onLambda lvl',
-          mapOnSegOpBody = onKernelBody lvl'
+        { mapOnSegOpLambda = onLambda user',
+          mapOnSegOpBody = onKernelBody user'
         }
 
-    onKernelBody lvl' body = do
-      let (body', allocs) = extractKernelBodyAllocations lvl' bound_outside bound_kernel body
+    onKernelBody user' body = do
+      let (body', allocs) = extractKernelBodyAllocations user' bound_outside bound_kernel body
       tell allocs
       return body'
 
-    onLambda lvl' lam = do
-      body <- onBody lvl' $ lambdaBody lam
+    onLambda user' lam = do
+      body <- onBody user' $ lambdaBody lam
       return lam {lambdaBody = body}
 
 genericExpandedInvariantAllocations ::
-  (SegLevel -> (Shape, [VName])) ->
-  Extraction ->
-  ExpandM (Stms KernelsMem, RebaseMap)
+  (User -> (Shape, [TPrimExp Int64 VName])) -> Extraction -> ExpandM (Stms GPUMem, RebaseMap)
 genericExpandedInvariantAllocations getNumUsers invariant_allocs = do
   -- We expand the invariant allocations by adding an inner dimension
   -- equal to the number of kernel threads.
-  (rebases, alloc_stms) <- runBinder $ mapM expand $ M.toList invariant_allocs
+  (rebases, alloc_stms) <- runBuilder $ mapM expand $ M.toList invariant_allocs
 
   return (alloc_stms, mconcat rebases)
   where
-    expand (mem, (lvl, per_thread_size, space)) = do
-      let num_users = fst $ getNumUsers lvl
-          allocpat = Pattern [] [PatElem mem $ MemMem space]
+    expand (mem, (user, per_thread_size, space)) = do
+      let num_users = fst $ getNumUsers user
+          allocpat = Pat [PatElem mem $ MemMem space]
       total_size <-
         letExp "total_size" <=< toExp . product $
           pe64 per_thread_size : map pe64 (shapeDims num_users)
       letBind allocpat $ Op $ Alloc (Var total_size) space
-      pure $ M.singleton mem $ newBase lvl
+      pure $ M.singleton mem $ newBase user
 
     untouched d = DimSlice 0 d 1
 
-    newBase lvl@SegThread {} (old_shape, _) =
-      let (users_shape, users_id) = getNumUsers lvl
+    newBase user@(SegThread {}, _) (old_shape, _) =
+      let (users_shape, user_ids) = getNumUsers user
           num_dims = length old_shape
           perm = [num_dims .. num_dims + shapeRank users_shape -1] ++ [0 .. num_dims -1]
           root_ixfun = IxFun.iota (old_shape ++ map pe64 (shapeDims users_shape))
           permuted_ixfun = IxFun.permute root_ixfun perm
           offset_ixfun =
             IxFun.slice permuted_ixfun $
-              DimIndices $
-                map (DimFix . le64) users_id ++ map untouched old_shape
+              DimIndices $ map DimFix user_ids ++ map untouched old_shape
        in offset_ixfun
-    newBase lvl@SegGroup {} (old_shape, _) =
-      let (users_shape, users_id) = getNumUsers lvl
+    newBase user@(SegGroup {}, _) (old_shape, _) =
+      let (users_shape, user_ids) = getNumUsers user
           root_ixfun = IxFun.iota $ map pe64 (shapeDims users_shape) ++ old_shape
           offset_ixfun =
             IxFun.slice root_ixfun $
               DimIndices $
-                map (DimFix . le64) users_id ++ map untouched old_shape
+                map DimFix user_ids ++ map untouched old_shape
        in offset_ixfun
 
 expandedInvariantAllocations ::
   SubExp ->
   Count NumGroups SubExp ->
-  SegSpace ->
+  Count GroupSize SubExp ->
   Extraction ->
-  ExpandM (Stms KernelsMem, RebaseMap)
-expandedInvariantAllocations num_threads (Count num_groups) segspace =
+  ExpandM (Stms GPUMem, RebaseMap)
+expandedInvariantAllocations num_threads (Count num_groups) (Count group_size) =
   genericExpandedInvariantAllocations getNumUsers
   where
-    getNumUsers SegThread {} = (Shape [num_threads], [segFlat segspace])
-    getNumUsers SegGroup {} = (Shape [num_groups], [segFlat segspace])
+    getNumUsers (SegThread {}, [gtid]) = (Shape [num_threads], [gtid])
+    getNumUsers (SegThread {}, [gid, ltid]) = (Shape [num_groups, group_size], [gid, ltid])
+    getNumUsers (SegGroup {}, [gid]) = (Shape [num_groups], [gid])
+    getNumUsers user = error $ "getNumUsers: unhandled " ++ show user
 
 expandedVariantAllocations ::
   SubExp ->
   SegSpace ->
-  Stms KernelsMem ->
+  Stms GPUMem ->
   Extraction ->
-  ExpandM (Stms KernelsMem, RebaseMap)
+  ExpandM (Stms GPUMem, RebaseMap)
 expandedVariantAllocations _ _ _ variant_allocs
   | null variant_allocs = return (mempty, mempty)
 expandedVariantAllocations num_threads kspace kstms variant_allocs = do
@@ -499,7 +507,7 @@ expandedVariantAllocations num_threads kspace kstms variant_allocs = do
   return (slice_stms' <> stmsFromList alloc_bnds, mconcat rebases)
   where
     expand (mem, (offset, total_size, space)) = do
-      let allocpat = Pattern [] [PatElem mem $ MemMem space]
+      let allocpat = Pat [PatElem mem $ MemMem space]
       return
         ( Let allocpat (defAux ()) $ Op $ Alloc total_size space,
           M.singleton mem $ newBase offset
@@ -533,7 +541,7 @@ type RebaseMap = M.Map VName (([TPrimExp Int64 VName], PrimType) -> IxFun)
 newtype OffsetM a
   = OffsetM
       ( ReaderT
-          (Scope KernelsMem)
+          (Scope GPUMem)
           (ReaderT RebaseMap (Either String))
           a
       )
@@ -541,12 +549,12 @@ newtype OffsetM a
     ( Applicative,
       Functor,
       Monad,
-      HasScope KernelsMem,
-      LocalScope KernelsMem,
+      HasScope GPUMem,
+      LocalScope GPUMem,
       MonadError String
     )
 
-runOffsetM :: Scope KernelsMem -> RebaseMap -> OffsetM a -> Either String a
+runOffsetM :: Scope GPUMem -> RebaseMap -> OffsetM a -> Either String a
 runOffsetM scope offsets (OffsetM m) =
   runReaderT (runReaderT m scope) offsets
 
@@ -558,7 +566,7 @@ lookupNewBase name x = do
   offsets <- askRebaseMap
   return $ ($ x) <$> M.lookup name offsets
 
-offsetMemoryInKernelBody :: KernelBody KernelsMem -> OffsetM (KernelBody KernelsMem)
+offsetMemoryInKernelBody :: KernelBody GPUMem -> OffsetM (KernelBody GPUMem)
 offsetMemoryInKernelBody kbody = do
   scope <- askScope
   stms' <-
@@ -569,7 +577,7 @@ offsetMemoryInKernelBody kbody = do
         (stmsToList $ kernelBodyStms kbody)
   return kbody {kernelBodyStms = stms'}
 
-offsetMemoryInBody :: Body KernelsMem -> OffsetM (Body KernelsMem)
+offsetMemoryInBody :: Body GPUMem -> OffsetM (Body GPUMem)
 offsetMemoryInBody (Body dec stms res) = do
   scope <- askScope
   stms' <-
@@ -580,18 +588,15 @@ offsetMemoryInBody (Body dec stms res) = do
         (stmsToList stms)
   return $ Body dec stms' res
 
-offsetMemoryInStm :: Stm KernelsMem -> OffsetM (Scope KernelsMem, Stm KernelsMem)
+offsetMemoryInStm :: Stm GPUMem -> OffsetM (Scope GPUMem, Stm GPUMem)
 offsetMemoryInStm (Let pat dec e) = do
-  pat' <- offsetMemoryInPattern pat
-  e' <- localScope (scopeOfPattern pat') $ offsetMemoryInExp e
+  pat' <- offsetMemoryInPat pat
+  e' <- localScope (scopeOfPat pat') $ offsetMemoryInExp e
   scope <- askScope
   -- Try to recompute the index function.  Fall back to creating rebase
   -- operations with the RebaseMap.
   rts <- runReaderT (expReturns e') scope
-  let pat'' =
-        Pattern
-          (patternContextElements pat')
-          (zipWith pick (patternValueElements pat') rts)
+  let pat'' = Pat $ zipWith pick (patElements pat') rts
       stm = Let pat'' dec e'
   let scope' = scopeOf stm <> scope
   return (scope', stm)
@@ -613,24 +618,13 @@ offsetMemoryInStm (Let pat dec e) = do
         inst Ext {} = Nothing
         inst (Free x) = return x
 
-offsetMemoryInPattern :: Pattern KernelsMem -> OffsetM (Pattern KernelsMem)
-offsetMemoryInPattern (Pattern ctx vals) = do
-  mapM_ inspectCtx ctx
-  Pattern ctx <$> mapM inspectVal vals
+offsetMemoryInPat :: Pat GPUMem -> OffsetM (Pat GPUMem)
+offsetMemoryInPat (Pat pes) = do
+  Pat <$> mapM inspectVal pes
   where
     inspectVal patElem = do
       new_dec <- offsetMemoryInMemBound $ patElemDec patElem
       return patElem {patElemDec = new_dec}
-    inspectCtx patElem
-      | Mem space <- patElemType patElem,
-        expandable space =
-        throwError $
-          unwords
-            [ "Cannot deal with existential memory block",
-              pretty (patElemName patElem),
-              "when expanding inside kernels."
-            ]
-      | otherwise = return ()
 
 offsetMemoryInParam :: Param (MemBound u) -> OffsetM (Param (MemBound u))
 offsetMemoryInParam fparam = do
@@ -640,38 +634,32 @@ offsetMemoryInParam fparam = do
 offsetMemoryInMemBound :: MemBound u -> OffsetM (MemBound u)
 offsetMemoryInMemBound summary@(MemArray pt shape u (ArrayIn mem ixfun)) = do
   new_base <- lookupNewBase mem (IxFun.base ixfun, pt)
-  return $
-    fromMaybe summary $ do
-      new_base' <- new_base
-      return $ MemArray pt shape u $ ArrayIn mem $ IxFun.rebase new_base' ixfun
+  return . fromMaybe summary $ do
+    new_base' <- new_base
+    return $ MemArray pt shape u $ ArrayIn mem $ IxFun.rebase new_base' ixfun
 offsetMemoryInMemBound summary = return summary
 
 offsetMemoryInBodyReturns :: BodyReturns -> OffsetM BodyReturns
 offsetMemoryInBodyReturns br@(MemArray pt shape u (ReturnsInBlock mem ixfun))
   | Just ixfun' <- isStaticIxFun ixfun = do
     new_base <- lookupNewBase mem (IxFun.base ixfun', pt)
-    return $
-      fromMaybe br $ do
-        new_base' <- new_base
-        return $
-          MemArray pt shape u $
-            ReturnsInBlock mem $
-              IxFun.rebase (fmap (fmap Free) new_base') ixfun
+    return . fromMaybe br $ do
+      new_base' <- new_base
+      return . MemArray pt shape u . ReturnsInBlock mem $
+        IxFun.rebase (fmap (fmap Free) new_base') ixfun
 offsetMemoryInBodyReturns br = return br
 
-offsetMemoryInLambda :: Lambda KernelsMem -> OffsetM (Lambda KernelsMem)
+offsetMemoryInLambda :: Lambda GPUMem -> OffsetM (Lambda GPUMem)
 offsetMemoryInLambda lam = inScopeOf lam $ do
   body <- offsetMemoryInBody $ lambdaBody lam
   return $ lam {lambdaBody = body}
 
-offsetMemoryInExp :: Exp KernelsMem -> OffsetM (Exp KernelsMem)
-offsetMemoryInExp (DoLoop ctx val form body) = do
-  let (ctxparams, ctxinit) = unzip ctx
-      (valparams, valinit) = unzip val
-  ctxparams' <- mapM offsetMemoryInParam ctxparams
-  valparams' <- mapM offsetMemoryInParam valparams
-  body' <- localScope (scopeOfFParams ctxparams' <> scopeOfFParams valparams' <> scopeOf form) (offsetMemoryInBody body)
-  return $ DoLoop (zip ctxparams' ctxinit) (zip valparams' valinit) form body'
+offsetMemoryInExp :: Exp GPUMem -> OffsetM (Exp GPUMem)
+offsetMemoryInExp (DoLoop merge form body) = do
+  let (params, args) = unzip merge
+  params' <- mapM offsetMemoryInParam params
+  body' <- localScope (scopeOfFParams params' <> scopeOf form) (offsetMemoryInBody body)
+  return $ DoLoop (zip params' args) form body'
 offsetMemoryInExp e = mapExpM recurse e
   where
     recurse =
@@ -693,8 +681,8 @@ offsetMemoryInExp e = mapExpM recurse e
 
 ---- Slicing allocation sizes out of a kernel.
 
-unAllocKernelsStms :: Stms KernelsMem -> Either String (Stms Kernels.Kernels)
-unAllocKernelsStms = unAllocStms False
+unAllocGPUStms :: Stms GPUMem -> Either String (Stms GPU.GPU)
+unAllocGPUStms = unAllocStms False
   where
     unAllocBody (Body dec stms res) =
       Body dec <$> unAllocStms True stms <*> pure res
@@ -709,16 +697,15 @@ unAllocKernelsStms = unAllocStms False
       | nested = throwError $ "Cannot handle nested allocation: " ++ pretty stm
       | otherwise = return Nothing
     unAllocStm _ (Let pat dec e) =
-      Just <$> (Let <$> unAllocPattern pat <*> pure dec <*> mapExpM unAlloc' e)
+      Just <$> (Let <$> unAllocPat pat <*> pure dec <*> mapExpM unAlloc' e)
 
     unAllocLambda (Lambda params body ret) =
       Lambda (unParams params) <$> unAllocBody body <*> pure ret
 
     unParams = mapMaybe $ traverse unMem
 
-    unAllocPattern pat@(Pattern ctx val) =
-      Pattern <$> maybe bad return (mapM (rephrasePatElem unMem) ctx)
-        <*> maybe bad return (mapM (rephrasePatElem unMem) val)
+    unAllocPat pat@(Pat merge) =
+      Pat <$> maybe bad return (mapM (rephrasePatElem unMem) merge)
       where
         bad = Left $ "Cannot handle memory in pattern " ++ pretty pat
 
@@ -760,7 +747,7 @@ unMem (MemArray pt shape u _) = Just $ Array pt shape u
 unMem (MemAcc acc ispace ts u) = Just $ Acc acc ispace ts u
 unMem MemMem {} = Nothing
 
-unAllocScope :: Scope KernelsMem -> Scope Kernels.Kernels
+unAllocScope :: Scope GPUMem -> Scope GPU.GPU
 unAllocScope = M.mapMaybe unInfo
   where
     unInfo (LetName dec) = LetName <$> unMem dec
@@ -779,32 +766,31 @@ sliceKernelSizes ::
   SubExp ->
   [SubExp] ->
   SegSpace ->
-  Stms KernelsMem ->
-  ExpandM (Stms Kernels.Kernels, [VName], [VName])
+  Stms GPUMem ->
+  ExpandM (Stms GPU.GPU, [VName], [VName])
 sliceKernelSizes num_threads sizes space kstms = do
-  kstms' <- either throwError return $ unAllocKernelsStms kstms
+  kstms' <- either throwError return $ unAllocGPUStms kstms
   let num_sizes = length sizes
       i64s = replicate num_sizes $ Prim int64
 
   kernels_scope <- asks unAllocScope
 
-  (max_lam, _) <- flip runBinderT kernels_scope $ do
+  (max_lam, _) <- flip runBuilderT kernels_scope $ do
     xs <- replicateM num_sizes $ newParam "x" (Prim int64)
     ys <- replicateM num_sizes $ newParam "y" (Prim int64)
     (zs, stms) <- localScope (scopeOfLParams $ xs ++ ys) $
       collectStms $
         forM (zip xs ys) $ \(x, y) ->
-          letSubExp "z" $ BasicOp $ BinOp (SMax Int64) (Var $ paramName x) (Var $ paramName y)
+          fmap subExpRes . letSubExp "z" . BasicOp $
+            BinOp (SMax Int64) (Var $ paramName x) (Var $ paramName y)
     return $ Lambda (xs ++ ys) (mkBody stms zs) i64s
 
   flat_gtid_lparam <- Param <$> newVName "flat_gtid" <*> pure (Prim (IntType Int64))
 
-  (size_lam', _) <- flip runBinderT kernels_scope $ do
+  (size_lam', _) <- flip runBuilderT kernels_scope $ do
     params <- replicateM num_sizes $ newParam "x" (Prim int64)
     (zs, stms) <- localScope
-      ( scopeOfLParams params
-          <> scopeOfLParams [flat_gtid_lparam]
-      )
+      (scopeOfLParams params <> scopeOfLParams [flat_gtid_lparam])
       $ collectStms $ do
         -- Even though this SegRed is one-dimensional, we need to
         -- provide indexes corresponding to the original potentially
@@ -817,17 +803,14 @@ sliceKernelSizes num_threads sizes space kstms = do
         zipWithM_ letBindNames (map pure kspace_gtids) =<< mapM toExp new_inds
 
         mapM_ addStm kstms'
-        return sizes
+        return $ subExpsRes sizes
 
     localScope (scopeOfSegSpace space) $
-      Kernels.simplifyLambda (Lambda [flat_gtid_lparam] (Body () stms zs) i64s)
+      GPU.simplifyLambda (Lambda [flat_gtid_lparam] (Body () stms zs) i64s)
 
-  ((maxes_per_thread, size_sums), slice_stms) <- flip runBinderT kernels_scope $ do
+  ((maxes_per_thread, size_sums), slice_stms) <- flip runBuilderT kernels_scope $ do
     pat <-
-      basicPattern []
-        <$> replicateM
-          num_sizes
-          (newIdent "max_per_thread" $ Prim int64)
+      basicPat <$> replicateM num_sizes (newIdent "max_per_thread" $ Prim int64)
 
     w <-
       letSubExp "size_slice_w"
@@ -848,10 +831,10 @@ sliceKernelSizes num_threads sizes space kstms = do
     addStms =<< mapM renameStm
       =<< nonSegRed lvl pat w [red_op] size_lam' [thread_space_iota]
 
-    size_sums <- forM (patternNames pat) $ \threads_max ->
+    size_sums <- forM (patNames pat) $ \threads_max ->
       letExp "size_sum" $
         BasicOp $ BinOp (Mul Int64 OverflowUndef) (Var threads_max) num_threads
 
-    return (patternNames pat, size_sums)
+    return (patNames pat, size_sums)
 
   return (slice_stms, maxes_per_thread, size_sums)

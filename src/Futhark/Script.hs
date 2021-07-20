@@ -9,6 +9,7 @@ module Futhark.Script
   ( -- * Server
     ScriptServer,
     withScriptServer,
+    withScriptServer',
 
     -- * Expressions, values, and types
     Func (..),
@@ -18,6 +19,8 @@ module Futhark.Script
     ScriptValueType (..),
     ScriptValue (..),
     scriptValueType,
+    serverVarsInValue,
+    ValOrVar (..),
     ExpValue,
 
     -- * Evaluation
@@ -31,10 +34,9 @@ module Futhark.Script
 where
 
 import Control.Monad.Except
-import qualified Data.Binary as Bin
-import qualified Data.ByteString.Lazy.Char8 as LBS
 import Data.Char
 import Data.Foldable (toList)
+import Data.Functor
 import Data.IORef
 import Data.List (intersperse)
 import qualified Data.Map as M
@@ -42,13 +44,12 @@ import qualified Data.Set as S
 import qualified Data.Text as T
 import Data.Traversable
 import Data.Void
+import qualified Futhark.Data.Parser as V
 import Futhark.Server
+import Futhark.Server.Values (getValue, putValue)
 import qualified Futhark.Test.Values as V
-import qualified Futhark.Test.Values.Parser as V
 import Futhark.Util (nubOrd)
 import Futhark.Util.Pretty hiding (float, line, sep, string, (</>), (<|>))
-import System.IO
-import System.IO.Temp
 import Text.Megaparsec
 import Text.Megaparsec.Char.Lexer (charLiteral)
 
@@ -56,12 +57,18 @@ import Text.Megaparsec.Char.Lexer (charLiteral)
 -- more convenient.
 data ScriptServer = ScriptServer Server (IORef Int)
 
+-- | Run an action with a 'ScriptServer' produced by an existing
+-- 'Server', without shutting it down at the end.
+withScriptServer' :: MonadIO m => Server -> (ScriptServer -> m a) -> m a
+withScriptServer' server f = do
+  counter <- liftIO $ newIORef 0
+  f $ ScriptServer server counter
+
 -- | Start a server, execute an action, then shut down the server.
 -- Similar to 'withServer'.
-withScriptServer :: FilePath -> [FilePath] -> (ScriptServer -> IO a) -> IO a
-withScriptServer prog options f = withServer prog options $ \server -> do
-  counter <- newIORef 0
-  f $ ScriptServer server counter
+withScriptServer :: ServerCfg -> (ScriptServer -> IO a) -> IO a
+withScriptServer cfg f =
+  withServer cfg $ flip withScriptServer' f
 
 -- | A function called in a 'Call' expression can be either a Futhark
 -- function or a builtin function.
@@ -78,6 +85,7 @@ data Exp
   | Tuple [Exp]
   | Record [(T.Text, Exp)]
   | StringLit T.Text
+  | Let [VarName] Exp Exp
   | -- | Server-side variable, *not* Futhark variable (these are
     -- handled in 'Call').
     ServerVar TypeName VarName
@@ -90,7 +98,13 @@ instance Pretty Func where
 instance Pretty Exp where
   ppr = pprPrec 0
   pprPrec _ (ServerVar _ v) = "$" <> ppr v
-  pprPrec _ (Const v) = ppr v
+  pprPrec _ (Const v) = strictText $ V.valueText v
+  pprPrec i (Let pat e1 e2) =
+    parensIf (i > 0) $ "let" <+> pat' <+> equals <+> ppr e1 <+> "in" <+> ppr e2
+    where
+      pat' = case pat of
+        [x] -> ppr x
+        _ -> parens $ commasep $ map ppr pat
   pprPrec _ (Call v []) = ppr v
   pprPrec i (Call v args) =
     parensIf (i > 0) $ ppr v <+> spread (map (pprPrec 1) args)
@@ -116,65 +130,59 @@ inBraces sep = between (lexeme sep "{") (lexeme sep "}")
 parseExp :: Parser () -> Parser Exp
 parseExp sep =
   choice
-    [ inParens sep (mkTuple <$> (parseExp sep `sepBy` pComma)),
-      inBraces sep (Record <$> (pField `sepBy` pComma)),
-      Call <$> lexeme sep parseFunc <*> many (parseExp sep),
-      Const <$> V.parseValue sep,
-      StringLit . T.pack <$> lexeme sep ("\"" *> manyTill charLiteral "\"")
+    [ lexeme sep "let" $> Let
+        <*> pPat <* lexeme sep "="
+        <*> parseExp sep <* lexeme sep "in"
+        <*> parseExp sep,
+      try $ Call <$> parseFunc <*> many pAtom,
+      pAtom
     ]
+    <?> "expression"
   where
-    pField = (,) <$> lexeme sep parseEntryName <*> (pEquals *> parseExp sep)
+    pField = (,) <$> pVarName <*> (pEquals *> parseExp sep)
     pEquals = lexeme sep "="
     pComma = lexeme sep ","
     mkTuple [v] = v
     mkTuple vs = Tuple vs
 
-    parseFunc =
+    pAtom =
       choice
-        [ FuncBuiltin <$> ("$" *> parseEntryName),
-          FuncFut <$> parseEntryName
+        [ try $ inParens sep (mkTuple <$> (parseExp sep `sepBy` pComma)),
+          inParens sep $ parseExp sep,
+          inBraces sep (Record <$> (pField `sepBy` pComma)),
+          Const <$> V.parseValue sep,
+          StringLit . T.pack <$> lexeme sep ("\"" *> manyTill charLiteral "\""),
+          Call <$> parseFunc <*> pure []
         ]
 
-    parseEntryName =
-      fmap T.pack $ (:) <$> satisfy isAlpha <*> many (satisfy constituent)
+    pPat =
+      choice
+        [ inParens sep $ pVarName `sepBy` pComma,
+          pure <$> pVarName
+        ]
+
+    parseFunc =
+      choice
+        [ FuncBuiltin <$> ("$" *> pVarName),
+          FuncFut <$> pVarName
+        ]
+
+    reserved = ["let", "in"]
+
+    pVarName = lexeme sep . try $ do
+      v <- fmap T.pack $ (:) <$> satisfy isAlpha <*> many (satisfy constituent)
+      guard $ v `notElem` reserved
+      pure v
       where
         constituent c = isAlphaNum c || c == '_'
 
-prettyFailure :: CmdFailure -> T.Text
-prettyFailure (CmdFailure bef aft) =
-  T.unlines $ bef ++ aft
-
-cmdMaybe :: (MonadError T.Text m, MonadIO m) => IO (Maybe CmdFailure) -> m ()
-cmdMaybe m = maybe (pure ()) (throwError . prettyFailure) =<< liftIO m
-
-cmdEither :: (MonadError T.Text m, MonadIO m) => IO (Either CmdFailure a) -> m a
-cmdEither m = either (throwError . prettyFailure) pure =<< liftIO m
-
 readVar :: (MonadError T.Text m, MonadIO m) => Server -> VarName -> m V.Value
 readVar server v =
-  either throwError pure <=< liftIO $
-    withSystemTempFile "futhark-server-read" $ \tmpf tmpf_h -> do
-      hClose tmpf_h
-      store_res <- cmdStore server tmpf [v]
-      case store_res of
-        Just err -> pure $ Left $ prettyFailure err
-        Nothing -> do
-          s <- LBS.readFile tmpf
-          case V.readValues s of
-            Just [val] -> pure $ Right val
-            Just [] -> pure $ Left "Cannot read opaque value from Futhark server."
-            _ -> pure $ Left "Invalid data file produced by Futhark server."
+  either throwError pure =<< liftIO (getValue server v)
 
 writeVar :: (MonadError T.Text m, MonadIO m) => Server -> VarName -> V.Value -> m ()
 writeVar server v val =
-  cmdMaybe . liftIO . withSystemTempFile "futhark-server-write" $ \tmpf tmpf_h -> do
-    LBS.hPutStr tmpf_h $ Bin.encode val
-    hClose tmpf_h
-    -- We are not using prettyprinting for the type, because we don't
-    -- want the sizes of the dimensions.
-    let V.ValueType dims t = V.valueType val
-        t' = mconcat (map (const "[]") dims) <> prettyText t
-    cmdRestore server tmpf [(v, t')]
+  cmdMaybe $ liftIO (putValue server v val)
 
 -- | A ScriptValue is either a base value or a partially applied
 -- function.  We don't have real first-class functions in
@@ -184,6 +192,7 @@ data ScriptValue v
   | -- | Ins, then outs.  Yes, this is the opposite of more or less
     -- everywhere else.
     SFun EntryName [TypeName] [TypeName] [ScriptValue v]
+  deriving (Show)
 
 instance Functor ScriptValue where
   fmap = fmapDefault
@@ -212,6 +221,7 @@ instance Pretty ScriptValueType where
         [out] -> strictText out
         _ -> parens $ commasep $ map strictText outs
 
+-- | A Haskell-level value or a variable on the server.
 data ValOrVar = VVal V.Value | VVar VarName
   deriving (Show)
 
@@ -224,6 +234,7 @@ scriptValueType :: ScriptValue v -> ScriptValueType
 scriptValueType (SValue t _) = STValue t
 scriptValueType (SFun _ ins outs _) = STFun ins outs
 
+-- | The set of server-side variables in the value.
 serverVarsInValue :: ExpValue -> S.Set VarName
 serverVarsInValue = S.fromList . concatMap isVar . toList
   where
@@ -246,6 +257,9 @@ valueToExp (V.ValueTuple fs) =
 
 -- | How to evaluate a builtin function.
 type EvalBuiltin m = T.Text -> [V.CompoundValue] -> m V.CompoundValue
+
+-- | Symbol table used for local variable lookups during expression evaluation.
+type VTable = M.Map VarName ExpValue
 
 -- | Evaluate a FutharkScript expression relative to some running server.
 evalExp ::
@@ -295,22 +309,38 @@ evalExp builtin (ScriptServer server counter) top_level_e = do
 
       valToInterVal :: V.CompoundValue -> ExpValue
       valToInterVal = fmap $ \v ->
-        SValue (V.prettyValueTypeNoDims (V.valueType v)) $ VVal v
+        SValue (V.valueTypeTextNoDims (V.valueType v)) $ VVal v
 
       simpleType (V.ValueAtom (STValue _)) = True
       simpleType _ = False
 
-      evalExp' :: Exp -> m ExpValue
-      evalExp' (ServerVar t v) =
-        pure $ V.ValueAtom $ SValue t $ VVar v
-      evalExp' (Call (FuncBuiltin name) es) = do
-        v <- builtin name =<< mapM (interValToVal <=< evalExp') es
-        pure $ valToInterVal v
-      evalExp' (Call (FuncFut name) es) = do
-        in_types <- cmdEither $ cmdInputs server name
-        out_types <- cmdEither $ cmdOutputs server name
+      letMatch :: [VarName] -> ExpValue -> m VTable
+      letMatch vs val
+        | vals <- V.unCompound val,
+          length vs == length vals =
+          pure $ M.fromList (zip vs vals)
+        | otherwise =
+          throwError $
+            "Pat: " <> prettyTextOneLine vs
+              <> "\nDoes not match value of type: "
+              <> prettyTextOneLine (fmap scriptValueType val)
 
-        es' <- mapM evalExp' es
+      evalExp' :: VTable -> Exp -> m ExpValue
+      evalExp' _ (ServerVar t v) =
+        pure $ V.ValueAtom $ SValue t $ VVar v
+      evalExp' vtable (Call (FuncBuiltin name) es) = do
+        v <- builtin name =<< mapM (interValToVal <=< evalExp' vtable) es
+        pure $ valToInterVal v
+      evalExp' vtable (Call (FuncFut name) es)
+        | Just e <- M.lookup name vtable = do
+          unless (null es) $
+            throwError $ "Locally bound name cannot be invoked as a function: " <> prettyText name
+          pure e
+      evalExp' vtable (Call (FuncFut name) es) = do
+        in_types <- fmap (map inputType) $ cmdEither $ cmdInputs server name
+        out_types <- fmap (map outputType) $ cmdEither $ cmdOutputs server name
+
+        es' <- mapM (evalExp' vtable) es
         let es_types = map (fmap scriptValueType) es'
 
         unless (all simpleType es_types) $
@@ -318,37 +348,43 @@ evalExp builtin (ScriptServer server counter) top_level_e = do
             "Literate Futhark does not support passing script-constructed records, tuples, or functions to entry points.\n"
               <> "Create a Futhark wrapper function."
 
-        -- Careful to not require saturated application.
-        unless (and $ zipWith (==) es_types (map (V.ValueAtom . STValue) in_types)) $
-          throwError $
-            "Function \"" <> name <> "\" expects arguments of types:\n"
-              <> prettyText (V.mkCompound $ map V.ValueAtom in_types)
-              <> "\nBut called with arguments of types:\n"
-              <> prettyText (V.mkCompound $ map V.ValueAtom es_types)
+        -- Careful to not require saturated application, but do still
+        -- check for over-saturation.
+        let too_many = length es_types > length in_types
+            too_wrong = zipWith (/=) es_types (map (V.ValueAtom . STValue) in_types)
+        when (or $ too_many : too_wrong) . throwError $
+          "Function \"" <> name <> "\" expects arguments of types:\n"
+            <> prettyText (V.mkCompound $ map V.ValueAtom in_types)
+            <> "\nBut called with arguments of types:\n"
+            <> prettyText (V.mkCompound $ map V.ValueAtom es_types)
 
-        ins <- mapM (interValToVar <=< evalExp') es
+        ins <- mapM (interValToVar <=< evalExp' vtable) es
 
         if length in_types == length ins
           then do
             outs <- replicateM (length out_types) $ newVar "out"
             void $ cmdEither $ cmdCall server name outs ins
-            pure $ V.mkCompound $ zipWith SValue out_types $ map VVar outs
+            pure $ V.mkCompound $ map V.ValueAtom $ zipWith SValue out_types $ map VVar outs
           else
             pure . V.ValueAtom . SFun name in_types out_types $
               zipWith SValue in_types $ map VVar ins
-      evalExp' (StringLit s) =
+      evalExp' _ (StringLit s) =
         case V.putValue s of
           Just s' ->
-            pure $ V.ValueAtom $ SValue (prettyText (V.valueType s')) $ VVal s'
+            pure $ V.ValueAtom $ SValue (V.valueTypeText (V.valueType s')) $ VVal s'
           Nothing -> error $ "Unable to write value " ++ pretty s
-      evalExp' (Const val) =
-        pure $ V.ValueAtom $ SValue (V.prettyValueTypeNoDims (V.valueType val)) $ VVal val
-      evalExp' (Tuple es) =
-        V.ValueTuple <$> mapM evalExp' es
-      evalExp' e@(Record m) = do
+      evalExp' _ (Const val) =
+        pure $ V.ValueAtom $ SValue (V.valueTypeTextNoDims (V.valueType val)) $ VVal val
+      evalExp' vtable (Tuple es) =
+        V.ValueTuple <$> mapM (evalExp' vtable) es
+      evalExp' vtable e@(Record m) = do
         when (length (nubOrd (map fst m)) /= length (map fst m)) $
           throwError $ "Record " <> prettyText e <> " has duplicate fields."
-        V.ValueRecord <$> traverse evalExp' (M.fromList m)
+        V.ValueRecord <$> traverse (evalExp' vtable) (M.fromList m)
+      evalExp' vtable (Let pat e1 e2) = do
+        v <- evalExp' vtable e1
+        pat_vtable <- letMatch pat v
+        evalExp' (pat_vtable <> vtable) e2
 
   let freeNonresultVars v = do
         let v_vars = serverVarsInValue v
@@ -363,7 +399,7 @@ evalExp builtin (ScriptServer server counter) top_level_e = do
         -- Call.
         void $ liftIO $ cmdFree server =<< readIORef vars
         throwError e
-  (freeNonresultVars =<< evalExp' top_level_e) `catchError` freeVarsOnError
+  (freeNonresultVars =<< evalExp' mempty top_level_e) `catchError` freeVarsOnError
 
 -- | Read actual values from the server.  Fails for values that have
 -- no well-defined external representation.
@@ -405,6 +441,7 @@ varsInExp (Tuple es) = foldMap varsInExp es
 varsInExp (Record fs) = foldMap (foldMap varsInExp) fs
 varsInExp Const {} = mempty
 varsInExp StringLit {} = mempty
+varsInExp (Let pat e1 e2) = varsInExp e1 <> S.filter (`notElem` pat) (varsInExp e2)
 
 -- | Release all the server-side variables in the value.  Yes,
 -- FutharkScript has manual memory management...
