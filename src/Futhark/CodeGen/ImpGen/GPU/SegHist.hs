@@ -99,7 +99,7 @@ computeHistoUsage space op = do
   num_subhistos <- dPrim "num_subhistos" int32
   subhisto_infos <- forM (zip (histDest op) (histNeutral op)) $ \(dest, ne) -> do
     dest_t <- lookupType dest
-    dest_mem <- entryArrayLocation <$> lookupArray dest
+    dest_mem <- entryArrayLoc <$> lookupArray dest
 
     subhistos_mem <-
       sDeclareMem (baseString dest ++ "_subhistos_mem") (Space "device")
@@ -122,7 +122,7 @@ computeHistoUsage space op = do
       SubhistosInfo subhistos $ do
         let unitHistoCase =
               emit $
-                Imp.SetMem subhistos_mem (memLocationName dest_mem) $
+                Imp.SetMem subhistos_mem (memLocName dest_mem) $
                   Space "device"
 
             multiHistoCase = do
@@ -360,16 +360,16 @@ prepareIntermediateArraysGlobal passage hist_T hist_N slugs = do
       -- destination.  The idea is to avoid a copy if we are writing a
       -- small number of values into a very large prior histogram.
       dests <- forM (zip (histDest op) subhisto_info) $ \(dest, info) -> do
-        dest_mem <- entryArrayLocation <$> lookupArray dest
+        dest_mem <- entryArrayLoc <$> lookupArray dest
 
         sub_mem <-
-          fmap memLocationName $
-            entryArrayLocation
+          fmap memLocName $
+            entryArrayLoc
               <$> lookupArray (subhistosArray info)
 
         let unitHistoCase =
               emit $
-                Imp.SetMem sub_mem (memLocationName dest_mem) $
+                Imp.SetMem sub_mem (memLocName dest_mem) $
                   Space "device"
 
             multiHistoCase = subhistosAlloc info
@@ -1107,10 +1107,10 @@ compileSegHist (Pat pes) num_groups group_size space ops kbody = do
             -- large as the ones we are supposed to use for the result.
             forM_ (zip red_pes subhistos) $ \(pe, subhisto) -> do
               pe_mem <-
-                memLocationName . entryArrayLocation
+                memLocName . entryArrayLoc
                   <$> lookupArray (patElemName pe)
               subhisto_mem <-
-                memLocationName . entryArrayLocation
+                memLocName . entryArrayLoc
                   <$> lookupArray subhisto
               emit $ Imp.SetMem pe_mem subhisto_mem $ Space "device"
 
