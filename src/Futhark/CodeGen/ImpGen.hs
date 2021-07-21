@@ -22,6 +22,7 @@ module Futhark.CodeGen.ImpGen
     Operations (..),
     defaultOperations,
     MemLocation (..),
+    sliceMemLocation,
     MemEntry (..),
     ScalarEntry (..),
 
@@ -125,7 +126,7 @@ import Control.Parallel.Strategies
 import Data.Bifunctor (first)
 import qualified Data.DList as DL
 import Data.Either
-import Data.List (find, genericLength)
+import Data.List (find)
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import qualified Data.Set as S
@@ -162,9 +163,7 @@ type ExpCompiler rep r op = Pat rep -> Exp rep -> ImpM rep r op ()
 type CopyCompiler rep r op =
   PrimType ->
   MemLocation ->
-  Slice (Imp.TExp Int64) ->
   MemLocation ->
-  Slice (Imp.TExp Int64) ->
   ImpM rep r op ()
 
 -- | An alternate way of compiling an allocation.
@@ -200,6 +199,10 @@ data MemLocation = MemLocation
     memLocationIxFun :: IxFun.IxFun (Imp.TExp Int64)
   }
   deriving (Eq, Show)
+
+sliceMemLocation :: MemLocation -> Slice (Imp.TExp Int64) -> MemLocation
+sliceMemLocation (MemLocation mem shape ixfun) slice =
+  MemLocation mem shape $ IxFun.slice ixfun slice
 
 data ArrayEntry = ArrayEntry
   { entryArrayLocation :: MemLocation,
@@ -925,8 +928,7 @@ defCompileBasicOp (Pat [pe]) (ArrayLit es _)
             IxFun.iota [fromIntegral $ length es]
         entry = MemVar Nothing $ MemEntry dest_space
     addVar static_array entry
-    let slice = Slice [DimSlice 0 (genericLength es) 1]
-    copy t dest_mem slice static_src slice
+    copy t dest_mem static_src
   | otherwise =
     forM_ (zip [0 ..] es) $ \(i, e) ->
       copyDWIM (patElemName pe) [DimFix $ fromInteger i] e []
@@ -1352,17 +1354,15 @@ fullyIndexArray' (MemLocation mem _ ixfun) indices = do
 -- More complicated read/write operations that use index functions.
 
 copy :: CopyCompiler rep r op
-copy bt dest destslice src srcslice = do
+copy bt dest src = do
   cc <- asks envCopyCompiler
-  cc bt dest destslice src srcslice
+  cc bt dest src
 
 -- | Is this copy really a mapping with transpose?
 isMapTransposeCopy ::
   PrimType ->
   MemLocation ->
-  Slice (Imp.TExp Int64) ->
   MemLocation ->
-  Slice (Imp.TExp Int64) ->
   Maybe
     ( Imp.TExp Int64,
       Imp.TExp Int64,
@@ -1370,45 +1370,37 @@ isMapTransposeCopy ::
       Imp.TExp Int64,
       Imp.TExp Int64
     )
-isMapTransposeCopy
-  bt
-  (MemLocation _ _ destIxFun)
-  destslice
-  (MemLocation _ _ srcIxFun)
-  srcslice
-    | Just (dest_offset, perm_and_destshape) <- IxFun.rearrangeWithOffset destIxFun' bt_size,
-      (perm, destshape) <- unzip perm_and_destshape,
-      Just src_offset <- IxFun.linearWithOffset srcIxFun' bt_size,
-      Just (r1, r2, _) <- isMapTranspose perm =
-      isOk destshape swap r1 r2 dest_offset src_offset
-    | Just dest_offset <- IxFun.linearWithOffset destIxFun' bt_size,
-      Just (src_offset, perm_and_srcshape) <- IxFun.rearrangeWithOffset srcIxFun' bt_size,
-      (perm, srcshape) <- unzip perm_and_srcshape,
-      Just (r1, r2, _) <- isMapTranspose perm =
-      isOk srcshape id r1 r2 dest_offset src_offset
-    | otherwise =
-      Nothing
-    where
-      bt_size = primByteSize bt
-      swap (x, y) = (y, x)
+isMapTransposeCopy bt (MemLocation _ _ destIxFun) (MemLocation _ _ srcIxFun)
+  | Just (dest_offset, perm_and_destshape) <- IxFun.rearrangeWithOffset destIxFun bt_size,
+    (perm, destshape) <- unzip perm_and_destshape,
+    Just src_offset <- IxFun.linearWithOffset srcIxFun bt_size,
+    Just (r1, r2, _) <- isMapTranspose perm =
+    isOk destshape swap r1 r2 dest_offset src_offset
+  | Just dest_offset <- IxFun.linearWithOffset destIxFun bt_size,
+    Just (src_offset, perm_and_srcshape) <- IxFun.rearrangeWithOffset srcIxFun bt_size,
+    (perm, srcshape) <- unzip perm_and_srcshape,
+    Just (r1, r2, _) <- isMapTranspose perm =
+    isOk srcshape id r1 r2 dest_offset src_offset
+  | otherwise =
+    Nothing
+  where
+    bt_size = primByteSize bt
+    swap (x, y) = (y, x)
 
-      destIxFun' = IxFun.slice destIxFun destslice
-      srcIxFun' = IxFun.slice srcIxFun srcslice
+    isOk shape f r1 r2 dest_offset src_offset = do
+      let (num_arrays, size_x, size_y) = getSizes shape f r1 r2
+      return
+        ( dest_offset,
+          src_offset,
+          num_arrays,
+          size_x,
+          size_y
+        )
 
-      isOk shape f r1 r2 dest_offset src_offset = do
-        let (num_arrays, size_x, size_y) = getSizes shape f r1 r2
-        return
-          ( dest_offset,
-            src_offset,
-            num_arrays,
-            size_x,
-            size_y
-          )
-
-      getSizes shape f r1 r2 =
-        let (mapped, notmapped) = splitAt r1 shape
-            (pretrans, posttrans) = f $ splitAt r2 notmapped
-         in (product mapped, product pretrans, product posttrans)
+    getSizes shape f r1 r2 =
+      let (mapped, notmapped) = splitAt r1 shape
+          (pretrans, posttrans) = f $ splitAt r2 notmapped
+       in (product mapped, product pretrans, product posttrans)
 
 mapTransposeName :: PrimType -> String
 mapTransposeName bt = "map_transpose_" ++ pretty bt
@@ -1424,15 +1416,9 @@ mapTransposeForType bt = do
 
 -- | Use an 'Imp.Copy' if possible, otherwise 'copyElementWise'.
 defaultCopy :: CopyCompiler rep r op
-defaultCopy pt dest destslice src srcslice
-  | Just
-      ( destoffset,
-        srcoffset,
-        num_arrays,
-        size_x,
-        size_y
-        ) <-
-      isMapTransposeCopy pt dest destslice src srcslice = do
+defaultCopy pt dest src
+  | Just (destoffset, srcoffset, num_arrays, size_x, size_y) <-
+      isMapTransposeCopy pt dest src = do
     fname <- mapTransposeForType pt
     emit $
       Imp.Call
@@ -1448,13 +1434,13 @@ defaultCopy pt dest destslice src srcslice
           size_x
           size_y
   | Just destoffset <-
-      IxFun.linearWithOffset (IxFun.slice dest_ixfun destslice) pt_size,
+      IxFun.linearWithOffset dest_ixfun pt_size,
     Just srcoffset <-
-      IxFun.linearWithOffset (IxFun.slice src_ixfun srcslice) pt_size = do
+      IxFun.linearWithOffset src_ixfun pt_size = do
     srcspace <- entryMemSpace <$> lookupMemory srcmem
     destspace <- entryMemSpace <$> lookupMemory destmem
     if isScalarSpace srcspace || isScalarSpace destspace
-      then copyElementWise pt dest destslice src srcslice
+      then copyElementWise pt dest src
       else
         emit $
           Imp.Copy
@@ -1466,10 +1452,10 @@ defaultCopy pt dest destslice src srcslice
             srcspace
             $ num_elems `withElemType` pt
   | otherwise =
-    copyElementWise pt dest destslice src srcslice
+    copyElementWise pt dest src
   where
     pt_size = primByteSize pt
-    num_elems = Imp.elements $ product $ sliceDims srcslice
+    num_elems = Imp.elements $ product $ IxFun.shape $ memLocationIxFun src
 
     MemLocation destmem _ dest_ixfun = dest
     MemLocation srcmem _ src_ixfun = src
@@ -1478,14 +1464,12 @@ defaultCopy pt dest destslice src srcslice
     isScalarSpace _ = False
 
 copyElementWise :: CopyCompiler rep r op
-copyElementWise bt dest destslice src srcslice = do
-  let bounds = sliceDims srcslice
+copyElementWise bt dest src = do
+  let bounds = IxFun.shape $ memLocationIxFun src
   is <- replicateM (length bounds) (newVName "i")
   let ivars = map Imp.vi64 is
-  (destmem, destspace, destidx) <-
-    fullyIndexArray' dest $ fixSlice destslice ivars
-  (srcmem, srcspace, srcidx) <-
-    fullyIndexArray' src $ fixSlice srcslice ivars
+  (destmem, destspace, destidx) <- fullyIndexArray' dest ivars
+  (srcmem, srcspace, srcidx) <- fullyIndexArray' src ivars
   vol <- asks envVolatility
   emit $
     foldl (.) id (zipWith Imp.For is $ map untyped bounds) $
@@ -1520,12 +1504,12 @@ copyArrayDWIM
         Imp.Write targetmem targetoffset bt destspace vol $
           Imp.index srcmem srcoffset bt srcspace vol
     | otherwise = do
-      let destslice' =
-            fullSliceNum (map toInt64Exp destshape) destslice
-          srcslice' =
-            fullSliceNum (map toInt64Exp srcshape) srcslice
+      let destslice' = fullSliceNum (map toInt64Exp destshape) destslice
+          srcslice' = fullSliceNum (map toInt64Exp srcshape) srcslice
           destrank = length $ sliceDims destslice'
           srcrank = length $ sliceDims srcslice'
+          destlocation' = sliceMemLocation destlocation destslice'
+          srclocation' = sliceMemLocation srclocation srcslice'
       if destrank /= srcrank
         then
           error $
@@ -1539,9 +1523,9 @@ copyArrayDWIM
               ++ pretty srcrank
               ++ ")"
         else
-          if destlocation == srclocation && destslice' == srcslice'
-            then return mempty -- Copy would be no-op.
-            else collect $ copy bt destlocation destslice' srclocation srcslice'
+          if destlocation' == srclocation'
+            then pure mempty -- Copy would be no-op.
+            else collect $ copy bt destlocation' srclocation'
 
 -- | Like 'copyDWIM', but the target is a 'ValueDestination'
 -- instead of a variable name.
