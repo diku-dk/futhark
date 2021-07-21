@@ -60,7 +60,7 @@ arrParam :: VName -> MulticoreGen Imp.Param
 arrParam arr = do
   name_entry <- lookupVar arr
   case name_entry of
-    ArrayVar _ (ArrayEntry (MemLocation mem _ _) _) ->
+    ArrayVar _ (ArrayEntry (MemLoc mem _ _) _) ->
       return $ Imp.MemParam mem DefaultSpace
     _ -> error $ "arrParam: could not handle array " ++ show arr
 

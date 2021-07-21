@@ -21,8 +21,8 @@ module Futhark.CodeGen.ImpGen
     AllocCompiler,
     Operations (..),
     defaultOperations,
-    MemLocation (..),
-    sliceMemLocation,
+    MemLoc (..),
+    sliceMemLoc,
     MemEntry (..),
     ScalarEntry (..),
 
@@ -162,8 +162,8 @@ type ExpCompiler rep r op = Pat rep -> Exp rep -> ImpM rep r op ()
 
 type CopyCompiler rep r op =
   PrimType ->
-  MemLocation ->
-  MemLocation ->
+  MemLoc ->
+  MemLoc ->
   ImpM rep r op ()
 
 -- | An alternate way of compiling an allocation.
@@ -193,25 +193,25 @@ defaultOperations opc =
     }
 
 -- | When an array is dared, this is where it is stored.
-data MemLocation = MemLocation
-  { memLocationName :: VName,
-    memLocationShape :: [Imp.DimSize],
-    memLocationIxFun :: IxFun.IxFun (Imp.TExp Int64)
+data MemLoc = MemLoc
+  { memLocName :: VName,
+    memLocShape :: [Imp.DimSize],
+    memLocIxFun :: IxFun.IxFun (Imp.TExp Int64)
   }
   deriving (Eq, Show)
 
-sliceMemLocation :: MemLocation -> Slice (Imp.TExp Int64) -> MemLocation
-sliceMemLocation (MemLocation mem shape ixfun) slice =
-  MemLocation mem shape $ IxFun.slice ixfun slice
+sliceMemLoc :: MemLoc -> Slice (Imp.TExp Int64) -> MemLoc
+sliceMemLoc (MemLoc mem shape ixfun) slice =
+  MemLoc mem shape $ IxFun.slice ixfun slice
 
 data ArrayEntry = ArrayEntry
-  { entryArrayLocation :: MemLocation,
+  { entryArrayLoc :: MemLoc,
     entryArrayElemType :: PrimType
   }
   deriving (Show)
 
 entryArrayShape :: ArrayEntry -> [Imp.DimSize]
-entryArrayShape = memLocationShape . entryArrayLocation
+entryArrayShape = memLocShape . entryArrayLoc
 
 newtype MemEntry = MemEntry {entryMemSpace :: Imp.Space}
   deriving (Show)
@@ -232,11 +232,11 @@ data VarEntry rep
 data ValueDestination
   = ScalarDestination VName
   | MemoryDestination VName
-  | -- | The 'MemLocation' is 'Just' if a copy if
+  | -- | The 'MemLoc' is 'Just' if a copy if
     -- required.  If it is 'Nothing', then a
     -- copy/assignment of a memory block somewhere
     -- takes care of this array.
-    ArrayDestination (Maybe MemLocation)
+    ArrayDestination (Maybe MemLoc)
   deriving (Show)
 
 data Env rep r op = Env
@@ -500,13 +500,13 @@ compileInParam fparam = case paramDec fparam of
     return $
       Right $
         ArrayDecl name bt $
-          MemLocation mem (shapeDims shape) $ fmap (fmap Imp.ScalarVar) ixfun
+          MemLoc mem (shapeDims shape) $ fmap (fmap Imp.ScalarVar) ixfun
   MemAcc {} ->
     error "Functions may not have accumulator parameters."
   where
     name = paramName fparam
 
-data ArrayDecl = ArrayDecl VName PrimType MemLocation
+data ArrayDecl = ArrayDecl VName PrimType MemLoc
 
 compileInParams ::
   Mem rep =>
@@ -532,7 +532,7 @@ compileInParams params orig_epts = do
 
       mkValueDesc fparam signedness =
         case (findArray $ paramName fparam, paramType fparam) of
-          (Just (ArrayDecl _ bt (MemLocation mem shape _)), _) -> do
+          (Just (ArrayDecl _ bt (MemLoc mem shape _)), _) -> do
             memspace <- findMemInfo mem
             Just $ Imp.ArrayValue mem memspace bt signedness shape
           (_, Prim bt) ->
@@ -918,13 +918,13 @@ defCompileBasicOp (Pat [pe]) (Concat i x ys _) = do
     offs_glb <-- tvExp offs_glb + rows
 defCompileBasicOp (Pat [pe]) (ArrayLit es _)
   | Just vs@(v : _) <- mapM isLiteral es = do
-    dest_mem <- entryArrayLocation <$> lookupArray (patElemName pe)
-    dest_space <- entryMemSpace <$> lookupMemory (memLocationName dest_mem)
+    dest_mem <- entryArrayLoc <$> lookupArray (patElemName pe)
+    dest_space <- entryMemSpace <$> lookupMemory (memLocName dest_mem)
     let t = primValueType v
     static_array <- newVNameForFun "static_array"
     emit $ Imp.DeclareArray static_array dest_space t $ Imp.ArrayValues vs
     let static_src =
-          MemLocation static_array [intConst Int64 $ fromIntegral $ length es] $
+          MemLoc static_array [intConst Int64 $ fromIntegral $ length es] $
             IxFun.iota [fromIntegral $ length es]
         entry = MemVar Nothing $ MemEntry dest_space
     addVar static_array entry
@@ -990,7 +990,7 @@ addArrays = mapM_ addArray
         ArrayVar
           Nothing
           ArrayEntry
-            { entryArrayLocation = location,
+            { entryArrayLoc = location,
               entryArrayElemType = bt
             }
 
@@ -1074,11 +1074,11 @@ memBoundToVarEntry e (MemMem space) =
 memBoundToVarEntry e (MemAcc acc ispace ts _) =
   AccVar e (acc, ispace, ts)
 memBoundToVarEntry e (MemArray bt shape _ (ArrayIn mem ixfun)) =
-  let location = MemLocation mem (shapeDims shape) $ fmap (fmap Imp.ScalarVar) ixfun
+  let location = MemLoc mem (shapeDims shape) $ fmap (fmap Imp.ScalarVar) ixfun
    in ArrayVar
         e
         ArrayEntry
-          { entryArrayLocation = location,
+          { entryArrayLoc = location,
             entryArrayElemType = bt
           }
 
@@ -1281,7 +1281,7 @@ lookupMemory name = do
 lookupArraySpace :: VName -> ImpM rep r op Space
 lookupArraySpace =
   fmap entryMemSpace . lookupMemory
-    <=< fmap (memLocationName . entryArrayLocation) . lookupArray
+    <=< fmap (memLocName . entryArrayLoc) . lookupArray
 
 -- | In the case of a histogram-like accumulator, also sets the index
 -- parameters.
@@ -1322,7 +1322,7 @@ destinationFromPat = mapM inspect . patElements
       let name = patElemName pe
       entry <- lookupVar name
       case entry of
-        ArrayVar _ (ArrayEntry MemLocation {} _) ->
+        ArrayVar _ (ArrayEntry MemLoc {} _) ->
           return $ ArrayDestination Nothing
         MemVar {} ->
           return $ MemoryDestination name
@@ -1337,13 +1337,13 @@ fullyIndexArray ::
   ImpM rep r op (VName, Imp.Space, Count Elements (Imp.TExp Int64))
 fullyIndexArray name indices = do
   arr <- lookupArray name
-  fullyIndexArray' (entryArrayLocation arr) indices
+  fullyIndexArray' (entryArrayLoc arr) indices
 
 fullyIndexArray' ::
-  MemLocation ->
+  MemLoc ->
   [Imp.TExp Int64] ->
   ImpM rep r op (VName, Imp.Space, Count Elements (Imp.TExp Int64))
-fullyIndexArray' (MemLocation mem _ ixfun) indices = do
+fullyIndexArray' (MemLoc mem _ ixfun) indices = do
   space <- entryMemSpace <$> lookupMemory mem
   return
     ( mem,
@@ -1361,8 +1361,8 @@ copy bt dest src = do
 -- | Is this copy really a mapping with transpose?
 isMapTransposeCopy ::
   PrimType ->
-  MemLocation ->
-  MemLocation ->
+  MemLoc ->
+  MemLoc ->
   Maybe
     ( Imp.TExp Int64,
       Imp.TExp Int64,
@@ -1370,7 +1370,7 @@ isMapTransposeCopy ::
       Imp.TExp Int64,
       Imp.TExp Int64
     )
-isMapTransposeCopy bt (MemLocation _ _ destIxFun) (MemLocation _ _ srcIxFun)
+isMapTransposeCopy bt (MemLoc _ _ destIxFun) (MemLoc _ _ srcIxFun)
   | Just (dest_offset, perm_and_destshape) <- IxFun.rearrangeWithOffset destIxFun bt_size,
     (perm, destshape) <- unzip perm_and_destshape,
     Just src_offset <- IxFun.linearWithOffset srcIxFun bt_size,
@@ -1455,17 +1455,17 @@ defaultCopy pt dest src
     copyElementWise pt dest src
   where
     pt_size = primByteSize pt
-    num_elems = Imp.elements $ product $ IxFun.shape $ memLocationIxFun src
+    num_elems = Imp.elements $ product $ IxFun.shape $ memLocIxFun src
 
-    MemLocation destmem _ dest_ixfun = dest
-    MemLocation srcmem _ src_ixfun = src
+    MemLoc destmem _ dest_ixfun = dest
+    MemLoc srcmem _ src_ixfun = src
 
     isScalarSpace ScalarSpace {} = True
     isScalarSpace _ = False
 
 copyElementWise :: CopyCompiler rep r op
 copyElementWise bt dest src = do
-  let bounds = IxFun.shape $ memLocationIxFun src
+  let bounds = IxFun.shape $ memLocIxFun src
   is <- replicateM (length bounds) (newVName "i")
   let ivars = map Imp.vi64 is
   (destmem, destspace, destidx) <- fullyIndexArray' dest ivars
@@ -1480,16 +1480,16 @@ copyElementWise bt dest src = do
 -- indexeded.
 copyArrayDWIM ::
   PrimType ->
-  MemLocation ->
+  MemLoc ->
   [DimIndex (Imp.TExp Int64)] ->
-  MemLocation ->
+  MemLoc ->
   [DimIndex (Imp.TExp Int64)] ->
   ImpM rep r op (Imp.Code op)
 copyArrayDWIM
   bt
-  destlocation@(MemLocation _ destshape _)
+  destlocation@(MemLoc _ destshape _)
   destslice
-  srclocation@(MemLocation _ srcshape _)
+  srclocation@(MemLoc _ srcshape _)
   srcslice
     | Just destis <- mapM dimFix destslice,
       Just srcis <- mapM dimFix srcslice,
@@ -1508,15 +1508,15 @@ copyArrayDWIM
           srcslice' = fullSliceNum (map toInt64Exp srcshape) srcslice
           destrank = length $ sliceDims destslice'
           srcrank = length $ sliceDims srcslice'
-          destlocation' = sliceMemLocation destlocation destslice'
-          srclocation' = sliceMemLocation srclocation srcslice'
+          destlocation' = sliceMemLoc destlocation destslice'
+          srclocation' = sliceMemLoc srclocation srcslice'
       if destrank /= srcrank
         then
           error $
             "copyArrayDWIM: cannot copy to "
-              ++ pretty (memLocationName destlocation)
+              ++ pretty (memLocName destlocation)
               ++ " from "
-              ++ pretty (memLocationName srclocation)
+              ++ pretty (memLocName srclocation)
               ++ " because ranks do not match ("
               ++ pretty destrank
               ++ " vs "
@@ -1585,7 +1585,7 @@ copyDWIMDest dest dest_slice (Var src) src_slice = do
         length src_slice == length (entryArrayShape arr) -> do
         let bt = entryArrayElemType arr
         (mem, space, i) <-
-          fullyIndexArray' (entryArrayLocation arr) src_is
+          fullyIndexArray' (entryArrayLoc arr) src_is
         vol <- asks envVolatility
         emit $ Imp.SetScalar name $ Imp.index mem i bt space vol
       | otherwise ->
@@ -1599,7 +1599,7 @@ copyDWIMDest dest dest_slice (Var src) src_slice = do
               pretty src_slice
             ]
     (ArrayDestination (Just dest_loc), ArrayVar _ src_arr) -> do
-      let src_loc = entryArrayLocation src_arr
+      let src_loc = entryArrayLoc src_arr
           bt = entryArrayElemType src_arr
       emit =<< copyArrayDWIM bt dest_loc dest_slice src_loc src_slice
     (ArrayDestination (Just dest_loc), ScalarVar _ (ScalarEntry bt))
@@ -1637,8 +1637,8 @@ copyDWIM dest dest_slice src src_slice = do
         case dest_entry of
           ScalarVar _ _ ->
             ScalarDestination dest
-          ArrayVar _ (ArrayEntry (MemLocation mem shape ixfun) _) ->
-            ArrayDestination $ Just $ MemLocation mem shape ixfun
+          ArrayVar _ (ArrayEntry (MemLoc mem shape ixfun) _) ->
+            ArrayDestination $ Just $ MemLoc mem shape ixfun
           MemVar _ _ ->
             MemoryDestination dest
           AccVar {} ->
