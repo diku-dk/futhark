@@ -528,7 +528,7 @@ flatSlice (IxFun (LMAD offset [dim] :| []) oshp True) (FlatSlice new_offset is)
       oshp
       True
   where
-    helper (FlatDimIndex n s) = LMADDim (ldStride dim * s) 0 n 0 Inc
+    helper (FlatDimIndex n s) = LMADDim (ldStride dim * s) 0 n 0 Unknown
 flatSlice _ _ =
   error "slice: reached impossible case when handling flat slices"
 

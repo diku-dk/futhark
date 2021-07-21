@@ -1013,7 +1013,7 @@ expReturns (BasicOp (Update _ v _ _)) =
   pure <$> varReturns v
 expReturns (BasicOp (FlatIndex v slice)) = do
   pure . varInfoToExpReturns <$> flatSliceInfo v slice
-expReturns (BasicOp (FlatUpdate _ v _ _)) =
+expReturns (BasicOp (FlatUpdate v _ _)) =
   pure <$> varReturns v
 expReturns (BasicOp op) =
   extReturns . staticShapes <$> primOpType op

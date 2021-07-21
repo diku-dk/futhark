@@ -1802,7 +1802,7 @@ isOverloadedFunction qname args loc = do
           n3 = arraysSize 2 ts
       let slice = I.FlatSlice offset' [FlatDimIndex n1 s1', FlatDimIndex n2 s2', FlatDimIndex n3 s3']
       forM (zip arrs1 arrs2) $ \(arr1', arr2') ->
-        letSubExp desc $ I.BasicOp $ I.FlatUpdate Unsafe arr1' slice arr2'
+        letSubExp desc $ I.BasicOp $ I.FlatUpdate arr1' slice arr2'
     handleRest _ _ = Nothing
 
     toSigned int_to e desc = do

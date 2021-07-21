@@ -2,7 +2,7 @@
 -- https://github.com/kkushagra/rodinia/blob/master/openmp/nw
 --
 -- ==
--- compiled random input { 1i64 10i32 [2362369]i32 [2362369]i32 }
+-- compiled random input { 1i64 10i32 [2362369]i32 [2362369]i32 } auto output
 
 import "intrinsics"
 
