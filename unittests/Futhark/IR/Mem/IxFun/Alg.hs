@@ -8,6 +8,7 @@ module Futhark.IR.Mem.IxFun.Alg
     rotate,
     reshape,
     slice,
+    flatSlice,
     rebase,
     shape,
     index,
@@ -19,8 +20,11 @@ import Futhark.IR.Prop
 import Futhark.IR.Syntax
   ( DimChange (..),
     DimIndex (..),
+    FlatDimIndex (..),
+    FlatSlice (..),
     ShapeChange,
     Slice (..),
+    flatSliceDims,
     sliceDims,
     unitSlice,
   )
@@ -39,6 +43,7 @@ data IxFun num
   | Permute (IxFun num) Permutation
   | Rotate (IxFun num) (Indices num)
   | Index (IxFun num) (Slice num)
+  | FlatIndex (IxFun num) (FlatSlice num)
   | Reshape (IxFun num) (ShapeChange num)
   | OffsetIndex (IxFun num) num
   | Rebase (IxFun num) (IxFun num)
@@ -50,6 +55,7 @@ instance Pretty num => Pretty (IxFun num) where
   ppr (Permute fun perm) = ppr fun <> ppr perm
   ppr (Rotate fun offsets) = ppr fun <> brackets (commasep $ map ((text "+" <>) . ppr) offsets)
   ppr (Index fun is) = ppr fun <> ppr is
+  ppr (FlatIndex fun is) = ppr fun <> ppr is
   ppr (Reshape fun oldshape) =
     ppr fun <> text "->reshape"
       <> parens (commasep (map ppr oldshape))
@@ -73,6 +79,9 @@ rotate = Rotate
 slice :: IxFun num -> Slice num -> IxFun num
 slice = Index
 
+flatSlice :: IxFun num -> FlatSlice num -> IxFun num
+flatSlice = FlatIndex
+
 rebase :: IxFun num -> IxFun num -> IxFun num
 rebase = Rebase
 
@@ -91,6 +100,8 @@ shape (Rotate ixfun _) =
   shape ixfun
 shape (Index _ how) =
   sliceDims how
+shape (FlatIndex _ how) =
+  flatSliceDims how
 shape (Reshape _ dims) =
   map newDim dims
 shape (OffsetIndex ixfun _) =
@@ -121,6 +132,10 @@ index (Index fun (Slice js)) is =
     adjust (DimFix j : js') is' = j : adjust js' is'
     adjust (DimSlice j _ s : js') (i : is') = j + i * s : adjust js' is'
     adjust _ _ = []
+index (FlatIndex fun (FlatSlice offset js)) is =
+  index fun [sum $ offset : zipWith f is js]
+  where
+    f i (FlatDimIndex _ s) = i * s
 index (Reshape fun newshape) is =
   let new_indices = reshapeIndex (shape fun) (newDims newshape) is
    in index fun new_indices
@@ -141,6 +156,8 @@ index (Rebase new_base fun) is =
           rotate (rebase new_base ixfun) offsets
         Index ixfun iis ->
           slice (rebase new_base ixfun) iis
+        FlatIndex ixfun iis ->
+          flatSlice (rebase new_base ixfun) iis
         Reshape ixfun new_shape ->
           reshape (rebase new_base ixfun) new_shape
         OffsetIndex ixfun s ->

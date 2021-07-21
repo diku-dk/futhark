@@ -95,6 +95,7 @@ tests =
     concat
       [ test_iota,
         test_slice_iota,
+        test_flat_slice_iota,
         test_reshape_slice_iota1,
         test_permute_slice_iota,
         test_rotate_rotate_permute_slice_iota,
@@ -130,6 +131,14 @@ test_slice_iota =
     testCase "slice . iota" $
       compareOps $
         slice (iota [n, n, n]) slice3
+
+test_flat_slice_iota :: [TestTree]
+test_flat_slice_iota =
+  singleton $
+    testCase "flatSlice . iota" $
+      compareOps $
+        flatSlice (iota [n * n * n * n]) $
+          FlatSlice 2 [FlatDimIndex (n * 2) 4, FlatDimIndex n 3, FlatDimIndex 1 2]
 
 test_reshape_slice_iota1 :: [TestTree]
 test_reshape_slice_iota1 =
