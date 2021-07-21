@@ -1409,29 +1409,35 @@ sKernel ops flatf name num_groups group_size v f = do
     f
 
 copyInGroup :: CopyCompiler GPUMem KernelEnv Imp.KernelOp
-copyInGroup pt destloc destslice srcloc srcslice = do
+copyInGroup pt destloc srcloc = do
   dest_space <- entryMemSpace <$> lookupMemory (memLocationName destloc)
   src_space <- entryMemSpace <$> lookupMemory (memLocationName srcloc)
 
+  let src_ixfun = memLocationIxFun srcloc
+      dims = IxFun.shape src_ixfun
+      rank = length dims
+
   case (dest_space, src_space) of
     (ScalarSpace destds _, ScalarSpace srcds _) -> do
-      let destslice' =
+      let fullDim d = DimSlice 0 d 1
+          destslice' =
             Slice $
-              replicate (length (unSlice destslice) - length destds) (DimFix 0)
-                ++ takeLast (length destds) (unSlice destslice)
+              replicate (rank - length destds) (DimFix 0)
+                ++ takeLast (length destds) (map fullDim dims)
           srcslice' =
             Slice $
-              replicate (length (unSlice srcslice) - length srcds) (DimFix 0)
-                ++ takeLast (length srcds) (unSlice srcslice)
-      copyElementWise pt destloc destslice' srcloc srcslice'
+              replicate (rank - length srcds) (DimFix 0)
+                ++ takeLast (length srcds) (map fullDim dims)
+      copyElementWise
+        pt
+        (sliceMemLocation destloc destslice')
+        (sliceMemLocation srcloc srcslice')
     _ -> do
-      groupCoverSpace (sliceDims destslice) $ \is ->
+      groupCoverSpace dims $ \is ->
         copyElementWise
           pt
-          destloc
-          (Slice $ map DimFix $ fixSlice destslice is)
-          srcloc
-          (Slice $ map DimFix $ fixSlice srcslice is)
+          (sliceMemLocation destloc (Slice $ map DimFix is))
+          (sliceMemLocation srcloc (Slice $ map DimFix is))
       sOp $ Imp.Barrier Imp.FenceLocal
 
 threadOperations, groupOperations :: Operations GPUMem KernelEnv Imp.KernelOp
@@ -1621,42 +1627,34 @@ sIota arr n x s et = do
     else sIotaKernel arr n x s et
 
 sCopy :: CopyCompiler GPUMem HostEnv Imp.HostOp
-sCopy
-  bt
-  destloc@(MemLocation destmem _ _)
-  destslice
-  srcloc@(MemLocation srcmem _ _)
-  srcslice =
-    do
-      -- Note that the shape of the destination and the source are
-      -- necessarily the same.
-      let shape = sliceDims srcslice
-          kernel_size = product shape
+sCopy bt destloc@(MemLocation destmem _ _) srcloc@(MemLocation srcmem srcdims _) = do
+  -- Note that the shape of the destination and the source are
+  -- necessarily the same.
+  let shape = map toInt64Exp srcdims
+      kernel_size = product shape
 
-      (constants, set_constants) <- simpleKernelConstants kernel_size "copy"
+  (constants, set_constants) <- simpleKernelConstants kernel_size "copy"
 
-      fname <- askFunction
-      let name =
-            keyWithEntryPoint fname $
-              nameFromString $
-                "copy_" ++ show (baseTag $ kernelGlobalThreadIdVar constants)
+  fname <- askFunction
+  let name =
+        keyWithEntryPoint fname $
+          nameFromString $
+            "copy_" ++ show (baseTag $ kernelGlobalThreadIdVar constants)
 
-      sKernelFailureTolerant True threadOperations constants name $ do
-        set_constants
+  sKernelFailureTolerant True threadOperations constants name $ do
+    set_constants
 
-        let gtid = sExt64 $ kernelGlobalThreadId constants
-            dest_is = unflattenIndex shape gtid
-            src_is = dest_is
+    let gtid = sExt64 $ kernelGlobalThreadId constants
+        dest_is = unflattenIndex shape gtid
+        src_is = dest_is
 
-        (_, destspace, destidx) <-
-          fullyIndexArray' destloc $ fixSlice destslice dest_is
-        (_, srcspace, srcidx) <-
-          fullyIndexArray' srcloc $ fixSlice srcslice src_is
+    (_, destspace, destidx) <- fullyIndexArray' destloc dest_is
+    (_, srcspace, srcidx) <- fullyIndexArray' srcloc src_is
 
-        sWhen (gtid .<. kernel_size) $
-          emit $
-            Imp.Write destmem destidx bt destspace Imp.Nonvolatile $
-              Imp.index srcmem srcidx bt srcspace Imp.Nonvolatile
+    sWhen (gtid .<. kernel_size) $
+      emit $
+        Imp.Write destmem destidx bt destspace Imp.Nonvolatile $
+          Imp.index srcmem srcidx bt srcspace Imp.Nonvolatile
 
 compileGroupResult ::
   SegSpace ->
