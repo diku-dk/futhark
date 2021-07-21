@@ -2,7 +2,10 @@
 -- https://github.com/kkushagra/rodinia/blob/master/openmp/nw
 --
 -- ==
--- compiled random input { 1i64 10i32 [2362369]i32 [2362369]i32 } auto output
+-- entry: nw_flat
+-- compiled random input { 16i64 10i32 [2362369]i32 [2362369]i32 } auto output
+-- compiled random input { 32i64 10i32 [2362369]i32 [2362369]i32 } auto output
+-- compiled random input { 64i64 10i32 [2362369]i32 [2362369]i32 } auto output
 
 import "intrinsics"
 
@@ -58,37 +61,58 @@ let process_block [b][bp1]
 
   in block[1:, 1:] :> [b][b]i32
 
-let main [n]
-         (block_size: i64)
-         (penalty: i32)
-         (input: *[n]i32)
-         (refs: [n]i32)
-         -- : *[n]i32
- =
+entry nw_flat [n]
+              (block_size: i64)
+              (penalty: i32)
+              (input: *[n]i32)
+              (refs: [n]i32)
+              : *[n]i32 =
   let row_length = i64.f64 <| f64.sqrt <| f64.i64 n
   let num_blocks = -- assert ((row_length - 1) % b == 0) <|
                    (row_length - 1) / block_size
   let bp1 = block_size + 1
 
-  let i = 0
-  let ip1 = i + 1
   let input =
-    -- loop input for i < num_blocks do
-    -- let input[row_length + 1 + i * block_size;
-    --           1 + i : row_length * block_size - block_size,
-    --           block_size : row_length,
-    --           block_size : 1] =
+    loop input for i < num_blocks do
+    let ip1 = i + 1
+    let v =
       #[incremental_flattening(only_intra)]
       map2 (process_block penalty)
-           (flat_index_3d input (i * block_size)
-                          ip1 (row_length * block_size - block_size)
-                          (block_size + 1) row_length
-                          (block_size + 1) (1i64))
-           (flat_index_3d refs (row_length + 1 + i * block_size)
-                          ip1 (row_length * block_size - block_size)
-            block_size row_length
-            block_size 1i64)
+      (flat_index_3d input (i * block_size)
+                     ip1 (row_length * block_size - block_size)
+                     (block_size + 1) row_length
+                     (block_size + 1) 1i64)
+      (flat_index_3d refs (row_length + 1 + i * block_size)
+                     ip1 (row_length * block_size - block_size)
+                     block_size row_length
+                     block_size 1i64)
+    in flat_update_3d
+         input
+         (row_length + 1 + i * block_size)
+         (row_length * block_size - block_size)
+         (row_length)
+         1
+         v
 
-    -- in input
+  let input =
+    loop input for i < num_blocks - 1 do
+    let v =
+      #[incremental_flattening(only_intra)]
+      map2 (process_block penalty)
+      (flat_index_3d input (((i + 1) * block_size + 1) * row_length - block_size - 1)
+                     (num_blocks - i - 1) (row_length * block_size - block_size)
+                     (block_size + 1) row_length
+                     (block_size + 1) 1i64)
+      (flat_index_3d refs (((i + 1) * block_size + 2) * row_length - block_size)
+                     (num_blocks - i - 1) (row_length * block_size - block_size)
+                     block_size row_length
+                     block_size 1i64)
+    in flat_update_3d
+         input
+         (((i + 1) * block_size + 2) * row_length - block_size)
+         (row_length * block_size - block_size)
+         (row_length)
+         1
+         v
 
   in input
