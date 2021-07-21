@@ -851,7 +851,7 @@ checkBasicOp (FlatIndex ident slice) = do
   when (arrayRank vt /= 1) $
     bad $ SlicingError (arrayRank vt) 1
   checkFlatSlice slice
-checkBasicOp (FlatUpdate src slice v) = do
+checkBasicOp (FlatUpdate _ src slice v) = do
   src_t <- checkArrIdent src
   when (arrayRank src_t /= 1) $
     bad $ SlicingError (arrayRank src_t) 1

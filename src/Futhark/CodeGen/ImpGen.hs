@@ -882,15 +882,21 @@ defCompileBasicOp (Pat [pe]) (Update safety _ slice se) =
     write = sUpdate (patElemName pe) slice' se
 defCompileBasicOp _ FlatIndex {} =
   pure ()
-defCompileBasicOp (Pat [pe]) (FlatUpdate _ slice v) =
+defCompileBasicOp (Pat [pe]) (FlatUpdate safety _ slice v) =
   sLoopNest (Shape dims) $ \is ->
-    copyDWIMFix (patElemName pe) [flatSliceIndex slice' is] (Var v) is
+    let flat = flatSliceIndex slice' is
+     in case safety of
+          Unsafe -> write flat is
+          Safe -> sWhen (inBoundsFlat flat pe_size) $ write flat is
   where
     slice' = fmap toInt64Exp slice
     dims = flatSliceDims slice
     flatSliceIndex (FlatSlice offset ds) is =
       sum (offset : zipWith (*) is (map flatStride ds))
     flatStride (FlatDimIndex _ s) = s
+    pe_size = toInt64Exp $ head $ arrayDims $ patElemType pe
+    write flat is =
+      copyDWIMFix (patElemName pe) [flat] (Var v) is
 defCompileBasicOp (Pat [pe]) (Replicate (Shape ds) se) = do
   ds' <- mapM toExp ds
   is <- replicateM (length ds) (newVName "i")
@@ -1701,6 +1707,11 @@ inBounds (Slice slice) dims =
       condInBounds (DimSlice i n s) d =
         0 .<=. i .&&. i + (n -1) * s .<. d
    in foldl1 (.&&.) $ zipWith condInBounds slice dims
+
+-- | Is this indexing in-bounds for an one-dimensional array of the give size?
+inBoundsFlat :: Imp.TExp Int64 -> Imp.TExp Int64 -> Imp.TExp Bool
+inBoundsFlat i d =
+  0 .<=. i .&&. i .<. d
 
 --- Building blocks for constructing code.
 

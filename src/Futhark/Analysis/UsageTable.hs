@@ -183,7 +183,7 @@ usageInExp (WithAcc inputs lam) =
     inputUsage (_, arrs, _) = foldMap consumedUsage arrs
 usageInExp (BasicOp (Update _ src _ _)) =
   consumedUsage src
-usageInExp (BasicOp (FlatUpdate src _ _)) =
+usageInExp (BasicOp (FlatUpdate _ src _ _)) =
   consumedUsage src
 usageInExp (Op op) =
   mconcat $ map consumedUsage (namesToList $ consumedInOp op)

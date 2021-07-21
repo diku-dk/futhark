@@ -149,7 +149,7 @@ checkForUpdates :: FusedRes -> Exp -> FusionGM FusedRes
 checkForUpdates res (BasicOp (Update _ src slice _)) = do
   let ifvs = namesToList $ freeIn slice
   updateKerInPlaces res ([src], ifvs)
-checkForUpdates res (BasicOp (FlatUpdate src slice _)) = do
+checkForUpdates res (BasicOp (FlatUpdate _ src slice _)) = do
   let ifvs = namesToList $ freeIn slice
   updateKerInPlaces res ([src], ifvs)
 checkForUpdates res (Op (Futhark.Scatter _ _ _ written_info)) = do

@@ -196,8 +196,12 @@ instance Pretty BasicOp where
         Unsafe -> text "with"
         Safe -> text "with?"
   ppr (FlatIndex v slice) = ppr v <> ppr slice
-  ppr (FlatUpdate src slice se) =
-    ppr src <+> text "with" <+> ppr slice <+> text "=" <+> ppr se
+  ppr (FlatUpdate safety src slice se) =
+    ppr src <+> with <+> ppr slice <+> text "=" <+> ppr se
+    where
+      with = case safety of
+        Unsafe -> text "with"
+        Safe -> text "with?"
   ppr (Iota e x s et) = text "iota" <> et' <> apply [ppr e, ppr x, ppr s]
     where
       et' = text $ show $ primBitSize $ IntType et
