@@ -120,9 +120,9 @@ precomputeSegOpIDs stms m = do
   localEnv f m
   where
     mkMap ltid dims = do
-      let dims' = map (sExt32 . toInt64Exp) dims
-      ids' <- mapM (dPrimVE "ltid_pre") $ unflattenIndex dims' ltid
-      return (dims, ids')
+      let dims' = map toInt64Exp dims
+      ids' <- dIndexSpace' "ltid_pre" dims' (sExt64 ltid)
+      return (dims, map sExt32 ids')
 
 keyWithEntryPoint :: Maybe Name -> Name -> Name
 keyWithEntryPoint fname key =
@@ -1473,10 +1473,10 @@ sReplicateKernel arr se = do
         keyWithEntryPoint fname $
           nameFromString $
             "replicate_" ++ show (baseTag $ kernelGlobalThreadIdVar constants)
-      is' = unflattenIndex dims $ sExt64 $ kernelGlobalThreadId constants
 
   sKernelFailureTolerant True threadOperations constants name $ do
     set_constants
+    is' <- dIndexSpace' "rep_i" dims $ sExt64 $ kernelGlobalThreadId constants
     sWhen (kernelThreadActive constants) $
       copyDWIMFix arr is' se $ drop (length ds) is'
 
@@ -1645,11 +1645,10 @@ sCopy bt destloc@(MemLoc destmem _ _) srcloc@(MemLoc srcmem srcdims _) = do
     set_constants
 
     let gtid = sExt64 $ kernelGlobalThreadId constants
-        dest_is = unflattenIndex shape gtid
-        src_is = dest_is
+    is <- dIndexSpace' "copy_i" shape gtid
 
-    (_, destspace, destidx) <- fullyIndexArray' destloc dest_is
-    (_, srcspace, srcidx) <- fullyIndexArray' srcloc src_is
+    (_, destspace, destidx) <- fullyIndexArray' destloc is
+    (_, srcspace, srcidx) <- fullyIndexArray' srcloc is
 
     sWhen (gtid .<. kernel_size) $
       emit $
@@ -1707,8 +1706,7 @@ compileGroupResult space pe (RegTileReturns _ dims_n_tiles what) = do
   -- Within the group tile, which register tile is this thread
   -- responsible for?
   reg_tile_is <-
-    mapM (dPrimVE "reg_tile_i") $
-      unflattenIndex group_tiles' $ sExt64 $ kernelLocalThreadId constants
+    dIndexSpace' "reg_tile_i" group_tiles' $ sExt64 $ kernelLocalThreadId constants
 
   -- Compute output array slice for the register tile belonging to
   -- this thread.
