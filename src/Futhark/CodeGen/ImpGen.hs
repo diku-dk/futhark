@@ -93,6 +93,7 @@ module Futhark.CodeGen.ImpGen
     dPrimV,
     dPrimVE,
     dIndexSpace,
+    dIndexSpace',
     sFor,
     sWhile,
     sComment,
@@ -1869,3 +1870,15 @@ dIndexSpace vs_ds j = do
       i' <- dPrimVE "remnant" $ i - Imp.vi64 v * size
       loop rest i'
     loop _ _ = pure ()
+
+-- | Like 'dIndexSpace', but invent some new names for the indexes
+-- based on the given template.
+dIndexSpace' ::
+  String ->
+  [Imp.TExp Int64] ->
+  Imp.TExp Int64 ->
+  ImpM rep r op [Imp.TExp Int64]
+dIndexSpace' desc ds j = do
+  ivs <- replicateM (length ds) (newVName desc)
+  dIndexSpace (zip ivs ds) j
+  pure $ map Imp.vi64 ivs
