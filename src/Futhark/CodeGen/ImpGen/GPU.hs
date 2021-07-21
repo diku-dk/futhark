@@ -255,51 +255,38 @@ expCompiler dest e =
   defCompileExp dest e
 
 callKernelCopy :: CopyCompiler GPUMem HostEnv Imp.HostOp
-callKernelCopy
-  bt
-  destloc@(MemLocation destmem _ destIxFun)
-  destslice
-  srcloc@(MemLocation srcmem srcshape srcIxFun)
-  srcslice
-    | Just
-        ( destoffset,
-          srcoffset,
-          num_arrays,
-          size_x,
-          size_y
-          ) <-
-        isMapTransposeCopy bt destloc destslice srcloc srcslice = do
-      fname <- mapTransposeForType bt
-      emit $
-        Imp.Call
-          []
-          fname
-          [ Imp.MemArg destmem,
-            Imp.ExpArg $ untyped destoffset,
-            Imp.MemArg srcmem,
-            Imp.ExpArg $ untyped srcoffset,
-            Imp.ExpArg $ untyped num_arrays,
-            Imp.ExpArg $ untyped size_x,
-            Imp.ExpArg $ untyped size_y
-          ]
-    | bt_size <- primByteSize bt,
-      Just destoffset <-
-        IxFun.linearWithOffset (IxFun.slice destIxFun destslice) bt_size,
-      Just srcoffset <-
-        IxFun.linearWithOffset (IxFun.slice srcIxFun srcslice) bt_size = do
-      let num_elems = Imp.elements $ product $ map toInt64Exp srcshape
-      srcspace <- entryMemSpace <$> lookupMemory srcmem
-      destspace <- entryMemSpace <$> lookupMemory destmem
-      emit $
-        Imp.Copy
-          destmem
-          (bytes $ sExt64 destoffset)
-          destspace
-          srcmem
-          (bytes $ sExt64 srcoffset)
-          srcspace
-          $ num_elems `Imp.withElemType` bt
-    | otherwise = sCopy bt destloc destslice srcloc srcslice
+callKernelCopy bt destloc@(MemLocation destmem _ destIxFun) srcloc@(MemLocation srcmem srcshape srcIxFun)
+  | Just (destoffset, srcoffset, num_arrays, size_x, size_y) <-
+      isMapTransposeCopy bt destloc srcloc = do
+    fname <- mapTransposeForType bt
+    emit $
+      Imp.Call
+        []
+        fname
+        [ Imp.MemArg destmem,
+          Imp.ExpArg $ untyped destoffset,
+          Imp.MemArg srcmem,
+          Imp.ExpArg $ untyped srcoffset,
+          Imp.ExpArg $ untyped num_arrays,
+          Imp.ExpArg $ untyped size_x,
+          Imp.ExpArg $ untyped size_y
+        ]
+  | bt_size <- primByteSize bt,
+    Just destoffset <- IxFun.linearWithOffset destIxFun bt_size,
+    Just srcoffset <- IxFun.linearWithOffset srcIxFun bt_size = do
+    let num_elems = Imp.elements $ product $ map toInt64Exp srcshape
+    srcspace <- entryMemSpace <$> lookupMemory srcmem
+    destspace <- entryMemSpace <$> lookupMemory destmem
+    emit $
+      Imp.Copy
+        destmem
+        (bytes $ sExt64 destoffset)
+        destspace
+        srcmem
+        (bytes $ sExt64 srcoffset)
+        srcspace
+        $ num_elems `Imp.withElemType` bt
+  | otherwise = sCopy bt destloc srcloc
 
 mapTransposeForType :: PrimType -> CallKernelGen Name
 mapTransposeForType bt = do
