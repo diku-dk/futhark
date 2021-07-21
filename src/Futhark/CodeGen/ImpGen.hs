@@ -882,6 +882,15 @@ defCompileBasicOp (Pat [pe]) (Update safety _ slice se) =
     write = sUpdate (patElemName pe) slice' se
 defCompileBasicOp _ FlatIndex {} =
   pure ()
+defCompileBasicOp (Pat [pe]) (FlatUpdate _ slice v) =
+  sLoopNest (Shape dims) $ \is ->
+    copyDWIMFix (patElemName pe) [flatSliceIndex slice' is] (Var v) is
+  where
+    slice' = fmap toInt64Exp slice
+    dims = flatSliceDims slice
+    flatSliceIndex (FlatSlice offset ds) is =
+      sum (offset : zipWith (*) is (map flatStride ds))
+    flatStride (FlatDimIndex _ s) = s
 defCompileBasicOp (Pat [pe]) (Replicate (Shape ds) se) = do
   ds' <- mapM toExp ds
   is <- replicateM (length ds) (newVName "i")
