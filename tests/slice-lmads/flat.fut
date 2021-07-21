@@ -1,6 +1,6 @@
 -- ==
 -- entry: update_antidiag
--- compiled script input { my_iota 100i64 }
+-- script input { my_iota 100i64 }
 -- output { [ 0i64,  1i64,  2i64,  3i64,  4i64,  5i64,  6i64,  7i64,  8i64,  9i64,
 --           10i64, 11i64, 12i64, 13i64, 14i64, 15i64, 16i64,  0i64,  1i64,  2i64,
 --           20i64, 21i64, 22i64, 23i64, 24i64, 25i64, 26i64,  3i64,  4i64,  5i64,
@@ -14,7 +14,7 @@
 
 -- ==
 -- entry: index_antidiag
--- compiled script input { my_iota 100i64 }
+-- script input { my_iota 100i64 }
 -- output { [ [ [ 17i64, 18i64, 19i64 ],
 --              [ 27i64, 28i64, 29i64 ],
 --              [ 37i64, 38i64, 39i64 ] ],

@@ -1683,6 +1683,10 @@ initialCtx =
                 else pure acc
           _ ->
             error $ "acc_write invalid arguments: " ++ pretty (acc, i, v)
+    def "flat_index_3d" =
+      Just $ error "flat_index_3d not supported in interpreter yet."
+    def "flat_update_3d" =
+      Just $ error "flat_update_3d not supported in interpreter yet."
     def "unzip" = Just $
       fun1 $ \x -> do
         let ShapeDim _ (ShapeRecord fs) = valueShape x
