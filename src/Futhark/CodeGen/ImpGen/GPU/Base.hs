@@ -413,8 +413,8 @@ compileGroupOp pat (Inner (SegOp (SegScan lvl space scans _ body))) = do
   -- row-major, but does not actually verify it.
   dims_flat <- dPrimV "dims_flat" $ product dims'
   let flattened pe = do
-        MemLocation mem _ _ <-
-          entryArrayLocation <$> lookupArray (patElemName pe)
+        MemLoc mem _ _ <-
+          entryArrayLoc <$> lookupArray (patElemName pe)
         let pe_t = typeOf pe
             arr_dims = Var (tvVar dims_flat) : drop (length dims') (arrayDims pe_t)
         sArray
@@ -480,9 +480,9 @@ compileGroupOp pat (Inner (SegOp (SegRed lvl space ops _ body))) = do
             let flat_shape =
                   Shape $
                     Var (tvVar dims_flat) :
-                    drop (length ltids) (memLocationShape arr_loc)
+                    drop (length ltids) (memLocShape arr_loc)
             sArray "red_arr_flat" pt flat_shape $
-              ArrayIn (memLocationName arr_loc) $
+              ArrayIn (memLocName arr_loc) $
                 IxFun.iota $ map pe64 $ shapeDims flat_shape
 
       let segment_size = last dims'
@@ -1410,10 +1410,10 @@ sKernel ops flatf name num_groups group_size v f = do
 
 copyInGroup :: CopyCompiler GPUMem KernelEnv Imp.KernelOp
 copyInGroup pt destloc srcloc = do
-  dest_space <- entryMemSpace <$> lookupMemory (memLocationName destloc)
-  src_space <- entryMemSpace <$> lookupMemory (memLocationName srcloc)
+  dest_space <- entryMemSpace <$> lookupMemory (memLocName destloc)
+  src_space <- entryMemSpace <$> lookupMemory (memLocName srcloc)
 
-  let src_ixfun = memLocationIxFun srcloc
+  let src_ixfun = memLocIxFun srcloc
       dims = IxFun.shape src_ixfun
       rank = length dims
 
@@ -1430,14 +1430,14 @@ copyInGroup pt destloc srcloc = do
                 ++ takeLast (length srcds) (map fullDim dims)
       copyElementWise
         pt
-        (sliceMemLocation destloc destslice')
-        (sliceMemLocation srcloc srcslice')
+        (sliceMemLoc destloc destslice')
+        (sliceMemLoc srcloc srcslice')
     _ -> do
       groupCoverSpace dims $ \is ->
         copyElementWise
           pt
-          (sliceMemLocation destloc (Slice $ map DimFix is))
-          (sliceMemLocation srcloc (Slice $ map DimFix is))
+          (sliceMemLoc destloc (Slice $ map DimFix is))
+          (sliceMemLoc srcloc (Slice $ map DimFix is))
       sOp $ Imp.Barrier Imp.FenceLocal
 
 threadOperations, groupOperations :: Operations GPUMem KernelEnv Imp.KernelOp
@@ -1511,7 +1511,7 @@ replicateForType bt = do
 
 replicateIsFill :: VName -> SubExp -> CallKernelGen (Maybe (CallKernelGen ()))
 replicateIsFill arr v = do
-  ArrayEntry (MemLocation arr_mem arr_shape arr_ixfun) _ <- lookupArray arr
+  ArrayEntry (MemLoc arr_mem arr_shape arr_ixfun) _ <- lookupArray arr
   v_t <- subExpType v
   case v_t of
     Prim v_t'
@@ -1548,7 +1548,7 @@ sIotaKernel ::
   IntType ->
   CallKernelGen ()
 sIotaKernel arr n x s et = do
-  destloc <- entryArrayLocation <$> lookupArray arr
+  destloc <- entryArrayLoc <$> lookupArray arr
   (constants, set_constants) <- simpleKernelConstants n "iota"
 
   fname <- askFunction
@@ -1615,7 +1615,7 @@ sIota ::
   IntType ->
   CallKernelGen ()
 sIota arr n x s et = do
-  ArrayEntry (MemLocation arr_mem _ arr_ixfun) _ <- lookupArray arr
+  ArrayEntry (MemLoc arr_mem _ arr_ixfun) _ <- lookupArray arr
   if IxFun.isLinear arr_ixfun
     then do
       fname <- iotaForType et
@@ -1627,7 +1627,7 @@ sIota arr n x s et = do
     else sIotaKernel arr n x s et
 
 sCopy :: CopyCompiler GPUMem HostEnv Imp.HostOp
-sCopy bt destloc@(MemLocation destmem _ _) srcloc@(MemLocation srcmem srcdims _) = do
+sCopy bt destloc@(MemLoc destmem _ _) srcloc@(MemLoc srcmem srcdims _) = do
   -- Note that the shape of the destination and the source are
   -- necessarily the same.
   let shape = map toInt64Exp srcdims
@@ -1787,6 +1787,6 @@ arrayInLocalMemory (Var name) = do
   case res of
     ArrayVar _ entry ->
       (Space "local" ==) . entryMemSpace
-        <$> lookupMemory (memLocationName (entryArrayLocation entry))
+        <$> lookupMemory (memLocName (entryArrayLoc entry))
     _ -> return False
 arrayInLocalMemory Constant {} = return False

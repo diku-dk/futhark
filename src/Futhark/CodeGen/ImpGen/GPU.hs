@@ -255,7 +255,7 @@ expCompiler dest e =
   defCompileExp dest e
 
 callKernelCopy :: CopyCompiler GPUMem HostEnv Imp.HostOp
-callKernelCopy bt destloc@(MemLocation destmem _ destIxFun) srcloc@(MemLocation srcmem srcshape srcIxFun)
+callKernelCopy bt destloc@(MemLoc destmem _ destIxFun) srcloc@(MemLoc srcmem srcshape srcIxFun)
   | Just (destoffset, srcoffset, num_arrays, size_x, size_y) <-
       isMapTransposeCopy bt destloc srcloc = do
     fname <- mapTransposeForType bt
