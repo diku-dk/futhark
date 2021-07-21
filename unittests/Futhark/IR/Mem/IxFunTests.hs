@@ -95,7 +95,6 @@ tests =
     concat
       [ test_iota,
         test_slice_iota,
-        test_flat_slice_iota,
         test_reshape_slice_iota1,
         test_permute_slice_iota,
         test_rotate_rotate_permute_slice_iota,
@@ -112,7 +111,9 @@ tests =
         test_rebase1,
         test_rebase2,
         test_rebase3,
-        test_rebase4_5
+        test_rebase4_5,
+        test_flatSlice_iota,
+        test_index_flatSlice_iota
       ]
 
 singleton :: TestTree -> [TestTree]
@@ -131,14 +132,6 @@ test_slice_iota =
     testCase "slice . iota" $
       compareOps $
         slice (iota [n, n, n]) slice3
-
-test_flat_slice_iota :: [TestTree]
-test_flat_slice_iota =
-  singleton $
-    testCase "flatSlice . iota" $
-      compareOps $
-        flatSlice (iota [n * n * n * n]) $
-          FlatSlice 2 [FlatDimIndex (n * 2) 4, FlatDimIndex n 3, FlatDimIndex 1 2]
 
 test_reshape_slice_iota1 :: [TestTree]
 test_reshape_slice_iota1 =
@@ -439,3 +432,21 @@ test_rebase4_5 =
           compareOps $
             rebase ixfn_base ixfn_orig
       ]
+
+test_flatSlice_iota :: [TestTree]
+test_flatSlice_iota =
+  singleton $
+    testCase "flatSlice . iota" $
+      compareOps $
+        flatSlice (iota [n * n * n * n]) $
+          FlatSlice 2 [FlatDimIndex (n * 2) 4, FlatDimIndex n 3, FlatDimIndex 1 2]
+
+test_index_flatSlice_iota :: [TestTree]
+test_index_flatSlice_iota =
+  singleton $
+    testCase "index . flatSlice . iota " $
+      compareOps $
+        slice (flatSlice (iota [2 + n * n * n]) flat_slice) $
+          Slice [DimFix 2, DimSlice 0 n 1, DimSlice 0 n 1]
+  where
+    flat_slice = FlatSlice 2 [FlatDimIndex (n * n) 1, FlatDimIndex n 1, FlatDimIndex 1 1]
