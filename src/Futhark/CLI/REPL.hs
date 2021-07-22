@@ -47,7 +47,7 @@ banner =
 
 -- | Run @futhark repl@.
 main :: String -> [String] -> IO ()
-main = mainWithOptions interpreterConfig options "options... [program.fut]" run
+main = mainWithOptions () [] "options... [program.fut]" run
   where
     run [] _ = Just $ repl Nothing
     run [prog] _ = Just $ repl $ Just prog
@@ -110,25 +110,6 @@ confirmQuit = do
     Just 'y' -> return True
     Just 'n' -> return False
     _ -> confirmQuit
-
-newtype InterpreterConfig = InterpreterConfig {interpreterEntryPoint :: Name}
-
-interpreterConfig :: InterpreterConfig
-interpreterConfig = InterpreterConfig defaultEntryPoint
-
-options :: [FunOptDescr InterpreterConfig]
-options =
-  [ Option
-      "e"
-      ["entry-point"]
-      ( ReqArg
-          ( \entry -> Right $ \config ->
-              config {interpreterEntryPoint = nameFromString entry}
-          )
-          "NAME"
-      )
-      "The entry point to execute."
-  ]
 
 -- | Representation of breaking at a breakpoint, to allow for
 -- navigating through the stack frames and such.
