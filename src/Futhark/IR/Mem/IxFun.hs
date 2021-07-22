@@ -522,13 +522,13 @@ flatSlice (IxFun (LMAD offset [dim] :| []) oshp True) (FlatSlice new_offset is)
     IxFun
       ( LMAD
           (offset + new_offset * ldStride dim)
-          (map helper $ zip is [0 ..])
+          (zipWith helper is [0 ..])
           :| []
       )
       oshp
       True
   where
-    helper (FlatDimIndex n s, i) = LMADDim (ldStride dim * s) 0 n i Unknown
+    helper (FlatDimIndex n s) i = LMADDim (ldStride dim * s) 0 n i Unknown
 flatSlice _ _ =
   error "slice: reached impossible case when handling flat slices"
 
