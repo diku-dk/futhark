@@ -35,7 +35,7 @@ data ConcatArg
   | ArgReplicate [SubExp] SubExp
   | ArgVar VName
 
-toConcatArg :: ST.SymbolTable rep -> VName -> (ConcatArg, Certificates)
+toConcatArg :: ST.SymbolTable rep -> VName -> (ConcatArg, Certs)
 toConcatArg vtable v =
   case ST.lookupBasicOp v vtable of
     Just (ArrayLit ses _, cs) ->
@@ -46,9 +46,9 @@ toConcatArg vtable v =
       (ArgVar v, mempty)
 
 fromConcatArg ::
-  MonadBinder m =>
+  MonadBuilder m =>
   Type ->
-  (ConcatArg, Certificates) ->
+  (ConcatArg, Certs) ->
   m VName
 fromConcatArg t (ArgArrayLit ses, cs) =
   certifying cs $ letExp "concat_lit" $ BasicOp $ ArrayLit ses $ rowType t
@@ -61,9 +61,9 @@ fromConcatArg _ (ArgVar v, _) =
   pure v
 
 fuseConcatArg ::
-  [(ConcatArg, Certificates)] ->
-  (ConcatArg, Certificates) ->
-  [(ConcatArg, Certificates)]
+  [(ConcatArg, Certs)] ->
+  (ConcatArg, Certs) ->
+  [(ConcatArg, Certs)]
 fuseConcatArg xs (ArgArrayLit [], _) =
   xs
 fuseConcatArg xs (ArgReplicate [w] se, cs)
@@ -79,7 +79,7 @@ fuseConcatArg ((ArgReplicate x_ws x_se, x_cs) : xs) (ArgReplicate y_ws y_se, y_c
 fuseConcatArg xs y =
   y : xs
 
-simplifyConcat :: BinderOps rep => BottomUpRuleBasicOp rep
+simplifyConcat :: BuilderOps rep => BottomUpRuleBasicOp rep
 -- concat@1(transpose(x),transpose(y)) == transpose(concat@0(x,y))
 simplifyConcat (vtable, _) pat _ (Concat i x xs new_d)
   | Just r <- arrayRank <$> ST.lookupType x vtable,
@@ -142,7 +142,7 @@ simplifyConcat (vtable, _) pat aux (Concat 0 x xs outer_w)
     forSingleArray ys = ys
 simplifyConcat _ _ _ _ = Skip
 
-ruleBasicOp :: BinderOps rep => TopDownRuleBasicOp rep
+ruleBasicOp :: BuilderOps rep => TopDownRuleBasicOp rep
 ruleBasicOp vtable pat aux op
   | Just (op', cs) <- applySimpleRules defOf seType op =
     Simplify $ certifying (cs <> stmAuxCerts aux) $ letBind pat $ BasicOp op'
@@ -150,22 +150,21 @@ ruleBasicOp vtable pat aux op
     defOf = (`ST.lookupExp` vtable)
     seType (Var v) = ST.lookupType v vtable
     seType (Constant v) = Just $ Prim $ primValueType v
-ruleBasicOp vtable pat _ (Update src _ (Var v))
+ruleBasicOp vtable pat _ (Update _ src _ (Var v))
   | Just (BasicOp Scratch {}, _) <- ST.lookupExp v vtable =
     Simplify $ letBind pat $ BasicOp $ SubExp $ Var src
 -- If we are writing a single-element slice from some array, and the
 -- element of that array can be computed as a PrimExp based on the
 -- index, let's just write that instead.
-ruleBasicOp vtable pat aux (Update src [DimSlice i n s] (Var v))
+ruleBasicOp vtable pat aux (Update safety src (Slice [DimSlice i n s]) (Var v))
   | isCt1 n,
     isCt1 s,
     Just (ST.Indexed cs e) <- ST.index v [intConst Int64 0] vtable =
     Simplify $ do
       e' <- toSubExp "update_elem" e
-      auxing aux $
-        certifying cs $
-          letBind pat $ BasicOp $ Update src [DimFix i] e'
-ruleBasicOp vtable pat _ (Update dest destis (Var v))
+      auxing aux . certifying cs $
+        letBind pat $ BasicOp $ Update safety src (Slice [DimFix i]) e'
+ruleBasicOp vtable pat _ (Update _ dest destis (Var v))
   | Just (e, _) <- ST.lookupExp v vtable,
     arrayFrom e =
     Simplify $ letBind pat $ BasicOp $ SubExp $ Var dest
@@ -182,7 +181,7 @@ ruleBasicOp vtable pat _ (Update dest destis (Var v))
         True
     arrayFrom _ =
       False
-ruleBasicOp vtable pat _ (Update dest is se)
+ruleBasicOp vtable pat _ (Update _ dest is se)
   | Just dest_t <- ST.lookupType dest vtable,
     isFullSlice (arrayShape dest_t) is = Simplify $
     case se of
@@ -192,8 +191,8 @@ ruleBasicOp vtable pat _ (Update dest is se)
             BasicOp $ Reshape (map DimNew $ arrayDims dest_t) v
         letBind pat $ BasicOp $ Copy v_reshaped
       _ -> letBind pat $ BasicOp $ ArrayLit [se] $ rowType dest_t
-ruleBasicOp vtable pat (StmAux cs1 attrs _) (Update dest1 is1 (Var v1))
-  | Just (Update dest2 is2 se2, cs2) <- ST.lookupBasicOp v1 vtable,
+ruleBasicOp vtable pat (StmAux cs1 attrs _) (Update safety1 dest1 is1 (Var v1))
+  | Just (Update safety2 dest2 is2 se2, cs2) <- ST.lookupBasicOp v1 vtable,
     Just (Copy v3, cs3) <- ST.lookupBasicOp dest2 vtable,
     Just (Index v4 is4, cs4) <- ST.lookupBasicOp v3 vtable,
     is4 == is1,
@@ -201,7 +200,7 @@ ruleBasicOp vtable pat (StmAux cs1 attrs _) (Update dest1 is1 (Var v1))
     Simplify $
       certifying (cs1 <> cs2 <> cs3 <> cs4) $ do
         is5 <- subExpSlice $ sliceSlice (primExpSlice is1) (primExpSlice is2)
-        attributing attrs $ letBind pat $ BasicOp $ Update dest1 is5 se2
+        attributing attrs $ letBind pat $ BasicOp $ Update (max safety1 safety2) dest1 is5 se2
 ruleBasicOp vtable pat _ (CmpOp (CmpEq t) se1 se2)
   | Just m <- simplifyWith se1 se2 = Simplify m
   | Just m <- simplifyWith se2 se1 = Simplify m
@@ -210,7 +209,7 @@ ruleBasicOp vtable pat _ (CmpOp (CmpEq t) se1 se2)
       | Just bnd <- ST.lookupStm v vtable,
         If p tbranch fbranch _ <- stmExp bnd,
         Just (y, z) <-
-          returns v (stmPattern bnd) tbranch fbranch,
+          returns v (stmPat bnd) tbranch fbranch,
         not $ boundInBody tbranch `namesIntersect` freeIn y,
         not $ boundInBody fbranch `namesIntersect` freeIn z = Just $ do
         eq_x_y <-
@@ -229,10 +228,9 @@ ruleBasicOp vtable pat _ (CmpOp (CmpEq t) se1 se2)
       Nothing
 
     returns v ifpat tbranch fbranch =
-      fmap snd $
-        find ((== v) . patElemName . fst) $
-          zip (patternValueElements ifpat) $
-            zip (bodyResult tbranch) (bodyResult fbranch)
+      fmap snd . find ((== v) . patElemName . fst) $
+        zip (patElements ifpat) $
+          zip (map resSubExp (bodyResult tbranch)) (map resSubExp (bodyResult fbranch))
 ruleBasicOp _ pat _ (Replicate (Shape []) se@Constant {}) =
   Simplify $ letBind pat $ BasicOp $ SubExp se
 ruleBasicOp _ pat _ (Replicate (Shape []) (Var v)) = Simplify $ do
@@ -270,9 +268,8 @@ ruleBasicOp vtable pat aux (Index idd slice)
                   (map pe64 inds)
           new_inds' <-
             mapM (toSubExp "new_index") new_inds
-          certifying idd_cs $
-            auxing aux $
-              letBind pat $ BasicOp $ Index idd2 $ map DimFix new_inds'
+          certifying idd_cs . auxing aux $
+            letBind pat $ BasicOp $ Index idd2 $ Slice $ map DimFix new_inds'
 ruleBasicOp _ pat _ (BinOp (Pow t) e1 e2)
   | e1 == intConst t 2 =
     Simplify $ letBind pat $ BasicOp $ BinOp (Shl t) (intConst t 1) e2
@@ -340,20 +337,19 @@ ruleBasicOp vtable pat aux (Rotate offsets1 v)
 -- Update with a slice of that array.  This matters when the arrays
 -- are far away (on the GPU, say), because it avoids a copy of the
 -- scalar to and from the host.
-ruleBasicOp vtable pat aux (Update arr_x slice_x (Var v))
-  | Just _ <- sliceIndices slice_x,
-    Just (Index arr_y slice_y, cs_y) <- ST.lookupBasicOp v vtable,
+ruleBasicOp vtable pat aux (Update safety arr_x (Slice slice_x) (Var v))
+  | Just _ <- sliceIndices (Slice slice_x),
+    Just (Index arr_y (Slice slice_y), cs_y) <- ST.lookupBasicOp v vtable,
     ST.available arr_y vtable,
     -- XXX: we should check for proper aliasing here instead.
     arr_y /= arr_x,
     Just (slice_x_bef, DimFix i, []) <- focusNth (length slice_x - 1) slice_x,
     Just (slice_y_bef, DimFix j, []) <- focusNth (length slice_y - 1) slice_y = Simplify $ do
-    let slice_x' = slice_x_bef ++ [DimSlice i (intConst Int64 1) (intConst Int64 1)]
-        slice_y' = slice_y_bef ++ [DimSlice j (intConst Int64 1) (intConst Int64 1)]
+    let slice_x' = Slice $ slice_x_bef ++ [DimSlice i (intConst Int64 1) (intConst Int64 1)]
+        slice_y' = Slice $ slice_y_bef ++ [DimSlice j (intConst Int64 1) (intConst Int64 1)]
     v' <- letExp (baseString v ++ "_slice") $ BasicOp $ Index arr_y slice_y'
-    certifying cs_y $
-      auxing aux $
-        letBind pat $ BasicOp $ Update arr_x slice_x' $ Var v'
+    certifying cs_y . auxing aux $
+      letBind pat $ BasicOp $ Update safety arr_x slice_x' $ Var v'
 
 -- Simplify away 0<=i when 'i' is from a loop of form 'for i < n'.
 ruleBasicOp vtable pat aux (CmpOp CmpSle {} x y)
@@ -372,20 +368,30 @@ ruleBasicOp vtable pat aux (CmpOp CmpSlt {} (Var x) y)
   | isCt0 y,
     maybe False ST.entryIsSize $ ST.lookup x vtable =
     Simplify $ auxing aux $ letBind pat $ BasicOp $ SubExp $ constant False
+-- Remove certificates for variables whose definition already contain
+-- that certificate.
+ruleBasicOp vtable pat aux (SubExp (Var v))
+  | cs <- unCerts $ stmAuxCerts aux,
+    not $ null cs,
+    Just v_cs <- unCerts . stmCerts <$> ST.lookupStm v vtable,
+    cs' <- filter (`notElem` v_cs) cs,
+    cs' /= cs =
+    Simplify . certifying (Certs cs') $
+      letBind pat $ BasicOp $ SubExp $ Var v
 ruleBasicOp _ _ _ _ =
   Skip
 
-topDownRules :: BinderOps rep => [TopDownRule rep]
+topDownRules :: BuilderOps rep => [TopDownRule rep]
 topDownRules =
   [ RuleBasicOp ruleBasicOp
   ]
 
-bottomUpRules :: BinderOps rep => [BottomUpRule rep]
+bottomUpRules :: BuilderOps rep => [BottomUpRule rep]
 bottomUpRules =
   [ RuleBasicOp simplifyConcat
   ]
 
 -- | A set of simplification rules for 'BasicOp's.  Includes rules
 -- from "Futhark.Optimise.Simplify.Rules.Simple".
-basicOpRules :: (BinderOps rep, Aliased rep) => RuleBook rep
+basicOpRules :: (BuilderOps rep, Aliased rep) => RuleBook rep
 basicOpRules = ruleBook topDownRules bottomUpRules <> loopRules

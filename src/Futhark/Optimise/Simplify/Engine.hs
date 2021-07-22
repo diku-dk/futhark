@@ -77,7 +77,7 @@ import Futhark.IR
 import Futhark.IR.Prop.Aliases
 import Futhark.Optimise.Simplify.Rep
 import Futhark.Optimise.Simplify.Rule
-import Futhark.Util (nubOrd, splitFromEnd)
+import Futhark.Util (nubOrd)
 
 data HoistBlockers rep = HoistBlockers
   { -- | Blocker for hoisting out of parallel loops.
@@ -111,12 +111,12 @@ emptyEnv rules blockers =
       envVtable = mempty
     }
 
-type Protect m = SubExp -> Pattern (Rep m) -> Op (Rep m) -> Maybe (m ())
+type Protect m = SubExp -> Pat (Rep m) -> Op (Rep m) -> Maybe (m ())
 
 data SimpleOps rep = SimpleOps
   { mkExpDecS ::
       ST.SymbolTable (Wise rep) ->
-      Pattern (Wise rep) ->
+      Pat (Wise rep) ->
       Exp (Wise rep) ->
       SimpleM rep (ExpDec (Wise rep)),
     mkBodyS ::
@@ -127,7 +127,7 @@ data SimpleOps rep = SimpleOps
     -- | Make a hoisted Op safe.  The SubExp is a boolean
     -- that is true when the value of the statement will
     -- actually be used.
-    protectHoistedOpS :: Protect (Binder (Wise rep)),
+    protectHoistedOpS :: Protect (Builder (Wise rep)),
     opUsageS :: Op (Wise rep) -> UT.UsageTable,
     simplifyOpS :: SimplifyOp rep (Op rep)
   }
@@ -135,7 +135,7 @@ data SimpleOps rep = SimpleOps
 type SimplifyOp rep op = op -> SimpleM rep (OpWithWisdom op, Stms (Wise rep))
 
 bindableSimpleOps ::
-  (SimplifiableRep rep, Bindable rep) =>
+  (SimplifiableRep rep, Buildable rep) =>
   SimplifyOp rep (Op rep) ->
   SimpleOps rep
 bindableSimpleOps =
@@ -149,7 +149,7 @@ newtype SimpleM rep a
   = SimpleM
       ( ReaderT
           (SimpleOps rep, Env rep)
-          (State (VNameSource, Bool, Certificates))
+          (State (VNameSource, Bool, Certs))
           a
       )
   deriving
@@ -157,7 +157,7 @@ newtype SimpleM rep a
       Functor,
       Monad,
       MonadReader (SimpleOps rep, Env rep),
-      MonadState (VNameSource, Bool, Certificates)
+      MonadState (VNameSource, Bool, Certs)
     )
 
 instance MonadFreshNames (SimpleM rep) where
@@ -207,7 +207,7 @@ localVtable ::
   SimpleM rep a
 localVtable f = local $ \(ops, env) -> (ops, env {envVtable = f $ envVtable env})
 
-collectCerts :: SimpleM rep a -> SimpleM rep (a, Certificates)
+collectCerts :: SimpleM rep a -> SimpleM rep (a, Certs)
 collectCerts m = do
   x <- m
   (a, b, cs) <- get
@@ -219,7 +219,7 @@ collectCerts m = do
 changed :: SimpleM rep ()
 changed = modify $ \(src, _, cs) -> (src, True, cs)
 
-usedCerts :: Certificates -> SimpleM rep ()
+usedCerts :: Certs -> SimpleM rep ()
 usedCerts cs = modify $ \(a, b, c) -> (a, b, cs <> c)
 
 -- | Indicate in the symbol table that we have descended into a loop.
@@ -244,7 +244,7 @@ bindArrayLParams params =
 
 bindMerge ::
   SimplifiableRep rep =>
-  [(FParam (Wise rep), SubExp, SubExp)] ->
+  [(FParam (Wise rep), SubExp, SubExpRes)] ->
   SimpleM rep a ->
   SimpleM rep a
 bindMerge = localVtable . ST.insertLoopMerge
@@ -269,7 +269,7 @@ protectIfHoisted ::
 protectIfHoisted cond side m = do
   (x, stms) <- m
   ops <- asks $ protectHoistedOpS . fst
-  runBinder $ do
+  runBuilder $ do
     if not $ all (safeExp . stmExp) stms
       then do
         cond' <-
@@ -288,14 +288,13 @@ protectIfHoisted cond side m = do
 protectLoopHoisted ::
   SimplifiableRep rep =>
   [(FParam (Wise rep), SubExp)] ->
-  [(FParam (Wise rep), SubExp)] ->
   LoopForm (Wise rep) ->
   SimpleM rep (a, Stms (Wise rep)) ->
   SimpleM rep (a, Stms (Wise rep))
-protectLoopHoisted ctx val form m = do
+protectLoopHoisted merge form m = do
   (x, stms) <- m
   ops <- asks $ protectHoistedOpS . fst
-  runBinder $ do
+  runBuilder $ do
     if not $ all (safeExp . stmExp) stms
       then do
         is_nonempty <- checkIfNonEmpty
@@ -307,7 +306,7 @@ protectLoopHoisted ctx val form m = do
       case form of
         WhileLoop cond
           | Just (_, cond_init) <-
-              find ((== cond) . paramName . fst) $ ctx ++ val ->
+              find ((== cond) . paramName . fst) merge ->
             return cond_init
           | otherwise -> return $ constant True -- infinite loop
         ForLoop _ it bound _ ->
@@ -315,26 +314,16 @@ protectLoopHoisted ctx val form m = do
             BasicOp $ CmpOp (CmpSlt it) (intConst it 0) bound
 
 protectIf ::
-  MonadBinder m =>
+  MonadBuilder m =>
   Protect m ->
   (Exp (Rep m) -> Bool) ->
   SubExp ->
   Stm (Rep m) ->
   m ()
-protectIf
-  _
-  _
-  taken
-  ( Let
-      pat
-      aux
-      (If cond taken_body untaken_body (IfDec if_ts IfFallback))
-    ) = do
-    cond' <- letSubExp "protect_cond_conj" $ BasicOp $ BinOp LogAnd taken cond
-    auxing aux $
-      letBind pat $
-        If cond' taken_body untaken_body $
-          IfDec if_ts IfFallback
+protectIf _ _ taken (Let pat aux (If cond taken_body untaken_body (IfDec if_ts IfFallback))) = do
+  cond' <- letSubExp "protect_cond_conj" $ BasicOp $ BinOp LogAnd taken cond
+  auxing aux . letBind pat $
+    If cond' taken_body untaken_body $ IfDec if_ts IfFallback
 protectIf _ _ taken (Let pat aux (BasicOp (Assert cond msg loc))) = do
   not_taken <- letSubExp "loop_not_taken" $ BasicOp $ UnOp Not taken
   cond' <- letSubExp "protect_assert_disj" $ BasicOp $ BinOp LogOr not_taken cond
@@ -350,15 +339,10 @@ protectIf _ f taken (Let pat aux e)
       Nothing -> do
         taken_body <- eBody [pure e]
         untaken_body <-
-          eBody $
-            map
-              (emptyOfType $ patternContextNames pat)
-              (patternValueTypes pat)
-        if_ts <- expTypesFromPattern pat
-        auxing aux $
-          letBind pat $
-            If taken taken_body untaken_body $
-              IfDec if_ts IfFallback
+          eBody $ map (emptyOfType $ patNames pat) (patTypes pat)
+        if_ts <- expTypesFromPat pat
+        auxing aux . letBind pat $
+          If taken taken_body untaken_body $ IfDec if_ts IfFallback
 protectIf _ _ _ stm =
   addStm stm
 
@@ -382,7 +366,7 @@ makeSafe (BasicOp (BinOp (UMod t _) x y)) =
 makeSafe _ =
   Nothing
 
-emptyOfType :: MonadBinder m => [VName] -> Type -> m (Exp (Rep m))
+emptyOfType :: MonadBuilder m => [VName] -> Type -> m (Exp (Rep m))
 emptyOfType _ Mem {} =
   error "emptyOfType: Cannot hoist non-existential memory."
 emptyOfType _ Acc {} =
@@ -401,7 +385,7 @@ emptyOfType ctx_names (Array et shape _) = do
 -- further optimisation..
 notWorthHoisting :: ASTRep rep => BlockPred rep
 notWorthHoisting _ _ (Let pat _ e) =
-  not (safeExp e) && any ((> 0) . arrayRank) (patternTypes pat)
+  not (safeExp e) && any ((> 0) . arrayRank) (patTypes pat)
 
 hoistStms ::
   SimplifiableRep rep =>
@@ -479,7 +463,7 @@ blockUnhoistedDeps = snd . mapAccumL block mempty
         (blocked, Right need)
 
 provides :: Stm rep -> [VName]
-provides = patternNames . stmPattern
+provides = patNames . stmPat
 
 expandUsage ::
   (ASTRep rep, Aliased rep) =>
@@ -490,7 +474,7 @@ expandUsage ::
   UT.UsageTable
 expandUsage usageInStm vtable utable stm@(Let pat _ e) =
   UT.expand (`ST.lookupAliases` vtable) (usageInStm stm <> usageThroughAliases)
-    <> ( if any (`UT.isSize` utable) (patternNames pat)
+    <> ( if any (`UT.isSize` utable) (patNames pat)
            then UT.sizeUsages (freeIn e)
            else mempty
        )
@@ -499,7 +483,7 @@ expandUsage usageInStm vtable utable stm@(Let pat _ e) =
     usageThroughAliases =
       mconcat $
         mapMaybe usageThroughBindeeAliases $
-          zip (patternNames pat) (patternAliases pat)
+          zip (patNames pat) (patAliases pat)
     usageThroughBindeeAliases (name, aliases) = do
       uses <- UT.lookup name utable
       return $ mconcat $ map (`UT.usage` uses) $ namesToList aliases
@@ -522,7 +506,7 @@ andAlso :: BlockPred rep -> BlockPred rep -> BlockPred rep
 andAlso p1 p2 body vtable need = p1 body vtable need && p2 body vtable need
 
 isConsumed :: BlockPred rep
-isConsumed _ utable = any (`UT.isConsumed` utable) . patternNames . stmPattern
+isConsumed _ utable = any (`UT.isConsumed` utable) . patNames . stmPat
 
 isOp :: BlockPred rep
 isOp _ _ (Let _ _ Op {}) = True
@@ -534,7 +518,7 @@ constructBody ::
   Result ->
   SimpleM rep (Body (Wise rep))
 constructBody stms res =
-  fmap fst . runBinder . buildBody_ $ do
+  fmap fst . runBuilder . buildBody_ $ do
     addStms stms
     pure res
 
@@ -634,7 +618,7 @@ hoistCommon cond ifsort ((res1, usages1), stms1) ((res2, usages2), stms2) = do
       isNotHoistableBnd _ _ (Let _ _ (BasicOp ArrayLit {})) = False
       isNotHoistableBnd _ _ (Let _ _ (BasicOp SubExp {})) = False
       isNotHoistableBnd _ usages (Let pat _ _)
-        | any (`UT.isSize` usages) $ patternNames pat =
+        | any (`UT.isSize` usages) $ patNames pat =
           False
       isNotHoistableBnd _ _ stm
         | is_alloc_fun stm = False
@@ -675,40 +659,16 @@ simplifyBody ds (Body _ bnds res) =
 -- | Simplify a single 'Result'.  The @[Diet]@ only covers the value
 -- elements, because the context cannot be consumed.
 simplifyResult ::
-  SimplifiableRep rep =>
-  [Diet] ->
-  Result ->
-  SimpleM rep (Result, UT.UsageTable)
+  SimplifiableRep rep => [Diet] -> Result -> SimpleM rep (Result, UT.UsageTable)
 simplifyResult ds res = do
-  let (ctx_res, val_res) = splitFromEnd (length ds) res
-  -- Copy propagation is a little trickier here, because there is no
-  -- place to put the certificates when copy-propagating a certified
-  -- statement.  However, for results in the *context*, it is OK to
-  -- just throw away the certificates, because for the program to be
-  -- type-correct, those statements must anyway be used (or
-  -- copy-propagated into) the statements producing the value result.
-  (ctx_res', _ctx_res_cs) <- collectCerts $ mapM simplify ctx_res
-  val_res' <- mapM simplify' val_res
-
-  let consumption = consumeResult $ zip ds val_res'
-      res' = ctx_res' <> val_res'
+  res' <- mapM simplify res
+  let consumption = consumeResult $ zip ds res'
   return (res', UT.usages (freeIn res') <> consumption)
-  where
-    simplify' (Var name) = do
-      bnd <- ST.lookupSubExp name <$> askVtable
-      case bnd of
-        Just (Constant v, cs)
-          | cs == mempty -> return $ Constant v
-        Just (Var id', cs)
-          | cs == mempty -> return $ Var id'
-        _ -> return $ Var name
-    simplify' (Constant v) =
-      return $ Constant v
 
 isDoLoopResult :: Result -> UT.UsageTable
 isDoLoopResult = mconcat . map checkForVar
   where
-    checkForVar (Var ident) = UT.inResultUsage ident
+    checkForVar (SubExpRes _ (Var ident)) = UT.inResultUsage ident
     checkForVar _ = mempty
 
 simplifyStms ::
@@ -722,7 +682,7 @@ simplifyStms stms m =
     Just (Let pat (StmAux stm_cs attrs dec) e, stms') -> do
       stm_cs' <- simplify stm_cs
       ((e', e_stms), e_cs) <- collectCerts $ simplifyExp e
-      (pat', pat_cs) <- collectCerts $ simplifyPattern pat
+      (pat', pat_cs) <- collectCerts $ simplifyPat pat
       let cs = stm_cs' <> e_cs <> pat_cs
       inspectStms e_stms $
         inspectStm (mkWiseLetStm pat' (StmAux cs attrs dec) e') $
@@ -778,16 +738,12 @@ simplifyExp (If cond tbranch fbranch (IfDec ts ifsort)) = do
   fbranch' <- simplifyBody ds fbranch
   (tbranch'', fbranch'', hoisted) <- hoistCommon cond' ifsort tbranch' fbranch'
   return (If cond' tbranch'' fbranch'' $ IfDec ts' ifsort, hoisted)
-simplifyExp (DoLoop ctx val form loopbody) = do
-  let (ctxparams, ctxinit) = unzip ctx
-      (valparams, valinit) = unzip val
-  ctxparams' <- mapM (traverse simplify) ctxparams
-  ctxinit' <- mapM simplify ctxinit
-  valparams' <- mapM (traverse simplify) valparams
-  valinit' <- mapM simplify valinit
-  let ctx' = zip ctxparams' ctxinit'
-      val' = zip valparams' valinit'
-      diets = map (diet . paramDeclType) valparams'
+simplifyExp (DoLoop merge form loopbody) = do
+  let (params, args) = unzip merge
+  params' <- mapM (traverse simplify) params
+  args' <- mapM simplify args
+  let merge' = zip params' args'
+      diets = map (diet . paramDeclType) params'
   (form', boundnames, wrapbody) <- case form of
     ForLoop loopvar it boundexp loopvars -> do
       boundexp' <- simplify boundexp
@@ -799,7 +755,7 @@ simplifyExp (DoLoop ctx val form loopbody) = do
         ( form',
           namesFromList (loopvar : map paramName loop_params') <> fparamnames,
           bindLoopVar loopvar it boundexp'
-            . protectLoopHoisted ctx' val' form'
+            . protectLoopHoisted merge' form'
             . bindArrayLParams loop_params'
         )
     WhileLoop cond -> do
@@ -807,31 +763,30 @@ simplifyExp (DoLoop ctx val form loopbody) = do
       return
         ( WhileLoop cond',
           fparamnames,
-          protectLoopHoisted ctx' val' (WhileLoop cond')
+          protectLoopHoisted merge' (WhileLoop cond')
         )
   seq_blocker <- asksEngineEnv $ blockHoistSeq . envHoistBlockers
   ((loopstms, loopres), hoisted) <-
-    enterLoop $
-      consumeMerge $
-        bindMerge (zipWith withRes (ctx' ++ val') (bodyResult loopbody)) $
-          wrapbody $
-            blockIf
-              ( hasFree boundnames `orIf` isConsumed
-                  `orIf` seq_blocker
-                  `orIf` notWorthHoisting
-              )
-              $ do
-                ((res, uses), stms) <- simplifyBody diets loopbody
-                return ((res, uses <> isDoLoopResult res), stms)
+    enterLoop . consumeMerge $
+      bindMerge (zipWith withRes merge' (bodyResult loopbody)) $
+        wrapbody $
+          blockIf
+            ( hasFree boundnames `orIf` isConsumed
+                `orIf` seq_blocker
+                `orIf` notWorthHoisting
+            )
+            $ do
+              ((res, uses), stms) <- simplifyBody diets loopbody
+              return ((res, uses <> isDoLoopResult res), stms)
   loopbody' <- constructBody loopstms loopres
-  return (DoLoop ctx' val' form' loopbody', hoisted)
+  return (DoLoop merge' form' loopbody', hoisted)
   where
     fparamnames =
-      namesFromList (map (paramName . fst) $ ctx ++ val)
+      namesFromList (map (paramName . fst) merge)
     consumeMerge =
       localVtable $ flip (foldl' (flip ST.consume)) $ namesToList consumed_by_merge
     consumed_by_merge =
-      freeIn $ map snd $ filter (unique . paramDeclType . fst) val
+      freeIn $ map snd $ filter (unique . paramDeclType . fst) merge
     withRes (p, x) y = (p, x, y)
 simplifyExp (Op op) = do
   (op', stms) <- simplifyOp op
@@ -896,7 +851,7 @@ type SimplifiableRep rep =
     Simplifiable (BranchType rep),
     CanBeWise (Op rep),
     ST.IndexOp (OpWithWisdom (Op rep)),
-    BinderOps (Wise rep),
+    BuilderOps (Wise rep),
     IsOp (Op rep)
   )
 
@@ -939,14 +894,18 @@ instance Simplifiable SubExp where
   simplify (Constant v) =
     return $ Constant v
 
-simplifyPattern ::
+instance Simplifiable SubExpRes where
+  simplify (SubExpRes cs se) = do
+    cs' <- simplify cs
+    (se', se_cs) <- collectCerts $ simplify se
+    pure $ SubExpRes (se_cs <> cs') se'
+
+simplifyPat ::
   (SimplifiableRep rep, Simplifiable dec) =>
-  PatternT dec ->
-  SimpleM rep (PatternT dec)
-simplifyPattern pat =
-  Pattern
-    <$> mapM inspect (patternContextElements pat)
-    <*> mapM inspect (patternValueElements pat)
+  PatT dec ->
+  SimpleM rep (PatT dec)
+simplifyPat (Pat xs) =
+  Pat <$> mapM inspect xs
   where
     inspect (PatElem name rep) = PatElem name <$> simplify rep
 
@@ -991,6 +950,9 @@ instance Simplifiable d => Simplifiable (DimIndex d) where
   simplify (DimFix i) = DimFix <$> simplify i
   simplify (DimSlice i n s) = DimSlice <$> simplify i <*> simplify n <*> simplify s
 
+instance Simplifiable d => Simplifiable (Slice d) where
+  simplify = traverse simplify
+
 simplifyLambda ::
   SimplifiableRep rep =>
   Lambda rep ->
@@ -1023,20 +985,20 @@ simplifyLambdaMaybeHoist blocked lam@(Lambda params body rettype) = do
   rettype' <- simplify rettype
   return (Lambda params' body' rettype', hoisted)
 
-consumeResult :: [(Diet, SubExp)] -> UT.UsageTable
+consumeResult :: [(Diet, SubExpRes)] -> UT.UsageTable
 consumeResult = mconcat . map inspect
   where
-    inspect (Consume, se) =
+    inspect (Consume, SubExpRes _ se) =
       mconcat $ map UT.consumedUsage $ namesToList $ subExpAliases se
     inspect _ = mempty
 
-instance Simplifiable Certificates where
-  simplify (Certificates ocs) = Certificates . nubOrd . concat <$> mapM check ocs
+instance Simplifiable Certs where
+  simplify (Certs ocs) = Certs . nubOrd . concat <$> mapM check ocs
     where
       check idd = do
         vv <- ST.lookupSubExp idd <$> askVtable
         case vv of
-          Just (Constant _, Certificates cs) -> return cs
+          Just (Constant _, Certs cs) -> return cs
           Just (Var idd', _) -> return [idd']
           _ -> return [idd]
 

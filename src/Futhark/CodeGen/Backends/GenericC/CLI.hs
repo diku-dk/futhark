@@ -156,8 +156,8 @@ opaqueToCType desc vds =
    in [C.cty|struct $id:name|]
 
 externalValueToCType :: ExternalValue -> C.Type
-externalValueToCType (TransparentValue vd) = valueDescToCType vd
-externalValueToCType (OpaqueValue desc vds) = opaqueToCType desc vds
+externalValueToCType (TransparentValue _ vd) = valueDescToCType vd
+externalValueToCType (OpaqueValue _ desc vds) = opaqueToCType desc vds
 
 primTypeInfo :: PrimType -> Signedness -> C.Exp
 primTypeInfo (IntType it) t = case (it, t) of
@@ -184,14 +184,14 @@ readPrimStm place i t ept =
           }|]
 
 readInput :: Int -> ExternalValue -> ([C.BlockItem], C.Stm, C.Stm, C.Stm, C.Exp)
-readInput i (OpaqueValue desc _) =
+readInput i (OpaqueValue _ desc _) =
   ( [C.citems|futhark_panic(1, "Cannot read input #%d of type %s\n", $int:i, $string:desc);|],
     [C.cstm|;|],
     [C.cstm|;|],
     [C.cstm|;|],
     [C.cexp|NULL|]
   )
-readInput i (TransparentValue (ScalarValue t ept _)) =
+readInput i (TransparentValue _ (ScalarValue t ept _)) =
   let dest = "read_value_" ++ show i
    in ( [C.citems|$ty:(primTypeToCType t) $id:dest;
                   $stm:(readPrimStm dest i t ept);|],
@@ -200,7 +200,7 @@ readInput i (TransparentValue (ScalarValue t ept _)) =
         [C.cstm|;|],
         [C.cexp|$id:dest|]
       )
-readInput i (TransparentValue (ArrayValue _ _ t ept dims)) =
+readInput i (TransparentValue _ (ArrayValue _ _ t ept dims)) =
   let dest = "read_value_" ++ show i
       shape = "read_shape_" ++ show i
       arr = "read_arr_" ++ show i
@@ -252,19 +252,19 @@ prepareOutputs = zipWith prepareResult [(0 :: Int) ..]
           result = "result_" ++ show i
 
       case ev of
-        TransparentValue ScalarValue {} ->
+        TransparentValue _ ScalarValue {} ->
           ( [C.citem|$ty:ty $id:result;|],
             [C.cexp|$id:result|],
             [C.cstm|;|]
           )
-        TransparentValue (ArrayValue _ _ t ept dims) ->
+        TransparentValue _ (ArrayValue _ _ t ept dims) ->
           let name = arrayName t ept $ length dims
               free_array = "futhark_free_" ++ name
            in ( [C.citem|$ty:ty *$id:result;|],
                 [C.cexp|$id:result|],
                 [C.cstm|assert($id:free_array(ctx, $id:result) == 0);|]
               )
-        OpaqueValue desc vds ->
+        OpaqueValue _ desc vds ->
           let free_opaque = "futhark_free_" ++ opaqueName desc vds
            in ( [C.citem|$ty:ty *$id:result;|],
                 [C.cexp|$id:result|],
@@ -277,11 +277,11 @@ printPrimStm dest val bt ept =
 
 -- | Return a statement printing the given external value.
 printStm :: ExternalValue -> C.Exp -> C.Stm
-printStm (OpaqueValue desc _) _ =
+printStm (OpaqueValue _ desc _) _ =
   [C.cstm|printf("#<opaque %s>", $string:desc);|]
-printStm (TransparentValue (ScalarValue bt ept _)) e =
+printStm (TransparentValue _ (ScalarValue bt ept _)) e =
   printPrimStm [C.cexp|stdout|] e bt ept
-printStm (TransparentValue (ArrayValue _ _ bt ept shape)) e =
+printStm (TransparentValue _ (ArrayValue _ _ bt ept shape)) e =
   let values_array = "futhark_values_" ++ name
       shape_array = "futhark_shape_" ++ name
       num_elems = cproduct [[C.cexp|$id:shape_array(ctx, $exp:e)[$int:i]|] | i <- [0 .. rank -1]]
@@ -304,10 +304,8 @@ printResult = concatMap f
     f (v, e) = [printStm v e, [C.cstm|printf("\n");|]]
 
 cliEntryPoint ::
-  Name ->
-  FunctionT a ->
-  Maybe (C.Definition, C.Initializer)
-cliEntryPoint fname fun@(Function _ _ _ _ results args) = do
+  FunctionT a -> Maybe (C.Definition, C.Initializer)
+cliEntryPoint fun@(Function _ _ _ _ results args) = do
   entry_point_name <- nameToString <$> functionEntry fun
   let (input_items, pack_input, free_input, free_parsed, input_args) =
         unzip5 $ readInputs args
@@ -376,7 +374,7 @@ cliEntryPoint fname fun@(Function _ _ _ _ results args) = do
      $items:(mconcat input_items)
 
      if (end_of_input(stdin) != 0) {
-       futhark_panic(1, "Expected EOF on stdin after reading input for %s.\n", $string:(quote (pretty fname)));
+       futhark_panic(1, "Expected EOF on stdin after reading input for \"%s\".\n", $string:(pretty entry_point_name));
      }
 
      $items:output_decls
@@ -423,7 +421,7 @@ cliDefs options (Functions funs) =
       option_parser =
         generateOptionParser "parse_options" $ genericOptions ++ options
       (cli_entry_point_decls, entry_point_inits) =
-        unzip $ mapMaybe (uncurry cliEntryPoint) funs
+        unzip $ mapMaybe (cliEntryPoint . snd) funs
    in [C.cunit|
 $esc:("#include <getopt.h>")
 $esc:("#include <ctype.h>")

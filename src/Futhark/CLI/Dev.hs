@@ -14,7 +14,7 @@ import qualified Data.Text.IO as T
 import Futhark.Actions
 import qualified Futhark.Analysis.Alias as Alias
 import Futhark.Analysis.Metrics (OpMetrics)
-import Futhark.Compiler.CLI
+import Futhark.Compiler.CLI hiding (compilerMain)
 import Futhark.IR (ASTRep, Op, Prog, pretty)
 import qualified Futhark.IR.GPU as GPU
 import qualified Futhark.IR.GPUMem as GPUMem
@@ -81,6 +81,7 @@ data Config = Config
     -- | Nothing is distinct from a empty pipeline -
     -- it means we don't even run the internaliser.
     futharkPipeline :: FutharkPipeline,
+    futharkCompilerMode :: CompilerMode,
     futharkAction :: UntypedAction,
     -- | If true, prints programs as raw ASTs instead
     -- of their prettyprinted form.
@@ -138,12 +139,14 @@ newtype UntypedPass
         FutharkM UntypedPassState
       )
 
+type BackendAction rep = FutharkConfig -> CompilerMode -> FilePath -> Action rep
+
 data UntypedAction
   = SOACSAction (Action SOACS.SOACS)
   | GPUAction (Action GPU.GPU)
-  | GPUMemAction (FilePath -> Action GPUMem.GPUMem)
-  | MCMemAction (FilePath -> Action MCMem.MCMem)
-  | SeqMemAction (FilePath -> Action SeqMem.SeqMem)
+  | GPUMemAction (BackendAction GPUMem.GPUMem)
+  | MCMemAction (BackendAction MCMem.MCMem)
+  | SeqMemAction (BackendAction SeqMem.SeqMem)
   | PolyAction
       ( forall rep.
         ( ASTRep rep,
@@ -152,14 +155,6 @@ data UntypedAction
         ) =>
         Action rep
       )
-
-untypedActionName :: UntypedAction -> String
-untypedActionName (SOACSAction a) = actionName a
-untypedActionName (GPUAction a) = actionName a
-untypedActionName (SeqMemAction a) = actionName $ a ""
-untypedActionName (GPUMemAction a) = actionName $ a ""
-untypedActionName (MCMemAction a) = actionName $ a ""
-untypedActionName (PolyAction a) = actionName (a :: Action SOACS.SOACS)
 
 instance Representation UntypedAction where
   representation (SOACSAction _) = "SOACS"
@@ -170,7 +165,7 @@ instance Representation UntypedAction where
   representation PolyAction {} = "<any>"
 
 newConfig :: Config
-newConfig = Config newFutharkConfig (Pipeline []) action False
+newConfig = Config newFutharkConfig (Pipeline []) ToExecutable action False
   where
     action = PolyAction printAction
 
@@ -404,10 +399,31 @@ commandLineOptions =
       "Parse and pretty-print the AST of the given program.",
     Option
       []
+      ["backend"]
+      ( ReqArg
+          ( \arg -> do
+              action <- case arg of
+                "c" -> Right $ SeqMemAction compileCAction
+                "multicore" -> Right $ MCMemAction compileMulticoreAction
+                "opencl" -> Right $ GPUMemAction compileOpenCLAction
+                "cuda" -> Right $ GPUMemAction compileCUDAAction
+                "wasm" -> Right $ SeqMemAction compileCtoWASMAction
+                "wasm-multicore" -> Right $ MCMemAction compileMulticoreToWASMAction
+                "python" -> Right $ SeqMemAction compilePythonAction
+                "pyopencl" -> Right $ GPUMemAction compilePyOpenCLAction
+                _ -> Left $ error $ "Invalid backend: " <> arg
+
+              Right $ \opts -> opts {futharkAction = action}
+          )
+          "c|multicore|opencl|cuda|python|pyopencl"
+      )
+      "Run this compiler backend on pipeline result.",
+    Option
+      []
       ["compile-imperative"]
       ( NoArg $
           Right $ \opts ->
-            opts {futharkAction = SeqMemAction $ const impCodeGenAction}
+            opts {futharkAction = SeqMemAction $ \_ _ _ -> impCodeGenAction}
       )
       "Translate program into the imperative IL and write it on standard output.",
     Option
@@ -415,7 +431,7 @@ commandLineOptions =
       ["compile-imperative-kernels"]
       ( NoArg $
           Right $ \opts ->
-            opts {futharkAction = GPUMemAction $ const kernelImpCodeGenAction}
+            opts {futharkAction = GPUMemAction $ \_ _ _ -> kernelImpCodeGenAction}
       )
       "Translate program into the imperative IL with kernels and write it on standard output.",
     Option
@@ -423,25 +439,9 @@ commandLineOptions =
       ["compile-imperative-multicore"]
       ( NoArg $
           Right $ \opts ->
-            opts {futharkAction = MCMemAction $ const multicoreImpCodeGenAction}
+            opts {futharkAction = MCMemAction $ \_ _ _ -> multicoreImpCodeGenAction}
       )
       "Translate program into the imperative IL with kernels and write it on standard output.",
-    Option
-      []
-      ["compile-opencl"]
-      ( NoArg $
-          Right $ \opts ->
-            opts {futharkAction = GPUMemAction $ compileOpenCLAction newFutharkConfig ToExecutable}
-      )
-      "Compile the program using the OpenCL backend.",
-    Option
-      []
-      ["compile-c"]
-      ( NoArg $
-          Right $ \opts ->
-            opts {futharkAction = SeqMemAction $ compileCAction newFutharkConfig ToExecutable}
-      )
-      "Compile the program using the C backend.",
     Option
       "p"
       ["print"]
@@ -500,6 +500,21 @@ commandLineOptions =
           "NAME"
       )
       "Treat this function as an additional entry point.",
+    Option
+      []
+      ["library"]
+      (NoArg $ Right $ \opts -> opts {futharkCompilerMode = ToLibrary})
+      "Generate a library instead of an executable.",
+    Option
+      []
+      ["executable"]
+      (NoArg $ Right $ \opts -> opts {futharkCompilerMode = ToExecutable})
+      "Generate an executable instead of a library (set by default).",
+    Option
+      []
+      ["server"]
+      (NoArg $ Right $ \opts -> opts {futharkCompilerMode = ToServer})
+      "Generate a server executable.",
     typedPassOption soacsProg Seq firstOrderTransform "f",
     soacsPassOption fuseSOACs "o",
     soacsPassOption inlineFunctions [],
@@ -528,7 +543,7 @@ commandLineOptions =
       "Run the default optimised kernels pipeline"
       kernelsPipeline
       []
-      ["kernels"],
+      ["gpu"],
     pipelineOption
       getSOACSProg
       "GPUMem"
@@ -536,15 +551,15 @@ commandLineOptions =
       "Run the full GPU compilation pipeline"
       gpuPipeline
       []
-      ["gpu"],
+      ["gpu-mem"],
     pipelineOption
       getSOACSProg
-      "GPUMem"
+      "SeqMem"
       SeqMem
       "Run the sequential CPU compilation pipeline"
       sequentialCpuPipeline
       []
-      ["cpu"],
+      ["seq-mem"],
     pipelineOption
       getSOACSProg
       "MCMem"
@@ -552,7 +567,7 @@ commandLineOptions =
       "Run the multicore compilation pipeline"
       multicorePipeline
       []
-      ["multicore"]
+      ["mc-mem"]
   ]
 
 incVerbosity :: Maybe FilePath -> FutharkConfig -> FutharkConfig
@@ -654,8 +669,8 @@ main = mainWithOptions newConfig commandLineOptions "options... program" compile
                   (".fut_soacs", readCore parseSOACS SOACS),
                   (".fut_seq", readCore parseSeq Seq),
                   (".fut_seq_mem", readCore parseSeqMem SeqMem),
-                  (".fut_kernels", readCore parseGPU GPU),
-                  (".fut_kernels_mem", readCore parseGPUMem GPUMem),
+                  (".fut_gpu", readCore parseGPU GPU),
+                  (".fut_gpu_mem", readCore parseGPUMem GPUMem),
                   (".fut_mc", readCore parseMC MC),
                   (".fut_mc_mem", readCore parseMCMem MCMem)
                 ]
@@ -677,43 +692,48 @@ runPolyPasses config base initial_prog = do
       (runPolyPass pipeline_config)
       initial_prog
       (getFutharkPipeline config)
-  logMsg $ "Running action " ++ untypedActionName (futharkAction config)
   case (end_prog, futharkAction config) of
     (SOACS prog, SOACSAction action) ->
-      actionProcedure action prog
+      otherAction action prog
     (GPU prog, GPUAction action) ->
-      actionProcedure action prog
+      otherAction action prog
     (SeqMem prog, SeqMemAction action) ->
-      actionProcedure (action base) prog
+      backendAction prog action
     (GPUMem prog, GPUMemAction action) ->
-      actionProcedure (action base) prog
+      backendAction prog action
     (MCMem prog, MCMemAction action) ->
-      actionProcedure (action base) prog
+      backendAction prog action
     (SOACS soacs_prog, PolyAction acs) ->
-      actionProcedure acs soacs_prog
+      otherAction acs soacs_prog
     (GPU kernels_prog, PolyAction acs) ->
-      actionProcedure acs kernels_prog
+      otherAction acs kernels_prog
     (MC mc_prog, PolyAction acs) ->
-      actionProcedure acs mc_prog
+      otherAction acs mc_prog
     (Seq seq_prog, PolyAction acs) ->
-      actionProcedure acs seq_prog
+      otherAction acs seq_prog
     (GPUMem mem_prog, PolyAction acs) ->
-      actionProcedure acs mem_prog
+      otherAction acs mem_prog
     (SeqMem mem_prog, PolyAction acs) ->
-      actionProcedure acs mem_prog
+      otherAction acs mem_prog
     (MCMem mem_prog, PolyAction acs) ->
-      actionProcedure acs mem_prog
+      otherAction acs mem_prog
     (_, action) ->
       externalErrorS $
-        "Action "
-          <> untypedActionName action
-          <> " expects "
+        "Action expects "
           ++ representation action
           ++ " representation, but got "
           ++ representation end_prog
           ++ "."
   logMsg ("Done." :: String)
   where
+    backendAction prog actionf = do
+      let action = actionf (futharkConfig config) (futharkCompilerMode config) base
+      otherAction action prog
+
+    otherAction action prog = do
+      logMsg $ "Running action " ++ actionName action
+      actionProcedure action prog
+
     pipeline_config =
       PipelineConfig
         { pipelineVerbose = fst (futharkVerbose $ futharkConfig config) > NotVerbose,

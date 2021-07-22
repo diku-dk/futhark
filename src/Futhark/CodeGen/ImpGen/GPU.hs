@@ -96,24 +96,24 @@ compileProgOpenCL = compileProg $ HostEnv openclAtomics OpenCL mempty
 compileProgCUDA = compileProg $ HostEnv cudaAtomics CUDA mempty
 
 opCompiler ::
-  Pattern GPUMem ->
+  Pat GPUMem ->
   Op GPUMem ->
   CallKernelGen ()
 opCompiler dest (Alloc e space) =
   compileAlloc dest e space
-opCompiler (Pattern _ [pe]) (Inner (SizeOp (GetSize key size_class))) = do
+opCompiler (Pat [pe]) (Inner (SizeOp (GetSize key size_class))) = do
   fname <- askFunction
   sOp $
     Imp.GetSize (patElemName pe) (keyWithEntryPoint fname key) $
       sizeClassWithEntryPoint fname size_class
-opCompiler (Pattern _ [pe]) (Inner (SizeOp (CmpSizeLe key size_class x))) = do
+opCompiler (Pat [pe]) (Inner (SizeOp (CmpSizeLe key size_class x))) = do
   fname <- askFunction
   let size_class' = sizeClassWithEntryPoint fname size_class
   sOp . Imp.CmpSizeLe (patElemName pe) (keyWithEntryPoint fname key) size_class'
     =<< toExp x
-opCompiler (Pattern _ [pe]) (Inner (SizeOp (GetSizeMax size_class))) =
+opCompiler (Pat [pe]) (Inner (SizeOp (GetSizeMax size_class))) =
   sOp $ Imp.GetSizeMax (patElemName pe) size_class
-opCompiler (Pattern _ [pe]) (Inner (SizeOp (CalcNumGroups w64 max_num_groups_key group_size))) = do
+opCompiler (Pat [pe]) (Inner (SizeOp (CalcNumGroups w64 max_num_groups_key group_size))) = do
   fname <- askFunction
   max_num_groups :: TV Int32 <- dPrim "max_num_groups" int32
   sOp $
@@ -148,7 +148,7 @@ sizeClassWithEntryPoint fname (Imp.SizeThreshold path def) =
 sizeClassWithEntryPoint _ size_class = size_class
 
 segOpCompiler ::
-  Pattern GPUMem ->
+  Pat GPUMem ->
   SegOp SegLevel GPUMem ->
   CallKernelGen ()
 segOpCompiler pat (SegMap lvl space _ kbody) =
@@ -203,7 +203,7 @@ checkLocalMemoryReqs code = do
     alignedSize x = x + ((8 - (x `rem` 8)) `rem` 8)
 
 withAcc ::
-  Pattern GPUMem ->
+  Pat GPUMem ->
   [(Shape, [VName], Maybe (Lambda GPUMem, [SubExp]))] ->
   Lambda GPUMem ->
   CallKernelGen ()
@@ -229,12 +229,12 @@ withAcc pat inputs lam = do
 
 expCompiler :: ExpCompiler GPUMem HostEnv Imp.HostOp
 -- We generate a simple kernel for itoa and replicate.
-expCompiler (Pattern _ [pe]) (BasicOp (Iota n x s et)) = do
+expCompiler (Pat [pe]) (BasicOp (Iota n x s et)) = do
   x' <- toExp x
   s' <- toExp s
 
   sIota (patElemName pe) (toInt64Exp n) x' s' et
-expCompiler (Pattern _ [pe]) (BasicOp (Replicate _ se)) =
+expCompiler (Pat [pe]) (BasicOp (Replicate _ se)) =
   sReplicate (patElemName pe) se
 -- Allocation in the "local" space is just a placeholder.
 expCompiler _ (Op (Alloc _ (Space "local"))) =
@@ -258,51 +258,38 @@ expCompiler dest e =
   defCompileExp dest e
 
 callKernelCopy :: CopyCompiler GPUMem HostEnv Imp.HostOp
-callKernelCopy
-  bt
-  destloc@(MemLocation destmem _ destIxFun)
-  destslice
-  srcloc@(MemLocation srcmem srcshape srcIxFun)
-  srcslice
-    | Just
-        ( destoffset,
-          srcoffset,
-          num_arrays,
-          size_x,
-          size_y
-          ) <-
-        isMapTransposeCopy bt destloc destslice srcloc srcslice = do
-      fname <- mapTransposeForType bt
-      emit $
-        Imp.Call
-          []
-          fname
-          [ Imp.MemArg destmem,
-            Imp.ExpArg $ untyped destoffset,
-            Imp.MemArg srcmem,
-            Imp.ExpArg $ untyped srcoffset,
-            Imp.ExpArg $ untyped num_arrays,
-            Imp.ExpArg $ untyped size_x,
-            Imp.ExpArg $ untyped size_y
-          ]
-    | bt_size <- primByteSize bt,
-      Just destoffset <-
-        IxFun.linearWithOffset (IxFun.slice destIxFun destslice) bt_size,
-      Just srcoffset <-
-        IxFun.linearWithOffset (IxFun.slice srcIxFun srcslice) bt_size = do
-      let num_elems = Imp.elements $ product $ map toInt64Exp srcshape
-      srcspace <- entryMemSpace <$> lookupMemory srcmem
-      destspace <- entryMemSpace <$> lookupMemory destmem
-      emit $
-        Imp.Copy
-          destmem
-          (bytes $ sExt64 destoffset)
-          destspace
-          srcmem
-          (bytes $ sExt64 srcoffset)
-          srcspace
-          $ num_elems `Imp.withElemType` bt
-    | otherwise = sCopy bt destloc destslice srcloc srcslice
+callKernelCopy bt destloc@(MemLoc destmem _ destIxFun) srcloc@(MemLoc srcmem srcshape srcIxFun)
+  | Just (destoffset, srcoffset, num_arrays, size_x, size_y) <-
+      isMapTransposeCopy bt destloc srcloc = do
+    fname <- mapTransposeForType bt
+    emit $
+      Imp.Call
+        []
+        fname
+        [ Imp.MemArg destmem,
+          Imp.ExpArg $ untyped destoffset,
+          Imp.MemArg srcmem,
+          Imp.ExpArg $ untyped srcoffset,
+          Imp.ExpArg $ untyped num_arrays,
+          Imp.ExpArg $ untyped size_x,
+          Imp.ExpArg $ untyped size_y
+        ]
+  | bt_size <- primByteSize bt,
+    Just destoffset <- IxFun.linearWithOffset destIxFun bt_size,
+    Just srcoffset <- IxFun.linearWithOffset srcIxFun bt_size = do
+    let num_elems = Imp.elements $ product $ map toInt64Exp srcshape
+    srcspace <- entryMemSpace <$> lookupMemory srcmem
+    destspace <- entryMemSpace <$> lookupMemory destmem
+    emit $
+      Imp.Copy
+        destmem
+        (bytes $ sExt64 destoffset)
+        destspace
+        srcmem
+        (bytes $ sExt64 srcoffset)
+        srcspace
+        $ num_elems `Imp.withElemType` bt
+  | otherwise = sCopy bt destloc srcloc
 
 mapTransposeForType :: PrimType -> CallKernelGen Name
 mapTransposeForType bt = do

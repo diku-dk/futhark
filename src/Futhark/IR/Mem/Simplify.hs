@@ -19,7 +19,6 @@ import qualified Futhark.Analysis.UsageTable as UT
 import Futhark.Construct
 import Futhark.IR.Mem
 import qualified Futhark.IR.Mem.IxFun as IxFun
-import qualified Futhark.IR.Syntax as AST
 import qualified Futhark.Optimise.Simplify as Simplify
 import qualified Futhark.Optimise.Simplify.Engine as Engine
 import Futhark.Optimise.Simplify.Rep
@@ -56,7 +55,7 @@ simplifyProgGeneric ops =
     -- corruption.  At this point in the compiler we have probably
     -- already moved all the array creations that matter.
     blockAllocs _ _ (Let pat _ _) =
-      not $ all primType $ patternTypes pat
+      not $ all primType $ patTypes pat
 
 simplifyStmsGeneric ::
   ( HasScope rep m,
@@ -77,8 +76,8 @@ simplifyStmsGeneric ops stms = do
     stms
 
 isResultAlloc :: Op rep ~ MemOp op => Engine.BlockPred rep
-isResultAlloc _ usage (Let (AST.Pattern [] [bindee]) _ (Op Alloc {})) =
-  UT.isInResult (patElemName bindee) usage
+isResultAlloc _ usage (Let (Pat [pe]) _ (Op Alloc {})) =
+  UT.isInResult (patElemName pe) usage
 isResultAlloc _ _ _ = False
 
 isAlloc :: Op rep ~ MemOp op => Engine.BlockPred rep
@@ -102,7 +101,7 @@ type SimplifyMemory rep =
     BodyDec rep ~ (),
     AllocOp (Op (Wise rep)),
     CanBeWise (Op rep),
-    BinderOps (Wise rep),
+    BuilderOps (Wise rep),
     Mem rep
   )
 
@@ -124,7 +123,7 @@ callKernelRules =
 unExistentialiseMemory :: SimplifyMemory rep => TopDownRuleIf (Wise rep)
 unExistentialiseMemory vtable pat _ (cond, tbranch, fbranch, ifdec)
   | ST.simplifyMemory vtable,
-    fixable <- foldl hasConcretisableMemory mempty $ patternElements pat,
+    fixable <- foldl hasConcretisableMemory mempty $ patElements pat,
     not $ null fixable = Simplify $ do
     -- Create non-existential memory blocks big enough to hold the
     -- arrays.
@@ -139,21 +138,17 @@ unExistentialiseMemory vtable pat _ (cond, tbranch, fbranch, ifdec)
     -- arrays where they are expected.
     let updateBody body = buildBody_ $ do
           res <- bodyBind body
-          zipWithM updateResult (patternElements pat) res
-        updateResult pat_elem (Var v)
+          zipWithM updateResult (patElements pat) res
+        updateResult pat_elem (SubExpRes cs (Var v))
           | Just mem <- lookup (patElemName pat_elem) arr_to_mem,
             (_, MemArray pt shape u (ArrayIn _ ixfun)) <- patElemDec pat_elem = do
             v_copy <- newVName $ baseString v <> "_nonext_copy"
             let v_pat =
-                  Pattern
-                    []
-                    [ PatElem v_copy $
-                        MemArray pt shape u $ ArrayIn mem ixfun
-                    ]
+                  Pat [PatElem v_copy $ MemArray pt shape u $ ArrayIn mem ixfun]
             addStm $ mkWiseLetStm v_pat (defAux ()) $ BasicOp (Copy v)
-            return $ Var v_copy
+            return $ SubExpRes cs $ Var v_copy
           | Just mem <- lookup (patElemName pat_elem) oldmem_to_mem =
-            return $ Var mem
+            return $ SubExpRes cs $ Var mem
         updateResult _ se =
           return se
     tbranch' <- updateBody tbranch
@@ -161,13 +156,11 @@ unExistentialiseMemory vtable pat _ (cond, tbranch, fbranch, ifdec)
     letBind pat $ If cond tbranch' fbranch' ifdec
   where
     onlyUsedIn name here =
-      not $
-        any ((name `nameIn`) . freeIn) $
-          filter ((/= here) . patElemName) $
-            patternValueElements pat
+      not . any ((name `nameIn`) . freeIn) . filter ((/= here) . patElemName) $
+        patElements pat
     knownSize Constant {} = True
     knownSize (Var v) = not $ inContext v
-    inContext = (`elem` patternContextNames pat)
+    inContext = (`elem` patNames pat)
 
     hasConcretisableMemory fixable pat_elem
       | (_, MemArray pt shape _ (ArrayIn mem ixfun)) <- patElemDec pat_elem,
@@ -175,12 +168,12 @@ unExistentialiseMemory vtable pat _ (cond, tbranch, fbranch, ifdec)
           fmap patElemType
             <$> find
               ((mem ==) . patElemName . snd)
-              (zip [(0 :: Int) ..] $ patternElements pat),
+              (zip [(0 :: Int) ..] $ patElements pat),
         Just tse <- maybeNth j $ bodyResult tbranch,
         Just fse <- maybeNth j $ bodyResult fbranch,
         mem `onlyUsedIn` patElemName pat_elem,
         all knownSize (shapeDims shape),
-        not $ freeIn ixfun `namesIntersect` namesFromList (patternNames pat),
+        not $ freeIn ixfun `namesIntersect` namesFromList (patNames pat),
         fse /= tse =
         let mem_size =
               untyped $ product $ primByteSize pt : map sExt64 (IxFun.base ixfun)
@@ -192,11 +185,11 @@ unExistentialiseMemory _ _ _ _ = Skip
 -- | If we are copying something that is itself a copy, just copy the
 -- original one instead.
 copyCopyToCopy ::
-  ( BinderOps rep,
+  ( BuilderOps rep,
     LetDec rep ~ (VarWisdom, MemBound u)
   ) =>
   TopDownRuleBasicOp rep
-copyCopyToCopy vtable pat@(Pattern [] [pat_elem]) _ (Copy v1)
+copyCopyToCopy vtable pat@(Pat [pat_elem]) _ (Copy v1)
   | Just (BasicOp (Copy v2), v1_cs) <- ST.lookupExp v1 vtable,
     Just (_, MemArray _ _ _ (ArrayIn srcmem src_ixfun)) <-
       ST.entryLetBoundDec =<< ST.lookup v1 vtable,
@@ -218,11 +211,11 @@ copyCopyToCopy _ _ _ _ = Skip
 -- | If the destination of a copy is the same as the source, just
 -- remove it.
 removeIdentityCopy ::
-  ( BinderOps rep,
+  ( BuilderOps rep,
     LetDec rep ~ (VarWisdom, MemBound u)
   ) =>
   TopDownRuleBasicOp rep
-removeIdentityCopy vtable pat@(Pattern [] [pe]) _ (Copy v)
+removeIdentityCopy vtable pat@(Pat [pe]) _ (Copy v)
   | (_, MemArray _ _ _ (ArrayIn dest_mem dest_ixfun)) <- patElemDec pe,
     Just (_, MemArray _ _ _ (ArrayIn src_mem src_ixfun)) <-
       ST.entryLetBoundDec =<< ST.lookup v vtable,
@@ -237,7 +230,7 @@ removeIdentityCopy _ _ _ _ = Skip
 decertifySafeAlloc :: SimplifyMemory rep => TopDownRuleOp (Wise rep)
 decertifySafeAlloc _ pat (StmAux cs attrs _) op
   | cs /= mempty,
-    [Mem _] <- patternTypes pat,
+    [Mem _] <- patTypes pat,
     safeOp op =
     Simplify $ attributing attrs $ letBind pat $ Op op
 decertifySafeAlloc _ _ _ _ = Skip

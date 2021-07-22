@@ -14,7 +14,7 @@
 module Futhark.IR.Prop.Aliases
   ( subExpAliases,
     expAliases,
-    patternAliases,
+    patAliases,
     lookupAliases,
     Aliased (..),
     AliasesOf (..),
@@ -58,7 +58,7 @@ subExpAliases (Var v) = vnameAliases v
 
 basicOpAliases :: BasicOp -> [Names]
 basicOpAliases (SubExp se) = [subExpAliases se]
-basicOpAliases (Opaque se) = [subExpAliases se]
+basicOpAliases (Opaque _ se) = [subExpAliases se]
 basicOpAliases (ArrayLit _ _) = [mempty]
 basicOpAliases BinOp {} = [mempty]
 basicOpAliases ConvOp {} = [mempty]
@@ -99,12 +99,11 @@ expAliases (If _ tb fb dec) =
         (bodyAliases tb, consumedInBody tb)
         (bodyAliases fb, consumedInBody fb)
 expAliases (BasicOp op) = basicOpAliases op
-expAliases (DoLoop ctxmerge valmerge _ loopbody) =
-  map (`namesSubtract` merge_names) val_aliases
+expAliases (DoLoop merge _ loopbody) =
+  map (`namesSubtract` merge_names) aliases
   where
-    (_ctx_aliases, val_aliases) =
-      splitAt (length ctxmerge) $ bodyAliases loopbody
-    merge_names = namesFromList $ map (paramName . fst) $ ctxmerge ++ valmerge
+    aliases = bodyAliases loopbody
+    merge_names = namesFromList $ map (paramName . fst) merge
 expAliases (Apply _ args t _) =
   funcallAliases args $ map declExtTypeOf t
 expAliases (WithAcc inputs lam) =
@@ -126,7 +125,7 @@ returnAliases rts args = map returnType' rts
     returnType' Acc {} =
       error "returnAliases Acc"
     returnType' Mem {} =
-      error "returnAliases Mem"
+      mconcat $ map (uncurry maskAliases) args
 
 maskAliases :: Names -> Diet -> Names
 maskAliases _ Consume = mempty
@@ -146,7 +145,7 @@ consumedInExp (Apply _ args _ _) =
     consumeArg _ = mempty
 consumedInExp (If _ tb fb _) =
   consumedInBody tb <> consumedInBody fb
-consumedInExp (DoLoop _ merge form body) =
+consumedInExp (DoLoop merge form body) =
   mconcat
     ( map (subExpAliases . snd) $
         filter (unique . paramDeclType . fst) merge
@@ -166,7 +165,7 @@ consumedInExp (WithAcc inputs lam) =
        )
   where
     inputConsumed (_, arrs, _) = namesFromList arrs
-consumedInExp (BasicOp (Update src _ _)) = oneName src
+consumedInExp (BasicOp (Update _ src _ _)) = oneName src
 consumedInExp (BasicOp (UpdateAcc acc _ _)) = oneName acc
 consumedInExp (BasicOp _) = mempty
 consumedInExp (Op op) = consumedInOp op
@@ -176,8 +175,8 @@ consumedByLambda :: Aliased rep => Lambda rep -> Names
 consumedByLambda = consumedInBody . lambdaBody
 
 -- | The aliases of each pattern element (including the context).
-patternAliases :: AliasesOf dec => PatternT dec -> [Names]
-patternAliases = map (aliasesOf . patElemDec) . patternElements
+patAliases :: AliasesOf dec => PatT dec -> [Names]
+patAliases = map (aliasesOf . patElemDec) . patElements
 
 -- | Something that contains alias information.
 class AliasesOf a where

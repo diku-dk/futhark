@@ -77,7 +77,7 @@ tileInKernelBody branch_variant initial_variance lvl initial_kspace ts kbody
     case maybe_tiled of
       Just (host_stms, tiling, tiledBody) -> do
         (res', stms') <-
-          runBinder $ mapM (tilingTileReturns tiling) =<< tiledBody mempty mempty
+          runBuilder $ mapM (tilingTileReturns tiling) =<< tiledBody mempty mempty
         return
           ( host_stms,
             ( tilingLevel tiling,
@@ -90,7 +90,7 @@ tileInKernelBody branch_variant initial_variance lvl initial_kspace ts kbody
   | otherwise =
     return (mempty, (lvl, initial_kspace, kbody))
   where
-    isSimpleResult (Returns _ se) = Just se
+    isSimpleResult (Returns _ cs se) = Just $ SubExpRes cs se
     isSimpleResult _ = Nothing
 
 tileInBody ::
@@ -125,7 +125,7 @@ tileInBody branch_variant initial_variance initial_lvl initial_space res_ts (Bod
             (tiling2d $ reverse $ zip top_gtids_rev top_kdims_rev)
             initial_lvl
             res_ts
-            (stmPattern stm_to_tile)
+            (stmPat stm_to_tile)
             (gtid_x, gtid_y)
             (kdim_x, kdim_y)
             w
@@ -147,7 +147,7 @@ tileInBody branch_variant initial_variance initial_lvl initial_space res_ts (Bod
             (tiling1d $ reverse top_space_rev)
             initial_lvl
             res_ts
-            (stmPattern stm_to_tile)
+            (stmPat stm_to_tile)
             gtid
             kdim
             w
@@ -156,7 +156,7 @@ tileInBody branch_variant initial_variance initial_lvl initial_space res_ts (Bod
             poststms'
             stms_res
       -- Tiling inside for-loop.
-      | DoLoop [] merge (ForLoop i it bound []) loopbody <- stmExp stm_to_tile,
+      | DoLoop merge (ForLoop i it bound []) loopbody <- stmExp stm_to_tile,
         (prestms', poststms') <-
           preludeToPostlude variance prestms stm_to_tile (stmsFromList poststms) = do
         let branch_variant' =
@@ -189,7 +189,7 @@ tileInBody branch_variant initial_variance initial_lvl initial_space res_ts (Bod
                 (freeIn loopbody <> freeIn merge)
                 tiled
                 res_ts
-                (stmPattern stm_to_tile)
+                (stmPat stm_to_tile)
                 (stmAux stm_to_tile)
                 merge
                 i
@@ -224,7 +224,7 @@ preludeToPostlude variance prelude stm_to_tile postlude =
 
     used stm =
       any (`nameIn` used_in_stm_variant) $
-        patternNames $ stmPattern stm
+        patNames $ stmPat stm
 
     (prelude_used, prelude_not_used) =
       Seq.partition used prelude
@@ -255,21 +255,21 @@ partitionPrelude variance prestms private used_after =
   (invariant_prestms, precomputed_variant_prestms, recomputed_variant_prestms)
   where
     invariantTo names stm =
-      case patternNames (stmPattern stm) of
+      case patNames (stmPat stm) of
         [] -> True -- Does not matter.
         v : _ -> not $ any (`nameIn` names) $ namesToList $ M.findWithDefault mempty v variance
 
     consumed v = v `nameIn` consumed_in_prestms
-    consumedStm stm = any consumed (patternNames (stmPattern stm))
+    consumedStm stm = any consumed (patNames (stmPat stm))
 
     later_consumed =
       namesFromList $
-        concatMap (patternNames . stmPattern) $
+        concatMap (patNames . stmPat) $
           stmsToList $ Seq.filter consumedStm prestms
 
     groupInvariant stm =
       invariantTo private stm
-        && not (any (`nameIn` later_consumed) (patternNames (stmPattern stm)))
+        && not (any (`nameIn` later_consumed) (patNames (stmPat stm)))
         && invariantTo later_consumed stm
     (invariant_prestms, variant_prestms) =
       Seq.partition groupInvariant prestms
@@ -284,14 +284,14 @@ partitionPrelude variance prestms private used_after =
     mustBeInlinedExp _ = False
     mustBeInlined stm =
       mustBeInlinedExp (stmExp stm)
-        && any (`nameIn` used_after) (patternNames (stmPattern stm))
+        && any (`nameIn` used_after) (patNames (stmPat stm))
 
     must_be_inlined =
       namesFromList $
-        concatMap (patternNames . stmPattern) $
+        concatMap (patNames . stmPat) $
           stmsToList $ Seq.filter mustBeInlined variant_prestms
     recompute stm =
-      any (`nameIn` must_be_inlined) (patternNames (stmPattern stm))
+      any (`nameIn` must_be_inlined) (patNames (stmPat stm))
         || not (invariantTo must_be_inlined stm)
     (recomputed_variant_prestms, precomputed_variant_prestms) =
       Seq.partition recompute variant_prestms
@@ -342,7 +342,7 @@ tileDoLoop ::
   Names ->
   (Stms GPU, Tiling, TiledBody) ->
   [Type] ->
-  Pattern GPU ->
+  Pat GPU ->
   StmAux (ExpDec GPU) ->
   [(FParam GPU, SubExp)] ->
   VName ->
@@ -392,21 +392,19 @@ tileDoLoop initial_space variance prestms used_in_body (host_stms, tiling, tiled
             certifying (stmAuxCerts aux) $
               tilingSegMap tiling "tiled_loopinit" (scalarLevel tiling) ResultPrivate $
                 \in_bounds slice ->
-                  fmap (map Var) $
+                  fmap varsRes $
                     protectOutOfBounds "loopinit" in_bounds merge_ts $ do
                       addPrivStms slice inloop_privstms
                       addPrivStms slice privstms
-                      return mergeinits
+                      return $ subExpsRes mergeinits
 
         let merge' = zip mergeparams' mergeinit'
 
         let indexMergeParams slice =
               localScope (scopeOfFParams mergeparams') $
                 forM_ (zip mergeparams mergeparams') $ \(to, from) ->
-                  letBindNames [paramName to] $
-                    BasicOp $
-                      Index (paramName from) $
-                        fullSlice (paramType from) slice
+                  letBindNames [paramName to] . BasicOp . Index (paramName from) $
+                    fullSlice (paramType from) slice
 
             private' =
               private <> namesFromList (map paramName mergeparams ++ map paramName mergeparams')
@@ -415,12 +413,12 @@ tileDoLoop initial_space variance prestms used_in_body (host_stms, tiling, tiled
               PrivStms mempty indexMergeParams <> privstms <> inloop_privstms
 
         loopbody' <-
-          localScope (scopeOfFParams mergeparams') . runBodyBinder $
+          localScope (scopeOfFParams mergeparams') . runBodyBuilder $
             resultBody . map Var
               <$> tiledBody private' privstms'
         accs' <-
           letTupExp "tiled_inside_loop" $
-            DoLoop [] merge' (ForLoop i it bound []) loopbody'
+            DoLoop merge' (ForLoop i it bound []) loopbody'
 
         postludeGeneric tiling (privstms <> inloop_privstms) pat accs' poststms poststms_res res_ts
 
@@ -432,21 +430,21 @@ tileDoLoop initial_space variance prestms used_in_body (host_stms, tiling, tiled
           filter (`notElem` unSegSpace (tilingSpace tiling)) $
             unSegSpace initial_space
 
-doPrelude :: Tiling -> PrivStms -> Stms GPU -> [VName] -> Binder GPU [VName]
+doPrelude :: Tiling -> PrivStms -> Stms GPU -> [VName] -> Builder GPU [VName]
 doPrelude tiling privstms prestms prestms_live =
   -- Create a SegMap that takes care of the prelude for every thread.
   tilingSegMap tiling "prelude" (scalarLevel tiling) ResultPrivate $
     \in_bounds slice -> do
       ts <- mapM lookupType prestms_live
-      fmap (map Var) $
+      fmap varsRes $
         protectOutOfBounds "pre" in_bounds ts $ do
           addPrivStms slice privstms
           addStms prestms
-          pure $ map Var prestms_live
+          pure $ varsRes prestms_live
 
 liveSet :: FreeIn a => Stms GPU -> a -> Names
 liveSet stms after =
-  namesFromList (concatMap (patternNames . stmPattern) stms)
+  namesFromList (concatMap (patNames . stmPat) stms)
     `namesIntersection` freeIn after
 
 tileable ::
@@ -498,7 +496,7 @@ inputsToTiles _ _ = []
 -- The atual tile size may be smaller for the last tile, so we have to
 -- be careful now.
 sliceUntiled ::
-  MonadBinder m =>
+  MonadBuilder m =>
   VName ->
   SubExp ->
   SubExp ->
@@ -521,7 +519,7 @@ data PrivStms = PrivStms (Stms GPU) ReadPrelude
 privStms :: Stms GPU -> PrivStms
 privStms stms = PrivStms stms $ const $ return ()
 
-addPrivStms :: Slice SubExp -> PrivStms -> Binder GPU ()
+addPrivStms :: [DimIndex SubExp] -> PrivStms -> Builder GPU ()
 addPrivStms local_slice (PrivStms stms readPrelude) = do
   readPrelude local_slice
   addStms stms
@@ -536,7 +534,7 @@ instance Semigroup PrivStms where
 instance Monoid PrivStms where
   mempty = privStms mempty
 
-type ReadPrelude = Slice SubExp -> Binder GPU ()
+type ReadPrelude = [DimIndex SubExp] -> Builder GPU ()
 
 data ProcessTileArgs = ProcessTileArgs
   { processPrivStms :: PrivStms,
@@ -567,8 +565,8 @@ data Tiling = Tiling
       String ->
       SegLevel ->
       ResultManifest ->
-      (PrimExp VName -> Slice SubExp -> Binder GPU [SubExp]) ->
-      Binder GPU [VName],
+      (PrimExp VName -> [DimIndex SubExp] -> Builder GPU Result) ->
+      Builder GPU [VName],
     -- The boolean PrimExp indicates whether they are in-bounds.
 
     tilingReadTile ::
@@ -576,22 +574,22 @@ data Tiling = Tiling
       PrivStms ->
       SubExp ->
       [InputArray] ->
-      Binder GPU [InputTile],
+      Builder GPU [InputTile],
     tilingProcessTile ::
       ProcessTileArgs ->
-      Binder GPU [VName],
+      Builder GPU [VName],
     tilingProcessResidualTile ::
       ResidualTileArgs ->
-      Binder GPU [VName],
-    tilingTileReturns :: VName -> Binder GPU KernelResult,
+      Builder GPU [VName],
+    tilingTileReturns :: VName -> Builder GPU KernelResult,
     tilingSpace :: SegSpace,
     tilingTileShape :: Shape,
     tilingLevel :: SegLevel,
-    tilingNumWholeTiles :: Binder GPU SubExp
+    tilingNumWholeTiles :: Builder GPU SubExp
   }
 
 type DoTiling gtids kdims =
-  SegLevel -> gtids -> kdims -> SubExp -> Binder GPU Tiling
+  SegLevel -> gtids -> kdims -> SubExp -> Builder GPU Tiling
 
 scalarLevel :: Tiling -> SegLevel
 scalarLevel tiling =
@@ -603,8 +601,8 @@ protectOutOfBounds ::
   String ->
   PrimExp VName ->
   [Type] ->
-  Binder GPU [SubExp] ->
-  Binder GPU [VName]
+  Builder GPU Result ->
+  Builder GPU [VName]
 protectOutOfBounds desc in_bounds ts m = do
   -- This is more complicated than you might expect, because we need
   -- to be able to produce a blank accumulator, which eBlank cannot
@@ -612,7 +610,7 @@ protectOutOfBounds desc in_bounds ts m = do
   -- an accumulator of type 'acc_t', then a unique variable of type
   -- 'acc_t' must also be free in the body.  This means we can find it
   -- based just on the type.
-  m_body <- insertStmsM $ resultBody <$> m
+  m_body <- insertStmsM $ mkBody mempty <$> m
   let m_body_free = namesToList $ freeIn m_body
   t_to_v <-
     filter (isAcc . fst)
@@ -626,16 +624,16 @@ protectOutOfBounds desc in_bounds ts m = do
 postludeGeneric ::
   Tiling ->
   PrivStms ->
-  Pattern GPU ->
+  Pat GPU ->
   [VName] ->
   Stms GPU ->
   Result ->
   [Type] ->
-  Binder GPU [VName]
+  Builder GPU [VName]
 postludeGeneric tiling privstms pat accs' poststms poststms_res res_ts =
   tilingSegMap tiling "thread_res" (scalarLevel tiling) ResultPrivate $ \in_bounds slice -> do
     -- Read our per-thread result from the tiled loop.
-    forM_ (zip (patternNames pat) accs') $ \(us, everyone) -> do
+    forM_ (zip (patNames pat) accs') $ \(us, everyone) -> do
       everyone_t <- lookupType everyone
       letBindNames [us] $ BasicOp $ Index everyone $ fullSlice everyone_t slice
 
@@ -644,19 +642,19 @@ postludeGeneric tiling privstms pat accs' poststms poststms_res res_ts =
         -- The privstms may still be necessary for the result.
         addPrivStms slice privstms
         return poststms_res
-      else fmap (map Var) $
+      else fmap varsRes $
         protectOutOfBounds "postlude" in_bounds res_ts $ do
           addPrivStms slice privstms
           addStms poststms
           return poststms_res
 
-type TiledBody = Names -> PrivStms -> Binder GPU [VName]
+type TiledBody = Names -> PrivStms -> Builder GPU [VName]
 
 tileGeneric ::
   DoTiling gtids kdims ->
   SegLevel ->
   [Type] ->
-  Pattern GPU ->
+  Pat GPU ->
   gtids ->
   kdims ->
   SubExp ->
@@ -666,13 +664,13 @@ tileGeneric ::
   Result ->
   TileM (Stms GPU, Tiling, TiledBody)
 tileGeneric doTiling initial_lvl res_ts pat gtids kdims w form inputs poststms poststms_res = do
-  (tiling, tiling_stms) <- runBinder $ doTiling initial_lvl gtids kdims w
+  (tiling, tiling_stms) <- runBuilder $ doTiling initial_lvl gtids kdims w
 
   return (tiling_stms, tiling, tiledBody tiling)
   where
     (red_comm, red_lam, red_nes, map_lam) = form
 
-    tiledBody :: Tiling -> Names -> PrivStms -> Binder GPU [VName]
+    tiledBody :: Tiling -> Names -> PrivStms -> Builder GPU [VName]
     tiledBody tiling _private privstms = do
       let tile_shape = tilingTileShape tiling
 
@@ -683,11 +681,11 @@ tileGeneric doTiling initial_lvl res_ts pat gtids kdims w form inputs poststms p
       mergeinits <- tilingSegMap tiling "mergeinit" (scalarLevel tiling) ResultPrivate $ \in_bounds slice ->
         -- Constant neutral elements (a common case) do not need protection from OOB.
         if freeIn red_nes == mempty
-          then return red_nes
-          else fmap (map Var) $
+          then return $ subExpsRes red_nes
+          else fmap varsRes $
             protectOutOfBounds "neutral" in_bounds (lambdaReturnType red_lam) $ do
               addPrivStms slice privstms
-              return red_nes
+              return $ subExpsRes red_nes
 
       merge <- forM (zip (lambdaParams red_lam) mergeinits) $ \(p, mergeinit) ->
         (,)
@@ -698,7 +696,7 @@ tileGeneric doTiling initial_lvl res_ts pat gtids kdims w form inputs poststms p
 
       tile_id <- newVName "tile_id"
       let loopform = ForLoop tile_id Int64 num_whole_tiles []
-      loopbody <- renameBody <=< runBodyBinder $
+      loopbody <- renameBody <=< runBodyBuilder $
         inScopeOf loopform $
           localScope (scopeOfFParams $ map fst merge) $ do
             -- Collectively read a tile.
@@ -712,7 +710,7 @@ tileGeneric doTiling initial_lvl res_ts pat gtids kdims w form inputs poststms p
                   ProcessTileArgs privstms red_comm red_lam map_lam tile accs (Var tile_id)
             resultBody . map Var <$> tilingProcessTile tiling tile_args
 
-      accs <- letTupExp "accs" $ DoLoop [] merge loopform loopbody
+      accs <- letTupExp "accs" $ DoLoop merge loopform loopbody
 
       -- We possibly have to traverse a residual tile.
       red_lam' <- renameLambda red_lam
@@ -733,7 +731,7 @@ mkReadPreludeValues prestms_live_arrs prestms_live slice =
       arr_t <- lookupType arr
       letBindNames [v] $ BasicOp $ Index arr $ fullSlice arr_t slice
 
-tileReturns :: [(VName, SubExp)] -> [(SubExp, SubExp)] -> VName -> Binder GPU KernelResult
+tileReturns :: [(VName, SubExp)] -> [(SubExp, SubExp)] -> VName -> Builder GPU KernelResult
 tileReturns dims_on_top dims arr = do
   let unit_dims = replicate (length dims_on_top) (intConst Int64 1)
   arr_t <- lookupType arr
@@ -744,7 +742,7 @@ tileReturns dims_on_top dims arr = do
         let new_shape = unit_dims ++ arrayDims arr_t
         letExp (baseString arr) $ BasicOp $ Reshape (map DimNew new_shape) arr
   let tile_dims = zip (map snd dims_on_top) unit_dims ++ dims
-  return $ TileReturns tile_dims arr'
+  return $ TileReturns mempty tile_dims arr'
 
 is1DTileable :: VName -> M.Map VName Names -> VName -> InputArray
 is1DTileable gtid variance arr
@@ -758,7 +756,7 @@ reconstructGtids1D ::
   VName ->
   VName ->
   VName ->
-  Binder GPU ()
+  Builder GPU ()
 reconstructGtids1D group_size gtid gid ltid =
   letBindNames [gtid]
     =<< toExp (le64 gid * pe64 (unCount group_size) + le64 ltid)
@@ -773,7 +771,7 @@ readTile1D ::
   PrivStms ->
   SubExp ->
   [InputArray] ->
-  Binder GPU [InputTile]
+  Builder GPU [InputTile]
 readTile1D tile_size gid gtid num_groups group_size kind privstms tile_id inputs =
   fmap (inputsToTiles inputs)
     . segMap1D "full_tile" lvl ResultNoSimplify
@@ -792,8 +790,8 @@ readTile1D tile_size gid gtid num_groups group_size kind privstms tile_id inputs
 
       let readTileElem arr =
             -- No need for fullSlice because we are tiling only prims.
-            letExp "tile_elem" (BasicOp $ Index arr [DimFix j])
-      fmap (map Var) $
+            letExp "tile_elem" (BasicOp $ Index arr $ Slice [DimFix j])
+      fmap varsRes $
         case kind of
           TilePartial ->
             letTupExp "pre"
@@ -814,7 +812,7 @@ processTile1D ::
   Count NumGroups SubExp ->
   Count GroupSize SubExp ->
   ProcessTileArgs ->
-  Binder GPU [VName]
+  Builder GPU [VName]
 processTile1D gid gtid kdim tile_size num_groups group_size tile_args = do
   let red_comm = processComm tile_args
       privstms = processPrivStms tile_args
@@ -832,7 +830,7 @@ processTile1D gid gtid kdim tile_size num_groups group_size tile_args = do
     -- OK because the parallel semantics are not used after this
     -- point).
     thread_accs <- forM accs $ \acc ->
-      letSubExp "acc" $ BasicOp $ Index acc [DimFix $ Var ltid]
+      letSubExp "acc" $ BasicOp $ Index acc $ Slice [DimFix $ Var ltid]
     let sliceTile (InputTiled _ arr) =
           pure arr
         sliceTile (InputUntiled arr) =
@@ -841,7 +839,7 @@ processTile1D gid gtid kdim tile_size num_groups group_size tile_args = do
     tiles' <- mapM sliceTile tiles
 
     let form' = redomapSOAC [Reduce red_comm red_lam thread_accs] map_lam
-    fmap (map Var) $
+    fmap varsRes $
       letTupExp "acc"
         =<< eIf
           (toExp $ le64 gtid .<. pe64 kdim)
@@ -858,7 +856,7 @@ processResidualTile1D ::
   Count NumGroups SubExp ->
   Count GroupSize SubExp ->
   ResidualTileArgs ->
-  Binder GPU [VName]
+  Builder GPU [VName]
 processResidualTile1D gid gtid kdim tile_size num_groups group_size args = do
   -- The number of residual elements that are not covered by
   -- the whole tiles.
@@ -881,7 +879,7 @@ processResidualTile1D gid gtid kdim tile_size num_groups group_size args = do
     num_whole_tiles = residualNumWholeTiles args
     w = residualInputSize args
 
-    nonemptyTile residual_input = runBodyBinder $ do
+    nonemptyTile residual_input = runBodyBuilder $ do
       -- Collectively construct a tile.  Threads that are out-of-bounds
       -- provide a blank dummy value.
       full_tiles <-
@@ -902,7 +900,7 @@ processResidualTile1D gid gtid kdim tile_size num_groups group_size args = do
             let slice =
                   DimSlice (intConst Int64 0) residual_input (intConst Int64 1)
             InputTiled perm
-              <$> letExp "partial_tile" (BasicOp $ Index tile [slice])
+              <$> letExp "partial_tile" (BasicOp $ Index tile $ Slice [slice])
 
       tiles <- mapM sliceTile full_tiles
 
@@ -989,7 +987,7 @@ reconstructGtids2D ::
   (VName, VName) ->
   (VName, VName) ->
   (VName, VName) ->
-  Binder GPU ()
+  Builder GPU ()
 reconstructGtids2D tile_size (gtid_x, gtid_y) (gid_x, gid_y) (ltid_x, ltid_y) = do
   -- Reconstruct the original gtids from gid_x/gid_y and ltid_x/ltid_y.
   letBindNames [gtid_x]
@@ -1008,7 +1006,7 @@ readTile2D ::
   PrivStms ->
   SubExp ->
   [InputArray] ->
-  Binder GPU [InputTile]
+  Builder GPU [InputTile]
 readTile2D (kdim_x, kdim_y) (gtid_x, gtid_y) (gid_x, gid_y) tile_size num_groups group_size kind privstms tile_id inputs =
   fmap (inputsToTiles inputs)
     . segMap2D
@@ -1033,10 +1031,8 @@ readTile2D (kdim_x, kdim_y) (gtid_x, gtid_y) (gid_x, gid_y) tile_size num_groups
             -- No need for fullSlice because we are tiling only prims.
             letExp
               "tile_elem"
-              ( BasicOp $
-                  Index
-                    arr
-                    [DimFix $ last $ rearrangeShape perm [i, j]]
+              ( BasicOp . Index arr $
+                  Slice [DimFix $ last $ rearrangeShape perm [i, j]]
               )
 
           readTileElemIfInBounds (arr, perm) = do
@@ -1053,10 +1049,10 @@ readTile2D (kdim_x, kdim_y) (gtid_x, gtid_y) (gid_x, gid_y) tile_size num_groups
                       ]
             eIf
               (toExp $ pe64 idx .<. pe64 w .&&. othercheck)
-              (eBody [return $ BasicOp $ Index arr [DimFix idx]])
+              (eBody [return $ BasicOp $ Index arr $ Slice [DimFix idx]])
               (eBody [eBlank tile_t])
 
-      fmap (map Var) $
+      fmap varsRes $
         case kind of
           TilePartial ->
             mapM (letExp "pre" <=< readTileElemIfInBounds) arrs_and_perms
@@ -1080,7 +1076,7 @@ processTile2D ::
   Count NumGroups SubExp ->
   Count GroupSize SubExp ->
   ProcessTileArgs ->
-  Binder GPU [VName]
+  Builder GPU [VName]
 processTile2D (gid_x, gid_y) (gtid_x, gtid_y) (kdim_x, kdim_y) tile_size num_groups group_size tile_args = do
   let privstms = processPrivStms tile_args
       red_comm = processComm tile_args
@@ -1107,7 +1103,7 @@ processTile2D (gid_x, gid_y) (gtid_x, gtid_y) (kdim_x, kdim_y) tile_size num_gro
       -- OK because the parallel semantics are not used after this
       -- point).
       thread_accs <- forM accs $ \acc ->
-        letSubExp "acc" $ BasicOp $ Index acc [DimFix $ Var ltid_x, DimFix $ Var ltid_y]
+        letSubExp "acc" $ BasicOp $ Index acc $ Slice [DimFix $ Var ltid_x, DimFix $ Var ltid_y]
       let form' = redomapSOAC [Reduce red_comm red_lam thread_accs] map_lam
 
           sliceTile (InputUntiled arr) =
@@ -1120,7 +1116,7 @@ processTile2D (gid_x, gid_y) (gtid_x, gtid_y) (kdim_x, kdim_y) tile_size num_gro
 
       tiles' <- mapM sliceTile tiles
 
-      fmap (map Var) $
+      fmap varsRes $
         letTupExp "acc"
           =<< eIf
             ( toExp $ le64 gtid_x .<. pe64 kdim_x .&&. le64 gtid_y .<. pe64 kdim_y
@@ -1136,7 +1132,7 @@ processResidualTile2D ::
   Count NumGroups SubExp ->
   Count GroupSize SubExp ->
   ResidualTileArgs ->
-  Binder GPU [VName]
+  Builder GPU [VName]
 processResidualTile2D
   gids
   gtids
@@ -1166,7 +1162,7 @@ processResidualTile2D
       num_whole_tiles = residualNumWholeTiles args
       w = residualInputSize args
 
-      nonemptyTile residual_input = renameBody <=< runBodyBinder $ do
+      nonemptyTile residual_input = renameBody <=< runBodyBuilder $ do
         -- Collectively construct a tile.  Threads that are out-of-bounds
         -- provide a blank dummy value.
         full_tile <-
@@ -1187,7 +1183,7 @@ processResidualTile2D
         tiles <- forM full_tile $ \case
           InputTiled perm tile' ->
             InputTiled perm
-              <$> letExp "partial_tile" (BasicOp $ Index tile' [slice, slice])
+              <$> letExp "partial_tile" (BasicOp $ Index tile' (Slice [slice, slice]))
           InputUntiled arr ->
             pure $ InputUntiled arr
 
@@ -1242,8 +1238,7 @@ tiling2d dims_on_top _initial_lvl (gtid_x, gtid_y) (kdim_x, kdim_y) w = do
             reconstructGtids2D tile_size (gtid_x, gtid_y) (gid_x, gid_y) (ltid_x, ltid_y)
             f
               ( untyped $
-                  le64 gtid_x .<. pe64 kdim_x
-                    .&&. le64 gtid_y .<. pe64 kdim_y
+                  le64 gtid_x .<. pe64 kdim_x .&&. le64 gtid_y .<. pe64 kdim_y
               )
               [DimFix $ Var ltid_x, DimFix $ Var ltid_y],
         tilingReadTile = readTile2D (kdim_x, kdim_y) (gtid_x, gtid_y) (gid_x, gid_y) tile_size (segNumGroups lvl) (segGroupSize lvl),

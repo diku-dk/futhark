@@ -23,7 +23,7 @@ import qualified Futhark.IR.SOACS.SOAC as SOAC
 import Futhark.Tools
 
 getSize ::
-  (MonadBinder m, Op (Rep m) ~ HostOp (Rep m) inner) =>
+  (MonadBuilder m, Op (Rep m) ~ HostOp (Rep m) inner) =>
   String ->
   SizeClass ->
   m SubExp
@@ -32,7 +32,7 @@ getSize desc size_class = do
   letSubExp desc $ Op $ SizeOp $ GetSize size_key size_class
 
 segThread ::
-  (MonadBinder m, Op (Rep m) ~ HostOp (Rep m) inner) =>
+  (MonadBuilder m, Op (Rep m) ~ HostOp (Rep m) inner) =>
   String ->
   m SegLevel
 segThread desc =

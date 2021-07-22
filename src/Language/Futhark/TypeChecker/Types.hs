@@ -15,13 +15,11 @@ module Language.Futhark.TypeChecker.Types
     Subst (..),
     substFromAbbr,
     TypeSubs,
-    unionSubs,
     Substitutable (..),
     substTypesAny,
   )
 where
 
-import Control.Applicative
 import Control.Monad.Identity
 import Control.Monad.Reader
 import Control.Monad.State
@@ -279,18 +277,18 @@ checkTypeExp t@(TESum cs loc) = do
 -- a description of all names used in the pattern group.
 checkForDuplicateNames ::
   MonadTypeChecker m =>
-  [UncheckedPattern] ->
+  [UncheckedPat] ->
   m ()
 checkForDuplicateNames = (`evalStateT` mempty) . mapM_ check
   where
     check (Id v _ loc) = seen v loc
-    check (PatternParens p _) = check p
+    check (PatParens p _) = check p
     check Wildcard {} = return ()
-    check (TuplePattern ps _) = mapM_ check ps
-    check (RecordPattern fs _) = mapM_ (check . snd) fs
-    check (PatternAscription p _ _) = check p
-    check PatternLit {} = return ()
-    check (PatternConstr _ _ ps _) = mapM_ check ps
+    check (TuplePat ps _) = mapM_ check ps
+    check (RecordPat fs _) = mapM_ (check . snd) fs
+    check (PatAscription p _ _) = check p
+    check PatLit {} = return ()
+    check (PatConstr _ _ ps _) = mapM_ check ps
 
     seen v loc = do
       already <- gets $ M.lookup v
@@ -390,10 +388,6 @@ substFromAbbr (TypeAbbr _ ps t) = Subst ps t
 -- | Substitutions to apply in a type.
 type TypeSubs = VName -> Maybe (Subst StructType)
 
--- | Additively combine two non-intersecting substitutions.
-unionSubs :: TypeSubs -> TypeSubs -> TypeSubs
-unionSubs f g v = g v <|> f v
-
 instance Functor Subst where
   fmap f (Subst ps t) = Subst ps $ f t
   fmap _ PrimSubst = PrimSubst
@@ -418,7 +412,7 @@ instance Substitutable (DimDecl VName) where
 instance Substitutable d => Substitutable (ShapeDecl d) where
   applySubst f = fmap $ applySubst f
 
-instance Substitutable Pattern where
+instance Substitutable Pat where
   applySubst f = runIdentity . astMap mapper
     where
       mapper =
@@ -427,7 +421,7 @@ instance Substitutable Pattern where
             mapOnName = return,
             mapOnQualName = return,
             mapOnStructType = return . applySubst f,
-            mapOnPatternType = return . applySubst f
+            mapOnPatType = return . applySubst f
           }
 
 applyType ::

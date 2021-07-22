@@ -14,14 +14,14 @@ import Futhark.Analysis.PrimExp.Convert
 import Futhark.IR
 
 -- | A function that, given a variable name, returns its definition.
-type VarLookup rep = VName -> Maybe (Exp rep, Certificates)
+type VarLookup rep = VName -> Maybe (Exp rep, Certs)
 
 -- | A function that, given a subexpression, returns its type.
 type TypeLookup = SubExp -> Maybe Type
 
 -- | A simple rule is a top-down rule that can be expressed as a pure
 -- function.
-type SimpleRule rep = VarLookup rep -> TypeLookup -> BasicOp -> Maybe (BasicOp, Certificates)
+type SimpleRule rep = VarLookup rep -> TypeLookup -> BasicOp -> Maybe (BasicOp, Certs)
 
 isCt1 :: SubExp -> Bool
 isCt1 (Constant v) = oneIsh v
@@ -60,18 +60,18 @@ simplifyBinOp _ _ (BinOp op (Constant v1) (Constant v2))
   | Just res <- doBinOp op v1 v2 =
     constRes res
 simplifyBinOp look _ (BinOp Add {} e1 e2)
-  | isCt0 e1 = subExpRes e2
-  | isCt0 e2 = subExpRes e1
+  | isCt0 e1 = resIsSubExp e2
+  | isCt0 e2 = resIsSubExp e1
   -- x+(y-x) => y
   | Var v2 <- e2,
     Just (BasicOp (BinOp Sub {} e2_a e2_b), cs) <- look v2,
     e2_b == e1 =
     Just (SubExp e2_a, cs)
 simplifyBinOp _ _ (BinOp FAdd {} e1 e2)
-  | isCt0 e1 = subExpRes e2
-  | isCt0 e2 = subExpRes e1
+  | isCt0 e1 = resIsSubExp e2
+  | isCt0 e2 = resIsSubExp e1
 simplifyBinOp look _ (BinOp sub@(Sub t _) e1 e2)
-  | isCt0 e2 = subExpRes e1
+  | isCt0 e2 = resIsSubExp e1
   -- Cases for simplifying (a+b)-b and permutations.
 
   -- (e1_a+e1_b)-e1_a == e1_b
@@ -95,17 +95,17 @@ simplifyBinOp look _ (BinOp sub@(Sub t _) e1 e2)
     e2_b == e1 =
     Just (BinOp sub (intConst t 0) e2_a, cs)
 simplifyBinOp _ _ (BinOp FSub {} e1 e2)
-  | isCt0 e2 = subExpRes e1
+  | isCt0 e2 = resIsSubExp e1
 simplifyBinOp _ _ (BinOp Mul {} e1 e2)
-  | isCt0 e1 = subExpRes e1
-  | isCt0 e2 = subExpRes e2
-  | isCt1 e1 = subExpRes e2
-  | isCt1 e2 = subExpRes e1
+  | isCt0 e1 = resIsSubExp e1
+  | isCt0 e2 = resIsSubExp e2
+  | isCt1 e1 = resIsSubExp e2
+  | isCt1 e2 = resIsSubExp e1
 simplifyBinOp _ _ (BinOp FMul {} e1 e2)
-  | isCt0 e1 = subExpRes e1
-  | isCt0 e2 = subExpRes e2
-  | isCt1 e1 = subExpRes e2
-  | isCt1 e2 = subExpRes e1
+  | isCt0 e1 = resIsSubExp e1
+  | isCt0 e2 = resIsSubExp e2
+  | isCt1 e1 = resIsSubExp e2
+  | isCt1 e2 = resIsSubExp e1
 simplifyBinOp look _ (BinOp (SMod t _) e1 e2)
   | isCt1 e2 = constRes $ IntValue $ intValue t (0 :: Int)
   | e1 == e2 = constRes $ IntValue $ intValue t (0 :: Int)
@@ -114,48 +114,48 @@ simplifyBinOp look _ (BinOp (SMod t _) e1 e2)
     e4 == e2 =
     Just (SubExp e1, v1_cs)
 simplifyBinOp _ _ (BinOp SDiv {} e1 e2)
-  | isCt0 e1 = subExpRes e1
-  | isCt1 e2 = subExpRes e1
+  | isCt0 e1 = resIsSubExp e1
+  | isCt1 e2 = resIsSubExp e1
   | isCt0 e2 = Nothing
 simplifyBinOp _ _ (BinOp SDivUp {} e1 e2)
-  | isCt0 e1 = subExpRes e1
-  | isCt1 e2 = subExpRes e1
+  | isCt0 e1 = resIsSubExp e1
+  | isCt1 e2 = resIsSubExp e1
   | isCt0 e2 = Nothing
 simplifyBinOp _ _ (BinOp FDiv {} e1 e2)
-  | isCt0 e1 = subExpRes e1
-  | isCt1 e2 = subExpRes e1
+  | isCt0 e1 = resIsSubExp e1
+  | isCt1 e2 = resIsSubExp e1
   | isCt0 e2 = Nothing
 simplifyBinOp _ _ (BinOp (SRem t _) e1 e2)
   | isCt1 e2 = constRes $ IntValue $ intValue t (0 :: Int)
   | e1 == e2 = constRes $ IntValue $ intValue t (1 :: Int)
 simplifyBinOp _ _ (BinOp SQuot {} e1 e2)
-  | isCt1 e2 = subExpRes e1
+  | isCt1 e2 = resIsSubExp e1
   | isCt0 e2 = Nothing
 simplifyBinOp _ _ (BinOp (FPow t) e1 e2)
-  | isCt0 e2 = subExpRes $ floatConst t 1
-  | isCt0 e1 || isCt1 e1 || isCt1 e2 = subExpRes e1
+  | isCt0 e2 = resIsSubExp $ floatConst t 1
+  | isCt0 e1 || isCt1 e1 || isCt1 e2 = resIsSubExp e1
 simplifyBinOp _ _ (BinOp (Shl t) e1 e2)
-  | isCt0 e2 = subExpRes e1
-  | isCt0 e1 = subExpRes $ intConst t 0
+  | isCt0 e2 = resIsSubExp e1
+  | isCt0 e1 = resIsSubExp $ intConst t 0
 simplifyBinOp _ _ (BinOp AShr {} e1 e2)
-  | isCt0 e2 = subExpRes e1
+  | isCt0 e2 = resIsSubExp e1
 simplifyBinOp _ _ (BinOp (And t) e1 e2)
-  | isCt0 e1 = subExpRes $ intConst t 0
-  | isCt0 e2 = subExpRes $ intConst t 0
-  | e1 == e2 = subExpRes e1
+  | isCt0 e1 = resIsSubExp $ intConst t 0
+  | isCt0 e2 = resIsSubExp $ intConst t 0
+  | e1 == e2 = resIsSubExp e1
 simplifyBinOp _ _ (BinOp Or {} e1 e2)
-  | isCt0 e1 = subExpRes e2
-  | isCt0 e2 = subExpRes e1
-  | e1 == e2 = subExpRes e1
+  | isCt0 e1 = resIsSubExp e2
+  | isCt0 e2 = resIsSubExp e1
+  | e1 == e2 = resIsSubExp e1
 simplifyBinOp _ _ (BinOp (Xor t) e1 e2)
-  | isCt0 e1 = subExpRes e2
-  | isCt0 e2 = subExpRes e1
-  | e1 == e2 = subExpRes $ intConst t 0
+  | isCt0 e1 = resIsSubExp e2
+  | isCt0 e2 = resIsSubExp e1
+  | e1 == e2 = resIsSubExp $ intConst t 0
 simplifyBinOp defOf _ (BinOp LogAnd e1 e2)
   | isCt0 e1 = constRes $ BoolValue False
   | isCt0 e2 = constRes $ BoolValue False
-  | isCt1 e1 = subExpRes e2
-  | isCt1 e2 = subExpRes e1
+  | isCt1 e1 = resIsSubExp e2
+  | isCt1 e2 = resIsSubExp e1
   | Var v <- e1,
     Just (BasicOp (UnOp Not e1'), v_cs) <- defOf v,
     e1' == e2 =
@@ -165,8 +165,8 @@ simplifyBinOp defOf _ (BinOp LogAnd e1 e2)
     e2' == e1 =
     Just (SubExp $ Constant $ BoolValue False, v_cs)
 simplifyBinOp defOf _ (BinOp LogOr e1 e2)
-  | isCt0 e1 = subExpRes e2
-  | isCt0 e2 = subExpRes e1
+  | isCt0 e1 = resIsSubExp e2
+  | isCt0 e2 = resIsSubExp e1
   | isCt1 e1 = constRes $ BoolValue True
   | isCt1 e2 = constRes $ BoolValue True
   | Var v <- e1,
@@ -179,7 +179,7 @@ simplifyBinOp defOf _ (BinOp LogOr e1 e2)
     Just (SubExp $ Constant $ BoolValue True, v_cs)
 simplifyBinOp defOf _ (BinOp (SMax it) e1 e2)
   | e1 == e2 =
-    subExpRes e1
+    resIsSubExp e1
   | Var v1 <- e1,
     Just (BasicOp (BinOp (SMax _) e1_1 e1_2), v1_cs) <- defOf v1,
     e1_1 == e2 =
@@ -198,11 +198,11 @@ simplifyBinOp defOf _ (BinOp (SMax it) e1 e2)
     Just (BinOp (SMax it) e2_1 e1, v2_cs)
 simplifyBinOp _ _ _ = Nothing
 
-constRes :: PrimValue -> Maybe (BasicOp, Certificates)
+constRes :: PrimValue -> Maybe (BasicOp, Certs)
 constRes = Just . (,mempty) . SubExp . Constant
 
-subExpRes :: SubExp -> Maybe (BasicOp, Certificates)
-subExpRes = Just . (,mempty) . SubExp
+resIsSubExp :: SubExp -> Maybe (BasicOp, Certs)
+resIsSubExp = Just . (,mempty) . SubExp
 
 simplifyUnOp :: SimpleRule rep
 simplifyUnOp _ _ (UnOp op (Constant v)) =
@@ -219,7 +219,7 @@ simplifyConvOp _ _ (ConvOp op (Constant v)) =
 simplifyConvOp _ _ (ConvOp op se)
   | (from, to) <- convOpType op,
     from == to =
-    subExpRes se
+    resIsSubExp se
 simplifyConvOp lookupVar _ (ConvOp (SExt t2 t1) (Var v))
   | Just (BasicOp (ConvOp (SExt t3 _) se), v_cs) <- lookupVar v,
     t2 >= t3 =
@@ -255,7 +255,7 @@ simplifyIdentityReshape _ seType (Reshape newshape v)
   | Just t <- seType $ Var v,
     newDims newshape == arrayDims t -- No-op reshape.
     =
-    subExpRes $ Var v
+    resIsSubExp $ Var v
 simplifyIdentityReshape _ _ _ = Nothing
 
 simplifyReshapeReshape :: SimpleRule rep
@@ -301,7 +301,7 @@ simplifyReshapeIndex :: SimpleRule rep
 simplifyReshapeIndex defOf _ (Reshape newshape v)
   | Just ds <- shapeCoercion newshape,
     Just (BasicOp (Index v' slice), v_cs) <- defOf v,
-    slice' <- reshapeSlice slice ds,
+    slice' <- Slice $ reshapeSlice (unSlice slice) ds,
     slice' /= slice =
     Just (Index v' slice', v_cs)
 simplifyReshapeIndex _ _ _ = Nothing
@@ -309,13 +309,13 @@ simplifyReshapeIndex _ _ _ = Nothing
 -- If we are updating a slice with the result of a size coercion, we
 -- instead use the original array and update the slice dimensions.
 simplifyUpdateReshape :: SimpleRule rep
-simplifyUpdateReshape defOf seType (Update dest slice (Var v))
+simplifyUpdateReshape defOf seType (Update safety dest slice (Var v))
   | Just (BasicOp (Reshape newshape v'), v_cs) <- defOf v,
     Just _ <- shapeCoercion newshape,
     Just ds <- arrayDims <$> seType (Var v'),
-    slice' <- reshapeSlice slice ds,
+    slice' <- Slice $ reshapeSlice (unSlice slice) ds,
     slice' /= slice =
-    Just (Update dest slice' $ Var v', v_cs)
+    Just (Update safety dest slice' $ Var v', v_cs)
 simplifyUpdateReshape _ _ _ = Nothing
 
 improveReshape :: SimpleRule rep
@@ -369,6 +369,6 @@ applySimpleRules ::
   VarLookup rep ->
   TypeLookup ->
   BasicOp ->
-  Maybe (BasicOp, Certificates)
+  Maybe (BasicOp, Certs)
 applySimpleRules defOf seType op =
   msum [rule defOf seType op | rule <- simpleRules]

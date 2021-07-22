@@ -18,7 +18,7 @@ import Data.Set (Set)
 import qualified Data.Set as S
 import qualified Futhark.Analysis.Interference as Interference
 import qualified Futhark.Analysis.LastUse as LastUse
-import Futhark.Binder.Class
+import Futhark.Builder.Class
 import Futhark.Construct
 import Futhark.IR.GPUMem
 import qualified Futhark.Optimise.ReuseAllocations.GreedyColoring as GreedyColoring
@@ -30,13 +30,13 @@ import Futhark.Util (invertMap)
 type Allocs = Map VName (SubExp, Space)
 
 getAllocsStm :: Stm GPUMem -> Allocs
-getAllocsStm (Let (Pattern [] [PatElem name _]) _ (Op (Alloc se sp))) =
+getAllocsStm (Let (Pat [PatElem name _]) _ (Op (Alloc se sp))) =
   M.singleton name (se, sp)
 getAllocsStm (Let _ _ (Op (Alloc _ _))) = error "impossible"
 getAllocsStm (Let _ _ (If _ then_body else_body _)) =
   foldMap getAllocsStm (bodyStms then_body)
     <> foldMap getAllocsStm (bodyStms else_body)
-getAllocsStm (Let _ _ (DoLoop _ _ _ body)) =
+getAllocsStm (Let _ _ (DoLoop _ _ body)) =
   foldMap getAllocsStm (bodyStms body)
 getAllocsStm _ = mempty
 
@@ -53,7 +53,7 @@ getAllocsSegOp (SegStencil _ _ _ _ body) =
   foldMap getAllocsStm (kernelBodyStms body)
 
 setAllocsStm :: Map VName SubExp -> Stm GPUMem -> Stm GPUMem
-setAllocsStm m stm@(Let (Pattern [] [PatElem name _]) _ (Op (Alloc _ _)))
+setAllocsStm m stm@(Let (Pat [PatElem name _]) _ (Op (Alloc _ _)))
   | Just s <- M.lookup name m =
     stm {stmExp = BasicOp $ SubExp s}
 setAllocsStm _ stm@(Let _ _ (Op (Alloc _ _))) = stm
@@ -68,14 +68,10 @@ setAllocsStm m stm@(Let _ _ (If cse then_body else_body dec)) =
           (else_body {bodyStms = setAllocsStm m <$> bodyStms else_body})
           dec
     }
-setAllocsStm m stm@(Let _ _ (DoLoop ctx vals form body)) =
+setAllocsStm m stm@(Let _ _ (DoLoop merge form body)) =
   stm
     { stmExp =
-        DoLoop
-          ctx
-          vals
-          form
-          (body {bodyStms = setAllocsStm m <$> bodyStms body})
+        DoLoop merge form (body {bodyStms = setAllocsStm m <$> bodyStms body})
     }
 setAllocsStm _ stm = stm
 
@@ -99,7 +95,7 @@ setAllocsSegOp m (SegStencil lvl sp stencils tps body) =
   SegStencil lvl sp stencils tps $
     body {kernelBodyStms = setAllocsStm m <$> kernelBodyStms body}
 
-maxSubExp :: MonadBinder m => Set SubExp -> m SubExp
+maxSubExp :: MonadBuilder m => Set SubExp -> m SubExp
 maxSubExp = helper . S.toList
   where
     helper (s1 : s2 : sexps) = do
@@ -115,16 +111,13 @@ definedInExp (Op (Inner (SegOp segop))) =
 definedInExp (If _ then_body else_body _) =
   foldMap definedInStm (bodyStms then_body)
     <> foldMap definedInStm (bodyStms else_body)
-definedInExp (DoLoop _ _ _ body) =
+definedInExp (DoLoop _ _ body) =
   foldMap definedInStm $ bodyStms body
 definedInExp _ = mempty
 
 definedInStm :: Stm GPUMem -> Set VName
-definedInStm Let {stmPattern = Pattern ctx vals, stmExp} =
-  let definedInside =
-        ctx <> vals
-          & fmap patElemName
-          & S.fromList
+definedInStm Let {stmPat = Pat merge, stmExp} =
+  let definedInside = merge & fmap patElemName & S.fromList
    in definedInExp stmExp <> definedInside
 
 definedInSegOp :: SegOp lvl GPUMem -> Set VName
@@ -145,7 +138,7 @@ isKernelInvariant segop (Var vname, _) =
 isKernelInvariant _ _ = True
 
 onKernelBodyStms ::
-  MonadBinder m =>
+  MonadBuilder m =>
   SegOp lvl GPUMem ->
   (Stms GPUMem -> m (Stms GPUMem)) ->
   m (SegOp lvl GPUMem)
@@ -169,7 +162,7 @@ onKernelBodyStms (SegStencil lvl space stencil ts body) f = do
 -- replace allocations and references to memory blocks inside with a (hopefully)
 -- reduced number of allocations.
 optimiseKernel ::
-  (MonadBinder m, Rep m ~ GPUMem) =>
+  (MonadBuilder m, Rep m ~ GPUMem) =>
   Interference.Graph VName ->
   SegOp lvl GPUMem ->
   m (SegOp lvl GPUMem)
@@ -234,10 +227,10 @@ onKernels f =
                   (else_body {bodyStms = else_body_stms})
                   dec
             }
-    helper stm@Let {stmExp = DoLoop ctx vals form body} =
+    helper stm@Let {stmExp = DoLoop merge form body} =
       inScopeOf stm $ do
         stms <- f `onKernels` bodyStms body
-        return $ stm {stmExp = DoLoop ctx vals form (body {bodyStms = stms})}
+        return $ stm {stmExp = DoLoop merge form (body {bodyStms = stms})}
     helper stm =
       inScopeOf stm $ return stm
 
@@ -265,4 +258,4 @@ optimise =
       PassM (Stms GPUMem)
     onStms graph scope stms = do
       let m = localScope scope $ optimiseKernel graph `onKernels` stms
-      fmap fst $ modifyNameSource $ runState (runBinderT m mempty)
+      fmap fst $ modifyNameSource $ runState (runBuilderT m mempty)

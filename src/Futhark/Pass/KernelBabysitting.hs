@@ -19,8 +19,8 @@ import Futhark.IR.GPU hiding
     FunDef,
     LParam,
     Lambda,
+    Pat,
     PatElem,
-    Pattern,
     Prog,
     RetType,
     Stm,
@@ -40,9 +40,9 @@ babysitKernels =
   where
     onStms scope stms = do
       let m = localScope scope $ transformStms mempty stms
-      fmap fst $ modifyNameSource $ runState (runBinderT m M.empty)
+      fmap fst $ modifyNameSource $ runState (runBuilderT m M.empty)
 
-type BabysitM = Binder GPU
+type BabysitM = Builder GPU
 
 transformStms :: ExpMap -> Stms GPU -> BabysitM (Stms GPU)
 transformStms expmap stms = collectStms_ $ foldM_ transformStm expmap stms
@@ -62,7 +62,7 @@ type ExpMap = M.Map VName (Stm GPU)
 nonlinearInMemory :: VName -> ExpMap -> Maybe (Maybe [Int])
 nonlinearInMemory name m =
   case M.lookup name m of
-    Just (Let _ _ (BasicOp (Opaque (Var arr)))) -> nonlinearInMemory arr m
+    Just (Let _ _ (BasicOp (Opaque _ (Var arr)))) -> nonlinearInMemory arr m
     Just (Let _ _ (BasicOp (Rearrange perm _))) -> Just $ Just $ rearrangeInverse perm
     Just (Let _ _ (BasicOp (Reshape _ arr))) -> nonlinearInMemory arr m
     Just (Let _ _ (BasicOp (Manifest perm _))) -> Just $ Just perm
@@ -70,7 +70,7 @@ nonlinearInMemory name m =
       nonlinear
         =<< find
           ((== name) . patElemName . fst)
-          (zip (patternElements pat) ts)
+          (zip (patElements pat) ts)
     _ -> Nothing
   where
     nonlinear (pe, t)
@@ -95,12 +95,12 @@ transformStm expmap (Let pat aux (Op (SegOp op)))
     op' <- mapSegOpM mapper op
     let stm' = Let pat aux $ Op $ SegOp op'
     addStm stm'
-    return $ M.fromList [(name, stm') | name <- patternNames pat] <> expmap
+    return $ M.fromList [(name, stm') | name <- patNames pat] <> expmap
 transformStm expmap (Let pat aux e) = do
   e' <- mapExpM (transform expmap) e
   let bnd' = Let pat aux e'
   addStm bnd'
-  return $ M.fromList [(name, bnd') | name <- patternNames pat] <> expmap
+  return $ M.fromList [(name, bnd') | name <- patNames pat] <> expmap
 
 transform :: ExpMap -> Mapper GPU GPU BabysitM
 transform expmap =
@@ -218,14 +218,14 @@ traverseKernelBodyArrayIndexes free_ker_vars thread_variant outer_scope f (Kerne
 
     mkSizeSubsts = foldMap mkStmSizeSubst
       where
-        mkStmSizeSubst (Let (Pattern [] [pe]) _ (Op (SizeOp (SplitSpace _ _ _ elems_per_i)))) =
+        mkStmSizeSubst (Let (Pat [pe]) _ (Op (SizeOp (SplitSpace _ _ _ elems_per_i)))) =
           M.singleton (patElemName pe) elems_per_i
         mkStmSizeSubst _ = mempty
 
 type Replacements = M.Map (VName, Slice SubExp) VName
 
 ensureCoalescedAccess ::
-  MonadBinder m =>
+  MonadBuilder m =>
   ExpMap ->
   [(VName, SubExp)] ->
   SubExp ->
@@ -268,7 +268,7 @@ ensureCoalescedAccess
           not $ null thread_gids,
           inner_gid <- last thread_gids,
           length slice >= length perm,
-          slice' <- map (slice !!) perm,
+          slice' <- map (unSlice slice !!) perm,
           DimFix inner_ind <- last slice',
           not $ null thread_gids,
           isGidVariant inner_gid inner_ind ->
@@ -309,7 +309,7 @@ ensureCoalescedAccess
         -- padding.
         | (is, rem_slice) <- splitSlice slice,
           and $ zipWith (==) is $ map Var thread_gids,
-          DimSlice offset len (Constant stride) : _ <- rem_slice,
+          DimSlice offset len (Constant stride) : _ <- unSlice rem_slice,
           isThreadLocalSubExp offset,
           Just {} <- sizeSubst len,
           oneIsh stride -> do
@@ -352,14 +352,14 @@ tooSmallSlice bs = fst . foldl comb (True, bs) . sliceDims
     comb (_, x) _ = (False, x)
 
 splitSlice :: Slice SubExp -> ([SubExp], Slice SubExp)
-splitSlice [] = ([], [])
-splitSlice (DimFix i : is) = first (i :) $ splitSlice is
+splitSlice (Slice []) = ([], Slice [])
+splitSlice (Slice (DimFix i : is)) = first (i :) $ splitSlice (Slice is)
 splitSlice is = ([], is)
 
 allDimAreSlice :: Slice SubExp -> Bool
-allDimAreSlice [] = True
-allDimAreSlice (DimFix _ : _) = False
-allDimAreSlice (_ : is) = allDimAreSlice is
+allDimAreSlice (Slice []) = True
+allDimAreSlice (Slice (DimFix _ : _)) = False
+allDimAreSlice (Slice (_ : is)) = allDimAreSlice (Slice is)
 
 -- Try to move thread indexes into their proper position.
 coalescedIndexes :: Names -> (VName -> SubExp -> Bool) -> [SubExp] -> [SubExp] -> Maybe [SubExp]
@@ -418,7 +418,7 @@ coalescingPermutation num_is rank =
   [num_is .. rank -1] ++ [0 .. num_is -1]
 
 rearrangeInput ::
-  MonadBinder m =>
+  MonadBuilder m =>
   Maybe (Maybe [Int]) ->
   [Int] ->
   VName ->
@@ -441,7 +441,7 @@ rearrangeInput manifest perm arr = do
     BasicOp $ Manifest perm manifested
 
 rowMajorArray ::
-  MonadBinder m =>
+  MonadBuilder m =>
   VName ->
   m VName
 rowMajorArray arr = do
@@ -449,7 +449,7 @@ rowMajorArray arr = do
   letExp (baseString arr ++ "_rowmajor") $ BasicOp $ Manifest [0 .. rank -1] arr
 
 rearrangeSlice ::
-  MonadBinder m =>
+  MonadBuilder m =>
   Int ->
   SubExp ->
   PrimExp VName ->
@@ -498,7 +498,7 @@ rearrangeSlice d w num_chunks arr = do
         =<< eSliceArray d arr_inv_tr (eSubExp $ constant (0 :: Int64)) (eSubExp w)
 
 paddedScanReduceInput ::
-  MonadBinder m =>
+  MonadBuilder m =>
   SubExp ->
   SubExp ->
   m (SubExp, SubExp)
@@ -518,7 +518,7 @@ varianceInStms t = foldl varianceInStm t . stmsToList
 
 varianceInStm :: VarianceTable -> Stm GPU -> VarianceTable
 varianceInStm variance bnd =
-  foldl' add variance $ patternNames $ stmPattern bnd
+  foldl' add variance $ patNames $ stmPat bnd
   where
     add variance' v = M.insert v binding_variance variance'
     look variance' v = oneName v <> M.findWithDefault mempty v variance'

@@ -64,16 +64,14 @@ doubleBuffer onOp =
        in runState (runReaderT m env) src
 
     env = Env mempty doNotTouchLoop onOp
-    doNotTouchLoop ctx val body = return (mempty, ctx, val, body)
+    doNotTouchLoop merge body = return (mempty, merge, body)
 
 type OptimiseLoop rep =
-  [(FParam rep, SubExp)] ->
   [(FParam rep, SubExp)] ->
   Body rep ->
   DoubleBufferM
     rep
     ( [Stm rep],
-      [(FParam rep, SubExp)],
       [(FParam rep, SubExp)],
       Body rep
     )
@@ -111,13 +109,13 @@ optimiseStms (e : es) = do
   return $ e_es ++ es'
 
 optimiseStm :: forall rep. ASTRep rep => Stm rep -> DoubleBufferM rep [Stm rep]
-optimiseStm (Let pat aux (DoLoop ctx val form body)) = do
+optimiseStm (Let pat aux (DoLoop merge form body)) = do
   body' <-
-    localScope (scopeOf form <> scopeOfFParams (map fst $ ctx ++ val)) $
+    localScope (scopeOf form <> scopeOfFParams (map fst merge)) $
       optimiseBody body
   opt_loop <- asks envOptimiseLoop
-  (bnds, ctx', val', body'') <- opt_loop ctx val body'
-  return $ bnds ++ [Let pat aux $ DoLoop ctx' val' form body'']
+  (bnds, merge', body'') <- opt_loop merge body'
+  return $ bnds ++ [Let pat aux $ DoLoop merge' form body'']
 optimiseStm (Let pat aux e) = do
   onOp <- asks envOptimiseOp
   pure . Let pat aux <$> mapExpM (optimise onOp) e
@@ -183,25 +181,20 @@ type Constraints rep =
     OpReturns rep
   )
 
-optimiseLoop :: (Constraints rep, Op rep ~ MemOp inner, BinderOps rep) => OptimiseLoop rep
-optimiseLoop ctx val body = do
+optimiseLoop :: (Constraints rep, Op rep ~ MemOp inner, BuilderOps rep) => OptimiseLoop rep
+optimiseLoop merge body = do
   -- We start out by figuring out which of the merge variables should
   -- be double-buffered.
   buffered <-
     doubleBufferMergeParams
-      (zip (map fst ctx) (bodyResult body))
-      (map fst merge)
+      (zip (map fst merge) (bodyResult body))
       (boundInBody body)
   -- Then create the allocations of the buffers and copies of the
   -- initial values.
   (merge', allocs) <- allocStms merge buffered
   -- Modify the loop body to copy buffered result arrays.
   let body' = doubleBufferResult (map fst merge) buffered body
-      (ctx', val') = splitAt (length ctx) merge'
-  -- Modify the initial merge p
-  return (allocs, ctx', val', body')
-  where
-    merge = ctx ++ val
+  pure (allocs, merge', body')
 
 -- | The booleans indicate whether we should also play with the
 -- initial merge values.
@@ -215,13 +208,13 @@ data DoubleBuffer
 
 doubleBufferMergeParams ::
   MonadFreshNames m =>
-  [(Param FParamMem, SubExp)] ->
-  [Param FParamMem] ->
+  [(Param FParamMem, SubExpRes)] ->
   Names ->
   m [DoubleBuffer]
-doubleBufferMergeParams ctx_and_res val_params bound_in_loop =
+doubleBufferMergeParams ctx_and_res bound_in_loop =
   evalStateT (mapM buffer val_params) M.empty
   where
+    val_params = map fst ctx_and_res
     loopVariant v =
       v `nameIn` bound_in_loop
         || v `elem` map (paramName . fst) ctx_and_res
@@ -230,9 +223,9 @@ doubleBufferMergeParams ctx_and_res val_params bound_in_loop =
       Just (Constant v, True)
     loopInvariantSize (Var v) =
       case find ((== v) . paramName . fst) ctx_and_res of
-        Just (_, Constant val) ->
+        Just (_, SubExpRes _ (Constant val)) ->
           Just (Constant val, False)
-        Just (_, Var v')
+        Just (_, SubExpRes _ (Var v'))
           | not $ loopVariant v' ->
             Just (Var v', False)
         Just _ ->
@@ -273,7 +266,7 @@ doubleBufferMergeParams ctx_and_res val_params bound_in_loop =
       _ -> return NoBuffer
 
 allocStms ::
-  (Constraints rep, Op rep ~ MemOp inner, BinderOps rep) =>
+  (Constraints rep, Op rep ~ MemOp inner, BuilderOps rep) =>
   [(FParam rep, SubExp)] ->
   [DoubleBuffer] ->
   DoubleBufferM rep ([(FParam rep, SubExp)], [Stm rep])
@@ -281,7 +274,7 @@ allocStms merge = runWriterT . zipWithM allocation merge
   where
     allocation m@(Param pname _, _) (BufferAlloc name size space b) = do
       stms <- lift $
-        runBinder_ $ do
+        runBuilder_ $ do
           size' <- toSubExp "double_buffer_size" size
           letBindNames [name] $ Op $ Alloc size' space
       tell $ stmsToList stms
@@ -295,7 +288,7 @@ allocStms merge = runWriterT . zipWithM allocation merge
           shape = arrayShape $ paramType f
           bound = MemArray bt shape NoUniqueness $ ArrayIn mem v_ixfun
       tell
-        [ Let (Pattern [] [PatElem v_copy bound]) (defAux ()) $
+        [ Let (Pat [PatElem v_copy bound]) (defAux ()) $
             BasicOp $ Copy v
         ]
       -- It is important that we treat this as a consumption, to
@@ -321,21 +314,21 @@ doubleBufferResult valparams buffered (Body _ bnds res) =
         unzip $ zipWith3 buffer valparams buffered val_res
    in Body () (bnds <> stmsFromList (catMaybes copybnds)) $ ctx_res ++ val_res'
   where
-    buffer _ (BufferAlloc bufname _ _ _) _ =
-      (Nothing, Var bufname)
-    buffer fparam (BufferCopy bufname ixfun copyname _) (Var v) =
+    buffer _ (BufferAlloc bufname _ _ _) se =
+      (Nothing, se {resSubExp = Var bufname})
+    buffer fparam (BufferCopy bufname ixfun copyname _) (SubExpRes cs (Var v)) =
       -- To construct the copy we will need to figure out its type
       -- based on the type of the function parameter.
       let t = resultType $ paramType fparam
           summary = MemArray (elemType t) (arrayShape t) NoUniqueness $ ArrayIn bufname ixfun
           copybnd =
-            Let (Pattern [] [PatElem copyname summary]) (defAux ()) $
+            Let (Pat [PatElem copyname summary]) (defAux ()) $
               BasicOp $ Copy v
-       in (Just copybnd, Var copyname)
+       in (Just copybnd, SubExpRes cs (Var copyname))
     buffer _ _ se =
       (Nothing, se)
 
-    parammap = M.fromList $ zip (map paramName valparams) res
+    parammap = M.fromList $ zip (map paramName valparams) $ map resSubExp res
 
     resultType t = t `setArrayDims` map substitute (arrayDims t)
 

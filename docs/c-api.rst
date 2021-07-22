@@ -281,7 +281,7 @@ For example, this Futhark entry point::
 
 Results in the following C function:
 
-.. c:function:: int futhark_entry_main(struct futhark_context *ctx, int32_t *out0, const struct futhark_i32_1d *in0)
+.. c:function:: int futhark_entry_sum(struct futhark_context *ctx, int32_t *out0, const struct futhark_i32_1d *in0)
 
    Asynchronously call the entry point with the given arguments.  Make
    sure to call :c:func:`futhark_context_sync` before using the value
@@ -300,6 +300,11 @@ even though execution has already (or will) fail.  These problems will
 be reported when :c:func:`futhark_context_sync` is called.  Therefore,
 be careful to check the return code of *both* the entry point itself,
 and :c:func:`futhark_context_sync`.
+
+For the rules on entry points that consume their input, see
+:ref:`api-consumption`.  Note that even if a value has been consumed,
+you must still manually free it.  This is the only operation that is
+permitted on a consumed value.
 
 GPU
 ---
@@ -432,7 +437,6 @@ backend.
    value less than ``1``, then the runtime system will use one thread
    per detected core.
 
-
 General guarantees
 ------------------
 
@@ -459,3 +463,8 @@ Note that for the GPU backends, the underlying API (such as CUDA or
 OpenCL) may perform file system operations during startup, and perhaps
 for caching GPU kernels in some cases.  This is beyond Futhark's
 control.
+
+Violation the restrictions of consumption (see :ref:`api-consumption`)
+can result in undefined behaviour.  This does not matter for programs
+whose entry points do not have unique parameter types
+(:ref:`in-place-updates`).

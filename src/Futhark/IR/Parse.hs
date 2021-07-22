@@ -160,14 +160,6 @@ pSubExps = braces (pSubExp `sepBy` pComma)
 pVNames :: Parser [VName]
 pVNames = braces (pVName `sepBy` pComma)
 
-pPatternLike :: Parser a -> Parser ([a], [a])
-pPatternLike p = braces $ do
-  xs <- p `sepBy` pComma
-  choice
-    [ pSemi *> ((xs,) <$> (p `sepBy` pComma)),
-      pure (mempty, xs)
-    ]
-
 pConvOp ::
   T.Text -> (t1 -> t2 -> ConvOp) -> Parser t1 -> Parser t2 -> Parser BasicOp
 pConvOp s op t1 t2 =
@@ -205,7 +197,7 @@ pDimIndex =
     ]
 
 pSlice :: Parser (Slice SubExp)
-pSlice = brackets $ pDimIndex `sepBy` pComma
+pSlice = Slice <$> brackets (pDimIndex `sepBy` pComma)
 
 pIndex :: Parser BasicOp
 pIndex = try $ Index <$> pVName <*> pSlice
@@ -214,11 +206,7 @@ pErrorMsgPart :: Parser (ErrorMsgPart SubExp)
 pErrorMsgPart =
   choice
     [ ErrorString <$> pStringLiteral,
-      flip ($) <$> (pSubExp <* pColon)
-        <*> choice
-          [ keyword "i32" $> ErrorInt32,
-            keyword "i64" $> ErrorInt64
-          ]
+      flip ErrorVal <$> (pSubExp <* pColon) <*> pPrimType
     ]
 
 pErrorMsg :: Parser (ErrorMsg SubExp)
@@ -256,7 +244,9 @@ pIota =
 pBasicOp :: Parser BasicOp
 pBasicOp =
   choice
-    [ keyword "opaque" $> Opaque <*> parens pSubExp,
+    [ keyword "opaque" $> Opaque OpaqueNil <*> parens pSubExp,
+      keyword "trace" $> uncurry (Opaque . OpaqueTrace)
+        <*> parens ((,) <$> lexeme pStringLiteral <* pComma <*> pSubExp),
       keyword "copy" $> Copy <*> parens pVName,
       keyword "assert"
         *> parens
@@ -286,8 +276,9 @@ pBasicOp =
           Concat d <$> pVName <*> many (pComma *> pVName) <*> pure w,
       pIota,
       try $
-        Update
+        flip Update
           <$> pVName <* keyword "with"
+          <*> choice [lexeme "?" $> Safe, pure Unsafe]
           <*> pSlice <* lexeme "="
           <*> pSubExp,
       ArrayLit
@@ -374,8 +365,11 @@ pPatElem :: PR rep -> Parser (PatElem rep)
 pPatElem pr =
   (PatElem <$> pVName <*> (pColon *> pLetDec pr)) <?> "pattern element"
 
-pPattern :: PR rep -> Parser (Pattern rep)
-pPattern pr = uncurry Pattern <$> pPatternLike (pPatElem pr)
+pPat :: PR rep -> Parser (Pat rep)
+pPat pr = Pat <$> braces (pPatElem pr `sepBy` pComma)
+
+pResult :: Parser Result
+pResult = braces $ pSubExpRes `sepBy` pComma
 
 pIf :: PR rep -> Parser (Exp rep)
 pIf pr =
@@ -394,7 +388,7 @@ pIf pr =
       If cond tbranch fbranch $ IfDec t sort
     pBranchBody =
       choice
-        [ try $ braces $ Body (pBodyDec pr) mempty <$> pSubExp `sepBy` pComma,
+        [ try $ Body (pBodyDec pr) mempty <$> pResult,
           braces (pBody pr)
         ]
 
@@ -417,17 +411,16 @@ pApply pr =
 
 pLoop :: PR rep -> Parser (Exp rep)
 pLoop pr =
-  keyword "loop" $> uncurry DoLoop
+  keyword "loop" $> DoLoop
     <*> pLoopParams
     <*> pLoopForm <* keyword "do"
     <*> braces (pBody pr)
   where
     pLoopParams = do
-      (ctx, val) <- pPatternLike (pFParam pr)
+      params <- braces $ pFParam pr `sepBy` pComma
       void $ lexeme "="
-      (ctx_init, val_init) <-
-        splitAt (length ctx) <$> braces (pSubExp `sepBy` pComma)
-      pure (zip ctx ctx_init, zip val val_init)
+      args <- braces (pSubExp `sepBy` pComma)
+      pure (zip params args)
 
     pLoopForm =
       choice
@@ -490,17 +483,22 @@ pExp pr =
       BasicOp <$> pBasicOp
     ]
 
+pCerts :: Parser Certs
+pCerts =
+  choice
+    [ lexeme "#" *> braces (Certs <$> pVName `sepBy` pComma)
+        <?> "certificates",
+      pure mempty
+    ]
+
+pSubExpRes :: Parser SubExpRes
+pSubExpRes = SubExpRes <$> pCerts <*> pSubExp
+
 pStm :: PR rep -> Parser (Stm rep)
 pStm pr =
-  keyword "let" $> Let <*> pPattern pr <* pEqual <*> pStmAux <*> pExp pr
+  keyword "let" $> Let <*> pPat pr <* pEqual <*> pStmAux <*> pExp pr
   where
     pStmAux = flip StmAux <$> pAttrs <*> pCerts <*> pure (pExpDec pr)
-    pCerts =
-      choice
-        [ lexeme "#" *> braces (Certificates <$> pVName `sepBy` pComma)
-            <?> "certificates",
-          pure mempty
-        ]
 
 pStms :: PR rep -> Parser (Stms rep)
 pStms pr = stmsFromList <$> many (pStm pr)
@@ -511,8 +509,6 @@ pBody pr =
     [ Body (pBodyDec pr) <$> pStms pr <* keyword "in" <*> pResult,
       Body (pBodyDec pr) mempty <$> pResult
     ]
-  where
-    pResult = braces $ pSubExp `sepBy` pComma
 
 pEntry :: Parser EntryPoint
 pEntry =
@@ -522,11 +518,12 @@ pEntry =
       <* pComma <*> pEntryPointTypes
   where
     pEntryPointTypes = braces (pEntryPointType `sepBy` pComma)
-    pEntryPointType =
+    pEntryPointType = do
+      u <- pUniqueness
       choice
-        [ "direct" $> TypeDirect,
-          "unsigned" $> TypeUnsigned,
-          "opaque" *> parens (TypeOpaque <$> pStringLiteral <* pComma <*> pInt)
+        [ "direct" $> TypeDirect u,
+          "unsigned" $> TypeUnsigned u,
+          "opaque" *> parens (TypeOpaque u <$> pStringLiteral <* pComma <*> pInt)
         ]
 
 pFunDef :: PR rep -> Parser (FunDef rep)
@@ -724,7 +721,8 @@ pSegSpace =
     pDim = (,) <$> pVName <* lexeme "<" <*> pSubExp
 
 pKernelResult :: Parser SegOp.KernelResult
-pKernelResult =
+pKernelResult = do
+  cs <- pCerts
   choice
     [ keyword "returns" $> SegOp.Returns
         <*> choice
@@ -732,26 +730,27 @@ pKernelResult =
             keyword "(private)" $> SegOp.ResultPrivate,
             pure SegOp.ResultMaySimplify
           ]
+        <*> pure cs
         <*> pSubExp,
       try $
-        flip SegOp.WriteReturns
+        flip (SegOp.WriteReturns cs)
           <$> pVName <* pColon
           <*> pShape <* keyword "with"
           <*> parens (pWrite `sepBy` pComma),
       try "tile"
-        *> parens (SegOp.TileReturns <$> (pTile `sepBy` pComma)) <*> pVName,
+        *> parens (SegOp.TileReturns cs <$> (pTile `sepBy` pComma)) <*> pVName,
       try "blkreg_tile"
-        *> parens (SegOp.RegTileReturns <$> (pRegTile `sepBy` pComma)) <*> pVName,
+        *> parens (SegOp.RegTileReturns cs <$> (pRegTile `sepBy` pComma)) <*> pVName,
       keyword "concat"
         *> parens
-          ( SegOp.ConcatReturns SegOp.SplitContiguous
+          ( SegOp.ConcatReturns cs SegOp.SplitContiguous
               <$> pSubExp <* pComma
               <*> pSubExp
           )
         <*> pVName,
       keyword "concat_strided"
         *> parens
-          ( SegOp.ConcatReturns
+          ( SegOp.ConcatReturns cs
               <$> (SegOp.SplitStrided <$> pSubExp) <* pComma
               <*> pSubExp <* pComma
               <*> pSubExp

@@ -106,12 +106,12 @@ mapExpM tv (Apply fname args ret loc) = do
 mapExpM tv (BasicOp (Index arr slice)) =
   BasicOp
     <$> ( Index <$> mapOnVName tv arr
-            <*> mapM (traverse (mapOnSubExp tv)) slice
+            <*> traverse (mapOnSubExp tv) slice
         )
-mapExpM tv (BasicOp (Update arr slice se)) =
+mapExpM tv (BasicOp (Update safety arr slice se)) =
   BasicOp
-    <$> ( Update <$> mapOnVName tv arr
-            <*> mapM (traverse (mapOnSubExp tv)) slice
+    <$> ( Update safety <$> mapOnVName tv arr
+            <*> traverse (mapOnSubExp tv) slice
             <*> mapOnSubExp tv se
         )
 mapExpM tv (BasicOp (Iota n x s et)) =
@@ -143,8 +143,8 @@ mapExpM tv (BasicOp (Manifest perm e)) =
   BasicOp <$> (Manifest perm <$> mapOnVName tv e)
 mapExpM tv (BasicOp (Assert e msg loc)) =
   BasicOp <$> (Assert <$> mapOnSubExp tv e <*> traverse (mapOnSubExp tv) msg <*> pure loc)
-mapExpM tv (BasicOp (Opaque e)) =
-  BasicOp <$> (Opaque <$> mapOnSubExp tv e)
+mapExpM tv (BasicOp (Opaque op e)) =
+  BasicOp <$> (Opaque op <$> mapOnSubExp tv e)
 mapExpM tv (BasicOp (UpdateAcc v is ses)) =
   BasicOp
     <$> ( UpdateAcc
@@ -158,19 +158,16 @@ mapExpM tv (WithAcc inputs lam) =
     onInput (shape, vs, op) =
       (,,) <$> mapOnShape tv shape <*> mapM (mapOnVName tv) vs
         <*> traverse (bitraverse (mapOnLambda tv) (mapM (mapOnSubExp tv))) op
-mapExpM tv (DoLoop ctxmerge valmerge form loopbody) = do
-  ctxparams' <- mapM (mapOnFParam tv) ctxparams
-  valparams' <- mapM (mapOnFParam tv) valparams
+mapExpM tv (DoLoop merge form loopbody) = do
+  params' <- mapM (mapOnFParam tv) params
   form' <- mapOnLoopForm tv form
-  let scope = scopeOf form' <> scopeOfFParams (ctxparams' ++ valparams')
+  let scope = scopeOf form' <> scopeOfFParams params'
   DoLoop
-    <$> (zip ctxparams' <$> mapM (mapOnSubExp tv) ctxinits)
-    <*> (zip valparams' <$> mapM (mapOnSubExp tv) valinits)
+    <$> (zip params' <$> mapM (mapOnSubExp tv) args)
     <*> pure form'
     <*> mapOnBody tv scope loopbody
   where
-    (ctxparams, ctxinits) = unzip ctxmerge
-    (valparams, valinits) = unzip valmerge
+    (params, args) = unzip merge
 mapExpM tv (Op op) =
   Op <$> mapOnOp tv op
 
@@ -283,10 +280,10 @@ walkExpM tv (If c texp fexp (IfDec ts _)) = do
 walkExpM tv (Apply _ args ret _) =
   mapM_ (walkOnSubExp tv . fst) args >> mapM_ (walkOnRetType tv) ret
 walkExpM tv (BasicOp (Index arr slice)) =
-  walkOnVName tv arr >> mapM_ (traverse_ (walkOnSubExp tv)) slice
-walkExpM tv (BasicOp (Update arr slice se)) =
+  walkOnVName tv arr >> traverse_ (walkOnSubExp tv) slice
+walkExpM tv (BasicOp (Update _ arr slice se)) =
   walkOnVName tv arr
-    >> mapM_ (traverse_ (walkOnSubExp tv)) slice
+    >> traverse_ (walkOnSubExp tv) slice
     >> walkOnSubExp tv se
 walkExpM tv (BasicOp (Iota n x s _)) =
   walkOnSubExp tv n >> walkOnSubExp tv x >> walkOnSubExp tv s
@@ -308,7 +305,7 @@ walkExpM tv (BasicOp (Manifest _ e)) =
   walkOnVName tv e
 walkExpM tv (BasicOp (Assert e msg _)) =
   walkOnSubExp tv e >> traverse_ (walkOnSubExp tv) msg
-walkExpM tv (BasicOp (Opaque e)) =
+walkExpM tv (BasicOp (Opaque _ e)) =
   walkOnSubExp tv e
 walkExpM tv (BasicOp (UpdateAcc v is ses)) = do
   walkOnVName tv v
@@ -320,16 +317,13 @@ walkExpM tv (WithAcc inputs lam) = do
     mapM_ (walkOnVName tv) vs
     traverse_ (bitraverse (walkOnLambda tv) (mapM (walkOnSubExp tv))) op
   walkOnLambda tv lam
-walkExpM tv (DoLoop ctxmerge valmerge form loopbody) = do
-  mapM_ (walkOnFParam tv) ctxparams
-  mapM_ (walkOnFParam tv) valparams
+walkExpM tv (DoLoop merge form loopbody) = do
+  mapM_ (walkOnFParam tv) params
   walkOnLoopForm tv form
-  mapM_ (walkOnSubExp tv) ctxinits
-  mapM_ (walkOnSubExp tv) valinits
-  let scope = scopeOfFParams (ctxparams ++ valparams) <> scopeOf form
+  mapM_ (walkOnSubExp tv) args
+  let scope = scopeOfFParams params <> scopeOf form
   walkOnBody tv scope loopbody
   where
-    (ctxparams, ctxinits) = unzip ctxmerge
-    (valparams, valinits) = unzip valmerge
+    (params, args) = unzip merge
 walkExpM tv (Op op) =
   walkOnOp tv op

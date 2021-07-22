@@ -16,26 +16,21 @@ writeResult ::
   PatElemT dec ->
   KernelResult ->
   MulticoreGen ()
-writeResult is pe (Returns _ se) =
+writeResult is pe (Returns _ _ se) =
   copyDWIMFix (patElemName pe) (map Imp.vi64 is) se []
-writeResult _ pe (WriteReturns (Shape rws) _ idx_vals) = do
+writeResult _ pe (WriteReturns _ (Shape rws) _ idx_vals) = do
   let (iss, vs) = unzip idx_vals
       rws' = map toInt64Exp rws
   forM_ (zip iss vs) $ \(slice, v) -> do
-    let slice' = map (fmap toInt64Exp) slice
-        condInBounds (DimFix i) rw =
-          0 .<=. i .&&. i .<. rw
-        condInBounds (DimSlice i n s) rw =
-          0 .<=. i .&&. i + n * s .<. rw
-        in_bounds = foldl1 (.&&.) $ zipWith condInBounds slice' rws'
-        when_in_bounds = copyDWIM (patElemName pe) slice' v []
-    sWhen in_bounds when_in_bounds
+    let slice' = fmap toInt64Exp slice
+        when_in_bounds = copyDWIM (patElemName pe) (unSlice slice') v []
+    sWhen (inBounds slice' rws') when_in_bounds
 writeResult _ _ res =
   error $ "writeResult: cannot handle " ++ pretty res
 
 compileSegMapBody ::
   TV Int64 ->
-  Pattern MCMem ->
+  Pat MCMem ->
   SegSpace ->
   KernelBody MCMem ->
   MulticoreGen Imp.Code
@@ -47,10 +42,10 @@ compileSegMapBody flat_idx pat space (KernelBody _ kstms kres) = do
     emit $ Imp.DebugPrint "SegMap fbody" Nothing
     dIndexSpace (zip is ns') $ tvExp flat_idx
     compileStms (freeIn kres) kstms' $
-      zipWithM_ (writeResult is) (patternElements pat) kres
+      zipWithM_ (writeResult is) (patElements pat) kres
 
 compileSegMap ::
-  Pattern MCMem ->
+  Pat MCMem ->
   SegSpace ->
   KernelBody MCMem ->
   MulticoreGen Imp.Code

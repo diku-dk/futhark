@@ -71,7 +71,7 @@ where
 import Control.Monad.RWS
 import qualified Data.Map.Strict as M
 import Futhark.Analysis.Alias
-import Futhark.Binder
+import Futhark.Builder
 import Futhark.IR.Aliases
 import Futhark.IR.GPU
 import Futhark.IR.MC
@@ -119,17 +119,14 @@ inPlaceLowering onOp lower =
     descend [] m = m
     descend (stm : stms) m = bindingStm stm $ descend stms m
 
-type Constraints rep = (Bindable rep, CanBeAliased (Op rep))
+type Constraints rep = (Buildable rep, CanBeAliased (Op rep))
 
 optimiseBody ::
   Constraints rep =>
   Body (Aliases rep) ->
   ForwardingM rep (Body (Aliases rep))
 optimiseBody (Body als bnds res) = do
-  bnds' <-
-    deepen $
-      optimiseStms (stmsToList bnds) $
-        mapM_ seen res
+  bnds' <- deepen $ optimiseStms (stmsToList bnds) $ mapM_ (seen . resSubExp) res
   return $ Body als (stmsFromList bnds') res
   where
     seen Constant {} = return ()
@@ -156,7 +153,7 @@ optimiseStms (bnd : bnds) m = do
       let updated_names =
             map updateName updates
           notUpdated =
-            not . any (`elem` updated_names) . patternNames . stmPattern
+            not . any (`elem` updated_names) . patNames . stmPat
 
       -- Condition (5) and (7) are assumed to be checked by
       -- lowerUpdate.
@@ -171,11 +168,11 @@ optimiseStms (bnd : bnds) m = do
           checkIfForwardableUpdate bnd'
           return $ bnd' : bnds'
   where
-    boundHere = patternNames $ stmPattern bnd
+    boundHere = patNames $ stmPat bnd
 
     checkIfForwardableUpdate (Let pat (StmAux cs _ _) e)
-      | Pattern [] [PatElem v dec] <- pat,
-        BasicOp (Update src slice (Var ve)) <- e =
+      | Pat [PatElem v dec] <- pat,
+        BasicOp (Update Unsafe src slice (Var ve)) <- e =
         maybeForward ve v dec cs src slice
     checkIfForwardableUpdate _ = return ()
 
@@ -184,10 +181,9 @@ optimiseInStm (Let pat dec e) =
   Let pat dec <$> optimiseExp e
 
 optimiseExp :: Constraints rep => Exp (Aliases rep) -> ForwardingM rep (Exp (Aliases rep))
-optimiseExp (DoLoop ctx val form body) =
-  bindingScope (scopeOf form) $
-    bindingFParams (map fst $ ctx ++ val) $
-      DoLoop ctx val form <$> optimiseBody body
+optimiseExp (DoLoop merge form body) =
+  bindingScope (scopeOf form) . bindingFParams (map fst merge) $
+    DoLoop merge form <$> optimiseBody body
 optimiseExp (Op op) = do
   f <- asks topOnOp
   Op <$> f op
@@ -199,7 +195,7 @@ optimiseExp e = mapExpM optimise e
         }
 
 onSegOp ::
-  (Bindable rep, CanBeAliased (Op rep)) =>
+  (Buildable rep, CanBeAliased (Op rep)) =>
   SegOp lvl (Aliases rep) ->
   ForwardingM rep (SegOp lvl (Aliases rep))
 onSegOp op =
@@ -324,7 +320,7 @@ bindingStm ::
   ForwardingM rep a ->
   ForwardingM rep a
 bindingStm (Let pat _ _) = local $ \(TopDown n vtable d x y) ->
-  let entries = M.fromList $ map entry $ patternElements pat
+  let entries = M.fromList $ map entry $ patElements pat
       entry patElem =
         let (aliases, _) = patElemDec patElem
          in ( patElemName patElem,
@@ -394,7 +390,7 @@ maybeForward ::
   VName ->
   VName ->
   LetDec (Aliases rep) ->
-  Certificates ->
+  Certs ->
   VName ->
   Slice SubExp ->
   ForwardingM rep ()

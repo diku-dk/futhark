@@ -143,10 +143,7 @@ newtype TypeM a
   = TypeM
       ( ReaderT
           Context
-          ( StateT
-              TypeState
-              (Except (Warnings, TypeError))
-          )
+          (StateT TypeState (Except (Warnings, TypeError)))
           a
       )
   deriving
@@ -236,7 +233,7 @@ class Monad m => MonadTypeChecker m where
 
   lookupType :: SrcLoc -> QualName Name -> m (QualName VName, [TypeParam], StructType, Liftedness)
   lookupMod :: SrcLoc -> QualName Name -> m (QualName VName, Mod)
-  lookupVar :: SrcLoc -> QualName Name -> m (QualName VName, PatternType)
+  lookupVar :: SrcLoc -> QualName Name -> m (QualName VName, PatType)
 
   checkNamedDim :: SrcLoc -> QualName Name -> m (QualName VName)
   checkNamedDim loc v = do

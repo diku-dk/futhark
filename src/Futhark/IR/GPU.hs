@@ -16,7 +16,7 @@ module Futhark.IR.GPU
   )
 where
 
-import Futhark.Binder
+import Futhark.Builder
 import Futhark.Construct
 import Futhark.IR.GPU.Kernel
 import Futhark.IR.GPU.Sizes
@@ -34,7 +34,7 @@ instance RepTypes GPU where
   type Op GPU = HostOp GPU (SOAC GPU)
 
 instance ASTRep GPU where
-  expTypesFromPattern = return . expExtTypesFromPattern
+  expTypesFromPat = return . expExtTypesFromPat
 
 instance TypeCheck.CheckableOp GPU where
   checkOp = typeCheckGPUOp Nothing
@@ -44,13 +44,13 @@ instance TypeCheck.CheckableOp GPU where
 
 instance TypeCheck.Checkable GPU
 
-instance Bindable GPU where
+instance Buildable GPU where
   mkBody = Body ()
-  mkExpPat ctx val _ = basicPattern ctx val
+  mkExpPat idents _ = basicPat idents
   mkExpDec _ _ = ()
   mkLetNames = simpleMkLetNames
 
-instance BinderOps GPU
+instance BuilderOps GPU
 
 instance PrettyRep GPU
 

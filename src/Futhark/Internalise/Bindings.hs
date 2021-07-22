@@ -6,7 +6,7 @@ module Futhark.Internalise.Bindings
   ( bindingFParams,
     bindingLoopParams,
     bindingLambdaParams,
-    stmPattern,
+    stmPat,
   )
 where
 
@@ -21,11 +21,11 @@ import Language.Futhark as E hiding (matchDims)
 
 bindingFParams ::
   [E.TypeParam] ->
-  [E.Pattern] ->
+  [E.Pat] ->
   ([I.FParam] -> [[I.FParam]] -> InternaliseM a) ->
   InternaliseM a
 bindingFParams tparams params m = do
-  flattened_params <- mapM flattenPattern params
+  flattened_params <- mapM flattenPat params
   let params_idents = concat flattened_params
   params_ts <-
     internaliseParamTypes $
@@ -35,7 +35,7 @@ bindingFParams tparams params m = do
 
   let shape_params = [I.Param v $ I.Prim I.int64 | E.TypeParamDim v _ <- tparams]
       shape_subst = M.fromList [(I.paramName p, [I.Var $ I.paramName p]) | p <- shape_params]
-  bindingFlatPattern params_idents (concat params_ts) $ \valueparams -> do
+  bindingFlatPat params_idents (concat params_ts) $ \valueparams -> do
     let (certparams, valueparams') = unzip $ map fixAccParam (concat valueparams)
     I.localScope (I.scopeOfFParams $ catMaybes certparams ++ shape_params ++ valueparams') $
       substitutingVars shape_subst $
@@ -49,45 +49,45 @@ bindingFParams tparams params m = do
 
 bindingLoopParams ::
   [E.TypeParam] ->
-  E.Pattern ->
+  E.Pat ->
   [I.Type] ->
   ([I.FParam] -> [I.FParam] -> InternaliseM a) ->
   InternaliseM a
 bindingLoopParams tparams pat ts m = do
-  pat_idents <- flattenPattern pat
+  pat_idents <- flattenPat pat
   pat_ts <- internaliseLoopParamType (E.patternStructType pat) ts
 
   let shape_params = [I.Param v $ I.Prim I.int64 | E.TypeParamDim v _ <- tparams]
       shape_subst = M.fromList [(I.paramName p, [I.Var $ I.paramName p]) | p <- shape_params]
 
-  bindingFlatPattern pat_idents pat_ts $ \valueparams ->
+  bindingFlatPat pat_idents pat_ts $ \valueparams ->
     I.localScope (I.scopeOfFParams $ shape_params ++ concat valueparams) $
       substitutingVars shape_subst $ m shape_params $ concat valueparams
 
 bindingLambdaParams ::
-  [E.Pattern] ->
+  [E.Pat] ->
   [I.Type] ->
   ([I.LParam] -> InternaliseM a) ->
   InternaliseM a
 bindingLambdaParams params ts m = do
-  params_idents <- concat <$> mapM flattenPattern params
+  params_idents <- concat <$> mapM flattenPat params
 
-  bindingFlatPattern params_idents ts $ \params' ->
+  bindingFlatPat params_idents ts $ \params' ->
     I.localScope (I.scopeOfLParams $ concat params') $ m $ concat params'
 
-processFlatPattern ::
+processFlatPat ::
   Show t =>
   [E.Ident] ->
   [t] ->
-  InternaliseM ([[I.Param t]], VarSubstitutions)
-processFlatPattern x y = processFlatPattern' [] x y
+  InternaliseM ([[I.Param t]], VarSubsts)
+processFlatPat x y = processFlatPat' [] x y
   where
-    processFlatPattern' pat [] _ = do
+    processFlatPat' pat [] _ = do
       let (vs, substs) = unzip pat
       return (reverse vs, M.fromList substs)
-    processFlatPattern' pat (p : rest) ts = do
+    processFlatPat' pat (p : rest) ts = do
       (ps, rest_ts) <- handleMapping ts <$> internaliseBindee p
-      processFlatPattern' ((ps, (E.identName p, map (I.Var . I.paramName) ps)) : pat) rest rest_ts
+      processFlatPat' ((ps, (E.identName p, map (I.Var . I.paramName) ps)) : pat) rest rest_ts
 
     handleMapping ts [] =
       ([], ts)
@@ -105,49 +105,49 @@ processFlatPattern x y = processFlatPattern' [] x y
         1 -> return [name]
         _ -> replicateM n $ newVName $ baseString name
 
-bindingFlatPattern ::
+bindingFlatPat ::
   Show t =>
   [E.Ident] ->
   [t] ->
   ([[I.Param t]] -> InternaliseM a) ->
   InternaliseM a
-bindingFlatPattern idents ts m = do
-  (ps, substs) <- processFlatPattern idents ts
+bindingFlatPat idents ts m = do
+  (ps, substs) <- processFlatPat idents ts
   local (\env -> env {envSubsts = substs `M.union` envSubsts env}) $
     m ps
 
 -- | Flatten a pattern.  Returns a list of identifiers.
-flattenPattern :: MonadFreshNames m => E.Pattern -> m [E.Ident]
-flattenPattern = flattenPattern'
+flattenPat :: MonadFreshNames m => E.Pat -> m [E.Ident]
+flattenPat = flattenPat'
   where
-    flattenPattern' (E.PatternParens p _) =
-      flattenPattern' p
-    flattenPattern' (E.Wildcard t loc) = do
+    flattenPat' (E.PatParens p _) =
+      flattenPat' p
+    flattenPat' (E.Wildcard t loc) = do
       name <- newVName "nameless"
-      flattenPattern' $ E.Id name t loc
-    flattenPattern' (E.Id v (Info t) loc) =
+      flattenPat' $ E.Id name t loc
+    flattenPat' (E.Id v (Info t) loc) =
       return [E.Ident v (Info t) loc]
     -- XXX: treat empty tuples and records as unit.
-    flattenPattern' (E.TuplePattern [] loc) =
-      flattenPattern' (E.Wildcard (Info $ E.Scalar $ E.Record mempty) loc)
-    flattenPattern' (E.RecordPattern [] loc) =
-      flattenPattern' (E.Wildcard (Info $ E.Scalar $ E.Record mempty) loc)
-    flattenPattern' (E.TuplePattern pats _) =
-      concat <$> mapM flattenPattern' pats
-    flattenPattern' (E.RecordPattern fs loc) =
-      flattenPattern' $ E.TuplePattern (map snd $ sortFields $ M.fromList fs) loc
-    flattenPattern' (E.PatternAscription p _ _) =
-      flattenPattern' p
-    flattenPattern' (E.PatternLit _ t loc) =
-      flattenPattern' $ E.Wildcard t loc
-    flattenPattern' (E.PatternConstr _ _ ps _) =
-      concat <$> mapM flattenPattern' ps
+    flattenPat' (E.TuplePat [] loc) =
+      flattenPat' (E.Wildcard (Info $ E.Scalar $ E.Record mempty) loc)
+    flattenPat' (E.RecordPat [] loc) =
+      flattenPat' (E.Wildcard (Info $ E.Scalar $ E.Record mempty) loc)
+    flattenPat' (E.TuplePat pats _) =
+      concat <$> mapM flattenPat' pats
+    flattenPat' (E.RecordPat fs loc) =
+      flattenPat' $ E.TuplePat (map snd $ sortFields $ M.fromList fs) loc
+    flattenPat' (E.PatAscription p _ _) =
+      flattenPat' p
+    flattenPat' (E.PatLit _ t loc) =
+      flattenPat' $ E.Wildcard t loc
+    flattenPat' (E.PatConstr _ _ ps _) =
+      concat <$> mapM flattenPat' ps
 
-stmPattern ::
-  E.Pattern ->
+stmPat ::
+  E.Pat ->
   [I.Type] ->
   ([VName] -> InternaliseM a) ->
   InternaliseM a
-stmPattern pat ts m = do
-  pat' <- flattenPattern pat
-  bindingFlatPattern pat' ts $ m . map I.paramName . concat
+stmPat pat ts m = do
+  pat' <- flattenPat pat
+  bindingFlatPat pat' ts $ m . map I.paramName . concat

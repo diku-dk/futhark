@@ -24,7 +24,7 @@ import Futhark.IR.Mem.Simplify
 import Futhark.IR.SegOp
 import qualified Futhark.Optimise.Simplify.Engine as Engine
 import Futhark.Pass
-import Futhark.Pass.ExplicitAllocations (BinderOps (..), mkLetNamesB', mkLetNamesB'')
+import Futhark.Pass.ExplicitAllocations (BuilderOps (..), mkLetNamesB', mkLetNamesB'')
 import qualified Futhark.TypeCheck as TC
 
 data MCMem
@@ -38,7 +38,7 @@ instance RepTypes MCMem where
   type Op MCMem = MemOp (MCOp MCMem ())
 
 instance ASTRep MCMem where
-  expTypesFromPattern = return . map snd . snd . bodyReturnsFromPattern
+  expTypesFromPat = return . map snd . bodyReturnsFromPat
 
 instance OpReturns MCMem where
   opReturns (Alloc _ space) = return [MemMem space]
@@ -61,17 +61,17 @@ instance TC.Checkable MCMem where
   checkLetBoundDec = checkMemInfo
   checkRetType = mapM_ (TC.checkExtType . declExtTypeOf)
   primFParam name t = return $ Param name (MemPrim t)
-  matchPattern = matchPatternToExp
+  matchPat = matchPatToExp
   matchReturnType = matchFunctionReturnType
   matchBranchType = matchBranchReturnType
   matchLoopResult = matchLoopResultMem
 
-instance BinderOps MCMem where
+instance BuilderOps MCMem where
   mkExpDecB _ _ = return ()
   mkBodyB stms res = return $ Body () stms res
   mkLetNamesB = mkLetNamesB' ()
 
-instance BinderOps (Engine.Wise MCMem) where
+instance BuilderOps (Engine.Wise MCMem) where
   mkExpDecB pat e = return $ Engine.mkWiseExpDec pat () e
   mkBodyB stms res = return $ Engine.mkWiseBody () stms res
   mkLetNamesB = mkLetNamesB''

@@ -297,6 +297,10 @@ have disabled - see `tools/style-check.sh`).
 Never use braces and semicolons - always use whitespace-based layout
 instead (except for generated code).
 
+### Prefer `pure` to `return`
+
+When writing monadic code, use `pure` instead of `return`.
+
 Design Rules
 ============
 

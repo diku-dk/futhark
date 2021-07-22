@@ -9,15 +9,43 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+  * The `#[trace]` and `#[break]` attributes now replace the `trace`
+    and `break` functions (although they are still present in
+    slightly-reduced but compatible form).
+
+  * The `#[opaque]` attribute replaces the `opaque` function, which is
+    now deprecated.
+
+  * Tracing now works in compiled code, albeit with several caveats
+    (mainly, it does not work for code running on the GPU).
+
+  * New `wasm` and `wasm-multicore` backends by Philip Lassen.  Still
+    very experimental; do not expect API stability.
+
+### Removed
+
+### Changed
+
+### Fixed
+
+  * `i64.abs` was wrong for arguments that did not fit in an `i32`.
+
+  * Some `f32` operations (`**`, `abs`, `max`) would be done in double
+    precision on the CUDA backend.
+
+  * Yet another defunctorisation bug (#1397).
+
+## [0.19.7]
+
+### Added
+
   * A new memory reuse optimisation has been added.  This results in
     slightly lower footprint for many programs.
 
   * The `cuda` backend now uses a fast single-pass implementation for
     segmented `scan`s, due to Morten Tychsen Clausen (#1375).
 
-### Removed
-
-### Changed
+  * `futhark bench` now prints interim results while it is running.
 
 ### Fixed
 
@@ -36,6 +64,13 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
     than strictly needed.
 
   * Size propagation bug in defunctionalisation (#1384).
+
+  * In the C FFI, array types used only internally to implement opaque
+    types are no longer exposed (#1387).
+
+  * `futhark bench` now copes with test programs that consume their
+    input (#1386).  This required an extension of the server protocol
+    as well.
 
 ## [0.19.6]
 

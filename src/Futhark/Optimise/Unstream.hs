@@ -61,7 +61,7 @@ unstream onOp simplify =
 type UnstreamM rep = ReaderT (Scope rep) (State VNameSource)
 
 type OnOp rep =
-  Pattern rep -> StmAux (ExpDec rep) -> Op rep -> UnstreamM rep [Stm rep]
+  Pat rep -> StmAux (ExpDec rep) -> Op rep -> UnstreamM rep [Stm rep]
 
 optimiseStms ::
   ASTRep rep =>
@@ -137,7 +137,7 @@ onMCOp stage pat aux (ParOp par_op op) = do
   pure [Let pat aux $ Op $ ParOp par_op' op']
 onMCOp stage pat aux (MC.OtherOp soac)
   | sequentialise stage soac = do
-    stms <- runBinder_ $ FOT.transformSOAC pat soac
+    stms <- runBuilder_ $ FOT.transformSOAC pat soac
     fmap concat $
       localScope (scopeOf stms) $
         mapM (optimiseStm (onMCOp stage)) $ stmsToList stms
@@ -158,7 +158,7 @@ sequentialise SeqAll _ = True
 onHostOp :: Stage -> OnOp GPU
 onHostOp stage pat aux (GPU.OtherOp soac)
   | sequentialise stage soac = do
-    stms <- runBinder_ $ FOT.transformSOAC pat soac
+    stms <- runBuilder_ $ FOT.transformSOAC pat soac
     fmap concat $
       localScope (scopeOf stms) $
         mapM (optimiseStm (onHostOp stage)) $ stmsToList stms

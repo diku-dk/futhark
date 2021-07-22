@@ -14,7 +14,7 @@ import Prelude hiding (quot, rem)
 
 -- Compile a SegScan construct
 compileSegScan ::
-  Pattern MCMem ->
+  Pat MCMem ->
   SegSpace ->
   [SegBinOp MCMem] ->
   KernelBody MCMem ->
@@ -45,7 +45,7 @@ resultArrays s segops =
       sAllocArray s pt full_shape DefaultSpace
 
 nonsegmentedScan ::
-  Pattern MCMem ->
+  Pat MCMem ->
   SegSpace ->
   [SegBinOp MCMem] ->
   KernelBody MCMem ->
@@ -64,7 +64,7 @@ nonsegmentedScan pat space scan_ops kbody nsubtasks = do
       scanStage3 pat space scan_ops3 kbody
 
 scanStage1 ::
-  Pattern MCMem ->
+  Pat MCMem ->
   SegSpace ->
   [SegBinOp MCMem] ->
   KernelBody MCMem ->
@@ -72,7 +72,7 @@ scanStage1 ::
 scanStage1 pat space scan_ops kbody = do
   let (all_scan_res, map_res) = splitAt (segBinOpResults scan_ops) $ kernelBodyResult kbody
       per_scan_res = segBinOpChunks scan_ops all_scan_res
-      per_scan_pes = segBinOpChunks scan_ops $ patternValueElements pat
+      per_scan_pes = segBinOpChunks scan_ops $ patElements pat
   let (is, ns) = unzip $ unSegSpace space
       ns' = map toInt64Exp ns
   iter <- dPrim "iter" $ IntType Int64
@@ -103,7 +103,7 @@ scanStage1 pat space scan_ops kbody = do
     sComment "stage 1 scan body" $
       compileStms mempty (kernelBodyStms kbody) $ do
         sComment "write mapped values results to memory" $ do
-          let map_arrs = drop (segBinOpResults scan_ops) $ patternElements pat
+          let map_arrs = drop (segBinOpResults scan_ops) $ patElements pat
           zipWithM_ (compileThreadResult space) map_arrs map_res
 
         forM_ (zip4 per_scan_pes scan_ops per_scan_res local_accs) $ \(pes, scan_op, scan_res, acc) ->
@@ -118,7 +118,7 @@ scanStage1 pat space scan_ops kbody = do
                 copyDWIMFix (paramName p) [] (kernelResultSubExp se) vec_is
 
             compileStms mempty (bodyStms $ lamBody scan_op) $
-              forM_ (zip3 acc pes (bodyResult $ lamBody scan_op)) $
+              forM_ (zip3 acc pes $ map resSubExp $ bodyResult $ lamBody scan_op) $
                 \(acc', pe, se) -> do
                   copyDWIMFix (patElemName pe) (map Imp.vi64 is ++ vec_is) se []
                   copyDWIMFix acc' vec_is se []
@@ -128,7 +128,7 @@ scanStage1 pat space scan_ops kbody = do
   emit $ Imp.Op $ Imp.ParLoop "scan_stage_1" (tvVar iter) (body_allocs <> prebody) body' mempty free_params $ segFlat space
 
 scanStage2 ::
-  Pattern MCMem ->
+  Pat MCMem ->
   TV Int32 ->
   SegSpace ->
   [SegBinOp MCMem] ->
@@ -138,7 +138,7 @@ scanStage2 pat nsubtasks space scan_ops kbody = do
   emit $ Imp.DebugPrint "nonsegmentedScan stage 2" Nothing
   let (is, ns) = unzip $ unSegSpace space
       ns_64 = map toInt64Exp ns
-      per_scan_pes = segBinOpChunks scan_ops $ patternValueElements pat
+      per_scan_pes = segBinOpChunks scan_ops $ patElements pat
       nsubtasks' = tvExp nsubtasks
 
   dScope Nothing $ scopeOfLParams $ concatMap (lambdaParams . segBinOpLambda) scan_ops
@@ -178,7 +178,7 @@ scanStage2 pat nsubtasks space scan_ops kbody = do
               copyDWIMFix (paramName p) [] (Var $ patElemName pe) ((offset_index' - 1) : vec_is)
 
           compileStms mempty (bodyStms $ lamBody scan_op) $
-            forM_ (zip3 acc pes (bodyResult $ lamBody scan_op)) $
+            forM_ (zip3 acc pes $ map resSubExp $ bodyResult $ lamBody scan_op) $
               \(acc', pe, se) -> do
                 copyDWIMFix (patElemName pe) ((offset_index' - 1) : vec_is) se []
                 copyDWIMFix acc' vec_is se []
@@ -186,7 +186,7 @@ scanStage2 pat nsubtasks space scan_ops kbody = do
 -- Stage 3 : Finally each thread partially scans a chunk of the input
 --           reading its corresponding carry-in
 scanStage3 ::
-  Pattern MCMem ->
+  Pat MCMem ->
   SegSpace ->
   [SegBinOp MCMem] ->
   KernelBody MCMem ->
@@ -195,7 +195,7 @@ scanStage3 pat space scan_ops kbody = do
   let (is, ns) = unzip $ unSegSpace space
       all_scan_res = take (segBinOpResults scan_ops) $ kernelBodyResult kbody
       per_scan_res = segBinOpChunks scan_ops all_scan_res
-      per_scan_pes = segBinOpChunks scan_ops $ patternValueElements pat
+      per_scan_pes = segBinOpChunks scan_ops $ patElements pat
       ns' = map toInt64Exp ns
 
   iter <- dPrimV "iter" (0 :: Imp.TExp Int64)
@@ -238,7 +238,7 @@ scanStage3 pat space scan_ops kbody = do
               copyDWIMFix (paramName p) [] (kernelResultSubExp se) vec_is
 
             compileStms mempty (bodyStms $ lamBody scan_op) $
-              forM_ (zip3 pes (bodyResult $ lamBody scan_op) acc) $
+              forM_ (zip3 pes (map resSubExp $ bodyResult $ lamBody scan_op) acc) $
                 \(pe, se, acc') -> do
                   copyDWIMFix (patElemName pe) (map Imp.vi64 is ++ vec_is) se []
                   copyDWIMFix acc' vec_is se []
@@ -251,7 +251,7 @@ scanStage3 pat space scan_ops kbody = do
 -- parallelize over the segments and each segment is
 -- scanned sequentially.
 segmentedScan ::
-  Pattern MCMem ->
+  Pat MCMem ->
   SegSpace ->
   [SegBinOp MCMem] ->
   KernelBody MCMem ->
@@ -267,7 +267,7 @@ segmentedScan pat space scan_ops kbody = do
 
 compileSegScanBody ::
   Imp.TExp Int64 ->
-  Pattern MCMem ->
+  Pat MCMem ->
   SegSpace ->
   [SegBinOp MCMem] ->
   KernelBody MCMem ->
@@ -276,7 +276,7 @@ compileSegScanBody segment_i pat space scan_ops kbody = do
   let (is, ns) = unzip $ unSegSpace space
       ns_64 = map toInt64Exp ns
 
-  let per_scan_pes = segBinOpChunks scan_ops $ patternValueElements pat
+  let per_scan_pes = segBinOpChunks scan_ops $ patElements pat
   collect $
     forM_ (zip scan_ops per_scan_pes) $ \(scan_op, scan_pes) -> do
       dScope Nothing $ scopeOfLParams $ lambdaParams $ segBinOpLambda scan_op
@@ -297,11 +297,11 @@ compileSegScanBody segment_i pat space scan_ops kbody = do
               copyDWIMFix (paramName p) [] (kernelResultSubExp se) []
 
           sComment "write mapped values results to memory" $
-            forM_ (zip (drop (length $ segBinOpNeutral scan_op) $ patternElements pat) map_res) $ \(pe, se) ->
+            forM_ (zip (drop (length $ segBinOpNeutral scan_op) $ patElements pat) map_res) $ \(pe, se) ->
               copyDWIMFix (patElemName pe) (map Imp.vi64 is) (kernelResultSubExp se) []
 
           sComment "combine with carry and write to memory" $
             compileStms mempty (bodyStms $ lambdaBody $ segBinOpLambda scan_op) $
-              forM_ (zip3 scan_x_params scan_pes (bodyResult $ lambdaBody $ segBinOpLambda scan_op)) $ \(p, pe, se) -> do
+              forM_ (zip3 scan_x_params scan_pes $ map resSubExp $ bodyResult $ lambdaBody $ segBinOpLambda scan_op) $ \(p, pe, se) -> do
                 copyDWIMFix (patElemName pe) (map Imp.vi64 is) se []
                 copyDWIMFix (paramName p) [] se []

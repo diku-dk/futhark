@@ -9,7 +9,7 @@ module Futhark.Internalise.Monad
   ( InternaliseM,
     runInternaliseM,
     throwError,
-    VarSubstitutions,
+    VarSubsts,
     InternaliseEnv (..),
     FunInfo,
     substitutingVars,
@@ -48,10 +48,10 @@ type FunTable = M.Map VName FunInfo
 
 -- | A mapping from external variable names to the corresponding
 -- internalised subexpressions.
-type VarSubstitutions = M.Map VName [SubExp]
+type VarSubsts = M.Map VName [SubExp]
 
 data InternaliseEnv = InternaliseEnv
-  { envSubsts :: VarSubstitutions,
+  { envSubsts :: VarSubsts,
     envDoBoundsChecks :: Bool,
     envSafe :: Bool,
     envAttrs :: Attrs
@@ -60,14 +60,14 @@ data InternaliseEnv = InternaliseEnv
 data InternaliseState = InternaliseState
   { stateNameSource :: VNameSource,
     stateFunTable :: FunTable,
-    stateConstSubsts :: VarSubstitutions,
+    stateConstSubsts :: VarSubsts,
     stateConstScope :: Scope SOACS,
     stateFuns :: [FunDef SOACS]
   }
 
 newtype InternaliseM a
   = InternaliseM
-      (BinderT SOACS (ReaderT InternaliseEnv (State InternaliseState)) a)
+      (BuilderT SOACS (ReaderT InternaliseEnv (State InternaliseState)) a)
   deriving
     ( Functor,
       Applicative,
@@ -83,7 +83,7 @@ instance MonadFreshNames (State InternaliseState) where
   getNameSource = gets stateNameSource
   putNameSource src = modify $ \s -> s {stateNameSource = src}
 
-instance MonadBinder InternaliseM where
+instance MonadBuilder InternaliseM where
   type Rep InternaliseM = SOACS
   mkExpDecM pat e = InternaliseM $ mkExpDecM pat e
   mkBodyM bnds res = InternaliseM $ mkBodyM bnds res
@@ -100,7 +100,7 @@ runInternaliseM ::
 runInternaliseM safe (InternaliseM m) =
   modifyNameSource $ \src ->
     let ((_, consts), s) =
-          runState (runReaderT (runBinderT m mempty) newEnv) (newState src)
+          runState (runReaderT (runBuilderT m mempty) newEnv) (newState src)
      in ((consts, reverse $ stateFuns s), stateNameSource s)
   where
     newEnv =
@@ -119,7 +119,7 @@ runInternaliseM safe (InternaliseM m) =
           stateFuns = mempty
         }
 
-substitutingVars :: VarSubstitutions -> InternaliseM a -> InternaliseM a
+substitutingVars :: VarSubsts -> InternaliseM a -> InternaliseM a
 substitutingVars substs = local $ \env -> env {envSubsts = substs <> envSubsts env}
 
 lookupSubst :: VName -> InternaliseM (Maybe [SubExp])
@@ -153,7 +153,7 @@ bindConstant cname fd = do
   let stms = bodyStms $ funDefBody fd
       substs =
         takeLast (length (funDefRetType fd)) $
-          bodyResult $ funDefBody fd
+          map resSubExp $ bodyResult $ funDefBody fd
   addStms stms
   modify $ \s ->
     s
@@ -174,7 +174,7 @@ assert ::
   SubExp ->
   ErrorMsg SubExp ->
   SrcLoc ->
-  InternaliseM Certificates
+  InternaliseM Certs
 assert desc se msg loc = assertingOne $ do
   attrs <- asks $ attrsForAssert . envAttrs
   attributing attrs $
@@ -184,8 +184,8 @@ assert desc se msg loc = assertingOne $ do
 -- | Execute the given action if 'envDoBoundsChecks' is true, otherwise
 -- just return an empty list.
 asserting ::
-  InternaliseM Certificates ->
-  InternaliseM Certificates
+  InternaliseM Certs ->
+  InternaliseM Certs
 asserting m = do
   doBoundsChecks <- asks envDoBoundsChecks
   if doBoundsChecks
@@ -196,5 +196,5 @@ asserting m = do
 -- just return an empty list.
 assertingOne ::
   InternaliseM VName ->
-  InternaliseM Certificates
-assertingOne m = asserting $ Certificates . pure <$> m
+  InternaliseM Certs
+assertingOne m = asserting $ Certs . pure <$> m

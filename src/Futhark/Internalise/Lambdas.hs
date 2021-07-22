@@ -50,7 +50,7 @@ internaliseStreamMapLambda internaliseLambda lam args = do
     (lam_params, orig_body, rettype) <-
       internaliseLambda lam $ I.Prim int64 : map outer argtypes
     let orig_chunk_param : params = lam_params
-    body <- runBodyBinder $ do
+    body <- runBodyBuilder $ do
       letBindNames [paramName orig_chunk_param] $ I.BasicOp $ I.SubExp $ I.Var chunk_size
       return orig_body
     mkLambda (chunk_param : params) $ do
@@ -96,7 +96,7 @@ internaliseStreamLambda internaliseLambda lam rowts = do
     (lam_params, orig_body, _) <-
       internaliseLambda lam $ I.Prim int64 : chunktypes
     let orig_chunk_param : params = lam_params
-    body <- runBodyBinder $ do
+    body <- runBodyBuilder $ do
       letBindNames [paramName orig_chunk_param] $ I.BasicOp $ I.SubExp $ I.Var chunk_size
       return orig_body
     return (chunk_param : params, body)
@@ -140,8 +140,8 @@ internalisePartitionLambda internaliseLambda k lam args = do
           (resultBody <$> mkResult eq_class (i + 1))
 
     lambdaWithIncrement :: I.Body -> InternaliseM I.Body
-    lambdaWithIncrement lam_body = runBodyBinder $ do
-      eq_class <- head <$> bodyBind lam_body
+    lambdaWithIncrement lam_body = runBodyBuilder $ do
+      eq_class <- resSubExp . head <$> bodyBind lam_body
       resultBody <$> mkResult eq_class 0
 
 internaliseStencilLambda ::

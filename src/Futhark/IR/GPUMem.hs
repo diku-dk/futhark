@@ -27,7 +27,7 @@ import Futhark.IR.Mem.Simplify
 import Futhark.MonadFreshNames
 import qualified Futhark.Optimise.Simplify.Engine as Engine
 import Futhark.Pass
-import Futhark.Pass.ExplicitAllocations (BinderOps (..), mkLetNamesB', mkLetNamesB'')
+import Futhark.Pass.ExplicitAllocations (BuilderOps (..), mkLetNamesB', mkLetNamesB'')
 import qualified Futhark.TypeCheck as TC
 
 data GPUMem
@@ -41,7 +41,7 @@ instance RepTypes GPUMem where
   type Op GPUMem = MemOp (HostOp GPUMem ())
 
 instance ASTRep GPUMem where
-  expTypesFromPattern = return . map snd . snd . bodyReturnsFromPattern
+  expTypesFromPat = return . map snd . bodyReturnsFromPat
 
 instance OpReturns GPUMem where
   opReturns (Alloc _ space) =
@@ -65,17 +65,17 @@ instance TC.Checkable GPUMem where
   checkLetBoundDec = checkMemInfo
   checkRetType = mapM_ $ TC.checkExtType . declExtTypeOf
   primFParam name t = return $ Param name (MemPrim t)
-  matchPattern = matchPatternToExp
+  matchPat = matchPatToExp
   matchReturnType = matchFunctionReturnType
   matchBranchType = matchBranchReturnType
   matchLoopResult = matchLoopResultMem
 
-instance BinderOps GPUMem where
+instance BuilderOps GPUMem where
   mkExpDecB _ _ = return ()
   mkBodyB stms res = return $ Body () stms res
   mkLetNamesB = mkLetNamesB' ()
 
-instance BinderOps (Engine.Wise GPUMem) where
+instance BuilderOps (Engine.Wise GPUMem) where
   mkExpDecB pat e = return $ Engine.mkWiseExpDec pat () e
   mkBodyB stms res = return $ Engine.mkWiseBody () stms res
   mkLetNamesB = mkLetNamesB''

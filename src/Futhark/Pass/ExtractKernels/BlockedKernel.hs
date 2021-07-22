@@ -32,9 +32,9 @@ import Prelude hiding (quot)
 
 -- | Constraints pertinent to performing distribution/flattening.
 type DistRep rep =
-  ( Bindable rep,
+  ( Buildable rep,
     HasSegOp rep,
-    BinderOps rep,
+    BuilderOps rep,
     LetDec rep ~ Type,
     ExpDec rep ~ (),
     BodyDec rep ~ (),
@@ -44,13 +44,13 @@ type DistRep rep =
 data ThreadRecommendation = ManyThreads | NoRecommendation SegVirt
 
 type MkSegLevel rep m =
-  [SubExp] -> String -> ThreadRecommendation -> BinderT rep m (SegOpLevel rep)
+  [SubExp] -> String -> ThreadRecommendation -> BuilderT rep m (SegOpLevel rep)
 
 mkSegSpace :: MonadFreshNames m => [(VName, SubExp)] -> m SegSpace
 mkSegSpace dims = SegSpace <$> newVName "phys_tid" <*> pure dims
 
 prepareRedOrScan ::
-  (MonadBinder m, DistRep (Rep m)) =>
+  (MonadBuilder m, DistRep (Rep m)) =>
   SubExp ->
   Lambda (Rep m) ->
   [VName] ->
@@ -61,21 +61,21 @@ prepareRedOrScan w map_lam arrs ispace inps = do
   gtid <- newVName "gtid"
   space <- mkSegSpace $ ispace ++ [(gtid, w)]
   kbody <- fmap (uncurry (flip (KernelBody ()))) $
-    runBinder $
+    runBuilder $
       localScope (scopeOfSegSpace space) $ do
         mapM_ readKernelInput inps
-        forM_ (zip (lambdaParams map_lam) arrs) $ \(p, arr) -> do
-          arr_t <- lookupType arr
-          letBindNames [paramName p] $
-            BasicOp $ Index arr $ fullSlice arr_t [DimFix $ Var gtid]
-        map (Returns ResultMaySimplify) <$> bodyBind (lambdaBody map_lam)
+        mapM_ readKernelInput $ do
+          (p, arr) <- zip (lambdaParams map_lam) arrs
+          pure $ KernelInput (paramName p) (paramType p) arr [Var gtid]
+        res <- bodyBind (lambdaBody map_lam)
+        forM res $ \(SubExpRes cs se) -> pure $ Returns ResultMaySimplify cs se
 
   return (space, kbody)
 
 segRed ::
   (MonadFreshNames m, DistRep rep, HasScope rep m) =>
   SegOpLevel rep ->
-  Pattern rep ->
+  Pat rep ->
   SubExp -> -- segment size
   [SegBinOp rep] ->
   Lambda rep ->
@@ -83,7 +83,7 @@ segRed ::
   [(VName, SubExp)] -> -- ispace = pair of (gtid, size) for the maps on "top" of this reduction
   [KernelInput] -> -- inps = inputs that can be looked up by using the gtids from ispace
   m (Stms rep)
-segRed lvl pat w ops map_lam arrs ispace inps = runBinder_ $ do
+segRed lvl pat w ops map_lam arrs ispace inps = runBuilder_ $ do
   (kspace, kbody) <- prepareRedOrScan w map_lam arrs ispace inps
   letBind pat $
     Op $
@@ -93,7 +93,7 @@ segRed lvl pat w ops map_lam arrs ispace inps = runBinder_ $ do
 segScan ::
   (MonadFreshNames m, DistRep rep, HasScope rep m) =>
   SegOpLevel rep ->
-  Pattern rep ->
+  Pat rep ->
   SubExp -> -- segment size
   [SegBinOp rep] ->
   Lambda rep ->
@@ -101,7 +101,7 @@ segScan ::
   [(VName, SubExp)] -> -- ispace = pair of (gtid, size) for the maps on "top" of this scan
   [KernelInput] -> -- inps = inputs that can be looked up by using the gtids from ispace
   m (Stms rep)
-segScan lvl pat w ops map_lam arrs ispace inps = runBinder_ $ do
+segScan lvl pat w ops map_lam arrs ispace inps = runBuilder_ $ do
   (kspace, kbody) <- prepareRedOrScan w map_lam arrs ispace inps
   letBind pat $
     Op $
@@ -111,14 +111,14 @@ segScan lvl pat w ops map_lam arrs ispace inps = runBinder_ $ do
 segMap ::
   (MonadFreshNames m, DistRep rep, HasScope rep m) =>
   SegOpLevel rep ->
-  Pattern rep ->
+  Pat rep ->
   SubExp -> -- segment size
   Lambda rep ->
   [VName] ->
   [(VName, SubExp)] -> -- ispace = pair of (gtid, size) for the maps on "top" of this map
   [KernelInput] -> -- inps = inputs that can be looked up by using the gtids from ispace
   m (Stms rep)
-segMap lvl pat w map_lam arrs ispace inps = runBinder_ $ do
+segMap lvl pat w map_lam arrs ispace inps = runBuilder_ $ do
   (kspace, kbody) <- prepareRedOrScan w map_lam arrs ispace inps
   letBind pat $
     Op $
@@ -126,9 +126,9 @@ segMap lvl pat w map_lam arrs ispace inps = runBinder_ $ do
         SegMap lvl kspace (lambdaReturnType map_lam) kbody
 
 dummyDim ::
-  (MonadFreshNames m, MonadBinder m, DistRep (Rep m)) =>
-  Pattern (Rep m) ->
-  m (Pattern (Rep m), [(VName, SubExp)], m ())
+  (MonadFreshNames m, MonadBuilder m, DistRep (Rep m)) =>
+  Pat (Rep m) ->
+  m (Pat (Rep m), [(VName, SubExp)], m ())
 dummyDim pat = do
   -- We add a unit-size segment on top to ensure that the result
   -- of the SegRed is an array, which we then immediately index.
@@ -137,14 +137,14 @@ dummyDim pat = do
   -- host-device copy (scalars are kept on the host, but arrays
   -- may be on the device).
   let addDummyDim t = t `arrayOfRow` intConst Int64 1
-  pat' <- fmap addDummyDim <$> renamePattern pat
+  pat' <- fmap addDummyDim <$> renamePat pat
   dummy <- newVName "dummy"
   let ispace = [(dummy, intConst Int64 1)]
 
   return
     ( pat',
       ispace,
-      forM_ (zip (patternNames pat') (patternNames pat)) $ \(from, to) -> do
+      forM_ (zip (patNames pat') (patNames pat)) $ \(from, to) -> do
         from_t <- lookupType from
         letBindNames [to] $
           BasicOp $
@@ -155,13 +155,13 @@ dummyDim pat = do
 nonSegRed ::
   (MonadFreshNames m, DistRep rep, HasScope rep m) =>
   SegOpLevel rep ->
-  Pattern rep ->
+  Pat rep ->
   SubExp ->
   [SegBinOp rep] ->
   Lambda rep ->
   [VName] ->
   m (Stms rep)
-nonSegRed lvl pat w ops map_lam arrs = runBinder_ $ do
+nonSegRed lvl pat w ops map_lam arrs = runBuilder_ $ do
   (pat', ispace, read_dummy) <- dummyDim pat
   addStms =<< segRed lvl pat' w ops map_lam arrs ispace []
   read_dummy
@@ -169,7 +169,7 @@ nonSegRed lvl pat w ops map_lam arrs = runBinder_ $ do
 segHist ::
   (DistRep rep, MonadFreshNames m, HasScope rep m) =>
   SegOpLevel rep ->
-  Pattern rep ->
+  Pat rep ->
   SubExp ->
   -- | Segment indexes and sizes.
   [(VName, SubExp)] ->
@@ -178,19 +178,21 @@ segHist ::
   Lambda rep ->
   [VName] ->
   m (Stms rep)
-segHist lvl pat arr_w ispace inps ops lam arrs = runBinder_ $ do
+segHist lvl pat arr_w ispace inps ops lam arrs = runBuilder_ $ do
   gtid <- newVName "gtid"
   space <- mkSegSpace $ ispace ++ [(gtid, arr_w)]
 
   kbody <- fmap (uncurry (flip $ KernelBody ())) $
-    runBinder $
+    runBuilder $
       localScope (scopeOfSegSpace space) $ do
         mapM_ readKernelInput inps
         forM_ (zip (lambdaParams lam) arrs) $ \(p, arr) -> do
           arr_t <- lookupType arr
           letBindNames [paramName p] $
             BasicOp $ Index arr $ fullSlice arr_t [DimFix $ Var gtid]
-        map (Returns ResultMaySimplify) <$> bodyBind (lambdaBody lam)
+        res <- bodyBind (lambdaBody lam)
+        forM res $ \(SubExpRes cs se) ->
+          pure $ Returns ResultMaySimplify cs se
 
   letBind pat $ Op $ segOp $ SegHist lvl space ops (lambdaReturnType lam) kbody
 
@@ -200,7 +202,7 @@ mapKernelSkeleton ::
   [KernelInput] ->
   m (SegSpace, Stms rep)
 mapKernelSkeleton ispace inputs = do
-  read_input_bnds <- runBinder_ $ mapM readKernelInput inputs
+  read_input_bnds <- runBuilder_ $ mapM readKernelInput inputs
 
   space <- mkSegSpace ispace
   return (space, read_input_bnds)
@@ -213,7 +215,7 @@ mapKernel ::
   [Type] ->
   KernelBody rep ->
   m (SegOp (SegOpLevel rep) rep, Stms rep)
-mapKernel mk_lvl ispace inputs rts (KernelBody () kstms krets) = runBinderT' $ do
+mapKernel mk_lvl ispace inputs rts (KernelBody () kstms krets) = runBuilderT' $ do
   (space, read_input_stms) <- mapKernelSkeleton ispace inputs
 
   let kbody' = KernelBody () (read_input_stms <> kstms) krets
@@ -238,16 +240,16 @@ data KernelInput = KernelInput
   deriving (Show)
 
 readKernelInput ::
-  (DistRep (Rep m), MonadBinder m) =>
+  (DistRep (Rep m), MonadBuilder m) =>
   KernelInput ->
   m ()
 readKernelInput inp = do
   let pe = PatElem (kernelInputName inp) $ kernelInputType inp
-  letBind (Pattern [] [pe]) . BasicOp $
+  letBind (Pat [pe]) . BasicOp $
     case kernelInputType inp of
       Acc {} ->
         SubExp $ Var $ kernelInputArray inp
       _ ->
-        Index (kernelInputArray inp) $
+        Index (kernelInputArray inp) . Slice $
           map DimFix (kernelInputIndices inp)
             ++ map sliceDim (arrayDims (kernelInputType inp))

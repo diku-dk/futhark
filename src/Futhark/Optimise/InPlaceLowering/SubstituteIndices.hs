@@ -20,7 +20,7 @@ import Futhark.IR.Prop.Aliases
 import Futhark.Transform.Substitute
 import Futhark.Util
 
-type IndexSubstitution dec = (Certificates, VName, dec, Slice SubExp)
+type IndexSubstitution dec = (Certs, VName, dec, Slice SubExp)
 
 type IndexSubstitutions dec = [(VName, IndexSubstitution dec)]
 
@@ -36,8 +36,8 @@ typeEnvFromSubstitutions = M.fromList . map (fromSubstitution . snd)
 -- | Perform the substitution.
 substituteIndices ::
   ( MonadFreshNames m,
-    BinderOps rep,
-    Bindable rep,
+    BuilderOps rep,
+    Buildable rep,
     Aliased rep,
     LetDec rep ~ dec
   ) =>
@@ -45,43 +45,42 @@ substituteIndices ::
   Stms rep ->
   m (IndexSubstitutions dec, Stms rep)
 substituteIndices substs bnds =
-  runBinderT (substituteIndicesInStms substs bnds) types
+  runBuilderT (substituteIndicesInStms substs bnds) types
   where
     types = typeEnvFromSubstitutions substs
 
 substituteIndicesInStms ::
-  (MonadBinder m, Bindable (Rep m), Aliased (Rep m)) =>
+  (MonadBuilder m, Buildable (Rep m), Aliased (Rep m)) =>
   IndexSubstitutions (LetDec (Rep m)) ->
   Stms (Rep m) ->
   m (IndexSubstitutions (LetDec (Rep m)))
 substituteIndicesInStms = foldM substituteIndicesInStm
 
 substituteIndicesInStm ::
-  (MonadBinder m, Bindable (Rep m), Aliased (Rep m)) =>
+  (MonadBuilder m, Buildable (Rep m), Aliased (Rep m)) =>
   IndexSubstitutions (LetDec (Rep m)) ->
   Stm (Rep m) ->
   m (IndexSubstitutions (LetDec (Rep m)))
 substituteIndicesInStm substs (Let pat rep e) = do
   e' <- substituteIndicesInExp substs e
-  (substs', pat') <- substituteIndicesInPattern substs pat
+  (substs', pat') <- substituteIndicesInPat substs pat
   addStm $ Let pat' rep e'
   return substs'
 
-substituteIndicesInPattern ::
-  (MonadBinder m, LetDec (Rep m) ~ dec) =>
+substituteIndicesInPat ::
+  (MonadBuilder m, LetDec (Rep m) ~ dec) =>
   IndexSubstitutions (LetDec (Rep m)) ->
-  PatternT dec ->
-  m (IndexSubstitutions (LetDec (Rep m)), PatternT dec)
-substituteIndicesInPattern substs pat = do
-  (substs', context) <- mapAccumLM sub substs $ patternContextElements pat
-  (substs'', values) <- mapAccumLM sub substs' $ patternValueElements pat
-  return (substs'', Pattern context values)
+  PatT dec ->
+  m (IndexSubstitutions (LetDec (Rep m)), PatT dec)
+substituteIndicesInPat substs pat = do
+  (substs', pes) <- mapAccumLM sub substs $ patElements pat
+  return (substs', Pat pes)
   where
     sub substs' patElem = return (substs', patElem)
 
 substituteIndicesInExp ::
-  ( MonadBinder m,
-    Bindable (Rep m),
+  ( MonadBuilder m,
+    Buildable (Rep m),
     Aliased (Rep m),
     LetDec (Rep m) ~ dec
   ) =>
@@ -91,7 +90,7 @@ substituteIndicesInExp ::
 substituteIndicesInExp substs (Op op) = do
   let used_in_op = filter ((`nameIn` freeIn op) . fst) substs
   var_substs <- fmap mconcat $
-    forM used_in_op $ \(v, (cs, src, src_dec, is)) -> do
+    forM used_in_op $ \(v, (cs, src, src_dec, Slice is)) -> do
       v' <-
         certifying cs $
           letExp "idx" $ BasicOp $ Index src $ fullSlice (typeOf src_dec) is
@@ -114,10 +113,9 @@ substituteIndicesInExp substs e = do
               row <-
                 certifying cs2 $
                   letExp (baseString v ++ "_row") $
-                    BasicOp $ Index src2 $ fullSlice (typeOf src2dec) is2
+                    BasicOp $ Index src2 $ fullSlice (typeOf src2dec) (unSlice is2)
               row_copy <-
-                letExp (baseString v ++ "_row_copy") $
-                  BasicOp $ Copy row
+                letExp (baseString v ++ "_row_copy") $ BasicOp $ Copy row
               return $
                 update
                   v
@@ -128,7 +126,7 @@ substituteIndicesInExp substs e = do
                       `setType` ( typeOf src2dec
                                     `setArrayDims` sliceDims is2
                                 ),
-                    []
+                    Slice []
                   )
                   substs'
           consumingSubst substs' _ =
@@ -136,7 +134,7 @@ substituteIndicesInExp substs e = do
        in foldM consumingSubst substs . namesToList . consumedInExp
 
 substituteIndicesInSubExp ::
-  MonadBinder m =>
+  MonadBuilder m =>
   IndexSubstitutions (LetDec (Rep m)) ->
   SubExp ->
   m SubExp
@@ -146,22 +144,22 @@ substituteIndicesInSubExp _ se =
   return se
 
 substituteIndicesInVar ::
-  MonadBinder m =>
+  MonadBuilder m =>
   IndexSubstitutions (LetDec (Rep m)) ->
   VName ->
   m VName
 substituteIndicesInVar substs v
-  | Just (cs2, src2, _, []) <- lookup v substs =
+  | Just (cs2, src2, _, Slice []) <- lookup v substs =
     certifying cs2 $
       letExp (baseString src2) $ BasicOp $ SubExp $ Var src2
-  | Just (cs2, src2, src2_dec, is2) <- lookup v substs =
+  | Just (cs2, src2, src2_dec, Slice is2) <- lookup v substs =
     certifying cs2 $
       letExp "idx" $ BasicOp $ Index src2 $ fullSlice (typeOf src2_dec) is2
   | otherwise =
     return v
 
 substituteIndicesInBody ::
-  (MonadBinder m, Bindable (Rep m), Aliased (Rep m)) =>
+  (MonadBuilder m, Buildable (Rep m), Aliased (Rep m)) =>
   IndexSubstitutions (LetDec (Rep m)) ->
   Body (Rep m) ->
   m (Body (Rep m))
@@ -171,8 +169,11 @@ substituteIndicesInBody substs (Body _ stms res) = do
       collectStms $ substituteIndicesInStms substs stms
   (res', res_stms) <-
     inScopeOf stms' $
-      collectStms $ mapM (substituteIndicesInSubExp substs') res
+      collectStms $ mapM (onSubExpRes substs') res
   mkBodyM (stms' <> res_stms) res'
+  where
+    onSubExpRes substs' (SubExpRes cs se) =
+      SubExpRes cs <$> substituteIndicesInSubExp substs' se
 
 update ::
   VName ->

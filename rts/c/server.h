@@ -131,7 +131,9 @@ struct entry_point {
   const char *name;
   entry_point_fn f;
   struct type **out_types;
+  bool *out_unique;
   struct type **in_types;
+  bool *in_unique;
 };
 
 int entry_num_ins(struct entry_point *e) {
@@ -459,6 +461,9 @@ void cmd_inputs(struct server_state *s, const char *args[]) {
 
   int num_ins = entry_num_ins(e);
   for (int i = 0; i < num_ins; i++) {
+    if (e->in_unique[i]) {
+      putchar('*');
+    }
     puts(e->in_types[i]->name);
   }
 }
@@ -475,6 +480,9 @@ void cmd_outputs(struct server_state *s, const char *args[]) {
 
   int num_outs = entry_num_outs(e);
   for (int i = 0; i < num_outs; i++) {
+    if (e->out_unique[i]) {
+      putchar('*');
+    }
     puts(e->out_types[i]->name);
   }
 }

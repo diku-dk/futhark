@@ -158,10 +158,12 @@ benchmarkDataset server opts futhark program entry input_spec expected_spec ref_
 
   cmdMaybe . liftIO $ cmdClear server
 
-  valuesAsVars server (zip ins input_types) futhark dir input_spec
-
   let freeOuts = cmdMaybe (cmdFree server outs)
       freeIns = cmdMaybe (cmdFree server ins)
+      loadInput = valuesAsVars server (zip ins $ map inputType input_types) futhark dir input_spec
+      reloadInput = freeIns >> loadInput
+
+  loadInput
 
   let runtime l
         | Just l' <- T.stripPrefix "runtime: " l,
@@ -172,6 +174,7 @@ benchmarkDataset server opts futhark program entry input_spec expected_spec ref_
 
       doRun = do
         call_lines <- cmdEither (cmdCall server entry outs ins)
+        when (any inputConsumed input_types) reloadInput
         case mapMaybe runtime call_lines of
           [call_runtime] -> do
             liftIO $ fromMaybe (const $ pure ()) (runResultAction opts) call_runtime

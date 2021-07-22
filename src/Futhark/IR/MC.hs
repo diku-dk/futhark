@@ -20,7 +20,7 @@ module Futhark.IR.MC
   )
 where
 
-import Futhark.Binder
+import Futhark.Builder
 import Futhark.Construct
 import Futhark.IR.MC.Op
 import Futhark.IR.Pretty
@@ -42,22 +42,22 @@ instance RepTypes MC where
   type Op MC = MCOp MC (SOAC MC)
 
 instance ASTRep MC where
-  expTypesFromPattern = return . expExtTypesFromPattern
+  expTypesFromPat = return . expExtTypesFromPat
 
 instance TypeCheck.CheckableOp MC where
   checkOp = typeCheckMCOp typeCheckSOAC
 
 instance TypeCheck.Checkable MC
 
-instance Bindable MC where
+instance Buildable MC where
   mkBody = Body ()
-  mkExpPat ctx val _ = basicPattern ctx val
+  mkExpPat idents _ = basicPat idents
   mkExpDec _ _ = ()
   mkLetNames = simpleMkLetNames
 
-instance BinderOps MC
+instance BuilderOps MC
 
-instance BinderOps (Engine.Wise MC)
+instance BuilderOps (Engine.Wise MC)
 
 instance PrettyRep MC
 

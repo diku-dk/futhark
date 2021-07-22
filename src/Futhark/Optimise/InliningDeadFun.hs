@@ -18,7 +18,7 @@ import Data.Maybe
 import qualified Data.Set as S
 import Futhark.Analysis.CallGraph
 import qualified Futhark.Analysis.SymbolTable as ST
-import Futhark.Binder
+import Futhark.Builder
 import Futhark.IR.SOACS
 import Futhark.IR.SOACS.Simplify
   ( simpleSOACS,
@@ -129,7 +129,7 @@ inlineInFunDef fdmap (FunDef entry attrs name rtp args body) =
 
 inlineFunction ::
   MonadFreshNames m =>
-  Pattern ->
+  Pat ->
   StmAux dec ->
   [(SubExp, Diet)] ->
   (Safety, SrcLoc, [SrcLoc]) ->
@@ -141,16 +141,11 @@ inlineFunction pat aux args (safety, loc, locs) fun = do
       mkBody
         (stmsFromList param_stms <> stmsFromList body_stms)
         (bodyResult (funDefBody fun))
-  let res_stms =
-        certify (stmAuxCerts aux)
-          <$> zipWith bindSubExp (patternIdents pat) res
-  pure $ stmsToList stms <> res_stms
+  pure $ stmsToList stms <> zipWith bindSubExpRes (patIdents pat) res
   where
     param_stms =
-      zipWith
-        bindSubExp
-        (map paramIdent $ funDefParams fun)
-        (map fst args)
+      certify (stmAuxCerts aux)
+        <$> zipWith bindSubExp (map paramIdent $ funDefParams fun) (map fst args)
 
     body_stms =
       stmsToList $
@@ -161,7 +156,10 @@ inlineFunction pat aux args (safety, loc, locs) fun = do
     -- point - it is crucial that we run copy propagation before
     -- the type checker sees this!
     bindSubExp ident se =
-      mkLet [] [ident] $ BasicOp $ SubExp se
+      mkLet [ident] $ BasicOp $ SubExp se
+
+    bindSubExpRes ident (SubExpRes cs se) =
+      certify cs $ bindSubExp ident se
 
     notmempty = (/= mempty) . locOf
 

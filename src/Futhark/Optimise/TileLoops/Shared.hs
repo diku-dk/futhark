@@ -25,23 +25,23 @@ segMap1D ::
   String ->
   SegLevel ->
   ResultManifest ->
-  (VName -> Binder GPU [SubExp]) ->
-  Binder GPU [VName]
+  (VName -> Builder GPU Result) ->
+  Builder GPU [VName]
 segMap1D desc lvl manifest f = do
   ltid <- newVName "ltid"
   ltid_flat <- newVName "ltid_flat"
   let space = SegSpace ltid_flat [(ltid, unCount $ segGroupSize lvl)]
 
-  ((ts, res), stms) <- localScope (scopeOfSegSpace space) . runBinder $ do
+  ((ts, res), stms) <- localScope (scopeOfSegSpace space) . runBuilder $ do
     res <- f ltid
-    ts <- mapM subExpType res
+    ts <- mapM subExpResType res
     return (ts, res)
   Body _ stms' res' <- renameBody $ mkBody stms res
 
+  let ret (SubExpRes cs se) = Returns manifest cs se
   letTupExp desc $
-    Op $
-      SegOp $
-        SegMap lvl space ts $ KernelBody () stms' $ map (Returns manifest) res'
+    Op . SegOp $
+      SegMap lvl space ts $ KernelBody () stms' $ map ret res'
 
 segMap2D ::
   String -> -- desc
@@ -49,24 +49,24 @@ segMap2D ::
   ResultManifest -> -- manifest
   (SubExp, SubExp) -> -- (dim_x, dim_y)
   ( (VName, VName) -> -- f
-    Binder GPU [SubExp]
+    Builder GPU Result
   ) ->
-  Binder GPU [VName]
+  Builder GPU [VName]
 segMap2D desc lvl manifest (dim_y, dim_x) f = do
   ltid_xx <- newVName "ltid_x"
   ltid_flat <- newVName "ltid_flat"
   ltid_yy <- newVName "ltid_y"
   let segspace = SegSpace ltid_flat [(ltid_yy, dim_y), (ltid_xx, dim_x)]
 
-  ((ts, res), stms) <- localScope (scopeOfSegSpace segspace) . runBinder $ do
+  ((ts, res), stms) <- localScope (scopeOfSegSpace segspace) . runBuilder $ do
     res <- f (ltid_yy, ltid_xx)
-    ts <- mapM subExpType res
+    ts <- mapM subExpResType res
     return (ts, res)
 
+  let ret (SubExpRes cs se) = Returns manifest cs se
   letTupExp desc <=< renameExp $
-    Op $
-      SegOp $
-        SegMap lvl segspace ts $ KernelBody () stms $ map (Returns manifest) res
+    Op . SegOp $
+      SegMap lvl segspace ts $ KernelBody () stms $ map ret res
 
 segMap3D ::
   String -> -- desc
@@ -74,9 +74,9 @@ segMap3D ::
   ResultManifest -> -- manifest
   (SubExp, SubExp, SubExp) -> -- (dim_z, dim_y, dim_x)
   ( (VName, VName, VName) -> -- f
-    Binder GPU [SubExp]
+    Builder GPU Result
   ) ->
-  Binder GPU [VName]
+  Builder GPU [VName]
 segMap3D desc lvl manifest (dim_z, dim_y, dim_x) f = do
   ltid_x <- newVName "ltid_x"
   ltid_flat <- newVName "ltid_flat"
@@ -84,15 +84,15 @@ segMap3D desc lvl manifest (dim_z, dim_y, dim_x) f = do
   ltid_z <- newVName "ltid_z"
   let segspace = SegSpace ltid_flat [(ltid_z, dim_z), (ltid_y, dim_y), (ltid_x, dim_x)]
 
-  ((ts, res), stms) <- localScope (scopeOfSegSpace segspace) . runBinder $ do
+  ((ts, res), stms) <- localScope (scopeOfSegSpace segspace) . runBuilder $ do
     res <- f (ltid_z, ltid_y, ltid_x)
-    ts <- mapM subExpType res
+    ts <- mapM subExpResType res
     return (ts, res)
 
+  let ret (SubExpRes cs se) = Returns manifest cs se
   letTupExp desc <=< renameExp $
-    Op $
-      SegOp $
-        SegMap lvl segspace ts $ KernelBody () stms $ map (Returns manifest) res
+    Op . SegOp $
+      SegMap lvl segspace ts $ KernelBody () stms $ map ret res
 
 segScatter2D ::
   String -> -- desc
@@ -100,20 +100,20 @@ segScatter2D ::
   VName ->
   SegLevel -> -- lvl
   (SubExp, SubExp) -> -- (dim_y, dim_x)
-  ((VName, VName) -> Binder GPU (SubExp, SubExp)) -> -- f
-  Binder GPU [VName]
+  ((VName, VName) -> Builder GPU (SubExp, SubExp)) -> -- f
+  Builder GPU [VName]
 segScatter2D desc arr_size updt_arr lvl (dim_x, dim_y) f = do
   ltid_x <- newVName "ltid_x"
   ltid_y <- newVName "ltid_y"
   ltid_flat <- newVName "ltid_flat"
   let segspace = SegSpace ltid_flat [(ltid_x, dim_x), (ltid_y, dim_y)]
 
-  ((t_v, res_v, res_i), stms) <- runBinder $ do
+  ((t_v, res_v, res_i), stms) <- runBuilder $ do
     (res_v, res_i) <- f (ltid_x, ltid_y)
     t_v <- subExpType res_v
     return (t_v, res_v, res_i)
 
-  let ret = WriteReturns (Shape [arr_size]) updt_arr [([DimFix res_i], res_v)]
+  let ret = WriteReturns mempty (Shape [arr_size]) updt_arr [(Slice [DimFix res_i], res_v)]
   let body = KernelBody () stms [ret]
 
   letTupExp desc <=< renameExp $ Op $ SegOp $ SegMap lvl segspace [t_v] body
@@ -148,7 +148,7 @@ isTileableRedomap stm
 
 defVarianceInStm :: VarianceTable -> Stm GPU -> VarianceTable
 defVarianceInStm variance bnd =
-  foldl' add variance $ patternNames $ stmPattern bnd
+  foldl' add variance $ patNames $ stmPat bnd
   where
     add variance' v = M.insert v binding_variance variance'
     look variance' v = oneName v <> M.findWithDefault mempty v variance'

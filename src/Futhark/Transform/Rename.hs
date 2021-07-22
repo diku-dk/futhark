@@ -19,7 +19,7 @@ module Futhark.Transform.Rename
     renameStm,
     renameBody,
     renameLambda,
-    renamePattern,
+    renamePat,
     renameSomething,
 
     -- * Renaming annotations
@@ -105,13 +105,13 @@ renameLambda = modifyNameSource . runRenamer . rename
 
 -- | Produce an equivalent pattern but with each pattern element given
 -- a new name.
-renamePattern ::
+renamePat ::
   (Rename dec, MonadFreshNames m) =>
-  PatternT dec ->
-  m (PatternT dec)
-renamePattern = modifyNameSource . runRenamer . rename'
+  PatT dec ->
+  m (PatT dec)
+renamePat = modifyNameSource . runRenamer . rename'
   where
-    rename' pat = bind (patternNames pat) $ rename pat
+    rename' pat = bind (patNames pat) $ rename pat
 
 -- | Rename the bound variables in something (does not affect free variables).
 renameSomething ::
@@ -201,7 +201,7 @@ renamingStms stms m = descend mempty stms
   where
     descend stms' rem_stms = case stmsHead rem_stms of
       Nothing -> m stms'
-      Just (stm, rem_stms') -> bind (patternNames $ stmPattern stm) $ do
+      Just (stm, rem_stms') -> bind (patNames $ stmPat stm) $ do
         stm' <- rename stm
         descend (stms' <> oneStm stm') rem_stms'
 
@@ -220,14 +220,14 @@ instance Rename SubExp where
 instance Rename dec => Rename (Param dec) where
   rename (Param name dec) = Param <$> rename name <*> rename dec
 
-instance Rename dec => Rename (PatternT dec) where
-  rename (Pattern context values) = Pattern <$> rename context <*> rename values
+instance Rename dec => Rename (PatT dec) where
+  rename (Pat xs) = Pat <$> rename xs
 
 instance Rename dec => Rename (PatElemT dec) where
   rename (PatElem ident dec) = PatElem <$> rename ident <*> rename dec
 
-instance Rename Certificates where
-  rename (Certificates cs) = Certificates <$> rename cs
+instance Rename Certs where
+  rename (Certs cs) = Certs <$> rename cs
 
 instance Rename Attrs where
   rename = pure
@@ -235,6 +235,9 @@ instance Rename Attrs where
 instance Rename dec => Rename (StmAux dec) where
   rename (StmAux cs attrs dec) =
     StmAux <$> rename cs <*> rename attrs <*> rename dec
+
+instance Rename SubExpRes where
+  rename (SubExpRes cs se) = SubExpRes <$> rename cs <*> rename se
 
 instance Renameable rep => Rename (Body rep) where
   rename (Body dec stms res) = do
@@ -248,49 +251,33 @@ instance Renameable rep => Rename (Stm rep) where
 instance Renameable rep => Rename (Exp rep) where
   rename (WithAcc inputs lam) =
     WithAcc <$> rename inputs <*> rename lam
-  rename (DoLoop ctx val form loopbody) = do
-    let (ctxparams, ctxinit) = unzip ctx
-        (valparams, valinit) = unzip val
-    ctxinit' <- mapM rename ctxinit
-    valinit' <- mapM rename valinit
+  rename (DoLoop merge form loopbody) = do
+    let (params, args) = unzip merge
+    args' <- mapM rename args
     case form of
       -- It is important that 'i' is renamed before the loop_vars, as
       -- 'i' may be used in the annotations for loop_vars (e.g. index
       -- functions).
       ForLoop i it boundexp loop_vars -> bind [i] $ do
-        let (loop_params, loop_arrs) = unzip loop_vars
+        let (arr_params, loop_arrs) = unzip loop_vars
         boundexp' <- rename boundexp
         loop_arrs' <- rename loop_arrs
-        bind
-          ( map paramName (ctxparams ++ valparams)
-              ++ map paramName loop_params
-          )
-          $ do
-            ctxparams' <- mapM rename ctxparams
-            valparams' <- mapM rename valparams
-            loop_params' <- mapM rename loop_params
-            i' <- rename i
-            loopbody' <- rename loopbody
-            return $
-              DoLoop
-                (zip ctxparams' ctxinit')
-                (zip valparams' valinit')
-                ( ForLoop i' it boundexp' $
-                    zip loop_params' loop_arrs'
-                )
-                loopbody'
-      WhileLoop cond ->
-        bind (map paramName $ ctxparams ++ valparams) $ do
-          ctxparams' <- mapM rename ctxparams
-          valparams' <- mapM rename valparams
+        bind (map paramName params ++ map paramName arr_params) $ do
+          params' <- mapM rename params
+          arr_params' <- mapM rename arr_params
+          i' <- rename i
           loopbody' <- rename loopbody
-          cond' <- rename cond
           return $
             DoLoop
-              (zip ctxparams' ctxinit')
-              (zip valparams' valinit')
-              (WhileLoop cond')
+              (zip params' args')
+              (ForLoop i' it boundexp' $ zip arr_params' loop_arrs')
               loopbody'
+      WhileLoop cond ->
+        bind (map paramName params) $ do
+          params' <- mapM rename params
+          loopbody' <- rename loopbody
+          cond' <- rename cond
+          return $ DoLoop (zip params' args') (WhileLoop cond') loopbody'
   rename e = mapExpM mapper e
     where
       mapper =

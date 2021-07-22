@@ -70,7 +70,7 @@ import Futhark.IR.GPU.Sizes (Count (..))
 import Futhark.IR.Pretty ()
 import Futhark.IR.Primitive
 import Futhark.IR.Prop.Names
-import Futhark.IR.Syntax
+import Futhark.IR.Syntax.Core
   ( ErrorMsg (..),
     ErrorMsgPart (..),
     Space (..),
@@ -132,7 +132,7 @@ data Constants a = Constants
 data Signedness
   = TypeUnsigned
   | TypeDirect
-  deriving (Eq, Show)
+  deriving (Eq, Ord, Show)
 
 -- | A description of an externally meaningful value.
 data ValueDesc
@@ -145,12 +145,14 @@ data ValueDesc
 
 -- | ^ An externally visible value.  This can be an opaque value
 -- (covering several physical internal values), or a single value that
--- can be used externally.
+-- can be used externally.  We record the uniqueness because it is
+-- important to the external interface as well.
 data ExternalValue
-  = -- | The string is a human-readable description
-    -- with no other semantics.
-    OpaqueValue String [ValueDesc]
-  | TransparentValue ValueDesc
+  = -- | The string is a human-readable description with no other
+    -- semantics.
+    -- not matter.
+    OpaqueValue Uniqueness String [ValueDesc]
+  | TransparentValue Uniqueness ValueDesc
   deriving (Show)
 
 -- | A imperative function, containing the body as well as its
@@ -262,6 +264,9 @@ data Code a
     -- debugging.  Code generators are free to ignore this
     -- statement.
     DebugPrint String (Maybe Exp)
+  | -- | Log the given message, *without* a trailing linebreak (unless
+    -- part of the mssage).
+    TracePrint (ErrorMsg Exp)
   | -- | Perform an extensible operation.
     Op a
   deriving (Show)
@@ -439,9 +444,9 @@ instance Pretty ValueDesc where
         TypeDirect -> mempty
 
 instance Pretty ExternalValue where
-  ppr (TransparentValue v) = ppr v
-  ppr (OpaqueValue desc vs) =
-    text "opaque" <+> text desc
+  ppr (TransparentValue u v) = ppr u <> ppr v
+  ppr (OpaqueValue u desc vs) =
+    ppr u <> text "opaque" <+> text desc
       <+> nestedBlock "{" "}" (stack $ map ppr vs)
 
 instance Pretty ArrayContents where
@@ -515,6 +520,8 @@ instance Pretty op => Pretty (Code op) where
     text "debug" <+> parens (commasep [text (show desc), ppr e])
   ppr (DebugPrint desc Nothing) =
     text "debug" <+> parens (text (show desc))
+  ppr (TracePrint msg) =
+    text "trace" <+> parens (ppr msg)
 
 instance Pretty Arg where
   ppr (MemArg m) = ppr m
@@ -597,6 +604,8 @@ instance Traversable Code where
     Comment s <$> traverse f code
   traverse _ (DebugPrint s v) =
     pure $ DebugPrint s v
+  traverse _ (TracePrint msg) =
+    pure $ TracePrint msg
 
 -- | The names declared with 'DeclareMem', 'DeclareScalar', and
 -- 'DeclareArray' in the given code.
@@ -626,8 +635,8 @@ instance FreeIn ValueDesc where
   freeIn' ScalarValue {} = mempty
 
 instance FreeIn ExternalValue where
-  freeIn' (TransparentValue vd) = freeIn' vd
-  freeIn' (OpaqueValue _ vds) = foldMap freeIn' vds
+  freeIn' (TransparentValue _ vd) = freeIn' vd
+  freeIn' (OpaqueValue _ _ vds) = foldMap freeIn' vds
 
 instance FreeIn a => FreeIn (Code a) where
   freeIn' (x :>>: y) =
@@ -668,6 +677,8 @@ instance FreeIn a => FreeIn (Code a) where
     freeIn' code
   freeIn' (DebugPrint _ v) =
     maybe mempty freeIn' v
+  freeIn' (TracePrint msg) =
+    foldMap freeIn' msg
 
 instance FreeIn ExpLeaf where
   freeIn' (Index v e _ _ _) = freeIn' v <> freeIn' e

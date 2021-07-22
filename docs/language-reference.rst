@@ -1401,7 +1401,7 @@ Module System
 .. productionlist::
    mod_bind: "module" `id` `mod_param`* "=" [":" mod_type_exp] "=" `mod_exp`
    mod_param: "(" `id` ":" `mod_type_exp` ")"
-   mod_type_bind: "module" "type" `id` `type_param`* "=" `mod_type_exp`
+   mod_type_bind: "module" "type" `id` "=" `mod_type_exp`
 
 Futhark supports an ML-style higher-order module system.  *Modules*
 can contain types, functions, and other modules and module types.
@@ -1656,6 +1656,32 @@ contradictory attributes are combined through fusion, it is
 unspecified which attributes take precedence.
 
 The following expression attributes are supported.
+
+``trace``
+.........
+
+Print the value produced by the attributed expression.  Used for
+debugging.  Somewhat unreliable outside of the interpreter, and in
+particular does not work for GPU device code.
+
+``trace(tag)``
+..............
+
+Like ``trace``, but prefix output with *tag*, which must lexically be
+an identifier.
+
+``break``
+.........
+
+In the interpreter, pause execution *before* evaluating the expression.
+No effect for compiled code.
+
+``opaque``
+..........
+
+The compiler will treat the attributed expression as a black box.
+This is used to work around optimisation deficiencies (or bugs),
+although it should hopefully rarely be necessary.
 
 ``incremental_flattening(no_outer)``
 ....................................

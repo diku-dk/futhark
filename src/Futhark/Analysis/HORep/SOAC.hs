@@ -99,15 +99,15 @@ import qualified Futhark.Util.Pretty as PP
 -- create a list, use 'ArrayTransforms' instead.
 data ArrayTransform
   = -- | A permutation of an otherwise valid input.
-    Rearrange Certificates [Int]
+    Rearrange Certs [Int]
   | -- | A reshaping of an otherwise valid input.
-    Reshape Certificates (ShapeChange SubExp)
+    Reshape Certs (ShapeChange SubExp)
   | -- | A reshaping of the outer dimension.
-    ReshapeOuter Certificates (ShapeChange SubExp)
+    ReshapeOuter Certs (ShapeChange SubExp)
   | -- | A reshaping of everything but the outer dimension.
-    ReshapeInner Certificates (ShapeChange SubExp)
+    ReshapeInner Certs (ShapeChange SubExp)
   | -- | Replicate the rows of the array a number of times.
-    Replicate Certificates Shape
+    Replicate Certs Shape
   deriving (Show, Eq, Ord)
 
 instance Substitute ArrayTransform where
@@ -226,7 +226,7 @@ combineTransforms _ _ = Nothing
 -- an input transformation of an array variable.  If so, return the
 -- variable and the transformation.  Only 'Rearrange' and 'Reshape'
 -- are possible to express this way.
-transformFromExp :: Certificates -> Exp rep -> Maybe (VName, ArrayTransform)
+transformFromExp :: Certs -> Exp rep -> Maybe (VName, ArrayTransform)
 transformFromExp cs (BasicOp (Futhark.Rearrange perm v)) =
   Just (v, Rearrange cs perm)
 transformFromExp cs (BasicOp (Futhark.Reshape shape v)) =
@@ -288,7 +288,7 @@ addInitialTransforms ts (Input ots a t) = Input (ts <> ots) a t
 
 -- | Convert SOAC inputs to the corresponding expressions.
 inputsToSubExps ::
-  (MonadBinder m) =>
+  (MonadBuilder m) =>
   [Input] ->
   m [VName]
 inputsToSubExps = mapM inputToExp'
@@ -472,14 +472,14 @@ width (Hist w _ _ _) = w
 
 -- | Convert a SOAC to the corresponding expression.
 toExp ::
-  (MonadBinder m, Op (Rep m) ~ Futhark.SOAC (Rep m)) =>
+  (MonadBuilder m, Op (Rep m) ~ Futhark.SOAC (Rep m)) =>
   SOAC (Rep m) ->
   m (Exp (Rep m))
 toExp soac = Op <$> toSOAC soac
 
 -- | Convert a SOAC to a Futhark-level SOAC.
 toSOAC ::
-  MonadBinder m =>
+  MonadBuilder m =>
   SOAC (Rep m) ->
   m (Futhark.SOAC (Rep m))
 toSOAC (Stream w form lam nes inps) =
@@ -520,7 +520,7 @@ fromExp _ = pure $ Left NotSOAC
 --   Returns the Stream SOAC and the
 --   extra-accumulator body-result ident if any.
 soacToStream ::
-  (MonadFreshNames m, Bindable rep, Op rep ~ Futhark.SOAC rep) =>
+  (MonadFreshNames m, Buildable rep, Op rep ~ Futhark.SOAC rep) =>
   SOAC rep ->
   m (SOAC rep, [Ident])
 soacToStream soac = do
@@ -547,8 +547,8 @@ soacToStream soac = do
         let insoac =
               Futhark.Screma chvar (map paramName strm_inpids) $
                 Futhark.mapSOAC lam'
-            insbnd = mkLet [] strm_resids $ Op insoac
-            strmbdy = mkBody (oneStm insbnd) $ map (Futhark.Var . identName) strm_resids
+            insbnd = mkLet strm_resids $ Op insoac
+            strmbdy = mkBody (oneStm insbnd) $ map (subExpRes . Futhark.Var . identName) strm_resids
             strmpar = chunk_param : strm_inpids
             strmlam = Lambda strmpar strmbdy loutps
             empty_lam = Lambda [] (mkBody mempty []) []
@@ -582,56 +582,48 @@ soacToStream soac = do
         outszm1id <- newIdent "szm1" $ Prim int64
         -- 1. let (scan0_ids,map_resids)  = scanomap(scan_lam,nes,map_lam,a_ch)
         let insbnd =
-              mkLet [] (scan0_ids ++ map_resids) $
-                Op $
-                  Futhark.Screma chvar (map paramName strm_inpids) $
-                    Futhark.scanomapSOAC [Futhark.Scan scan_lam nes] lam'
+              mkLet (scan0_ids ++ map_resids) . Op $
+                Futhark.Screma chvar (map paramName strm_inpids) $
+                  Futhark.scanomapSOAC [Futhark.Scan scan_lam nes] lam'
             -- 2. let outerszm1id = chunksize - 1
             outszm1bnd =
-              mkLet [] [outszm1id] $
-                BasicOp $
-                  BinOp
-                    (Sub Int64 OverflowUndef)
-                    (Futhark.Var $ paramName chunk_param)
-                    (constant (1 :: Int64))
+              mkLet [outszm1id] . BasicOp $
+                BinOp
+                  (Sub Int64 OverflowUndef)
+                  (Futhark.Var $ paramName chunk_param)
+                  (constant (1 :: Int64))
             -- 3. let lasteel_ids = ...
             empty_arr_bnd =
-              mkLet [] [empty_arr] $
-                BasicOp $
-                  CmpOp
-                    (CmpSlt Int64)
-                    (Futhark.Var $ identName outszm1id)
-                    (constant (0 :: Int64))
+              mkLet [empty_arr] . BasicOp $
+                CmpOp
+                  (CmpSlt Int64)
+                  (Futhark.Var $ identName outszm1id)
+                  (constant (0 :: Int64))
             leltmpbnds =
               zipWith
                 ( \lid arrid ->
-                    mkLet [] [lid] $
-                      BasicOp $
-                        Index (identName arrid) $
-                          fullSlice
-                            (identType arrid)
-                            [DimFix $ Futhark.Var $ identName outszm1id]
+                    mkLet [lid] . BasicOp $
+                      Index (identName arrid) $
+                        fullSlice
+                          (identType arrid)
+                          [DimFix $ Futhark.Var $ identName outszm1id]
                 )
                 lastel_tmp_ids
                 scan0_ids
             lelbnd =
-              mkLet [] lastel_ids $
+              mkLet lastel_ids $
                 If
                   (Futhark.Var $ identName empty_arr)
-                  (mkBody mempty nes)
+                  (mkBody mempty $ subExpsRes nes)
                   ( mkBody (stmsFromList leltmpbnds) $
-                      map (Futhark.Var . identName) lastel_tmp_ids
+                      varsRes $ map identName lastel_tmp_ids
                   )
                   $ ifCommon $ map identType lastel_tmp_ids
         -- 4. let strm_resids = map (acc `+`,nes, scan0_ids)
         maplam <- mkMapPlusAccLam (map (Futhark.Var . paramName) inpacc_ids) scan_lam
         let mapbnd =
-              mkLet [] strm_resids $
-                Op $
-                  Futhark.Screma
-                    chvar
-                    (map identName scan0_ids)
-                    (Futhark.mapSOAC maplam)
+              mkLet strm_resids . Op $
+                Futhark.Screma chvar (map identName scan0_ids) (Futhark.mapSOAC maplam)
         -- 5. let acc'        = acc + lasteel_ids
         addlelbdy <-
           mkPlusBnds scan_lam $
@@ -641,7 +633,7 @@ soacToStream soac = do
         let (addlelbnd, addlelres) = (bodyStms addlelbdy, bodyResult addlelbdy)
             strmbdy =
               mkBody (stmsFromList [insbnd, outszm1bnd, empty_arr_bnd, lelbnd, mapbnd] <> addlelbnd) $
-                addlelres ++ map (Futhark.Var . identName) (strm_resids ++ map_resids)
+                addlelres ++ map (subExpRes . Futhark.Var . identName) (strm_resids ++ map_resids)
             strmpar = chunk_param : inpacc_ids ++ strm_inpids
             strmlam = Lambda strmpar strmbdy (accrtps ++ loutps)
         return
@@ -670,7 +662,7 @@ soacToStream soac = do
                 chvar
                 (map paramName strm_inpids)
                 $ Futhark.redomapSOAC [Futhark.Reduce comm lamin nes] foldlam
-            insbnd = mkLet [] (acc0_ids ++ strm_resids) $ Op insoac
+            insbnd = mkLet (acc0_ids ++ strm_resids) $ Op insoac
         -- 2. let acc'     = acc + acc0_ids    in
         addaccbdy <-
           mkPlusBnds lamin $
@@ -680,7 +672,7 @@ soacToStream soac = do
         let (addaccbnd, addaccres) = (bodyStms addaccbdy, bodyResult addaccbdy)
             strmbdy =
               mkBody (oneStm insbnd <> addaccbnd) $
-                addaccres ++ map (Futhark.Var . identName) strm_resids
+                addaccres ++ map (subExpRes . Futhark.Var . identName) strm_resids
             strmpar = chunk_param : inpacc_ids ++ strm_inpids
             strmlam = Lambda strmpar strmbdy (accrtps ++ loutps')
         lam0 <- renameLambda lamin
@@ -690,7 +682,7 @@ soacToStream soac = do
     _ -> return (soac, [])
   where
     mkMapPlusAccLam ::
-      (MonadFreshNames m, Bindable rep) =>
+      (MonadFreshNames m, Buildable rep) =>
       [SubExp] ->
       Lambda rep ->
       m (Lambda rep)
@@ -698,12 +690,7 @@ soacToStream soac = do
       let (accpars, rempars) = splitAt (length accs) $ lambdaParams plus
           parbnds =
             zipWith
-              ( \par se ->
-                  mkLet
-                    []
-                    [paramIdent par]
-                    (BasicOp $ SubExp se)
-              )
+              (\par se -> mkLet [paramIdent par] (BasicOp $ SubExp se))
               accpars
               accs
           plus_bdy = lambdaBody plus
@@ -715,7 +702,7 @@ soacToStream soac = do
       renameLambda $ Lambda rempars newlambdy $ lambdaReturnType plus
 
     mkPlusBnds ::
-      (MonadFreshNames m, Bindable rep) =>
+      (MonadFreshNames m, Buildable rep) =>
       Lambda rep ->
       [SubExp] ->
       m (Body rep)
@@ -723,12 +710,7 @@ soacToStream soac = do
       plus' <- renameLambda plus
       let parbnds =
             zipWith
-              ( \par se ->
-                  mkLet
-                    []
-                    [paramIdent par]
-                    (BasicOp $ SubExp se)
-              )
+              (\par se -> mkLet [paramIdent par] (BasicOp $ SubExp se))
               (lambdaParams plus')
               accels
           body = lambdaBody plus'

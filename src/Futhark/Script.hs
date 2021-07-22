@@ -131,7 +131,7 @@ parseExp :: Parser () -> Parser Exp
 parseExp sep =
   choice
     [ lexeme sep "let" $> Let
-        <*> pPattern <* lexeme sep "="
+        <*> pPat <* lexeme sep "="
         <*> parseExp sep <* lexeme sep "in"
         <*> parseExp sep,
       try $ Call <$> parseFunc <*> many pAtom,
@@ -155,7 +155,7 @@ parseExp sep =
           Call <$> parseFunc <*> pure []
         ]
 
-    pPattern =
+    pPat =
       choice
         [ inParens sep $ pVarName `sepBy` pComma,
           pure <$> pVarName
@@ -321,7 +321,7 @@ evalExp builtin (ScriptServer server counter) top_level_e = do
           pure $ M.fromList (zip vs vals)
         | otherwise =
           throwError $
-            "Pattern: " <> prettyTextOneLine vs
+            "Pat: " <> prettyTextOneLine vs
               <> "\nDoes not match value of type: "
               <> prettyTextOneLine (fmap scriptValueType val)
 
@@ -337,8 +337,8 @@ evalExp builtin (ScriptServer server counter) top_level_e = do
             throwError $ "Locally bound name cannot be invoked as a function: " <> prettyText name
           pure e
       evalExp' vtable (Call (FuncFut name) es) = do
-        in_types <- cmdEither $ cmdInputs server name
-        out_types <- cmdEither $ cmdOutputs server name
+        in_types <- fmap (map inputType) $ cmdEither $ cmdInputs server name
+        out_types <- fmap (map outputType) $ cmdEither $ cmdOutputs server name
 
         es' <- mapM (evalExp' vtable) es
         let es_types = map (fmap scriptValueType) es'

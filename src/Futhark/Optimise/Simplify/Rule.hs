@@ -58,11 +58,11 @@ where
 import Control.Monad.State
 import qualified Futhark.Analysis.SymbolTable as ST
 import qualified Futhark.Analysis.UsageTable as UT
-import Futhark.Binder
+import Futhark.Builder
 import Futhark.IR
 
 -- | The monad in which simplification rules are evaluated.
-newtype RuleM rep a = RuleM (BinderT rep (StateT VNameSource Maybe) a)
+newtype RuleM rep a = RuleM (BuilderT rep (StateT VNameSource Maybe) a)
   deriving
     ( Functor,
       Applicative,
@@ -72,7 +72,7 @@ newtype RuleM rep a = RuleM (BinderT rep (StateT VNameSource Maybe) a)
       LocalScope rep
     )
 
-instance (ASTRep rep, BinderOps rep) => MonadBinder (RuleM rep) where
+instance (ASTRep rep, BuilderOps rep) => MonadBuilder (RuleM rep) where
   type Rep (RuleM rep) = rep
   mkExpDecM pat e = RuleM $ mkExpDecM pat e
   mkBodyM bnds res = RuleM $ mkBodyM bnds res
@@ -90,7 +90,7 @@ simplify ::
   Maybe (Stms rep, VNameSource)
 simplify _ _ Skip = Nothing
 simplify scope src (Simplify (RuleM m)) =
-  runStateT (runBinderT_ m scope) src
+  runStateT (runBuilderT_ m scope) src
 
 cannotSimplify :: RuleM rep a
 cannotSimplify = RuleM $ lift $ lift Nothing
@@ -110,7 +110,7 @@ type RuleGeneric rep a = a -> Stm rep -> Rule rep
 
 type RuleBasicOp rep a =
   ( a ->
-    Pattern rep ->
+    Pat rep ->
     StmAux (ExpDec rep) ->
     BasicOp ->
     Rule rep
@@ -118,7 +118,7 @@ type RuleBasicOp rep a =
 
 type RuleIf rep a =
   a ->
-  Pattern rep ->
+  Pat rep ->
   StmAux (ExpDec rep) ->
   ( SubExp,
     BodyT rep,
@@ -129,10 +129,9 @@ type RuleIf rep a =
 
 type RuleDoLoop rep a =
   a ->
-  Pattern rep ->
+  Pat rep ->
   StmAux (ExpDec rep) ->
   ( [(FParam rep, SubExp)],
-    [(FParam rep, SubExp)],
     LoopForm rep,
     BodyT rep
   ) ->
@@ -140,7 +139,7 @@ type RuleDoLoop rep a =
 
 type RuleOp rep a =
   a ->
-  Pattern rep ->
+  Pat rep ->
   StmAux (ExpDec rep) ->
   Op rep ->
   Rule rep
@@ -290,8 +289,8 @@ rulesForStm stm = case stmExp stm of
 applyRule :: SimplificationRule rep a -> a -> Stm rep -> Rule rep
 applyRule (RuleGeneric f) a stm = f a stm
 applyRule (RuleBasicOp f) a (Let pat aux (BasicOp e)) = f a pat aux e
-applyRule (RuleDoLoop f) a (Let pat aux (DoLoop ctx val form body)) =
-  f a pat aux (ctx, val, form, body)
+applyRule (RuleDoLoop f) a (Let pat aux (DoLoop merge form body)) =
+  f a pat aux (merge, form, body)
 applyRule (RuleIf f) a (Let pat aux (If cond tbody fbody ifsort)) =
   f a pat aux (cond, tbody, fbody, ifsort)
 applyRule (RuleOp f) a (Let pat aux (Op op)) =

@@ -17,7 +17,7 @@ import qualified Prelude (div)
 
 -- | Compile 'SegMap' instance code.
 compileSegStencil ::
-  Pattern GPUMem ->
+  Pat GPUMem ->
   SegLevel ->
   SegSpace ->
   StencilOp GPUMem ->
@@ -209,7 +209,7 @@ sForUnflatten sizes start_flat added_flat body = do
 -- This is equivalent to just making a nest of maps and finding the neighbours from there.
 -- This kernel is primarily used as a fallback in case the others can't meaningfully be run
 compileGlobalReadFlat ::
-  Pattern GPUMem ->
+  Pat GPUMem ->
   SegLevel ->
   SegSpace ->
   StencilOp GPUMem ->
@@ -286,8 +286,8 @@ compileGlobalReadFlat pat lvl space op kbody = do
 
       -- compile lambda function and designate output style
       compileStms mempty (bodyStms lamBody) $
-        zipWithM_ (compileThreadResult space) (patternElements pat) $
-          map (Returns ResultMaySimplify) $ bodyResult lamBody
+        zipWithM_ (compileThreadResult space) (patElements pat) $
+          map (Returns ResultMaySimplify mempty . resSubExp) $ bodyResult lamBody
 
 -- Kernel for evaluating a single stencil.
 -- This kernel uses shared memory to store read elements,
@@ -303,7 +303,7 @@ compileGlobalReadFlat pat lvl space op kbody = do
 --   In phase 2 it iterates through the write-set and evaluated the lambda
 --     function and performs writes.
 compileBigTileMultiWriteSingleDim ::
-  Pattern GPUMem ->
+  Pat GPUMem ->
   SegLevel ->
   SegSpace ->
   StencilOp GPUMem ->
@@ -461,5 +461,5 @@ compileBigTileMultiWriteSingleDim pat _ space op kbody group_sizes_exp work_mult
 
               -- compile lambda function and designate output style
               compileStms mempty (bodyStms lamBody) $
-                zipWithM_ (compileThreadResult space) (patternElements pat) $
-                  map (Returns ResultMaySimplify) $ bodyResult lamBody
+                zipWithM_ (compileThreadResult space) (patElements pat) $
+                  map (Returns ResultMaySimplify mempty . resSubExp) $ bodyResult lamBody
