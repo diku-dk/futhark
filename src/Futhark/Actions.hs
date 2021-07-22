@@ -307,16 +307,16 @@ compilePyOpenCLAction fcfg mode outpath =
 cmdEMCFLAGS :: [String] -> [String]
 cmdEMCFLAGS def = maybe def words $ lookup "EMCFLAGS" unixEnvironment
 
-runEMCC :: String -> String -> FilePath -> [String] -> [String] -> [String] -> Bool -> Bool -> FutharkM ()
-runEMCC cpath outpath classpath cflags_def ldflags expfuns rts lib = do
+runEMCC :: String -> String -> FilePath -> [String] -> [String] -> [String] -> Bool -> FutharkM ()
+runEMCC cpath outpath classpath cflags_def ldflags expfuns lib = do
   ret <-
     liftIO $
       runProgramWithExitCode
         "emcc"
         ( [cpath, "-o", outpath]
             ++ ["-lnodefs.js"]
-            ++ (if rts then ["-s", "--post-js", classpath] else [])
-            ++ (if lib then ["-s", "EXPORT_NAME=createFutharkModule", "-s", "MODULARIZE=1"] else [])
+            ++ ["-s", "--post-js", classpath]
+            ++ (if lib then ["-s", "EXPORT_NAME=loadFuthark", "-s", "MODULARIZE=1", "-s", "EXPORT_ES6=1"] else [])
             ++ ["-s", "WASM_BIGINT"]
             ++ cmdCFLAGS cflags_def
             ++ cmdEMCFLAGS [""]
@@ -354,12 +354,12 @@ compileCtoWASMAction fcfg mode outpath =
       case mode of
         ToLibrary -> do
           writeLibs cprog jsprog
-          runEMCC cpath jpath classpath ["-O3", "-msimd128"] ["-lm"] exps True True
+          runEMCC cpath mjspath classpath ["-O3", "-msimd128"] ["-lm"] exps True
         _ -> do
           -- Non-server executables are not supported.
           writeLibs cprog jsprog
           liftIO $ appendFile classpath SequentialWASM.runServer
-          runEMCC cpath outpath classpath ["-O3", "-msimd128"] ["-lm"] exps True False
+          runEMCC cpath outpath classpath ["-O3", "-msimd128"] ["-lm"] exps False
     writeLibs cprog jsprog = do
       let (h, imp) = SequentialC.asLibrary cprog
       liftIO $ writeFile hpath h
@@ -368,7 +368,7 @@ compileCtoWASMAction fcfg mode outpath =
 
     cpath = outpath `addExtension` "c"
     hpath = outpath `addExtension` "h"
-    jpath = outpath `addExtension` "js"
+    mjspath = outpath `addExtension` "mjs"
     classpath = outpath `addExtension` ".class.js"
 
 compileMulticoreToWASMAction :: FutharkConfig -> CompilerMode -> FilePath -> Action MCMem
@@ -385,12 +385,12 @@ compileMulticoreToWASMAction fcfg mode outpath =
       case mode of
         ToLibrary -> do
           writeLibs cprog jsprog
-          runEMCC cpath jpath classpath ["-O3", "-msimd128"] ["-lm", "-pthread"] exps True True
+          runEMCC cpath mjspath classpath ["-O3", "-msimd128"] ["-lm", "-pthread"] exps True
         _ -> do
           -- Non-server executables are not supported.
           writeLibs cprog jsprog
           liftIO $ appendFile classpath MulticoreWASM.runServer
-          runEMCC cpath outpath classpath ["-O3", "-msimd128"] ["-lm", "-pthread"] exps True False
+          runEMCC cpath outpath classpath ["-O3", "-msimd128"] ["-lm", "-pthread"] exps False
 
     writeLibs cprog jsprog = do
       let (h, imp) = MulticoreC.asLibrary cprog
@@ -400,5 +400,5 @@ compileMulticoreToWASMAction fcfg mode outpath =
 
     cpath = outpath `addExtension` "c"
     hpath = outpath `addExtension` "h"
-    jpath = outpath `addExtension` "js"
+    mjspath = outpath `addExtension` "mjs"
     classpath = outpath `addExtension` ".class.js"
