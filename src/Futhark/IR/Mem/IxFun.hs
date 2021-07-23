@@ -34,7 +34,7 @@ import Control.Category
 import Control.Monad.Identity
 import Control.Monad.State
 import Control.Monad.Writer
-import Data.Function (on)
+import Data.Function (on, (&))
 import Data.List (sort, sortBy, zip4, zip5, zipWith5)
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.List.NonEmpty as NE
@@ -516,19 +516,20 @@ flatSlice ::
   IxFun num ->
   FlatSlice num ->
   IxFun num
-flatSlice (IxFun (LMAD offset [dim] :| []) oshp True) (FlatSlice new_offset is)
-  | ldRotate dim == 0,
-    ldMon dim == Inc =
-    IxFun
-      ( LMAD
-          (offset + new_offset * ldStride dim)
-          (zipWith helper is [0 ..])
-          :| []
-      )
-      oshp
-      True
+flatSlice ixfun@(IxFun (LMAD offset (dim : dims) :| lmads) oshp cg) (FlatSlice new_offset is)
+  | hasContiguousPerm ixfun,
+    ldRotate dim == 0 =
+    let lmad =
+          ( LMAD
+              (offset + new_offset * ldStride dim)
+              ( map (helper $ ldStride dim) is
+                  <> dims
+              )
+          )
+            & setLMADPermutation [0 ..]
+     in IxFun (lmad :| lmads) oshp cg
   where
-    helper (FlatDimIndex n s) i = LMADDim (ldStride dim * s) 0 n i Unknown
+    helper s0 (FlatDimIndex n s) = LMADDim (s0 * s) 0 n 0 Unknown
 flatSlice _ _ =
   error "slice: reached impossible case when handling flat slices"
 

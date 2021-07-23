@@ -100,8 +100,8 @@ shape (Rotate ixfun _) =
   shape ixfun
 shape (Index _ how) =
   sliceDims how
-shape (FlatIndex _ how) =
-  flatSliceDims how
+shape (FlatIndex ixfun how) =
+  flatSliceDims how <> tail (shape ixfun)
 shape (Reshape _ dims) =
   map newDim dims
 shape (OffsetIndex ixfun _) =
@@ -133,7 +133,7 @@ index (Index fun (Slice js)) is =
     adjust (DimSlice j _ s : js') (i : is') = j + i * s : adjust js' is'
     adjust _ _ = []
 index (FlatIndex fun (FlatSlice offset js)) is =
-  index fun [sum $ offset : zipWith f is js]
+  index fun $ (sum $ offset : zipWith f is js) : drop (length js) is
   where
     f i (FlatDimIndex _ s) = i * s
 index (Reshape fun newshape) is =
