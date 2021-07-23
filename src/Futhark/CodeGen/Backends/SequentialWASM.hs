@@ -5,6 +5,7 @@
 module Futhark.CodeGen.Backends.SequentialWASM
   ( compileProg,
     runServer,
+    libraryExports,
     GC.CParts (..),
     GC.asLibrary,
     GC.asExecutable,

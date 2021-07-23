@@ -24,19 +24,15 @@ with the ``--library`` command line option produces fou4 files:
 * ``futlib.mjs``: An ES6 module that can can be imported by other
   JavaScript code, and implements the API given in the following.
 
-The module defines a single export, ``loadFuthark``, which is a
-factory function that returns a Promise that resolves with an
-Emscripten module instance.  *That* module then defines a constructor
-for the ``FutharkContext`` class described below.  A simple usage
-example:
+The exports a function, ``newFutharkContext``, which is a factory
+function that returns a Promise producing a ``FutharkContext``
+instance (see below).  A simple usage example:
 
 .. code-block:: javascript
 
-   import loadFuthark from './futmod.mjs';
+   import { newFutharkContext } from './futmod.mjs';
    var fc;
-   loadFuthark().then(function (m) {
-     fc = new m.FutharkContext();
-   });
+   newFutharkContext().then(x => fc = x);
 
 General concerns
 ----------------
@@ -50,13 +46,19 @@ FutharkContext
 --------------
 
 FutharkContext is a class that contains information about the context
-and configuration from the C API. It has methods for invoking the Futhark
-entry points and creating FutharkArrays on the WebAssembly heap.
+and configuration from the C API. It has methods for invoking the
+Futhark entry points and creating FutharkArrays on the WebAssembly
+heap.
 
+.. js:function:: newFutharkContext()
+
+   Asynchronously create a new ``FutharkContext`` object.
 
 .. js:class:: FutharkContext()
 
-   Creates a new ``FutharkContext``.
+   A bookkeeping class representing an instance of a Futhark program.
+   Do *not* directly invoke its constructor - always use the
+   ``newFutharkContext()`` factory function.
 
 .. js:function:: FutharkContext.free()
 
