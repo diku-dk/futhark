@@ -9,6 +9,7 @@ where
 
 import Control.Monad
 import qualified Data.Map as M
+import qualified Data.Text as T
 import qualified Futhark.CodeGen.Backends.GenericPython as Py
 import Futhark.CodeGen.Backends.GenericPython.AST
 import Futhark.CodeGen.Backends.GenericPython.Options
@@ -26,7 +27,7 @@ compileProg ::
   Py.CompilerMode ->
   String ->
   Prog GPUMem ->
-  m (ImpGen.Warnings, String)
+  m (ImpGen.Warnings, T.Text)
 compileProg mode class_name prog = do
   ( ws,
     Imp.Program

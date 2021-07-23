@@ -49,6 +49,7 @@ import Control.Monad.Identity
 import Control.Monad.RWS
 import qualified Data.Map as M
 import Data.Maybe
+import qualified Data.Text as T
 import Futhark.CodeGen.Backends.GenericPython.AST
 import Futhark.CodeGen.Backends.GenericPython.Definitions
 import Futhark.CodeGen.Backends.GenericPython.Options
@@ -59,7 +60,7 @@ import Futhark.IR.Prop (isBuiltInFunction, subExpVars)
 import Futhark.IR.Syntax (Space (..))
 import Futhark.MonadFreshNames
 import Futhark.Util (zEncodeString)
-import Futhark.Util.Pretty (pretty)
+import Futhark.Util.Pretty (pretty, prettyText)
 
 -- | A substitute expression compiler, tried before the main
 -- compilation function.
@@ -362,27 +363,24 @@ compileProg ::
   [PyStmt] ->
   [Option] ->
   Imp.Definitions op ->
-  m String
+  m T.Text
 compileProg mode class_name constructor imports defines ops userstate sync options prog = do
   src <- getNameSource
   let prog' = runCompilerM ops src userstate compileProg'
-  return $
-    pretty
-      ( PyProg $
-          imports
-            ++ [ Import "argparse" Nothing,
-                 Assign (Var "sizes") $ Dict []
-               ]
-            ++ defines
-            ++ [ Escape pyValues,
-                 Escape pyFunctions,
-                 Escape pyPanic,
-                 Escape pyTuning,
-                 Escape pyUtility,
-                 Escape pyServer
-               ]
-            ++ prog'
-      )
+  pure . prettyText . PyProg $
+    imports
+      ++ [ Import "argparse" Nothing,
+           Assign (Var "sizes") $ Dict []
+         ]
+      ++ defines
+      ++ [ Escape pyValues,
+           Escape pyFunctions,
+           Escape pyPanic,
+           Escape pyTuning,
+           Escape pyUtility,
+           Escape pyServer
+         ]
+      ++ prog'
   where
     Imp.Definitions consts (Imp.Functions funs) = prog
     compileProg' = withConstantSubsts consts $ do

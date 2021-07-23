@@ -1,3 +1,5 @@
+{-# LANGUAGE OverloadedStrings #-}
+
 -- | C code generator.  This module can convert a correct ImpCode
 -- program to an equivalent C program.  This C program is expected to
 -- be converted to WebAssembly, so we also produce the intended
@@ -14,6 +16,7 @@ module Futhark.CodeGen.Backends.SequentialWASM
 where
 
 import Data.Maybe
+import qualified Data.Text as T
 import qualified Futhark.CodeGen.Backends.GenericC as GC
 import Futhark.CodeGen.Backends.GenericWASM
 import Futhark.CodeGen.Backends.SequentialC.Boilerplate
@@ -23,7 +26,7 @@ import Futhark.IR.SeqMem
 import Futhark.MonadFreshNames
 
 -- | Compile the program to sequential C with a JavaScript wrapper.
-compileProg :: MonadFreshNames m => Prog SeqMem -> m (ImpGen.Warnings, (GC.CParts, String, [String]))
+compileProg :: MonadFreshNames m => Prog SeqMem -> m (ImpGen.Warnings, (GC.CParts, T.Text, [String]))
 compileProg prog = do
   (ws, prog') <- ImpGen.compileProg prog
 
