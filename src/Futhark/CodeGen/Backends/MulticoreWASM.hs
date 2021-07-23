@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE TemplateHaskell #-}
 
@@ -18,6 +19,7 @@ where
 
 import Data.FileEmbed
 import Data.Maybe
+import qualified Data.Text as T
 import qualified Futhark.CodeGen.Backends.GenericC as GC
 import Futhark.CodeGen.Backends.GenericWASM
 import qualified Futhark.CodeGen.Backends.MulticoreC as MC
@@ -27,7 +29,7 @@ import Futhark.IR.MCMem
 import Futhark.MonadFreshNames
 import qualified Language.C.Quote.OpenCL as C
 
-compileProg :: MonadFreshNames m => Prog MCMem -> m (ImpGen.Warnings, (GC.CParts, String, [String]))
+compileProg :: MonadFreshNames m => Prog MCMem -> m (ImpGen.Warnings, (GC.CParts, T.Text, [String]))
 compileProg prog = do
   (ws, prog') <- ImpGen.compileProg prog
 

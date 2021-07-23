@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE TemplateHaskell #-}
 
@@ -70,37 +71,36 @@ emccExportNames jses =
     typs = nub $ concatMap (\jse -> parameters jse ++ ret jse) jses
     gfn typ str = "_futhark_" ++ typ ++ "_" ++ baseType str ++ "_" ++ show (dim str) ++ "d"
 
-javascriptWrapper :: [JSEntryPoint] -> String
+javascriptWrapper :: [JSEntryPoint] -> T.Text
 javascriptWrapper entryPoints =
-  unlines
+  T.unlines
     [ jsServer,
       jsValues,
       jsClasses,
       classFutharkContext entryPoints
     ]
 
-jsServer :: String
+jsServer :: T.Text
 jsServer = $(embedStringFile "rts/javascript/server.js")
 
-jsValues :: String
+jsValues :: T.Text
 jsValues = $(embedStringFile "rts/javascript/values.js")
 
-jsClasses :: String
+jsClasses :: T.Text
 jsClasses = $(embedStringFile "rts/javascript/wrapperclasses.js")
 
-classFutharkContext :: [JSEntryPoint] -> String
+classFutharkContext :: [JSEntryPoint] -> T.Text
 classFutharkContext entryPoints =
-  unlines
+  T.unlines
     [ "class FutharkContext {",
       constructor entryPoints,
       getFreeFun,
       getEntryPointsFun,
       getErrorFun,
-      unlines $ map toFutharkArray arrays,
-      unlines $ map jsWrapEntryPoint entryPoints,
+      T.unlines $ map toFutharkArray arrays,
+      T.unlines $ map jsWrapEntryPoint entryPoints,
       "}",
-      T.unpack
-        [text|
+      [text|
       async function newFutharkContext() {
         var wasm = await loadWASM();
         return new FutharkContext(wasm);
@@ -111,10 +111,9 @@ classFutharkContext entryPoints =
     arrays = filter isArray typs
     typs = nub $ concatMap (\jse -> parameters jse ++ ret jse) entryPoints
 
-constructor :: [JSEntryPoint] -> String
+constructor :: [JSEntryPoint] -> T.Text
 constructor jses =
-  T.unpack
-    [text|
+  [text|
   constructor(wasm, num_threads) {
     this.wasm = wasm;
     this.cfg = this.wasm._futhark_context_config_new();
@@ -126,31 +125,28 @@ constructor jses =
   }
   |]
   where
-    entries = T.pack $ intercalate "," $ map dicEntry jses
+    entries = T.intercalate "," $ map dicEntry jses
 
-getFreeFun :: String
+getFreeFun :: T.Text
 getFreeFun =
-  T.unpack
-    [text|
+  [text|
   free() {
     this.wasm._futhark_context_free(this.ctx);
     this.wasm._futhark_context_config_free(this.cfg);
   }
   |]
 
-getEntryPointsFun :: String
+getEntryPointsFun :: T.Text
 getEntryPointsFun =
-  T.unpack
-    [text|
+  [text|
   get_entry_points() {
     return this.entry_points;
   }
   |]
 
-getErrorFun :: String
+getErrorFun :: T.Text
 getErrorFun =
-  T.unpack
-    [text|
+  [text|
   get_error() {
     var ptr = this.wasm._futhark_context_get_error(this.ctx);
     var len = HEAP8.subarray(ptr).indexOf(0);
@@ -160,10 +156,9 @@ getErrorFun =
   }
   |]
 
-dicEntry :: JSEntryPoint -> String
+dicEntry :: JSEntryPoint -> T.Text
 dicEntry jse =
-  T.unpack
-    [text|
+  [text|
   '${ename}' : [${params}, ${rets}]
   |]
   where
@@ -171,10 +166,9 @@ dicEntry jse =
     params = T.pack $ show $ parameters jse
     rets = T.pack $ show $ ret jse
 
-jsWrapEntryPoint :: JSEntryPoint -> String
+jsWrapEntryPoint :: JSEntryPoint -> T.Text
 jsWrapEntryPoint jse =
-  T.unpack
-    [text|
+  [text|
   ${func_name}(${inparams}) {
     var out = [${outparams}].map(n => this.wasm._malloc(n));
     var to_free = [];
@@ -295,10 +289,9 @@ typeHeap typ =
     "bool" -> "this.wasm.HEAP8"
     _ -> "this.wasm.HEAP32"
 
-toFutharkArray :: String -> String
+toFutharkArray :: String -> T.Text
 toFutharkArray typ =
-  T.unpack
-    [text|
+  [text|
   ${new}_from_jsarray(${arraynd_p}) {
     return this.${new}(${arraynd_flat_p}, ${arraynd_dims_p});
   }
@@ -337,16 +330,14 @@ toFutharkArray typ =
     (arraynd_p, arraynd_flat_p, arraynd_dims_p) = (T.pack arraynd, T.pack arraynd_flat, T.pack arraynd_dims)
     args = T.pack $ intercalate ", " ["'" ++ ftype ++ "'", show d, heap, fshape, fvalues, ffree]
 
-runServer :: String
+runServer :: T.Text
 runServer =
-  T.unpack
-    [text|
+  [text|
    Module.onRuntimeInitialized = () => {
      var context = new FutharkContext(Module);
      var server = new Server(context);
      server.run();
-   }
-  |]
+   }|]
 
-libraryExports :: String
+libraryExports :: T.Text
 libraryExports = "export {newFutharkContext, FutharkContext, FutharkArray, FutharkOpaque};"
