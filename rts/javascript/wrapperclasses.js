@@ -12,15 +12,15 @@ class FutharkArray {
     this.ffree = ffree;
   }
   futharkType() { return this.type_name; }
-  free() { this.ffree(this.ctx, this.ptr); }
+  free() { this.ffree(this.ctx.ctx, this.ptr); }
   shape() {
-    var s = this.fshape(this.ctx, this.ptr) >> 3;
-    return Array.from(HEAP64.subarray(s, s + this.dim));
+    var s = this.fshape(this.ctx.ctx, this.ptr) >> 3;
+    return Array.from(this.ctx.wasm.HEAP64.subarray(s, s + this.dim));
   }
   toTypedArray(dims = this.shape()) {
     console.assert(dims.length === this.dim, "dim=%s,dims=%s", this.dim, dims.toString());
     var length = Number(dims.reduce((a, b) => a * b));
-    var v = this.fvalues(this.ctx, this.ptr) / this.heap.BYTES_PER_ELEMENT;
+    var v = this.fvalues(this.ctx.ctx, this.ptr) / this.heap.BYTES_PER_ELEMENT;
     return this.heap.subarray(v, v + length);
   }
   toArray() {
@@ -40,11 +40,7 @@ class FutharkArray {
 
 class FutharkOpaque {
   constructor(ctx, ptr, ffree) { this.ctx = ctx; this.ptr = ptr; this.ffree = ffree; }
-  free() { this.ffree(this.ctx, this.ptr); }
+  free() { this.ffree(this.ctx.ctx, this.ptr); }
 }
-
-Module['FutharkArray'] = FutharkArray;
-
-Module['FutharkOpaque'] = FutharkOpaque;
 
 // End of wrapperclasses.js

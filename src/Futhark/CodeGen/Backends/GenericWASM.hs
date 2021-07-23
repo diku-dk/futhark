@@ -2,8 +2,7 @@
 {-# LANGUAGE TemplateHaskell #-}
 
 module Futhark.CodeGen.Backends.GenericWASM
-  ( runServer,
-    GC.CParts (..),
+  ( GC.CParts (..),
     GC.asLibrary,
     GC.asExecutable,
     GC.asServer,
@@ -11,6 +10,8 @@ module Futhark.CodeGen.Backends.GenericWASM
     emccExportNames,
     javascriptWrapper,
     extToString,
+    runServer,
+    libraryExports,
   )
 where
 
@@ -98,7 +99,13 @@ classFutharkContext entryPoints =
       unlines $ map toFutharkArray arrays,
       unlines $ map jsWrapEntryPoint entryPoints,
       "}",
-      "Module['FutharkContext'] = FutharkContext;"
+      T.unpack
+        [text|
+      async function newFutharkContext() {
+        var wasm = await loadWASM();
+        return new FutharkContext(wasm);
+      }
+      |]
     ]
   where
     arrays = filter isArray typs
@@ -108,10 +115,11 @@ constructor :: [JSEntryPoint] -> String
 constructor jses =
   T.unpack
     [text|
-  constructor(num_threads) {
-    this.cfg = _futhark_context_config_new();
-    if (num_threads) _futhark_context_config_set_num_threads(this.cfg, num_threads);
-    this.ctx = _futhark_context_new(this.cfg);
+  constructor(wasm, num_threads) {
+    this.wasm = wasm;
+    this.cfg = this.wasm._futhark_context_config_new();
+    if (num_threads) this.wasm._futhark_context_config_set_num_threads(this.cfg, num_threads);
+    this.ctx = this.wasm._futhark_context_new(this.cfg);
     this.entry_points = {
       ${entries}
     };
@@ -125,8 +133,8 @@ getFreeFun =
   T.unpack
     [text|
   free() {
-    _futhark_context_free(this.ctx);
-    _futhark_context_config_free(this.cfg);
+    this.wasm._futhark_context_free(this.ctx);
+    this.wasm._futhark_context_config_free(this.cfg);
   }
   |]
 
@@ -144,10 +152,10 @@ getErrorFun =
   T.unpack
     [text|
   get_error() {
-    var ptr = _futhark_context_get_error(this.ctx);
+    var ptr = this.wasm._futhark_context_get_error(this.ctx);
     var len = HEAP8.subarray(ptr).indexOf(0);
     var str = String.fromCharCode(...HEAP8.subarray(ptr, ptr + len));
-    _free(ptr);
+    this.wasm._free(ptr);
     return str;
   }
   |]
@@ -168,11 +176,11 @@ jsWrapEntryPoint jse =
   T.unpack
     [text|
   ${func_name}(${inparams}) {
-    var out = [${outparams}].map(n => _malloc(n));
+    var out = [${outparams}].map(n => this.wasm._malloc(n));
     var to_free = [];
-    var do_free = () => { out.forEach(_free); to_free.forEach(f => f.free()); };
+    var do_free = () => { out.forEach(this.wasm._free); to_free.forEach(f => f.free()); };
     ${paramsToPtr}
-    if (_futhark_entry_${func_name}(this.ctx, ...out, ${ins}) > 0) {
+    if (this.wasm._futhark_entry_${func_name}(this.ctx, ...out, ${ins}) > 0) {
       do_free();
       throw this.get_error();
     }
@@ -215,7 +223,7 @@ makeResult i typ =
       then "this.new_" ++ signature ++ "_from_ptr(" ++ readout ++ ");"
       else
         if isOpaque typ
-          then "new FutharkOpaque(this.ctx, " ++ readout ++ ", _futhark_free_" ++ typ ++ ");"
+          then "new FutharkOpaque(this, " ++ readout ++ ", this.wasm._futhark_free_" ++ typ ++ ");"
           else readout ++ if typ == "bool" then "!==0;" else ";"
   where
     res = "out[" ++ show i ++ "]"
@@ -274,18 +282,18 @@ typeShift typ =
 typeHeap :: String -> String
 typeHeap typ =
   case typ of
-    "i8" -> "HEAP8"
-    "i16" -> "HEAP16"
-    "i32" -> "HEAP32"
-    "i64" -> "HEAP64"
-    "u8" -> "HEAPU8"
-    "u16" -> "HEAPU16"
-    "u32" -> "HEAPU32"
-    "u64" -> "(new BigUint64Array(HEAP64.buffer))"
-    "f32" -> "HEAPF32"
-    "f64" -> "HEAPF64"
-    "bool" -> "HEAP8"
-    _ -> "HEAP32"
+    "i8" -> "this.wasm.HEAP8"
+    "i16" -> "this.wasm.HEAP16"
+    "i32" -> "this.wasm.HEAP32"
+    "i64" -> "this.wasm.HEAP64"
+    "u8" -> "this.wasm.HEAPU8"
+    "u16" -> "this.wasm.HEAPU16"
+    "u32" -> "this.wasm.HEAPU32"
+    "u64" -> "(new BigUint64Array(this.wasm.HEAP64.buffer))"
+    "f32" -> "this.wasm.HEAPF32"
+    "f64" -> "this.wasm.HEAPF64"
+    "bool" -> "this.wasm.HEAP8"
+    _ -> "this.wasm.HEAP32"
 
 toFutharkArray :: String -> String
 toFutharkArray typ =
@@ -296,15 +304,15 @@ toFutharkArray typ =
   }
   ${new}(array, ${dims}) {
     console.assert(array.length === ${dims_multiplied}, 'len=%s,dims=%s', array.length, [${dims}].toString());
-      var copy = _malloc(array.length << ${shift});
+      var copy = this.wasm._malloc(array.length << ${shift});
       ${heapType}.set(array, copy >> ${shift});
       var ptr = ${fnew}(this.ctx, copy, ${bigint_dims});
-      _free(copy);
+      this.wasm._free(copy);
       return this.${new}_from_ptr(ptr);
     }
 
     ${new}_from_ptr(ptr) {
-      return new FutharkArray(this.ctx, ptr, ${args});
+      return new FutharkArray(this, ptr, ${args});
     }
     |]
   where
@@ -314,12 +322,12 @@ toFutharkArray typ =
     signature = ftype ++ "_" ++ show d ++ "d"
     new = T.pack $ "new_" ++ signature
     fnew = T.pack $ "_futhark_new_" ++ signature
-    fshape = "_futhark_shape_" ++ signature
-    fvalues = "_futhark_values_raw_" ++ signature
-    ffree = "_futhark_free_" ++ signature
+    fshape = "this.wasm._futhark_shape_" ++ signature
+    fvalues = "this.wasm._futhark_values_raw_" ++ signature
+    ffree = "this.wasm._futhark_free_" ++ signature
     arraynd = "array" ++ show d ++ "d"
     shift = T.pack $ show (typeShift ftype)
-    heapType = T.pack $ typeHeap ftype
+    heapType = T.pack heap
     arraynd_flat = if d > 1 then arraynd ++ ".flat()" else arraynd
     arraynd_dims = intercalate ", " [arraynd ++ mult i "[0]" ++ ".length" | i <- [0 .. d -1]]
     dims = T.pack $ intercalate ", " ["d" ++ show i | i <- [0 .. d -1]]
@@ -334,8 +342,11 @@ runServer =
   T.unpack
     [text|
    Module.onRuntimeInitialized = () => {
-     var context = new FutharkContext();
+     var context = new FutharkContext(Module);
      var server = new Server(context);
      server.run();
    }
   |]
+
+libraryExports :: String
+libraryExports = "export {newFutharkContext, FutharkContext, FutharkArray, FutharkOpaque};"

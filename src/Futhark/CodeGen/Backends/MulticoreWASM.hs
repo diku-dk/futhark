@@ -8,6 +8,7 @@
 module Futhark.CodeGen.Backends.MulticoreWASM
   ( compileProg,
     runServer,
+    libraryExports,
     GC.CParts (..),
     GC.asLibrary,
     GC.asExecutable,

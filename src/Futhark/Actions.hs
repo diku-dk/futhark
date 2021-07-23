@@ -315,8 +315,18 @@ runEMCC cpath outpath classpath cflags_def ldflags expfuns lib = do
         "emcc"
         ( [cpath, "-o", outpath]
             ++ ["-lnodefs.js"]
-            ++ ["-s", "--post-js", classpath]
-            ++ (if lib then ["-s", "EXPORT_NAME=loadFuthark", "-s", "MODULARIZE=1", "-s", "EXPORT_ES6=1"] else [])
+            ++ ["-s", "--extern-post-js", classpath]
+            ++ ( if lib
+                   then
+                     [ "-s",
+                       "EXPORT_NAME=loadWASM",
+                       "-s",
+                       "MODULARIZE=1",
+                       "-s",
+                       "EXPORT_ES6=1"
+                     ]
+                   else []
+               )
             ++ ["-s", "WASM_BIGINT"]
             ++ cmdCFLAGS cflags_def
             ++ cmdEMCFLAGS [""]
@@ -354,6 +364,7 @@ compileCtoWASMAction fcfg mode outpath =
       case mode of
         ToLibrary -> do
           writeLibs cprog jsprog
+          liftIO $ appendFile classpath SequentialWASM.libraryExports
           runEMCC cpath mjspath classpath ["-O3", "-msimd128"] ["-lm"] exps True
         _ -> do
           -- Non-server executables are not supported.
@@ -385,6 +396,7 @@ compileMulticoreToWASMAction fcfg mode outpath =
       case mode of
         ToLibrary -> do
           writeLibs cprog jsprog
+          liftIO $ appendFile classpath MulticoreWASM.libraryExports
           runEMCC cpath mjspath classpath ["-O3", "-msimd128"] ["-lm", "-pthread"] exps True
         _ -> do
           -- Non-server executables are not supported.
