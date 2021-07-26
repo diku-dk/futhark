@@ -366,3 +366,30 @@ Now you should be able to run the `Game of Life`_ example.
 .. _`PyOpenCL repository`: https://github.com/pyopencl/pyopencl
 .. _`Game of Life`: https://github.com/diku-dk/futhark-benchmarks/tree/master/misc/life
 .. _`issues page`: https://github.com/diku-dk/futhark/issues
+
+Futhark with Nix
+----------------
+
+Futhark mostly works fine with Nix and `NixOS
+<https://nixos.org/>`_, but when using OpenCL you may need to make
+more packages available in your environment.  This is regardless of
+whether you are using the ``futhark`` package from Nixpkgs or one you
+have installed otherwise.
+
+* On NixOS, for OpenCL, you should import ``opencl-headers`` and
+  ``opencl-icd``.  You also need some form of OpenCL backend.  If you
+  have an AMD GPU and use ROCm, you may also need
+  ``rocm-opencl-runtime``.
+
+* On NixOS, for CUDA (and probably also OpenCL on NVIDIA GPUs), you
+  need ``cudatoolkit``.  However, ``cudatoolkit`` does not appear to
+  provide ``libcuda.so`` and similar libraries.  These are instead
+  provided in an ``nvidia_x11`` package that is specific to some
+  kernel version, e.g. ``linuxPackages_5_4.nvidia_x11``.  You will
+  need this as well.
+
+* On macOS, for OpenCL, you need ``darwin.apple_sdk.frameworks.OpenCL``.
+
+These can be easily made available with e.g::
+
+  nix-shell -p opencl-headers -p opencl-icd

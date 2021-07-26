@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 #
 # See the impact of a Futhark commit compared to the previous one we
 # have benchmarking for.

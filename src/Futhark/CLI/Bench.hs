@@ -21,7 +21,7 @@ import qualified Data.Text as T
 import Futhark.Bench
 import Futhark.Server
 import Futhark.Test
-import Futhark.Util (fancyTerminal, maxinum, maybeNth, pmapIO)
+import Futhark.Util (atMostChars, fancyTerminal, maxinum, maybeNth, pmapIO)
 import Futhark.Util.Console
 import Futhark.Util.Options
 import System.Console.ANSI (clearLine)
@@ -92,15 +92,15 @@ runBenchmarks opts paths = do
 
   futhark <- FutharkExe . compFuthark <$> compileOptions opts
 
-  results <-
-    concat
-      <$> mapM
-        (runBenchmark opts futhark)
-        (sortBy (comparing fst) compiled_benchmarks)
+  maybe_results <-
+    mapM
+      (runBenchmark opts futhark)
+      (sortBy (comparing fst) compiled_benchmarks)
+  let results = concat $ catMaybes maybe_results
   case optJSON opts of
     Nothing -> return ()
     Just file -> LBS.writeFile file $ encodeBenchResults results
-  when (anyFailed results) exitFailure
+  when (any isNothing maybe_results || anyFailed results) exitFailure
   where
     ignored f = any (`match` f) $ optIgnoreFiles opts
 
@@ -165,7 +165,7 @@ compileBenchmark opts (program, spec) =
   where
     hasRuns (InputOutputs _ runs) = not $ null runs
 
-withProgramServer :: FilePath -> FilePath -> [String] -> (Server -> IO a) -> IO a
+withProgramServer :: FilePath -> FilePath -> [String] -> (Server -> IO a) -> IO (Maybe a)
 withProgramServer program runner extra_options f = do
   -- Explicitly prefixing the current directory is necessary for
   -- readProcessWithExitCode to find the binary when binOutputf has
@@ -177,14 +177,15 @@ withProgramServer program runner extra_options f = do
         | null runner = (binpath, extra_options)
         | otherwise = (runner, binpath : extra_options)
 
-  liftIO $ withServer to_run to_run_args f `catch` onError
+  liftIO $ (Just <$> withServer (futharkServerCfg to_run to_run_args) f) `catch` onError
   where
-    onError :: SomeException -> IO a
+    onError :: SomeException -> IO (Maybe a)
     onError e = do
-      hPrint stderr e
-      exitFailure
+      putStrLn $ inBold $ inRed $ "\nFailed to run " ++ program
+      putStrLn $ inRed $ show e
+      pure Nothing
 
-runBenchmark :: BenchOptions -> FutharkExe -> (FilePath, [InputOutputs]) -> IO [BenchResult]
+runBenchmark :: BenchOptions -> FutharkExe -> (FilePath, [InputOutputs]) -> IO (Maybe [BenchResult])
 runBenchmark opts futhark (program, cases) = do
   (tuning_opts, tuning_desc) <- determineTuning (optTuning opts) program
   let runopts = "-L" : optExtraOptions opts ++ tuning_opts
@@ -192,7 +193,7 @@ runBenchmark opts futhark (program, cases) = do
     mapM (forInputOutputs server tuning_desc) $ filter relevant cases
   where
     forInputOutputs server tuning_desc (InputOutputs entry_name runs) = do
-      putStr $ inBold $ "\nResults for " ++ program' ++ tuning_desc ++ ":\n"
+      putStr $ inBold $ "\n" ++ program' ++ tuning_desc ++ ":\n"
       BenchResult program' . catMaybes
         <$> mapM (runBenchmarkCase server opts futhark program entry_name pad_to) runs
       where
@@ -203,7 +204,7 @@ runBenchmark opts futhark (program, cases) = do
 
     relevant = maybe (const True) (==) (optEntryPoint opts) . T.unpack . iosEntryPoint
 
-    pad_to = foldl max 0 $ concatMap (map (length . runDescription) . iosTestRuns) cases
+    pad_to = foldl max 0 $ concatMap (map (length . atMostChars 40 . runDescription) . iosTestRuns) cases
 
 runOptions :: (Int -> IO ()) -> BenchOptions -> RunOptions
 runOptions f opts =
@@ -216,7 +217,7 @@ runOptions f opts =
 
 progressBar :: Int -> Int -> Int -> String
 progressBar cur bound steps =
-  "[" ++ map cell [1 .. steps] ++ "] " ++ show cur ++ "/" ++ show bound
+  "|" ++ map cell [1 .. steps] ++ "| " ++ show cur ++ "/" ++ show bound
   where
     step_size :: Double
     step_size = fromIntegral bound / fromIntegral steps
@@ -229,28 +230,37 @@ progressBar cur bound steps =
     cell i
       | i' * step_size <= cur' = char 9
       | otherwise =
-        char
-          ( floor
-              ( ((cur' - (i' -1) * step_size) * num_chars)
-                  / step_size
-              )
-          )
+        char (floor (((cur' - (i' -1) * step_size) * num_chars) / step_size))
       where
         i' = fromIntegral i
 
 descString :: String -> Int -> String
 descString desc pad_to = desc ++ ": " ++ replicate (pad_to - length desc) ' '
 
+interimResult :: Int -> Int -> Int -> String
+interimResult us_sum i runs =
+  printf "%10.0fμs " avg ++ progressBar i runs 10
+  where
+    avg :: Double
+    avg = fromIntegral us_sum / fromIntegral i
+
 mkProgressPrompt :: Int -> Int -> String -> IO (Maybe Int -> IO ())
 mkProgressPrompt runs pad_to dataset_desc
   | fancyTerminal = do
-    count <- newIORef (0 :: Int)
+    count <- newIORef (0, 0)
     return $ \us -> do
       putStr "\r" -- Go to start of line.
-      i <- readIORef count
-      let i' = if isJust us then i + 1 else i
-      writeIORef count i'
-      putStr $ descString dataset_desc pad_to ++ progressBar i' runs 10
+      let p s =
+            putStr $
+              descString (atMostChars 40 dataset_desc) pad_to ++ s
+      (us_sum, i) <- readIORef count
+      case us of
+        Nothing -> p $ replicate 13 ' ' ++ progressBar i runs 10
+        Just us' -> do
+          let us_sum' = us_sum + us'
+              i' = i + 1
+          writeIORef count (us_sum', i')
+          p $ interimResult us_sum' i' runs
       putStr " " -- Just to move the cursor away from the progress bar.
       hFlush stdout
   | otherwise = do
@@ -259,17 +269,19 @@ mkProgressPrompt runs pad_to dataset_desc
     return $ const $ return ()
 
 reportResult :: [RunResult] -> IO ()
-reportResult results = do
-  let runtimes = map (fromIntegral . runMicroseconds) results
-      avg = sum runtimes / fromIntegral (length runtimes)
-      rsd = stddevp runtimes / mean runtimes :: Double
-  putStrLn $
-    printf
-      "%10.0fμs (RSD: %.3f; min: %3.0f%%; max: %+3.0f%%)"
-      avg
-      rsd
-      ((minimum runtimes / avg - 1) * 100)
-      ((maxinum runtimes / avg - 1) * 100)
+reportResult = putStrLn . reportString
+  where
+    reportString results =
+      printf
+        "%10.0fμs (RSD: %.3f; min: %3.0f%%; max: %+3.0f%%)"
+        avg
+        rsd
+        ((minimum runtimes / avg - 1) * 100)
+        ((maxinum runtimes / avg - 1) * 100)
+      where
+        runtimes = map (fromIntegral . runMicroseconds) results
+        avg = sum runtimes / fromIntegral (length runtimes)
+        rsd = stddevp runtimes / mean runtimes :: Double
 
 runBenchmarkCase ::
   Server ->
@@ -309,12 +321,13 @@ runBenchmarkCase server opts futhark program entry pad_to tr@(TestRun _ input_sp
 
   case res of
     Left err -> do
-      liftIO $ putStrLn $ descString dataset_desc pad_to
+      when fancyTerminal $
+        liftIO $ putStrLn $ descString (atMostChars 40 dataset_desc) pad_to
       liftIO $ putStrLn $ inRed $ T.unpack err
       return $ Just $ DataResult dataset_desc $ Left err
     Right (runtimes, errout) -> do
       when fancyTerminal $
-        putStr $ descString dataset_desc pad_to
+        putStr $ descString (atMostChars 40 dataset_desc) pad_to
 
       reportResult runtimes
       Result runtimes (getMemoryUsage errout) errout

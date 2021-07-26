@@ -65,7 +65,7 @@ primTypeToCType :: PrimType -> C.Type
 primTypeToCType (IntType t) = intTypeToCType t
 primTypeToCType (FloatType t) = floatTypeToCType t
 primTypeToCType Bool = [C.cty|typename bool|]
-primTypeToCType Cert = [C.cty|typename bool|]
+primTypeToCType Unit = [C.cty|typename bool|]
 
 -- | The C type corresponding to a primitive type.  Integers are
 -- assumed to have the specified sign.
@@ -127,11 +127,11 @@ opaqueName s vds = "opaque_" ++ hash (zipWith xor [0 ..] $ map ord (s ++ concatM
 -- | The type used to expose a Futhark value in the C API.  A pointer
 -- in the case of arrays and opaques.
 externalValueType :: ExternalValue -> C.Type
-externalValueType (OpaqueValue desc vds) =
+externalValueType (OpaqueValue _ desc vds) =
   [C.cty|struct $id:("futhark_" ++ opaqueName desc vds)*|]
-externalValueType (TransparentValue (ArrayValue _ _ pt signed shape)) =
+externalValueType (TransparentValue _ (ArrayValue _ _ pt signed shape)) =
   [C.cty|struct $id:("futhark_" ++ arrayName pt signed (length shape))*|]
-externalValueType (TransparentValue (ScalarValue pt signed _)) =
+externalValueType (TransparentValue _ (ScalarValue pt signed _)) =
   signedPrimTypeToCType signed pt
 
 -- | Return an expression multiplying together the given expressions.
@@ -174,7 +174,7 @@ instance C.ToExp PrimValue where
   toExp (FloatValue v) = C.toExp v
   toExp (BoolValue True) = C.toExp (1 :: Int8)
   toExp (BoolValue False) = C.toExp (0 :: Int8)
-  toExp Checked = C.toExp (1 :: Int8)
+  toExp UnitValue = C.toExp (1 :: Int8)
 
 instance C.ToExp SubExp where
   toExp (Var v) = C.toExp v
@@ -354,6 +354,25 @@ cIntOps =
 cIntPrimFuns :: [C.Definition]
 cIntPrimFuns =
   [C.cunit|
+   static typename int8_t abs8(typename int8_t x) {
+     return abs(x);
+   }
+   static typename int16_t abs16(typename int16_t x) {
+     return abs(x);
+   }
+   static typename int32_t abs32(typename int32_t x) {
+     return abs(x);
+   }
+$esc:("#if defined(__OPENCL_VERSION__)")
+   static typename int64_t abs64(typename int64_t x) {
+     return abs(x);
+   }
+$esc:("#else")
+   static typename int64_t abs64(typename int64_t x) {
+     return llabs(x);
+   }
+$esc:("#endif")
+
 $esc:("#if defined(__OPENCL_VERSION__)")
    static typename int32_t $id:(funName' "popc8") (typename int8_t x) {
       return popcount(x);
@@ -457,11 +476,25 @@ $esc:("#else")
      typename uint64_t bb = b;
      return (aa * bb) >> 32;
     }
-   static typename uint64_t $id:(funName' "mul_hi64") (typename uint64_t a, typename uint64_t b) {
-     typename __uint128_t aa = a;
-     typename __uint128_t bb = b;
-     return (aa * bb) >> 64;
-    }
+   $esc:("#ifdef __EMSCRIPTEN__")
+      static typename uint64_t $id:(funName' "mul_hi64") (typename uint64_t x, typename uint64_t y) {
+        typename uint64_t a = x >> 32, b = x & 0xffffffff;
+        typename uint64_t c = y >> 32, d = y & 0xffffffff;
+        typename uint64_t ac = a * c;
+        typename uint64_t bc = b * c;
+        typename uint64_t ad = a * d;
+        typename uint64_t bd = b * d;
+        typename uint64_t mid34 = (bd >> 32) + (bc & 0xffffffff) + (ad & 0xffffffff);
+        typename uint64_t upper64 = ac + (bc >> 32) + (ad >> 32) + (mid34 >> 32);
+        return upper64;
+       }
+   $esc:("#else")
+      static typename uint64_t $id:(funName' "mul_hi64") (typename uint64_t a, typename uint64_t b) {
+        typename __uint128_t aa = a;
+        typename __uint128_t bb = b;
+        return (aa * bb) >> 64;
+       }
+   $esc:("#endif")
 $esc:("#endif")
 
 $esc:("#if defined(__OPENCL_VERSION__)")
@@ -635,7 +668,7 @@ cFloatConvOps :: [C.Definition]
     convOp s from to = s ++ "_" ++ pretty from ++ "_" ++ pretty to
 
     mkOps =
-      [mkFDiv, mkFAdd, mkFSub, mkFMul, mkFMin, mkFMax, mkPow, mkCmpLt, mkCmpLe]
+      [mkFDiv, mkFAdd, mkFSub, mkFMul, mkCmpLt, mkCmpLe]
         ++ map (mkFPConvIF "sitofp") [minBound .. maxBound]
         ++ map (mkFPConvUF "uitofp") [minBound .. maxBound]
         ++ map (flip $ mkFPConvFI "fptosi") [minBound .. maxBound]
@@ -645,15 +678,8 @@ cFloatConvOps :: [C.Definition]
     mkFAdd = simpleFloatOp "fadd" [C.cexp|x + y|]
     mkFSub = simpleFloatOp "fsub" [C.cexp|x - y|]
     mkFMul = simpleFloatOp "fmul" [C.cexp|x * y|]
-    mkFMin = simpleFloatOp "fmin" [C.cexp|fmin(x, y)|]
-    mkFMax = simpleFloatOp "fmax" [C.cexp|fmax(x, y)|]
     mkCmpLt = floatCmpOp "cmplt" [C.cexp|x < y|]
     mkCmpLe = floatCmpOp "cmple" [C.cexp|x <= y|]
-
-    mkPow Float32 =
-      [C.cedecl|static inline float fpow32(float x, float y) { return pow(x, y); }|]
-    mkPow Float64 =
-      [C.cedecl|static inline double fpow64(double x, double y) { return pow(x, y); }|]
 
     mkFPConv from_f to_f s from_t to_t =
       [C.cedecl|static inline $ty:to_ct
@@ -680,6 +706,34 @@ cFloatConvOps :: [C.Definition]
 cFloat32Funs :: [C.Definition]
 cFloat32Funs =
   [C.cunit|
+$esc:("#ifdef __OPENCL_VERSION__")
+    static inline float fabs32(float x) {
+      return fabs(x);
+    }
+    static inline float fmax32(float x, float y) {
+      return fmax(x, y);
+    }
+    static inline float fmin32(float x, float y) {
+      return fmin(x, y);
+    }
+    static inline float fpow32(float x, float y) {
+      return pow(x, y);
+    }
+$esc:("#else")
+    static inline float fabs32(float x) {
+      return fabsf(x);
+    }
+    static inline float fmax32(float x, float y) {
+      return fmaxf(x, y);
+    }
+    static inline float fmin32(float x, float y) {
+      return fminf(x, y);
+    }
+    static inline float fpow32(float x, float y) {
+      return powf(x, y);
+    }
+$esc:("#endif")
+
     static inline typename bool $id:(funName' "isnan32")(float x) {
       return isnan(x);
     }
@@ -759,6 +813,10 @@ $esc:("#ifdef __OPENCL_VERSION__")
 
     static inline float $id:(funName' "atan2_32")(float x, float y) {
       return atan2(x,y);
+    }
+
+    static inline float $id:(funName' "hypot32")(float x, float y) {
+      return hypot(x,y);
     }
 
     static inline float $id:(funName' "gamma32")(float x) {
@@ -863,6 +921,10 @@ $esc:("#else")
       return atan2f(x,y);
     }
 
+    static inline float $id:(funName' "hypot32")(float x, float y) {
+      return hypotf(x,y);
+    }
+
     static inline float $id:(funName' "gamma32")(float x) {
       return tgammaf(x);
     }
@@ -919,6 +981,22 @@ $esc:("#endif")
 cFloat64Funs :: [C.Definition]
 cFloat64Funs =
   [C.cunit|
+    static inline double fabs64(double x) {
+      return fabs(x);
+    }
+
+    static inline float fmax64(double x, double y) {
+      return fmax(x, y);
+    }
+
+    static inline float fmin64(double x, double y) {
+      return fmin(x, y);
+    }
+
+    static inline double fpow64(double x, double y) {
+      return pow(x, y);
+    }
+
     static inline double $id:(funName' "log64")(double x) {
       return log(x);
     }
@@ -989,6 +1067,10 @@ cFloat64Funs =
 
     static inline double $id:(funName' "atan2_64")(double x, double y) {
       return atan2(x,y);
+    }
+
+    static inline double $id:(funName' "hypot64")(double x, double y) {
+      return hypot(x,y);
     }
 
     static inline double $id:(funName' "gamma64")(double x) {
@@ -1081,7 +1163,7 @@ typeStr :: Signedness -> PrimType -> String
 typeStr sign pt =
   case (sign, pt) of
     (_, Bool) -> "bool"
-    (_, Cert) -> "bool"
+    (_, Unit) -> "bool"
     (_, FloatType Float32) -> " f32"
     (_, FloatType Float64) -> " f64"
     (TypeDirect, IntType Int8) -> "  i8"
@@ -1097,7 +1179,7 @@ storeValueHeader :: Signedness -> PrimType -> Int -> C.Exp -> C.Exp -> [C.Stm]
 storeValueHeader sign pt rank shape dest =
   [C.cstms|
           *$exp:dest++ = 'b';
-          *$exp:dest++ = 1;
+          *$exp:dest++ = 2;
           *$exp:dest++ = $int:rank;
           memcpy($exp:dest, $string:(typeStr sign pt), 4);
           $exp:dest += 4;
@@ -1115,7 +1197,7 @@ loadValueHeader :: Signedness -> PrimType -> Int -> C.Exp -> C.Exp -> [C.Stm]
 loadValueHeader sign pt rank shape src =
   [C.cstms|
      err |= (*$exp:src++ != 'b');
-     err |= (*$exp:src++ != 1);
+     err |= (*$exp:src++ != 2);
      err |= (*$exp:src++ != $exp:rank);
      err |= (memcmp($exp:src, $string:(typeStr sign pt), 4) != 0);
      $exp:src += 4;

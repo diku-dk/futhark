@@ -41,7 +41,7 @@ data ASTMapper m = ASTMapper
     mapOnName :: VName -> m VName,
     mapOnQualName :: QualName VName -> m (QualName VName),
     mapOnStructType :: StructType -> m StructType,
-    mapOnPatternType :: PatternType -> m PatternType
+    mapOnPatType :: PatType -> m PatType
   }
 
 -- | An 'ASTMapper' that just leaves its input unchanged.
@@ -52,7 +52,7 @@ identityMapper =
       mapOnName = return,
       mapOnQualName = return,
       mapOnStructType = return,
-      mapOnPatternType = return
+      mapOnPatType = return
     }
 
 -- | The class of things that we can map an 'ASTMapper' across.
@@ -63,18 +63,69 @@ class ASTMappable x where
   -- into subexpressions.  The mapping is done left-to-right.
   astMap :: Monad m => ASTMapper m -> x -> m x
 
+instance ASTMappable (AppExpBase Info VName) where
+  astMap tv (Range start next end loc) =
+    Range <$> mapOnExp tv start <*> traverse (mapOnExp tv) next
+      <*> traverse (mapOnExp tv) end
+      <*> pure loc
+  astMap tv (If c texp fexp loc) =
+    If <$> mapOnExp tv c <*> mapOnExp tv texp <*> mapOnExp tv fexp <*> pure loc
+  astMap tv (Match e cases loc) =
+    Match <$> mapOnExp tv e <*> astMap tv cases <*> pure loc
+  astMap tv (Apply f arg d loc) =
+    Apply <$> mapOnExp tv f <*> mapOnExp tv arg <*> pure d <*> pure loc
+  astMap tv (LetPat sizes pat e body loc) =
+    LetPat <$> astMap tv sizes <*> astMap tv pat <*> mapOnExp tv e <*> mapOnExp tv body <*> pure loc
+  astMap tv (LetFun name (fparams, params, ret, t, e) body loc) =
+    LetFun <$> mapOnName tv name
+      <*> ( (,,,,) <$> mapM (astMap tv) fparams <*> mapM (astMap tv) params
+              <*> traverse (astMap tv) ret
+              <*> traverse (mapOnStructType tv) t
+              <*> mapOnExp tv e
+          )
+      <*> mapOnExp tv body
+      <*> pure loc
+  astMap tv (LetWith dest src idxexps vexp body loc) =
+    LetWith
+      <$> astMap tv dest
+      <*> astMap tv src
+      <*> mapM (astMap tv) idxexps
+      <*> mapOnExp tv vexp
+      <*> mapOnExp tv body
+      <*> pure loc
+  astMap tv (Coerce e tdecl loc) =
+    Coerce <$> mapOnExp tv e <*> astMap tv tdecl <*> pure loc
+  astMap tv (BinOp (fname, fname_loc) t (x, Info (xt, xext)) (y, Info (yt, yext)) loc) =
+    BinOp <$> ((,) <$> mapOnQualName tv fname <*> pure fname_loc)
+      <*> traverse (mapOnPatType tv) t
+      <*> ( (,) <$> mapOnExp tv x
+              <*> (Info <$> ((,) <$> mapOnStructType tv xt <*> pure xext))
+          )
+      <*> ( (,) <$> mapOnExp tv y
+              <*> (Info <$> ((,) <$> mapOnStructType tv yt <*> pure yext))
+          )
+      <*> pure loc
+  astMap tv (DoLoop sparams mergepat mergeexp form loopbody loc) =
+    DoLoop <$> mapM (mapOnName tv) sparams <*> astMap tv mergepat
+      <*> mapOnExp tv mergeexp
+      <*> astMap tv form
+      <*> mapOnExp tv loopbody
+      <*> pure loc
+  astMap tv (Index arr idxexps loc) =
+    Index <$> mapOnExp tv arr <*> mapM (astMap tv) idxexps <*> pure loc
+
 instance ASTMappable (ExpBase Info VName) where
   astMap tv (Var name t loc) =
-    Var <$> mapOnQualName tv name <*> traverse (mapOnPatternType tv) t
+    Var <$> mapOnQualName tv name <*> traverse (mapOnPatType tv) t
       <*> pure loc
   astMap _ (Literal val loc) =
     pure $ Literal val loc
   astMap _ (StringLit vs loc) =
     pure $ StringLit vs loc
   astMap tv (IntLit val t loc) =
-    IntLit val <$> traverse (mapOnPatternType tv) t <*> pure loc
+    IntLit val <$> traverse (mapOnPatType tv) t <*> pure loc
   astMap tv (FloatLit val t loc) =
-    FloatLit val <$> traverse (mapOnPatternType tv) t <*> pure loc
+    FloatLit val <$> traverse (mapOnPatType tv) t <*> pure loc
   astMap tv (Parens e loc) =
     Parens <$> mapOnExp tv e <*> pure loc
   astMap tv (QualParens (name, nameloc) e loc) =
@@ -86,63 +137,11 @@ instance ASTMappable (ExpBase Info VName) where
   astMap tv (RecordLit fields loc) =
     RecordLit <$> astMap tv fields <*> pure loc
   astMap tv (ArrayLit els t loc) =
-    ArrayLit <$> mapM (mapOnExp tv) els <*> traverse (mapOnPatternType tv) t <*> pure loc
-  astMap tv (Range start next end (t, ext) loc) =
-    Range <$> mapOnExp tv start <*> traverse (mapOnExp tv) next
-      <*> traverse (mapOnExp tv) end
-      <*> ((,) <$> traverse (mapOnPatternType tv) t <*> pure ext)
-      <*> pure loc
+    ArrayLit <$> mapM (mapOnExp tv) els <*> traverse (mapOnPatType tv) t <*> pure loc
   astMap tv (Ascript e tdecl loc) =
     Ascript <$> mapOnExp tv e <*> astMap tv tdecl <*> pure loc
-  astMap tv (Coerce e tdecl (t, ext) loc) =
-    Coerce <$> mapOnExp tv e <*> astMap tv tdecl
-      <*> ((,) <$> traverse (mapOnPatternType tv) t <*> pure ext)
-      <*> pure loc
-  astMap tv (BinOp (fname, fname_loc) t (x, Info (xt, xext)) (y, Info (yt, yext)) (Info rt) ext loc) =
-    BinOp <$> ((,) <$> mapOnQualName tv fname <*> pure fname_loc)
-      <*> traverse (mapOnPatternType tv) t
-      <*> ( (,) <$> mapOnExp tv x
-              <*> (Info <$> ((,) <$> mapOnStructType tv xt <*> pure xext))
-          )
-      <*> ( (,) <$> mapOnExp tv y
-              <*> (Info <$> ((,) <$> mapOnStructType tv yt <*> pure yext))
-          )
-      <*> (Info <$> mapOnPatternType tv rt)
-      <*> pure ext
-      <*> pure loc
   astMap tv (Negate x loc) =
     Negate <$> mapOnExp tv x <*> pure loc
-  astMap tv (If c texp fexp (t, ext) loc) =
-    If <$> mapOnExp tv c <*> mapOnExp tv texp <*> mapOnExp tv fexp
-      <*> ((,) <$> traverse (mapOnPatternType tv) t <*> pure ext)
-      <*> pure loc
-  astMap tv (Apply f arg d (Info t, ext) loc) =
-    Apply <$> mapOnExp tv f <*> mapOnExp tv arg <*> pure d
-      <*> ((,) <$> (Info <$> mapOnPatternType tv t) <*> pure ext)
-      <*> pure loc
-  astMap tv (LetPat pat e body (t, ext) loc) =
-    LetPat <$> astMap tv pat <*> mapOnExp tv e <*> mapOnExp tv body
-      <*> ((,) <$> traverse (mapOnPatternType tv) t <*> pure ext)
-      <*> pure loc
-  astMap tv (LetFun name (fparams, params, ret, t, e) body body_t loc) =
-    LetFun <$> mapOnName tv name
-      <*> ( (,,,,) <$> mapM (astMap tv) fparams <*> mapM (astMap tv) params
-              <*> traverse (astMap tv) ret
-              <*> traverse (mapOnStructType tv) t
-              <*> mapOnExp tv e
-          )
-      <*> mapOnExp tv body
-      <*> traverse (mapOnPatternType tv) body_t
-      <*> pure loc
-  astMap tv (LetWith dest src idxexps vexp body t loc) =
-    LetWith
-      <$> astMap tv dest
-      <*> astMap tv src
-      <*> mapM (astMap tv) idxexps
-      <*> mapOnExp tv vexp
-      <*> mapOnExp tv body
-      <*> traverse (mapOnPatternType tv) t
-      <*> pure loc
   astMap tv (Update src slice v loc) =
     Update <$> mapOnExp tv src <*> mapM (astMap tv) slice
       <*> mapOnExp tv v
@@ -150,14 +149,10 @@ instance ASTMappable (ExpBase Info VName) where
   astMap tv (RecordUpdate src fs v (Info t) loc) =
     RecordUpdate <$> mapOnExp tv src <*> pure fs
       <*> mapOnExp tv v
-      <*> (Info <$> mapOnPatternType tv t)
+      <*> (Info <$> mapOnPatType tv t)
       <*> pure loc
   astMap tv (Project field e t loc) =
-    Project field <$> mapOnExp tv e <*> traverse (mapOnPatternType tv) t <*> pure loc
-  astMap tv (Index arr idxexps (t, ext) loc) =
-    Index <$> mapOnExp tv arr <*> mapM (astMap tv) idxexps
-      <*> ((,) <$> traverse (mapOnPatternType tv) t <*> pure ext)
-      <*> pure loc
+    Project field <$> mapOnExp tv e <*> traverse (mapOnPatType tv) t <*> pure loc
   astMap tv (Assert e1 e2 desc loc) =
     Assert <$> mapOnExp tv e1 <*> mapOnExp tv e2 <*> pure desc <*> pure loc
   astMap tv (Lambda params body ret t loc) =
@@ -168,49 +163,40 @@ instance ASTMappable (ExpBase Info VName) where
       <*> pure loc
   astMap tv (OpSection name t loc) =
     OpSection <$> mapOnQualName tv name
-      <*> traverse (mapOnPatternType tv) t
+      <*> traverse (mapOnPatType tv) t
       <*> pure loc
   astMap tv (OpSectionLeft name t arg (Info (pa, t1a, argext), Info (pb, t1b)) (t2, retext) loc) =
     OpSectionLeft <$> mapOnQualName tv name
-      <*> traverse (mapOnPatternType tv) t
+      <*> traverse (mapOnPatType tv) t
       <*> mapOnExp tv arg
       <*> ( (,)
               <$> (Info <$> ((pa,,) <$> mapOnStructType tv t1a <*> pure argext))
               <*> (Info <$> ((pb,) <$> mapOnStructType tv t1b))
           )
-      <*> ((,) <$> traverse (mapOnPatternType tv) t2 <*> pure retext)
+      <*> ((,) <$> traverse (mapOnPatType tv) t2 <*> pure retext)
       <*> pure loc
   astMap tv (OpSectionRight name t arg (Info (pa, t1a), Info (pb, t1b, argext)) t2 loc) =
     OpSectionRight <$> mapOnQualName tv name
-      <*> traverse (mapOnPatternType tv) t
+      <*> traverse (mapOnPatType tv) t
       <*> mapOnExp tv arg
       <*> ( (,)
               <$> (Info <$> ((pa,) <$> mapOnStructType tv t1a))
               <*> (Info <$> ((pb,,) <$> mapOnStructType tv t1b <*> pure argext))
           )
-      <*> traverse (mapOnPatternType tv) t2
+      <*> traverse (mapOnPatType tv) t2
       <*> pure loc
   astMap tv (ProjectSection fields t loc) =
-    ProjectSection fields <$> traverse (mapOnPatternType tv) t <*> pure loc
+    ProjectSection fields <$> traverse (mapOnPatType tv) t <*> pure loc
   astMap tv (IndexSection idxs t loc) =
     IndexSection <$> mapM (astMap tv) idxs
-      <*> traverse (mapOnPatternType tv) t
-      <*> pure loc
-  astMap tv (DoLoop sparams mergepat mergeexp form loopbody (Info (ret, ext)) loc) =
-    DoLoop <$> mapM (mapOnName tv) sparams <*> astMap tv mergepat
-      <*> mapOnExp tv mergeexp
-      <*> astMap tv form
-      <*> mapOnExp tv loopbody
-      <*> (Info <$> ((,) <$> mapOnPatternType tv ret <*> pure ext))
+      <*> traverse (mapOnPatType tv) t
       <*> pure loc
   astMap tv (Constr name es ts loc) =
-    Constr name <$> traverse (mapOnExp tv) es <*> traverse (mapOnPatternType tv) ts <*> pure loc
-  astMap tv (Match e cases (t, ext) loc) =
-    Match <$> mapOnExp tv e <*> astMap tv cases
-      <*> ((,) <$> traverse (mapOnPatternType tv) t <*> pure ext)
-      <*> pure loc
+    Constr name <$> traverse (mapOnExp tv) es <*> traverse (mapOnPatType tv) ts <*> pure loc
   astMap tv (Attr attr e loc) =
     Attr attr <$> mapOnExp tv e <*> pure loc
+  astMap tv (AppExp e res) =
+    AppExp <$> astMap tv e <*> astMap tv res
 
 instance ASTMappable (LoopFormBase Info VName) where
   astMap tv (For i bound) = For <$> astMap tv i <*> mapOnExp tv bound
@@ -247,7 +233,7 @@ instance ASTMappable (DimExp VName) where
 instance ASTMappable (DimDecl VName) where
   astMap tv (NamedDim vn) = NamedDim <$> mapOnQualName tv vn
   astMap _ (ConstDim k) = pure $ ConstDim k
-  astMap _ AnyDim = pure AnyDim
+  astMap tv (AnyDim vn) = AnyDim <$> traverse (mapOnName tv) vn
 
 instance ASTMappable (TypeParamBase VName) where
   astMap = traverse . mapOnName
@@ -266,6 +252,10 @@ instance ASTMappable Alias where
 
 instance ASTMappable Aliasing where
   astMap tv = fmap S.fromList . traverse (astMap tv) . S.toList
+
+instance ASTMappable AppRes where
+  astMap tv (AppRes t ext) =
+    AppRes <$> mapOnPatType tv t <*> pure ext
 
 type TypeTraverser f t dim1 als1 dim2 als2 =
   (TypeName -> f TypeName) ->
@@ -312,7 +302,7 @@ instance ASTMappable StructType where
     where
       f = fmap typeNameFromQualName . mapOnQualName tv . qualNameFromTypeName
 
-instance ASTMappable PatternType where
+instance ASTMappable PatType where
   astMap tv = traverseType f (astMap tv) (astMap tv)
     where
       f = fmap typeNameFromQualName . mapOnQualName tv . qualNameFromTypeName
@@ -323,32 +313,36 @@ instance ASTMappable (TypeDeclBase Info VName) where
 
 instance ASTMappable (IdentBase Info VName) where
   astMap tv (Ident name (Info t) loc) =
-    Ident <$> mapOnName tv name <*> (Info <$> mapOnPatternType tv t) <*> pure loc
+    Ident <$> mapOnName tv name <*> (Info <$> mapOnPatType tv t) <*> pure loc
 
-instance ASTMappable (PatternBase Info VName) where
+instance ASTMappable (SizeBinder VName) where
+  astMap tv (SizeBinder name loc) =
+    SizeBinder <$> mapOnName tv name <*> pure loc
+
+instance ASTMappable (PatBase Info VName) where
   astMap tv (Id name (Info t) loc) =
-    Id <$> mapOnName tv name <*> (Info <$> mapOnPatternType tv t) <*> pure loc
-  astMap tv (TuplePattern pats loc) =
-    TuplePattern <$> mapM (astMap tv) pats <*> pure loc
-  astMap tv (RecordPattern fields loc) =
-    RecordPattern <$> mapM (traverse $ astMap tv) fields <*> pure loc
-  astMap tv (PatternParens pat loc) =
-    PatternParens <$> astMap tv pat <*> pure loc
-  astMap tv (PatternAscription pat t loc) =
-    PatternAscription <$> astMap tv pat <*> astMap tv t <*> pure loc
+    Id <$> mapOnName tv name <*> (Info <$> mapOnPatType tv t) <*> pure loc
+  astMap tv (TuplePat pats loc) =
+    TuplePat <$> mapM (astMap tv) pats <*> pure loc
+  astMap tv (RecordPat fields loc) =
+    RecordPat <$> mapM (traverse $ astMap tv) fields <*> pure loc
+  astMap tv (PatParens pat loc) =
+    PatParens <$> astMap tv pat <*> pure loc
+  astMap tv (PatAscription pat t loc) =
+    PatAscription <$> astMap tv pat <*> astMap tv t <*> pure loc
   astMap tv (Wildcard (Info t) loc) =
-    Wildcard <$> (Info <$> mapOnPatternType tv t) <*> pure loc
-  astMap tv (PatternLit v (Info t) loc) =
-    PatternLit v <$> (Info <$> mapOnPatternType tv t) <*> pure loc
-  astMap tv (PatternConstr n (Info t) ps loc) =
-    PatternConstr n <$> (Info <$> mapOnPatternType tv t) <*> mapM (astMap tv) ps <*> pure loc
+    Wildcard <$> (Info <$> mapOnPatType tv t) <*> pure loc
+  astMap tv (PatLit v (Info t) loc) =
+    PatLit v <$> (Info <$> mapOnPatType tv t) <*> pure loc
+  astMap tv (PatConstr n (Info t) ps loc) =
+    PatConstr n <$> (Info <$> mapOnPatType tv t) <*> mapM (astMap tv) ps <*> pure loc
 
 instance ASTMappable (FieldBase Info VName) where
   astMap tv (RecordFieldExplicit name e loc) =
     RecordFieldExplicit name <$> mapOnExp tv e <*> pure loc
   astMap tv (RecordFieldImplicit name t loc) =
     RecordFieldImplicit <$> mapOnName tv name
-      <*> traverse (mapOnPatternType tv) t
+      <*> traverse (mapOnPatType tv) t
       <*> pure loc
 
 instance ASTMappable (CaseBase Info VName) where
@@ -386,16 +380,16 @@ bareField (RecordFieldExplicit name e loc) =
 bareField (RecordFieldImplicit name _ loc) =
   RecordFieldImplicit name NoInfo loc
 
-barePat :: PatternBase Info VName -> PatternBase NoInfo VName
-barePat (TuplePattern ps loc) = TuplePattern (map barePat ps) loc
-barePat (RecordPattern fs loc) = RecordPattern (map (fmap barePat) fs) loc
-barePat (PatternParens p loc) = PatternParens (barePat p) loc
+barePat :: PatBase Info VName -> PatBase NoInfo VName
+barePat (TuplePat ps loc) = TuplePat (map barePat ps) loc
+barePat (RecordPat fs loc) = RecordPat (map (fmap barePat) fs) loc
+barePat (PatParens p loc) = PatParens (barePat p) loc
 barePat (Id v _ loc) = Id v NoInfo loc
 barePat (Wildcard _ loc) = Wildcard NoInfo loc
-barePat (PatternAscription pat (TypeDecl t _) loc) =
-  PatternAscription (barePat pat) (TypeDecl t NoInfo) loc
-barePat (PatternLit v _ loc) = PatternLit v NoInfo loc
-barePat (PatternConstr c _ ps loc) = PatternConstr c NoInfo (map barePat ps) loc
+barePat (PatAscription pat (TypeDecl t _) loc) =
+  PatAscription (barePat pat) (TypeDecl t NoInfo) loc
+barePat (PatLit v _ loc) = PatLit v NoInfo loc
+barePat (PatConstr c _ ps loc) = PatConstr c NoInfo (map barePat ps) loc
 
 bareDimIndex :: DimIndexBase Info VName -> DimIndexBase NoInfo VName
 bareDimIndex (DimFix e) =
@@ -424,44 +418,15 @@ bareExp (TupLit els loc) = TupLit (map bareExp els) loc
 bareExp (StringLit vs loc) = StringLit vs loc
 bareExp (RecordLit fields loc) = RecordLit (map bareField fields) loc
 bareExp (ArrayLit els _ loc) = ArrayLit (map bareExp els) NoInfo loc
-bareExp (Range start next end _ loc) =
-  Range
-    (bareExp start)
-    (fmap bareExp next)
-    (fmap bareExp end)
-    (NoInfo, NoInfo)
-    loc
 bareExp (Ascript e tdecl loc) =
   Ascript (bareExp e) (bareTypeDecl tdecl) loc
-bareExp (Coerce e tdecl _ loc) =
-  Coerce (bareExp e) (bareTypeDecl tdecl) (NoInfo, NoInfo) loc
-bareExp (BinOp fname _ (x, _) (y, _) _ _ loc) =
-  BinOp fname NoInfo (bareExp x, NoInfo) (bareExp y, NoInfo) NoInfo NoInfo loc
 bareExp (Negate x loc) = Negate (bareExp x) loc
-bareExp (If c texp fexp _ loc) =
-  If (bareExp c) (bareExp texp) (bareExp fexp) (NoInfo, NoInfo) loc
-bareExp (Apply f arg _ _ loc) =
-  Apply (bareExp f) (bareExp arg) NoInfo (NoInfo, NoInfo) loc
-bareExp (LetPat pat e body _ loc) =
-  LetPat (barePat pat) (bareExp e) (bareExp body) (NoInfo, NoInfo) loc
-bareExp (LetFun name (fparams, params, ret, _, e) body _ loc) =
-  LetFun name (fparams, map barePat params, ret, NoInfo, bareExp e) (bareExp body) NoInfo loc
-bareExp (LetWith (Ident dest _ destloc) (Ident src _ srcloc) idxexps vexp body _ loc) =
-  LetWith
-    (Ident dest NoInfo destloc)
-    (Ident src NoInfo srcloc)
-    (map bareDimIndex idxexps)
-    (bareExp vexp)
-    (bareExp body)
-    NoInfo
-    loc
 bareExp (Update src slice v loc) =
   Update (bareExp src) (map bareDimIndex slice) (bareExp v) loc
 bareExp (RecordUpdate src fs v _ loc) =
   RecordUpdate (bareExp src) fs (bareExp v) NoInfo loc
-bareExp (Project field e _ loc) = Project field (bareExp e) NoInfo loc
-bareExp (Index arr slice _ loc) =
-  Index (bareExp arr) (map bareDimIndex slice) (NoInfo, NoInfo) loc
+bareExp (Project field e _ loc) =
+  Project field (bareExp e) NoInfo loc
 bareExp (Assert e1 e2 _ loc) = Assert (bareExp e1) (bareExp e2) NoInfo loc
 bareExp (Lambda params body ret _ loc) =
   Lambda (map barePat params) (bareExp body) ret NoInfo loc
@@ -473,18 +438,46 @@ bareExp (OpSectionRight name _ arg _ _ loc) =
 bareExp (ProjectSection fields _ loc) = ProjectSection fields NoInfo loc
 bareExp (IndexSection slice _ loc) =
   IndexSection (map bareDimIndex slice) NoInfo loc
-bareExp (DoLoop _ mergepat mergeexp form loopbody _ loc) =
-  DoLoop
-    []
-    (barePat mergepat)
-    (bareExp mergeexp)
-    (bareLoopForm form)
-    (bareExp loopbody)
-    NoInfo
-    loc
 bareExp (Constr name es _ loc) =
   Constr name (map bareExp es) NoInfo loc
-bareExp (Match e cases _ loc) =
-  Match (bareExp e) (fmap bareCase cases) (NoInfo, NoInfo) loc
+bareExp (AppExp appexp _) =
+  AppExp appexp' NoInfo
+  where
+    appexp' =
+      case appexp of
+        Match e cases loc ->
+          Match (bareExp e) (fmap bareCase cases) loc
+        DoLoop _ mergepat mergeexp form loopbody loc ->
+          DoLoop
+            []
+            (barePat mergepat)
+            (bareExp mergeexp)
+            (bareLoopForm form)
+            (bareExp loopbody)
+            loc
+        LetWith (Ident dest _ destloc) (Ident src _ srcloc) idxexps vexp body loc ->
+          LetWith
+            (Ident dest NoInfo destloc)
+            (Ident src NoInfo srcloc)
+            (map bareDimIndex idxexps)
+            (bareExp vexp)
+            (bareExp body)
+            loc
+        BinOp fname _ (x, _) (y, _) loc ->
+          BinOp fname NoInfo (bareExp x, NoInfo) (bareExp y, NoInfo) loc
+        If c texp fexp loc ->
+          If (bareExp c) (bareExp texp) (bareExp fexp) loc
+        Apply f arg _ loc ->
+          Apply (bareExp f) (bareExp arg) NoInfo loc
+        LetPat sizes pat e body loc ->
+          LetPat sizes (barePat pat) (bareExp e) (bareExp body) loc
+        LetFun name (fparams, params, ret, _, e) body loc ->
+          LetFun name (fparams, map barePat params, ret, NoInfo, bareExp e) (bareExp body) loc
+        Range start next end loc ->
+          Range (bareExp start) (fmap bareExp next) (fmap bareExp end) loc
+        Coerce e tdecl loc ->
+          Coerce (bareExp e) (bareTypeDecl tdecl) loc
+        Index arr slice loc ->
+          Index (bareExp arr) (map bareDimIndex slice) loc
 bareExp (Attr attr e loc) =
   Attr attr (bareExp e) loc

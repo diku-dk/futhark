@@ -2,6 +2,7 @@
 
 import sys
 import time
+import shlex # For string splitting
 
 class Server:
     def __init__(self, ctx):
@@ -28,6 +29,10 @@ class Server:
         if not vname in self._vars:
             raise self.Failure('Unknown variable: %s' % vname)
 
+    def _check_new_var(self, vname):
+        if vname in self._vars:
+            raise self.Failure('Variable already exists: %s' % vname)
+
     def _get_var(self, vname):
         self._check_var(vname)
         return self._vars[vname]
@@ -50,6 +55,14 @@ class Server:
             self._check_var(vname)
             del self._vars[vname]
 
+    def _cmd_rename(self, args):
+        oldname = self._get_arg(args, 0)
+        newname = self._get_arg(args, 1)
+        self._check_var(oldname)
+        self._check_new_var(newname)
+        self._vars[newname] = self._vars[oldname]
+        del self._vars[oldname]
+
     def _cmd_call(self, args):
         entry = self._get_entry_point(self._get_arg(args, 0))
         num_ins = len(entry[0])
@@ -62,8 +75,7 @@ class Server:
         out_vnames = args[1:num_outs+1]
 
         for out_vname in out_vnames:
-            if out_vname in self._vars:
-                raise self.Failure('Variable already exists: %s' % out_vname)
+            self._check_new_var(out_vname)
 
         in_vnames = args[1+num_outs:]
         ins = [ self._get_var(in_vname) for in_vname in in_vnames ]
@@ -81,22 +93,35 @@ class Server:
             for (out_vname, val) in zip(out_vnames, vals):
                 self._vars[out_vname] = val
 
+    def _store_val(self, f, value):
+        # In case we are using the PyOpenCL backend, we first
+        # need to convert OpenCL arrays to ordinary NumPy
+        # arrays.  We do this in a nasty way.
+        if isinstance(value, opaque):
+            for component in value.data:
+                self._store_val(f, component)
+        elif isinstance(value, np.number) or isinstance(value, bool) or isinstance(value, np.bool_) or isinstance(value, np.ndarray):
+            # Ordinary NumPy value.
+            f.write(construct_binary_value(value))
+        else:
+            # Assuming PyOpenCL array.
+            f.write(construct_binary_value(value.get()))
+
     def _cmd_store(self, args):
         fname = self._get_arg(args, 0)
 
         with open(fname, 'wb') as f:
             for i in range(1, len(args)):
-                vname = args[i]
-                value = self._get_var(vname)
-                # In case we are using the PyOpenCL backend, we first
-                # need to convert OpenCL arrays to ordinary NumPy
-                # arrays.  We do this in a nasty way.
-                if isinstance(value, np.number) or isinstance(value, np.bool) or isinstance(value, np.bool_) or isinstance(value, np.ndarray):
-                    # Ordinary NumPy value.
-                    f.write(construct_binary_value(self._vars[vname]))
-                else:
-                    # Assuming PyOpenCL array.
-                    f.write(construct_binary_value(self._vars[vname].get()))
+                self._store_val(f, self._get_var(args[i]))
+
+    def _restore_val(self, reader, typename):
+        if typename in self._ctx.opaques:
+            vs = []
+            for t in self._ctx.opaques[typename]:
+                vs += [read_value(t, reader)]
+            return opaque(typename, *vs)
+        else:
+            return read_value(typename, reader)
 
     def _cmd_restore(self, args):
         if len(args) % 2 == 0:
@@ -116,7 +141,7 @@ class Server:
                     raise self.Failure('Variable already exists: %s' % vname)
 
                 try:
-                    self._vars[vname] = read_value(typename, reader)
+                    self._vars[vname] = self._restore_val(reader, typename)
                 except ValueError:
                     raise self.Failure('Failed to restore variable %s.\n'
                                        'Possibly malformed data in %s.\n'
@@ -132,6 +157,7 @@ class Server:
                   'restore': _cmd_restore,
                   'store': _cmd_store,
                   'free': _cmd_free,
+                  'rename': _cmd_rename,
                   'clear': _cmd_dummy,
                   'pause_profiling': _cmd_dummy,
                   'unpause_profiling': _cmd_dummy,
@@ -139,7 +165,7 @@ class Server:
                  }
 
     def _process_line(self, line):
-        words = line.split()
+        words = shlex.split(line)
         if words == []:
             raise self.Failure('Empty line')
         else:

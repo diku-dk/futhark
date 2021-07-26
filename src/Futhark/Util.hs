@@ -25,7 +25,6 @@ module Futhark.Util
     focusNth,
     hashIntText,
     unixEnvironment,
-    isEnvVarSet,
     isEnvVarAtLeast,
     fancyTerminal,
     runProgramWithExitCode,
@@ -40,13 +39,17 @@ module Futhark.Util
     lgammaf,
     tgamma,
     tgammaf,
+    hypot,
+    hypotf,
     fromPOSIX,
     toPOSIX,
     trim,
     pmapIO,
+    readFileSafely,
     UserString,
     EncodedString,
     zEncodeString,
+    atMostChars,
     invertMap,
   )
 where
@@ -69,6 +72,7 @@ import qualified Data.Set as Set
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import qualified Data.Text.Encoding.Error as T
+import qualified Data.Text.IO as T
 import Data.Tuple (swap)
 import Numeric
 import qualified System.Directory.Tree as Dir
@@ -77,6 +81,7 @@ import System.Exit
 import qualified System.FilePath as Native
 import qualified System.FilePath.Posix as Posix
 import System.IO (hIsTerminalDevice, stdout)
+import System.IO.Error (isDoesNotExistError)
 import System.IO.Unsafe
 import System.Process.ByteString
 import Text.Printf
@@ -176,16 +181,6 @@ hashIntText x = T.pack $ printf "%x" (fromIntegral x :: Word)
 -- | The Unix environment when the Futhark compiler started.
 unixEnvironment :: [(String, String)]
 unixEnvironment = unsafePerformIO getEnvironment
-
--- | Is an environment variable set to 0 or 1?  If 0, return False; if
--- 1, True; otherwise default.
-isEnvVarSet :: String -> Bool -> Bool
-isEnvVarSet name default_val = fromMaybe default_val $ do
-  val <- lookup name unixEnvironment
-  case val of
-    "0" -> return False
-    "1" -> return True
-    _ -> Nothing
 
 -- | True if the environment variable, viewed as an integer, has at
 -- least this numeric value.  Returns False if variable is unset or
@@ -293,6 +288,18 @@ tgamma = c_tgamma
 tgammaf :: Float -> Float
 tgammaf = c_tgammaf
 
+foreign import ccall "hypot" c_hypot :: Double -> Double -> Double
+
+foreign import ccall "hypotf" c_hypotf :: Float -> Float -> Float
+
+-- | The system-level @hypot@ function.
+hypot :: Double -> Double -> Double
+hypot = c_hypot
+
+-- | The system-level @hypotf@ function.
+hypotf :: Float -> Float -> Float
+hypotf = c_hypotf
+
 -- | Turn a POSIX filepath into a filepath for the native system.
 toPOSIX :: Native.FilePath -> Posix.FilePath
 toPOSIX = Posix.joinPath . Native.splitDirectories
@@ -338,6 +345,18 @@ pmapIO concurrency f elems = do
       case res of
         Left err -> throw (err :: SomeException)
         Right v -> pure v
+
+-- | Read a file, returning 'Nothing' if the file does not exist, and
+-- 'Left' if some other error occurs.
+readFileSafely :: FilePath -> IO (Maybe (Either String T.Text))
+readFileSafely filepath =
+  (Just . Right <$> T.readFile filepath) `catch` couldNotRead
+  where
+    couldNotRead e
+      | isDoesNotExistError e =
+        return Nothing
+      | otherwise =
+        return $ Just $ Left $ show e
 
 -- Z-encoding from https://ghc.haskell.org/trac/ghc/wiki/Commentary/Compiler/SymbolNames
 --
@@ -415,6 +434,11 @@ encodeAsUnicodeCharar c =
     else '0' : hex_str
   where
     hex_str = showHex (ord c) "U"
+
+atMostChars :: Int -> String -> String
+atMostChars n s
+  | length s > n = take (n -3) s ++ "..."
+  | otherwise = s
 
 invertMap :: (Ord v, Ord k) => Map k v -> Map v (Set k)
 invertMap m =

@@ -70,13 +70,13 @@ pkgPathFilePath = joinPath . Posix.splitPath . T.unpack
 -- @hash@ (typically the Git commit ID).  This function detects such
 -- versions.
 isCommitVersion :: SemVer -> Maybe T.Text
-isCommitVersion (SemVer 0 0 0 [_] [Str s NE.:| []]) = Just s
+isCommitVersion (SemVer 0 0 0 [_] (Just s)) = Just s
 isCommitVersion _ = Nothing
 
 -- | @commitVersion timestamp commit@ constructs a commit version.
 commitVersion :: T.Text -> T.Text -> SemVer
 commitVersion time commit =
-  SemVer 0 0 0 [Str time NE.:| []] [Str commit NE.:| []]
+  SemVer 0 0 0 [Str time NE.:| []] (Just commit)
 
 -- | Unfortunately, Data.Versions has a buggy semver parser that
 -- collapses consecutive zeroes in the metadata field.  So, we define
@@ -94,8 +94,8 @@ semver' = SemVer <$> majorP <*> minorP <*> patchP <*> preRel <*> metaData
     digitsP = read <$> ((T.unpack <$> string "0") <|> some digitChar)
     preRel = maybe [] pure <$> optional preRel'
     preRel' = char '-' *> (pure . Str . T.pack <$> some digitChar)
-    metaData = maybe [] pure <$> optional metaData'
-    metaData' = char '+' *> (pure . Str . T.pack <$> some alphaNumChar)
+    metaData = optional metaData'
+    metaData' = char '+' *> (T.pack <$> some alphaNumChar)
 
 -- | The dependencies of a (revision of a) package is a mapping from
 -- package paths to minimum versions (and an optional hash pinning).

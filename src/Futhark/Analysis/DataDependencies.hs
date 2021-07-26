@@ -18,13 +18,13 @@ import Futhark.IR
 type Dependencies = M.Map VName Names
 
 -- | Compute the data dependencies for an entire body.
-dataDependencies :: ASTLore lore => Body lore -> Dependencies
+dataDependencies :: ASTRep rep => Body rep -> Dependencies
 dataDependencies = dataDependencies' M.empty
 
 dataDependencies' ::
-  ASTLore lore =>
+  ASTRep rep =>
   Dependencies ->
-  Body lore ->
+  Body rep ->
   Dependencies
 dataDependencies' startdeps = foldl grow startdeps . bodyStms
   where
@@ -32,7 +32,7 @@ dataDependencies' startdeps = foldl grow startdeps . bodyStms
       let tdeps = dataDependencies' deps tb
           fdeps = dataDependencies' deps fb
           cdeps = depsOf deps c
-          comb (pe, tres, fres) =
+          comb (pe, SubExpRes _ tres, SubExpRes _ fres) =
             ( patElemName pe,
               mconcat $
                 [freeIn pe, cdeps, depsOf tdeps tres, depsOf fdeps fres]
@@ -42,14 +42,14 @@ dataDependencies' startdeps = foldl grow startdeps . bodyStms
             M.fromList $
               map comb $
                 zip3
-                  (patternElements pat)
+                  (patElements pat)
                   (bodyResult tb)
                   (bodyResult fb)
        in M.unions [branchdeps, deps, tdeps, fdeps]
     grow deps (Let pat _ e) =
       let free = freeIn pat <> freeIn e
           freeDeps = mconcat $ map (depsOfVar deps) $ namesToList free
-       in M.fromList [(name, freeDeps) | name <- patternNames pat] `M.union` deps
+       in M.fromList [(name, freeDeps) | name <- patNames pat] `M.union` deps
 
 depsOf :: Dependencies -> SubExp -> Names
 depsOf _ (Constant _) = mempty

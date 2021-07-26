@@ -9,23 +9,25 @@ where
 
 import Control.Monad
 import qualified Data.Map as M
+import qualified Data.Text as T
 import qualified Futhark.CodeGen.Backends.GenericPython as Py
 import Futhark.CodeGen.Backends.GenericPython.AST
 import Futhark.CodeGen.Backends.GenericPython.Options
 import Futhark.CodeGen.Backends.PyOpenCL.Boilerplate
 import qualified Futhark.CodeGen.ImpCode.OpenCL as Imp
 import qualified Futhark.CodeGen.ImpGen.OpenCL as ImpGen
-import Futhark.IR.KernelsMem (KernelsMem, Prog)
+import Futhark.IR.GPUMem (GPUMem, Prog)
 import Futhark.MonadFreshNames
 import Futhark.Util (zEncodeString)
+import Futhark.Util.Pretty (pretty)
 
 -- | Compile the program to Python with calls to OpenCL.
 compileProg ::
   MonadFreshNames m =>
   Py.CompilerMode ->
   String ->
-  Prog KernelsMem ->
-  m (ImpGen.Warnings, String)
+  Prog GPUMem ->
+  m (ImpGen.Warnings, T.Text)
 compileProg mode class_name prog = do
   ( ws,
     Imp.Program
@@ -185,7 +187,7 @@ compileProg mode class_name prog = do
 -- We have many casts to 'long', because PyOpenCL may get confused at
 -- the 32-bit numbers that ImpCode uses for offsets and the like.
 asLong :: PyExp -> PyExp
-asLong x = Py.simpleCall "np.long" [x]
+asLong x = Py.simpleCall "np.int64" [x]
 
 callKernel :: Py.OpCompiler Imp.OpenCL ()
 callKernel (Imp.GetSize v key) = do

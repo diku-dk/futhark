@@ -1,6 +1,6 @@
 -- Sumtype consumption.
 -- ==
--- error: Variable "v" previously
+-- error: "v".*consumed
 
 type^ sum = #foo (*[]i32) | #bar (*[]i32)
 

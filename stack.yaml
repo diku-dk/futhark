@@ -1,8 +1,6 @@
-resolver: nightly-2020-12-14
+resolver: nightly-2021-06-19
 packages:
 - .
-
-extra-deps: []
 
 flags: {}
 
@@ -15,3 +13,7 @@ nix:
 # This makes it do so.
 ghc-options:
   $locals: -j -optP-Wno-nonportable-include-path
+
+extra-deps:
+- futhark-data-1.0.0.1
+- futhark-server-1.1.0.0

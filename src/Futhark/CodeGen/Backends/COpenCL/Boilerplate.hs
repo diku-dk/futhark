@@ -16,6 +16,7 @@ module Futhark.CodeGen.Backends.COpenCL.Boilerplate
     costCentreReport,
     kernelRuntime,
     kernelRuns,
+    sizeLoggingCode,
   )
 where
 
@@ -28,6 +29,7 @@ import Futhark.CodeGen.Backends.GenericC.Options
 import Futhark.CodeGen.ImpCode.OpenCL
 import Futhark.CodeGen.OpenCL.Heuristics
 import Futhark.Util (chunk, zEncodeString)
+import Futhark.Util.Pretty (prettyOneLine)
 import qualified Language.C.Quote.OpenCL as C
 import qualified Language.C.Syntax as C
 
@@ -41,8 +43,8 @@ failureSwitch failures =
             escapeChar c = [c]
          in concatMap escapeChar
       onPart (ErrorString s) = printfEscape s
-      onPart ErrorInt32 {} = "%lld"
-      onPart ErrorInt64 {} = "%lld"
+      -- FIXME: bogus for non-ints.
+      onPart ErrorVal {} = "%lld"
       onFailure i (FailureMsg emsg@(ErrorMsg parts) backtrace) =
         let msg = concatMap onPart parts ++ "\n" ++ printfEscape backtrace
             msgargs = [[C.cexp|args[$int:j]|] | j <- [0 .. errorMsgNumArgs emsg -1]]
@@ -666,6 +668,17 @@ sizeHeuristicsCode (SizeHeuristic platform_name device_type which (TPrimExp what
         Just _ -> return ()
 
       return [C.cexp|$id:v|]
+
+-- Output size information if logging is enabled.
+--
+-- The autotuner depends on the format of this output, so use caution if
+-- changing it.
+sizeLoggingCode :: VName -> Name -> C.Exp -> GC.CompilerM op () ()
+sizeLoggingCode v key x' = do
+  GC.stm
+    [C.cstm|if (ctx->logging) {
+    fprintf(ctx->log, "Compared %s <= %ld: %s.\n", $string:(prettyOneLine key), (long)$exp:x', $id:v ? "true" : "false");
+    }|]
 
 -- Options that are common to multiple GPU-like backends.
 commonOptions :: [Option]

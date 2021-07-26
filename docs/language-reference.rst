@@ -107,8 +107,9 @@ Compound Types and Values
 
 Compound types can be constructed based on the primitive types.  The
 Futhark type system is entirely structural, and type abbreviations are
-merely shorthands.  The only exception is abstract types whose
-definition has been hidden via the module system (see `Module
+merely shorthands (with one exception, see
+:ref:`sizes-in-abbreviations`).  The only exception is abstract types
+whose definition has been hidden via the module system (see `Module
 System`_).
 
 .. productionlist::
@@ -190,12 +191,14 @@ Functions are classified via function types, but they are not fully
 first class.  See :ref:`hofs` for the details.
 
 .. productionlist::
-   stringlit: '"' `stringchar` '"'
+   stringlit: '"' `stringchar`* '"'
+   charlit: "'" `stringchar` "'"
    stringchar: <any source character except "\" or newline or quotes>
 
 String literals are supported, but only as syntactic sugar for UTF-8
 encoded arrays of ``u8`` values.  There is no character type in
-Futhark.
+Futhark, but character literals are interpreted as integers of the
+corresponding Unicode code point.
 
 Declarations
 ------------
@@ -407,6 +410,7 @@ literals and variables, but also more complicated forms.
    atom:   `literal`
        : | `qualid` ("." `fieldid`)*
        : | `stringlit`
+       : | `charlit`
        : | "(" ")"
        : | "(" `exp` ")" ("." `fieldid`)*
        : | "(" `exp` ("," `exp`)* ")"
@@ -432,7 +436,7 @@ literals and variables, but also more complicated forms.
       : | `exp` [ ".." `exp` ] "..<" `exp`
       : | `exp` [ ".." `exp` ] "..>" `exp`
       : | "if" `exp` "then" `exp` "else" `exp`
-      : | "let" `pat` "=" `exp` "in" `exp`
+      : | "let" `size`* `pat` "=" `exp` "in" `exp`
       : | "let" `id` "[" `index` ("," `index`)* "]" "=" `exp` "in" `exp`
       : | "let" `id` `type_param`* `pat`+ [":" `type`] "=" `exp` "in" `exp`
       : | "(" "\" `pat`+ [":" `type`] "->" `exp` ")"
@@ -445,6 +449,7 @@ literals and variables, but also more complicated forms.
       : | "match" `exp` ("case" `pat` "->" `exp`)+
    field:   `fieldid` "=" `exp`
         : | `id`
+   size : "[" `id` "]"
    pat:   `id`
       : | `literal`
       : |  "_"
@@ -860,8 +865,15 @@ Evaluate ``e`` and bind the result to the irrefutable pattern ``pat``
 (see :ref:`patterns`) while evaluating ``body``.  The ``in`` keyword
 is optional if ``body`` is a ``let`` expression.
 
+``let [n] pat = e in body``
+...........................
+
+As above, but bind sizes (here ``n``) used in the pattern (here to the
+size of the array being bound).  All sizes must be used in the
+pattern.  Roughly Equivalent to ``let f [n] pat = body in f e``.
+
 ``let a[i] = v in body``
-........................................
+........................
 
 Write ``v`` to ``a[i]`` and evaluate ``body``.  The given index need
 not be complete and can also be a slice, but in these cases, the value
@@ -1280,6 +1292,30 @@ fresh size ``k``.  The lambda is then assigned the type ``[n]t ->
 be passed to ``map``, as explained before.  The solution is to bind
 ``length`` to a name *before* the lambda.
 
+.. _sizes-in-abbreviations:
+
+Sizes in type abbreviations
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+When anonymous sizes are passed to type abbreviations, if that
+anonymous size is eventually instantiated with an existential size,
+the *same* existential size is going to be used for all instances of
+the corresponding parameter in the right-hand-side of the type
+abbreviation.  Note that this breaks with the usual conception of type
+abbreviations as purely a shorthand, as this could not be expressed
+without the abbreviation.  Example::
+
+  type square [n] = [n][n]i32
+
+The following function is be *known* to return a square array::
+
+  val f : () -> square []
+
+But this is not the case for the function that inlines the definition
+of ``square``::
+
+  val g : () -> [][]i32
+
 .. _in-place-updates:
 
 In-place Updates
@@ -1365,7 +1401,7 @@ Module System
 .. productionlist::
    mod_bind: "module" `id` `mod_param`* "=" [":" mod_type_exp] "=" `mod_exp`
    mod_param: "(" `id` ":" `mod_type_exp` ")"
-   mod_type_bind: "module" "type" `id` `type_param`* "=" `mod_type_exp`
+   mod_type_bind: "module" "type" `id` "=" `mod_type_exp`
 
 Futhark supports an ML-style higher-order module system.  *Modules*
 can contain types, functions, and other modules and module types.
@@ -1620,6 +1656,32 @@ contradictory attributes are combined through fusion, it is
 unspecified which attributes take precedence.
 
 The following expression attributes are supported.
+
+``trace``
+.........
+
+Print the value produced by the attributed expression.  Used for
+debugging.  Somewhat unreliable outside of the interpreter, and in
+particular does not work for GPU device code.
+
+``trace(tag)``
+..............
+
+Like ``trace``, but prefix output with *tag*, which must lexically be
+an identifier.
+
+``break``
+.........
+
+In the interpreter, pause execution *before* evaluating the expression.
+No effect for compiled code.
+
+``opaque``
+..........
+
+The compiler will treat the attributed expression as a black box.
+This is used to work around optimisation deficiencies (or bugs),
+although it should hopefully rarely be necessary.
 
 ``incremental_flattening(no_outer)``
 ....................................

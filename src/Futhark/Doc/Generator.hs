@@ -401,7 +401,7 @@ valBindHtml name (ValBind _ _ retdecl (Info (rettype, _)) tparams params _ _ _ _
       noLink' =
         noLink $
           map typeParamName tparams
-            ++ map identName (S.toList $ mconcat $ map patternIdents params)
+            ++ map identName (S.toList $ mconcat $ map patIdents params)
   rettype' <- noLink' $ maybe (typeHtml rettype) typeExpHtml retdecl
   params' <- noLink' $ mapM patternHtml params
   return
@@ -666,7 +666,7 @@ vnameLink' (VName _ tag) current file =
 typeNameHtml :: TypeName -> DocM Html
 typeNameHtml = qualNameHtml . qualNameFromTypeName
 
-patternHtml :: Pattern -> DocM Html
+patternHtml :: Pat -> DocM Html
 patternHtml pat = do
   let (pat_param, t) = patternParam pat
   t' <- typeHtml t
@@ -679,7 +679,7 @@ relativise dest src =
   concat (replicate (length (splitPath src) - 1) "../") ++ dest
 
 dimDeclHtml :: DimDecl VName -> DocM Html
-dimDeclHtml AnyDim = return mempty
+dimDeclHtml (AnyDim _) = return mempty
 dimDeclHtml (NamedDim v) = qualNameHtml v
 dimDeclHtml (ConstDim n) = return $ toHtml (show n)
 

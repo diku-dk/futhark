@@ -20,11 +20,19 @@ let
     packageOverrides = pkgs: rec {
       haskellPackages = pkgs.haskellPackages.override {
         overrides = haskellPackagesNew: haskellPackagesOld: rec {
+          versions =
+            haskellPackagesNew.callPackage ./nix/versions.nix { };
+
+          futhark-data =
+            haskellPackagesNew.callPackage ./nix/futhark-data.nix { };
+
+          futhark-server =
+            haskellPackagesNew.callPackage ./nix/futhark-server.nix { };
 
           futhark =
             pkgs.haskell.lib.overrideCabal
               (pkgs.haskell.lib.addBuildTools
-                (haskellPackagesNew.callPackage ./futhark.nix { })
+                (haskellPackagesNew.callCabal2nix "futhark" ./. { })
                 [ pkgs.python37Packages.sphinx ])
               ( _drv: {
                 isLibrary = false;

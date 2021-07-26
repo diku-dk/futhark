@@ -152,7 +152,7 @@ def sext_T_i64(x):
   return np.int64(x)
 
 def itob_T_bool(x):
-  return np.bool(x)
+  return bool(x)
 
 def btoi_bool_i8(x):
   return np.int8(x)
@@ -432,6 +432,9 @@ def futhark_atanh64(x):
 def futhark_atan2_64(x, y):
   return np.arctan2(x, y)
 
+def futhark_hypot64(x, y):
+  return np.hypot(x, y)
+
 def futhark_gamma64(x):
   return np.float64(math.gamma(x))
 
@@ -514,6 +517,9 @@ def futhark_atanh32(x):
 
 def futhark_atan2_32(x, y):
   return np.arctan2(x, y)
+
+def futhark_hypot32(x, y):
+  return np.hypot(x, y)
 
 def futhark_gamma32(x):
   return np.float32(math.gamma(x))

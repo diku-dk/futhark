@@ -4,8 +4,7 @@
 
 -- | A representation for multicore CPU parallelism.
 module Futhark.IR.MC
-  ( -- * The Lore definition
-    MC,
+  ( MC,
 
     -- * Simplification
     simplifyProg,
@@ -21,7 +20,7 @@ module Futhark.IR.MC
   )
 where
 
-import Futhark.Binder
+import Futhark.Builder
 import Futhark.Construct
 import Futhark.IR.MC.Op
 import Futhark.IR.Pretty
@@ -39,28 +38,28 @@ import qualified Futhark.TypeCheck as TypeCheck
 
 data MC
 
-instance Decorations MC where
+instance RepTypes MC where
   type Op MC = MCOp MC (SOAC MC)
 
-instance ASTLore MC where
-  expTypesFromPattern = return . expExtTypesFromPattern
+instance ASTRep MC where
+  expTypesFromPat = return . expExtTypesFromPat
 
 instance TypeCheck.CheckableOp MC where
   checkOp = typeCheckMCOp typeCheckSOAC
 
 instance TypeCheck.Checkable MC
 
-instance Bindable MC where
+instance Buildable MC where
   mkBody = Body ()
-  mkExpPat ctx val _ = basicPattern ctx val
+  mkExpPat idents _ = basicPat idents
   mkExpDec _ _ = ()
   mkLetNames = simpleMkLetNames
 
-instance BinderOps MC
+instance BuilderOps MC
 
-instance BinderOps (Engine.Wise MC)
+instance BuilderOps (Engine.Wise MC)
 
-instance PrettyLore MC
+instance PrettyRep MC
 
 simpleMC :: Simplify.SimpleOps MC
 simpleMC = Simplify.bindableSimpleOps $ simplifyMCOp SOAC.simplifySOAC

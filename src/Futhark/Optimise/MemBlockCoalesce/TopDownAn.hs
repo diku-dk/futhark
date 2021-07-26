@@ -1,67 +1,80 @@
-{-# LANGUAGE TypeFamilies, FlexibleContexts #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE TypeFamilies #-}
+
 module Futhark.Optimise.MemBlockCoalesce.TopDownAn
-       ( TopDnEnv(..), ScopeTab, InhibitTab, RangeTab
-       , topdwnTravBinding, topDownLoop
-       , getDirAliasedIxfn, addInvAliassesVarTab
-       , areAnyAliased, safety2 )
-       where
+  ( TopDnEnv (..),
+    ScopeTab,
+    InhibitTab,
+    RangeTab,
+    topdwnTravBinding,
+    topDownLoop,
+    getDirAliasedIxfn,
+    addInvAliassesVarTab,
+    areAnyAliased,
+    safety2,
+  )
+where
 
-import qualified Data.Map.Strict as M
 import qualified Control.Exception.Base as Exc
+import qualified Data.Map.Strict as M
 import Debug.Trace
-
-import Futhark.IR.Aliases
 import Futhark.Analysis.PrimExp.Convert
-import qualified Futhark.IR.SeqMem as ExpMem
+import Futhark.IR.Aliases
 --import qualified Futhark.IR.Mem.IxFun as IxFun
-import Futhark.Optimise.MemBlockCoalesce.DataStructs
-import qualified Futhark.IR.Mem.IxFun as IxFun
 
+import qualified Futhark.IR.Mem.IxFun as IxFun
+import qualified Futhark.IR.SeqMem as ExpMem
+import Futhark.Optimise.MemBlockCoalesce.DataStructs
 
 type ScopeTab = Scope (Aliases ExpMem.SeqMem)
 -- ^ maps array-variable names to various info, including
 --   types, memory block and index function, etc.
 
 type DirAlias = ExpMem.IxFun -> ExpMem.IxFun
+
 type InvAlias = Maybe (ExpMem.IxFun -> ExpMem.IxFun)
+
 type RangeTab = M.Map VName (PrimExp VName, PrimExp VName)
+
 type VarAliasTab = M.Map VName (VName, DirAlias, InvAlias)
+
 type MemAliasTab = M.Map VName Names
 
-data TopDnEnv = TopDnEnv { alloc   :: AllocTab
-                         -- ^ contains the already allocated memory blocks
-                         , scope   :: ScopeTab
-                         -- ^ variable info, including var-to-memblock assocs
-                         , inhibited :: InhibitTab
-                         -- ^ the inherited inhibitions from the previous try
-                         , ranges :: RangeTab
-                         -- ^ table holding closed ranges for i64-integral scalars
-                         , v_alias :: VarAliasTab
-                         -- ^ for statements such as transpose, reshape, index, etc., that alias
-                         --   an array variable: maps var-names to pair of aliased var name
-                         --   and index function transformation. For example, for
-                         --   @let b = a[slc]@ it should add the binding
-                         --   @ b |-> (a, `slice` slc )@
-                         , m_alias :: MemAliasTab
-                         -- ^ keeps track of memory block aliasing.
-                         --   this needs to be implemented
-                         }
+data TopDnEnv = TopDnEnv
+  { -- | contains the already allocated memory blocks
+    alloc :: AllocTab,
+    -- | variable info, including var-to-memblock assocs
+    scope :: ScopeTab,
+    -- | the inherited inhibitions from the previous try
+    inhibited :: InhibitTab,
+    -- | table holding closed ranges for i64-integral scalars
+    ranges :: RangeTab,
+    -- | for statements such as transpose, reshape, index, etc., that alias
+    --   an array variable: maps var-names to pair of aliased var name
+    --   and index function transformation. For example, for
+    --   @let b = a[slc]@ it should add the binding
+    --   @ b |-> (a, `slice` slc )@
+    v_alias :: VarAliasTab,
+    -- | keeps track of memory block aliasing.
+    --   this needs to be implemented
+    m_alias :: MemAliasTab
+  }
 
 safety2 :: TopDnEnv -> VName -> Bool
 safety2 td_env m =
   --  nameIn m (alloc td_env)
   case M.lookup m (scope td_env) of
     (Just _) -> True
-    Nothing  -> False
+    Nothing -> False
 
 getDirAliasFromExp :: Exp (Aliases ExpMem.SeqMem) -> Maybe (VName, ExpMem.IxFun -> ExpMem.IxFun)
 getDirAliasFromExp (BasicOp (SubExp (Var x))) = Just (x, id)
-getDirAliasFromExp (BasicOp (Opaque (Var x))) = Just (x, id)
-getDirAliasFromExp (BasicOp (Reshape shp_chg x)) = Just (x, (`IxFun.reshape` (map (fmap ExpMem.pe64) shp_chg)))
+getDirAliasFromExp (BasicOp (Opaque _ (Var x))) = Just (x, id)
+getDirAliasFromExp (BasicOp (Reshape shp_chg x)) = Just (x, (`IxFun.reshape` map (fmap ExpMem.pe64) shp_chg))
 getDirAliasFromExp (BasicOp (Rearrange perm x)) = Just (x, (`IxFun.permute` perm))
-getDirAliasFromExp (BasicOp (Rotate rs x)) = Just (x, (`IxFun.rotate` (fmap ExpMem.pe64 rs)))
-getDirAliasFromExp (BasicOp (Index x slc)) = Just (x, (`IxFun.slice` (map (fmap ExpMem.pe64) slc)))
-getDirAliasFromExp (BasicOp (Update x _ _elm)) = Just (x, id)
+getDirAliasFromExp (BasicOp (Rotate rs x)) = Just (x, (`IxFun.rotate` fmap ExpMem.pe64 rs))
+getDirAliasFromExp (BasicOp (Index x slc)) = Just (x, (`IxFun.slice` (Slice $ map (fmap ExpMem.pe64) $ unSlice slc)))
+getDirAliasFromExp (BasicOp (Update _ x _ _elm)) = Just (x, id)
 getDirAliasFromExp _ = Nothing
 
 -- | This was former @createsAliasedArrOK@ from DataStructs
@@ -80,43 +93,41 @@ getDirAliasFromExp _ = Nothing
 --     but rotations and full slices could also be supported.
 getInvAliasFromExp :: Exp (Aliases ExpMem.SeqMem) -> Maybe (VName, ExpMem.IxFun -> ExpMem.IxFun)
 getInvAliasFromExp (BasicOp (SubExp (Var x))) = Just (x, id)
-getInvAliasFromExp (BasicOp (Opaque (Var x))) = Just (x, id)
-getInvAliasFromExp (BasicOp (Update x _ _elm))= Just (x, id)
+getInvAliasFromExp (BasicOp (Opaque _ (Var x))) = Just (x, id)
+getInvAliasFromExp (BasicOp (Update _ x _ _elm)) = Just (x, id)
 getInvAliasFromExp (BasicOp (Rearrange perm arr_nm)) =
-  let perm' = IxFun.permuteInv perm [0..length perm - 1]
-  in  Just (arr_nm, (`IxFun.permute` perm'))
+  let perm' = IxFun.permuteInv perm [0 .. length perm - 1]
+   in Just (arr_nm, (`IxFun.permute` perm'))
 getInvAliasFromExp _ = Nothing
-
 
 -- | fills in the TopDnEnv table
 topdwnTravBinding :: TopDnEnv -> Stm (Aliases ExpMem.SeqMem) -> TopDnEnv
-topdwnTravBinding env stm@(Let (Pattern [] [pe]) _ (Op (ExpMem.Alloc _ _)) ) =
-  env { alloc = (alloc env) <> (oneName (patElemName pe)), scope = scope env <> scopeOf stm }
-topdwnTravBinding env stm@(Let (Pattern [] [pe]) _ e)
+topdwnTravBinding env stm@(Let (Pat [pe]) _ (Op (ExpMem.Alloc _ _))) =
+  env {alloc = alloc env <> oneName (patElemName pe), scope = scope env <> scopeOf stm}
+topdwnTravBinding env stm@(Let (Pat [pe]) _ e)
   | Just (x, ixfn) <- getDirAliasFromExp e =
     let ixfn_inv = case getInvAliasFromExp e of
-                    Nothing -> Nothing
-                    Just (_, xfn) -> Just xfn
-        env' = env { v_alias = M.insert (patElemName pe) (x,ixfn,ixfn_inv) (v_alias env)}
-    in  env' { scope = scope env <> scopeOf stm }
+          Nothing -> Nothing
+          Just (_, xfn) -> Just xfn
+        env' = env {v_alias = M.insert (patElemName pe) (x, ixfn, ixfn_inv) (v_alias env)}
+     in env' {scope = scope env <> scopeOf stm}
 topdwnTravBinding env stm =
   -- ToDo: remember to update scope info appropriately
   --       for compound statements such as if, do-loop, etc.
-  env { scope = scope env <> scopeOf stm }
-
+  env {scope = scope env <> scopeOf stm}
 
 topDownLoop :: TopDnEnv -> Stm (Aliases ExpMem.SeqMem) -> TopDnEnv
-topDownLoop td_env (Let _pat _ (DoLoop arginis_ctx arginis lform body)) =
-  let scopetab = scope td_env                              <>
-                 (scopeOfFParams (fst $ unzip arginis_ctx) <>
-                 (scopeOfFParams (fst $ unzip arginis    ) <>
-                 scopeOf lform )) --scopeOfLoopForm lform))
+topDownLoop td_env (Let _pat _ (DoLoop arginis lform body)) =
+  let scopetab =
+        scope td_env
+          <> ( scopeOfFParams (map fst arginis)
+                 <> scopeOf lform --scopeOfLoopForm lform))
+             )
       scopetab_loop = scopetab <> scopeOf (bodyStms body)
-      _bdy_ress = drop (length arginis_ctx) $ bodyResult body
       m_alias' = m_alias td_env
-                  -- foldl (foldfun scopetab_loop) (m_alias td_env) $
-                  --   zip3 (patternValueElements pat) arginis bdy_ress
-  in  td_env { scope = scopetab_loop, m_alias = m_alias' }
+   in -- foldl (foldfun scopetab_loop) (m_alias td_env) $
+      --   zip3 (patternValueElements pat) arginis bdy_ress
+      td_env {scope = scopetab_loop, m_alias = m_alias'}
 {--
   where
     updateAlias (m, m_al) tab =
@@ -196,24 +207,27 @@ getDirAliasedIxfn td_env coals_tab x =
     Just (MemBlock _ _ m_x orig_ixfun) ->
       case M.lookup m_x coals_tab of
         Nothing -> Just (m_x, m_x, orig_ixfun)
-                    -- fine, this is not subject to a coalesced point
-                    -- just return the original index function
+        -- fine, this is not subject to a coalesced point
+        -- just return the original index function
         Just coal_etry ->
           case walkAliasTab (v_alias td_env) (vartab coal_etry) x of
             Nothing -> Exc.assert False Nothing
             Just (m, ixf) -> Just (m_x, m, ixf)
     Nothing -> Nothing
 
-walkAliasTab :: VarAliasTab -> M.Map VName Coalesced -> VName
-             -> Maybe (VName, ExpMem.IxFun)
+walkAliasTab ::
+  VarAliasTab ->
+  M.Map VName Coalesced ->
+  VName ->
+  Maybe (VName, ExpMem.IxFun)
 walkAliasTab _ vtab x
   | Just (Coalesced _ (MemBlock _ _ new_mem new_ixfun) _subs) <- M.lookup x vtab =
-    Just (new_mem, new_ixfun) -- ^ @x@ is in @vartab@ together with its new ixfun
+    Just (new_mem, new_ixfun) -- @x@ is in @vartab@ together with its new ixfun
 walkAliasTab alias_tab vtab x
   | Just (x0, alias0, _) <- M.lookup x alias_tab,
     Just (m, ixfn0) <- walkAliasTab alias_tab vtab x0 =
-        -- ^ x = alias0 x0, the new ixfun of @x0@ is recorded in @vartab@ as ixfn0
-        Just (m, alias0 ixfn0)
+    -- x = alias0 x0, the new ixfun of @x0@ is recorded in @vartab@ as ixfn0
+    Just (m, alias0 ixfn0)
 walkAliasTab _ _ _ = Exc.assert False Nothing
 
 -- | We assume @x@ is in @vartab@ and we add the variables that @x@ aliases
@@ -227,28 +241,31 @@ walkAliasTab _ _ _ = Exc.assert False Nothing
 --     with @x2@ as argument should also insert entries for @x1@ and @x0@ to
 --     @vartab@, of course if their aliasing operations are invertible.
 --   We assume inverting aliases has been performed by the top-down pass.
-addInvAliassesVarTab :: TopDnEnv -> M.Map VName Coalesced -> VName
-                     -> Maybe (M.Map VName Coalesced)
+addInvAliassesVarTab ::
+  TopDnEnv ->
+  M.Map VName Coalesced ->
+  VName ->
+  Maybe (M.Map VName Coalesced)
 addInvAliassesVarTab td_env vtab x
   | Just (Coalesced _ (MemBlock _ _ m_y x_ixfun) fv_subs) <- M.lookup x vtab =
     case M.lookup x (v_alias td_env) of
       Nothing -> Just vtab
-      Just (nm, _, Nothing) -> trace ("Fails Inversion: "++pretty(x, nm, M.keys (v_alias td_env))) Nothing -- can't invert ixfun, conservatively fail!
+      Just (nm, _, Nothing) -> trace ("Fails Inversion: " ++ pretty (x, nm, M.keys (v_alias td_env))) Nothing -- can't invert ixfun, conservatively fail!
       Just (x0, _, Just inv_alias0) ->
         let x_ixfn0 = inv_alias0 x_ixfun
-        in case getScopeMemInfo x0 (scope td_env) of
-            Nothing -> Exc.assert False Nothing
-            Just (MemBlock ptp shp _ _) ->
-              let coal = Coalesced Trans (MemBlock ptp shp m_y x_ixfn0) fv_subs
-                  vartab' = M.insert x0 coal vtab
-              in  addInvAliassesVarTab td_env vartab' x0
+         in case getScopeMemInfo x0 (scope td_env) of
+              Nothing -> Exc.assert False Nothing
+              Just (MemBlock ptp shp _ _) ->
+                let coal = Coalesced Trans (MemBlock ptp shp m_y x_ixfn0) fv_subs
+                    vartab' = M.insert x0 coal vtab
+                 in addInvAliassesVarTab td_env vartab' x0
 addInvAliassesVarTab _ _ _ = Exc.assert False Nothing
 
 areAliased :: TopDnEnv -> VName -> VName -> Bool
 areAliased _ m_x m_y =
-    -- ^ this is a dummy implementation
-    m_x == m_y
+  -- this is a dummy implementation
+  m_x == m_y
 
 areAnyAliased :: TopDnEnv -> VName -> [VName] -> Bool
-areAnyAliased td_env m_x m_ys =
-    any (areAliased td_env m_x) m_ys
+areAnyAliased td_env m_x =
+  any (areAliased td_env m_x)

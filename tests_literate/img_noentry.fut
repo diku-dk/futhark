@@ -1,0 +1,1 @@
+-- > :img $loadimg "../assets/ohyes.png"

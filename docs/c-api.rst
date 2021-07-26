@@ -90,8 +90,10 @@ Context
 
 .. c:function:: void futhark_context_free(struct futhark_context *ctx)
 
-   Free the context object.  It must not be used again.  The
-   configuration must be freed separately with
+   Free the context object.  It must not be used again.  You must call
+   :c:func:`futhark_context_sync` before calling this function to
+   ensure there are no outstanding asynchronous operations still
+   running. The configuration must be freed separately with
    :c:func:`futhark_context_config_free`.
 
 .. c:function:: int futhark_context_sync(struct futhark_context *ctx)
@@ -132,7 +134,7 @@ Context
    contain interesting information if
    :c:func:`futhark_context_config_set_debugging` or
    :c:func:`futhark_context_config_set_profiling` has been called
-   previously.
+   previously.  Returns ``NULL`` on failure.
 
 .. c:function:: int futhark_context_clear_caches(struct futhark_context *ctx)
 
@@ -171,7 +173,7 @@ will not result in a double free.
    dimensions express the number of elements.  The data is copied into
    the new value.  It is the caller's responsibility to eventually
    call :c:func:`futhark_free_i32_1d`.  Multi-dimensional arrays are
-   assumed to be in row-major form.
+   assumed to be in row-major form.  Returns ``NULL`` on failure.
 
 .. c:function:: struct futhark_i32_1d *futhark_new_raw_i32_1d(struct futhark_context *ctx, char *data, int offset, int64_t dim0)
 
@@ -180,6 +182,7 @@ will not result in a double free.
    ``c`` backend, but when using e.g. the ``opencl`` backend, the
    ``data`` parameter will be a ``cl_mem``.  It is the caller's
    responsibility to eventually call :c:func:`futhark_free_i32_1d`.
+   Returns ``NULL`` on failure.
 
 .. c:function:: int futhark_free_i32_1d(struct futhark_context *ctx, struct futhark_i32_1d *arr)
 
@@ -197,7 +200,8 @@ will not result in a double free.
 
    Return a pointer to the shape of the array, with one element per
    dimension.  The lifetime of the shape is the same as ``arr``, and
-   should *not* be manually freed.
+   should *not* be manually freed.  Assuming ``arr`` is a valid
+   object, this function cannot fail.
 
 .. _opaques:
 
@@ -229,13 +233,19 @@ see :c:func:`futhark_restore_opaque_foo`).
    count by one.  The value (or at least this reference) may not be
    used again after this function returns.
 
-.. c:function:: int futhark_store_opaque_foo(struct futhark_context *ctx, const struct futhark_opaque_foo *obj, void **p, size_t *n);
+.. c:function:: int futhark_store_opaque_foo(struct futhark_context *ctx, const struct futhark_opaque_foo *obj, void **p, size_t *n)
 
    Serialise an opaque value to a byte sequence, which can later be
    restored with :c:func:`futhark_restore_opaque_foo`.  The byte
-   representation is not otherwise specified.  The variable pointed to
-   by ``n`` will always be set to the number of bytes needed to
-   represent the value.  The ``p`` parameter is more complex:
+   representation is not otherwise specified, and is not stable
+   between compiler versions or programs.  It is stable under change
+   of compiler backend, but not change of compiler version, or
+   modification to the source program (although in most cases the
+   format will not change).
+
+   The variable pointed to by ``n`` will always be set to the number
+   of bytes needed to represent the value.  The ``p`` parameter is
+   more complex:
 
    * If ``p`` is ``NULL``, the function will write to ``*n``, but not
      actually serialise the opaque value.
@@ -250,7 +260,7 @@ see :c:func:`futhark_restore_opaque_foo`).
 
    Returns 0 on success.
 
-.. c:function:: struct futhark_opaque_foo* futhark_restore_opaque_foo(struct futhark_context *ctx, const void *p);
+.. c:function:: struct futhark_opaque_foo* futhark_restore_opaque_foo(struct futhark_context *ctx, const void *p)
 
    Restore a byte sequence previously written with
    :c:func:`futhark_store_opaque_foo`.  Returns ``NULL`` on failure.
@@ -271,22 +281,30 @@ For example, this Futhark entry point::
 
 Results in the following C function:
 
-.. c:function:: int futhark_entry_main(struct futhark_context *ctx, int32_t *out0, const struct futhark_i32_1d *in0)
+.. c:function:: int futhark_entry_sum(struct futhark_context *ctx, int32_t *out0, const struct futhark_i32_1d *in0)
 
    Asynchronously call the entry point with the given arguments.  Make
    sure to call :c:func:`futhark_context_sync` before using the value
    of ``out0``.
 
-The exact behaviour of the exit code depends on the backend.  For the
-sequential C backend, errors will always be available when the entry
-point returns, and :c:func:`futhark_context_sync` will always return
-success.  When using a GPU backend such as ``cuda`` or ``opencl``, the
-entry point may still be running asynchronous operations when it
+Errors are indicated by a nonzero return value.  On error, nothing is
+written to the *out*-parameters.
+
+The precise semantics of the return value depends on the backend.  For
+the sequential C backend, errors will always be available when the
+entry point returns, and :c:func:`futhark_context_sync` will always
+return zero.  When using a GPU backend such as ``cuda`` or ``opencl``,
+the entry point may still be running asynchronous operations when it
 returns, in which case the entry point may return zero successfully,
 even though execution has already (or will) fail.  These problems will
-be reported when :c:func:`futhark_context_sync` is called.  When using
-GPU backends, be careful to check the return code of *both* the entry
-point itself, and :c:func:`futhark_context_sync`.
+be reported when :c:func:`futhark_context_sync` is called.  Therefore,
+be careful to check the return code of *both* the entry point itself,
+and :c:func:`futhark_context_sync`.
+
+For the rules on entry points that consume their input, see
+:ref:`api-consumption`.  Note that even if a value has been consumed,
+you must still manually free it.  This is the only operation that is
+permitted on a consumed value.
 
 GPU
 ---
@@ -419,7 +437,6 @@ backend.
    value less than ``1``, then the runtime system will use one thread
    per detected core.
 
-
 General guarantees
 ------------------
 
@@ -446,3 +463,8 @@ Note that for the GPU backends, the underlying API (such as CUDA or
 OpenCL) may perform file system operations during startup, and perhaps
 for caching GPU kernels in some cases.  This is beyond Futhark's
 control.
+
+Violation the restrictions of consumption (see :ref:`api-consumption`)
+can result in undefined behaviour.  This does not matter for programs
+whose entry points do not have unique parameter types
+(:ref:`in-place-updates`).

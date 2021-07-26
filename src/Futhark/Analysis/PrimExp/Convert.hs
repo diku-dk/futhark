@@ -9,6 +9,10 @@ module Futhark.Analysis.PrimExp.Convert
     le32,
     pe64,
     le64,
+    f32pe,
+    f32le,
+    f64pe,
+    f64le,
     primExpFromSubExpM,
     replaceInPrimExp,
     replaceInPrimExpM,
@@ -56,9 +60,9 @@ instance ToExp v => ToExp (TPrimExp t v) where
 -- This includes constants and variable names, which are passed as
 -- t'SubExp's.
 primExpFromExp ::
-  (Fail.MonadFail m, Decorations lore) =>
+  (Fail.MonadFail m, RepTypes rep) =>
   (VName -> m (PrimExp v)) ->
-  Exp lore ->
+  Exp rep ->
   m (PrimExp v)
 primExpFromExp f (BasicOp (BinOp op x y)) =
   BinOpExp op <$> primExpFromSubExpM f x <*> primExpFromSubExpM f y
@@ -102,6 +106,22 @@ pe64 = isInt64 . primExpFromSubExp int64
 le64 :: a -> TPrimExp Int64 a
 le64 = isInt64 . flip LeafExp int64
 
+-- | Shorthand for constructing a 'TPrimExp' of type 'Float32'.
+f32pe :: SubExp -> TPrimExp Float VName
+f32pe = isF32 . primExpFromSubExp float32
+
+-- | Shorthand for constructing a 'TPrimExp' of type 'Float32', from a leaf.
+f32le :: a -> TPrimExp Float a
+f32le = isF32 . flip LeafExp float32
+
+-- | Shorthand for constructing a 'TPrimExp' of type 'Float64'.
+f64pe :: SubExp -> TPrimExp Double VName
+f64pe = isF64 . primExpFromSubExp float64
+
+-- | Shorthand for constructing a 'TPrimExp' of type 'Float64', from a leaf.
+f64le :: a -> TPrimExp Double a
+f64le = isF64 . flip LeafExp float64
+
 -- | Applying a monadic transformation to the leaves in a 'PrimExp'.
 replaceInPrimExpM ::
   Monad m =>
@@ -144,8 +164,8 @@ substituteInPrimExp tab = replaceInPrimExp $ \v t ->
 
 -- | Convert a 'SubExp' slice to a 'PrimExp' slice.
 primExpSlice :: Slice SubExp -> Slice (TPrimExp Int64 VName)
-primExpSlice = map $ fmap pe64
+primExpSlice = fmap pe64
 
 -- | Convert a 'PrimExp' slice to a 'SubExp' slice.
-subExpSlice :: MonadBinder m => Slice (TPrimExp Int64 VName) -> m (Slice SubExp)
-subExpSlice = mapM $ traverse $ toSubExp "slice"
+subExpSlice :: MonadBuilder m => Slice (TPrimExp Int64 VName) -> m (Slice SubExp)
+subExpSlice = traverse $ toSubExp "slice"

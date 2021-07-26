@@ -69,13 +69,13 @@ data BreakReason
     BreakNaN
 
 data ExtOp a
-  = ExtOpTrace Loc String a
-  | ExtOpBreak BreakReason (NE.NonEmpty StackFrame) a
+  = ExtOpTrace String String a
+  | ExtOpBreak Loc BreakReason (NE.NonEmpty StackFrame) a
   | ExtOpError InterpreterError
 
 instance Functor ExtOp where
   fmap f (ExtOpTrace w s x) = ExtOpTrace w s $ f x
-  fmap f (ExtOpBreak why backtrace x) = ExtOpBreak why backtrace $ f x
+  fmap f (ExtOpBreak w why backtrace x) = ExtOpBreak w why backtrace $ f x
   fmap _ (ExtOpError err) = ExtOpError err
 
 type Stack = [StackFrame]
@@ -243,9 +243,10 @@ data Value
   | -- Stores the full shape.
     ValueRecord (M.Map Name Value)
   | ValueFun (Value -> EvalM Value)
-  | ValueSum ValueShape Name [Value]
-
--- Stores the full shape.
+  | -- Stores the full shape.
+    ValueSum ValueShape Name [Value]
+  | -- The update function and the array.
+    ValueAcc (Value -> Value -> EvalM Value) !(Array Int Value)
 
 instance Eq Value where
   ValuePrim (SignedValue x) == ValuePrim (SignedValue y) =
@@ -259,6 +260,7 @@ instance Eq Value where
   ValueArray _ x == ValueArray _ y = x == y
   ValueRecord x == ValueRecord y = x == y
   ValueSum _ n1 vs1 == ValueSum _ n2 vs2 = n1 == n2 && vs1 == vs2
+  ValueAcc _ x == ValueAcc _ y = x == y
   _ == _ = False
 
 instance Pretty Value where
@@ -273,6 +275,7 @@ instance Pretty Value where
      in brackets $ cat $ punctuate separator (map ppr elements)
   pprPrec _ (ValueRecord m) = prettyRecord m
   pprPrec _ ValueFun {} = text "#<fun>"
+  pprPrec _ ValueAcc {} = text "#<acc>"
   pprPrec p (ValueSum _ n vs) =
     parensIf (p > 0) $ text "#" <> sep (ppr n : map (pprPrec 1) vs)
 
@@ -452,13 +455,9 @@ bad loc env s = stacking loc env $ do
   ss <- map (locStr . srclocOf) <$> stacktrace
   liftF $ ExtOpError $ InterpreterError $ "Error at\n" ++ prettyStacktrace 0 ss ++ s
 
-trace :: Value -> EvalM ()
-trace v = do
-  -- We take the second-to-top element of the stack, because any
-  -- actual call to 'implicits.trace' is going to be in the trace
-  -- function in the prelude, which is not interesting.
-  top <- fromMaybe noLoc . maybeHead . drop 1 <$> stacktrace
-  liftF $ ExtOpTrace top (prettyOneLine v) ()
+trace :: String -> Value -> EvalM ()
+trace w v = do
+  liftF $ ExtOpTrace w (prettyOneLine v) ()
 
 typeCheckerEnv :: Env -> T.Env
 typeCheckerEnv env =
@@ -474,16 +473,12 @@ typeCheckerEnv env =
           T.envVtable = vtable
         }
 
-break :: EvalM ()
-break = do
-  -- We don't want the env of the function that is calling
-  -- intrinsics.break, since that is just going to be the boring
-  -- wrapper function (intrinsics are never called directly).
-  -- This is why we go a step up the stack.
-  backtrace <- asks $ drop 1 . fst
+break :: Loc -> EvalM ()
+break loc = do
+  backtrace <- asks fst
   case NE.nonEmpty backtrace of
     Nothing -> return ()
-    Just backtrace' -> liftF $ ExtOpBreak BreakPoint backtrace' ()
+    Just backtrace' -> liftF $ ExtOpBreak loc BreakPoint backtrace' ()
 
 fromArray :: Value -> (ValueShape, [Value])
 fromArray (ValueArray shape as) = (shape, elems as)
@@ -506,30 +501,30 @@ apply2 loc env f x y = stacking loc env $ do
   f' <- apply noLoc mempty f x
   apply noLoc mempty f' y
 
-matchPattern :: Env -> Pattern -> Value -> EvalM Env
-matchPattern env p v = do
+matchPat :: Env -> Pat -> Value -> EvalM Env
+matchPat env p v = do
   m <- runMaybeT $ patternMatch env p v
   case m of
-    Nothing -> error $ "matchPattern: missing case for " ++ pretty p ++ " and " ++ pretty v
+    Nothing -> error $ "matchPat: missing case for " ++ pretty p ++ " and " ++ pretty v
     Just env' -> return env'
 
-patternMatch :: Env -> Pattern -> Value -> MaybeT EvalM Env
+patternMatch :: Env -> Pat -> Value -> MaybeT EvalM Env
 patternMatch env (Id v (Info t) _) val =
   lift $
     pure $
       valEnv (M.singleton v (Just $ T.BoundV [] $ toStruct t, val)) <> env
 patternMatch env Wildcard {} _ =
   lift $ pure env
-patternMatch env (TuplePattern ps _) (ValueRecord vs) =
+patternMatch env (TuplePat ps _) (ValueRecord vs) =
   foldM (\env' (p, v) -> patternMatch env' p v) env $
     zip ps (map snd $ sortFields vs)
-patternMatch env (RecordPattern ps _) (ValueRecord vs) =
+patternMatch env (RecordPat ps _) (ValueRecord vs) =
   foldM (\env' (p, v) -> patternMatch env' p v) env $
     M.intersectionWith (,) (M.fromList ps) vs
-patternMatch env (PatternParens p _) v = patternMatch env p v
-patternMatch env (PatternAscription p _ _) v =
+patternMatch env (PatParens p _) v = patternMatch env p v
+patternMatch env (PatAscription p _ _) v =
   patternMatch env p v
-patternMatch env (PatternLit l t _) v = do
+patternMatch env (PatLit l t _) v = do
   l' <- case l of
     PatLitInt x -> lift $ eval env $ IntLit x t mempty
     PatLitFloat x -> lift $ eval env $ FloatLit x t mempty
@@ -537,7 +532,7 @@ patternMatch env (PatternLit l t _) v = do
   if v == l'
     then pure env
     else mzero
-patternMatch env (PatternConstr n _ ps _) (ValueSum _ n' vs)
+patternMatch env (PatConstr n _ ps _) (ValueSum _ n' vs)
   | n == n' =
     foldM (\env' (p, v) -> patternMatch env' p v) env $ zip ps vs
 patternMatch _ _ _ = mzero
@@ -720,7 +715,7 @@ typeValueShape env t = do
     dim (ConstDim x) = Just $ fromIntegral x
     dim _ = Nothing
 
-evalFunction :: Env -> [VName] -> [Pattern] -> Exp -> StructType -> EvalM Value
+evalFunction :: Env -> [VName] -> [Pat] -> Exp -> StructType -> EvalM Value
 -- We treat zero-parameter lambdas as simply an expression to
 -- evaluate immediately.  Note that this is *not* the same as a lambda
 -- that takes an empty tuple '()' as argument!  Zero-parameter lambdas
@@ -733,7 +728,7 @@ evalFunction env _ [] body rettype =
     etaExpand vs env' (Scalar (Arrow _ _ pt rt)) =
       return $
         ValueFun $ \v -> do
-          env'' <- matchPattern env' (Wildcard (Info $ fromStruct pt) noLoc) v
+          env'' <- matchPat env' (Wildcard (Info $ fromStruct pt) noLoc) v
           etaExpand (v : vs) env'' rt
     etaExpand vs env' _ = do
       f <- eval env' body
@@ -741,24 +736,19 @@ evalFunction env _ [] body rettype =
 evalFunction env missing_sizes (p : ps) body rettype =
   return $
     ValueFun $ \v -> do
-      env' <- matchPattern env p v
+      env' <- matchPat env p v
       -- Fix up the last sizes, if any.
-      let env''
+      let p_t = evalType env $ patternStructType p
+          env''
             | null missing_sizes = env'
             | otherwise =
-              env'
-                <> i64Env
-                  ( resolveExistentials
-                      missing_sizes
-                      (patternStructType p)
-                      (valueShape v)
-                  )
+              env' <> i64Env (resolveExistentials missing_sizes p_t (valueShape v))
       evalFunction env'' missing_sizes ps body rettype
 
 evalFunctionBinding ::
   Env ->
   [TypeParam] ->
-  [Pattern] ->
+  [Pat] ->
   StructType ->
   [VName] ->
   Exp ->
@@ -803,36 +793,8 @@ returned env ret retext v = do
       resolveExistentials retext (evalType env $ toStruct ret) $ valueShape v
   return v
 
-eval :: Env -> Exp -> EvalM Value
-eval _ (Literal v _) = return $ ValuePrim v
-eval env (Parens e _) = eval env e
-eval env (QualParens (qv, _) e loc) = do
-  m <- evalModuleVar env qv
-  case m of
-    ModuleFun {} -> error $ "Local open of module function at " ++ locStr loc
-    Module m' -> eval (m' <> env) e
-eval env (TupLit vs _) = toTuple <$> mapM (eval env) vs
-eval env (RecordLit fields _) =
-  ValueRecord . M.fromList <$> mapM evalField fields
-  where
-    evalField (RecordFieldExplicit k e _) = do
-      v <- eval env e
-      return (k, v)
-    evalField (RecordFieldImplicit k t loc) = do
-      v <- eval env $ Var (qualName k) t loc
-      return (baseName k, v)
-eval _ (StringLit vs _) =
-  return $
-    toArray' ShapeLeaf $
-      map (ValuePrim . UnsignedValue . Int8Value . fromIntegral) vs
-eval env (ArrayLit [] (Info t) _) = do
-  t' <- typeValueShape env $ toStruct t
-  return $ toArray t' []
-eval env (ArrayLit (v : vs) _ _) = do
-  v' <- eval env v
-  vs' <- mapM (eval env) vs
-  return $ toArray' (valueShape v') (v' : vs')
-eval env (Range start maybe_second end (Info t, Info retext) loc) = do
+evalAppExp :: Env -> AppExp -> EvalM Value
+evalAppExp env (Range start maybe_second end loc) = do
   start' <- asInteger <$> eval env start
   maybe_second' <- traverse (fmap asInteger . eval env) maybe_second
   end' <- traverse (fmap asInteger . eval env) end
@@ -856,18 +818,16 @@ eval env (Range start maybe_second end (Info t, Info retext) loc) = do
             (x -1, second' - start', start' <= x && second' > start')
 
   if ok
-    then
-      returned env t retext $
-        toArray' ShapeLeaf $ map toInt [start', start' + step .. end_adj]
+    then pure $ toArray' ShapeLeaf $ map toInt [start', start' + step .. end_adj]
     else bad loc env $ badRange start' maybe_second' end'
   where
     toInt =
-      case stripArray 1 t of
+      case typeOf start of
         Scalar (Prim (Signed t')) ->
           ValuePrim . SignedValue . intValue t'
         Scalar (Prim (Unsigned t')) ->
           ValuePrim . UnsignedValue . intValue t'
-        _ -> error $ "Nonsensical range type: " ++ show t
+        t -> error $ "Nonsensical range type: " ++ show t
 
     badRange start' maybe_second' end' =
       "Range " ++ pretty start'
@@ -881,10 +841,8 @@ eval env (Range start maybe_second end (Info t, Info retext) loc) = do
                UpToExclusive x -> "..<" ++ pretty x
            )
         ++ " is invalid."
-eval env (Var qv (Info t) _) = evalTermVar env qv (toStruct t)
-eval env (Ascript e _ _) = eval env e
-eval env (Coerce e td (Info ret, Info retext) loc) = do
-  v <- returned env ret retext =<< eval env e
+evalAppExp env (Coerce e td loc) = do
+  v <- eval env e
   let t = evalType env $ unInfo $ expandedType td
   case checkShape (structTypeShape (envShapes env) t) (valueShape v) of
     Just _ -> return v
@@ -896,36 +854,23 @@ eval env (Coerce e td (Info ret, Info retext) loc) = do
           <> "` (`"
           <> pretty t
           <> "`)"
-eval env (LetPat p e body (Info ret, Info retext) _) = do
+evalAppExp env (LetPat sizes p e body _) = do
   v <- eval env e
-  env' <- matchPattern env p v
-  returned env ret retext =<< eval env' body
-eval env (LetFun f (tparams, ps, _, Info ret, fbody) body _ _) = do
+  env' <- matchPat env p v
+  let p_t = evalType env $ patternStructType p
+      v_s = valueShape v
+      env'' = env' <> i64Env (resolveExistentials (map sizeName sizes) p_t v_s)
+  eval env'' body
+evalAppExp env (LetFun f (tparams, ps, _, Info ret, fbody) body _) = do
   binding <- evalFunctionBinding env tparams ps ret [] fbody
   eval (env {envTerm = M.insert f binding $ envTerm env}) body
-eval _ (IntLit v (Info t) _) =
-  case t of
-    Scalar (Prim (Signed it)) ->
-      return $ ValuePrim $ SignedValue $ intValue it v
-    Scalar (Prim (Unsigned it)) ->
-      return $ ValuePrim $ UnsignedValue $ intValue it v
-    Scalar (Prim (FloatType ft)) ->
-      return $ ValuePrim $ FloatValue $ floatValue ft v
-    _ -> error $ "eval: nonsensical type for integer literal: " ++ pretty t
-eval _ (FloatLit v (Info t) _) =
-  case t of
-    Scalar (Prim (FloatType ft)) ->
-      return $ ValuePrim $ FloatValue $ floatValue ft v
-    _ -> error $ "eval: nonsensical type for float literal: " ++ pretty t
-eval
+evalAppExp
   env
   ( BinOp
       (op, _)
       op_t
       (x, Info (_, xext))
       (y, Info (_, yext))
-      (Info t)
-      (Info retext)
       loc
     )
     | baseString (qualLeaf op) == "&&" = do
@@ -942,49 +887,21 @@ eval
       op' <- eval env $ Var op op_t loc
       x' <- evalArg env x xext
       y' <- evalArg env y yext
-      returned env t retext =<< apply2 loc env op' x' y'
-eval env (If cond e1 e2 (Info ret, Info retext) _) = do
+      apply2 loc env op' x' y'
+evalAppExp env (If cond e1 e2 _) = do
   cond' <- asBool <$> eval env cond
-  returned env ret retext
-    =<< if cond' then eval env e1 else eval env e2
-eval env (Apply f x (Info (_, ext)) (Info t, Info retext) loc) = do
+  if cond' then eval env e1 else eval env e2
+evalAppExp env (Apply f x (Info (_, ext)) loc) = do
   -- It is important that 'x' is evaluated first in order to bring any
   -- sizes into scope that may be used in the type of 'f'.
   x' <- evalArg env x ext
   f' <- eval env f
-  returned env t retext =<< apply loc env f' x'
-eval env (Negate e _) = do
-  ev <- eval env e
-  ValuePrim <$> case ev of
-    ValuePrim (SignedValue (Int8Value v)) -> return $ SignedValue $ Int8Value (- v)
-    ValuePrim (SignedValue (Int16Value v)) -> return $ SignedValue $ Int16Value (- v)
-    ValuePrim (SignedValue (Int32Value v)) -> return $ SignedValue $ Int32Value (- v)
-    ValuePrim (SignedValue (Int64Value v)) -> return $ SignedValue $ Int64Value (- v)
-    ValuePrim (UnsignedValue (Int8Value v)) -> return $ UnsignedValue $ Int8Value (- v)
-    ValuePrim (UnsignedValue (Int16Value v)) -> return $ UnsignedValue $ Int16Value (- v)
-    ValuePrim (UnsignedValue (Int32Value v)) -> return $ UnsignedValue $ Int32Value (- v)
-    ValuePrim (UnsignedValue (Int64Value v)) -> return $ UnsignedValue $ Int64Value (- v)
-    ValuePrim (FloatValue (Float32Value v)) -> return $ FloatValue $ Float32Value (- v)
-    ValuePrim (FloatValue (Float64Value v)) -> return $ FloatValue $ Float64Value (- v)
-    _ -> error $ "Cannot negate " ++ pretty ev
-eval env (Index e is (Info t, Info retext) loc) = do
+  apply loc env f' x'
+evalAppExp env (Index e is loc) = do
   is' <- mapM (evalDimIndex env) is
   arr <- eval env e
-  returned env t retext =<< evalIndex loc env is' arr
-eval env (Update src is v loc) =
-  maybe oob return
-    =<< updateArray <$> mapM (evalDimIndex env) is <*> eval env src <*> eval env v
-  where
-    oob = bad loc env "Bad update"
-eval env (RecordUpdate src all_fs v _ _) =
-  update <$> eval env src <*> pure all_fs <*> eval env v
-  where
-    update _ [] v' = v'
-    update (ValueRecord src') (f : fs) v'
-      | Just f_v <- M.lookup f src' =
-        ValueRecord $ M.insert f (update f_v fs v') src'
-    update _ _ _ = error "eval RecordUpdate: invalid value."
-eval env (LetWith dest src is v body _ loc) = do
+  evalIndex loc env is' arr
+evalAppExp env (LetWith dest src is v body loc) = do
   let Ident src_vn (Info src_t) _ = src
   dest' <-
     maybe oob return
@@ -995,46 +912,17 @@ eval env (LetWith dest src is v body _ loc) = do
   eval (valEnv (M.singleton (identName dest) (Just t, dest')) <> env) body
   where
     oob = bad loc env "Bad update"
-
--- We treat zero-parameter lambdas as simply an expression to
--- evaluate immediately.  Note that this is *not* the same as a lambda
--- that takes an empty tuple '()' as argument!  Zero-parameter lambdas
--- can never occur in a well-formed Futhark program, but they are
--- convenient in the interpreter.
-eval env (Lambda ps body _ (Info (_, rt)) _) =
-  evalFunction env [] ps body rt
-eval env (OpSection qv (Info t) _) = evalTermVar env qv $ toStruct t
-eval env (OpSectionLeft qv _ e (Info (_, _, argext), _) (Info t, Info retext) loc) = do
-  v <- evalArg env e argext
-  f <- evalTermVar env qv (toStruct t)
-  returned env t retext =<< apply loc env f v
-eval env (OpSectionRight qv _ e (Info _, Info (_, _, argext)) (Info t) loc) = do
-  y <- evalArg env e argext
-  return $
-    ValueFun $ \x -> do
-      f <- evalTermVar env qv $ toStruct t
-      apply2 loc env f x y
-eval env (IndexSection is _ loc) = do
-  is' <- mapM (evalDimIndex env) is
-  return $ ValueFun $ evalIndex loc env is'
-eval _ (ProjectSection ks _ _) =
-  return $ ValueFun $ flip (foldM walk) ks
-  where
-    walk (ValueRecord fs) f
-      | Just v' <- M.lookup f fs = return v'
-    walk _ _ = error "Value does not have expected field."
-eval env (DoLoop sparams pat init_e form body (Info (ret, retext)) _) = do
+evalAppExp env (DoLoop sparams pat init_e form body _) = do
   init_v <- eval env init_e
-  returned env ret retext
-    =<< case form of
-      For iv bound -> do
-        bound' <- asSigned <$> eval env bound
-        forLoop (identName iv) bound' (zero bound') init_v
-      ForIn in_pat in_e -> do
-        (_, in_vs) <- fromArray <$> eval env in_e
-        foldM (forInLoop in_pat) init_v in_vs
-      While cond ->
-        whileLoop cond init_v
+  case form of
+    For iv bound -> do
+      bound' <- asSigned <$> eval env bound
+      forLoop (identName iv) bound' (zero bound') init_v
+    ForIn in_pat in_e -> do
+      (_, in_vs) <- fromArray <$> eval env in_e
+      foldM (forInLoop in_pat) init_v in_vs
+    While cond ->
+      whileLoop cond init_v
   where
     withLoopParams v =
       let sparams' =
@@ -1042,7 +930,7 @@ eval env (DoLoop sparams pat init_e form body (Info (ret, retext)) _) = do
               sparams
               (patternStructType pat)
               (valueShape v)
-       in matchPattern (i64Env sparams' <> env) pat v
+       in matchPat (i64Env sparams' <> env) pat v
 
     inc = (`P.doAdd` Int64Value 1)
     zero = (`P.doMul` Int64Value 0)
@@ -1073,8 +961,121 @@ eval env (DoLoop sparams pat init_e form body (Info (ret, retext)) _) = do
 
     forInLoop in_pat v in_v = do
       env' <- withLoopParams v
-      env'' <- matchPattern env' in_pat in_v
+      env'' <- matchPat env' in_pat in_v
       eval env'' body
+evalAppExp env (Match e cs _) = do
+  v <- eval env e
+  match v (NE.toList cs)
+  where
+    match _ [] =
+      error "Pat match failure."
+    match v (c : cs') = do
+      c' <- evalCase v env c
+      case c' of
+        Just v' -> return v'
+        Nothing -> match v cs'
+
+eval :: Env -> Exp -> EvalM Value
+eval _ (Literal v _) = return $ ValuePrim v
+eval env (Parens e _) = eval env e
+eval env (QualParens (qv, _) e loc) = do
+  m <- evalModuleVar env qv
+  case m of
+    ModuleFun {} -> error $ "Local open of module function at " ++ locStr loc
+    Module m' -> eval (m' <> env) e
+eval env (TupLit vs _) = toTuple <$> mapM (eval env) vs
+eval env (RecordLit fields _) =
+  ValueRecord . M.fromList <$> mapM evalField fields
+  where
+    evalField (RecordFieldExplicit k e _) = do
+      v <- eval env e
+      return (k, v)
+    evalField (RecordFieldImplicit k t loc) = do
+      v <- eval env $ Var (qualName k) t loc
+      return (baseName k, v)
+eval _ (StringLit vs _) =
+  return $
+    toArray' ShapeLeaf $
+      map (ValuePrim . UnsignedValue . Int8Value . fromIntegral) vs
+eval env (ArrayLit [] (Info t) _) = do
+  t' <- typeValueShape env $ toStruct t
+  return $ toArray t' []
+eval env (ArrayLit (v : vs) _ _) = do
+  v' <- eval env v
+  vs' <- mapM (eval env) vs
+  return $ toArray' (valueShape v') (v' : vs')
+eval env (AppExp e (Info (AppRes t retext))) =
+  returned env t retext =<< evalAppExp env e
+eval env (Var qv (Info t) _) = evalTermVar env qv (toStruct t)
+eval env (Ascript e _ _) = eval env e
+eval _ (IntLit v (Info t) _) =
+  case t of
+    Scalar (Prim (Signed it)) ->
+      return $ ValuePrim $ SignedValue $ intValue it v
+    Scalar (Prim (Unsigned it)) ->
+      return $ ValuePrim $ UnsignedValue $ intValue it v
+    Scalar (Prim (FloatType ft)) ->
+      return $ ValuePrim $ FloatValue $ floatValue ft v
+    _ -> error $ "eval: nonsensical type for integer literal: " ++ pretty t
+eval _ (FloatLit v (Info t) _) =
+  case t of
+    Scalar (Prim (FloatType ft)) ->
+      return $ ValuePrim $ FloatValue $ floatValue ft v
+    _ -> error $ "eval: nonsensical type for float literal: " ++ pretty t
+eval env (Negate e _) = do
+  ev <- eval env e
+  ValuePrim <$> case ev of
+    ValuePrim (SignedValue (Int8Value v)) -> return $ SignedValue $ Int8Value (- v)
+    ValuePrim (SignedValue (Int16Value v)) -> return $ SignedValue $ Int16Value (- v)
+    ValuePrim (SignedValue (Int32Value v)) -> return $ SignedValue $ Int32Value (- v)
+    ValuePrim (SignedValue (Int64Value v)) -> return $ SignedValue $ Int64Value (- v)
+    ValuePrim (UnsignedValue (Int8Value v)) -> return $ UnsignedValue $ Int8Value (- v)
+    ValuePrim (UnsignedValue (Int16Value v)) -> return $ UnsignedValue $ Int16Value (- v)
+    ValuePrim (UnsignedValue (Int32Value v)) -> return $ UnsignedValue $ Int32Value (- v)
+    ValuePrim (UnsignedValue (Int64Value v)) -> return $ UnsignedValue $ Int64Value (- v)
+    ValuePrim (FloatValue (Float32Value v)) -> return $ FloatValue $ Float32Value (- v)
+    ValuePrim (FloatValue (Float64Value v)) -> return $ FloatValue $ Float64Value (- v)
+    _ -> error $ "Cannot negate " ++ pretty ev
+eval env (Update src is v loc) =
+  maybe oob return
+    =<< updateArray <$> mapM (evalDimIndex env) is <*> eval env src <*> eval env v
+  where
+    oob = bad loc env "Bad update"
+eval env (RecordUpdate src all_fs v _ _) =
+  update <$> eval env src <*> pure all_fs <*> eval env v
+  where
+    update _ [] v' = v'
+    update (ValueRecord src') (f : fs) v'
+      | Just f_v <- M.lookup f src' =
+        ValueRecord $ M.insert f (update f_v fs v') src'
+    update _ _ _ = error "eval RecordUpdate: invalid value."
+-- We treat zero-parameter lambdas as simply an expression to
+-- evaluate immediately.  Note that this is *not* the same as a lambda
+-- that takes an empty tuple '()' as argument!  Zero-parameter lambdas
+-- can never occur in a well-formed Futhark program, but they are
+-- convenient in the interpreter.
+eval env (Lambda ps body _ (Info (_, rt)) _) =
+  evalFunction env [] ps body rt
+eval env (OpSection qv (Info t) _) = evalTermVar env qv $ toStruct t
+eval env (OpSectionLeft qv _ e (Info (_, _, argext), _) (Info t, Info retext) loc) = do
+  v <- evalArg env e argext
+  f <- evalTermVar env qv (toStruct t)
+  returned env t retext =<< apply loc env f v
+eval env (OpSectionRight qv _ e (Info _, Info (_, _, argext)) (Info t) loc) = do
+  y <- evalArg env e argext
+  return $
+    ValueFun $ \x -> do
+      f <- evalTermVar env qv $ toStruct t
+      apply2 loc env f x y
+eval env (IndexSection is _ loc) = do
+  is' <- mapM (evalDimIndex env) is
+  return $ ValueFun $ evalIndex loc env is'
+eval _ (ProjectSection ks _ _) =
+  return $ ValueFun $ flip (foldM walk) ks
+  where
+    walk (ValueRecord fs) f
+      | Just v' <- M.lookup f fs = return v'
+    walk _ _ = error "Value does not have expected field."
 eval env (Project f e _ _) = do
   v <- eval env e
   case v of
@@ -1088,18 +1089,19 @@ eval env (Constr c es (Info t) _) = do
   vs <- mapM (eval env) es
   shape <- typeValueShape env $ toStruct t
   return $ ValueSum shape c vs
-eval env (Match e cs (Info ret, Info retext) _) = do
+eval env (Attr (AttrAtom "break") e loc) = do
+  break (locOf loc)
+  eval env e
+eval env (Attr (AttrAtom "trace") e loc) = do
   v <- eval env e
-  returned env ret retext =<< match v (NE.toList cs)
-  where
-    match _ [] =
-      error "Pattern match failure."
-    match v (c : cs') = do
-      c' <- evalCase v env c
-      case c' of
-        Just v' -> return v'
-        Nothing -> match v cs'
-eval env (Attr _ e _) = eval env e
+  trace (locStr (locOf loc)) v
+  pure v
+eval env (Attr (AttrComp "trace" [AttrAtom tag]) e _) = do
+  v <- eval env e
+  trace (nameToString tag) v
+  pure v
+eval env (Attr _ e _) =
+  eval env e
 
 evalCase ::
   Value ->
@@ -1137,7 +1139,7 @@ substituteInModule substs = onModule
     onType (T.TypeAbbr l ps t) = T.TypeAbbr l ps $ first onDim t
     onDim (NamedDim v) = NamedDim $ replaceQ v
     onDim (ConstDim x) = ConstDim x
-    onDim AnyDim = AnyDim
+    onDim (AnyDim v) = AnyDim v
 
 evalModuleVar :: Env -> QualName VName -> EvalM Module
 evalModuleVar env qv =
@@ -1229,7 +1231,9 @@ breakOnNaN inputs result
     backtrace <- asks fst
     case NE.nonEmpty backtrace of
       Nothing -> return ()
-      Just backtrace' -> liftF $ ExtOpBreak BreakNaN backtrace' ()
+      Just backtrace' ->
+        let loc = stackFrameLoc $ NE.head backtrace'
+         in liftF $ ExtOpBreak loc BreakNaN backtrace' ()
 breakOnNaN _ _ =
   return ()
 
@@ -1296,7 +1300,7 @@ initialCtx =
     putV (P.IntValue x) = SignedValue x
     putV (P.FloatValue x) = FloatValue x
     putV (P.BoolValue x) = BoolValue x
-    putV P.Checked = BoolValue True
+    putV P.UnitValue = BoolValue True
 
     getS (SignedValue x) = Just $ P.IntValue x
     getS _ = Nothing
@@ -1336,6 +1340,13 @@ initialCtx =
           case fromTuple v of
             Just [x, y, z] -> f x y z
             _ -> error $ "Expected triple; got: " ++ pretty v
+
+    fun5t f =
+      TermValue Nothing $
+        ValueFun $ \v ->
+          case fromTuple v of
+            Just [x, y, z, a, b] -> f x y z a b
+            _ -> error $ "Expected pentuple; got: " ++ pretty v
 
     fun6t f =
       TermValue Nothing $
@@ -1628,6 +1639,50 @@ initialCtx =
         insertAt 0 x (l : ls) = (x : l) : ls
         insertAt i x (l : ls) = l : insertAt (i -1) x ls
         insertAt _ _ ls = ls
+    def "scatter_stream" = Just $
+      fun3t $ \dest f vs ->
+        case (dest, vs) of
+          ( ValueArray dest_shape dest_arr,
+            ValueArray _ vs_arr
+            ) -> do
+              let acc = ValueAcc (\_ x -> pure x) dest_arr
+              acc' <- foldM (apply2 noLoc mempty f) acc vs_arr
+              case acc' of
+                ValueAcc _ dest_arr' ->
+                  return $ ValueArray dest_shape dest_arr'
+                _ ->
+                  error $ "scatter_stream produced: " ++ pretty acc'
+          _ ->
+            error $ "scatter_stream expects array, but got: " ++ pretty (dest, vs)
+    def "hist_stream" = Just $
+      fun5t $ \dest op _ne f vs ->
+        case (dest, vs) of
+          ( ValueArray dest_shape dest_arr,
+            ValueArray _ vs_arr
+            ) -> do
+              let acc = ValueAcc (apply2 noLoc mempty op) dest_arr
+              acc' <- foldM (apply2 noLoc mempty f) acc vs_arr
+              case acc' of
+                ValueAcc _ dest_arr' ->
+                  return $ ValueArray dest_shape dest_arr'
+                _ ->
+                  error $ "hist_stream produced: " ++ pretty acc'
+          _ ->
+            error $ "hist_stream expects array, but got: " ++ pretty (dest, vs)
+    def "acc_write" = Just $
+      fun3t $ \acc i v ->
+        case (acc, i) of
+          ( ValueAcc op acc_arr,
+            ValuePrim (SignedValue (Int64Value i'))
+            ) ->
+              if i' >= 0 && i' < arrayLength acc_arr
+                then do
+                  let x = acc_arr ! fromIntegral i'
+                  res <- op x v
+                  pure $ ValueAcc op $ acc_arr // [(fromIntegral i', res)]
+                else pure acc
+          _ ->
+            error $ "acc_write invalid arguments: " ++ pretty (acc, i, v)
     def "unzip" = Just $
       fun1 $ \x -> do
         let ShapeDim _ (ShapeRecord fs) = valueShape x
@@ -1679,12 +1734,7 @@ initialCtx =
             rowshape = ShapeDim (asInt64 m) innershape
             shape = ShapeDim (asInt64 n) rowshape
         return $ toArray shape $ map (toArray rowshape) $ chunk (asInt m) xs'
-    def "opaque" = Just $ fun1 return
-    def "trace" = Just $ fun1 $ \v -> trace v >> return v
-    def "break" = Just $
-      fun1 $ \v -> do
-        break
-        return v
+    def "acc" = Nothing
     def s | nameFromString s `M.member` namesToPrimTypes = Nothing
     def s = error $ "Missing intrinsic: " ++ s
 
@@ -1702,7 +1752,13 @@ interpretExp ctx e = runEvalM (ctxImports ctx) $ eval (ctxEnv ctx) e
 
 interpretDec :: Ctx -> Dec -> F ExtOp Ctx
 interpretDec ctx d = do
-  env <- runEvalM (ctxImports ctx) $ evalDec (ctxEnv ctx) d
+  env <- runEvalM (ctxImports ctx) $ do
+    env <- evalDec (ctxEnv ctx) d
+    -- We need to extract any new existential sizes and add them as
+    -- ordinary bindings to the context, or we will not be able to
+    -- look up their values later.
+    sizes <- extSizeEnv
+    pure $ env <> sizes
   return ctx {ctxEnv = env}
 
 interpretImport :: Ctx -> (FilePath, Prog) -> F ExtOp Ctx

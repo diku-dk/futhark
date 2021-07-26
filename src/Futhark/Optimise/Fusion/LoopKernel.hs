@@ -76,7 +76,7 @@ transformOutput ::
   SOAC.ArrayTransforms ->
   [VName] ->
   [Ident] ->
-  Binder SOACS ()
+  Builder SOACS ()
 transformOutput ts names = descend ts
   where
     descend ts' validents =
@@ -86,7 +86,7 @@ transformOutput ts names = descend ts
             letBindNames [k] $ BasicOp $ SubExp $ Var $ identName valident
         t SOAC.:< ts'' -> do
           let (es, css) = unzip $ map (applyTransform t) validents
-              mkPat (Ident nm tp) = Pattern [] [PatElem nm tp]
+              mkPat (Ident nm tp) = Pat [PatElem nm tp]
           opts <- concat <$> mapM primOpType es
           newIds <- forM (zip names opts) $ \(k, opt) ->
             newIdent (baseString k) opt
@@ -94,7 +94,7 @@ transformOutput ts names = descend ts
             certifying cs $ letBind (mkPat ids) (BasicOp e)
           descend ts'' newIds
 
-applyTransform :: SOAC.ArrayTransform -> Ident -> (BasicOp, Certificates)
+applyTransform :: SOAC.ArrayTransform -> Ident -> (BasicOp, Certs)
 applyTransform (SOAC.Rearrange cs perm) v =
   (Rearrange perm' $ identName v, cs)
   where
@@ -429,7 +429,7 @@ fuseSOACwithKer unfus_set outVars soac_p soac_p_consumed ker = do
               (body_p, body_c) = (lambdaBody lam_p, lambdaBody lam_c)
               body' =
                 Body
-                  { bodyDec = bodyDec body_p, -- body_p and body_c have the same lores
+                  { bodyDec = bodyDec body_p, -- body_p and body_c have the same decorations
                     bodyStms = bodyStms body_p <> bodyStms body_c,
                     bodyResult =
                       take c_num_buckets (bodyResult body_c)
@@ -450,33 +450,29 @@ fuseSOACwithKer unfus_set outVars soac_p soac_p_consumed ker = do
             SOAC.Hist w (ops_c <> ops_p) lam' (inp_c_arr <> inp_p_arr)
 
     -- Scatter-write fusion.
-    ( SOAC.Scatter _len2 _lam_c ivs2 as2,
+    ( SOAC.Scatter _len_c _lam_c ivs_c as_c,
       SOAC.Scatter _len_p _lam_p ivs_p as_p
       )
         | horizFuse -> do
-          let zipW xs ys = ys_p ++ xs_p ++ ys2 ++ xs2
+          let zipW as_xs xs as_ys ys = xs_indices ++ ys_indices ++ xs_vals ++ ys_vals
                 where
-                  lenx = length xs `div` 2
-                  xs_p = take lenx xs
-                  xs2 = drop lenx xs
-                  leny = length ys `div` 2
-                  ys_p = take leny ys
-                  ys2 = drop leny ys
-          let (body_p, body2) = (lambdaBody lam_p, lambdaBody lam_c)
+                  (xs_indices, xs_vals) = splitScatterResults as_xs xs
+                  (ys_indices, ys_vals) = splitScatterResults as_ys ys
+          let (body_p, body_c) = (lambdaBody lam_p, lambdaBody lam_c)
           let body' =
                 Body
-                  { bodyDec = bodyDec body_p, -- body_p and body2 have the same lores
-                    bodyStms = bodyStms body_p <> bodyStms body2,
-                    bodyResult = zipW (bodyResult body_p) (bodyResult body2)
+                  { bodyDec = bodyDec body_p, -- body_p and body_c have the same decorations
+                    bodyStms = bodyStms body_p <> bodyStms body_c,
+                    bodyResult = zipW as_c (bodyResult body_c) as_p (bodyResult body_p)
                   }
           let lam' =
                 Lambda
-                  { lambdaParams = lambdaParams lam_p ++ lambdaParams lam_c,
+                  { lambdaParams = lambdaParams lam_c ++ lambdaParams lam_p,
                     lambdaBody = body',
-                    lambdaReturnType = zipW (lambdaReturnType lam_p) (lambdaReturnType lam_c)
+                    lambdaReturnType = zipW as_c (lambdaReturnType lam_c) as_p (lambdaReturnType lam_p)
                   }
           success (outNames ker ++ returned_outvars) $
-            SOAC.Scatter w lam' (ivs_p ++ ivs2) (as2 ++ as_p)
+            SOAC.Scatter w lam' (ivs_c ++ ivs_p) (as_c ++ as_p)
     (SOAC.Scatter {}, _) ->
       fail "Cannot fuse a write with anything else than a write or a map"
     (_, SOAC.Scatter {}) ->
@@ -551,7 +547,7 @@ fuseSOACwithKer unfus_set outVars soac_p soac_p_consumed ker = do
     ---------------------------------
     _ -> fail "Cannot fuse"
 
-getStreamOrder :: StreamForm lore -> StreamOrd
+getStreamOrder :: StreamForm rep -> StreamOrd
 getStreamOrder (Parallel o _ _) = o
 getStreamOrder Sequential = InOrder
 
@@ -597,7 +593,7 @@ fuseStreamHelper
                 inp2_arr
             res_lam'' = res_lam' {lambdaParams = chunk1 : lambdaParams res_lam'}
             unfus_accs = take (length nes1) outVars
-            unfus_arrs = filter (`nameIn` unfus_set) outVars
+            unfus_arrs = filter (`notElem` unfus_accs) $ filter (`nameIn` unfus_set) outVars
         res_form <- mergeForms form2 form1
         return
           ( unfus_accs ++ out_kernms ++ unfus_arrs,
@@ -688,10 +684,10 @@ iswim _ (SOAC.Screma w form arrs) ots
     let map_body =
           mkBody
             ( oneStm $
-                Let (setPatternOuterDimTo w map_pat) (defAux ()) $
-                  Op $ Futhark.Screma w scan_form arrs'
+                Let (setPatOuterDimTo w map_pat) (defAux ()) $
+                  Op $ Futhark.Screma w arrs' scan_form
             )
-            $ map Var $ patternNames map_pat
+            $ varsRes $ patNames map_pat
         map_fun' = Lambda map_params map_body map_rettype
         perm = case lambdaReturnType map_fun of
           [] -> []
@@ -714,8 +710,8 @@ setParamOuterDimTo w param =
   let t = paramType param `setOuterSize` w
    in param {paramDec = t}
 
-setPatternOuterDimTo :: SubExp -> Pattern -> Pattern
-setPatternOuterDimTo w = fmap (`setOuterSize` w)
+setPatOuterDimTo :: SubExp -> Pat -> Pat
+setPatOuterDimTo w = fmap (`setOuterSize` w)
 
 -- Now for fiddling with transpositions...
 
@@ -861,7 +857,7 @@ pullReshape (SOAC.Screma _ form inps) ots
               stripArray (length shape - length outershape) inpt
 
           inner_body <-
-            runBodyBinder $
+            runBodyBuilder $
               eBody [SOAC.toExp $ inner $ map (SOAC.identInput . paramIdent) ps]
           let inner_fun =
                 Lambda

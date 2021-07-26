@@ -15,6 +15,7 @@ where
 import Data.Bifunctor (first, second)
 import Data.FileEmbed
 import qualified Data.Map as M
+import Data.Maybe
 import Futhark.CodeGen.Backends.GenericC.Options
 import Futhark.CodeGen.Backends.SimpleRep
 import Futhark.CodeGen.ImpCode
@@ -44,7 +45,7 @@ genericOptions =
         optionDescription = "Print help information and exit.",
         optionAction =
           [C.cstm|{
-                   printf("Usage: %s [OPTION]...\nOptions:\n\n%s\nFor more information, consult the Futhark User's Guide or the man pages.\n",
+                   printf("Usage: %s [OPTIONS]...\nOptions:\n\n%s\nFor more information, consult the Futhark User's Guide or the man pages.\n",
                           fut_progname, option_descriptions);
                    exit(0);
                   }|]
@@ -100,22 +101,22 @@ genericOptions =
   ]
 
 typeStructName :: ExternalValue -> String
-typeStructName (TransparentValue (ScalarValue pt signed _)) =
+typeStructName (TransparentValue _ (ScalarValue pt signed _)) =
   let name = prettySigned (signed == TypeUnsigned) pt
    in "type_" ++ name
-typeStructName (TransparentValue (ArrayValue _ _ pt signed shape)) =
+typeStructName (TransparentValue _ (ArrayValue _ _ pt signed shape)) =
   let rank = length shape
       name = arrayName pt signed rank
    in "type_" ++ name
-typeStructName (OpaqueValue name vds) =
+typeStructName (OpaqueValue _ name vds) =
   "type_" ++ opaqueName name vds
 
 valueDescBoilerplate :: ExternalValue -> (String, (C.Initializer, [C.Definition]))
-valueDescBoilerplate ev@(TransparentValue (ScalarValue pt signed _)) =
+valueDescBoilerplate ev@(TransparentValue _ (ScalarValue pt signed _)) =
   let name = prettySigned (signed == TypeUnsigned) pt
       type_name = typeStructName ev
    in (name, ([C.cinit|&$id:type_name|], mempty))
-valueDescBoilerplate ev@(TransparentValue (ArrayValue _ _ pt signed shape)) =
+valueDescBoilerplate ev@(TransparentValue _ (ArrayValue _ _ pt signed shape)) =
   let rank = length shape
       name = arrayName pt signed rank
       pt_name = prettySigned (signed == TypeUnsigned) pt
@@ -155,7 +156,7 @@ valueDescBoilerplate ev@(TransparentValue (ArrayValue _ _ pt signed shape)) =
               };|]
         )
       )
-valueDescBoilerplate ev@(OpaqueValue name vds) =
+valueDescBoilerplate ev@(OpaqueValue _ name vds) =
   let type_name = typeStructName ev
       aux_name = type_name ++ "_aux"
       opaque_free = "futhark_free_" ++ opaqueName name vds
@@ -165,12 +166,14 @@ valueDescBoilerplate ev@(OpaqueValue name vds) =
         ( [C.cinit|&$id:type_name|],
           [C.cunit|
               struct opaque_aux $id:aux_name = {
+                .store = (typename opaque_store_fn)$id:opaque_store,
+                .restore = (typename opaque_restore_fn)$id:opaque_restore,
                 .free = (typename opaque_free_fn)$id:opaque_free
               };
               struct type $id:type_name = {
                 .name = $string:name,
-                .restore = (typename restore_fn)$id:opaque_store,
-                .store = (typename store_fn)$id:opaque_restore,
+                .restore = (typename restore_fn)restore_opaque,
+                .store = (typename store_fn)store_opaque,
                 .free = (typename free_fn)free_opaque,
                 .aux = &$id:aux_name
               };|]
@@ -182,36 +185,43 @@ functionExternalValues fun = functionResult fun ++ functionArgs fun
 
 entryTypeBoilerplate :: Functions a -> ([C.Initializer], [C.Definition])
 entryTypeBoilerplate (Functions funs) =
-  second concat $
-    unzip $
-      M.elems $
-        M.fromList $
-          map valueDescBoilerplate $
-            concatMap (functionExternalValues . snd) $
-              filter (functionEntry . snd) funs
+  second concat . unzip . M.elems . M.fromList . map valueDescBoilerplate
+    . concatMap (functionExternalValues . snd)
+    . filter (isJust . functionEntry . snd)
+    $ funs
 
-oneEntryBoilerplate :: (Name, Function a) -> ([C.Definition], C.Initializer)
-oneEntryBoilerplate (name, fun) =
-  let entry_f = "futhark_entry_" ++ pretty name
+oneEntryBoilerplate :: (Name, Function a) -> Maybe ([C.Definition], C.Initializer)
+oneEntryBoilerplate (name, fun) = do
+  ename <- functionEntry fun
+  let entry_f = "futhark_entry_" ++ pretty ename
       call_f = "call_" ++ pretty name
       out_types = functionResult fun
       in_types = functionArgs fun
       out_types_name = pretty name ++ "_out_types"
       in_types_name = pretty name ++ "_in_types"
+      out_unique_name = pretty name ++ "_out_unique"
+      in_unique_name = pretty name ++ "_in_unique"
       (out_items, out_args)
         | null out_types = ([C.citems|(void)outs;|], mempty)
         | otherwise = unzip $ zipWith loadOut [0 ..] out_types
       (in_items, in_args)
         | null in_types = ([C.citems|(void)ins;|], mempty)
         | otherwise = unzip $ zipWith loadIn [0 ..] in_types
-   in ( [C.cunit|
+  pure
+    ( [C.cunit|
                 struct type* $id:out_types_name[] = {
                   $inits:(map typeStructInit out_types),
                   NULL
                 };
+                bool $id:out_unique_name[] = {
+                  $inits:(map typeUniqueInit out_types)
+                };
                 struct type* $id:in_types_name[] = {
                   $inits:(map typeStructInit in_types),
                   NULL
+                };
+                bool $id:in_unique_name[] = {
+                  $inits:(map typeUniqueInit in_types)
                 };
                 int $id:call_f(struct futhark_context *ctx, void **outs, void **ins) {
                   $items:out_items
@@ -219,15 +229,24 @@ oneEntryBoilerplate (name, fun) =
                   return $id:entry_f(ctx, $args:out_args, $args:in_args);
                 }
                 |],
-        [C.cinit|{
-            .name = $string:(pretty name),
+      [C.cinit|{
+            .name = $string:(pretty ename),
             .f = $id:call_f,
             .in_types = $id:in_types_name,
-            .out_types = $id:out_types_name
+            .out_types = $id:out_types_name,
+            .in_unique = $id:in_unique_name,
+            .out_unique = $id:out_unique_name
             }|]
-      )
+    )
   where
     typeStructInit t = [C.cinit|&$id:(typeStructName t)|]
+    typeUniqueInit t =
+      case typeUnique t of
+        Unique -> [C.cinit|true|]
+        Nonunique -> [C.cinit|false|]
+
+    typeUnique (TransparentValue u _) = u
+    typeUnique (OpaqueValue u _ _) = u
 
     loadOut i ev =
       let v = "out" ++ show (i :: Int)
@@ -243,7 +262,7 @@ oneEntryBoilerplate (name, fun) =
 
 entryBoilerplate :: Functions a -> ([C.Definition], [C.Initializer])
 entryBoilerplate (Functions funs) =
-  first concat $ unzip $ map oneEntryBoilerplate $ filter (functionEntry . snd) funs
+  first concat $ unzip $ mapMaybe oneEntryBoilerplate funs
 
 mkBoilerplate ::
   Functions a ->

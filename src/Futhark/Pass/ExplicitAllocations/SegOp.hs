@@ -9,45 +9,43 @@ module Futhark.Pass.ExplicitAllocations.SegOp
   )
 where
 
-import Futhark.IR.KernelsMem
+import Futhark.IR.GPUMem
 import qualified Futhark.IR.Mem.IxFun as IxFun
 import Futhark.Pass.ExplicitAllocations
 
-instance SizeSubst (SegOp lvl lore) where
+instance SizeSubst (SegOp lvl rep) where
   opSizeSubst _ _ = mempty
 
 allocInKernelBody ::
-  Allocable fromlore tolore =>
-  KernelBody fromlore ->
-  AllocM fromlore tolore (KernelBody tolore)
+  Allocable fromrep torep =>
+  KernelBody fromrep ->
+  AllocM fromrep torep (KernelBody torep)
 allocInKernelBody (KernelBody () stms res) =
-  allocInStms stms $ \stms' -> return $ KernelBody () stms' res
+  uncurry (flip (KernelBody ()))
+    <$> collectStms (allocInStms stms (pure res))
 
 allocInLambda ::
-  Allocable fromlore tolore =>
-  [LParam tolore] ->
-  Body fromlore ->
-  [Type] ->
-  AllocM fromlore tolore (Lambda tolore)
-allocInLambda params body rettype = do
-  body' <- localScope (scopeOfLParams params) $
-    allocInStms (bodyStms body) $ \bnds' ->
-      return $ Body () bnds' $ bodyResult body
-  return $ Lambda params body' rettype
+  Allocable fromrep torep =>
+  [LParam torep] ->
+  Body fromrep ->
+  AllocM fromrep torep (Lambda torep)
+allocInLambda params body =
+  mkLambda params . allocInStms (bodyStms body) $
+    pure $ bodyResult body
 
 allocInBinOpParams ::
-  Allocable fromlore tolore =>
+  Allocable fromrep torep =>
   SubExp ->
   TPrimExp Int64 VName ->
   TPrimExp Int64 VName ->
-  [LParam fromlore] ->
-  [LParam fromlore] ->
-  AllocM fromlore tolore ([LParam tolore], [LParam tolore])
+  [LParam fromrep] ->
+  [LParam fromrep] ->
+  AllocM fromrep torep ([LParam torep], [LParam torep])
 allocInBinOpParams num_threads my_id other_id xs ys = unzip <$> zipWithM alloc xs ys
   where
     alloc x y =
       case paramType x of
-        Array bt shape u -> do
+        Array pt shape u -> do
           twice_num_threads <-
             letSubExp "twice_num_threads" $
               BasicOp $ BinOp (Mul Int64 OverflowUndef) num_threads $ intConst Int64 2
@@ -64,8 +62,8 @@ allocInBinOpParams num_threads my_id other_id xs ys = unzip <$> zipWithM alloc x
                 IxFun.slice ixfun_base $
                   fullSliceNum base_dims [DimFix other_id]
           return
-            ( x {paramDec = MemArray bt shape u $ ArrayIn mem ixfun_x},
-              y {paramDec = MemArray bt shape u $ ArrayIn mem ixfun_y}
+            ( x {paramDec = MemArray pt shape u $ ArrayIn mem ixfun_x},
+              y {paramDec = MemArray pt shape u $ ArrayIn mem ixfun_y}
             )
         Prim bt ->
           return
@@ -77,13 +75,19 @@ allocInBinOpParams num_threads my_id other_id xs ys = unzip <$> zipWithM alloc x
             ( x {paramDec = MemMem space},
               y {paramDec = MemMem space}
             )
+        -- This next case will never happen.
+        Acc acc ispace ts u ->
+          return
+            ( x {paramDec = MemAcc acc ispace ts u},
+              y {paramDec = MemAcc acc ispace ts u}
+            )
 
 allocInBinOpLambda ::
-  Allocable fromlore tolore =>
+  Allocable fromrep torep =>
   SubExp ->
   SegSpace ->
-  Lambda fromlore ->
-  AllocM fromlore tolore (Lambda tolore)
+  Lambda fromrep ->
+  AllocM fromrep torep (Lambda torep)
 allocInBinOpLambda num_threads (SegSpace flat _) lam = do
   let (acc_params, arr_params) =
         splitAt (length (lambdaParams lam) `div` 2) $ lambdaParams lam
@@ -92,7 +96,4 @@ allocInBinOpLambda num_threads (SegSpace flat _) lam = do
   (acc_params', arr_params') <-
     allocInBinOpParams num_threads index_x index_y acc_params arr_params
 
-  allocInLambda
-    (acc_params' ++ arr_params')
-    (lambdaBody lam)
-    (lambdaReturnType lam)
+  allocInLambda (acc_params' ++ arr_params') (lambdaBody lam)

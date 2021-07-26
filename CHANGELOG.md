@@ -9,14 +9,211 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+  * The `#[trace]` and `#[break]` attributes now replace the `trace`
+    and `break` functions (although they are still present in
+    slightly-reduced but compatible form).
+
+  * The `#[opaque]` attribute replaces the `opaque` function, which is
+    now deprecated.
+
+  * Tracing now works in compiled code, albeit with several caveats
+    (mainly, it does not work for code running on the GPU).
+
+  * New `wasm` and `wasm-multicore` backends by Philip Lassen.  Still
+    very experimental; do not expect API stability.
+
+### Removed
+
+### Changed
+
+### Fixed
+
+  * `i64.abs` was wrong for arguments that did not fit in an `i32`.
+
+  * Some `f32` operations (`**`, `abs`, `max`) would be done in double
+    precision on the CUDA backend.
+
+  * Yet another defunctorisation bug (#1397).
+
+## [0.19.7]
+
+### Added
+
+  * A new memory reuse optimisation has been added.  This results in
+    slightly lower footprint for many programs.
+
+  * The `cuda` backend now uses a fast single-pass implementation for
+    segmented `scan`s, due to Morten Tychsen Clausen (#1375).
+
+  * `futhark bench` now prints interim results while it is running.
+
+### Fixed
+
+  * `futhark test` now provides better error message when asked to
+    test an undefined entry point (#1367).
+
+  * `futhark pkg` now detects some nonsensical package paths (#1364).
+
+  * FutharkScript now parses `f x y` as applying `f` to `x` and `y`,
+    rather than as `f (x y)`.
+
+  * Some internal array utility functions would not be generated if
+    entry points exposed both unit arrays and boolean arrays (#1374).
+
+  * Nested reductions used (much) more memory for intermediate results
+    than strictly needed.
+
+  * Size propagation bug in defunctionalisation (#1384).
+
+  * In the C FFI, array types used only internally to implement opaque
+    types are no longer exposed (#1387).
+
+  * `futhark bench` now copes with test programs that consume their
+    input (#1386).  This required an extension of the server protocol
+    as well.
+
+## [0.19.6]
+
+### Added
+
+  * `f32.hypot` and `f64.hypot` are now much more numerically exact in
+    the interpreter.
+
+  * Generated code now contains a header with information about the
+    version of Futhark used (and maybe more information in the
+    future).
+
+  * Testing/benchmarking with large input data (including randomly
+    generated data) is much faster, as each file is now only read
+    once.
+
+  * Test programs may now use arbitrary FutharkScript expressions to
+    produce test input, in particular expressions that produce opaque
+    values.  This affects both testing, benchmarking, and autotuning.
+
+  * Compilation is about 10% faster, especially for large programs.
+
+### Fixed
+
+  * `futhark repl` had trouble with declarations that produced unknown
+    sizes (#1347).
+
+  * Entry points can now have same name as (undocumented!) compiler intrinsics.
+
+  * FutharkScript now detects too many arguments passed to functions.
+
+  * Sequentialisation bug (#1350).
+
+  * Missing causality check for index sections.
+
+  * `futhark test` now reports mismatches using proper indexes (#1356).
+
+  * Missing alias checking in fusion could lead to compiler crash (#1358).
+
+  * The absolute value of NaN is no longer infinity in the interpreter (#1359).
+
+  * Proper detection of zero strides in compiler (#1360).
+
+  * Invalid memory accesses related to internal bookkeeping of bounds checking.
+
+## [0.19.5]
+
+### Added
+
+  * Initial work on granting programmers more control over existential
+    sizes, starting with making type abbreviations function as
+    existential quantifiers (#1301).
+
+  * FutharkScript now also supports arrays and scientific notation.
+
+  * Added `f32.epsilon` and `f64.epsilon` for the difference between
+    1.0 and the next larger representable number.
+
+  * Added `f32.hypot` and `f64.hypot` for your hypothenuse needs (#1344).
+
+  * Local size bindings in `let` expressions, e.g:
+
+    ```
+    let [n] (xs': [n]i32) = filter (>0) xs
+    in ...
+    ```
+
+### Fixed
+
+  * `futhark_context_report()` now internally calls
+    `futhark_context_sync()` before collecting profiling information
+    (if applicable).
+
+  * `futhark literate`: Parse errors for expression directives now
+    detected properly.
+
+  * `futhark autotune` now works with the `cuda` backend (#1312).
+
+  * Devious fusion bug (#1322) causing compiler crashes.
+
+  * Memory expansion bug for certain complex GPU kernels (#1328).
+
+  * Complex expressions in index sections (#1332).
+
+  * Handling of sizes in abstract types in the interpreter (#1333).
+
+  * Type checking of explicit size requirements in `loop` parameter (#1324).
+
+  * Various alias checking bugs (#1300, #1340).
+
+## [0.19.4]
+
+### Fixed
+
+  * Some uniqueness ignorance in fusion (#1291).
+
+  * An invalid transformation could in rare cases cause race
+    conditions (#1292).
+
+  * Generated Python and C code should now be warning-free.
+
+  * Missing check for uses of size-lifted types (#1294).
+
+  * Error in simplification of concatenations could cause compiler
+    crashes (#1296).
+
+## [0.19.3]
+
+### Added
+
+  * Better `futhark test`/`futhark bench` errors when test data does
+    not have the expected type.
+
+### Fixed
+
+  * Mismatch between how thresholds were printed and what the
+    autotuner was looking for (#1269).
+
+  * `zip` now produces unique arrays (#1271).
+
+  * `futhark literate` no longer chokes on lines beginning with `--`
+    without a following whitespace.
+
+  * `futhark literate`: `:loadimg` was broken due to overzealous
+    type checking (#1276).
+
+  * `futhark literate`: `:loadimg` now handles relative paths properly.
+
+  * `futhark hash` no longer considers the built-in prelude.
+
+  * Server executables had broken store/restore commands for opaque types.
+
+## [0.19.2]
+
+### Added
+
   * New subcommand: `futhark hash`.
 
   * `futhark literate` is now smart about when to regenerate image and
     animation files.
 
-### Removed
-
-### Changed
+  * `futhark literate` now produces better error messages passing
+    expressions of the wrong type to directives.
 
 ### Fixed
 
@@ -33,6 +230,12 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * A lambda lifting bug due to not handling existential sizes
     produced by loops correctly (#1267).
+
+  * Incorrect uniqueness attributes inserted by lambda lifting
+    (#1268).
+
+  * FutharkScript record expressions were a bit too sensitive to
+    whitespace.
 
 ## [0.19.1]
 

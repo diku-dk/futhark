@@ -18,8 +18,8 @@ import Futhark.Tools
 -- | Interchange Scan With Inner Map. Tries to turn a @scan(map)@ into a
 -- @map(scan)
 iswim ::
-  (MonadBinder m, Lore m ~ SOACS) =>
-  Pattern ->
+  (MonadBuilder m, Rep m ~ SOACS) =>
+  Pat ->
   SubExp ->
   Lambda ->
   [(SubExp, VName)] ->
@@ -51,42 +51,33 @@ iswim res_pat w scan_fun scan_input
     let map_body =
           mkBody
             ( oneStm $
-                Let (setPatternOuterDimTo w map_pat) (defAux ()) $
-                  Op $ Screma w scan_soac scan_arrs
+                Let (setPatOuterDimTo w map_pat) (defAux ()) $
+                  Op $ Screma w scan_arrs scan_soac
             )
-            $ map Var $ patternNames map_pat
+            $ varsRes $ patNames map_pat
         map_fun' = Lambda map_params map_body map_rettype
 
     res_pat' <-
-      fmap (basicPattern []) $
+      fmap basicPat $
         mapM (newIdent' (<> "_transposed") . transposeIdentType) $
-          patternValueIdents res_pat
+          patIdents res_pat
 
     addStm $
       Let res_pat' (StmAux map_cs mempty ()) $
-        Op $
-          Screma
-            map_w
-            (mapSOAC map_fun')
-            map_arrs'
+        Op $ Screma map_w map_arrs' (mapSOAC map_fun')
 
-    forM_
-      ( zip
-          (patternValueIdents res_pat)
-          (patternValueIdents res_pat')
-      )
-      $ \(to, from) -> do
-        let perm = [1, 0] ++ [2 .. arrayRank (identType from) -1]
-        addStm $
-          Let (basicPattern [] [to]) (defAux ()) $
-            BasicOp $ Rearrange perm $ identName from
+    forM_ (zip (patIdents res_pat) (patIdents res_pat')) $ \(to, from) -> do
+      let perm = [1, 0] ++ [2 .. arrayRank (identType from) -1]
+      addStm $
+        Let (basicPat [to]) (defAux ()) $
+          BasicOp $ Rearrange perm $ identName from
   | otherwise = Nothing
 
 -- | Interchange Reduce With Inner Map. Tries to turn a @reduce(map)@ into a
 -- @map(reduce)
 irwim ::
-  (MonadBinder m, Lore m ~ SOACS) =>
-  Pattern ->
+  (MonadBuilder m, Rep m ~ SOACS) =>
+  Pat ->
   SubExp ->
   Commutativity ->
   Lambda ->
@@ -118,7 +109,7 @@ irwim res_pat w comm red_fun red_input
         red_rettype = lambdaReturnType map_fun
         red_fun' = Lambda red_params red_body red_rettype
         red_input' = zip accs' $ map paramName map_params
-        red_pat = stripPatternOuterDim map_pat
+        red_pat = stripPatOuterDim map_pat
 
     map_body <-
       case irwim red_pat w comm red_fun' red_input' of
@@ -128,38 +119,38 @@ irwim res_pat w comm red_fun red_input
             mkBody
               ( oneStm $
                   Let red_pat (defAux ()) $
-                    Op $ Screma w reduce_soac $ map snd red_input'
+                    Op $ Screma w (map snd red_input') reduce_soac
               )
-              $ map Var $ patternNames map_pat
+              $ varsRes $ patNames map_pat
         Just m -> localScope (scopeOfLParams map_params) $ do
           map_body_bnds <- collectStms_ m
-          return $ mkBody map_body_bnds $ map Var $ patternNames map_pat
+          return $ mkBody map_body_bnds $ varsRes $ patNames map_pat
 
     let map_fun' = Lambda map_params map_body map_rettype
 
     addStm $
       Let res_pat (StmAux map_cs mempty ()) $
-        Op $ Screma map_w (mapSOAC map_fun') arrs'
+        Op $ Screma map_w arrs' $ mapSOAC map_fun'
   | otherwise = Nothing
 
 -- | Does this reduce operator contain an inner map, and if so, what
 -- does that map look like?
 rwimPossible ::
   Lambda ->
-  Maybe (Pattern, Certificates, SubExp, Lambda)
+  Maybe (Pat, Certs, SubExp, Lambda)
 rwimPossible fun
   | Body _ stms res <- lambdaBody fun,
     [bnd] <- stmsToList stms, -- Body has a single binding
-    map_pat <- stmPattern bnd,
-    map Var (patternNames map_pat) == res, -- Returned verbatim
-    Op (Screma map_w form map_arrs) <- stmExp bnd,
+    map_pat <- stmPat bnd,
+    map Var (patNames map_pat) == map resSubExp res, -- Returned verbatim
+    Op (Screma map_w map_arrs form) <- stmExp bnd,
     Just map_fun <- isMapSOAC form,
     map paramName (lambdaParams fun) == map_arrs =
     Just (map_pat, stmCerts bnd, map_w, map_fun)
   | otherwise =
     Nothing
 
-transposedArrays :: MonadBinder m => [VName] -> m [VName]
+transposedArrays :: MonadBuilder m => [VName] -> m [VName]
 transposedArrays arrs = forM arrs $ \arr -> do
   t <- lookupType arr
   let perm = [1, 0] ++ [2 .. arrayRank t -1]
@@ -184,9 +175,9 @@ setOuterDimTo :: SubExp -> Type -> Type
 setOuterDimTo w t =
   arrayOfRow (rowType t) w
 
-setPatternOuterDimTo :: SubExp -> Pattern -> Pattern
-setPatternOuterDimTo w pat =
-  basicPattern [] $ map (setIdentOuterDimTo w) $ patternValueIdents pat
+setPatOuterDimTo :: SubExp -> Pat -> Pat
+setPatOuterDimTo w pat =
+  basicPat $ map (setIdentOuterDimTo w) $ patIdents pat
 
 transposeIdentType :: Ident -> Ident
 transposeIdentType ident =
@@ -196,6 +187,6 @@ stripIdentOuterDim :: Ident -> Ident
 stripIdentOuterDim ident =
   ident {identType = rowType $ identType ident}
 
-stripPatternOuterDim :: Pattern -> Pattern
-stripPatternOuterDim pat =
-  basicPattern [] $ map stripIdentOuterDim $ patternValueIdents pat
+stripPatOuterDim :: Pat -> Pat
+stripPatOuterDim pat =
+  basicPat $ map stripIdentOuterDim $ patIdents pat

@@ -14,7 +14,7 @@ import qualified Data.Map.Strict as M
 import Data.Maybe
 import Futhark.Util (maybeHead, nubOrd)
 import Futhark.Util.Pretty hiding (bool, group, space)
-import Language.Futhark hiding (ExpBase (Constr), unscopeType)
+import Language.Futhark hiding (ExpBase (Constr))
 
 data Constr
   = Constr Name
@@ -50,22 +50,22 @@ pprMatch _ (MatchConstr (ConstrRecord fs) ps _) =
 instance Pretty Match where
   ppr = pprMatch (-1)
 
-patternToMatch :: Pattern -> Match
+patternToMatch :: Pat -> Match
 patternToMatch (Id _ (Info t) _) = MatchWild $ toStruct t
 patternToMatch (Wildcard (Info t) _) = MatchWild $ toStruct t
-patternToMatch (PatternParens p _) = patternToMatch p
-patternToMatch (PatternAscription p _ _) = patternToMatch p
-patternToMatch (PatternLit l (Info t) _) =
+patternToMatch (PatParens p _) = patternToMatch p
+patternToMatch (PatAscription p _ _) = patternToMatch p
+patternToMatch (PatLit l (Info t) _) =
   MatchConstr (ConstrLit l) [] $ toStruct t
-patternToMatch p@(TuplePattern ps _) =
+patternToMatch p@(TuplePat ps _) =
   MatchConstr ConstrTuple (map patternToMatch ps) $
     patternStructType p
-patternToMatch p@(RecordPattern fs _) =
+patternToMatch p@(RecordPat fs _) =
   MatchConstr (ConstrRecord fnames) (map patternToMatch ps) $
     patternStructType p
   where
     (fnames, ps) = unzip $ sortFields $ M.fromList fs
-patternToMatch (PatternConstr c (Info t) args _) =
+patternToMatch (PatConstr c (Info t) args _) =
   MatchConstr (Constr c) (map patternToMatch args) $ toStruct t
 
 isConstr :: Match -> Maybe Name
@@ -164,7 +164,7 @@ findUnmatched _ _ = []
 {-# NOINLINE unmatched #-}
 
 -- | Find the unmatched cases.
-unmatched :: [Pattern] -> [Match]
+unmatched :: [Pat] -> [Match]
 unmatched orig_ps =
   -- The algorithm may find duplicate example, which we filter away
   -- here.

@@ -1,7 +1,7 @@
 module Futhark.CodeGen.ImpGen.Multicore.Base
-  ( compileKBody,
-    extractAllocations,
+  ( extractAllocations,
     compileThreadResult,
+    Locks (..),
     HostEnv (..),
     AtomicBinOp,
     MulticoreGen,
@@ -23,14 +23,13 @@ where
 
 import Control.Monad
 import Data.Bifunctor
-import Data.List (elemIndex, find)
+import qualified Data.Map as M
 import Data.Maybe
 import qualified Futhark.CodeGen.ImpCode.Multicore as Imp
 import Futhark.CodeGen.ImpGen
 import Futhark.Error
 import Futhark.IR.MCMem
 import Futhark.Transform.Rename
-import Futhark.Util (maybeNth)
 import Prelude hiding (quot, rem)
 
 -- | Is there an atomic t'BinOp' corresponding to this t'BinOp'?
@@ -38,8 +37,16 @@ type AtomicBinOp =
   BinOp ->
   Maybe (VName -> VName -> Imp.Count Imp.Elements (Imp.TExp Int32) -> Imp.Exp -> Imp.AtomicOp)
 
-newtype HostEnv = HostEnv
-  {hostAtomics :: AtomicBinOp}
+-- | Information about the locks available for accumulators.
+data Locks = Locks
+  { locksArray :: VName,
+    locksCount :: Int
+  }
+
+data HostEnv = HostEnv
+  { hostAtomics :: AtomicBinOp,
+    hostLocks :: M.Map VName Locks
+  }
 
 type MulticoreGen = ImpM MCMem HostEnv Imp.Multicore
 
@@ -49,15 +56,19 @@ segOpString SegRed {} = return "segred"
 segOpString SegScan {} = return "segscan"
 segOpString SegHist {} = return "seghist"
 
-toParam :: VName -> TypeBase shape u -> MulticoreGen Imp.Param
-toParam name (Prim pt) = return $ Imp.ScalarParam name pt
-toParam name (Mem space) = return $ Imp.MemParam name space
-toParam name Array {} = do
-  name_entry <- lookupVar name
+arrParam :: VName -> MulticoreGen Imp.Param
+arrParam arr = do
+  name_entry <- lookupVar arr
   case name_entry of
-    ArrayVar _ (ArrayEntry (MemLocation mem _ _) _) ->
+    ArrayVar _ (ArrayEntry (MemLoc mem _ _) _) ->
       return $ Imp.MemParam mem DefaultSpace
-    _ -> error $ "[toParam] Could not handle array for " ++ show name
+    _ -> error $ "arrParam: could not handle array " ++ show arr
+
+toParam :: VName -> TypeBase shape u -> MulticoreGen [Imp.Param]
+toParam name (Prim pt) = return [Imp.ScalarParam name pt]
+toParam name (Mem space) = return [Imp.MemParam name space]
+toParam name Array {} = pure <$> arrParam name
+toParam _name Acc {} = pure [] -- FIXME?  Are we sure this works?
 
 getSpace :: SegOp () MCMem -> SegSpace
 getSpace (SegHist _ space _ _ _) = space
@@ -82,11 +93,11 @@ getIterationDomain _ space = do
 
 -- When the SegRed's return value is a scalar
 -- we perform a call by value-result in the segop function
-getReturnParams :: Pattern MCMem -> SegOp () MCMem -> MulticoreGen [Imp.Param]
+getReturnParams :: Pat MCMem -> SegOp () MCMem -> MulticoreGen [Imp.Param]
 getReturnParams pat SegRed {} = do
-  let retvals = map patElemName $ patternElements pat
+  let retvals = map patElemName $ patElements pat
   retvals_ts <- mapM lookupType retvals
-  zipWithM toParam retvals retvals_ts
+  concat <$> zipWithM toParam retvals retvals_ts
 getReturnParams _ _ = return mempty
 
 renameSegBinOp :: [SegBinOp MCMem] -> MulticoreGen [SegBinOp MCMem]
@@ -95,21 +106,12 @@ renameSegBinOp segbinops =
     lam' <- renameLambda lam
     return $ SegBinOp comm lam' ne shape
 
-compileKBody ::
-  KernelBody MCMem ->
-  ([(SubExp, [Imp.Exp])] -> ImpM MCMem () Imp.Multicore ()) ->
-  ImpM MCMem () Imp.Multicore ()
-compileKBody kbody red_cont =
-  compileStms (freeIn $ kernelBodyResult kbody) (kernelBodyStms kbody) $ do
-    let red_res = kernelBodyResult kbody
-    red_cont $ zip (map kernelResultSubExp red_res) $ repeat []
-
 compileThreadResult ::
   SegSpace ->
   PatElem MCMem ->
   KernelResult ->
   MulticoreGen ()
-compileThreadResult space pe (Returns _ what) = do
+compileThreadResult space pe (Returns _ _ what) = do
   let is = map (Imp.vi64 . fst) $ unSegSpace space
   copyDWIMFix (patElemName pe) is what []
 compileThreadResult _ _ ConcatReturns {} =
@@ -129,7 +131,7 @@ freeParams :: Imp.Code -> [VName] -> MulticoreGen [Imp.Param]
 freeParams code names = do
   let freeVars = freeVariables code names
   ts <- mapM lookupType freeVars
-  zipWithM toParam freeVars ts
+  concat <$> zipWithM toParam freeVars ts
 
 -- | Arrays for storing group results shared between threads
 groupResultArrays ::
@@ -140,9 +142,8 @@ groupResultArrays ::
 groupResultArrays s num_threads reds =
   forM reds $ \(SegBinOp _ lam _ shape) ->
     forM (lambdaReturnType lam) $ \t -> do
-      let pt = elemType t
-          full_shape = Shape [num_threads] <> shape <> arrayShape t
-      sAllocArray s pt full_shape DefaultSpace
+      let full_shape = Shape [num_threads] <> shape <> arrayShape t
+      sAllocArray s (elemType t) full_shape DefaultSpace
 
 isLoadBalanced :: Imp.Code -> Bool
 isLoadBalanced (a Imp.:>>: b) = isLoadBalanced a && isLoadBalanced b
@@ -153,10 +154,10 @@ isLoadBalanced Imp.While {} = False
 isLoadBalanced (Imp.Op (Imp.ParLoop _ _ _ code _ _ _)) = isLoadBalanced code
 isLoadBalanced _ = True
 
-segBinOpComm' :: [SegBinOp lore] -> Commutativity
+segBinOpComm' :: [SegBinOp rep] -> Commutativity
 segBinOpComm' = mconcat . map segBinOpComm
 
-decideScheduling' :: SegOp () lore -> Imp.Code -> Imp.Scheduling
+decideScheduling' :: SegOp () rep -> Imp.Code -> Imp.Scheduling
 decideScheduling' SegHist {} _ = Imp.Static
 decideScheduling' SegScan {} _ = Imp.Static
 decideScheduling' (SegRed _ _ reds _ _) code =
@@ -241,25 +242,25 @@ data Locking = Locking
 
 -- | A function for generating code for an atomic update.  Assumes
 -- that the bucket is in-bounds.
-type DoAtomicUpdate lore r =
+type DoAtomicUpdate rep r =
   [VName] -> [Imp.TExp Int64] -> MulticoreGen ()
 
 -- | The mechanism that will be used for performing the atomic update.
 -- Approximates how efficient it will be.  Ordered from most to least
 -- efficient.
-data AtomicUpdate lore r
-  = AtomicPrim (DoAtomicUpdate lore r)
+data AtomicUpdate rep r
+  = AtomicPrim (DoAtomicUpdate rep r)
   | -- | Can be done by efficient swaps.
-    AtomicCAS (DoAtomicUpdate lore r)
+    AtomicCAS (DoAtomicUpdate rep r)
   | -- | Requires explicit locking.
-    AtomicLocking (Locking -> DoAtomicUpdate lore r)
+    AtomicLocking (Locking -> DoAtomicUpdate rep r)
 
 atomicUpdateLocking ::
   AtomicBinOp ->
   Lambda MCMem ->
   AtomicUpdate MCMem ()
 atomicUpdateLocking atomicBinOp lam
-  | Just ops_and_ts <- splitOp lam,
+  | Just ops_and_ts <- lamIsBinOp lam,
     all (\(_, t, _, _) -> supportedPrims $ primBitSize t) ops_and_ts =
     primOrCas ops_and_ts $ \arrs bucket ->
       -- If the operator is a vectorised binary operator on 32-bit values,
@@ -405,24 +406,6 @@ atomicUpdateCAS t arr old bucket x do_op = do
           (sExt32 <$> bucket_offset)
           (tvVar run_loop)
           (toBits (Imp.var x t))
-
--- | Horizontally fission a lambda that models a binary operator.
-splitOp :: ASTLore lore => Lambda lore -> Maybe [(BinOp, PrimType, VName, VName)]
-splitOp lam = mapM splitStm $ bodyResult $ lambdaBody lam
-  where
-    n = length $ lambdaReturnType lam
-    splitStm (Var res) = do
-      Let (Pattern [] [pe]) _ (BasicOp (BinOp op (Var x) (Var y))) <-
-        find (([res] ==) . patternNames . stmPattern) $
-          stmsToList $ bodyStms $ lambdaBody lam
-      i <- Var res `elemIndex` bodyResult (lambdaBody lam)
-      xp <- maybeNth i $ lambdaParams lam
-      yp <- maybeNth (n + i) $ lambdaParams lam
-      guard $ paramName xp == x
-      guard $ paramName yp == y
-      Prim t <- Just $ patElemType pe
-      return (op, t, paramName xp, paramName yp)
-    splitStm _ = Nothing
 
 -- TODO for supporting 8 and 16 bits (and 128)
 -- we need a functions for converting to and from bits

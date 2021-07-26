@@ -298,21 +298,79 @@ General Concerns
 
 Futhark entry points are mapped to some form of function or method in
 the target language.  Generally, an entry point taking *n* parameters
-will result in a function taking *n* parameters.  Extra parameters may
-be added to pass in context data, or *out*-parameters for writing the
-result, for target languages that do not support multiple return
-values from functions.
+will result in a function taking *n* parameters.  If the entry point
+returns an *m*-element tuple, then the function will return *m* values
+(although the tuple can be replaced with a single opaque value, see
+below).  Extra parameters may be added to pass in context data, or
+*out*-parameters for writing the result, for target languages that do
+not support multiple return values from functions.
 
 Not all Futhark types can be mapped cleanly to the target language.
-Arrays of tuples, for example, are a common issue.  In such cases, *opaque
-types* are used in the generated code.  Values of these types cannot
-be directly inspected, but can be passed back to Futhark entry points.
-In the general case, these types will be named with a random hash.
-However, if you insert an explicit type annotation (and the type
-name contains only characters valid for identifiers for the used
+Arrays of tuples, for example, are a common issue.  In such cases,
+*opaque types* are used in the generated code.  Values of these types
+cannot be directly inspected, but can be passed back to Futhark entry
+points.  In the general case, these types will be named with a random
+hash.  However, if you insert an explicit type annotation (and the
+type name contains only characters valid for identifiers for the used
 backend), the indicated name will be used.  Note that arrays contain
-brackets, which are usually not valid in identifiers.  Defining a
-simple type alias is the best way around this.
+brackets, which are usually not valid in identifiers.  Defining and
+using a type abbreviation is the best way around this.
+
+.. _valuemapping:
+
+Value Mapping
+~~~~~~~~~~~~~
+
+The rules for how Futhark values are mapped to target language values
+are as follows:
+
+* Primitive types or arrays of primitive types are mapped
+  transparently (although for the C backends, this still involves a
+  distinct type for arrays).
+
+* All other types are mapped to an opaque type.  Use a type ascription
+  with a type abbreviation to give it a specific name, otherwise one
+  will be generated.
+
+Return types follow the rules, with one addition:
+
+* If the return type is an *m*-element tuple, then the the function
+  returns *m* values, mapped according to the rules above (but not
+  including this one - nested tuples are not mapped directly).  This
+  rule does not apply when the entry point has been given a return
+  type ascription that is not syntactically a tuple type.
+
+.. _api-consumption:
+
+Consumption and Aliasing
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+Futhark's support for :ref:`in-place-updates` has implications for the
+generated API.  Unfortunately, The type system of most languages
+(e.g. C) is not rich enough to express the rules, so they are not
+statically (or currently even dynamically checked).  Since Futhark
+will never infer a unique/consuming type for an entry point parameter,
+this section can be ignored unless uniqueness annotations have been
+manually added to the entry points parameter types.  The rules are
+essentially the same as in the language itself:
+
+1. Each entry point input parameter is either *consuming* or
+   *nonconsuming* (the default).  This corresponds to unique and
+   nonunique types in the original Futhark program.  A value passed
+   for a consuming parameter is considered *consumed*, now has an
+   unspecified value, and may never be used again.  It must still be
+   manually freed, if applicable.
+   Further, any *aliases* of that value are also considered consumed
+   and may not be used.
+
+2. Each entry point output is either *unique* or *nonunique*.  A
+   unique output has no aliases.  A nonunique output aliases *every*
+   nonconsuming input parameter.
+
+Note that these distinctions are currently usually not visible in the
+generated API, and so correct usage requires knowledge of the original
+types in the Futhark function.  The safest strategy is to not expose
+unique types in entry points.
 
 Generating C
 ^^^^^^^^^^^^

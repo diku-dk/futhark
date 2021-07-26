@@ -1,6 +1,5 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TupleSections #-}
 
 -- | Low-level compilation parts.  Look at "Futhark.Compiler" for a
 -- more high-level API.
@@ -16,16 +15,15 @@ module Futhark.Compiler.Program
   )
 where
 
-import Control.Exception
 import Control.Monad
 import Control.Monad.Except
 import Control.Monad.State
 import Data.List (intercalate, isPrefixOf)
 import Data.Maybe
 import qualified Data.Text as T
-import qualified Data.Text.IO as T
 import Futhark.Error
 import Futhark.FreshNames
+import Futhark.Util (readFileSafely)
 import Futhark.Util.Pretty (line, ppr, (</>))
 import qualified Language.Futhark as E
 import Language.Futhark.Parser
@@ -33,18 +31,8 @@ import Language.Futhark.Prelude
 import Language.Futhark.Semantic
 import qualified Language.Futhark.TypeChecker as E
 import Language.Futhark.Warnings
+import System.FilePath (normalise)
 import qualified System.FilePath.Posix as Posix
-import System.IO.Error
-
-readFileSafely :: String -> IO (Maybe (Either String (String, T.Text)))
-readFileSafely filepath =
-  (Just . Right . (filepath,) <$> T.readFile filepath) `catch` couldNotRead
-  where
-    couldNotRead e
-      | isDoesNotExistError e =
-        return Nothing
-      | otherwise =
-        return $ Just $ Left $ show e
 
 newtype ReaderState = ReaderState
   {alreadyRead :: [(ImportName, E.UncheckedProg)]}
@@ -66,9 +54,10 @@ readImportFile include = do
   -- First we try to find a file of the given name in the search path,
   -- then we look at the builtin library if we have to.  For the
   -- builtins, we don't use the search path.
-  r <- liftIO $ readFileSafely $ includeToFilePath include
+  let filepath = includeToFilePath include
+  r <- liftIO $ readFileSafely filepath
   case (r, lookup prelude_str prelude) of
-    (Just (Right (filepath, s)), _) -> return (s, filepath)
+    (Just (Right s), _) -> return (s, filepath)
     (Just (Left e), _) -> externalErrorS e
     (Nothing, Just t) -> return (t, prelude_str)
     (Nothing, Nothing) -> externalErrorS not_found
@@ -173,8 +162,9 @@ setEntryPoints ::
   [(ImportName, E.UncheckedProg)]
 setEntryPoints extra_eps fps = map onProg
   where
+    fps' = map normalise fps
     onProg (name, prog)
-      | includeToFilePath name `elem` fps =
+      | includeToFilePath name `elem` fps' =
         (name, prog {E.progDecs = map onDec (E.progDecs prog)})
       | otherwise =
         (name, prog)
@@ -197,7 +187,7 @@ readUntypedLibrary fps = runReaderM $ do
     onFile fp = do
       r <- liftIO $ readFileSafely fp
       case r of
-        Just (Right (_, fs)) ->
+        Just (Right fs) ->
           handleFile [] (mkInitialImport fp_name) fs fp
         Just (Left e) -> externalErrorS e
         Nothing -> externalErrorS $ fp ++ ": file not found."

@@ -27,6 +27,7 @@ import qualified Data.Vector.Storable as SVec
 import qualified Data.Vector.Storable.ByteString as SVec
 import Data.Void
 import Data.Word (Word32, Word8)
+import Futhark.Data
 import Futhark.Script
 import Futhark.Server
 import Futhark.Test
@@ -50,6 +51,7 @@ import System.Environment (getExecutablePath)
 import System.Exit
 import System.FilePath
 import System.IO
+import System.IO.Error (isDoesNotExistError)
 import System.IO.Temp (withSystemTempDirectory, withSystemTempFile)
 import Text.Megaparsec hiding (State, failure, token)
 import Text.Megaparsec.Char
@@ -162,12 +164,12 @@ parseInt :: Parser Int
 parseInt = lexeme $ read <$> some (satisfy isDigit)
 
 restOfLine :: Parser T.Text
-restOfLine = takeWhileP Nothing (/= '\n') <* eol
+restOfLine = takeWhileP Nothing (/= '\n') <* (void eol <|> eof)
 
 parseBlockComment :: Parser T.Text
 parseBlockComment = T.unlines <$> some line
   where
-    line = ("-- " *> restOfLine) <|> ("--" *> eol $> "")
+    line = "--" *> optional " " *> restOfLine
 
 parseTestBlock :: Parser T.Text
 parseTestBlock =
@@ -180,7 +182,7 @@ parseBlockCode :: Parser T.Text
 parseBlockCode = T.unlines . noblanks <$> some line
   where
     noblanks = reverse . dropWhile T.null . reverse . dropWhile T.null
-    line = try (notFollowedBy "--") *> restOfLine
+    line = try (notFollowedBy "--") *> notFollowedBy eof *> restOfLine
 
 parsePlotParams :: Parser (Maybe (Int, Int))
 parsePlotParams =
@@ -219,6 +221,14 @@ parseVideoParams =
       s <- lexeme $ takeWhileP Nothing (not . isSpace)
       pure params {videoFormat = Just s}
 
+atStartOfLine :: Parser ()
+atStartOfLine = do
+  col <- sourceColumn <$> getSourcePos
+  when (col /= pos1) empty
+
+afterExp :: Parser ()
+afterExp = choice [atStartOfLine, void eol]
+
 parseBlock :: Parser Block
 parseBlock =
   choice
@@ -230,7 +240,7 @@ parseBlock =
   where
     parseDirective =
       choice
-        [ DirectiveRes <$> parseExp postlexeme,
+        [ DirectiveRes <$> parseExp postlexeme <* afterExp,
           directiveName "covert" $> DirectiveCovert
             <*> parseDirective,
           directiveName "brief" $> DirectiveBrief
@@ -313,6 +323,15 @@ greyFloatToImg = SVec.map grey
       let i' = round (i * 255) .&. 0xFF
        in (i' `shiftL` 16) .|. (i' `shiftL` 8) .|. i'
 
+greyByteToImg ::
+  (Integral a, SVec.Storable a) =>
+  SVec.Vector a ->
+  SVec.Vector Word32
+greyByteToImg = SVec.map grey
+  where
+    grey i =
+      (fromIntegral i `shiftL` 16) .|. (fromIntegral i `shiftL` 8) .|. fromIntegral i
+
 -- BMPs are RGBA and bottom-up where we assumes images are top-down
 -- and ARGB.  We fix this up before encoding the BMP.  This is
 -- probably a little slower than it has to be.
@@ -327,18 +346,24 @@ vecToBMP h w = BMP.renderBMP . BMP.packRGBA32ToBMP24 w h . SVec.vectorToByteStri
        in fromIntegral c :: Word8
 
 valueToBMP :: Value -> Maybe LBS.ByteString
-valueToBMP v@(Word32Value _ bytes)
+valueToBMP v@(U32Value _ bytes)
   | [h, w] <- valueShape v =
     Just $ vecToBMP h w bytes
-valueToBMP v@(Int32Value _ bytes)
+valueToBMP v@(I32Value _ bytes)
   | [h, w] <- valueShape v =
     Just $ vecToBMP h w $ SVec.map fromIntegral bytes
-valueToBMP v@(Float32Value _ bytes)
+valueToBMP v@(F32Value _ bytes)
   | [h, w] <- valueShape v =
     Just $ vecToBMP h w $ greyFloatToImg bytes
-valueToBMP v@(Float64Value _ bytes)
+valueToBMP v@(U8Value _ bytes)
+  | [h, w] <- valueShape v =
+    Just $ vecToBMP h w $ greyByteToImg bytes
+valueToBMP v@(F64Value _ bytes)
   | [h, w] <- valueShape v =
     Just $ vecToBMP h w $ greyFloatToImg bytes
+valueToBMP v@(BoolValue _ bytes)
+  | [h, w] <- valueShape v =
+    Just $ vecToBMP h w $ greyByteToImg $ SVec.map ((*) 255 . fromEnum) bytes
 valueToBMP _ = Nothing
 
 valueToBMPs :: Value -> Maybe [LBS.ByteString]
@@ -430,12 +455,12 @@ loadBMP bmpfile = do
                 b = fromIntegral $ bmp_bs `BS.index` (l' * 4 + 2)
                 a = fromIntegral $ bmp_bs `BS.index` (l' * 4 + 3)
              in (a `shiftL` 24) .|. (r `shiftL` 16) .|. (g `shiftL` 8) .|. b
-      pure $ ValueAtom $ Word32Value shape $ SVec.generate (w * h) pix
+      pure $ ValueAtom $ U32Value shape $ SVec.generate (w * h) pix
 
 loadImage :: FilePath -> ScriptM (Compound Value)
 loadImage imgfile =
   withTempDir $ \dir -> do
-    let bmpfile = dir </> imgfile `replaceExtension` "bmp"
+    let bmpfile = dir </> takeBaseName imgfile `replaceExtension` "bmp"
     void $ system "convert" [imgfile, "-type", "TrueColorAlpha", bmpfile] mempty
     loadBMP bmpfile
 
@@ -503,20 +528,23 @@ processDirective env (DirectiveBrief d) =
 processDirective env (DirectiveCovert d) =
   processDirective env d
 processDirective env (DirectiveRes e) = do
-  vs <- evalExpToGround literateBuiltin (envServer env) e
+  v <- either nope pure =<< evalExpToGround literateBuiltin (envServer env) e
   pure $
     T.unlines
       [ "",
         "```",
-        prettyText vs,
+        prettyText v,
         "```",
         ""
       ]
+  where
+    nope t =
+      throwError $ "Cannot show value of type " <> prettyText t
 --
 processDirective env (DirectiveImg e) = do
-  vs <- evalExpToGround literateBuiltin (envServer env) e
-  case vs of
-    ValueAtom v
+  maybe_v <- evalExpToGround literateBuiltin (envServer env) e
+  case maybe_v of
+    Right (ValueAtom v)
       | Just bmp <- valueToBMP v -> do
         pngfile <- withTempDir $ \dir -> do
           let bmpfile = dir </> "img.bmp"
@@ -524,25 +552,30 @@ processDirective env (DirectiveImg e) = do
           newFile env "img.png" $ \pngfile ->
             void $ system "convert" [bmpfile, pngfile] mempty
         pure $ imgBlock pngfile
-    _ ->
+    Right v ->
+      nope $ fmap valueType v
+    Left t ->
+      nope t
+  where
+    nope t =
       throwError $
-        "Cannot create image from value of type "
-          <> prettyText (fmap valueType vs)
+        "Cannot create image from value of type " <> prettyText t
 --
 processDirective env (DirectivePlot e size) = do
-  v <- evalExpToGround literateBuiltin (envServer env) e
-  case v of
-    _
+  maybe_v <- evalExpToGround literateBuiltin (envServer env) e
+  case maybe_v of
+    Right v
       | Just vs <- plottable2d v -> do
         pngfile <- newFile env "plot.png" $ plotWith [(Nothing, vs)]
         pure $ imgBlock pngfile
-    ValueRecord m
+    Right (ValueRecord m)
       | Just m' <- traverse plottable2d m -> do
         pngfile <- newFile env "plot.png" $ plotWith $ map (first Just) $ M.toList m'
         pure $ imgBlock pngfile
-    _ ->
-      throwError $
-        "Cannot plot value of type " <> prettyText (fmap valueType v)
+    Right v ->
+      throwError $ "Cannot plot value of type " <> prettyText (fmap valueType v)
+    Left t ->
+      throwError $ "Cannot plot opaque value of type " <> prettyText t
   where
     plottable2d v = do
       [x, y] <- plottable v
@@ -574,15 +607,16 @@ processDirective env (DirectivePlot e size) = do
         void $ system "gnuplot" [] script
 --
 processDirective env (DirectiveGnuplot e script) = do
-  vs <- evalExpToGround literateBuiltin (envServer env) e
-  case vs of
-    ValueRecord m
+  maybe_v <- evalExpToGround literateBuiltin (envServer env) e
+  case maybe_v of
+    Right (ValueRecord m)
       | Just m' <- traverse plottable m -> do
         pngfile <- newFile env "plot.png" $ plotWith $ M.toList m'
         pure $ imgBlock pngfile
-    _ ->
-      throwError $
-        "Cannot plot value of type " <> prettyText (fmap valueType vs)
+    Right v ->
+      throwError $ "Cannot plot value of type " <> prettyText (fmap valueType v)
+    Left t ->
+      throwError $ "Cannot plot opaque value of type " <> prettyText t
   where
     plotWith xys pngfile = withGnuplotData [] xys $ \_ sets -> do
       let script' =
@@ -729,8 +763,11 @@ processBlock env (BlockDirective directive) = do
 cleanupImgDir :: Env -> Files -> IO ()
 cleanupImgDir env keep_files =
   mapM_ toRemove . filter (not . (`S.member` keep_files))
-    =<< directoryContents (envImgDir env)
+    =<< (directoryContents (envImgDir env) `catchError` onError)
   where
+    onError e
+      | isDoesNotExistError e = pure []
+      | otherwise = throwError e
     toRemove f = do
       when (scriptVerbose (envOpts env) > 0) $
         T.hPutStrLn stderr $ "Deleting unused file: " <> T.pack f
@@ -815,13 +852,15 @@ main = mainWithOptions initialOptions commandLineOptions "program" $ \args opts 
       script <- parseProgFile prog
 
       unless (scriptSkipCompilation opts) $ do
-        let entryOpt v = "--entry=" ++ T.unpack v
+        let entryOpt v = "--entry-point=" ++ T.unpack v
             compile_options =
               "--server" :
               map entryOpt (S.toList (varsInScripts script))
                 ++ scriptCompilerOptions opts
         when (scriptVerbose opts > 0) $
           T.hPutStrLn stderr $ "Compiling " <> T.pack prog <> "..."
+        when (scriptVerbose opts > 1) $
+          T.hPutStrLn stderr $ T.pack $ unwords compile_options
 
         let onError err = do
               mapM_ (T.hPutStrLn stderr) err
@@ -840,8 +879,9 @@ main = mainWithOptions initialOptions commandLineOptions "program" $ \args opts 
       let mdfile = fromMaybe (prog `replaceExtension` "md") $ scriptOutput opts
           imgdir = dropExtension mdfile <> "-img"
           run_options = scriptExtraOptions opts
+          cfg = futharkServerCfg ("." </> dropExtension prog) run_options
 
-      withScriptServer ("." </> dropExtension prog) run_options $ \server -> do
+      withScriptServer cfg $ \server -> do
         let env =
               Env
                 { envServer = server,

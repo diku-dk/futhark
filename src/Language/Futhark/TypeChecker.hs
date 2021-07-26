@@ -103,7 +103,9 @@ checkModExp ::
   ModExpBase NoInfo Name ->
   (Warnings, Either TypeError (MTy, ModExpBase Info VName))
 checkModExp files src env me =
-  second (fmap fst) $ runTypeM env files' (mkInitialImport "") src $ checkOneModExp me
+  second (fmap fst) . runTypeM env files' (mkInitialImport "") src $ do
+    (_abs, mty, me') <- checkOneModExp me
+    pure (mty, me')
   where
     files' = M.map fileEnv $ M.fromList files
 
@@ -127,8 +129,8 @@ initialEnv =
 
     intrinsicsModule = Env mempty initialTypeTable mempty mempty intrinsicsNameMap
 
-    addIntrinsicT (name, IntrinsicType t) =
-      Just (name, TypeAbbr Unlifted [] $ Scalar $ Prim t)
+    addIntrinsicT (name, IntrinsicType l ps t) =
+      Just (name, TypeAbbr l ps t)
     addIntrinsicT _ =
       Nothing
 
@@ -194,7 +196,7 @@ bindingTypeParams tparams = localEnv env
 emptyDimParam :: StructType -> Bool
 emptyDimParam = isNothing . traverseDims onDim
   where
-    onDim _ pos AnyDim | pos `elem` [PosImmediate, PosParam] = Nothing
+    onDim _ pos (AnyDim _) | pos `elem` [PosImmediate, PosParam] = Nothing
     onDim _ _ d = Just d
 
 -- In this function, after the recursion, we add the Env of the
@@ -270,7 +272,7 @@ checkSpecs (TypeSpec l name ps doc loc : specs) =
 checkSpecs (ModSpec name sig doc loc : specs) =
   bindSpaced [(Term, name)] $ do
     name' <- checkName Term name loc
-    (mty, sig') <- checkSigExp sig
+    (_sig_abs, mty, sig') <- checkSigExp sig
     let senv =
           mempty
             { envNameMap = M.singleton (Term, name) $ qualName name',
@@ -283,13 +285,13 @@ checkSpecs (ModSpec name sig doc loc : specs) =
         ModSpec name' sig' doc loc : specs'
       )
 checkSpecs (IncludeSpec e loc : specs) = do
-  (e_abs, e_env, e') <- checkSigExpToEnv e
+  (e_abs, env_abs, e_env, e') <- checkSigExpToEnv e
 
-  mapM_ (warnIfShadowing . fmap baseName) $ M.keys e_abs
+  mapM_ (warnIfShadowing . fmap baseName) $ M.keys env_abs
 
   (abstypes, env, specs') <- localEnv e_env $ checkSpecs specs
   return
-    ( abstypes <> e_abs,
+    ( e_abs <> env_abs <> abstypes,
       env <> e_env,
       IncludeSpec e' loc : specs'
     )
@@ -300,26 +302,26 @@ checkSpecs (IncludeSpec e loc : specs) = do
     warnAbout qn =
       warn loc $ "Inclusion shadows type" <+> pquote (ppr qn) <+> "."
 
-checkSigExp :: SigExpBase NoInfo Name -> TypeM (MTy, SigExpBase Info VName)
+checkSigExp :: SigExpBase NoInfo Name -> TypeM (TySet, MTy, SigExpBase Info VName)
 checkSigExp (SigParens e loc) = do
-  (mty, e') <- checkSigExp e
-  return (mty, SigParens e' loc)
+  (abs, mty, e') <- checkSigExp e
+  return (abs, mty, SigParens e' loc)
 checkSigExp (SigVar name NoInfo loc) = do
   (name', mty) <- lookupMTy loc name
   (mty', substs) <- newNamesForMTy mty
-  return (mty', SigVar name' (Info substs) loc)
+  return (mtyAbs mty', mty', SigVar name' (Info substs) loc)
 checkSigExp (SigSpecs specs loc) = do
   checkForDuplicateSpecs specs
   (abstypes, env, specs') <- checkSpecs specs
-  return (MTy abstypes $ ModEnv env, SigSpecs specs' loc)
+  return (abstypes, MTy abstypes $ ModEnv env, SigSpecs specs' loc)
 checkSigExp (SigWith s (TypeRef tname ps td trloc) loc) = do
-  (s_abs, s_env, s') <- checkSigExpToEnv s
+  (abs, s_abs, s_env, s') <- checkSigExpToEnv s
   checkTypeParams ps $ \ps' -> do
     (td', _) <- bindingTypeParams ps' $ checkTypeDecl td
     (tname', s_abs', s_env') <- refineEnv loc s_abs s_env tname ps' $ unInfo $ expandedType td'
-    return (MTy s_abs' $ ModEnv s_env', SigWith s' (TypeRef tname' ps' td' trloc) loc)
+    return (abs, MTy s_abs' $ ModEnv s_env', SigWith s' (TypeRef tname' ps' td' trloc) loc)
 checkSigExp (SigArrow maybe_pname e1 e2 loc) = do
-  (MTy s_abs e1_mod, e1') <- checkSigExp e1
+  (e1_abs, MTy s_abs e1_mod, e1') <- checkSigExp e1
   (env_for_e2, maybe_pname') <-
     case maybe_pname of
       Just pname -> bindSpaced [(Term, pname)] $ do
@@ -333,41 +335,48 @@ checkSigExp (SigArrow maybe_pname e1 e2 loc) = do
           )
       Nothing ->
         return (mempty, Nothing)
-  (e2_mod, e2') <- localEnv env_for_e2 $ checkSigExp e2
+  (e2_abs, e2_mod, e2') <- localEnv env_for_e2 $ checkSigExp e2
   return
-    ( MTy mempty $ ModFun $ FunSig s_abs e1_mod e2_mod,
+    ( e1_abs <> e2_abs,
+      MTy mempty $ ModFun $ FunSig s_abs e1_mod e2_mod,
       SigArrow maybe_pname' e1' e2' loc
     )
 
-checkSigExpToEnv :: SigExpBase NoInfo Name -> TypeM (TySet, Env, SigExpBase Info VName)
+checkSigExpToEnv ::
+  SigExpBase NoInfo Name ->
+  TypeM (TySet, TySet, Env, SigExpBase Info VName)
 checkSigExpToEnv e = do
-  (MTy abs mod, e') <- checkSigExp e
+  (abs, MTy mod_abs mod, e') <- checkSigExp e
   case mod of
-    ModEnv env -> return (abs, env, e')
+    ModEnv env -> return (abs, mod_abs, env, e')
     ModFun {} -> unappliedFunctor $ srclocOf e
 
-checkSigBind :: SigBindBase NoInfo Name -> TypeM (Env, SigBindBase Info VName)
+checkSigBind :: SigBindBase NoInfo Name -> TypeM (TySet, Env, SigBindBase Info VName)
 checkSigBind (SigBind name e doc loc) = do
-  (env, e') <- checkSigExp e
+  (abs, env, e') <- checkSigExp e
   bindSpaced [(Signature, name)] $ do
     name' <- checkName Signature name loc
     return
-      ( mempty
+      ( abs,
+        mempty
           { envSigTable = M.singleton name' env,
             envNameMap = M.singleton (Signature, name) (qualName name')
           },
         SigBind name' e' doc loc
       )
 
-checkOneModExp :: ModExpBase NoInfo Name -> TypeM (MTy, ModExpBase Info VName)
+checkOneModExp ::
+  ModExpBase NoInfo Name ->
+  TypeM (TySet, MTy, ModExpBase Info VName)
 checkOneModExp (ModParens e loc) = do
-  (mty, e') <- checkOneModExp e
-  return (mty, ModParens e' loc)
+  (abs, mty, e') <- checkOneModExp e
+  return (abs, mty, ModParens e' loc)
 checkOneModExp (ModDecs decs loc) = do
   checkForDuplicateDecs decs
   (abstypes, env, decs') <- checkDecs decs
   return
-    ( MTy abstypes $ ModEnv env,
+    ( abstypes,
+      MTy abstypes $ ModEnv env,
       ModDecs decs' loc
     )
 checkOneModExp (ModVar v loc) = do
@@ -377,40 +386,47 @@ checkOneModExp (ModVar v loc) = do
         && baseTag (qualLeaf v') <= maxIntrinsicTag
     )
     $ typeError loc mempty "The 'intrinsics' module may not be used in module expressions."
-  return (MTy mempty env, ModVar v' loc)
+  return (mempty, MTy mempty env, ModVar v' loc)
 checkOneModExp (ModImport name NoInfo loc) = do
   (name', env) <- lookupImport loc name
   return
-    ( MTy mempty $ ModEnv env,
+    ( mempty,
+      MTy mempty $ ModEnv env,
       ModImport name (Info name') loc
     )
 checkOneModExp (ModApply f e NoInfo NoInfo loc) = do
-  (f_mty, f') <- checkOneModExp f
+  (f_abs, f_mty, f') <- checkOneModExp f
   case mtyMod f_mty of
     ModFun functor -> do
-      (e_mty, e') <- checkOneModExp e
+      (e_abs, e_mty, e') <- checkOneModExp e
       (mty, psubsts, rsubsts) <- applyFunctor loc functor e_mty
-      return (mty, ModApply f' e' (Info psubsts) (Info rsubsts) loc)
+      return
+        ( mtyAbs mty <> f_abs <> e_abs,
+          mty,
+          ModApply f' e' (Info psubsts) (Info rsubsts) loc
+        )
     _ ->
       typeError loc mempty "Cannot apply non-parametric module."
 checkOneModExp (ModAscript me se NoInfo loc) = do
-  (me_mod, me') <- checkOneModExp me
-  (se_mty, se') <- checkSigExp se
+  (me_abs, me_mod, me') <- checkOneModExp me
+  (se_abs, se_mty, se') <- checkSigExp se
   match_subst <- badOnLeft $ matchMTys me_mod se_mty loc
-  return (se_mty, ModAscript me' se' (Info match_subst) loc)
+  return (se_abs <> me_abs, se_mty, ModAscript me' se' (Info match_subst) loc)
 checkOneModExp (ModLambda param maybe_fsig_e body_e loc) =
   withModParam param $ \param' param_abs param_mod -> do
-    (maybe_fsig_e', body_e', mty) <- checkModBody (fst <$> maybe_fsig_e) body_e loc
+    (abs, maybe_fsig_e', body_e', mty) <-
+      checkModBody (fst <$> maybe_fsig_e) body_e loc
     return
-      ( MTy mempty $ ModFun $ FunSig param_abs param_mod mty,
+      ( abs,
+        MTy mempty $ ModFun $ FunSig param_abs param_mod mty,
         ModLambda param' maybe_fsig_e' body_e' loc
       )
 
 checkOneModExpToEnv :: ModExpBase NoInfo Name -> TypeM (TySet, Env, ModExpBase Info VName)
 checkOneModExpToEnv e = do
-  (MTy abs mod, e') <- checkOneModExp e
+  (e_abs, MTy abs mod, e') <- checkOneModExp e
   case mod of
-    ModEnv env -> return (abs, env, e')
+    ModEnv env -> pure (e_abs <> abs, env, e')
     ModFun {} -> unappliedFunctor $ srclocOf e
 
 withModParam ::
@@ -418,7 +434,7 @@ withModParam ::
   (ModParamBase Info VName -> TySet -> Mod -> TypeM a) ->
   TypeM a
 withModParam (ModParam pname psig_e NoInfo loc) m = do
-  (MTy p_abs p_mod, psig_e') <- checkSigExp psig_e
+  (_abs, MTy p_abs p_mod, psig_e') <- checkSigExp psig_e
   bindSpaced [(Term, pname)] $ do
     pname' <- checkName Term pname loc
     let in_body_env = mempty {envModTable = M.singleton pname' p_mod}
@@ -439,27 +455,38 @@ checkModBody ::
   ModExpBase NoInfo Name ->
   SrcLoc ->
   TypeM
-    ( Maybe (SigExp, Info (M.Map VName VName)),
+    ( TySet,
+      Maybe (SigExp, Info (M.Map VName VName)),
       ModExp,
       MTy
     )
 checkModBody maybe_fsig_e body_e loc = do
-  (body_mty, body_e') <- checkOneModExp body_e
+  (body_e_abs, body_mty, body_e') <- checkOneModExp body_e
   case maybe_fsig_e of
     Nothing ->
-      return (Nothing, body_e', body_mty)
+      return
+        ( mtyAbs body_mty <> body_e_abs,
+          Nothing,
+          body_e',
+          body_mty
+        )
     Just fsig_e -> do
-      (fsig_mty, fsig_e') <- checkSigExp fsig_e
+      (fsig_abs, fsig_mty, fsig_e') <- checkSigExp fsig_e
       fsig_subst <- badOnLeft $ matchMTys body_mty fsig_mty loc
-      return (Just (fsig_e', Info fsig_subst), body_e', fsig_mty)
+      return
+        ( fsig_abs <> body_e_abs,
+          Just (fsig_e', Info fsig_subst),
+          body_e',
+          fsig_mty
+        )
 
 checkModBind :: ModBindBase NoInfo Name -> TypeM (TySet, Env, ModBindBase Info VName)
 checkModBind (ModBind name [] maybe_fsig_e e doc loc) = do
-  (maybe_fsig_e', e', mty) <- checkModBody (fst <$> maybe_fsig_e) e loc
+  (e_abs, maybe_fsig_e', e', mty) <- checkModBody (fst <$> maybe_fsig_e) e loc
   bindSpaced [(Term, name)] $ do
     name' <- checkName Term name loc
     return
-      ( mtyAbs mty,
+      ( e_abs,
         mempty
           { envModTable = M.singleton name' $ mtyMod mty,
             envNameMap = M.singleton (Term, name) $ qualName name'
@@ -467,22 +494,23 @@ checkModBind (ModBind name [] maybe_fsig_e e doc loc) = do
         ModBind name' [] maybe_fsig_e' e' doc loc
       )
 checkModBind (ModBind name (p : ps) maybe_fsig_e body_e doc loc) = do
-  (params', maybe_fsig_e', body_e', funsig) <-
+  (abs, params', maybe_fsig_e', body_e', funsig) <-
     withModParam p $ \p' p_abs p_mod ->
       withModParams ps $ \params_stuff -> do
         let (ps', ps_abs, ps_mod) = unzip3 params_stuff
-        (maybe_fsig_e', body_e', mty) <- checkModBody (fst <$> maybe_fsig_e) body_e loc
+        (abs, maybe_fsig_e', body_e', mty) <- checkModBody (fst <$> maybe_fsig_e) body_e loc
         let addParam (x, y) mty' = MTy mempty $ ModFun $ FunSig x y mty'
         return
-          ( p' : ps',
+          ( abs,
+            p' : ps',
             maybe_fsig_e',
             body_e',
             FunSig p_abs p_mod $ foldr addParam mty $ zip ps_abs ps_mod
           )
   bindSpaced [(Term, name)] $ do
     name' <- checkName Term name loc
-    return
-      ( mempty,
+    pure
+      ( abs,
         mempty
           { envModTable =
               M.singleton name' $ ModFun funsig,
@@ -559,16 +587,16 @@ checkTypeBind (TypeBind name l tps td doc loc) =
           TypeBind name' l tps' td' doc loc
         )
 
-entryPoint :: [Pattern] -> Maybe (TypeExp VName) -> StructType -> EntryPoint
+entryPoint :: [Pat] -> Maybe (TypeExp VName) -> StructType -> EntryPoint
 entryPoint params orig_ret_te orig_ret =
   EntryPoint (map patternEntry params ++ more_params) rettype'
   where
     (more_params, rettype') =
       onRetType orig_ret_te orig_ret
 
-    patternEntry (PatternParens p _) =
+    patternEntry (PatParens p _) =
       patternEntry p
-    patternEntry (PatternAscription _ tdecl _) =
+    patternEntry (PatAscription _ tdecl _) =
       EntryType (unInfo (expandedType tdecl)) (Just (declaredType tdecl))
     patternEntry p =
       EntryType (patternStructType p) Nothing
@@ -659,11 +687,11 @@ nastyReturnType te t
     nastyType' (Just te') _ | niceTypeExp te' = False
     nastyType' _ t' = nastyType t'
 
-nastyParameter :: Pattern -> Bool
+nastyParameter :: Pat -> Bool
 nastyParameter p = nastyType (patternType p) && not (ascripted p)
   where
-    ascripted (PatternAscription _ (TypeDecl te _) _) = niceTypeExp te
-    ascripted (PatternParens p' _) = ascripted p'
+    ascripted (PatAscription _ (TypeDecl te _) _) = niceTypeExp te
+    ascripted (PatParens p' _) = ascripted p'
     ascripted _ = False
 
 niceTypeExp :: TypeExp VName -> Bool
@@ -677,8 +705,8 @@ checkOneDec (ModDec struct) = do
   (abs, modenv, struct') <- checkModBind struct
   return (abs, modenv, ModDec struct')
 checkOneDec (SigDec sig) = do
-  (sigenv, sig') <- checkSigBind sig
-  return (mempty, sigenv, SigDec sig')
+  (abs, sigenv, sig') <- checkSigBind sig
+  return (abs, sigenv, SigDec sig')
 checkOneDec (TypeDec tdec) = do
   (tenv, tdec') <- checkTypeBind tdec
   return (mempty, tenv, TypeDec tdec')

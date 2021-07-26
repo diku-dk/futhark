@@ -20,6 +20,7 @@ module Futhark.IR.Prop.TypeOf
   ( expExtType,
     expExtTypeSize,
     subExpType,
+    subExpResType,
     primOpType,
     mapType,
 
@@ -34,9 +35,7 @@ module Futhark.IR.Prop.TypeOf
   )
 where
 
-import Data.Maybe
 import Futhark.IR.Prop.Constants
-import Futhark.IR.Prop.Patterns
 import Futhark.IR.Prop.Reshape
 import Futhark.IR.Prop.Scope
 import Futhark.IR.Prop.Types
@@ -48,20 +47,25 @@ subExpType :: HasScope t m => SubExp -> m Type
 subExpType (Constant val) = pure $ Prim $ primValueType val
 subExpType (Var name) = lookupType name
 
+-- | Type type of a 'SubExpRes' - not that this might refer to names
+-- bound in the body containing the result.
+subExpResType :: HasScope t m => SubExpRes -> m Type
+subExpResType = subExpType . resSubExp
+
 -- | @mapType f arrts@ wraps each element in the return type of @f@ in
 -- an array with size equal to the outermost dimension of the first
 -- element of @arrts@.
-mapType :: SubExp -> Lambda lore -> [Type]
+mapType :: SubExp -> Lambda rep -> [Type]
 mapType outersize f =
   [ arrayOf t (Shape [outersize]) NoUniqueness
     | t <- lambdaReturnType f
   ]
 
 -- | The type of a primitive operation.
-primOpType :: HasScope lore m => BasicOp -> m [Type]
+primOpType :: HasScope rep m => BasicOp -> m [Type]
 primOpType (SubExp se) =
   pure <$> subExpType se
-primOpType (Opaque se) =
+primOpType (Opaque _ se) =
   pure <$> subExpType se
 primOpType (ArrayLit es rt) =
   pure [arrayOf rt (Shape [n]) NoUniqueness]
@@ -79,10 +83,8 @@ primOpType (Index ident slice) =
   result <$> lookupType ident
   where
     result t = [Prim (elemType t) `arrayOfShape` shape]
-    shape = Shape $ mapMaybe dimSize slice
-    dimSize (DimSlice _ d _) = Just d
-    dimSize DimFix {} = Nothing
-primOpType (Update src _ _) =
+    shape = Shape $ sliceDims slice
+primOpType (Update _ src _ _) =
   pure <$> lookupType src
 primOpType (Iota n _ _ et) =
   pure [arrayOf (Prim (IntType et)) (Shape [n]) NoUniqueness]
@@ -115,48 +117,57 @@ primOpType (Copy v) =
 primOpType (Manifest _ v) =
   pure <$> lookupType v
 primOpType Assert {} =
-  pure [Prim Cert]
+  pure [Prim Unit]
+primOpType (UpdateAcc v _ _) =
+  pure <$> lookupType v
 
 -- | The type of an expression.
 expExtType ::
-  (HasScope lore m, TypedOp (Op lore)) =>
-  Exp lore ->
+  (HasScope rep m, TypedOp (Op rep)) =>
+  Exp rep ->
   m [ExtType]
 expExtType (Apply _ _ rt _) = pure $ map (fromDecl . declExtTypeOf) rt
 expExtType (If _ _ _ rt) = pure $ map extTypeOf $ ifReturns rt
-expExtType (DoLoop ctxmerge valmerge _ _) =
-  pure $ loopExtType (map (paramIdent . fst) ctxmerge) (map (paramIdent . fst) valmerge)
+expExtType (DoLoop merge _ _) =
+  pure $ loopExtType $ map fst merge
 expExtType (BasicOp op) = staticShapes <$> primOpType op
+expExtType (WithAcc inputs lam) =
+  fmap staticShapes $
+    (<>)
+      <$> (concat <$> traverse inputType inputs)
+      <*> pure (drop num_accs (lambdaReturnType lam))
+  where
+    inputType (_, arrs, _) = traverse lookupType arrs
+    num_accs = length inputs
 expExtType (Op op) = opType op
 
 -- | The number of values returned by an expression.
 expExtTypeSize ::
-  (Decorations lore, TypedOp (Op lore)) =>
-  Exp lore ->
+  (RepTypes rep, TypedOp (Op rep)) =>
+  Exp rep ->
   Int
 expExtTypeSize = length . feelBad . expExtType
 
 -- FIXME, this is a horrible quick hack.
-newtype FeelBad lore a = FeelBad {feelBad :: a}
+newtype FeelBad rep a = FeelBad {feelBad :: a}
 
-instance Functor (FeelBad lore) where
+instance Functor (FeelBad rep) where
   fmap f = FeelBad . f . feelBad
 
-instance Applicative (FeelBad lore) where
+instance Applicative (FeelBad rep) where
   pure = FeelBad
   f <*> x = FeelBad $ feelBad f $ feelBad x
 
-instance Decorations lore => HasScope lore (FeelBad lore) where
+instance RepTypes rep => HasScope rep (FeelBad rep) where
   lookupType = const $ pure $ Prim $ IntType Int64
   askScope = pure mempty
 
--- | Given the context and value merge parameters of a Futhark @loop@,
--- produce the return type.
-loopExtType :: [Ident] -> [Ident] -> [ExtType]
-loopExtType ctx val =
-  existentialiseExtTypes inaccessible $ staticShapes $ map identType val
+-- | Given the parameters of a loop, produce the return type.
+loopExtType :: Typed dec => [Param dec] -> [ExtType]
+loopExtType params =
+  existentialiseExtTypes inaccessible $ staticShapes $ map typeOf params
   where
-    inaccessible = map identName ctx
+    inaccessible = map paramName params
 
 -- | Any operation must define an instance of this class, which
 -- describes the type of the operation (at the value level).
