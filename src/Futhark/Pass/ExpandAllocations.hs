@@ -556,6 +556,11 @@ runOffsetM scope offsets (OffsetM m) =
 askRebaseMap :: OffsetM RebaseMap
 askRebaseMap = OffsetM $ lift ask
 
+localRebaseMap :: (RebaseMap -> RebaseMap) -> OffsetM a -> OffsetM a
+localRebaseMap f (OffsetM m) = OffsetM $ do
+  scope <- ask
+  lift $ local f $ runReaderT m scope
+
 lookupNewBase :: VName -> ([TPrimExp Int64 VName], PrimType) -> OffsetM (Maybe IxFun)
 lookupNewBase name x = do
   offsets <- askRebaseMap
@@ -585,8 +590,8 @@ offsetMemoryInBody (Body dec stms res) = do
 
 offsetMemoryInStm :: Stm GPUMem -> OffsetM (Scope GPUMem, Stm GPUMem)
 offsetMemoryInStm (Let pat dec e) = do
-  pat' <- offsetMemoryInPat pat
-  e' <- localScope (scopeOfPat pat') $ offsetMemoryInExp e
+  e' <- offsetMemoryInExp e
+  pat' <- offsetMemoryInPat pat =<< expReturns e'
   scope <- askScope
   -- Try to recompute the index function.  Fall back to creating rebase
   -- operations with the RebaseMap.
@@ -613,13 +618,20 @@ offsetMemoryInStm (Let pat dec e) = do
         inst Ext {} = Nothing
         inst (Free x) = return x
 
-offsetMemoryInPat :: Pat GPUMem -> OffsetM (Pat GPUMem)
-offsetMemoryInPat (Pat pes) = do
-  Pat <$> mapM inspectVal pes
+offsetMemoryInPat :: Pat GPUMem -> [ExpReturns] -> OffsetM (Pat GPUMem)
+offsetMemoryInPat (Pat pes) rets = do
+  Pat <$> zipWithM onPE pes rets
   where
-    inspectVal patElem = do
-      new_dec <- offsetMemoryInMemBound $ patElemDec patElem
-      return patElem {patElemDec = new_dec}
+    onPE
+      (PatElem name (MemArray pt shape u (ArrayIn mem _)))
+      (MemArray _ _ _ (Just (ReturnsNewBlock _ _ ixfun))) =
+        pure . PatElem name . MemArray pt shape u . ArrayIn mem $
+          fmap (fmap unExt) ixfun
+    onPE pe _ = do
+      new_dec <- offsetMemoryInMemBound $ patElemDec pe
+      pure pe {patElemDec = new_dec}
+    unExt (Ext i) = patElemName (pes !! i)
+    unExt (Free v) = v
 
 offsetMemoryInParam :: Param (MemBound u) -> OffsetM (Param (MemBound u))
 offsetMemoryInParam fparam = do
@@ -649,12 +661,34 @@ offsetMemoryInLambda lam = inScopeOf lam $ do
   body <- offsetMemoryInBody $ lambdaBody lam
   return $ lam {lambdaBody = body}
 
+-- A loop may have memory parameters, and those memory blocks may
+-- be expanded.  We assume (but do not check - FIXME) that if the
+-- initial value of a loop parameter is an expanded memory block,
+-- then so will the result be.
+offsetMemoryInLoopParams ::
+  [(FParam GPUMem, SubExp)] ->
+  ([(FParam GPUMem, SubExp)] -> OffsetM a) ->
+  OffsetM a
+offsetMemoryInLoopParams merge f = do
+  let (params, args) = unzip merge
+  localRebaseMap extend $ do
+    params' <- mapM offsetMemoryInParam params
+    f $ zip params' args
+  where
+    extend rm = foldl' onParamArg rm merge
+    onParamArg rm (param, Var arg)
+      | Just x <- M.lookup arg rm =
+        M.insert (paramName param) x rm
+    onParamArg rm _ = rm
+
 offsetMemoryInExp :: Exp GPUMem -> OffsetM (Exp GPUMem)
 offsetMemoryInExp (DoLoop merge form body) = do
-  let (params, args) = unzip merge
-  params' <- mapM offsetMemoryInParam params
-  body' <- localScope (scopeOfFParams params' <> scopeOf form) (offsetMemoryInBody body)
-  return $ DoLoop (zip params' args) form body'
+  offsetMemoryInLoopParams merge $ \merge' -> do
+    body' <-
+      localScope
+        (scopeOfFParams (map fst merge') <> scopeOf form)
+        (offsetMemoryInBody body)
+    return $ DoLoop merge' form body'
 offsetMemoryInExp e = mapExpM recurse e
   where
     recurse =
