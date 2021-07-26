@@ -57,6 +57,7 @@ module Futhark.IR.Syntax.Core
     FlatSlice (..),
     FlatDimIndex (..),
     flatSliceDims,
+    flatSliceStrides,
   )
 where
 
@@ -435,6 +436,11 @@ flatSliceDims :: FlatSlice d -> [d]
 flatSliceDims (FlatSlice _ ds) = map dimSlice ds
   where
     dimSlice (FlatDimIndex n _) = n
+
+flatSliceStrides :: FlatSlice d -> [d]
+flatSliceStrides (FlatSlice _ ds) = map dimStride ds
+  where
+    dimStride (FlatDimIndex _ s) = s
 
 -- | An element of a pattern - consisting of a name and an addditional
 -- parametric decoration.  This decoration is what is expected to

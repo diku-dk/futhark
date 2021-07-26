@@ -57,6 +57,8 @@ import Futhark.IR.Syntax
     ShapeChange,
     Slice (..),
     dimFix,
+    flatSliceDims,
+    flatSliceStrides,
     unitSlice,
   )
 import Futhark.IR.Syntax.Core (Ext (..))
@@ -520,18 +522,25 @@ flatSlice ixfun@(IxFun (LMAD offset (dim : dims) :| lmads) oshp cg) (FlatSlice n
   | hasContiguousPerm ixfun,
     ldRotate dim == 0 =
     let lmad =
-          ( LMAD
-              (offset + new_offset * ldStride dim)
-              ( map (helper $ ldStride dim) is
-                  <> dims
-              )
-          )
+          LMAD
+            (offset + new_offset * ldStride dim)
+            ( map (helper $ ldStride dim) is
+                <> dims
+            )
             & setLMADPermutation [0 ..]
      in IxFun (lmad :| lmads) oshp cg
   where
     helper s0 (FlatDimIndex n s) = LMADDim (s0 * s) 0 n 0 Unknown
-flatSlice _ _ =
-  error "slice: reached impossible case when handling flat slices"
+flatSlice (IxFun (lmad :| lmads) oshp cg) s@(FlatSlice new_offset _) =
+  IxFun (LMAD (new_offset * base_stride) (new_dims <> tail_dims) :| lmad : lmads) oshp cg
+  where
+    tail_shapes = tail $ lmadShape lmad
+    base_stride = product tail_shapes
+    tail_strides = tail $ scanr (*) 1 tail_shapes
+    tail_dims = zipWith5 LMADDim tail_strides (repeat 0) tail_shapes [length new_shapes ..] (repeat Inc)
+    new_shapes = flatSliceDims s
+    new_strides = map (* base_stride) $ flatSliceStrides s
+    new_dims = zipWith5 LMADDim new_strides (repeat 0) new_shapes [0 ..] (repeat Inc)
 
 -- | Handle the simple case where all reshape dimensions are coercions.
 reshapeCoercion ::
