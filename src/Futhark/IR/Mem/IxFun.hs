@@ -887,11 +887,13 @@ flatOneDim (s, r, n) i
   | r == 0 = i * s
   | otherwise = ((i + r) `mod` n) * s
 
--- | Generalised iota with user-specified offset and strides.
+-- | Generalised iota with user-specified offset and rotates.
 makeRotIota ::
   IntegralExp num =>
   Monotonicity ->
+  -- | Offset
   num ->
+  -- | Pairs of shape and rotation
   [(num, num)] ->
   LMAD num
 makeRotIota mon off support
