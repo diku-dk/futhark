@@ -105,6 +105,9 @@ data Definitions a = Definitions
   }
   deriving (Show)
 
+instance Functor Definitions where
+  fmap f (Definitions consts funs) = Definitions (fmap f consts) (fmap f funs)
+
 -- | A collection of imperative functions.
 newtype Functions a = Functions [(Name, Function a)]
   deriving (Show)
@@ -124,6 +127,9 @@ data Constants a = Constants
     constsInit :: Code a
   }
   deriving (Show)
+
+instance Functor Constants where
+  fmap f (Constants params code) = Constants params (fmap f code)
 
 -- | Since the core language does not care for signedness, but the
 -- source language does, entry point input/output information has
