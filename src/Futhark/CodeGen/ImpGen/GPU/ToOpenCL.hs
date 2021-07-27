@@ -666,7 +666,7 @@ inKernelOperations mode body =
       name' <- newVName $ pretty name ++ "_backing"
       GC.modifyUserState $ \s ->
         s {kernelLocalMemory = (name', fmap untyped size) : kernelLocalMemory s}
-      GC.stm [C.cstm|$id:name = (__local $ty:defaultMemBlockType) $id:name';|]
+      GC.stm [C.cstm|$id:name = (__local unsigned char*) $id:name';|]
     kernelOps (ErrorSync f) = do
       label <- nextErrorLabel
       pending <- kernelSyncPending <$> GC.getUserState
