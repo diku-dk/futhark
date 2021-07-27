@@ -88,7 +88,7 @@ funName' = funName . nameFromString
 
 -- | The type of memory blocks in the default memory space.
 defaultMemBlockType :: C.Type
-defaultMemBlockType = [C.cty|char*|]
+defaultMemBlockType = [C.cty|unsigned char*|]
 
 -- | The name of exposed array type structs.
 arrayName :: PrimType -> Signedness -> Int -> String
