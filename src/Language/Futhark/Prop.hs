@@ -1017,7 +1017,30 @@ intrinsics =
              ]
           ++
           -- Experimental LMAD ones.
-          [ ( "flat_index_3d",
+          [ ( "flat_index_2d",
+              IntrinsicPolyFun
+                [tp_a, sp_n]
+                [ arr_a $ shape [n],
+                  Scalar (Prim $ Signed Int64),
+                  Scalar (Prim $ Signed Int64),
+                  Scalar (Prim $ Signed Int64),
+                  Scalar (Prim $ Signed Int64),
+                  Scalar (Prim $ Signed Int64)
+                ]
+                $ arr_a $ ShapeDecl [AnyDim Nothing, AnyDim Nothing]
+            ),
+            ( "flat_update_2d",
+              IntrinsicPolyFun
+                [tp_a, sp_n, sp_k, sp_l]
+                [ uarr_a $ shape [n],
+                  Scalar (Prim $ Signed Int64),
+                  Scalar (Prim $ Signed Int64),
+                  Scalar (Prim $ Signed Int64),
+                  arr_a $ shape [k, l]
+                ]
+                $ uarr_a $ shape [n]
+            ),
+            ( "flat_index_3d",
               IntrinsicPolyFun
                 [tp_a, sp_n]
                 [ arr_a $ shape [n],

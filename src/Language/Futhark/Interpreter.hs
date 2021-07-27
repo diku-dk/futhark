@@ -1705,6 +1705,42 @@ initialCtx =
           _ ->
             error $ "acc_write invalid arguments: " ++ pretty (acc, i, v)
     --
+    def "flat_index_2d" = Just . fun6t $ \arr offset n1 s1 n2 s2 -> do
+      let offset' = asInt64 offset
+          n1' = asInt64 n1
+          n2' = asInt64 n2
+          s1' = asInt64 s1
+          s2' = asInt64 s2
+          shapeFromDims = foldr ShapeDim ShapeLeaf
+          mk1 = fmap (toArray (shapeFromDims [n1', n2'])) . sequence
+          mk2 = fmap (toArray $ shapeFromDims [n2']) . sequence
+          iota x = [0 .. x -1]
+          f i j =
+            indexArray [IndexingFix $ offset' + i * s1' + j * s2'] arr
+
+      case mk1 [mk2 [f i j | j <- iota n2'] | i <- iota n1'] of
+        Just arr' -> pure arr'
+        Nothing ->
+          bad mempty mempty $
+            "Index out of bounds: " ++ pretty [(n1', s1', n2', s2')]
+    --
+    def "flat_update_2d" = Just . fun5t $ \arr offset s1 s2 v -> do
+      let offset' = asInt64 offset
+          s1' = asInt64 s1
+          s2' = asInt64 s2
+      case valueShape v of
+        ShapeDim n1 (ShapeDim n2 _) -> do
+          let iota x = [0 .. x -1]
+              f arr' (i, j) =
+                updateArray [IndexingFix $ offset' + i * s1' + j * s2'] arr'
+                  =<< indexArray [IndexingFix i, IndexingFix j] v
+          case foldM f arr [(i, j) | i <- iota n1, j <- iota n2] of
+            Just arr' -> pure arr'
+            Nothing ->
+              bad mempty mempty $
+                "Index out of bounds: " ++ pretty [(n1, s1', n2, s2')]
+        s -> error $ "flat_update_2d: invalid arg shape: " ++ show s
+    --
     def "flat_index_3d" = Just . fun8t $ \arr offset n1 s1 n2 s2 n3 s3 -> do
       let offset' = asInt64 offset
           n1' = asInt64 n1
