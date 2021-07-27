@@ -357,7 +357,7 @@ onKernel target kernel = do
       return
         ( Just $ SharedMemoryKArg size,
           Just [C.cparam|__local volatile typename int64_t* $id:mem_aligned|],
-          [C.citem|__local volatile unsigned char* restrict $id:mem = (__local volatile $ty:defaultMemBlockType) $id:mem_aligned;|]
+          [C.citem|__local volatile unsigned char* restrict $id:mem = (__local volatile unsigned char*) $id:mem_aligned;|]
         )
     prepareLocalMemory TargetCUDA (mem, size) = do
       param <- newVName $ baseString mem ++ "_offset"
