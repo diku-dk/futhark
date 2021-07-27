@@ -577,7 +577,7 @@ static inline void mem_fence_global() {
 
 $esc:("#define NAN (0.0/0.0)")
 $esc:("#define INFINITY (1.0/0.0)")
-extern volatile __shared__ $ty:defaultMemBlockType shared_mem[];
+extern volatile __shared__ unsigned char shared_mem[];
 |]
 
 compilePrimExp :: PrimExp KernelConst -> C.Exp
