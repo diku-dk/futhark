@@ -357,7 +357,7 @@ onKernel target kernel = do
       return
         ( Just $ SharedMemoryKArg size,
           Just [C.cparam|__local volatile typename int64_t* $id:mem_aligned|],
-          [C.citem|__local volatile char* restrict $id:mem = (__local volatile char*)$id:mem_aligned;|]
+          [C.citem|__local volatile restrict $ty:defaultMemBlockType $id:mem = (__local volatile $ty:defaultMemBlockType) $id:mem_aligned;|]
         )
     prepareLocalMemory TargetCUDA (mem, size) = do
       param <- newVName $ baseString mem ++ "_offset"
@@ -376,7 +376,7 @@ useAsParam (ScalarUse name bt) =
         _ -> GC.primTypeToCType bt
    in Just [C.cparam|$ty:ctp $id:name|]
 useAsParam (MemoryUse name) =
-  Just [C.cparam|__global unsigned char *$id:name|]
+  Just [C.cparam|__global $ty:defaultMemBlockType $id:name|]
 useAsParam ConstUse {} =
   Nothing
 
