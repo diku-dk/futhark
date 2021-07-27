@@ -1355,12 +1355,26 @@ initialCtx =
             Just [x, y, z, a, b, c] -> f x y z a b c
             _ -> error $ "Expected sextuple; got: " ++ pretty v
 
+    fun7t f =
+      TermValue Nothing $
+        ValueFun $ \v ->
+          case fromTuple v of
+            Just [x, y, z, a, b, c, d] -> f x y z a b c d
+            _ -> error $ "Expected septuple; got: " ++ pretty v
+
     fun8t f =
       TermValue Nothing $
         ValueFun $ \v ->
           case fromTuple v of
             Just [x, y, z, a, b, c, d, e] -> f x y z a b c d e
             _ -> error $ "Expected sextuple; got: " ++ pretty v
+
+    fun10t fun =
+      TermValue Nothing $
+        ValueFun $ \v ->
+          case fromTuple v of
+            Just [x, y, z, a, b, c, d, e, f, g] -> fun x y z a b c d e f g
+            _ -> error $ "Expected octuple; got: " ++ pretty v
 
     bopDef fs = fun2 $ \x y ->
       case (x, y) of
@@ -1730,6 +1744,50 @@ initialCtx =
               bad mempty mempty $
                 "Index out of bounds: " ++ pretty [(n1, s1', n2, s2', n3, s3')]
         s -> error $ "flat_update_3d: invalid arg shape: " ++ show s
+    --
+    def "flat_index_4d" = Just . fun10t $ \arr offset n1 s1 n2 s2 n3 s3 n4 s4 -> do
+      let offset' = asInt64 offset
+          n1' = asInt64 n1
+          n2' = asInt64 n2
+          n3' = asInt64 n3
+          n4' = asInt64 n4
+          s1' = asInt64 s1
+          s2' = asInt64 s2
+          s3' = asInt64 s3
+          s4' = asInt64 s4
+          shapeFromDims = foldr ShapeDim ShapeLeaf
+          mk1 = fmap (toArray (shapeFromDims [n1', n2', n3', n4'])) . sequence
+          mk2 = fmap (toArray $ shapeFromDims [n2', n3', n4']) . sequence
+          mk3 = fmap (toArray $ shapeFromDims [n3', n4']) . sequence
+          mk4 = fmap (toArray $ shapeFromDims [n4']) . sequence
+          iota x = [0 .. x -1]
+          f i j l m =
+            indexArray [IndexingFix $ offset' + i * s1' + j * s2' + l * s3' + m * s4'] arr
+
+      case mk1 [mk2 [mk3 [mk4 [f i j l m | m <- iota n4'] | l <- iota n3'] | j <- iota n2'] | i <- iota n1'] of
+        Just arr' -> pure arr'
+        Nothing ->
+          bad mempty mempty $
+            "Index out of bounds: " ++ pretty [(n1', s1', n2', s2', n3', s3', n4', s4')]
+    --
+    def "flat_update_4d" = Just . fun7t $ \arr offset s1 s2 s3 s4 v -> do
+      let offset' = asInt64 offset
+          s1' = asInt64 s1
+          s2' = asInt64 s2
+          s3' = asInt64 s3
+          s4' = asInt64 s4
+      case valueShape v of
+        ShapeDim n1 (ShapeDim n2 (ShapeDim n3 (ShapeDim n4 _))) -> do
+          let iota x = [0 .. x -1]
+              f arr' (i, j, l, m) =
+                updateArray [IndexingFix $ offset' + i * s1' + j * s2' + l * s3' + m * s4'] arr'
+                  =<< indexArray [IndexingFix i, IndexingFix j, IndexingFix l, IndexingFix m] v
+          case foldM f arr [(i, j, l, m) | i <- iota n1, j <- iota n2, l <- iota n3, m <- iota n4] of
+            Just arr' -> pure arr'
+            Nothing ->
+              bad mempty mempty $
+                "Index out of bounds: " ++ pretty [(n1, s1', n2, s2', n3, s3', n4, s4')]
+        s -> error $ "flat_update_4d: invalid arg shape: " ++ show s
     --
     def "unzip" = Just $
       fun1 $ \x -> do

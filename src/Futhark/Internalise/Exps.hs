@@ -1803,6 +1803,36 @@ isOverloadedFunction qname args loc = do
       let slice = I.FlatSlice offset' [FlatDimIndex n1 s1', FlatDimIndex n2 s2', FlatDimIndex n3 s3']
       forM (zip arrs1 arrs2) $ \(arr1', arr2') ->
         letSubExp desc $ I.BasicOp $ I.FlatUpdate arr1' slice arr2'
+    handleRest [TupLit [arr, offset, n1, s1, n2, s2, n3, s3, n4, s4] _] "flat_index_4d" = Just $ \desc -> do
+      arrs <- internaliseExpToVars "arr" arr
+      offset' <- internaliseExp1 "offset" offset
+      n1' <- internaliseExp1 "n1" n1
+      s1' <- internaliseExp1 "s1" s1
+      n2' <- internaliseExp1 "n2" n2
+      s2' <- internaliseExp1 "s2" s2
+      n3' <- internaliseExp1 "n3" n3
+      s3' <- internaliseExp1 "s3" s3
+      n4' <- internaliseExp1 "n4" n4
+      s4' <- internaliseExp1 "s4" s4
+      let slice = I.FlatSlice offset' [FlatDimIndex n1' s1', FlatDimIndex n2' s2', FlatDimIndex n3' s3', FlatDimIndex n4' s4']
+      forM arrs $ \arr' ->
+        letSubExp desc $ I.BasicOp $ I.FlatIndex arr' slice
+    handleRest [TupLit [arr1, offset, s1, s2, s3, s4, arr2] _] "flat_update_4d" = Just $ \desc -> do
+      arrs1 <- internaliseExpToVars "arr" arr1
+      offset' <- internaliseExp1 "offset" offset
+      s1' <- internaliseExp1 "s1" s1
+      s2' <- internaliseExp1 "s2" s2
+      s3' <- internaliseExp1 "s3" s3
+      s4' <- internaliseExp1 "s4" s4
+      arrs2 <- internaliseExpToVars "arr" arr2
+      ts <- mapM lookupType arrs2
+      let n1 = arraysSize 0 ts
+          n2 = arraysSize 1 ts
+          n3 = arraysSize 2 ts
+          n4 = arraysSize 3 ts
+      let slice = I.FlatSlice offset' [FlatDimIndex n1 s1', FlatDimIndex n2 s2', FlatDimIndex n3 s3', FlatDimIndex n4 s4']
+      forM (zip arrs1 arrs2) $ \(arr1', arr2') ->
+        letSubExp desc $ I.BasicOp $ I.FlatUpdate arr1' slice arr2'
     handleRest _ _ = Nothing
 
     toSigned int_to e desc = do
