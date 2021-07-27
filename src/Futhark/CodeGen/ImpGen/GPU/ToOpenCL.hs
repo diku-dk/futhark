@@ -364,7 +364,7 @@ onKernel target kernel = do
       return
         ( Just $ SharedMemoryKArg size,
           Just [C.cparam|uint $id:param|],
-          [C.citem|volatile char *$id:mem = &shared_mem[$id:param];|]
+          [C.citem|volatile $ty:defaultMemBlockType $id:mem = &shared_mem[$id:param];|]
         )
 
 useAsParam :: KernelUse -> Maybe C.Param
@@ -577,7 +577,7 @@ static inline void mem_fence_global() {
 
 $esc:("#define NAN (0.0/0.0)")
 $esc:("#define INFINITY (1.0/0.0)")
-extern volatile __shared__ char shared_mem[];
+extern volatile __shared__ $ty:defaultMemBlockType shared_mem[];
 |]
 
 compilePrimExp :: PrimExp KernelConst -> C.Exp
@@ -666,7 +666,7 @@ inKernelOperations mode body =
       name' <- newVName $ pretty name ++ "_backing"
       GC.modifyUserState $ \s ->
         s {kernelLocalMemory = (name', fmap untyped size) : kernelLocalMemory s}
-      GC.stm [C.cstm|$id:name = (__local char*) $id:name';|]
+      GC.stm [C.cstm|$id:name = (__local $ty:defaultMemBlockType) $id:name';|]
     kernelOps (ErrorSync f) = do
       label <- nextErrorLabel
       pending <- kernelSyncPending <$> GC.getUserState
