@@ -2,7 +2,11 @@
 --
 -- ==
 -- entry: lud
--- random input { 32i64 [4194304]f32 }
+-- random input { 32i64 [1024]f32 }
+-- auto output
+-- compiled random input { 32i64 [16384]f32 }
+-- auto output
+-- compiled random input { 32i64 [4194304]f32 }
 -- auto output
 
 import "intrinsics"
