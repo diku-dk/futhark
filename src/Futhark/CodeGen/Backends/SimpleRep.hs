@@ -401,28 +401,28 @@ $esc:("#elif defined(__CUDA_ARCH__)")
       return __popcll(x);
    }
 $esc:("#else")
-   static typename int32_t $id:(funName' "popc8") (typename int8_t x) {
+   static typename int32_t $id:(funName' "popc8") (typename uint8_t x) {
      int c = 0;
      for (; x; ++c) {
        x &= x - 1;
      }
      return c;
     }
-   static typename int32_t $id:(funName' "popc16") (typename int16_t x) {
+   static typename int32_t $id:(funName' "popc16") (typename uint16_t x) {
      int c = 0;
      for (; x; ++c) {
        x &= x - 1;
      }
      return c;
    }
-   static typename int32_t $id:(funName' "popc32") (typename int32_t x) {
+   static typename int32_t $id:(funName' "popc32") (typename uint32_t x) {
      int c = 0;
      for (; x; ++c) {
        x &= x - 1;
      }
      return c;
    }
-   static typename int32_t $id:(funName' "popc64") (typename int64_t x) {
+   static typename int32_t $id:(funName' "popc64") (typename uint64_t x) {
      int c = 0;
      for (; x; ++c) {
        x &= x - 1;
