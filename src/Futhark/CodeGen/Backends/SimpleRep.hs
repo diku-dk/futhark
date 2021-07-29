@@ -294,7 +294,7 @@ cIntOps =
       [C.cedecl|$esc:("#define " ++ name ++ "(x) (" ++ prettyOneLine rhs ++ ")")|]
 
     mkPow t =
-      let ct = intTypeToCType t
+      let ct = uintTypeToCType t -- To make overflow well-defined.
        in [C.cedecl|static inline $ty:ct $id:(taggedI "pow" t)($ty:ct x, $ty:ct y) {
                          $ty:ct res = 1, rem = y;
                          while (rem != 0) {
