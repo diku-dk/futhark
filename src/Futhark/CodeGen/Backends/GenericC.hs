@@ -799,9 +799,11 @@ copyMemoryDefaultSpace ::
   CompilerM op s ()
 copyMemoryDefaultSpace destmem destidx srcmem srcidx nbytes =
   stm
-    [C.cstm|memmove($exp:destmem + $exp:destidx,
+    [C.cstm|if ($exp:nbytes > 0) {
+              memmove($exp:destmem + $exp:destidx,
                       $exp:srcmem + $exp:srcidx,
-                      $exp:nbytes);|]
+                      $exp:nbytes);
+            }|]
 
 --- Entry points.
 
