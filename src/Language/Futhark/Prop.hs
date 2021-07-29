@@ -570,6 +570,7 @@ typeOf (Project _ _ (Info t) _) = t
 typeOf (Var _ (Info t) _) = t
 typeOf (Ascript e _ _) = typeOf e
 typeOf (Negate e _) = typeOf e
+typeOf (Not e _) = typeOf e
 typeOf (Update e _ _ _) = typeOf e `setAliases` mempty
 typeOf (RecordUpdate _ _ _ (Info t) _) = t
 typeOf (Assert _ e _ _) = typeOf e

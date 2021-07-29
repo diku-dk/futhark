@@ -26,6 +26,15 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Changed
 
+  * The `!` function in the integer modules is now called `not`.
+
+  * `!` is now builtin syntax.  You can no longer define a function
+    called `!`.  It is extremely unlikely this affects you.  This
+    removes the last special-casing of prefix operators.
+
+  * `map (!)` is no longer permitted (and it never was according to
+    the grammar).
+
 ### Fixed
 
   * `i64.abs` was wrong for arguments that did not fit in an `i32`.

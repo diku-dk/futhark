@@ -51,9 +51,6 @@ import Futhark.Util.Loc hiding (L)
 @identifier = [a-zA-Z] [a-zA-Z0-9_']* | "_" [a-zA-Z0-9] [a-zA-Z0-9_']*
 @qualidentifier = (@identifier ".")+ @identifier
 
-@unop = "!"
-@qualunop = (@identifier ".")+ @unop
-
 $opchar = [\+\-\*\/\%\=\!\>\<\|\&\^\.]
 @binop = ($opchar # \.) $opchar*
 @qualbinop = (@identifier ".")+ @binop
@@ -94,6 +91,7 @@ tokens :-
   "..."                    { tokenC THREE_DOTS }
   ".."                     { tokenC TWO_DOTS }
   "."                      { tokenC DOT }
+  "!"                      { tokenC BANG }
 
   @intlit i8               { tokenM $ return . I8LIT . readIntegral . T.filter (/= '_') . T.takeWhile (/='i') }
   @intlit i16              { tokenM $ return . I16LIT . readIntegral . T.filter (/= '_') . T.takeWhile (/='i') }
@@ -120,9 +118,6 @@ tokens :-
   @identifier "." "("      { tokenM $ fmap (QUALPAREN []) . indexing . T.init . T.takeWhile (/='(') }
   @qualidentifier "." "("  { tokenM $ fmap (uncurry QUALPAREN) . mkQualId . T.init . T.takeWhile (/='(') }
   "#" @identifier          { tokenS $ CONSTRUCTOR . nameFromText . T.drop 1 }
-
-  @unop                    { tokenS $ UNOP . nameFromText }
-  @qualunop                { tokenM $ fmap (uncurry QUALUNOP) . mkQualId }
 
   @binop                   { tokenM $ return . symbol [] . nameFromText }
   @qualbinop               { tokenM $ \s -> do (qs,k) <- mkQualId s; return (symbol qs k) }
@@ -287,8 +282,6 @@ data Token = ID Name
            | INDEXING Name
            | QUALINDEXING [Name] Name
            | QUALPAREN [Name] Name
-           | UNOP Name
-           | QUALUNOP [Name] Name
            | SYMBOL BinOp [Name] Name
            | CONSTRUCTOR Name
            | PROJ_INTFIELD Name
@@ -335,6 +328,7 @@ data Token = ID Name
            | EQU
            | ASTERISK
            | NEGATE
+           | BANG
            | LTH
            | HAT
            | TILDE

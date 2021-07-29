@@ -323,6 +323,7 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (ExpBase f vn) where
     text $ show $ decode s
   pprPrec _ (Project k e _ _) = ppr e <> text "." <> ppr k
   pprPrec _ (Negate e _) = text "-" <> ppr e
+  pprPrec _ (Not e _) = text "-" <> ppr e
   pprPrec _ (Update src idxs ve _) =
     ppr src <+> text "with"
       <+> brackets (commasep (map ppr idxs))

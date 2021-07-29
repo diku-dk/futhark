@@ -442,6 +442,8 @@ transformExp (Ascript e tp loc) =
   Ascript <$> transformExp e <*> pure tp <*> pure loc
 transformExp (Negate e loc) =
   Negate <$> transformExp e <*> pure loc
+transformExp (Not e loc) =
+  Not <$> transformExp e <*> pure loc
 transformExp (Lambda params e0 decl tp loc) = do
   e0' <- transformExp e0
   return $ Lambda params e0' decl tp loc
