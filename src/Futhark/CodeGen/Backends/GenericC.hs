@@ -1916,7 +1916,6 @@ compilePrimExp f (BinOpExp bop x y) = do
     Xor {} -> [C.cexp|$exp:x' ^ $exp:y'|]
     And {} -> [C.cexp|$exp:x' & $exp:y'|]
     Or {} -> [C.cexp|$exp:x' | $exp:y'|]
-    Shl {} -> [C.cexp|$exp:x' << $exp:y'|]
     LogAnd {} -> [C.cexp|$exp:x' && $exp:y'|]
     LogOr {} -> [C.cexp|$exp:x' || $exp:y'|]
     _ -> [C.cexp|$id:(pretty bop)($exp:x', $exp:y')|]
