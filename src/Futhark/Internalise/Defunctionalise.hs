@@ -543,6 +543,9 @@ defuncExp e@(AppExp Apply {} _) = defuncApply 0 e
 defuncExp (Negate e0 loc) = do
   (e0', sv) <- defuncExp e0
   return (Negate e0' loc, sv)
+defuncExp (Not e0 loc) = do
+  (e0', sv) <- defuncExp e0
+  return (Not e0' loc, sv)
 defuncExp (Lambda pats e0 _ (Info (_, ret)) loc) =
   defuncFun [] pats e0 ret loc
 -- Operator sections are expected to be converted to lambda-expressions

@@ -81,6 +81,7 @@ freeVars expr = case expr of
   AppExp (If e1 e2 e3 _) _ -> freeVars e1 <> freeVars e2 <> freeVars e3
   AppExp (Apply e1 e2 _ _) _ -> freeVars e1 <> freeVars e2
   Negate e _ -> freeVars e
+  Not e _ -> freeVars e
   Lambda pats e0 _ (Info (_, t)) _ ->
     (sizes (foldMap patternDimNames pats) <> freeVars e0 <> sizes (typeDimNames t))
       `withoutM` foldMap patVars pats

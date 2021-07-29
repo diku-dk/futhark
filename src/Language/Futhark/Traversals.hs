@@ -142,6 +142,8 @@ instance ASTMappable (ExpBase Info VName) where
     Ascript <$> mapOnExp tv e <*> astMap tv tdecl <*> pure loc
   astMap tv (Negate x loc) =
     Negate <$> mapOnExp tv x <*> pure loc
+  astMap tv (Not x loc) =
+    Not <$> mapOnExp tv x <*> pure loc
   astMap tv (Update src slice v loc) =
     Update <$> mapOnExp tv src <*> mapM (astMap tv) slice
       <*> mapOnExp tv v
@@ -421,6 +423,7 @@ bareExp (ArrayLit els _ loc) = ArrayLit (map bareExp els) NoInfo loc
 bareExp (Ascript e tdecl loc) =
   Ascript (bareExp e) (bareTypeDecl tdecl) loc
 bareExp (Negate x loc) = Negate (bareExp x) loc
+bareExp (Not x loc) = Not (bareExp x) loc
 bareExp (Update src slice v loc) =
   Update (bareExp src) (map bareDimIndex slice) (bareExp v) loc
 bareExp (RecordUpdate src fs v _ loc) =
