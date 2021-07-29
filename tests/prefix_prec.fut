@@ -1,6 +1,6 @@
 -- Test that prefix operators have the right precedence.
 --
 -- ==
--- input {} output { 1 }
+-- input {1 2} output { 1 }
 
-let main = -1+2
+let main x y = -x%y : i32

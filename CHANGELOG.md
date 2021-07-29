@@ -38,6 +38,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * The `clz` function would sometimes exhibit undefined behaviour in
     CPU code (#1415).
 
+  * Operator priority of prefix `-` was wrong - it is now the same as
+    `!` (#1419).
+
 ## [0.19.7]
 
 ### Added
