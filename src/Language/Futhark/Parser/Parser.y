@@ -602,8 +602,9 @@ Exp2 :: { UncheckedExp }
      | Exp2 '..' Exp2 '..>' Exp2 { AppExp (Range $1 (Just $3) (DownToExclusive $5) (srcspan $1 $>)) NoInfo }
      | Exp2 '..' Atom            {% twoDotsRange $2 }
      | Atom '..' Exp2            {% twoDotsRange $2 }
-     | '-' Exp2
-       { Negate $2 $1 }
+     | '-' Exp2  %prec juxtprec  { Negate $2 $1 }
+     | UnOp Exp2 %prec juxtprec  {% applyExp [Var (fst $1) NoInfo (snd $1), $2] }
+
 
      | Exp2 with '[' DimIndices ']' '=' Exp2
        { Update $1 $4 $7 (srcspan $1 $>) }
@@ -622,8 +623,6 @@ Apply_ :: { UncheckedExp }
 ApplyList :: { [UncheckedExp] }
           : ApplyList Atom %prec juxtprec
             { $1 ++ [$2] }
-          | UnOp Atom %prec juxtprec
-            { [Var (fst $1) NoInfo (snd $1), $2] }
           | Atom %prec juxtprec
             { [$1] }
 
