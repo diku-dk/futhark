@@ -249,6 +249,7 @@ jobs:
         echo "$HOME/.local/bin" >> $GITHUB_PATH
 
     - run: |
+        export CFLAGS="-fsanitize=undefined -fno-sanitize-recover -O3"
         futhark test -c --backend=c tests examples --no-tuning
         make -C tests_lib/c -j
 
