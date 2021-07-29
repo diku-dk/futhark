@@ -182,6 +182,7 @@ instance C.ToExp SubExp where
 
 cIntOps :: [C.Definition]
 cIntOps =
+  [C.cedecl|$esc:("#define parens(x) (x)")|] :
   concatMap (`map` [minBound .. maxBound]) ops
     ++ cIntPrimFuns
   where
