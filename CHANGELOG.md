@@ -35,6 +35,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Yet another defunctorisation bug (#1397).
 
+  * The `clz` function would sometimes exhibit undefined behaviour in
+    CPU code (#1415).
+
 ## [0.19.7]
 
 ### Added

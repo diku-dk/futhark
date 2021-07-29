@@ -128,4 +128,6 @@ static void str_builder(struct str_builder *b, const char *s, ...) {
   b->used += needed;
 }
 
+#define parens(x) (x)
+
 // End of util.h.
