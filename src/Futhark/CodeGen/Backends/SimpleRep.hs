@@ -306,13 +306,13 @@ cIntOps =
                          return res;
               }|]
 
-    mkSExt from_t to_t = macro name [C.cexp|($ty:to_ct)(($ty:from_ct)x)|]
+    mkSExt from_t to_t = macro name [C.cexp|($ty:to_ct)(($ty:from_ct)parens(x))|]
       where
         name = "sext_" ++ pretty from_t ++ "_" ++ pretty to_t
         from_ct = intTypeToCType from_t
         to_ct = intTypeToCType to_t
 
-    mkZExt from_t to_t = macro name [C.cexp|($ty:to_ct)(($ty:from_ct)x)|]
+    mkZExt from_t to_t = macro name [C.cexp|($ty:to_ct)(($ty:from_ct)parens(x))|]
       where
         name = "zext_" ++ pretty from_t ++ "_" ++ pretty to_t
         from_ct = uintTypeToCType from_t
@@ -554,44 +554,27 @@ $esc:("#elif defined(__CUDA_ARCH__)")
    }
 $esc:("#else")
    static typename int32_t $id:(funName' "clz8") (typename int8_t x) {
-    int n = 0;
-    int bits = sizeof(x) * 8;
-    for (int i = 0; i < bits; i++) {
-        if (x < 0) break;
-        n++;
-        x <<= 1;
-    }
-    return n;
+     return x == 0 ? 8 : __builtin_clz(zext_i8_i32(x))-24;
    }
    static typename int32_t $id:(funName' "clz16") (typename int16_t x) {
-    int n = 0;
-    int bits = sizeof(x) * 8;
-    for (int i = 0; i < bits; i++) {
-        if (x < 0) break;
-        n++;
-        x <<= 1;
-    }
-    return n;
+     return x == 0 ? 16 : __builtin_clz(zext_i16_i32(x))-16;
    }
    static typename int32_t $id:(funName' "clz32") (typename int32_t x) {
-    int n = 0;
-    int bits = sizeof(x) * 8;
-    for (int i = 0; i < bits; i++) {
-        if (x < 0) break;
-        n++;
-        x <<= 1;
-    }
-    return n;
+     return x == 0 ? 32 : __builtin_clz(zext_i32_i32(x));
    }
    static typename int32_t $id:(funName' "clz64") (typename int64_t x) {
-    int n = 0;
-    int bits = sizeof(x) * 8;
-    for (int i = 0; i < bits; i++) {
-        if (x < 0) break;
-        n++;
-        x <<= 1;
-    }
-    return n;
+     typename int32_t firsthalf = zext_i64_i32(x>>32L);
+     typename int32_t secondhalf = zext_i64_i32(x);
+     if (x == 0) {
+       return 64;
+     } else {
+       int firsthalf_clz = firsthalf == 0 ? 32 : __builtin_clz(firsthalf);
+       if (firsthalf_clz == 32) {
+         return 32 + __builtin_clz(secondhalf);
+       } else {
+         return firsthalf_clz;
+       }
+     }
    }
 $esc:("#endif")
 

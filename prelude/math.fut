@@ -111,12 +111,13 @@ module type integral = {
   val mad_hi: (a: t) -> (b: t) -> (c: t) -> t
 
   -- | Count number of zero bits preceding the most significant set
-  -- bit.
+  -- bit.  Returns the number of bits in the type if the argument is
+  -- zero.
   val clz: t -> i32
 
   -- | Count number of trailing zero bits following the least
   -- significant set bit.  Returns the number of bits in the type if
-  -- the argument is all-zero.
+  -- the argument is zero.
   val ctz: t -> i32
 }
 
