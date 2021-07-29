@@ -286,8 +286,9 @@ void cmd_call(struct server_state *s, const char *args[]) {
 
   int num_outs = entry_num_outs(e);
   int num_ins = entry_num_ins(e);
-  void* outs[num_outs];
-  void* ins[num_ins];
+  // +1 to avoid zero-size arrays, which is UB.
+  void* outs[num_outs+1];
+  void* ins[num_ins+1];
 
   for (int i = 0; i < num_ins; i++) {
     const char *in_name = get_arg(args, 1+num_outs+i);
