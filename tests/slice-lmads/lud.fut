@@ -3,11 +3,21 @@
 -- ==
 -- entry: lud
 -- random input { 32i64 [1024]f32 }
--- auto output
 -- compiled random input { 32i64 [16384]f32 }
--- auto output
 -- compiled random input { 32i64 [4194304]f32 }
--- auto output
+
+-- ==
+-- entry: lud_2d
+-- input @ ../../../futhark-benchmarks/rodinia/lud/data/16by16.in
+-- output @ ../../../futhark-benchmarks/rodinia/lud/data/16by16.out
+-- compiled input @ ../../../futhark-benchmarks/rodinia/lud/data/64.in
+-- output @ ../../../futhark-benchmarks/rodinia/lud/data/64.out
+-- compiled input @ ../../../futhark-benchmarks/rodinia/lud/data/256.in
+-- output @ ../../../futhark-benchmarks/rodinia/lud/data/256.out
+-- compiled input @ ../../../futhark-benchmarks/rodinia/lud/data/512.in.gz
+-- output @ ../../../futhark-benchmarks/rodinia/lud/data/512.out.gz
+-- compiled input @ ../../../futhark-benchmarks/rodinia/lud/data/2048.in.gz
+-- output @ ../../../futhark-benchmarks/rodinia/lud/data/2048.out.gz
 
 import "intrinsics"
 

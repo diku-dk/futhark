@@ -7,6 +7,8 @@
 -- output { [[[2i64, 3i64], [6i64, 7i64]],
 --           [[5i64, 6i64], [9i64, 10i64]],
 --           [[8i64, 9i64], [12i64, 13i64]]] }
+-- input { [ 0i64 ] }
+-- error: out of bounds
 
 -- ==
 -- entry: update_antidiag
@@ -18,6 +20,8 @@
 --            4i64,  2i64,  3i64,  7i64,
 --            8i64,  9i64,  4i64,  5i64,
 --           12i64, 13i64,  6i64,  7i64 ] }
+-- input { [ 0i64 ] }
+-- error: out of bounds
 
 import "intrinsics"
 
