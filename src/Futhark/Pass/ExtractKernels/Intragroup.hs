@@ -14,7 +14,7 @@ import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 import Futhark.Analysis.PrimExp.Convert
 import qualified Futhark.IR.GPU as Out
-import Futhark.IR.GPU.Kernel hiding (HistOp)
+import Futhark.IR.GPU.Op hiding (HistOp)
 import Futhark.IR.SOACS
 import Futhark.MonadFreshNames
 import Futhark.Pass.ExtractKernels.BlockedKernel

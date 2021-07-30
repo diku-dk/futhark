@@ -166,7 +166,7 @@ import Control.Monad.Reader
 import Data.Bifunctor (first)
 import Data.Maybe
 import qualified Futhark.IR.GPU as Out
-import Futhark.IR.GPU.Kernel
+import Futhark.IR.GPU.Op
 import Futhark.IR.SOACS
 import Futhark.IR.SOACS.Simplify (simplifyStms)
 import Futhark.MonadFreshNames

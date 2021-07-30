@@ -156,7 +156,7 @@ library
       Futhark.IR
       Futhark.IR.Aliases
       Futhark.IR.GPU
-      Futhark.IR.GPU.Kernel
+      Futhark.IR.GPU.Op
       Futhark.IR.GPU.Simplify
       Futhark.IR.GPU.Sizes
       Futhark.IR.GPUMem

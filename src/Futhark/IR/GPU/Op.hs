@@ -7,7 +7,7 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
 
-module Futhark.IR.GPU.Kernel
+module Futhark.IR.GPU.Op
   ( -- * Size operations
     SizeOp (..),
 
