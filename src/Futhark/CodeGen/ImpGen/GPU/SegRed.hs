@@ -89,7 +89,7 @@ compileSegRed pat lvl space reds body =
       let (red_res, map_res) = splitAt (segBinOpResults reds) $ kernelBodyResult body
 
       sComment "save map-out results" $ do
-        let map_arrs = drop (segBinOpResults reds) $ patElements pat
+        let map_arrs = drop (segBinOpResults reds) $ patElems pat
         zipWithM_ (compileThreadResult space) map_arrs map_res
 
       red_cont $ zip (map kernelResultSubExp red_res) $ repeat []
@@ -228,7 +228,7 @@ nonsegmentedReduction segred_pat num_groups group_size space reds body = do
 
     let segred_pes =
           chunks (map (length . segBinOpNeutral) reds) $
-            patElements segred_pat
+            patElems segred_pat
     forM_ (zip7 reds reds_arrs reds_group_res_arrs segred_pes slugs reds_op_renamed [0 ..]) $
       \(SegBinOp _ red_op nes _, red_arrs, group_res_arrs, pes, slug, red_op_renamed, i) -> do
         let (red_x_params, red_y_params) = splitAt (length nes) $ lambdaParams red_op
@@ -466,7 +466,7 @@ largeSegmentsReduction segred_pat num_groups group_size space reds body = do
 
       let segred_pes =
             chunks (map (length . segBinOpNeutral) reds) $
-              patElements segred_pat
+              patElems segred_pat
 
           multiple_groups_per_segment =
             forM_ (zip7 reds reds_arrs reds_group_res_arrs segred_pes slugs reds_op_renamed [0 ..]) $

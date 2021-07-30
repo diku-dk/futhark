@@ -320,7 +320,7 @@ bindingStm ::
   ForwardingM rep a ->
   ForwardingM rep a
 bindingStm (Let pat _ _) = local $ \(TopDown n vtable d x y) ->
-  let entries = M.fromList $ map entry $ patElements pat
+  let entries = M.fromList $ map entry $ patElems pat
       entry patElem =
         let (aliases, _) = patElemDec patElem
          in ( patElemName patElem,

@@ -52,11 +52,11 @@ analyseStm ::
   m (InUse, LastUsed, Graph VName)
 analyseStm lumap inuse0 stm =
   inScopeOf stm $ do
-    let pat_name = patElemName $ head $ patElements $ stmPat stm
+    let pat_name = patElemName $ head $ patElems $ stmPat stm
 
     new_mems <-
       stmPat stm
-        & patElements
+        & patElems
         & mapM (memInfo . patElemName)
         <&> catMaybes
         <&> namesFromList

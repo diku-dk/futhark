@@ -125,7 +125,7 @@ optimiseStms onOp init_vtable init_sinking all_stms free_in_res =
     optimiseStms' _ _ [] = ([], mempty)
     optimiseStms' vtable sinking (stm : stms)
       | BasicOp Index {} <- stmExp stm,
-        [pe] <- patElements (stmPat stm),
+        [pe] <- patElems (stmPat stm),
         primType $ patElemType pe,
         maybe True (== 1) $ M.lookup (patElemName pe) multiplicities =
         let (stms', sunk) =

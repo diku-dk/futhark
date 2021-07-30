@@ -181,7 +181,7 @@ instance Scoped rep (LoopForm rep) where
 -- | The scope of a pattern.
 scopeOfPat :: LetDec rep ~ dec => PatT dec -> Scope rep
 scopeOfPat =
-  mconcat . map scopeOfPatElem . patElements
+  mconcat . map scopeOfPatElem . patElems
 
 -- | The scope of a pattern element.
 scopeOfPatElem :: LetDec rep ~ dec => PatElemT dec -> Scope rep

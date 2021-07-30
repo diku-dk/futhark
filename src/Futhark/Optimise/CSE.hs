@@ -199,7 +199,7 @@ cseInStms consumed (stm : stms) m =
       let ds =
             case stmExp stm' of
               DoLoop merge _ _ -> map (diet . declTypeOf . fst) merge
-              _ -> map patElemDiet $ patElements $ stmPat stm'
+              _ -> map patElemDiet $ patElems $ stmPat stm'
       e <- mapExpM (cse ds) $ stmExp stm'
       return stm' {stmExp = e}
 
@@ -223,7 +223,7 @@ cseInStm consumed (Let pat (StmAux cs attrs edec) e) m = do
   CSEState (esubsts, nsubsts) cse_arrays <- ask
   let e' = substituteNames nsubsts e
       pat' = substituteNames nsubsts pat
-  if any (bad cse_arrays) $ patElements pat
+  if any (bad cse_arrays) $ patElems pat
     then m [Let pat' (StmAux cs attrs edec) e']
     else case M.lookup (edec, e') esubsts of
       Just subpat ->
@@ -231,7 +231,7 @@ cseInStm consumed (Let pat (StmAux cs attrs edec) e) m = do
           let lets =
                 [ Let (Pat [patElem']) (StmAux cs attrs edec) $
                     BasicOp $ SubExp $ Var $ patElemName patElem
-                  | (name, patElem) <- zip (patNames pat') $ patElements subpat,
+                  | (name, patElem) <- zip (patNames pat') $ patElems subpat,
                     let patElem' = patElem {patElemName = name}
                 ]
           m lets

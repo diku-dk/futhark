@@ -73,7 +73,7 @@ substituteIndicesInPat ::
   PatT dec ->
   m (IndexSubstitutions (LetDec (Rep m)), PatT dec)
 substituteIndicesInPat substs pat = do
-  (substs', pes) <- mapAccumLM sub substs $ patElements pat
+  (substs', pes) <- mapAccumLM sub substs $ patElems pat
   return (substs', Pat pes)
   where
     sub substs' patElem = return (substs', patElem)

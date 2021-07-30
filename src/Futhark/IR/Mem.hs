@@ -877,9 +877,9 @@ checkMemInfo name (MemArray _ shape _ (ArrayIn v ixfun)) = do
 bodyReturnsFromPat ::
   PatT (MemBound NoUniqueness) -> [(VName, BodyReturns)]
 bodyReturnsFromPat pat =
-  map asReturns $ patElements pat
+  map asReturns $ patElems pat
   where
-    ctx = patElements pat
+    ctx = patElems pat
 
     ext (Var v)
       | Just (i, _) <- find ((== v) . patElemName . snd) $ zip [0 ..] ctx =

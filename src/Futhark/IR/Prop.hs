@@ -240,7 +240,7 @@ class
 expExtTypesFromPat :: Typed dec => PatT dec -> [ExtType]
 expExtTypesFromPat pat =
   existentialiseExtTypes (patNames pat) $
-    staticShapes $ map patElemType $ patElements pat
+    staticShapes $ map patElemType $ patElems pat
 
 -- | Keep only those attributes that are relevant for 'Assert'
 -- expressions.

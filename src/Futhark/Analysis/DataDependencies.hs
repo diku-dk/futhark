@@ -42,7 +42,7 @@ dataDependencies' startdeps = foldl grow startdeps . bodyStms
             M.fromList $
               map comb $
                 zip3
-                  (patElements pat)
+                  (patElems pat)
                   (bodyResult tb)
                   (bodyResult fb)
        in M.unions [branchdeps, deps, tdeps, fdeps]

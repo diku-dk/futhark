@@ -246,9 +246,9 @@ streamRed mk_lvl pat w comm red_lam fold_lam nes arrs = runBuilderT'_ $ do
   -- First, figure out how many threads to use for this.
   size <- blockedKernelSize "stream_red" w
 
-  let (redout_pes, mapout_pes) = splitAt (length nes) $ patElements pat
+  let (redout_pes, mapout_pes) = splitAt (length nes) $ patElems pat
   (redout_pat, ispace, read_dummy) <- dummyDim $ Pat redout_pes
-  let pat' = Pat $ patElements redout_pat ++ mapout_pes
+  let pat' = Pat $ patElems redout_pat ++ mapout_pes
 
   (_, kspace, ts, kbody) <- prepareStream size ispace w comm fold_lam nes arrs
 

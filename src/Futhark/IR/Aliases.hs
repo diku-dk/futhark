@@ -255,7 +255,7 @@ mkPatAliases pat e =
    in -- In case the pattern has
       -- more elements (this
       -- implies a type error).
-      zipWith annotatePatElem (patElements pat) als
+      zipWith annotatePatElem (patElems pat) als
   where
     annotatePatElem bindee names =
       bindee `setPatElemDec` (AliasDec names', patElemDec bindee)
