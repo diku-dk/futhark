@@ -101,7 +101,7 @@ atomicHistogram pat flat_idx space histops kbody = do
   let (is, ns) = unzip $ unSegSpace space
       ns_64 = map toInt64Exp ns
   let num_red_res = length histops + sum (map (length . histNeutral) histops)
-      (all_red_pes, map_pes) = splitAt num_red_res $ patElements pat
+      (all_red_pes, map_pes) = splitAt num_red_res $ patElems pat
 
   atomicOps <- mapM onOpAtomic histops
 
@@ -172,10 +172,10 @@ subHistogram pat flat_idx space histops num_histos kbody = do
   let (is, ns) = unzip $ unSegSpace space
       ns_64 = map toInt64Exp ns
 
-  let pes = patElements pat
+  let pes = patElems pat
       num_red_res = length histops + sum (map (length . histNeutral) histops)
       map_pes = drop num_red_res pes
-      per_red_pes = segHistOpChunks histops $ patElements pat
+      per_red_pes = segHistOpChunks histops $ patElems pat
 
   -- Allocate array of subhistograms in the calling thread.  Each
   -- tasks will work in its own private allocations (to avoid false
@@ -318,8 +318,8 @@ compileSegHistBody idx pat space histops kbody = do
       ns_64 = map toInt64Exp ns
 
   let num_red_res = length histops + sum (map (length . histNeutral) histops)
-      map_pes = drop num_red_res $ patElements pat
-      per_red_pes = segHistOpChunks histops $ patElements pat
+      map_pes = drop num_red_res $ patElems pat
+      per_red_pes = segHistOpChunks histops $ patElems pat
 
   collect $ do
     let inner_bound = last ns_64

@@ -366,7 +366,7 @@ bindingEntries ::
   SymbolTable rep ->
   [LetBoundEntry rep]
 bindingEntries bnd@(Let pat _ _) vtable = do
-  pat_elem <- patElements pat
+  pat_elem <- patElems pat
   return $ defBndEntry vtable pat_elem (Aliases.aliasesOf pat_elem) bnd
 
 adjustSeveral :: Ord k => (v -> v) -> [k] -> M.Map k v -> M.Map k v
@@ -411,7 +411,7 @@ insertStm ::
   SymbolTable rep
 insertStm stm vtable =
   flip (foldl' $ flip consume) (namesToList stm_consumed) $
-    flip (foldl' addRevAliases) (patElements $ stmPat stm) $
+    flip (foldl' addRevAliases) (patElems $ stmPat stm) $
       insertEntries (zip names $ map LetBound $ bindingEntries stm vtable) vtable
   where
     names = patNames $ stmPat stm

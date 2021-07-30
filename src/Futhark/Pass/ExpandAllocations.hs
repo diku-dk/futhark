@@ -101,7 +101,7 @@ transformStm (Let pat aux (If cond tbranch fbranch (IfDec ts IfEquiv))) = do
 
     useBranch b =
       bodyStms b
-        <> stmsFromList (zipWith bindRes (patElements pat) (bodyResult b))
+        <> stmsFromList (zipWith bindRes (patElems pat) (bodyResult b))
 transformStm (Let pat aux e) = do
   (bnds, e') <- transformExp =<< mapExpM transform e
   return $ bnds <> oneStm (Let pat aux e')
@@ -596,7 +596,7 @@ offsetMemoryInStm (Let pat dec e) = do
   -- Try to recompute the index function.  Fall back to creating rebase
   -- operations with the RebaseMap.
   rts <- runReaderT (expReturns e') scope
-  let pat'' = Pat $ zipWith pick (patElements pat') rts
+  let pat'' = Pat $ zipWith pick (patElems pat') rts
       stm = Let pat'' dec e'
   let scope' = scopeOf stm <> scope
   return (scope', stm)

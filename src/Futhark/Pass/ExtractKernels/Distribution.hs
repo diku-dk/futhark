@@ -102,7 +102,7 @@ pushInnerTarget :: Target -> Targets -> Targets
 pushInnerTarget (pat, res) (Targets inner_target targets) =
   Targets (pat', res') (targets ++ [inner_target])
   where
-    (pes', res') = unzip $ filter (used . fst) $ zip (patElements pat) res
+    (pes', res') = unzip $ filter (used . fst) $ zip (patElems pat) res
     pat' = Pat pes'
     inner_used = freeIn $ snd inner_target
     used pe = patElemName pe `nameIn` inner_used
@@ -515,11 +515,11 @@ removeIdentityMappingGeneral ::
   )
 removeIdentityMappingGeneral bound pat res =
   let (identities, not_identities) =
-        mapEither isIdentity $ zip (patElements pat) res
+        mapEither isIdentity $ zip (patElems pat) res
       (not_identity_patElems, not_identity_res) = unzip not_identities
       (identity_patElems, identity_res) = unzip identities
       expandTarget (tpat, tres) =
-        ( Pat $ patElements tpat ++ identity_patElems,
+        ( Pat $ patElems tpat ++ identity_patElems,
           tres ++ map (uncurry SubExpRes . second Var) identity_res
         )
       identity_map =

@@ -331,7 +331,7 @@ kernelAlternatives pat default_body [] = runBuilder_ $ do
   forM_ (zip (patNames pat) ses) $ \(name, SubExpRes cs se) ->
     certifying cs $ letBindNames [name] $ BasicOp $ SubExp se
 kernelAlternatives pat default_body ((cond, alt) : alts) = runBuilder_ $ do
-  alts_pat <- fmap Pat . forM (patElements pat) $ \pe -> do
+  alts_pat <- fmap Pat . forM (patElems pat) $ \pe -> do
     name <- newVName $ baseString $ patElemName pe
     return pe {patElemName = name}
 
@@ -476,7 +476,7 @@ transformStm path (Let pat aux@(StmAux cs _ _) (Op (Stream w arrs (Parallel o co
         let fold_fun' = soacsLambdaToGPU fold_fun
 
         let (red_pat_elems, concat_pat_elems) =
-              splitAt (length nes) $ patElements pat
+              splitAt (length nes) $ patElems pat
             red_pat = Pat red_pat_elems
 
         ((num_threads, red_results), stms) <-
