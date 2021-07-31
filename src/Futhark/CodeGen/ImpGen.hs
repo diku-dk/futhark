@@ -426,7 +426,7 @@ constsVTable :: Mem rep => Stms rep -> VTable rep
 constsVTable = foldMap stmVtable
   where
     stmVtable (Let pat _ e) =
-      foldMap (peVtable e) $ patElements pat
+      foldMap (peVtable e) $ patElems pat
     peVtable e (PatElem name dec) =
       M.singleton name $ memBoundToVarEntry (Just e) dec
 
@@ -718,7 +718,7 @@ defCompileStms alive_after_stms all_stms m =
   void $ compileStms' mempty $ stmsToList all_stms
   where
     compileStms' allocs (Let pat aux e : bs) = do
-      dVars (Just e) (patElements pat)
+      dVars (Just e) (patElems pat)
 
       e_code <-
         localAttrs (stmAuxAttrs aux) $
@@ -739,7 +739,7 @@ defCompileStms alive_after_stms all_stms m =
       emit code
       return $ freeIn code <> alive_after_stms
 
-    patternAllocs = S.fromList . mapMaybe isMemPatElem . patElements
+    patternAllocs = S.fromList . mapMaybe isMemPatElem . patElems
     isMemPatElem pe = case patElemType pe of
       Mem space -> Just (patElemName pe, space)
       _ -> Nothing
@@ -1329,7 +1329,7 @@ lookupAcc name is = do
     _ -> error $ "ImpGen.lookupAcc: not an accumulator: " ++ pretty name
 
 destinationFromPat :: Mem rep => Pat rep -> ImpM rep r op [ValueDestination]
-destinationFromPat = mapM inspect . patElements
+destinationFromPat = mapM inspect . patElems
   where
     inspect pe = do
       let name = patElemName pe

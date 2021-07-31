@@ -89,6 +89,7 @@ import Data.FileEmbed
 import Data.Loc
 import qualified Data.Map.Strict as M
 import Data.Maybe
+import qualified Data.Text as T
 import Futhark.CodeGen.Backends.GenericC.CLI (cliDefs)
 import Futhark.CodeGen.Backends.GenericC.Options
 import Futhark.CodeGen.Backends.GenericC.Server (serverDefs)
@@ -96,8 +97,10 @@ import Futhark.CodeGen.Backends.SimpleRep
 import Futhark.CodeGen.ImpCode
 import Futhark.IR.Prop (isBuiltInFunction)
 import Futhark.MonadFreshNames
+import Futhark.Util.Pretty (prettyText)
 import qualified Language.C.Quote.OpenCL as C
 import qualified Language.C.Syntax as C
+import NeatInterpolation (untrimming)
 
 -- How public an array type definition sould be.  Public types show up
 -- in the generated API, while private types are used only to
@@ -796,9 +799,11 @@ copyMemoryDefaultSpace ::
   CompilerM op s ()
 copyMemoryDefaultSpace destmem destidx srcmem srcidx nbytes =
   stm
-    [C.cstm|memmove($exp:destmem + $exp:destidx,
+    [C.cstm|if ($exp:nbytes > 0) {
+              memmove($exp:destmem + $exp:destidx,
                       $exp:srcmem + $exp:srcidx,
-                      $exp:nbytes);|]
+                      $exp:nbytes);
+            }|]
 
 --- Entry points.
 
@@ -1327,26 +1332,25 @@ onEntryPoint get_consts fname (Function (Just ename) outputs inputs _ results ar
 -- all of them, which yields a CLI program.  Another is to compile the
 -- library part by itself, and use the header file to call into it.
 data CParts = CParts
-  { cHeader :: String,
+  { cHeader :: T.Text,
     -- | Utility definitions that must be visible
     -- to both CLI and library parts.
-    cUtils :: String,
-    cCLI :: String,
-    cServer :: String,
-    cLib :: String
+    cUtils :: T.Text,
+    cCLI :: T.Text,
+    cServer :: T.Text,
+    cLib :: T.Text
   }
 
-gnuSource :: String
+gnuSource :: T.Text
 gnuSource =
-  pretty
-    [C.cunit|
+  [untrimming|
 // We need to define _GNU_SOURCE before
 // _any_ headers files are imported to get
 // the usage statistics of a thread (i.e. have RUSAGE_THREAD) on GNU/Linux
 // https://manpages.courier-mta.org/htmlman2/getrusage.2.html
-$esc:("#ifndef _GNU_SOURCE") // Avoid possible double-definition warning.
-$esc:("#define _GNU_SOURCE")
-$esc:("#endif")
+#ifndef _GNU_SOURCE // Avoid possible double-definition warning.
+#define _GNU_SOURCE
+#endif
 |]
 
 -- We may generate variables that are never used (e.g. for
@@ -1354,39 +1358,37 @@ $esc:("#endif")
 -- intrinsics), and generated code may have other cosmetic issues that
 -- compilers warn about.  We disable these warnings to not clutter the
 -- compilation logs.
-disableWarnings :: String
+disableWarnings :: T.Text
 disableWarnings =
-  pretty
-    [C.cunit|
-$esc:("#ifdef __clang__")
-$esc:("#pragma clang diagnostic ignored \"-Wunused-function\"")
-$esc:("#pragma clang diagnostic ignored \"-Wunused-variable\"")
-$esc:("#pragma clang diagnostic ignored \"-Wparentheses\"")
-$esc:("#pragma clang diagnostic ignored \"-Wunused-label\"")
-$esc:("#elif __GNUC__")
-$esc:("#pragma GCC diagnostic ignored \"-Wunused-function\"")
-$esc:("#pragma GCC diagnostic ignored \"-Wunused-variable\"")
-$esc:("#pragma GCC diagnostic ignored \"-Wparentheses\"")
-$esc:("#pragma GCC diagnostic ignored \"-Wunused-label\"")
-$esc:("#pragma GCC diagnostic ignored \"-Wunused-but-set-variable\"")
-$esc:("#endif")
-
+  [untrimming|
+#ifdef __clang__
+#pragma clang diagnostic ignored "-Wunused-function"
+#pragma clang diagnostic ignored "-Wunused-variable"
+#pragma clang diagnostic ignored "-Wparentheses"
+#pragma clang diagnostic ignored "-Wunused-label"
+#elif __GNUC__
+#pragma GCC diagnostic ignored "-Wunused-function"
+#pragma GCC diagnostic ignored "-Wunused-variable"
+#pragma GCC diagnostic ignored "-Wparentheses"
+#pragma GCC diagnostic ignored "-Wunused-label"
+#pragma GCC diagnostic ignored "-Wunused-but-set-variable"
+#endif
 |]
 
 -- | Produce header and implementation files.
-asLibrary :: CParts -> (String, String)
+asLibrary :: CParts -> (T.Text, T.Text)
 asLibrary parts =
   ( "#pragma once\n\n" <> cHeader parts,
     gnuSource <> disableWarnings <> cHeader parts <> cUtils parts <> cLib parts
   )
 
 -- | As executable with command-line interface.
-asExecutable :: CParts -> String
+asExecutable :: CParts -> T.Text
 asExecutable parts =
   gnuSource <> disableWarnings <> cHeader parts <> cUtils parts <> cCLI parts <> cLib parts
 
 -- | As server executable.
-asServer :: CParts -> String
+asServer :: CParts -> T.Text
 asServer parts =
   gnuSource <> disableWarnings <> cHeader parts <> cUtils parts <> cServer parts <> cLib parts
 
@@ -1491,13 +1493,13 @@ $edecls:definitions
 $edecls:entry_point_decls
   |]
 
-  return $
+  return
     CParts
-      { cHeader = pretty headerdefs,
-        cUtils = pretty utildefs,
-        cCLI = pretty clidefs,
-        cServer = pretty serverdefs,
-        cLib = pretty libdefs
+      { cHeader = prettyText headerdefs,
+        cUtils = prettyText utildefs,
+        cCLI = prettyText clidefs,
+        cServer = prettyText serverdefs,
+        cLib = prettyText libdefs
       }
   where
     Definitions consts (Functions funs) = prog
@@ -1914,7 +1916,6 @@ compilePrimExp f (BinOpExp bop x y) = do
     Xor {} -> [C.cexp|$exp:x' ^ $exp:y'|]
     And {} -> [C.cexp|$exp:x' & $exp:y'|]
     Or {} -> [C.cexp|$exp:x' | $exp:y'|]
-    Shl {} -> [C.cexp|$exp:x' << $exp:y'|]
     LogAnd {} -> [C.cexp|$exp:x' && $exp:y'|]
     LogOr {} -> [C.cexp|$exp:x' || $exp:y'|]
     _ -> [C.cexp|$id:(pretty bop)($exp:x', $exp:y')|]

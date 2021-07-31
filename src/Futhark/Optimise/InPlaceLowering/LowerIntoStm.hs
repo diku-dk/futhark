@@ -117,7 +117,7 @@ lowerUpdatesIntoSegMap ::
 lowerUpdatesIntoSegMap scope pat updates kspace kbody = do
   -- The updates are all-or-nothing.  Being more liberal would require
   -- changes to the in-place-lowering pass itself.
-  mk <- zipWithM onRet (patElements pat) (kernelBodyResult kbody)
+  mk <- zipWithM onRet (patElems pat) (kernelBodyResult kbody)
   return $ do
     (pes, bodystms, krets, poststms) <- unzip4 <$> sequence mk
     return

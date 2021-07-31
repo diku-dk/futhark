@@ -212,7 +212,7 @@ withoutAttrs (Attrs x) (Attrs y) = Attrs $ x `S.difference` y
 type PatElem rep = PatElemT (LetDec rep)
 
 -- | A pattern is conceptually just a list of names and their types.
-newtype PatT dec = Pat {patElements :: [PatElemT dec]}
+newtype PatT dec = Pat {patElems :: [PatElemT dec]}
   deriving (Ord, Show, Eq)
 
 instance Semigroup (PatT dec) where

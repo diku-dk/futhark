@@ -1253,7 +1253,7 @@ checkStm stm@(Let pat (StmAux (Certs cs) _ (_, dec)) e) m = do
   context ("When matching\n" ++ message "  " pat ++ "\nwith\n" ++ message "  " e) $
     matchPat pat e
   binding (maybeWithoutAliases $ scopeOf stm) $ do
-    mapM_ checkPatElem (patElements $ removePatAliases pat)
+    mapM_ checkPatElem (patElems $ removePatAliases pat)
     m
   where
     -- FIXME: this is wrong.  However, the core language type system

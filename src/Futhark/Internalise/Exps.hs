@@ -670,6 +670,16 @@ internaliseExp desc (E.Negate e _) = do
     I.Prim (I.FloatType t) ->
       letTupExp' desc $ I.BasicOp $ I.BinOp (I.FSub t) (I.floatConst t 0) e'
     _ -> error "Futhark.Internalise.internaliseExp: non-numeric type in Negate"
+internaliseExp desc (E.Not e _) = do
+  e' <- internaliseExp1 "not_arg" e
+  et <- subExpType e'
+  case et of
+    I.Prim (I.IntType t) ->
+      letTupExp' desc $ I.BasicOp $ I.UnOp (I.Complement t) e'
+    I.Prim I.Bool ->
+      letTupExp' desc $ I.BasicOp $ I.UnOp I.Not e'
+    _ ->
+      error "Futhark.Internalise.internaliseExp: non-int/bool type in Not"
 internaliseExp desc (E.Update src slice ve loc) = do
   ves <- internaliseExp "lw_val" ve
   srcs <- internaliseExpToVars "src" src
@@ -1002,7 +1012,7 @@ internaliseDimIndex w (E.DimSlice i j s) = do
   n <- letSubExp "n" =<< divRounding (toExp j_m_i) (toExp s')
 
   zero_stride <- letSubExp "zero_stride" $ I.BasicOp $ I.CmpOp (CmpEq int64) s_sign zero
-  nonzero_stride <- letSubExp "nonzero_stride" $ I.BasicOp $ I.UnOp Not zero_stride
+  nonzero_stride <- letSubExp "nonzero_stride" $ I.BasicOp $ I.UnOp I.Not zero_stride
 
   -- Bounds checks depend on whether we are slicing forwards or
   -- backwards.  If forwards, we must check '0 <= i && i <= j'.  If
@@ -1325,7 +1335,7 @@ certifyingNonzero loc t x m = do
     letSubExp "zero" $
       I.BasicOp $
         CmpOp (CmpEq (IntType t)) x (intConst t 0)
-  nonzero <- letSubExp "nonzero" $ I.BasicOp $ UnOp Not zero
+  nonzero <- letSubExp "nonzero" $ I.BasicOp $ UnOp I.Not zero
   c <- assert "nonzero_cert" nonzero "division by zero" loc
   certifying c m
 
@@ -1703,7 +1713,6 @@ isOverloadedFunction qname args loc = do
       fmap pure $ letSubExp desc $ BasicOp $ UpdateAcc acc' [i'] vs
     handleAccs _ _ = Nothing
 
-    handleRest [x] "!" = Just $ complementF x
     handleRest [x] "opaque" = Just $ \desc ->
       mapM (letSubExp desc . BasicOp . Opaque OpaqueNil) =<< internaliseExp "opaque_arg" x
     handleRest [E.TupLit [a, si, v] _] "scatter" = Just $ scatterF 1 a si v
@@ -1826,17 +1835,6 @@ isOverloadedFunction qname args loc = do
         E.Scalar (E.Prim (E.FloatType float_from)) ->
           letTupExp' desc $ I.BasicOp $ I.ConvOp (I.FPToUI float_from int_to) e'
         _ -> error "Futhark.Internalise.internaliseExp: non-numeric type in ToUnsigned"
-
-    complementF e desc = do
-      e' <- internaliseExp1 "complement_arg" e
-      et <- subExpType e'
-      case et of
-        I.Prim (I.IntType t) ->
-          letTupExp' desc $ I.BasicOp $ I.UnOp (I.Complement t) e'
-        I.Prim I.Bool ->
-          letTupExp' desc $ I.BasicOp $ I.UnOp I.Not e'
-        _ ->
-          error "Futhark.Internalise.internaliseExp: non-int/bool type in Complement"
 
     scatterF dim a si v desc = do
       si' <- internaliseExpToVars "write_arg_i" si

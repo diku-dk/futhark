@@ -179,7 +179,7 @@ consumedByLambda = consumedInBody . lambdaBody
 
 -- | The aliases of each pattern element (including the context).
 patAliases :: AliasesOf dec => PatT dec -> [Names]
-patAliases = map (aliasesOf . patElemDec) . patElements
+patAliases = map (aliasesOf . patElemDec) . patElems
 
 -- | Something that contains alias information.
 class AliasesOf a where

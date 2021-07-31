@@ -1036,6 +1036,13 @@ eval env (Negate e _) = do
     ValuePrim (FloatValue (Float32Value v)) -> return $ FloatValue $ Float32Value (- v)
     ValuePrim (FloatValue (Float64Value v)) -> return $ FloatValue $ Float64Value (- v)
     _ -> error $ "Cannot negate " ++ pretty ev
+eval env (Not e _) = do
+  ev <- eval env e
+  ValuePrim <$> case ev of
+    ValuePrim (BoolValue b) -> pure $ BoolValue $ not b
+    ValuePrim (SignedValue iv) -> pure $ SignedValue $ P.doComplement iv
+    ValuePrim (UnsignedValue iv) -> pure $ UnsignedValue $ P.doComplement iv
+    _ -> error $ "Cannot logically negate " ++ pretty ev
 eval env (Update src is v loc) =
   maybe oob return
     =<< updateArray <$> mapM (evalDimIndex env) is <*> eval env src <*> eval env v
@@ -1876,7 +1883,6 @@ initialCtx =
             rowshape = ShapeDim (asInt64 m) innershape
             shape = ShapeDim (asInt64 n) rowshape
         return $ toArray shape $ map (toArray rowshape) $ chunk (asInt m) xs'
-    def "opaque" = Just $ fun1 return
     def "acc" = Nothing
     def s | nameFromString s `M.member` namesToPrimTypes = Nothing
     def s = error $ "Missing intrinsic: " ++ s

@@ -429,6 +429,8 @@ literals and variables, but also more complicated forms.
    exp:   `atom`
       : | `exp` `qualbinop` `exp`
       : | `exp` `exp`
+      : | "!" `exp`
+      : | "-" `exp`
       : | `constructor` `exp`*
       : | `exp` ":" `type`
       : | `exp` ":>" `type`
@@ -502,6 +504,10 @@ in natural text.
 * An expression ``(-x)`` is parsed as the variable ``x`` negated and
   enclosed in parentheses, rather than an operator section partially
   applying the infix operator ``-``.
+
+* Function application and prefix operators bind more tightly than any
+  infix operator.  Note that the only prefix operators are ``!`` and
+  ``-``, and more cannot be defined.
 
 * The following table describes the precedence and associativity of
   infix operators.  All operators in the same row have the same
