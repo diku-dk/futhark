@@ -166,7 +166,7 @@ import Control.Monad.Reader
 import Data.Bifunctor (first)
 import Data.Maybe
 import qualified Futhark.IR.GPU as Out
-import Futhark.IR.GPU.Kernel
+import Futhark.IR.GPU.Op
 import Futhark.IR.SOACS
 import Futhark.IR.SOACS.Simplify (simplifyStms)
 import Futhark.MonadFreshNames
@@ -331,7 +331,7 @@ kernelAlternatives pat default_body [] = runBuilder_ $ do
   forM_ (zip (patNames pat) ses) $ \(name, SubExpRes cs se) ->
     certifying cs $ letBindNames [name] $ BasicOp $ SubExp se
 kernelAlternatives pat default_body ((cond, alt) : alts) = runBuilder_ $ do
-  alts_pat <- fmap Pat . forM (patElements pat) $ \pe -> do
+  alts_pat <- fmap Pat . forM (patElems pat) $ \pe -> do
     name <- newVName $ baseString $ patElemName pe
     return pe {patElemName = name}
 
@@ -476,7 +476,7 @@ transformStm path (Let pat aux@(StmAux cs _ _) (Op (Stream w arrs (Parallel o co
         let fold_fun' = soacsLambdaToGPU fold_fun
 
         let (red_pat_elems, concat_pat_elems) =
-              splitAt (length nes) $ patElements pat
+              splitAt (length nes) $ patElems pat
             red_pat = Pat red_pat_elems
 
         ((num_threads, red_results), stms) <-
@@ -551,7 +551,7 @@ transformStm _ (Let pat (StmAux cs _ _) (Op (Scatter w lam ivs as))) = runBuilde
         let res_cs =
               foldMap (foldMap resCerts . fst) is_vs
                 <> foldMap (resCerts . snd) is_vs
-            is_vs' = [(map (DimFix . resSubExp) is, resSubExp v) | (is, v) <- is_vs]
+            is_vs' = [(Slice $ map (DimFix . resSubExp) is, resSubExp v) | (is, v) <- is_vs]
         return $ WriteReturns res_cs a_w a is_vs'
       body = KernelBody () kstms krets
       inputs = do

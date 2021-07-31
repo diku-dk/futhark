@@ -9,11 +9,46 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+  * The `#[trace]` and `#[break]` attributes now replace the `trace`
+    and `break` functions (although they are still present in
+    slightly-reduced but compatible form).
+
+  * The `#[opaque]` attribute replaces the `opaque` function, which is
+    now deprecated.
+
+  * Tracing now works in compiled code, albeit with several caveats
+    (mainly, it does not work for code running on the GPU).
+
+  * New `wasm` and `wasm-multicore` backends by Philip Lassen.  Still
+    very experimental; do not expect API stability.
+
 ### Removed
 
 ### Changed
 
+  * The `!` function in the integer modules is now called `not`.
+
+  * `!` is now builtin syntax.  You can no longer define a function
+    called `!`.  It is extremely unlikely this affects you.  This
+    removes the last special-casing of prefix operators.
+
+  * A prefix operator section (i.e.. `(!)`) is no longer permitted
+    (and it never was according to the grammar).
+
 ### Fixed
+
+  * `i64.abs` was wrong for arguments that did not fit in an `i32`.
+
+  * Some `f32` operations (`**`, `abs`, `max`) would be done in double
+    precision on the CUDA backend.
+
+  * Yet another defunctorisation bug (#1397).
+
+  * The `clz` function would sometimes exhibit undefined behaviour in
+    CPU code (#1415).
+
+  * Operator priority of prefix `-` was wrong - it is now the same as
+    `!` (#1419).
 
 ## [0.19.7]
 

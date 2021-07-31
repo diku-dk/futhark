@@ -47,7 +47,7 @@ banner =
 
 -- | Run @futhark repl@.
 main :: String -> [String] -> IO ()
-main = mainWithOptions interpreterConfig options "options... [program.fut]" run
+main = mainWithOptions () [] "options... [program.fut]" run
   where
     run [] _ = Just $ repl Nothing
     run [prog] _ = Just $ repl $ Just prog
@@ -110,25 +110,6 @@ confirmQuit = do
     Just 'y' -> return True
     Just 'n' -> return False
     _ -> confirmQuit
-
-newtype InterpreterConfig = InterpreterConfig {interpreterEntryPoint :: Name}
-
-interpreterConfig :: InterpreterConfig
-interpreterConfig = InterpreterConfig defaultEntryPoint
-
-options :: [FunOptDescr InterpreterConfig]
-options =
-  [ Option
-      "e"
-      ["entry-point"]
-      ( ReqArg
-          ( \entry -> Right $ \config ->
-              config {interpreterEntryPoint = nameFromString entry}
-          )
-          "NAME"
-      )
-      "The entry point to execute."
-  ]
 
 -- | Representation of breaking at a breakpoint, to allow for
 -- navigating through the stack frames and such.
@@ -346,9 +327,9 @@ runInterpreter m = runF m (return . Right) intOp
     intOp (I.ExtOpError err) =
       return $ Left err
     intOp (I.ExtOpTrace w v c) = do
-      liftIO $ putStrLn $ "Trace at " ++ locStr (srclocOf w) ++ ": " ++ v
+      liftIO $ putStrLn $ w ++ ": " ++ v
       c
-    intOp (I.ExtOpBreak why callstack c) = do
+    intOp (I.ExtOpBreak w why callstack c) = do
       s <- get
 
       let why' = case why of
@@ -361,7 +342,7 @@ runInterpreter m = runF m (return . Right) intOp
 
       -- Are we supposed to respect this breakpoint?
       when (breakForReason s top why) $ do
-        liftIO $ putStrLn $ why' <> " at " ++ locStr top
+        liftIO $ putStrLn $ why' <> " at " ++ locStr w
         liftIO $ putStrLn $ prettyBreaking breaking
         liftIO $ putStrLn "<Enter> to continue."
 
@@ -398,9 +379,9 @@ runInterpreter' m = runF m (return . Right) intOp
   where
     intOp (I.ExtOpError err) = return $ Left err
     intOp (I.ExtOpTrace w v c) = do
-      liftIO $ putStrLn $ "Trace at " ++ locStr w ++ ": " ++ v
+      liftIO $ putStrLn $ w ++ ": " ++ v
       c
-    intOp (I.ExtOpBreak _ _ c) = c
+    intOp (I.ExtOpBreak _ _ _ c) = c
 
 type Command = T.Text -> FutharkiM ()
 

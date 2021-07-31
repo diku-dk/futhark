@@ -14,7 +14,7 @@ import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 import Futhark.Analysis.PrimExp.Convert
 import qualified Futhark.IR.GPU as Out
-import Futhark.IR.GPU.Kernel hiding (HistOp)
+import Futhark.IR.GPU.Op hiding (HistOp)
 import Futhark.IR.SOACS
 import Futhark.MonadFreshNames
 import Futhark.Pass.ExtractKernels.BlockedKernel
@@ -293,7 +293,7 @@ intraGroupStm lvl stm@(Let pat aux e) = do
             let cs =
                   foldMap (foldMap resCerts . fst) is_vs
                     <> foldMap (resCerts . snd) is_vs
-                is_vs' = [(map (DimFix . resSubExp) is, resSubExp v) | (is, v) <- is_vs]
+                is_vs' = [(Slice $ map (DimFix . resSubExp) is, resSubExp v) | (is, v) <- is_vs]
             return $ WriteReturns cs a_w a is_vs'
           inputs = do
             (p, p_a) <- zip (lambdaParams lam') ivs

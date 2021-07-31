@@ -250,6 +250,6 @@ readKernelInput inp = do
       Acc {} ->
         SubExp $ Var $ kernelInputArray inp
       _ ->
-        Index (kernelInputArray inp) $
+        Index (kernelInputArray inp) . Slice $
           map DimFix (kernelInputIndices inp)
             ++ map sliceDim (arrayDims (kernelInputType inp))

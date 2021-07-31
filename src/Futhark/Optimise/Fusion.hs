@@ -146,8 +146,11 @@ updateKerInPlaces res (ip_vs, other_infuse_vs) = do
   return res' {kernels = M.map inspectKer $ kernels res'}
 
 checkForUpdates :: FusedRes -> Exp -> FusionGM FusedRes
-checkForUpdates res (BasicOp (Update _ src is _)) = do
-  let ifvs = namesToList $ mconcat $ map freeIn is
+checkForUpdates res (BasicOp (Update _ src slice _)) = do
+  let ifvs = namesToList $ freeIn slice
+  updateKerInPlaces res ([src], ifvs)
+checkForUpdates res (BasicOp (FlatUpdate src slice _)) = do
+  let ifvs = namesToList $ freeIn slice
   updateKerInPlaces res ([src], ifvs)
 checkForUpdates res (Op (Futhark.Scatter _ _ _ written_info)) = do
   let updt_arrs = map (\(_, _, x) -> x) written_info

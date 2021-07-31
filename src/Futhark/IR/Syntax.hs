@@ -137,6 +137,7 @@ module Futhark.IR.Syntax
     BinOp (..),
     CmpOp (..),
     ConvOp (..),
+    OpaqueOp (..),
     DimChange (..),
     ShapeChange,
     ExpT (..),
@@ -212,7 +213,7 @@ withoutAttrs (Attrs x) (Attrs y) = Attrs $ x `S.difference` y
 type PatElem rep = PatElemT (LetDec rep)
 
 -- | A pattern is conceptually just a list of names and their types.
-newtype PatT dec = Pat {patElements :: [PatElemT dec]}
+newtype PatT dec = Pat {patElems :: [PatElemT dec]}
   deriving (Ord, Show, Eq)
 
 instance Semigroup (PatT dec) where
@@ -366,16 +367,26 @@ instance Traversable DimChange where
 -- | A list of 'DimChange's, indicating the new dimensions of an array.
 type ShapeChange d = [DimChange d]
 
+-- | Apart from being Opaque, what else is going on here?
+data OpaqueOp
+  = -- | No special operation.
+    OpaqueNil
+  | -- | Print the argument, prefixed by this string.
+    OpaqueTrace String
+  deriving (Eq, Ord, Show)
+
 -- | A primitive operation that returns something of known size and
 -- does not itself contain any bindings.
 data BasicOp
   = -- | A variable or constant.
     SubExp SubExp
   | -- | Semantically and operationally just identity, but is
-    -- invisible/impenetrable to optimisations (hopefully).  This is
-    -- just a hack to avoid optimisation (so, to work around compiler
-    -- limitations).
-    Opaque SubExp
+    -- invisible/impenetrable to optimisations (hopefully).  This
+    -- partially a hack to avoid optimisation (so, to work around
+    -- compiler limitations), but is also used to implement tracing
+    -- and other operations that are semantically invisible, but have
+    -- some sort of effect (brrr).
+    Opaque OpaqueOp SubExp
   | -- | Array literals, e.g., @[ [1+x, 3], [2, 1+4] ]@.
     -- Second arg is the element type of the rows of the array.
     ArrayLit [SubExp] Type
@@ -398,6 +409,8 @@ data BasicOp
     -- Consumes the array.  If 'Safe', perform a run-time bounds check
     -- and ignore the write if out of bounds (like @Scatter@).
     Update Safety VName (Slice SubExp) SubExp
+  | FlatIndex VName (FlatSlice SubExp)
+  | FlatUpdate VName (FlatSlice SubExp) VName
   | -- | @concat@0([1],[2, 3, 4]) = [1, 2, 3, 4]@.
     Concat Int VName [VName] SubExp
   | -- | Copy the given array.  The result will not alias anything.

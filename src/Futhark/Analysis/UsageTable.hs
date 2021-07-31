@@ -157,10 +157,10 @@ usageInStm (Let pat rep e) =
   where
     usageInPat =
       usages
-        ( mconcat (map freeIn $ patElements pat)
+        ( mconcat (map freeIn $ patElems pat)
             `namesSubtract` namesFromList (patNames pat)
         )
-        <> sizeUsages (foldMap (freeIn . patElemType) (patElements pat))
+        <> sizeUsages (foldMap (freeIn . patElemType) (patElems pat))
     usageInExpDec =
       usages $ freeIn rep
 
@@ -182,6 +182,8 @@ usageInExp (WithAcc inputs lam) =
   where
     inputUsage (_, arrs, _) = foldMap consumedUsage arrs
 usageInExp (BasicOp (Update _ src _ _)) =
+  consumedUsage src
+usageInExp (BasicOp (FlatUpdate src _ _)) =
   consumedUsage src
 usageInExp (Op op) =
   mconcat $ map consumedUsage (namesToList $ consumedInOp op)

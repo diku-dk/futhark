@@ -89,6 +89,7 @@ import Data.FileEmbed
 import Data.Loc
 import qualified Data.Map.Strict as M
 import Data.Maybe
+import qualified Data.Text as T
 import Futhark.CodeGen.Backends.GenericC.CLI (cliDefs)
 import Futhark.CodeGen.Backends.GenericC.Options
 import Futhark.CodeGen.Backends.GenericC.Server (serverDefs)
@@ -96,8 +97,10 @@ import Futhark.CodeGen.Backends.SimpleRep
 import Futhark.CodeGen.ImpCode
 import Futhark.IR.Prop (isBuiltInFunction)
 import Futhark.MonadFreshNames
+import Futhark.Util.Pretty (prettyText)
 import qualified Language.C.Quote.OpenCL as C
 import qualified Language.C.Syntax as C
+import NeatInterpolation (untrimming)
 
 -- How public an array type definition sould be.  Public types show up
 -- in the generated API, while private types are used only to
@@ -223,16 +226,29 @@ data Operations op s = Operations
     opsCritical :: ([C.BlockItem], [C.BlockItem])
   }
 
-defError :: ErrorCompiler op s
-defError (ErrorMsg parts) stacktrace = do
-  free_all_mem <- collect $ mapM_ (uncurry unRefMem) =<< gets compDeclaredMem
-  let onPart (ErrorString s) = return ("%s", [C.cexp|$string:s|])
-      onPart (ErrorInt32 x) = ("%d",) <$> compileExp x
-      onPart (ErrorInt64 x) = ("%lld",) <$> compileExp x
+errorMsgString :: ErrorMsg Exp -> CompilerM op s (String, [C.Exp])
+errorMsgString (ErrorMsg parts) = do
+  let boolStr e = [C.cexp|($exp:e) ? "true" : "false"|]
+      asLongLong e = [C.cexp|(long long int)$exp:e|]
+      onPart (ErrorString s) = return ("%s", [C.cexp|$string:s|])
+      onPart (ErrorVal Bool x) = ("%s",) . boolStr <$> compileExp x
+      onPart (ErrorVal Unit _) = pure ("%s", [C.cexp|"()"|])
+      onPart (ErrorVal (IntType Int8) x) = ("%hhd",) <$> compileExp x
+      onPart (ErrorVal (IntType Int16) x) = ("%hd",) <$> compileExp x
+      onPart (ErrorVal (IntType Int32) x) = ("%d",) <$> compileExp x
+      onPart (ErrorVal (IntType Int64) x) = ("%lld",) . asLongLong <$> compileExp x
+      onPart (ErrorVal (FloatType Float32) x) = ("%f",) <$> compileExp x
+      onPart (ErrorVal (FloatType Float64) x) = ("%f",) <$> compileExp x
   (formatstrs, formatargs) <- unzip <$> mapM onPart parts
-  let formatstr = "Error: " ++ concat formatstrs ++ "\n\nBacktrace:\n%s"
+  pure (mconcat formatstrs, formatargs)
+
+defError :: ErrorCompiler op s
+defError msg stacktrace = do
+  free_all_mem <- collect $ mapM_ (uncurry unRefMem) =<< gets compDeclaredMem
+  (formatstr, formatargs) <- errorMsgString msg
+  let formatstr' = "Error: " <> formatstr <> "\n\nBacktrace:\n%s"
   items
-    [C.citems|ctx->error = msgprintf($string:formatstr, $args:formatargs, $string:stacktrace);
+    [C.citems|ctx->error = msgprintf($string:formatstr', $args:formatargs, $string:stacktrace);
                   $items:free_all_mem
                   return 1;|]
 
@@ -783,9 +799,11 @@ copyMemoryDefaultSpace ::
   CompilerM op s ()
 copyMemoryDefaultSpace destmem destidx srcmem srcidx nbytes =
   stm
-    [C.cstm|memmove($exp:destmem + $exp:destidx,
+    [C.cstm|if ($exp:nbytes > 0) {
+              memmove($exp:destmem + $exp:destidx,
                       $exp:srcmem + $exp:srcidx,
-                      $exp:nbytes);|]
+                      $exp:nbytes);
+            }|]
 
 --- Entry points.
 
@@ -1130,7 +1148,7 @@ allTrue (x : xs) = [C.cexp|$exp:x && $exp:(allTrue xs)|]
 
 prepareEntryInputs ::
   [ExternalValue] ->
-  CompilerM op s ([(C.Param, C.Exp)], [C.BlockItem])
+  CompilerM op s ([(C.Param, Maybe C.Exp)], [C.BlockItem])
 prepareEntryInputs args = collect' $ zipWithM prepare [(0 :: Int) ..] args
   where
     arg_names = namesFromList $ concatMap evNames args
@@ -1144,7 +1162,7 @@ prepareEntryInputs args = collect' $ zipWithM prepare [(0 :: Int) ..] args
       (ty, check) <- prepareValue Public [C.cexp|$id:pname|] vd
       return
         ( [C.cparam|const $ty:ty $id:pname|],
-          allTrue check
+          if null check then Nothing else Just $ allTrue check
         )
     prepare pno (OpaqueValue _ desc vds) = do
       ty <- opaqueToCType desc vds
@@ -1154,7 +1172,9 @@ prepareEntryInputs args = collect' $ zipWithM prepare [(0 :: Int) ..] args
       checks <- map snd <$> zipWithM (prepareValue Private) (zipWith field [0 ..] vds) vds
       return
         ( [C.cparam|const $ty:ty *$id:pname|],
-          allTrue $ concat checks
+          if null $ concat checks
+            then Nothing
+            else Just $ allTrue $ concat checks
         )
 
     prepareValue _ src (ScalarValue pt signed name) = do
@@ -1256,18 +1276,25 @@ onEntryPoint get_consts fname (Function (Just ename) outputs inputs _ results ar
                                       $params:entry_point_output_params,
                                       $params:entry_point_input_params);|]
 
-  let critical =
-        [C.citems|
-         $items:unpack_entry_inputs
-
-         if (!($exp:(allTrue entry_point_input_checks))) {
+  let checks = catMaybes entry_point_input_checks
+      check_input =
+        if null checks
+          then []
+          else
+            [C.citems|
+         if (!($exp:(allTrue (catMaybes entry_point_input_checks)))) {
            ret = 1;
            if (!ctx->error) {
              ctx->error = msgprintf("Error: entry point arguments have invalid sizes.\n");
            }
-         } else {
-           ret = $id:(funName fname)(ctx, $args:out_args, $args:in_args);
+         }|]
 
+      critical =
+        [C.citems|
+         $items:unpack_entry_inputs
+         $items:check_input
+         if (ret == 0) {
+           ret = $id:(funName fname)(ctx, $args:out_args, $args:in_args);
            if (ret == 0) {
              $items:get_consts
 
@@ -1305,26 +1332,25 @@ onEntryPoint get_consts fname (Function (Just ename) outputs inputs _ results ar
 -- all of them, which yields a CLI program.  Another is to compile the
 -- library part by itself, and use the header file to call into it.
 data CParts = CParts
-  { cHeader :: String,
+  { cHeader :: T.Text,
     -- | Utility definitions that must be visible
     -- to both CLI and library parts.
-    cUtils :: String,
-    cCLI :: String,
-    cServer :: String,
-    cLib :: String
+    cUtils :: T.Text,
+    cCLI :: T.Text,
+    cServer :: T.Text,
+    cLib :: T.Text
   }
 
-gnuSource :: String
+gnuSource :: T.Text
 gnuSource =
-  pretty
-    [C.cunit|
+  [untrimming|
 // We need to define _GNU_SOURCE before
 // _any_ headers files are imported to get
 // the usage statistics of a thread (i.e. have RUSAGE_THREAD) on GNU/Linux
 // https://manpages.courier-mta.org/htmlman2/getrusage.2.html
-$esc:("#ifndef _GNU_SOURCE") // Avoid possible double-definition warning.
-$esc:("#define _GNU_SOURCE")
-$esc:("#endif")
+#ifndef _GNU_SOURCE // Avoid possible double-definition warning.
+#define _GNU_SOURCE
+#endif
 |]
 
 -- We may generate variables that are never used (e.g. for
@@ -1332,39 +1358,37 @@ $esc:("#endif")
 -- intrinsics), and generated code may have other cosmetic issues that
 -- compilers warn about.  We disable these warnings to not clutter the
 -- compilation logs.
-disableWarnings :: String
+disableWarnings :: T.Text
 disableWarnings =
-  pretty
-    [C.cunit|
-$esc:("#ifdef __clang__")
-$esc:("#pragma clang diagnostic ignored \"-Wunused-function\"")
-$esc:("#pragma clang diagnostic ignored \"-Wunused-variable\"")
-$esc:("#pragma clang diagnostic ignored \"-Wparentheses\"")
-$esc:("#pragma clang diagnostic ignored \"-Wunused-label\"")
-$esc:("#elif __GNUC__")
-$esc:("#pragma GCC diagnostic ignored \"-Wunused-function\"")
-$esc:("#pragma GCC diagnostic ignored \"-Wunused-variable\"")
-$esc:("#pragma GCC diagnostic ignored \"-Wparentheses\"")
-$esc:("#pragma GCC diagnostic ignored \"-Wunused-label\"")
-$esc:("#pragma GCC diagnostic ignored \"-Wunused-but-set-variable\"")
-$esc:("#endif")
-
+  [untrimming|
+#ifdef __clang__
+#pragma clang diagnostic ignored "-Wunused-function"
+#pragma clang diagnostic ignored "-Wunused-variable"
+#pragma clang diagnostic ignored "-Wparentheses"
+#pragma clang diagnostic ignored "-Wunused-label"
+#elif __GNUC__
+#pragma GCC diagnostic ignored "-Wunused-function"
+#pragma GCC diagnostic ignored "-Wunused-variable"
+#pragma GCC diagnostic ignored "-Wparentheses"
+#pragma GCC diagnostic ignored "-Wunused-label"
+#pragma GCC diagnostic ignored "-Wunused-but-set-variable"
+#endif
 |]
 
 -- | Produce header and implementation files.
-asLibrary :: CParts -> (String, String)
+asLibrary :: CParts -> (T.Text, T.Text)
 asLibrary parts =
   ( "#pragma once\n\n" <> cHeader parts,
     gnuSource <> disableWarnings <> cHeader parts <> cUtils parts <> cLib parts
   )
 
 -- | As executable with command-line interface.
-asExecutable :: CParts -> String
+asExecutable :: CParts -> T.Text
 asExecutable parts =
   gnuSource <> disableWarnings <> cHeader parts <> cUtils parts <> cCLI parts <> cLib parts
 
 -- | As server executable.
-asServer :: CParts -> String
+asServer :: CParts -> T.Text
 asServer parts =
   gnuSource <> disableWarnings <> cHeader parts <> cUtils parts <> cServer parts <> cLib parts
 
@@ -1469,13 +1493,13 @@ $edecls:definitions
 $edecls:entry_point_decls
   |]
 
-  return $
+  return
     CParts
-      { cHeader = pretty headerdefs,
-        cUtils = pretty utildefs,
-        cCLI = pretty clidefs,
-        cServer = pretty serverdefs,
-        cLib = pretty libdefs
+      { cHeader = prettyText headerdefs,
+        cUtils = prettyText utildefs,
+        cCLI = prettyText clidefs,
+        cServer = prettyText serverdefs,
+        cLib = prettyText libdefs
       }
   where
     Definitions consts (Functions funs) = prog
@@ -1845,9 +1869,6 @@ compilePrimExp f (UnOpExp Complement {} x) = do
 compilePrimExp f (UnOpExp Not {} x) = do
   x' <- compilePrimExp f x
   return [C.cexp|!$exp:x'|]
-compilePrimExp f (UnOpExp Abs {} x) = do
-  x' <- compilePrimExp f x
-  return [C.cexp|abs($exp:x')|]
 compilePrimExp f (UnOpExp (FAbs Float32) x) = do
   x' <- compilePrimExp f x
   return [C.cexp|(float)fabs($exp:x')|]
@@ -1860,12 +1881,9 @@ compilePrimExp f (UnOpExp SSignum {} x) = do
 compilePrimExp f (UnOpExp USignum {} x) = do
   x' <- compilePrimExp f x
   return [C.cexp|($exp:x' > 0) - ($exp:x' < 0) != 0|]
-compilePrimExp f (UnOpExp (FSignum Float32) x) = do
+compilePrimExp f (UnOpExp op x) = do
   x' <- compilePrimExp f x
-  return [C.cexp|fsignum32($exp:x')|]
-compilePrimExp f (UnOpExp (FSignum Float64) x) = do
-  x' <- compilePrimExp f x
-  return [C.cexp|fsignum32($exp:x')|]
+  return [C.cexp|$id:(pretty op)($exp:x')|]
 compilePrimExp f (CmpOpExp cmp x y) = do
   x' <- compilePrimExp f x
   y' <- compilePrimExp f y
@@ -1898,7 +1916,6 @@ compilePrimExp f (BinOpExp bop x y) = do
     Xor {} -> [C.cexp|$exp:x' ^ $exp:y'|]
     And {} -> [C.cexp|$exp:x' & $exp:y'|]
     Or {} -> [C.cexp|$exp:x' | $exp:y'|]
-    Shl {} -> [C.cexp|$exp:x' << $exp:y'|]
     LogAnd {} -> [C.cexp|$exp:x' && $exp:y'|]
     LogOr {} -> [C.cexp|$exp:x' || $exp:y'|]
     _ -> [C.cexp|$id:(pretty bop)($exp:x', $exp:y')|]
@@ -1924,6 +1941,9 @@ compileCode (Comment s code) = do
     [C.cstm|$comment:comment
               { $items:xs }
              |]
+compileCode (TracePrint msg) = do
+  (formatstr, formatargs) <- errorMsgString msg
+  stm [C.cstm|fprintf(ctx->log, $string:formatstr, $args:formatargs);|]
 compileCode (DebugPrint s (Just e)) = do
   e' <- compileExp e
   stm
@@ -1956,9 +1976,8 @@ compileCode (c1 :>>: c2) = go (linearCode (c1 :>>: c2))
 compileCode (Assert e msg (loc, locs)) = do
   e' <- compileExp e
   err <-
-    collect $
-      join $
-        asks (opsError . envOperations) <*> pure msg <*> pure stacktrace
+    collect . join $
+      asks (opsError . envOperations) <*> pure msg <*> pure stacktrace
   stm [C.cstm|if (!$exp:e') { $items:err }|]
   where
     stacktrace = prettyStacktrace 0 $ map locStr $ loc : locs

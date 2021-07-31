@@ -24,7 +24,6 @@ module Language.Futhark.Syntax
     ShapeDecl (..),
     shapeRank,
     stripDims,
-    unifyShapes,
     TypeName (..),
     typeNameFromQualName,
     qualNameFromTypeName,
@@ -315,13 +314,6 @@ stripDims :: Int -> ShapeDecl dim -> Maybe (ShapeDecl dim)
 stripDims i (ShapeDecl l)
   | i < length l = Just $ ShapeDecl $ drop i l
   | otherwise = Nothing
-
--- | @unifyShapes x y@ combines @x@ and @y@ to contain their maximum
--- common information, and fails if they conflict.
-unifyShapes :: ArrayDim dim => ShapeDecl dim -> ShapeDecl dim -> Maybe (ShapeDecl dim)
-unifyShapes (ShapeDecl xs) (ShapeDecl ys) = do
-  guard $ length xs == length ys
-  ShapeDecl <$> zipWithM unifyDims xs ys
 
 -- | A type name consists of qualifiers (for error messages) and a
 -- 'VName' (for equality checking).
@@ -696,8 +688,10 @@ instance Located (SizeBinder vn) where
 -- need, so we can pretend that an application expression was really
 -- bound to a name.
 data AppExpBase f vn
-  = -- | The @Maybe VName@ is a possible existential size
-    -- that is instantiated by this argument..
+  = -- | The @Maybe VName@ is a possible existential size that is
+    -- instantiated by this argument.  May have duplicates across the
+    -- program, but they will all produce the same value (the
+    -- expressions will be identical).
     Apply
       (ExpBase f vn)
       (ExpBase f vn)
@@ -812,6 +806,8 @@ data ExpBase f vn
   | Project Name (ExpBase f vn) (f PatType) SrcLoc
   | -- | Numeric negation (ugly special case; Haskell did it first).
     Negate (ExpBase f vn) SrcLoc
+  | -- | Logical and bitwise negation.
+    Not (ExpBase f vn) SrcLoc
   | -- | Fail if the first expression does not return true,
     -- and return the value of the second expression if it
     -- does.
@@ -872,6 +868,7 @@ instance Located (ExpBase f vn) where
   locOf (Var _ _ loc) = locOf loc
   locOf (Ascript _ _ loc) = locOf loc
   locOf (Negate _ pos) = locOf pos
+  locOf (Not _ pos) = locOf pos
   locOf (Update _ _ _ pos) = locOf pos
   locOf (RecordUpdate _ _ _ _ pos) = locOf pos
   locOf (Lambda _ _ _ _ loc) = locOf loc

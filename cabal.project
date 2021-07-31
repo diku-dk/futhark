@@ -2,4 +2,4 @@ packages: futhark.cabal
 index-state: 2021-07-01T13:04:15Z
 
 package futhark
-  ghc-options: -Werror -j
+  ghc-options: -Werror -j -fwrite-ide-info

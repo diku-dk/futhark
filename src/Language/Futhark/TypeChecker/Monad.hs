@@ -40,6 +40,7 @@ module Language.Futhark.TypeChecker.Monad
     MTy (..),
     anySignedType,
     anyUnsignedType,
+    anyIntType,
     anyFloatType,
     anyNumberType,
     anyPrimType,
@@ -143,10 +144,7 @@ newtype TypeM a
   = TypeM
       ( ReaderT
           Context
-          ( StateT
-              TypeState
-              (Except (Warnings, TypeError))
-          )
+          (StateT TypeState (Except (Warnings, TypeError)))
           a
       )
   deriving
@@ -469,7 +467,7 @@ topLevelNameMap = M.filterWithKey (\k _ -> atTopLevel k) intrinsicsNameMap
   where
     atTopLevel :: (Namespace, Name) -> Bool
     atTopLevel (Type, _) = True
-    atTopLevel (Term, v) = v `S.member` (type_names <> binop_names <> unop_names <> fun_names)
+    atTopLevel (Term, v) = v `S.member` (type_names <> binop_names <> fun_names)
       where
         type_names = S.fromList $ map (nameFromString . pretty) anyPrimType
         binop_names =
@@ -477,6 +475,5 @@ topLevelNameMap = M.filterWithKey (\k _ -> atTopLevel k) intrinsicsNameMap
             map
               (nameFromString . pretty)
               [minBound .. (maxBound :: BinOp)]
-        unop_names = S.fromList $ map nameFromString ["!"]
         fun_names = S.fromList $ map nameFromString ["shape"]
     atTopLevel _ = False

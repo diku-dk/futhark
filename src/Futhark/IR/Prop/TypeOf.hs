@@ -35,7 +35,6 @@ module Futhark.IR.Prop.TypeOf
   )
 where
 
-import Data.Maybe
 import Futhark.IR.Prop.Constants
 import Futhark.IR.Prop.Reshape
 import Futhark.IR.Prop.Scope
@@ -66,7 +65,7 @@ mapType outersize f =
 primOpType :: HasScope rep m => BasicOp -> m [Type]
 primOpType (SubExp se) =
   pure <$> subExpType se
-primOpType (Opaque se) =
+primOpType (Opaque _ se) =
   pure <$> subExpType se
 primOpType (ArrayLit es rt) =
   pure [arrayOf rt (Shape [n]) NoUniqueness]
@@ -84,10 +83,15 @@ primOpType (Index ident slice) =
   result <$> lookupType ident
   where
     result t = [Prim (elemType t) `arrayOfShape` shape]
-    shape = Shape $ mapMaybe dimSize slice
-    dimSize (DimSlice _ d _) = Just d
-    dimSize DimFix {} = Nothing
+    shape = Shape $ sliceDims slice
 primOpType (Update _ src _ _) =
+  pure <$> lookupType src
+primOpType (FlatIndex ident slice) =
+  result <$> lookupType ident
+  where
+    result t = [Prim (elemType t) `arrayOfShape` shape]
+    shape = Shape $ flatSliceDims slice
+primOpType (FlatUpdate src _ _) =
   pure <$> lookupType src
 primOpType (Iota n _ _ et) =
   pure [arrayOf (Prim (IntType et)) (Shape [n]) NoUniqueness]

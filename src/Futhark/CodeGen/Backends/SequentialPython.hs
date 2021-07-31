@@ -5,6 +5,7 @@ module Futhark.CodeGen.Backends.SequentialPython
 where
 
 import Control.Monad
+import qualified Data.Text as T
 import qualified Futhark.CodeGen.Backends.GenericPython as GenericPython
 import Futhark.CodeGen.Backends.GenericPython.AST
 import qualified Futhark.CodeGen.ImpCode.Sequential as Imp
@@ -18,7 +19,7 @@ compileProg ::
   GenericPython.CompilerMode ->
   String ->
   Prog SeqMem ->
-  m (ImpGen.Warnings, String)
+  m (ImpGen.Warnings, T.Text)
 compileProg mode class_name =
   ImpGen.compileProg
     >=> traverse

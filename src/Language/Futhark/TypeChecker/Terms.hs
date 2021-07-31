@@ -462,7 +462,7 @@ extSize loc e = do
     Just d ->
       return
         ( NamedDim $ qualName d,
-          Nothing
+          Just d
         )
 
 -- Any argument sizes created with 'extSize' inside the given action
@@ -1545,6 +1545,9 @@ checkExp (Var qn NoInfo loc) = do
 checkExp (Negate arg loc) = do
   arg' <- require "numeric negation" anyNumberType =<< checkExp arg
   return $ Negate arg' loc
+checkExp (Not arg loc) = do
+  arg' <- require "logical negation" (Bool : anyIntType) =<< checkExp arg
+  return $ Not arg' loc
 checkExp e@(AppExp Apply {} _) = fst <$> checkApplyExp e
 checkExp (AppExp (LetPat sizes pat e body loc) _) =
   sequentially (checkExp e) $ \e' e_occs -> do

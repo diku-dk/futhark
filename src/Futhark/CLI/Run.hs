@@ -154,6 +154,6 @@ runInterpreter' m = runF m (return . Right) intOp
   where
     intOp (I.ExtOpError err) = return $ Left err
     intOp (I.ExtOpTrace w v c) = do
-      liftIO $ putStrLn $ "Trace at " ++ locStr w ++ ": " ++ v
+      liftIO $ hPutStrLn stderr $ w ++ ": " ++ v
       c
-    intOp (I.ExtOpBreak _ _ c) = c
+    intOp (I.ExtOpBreak _ _ _ c) = c

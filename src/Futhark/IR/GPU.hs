@@ -10,7 +10,7 @@ module Futhark.IR.GPU
     module Futhark.IR.Traversals,
     module Futhark.IR.Pretty,
     module Futhark.IR.Syntax,
-    module Futhark.IR.GPU.Kernel,
+    module Futhark.IR.GPU.Op,
     module Futhark.IR.GPU.Sizes,
     module Futhark.IR.SOACS.SOAC,
   )
@@ -18,7 +18,7 @@ where
 
 import Futhark.Builder
 import Futhark.Construct
-import Futhark.IR.GPU.Kernel
+import Futhark.IR.GPU.Op
 import Futhark.IR.GPU.Sizes
 import Futhark.IR.Pretty
 import Futhark.IR.Prop

@@ -60,7 +60,7 @@ mmBlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kbo
     -- exactly one of the two innermost dimensions of the kernel
     Just var_dims <- isInvarTo1of2InnerDims mempty seg_space variance arrs,
     -- get the variables on which the first result of redomap depends on
-    [redomap_orig_res] <- patElements pat_redomap,
+    [redomap_orig_res] <- patElems pat_redomap,
     Just res_red_var <- M.lookup (patElemName redomap_orig_res) variance, -- variance of the reduce result
 
     -- we furthermore check that code1 is only formed by
@@ -432,15 +432,15 @@ index se_desc arr outer_indices = do
       inner_dims = shapeDims $ stripDims (length outer_indices) shape
       untouched d = DimSlice (intConst Int64 0) d (intConst Int64 1)
       inner_slices = map untouched inner_dims
-      indices = map (DimFix . Var) outer_indices ++ inner_slices
-  letExp se_desc $ BasicOp $ Index arr indices
+      slice = Slice $ map (DimFix . Var) outer_indices ++ inner_slices
+  letExp se_desc $ BasicOp $ Index arr slice
 
 update :: MonadBuilder m => String -> VName -> [VName] -> VName -> m VName
 update se_desc arr indices new_elem = update' se_desc arr indices (Var new_elem)
 
 update' :: MonadBuilder m => String -> VName -> [VName] -> SubExp -> m VName
 update' se_desc arr indices new_elem =
-  letExp se_desc $ BasicOp $ Update Unsafe arr (map (DimFix . Var) indices) new_elem
+  letExp se_desc $ BasicOp $ Update Unsafe arr (Slice $ map (DimFix . Var) indices) new_elem
 
 forLoop' ::
   SubExp -> -- loop var
@@ -572,13 +572,13 @@ processIndirections ::
   Maybe (Stms GPU, M.Map VName (Stm GPU))
 processIndirections arrs _ acc stm@(Let patt _ (BasicOp (Index _ _)))
   | Just (ss, tab) <- acc,
-    [p] <- patElements patt,
+    [p] <- patElems patt,
     p_nm <- patElemName p,
     nameIn p_nm arrs =
     Just (ss, M.insert p_nm stm tab)
 processIndirections _ res_red_var acc stm'@(Let patt _ _)
   | Just (ss, tab) <- acc,
-    ps <- patElements patt,
+    ps <- patElems patt,
     all (\p -> not (nameIn (patElemName p) res_red_var)) ps =
     Just (ss Seq.|> stm', tab)
   | otherwise = Nothing
@@ -727,7 +727,7 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
     -- exactly one of the two innermost dimensions of the kernel
     Just _ <- isInvarTo2of3InnerDims mempty space variance inp_soac_arrs,
     -- get the free variables on which the result of redomap depends on
-    redomap_orig_res <- patElements pat_redomap,
+    redomap_orig_res <- patElems pat_redomap,
     res_red_var <- -- variance of the reduce result
       mconcat $ mapMaybe ((`M.lookup` variance) . patElemName) redomap_orig_res,
     mempty /= res_red_var,
@@ -846,7 +846,7 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
                         --y_tp  <- subExpType y_elm
                         return (y_elm, y_ind)
 
-                      let ret = WriteReturns mempty (Shape [rz]) loc_Y_nm [([DimFix res_i], res_v)]
+                      let ret = WriteReturns mempty (Shape [rz]) loc_Y_nm [(Slice [DimFix res_i], res_v)]
                       let body = KernelBody () stms [ret]
 
                       res_nms <-
@@ -925,7 +925,7 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
                 rss_init <- scratch "rss_init" (elemType res_tp) [rz, se1, se1]
                 fmap varRes $
                   forLoop rz [rss_init] $ \i [rss] -> do
-                    let slice = [DimFix $ Var i, DimFix se0, DimFix se0]
+                    let slice = Slice [DimFix $ Var i, DimFix se0, DimFix se0]
                     thread_res <- index "thread_res" res [ltid_y, ltid_x, i]
                     rss' <- letSubExp "rss" $ BasicOp $ Update Unsafe rss slice $ Var thread_res
                     resultBodyM [rss']
@@ -954,7 +954,7 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
                       )
                       (eBody $ map eBlank kertp)
                 rss' <- forM (zip res_els rss_merge) $ \(res_el, rs_merge) -> do
-                  let slice = [DimFix $ Var i, DimFix se0, DimFix se0]
+                  let slice = Slice [DimFix $ Var i, DimFix se0, DimFix se0]
                   letSubExp "rss" $ BasicOp $ Update Unsafe rs_merge slice res_el
                 resultBodyM rss'
               return $ varsRes rss
@@ -999,10 +999,10 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
       (VName, Stm GPU) ->
       Builder GPU (M.Map VName (Stm GPU), M.Map VName (PrimType, Stm GPU))
     insertTranspose variance (gidz, _) (tab_inn, tab_out) (p_nm, stm@(Let patt yy (BasicOp (Index arr_nm slc))))
-      | [p] <- patElements patt,
+      | [p] <- patElems patt,
         ptp <- elemType $ patElemType p,
         p_nm == patElemName p =
-        case L.findIndices (variantSliceDim variance gidz) slc of
+        case L.findIndices (variantSliceDim variance gidz) (unSlice slc) of
           [] -> return (M.insert p_nm stm tab_inn, tab_out)
           i : _ -> do
             arr_tp <- lookupType arr_nm

@@ -162,9 +162,19 @@ instance PrettyRep rep => Pretty (Stm rep) where
             stmCertAnnots bnd
           ]
 
+instance Pretty a => Pretty (Slice a) where
+  ppr (Slice xs) = brackets (commasep (map ppr xs))
+
+instance Pretty d => Pretty (FlatDimIndex d) where
+  ppr (FlatDimIndex n s) = ppr n <+> text ":" <+> ppr s
+
+instance Pretty a => Pretty (FlatSlice a) where
+  ppr (FlatSlice offset xs) = brackets (ppr offset <> text ";" <+> commasep (map ppr xs))
+
 instance Pretty BasicOp where
   ppr (SubExp se) = ppr se
-  ppr (Opaque e) = text "opaque" <> apply [ppr e]
+  ppr (Opaque OpaqueNil e) = text "opaque" <> apply [ppr e]
+  ppr (Opaque (OpaqueTrace s) e) = text "trace" <> apply [ppr (show s), ppr e]
   ppr (ArrayLit es rt) =
     case rt of
       Array {} -> brackets $ commastack $ map ppr es
@@ -178,16 +188,16 @@ instance Pretty BasicOp where
     where
       (fromtype, totype) = convOpType conv
   ppr (UnOp op e) = ppr op <+> pprPrec 9 e
-  ppr (Index v idxs) =
-    ppr v <> brackets (commasep (map ppr idxs))
-  ppr (Update safety src idxs se) =
-    ppr src <+> with <+> brackets (commasep (map ppr idxs))
-      <+> text "="
-      <+> ppr se
+  ppr (Index v slice) = ppr v <> ppr slice
+  ppr (Update safety src slice se) =
+    ppr src <+> with <+> ppr slice <+> text "=" <+> ppr se
     where
       with = case safety of
         Unsafe -> text "with"
         Safe -> text "with?"
+  ppr (FlatIndex v slice) = ppr v <> ppr slice
+  ppr (FlatUpdate src slice se) =
+    ppr src <+> text "with" <+> ppr slice <+> text "=" <+> ppr se
   ppr (Iota e x s et) = text "iota" <> et' <> apply [ppr e, ppr x, ppr s]
     where
       et' = text $ show $ primBitSize $ IntType et
@@ -214,8 +224,7 @@ instance Pretty a => Pretty (ErrorMsg a) where
   ppr (ErrorMsg parts) = braces $ align $ commasep $ map p parts
     where
       p (ErrorString s) = text $ show s
-      p (ErrorInt32 x) = ppr x <+> colon <+> text "i32"
-      p (ErrorInt64 x) = ppr x <+> colon <+> text "i64"
+      p (ErrorVal t x) = ppr x <+> colon <+> ppr t
 
 instance PrettyRep rep => Pretty (Exp rep) where
   ppr (If c t f (IfDec ret ifsort)) =

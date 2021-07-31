@@ -408,6 +408,8 @@ commandLineOptions =
                 "multicore" -> Right $ MCMemAction compileMulticoreAction
                 "opencl" -> Right $ GPUMemAction compileOpenCLAction
                 "cuda" -> Right $ GPUMemAction compileCUDAAction
+                "wasm" -> Right $ SeqMemAction compileCtoWASMAction
+                "wasm-multicore" -> Right $ MCMemAction compileMulticoreToWASMAction
                 "python" -> Right $ SeqMemAction compilePythonAction
                 "pyopencl" -> Right $ GPUMemAction compilePyOpenCLAction
                 _ -> Left $ error $ "Invalid backend: " <> arg
@@ -543,7 +545,7 @@ commandLineOptions =
       "Run the default optimised kernels pipeline"
       kernelsPipeline
       []
-      ["kernels"],
+      ["gpu"],
     pipelineOption
       getSOACSProg
       "GPUMem"
@@ -551,15 +553,15 @@ commandLineOptions =
       "Run the full GPU compilation pipeline"
       gpuPipeline
       []
-      ["gpu"],
+      ["gpu-mem"],
     pipelineOption
       getSOACSProg
-      "GPUMem"
+      "SeqMem"
       SeqMem
       "Run the sequential CPU compilation pipeline"
       sequentialCpuPipeline
       []
-      ["cpu"],
+      ["seq-mem"],
     pipelineOption
       getSOACSProg
       "MCMem"
@@ -567,7 +569,7 @@ commandLineOptions =
       "Run the multicore compilation pipeline"
       multicorePipeline
       []
-      ["multicore"]
+      ["mc-mem"]
   ]
 
 incVerbosity :: Maybe FilePath -> FutharkConfig -> FutharkConfig
@@ -669,8 +671,8 @@ main = mainWithOptions newConfig commandLineOptions "options... program" compile
                   (".fut_soacs", readCore parseSOACS SOACS),
                   (".fut_seq", readCore parseSeq Seq),
                   (".fut_seq_mem", readCore parseSeqMem SeqMem),
-                  (".fut_kernels", readCore parseGPU GPU),
-                  (".fut_kernels_mem", readCore parseGPUMem GPUMem),
+                  (".fut_gpu", readCore parseGPU GPU),
+                  (".fut_gpu_mem", readCore parseGPUMem GPUMem),
                   (".fut_mc", readCore parseMC MC),
                   (".fut_mc_mem", readCore parseMCMem MCMem)
                 ]

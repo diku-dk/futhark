@@ -53,7 +53,6 @@ module Language.Futhark.Prop
     foldFunType,
     typeVars,
     typeDimNames,
-    primByteSize,
 
     -- * Operations on types
     peelArray,
@@ -529,13 +528,6 @@ valueType :: Value -> ValueType
 valueType (PrimValue bv) = Scalar $ Prim $ primValueType bv
 valueType (ArrayValue _ t) = t
 
--- | The size of values of this type, in bytes.
-primByteSize :: Num a => PrimType -> a
-primByteSize (Signed it) = Primitive.intByteSize it
-primByteSize (Unsigned it) = Primitive.intByteSize it
-primByteSize (FloatType ft) = Primitive.floatByteSize ft
-primByteSize Bool = 1
-
 -- | The type is leaving a scope, so clean up any aliases that
 -- reference the bound variables, and turn any dimensions that name
 -- them into AnyDim instead.
@@ -578,6 +570,7 @@ typeOf (Project _ _ (Info t) _) = t
 typeOf (Var _ (Info t) _) = t
 typeOf (Ascript e _ _) = typeOf e
 typeOf (Negate e _) = typeOf e
+typeOf (Not e _) = typeOf e
 typeOf (Update e _ _ _) = typeOf e `setAliases` mempty
 typeOf (RecordUpdate _ _ _ (Info t) _) = t
 typeOf (Assert _ e _ _) = typeOf e
@@ -790,7 +783,6 @@ intrinsics =
     M.fromList $
       zipWith namify [20 ..] $
         map primFun (M.toList Primitive.primFuns)
-          ++ [("opaque", IntrinsicPolyFun [tp_a] [Scalar t_a] $ Scalar t_a)]
           ++ map unOpFun Primitive.allUnOps
           ++ map binOpFun Primitive.allBinOps
           ++ map cmpOpFun Primitive.allCmpOps
@@ -1023,8 +1015,6 @@ intrinsics =
                    ]
                    $ uarr_a $ shape [k]
                ),
-               ("trace", IntrinsicPolyFun [tp_a] [Scalar t_a] $ Scalar t_a),
-               ("break", IntrinsicPolyFun [tp_a] [Scalar t_a] $ Scalar t_a),
                ( "jvp",
                  IntrinsicPolyFun
                    [tp_a, tp_b]
@@ -1044,8 +1034,89 @@ intrinsics =
                    $ Scalar t_a
                )
              ]
+          ++
+          -- Experimental LMAD ones.
+          [ ( "flat_index_2d",
+              IntrinsicPolyFun
+                [tp_a, sp_n]
+                [ arr_a $ shape [n],
+                  Scalar (Prim $ Signed Int64),
+                  Scalar (Prim $ Signed Int64),
+                  Scalar (Prim $ Signed Int64),
+                  Scalar (Prim $ Signed Int64),
+                  Scalar (Prim $ Signed Int64)
+                ]
+                $ arr_a $ ShapeDecl [AnyDim Nothing, AnyDim Nothing]
+            ),
+            ( "flat_update_2d",
+              IntrinsicPolyFun
+                [tp_a, sp_n, sp_k, sp_l]
+                [ uarr_a $ shape [n],
+                  Scalar (Prim $ Signed Int64),
+                  Scalar (Prim $ Signed Int64),
+                  Scalar (Prim $ Signed Int64),
+                  arr_a $ shape [k, l]
+                ]
+                $ uarr_a $ shape [n]
+            ),
+            ( "flat_index_3d",
+              IntrinsicPolyFun
+                [tp_a, sp_n]
+                [ arr_a $ shape [n],
+                  Scalar (Prim $ Signed Int64),
+                  Scalar (Prim $ Signed Int64),
+                  Scalar (Prim $ Signed Int64),
+                  Scalar (Prim $ Signed Int64),
+                  Scalar (Prim $ Signed Int64),
+                  Scalar (Prim $ Signed Int64),
+                  Scalar (Prim $ Signed Int64)
+                ]
+                $ arr_a $ ShapeDecl [AnyDim Nothing, AnyDim Nothing, AnyDim Nothing]
+            ),
+            ( "flat_update_3d",
+              IntrinsicPolyFun
+                [tp_a, sp_n, sp_k, sp_l, sp_p]
+                [ uarr_a $ shape [n],
+                  Scalar (Prim $ Signed Int64),
+                  Scalar (Prim $ Signed Int64),
+                  Scalar (Prim $ Signed Int64),
+                  Scalar (Prim $ Signed Int64),
+                  arr_a $ shape [k, l, p]
+                ]
+                $ uarr_a $ shape [n]
+            ),
+            ( "flat_index_4d",
+              IntrinsicPolyFun
+                [tp_a, sp_n]
+                [ arr_a $ shape [n],
+                  Scalar (Prim $ Signed Int64),
+                  Scalar (Prim $ Signed Int64),
+                  Scalar (Prim $ Signed Int64),
+                  Scalar (Prim $ Signed Int64),
+                  Scalar (Prim $ Signed Int64),
+                  Scalar (Prim $ Signed Int64),
+                  Scalar (Prim $ Signed Int64),
+                  Scalar (Prim $ Signed Int64),
+                  Scalar (Prim $ Signed Int64)
+                ]
+                $ arr_a $ ShapeDecl [AnyDim Nothing, AnyDim Nothing, AnyDim Nothing, AnyDim Nothing]
+            ),
+            ( "flat_update_4d",
+              IntrinsicPolyFun
+                [tp_a, sp_n, sp_k, sp_l, sp_p, sp_q]
+                [ uarr_a $ shape [n],
+                  Scalar (Prim $ Signed Int64),
+                  Scalar (Prim $ Signed Int64),
+                  Scalar (Prim $ Signed Int64),
+                  Scalar (Prim $ Signed Int64),
+                  Scalar (Prim $ Signed Int64),
+                  arr_a $ shape [k, l, p, q]
+                ]
+                $ uarr_a $ shape [n]
+            )
+          ]
   where
-    [a, b, n, m, k, l, p] = zipWith VName (map nameFromString ["a", "b", "n", "m", "k", "l", "p"]) [0 ..]
+    [a, b, n, m, k, l, p, q] = zipWith VName (map nameFromString ["a", "b", "n", "m", "k", "l", "p", "q"]) [0 ..]
 
     t_a = TypeVar () Nonunique (typeName a) []
     arr_a = Array () Nonunique t_a
@@ -1057,7 +1128,7 @@ intrinsics =
     uarr_b = Array () Unique t_b
     tp_b = TypeParamType Unlifted b mempty
 
-    [sp_n, sp_m, sp_k, sp_l, _sp_p] = map (`TypeParamDim` mempty) [n, m, k, l, p]
+    [sp_n, sp_m, sp_k, sp_l, sp_p, sp_q] = map (`TypeParamDim` mempty) [n, m, k, l, p, q]
 
     shape = ShapeDecl . map (NamedDim . qualName)
 

@@ -14,7 +14,6 @@ where
 
 import Control.Monad
 import Data.List (find)
-import Debug.Trace
 import qualified Futhark.Analysis.SymbolTable as ST
 import qualified Futhark.Analysis.UsageTable as UT
 import Futhark.Construct
@@ -124,7 +123,7 @@ callKernelRules =
 unExistentialiseMemory :: SimplifyMemory rep => TopDownRuleIf (Wise rep)
 unExistentialiseMemory vtable pat _ (cond, tbranch, fbranch, ifdec)
   | ST.simplifyMemory vtable,
-    fixable <- foldl hasConcretisableMemory mempty $ patElements pat,
+    fixable <- foldl hasConcretisableMemory mempty $ patElems pat,
     not $ null fixable = Simplify $ do
     -- Create non-existential memory blocks big enough to hold the
     -- arrays.
@@ -139,7 +138,7 @@ unExistentialiseMemory vtable pat _ (cond, tbranch, fbranch, ifdec)
     -- arrays where they are expected.
     let updateBody body = buildBody_ $ do
           res <- bodyBind body
-          zipWithM updateResult (patElements pat) res
+          zipWithM updateResult (patElems pat) res
         updateResult pat_elem (SubExpRes cs (Var v))
           | Just mem <- lookup (patElemName pat_elem) arr_to_mem,
             (_, MemArray pt shape u (ArrayIn _ ixfun)) <- patElemDec pat_elem = do
@@ -154,12 +153,11 @@ unExistentialiseMemory vtable pat _ (cond, tbranch, fbranch, ifdec)
           return se
     tbranch' <- updateBody tbranch
     fbranch' <- updateBody fbranch
-    traceM "unExistentialiseMemory"
     letBind pat $ If cond tbranch' fbranch' ifdec
   where
     onlyUsedIn name here =
       not . any ((name `nameIn`) . freeIn) . filter ((/= here) . patElemName) $
-        patElements pat
+        patElems pat
     knownSize Constant {} = True
     knownSize (Var v) = not $ inContext v
     inContext = (`elem` patNames pat)
@@ -170,7 +168,7 @@ unExistentialiseMemory vtable pat _ (cond, tbranch, fbranch, ifdec)
           fmap patElemType
             <$> find
               ((mem ==) . patElemName . snd)
-              (zip [(0 :: Int) ..] $ patElements pat),
+              (zip [(0 :: Int) ..] $ patElems pat),
         Just tse <- maybeNth j $ bodyResult tbranch,
         Just fse <- maybeNth j $ bodyResult fbranch,
         mem `onlyUsedIn` patElemName pat_elem,

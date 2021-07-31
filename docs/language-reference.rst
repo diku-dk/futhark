@@ -429,6 +429,8 @@ literals and variables, but also more complicated forms.
    exp:   `atom`
       : | `exp` `qualbinop` `exp`
       : | `exp` `exp`
+      : | "!" `exp`
+      : | "-" `exp`
       : | `constructor` `exp`*
       : | `exp` ":" `type`
       : | `exp` ":>" `type`
@@ -502,6 +504,10 @@ in natural text.
 * An expression ``(-x)`` is parsed as the variable ``x`` negated and
   enclosed in parentheses, rather than an operator section partially
   applying the infix operator ``-``.
+
+* Function application and prefix operators bind more tightly than any
+  infix operator.  Note that the only prefix operators are ``!`` and
+  ``-``, and more cannot be defined.
 
 * The following table describes the precedence and associativity of
   infix operators.  All operators in the same row have the same
@@ -1401,7 +1407,7 @@ Module System
 .. productionlist::
    mod_bind: "module" `id` `mod_param`* "=" [":" mod_type_exp] "=" `mod_exp`
    mod_param: "(" `id` ":" `mod_type_exp` ")"
-   mod_type_bind: "module" "type" `id` `type_param`* "=" `mod_type_exp`
+   mod_type_bind: "module" "type" `id` "=" `mod_type_exp`
 
 Futhark supports an ML-style higher-order module system.  *Modules*
 can contain types, functions, and other modules and module types.
@@ -1656,6 +1662,32 @@ contradictory attributes are combined through fusion, it is
 unspecified which attributes take precedence.
 
 The following expression attributes are supported.
+
+``trace``
+.........
+
+Print the value produced by the attributed expression.  Used for
+debugging.  Somewhat unreliable outside of the interpreter, and in
+particular does not work for GPU device code.
+
+``trace(tag)``
+..............
+
+Like ``trace``, but prefix output with *tag*, which must lexically be
+an identifier.
+
+``break``
+.........
+
+In the interpreter, pause execution *before* evaluating the expression.
+No effect for compiled code.
+
+``opaque``
+..........
+
+The compiler will treat the attributed expression as a black box.
+This is used to work around optimisation deficiencies (or bugs),
+although it should hopefully rarely be necessary.
 
 ``incremental_flattening(no_outer)``
 ....................................

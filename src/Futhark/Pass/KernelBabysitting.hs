@@ -62,7 +62,7 @@ type ExpMap = M.Map VName (Stm GPU)
 nonlinearInMemory :: VName -> ExpMap -> Maybe (Maybe [Int])
 nonlinearInMemory name m =
   case M.lookup name m of
-    Just (Let _ _ (BasicOp (Opaque (Var arr)))) -> nonlinearInMemory arr m
+    Just (Let _ _ (BasicOp (Opaque _ (Var arr)))) -> nonlinearInMemory arr m
     Just (Let _ _ (BasicOp (Rearrange perm _))) -> Just $ Just $ rearrangeInverse perm
     Just (Let _ _ (BasicOp (Reshape _ arr))) -> nonlinearInMemory arr m
     Just (Let _ _ (BasicOp (Manifest perm _))) -> Just $ Just perm
@@ -70,7 +70,7 @@ nonlinearInMemory name m =
       nonlinear
         =<< find
           ((== name) . patElemName . fst)
-          (zip (patElements pat) ts)
+          (zip (patElems pat) ts)
     _ -> Nothing
   where
     nonlinear (pe, t)
@@ -268,7 +268,7 @@ ensureCoalescedAccess
           not $ null thread_gids,
           inner_gid <- last thread_gids,
           length slice >= length perm,
-          slice' <- map (slice !!) perm,
+          slice' <- map (unSlice slice !!) perm,
           DimFix inner_ind <- last slice',
           not $ null thread_gids,
           isGidVariant inner_gid inner_ind ->
@@ -309,7 +309,7 @@ ensureCoalescedAccess
         -- padding.
         | (is, rem_slice) <- splitSlice slice,
           and $ zipWith (==) is $ map Var thread_gids,
-          DimSlice offset len (Constant stride) : _ <- rem_slice,
+          DimSlice offset len (Constant stride) : _ <- unSlice rem_slice,
           isThreadLocalSubExp offset,
           Just {} <- sizeSubst len,
           oneIsh stride -> do
@@ -352,14 +352,14 @@ tooSmallSlice bs = fst . foldl comb (True, bs) . sliceDims
     comb (_, x) _ = (False, x)
 
 splitSlice :: Slice SubExp -> ([SubExp], Slice SubExp)
-splitSlice [] = ([], [])
-splitSlice (DimFix i : is) = first (i :) $ splitSlice is
+splitSlice (Slice []) = ([], Slice [])
+splitSlice (Slice (DimFix i : is)) = first (i :) $ splitSlice (Slice is)
 splitSlice is = ([], is)
 
 allDimAreSlice :: Slice SubExp -> Bool
-allDimAreSlice [] = True
-allDimAreSlice (DimFix _ : _) = False
-allDimAreSlice (_ : is) = allDimAreSlice is
+allDimAreSlice (Slice []) = True
+allDimAreSlice (Slice (DimFix _ : _)) = False
+allDimAreSlice (Slice (_ : is)) = allDimAreSlice (Slice is)
 
 -- Try to move thread indexes into their proper position.
 coalescedIndexes :: Names -> (VName -> SubExp -> Bool) -> [SubExp] -> [SubExp] -> Maybe [SubExp]

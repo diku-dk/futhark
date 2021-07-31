@@ -47,7 +47,7 @@ import Futhark.IR.Aliases
     removeProgAliases,
     removeStmAliases,
   )
-import qualified Futhark.IR.GPU.Kernel as Kernel
+import qualified Futhark.IR.GPU as GPU
 import qualified Futhark.IR.MC as MC
 import qualified Futhark.IR.Mem as Memory
 import Futhark.IR.Prop.Aliases
@@ -199,7 +199,7 @@ cseInStms consumed (stm : stms) m =
       let ds =
             case stmExp stm' of
               DoLoop merge _ _ -> map (diet . declTypeOf . fst) merge
-              _ -> map patElemDiet $ patElements $ stmPat stm'
+              _ -> map patElemDiet $ patElems $ stmPat stm'
       e <- mapExpM (cse ds) $ stmExp stm'
       return stm' {stmExp = e}
 
@@ -230,7 +230,7 @@ cseInStm consumed (Let pat (StmAux cs attrs edec) e) m = do
   CSEState (esubsts, nsubsts) cse_arrays <- ask
   let e' = normExp $substituteNames nsubsts e
       pat' = substituteNames nsubsts pat
-  if any (bad cse_arrays) $ patElements pat
+  if any (bad cse_arrays) $ patElems pat
     then m [Let pat' (StmAux cs attrs edec) e']
     else case M.lookup (edec, e') esubsts of
       Just subpat ->
@@ -238,7 +238,7 @@ cseInStm consumed (Let pat (StmAux cs attrs edec) e) m = do
           let lets =
                 [ Let (Pat [patElem']) (StmAux cs attrs edec) $
                     BasicOp $ SubExp $ Var $ patElemName patElem
-                  | (name, patElem) <- zip (patNames pat') $ patElements subpat,
+                  | (name, patElem) <- zip (patNames pat') $ patElems subpat,
                     let patElem' = patElem {patElemName = name}
                 ]
           m lets
@@ -303,10 +303,10 @@ instance
     CSEInOp (Op rep),
     CSEInOp op
   ) =>
-  CSEInOp (Kernel.HostOp rep op)
+  CSEInOp (GPU.HostOp rep op)
   where
-  cseInOp (Kernel.SegOp op) = Kernel.SegOp <$> cseInOp op
-  cseInOp (Kernel.OtherOp op) = Kernel.OtherOp <$> cseInOp op
+  cseInOp (GPU.SegOp op) = GPU.SegOp <$> cseInOp op
+  cseInOp (GPU.OtherOp op) = GPU.OtherOp <$> cseInOp op
   cseInOp x = return x
 
 instance
@@ -324,20 +324,20 @@ instance
 
 instance
   (ASTRep rep, Aliased rep, CSEInOp (Op rep)) =>
-  CSEInOp (Kernel.SegOp lvl rep)
+  CSEInOp (GPU.SegOp lvl rep)
   where
   cseInOp =
     subCSE
-      . Kernel.mapSegOpM
-        (Kernel.SegOpMapper return cseInLambda cseInKernelBody return return)
+      . GPU.mapSegOpM
+        (GPU.SegOpMapper return cseInLambda cseInKernelBody return return)
 
 cseInKernelBody ::
   (ASTRep rep, Aliased rep, CSEInOp (Op rep)) =>
-  Kernel.KernelBody rep ->
-  CSEM rep (Kernel.KernelBody rep)
-cseInKernelBody (Kernel.KernelBody bodydec bnds res) = do
+  GPU.KernelBody rep ->
+  CSEM rep (GPU.KernelBody rep)
+cseInKernelBody (GPU.KernelBody bodydec bnds res) = do
   Body _ bnds' _ <- cseInBody (map (const Observe) res) $ Body bodydec bnds []
-  return $ Kernel.KernelBody bodydec bnds' res
+  return $ GPU.KernelBody bodydec bnds' res
 
 instance CSEInOp op => CSEInOp (Memory.MemOp op) where
   cseInOp o@Memory.Alloc {} = return o

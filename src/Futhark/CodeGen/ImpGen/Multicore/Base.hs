@@ -60,7 +60,7 @@ arrParam :: VName -> MulticoreGen Imp.Param
 arrParam arr = do
   name_entry <- lookupVar arr
   case name_entry of
-    ArrayVar _ (ArrayEntry (MemLocation mem _ _) _) ->
+    ArrayVar _ (ArrayEntry (MemLoc mem _ _) _) ->
       return $ Imp.MemParam mem DefaultSpace
     _ -> error $ "arrParam: could not handle array " ++ show arr
 
@@ -95,7 +95,7 @@ getIterationDomain _ space = do
 -- we perform a call by value-result in the segop function
 getReturnParams :: Pat MCMem -> SegOp () MCMem -> MulticoreGen [Imp.Param]
 getReturnParams pat SegRed {} = do
-  let retvals = map patElemName $ patElements pat
+  let retvals = map patElemName $ patElems pat
   retvals_ts <- mapM lookupType retvals
   concat <$> zipWithM toParam retvals retvals_ts
 getReturnParams _ _ = return mempty

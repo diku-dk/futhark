@@ -106,13 +106,24 @@ mapExpM tv (Apply fname args ret loc) = do
 mapExpM tv (BasicOp (Index arr slice)) =
   BasicOp
     <$> ( Index <$> mapOnVName tv arr
-            <*> mapM (traverse (mapOnSubExp tv)) slice
+            <*> traverse (mapOnSubExp tv) slice
         )
 mapExpM tv (BasicOp (Update safety arr slice se)) =
   BasicOp
     <$> ( Update safety <$> mapOnVName tv arr
-            <*> mapM (traverse (mapOnSubExp tv)) slice
+            <*> traverse (mapOnSubExp tv) slice
             <*> mapOnSubExp tv se
+        )
+mapExpM tv (BasicOp (FlatIndex arr slice)) =
+  BasicOp
+    <$> ( FlatIndex <$> mapOnVName tv arr
+            <*> traverse (mapOnSubExp tv) slice
+        )
+mapExpM tv (BasicOp (FlatUpdate arr slice se)) =
+  BasicOp
+    <$> ( FlatUpdate <$> mapOnVName tv arr
+            <*> traverse (mapOnSubExp tv) slice
+            <*> mapOnVName tv se
         )
 mapExpM tv (BasicOp (Iota n x s et)) =
   BasicOp <$> (Iota <$> mapOnSubExp tv n <*> mapOnSubExp tv x <*> mapOnSubExp tv s <*> pure et)
@@ -143,8 +154,8 @@ mapExpM tv (BasicOp (Manifest perm e)) =
   BasicOp <$> (Manifest perm <$> mapOnVName tv e)
 mapExpM tv (BasicOp (Assert e msg loc)) =
   BasicOp <$> (Assert <$> mapOnSubExp tv e <*> traverse (mapOnSubExp tv) msg <*> pure loc)
-mapExpM tv (BasicOp (Opaque e)) =
-  BasicOp <$> (Opaque <$> mapOnSubExp tv e)
+mapExpM tv (BasicOp (Opaque op e)) =
+  BasicOp <$> (Opaque op <$> mapOnSubExp tv e)
 mapExpM tv (BasicOp (UpdateAcc v is ses)) =
   BasicOp
     <$> ( UpdateAcc
@@ -280,11 +291,17 @@ walkExpM tv (If c texp fexp (IfDec ts _)) = do
 walkExpM tv (Apply _ args ret _) =
   mapM_ (walkOnSubExp tv . fst) args >> mapM_ (walkOnRetType tv) ret
 walkExpM tv (BasicOp (Index arr slice)) =
-  walkOnVName tv arr >> mapM_ (traverse_ (walkOnSubExp tv)) slice
+  walkOnVName tv arr >> traverse_ (walkOnSubExp tv) slice
 walkExpM tv (BasicOp (Update _ arr slice se)) =
   walkOnVName tv arr
-    >> mapM_ (traverse_ (walkOnSubExp tv)) slice
+    >> traverse_ (walkOnSubExp tv) slice
     >> walkOnSubExp tv se
+walkExpM tv (BasicOp (FlatIndex arr slice)) =
+  walkOnVName tv arr >> traverse_ (walkOnSubExp tv) slice
+walkExpM tv (BasicOp (FlatUpdate arr slice se)) =
+  walkOnVName tv arr
+    >> traverse_ (walkOnSubExp tv) slice
+    >> walkOnVName tv se
 walkExpM tv (BasicOp (Iota n x s _)) =
   walkOnSubExp tv n >> walkOnSubExp tv x >> walkOnSubExp tv s
 walkExpM tv (BasicOp (Replicate shape vexp)) =
@@ -305,7 +322,7 @@ walkExpM tv (BasicOp (Manifest _ e)) =
   walkOnVName tv e
 walkExpM tv (BasicOp (Assert e msg _)) =
   walkOnSubExp tv e >> traverse_ (walkOnSubExp tv) msg
-walkExpM tv (BasicOp (Opaque e)) =
+walkExpM tv (BasicOp (Opaque _ e)) =
   walkOnSubExp tv e
 walkExpM tv (BasicOp (UpdateAcc v is ses)) = do
   walkOnVName tv v

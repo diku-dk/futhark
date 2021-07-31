@@ -43,7 +43,7 @@ removeRedundantMergeVariables (_, used) pat aux (merge, form, body)
 
         (keep_valpart, discard_valpart) =
           partition (resIsNecessary . snd) $
-            zip (patElements pat) $ zip merge $ bodyResult body
+            zip (patElems pat) $ zip merge $ bodyResult body
 
         (keep_valpatelems, keep_val) = unzip keep_valpart
         (_discard_valpatelems, discard_val) = unzip discard_valpart
@@ -89,7 +89,7 @@ hoistLoopInvariantMergeVariables :: BuilderOps rep => TopDownRuleDoLoop rep
 hoistLoopInvariantMergeVariables vtable pat aux (merge, form, loopbody) = do
   -- Figure out which of the elements of loopresult are
   -- loop-invariant, and hoist them out.
-  let explpat = zip (patElements pat) $ map (paramName . fst) merge
+  let explpat = zip (patElems pat) $ map (paramName . fst) merge
   case foldr checkInvariance ([], explpat, [], []) $
     zip3 (patNames pat) merge res of
     ([], _, _, _) ->
@@ -205,7 +205,7 @@ simplifyLoopVariables vtable pat aux (merge, form@(ForLoop i it num_iters loop_v
         vtable'
         seType
         arr
-        (DimFix (Var i) : fullSlice (paramType p) [])
+        (Slice (DimFix (Var i) : unSlice (fullSlice (paramType p) [])))
         $ paramName p `nameIn` consumed_in_body
 
     -- We only want this simplification if the result does not refer
@@ -215,7 +215,7 @@ simplifyLoopVariables vtable pat aux (merge, form@(ForLoop i it num_iters loop_v
     onLoopVar (p, arr) (Just m) = do
       (x, x_stms) <- collectStms m
       case x of
-        IndexResult cs arr' slice
+        IndexResult cs arr' (Slice slice)
           | not $ any ((i `nameIn`) . freeIn) x_stms,
             DimFix (Var j) : slice' <- slice,
             j == i,
@@ -224,10 +224,8 @@ simplifyLoopVariables vtable pat aux (merge, form@(ForLoop i it num_iters loop_v
             w <- arraySize 0 <$> lookupType arr'
             for_in_partial <-
               certifying cs $
-                letExp "for_in_partial" $
-                  BasicOp $
-                    Index arr' $
-                      DimSlice (intConst Int64 0) w (intConst Int64 1) : slice'
+                letExp "for_in_partial" . BasicOp . Index arr' . Slice $
+                  DimSlice (intConst Int64 0) w (intConst Int64 1) : slice'
             return (Just (p, for_in_partial), mempty)
         SubExpResult cs se
           | all (notIndex . stmExp) x_stms -> do
@@ -289,10 +287,8 @@ unroll n merge (iv, it, i) loop_vars body
       letBindNames [iv] $ BasicOp $ SubExp $ intConst it i
 
       forM_ loop_vars $ \(p, arr) ->
-        letBindNames [paramName p] $
-          BasicOp $
-            Index arr $
-              DimFix (intConst Int64 i) : fullSlice (paramType p) []
+        letBindNames [paramName p] . BasicOp . Index arr . Slice $
+          DimFix (intConst Int64 i) : unSlice (fullSlice (paramType p) [])
 
       -- Some of the sizes in the types here might be temporarily wrong
       -- until copy propagation fixes it up.

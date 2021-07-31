@@ -357,14 +357,14 @@ onKernel target kernel = do
       return
         ( Just $ SharedMemoryKArg size,
           Just [C.cparam|__local volatile typename int64_t* $id:mem_aligned|],
-          [C.citem|__local volatile char* restrict $id:mem = (__local volatile char*)$id:mem_aligned;|]
+          [C.citem|__local volatile unsigned char* restrict $id:mem = (__local volatile unsigned char*) $id:mem_aligned;|]
         )
     prepareLocalMemory TargetCUDA (mem, size) = do
       param <- newVName $ baseString mem ++ "_offset"
       return
         ( Just $ SharedMemoryKArg size,
           Just [C.cparam|uint $id:param|],
-          [C.citem|volatile char *$id:mem = &shared_mem[$id:param];|]
+          [C.citem|volatile $ty:defaultMemBlockType $id:mem = &shared_mem[$id:param];|]
         )
 
 useAsParam :: KernelUse -> Maybe C.Param
@@ -376,7 +376,7 @@ useAsParam (ScalarUse name bt) =
         _ -> GC.primTypeToCType bt
    in Just [C.cparam|$ty:ctp $id:name|]
 useAsParam (MemoryUse name) =
-  Just [C.cparam|__global unsigned char *$id:name|]
+  Just [C.cparam|__global $ty:defaultMemBlockType $id:name|]
 useAsParam ConstUse {} =
   Nothing
 
@@ -577,7 +577,7 @@ static inline void mem_fence_global() {
 
 $esc:("#define NAN (0.0/0.0)")
 $esc:("#define INFINITY (1.0/0.0)")
-extern volatile __shared__ char shared_mem[];
+extern volatile __shared__ unsigned char shared_mem[];
 |]
 
 compilePrimExp :: PrimExp KernelConst -> C.Exp
@@ -666,7 +666,7 @@ inKernelOperations mode body =
       name' <- newVName $ pretty name ++ "_backing"
       GC.modifyUserState $ \s ->
         s {kernelLocalMemory = (name', fmap untyped size) : kernelLocalMemory s}
-      GC.stm [C.cstm|$id:name = (__local char*) $id:name';|]
+      GC.stm [C.cstm|$id:name = (__local unsigned char*) $id:name';|]
     kernelOps (ErrorSync f) = do
       label <- nextErrorLabel
       pending <- kernelSyncPending <$> GC.getUserState
@@ -816,14 +816,11 @@ inKernelOperations mode body =
         s {kernelFailures = kernelFailures s ++ [FailureMsg msg backtrace]}
       let setArgs _ [] = return []
           setArgs i (ErrorString {} : parts') = setArgs i parts'
-          setArgs i (ErrorInt32 x : parts') = do
+          -- FIXME: bogus for non-ints.
+          setArgs i (ErrorVal _ x : parts') = do
             x' <- GC.compileExp x
             stms <- setArgs (i + 1) parts'
             return $ [C.cstm|global_failure_args[$int:i] = (typename int64_t)$exp:x';|] : stms
-          setArgs i (ErrorInt64 x : parts') = do
-            x' <- GC.compileExp x
-            stms <- setArgs (i + 1) parts'
-            return $ [C.cstm|global_failure_args[$int:i] = $exp:x';|] : stms
       argstms <- setArgs (0 :: Int) parts
 
       what_next <- whatNext
@@ -873,6 +870,7 @@ typesInCode (If (TPrimExp e) c1 c2) =
 typesInCode (Assert e _ _) = typesInExp e
 typesInCode (Comment _ c) = typesInCode c
 typesInCode (DebugPrint _ v) = maybe mempty typesInExp v
+typesInCode (TracePrint msg) = foldMap typesInExp msg
 typesInCode Op {} = mempty
 
 typesInExp :: Exp -> S.Set PrimType

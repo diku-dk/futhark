@@ -64,15 +64,14 @@ lowerUpdate scope (Let pat aux (DoLoop merge form body)) updates = do
 lowerUpdate
   _
   (Let pat aux (BasicOp (SubExp (Var v))))
-  [DesiredUpdate bindee_nm bindee_dec cs src is val]
+  [DesiredUpdate bindee_nm bindee_dec cs src (Slice is) val]
     | patNames pat == [src] =
       let is' = fullSlice (typeOf bindee_dec) is
-       in Just $
-            return
-              [ certify (stmAuxCerts aux <> cs) $
-                  mkLet [Ident bindee_nm $ typeOf bindee_dec] $
-                    BasicOp $ Update Unsafe v is' $ Var val
-              ]
+       in Just . pure $
+            [ certify (stmAuxCerts aux <> cs) $
+                mkLet [Ident bindee_nm $ typeOf bindee_dec] $
+                  BasicOp $ Update Unsafe v is' $ Var val
+            ]
 lowerUpdate _ _ _ =
   Nothing
 
@@ -118,7 +117,7 @@ lowerUpdatesIntoSegMap ::
 lowerUpdatesIntoSegMap scope pat updates kspace kbody = do
   -- The updates are all-or-nothing.  Being more liberal would require
   -- changes to the in-place-lowering pass itself.
-  mk <- zipWithM onRet (patElements pat) (kernelBodyResult kbody)
+  mk <- zipWithM onRet (patElems pat) (kernelBodyResult kbody)
   return $ do
     (pes, bodystms, krets, poststms) <- unzip4 <$> sequence mk
     return
@@ -142,18 +141,17 @@ lowerUpdatesIntoSegMap scope pat updates kspace kbody = do
         guard $
           let (dims', slice') =
                 unzip . drop (length gtids) . filter (isNothing . dimFix . snd) $
-                  zip (arrayDims (typeOf bindee_dec)) slice
-           in isFullSlice (Shape dims') slice'
+                  zip (arrayDims (typeOf bindee_dec)) (unSlice slice)
+           in isFullSlice (Shape dims') (Slice slice')
 
         Just $ do
           (slice', bodystms) <-
             flip runBuilderT scope $
               traverse (toSubExp "index") $
-                fixSlice (map (fmap pe64) slice) $
-                  map (pe64 . Var) gtids
+                fixSlice (fmap pe64 slice) $ map (pe64 . Var) gtids
 
           let res_dims = arrayDims $ snd bindee_dec
-              ret' = WriteReturns cs (Shape res_dims) src [(map DimFix slice', se)]
+              ret' = WriteReturns cs (Shape res_dims) src [(Slice $ map DimFix slice', se)]
 
           return
             ( PatElem bindee_nm bindee_dec,
@@ -257,13 +255,13 @@ lowerUpdateIntoLoop scope updates pat val form body = do
                 Update
                   Unsafe
                   (updateSource update)
-                  (fullSlice source_t $ updateIndices update)
+                  (fullSlice source_t $ unSlice $ updateIndices update)
                   $ snd $ mergeParam summary
             ],
             [ mkLet [elmident] . BasicOp $
                 Index
                   (updateName update)
-                  (fullSlice source_t $ updateIndices update)
+                  (fullSlice source_t $ unSlice $ updateIndices update)
             ]
           )
         return $
@@ -364,7 +362,7 @@ manipulateResult summaries substs = do
     substRes (SubExpRes res_cs (Var res_v)) (subst_v, (_, nm, _, _))
       | res_v == subst_v =
         pure $ SubExpRes res_cs $ Var nm
-    substRes (SubExpRes res_cs res_se) (_, (cs, nm, dec, is)) = do
+    substRes (SubExpRes res_cs res_se) (_, (cs, nm, dec, Slice is)) = do
       v' <- newIdent' (++ "_updated") $ Ident nm $ typeOf dec
       tell
         [ certify (res_cs <> cs) . mkLet [v'] . BasicOp $

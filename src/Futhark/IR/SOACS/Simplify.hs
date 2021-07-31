@@ -299,7 +299,7 @@ liftIdentityMapping _ pat aux op
             )
 
     case foldr checkInvariance ([], [], []) $
-      zip3 (patElements pat) ses rettype of
+      zip3 (patElems pat) ses rettype of
       ([], _, _) -> Skip
       (invariant, mapresult, rettype') -> Simplify $ do
         let (pat', ses') = unzip mapresult
@@ -426,7 +426,7 @@ removeDeadMapping (_, used) pat aux (Screma w arrs form)
         (pat', ses', ts') =
           unzip3 $
             filter isUsed $
-              zip3 (patElements pat) ses $ lambdaReturnType fun
+              zip3 (patElems pat) ses $ lambdaReturnType fun
         fun' =
           fun
             { lambdaBody = (lambdaBody fun) {bodyResult = ses'},
@@ -550,7 +550,7 @@ removeDeadReduction :: BottomUpRuleOp (Wise SOACS)
 removeDeadReduction (_, used) pat aux (Screma w arrs form)
   | Just ([Reduce comm redlam nes], maplam) <- isRedomapSOAC form,
     not $ all (`UT.used` used) $ patNames pat, -- Quick/cheap check
-    let (red_pes, map_pes) = splitAt (length nes) $ patElements pat,
+    let (red_pes, map_pes) = splitAt (length nes) $ patElems pat,
     let redlam_deps = dataDependencies $ lambdaBody redlam,
     let redlam_res = bodyResult $ lambdaBody redlam,
     let redlam_params = lambdaParams redlam,
@@ -589,7 +589,7 @@ removeDeadWrite (_, used) pat aux (Scatter w fun arrs dests) =
       (pat', i_ses', v_ses', i_ts', v_ts', dests') =
         unzip6 $
           filter isUsed $
-            zip6 (patElements pat) i_ses v_ses i_ts v_ts dests
+            zip6 (patElems pat) i_ses v_ses i_ts v_ts dests
       fun' =
         fun
           { lambdaBody = (lambdaBody fun) {bodyResult = concat i_ses' ++ v_ses'},
@@ -675,7 +675,7 @@ simplifyKnownIterationSOAC _ pat _ op
         (Scan scan_lam scan_nes) = singleScan scans
         (scan_pes, red_pes, map_pes) =
           splitAt3 (length scan_nes) (length red_nes) $
-            patElements pat
+            patElems pat
         bindMapParam p a = do
           a_t <- lookupType a
           letBindNames [paramName p] $
@@ -844,7 +844,7 @@ simplifyMapIota vtable pat aux (Screma w arrs (ScremaForm scan reduce map_lam))
         zeroIsh o && oneIsh s
       _ -> False
 
-    indexesWith v (ArrayIndexing cs arr (DimFix (Var i) : _))
+    indexesWith v (ArrayIndexing cs arr (Slice (DimFix (Var i) : _)))
       | arr `ST.elem` vtable,
         all (`ST.elem` vtable) $ unCerts cs =
         i == v
@@ -857,16 +857,13 @@ simplifyMapIota vtable pat aux (Screma w arrs (ScremaForm scan reduce map_lam))
         if arraySize 0 arr_t == w
           then return arr
           else
-            certifying cs $
-              letExp (baseString arr ++ "_prefix") $
-                BasicOp $
-                  Index arr $
-                    fullSlice arr_t [DimSlice (intConst Int64 0) w (intConst Int64 1)]
+            certifying cs . letExp (baseString arr ++ "_prefix") . BasicOp . Index arr $
+              fullSlice arr_t [DimSlice (intConst Int64 0) w (intConst Int64 1)]
       return $
         Just
           ( arr',
             Param arr_elem (rowType arr_t),
-            ArrayIndexing cs arr_elem (drop 1 slice)
+            ArrayIndexing cs arr_elem (Slice (drop 1 (unSlice slice)))
           )
     mapOverArr _ = return Nothing
 simplifyMapIota _ _ _ _ = Skip
@@ -930,8 +927,8 @@ moveTransformToInput vtable pat aux (Screma w arrs (ScremaForm scan reduce map_l
         arr_transformed <- certifying (arrayOpCerts op) $
           letExp (baseString arr ++ "_transformed") $
             case op of
-              ArrayIndexing _ _ slice ->
-                BasicOp $ Index arr $ whole_dim : slice
+              ArrayIndexing _ _ (Slice slice) ->
+                BasicOp $ Index arr $ Slice $ whole_dim : slice
               ArrayRearrange _ _ perm ->
                 BasicOp $ Rearrange (0 : map (+ 1) perm) arr
               ArrayRotate _ _ rots ->

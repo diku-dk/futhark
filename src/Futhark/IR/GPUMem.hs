@@ -14,13 +14,13 @@ module Futhark.IR.GPUMem
 
     -- * Module re-exports
     module Futhark.IR.Mem,
-    module Futhark.IR.GPU.Kernel,
+    module Futhark.IR.GPU.Op,
   )
 where
 
 import Futhark.Analysis.PrimExp.Convert
 import qualified Futhark.Analysis.UsageTable as UT
-import Futhark.IR.GPU.Kernel
+import Futhark.IR.GPU.Op
 import Futhark.IR.GPU.Simplify (simplifyKernelOp)
 import Futhark.IR.Mem
 import Futhark.IR.Mem.Simplify

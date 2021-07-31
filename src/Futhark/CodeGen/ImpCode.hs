@@ -70,7 +70,7 @@ import Futhark.IR.GPU.Sizes (Count (..))
 import Futhark.IR.Pretty ()
 import Futhark.IR.Primitive
 import Futhark.IR.Prop.Names
-import Futhark.IR.Syntax
+import Futhark.IR.Syntax.Core
   ( ErrorMsg (..),
     ErrorMsgPart (..),
     Space (..),
@@ -105,6 +105,9 @@ data Definitions a = Definitions
   }
   deriving (Show)
 
+instance Functor Definitions where
+  fmap f (Definitions consts funs) = Definitions (fmap f consts) (fmap f funs)
+
 -- | A collection of imperative functions.
 newtype Functions a = Functions [(Name, Function a)]
   deriving (Show)
@@ -124,6 +127,9 @@ data Constants a = Constants
     constsInit :: Code a
   }
   deriving (Show)
+
+instance Functor Constants where
+  fmap f (Constants params code) = Constants params (fmap f code)
 
 -- | Since the core language does not care for signedness, but the
 -- source language does, entry point input/output information has
@@ -264,6 +270,9 @@ data Code a
     -- debugging.  Code generators are free to ignore this
     -- statement.
     DebugPrint String (Maybe Exp)
+  | -- | Log the given message, *without* a trailing linebreak (unless
+    -- part of the mssage).
+    TracePrint (ErrorMsg Exp)
   | -- | Perform an extensible operation.
     Op a
   deriving (Show)
@@ -519,6 +528,8 @@ instance Pretty op => Pretty (Code op) where
     text "debug" <+> parens (commasep [text (show desc), ppr e])
   ppr (DebugPrint desc Nothing) =
     text "debug" <+> parens (text (show desc))
+  ppr (TracePrint msg) =
+    text "trace" <+> parens (ppr msg)
 
 instance Pretty Arg where
   ppr (MemArg m) = ppr m
@@ -601,6 +612,8 @@ instance Traversable Code where
     Comment s <$> traverse f code
   traverse _ (DebugPrint s v) =
     pure $ DebugPrint s v
+  traverse _ (TracePrint msg) =
+    pure $ TracePrint msg
 
 -- | The names declared with 'DeclareMem', 'DeclareScalar', and
 -- 'DeclareArray' in the given code.
@@ -672,6 +685,8 @@ instance FreeIn a => FreeIn (Code a) where
     freeIn' code
   freeIn' (DebugPrint _ v) =
     maybe mempty freeIn' v
+  freeIn' (TracePrint msg) =
+    foldMap freeIn' msg
 
 instance FreeIn ExpLeaf where
   freeIn' (Index v e _ _ _) = freeIn' v <> freeIn' e

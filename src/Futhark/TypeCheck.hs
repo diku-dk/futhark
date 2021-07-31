@@ -803,7 +803,7 @@ checkBody (Body (_, rep) bnds res) = do
 checkBasicOp :: Checkable rep => BasicOp -> TypeM rep ()
 checkBasicOp (SubExp es) =
   void $ checkSubExp es
-checkBasicOp (Opaque es) =
+checkBasicOp (Opaque _ es) =
   void $ checkSubExp es
 checkBasicOp (ArrayLit [] _) =
   return ()
@@ -827,13 +827,13 @@ checkBasicOp (UnOp op e) = require [Prim $ unOpType op] e
 checkBasicOp (BinOp op e1 e2) = checkBinOpArgs (binOpType op) e1 e2
 checkBasicOp (CmpOp op e1 e2) = checkCmpOp op e1 e2
 checkBasicOp (ConvOp op e) = require [Prim $ fst $ convOpType op] e
-checkBasicOp (Index ident idxes) = do
+checkBasicOp (Index ident (Slice idxes)) = do
   vt <- lookupType ident
   observe ident
   when (arrayRank vt /= length idxes) $
     bad $ SlicingError (arrayRank vt) (length idxes)
   mapM_ checkDimIndex idxes
-checkBasicOp (Update _ src idxes se) = do
+checkBasicOp (Update _ src (Slice idxes) se) = do
   src_t <- checkArrIdent src
   when (arrayRank src_t /= length idxes) $
     bad $ SlicingError (arrayRank src_t) (length idxes)
@@ -843,7 +843,25 @@ checkBasicOp (Update _ src idxes se) = do
     bad $ TypeError "The target of an Update must not alias the value to be written."
 
   mapM_ checkDimIndex idxes
-  require [arrayOf (Prim (elemType src_t)) (Shape (sliceDims idxes)) NoUniqueness] se
+  require [arrayOf (Prim (elemType src_t)) (Shape (sliceDims (Slice idxes))) NoUniqueness] se
+  consume =<< lookupAliases src
+checkBasicOp (FlatIndex ident slice) = do
+  vt <- lookupType ident
+  observe ident
+  when (arrayRank vt /= 1) $
+    bad $ SlicingError (arrayRank vt) 1
+  checkFlatSlice slice
+checkBasicOp (FlatUpdate src slice v) = do
+  src_t <- checkArrIdent src
+  when (arrayRank src_t /= 1) $
+    bad $ SlicingError (arrayRank src_t) 1
+
+  v_aliases <- lookupAliases v
+  when (src `nameIn` v_aliases) $
+    bad $ TypeError "The target of an Update must not alias the value to be written."
+
+  checkFlatSlice slice
+  requireI [arrayOf (Prim (elemType src_t)) (Shape (flatSliceDims slice)) NoUniqueness] v
   consume =<< lookupAliases src
 checkBasicOp (Iota e x s et) = do
   require [Prim int64] e
@@ -916,8 +934,7 @@ checkBasicOp (Assert e (ErrorMsg parts) _) = do
   mapM_ checkPart parts
   where
     checkPart ErrorString {} = return ()
-    checkPart (ErrorInt32 x) = require [Prim int32] x
-    checkPart (ErrorInt64 x) = require [Prim int64] x
+    checkPart (ErrorVal t x) = require [Prim t] x
 checkBasicOp (UpdateAcc acc is ses) = do
   (shape, ts) <- checkAccIdent acc
 
@@ -1204,6 +1221,20 @@ checkPatElem (PatElem name dec) =
   context ("When checking pattern element " ++ pretty name) $
     checkLetBoundDec name dec
 
+checkFlatDimIndex ::
+  Checkable rep =>
+  FlatDimIndex SubExp ->
+  TypeM rep ()
+checkFlatDimIndex (FlatDimIndex n s) = mapM_ (require [Prim int64]) [n, s]
+
+checkFlatSlice ::
+  Checkable rep =>
+  FlatSlice SubExp ->
+  TypeM rep ()
+checkFlatSlice (FlatSlice offset idxs) = do
+  require [Prim int64] offset
+  mapM_ checkFlatDimIndex idxs
+
 checkDimIndex ::
   Checkable rep =>
   DimIndex SubExp ->
@@ -1222,7 +1253,7 @@ checkStm stm@(Let pat (StmAux (Certs cs) _ (_, dec)) e) m = do
   context ("When matching\n" ++ message "  " pat ++ "\nwith\n" ++ message "  " e) $
     matchPat pat e
   binding (maybeWithoutAliases $ scopeOf stm) $ do
-    mapM_ checkPatElem (patElements $ removePatAliases pat)
+    mapM_ checkPatElem (patElems $ removePatAliases pat)
     m
   where
     -- FIXME: this is wrong.  However, the core language type system

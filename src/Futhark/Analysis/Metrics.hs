@@ -118,7 +118,7 @@ expMetrics (Op op) =
 
 primOpMetrics :: BasicOp -> MetricsM ()
 primOpMetrics (SubExp _) = seen "SubExp"
-primOpMetrics (Opaque _) = seen "Opaque"
+primOpMetrics (Opaque _ _) = seen "Opaque"
 primOpMetrics ArrayLit {} = seen "ArrayLit"
 primOpMetrics BinOp {} = seen "BinOp"
 primOpMetrics UnOp {} = seen "UnOp"
@@ -127,6 +127,8 @@ primOpMetrics CmpOp {} = seen "ConvOp"
 primOpMetrics Assert {} = seen "Assert"
 primOpMetrics Index {} = seen "Index"
 primOpMetrics Update {} = seen "Update"
+primOpMetrics FlatIndex {} = seen "FlatIndex"
+primOpMetrics FlatUpdate {} = seen "FlatUpdate"
 primOpMetrics Concat {} = seen "Concat"
 primOpMetrics Copy {} = seen "Copy"
 primOpMetrics Manifest {} = seen "Manifest"

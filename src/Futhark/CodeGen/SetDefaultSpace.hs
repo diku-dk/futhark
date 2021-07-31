@@ -4,6 +4,7 @@
 -- assumes that 'DefaultSpace' is CPU memory.
 module Futhark.CodeGen.SetDefaultSpace
   ( setDefaultSpace,
+    setDefaultCodeSpace,
   )
 where
 
@@ -14,12 +15,16 @@ import Futhark.CodeGen.ImpCode
 setDefaultSpace :: Space -> Definitions op -> Definitions op
 setDefaultSpace space (Definitions (Constants ps consts) (Functions fundecs)) =
   Definitions
-    (Constants (map (setParamSpace space) ps) (setBodySpace space consts))
+    (Constants (map (setParamSpace space) ps) (setCodeSpace space consts))
     ( Functions
         [ (fname, setFunctionSpace space func)
           | (fname, func) <- fundecs
         ]
     )
+
+-- | Like 'setDefaultSpace', but for 'Code'.
+setDefaultCodeSpace :: Space -> Code op -> Code op
+setDefaultCodeSpace = setCodeSpace
 
 setFunctionSpace :: Space -> Function op -> Function op
 setFunctionSpace space (Function entry outputs inputs body results args) =
@@ -27,7 +32,7 @@ setFunctionSpace space (Function entry outputs inputs body results args) =
     entry
     (map (setParamSpace space) outputs)
     (map (setParamSpace space) inputs)
-    (setBodySpace space body)
+    (setCodeSpace space body)
     (map (setExtValueSpace space) results)
     (map (setExtValueSpace space) args)
 
@@ -49,16 +54,16 @@ setValueSpace space (ArrayValue mem _ bt ept shape) =
 setValueSpace _ (ScalarValue bt ept v) =
   ScalarValue bt ept v
 
-setBodySpace :: Space -> Code op -> Code op
-setBodySpace space (Allocate v e old_space) =
+setCodeSpace :: Space -> Code op -> Code op
+setCodeSpace space (Allocate v e old_space) =
   Allocate v (fmap (setTExpSpace space) e) $ setSpace space old_space
-setBodySpace space (Free v old_space) =
+setCodeSpace space (Free v old_space) =
   Free v $ setSpace space old_space
-setBodySpace space (DeclareMem name old_space) =
+setCodeSpace space (DeclareMem name old_space) =
   DeclareMem name $ setSpace space old_space
-setBodySpace space (DeclareArray name _ t vs) =
+setCodeSpace space (DeclareArray name _ t vs) =
   DeclareArray name space t vs
-setBodySpace space (Copy dest dest_offset dest_space src src_offset src_space n) =
+setCodeSpace space (Copy dest dest_offset dest_space src src_offset src_space n) =
   Copy
     dest
     (fmap (setTExpSpace space) dest_offset)
@@ -70,7 +75,7 @@ setBodySpace space (Copy dest dest_offset dest_space src src_offset src_space n)
   where
     dest_space' = setSpace space dest_space
     src_space' = setSpace space src_space
-setBodySpace space (Write dest dest_offset bt dest_space vol e) =
+setCodeSpace space (Write dest dest_offset bt dest_space vol e) =
   Write
     dest
     (fmap (setTExpSpace space) dest_offset)
@@ -78,34 +83,36 @@ setBodySpace space (Write dest dest_offset bt dest_space vol e) =
     (setSpace space dest_space)
     vol
     (setExpSpace space e)
-setBodySpace space (c1 :>>: c2) =
-  setBodySpace space c1 :>>: setBodySpace space c2
-setBodySpace space (For i e body) =
-  For i (setExpSpace space e) $ setBodySpace space body
-setBodySpace space (While e body) =
-  While (setTExpSpace space e) $ setBodySpace space body
-setBodySpace space (If e c1 c2) =
-  If (setTExpSpace space e) (setBodySpace space c1) (setBodySpace space c2)
-setBodySpace space (Comment s c) =
-  Comment s $ setBodySpace space c
-setBodySpace _ Skip =
+setCodeSpace space (c1 :>>: c2) =
+  setCodeSpace space c1 :>>: setCodeSpace space c2
+setCodeSpace space (For i e body) =
+  For i (setExpSpace space e) $ setCodeSpace space body
+setCodeSpace space (While e body) =
+  While (setTExpSpace space e) $ setCodeSpace space body
+setCodeSpace space (If e c1 c2) =
+  If (setTExpSpace space e) (setCodeSpace space c1) (setCodeSpace space c2)
+setCodeSpace space (Comment s c) =
+  Comment s $ setCodeSpace space c
+setCodeSpace _ Skip =
   Skip
-setBodySpace _ (DeclareScalar name vol bt) =
+setCodeSpace _ (DeclareScalar name vol bt) =
   DeclareScalar name vol bt
-setBodySpace space (SetScalar name e) =
+setCodeSpace space (SetScalar name e) =
   SetScalar name $ setExpSpace space e
-setBodySpace space (SetMem to from old_space) =
+setCodeSpace space (SetMem to from old_space) =
   SetMem to from $ setSpace space old_space
-setBodySpace space (Call dests fname args) =
+setCodeSpace space (Call dests fname args) =
   Call dests fname $ map setArgSpace args
   where
     setArgSpace (MemArg m) = MemArg m
     setArgSpace (ExpArg e) = ExpArg $ setExpSpace space e
-setBodySpace space (Assert e msg loc) =
-  Assert (setExpSpace space e) msg loc
-setBodySpace space (DebugPrint s v) =
+setCodeSpace space (Assert e msg loc) =
+  Assert (setExpSpace space e) (fmap (setExpSpace space) msg) loc
+setCodeSpace space (DebugPrint s v) =
   DebugPrint s $ fmap (setExpSpace space) v
-setBodySpace _ (Op op) =
+setCodeSpace space (TracePrint msg) =
+  TracePrint $ fmap (setExpSpace space) msg
+setCodeSpace _ (Op op) =
   Op op
 
 setExpSpace :: Space -> Exp -> Exp

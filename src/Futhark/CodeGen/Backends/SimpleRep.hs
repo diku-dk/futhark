@@ -88,7 +88,7 @@ funName' = funName . nameFromString
 
 -- | The type of memory blocks in the default memory space.
 defaultMemBlockType :: C.Type
-defaultMemBlockType = [C.cty|char*|]
+defaultMemBlockType = [C.cty|unsigned char*|]
 
 -- | The name of exposed array type structs.
 arrayName :: PrimType -> Signedness -> Int -> String
@@ -182,6 +182,7 @@ instance C.ToExp SubExp where
 
 cIntOps :: [C.Definition]
 cIntOps =
+  [C.cedecl|$esc:("#define parens(x) (x)")|] :
   concatMap (`map` [minBound .. maxBound]) ops
     ++ cIntPrimFuns
   where
@@ -293,7 +294,7 @@ cIntOps =
       [C.cedecl|$esc:("#define " ++ name ++ "(x) (" ++ prettyOneLine rhs ++ ")")|]
 
     mkPow t =
-      let ct = intTypeToCType t
+      let ct = uintTypeToCType t -- To make overflow well-defined.
        in [C.cedecl|static inline $ty:ct $id:(taggedI "pow" t)($ty:ct x, $ty:ct y) {
                          $ty:ct res = 1, rem = y;
                          while (rem != 0) {
@@ -306,13 +307,13 @@ cIntOps =
                          return res;
               }|]
 
-    mkSExt from_t to_t = macro name [C.cexp|($ty:to_ct)(($ty:from_ct)x)|]
+    mkSExt from_t to_t = macro name [C.cexp|($ty:to_ct)(($ty:from_ct)parens(x))|]
       where
         name = "sext_" ++ pretty from_t ++ "_" ++ pretty to_t
         from_ct = intTypeToCType from_t
         to_ct = intTypeToCType to_t
 
-    mkZExt from_t to_t = macro name [C.cexp|($ty:to_ct)(($ty:from_ct)x)|]
+    mkZExt from_t to_t = macro name [C.cexp|($ty:to_ct)(($ty:from_ct)parens(x))|]
       where
         name = "zext_" ++ pretty from_t ++ "_" ++ pretty to_t
         from_ct = uintTypeToCType from_t
@@ -354,6 +355,25 @@ cIntOps =
 cIntPrimFuns :: [C.Definition]
 cIntPrimFuns =
   [C.cunit|
+   static typename int8_t abs8(typename int8_t x) {
+     return abs(x);
+   }
+   static typename int16_t abs16(typename int16_t x) {
+     return abs(x);
+   }
+   static typename int32_t abs32(typename int32_t x) {
+     return abs(x);
+   }
+$esc:("#if defined(__OPENCL_VERSION__)")
+   static typename int64_t abs64(typename int64_t x) {
+     return abs(x);
+   }
+$esc:("#else")
+   static typename int64_t abs64(typename int64_t x) {
+     return llabs(x);
+   }
+$esc:("#endif")
+
 $esc:("#if defined(__OPENCL_VERSION__)")
    static typename int32_t $id:(funName' "popc8") (typename int8_t x) {
       return popcount(x);
@@ -381,28 +401,28 @@ $esc:("#elif defined(__CUDA_ARCH__)")
       return __popcll(x);
    }
 $esc:("#else")
-   static typename int32_t $id:(funName' "popc8") (typename int8_t x) {
+   static typename int32_t $id:(funName' "popc8") (typename uint8_t x) {
      int c = 0;
      for (; x; ++c) {
        x &= x - 1;
      }
      return c;
     }
-   static typename int32_t $id:(funName' "popc16") (typename int16_t x) {
+   static typename int32_t $id:(funName' "popc16") (typename uint16_t x) {
      int c = 0;
      for (; x; ++c) {
        x &= x - 1;
      }
      return c;
    }
-   static typename int32_t $id:(funName' "popc32") (typename int32_t x) {
+   static typename int32_t $id:(funName' "popc32") (typename uint32_t x) {
      int c = 0;
      for (; x; ++c) {
        x &= x - 1;
      }
      return c;
    }
-   static typename int32_t $id:(funName' "popc64") (typename int64_t x) {
+   static typename int32_t $id:(funName' "popc64") (typename uint64_t x) {
      int c = 0;
      for (; x; ++c) {
        x &= x - 1;
@@ -457,11 +477,25 @@ $esc:("#else")
      typename uint64_t bb = b;
      return (aa * bb) >> 32;
     }
-   static typename uint64_t $id:(funName' "mul_hi64") (typename uint64_t a, typename uint64_t b) {
-     typename __uint128_t aa = a;
-     typename __uint128_t bb = b;
-     return (aa * bb) >> 64;
-    }
+   $esc:("#ifdef __EMSCRIPTEN__")
+      static typename uint64_t $id:(funName' "mul_hi64") (typename uint64_t x, typename uint64_t y) {
+        typename uint64_t a = x >> 32, b = x & 0xffffffff;
+        typename uint64_t c = y >> 32, d = y & 0xffffffff;
+        typename uint64_t ac = a * c;
+        typename uint64_t bc = b * c;
+        typename uint64_t ad = a * d;
+        typename uint64_t bd = b * d;
+        typename uint64_t mid34 = (bd >> 32) + (bc & 0xffffffff) + (ad & 0xffffffff);
+        typename uint64_t upper64 = ac + (bc >> 32) + (ad >> 32) + (mid34 >> 32);
+        return upper64;
+       }
+   $esc:("#else")
+      static typename uint64_t $id:(funName' "mul_hi64") (typename uint64_t a, typename uint64_t b) {
+        typename __uint128_t aa = a;
+        typename __uint128_t bb = b;
+        return (aa * bb) >> 64;
+       }
+   $esc:("#endif")
 $esc:("#endif")
 
 $esc:("#if defined(__OPENCL_VERSION__)")
@@ -521,44 +555,27 @@ $esc:("#elif defined(__CUDA_ARCH__)")
    }
 $esc:("#else")
    static typename int32_t $id:(funName' "clz8") (typename int8_t x) {
-    int n = 0;
-    int bits = sizeof(x) * 8;
-    for (int i = 0; i < bits; i++) {
-        if (x < 0) break;
-        n++;
-        x <<= 1;
-    }
-    return n;
+     return x == 0 ? 8 : __builtin_clz(zext_i8_i32(x))-24;
    }
    static typename int32_t $id:(funName' "clz16") (typename int16_t x) {
-    int n = 0;
-    int bits = sizeof(x) * 8;
-    for (int i = 0; i < bits; i++) {
-        if (x < 0) break;
-        n++;
-        x <<= 1;
-    }
-    return n;
+     return x == 0 ? 16 : __builtin_clz(zext_i16_i32(x))-16;
    }
    static typename int32_t $id:(funName' "clz32") (typename int32_t x) {
-    int n = 0;
-    int bits = sizeof(x) * 8;
-    for (int i = 0; i < bits; i++) {
-        if (x < 0) break;
-        n++;
-        x <<= 1;
-    }
-    return n;
+     return x == 0 ? 32 : __builtin_clz(zext_i32_i32(x));
    }
    static typename int32_t $id:(funName' "clz64") (typename int64_t x) {
-    int n = 0;
-    int bits = sizeof(x) * 8;
-    for (int i = 0; i < bits; i++) {
-        if (x < 0) break;
-        n++;
-        x <<= 1;
-    }
-    return n;
+     typename int32_t firsthalf = zext_i64_i32(x>>32L);
+     typename int32_t secondhalf = zext_i64_i32(x);
+     if (x == 0) {
+       return 64;
+     } else {
+       int firsthalf_clz = firsthalf == 0 ? 32 : __builtin_clz(firsthalf);
+       if (firsthalf_clz == 32) {
+         return 32 + __builtin_clz(secondhalf);
+       } else {
+         return firsthalf_clz;
+       }
+     }
    }
 $esc:("#endif")
 
@@ -635,7 +652,7 @@ cFloatConvOps :: [C.Definition]
     convOp s from to = s ++ "_" ++ pretty from ++ "_" ++ pretty to
 
     mkOps =
-      [mkFDiv, mkFAdd, mkFSub, mkFMul, mkFMin, mkFMax, mkPow, mkCmpLt, mkCmpLe]
+      [mkFDiv, mkFAdd, mkFSub, mkFMul, mkCmpLt, mkCmpLe]
         ++ map (mkFPConvIF "sitofp") [minBound .. maxBound]
         ++ map (mkFPConvUF "uitofp") [minBound .. maxBound]
         ++ map (flip $ mkFPConvFI "fptosi") [minBound .. maxBound]
@@ -645,15 +662,8 @@ cFloatConvOps :: [C.Definition]
     mkFAdd = simpleFloatOp "fadd" [C.cexp|x + y|]
     mkFSub = simpleFloatOp "fsub" [C.cexp|x - y|]
     mkFMul = simpleFloatOp "fmul" [C.cexp|x * y|]
-    mkFMin = simpleFloatOp "fmin" [C.cexp|fmin(x, y)|]
-    mkFMax = simpleFloatOp "fmax" [C.cexp|fmax(x, y)|]
     mkCmpLt = floatCmpOp "cmplt" [C.cexp|x < y|]
     mkCmpLe = floatCmpOp "cmple" [C.cexp|x <= y|]
-
-    mkPow Float32 =
-      [C.cedecl|static inline float fpow32(float x, float y) { return pow(x, y); }|]
-    mkPow Float64 =
-      [C.cedecl|static inline double fpow64(double x, double y) { return pow(x, y); }|]
 
     mkFPConv from_f to_f s from_t to_t =
       [C.cedecl|static inline $ty:to_ct
@@ -680,6 +690,34 @@ cFloatConvOps :: [C.Definition]
 cFloat32Funs :: [C.Definition]
 cFloat32Funs =
   [C.cunit|
+$esc:("#ifdef __OPENCL_VERSION__")
+    static inline float fabs32(float x) {
+      return fabs(x);
+    }
+    static inline float fmax32(float x, float y) {
+      return fmax(x, y);
+    }
+    static inline float fmin32(float x, float y) {
+      return fmin(x, y);
+    }
+    static inline float fpow32(float x, float y) {
+      return pow(x, y);
+    }
+$esc:("#else")
+    static inline float fabs32(float x) {
+      return fabsf(x);
+    }
+    static inline float fmax32(float x, float y) {
+      return fmaxf(x, y);
+    }
+    static inline float fmin32(float x, float y) {
+      return fminf(x, y);
+    }
+    static inline float fpow32(float x, float y) {
+      return powf(x, y);
+    }
+$esc:("#endif")
+
     static inline typename bool $id:(funName' "isnan32")(float x) {
       return isnan(x);
     }
@@ -927,6 +965,22 @@ $esc:("#endif")
 cFloat64Funs :: [C.Definition]
 cFloat64Funs =
   [C.cunit|
+    static inline double fabs64(double x) {
+      return fabs(x);
+    }
+
+    static inline float fmax64(double x, double y) {
+      return fmax(x, y);
+    }
+
+    static inline float fmin64(double x, double y) {
+      return fmin(x, y);
+    }
+
+    static inline double fpow64(double x, double y) {
+      return pow(x, y);
+    }
+
     static inline double $id:(funName' "log64")(double x) {
       return log(x);
     }

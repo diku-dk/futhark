@@ -2,7 +2,6 @@
 module Futhark.Util.Console
   ( color,
     inRed,
-    inGreen,
     inBold,
   )
 where
@@ -16,10 +15,6 @@ color sgr s = setSGRCode sgr ++ s ++ setSGRCode [Reset]
 -- | Make the string red.
 inRed :: String -> String
 inRed s = setSGRCode [SetColor Foreground Vivid Red] ++ s ++ setSGRCode [Reset]
-
--- | Make the string green.
-inGreen :: String -> String
-inGreen s = setSGRCode [SetColor Foreground Vivid Red] ++ s ++ setSGRCode [Reset]
 
 -- | Make the string bold.
 inBold :: String -> String

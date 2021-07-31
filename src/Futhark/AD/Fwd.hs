@@ -205,9 +205,9 @@ basicFwd pat aux op = do
     SubExp se -> do
       se_tan <- tangent se
       addStm $ Let pat_tan aux $ BasicOp $ SubExp se_tan
-    Opaque se -> do
+    Opaque op se -> do
       se_tan <- tangent se
-      addStm $ Let pat_tan aux $ BasicOp $ Opaque se_tan
+      addStm $ Let pat_tan aux $ BasicOp $ Opaque op se_tan
     ArrayLit ses t -> do
       ses_tan <- tangent ses
       addStm $ Let pat_tan aux $ BasicOp $ ArrayLit ses_tan t

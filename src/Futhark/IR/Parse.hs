@@ -24,7 +24,7 @@ import Data.Void
 import Futhark.Analysis.PrimExp.Parse
 import Futhark.IR
 import Futhark.IR.GPU (GPU)
-import qualified Futhark.IR.GPU.Kernel as Kernel
+import qualified Futhark.IR.GPU.Op as GPU
 import Futhark.IR.GPUMem (GPUMem)
 import Futhark.IR.MC (MC)
 import qualified Futhark.IR.MC.Op as MC
@@ -194,20 +194,27 @@ pDimIndex =
     ]
 
 pSlice :: Parser (Slice SubExp)
-pSlice = brackets $ pDimIndex `sepBy` pComma
+pSlice = Slice <$> brackets (pDimIndex `sepBy` pComma)
 
 pIndex :: Parser BasicOp
 pIndex = try $ Index <$> pVName <*> pSlice
+
+pFlatDimIndex :: Parser (FlatDimIndex SubExp)
+pFlatDimIndex =
+  FlatDimIndex <$> pSubExp <* lexeme ":" <*> pSubExp
+
+pFlatSlice :: Parser (FlatSlice SubExp)
+pFlatSlice =
+  brackets $ FlatSlice <$> pSubExp <* pSemi <*> (pFlatDimIndex `sepBy` pComma)
+
+pFlatIndex :: Parser BasicOp
+pFlatIndex = try $ FlatIndex <$> pVName <*> pFlatSlice
 
 pErrorMsgPart :: Parser (ErrorMsgPart SubExp)
 pErrorMsgPart =
   choice
     [ ErrorString <$> pStringLiteral,
-      flip ($) <$> (pSubExp <* pColon)
-        <*> choice
-          [ keyword "i32" $> ErrorInt32,
-            keyword "i64" $> ErrorInt64
-          ]
+      flip ErrorVal <$> (pSubExp <* pColon) <*> pPrimType
     ]
 
 pErrorMsg :: Parser (ErrorMsg SubExp)
@@ -245,7 +252,9 @@ pIota =
 pBasicOp :: Parser BasicOp
 pBasicOp =
   choice
-    [ keyword "opaque" $> Opaque <*> parens pSubExp,
+    [ keyword "opaque" $> Opaque OpaqueNil <*> parens pSubExp,
+      keyword "trace" $> uncurry (Opaque . OpaqueTrace)
+        <*> parens ((,) <$> lexeme pStringLiteral <* pComma <*> pSubExp),
       keyword "copy" $> Copy <*> parens pVName,
       keyword "assert"
         *> parens
@@ -280,6 +289,11 @@ pBasicOp =
           <*> choice [lexeme "?" $> Safe, pure Unsafe]
           <*> pSlice <* lexeme "="
           <*> pSubExp,
+      try $
+        FlatUpdate
+          <$> pVName <* keyword "with"
+          <*> pFlatSlice <* lexeme "="
+          <*> pVName,
       ArrayLit
         <$> brackets (pSubExp `sepBy` pComma)
         <*> (lexeme ":" *> "[]" *> pType),
@@ -298,6 +312,7 @@ pBasicOp =
       pConvOp "btoi" (const BToI) (keyword "bool") pIntType,
       --
       pIndex,
+      pFlatIndex,
       pBinOp,
       pCmpOp,
       pUnOp,
@@ -645,23 +660,23 @@ pSOAC pr =
           <*> braces (pSubExp `sepBy` pComma) <* pComma
           <*> braces (pSubExp `sepBy` pComma)
 
-pSizeClass :: Parser Kernel.SizeClass
+pSizeClass :: Parser GPU.SizeClass
 pSizeClass =
   choice
-    [ keyword "group_size" $> Kernel.SizeGroup,
-      keyword "num_groups" $> Kernel.SizeNumGroups,
-      keyword "num_groups" $> Kernel.SizeNumGroups,
-      keyword "tile_size" $> Kernel.SizeTile,
-      keyword "reg_tile_size" $> Kernel.SizeRegTile,
-      keyword "local_memory" $> Kernel.SizeLocalMemory,
+    [ keyword "group_size" $> GPU.SizeGroup,
+      keyword "num_groups" $> GPU.SizeNumGroups,
+      keyword "num_groups" $> GPU.SizeNumGroups,
+      keyword "tile_size" $> GPU.SizeTile,
+      keyword "reg_tile_size" $> GPU.SizeRegTile,
+      keyword "local_memory" $> GPU.SizeLocalMemory,
       keyword "threshold"
         *> parens
-          ( flip Kernel.SizeThreshold
+          ( flip GPU.SizeThreshold
               <$> choice [Just <$> pInt64, "def" $> Nothing] <* pComma
               <*> pKernelPath
           ),
       keyword "bespoke"
-        *> parens (Kernel.SizeBespoke <$> pName <* pComma <*> pInt64)
+        *> parens (GPU.SizeBespoke <$> pName <* pComma <*> pInt64)
     ]
   where
     pKernelPath = many pStep
@@ -671,33 +686,33 @@ pSizeClass =
           (,) <$> pName <*> pure True
         ]
 
-pSizeOp :: Parser Kernel.SizeOp
+pSizeOp :: Parser GPU.SizeOp
 pSizeOp =
   choice
     [ keyword "get_size"
-        *> parens (Kernel.GetSize <$> pName <* pComma <*> pSizeClass),
+        *> parens (GPU.GetSize <$> pName <* pComma <*> pSizeClass),
       keyword "get_size_max"
-        *> parens (Kernel.GetSizeMax <$> pSizeClass),
+        *> parens (GPU.GetSizeMax <$> pSizeClass),
       keyword "cmp_size"
-        *> ( parens (Kernel.CmpSizeLe <$> pName <* pComma <*> pSizeClass)
+        *> ( parens (GPU.CmpSizeLe <$> pName <* pComma <*> pSizeClass)
                <*> (lexeme "<=" *> pSubExp)
            ),
       keyword "calc_num_groups"
         *> parens
-          ( Kernel.CalcNumGroups
+          ( GPU.CalcNumGroups
               <$> pSubExp <* pComma <*> pName <* pComma <*> pSubExp
           ),
       keyword "split_space"
         *> parens
-          ( Kernel.SplitSpace Kernel.SplitContiguous
+          ( GPU.SplitSpace GPU.SplitContiguous
               <$> pSubExp <* pComma
               <*> pSubExp <* pComma
               <*> pSubExp
           ),
       keyword "split_space_strided"
         *> parens
-          ( Kernel.SplitSpace
-              <$> (Kernel.SplitStrided <$> pSubExp) <* pComma
+          ( GPU.SplitSpace
+              <$> (GPU.SplitStrided <$> pSubExp) <* pComma
               <*> pSubExp <* pComma
               <*> pSubExp <* pComma
               <*> pSubExp
@@ -804,15 +819,15 @@ pSegOp pr pLvl =
     pSegScan = pSegOp' SegOp.SegScan pSegBinOp
     pSegHist = pSegOp' SegOp.SegHist pHistOp
 
-pSegLevel :: Parser Kernel.SegLevel
+pSegLevel :: Parser GPU.SegLevel
 pSegLevel =
   parens $
     choice
-      [ keyword "thread" $> Kernel.SegThread,
-        keyword "group" $> Kernel.SegGroup
+      [ keyword "thread" $> GPU.SegThread,
+        keyword "group" $> GPU.SegGroup
       ]
-      <*> (pSemi *> lexeme "#groups=" $> Kernel.Count <*> pSubExp)
-      <*> (pSemi *> lexeme "groupsize=" $> Kernel.Count <*> pSubExp)
+      <*> (pSemi *> lexeme "#groups=" $> GPU.Count <*> pSubExp)
+      <*> (pSemi *> lexeme "groupsize=" $> GPU.Count <*> pSubExp)
       <*> choice
         [ pSemi
             *> choice
@@ -822,12 +837,12 @@ pSegLevel =
           pure SegOp.SegNoVirt
         ]
 
-pHostOp :: PR rep -> Parser op -> Parser (Kernel.HostOp rep op)
+pHostOp :: PR rep -> Parser op -> Parser (GPU.HostOp rep op)
 pHostOp pr pOther =
   choice
-    [ Kernel.SegOp <$> pSegOp pr pSegLevel,
-      Kernel.SizeOp <$> pSizeOp,
-      Kernel.OtherOp <$> pOther
+    [ GPU.SegOp <$> pSegOp pr pSegLevel,
+      GPU.SizeOp <$> pSizeOp,
+      GPU.OtherOp <$> pOther
     ]
 
 pMCOp :: PR rep -> Parser op -> Parser (MC.MCOp rep op)

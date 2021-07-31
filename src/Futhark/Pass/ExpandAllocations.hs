@@ -101,7 +101,7 @@ transformStm (Let pat aux (If cond tbranch fbranch (IfDec ts IfEquiv))) = do
 
     useBranch b =
       bodyStms b
-        <> stmsFromList (zipWith bindRes (patElements pat) (bodyResult b))
+        <> stmsFromList (zipWith bindRes (patElems pat) (bodyResult b))
 transformStm (Let pat aux e) = do
   (bnds, e') <- transformExp =<< mapExpM transform e
   return $ bnds <> oneStm (Let pat aux e')
@@ -445,13 +445,13 @@ genericExpandedInvariantAllocations getNumUsers invariant_allocs = do
           permuted_ixfun = IxFun.permute root_ixfun perm
           offset_ixfun =
             IxFun.slice permuted_ixfun $
-              map DimFix user_ids ++ map untouched old_shape
+              Slice $ map DimFix user_ids ++ map untouched old_shape
        in offset_ixfun
     newBase user@(SegGroup {}, _) (old_shape, _) =
       let (users_shape, user_ids) = getNumUsers user
           root_ixfun = IxFun.iota $ map pe64 (shapeDims users_shape) ++ old_shape
           offset_ixfun =
-            IxFun.slice root_ixfun $
+            IxFun.slice root_ixfun . Slice $
               map DimFix user_ids ++ map untouched old_shape
        in offset_ixfun
 
@@ -522,11 +522,8 @@ expandedVariantAllocations num_threads kspace kstms variant_allocs = do
             pe64 size_per_thread `quot` primByteSize pt
           root_ixfun = IxFun.iota [elems_per_thread, num_threads']
           offset_ixfun =
-            IxFun.slice
-              root_ixfun
-              [ DimSlice 0 num_threads' 1,
-                DimFix gtid
-              ]
+            IxFun.slice root_ixfun . Slice $
+              [DimSlice 0 num_threads' 1, DimFix gtid]
           shapechange =
             if length old_shape == 1
               then map DimCoercion old_shape
@@ -559,6 +556,11 @@ runOffsetM scope offsets (OffsetM m) =
 askRebaseMap :: OffsetM RebaseMap
 askRebaseMap = OffsetM $ lift ask
 
+localRebaseMap :: (RebaseMap -> RebaseMap) -> OffsetM a -> OffsetM a
+localRebaseMap f (OffsetM m) = OffsetM $ do
+  scope <- ask
+  lift $ local f $ runReaderT m scope
+
 lookupNewBase :: VName -> ([TPrimExp Int64 VName], PrimType) -> OffsetM (Maybe IxFun)
 lookupNewBase name x = do
   offsets <- askRebaseMap
@@ -588,13 +590,13 @@ offsetMemoryInBody (Body dec stms res) = do
 
 offsetMemoryInStm :: Stm GPUMem -> OffsetM (Scope GPUMem, Stm GPUMem)
 offsetMemoryInStm (Let pat dec e) = do
-  pat' <- offsetMemoryInPat pat
-  e' <- localScope (scopeOfPat pat') $ offsetMemoryInExp e
+  e' <- offsetMemoryInExp e
+  pat' <- offsetMemoryInPat pat =<< expReturns e'
   scope <- askScope
   -- Try to recompute the index function.  Fall back to creating rebase
   -- operations with the RebaseMap.
   rts <- runReaderT (expReturns e') scope
-  let pat'' = Pat $ zipWith pick (patElements pat') rts
+  let pat'' = Pat $ zipWith pick (patElems pat') rts
       stm = Let pat'' dec e'
   let scope' = scopeOf stm <> scope
   return (scope', stm)
@@ -616,13 +618,20 @@ offsetMemoryInStm (Let pat dec e) = do
         inst Ext {} = Nothing
         inst (Free x) = return x
 
-offsetMemoryInPat :: Pat GPUMem -> OffsetM (Pat GPUMem)
-offsetMemoryInPat (Pat pes) = do
-  Pat <$> mapM inspectVal pes
+offsetMemoryInPat :: Pat GPUMem -> [ExpReturns] -> OffsetM (Pat GPUMem)
+offsetMemoryInPat (Pat pes) rets = do
+  Pat <$> zipWithM onPE pes rets
   where
-    inspectVal patElem = do
-      new_dec <- offsetMemoryInMemBound $ patElemDec patElem
-      return patElem {patElemDec = new_dec}
+    onPE
+      (PatElem name (MemArray pt shape u (ArrayIn mem _)))
+      (MemArray _ _ _ (Just (ReturnsNewBlock _ _ ixfun))) =
+        pure . PatElem name . MemArray pt shape u . ArrayIn mem $
+          fmap (fmap unExt) ixfun
+    onPE pe _ = do
+      new_dec <- offsetMemoryInMemBound $ patElemDec pe
+      pure pe {patElemDec = new_dec}
+    unExt (Ext i) = patElemName (pes !! i)
+    unExt (Free v) = v
 
 offsetMemoryInParam :: Param (MemBound u) -> OffsetM (Param (MemBound u))
 offsetMemoryInParam fparam = do
@@ -652,12 +661,34 @@ offsetMemoryInLambda lam = inScopeOf lam $ do
   body <- offsetMemoryInBody $ lambdaBody lam
   return $ lam {lambdaBody = body}
 
+-- A loop may have memory parameters, and those memory blocks may
+-- be expanded.  We assume (but do not check - FIXME) that if the
+-- initial value of a loop parameter is an expanded memory block,
+-- then so will the result be.
+offsetMemoryInLoopParams ::
+  [(FParam GPUMem, SubExp)] ->
+  ([(FParam GPUMem, SubExp)] -> OffsetM a) ->
+  OffsetM a
+offsetMemoryInLoopParams merge f = do
+  let (params, args) = unzip merge
+  localRebaseMap extend $ do
+    params' <- mapM offsetMemoryInParam params
+    f $ zip params' args
+  where
+    extend rm = foldl' onParamArg rm merge
+    onParamArg rm (param, Var arg)
+      | Just x <- M.lookup arg rm =
+        M.insert (paramName param) x rm
+    onParamArg rm _ = rm
+
 offsetMemoryInExp :: Exp GPUMem -> OffsetM (Exp GPUMem)
 offsetMemoryInExp (DoLoop merge form body) = do
-  let (params, args) = unzip merge
-  params' <- mapM offsetMemoryInParam params
-  body' <- localScope (scopeOfFParams params' <> scopeOf form) (offsetMemoryInBody body)
-  return $ DoLoop (zip params' args) form body'
+  offsetMemoryInLoopParams merge $ \merge' -> do
+    body' <-
+      localScope
+        (scopeOfFParams (map fst merge') <> scopeOf form)
+        (offsetMemoryInBody body)
+    return $ DoLoop merge' form body'
 offsetMemoryInExp e = mapExpM recurse e
   where
     recurse =

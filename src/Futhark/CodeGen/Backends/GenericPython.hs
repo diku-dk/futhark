@@ -49,6 +49,7 @@ import Control.Monad.Identity
 import Control.Monad.RWS
 import qualified Data.Map as M
 import Data.Maybe
+import qualified Data.Text as T
 import Futhark.CodeGen.Backends.GenericPython.AST
 import Futhark.CodeGen.Backends.GenericPython.Definitions
 import Futhark.CodeGen.Backends.GenericPython.Options
@@ -59,7 +60,7 @@ import Futhark.IR.Prop (isBuiltInFunction, subExpVars)
 import Futhark.IR.Syntax (Space (..))
 import Futhark.MonadFreshNames
 import Futhark.Util (zEncodeString)
-import Futhark.Util.Pretty (pretty)
+import Futhark.Util.Pretty (pretty, prettyText)
 
 -- | A substitute expression compiler, tried before the main
 -- compilation function.
@@ -362,27 +363,24 @@ compileProg ::
   [PyStmt] ->
   [Option] ->
   Imp.Definitions op ->
-  m String
+  m T.Text
 compileProg mode class_name constructor imports defines ops userstate sync options prog = do
   src <- getNameSource
   let prog' = runCompilerM ops src userstate compileProg'
-  return $
-    pretty
-      ( PyProg $
-          imports
-            ++ [ Import "argparse" Nothing,
-                 Assign (Var "sizes") $ Dict []
-               ]
-            ++ defines
-            ++ [ Escape pyValues,
-                 Escape pyFunctions,
-                 Escape pyPanic,
-                 Escape pyTuning,
-                 Escape pyUtility,
-                 Escape pyServer
-               ]
-            ++ prog'
-      )
+  pure . prettyText . PyProg $
+    imports
+      ++ [ Import "argparse" Nothing,
+           Assign (Var "sizes") $ Dict []
+         ]
+      ++ defines
+      ++ [ Escape pyValues,
+           Escape pyFunctions,
+           Escape pyPanic,
+           Escape pyTuning,
+           Escape pyUtility,
+           Escape pyServer
+         ]
+      ++ prog'
   where
     Imp.Definitions consts (Imp.Functions funs) = prog
     compileProg' = withConstantSubsts consts $ do
@@ -1166,8 +1164,20 @@ compileExp = compilePrimExp compileLeaf
       src' <- compileVar src
       return $ simpleCall "indexArray" [src', iexp', Var bt', Var nptype]
 
+errorMsgString :: Imp.ErrorMsg Imp.Exp -> CompilerM op s (String, [PyExp])
+errorMsgString (Imp.ErrorMsg parts) = do
+  let onPart (Imp.ErrorString s) = return ("%s", String s)
+      onPart (Imp.ErrorVal IntType {} x) = ("%d",) <$> compileExp x
+      onPart (Imp.ErrorVal FloatType {} x) = ("%f",) <$> compileExp x
+      onPart (Imp.ErrorVal Imp.Bool x) = ("%r",) <$> compileExp x
+      onPart (Imp.ErrorVal Unit {} x) = ("%r",) <$> compileExp x
+  (formatstrs, formatargs) <- unzip <$> mapM onPart parts
+  pure (mconcat formatstrs, formatargs)
+
 compileCode :: Imp.Code op -> CompilerM op s ()
 compileCode Imp.DebugPrint {} =
+  return ()
+compileCode Imp.TracePrint {} =
   return ()
 compileCode (Imp.Op op) =
   join $ asks envOpCompiler <*> pure op
@@ -1236,18 +1246,15 @@ compileCode (Imp.DeclareArray name _ t vs) = do
 compileCode (Imp.Comment s code) = do
   code' <- collect $ compileCode code
   stm $ Comment s code'
-compileCode (Imp.Assert e (Imp.ErrorMsg parts) (loc, locs)) = do
+compileCode (Imp.Assert e msg (loc, locs)) = do
   e' <- compileExp e
-  let onPart (Imp.ErrorString s) = return ("%s", String s)
-      onPart (Imp.ErrorInt32 x) = ("%d",) <$> compileExp x
-      onPart (Imp.ErrorInt64 x) = ("%d",) <$> compileExp x
-  (formatstrs, formatargs) <- unzip <$> mapM onPart parts
+  (formatstr, formatargs) <- errorMsgString msg
   stm $
     Assert
       e'
       ( BinOp
           "%"
-          (String $ "Error: " ++ concat formatstrs ++ "\n\nBacktrace:\n" ++ stacktrace)
+          (String $ "Error: " ++ formatstr ++ "\n\nBacktrace:\n" ++ stacktrace)
           (Tuple formatargs)
       )
   where

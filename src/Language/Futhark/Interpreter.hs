@@ -69,13 +69,13 @@ data BreakReason
     BreakNaN
 
 data ExtOp a
-  = ExtOpTrace Loc String a
-  | ExtOpBreak BreakReason (NE.NonEmpty StackFrame) a
+  = ExtOpTrace String String a
+  | ExtOpBreak Loc BreakReason (NE.NonEmpty StackFrame) a
   | ExtOpError InterpreterError
 
 instance Functor ExtOp where
   fmap f (ExtOpTrace w s x) = ExtOpTrace w s $ f x
-  fmap f (ExtOpBreak why backtrace x) = ExtOpBreak why backtrace $ f x
+  fmap f (ExtOpBreak w why backtrace x) = ExtOpBreak w why backtrace $ f x
   fmap _ (ExtOpError err) = ExtOpError err
 
 type Stack = [StackFrame]
@@ -455,13 +455,9 @@ bad loc env s = stacking loc env $ do
   ss <- map (locStr . srclocOf) <$> stacktrace
   liftF $ ExtOpError $ InterpreterError $ "Error at\n" ++ prettyStacktrace 0 ss ++ s
 
-trace :: Value -> EvalM ()
-trace v = do
-  -- We take the second-to-top element of the stack, because any
-  -- actual call to 'implicits.trace' is going to be in the trace
-  -- function in the prelude, which is not interesting.
-  top <- fromMaybe noLoc . maybeHead . drop 1 <$> stacktrace
-  liftF $ ExtOpTrace top (prettyOneLine v) ()
+trace :: String -> Value -> EvalM ()
+trace w v = do
+  liftF $ ExtOpTrace w (prettyOneLine v) ()
 
 typeCheckerEnv :: Env -> T.Env
 typeCheckerEnv env =
@@ -477,16 +473,12 @@ typeCheckerEnv env =
           T.envVtable = vtable
         }
 
-break :: EvalM ()
-break = do
-  -- We don't want the env of the function that is calling
-  -- intrinsics.break, since that is just going to be the boring
-  -- wrapper function (intrinsics are never called directly).
-  -- This is why we go a step up the stack.
-  backtrace <- asks $ drop 1 . fst
+break :: Loc -> EvalM ()
+break loc = do
+  backtrace <- asks fst
   case NE.nonEmpty backtrace of
     Nothing -> return ()
-    Just backtrace' -> liftF $ ExtOpBreak BreakPoint backtrace' ()
+    Just backtrace' -> liftF $ ExtOpBreak loc BreakPoint backtrace' ()
 
 fromArray :: Value -> (ValueShape, [Value])
 fromArray (ValueArray shape as) = (shape, elems as)
@@ -1044,6 +1036,13 @@ eval env (Negate e _) = do
     ValuePrim (FloatValue (Float32Value v)) -> return $ FloatValue $ Float32Value (- v)
     ValuePrim (FloatValue (Float64Value v)) -> return $ FloatValue $ Float64Value (- v)
     _ -> error $ "Cannot negate " ++ pretty ev
+eval env (Not e _) = do
+  ev <- eval env e
+  ValuePrim <$> case ev of
+    ValuePrim (BoolValue b) -> pure $ BoolValue $ not b
+    ValuePrim (SignedValue iv) -> pure $ SignedValue $ P.doComplement iv
+    ValuePrim (UnsignedValue iv) -> pure $ UnsignedValue $ P.doComplement iv
+    _ -> error $ "Cannot logically negate " ++ pretty ev
 eval env (Update src is v loc) =
   maybe oob return
     =<< updateArray <$> mapM (evalDimIndex env) is <*> eval env src <*> eval env v
@@ -1097,7 +1096,19 @@ eval env (Constr c es (Info t) _) = do
   vs <- mapM (eval env) es
   shape <- typeValueShape env $ toStruct t
   return $ ValueSum shape c vs
-eval env (Attr _ e _) = eval env e
+eval env (Attr (AttrAtom "break") e loc) = do
+  break (locOf loc)
+  eval env e
+eval env (Attr (AttrAtom "trace") e loc) = do
+  v <- eval env e
+  trace (locStr (locOf loc)) v
+  pure v
+eval env (Attr (AttrComp "trace" [AttrAtom tag]) e _) = do
+  v <- eval env e
+  trace (nameToString tag) v
+  pure v
+eval env (Attr _ e _) =
+  eval env e
 
 evalCase ::
   Value ->
@@ -1227,7 +1238,9 @@ breakOnNaN inputs result
     backtrace <- asks fst
     case NE.nonEmpty backtrace of
       Nothing -> return ()
-      Just backtrace' -> liftF $ ExtOpBreak BreakNaN backtrace' ()
+      Just backtrace' ->
+        let loc = stackFrameLoc $ NE.head backtrace'
+         in liftF $ ExtOpBreak loc BreakNaN backtrace' ()
 breakOnNaN _ _ =
   return ()
 
@@ -1348,6 +1361,27 @@ initialCtx =
           case fromTuple v of
             Just [x, y, z, a, b, c] -> f x y z a b c
             _ -> error $ "Expected sextuple; got: " ++ pretty v
+
+    fun7t f =
+      TermValue Nothing $
+        ValueFun $ \v ->
+          case fromTuple v of
+            Just [x, y, z, a, b, c, d] -> f x y z a b c d
+            _ -> error $ "Expected septuple; got: " ++ pretty v
+
+    fun8t f =
+      TermValue Nothing $
+        ValueFun $ \v ->
+          case fromTuple v of
+            Just [x, y, z, a, b, c, d, e] -> f x y z a b c d e
+            _ -> error $ "Expected sextuple; got: " ++ pretty v
+
+    fun10t fun =
+      TermValue Nothing $
+        ValueFun $ \v ->
+          case fromTuple v of
+            Just [x, y, z, a, b, c, d, e, f, g] -> fun x y z a b c d e f g
+            _ -> error $ "Expected octuple; got: " ++ pretty v
 
     bopDef fs = fun2 $ \x y ->
       case (x, y) of
@@ -1677,6 +1711,127 @@ initialCtx =
                 else pure acc
           _ ->
             error $ "acc_write invalid arguments: " ++ pretty (acc, i, v)
+    --
+    def "flat_index_2d" = Just . fun6t $ \arr offset n1 s1 n2 s2 -> do
+      let offset' = asInt64 offset
+          n1' = asInt64 n1
+          n2' = asInt64 n2
+          s1' = asInt64 s1
+          s2' = asInt64 s2
+          shapeFromDims = foldr ShapeDim ShapeLeaf
+          mk1 = fmap (toArray (shapeFromDims [n1', n2'])) . sequence
+          mk2 = fmap (toArray $ shapeFromDims [n2']) . sequence
+          iota x = [0 .. x -1]
+          f i j =
+            indexArray [IndexingFix $ offset' + i * s1' + j * s2'] arr
+
+      case mk1 [mk2 [f i j | j <- iota n2'] | i <- iota n1'] of
+        Just arr' -> pure arr'
+        Nothing ->
+          bad mempty mempty $
+            "Index out of bounds: " ++ pretty [(n1', s1', n2', s2')]
+    --
+    def "flat_update_2d" = Just . fun5t $ \arr offset s1 s2 v -> do
+      let offset' = asInt64 offset
+          s1' = asInt64 s1
+          s2' = asInt64 s2
+      case valueShape v of
+        ShapeDim n1 (ShapeDim n2 _) -> do
+          let iota x = [0 .. x -1]
+              f arr' (i, j) =
+                updateArray [IndexingFix $ offset' + i * s1' + j * s2'] arr'
+                  =<< indexArray [IndexingFix i, IndexingFix j] v
+          case foldM f arr [(i, j) | i <- iota n1, j <- iota n2] of
+            Just arr' -> pure arr'
+            Nothing ->
+              bad mempty mempty $
+                "Index out of bounds: " ++ pretty [(n1, s1', n2, s2')]
+        s -> error $ "flat_update_2d: invalid arg shape: " ++ show s
+    --
+    def "flat_index_3d" = Just . fun8t $ \arr offset n1 s1 n2 s2 n3 s3 -> do
+      let offset' = asInt64 offset
+          n1' = asInt64 n1
+          n2' = asInt64 n2
+          n3' = asInt64 n3
+          s1' = asInt64 s1
+          s2' = asInt64 s2
+          s3' = asInt64 s3
+          shapeFromDims = foldr ShapeDim ShapeLeaf
+          mk1 = fmap (toArray (shapeFromDims [n1', n2', n3'])) . sequence
+          mk2 = fmap (toArray $ shapeFromDims [n2', n3']) . sequence
+          mk3 = fmap (toArray $ shapeFromDims [n3']) . sequence
+          iota x = [0 .. x -1]
+          f i j l =
+            indexArray [IndexingFix $ offset' + i * s1' + j * s2' + l * s3'] arr
+
+      case mk1 [mk2 [mk3 [f i j l | l <- iota n3'] | j <- iota n2'] | i <- iota n1'] of
+        Just arr' -> pure arr'
+        Nothing ->
+          bad mempty mempty $
+            "Index out of bounds: " ++ pretty [(n1', s1', n2', s2', n3', s3')]
+    --
+    def "flat_update_3d" = Just . fun6t $ \arr offset s1 s2 s3 v -> do
+      let offset' = asInt64 offset
+          s1' = asInt64 s1
+          s2' = asInt64 s2
+          s3' = asInt64 s3
+      case valueShape v of
+        ShapeDim n1 (ShapeDim n2 (ShapeDim n3 _)) -> do
+          let iota x = [0 .. x -1]
+              f arr' (i, j, l) =
+                updateArray [IndexingFix $ offset' + i * s1' + j * s2' + l * s3'] arr'
+                  =<< indexArray [IndexingFix i, IndexingFix j, IndexingFix l] v
+          case foldM f arr [(i, j, l) | i <- iota n1, j <- iota n2, l <- iota n3] of
+            Just arr' -> pure arr'
+            Nothing ->
+              bad mempty mempty $
+                "Index out of bounds: " ++ pretty [(n1, s1', n2, s2', n3, s3')]
+        s -> error $ "flat_update_3d: invalid arg shape: " ++ show s
+    --
+    def "flat_index_4d" = Just . fun10t $ \arr offset n1 s1 n2 s2 n3 s3 n4 s4 -> do
+      let offset' = asInt64 offset
+          n1' = asInt64 n1
+          n2' = asInt64 n2
+          n3' = asInt64 n3
+          n4' = asInt64 n4
+          s1' = asInt64 s1
+          s2' = asInt64 s2
+          s3' = asInt64 s3
+          s4' = asInt64 s4
+          shapeFromDims = foldr ShapeDim ShapeLeaf
+          mk1 = fmap (toArray (shapeFromDims [n1', n2', n3', n4'])) . sequence
+          mk2 = fmap (toArray $ shapeFromDims [n2', n3', n4']) . sequence
+          mk3 = fmap (toArray $ shapeFromDims [n3', n4']) . sequence
+          mk4 = fmap (toArray $ shapeFromDims [n4']) . sequence
+          iota x = [0 .. x -1]
+          f i j l m =
+            indexArray [IndexingFix $ offset' + i * s1' + j * s2' + l * s3' + m * s4'] arr
+
+      case mk1 [mk2 [mk3 [mk4 [f i j l m | m <- iota n4'] | l <- iota n3'] | j <- iota n2'] | i <- iota n1'] of
+        Just arr' -> pure arr'
+        Nothing ->
+          bad mempty mempty $
+            "Index out of bounds: " ++ pretty [(n1', s1', n2', s2', n3', s3', n4', s4')]
+    --
+    def "flat_update_4d" = Just . fun7t $ \arr offset s1 s2 s3 s4 v -> do
+      let offset' = asInt64 offset
+          s1' = asInt64 s1
+          s2' = asInt64 s2
+          s3' = asInt64 s3
+          s4' = asInt64 s4
+      case valueShape v of
+        ShapeDim n1 (ShapeDim n2 (ShapeDim n3 (ShapeDim n4 _))) -> do
+          let iota x = [0 .. x -1]
+              f arr' (i, j, l, m) =
+                updateArray [IndexingFix $ offset' + i * s1' + j * s2' + l * s3' + m * s4'] arr'
+                  =<< indexArray [IndexingFix i, IndexingFix j, IndexingFix l, IndexingFix m] v
+          case foldM f arr [(i, j, l, m) | i <- iota n1, j <- iota n2, l <- iota n3, m <- iota n4] of
+            Just arr' -> pure arr'
+            Nothing ->
+              bad mempty mempty $
+                "Index out of bounds: " ++ pretty [(n1, s1', n2, s2', n3, s3', n4, s4')]
+        s -> error $ "flat_update_4d: invalid arg shape: " ++ show s
+    --
     def "unzip" = Just $
       fun1 $ \x -> do
         let ShapeDim _ (ShapeRecord fs) = valueShape x
@@ -1732,12 +1887,6 @@ initialCtx =
       fun3t $ \_ _ _ -> bad noLoc mempty "Interpreter does not support autodiff."
     def "jvp" = Just $
       fun3t $ \_ _ _ -> bad noLoc mempty "Interpreter does not support autodiff."
-    def "opaque" = Just $ fun1 return
-    def "trace" = Just $ fun1 $ \v -> trace v >> return v
-    def "break" = Just $
-      fun1 $ \v -> do
-        break
-        return v
     def "acc" = Nothing
     def s | nameFromString s `M.member` namesToPrimTypes = Nothing
     def s = error $ "Missing intrinsic: " ++ s

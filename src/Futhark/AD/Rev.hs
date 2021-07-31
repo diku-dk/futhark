@@ -301,7 +301,7 @@ updateAdj v d = do
           insAdj v v_adj'
 
 updateAdjSlice :: Slice SubExp -> VName -> VName -> ADM ()
-updateAdjSlice [DimFix i] v d =
+updateAdjSlice (Slice [DimFix i]) v d =
   updateAdjIndex v (AssumeBounds, i) (Var d)
 updateAdjSlice slice v d = do
   t <- lookupType v
@@ -313,7 +313,7 @@ updateAdjSlice slice v d = do
   v_adj' <- case v_adj_t of
     Acc {} ->
       letExp (baseString v_adj) . BasicOp $
-        UpdateAcc v_adj (map isDimFix slice) [Var d]
+        UpdateAcc v_adj (map isDimFix (unSlice slice)) [Var d]
     _ -> do
       v_adjslice <-
         if primType t
@@ -464,8 +464,10 @@ diffBasicOp pat aux e m =
     Index arr slice -> do
       (_pat_v, pat_adj) <- commonBasicOp pat aux e m
       void $ updateAdjSlice slice arr pat_adj
+    FlatIndex {} -> error "FlatIndex not handled by AD yet."
+    FlatUpdate {} -> error "FlatUpdate not handled by AD yet."
     --
-    Opaque se -> do
+    Opaque _ se -> do
       (_pat_v, pat_adj) <- commonBasicOp pat aux e m
       updateSubExpAdj se pat_adj
     --
@@ -871,7 +873,7 @@ diffSOAC pat aux soac@(Screma w as form) m
     -- so we can detect special cases.  Post-AD, the result may be
     -- fused again.
     let ks = map (length . redNeutral) reds
-        pat_per_red = map Pat $ chunks ks $ patElements pat
+        pat_per_red = map Pat $ chunks ks $ patElems pat
         as_per_red = chunks ks as
         onReds (red : reds') (red_pat : red_pats') (red_as : red_as') = do
           red_form <- reduceSOAC [red]

@@ -224,17 +224,17 @@ internaliseAppExp desc (E.Range start maybe_second end loc) = do
   let errmsg =
         errorMsg $
           ["Range "]
-            ++ [ErrorInt64 start'_i64]
+            ++ [ErrorVal int64 start'_i64]
             ++ ( case maybe_second'_i64 of
                    Nothing -> []
-                   Just second_i64 -> ["..", ErrorInt64 second_i64]
+                   Just second_i64 -> ["..", ErrorVal int64 second_i64]
                )
             ++ ( case end of
                    DownToExclusive {} -> ["..>"]
                    ToInclusive {} -> ["..."]
                    UpToExclusive {} -> ["..<"]
                )
-            ++ [ErrorInt64 end'_i64, " is invalid."]
+            ++ [ErrorVal int64 end'_i64, " is invalid."]
 
   (it, le_op, lt_op) <-
     case E.typeOf start of
@@ -351,7 +351,7 @@ internaliseAppExp desc (E.Coerce e (TypeDecl dt (Info et)) loc) = do
     dims <- arrayDims <$> subExpType e'
     let parts =
           ["Value of (core language) shape ("]
-            ++ intersperse ", " (map ErrorInt64 dims)
+            ++ intersperse ", " (map (ErrorVal int64) dims)
             ++ [") cannot match shape of type `"]
             ++ dt'
             ++ ["`."]
@@ -378,12 +378,7 @@ internaliseAppExp desc e@E.Apply {} = do
         let tag ses = [(se, I.Observe) | se <- ses]
         args' <- reverse <$> mapM (internaliseArg arg_desc) (reverse args)
         let args'' = concatMap tag args'
-        letTupExp' desc $
-          I.Apply
-            fname
-            args''
-            [I.Prim rettype]
-            (Safe, loc, [])
+        letTupExp' desc $ I.Apply fname args'' [I.Prim rettype] (Safe, loc, [])
       | otherwise -> do
         args' <- concat . reverse <$> mapM (internaliseArg arg_desc) (reverse args)
         fst <$> funcall desc qfname args' loc
@@ -675,6 +670,16 @@ internaliseExp desc (E.Negate e _) = do
     I.Prim (I.FloatType t) ->
       letTupExp' desc $ I.BasicOp $ I.BinOp (I.FSub t) (I.floatConst t 0) e'
     _ -> error "Futhark.Internalise.internaliseExp: non-numeric type in Negate"
+internaliseExp desc (E.Not e _) = do
+  e' <- internaliseExp1 "not_arg" e
+  et <- subExpType e'
+  case et of
+    I.Prim (I.IntType t) ->
+      letTupExp' desc $ I.BasicOp $ I.UnOp (I.Complement t) e'
+    I.Prim I.Bool ->
+      letTupExp' desc $ I.BasicOp $ I.UnOp I.Not e'
+    _ ->
+      error "Futhark.Internalise.internaliseExp: non-int/bool type in Not"
 internaliseExp desc (E.Update src slice ve loc) = do
   ves <- internaliseExp "lw_val" ve
   srcs <- internaliseExpToVars "src" src
@@ -712,16 +717,27 @@ internaliseExp desc (E.RecordUpdate src fields ve _ _) = do
         src'' <- replace t fs ve' to_update
         return $ bef ++ src'' ++ aft
     replace _ _ ve' _ = return ve'
-internaliseExp desc (E.Attr attr e _) =
-  local f $ internaliseExp desc e
+internaliseExp desc (E.Attr attr e loc) = do
+  e' <- local f $ internaliseExp desc e
+  case attr' of
+    "trace" ->
+      traceRes (locStr loc) e'
+    I.AttrComp "trace" [I.AttrAtom tag] ->
+      traceRes (nameToString tag) e'
+    "opaque" ->
+      mapM (letSubExp desc . BasicOp . Opaque OpaqueNil) e'
+    _ ->
+      pure e'
   where
-    attrs = oneAttr $ internaliseAttr attr
+    traceRes tag' e' =
+      mapM (letSubExp desc . BasicOp . Opaque (OpaqueTrace tag')) e'
+    attr' = internaliseAttr attr
     f env
-      | "unsafe" `inAttrs` attrs,
+      | attr' == "unsafe",
         not $ envSafe env =
         env {envDoBoundsChecks = False}
       | otherwise =
-        env {envAttrs = envAttrs env <> attrs}
+        env {envAttrs = envAttrs env <> oneAttr attr'}
 internaliseExp desc (E.Assert e1 e2 (Info check) loc) = do
   e1' <- internaliseExp1 "assert_cond" e1
   c <- assert "assert_c" e1' (errorMsg [ErrorString $ "Assertion is false: " <> check]) loc
@@ -799,11 +815,16 @@ internaliseExp _ e@E.IndexSection {} =
 
 internaliseArg :: String -> (E.Exp, Maybe VName) -> InternaliseM [SubExp]
 internaliseArg desc (arg, argdim) = do
-  arg' <- internaliseExp desc arg
-  case (arg', argdim) of
-    ([se], Just d) -> letBindNames [d] $ BasicOp $ SubExp se
-    _ -> return ()
-  return arg'
+  exists <- askScope
+  case argdim of
+    Just d | d `M.member` exists -> pure [I.Var d]
+    _ -> do
+      arg' <- internaliseExp desc arg
+      case (arg', argdim) of
+        ([se], Just d) -> do
+          letBindNames [d] $ BasicOp $ SubExp se
+        _ -> return ()
+      pure arg'
 
 subExpPrimType :: I.SubExp -> InternaliseM I.PrimType
 subExpPrimType = fmap I.elemType . subExpType
@@ -917,7 +938,7 @@ internaliseSlice loc dims idxs = do
         errorMsg $
           ["Index ["] ++ intercalate [", "] parts
             ++ ["] out of bounds for array of shape ["]
-            ++ intersperse "][" (map ErrorInt64 $ take (length idxs) dims)
+            ++ intersperse "][" (map (ErrorVal int64) $ take (length idxs) dims)
             ++ ["]."]
   c <- assert "index_certs" ok msg loc
   return (idxs', c)
@@ -935,7 +956,7 @@ internaliseDimIndex w (E.DimFix i) = do
         I.BasicOp $
           I.CmpOp (I.CmpSlt I.Int64) i' w
   ok <- letSubExp "bounds_check" =<< eBinOp I.LogAnd (pure lowerBound) (pure upperBound)
-  return (I.DimFix i', ok, [ErrorInt64 i'])
+  return (I.DimFix i', ok, [ErrorVal int64 i'])
 
 -- Special-case an important common case that otherwise leads to horrible code.
 internaliseDimIndex
@@ -991,7 +1012,7 @@ internaliseDimIndex w (E.DimSlice i j s) = do
   n <- letSubExp "n" =<< divRounding (toExp j_m_i) (toExp s')
 
   zero_stride <- letSubExp "zero_stride" $ I.BasicOp $ I.CmpOp (CmpEq int64) s_sign zero
-  nonzero_stride <- letSubExp "nonzero_stride" $ I.BasicOp $ I.UnOp Not zero_stride
+  nonzero_stride <- letSubExp "nonzero_stride" $ I.BasicOp $ I.UnOp I.Not zero_stride
 
   -- Bounds checks depend on whether we are slicing forwards or
   -- backwards.  If forwards, we must check '0 <= i && i <= j'.  If
@@ -1043,20 +1064,20 @@ internaliseDimIndex w (E.DimSlice i j s) = do
 
   let parts = case (i, j, s) of
         (_, _, Just {}) ->
-          [ maybe "" (const $ ErrorInt64 i') i,
+          [ maybe "" (const $ ErrorVal int64 i') i,
             ":",
-            maybe "" (const $ ErrorInt64 j') j,
+            maybe "" (const $ ErrorVal int64 j') j,
             ":",
-            ErrorInt64 s'
+            ErrorVal int64 s'
           ]
         (_, Just {}, _) ->
-          [ maybe "" (const $ ErrorInt64 i') i,
+          [ maybe "" (const $ ErrorVal int64 i') i,
             ":",
-            ErrorInt64 j'
+            ErrorVal int64 j'
           ]
-            ++ maybe mempty (const [":", ErrorInt64 s']) s
+            ++ maybe mempty (const [":", ErrorVal int64 s']) s
         (_, Nothing, Nothing) ->
-          [ErrorInt64 i', ":"]
+          [ErrorVal int64 i', ":"]
   return (I.DimSlice i' n s', acceptable, parts)
   where
     zero = constant (0 :: Int64)
@@ -1314,7 +1335,7 @@ certifyingNonzero loc t x m = do
     letSubExp "zero" $
       I.BasicOp $
         CmpOp (CmpEq (IntType t)) x (intConst t 0)
-  nonzero <- letSubExp "nonzero" $ I.BasicOp $ UnOp Not zero
+  nonzero <- letSubExp "nonzero" $ I.BasicOp $ UnOp I.Not zero
   c <- assert "nonzero_cert" nonzero "division by zero" loc
   certifying c m
 
@@ -1706,9 +1727,6 @@ isOverloadedFunction qname args loc = do
             _ -> VJP lam x' v'
     handleAD _ _ = Nothing
 
-    handleRest [x] "!" = Just $ complementF x
-    handleRest [x] "opaque" = Just $ \desc ->
-      mapM (letSubExp desc . BasicOp . Opaque) =<< internaliseExp "opaque_arg" x
     handleRest [E.TupLit [a, si, v] _] "scatter" = Just $ scatterF 1 a si v
     handleRest [E.TupLit [a, si, v] _] "scatter_2d" = Just $ scatterF 2 a si v
     handleRest [E.TupLit [a, si, v] _] "scatter_3d" = Just $ scatterF 3 a si v
@@ -1780,8 +1798,18 @@ isOverloadedFunction qname args loc = do
                 <*> internaliseExpToVars (desc ++ "_zip_y") y
             )
     handleRest [x] "unzip" = Just $ flip internaliseExp x
-    handleRest [x] "trace" = Just $ flip internaliseExp x
-    handleRest [x] "break" = Just $ flip internaliseExp x
+    handleRest [TupLit [arr, offset, n1, s1, n2, s2] _] "flat_index_2d" = Just $ \desc -> do
+      flatIndexHelper desc loc arr offset [(n1, s1), (n2, s2)]
+    handleRest [TupLit [arr1, offset, s1, s2, arr2] _] "flat_update_2d" = Just $ \desc -> do
+      flatUpdateHelper desc loc arr1 offset [s1, s2] arr2
+    handleRest [TupLit [arr, offset, n1, s1, n2, s2, n3, s3] _] "flat_index_3d" = Just $ \desc -> do
+      flatIndexHelper desc loc arr offset [(n1, s1), (n2, s2), (n3, s3)]
+    handleRest [TupLit [arr1, offset, s1, s2, s3, arr2] _] "flat_update_3d" = Just $ \desc -> do
+      flatUpdateHelper desc loc arr1 offset [s1, s2, s3] arr2
+    handleRest [TupLit [arr, offset, n1, s1, n2, s2, n3, s3, n4, s4] _] "flat_index_4d" = Just $ \desc -> do
+      flatIndexHelper desc loc arr offset [(n1, s1), (n2, s2), (n3, s3), (n4, s4)]
+    handleRest [TupLit [arr1, offset, s1, s2, s3, s4, arr2] _] "flat_update_4d" = Just $ \desc -> do
+      flatUpdateHelper desc loc arr1 offset [s1, s2, s3, s4] arr2
     handleRest _ _ = Nothing
 
     toSigned int_to e desc = do
@@ -1819,17 +1847,6 @@ isOverloadedFunction qname args loc = do
         E.Scalar (E.Prim (E.FloatType float_from)) ->
           letTupExp' desc $ I.BasicOp $ I.ConvOp (I.FPToUI float_from int_to) e'
         _ -> error "Futhark.Internalise.internaliseExp: non-numeric type in ToUnsigned"
-
-    complementF e desc = do
-      e' <- internaliseExp1 "complement_arg" e
-      et <- subExpType e'
-      case et of
-        I.Prim (I.IntType t) ->
-          letTupExp' desc $ I.BasicOp $ I.UnOp (I.Complement t) e'
-        I.Prim I.Bool ->
-          letTupExp' desc $ I.BasicOp $ I.UnOp I.Not e'
-        _ ->
-          error "Futhark.Internalise.internaliseExp: non-int/bool type in Complement"
 
     scatterF dim a si v desc = do
       si' <- internaliseExpToVars "write_arg_i" si
@@ -1891,6 +1908,100 @@ isOverloadedFunction qname args loc = do
 
       let sa_ws = map (Shape . take dim . arrayDims) sa_ts
       letTupExp' desc $ I.Op $ I.Scatter si_w lam sivs $ zip3 sa_ws (repeat 1) sas
+
+flatIndexHelper :: String -> SrcLoc -> E.Exp -> E.Exp -> [(E.Exp, E.Exp)] -> InternaliseM [SubExp]
+flatIndexHelper desc loc arr offset slices = do
+  arrs <- internaliseExpToVars "arr" arr
+  offset' <- internaliseExp1 "offset" offset
+  old_dim <- I.arraysSize 0 <$> mapM lookupType arrs
+  offset_inbounds_down <- letSubExp "offset_inbounds_down" $ I.BasicOp $ I.CmpOp (I.CmpUle Int64) (intConst Int64 0) offset'
+  offset_inbounds_up <- letSubExp "offset_inbounds_up" $ I.BasicOp $ I.CmpOp (I.CmpUlt Int64) offset' old_dim
+  slices' <-
+    mapM
+      ( \(n, s) -> do
+          n' <- internaliseExp1 "n" n
+          s' <- internaliseExp1 "s" s
+          return (n', s')
+      )
+      slices
+  (min_bound, max_bound) <-
+    foldM
+      ( \(lower, upper) (n, s) -> do
+          n_m1 <- letSubExp "span" $ I.BasicOp $ I.BinOp (I.Sub Int64 I.OverflowUndef) n (intConst Int64 1)
+          spn <- letSubExp "span" $ I.BasicOp $ I.BinOp (I.Mul Int64 I.OverflowUndef) n_m1 s
+
+          span_and_lower <- letSubExp "span_and_lower" $ I.BasicOp $ I.BinOp (I.Add Int64 I.OverflowUndef) spn lower
+          span_and_upper <- letSubExp "span_and_upper" $ I.BasicOp $ I.BinOp (I.Add Int64 I.OverflowUndef) spn upper
+
+          lower' <- letSubExp "minimum" $ I.BasicOp $ I.BinOp (I.UMin Int64) span_and_lower lower
+          upper' <- letSubExp "maximum" $ I.BasicOp $ I.BinOp (I.UMax Int64) span_and_upper upper
+
+          return (lower', upper')
+      )
+      (offset', offset')
+      slices'
+  min_in_bounds <- letSubExp "min_in_bounds" $ I.BasicOp $ I.CmpOp (I.CmpUle Int64) (intConst Int64 0) min_bound
+  max_in_bounds <- letSubExp "max_in_bounds" $ I.BasicOp $ I.CmpOp (I.CmpUlt Int64) max_bound old_dim
+
+  all_bounds <-
+    foldM
+      (\x y -> letSubExp "inBounds" $ I.BasicOp $ I.BinOp I.LogAnd x y)
+      offset_inbounds_down
+      [offset_inbounds_up, min_in_bounds, max_in_bounds]
+
+  c <- assert "bounds_cert" all_bounds (ErrorMsg [ErrorString $ "Flat slice out of bounds: " ++ pretty old_dim ++ " and " ++ pretty slices']) loc
+  let slice = I.FlatSlice offset' $ map (uncurry FlatDimIndex) slices'
+  certifying c $
+    forM arrs $ \arr' ->
+      letSubExp desc $ I.BasicOp $ I.FlatIndex arr' slice
+
+flatUpdateHelper :: String -> SrcLoc -> E.Exp -> E.Exp -> [E.Exp] -> E.Exp -> InternaliseM [SubExp]
+flatUpdateHelper desc loc arr1 offset slices arr2 = do
+  arrs1 <- internaliseExpToVars "arr" arr1
+  offset' <- internaliseExp1 "offset" offset
+  old_dim <- I.arraysSize 0 <$> mapM lookupType arrs1
+  offset_inbounds_down <- letSubExp "offset_inbounds_down" $ I.BasicOp $ I.CmpOp (I.CmpUle Int64) (intConst Int64 0) offset'
+  offset_inbounds_up <- letSubExp "offset_inbounds_up" $ I.BasicOp $ I.CmpOp (I.CmpUlt Int64) offset' old_dim
+  arrs2 <- internaliseExpToVars "arr" arr2
+  ts <- mapM lookupType arrs2
+  slices' <-
+    mapM
+      ( \(s, i) -> do
+          s' <- internaliseExp1 "s" s
+          let n = arraysSize i ts
+          return (n, s')
+      )
+      $ zip slices [0 ..]
+  (min_bound, max_bound) <-
+    foldM
+      ( \(lower, upper) (n, s) -> do
+          n_m1 <- letSubExp "span" $ I.BasicOp $ I.BinOp (I.Sub Int64 I.OverflowUndef) n (intConst Int64 1)
+          spn <- letSubExp "span" $ I.BasicOp $ I.BinOp (I.Mul Int64 I.OverflowUndef) n_m1 s
+
+          span_and_lower <- letSubExp "span_and_lower" $ I.BasicOp $ I.BinOp (I.Add Int64 I.OverflowUndef) spn lower
+          span_and_upper <- letSubExp "span_and_upper" $ I.BasicOp $ I.BinOp (I.Add Int64 I.OverflowUndef) spn upper
+
+          lower' <- letSubExp "minimum" $ I.BasicOp $ I.BinOp (I.UMin Int64) span_and_lower lower
+          upper' <- letSubExp "maximum" $ I.BasicOp $ I.BinOp (I.UMax Int64) span_and_upper upper
+
+          return (lower', upper')
+      )
+      (offset', offset')
+      slices'
+  min_in_bounds <- letSubExp "min_in_bounds" $ I.BasicOp $ I.CmpOp (I.CmpUle Int64) (intConst Int64 0) min_bound
+  max_in_bounds <- letSubExp "max_in_bounds" $ I.BasicOp $ I.CmpOp (I.CmpUlt Int64) max_bound old_dim
+
+  all_bounds <-
+    foldM
+      (\x y -> letSubExp "inBounds" $ I.BasicOp $ I.BinOp I.LogAnd x y)
+      offset_inbounds_down
+      [offset_inbounds_up, min_in_bounds, max_in_bounds]
+
+  c <- assert "bounds_cert" all_bounds (ErrorMsg [ErrorString $ "Flat slice out of bounds: " ++ pretty old_dim ++ " and " ++ pretty slices']) loc
+  let slice = I.FlatSlice offset' $ map (uncurry FlatDimIndex) slices'
+  certifying c $
+    forM (zip arrs1 arrs2) $ \(arr1', arr2') ->
+      letSubExp desc $ I.BasicOp $ I.FlatUpdate arr1' slice arr2'
 
 funcall ::
   String ->
@@ -2007,7 +2118,7 @@ partitionWithSOACS k lam arrs = do
   nonempty_body <- runBodyBuilder $
     fmap resultBody $
       forM all_offsets $ \offset_array ->
-        letSubExp "last_offset" $ I.BasicOp $ I.Index offset_array [I.DimFix last_index]
+        letSubExp "last_offset" $ I.BasicOp $ I.Index offset_array $ Slice [I.DimFix last_index]
   let empty_body = resultBody $ replicate k $ constant (0 :: Int64)
   is_empty <- letSubExp "is_empty" $ I.BasicOp $ I.CmpOp (CmpEq int64) w $ constant (0 :: Int64)
   sizes <-
@@ -2131,7 +2242,7 @@ dimExpForError (DimExpNamed d _) = do
   d' <- case substs of
     Just [v] -> return v
     _ -> return $ I.Var $ E.qualLeaf d
-  return $ ErrorInt64 d'
+  return $ ErrorVal int64 d'
 dimExpForError (DimExpConst d _) =
   return $ ErrorString $ pretty d
 dimExpForError DimExpAny = return ""
