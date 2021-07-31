@@ -76,6 +76,8 @@ handleHostOp (OtherOp op) =
   error $ "Cannot allocate memory in SOAC: " ++ pretty op
 handleHostOp (SegOp op) =
   Inner . SegOp <$> handleSegOp op
+handleHostOp (GPUBody ts (Body _ stms res)) =
+  fmap (Inner . GPUBody ts) . buildBody_ . allocInStms stms $ pure res
 
 kernelExpHints :: Allocator GPUMem m => Exp GPUMem -> m [ExpHint]
 kernelExpHints (BasicOp (Manifest perm v)) = do

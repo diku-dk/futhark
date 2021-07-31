@@ -101,6 +101,10 @@ analyseStm (Let pat _ e) (lumap0, used0) =
           (lumap'', used'') = analyseKernelBody (lumap', used') body
           nms = (freeIn lvl <> freeIn tps) `namesSubtract` used''
        in (insertNames pat_name nms lumap'', used'' <> nms)
+    analyseExp (lumap, used) (Op (Inner (GPUBody ts body))) =
+      let (lumap', used') = analyseBody lumap used body
+          nms = freeIn ts
+       in (insertNames pat_name nms lumap', used' <> nms)
     analyseExp (lumap, used) (WithAcc _ l) =
       analyseLambda (lumap, used) l
     segOpHelper lumap used lvl binops tps body =

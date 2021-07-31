@@ -74,6 +74,17 @@ simplifyKernelOp _ (SizeOp (CmpSizeLe key size_class x)) = do
 simplifyKernelOp _ (SizeOp (CalcNumGroups w max_num_groups group_size)) = do
   w' <- Engine.simplify w
   return (SizeOp $ CalcNumGroups w' max_num_groups group_size, mempty)
+simplifyKernelOp _ (GPUBody ts body) = do
+  ts' <- Engine.simplify ts
+  ((bodystms, bodyres), hoisted) <-
+    Engine.blockIf keepOnGPU $
+      Engine.simplifyBody (map (const Consume) ts) body
+  body' <- Engine.constructBody bodystms bodyres
+  pure (GPUBody ts' body', hoisted)
+  where
+    keepOnGPU _ _ = keepExpOnGPU . stmExp
+    keepExpOnGPU (BasicOp Index {}) = True
+    keepExpOnGPU _ = False
 
 instance BuilderOps (Wise GPU)
 

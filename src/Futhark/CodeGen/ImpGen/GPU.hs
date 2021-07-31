@@ -143,6 +143,12 @@ opCompiler (Pat [pe]) (Inner (SizeOp (CalcNumGroups w64 max_num_groups_key group
   mkTV (patElemName pe) int32 <-- sExt32 num_groups
 opCompiler dest (Inner (SegOp op)) =
   segOpCompiler dest op
+opCompiler (Pat pes) (Inner (GPUBody _ (Body _ stms res))) = do
+  tid <- newVName "tid"
+  sKernelThread "gpuseq" 1 1 tid $
+    compileStms (freeIn res) stms $
+      forM_ (zip pes res) $ \(pe, SubExpRes _ se) ->
+        copyDWIM (patElemName pe) [DimFix 0] se []
 opCompiler pat e =
   compilerBugS $
     "opCompiler: Invalid pattern\n  "
