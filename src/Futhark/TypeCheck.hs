@@ -845,6 +845,24 @@ checkBasicOp (Update _ src (Slice idxes) se) = do
   mapM_ checkDimIndex idxes
   require [arrayOf (Prim (elemType src_t)) (Shape (sliceDims (Slice idxes))) NoUniqueness] se
   consume =<< lookupAliases src
+checkBasicOp (FlatIndex ident slice) = do
+  vt <- lookupType ident
+  observe ident
+  when (arrayRank vt /= 1) $
+    bad $ SlicingError (arrayRank vt) 1
+  checkFlatSlice slice
+checkBasicOp (FlatUpdate src slice v) = do
+  src_t <- checkArrIdent src
+  when (arrayRank src_t /= 1) $
+    bad $ SlicingError (arrayRank src_t) 1
+
+  v_aliases <- lookupAliases v
+  when (src `nameIn` v_aliases) $
+    bad $ TypeError "The target of an Update must not alias the value to be written."
+
+  checkFlatSlice slice
+  requireI [arrayOf (Prim (elemType src_t)) (Shape (flatSliceDims slice)) NoUniqueness] v
+  consume =<< lookupAliases src
 checkBasicOp (Iota e x s et) = do
   require [Prim int64] e
   require [Prim $ IntType et] x
@@ -1202,6 +1220,20 @@ checkPatElem ::
 checkPatElem (PatElem name dec) =
   context ("When checking pattern element " ++ pretty name) $
     checkLetBoundDec name dec
+
+checkFlatDimIndex ::
+  Checkable rep =>
+  FlatDimIndex SubExp ->
+  TypeM rep ()
+checkFlatDimIndex (FlatDimIndex n s) = mapM_ (require [Prim int64]) [n, s]
+
+checkFlatSlice ::
+  Checkable rep =>
+  FlatSlice SubExp ->
+  TypeM rep ()
+checkFlatSlice (FlatSlice offset idxs) = do
+  require [Prim int64] offset
+  mapM_ checkFlatDimIndex idxs
 
 checkDimIndex ::
   Checkable rep =>

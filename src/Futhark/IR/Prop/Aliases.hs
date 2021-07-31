@@ -66,6 +66,8 @@ basicOpAliases CmpOp {} = [mempty]
 basicOpAliases UnOp {} = [mempty]
 basicOpAliases (Index ident _) = [vnameAliases ident]
 basicOpAliases Update {} = [mempty]
+basicOpAliases (FlatIndex ident _) = [vnameAliases ident]
+basicOpAliases FlatUpdate {} = [mempty]
 basicOpAliases Iota {} = [mempty]
 basicOpAliases Replicate {} = [mempty]
 basicOpAliases Scratch {} = [mempty]
@@ -166,6 +168,7 @@ consumedInExp (WithAcc inputs lam) =
   where
     inputConsumed (_, arrs, _) = namesFromList arrs
 consumedInExp (BasicOp (Update _ src _ _)) = oneName src
+consumedInExp (BasicOp (FlatUpdate src _ _)) = oneName src
 consumedInExp (BasicOp (UpdateAcc acc _ _)) = oneName acc
 consumedInExp (BasicOp _) = mempty
 consumedInExp (Op op) = consumedInOp op

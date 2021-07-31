@@ -139,8 +139,10 @@ simplifyIndexing vtable seType idd (Slice inds) consuming =
         length inds == length dims,
         -- It is generally not safe to simplify a slice of a copy,
         -- because the result may be used in an in-place update of the
-        -- original.
-        Just _ <- mapM dimFix inds,
+        -- original.  But we know this can only happen if the original
+        -- is bound the same depth as we are!
+        all (isJust . dimFix) inds
+          || maybe True ((ST.loopDepth vtable /=) . ST.entryDepth) (ST.lookup src vtable),
         not consuming,
         ST.available src vtable ->
         Just $ pure $ IndexResult cs src $ Slice inds

@@ -107,6 +107,7 @@ import Control.Monad.Except
 import Control.Monad.Reader
 import Control.Monad.State
 import Data.Foldable (traverse_)
+import Data.Function ((&))
 import Data.List (elemIndex, find)
 import qualified Data.Map.Strict as M
 import Data.Maybe
@@ -529,6 +530,14 @@ funReturnsToExpReturns = noUniquenessReturns . maybeReturns
 
 bodyReturnsToExpReturns :: BodyReturns -> ExpReturns
 bodyReturnsToExpReturns = noUniquenessReturns . maybeReturns
+
+varInfoToExpReturns :: MemInfo SubExp NoUniqueness MemBind -> ExpReturns
+varInfoToExpReturns (MemArray et shape u (ArrayIn mem ixfun)) =
+  MemArray et (fmap Free shape) u $
+    Just $ ReturnsInBlock mem $ existentialiseIxFun [] ixfun
+varInfoToExpReturns (MemPrim pt) = MemPrim pt
+varInfoToExpReturns (MemAcc acc ispace ts u) = MemAcc acc ispace ts u
+varInfoToExpReturns (MemMem space) = MemMem space
 
 matchRetTypeToResult ::
   (Mem rep, TC.Checkable rep) =>
@@ -999,17 +1008,12 @@ expReturns (BasicOp (Rotate offsets v)) = do
         Just $ ReturnsInBlock mem $ existentialiseIxFun [] ixfun'
     ]
 expReturns (BasicOp (Index v slice)) = do
-  info <- sliceInfo v slice
-  case info of
-    MemArray et shape u (ArrayIn mem ixfun) ->
-      return
-        [ MemArray et (fmap Free shape) u $
-            Just $ ReturnsInBlock mem $ existentialiseIxFun [] ixfun
-        ]
-    MemPrim pt -> return [MemPrim pt]
-    MemAcc acc ispace ts u -> return [MemAcc acc ispace ts u]
-    MemMem space -> return [MemMem space]
+  pure . varInfoToExpReturns <$> sliceInfo v slice
 expReturns (BasicOp (Update _ v _ _)) =
+  pure <$> varReturns v
+expReturns (BasicOp (FlatIndex v slice)) = do
+  pure . varInfoToExpReturns <$> flatSliceInfo v slice
+expReturns (BasicOp (FlatUpdate v _ _)) =
   pure <$> varReturns v
 expReturns (BasicOp op) =
   extReturns . staticShapes <$> primOpType op
@@ -1069,6 +1073,20 @@ sliceInfo v slice = do
       return $
         MemArray et (Shape dims) NoUniqueness . ArrayIn mem $
           IxFun.slice ixfun (fmap pe64 slice)
+
+flatSliceInfo ::
+  (Monad m, HasScope rep m, Mem rep) =>
+  VName ->
+  FlatSlice SubExp ->
+  m (MemInfo SubExp NoUniqueness MemBind)
+flatSliceInfo v slice@(FlatSlice offset idxs) = do
+  (et, _, mem, ixfun) <- arrayVarReturns v
+  map (fmap pe64) idxs
+    & FlatSlice (pe64 offset)
+    & IxFun.flatSlice ixfun
+    & ArrayIn mem
+    & MemArray et (Shape (flatSliceDims slice)) NoUniqueness
+    & pure
 
 class TypedOp (Op rep) => OpReturns rep where
   opReturns ::

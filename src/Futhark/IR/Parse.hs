@@ -199,6 +199,17 @@ pSlice = Slice <$> brackets (pDimIndex `sepBy` pComma)
 pIndex :: Parser BasicOp
 pIndex = try $ Index <$> pVName <*> pSlice
 
+pFlatDimIndex :: Parser (FlatDimIndex SubExp)
+pFlatDimIndex =
+  FlatDimIndex <$> pSubExp <* lexeme ":" <*> pSubExp
+
+pFlatSlice :: Parser (FlatSlice SubExp)
+pFlatSlice =
+  brackets $ FlatSlice <$> pSubExp <* pSemi <*> (pFlatDimIndex `sepBy` pComma)
+
+pFlatIndex :: Parser BasicOp
+pFlatIndex = try $ FlatIndex <$> pVName <*> pFlatSlice
+
 pErrorMsgPart :: Parser (ErrorMsgPart SubExp)
 pErrorMsgPart =
   choice
@@ -278,6 +289,11 @@ pBasicOp =
           <*> choice [lexeme "?" $> Safe, pure Unsafe]
           <*> pSlice <* lexeme "="
           <*> pSubExp,
+      try $
+        FlatUpdate
+          <$> pVName <* keyword "with"
+          <*> pFlatSlice <* lexeme "="
+          <*> pVName,
       ArrayLit
         <$> brackets (pSubExp `sepBy` pComma)
         <*> (lexeme ":" *> "[]" *> pType),
@@ -296,6 +312,7 @@ pBasicOp =
       pConvOp "btoi" (const BToI) (keyword "bool") pIntType,
       --
       pIndex,
+      pFlatIndex,
       pBinOp,
       pCmpOp,
       pUnOp,

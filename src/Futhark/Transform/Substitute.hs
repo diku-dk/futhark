@@ -191,6 +191,12 @@ instance Substitute d => Substitute (DimIndex d) where
 instance Substitute d => Substitute (Slice d) where
   substituteNames substs = fmap $ substituteNames substs
 
+instance Substitute d => Substitute (FlatDimIndex d) where
+  substituteNames substs = fmap $ substituteNames substs
+
+instance Substitute d => Substitute (FlatSlice d) where
+  substituteNames substs = fmap $ substituteNames substs
+
 instance Substitute v => Substitute (PrimExp v) where
   substituteNames substs = fmap $ substituteNames substs
 
