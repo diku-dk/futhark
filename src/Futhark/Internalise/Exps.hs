@@ -1713,8 +1713,6 @@ isOverloadedFunction qname args loc = do
       fmap pure $ letSubExp desc $ BasicOp $ UpdateAcc acc' [i'] vs
     handleAccs _ _ = Nothing
 
-    handleRest [x] "opaque" = Just $ \desc ->
-      mapM (letSubExp desc . BasicOp . Opaque OpaqueNil) =<< internaliseExp "opaque_arg" x
     handleRest [E.TupLit [a, si, v] _] "scatter" = Just $ scatterF 1 a si v
     handleRest [E.TupLit [a, si, v] _] "scatter_2d" = Just $ scatterF 2 a si v
     handleRest [E.TupLit [a, si, v] _] "scatter_3d" = Just $ scatterF 3 a si v
