@@ -402,6 +402,8 @@ data BasicOp
     -- Consumes the array.  If 'Safe', perform a run-time bounds check
     -- and ignore the write if out of bounds (like @Scatter@).
     Update Safety VName (Slice SubExp) SubExp
+  | FlatIndex VName (FlatSlice SubExp)
+  | FlatUpdate VName (FlatSlice SubExp) VName
   | -- | @concat@0([1],[2, 3, 4]) = [1, 2, 3, 4]@.
     Concat Int VName [VName] SubExp
   | -- | Copy the given array.  The result will not alias anything.

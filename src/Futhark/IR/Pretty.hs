@@ -165,6 +165,12 @@ instance PrettyRep rep => Pretty (Stm rep) where
 instance Pretty a => Pretty (Slice a) where
   ppr (Slice xs) = brackets (commasep (map ppr xs))
 
+instance Pretty d => Pretty (FlatDimIndex d) where
+  ppr (FlatDimIndex n s) = ppr n <+> text ":" <+> ppr s
+
+instance Pretty a => Pretty (FlatSlice a) where
+  ppr (FlatSlice offset xs) = brackets (ppr offset <> text ";" <+> commasep (map ppr xs))
+
 instance Pretty BasicOp where
   ppr (SubExp se) = ppr se
   ppr (Opaque OpaqueNil e) = text "opaque" <> apply [ppr e]
@@ -189,6 +195,9 @@ instance Pretty BasicOp where
       with = case safety of
         Unsafe -> text "with"
         Safe -> text "with?"
+  ppr (FlatIndex v slice) = ppr v <> ppr slice
+  ppr (FlatUpdate src slice se) =
+    ppr src <+> text "with" <+> ppr slice <+> text "=" <+> ppr se
   ppr (Iota e x s et) = text "iota" <> et' <> apply [ppr e, ppr x, ppr s]
     where
       et' = text $ show $ primBitSize $ IntType et

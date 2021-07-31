@@ -205,6 +205,10 @@ sliceMemLoc :: MemLoc -> Slice (Imp.TExp Int64) -> MemLoc
 sliceMemLoc (MemLoc mem shape ixfun) slice =
   MemLoc mem shape $ IxFun.slice ixfun slice
 
+flatSliceMemLoc :: MemLoc -> FlatSlice (Imp.TExp Int64) -> MemLoc
+flatSliceMemLoc (MemLoc mem shape ixfun) slice =
+  MemLoc mem shape $ IxFun.flatSlice ixfun slice
+
 data ArrayEntry = ArrayEntry
   { entryArrayLoc :: MemLoc,
     entryArrayElemType :: PrimType
@@ -881,6 +885,14 @@ defCompileBasicOp (Pat [pe]) (Update safety _ slice se) =
     slice' = fmap toInt64Exp slice
     dims = map toInt64Exp $ arrayDims $ patElemType pe
     write = sUpdate (patElemName pe) slice' se
+defCompileBasicOp _ FlatIndex {} =
+  pure ()
+defCompileBasicOp (Pat [pe]) (FlatUpdate _ slice v) = do
+  pe_loc <- entryArrayLoc <$> lookupArray (patElemName pe)
+  v_loc <- entryArrayLoc <$> lookupArray v
+  copy (elemType (patElemType pe)) (flatSliceMemLoc pe_loc slice') v_loc
+  where
+    slice' = fmap toInt64Exp slice
 defCompileBasicOp (Pat [pe]) (Replicate (Shape ds) se) = do
   ds' <- mapM toExp ds
   is <- replicateM (length ds) (newVName "i")

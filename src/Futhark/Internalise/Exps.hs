@@ -1786,6 +1786,18 @@ isOverloadedFunction qname args loc = do
                 <*> internaliseExpToVars (desc ++ "_zip_y") y
             )
     handleRest [x] "unzip" = Just $ flip internaliseExp x
+    handleRest [TupLit [arr, offset, n1, s1, n2, s2] _] "flat_index_2d" = Just $ \desc -> do
+      flatIndexHelper desc loc arr offset [(n1, s1), (n2, s2)]
+    handleRest [TupLit [arr1, offset, s1, s2, arr2] _] "flat_update_2d" = Just $ \desc -> do
+      flatUpdateHelper desc loc arr1 offset [s1, s2] arr2
+    handleRest [TupLit [arr, offset, n1, s1, n2, s2, n3, s3] _] "flat_index_3d" = Just $ \desc -> do
+      flatIndexHelper desc loc arr offset [(n1, s1), (n2, s2), (n3, s3)]
+    handleRest [TupLit [arr1, offset, s1, s2, s3, arr2] _] "flat_update_3d" = Just $ \desc -> do
+      flatUpdateHelper desc loc arr1 offset [s1, s2, s3] arr2
+    handleRest [TupLit [arr, offset, n1, s1, n2, s2, n3, s3, n4, s4] _] "flat_index_4d" = Just $ \desc -> do
+      flatIndexHelper desc loc arr offset [(n1, s1), (n2, s2), (n3, s3), (n4, s4)]
+    handleRest [TupLit [arr1, offset, s1, s2, s3, s4, arr2] _] "flat_update_4d" = Just $ \desc -> do
+      flatUpdateHelper desc loc arr1 offset [s1, s2, s3, s4] arr2
     handleRest _ _ = Nothing
 
     toSigned int_to e desc = do
@@ -1884,6 +1896,100 @@ isOverloadedFunction qname args loc = do
 
       let sa_ws = map (Shape . take dim . arrayDims) sa_ts
       letTupExp' desc $ I.Op $ I.Scatter si_w lam sivs $ zip3 sa_ws (repeat 1) sas
+
+flatIndexHelper :: String -> SrcLoc -> E.Exp -> E.Exp -> [(E.Exp, E.Exp)] -> InternaliseM [SubExp]
+flatIndexHelper desc loc arr offset slices = do
+  arrs <- internaliseExpToVars "arr" arr
+  offset' <- internaliseExp1 "offset" offset
+  old_dim <- I.arraysSize 0 <$> mapM lookupType arrs
+  offset_inbounds_down <- letSubExp "offset_inbounds_down" $ I.BasicOp $ I.CmpOp (I.CmpUle Int64) (intConst Int64 0) offset'
+  offset_inbounds_up <- letSubExp "offset_inbounds_up" $ I.BasicOp $ I.CmpOp (I.CmpUlt Int64) offset' old_dim
+  slices' <-
+    mapM
+      ( \(n, s) -> do
+          n' <- internaliseExp1 "n" n
+          s' <- internaliseExp1 "s" s
+          return (n', s')
+      )
+      slices
+  (min_bound, max_bound) <-
+    foldM
+      ( \(lower, upper) (n, s) -> do
+          n_m1 <- letSubExp "span" $ I.BasicOp $ I.BinOp (I.Sub Int64 I.OverflowUndef) n (intConst Int64 1)
+          spn <- letSubExp "span" $ I.BasicOp $ I.BinOp (I.Mul Int64 I.OverflowUndef) n_m1 s
+
+          span_and_lower <- letSubExp "span_and_lower" $ I.BasicOp $ I.BinOp (I.Add Int64 I.OverflowUndef) spn lower
+          span_and_upper <- letSubExp "span_and_upper" $ I.BasicOp $ I.BinOp (I.Add Int64 I.OverflowUndef) spn upper
+
+          lower' <- letSubExp "minimum" $ I.BasicOp $ I.BinOp (I.UMin Int64) span_and_lower lower
+          upper' <- letSubExp "maximum" $ I.BasicOp $ I.BinOp (I.UMax Int64) span_and_upper upper
+
+          return (lower', upper')
+      )
+      (offset', offset')
+      slices'
+  min_in_bounds <- letSubExp "min_in_bounds" $ I.BasicOp $ I.CmpOp (I.CmpUle Int64) (intConst Int64 0) min_bound
+  max_in_bounds <- letSubExp "max_in_bounds" $ I.BasicOp $ I.CmpOp (I.CmpUlt Int64) max_bound old_dim
+
+  all_bounds <-
+    foldM
+      (\x y -> letSubExp "inBounds" $ I.BasicOp $ I.BinOp I.LogAnd x y)
+      offset_inbounds_down
+      [offset_inbounds_up, min_in_bounds, max_in_bounds]
+
+  c <- assert "bounds_cert" all_bounds (ErrorMsg [ErrorString $ "Flat slice out of bounds: " ++ pretty old_dim ++ " and " ++ pretty slices']) loc
+  let slice = I.FlatSlice offset' $ map (uncurry FlatDimIndex) slices'
+  certifying c $
+    forM arrs $ \arr' ->
+      letSubExp desc $ I.BasicOp $ I.FlatIndex arr' slice
+
+flatUpdateHelper :: String -> SrcLoc -> E.Exp -> E.Exp -> [E.Exp] -> E.Exp -> InternaliseM [SubExp]
+flatUpdateHelper desc loc arr1 offset slices arr2 = do
+  arrs1 <- internaliseExpToVars "arr" arr1
+  offset' <- internaliseExp1 "offset" offset
+  old_dim <- I.arraysSize 0 <$> mapM lookupType arrs1
+  offset_inbounds_down <- letSubExp "offset_inbounds_down" $ I.BasicOp $ I.CmpOp (I.CmpUle Int64) (intConst Int64 0) offset'
+  offset_inbounds_up <- letSubExp "offset_inbounds_up" $ I.BasicOp $ I.CmpOp (I.CmpUlt Int64) offset' old_dim
+  arrs2 <- internaliseExpToVars "arr" arr2
+  ts <- mapM lookupType arrs2
+  slices' <-
+    mapM
+      ( \(s, i) -> do
+          s' <- internaliseExp1 "s" s
+          let n = arraysSize i ts
+          return (n, s')
+      )
+      $ zip slices [0 ..]
+  (min_bound, max_bound) <-
+    foldM
+      ( \(lower, upper) (n, s) -> do
+          n_m1 <- letSubExp "span" $ I.BasicOp $ I.BinOp (I.Sub Int64 I.OverflowUndef) n (intConst Int64 1)
+          spn <- letSubExp "span" $ I.BasicOp $ I.BinOp (I.Mul Int64 I.OverflowUndef) n_m1 s
+
+          span_and_lower <- letSubExp "span_and_lower" $ I.BasicOp $ I.BinOp (I.Add Int64 I.OverflowUndef) spn lower
+          span_and_upper <- letSubExp "span_and_upper" $ I.BasicOp $ I.BinOp (I.Add Int64 I.OverflowUndef) spn upper
+
+          lower' <- letSubExp "minimum" $ I.BasicOp $ I.BinOp (I.UMin Int64) span_and_lower lower
+          upper' <- letSubExp "maximum" $ I.BasicOp $ I.BinOp (I.UMax Int64) span_and_upper upper
+
+          return (lower', upper')
+      )
+      (offset', offset')
+      slices'
+  min_in_bounds <- letSubExp "min_in_bounds" $ I.BasicOp $ I.CmpOp (I.CmpUle Int64) (intConst Int64 0) min_bound
+  max_in_bounds <- letSubExp "max_in_bounds" $ I.BasicOp $ I.CmpOp (I.CmpUlt Int64) max_bound old_dim
+
+  all_bounds <-
+    foldM
+      (\x y -> letSubExp "inBounds" $ I.BasicOp $ I.BinOp I.LogAnd x y)
+      offset_inbounds_down
+      [offset_inbounds_up, min_in_bounds, max_in_bounds]
+
+  c <- assert "bounds_cert" all_bounds (ErrorMsg [ErrorString $ "Flat slice out of bounds: " ++ pretty old_dim ++ " and " ++ pretty slices']) loc
+  let slice = I.FlatSlice offset' $ map (uncurry FlatDimIndex) slices'
+  certifying c $
+    forM (zip arrs1 arrs2) $ \(arr1', arr2') ->
+      letSubExp desc $ I.BasicOp $ I.FlatUpdate arr1' slice arr2'
 
 funcall ::
   String ->
