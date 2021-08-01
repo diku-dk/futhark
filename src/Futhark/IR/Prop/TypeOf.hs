@@ -21,7 +21,7 @@ module Futhark.IR.Prop.TypeOf
     expExtTypeSize,
     subExpType,
     subExpResType,
-    primOpType,
+    basicOpType,
     mapType,
 
     -- * Return type
@@ -62,70 +62,70 @@ mapType outersize f =
   ]
 
 -- | The type of a primitive operation.
-primOpType :: HasScope rep m => BasicOp -> m [Type]
-primOpType (SubExp se) =
+basicOpType :: HasScope rep m => BasicOp -> m [Type]
+basicOpType (SubExp se) =
   pure <$> subExpType se
-primOpType (Opaque _ se) =
+basicOpType (Opaque _ se) =
   pure <$> subExpType se
-primOpType (ArrayLit es rt) =
+basicOpType (ArrayLit es rt) =
   pure [arrayOf rt (Shape [n]) NoUniqueness]
   where
     n = intConst Int64 $ toInteger $ length es
-primOpType (BinOp bop _ _) =
+basicOpType (BinOp bop _ _) =
   pure [Prim $ binOpType bop]
-primOpType (UnOp _ x) =
+basicOpType (UnOp _ x) =
   pure <$> subExpType x
-primOpType CmpOp {} =
+basicOpType CmpOp {} =
   pure [Prim Bool]
-primOpType (ConvOp conv _) =
+basicOpType (ConvOp conv _) =
   pure [Prim $ snd $ convOpType conv]
-primOpType (Index ident slice) =
+basicOpType (Index ident slice) =
   result <$> lookupType ident
   where
     result t = [Prim (elemType t) `arrayOfShape` shape]
     shape = Shape $ sliceDims slice
-primOpType (Update _ src _ _) =
+basicOpType (Update _ src _ _) =
   pure <$> lookupType src
-primOpType (FlatIndex ident slice) =
+basicOpType (FlatIndex ident slice) =
   result <$> lookupType ident
   where
     result t = [Prim (elemType t) `arrayOfShape` shape]
     shape = Shape $ flatSliceDims slice
-primOpType (FlatUpdate src _ _) =
+basicOpType (FlatUpdate src _ _) =
   pure <$> lookupType src
-primOpType (Iota n _ _ et) =
+basicOpType (Iota n _ _ et) =
   pure [arrayOf (Prim (IntType et)) (Shape [n]) NoUniqueness]
-primOpType (Replicate (Shape []) e) =
+basicOpType (Replicate (Shape []) e) =
   pure <$> subExpType e
-primOpType (Replicate shape e) =
+basicOpType (Replicate shape e) =
   pure . flip arrayOfShape shape <$> subExpType e
-primOpType (Scratch t shape) =
+basicOpType (Scratch t shape) =
   pure [arrayOf (Prim t) (Shape shape) NoUniqueness]
-primOpType (Reshape [] e) =
+basicOpType (Reshape [] e) =
   result <$> lookupType e
   where
     result t = [Prim $ elemType t]
-primOpType (Reshape shape e) =
+basicOpType (Reshape shape e) =
   result <$> lookupType e
   where
     result t = [t `setArrayShape` newShape shape]
-primOpType (Rearrange perm e) =
+basicOpType (Rearrange perm e) =
   result <$> lookupType e
   where
     result t = [rearrangeType perm t]
-primOpType (Rotate _ e) =
+basicOpType (Rotate _ e) =
   pure <$> lookupType e
-primOpType (Concat i x _ ressize) =
+basicOpType (Concat i x _ ressize) =
   result <$> lookupType x
   where
     result xt = [setDimSize i xt ressize]
-primOpType (Copy v) =
+basicOpType (Copy v) =
   pure <$> lookupType v
-primOpType (Manifest _ v) =
+basicOpType (Manifest _ v) =
   pure <$> lookupType v
-primOpType Assert {} =
+basicOpType Assert {} =
   pure [Prim Unit]
-primOpType (UpdateAcc v _ _) =
+basicOpType (UpdateAcc v _ _) =
   pure <$> lookupType v
 
 -- | The type of an expression.
@@ -137,7 +137,7 @@ expExtType (Apply _ _ rt _) = pure $ map (fromDecl . declExtTypeOf) rt
 expExtType (If _ _ _ rt) = pure $ map extTypeOf $ ifReturns rt
 expExtType (DoLoop merge _ _) =
   pure $ loopExtType $ map fst merge
-expExtType (BasicOp op) = staticShapes <$> primOpType op
+expExtType (BasicOp op) = staticShapes <$> basicOpType op
 expExtType (WithAcc inputs lam) =
   fmap staticShapes $
     (<>)
