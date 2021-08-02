@@ -59,10 +59,14 @@ memEmpty :: MemRefs
 memEmpty = MemRefs (Over mempty) (Over mempty)
 
 data CoalescedKind
-  = Ccopy -- let x    = copy b^{lu}
-  | InPl -- let x[i] = b^{lu}
-  | Conc -- let x    = concat(a, b^{lu})
-  | Trans -- transitive, i.e., other variables aliased with b.
+  = -- | let x    = copy b^{lu}
+    Ccopy
+  | -- | let x[i] = b^{lu}
+    InPl
+  | -- | let x    = concat(a, b^{lu})
+    Conc
+  | -- | transitive, i.e., other variables aliased with b.
+    Trans
 
 data ArrayMemBound = MemBlock PrimType Shape VName ExpMem.IxFun
 
@@ -71,11 +75,14 @@ type FreeVarSubsts = M.Map VName (ExpMem.TPrimExp Int64 VName) --(ExpMem.PrimExp
 -- | Coalesced Access Entry
 data Coalesced
   = Coalesced
-      CoalescedKind -- the kind of coalescing
-      ArrayMemBound -- destination mem_block info @f_m_x[i]@ (must be ArrayMem)
+      CoalescedKind
+      -- ^ the kind of coalescing
+      ArrayMemBound
+      -- ^ destination mem_block info @f_m_x[i]@ (must be ArrayMem)
       -- (Maybe ExpMem.IxFun) -- the inverse ixfun of a coalesced array, such that
       --                     --  ixfuns can be correctly constructed for aliases;
-      FreeVarSubsts -- substitutions for free vars in index function
+      FreeVarSubsts
+      -- ^ substitutions for free vars in index function
 
 data CoalsEntry = CoalsEntry
   { -- | destination memory block

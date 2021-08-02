@@ -12,8 +12,6 @@
 -- structure cpu { Alloc 2 }
 -- structure gpu { Alloc 2 }
 
-import "/futlib/array"
-
 let main [n] (a0: [n]i32, n_iter: i32): []i32 =
   let a2 = loop a = a0 for _i < n_iter do
     -- If we coalesce a2 into a3, we end up coalescing the actual memory that

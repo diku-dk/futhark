@@ -46,10 +46,10 @@ data IntrfEnv = IntrfEnv
     -- | the set of active memory blocks; subset of alloca;
     --   a memory block is removed from active upon a last use
     --   and added to active at array creation.
-    --                         , fresh :: Names
-    -- ^ array variables that are newly created, i.e., they "own"
-    --   their memory block during their life span.
     active :: Names
+    --                         , fresh :: Names
+    --- ^ array variables that are newly created, i.e., they "own"
+    --   their memory block during their life span.
   }
 
 emptyInterfEnv :: IntrfEnv
@@ -86,12 +86,10 @@ intrfAnBnd ::
   IntrfEnv ->
   Stm (Aliases ExpMem.SeqMem) ->
   IntrfEnv
-intrfAnBnd _ env (Let pat _ (Op (ExpMem.Alloc sz _))) =
-  case patNames pat of
-    [] -> env
-    nm : _ ->
-      let nm' = trace ("AllocNode: " ++ pretty nm ++ " size: " ++ pretty sz) nm
-       in env {alloc = oneName nm' <> alloc env}
+intrfAnBnd _ env (Let (Pat [PatElem nm _]) _ (Op (ExpMem.Alloc sz _))) =
+  env {alloc = oneName (trace ("AllocNode: " ++ pretty nm ++ " size: " ++ pretty sz) nm) <> alloc env}
+intrfAnBnd _ _ (Let _ _ (Op (ExpMem.Alloc _ _))) =
+  error "Impossible"
 intrfAnBnd lutab env (Let pat _ (DoLoop var_ses _ body)) =
   -- BUG!!! you need to handle the potential circular aliasing
   -- between loop-variant variables and their memory blocks;
@@ -99,17 +97,20 @@ intrfAnBnd lutab env (Let pat _ (DoLoop var_ses _ body)) =
   let alias0 = updateAliasing (alias env) pat Nothing
       alias' =
         foldl
-          ( \acc patel ->
+          ( \acc ((loopel, _), patel) ->
               let patnm = patElemName patel
-                  parnm = paramName undefined -- fpar
-               in case trace ("LOOPMEMCTX: " ++ pretty patnm ++ " " ++ pretty parnm) $ M.lookup patnm alias0 of
+                  parnm = paramName loopel
+               in case trace
+                    ( "LOOPMEMCTX: " ++ pretty patnm -- ++ " " ++ pretty parnm
+                    )
+                    $ M.lookup patnm alias0 of
                     Nothing -> acc
                     Just al ->
                       trace (" found alias set: " ++ pretty (namesToList al)) $
                         M.insert parnm al acc
           )
           (alias env)
-          $ patElems pat
+          $ zip var_ses $ patElems pat
 
       (lvars, _) = unzip var_ses
       lvarmems =
