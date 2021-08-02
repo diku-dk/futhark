@@ -70,7 +70,7 @@ nonlinearInMemory name m =
       nonlinear
         =<< find
           ((== name) . patElemName . fst)
-          (zip (patElements pat) ts)
+          (zip (patElems pat) ts)
     _ -> Nothing
   where
     nonlinear (pe, t)

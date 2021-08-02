@@ -229,7 +229,7 @@ ruleBasicOp vtable pat _ (CmpOp (CmpEq t) se1 se2)
 
     returns v ifpat tbranch fbranch =
       fmap snd . find ((== v) . patElemName . fst) $
-        zip (patElements ifpat) $
+        zip (patElems ifpat) $
           zip (map resSubExp (bodyResult tbranch)) (map resSubExp (bodyResult fbranch))
 ruleBasicOp _ pat _ (Replicate (Shape []) se@Constant {}) =
   Simplify $ letBind pat $ BasicOp $ SubExp se

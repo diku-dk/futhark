@@ -190,7 +190,7 @@ runDistNestT env (DistNestT m) = do
         loopNestingParamsAndArrs outermost
 
     identityStms (rem_pat, res) =
-      stmsFromList $ zipWith identityStm (patElements rem_pat) res
+      stmsFromList $ zipWith identityStm (patElems rem_pat) res
     identityStm pe (SubExpRes cs (Var v))
       | Just arr <- lookup v params_to_arrs =
         certify cs $ Let (Pat [pe]) (defAux ()) $ BasicOp $ Copy arr
@@ -269,7 +269,7 @@ leavingNesting acc =
               certify cs $ Let (Pat [pe]) aux $ BasicOp $ Replicate (Shape [w]) se
 
             stms =
-              stmsFromList $ zipWith remnantStm (patElements pat) res
+              stmsFromList $ zipWith remnantStm (patElems pat) res
 
         return $ acc {distTargets = newtargets, distStms = stms}
 
@@ -800,7 +800,7 @@ segmentedScatterKernel nest perm scatter_pat cs scatter_w lam ivs dests = do
 
     let pat =
           Pat . rearrangeShape perm $
-            patElements $ loopNestingPat $ fst nest
+            patElems $ loopNestingPat $ fst nest
 
     letBind pat $ Op $ segOp k
   where
@@ -872,7 +872,7 @@ segmentedUpdateKernel nest perm cs arr slice v = do
 
     let pat =
           Pat . rearrangeShape perm $
-            patElements $ loopNestingPat $ fst nest
+            patElems $ loopNestingPat $ fst nest
 
     letBind pat $ Op $ segOp k
 
@@ -907,7 +907,7 @@ segmentedGatherKernel nest cs arr slice = do
   traverse renameStm <=< runBuilder_ $ do
     addStms prestms
 
-    let pat = Pat $ patElements $ loopNestingPat $ fst nest
+    let pat = Pat $ patElems $ loopNestingPat $ fst nest
 
     letBind pat $ Op $ segOp k
 
@@ -928,7 +928,7 @@ segmentedHistKernel nest perm cs hist_w ops lam arrs = do
   (ispace, inputs) <- flatKernel nest
   let orig_pat =
         Pat . rearrangeShape perm $
-          patElements $ loopNestingPat $ fst nest
+          patElems $ loopNestingPat $ fst nest
 
   -- The input/output arrays _must_ correspond to some kernel input,
   -- or else the original nested Hist would have been ill-typed.
@@ -1120,7 +1120,7 @@ isSegmentedOp nest perm free_in_op _free_in_fold_op nes arrs m = runMaybeT $ do
 
         let pat =
               Pat . rearrangeShape perm $
-                patElements $ loopNestingPat $ fst nest
+                patElems $ loopNestingPat $ fst nest
 
         m pat ispace kernel_inps nes' nested_arrs
 
@@ -1153,7 +1153,7 @@ expandKernelNest pes (outer_nest, inner_nests) = do
       return
         nest
           { loopNestingPat =
-              Pat $ patElements (loopNestingPat nest) <> pes'
+              Pat $ patElems (loopNestingPat nest) <> pes'
           }
 
     expandPatElemWith dims pe = do

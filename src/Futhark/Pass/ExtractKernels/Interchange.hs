@@ -54,7 +54,7 @@ interchangeLoop
         mapM expand merge
 
     let loop_pat_expanded =
-          Pat $ map expandPatElem $ patElements loop_pat
+          Pat $ map expandPatElem $ patElems loop_pat
         new_params =
           [Param pname $ fromDecl ptype | (Param pname ptype, _) <- merge]
         new_arrs = map (paramName . fst) merge_expanded
@@ -75,7 +75,7 @@ interchangeLoop
           Let loop_pat_expanded aux $
             Op $ Screma w (arrs' <> new_arrs) (mapSOAC lam)
         res = varsRes $ patNames loop_pat_expanded
-        pat' = Pat $ rearrangeShape perm $ patElements pat
+        pat' = Pat $ rearrangeShape perm $ patElems pat
 
     return $
       SeqLoop perm pat' merge_expanded form $
@@ -145,13 +145,13 @@ interchangeBranch1
   (Branch perm branch_pat cond tbranch fbranch (IfDec ret if_sort))
   (MapNesting pat aux w params_and_arrs) = do
     let ret' = map (`arrayOfRow` Free w) ret
-        pat' = Pat $ rearrangeShape perm $ patElements pat
+        pat' = Pat $ rearrangeShape perm $ patElems pat
 
         (params, arrs) = unzip params_and_arrs
         lam_ret = rearrangeShape perm $ map rowType $ patTypes pat
 
         branch_pat' =
-          Pat $ map (fmap (`arrayOfRow` w)) $ patElements branch_pat
+          Pat $ map (fmap (`arrayOfRow` w)) $ patElems branch_pat
 
         mkBranch branch = (renameBody =<<) $ do
           let lam = Lambda params branch lam_ret
@@ -204,7 +204,7 @@ interchangeWithAcc1
           maplam = Lambda (iota_p : orig_acc_params ++ params) (lambdaBody acc_lam) maplam_ret
       auxing map_aux . fmap subExpsRes . letTupExp' "withacc_inter" $
         Op $ Screma w (iota_w : map paramName acc_params ++ arrs) (mapSOAC maplam)
-    let pat = Pat $ rearrangeShape perm $ patElements map_pat
+    let pat = Pat $ rearrangeShape perm $ patElems map_pat
         perm' = [0 .. patSize pat -1]
     pure $ WithAccStm perm' pat inputs' acc_lam'
     where

@@ -223,7 +223,7 @@ updateAliasing ::
 updateAliasing stab pat m_ip =
   -- not $ any (`nameIn` freeIn pat) $ patternNames pat,
   foldl updateTab stab $
-    map addMaybe $ patElements pat
+    map addMaybe $ patElems pat
   where
     addMaybe a = if not $ patElemName a `nameIn` freeIn pat then (a, m_ip) else (a, Nothing)
     -- Compute the transitive closure of current pattern
@@ -251,7 +251,7 @@ getArrMemAssoc pat =
         ExpMem.MemPrim _ -> Nothing
         ExpMem.MemAcc {} -> Nothing
     )
-    $ patElements pat
+    $ patElems pat
 
 getArrMemAssocFParam :: [FParam (Aliases ExpMem.SeqMem)] -> [(VName, ArrayMemBound)]
 getArrMemAssocFParam =

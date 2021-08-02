@@ -109,7 +109,7 @@ intrfAnBnd lutab env (Let pat _ (DoLoop var_ses _ body)) =
                         M.insert parnm al acc
           )
           (alias env)
-          $ patElements pat
+          $ patElems pat
 
       (lvars, _) = unzip var_ses
       lvarmems =

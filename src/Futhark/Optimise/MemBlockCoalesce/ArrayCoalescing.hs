@@ -198,7 +198,7 @@ mkCoalsTabBnd _ (Let (Pat [pe]) _ e) td_env bu_env
   | Just primexp <- primExpFromExp (basePMconv (scope td_env) (scals bu_env)) e =
     bu_env {scals = M.insert (patElemName pe) primexp (scals bu_env)}
 mkCoalsTabBnd lutab (Let patt _ (If _ body_then body_else _)) td_env bu_env =
-  let pat_val_elms = patElements patt
+  let pat_val_elms = patElems patt
       -- ToDo: 1. we need to record existential memory blocks in alias table on the top-down pass.
       --       2. need to extend the scope table
 
@@ -346,7 +346,7 @@ mkCoalsTabBnd lutab (Let patt _ (If _ body_then body_else _)) td_env bu_env =
 --
 
 mkCoalsTabBnd lutab lstm@(Let pat _ (DoLoop arginis lform body)) td_env bu_env =
-  let pat_val_elms = patElements pat
+  let pat_val_elms = patElems pat
       td_env' = topDownLoop td_env lstm
       allocs_bdy = foldl getAllocs (alloc td_env') $ bodyStms body
       td_env_allocs = td_env' {alloc = allocs_bdy}
@@ -1022,7 +1022,7 @@ mkSubsTab ::
   [SubExp] ->
   M.Map VName (ExpMem.TPrimExp Int64 VName)
 mkSubsTab pat res =
-  let pat_elms = patElements pat
+  let pat_elms = patElems pat
    in M.fromList $ mapMaybe mki64subst $ zip pat_elms res
   where
     mki64subst (a, Var v)

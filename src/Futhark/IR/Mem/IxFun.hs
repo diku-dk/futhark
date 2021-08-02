@@ -15,6 +15,7 @@ module Futhark.IR.Mem.IxFun
     rotate,
     reshape,
     slice,
+    flatSlice,
     rebase,
     shape,
     rank,
@@ -36,7 +37,7 @@ import Control.Category
 import Control.Monad.Identity
 import Control.Monad.State
 import Control.Monad.Writer
-import Data.Function (on)
+import Data.Function (on, (&))
 import Data.List (sort, sortBy, unzip4, zip4, zip5, zipWith5, (\\))
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.List.NonEmpty as NE
@@ -54,10 +55,14 @@ import Futhark.IR.Prop
 import Futhark.IR.Syntax
   ( DimChange (..),
     DimIndex (..),
+    FlatDimIndex (..),
+    FlatSlice (..),
     ShapeChange,
     Slice (..),
     VName,
     dimFix,
+    flatSliceDims,
+    flatSliceStrides,
     unitSlice,
   )
 import Futhark.IR.Syntax.Core (Ext (..))
@@ -536,6 +541,36 @@ slice ixfun@(IxFun (lmad@(LMAD _ _) :| lmads) oshp cg) dim_slices
         IxFun (lmad' :| lmad : lmads) oshp (cg && cg')
       _ -> error "slice: reached impossible case"
 
+-- | Flat-slice an index function.
+flatSlice ::
+  (Eq num, IntegralExp num) =>
+  IxFun num ->
+  FlatSlice num ->
+  IxFun num
+flatSlice ixfun@(IxFun (LMAD offset (dim : dims) :| lmads) oshp cg) (FlatSlice new_offset is)
+  | hasContiguousPerm ixfun,
+    ldRotate dim == 0 =
+    let lmad =
+          LMAD
+            (offset + new_offset * ldStride dim)
+            ( map (helper $ ldStride dim) is
+                <> dims
+            )
+            & setLMADPermutation [0 ..]
+     in IxFun (lmad :| lmads) oshp cg
+  where
+    helper s0 (FlatDimIndex n s) = LMADDim (s0 * s) 0 n 0 Unknown
+flatSlice (IxFun (lmad :| lmads) oshp cg) s@(FlatSlice new_offset _) =
+  IxFun (LMAD (new_offset * base_stride) (new_dims <> tail_dims) :| lmad : lmads) oshp cg
+  where
+    tail_shapes = tail $ lmadShape lmad
+    base_stride = product tail_shapes
+    tail_strides = tail $ scanr (*) 1 tail_shapes
+    tail_dims = zipWith5 LMADDim tail_strides (repeat 0) tail_shapes [length new_shapes ..] (repeat Inc)
+    new_shapes = flatSliceDims s
+    new_strides = map (* base_stride) $ flatSliceStrides s
+    new_dims = zipWith5 LMADDim new_strides (repeat 0) new_shapes [0 ..] (repeat Inc)
+
 -- | Handle the simple case where all reshape dimensions are coercions.
 reshapeCoercion ::
   (Eq num, IntegralExp num) =>
@@ -883,11 +918,13 @@ flatOneDim (s, r, n) i
   | r == 0 = i * s
   | otherwise = ((i + r) `mod` n) * s
 
--- | Generalised iota with user-specified offset and strides.
+-- | Generalised iota with user-specified offset and rotates.
 makeRotIota ::
   IntegralExp num =>
   Monotonicity ->
+  -- | Offset
   num ->
+  -- | Pairs of shape and rotation
   [(num, num)] ->
   LMAD num
 makeRotIota mon off support

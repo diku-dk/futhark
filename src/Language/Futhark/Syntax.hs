@@ -806,6 +806,8 @@ data ExpBase f vn
   | Project Name (ExpBase f vn) (f PatType) SrcLoc
   | -- | Numeric negation (ugly special case; Haskell did it first).
     Negate (ExpBase f vn) SrcLoc
+  | -- | Logical and bitwise negation.
+    Not (ExpBase f vn) SrcLoc
   | -- | Fail if the first expression does not return true,
     -- and return the value of the second expression if it
     -- does.
@@ -866,6 +868,7 @@ instance Located (ExpBase f vn) where
   locOf (Var _ _ loc) = locOf loc
   locOf (Ascript _ _ loc) = locOf loc
   locOf (Negate _ pos) = locOf pos
+  locOf (Not _ pos) = locOf pos
   locOf (Update _ _ _ pos) = locOf pos
   locOf (RecordUpdate _ _ _ _ pos) = locOf pos
   locOf (Lambda _ _ _ _ loc) = locOf loc

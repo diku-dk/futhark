@@ -353,6 +353,12 @@ instance FreeIn d => FreeIn (DimIndex d) where
 instance FreeIn d => FreeIn (Slice d) where
   freeIn' = Data.Foldable.foldMap freeIn'
 
+instance FreeIn d => FreeIn (FlatDimIndex d) where
+  freeIn' = Data.Foldable.foldMap freeIn'
+
+instance FreeIn d => FreeIn (FlatSlice d) where
+  freeIn' = Data.Foldable.foldMap freeIn'
+
 instance FreeIn SubExpRes where
   freeIn' (SubExpRes cs se) = freeIn' cs <> freeIn' se
 

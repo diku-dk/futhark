@@ -115,7 +115,15 @@ tests =
         test_rebase2,
         test_rebase3,
         test_rebase4_5,
-        test_invIxFun
+        test_invIxFun,
+        test_flatSlice_iota,
+        test_slice_flatSlice_iota,
+        test_flatSlice_flatSlice_iota,
+        test_flatSlice_slice_iota,
+        test_flatSlice_rotate_iota,
+        test_flatSlice_rotate_slice_iota,
+        test_flatSlice_transpose_slice_iota,
+        test_rotate_flatSlice_transpose_slice_iota
       ]
 
 singleton :: TestTree -> [TestTree]
@@ -606,3 +614,76 @@ test_invIxFun =
   ]
     & testGroup "invIxFun"
     & singleton
+
+test_flatSlice_iota :: [TestTree]
+test_flatSlice_iota =
+  singleton $
+    testCase "flatSlice . iota" $
+      compareOps $
+        flatSlice (iota [n * n * n * n]) $
+          FlatSlice 2 [FlatDimIndex (n * 2) 4, FlatDimIndex n 3, FlatDimIndex 1 2]
+
+test_slice_flatSlice_iota :: [TestTree]
+test_slice_flatSlice_iota =
+  singleton $
+    testCase "slice . flatSlice . iota " $
+      compareOps $
+        slice (flatSlice (iota [2 + n * n * n]) flat_slice) $
+          Slice [DimFix 2, DimSlice 0 n 1, DimFix 0]
+  where
+    flat_slice = FlatSlice 2 [FlatDimIndex (n * n) 1, FlatDimIndex n 1, FlatDimIndex 1 1]
+
+test_flatSlice_flatSlice_iota :: [TestTree]
+test_flatSlice_flatSlice_iota =
+  singleton $
+    testCase "flatSlice . flatSlice . iota " $
+      compareOps $
+        flatSlice (flatSlice (iota [10 * 10]) flat_slice_1) flat_slice_2
+  where
+    flat_slice_1 = FlatSlice 17 [FlatDimIndex 3 27, FlatDimIndex 3 10, FlatDimIndex 3 1]
+    flat_slice_2 = FlatSlice 2 [FlatDimIndex 2 (-2)]
+
+test_flatSlice_slice_iota :: [TestTree]
+test_flatSlice_slice_iota =
+  singleton $
+    testCase "flatSlice . slice . iota " $
+      compareOps $
+        flatSlice (slice (iota [210, 100]) $ Slice [DimSlice 10 100 2, DimFix 10]) flat_slice_1
+  where
+    flat_slice_1 = FlatSlice 17 [FlatDimIndex 3 27, FlatDimIndex 3 10, FlatDimIndex 3 1]
+
+test_flatSlice_rotate_iota :: [TestTree]
+test_flatSlice_rotate_iota =
+  singleton $
+    testCase "flatSlice . rotate . iota " $
+      compareOps $
+        flatSlice (rotate (iota [10, 10]) [2, 5]) flat_slice_1
+  where
+    flat_slice_1 = FlatSlice 3 [FlatDimIndex 2 2, FlatDimIndex 2 1]
+
+test_flatSlice_rotate_slice_iota :: [TestTree]
+test_flatSlice_rotate_slice_iota =
+  singleton $
+    testCase "flatSlice . rotate . slice . iota " $
+      compareOps $
+        flatSlice (rotate (slice (iota [20, 20]) $ Slice [DimSlice 1 5 2, DimSlice 0 5 2]) [2, 3]) flat_slice_1
+  where
+    flat_slice_1 = FlatSlice 1 [FlatDimIndex 2 2]
+
+test_flatSlice_transpose_slice_iota :: [TestTree]
+test_flatSlice_transpose_slice_iota =
+  singleton $
+    testCase "flatSlice . transpose . slice . iota " $
+      compareOps $
+        flatSlice (permute (slice (iota [20, 20]) $ Slice [DimSlice 1 5 2, DimSlice 0 5 2]) [1, 0]) flat_slice_1
+  where
+    flat_slice_1 = FlatSlice 1 [FlatDimIndex 2 2]
+
+test_rotate_flatSlice_transpose_slice_iota :: [TestTree]
+test_rotate_flatSlice_transpose_slice_iota =
+  singleton $
+    testCase "flatSlice . transpose . slice . iota " $
+      compareOps $
+        rotate (flatSlice (permute (slice (iota [20, 20]) $ Slice [DimSlice 1 5 2, DimSlice 1 5 2]) [1, 0]) flat_slice_1) [2, 1]
+  where
+    flat_slice_1 = FlatSlice 1 [FlatDimIndex 2 2]
