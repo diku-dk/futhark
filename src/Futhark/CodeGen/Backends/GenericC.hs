@@ -1480,7 +1480,9 @@ $esc:header_extra
 
 $esc:lock_h
 
-$edecls:builtin
+$esc:("#define FUTHARK_F64_ENABLED")
+
+$esc:cScalarDefs
 
 $edecls:early_decls
 
@@ -1532,11 +1534,6 @@ $edecls:entry_point_decls
         loc = case func of
           C.OldFunc _ _ _ _ _ _ l -> l
           C.Func _ _ _ _ _ l -> l
-
-    builtin =
-      cIntOps ++ cFloat32Ops ++ cFloat64Ops ++ cFloatConvOps
-        ++ cFloat32Funs
-        ++ cFloat64Funs
 
     util_h = $(embedStringFile "rts/c/util.h")
     timing_h = $(embedStringFile "rts/c/timing.h")
