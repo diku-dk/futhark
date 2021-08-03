@@ -49,7 +49,10 @@ lastUseAnBdy ::
 lastUseAnBdy alstab bdy@(Body _ bnds result) (lutab, used_nms) =
   -- perform analysis bottom-up in bindings: results are known to be used,
   -- hence they are added to the used_nms set.
-  let (lutab', _) = traverseBindings alstab (stmsToList bnds) (lutab, used_nms) $ getNamesFromSubExps $ map resSubExp result
+  let (lutab', _) =
+        traverseBindings alstab (stmsToList bnds) (lutab, used_nms) $
+          namesToList $
+            freeIn $ map resSubExp result
       -- Clean up the used names by recomputing the aliasing transitive-closure
       -- of the free names in body based on the current alias table @alstab@.
       free_in_body = freeIn bdy

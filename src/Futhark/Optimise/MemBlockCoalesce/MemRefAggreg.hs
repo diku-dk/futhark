@@ -11,6 +11,7 @@ module Futhark.Optimise.MemBlockCoalesce.MemRefAggreg
 where
 
 import qualified Control.Exception.Base as Exc
+import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as M
 import Data.Maybe
@@ -31,10 +32,12 @@ se1 = intConst Int64 1
 -----------------------------------------------------
 -- Some translations of Accesses and Ixfuns        --
 -----------------------------------------------------
+
+-- | Wraps some LMADs in an IxFun
 fakeIxfunFromLmads :: [LmadRef] -> ExpMem.IxFun
 fakeIxfunFromLmads [] = error "Fun fakeIxfunFromLmads should only be called on non-empty lists!"
 fakeIxfunFromLmads (lmad : lmads) =
-  IxFun.IxFun (lmad NE.:| lmads) [pe64 se1] False
+  IxFun.IxFun (lmad :| lmads) [pe64 se1] False
 
 -- | Checks whether the index function can be translated at the
 --     current program point and also returns the substitutions.
@@ -46,10 +49,9 @@ fakeIxfunFromLmads (lmad : lmads) =
 translateIndFunFreeVar ::
   ScopeTab ->
   ScalarTab ->
-  Maybe ExpMem.IxFun ->
+  ExpMem.IxFun ->
   (Bool, FreeVarSubsts)
-translateIndFunFreeVar _ _ Nothing = (True, M.empty)
-translateIndFunFreeVar scope0 scals0 (Just indfun) =
+translateIndFunFreeVar scope0 scals0 indfun =
   translateHelper M.empty $ freeIn indfun
   where
     translateHelper :: FreeVarSubsts -> Names -> (Bool, FreeVarSubsts)
@@ -76,7 +78,7 @@ translateAccess _ _ (Over l)
 translateAccess scope0 scals0 (Over slmads)
   | lmad : lmads <- S.toList slmads,
     fake_ixfn <- fakeIxfunFromLmads (lmad : lmads),
-    (True, subst) <- translateIndFunFreeVar scope0 scals0 (Just fake_ixfn) =
+    (True, subst) <- translateIndFunFreeVar scope0 scals0 fake_ixfn =
     Over $
       S.fromList $
         NE.toList $
@@ -174,7 +176,8 @@ recordMemRefUses ::
   Stm (Aliases ExpMem.SeqMem) ->
   (CoalsTab, InhibitTab)
 recordMemRefUses td_env bu_env stm =
-  let (active_tab, inhibit_tab) = (activeCoals bu_env, inhibit bu_env)
+  let active_tab = activeCoals bu_env
+      inhibit_tab = inhibit bu_env
       (stm_wrts, stm_uses) = getUseSumFromStm td_env active_tab stm
       active_etries = M.toList active_tab
 
@@ -256,12 +259,12 @@ recordMemRefUses td_env bu_env stm =
           Nothing -> acc
           Just nms -> nms <> acc
     mbLmad indfun
-      | (True, subst) <- translateIndFunFreeVar (scope td_env) (scals bu_env) (Just indfun),
-        (IxFun.IxFun (lmad NE.:| []) _ _) <- IxFun.substituteInIxFun subst indfun =
+      | (True, subst) <- translateIndFunFreeVar (scope td_env) (scals bu_env) indfun,
+        (IxFun.IxFun (lmad :| []) _ _) <- IxFun.substituteInIxFun subst indfun =
         Just lmad
     mbLmad _ = Nothing
     addLmads (Just wrts) uses etry =
-      etry {memrefs = unionMemRefs (MemRefs uses wrts) (memrefs etry)}
+      etry {memrefs = MemRefs uses wrts <> memrefs etry}
     addLmads _ _ _ =
       error "Impossible case reached because we have filtered Nothings before"
 

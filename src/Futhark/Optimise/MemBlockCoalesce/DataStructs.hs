@@ -22,16 +22,13 @@ module Futhark.Optimise.MemBlockCoalesce.DataStructs
     InhibitTab,
     aliasTransClos,
     updateAliasing,
-    getNamesFromSubExps,
     unionCoalsEntry,
     getArrMemAssocFParam,
     getScopeMemInfo,
     prettyCoalTab,
-    memEmpty,
     createsNewArrOK,
     getArrMemAssoc,
     getUniqueMemFParam,
-    unionMemRefs,
     markFailedCoal,
   )
 where
@@ -46,17 +43,36 @@ import qualified Futhark.IR.SeqMem as ExpMem
 import Futhark.Util.Pretty hiding (float, line, sep, string, (</>), (<|>))
 import Prelude
 
+-- | An LMAD specialized to TPrimExps (a typed primexp)
 type LmadRef = IxFun.LMAD (ExpMem.TPrimExp Int64 VName)
 
-data AccsSum = Top | Over (S.Set LmadRef)
+-- | Accesses sum
+data AccsSum
+  = -- | TODO: What is this meant to signify?
+    Top
+  | -- | And this?
+    Over (S.Set LmadRef)
+
+instance Semigroup AccsSum where
+  Top <> _ = Top
+  _ <> Top = Top
+  (Over a) <> (Over b) =
+    Over $ S.union a b
+
+instance Monoid AccsSum where
+  mempty = Over mempty
 
 data MemRefs = MemRefs
   { dstrefs :: AccsSum,
     srcwrts :: AccsSum
   }
 
-memEmpty :: MemRefs
-memEmpty = MemRefs (Over mempty) (Over mempty)
+instance Semigroup MemRefs where
+  m1 <> m2 =
+    MemRefs (dstrefs m1 <> dstrefs m2) (srcwrts m1 <> srcwrts m2)
+
+instance Monoid MemRefs where
+  mempty = MemRefs mempty mempty
 
 data CoalescedKind
   = -- | let x    = copy b^{lu}
@@ -189,16 +205,6 @@ instance Pretty CoalsEntry where
       <+/> "}"
       <+/> "\n"
 
-unionMemRefs :: MemRefs -> MemRefs -> MemRefs
-unionMemRefs (MemRefs d1 s1) (MemRefs d2 s2) =
-  MemRefs (unionAccss d1 d2) (unionAccss s1 s2)
-  where
-    unionAccss :: AccsSum -> AccsSum -> AccsSum
-    unionAccss Top _ = Top
-    unionAccss _ Top = Top
-    unionAccss (Over a) (Over b) =
-      Over $ S.union a b
-
 unionCoalsEntry :: CoalsEntry -> CoalsEntry -> CoalsEntry
 unionCoalsEntry etry1 (CoalsEntry dstmem2 dstind2 alsmem2 vartab2 optdeps2 memrefs2) =
   if dstmem etry1 /= dstmem2 || dstind etry1 /= dstind2
@@ -206,16 +212,10 @@ unionCoalsEntry etry1 (CoalsEntry dstmem2 dstind2 alsmem2 vartab2 optdeps2 memre
     else
       etry1
         { alsmem = alsmem etry1 <> alsmem2,
-          optdeps = optdeps etry1 `M.union` optdeps2,
-          vartab = vartab etry1 `M.union` vartab2,
-          memrefs = unionMemRefs (memrefs etry1) memrefs2
+          optdeps = optdeps etry1 <> optdeps2,
+          vartab = vartab etry1 <> vartab2,
+          memrefs = memrefs etry1 <> memrefs2
         }
-
-getNamesFromSubExps :: [SubExp] -> [VName]
-getNamesFromSubExps = mapMaybe var2Maybe
-  where
-    var2Maybe (Constant _) = Nothing
-    var2Maybe (Var nm) = Just nm
 
 aliasTransClos :: AliasTab -> Names -> Names
 aliasTransClos alstab args =

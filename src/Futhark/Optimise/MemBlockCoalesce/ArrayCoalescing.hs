@@ -68,6 +68,7 @@ markSuccessCoal (actv, succc) m_b info_b =
     appendCoalsInfo m_b info_b succc
   )
 
+-- | Prettyprint the inhibit table
 prettyInhibitTab :: InhibitTab -> String
 prettyInhibitTab tab =
   let list_tups = map (second namesToList) (M.toList tab)
@@ -77,11 +78,14 @@ prettyInhibitTab tab =
 --- Main Coalescing Transformation computes a successful coalescing table    ---
 --------------------------------------------------------------------------------
 
+-- | Given a program, compute the coalescing table by folding over each function.
 mkCoalsTab :: Prog (Aliases ExpMem.SeqMem) -> CoalsTab
 mkCoalsTab prg = foldl M.union M.empty $ map mkCoalsTabFun $ progFuns prg
 
+-- | Given a function, compute the coalescing table
 mkCoalsTabFun :: FunDef (Aliases ExpMem.SeqMem) -> CoalsTab
 mkCoalsTabFun fun@(FunDef _ _ _ _ fpars body) =
+  -- First compute last-use information
   let (_, lutab) = lastUseFun fun
       unique_mems = namesFromList $ M.keys $ getUniqueMemFParam fpars
       topenv =
@@ -438,7 +442,7 @@ mkCoalsTabBnd lutab lstm@(Let pat _ (DoLoop arginis lform body)) td_env bu_env =
           (zip res_mem_bdy res_mem_arg)
       -- analysing the loop body starts from a null memory-reference set;
       --  the results of the loop body iteration are aggregated later
-      actv4 = M.map (\etry -> etry {memrefs = memEmpty}) actv3
+      actv4 = M.map (\etry -> etry {memrefs = mempty}) actv3
       res_env_body =
         mkCoalsTabBdy
           lutab
@@ -544,7 +548,7 @@ mkCoalsTabBnd lutab lstm@(Let pat _ (DoLoop arginis lform body)) td_env bu_env =
             info_i' =
               info_i
                 { optdeps = M.insert b m_b $ optdeps info_i,
-                  memrefs = memEmpty,
+                  memrefs = mempty,
                   vartab = vtab_i
                 }
             act' = M.insert m_i info_i' act
@@ -569,7 +573,7 @@ mkCoalsTabBnd lutab lstm@(Let pat _ (DoLoop arginis lform body)) td_env bu_env =
         let scope_tab =
               scope td_env
                 <> scopeOfFParams (map fst arginis)
-            (safe_5, fv_subst) = translateIndFunFreeVar scope_tab (scals bu_env) (Just ixfn)
+            (safe_5, fv_subst) = translateIndFunFreeVar scope_tab (scals bu_env) ixfn
          in if safe_5
               then Just $ info {vartab = M.insert x (Coalesced knd mbd fv_subst) (vartab info)}
               else Nothing
@@ -585,7 +589,7 @@ mkCoalsTabBnd lutab lstm@(Let pat _ (DoLoop arginis lform body)) td_env bu_env =
       case M.lookup m_b actv_bef of
         Nothing -> etry
         Just etry0 ->
-          etry {memrefs = unionMemRefs (memrefs etry0) (memrefs etry)}
+          etry {memrefs = memrefs etry0 <> memrefs etry}
     aggAcrossLoopEntry ::
       ScopeTab ->
       ScalarTab ->
@@ -644,7 +648,7 @@ mkCoalsTabBnd lutab stm@(Let pat@(Pat [x']) _ e@(BasicOp (Update _ x _ _elm))) t
                 -- this case should not happen, but if it can that just fail conservatively
                 -- markFailedCoal (actv, inhbt) m_x
                 Just (Coalesced k mblk@(MemBlock _ _ _ x_indfun) _) ->
-                  let (ok, fv_subs) = translateIndFunFreeVar (scope td_env) (scals bu_env) $ Just x_indfun
+                  let (ok, fv_subs) = translateIndFunFreeVar (scope td_env) (scals bu_env) x_indfun
                       safe2 = safety2 td_env (dstmem info)
                    in if not ok || not safe2
                         then -- conservatively fail free-var translation fails
@@ -708,7 +712,7 @@ mkCoalsTabBnd lutab stm@(Let pat _ e) td_env bu_env =
                   case getDirAliasedIxfn td_env a_acc b of
                     Nothing -> trace ("failed alias " ++ pretty b ++ " @ " ++ pretty mb) (failed, s_acc)
                     Just (_, _, b_indfun') ->
-                      case translateIndFunFreeVar (scope td_env) (scals bu_env) (Just b_indfun') of
+                      case translateIndFunFreeVar (scope td_env) (scals bu_env) b_indfun' of
                         (False, _) -> trace ("failed translate " ++ pretty b ++ " @ " ++ pretty mb) (failed, s_acc)
                         (True, fv_subst) ->
                           let mem_info = Coalesced Trans (MemBlock tp shp x_mem b_indfun') fv_subst
@@ -721,7 +725,7 @@ mkCoalsTabBnd lutab stm@(Let pat _ e) td_env bu_env =
                   -- if 2,4,5 hold promote it to successful coalesced table,
                   -- or if e = transpose, etc. then postpone decision for later on
                   let safe_2 = safety2 td_env x_mem -- nameIn x_mem (alloc td_env)
-                      (safe_5, fv_subst) = translateIndFunFreeVar (scope td_env) (scals bu_env) (Just new_indfun)
+                      (safe_5, fv_subst) = translateIndFunFreeVar (scope td_env) (scals bu_env) new_indfun
                    in if safe_2 && safe_5
                         then
                           let mem_info = Coalesced k mblk fv_subst
@@ -768,14 +772,14 @@ filterSafetyCond2and5 act_coal inhb_coal scals_env td_env =
                         case getDirAliasedIxfn td_env acc b of
                           Nothing -> trace ("failed getting direct-alias ixfn: " ++ pretty b ++ " @ " ++ pretty m_b) failed
                           Just (_, _, b_indfun') ->
-                            case translateIndFunFreeVar (scope td_env) scals_env (Just b_indfun') of
+                            case translateIndFunFreeVar (scope td_env) scals_env b_indfun' of
                               (False, _) -> trace ("failed translating ixfn subs: " ++ pretty b ++ " @ " ++ pretty m_b) failed
                               (True, fv_subst) ->
                                 let mem_info = Coalesced Trans (MemBlock tp0 shp0 x_mem b_indfun') fv_subst
                                     info' = info {vartab = M.insert b mem_info vtab}
                                  in (M.insert m_b info' acc, inhb)
                       Just (Coalesced k mblk@(MemBlock _ _ _ new_indfun) _) ->
-                        let (safe_5, fv_subst) = translateIndFunFreeVar (scope td_env) scals_env (Just new_indfun)
+                        let (safe_5, fv_subst) = translateIndFunFreeVar (scope td_env) scals_env new_indfun
                             safe_2 = safety2 td_env x_mem
                          in if safe_5 && safe_2
                               then
@@ -864,7 +868,7 @@ mkCoalsHelper3PatternMatch pat e lutab td_env successCoals_tab activeCoals_tab i
                               mem_yx_al
                               vtab'
                               opts'
-                              memEmpty
+                              mempty
                        in trace ("inserting new coalescing relation: " ++ pretty m_b ++ " -> " ++ pretty m_yx) $
                             M.insert m_b coal_etry acc
             _ -> trace ("Failed helper 3: " ++ pretty m_b) acc
