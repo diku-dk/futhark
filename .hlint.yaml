@@ -1,0 +1,3 @@
+- modules:
+  - {name: [Data.Set, Data.HashSet], as: S}
+  - {name: [Data.Map, Data.Map.*], as: M}
