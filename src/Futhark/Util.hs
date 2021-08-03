@@ -64,11 +64,9 @@ import Data.Either
 import Data.Function ((&))
 import Data.List (foldl', genericDrop, genericSplitAt, sort)
 import qualified Data.List.NonEmpty as NE
-import Data.Map (Map)
-import qualified Data.Map as Map
+import qualified Data.Map as M
 import Data.Maybe
-import Data.Set (Set)
-import qualified Data.Set as Set
+import qualified Data.Set as S
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import qualified Data.Text.Encoding.Error as T
@@ -440,8 +438,8 @@ atMostChars n s
   | length s > n = take (n -3) s ++ "..."
   | otherwise = s
 
-invertMap :: (Ord v, Ord k) => Map k v -> Map v (Set k)
+invertMap :: (Ord v, Ord k) => M.Map k v -> M.Map v (S.Set k)
 invertMap m =
-  Map.toList m
-    & fmap (swap . first Set.singleton)
-    & foldr (uncurry $ Map.insertWith (<>)) mempty
+  M.toList m
+    & fmap (swap . first S.singleton)
+    & foldr (uncurry $ M.insertWith (<>)) mempty

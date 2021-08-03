@@ -404,8 +404,8 @@ openClCode kernels =
         | kernel_func <- kernels
       ]
 
-atomicsDefs :: String
-atomicsDefs = $(embedStringFile "rts/c/atomics.h")
+cAtomicsDefs :: String
+cAtomicsDefs = $(embedStringFile "rts/c/atomics.h")
 
 genOpenClPrelude :: S.Set PrimType -> [C.Definition]
 genOpenClPrelude ts =
@@ -457,23 +457,14 @@ static inline void mem_fence_local() {
   mem_fence(CLK_LOCAL_MEM_FENCE);
 }
 |]
-    ++ cIntOps
-    ++ cFloat32Ops
-    ++ cFloat32Funs
-    ++ (if uses_float64 then cFloat64Ops ++ cFloat64Funs ++ cFloatConvOps else [])
-    ++ [[C.cedecl|$esc:atomicsDefs|]]
+    ++ [[C.cedecl|$esc:cScalarDefs|], [C.cedecl|$esc:cAtomicsDefs|]]
   where
     uses_float64 = FloatType Float64 `S.member` ts
 
 genCUDAPrelude :: [C.Definition]
 genCUDAPrelude =
-  cudafy ++ ops
+  cudafy ++ [[C.cedecl|$esc:cScalarDefs|], [C.cedecl|$esc:cAtomicsDefs|]]
   where
-    ops =
-      cIntOps ++ cFloat32Ops ++ cFloat32Funs ++ cFloat64Ops
-        ++ cFloat64Funs
-        ++ cFloatConvOps
-        ++ [[C.cedecl|$esc:atomicsDefs|]]
     cudafy =
       [CUDAC.cunit|
 $esc:("#define FUTHARK_CUDA")
