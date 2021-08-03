@@ -3,7 +3,7 @@
 
 module Futhark.Optimise.MemBlockCoalesce.MemRefAggreg
   ( recordMemRefUses,
-    translateIndFunFreeVar,
+    freeVarSubstitutions,
     aggSummaryLoopTotal,
     aggSummaryLoopPartial,
     noMemOverlap,
@@ -36,38 +36,38 @@ import Prelude
 --     enough substitutions (from the bottom-up scalar table) until
 --     all vars appearing in the index function are defined in the
 --     current scope?"
---   Please fix: needs a form of fix-point iteration!
-translateIndFunFreeVar ::
+freeVarSubstitutions ::
   FreeIn a =>
   ScopeTab ->
   ScalarTab ->
   a ->
-  (Bool, FreeVarSubsts)
-translateIndFunFreeVar scope0 scals0 indfun =
-  translateHelper M.empty $ namesToList $ freeIn indfun
+  Maybe FreeVarSubsts
+freeVarSubstitutions scope0 scals0 indfun =
+  freeVarSubstitutions' mempty $ namesToList $ freeIn indfun
   where
-    translateHelper :: FreeVarSubsts -> [VName] -> (Bool, FreeVarSubsts)
-    translateHelper substs [] = (True, substs)
-    translateHelper subst0 cur_fvs =
-      let fv_trans_vars = filter (`M.notMember` scope0) cur_fvs
-       in case fmap unzip $ mapM getSubst fv_trans_vars of
+    freeVarSubstitutions' :: FreeVarSubsts -> [VName] -> Maybe FreeVarSubsts
+    freeVarSubstitutions' subs [] = Just subs
+    freeVarSubstitutions' subs0 fvs =
+      let fvs_not_in_scope = filter (`M.notMember` scope0) fvs
+       in case fmap unzip $ mapM getSubstitution fvs_not_in_scope of
+            -- We require that all free variables can be substituted
             Just (subs, new_fvs) ->
-              translateHelper (subst0 <> mconcat subs) $ concat new_fvs
-            _ -> (False, M.empty)
-    getSubst v
+              freeVarSubstitutions' (subs0 <> mconcat subs) $ concat new_fvs
+            _ -> Nothing
+    getSubstitution v
       | Just pe <- M.lookup v scals0,
         IntType Int64 <- primExpType pe =
         Just (M.singleton v $ isInt64 pe, namesToList $ freeIn pe)
-    getSubst _v = Nothing
+    getSubstitution _v = Nothing
 
--- mbAccess
+-- | Translates free variables in an access sum
 translateAccess :: ScopeTab -> ScalarTab -> AccsSum -> AccsSum
 translateAccess _ _ Top = Top
 translateAccess scope0 scals0 (Over slmads)
-  | (True, subst) <- translateIndFunFreeVar scope0 scals0 $ S.toList slmads =
+  | Just subs <- freeVarSubstitutions scope0 scals0 $ S.toList slmads =
     slmads
       & S.toList
-      & map (IxFun.substituteInLMAD subst)
+      & map (IxFun.substituteInLMAD subs)
       & S.fromList
       & Over
 translateAccess _ _ _ = Top
@@ -245,8 +245,8 @@ recordMemRefUses td_env bu_env stm =
           Nothing -> acc
           Just nms -> nms <> acc
     mbLmad indfun
-      | (True, subst) <- translateIndFunFreeVar (scope td_env) (scals bu_env) indfun,
-        (IxFun.IxFun (lmad :| []) _ _) <- IxFun.substituteInIxFun subst indfun =
+      | Just subs <- freeVarSubstitutions (scope td_env) (scals bu_env) indfun,
+        (IxFun.IxFun (lmad :| []) _ _) <- IxFun.substituteInIxFun subs indfun =
         Just lmad
     mbLmad _ = Nothing
     addLmads (Just wrts) uses etry =

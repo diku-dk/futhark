@@ -46,7 +46,7 @@ import Prelude
 -- | An LMAD specialized to TPrimExps (a typed primexp)
 type LmadRef = IxFun.LMAD (ExpMem.TPrimExp Int64 VName)
 
--- | Accesses sum
+-- | Sum of all memory accesses at a given point in the code
 data AccsSum
   = -- | TODO: What is this meant to signify?
     Top
