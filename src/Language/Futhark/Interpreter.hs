@@ -1033,6 +1033,7 @@ eval env (Negate e _) = do
     ValuePrim (UnsignedValue (Int16Value v)) -> return $ UnsignedValue $ Int16Value (- v)
     ValuePrim (UnsignedValue (Int32Value v)) -> return $ UnsignedValue $ Int32Value (- v)
     ValuePrim (UnsignedValue (Int64Value v)) -> return $ UnsignedValue $ Int64Value (- v)
+    ValuePrim (FloatValue (Float16Value v)) -> return $ FloatValue $ Float16Value (- v)
     ValuePrim (FloatValue (Float32Value v)) -> return $ FloatValue $ Float32Value (- v)
     ValuePrim (FloatValue (Float64Value v)) -> return $ FloatValue $ Float64Value (- v)
     _ -> error $ "Cannot negate " ++ pretty ev
@@ -1228,6 +1229,7 @@ data Ctx = Ctx
 nanValue :: PrimValue -> Bool
 nanValue (FloatValue v) =
   case v of
+    Float16Value x -> isNaN x
     Float32Value x -> isNaN x
     Float64Value x -> isNaN x
 nanValue _ = False
@@ -1276,7 +1278,8 @@ initialCtx =
       ]
     intOp f = sintOp f ++ uintOp f
     floatOp f =
-      [ (getF, putF, P.doBinOp (f Float32)),
+      [ (getF, putF, P.doBinOp (f Float16)),
+        (getF, putF, P.doBinOp (f Float32)),
         (getF, putF, P.doBinOp (f Float64))
       ]
     arithOp f g = Just $ bopDef $ intOp f ++ floatOp g
@@ -1295,7 +1298,8 @@ initialCtx =
         (getU, Just . BoolValue, P.doCmpOp (f Int64))
       ]
     floatCmp f =
-      [ (getF, Just . BoolValue, P.doCmpOp (f Float32)),
+      [ (getF, Just . BoolValue, P.doCmpOp (f Float16)),
+        (getF, Just . BoolValue, P.doCmpOp (f Float32)),
         (getF, Just . BoolValue, P.doCmpOp (f Float64))
       ]
     boolCmp f = [(getB, Just . BoolValue, P.doCmpOp f)]

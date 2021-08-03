@@ -190,7 +190,7 @@ class Server {
           this._set_var(vname, ptr, typename);
         }
       } catch (err) {
-        var err_msg = "Failed to restore variable " + vname + ".\nPossibly malformed data in " + fname + ".\n";
+        var err_msg = "Failed to restore variable " + vname + ".\nPossibly malformed data in " + fname + ".\n" + err.toString();
         throw err_msg;
       }
     }
