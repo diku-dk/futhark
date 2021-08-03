@@ -98,7 +98,7 @@ generateContext = do
   GC.publicDef_ "context_config_set_logging" GC.InitDecl $ \s ->
     ( [C.cedecl|void $id:s(struct $id:cfg* cfg, int flag);|],
       [C.cedecl|void $id:s(struct $id:cfg* cfg, int detail) {
-                             /* Does nothing for this backend. */
+                             // Does nothing for this backend.
                              (void)cfg; (void)detail;
                            }|]
     )
