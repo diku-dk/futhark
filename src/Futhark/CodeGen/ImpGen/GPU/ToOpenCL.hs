@@ -421,8 +421,8 @@ genOpenClPrelude ts =
         | uses_float64
       ]
     ++ [C.cunit|
-/* Some OpenCL programs dislike empty progams, or programs with no kernels.
- * Declare a dummy kernel to ensure they remain our friends. */
+// Some OpenCL programs dislike empty progams, or programs with no kernels.
+// Declare a dummy kernel to ensure they remain our friends.
 __kernel void dummy_kernel(__global unsigned char *dummy, int n)
 {
     const int thread_gid = get_global_id(0);
