@@ -462,7 +462,7 @@ test_invIxFun =
       -- let b = rotate 4 a
       -- let y[i] = b
       let i_0 = IxFunLMAD.iota [TPrimExp $ LeafExp (VName (nameFromString "n") 0) $ IntType Int64]
-          i_b = IxFunLMAD.rebase (IxFunLMAD.rotate (i_0) [TPrimExp $ ValueExp (IntValue (Int64Value 4))]) i_0
+          i_b = IxFunLMAD.rebase (IxFunLMAD.rotate i_0 [TPrimExp $ ValueExp (IntValue (Int64Value 4))]) i_0
           i_y = IxFunLMAD.iota [TPrimExp $ LeafExp (VName (nameFromString "n") 0) $ IntType Int64]
        in case IxFunLMAD.invIxFun i_y i_b of
             Just i_0' ->
@@ -475,8 +475,8 @@ test_invIxFun =
       -- let y = map (rotate 20) y
       -- let y[i] = b
       let i_0 = IxFunLMAD.iota [TPrimExp $ LeafExp (VName (nameFromString "n") 0) $ IntType Int64]
-          i_b = IxFunLMAD.rebase (IxFunLMAD.rotate (i_0) [TPrimExp $ ValueExp (IntValue (Int64Value 4))]) i_0
-          i_y = IxFunLMAD.rebase (IxFunLMAD.rotate (i_0) [TPrimExp $ ValueExp (IntValue (Int64Value 20))]) i_0
+          i_b = IxFunLMAD.rebase (IxFunLMAD.rotate i_0 [TPrimExp $ ValueExp (IntValue (Int64Value 4))]) i_0
+          i_y = IxFunLMAD.rebase (IxFunLMAD.rotate i_0 [TPrimExp $ ValueExp (IntValue (Int64Value 20))]) i_0
        in case IxFunLMAD.invIxFun i_y i_b of
             Just i_0' ->
               let i_b' = IxFunLMAD.rebase i_b i_0'
@@ -487,7 +487,7 @@ test_invIxFun =
       -- let b = rotate (-4) a
       -- let y[i] = b
       let i_0 = IxFunLMAD.iota [TPrimExp $ LeafExp (VName (nameFromString "n") 0) $ IntType Int64]
-          i_b = IxFunLMAD.rebase (IxFunLMAD.rotate (i_0) [TPrimExp $ ValueExp (IntValue (Int64Value (-4)))]) i_0
+          i_b = IxFunLMAD.rebase (IxFunLMAD.rotate i_0 [TPrimExp $ ValueExp (IntValue (Int64Value (-4)))]) i_0
           i_y = IxFunLMAD.iota [TPrimExp $ LeafExp (VName (nameFromString "n") 0) $ IntType Int64]
        in case IxFunLMAD.invIxFun i_y i_b of
             Just i_0' ->

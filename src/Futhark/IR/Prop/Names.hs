@@ -46,6 +46,7 @@ import Control.Monad.State.Strict
 import Data.Foldable
 import qualified Data.IntMap.Strict as IM
 import qualified Data.Map.Strict as M
+import qualified Data.Set as S
 import Futhark.IR.Prop.Patterns
 import Futhark.IR.Prop.Scope
 import Futhark.IR.Syntax
@@ -204,6 +205,9 @@ instance (FreeIn a, FreeIn b, FreeIn c, FreeIn d) => FreeIn (a, b, c, d) where
   freeIn' (a, b, c, d) = freeIn' a <> freeIn' b <> freeIn' c <> freeIn' d
 
 instance FreeIn a => FreeIn [a] where
+  freeIn' = foldMap freeIn'
+
+instance FreeIn a => FreeIn (S.Set a) where
   freeIn' = foldMap freeIn'
 
 instance

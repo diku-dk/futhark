@@ -295,9 +295,9 @@ mkCoalsTabBnd lutab (Let patt _ (If _ body_then body_else _)) td_env bu_env =
           M.unionWith (<>) inhb_then1 inhb_else1
    in bu_env {activeCoals = actv_res, successCoals = succ_res, inhibit = inhibit_res}
   where
-    foldfun _ ((act, inhb), succc) ((m_b, _, _, _), (_, _, _, _))
+    foldfun _ ((act, _), _) ((m_b, _, _, _), (_, _, _, _))
       | Nothing <- M.lookup m_b act =
-        trace "Imposible Case!!!" $ Exc.assert False ((act, inhb), succc)
+        error "Imposible Case!!!"
     foldfun
       ((_, succ_then0), (_, succ_else0))
       ((act, inhb), succc)

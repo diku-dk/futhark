@@ -10,7 +10,6 @@ module Futhark.Optimise.MemBlockCoalesce.MemRefAggreg
   )
 where
 
-import qualified Control.Exception.Base as Exc
 import Data.Function ((&))
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.Map.Strict as M
@@ -49,7 +48,7 @@ freeVarSubstitutions scope0 scals0 indfun =
     freeVarSubstitutions' subs [] = Just subs
     freeVarSubstitutions' subs0 fvs =
       let fvs_not_in_scope = filter (`M.notMember` scope0) fvs
-       in case fmap unzip $ mapM getSubstitution fvs_not_in_scope of
+       in case unzip <$> mapM getSubstitution fvs_not_in_scope of
             -- We require that all free variables can be substituted
             Just (subs, new_fvs) ->
               freeVarSubstitutions' (subs0 <> mconcat subs) $ concat new_fvs
@@ -64,11 +63,9 @@ freeVarSubstitutions scope0 scals0 indfun =
 translateAccess :: ScopeTab -> ScalarTab -> AccsSum -> AccsSum
 translateAccess _ _ Top = Top
 translateAccess scope0 scals0 (Over slmads)
-  | Just subs <- freeVarSubstitutions scope0 scals0 $ S.toList slmads =
+  | Just subs <- freeVarSubstitutions scope0 scals0 slmads =
     slmads
-      & S.toList
-      & map (IxFun.substituteInLMAD subs)
-      & S.fromList
+      & S.map (IxFun.substituteInLMAD subs)
       & Over
 translateAccess _ _ _ = Top
 
@@ -82,7 +79,7 @@ getUseSumFromStm td_env coal_tab (Let Pat {} _ (BasicOp (Index arr (Slice slc)))
   | Just (MemBlock _ shp _ _) <- getScopeMemInfo arr (scope td_env),
     length slc == length (shapeDims shp) && all isFix slc =
     case getDirAliasedIxfn td_env coal_tab arr of
-      Nothing -> Exc.assert False ([], [])
+      Nothing -> error "impossible"
       Just (mem_b, mem_arr, ixfn_arr) ->
         let new_ixfn = IxFun.slice ixfn_arr $ Slice $ map (fmap pe64) slc
          in ([], [(mem_b, mem_arr, new_ixfn)])
@@ -109,15 +106,15 @@ getUseSumFromStm td_env coal_tab (Let (Pat [x']) _ (BasicOp (Update _ _x (Slice 
           Var a -> case getDirAliasedIxfn td_env coal_tab a of
             Nothing -> ([r1], [r1])
             Just r2 -> ([r1], [r1, r2])
-getUseSumFromStm _ _ (Let Pat {} _ (BasicOp Update {})) = Exc.assert False ([], [])
+getUseSumFromStm _ _ (Let Pat {} _ (BasicOp Update {})) = error "impossible"
 -- y = copy x
 getUseSumFromStm td_env coal_tab (Let (Pat [y]) _ (BasicOp (Copy x))) =
   let wrt = getDirAliasedIxfn td_env coal_tab $ patElemName y
       rd = getDirAliasedIxfn td_env coal_tab x
    in case (wrt, rd) of
         (Just w, Just r) -> ([w], [w, r])
-        _ -> Exc.assert False ([], []) -- should not happen as @x@ should be an array
-getUseSumFromStm _ _ (Let Pat {} _ (BasicOp Copy {})) = Exc.assert False ([], [])
+        _ -> error $ "Impossible, " ++ pretty x ++ " should be an array"
+getUseSumFromStm _ _ (Let Pat {} _ (BasicOp Copy {})) = error "Impossible"
 -- concat
 getUseSumFromStm td_env coal_tab (Let (Pat ys) _ (BasicOp (Concat _i a bs _ses))) =
   let ws = mapMaybe (getDirAliasedIxfn td_env coal_tab . patElemName) ys
