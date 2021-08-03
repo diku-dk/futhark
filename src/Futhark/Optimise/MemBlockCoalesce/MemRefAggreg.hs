@@ -44,22 +44,20 @@ translateIndFunFreeVar ::
   a ->
   (Bool, FreeVarSubsts)
 translateIndFunFreeVar scope0 scals0 indfun =
-  translateHelper M.empty $ freeIn indfun
+  translateHelper M.empty $ namesToList $ freeIn indfun
   where
-    translateHelper :: FreeVarSubsts -> Names -> (Bool, FreeVarSubsts)
-    translateHelper substs nms
-      | mempty == nms = (True, substs)
+    translateHelper :: FreeVarSubsts -> [VName] -> (Bool, FreeVarSubsts)
+    translateHelper substs [] = (True, substs)
     translateHelper subst0 cur_fvs =
-      let fv_trans_vars = filter (\x -> not $ M.member x scope0) $ namesToList cur_fvs
-          (subs, new_fvs_2) = unzip $ mapMaybe getSubst fv_trans_vars
-          new_fvs = foldl (<>) mempty new_fvs_2
-       in if length fv_trans_vars == length subs
-            then translateHelper (M.union subst0 $ M.fromList subs) new_fvs
-            else (False, M.empty)
+      let fv_trans_vars = filter (`M.notMember` scope0) cur_fvs
+       in case fmap unzip $ mapM getSubst fv_trans_vars of
+            Just (subs, new_fvs) ->
+              translateHelper (subst0 <> mconcat subs) $ concat new_fvs
+            _ -> (False, M.empty)
     getSubst v
       | Just pe <- M.lookup v scals0,
         IntType Int64 <- primExpType pe =
-        Just ((v, isInt64 pe), freeIn pe)
+        Just (M.singleton v $ isInt64 pe, namesToList $ freeIn pe)
     getSubst _v = Nothing
 
 -- mbAccess
