@@ -281,7 +281,7 @@ addInvAliassesVarTab td_env vtab x
          in case getScopeMemInfo x0 (scope td_env) of
               Nothing -> error "impossible"
               Just (MemBlock ptp shp _ _) ->
-                let coal = Coalesced Trans (MemBlock ptp shp m_y x_ixfn0) fv_subs
+                let coal = Coalesced TransitiveCoal (MemBlock ptp shp m_y x_ixfn0) fv_subs
                     vartab' = M.insert x0 coal vtab
                  in addInvAliassesVarTab td_env vartab' x0
 addInvAliassesVarTab _ _ _ = error "impossible"

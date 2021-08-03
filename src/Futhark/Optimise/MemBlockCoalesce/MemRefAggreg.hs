@@ -60,14 +60,14 @@ freeVarSubstitutions scope0 scals0 indfun =
     getSubstitution _v = Nothing
 
 -- | Translates free variables in an access sum
-translateAccess :: ScopeTab -> ScalarTab -> AccsSum -> AccsSum
-translateAccess _ _ Top = Top
-translateAccess scope0 scals0 (Over slmads)
+translateAccess :: ScopeTab -> ScalarTab -> AccessSummary -> AccessSummary
+translateAccess _ _ Undeterminable = Undeterminable
+translateAccess scope0 scals0 (Set slmads)
   | Just subs <- freeVarSubstitutions scope0 scals0 slmads =
     slmads
       & S.map (IxFun.substituteInLMAD subs)
-      & Over
-translateAccess _ _ _ = Top
+      & Set
+translateAccess _ _ _ = Undeterminable
 
 -- | This function computes the written and read memory references for the current statement
 getUseSumFromStm ::
@@ -169,15 +169,15 @@ recordMemRefUses td_env bu_env stm =
           map
             ( \(m_b, etry) ->
                 if null stm_wrts
-                  then (Just $ Over mempty, dstrefs (memrefs etry))
+                  then (Just $ Set mempty, dstrefs (memrefs etry))
                   else
                     let alias_m_b = getAliases mempty m_b
                         ixfns = map tupThd $ filter ((`nameIn` alias_m_b) . tupFst) stm_wrts
                         wrt_tmps = mapMaybe mbLmad ixfns
                         wrt_lmads =
                           if length wrt_tmps == length ixfns
-                            then Over $ S.fromList wrt_tmps
-                            else Top
+                            then Set $ S.fromList wrt_tmps
+                            else Undeterminable
                         prev_use =
                           translateAccess (scope td_env) (scals bu_env) $
                             (dstrefs . memrefs) etry
@@ -193,7 +193,7 @@ recordMemRefUses td_env bu_env stm =
         map
           ( \(m_b, etry) ->
               if null stm_uses
-                then Over mempty
+                then Set mempty
                 else
                   let -- get rid of the read and write to m_b, those are not relevant
                       alias_m_b = getAliases mempty m_b
@@ -204,8 +204,8 @@ recordMemRefUses td_env bu_env stm =
                         --trace ("MemRefUses for: "++pretty (m_b,dstmem etry)++" "++pretty stm_uses') $
                         mapMaybe mbLmad ixfns
                    in if length lmads == length ixfns
-                        then Over (S.fromList lmads)
-                        else Top
+                        then Set (S.fromList lmads)
+                        else Undeterminable
           )
           active_etries
 
@@ -257,14 +257,14 @@ recordMemRefUses td_env bu_env stm =
 --  possible. Currently the implementations are dummy      --
 --  aiming to be useful only when one of the sets is empty.--
 -------------------------------------------------------------
-noMemOverlap :: TopDnEnv -> AccsSum -> AccsSum -> Bool
-noMemOverlap _ _ (Over mr)
+noMemOverlap :: TopDnEnv -> AccessSummary -> AccessSummary -> Bool
+noMemOverlap _ _ (Set mr)
   | mr == mempty = True
-noMemOverlap _ (Over mr) _
+noMemOverlap _ (Set mr) _
   | mr == mempty = True
-noMemOverlap _ Top _ = False
-noMemOverlap _ _ Top = False
-noMemOverlap _ (Over _) (Over _) =
+noMemOverlap _ Undeterminable _ = False
+noMemOverlap _ _ Undeterminable = False
+noMemOverlap _ (Set _) (Set _) =
   False
 
 -- TODO add non-trivial implementation, please
@@ -273,7 +273,7 @@ noMemOverlap _ (Over _) (Over _) =
 --     across a loop of index i = 0 .. n-1
 --   The current implementation is naive, in that it
 --     treats the case when the summary is loop-invariant,
---     and returns Top in the other cases.
+--     and returns Undeterminable in the other cases.
 --   The current implementation is good for while, but needs
 --     to be refined for @for i < n@ loops
 aggSummaryLoopTotal ::
@@ -281,22 +281,22 @@ aggSummaryLoopTotal ::
   ScopeTab ->
   ScalarTab ->
   Maybe (VName, (ExpMem.TPrimExp Int64 VName, ExpMem.TPrimExp Int64 VName)) ->
-  AccsSum ->
-  AccsSum
-aggSummaryLoopTotal _ _ _ _ Top = Top
-aggSummaryLoopTotal _ _ _ _ (Over l)
-  | l == mempty = Over mempty
+  AccessSummary ->
+  AccessSummary
+aggSummaryLoopTotal _ _ _ _ Undeterminable = Undeterminable
+aggSummaryLoopTotal _ _ _ _ (Set l)
+  | l == mempty = Set mempty
 aggSummaryLoopTotal scope_bef scope_loop scals_loop _ access
-  | Over ls <- translateAccess scope_loop scals_loop access,
+  | Set ls <- translateAccess scope_loop scals_loop access,
     nms <- foldl (<>) mempty $ map freeIn $ S.toList ls,
     all inBeforeScope (namesToList nms) =
-    Over ls
+    Set ls
   where
     inBeforeScope v =
       case M.lookup v scope_bef of
         Nothing -> False
         Just _ -> True
-aggSummaryLoopTotal _ _ _ _ _ = Top
+aggSummaryLoopTotal _ _ _ _ _ = Undeterminable
 
 -- | Suppossed to partially aggregate the iteration-level summaries
 --     across a loop of index i = 0 .. n-1. This means that it
@@ -308,6 +308,6 @@ aggSummaryLoopPartial ::
   ScopeTab ->
   ScalarTab ->
   Maybe (VName, (ExpMem.TPrimExp Int64 VName, ExpMem.TPrimExp Int64 VName)) ->
-  AccsSum ->
-  AccsSum
+  AccessSummary ->
+  AccessSummary
 aggSummaryLoopPartial = aggSummaryLoopTotal

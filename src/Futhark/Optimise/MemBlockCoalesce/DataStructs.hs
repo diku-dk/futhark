@@ -17,7 +17,7 @@ module Futhark.Optimise.MemBlockCoalesce.DataStructs
     FreeVarSubsts,
     LmadRef,
     MemRefs (..),
-    AccsSum (..),
+    AccessSummary (..),
     BotUpEnv (..),
     InhibitTab,
     aliasTransClos,
@@ -46,25 +46,27 @@ import Prelude
 -- | An LMAD specialized to TPrimExps (a typed primexp)
 type LmadRef = IxFun.LMAD (ExpMem.TPrimExp Int64 VName)
 
--- | Sum of all memory accesses at a given point in the code
-data AccsSum
-  = -- | TODO: What is this meant to signify?
-    Top
-  | -- | And this?
-    Over (S.Set LmadRef)
+-- | Summary of all memory accesses at a given point in the code
+data AccessSummary
+  = -- | The access summary was statically undeterminable, for instance by
+    -- having multiple lmads. In this case, we should conservatively avoid all
+    -- coalescing.
+    Undeterminable
+  | -- | A conservative estimate of the set of accesses up until this point.
+    Set (S.Set LmadRef)
 
-instance Semigroup AccsSum where
-  Top <> _ = Top
-  _ <> Top = Top
-  (Over a) <> (Over b) =
-    Over $ S.union a b
+instance Semigroup AccessSummary where
+  Undeterminable <> _ = Undeterminable
+  _ <> Undeterminable = Undeterminable
+  (Set a) <> (Set b) =
+    Set $ S.union a b
 
-instance Monoid AccsSum where
-  mempty = Over mempty
+instance Monoid AccessSummary where
+  mempty = Set mempty
 
 data MemRefs = MemRefs
-  { dstrefs :: AccsSum,
-    srcwrts :: AccsSum
+  { dstrefs :: AccessSummary,
+    srcwrts :: AccessSummary
   }
 
 instance Semigroup MemRefs where
@@ -76,13 +78,13 @@ instance Monoid MemRefs where
 
 data CoalescedKind
   = -- | let x    = copy b^{lu}
-    Ccopy
+    CopyCoal
   | -- | let x[i] = b^{lu}
-    InPl
+    InPlaceCoal
   | -- | let x    = concat(a, b^{lu})
-    Conc
+    ConcatCoal
   | -- | transitive, i.e., other variables aliased with b.
-    Trans
+    TransitiveCoal
 
 data ArrayMemBound = MemBlock PrimType Shape VName ExpMem.IxFun
 
@@ -172,20 +174,20 @@ data BotUpEnv = BotUpEnv
     inhibit :: InhibitTab
   }
 
-instance Pretty AccsSum where
-  --show :: AccsSum -> String
-  ppr Top = "Top"
-  ppr (Over a) = "Access-Overestimate:" <+/> ppr a <+/> " "
+instance Pretty AccessSummary where
+  --show :: AccessSummary -> String
+  ppr Undeterminable = "Undeterminable"
+  ppr (Set a) = "Access-Set:" <+/> ppr a <+/> " "
 
 instance Pretty MemRefs where
   --show :: MemRefs -> String
   ppr (MemRefs a b) = "( Use-Sum:" <+> ppr a <+> "Write-Sum:" <+> ppr b <> ")"
 
 instance Pretty CoalescedKind where
-  ppr Ccopy = "Cpy"
-  ppr InPl = "InPl"
-  ppr Conc = "Concat"
-  ppr Trans = "Trans"
+  ppr CopyCoal = "Copy"
+  ppr InPlaceCoal = "InPlace"
+  ppr ConcatCoal = "Concat"
+  ppr TransitiveCoal = "Transitive"
 
 instance Pretty ArrayMemBound where
   ppr (MemBlock ptp shp m_nm ixfn) =
@@ -228,7 +230,6 @@ updateAliasing ::
   Maybe VName ->
   AliasTab
 updateAliasing stab pat m_ip =
-  -- not $ any (`nameIn` freeIn pat) $ patternNames pat,
   foldl updateTab stab $
     map addMaybe $ patElems pat
   where
@@ -302,27 +303,7 @@ createsNewArrOK (BasicOp Concat {}) = True
 createsNewArrOK (BasicOp ArrayLit {}) = True
 createsNewArrOK (BasicOp Scratch {}) = True
 createsNewArrOK (Op _) = True
---createsNewArrOK (Op (ExpMem.Inner (ExpMem.SegOp _))) = True
---createsNewArrOK (BasicOp Partition{}) = True -- was this removed?
---createsNewArrOK (Op (ExpMem.Inner ExpMem.Kernel{})) = True -- absolete
---KernelsMem
 createsNewArrOK _ = False
-
-{--
-createsNewArrIK :: Exp (Aliases ExpMem.InKernel) -> Bool
-createsNewArrIK (Op (ExpMem.Inner ExpMem.GroupReduce{})) = True
-createsNewArrIK (Op (ExpMem.Inner ExpMem.GroupScan{})) = True
-createsNewArrIK (Op (ExpMem.Inner ExpMem.GroupStream{})) = True
-createsNewArrIK (Op (ExpMem.Inner ExpMem.Combine{})) = True
-createsNewArrIK (BasicOp Partition{}) = True
-createsNewArrIK (BasicOp Replicate{}) = True
-createsNewArrIK (BasicOp Iota{}) = True
-createsNewArrIK (BasicOp Manifest{}) = True
-createsNewArrIK (BasicOp ExpMem.Copy{}) = True
-createsNewArrIK (BasicOp Concat{}) = True
-createsNewArrIK (BasicOp ArrayLit{}) = True
-createsNewArrIK _ = False
---}
 
 -- | Memory-block removal from active-coalescing table
 --   should only be handled via this function, it is easy

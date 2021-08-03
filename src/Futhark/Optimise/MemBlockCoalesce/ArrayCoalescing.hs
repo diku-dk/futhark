@@ -714,7 +714,7 @@ mkCoalsTabBnd lutab stm@(Let pat _ e) td_env bu_env =
                       case freeVarSubstitutions (scope td_env) (scals bu_env) b_indfun' of
                         Nothing -> trace ("failed translate " ++ pretty b ++ " @ " ++ pretty mb) (failed, s_acc)
                         Just fv_subst ->
-                          let mem_info = Coalesced Trans (MemBlock tp shp x_mem b_indfun') fv_subst
+                          let mem_info = Coalesced TransitiveCoal (MemBlock tp shp x_mem b_indfun') fv_subst
                               info' = info {vartab = M.insert b mem_info vtab}
                            in trace
                                 ("COALESCING: postponed promotion (dir-alias): " ++ pretty (b, mb))
@@ -774,7 +774,7 @@ filterSafetyCond2and5 act_coal inhb_coal scals_env td_env =
                             case freeVarSubstitutions (scope td_env) scals_env b_indfun' of
                               Nothing -> trace ("failed translating ixfn subs: " ++ pretty b ++ " @ " ++ pretty m_b) failed
                               Just fv_subst ->
-                                let mem_info = Coalesced Trans (MemBlock tp0 shp0 x_mem b_indfun') fv_subst
+                                let mem_info = Coalesced TransitiveCoal (MemBlock tp0 shp0 x_mem b_indfun') fv_subst
                                     info' = info {vartab = M.insert b mem_info vtab}
                                  in (M.insert m_b info' acc, inhb)
                       Just (Coalesced k mblk@(MemBlock _ _ _ new_indfun) _) ->
@@ -822,7 +822,7 @@ mkCoalsHelper3PatternMatch pat e lutab td_env successCoals_tab activeCoals_tab i
       -- on top of @m_x@, i.e., transitively, any use of @m_y@ should
       -- be checked for the lifetime of @b@.
       let proper_coals_tab = case knd of
-            InPl -> activeCoals_tab
+            InPlaceCoal -> activeCoals_tab
             _ -> successCoals_tab
           (m_yx, ind_yx, mem_yx_al, x_deps) =
             case M.lookup m_x proper_coals_tab of
@@ -887,7 +887,7 @@ genCoalStmtInfo lutab scopetab pat (BasicOp (Copy b))
       (Just last_uses, Just (MemBlock tpb shpb m_b ind_b)) ->
         if trace ("COALESCING: copy pattern found: " ++ pretty x ++ " = copy " ++ pretty b) $ not (nameIn b last_uses)
           then Nothing
-          else Just [(Ccopy, id, x, m_x, ind_x, b, m_b, ind_b, tpb, shpb)]
+          else Just [(CopyCoal, id, x, m_x, ind_x, b, m_b, ind_b, tpb, shpb)]
       _ -> Nothing
 -- CASE c) @let x[i] = b^{lu}@
 genCoalStmtInfo lutab scopetab pat (BasicOp (Update _ x slice_x (Var b)))
@@ -898,7 +898,7 @@ genCoalStmtInfo lutab scopetab pat (BasicOp (Update _ x slice_x (Var b)))
           then Nothing
           else
             trace ("COALESCING: in-place pattern found: " ++ pretty x' ++ "[]=" ++ pretty b) $
-              Just [(InPl, (`updateIndFunSlice` slice_x), x, m_x, ind_x, b, m_b, ind_b, tpb, shpb)]
+              Just [(InPlaceCoal, (`updateIndFunSlice` slice_x), x, m_x, ind_x, b, m_b, ind_b, tpb, shpb)]
       _ -> Nothing
   where
     updateIndFunSlice :: ExpMem.IxFun -> Slice SubExp -> ExpMem.IxFun
@@ -927,7 +927,7 @@ genCoalStmtInfo lutab scopetab pat (BasicOp (Concat 0 b0 bs _))
                                    in -- ind_x_slice = IxFun.slice ind_x slc
                                       trace
                                         ("Concat coalescing root: " ++ pretty m_b ++ " -> " ++ pretty m_x)
-                                        (acc ++ [(Conc, (`IxFun.slice` slc), x, m_x, ind_x, b, m_b, ind_b, tpb, shpb)], offs', True)
+                                        (acc ++ [(ConcatCoal, (`IxFun.slice` slc), x, m_x, ind_x, b, m_b, ind_b, tpb, shpb)], offs', True)
                                 else (acc, offs', True)
                         _ -> (acc, offs, False)
                 )
