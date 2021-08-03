@@ -24,6 +24,7 @@ module Futhark.IR.Mem.IxFun
     isDirect,
     isLinear,
     substituteInIxFun,
+    substituteInLMAD,
     leastGeneralGeneralization,
     existentialize,
     closeEnough,
@@ -255,23 +256,26 @@ setLMADShape shp lmad = lmad {lmadDims = zipWith (\dim s -> dim {ldShape = s}) (
 -- | Substitute a name with a PrimExp in an LMAD.
 substituteInLMAD ::
   Ord a =>
-  M.Map a (PrimExp a) ->
-  LMAD (PrimExp a) ->
-  LMAD (PrimExp a)
+  M.Map a (TPrimExp t a) ->
+  LMAD (TPrimExp t a) ->
+  LMAD (TPrimExp t a)
 substituteInLMAD tab (LMAD offset dims) =
-  let offset' = substituteInPrimExp tab offset
+  let offset' = sub offset
       dims' =
         map
           ( \(LMADDim s r n p m) ->
               LMADDim
-                (substituteInPrimExp tab s)
-                (substituteInPrimExp tab r)
-                (substituteInPrimExp tab n)
+                (sub s)
+                (sub r)
+                (sub n)
                 p
                 m
           )
           dims
    in LMAD offset' dims'
+  where
+    tab' = fmap untyped tab
+    sub = TPrimExp . substituteInPrimExp tab' . untyped
 
 -- | Substitute a name with a PrimExp in an index function.
 substituteInIxFun ::
@@ -281,7 +285,7 @@ substituteInIxFun ::
   IxFun (TPrimExp t a)
 substituteInIxFun tab (IxFun lmads oshp cg) =
   IxFun
-    (NE.map (fmap TPrimExp . substituteInLMAD tab' . fmap untyped) lmads)
+    (NE.map (substituteInLMAD tab) lmads)
     (map (TPrimExp . substituteInPrimExp tab' . untyped) oshp)
     cg
   where

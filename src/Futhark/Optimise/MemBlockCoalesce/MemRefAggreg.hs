@@ -11,8 +11,8 @@ module Futhark.Optimise.MemBlockCoalesce.MemRefAggreg
 where
 
 import qualified Control.Exception.Base as Exc
+import Data.Function ((&))
 import Data.List.NonEmpty (NonEmpty (..))
-import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import qualified Data.Set as S
@@ -26,18 +26,9 @@ import Futhark.Optimise.MemBlockCoalesce.DataStructs
 import Futhark.Optimise.MemBlockCoalesce.TopDownAn
 import Prelude
 
-se1 :: SubExp
-se1 = intConst Int64 1
-
 -----------------------------------------------------
 -- Some translations of Accesses and Ixfuns        --
 -----------------------------------------------------
-
--- | Wraps some LMADs in an IxFun
-fakeIxfunFromLmads :: [LmadRef] -> ExpMem.IxFun
-fakeIxfunFromLmads [] = error "Fun fakeIxfunFromLmads should only be called on non-empty lists!"
-fakeIxfunFromLmads (lmad : lmads) =
-  IxFun.IxFun (lmad :| lmads) [pe64 se1] False
 
 -- | Checks whether the index function can be translated at the
 --     current program point and also returns the substitutions.
@@ -47,9 +38,10 @@ fakeIxfunFromLmads (lmad : lmads) =
 --     current scope?"
 --   Please fix: needs a form of fix-point iteration!
 translateIndFunFreeVar ::
+  FreeIn a =>
   ScopeTab ->
   ScalarTab ->
-  ExpMem.IxFun ->
+  a ->
   (Bool, FreeVarSubsts)
 translateIndFunFreeVar scope0 scals0 indfun =
   translateHelper M.empty $ freeIn indfun
@@ -73,17 +65,13 @@ translateIndFunFreeVar scope0 scals0 indfun =
 -- mbAccess
 translateAccess :: ScopeTab -> ScalarTab -> AccsSum -> AccsSum
 translateAccess _ _ Top = Top
-translateAccess _ _ (Over l)
-  | l == mempty = Over mempty
 translateAccess scope0 scals0 (Over slmads)
-  | lmad : lmads <- S.toList slmads,
-    fake_ixfn <- fakeIxfunFromLmads (lmad : lmads),
-    (True, subst) <- translateIndFunFreeVar scope0 scals0 fake_ixfn =
-    Over $
-      S.fromList $
-        NE.toList $
-          IxFun.ixfunLMADs $
-            IxFun.substituteInIxFun subst fake_ixfn
+  | (True, subst) <- translateIndFunFreeVar scope0 scals0 $ S.toList slmads =
+    slmads
+      & S.toList
+      & map (IxFun.substituteInLMAD subst)
+      & S.fromList
+      & Over
 translateAccess _ _ _ = Top
 
 -- | This function computes the written and read memory references for the current statement
