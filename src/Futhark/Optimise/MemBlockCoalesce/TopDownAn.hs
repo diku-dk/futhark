@@ -141,14 +141,13 @@ topDownLoop :: TopDnEnv -> Stm (Aliases ExpMem.SeqMem) -> TopDnEnv
 topDownLoop td_env (Let _pat _ (DoLoop arginis lform body)) =
   let scopetab =
         scope td_env
-          <> ( scopeOfFParams (map fst arginis)
-                 <> scopeOf lform --scopeOfLoopForm lform))
-             )
-      scopetab_loop = scopetab <> scopeOf (bodyStms body)
+          <> scopeOfFParams (map fst arginis)
+          <> scopeOf lform --scopeOfLoopForm lform))
+          <> scopeOf (bodyStms body)
       m_alias' = m_alias td_env
    in -- foldl (foldfun scopetab_loop) (m_alias td_env) $
       --   zip3 (patternValueElements pat) arginis bdy_ress
-      td_env {scope = scopetab_loop, m_alias = m_alias'}
+      td_env {scope = scopetab, m_alias = m_alias'}
 {--
   where
     updateAlias (m, m_al) tab =
