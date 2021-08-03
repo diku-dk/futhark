@@ -30,8 +30,10 @@ type ScopeTab = Scope (Aliases ExpMem.SeqMem)
 --   types, memory block and index function, etc.
 
 type DirAlias = ExpMem.IxFun -> ExpMem.IxFun
+-- ^ A direct aliasing transformation
 
 type InvAlias = Maybe (ExpMem.IxFun -> ExpMem.IxFun)
+-- ^ An inverse aliasing transformation
 
 type RangeTab = M.Map VName (PrimExp VName, PrimExp VName)
 
@@ -71,7 +73,7 @@ safety2 td_env m =
 -- For instance, if the expression is a 'Rotate', returns the value being
 -- rotated as well as a function for rotating an index function the appropriate
 -- amount.
-getDirAliasFromExp :: Exp (Aliases ExpMem.SeqMem) -> Maybe (VName, ExpMem.IxFun -> ExpMem.IxFun)
+getDirAliasFromExp :: Exp (Aliases ExpMem.SeqMem) -> Maybe (VName, DirAlias)
 getDirAliasFromExp (BasicOp (SubExp (Var x))) = Just (x, id)
 getDirAliasFromExp (BasicOp (Opaque _ (Var x))) = Just (x, id)
 getDirAliasFromExp (BasicOp (Reshape shp_chg x)) =
@@ -112,7 +114,7 @@ getDirAliasFromExp _ = Nothing
 --
 -- This function complements 'getDirAliasFromExp' by returning a function that
 -- applies the inverse index function transformation.
-getInvAliasFromExp :: Exp (Aliases ExpMem.SeqMem) -> Maybe (ExpMem.IxFun -> ExpMem.IxFun)
+getInvAliasFromExp :: Exp (Aliases ExpMem.SeqMem) -> InvAlias
 getInvAliasFromExp (BasicOp (SubExp (Var _))) = Just id
 getInvAliasFromExp (BasicOp (Opaque _ (Var _))) = Just id
 getInvAliasFromExp (BasicOp (Update {})) = Just id
@@ -227,13 +229,14 @@ getDirAliasedIxfn td_env coals_tab x =
   case getScopeMemInfo x (scope td_env) of
     Just (MemBlock _ _ m_x orig_ixfun) ->
       case M.lookup m_x coals_tab of
-        Nothing -> Just (m_x, m_x, orig_ixfun)
-        -- fine, this is not subject to a coalesced point
-        -- just return the original index function
         Just coal_etry ->
           case walkAliasTab (v_alias td_env) (vartab coal_etry) x of
             Nothing -> error "Should not happen?"
             Just (m, ixf) -> Just (m_x, m, ixf)
+        Nothing ->
+          -- This value is not subject to coalescing at the moment. Just return the
+          -- original index function
+          Just (m_x, m_x, orig_ixfun)
     Nothing -> Nothing
 
 -- | Given a 'VName', walk the 'VarAliasTab' until found in the 'Map'.
