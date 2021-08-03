@@ -510,7 +510,7 @@ test_invIxFun =
           i_b =
             IxFunLMAD.rebase
               ( IxFunLMAD.rotate
-                  (i_0)
+                  i_0
                   [ TPrimExp $ ValueExp (IntValue (Int64Value (-1))),
                     TPrimExp $ ValueExp (IntValue (Int64Value 5))
                   ]

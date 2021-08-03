@@ -88,7 +88,7 @@ getDirAliasFromExp (BasicOp (FlatIndex x (FlatSlice offset idxs))) =
     ( x,
       ( `IxFun.flatSlice`
           ( FlatSlice (ExpMem.pe64 offset) $
-              map (fmap ExpMem.pe64) $ idxs
+              map (fmap ExpMem.pe64) idxs
           )
       )
     )
@@ -115,7 +115,7 @@ getDirAliasFromExp _ = Nothing
 getInvAliasFromExp :: Exp (Aliases ExpMem.SeqMem) -> Maybe (ExpMem.IxFun -> ExpMem.IxFun)
 getInvAliasFromExp (BasicOp (SubExp (Var _))) = Just id
 getInvAliasFromExp (BasicOp (Opaque _ (Var _))) = Just id
-getInvAliasFromExp (BasicOp (Update _ _ _ _)) = Just id
+getInvAliasFromExp (BasicOp (Update {})) = Just id
 getInvAliasFromExp (BasicOp (Rearrange perm _)) =
   let perm' = IxFun.permuteInv perm [0 .. length perm - 1]
    in Just (`IxFun.permute` perm')
@@ -221,6 +221,7 @@ getTransitiveAlias alias_tab vtab b ixfn
 getTransitiveAlias _ _ _ _ = Nothing
 --}
 
+-- | Get direct aliased index function?
 getDirAliasedIxfn :: TopDnEnv -> CoalsTab -> VName -> Maybe (VName, VName, ExpMem.IxFun)
 getDirAliasedIxfn td_env coals_tab x =
   case getScopeMemInfo x (scope td_env) of
