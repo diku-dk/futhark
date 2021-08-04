@@ -5,10 +5,6 @@
 module Futhark.Optimise.MemBlockCoalesce.LastUse (lastUseFun, lastUsePrg) where
 
 import qualified Data.Map.Strict as M
---import Debug.Trace
-
---import Futhark.Representation.AST.Syntax
-
 import Futhark.IR.Aliases
 import qualified Futhark.IR.SeqMem as ExpMem
 import Futhark.Optimise.MemBlockCoalesce.DataStructs
@@ -73,6 +69,7 @@ lastUseAnBdy alstab bdy@(Body _ bnds result) (lutab, used_nms) =
     traverseBindings stab (bd@(Let pat _ e) : bds) (lutab1, nms) res_nms =
       let m_v = case e of
             BasicOp (Update _ old _ _) -> Just old
+            BasicOp (FlatUpdate old _ _) -> Just old
             _ -> Nothing
           stab' = updateAliasing stab pat m_v
           (lutab1', nms') = traverseBindings stab' bds (lutab1, nms) res_nms
@@ -132,7 +129,7 @@ lastUseAnExp alstab (If _ then_body else_body _) used_nms =
           free_in_body_then <> free_in_body_else
    in (then_lutab `M.union` else_lutab, last_used_arrs, used_nms')
 lastUseAnExp alstab (DoLoop var_ses _ body) used_nms0 =
-  let free_in_body = aliasTransClos alstab $ freeIn body
+  let free_in_body = aliasTransitiveClosure alstab $ freeIn body
       -- compute the alising transitive closure of initializers
       var_inis = map transClosInis var_ses
       free_and_used = free_in_body <> used_nms0
@@ -183,7 +180,7 @@ lastUseAnVars :: AliasTab -> Names -> Names -> (Names, Names)
 lastUseAnVars alstab used_nms args =
   let -- a use of an argument x is also a use of any variable in x alias set
       -- so we update the alias-based transitive-closure of used names.
-      args_nms = aliasTransClos alstab args
+      args_nms = aliasTransitiveClosure alstab args
       -- if neither a variable x, nor any of its alias set have been used
       -- before (in the backward traversal), then it is a last use of both
       --  that variable and all other variables in its alias set

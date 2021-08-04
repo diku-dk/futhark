@@ -7,7 +7,6 @@ module Futhark.Optimise.MemBlockCoalesce.DataStructs
     CoalescedKind (..),
     ArrayMemBound (..),
     AllocTab,
-    V2MemTab,
     AliasTab,
     LUTabFun,
     LUTabPrg,
@@ -20,7 +19,7 @@ module Futhark.Optimise.MemBlockCoalesce.DataStructs
     AccessSummary (..),
     BotUpEnv (..),
     InhibitTab,
-    aliasTransClos,
+    aliasTransitiveClosure,
     updateAliasing,
     unionCoalsEntry,
     getArrMemAssocFParam,
@@ -65,7 +64,10 @@ instance Monoid AccessSummary where
   mempty = Set mempty
 
 data MemRefs = MemRefs
-  { dstrefs :: AccessSummary,
+  { -- | The access summary of all references (reads
+    -- and writes) to the destination of a coalescing entry
+    dstrefs :: AccessSummary,
+    -- | The access summary of all writes to the source of a coalescing entry
     srcwrts :: AccessSummary
   }
 
@@ -86,9 +88,11 @@ data CoalescedKind
   | -- | transitive, i.e., other variables aliased with b.
     TransitiveCoal
 
+-- | Information about a memory block: type, shape, name and ixfun.
 data ArrayMemBound = MemBlock PrimType Shape VName ExpMem.IxFun
 
-type FreeVarSubsts = M.Map VName (ExpMem.TPrimExp Int64 VName) --(ExpMem.PrimExp VName)
+-- | Free variable substitutions
+type FreeVarSubsts = M.Map VName (ExpMem.TPrimExp Int64 VName)
 
 -- | Coalesced Access Entry
 data Coalesced
@@ -133,15 +137,13 @@ data CoalsEntry = CoalsEntry
     --     @x@ discriminates between memory being reused across semantically
     --     different arrays (searched in @vartab@ field).
     optdeps :: M.Map VName VName,
+    -- | Access summaries of uses and writes of destination and source
+    -- respectively.
     memrefs :: MemRefs
   }
 
-type AllocTab = Names --M.Map VName SubExp
-
+type AllocTab = Names
 -- ^ the allocatted memory blocks
-
-type V2MemTab = M.Map VName ArrayMemBound
--- ^ maps array-variable names to their memory block info (including index function)
 
 type AliasTab = M.Map VName Names
 -- ^ maps a variable or memory block to its aliases
@@ -156,31 +158,33 @@ type ScalarTab = M.Map VName (ExpMem.PrimExp VName)
 -- ^ maps a variable name to its PrimExp scalar expression
 
 type CoalsTab = M.Map VName CoalsEntry
--- ^ maps a memory-block name to a Map in which each variable
---   associated to that memory block is bound to its @Coalesced@ info.
+-- ^ maps a memory-block name to a 'CoalsEntry'. Among other things, it contains
+--   @vartab@, a map in which each variable associated to that memory block is
+--   bound to its 'Coalesced' info.
 
 type InhibitTab = M.Map VName Names
 -- ^ inhibited memory-block mergings from the key (memory block)
---   to the value (set of memory blocks)
+--   to the value (set of memory blocks).
 
 data BotUpEnv = BotUpEnv
   { -- | maps scalar variables to theirs PrimExp expansion
     scals :: ScalarTab,
-    -- | optimistic coalescing info
+    -- | Optimistic coalescing info. We are currently trying to coalesce these
+    -- memory blocks.
     activeCoals :: CoalsTab,
-    -- | committed (successfull) coalescing info
+    -- | Committed (successfull) coalescing info. These memory blocks have been
+    -- successfully coalesced.
     successCoals :: CoalsTab,
-    -- | the coalescing failures from this pass
+    -- | The coalescing failures from this pass. We will no longer try to merge
+    -- these memory blocks.
     inhibit :: InhibitTab
   }
 
 instance Pretty AccessSummary where
-  --show :: AccessSummary -> String
   ppr Undeterminable = "Undeterminable"
   ppr (Set a) = "Access-Set:" <+/> ppr a <+/> " "
 
 instance Pretty MemRefs where
-  --show :: MemRefs -> String
   ppr (MemRefs a b) = "( Use-Sum:" <+> ppr a <+> "Write-Sum:" <+> ppr b <> ")"
 
 instance Pretty CoalescedKind where
@@ -207,6 +211,9 @@ instance Pretty CoalsEntry where
       <+/> "}"
       <+/> "\n"
 
+-- | Compute the union of two 'CoalsEntry'. If two 'CoalsEntry' do not refer to
+-- the same destination memory and use the same index function, the first
+-- 'CoalsEntry' is returned.
 unionCoalsEntry :: CoalsEntry -> CoalsEntry -> CoalsEntry
 unionCoalsEntry etry1 (CoalsEntry dstmem2 dstind2 alsmem2 vartab2 optdeps2 memrefs2) =
   if dstmem etry1 /= dstmem2 || dstind etry1 /= dstind2
@@ -219,10 +226,23 @@ unionCoalsEntry etry1 (CoalsEntry dstmem2 dstind2 alsmem2 vartab2 optdeps2 memre
           memrefs = memrefs etry1 <> memrefs2
         }
 
-aliasTransClos :: AliasTab -> Names -> Names
-aliasTransClos alstab args =
-  foldl (<>) args $ mapMaybe (`M.lookup` alstab) $ namesToList args
+-- | Compute the transititve closure of the aliases of a set of 'Names'.
+aliasTransitiveClosure :: AliasTab -> Names -> Names
+aliasTransitiveClosure alstab args =
+  let res = foldl (<>) args $ mapMaybe (`M.lookup` alstab) $ namesToList args
+   in if res == args
+        then res
+        else aliasTransitiveClosure alstab res
 
+-- | Is the 'PatElem' a context parameter in 'Pat', meaning that it is used in
+-- 'Pat'.
+isContextParam :: PatElem (Aliases ExpMem.SeqMem) -> Pat (Aliases ExpMem.SeqMem) -> Bool
+isContextParam a pat =
+  not $ patElemName a `nameIn` freeIn pat
+
+-- | Update 'AliasTab' given from a given 'Pat'. If given a 'VName' (used to
+-- signify the origin of an in-place update), that name is added as an alias to
+-- "context parameters" in the pattern.
 updateAliasing ::
   AliasTab ->
   Pat (Aliases ExpMem.SeqMem) ->
@@ -233,22 +253,25 @@ updateAliasing stab pat m_ip =
   foldl updateTab stab $
     map addMaybe $ patElems pat
   where
-    addMaybe a = if not $ patElemName a `nameIn` freeIn pat then (a, m_ip) else (a, Nothing)
+    addMaybe a =
+      if isContextParam a pat
+        then (a, m_ip)
+        else (a, Nothing)
     -- Compute the transitive closure of current pattern
     -- name by concating all its aliases entries in stabb.
     -- In case of an IN-PLACE update (`mb_v` not Nothing)
     -- add the previous name to the alias set of the new one.
-    updateTab :: AliasTab -> (PatElemT (LetDec (Aliases ExpMem.SeqMem)), Maybe VName) -> AliasTab
+    updateTab :: AliasTab -> (PatElem (Aliases ExpMem.SeqMem), Maybe VName) -> AliasTab
     updateTab stabb (patel, mb_v) =
-      let (al, _) = patElemDec patel
-          al_nms = case mb_v of
-            Nothing -> unAliases al
-            Just v -> unAliases al <> oneName v
-          al_trns = foldl (<>) al_nms $ mapMaybe (`M.lookup` stabb) $ namesToList al_nms
-       in if al_trns == mempty
+      let pat_aliases = unAliases $ fst $ patElemDec patel
+          aliases = pat_aliases <> maybe mempty oneName mb_v
+          aliases' = aliasTransitiveClosure stabb aliases
+       in if aliases' == mempty
             then stabb
-            else M.insert (patElemName patel) al_trns stabb
+            else M.insert (patElemName patel) aliases' stabb
 
+-- | Get the names of array 'PatElem's in a 'Pat' and the corresponding
+-- 'ArrayMemBound' information for each array.
 getArrMemAssoc :: Pat (Aliases ExpMem.SeqMem) -> [(VName, ArrayMemBound)]
 getArrMemAssoc pat =
   mapMaybe
@@ -261,6 +284,8 @@ getArrMemAssoc pat =
     )
     $ patElems pat
 
+-- | Get the names of arrays in a list of 'FParam' and the corresponding
+-- 'ArrayMemBound' information for each array.
 getArrMemAssocFParam :: [FParam (Aliases ExpMem.SeqMem)] -> [(VName, ArrayMemBound)]
 getArrMemAssocFParam =
   mapMaybe
@@ -272,17 +297,21 @@ getArrMemAssocFParam =
         ExpMem.MemAcc {} -> Nothing
     )
 
+-- | Get memory blocks in a list of 'FParam' that are used for unique arrays in
+-- the same list of 'FParam'.
 getUniqueMemFParam :: [FParam (Aliases ExpMem.SeqMem)] -> M.Map VName Space
 getUniqueMemFParam params =
-  let mems = mapMaybe (\el -> getMemMem (paramName el) (paramDec el)) params
-      upms = namesFromList $ mapMaybe (getMemArray . paramDec) params
-   in M.fromList $ filter (\(k, _) -> nameIn k upms) mems
+  let mems = M.fromList $ mapMaybe justMem params
+      arrayMems = S.fromList $ mapMaybe (justArrayMem . paramDec) params
+   in mems `M.restrictKeys` arrayMems
   where
-    getMemMem nm (ExpMem.MemMem sp) = Just (nm, sp)
-    getMemMem _ _ = Nothing
-    getMemArray (ExpMem.MemArray _ _ Unique (ExpMem.ArrayIn mem_nm _)) = Just mem_nm
-    getMemArray _ = Nothing
+    justMem (Param nm (ExpMem.MemMem sp)) = Just (nm, sp)
+    justMem _ = Nothing
+    justArrayMem (ExpMem.MemArray _ _ Unique (ExpMem.ArrayIn mem_nm _)) = Just mem_nm
+    justArrayMem _ = Nothing
 
+-- | Looks up 'VName' in the given scope. If it is a 'ExpMem.MemArray', return the
+-- 'ArrayMemBound' information for the array.
 getScopeMemInfo ::
   VName ->
   Scope (Aliases ExpMem.SeqMem) ->
@@ -294,6 +323,7 @@ getScopeMemInfo r scope_env0 =
     Just (LParamName (ExpMem.MemArray tp shp _ (ExpMem.ArrayIn m idx))) -> Just (MemBlock tp shp m idx)
     _ -> Nothing
 
+-- | @True@ if the expression returns a "fresh" array.
 createsNewArrOK :: Exp (Aliases ExpMem.SeqMem) -> Bool
 createsNewArrOK (BasicOp Replicate {}) = True
 createsNewArrOK (BasicOp Iota {}) = True
@@ -319,13 +349,12 @@ markFailedCoal (coal_tab, inhb_tab) src_mem =
   case M.lookup src_mem coal_tab of
     Nothing -> (coal_tab, inhb_tab)
     Just coale ->
-      let failed_set = case M.lookup src_mem inhb_tab of
-            Nothing -> oneName (dstmem coale)
-            Just fld -> fld <> oneName (dstmem coale)
+      let failed_set = oneName $ dstmem coale
+          failed_set' = failed_set <> (fromMaybe mempty $ M.lookup src_mem inhb_tab)
        in trace
             ("Failed Coalesce: " ++ pretty src_mem ++ "->" ++ pretty (dstmem coale))
             ( M.delete src_mem coal_tab,
-              M.insert src_mem failed_set inhb_tab
+              M.insert src_mem failed_set' inhb_tab
             )
 
 -- | A poor attempt at a pretty printer of the Coalescing Table
