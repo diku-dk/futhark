@@ -10,6 +10,13 @@ class FutharkArray {
     this.fshape = fshape;
     this.fvalues = fvalues;
     this.ffree = ffree;
+    this.valid = true;
+  }
+
+  validCheck() {
+    if (!this.valid) {
+      throw "Using freed memory"
+    }
   }
 
   futharkType() {
@@ -17,15 +24,19 @@ class FutharkArray {
   }
 
   free() {
+    this.validCheck();
     this.ffree(this.ctx.ctx, this.ptr);
+    this.valid = false;
   }
 
   shape() {
+    this.validCheck();
     var s = this.fshape(this.ctx.ctx, this.ptr) >> 3;
     return Array.from(this.ctx.wasm.HEAP64.subarray(s, s + this.dim));
   }
 
   toTypedArray(dims = this.shape()) {
+    this.validCheck();
     console.assert(dims.length === this.dim, "dim=%s,dims=%s", this.dim, dims.toString());
     var length = Number(dims.reduce((a, b) => a * b));
     var v = this.fvalues(this.ctx.ctx, this.ptr) / this.heap.BYTES_PER_ELEMENT;
@@ -33,6 +44,7 @@ class FutharkArray {
   }
 
   toArray() {
+    this.validCheck();
     var dims = this.shape();
     var ta = this.toTypedArray(dims);
     return (function nest(offs, ds) {
@@ -52,10 +64,19 @@ class FutharkOpaque {
     this.ctx = ctx;
     this.ptr = ptr;
     this.ffree = ffree;
+    this.valid = true;
+  }
+
+  validCheck() {
+    if (!this.valid) {
+      throw "Using freed memory"
+    }
   }
 
   free() {
+    this.validCheck();
     this.ffree(this.ctx.ctx, this.ptr);
+    this.valid = false;
   }
 }
 
