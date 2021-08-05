@@ -584,11 +584,11 @@ static inline f16 futrts_from_bits16(int16_t x) {
 #else
 
 static inline int16_t futrts_to_bits16(f16 x) {
-  return float2halfbits(x);
+  return (int16_t)float2halfbits(x);
 }
 
 static inline f16 futrts_from_bits16(int16_t x) {
-  return halfbits2float(x);
+  return halfbits2float((uint16_t)x);
 }
 
 static inline f16 fsignum16(f16 x) {
