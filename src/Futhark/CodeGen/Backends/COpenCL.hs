@@ -231,7 +231,7 @@ copyOpenCLMemory destmem destidx DefaultSpace srcmem srcidx (Space "device") nby
       OPENCL_SUCCEED_OR_RETURN(
         clEnqueueReadBuffer(ctx->opencl.queue, $exp:srcmem,
                             ctx->failure_is_an_option ? CL_FALSE : CL_TRUE,
-                            $exp:srcidx, $exp:nbytes,
+                            (size_t)$exp:srcidx, (size_t)$exp:nbytes,
                             $exp:destmem + $exp:destidx,
                             0, NULL, $exp:(profilingEvent copyHostToDev)));
       if (ctx->failure_is_an_option &&
@@ -244,7 +244,7 @@ copyOpenCLMemory destmem destidx (Space "device") srcmem srcidx DefaultSpace nby
     if ($exp:nbytes > 0) {
       OPENCL_SUCCEED_OR_RETURN(
         clEnqueueWriteBuffer(ctx->opencl.queue, $exp:destmem, CL_TRUE,
-                             $exp:destidx, $exp:nbytes,
+                             (size_t)$exp:destidx, (size_t)$exp:nbytes,
                              $exp:srcmem + $exp:srcidx,
                              0, NULL, $exp:(profilingEvent copyDevToHost)));
     }
@@ -258,8 +258,8 @@ copyOpenCLMemory destmem destidx (Space "device") srcmem srcidx (Space "device")
       OPENCL_SUCCEED_OR_RETURN(
         clEnqueueCopyBuffer(ctx->opencl.queue,
                             $exp:srcmem, $exp:destmem,
-                            $exp:srcidx, $exp:destidx,
-                            $exp:nbytes,
+                            (size_t)$exp:srcidx, (size_t)$exp:destidx,
+                            (size_t)$exp:nbytes,
                             0, NULL, $exp:(profilingEvent copyDevToDev)));
       if (ctx->debugging) {
         OPENCL_SUCCEED_FATAL(clFinish(ctx->opencl.queue));
@@ -360,7 +360,7 @@ callKernel (LaunchKernel safety name args num_workgroups workgroup_size) = do
       num_bytes' <- GC.compileExp $ unCount num_bytes
       GC.stm
         [C.cstm|
-            OPENCL_SUCCEED_OR_RETURN(clSetKernelArg(ctx->$id:name, $int:i, $exp:num_bytes', NULL));
+            OPENCL_SUCCEED_OR_RETURN(clSetKernelArg(ctx->$id:name, $int:i, (size_t)$exp:num_bytes', NULL));
             |]
 
     localBytes cur (SharedMemoryKArg num_bytes) = do
@@ -410,7 +410,7 @@ launchKernel kernel_name num_workgroups workgroup_dims local_bytes = do
     kernel_rank = length kernel_dims
     kernel_dims = zipWith multExp (map toSize num_workgroups) (map toSize workgroup_dims)
     kernel_dims' = map toInit kernel_dims
-    workgroup_dims' = map toInit workgroup_dims
+    workgroup_dims' = map (toInit . toSize) workgroup_dims
     total_elements = foldl multExp [C.cexp|1|] kernel_dims
 
     toInit e = [C.cinit|$exp:e|]
