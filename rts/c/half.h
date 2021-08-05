@@ -1,6 +1,6 @@
 // Start of half.h.
 
-// Conversion functions are from https://github.com/suruoxi/half, but
+// Conversion functions are from http://half.sourceforge.net/, but
 // translated to C.
 //
 // Copyright (c) 2012-2017 Christian Rau <rauy@users.sourceforge.net>
