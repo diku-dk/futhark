@@ -564,6 +564,25 @@ static inline f16 futrts_fma16(f16 a, f16 b, f16 c) {
   return futrts_fma32(a, b, c);
 }
 
+// Even when we are using an OpenCL that does not support cl_khr_fp16,
+// it must still support vload_half for actually creating a
+// half-precision number, which can then be efficiently converted to a
+// float.  Similarly for vstore_half.
+#ifdef __OPENCL_VERSION__
+
+static inline int16_t futrts_to_bits16(f16 x) {
+  int16_t y;
+  // Violating strict aliasing here.
+  vstore_half((float)x, 0, (half*)&y);
+  return y;
+}
+
+static inline f16 futrts_from_bits16(int16_t x) {
+  return (f16)vload_half(0, (half*)&x);
+}
+
+#else
+
 static inline int16_t futrts_to_bits16(f16 x) {
   return float2halfbits(x);
 }
@@ -575,6 +594,8 @@ static inline f16 futrts_from_bits16(int16_t x) {
 static inline f16 fsignum16(f16 x) {
   return futrts_isnan16(x) ? x : (x > 0) - (x < 0);
 }
+
+#endif
 
 #endif
 
