@@ -39,6 +39,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * A prefix operator section (i.e.. `(!)`) is no longer permitted
     (and it never was according to the grammar).
 
+  * The "raw" array creation functions in the C API now take an
+    `int64_t` offset parameter.
+
 ### Fixed
 
   * `i64.abs` was wrong for arguments that did not fit in an `i32`.
