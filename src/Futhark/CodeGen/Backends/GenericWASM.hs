@@ -16,12 +16,12 @@ module Futhark.CodeGen.Backends.GenericWASM
   )
 where
 
-import Data.FileEmbed
 import Data.List (intercalate, nub)
 import qualified Data.Text as T
 import qualified Futhark.CodeGen.Backends.GenericC as GC
 import Futhark.CodeGen.Backends.SimpleRep (opaqueName)
 import qualified Futhark.CodeGen.ImpCode.Sequential as Imp
+import Futhark.CodeGen.RTS.JavaScript
 import Futhark.IR.Primitive
 import NeatInterpolation (text)
 
@@ -75,20 +75,11 @@ emccExportNames jses =
 javascriptWrapper :: [JSEntryPoint] -> T.Text
 javascriptWrapper entryPoints =
   T.unlines
-    [ jsServer,
-      jsValues,
-      jsClasses,
+    [ serverJs,
+      valuesJs,
+      wrapperclassesJs,
       classFutharkContext entryPoints
     ]
-
-jsServer :: T.Text
-jsServer = $(embedStringFile "rts/javascript/server.js")
-
-jsValues :: T.Text
-jsValues = $(embedStringFile "rts/javascript/values.js")
-
-jsClasses :: T.Text
-jsClasses = $(embedStringFile "rts/javascript/wrapperclasses.js")
 
 classFutharkContext :: [JSEntryPoint] -> T.Text
 classFutharkContext entryPoints =

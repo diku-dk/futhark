@@ -13,16 +13,17 @@ where
 import Control.Monad.Identity
 import Control.Monad.Reader
 import Control.Monad.State
-import Data.FileEmbed
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import qualified Data.Set as S
+import qualified Data.Text as T
 import qualified Futhark.CodeGen.Backends.GenericC as GC
 import Futhark.CodeGen.Backends.SimpleRep
 import Futhark.CodeGen.ImpCode.GPU hiding (Program)
 import qualified Futhark.CodeGen.ImpCode.GPU as ImpGPU
 import Futhark.CodeGen.ImpCode.OpenCL hiding (Program)
 import qualified Futhark.CodeGen.ImpCode.OpenCL as ImpOpenCL
+import Futhark.CodeGen.RTS.C (atomicsH, halfH)
 import Futhark.Error (compilerLimitationS)
 import Futhark.IR.Prop (isBuiltInFunction)
 import Futhark.MonadFreshNames
@@ -404,12 +405,6 @@ openClCode kernels =
         | kernel_func <- kernels
       ]
 
-cAtomicsDefs :: String
-cAtomicsDefs = $(embedStringFile "rts/c/atomics.h")
-
-cHalfDefs :: String
-cHalfDefs = $(embedStringFile "rts/c/half.h")
-
 genOpenClPrelude :: S.Set PrimType -> [C.Definition]
 genOpenClPrelude ts =
   -- Clang-based OpenCL implementations need this for 'static' to work.
@@ -460,7 +455,7 @@ static inline void mem_fence_local() {
   mem_fence(CLK_LOCAL_MEM_FENCE);
 }
 |]
-    ++ [[C.cedecl|$esc:cHalfDefs|], [C.cedecl|$esc:cScalarDefs|], [C.cedecl|$esc:cAtomicsDefs|]]
+    ++ [[C.cedecl|$esc:(T.unpack (halfH <> cScalarDefs <> atomicsH))|]]
   where
     uses_float64 = FloatType Float64 `S.member` ts
 
@@ -570,7 +565,7 @@ $esc:("#define NAN (0.0/0.0)")
 $esc:("#define INFINITY (1.0/0.0)")
 extern volatile __shared__ unsigned char shared_mem[];
 |]
-    ++ [[C.cedecl|$esc:cHalfDefs|], [C.cedecl|$esc:cScalarDefs|], [C.cedecl|$esc:cAtomicsDefs|]]
+    ++ [[C.cedecl|$esc:(T.unpack (halfH <> cScalarDefs <> atomicsH))|]]
 
 compilePrimExp :: PrimExp KernelConst -> C.Exp
 compilePrimExp e = runIdentity $ GC.compilePrimExp compileKernelConst e

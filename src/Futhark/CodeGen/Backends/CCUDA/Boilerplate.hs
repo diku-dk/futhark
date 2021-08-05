@@ -9,9 +9,9 @@ module Futhark.CodeGen.Backends.CCUDA.Boilerplate
   )
 where
 
-import Data.FileEmbed (embedStringFile)
 import qualified Data.Map as M
 import Data.Maybe
+import qualified Data.Text as T
 import Futhark.CodeGen.Backends.COpenCL.Boilerplate
   ( copyDevToDev,
     copyDevToHost,
@@ -25,6 +25,7 @@ import Futhark.CodeGen.Backends.COpenCL.Boilerplate
   )
 import qualified Futhark.CodeGen.Backends.GenericC as GC
 import Futhark.CodeGen.ImpCode.OpenCL
+import Futhark.CodeGen.RTS.C (cudaH, freeListH)
 import Futhark.Util (chunk, zEncodeString)
 import qualified Language.C.Quote.OpenCL as C
 import qualified Language.C.Syntax as C
@@ -68,8 +69,8 @@ generateBoilerplate cuda_program cuda_prelude cost_centres kernels sizes failure
       $esc:("#include <cuda.h>")
       $esc:("#include <nvrtc.h>")
       $esc:("typedef CUdeviceptr fl_mem_t;")
-      $esc:free_list_h
-      $esc:cuda_h
+      $esc:(T.unpack freeListH)
+      $esc:(T.unpack cudaH)
       const char *cuda_program[] = {$inits:fragments, NULL};
       |]
 
@@ -80,8 +81,6 @@ generateBoilerplate cuda_program cuda_prelude cost_centres kernels sizes failure
   GC.profileReport [C.citem|CUDA_SUCCEED_FATAL(cuda_tally_profiling_records(&ctx->cuda));|]
   mapM_ GC.profileReport $ costCentreReport $ cost_centres ++ M.keys kernels
   where
-    cuda_h = $(embedStringFile "rts/c/cuda.h")
-    free_list_h = $(embedStringFile "rts/c/free_list.h")
     fragments =
       map (\s -> [C.cinit|$string:s|]) $
         chunk 2000 (cuda_prelude ++ cuda_program)

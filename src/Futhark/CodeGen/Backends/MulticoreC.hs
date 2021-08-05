@@ -17,14 +17,15 @@ module Futhark.CodeGen.Backends.MulticoreC
 where
 
 import Control.Monad
-import Data.FileEmbed
 import qualified Data.Map as M
 import Data.Maybe
+import qualified Data.Text as T
 import qualified Futhark.CodeGen.Backends.GenericC as GC
 import Futhark.CodeGen.Backends.GenericC.Options
 import Futhark.CodeGen.Backends.SimpleRep
 import Futhark.CodeGen.ImpCode.Multicore
 import qualified Futhark.CodeGen.ImpGen.Multicore as ImpGen
+import Futhark.CodeGen.RTS.C (schedulerH)
 import Futhark.IR.MCMem (MCMem, Prog)
 import Futhark.MonadFreshNames
 import qualified Language.C.Quote.OpenCL as C
@@ -49,8 +50,7 @@ compileProg =
 
 generateContext :: GC.CompilerM op () ()
 generateContext = do
-  let scheduler_h = $(embedStringFile "rts/c/scheduler.h")
-  mapM_ GC.earlyDecl [C.cunit|$esc:scheduler_h|]
+  mapM_ GC.earlyDecl [C.cunit|$esc:(T.unpack schedulerH)|]
 
   cfg <- GC.publicDef "context_config" GC.InitDecl $ \s ->
     ( [C.cedecl|struct $id:s;|],

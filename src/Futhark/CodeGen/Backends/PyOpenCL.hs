@@ -16,6 +16,7 @@ import Futhark.CodeGen.Backends.GenericPython.Options
 import Futhark.CodeGen.Backends.PyOpenCL.Boilerplate
 import qualified Futhark.CodeGen.ImpCode.OpenCL as Imp
 import qualified Futhark.CodeGen.ImpGen.OpenCL as ImpGen
+import Futhark.CodeGen.RTS.Python (openclPy)
 import Futhark.IR.GPUMem (GPUMem, Prog)
 import Futhark.MonadFreshNames
 import Futhark.Util (zEncodeString)
@@ -68,7 +69,7 @@ compileProg mode class_name prog = do
         [ Import "sys" Nothing,
           Import "numpy" $ Just "np",
           Import "ctypes" $ Just "ct",
-          Escape openClPrelude,
+          Escape openclPy,
           Import "pyopencl.array" Nothing,
           Import "time" Nothing
         ]

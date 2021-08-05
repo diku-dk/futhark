@@ -38,8 +38,9 @@ where
 
 import Data.Bits (shiftR, xor)
 import Data.Char (isAlphaNum, isDigit, ord)
-import Data.FileEmbed
+import qualified Data.Text as T
 import Futhark.CodeGen.ImpCode
+import Futhark.CodeGen.RTS.C (scalarF16H, scalarH)
 import Futhark.Util (zEncodeString)
 import qualified Language.C.Quote.C as C
 import qualified Language.C.Syntax as C
@@ -213,8 +214,8 @@ instance C.ToExp SubExp where
   toExp (Var v) = C.toExp v
   toExp (Constant c) = C.toExp c
 
-cScalarDefs :: String
-cScalarDefs = $(embedStringFile "rts/c/scalar.h") <> $(embedStringFile "rts/c/scalar_f16.h")
+cScalarDefs :: T.Text
+cScalarDefs = scalarH <> scalarF16H
 
 storageSize :: PrimType -> Int -> C.Exp -> C.Exp
 storageSize pt rank shape =

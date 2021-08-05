@@ -84,7 +84,6 @@ import Control.Monad.Reader
 import Control.Monad.State
 import Data.Bifunctor (first)
 import qualified Data.DList as DL
-import Data.FileEmbed
 import Data.Loc
 import qualified Data.Map.Strict as M
 import Data.Maybe
@@ -94,6 +93,7 @@ import Futhark.CodeGen.Backends.GenericC.Options
 import Futhark.CodeGen.Backends.GenericC.Server (serverDefs)
 import Futhark.CodeGen.Backends.SimpleRep
 import Futhark.CodeGen.ImpCode
+import Futhark.CodeGen.RTS.C (halfH, lockH, timingH, utilH)
 import Futhark.IR.Prop (isBuiltInFunction)
 import Futhark.MonadFreshNames
 import Futhark.Util.Pretty (prettyText)
@@ -1461,11 +1461,11 @@ $esc:("#undef NDEBUG")
 $esc:("#include <assert.h>")
 $esc:("#include <stdarg.h>")
 
-$esc:util_h
+$esc:(T.unpack utilH)
 
-$esc:half_h
+$esc:(T.unpack halfH)
 
-$esc:timing_h
+$esc:(T.unpack timingH)
 |]
 
   let early_decls = DL.toList $ compEarlyDecls endstate
@@ -1483,11 +1483,11 @@ $esc:("#include <ctype.h>")
 
 $esc:header_extra
 
-$esc:lock_h
+$esc:(T.unpack lockH)
 
 $esc:("#define FUTHARK_F64_ENABLED")
 
-$esc:cScalarDefs
+$esc:(T.unpack cScalarDefs)
 
 $edecls:early_decls
 
@@ -1539,11 +1539,6 @@ $edecls:entry_point_decls
         loc = case func of
           C.OldFunc _ _ _ _ _ _ l -> l
           C.Func _ _ _ _ _ l -> l
-
-    util_h = $(embedStringFile "rts/c/util.h")
-    half_h = $(embedStringFile "rts/c/half.h")
-    timing_h = $(embedStringFile "rts/c/timing.h")
-    lock_h = $(embedStringFile "rts/c/lock.h")
 
 commonLibFuns :: [C.BlockItem] -> CompilerM op s ()
 commonLibFuns memreport = do
