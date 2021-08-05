@@ -921,31 +921,19 @@ static int32_t futrts_clzz64(int64_t x) {
 #else // Not OpenCL or CUDA, but plain C.
 
 static int32_t futrts_clzz8(int8_t x) {
-  return x == 0 ? 8 : __builtin_clz(zext_i8_i32(x)) - 24;
+  return x == 0 ? 8 : __builtin_clz((uint32_t)zext_i8_i32(x)) - 24;
 }
 
 static int32_t futrts_clzz16(int16_t x) {
-  return x == 0 ? 16 : __builtin_clz(zext_i16_i32(x)) - 16;
+  return x == 0 ? 16 : __builtin_clz((uint32_t)zext_i16_i32(x)) - 16;
 }
 
 static int32_t futrts_clzz32(int32_t x) {
-  return x == 0 ? 32 : __builtin_clz(zext_i32_i32(x));
+  return x == 0 ? 32 : __builtin_clz((uint32_t)x);
 }
 
 static int32_t futrts_clzz64(int64_t x) {
-  int32_t firsthalf = zext_i64_i32(x >> 32L);
-  int32_t secondhalf = zext_i64_i32(x);
-
-  if (x == 0)
-    return 64;
-  else {
-    int firsthalf_clz = firsthalf == 0 ? 32 : __builtin_clz(firsthalf);
-
-    if (firsthalf_clz == 32)
-      return 32 + __builtin_clz(secondhalf);
-    else
-      return firsthalf_clz;
-  }
+  return x == 0 ? 64 : __builtin_clzll((uint64_t)x);
 }
 #endif
 
@@ -1003,19 +991,19 @@ static int32_t futrts_ctzz64(int64_t x) {
 #else // Not OpenCL or CUDA, but plain C.
 
 static int32_t futrts_ctzz8(int8_t x) {
-  return x == 0 ? 8 : __builtin_ctz((uint32_t) x);
+  return x == 0 ? 8 : __builtin_ctz((uint32_t)x);
 }
 
 static int32_t futrts_ctzz16(int16_t x) {
-  return x == 0 ? 16 : __builtin_ctz((uint32_t) x);
+  return x == 0 ? 16 : __builtin_ctz((uint32_t)x);
 }
 
 static int32_t futrts_ctzz32(int32_t x) {
-  return x == 0 ? 32 : __builtin_ctz(x);
+  return x == 0 ? 32 : __builtin_ctz((uint32_t)x);
 }
 
 static int32_t futrts_ctzz64(int64_t x) {
-  return x == 0 ? 64 : __builtin_ctzll(x);
+  return x == 0 ? 64 : __builtin_ctzll((uint64_t)x);
 }
 #endif
 
