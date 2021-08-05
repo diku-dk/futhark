@@ -21,13 +21,14 @@ module Futhark.CodeGen.Backends.COpenCL.Boilerplate
 where
 
 import Control.Monad.State
-import Data.FileEmbed
 import qualified Data.Map as M
 import Data.Maybe
+import qualified Data.Text as T
 import qualified Futhark.CodeGen.Backends.GenericC as GC
 import Futhark.CodeGen.Backends.GenericC.Options
 import Futhark.CodeGen.ImpCode.OpenCL
 import Futhark.CodeGen.OpenCL.Heuristics
+import Futhark.CodeGen.RTS.C (freeListH, openclH)
 import Futhark.Util (chunk, zEncodeString)
 import Futhark.Util.Pretty (prettyOneLine)
 import qualified Language.C.Quote.OpenCL as C
@@ -549,15 +550,12 @@ void post_opencl_setup(struct opencl_context *ctx, struct opencl_device_option *
 }|]
       ]
 
-    free_list_h = $(embedStringFile "rts/c/free_list.h")
-    openCL_h = $(embedStringFile "rts/c/opencl.h")
-
     program_fragments = opencl_program_fragments ++ [[C.cinit|NULL|]]
     openCL_boilerplate =
       [C.cunit|
           $esc:("typedef cl_mem fl_mem_t;")
-          $esc:free_list_h
-          $esc:openCL_h
+          $esc:(T.unpack freeListH)
+          $esc:(T.unpack openclH)
           static const char *opencl_program[] = {$inits:program_fragments};|]
 
 loadKernel :: (KernelName, KernelSafety) -> C.Stm
