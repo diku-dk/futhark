@@ -679,11 +679,11 @@ static inline int64_t btoi_bool_i64(bool x) {
 #define zext_i64_i64(x) ((int64_t) (uint64_t) (x))
 
 static int8_t abs8(int8_t x) {
-  return abs(x);
+  return (int8_t)abs(x);
 }
 
 static int16_t abs16(int16_t x) {
-  return abs(x);
+  return (int16_t)abs(x);
 }
 
 static int32_t abs32(int32_t x) {
