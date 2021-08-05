@@ -339,8 +339,20 @@ def fptoui_T_i64(x):
   return np.uint64(np.trunc(x))
 fptoui_f16_i64 = fptoui_f32_i64 = fptoui_f64_i64 = fptoui_T_i64
 
+def fpconv_f16_f32(x):
+  return np.float32(x)
+
+def fpconv_f16_f64(x):
+  return np.float64(x)
+
+def fpconv_f32_f16(x):
+  return np.float16(x)
+
 def fpconv_f32_f64(x):
   return np.float64(x)
+
+def fpconv_f64_f16(x):
+  return np.float16(x)
 
 def fpconv_f64_f32(x):
   return np.float32(x)
