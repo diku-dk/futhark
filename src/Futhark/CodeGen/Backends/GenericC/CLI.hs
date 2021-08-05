@@ -145,7 +145,7 @@ genericOptions =
 
 valueDescToCType :: ValueDesc -> C.Type
 valueDescToCType (ScalarValue pt signed _) =
-  signedPrimTypeToCType signed pt
+  primAPIType signed pt
 valueDescToCType (ArrayValue _ _ pt signed shape) =
   let name = "futhark_" ++ arrayName pt signed (length shape)
    in [C.cty|struct $id:name|]
@@ -169,6 +169,7 @@ primTypeInfo (IntType it) t = case (it, t) of
   (Int16, _) -> [C.cexp|i16_info|]
   (Int32, _) -> [C.cexp|i32_info|]
   (Int64, _) -> [C.cexp|i64_info|]
+primTypeInfo (FloatType Float16) _ = [C.cexp|f16_info|]
 primTypeInfo (FloatType Float32) _ = [C.cexp|f32_info|]
 primTypeInfo (FloatType Float64) _ = [C.cexp|f64_info|]
 primTypeInfo Bool _ = [C.cexp|bool_info|]
@@ -193,12 +194,12 @@ readInput i (OpaqueValue _ desc _) =
   )
 readInput i (TransparentValue _ (ScalarValue t ept _)) =
   let dest = "read_value_" ++ show i
-   in ( [C.citems|$ty:(primTypeToCType t) $id:dest;
+   in ( [C.citems|$ty:(primStorageType t) $id:dest;
                   $stm:(readPrimStm dest i t ept);|],
         [C.cstm|;|],
         [C.cstm|;|],
         [C.cstm|;|],
-        [C.cexp|$id:dest|]
+        fromStorage t [C.cexp|$id:dest|]
       )
 readInput i (TransparentValue _ (ArrayValue _ _ t ept dims)) =
   let dest = "read_value_" ++ show i
@@ -211,7 +212,7 @@ readInput i (TransparentValue _ (ArrayValue _ _ t ept dims)) =
       rank = length dims
       dims_exps = [[C.cexp|$id:shape[$int:j]|] | j <- [0 .. rank -1]]
       dims_s = concat $ replicate rank "[]"
-      t' = signedPrimTypeToCType ept t
+      t' = primAPIType ept t
 
       new_array = "futhark_new_" ++ name
       free_array = "futhark_free_" ++ name
@@ -295,7 +296,7 @@ printStm (TransparentValue _ (ArrayValue _ _ bt ept shape)) e =
       }|]
   where
     rank = length shape
-    bt' = primTypeToCType bt
+    bt' = primStorageType bt
     name = arrayName bt ept rank
 
 printResult :: [(ExternalValue, C.Exp)] -> [C.Stm]

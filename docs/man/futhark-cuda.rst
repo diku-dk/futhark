@@ -161,13 +161,19 @@ If run without ``--library``, ``futhark cuda`` will invoke a C
 compiler to compile the generated C program into a binary.  This only
 works if the C compiler can find the necessary CUDA libraries.  On
 most systems, CUDA is installed in ``/usr/local/cuda``, which is
-usually not part of the default compiler search path.  You may need to
+usually not part of the default compiler search path. You may need to
 set the following environment variables before running ``futhark
 cuda``::
 
   LIBRARY_PATH=/usr/local/cuda/lib64
   LD_LIBRARY_PATH=/usr/local/cuda/lib64/
   CPATH=/usr/local/cuda/include
+
+At runtime the generated program must be able to find the CUDA
+installation directory, which is normally located at
+``/usr/local/cuda``.  If you have CUDA installed elsewhere, set any of
+the ``CUDA_HOME``, ``CUDA_ROOT``, or ``CUDA_PATH`` environment
+variables to the proper directory.
 
 SEE ALSO
 ========

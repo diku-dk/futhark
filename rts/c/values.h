@@ -337,6 +337,30 @@ static int read_str_u64(char *buf, void* dest) {
   READ_STR(SCNu64, uint64_t, "u64");
 }
 
+static int read_str_f16(char *buf, void* dest) {
+  remove_underscores(buf);
+  if (strcmp(buf, "f16.nan") == 0) {
+    *(uint16_t*)dest = float2halfbits(NAN);
+    return 0;
+  } else if (strcmp(buf, "f16.inf") == 0) {
+    *(uint16_t*)dest = float2halfbits(INFINITY);
+    return 0;
+  } else if (strcmp(buf, "-f16.inf") == 0) {
+    *(uint16_t*)dest = float2halfbits(-INFINITY);
+    return 0;
+  } else {
+    int j;
+    float x;
+    if (sscanf(buf, "%f%n", &x, &j) == 1) {
+      if (strcmp(buf+j, "") == 0 || strcmp(buf+j, "f16") == 0) {
+        *(uint16_t*)dest = float2halfbits(x);
+        return 0;
+      }
+    }
+    return 1;
+  }
+}
+
 static int read_str_f32(char *buf, void* dest) {
   remove_underscores(buf);
   if (strcmp(buf, "f32.nan") == 0) {
@@ -411,6 +435,19 @@ static int write_str_i64(FILE *out, int64_t *src) {
 
 static int write_str_u64(FILE *out, uint64_t *src) {
   return fprintf(out, "%"PRIu64"u64", *src);
+}
+
+static int write_str_f16(FILE *out, uint16_t *src) {
+  float x = halfbits2float(*src);
+  if (isnan(x)) {
+    return fprintf(out, "f16.nan");
+  } else if (isinf(x) && x >= 0) {
+    return fprintf(out, "f16.inf");
+  } else if (isinf(x)) {
+    return fprintf(out, "-f16.inf");
+  } else {
+    return fprintf(out, "%.6ff16", x);
+  }
 }
 
 static int write_str_f32(FILE *out, float *src) {
@@ -510,6 +547,9 @@ static const struct primtype_info_t u32_info =
 static const struct primtype_info_t u64_info =
   {.binname = " u64", .type_name = "u64",  .size = 8,
    .write_str = (writer)write_str_u64, .read_str = (str_reader)read_str_u64};
+static const struct primtype_info_t f16_info =
+  {.binname = " f16", .type_name = "f16",  .size = 2,
+   .write_str = (writer)write_str_f16, .read_str = (str_reader)read_str_f16};
 static const struct primtype_info_t f32_info =
   {.binname = " f32", .type_name = "f32",  .size = 4,
    .write_str = (writer)write_str_f32, .read_str = (str_reader)read_str_f32};
@@ -523,7 +563,7 @@ static const struct primtype_info_t bool_info =
 static const struct primtype_info_t* primtypes[] = {
   &i8_info, &i16_info, &i32_info, &i64_info,
   &u8_info, &u16_info, &u32_info, &u64_info,
-  &f32_info, &f64_info,
+  &f16_info, &f32_info, &f64_info,
   &bool_info,
   NULL // NULL-terminated
 };

@@ -407,6 +407,9 @@ openClCode kernels =
 cAtomicsDefs :: String
 cAtomicsDefs = $(embedStringFile "rts/c/atomics.h")
 
+cHalfDefs :: String
+cHalfDefs = $(embedStringFile "rts/c/half.h")
+
 genOpenClPrelude :: S.Set PrimType -> [C.Definition]
 genOpenClPrelude ts =
   -- Clang-based OpenCL implementations need this for 'static' to work.
@@ -457,16 +460,13 @@ static inline void mem_fence_local() {
   mem_fence(CLK_LOCAL_MEM_FENCE);
 }
 |]
-    ++ [[C.cedecl|$esc:cScalarDefs|], [C.cedecl|$esc:cAtomicsDefs|]]
+    ++ [[C.cedecl|$esc:cHalfDefs|], [C.cedecl|$esc:cScalarDefs|], [C.cedecl|$esc:cAtomicsDefs|]]
   where
     uses_float64 = FloatType Float64 `S.member` ts
 
 genCUDAPrelude :: [C.Definition]
 genCUDAPrelude =
-  cudafy ++ [[C.cedecl|$esc:cScalarDefs|], [C.cedecl|$esc:cAtomicsDefs|]]
-  where
-    cudafy =
-      [CUDAC.cunit|
+  [CUDAC.cunit|
 $esc:("#define FUTHARK_CUDA")
 $esc:("#define FUTHARK_F64_ENABLED")
 
@@ -570,6 +570,7 @@ $esc:("#define NAN (0.0/0.0)")
 $esc:("#define INFINITY (1.0/0.0)")
 extern volatile __shared__ unsigned char shared_mem[];
 |]
+    ++ [[C.cedecl|$esc:cHalfDefs|], [C.cedecl|$esc:cScalarDefs|], [C.cedecl|$esc:cAtomicsDefs|]]
 
 compilePrimExp :: PrimExp KernelConst -> C.Exp
 compilePrimExp e = runIdentity $ GC.compilePrimExp compileKernelConst e
@@ -729,8 +730,8 @@ inKernelOperations mode body =
     --
     atomicOps s (AtomicAdd t old arr ind val) =
       doAtomic s t old arr ind val "atomic_add" [C.cty|int|]
-    atomicOps s (AtomicFAdd Float32 old arr ind val) =
-      doAtomic s Float32 old arr ind val "atomic_fadd" [C.cty|float|]
+    atomicOps s (AtomicFAdd t old arr ind val) =
+      doAtomic s t old arr ind val "atomic_fadd" [C.cty|float|]
     atomicOps s (AtomicSMax t old arr ind val) =
       doAtomic s t old arr ind val "atomic_smax" [C.cty|int|]
     atomicOps s (AtomicSMin t old arr ind val) =

@@ -51,13 +51,12 @@ Primitive Types and Values
 Boolean literals are written ``true`` and ``false``.  The primitive
 types in Futhark are the signed integer types ``i8``, ``i16``,
 ``i32``, ``i64``, the unsigned integer types ``u8``, ``u16``, ``u32``,
-``u64``, the floating-point types ``f32``, ``f64``, as well as
-``bool``.  An ``f32`` is always a single-precision float and a ``f64``
-is a double-precision float.
+``u64``, the floating-point types ``f16``, ``f32``, ``f64``, as well
+as ``bool``.
 
 .. productionlist::
    int_type: "i8" | "i16" | "i32" | "i64" | "u8" | "u16" | "u32" | "u64"
-   float_type: "f32" | "f64"
+   float_type: "f16" | "f32" | "f64"
 
 Numeric literals can be suffixed with their intended type.  For
 example ``42i8`` is of type ``i8``, and ``1337e2f64`` is of type

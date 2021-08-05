@@ -46,6 +46,7 @@ module Futhark.Util
     trim,
     pmapIO,
     readFileSafely,
+    convFloat,
     UserString,
     EncodedString,
     zEncodeString,
@@ -355,6 +356,15 @@ readFileSafely filepath =
         return Nothing
       | otherwise =
         return $ Just $ Left $ show e
+
+-- | Convert between different floating-point types, preserving
+-- infinities and NaNs.
+convFloat :: (RealFloat from, RealFloat to) => from -> to
+convFloat v
+  | isInfinite v, v > 0 = 1 / 0
+  | isInfinite v, v < 0 = -1 / 0
+  | isNaN v = 0 / 0
+  | otherwise = fromRational $ toRational v
 
 -- Z-encoding from https://ghc.haskell.org/trac/ghc/wiki/Commentary/Compiler/SymbolNames
 --

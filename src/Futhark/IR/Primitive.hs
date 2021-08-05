@@ -17,6 +17,7 @@ module Futhark.IR.Primitive
     PrimType (..),
     allPrimTypes,
     module Data.Int,
+    Half,
 
     -- * Values
     IntValue (..),
@@ -116,9 +117,11 @@ import Data.Fixed (mod') -- Weird location.
 import Data.Int (Int16, Int32, Int64, Int8)
 import qualified Data.Map as M
 import Data.Word
+import Foreign.C.Types (CUShort (..))
 import Futhark.Util
   ( ceilDouble,
     ceilFloat,
+    convFloat,
     floorDouble,
     floorFloat,
     hypot,
@@ -131,6 +134,7 @@ import Futhark.Util
     tgammaf,
   )
 import Futhark.Util.Pretty
+import Numeric.Half
 import Prelude hiding (id, (.))
 
 -- | An integer type, ordered by size.  Note that signedness is not a
@@ -155,11 +159,13 @@ allIntTypes = [minBound .. maxBound]
 
 -- | A floating point type.
 data FloatType
-  = Float32
+  = Float16
+  | Float32
   | Float64
   deriving (Eq, Ord, Show, Enum, Bounded)
 
 instance Pretty FloatType where
+  ppr Float16 = text "f16"
   ppr Float32 = text "f32"
   ppr Float64 = text "f64"
 
@@ -181,19 +187,21 @@ instance Enum PrimType where
   toEnum 1 = IntType Int16
   toEnum 2 = IntType Int32
   toEnum 3 = IntType Int64
-  toEnum 4 = FloatType Float32
-  toEnum 5 = FloatType Float64
-  toEnum 6 = Bool
+  toEnum 4 = FloatType Float16
+  toEnum 5 = FloatType Float32
+  toEnum 6 = FloatType Float64
+  toEnum 7 = Bool
   toEnum _ = Unit
 
   fromEnum (IntType Int8) = 0
   fromEnum (IntType Int16) = 1
   fromEnum (IntType Int32) = 2
   fromEnum (IntType Int64) = 3
-  fromEnum (FloatType Float32) = 4
-  fromEnum (FloatType Float64) = 5
-  fromEnum Bool = 6
-  fromEnum Unit = 7
+  fromEnum (FloatType Float16) = 4
+  fromEnum (FloatType Float32) = 5
+  fromEnum (FloatType Float64) = 6
+  fromEnum Bool = 7
+  fromEnum Unit = 8
 
 instance Bounded PrimType where
   minBound = IntType Int8
@@ -249,32 +257,48 @@ valueIntegral (Int64Value v) = fromIntegral v
 
 -- | A floating-point value.
 data FloatValue
-  = Float32Value !Float
+  = Float16Value !Half
+  | Float32Value !Float
   | Float64Value !Double
   deriving (Show)
 
 instance Eq FloatValue where
+  Float16Value x == Float16Value y = isNaN x && isNaN y || x == y
   Float32Value x == Float32Value y = isNaN x && isNaN y || x == y
   Float64Value x == Float64Value y = isNaN x && isNaN y || x == y
-  Float32Value _ == Float64Value _ = False
-  Float64Value _ == Float32Value _ = False
+  _ == _ = False
 
 -- The derived Ord instance does not handle NaNs correctly.
 instance Ord FloatValue where
+  Float16Value x <= Float16Value y = x <= y
   Float32Value x <= Float32Value y = x <= y
   Float64Value x <= Float64Value y = x <= y
+  Float16Value _ <= Float32Value _ = True
+  Float16Value _ <= Float64Value _ = True
+  Float32Value _ <= Float16Value _ = False
   Float32Value _ <= Float64Value _ = True
+  Float64Value _ <= Float16Value _ = False
   Float64Value _ <= Float32Value _ = False
 
+  Float16Value x < Float16Value y = x < y
   Float32Value x < Float32Value y = x < y
   Float64Value x < Float64Value y = x < y
+  Float16Value _ < Float32Value _ = True
+  Float16Value _ < Float64Value _ = True
+  Float32Value _ < Float16Value _ = False
   Float32Value _ < Float64Value _ = True
+  Float64Value _ < Float16Value _ = False
   Float64Value _ < Float32Value _ = False
 
   (>) = flip (<)
   (>=) = flip (<=)
 
 instance Pretty FloatValue where
+  ppr (Float16Value v)
+    | isInfinite v, v >= 0 = text "f16.inf"
+    | isInfinite v, v < 0 = text "-f16.inf"
+    | isNaN v = text "f16.nan"
+    | otherwise = text $ show v ++ "f16"
   ppr (Float32Value v)
     | isInfinite v, v >= 0 = text "f32.inf"
     | isInfinite v, v < 0 = text "-f32.inf"
@@ -288,11 +312,13 @@ instance Pretty FloatValue where
 
 -- | Create a t'FloatValue' from a type and a 'Rational'.
 floatValue :: Real num => FloatType -> num -> FloatValue
+floatValue Float16 = Float16Value . fromRational . toRational
 floatValue Float32 = Float32Value . fromRational . toRational
 floatValue Float64 = Float64Value . fromRational . toRational
 
 -- | The type of a floating-point value.
 floatValueType :: FloatValue -> FloatType
+floatValueType Float16Value {} = Float16
 floatValueType Float32Value {} = Float32
 floatValueType Float64Value {} = Float64
 
@@ -327,6 +353,7 @@ blankPrimValue (IntType Int8) = IntValue $ Int8Value 0
 blankPrimValue (IntType Int16) = IntValue $ Int16Value 0
 blankPrimValue (IntType Int32) = IntValue $ Int32Value 0
 blankPrimValue (IntType Int64) = IntValue $ Int64Value 0
+blankPrimValue (FloatType Float16) = FloatValue $ Float16Value 0.0
 blankPrimValue (FloatType Float32) = FloatValue $ Float32Value 0.0
 blankPrimValue (FloatType Float64) = FloatValue $ Float64Value 0.0
 blankPrimValue Bool = BoolValue False
@@ -628,6 +655,7 @@ doAbs v = intValue (intValueType v) $ abs $ intToInt64 v
 
 -- | @abs(-2.0) = 2.0@.
 doFAbs :: FloatValue -> FloatValue
+doFAbs (Float16Value x) = Float16Value $ abs x
 doFAbs (Float32Value x) = Float32Value $ abs x
 doFAbs (Float64Value x) = Float64Value $ abs x
 
@@ -641,6 +669,7 @@ doUSignum v = intValue (intValueType v) $ signum $ intToWord64 v
 
 -- | @fsignum(-2.0)@ = -1.0.
 doFSignum :: FloatValue -> FloatValue
+doFSignum (Float16Value v) = Float16Value $ signum v
 doFSignum (Float32Value v) = Float32Value $ signum v
 doFSignum (Float64Value v) = Float64Value $ signum v
 
@@ -649,27 +678,27 @@ doFSignum (Float64Value v) = Float64Value $ signum v
 -- zero).
 doBinOp :: BinOp -> PrimValue -> PrimValue -> Maybe PrimValue
 doBinOp Add {} = doIntBinOp doAdd
-doBinOp FAdd {} = doFloatBinOp (+) (+)
+doBinOp FAdd {} = doFloatBinOp (+) (+) (+)
 doBinOp Sub {} = doIntBinOp doSub
-doBinOp FSub {} = doFloatBinOp (-) (-)
+doBinOp FSub {} = doFloatBinOp (-) (-) (-)
 doBinOp Mul {} = doIntBinOp doMul
-doBinOp FMul {} = doFloatBinOp (*) (*)
+doBinOp FMul {} = doFloatBinOp (*) (*) (*)
 doBinOp UDiv {} = doRiskyIntBinOp doUDiv
 doBinOp UDivUp {} = doRiskyIntBinOp doUDivUp
 doBinOp SDiv {} = doRiskyIntBinOp doSDiv
 doBinOp SDivUp {} = doRiskyIntBinOp doSDivUp
-doBinOp FDiv {} = doFloatBinOp (/) (/)
-doBinOp FMod {} = doFloatBinOp mod' mod'
+doBinOp FDiv {} = doFloatBinOp (/) (/) (/)
+doBinOp FMod {} = doFloatBinOp mod' mod' mod'
 doBinOp UMod {} = doRiskyIntBinOp doUMod
 doBinOp SMod {} = doRiskyIntBinOp doSMod
 doBinOp SQuot {} = doRiskyIntBinOp doSQuot
 doBinOp SRem {} = doRiskyIntBinOp doSRem
 doBinOp SMin {} = doIntBinOp doSMin
 doBinOp UMin {} = doIntBinOp doUMin
-doBinOp FMin {} = doFloatBinOp min min
+doBinOp FMin {} = doFloatBinOp min min min
 doBinOp SMax {} = doIntBinOp doSMax
 doBinOp UMax {} = doIntBinOp doUMax
-doBinOp FMax {} = doFloatBinOp max max
+doBinOp FMax {} = doFloatBinOp max max max
 doBinOp Shl {} = doIntBinOp doShl
 doBinOp LShr {} = doIntBinOp doLShr
 doBinOp AShr {} = doIntBinOp doAShr
@@ -677,7 +706,7 @@ doBinOp And {} = doIntBinOp doAnd
 doBinOp Or {} = doIntBinOp doOr
 doBinOp Xor {} = doIntBinOp doXor
 doBinOp Pow {} = doRiskyIntBinOp doPow
-doBinOp FPow {} = doFloatBinOp (**) (**)
+doBinOp FPow {} = doFloatBinOp (**) (**) (**)
 doBinOp LogAnd {} = doBoolBinOp (&&)
 doBinOp LogOr {} = doBoolBinOp (||)
 
@@ -700,16 +729,19 @@ doRiskyIntBinOp f (IntValue v1) (IntValue v2) =
 doRiskyIntBinOp _ _ _ = Nothing
 
 doFloatBinOp ::
+  (Half -> Half -> Half) ->
   (Float -> Float -> Float) ->
   (Double -> Double -> Double) ->
   PrimValue ->
   PrimValue ->
   Maybe PrimValue
-doFloatBinOp f32 _ (FloatValue (Float32Value v1)) (FloatValue (Float32Value v2)) =
+doFloatBinOp f16 _ _ (FloatValue (Float16Value v1)) (FloatValue (Float16Value v2)) =
+  Just $ FloatValue $ Float16Value $ f16 v1 v2
+doFloatBinOp _ f32 _ (FloatValue (Float32Value v1)) (FloatValue (Float32Value v2)) =
   Just $ FloatValue $ Float32Value $ f32 v1 v2
-doFloatBinOp _ f64 (FloatValue (Float64Value v1)) (FloatValue (Float64Value v2)) =
+doFloatBinOp _ _ f64 (FloatValue (Float64Value v1)) (FloatValue (Float64Value v2)) =
   Just $ FloatValue $ Float64Value $ f64 v1 v2
-doFloatBinOp _ _ _ _ = Nothing
+doFloatBinOp _ _ _ _ _ = Nothing
 
 doBoolBinOp ::
   (Bool -> Bool -> Bool) ->
@@ -890,6 +922,7 @@ doSExt (Int64Value x) t = intValue t $ toInteger x
 
 -- | Convert the former floating-point type to the latter.
 doFPConv :: FloatValue -> FloatType -> FloatValue
+doFPConv v Float16 = Float16Value $ floatToHalf v
 doFPConv v Float32 = Float32Value $ floatToFloat v
 doFPConv v Float64 = Float64Value $ floatToDouble v
 
@@ -974,6 +1007,11 @@ intToInt :: IntValue -> Int
 intToInt = fromIntegral . intToInt64
 
 floatToDouble :: FloatValue -> Double
+floatToDouble (Float16Value v)
+  | isInfinite v, v > 0 = 1 / 0
+  | isInfinite v, v < 0 = -1 / 0
+  | isNaN v = 0 / 0
+  | otherwise = fromRational $ toRational v
 floatToDouble (Float32Value v)
   | isInfinite v, v > 0 = 1 / 0
   | isInfinite v, v < 0 = -1 / 0
@@ -982,12 +1020,30 @@ floatToDouble (Float32Value v)
 floatToDouble (Float64Value v) = v
 
 floatToFloat :: FloatValue -> Float
-floatToFloat (Float64Value v)
+floatToFloat (Float16Value v)
   | isInfinite v, v > 0 = 1 / 0
   | isInfinite v, v < 0 = -1 / 0
   | isNaN v = 0 / 0
   | otherwise = fromRational $ toRational v
 floatToFloat (Float32Value v) = v
+floatToFloat (Float64Value v)
+  | isInfinite v, v > 0 = 1 / 0
+  | isInfinite v, v < 0 = -1 / 0
+  | isNaN v = 0 / 0
+  | otherwise = fromRational $ toRational v
+
+floatToHalf :: FloatValue -> Half
+floatToHalf (Float16Value v) = v
+floatToHalf (Float32Value v)
+  | isInfinite v, v > 0 = 1 / 0
+  | isInfinite v, v < 0 = -1 / 0
+  | isNaN v = 0 / 0
+  | otherwise = fromRational $ toRational v
+floatToHalf (Float64Value v)
+  | isInfinite v, v > 0 = 1 / 0
+  | isInfinite v, v < 0 = -1 / 0
+  | isNaN v = 0 / 0
+  | otherwise = fromRational $ toRational v
 
 -- | The result type of a binary operator.
 binOpType :: BinOp -> PrimType
@@ -1058,6 +1114,12 @@ convOpType (SIToFP from to) = (IntType from, FloatType to)
 convOpType (IToB from) = (IntType from, Bool)
 convOpType (BToI to) = (Bool, IntType to)
 
+halfToWord :: Half -> Word16
+halfToWord (Half (CUShort x)) = x
+
+wordToHalf :: Word16 -> Half
+wordToHalf = Half . CUShort
+
 floatToWord :: Float -> Word32
 floatToWord = G.runGet G.getWord32le . P.runPut . P.putFloatle
 
@@ -1081,50 +1143,94 @@ primFuns ::
     )
 primFuns =
   M.fromList
-    [ f32 "sqrt32" sqrt,
+    [ f16 "sqrt16" sqrt,
+      f32 "sqrt32" sqrt,
       f64 "sqrt64" sqrt,
+      --
+      f16 "log16" log,
       f32 "log32" log,
       f64 "log64" log,
+      --
+      f16 "log10_16" (logBase 10),
       f32 "log10_32" (logBase 10),
       f64 "log10_64" (logBase 10),
+      --
+      f16 "log2_16" (logBase 2),
       f32 "log2_32" (logBase 2),
       f64 "log2_64" (logBase 2),
+      --
+      f16 "exp16" exp,
       f32 "exp32" exp,
       f64 "exp64" exp,
+      --
+      f16 "sin16" sin,
       f32 "sin32" sin,
       f64 "sin64" sin,
+      --
+      f16 "sinh16" sinh,
       f32 "sinh32" sinh,
       f64 "sinh64" sinh,
+      --
+      f16 "cos16" cos,
       f32 "cos32" cos,
       f64 "cos64" cos,
+      --
+      f16 "cosh16" cosh,
       f32 "cosh32" cosh,
       f64 "cosh64" cosh,
+      --
+      f16 "tan16" tan,
       f32 "tan32" tan,
       f64 "tan64" tan,
+      --
+      f16 "tanh16" tanh,
       f32 "tanh32" tanh,
       f64 "tanh64" tanh,
+      --
+      f16 "asin16" asin,
       f32 "asin32" asin,
       f64 "asin64" asin,
+      --
+      f16 "asinh16" asinh,
       f32 "asinh32" asinh,
       f64 "asinh64" asinh,
+      --
+      f16 "acos16" acos,
       f32 "acos32" acos,
       f64 "acos64" acos,
+      --
+      f16 "acosh16" acosh,
       f32 "acosh32" acosh,
       f64 "acosh64" acosh,
+      --
+      f16 "atan16" atan,
       f32 "atan32" atan,
       f64 "atan64" atan,
+      --
+      f16 "atanh16" atanh,
       f32 "atanh32" atanh,
       f64 "atanh64" atanh,
+      --
+      f16 "round16" $ convFloat . roundFloat . convFloat,
       f32 "round32" roundFloat,
       f64 "round64" roundDouble,
+      --
+      f16 "ceil16" $ convFloat . ceilFloat . convFloat,
       f32 "ceil32" ceilFloat,
       f64 "ceil64" ceilDouble,
+      --
+      f16 "floor16" $ convFloat . floorFloat . convFloat,
       f32 "floor32" floorFloat,
       f64 "floor64" floorDouble,
+      --
+      f16 "gamma16" $ convFloat . tgammaf . convFloat,
       f32 "gamma32" tgammaf,
       f64 "gamma64" tgamma,
+      --
+      f16 "lgamma16" $ convFloat . lgammaf . convFloat,
       f32 "lgamma32" lgammaf,
       f64 "lgamma64" lgamma,
+      --
       i8 "clz8" $ IntValue . Int32Value . fromIntegral . countLeadingZeros,
       i16 "clz16" $ IntValue . Int32Value . fromIntegral . countLeadingZeros,
       i32 "clz32" $ IntValue . Int32Value . fromIntegral . countLeadingZeros,
@@ -1209,6 +1315,16 @@ primFuns =
             _ -> Nothing
         )
       ),
+      --
+      ( "atan2_16",
+        ( [FloatType Float16, FloatType Float16],
+          FloatType Float16,
+          \case
+            [FloatValue (Float16Value x), FloatValue (Float16Value y)] ->
+              Just $ FloatValue $ Float16Value $ atan2 x y
+            _ -> Nothing
+        )
+      ),
       ( "atan2_32",
         ( [FloatType Float32, FloatType Float32],
           FloatType Float32,
@@ -1224,6 +1340,16 @@ primFuns =
           \case
             [FloatValue (Float64Value x), FloatValue (Float64Value y)] ->
               Just $ FloatValue $ Float64Value $ atan2 x y
+            _ -> Nothing
+        )
+      ),
+      --
+      ( "hypot16",
+        ( [FloatType Float16, FloatType Float16],
+          FloatType Float16,
+          \case
+            [FloatValue (Float16Value x), FloatValue (Float16Value y)] ->
+              Just $ FloatValue $ Float16Value $ convFloat $ hypotf (convFloat x) (convFloat y)
             _ -> Nothing
         )
       ),
@@ -1245,6 +1371,14 @@ primFuns =
             _ -> Nothing
         )
       ),
+      ( "isinf16",
+        ( [FloatType Float16],
+          Bool,
+          \case
+            [FloatValue (Float16Value x)] -> Just $ BoolValue $ isInfinite x
+            _ -> Nothing
+        )
+      ),
       ( "isinf32",
         ( [FloatType Float32],
           Bool,
@@ -1261,6 +1395,14 @@ primFuns =
             _ -> Nothing
         )
       ),
+      ( "isnan16",
+        ( [FloatType Float16],
+          Bool,
+          \case
+            [FloatValue (Float16Value x)] -> Just $ BoolValue $ isNaN x
+            _ -> Nothing
+        )
+      ),
       ( "isnan32",
         ( [FloatType Float32],
           Bool,
@@ -1274,6 +1416,15 @@ primFuns =
           Bool,
           \case
             [FloatValue (Float64Value x)] -> Just $ BoolValue $ isNaN x
+            _ -> Nothing
+        )
+      ),
+      ( "to_bits16",
+        ( [FloatType Float16],
+          IntType Int16,
+          \case
+            [FloatValue (Float16Value x)] ->
+              Just $ IntValue $ Int16Value $ fromIntegral $ halfToWord x
             _ -> Nothing
         )
       ),
@@ -1295,6 +1446,15 @@ primFuns =
             _ -> Nothing
         )
       ),
+      ( "from_bits16",
+        ( [IntType Int16],
+          FloatType Float16,
+          \case
+            [IntValue (Int16Value x)] ->
+              Just $ FloatValue $ Float16Value $ wordToHalf $ fromIntegral x
+            _ -> Nothing
+        )
+      ),
       ( "from_bits32",
         ( [IntType Int32],
           FloatType Float32,
@@ -1313,10 +1473,13 @@ primFuns =
             _ -> Nothing
         )
       ),
+      f16_3 "lerp16" (\v0 v1 t -> v0 + (v1 - v0) * max 0 (min 1 t)),
       f32_3 "lerp32" (\v0 v1 t -> v0 + (v1 - v0) * max 0 (min 1 t)),
       f64_3 "lerp64" (\v0 v1 t -> v0 + (v1 - v0) * max 0 (min 1 t)),
+      f16_3 "mad16" (\a b c -> a * b + c),
       f32_3 "mad32" (\a b c -> a * b + c),
       f64_3 "mad64" (\a b c -> a * b + c),
+      f16_3 "fma16" (\a b c -> a * b + c),
       f32_3 "fma32" (\a b c -> a * b + c),
       f64_3 "fma64" (\a b c -> a * b + c)
     ]
@@ -1325,8 +1488,16 @@ primFuns =
     i16 s f = (s, ([IntType Int16], IntType Int32, i16PrimFun f))
     i32 s f = (s, ([IntType Int32], IntType Int32, i32PrimFun f))
     i64 s f = (s, ([IntType Int64], IntType Int32, i64PrimFun f))
+    f16 s f = (s, ([FloatType Float16], FloatType Float16, f16PrimFun f))
     f32 s f = (s, ([FloatType Float32], FloatType Float32, f32PrimFun f))
     f64 s f = (s, ([FloatType Float64], FloatType Float64, f64PrimFun f))
+    f16_3 s f =
+      ( s,
+        ( [FloatType Float16, FloatType Float16, FloatType Float16],
+          FloatType Float16,
+          f16PrimFun3 f
+        )
+      )
     f32_3 s f =
       ( s,
         ( [FloatType Float32, FloatType Float32, FloatType Float32],
@@ -1358,6 +1529,10 @@ primFuns =
       Just $ f x
     i64PrimFun _ _ = Nothing
 
+    f16PrimFun f [FloatValue (Float16Value x)] =
+      Just $ FloatValue $ Float16Value $ f x
+    f16PrimFun _ _ = Nothing
+
     f32PrimFun f [FloatValue (Float32Value x)] =
       Just $ FloatValue $ Float32Value $ f x
     f32PrimFun _ _ = Nothing
@@ -1365,6 +1540,15 @@ primFuns =
     f64PrimFun f [FloatValue (Float64Value x)] =
       Just $ FloatValue $ Float64Value $ f x
     f64PrimFun _ _ = Nothing
+
+    f16PrimFun3
+      f
+      [ FloatValue (Float16Value a),
+        FloatValue (Float16Value b),
+        FloatValue (Float16Value c)
+        ] =
+        Just $ FloatValue $ Float16Value $ f a b c
+    f16PrimFun3 _ _ = Nothing
 
     f32PrimFun3
       f
@@ -1387,6 +1571,7 @@ primFuns =
 -- | Is the given value kind of zero?
 zeroIsh :: PrimValue -> Bool
 zeroIsh (IntValue k) = zeroIshInt k
+zeroIsh (FloatValue (Float16Value k)) = k == 0
 zeroIsh (FloatValue (Float32Value k)) = k == 0
 zeroIsh (FloatValue (Float64Value k)) = k == 0
 zeroIsh (BoolValue False) = True
@@ -1395,6 +1580,7 @@ zeroIsh _ = False
 -- | Is the given value kind of one?
 oneIsh :: PrimValue -> Bool
 oneIsh (IntValue k) = oneIshInt k
+oneIsh (FloatValue (Float16Value k)) = k == 1
 oneIsh (FloatValue (Float32Value k)) = k == 1
 oneIsh (FloatValue (Float64Value k)) = k == 1
 oneIsh (BoolValue True) = True
@@ -1403,6 +1589,7 @@ oneIsh _ = False
 -- | Is the given value kind of negative?
 negativeIsh :: PrimValue -> Bool
 negativeIsh (IntValue k) = negativeIshInt k
+negativeIsh (FloatValue (Float16Value k)) = k < 0
 negativeIsh (FloatValue (Float32Value k)) = k < 0
 negativeIsh (FloatValue (Float64Value k)) = k < 0
 negativeIsh (BoolValue _) = False
@@ -1449,6 +1636,7 @@ intByteSize Int64 = 8
 
 -- | The size of a value of a given floating-point type in eight-bit bytes.
 floatByteSize :: Num a => FloatType -> a
+floatByteSize Float16 = 2
 floatByteSize Float32 = 4
 floatByteSize Float64 = 8
 
@@ -1563,6 +1751,7 @@ taggedI s Int32 = text $ s ++ "32"
 taggedI s Int64 = text $ s ++ "64"
 
 taggedF :: String -> FloatType -> Doc
+taggedF s Float16 = text $ s ++ "16"
 taggedF s Float32 = text $ s ++ "32"
 taggedF s Float64 = text $ s ++ "64"
 

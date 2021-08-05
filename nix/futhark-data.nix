@@ -1,14 +1,15 @@
 { mkDerivation, base, binary, bytestring, bytestring-to-vector
-, containers, lib, megaparsec, mtl, QuickCheck, tasty, tasty-hunit
-, tasty-quickcheck, text, vector, vector-binary-instances
+, containers, half, lib, megaparsec, mtl, QuickCheck, tasty
+, tasty-hunit, tasty-quickcheck, text, vector
+, vector-binary-instances
 }:
 mkDerivation {
   pname = "futhark-data";
-  version = "1.0.0.1";
-  sha256 = "95ebad0fc7a459b756533471b3637ac4ece1f5de7e7239896c5481995f3ccb88";
+  version = "1.0.1.1";
+  sha256 = "bc60c4e080f4106afb250f2905e3ae541851aaaac53ec879d9067f907586a3e5";
   libraryHaskellDepends = [
-    base binary bytestring bytestring-to-vector containers megaparsec
-    mtl text vector vector-binary-instances
+    base binary bytestring bytestring-to-vector containers half
+    megaparsec mtl text vector vector-binary-instances
   ];
   testHaskellDepends = [
     base binary bytestring megaparsec QuickCheck tasty tasty-hunit

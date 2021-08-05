@@ -148,10 +148,16 @@ Values
 ------
 
 Primitive types (``i32``, ``bool``, etc) are mapped directly to their
-corresponding C type.  For each distinct array type of primitives
-(ignoring sizes), an opaque C struct is defined.  For types that do
-not map cleanly to C, including records, sum types, and arrays of
-tuples, see :ref:`opaques`.
+corresponding C type.  The ``f16`` type is mapped to ``uint16_t``,
+because C does not have a standard ``half`` type.  This integer
+contains the bitwise representation of the ``f16`` value in the IEEE
+754 binary16 format.
+
+For each distinct array type of primitives (ignoring sizes), an opaque
+C struct is defined.  Arrays of ``f16`` are presented as containing
+``uint16_t`` elements.  For types that do not map cleanly to C,
+including records, sum types, and arrays of tuples, see
+:ref:`opaques`.
 
 All array values share a similar API, which is illustrated here for
 the case of the type ``[]i32``.  The creation/retrieval functions are

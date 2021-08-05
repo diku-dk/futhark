@@ -1,25 +1,14 @@
 // Start of values.js
 
-var type_strs = { "Int8Array" : '  i8',
-                  "Int16Array" : ' i16',
-                  "Int32Array" : ' i32',
-                  "BigInt64Array" : ' i64',
-                  "Uint8Array" : '  u8',
-                  "Uint16Array" :  ' u16',
-                  "Uint32Array" :  ' u32',
-                  "BigUint64Array" :  ' u64',
-                  "Float32Array" : ' f32',
-                  "Float64Array" : ' f64',
-                };
-
 var typToType = { '  i8' : Int8Array ,
                   ' i16' : Int16Array ,
                   ' i32' : Int32Array ,
                   ' i64' : BigInt64Array ,
                   '  u8' : Uint8Array ,
-                  ' u16' :  Uint16Array ,
-                  ' u32' :  Uint32Array ,
-                  ' u64' :  BigUint64Array ,
+                  ' u16' : Uint16Array ,
+                  ' u32' : Uint32Array ,
+                  ' u64' : BigUint64Array ,
+                  ' f16' : Uint16Array ,
                   ' f32' : Float32Array ,
                   ' f64' : Float64Array ,
                   'bool' : Uint8Array
@@ -46,6 +35,7 @@ var typToSize = {
   " i16" : 2,
   " u32" : 4,
   " i32" : 4,
+  " f16" : 2,
   " f32" : 4,
   " u64" : 8,
   " i64" : 8,

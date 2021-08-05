@@ -736,6 +736,12 @@ static cl_program setup_opencl_with_command_queue(struct opencl_context *ctx,
                   "%s ", extra_build_opts[i]);
   }
 
+  // Oclgrind claims to support cl_khr_fp16, but this is not actually
+  // the case.
+  if (strcmp(device_option.platform_name, "Oclgrind") == 0) {
+    w += snprintf(compile_opts+w, compile_opts_size-w, "-DEMULATE_F16 ");
+  }
+
   if (ctx->cfg.debugging) {
     fprintf(stderr, "OpenCL compiler options: %s\n", compile_opts);
     fprintf(stderr, "Building OpenCL program...\n");
