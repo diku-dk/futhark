@@ -1,3 +1,5 @@
+{-# LANGUAGE OverloadedStrings #-}
+
 -- | C code generator.  This module can convert a correct ImpCode
 -- program to an equivalent C program. The C code is strictly
 -- sequential, but can handle the full Futhark language.
@@ -22,7 +24,7 @@ import Futhark.MonadFreshNames
 compileProg :: MonadFreshNames m => Prog SeqMem -> m (ImpGen.Warnings, GC.CParts)
 compileProg =
   traverse
-    (GC.compileProg "c" operations generateBoilerplate "" [DefaultSpace] [])
+    (GC.compileProg "c" operations generateBoilerplate mempty [DefaultSpace] [])
     <=< ImpGen.compileProg
   where
     operations :: GC.Operations Imp.Sequential ()

@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE TupleSections #-}
 
@@ -26,6 +27,7 @@ import Futhark.IR.GPUMem hiding
   )
 import Futhark.MonadFreshNames
 import qualified Language.C.Quote.OpenCL as C
+import NeatInterpolation (untrimming)
 
 -- | Compile the program to C with calls to CUDA.
 compileProg :: MonadFreshNames m => Prog GPUMem -> m (ImpGen.Warnings, GC.CParts)
@@ -75,11 +77,11 @@ compileProg prog = do
             )
         }
     cuda_includes =
-      unlines
-        [ "#include <cuda.h>",
-          "#include <cuda_runtime.h>",
-          "#include <nvrtc.h>"
-        ]
+      [untrimming|
+       #include <cuda.h>
+       #include <cuda_runtime.h>
+       #include <nvrtc.h>
+      |]
 
 cliOptions :: [Option]
 cliOptions =
@@ -197,7 +199,7 @@ copyCUDAMemory dstmem dstidx dstSpace srcmem srcidx srcSpace nbytes = do
                 }
                 |]
   where
-    memcpyFun DefaultSpace (Space "device") = ("cuMemcpyDtoH", copyDevToHost)
+    memcpyFun DefaultSpace (Space "device") = ("cuMemcpyDtoH" :: String, copyDevToHost)
     memcpyFun (Space "device") DefaultSpace = ("cuMemcpyHtoD", copyHostToDev)
     memcpyFun (Space "device") (Space "device") = ("cuMemcpy", copyDevToDev)
     memcpyFun _ _ =

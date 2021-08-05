@@ -1,4 +1,5 @@
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE TupleSections #-}
 
@@ -27,6 +28,7 @@ import Futhark.IR.GPUMem hiding
 import Futhark.MonadFreshNames
 import qualified Language.C.Quote.OpenCL as C
 import qualified Language.C.Syntax as C
+import NeatInterpolation (untrimming)
 
 -- | Compile the program to C with calls to OpenCL.
 compileProg :: MonadFreshNames m => Prog GPUMem -> m (ImpGen.Warnings, GC.CParts)
@@ -81,16 +83,16 @@ compileProg prog = do
           GC.opsFatMemory = True
         }
     include_opencl_h =
-      unlines
-        [ "#define CL_TARGET_OPENCL_VERSION 120",
-          "#define CL_USE_DEPRECATED_OPENCL_1_2_APIS",
-          "#ifdef __APPLE__",
-          "#define CL_SILENCE_DEPRECATION",
-          "#include <OpenCL/cl.h>",
-          "#else",
-          "#include <CL/cl.h>",
-          "#endif"
-        ]
+      [untrimming|
+       #define CL_TARGET_OPENCL_VERSION 120
+       #define CL_USE_DEPRECATED_OPENCL_1_2_APIS
+       #ifdef __APPLE__
+       #define CL_SILENCE_DEPRECATION
+       #include <OpenCL/cl.h>
+       #else
+       #include <CL/cl.h>
+       #endif
+       |]
 
 cliOptions :: [Option]
 cliOptions =

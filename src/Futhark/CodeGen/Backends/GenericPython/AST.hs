@@ -31,7 +31,7 @@ data PyExp
   | Bool Bool
   | Float Double
   | String String
-  | RawStringLiteral String
+  | RawStringLiteral T.Text
   | Var String
   | BinOp String PyExp PyExp
   | UnOp String PyExp
@@ -106,7 +106,7 @@ instance Pretty PyExp where
     | isInfinite x = text $ if x > 0 then "float('inf')" else "float('-inf')"
     | otherwise = ppr x
   ppr (String x) = text $ show x
-  ppr (RawStringLiteral s) = text "\"\"\"" <> text s <> text "\"\"\""
+  ppr (RawStringLiteral s) = text "\"\"\"" <> strictText s <> text "\"\"\""
   ppr (Var n) = text $ map (\x -> if x == '\'' then 'm' else x) n
   ppr (Field e s) = ppr e <> text "." <> text s
   ppr (BinOp s e1 e2) = parens (ppr e1 <+> text s <+> ppr e2)

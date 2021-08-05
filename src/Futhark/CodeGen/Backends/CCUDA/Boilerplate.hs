@@ -55,8 +55,8 @@ profilingEnclosure name =
 -- | Called after most code has been generated to generate the bulk of
 -- the boilerplate.
 generateBoilerplate ::
-  String ->
-  String ->
+  T.Text ->
+  T.Text ->
   [Name] ->
   M.Map KernelName KernelSafety ->
   M.Map Name SizeClass ->
@@ -82,8 +82,9 @@ generateBoilerplate cuda_program cuda_prelude cost_centres kernels sizes failure
   mapM_ GC.profileReport $ costCentreReport $ cost_centres ++ M.keys kernels
   where
     fragments =
-      map (\s -> [C.cinit|$string:s|]) $
-        chunk 2000 (cuda_prelude ++ cuda_program)
+      [ [C.cinit|$string:s|]
+        | s <- chunk 2000 $ T.unpack $ cuda_prelude <> cuda_program
+      ]
 
 generateSizeFuns :: M.Map Name SizeClass -> GC.CompilerM OpenCL () ()
 generateSizeFuns sizes = do
