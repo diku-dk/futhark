@@ -107,7 +107,7 @@ genericOptions =
                 int value = atoi(value_str);
                 if (equals != NULL) {
                   *equals = 0;
-                  if (futhark_context_config_set_size(cfg, name, value) != 0) {
+                  if (futhark_context_config_set_size(cfg, name, (size_t)value) != 0) {
                     futhark_panic(1, "Unknown size: %s\n", name);
                   }
                 } else {

@@ -406,11 +406,11 @@ static inline uint64_t umax64(uint64_t x, uint64_t y) {
 }
 
 static inline uint8_t shl8(uint8_t x, uint8_t y) {
-  return x << y;
+  return (uint8_t)(x << y);
 }
 
 static inline uint16_t shl16(uint16_t x, uint16_t y) {
-  return x << y;
+  return (uint16_t)(x << y);
 }
 
 static inline uint32_t shl32(uint32_t x, uint32_t y) {

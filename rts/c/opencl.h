@@ -195,7 +195,7 @@ static const char* opencl_error_string(cl_int err)
     }
 }
 
-static void opencl_succeed_fatal(unsigned int ret,
+static void opencl_succeed_fatal(cl_int ret,
                                  const char *call,
                                  const char *file,
                                  int line) {
@@ -205,7 +205,7 @@ static void opencl_succeed_fatal(unsigned int ret,
   }
 }
 
-static char* opencl_succeed_nonfatal(unsigned int ret,
+static char* opencl_succeed_nonfatal(cl_int ret,
                                      const char *call,
                                      const char *file,
                                      int line) {
