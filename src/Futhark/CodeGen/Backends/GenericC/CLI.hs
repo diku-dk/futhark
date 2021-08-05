@@ -19,6 +19,7 @@ import Futhark.CodeGen.Backends.GenericC.Options
 import Futhark.CodeGen.Backends.SimpleRep
 import Futhark.CodeGen.ImpCode
 import Futhark.CodeGen.RTS.C (tuningH, valuesH)
+import Futhark.Util.Pretty (prettyText)
 import qualified Language.C.Quote.OpenCL as C
 import qualified Language.C.Syntax as C
 
@@ -415,13 +416,14 @@ cliEntryPoint fun@(Function _ _ _ _ results args) = do
 {-# NOINLINE cliDefs #-}
 
 -- | Generate Futhark standalone executable code.
-cliDefs :: [Option] -> Functions a -> [C.Definition]
+cliDefs :: [Option] -> Functions a -> T.Text
 cliDefs options (Functions funs) =
   let option_parser =
         generateOptionParser "parse_options" $ genericOptions ++ options
       (cli_entry_point_decls, entry_point_inits) =
         unzip $ mapMaybe (cliEntryPoint . snd) funs
-   in [C.cunit|
+   in prettyText
+        [C.cunit|
 $esc:("#include <getopt.h>")
 $esc:("#include <ctype.h>")
 $esc:("#include <inttypes.h>")

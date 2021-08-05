@@ -20,6 +20,7 @@ import Futhark.CodeGen.Backends.GenericC.Options
 import Futhark.CodeGen.Backends.SimpleRep
 import Futhark.CodeGen.ImpCode
 import Futhark.CodeGen.RTS.C (serverH, tuningH, valuesH)
+import Futhark.Util.Pretty (prettyText)
 import qualified Language.C.Quote.OpenCL as C
 import qualified Language.C.Syntax as C
 
@@ -276,13 +277,14 @@ mkBoilerplate funs =
 {-# NOINLINE serverDefs #-}
 
 -- | Generate Futhark server executable code.
-serverDefs :: [Option] -> Functions a -> [C.Definition]
+serverDefs :: [Option] -> Functions a -> T.Text
 serverDefs options funs =
   let option_parser =
         generateOptionParser "parse_options" $ genericOptions ++ options
       (boilerplate_defs, type_inits, entry_point_inits) =
         mkBoilerplate funs
-   in [C.cunit|
+   in prettyText
+        [C.cunit|
 $esc:("#include <getopt.h>")
 $esc:("#include <ctype.h>")
 $esc:("#include <inttypes.h>")
