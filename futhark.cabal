@@ -105,7 +105,6 @@ library
       Futhark.CodeGen.Backends.GenericC.Server
       Futhark.CodeGen.Backends.GenericPython
       Futhark.CodeGen.Backends.GenericPython.AST
-      Futhark.CodeGen.Backends.GenericPython.Definitions
       Futhark.CodeGen.Backends.GenericPython.Options
       Futhark.CodeGen.Backends.GenericWASM
       Futhark.CodeGen.Backends.MulticoreC
@@ -117,6 +116,9 @@ library
       Futhark.CodeGen.Backends.SequentialPython
       Futhark.CodeGen.Backends.SequentialWASM
       Futhark.CodeGen.Backends.SimpleRep
+      Futhark.CodeGen.RTS.C
+      Futhark.CodeGen.RTS.Python
+      Futhark.CodeGen.RTS.JavaScript
       Futhark.CodeGen.ImpCode
       Futhark.CodeGen.ImpCode.GPU
       Futhark.CodeGen.ImpCode.Multicore

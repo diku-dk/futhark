@@ -11,6 +11,7 @@ module Futhark.CodeGen.Backends.GenericPython.AST
   )
 where
 
+import qualified Data.Text as T
 import Futhark.Util.Pretty
 import Language.Futhark.Core
 
@@ -75,7 +76,7 @@ data PyStmt
   | FunDef PyFunDef
   | ClassDef PyClassDef
   | -- Some arbitrary string of Python code.
-    Escape String
+    Escape T.Text
   deriving (Eq, Show)
 
 data PyExcept = Catch PyExp [PyStmt]
@@ -172,7 +173,7 @@ instance Pretty PyStmt where
     text "import" <+> text from
   ppr (FunDef d) = ppr d
   ppr (ClassDef d) = ppr d
-  ppr (Escape s) = stack $ map text $ lines s
+  ppr (Escape s) = stack $ map strictText $ T.lines s
 
 instance Pretty PyFunDef where
   ppr (Def fname params body) =

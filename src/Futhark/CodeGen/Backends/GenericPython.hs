@@ -53,9 +53,9 @@ import qualified Data.Map as M
 import Data.Maybe
 import qualified Data.Text as T
 import Futhark.CodeGen.Backends.GenericPython.AST
-import Futhark.CodeGen.Backends.GenericPython.Definitions
 import Futhark.CodeGen.Backends.GenericPython.Options
 import qualified Futhark.CodeGen.ImpCode as Imp
+import Futhark.CodeGen.RTS.Python
 import Futhark.Compiler.CLI (CompilerMode (..))
 import Futhark.IR.Primitive hiding (Bool)
 import Futhark.IR.Prop (isBuiltInFunction, subExpVars)
@@ -375,12 +375,12 @@ compileProg mode class_name constructor imports defines ops userstate sync optio
            Assign (Var "sizes") $ Dict []
          ]
       ++ defines
-      ++ [ Escape pyValues,
-           Escape pyFunctions,
-           Escape pyPanic,
-           Escape pyTuning,
-           Escape pyUtility,
-           Escape pyServer
+      ++ [ Escape valuesPy,
+           Escape memoryPy,
+           Escape panicPy,
+           Escape tuningPy,
+           Escape scalarPy,
+           Escape serverPy
          ]
       ++ prog'
   where
