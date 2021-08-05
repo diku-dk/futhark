@@ -2,6 +2,14 @@
 {-# LANGUAGE TypeFamilies #-}
 
 -- | Playground for work on merging memory blocks
+--
+-- Last-Use analysis of a Futhark program in aliased explicit-memory lore form.
+-- Takes as input such a program or a function and produces a 'M.Map VName
+-- Names', in which the key identified the let stmt, and the list argument
+-- identifies the variables that were lastly used in that stmt.  Note that the
+-- results of a body do not have a last use, and neither do a function
+-- parameters if it happens to not be used inside function's body.  Such cases
+-- are supposed to be treated separately.
 module Futhark.Optimise.MemBlockCoalesce.LastUse (lastUseFun, lastUsePrg) where
 
 import qualified Data.Map.Strict as M
@@ -10,37 +18,33 @@ import qualified Futhark.IR.SeqMem as ExpMem
 import Futhark.Optimise.MemBlockCoalesce.DataStructs
 import Prelude
 
--- | Last-Use analysis of a Futhark program in aliased explicit-memory lore form.
---   Takes as input such a program and produces a `M.Map VName [VName]`,
---   in which the key identified the let stmt, and the list argument
---   identifies the variables that were lastly used in that stmt.
---   Note that the results of a body do not have a last use, and neither
---   do a function parameters if it happens to not be used inside function's body.
---   Such cases are supposed to be treated separately.
+-- | Perform last-use analysis on a 'Prog'
 lastUsePrg :: Prog (Aliases ExpMem.SeqMem) -> LUTabPrg
 lastUsePrg prg = M.fromList $ map lastUseFun $ progFuns prg
 
+-- | Perform last-use analysis on a 'FunDef'
 lastUseFun :: FunDef (Aliases ExpMem.SeqMem) -> (Name, LUTabFun)
 lastUseFun (FunDef _ _ fname _ _ body) =
   let (_, res, _) = lastUseAnBdy M.empty body (M.empty, mempty)
    in (fname, res)
 
--- | Performing the last-use analysis on a body. Arguments are:
---     (i) the aliasing table,
---    (ii) the body of statements,
---   (iii) the current last-use table, tupled with the known set of already used names.
---   The result is:
---     (i) the body's free variables (optimization),
---    (ii) an updated last-use table,
---   (iii) an updated set of used names (including the binding).
---   The implementation consists of a bottom-up traversal of the body's statements
---   in which the the variables lastly used in a statement are computed as the
---   difference between the free-variables in that stmt and the set of variables
---   known to be used after that statement.
+-- | Performing the last-use analysis on a body.
+--
+-- The implementation consists of a bottom-up traversal of the body's statements
+-- in which the the variables lastly used in a statement are computed as the
+-- difference between the free-variables in that stmt and the set of variables
+-- known to be used after that statement.
 lastUseAnBdy ::
+  -- | The aliasing table
   AliasTab ->
+  -- | The body of statements
   Body (Aliases ExpMem.SeqMem) ->
+  -- | The current last-use table, tupled with the known set of already used names
   (LUTabFun, Names) ->
+  -- | The result is:
+  --      (i) the body's free variables (optimization),
+  --     (ii) an updated last-use table,
+  --    (iii) an updated set of used names (including the binding).
   (Names, LUTabFun, Names)
 lastUseAnBdy alstab bdy@(Body _ bnds result) (lutab, used_nms) =
   -- perform analysis bottom-up in bindings: results are known to be used,
@@ -63,7 +67,6 @@ lastUseAnBdy alstab bdy@(Body _ bnds result) (lutab, used_nms) =
       (LUTabFun, Names) ->
       [VName] ->
       (LUTabFun, Names)
-
     traverseBindings stab [] (lutab1, nms) res_nms =
       (lutab1, foldl mkUnion nms $ map (`M.lookup` stab) res_nms)
     traverseBindings stab (bd@(Let pat _ e) : bds) (lutab1, nms) res_nms =

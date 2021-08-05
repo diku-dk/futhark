@@ -117,7 +117,7 @@ getDirAliasFromExp _ = Nothing
 getInvAliasFromExp :: Exp (Aliases ExpMem.SeqMem) -> InvAlias
 getInvAliasFromExp (BasicOp (SubExp (Var _))) = Just id
 getInvAliasFromExp (BasicOp (Opaque _ (Var _))) = Just id
-getInvAliasFromExp (BasicOp (Update {})) = Just id
+getInvAliasFromExp (BasicOp Update {}) = Just id
 getInvAliasFromExp (BasicOp (Rearrange perm _)) =
   let perm' = IxFun.permuteInv perm [0 .. length perm - 1]
    in Just (`IxFun.permute` perm')

@@ -350,7 +350,7 @@ markFailedCoal (coal_tab, inhb_tab) src_mem =
     Nothing -> (coal_tab, inhb_tab)
     Just coale ->
       let failed_set = oneName $ dstmem coale
-          failed_set' = failed_set <> (fromMaybe mempty $ M.lookup src_mem inhb_tab)
+          failed_set' = failed_set <> fromMaybe mempty (M.lookup src_mem inhb_tab)
        in trace
             ("Failed Coalesce: " ++ pretty src_mem ++ "->" ++ pretty (dstmem coale))
             ( M.delete src_mem coal_tab,
