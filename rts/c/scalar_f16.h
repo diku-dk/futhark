@@ -614,11 +614,11 @@ static inline f16 fpconv_f32_f16(float x) {
 #ifdef FUTHARK_F64_ENABLED
 
 static inline double fpconv_f16_f64(f16 x) {
-  return x;
+  return (double) x;
 }
 
 static inline f16 fpconv_f64_f16(double x) {
-  return x;
+  return (f16) x;
 }
 
 #endif
