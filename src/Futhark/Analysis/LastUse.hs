@@ -1,5 +1,9 @@
+{-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE UndecidableInstances #-}
 
 -- | Provides last-use analysis for Futhark programs.
 module Futhark.Analysis.LastUse (LastUseMap, analyseProg) where
@@ -27,10 +31,17 @@ type LastUse = Map VName VName
 -- or otherwise.
 type Used = Names
 
+type LastUseHelper rep =
+  ( OpWithAliases (Op rep) ~ MemOp (HostOp (Aliases rep) ()),
+    ASTRep rep,
+    HasLastUse rep,
+    CanBeAliased (Op rep)
+  )
+
 -- | Analyses a program to return a last-use map, mapping each simple statement
 -- in the program to the values that were last used within that statement, and
 -- the set of all `VName` that were used inside.
-analyseProg :: Prog GPUMem -> (LastUseMap, Used)
+analyseProg :: LastUseHelper rep => Prog rep -> (LastUseMap, Used)
 analyseProg prog =
   let consts =
         progConsts prog
@@ -40,15 +51,15 @@ analyseProg prog =
       (lus, used) = foldMap (analyseFun mempty consts) funs
    in (flipMap lus, used)
 
-analyseFun :: LastUse -> Used -> FunDef (Aliases GPUMem) -> (LastUse, Used)
+analyseFun :: LastUseHelper rep => LastUse -> Used -> FunDef (Aliases rep) -> (LastUse, Used)
 analyseFun lumap used fun =
   let (lumap', used') = analyseBody lumap used $ funDefBody fun
    in (lumap', used' <> freeIn (funDefParams fun))
 
-analyseStms :: LastUse -> Used -> Stms (Aliases GPUMem) -> (LastUse, Used)
+analyseStms :: LastUseHelper rep => LastUse -> Used -> Stms (Aliases rep) -> (LastUse, Used)
 analyseStms lumap used stms = foldr analyseStm (lumap, used) $ stmsToList stms
 
-analyseStm :: Stm (Aliases GPUMem) -> (LastUse, Used) -> (LastUse, Used)
+analyseStm :: LastUseHelper rep => Stm (Aliases rep) -> (LastUse, Used) -> (LastUse, Used)
 analyseStm (Let pat _ e) (lumap0, used0) =
   let (lumap', used') = patElems pat & foldl helper (lumap0, used0)
    in analyseExp (lumap', used') e
@@ -63,7 +74,6 @@ analyseStm (Let pat _ e) (lumap0, used0) =
       )
 
     pat_name = patElemName $ head $ patElems pat
-    analyseExp :: (LastUse, Used) -> Exp (Aliases GPUMem) -> (LastUse, Used)
     analyseExp (lumap, used) (BasicOp _) =
       let nms = freeIn e `namesSubtract` used
        in (insertNames pat_name nms lumap, used <> nms)
@@ -80,50 +90,87 @@ analyseStm (Let pat _ e) (lumap0, used0) =
       let (lumap', used') = analyseBody lumap used body
           nms = (freeIn merge <> freeIn form) `namesSubtract` used'
        in (insertNames pat_name nms lumap', used' <> nms)
-    analyseExp (lumap, used) (Op (Alloc se sp)) =
-      let nms = (freeIn se <> freeIn sp) `namesSubtract` used
-       in (insertNames pat_name nms lumap, used <> nms)
-    analyseExp (lumap, used) (Op (Inner (SizeOp sop))) =
-      let nms = freeIn sop `namesSubtract` used
-       in (insertNames pat_name nms lumap, used <> nms)
-    analyseExp (lumap, used) (Op (Inner (OtherOp ()))) =
-      (lumap, used)
-    analyseExp (lumap, used) (Op (Inner (SegOp (SegMap lvl _ tps body)))) =
-      let (lumap', used') = analyseKernelBody (lumap, used) body
-          nms = (freeIn lvl <> freeIn tps) `namesSubtract` used'
-       in (insertNames pat_name nms lumap', used' <> nms)
-    analyseExp (lumap, used) (Op (Inner (SegOp (SegRed lvl _ binops tps body)))) =
-      segOpHelper lumap used lvl binops tps body
-    analyseExp (lumap, used) (Op (Inner (SegOp (SegScan lvl _ binops tps body)))) =
-      segOpHelper lumap used lvl binops tps body
-    analyseExp (lumap, used) (Op (Inner (SegOp (SegHist lvl _ binops tps body)))) =
-      let (lumap', used') = foldr analyseHistOp (lumap, used) binops
-          (lumap'', used'') = analyseKernelBody (lumap', used') body
-          nms = (freeIn lvl <> freeIn tps) `namesSubtract` used''
-       in (insertNames pat_name nms lumap'', used'' <> nms)
     analyseExp (lumap, used) (WithAcc _ l) =
       analyseLambda (lumap, used) l
-    segOpHelper lumap used lvl binops tps body =
-      let (lumap', used') = foldr analyseSegBinOp (lumap, used) binops
-          (lumap'', used'') = analyseKernelBody (lumap', used') body
-          nms = (freeIn lvl <> freeIn tps) `namesSubtract` used''
-       in (insertNames pat_name nms lumap'', used'' <> nms)
+    analyseExp (lumap, used) (Op op) =
+      lastUse pat_name (lumap, used) op
 
-analyseBody :: LastUse -> Used -> Body (Aliases GPUMem) -> (LastUse, Used)
+analyseMemHostOp :: LastUseHelper rep => VName -> (LastUse, Names) -> MemOp (HostOp (Aliases rep) ()) -> (LastUse, Names)
+analyseMemHostOp pat_name (lumap, used) (Alloc se sp) =
+  let nms = (freeIn se <> freeIn sp) `namesSubtract` used
+   in (insertNames pat_name nms lumap, used <> nms)
+analyseMemHostOp pat_name (lumap, used) (Inner hostOp) =
+  analyseHostOp pat_name (lumap, used) hostOp
+
+analyseHostOp ::
+  LastUseHelper rep => VName -> (LastUse, Names) -> HostOp (Aliases rep) () -> (LastUse, Names)
+analyseHostOp pat_name (lumap, used) (SizeOp sop) =
+  let nms = freeIn sop `namesSubtract` used
+   in (insertNames pat_name nms lumap, used <> nms)
+analyseHostOp _ (lumap, used) (OtherOp ()) =
+  (lumap, used)
+analyseHostOp pat_name (lumap, used) (SegOp sop) =
+  analyseSegOp pat_name (lumap, used) sop
+
+segOpHelper ::
+  LastUseHelper rep =>
+  VName ->
+  LastUse ->
+  Used ->
+  SegLevel ->
+  [SegBinOp (Aliases rep)] ->
+  [Type] ->
+  KernelBody (Aliases rep) ->
+  (LastUse, Used)
+segOpHelper pat_name lumap used lvl binops tps body =
+  let (lumap', used') = foldr analyseSegBinOp (lumap, used) binops
+      (lumap'', used'') = analyseKernelBody (lumap', used') body
+      nms = (freeIn lvl <> freeIn tps) `namesSubtract` used''
+   in (insertNames pat_name nms lumap'', used'' <> nms)
+
+analyseSegOp :: LastUseHelper rep => VName -> (LastUse, Names) -> SegOp SegLevel (Aliases rep) -> (LastUse, Names)
+analyseSegOp pat_name (lumap, used) (SegMap lvl _ tps body) =
+  let (lumap', used') = analyseKernelBody (lumap, used) body
+      nms = (freeIn lvl <> freeIn tps) `namesSubtract` used'
+   in (insertNames pat_name nms lumap', used' <> nms)
+analyseSegOp pat_name (lumap, used) (SegRed lvl _ binops tps body) =
+  segOpHelper pat_name lumap used lvl binops tps body
+analyseSegOp pat_name (lumap, used) (SegScan lvl _ binops tps body) =
+  segOpHelper pat_name lumap used lvl binops tps body
+analyseSegOp pat_name (lumap, used) (SegHist lvl _ binops tps body) =
+  let (lumap', used') = foldr analyseHistOp (lumap, used) binops
+      (lumap'', used'') = analyseKernelBody (lumap', used') body
+      nms = (freeIn lvl <> freeIn tps) `namesSubtract` used''
+   in (insertNames pat_name nms lumap'', used'' <> nms)
+
+class HasLastUse rep where
+  lastUse :: VName -> (LastUse, Used) -> (MemOp (HostOp (Aliases rep) ())) -> (LastUse, Used)
+
+instance HasLastUse GPUMem where
+  lastUse = analyseMemHostOp
+
+analyseBody ::
+  LastUseHelper rep =>
+  LastUse ->
+  Used ->
+  Body (Aliases rep) ->
+  (LastUse, Used)
 analyseBody lumap used (Body _ stms result) =
   let used' = used <> freeIn result
    in analyseStms lumap used' stms
 
 analyseKernelBody ::
+  LastUseHelper rep =>
   (LastUse, Used) ->
-  KernelBody (Aliases GPUMem) ->
+  KernelBody (Aliases rep) ->
   (LastUse, Used)
 analyseKernelBody (lumap, used) (KernelBody _ stms result) =
   let used' = used <> freeIn result
    in analyseStms lumap used' stms
 
 analyseSegBinOp ::
-  SegBinOp (Aliases GPUMem) ->
+  LastUseHelper rep =>
+  SegBinOp (Aliases rep) ->
   (LastUse, Used) ->
   (LastUse, Used)
 analyseSegBinOp (SegBinOp _ lambda neutral shp) (lumap, used) =
@@ -132,7 +179,8 @@ analyseSegBinOp (SegBinOp _ lambda neutral shp) (lumap, used) =
    in (lumap', used' <> nms)
 
 analyseHistOp ::
-  HistOp (Aliases GPUMem) ->
+  LastUseHelper rep =>
+  HistOp (Aliases rep) ->
   (LastUse, Used) ->
   (LastUse, Used)
 analyseHistOp (HistOp width race dest neutral shp lambda) (lumap, used) =
@@ -144,7 +192,11 @@ analyseHistOp (HistOp width race dest neutral shp lambda) (lumap, used) =
           `namesSubtract` used'
    in (lumap', used' <> nms)
 
-analyseLambda :: (LastUse, Used) -> Lambda (Aliases GPUMem) -> (LastUse, Used)
+analyseLambda ::
+  LastUseHelper rep =>
+  (LastUse, Used) ->
+  Lambda (Aliases rep) ->
+  (LastUse, Used)
 analyseLambda (lumap, used) (Lambda params body ret) =
   let (lumap', used') = analyseBody lumap used body
       used'' = used' <> freeIn params <> freeIn ret
