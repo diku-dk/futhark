@@ -22,6 +22,7 @@ where
 
 import Data.Text (Text)
 import qualified Data.Text.Lazy as LT
+import Numeric.Half
 import Text.PrettyPrint.Mainland hiding (pretty)
 import qualified Text.PrettyPrint.Mainland as PP
 import Text.PrettyPrint.Mainland.Class
@@ -94,3 +95,6 @@ shorten a
 -- | Like 'commasep', but a newline after every comma.
 commastack :: [Doc] -> Doc
 commastack = align . stack . punctuate comma
+
+instance Pretty Half where
+  ppr = text . show
