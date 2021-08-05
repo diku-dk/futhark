@@ -593,7 +593,7 @@ allocRawMem dest size space desc = case space of
         <*> pure [C.cexp|$exp:desc|]
         <*> pure sid
   _ ->
-    stm [C.cstm|$exp:dest = (unsigned char*) malloc($exp:size);|]
+    stm [C.cstm|$exp:dest = (unsigned char*) malloc((size_t)$exp:size);|]
 
 freeRawMem ::
   (C.ToExp a, C.ToExp b) =>
@@ -858,7 +858,7 @@ arrayLibraryFunctions pub space pt signed rank = do
         resetMem [C.cexp|arr->mem|] space
         allocMem
           [C.cexp|arr->mem|]
-          [C.cexp|((size_t)$exp:arr_size) * $int:(primByteSize pt::Int)|]
+          [C.cexp|$exp:arr_size * $int:(primByteSize pt::Int)|]
           space
           [C.cstm|return NULL;|]
         forM_ [0 .. rank -1] $ \i ->
