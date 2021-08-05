@@ -1497,11 +1497,11 @@ static inline double fabs64(double x) {
   return fabs(x);
 }
 
-static inline float fmax64(double x, double y) {
+static inline double fmax64(double x, double y) {
   return fmax(x, y);
 }
 
-static inline float fmin64(double x, double y) {
+static inline double fmin64(double x, double y) {
   return fmin(x, y);
 }
 
