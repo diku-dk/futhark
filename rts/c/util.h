@@ -7,6 +7,14 @@
 
 static const char *fut_progname = "(embedded Futhark)";
 
+static void futhark_panic(int eval, const char *fmt, ...) __attribute__((noreturn));
+static char* msgprintf(const char *s, ...);
+static void* slurp_file(const char *filename, size_t *size);
+static int dump_file(const char *file, const void *buf, size_t n);
+struct str_builder;
+static void str_builder_init(struct str_builder *b);
+static void str_builder(struct str_builder *b, const char *s, ...);
+
 static void futhark_panic(int eval, const char *fmt, ...) {
   va_list ap;
   va_start(ap, fmt);
@@ -27,7 +35,6 @@ static char* msgprintf(const char *s, ...) {
   vsnprintf(buffer, needed, s, vl);
   return buffer;
 }
-
 
 static inline void check_err(int errval, int sets_errno, const char *fun, int line,
                             const char *msg, ...) {
@@ -52,12 +59,12 @@ static inline void check_err(int errval, int sets_errno, const char *fun, int li
 // Read the rest of an open file into a NUL-terminated string; returns
 // NULL on error.
 static void* fslurp_file(FILE *f, size_t *size) {
-  size_t start = ftell(f);
+  long start = ftell(f);
   fseek(f, 0, SEEK_END);
-  size_t src_size = ftell(f)-start;
+  long src_size = ftell(f)-start;
   fseek(f, start, SEEK_SET);
-  unsigned char *s = (unsigned char*) malloc(src_size + 1);
-  if (fread(s, 1, src_size, f) != src_size) {
+  unsigned char *s = (unsigned char*) malloc((size_t)src_size + 1);
+  if (fread(s, 1, (size_t)src_size, f) != (size_t)src_size) {
     free(s);
     s = NULL;
   } else {
@@ -65,7 +72,7 @@ static void* fslurp_file(FILE *f, size_t *size) {
   }
 
   if (size) {
-    *size = src_size;
+    *size = (size_t)src_size;
   }
 
   return s;
