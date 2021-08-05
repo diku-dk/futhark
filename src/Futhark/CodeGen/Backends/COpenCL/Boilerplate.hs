@@ -71,8 +71,8 @@ profilingEvent name =
 -- | Called after most code has been generated to generate the bulk of
 -- the boilerplate.
 generateBoilerplate ::
-  String ->
-  String ->
+  T.Text ->
+  T.Text ->
   [Name] ->
   M.Map KernelName KernelSafety ->
   [PrimType] ->
@@ -83,7 +83,7 @@ generateBoilerplate opencl_code opencl_prelude cost_centres kernels types sizes 
   final_inits <- GC.contextFinalInits
 
   let (ctx_opencl_fields, ctx_opencl_inits, top_decls, later_top_decls) =
-        openClDecls cost_centres kernels opencl_code opencl_prelude
+        openClDecls cost_centres kernels (opencl_prelude <> opencl_code)
 
   mapM_ GC.earlyDecl top_decls
 
@@ -506,17 +506,18 @@ generateBoilerplate opencl_code opencl_prelude cost_centres kernels types sizes 
 openClDecls ::
   [Name] ->
   M.Map KernelName KernelSafety ->
-  String ->
-  String ->
+  T.Text ->
   ([C.FieldGroup], [C.Stm], [C.Definition], [C.Definition])
-openClDecls cost_centres kernels opencl_program opencl_prelude =
+openClDecls cost_centres kernels opencl_program =
   (ctx_fields, ctx_inits, openCL_boilerplate, openCL_load)
   where
     opencl_program_fragments =
       -- Some C compilers limit the size of literal strings, so
       -- chunk the entire program into small bits here, and
       -- concatenate it again at runtime.
-      [[C.cinit|$string:s|] | s <- chunk 2000 (opencl_prelude ++ opencl_program)]
+      [ [C.cinit|$string:s|]
+        | s <- chunk 2000 $ T.unpack opencl_program
+      ]
 
     ctx_fields =
       [ [C.csdecl|int total_runs;|],

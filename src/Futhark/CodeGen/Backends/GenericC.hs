@@ -343,18 +343,27 @@ envStaticArray = opsStaticArray . envOperations
 envFatMemory :: CompilerEnv op s -> Bool
 envFatMemory = opsFatMemory . envOperations
 
-initDecls, arrayDecls, opaqueDecls, entryDecls, miscDecls :: CompilerState s -> [C.Definition]
-initDecls = concatMap (DL.toList . snd) . filter ((== InitDecl) . fst) . M.toList . compHeaderDecls
-arrayDecls = concatMap (DL.toList . snd) . filter (isArrayDecl . fst) . M.toList . compHeaderDecls
+declsCode :: (HeaderSection -> Bool) -> CompilerState s -> T.Text
+declsCode p =
+  T.unlines
+    . map prettyText
+    . concatMap (DL.toList . snd)
+    . filter (p . fst)
+    . M.toList
+    . compHeaderDecls
+
+initDecls, arrayDecls, opaqueDecls, entryDecls, miscDecls :: CompilerState s -> T.Text
+initDecls = declsCode (== InitDecl)
+arrayDecls = declsCode isArrayDecl
   where
     isArrayDecl ArrayDecl {} = True
     isArrayDecl _ = False
-opaqueDecls = concatMap (DL.toList . snd) . filter (isOpaqueDecl . fst) . M.toList . compHeaderDecls
+opaqueDecls = declsCode isOpaqueDecl
   where
     isOpaqueDecl OpaqueDecl {} = True
     isOpaqueDecl _ = False
-entryDecls = concatMap (DL.toList . snd) . filter ((== EntryDecl) . fst) . M.toList . compHeaderDecls
-miscDecls = concatMap (DL.toList . snd) . filter ((== MiscDecl) . fst) . M.toList . compHeaderDecls
+entryDecls = declsCode (== EntryDecl)
+miscDecls = declsCode (== MiscDecl)
 
 contextContents :: CompilerM op s ([C.FieldGroup], [C.Stm])
 contextContents = do
@@ -1399,10 +1408,10 @@ asServer parts =
 -- function named "main" as entry point, so make sure it is defined.
 compileProg ::
   MonadFreshNames m =>
-  String ->
+  T.Text ->
   Operations op () ->
   CompilerM op () () ->
-  String ->
+  T.Text ->
   [Space] ->
   [Option] ->
   Definitions op ->
@@ -1411,102 +1420,105 @@ compileProg backend ops extra header_extra spaces options prog = do
   src <- getNameSource
   let ((prototypes, definitions, entry_point_decls), endstate) =
         runCompilerM ops src () compileProg'
+      initdecls = initDecls endstate
+      entrydecls = entryDecls endstate
+      arraydecls = arrayDecls endstate
+      opaquedecls = opaqueDecls endstate
+      miscdecls = miscDecls endstate
 
   let headerdefs =
-        [C.cunit|
-$esc:("// Headers\n")
-$esc:("#include <stdint.h>")
-$esc:("#include <stddef.h>")
-$esc:("#include <stdbool.h>")
-$esc:("#include <stdio.h>")
-$esc:("#include <float.h>")
-$esc:(header_extra)
+        [untrimming|
+// Headers\n")
+#include <stdint.h>
+#include <stddef.h>
+#include <stdbool.h>
+#include <stdio.h>
+#include <float.h>
+$header_extra
+#ifdef __cplusplus
+extern "C" {
+#endif
 
-$esc:("#ifdef __cplusplus")
-$esc:("extern \"C\" {")
-$esc:("#endif")
+// Initialisation
+$initdecls
 
-$esc:("\n// Initialisation\n")
-$edecls:(initDecls endstate)
+// Arrays
+$arraydecls
 
-$esc:("\n// Arrays\n")
-$edecls:(arrayDecls endstate)
+// Opaque values
+$opaquedecls
 
-$esc:("\n// Opaque values\n")
-$edecls:(opaqueDecls endstate)
+// Entry points
+$entrydecls
 
-$esc:("\n// Entry points\n")
-$edecls:(entryDecls endstate)
+// Miscellaneous
+$miscdecls
+#define FUTHARK_BACKEND_$backend
 
-$esc:("\n// Miscellaneous\n")
-$edecls:(miscDecls endstate)
-$esc:("#define FUTHARK_BACKEND_"++backend)
-
-$esc:("#ifdef __cplusplus")
-$esc:("}")
-$esc:("#endif")
-                           |]
+#ifdef __cplusplus
+}
+#endif
+|]
 
   let utildefs =
-        [C.cunit|
-$esc:("#include <stdio.h>")
-$esc:("#include <stdlib.h>")
-$esc:("#include <stdbool.h>")
-$esc:("#include <math.h>")
-$esc:("#include <stdint.h>")
+        [untrimming|
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdbool.h>
+#include <math.h>
+#include <stdint.h>
 // If NDEBUG is set, the assert() macro will do nothing. Since Futhark
 // (unfortunately) makes use of assert() for error detection (and even some
 // side effects), we want to avoid that.
-$esc:("#undef NDEBUG")
-$esc:("#include <assert.h>")
-$esc:("#include <stdarg.h>")
-
-$esc:(T.unpack utilH)
-
-$esc:(T.unpack halfH)
-
-$esc:(T.unpack timingH)
+#undef NDEBUG
+#include <assert.h>
+#include <stdarg.h>
+$utilH
+$halfH
+$timingH
 |]
 
-  let early_decls = DL.toList $ compEarlyDecls endstate
-  let lib_decls = DL.toList $ compLibDecls endstate
-  let clidefs = cliDefs options $ Functions entry_funs
-  let serverdefs = serverDefs options $ Functions entry_funs
-  let libdefs =
-        [C.cunit|
-$esc:("#ifdef _MSC_VER\n#define inline __inline\n#endif")
-$esc:("#include <string.h>")
-$esc:("#include <string.h>")
-$esc:("#include <errno.h>")
-$esc:("#include <assert.h>")
-$esc:("#include <ctype.h>")
+  let early_decls = T.unlines $ map prettyText $ DL.toList $ compEarlyDecls endstate
+      lib_decls = T.unlines $ map prettyText $ DL.toList $ compLibDecls endstate
+      clidefs = cliDefs options $ Functions entry_funs
+      serverdefs = serverDefs options $ Functions entry_funs
+      libdefs =
+        [untrimming|
+#ifdef _MSC_VER
+#define inline __inline
+#endif
+#include <string.h>
+#include <string.h>
+#include <errno.h>
+#include <assert.h>
+#include <ctype.h>
 
-$esc:header_extra
+$header_extra
 
-$esc:(T.unpack lockH)
+$lockH
 
-$esc:("#define FUTHARK_F64_ENABLED")
+#define FUTHARK_F64_ENABLED
 
-$esc:(T.unpack cScalarDefs)
+$cScalarDefs
 
-$edecls:early_decls
+$early_decls
 
-$edecls:prototypes
+$prototypes
 
-$edecls:lib_decls
+$lib_decls
 
-$edecls:definitions
+$definitions
 
-$edecls:entry_point_decls
+$entry_point_decls
   |]
 
   return
     CParts
-      { cHeader = prettyText headerdefs,
-        cUtils = prettyText utildefs,
-        cCLI = prettyText clidefs,
-        cServer = prettyText serverdefs,
-        cLib = prettyText libdefs
+      { cHeader = headerdefs,
+        cUtils = utildefs,
+        cCLI = clidefs,
+        cServer = serverdefs,
+        cLib = libdefs
       }
   where
     Definitions consts (Functions funs) = prog
@@ -1532,7 +1544,11 @@ $edecls:entry_point_decls
 
       commonLibFuns memreport
 
-      return (prototypes, map funcToDef functions, entry_points)
+      return
+        ( T.unlines $ map prettyText prototypes,
+          T.unlines $ map (prettyText . funcToDef) functions,
+          T.unlines $ map prettyText entry_points
+        )
 
     funcToDef func = C.FuncDef func loc
       where

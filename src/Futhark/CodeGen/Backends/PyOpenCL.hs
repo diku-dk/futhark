@@ -62,7 +62,7 @@ compileProg mode class_name prog = do
           Assign (Var "default_num_groups") None,
           Assign (Var "default_tile_size") None,
           Assign (Var "default_reg_tile_size") None,
-          Assign (Var "fut_opencl_src") $ RawStringLiteral $ opencl_prelude ++ opencl_code
+          Assign (Var "fut_opencl_src") $ RawStringLiteral $ opencl_prelude <> opencl_code
         ]
 
   let imports =
