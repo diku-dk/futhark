@@ -109,9 +109,3 @@ simpleGPUMem =
       UT.sizeUsage v
     expLocalAlloc _ =
       mempty
-
-instance HasSegOp GPUMem where
-  type SegOpLevel GPUMem = SegLevel
-  asSegOp (Inner (SegOp op)) = Just op
-  asSegOp _ = Nothing
-  segOp = Inner . SegOp
