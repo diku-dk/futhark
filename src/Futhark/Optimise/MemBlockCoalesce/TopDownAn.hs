@@ -63,10 +63,7 @@ data TopDnEnv = TopDnEnv
 
 safety2 :: TopDnEnv -> VName -> Bool
 safety2 td_env m =
-  --  nameIn m (alloc td_env)
-  case M.lookup m (scope td_env) of
-    (Just _) -> True
-    Nothing -> False
+  m `M.member` scope td_env
 
 -- | Get alias and (direct) index function mapping from expression
 --

@@ -29,12 +29,11 @@ import Prelude
 -- Some translations of Accesses and Ixfuns        --
 -----------------------------------------------------
 
--- | Checks whether the index function can be translated at the
---     current program point and also returns the substitutions.
---     It comes down to answering the question: "can one perform
---     enough substitutions (from the bottom-up scalar table) until
---     all vars appearing in the index function are defined in the
---     current scope?"
+-- | Checks whether the index function can be translated at the current program
+-- point and also returns the substitutions.  It comes down to answering the
+-- question: "can one perform enough substitutions (from the bottom-up scalar
+-- table) until all vars appearing in the index function are defined in the
+-- current scope?"
 freeVarSubstitutions ::
   FreeIn a =>
   ScopeTab ->
@@ -59,21 +58,23 @@ freeVarSubstitutions scope0 scals0 indfun =
         Just (M.singleton v $ isInt64 pe, namesToList $ freeIn pe)
     getSubstitution _v = Nothing
 
--- | Translates free variables in an access sum
-translateAccess :: ScopeTab -> ScalarTab -> AccessSummary -> AccessSummary
-translateAccess _ _ Undeterminable = Undeterminable
-translateAccess scope0 scals0 (Set slmads)
+-- | Translates free variables in an access summary
+translateAccessSummary :: ScopeTab -> ScalarTab -> AccessSummary -> AccessSummary
+translateAccessSummary _ _ Undeterminable = Undeterminable
+translateAccessSummary scope0 scals0 (Set slmads)
   | Just subs <- freeVarSubstitutions scope0 scals0 slmads =
     slmads
       & S.map (IxFun.substituteInLMAD subs)
       & Set
-translateAccess _ _ _ = Undeterminable
+translateAccessSummary _ _ _ = Undeterminable
 
 -- | This function computes the written and read memory references for the current statement
 getUseSumFromStm ::
   TopDnEnv ->
   CoalsTab ->
   Stm (Aliases ExpMem.SeqMem) ->
+  -- | A pair of written and written+read memory locations, along with their
+  -- associated array and the index function used.
   ([(VName, VName, ExpMem.IxFun)], [(VName, VName, ExpMem.IxFun)])
 getUseSumFromStm td_env coal_tab (Let Pat {} _ (BasicOp (Index arr (Slice slc))))
   | Just (MemBlock _ shp _ _) <- getScopeMemInfo arr (scope td_env),
@@ -107,16 +108,16 @@ getUseSumFromStm td_env coal_tab (Let (Pat [x']) _ (BasicOp (Update _ _x (Slice 
             Nothing -> ([r1], [r1])
             Just r2 -> ([r1], [r1, r2])
 getUseSumFromStm _ _ (Let Pat {} _ (BasicOp Update {})) = error "impossible"
--- y = copy x
 getUseSumFromStm td_env coal_tab (Let (Pat [y]) _ (BasicOp (Copy x))) =
+  -- y = copy x
   let wrt = getDirAliasedIxfn td_env coal_tab $ patElemName y
       rd = getDirAliasedIxfn td_env coal_tab x
    in case (wrt, rd) of
         (Just w, Just r) -> ([w], [w, r])
         _ -> error $ "Impossible, " ++ pretty x ++ " should be an array"
 getUseSumFromStm _ _ (Let Pat {} _ (BasicOp Copy {})) = error "Impossible"
--- concat
 getUseSumFromStm td_env coal_tab (Let (Pat ys) _ (BasicOp (Concat _i a bs _ses))) =
+  -- concat
   let ws = mapMaybe (getDirAliasedIxfn td_env coal_tab . patElemName) ys
       rs = mapMaybe (getDirAliasedIxfn td_env coal_tab) (a : bs)
    in (ws, ws ++ rs)
@@ -129,18 +130,18 @@ getUseSumFromStm td_env coal_tab (Let (Pat ys) _ (BasicOp (Replicate _shp se))) 
    in case se of
         Constant _ -> (ws, ws)
         Var x -> (ws, ws ++ mapMaybe (getDirAliasedIxfn td_env coal_tab) [x])
--- UnAcc, UpdateAcc are not supported
---getUseSumFromStm td_env coal_tab (BasicOp (UnAcc{})) =
---  error "UnAcc is not supported yet!"
---getUseSumFromStm td_env coal_tab (BasicOp (UpdateAcc{})) =
---  error "UpdateAcc is not supported yet!"
--- SubExp, Scratch, reshape, rearrange, rotate and scalar ops
---   do not require an array access.
+getUseSumFromStm td_env coal_tab (Let (Pat [x]) _ (BasicOp (FlatUpdate _ (FlatSlice offset slc) v)))
+  | Just (m_b, m_x, x_ixfn) <- getDirAliasedIxfn td_env coal_tab (patElemName x) =
+    let x_ixfn_slc = IxFun.flatSlice x_ixfn $ FlatSlice (pe64 offset) $ map (fmap pe64) slc
+        r1 = (m_b, m_x, x_ixfn_slc)
+     in case getDirAliasedIxfn td_env coal_tab v of
+          Nothing -> ([r1], [r1])
+          Just r2 -> ([r1], [r1, r2])
 getUseSumFromStm _ _ (Let Pat {} _ BasicOp {}) = ([], [])
 getUseSumFromStm _ _ (Let Pat {} _ (Op (ExpMem.Alloc _ _))) = ([], [])
--- if-then-else, loops are supposed to be treated separately,
--- calls are not supported, and Ops are not yet supported
 getUseSumFromStm _ _ stm =
+  -- if-then-else, loops are supposed to be treated separately,
+  -- calls are not supported, and Ops are not yet supported
   error ("In MemRefAggreg.hs, getUseSumFromStm, unsuported case of stm being: " ++ pretty stm)
 
 -- | This function:
@@ -179,7 +180,7 @@ recordMemRefUses td_env bu_env stm =
                             then Set $ S.fromList wrt_tmps
                             else Undeterminable
                         prev_use =
-                          translateAccess (scope td_env) (scals bu_env) $
+                          translateAccessSummary (scope td_env) (scals bu_env) $
                             (dstrefs . memrefs) etry
                         no_overlap = noMemOverlap td_env prev_use wrt_lmads
                      in if no_overlap
@@ -238,9 +239,8 @@ recordMemRefUses td_env bu_env stm =
     okMemRef (_, _) = True
     getAliases acc m =
       oneName m
-        <> case M.lookup m (m_alias td_env) of
-          Nothing -> acc
-          Just nms -> nms <> acc
+        <> acc
+        <> fromMaybe mempty (M.lookup m (m_alias td_env))
     mbLmad indfun
       | Just subs <- freeVarSubstitutions (scope td_env) (scals bu_env) indfun,
         (IxFun.IxFun (lmad :| []) _ _) <- IxFun.substituteInIxFun subs indfun =
@@ -262,6 +262,8 @@ noMemOverlap _ _ (Set mr)
   | mr == mempty = True
 noMemOverlap _ (Set mr) _
   | mr == mempty = True
+noMemOverlap _ (Set ml) (Set mr)
+  | mr == ml = False
 noMemOverlap _ Undeterminable _ = False
 noMemOverlap _ _ Undeterminable = False
 noMemOverlap _ (Set _) (Set _) =
@@ -287,7 +289,7 @@ aggSummaryLoopTotal _ _ _ _ Undeterminable = Undeterminable
 aggSummaryLoopTotal _ _ _ _ (Set l)
   | l == mempty = Set mempty
 aggSummaryLoopTotal scope_bef scope_loop scals_loop _ access
-  | Set ls <- translateAccess scope_loop scals_loop access,
+  | Set ls <- translateAccessSummary scope_loop scals_loop access,
     nms <- foldl (<>) mempty $ map freeIn $ S.toList ls,
     all inBeforeScope (namesToList nms) =
     Set ls
