@@ -313,7 +313,7 @@ analyseGPU' lumap stms =
     helper stm =
       inScopeOf stm $ return mempty
 
-nameInfoToMemInfo :: Mem rep => NameInfo rep -> MemBound NoUniqueness
+nameInfoToMemInfo :: Mem rep inner => NameInfo rep -> MemBound NoUniqueness
 nameInfoToMemInfo info =
   case info of
     FParamName summary -> noUniquenessReturns summary
