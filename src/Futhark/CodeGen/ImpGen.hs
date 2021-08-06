@@ -428,7 +428,7 @@ constsVTable = foldMap stmVtable
     stmVtable (Let pat _ e) =
       foldMap (peVtable e) $ patElems pat
     peVtable e (PatElem name dec) =
-      M.singleton name $ memBoundToVarEntry (Just e) dec
+      M.singleton name $ memBoundToVarEntry (Just e) $ letDecMem dec
 
 compileProg ::
   (Mem rep, FreeIn op, MonadFreshNames m) =>
@@ -665,7 +665,7 @@ compileFunDef (FunDef entry _ fname rettype params body) =
 
       return (outparams, inparams, results, args)
 
-compileBody :: (Mem rep) => Pat rep -> Body rep -> ImpM rep r op ()
+compileBody :: Pat rep -> Body rep -> ImpM rep r op ()
 compileBody pat (Body _ bnds ses) = do
   dests <- destinationFromPat pat
   compileStms (freeIn ses) bnds $
@@ -1099,7 +1099,7 @@ infoDec ::
   Mem rep =>
   NameInfo rep ->
   MemInfo SubExp NoUniqueness MemBind
-infoDec (LetName dec) = dec
+infoDec (LetName dec) = letDecMem dec
 infoDec (FParamName dec) = noUniquenessReturns dec
 infoDec (LParamName dec) = dec
 infoDec (IndexName it) = MemPrim $ IntType it
@@ -1328,7 +1328,7 @@ lookupAcc name is = do
           error $ "ImpGen.lookupAcc: unlisted accumulator: " ++ pretty name
     _ -> error $ "ImpGen.lookupAcc: not an accumulator: " ++ pretty name
 
-destinationFromPat :: Mem rep => Pat rep -> ImpM rep r op [ValueDestination]
+destinationFromPat :: Pat rep -> ImpM rep r op [ValueDestination]
 destinationFromPat = mapM inspect . patElems
   where
     inspect pe = do

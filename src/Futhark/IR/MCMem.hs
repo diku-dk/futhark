@@ -40,10 +40,13 @@ instance RepTypes MCMem where
 instance ASTRep MCMem where
   expTypesFromPat = return . map snd . bodyReturnsFromPat
 
-instance OpReturns MCMem where
-  opReturns (Alloc _ space) = return [MemMem space]
-  opReturns (Inner (ParOp _ op)) = segOpReturns op
-  opReturns (Inner (OtherOp ())) = pure []
+instance OpReturns (MCOp MCMem ()) where
+  opReturns (ParOp _ op) = segOpReturns op
+  opReturns (OtherOp ()) = pure []
+
+instance OpReturns (MCOp (Engine.Wise MCMem) ()) where
+  opReturns (ParOp _ op) = segOpReturns op
+  opReturns k = extReturns <$> opType k
 
 instance PrettyRep MCMem
 

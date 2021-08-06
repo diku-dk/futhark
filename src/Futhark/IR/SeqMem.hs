@@ -37,10 +37,6 @@ instance RepTypes SeqMem where
 instance ASTRep SeqMem where
   expTypesFromPat = return . map snd . bodyReturnsFromPat
 
-instance OpReturns SeqMem where
-  opReturns (Alloc _ space) = return [MemMem space]
-  opReturns (Inner ()) = pure []
-
 instance PrettyRep SeqMem
 
 instance TC.CheckableOp SeqMem where

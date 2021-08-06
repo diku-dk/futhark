@@ -1468,7 +1468,7 @@ bottomUpSegOp (vtable, used) (Pat kpes) dec segop = Simplify $ do
 
 kernelBodyReturns ::
   (Mem rep, HasScope rep m, Monad m) =>
-  KernelBody rep ->
+  KernelBody somerep ->
   [ExpReturns] ->
   m [ExpReturns]
 kernelBodyReturns = zipWithM correct . kernelBodyResult
@@ -1479,7 +1479,7 @@ kernelBodyReturns = zipWithM correct . kernelBodyResult
 -- | Like 'segOpType', but for memory representations.
 segOpReturns ::
   (Mem rep, Monad m, HasScope rep m) =>
-  SegOp lvl rep ->
+  SegOp lvl somerep ->
   m [ExpReturns]
 segOpReturns k@(SegMap _ _ _ kbody) =
   kernelBodyReturns kbody . extReturns =<< opType k

@@ -97,6 +97,7 @@ blockers =
 -- | Some constraints that must hold for the simplification rules to work.
 type SimplifyMemory rep =
   ( Simplify.SimplifiableRep rep,
+    LetDec rep ~ LetDecMem,
     ExpDec rep ~ (),
     BodyDec rep ~ (),
     AllocOp (Op (Wise rep)),

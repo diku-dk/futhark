@@ -43,10 +43,12 @@ instance RepTypes GPUMem where
 instance ASTRep GPUMem where
   expTypesFromPat = return . map snd . bodyReturnsFromPat
 
-instance OpReturns GPUMem where
-  opReturns (Alloc _ space) =
-    return [MemMem space]
-  opReturns (Inner (SegOp op)) = segOpReturns op
+instance OpReturns (HostOp GPUMem ()) where
+  opReturns (SegOp op) = segOpReturns op
+  opReturns k = extReturns <$> opType k
+
+instance OpReturns (HostOp (Engine.Wise GPUMem) ()) where
+  opReturns (SegOp op) = segOpReturns op
   opReturns k = extReturns <$> opType k
 
 instance PrettyRep GPUMem
