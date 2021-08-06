@@ -50,14 +50,16 @@ intBinOp _ _ f _ Int32 a b = untyped2 $ f (isInt32 a) (isInt32 b)
 intBinOp _ _ _ f Int64 a b = untyped2 $ f (isInt64 a) (isInt64 b)
 
 floatBinOp ::
+  OnBinOp Half v ->
   OnBinOp Float v ->
   OnBinOp Double v ->
   FloatType ->
   PrimExp v ->
   PrimExp v ->
   (PrimExp v, PrimExp v)
-floatBinOp f _ Float32 a b = untyped2 $ f (isF32 a) (isF32 b)
-floatBinOp _ f Float64 a b = untyped2 $ f (isF64 a) (isF64 b)
+floatBinOp f _ _ Float16 a b = untyped2 $ f (isF16 a) (isF16 b)
+floatBinOp _ f _ Float32 a b = untyped2 $ f (isF32 a) (isF32 b)
+floatBinOp _ _ f Float64 a b = untyped2 $ f (isF64 a) (isF64 b)
 
 pdBinOp :: BinOp -> PrimExp VName -> PrimExp VName -> (PrimExp VName, PrimExp VName)
 pdBinOp (Add it _) _ _ = (iConst it 1, iConst it 1)
@@ -67,25 +69,45 @@ pdBinOp (SDiv it _) a b =
   intBinOp derivs derivs derivs derivs it a b
   where
     derivs x y = (1 `quot` y, negate (x `quot` (y * y)))
+pdBinOp (SDivUp it _) a b =
+  intBinOp derivs derivs derivs derivs it a b
+  where
+    derivs x y = (1 `quot` y, negate (x `quot` (y * y)))
+pdBinOp (UDiv it _) a b =
+  intBinOp derivs derivs derivs derivs it a b
+  where
+    derivs x y = (1 `quot` y, negate (x `quot` (y * y)))
+pdBinOp (UDivUp it _) a b =
+  intBinOp derivs derivs derivs derivs it a b
+  where
+    derivs x y = (1 `quot` y, negate (x `quot` (y * y)))
 pdBinOp (SMod it _) _ _ = (iConst it 1, iConst it 0) -- FIXME
+pdBinOp (SMax it) a b =
+  intBinOp derivs derivs derivs derivs it a b
+  where
+    derivs x y = (fromBoolExp (x .>=. y), fromBoolExp (x .<. y))
+pdBinOp (SMin it) a b =
+  intBinOp derivs derivs derivs derivs it a b
+  where
+    derivs x y = (fromBoolExp (x .<=. y), fromBoolExp (x .>. y))
 --
 pdBinOp (FAdd ft) _ _ = (fConst ft 1, fConst ft 1)
 pdBinOp (FSub ft) _ _ = (fConst ft 1, fConst ft (-1))
 pdBinOp (FMul _) x y = (y, x)
 pdBinOp (FDiv ft) a b =
-  floatBinOp derivs derivs ft a b
+  floatBinOp derivs derivs derivs ft a b
   where
     derivs x y = (1 / y, negate (x / (y ** 2)))
 pdBinOp (FPow ft) a b =
-  floatBinOp derivs derivs ft a b
+  floatBinOp derivs derivs derivs ft a b
   where
     derivs x y = (y * (x ** (y -1)), (x ** y) * log x)
 pdBinOp (FMax ft) a b =
-  floatBinOp derivs derivs ft a b
+  floatBinOp derivs derivs derivs ft a b
   where
     derivs x y = (fromBoolExp (x .>=. y), fromBoolExp (x .<. y))
 pdBinOp (FMin ft) a b =
-  floatBinOp derivs derivs ft a b
+  floatBinOp derivs derivs derivs ft a b
   where
     derivs x y = (fromBoolExp (x .<=. y), fromBoolExp (x .>. y))
 pdBinOp LogAnd a b = (b, a)
