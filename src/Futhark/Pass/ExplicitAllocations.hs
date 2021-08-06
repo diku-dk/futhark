@@ -44,7 +44,7 @@ import Control.Monad.RWS.Strict
 import Control.Monad.Reader
 import Control.Monad.State
 import Control.Monad.Writer
-import Data.List (elemIndex, foldl', partition, zip4)
+import Data.List (foldl', partition, zip4)
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import qualified Data.Set as S
@@ -473,6 +473,9 @@ allocInMergeParams merge m = do
           (valctx_args <> valargs')
   localScope summary $ m merge' mk_loop_res
   where
+    param_names = namesFromList $ map (paramName . fst) merge
+    anyIsLoopParam names = names `namesIntersect` param_names
+
     allocInMergeParam ::
       (Allocable fromrep torep, Allocator torep (AllocM fromrep torep)) =>
       (Param DeclType, SubExp) ->
@@ -484,47 +487,66 @@ allocInMergeParams merge m = do
           SubExp -> WriterT ([SubExp], [SubExp]) (AllocM fromrep torep) SubExp
         )
     allocInMergeParam (mergeparam, Var v)
-      | Array pt shape u <- paramDeclType mergeparam = do
-        (mem', _) <- lift $ lookupArraySummary v
-        mem_space <- lift $ lookupMemSpace mem'
+      | param_t@(Array pt shape u) <- paramDeclType mergeparam = do
+        (v_mem, v_ixfun) <- lift $ lookupArraySummary v
+        v_mem_space <- lift $ lookupMemSpace v_mem
 
-        let mkExt (Var dim_v)
-              | Just i <- dim_v `elemIndex` map (paramName . fst) merge =
-                Ext i
-            mkExt dim_se = Free dim_se
-        (v', ext_ixfun, substs, mem'') <-
-          lift $ existentializeArray mem_space (fmap mkExt shape) v
-        mem_space' <- lift $ lookupMemSpace mem''
+        -- Loop-invariant array parameters that are in scalar space
+        -- are special - we do not wish to existentialise their index
+        -- function at all (but the memory block is still existential).
+        case v_mem_space of
+          ScalarSpace {} ->
+            if anyIsLoopParam (freeIn shape)
+              then do
+                -- Arrays with loop-variant shape cannot be in scalar
+                -- space, so copy them elsewhere and try again.
+                (_, v') <- lift $ allocLinearArray DefaultSpace (baseString v) v
+                allocInMergeParam (mergeparam, Var v')
+              else do
+                let scalarRes (Var res) = do
+                      (res_mem, res') <-
+                        lift $ arrayWithIxFun v_mem_space v_ixfun (fromDecl param_t) res
+                      tell ([], [Var res_mem])
+                      pure $ Var res'
+                    scalarRes se = pure se
 
-        (ctx_params, param_ixfun_substs) <-
-          unzip
-            <$> mapM
-              ( \e -> do
-                  let e_t = primExpType $ untyped e
-                  vname <- lift $ newVName "ctx_param_ext"
-                  return
-                    ( Param vname $ MemPrim e_t,
-                      fmap Free $ pe64 $ Var vname
-                    )
+                mem_name <- newVName "mem_param"
+                tell ([], [Param mem_name $ MemMem v_mem_space])
+
+                pure
+                  ( mergeparam {paramDec = MemArray pt shape u $ ArrayIn mem_name v_ixfun},
+                    Var v,
+                    scalarRes
+                  )
+          _ -> do
+            (v', ext_ixfun, substs, v_mem') <-
+              lift $ existentializeArray v_mem_space v
+            v_mem_space' <- lift $ lookupMemSpace v_mem'
+
+            (ctx_params, param_ixfun_substs) <-
+              fmap unzip . forM substs $ \e -> do
+                vname <- lift $ newVName "ctx_param_ext"
+                pure
+                  ( Param vname $ MemPrim $ primExpType $ untyped e,
+                    fmap Free $ pe64 $ Var vname
+                  )
+
+            tell (ctx_params, [])
+
+            param_ixfun <-
+              instantiateIxFun $
+                IxFun.substituteInIxFun
+                  (M.fromList $ zip (fmap Ext [0 ..]) param_ixfun_substs)
+                  ext_ixfun
+
+            mem_name <- newVName "mem_param"
+            tell ([], [Param mem_name $ MemMem v_mem_space'])
+
+            pure
+              ( mergeparam {paramDec = MemArray pt shape u $ ArrayIn mem_name param_ixfun},
+                v',
+                ensureArrayIn v_mem_space'
               )
-              substs
-
-        tell (ctx_params, [])
-
-        param_ixfun <-
-          instantiateIxFun $
-            IxFun.substituteInIxFun
-              (M.fromList $ zip (fmap Ext [0 ..]) param_ixfun_substs)
-              ext_ixfun
-
-        mem_name <- newVName "mem_param"
-        tell ([], [Param mem_name $ MemMem mem_space'])
-
-        return
-          ( mergeparam {paramDec = MemArray pt shape u $ ArrayIn mem_name param_ixfun},
-            v',
-            ensureArrayIn mem_space'
-          )
     allocInMergeParam (mergeparam, se) = doDefault mergeparam se =<< lift askDefaultSpace
 
     doDefault mergeparam se space = do
@@ -535,33 +557,9 @@ allocInMergeParams merge m = do
 existentializeArray ::
   (Allocable fromrep torep, Allocator torep (AllocM fromrep torep)) =>
   Space ->
-  ExtShape ->
   VName ->
   AllocM fromrep torep (SubExp, ExtIxFun, [TPrimExp Int64 VName], VName)
-existentializeArray space@ScalarSpace {} param_shape v
-  | all (isJust . isFree) param_shape = do
-    (mem', ixfun) <- lookupArraySummary v
-    v_space <- lookupMemSpace mem'
-    if v_space == space
-      then pure (Var v, fmap (fmap Free) ixfun, mempty, mem')
-      else do
-        -- No polymorphism in memory spaces.  FIXME: something is
-        -- fishy about the index function we pick here.  We really
-        -- should know the precise (and completely loop-invariant)
-        -- index function of any ScalarSpace loop parameters.
-        v_t <- lookupType v
-        let Array pt shape u = v_t
-        mem'' <- allocForArray v_t space
-        v' <- newVName $ baseString v ++ "_scalar_copy"
-        let pat = Pat [PatElem v' $ MemArray pt shape u $ ArrayIn mem'' ixfun]
-        addStm $ Let pat (defAux ()) $ BasicOp $ Copy v
-        pure (Var v', fmap (fmap Free) ixfun, mempty, mem'')
-  | otherwise = do
-    -- Loop parameters with loop-variant size cannot be held in
-    -- ScalarSpace.
-    (_, v') <- allocLinearArray DefaultSpace (baseString v) v
-    existentializeArray DefaultSpace param_shape v'
-existentializeArray space _ v = do
+existentializeArray space v = do
   (mem', ixfun) <- lookupArraySummary v
   sp <- lookupMemSpace mem'
 
@@ -575,6 +573,20 @@ existentializeArray space _ v = do
       let (ext_ixfun, substs) = runState (IxFun.existentialize ixfun') []
       return (Var v', fromJust ext_ixfun, substs, mem)
 
+arrayWithIxFun ::
+  (MonadBuilder m, Allocator (Rep m) m) =>
+  Space ->
+  IxFun ->
+  Type ->
+  VName ->
+  m (VName, VName)
+arrayWithIxFun space ixfun v_t v = do
+  let Array pt shape u = v_t
+  mem <- allocForArray v_t space
+  v_copy <- newVName $ baseString v <> "_scalcopy"
+  letBind (Pat [PatElem v_copy $ MemArray pt shape u $ ArrayIn mem ixfun]) $ BasicOp $ Copy v
+  pure (mem, v_copy)
+
 ensureArrayIn ::
   ( Allocable fromrep torep,
     Allocator torep (AllocM fromrep torep)
@@ -585,8 +597,7 @@ ensureArrayIn ::
 ensureArrayIn _ (Constant v) =
   error $ "ensureArrayIn: " ++ pretty v ++ " cannot be an array."
 ensureArrayIn space (Var v) = do
-  v_shape <- arrayShape <$> lift (lookupType v)
-  (sub_exp, _, substs, mem) <- lift $ existentializeArray space (fmap Free v_shape) v
+  (sub_exp, _, substs, mem) <- lift $ existentializeArray space v
   (ctx_vals, _) <-
     unzip
       <$> mapM
