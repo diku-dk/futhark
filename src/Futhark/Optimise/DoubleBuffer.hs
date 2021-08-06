@@ -103,7 +103,7 @@ doubleBufferMC :: Pass MCMem MCMem
 doubleBufferMC = doubleBuffer optimiseMCOp
 
 -- | The double buffering pass definition.
-doubleBuffer :: Mem rep => OptimiseOp rep -> Pass rep rep
+doubleBuffer :: Mem rep inner => OptimiseOp rep -> Pass rep rep
 doubleBuffer onOp =
   Pass
     { passName = "Double buffer",
@@ -225,17 +225,11 @@ optimiseLambda lam = do
   pure lam {lambdaBody = body}
 
 type Constraints rep inner =
-  ( ASTRep rep,
-    FParamInfo rep ~ FParamMem,
-    LParamInfo rep ~ LParamMem,
-    RetType rep ~ RetTypeMem,
-    LetDec rep ~ LetDecMem,
-    BranchType rep ~ BranchTypeMem,
+  ( Mem rep inner,
+    BuilderOps rep,
     ExpDec rep ~ (),
     BodyDec rep ~ (),
-    Op rep ~ MemOp inner,
-    OpReturns (Op rep),
-    BuilderOps rep
+    LetDec rep ~ LetDecMem
   )
 
 extractAllocOf :: Constraints rep inner => Names -> VName -> Stms rep -> Maybe (Stm rep, Stms rep)

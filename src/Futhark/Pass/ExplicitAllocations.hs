@@ -73,9 +73,8 @@ dimAllocationSize _ size =
 type Allocable fromrep torep inner =
   ( PrettyRep fromrep,
     PrettyRep torep,
-    Mem torep,
+    Mem torep inner,
     LetDec torep ~ LetDecMem,
-    Op torep ~ MemOp inner,
     FParamInfo fromrep ~ DeclType,
     LParamInfo fromrep ~ Type,
     BranchType fromrep ~ ExtType,
@@ -83,7 +82,7 @@ type Allocable fromrep torep inner =
     BodyDec fromrep ~ (),
     BodyDec torep ~ (),
     ExpDec torep ~ (),
-    SizeSubst (Op torep),
+    SizeSubst inner,
     BuilderOps torep
   )
 
@@ -219,7 +218,7 @@ allocsForStm idents e = do
   pure $ Let (Pat pes) (defAux dec) e
 
 patWithAllocations ::
-  (MonadBuilder m, Mem (Rep m), Op (Rep m) ~ MemOp inner) =>
+  (MonadBuilder m, Mem (Rep m) inner) =>
   Space ->
   ChunkMap ->
   [VName] ->
@@ -369,7 +368,7 @@ allocInFParam param pspace =
       return param {paramDec = MemAcc acc ispace ts u}
 
 allocInMergeParams ::
-  (Allocable fromrep torep inner, Op torep ~ MemOp inner) =>
+  (Allocable fromrep torep inner) =>
   [(FParam fromrep, SubExp)] ->
   ( [(FParam torep, SubExp)] ->
     ([SubExp] -> AllocM fromrep torep ([SubExp], [SubExp])) ->
@@ -736,7 +735,7 @@ allocInLambda params body =
   mkLambda params . allocInStms (bodyStms body) $ pure $ bodyResult body
 
 allocInExp ::
-  (Allocable fromrep torep inner, Op torep ~ MemOp inner) =>
+  (Allocable fromrep torep inner) =>
   Exp fromrep ->
   AllocM fromrep torep (Exp torep)
 allocInExp (DoLoop merge form (Body () bodybnds bodyres)) =
@@ -916,7 +915,7 @@ shiftShapeExts k (MemArray pt shape u returns) =
 shiftShapeExts _ ret = ret
 
 addResCtxInIfBody ::
-  (Allocable fromrep torep inner, Op torep ~ MemOp inner) =>
+  (Allocable fromrep torep inner) =>
   [ExtType] ->
   Body torep ->
   [Maybe Space] ->
@@ -989,7 +988,7 @@ addResCtxInIfBody ifrets (Body _ bnds res) spaces substs = buildBody $ do
     adjustExtPE k = fmap (adjustExtV k)
 
 mkSpaceOks ::
-  (Mem torep, LocalScope torep m) =>
+  (Mem torep inner, LocalScope torep m) =>
   Int ->
   Body torep ->
   m [Maybe Space]
@@ -1056,9 +1055,8 @@ stmConsts (Let pat _ (Op op))
 stmConsts _ = mempty
 
 mkLetNamesB' ::
-  ( Op (Rep m) ~ MemOp inner,
-    LetDec (Rep m) ~ LetDecMem,
-    Mem (Rep m),
+  ( LetDec (Rep m) ~ LetDecMem,
+    Mem (Rep m) inner,
     MonadBuilder m,
     ExpDec (Rep m) ~ ()
   ) =>
@@ -1074,10 +1072,9 @@ mkLetNamesB' dec names e = do
 
 mkLetNamesB'' ::
   ( BuilderOps rep,
-    Op rep ~ MemOp inner,
-    Mem rep,
+    Mem rep inner,
     LetDec rep ~ LetDecMem,
-    OpReturns (Op (Engine.Wise rep)),
+    OpReturns (Engine.OpWithWisdom inner),
     ExpDec rep ~ (),
     Rep m ~ Engine.Wise rep,
     HasScope (Engine.Wise rep) m,
@@ -1099,8 +1096,7 @@ simplifiable ::
   ( Engine.SimplifiableRep rep,
     ExpDec rep ~ (),
     BodyDec rep ~ (),
-    Op rep ~ MemOp inner,
-    Mem rep
+    Mem rep inner
   ) =>
   (Engine.OpWithWisdom inner -> UT.UsageTable) ->
   (inner -> Engine.SimpleM rep (Engine.OpWithWisdom inner, Stms (Engine.Wise rep))) ->
