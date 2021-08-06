@@ -463,6 +463,11 @@ commandLineOptions =
       (NoArg $ Right $ \opts -> opts {futharkAction = GPUMemAction $ \_ _ _ -> memAliasesAction})
       "Print memory aliases.",
     Option
+      []
+      ["compare-last-use"]
+      (NoArg $ Right $ \opts -> opts {futharkAction = SeqMemAction $ \_ _ _ -> compareLastUseAction})
+      "Compare last use.",
+    Option
       "m"
       ["metrics"]
       (NoArg $ Right $ \opts -> opts {futharkAction = PolyAction metricsAction})

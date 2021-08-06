@@ -7,6 +7,7 @@ module Futhark.Actions
   ( printAction,
     printAliasesAction,
     memAliasesAction,
+    compareLastUseAction,
     impCodeGenAction,
     kernelImpCodeGenAction,
     multicoreImpCodeGenAction,
@@ -26,10 +27,12 @@ where
 import Control.Monad
 import Control.Monad.IO.Class
 import Data.List (intercalate)
+import qualified Data.Map as M
 import Data.Maybe (fromMaybe)
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import Futhark.Analysis.Alias
+import qualified Futhark.Analysis.LastUse
 import qualified Futhark.Analysis.MemAlias as MA
 import Futhark.Analysis.Metrics
 import qualified Futhark.CodeGen.Backends.CCUDA as CCUDA
@@ -50,6 +53,7 @@ import Futhark.IR.MCMem (MCMem)
 import Futhark.IR.Prop.Aliases
 import Futhark.IR.SeqMem (SeqMem)
 import qualified Futhark.Optimise.MemBlockCoalesce as Coalesce
+import qualified Futhark.Optimise.MemBlockCoalesce.LastUse
 import Futhark.Util (runProgramWithExitCode, unixEnvironment)
 import Futhark.Version (versionString)
 import System.Directory
@@ -91,6 +95,28 @@ metricsAction =
     { actionName = "Compute metrics",
       actionDescription = "Print metrics on the final AST.",
       actionProcedure = liftIO . putStr . show . progMetrics
+    }
+
+-- | Print the result to stdout, alias annotations.
+compareLastUseAction :: Action SeqMem
+compareLastUseAction =
+  Action
+    { actionName = "Compare Last Use",
+      actionDescription = "Compare last use",
+      actionProcedure = \prog -> do
+        let lastuse1 = fst $ Futhark.Analysis.LastUse.analyseSeqMem prog
+        let lastuse2 = mconcat $ M.elems $ Futhark.Optimise.MemBlockCoalesce.LastUse.lastUsePrg $ aliasAnalysis prog
+        if lastuse1 == lastuse2
+          then return ()
+          else liftIO $ putStrLn ("Last uses differ:\n" <> pretty lastuse1 <> "\n" <> pretty lastuse2)
+
+        liftIO $ putStrLn ""
+
+        let allnames1 = mconcat $ M.elems lastuse1
+        let allnames2 = mconcat $ M.elems lastuse2
+        if allnames1 == allnames2
+          then return ()
+          else liftIO $ putStrLn ("Allnames differ:\n" <> pretty allnames1 <> "\n" <> pretty allnames2)
     }
 
 -- | Convert the program to sequential ImpCode and print it to stdout.
