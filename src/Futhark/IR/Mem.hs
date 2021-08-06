@@ -75,7 +75,7 @@ module Futhark.IR.Mem
     noUniquenessReturns,
     bodyReturnsToExpReturns,
     Mem,
-    AllocOp (..),
+    HasLetDecMem (..),
     OpReturns (..),
     varReturns,
     expReturns,
@@ -147,19 +147,26 @@ type RetTypeMem = FunReturns
 
 type BranchTypeMem = BodyReturns
 
--- | The class of ops that have memory allocation.
-class AllocOp op where
-  allocOp :: SubExp -> Space -> op
+-- | The class of pattern element decorators that contain memory
+-- information.
+class HasLetDecMem t where
+  letDecMem :: t -> LetDecMem
 
-type Mem rep =
-  ( AllocOp (Op rep),
-    FParamInfo rep ~ FParamMem,
+instance HasLetDecMem LetDecMem where
+  letDecMem = id
+
+instance HasLetDecMem b => HasLetDecMem (a, b) where
+  letDecMem = letDecMem . snd
+
+type Mem rep inner =
+  ( FParamInfo rep ~ FParamMem,
     LParamInfo rep ~ LParamMem,
-    LetDec rep ~ LetDecMem,
+    HasLetDecMem (LetDec rep),
     RetType rep ~ RetTypeMem,
     BranchType rep ~ BranchTypeMem,
     ASTRep rep,
-    OpReturns rep
+    OpReturns inner,
+    Op rep ~ MemOp inner
   )
 
 instance IsRetType FunReturns where
@@ -175,9 +182,6 @@ data MemOp inner
     Alloc SubExp Space
   | Inner inner
   deriving (Eq, Ord, Show)
-
-instance AllocOp (MemOp inner) where
-  allocOp = Alloc
 
 instance FreeIn inner => FreeIn (MemOp inner) where
   freeIn' (Alloc size _) = freeIn' size
@@ -540,7 +544,7 @@ varInfoToExpReturns (MemAcc acc ispace ts u) = MemAcc acc ispace ts u
 varInfoToExpReturns (MemMem space) = MemMem space
 
 matchRetTypeToResult ::
-  (Mem rep, TC.Checkable rep) =>
+  (Mem rep inner, TC.Checkable rep) =>
   [FunReturns] ->
   Result ->
   TC.TypeM rep ()
@@ -550,7 +554,7 @@ matchRetTypeToResult rettype result = do
   matchReturnType rettype (map resSubExp result) result_ts
 
 matchFunctionReturnType ::
-  (Mem rep, TC.Checkable rep) =>
+  (Mem rep inner, TC.Checkable rep) =>
   [FunReturns] ->
   Result ->
   TC.TypeM rep ()
@@ -577,7 +581,7 @@ matchFunctionReturnType rettype result = do
                   ++ pretty ixfun
 
 matchLoopResultMem ::
-  (Mem rep, TC.Checkable rep) =>
+  (Mem rep inner, TC.Checkable rep) =>
   [FParam (Aliases rep)] ->
   Result ->
   TC.TypeM rep ()
@@ -613,7 +617,7 @@ matchLoopResultMem params = matchRetTypeToResult rettype
         ixfun' = existentialiseIxFun param_names ixfun
 
 matchBranchReturnType ::
-  (Mem rep, TC.Checkable rep) =>
+  (Mem rep inner, TC.Checkable rep) =>
   [BodyReturns] ->
   Body (Aliases rep) ->
   TC.TypeM rep ()
@@ -732,8 +736,11 @@ matchReturnType rettype res ts = do
               throwError . unwords $
                 ["Expected memory", pretty x_ext, "=>", pretty x_mem, "but but has type", pretty t]
       checkMemReturn x y =
-        throwError . unwords $
-          ["Expected array in", pretty x, "but array returned in", pretty y]
+        throwError . pretty $
+          "Expected array in"
+            </> indent 2 (ppr x)
+            </> "but array returned in"
+            </> indent 2 (ppr y)
 
       bad :: String -> TC.TypeM rep a
       bad s =
@@ -749,7 +756,7 @@ matchReturnType rettype res ts = do
   either bad return =<< runExceptT (zipWithM_ checkReturn rettype ts)
 
 matchPatToExp ::
-  (Mem rep, TC.Checkable rep) =>
+  (Mem rep inner, LetDec rep ~ LetDecMem, TC.Checkable rep) =>
   Pat (Aliases rep) ->
   Exp (Aliases rep) ->
   TC.TypeM rep ()
@@ -799,41 +806,41 @@ matchPatToExp pat e = do
     matches _ _ _ _ = False
 
 varMemInfo ::
-  Mem rep =>
+  Mem rep inner =>
   VName ->
   TC.TypeM rep (MemInfo SubExp NoUniqueness MemBind)
 varMemInfo name = do
   dec <- TC.lookupVar name
 
   case dec of
-    LetName (_, summary) -> return summary
-    FParamName summary -> return $ noUniquenessReturns summary
-    LParamName summary -> return summary
-    IndexName it -> return $ MemPrim $ IntType it
+    LetName (_, summary) -> pure $ letDecMem summary
+    FParamName summary -> pure $ noUniquenessReturns summary
+    LParamName summary -> pure summary
+    IndexName it -> pure $ MemPrim $ IntType it
 
-nameInfoToMemInfo :: Mem rep => NameInfo rep -> MemBound NoUniqueness
+nameInfoToMemInfo :: Mem rep inner => NameInfo rep -> MemBound NoUniqueness
 nameInfoToMemInfo info =
   case info of
     FParamName summary -> noUniquenessReturns summary
     LParamName summary -> summary
-    LetName summary -> summary
+    LetName summary -> letDecMem summary
     IndexName it -> MemPrim $ IntType it
 
 lookupMemInfo ::
-  (HasScope rep m, Mem rep) =>
+  (HasScope rep m, Mem rep inner) =>
   VName ->
   m (MemInfo SubExp NoUniqueness MemBind)
 lookupMemInfo = fmap nameInfoToMemInfo . lookupInfo
 
 subExpMemInfo ::
-  (HasScope rep m, Monad m, Mem rep) =>
+  (HasScope rep m, Monad m, Mem rep inner) =>
   SubExp ->
   m (MemInfo SubExp NoUniqueness MemBind)
 subExpMemInfo (Var v) = lookupMemInfo v
 subExpMemInfo (Constant v) = return $ MemPrim $ primValueType v
 
 lookupArraySummary ::
-  (Mem rep, HasScope rep m, Monad m) =>
+  (Mem rep inner, HasScope rep m, Monad m) =>
   VName ->
   m (VName, IxFun.IxFun (TPrimExp Int64 VName))
 lookupArraySummary name = do
@@ -934,7 +941,7 @@ extReturns ets =
     convert (Free v) = Free <$> pe64 v
 
 arrayVarReturns ::
-  (HasScope rep m, Monad m, Mem rep) =>
+  (HasScope rep m, Monad m, Mem rep inner) =>
   VName ->
   m (PrimType, Shape, VName, IxFun)
 arrayVarReturns v = do
@@ -946,7 +953,7 @@ arrayVarReturns v = do
       error $ "arrayVarReturns: " ++ pretty v ++ " is not an array."
 
 varReturns ::
-  (HasScope rep m, Monad m, Mem rep) =>
+  (HasScope rep m, Monad m, Mem rep inner) =>
   VName ->
   m ExpReturns
 varReturns v = do
@@ -963,7 +970,7 @@ varReturns v = do
     MemAcc acc ispace ts u ->
       return $ MemAcc acc ispace ts u
 
-subExpReturns :: (HasScope rep m, Monad m, Mem rep) => SubExp -> m ExpReturns
+subExpReturns :: (HasScope rep m, Monad m, Mem rep inner) => SubExp -> m ExpReturns
 subExpReturns (Var v) =
   varReturns v
 subExpReturns (Constant v) =
@@ -974,7 +981,7 @@ subExpReturns (Constant v) =
 expReturns ::
   ( Monad m,
     LocalScope rep m,
-    Mem rep
+    Mem rep inner
   ) =>
   Exp rep ->
   m [ExpReturns]
@@ -1061,7 +1068,7 @@ expReturns (WithAcc inputs lam) =
     num_accs = length inputs
 
 sliceInfo ::
-  (Monad m, HasScope rep m, Mem rep) =>
+  (Monad m, HasScope rep m, Mem rep inner) =>
   VName ->
   Slice SubExp ->
   m (MemInfo SubExp NoUniqueness MemBind)
@@ -1075,7 +1082,7 @@ sliceInfo v slice = do
           IxFun.slice ixfun (fmap pe64 slice)
 
 flatSliceInfo ::
-  (Monad m, HasScope rep m, Mem rep) =>
+  (Monad m, HasScope rep m, Mem rep inner) =>
   VName ->
   FlatSlice SubExp ->
   m (MemInfo SubExp NoUniqueness MemBind)
@@ -1088,12 +1095,16 @@ flatSliceInfo v slice@(FlatSlice offset idxs) = do
     & MemArray et (Shape (flatSliceDims slice)) NoUniqueness
     & pure
 
-class TypedOp (Op rep) => OpReturns rep where
-  opReturns ::
-    (Monad m, HasScope rep m) =>
-    Op rep ->
-    m [ExpReturns]
+class TypedOp op => OpReturns op where
+  opReturns :: (Mem rep inner, Monad m, HasScope rep m) => op -> m [ExpReturns]
   opReturns op = extReturns <$> opType op
+
+instance OpReturns inner => OpReturns (MemOp inner) where
+  opReturns (Alloc _ space) = pure [MemMem space]
+  opReturns (Inner op) = opReturns op
+
+instance OpReturns () where
+  opReturns () = pure []
 
 applyFunReturns ::
   Typed dec =>

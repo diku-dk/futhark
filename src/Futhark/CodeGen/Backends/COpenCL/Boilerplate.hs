@@ -21,13 +21,14 @@ module Futhark.CodeGen.Backends.COpenCL.Boilerplate
 where
 
 import Control.Monad.State
-import Data.FileEmbed
 import qualified Data.Map as M
 import Data.Maybe
+import qualified Data.Text as T
 import qualified Futhark.CodeGen.Backends.GenericC as GC
 import Futhark.CodeGen.Backends.GenericC.Options
 import Futhark.CodeGen.ImpCode.OpenCL
 import Futhark.CodeGen.OpenCL.Heuristics
+import Futhark.CodeGen.RTS.C (freeListH, openclH)
 import Futhark.Util (chunk, zEncodeString)
 import Futhark.Util.Pretty (prettyOneLine)
 import qualified Language.C.Quote.OpenCL as C
@@ -70,8 +71,8 @@ profilingEvent name =
 -- | Called after most code has been generated to generate the bulk of
 -- the boilerplate.
 generateBoilerplate ::
-  String ->
-  String ->
+  T.Text ->
+  T.Text ->
   [Name] ->
   M.Map KernelName KernelSafety ->
   [PrimType] ->
@@ -82,7 +83,7 @@ generateBoilerplate opencl_code opencl_prelude cost_centres kernels types sizes 
   final_inits <- GC.contextFinalInits
 
   let (ctx_opencl_fields, ctx_opencl_inits, top_decls, later_top_decls) =
-        openClDecls cost_centres kernels opencl_code opencl_prelude
+        openClDecls cost_centres kernels (opencl_prelude <> opencl_code)
 
   mapM_ GC.earlyDecl top_decls
 
@@ -505,17 +506,18 @@ generateBoilerplate opencl_code opencl_prelude cost_centres kernels types sizes 
 openClDecls ::
   [Name] ->
   M.Map KernelName KernelSafety ->
-  String ->
-  String ->
+  T.Text ->
   ([C.FieldGroup], [C.Stm], [C.Definition], [C.Definition])
-openClDecls cost_centres kernels opencl_program opencl_prelude =
+openClDecls cost_centres kernels opencl_program =
   (ctx_fields, ctx_inits, openCL_boilerplate, openCL_load)
   where
     opencl_program_fragments =
       -- Some C compilers limit the size of literal strings, so
       -- chunk the entire program into small bits here, and
       -- concatenate it again at runtime.
-      [[C.cinit|$string:s|] | s <- chunk 2000 (opencl_prelude ++ opencl_program)]
+      [ [C.cinit|$string:s|]
+        | s <- chunk 2000 $ T.unpack opencl_program
+      ]
 
     ctx_fields =
       [ [C.csdecl|int total_runs;|],
@@ -549,15 +551,12 @@ void post_opencl_setup(struct opencl_context *ctx, struct opencl_device_option *
 }|]
       ]
 
-    free_list_h = $(embedStringFile "rts/c/free_list.h")
-    openCL_h = $(embedStringFile "rts/c/opencl.h")
-
     program_fragments = opencl_program_fragments ++ [[C.cinit|NULL|]]
     openCL_boilerplate =
       [C.cunit|
           $esc:("typedef cl_mem fl_mem_t;")
-          $esc:free_list_h
-          $esc:openCL_h
+          $esc:(T.unpack freeListH)
+          $esc:(T.unpack openclH)
           static const char *opencl_program[] = {$inits:program_fragments};|]
 
 loadKernel :: (KernelName, KernelSafety) -> C.Stm

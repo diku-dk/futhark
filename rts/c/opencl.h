@@ -195,7 +195,7 @@ static const char* opencl_error_string(cl_int err)
     }
 }
 
-static void opencl_succeed_fatal(unsigned int ret,
+static void opencl_succeed_fatal(cl_int ret,
                                  const char *call,
                                  const char *file,
                                  int line) {
@@ -205,7 +205,7 @@ static void opencl_succeed_fatal(unsigned int ret,
   }
 }
 
-static char* opencl_succeed_nonfatal(unsigned int ret,
+static char* opencl_succeed_nonfatal(cl_int ret,
                                      const char *call,
                                      const char *file,
                                      int line) {
@@ -734,6 +734,12 @@ static cl_program setup_opencl_with_command_queue(struct opencl_context *ctx,
   for (int i = 0; extra_build_opts[i] != NULL; i++) {
     w += snprintf(compile_opts+w, compile_opts_size-w,
                   "%s ", extra_build_opts[i]);
+  }
+
+  // Oclgrind claims to support cl_khr_fp16, but this is not actually
+  // the case.
+  if (strcmp(device_option.platform_name, "Oclgrind") == 0) {
+    w += snprintf(compile_opts+w, compile_opts_size-w, "-DEMULATE_F16 ");
   }
 
   if (ctx->cfg.debugging) {
