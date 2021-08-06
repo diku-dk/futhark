@@ -732,8 +732,11 @@ matchReturnType rettype res ts = do
               throwError . unwords $
                 ["Expected memory", pretty x_ext, "=>", pretty x_mem, "but but has type", pretty t]
       checkMemReturn x y =
-        throwError . unwords $
-          ["Expected array in", pretty x, "but array returned in", pretty y]
+        throwError . pretty $
+          "Expected array in"
+            </> indent 2 (ppr x)
+            </> "but array returned in"
+            </> indent 2 (ppr y)
 
       bad :: String -> TC.TypeM rep a
       bad s =
