@@ -61,6 +61,7 @@ library
       Futhark.Analysis.Interference
       Futhark.Analysis.LastUse
       Futhark.Analysis.Metrics
+      Futhark.Analysis.MemAlias
       Futhark.Analysis.Metrics.Type
       Futhark.Analysis.PrimExp
       Futhark.Analysis.PrimExp.Convert

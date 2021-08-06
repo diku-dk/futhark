@@ -458,6 +458,11 @@ commandLineOptions =
       (NoArg $ Right $ \opts -> opts {futharkAction = SeqMemAction $ \_ _ _ -> memoryBlockMerging})
       "Perform memory merging and print the results.",
     Option
+      []
+      ["mem-aliases"]
+      (NoArg $ Right $ \opts -> opts {futharkAction = GPUMemAction $ \_ _ _ -> memAliasesAction})
+      "Print memory aliases.",
+    Option
       "m"
       ["metrics"]
       (NoArg $ Right $ \opts -> opts {futharkAction = PolyAction metricsAction})
