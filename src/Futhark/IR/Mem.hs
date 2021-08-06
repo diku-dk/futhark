@@ -75,6 +75,7 @@ module Futhark.IR.Mem
     noUniquenessReturns,
     bodyReturnsToExpReturns,
     Mem,
+    HasLetDecMem (..),
     AllocOp (..),
     OpReturns (..),
     varReturns,
@@ -151,15 +152,26 @@ type BranchTypeMem = BodyReturns
 class AllocOp op where
   allocOp :: SubExp -> Space -> op
 
+-- | The class of pattern element decorators that contain memory
+-- information.
+class HasLetDecMem t where
+  letDecMem :: t -> LetDecMem
+
+instance HasLetDecMem LetDecMem where
+  letDecMem = id
+
+instance HasLetDecMem b => HasLetDecMem (a, b) where
+  letDecMem = letDecMem . snd
+
 type Mem rep =
   ( AllocOp (Op rep),
     FParamInfo rep ~ FParamMem,
     LParamInfo rep ~ LParamMem,
-    LetDec rep ~ LetDecMem,
+    HasLetDecMem (LetDec rep),
     RetType rep ~ RetTypeMem,
     BranchType rep ~ BranchTypeMem,
     ASTRep rep,
-    OpReturns rep
+    OpReturns (Op rep)
   )
 
 instance IsRetType FunReturns where
@@ -752,7 +764,7 @@ matchReturnType rettype res ts = do
   either bad return =<< runExceptT (zipWithM_ checkReturn rettype ts)
 
 matchPatToExp ::
-  (Mem rep, TC.Checkable rep) =>
+  (Mem rep, LetDec rep ~ LetDecMem, TC.Checkable rep) =>
   Pat (Aliases rep) ->
   Exp (Aliases rep) ->
   TC.TypeM rep ()
@@ -809,17 +821,17 @@ varMemInfo name = do
   dec <- TC.lookupVar name
 
   case dec of
-    LetName (_, summary) -> return summary
-    FParamName summary -> return $ noUniquenessReturns summary
-    LParamName summary -> return summary
-    IndexName it -> return $ MemPrim $ IntType it
+    LetName (_, summary) -> pure $ letDecMem summary
+    FParamName summary -> pure $ noUniquenessReturns summary
+    LParamName summary -> pure summary
+    IndexName it -> pure $ MemPrim $ IntType it
 
 nameInfoToMemInfo :: Mem rep => NameInfo rep -> MemBound NoUniqueness
 nameInfoToMemInfo info =
   case info of
     FParamName summary -> noUniquenessReturns summary
     LParamName summary -> summary
-    LetName summary -> summary
+    LetName summary -> letDecMem summary
     IndexName it -> MemPrim $ IntType it
 
 lookupMemInfo ::
@@ -1091,12 +1103,16 @@ flatSliceInfo v slice@(FlatSlice offset idxs) = do
     & MemArray et (Shape (flatSliceDims slice)) NoUniqueness
     & pure
 
-class TypedOp (Op rep) => OpReturns rep where
-  opReturns ::
-    (Monad m, HasScope rep m) =>
-    Op rep ->
-    m [ExpReturns]
+class TypedOp op => OpReturns op where
+  opReturns :: (Mem rep, Monad m, HasScope rep m) => op -> m [ExpReturns]
   opReturns op = extReturns <$> opType op
+
+instance OpReturns inner => OpReturns (MemOp inner) where
+  opReturns (Alloc _ space) = pure [MemMem space]
+  opReturns (Inner op) = opReturns op
+
+instance OpReturns () where
+  opReturns () = pure []
 
 applyFunReturns ::
   Typed dec =>

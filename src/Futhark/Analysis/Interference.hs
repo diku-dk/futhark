@@ -318,7 +318,7 @@ nameInfoToMemInfo info =
   case info of
     FParamName summary -> noUniquenessReturns summary
     LParamName summary -> summary
-    LetName summary -> summary
+    LetName summary -> letDecMem summary
     IndexName it -> MemPrim $ IntType it
 
 memInfo :: LocalScope GPUMem m => VName -> m (Maybe VName)
