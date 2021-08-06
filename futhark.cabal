@@ -108,7 +108,6 @@ library
       Futhark.CodeGen.Backends.GenericC.Server
       Futhark.CodeGen.Backends.GenericPython
       Futhark.CodeGen.Backends.GenericPython.AST
-      Futhark.CodeGen.Backends.GenericPython.Definitions
       Futhark.CodeGen.Backends.GenericPython.Options
       Futhark.CodeGen.Backends.GenericWASM
       Futhark.CodeGen.Backends.MulticoreC
@@ -120,6 +119,9 @@ library
       Futhark.CodeGen.Backends.SequentialPython
       Futhark.CodeGen.Backends.SequentialWASM
       Futhark.CodeGen.Backends.SimpleRep
+      Futhark.CodeGen.RTS.C
+      Futhark.CodeGen.RTS.Python
+      Futhark.CodeGen.RTS.JavaScript
       Futhark.CodeGen.ImpCode
       Futhark.CodeGen.ImpCode.GPU
       Futhark.CodeGen.ImpCode.Multicore
@@ -325,9 +327,10 @@ library
     , file-embed >=0.0.9
     , filepath >=1.4.1.1
     , free >=4.12.4
-    , futhark-data >= 1.0.0.1
+    , futhark-data >= 1.0.1.1
     , futhark-server >= 1.1.0.0
     , gitrev >=1.2.0
+    , half >= 0.3
     , hashable
     , haskeline
     , language-c-quote >=0.12

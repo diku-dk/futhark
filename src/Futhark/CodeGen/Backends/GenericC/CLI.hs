@@ -12,12 +12,14 @@ module Futhark.CodeGen.Backends.GenericC.CLI
   )
 where
 
-import Data.FileEmbed
 import Data.List (unzip5)
 import Data.Maybe
+import qualified Data.Text as T
 import Futhark.CodeGen.Backends.GenericC.Options
 import Futhark.CodeGen.Backends.SimpleRep
 import Futhark.CodeGen.ImpCode
+import Futhark.CodeGen.RTS.C (tuningH, valuesH)
+import Futhark.Util.Pretty (prettyText)
 import qualified Language.C.Quote.OpenCL as C
 import qualified Language.C.Syntax as C
 
@@ -105,7 +107,7 @@ genericOptions =
                 int value = atoi(value_str);
                 if (equals != NULL) {
                   *equals = 0;
-                  if (futhark_context_config_set_size(cfg, name, value) != 0) {
+                  if (futhark_context_config_set_size(cfg, name, (size_t)value) != 0) {
                     futhark_panic(1, "Unknown size: %s\n", name);
                   }
                 } else {
@@ -145,7 +147,7 @@ genericOptions =
 
 valueDescToCType :: ValueDesc -> C.Type
 valueDescToCType (ScalarValue pt signed _) =
-  signedPrimTypeToCType signed pt
+  primAPIType signed pt
 valueDescToCType (ArrayValue _ _ pt signed shape) =
   let name = "futhark_" ++ arrayName pt signed (length shape)
    in [C.cty|struct $id:name|]
@@ -169,6 +171,7 @@ primTypeInfo (IntType it) t = case (it, t) of
   (Int16, _) -> [C.cexp|i16_info|]
   (Int32, _) -> [C.cexp|i32_info|]
   (Int64, _) -> [C.cexp|i64_info|]
+primTypeInfo (FloatType Float16) _ = [C.cexp|f16_info|]
 primTypeInfo (FloatType Float32) _ = [C.cexp|f32_info|]
 primTypeInfo (FloatType Float64) _ = [C.cexp|f64_info|]
 primTypeInfo Bool _ = [C.cexp|bool_info|]
@@ -193,12 +196,12 @@ readInput i (OpaqueValue _ desc _) =
   )
 readInput i (TransparentValue _ (ScalarValue t ept _)) =
   let dest = "read_value_" ++ show i
-   in ( [C.citems|$ty:(primTypeToCType t) $id:dest;
+   in ( [C.citems|$ty:(primStorageType t) $id:dest;
                   $stm:(readPrimStm dest i t ept);|],
         [C.cstm|;|],
         [C.cstm|;|],
         [C.cstm|;|],
-        [C.cexp|$id:dest|]
+        fromStorage t [C.cexp|$id:dest|]
       )
 readInput i (TransparentValue _ (ArrayValue _ _ t ept dims)) =
   let dest = "read_value_" ++ show i
@@ -211,7 +214,7 @@ readInput i (TransparentValue _ (ArrayValue _ _ t ept dims)) =
       rank = length dims
       dims_exps = [[C.cexp|$id:shape[$int:j]|] | j <- [0 .. rank -1]]
       dims_s = concat $ replicate rank "[]"
-      t' = signedPrimTypeToCType ept t
+      t' = primAPIType ept t
 
       new_array = "futhark_new_" ++ name
       free_array = "futhark_free_" ++ name
@@ -295,7 +298,7 @@ printStm (TransparentValue _ (ArrayValue _ _ bt ept shape)) e =
       }|]
   where
     rank = length shape
-    bt' = primTypeToCType bt
+    bt' = primStorageType bt
     name = arrayName bt ept rank
 
 printResult :: [(ExternalValue, C.Exp)] -> [C.Stm]
@@ -413,21 +416,19 @@ cliEntryPoint fun@(Function _ _ _ _ results args) = do
 {-# NOINLINE cliDefs #-}
 
 -- | Generate Futhark standalone executable code.
-cliDefs :: [Option] -> Functions a -> [C.Definition]
+cliDefs :: [Option] -> Functions a -> T.Text
 cliDefs options (Functions funs) =
-  let values_h = $(embedStringFile "rts/c/values.h")
-      tuning_h = $(embedStringFile "rts/c/tuning.h")
-
-      option_parser =
+  let option_parser =
         generateOptionParser "parse_options" $ genericOptions ++ options
       (cli_entry_point_decls, entry_point_inits) =
         unzip $ mapMaybe (cliEntryPoint . snd) funs
-   in [C.cunit|
+   in prettyText
+        [C.cunit|
 $esc:("#include <getopt.h>")
 $esc:("#include <ctype.h>")
 $esc:("#include <inttypes.h>")
 
-$esc:values_h
+$esc:(T.unpack valuesH)
 
 static int binary_output = 0;
 static typename FILE *runtime_file;
@@ -436,7 +437,7 @@ static int num_runs = 1;
 // If the entry point is NULL, the program will terminate after doing initialisation and such.
 static const char *entry_point = "main";
 
-$esc:tuning_h
+$esc:(T.unpack tuningH)
 
 $func:option_parser
 

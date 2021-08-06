@@ -345,6 +345,18 @@ static char *cuda_nvrtc_build(struct cuda_context *ctx, const char *src,
   opts[i++] = msgprintf("-DLOCKSTEP_WIDTH=%zu", ctx->lockstep_width);
   opts[i++] = msgprintf("-DMAX_THREADS_PER_BLOCK=%zu", ctx->max_block_size);
 
+  // Time for the best lines of the code in the entire compiler.
+  if (getenv("CUDA_HOME") != NULL) {
+    opts[i++] = msgprintf("-I%s/include", getenv("CUDA_HOME"));
+  }
+  if (getenv("CUDA_ROOT") != NULL) {
+    opts[i++] = msgprintf("-I%s/include", getenv("CUDA_ROOT"));
+  }
+  if (getenv("CUDA_PATH") != NULL) {
+    opts[i++] = msgprintf("-I%s/include", getenv("CUDA_PATH"));
+  }
+  opts[i++] = msgprintf("-I/usr/local/cuda/include");
+
   // It is crucial that the extra_opts are last, so that the free()
   // logic below does not cause problems.
   for (int j = 0; extra_opts[j] != NULL; j++) {

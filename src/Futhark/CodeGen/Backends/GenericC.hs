@@ -46,7 +46,6 @@ module Futhark.CodeGen.Backends.GenericC
     compileCode,
     compileExp,
     compilePrimExp,
-    compilePrimValue,
     compileExpToName,
     rawMem,
     item,
@@ -85,7 +84,6 @@ import Control.Monad.Reader
 import Control.Monad.State
 import Data.Bifunctor (first)
 import qualified Data.DList as DL
-import Data.FileEmbed
 import Data.Loc
 import qualified Data.Map.Strict as M
 import Data.Maybe
@@ -95,6 +93,7 @@ import Futhark.CodeGen.Backends.GenericC.Options
 import Futhark.CodeGen.Backends.GenericC.Server (serverDefs)
 import Futhark.CodeGen.Backends.SimpleRep
 import Futhark.CodeGen.ImpCode
+import Futhark.CodeGen.RTS.C (halfH, lockH, timingH, utilH)
 import Futhark.IR.Prop (isBuiltInFunction)
 import Futhark.MonadFreshNames
 import Futhark.Util.Pretty (prettyText)
@@ -230,6 +229,7 @@ errorMsgString :: ErrorMsg Exp -> CompilerM op s (String, [C.Exp])
 errorMsgString (ErrorMsg parts) = do
   let boolStr e = [C.cexp|($exp:e) ? "true" : "false"|]
       asLongLong e = [C.cexp|(long long int)$exp:e|]
+      asDouble e = [C.cexp|(double)$exp:e|]
       onPart (ErrorString s) = return ("%s", [C.cexp|$string:s|])
       onPart (ErrorVal Bool x) = ("%s",) . boolStr <$> compileExp x
       onPart (ErrorVal Unit _) = pure ("%s", [C.cexp|"()"|])
@@ -237,7 +237,8 @@ errorMsgString (ErrorMsg parts) = do
       onPart (ErrorVal (IntType Int16) x) = ("%hd",) <$> compileExp x
       onPart (ErrorVal (IntType Int32) x) = ("%d",) <$> compileExp x
       onPart (ErrorVal (IntType Int64) x) = ("%lld",) . asLongLong <$> compileExp x
-      onPart (ErrorVal (FloatType Float32) x) = ("%f",) <$> compileExp x
+      onPart (ErrorVal (FloatType Float16) x) = ("%f",) . asDouble <$> compileExp x
+      onPart (ErrorVal (FloatType Float32) x) = ("%f",) . asDouble <$> compileExp x
       onPart (ErrorVal (FloatType Float64) x) = ("%f",) <$> compileExp x
   (formatstrs, formatargs) <- unzip <$> mapM onPart parts
   pure (mconcat formatstrs, formatargs)
@@ -342,18 +343,27 @@ envStaticArray = opsStaticArray . envOperations
 envFatMemory :: CompilerEnv op s -> Bool
 envFatMemory = opsFatMemory . envOperations
 
-initDecls, arrayDecls, opaqueDecls, entryDecls, miscDecls :: CompilerState s -> [C.Definition]
-initDecls = concatMap (DL.toList . snd) . filter ((== InitDecl) . fst) . M.toList . compHeaderDecls
-arrayDecls = concatMap (DL.toList . snd) . filter (isArrayDecl . fst) . M.toList . compHeaderDecls
+declsCode :: (HeaderSection -> Bool) -> CompilerState s -> T.Text
+declsCode p =
+  T.unlines
+    . map prettyText
+    . concatMap (DL.toList . snd)
+    . filter (p . fst)
+    . M.toList
+    . compHeaderDecls
+
+initDecls, arrayDecls, opaqueDecls, entryDecls, miscDecls :: CompilerState s -> T.Text
+initDecls = declsCode (== InitDecl)
+arrayDecls = declsCode isArrayDecl
   where
     isArrayDecl ArrayDecl {} = True
     isArrayDecl _ = False
-opaqueDecls = concatMap (DL.toList . snd) . filter (isOpaqueDecl . fst) . M.toList . compHeaderDecls
+opaqueDecls = declsCode isOpaqueDecl
   where
     isOpaqueDecl OpaqueDecl {} = True
     isOpaqueDecl _ = False
-entryDecls = concatMap (DL.toList . snd) . filter ((== EntryDecl) . fst) . M.toList . compHeaderDecls
-miscDecls = concatMap (DL.toList . snd) . filter ((== MiscDecl) . fst) . M.toList . compHeaderDecls
+entryDecls = declsCode (== EntryDecl)
+miscDecls = declsCode (== MiscDecl)
 
 contextContents :: CompilerM op s ([C.FieldGroup], [C.Stm])
 contextContents = do
@@ -583,7 +593,7 @@ allocRawMem dest size space desc = case space of
         <*> pure [C.cexp|$exp:desc|]
         <*> pure sid
   _ ->
-    stm [C.cstm|$exp:dest = (char*) malloc($exp:size);|]
+    stm [C.cstm|$exp:dest = (unsigned char*) malloc((size_t)$exp:size);|]
 
 freeRawMem ::
   (C.ToExp a, C.ToExp b) =>
@@ -824,7 +834,7 @@ arrayLibraryFunctions ::
   Int ->
   CompilerM op s [C.Definition]
 arrayLibraryFunctions pub space pt signed rank = do
-  let pt' = signedPrimTypeToCType signed pt
+  let pt' = primAPIType signed pt
       name = arrayName pt signed rank
       arr_name = "futhark_" ++ name
       array_type = [C.cty|struct $id:arr_name|]
@@ -848,7 +858,7 @@ arrayLibraryFunctions pub space pt signed rank = do
         resetMem [C.cexp|arr->mem|] space
         allocMem
           [C.cexp|arr->mem|]
-          [C.cexp|((size_t)$exp:arr_size) * $int:(primByteSize pt::Int)|]
+          [C.cexp|$exp:arr_size * $int:(primByteSize pt::Int)|]
           space
           [C.cstm|return NULL;|]
         forM_ [0 .. rank -1] $ \i ->
@@ -902,7 +912,7 @@ arrayLibraryFunctions pub space pt signed rank = do
   proto
     [C.cedecl|$ty:array_type* $id:new_array($ty:ctx_ty *ctx, const $ty:pt' *data, $params:shape_params);|]
   proto
-    [C.cedecl|$ty:array_type* $id:new_raw_array($ty:ctx_ty *ctx, const $ty:memty data, int offset, $params:shape_params);|]
+    [C.cedecl|$ty:array_type* $id:new_raw_array($ty:ctx_ty *ctx, const $ty:memty data, typename int64_t offset, $params:shape_params);|]
   proto
     [C.cedecl|int $id:free_array($ty:ctx_ty *ctx, $ty:array_type *arr);|]
   proto
@@ -924,7 +934,7 @@ arrayLibraryFunctions pub space pt signed rank = do
             return arr;
           }
 
-          $ty:array_type* $id:new_raw_array($ty:ctx_ty *ctx, const $ty:memty data, int offset,
+          $ty:array_type* $id:new_raw_array($ty:ctx_ty *ctx, const $ty:memty data, typename int64_t offset,
                                             $params:shape_params) {
             $ty:array_type* bad = NULL;
             $ty:array_type *arr = ($ty:array_type*) malloc(sizeof($ty:array_type));
@@ -1100,7 +1110,7 @@ opaqueLibraryFunctions desc vds = do
 
 valueDescToCType :: Publicness -> ValueDesc -> CompilerM op s C.Type
 valueDescToCType _ (ScalarValue pt signed _) =
-  return $ signedPrimTypeToCType signed pt
+  return $ primAPIType signed pt
 valueDescToCType pub (ArrayValue _ space pt signed shape) = do
   let rank = length shape
   name <- publicName $ arrayName pt signed rank
@@ -1178,8 +1188,9 @@ prepareEntryInputs args = collect' $ zipWithM prepare [(0 :: Int) ..] args
         )
 
     prepareValue _ src (ScalarValue pt signed name) = do
-      let pt' = signedPrimTypeToCType signed pt
-      stm [C.cstm|$id:name = $exp:src;|]
+      let pt' = primAPIType signed pt
+          src' = fromStorage pt $ C.toExp src mempty
+      stm [C.cstm|$id:name = $exp:src';|]
       return (pt', [])
     prepareValue pub src vd@(ArrayValue mem _ _ _ shape) = do
       ty <- valueDescToCType pub vd
@@ -1234,8 +1245,9 @@ prepareEntryOutputs = collect' . zipWithM prepare [(0 :: Int) ..]
 
       return [C.cparam|$ty:ty **$id:pname|]
 
-    prepareValue dest (ScalarValue _ _ name) =
-      stm [C.cstm|$exp:dest = $id:name;|]
+    prepareValue dest (ScalarValue t _ name) =
+      let name' = toStorage t $ C.toExp name mempty
+       in stm [C.cstm|$exp:dest = $exp:name';|]
     prepareValue dest (ArrayValue mem _ _ _ shape) = do
       stm [C.cstm|$exp:dest->mem = $id:mem;|]
 
@@ -1396,10 +1408,10 @@ asServer parts =
 -- function named "main" as entry point, so make sure it is defined.
 compileProg ::
   MonadFreshNames m =>
-  String ->
+  T.Text ->
   Operations op () ->
   CompilerM op () () ->
-  String ->
+  T.Text ->
   [Space] ->
   [Option] ->
   Definitions op ->
@@ -1408,98 +1420,105 @@ compileProg backend ops extra header_extra spaces options prog = do
   src <- getNameSource
   let ((prototypes, definitions, entry_point_decls), endstate) =
         runCompilerM ops src () compileProg'
+      initdecls = initDecls endstate
+      entrydecls = entryDecls endstate
+      arraydecls = arrayDecls endstate
+      opaquedecls = opaqueDecls endstate
+      miscdecls = miscDecls endstate
 
   let headerdefs =
-        [C.cunit|
-$esc:("// Headers\n")
-$esc:("#include <stdint.h>")
-$esc:("#include <stddef.h>")
-$esc:("#include <stdbool.h>")
-$esc:("#include <stdio.h>")
-$esc:("#include <float.h>")
-$esc:(header_extra)
+        [untrimming|
+// Headers\n")
+#include <stdint.h>
+#include <stddef.h>
+#include <stdbool.h>
+#include <stdio.h>
+#include <float.h>
+$header_extra
+#ifdef __cplusplus
+extern "C" {
+#endif
 
-$esc:("#ifdef __cplusplus")
-$esc:("extern \"C\" {")
-$esc:("#endif")
+// Initialisation
+$initdecls
 
-$esc:("\n// Initialisation\n")
-$edecls:(initDecls endstate)
+// Arrays
+$arraydecls
 
-$esc:("\n// Arrays\n")
-$edecls:(arrayDecls endstate)
+// Opaque values
+$opaquedecls
 
-$esc:("\n// Opaque values\n")
-$edecls:(opaqueDecls endstate)
+// Entry points
+$entrydecls
 
-$esc:("\n// Entry points\n")
-$edecls:(entryDecls endstate)
+// Miscellaneous
+$miscdecls
+#define FUTHARK_BACKEND_$backend
 
-$esc:("\n// Miscellaneous\n")
-$edecls:(miscDecls endstate)
-$esc:("#define FUTHARK_BACKEND_"++backend)
-
-$esc:("#ifdef __cplusplus")
-$esc:("}")
-$esc:("#endif")
-                           |]
+#ifdef __cplusplus
+}
+#endif
+|]
 
   let utildefs =
-        [C.cunit|
-$esc:("#include <stdio.h>")
-$esc:("#include <stdlib.h>")
-$esc:("#include <stdbool.h>")
-$esc:("#include <math.h>")
-$esc:("#include <stdint.h>")
+        [untrimming|
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdbool.h>
+#include <math.h>
+#include <stdint.h>
 // If NDEBUG is set, the assert() macro will do nothing. Since Futhark
 // (unfortunately) makes use of assert() for error detection (and even some
 // side effects), we want to avoid that.
-$esc:("#undef NDEBUG")
-$esc:("#include <assert.h>")
-$esc:("#include <stdarg.h>")
-
-$esc:util_h
-
-$esc:timing_h
+#undef NDEBUG
+#include <assert.h>
+#include <stdarg.h>
+$utilH
+$halfH
+$timingH
 |]
 
-  let early_decls = DL.toList $ compEarlyDecls endstate
-  let lib_decls = DL.toList $ compLibDecls endstate
-  let clidefs = cliDefs options $ Functions entry_funs
-  let serverdefs = serverDefs options $ Functions entry_funs
-  let libdefs =
-        [C.cunit|
-$esc:("#ifdef _MSC_VER\n#define inline __inline\n#endif")
-$esc:("#include <string.h>")
-$esc:("#include <string.h>")
-$esc:("#include <errno.h>")
-$esc:("#include <assert.h>")
-$esc:("#include <ctype.h>")
+  let early_decls = T.unlines $ map prettyText $ DL.toList $ compEarlyDecls endstate
+      lib_decls = T.unlines $ map prettyText $ DL.toList $ compLibDecls endstate
+      clidefs = cliDefs options $ Functions entry_funs
+      serverdefs = serverDefs options $ Functions entry_funs
+      libdefs =
+        [untrimming|
+#ifdef _MSC_VER
+#define inline __inline
+#endif
+#include <string.h>
+#include <string.h>
+#include <errno.h>
+#include <assert.h>
+#include <ctype.h>
 
-$esc:header_extra
+$header_extra
 
-$esc:lock_h
+$lockH
 
-$edecls:builtin
+#define FUTHARK_F64_ENABLED
 
-$edecls:early_decls
+$cScalarDefs
 
-$edecls:prototypes
+$early_decls
 
-$edecls:lib_decls
+$prototypes
 
-$edecls:definitions
+$lib_decls
 
-$edecls:entry_point_decls
+$definitions
+
+$entry_point_decls
   |]
 
   return
     CParts
-      { cHeader = prettyText headerdefs,
-        cUtils = prettyText utildefs,
-        cCLI = prettyText clidefs,
-        cServer = prettyText serverdefs,
-        cLib = prettyText libdefs
+      { cHeader = headerdefs,
+        cUtils = utildefs,
+        cCLI = clidefs,
+        cServer = serverdefs,
+        cLib = libdefs
       }
   where
     Definitions consts (Functions funs) = prog
@@ -1525,22 +1544,17 @@ $edecls:entry_point_decls
 
       commonLibFuns memreport
 
-      return (prototypes, map funcToDef functions, entry_points)
+      return
+        ( T.unlines $ map prettyText prototypes,
+          T.unlines $ map (prettyText . funcToDef) functions,
+          T.unlines $ map prettyText entry_points
+        )
 
     funcToDef func = C.FuncDef func loc
       where
         loc = case func of
           C.OldFunc _ _ _ _ _ _ l -> l
           C.Func _ _ _ _ _ l -> l
-
-    builtin =
-      cIntOps ++ cFloat32Ops ++ cFloat64Ops ++ cFloatConvOps
-        ++ cFloat32Funs
-        ++ cFloat64Funs
-
-    util_h = $(embedStringFile "rts/c/util.h")
-    timing_h = $(embedStringFile "rts/c/timing.h")
-    lock_h = $(embedStringFile "rts/c/lock.h")
 
 commonLibFuns :: [C.BlockItem] -> CompilerM op s ()
 commonLibFuns memreport = do
@@ -1772,33 +1786,6 @@ compileFun get_constants extra (fname, func@(Function _ outputs inputs body _ _)
       p_name <- newVName $ baseString name ++ "_p"
       return ([C.cparam|$ty:ty *$id:p_name|], [C.cexp|$id:p_name|])
 
-compilePrimValue :: PrimValue -> C.Exp
-compilePrimValue (IntValue (Int8Value k)) = [C.cexp|(typename int8_t)$int:k|]
-compilePrimValue (IntValue (Int16Value k)) = [C.cexp|(typename int16_t)$int:k|]
-compilePrimValue (IntValue (Int32Value k)) = [C.cexp|$int:k|]
-compilePrimValue (IntValue (Int64Value k)) = [C.cexp|(typename int64_t)$int:k|]
-compilePrimValue (FloatValue (Float64Value x))
-  | isInfinite x =
-    if x > 0 then [C.cexp|INFINITY|] else [C.cexp|-INFINITY|]
-  | isNaN x =
-    [C.cexp|NAN|]
-  | otherwise =
-    [C.cexp|$double:x|]
-compilePrimValue (FloatValue (Float32Value x))
-  | isInfinite x =
-    if x > 0 then [C.cexp|INFINITY|] else [C.cexp|-INFINITY|]
-  | isNaN x =
-    [C.cexp|NAN|]
-  | otherwise =
-    [C.cexp|$float:x|]
-compilePrimValue (BoolValue b) =
-  [C.cexp|$int:b'|]
-  where
-    b' :: Int
-    b' = if b then 1 else 0
-compilePrimValue UnitValue =
-  [C.cexp|0|]
-
 derefPointer :: C.Exp -> C.Exp -> C.Type -> C.Exp
 derefPointer ptr i res_t =
   [C.cexp|(($ty:res_t)$exp:ptr)[$exp:i]|]
@@ -1839,18 +1826,19 @@ compileExp = compilePrimExp compileLeaf
     compileLeaf (ScalarVar src) =
       return [C.cexp|$id:src|]
     compileLeaf (Index _ _ Unit __ _) =
-      return $ compilePrimValue UnitValue
+      pure $ C.toExp UnitValue mempty
     compileLeaf (Index src (Count iexp) restype DefaultSpace vol) = do
       src' <- rawMem src
-      derefPointer src'
-        <$> compileExp (untyped iexp)
-        <*> pure [C.cty|$tyquals:(volQuals vol) $ty:(primTypeToCType restype)*|]
+      fmap (fromStorage restype) $
+        derefPointer src'
+          <$> compileExp (untyped iexp)
+          <*> pure [C.cty|$tyquals:(volQuals vol) $ty:(primStorageType restype)*|]
     compileLeaf (Index src (Count iexp) restype (Space space) vol) =
-      join $
+      fmap (fromStorage restype) . join $
         asks envReadScalar
           <*> rawMem src
           <*> compileExp (untyped iexp)
-          <*> pure (primTypeToCType restype)
+          <*> pure (primStorageType restype)
           <*> pure space
           <*> pure vol
     compileLeaf (Index src (Count iexp) _ ScalarSpace {} _) = do
@@ -1860,7 +1848,7 @@ compileExp = compilePrimExp compileLeaf
 -- | Tell me how to compile a @v@, and I'll Compile any @PrimExp v@ for you.
 compilePrimExp :: Monad m => (v -> m C.Exp) -> PrimExp v -> m C.Exp
 compilePrimExp _ (ValueExp val) =
-  return $ compilePrimValue val
+  pure $ C.toExp val mempty
 compilePrimExp f (LeafExp v _) =
   f v
 compilePrimExp f (UnOpExp Complement {} x) = do
@@ -2052,8 +2040,8 @@ compileCode (Write dest (Count idx) elemtype DefaultSpace vol elemexp) = do
   deref <-
     derefPointer dest'
       <$> compileExp (untyped idx)
-      <*> pure [C.cty|$tyquals:(volQuals vol) $ty:(primTypeToCType elemtype)*|]
-  elemexp' <- compileExp elemexp
+      <*> pure [C.cty|$tyquals:(volQuals vol) $ty:(primStorageType elemtype)*|]
+  elemexp' <- toStorage elemtype <$> compileExp elemexp
   stm [C.cstm|$exp:deref = $exp:elemexp';|]
 compileCode (Write dest (Count idx) _ ScalarSpace {} _ elemexp) = do
   idx' <- compileExp (untyped idx)
@@ -2064,10 +2052,10 @@ compileCode (Write dest (Count idx) elemtype (Space space) vol elemexp) =
     asks envWriteScalar
       <*> rawMem dest
       <*> compileExp (untyped idx)
-      <*> pure (primTypeToCType elemtype)
+      <*> pure (primStorageType elemtype)
       <*> pure space
       <*> pure vol
-      <*> compileExp elemexp
+      <*> (toStorage elemtype <$> compileExp elemexp)
 compileCode (DeclareMem name space) =
   declMem name space
 compileCode (DeclareScalar name vol t) = do
@@ -2080,7 +2068,7 @@ compileCode (DeclareArray name DefaultSpace t vs) = do
   let ct = primTypeToCType t
   case vs of
     ArrayValues vs' -> do
-      let vs'' = [[C.cinit|$exp:(compilePrimValue v)|] | v <- vs']
+      let vs'' = [[C.cinit|$exp:v|] | v <- vs']
       earlyDecl [C.cedecl|static $ty:ct $id:name_realtype[$int:(length vs')] = {$inits:vs''};|]
     ArrayZeros n ->
       earlyDecl [C.cedecl|static $ty:ct $id:name_realtype[$int:n];|]

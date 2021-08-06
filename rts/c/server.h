@@ -57,6 +57,7 @@ DEF_SCALAR_TYPE(u8);
 DEF_SCALAR_TYPE(u16);
 DEF_SCALAR_TYPE(u32);
 DEF_SCALAR_TYPE(u64);
+DEF_SCALAR_TYPE(f16);
 DEF_SCALAR_TYPE(f32);
 DEF_SCALAR_TYPE(f64);
 DEF_SCALAR_TYPE(bool);
@@ -75,6 +76,7 @@ struct value {
     uint32_t v_u32;
     uint64_t v_u64;
 
+    uint16_t v_f16;
     float v_f32;
     double v_f64;
 
@@ -106,6 +108,9 @@ void* value_ptr(struct value *v) {
   }
   if (v->type == &type_u64) {
     return &v->value.v_u64;
+  }
+  if (v->type == &type_f16) {
+    return &v->value.v_f16;
   }
   if (v->type == &type_f32) {
     return &v->value.v_f32;

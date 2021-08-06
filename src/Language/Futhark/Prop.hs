@@ -513,6 +513,7 @@ intValueType Int32Value {} = Int32
 intValueType Int64Value {} = Int64
 
 floatValueType :: FloatValue -> FloatType
+floatValueType Float16Value {} = Float16
 floatValueType Float32Value {} = Float32
 floatValueType Float64Value {} = Float64
 

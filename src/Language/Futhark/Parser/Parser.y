@@ -86,6 +86,7 @@ import Futhark.Util.Loc hiding (L) -- Lexer has replacements.
       u32lit          { L _ (U32LIT _) }
       u64lit          { L _ (U64LIT _) }
       floatlit        { L _ (FLOATLIT _) }
+      f16lit          { L _ (F16LIT _) }
       f32lit          { L _ (F32LIT _) }
       f64lit          { L _ (F64LIT _) }
       stringlit       { L _ (STRINGLIT _) }
@@ -673,6 +674,7 @@ PrimLit :: { (PrimValue, SrcLoc) }
         | u32lit { let L loc (U32LIT num) = $1 in (UnsignedValue $ Int32Value $ fromIntegral num, loc) }
         | u64lit { let L loc (U64LIT num) = $1 in (UnsignedValue $ Int64Value $ fromIntegral num, loc) }
 
+        | f16lit { let L loc (F16LIT num) = $1 in (FloatValue $ Float16Value num, loc) }
         | f32lit { let L loc (F32LIT num) = $1 in (FloatValue $ Float32Value num, loc) }
         | f64lit { let L loc (F64LIT num) = $1 in (FloatValue $ Float64Value num, loc) }
 
@@ -930,10 +932,13 @@ UnsignedLit :: { (IntValue, SrcLoc) }
             | u64lit { let L pos (U64LIT num) = $1 in (Int64Value $ fromIntegral num, pos) }
 
 FloatLit :: { (FloatValue, SrcLoc) }
-         : f32lit { let L loc (F32LIT num) = $1 in (Float32Value num, loc) }
+         : f16lit { let L loc (F16LIT num) = $1 in (Float16Value num, loc) }
+         | f32lit { let L loc (F32LIT num) = $1 in (Float32Value num, loc) }
          | f64lit { let L loc (F64LIT num) = $1 in (Float64Value num, loc) }
          | QualName {% let (qn, loc) = $1 in
                        case qn of
+                         QualName ["f16"] "inf" -> return (Float16Value (1/0), loc)
+                         QualName ["f16"] "nan" -> return (Float16Value (0/0), loc)
                          QualName ["f32"] "inf" -> return (Float32Value (1/0), loc)
                          QualName ["f32"] "nan" -> return (Float32Value (0/0), loc)
                          QualName ["f64"] "inf" -> return (Float64Value (1/0), loc)
@@ -1121,6 +1126,7 @@ intNegate (Int32Value v) = Int32Value (-v)
 intNegate (Int64Value v) = Int64Value (-v)
 
 floatNegate :: FloatValue -> FloatValue
+floatNegate (Float16Value v) = Float16Value (-v)
 floatNegate (Float32Value v) = Float32Value (-v)
 floatNegate (Float64Value v) = Float64Value (-v)
 
