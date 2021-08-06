@@ -476,6 +476,19 @@ allocInMergeParams merge m = do
     param_names = namesFromList $ map (paramName . fst) merge
     anyIsLoopParam names = names `namesIntersect` param_names
 
+    scalarRes param_t v_mem_space v_ixfun (Var res) = do
+      -- Try really hard to avoid copying needlessly, but the result
+      -- _must_ be in ScalarSpace and have the right index function.
+      (res_mem, res_ixfun) <- lift $ lookupArraySummary res
+      res_mem_space <- lift $ lookupMemSpace res_mem
+      (res_mem', res') <-
+        if (res_mem_space, res_ixfun) == (v_mem_space, v_ixfun)
+          then pure (res_mem, res)
+          else lift $ arrayWithIxFun v_mem_space v_ixfun (fromDecl param_t) res
+      tell ([], [Var res_mem'])
+      pure $ Var res'
+    scalarRes _ _ _ se = pure se
+
     allocInMergeParam ::
       (Allocable fromrep torep, Allocator torep (AllocM fromrep torep)) =>
       (Param DeclType, SubExp) ->
@@ -503,20 +516,13 @@ allocInMergeParams merge m = do
                 (_, v') <- lift $ allocLinearArray DefaultSpace (baseString v) v
                 allocInMergeParam (mergeparam, Var v')
               else do
-                let scalarRes (Var res) = do
-                      (res_mem, res') <-
-                        lift $ arrayWithIxFun v_mem_space v_ixfun (fromDecl param_t) res
-                      tell ([], [Var res_mem])
-                      pure $ Var res'
-                    scalarRes se = pure se
-
                 mem_name <- newVName "mem_param"
                 tell ([], [Param mem_name $ MemMem v_mem_space])
 
                 pure
                   ( mergeparam {paramDec = MemArray pt shape u $ ArrayIn mem_name v_ixfun},
                     Var v,
-                    scalarRes
+                    scalarRes param_t v_mem_space v_ixfun
                   )
           _ -> do
             (v', ext_ixfun, substs, v_mem') <-
