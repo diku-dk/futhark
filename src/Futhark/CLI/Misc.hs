@@ -43,7 +43,9 @@ mainHash = mainWithOptions () [] "program" $ \args () ->
   case args of
     [file] -> Just $ do
       prog <- filter (not . isBuiltin . fst) <$> readUntypedProgramOrDie file
-      liftIO $ T.putStrLn $ hashIntText $ hash $ prettyText prog
+      -- The 'map snd' is an attempt to get rid of the file names so
+      -- they won't affect the hashing.
+      liftIO $ T.putStrLn $ hashIntText $ hash $ prettyText $ map snd prog
     _ -> Nothing
 
 -- | @futhark dataget@
