@@ -298,6 +298,7 @@ jobs:
 
     - run: |
         futhark test -c --no-terminal --no-tuning --backend=python --exclude=no_python --exclude=compiled tests examples
+        make -C tests_lib/python -j
 
   test-opencl:
     runs-on: ubuntu-20.04
@@ -349,6 +350,7 @@ jobs:
 
     - run: |
         futhark test -c --no-terminal --backend=pyopencl --exclude=no_opencl --exclude=compiled --runner=tools/oclgrindrunner.sh tests examples
+        make -C tests_lib/c FUTHARK_BACKEND=pyopencl
 
   test-cuda:
     runs-on: ubuntu-20.04
