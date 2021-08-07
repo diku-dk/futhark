@@ -59,6 +59,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * `futhark hash` is now invariant to source location.
 
+  * `futhark literate` is now much better at avoiding unnecessary
+    recalculation.
+
 ## [0.19.7]
 
 ### Added
