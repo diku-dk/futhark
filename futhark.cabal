@@ -329,7 +329,6 @@ library
     , futhark-server >= 1.1.0.0
     , gitrev >=1.2.0
     , half >= 0.3
-    , hashable
     , haskeline
     , language-c-quote >=0.12
     , mainland-pretty >=0.6.1
