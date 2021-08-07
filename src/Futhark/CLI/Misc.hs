@@ -11,12 +11,11 @@ where
 import Control.Monad.State
 import qualified Data.ByteString.Lazy as BS
 import Data.Function (on)
-import Data.Hashable (hash)
 import Data.List (isInfixOf, isPrefixOf, nubBy)
 import qualified Data.Text.IO as T
 import Futhark.Compiler
 import Futhark.Test
-import Futhark.Util (hashIntText)
+import Futhark.Util (hashText)
 import Futhark.Util.Options
 import Futhark.Util.Pretty (prettyText)
 import System.Environment (getExecutablePath)
@@ -45,7 +44,7 @@ mainHash = mainWithOptions () [] "program" $ \args () ->
       prog <- filter (not . isBuiltin . fst) <$> readUntypedProgramOrDie file
       -- The 'map snd' is an attempt to get rid of the file names so
       -- they won't affect the hashing.
-      liftIO $ T.putStrLn $ hashIntText $ hash $ prettyText $ map snd prog
+      liftIO $ T.putStrLn $ hashText $ prettyText $ map snd prog
     _ -> Nothing
 
 -- | @futhark dataget@

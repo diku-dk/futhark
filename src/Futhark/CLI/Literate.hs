@@ -14,7 +14,6 @@ import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as LBS
 import Data.Char
 import Data.Functor
-import Data.Hashable (hash)
 import Data.Int (Int64)
 import Data.List (foldl', transpose)
 import qualified Data.Map as M
@@ -34,7 +33,7 @@ import Futhark.Test
 import Futhark.Test.Values
 import Futhark.Util
   ( directoryContents,
-    hashIntText,
+    hashText,
     nubOrd,
     runProgramWithExitCode,
   )
@@ -508,12 +507,12 @@ data Env = Env
     envRelImgDir :: FilePath,
     envOpts :: Options,
     envServer :: ScriptServer,
-    envHash :: Int
+    envHash :: T.Text
   }
 
 newFileWorker :: Env -> FilePath -> (FilePath -> ScriptM ()) -> ScriptM (FilePath, FilePath)
 newFileWorker env template m = do
-  let fname_base = T.unpack (hashIntText (envHash env)) <> "-" <> template
+  let fname_base = T.unpack (envHash env) <> "-" <> template
       fname = envImgDir env </> fname_base
       fname_rel = envRelImgDir env </> fname_base
   exists <- liftIO $ doesFileExist fname
@@ -752,7 +751,7 @@ processBlock env (BlockDirective directive) = do
           "```\n" <> prettyText (pprDirective False directive) <> "\n```\n"
         _ ->
           "```\n" <> prettyText (pprDirective True directive) <> "\n```\n"
-      env' = env {envHash = hash (envHash env, prettyText directive)}
+      env' = env {envHash = hashText (envHash env <> prettyText directive)}
   (r, files) <- runScriptM $ processDirective env' directive
   case r of
     Left err -> failed prompt err files
@@ -883,7 +882,7 @@ main = mainWithOptions initialOptions commandLineOptions "program" $ \args opts 
             T.hPutStrLn stderr err
             exitFailure
       proghash <-
-        either onError (pure . hash) <=< runExceptT $
+        either onError pure <=< runExceptT $
           system futhark ["hash", prog] mempty
 
       let mdfile = fromMaybe (prog `replaceExtension` "md") $ scriptOutput opts
