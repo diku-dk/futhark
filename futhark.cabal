@@ -331,7 +331,7 @@ library
     , half >= 0.3
     , haskeline
     , language-c-quote >=0.12
-    , mainland-pretty >=0.6.1
+    , mainland-pretty >=0.7.1
     , cmark-gfm >=0.2.1
     , megaparsec >=9.0.0
     , mtl >=2.2.1
