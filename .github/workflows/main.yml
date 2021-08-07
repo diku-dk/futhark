@@ -473,6 +473,9 @@ jobs:
         cd tests_bench && sh test.sh
 
     - run: |
+        cd tests_adhoc && sh test.sh
+
+    - run: |
         futhark doc -o prelude-docs prelude
         tar -Jcf prelude-docs.tar.xz prelude-docs
 
