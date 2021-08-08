@@ -57,6 +57,12 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * Operator priority of prefix `-` was wrong - it is now the same as
     `!` (#1419).
 
+  * `futhark hash` is now invariant to source location as well as
+    stable across OS/compiler/library versions.
+
+  * `futhark literate` is now much better at avoiding unnecessary
+    recalculation.
+
 ## [0.19.7]
 
 ### Added

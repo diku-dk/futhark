@@ -298,6 +298,7 @@ jobs:
 
     - run: |
         futhark test -c --no-terminal --no-tuning --backend=python --exclude=no_python --exclude=compiled tests examples
+        make -C tests_lib/python -j
 
   test-opencl:
     runs-on: ubuntu-20.04
@@ -470,6 +471,9 @@ jobs:
 
     - run: |
         cd tests_bench && sh test.sh
+
+    - run: |
+        cd tests_adhoc && sh test.sh
 
     - run: |
         futhark doc -o prelude-docs prelude
