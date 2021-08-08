@@ -430,14 +430,17 @@ fwdStm (Let pat aux (WithAcc inputs lam)) = do
         nes_tan <- mapM (fmap Var . zeroFromSubExp) nes
         op_lam' <- fwdLambda op_lam
         case op_lam' of
-          Lambda (i : _ : ps) body ret -> do
-            let op_lam'' = Lambda (i : ps) body ret
+          Lambda ps body ret -> do
+            let op_lam'' = Lambda (removeIndexTans (shapeRank shape) ps) body ret
             return $ Just (op_lam'', interleave nes nes_tan)
-          _ -> error "Malformed lambda in MkAcc."
     pure (shape, arrs <> arrs_tan, op')
   pat' <- bundleNew pat
   lam' <- fwdLambda lam
   addStm $ Let pat' aux $ WithAcc inputs' lam'
+  where
+    removeIndexTans 0 ps = ps
+    removeIndexTans i (p : _ : ps) = p : removeIndexTans (i -1) ps
+    removeIndexTans _ ps = ps
 fwdStm (Let pat aux (Op soac)) = fwdSOAC pat aux soac
 fwdStm stm =
   error $ "unhandled forward mode AD for Stm: " ++ pretty stm ++ "\n" ++ show stm
