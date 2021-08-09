@@ -58,9 +58,8 @@ internaliseValBind fb@(E.ValBind entry fname retdecl (Info (rettype, _)) tparams
 
       (body', rettype') <- buildBody $ do
         body_res <- internaliseExp (baseString fname <> "_res") body
-        rettype_bad <-
-          internaliseReturnType rettype =<< mapM subExpType body_res
-        let rettype' = zeroExts rettype_bad
+        rettype' <-
+          fmap zeroExts . internaliseReturnType rettype =<< mapM subExpType body_res
         body_res' <-
           ensureResultExtShape msg loc (map I.fromDecl rettype') $ subExpsRes body_res
         pure
