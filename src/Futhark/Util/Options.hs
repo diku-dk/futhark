@@ -8,6 +8,7 @@ module Futhark.Util.Options
 where
 
 import Control.Monad.IO.Class
+import Data.List (sortBy)
 import Futhark.Version
 import System.Console.GetOpt
 import System.Exit
@@ -51,7 +52,13 @@ mainWithOptions emptyConfig commandLineOptions usage f prog args =
 helpStr :: String -> String -> [OptDescr a] -> IO String
 helpStr prog usage opts = do
   let header = unlines ["Usage: " ++ prog ++ " " ++ usage, "Options:"]
-  return $ usageInfo header opts
+  return $ usageInfo header $ sortBy cmp opts
+  where
+    -- Sort first by long option, then by short name, then by description.  Hopefully
+    -- everything has a long option.
+    cmp (Option _ (a : _) _ _) (Option _ (b : _) _ _) = compare a b
+    cmp (Option (a : _) _ _ _) (Option (b : _) _ _ _) = compare a b
+    cmp (Option _ _ _ a) (Option _ _ _ b) = compare a b
 
 badOptions :: String -> [String] -> [String] -> [String] -> IO ()
 badOptions usage nonopts errs unrecs = do
