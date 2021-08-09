@@ -346,8 +346,14 @@ updateAdjIndex v (check, i) se = do
       v_adj_t <- lookupType v_adj
       insAdj v
         =<< case v_adj_t of
-          Acc {} ->
-            letExp (baseString v_adj) . BasicOp $ UpdateAcc v_adj [i] [se]
+          Acc {} -> do
+            se_v <- letExp "se_v" $ BasicOp $ SubExp se
+            dims <- arrayDims <$> lookupType se_v
+            ~[v_adj'] <-
+              tabNest (length dims) [se_v, v_adj] $ \is [se_v', v_adj'] ->
+                letTupExp "acc" $
+                  BasicOp $ UpdateAcc v_adj' (i : map Var is) [Var se_v']
+            pure v_adj'
           _ -> do
             let safety = case check of
                   CheckBounds -> Safe
@@ -597,10 +603,9 @@ partitionAdjVars (fv : fvs) =
 diffMap :: [Adj] -> SubExp -> Lambda -> [VName] -> Substitutions -> ADM ()
 diffMap res_adjs w map_lam as substs
   | Just res_ivs <- mapM isSparse res_adjs,
-    freeIn map_lam == mempty, -- FIXME? Too conservative.
     M.null substs = do
     -- Since at most only a constant number of adjoint are nonzero
-    -- (length adj_ivs), there is no need for the return sweep code to
+    -- (length res_ivs), there is no need for the return sweep code to
     -- contain a Map at all.
 
     free <- filterM isActive $ namesToList $ freeIn map_lam
@@ -613,7 +618,7 @@ diffMap res_adjs w map_lam as substs
               | res_i == j = adj_v
               | otherwise = AdjZero (arrayShape t) (elemType t)
         -- Values for the out-of-bounds case does not matter, as we will
-        -- be writing to an out-of-bounds index anyway (which is ignored.
+        -- be writing to an out-of-bounds index anyway, which is ignored.
         ooBounds =
           eBody
             ( map (pure . zeroExp) $
