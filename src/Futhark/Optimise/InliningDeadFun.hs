@@ -281,7 +281,7 @@ inlineAggressively =
     { passName = "Inline aggressively",
       passDescription = "Aggressively inline and remove resulting dead functions.",
       passFunction =
-        copyPropagateInProg simpleSOACS <=< aggInlineFunctions
+        copyPropagateInProg simpleSOACS . removeDeadFunctionsF <=< aggInlineFunctions
     }
 
 -- | Inline some functions and remove the resulting dead functions.
