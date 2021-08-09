@@ -39,8 +39,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * A prefix operator section (i.e.. `(!)`) is no longer permitted
     (and it never was according to the grammar).
 
-  * The "raw" array creation functions in the C API now take an
-    `int64_t` offset parameter.
+  * The offset parameter for the "raw" array creation functions in the
+    C API is now `int64_t` instead of `int`.
 
 ### Fixed
 
@@ -62,6 +62,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * `futhark literate` is now much better at avoiding unnecessary
     recalculation.
+
+  * Fixed a hole in size type checking that would usually lead to
+    compiler crashes (#1435).
 
 ## [0.19.7]
 
