@@ -63,6 +63,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * `futhark literate` is now much better at avoiding unnecessary
     recalculation.
 
+  * Fixed a hole in size type checking that would usually lead to
+    compiler crashes (#1435).
+
 ## [0.19.7]
 
 ### Added
