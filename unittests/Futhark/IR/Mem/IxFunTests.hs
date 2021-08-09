@@ -123,7 +123,8 @@ tests =
         test_flatSlice_rotate_iota,
         test_flatSlice_rotate_slice_iota,
         test_flatSlice_transpose_slice_iota,
-        test_rotate_flatSlice_transpose_slice_iota
+        test_rotate_flatSlice_transpose_slice_iota,
+        test_disjoint_ixfun_1d
       ]
 
 singleton :: TestTree -> [TestTree]
@@ -687,3 +688,44 @@ test_rotate_flatSlice_transpose_slice_iota =
         rotate (flatSlice (permute (slice (iota [20, 20]) $ Slice [DimSlice 1 5 2, DimSlice 1 5 2]) [1, 0]) flat_slice_1) [2, 1]
   where
     flat_slice_1 = FlatSlice 1 [FlatDimIndex 2 2]
+
+compareDisjoint :: (Bool, Bool) -> Assertion
+compareDisjoint (lmadDisjoint, algDisjoint) =
+  let errorMessage =
+        "LMAD disjoint: " ++ show lmadDisjoint ++ "\n"
+          ++ "Alg disjoint: "
+          ++ show algDisjoint
+   in (lmadDisjoint == algDisjoint) @? errorMessage
+
+test_disjoint_ixfun_1d :: [TestTree]
+test_disjoint_ixfun_1d =
+  [ let ixf1 = iota [10 :: Int]
+        ixf2 = iota [10]
+     in testCase "disjoint . iota 10 " $
+          compareDisjoint (disjoint ixf1 ixf2),
+    let ixf1 = iota [10 :: Int]
+        ixf2 = slice (iota [10]) $ Slice [DimSlice 10 10 1]
+     in testCase "disjoint (iota 10) (offset 10 $ iota 20) " $
+          compareDisjoint (disjoint ixf1 ixf2),
+    let ixf1 = slice (iota [10]) $ Slice [DimSlice 10 10 1]
+        ixf2 = iota [10 :: Int]
+     in testCase "disjoint (offset 10 $ iota 20) (iota 10) " $
+          compareDisjoint (disjoint ixf1 ixf2),
+    let ixf1 = iota [10 :: Int]
+        ixf2 = slice (iota [10]) $ Slice [DimSlice 9 10 1]
+     in testCase "disjoint (iota 10) (offset 9 $ iota 20) " $
+          compareDisjoint (disjoint ixf1 ixf2),
+    let ixf1 = slice (iota [20 :: Int]) $ Slice [DimSlice 0 10 2]
+        ixf2 = slice (iota [20]) $ Slice [DimSlice 1 10 2]
+     in testCase "disjoint [0, 2, ...] [1, 3, ...] " $
+          compareDisjoint
+            (disjoint ixf1 ixf2),
+    let ixf1 = slice (iota [100 :: Int]) $ Slice [DimSlice 0 10 9]
+        ixf2 = slice (iota [100]) $ Slice [DimSlice 1 10 6]
+     in testCase "disjoint [0, 9, ...] [1, 7, ...] " $
+          compareDisjoint (disjoint ixf1 ixf2),
+    let ixf1 = slice (iota [100 :: Int]) $ Slice [DimSlice 0 10 9]
+        ixf2 = slice (iota [100]) $ Slice [DimSlice 3 10 6]
+     in testCase "disjoint [0, 9, ...] [3, 9, ...] " $
+          compareDisjoint (disjoint ixf1 ixf2)
+  ]

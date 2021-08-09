@@ -354,7 +354,7 @@ instance Pretty v => Floating (TPrimExp Double v) where
   acosh x = isF64 $ FunExp "acosh64" [untyped x] $ FloatType Float64
   atanh x = isF64 $ FunExp "atanh64" [untyped x] $ FloatType Float64
 
-instance (IntExp t, Pretty v) => IntegralExp (TPrimExp t v) where
+instance (IntExp t, Pretty v, Eq v) => IntegralExp (TPrimExp t v) where
   TPrimExp x `div` TPrimExp y
     | Just z <-
         msum

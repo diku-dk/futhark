@@ -31,6 +31,7 @@ module Futhark.IR.Mem.IxFun
     invIxFun,
     hasOneLmad,
     permuteInv,
+    disjoint,
   )
 where
 
@@ -1263,3 +1264,14 @@ invIxFun a b =
   case invIxFunGen (fmap untyped a) (fmap untyped b) of
     Nothing -> Nothing
     Just ixf -> Just $ fmap TPrimExp ixf
+
+divides :: IntegralExp e => e -> e -> Bool
+divides x y = Futhark.Util.IntegralExp.mod y x == 0
+
+disjoint :: (IntegralExp e, Ord e) => IxFun e -> IxFun e -> Bool
+disjoint (IxFun (LMAD offset1 [dim1] :| []) _ _) (IxFun (LMAD offset2 [dim2] :| []) _ _)
+  | ldRotate dim1 == 0 && ldRotate dim2 == 0 =
+    not (divides (Futhark.Util.IntegralExp.gcd (ldStride dim1) (ldStride dim2)) (offset1 - offset2))
+      || offset1 >= offset2 + ldShape dim2
+      || offset2 >= offset1 + ldShape dim1
+disjoint _x _y = undefined

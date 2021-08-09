@@ -12,9 +12,12 @@ module Futhark.IR.Mem.IxFun.Alg
     rebase,
     shape,
     index,
+    disjoint,
   )
 where
 
+import qualified Data.List as DL
+import qualified Data.Set as S
 import Futhark.IR.Pretty ()
 import Futhark.IR.Prop
 import Futhark.IR.Syntax
@@ -30,7 +33,7 @@ import Futhark.IR.Syntax
   )
 import Futhark.Util.IntegralExp
 import Futhark.Util.Pretty
-import Prelude hiding (mod)
+import Prelude hiding (div, mod, span)
 
 type Shape num = [num]
 
@@ -110,7 +113,7 @@ shape (Rebase _ ixfun) =
   shape ixfun
 
 index ::
-  (IntegralExp num, Eq num) =>
+  IntegralExp num =>
   IxFun num ->
   Indices num ->
   num
@@ -165,3 +168,28 @@ index (Rebase new_base fun) is =
         r@Rebase {} ->
           r
    in index fun' is
+
+allPoints :: (IntegralExp num, Enum num) => [num] -> [[num]]
+allPoints dims =
+  let total = product dims
+      strides = drop 1 $ DL.reverse $ scanl (*) 1 $ DL.reverse dims
+   in map (unflatInd strides) [0 .. total -1]
+  where
+    unflatInd strides x =
+      fst $
+        foldl
+          ( \(res, acc) span ->
+              (res ++ [acc `div` span], acc `mod` span)
+          )
+          ([], x)
+          strides
+
+disjoint :: (IntegralExp num, Ord num, Enum num) => IxFun num -> IxFun num -> Bool
+disjoint ixf1 ixf2 =
+  let shp1 = shape ixf1
+      points1 = S.fromList $ allPoints shp1
+      allIdxs1 = S.map (index ixf1) points1
+      shp2 = shape ixf2
+      points2 = S.fromList $ allPoints shp2
+      allIdxs2 = S.map (index ixf2) points2
+   in S.disjoint allIdxs1 allIdxs2

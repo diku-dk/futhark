@@ -21,11 +21,12 @@ module Futhark.Util.IntegralExp
 where
 
 import Data.Int
+import Futhark.Util.Pretty
 import Prelude
 
 -- | A twist on the 'Integral' type class that is more friendly to
 -- symbolic representations.
-class Num e => IntegralExp e where
+class (Num e, Eq e) => IntegralExp e where
   quot :: e -> e -> e
   rem :: e -> e -> e
   div :: e -> e -> e
@@ -38,10 +39,19 @@ class Num e => IntegralExp e where
   divUp x y =
     (x + y - 1) `Futhark.Util.IntegralExp.div` y
 
+  gcd :: e -> e -> e
+  gcd x y = gcd' (abs x) (abs y)
+    where
+      gcd' a 0 = a
+      gcd' a b = gcd' b (a `Futhark.Util.IntegralExp.rem` b)
+
 -- | This wrapper allows you to use a type that is an instance of the
 -- true class whenever the simile class is required.
 newtype Wrapped a = Wrapped {wrappedValue :: a}
   deriving (Eq, Ord, Show)
+
+instance Pretty a => Pretty (Wrapped a) where
+  ppr = ppr . wrappedValue
 
 liftOp ::
   (a -> a) ->
