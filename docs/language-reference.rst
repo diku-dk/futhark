@@ -1776,6 +1776,11 @@ Do not inline any calls to this function.  If the function is then
 used within a parallel construct (e.g. ``map``), this will likely
 prevent the GPU backends from generating working code.
 
+``inline``
+..........
+
+Always inline calls to this function.
+
 Spec attributes
 ~~~~~~~~~~~~~~~
 

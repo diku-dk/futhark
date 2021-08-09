@@ -44,7 +44,9 @@ standardPipeline :: Pipeline SOACS SOACS
 standardPipeline =
   passes
     [ simplifySOACS,
-      inlineFunctions,
+      inlineConservatively,
+      simplifySOACS,
+      inlineAggressively,
       simplifySOACS,
       performCSE True,
       simplifySOACS,
