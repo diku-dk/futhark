@@ -15,9 +15,9 @@ module Language.Futhark.Pretty
   )
 where
 
-import Codec.Binary.UTF8.String (decode)
 import Control.Monad
 import Data.Array
+import Data.Char (chr)
 import Data.Functor
 import Data.List (intersperse)
 import qualified Data.List.NonEmpty as NE
@@ -320,7 +320,7 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (ExpBase f vn) where
             text "@" <> parens (align $ ppr t)
         _ -> mempty
   pprPrec _ (StringLit s _) =
-    text $ show $ decode s
+    text $ show $ map (chr . fromIntegral) s
   pprPrec _ (Project k e _ _) = ppr e <> text "." <> ppr k
   pprPrec _ (Negate e _) = text "-" <> ppr e
   pprPrec _ (Not e _) = text "-" <> ppr e
