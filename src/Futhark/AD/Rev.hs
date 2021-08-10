@@ -15,7 +15,7 @@ module Futhark.AD.Rev (revVJP) where
 
 import Control.Monad
 import Control.Monad.State.Strict
-import Data.Bifunctor (second)
+import Data.Bifunctor (first, second)
 import Data.List (foldl')
 import qualified Data.Map as M
 import Data.Maybe
@@ -96,7 +96,13 @@ zeroExp t = error $ "zeroExp: " ++ pretty t
 
 -- | Whether 'Sparse' should check bounds or assume they are correct.
 -- The latter results in simpler code.
-data InBounds = CheckBounds | AssumeBounds
+data InBounds
+  = CheckBounds
+  | AssumeBounds
+  | -- | Dynamically these will always fail, so don't bother
+    -- generating code for the update.  This is only needed to ensure
+    -- a consistent representation of sparse Jacobians.
+    OutOfBounds
   deriving (Eq, Ord, Show)
 
 -- | A symbolic representation of an array that is all zeroes, except at one
@@ -132,14 +138,44 @@ sparseArray (Sparse shape t ivs) = do
   where
     arr_t = Prim t `arrayOfShape` shape
     f arr (check, i, se) = do
-      let safety = case check of
-            AssumeBounds -> Unsafe
-            CheckBounds -> Safe
-      letExp "sparse" . BasicOp $
-        Update safety arr (fullSlice arr_t [DimFix i]) se
+      let stm s =
+            letExp "sparse" . BasicOp $
+              Update s arr (fullSlice arr_t [DimFix i]) se
+      case check of
+        AssumeBounds -> stm Unsafe
+        CheckBounds -> stm Safe
+        OutOfBounds -> pure arr
 
 adjFromVar :: VName -> Adj
 adjFromVar = AdjVal . Var
+
+-- | The values representing an adjoint in symbolic form.  This is
+-- used for when we wish to return an Adj from a Body or similar
+-- without forcing manifestation.  Also returns a function for
+-- reassembling the Adj from a new representation (the list must have
+-- the same length).
+adjRep :: Adj -> ([SubExp], [SubExp] -> Adj)
+adjRep (AdjVal se) = ([se], \[se'] -> AdjVal se')
+adjRep (AdjZero shape pt) = ([], \[] -> AdjZero shape pt)
+adjRep (AdjSparse (Sparse shape pt ivs)) =
+  (concatMap ivRep ivs, AdjSparse . Sparse shape pt . repIvs ivs)
+  where
+    ivRep (_, i, v) = [i, v]
+    repIvs ((check, _, _) : ivs') (i : v : ses) =
+      (check', i, v) : repIvs ivs' ses
+      where
+        check' = case check of
+          AssumeBounds -> AssumeBounds
+          CheckBounds -> CheckBounds
+          OutOfBounds -> CheckBounds -- sic!
+    repIvs _ _ = []
+
+-- | Conveniently convert a list of Adjs to their representation, as
+-- well as produce a function for converting back.
+adjsReps :: [Adj] -> ([SubExp], [SubExp] -> [Adj])
+adjsReps adjs =
+  let (reps, fs) = unzip $ map adjRep adjs
+   in (concat reps, zipWith ($) fs . chunks (map length reps))
 
 data RState = RState
   { stateAdjs :: M.Map VName Adj,
@@ -244,7 +280,7 @@ addLambda t@Array {} = do
   lam <- addLambda $ rowType t
   body <- insertStmsM $ do
     res <- letSubExp "lam_map" $ Op $ Screma (arraySize 0 t) [xs, ys] (mapSOAC lam)
-    return $ resultBody [res]
+    pure $ resultBody [res]
   pure
     Lambda
       { lambdaParams = [Param xs t, Param ys t],
@@ -317,7 +353,7 @@ updateAdjSlice slice v d = do
     _ -> do
       v_adjslice <-
         if primType t
-          then return v_adj
+          then pure v_adj
           else
             letExp (baseString v ++ "_slice") $
               BasicOp $ Index v_adj slice
@@ -346,20 +382,25 @@ updateAdjIndex v (check, i) se = do
       v_adj_t <- lookupType v_adj
       insAdj v
         =<< case v_adj_t of
-          Acc {} -> do
-            se_v <- letExp "se_v" $ BasicOp $ SubExp se
-            dims <- arrayDims <$> lookupType se_v
-            ~[v_adj'] <-
-              tabNest (length dims) [se_v, v_adj] $ \is [se_v', v_adj'] ->
-                letTupExp "acc" $
-                  BasicOp $ UpdateAcc v_adj' (i : map Var is) [Var se_v']
-            pure v_adj'
+          Acc {}
+            | check == OutOfBounds ->
+              pure v_adj
+            | otherwise -> do
+              se_v <- letExp "se_v" $ BasicOp $ SubExp se
+              dims <- arrayDims <$> lookupType se_v
+              ~[v_adj'] <-
+                tabNest (length dims) [se_v, v_adj] $ \is [se_v', v_adj'] ->
+                  letTupExp "acc" $
+                    BasicOp $ UpdateAcc v_adj' (i : map Var is) [Var se_v']
+              pure v_adj'
           _ -> do
-            let safety = case check of
-                  CheckBounds -> Safe
-                  AssumeBounds -> Unsafe
-            letExp (baseString v_adj) $
-              BasicOp $ Update safety v_adj (fullSlice v_adj_t [DimFix i]) se
+            let stm s =
+                  letExp (baseString v_adj) $
+                    BasicOp $ Update s v_adj (fullSlice v_adj_t [DimFix i]) se
+            case check of
+              CheckBounds -> stm Safe
+              AssumeBounds -> stm Unsafe
+              OutOfBounds -> pure v_adj
 
 -- | Is this primal variable active in the AD sense?  FIXME: this is
 -- (obviously) much too conservative.
@@ -600,6 +641,15 @@ partitionAdjVars (fv : fvs) =
   where
     (xs, ys, zs) = partitionAdjVars fvs
 
+buildRenamedBody ::
+  MonadBuilder m =>
+  m (Result, a) ->
+  m (BodyT (Rep m), a)
+buildRenamedBody m = do
+  (body, x) <- buildBody m
+  body' <- renameBody body
+  pure (body', x)
+
 diffMap :: [Adj] -> SubExp -> Lambda -> [VName] -> Substitutions -> ADM ()
 diffMap res_adjs w map_lam as substs
   | Just res_ivs <- mapM isSparse res_adjs,
@@ -611,6 +661,7 @@ diffMap res_adjs w map_lam as substs
     free <- filterM isActive $ namesToList $ freeIn map_lam
     free_ts <- mapM lookupType free
     let adjs_for = map paramName (lambdaParams map_lam) ++ free
+        adjs_ts = map paramType (lambdaParams map_lam) ++ free_ts
 
     let oneHot res_i adj_v = zipWith f [0 :: Int ..] $ lambdaReturnType map_lam
           where
@@ -619,36 +670,44 @@ diffMap res_adjs w map_lam as substs
               | otherwise = AdjZero (arrayShape t) (elemType t)
         -- Values for the out-of-bounds case does not matter, as we will
         -- be writing to an out-of-bounds index anyway, which is ignored.
-        ooBounds =
-          eBody
-            ( map (pure . zeroExp) $
-                map paramType (lambdaParams map_lam) ++ free_ts
-            )
-        inBounds res_i adj_i adj_v = renameBody <=< buildBody_ $ do
+        ooBounds adj_i = subAD . buildRenamedBody $ do
+          forM_ (zip as adjs_ts) $ \(a, t) -> do
+            scratch <- letSubExp "oo_scratch" =<< eBlank t
+            updateAdjIndex a (OutOfBounds, adj_i) scratch
+          first subExpsRes . adjsReps <$> mapM lookupAdj as
+        inBounds res_i adj_i adj_v = subAD . buildRenamedBody $ do
           forM_ (zip (lambdaParams map_lam) as) $ \(p, a) -> do
             a_t <- lookupType a
             letBindNames [paramName p] $
               BasicOp $ Index a $ fullSlice a_t [DimFix adj_i]
-          bodyBind . lambdaBody
-            =<< diffLambda (oneHot res_i (AdjVal adj_v)) adjs_for map_lam
+          adj_elems <-
+            fmap (map resSubExp) . bodyBind . lambdaBody
+              =<< diffLambda (oneHot res_i (AdjVal adj_v)) adjs_for map_lam
+          forM_ (zip as adj_elems) $ \(a, a_adj_elem) -> do
+            updateAdjIndex a (AssumeBounds, adj_i) a_adj_elem
+          first subExpsRes . adjsReps <$> mapM lookupAdj as
 
         -- Generate an iteration of the map function for every
         -- position.  This is a bit inefficient - probably we could do
         -- some deduplication.
         forPos res_i (check, adj_i, adj_v) = do
-          as_adj_elems <-
+          as_adj <-
             case check of
-              CheckBounds ->
-                fmap (map Var) . letTupExp "map_adj_elem"
+              CheckBounds -> do
+                (oobranch, mkadjs) <- ooBounds adj_i
+                (iibranch, _) <- inBounds res_i adj_i adj_v
+                fmap mkadjs . letTupExp' "map_adj_elem"
                   =<< eIf
                     (eOutOfBounds (head as) [eSubExp adj_i])
-                    ooBounds
-                    (inBounds res_i adj_i adj_v)
-              AssumeBounds ->
-                map resSubExp <$> (bodyBind =<< inBounds res_i adj_i adj_v)
+                    (pure oobranch)
+                    (pure iibranch)
+              AssumeBounds -> do
+                (body, mkadjs) <- inBounds res_i adj_i adj_v
+                mkadjs . map resSubExp <$> bodyBind body
+              OutOfBounds ->
+                mapM lookupAdj as
 
-          forM_ (zip as as_adj_elems) $ \(a, a_adj_elem) ->
-            updateAdjIndex a (check, adj_i) a_adj_elem
+          zipWithM setAdj as as_adj
 
         -- Generate an iteration of the map function for every result.
         forRes res_i ivs =
