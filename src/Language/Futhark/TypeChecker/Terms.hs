@@ -476,14 +476,6 @@ noSizeEscape m = do
   modify $ \s -> s {stateDimTable = dimtable}
   return x
 
-noExtSizes :: TermTypeM a -> TermTypeM a
-noExtSizes m = do
-  dimtable <- gets stateDimTable
-  modify $ \s -> s {stateDimTable = mempty}
-  x <- m
-  modify $ \s -> s {stateDimTable = dimtable}
-  return x
-
 constrain :: VName -> Constraint -> TermTypeM ()
 constrain v c = do
   lvl <- curLevel
@@ -1314,8 +1306,8 @@ addResultAliases r (Array als u t shape) = do
 -- function", for better error messages.
 checkApplyExp :: UncheckedExp -> TermTypeM (Exp, ApplyOp)
 checkApplyExp (AppExp (Apply e1 e2 _ loc) _) = do
-  (e1', (fname, i)) <- checkApplyExp e1
   arg <- checkArg e2
+  (e1', (fname, i)) <- checkApplyExp e1
   t <- expType e1'
   (t1, rt, argext, exts) <- checkApply loc (fname, i) t arg
   rt' <- addResultAliases (NameAppRes fname loc) rt
@@ -1725,7 +1717,7 @@ checkExp (Assert e1 e2 NoInfo loc) = do
   e2' <- checkExp e2
   return $ Assert e1' e2' (Info (pretty e1)) loc
 checkExp (Lambda params body rettype_te NoInfo loc) =
-  removeSeminullOccurences . noUnique . incLevel . noExtSizes . bindingParams [] params $ \_ params' -> do
+  removeSeminullOccurences . noUnique . incLevel . bindingParams [] params $ \_ params' -> do
     rettype_checked <- traverse checkTypeExp rettype_te
     let declared_rettype =
           case rettype_checked of
