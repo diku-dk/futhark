@@ -322,7 +322,7 @@ library
     , directory >=1.3.0.0
     , directory-tree >=0.12.1
     , dlist >=0.6.0.1
-    , file-embed >=0.0.9
+    , file-embed >=0.0.14.0
     , filepath >=1.4.1.1
     , free >=4.12.4
     , futhark-data >= 1.0.1.1
