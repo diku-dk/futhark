@@ -8,7 +8,10 @@ module Futhark.Version
   )
 where
 
+import qualified Data.ByteString.Char8 as BS
+import Data.FileEmbed
 import Data.Version
+import Futhark.Util (trim)
 import GitHash
 import qualified Paths_futhark
 
@@ -21,13 +24,16 @@ version = Paths_futhark.version
 
 {-# NOINLINE versionString #-}
 
--- | The version of Futhark that we are using, as a 'String'
+-- | The version of Futhark that we are using, as a 'String'.
 versionString :: String
 versionString =
   showVersion version
     ++ gitversion $$tGitInfoCwdTry
   where
-    gitversion (Left _) = ""
+    gitversion (Left _) =
+      case commitIdFromFile of
+        Nothing -> ""
+        Just commit -> "\ngit: " <> commit
     gitversion (Right gi) =
       concat
         [ "\n",
@@ -44,3 +50,6 @@ versionString =
           | giBranch gi == "master" = ""
           | otherwise = giBranch gi ++ " @ "
         dirty = if giDirty gi then " [modified]" else ""
+
+commitIdFromFile :: Maybe String
+commitIdFromFile = trim . BS.unpack <$> $(embedFileIfExists "./commit-id")
