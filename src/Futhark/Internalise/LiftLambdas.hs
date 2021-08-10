@@ -81,10 +81,9 @@ liftFunction fname tparams params ret funbody = do
         global
           <> foldMap patNames params
           <> S.fromList (map typeParamName tparams)
-          <> existentials funbody
 
       free =
-        let immediate_free = FV.freeVars funbody `FV.without` bound
+        let immediate_free = FV.freeVars funbody `FV.without` (bound <> existentials funbody)
             sizes_in_free =
               foldMap typeDimNames $
                 M.elems $ FV.unNameSet immediate_free
