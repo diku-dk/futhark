@@ -28,7 +28,7 @@
 -- A monad that implements 'MonadBuilder' tracks the statements added
 -- so far, the current names in scope, and allows you to add
 -- additional statements with 'addStm'.  Any monad that implements
--- 'MonadBuilder' also implements the t'REp' type family, which
+-- 'MonadBuilder' also implements the t'Rep' type family, which
 -- indicates which rep it works with.  Inside a 'MonadBuilder' we can
 -- use 'collectStms' to gather up the 'Stms' added with 'addStm' in
 -- some nested computation.

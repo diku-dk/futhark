@@ -4,6 +4,8 @@
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeFamilies #-}
 
+-- | Conversion of a monomorphic, first-order, defunctorised source
+-- program to a core Futhark program.
 module Futhark.Internalise.Exps (transformProg) where
 
 import Control.Monad.Reader

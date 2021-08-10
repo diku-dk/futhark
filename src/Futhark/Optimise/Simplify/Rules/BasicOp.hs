@@ -4,7 +4,7 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# OPTIONS_GHC -Wno-overlapping-patterns -Wno-incomplete-patterns -Wno-incomplete-uni-patterns -Wno-incomplete-record-updates #-}
 
--- | Some simplification rules for 'BasicOp'.
+-- | Some simplification rules for t'BasicOp'.
 module Futhark.Optimise.Simplify.Rules.BasicOp
   ( basicOpRules,
   )
@@ -391,7 +391,7 @@ bottomUpRules =
   [ RuleBasicOp simplifyConcat
   ]
 
--- | A set of simplification rules for 'BasicOp's.  Includes rules
+-- | A set of simplification rules for t'BasicOp's.  Includes rules
 -- from "Futhark.Optimise.Simplify.Rules.Simple".
 basicOpRules :: (BuilderOps rep, Aliased rep) => RuleBook rep
 basicOpRules = ruleBook topDownRules bottomUpRules <> loopRules

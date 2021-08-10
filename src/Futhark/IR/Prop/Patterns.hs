@@ -13,7 +13,6 @@ module Futhark.IR.Prop.Patterns
     patElemIdent,
     patElemType,
     setPatElemDec,
-    patElems,
     patIdents,
     patNames,
     patTypes,

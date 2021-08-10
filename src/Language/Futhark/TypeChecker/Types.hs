@@ -382,6 +382,7 @@ typeParamToArg (TypeParamType _ v ploc) =
 data Subst t = Subst [TypeParam] t | PrimSubst | SizeSubst (DimDecl VName)
   deriving (Show)
 
+-- | Create a type substitution corresponding to a type binding.
 substFromAbbr :: TypeBinding -> Subst StructType
 substFromAbbr (TypeAbbr _ ps t) = Subst ps t
 
