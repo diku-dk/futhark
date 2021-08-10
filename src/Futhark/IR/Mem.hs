@@ -177,8 +177,7 @@ instance IsBodyType BodyReturns where
   primBodyType = MemPrim
 
 data MemOp inner
-  = -- | Allocate a memory block.  This really should not be an
-    -- expression, but what are you gonna do...
+  = -- | Allocate a memory block.
     Alloc SubExp Space
   | Inner inner
   deriving (Eq, Ord, Show)
