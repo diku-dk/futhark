@@ -349,7 +349,6 @@ library
     , time >=1.6.0.1
     , transformers >=0.3
     , unordered-containers >=0.2.7
-    , utf8-string >=1
     , vector >=0.12
     , vector-binary-instances >=0.2.2.0
     , versions >=5.0.0
