@@ -18,17 +18,17 @@ import Futhark.Analysis.LastUse (LastUseMap)
 import Futhark.IR.GPUMem
 import Futhark.Util (invertMap)
 
--- | The set of `VName` currently in use.
+-- | The set of 'VName' currently in use.
 type InUse = Names
 
--- | The set of `VName` that are no longer in use.
+-- | The set of 'VName' that are no longer in use.
 type LastUsed = Names
 
--- | An interference graph. An element `(x, y)` in the set means that there is
--- an undirected edge between `x` and `y`, and therefore the lifetimes of `x`
--- and `y` overlap and they "interfere" with each other. We assume that pairs
--- are always normalized, such that `x` < `y`, before inserting. This should
--- prevent any duplicates. We also don't allow any pairs where `x == y`.
+-- | An interference graph. An element @(x, y)@ in the set means that there is
+-- an undirected edge between @x@ and @y@, and therefore the lifetimes of @x@
+-- and @y@ overlap and they "interfere" with each other. We assume that pairs
+-- are always normalized, such that @x@ < @y@, before inserting. This should
+-- prevent any duplicates. We also don't allow any pairs where @x == y@.
 type Graph a = Set (a, a)
 
 -- | Insert an edge between two values into the graph.
@@ -313,12 +313,12 @@ analyseGPU' lumap stms =
     helper stm =
       inScopeOf stm $ return mempty
 
-nameInfoToMemInfo :: Mem rep => NameInfo rep -> MemBound NoUniqueness
+nameInfoToMemInfo :: Mem rep inner => NameInfo rep -> MemBound NoUniqueness
 nameInfoToMemInfo info =
   case info of
     FParamName summary -> noUniquenessReturns summary
     LParamName summary -> summary
-    LetName summary -> summary
+    LetName summary -> letDecMem summary
     IndexName it -> MemPrim $ IntType it
 
 memInfo :: LocalScope GPUMem m => VName -> m (Maybe VName)

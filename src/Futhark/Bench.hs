@@ -38,6 +38,8 @@ import System.Timeout (timeout)
 newtype RunResult = RunResult {runMicroseconds :: Int}
   deriving (Eq, Show)
 
+-- | The measurements resulting from various successful runs of a
+-- benchmark (same dataset).
 data Result = Result
   { runResults :: [RunResult],
     memoryMap :: M.Map T.Text Int,

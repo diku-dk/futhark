@@ -22,6 +22,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * New `wasm` and `wasm-multicore` backends by Philip Lassen.  Still
     very experimental; do not expect API stability.
 
+  * New intrinsic type `f16`, along with a prelude module `f16`.
+    Implemented with hardware support where it is available, and with
+    `f32`-based emulation where it is not.
+
 ### Removed
 
 ### Changed
@@ -34,6 +38,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * A prefix operator section (i.e.. `(!)`) is no longer permitted
     (and it never was according to the grammar).
+
+  * The offset parameter for the "raw" array creation functions in the
+    C API is now `int64_t` instead of `int`.
 
 ### Fixed
 
@@ -49,6 +56,15 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Operator priority of prefix `-` was wrong - it is now the same as
     `!` (#1419).
+
+  * `futhark hash` is now invariant to source location as well as
+    stable across OS/compiler/library versions.
+
+  * `futhark literate` is now much better at avoiding unnecessary
+    recalculation.
+
+  * Fixed a hole in size type checking that would usually lead to
+    compiler crashes (#1435).
 
 ## [0.19.7]
 

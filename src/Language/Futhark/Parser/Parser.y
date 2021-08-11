@@ -24,8 +24,9 @@ import Control.Monad.Except
 import Control.Monad.Reader
 import Control.Monad.Trans.State
 import Data.Array
+import qualified Data.ByteString as BS
 import qualified Data.Text as T
-import Codec.Binary.UTF8.String (encode)
+import qualified Data.Text.Encoding as T
 import Data.Char (ord)
 import Data.Maybe (fromMaybe, fromJust)
 import Data.List (genericLength)
@@ -86,6 +87,7 @@ import Futhark.Util.Loc hiding (L) -- Lexer has replacements.
       u32lit          { L _ (U32LIT _) }
       u64lit          { L _ (U64LIT _) }
       floatlit        { L _ (FLOATLIT _) }
+      f16lit          { L _ (F16LIT _) }
       f32lit          { L _ (F32LIT _) }
       f64lit          { L _ (F64LIT _) }
       stringlit       { L _ (STRINGLIT _) }
@@ -220,7 +222,7 @@ Dec_ :: { UncheckedDec }
     | ModBind           { ModDec $1 }
     | open ModExp       { OpenDec $2 $1 }
     | import stringlit
-      { let L _ (STRINGLIT s) = $2 in ImportDec s NoInfo (srcspan $1 $>) }
+      { let L _ (STRINGLIT s) = $2 in ImportDec (T.unpack s) NoInfo (srcspan $1 $>) }
     | local Dec         { LocalDec $2 (srcspan $1 $>) }
     | '#[' AttrInfo ']' Dec_
                         { addAttr $2 $4 }
@@ -252,7 +254,7 @@ ModExp :: { UncheckedModExp }
         | '\\' ModParam maybeAscription(SimpleSigExp) '->' ModExp
           { ModLambda $2 (fmap (,NoInfo) $3) $5 (srcspan $1 $>) }
         | import stringlit
-          { let L _ (STRINGLIT s) = $2 in ModImport s NoInfo (srcspan $1 $>) }
+          { let L _ (STRINGLIT s) = $2 in ModImport (T.unpack s) NoInfo (srcspan $1 $>) }
         | ModExpApply
           { $1 }
         | ModExpAtom
@@ -614,7 +616,7 @@ Atom : PrimLit        { Literal (fst $1) (snd $1) }
      | intlit         { let L loc (INTLIT x) = $1 in IntLit x NoInfo loc }
      | floatlit       { let L loc (FLOATLIT x) = $1 in FloatLit x NoInfo loc }
      | stringlit      { let L loc (STRINGLIT s) = $1 in
-                        StringLit (encode s) loc }
+                        StringLit (BS.unpack (T.encodeUtf8 s)) loc }
      | '(' Exp ')' FieldAccesses
        { foldl (\x (y, _) -> Project y x NoInfo (srclocOf x))
                (Parens $2 (srcspan $1 ($3:map snd $>)))
@@ -673,6 +675,7 @@ PrimLit :: { (PrimValue, SrcLoc) }
         | u32lit { let L loc (U32LIT num) = $1 in (UnsignedValue $ Int32Value $ fromIntegral num, loc) }
         | u64lit { let L loc (U64LIT num) = $1 in (UnsignedValue $ Int64Value $ fromIntegral num, loc) }
 
+        | f16lit { let L loc (F16LIT num) = $1 in (FloatValue $ Float16Value num, loc) }
         | f32lit { let L loc (F32LIT num) = $1 in (FloatValue $ Float32Value num, loc) }
         | f64lit { let L loc (F64LIT num) = $1 in (FloatValue $ Float64Value num, loc) }
 
@@ -909,7 +912,7 @@ FloatValue :: { Value }
 
 StringValue :: { Value }
 StringValue : stringlit  { let L pos (STRINGLIT s) = $1 in
-                           ArrayValue (arrayFromList $ map (PrimValue . UnsignedValue . Int8Value . fromIntegral) $ encode s) $ Scalar $ Prim $ Signed Int32 }
+                           ArrayValue (arrayFromList $ map (PrimValue . UnsignedValue . Int8Value . fromIntegral) $ BS.unpack $ T.encodeUtf8 s) $ Scalar $ Prim $ Signed Int32 }
 
 BoolValue :: { Value }
 BoolValue : true           { PrimValue $ BoolValue True }
@@ -930,10 +933,13 @@ UnsignedLit :: { (IntValue, SrcLoc) }
             | u64lit { let L pos (U64LIT num) = $1 in (Int64Value $ fromIntegral num, pos) }
 
 FloatLit :: { (FloatValue, SrcLoc) }
-         : f32lit { let L loc (F32LIT num) = $1 in (Float32Value num, loc) }
+         : f16lit { let L loc (F16LIT num) = $1 in (Float16Value num, loc) }
+         | f32lit { let L loc (F32LIT num) = $1 in (Float32Value num, loc) }
          | f64lit { let L loc (F64LIT num) = $1 in (Float64Value num, loc) }
          | QualName {% let (qn, loc) = $1 in
                        case qn of
+                         QualName ["f16"] "inf" -> return (Float16Value (1/0), loc)
+                         QualName ["f16"] "nan" -> return (Float16Value (0/0), loc)
                          QualName ["f32"] "inf" -> return (Float32Value (1/0), loc)
                          QualName ["f32"] "nan" -> return (Float32Value (0/0), loc)
                          QualName ["f64"] "inf" -> return (Float64Value (1/0), loc)
@@ -1121,6 +1127,7 @@ intNegate (Int32Value v) = Int32Value (-v)
 intNegate (Int64Value v) = Int64Value (-v)
 
 floatNegate :: FloatValue -> FloatValue
+floatNegate (Float16Value v) = Float16Value (-v)
 floatNegate (Float32Value v) = Float32Value (-v)
 floatNegate (Float64Value v) = Float64Value (-v)
 

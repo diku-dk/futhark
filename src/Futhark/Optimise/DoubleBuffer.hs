@@ -103,7 +103,7 @@ doubleBufferMC :: Pass MCMem MCMem
 doubleBufferMC = doubleBuffer optimiseMCOp
 
 -- | The double buffering pass definition.
-doubleBuffer :: Mem rep => OptimiseOp rep -> Pass rep rep
+doubleBuffer :: Mem rep inner => OptimiseOp rep -> Pass rep rep
 doubleBuffer onOp =
   Pass
     { passName = "Double buffer",
@@ -224,19 +224,15 @@ optimiseLambda lam = do
   body <- localScope (castScope $ scopeOf lam) $ optimiseBody $ lambdaBody lam
   pure lam {lambdaBody = body}
 
-type Constraints rep =
-  ( ASTRep rep,
-    FParamInfo rep ~ FParamMem,
-    LParamInfo rep ~ LParamMem,
-    RetType rep ~ RetTypeMem,
-    LetDec rep ~ LetDecMem,
-    BranchType rep ~ BranchTypeMem,
+type Constraints rep inner =
+  ( Mem rep inner,
+    BuilderOps rep,
     ExpDec rep ~ (),
     BodyDec rep ~ (),
-    OpReturns rep
+    LetDec rep ~ LetDecMem
   )
 
-extractAllocOf :: Op rep ~ MemOp inner => Names -> VName -> Stms rep -> Maybe (Stm rep, Stms rep)
+extractAllocOf :: Constraints rep inner => Names -> VName -> Stms rep -> Maybe (Stm rep, Stms rep)
 extractAllocOf bound needle stms = do
   (stm, stms') <- stmsHead stms
   case stm of
@@ -251,7 +247,7 @@ extractAllocOf bound needle stms = do
     invariant Constant {} = True
     invariant (Var v) = not $ v `nameIn` bound
 
-optimiseLoop :: (Constraints rep, Op rep ~ MemOp inner, BuilderOps rep) => OptimiseLoop rep
+optimiseLoop :: Constraints rep inner => OptimiseLoop rep
 optimiseLoop pat merge body = do
   (outer_stms_1, pat', merge', body') <-
     optimiseLoopBySwitching pat merge body
@@ -263,7 +259,7 @@ isArrayIn :: VName -> Param FParamMem -> Bool
 isArrayIn x (Param _ (MemArray _ _ _ (ArrayIn y _))) = x == y
 isArrayIn _ _ = False
 
-optimiseLoopBySwitching :: (Constraints rep, Op rep ~ MemOp inner, BuilderOps rep) => OptimiseLoop rep
+optimiseLoopBySwitching :: Constraints rep inner => OptimiseLoop rep
 optimiseLoopBySwitching (Pat pes) merge (Body _ body_stms body_res) = do
   ((pat', merge', body'), outer_stms) <- runBuilder $ do
     ((buffered, body_stms'), (pes', merge', body_res')) <-
@@ -325,7 +321,7 @@ optimiseLoopBySwitching (Pat pes) merge (Body _ body_stms body_res) = do
           _ -> pure (param, Var arg)
     maybeCopyInitial _ (param, arg) = pure (param, arg)
 
-optimiseLoopByCopying :: (Constraints rep, Op rep ~ MemOp inner, BuilderOps rep) => OptimiseLoop rep
+optimiseLoopByCopying :: Constraints rep inner => OptimiseLoop rep
 optimiseLoopByCopying pat merge body = do
   -- We start out by figuring out which of the merge variables should
   -- be double-buffered.
@@ -412,7 +408,7 @@ doubleBufferMergeParams ctx_and_res bound_in_loop =
       _ -> pure NoBuffer
 
 allocStms ::
-  (Constraints rep, Op rep ~ MemOp inner, BuilderOps rep) =>
+  Constraints rep inner =>
   [(FParam rep, SubExp)] ->
   [DoubleBuffer] ->
   DoubleBufferM rep ([(FParam rep, SubExp)], [Stm rep])
@@ -449,7 +445,7 @@ allocStms merge = runWriterT . zipWithM allocation merge
       pure (f, se)
 
 doubleBufferResult ::
-  (Constraints rep) =>
+  Constraints rep inner =>
   [FParam rep] ->
   [DoubleBuffer] ->
   Body rep ->

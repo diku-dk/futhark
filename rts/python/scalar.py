@@ -238,9 +238,9 @@ smin8 = smin16 = smin32 = smin64 = sminN
 umax8 = umax16 = umax32 = umax64 = umaxN
 umin8 = umin16 = umin32 = umin64 = uminN
 pow8 = pow16 = pow32 = pow64 = powN
-fpow32 = fpow64 = fpowN
-fmax32 = fmax64 = fmaxN
-fmin32 = fmin64 = fminN
+fpow16 = fpow32 = fpow64 = fpowN
+fmax16 = fmax32 = fmax64 = fmaxN
+fmin16 = fmin32 = fmin64 = fminN
 sle8 = sle16 = sle32 = sle64 = sleN
 slt8 = slt16 = slt32 = slt64 = sltN
 ule8 = ule16 = ule32 = ule64 = uleN
@@ -309,38 +309,50 @@ uitofp_i8_f64 = uitofp_i16_f64 = uitofp_i32_f64 = uitofp_i64_f64 = uitofp_T_f64
 
 def fptosi_T_i8(x):
   return np.int8(np.trunc(x))
-fptosi_f32_i8 = fptosi_f64_i8 = fptosi_T_i8
+fptosi_f16_i8 = fptosi_f32_i8 = fptosi_f64_i8 = fptosi_T_i8
 
 def fptosi_T_i16(x):
   return np.int16(np.trunc(x))
-fptosi_f32_i16 = fptosi_f64_i16 = fptosi_T_i16
+fptosi_f16_i16 = fptosi_f32_i16 = fptosi_f64_i16 = fptosi_T_i16
 
 def fptosi_T_i32(x):
   return np.int32(np.trunc(x))
-fptosi_f32_i32 = fptosi_f64_i32 = fptosi_T_i32
+fptosi_f16_i32 = fptosi_f32_i32 = fptosi_f64_i32 = fptosi_T_i32
 
 def fptosi_T_i64(x):
   return np.int64(np.trunc(x))
-fptosi_f32_i64 = fptosi_f64_i64 = fptosi_T_i64
+fptosi_f16_i64 = fptosi_f32_i64 = fptosi_f64_i64 = fptosi_T_i64
 
 def fptoui_T_i8(x):
   return np.uint8(np.trunc(x))
-fptoui_f32_i8 = fptoui_f64_i8 = fptoui_T_i8
+fptoui_f16_i8 = fptoui_f32_i8 = fptoui_f64_i8 = fptoui_T_i8
 
 def fptoui_T_i16(x):
   return np.uint16(np.trunc(x))
-fptoui_f32_i16 = fptoui_f64_i16 = fptoui_T_i16
+fptoui_f16_i16 = fptoui_f32_i16 = fptoui_f64_i16 = fptoui_T_i16
 
 def fptoui_T_i32(x):
   return np.uint32(np.trunc(x))
-fptoui_f32_i32 = fptoui_f64_i32 = fptoui_T_i32
+fptoui_f16_i32 = fptoui_f32_i32 = fptoui_f64_i32 = fptoui_T_i32
 
 def fptoui_T_i64(x):
   return np.uint64(np.trunc(x))
-fptoui_f32_i64 = fptoui_f64_i64 = fptoui_T_i64
+fptoui_f16_i64 = fptoui_f32_i64 = fptoui_f64_i64 = fptoui_T_i64
+
+def fpconv_f16_f32(x):
+  return np.float32(x)
+
+def fpconv_f16_f64(x):
+  return np.float64(x)
+
+def fpconv_f32_f16(x):
+  return np.float16(x)
 
 def fpconv_f32_f64(x):
   return np.float64(x)
+
+def fpconv_f64_f16(x):
+  return np.float16(x)
 
 def fpconv_f64_f32(x):
   return np.float32(x)
@@ -550,16 +562,111 @@ def futhark_from_bits32(x):
   s = struct.pack('>l', x)
   return np.float32(struct.unpack('>f', s)[0])
 
+def futhark_log16(x):
+  return np.float16(np.log(x))
+
+def futhark_log2_16(x):
+  return np.float16(np.log2(x))
+
+def futhark_log10_16(x):
+  return np.float16(np.log10(x))
+
+def futhark_sqrt16(x):
+  return np.float16(np.sqrt(x))
+
+def futhark_exp16(x):
+  return np.exp(x)
+
+def futhark_cos16(x):
+  return np.cos(x)
+
+def futhark_sin16(x):
+  return np.sin(x)
+
+def futhark_tan16(x):
+  return np.tan(x)
+
+def futhark_acos16(x):
+  return np.arccos(x)
+
+def futhark_asin16(x):
+  return np.arcsin(x)
+
+def futhark_atan16(x):
+  return np.arctan(x)
+
+def futhark_cosh16(x):
+  return np.cosh(x)
+
+def futhark_sinh16(x):
+  return np.sinh(x)
+
+def futhark_tanh16(x):
+  return np.tanh(x)
+
+def futhark_acosh16(x):
+  return np.arccosh(x)
+
+def futhark_asinh16(x):
+  return np.arcsinh(x)
+
+def futhark_atanh16(x):
+  return np.arctanh(x)
+
+def futhark_atan2_16(x, y):
+  return np.arctan2(x, y)
+
+def futhark_hypot16(x, y):
+  return np.hypot(x, y)
+
+def futhark_gamma16(x):
+  return np.float16(math.gamma(x))
+
+def futhark_lgamma16(x):
+  return np.float16(math.lgamma(x))
+
+def futhark_round16(x):
+  return np.round(x)
+
+def futhark_ceil16(x):
+  return np.ceil(x)
+
+def futhark_floor16(x):
+  return np.floor(x)
+
+def futhark_isnan16(x):
+  return np.isnan(x)
+
+def futhark_isinf16(x):
+  return np.isinf(x)
+
+def futhark_to_bits16(x):
+  s = struct.pack('>e', x)
+  return np.int16(struct.unpack('>H', s)[0])
+
+def futhark_from_bits16(x):
+  s = struct.pack('>H', np.uint16(x))
+  return np.float16(struct.unpack('>e', s)[0])
+
+def futhark_lerp16(v0, v1, t):
+  return v0 + (v1-v0)*t
+
 def futhark_lerp32(v0, v1, t):
   return v0 + (v1-v0)*t
 
 def futhark_lerp64(v0, v1, t):
   return v0 + (v1-v0)*t
 
+def futhark_mad16(a, b, c):
+  return a * b + c
+
 def futhark_mad32(a, b, c):
   return a * b + c
 
 def futhark_mad64(a, b, c):
+  return a * b + c
+
+def futhark_fma16(a, b, c):
   return a * b + c
 
 def futhark_fma32(a, b, c):

@@ -338,6 +338,7 @@ pythonCommon codegen fcfg mode outpath prog = do
       perms <- liftIO $ getPermissions outpath
       setPermissions outpath $ setOwnerExecutable True perms
 
+-- | The @futhark python@ action.
 compilePythonAction :: FutharkConfig -> CompilerMode -> FilePath -> Action SeqMem
 compilePythonAction fcfg mode outpath =
   Action
@@ -346,6 +347,7 @@ compilePythonAction fcfg mode outpath =
       actionProcedure = pythonCommon SequentialPy.compileProg fcfg mode outpath
     }
 
+-- | The @futhark pyopencl@ action.
 compilePyOpenCLAction :: FutharkConfig -> CompilerMode -> FilePath -> Action GPUMem
 compilePyOpenCLAction fcfg mode outpath =
   Action
@@ -401,6 +403,7 @@ runEMCC cpath outpath classpath cflags_def ldflags expfuns lib = do
     Right (ExitSuccess, _, _) ->
       return ()
 
+-- | The @futhark wasm@ action.
 compileCtoWASMAction :: FutharkConfig -> CompilerMode -> FilePath -> Action SeqMem
 compileCtoWASMAction fcfg mode outpath =
   Action
@@ -432,6 +435,7 @@ compileCtoWASMAction fcfg mode outpath =
     mjspath = outpath `addExtension` "mjs"
     classpath = outpath `addExtension` ".class.js"
 
+-- | The @futhark wasm-multicore@ action.
 compileMulticoreToWASMAction :: FutharkConfig -> CompilerMode -> FilePath -> Action MCMem
 compileMulticoreToWASMAction fcfg mode outpath =
   Action

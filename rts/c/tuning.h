@@ -20,7 +20,7 @@ static char* load_tuning_file(const char *fname,
     if (eql) {
       *eql = 0;
       int value = atoi(eql+1);
-      if (set_size(cfg, line, value) != 0) {
+      if (set_size(cfg, line, (size_t)value) != 0) {
         char* err = (char*) malloc(max_line_len + 50);
         snprintf(err, max_line_len + 50, "Unknown name '%s' on line %d.", line, lineno);
         free(line);

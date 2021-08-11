@@ -106,7 +106,6 @@ library
       Futhark.CodeGen.Backends.GenericC.Server
       Futhark.CodeGen.Backends.GenericPython
       Futhark.CodeGen.Backends.GenericPython.AST
-      Futhark.CodeGen.Backends.GenericPython.Definitions
       Futhark.CodeGen.Backends.GenericPython.Options
       Futhark.CodeGen.Backends.GenericWASM
       Futhark.CodeGen.Backends.MulticoreC
@@ -118,6 +117,9 @@ library
       Futhark.CodeGen.Backends.SequentialPython
       Futhark.CodeGen.Backends.SequentialWASM
       Futhark.CodeGen.Backends.SimpleRep
+      Futhark.CodeGen.RTS.C
+      Futhark.CodeGen.RTS.Python
+      Futhark.CodeGen.RTS.JavaScript
       Futhark.CodeGen.ImpCode
       Futhark.CodeGen.ImpCode.GPU
       Futhark.CodeGen.ImpCode.Multicore
@@ -316,25 +318,27 @@ library
     , ansi-terminal >=0.6.3.1
     , array >=0.4
     , base >=4.13 && <5
+    , base16-bytestring
     , binary >=0.8.3
     , blaze-html >=0.9.0.1
     , bytestring >=0.10.8
     , bytestring-to-vector >=0.3.0.1
     , bmp >=1.2.6.3
     , containers >=0.6.2.1
+    , cryptohash-md5
     , directory >=1.3.0.0
     , directory-tree >=0.12.1
     , dlist >=0.6.0.1
-    , file-embed >=0.0.9
+    , file-embed >=0.0.14.0
     , filepath >=1.4.1.1
     , free >=4.12.4
-    , futhark-data >= 1.0.0.1
+    , futhark-data >= 1.0.1.1
     , futhark-server >= 1.1.0.0
-    , gitrev >=1.2.0
-    , hashable
+    , githash >=0.1.6.1
+    , half >= 0.3
     , haskeline
     , language-c-quote >=0.12
-    , mainland-pretty >=0.6.1
+    , mainland-pretty >=0.7.1
     , cmark-gfm >=0.2.1
     , megaparsec >=9.0.0
     , mtl >=2.2.1
@@ -352,7 +356,6 @@ library
     , time >=1.6.0.1
     , transformers >=0.3
     , unordered-containers >=0.2.7
-    , utf8-string >=1
     , vector >=0.12
     , vector-binary-instances >=0.2.2.0
     , versions >=5.0.0

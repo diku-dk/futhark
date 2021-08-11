@@ -181,7 +181,7 @@ data Operations rep r op = Operations
 -- | An operations set for which the expression compiler always
 -- returns 'defCompileExp'.
 defaultOperations ::
-  (Mem rep, FreeIn op) =>
+  (Mem rep inner, FreeIn op) =>
   OpCompiler rep r op ->
   Operations rep r op
 defaultOperations opc =
@@ -422,16 +422,16 @@ hasFunction fname = gets $ \s ->
   let Imp.Functions fs = stateFunctions s
    in isJust $ lookup fname fs
 
-constsVTable :: Mem rep => Stms rep -> VTable rep
+constsVTable :: Mem rep inner => Stms rep -> VTable rep
 constsVTable = foldMap stmVtable
   where
     stmVtable (Let pat _ e) =
       foldMap (peVtable e) $ patElems pat
     peVtable e (PatElem name dec) =
-      M.singleton name $ memBoundToVarEntry (Just e) dec
+      M.singleton name $ memBoundToVarEntry (Just e) $ letDecMem dec
 
 compileProg ::
-  (Mem rep, FreeIn op, MonadFreshNames m) =>
+  (Mem rep inner, FreeIn op, MonadFreshNames m) =>
   r ->
   Operations rep r op ->
   Imp.Space ->
@@ -493,7 +493,7 @@ compileConsts used_consts stms = do
       (mempty, s)
 
 compileInParam ::
-  Mem rep =>
+  Mem rep inner =>
   FParam rep ->
   ImpM rep r op (Either Imp.Param ArrayDecl)
 compileInParam fparam = case paramDec fparam of
@@ -514,7 +514,7 @@ compileInParam fparam = case paramDec fparam of
 data ArrayDecl = ArrayDecl VName PrimType MemLoc
 
 compileInParams ::
-  Mem rep =>
+  Mem rep inner =>
   [FParam rep] ->
   [EntryPointType] ->
   ImpM rep r op ([Imp.Param], [ArrayDecl], [Imp.ExternalValue])
@@ -578,7 +578,7 @@ compileOutParam MemAcc {} =
   error "Functions may not return accumulators."
 
 compileExternalValues ::
-  Mem rep =>
+  Mem rep inner =>
   [RetType rep] ->
   [EntryPointType] ->
   [Maybe Imp.Param] ->
@@ -626,7 +626,7 @@ compileExternalValues orig_rts orig_epts maybe_params = do
   mkExts (length ctx_rts) orig_epts val_rts
 
 compileOutParams ::
-  Mem rep =>
+  Mem rep inner =>
   [RetType rep] ->
   Maybe [EntryPointType] ->
   ImpM rep r op ([Imp.ExternalValue], [Imp.Param], [ValueDestination])
@@ -638,7 +638,7 @@ compileOutParams orig_rts maybe_orig_epts = do
   return (evs, catMaybes maybe_params, dests)
 
 compileFunDef ::
-  Mem rep =>
+  Mem rep inner =>
   FunDef rep ->
   ImpM rep r op ()
 compileFunDef (FunDef entry _ fname rettype params body) =
@@ -665,7 +665,7 @@ compileFunDef (FunDef entry _ fname rettype params body) =
 
       return (outparams, inparams, results, args)
 
-compileBody :: (Mem rep) => Pat rep -> Body rep -> ImpM rep r op ()
+compileBody :: Pat rep -> Body rep -> ImpM rep r op ()
 compileBody pat (Body _ bnds ses) = do
   dests <- destinationFromPat pat
   compileStms (freeIn ses) bnds $
@@ -705,7 +705,7 @@ compileStms alive_after_stms all_stms m = do
   cb alive_after_stms all_stms m
 
 defCompileStms ::
-  (Mem rep, FreeIn op) =>
+  (Mem rep inner, FreeIn op) =>
   Names ->
   Stms rep ->
   ImpM rep r op () ->
@@ -750,7 +750,7 @@ compileExp pat e = do
   ec pat e
 
 defCompileExp ::
-  (Mem rep) =>
+  (Mem rep inner) =>
   Pat rep ->
   Exp rep ->
   ImpM rep r op ()
@@ -832,7 +832,7 @@ traceArray s t shape se = do
   emit . Imp.TracePrint $ ErrorMsg ["\n"]
 
 defCompileBasicOp ::
-  Mem rep =>
+  Mem rep inner =>
   Pat rep ->
   BasicOp ->
   ImpM rep r op ()
@@ -1009,7 +1009,7 @@ addArrays = mapM_ addArray
 
 -- | Like 'dFParams', but does not create new declarations.
 -- Note: a hack to be used only for functions.
-addFParams :: Mem rep => [FParam rep] -> ImpM rep r op ()
+addFParams :: Mem rep inner => [FParam rep] -> ImpM rep r op ()
 addFParams = mapM_ addFParam
   where
     addFParam fparam =
@@ -1021,7 +1021,7 @@ addLoopVar :: VName -> IntType -> ImpM rep r op ()
 addLoopVar i it = addVar i $ ScalarVar Nothing $ ScalarEntry $ IntType it
 
 dVars ::
-  Mem rep =>
+  Mem rep inner =>
   Maybe (Exp rep) ->
   [PatElem rep] ->
   ImpM rep r op ()
@@ -1029,10 +1029,10 @@ dVars e = mapM_ dVar
   where
     dVar = dScope e . scopeOfPatElem
 
-dFParams :: Mem rep => [FParam rep] -> ImpM rep r op ()
+dFParams :: Mem rep inner => [FParam rep] -> ImpM rep r op ()
 dFParams = dScope Nothing . scopeOfFParams
 
-dLParams :: Mem rep => [LParam rep] -> ImpM rep r op ()
+dLParams :: Mem rep inner => [LParam rep] -> ImpM rep r op ()
 dLParams = dScope Nothing . scopeOfLParams
 
 dPrimVol :: String -> PrimType -> Imp.TExp t -> ImpM rep r op (TV t)
@@ -1096,16 +1096,16 @@ memBoundToVarEntry e (MemArray bt shape _ (ArrayIn mem ixfun)) =
           }
 
 infoDec ::
-  Mem rep =>
+  Mem rep inner =>
   NameInfo rep ->
   MemInfo SubExp NoUniqueness MemBind
-infoDec (LetName dec) = dec
+infoDec (LetName dec) = letDecMem dec
 infoDec (FParamName dec) = noUniquenessReturns dec
 infoDec (LParamName dec) = dec
 infoDec (IndexName it) = MemPrim $ IntType it
 
 dInfo ::
-  Mem rep =>
+  Mem rep inner =>
   Maybe (Exp rep) ->
   VName ->
   NameInfo rep ->
@@ -1124,7 +1124,7 @@ dInfo e name info = do
   addVar name entry
 
 dScope ::
-  Mem rep =>
+  Mem rep inner =>
   Maybe (Exp rep) ->
   Scope rep ->
   ImpM rep r op ()
@@ -1328,7 +1328,7 @@ lookupAcc name is = do
           error $ "ImpGen.lookupAcc: unlisted accumulator: " ++ pretty name
     _ -> error $ "ImpGen.lookupAcc: not an accumulator: " ++ pretty name
 
-destinationFromPat :: Mem rep => Pat rep -> ImpM rep r op [ValueDestination]
+destinationFromPat :: Pat rep -> ImpM rep r op [ValueDestination]
 destinationFromPat = mapM inspect . patElems
   where
     inspect pe = do
@@ -1673,11 +1673,7 @@ copyDWIMFix dest dest_is src src_is =
 -- writing the result to @dest@, which must be a single
 -- 'MemoryDestination',
 compileAlloc ::
-  Mem rep =>
-  Pat rep ->
-  SubExp ->
-  Space ->
-  ImpM rep r op ()
+  Mem rep inner => Pat rep -> SubExp -> Space -> ImpM rep r op ()
 compileAlloc (Pat [mem]) e space = do
   let e' = Imp.bytes $ toInt64Exp e
   allocator <- asks $ M.lookup space . envAllocCompilers

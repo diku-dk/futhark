@@ -4,16 +4,25 @@
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 
 -- | Simple C runtime representation.
+--
+-- Most types use the same memory and scalar variable representation.
+-- For those that do not (as of this writing, only `Float16`), we use
+-- 'primStorageType' for the array element representation, and
+-- 'primTypeToCType' for their scalar representation.  Use 'toStorage'
+-- and 'fromStorage' to convert back and forth.
 module Futhark.CodeGen.Backends.SimpleRep
   ( tupleField,
     funName,
     defaultMemBlockType,
     intTypeToCType,
     primTypeToCType,
-    signedPrimTypeToCType,
+    primStorageType,
+    primAPIType,
     arrayName,
     opaqueName,
     externalValueType,
+    toStorage,
+    fromStorage,
     cproduct,
     csum,
 
@@ -29,8 +38,9 @@ where
 
 import Data.Bits (shiftR, xor)
 import Data.Char (isAlphaNum, isDigit, ord)
-import Data.FileEmbed
+import qualified Data.Text as T
 import Futhark.CodeGen.ImpCode
+import Futhark.CodeGen.RTS.C (scalarF16H, scalarH)
 import Futhark.Util (zEncodeString)
 import qualified Language.C.Quote.C as C
 import qualified Language.C.Syntax as C
@@ -50,25 +60,37 @@ uintTypeToCType Int16 = [C.cty|typename uint16_t|]
 uintTypeToCType Int32 = [C.cty|typename uint32_t|]
 uintTypeToCType Int64 = [C.cty|typename uint64_t|]
 
--- | The C type corresponding to a float type.
-floatTypeToCType :: FloatType -> C.Type
-floatTypeToCType Float32 = [C.cty|float|]
-floatTypeToCType Float64 = [C.cty|double|]
-
 -- | The C type corresponding to a primitive type.  Integers are
 -- assumed to be unsigned.
 primTypeToCType :: PrimType -> C.Type
 primTypeToCType (IntType t) = intTypeToCType t
-primTypeToCType (FloatType t) = floatTypeToCType t
+primTypeToCType (FloatType Float16) = [C.cty|typename f16|]
+primTypeToCType (FloatType Float32) = [C.cty|float|]
+primTypeToCType (FloatType Float64) = [C.cty|double|]
 primTypeToCType Bool = [C.cty|typename bool|]
 primTypeToCType Unit = [C.cty|typename bool|]
 
--- | The C type corresponding to a primitive type.  Integers are
+-- | The C storage type for arrays of this primitive type.
+primStorageType :: PrimType -> C.Type
+primStorageType (FloatType Float16) = [C.cty|typename uint16_t|]
+primStorageType t = primTypeToCType t
+
+-- | The C API corresponding to a primitive type.  Integers are
 -- assumed to have the specified sign.
-signedPrimTypeToCType :: Signedness -> PrimType -> C.Type
-signedPrimTypeToCType TypeUnsigned (IntType t) = uintTypeToCType t
-signedPrimTypeToCType TypeDirect (IntType t) = intTypeToCType t
-signedPrimTypeToCType _ t = primTypeToCType t
+primAPIType :: Signedness -> PrimType -> C.Type
+primAPIType TypeUnsigned (IntType t) = uintTypeToCType t
+primAPIType TypeDirect (IntType t) = intTypeToCType t
+primAPIType _ t = primStorageType t
+
+-- | Convert from scalar to storage representation for the given type.
+toStorage :: PrimType -> C.Exp -> C.Exp
+toStorage (FloatType Float16) e = [C.cexp|futrts_to_bits16($exp:e)|]
+toStorage _ e = e
+
+-- | Convert from storage to scalar representation for the given type.
+fromStorage :: PrimType -> C.Exp -> C.Exp
+fromStorage (FloatType Float16) e = [C.cexp|futrts_from_bits16($exp:e)|]
+fromStorage _ e = e
 
 -- | @tupleField i@ is the name of field number @i@ in a tuple.
 tupleField :: Int -> String
@@ -125,7 +147,7 @@ externalValueType (OpaqueValue _ desc vds) =
 externalValueType (TransparentValue _ (ArrayValue _ _ pt signed shape)) =
   [C.cty|struct $id:("futhark_" ++ arrayName pt signed (length shape))*|]
 externalValueType (TransparentValue _ (ScalarValue pt signed _)) =
-  signedPrimTypeToCType signed pt
+  primAPIType signed pt
 
 -- | Return an expression multiplying together the given expressions.
 -- If an empty list is given, the expression @1@ is returned.
@@ -153,28 +175,48 @@ instance C.ToExp VName where
   toExp v _ = [C.cexp|$id:v|]
 
 instance C.ToExp IntValue where
-  toExp (Int8Value v) = C.toExp v
-  toExp (Int16Value v) = C.toExp v
-  toExp (Int32Value v) = C.toExp v
-  toExp (Int64Value v) = C.toExp v
+  toExp (Int8Value k) _ = [C.cexp|(typename int8_t)$int:k|]
+  toExp (Int16Value k) _ = [C.cexp|(typename int16_t)$int:k|]
+  toExp (Int32Value k) _ = [C.cexp|$int:k|]
+  toExp (Int64Value k) _ = [C.cexp|(typename int64_t)$int:k|]
 
 instance C.ToExp FloatValue where
-  toExp (Float32Value v) = C.toExp v
-  toExp (Float64Value v) = C.toExp v
+  toExp (Float16Value x) _
+    | isInfinite x =
+      if x > 0 then [C.cexp|INFINITY|] else [C.cexp|-INFINITY|]
+    | isNaN x =
+      [C.cexp|NAN|]
+    | otherwise =
+      [C.cexp|$float:(fromRational (toRational x))|]
+  toExp (Float32Value x) _
+    | isInfinite x =
+      if x > 0 then [C.cexp|INFINITY|] else [C.cexp|-INFINITY|]
+    | isNaN x =
+      [C.cexp|NAN|]
+    | otherwise =
+      [C.cexp|$float:x|]
+  toExp (Float64Value x) _
+    | isInfinite x =
+      if x > 0 then [C.cexp|INFINITY|] else [C.cexp|-INFINITY|]
+    | isNaN x =
+      [C.cexp|NAN|]
+    | otherwise =
+      [C.cexp|$double:x|]
 
 instance C.ToExp PrimValue where
   toExp (IntValue v) = C.toExp v
   toExp (FloatValue v) = C.toExp v
   toExp (BoolValue True) = C.toExp (1 :: Int8)
   toExp (BoolValue False) = C.toExp (0 :: Int8)
-  toExp UnitValue = C.toExp (1 :: Int8)
+  toExp UnitValue = C.toExp (0 :: Int8)
 
 instance C.ToExp SubExp where
   toExp (Var v) = C.toExp v
   toExp (Constant c) = C.toExp c
 
-cScalarDefs :: String
-cScalarDefs = $(embedStringFile "rts/c/scalar.h")
+-- | Implementations of scalar operations.
+cScalarDefs :: T.Text
+cScalarDefs = scalarH <> scalarF16H
 
 storageSize :: PrimType -> Int -> C.Exp -> C.Exp
 storageSize pt rank shape =
@@ -192,6 +234,7 @@ typeStr sign pt =
   case (sign, pt) of
     (_, Bool) -> "bool"
     (_, Unit) -> "bool"
+    (_, FloatType Float16) -> " f16"
     (_, FloatType Float32) -> " f32"
     (_, FloatType Float64) -> " f64"
     (TypeDirect, IntType Int8) -> "  i8"

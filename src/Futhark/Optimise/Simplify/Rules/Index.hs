@@ -23,7 +23,7 @@ isCt0 :: SubExp -> Bool
 isCt0 (Constant v) = zeroIsh v
 isCt0 _ = False
 
--- | Some index expressions can be simplified to 'SubExp's, while
+-- | Some index expressions can be simplified to t'SubExp's, while
 -- others produce another index expression (which may be further
 -- simplifiable).
 data IndexResult

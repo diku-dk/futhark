@@ -1306,8 +1306,8 @@ addResultAliases r (Array als u t shape) = do
 -- function", for better error messages.
 checkApplyExp :: UncheckedExp -> TermTypeM (Exp, ApplyOp)
 checkApplyExp (AppExp (Apply e1 e2 _ loc) _) = do
-  (e1', (fname, i)) <- checkApplyExp e1
   arg <- checkArg e2
+  (e1', (fname, i)) <- checkApplyExp e1
   t <- expType e1'
   (t1, rt, argext, exts) <- checkApply loc (fname, i) t arg
   rt' <- addResultAliases (NameAppRes fname loc) rt
@@ -2640,9 +2640,11 @@ literalOverflowCheck = void . check
     bitWidth ty = 8 * intByteSize ty :: Int
     inBoundsI x (Signed t) = x >= -2 ^ (bitWidth t - 1) && x < 2 ^ (bitWidth t - 1)
     inBoundsI x (Unsigned t) = x >= 0 && x < 2 ^ bitWidth t
+    inBoundsI x (FloatType Float16) = not $ isInfinite (fromIntegral x :: Half)
     inBoundsI x (FloatType Float32) = not $ isInfinite (fromIntegral x :: Float)
     inBoundsI x (FloatType Float64) = not $ isInfinite (fromIntegral x :: Double)
     inBoundsI _ Bool = error "Inferred type of int literal is not a number"
+    inBoundsF x Float16 = not $ isInfinite (realToFrac x :: Float)
     inBoundsF x Float32 = not $ isInfinite (realToFrac x :: Float)
     inBoundsF x Float64 = not $ isInfinite x
     warnBounds inBounds x ty loc =
