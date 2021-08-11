@@ -453,6 +453,11 @@ commandLineOptions =
       (NoArg $ Right $ \opts -> opts {futharkAction = PolyAction printAliasesAction})
       "Print the resulting IR with aliases.",
     Option
+      []
+      ["call-graph"]
+      (NoArg $ Right $ \opts -> opts {futharkAction = SOACSAction callGraphAction})
+      "Print the resulting call graph.",
+    Option
       "m"
       ["metrics"]
       (NoArg $ Right $ \opts -> opts {futharkAction = PolyAction metricsAction})

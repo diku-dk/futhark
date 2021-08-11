@@ -6,6 +6,7 @@
 module Futhark.Actions
   ( printAction,
     printAliasesAction,
+    callGraphAction,
     impCodeGenAction,
     kernelImpCodeGenAction,
     multicoreImpCodeGenAction,
@@ -28,6 +29,7 @@ import Data.Maybe (fromMaybe)
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import Futhark.Analysis.Alias
+import Futhark.Analysis.CallGraph (buildCallGraph)
 import Futhark.Analysis.Metrics
 import qualified Futhark.CodeGen.Backends.CCUDA as CCUDA
 import qualified Futhark.CodeGen.Backends.COpenCL as COpenCL
@@ -45,6 +47,7 @@ import Futhark.IR
 import Futhark.IR.GPUMem (GPUMem)
 import Futhark.IR.MCMem (MCMem)
 import Futhark.IR.Prop.Aliases
+import Futhark.IR.SOACS (SOACS)
 import Futhark.IR.SeqMem (SeqMem)
 import Futhark.Util (runProgramWithExitCode, unixEnvironment)
 import Futhark.Version (versionString)
@@ -69,6 +72,15 @@ printAliasesAction =
     { actionName = "Prettyprint",
       actionDescription = "Prettyprint the resulting internal representation on standard output.",
       actionProcedure = liftIO . putStrLn . pretty . aliasAnalysis
+    }
+
+-- | Print call graph to stdout.
+callGraphAction :: Action SOACS
+callGraphAction =
+  Action
+    { actionName = "call-graph",
+      actionDescription = "Prettyprint the callgraph of the result to standard output.",
+      actionProcedure = liftIO . putStrLn . pretty . buildCallGraph
     }
 
 -- | Print metrics about AST node counts to stdout.
