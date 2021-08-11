@@ -77,7 +77,8 @@ inlineFunctions simplify_rate cg what_should_be_inlined prog = do
       if null to_inline_now
         then pure (consts, funs)
         else do
-          let inlinemap = fdmap dont_inline_in
+          let inlinemap =
+                fdmap $ filter ((`S.member` to_inline_now) . funDefName) dont_inline_in
           (vtable', consts') <-
             if any (`calledByConsts` cg) to_inline_now
               then
