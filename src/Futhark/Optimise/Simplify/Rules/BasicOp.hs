@@ -286,10 +286,8 @@ ruleBasicOp _ pat _ (Rearrange perm v)
 ruleBasicOp vtable pat aux (Rearrange perm v)
   | Just (BasicOp (Rearrange perm2 e), v_cs) <- ST.lookupExp v vtable =
     -- Rearranging a rearranging: compose the permutations.
-    Simplify $
-      certifying v_cs $
-        auxing aux $
-          letBind pat $ BasicOp $ Rearrange (perm `rearrangeCompose` perm2) e
+    Simplify . certifying v_cs . auxing aux $
+      letBind pat $ BasicOp $ Rearrange (perm `rearrangeCompose` perm2) e
 ruleBasicOp vtable pat aux (Rearrange perm v)
   | Just (BasicOp (Rotate offsets v2), v_cs) <- ST.lookupExp v vtable,
     Just (BasicOp (Rearrange perm3 v3), v2_cs) <- ST.lookupExp v2 vtable = Simplify $ do
