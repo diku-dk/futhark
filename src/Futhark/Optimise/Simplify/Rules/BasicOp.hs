@@ -270,6 +270,12 @@ ruleBasicOp vtable pat aux (Index idd slice)
             mapM (toSubExp "new_index") new_inds
           certifying idd_cs . auxing aux $
             letBind pat $ BasicOp $ Index idd2 $ Slice $ map DimFix new_inds'
+
+-- Copying an iota is pointless; just make it an iota instead.
+ruleBasicOp vtable pat aux (Copy v)
+  | Just (Iota n x s it, v_cs) <- ST.lookupBasicOp v vtable =
+    Simplify . certifying v_cs . auxing aux $
+      letBind pat $ BasicOp $ Iota n x s it
 ruleBasicOp _ pat _ (BinOp (Pow t) e1 e2)
   | e1 == intConst t 2 =
     Simplify $ letBind pat $ BasicOp $ BinOp (Shl t) (intConst t 1) e2
