@@ -1116,9 +1116,11 @@ invIxFunGen ::
 invIxFunGen
   (IxFun (lmad_y :| []) oshp_y ctg_y)
   (IxFun (lmad_b :| []) _oshp_b _ctg_b)
-    -- Sanity condition: both lmads have the same rank:
-    | k <- length (lmadDims lmad_y),
+    | -- Sanity condition: both lmads have the same rank:
+      k <- length (lmadDims lmad_y),
       k == length (lmadDims lmad_b),
+      -- Sanity condition: We cannot invert lossy slices
+      lmadOffset lmad_b == zeroI64PE,
       -- Intuitively, we work with the invariant:
       --   @perm_y = perm_b o perm_0  = permuteForward perm_b perm_r@
       -- And @perm_0@ can be found by taking the inverse:
