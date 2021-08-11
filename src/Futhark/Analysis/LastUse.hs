@@ -94,7 +94,7 @@ analyseSeqOp _ (lumap, used) (Inner ()) =
 -- | Analyses a program to return a last-use map, mapping each simple statement
 -- in the program to the values that were last used within that statement, and
 -- the set of all `VName` that were used inside.
-analyseProg :: (CanBeAliased (Op rep), Mem rep) => LastUseOp rep -> Prog rep -> (LastUseMap, Used)
+analyseProg :: (CanBeAliased (Op rep), Mem rep inner) => LastUseOp rep -> Prog rep -> (LastUseMap, Used)
 analyseProg onOp prog =
   runReader helper (Env onOp)
   where
