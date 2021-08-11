@@ -8,6 +8,7 @@ where
 import Data.Function ((&))
 import qualified Data.List as DL
 import Data.List.NonEmpty (NonEmpty (..))
+import qualified Data.List.NonEmpty as NE
 import Futhark.Analysis.PrimExp
 import qualified Futhark.IR.Mem.IxFun as IxFunLMAD
 import qualified Futhark.IR.Mem.IxFun.Alg as IxFunAlg
@@ -124,7 +125,9 @@ tests =
         test_flatSlice_rotate_slice_iota,
         test_flatSlice_transpose_slice_iota,
         test_rotate_flatSlice_transpose_slice_iota,
-        test_disjoint_ixfun_1d
+        test_disjoint_ixfun_1d,
+        test_disjoint_ixfun_2d,
+        test_conservative_flatten
       ]
 
 singleton :: TestTree -> [TestTree]
@@ -689,43 +692,115 @@ test_rotate_flatSlice_transpose_slice_iota =
   where
     flat_slice_1 = FlatSlice 1 [FlatDimIndex 2 2]
 
-compareDisjoint :: (Bool, Bool) -> Assertion
-compareDisjoint (lmadDisjoint, algDisjoint) =
+compareDisjoint :: Bool -> (Bool, Bool) -> Assertion
+compareDisjoint groundTruth (lmadDisjoint, algDisjoint) =
   let errorMessage =
-        "LMAD disjoint: " ++ show lmadDisjoint ++ "\n"
-          ++ "Alg disjoint: "
+        "LMAD disjoint: "
+          ++ show lmadDisjoint
+          ++ "\nAlg disjoint: "
           ++ show algDisjoint
-   in (lmadDisjoint == algDisjoint) @? errorMessage
+          ++ "\nGround truth: "
+          ++ show groundTruth
+   in (lmadDisjoint == groundTruth && lmadDisjoint == algDisjoint) @? errorMessage
 
 test_disjoint_ixfun_1d :: [TestTree]
 test_disjoint_ixfun_1d =
   [ let ixf1 = iota [10 :: Int]
         ixf2 = iota [10]
      in testCase "disjoint . iota 10 " $
-          compareDisjoint (disjoint ixf1 ixf2),
+          compareDisjoint False (disjoint ixf1 ixf2),
     let ixf1 = iota [10 :: Int]
         ixf2 = slice (iota [10]) $ Slice [DimSlice 10 10 1]
      in testCase "disjoint (iota 10) (offset 10 $ iota 20) " $
-          compareDisjoint (disjoint ixf1 ixf2),
+          compareDisjoint True (disjoint ixf1 ixf2),
     let ixf1 = slice (iota [10]) $ Slice [DimSlice 10 10 1]
         ixf2 = iota [10 :: Int]
      in testCase "disjoint (offset 10 $ iota 20) (iota 10) " $
-          compareDisjoint (disjoint ixf1 ixf2),
+          compareDisjoint True (disjoint ixf1 ixf2),
     let ixf1 = iota [10 :: Int]
         ixf2 = slice (iota [10]) $ Slice [DimSlice 9 10 1]
      in testCase "disjoint (iota 10) (offset 9 $ iota 20) " $
-          compareDisjoint (disjoint ixf1 ixf2),
+          compareDisjoint False (disjoint ixf1 ixf2),
     let ixf1 = slice (iota [20 :: Int]) $ Slice [DimSlice 0 10 2]
         ixf2 = slice (iota [20]) $ Slice [DimSlice 1 10 2]
      in testCase "disjoint [0, 2, ...] [1, 3, ...] " $
           compareDisjoint
+            True
             (disjoint ixf1 ixf2),
     let ixf1 = slice (iota [100 :: Int]) $ Slice [DimSlice 0 10 9]
         ixf2 = slice (iota [100]) $ Slice [DimSlice 1 10 6]
      in testCase "disjoint [0, 9, ...] [1, 7, ...] " $
-          compareDisjoint (disjoint ixf1 ixf2),
+          compareDisjoint True (disjoint ixf1 ixf2),
     let ixf1 = slice (iota [100 :: Int]) $ Slice [DimSlice 0 10 9]
         ixf2 = slice (iota [100]) $ Slice [DimSlice 3 10 6]
      in testCase "disjoint [0, 9, ...] [3, 9, ...] " $
-          compareDisjoint (disjoint ixf1 ixf2)
+          compareDisjoint False (disjoint ixf1 ixf2),
+    let ixf1 = slice (iota [100 :: Int]) $ Slice [DimSlice 90 10 (-9)]
+        ixf2 = slice (iota [100]) $ Slice [DimSlice 9 10 9]
+     in testCase "disjoint [90, 81, ..., 9] [9, 18, ..., 90] " $
+          compareDisjoint False (disjoint ixf1 ixf2)
   ]
+
+-- TODO Test with negative strides
+
+test_disjoint_ixfun_2d :: [TestTree]
+test_disjoint_ixfun_2d =
+  [ let ixf1 = iota [10 :: Int, 10]
+        ixf2 = iota [10, 10]
+     in testCase "disjoint . iota 10 10 " $
+          compareDisjoint False (disjoint ixf1 ixf2),
+    -- Expected failure
+    -- let ixf1 = slice (iota [10 :: Int, 10]) $ Slice [DimSlice 0 5 2, DimSlice 0 10 1]
+    --     ixf2 = slice (iota [10, 10]) $ Slice [DimSlice 1 5 2, DimSlice 0 10 1]
+    --  in testCase "disjoint . non-overlapping slices " $
+    --       compareDisjoint True (disjoint ixf1 ixf2),
+    let ixf1 = flatSlice (iota [100 :: Int]) $ FlatSlice 0 [FlatDimIndex 5 20, FlatDimIndex 11 1]
+        ixf2 = slice (iota [10, 10]) $ Slice [DimSlice 1 5 2, DimSlice 0 10 1]
+     in testCase "disjoint . overlapping slices " $
+          compareDisjoint False (disjoint ixf1 ixf2),
+    let ixf1 = slice (iota [10 :: Int, 10]) $ Slice [DimSlice 0 5 2, DimSlice 0 5 2]
+        ixf2 = slice (iota [10 :: Int, 10]) $ Slice [DimSlice 1 5 2, DimSlice 1 5 2]
+     in testCase "disjoint . interleaved slices " $
+          compareDisjoint True (disjoint ixf1 ixf2)
+  ]
+
+test_conservative_flatten :: [TestTree]
+test_conservative_flatten =
+  let tester ixf =
+        let shp = IxFunLMAD.shape ixf
+            points = allPoints shp
+            idxs = map (IxFunLMAD.index ixf) points
+            flattened =
+              IxFunLMAD.conservativeFlatten $
+                NE.head $ IxFunLMAD.ixfunLMADs ixf
+            ixf' =
+              IxFunLMAD.IxFun
+                (flattened :| [])
+                (IxFunLMAD.lmadShape flattened)
+                True
+            shp' = IxFunLMAD.shape ixf'
+            points' = allPoints shp'
+            idxs' = map (IxFunLMAD.index ixf') points'
+         in idxs DL.\\ idxs' == []
+              @? ( "Invalid flatten!\nGot idxs: " <> pretty idxs'
+                     <> "\nReal idxs: "
+                     <> pretty idxs
+                     <> "\nDiff: "
+                     <> pretty (idxs DL.\\ idxs')
+                     <> "\nOriginal ixfun: "
+                     <> pretty ixf
+                     <> "\nFlattened ixfun: "
+                     <> pretty ixf'
+                 )
+   in [ testCase "conservativeFlatten" $
+          tester $
+            IxFunLMAD.flatSlice (IxFunLMAD.iota [100 :: Int]) $
+              FlatSlice 0 [FlatDimIndex 5 20, FlatDimIndex 11 1],
+        let flat_slice_1 = FlatSlice 17 [FlatDimIndex 3 27, FlatDimIndex 3 10, FlatDimIndex 3 2]
+            flat_slice_2 = FlatSlice 2 [FlatDimIndex 2 (-2)]
+         in testCase "conservativeFlatten 2" $
+              tester $
+                IxFunLMAD.flatSlice
+                  (IxFunLMAD.flatSlice (IxFunLMAD.iota [10 * 10 :: Int]) flat_slice_1)
+                  flat_slice_2
+      ]

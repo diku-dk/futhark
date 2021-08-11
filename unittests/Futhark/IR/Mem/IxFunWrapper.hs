@@ -13,6 +13,7 @@ module Futhark.IR.Mem.IxFunWrapper
   )
 where
 
+import Data.List.NonEmpty
 import qualified Futhark.IR.Mem.IxFun as I
 import qualified Futhark.IR.Mem.IxFun.Alg as IA
 import Futhark.IR.Syntax (FlatSlice, ShapeChange, Slice)
@@ -79,4 +80,5 @@ disjoint ::
   IxFun num ->
   IxFun num ->
   (Bool, Bool)
-disjoint (l, a) (l1, a1) = (I.disjoint l l1, IA.disjoint a a1)
+disjoint (I.IxFun (l :| []) _ _, a) (I.IxFun (l1 :| []) _ _, a1) = (I.disjoint l l1, IA.disjoint a a1)
+disjoint (_, a) (_, a1) = (undefined, IA.disjoint a a1)

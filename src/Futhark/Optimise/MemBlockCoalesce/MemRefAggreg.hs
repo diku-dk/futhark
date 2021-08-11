@@ -266,10 +266,9 @@ noMemOverlap _ (Set ml) (Set mr)
   | mr == ml = False
 noMemOverlap _ Undeterminable _ = False
 noMemOverlap _ _ Undeterminable = False
-noMemOverlap _ (Set _) (Set _) =
-  False
-
--- TODO add non-trivial implementation, please
+noMemOverlap _ (Set is) (Set js) =
+  -- TODO Expand this to be able to handle eg. nw
+  all (\i -> all (IxFun.disjoint i) $ S.toList js) $ S.toList is
 
 -- | Suppossed to aggregate the iteration-level summaries
 --     across a loop of index i = 0 .. n-1

@@ -18,6 +18,7 @@ module Futhark.IR.Mem.IxFun
     flatSlice,
     rebase,
     shape,
+    lmadShape,
     rank,
     linearWithOffset,
     rearrangeWithOffset,
@@ -31,6 +32,7 @@ module Futhark.IR.Mem.IxFun
     invIxFun,
     hasOneLmad,
     permuteInv,
+    conservativeFlatten,
     disjoint,
   )
 where
@@ -1265,13 +1267,49 @@ invIxFun a b =
     Nothing -> Nothing
     Just ixf -> Just $ fmap TPrimExp ixf
 
-divides :: IntegralExp e => e -> e -> Bool
-divides x y = Futhark.Util.IntegralExp.mod y x == 0
+-- | Computes the maximum span of an 'LMAD'. The result is the lowest and
+-- highest flat values representable by that 'LMAD'.
+flatSpan :: (IntegralExp e, Ord e) => LMAD e -> (e, e)
+flatSpan (LMAD ofs dims) =
+  let (l, u) =
+        foldl
+          ( \(lower, upper) dim ->
+              let spn = ldStride dim * (ldShape dim - 1)
+               in ( min (spn + lower) lower,
+                    max (spn + upper) upper
+                  )
+          )
+          (ofs, ofs)
+          dims
+   in (l, u)
 
-disjoint :: (IntegralExp e, Ord e) => IxFun e -> IxFun e -> Bool
-disjoint (IxFun (LMAD offset1 [dim1] :| []) _ _) (IxFun (LMAD offset2 [dim2] :| []) _ _)
-  | ldRotate dim1 == 0 && ldRotate dim2 == 0 =
-    not (divides (Futhark.Util.IntegralExp.gcd (ldStride dim1) (ldStride dim2)) (offset1 - offset2))
-      || offset1 >= offset2 + ldShape dim2
-      || offset2 >= offset1 + ldShape dim1
-disjoint _x _y = undefined
+-- | Conservatively flatten a list of LMAD dimensions
+--
+-- Since not all LMADs can actually be flattened, we try to overestimate the
+-- flattened array instead. This means that any "holes" in betwen dimensions
+-- will get filled out.
+conservativeFlatten :: (IntegralExp e, Ord e) => LMAD e -> LMAD e
+conservativeFlatten l@(LMAD _ dims) =
+  LMAD offset [LMADDim strd 0 (shp + 1) 0 Unknown]
+  where
+    strd = foldl Futhark.Util.IntegralExp.gcd (ldStride $ head dims) $ map ldStride dims
+    (offset, shp) = flatSpan l
+
+-- | Returns @True@ if the two 'LMAD's could be proven disjoint.
+--
+-- Uses some best-approximation heuristics to determine disjointness. For two
+-- 1-dimensional arrays, we can guarantee whether or not they are disjoint, but
+-- as soon as more than one dimension is involved, things get more
+-- tricky. Currently, we try to 'conservativelyFlatten' any LMAD with more than
+-- one dimension.
+disjoint :: (IntegralExp e, Ord e) => LMAD e -> LMAD e -> Bool
+disjoint (LMAD offset1 [dim1]) (LMAD offset2 [dim2]) =
+  not (divides (Futhark.Util.IntegralExp.gcd (ldStride dim1) (ldStride dim2)) (offset1 - offset2))
+    || offset1 >= max offset2 (offset2 + ldShape dim2 * ldStride dim2)
+    || offset2 >= max offset1 (offset1 + ldShape dim1 * ldStride dim1)
+  where
+    divides x y = Futhark.Util.IntegralExp.mod y x == 0
+disjoint lmad1 lmad2 =
+  disjoint
+    (conservativeFlatten lmad1)
+    (conservativeFlatten lmad2)
