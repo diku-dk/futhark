@@ -624,7 +624,7 @@ valuesAsVars server names_and_types futhark dir (GenValues gens) = do
     cmdMaybe $ cmdRestore server (dir </> file) [(v, t)]
 valuesAsVars server names_and_types _ _ (Values vs) = do
   let types = map snd names_and_types
-      vs_types = map (V.valueTypeText . V.valueType) vs
+      vs_types = map (V.valueTypeTextNoDims . V.valueType) vs
   unless (types == vs_types) . throwError . T.unlines $
     [ "Expected input of types: " <> prettyTextOneLine types,
       "Provided input of types: " <> prettyTextOneLine vs_types
