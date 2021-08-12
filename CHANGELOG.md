@@ -26,6 +26,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
     Implemented with hardware support where it is available, and with
     `f32`-based emulation where it is not.
 
+  * Sometimes slightly more informative error message when input of
+    the wrong type is passed to a test program.
+
 ### Removed
 
 ### Changed
