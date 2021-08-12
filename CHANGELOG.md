@@ -66,6 +66,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * Fixed a hole in size type checking that would usually lead to
     compiler crashes (#1435).
 
+  * Underscores now allowed in numeric literals in test data (#1440).
+
 ## [0.19.7]
 
 ### Added
