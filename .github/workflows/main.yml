@@ -392,6 +392,10 @@ jobs:
       with:
         node-version: '16.x'
 
+    - name: Install Jest
+      run: |
+        npm install jest --global
+
     - uses: actions/download-artifact@v2
       with:
         name: futhark-nightly-linux-x86_64.tar.xz
@@ -407,7 +411,8 @@ jobs:
         node --version
         export EMCFLAGS="-sINITIAL_MEMORY=2147418112 -O1" # 2gb - 64kb... largest value of memory
         futhark test -c --backend=wasm --runner=./tools/node-simd.sh --no-tuning --exclude=no_wasm tests examples
-        make -C tests_lib/javascript -j
+        make -C tests_lib/javascript
+        make -C tests_lib/web
 
   test-wasm-multicore:
     runs-on: ubuntu-20.04
