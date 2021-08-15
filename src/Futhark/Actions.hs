@@ -334,14 +334,7 @@ runEMCC cpath outpath classpath cflags_def ldflags expfuns lib = do
             ++ ["-lnodefs.js"]
             ++ ["-s", "--extern-post-js", classpath]
             ++ ( if lib
-                   then
-                     [ "-s",
-                       "EXPORT_NAME=loadWASM",
-                       "-s",
-                       "MODULARIZE=1",
-                       "-s",
-                       "EXPORT_ES6=1"
-                     ]
+                   then ["-s", "EXPORT_NAME=loadWASM"]
                    else []
                )
             ++ ["-s", "WASM_BIGINT"]
