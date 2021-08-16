@@ -45,7 +45,7 @@ newFutharkContext().then(fc => {
 
   for (var i = 0; i < Number(n); i++) {
     // check with consideration for floating point precision
-    assert(Math.abs(replicate1d_res_arr[i] - 1.1 < .0001));
+    assert(Math.abs(replicate1d_res_arr[i] - 1.1) < .0001);
   }
 
   console.log("Testing Entry Point : replicate2d");
@@ -59,7 +59,7 @@ newFutharkContext().then(fc => {
   for (var i = 0; i < Number(x); i++) {
     for (var j = 0; j < Number(y); j++) {
       // check with consideration for floating point precision
-      assert(Math.abs(replicate1d_res_arr[i][j] - 1.1 < .0001));
+      assert(Math.abs(replicate1d_res_arr[i][j] - 1.1) < .0001);
     }
   }
 
@@ -77,8 +77,8 @@ newFutharkContext().then(fc => {
   var shape_ints = futhark_test_array_shape_ints.shape();
   var shape_bigints = futhark_test_array_shape_bigints.shape();
 
-  assert(shape_ints[0] == shape_bigints[0]);
-  assert(shape_ints[1] == shape_bigints[1]);
+  assert(shape_ints[0] === shape_bigints[0]);
+  assert(shape_ints[1] === shape_bigints[1]);
 
   console.log("Testing toArray");
 
@@ -87,7 +87,7 @@ newFutharkContext().then(fc => {
 
   for (var i = 0; i < 2; i++) {
     for (var j = 0; j < 3; j++) {
-      assert(arr_toArray[i][j] == test_arr[i * 3 + j]);
+      assert(arr_toArray[i][j] === test_arr[i * 3 + j]);
     }
   }
 
@@ -96,7 +96,7 @@ newFutharkContext().then(fc => {
   var arr_toTypedArray = futhark_test_array.toTypedArray();
 
   for (var i = 0; i < 3 * 2; i++) {
-    assert(arr_toTypedArray[i] == test_arr[i]);
+    assert(arr_toTypedArray[i] === test_arr[i]);
   }
 
   console.log("Testing shape");
@@ -105,7 +105,7 @@ newFutharkContext().then(fc => {
   var actual_shape = futhark_test_array.shape();
 
   assert(actual_shape[0] === actual_shape[0]);
-  assert(actual_shape[1] === actual_shape[1]);
+  assert(expected_shape[1] === expected_shape[1]);
 
   console.log("Testing frees");
 
