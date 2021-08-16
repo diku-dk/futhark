@@ -592,7 +592,12 @@ diffBasicOp pat aux e m =
     Update safety arr slice v -> do
       (_pat_v, pat_adj) <- commonBasicOp pat aux e m
       v_adj <- letExp "update_val_adj" $ BasicOp $ Index pat_adj slice
-      updateSubExpAdj v v_adj
+      t <- lookupType v_adj
+      v_adj_copy <-
+        case t of
+          Array {} -> letExp "update_val_adj_copy" $ BasicOp $ Copy v_adj
+          _ -> return v_adj
+      updateSubExpAdj v v_adj_copy
       zeroes <- letSubExp "update_zero" . zeroExp =<< subExpType v
       void $
         updateAdj arr
