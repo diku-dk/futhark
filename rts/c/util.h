@@ -53,8 +53,8 @@ static inline void check_err(int errval, int sets_errno, const char *fun, int li
   }
 }
 
-#define CHECK_ERR(err, msg...) check_err(err, 0, __func__, __LINE__, msg)
-#define CHECK_ERRNO(err, msg...) check_err(err, 1, __func__, __LINE__, msg)
+#define CHECK_ERR(err, ...) check_err(err, 0, __func__, __LINE__, __VA_ARGS__)
+#define CHECK_ERRNO(err, ...) check_err(err, 1, __func__, __LINE__, __VA_ARGS__)
 
 // Read the rest of an open file into a NUL-terminated string; returns
 // NULL on error.
