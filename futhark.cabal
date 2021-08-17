@@ -53,6 +53,7 @@ source-repository head
 library
   exposed-modules:
       Futhark.Actions
+      Futhark.Analysis.AlgSimplify
       Futhark.Analysis.Alias
       Futhark.Analysis.CallGraph
       Futhark.Analysis.DataDependencies
@@ -380,6 +381,7 @@ test-suite unit
   other-modules:
       Futhark.BenchTests
       Futhark.Pkg.SolveTests
+      Futhark.Analysis.AlgSimplifyTests
       Futhark.IR.Prop.RearrangeTests
       Futhark.IR.Prop.ReshapeTests
       Futhark.IR.PropTests
