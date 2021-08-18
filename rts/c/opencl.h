@@ -415,7 +415,8 @@ static int is_blacklisted(const char *platform_name, const char *device_name,
       strcmp(cfg->preferred_device, "") != 0) {
     return 0;
   } else if (strstr(platform_name, "Apple") != NULL &&
-             strstr(device_name, "Intel(R) Core(TM)") != NULL) {
+            (strstr(device_name, "Intel(R) Core(TM)") != NULL || 
+             strstr(device_name, "Intel(R) UHD Graphics 630") != NULL)) {
     return 1;
   } else {
     return 0;
