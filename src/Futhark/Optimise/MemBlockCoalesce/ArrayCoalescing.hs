@@ -2,7 +2,7 @@
 {-# LANGUAGE TypeFamilies #-}
 
 -- | Playground for work on merging memory blocks
-module Futhark.Optimise.MemBlockCoalesce.ArrayCoalescing (mkCoalsTab) where
+module Futhark.Optimise.MemBlockCoalesce.ArrayCoalescing (mkCoalsTab, CoalsTab) where
 
 import Control.Arrow
 import qualified Control.Exception.Base as Exc

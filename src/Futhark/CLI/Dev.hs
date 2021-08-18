@@ -34,6 +34,7 @@ import Futhark.Optimise.DoubleBuffer
 import Futhark.Optimise.Fusion
 import Futhark.Optimise.InPlaceLowering
 import Futhark.Optimise.InliningDeadFun
+import qualified Futhark.Optimise.MemBlockCoalesce as MemBlockCoalesce
 import qualified Futhark.Optimise.ReuseAllocations as ReuseAllocations
 import Futhark.Optimise.Sink
 import Futhark.Optimise.TileLoops
@@ -216,6 +217,13 @@ kernelsProg name rep =
   externalErrorS $
     "Pass " ++ name ++ " expects GPU representation, but got " ++ representation rep
 
+seqMemProg :: String -> UntypedPassState -> FutharkM (Prog SeqMem.SeqMem)
+seqMemProg _ (SeqMem prog) =
+  return prog
+seqMemProg name rep =
+  externalErrorS $
+    "Pass " ++ name ++ " expects SeqMem representation, but got " ++ representation rep
+
 typedPassOption ::
   Checkable torep =>
   (String -> UntypedPassState -> FutharkM (Prog fromrep)) ->
@@ -242,6 +250,13 @@ kernelsPassOption ::
   FutharkOption
 kernelsPassOption =
   typedPassOption kernelsProg GPU
+
+seqMemPassOption ::
+  Pass SeqMem.SeqMem SeqMem.SeqMem ->
+  String ->
+  FutharkOption
+seqMemPassOption =
+  typedPassOption seqMemProg SeqMem
 
 kernelsMemPassOption ::
   Pass GPUMem.GPUMem GPUMem.GPUMem ->
@@ -546,6 +561,7 @@ commandLineOptions =
     kernelsMemPassOption doubleBufferGPU [],
     kernelsMemPassOption expandAllocations [],
     kernelsMemPassOption ReuseAllocations.optimise [],
+    seqMemPassOption MemBlockCoalesce.pass [],
     cseOption [],
     simplifyOption "e",
     soacsPipelineOption

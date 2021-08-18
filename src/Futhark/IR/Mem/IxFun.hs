@@ -980,14 +980,15 @@ ixfunMonotonicityRots ignore_rots (IxFun (lmad :| lmads) _ _) =
 -- | Generalization (anti-unification)
 --
 -- Anti-unification of two index functions is supported under the following conditions:
+--
 --   0. Both index functions are represented by ONE lmad (assumed common case!)
---   1. The support array of the two indexfuns have the same dimensionality
---      (we can relax this condition if we use a 1D support, as we probably should!)
+--   1. The support array of the two indexfuns have the same dimensionality (we
+--   can relax this condition if we use a 1D support, as we probably should!)
 --   2. The contiguous property and the per-dimension monotonicity are the same
---      (otherwise we might loose important information; this can be relaxed!)
---   3. Most importantly, both index functions correspond to the same permutation
---      (since the permutation is represented by INTs, this restriction cannot
---       be relaxed, unless we move to a gated-LMAD representation!)
+--   (otherwise we might loose important information; this can be relaxed!)
+--   3. Most importantly, both index functions correspond to the same
+--   permutation (since the permutation is represented by INTs, this restriction
+--   cannot be relaxed, unless we move to a gated-LMAD representation!)
 leastGeneralGeneralization ::
   Eq v =>
   IxFun (PrimExp v) ->

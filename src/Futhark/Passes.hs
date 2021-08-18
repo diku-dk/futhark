@@ -25,6 +25,7 @@ import Futhark.Optimise.DoubleBuffer
 import Futhark.Optimise.Fusion
 import Futhark.Optimise.InPlaceLowering
 import Futhark.Optimise.InliningDeadFun
+import qualified Futhark.Optimise.MemBlockCoalesce as MemBlockCoalesce
 import qualified Futhark.Optimise.ReuseAllocations as ReuseAllocations
 import Futhark.Optimise.Sink
 import Futhark.Optimise.TileLoops
@@ -91,6 +92,8 @@ sequentialCpuPipeline =
     >>> passes
       [ performCSE False,
         simplifySeqMem,
+        simplifySeqMem,
+        MemBlockCoalesce.pass,
         simplifySeqMem
       ]
 
