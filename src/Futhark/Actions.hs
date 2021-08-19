@@ -163,7 +163,7 @@ memoryBlockMerging =
   Action
     { actionName = "Merge memory blocks",
       actionDescription = "Perform memory block merging and print results",
-      actionProcedure = liftIO . Coalesce.memoryBlockMerging
+      actionProcedure = liftIO . Coalesce.printMemoryBlockMerging
     }
 
 -- Lines that we prepend (in comments) to generated code.

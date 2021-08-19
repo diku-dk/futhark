@@ -93,7 +93,7 @@ sequentialCpuPipeline =
       [ performCSE False,
         simplifySeqMem,
         simplifySeqMem,
-        MemBlockCoalesce.pass,
+        MemBlockCoalesce.coalesceSeqMem,
         simplifySeqMem
       ]
 

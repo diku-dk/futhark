@@ -566,7 +566,7 @@ commandLineOptions =
     kernelsMemPassOption doubleBufferGPU [],
     kernelsMemPassOption expandAllocations [],
     kernelsMemPassOption ReuseAllocations.optimise [],
-    seqMemPassOption MemBlockCoalesce.pass [],
+    seqMemPassOption MemBlockCoalesce.coalesceSeqMem [],
     cseOption [],
     simplifyOption "e",
     soacsPipelineOption
