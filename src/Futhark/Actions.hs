@@ -8,6 +8,7 @@ module Futhark.Actions
     printAliasesAction,
     memAliasesAction,
     compareLastUseAction,
+    callGraphAction,
     impCodeGenAction,
     kernelImpCodeGenAction,
     multicoreImpCodeGenAction,
@@ -32,6 +33,7 @@ import Data.Maybe (fromMaybe)
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import Futhark.Analysis.Alias
+import Futhark.Analysis.CallGraph (buildCallGraph)
 import qualified Futhark.Analysis.LastUse
 import qualified Futhark.Analysis.MemAlias as MA
 import Futhark.Analysis.Metrics
@@ -51,6 +53,7 @@ import Futhark.IR
 import Futhark.IR.GPUMem (GPUMem)
 import Futhark.IR.MCMem (MCMem)
 import Futhark.IR.Prop.Aliases
+import Futhark.IR.SOACS (SOACS)
 import Futhark.IR.SeqMem (SeqMem)
 import qualified Futhark.Optimise.MemBlockCoalesce as Coalesce
 import qualified Futhark.Optimise.MemBlockCoalesce.LastUse
@@ -86,6 +89,15 @@ memAliasesAction =
     { actionName = "mem alias",
       actionDescription = "Print memory aliases on standard output.",
       actionProcedure = liftIO . putStrLn . pretty . MA.analyze
+    }
+
+-- | Print call graph to stdout.
+callGraphAction :: Action SOACS
+callGraphAction =
+  Action
+    { actionName = "call-graph",
+      actionDescription = "Prettyprint the callgraph of the result to standard output.",
+      actionProcedure = liftIO . putStrLn . pretty . buildCallGraph
     }
 
 -- | Print metrics about AST node counts to stdout.
@@ -369,14 +381,7 @@ runEMCC cpath outpath classpath cflags_def ldflags expfuns lib = do
             ++ ["-lnodefs.js"]
             ++ ["-s", "--extern-post-js", classpath]
             ++ ( if lib
-                   then
-                     [ "-s",
-                       "EXPORT_NAME=loadWASM",
-                       "-s",
-                       "MODULARIZE=1",
-                       "-s",
-                       "EXPORT_ES6=1"
-                     ]
+                   then ["-s", "EXPORT_NAME=loadWASM"]
                    else []
                )
             ++ ["-s", "WASM_BIGINT"]

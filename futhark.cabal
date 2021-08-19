@@ -333,7 +333,7 @@ library
     , file-embed >=0.0.14.0
     , filepath >=1.4.1.1
     , free >=4.12.4
-    , futhark-data >= 1.0.1.1
+    , futhark-data >= 1.0.2.0
     , futhark-server >= 1.1.0.0
     , githash >=0.1.6.1
     , half >= 0.3

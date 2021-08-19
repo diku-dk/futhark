@@ -1,0 +1,20 @@
+{
+  "scripts": {
+    "test": "jest"
+  },
+  "name": "web-tests",
+  "jest": {
+    "preset": "jest-puppeteer",
+    "verbose": true
+  },
+  "dependencies": {
+    "jest-puppeteer": "^5.0.4",
+    "puppeteer": "^9.1.1",
+    "puppeteer-core": "^9.1.1"
+  },
+  "devDependencies": {
+    "jest": "^27.0.6",
+    "jest-cli": "^27.0.6",
+    "jest-dev-server": "^5.0.3"
+  }
+}

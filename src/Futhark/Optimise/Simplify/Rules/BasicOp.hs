@@ -270,9 +270,12 @@ ruleBasicOp vtable pat aux (Index idd slice)
             mapM (toSubExp "new_index") new_inds
           certifying idd_cs . auxing aux $
             letBind pat $ BasicOp $ Index idd2 $ Slice $ map DimFix new_inds'
-ruleBasicOp _ pat _ (BinOp (Pow t) e1 e2)
-  | e1 == intConst t 2 =
-    Simplify $ letBind pat $ BasicOp $ BinOp (Shl t) (intConst t 1) e2
+
+-- Copying an iota is pointless; just make it an iota instead.
+ruleBasicOp vtable pat aux (Copy v)
+  | Just (Iota n x s it, v_cs) <- ST.lookupBasicOp v vtable =
+    Simplify . certifying v_cs . auxing aux $
+      letBind pat $ BasicOp $ Iota n x s it
 -- Handle identity permutation.
 ruleBasicOp _ pat _ (Rearrange perm v)
   | sort perm == perm =
@@ -280,10 +283,8 @@ ruleBasicOp _ pat _ (Rearrange perm v)
 ruleBasicOp vtable pat aux (Rearrange perm v)
   | Just (BasicOp (Rearrange perm2 e), v_cs) <- ST.lookupExp v vtable =
     -- Rearranging a rearranging: compose the permutations.
-    Simplify $
-      certifying v_cs $
-        auxing aux $
-          letBind pat $ BasicOp $ Rearrange (perm `rearrangeCompose` perm2) e
+    Simplify . certifying v_cs . auxing aux $
+      letBind pat $ BasicOp $ Rearrange (perm `rearrangeCompose` perm2) e
 ruleBasicOp vtable pat aux (Rearrange perm v)
   | Just (BasicOp (Rotate offsets v2), v_cs) <- ST.lookupExp v vtable,
     Just (BasicOp (Rearrange perm3 v3), v2_cs) <- ST.lookupExp v2 vtable = Simplify $ do

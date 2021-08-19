@@ -483,6 +483,11 @@ commandLineOptions =
       (NoArg $ Right $ \opts -> opts {futharkAction = SeqMemAction $ \_ _ _ -> compareLastUseAction})
       "Compare last use.",
     Option
+      []
+      ["call-graph"]
+      (NoArg $ Right $ \opts -> opts {futharkAction = SOACSAction callGraphAction})
+      "Print the resulting call graph.",
+    Option
       "m"
       ["metrics"]
       (NoArg $ Right $ \opts -> opts {futharkAction = PolyAction metricsAction})

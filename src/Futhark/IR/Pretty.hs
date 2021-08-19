@@ -129,6 +129,9 @@ certAnnots cs
 stmCertAnnots :: Stm rep -> [Doc]
 stmCertAnnots = certAnnots . stmAuxCerts . stmAux
 
+instance Pretty Attrs where
+  ppr = spread . attrAnnots
+
 instance Pretty (PatElemT dec) => Pretty (PatT dec) where
   ppr (Pat xs) = braces $ commastack $ map ppr xs
 
