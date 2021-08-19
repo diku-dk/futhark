@@ -6,12 +6,10 @@
 -- structure cpu { Alloc 2 }
 -- structure gpu { Alloc 2 }
 
-import "/futlib/array"
-
-let main (cond: bool, lengths: []i32, index: i32): []i32 =
+let main (cond: bool, lengths: []i64, index: i64): []i64 =
   if cond
   then let lengths' = map (+1) lengths
-       let temp = replicate lengths'[index] 1i32
+       let temp = replicate lengths'[index] 1i64
 
        -- Will be moved up to before temp.
        let with_hoistable_mem = copy temp

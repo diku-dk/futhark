@@ -5,9 +5,7 @@
 -- structure cpu { Alloc 1 }
 -- structure gpu { Alloc 1 }
 
-import "/futlib/array"
-
-let main (length0: i32, length1: i32): []i32 =
+let main (length0: i64, length1: i64): []i32 =
   let temp0 = replicate length0 1i32
   let temp1 = replicate length1 1i32
 

@@ -1,17 +1,17 @@
 -- Memory block merging with a copy into a multidimensional array.  Requires
 -- allocation hoisting of the memory block for 't1'.
 -- ==
--- input { 1
---         [7, 0, 7]
+-- input { 1i64
+--         [7i64, 0i64, 7i64]
 --       }
--- output { [[0, 1, 2],
---           [8, 1, 8],
---           [0, 1, 2]]
+-- output { [[0i64, 1i64, 2i64],
+--           [8i64, 1i64, 8i64],
+--           [0i64, 1i64, 2i64]]
 --        }
 -- structure cpu { Alloc 2 }
 -- structure gpu { Alloc 2 }
 
-let main [n] (i: i32) (ns: [n]i32): [n][n]i32 =
+let main [n] (i: i64) (ns: [n]i64): [n][n]i64 =
   let t0 = map (+ 1) ns -- Will use the memory of t1[i].
 
   -- This is the basis array in which everything will be put.  Its creation uses

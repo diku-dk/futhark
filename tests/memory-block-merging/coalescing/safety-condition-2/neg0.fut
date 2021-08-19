@@ -2,17 +2,17 @@
 -- before the function body is run, so 'xs', which is created in the body, can
 -- never be allocated before 'ys'.
 -- ==
--- input { 0
---         [10, 20, 30]
+-- input { 0i64
+--         [10i64, 20i64, 30i64]
 --       }
--- output { [[10, 20, 30],
---           [3, 4, 5],
---           [6, 7, 8]]
+-- output { [[10i64, 20i64, 30i64],
+--           [3i64, 4i64, 5i64],
+--           [6i64, 7i64, 8i64]]
 --        }
 -- structure cpu { Alloc 1 }
 -- structure gpu { Alloc 1 }
 
-let main [n] (i: i32, ys: [n]i32): [n][n]i32 =
-  let xs = reshape (n, n) (iota (n * n))
+let main [n] (i: i64) (ys: [n]i64): [n][n]i64 =
+  let xs = unflatten n n (iota (n * n))
   let xs[i] = ys
   in xs

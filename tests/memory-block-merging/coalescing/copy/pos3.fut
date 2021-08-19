@@ -1,6 +1,6 @@
 -- Memory block merging with a copy into a multidimensional array.
 -- ==
--- input { 1
+-- input { 1i64
 --         [6, 0, 7]
 --         [[-1, 0, 1],
 --          [-1, 0, 1],
@@ -13,9 +13,7 @@
 -- structure cpu { Alloc 1 }
 -- structure gpu { Alloc 1 }
 
-import "/futlib/array"
-
-let main [n] (i: i32, ns: [n]i32, mss: [n][n]i32): [n][n]i32 =
+let main [n] (i: i64) (ns: [n]i32) (mss: [n][n]i32): [n][n]i32 =
   -- This is the basis array in which everything will be put.
   let t1 = map (\ms -> map (+ 1) ms) mss
 

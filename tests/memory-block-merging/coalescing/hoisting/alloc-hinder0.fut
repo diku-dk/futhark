@@ -1,13 +1,11 @@
 -- An example of a program with silly limits.
 -- ==
--- input { [1, 2] }
--- output { [2, 3, 0, 1] }
+-- input { [1i64, 2i64] }
+-- output { [2i64, 3i64, 0i64, 1i64] }
 -- structure cpu { Alloc 2 }
 -- structure gpu { Alloc 2 }
 
-import "/futlib/array"
-
-let main (ns: []i32): []i32 =
+let main (ns: []i64): []i64 =
   let t0 = map (+ 1) ns
 
   -- Create an array whose memory block allocation depends on the *value* of t0,

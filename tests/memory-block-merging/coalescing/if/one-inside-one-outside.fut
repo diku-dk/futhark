@@ -3,16 +3,16 @@
 -- conditions are kept, since 'ys0' and 'ys1' can use the same memory block
 -- without 'ys0' being overwritten (it seems).
 -- ==
--- input { [[1, 4], [9, 16]]
+-- input { [[1i64, 4i64], [9i64, 16i64]]
 --         false
---         1
+--         1i64
 --       }
--- output { [[1, 4], [1, 2]]
+-- output { [[1i64, 4i64], [1i64, 2i64]]
 --        }
 -- structure cpu { Alloc 0 }
 -- structure gpu { Alloc 0 }
 
-let main [n] (xs: *[n][n]i32, cond: bool, i: i32): [n][n]i32 =
+let main [n] (xs: *[n][n]i64) (cond: bool) (i: i64): [n][n]i64 =
   let ys0 = iota n
   let ys = if cond
            then ys0

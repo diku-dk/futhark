@@ -5,14 +5,14 @@
 -- This problem originated from the decision to allow allocations inside loops.
 -- ==
 -- input { [3, 6]
---         2
+--         2i64
 --       }
 -- output { [5, 8]
 --        }
 -- structure cpu { Alloc 2 }
 -- structure gpu { Alloc 2 }
 
-let main [n] (a0: [n]i32, n_iter: i32): []i32 =
+let main [n] (a0: [n]i32) (n_iter: i64): []i32 =
   let a2 = loop a = a0 for _i < n_iter do
     -- If we coalesce a2 into a3, we end up coalescing the actual memory that
     -- the existential memory of a2 points to: the memory of b0.  But that
@@ -22,7 +22,7 @@ let main [n] (a0: [n]i32, n_iter: i32): []i32 =
     -- coalescing occurs, both iterations will use the same globally-created
     -- memory, and the replicate will write over everything written by the
     -- previous iteration.
-    let b0 = replicate n 0
+    let b0 = replicate n 0i32
     let a' = loop b = b0 for j < n do
       let b[j] = a[j] + 1
       in b
