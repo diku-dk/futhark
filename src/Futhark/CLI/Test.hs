@@ -75,7 +75,7 @@ data TestResult
 
 pureTestResults :: IO [TestResult] -> TestM ()
 pureTestResults m = do
-  errs <- (foldr collectErrors mempty) <$> liftIO m
+  errs <- foldr collectErrors mempty <$> liftIO m
   unless (null errs) $ E.throwError $ concat errs
   where
     collectErrors Success errs = errs
