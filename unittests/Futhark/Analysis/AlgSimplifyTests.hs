@@ -33,26 +33,36 @@ tests =
             == evalPrimExp (\_ -> Nothing) (untyped $ simplify mempty (TPrimExp e))
     ]
 
-eval :: Sum -> Int64
-eval (Sum _ terms) =
+class HasEval nest where
+  eval :: nest -> Int64
+
+instance HasEval NestedSum where
+  eval = evalSum . unNested
+
+evalSum :: HasEval nest => SumNode nest -> Int64
+evalSum (Sum _ terms) =
   sum $ map evalTerm terms
 
-evalTerm :: Term -> Int64
+evalTerm :: HasEval nest => Term nest -> Int64
 evalTerm (Product _ []) = 0
 evalTerm (Product _ atoms) =
   product $ map evalAtom atoms
 evalTerm (Negated t) = (0 -) $ evalTerm t
 
-evalAtom :: Atom -> Int64
+evalAtom :: HasEval nest => Atom nest -> Int64
 evalAtom (Exp (ValueExp (IntValue (Int64Value i)))) = i
-evalAtom (NestedSum s) = eval s
+evalAtom (Nested s) = eval s
 evalAtom _ = undefined
 
-instance Arbitrary Sum where
+instance Arbitrary NestedSum where
+  arbitrary = NestedSum <$> arbitrary
+  shrink (NestedSum s) = NestedSum <$> shrink s
+
+instance Arbitrary nest => Arbitrary (SumNode nest) where
   arbitrary = fmap (Sum OverflowUndef) arbitrary
   shrink (Sum o terms) = map (Sum o) $ concatMap shrink $ subsequences terms
 
-instance Arbitrary Term where
+instance Arbitrary nest => Arbitrary (Term nest) where
   arbitrary = do
     n <- getSize
     if n <= 1
@@ -65,7 +75,7 @@ instance Arbitrary Term where
   shrink (Negated t) = map Negated (shrink t) ++ shrink t
   shrink (Product o atoms) = map (Product o) $ concatMap shrink $ subsequences atoms
 
-instance Arbitrary Atom where
+instance Arbitrary nest => Arbitrary (Atom nest) where
   arbitrary = do
     n <- getSize
     if n <= 1
@@ -73,10 +83,10 @@ instance Arbitrary Atom where
       else
         oneof
           [ scale (`div` 2) $ fmap (Exp . ValueExp . IntValue . Int64Value) arbitrary,
-            scale (`div` 2) $ fmap NestedSum arbitrary
+            scale (`div` 2) $ fmap Nested arbitrary
           ]
   shrink (Exp e) = []
-  shrink (NestedSum s) = map NestedSum $ shrink s
+  shrink (Nested s) = map Nested $ shrink s
 
 add :: PrimExp VName -> PrimExp VName -> PrimExp VName
 add = BinOpExp (Add Int64 OverflowUndef)

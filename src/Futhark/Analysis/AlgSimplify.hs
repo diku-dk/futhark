@@ -3,7 +3,16 @@
 {-# OPTIONS_GHC -fno-warn-unused-matches #-}
 {-# OPTIONS_GHC -fno-warn-unused-top-binds #-}
 
-module Futhark.Analysis.AlgSimplify (simplify, Atom (..), Term (..), Sum (..), simplifySum, simplifySum') where
+module Futhark.Analysis.AlgSimplify
+  ( simplify,
+    Atom (..),
+    Term (..),
+    NestedSum (..),
+    SumNode (..),
+    simplifySum,
+    simplifySum',
+  )
+where
 
 import Data.Function ((&))
 import qualified Data.Map as M
@@ -17,94 +26,110 @@ type Exp = PrimExp VName
 
 type LookupTable = M.Map VName Exp
 
-data Sum
-  = Sum Overflow [Term]
+newtype NestedSum = NestedSum {unNested :: SumNode NestedSum}
   deriving (Show, Eq, Generic)
 
-instance Pretty Sum where
+type Sum = SumNode ()
+
+data SumNode nest
+  = Sum Overflow [Term nest]
+  deriving (Show, Eq, Generic)
+
+instance Pretty nest => Pretty (SumNode nest) where
   ppr (Sum _ terms) = "Sum " <> brackets (commasep $ fmap ppr terms)
 
-data Term
-  = Negated Term
-  | Product Overflow [Atom]
+data Term nest
+  = Negated (Term nest)
+  | Product Overflow [Atom nest]
   deriving (Show, Eq, Generic)
 
-instance Pretty Term where
+instance Pretty nest => Pretty (Term nest) where
   ppr (Negated term) = "-" <> ppr term
   ppr (Product _ atoms) = "Product " <> brackets (commasep $ fmap ppr atoms)
 
-data Atom
+data Atom nest
   = Exp Exp
-  | NestedSum Sum
+  | Nested nest
   deriving (Show, Eq, Generic)
 
-instance Pretty Atom where
+instance Pretty nest => Pretty (Atom nest) where
   ppr (Exp e) = ppr e
-  ppr (NestedSum s) = parens $ ppr s
+  ppr (Nested s) = parens $ ppr s
 
 simplify :: LookupTable -> TPrimExp Int64 VName -> TPrimExp Int64 VName
 simplify table e =
   untyped e
     & sumOfProducts
     & simplifySum
+    & unNested
     & lookupExps table
+    & NestedSum
     & sumToExp
     & TPrimExp
 
-lookupExps :: LookupTable -> Sum -> Sum
+class HasLookup nest where
+  lookupExpsInNest :: LookupTable -> nest -> nest
+
+instance HasLookup NestedSum where
+  lookupExpsInNest table (NestedSum s) = NestedSum $ lookupExps table s
+
+lookupExps :: HasLookup nest => LookupTable -> SumNode nest -> SumNode nest
 lookupExps table (Sum o terms) =
-  Sum o $ fmap lookupExpsInTerm terms
-  where
-    lookupExpsInTerm (Negated term) = Negated $ lookupExpsInTerm term
-    lookupExpsInTerm (Product o' atoms) = Product o' $ fmap lookupExpsInAtom atoms
+  Sum o $ fmap (lookupExpsInTerm table) terms
 
-    lookupExpsInAtom e@(Exp (LeafExp v _)) = maybe e (lookupExpsInAtom . Exp) $ M.lookup v table
-    lookupExpsInAtom (NestedSum s) = NestedSum $ lookupExps table s
-    lookupExpsInAtom a = a
+lookupExpsInTerm :: HasLookup nest => LookupTable -> Term nest -> Term nest
+lookupExpsInTerm table (Negated term) = Negated $ lookupExpsInTerm table term
+lookupExpsInTerm table (Product o' atoms) = Product o' $ fmap (lookupExpsInAtom table) atoms
 
-sumOfProducts :: Exp -> Sum
+lookupExpsInAtom :: HasLookup nest => LookupTable -> Atom nest -> Atom nest
+lookupExpsInAtom table e@(Exp (LeafExp v _)) = maybe e (lookupExpsInAtom table . Exp) $ M.lookup v table
+lookupExpsInAtom table (Nested s) = Nested $ lookupExpsInNest table s
+lookupExpsInAtom table a = a
+
+sumOfProducts :: Exp -> NestedSum
 sumOfProducts e =
-  case e of
-    BinOpExp (Add Int64 o) e1 e2 ->
-      let terms =
-            ( case sumOfProducts e1 of
-                Sum o' terms' | o == o' -> terms'
-                _ -> [Product o [Exp e1]]
-            )
-              <> ( case sumOfProducts e2 of
-                     Sum o' terms' | o == o' -> terms'
-                     _ -> [Product o [Exp e2]]
-                 )
-       in Sum o terms
-    BinOpExp (Sub Int64 o) (ValueExp (IntValue (Int64Value 0))) e'
-      | Sum o' terms <- sumOfProducts e',
-        o == o' ->
-        Sum o $ fmap Negated terms
-    BinOpExp (Sub Int64 o) e1 e2 ->
-      let terms =
-            ( case sumOfProducts e1 of
-                Sum o' terms' | o == o' -> terms'
-                _ -> [Product o [Exp e1]]
-            )
-              <> ( case sumOfProducts e2 of
-                     Sum o' terms' | o == o' -> fmap Negated terms'
-                     _ -> [Negated $ Product o [Exp e2]]
-                 )
-       in Sum o terms
-    BinOpExp (Mul Int64 o) e1 e2 ->
-      let atoms =
-            ( case productOfSums e1 of
-                Product o' atoms' | o == o' -> atoms'
-                _ -> [Exp e1]
-            )
-              <> ( case productOfSums e2 of
-                     Product o' atoms' | o == o' -> atoms'
-                     _ -> [Exp e2]
-                 )
-       in Sum o [Product o atoms]
-    _ -> Sum OverflowUndef [Product OverflowUndef [Exp e]]
+  NestedSum $
+    case e of
+      BinOpExp (Add Int64 o) e1 e2 ->
+        let terms =
+              ( case sumOfProducts e1 of
+                  NestedSum (Sum o' terms') | o == o' -> terms'
+                  _ -> [Product o [Exp e1]]
+              )
+                <> ( case sumOfProducts e2 of
+                       NestedSum (Sum o' terms') | o == o' -> terms'
+                       _ -> [Product o [Exp e2]]
+                   )
+         in Sum o terms
+      BinOpExp (Sub Int64 o) (ValueExp (IntValue (Int64Value 0))) e'
+        | NestedSum (Sum o' terms) <- sumOfProducts e',
+          o == o' ->
+          Sum o $ fmap Negated terms
+      BinOpExp (Sub Int64 o) e1 e2 ->
+        let terms =
+              ( case sumOfProducts e1 of
+                  NestedSum (Sum o' terms') | o == o' -> terms'
+                  _ -> [Product o [Exp e1]]
+              )
+                <> ( case sumOfProducts e2 of
+                       NestedSum (Sum o' terms') | o == o' -> fmap Negated terms'
+                       _ -> [Negated $ Product o [Exp e2]]
+                   )
+         in Sum o terms
+      BinOpExp (Mul Int64 o) e1 e2 ->
+        let atoms =
+              ( case productOfSums e1 of
+                  Product o' atoms' | o == o' -> atoms'
+                  _ -> [Exp e1]
+              )
+                <> ( case productOfSums e2 of
+                       Product o' atoms' | o == o' -> atoms'
+                       _ -> [Exp e2]
+                   )
+         in Sum o [Product o atoms]
+      _ -> Sum OverflowUndef [Product OverflowUndef [Exp e]]
 
-productOfSums :: Exp -> Term
+productOfSums :: Exp -> Term NestedSum
 productOfSums e =
   case e of
     BinOpExp (Mul Int64 o) e1 e2 ->
@@ -119,10 +144,10 @@ productOfSums e =
                  )
        in Product o atoms
     BinOpExp (Add Int64 _) _ _ ->
-      Product OverflowUndef [NestedSum (sumOfProducts e)]
+      Product OverflowUndef [Nested (sumOfProducts e)]
     _ -> Product OverflowUndef [Exp e]
 
-removeNegations :: [Term] -> [Term]
+removeNegations :: [Term NestedSum] -> [Term NestedSum]
 removeNegations [] = []
 removeNegations (t : ts) =
   case simplifyTerm $ Negated t of
@@ -132,23 +157,23 @@ removeNegations (t : ts) =
         _ -> t : removeNegations ts
     Nothing -> t : removeNegations ts
 
-simplifySum :: Sum -> Sum
+simplifySum :: NestedSum -> NestedSum
 simplifySum s =
   case simplifySum' s of
     Just s'
       | s' == s -> s
       | otherwise -> simplifySum s'
     Nothing ->
-      Sum OverflowUndef []
+      NestedSum $ Sum OverflowUndef []
 
-simplifySum' :: Sum -> Maybe Sum
-simplifySum' (Sum o []) = Nothing
-simplifySum' (Sum o ts) =
+simplifySum' :: NestedSum -> Maybe NestedSum
+simplifySum' (NestedSum (Sum o [])) = Nothing
+simplifySum' (NestedSum (Sum o ts)) =
   case removeNegations $ mapMaybe simplifyTerm ts of
     [] -> Nothing
-    s -> Just $ Sum o s
+    s -> Just $ NestedSum $ Sum o s
 
-simplifyTerm :: Term -> Maybe Term
+simplifyTerm :: Term NestedSum -> Maybe (Term NestedSum)
 simplifyTerm (Product o []) = Nothing
 simplifyTerm (Product o atoms) =
   let atoms' = mapMaybe simplifyAtom atoms
@@ -163,25 +188,25 @@ simplifyTerm (Negated (Negated t)) =
 simplifyTerm (Negated t) =
   Negated <$> simplifyTerm t
 
-simplifyAtom :: Atom -> Maybe Atom
+simplifyAtom :: Atom NestedSum -> Maybe (Atom NestedSum)
 simplifyAtom (Exp e) = Just $ Exp e
-simplifyAtom (NestedSum s) =
+simplifyAtom (Nested s) =
   case simplifySum' s of
     Nothing -> Just $ Exp $ ValueExp $ IntValue $ Int64Value 0
-    Just s' -> Just $ NestedSum s'
+    Just s' -> Just $ Nested s'
 
-sumToExp :: Sum -> Exp
-sumToExp (Sum _ []) =
+sumToExp :: NestedSum -> Exp
+sumToExp (NestedSum (Sum _ [])) =
   ValueExp $ IntValue $ Int64Value 0
-sumToExp (Sum o [x]) = termToExp x
-sumToExp (Sum o (x : xs)) = BinOpExp (Add Int64 o) (termToExp x) (sumToExp $ Sum o xs)
+sumToExp (NestedSum (Sum o [x])) = termToExp x
+sumToExp (NestedSum (Sum o (x : xs))) = BinOpExp (Add Int64 o) (termToExp x) (sumToExp $ NestedSum $ Sum o xs)
 
-termToExp :: Term -> Exp
+termToExp :: Term NestedSum -> Exp
 termToExp (Negated t) = BinOpExp (Sub Int64 OverflowUndef) (ValueExp $ IntValue $ Int64Value 0) $ termToExp t
 termToExp (Product o []) = ValueExp $ IntValue $ Int64Value 0
 termToExp (Product o (atom : atoms)) =
   foldl (BinOpExp (Mul Int64 o)) (atomToExp atom) $ map atomToExp atoms
 
-atomToExp :: Atom -> Exp
+atomToExp :: Atom NestedSum -> Exp
 atomToExp (Exp e) = e
-atomToExp (NestedSum s) = sumToExp s
+atomToExp (Nested s) = sumToExp s
