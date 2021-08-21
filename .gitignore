@@ -43,3 +43,6 @@ core.*
 data/
 lib/
 testparser/
+
+# Ignore macOS system files.
+.DS_Store
