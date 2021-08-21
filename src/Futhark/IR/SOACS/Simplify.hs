@@ -282,10 +282,14 @@ liftIdentityMapping _ pat aux op
 
         checkInvariance (outId, SubExpRes _ (Var v), _) (invariant, mapresult, rettype')
           | Just inp <- M.lookup v inputMap =
-            ( (Pat [outId], BasicOp (Copy inp)) : invariant,
+            ( (Pat [outId], e inp) : invariant,
               mapresult,
               rettype'
             )
+          where
+            e inp = case patElemType outId of
+              Acc {} -> BasicOp $ SubExp $ Var inp
+              _ -> BasicOp (Copy inp)
         checkInvariance (outId, SubExpRes _ e, t) (invariant, mapresult, rettype')
           | freeOrConst e =
             ( (Pat [outId], BasicOp $ Replicate (Shape [w]) e) : invariant,
