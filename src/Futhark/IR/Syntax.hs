@@ -460,9 +460,9 @@ data ExpT rep
   | -- | Create accumulators backed by the given arrays (which are
     -- consumed) and pass them to the lambda, which must return the
     -- updated accumulators and possibly some extra values.  The
-    -- accumulators are turned back into arrays.  The 'Shape' is the
+    -- accumulators are turned back into arrays.  The t'Shape' is the
     -- write index space.  The corresponding arrays must all have this
-    -- shape outermost.  This construct is not part of 'BasicOp'
+    -- shape outermost.  This construct is not part of t'BasicOp'
     -- because we need the @rep@ parameter.
     WithAcc [(Shape, [VName], Maybe (Lambda rep, [SubExp]))] (Lambda rep)
   | Op (Op rep)

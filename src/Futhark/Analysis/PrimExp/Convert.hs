@@ -90,19 +90,19 @@ primExpFromSubExp :: PrimType -> SubExp -> PrimExp VName
 primExpFromSubExp t (Var v) = LeafExp v t
 primExpFromSubExp _ (Constant v) = ValueExp v
 
--- | Shorthand for constructing a 'TPrimExp' of type 'Int32'.
+-- | Shorthand for constructing a 'TPrimExp' of type v'Int32'.
 pe32 :: SubExp -> TPrimExp Int32 VName
 pe32 = isInt32 . primExpFromSubExp int32
 
--- | Shorthand for constructing a 'TPrimExp' of type 'Int32', from a leaf.
+-- | Shorthand for constructing a 'TPrimExp' of type v'Int32', from a leaf.
 le32 :: a -> TPrimExp Int32 a
 le32 = isInt32 . flip LeafExp int32
 
--- | Shorthand for constructing a 'TPrimExp' of type 'Int64'.
+-- | Shorthand for constructing a 'TPrimExp' of type v'Int64'.
 pe64 :: SubExp -> TPrimExp Int64 VName
 pe64 = isInt64 . primExpFromSubExp int64
 
--- | Shorthand for constructing a 'TPrimExp' of type 'Int64', from a leaf.
+-- | Shorthand for constructing a 'TPrimExp' of type v'Int64', from a leaf.
 le64 :: a -> TPrimExp Int64 a
 le64 = isInt64 . flip LeafExp int64
 
@@ -110,15 +110,15 @@ le64 = isInt64 . flip LeafExp int64
 f32pe :: SubExp -> TPrimExp Float VName
 f32pe = isF32 . primExpFromSubExp float32
 
--- | Shorthand for constructing a 'TPrimExp' of type 'Float32', from a leaf.
+-- | Shorthand for constructing a 'TPrimExp' of type v'Float32', from a leaf.
 f32le :: a -> TPrimExp Float a
 f32le = isF32 . flip LeafExp float32
 
--- | Shorthand for constructing a 'TPrimExp' of type 'Float64'.
+-- | Shorthand for constructing a 'TPrimExp' of type v'Float64'.
 f64pe :: SubExp -> TPrimExp Double VName
 f64pe = isF64 . primExpFromSubExp float64
 
--- | Shorthand for constructing a 'TPrimExp' of type 'Float64', from a leaf.
+-- | Shorthand for constructing a 'TPrimExp' of type v'Float64', from a leaf.
 f64le :: a -> TPrimExp Double a
 f64le = isF64 . flip LeafExp float64
 
@@ -162,10 +162,10 @@ substituteInPrimExp ::
 substituteInPrimExp tab = replaceInPrimExp $ \v t ->
   fromMaybe (LeafExp v t) $ M.lookup v tab
 
--- | Convert a 'SubExp' slice to a 'PrimExp' slice.
+-- | Convert a t'SubExp' slice to a 'PrimExp' slice.
 primExpSlice :: Slice SubExp -> Slice (TPrimExp Int64 VName)
 primExpSlice = fmap pe64
 
--- | Convert a 'PrimExp' slice to a 'SubExp' slice.
+-- | Convert a 'PrimExp' slice to a t'SubExp' slice.
 subExpSlice :: MonadBuilder m => Slice (TPrimExp Int64 VName) -> m (Slice SubExp)
 subExpSlice = traverse $ toSubExp "slice"

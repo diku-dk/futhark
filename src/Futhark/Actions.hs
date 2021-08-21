@@ -6,6 +6,7 @@
 module Futhark.Actions
   ( printAction,
     printAliasesAction,
+    callGraphAction,
     impCodeGenAction,
     kernelImpCodeGenAction,
     multicoreImpCodeGenAction,
@@ -28,6 +29,7 @@ import Data.Maybe (fromMaybe)
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import Futhark.Analysis.Alias
+import Futhark.Analysis.CallGraph (buildCallGraph)
 import Futhark.Analysis.Metrics
 import qualified Futhark.CodeGen.Backends.CCUDA as CCUDA
 import qualified Futhark.CodeGen.Backends.COpenCL as COpenCL
@@ -45,6 +47,7 @@ import Futhark.IR
 import Futhark.IR.GPUMem (GPUMem)
 import Futhark.IR.MCMem (MCMem)
 import Futhark.IR.Prop.Aliases
+import Futhark.IR.SOACS (SOACS)
 import Futhark.IR.SeqMem (SeqMem)
 import Futhark.Util (runProgramWithExitCode, unixEnvironment)
 import Futhark.Version (versionString)
@@ -69,6 +72,15 @@ printAliasesAction =
     { actionName = "Prettyprint",
       actionDescription = "Prettyprint the resulting internal representation on standard output.",
       actionProcedure = liftIO . putStrLn . pretty . aliasAnalysis
+    }
+
+-- | Print call graph to stdout.
+callGraphAction :: Action SOACS
+callGraphAction =
+  Action
+    { actionName = "call-graph",
+      actionDescription = "Prettyprint the callgraph of the result to standard output.",
+      actionProcedure = liftIO . putStrLn . pretty . buildCallGraph
     }
 
 -- | Print metrics about AST node counts to stdout.
@@ -291,6 +303,7 @@ pythonCommon codegen fcfg mode outpath prog = do
       perms <- liftIO $ getPermissions outpath
       setPermissions outpath $ setOwnerExecutable True perms
 
+-- | The @futhark python@ action.
 compilePythonAction :: FutharkConfig -> CompilerMode -> FilePath -> Action SeqMem
 compilePythonAction fcfg mode outpath =
   Action
@@ -299,6 +312,7 @@ compilePythonAction fcfg mode outpath =
       actionProcedure = pythonCommon SequentialPy.compileProg fcfg mode outpath
     }
 
+-- | The @futhark pyopencl@ action.
 compilePyOpenCLAction :: FutharkConfig -> CompilerMode -> FilePath -> Action GPUMem
 compilePyOpenCLAction fcfg mode outpath =
   Action
@@ -320,14 +334,7 @@ runEMCC cpath outpath classpath cflags_def ldflags expfuns lib = do
             ++ ["-lnodefs.js"]
             ++ ["-s", "--extern-post-js", classpath]
             ++ ( if lib
-                   then
-                     [ "-s",
-                       "EXPORT_NAME=loadWASM",
-                       "-s",
-                       "MODULARIZE=1",
-                       "-s",
-                       "EXPORT_ES6=1"
-                     ]
+                   then ["-s", "EXPORT_NAME=loadWASM"]
                    else []
                )
             ++ ["-s", "WASM_BIGINT"]
@@ -354,6 +361,7 @@ runEMCC cpath outpath classpath cflags_def ldflags expfuns lib = do
     Right (ExitSuccess, _, _) ->
       return ()
 
+-- | The @futhark wasm@ action.
 compileCtoWASMAction :: FutharkConfig -> CompilerMode -> FilePath -> Action SeqMem
 compileCtoWASMAction fcfg mode outpath =
   Action
@@ -385,6 +393,7 @@ compileCtoWASMAction fcfg mode outpath =
     mjspath = outpath `addExtension` "mjs"
     classpath = outpath `addExtension` ".class.js"
 
+-- | The @futhark wasm-multicore@ action.
 compileMulticoreToWASMAction :: FutharkConfig -> CompilerMode -> FilePath -> Action MCMem
 compileMulticoreToWASMAction fcfg mode outpath =
   Action

@@ -44,7 +44,7 @@ colorNode nbs (x, sp) (spaces, coloring) =
       (spaces', color) = firstAvailable spaces nb_colors 0 sp
    in (spaces', M.insert x color coloring)
 
--- | Graph coloring that takes into account the `space` of values. Two values
+-- | Graph coloring that takes into account the @space@ of values. Two values
 -- can only share the same color if they live in the same space. The result is
 -- map from each color to a space and a map from each value in the input graph
 -- to it's new color.

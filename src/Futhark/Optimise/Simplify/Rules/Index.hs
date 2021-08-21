@@ -23,7 +23,7 @@ isCt0 :: SubExp -> Bool
 isCt0 (Constant v) = zeroIsh v
 isCt0 _ = False
 
--- | Some index expressions can be simplified to 'SubExp's, while
+-- | Some index expressions can be simplified to t'SubExp's, while
 -- others produce another index expression (which may be further
 -- simplifiable).
 data IndexResult
@@ -111,9 +111,13 @@ simplifyIndexing vtable seType idd (Slice inds) consuming =
         IndexResult cs aa
           <$> subExpSlice (sliceSlice (primExpSlice ais) (primExpSlice (Slice inds)))
     Just (Replicate (Shape [_]) (Var vv), cs)
-      | [DimFix {}] <- inds, not consuming -> Just $ pure $ SubExpResult cs $ Var vv
+      | [DimFix {}] <- inds,
+        not consuming,
+        ST.available vv vtable ->
+        Just $ pure $ SubExpResult cs $ Var vv
       | DimFix {} : is' <- inds,
-        not consuming ->
+        not consuming,
+        ST.available vv vtable ->
         Just $ pure $ IndexResult cs vv $ Slice is'
     Just (Replicate (Shape [_]) val@(Constant _), cs)
       | [DimFix {}] <- inds, not consuming -> Just $ pure $ SubExpResult cs val

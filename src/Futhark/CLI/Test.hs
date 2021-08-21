@@ -74,11 +74,12 @@ data TestResult
   deriving (Eq, Show)
 
 pureTestResults :: IO [TestResult] -> TestM ()
-pureTestResults m =
-  mapM_ check =<< liftIO m
+pureTestResults m = do
+  errs <- foldr collectErrors mempty <$> liftIO m
+  unless (null errs) $ E.throwError $ concat errs
   where
-    check Success = pure ()
-    check (Failure err) = E.throwError err
+    collectErrors Success errs = errs
+    collectErrors (Failure err) errs = err : errs
 
 withProgramServer :: FilePath -> FilePath -> [String] -> (Server -> IO [TestResult]) -> TestM ()
 withProgramServer program runner extra_options f = do

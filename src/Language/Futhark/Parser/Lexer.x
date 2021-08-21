@@ -112,7 +112,7 @@ tokens :-
   @hexreallit f64          { tokenM $ fmap F64LIT . readHexRealLit . T.filter (/= '_') . T.dropEnd 3 }
   @hexreallit              { tokenM $ fmap FLOATLIT . readHexRealLit . T.filter (/= '_') }
   "'" @charlit "'"         { tokenM $ fmap CHARLIT . tryRead "char" }
-  \" @stringcharlit* \"    { tokenM $ fmap STRINGLIT . tryRead "string"  }
+  \" @stringcharlit* \"    { tokenM $ fmap (STRINGLIT . T.pack) . tryRead "string"  }
 
   @identifier              { tokenS keyword }
   @identifier "["          { tokenM $ fmap INDEXING . indexing . T.takeWhile (/='[') }
@@ -289,7 +289,7 @@ data Token = ID Name
            | PROJ_INTFIELD Name
 
            | INTLIT Integer
-           | STRINGLIT String
+           | STRINGLIT T.Text
            | I8LIT Int8
            | I16LIT Int16
            | I32LIT Int32

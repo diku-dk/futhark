@@ -26,6 +26,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
     Implemented with hardware support where it is available, and with
     `f32`-based emulation where it is not.
 
+  * Sometimes slightly more informative error message when input of
+    the wrong type is passed to a test program.
+
 ### Removed
 
 ### Changed
@@ -65,6 +68,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Fixed a hole in size type checking that would usually lead to
     compiler crashes (#1435).
+
+  * Underscores now allowed in numeric literals in test data (#1440).
 
 ## [0.19.7]
 

@@ -214,6 +214,7 @@ instance C.ToExp SubExp where
   toExp (Var v) = C.toExp v
   toExp (Constant c) = C.toExp c
 
+-- | Implementations of scalar operations.
 cScalarDefs :: T.Text
 cScalarDefs = scalarH <> scalarF16H
 

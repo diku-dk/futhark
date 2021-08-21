@@ -148,7 +148,7 @@ onKernelBodyStms (SegHist lvl space binops ts body) f = do
   stms <- f $ kernelBodyStms body
   return $ SegHist lvl space binops ts $ body {kernelBodyStms = stms}
 
--- | This is the actual optimiser. Given an interference graph and a `SegOp`,
+-- | This is the actual optimiser. Given an interference graph and a @SegOp@,
 -- replace allocations and references to memory blocks inside with a (hopefully)
 -- reduced number of allocations.
 optimiseKernel ::
