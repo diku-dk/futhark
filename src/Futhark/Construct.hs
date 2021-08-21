@@ -74,6 +74,7 @@ module Futhark.Construct
     eSliceArray,
     eBlank,
     eAll,
+    eDimInBounds,
     eOutOfBounds,
     asIntZ,
     asIntS,
@@ -337,6 +338,14 @@ eSliceArray d arr i n = do
   return $ BasicOp $ Index arr $ fullSlice arr_t $ skips ++ [slice i' n']
   where
     slice j m = DimSlice j m (constant (1 :: Int64))
+
+-- | @eInBoundsForDim w i@ produces @0 <= i < w@.
+eDimInBounds :: MonadBuilder m => m (Exp (Rep m)) -> m (Exp (Rep m)) -> m (Exp (Rep m))
+eDimInBounds w i =
+  eBinOp
+    LogAnd
+    (eCmpOp (CmpSle Int64) (eSubExp (intConst Int64 0)) i)
+    (eCmpOp (CmpSlt Int64) i w)
 
 -- | Are these indexes out-of-bounds for the array?
 eOutOfBounds ::

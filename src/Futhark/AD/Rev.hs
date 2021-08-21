@@ -97,7 +97,9 @@ zeroExp t = error $ "zeroExp: " ++ pretty t
 -- | Whether 'Sparse' should check bounds or assume they are correct.
 -- The latter results in simpler code.
 data InBounds
-  = CheckBounds
+  = -- | If a SubExp is provided, it references a boolean that is true
+    -- when in-bounds.
+    CheckBounds (Maybe SubExp)
   | AssumeBounds
   | -- | Dynamically these will always fail, so don't bother
     -- generating code for the update.  This is only needed to ensure
@@ -143,7 +145,7 @@ sparseArray (Sparse shape t ivs) = do
               Update s arr (fullSlice arr_t [DimFix i]) se
       case check of
         AssumeBounds -> stm Unsafe
-        CheckBounds -> stm Safe
+        CheckBounds _ -> stm Safe
         OutOfBounds -> pure arr
 
 adjFromVar :: VName -> Adj
@@ -166,8 +168,8 @@ adjRep (AdjSparse (Sparse shape pt ivs)) =
       where
         check' = case check of
           AssumeBounds -> AssumeBounds
-          CheckBounds -> CheckBounds
-          OutOfBounds -> CheckBounds -- sic!
+          CheckBounds b -> CheckBounds b
+          OutOfBounds -> CheckBounds (Just (constant False)) -- sic!
     repIvs _ _ = []
 
 -- | Conveniently convert a list of Adjs to their representation, as
@@ -398,7 +400,7 @@ updateAdjIndex v (check, i) se = do
                   letExp (baseString v_adj) $
                     BasicOp $ Update s v_adj (fullSlice v_adj_t [DimFix i]) se
             case check of
-              CheckBounds -> stm Safe
+              CheckBounds _ -> stm Safe
               AssumeBounds -> stm Unsafe
               OutOfBounds -> pure v_adj
 
@@ -698,14 +700,14 @@ diffMap res_adjs w map_lam as substs
         forPos res_i (check, adj_i, adj_v) = do
           as_adj <-
             case check of
-              CheckBounds -> do
-                (oobranch, mkadjs) <- ooBounds adj_i
-                (iibranch, _) <- inBounds res_i adj_i adj_v
+              CheckBounds b -> do
+                (obbranch, mkadjs) <- ooBounds adj_i
+                (ibbranch, _) <- inBounds res_i adj_i adj_v
                 fmap mkadjs . letTupExp' "map_adj_elem"
                   =<< eIf
-                    (eOutOfBounds (head as) [eSubExp adj_i])
-                    (pure oobranch)
-                    (pure iibranch)
+                    (maybe (eDimInBounds (eSubExp w) (eSubExp adj_i)) eSubExp b)
+                    (pure ibbranch)
+                    (pure obbranch)
               AssumeBounds -> do
                 (body, mkadjs) <- inBounds res_i adj_i adj_v
                 mkadjs . map resSubExp <$> bodyBind body
@@ -932,7 +934,10 @@ diffMinMaxRed x aux w minmax ne as m = do
   m
 
   x_adj <- lookupAdjVal x
-  updateAdjIndex as (CheckBounds, Var x_ind) (Var x_adj)
+  in_bounds <-
+    letSubExp "minmax_in_bounds" . BasicOp $
+      CmpOp (CmpSlt Int64) (intConst Int64 0) w
+  updateAdjIndex as (CheckBounds (Just in_bounds), Var x_ind) (Var x_adj)
 
 diffSOAC :: Pat -> StmAux () -> SOAC SOACS -> ADM () -> ADM ()
 diffSOAC pat aux soac@(Screma w as form) m
