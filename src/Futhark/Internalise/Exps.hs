@@ -1714,7 +1714,7 @@ isOverloadedFunction qname args loc = do
     handleAccs _ _ = Nothing
 
     handleAD [TupLit [f, x, v] _] fname
-      | fname `elem` ["jvp", "vjp"] = Just $ \desc -> do
+      | fname `elem` ["jvp2", "vjp2"] = Just $ \desc -> do
         x' <- internaliseExp "ad_x" x
         v' <- internaliseExp "ad_v" v
         xts <- mapM subExpType x'
@@ -1722,7 +1722,7 @@ isOverloadedFunction qname args loc = do
         let lam = I.Lambda ps body ret
         fmap (map I.Var) . letTupExp desc . Op $
           case fname of
-            "jvp" -> JVP lam x' v'
+            "jvp2" -> JVP lam x' v'
             _ -> VJP lam x' v'
     handleAD _ _ = Nothing
 

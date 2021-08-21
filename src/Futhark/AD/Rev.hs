@@ -1072,9 +1072,9 @@ revVJP scope (Lambda params body ts) =
           (map (adjFromVar . paramName) params_adj)
           (map paramName params)
           body
-    let body' = Body () stms $ takeLast (length params) res
+    let body' = Body () stms res
 
-    pure $ Lambda (params ++ params_adj) body' (map paramType params)
+    pure $ Lambda (params ++ params_adj) body' (ts <> map paramType params)
 
 -- Note [Consumption]
 --

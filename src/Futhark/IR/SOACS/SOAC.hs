@@ -489,10 +489,12 @@ instance ASTRep rep => Rename (SOAC rep) where
 
 -- | The type of a SOAC.
 soacType :: Typed (LParamInfo rep) => SOAC rep -> [Type]
-soacType (VJP lam _ _) =
-  map paramType (lambdaParams lam)
 soacType (JVP lam _ _) =
   lambdaReturnType lam
+    ++ lambdaReturnType lam
+soacType (VJP lam _ _) =
+  lambdaReturnType lam
+    ++ map paramType (lambdaParams lam)
 soacType (Stream outersize _ _ accs lam) =
   map (substNamesInType substs) rtp
   where

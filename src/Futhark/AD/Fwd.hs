@@ -450,15 +450,15 @@ fwdBody (Body _ stms res) = buildBody_ $ do
   mapM_ fwdStm stms
   bundleTan res
 
-fwdBodyOnlyTangents :: Body -> ADM Body
-fwdBodyOnlyTangents (Body _ stms res) = buildBody_ $ do
+fwdBodyTansLast :: Body -> ADM Body
+fwdBodyTansLast (Body _ stms res) = buildBody_ $ do
   mapM_ fwdStm stms
-  tangent res
+  (res <>) <$> tangent res
 
 fwdJVP :: MonadFreshNames m => Scope SOACS -> Lambda -> m Lambda
 fwdJVP scope l@(Lambda params body ret) =
   runADM . localScope scope . inScopeOf l $ do
     params_tan <- newTan params
-    body_tan <- fwdBodyOnlyTangents body
+    body_tan <- fwdBodyTansLast body
     ret_tan <- tangent ret
-    return $ Lambda (params ++ params_tan) body_tan (ret ++ ret_tan)
+    return $ Lambda (params ++ params_tan) body_tan (ret <> ret_tan)

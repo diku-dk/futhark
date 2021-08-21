@@ -5,12 +5,7 @@ open import "soacs"
 open import "array"
 open import "math"
 open import "functional"
-
-let jvp 'a 'b (f: a -> b) (x: a) (x': a) : b =
-  intrinsics.jvp (f, x, x')
-
-let vjp 'a 'b (f: a -> b) (x: a) (y': b) : a =
-  intrinsics.vjp (f, x, y')
+open import "ad"
 
 -- | Create single-precision float from integer.
 let r32 (x: i32): f32 = f32.i32 x

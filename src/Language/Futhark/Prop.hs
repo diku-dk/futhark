@@ -1016,23 +1016,23 @@ intrinsics =
                    ]
                    $ uarr_a $ shape [k]
                ),
-               ( "jvp",
+               ( "jvp2",
                  IntrinsicPolyFun
                    [tp_a, tp_b]
                    [ Scalar t_a `arr` Scalar t_b,
                      Scalar t_a,
                      Scalar t_a
                    ]
-                   $ Scalar t_b
+                   $ tupleRecord [Scalar t_b, Scalar t_b]
                ),
-               ( "vjp",
+               ( "vjp2",
                  IntrinsicPolyFun
                    [tp_a, tp_b]
                    [ Scalar t_a `arr` Scalar t_b,
                      Scalar t_a,
                      Scalar t_b
                    ]
-                   $ Scalar t_a
+                   $ tupleRecord [Scalar t_b, Scalar t_a]
                )
              ]
           ++
