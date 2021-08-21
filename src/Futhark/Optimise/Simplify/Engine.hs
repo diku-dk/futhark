@@ -61,6 +61,7 @@ module Futhark.Optimise.Simplify.Engine
     hoistStms,
     blockIf,
     enterLoop,
+    constructBody,
     module Futhark.Optimise.Simplify.Rep,
   )
 where

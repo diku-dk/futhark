@@ -16,6 +16,7 @@ module Futhark.Analysis.Metrics
     MetricsM,
     stmMetrics,
     lambdaMetrics,
+    bodyMetrics,
   )
 where
 
@@ -91,6 +92,7 @@ progMetrics prog =
 funDefMetrics :: OpMetrics (Op rep) => FunDef rep -> MetricsM ()
 funDefMetrics = bodyMetrics . funDefBody
 
+-- | Compute metrics for this body.
 bodyMetrics :: OpMetrics (Op rep) => Body rep -> MetricsM ()
 bodyMetrics = mapM_ stmMetrics . bodyStms
 
