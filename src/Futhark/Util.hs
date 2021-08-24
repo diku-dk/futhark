@@ -52,6 +52,7 @@ module Futhark.Util
     zEncodeString,
     atMostChars,
     invertMap,
+    cartesian,
   )
 where
 
@@ -64,6 +65,7 @@ import qualified Data.ByteString as BS
 import qualified Data.ByteString.Base16 as Base16
 import Data.Char
 import Data.Either
+import Data.Foldable (toList)
 import Data.Function ((&))
 import Data.List (foldl', genericDrop, genericSplitAt, sort)
 import qualified Data.List.NonEmpty as NE
@@ -455,3 +457,10 @@ invertMap m =
   M.toList m
     & fmap (swap . first S.singleton)
     & foldr (uncurry $ M.insertWith (<>)) mempty
+
+-- | Compute the cartesian product of two foldable collections, using the given
+-- combinator function.
+cartesian :: (Monoid m, Foldable t) => (a -> a -> m) -> t a -> t a -> m
+cartesian f xs ys =
+  [(x, y) | x <- toList xs, y <- toList ys]
+    & foldMap (uncurry f)

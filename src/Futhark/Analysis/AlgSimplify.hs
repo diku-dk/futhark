@@ -9,11 +9,14 @@ module Futhark.Analysis.AlgSimplify
     Term (..),
     NestedSum (..),
     SumNode (..),
+    Sum,
+    flattenNestedSum,
     simplifySum,
     simplifySum',
   )
 where
 
+import Data.Bits (xor)
 import Data.Function ((&))
 import qualified Data.Map as M
 import Data.Maybe (mapMaybe)
@@ -21,6 +24,7 @@ import Futhark.Analysis.PrimExp
 import Futhark.IR.Syntax.Core
 import Futhark.Util.Pretty
 import GHC.Generics
+import Prelude hiding (negate)
 
 type Exp = PrimExp VName
 
@@ -210,3 +214,94 @@ termToExp (Product o (atom : atoms)) =
 atomToExp :: Atom NestedSum -> Exp
 atomToExp (Exp e) = e
 atomToExp (Nested s) = sumToExp s
+
+data Prod
+  = Prod
+      Bool
+      -- ^ True if the product is negated
+      [Exp]
+  deriving (Show, Eq, Ord)
+
+instance Pretty Prod where
+  ppr (Prod b exps) =
+    (if b then "-" else "") <> ppr exps
+
+negate :: Prod -> Prod
+negate (Prod b es) = Prod (not b) es
+
+flattenNestedSum :: NestedSum -> [Prod]
+flattenNestedSum (NestedSum (Sum o ts)) = concatMap flattenTerm ts
+
+flattenTerm :: Term NestedSum -> [Prod]
+flattenTerm (Negated t) = map negate $ flattenTerm t
+flattenTerm (Product o atoms) =
+  case map flattenAtom atoms of
+    (first : rest) -> foldr helper first rest
+    [] -> []
+  where
+    helper acc xs = [Prod (b `xor` b') (x <> a) | Prod b a <- acc, Prod b' x <- xs]
+
+flattenAtom :: Atom NestedSum -> [Prod]
+flattenAtom (Exp e) = [Prod False [e]]
+flattenAtom (Nested s) = flattenNestedSum s
+
+var :: Int -> Exp
+var i = LeafExp (VName (nameFromString $ "var_" <> show i) i) (IntType Int64)
+
+val :: Int64 -> Exp
+val i = ValueExp $ IntValue $ Int64Value i
+
+add :: Exp -> Exp -> Exp
+add x y = BinOpExp (Add Int64 OverflowUndef) x y
+
+mul :: Exp -> Exp -> Exp
+mul x y = BinOpExp (Mul Int64 OverflowUndef) x y
+
+test :: NestedSum
+test =
+  NestedSum $
+    Sum
+      OverflowUndef
+      [ Product
+          OverflowUndef
+          [ Nested $
+              NestedSum $
+                Sum
+                  OverflowUndef
+                  [ Product OverflowUndef [Exp $ var 1, Exp $ var 2],
+                    Product OverflowUndef [Exp $ var 3, Exp $ var 4]
+                  ],
+            Exp $ var 5
+          ],
+        Product
+          OverflowUndef
+          [Exp $ var 6],
+        Product OverflowUndef [Exp $ var 7]
+      ]
+
+test2 :: NestedSum
+test2 =
+  NestedSum $
+    Sum
+      OverflowUndef
+      [ Product
+          OverflowUndef
+          [ Nested $
+              NestedSum $
+                Sum
+                  OverflowUndef
+                  [ Product OverflowUndef [Exp $ var 1],
+                    Negated $ Product OverflowUndef [Exp $ var 2]
+                  ],
+            Nested $
+              NestedSum $
+                Sum
+                  OverflowUndef
+                  [ Product OverflowUndef [Exp $ var 3],
+                    Product OverflowUndef [Exp $ var 4]
+                  ],
+            Exp $ var 5
+          ],
+        Product OverflowUndef [Exp $ var 6],
+        Product OverflowUndef [Exp $ var 7]
+      ]
