@@ -71,6 +71,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Underscores now allowed in numeric literals in test data (#1440).
 
+  * The `cuda` backend did not use single-pass segmented scans as
+    intended.  Now it does.
+
 ## [0.19.7]
 
 ### Added
