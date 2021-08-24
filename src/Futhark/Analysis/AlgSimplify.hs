@@ -9,6 +9,7 @@ module Futhark.Analysis.AlgSimplify
     Term (..),
     NestedSum (..),
     SumNode (..),
+    Prod (..),
     Sum,
     flattenNestedSum,
     simplifySum,
@@ -236,7 +237,7 @@ flattenTerm :: Term NestedSum -> [Prod]
 flattenTerm (Negated t) = map negate $ flattenTerm t
 flattenTerm (Product o atoms) =
   case map flattenAtom atoms of
-    (first : rest) -> foldr helper first rest
+    (first : rest) -> foldl helper first rest
     [] -> []
   where
     helper acc xs = [Prod (b `xor` b') (x <> a) | Prod b a <- acc, Prod b' x <- xs]
@@ -273,9 +274,7 @@ test =
                   ],
             Exp $ var 5
           ],
-        Product
-          OverflowUndef
-          [Exp $ var 6],
+        Product OverflowUndef [Exp $ var 6],
         Product OverflowUndef [Exp $ var 7]
       ]
 
@@ -291,14 +290,14 @@ test2 =
                 Sum
                   OverflowUndef
                   [ Product OverflowUndef [Exp $ var 1],
-                    Negated $ Product OverflowUndef [Exp $ var 2]
+                    Product OverflowUndef [Exp $ var 2]
                   ],
             Nested $
               NestedSum $
                 Sum
                   OverflowUndef
                   [ Product OverflowUndef [Exp $ var 3],
-                    Product OverflowUndef [Exp $ var 4]
+                    Negated $ Product OverflowUndef [Exp $ var 4]
                   ],
             Exp $ var 5
           ],

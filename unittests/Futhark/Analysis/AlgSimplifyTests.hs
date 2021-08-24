@@ -30,7 +30,8 @@ tests =
       testProperty "simplifySum doesn't change exp evalutation result" $
         \(TestableExp e) ->
           evalPrimExp (\_ -> Nothing) e
-            == evalPrimExp (\_ -> Nothing) (untyped $ simplify mempty (TPrimExp e))
+            == evalPrimExp (\_ -> Nothing) (untyped $ simplify mempty (TPrimExp e)),
+      testProperty "flattening does not change result" $ mapSize (\i -> min 10 i) $ \s -> eval (flattenNestedSum s) == eval s
     ]
 
 class HasEval nest where
@@ -38,6 +39,14 @@ class HasEval nest where
 
 instance HasEval NestedSum where
   eval = evalSum . unNested
+
+instance HasEval [Prod] where
+  eval prods = sum $ map evalProd prods
+
+evalProd :: Prod -> Int64
+evalProd (Prod b exps) =
+  let res = product $ map evalExp exps
+   in if b then negate res else res
 
 evalSum :: HasEval nest => SumNode nest -> Int64
 evalSum (Sum _ terms) =
@@ -50,9 +59,12 @@ evalTerm (Product _ atoms) =
 evalTerm (Negated t) = (0 -) $ evalTerm t
 
 evalAtom :: HasEval nest => Atom nest -> Int64
-evalAtom (Exp (ValueExp (IntValue (Int64Value i)))) = i
+evalAtom (Exp e) = evalExp e
 evalAtom (Nested s) = eval s
-evalAtom _ = undefined
+
+evalExp :: PrimExp VName -> Int64
+evalExp (ValueExp (IntValue (Int64Value i))) = i
+evalExp _ = undefined
 
 instance Arbitrary NestedSum where
   arbitrary = NestedSum <$> arbitrary
