@@ -103,7 +103,7 @@ onePrim Unit = UnitValue
 oneExp :: Type -> ExpT rep
 oneExp (Prim t) = BasicOp $ SubExp $ constant $ onePrim t
 oneExp (Array pt shape _) =
-  BasicOp $ Replicate shape $ Constant $ blankPrimValue pt
+  BasicOp $ Replicate shape $ Constant $ onePrim pt
 oneExp t = error $ "oneExp: " ++ pretty t
 
 -- | Whether 'Sparse' should check bounds or assume they are correct.
@@ -984,40 +984,36 @@ mkScanAdjointLam lam0 keep_first = do
 --       `ys_adj` is the known adjoint of ys
 --       `j` draw values from `iota n`
 mkScanFusedMapLam :: SubExp -> Lambda -> [VName] -> [VName] -> [VName] -> ADM Lambda
-mkScanFusedMapLam n scn_lam xs ys ys_adj = do
+mkScanFusedMapLam w scn_lam xs ys ys_adj = do
   lam <- mkScanAdjointLam scn_lam True
-  ystp <- mapM lookupType ys
-  let rtp = lambdaReturnType lam
+  ys_ts <- mapM lookupType ys
   let lam_arg = map paramName $ lambdaParams lam
-  let (lam_as, lam_bs) = splitAt (length rtp) lam_arg
+  let (lam_as, lam_bs) = splitAt (length ys) lam_arg
   par_i <- newParam "i" $ Prim int64
   let i = paramName par_i
-  let pars = zipWith Param ys_adj ystp
-  body <-
-    runBodyBuilder . localScope (scopeOfLParams (par_i : pars)) . eBody $
-      [ eIf
-          (toExp $ le64 i .>. pe64 (intConst Int64 0))
-          ( buildBody_ . localScope (scopeOfLParams (par_i : pars)) $ do
-              j <- letSubExp "j" =<< toExp (pe64 n - (le64 i + pe64 (intConst Int64 1)))
-              j1 <- letSubExp "j1" =<< toExp (pe64 n - le64 i)
-              y_s <- forM (zip (zip3 ys xs ys_adj) (zip3 lam_as lam_bs rtp)) $
-                \((y, x, y_), (a, b, t)) -> do
-                  yj <- letSubExp (baseString y ++ "_j") $ BasicOp $ Index y $ fullSlice t [DimFix j]
-                  y_j <- letSubExp (baseString y_ ++ "_j") $ BasicOp $ Index y_ $ fullSlice t [DimFix j]
-                  xj <- letSubExp (baseString x ++ "_j") $ BasicOp $ Index x $ fullSlice t [DimFix j1]
-                  letBindNames [a] $ BasicOp $ SubExp yj
-                  letBindNames [b] $ BasicOp $ SubExp xj
-                  pure $ subExpRes y_j
-              lam_rs <- bodyBind $ lambdaBody lam
-              pure $ unpairs $ zip y_s lam_rs
-          )
-          ( buildBody_ $ do
-              zs <- mapM (letSubExp "ct_zero" <=< eBlank) rtp
-              os <- mapM (letSubExp "ct_one" . oneExp) rtp
-              pure $ subExpsRes $ unpairs $ zip zs os
-          )
-      ]
-  pure $ Lambda [par_i] body (unpairs $ zip rtp rtp)
+  mkLambda [par_i] $
+    fmap varsRes . letTupExp "x"
+      =<< eIf
+        (toExp $ le64 i .==. 0)
+        ( buildBody_ $ do
+            zs <- mapM (letSubExp "ct_zero" . zeroExp . rowType) ys_ts
+            os <- mapM (letSubExp "ct_one" . oneExp . rowType) ys_ts
+            pure $ subExpsRes $ unpairs $ zip zs os
+        )
+        ( buildBody_ $ do
+            j <- letSubExp "j" =<< toExp (pe64 w - (le64 i + pe64 (intConst Int64 1)))
+            j1 <- letSubExp "j1" =<< toExp (pe64 w - le64 i)
+            y_s <- forM (zip (zip3 ys xs ys_adj) (zip3 lam_as lam_bs ys_ts)) $
+              \((y, x, y_), (a, b, t)) -> do
+                yj <- letSubExp (baseString y ++ "_j") $ BasicOp $ Index y $ fullSlice t [DimFix j]
+                y_j <- letSubExp (baseString y_ ++ "_j") $ BasicOp $ Index y_ $ fullSlice t [DimFix j]
+                xj <- letSubExp (baseString x ++ "_j") $ BasicOp $ Index x $ fullSlice t [DimFix j1]
+                letBindNames [a] $ BasicOp $ SubExp yj
+                letBindNames [b] $ BasicOp $ SubExp xj
+                pure $ subExpRes y_j
+            lam_rs <- bodyBind $ lambdaBody lam
+            pure $ unpairs $ zip y_s lam_rs
+        )
 
 -- \(a1, b1) (a2, b2) -> (a2 + b2 * a1, b1 * b2)
 mkScanLinFunO :: Type -> ADM (Scan SOACS)
@@ -1040,8 +1036,8 @@ mkScanLinFunO t = do
 --    `let rs = map2 (\ d_i c_i -> d_i + c_i * y_adj[n-1]) d c |> reverse`
 -- but insert explicit indexing to reverse inside the map.
 mkScan2ndMaps :: SubExp -> (Type, VName, (VName, VName)) -> ADM VName
-mkScan2ndMaps n (arr_tp, y_adj, (ds, cs)) = do
-  nm1 <- letSubExp "nm1" =<< toExp (pe64 n -1)
+mkScan2ndMaps w (arr_tp, y_adj, (ds, cs)) = do
+  nm1 <- letSubExp "nm1" =<< toExp (pe64 w -1)
   y_adj_last <-
     letExp (baseString y_adj ++ "_last") $
       BasicOp $ Index y_adj $ fullSlice arr_tp [DimFix nm1]
@@ -1049,7 +1045,7 @@ mkScan2ndMaps n (arr_tp, y_adj, (ds, cs)) = do
   par_i <- newParam "i" $ Prim int64
   lam <- mkLambda [par_i] $ do
     let i = paramName par_i
-    j <- letSubExp "j" =<< toExp (pe64 n - (le64 i + 1))
+    j <- letSubExp "j" =<< toExp (pe64 w - (le64 i + 1))
     dj <- letExp (baseString ds ++ "_dj") $ BasicOp $ Index ds $ fullSlice arr_tp [DimFix j]
     cj <- letExp (baseString cs ++ "_cj") $ BasicOp $ Index cs $ fullSlice arr_tp [DimFix j]
 
@@ -1057,15 +1053,15 @@ mkScan2ndMaps n (arr_tp, y_adj, (ds, cs)) = do
     fmap varsRes . tabNest (arrayRank (rowType arr_tp)) [y_adj_last, dj, cj] $ \_ [y_adj_last', dj', cj'] ->
       letTupExp "res" <=< toExp $ pet dj' ~+~ pet cj' ~*~ pet y_adj_last'
 
-  iota <- letExp "iota" $ BasicOp $ Iota n (intConst Int64 0) (intConst Int64 1) Int64
-  letExp "after_scan" $ Op (Screma n [iota] (ScremaForm [] [] lam))
+  iota <- letExp "iota" $ BasicOp $ Iota w (intConst Int64 0) (intConst Int64 1) Int64
+  letExp "after_scan" $ Op (Screma w [iota] (ScremaForm [] [] lam))
 
 -- perform the final map, which is fusable with the maps obtained from `mkScan2ndMaps`
 -- let xs_contribs =
 --    map3 (\ i a r -> if i==0 then r else (df2dy (ys[i-1]) a) \bar{*} r)
 --         (iota n) xs rs
 mkScanFinalMap :: SubExp -> Lambda -> [VName] -> [VName] -> [VName] -> ADM [VName]
-mkScanFinalMap n scan_lam xs ys rs = do
+mkScanFinalMap w scan_lam xs ys rs = do
   let eltps = lambdaReturnType scan_lam
   lam <- mkScanAdjointLam scan_lam False
   par_i <- newParam "i" $ Prim int64
@@ -1081,8 +1077,9 @@ mkScanFinalMap n scan_lam xs ys rs = do
           (resultBodyM $ map (Var . paramName) par_r)
           ( buildBody_ $ do
               im1 <- letSubExp "im1" =<< toExp (le64 i - pe64 (intConst Int64 1))
-              ys_im1 <- forM (zip ys eltps) $ \(y, t) ->
-                letSubExp (baseString y ++ "_last") $ BasicOp $ Index y $ fullSlice t [DimFix im1]
+              ys_im1 <- forM ys $ \y -> do
+                y_t <- lookupType y
+                letSubExp (baseString y ++ "_last") $ BasicOp $ Index y $ fullSlice y_t [DimFix im1]
               forM_ (zip (lambdaParams lam) (ys_im1 ++ map (Var . paramName) par_x)) $ \(p, act) ->
                 letBindNames [paramName p] $ BasicOp $ SubExp act
 
@@ -1097,8 +1094,8 @@ mkScanFinalMap n scan_lam xs ys rs = do
                     letTupExp "res" <=< toExp $ pet lam_r' ~*~ pet r'
           )
 
-  iota <- letExp "iota" $ BasicOp $ Iota n (intConst Int64 0) (intConst Int64 1) Int64
-  letTupExp "scan_contribs" $ Op (Screma n (iota : xs ++ rs) (ScremaForm [] [] map_lam))
+  iota <- letExp "iota" $ BasicOp $ Iota w (intConst Int64 0) (intConst Int64 1) Int64
+  letTupExp "scan_contribs" $ Op (Screma w (iota : xs ++ rs) (ScremaForm [] [] map_lam))
 
 diffScan :: [VName] -> SubExp -> [VName] -> Scan SOACS -> ADM ()
 diffScan ys w as scan = do
