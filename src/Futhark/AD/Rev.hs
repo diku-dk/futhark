@@ -28,7 +28,7 @@ import Futhark.IR.SOACS
 import Futhark.Tools
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
-import Futhark.Util (chunks, splitAt3, takeLast)
+import Futhark.Util (chunks, pairs, splitAt3, takeLast, unpairs)
 
 --- First some general utility functions that are not specific to AD.
 
@@ -94,6 +94,18 @@ zeroExp (Array pt shape _) =
   BasicOp $ Replicate shape $ Constant $ blankPrimValue pt
 zeroExp t = error $ "zeroExp: " ++ pretty t
 
+onePrim :: PrimType -> PrimValue
+onePrim (IntType it) = IntValue $ intValue it (1 :: Int)
+onePrim (FloatType ft) = FloatValue $ floatValue ft (1 :: Double)
+onePrim Bool = BoolValue True
+onePrim Unit = UnitValue
+
+oneExp :: Type -> ExpT rep
+oneExp (Prim t) = BasicOp $ SubExp $ constant $ onePrim t
+oneExp (Array pt shape _) =
+  BasicOp $ Replicate shape $ Constant $ blankPrimValue pt
+oneExp t = error $ "oneExp: " ++ pretty t
+
 -- | Whether 'Sparse' should check bounds or assume they are correct.
 -- The latter results in simpler code.
 data InBounds
@@ -150,6 +162,9 @@ sparseArray (Sparse shape t ivs) = do
 
 adjFromVar :: VName -> Adj
 adjFromVar = AdjVal . Var
+
+adjFromParam :: Param t -> Adj
+adjFromParam = adjFromVar . paramName
 
 -- | The values representing an adjoint in symbolic form.  This is
 -- used for when we wish to return an Adj from a Body or similar
@@ -749,7 +764,7 @@ diffMap pat_adj w map_lam as substs = do
           noAdjsFor free_without_adjs $ do
             zipWithM_ insAdj free_with_adjs $ map paramName free_adjs_params
             bodyBind . lambdaBody
-              =<< diffLambda (map (adjFromVar . paramName) pat_adj_params) adjs_for map_lam'
+              =<< diffLambda (map adjFromParam pat_adj_params) adjs_for map_lam'
 
     (param_contribs, free_contribs) <-
       fmap (splitAt (length (lambdaParams map_lam'))) $
@@ -939,22 +954,191 @@ diffMinMaxRed x aux w minmax ne as m = do
       CmpOp (CmpSlt Int64) (intConst Int64 0) w
   updateAdjIndex as (CheckBounds (Just in_bounds), Var x_ind) (Var x_adj)
 
+-- computes `d(x op y)/dx` when keep_first=true,
+-- and `d(x op y)/dy otherwise.
+-- `op` is given as `lam`
+mkScanAdjointLam :: Lambda -> Bool -> ADM Lambda
+mkScanAdjointLam lam0 keep_first = do
+  let len = length $ lambdaReturnType lam0
+  lam <- renameLambda lam0
+  let p2diff =
+        if keep_first
+          then take len $ lambdaParams lam
+          else drop len $ lambdaParams lam
+  p_adjs <- mapM (newParam "elem_adj") (lambdaReturnType lam)
+  lam' <-
+    localScope (scopeOfLParams p_adjs) $
+      diffLambda (map adjFromParam p_adjs) (map paramName p2diff) lam
+  stms' <-
+    runBuilderT'_ $
+      mapM_ (\p -> letBindNames [paramName p] $ oneExp $ paramType p) p_adjs
+  let lam_bdy' = lambdaBody lam'
+      lam'' = lam' {lambdaBody = lam_bdy' {bodyStms = stms' <> bodyStms lam_bdy'}}
+  return lam''
+
+-- Should generate something like:
+-- `\ j -> let i = n - 1 - j
+--         if i < n-1 then ( ys_adj[i], df2dx ys[i] xs[i+1]) else (0,1) )`
+-- where `ys` is  the result of scan
+--       `xs` is  the input  of scan
+--       `ys_adj` is the known adjoint of ys
+--       `j` draw values from `iota n`
+mkScanFusedMapLam :: SubExp -> Lambda -> [VName] -> [VName] -> [VName] -> ADM Lambda
+mkScanFusedMapLam n scn_lam xs ys ys_adj = do
+  lam <- mkScanAdjointLam scn_lam True
+  ystp <- mapM lookupType ys
+  let rtp = lambdaReturnType lam
+  let lam_arg = map paramName $ lambdaParams lam
+  let (lam_as, lam_bs) = splitAt (length rtp) lam_arg
+  par_i <- newParam "i" $ Prim int64
+  let i = paramName par_i
+  let pars = zipWith Param ys_adj ystp
+  body <-
+    runBodyBuilder . localScope (scopeOfLParams (par_i : pars)) . eBody $
+      [ eIf
+          (toExp $ le64 i .>. pe64 (intConst Int64 0))
+          ( buildBody_ . localScope (scopeOfLParams (par_i : pars)) $ do
+              j <- letSubExp "j" =<< toExp (pe64 n - (le64 i + pe64 (intConst Int64 1)))
+              j1 <- letSubExp "j1" =<< toExp (pe64 n - le64 i)
+              y_s <- forM (zip (zip3 ys xs ys_adj) (zip3 lam_as lam_bs rtp)) $
+                \((y, x, y_), (a, b, t)) -> do
+                  yj <- letSubExp (baseString y ++ "_j") $ BasicOp $ Index y $ fullSlice t [DimFix j]
+                  y_j <- letSubExp (baseString y_ ++ "_j") $ BasicOp $ Index y_ $ fullSlice t [DimFix j]
+                  xj <- letSubExp (baseString x ++ "_j") $ BasicOp $ Index x $ fullSlice t [DimFix j1]
+                  letBindNames [a] $ BasicOp $ SubExp yj
+                  letBindNames [b] $ BasicOp $ SubExp xj
+                  pure $ subExpRes y_j
+              lam_rs <- bodyBind $ lambdaBody lam
+              pure $ unpairs $ zip y_s lam_rs
+          )
+          ( buildBody_ $ do
+              zs <- mapM (letSubExp "ct_zero" <=< eBlank) rtp
+              os <- mapM (letSubExp "ct_one" . oneExp) rtp
+              pure $ subExpsRes $ unpairs $ zip zs os
+          )
+      ]
+  pure $ Lambda [par_i] body (unpairs $ zip rtp rtp)
+
+-- \(a1, b1) (a2, b2) -> (a2 + b2 * a1, b1 * b2)
+mkScanLinFunO :: Type -> ADM (Scan SOACS)
+mkScanLinFunO t = do
+  let pt = elemType t
+  zero <- letSubExp "zeros" $ zeroExp t
+  one <- letSubExp "ones" $ oneExp t
+  tmp <- mapM newVName ["a1", "b1", "a2", "b2"]
+  let [a1, b1, a2, b2] = tmp
+      pet = primExpFromSubExp pt . Var
+  lam <- mkLambda (map (`Param` t) [a1, b1, a2, b2]) . fmap varsRes $
+    tabNest (arrayRank t) [a1, b1, a2, b2] $ \_ [a1', b1', a2', b2'] -> do
+      x <- letExp "x" <=< toExp $ pet a2' ~+~ pet b2' ~*~ pet a1'
+      y <- letExp "y" <=< toExp $ pet b1' ~*~ pet b2'
+      pure [x, y]
+  return $ Scan lam [zero, one]
+
+-- build the map following the scan with linear-function-composition:
+-- for each (ds,cs) length-n array results of the scan, combine them as:
+--    `let rs = map2 (\ d_i c_i -> d_i + c_i * y_adj[n-1]) d c |> reverse`
+-- but insert explicit indexing to reverse inside the map.
+mkScan2ndMaps :: SubExp -> (Type, VName, (VName, VName)) -> ADM VName
+mkScan2ndMaps n (arr_tp, y_adj, (ds, cs)) = do
+  nm1 <- letSubExp "nm1" =<< toExp (pe64 n -1)
+  y_adj_last <-
+    letExp (baseString y_adj ++ "_last") $
+      BasicOp $ Index y_adj $ fullSlice arr_tp [DimFix nm1]
+
+  par_i <- newParam "i" $ Prim int64
+  lam <- mkLambda [par_i] $ do
+    let i = paramName par_i
+    j <- letSubExp "j" =<< toExp (pe64 n - (le64 i + 1))
+    dj <- letExp (baseString ds ++ "_dj") $ BasicOp $ Index ds $ fullSlice arr_tp [DimFix j]
+    cj <- letExp (baseString cs ++ "_cj") $ BasicOp $ Index cs $ fullSlice arr_tp [DimFix j]
+
+    let pet = primExpFromSubExp (elemType arr_tp) . Var
+    fmap varsRes . tabNest (arrayRank (rowType arr_tp)) [y_adj_last, dj, cj] $ \_ [y_adj_last', dj', cj'] ->
+      letTupExp "res" <=< toExp $ pet dj' ~+~ pet cj' ~*~ pet y_adj_last'
+
+  iota <- letExp "iota" $ BasicOp $ Iota n (intConst Int64 0) (intConst Int64 1) Int64
+  letExp "after_scan" $ Op (Screma n [iota] (ScremaForm [] [] lam))
+
+-- perform the final map, which is fusable with the maps obtained from `mkScan2ndMaps`
+-- let xs_contribs =
+--    map3 (\ i a r -> if i==0 then r else (df2dy (ys[i-1]) a) \bar{*} r)
+--         (iota n) xs rs
+mkScanFinalMap :: SubExp -> Lambda -> [VName] -> [VName] -> [VName] -> ADM [VName]
+mkScanFinalMap n scan_lam xs ys rs = do
+  let eltps = lambdaReturnType scan_lam
+  lam <- mkScanAdjointLam scan_lam False
+  par_i <- newParam "i" $ Prim int64
+  let i = paramName par_i
+  par_x <- mapM (\(x, t) -> newParam (baseString x ++ "_par_x") t) $ zip xs eltps
+  par_r <- mapM (\(r, t) -> newParam (baseString r ++ "_par_r") t) $ zip rs eltps
+
+  map_lam <-
+    mkLambda (par_i : par_x ++ par_r) $
+      fmap varsRes . letTupExp "scan_contribs"
+        =<< eIf
+          (toExp $ le64 i .==. 0)
+          (resultBodyM $ map (Var . paramName) par_r)
+          ( buildBody_ $ do
+              im1 <- letSubExp "im1" =<< toExp (le64 i - pe64 (intConst Int64 1))
+              ys_im1 <- forM (zip ys eltps) $ \(y, t) ->
+                letSubExp (baseString y ++ "_last") $ BasicOp $ Index y $ fullSlice t [DimFix im1]
+              forM_ (zip (lambdaParams lam) (ys_im1 ++ map (Var . paramName) par_x)) $ \(p, act) ->
+                letBindNames [paramName p] $ BasicOp $ SubExp act
+
+              let resVName = letExp "const" . BasicOp . SubExp . resSubExp
+              lam_res <- mapM resVName =<< bodyBind (lambdaBody lam)
+
+              fmap (varsRes . mconcat) . forM (zip3 lam_res (map paramName par_r) eltps) $
+                \(lam_r, r, eltp) -> do
+                  let pet = primExpFromSubExp (elemType eltp) . Var
+
+                  tabNest (arrayRank eltp) [lam_r, r] $ \_ [lam_r', r'] ->
+                    letTupExp "res" <=< toExp $ pet lam_r' ~*~ pet r'
+          )
+
+  iota <- letExp "iota" $ BasicOp $ Iota n (intConst Int64 0) (intConst Int64 1) Int64
+  letTupExp "scan_contribs" $ Op (Screma n (iota : xs ++ rs) (ScremaForm [] [] map_lam))
+
+diffScan :: [VName] -> SubExp -> [VName] -> Scan SOACS -> ADM ()
+diffScan ys w as scan = do
+  ys_adj <- mapM lookupAdjVal ys
+  as_ts <- mapM lookupType as
+  map1_lam <- mkScanFusedMapLam w (scanLambda scan) as ys ys_adj
+  scans_lin_fun_o <- mapM mkScanLinFunO $ lambdaReturnType $ scanLambda scan
+  iota <-
+    letExp "iota" $ BasicOp $ Iota w (intConst Int64 0) (intConst Int64 1) Int64
+  r_scan <-
+    letTupExp "adj_ctrb_scan" $
+      Op (Screma w [iota] (ScremaForm scans_lin_fun_o [] map1_lam))
+  red_nms <- mapM (mkScan2ndMaps w) (zip3 as_ts ys_adj (pairs r_scan))
+  as_contribs <- mkScanFinalMap w (scanLambda scan) as ys red_nms
+  zipWithM_ updateAdj as as_contribs
+
+-- We split any multi-op scan or reduction into multiple operations so
+-- we can detect special cases.  Post-AD, the result may be fused
+-- again.
+splitScanRed ::
+  ([a] -> ADM (ScremaForm SOACS), a -> [SubExp]) ->
+  (Pat, StmAux (), [a], SubExp, [VName]) ->
+  ADM () ->
+  ADM ()
+splitScanRed (opSOAC, opNeutral) (pat, aux, ops, w, as) m = do
+  let ks = map (length . opNeutral) ops
+      pat_per_op = map Pat $ chunks ks $ patElems pat
+      as_per_op = chunks ks as
+      onOps (op : ops') (op_pat : op_pats') (op_as : op_as') = do
+        op_form <- opSOAC [op]
+        diffSOAC op_pat aux (Screma w op_as op_form) $
+          onOps ops' op_pats' op_as'
+      onOps _ _ _ = m
+  onOps ops pat_per_op as_per_op
+
 diffSOAC :: Pat -> StmAux () -> SOAC SOACS -> ADM () -> ADM ()
 diffSOAC pat aux soac@(Screma w as form) m
   | Just reds <- isReduceSOAC form,
-    length reds > 1 = do
-    -- We split any horizontal reduction into multiple reductions so
-    -- we can detect special cases.  Post-AD, the result may be fused
-    -- again.
-    let ks = map (length . redNeutral) reds
-        pat_per_red = map Pat $ chunks ks $ patElems pat
-        as_per_red = chunks ks as
-        onReds (red : reds') (red_pat : red_pats') (red_as : red_as') = do
-          red_form <- reduceSOAC [red]
-          diffSOAC red_pat aux (Screma w red_as red_form) $
-            onReds reds' red_pats' red_as'
-        onReds _ _ _ = m
-    onReds reds pat_per_red as_per_red
+    length reds > 1 =
+    splitScanRed (reduceSOAC, redNeutral) (pat, aux, reds, w, as) m
   | Just [red] <- isReduceSOAC form,
     [x] <- patNames pat,
     [ne] <- redNeutral red,
@@ -973,6 +1157,13 @@ diffSOAC pat aux soac@(Screma w as form) m
     isMinMaxOp (UMax _) = True
     isMinMaxOp (FMax _) = True
     isMinMaxOp _ = False
+diffSOAC pat aux soac@(Screma w as form) m
+  | Just scans <- isScanSOAC form,
+    length scans > 1 =
+    splitScanRed (scanSOAC, scanNeutral) (pat, aux, scans, w, as) m
+  | Just red <- singleScan <$> isScanSOAC form = do
+    void $ commonSOAC pat aux soac m
+    diffScan (patNames pat) w as red
 diffSOAC pat aux soac@(Screma w as form) m
   | Just lam <- isMapSOAC form = do
     copy_substs <- copyConsumedArrs $ Op soac
@@ -1074,7 +1265,7 @@ revVJP scope (Lambda params body ts) =
     Body () stms res <-
       localScope (scopeOfLParams params_adj) $
         diffBody
-          (map (adjFromVar . paramName) params_adj)
+          (map adjFromParam params_adj)
           (map paramName params)
           body
     let body' = Body () stms res
