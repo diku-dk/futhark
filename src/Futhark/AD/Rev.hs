@@ -943,9 +943,9 @@ diffSOAC :: Pat -> StmAux () -> SOAC SOACS -> ADM () -> ADM ()
 diffSOAC pat aux soac@(Screma w as form) m
   | Just reds <- isReduceSOAC form,
     length reds > 1 = do
-    -- We split any horizontally reduction into multiple reductions
-    -- so we can detect special cases.  Post-AD, the result may be
-    -- fused again.
+    -- We split any horizontal reduction into multiple reductions so
+    -- we can detect special cases.  Post-AD, the result may be fused
+    -- again.
     let ks = map (length . redNeutral) reds
         pat_per_red = map Pat $ chunks ks $ patElems pat
         as_per_red = chunks ks as
