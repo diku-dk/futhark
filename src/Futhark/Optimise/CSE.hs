@@ -42,6 +42,7 @@ import Futhark.Analysis.Alias
 import Futhark.IR
 import Futhark.IR.Aliases
   ( Aliases,
+    consumedInStms,
     mkStmsAliases,
     removeFunDefAliases,
     removeProgAliases,
@@ -54,9 +55,6 @@ import Futhark.IR.Prop.Aliases
 import qualified Futhark.IR.SOACS.SOAC as SOAC
 import Futhark.Pass
 import Futhark.Transform.Substitute
-
-consumedInStms :: Aliased rep => Stms rep -> Names
-consumedInStms = snd . flip mkStmsAliases []
 
 -- | Perform CSE on every function in a program.
 --
