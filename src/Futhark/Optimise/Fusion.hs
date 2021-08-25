@@ -568,7 +568,6 @@ horizontGreedyFuse rem_bnds res (out_idds, aux, soac, consumed) = do
 
   -- now try to fuse kernels one by one (in a fold); @ok_ind@ is the index of the
   -- kernel until which fusion succeded, and @fused_ker@ is the resulting kernel.
-  use_scope <- (<> scopeOf rem_bnds) <$> askScope
   (_, ok_ind, _, fused_ker, _) <-
     foldM
       ( \(cur_ok, n, prev_ind, cur_ker, ufus_nms) (ker, _ker_nm, bnd_ind) -> do
@@ -590,25 +589,20 @@ horizontGreedyFuse rem_bnds res (out_idds, aux, soac, consumed) = do
               -- output transforms.
               cons_no_out_transf = SOAC.nullTransforms $ outputTransform ker
 
-          consumer_ok <- do
-            let consumer_bnd = rem_bnds !! bnd_ind
-            maybesoac <- runReaderT (SOAC.fromExp $ stmExp consumer_bnd) use_scope
-            case maybesoac of
-              -- check that consumer's lambda body does not use
-              -- directly the produced arrays (e.g., see noFusion3.fut).
-              Right conssoac ->
-                return $
-                  not $
-                    curker_outset
-                      `namesIntersect` freeIn (lambdaBody $ SOAC.lambda conssoac)
-              Left _ -> return True
+          -- check that consumer's lambda body does not use
+          -- directly the produced arrays (e.g., see noFusion3.fut).
+          let consumer_ok =
+                not $
+                  curker_outset
+                    `namesIntersect` freeIn (lambdaBody $ SOAC.lambda $ fsoac ker)
 
           let interm_bnds_ok =
                 cur_ok && consumer_ok && out_transf_ok && cons_no_out_transf
                   && foldl
                     ( \ok bnd ->
                         ok
-                          && not (curker_outset `namesIntersect` freeIn (stmExp bnd)) -- hardwired to False after first fail
+                          && not (curker_outset `namesIntersect` freeIn (stmExp bnd))
+                          -- hardwired to False after first fail
                           -- (i) check that the in-between bindings do
                           --     not use the result of current kernel OR
                           ||
@@ -647,7 +641,7 @@ horizontGreedyFuse rem_bnds res (out_idds, aux, soac, consumed) = do
   -- Find the kernels we have fused into and the name of the last such
   -- kernel (if any).
   let (to_fuse_kers', to_fuse_knms', _) = unzip3 $ take ok_ind kernminds'
-      new_kernms = drop (ok_ind -1) to_fuse_knms'
+      new_kernms = drop (ok_ind - 1) to_fuse_knms'
 
   return (ok_ind > 0, [fused_ker], new_kernms, to_fuse_kers', to_fuse_knms')
   where
