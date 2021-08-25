@@ -1,4 +1,7 @@
 -- ==
+-- structure { Screma 3 }
+
+
 let f(a: f64): f64 = a + 3.0
 let g(a: []f64) (b: f64): f64 = a[0] * b
 let h(a:  f64) (b: f64): f64 = a * b
