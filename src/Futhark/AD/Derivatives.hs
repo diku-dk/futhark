@@ -193,9 +193,9 @@ pdBuiltin "atan2_64" [x, y] =
       untyped $ - isF64 x / (isF64 x ** 2 + isF64 y ** 2)
     ]
 pdBuiltin "tanh32" [x] =
-  Just [untyped $ 1 - (tanh $ isF32 x) ** 2]
+  Just [untyped $ 1 - tanh (isF32 x) ** 2]
 pdBuiltin "tanh64" [x] =
-  Just [untyped $ 1 - (tanh $ isF64 x) ** 2]
+  Just [untyped $ 1 - tanh (isF64 x) ** 2]
 -- More problematic derivatives follow bellow
 pdBuiltin "round32" [_] =
   Just [fConst Float32 0]
