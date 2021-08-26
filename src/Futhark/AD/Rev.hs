@@ -167,6 +167,9 @@ adjFromVar = AdjVal . Var
 adjFromParam :: Param t -> Adj
 adjFromParam = adjFromVar . paramName
 
+unitAdjOfType :: Type -> ADM Adj
+unitAdjOfType t = AdjVal <$> letSubExp "adj_unit" (oneExp t)
+
 -- | The values representing an adjoint in symbolic form.  This is
 -- used for when we wish to return an Adj from a Body or similar
 -- without forcing manifestation.  Also returns a function for
@@ -989,16 +992,8 @@ mkScanAdjointLam lam0 keep_first = do
         if keep_first
           then take len $ lambdaParams lam
           else drop len $ lambdaParams lam
-  p_adjs <- mapM (newParam "elem_adj") (lambdaReturnType lam)
-  lam' <-
-    localScope (scopeOfLParams p_adjs) $
-      diffLambda (map adjFromParam p_adjs) (map paramName p2diff) lam
-  stms' <-
-    runBuilderT'_ $
-      mapM_ (\p -> letBindNames [paramName p] $ oneExp $ paramType p) p_adjs
-  let lam_bdy' = lambdaBody lam'
-      lam'' = lam' {lambdaBody = lam_bdy' {bodyStms = stms' <> bodyStms lam_bdy'}}
-  return lam''
+  p_adjs <- mapM unitAdjOfType (lambdaReturnType lam)
+  diffLambda p_adjs (map paramName p2diff) lam
 
 -- Should generate something like:
 -- `\ j -> let i = n - 1 - j
