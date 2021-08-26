@@ -981,17 +981,17 @@ diffMinMaxRed x aux w minmax ne as m = do
       CmpOp (CmpSlt Int64) (intConst Int64 0) w
   updateAdjIndex as (CheckBounds (Just in_bounds), Var x_ind) (Var x_adj)
 
--- computes `d(x op y)/dx` when keep_first=true,
--- and `d(x op y)/dy otherwise.
--- `op` is given as `lam`
-mkScanAdjointLam :: Lambda -> Bool -> ADM Lambda
-mkScanAdjointLam lam0 keep_first = do
+data FirstOrSecond = WrtFirst | WrtSecond
+
+-- computes `d(x op y)/dx` or d(x op y)/dy
+mkScanAdjointLam :: Lambda -> FirstOrSecond -> ADM Lambda
+mkScanAdjointLam lam0 which = do
   let len = length $ lambdaReturnType lam0
   lam <- renameLambda lam0
   let p2diff =
-        if keep_first
-          then take len $ lambdaParams lam
-          else drop len $ lambdaParams lam
+        case which of
+          WrtFirst -> take len $ lambdaParams lam
+          WrtSecond -> drop len $ lambdaParams lam
   p_adjs <- mapM unitAdjOfType (lambdaReturnType lam)
   diffLambda p_adjs (map paramName p2diff) lam
 
@@ -1004,7 +1004,7 @@ mkScanAdjointLam lam0 keep_first = do
 --       `j` draw values from `iota n`
 mkScanFusedMapLam :: SubExp -> Lambda -> [VName] -> [VName] -> [VName] -> ADM Lambda
 mkScanFusedMapLam w scn_lam xs ys ys_adj = do
-  lam <- mkScanAdjointLam scn_lam True
+  lam <- mkScanAdjointLam scn_lam WrtFirst
   ys_ts <- mapM lookupType ys
   let lam_arg = map paramName $ lambdaParams lam
   let (lam_as, lam_bs) = splitAt (length ys) lam_arg
@@ -1082,7 +1082,7 @@ mkScan2ndMaps w (arr_tp, y_adj, (ds, cs)) = do
 mkScanFinalMap :: SubExp -> Lambda -> [VName] -> [VName] -> [VName] -> ADM [VName]
 mkScanFinalMap w scan_lam xs ys rs = do
   let eltps = lambdaReturnType scan_lam
-  lam <- mkScanAdjointLam scan_lam False
+  lam <- mkScanAdjointLam scan_lam WrtSecond
   par_i <- newParam "i" $ Prim int64
   let i = paramName par_i
   par_x <- mapM (\(x, t) -> newParam (baseString x ++ "_par_x") t) $ zip xs eltps
