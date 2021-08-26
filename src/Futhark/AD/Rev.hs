@@ -1024,11 +1024,9 @@ mkScanFusedMapLam w scn_lam xs ys ys_adj = do
             j1 <- letSubExp "j1" =<< toExp (pe64 w - le64 i)
             y_s <- forM (zip (zip3 ys xs ys_adj) (zip3 lam_as lam_bs ys_ts)) $
               \((y, x, y_), (a, b, t)) -> do
-                yj <- letSubExp (baseString y ++ "_j") $ BasicOp $ Index y $ fullSlice t [DimFix j]
+                letBindNames [a] $ BasicOp $ Index y $ fullSlice t [DimFix j]
+                letBindNames [b] $ BasicOp $ Index x $ fullSlice t [DimFix j1]
                 y_j <- letSubExp (baseString y_ ++ "_j") $ BasicOp $ Index y_ $ fullSlice t [DimFix j]
-                xj <- letSubExp (baseString x ++ "_j") $ BasicOp $ Index x $ fullSlice t [DimFix j1]
-                letBindNames [a] $ BasicOp $ SubExp yj
-                letBindNames [b] $ BasicOp $ SubExp xj
                 pure $ subExpRes y_j
             lam_rs <- bodyBind $ lambdaBody lam
             pure $ unpairs $ zip y_s lam_rs
