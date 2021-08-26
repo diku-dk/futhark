@@ -30,7 +30,7 @@ instance (see below).  A simple usage example:
 
 .. code-block:: javascript
 
-   import { newFutharkContext } from './futmod.mjs';
+   import { newFutharkContext } from './futlib.mjs';
    var fc;
    newFutharkContext().then(x => fc = x);
 
