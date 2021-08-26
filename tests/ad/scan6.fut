@@ -1,5 +1,6 @@
 -- Scan with linear function composition.
 -- ==
+-- tags { disable }
 -- entry: fwd_J rev_J
 -- compiled input { [[1f32, 2f32], [4f32, 3f32], [3f32, 4f32], [4f32, 2f32]] }
 -- output {

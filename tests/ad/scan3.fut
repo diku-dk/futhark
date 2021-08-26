@@ -1,5 +1,6 @@
 -- Scan with 2x2 matrix multiplication.
 -- ==
+-- tags { disable }
 -- entry: fwd_J rev_J
 -- compiled input { [[1f32,2f32,3f32,4f32], [4f32,3f32,2f32,1f32], [1f32,2f32,3f32,4f32], [4f32,3f32,2f32,1f32]] }
 -- output {
