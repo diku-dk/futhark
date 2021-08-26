@@ -7,6 +7,13 @@ let pow_list [n] y (xs :[n]i32) = loop accs = (replicate n 1) for _i < y do
 entry prim y xs = pow_list y xs
 		     
 -- ==
--- entry: f_vjp
--- compiled input { 3 [1,2,3] } output { [3,12,27] }
-entry f_vjp [n] y (xs :[n]i32) = vjp (pow_list y) xs (replicate n 1)
+-- entry: f_vjp f_jvp
+-- compiled input { 3 [1,2,3] }
+-- output { [[3,0,0],
+--           [0,12,0],
+--           [0,0,27]]
+--        }
+entry f_jvp [n] y (xs :[n]i32) =
+  tabulate n (\i -> jvp (pow_list y) xs (replicate n 0 with [i] = 1)) |> transpose
+entry f_vjp [n] y (xs :[n]i32) =
+  tabulate n (\i -> vjp (pow_list y) xs (replicate n 0 with [i] = 1))

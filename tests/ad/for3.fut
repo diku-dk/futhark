@@ -10,6 +10,15 @@ let square [n] (xs: [n]i32) =
 entry prim [n] (xs: [n]i32) = square xs
 		     
 -- ==
--- entry: f_vjp
--- compiled input { [1,2,3,4,5] } output { [2,4,6,8,10] }
-entry f_vjp [n] (xs: [n]i32) = vjp square xs (replicate n 1)
+-- entry: f_jvp f_vjp
+-- compiled input { [1,2,3,4,5] }
+-- output { [[2,0,0,0,0],
+--           [0,4,0,0,0],
+--           [0,0,6,0,0],
+--           [0,0,0,8,0],
+--           [0,0,0,0,10]]
+--        }
+entry f_jvp [n] (xs :[n]i32) =
+  tabulate n (\i -> jvp square xs (replicate n 0 with [i] = 1)) |> transpose
+entry f_vjp [n] (xs :[n]i32) =
+  tabulate n (\i -> vjp square xs (replicate n 0 with [i] = 1))
