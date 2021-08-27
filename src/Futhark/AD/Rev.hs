@@ -298,7 +298,7 @@ tabNest = tabNest' []
       params <- forM vs $ \v ->
         newParam (baseString v <> "_p") . rowType =<< lookupType v
       ((ret, res), stms) <- collectStms . localScope (scopeOfLParams (iparam : params)) $ do
-        res <- tabNest' (paramName iparam : is) (n -1) (map paramName params) f
+        res <- tabNest' (paramName iparam : is) (n - 1) (map paramName params) f
         ret <- mapM lookupType res
         pure (ret, varsRes res)
       let lam = Lambda (iparam : params) (Body () stms res) ret
@@ -1006,8 +1006,6 @@ mkScanFusedMapLam :: SubExp -> Lambda -> [VName] -> [VName] -> [VName] -> ADM La
 mkScanFusedMapLam w scn_lam xs ys ys_adj = do
   lam <- mkScanAdjointLam scn_lam WrtFirst
   ys_ts <- mapM lookupType ys
-  let lam_arg = map paramName $ lambdaParams lam
-  let (lam_as, lam_bs) = splitAt (length ys) lam_arg
   par_i <- newParam "i" $ Prim int64
   let i = paramName par_i
   mkLambda [par_i] $
@@ -1020,16 +1018,15 @@ mkScanFusedMapLam w scn_lam xs ys ys_adj = do
             pure $ subExpsRes $ unpairs $ zip zs os
         )
         ( buildBody_ $ do
-            j <- letSubExp "j" =<< toExp (pe64 w - (le64 i + pe64 (intConst Int64 1)))
+            j <- letSubExp "j" =<< toExp (pe64 w - (le64 i + 1))
             j1 <- letSubExp "j1" =<< toExp (pe64 w - le64 i)
-            y_s <- forM (zip (zip3 ys xs ys_adj) (zip3 lam_as lam_bs ys_ts)) $
-              \((y, x, y_), (a, b, t)) -> do
-                letBindNames [a] $ BasicOp $ Index y $ fullSlice t [DimFix j]
-                letBindNames [b] $ BasicOp $ Index x $ fullSlice t [DimFix j1]
-                y_j <- letSubExp (baseString y_ ++ "_j") $ BasicOp $ Index y_ $ fullSlice t [DimFix j]
-                pure $ subExpRes y_j
-            lam_rs <- bodyBind $ lambdaBody lam
-            pure $ unpairs $ zip y_s lam_rs
+            let index idx arr t = BasicOp $ Index arr $ fullSlice t [DimFix idx]
+            y_s <- forM (zip ys_adj ys_ts) $ \(y_, t) ->
+              letSubExp (baseString y_ ++ "_j") $ index j y_ t
+            lam_rs <-
+              eLambda lam . map pure $
+                zipWith (index j) ys ys_ts ++ zipWith (index j1) xs ys_ts
+            pure $ unpairs $ zip (subExpsRes y_s) lam_rs
         )
 
 -- \(a1, b1) (a2, b2) -> (a2 + b2 * a1, b1 * b2)
@@ -1054,7 +1051,7 @@ mkScanLinFunO t = do
 -- but insert explicit indexing to reverse inside the map.
 mkScan2ndMaps :: SubExp -> (Type, VName, (VName, VName)) -> ADM VName
 mkScan2ndMaps w (arr_tp, y_adj, (ds, cs)) = do
-  nm1 <- letSubExp "nm1" =<< toExp (pe64 w -1)
+  nm1 <- letSubExp "nm1" =<< toExp (pe64 w - 1)
   y_adj_last <-
     letExp (baseString y_adj ++ "_last") $
       BasicOp $ Index y_adj $ fullSlice arr_tp [DimFix nm1]
@@ -1093,15 +1090,14 @@ mkScanFinalMap w scan_lam xs ys rs = do
           (toExp $ le64 i .==. 0)
           (resultBodyM $ map (Var . paramName) par_r)
           ( buildBody_ $ do
-              im1 <- letSubExp "im1" =<< toExp (le64 i - pe64 (intConst Int64 1))
+              im1 <- letSubExp "im1" =<< toExp (le64 i - 1)
               ys_im1 <- forM ys $ \y -> do
                 y_t <- lookupType y
                 letSubExp (baseString y ++ "_last") $ BasicOp $ Index y $ fullSlice y_t [DimFix im1]
-              forM_ (zip (lambdaParams lam) (ys_im1 ++ map (Var . paramName) par_x)) $ \(p, act) ->
-                letBindNames [paramName p] $ BasicOp $ SubExp act
 
-              let resVName = letExp "const" . BasicOp . SubExp . resSubExp
-              lam_res <- mapM resVName =<< bodyBind (lambdaBody lam)
+              lam_res <-
+                mapM (letExp "const" . BasicOp . SubExp . resSubExp)
+                  =<< eLambda lam (map eSubExp $ ys_im1 ++ map (Var . paramName) par_x)
 
               fmap (varsRes . mconcat) . forM (zip3 lam_res (map paramName par_r) eltps) $
                 \(lam_r, r, eltp) -> do
