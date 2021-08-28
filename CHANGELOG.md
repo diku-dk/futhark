@@ -39,7 +39,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
     called `!`.  It is extremely unlikely this affects you.  This
     removes the last special-casing of prefix operators.
 
-  * A prefix operator section (i.e.. `(!)`) is no longer permitted
+  * A prefix operator section (i.e. `(!)`) is no longer permitted
     (and it never was according to the grammar).
 
   * The offset parameter for the "raw" array creation functions in the
