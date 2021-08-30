@@ -413,13 +413,13 @@ updateAdjIndex v (check, i) se = do
     Just adj@AdjVal {} -> do
       v_adj <- adjVal adj
       v_adj_t <- lookupType v_adj
+      se_v <- letExp "se_v" $ BasicOp $ SubExp se
       insAdj v
         =<< case v_adj_t of
           Acc {}
             | check == OutOfBounds ->
               pure v_adj
             | otherwise -> do
-              se_v <- letExp "se_v" $ BasicOp $ SubExp se
               dims <- arrayDims <$> lookupType se_v
               ~[v_adj'] <-
                 tabNest (length dims) [se_v, v_adj] $ \is [se_v', v_adj'] ->
@@ -427,12 +427,14 @@ updateAdjIndex v (check, i) se = do
                     BasicOp $ UpdateAcc v_adj' (i : map Var is) [Var se_v']
               pure v_adj'
           _ -> do
-            let stm s =
+            let stms s = do
+                  v_adj_i <- letExp (baseString v_adj <> "_i") $ BasicOp $ Index v_adj $ fullSlice v_adj_t [DimFix i]
+                  update <- letExp "updated_adj_i" =<< addExp se_v v_adj_i
                   letExp (baseString v_adj) $
-                    BasicOp $ Update s v_adj (fullSlice v_adj_t [DimFix i]) se
+                    BasicOp $ Update s v_adj (fullSlice v_adj_t [DimFix i]) $ Var update
             case check of
-              CheckBounds _ -> stm Safe
-              AssumeBounds -> stm Unsafe
+              CheckBounds _ -> stms Safe
+              AssumeBounds -> stms Unsafe
               OutOfBounds -> pure v_adj
 
 -- | Is this primal variable active in the AD sense?  FIXME: this is
