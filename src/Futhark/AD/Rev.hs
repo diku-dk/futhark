@@ -429,9 +429,9 @@ updateAdjIndex v (check, i) se = do
           _ -> do
             let stms s = do
                   v_adj_i <- letExp (baseString v_adj <> "_i") $ BasicOp $ Index v_adj $ fullSlice v_adj_t [DimFix i]
-                  update <- letExp "updated_adj_i" =<< addExp se_v v_adj_i
+                  se_update <- letSubExp "updated_adj_i" =<< addExp se_v v_adj_i
                   letExp (baseString v_adj) $
-                    BasicOp $ Update s v_adj (fullSlice v_adj_t [DimFix i]) $ Var update
+                    BasicOp $ Update s v_adj (fullSlice v_adj_t [DimFix i]) se_update
             case check of
               CheckBounds _ -> stms Safe
               AssumeBounds -> stms Unsafe
