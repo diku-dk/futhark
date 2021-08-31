@@ -19,9 +19,6 @@ let primal [n] (xs: [n](f32,f32)) =
 let fromarrs = map (\x -> (x[0],x[1]))
 let toarrs = map (\(a,b) -> [a,b])
 
-let onehot n i =
-  tabulate n ((==i) >-> f32.bool)
-
 let onehot_2d n m x y =
   tabulate_2d n m (\i j -> f32.bool((i,j) == (x,y)))
 
