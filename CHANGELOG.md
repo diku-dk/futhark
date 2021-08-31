@@ -5,7 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
-## [0.20.0]
+## [0.21.0]
+
+### Adeed
+
+### Removed
+
+### Changed
+
+### Fixed
+
+## [0.20.1]
 
 ### Added
 
@@ -29,8 +39,6 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * Sometimes slightly more informative error message when input of
     the wrong type is passed to a test program.
 
-### Removed
-
 ### Changed
 
   * The `!` function in the integer modules is now called `not`.
@@ -39,7 +47,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
     called `!`.  It is extremely unlikely this affects you.  This
     removes the last special-casing of prefix operators.
 
-  * A prefix operator section (i.e.. `(!)`) is no longer permitted
+  * A prefix operator section (i.e. `(!)`) is no longer permitted
     (and it never was according to the grammar).
 
   * The offset parameter for the "raw" array creation functions in the
