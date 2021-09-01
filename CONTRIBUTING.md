@@ -34,4 +34,4 @@ the main website.
 #### **Do you have questions about the source code?**
 
 * Ask any question about the code base on Gitter or IRC (#futhark on
-  Freenode).  Please don't open GitHub issues just to ask questions.
+  Libera.Chat).  Please don't open GitHub issues just to ask questions.
