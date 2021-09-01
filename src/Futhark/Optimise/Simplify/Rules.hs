@@ -65,6 +65,11 @@ standardRules = ruleBook topDownRules bottomUpRules <> loopRules <> basicOpRules
 removeUnnecessaryCopy :: (BuilderOps rep, Aliased rep) => BottomUpRuleBasicOp rep
 removeUnnecessaryCopy (vtable, used) (Pat [d]) _ (Copy v)
   | not (v `UT.isConsumed` used),
+    -- This next line is too conservative, but the problem is that 'v'
+    -- might not look like it has been consumed if it is consumed in
+    -- an outer scope.  This is because the simplifier applies
+    -- bottom-up rules in a kind of deepest-first order.
+    not (patElemName d `UT.isInResult` used) || (patElemName d `UT.isConsumed` used),
     (not (v `UT.used` used) && consumable) || not (patElemName d `UT.isConsumed` used) =
     Simplify $ letBindNames [patElemName d] $ BasicOp $ SubExp $ Var v
   where

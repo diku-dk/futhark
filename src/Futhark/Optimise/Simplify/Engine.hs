@@ -662,7 +662,8 @@ simplifyResult ::
   SimplifiableRep rep => [Diet] -> Result -> SimpleM rep (Result, UT.UsageTable)
 simplifyResult ds res = do
   res' <- mapM simplify res
-  let consumption = consumeResult $ zip ds res'
+  vtable <- askVtable
+  let consumption = consumeResult vtable $ zip ds res'
   return (res', UT.usages (freeIn res') <> consumption)
 
 isDoLoopResult :: Result -> UT.UsageTable
@@ -985,11 +986,11 @@ simplifyLambdaMaybeHoist blocked lam@(Lambda params body rettype) = do
   rettype' <- simplify rettype
   return (Lambda params' body' rettype', hoisted)
 
-consumeResult :: [(Diet, SubExpRes)] -> UT.UsageTable
-consumeResult = mconcat . map inspect
+consumeResult :: ST.SymbolTable rep -> [(Diet, SubExpRes)] -> UT.UsageTable
+consumeResult vtable = mconcat . map inspect
   where
-    inspect (Consume, SubExpRes _ se) =
-      mconcat $ map UT.consumedUsage $ namesToList $ subExpAliases se
+    inspect (Consume, SubExpRes _ (Var v)) =
+      mconcat $ map UT.consumedUsage $ v : namesToList (ST.lookupAliases v vtable)
     inspect _ = mempty
 
 instance Simplifiable Certs where
