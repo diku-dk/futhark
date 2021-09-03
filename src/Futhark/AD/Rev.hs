@@ -1467,12 +1467,11 @@ subSubsts m = do
 diffBody :: [Adj] -> [VName] -> Body -> ADM Body
 diffBody res_adjs get_adjs_for (Body () stms res) = subAD $
   subSubsts $ do
-    stms_c <- copyConsumedArrsInStms stms
     let onResult (SubExpRes _ (Constant _)) _ = pure ()
         onResult (SubExpRes _ (Var v)) v_adj = void $ updateAdj v =<< adjVal v_adj
     (adjs, stms') <- collectStms $ do
       zipWithM_ onResult (takeLast (length res_adjs) res) res_adjs
-      diffStms stms_c
+      diffStms =<< copyConsumedArrsInStms stms
       mapM lookupAdjVal get_adjs_for
     pure $ Body () stms' $ res <> varsRes adjs
 
