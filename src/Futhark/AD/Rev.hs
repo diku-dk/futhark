@@ -458,22 +458,10 @@ updateAdjIndex v (check, i) se = do
 isActive :: VName -> ADM Bool
 isActive = fmap (/= Prim Unit) . lookupType
 
--- | Create copies of all arrays consumed in the expression, and
--- return a substituion mapping from the old names to the names of the
--- copies.
+-- | Create copies of all arrays consumed in the given statements, and
+-- return statements which include copies of the consumed arrays.
 --
 -- See Note [Consumption].
-copyConsumedArrs :: Exp -> ADM Substitutions
-copyConsumedArrs e =
-  mconcat <$> mapM onConsumed (namesToList $ consumedInExp (Alias.analyseExp mempty e))
-  where
-    onConsumed v = do
-      v_t <- lookupType v
-      case v_t of
-        Acc {} -> error $ "copyConsumedArrs: Acc " <> pretty v
-        Array {} -> M.singleton v <$> letExp (baseString v <> "_ad_copy") (BasicOp $ Copy v)
-        _ -> pure mempty
-
 copyConsumedArrsInStms :: Stms SOACS -> ADM (Stms SOACS)
 copyConsumedArrsInStms ss = inScopeOf ss $ collectStms_ $ copyConsumedArrsInStms' ss
   where
@@ -747,10 +735,9 @@ buildRenamedBody m = do
   body' <- renameBody body
   pure (body', x)
 
-diffMap :: [Adj] -> SubExp -> Lambda -> [VName] -> Substitutions -> ADM ()
-diffMap res_adjs w map_lam as substs
-  | Just res_ivs <- mapM isSparse res_adjs,
-    M.null substs = returnSweepCode $ do
+diffMap :: [Adj] -> SubExp -> Lambda -> [VName] -> ADM ()
+diffMap res_adjs w map_lam as
+  | Just res_ivs <- mapM isSparse res_adjs = returnSweepCode $ do
     -- Since at most only a constant number of adjoint are nonzero
     -- (length res_ivs), there is no need for the return sweep code to
     -- contain a Map at all.
@@ -817,7 +804,7 @@ diffMap res_adjs w map_lam as substs
       Just ivs
     isSparse _ =
       Nothing
-diffMap pat_adj w map_lam as _ =
+diffMap pat_adj w map_lam as =
   returnSweepCode $ do
     pat_adj_vals <- mapM adjVal pat_adj
     pat_adj_params <-
@@ -1224,9 +1211,8 @@ diffSOAC pat aux soac@(Screma w as form) m
     diffScan (patNames pat) w as red
 diffSOAC pat aux soac@(Screma w as form) m
   | Just lam <- isMapSOAC form = do
-    copy_substs <- copyConsumedArrs $ Op soac
     pat_adj <- commonSOAC pat aux soac m
-    diffMap pat_adj w lam as copy_substs
+    diffMap pat_adj w lam as
 diffSOAC pat _aux (Screma w as form) m
   | Just (reds, map_lam) <-
       isRedomapSOAC form = do
