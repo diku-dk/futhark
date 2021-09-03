@@ -409,6 +409,10 @@ updateSubExpAdj :: SubExp -> VName -> ADM ()
 updateSubExpAdj Constant {} _ = pure ()
 updateSubExpAdj (Var v) d = void $ updateAdj v d
 
+insSubExpAdj :: SubExp -> VName -> ADM ()
+insSubExpAdj Constant {} _ = pure ()
+insSubExpAdj (Var v) d = void $ insAdj v d
+
 -- The index may be negative, in which case the update has no effect.
 updateAdjIndex :: VName -> (InBounds, SubExp) -> SubExp -> ADM ()
 updateAdjIndex v (check, i) se = do
@@ -1297,7 +1301,9 @@ diffLoop
                 loop_res = mapMaybe res_vname res'
                 loop_var_arrays = map snd loop_vars'
                 loop_var_param_names = map (paramName . fst) loop_vars'
-                loop_free = namesToList (freeIn loop') \\ loop_var_arrays
+                getVName Constant {} = Nothing
+                getVName (Var v) = Just v
+                loop_free = (namesToList (freeIn loop') \\ loop_var_arrays) \\ mapMaybe (getVName . snd) param_tuples'
 
             zipWithM_ subst_loop_tape loop_param_names loop_param_names'
 
@@ -1306,7 +1312,7 @@ diffLoop
                     Just v -> do
                       pat_adj <- lookupAdjVal pat
                       v_adj <- adjVName v
-                      return $ Just (Param v_adj t, Var pat_adj)
+                      return $ Just (Param v_adj (toDecl (fromDecl t) Unique), Var pat_adj)
                     _ -> return Nothing
 
             param_tuples_res_adj <- catMaybes <$> zipWithM build_param_tuples_adj res' (zip pats loop_params')
@@ -1351,19 +1357,20 @@ diffLoop
 
             ((loop_param_adjs, loop_free_adjs, loop_vars_adjs), stms_adj) <- collectStms $
               subAD $
-                localScope (scopeOfFParams $ map fst param_tuples_adj <> loop_params') $
-                  inScopeOf form' $ do
-                    zipWithM_ (\(Param p _, _) v -> insAdj v p) param_tuples_adj (loop_res <> loop_free <> loop_var_arrays)
-                    diffStms stms'
-                    loop_free_adjs <- mapM lookupAdjVal loop_free
-                    loop_param_adjs <- mapM (lookupAdjVal . paramName) loop_params'
-                    let f vs v = do
-                          vs_t <- lookupType vs
-                          v_adj <- lookupAdjVal v
-                          updateAdjSlice (fullSlice vs_t [DimFix i_reverse64]) vs v_adj
-                    zipWithM_ f loop_var_arrays loop_var_param_names
-                    loop_vars_adjs <- mapM lookupAdjVal loop_var_arrays
-                    return (loop_param_adjs, loop_free_adjs, loop_vars_adjs)
+                localScope (scopeOfFParams $ map fst param_tuples_adj) $
+                  localScope (scopeOfFParams loop_params') $
+                    inScopeOf form' $ do
+                      zipWithM_ (\(Param p _, _) v -> insAdj v p) param_tuples_adj (loop_res <> loop_free <> loop_var_arrays)
+                      diffStms stms'
+                      loop_free_adjs <- mapM lookupAdjVal loop_free
+                      loop_param_adjs <- mapM (lookupAdjVal . paramName) loop_params'
+                      let f vs v = do
+                            vs_t <- lookupType vs
+                            v_adj <- lookupAdjVal v
+                            updateAdjSlice (fullSlice vs_t [DimFix i_reverse64]) vs v_adj
+                      zipWithM_ f loop_var_arrays loop_var_param_names
+                      loop_vars_adjs <- mapM lookupAdjVal loop_var_arrays
+                      return (loop_param_adjs, loop_free_adjs, loop_vars_adjs)
 
             let restore v = localScope (scopeOfFParams loop_params') $ do
                   vs <- lookupLoopTape v
@@ -1397,9 +1404,10 @@ diffLoop
                           param_tuples_adj
                           form'
                           body_adj
-                  zipWithM_ updateSubExpAdj (map snd param_tuples') $ take (length loop_param_adjs) adjs'
-                  zipWithM_ updateAdj loop_free $ take (length loop_free_adjs) $ drop (length loop_param_adjs) adjs'
-                  zipWithM_ updateAdj loop_var_arrays $ drop (length loop_param_adjs + length loop_free_adjs) adjs'
+
+                  zipWithM_ insSubExpAdj (map snd param_tuples') $ take (length loop_param_adjs) adjs'
+                  zipWithM_ (\v v_adj -> do insAdj v v_adj; (void . lookupAdjVal) v) loop_free $ take (length loop_free_adjs) $ drop (length loop_param_adjs) adjs'
+                  zipWithM_ (\v v_adj -> do insAdj v v_adj; void $ lookupAdjVal v) loop_var_arrays $ drop (length loop_param_adjs + length loop_free_adjs) adjs'
           _ -> error "diffLoop: unexpected non-loop expression."
 diffLoop _ _ _ _ = error "diffLoop: unexpected non-loop expression."
 
