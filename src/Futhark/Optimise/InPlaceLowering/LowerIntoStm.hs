@@ -153,13 +153,16 @@ lowerUpdatesIntoSegMap scope pat updates kspace kbody = do
           let res_dims = arrayDims $ snd bindee_dec
               ret' = WriteReturns cs (Shape res_dims) src [(Slice $ map DimFix slice', se)]
 
+          v_aliased <- newName v
+
           return
             ( PatElem bindee_nm bindee_dec,
               bodystms,
               ret',
-              oneStm $
-                mkLet [Ident v $ typeOf v_dec] $
-                  BasicOp $ Index bindee_nm slice
+              stmsFromList
+                [ mkLet [Ident v_aliased $ typeOf v_dec] $ BasicOp $ Index bindee_nm slice,
+                  mkLet [Ident v $ typeOf v_dec] $ BasicOp $ Copy v_aliased
+                ]
             )
     onRet pe ret =
       Just $ return (pe, mempty, ret, mempty)
