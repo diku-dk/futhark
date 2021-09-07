@@ -93,7 +93,8 @@ substituteIndicesInExp substs (Op op) = do
     forM used_in_op $ \(v, (cs, src, src_dec, Slice is)) -> do
       v' <-
         certifying cs $
-          letExp "idx" $ BasicOp $ Index src $ fullSlice (typeOf src_dec) is
+          letExp (baseString src <> "_op_idx") $
+            BasicOp $ Index src $ fullSlice (typeOf src_dec) is
       pure $ M.singleton v v'
   pure $ Op $ substituteNames var_substs op
 substituteIndicesInExp substs e = do
@@ -154,7 +155,8 @@ substituteIndicesInVar substs v
       letExp (baseString src2) $ BasicOp $ SubExp $ Var src2
   | Just (cs2, src2, src2_dec, Slice is2) <- lookup v substs =
     certifying cs2 $
-      letExp "idx" $ BasicOp $ Index src2 $ fullSlice (typeOf src2_dec) is2
+      letExp (baseString src2 <> "_v_idx") $
+        BasicOp $ Index src2 $ fullSlice (typeOf src2_dec) is2
   | otherwise =
     return v
 
