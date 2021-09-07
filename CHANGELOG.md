@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * In-place-lowering bug (#1457).
 
+* Another in-place-lowering bug (#1460).
+
 ## [0.20.1]
 
 ### Added
