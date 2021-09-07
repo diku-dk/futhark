@@ -70,6 +70,15 @@ substituteIndicesInStm substs (Let pat _ (BasicOp (Rotate rots v)))
     pure $ (v', (cs, src', src_t', is)) : substs
   where
     zero = intConst Int64 0
+substituteIndicesInStm substs (Let pat _ (BasicOp (Rearrange perm v)))
+  | Just (cs, src, src_t, is) <- lookup v substs,
+    [v'] <- patNames pat = do
+    let extra_dims = arrayRank src_t - length perm
+        perm' = [0 .. extra_dims -1] ++ map (+ extra_dims) perm
+    src' <-
+      letExp (baseString v' <> "_subst") $ BasicOp $ Rearrange perm' src
+    src_t' <- lookupType src'
+    pure $ (v', (cs, src', src_t', is)) : substs
 substituteIndicesInStm substs (Let pat rep e) = do
   e' <- substituteIndicesInExp substs e
   addStm $ Let pat rep e'
