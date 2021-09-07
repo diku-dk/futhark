@@ -338,20 +338,18 @@ data LoopResultSummary dec = LoopResultSummary
   }
   deriving (Show)
 
-indexSubstitutions ::
-  [LoopResultSummary dec] ->
-  IndexSubstitutions dec
+indexSubstitutions :: Typed dec => [LoopResultSummary dec] -> IndexSubstitutions
 indexSubstitutions = mapMaybe getSubstitution
   where
     getSubstitution res = do
       (DesiredUpdate _ _ cs _ is _, nm, dec) <- relatedUpdate res
       let name = paramName $ fst $ mergeParam res
-      return (name, (cs, nm, dec, is))
+      return (name, (cs, nm, typeOf dec, is))
 
 manipulateResult ::
   (Buildable rep, MonadFreshNames m) =>
   [LoopResultSummary (LetDec rep)] ->
-  IndexSubstitutions (LetDec rep) ->
+  IndexSubstitutions ->
   m (Result, Stms rep)
 manipulateResult summaries substs = do
   let (orig_ses, updated_ses) = partitionEithers $ map unchangedRes summaries

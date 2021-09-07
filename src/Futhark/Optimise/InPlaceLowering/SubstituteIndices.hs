@@ -18,20 +18,16 @@ import Futhark.Construct
 import Futhark.IR
 import Futhark.IR.Prop.Aliases
 import Futhark.Transform.Substitute
-import Futhark.Util
 
-type IndexSubstitution dec = (Certs, VName, dec, Slice SubExp)
+type IndexSubstitution = (Certs, VName, Type, Slice SubExp)
 
-type IndexSubstitutions dec = [(VName, IndexSubstitution dec)]
+type IndexSubstitutions = [(VName, IndexSubstitution)]
 
-typeEnvFromSubstitutions ::
-  LetDec rep ~ dec =>
-  IndexSubstitutions dec ->
-  Scope rep
+typeEnvFromSubstitutions :: LParamInfo rep ~ Type => IndexSubstitutions -> Scope rep
 typeEnvFromSubstitutions = M.fromList . map (fromSubstitution . snd)
   where
     fromSubstitution (_, name, t, _) =
-      (name, LetName t)
+      (name, LParamName t)
 
 -- | Perform the substitution.
 substituteIndices ::
@@ -39,11 +35,11 @@ substituteIndices ::
     BuilderOps rep,
     Buildable rep,
     Aliased rep,
-    LetDec rep ~ dec
+    LParamInfo rep ~ Type
   ) =>
-  IndexSubstitutions dec ->
+  IndexSubstitutions ->
   Stms rep ->
-  m (IndexSubstitutions dec, Stms rep)
+  m (IndexSubstitutions, Stms rep)
 substituteIndices substs bnds =
   runBuilderT (substituteIndicesInStms substs bnds) types
   where
@@ -51,40 +47,37 @@ substituteIndices substs bnds =
 
 substituteIndicesInStms ::
   (MonadBuilder m, Buildable (Rep m), Aliased (Rep m)) =>
-  IndexSubstitutions (LetDec (Rep m)) ->
+  IndexSubstitutions ->
   Stms (Rep m) ->
-  m (IndexSubstitutions (LetDec (Rep m)))
+  m IndexSubstitutions
 substituteIndicesInStms = foldM substituteIndicesInStm
 
 substituteIndicesInStm ::
   (MonadBuilder m, Buildable (Rep m), Aliased (Rep m)) =>
-  IndexSubstitutions (LetDec (Rep m)) ->
+  IndexSubstitutions ->
   Stm (Rep m) ->
-  m (IndexSubstitutions (LetDec (Rep m)))
+  m IndexSubstitutions
+-- FIXME: we likely need to do something similar for all expressions
+-- that produce aliases.  Ugh.  See issue #1460.  Or maybe we should
+-- look at/copy all consumed arrays up front, instead of ad-hoc.
+substituteIndicesInStm substs (Let pat _ (BasicOp (Rotate rots v)))
+  | Just (cs, src, src_t, is) <- lookup v substs,
+    [v'] <- patNames pat = do
+    src' <-
+      letExp (baseString v' <> "_subst") $
+        BasicOp $ Rotate (replicate (arrayRank src_t - length rots) zero ++ rots) src
+    src_t' <- lookupType src'
+    pure $ (v', (cs, src', src_t', is)) : substs
+  where
+    zero = intConst Int64 0
 substituteIndicesInStm substs (Let pat rep e) = do
   e' <- substituteIndicesInExp substs e
-  (substs', pat') <- substituteIndicesInPat substs pat
-  addStm $ Let pat' rep e'
-  return substs'
-
-substituteIndicesInPat ::
-  (MonadBuilder m, LetDec (Rep m) ~ dec) =>
-  IndexSubstitutions (LetDec (Rep m)) ->
-  PatT dec ->
-  m (IndexSubstitutions (LetDec (Rep m)), PatT dec)
-substituteIndicesInPat substs pat = do
-  (substs', pes) <- mapAccumLM sub substs $ patElems pat
-  return (substs', Pat pes)
-  where
-    sub substs' patElem = return (substs', patElem)
+  addStm $ Let pat rep e'
+  pure substs
 
 substituteIndicesInExp ::
-  ( MonadBuilder m,
-    Buildable (Rep m),
-    Aliased (Rep m),
-    LetDec (Rep m) ~ dec
-  ) =>
-  IndexSubstitutions (LetDec (Rep m)) ->
+  (MonadBuilder m, Buildable (Rep m), Aliased (Rep m)) =>
+  IndexSubstitutions ->
   Exp (Rep m) ->
   m (Exp (Rep m))
 substituteIndicesInExp substs (Op op) = do
@@ -136,7 +129,7 @@ substituteIndicesInExp substs e = do
 
 substituteIndicesInSubExp ::
   MonadBuilder m =>
-  IndexSubstitutions (LetDec (Rep m)) ->
+  IndexSubstitutions ->
   SubExp ->
   m SubExp
 substituteIndicesInSubExp substs (Var v) =
@@ -146,7 +139,7 @@ substituteIndicesInSubExp _ se =
 
 substituteIndicesInVar ::
   MonadBuilder m =>
-  IndexSubstitutions (LetDec (Rep m)) ->
+  IndexSubstitutions ->
   VName ->
   m VName
 substituteIndicesInVar substs v
@@ -162,7 +155,7 @@ substituteIndicesInVar substs v
 
 substituteIndicesInBody ::
   (MonadBuilder m, Buildable (Rep m), Aliased (Rep m)) =>
-  IndexSubstitutions (LetDec (Rep m)) ->
+  IndexSubstitutions ->
   Body (Rep m) ->
   m (Body (Rep m))
 substituteIndicesInBody substs (Body _ stms res) = do
@@ -180,9 +173,9 @@ substituteIndicesInBody substs (Body _ stms res) = do
 update ::
   VName ->
   VName ->
-  IndexSubstitution dec ->
-  IndexSubstitutions dec ->
-  IndexSubstitutions dec
+  IndexSubstitution ->
+  IndexSubstitutions ->
+  IndexSubstitutions
 update needle name subst ((othername, othersubst) : substs)
   | needle == othername = (name, subst) : substs
   | otherwise = (othername, othersubst) : update needle name subst substs
