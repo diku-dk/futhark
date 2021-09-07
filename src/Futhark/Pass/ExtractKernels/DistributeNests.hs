@@ -860,7 +860,7 @@ segmentedUpdateKernel nest perm cs arr slice v = do
   -- Remove unused kernel inputs, since some of these might
   -- reference the array we are scattering into.
   let kernel_inps' =
-        filter ((`nameIn` freeIn kstms) . kernelInputName) kernel_inps
+        filter ((`nameIn` (freeIn kstms <> freeIn res)) . kernelInputName) kernel_inps
 
   mk_lvl <- mkSegLevel
   (k, prestms) <-

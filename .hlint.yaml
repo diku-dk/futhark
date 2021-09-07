@@ -1,3 +1,6 @@
 - modules:
   - {name: [Data.Set, Data.HashSet], as: S}
   - {name: [Data.Map, Data.Map.*], as: M}
+
+- error: {lhs: map subExpRes, rhs: subExpsRes}
+- error: {lhs: map varRes, rhs: varsRes}
