@@ -21,6 +21,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Another in-place-lowering bug (#1460).
 
+* Don't try to tile inside loops with parameters with variant sizes (#1462).
+
 ## [0.20.1]
 
 ### Added
