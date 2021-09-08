@@ -10,5 +10,6 @@ let runs (t: i64): [][]f32 =
     in map (run t (t + 2) start) (iota 5)
 
 -- ==
+-- tags { no_opencl }
 -- input { }
 let main = runs 10
