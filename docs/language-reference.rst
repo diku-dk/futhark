@@ -21,7 +21,8 @@ Identifiers and Keywords
 ------------------------
 
 .. productionlist::
-   id: `letter` (`letter` | "_" | "'")* | "_" `id`
+   id: `letter` `constituent`* | "_" `constituent`*
+   constituent: `letter` | `digit` | "_" | "'"
    quals: (`id` ".")+
    qualid: `id` | `quals` `id`
    binop: `opstartchar` `opchar`*
