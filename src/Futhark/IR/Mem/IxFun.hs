@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# OPTIONS_GHC -fno-warn-redundant-constraints #-}
 
@@ -29,6 +30,7 @@ module Futhark.IR.Mem.IxFun
     leastGeneralGeneralization,
     existentialize,
     closeEnough,
+    equivalent,
     invIxFun,
     hasOneLmad,
     permuteInv,
@@ -566,7 +568,9 @@ flatSlice ixfun@(IxFun (LMAD offset (dim : dims) :| lmads) oshp cg) (FlatSlice n
             & setLMADPermutation [0 ..]
      in IxFun (lmad :| lmads) oshp cg
   where
-    helper s0 (FlatDimIndex n s) = LMADDim (s0 * s) 0 n 0 Unknown
+    helper s0 (FlatDimIndex n s) =
+      let new_mon = if s0 * s == 1 then Inc else Unknown
+       in LMADDim (s0 * s) 0 n 0 new_mon
 flatSlice (IxFun (lmad :| lmads) oshp cg) s@(FlatSlice new_offset _) =
   IxFun (LMAD (new_offset * base_stride) (new_dims <> tail_dims) :| lmad : lmads) oshp cg
   where
@@ -1082,6 +1086,26 @@ closeEnough ixf1 ixf2 =
       length (lmadDims lmad1) == length (lmadDims lmad2)
         && map ldPerm (lmadDims lmad1)
         == map ldPerm (lmadDims lmad2)
+
+-- | Returns true if two 'IxFun's are equivalent.
+--
+-- Equivalence in this case is defined as having the same number of LMADs, with
+-- each pair of LMADs matching in permutation, offsets, strides and rotations.
+equivalent :: Eq num => IxFun num -> IxFun num -> Bool
+equivalent ixf1 ixf2 =
+  NE.length (ixfunLMADs ixf1) == NE.length (ixfunLMADs ixf2)
+    && all closeEnoughLMADs (NE.zip (ixfunLMADs ixf1) (ixfunLMADs ixf2))
+  where
+    closeEnoughLMADs (lmad1, lmad2) =
+      length (lmadDims lmad1) == length (lmadDims lmad2)
+        && map ldPerm (lmadDims lmad1)
+        == map ldPerm (lmadDims lmad2)
+        && lmadOffset lmad1
+        == lmadOffset lmad2
+        && map ldStride (lmadDims lmad1)
+        == map ldStride (lmadDims lmad2)
+        && map ldRotate (lmadDims lmad1)
+        == map ldRotate (lmadDims lmad2)
 
 -- | The result of @invIxFun ixf_y ixf_b@ is @ixf_0@
 --     such that @ixf_y = ixf_b o ixf_0@

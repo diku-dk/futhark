@@ -157,6 +157,7 @@ tileInBody branch_variant initial_variance initial_lvl initial_space res_ts (Bod
             stms_res
       -- Tiling inside for-loop.
       | DoLoop merge (ForLoop i it bound []) loopbody <- stmExp stm_to_tile,
+        not $ any ((`nameIn` freeIn merge) . paramName . fst) merge,
         (prestms', poststms') <-
           preludeToPostlude variance prestms stm_to_tile (stmsFromList poststms) = do
         let branch_variant' =
