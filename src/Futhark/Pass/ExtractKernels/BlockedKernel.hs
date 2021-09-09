@@ -202,10 +202,10 @@ mapKernelSkeleton ::
   [KernelInput] ->
   m (SegSpace, Stms rep)
 mapKernelSkeleton ispace inputs = do
-  read_input_bnds <- runBuilder_ $ mapM readKernelInput inputs
+  read_input_stms <- runBuilder_ $ mapM readKernelInput inputs
 
   space <- mkSegSpace ispace
-  return (space, read_input_bnds)
+  return (space, read_input_stms)
 
 mapKernel ::
   (DistRep rep, HasScope rep m, MonadFreshNames m) =>

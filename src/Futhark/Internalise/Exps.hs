@@ -481,7 +481,7 @@ internaliseAppExp desc (E.DoLoop sparams mergepat mergeexp form loopbody loc) = 
         -- anything.
         shapeinit <- argShapes (map I.paramName shapepat) mergepat' mergeinit_ts
 
-        (loop_initial_cond, init_loop_cond_bnds) <- collectStms $ do
+        (loop_initial_cond, init_loop_cond_stms) <- collectStms $ do
           forM_ (zip shapepat shapeinit) $ \(p, se) ->
             letBindNames [paramName p] $ BasicOp $ SubExp se
           forM_ (zip mergepat' mergeinit) $ \(p, se) ->
@@ -495,7 +495,7 @@ internaliseAppExp desc (E.DoLoop sparams mergepat mergeexp form loopbody loc) = 
                     _ -> SubExp se
           internaliseExp1 "loop_cond" cond
 
-        addStms init_loop_cond_bnds
+        addStms init_loop_cond_stms
 
         bodyFromStms $ do
           ses <- internaliseExp "loopres" loopbody

@@ -86,7 +86,7 @@ instance MonadFreshNames (State InternaliseState) where
 instance MonadBuilder InternaliseM where
   type Rep InternaliseM = SOACS
   mkExpDecM pat e = InternaliseM $ mkExpDecM pat e
-  mkBodyM bnds res = InternaliseM $ mkBodyM bnds res
+  mkBodyM stms res = InternaliseM $ mkBodyM stms res
   mkLetNamesM pat e = InternaliseM $ mkLetNamesM pat e
 
   addStms = InternaliseM . addStms

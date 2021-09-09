@@ -208,15 +208,15 @@ mkWiseBody ::
   Stms (Wise rep) ->
   Result ->
   Body (Wise rep)
-mkWiseBody dec bnds res =
+mkWiseBody dec stms res =
   Body
-    ( BodyWisdom aliases consumed (AliasDec $ freeIn $ freeInStmsAndRes bnds res),
+    ( BodyWisdom aliases consumed (AliasDec $ freeIn $ freeInStmsAndRes stms res),
       dec
     )
-    bnds
+    stms
     res
   where
-    (aliases, consumed) = Aliases.mkBodyAliases bnds res
+    (aliases, consumed) = Aliases.mkBodyAliases stms res
 
 mkWiseLetStm ::
   (ASTRep rep, CanBeWise (Op rep)) =>
@@ -254,9 +254,9 @@ instance (Buildable rep, CanBeWise (Op rep)) => Buildable (Wise rep) where
       Let pat dec _ <- mkLetNames names $ removeExpWisdom e
       return $ mkWiseLetStm pat dec e
 
-  mkBody bnds res =
-    let Body bodyrep _ _ = mkBody (fmap removeStmWisdom bnds) res
-     in mkWiseBody bodyrep bnds res
+  mkBody stms res =
+    let Body bodyrep _ _ = mkBody (fmap removeStmWisdom stms) res
+     in mkWiseBody bodyrep stms res
 
 class
   ( AliasedOp (OpWithWisdom op),

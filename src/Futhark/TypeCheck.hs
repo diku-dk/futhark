@@ -441,10 +441,10 @@ binding ::
   Scope (Aliases rep) ->
   TypeM rep a ->
   TypeM rep a
-binding bnds = check . local (`bindVars` bnds)
+binding stms = check . local (`bindVars` stms)
   where
     bindVars = M.foldlWithKey' bindVar
-    boundnames = M.keys bnds
+    boundnames = M.keys stms
 
     bindVar env name (LetName (AliasDec als, dec)) =
       let als'
@@ -460,15 +460,15 @@ binding bnds = check . local (`bindVars` bnds)
     -- Check whether the bound variables have been used correctly
     -- within their scope.
     check m = do
-      mapM_ bound $ M.keys bnds
+      mapM_ bound $ M.keys stms
       (a, os) <- collectOccurences m
       tell $ Consumption $ unOccur (namesFromList boundnames) os
       return a
 
 lookupVar :: VName -> TypeM rep (NameInfo (Aliases rep))
 lookupVar name = do
-  bnd <- asks $ M.lookup name . envVtable
-  case bnd of
+  stm <- asks $ M.lookup name . envVtable
+  case stm of
     Nothing -> bad $ UnknownVariableError name
     Just dec -> return dec
 
@@ -494,8 +494,8 @@ lookupFun ::
   [SubExp] ->
   TypeM rep ([RetType rep], [DeclType])
 lookupFun fname args = do
-  bnd <- asks $ M.lookup fname . envFtable
-  case bnd of
+  stm <- asks $ M.lookup fname . envFtable
+  case stm of
     Nothing -> bad $ UnknownFunctionError fname
     Just (ftype, params) -> do
       argts <- mapM subExpType args
@@ -719,13 +719,13 @@ checkStms ::
   Stms (Aliases rep) ->
   TypeM rep a ->
   TypeM rep a
-checkStms origbnds m = delve $ stmsToList origbnds
+checkStms origstms m = delve $ stmsToList origstms
   where
-    delve (stm@(Let pat _ e) : bnds) = do
+    delve (stm@(Let pat _ e) : stms) = do
       context (pretty $ "In expression of statement" </> indent 2 (ppr pat)) $
         checkExp e
       checkStm stm $
-        delve bnds
+        delve stms
     delve [] =
       m
 
@@ -740,28 +740,28 @@ checkFunBody ::
   [RetType rep] ->
   Body (Aliases rep) ->
   TypeM rep [Names]
-checkFunBody rt (Body (_, rep) bnds res) = do
+checkFunBody rt (Body (_, rep) stms res) = do
   checkBodyDec rep
-  checkStms bnds $ do
+  checkStms stms $ do
     context "When checking body result" $ checkResult res
     context "When matching declared return type to result of body" $
       matchReturnType rt res
     map (`namesSubtract` bound_here) <$> mapM (subExpAliasesM . resSubExp) res
   where
-    bound_here = namesFromList $ M.keys $ scopeOf bnds
+    bound_here = namesFromList $ M.keys $ scopeOf stms
 
 checkLambdaBody ::
   Checkable rep =>
   [Type] ->
   Body (Aliases rep) ->
   TypeM rep [Names]
-checkLambdaBody ret (Body (_, rep) bnds res) = do
+checkLambdaBody ret (Body (_, rep) stms res) = do
   checkBodyDec rep
-  checkStms bnds $ do
+  checkStms stms $ do
     checkLambdaResult ret res
     map (`namesSubtract` bound_here) <$> mapM (subExpAliasesM . resSubExp) res
   where
-    bound_here = namesFromList $ M.keys $ scopeOf bnds
+    bound_here = namesFromList $ M.keys $ scopeOf stms
 
 checkLambdaResult ::
   Checkable rep =>
@@ -792,13 +792,13 @@ checkBody ::
   Checkable rep =>
   Body (Aliases rep) ->
   TypeM rep [Names]
-checkBody (Body (_, rep) bnds res) = do
+checkBody (Body (_, rep) stms res) = do
   checkBodyDec rep
-  checkStms bnds $ do
+  checkStms stms $ do
     checkResult res
     map (`namesSubtract` bound_here) <$> mapM (subExpAliasesM . resSubExp) res
   where
-    bound_here = namesFromList $ M.keys $ scopeOf bnds
+    bound_here = namesFromList $ M.keys $ scopeOf stms
 
 checkBasicOp :: Checkable rep => BasicOp -> TypeM rep ()
 checkBasicOp (SubExp es) =
