@@ -431,19 +431,18 @@ internaliseAppExp desc (E.DoLoop sparams mergepat mergeexp form loopbody loc) = 
     sparams' = map (`TypeParamDim` mempty) sparams
 
     forLoop mergepat' shapepat mergeinit form' =
-      bodyFromStms $
-        inScopeOf form' $ do
-          ses <- internaliseExp "loopres" loopbody
-          sets <- mapM subExpType ses
-          shapeargs <- argShapes (map I.paramName shapepat) mergepat' sets
-          return
-            ( subExpsRes $ shapeargs ++ ses,
-              ( form',
-                shapepat,
-                mergepat',
-                mergeinit
-              )
+      bodyFromStms . inScopeOf form' $ do
+        ses <- internaliseExp "loopres" loopbody
+        sets <- mapM subExpType ses
+        shapeargs <- argShapes (map I.paramName shapepat) mergepat' sets
+        pure
+          ( subExpsRes $ shapeargs ++ ses,
+            ( form',
+              shapepat,
+              mergepat',
+              mergeinit
             )
+          )
 
     handleForm mergeinit (E.ForIn x arr) = do
       arr' <- internaliseExpToVars "for_in_arr" arr
@@ -453,17 +452,16 @@ internaliseAppExp desc (E.DoLoop sparams mergepat mergeexp form loopbody loc) = 
       i <- newVName "i"
 
       ts <- mapM subExpType mergeinit
-      bindingLoopParams sparams' mergepat ts $
-        \shapepat mergepat' ->
-          bindingLambdaParams [x] (map rowType arr_ts) $ \x_params -> do
-            let loopvars = zip x_params arr'
-            forLoop mergepat' shapepat mergeinit $
-              I.ForLoop i Int64 w loopvars
+      bindingLoopParams sparams' mergepat ts $ \shapepat mergepat' ->
+        bindingLambdaParams [x] (map rowType arr_ts) $ \x_params -> do
+          let loopvars = zip x_params arr'
+          forLoop mergepat' shapepat mergeinit $
+            I.ForLoop i Int64 w loopvars
     handleForm mergeinit (E.For i num_iterations) = do
       num_iterations' <- internaliseExp1 "upper_bound" num_iterations
       num_iterations_t <- I.subExpType num_iterations'
       it <- case num_iterations_t of
-        I.Prim (IntType it) -> return it
+        I.Prim (IntType it) -> pure it
         _ -> error "internaliseExp DoLoop: invalid type"
 
       ts <- mapM subExpType mergeinit
@@ -522,7 +520,7 @@ internaliseAppExp desc (E.DoLoop sparams mergepat mergeexp form loopbody loc) = 
             subExpsRes <$> internaliseExp "loop_cond" cond
           loop_end_cond <- bodyBind loop_end_cond_body
 
-          return
+          pure
             ( subExpsRes shapeargs ++ loop_end_cond ++ subExpsRes ses,
               ( I.WhileLoop $ I.paramName loop_while,
                 shapepat,
@@ -567,9 +565,8 @@ internaliseExp desc (E.Parens e _) =
 internaliseExp desc (E.QualParens _ e _) =
   internaliseExp desc e
 internaliseExp desc (E.StringLit vs _) =
-  fmap pure $
-    letSubExp desc $
-      I.BasicOp $ I.ArrayLit (map constant vs) $ I.Prim int8
+  fmap pure . letSubExp desc $
+    I.BasicOp $ I.ArrayLit (map constant vs) $ I.Prim int8
 internaliseExp _ (E.Var (E.QualName _ name) _ _) = do
   subst <- lookupSubst name
   case subst of
@@ -1213,9 +1210,8 @@ internaliseStreamRed desc o comm lam0 lam arr = do
     I.BasicOp $ I.SubExp $ constant (0 :: Int64)
   forM_ lam_val_params $ \p ->
     letBindNames [I.paramName p] $
-      I.BasicOp $
-        I.Scratch (I.elemType $ I.paramType p) $
-          I.arrayDims $ I.paramType p
+      I.BasicOp . I.Scratch (I.elemType $ I.paramType p) $
+        I.arrayDims $ I.paramType p
   nes <- bodyBind =<< renameBody lam_body
 
   nes_ts <- mapM I.subExpResType nes
@@ -1348,9 +1344,8 @@ certifyingNonnegative ::
   InternaliseM a
 certifyingNonnegative loc t x m = do
   nonnegative <-
-    letSubExp "nonnegative" $
-      I.BasicOp $
-        CmpOp (CmpSle t) (intConst t 0) x
+    letSubExp "nonnegative" . I.BasicOp $
+      CmpOp (CmpSle t) (intConst t 0) x
   c <- assert "nonzero_cert" nonnegative "negative exponent" loc
   certifying c m
 
