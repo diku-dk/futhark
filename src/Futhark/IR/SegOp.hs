@@ -1090,9 +1090,9 @@ mkWiseKernelBody ::
   Stms (Wise rep) ->
   [KernelResult] ->
   KernelBody (Wise rep)
-mkWiseKernelBody dec bnds res =
-  let Body dec' _ _ = mkWiseBody dec bnds $ subExpsRes res_vs
-   in KernelBody dec' bnds res
+mkWiseKernelBody dec stms res =
+  let Body dec' _ _ = mkWiseBody dec stms $ subExpsRes res_vs
+   in KernelBody dec' stms res
   where
     res_vs = map kernelResultSubExp res
 

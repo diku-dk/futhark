@@ -463,10 +463,10 @@ doubleBufferResult valparams buffered (Body _ stms res) =
       -- based on the type of the function parameter.
       let t = resultType $ paramType fparam
           summary = MemArray (elemType t) (arrayShape t) NoUniqueness $ ArrayIn bufname ixfun
-          copybnd =
+          copystm =
             Let (Pat [PatElem copyname summary]) (defAux ()) $
               BasicOp $ Copy v
-       in (Just copybnd, SubExpRes cs (Var copyname))
+       in (Just copystm, SubExpRes cs (Var copyname))
     buffer _ _ se =
       (Nothing, se)
 
