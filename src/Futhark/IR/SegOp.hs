@@ -1176,9 +1176,9 @@ mkWiseKernelBody ::
   Stms (Wise rep) ->
   [KernelResult] ->
   KernelBody (Wise rep)
-mkWiseKernelBody dec bnds res =
-  let Body dec' _ _ = mkWiseBody dec bnds $ subExpsRes res_vs
-   in KernelBody dec' bnds res
+mkWiseKernelBody dec stms res =
+  let Body dec' _ _ = mkWiseBody dec stms $ subExpsRes res_vs
+   in KernelBody dec' stms res
   where
     res_vs = map kernelResultSubExp res
 
@@ -1575,8 +1575,8 @@ bottomUpSegOp (vtable, used) (Pat kpes) dec segop = Simplify $ do
 --- Memory
 
 kernelBodyReturns ::
-  (Mem rep, HasScope rep m, Monad m) =>
-  KernelBody rep ->
+  (Mem rep inner, HasScope rep m, Monad m) =>
+  KernelBody somerep ->
   [ExpReturns] ->
   m [ExpReturns]
 kernelBodyReturns = zipWithM correct . kernelBodyResult
@@ -1586,8 +1586,8 @@ kernelBodyReturns = zipWithM correct . kernelBodyResult
 
 -- | Like 'segOpType', but for memory representations.
 segOpReturns ::
-  (Mem rep, Monad m, HasScope rep m) =>
-  SegOp lvl rep ->
+  (Mem rep inner, Monad m, HasScope rep m) =>
+  SegOp lvl somerep ->
   m [ExpReturns]
 segOpReturns k@(SegMap _ _ _ kbody) =
   kernelBodyReturns kbody . extReturns =<< opType k

@@ -21,7 +21,8 @@ Identifiers and Keywords
 ------------------------
 
 .. productionlist::
-   id: `letter` (`letter` | "_" | "'")* | "_" `id`
+   id: `letter` `constituent`* | "_" `constituent`*
+   constituent: `letter` | `digit` | "_" | "'"
    quals: (`id` ".")+
    qualid: `id` | `quals` `id`
    binop: `opstartchar` `opchar`*
@@ -51,13 +52,12 @@ Primitive Types and Values
 Boolean literals are written ``true`` and ``false``.  The primitive
 types in Futhark are the signed integer types ``i8``, ``i16``,
 ``i32``, ``i64``, the unsigned integer types ``u8``, ``u16``, ``u32``,
-``u64``, the floating-point types ``f32``, ``f64``, as well as
-``bool``.  An ``f32`` is always a single-precision float and a ``f64``
-is a double-precision float.
+``u64``, the floating-point types ``f16``, ``f32``, ``f64``, as well
+as ``bool``.
 
 .. productionlist::
    int_type: "i8" | "i16" | "i32" | "i64" | "u8" | "u16" | "u32" | "u64"
-   float_type: "f32" | "f64"
+   float_type: "f16" | "f32" | "f64"
 
 Numeric literals can be suffixed with their intended type.  For
 example ``42i8`` is of type ``i8``, and ``1337e2f64`` is of type
@@ -429,6 +429,8 @@ literals and variables, but also more complicated forms.
    exp:   `atom`
       : | `exp` `qualbinop` `exp`
       : | `exp` `exp`
+      : | "!" `exp`
+      : | "-" `exp`
       : | `constructor` `exp`*
       : | `exp` ":" `type`
       : | `exp` ":>" `type`
@@ -502,6 +504,10 @@ in natural text.
 * An expression ``(-x)`` is parsed as the variable ``x`` negated and
   enclosed in parentheses, rather than an operator section partially
   applying the infix operator ``-``.
+
+* Function application and prefix operators bind more tightly than any
+  infix operator.  Note that the only prefix operators are ``!`` and
+  ``-``, and more cannot be defined.
 
 * The following table describes the precedence and associativity of
   infix operators.  All operators in the same row have the same
@@ -1770,6 +1776,11 @@ The following declaration attributes are supported.
 Do not inline any calls to this function.  If the function is then
 used within a parallel construct (e.g. ``map``), this will likely
 prevent the GPU backends from generating working code.
+
+``inline``
+..........
+
+Always inline calls to this function.
 
 Spec attributes
 ~~~~~~~~~~~~~~~

@@ -42,7 +42,6 @@ import qualified Control.Monad.RWS.Strict
 import Control.Monad.Reader
 import qualified Data.Map.Strict as M
 import Futhark.IR.Pretty ()
-import Futhark.IR.Prop.Patterns
 import Futhark.IR.Prop.Types
 import Futhark.IR.Rep
 import Futhark.IR.Syntax
@@ -181,7 +180,7 @@ instance Scoped rep (LoopForm rep) where
 -- | The scope of a pattern.
 scopeOfPat :: LetDec rep ~ dec => PatT dec -> Scope rep
 scopeOfPat =
-  mconcat . map scopeOfPatElem . patElements
+  mconcat . map scopeOfPatElem . patElems
 
 -- | The scope of a pattern element.
 scopeOfPatElem :: LetDec rep ~ dec => PatElemT dec -> Scope rep

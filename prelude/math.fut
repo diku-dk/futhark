@@ -17,6 +17,7 @@ module type from_prim = {
   val u32: u32 -> t
   val u64: u64 -> t
 
+  val f16: f16 -> t
   val f32: f32 -> t
   val f64: f64 -> t
 
@@ -89,7 +90,9 @@ module type integral = {
   val &: t -> t -> t
   val |: t -> t -> t
   val ^: t -> t -> t
-  val !: t -> t
+
+  -- | Bitwise negation.
+  val not: t -> t
 
   val <<: t -> t -> t
   val >>: t -> t -> t
@@ -111,12 +114,13 @@ module type integral = {
   val mad_hi: (a: t) -> (b: t) -> (c: t) -> t
 
   -- | Count number of zero bits preceding the most significant set
-  -- bit.
+  -- bit.  Returns the number of bits in the type if the argument is
+  -- zero.
   val clz: t -> i32
 
   -- | Count number of trailing zero bits following the least
   -- significant set bit.  Returns the number of bits in the type if
-  -- the argument is all-zero.
+  -- the argument is zero.
   val ctz: t -> i32
 }
 
@@ -233,6 +237,7 @@ module bool: from_prim with t = bool = {
   let u32 (x: u32) = intrinsics.itob_i32_bool (intrinsics.sign_i32 x)
   let u64 (x: u64) = intrinsics.itob_i64_bool (intrinsics.sign_i64 x)
 
+  let f16 (x: f16) = x != 0f16
   let f32 (x: f32) = x != 0f32
   let f64 (x: f64) = x != 0f64
 
@@ -254,7 +259,7 @@ module i8: (integral with t = i8) = {
   let (x: i8) & (y: i8) = intrinsics.and8 (x, y)
   let (x: i8) | (y: i8) = intrinsics.or8 (x, y)
   let (x: i8) ^ (y: i8) = intrinsics.xor8 (x, y)
-  let ! (x: i8) = intrinsics.complement8 x
+  let not (x: i8) = intrinsics.complement8 x
 
   let (x: i8) << (y: i8) = intrinsics.shl8 (x, y)
   let (x: i8) >> (y: i8) = intrinsics.ashr8 (x, y)
@@ -270,6 +275,7 @@ module i8: (integral with t = i8) = {
   let u32 (x: u32) = intrinsics.zext_i32_i8 (intrinsics.sign_i32 x)
   let u64 (x: u64) = intrinsics.zext_i64_i8 (intrinsics.sign_i64 x)
 
+  let f16 (x: f16) = intrinsics.fptosi_f16_i8 x
   let f32 (x: f32) = intrinsics.fptosi_f32_i8 x
   let f64 (x: f64) = intrinsics.fptosi_f64_i8 x
 
@@ -283,7 +289,7 @@ module i8: (integral with t = i8) = {
   let (x: i8) > (y: i8) = intrinsics.slt8 (y, x)
   let (x: i8) <= (y: i8) = intrinsics.sle8 (x, y)
   let (x: i8) >= (y: i8) = intrinsics.sle8 (y, x)
-  let (x: i8) != (y: i8) = intrinsics.! (x == y)
+  let (x: i8) != (y: i8) = !(x == y)
 
   let sgn (x: i8) = intrinsics.ssignum8 x
   let abs (x: i8) = intrinsics.abs8 x
@@ -298,7 +304,7 @@ module i8: (integral with t = i8) = {
   let num_bits = 8i32
   let get_bit (bit: i32) (x: t) = to_i32 ((x >> i32 bit) & i32 1)
   let set_bit (bit: i32) (x: t) (b: i32) =
-    ((x & i32 (intrinsics.!(1 intrinsics.<< bit))) | i32 (b intrinsics.<< bit))
+    ((x & i32 (!(1 intrinsics.<< bit))) | i32 (b intrinsics.<< bit))
   let popc = intrinsics.popc8
   let mul_hi a b = intrinsics.mul_hi8 (i8 a, i8 b)
   let mad_hi a b c = intrinsics.mad_hi8 (i8 a, i8 b, i8 c)
@@ -326,7 +332,7 @@ module i16: (integral with t = i16) = {
   let (x: i16) & (y: i16) = intrinsics.and16 (x, y)
   let (x: i16) | (y: i16) = intrinsics.or16 (x, y)
   let (x: i16) ^ (y: i16) = intrinsics.xor16 (x, y)
-  let ! (x: i16) = intrinsics.complement16 x
+  let not (x: i16) = intrinsics.complement16 x
 
   let (x: i16) << (y: i16) = intrinsics.shl16 (x, y)
   let (x: i16) >> (y: i16) = intrinsics.ashr16 (x, y)
@@ -342,6 +348,7 @@ module i16: (integral with t = i16) = {
   let u32 (x: u32) = intrinsics.zext_i32_i16 (intrinsics.sign_i32 x)
   let u64 (x: u64) = intrinsics.zext_i64_i16 (intrinsics.sign_i64 x)
 
+  let f16 (x: f16) = intrinsics.fptosi_f16_i16 x
   let f32 (x: f32) = intrinsics.fptosi_f32_i16 x
   let f64 (x: f64) = intrinsics.fptosi_f64_i16 x
 
@@ -355,7 +362,7 @@ module i16: (integral with t = i16) = {
   let (x: i16) > (y: i16) = intrinsics.slt16 (y, x)
   let (x: i16) <= (y: i16) = intrinsics.sle16 (x, y)
   let (x: i16) >= (y: i16) = intrinsics.sle16 (y, x)
-  let (x: i16) != (y: i16) = intrinsics.! (x == y)
+  let (x: i16) != (y: i16) = !(x == y)
 
   let sgn (x: i16) = intrinsics.ssignum16 x
   let abs (x: i16) = intrinsics.abs16 x
@@ -370,7 +377,7 @@ module i16: (integral with t = i16) = {
   let num_bits = 16i32
   let get_bit (bit: i32) (x: t) = to_i32 ((x >> i32 bit) & i32 1)
   let set_bit (bit: i32) (x: t) (b: i32) =
-    ((x & i32 (intrinsics.!(1 intrinsics.<< bit))) | i32 (b intrinsics.<< bit))
+    ((x & i32 (!(1 intrinsics.<< bit))) | i32 (b intrinsics.<< bit))
   let popc = intrinsics.popc16
   let mul_hi a b = intrinsics.mul_hi16 (i16 a, i16 b)
   let mad_hi a b c = intrinsics.mad_hi16 (i16 a, i16 b, i16 c)
@@ -401,7 +408,7 @@ module i32: (integral with t = i32) = {
   let (x: i32) & (y: i32) = intrinsics.and32 (x, y)
   let (x: i32) | (y: i32) = intrinsics.or32 (x, y)
   let (x: i32) ^ (y: i32) = intrinsics.xor32 (x, y)
-  let ! (x: i32) = intrinsics.complement32 x
+  let not (x: i32) = intrinsics.complement32 x
 
   let (x: i32) << (y: i32) = intrinsics.shl32 (x, y)
   let (x: i32) >> (y: i32) = intrinsics.ashr32 (x, y)
@@ -417,6 +424,7 @@ module i32: (integral with t = i32) = {
   let u32 (x: u32) = intrinsics.zext_i32_i32 (intrinsics.sign_i32 x)
   let u64 (x: u64) = intrinsics.zext_i64_i32 (intrinsics.sign_i64 x)
 
+  let f16 (x: f16) = intrinsics.fptosi_f16_i32 x
   let f32 (x: f32) = intrinsics.fptosi_f32_i32 x
   let f64 (x: f64) = intrinsics.fptosi_f64_i32 x
 
@@ -430,7 +438,7 @@ module i32: (integral with t = i32) = {
   let (x: i32) > (y: i32) = intrinsics.slt32 (y, x)
   let (x: i32) <= (y: i32) = intrinsics.sle32 (x, y)
   let (x: i32) >= (y: i32) = intrinsics.sle32 (y, x)
-  let (x: i32) != (y: i32) = intrinsics.! (x == y)
+  let (x: i32) != (y: i32) = !(x == y)
 
   let sgn (x: i32) = intrinsics.ssignum32 x
   let abs (x: i32) = intrinsics.abs32 x
@@ -445,7 +453,7 @@ module i32: (integral with t = i32) = {
   let num_bits = 32i32
   let get_bit (bit: i32) (x: t) = to_i32 ((x >> i32 bit) & i32 1)
   let set_bit (bit: i32) (x: t) (b: i32) =
-    ((x & i32 (intrinsics.!(1 intrinsics.<< bit))) | i32 (b intrinsics.<< bit))
+    ((x & i32 (!(1 intrinsics.<< bit))) | i32 (b intrinsics.<< bit))
   let popc = intrinsics.popc32
   let mul_hi a b = intrinsics.mul_hi32 (i32 a, i32 b)
   let mad_hi a b c = intrinsics.mad_hi32 (i32 a, i32 b, i32 c)
@@ -476,7 +484,7 @@ module i64: (integral with t = i64) = {
   let (x: i64) & (y: i64) = intrinsics.and64 (x, y)
   let (x: i64) | (y: i64) = intrinsics.or64 (x, y)
   let (x: i64) ^ (y: i64) = intrinsics.xor64 (x, y)
-  let ! (x: i64) = intrinsics.complement64 x
+  let not (x: i64) = intrinsics.complement64 x
 
   let (x: i64) << (y: i64) = intrinsics.shl64 (x, y)
   let (x: i64) >> (y: i64) = intrinsics.ashr64 (x, y)
@@ -492,6 +500,7 @@ module i64: (integral with t = i64) = {
   let u32 (x: u32) = intrinsics.zext_i32_i64 (intrinsics.sign_i32 x)
   let u64 (x: u64) = intrinsics.zext_i64_i64 (intrinsics.sign_i64 x)
 
+  let f16 (x: f16) = intrinsics.fptosi_f16_i64 x
   let f32 (x: f32) = intrinsics.fptosi_f32_i64 x
   let f64 (x: f64) = intrinsics.fptosi_f64_i64 x
 
@@ -505,7 +514,7 @@ module i64: (integral with t = i64) = {
   let (x: i64) > (y: i64) = intrinsics.slt64 (y, x)
   let (x: i64) <= (y: i64) = intrinsics.sle64 (x, y)
   let (x: i64) >= (y: i64) = intrinsics.sle64 (y, x)
-  let (x: i64) != (y: i64) = intrinsics.! (x == y)
+  let (x: i64) != (y: i64) = !(x == y)
 
   let sgn (x: i64) = intrinsics.ssignum64 x
   let abs (x: i64) = intrinsics.abs64 x
@@ -520,7 +529,7 @@ module i64: (integral with t = i64) = {
   let num_bits = 64i32
   let get_bit (bit: i32) (x: t) = to_i32 ((x >> i32 bit) & i32 1)
   let set_bit (bit: i32) (x: t) (b: i32) =
-    ((x & i32 (intrinsics.!(1 intrinsics.<< bit))) | intrinsics.zext_i32_i64 (b intrinsics.<< bit))
+    ((x & i32 (!(1 intrinsics.<< bit))) | intrinsics.zext_i32_i64 (b intrinsics.<< bit))
   let popc = intrinsics.popc64
   let mul_hi a b = intrinsics.mul_hi64 (i64 a, i64 b)
   let mad_hi a b c = intrinsics.mad_hi64 (i64 a, i64 b, i64 c)
@@ -551,7 +560,7 @@ module u8: (integral with t = u8) = {
   let (x: u8) & (y: u8) = unsign (intrinsics.and8 (sign x, sign y))
   let (x: u8) | (y: u8) = unsign (intrinsics.or8 (sign x, sign y))
   let (x: u8) ^ (y: u8) = unsign (intrinsics.xor8 (sign x, sign y))
-  let ! (x: u8) = unsign (intrinsics.complement8 (sign x))
+  let not (x: u8) = unsign (intrinsics.complement8 (sign x))
 
   let (x: u8) << (y: u8) = unsign (intrinsics.shl8 (sign x, sign y))
   let (x: u8) >> (y: u8) = unsign (intrinsics.ashr8 (sign x, sign y))
@@ -567,6 +576,7 @@ module u8: (integral with t = u8) = {
   let i32 (x: i32) = unsign (intrinsics.zext_i32_i8 x)
   let i64 (x: i64) = unsign (intrinsics.zext_i64_i8 x)
 
+  let f16 (x: f16) = unsign (intrinsics.fptoui_f16_i8 x)
   let f32 (x: f32) = unsign (intrinsics.fptoui_f32_i8 x)
   let f64 (x: f64) = unsign (intrinsics.fptoui_f64_i8 x)
 
@@ -580,7 +590,7 @@ module u8: (integral with t = u8) = {
   let (x: u8) > (y: u8) = intrinsics.ult8 (sign y, sign x)
   let (x: u8) <= (y: u8) = intrinsics.ule8 (sign x, sign y)
   let (x: u8) >= (y: u8) = intrinsics.ule8 (sign y, sign x)
-  let (x: u8) != (y: u8) = intrinsics.! (x == y)
+  let (x: u8) != (y: u8) = !(x == y)
 
   let sgn (x: u8) = unsign (intrinsics.usignum8 (sign x))
   let abs (x: u8) = x
@@ -595,7 +605,7 @@ module u8: (integral with t = u8) = {
   let num_bits = 8i32
   let get_bit (bit: i32) (x: t) = to_i32 ((x >> i32 bit) & i32 1)
   let set_bit (bit: i32) (x: t) (b: i32) =
-    ((x & i32 (intrinsics.!(1 intrinsics.<< bit))) | i32 (b intrinsics.<< bit))
+    ((x & i32 (!(1 intrinsics.<< bit))) | i32 (b intrinsics.<< bit))
   let popc x = intrinsics.popc8 (sign x)
   let mul_hi a b = unsign (intrinsics.mul_hi8 (sign a, sign b))
   let mad_hi a b c = unsign (intrinsics.mad_hi8 (sign a, sign b, sign c))
@@ -626,7 +636,7 @@ module u16: (integral with t = u16) = {
   let (x: u16) & (y: u16) = unsign (intrinsics.and16 (sign x, sign y))
   let (x: u16) | (y: u16) = unsign (intrinsics.or16 (sign x, sign y))
   let (x: u16) ^ (y: u16) = unsign (intrinsics.xor16 (sign x, sign y))
-  let ! (x: u16) = unsign (intrinsics.complement16 (sign x))
+  let not (x: u16) = unsign (intrinsics.complement16 (sign x))
 
   let (x: u16) << (y: u16) = unsign (intrinsics.shl16 (sign x, sign y))
   let (x: u16) >> (y: u16) = unsign (intrinsics.ashr16 (sign x, sign y))
@@ -642,6 +652,7 @@ module u16: (integral with t = u16) = {
   let i32 (x: i32) = unsign (intrinsics.zext_i32_i16 x)
   let i64 (x: i64) = unsign (intrinsics.zext_i64_i16 x)
 
+  let f16 (x: f16) = unsign (intrinsics.fptoui_f16_i16 x)
   let f32 (x: f32) = unsign (intrinsics.fptoui_f32_i16 x)
   let f64 (x: f64) = unsign (intrinsics.fptoui_f64_i16 x)
 
@@ -655,7 +666,7 @@ module u16: (integral with t = u16) = {
   let (x: u16) > (y: u16) = intrinsics.ult16 (sign y, sign x)
   let (x: u16) <= (y: u16) = intrinsics.ule16 (sign x, sign y)
   let (x: u16) >= (y: u16) = intrinsics.ule16 (sign y, sign x)
-  let (x: u16) != (y: u16) = intrinsics.! (x == y)
+  let (x: u16) != (y: u16) = !(x == y)
 
   let sgn (x: u16) = unsign (intrinsics.usignum16 (sign x))
   let abs (x: u16) = x
@@ -670,7 +681,7 @@ module u16: (integral with t = u16) = {
   let num_bits = 16i32
   let get_bit (bit: i32) (x: t) = to_i32 ((x >> i32 bit) & i32 1)
   let set_bit (bit: i32) (x: t) (b: i32) =
-    ((x & i32 (intrinsics.!(1 intrinsics.<< bit))) | i32 (b intrinsics.<< bit))
+    ((x & i32 (!(1 intrinsics.<< bit))) | i32 (b intrinsics.<< bit))
   let popc x = intrinsics.popc16 (sign x)
   let mul_hi a b = unsign (intrinsics.mul_hi16 (sign a, sign b))
   let mad_hi a b c = unsign (intrinsics.mad_hi16 (sign a, sign b, sign c))
@@ -701,7 +712,7 @@ module u32: (integral with t = u32) = {
   let (x: u32) & (y: u32) = unsign (intrinsics.and32 (sign x, sign y))
   let (x: u32) | (y: u32) = unsign (intrinsics.or32 (sign x, sign y))
   let (x: u32) ^ (y: u32) = unsign (intrinsics.xor32 (sign x, sign y))
-  let ! (x: u32) = unsign (intrinsics.complement32 (sign x))
+  let not (x: u32) = unsign (intrinsics.complement32 (sign x))
 
   let (x: u32) << (y: u32) = unsign (intrinsics.shl32 (sign x, sign y))
   let (x: u32) >> (y: u32) = unsign (intrinsics.ashr32 (sign x, sign y))
@@ -717,6 +728,7 @@ module u32: (integral with t = u32) = {
   let i32 (x: i32) = unsign (intrinsics.zext_i32_i32 x)
   let i64 (x: i64) = unsign (intrinsics.zext_i64_i32 x)
 
+  let f16 (x: f16) = unsign (intrinsics.fptoui_f16_i32 x)
   let f32 (x: f32) = unsign (intrinsics.fptoui_f32_i32 x)
   let f64 (x: f64) = unsign (intrinsics.fptoui_f64_i32 x)
 
@@ -730,7 +742,7 @@ module u32: (integral with t = u32) = {
   let (x: u32) > (y: u32) = intrinsics.ult32 (sign y, sign x)
   let (x: u32) <= (y: u32) = intrinsics.ule32 (sign x, sign y)
   let (x: u32) >= (y: u32) = intrinsics.ule32 (sign y, sign x)
-  let (x: u32) != (y: u32) = intrinsics.! (x == y)
+  let (x: u32) != (y: u32) = !(x == y)
 
   let sgn (x: u32) = unsign (intrinsics.usignum32 (sign x))
   let abs (x: u32) = x
@@ -745,7 +757,7 @@ module u32: (integral with t = u32) = {
   let num_bits = 32i32
   let get_bit (bit: i32) (x: t) = to_i32 ((x >> i32 bit) & i32 1)
   let set_bit (bit: i32) (x: t) (b: i32) =
-    ((x & i32 (intrinsics.!(1 intrinsics.<< bit))) | i32 (b intrinsics.<< bit))
+    ((x & i32 (!(1 intrinsics.<< bit))) | i32 (b intrinsics.<< bit))
   let popc x = intrinsics.popc32 (sign x)
   let mul_hi a b = unsign (intrinsics.mul_hi32 (sign a, sign b))
   let mad_hi a b c = unsign (intrinsics.mad_hi32 (sign a, sign b, sign c))
@@ -776,7 +788,7 @@ module u64: (integral with t = u64) = {
   let (x: u64) & (y: u64) = unsign (intrinsics.and64 (sign x, sign y))
   let (x: u64) | (y: u64) = unsign (intrinsics.or64 (sign x, sign y))
   let (x: u64) ^ (y: u64) = unsign (intrinsics.xor64 (sign x, sign y))
-  let ! (x: u64) = unsign (intrinsics.complement64 (sign x))
+  let not (x: u64) = unsign (intrinsics.complement64 (sign x))
 
   let (x: u64) << (y: u64) = unsign (intrinsics.shl64 (sign x, sign y))
   let (x: u64) >> (y: u64) = unsign (intrinsics.ashr64 (sign x, sign y))
@@ -792,6 +804,7 @@ module u64: (integral with t = u64) = {
   let i32 (x: i32) = unsign (intrinsics.zext_i32_i64 x)
   let i64 (x: i64) = unsign (intrinsics.zext_i64_i64 x)
 
+  let f16 (x: f16) = unsign (intrinsics.fptoui_f16_i64 x)
   let f32 (x: f32) = unsign (intrinsics.fptoui_f32_i64 x)
   let f64 (x: f64) = unsign (intrinsics.fptoui_f64_i64 x)
 
@@ -805,7 +818,7 @@ module u64: (integral with t = u64) = {
   let (x: u64) > (y: u64) = intrinsics.ult64 (sign y, sign x)
   let (x: u64) <= (y: u64) = intrinsics.ule64 (sign x, sign y)
   let (x: u64) >= (y: u64) = intrinsics.ule64 (sign y, sign x)
-  let (x: u64) != (y: u64) = intrinsics.! (x == y)
+  let (x: u64) != (y: u64) = !(x == y)
 
   let sgn (x: u64) = unsign (intrinsics.usignum64 (sign x))
   let abs (x: u64) = x
@@ -820,7 +833,7 @@ module u64: (integral with t = u64) = {
   let num_bits = 64i32
   let get_bit (bit: i32) (x: t) = to_i32 ((x >> i32 bit) & i32 1)
   let set_bit (bit: i32) (x: t) (b: i32) =
-    ((x & i32 (intrinsics.!(1 intrinsics.<< bit))) | i32 (b intrinsics.<< bit))
+    ((x & i32 (!(1 intrinsics.<< bit))) | i32 (b intrinsics.<< bit))
   let popc x = intrinsics.popc64 (sign x)
   let mul_hi a b = unsign (intrinsics.mul_hi64 (sign a, sign b))
   let mad_hi a b c = unsign (intrinsics.mad_hi64 (sign a, sign b, sign c))
@@ -857,6 +870,7 @@ module f64: (float with t = f64 with int_t = u64) = {
   let i32 (x: i32) = intrinsics.sitofp_i32_f64 x
   let i64 (x: i64) = intrinsics.sitofp_i64_f64 x
 
+  let f16 (x: f16) = intrinsics.fpconv_f16_f64 x
   let f32 (x: f32) = intrinsics.fpconv_f32_f64 x
   let f64 (x: f64) = intrinsics.fpconv_f64_f64 x
 
@@ -871,7 +885,7 @@ module f64: (float with t = f64 with int_t = u64) = {
   let (x: f64) > (y: f64) = intrinsics.lt64 (y, x)
   let (x: f64) <= (y: f64) = intrinsics.le64 (x, y)
   let (x: f64) >= (y: f64) = intrinsics.le64 (y, x)
-  let (x: f64) != (y: f64) = intrinsics.! (x == y)
+  let (x: f64) != (y: f64) = !(x == y)
 
   let neg (x: t) = -x
   let recip (x: t) = 1/x
@@ -965,6 +979,7 @@ module f32: (float with t = f32 with int_t = u32) = {
   let i32 (x: i32) = intrinsics.sitofp_i32_f32 x
   let i64 (x: i64) = intrinsics.sitofp_i64_f32 x
 
+  let f16 (x: f16) = intrinsics.fpconv_f16_f32 x
   let f32 (x: f32) = intrinsics.fpconv_f32_f32 x
   let f64 (x: f64) = intrinsics.fpconv_f64_f32 x
 
@@ -979,7 +994,7 @@ module f32: (float with t = f32 with int_t = u32) = {
   let (x: f32) > (y: f32) = intrinsics.lt32 (y, x)
   let (x: f32) <= (y: f32) = intrinsics.le32 (x, y)
   let (x: f32) >= (y: f32) = intrinsics.le32 (y, x)
-  let (x: f32) != (y: f32) = intrinsics.! (x == y)
+  let (x: f32) != (y: f32) = !(x == y)
 
   let neg (x: t) = -x
   let recip (x: t) = 1/x
@@ -1038,6 +1053,119 @@ module f32: (float with t = f32 with int_t = u32) = {
   let highest = inf
   let lowest = -inf
   let epsilon = 1.1920929e-7f32
+
+  let pi = f64 f64m.pi
+  let e = f64 f64m.e
+
+  let sum = reduce (+) (i32 0)
+  let product = reduce (*) (i32 1)
+  let maximum = reduce max lowest
+  let minimum = reduce min highest
+}
+
+-- | Emulated with single precision on systems that do not natively
+-- support half precision.  This means you might get more accurate
+-- results than on real systems, but it is also likely to be
+-- significantly slower than just using `f32` in the first place.
+module f16: (float with t = f16 with int_t = u16) = {
+  type t = f16
+  type int_t = u16
+
+  module i16m = i16
+  module u16m = u16
+  module f64m = f64
+
+  let (x: f16) + (y: f16) = intrinsics.fadd16 (x, y)
+  let (x: f16) - (y: f16) = intrinsics.fsub16 (x, y)
+  let (x: f16) * (y: f16) = intrinsics.fmul16 (x, y)
+  let (x: f16) / (y: f16) = intrinsics.fdiv16 (x, y)
+  let (x: f16) % (y: f16) = intrinsics.fmod16 (x, y)
+  let (x: f16) ** (y: f16) = intrinsics.fpow16 (x, y)
+
+  let u8  (x: u8)  = intrinsics.uitofp_i8_f16  (i8.u8 x)
+  let u16 (x: u16) = intrinsics.uitofp_i16_f16 (i16.u16 x)
+  let u32 (x: u32) = intrinsics.uitofp_i32_f16 (i32.u32 x)
+  let u64 (x: u64) = intrinsics.uitofp_i64_f16 (i64.u64 x)
+
+  let i8 (x: i8) = intrinsics.sitofp_i8_f16 x
+  let i16 (x: i16) = intrinsics.sitofp_i16_f16 x
+  let i32 (x: i32) = intrinsics.sitofp_i32_f16 x
+  let i64 (x: i64) = intrinsics.sitofp_i64_f16 x
+
+  let f16 (x: f16) = intrinsics.fpconv_f16_f16 x
+  let f32 (x: f32) = intrinsics.fpconv_f32_f16 x
+  let f64 (x: f64) = intrinsics.fpconv_f64_f16 x
+
+  let bool (x: bool) = if x then 1f16 else 0f16
+
+  let from_fraction (x: i64) (y: i64) = i64 x / i64 y
+  let to_i64 (x: f16) = intrinsics.fptosi_f16_i64 x
+  let to_f64 (x: f16) = intrinsics.fpconv_f16_f64 x
+
+  let (x: f16) == (y: f16) = intrinsics.eq_f16 (x, y)
+  let (x: f16) < (y: f16) = intrinsics.lt16 (x, y)
+  let (x: f16) > (y: f16) = intrinsics.lt16 (y, x)
+  let (x: f16) <= (y: f16) = intrinsics.le16 (x, y)
+  let (x: f16) >= (y: f16) = intrinsics.le16 (y, x)
+  let (x: f16) != (y: f16) = !(x == y)
+
+  let neg (x: t) = -x
+  let recip (x: t) = 1/x
+  let max (x: t) (y: t) = intrinsics.fmax16 (x, y)
+  let min (x: t) (y: t) = intrinsics.fmin16 (x, y)
+
+  let sgn (x: f16) = intrinsics.fsignum16 x
+  let abs (x: f16) = intrinsics.fabs16 x
+
+  let sqrt (x: f16) = intrinsics.sqrt16 x
+
+  let log (x: f16) = intrinsics.log16 x
+  let log2 (x: f16) = intrinsics.log2_16 x
+  let log10 (x: f16) = intrinsics.log10_16 x
+  let exp (x: f16) = intrinsics.exp16 x
+  let sin (x: f16) = intrinsics.sin16 x
+  let cos (x: f16) = intrinsics.cos16 x
+  let tan (x: f16) = intrinsics.tan16 x
+  let acos (x: f16) = intrinsics.acos16 x
+  let asin (x: f16) = intrinsics.asin16 x
+  let atan (x: f16) = intrinsics.atan16 x
+  let sinh (x: f16) = intrinsics.sinh16 x
+  let cosh (x: f16) = intrinsics.cosh16 x
+  let tanh (x: f16) = intrinsics.tanh16 x
+  let acosh (x: f16) = intrinsics.acosh16 x
+  let asinh (x: f16) = intrinsics.asinh16 x
+  let atanh (x: f16) = intrinsics.atanh16 x
+  let atan2 (x: f16) (y: f16) = intrinsics.atan2_16 (x, y)
+  let hypot (x: f16) (y: f16) = intrinsics.hypot16 (x, y)
+  let gamma = intrinsics.gamma16
+  let lgamma = intrinsics.lgamma16
+
+  let lerp v0 v1 t = intrinsics.lerp16 (v0,v1,t)
+  let fma a b c = intrinsics.fma16 (a,b,c)
+  let mad a b c = intrinsics.mad16 (a,b,c)
+
+  let ceil = intrinsics.ceil16
+  let floor = intrinsics.floor16
+  let trunc (x: f16) : f16 = i16 (i16m.f16 x)
+
+  let round = intrinsics.round16
+
+  let to_bits (x: f16): u16 = u16m.i16 (intrinsics.to_bits16 x)
+  let from_bits (x: u16): f16 = intrinsics.from_bits16 (intrinsics.sign_i16 x)
+
+  let num_bits = 16i32
+  let get_bit (bit: i32) (x: t) = u16m.get_bit bit (to_bits x)
+  let set_bit (bit: i32) (x: t) (b: i32) = from_bits (u16m.set_bit bit (to_bits x) b)
+
+  let isinf (x: f16) = intrinsics.isinf16 x
+  let isnan (x: f16) = intrinsics.isnan16 x
+
+  let inf = 1f16 / 0f16
+  let nan = 0f16 / 0f16
+
+  let highest = inf
+  let lowest = -inf
+  let epsilon = 1.1920929e-7f16
 
   let pi = f64 f64m.pi
   let e = f64 f64m.e

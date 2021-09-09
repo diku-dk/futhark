@@ -23,7 +23,7 @@ isCt0 :: SubExp -> Bool
 isCt0 (Constant v) = zeroIsh v
 isCt0 _ = False
 
--- | Some index expressions can be simplified to 'SubExp's, while
+-- | Some index expressions can be simplified to t'SubExp's, while
 -- others produce another index expression (which may be further
 -- simplifiable).
 data IndexResult
@@ -111,9 +111,13 @@ simplifyIndexing vtable seType idd (Slice inds) consuming =
         IndexResult cs aa
           <$> subExpSlice (sliceSlice (primExpSlice ais) (primExpSlice (Slice inds)))
     Just (Replicate (Shape [_]) (Var vv), cs)
-      | [DimFix {}] <- inds, not consuming -> Just $ pure $ SubExpResult cs $ Var vv
+      | [DimFix {}] <- inds,
+        not consuming,
+        ST.available vv vtable ->
+        Just $ pure $ SubExpResult cs $ Var vv
       | DimFix {} : is' <- inds,
-        not consuming ->
+        not consuming,
+        ST.available vv vtable ->
         Just $ pure $ IndexResult cs vv $ Slice is'
     Just (Replicate (Shape [_]) val@(Constant _), cs)
       | [DimFix {}] <- inds, not consuming -> Just $ pure $ SubExpResult cs val
@@ -139,8 +143,10 @@ simplifyIndexing vtable seType idd (Slice inds) consuming =
         length inds == length dims,
         -- It is generally not safe to simplify a slice of a copy,
         -- because the result may be used in an in-place update of the
-        -- original.
-        Just _ <- mapM dimFix inds,
+        -- original.  But we know this can only happen if the original
+        -- is bound the same depth as we are!
+        all (isJust . dimFix) inds
+          || maybe True ((ST.loopDepth vtable /=) . ST.entryDepth) (ST.lookup src vtable),
         not consuming,
         ST.available src vtable ->
         Just $ pure $ IndexResult cs src $ Slice inds
@@ -184,13 +190,13 @@ simplifyIndexing vtable seType idd (Slice inds) consuming =
               letSubExp "index_concat" $ BasicOp $ Index x $ Slice $ ibef ++ DimFix i : iaft
             mkBranch ((x', start) : xs_and_starts') = do
               cmp <- letSubExp "index_concat_cmp" $ BasicOp $ CmpOp (CmpSle Int64) start i
-              (thisres, thisbnds) <- collectStms $ do
+              (thisres, thisstms) <- collectStms $ do
                 i' <- letSubExp "index_concat_i" $ BasicOp $ BinOp (Sub Int64 OverflowWrap) i start
                 letSubExp "index_concat" . BasicOp . Index x' $
                   Slice $ ibef ++ DimFix i' : iaft
-              thisbody <- mkBodyM thisbnds [subExpRes thisres]
-              (altres, altbnds) <- collectStms $ mkBranch xs_and_starts'
-              altbody <- mkBodyM altbnds [subExpRes altres]
+              thisbody <- mkBodyM thisstms [subExpRes thisres]
+              (altres, altstms) <- collectStms $ mkBranch xs_and_starts'
+              altbody <- mkBodyM altstms [subExpRes altres]
               letSubExp "index_concat_branch" $
                 If cmp thisbody altbody $
                   IfDec [primBodyType res_t] IfNormal

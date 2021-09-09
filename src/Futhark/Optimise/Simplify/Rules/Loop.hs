@@ -43,7 +43,7 @@ removeRedundantMergeVariables (_, used) pat aux (merge, form, body)
 
         (keep_valpart, discard_valpart) =
           partition (resIsNecessary . snd) $
-            zip (patElements pat) $ zip merge $ bodyResult body
+            zip (patElems pat) $ zip merge $ bodyResult body
 
         (keep_valpatelems, keep_val) = unzip keep_valpart
         (_discard_valpatelems, discard_val) = unzip discard_valpart
@@ -89,7 +89,7 @@ hoistLoopInvariantMergeVariables :: BuilderOps rep => TopDownRuleDoLoop rep
 hoistLoopInvariantMergeVariables vtable pat aux (merge, form, loopbody) = do
   -- Figure out which of the elements of loopresult are
   -- loop-invariant, and hoist them out.
-  let explpat = zip (patElements pat) $ map (paramName . fst) merge
+  let explpat = zip (patElems pat) $ map (paramName . fst) merge
   case foldr checkInvariance ([], explpat, [], []) $
     zip3 (patNames pat) merge res of
     ([], _, _, _) ->
@@ -122,9 +122,9 @@ hoistLoopInvariantMergeVariables vtable pat aux (merge, form, loopbody) = do
           isInvariant,
           -- Also do not remove the condition in a while-loop.
           not $ paramName mergeParam `nameIn` freeIn form =
-          let (bnd, explpat'') =
+          let (stm, explpat'') =
                 removeFromResult (mergeParam, mergeInit) explpat'
-           in ( maybe id (:) bnd $ (paramIdent mergeParam, mergeInit) : invariant,
+           in ( maybe id (:) stm $ (paramIdent mergeParam, mergeInit) : invariant,
                 explpat'',
                 merge',
                 resExps

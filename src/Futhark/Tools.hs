@@ -27,8 +27,6 @@ import Futhark.Util
 --
 -- Reuses the original pattern for the @reduce@, and creates a new
 -- pattern with new 'Ident's for the result of the @map@.
---
--- Only handles a pattern with an empty 'patternContextElements'.
 redomapToMapAndReduce ::
   ( MonadFreshNames m,
     Buildable rep,
@@ -137,7 +135,7 @@ sequentialStreamWholeArray pat w nes lam arrs = do
   -- The number of results in the body matches exactly the size (and
   -- order) of 'pat', so we bind them up here, again with a reshape to
   -- make the types work out.
-  forM_ (zip (patElements pat) $ bodyResult $ lambdaBody lam) $ \(pe, SubExpRes cs se) ->
+  forM_ (zip (patElems pat) $ bodyResult $ lambdaBody lam) $ \(pe, SubExpRes cs se) ->
     certifying cs $ case (arrayDims $ patElemType pe, se) of
       (dims, Var v)
         | not $ null dims ->

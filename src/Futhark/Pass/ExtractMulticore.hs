@@ -3,6 +3,9 @@
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeFamilies #-}
 
+-- | Extraction of parallelism from a SOACs program.  This generates
+-- parallel constructs aimed at CPU execution, which in particular may
+-- involve ad-hoc irregular nested parallelism.
 module Futhark.Pass.ExtractMulticore (extractMulticore) where
 
 import Control.Monad.Identity
@@ -446,6 +449,8 @@ transformProg (Prog consts funs) =
       funs' <- inScopeOf consts' $ mapM transformFunDef funs
       return $ Prog consts' funs'
 
+-- | Transform a program using SOACs to a program in the 'MC'
+-- representation, using some amount of flattening.
 extractMulticore :: Pass SOACS MC
 extractMulticore =
   Pass

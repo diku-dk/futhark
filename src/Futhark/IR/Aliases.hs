@@ -242,8 +242,8 @@ mkAliasedBody ::
   Stms (Aliases rep) ->
   Result ->
   Body (Aliases rep)
-mkAliasedBody dec bnds res =
-  Body (mkBodyAliases bnds res, dec) bnds res
+mkAliasedBody dec stms res =
+  Body (mkBodyAliases stms res, dec) stms res
 
 mkPatAliases ::
   (Aliased rep, Typed dec) =>
@@ -255,7 +255,7 @@ mkPatAliases pat e =
    in -- In case the pattern has
       -- more elements (this
       -- implies a type error).
-      zipWith annotatePatElem (patElements pat) als
+      zipWith annotatePatElem (patElems pat) als
   where
     annotatePatElem bindee names =
       bindee `setPatElemDec` (AliasDec names', patElemDec bindee)
@@ -271,13 +271,13 @@ mkBodyAliases ::
   Stms rep ->
   Result ->
   BodyAliasing
-mkBodyAliases bnds res =
-  -- We need to remove the names that are bound in bnds from the alias
+mkBodyAliases stms res =
+  -- We need to remove the names that are bound in stms from the alias
   -- and consumption sets.  We do this by computing the transitive
-  -- closure of the alias map (within bnds), then removing anything
-  -- bound in bnds.
-  let (aliases, consumed) = mkStmsAliases bnds res
-      boundNames = foldMap (namesFromList . patNames . stmPat) bnds
+  -- closure of the alias map (within stms), then removing anything
+  -- bound in stms.
+  let (aliases, consumed) = mkStmsAliases stms res
+      boundNames = foldMap (namesFromList . patNames . stmPat) stms
       aliases' = map (`namesSubtract` boundNames) aliases
       consumed' = consumed `namesSubtract` boundNames
    in (map AliasDec aliases', AliasDec consumed')
@@ -289,14 +289,14 @@ mkStmsAliases ::
   Stms rep ->
   Result ->
   ([Names], Names)
-mkStmsAliases bnds res = delve mempty $ stmsToList bnds
+mkStmsAliases stms res = delve mempty $ stmsToList stms
   where
     delve (aliasmap, consumed) [] =
       ( map (aliasClosure aliasmap . subExpAliases . resSubExp) res,
         consumed
       )
-    delve (aliasmap, consumed) (bnd : bnds') =
-      delve (trackAliases (aliasmap, consumed) bnd) bnds'
+    delve (aliasmap, consumed) (stm : stms') =
+      delve (trackAliases (aliasmap, consumed) stm) stms'
     aliasClosure aliasmap names =
       names <> mconcat (map look $ namesToList names)
       where
@@ -355,8 +355,8 @@ instance (Buildable rep, CanBeAliased (Op rep)) => Buildable (Aliases rep) where
       Let pat dec _ <- mkLetNames names $ removeExpAliases e
       return $ mkAliasedLetStm pat dec e
 
-  mkBody bnds res =
-    let Body bodyrep _ _ = mkBody (fmap removeStmAliases bnds) res
-     in mkAliasedBody bodyrep bnds res
+  mkBody stms res =
+    let Body bodyrep _ _ = mkBody (fmap removeStmAliases stms) res
+     in mkAliasedBody bodyrep stms res
 
 instance (ASTRep (Aliases rep), Buildable (Aliases rep)) => BuilderOps (Aliases rep)

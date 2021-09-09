@@ -5,7 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
-## [0.20.0]
+## [0.21.0]
+
+### Adeed
+
+### Removed
+
+### Changed
+
+### Fixed
+
+* Simplification bug (#1455).
+
+* In-place-lowering bug (#1457).
+
+* Another in-place-lowering bug (#1460).
+
+* Don't try to tile inside loops with parameters with variant sizes (#1462).
+
+## [0.20.1]
 
 ### Added
 
@@ -22,9 +40,26 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * New `wasm` and `wasm-multicore` backends by Philip Lassen.  Still
     very experimental; do not expect API stability.
 
-### Removed
+  * New intrinsic type `f16`, along with a prelude module `f16`.
+    Implemented with hardware support where it is available, and with
+    `f32`-based emulation where it is not.
+
+  * Sometimes slightly more informative error message when input of
+    the wrong type is passed to a test program.
 
 ### Changed
+
+  * The `!` function in the integer modules is now called `not`.
+
+  * `!` is now builtin syntax.  You can no longer define a function
+    called `!`.  It is extremely unlikely this affects you.  This
+    removes the last special-casing of prefix operators.
+
+  * A prefix operator section (i.e. `(!)`) is no longer permitted
+    (and it never was according to the grammar).
+
+  * The offset parameter for the "raw" array creation functions in the
+    C API is now `int64_t` instead of `int`.
 
 ### Fixed
 
@@ -34,6 +69,26 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
     precision on the CUDA backend.
 
   * Yet another defunctorisation bug (#1397).
+
+  * The `clz` function would sometimes exhibit undefined behaviour in
+    CPU code (#1415).
+
+  * Operator priority of prefix `-` was wrong - it is now the same as
+    `!` (#1419).
+
+  * `futhark hash` is now invariant to source location as well as
+    stable across OS/compiler/library versions.
+
+  * `futhark literate` is now much better at avoiding unnecessary
+    recalculation.
+
+  * Fixed a hole in size type checking that would usually lead to
+    compiler crashes (#1435).
+
+  * Underscores now allowed in numeric literals in test data (#1440).
+
+  * The `cuda` backend did not use single-pass segmented scans as
+    intended.  Now it does.
 
 ## [0.19.7]
 

@@ -28,7 +28,7 @@ compileSegRed pat space reds kbody nsubtasks =
       let (red_res, map_res) = splitAt (segBinOpResults reds) $ kernelBodyResult kbody
 
       sComment "save map-out results" $ do
-        let map_arrs = drop (segBinOpResults reds) $ patElements pat
+        let map_arrs = drop (segBinOpResults reds) $ patElems pat
         zipWithM_ (compileThreadResult space) map_arrs map_res
 
       red_cont $ zip (map kernelResultSubExp red_res) $ repeat []
@@ -169,7 +169,7 @@ reductionStage2 ::
   [SegBinOpSlug] ->
   MulticoreGen ()
 reductionStage2 pat space nsubtasks slugs = do
-  let per_red_pes = segBinOpChunks (map slugOp slugs) $ patElements pat
+  let per_red_pes = segBinOpChunks (map slugOp slugs) $ patElems pat
       phys_id = Imp.vi64 (segFlat space)
   sComment "neutral-initialise the output" $
     forM_ (zip (map slugOp slugs) per_red_pes) $ \(red, red_res) ->
@@ -226,7 +226,7 @@ compileSegRedBody n_segments pat space reds kbody = do
       inner_bound = last ns_64
       n_segments' = tvExp n_segments
 
-  let per_red_pes = segBinOpChunks reds $ patElements pat
+  let per_red_pes = segBinOpChunks reds $ patElems pat
   -- Perform sequential reduce on inner most dimension
   collect $ do
     flat_idx <- dPrimVE "flat_idx" $ n_segments' * inner_bound

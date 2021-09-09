@@ -28,7 +28,7 @@
 -- A monad that implements 'MonadBuilder' tracks the statements added
 -- so far, the current names in scope, and allows you to add
 -- additional statements with 'addStm'.  Any monad that implements
--- 'MonadBuilder' also implements the t'REp' type family, which
+-- 'MonadBuilder' also implements the t'Rep' type family, which
 -- indicates which rep it works with.  Inside a 'MonadBuilder' we can
 -- use 'collectStms' to gather up the 'Stms' added with 'addStm' in
 -- some nested computation.
@@ -515,8 +515,8 @@ insertStmsM ::
   m (Body (Rep m)) ->
   m (Body (Rep m))
 insertStmsM m = do
-  (Body _ bnds res, otherbnds) <- collectStms m
-  mkBodyM (otherbnds <> bnds) res
+  (Body _ stms res, otherstms) <- collectStms m
+  mkBodyM (otherstms <> stms) res
 
 -- | Evaluate an action that produces a 'Result' and an auxiliary
 -- value, then return the body constructed from the 'Result' and any
@@ -544,9 +544,9 @@ mapResult ::
   (Result -> Body rep) ->
   Body rep ->
   Body rep
-mapResult f (Body _ bnds res) =
-  let Body _ bnds2 newres = f res
-   in mkBody (bnds <> bnds2) newres
+mapResult f (Body _ stms res) =
+  let Body _ stms2 newres = f res
+   in mkBody (stms <> stms2) newres
 
 -- | Instantiate all existential parts dimensions of the given
 -- type, using a monadic action to create the necessary t'SubExp's.

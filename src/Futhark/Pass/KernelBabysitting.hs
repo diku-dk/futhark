@@ -70,7 +70,7 @@ nonlinearInMemory name m =
       nonlinear
         =<< find
           ((== name) . patElemName . fst)
-          (zip (patElements pat) ts)
+          (zip (patElems pat) ts)
     _ -> Nothing
   where
     nonlinear (pe, t)
@@ -98,9 +98,9 @@ transformStm expmap (Let pat aux (Op (SegOp op)))
     return $ M.fromList [(name, stm') | name <- patNames pat] <> expmap
 transformStm expmap (Let pat aux e) = do
   e' <- mapExpM (transform expmap) e
-  let bnd' = Let pat aux e'
-  addStm bnd'
-  return $ M.fromList [(name, bnd') | name <- patNames pat] <> expmap
+  let stm' = Let pat aux e'
+  addStm stm'
+  return $ M.fromList [(name, stm') | name <- patNames pat] <> expmap
 
 transform :: ExpMap -> Mapper GPU GPU BabysitM
 transform expmap =
@@ -517,9 +517,9 @@ varianceInStms :: VarianceTable -> Stms GPU -> VarianceTable
 varianceInStms t = foldl varianceInStm t . stmsToList
 
 varianceInStm :: VarianceTable -> Stm GPU -> VarianceTable
-varianceInStm variance bnd =
-  foldl' add variance $ patNames $ stmPat bnd
+varianceInStm variance stm =
+  foldl' add variance $ patNames $ stmPat stm
   where
     add variance' v = M.insert v binding_variance variance'
     look variance' v = oneName v <> M.findWithDefault mempty v variance'
-    binding_variance = mconcat $ map (look variance) $ namesToList (freeIn bnd)
+    binding_variance = mconcat $ map (look variance) $ namesToList (freeIn stm)

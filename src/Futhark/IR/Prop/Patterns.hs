@@ -13,7 +13,6 @@ module Futhark.IR.Prop.Patterns
     patElemIdent,
     patElemType,
     setPatElemDec,
-    patElements,
     patIdents,
     patNames,
     patTypes,
@@ -53,11 +52,11 @@ setPatElemDec pe x = fmap (const x) pe
 
 -- | Return a list of the 'Ident's bound by the t'Pat'.
 patIdents :: Typed dec => PatT dec -> [Ident]
-patIdents = map patElemIdent . patElements
+patIdents = map patElemIdent . patElems
 
 -- | Return a list of the 'Name's bound by the t'Pat'.
 patNames :: PatT dec -> [VName]
-patNames = map patElemName . patElements
+patNames = map patElemName . patElems
 
 -- | Return a list of the typess bound by the pattern.
 patTypes :: Typed dec => PatT dec -> [Type]

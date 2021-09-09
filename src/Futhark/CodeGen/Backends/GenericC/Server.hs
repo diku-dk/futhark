@@ -13,12 +13,14 @@ module Futhark.CodeGen.Backends.GenericC.Server
 where
 
 import Data.Bifunctor (first, second)
-import Data.FileEmbed
 import qualified Data.Map as M
 import Data.Maybe
+import qualified Data.Text as T
 import Futhark.CodeGen.Backends.GenericC.Options
 import Futhark.CodeGen.Backends.SimpleRep
 import Futhark.CodeGen.ImpCode
+import Futhark.CodeGen.RTS.C (serverH, tuningH, valuesH)
+import Futhark.Util.Pretty (prettyText)
 import qualified Language.C.Quote.OpenCL as C
 import qualified Language.C.Syntax as C
 
@@ -275,16 +277,14 @@ mkBoilerplate funs =
 {-# NOINLINE serverDefs #-}
 
 -- | Generate Futhark server executable code.
-serverDefs :: [Option] -> Functions a -> [C.Definition]
+serverDefs :: [Option] -> Functions a -> T.Text
 serverDefs options funs =
-  let server_h = $(embedStringFile "rts/c/server.h")
-      values_h = $(embedStringFile "rts/c/values.h")
-      tuning_h = $(embedStringFile "rts/c/tuning.h")
-      option_parser =
+  let option_parser =
         generateOptionParser "parse_options" $ genericOptions ++ options
       (boilerplate_defs, type_inits, entry_point_inits) =
         mkBoilerplate funs
-   in [C.cunit|
+   in prettyText
+        [C.cunit|
 $esc:("#include <getopt.h>")
 $esc:("#include <ctype.h>")
 $esc:("#include <inttypes.h>")
@@ -292,9 +292,9 @@ $esc:("#include <inttypes.h>")
 // If the entry point is NULL, the program will terminate after doing initialisation and such.  It is not used for anything else in server mode.
 static const char *entry_point = "main";
 
-$esc:values_h
-$esc:server_h
-$esc:tuning_h
+$esc:(T.unpack valuesH)
+$esc:(T.unpack serverH)
+$esc:(T.unpack tuningH)
 
 $edecls:boilerplate_defs
 

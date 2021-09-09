@@ -19,16 +19,16 @@ def normaliseArray(x):
 def unwrapArray(x):
   return normaliseArray(x).ctypes.data_as(ct.POINTER(ct.c_byte))
 
-def createArray(x, shape):
+def createArray(x, shape, t):
   # HACK: np.ctypeslib.as_array may fail if the shape contains zeroes,
   # for some reason.
   if any(map(lambda x: x == 0, shape)):
-      return np.ndarray(shape, dtype=x._type_)
+      return np.ndarray(shape, dtype=t)
   else:
-      return np.ctypeslib.as_array(x, shape=shape)
+      return np.ctypeslib.as_array(x, shape=shape).view(t)
 
-def indexArray(x, offset, bt, nptype):
-  return nptype(addressOffset(x, offset*ct.sizeof(bt), bt)[0])
+def indexArray(x, offset, bt):
+  return addressOffset(x, offset*ct.sizeof(bt), bt)[0]
 
 def writeScalarArray(x, offset, v):
   ct.memmove(ct.addressof(x.contents)+int(offset)*ct.sizeof(v), ct.addressof(v), ct.sizeof(v))

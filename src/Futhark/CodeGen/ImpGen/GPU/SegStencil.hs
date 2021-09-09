@@ -286,7 +286,7 @@ compileGlobalReadFlat pat lvl space op kbody = do
 
       -- compile lambda function and designate output style
       compileStms mempty (bodyStms lamBody) $
-        zipWithM_ (compileThreadResult space) (patElements pat) $
+        zipWithM_ (compileThreadResult space) (patElems pat) $
           map (Returns ResultMaySimplify mempty . resSubExp) $ bodyResult lamBody
 
 -- Kernel for evaluating a single stencil.
@@ -461,5 +461,5 @@ compileBigTileMultiWriteSingleDim pat _ space op kbody group_sizes_exp work_mult
 
               -- compile lambda function and designate output style
               compileStms mempty (bodyStms lamBody) $
-                zipWithM_ (compileThreadResult space) (patElements pat) $
+                zipWithM_ (compileThreadResult space) (patElems pat) $
                   map (Returns ResultMaySimplify mempty . resSubExp) $ bodyResult lamBody

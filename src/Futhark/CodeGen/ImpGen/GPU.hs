@@ -84,8 +84,19 @@ compileProg ::
   Prog GPUMem ->
   m (Warnings, Imp.Program)
 compileProg env prog =
-  second (setDefaultSpace (Imp.Space "device"))
-    <$> Futhark.CodeGen.ImpGen.compileProg env callKernelOperations (Imp.Space "device") prog
+  second (fmap setOpSpace . setDefsSpace)
+    <$> Futhark.CodeGen.ImpGen.compileProg env callKernelOperations device_space prog
+  where
+    device_space = Imp.Space "device"
+    global_space = Imp.Space "global"
+    setDefsSpace = setDefaultSpace device_space
+    setOpSpace (Imp.CallKernel kernel) =
+      Imp.CallKernel
+        kernel
+          { Imp.kernelBody =
+              setDefaultCodeSpace global_space $ Imp.kernelBody kernel
+          }
+    setOpSpace op = op
 
 -- | Compile a 'GPUMem' program to low-level parallel code, with
 -- either CUDA or OpenCL characteristics.

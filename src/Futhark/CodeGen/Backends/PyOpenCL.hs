@@ -9,12 +9,14 @@ where
 
 import Control.Monad
 import qualified Data.Map as M
+import qualified Data.Text as T
 import qualified Futhark.CodeGen.Backends.GenericPython as Py
 import Futhark.CodeGen.Backends.GenericPython.AST
 import Futhark.CodeGen.Backends.GenericPython.Options
 import Futhark.CodeGen.Backends.PyOpenCL.Boilerplate
 import qualified Futhark.CodeGen.ImpCode.OpenCL as Imp
 import qualified Futhark.CodeGen.ImpGen.OpenCL as ImpGen
+import Futhark.CodeGen.RTS.Python (openclPy)
 import Futhark.IR.GPUMem (GPUMem, Prog)
 import Futhark.MonadFreshNames
 import Futhark.Util (zEncodeString)
@@ -26,7 +28,7 @@ compileProg ::
   Py.CompilerMode ->
   String ->
   Prog GPUMem ->
-  m (ImpGen.Warnings, String)
+  m (ImpGen.Warnings, T.Text)
 compileProg mode class_name prog = do
   ( ws,
     Imp.Program
@@ -60,14 +62,14 @@ compileProg mode class_name prog = do
           Assign (Var "default_num_groups") None,
           Assign (Var "default_tile_size") None,
           Assign (Var "default_reg_tile_size") None,
-          Assign (Var "fut_opencl_src") $ RawStringLiteral $ opencl_prelude ++ opencl_code
+          Assign (Var "fut_opencl_src") $ RawStringLiteral $ opencl_prelude <> opencl_code
         ]
 
   let imports =
         [ Import "sys" Nothing,
           Import "numpy" $ Just "np",
           Import "ctypes" $ Just "ct",
-          Escape openClPrelude,
+          Escape openclPy,
           Import "pyopencl.array" Nothing,
           Import "time" Nothing
         ]
@@ -424,7 +426,7 @@ packArrayOutput mem "device" bt ept dims = do
       (Var "cl.array.Array")
       [ Arg $ Var "self.queue",
         Arg $ Tuple dims',
-        Arg $ Var $ Py.compilePrimTypeExt bt ept,
+        Arg $ Var $ Py.compilePrimToExtNp bt ept,
         ArgKeyword "data" mem'
       ]
 packArrayOutput _ sid _ _ _ =

@@ -42,20 +42,13 @@ shapeMapping all_params value_arg_types =
     match (Var v, se) = Just (v, se)
     match _ = Nothing
 
-argShapes ::
-  (HasScope SOACS m, Monad m) =>
-  [VName] ->
-  [FParam] ->
-  [Type] ->
-  m [SubExp]
+argShapes :: [VName] -> [FParam] -> [Type] -> InternaliseM [SubExp]
 argShapes shapes all_params valargts = do
   mapping <- shapeMapping all_params valargts
   let addShape name =
         case M.lookup name mapping of
           Just se -> se
-          _ -> intConst Int64 0 -- FIXME: we only need this because
-          -- the defunctionaliser throws away
-          -- sizes.
+          _ -> error $ "argShapes: " ++ pretty name
   return $ map addShape shapes
 
 ensureResultShape ::

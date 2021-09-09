@@ -942,17 +942,17 @@ checkPat sizes p t m = do
       bindNameMap (patternNameMap p') $ m p'
 
 binding :: [Ident] -> TermTypeM a -> TermTypeM a
-binding bnds = check . handleVars
+binding stms = check . handleVars
   where
     handleVars m =
-      localScope (`bindVars` bnds) $ do
+      localScope (`bindVars` stms) $ do
         -- Those identifiers that can potentially also be sizes are
         -- added as type constraints.  This is necessary so that we
         -- can properly detect scope violations during unification.
         -- We do this for *all* identifiers, not just those that are
         -- integers, because they may become integers later due to
         -- inference...
-        forM_ bnds $ \ident ->
+        forM_ stms $ \ident ->
           constrain (identName ident) $ ParamSize $ srclocOf ident
         m
 
@@ -986,11 +986,11 @@ binding bnds = check . handleVars
       (a, usages) <- collectBindingsOccurences m
       checkOccurences usages
 
-      mapM_ (checkIfUsed usages) bnds
+      mapM_ (checkIfUsed usages) stms
 
       return a
 
-    -- Collect and remove all occurences in @bnds@.  This relies
+    -- Collect and remove all occurences in @stms@.  This relies
     -- on the fact that no variables shadow any other.
     collectBindingsOccurences m = do
       (x, usage) <- collectOccurences m
@@ -1010,7 +1010,7 @@ binding bnds = check . handleVars
                         occ {observed = obs2, consumed = con2}
                       )
               )
-        names = S.fromList $ map identName bnds
+        names = S.fromList $ map identName stms
         divide s = (s `S.intersection` names, s `S.difference` names)
 
 bindingTypes ::
@@ -1306,8 +1306,8 @@ addResultAliases r (Array als u t shape) = do
 -- function", for better error messages.
 checkApplyExp :: UncheckedExp -> TermTypeM (Exp, ApplyOp)
 checkApplyExp (AppExp (Apply e1 e2 _ loc) _) = do
-  (e1', (fname, i)) <- checkApplyExp e1
   arg <- checkArg e2
+  (e1', (fname, i)) <- checkApplyExp e1
   t <- expType e1'
   (t1, rt, argext, exts) <- checkApply loc (fname, i) t arg
   rt' <- addResultAliases (NameAppRes fname loc) rt
@@ -1545,6 +1545,9 @@ checkExp (Var qn NoInfo loc) = do
 checkExp (Negate arg loc) = do
   arg' <- require "numeric negation" anyNumberType =<< checkExp arg
   return $ Negate arg' loc
+checkExp (Not arg loc) = do
+  arg' <- require "logical negation" (Bool : anyIntType) =<< checkExp arg
+  return $ Not arg' loc
 checkExp e@(AppExp Apply {} _) = fst <$> checkApplyExp e
 checkExp (AppExp (LetPat sizes pat e body loc) _) =
   sequentially (checkExp e) $ \e' e_occs -> do
@@ -2637,9 +2640,11 @@ literalOverflowCheck = void . check
     bitWidth ty = 8 * intByteSize ty :: Int
     inBoundsI x (Signed t) = x >= -2 ^ (bitWidth t - 1) && x < 2 ^ (bitWidth t - 1)
     inBoundsI x (Unsigned t) = x >= 0 && x < 2 ^ bitWidth t
+    inBoundsI x (FloatType Float16) = not $ isInfinite (fromIntegral x :: Half)
     inBoundsI x (FloatType Float32) = not $ isInfinite (fromIntegral x :: Float)
     inBoundsI x (FloatType Float64) = not $ isInfinite (fromIntegral x :: Double)
     inBoundsI _ Bool = error "Inferred type of int literal is not a number"
+    inBoundsF x Float16 = not $ isInfinite (realToFrac x :: Float)
     inBoundsF x Float32 = not $ isInfinite (realToFrac x :: Float)
     inBoundsF x Float64 = not $ isInfinite x
     warnBounds inBounds x ty loc =

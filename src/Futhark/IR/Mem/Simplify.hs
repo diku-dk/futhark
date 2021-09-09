@@ -29,14 +29,14 @@ import Futhark.Pass.ExplicitAllocations (simplifiable)
 import Futhark.Util
 
 simpleGeneric ::
-  (SimplifyMemory rep, Op rep ~ MemOp inner) =>
+  (SimplifyMemory rep inner) =>
   (OpWithWisdom inner -> UT.UsageTable) ->
   Simplify.SimplifyOp rep inner ->
   Simplify.SimpleOps rep
 simpleGeneric = simplifiable
 
 simplifyProgGeneric ::
-  (SimplifyMemory rep, Op rep ~ MemOp inner) =>
+  (SimplifyMemory rep inner) =>
   Simplify.SimpleOps rep ->
   Prog rep ->
   PassM (Prog rep)
@@ -60,8 +60,7 @@ simplifyProgGeneric ops =
 simplifyStmsGeneric ::
   ( HasScope rep m,
     MonadFreshNames m,
-    SimplifyMemory rep,
-    Op rep ~ MemOp inner
+    SimplifyMemory rep inner
   ) =>
   Simplify.SimpleOps rep ->
   Stms rep ->
@@ -95,17 +94,17 @@ blockers =
     }
 
 -- | Some constraints that must hold for the simplification rules to work.
-type SimplifyMemory rep =
+type SimplifyMemory rep inner =
   ( Simplify.SimplifiableRep rep,
+    LetDec rep ~ LetDecMem,
     ExpDec rep ~ (),
     BodyDec rep ~ (),
-    AllocOp (Op (Wise rep)),
     CanBeWise (Op rep),
     BuilderOps (Wise rep),
-    Mem rep
+    Mem rep inner
   )
 
-callKernelRules :: SimplifyMemory rep => RuleBook (Wise rep)
+callKernelRules :: SimplifyMemory rep inner => RuleBook (Wise rep)
 callKernelRules =
   standardRules
     <> ruleBook
@@ -120,10 +119,10 @@ callKernelRules =
 -- the array is not existential, and the index function of the array
 -- does not refer to any names in the pattern, then we can create a
 -- block of the proper size and always return there.
-unExistentialiseMemory :: SimplifyMemory rep => TopDownRuleIf (Wise rep)
+unExistentialiseMemory :: SimplifyMemory rep inner => TopDownRuleIf (Wise rep)
 unExistentialiseMemory vtable pat _ (cond, tbranch, fbranch, ifdec)
   | ST.simplifyMemory vtable,
-    fixable <- foldl hasConcretisableMemory mempty $ patElements pat,
+    fixable <- foldl hasConcretisableMemory mempty $ patElems pat,
     not $ null fixable = Simplify $ do
     -- Create non-existential memory blocks big enough to hold the
     -- arrays.
@@ -131,14 +130,14 @@ unExistentialiseMemory vtable pat _ (cond, tbranch, fbranch, ifdec)
       fmap unzip $
         forM fixable $ \(arr_pe, mem_size, oldmem, space) -> do
           size <- toSubExp "size" mem_size
-          mem <- letExp "mem" $ Op $ allocOp size space
+          mem <- letExp "mem" $ Op $ Alloc size space
           return ((patElemName arr_pe, mem), (oldmem, mem))
 
     -- Update the branches to contain Copy expressions putting the
     -- arrays where they are expected.
     let updateBody body = buildBody_ $ do
           res <- bodyBind body
-          zipWithM updateResult (patElements pat) res
+          zipWithM updateResult (patElems pat) res
         updateResult pat_elem (SubExpRes cs (Var v))
           | Just mem <- lookup (patElemName pat_elem) arr_to_mem,
             (_, MemArray pt shape u (ArrayIn _ ixfun)) <- patElemDec pat_elem = do
@@ -157,7 +156,7 @@ unExistentialiseMemory vtable pat _ (cond, tbranch, fbranch, ifdec)
   where
     onlyUsedIn name here =
       not . any ((name `nameIn`) . freeIn) . filter ((/= here) . patElemName) $
-        patElements pat
+        patElems pat
     knownSize Constant {} = True
     knownSize (Var v) = not $ inContext v
     inContext = (`elem` patNames pat)
@@ -168,7 +167,7 @@ unExistentialiseMemory vtable pat _ (cond, tbranch, fbranch, ifdec)
           fmap patElemType
             <$> find
               ((mem ==) . patElemName . snd)
-              (zip [(0 :: Int) ..] $ patElements pat),
+              (zip [(0 :: Int) ..] $ patElems pat),
         Just tse <- maybeNth j $ bodyResult tbranch,
         Just fse <- maybeNth j $ bodyResult fbranch,
         mem `onlyUsedIn` patElemName pat_elem,
@@ -227,7 +226,7 @@ removeIdentityCopy _ _ _ _ = Skip
 -- If an allocation is statically known to be safe, then we can remove
 -- the certificates on it.  This can help hoist things that would
 -- otherwise be stuck inside loops or branches.
-decertifySafeAlloc :: SimplifyMemory rep => TopDownRuleOp (Wise rep)
+decertifySafeAlloc :: SimplifyMemory rep inner => TopDownRuleOp (Wise rep)
 decertifySafeAlloc _ pat (StmAux cs attrs _) op
   | cs /= mempty,
     [Mem _] <- patTypes pat,

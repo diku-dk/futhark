@@ -308,10 +308,14 @@ liftIdentityMapping _ pat aux op
 
         checkInvariance (outId, SubExpRes _ (Var v), _) (invariant, mapresult, rettype')
           | Just inp <- M.lookup v inputMap =
-            ( (Pat [outId], BasicOp (Copy inp)) : invariant,
+            ( (Pat [outId], e inp) : invariant,
               mapresult,
               rettype'
             )
+          where
+            e inp = case patElemType outId of
+              Acc {} -> BasicOp $ SubExp $ Var inp
+              _ -> BasicOp (Copy inp)
         checkInvariance (outId, SubExpRes _ e, t) (invariant, mapresult, rettype')
           | freeOrConst e =
             ( (Pat [outId], BasicOp $ Replicate (Shape [w]) e) : invariant,
@@ -325,7 +329,7 @@ liftIdentityMapping _ pat aux op
             )
 
     case foldr checkInvariance ([], [], []) $
-      zip3 (patElements pat) ses rettype of
+      zip3 (patElems pat) ses rettype of
       ([], _, _) -> Skip
       (invariant, mapresult, rettype') -> Simplify $ do
         let (pat', ses') = unzip mapresult
@@ -380,16 +384,16 @@ removeReplicateMapping ::
 removeReplicateMapping vtable pat aux op
   | Just (Screma w arrs form) <- asSOAC op,
     Just fun <- isMapSOAC form,
-    Just (bnds, fun', arrs') <- removeReplicateInput vtable fun arrs = Simplify $ do
-    forM_ bnds $ \(vs, cs, e) -> certifying cs $ letBindNames vs e
+    Just (stms, fun', arrs') <- removeReplicateInput vtable fun arrs = Simplify $ do
+    forM_ stms $ \(vs, cs, e) -> certifying cs $ letBindNames vs e
     auxing aux $ letBind pat $ Op $ soacOp $ Screma w arrs' $ mapSOAC fun'
 removeReplicateMapping _ _ _ _ = Skip
 
 -- | Like 'removeReplicateMapping', but for 'Scatter'.
 removeReplicateWrite :: TopDownRuleOp (Wise SOACS)
 removeReplicateWrite vtable pat aux (Scatter len lam ivs as)
-  | Just (bnds, lam', ivs') <- removeReplicateInput vtable lam ivs = Simplify $ do
-    forM_ bnds $ \(vs, cs, e) -> certifying cs $ letBindNames vs e
+  | Just (stms, lam', ivs') <- removeReplicateInput vtable lam ivs = Simplify $ do
+    forM_ stms $ \(vs, cs, e) -> certifying cs $ letBindNames vs e
     auxing aux $ letBind pat $ Op $ Scatter len lam' ivs' as
 removeReplicateWrite _ _ _ _ = Skip
 
@@ -452,7 +456,7 @@ removeDeadMapping (_, used) pat aux (Screma w arrs form)
         (pat', ses', ts') =
           unzip3 $
             filter isUsed $
-              zip3 (patElements pat) ses $ lambdaReturnType fun
+              zip3 (patElems pat) ses $ lambdaReturnType fun
         fun' =
           fun
             { lambdaBody = (lambdaBody fun) {bodyResult = ses'},
@@ -576,7 +580,7 @@ removeDeadReduction :: BottomUpRuleOp (Wise SOACS)
 removeDeadReduction (_, used) pat aux (Screma w arrs form)
   | Just ([Reduce comm redlam nes], maplam) <- isRedomapSOAC form,
     not $ all (`UT.used` used) $ patNames pat, -- Quick/cheap check
-    let (red_pes, map_pes) = splitAt (length nes) $ patElements pat,
+    let (red_pes, map_pes) = splitAt (length nes) $ patElems pat,
     let redlam_deps = dataDependencies $ lambdaBody redlam,
     let redlam_res = bodyResult $ lambdaBody redlam,
     let redlam_params = lambdaParams redlam,
@@ -615,7 +619,7 @@ removeDeadWrite (_, used) pat aux (Scatter w fun arrs dests) =
       (pat', i_ses', v_ses', i_ts', v_ts', dests') =
         unzip6 $
           filter isUsed $
-            zip6 (patElements pat) i_ses v_ses i_ts v_ts dests
+            zip6 (patElems pat) i_ses v_ses i_ts v_ts dests
       fun' =
         fun
           { lambdaBody = (lambdaBody fun) {bodyResult = concat i_ses' ++ v_ses'},
@@ -701,7 +705,7 @@ simplifyKnownIterationSOAC _ pat _ op
         (Scan scan_lam scan_nes) = singleScan scans
         (scan_pes, red_pes, map_pes) =
           splitAt3 (length scan_nes) (length red_nes) $
-            patElements pat
+            patElems pat
         bindMapParam p a = do
           a_t <- lookupType a
           letBindNames [paramName p] $

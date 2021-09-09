@@ -54,13 +54,13 @@ lowerUpdate ::
 lowerUpdate scope (Let pat aux (DoLoop merge form body)) updates = do
   canDo <- lowerUpdateIntoLoop scope updates pat merge form body
   Just $ do
-    (prebnds, postbnds, pat', merge', body') <- canDo
+    (prestms, poststms, pat', merge', body') <- canDo
     return $
-      prebnds
+      prestms
         ++ [ certify (stmAuxCerts aux) $
                mkLet pat' $ DoLoop merge' form body'
            ]
-        ++ postbnds
+        ++ poststms
 lowerUpdate
   _
   (Let pat aux (BasicOp (SubExp (Var v))))
@@ -117,7 +117,7 @@ lowerUpdatesIntoSegMap ::
 lowerUpdatesIntoSegMap scope pat updates kspace kbody = do
   -- The updates are all-or-nothing.  Being more liberal would require
   -- changes to the in-place-lowering pass itself.
-  mk <- zipWithM onRet (patElements pat) (kernelBodyResult kbody)
+  mk <- zipWithM onRet (patElems pat) (kernelBodyResult kbody)
   return $ do
     (pes, bodystms, krets, poststms) <- unzip4 <$> sequence mk
     return
@@ -153,13 +153,16 @@ lowerUpdatesIntoSegMap scope pat updates kspace kbody = do
           let res_dims = arrayDims $ snd bindee_dec
               ret' = WriteReturns cs (Shape res_dims) src [(Slice $ map DimFix slice', se)]
 
+          v_aliased <- newName v
+
           return
             ( PatElem bindee_nm bindee_dec,
               bodystms,
               ret',
-              oneStm $
-                mkLet [Ident v $ typeOf v_dec] $
-                  BasicOp $ Index bindee_nm slice
+              stmsFromList
+                [ mkLet [Ident v_aliased $ typeOf v_dec] $ BasicOp $ Index bindee_nm slice,
+                  mkLet [Ident v $ typeOf v_dec] $ BasicOp $ Copy v_aliased
+                ]
             )
     onRet pe ret =
       Just $ return (pe, mempty, ret, mempty)
@@ -221,13 +224,13 @@ lowerUpdateIntoLoop scope updates pat val form body = do
 
   Just $ do
     in_place_map <- mk_in_place_map
-    (val', prebnds, postbnds) <- mkMerges in_place_map
+    (val', prestms, poststms) <- mkMerges in_place_map
     let valpat = mkResAndPat in_place_map
         idxsubsts = indexSubstitutions in_place_map
-    (idxsubsts', newbnds) <- substituteIndices idxsubsts $ bodyStms body
-    (body_res, res_bnds) <- manipulateResult in_place_map idxsubsts'
-    let body' = mkBody (newbnds <> res_bnds) body_res
-    return (prebnds, postbnds, valpat, val', body')
+    (idxsubsts', newstms) <- substituteIndices idxsubsts $ bodyStms body
+    (body_res, res_stms) <- manipulateResult in_place_map idxsubsts'
+    let body' = mkBody (newstms <> res_stms) body_res
+    return (prestms, poststms, valpat, val', body')
   where
     usedInBody =
       mconcat $ map (`lookupAliases` scope) $ namesToList $ freeIn body <> freeIn form
@@ -238,9 +241,9 @@ lowerUpdateIntoLoop scope updates pat val form body = do
       [LoopResultSummary (als, Type)] ->
       m ([(Param DeclType, SubExp)], [Stm rep], [Stm rep])
     mkMerges summaries = do
-      ((origmerge, extramerge), (prebnds, postbnds)) <-
+      ((origmerge, extramerge), (prestms, poststms)) <-
         runWriterT $ partitionEithers <$> mapM mkMerge summaries
-      return (origmerge ++ extramerge, prebnds, postbnds)
+      return (origmerge ++ extramerge, prestms, poststms)
 
     mkMerge summary
       | Just (update, mergename, mergedec) <- relatedUpdate summary = do
@@ -335,25 +338,23 @@ data LoopResultSummary dec = LoopResultSummary
   }
   deriving (Show)
 
-indexSubstitutions ::
-  [LoopResultSummary dec] ->
-  IndexSubstitutions dec
+indexSubstitutions :: Typed dec => [LoopResultSummary dec] -> IndexSubstitutions
 indexSubstitutions = mapMaybe getSubstitution
   where
     getSubstitution res = do
       (DesiredUpdate _ _ cs _ is _, nm, dec) <- relatedUpdate res
       let name = paramName $ fst $ mergeParam res
-      return (name, (cs, nm, dec, is))
+      return (name, (cs, nm, typeOf dec, is))
 
 manipulateResult ::
   (Buildable rep, MonadFreshNames m) =>
   [LoopResultSummary (LetDec rep)] ->
-  IndexSubstitutions (LetDec rep) ->
+  IndexSubstitutions ->
   m (Result, Stms rep)
 manipulateResult summaries substs = do
   let (orig_ses, updated_ses) = partitionEithers $ map unchangedRes summaries
-  (subst_ses, res_bnds) <- runWriterT $ zipWithM substRes updated_ses substs
-  pure (orig_ses ++ subst_ses, stmsFromList res_bnds)
+  (subst_ses, res_stms) <- runWriterT $ zipWithM substRes updated_ses substs
+  pure (orig_ses ++ subst_ses, stmsFromList res_stms)
   where
     unchangedRes summary =
       case relatedUpdate summary of

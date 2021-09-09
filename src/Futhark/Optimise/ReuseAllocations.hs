@@ -158,7 +158,7 @@ onKernelBodyStms (SegStencil lvl space stencil ts body) f = do
   stms <- f $ kernelBodyStms body
   return $ SegStencil lvl space stencil ts $ body {kernelBodyStms = stms}
 
--- | This is the actual optimiser. Given an interference graph and a `SegOp`,
+-- | This is the actual optimiser. Given an interference graph and a @SegOp@,
 -- replace allocations and references to memory blocks inside with a (hopefully)
 -- reduced number of allocations.
 optimiseKernel ::

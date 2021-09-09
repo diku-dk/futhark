@@ -102,7 +102,7 @@ pushInnerTarget :: Target -> Targets -> Targets
 pushInnerTarget (pat, res) (Targets inner_target targets) =
   Targets (pat', res') (targets ++ [inner_target])
   where
-    (pes', res') = unzip $ filter (used . fst) $ zip (patElements pat) res
+    (pes', res') = unzip $ filter (used . fst) $ zip (patElems pat) res
     pat' = Pat pes'
     inner_used = freeIn $ snd inner_target
     used pe = patElemName pe `nameIn` inner_used
@@ -355,8 +355,8 @@ distributionBodyFromStm ::
   Targets ->
   Stm rep ->
   (DistributionBody, Result)
-distributionBodyFromStm targets bnd =
-  distributionBodyFromStms targets $ oneStm bnd
+distributionBodyFromStm targets stm =
+  distributionBodyFromStms targets $ oneStm stm
 
 createKernelNest ::
   forall rep m.
@@ -515,11 +515,11 @@ removeIdentityMappingGeneral ::
   )
 removeIdentityMappingGeneral bound pat res =
   let (identities, not_identities) =
-        mapEither isIdentity $ zip (patElements pat) res
+        mapEither isIdentity $ zip (patElems pat) res
       (not_identity_patElems, not_identity_res) = unzip not_identities
       (identity_patElems, identity_res) = unzip identities
       expandTarget (tpat, tres) =
-        ( Pat $ patElements tpat ++ identity_patElems,
+        ( Pat $ patElems tpat ++ identity_patElems,
           tres ++ map (uncurry SubExpRes . second Var) identity_res
         )
       identity_map =
@@ -567,10 +567,10 @@ tryDistribute mk_lvl nest targets stms =
   createKernelNest nest dist_body
     >>= \case
       Just (targets', distributed) -> do
-        (kernel_bnd, w_bnds) <-
+        (kernel_stm, w_stms) <-
           localScope (targetsScope targets') $
             constructKernel mk_lvl distributed $ mkBody stms inner_body_res
-        distributed' <- renameStm kernel_bnd
+        distributed' <- renameStm kernel_stm
         logMsg $
           "distributing\n"
             ++ unlines (map pretty $ stmsToList stms)
@@ -581,7 +581,7 @@ tryDistribute mk_lvl nest targets stms =
             ++ ppTargets targets
             ++ "\nand with new targets\n"
             ++ ppTargets targets'
-        return $ Just (targets', w_bnds <> oneStm distributed')
+        return $ Just (targets', w_stms <> oneStm distributed')
       Nothing ->
         return Nothing
   where
@@ -593,8 +593,8 @@ tryDistributeStm ::
   Targets ->
   Stm rep ->
   m (Maybe (Result, Targets, KernelNest))
-tryDistributeStm nest targets bnd =
+tryDistributeStm nest targets stm =
   fmap addRes <$> createKernelNest nest dist_body
   where
-    (dist_body, res) = distributionBodyFromStm targets bnd
+    (dist_body, res) = distributionBodyFromStm targets stm
     addRes (targets', kernel_nest) = (res, targets', kernel_nest)

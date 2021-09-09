@@ -30,9 +30,27 @@ let
             haskellPackagesNew.callPackage ./nix/futhark-server.nix { };
 
           futhark =
+            # callCabal2Nix does not do a great job at determining
+            # which files must be included as source, which causes
+            # trouble if you have lots of other large files lying
+            # around (say, data files for testing).  As a workaround
+            # we explicitly tell it which files are needed.  This must
+            # be _manually_ kept in sync with whatever the cabal file requires.
+            let sources = ["futhark.cabal"
+                           "Setup.hs"
+                           "LICENSE"
+                           "^src.*"
+                           "^rts.*"
+                           "^docs.*"
+                           "^prelude.*"
+                           "^assets.*"
+                           "^unittests.*"
+                          ];
+                cleanSource = src: pkgs.lib.sourceByRegex src sources;
+            in
             pkgs.haskell.lib.overrideCabal
               (pkgs.haskell.lib.addBuildTools
-                (haskellPackagesNew.callCabal2nix "futhark" ./. { })
+                (haskellPackagesNew.callCabal2nix "futhark" (cleanSource ./.) { })
                 [ pkgs.python37Packages.sphinx ])
               ( _drv: {
                 isLibrary = false;
@@ -49,6 +67,10 @@ let
                   "--extra-lib-dirs=${pkgs.zlib.static}/lib"
                   "--extra-lib-dirs=${pkgs.libffi.overrideAttrs (old: { dontDisableStatic = true; })}/lib"
                 ];
+
+                preBuild = ''
+        if [ "${commit}" ]; then echo "${commit}" > commit-id; fi
+                '';
 
                 postBuild = (_drv.postBuild or "") + ''
         make -C docs man

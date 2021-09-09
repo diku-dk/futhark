@@ -14,13 +14,13 @@ module Futhark.IR.GPUMem
 
     -- * Module re-exports
     module Futhark.IR.Mem,
-    module Futhark.IR.GPU.Kernel,
+    module Futhark.IR.GPU.Op,
   )
 where
 
 import Futhark.Analysis.PrimExp.Convert
 import qualified Futhark.Analysis.UsageTable as UT
-import Futhark.IR.GPU.Kernel
+import Futhark.IR.GPU.Op
 import Futhark.IR.GPU.Simplify (simplifyKernelOp)
 import Futhark.IR.Mem
 import Futhark.IR.Mem.Simplify
@@ -43,10 +43,12 @@ instance RepTypes GPUMem where
 instance ASTRep GPUMem where
   expTypesFromPat = return . map snd . bodyReturnsFromPat
 
-instance OpReturns GPUMem where
-  opReturns (Alloc _ space) =
-    return [MemMem space]
-  opReturns (Inner (SegOp op)) = segOpReturns op
+instance OpReturns (HostOp GPUMem ()) where
+  opReturns (SegOp op) = segOpReturns op
+  opReturns k = extReturns <$> opType k
+
+instance OpReturns (HostOp (Engine.Wise GPUMem) ()) where
+  opReturns (SegOp op) = segOpReturns op
   opReturns k = extReturns <$> opType k
 
 instance PrettyRep GPUMem

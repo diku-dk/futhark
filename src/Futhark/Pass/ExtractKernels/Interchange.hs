@@ -54,7 +54,7 @@ interchangeLoop
         mapM expand merge
 
     let loop_pat_expanded =
-          Pat $ map expandPatElem $ patElements loop_pat
+          Pat $ map expandPatElem $ patElems loop_pat
         new_params =
           [Param pname $ fromDecl ptype | (Param pname ptype, _) <- merge]
         new_arrs = map (paramName . fst) merge_expanded
@@ -65,21 +65,21 @@ interchangeLoop
     -- small simplification, we just remove the parameter outright if
     -- it is not used anymore.  This might happen if the parameter was
     -- used just as the inital value of a merge parameter.
-    ((params', arrs'), pre_copy_bnds) <-
+    ((params', arrs'), pre_copy_stms) <-
       runBuilder $
         localScope (scopeOfLParams new_params) $
           unzip . catMaybes <$> mapM copyOrRemoveParam params_and_arrs
 
     let lam = Lambda (params' <> new_params) body rettype
-        map_bnd =
+        map_stm =
           Let loop_pat_expanded aux $
             Op $ Screma w (arrs' <> new_arrs) (mapSOAC lam)
         res = varsRes $ patNames loop_pat_expanded
-        pat' = Pat $ rearrangeShape perm $ patElements pat
+        pat' = Pat $ rearrangeShape perm $ patElems pat
 
     return $
       SeqLoop perm pat' merge_expanded form $
-        mkBody (pre_copy_bnds <> oneStm map_bnd) res
+        mkBody (pre_copy_stms <> oneStm map_stm) res
     where
       free_in_body = freeIn body
 
@@ -119,11 +119,11 @@ interchangeLoops ::
   SeqLoop ->
   m (Stms SOACS)
 interchangeLoops nest loop = do
-  (loop', bnds) <-
+  (loop', stms) <-
     runBuilder $
       foldM (interchangeLoop isMapParameter) loop $
         reverse $ kernelNestLoops nest
-  return $ bnds <> oneStm (seqLoopStm loop')
+  return $ stms <> oneStm (seqLoopStm loop')
   where
     isMapParameter v =
       fmap snd $
@@ -145,19 +145,19 @@ interchangeBranch1
   (Branch perm branch_pat cond tbranch fbranch (IfDec ret if_sort))
   (MapNesting pat aux w params_and_arrs) = do
     let ret' = map (`arrayOfRow` Free w) ret
-        pat' = Pat $ rearrangeShape perm $ patElements pat
+        pat' = Pat $ rearrangeShape perm $ patElems pat
 
         (params, arrs) = unzip params_and_arrs
         lam_ret = rearrangeShape perm $ map rowType $ patTypes pat
 
         branch_pat' =
-          Pat $ map (fmap (`arrayOfRow` w)) $ patElements branch_pat
+          Pat $ map (fmap (`arrayOfRow` w)) $ patElems branch_pat
 
         mkBranch branch = (renameBody =<<) $ do
           let lam = Lambda params branch lam_ret
               res = varsRes $ patNames branch_pat'
-              map_bnd = Let branch_pat' aux $ Op $ Screma w arrs $ mapSOAC lam
-          return $ mkBody (oneStm map_bnd) res
+              map_stm = Let branch_pat' aux $ Op $ Screma w arrs $ mapSOAC lam
+          return $ mkBody (oneStm map_stm) res
 
     tbranch' <- mkBranch tbranch
     fbranch' <- mkBranch fbranch
@@ -171,9 +171,9 @@ interchangeBranch ::
   Branch ->
   m (Stms SOACS)
 interchangeBranch nest loop = do
-  (loop', bnds) <-
+  (loop', stms) <-
     runBuilder $ foldM interchangeBranch1 loop $ reverse $ kernelNestLoops nest
-  return $ bnds <> oneStm (branchStm loop')
+  return $ stms <> oneStm (branchStm loop')
 
 data WithAccStm
   = WithAccStm [Int] Pat [(Shape, [VName], Maybe (Lambda, [SubExp]))] Lambda
@@ -204,7 +204,7 @@ interchangeWithAcc1
           maplam = Lambda (iota_p : orig_acc_params ++ params) (lambdaBody acc_lam) maplam_ret
       auxing map_aux . fmap subExpsRes . letTupExp' "withacc_inter" $
         Op $ Screma w (iota_w : map paramName acc_params ++ arrs) (mapSOAC maplam)
-    let pat = Pat $ rearrangeShape perm $ patElements map_pat
+    let pat = Pat $ rearrangeShape perm $ patElems map_pat
         perm' = [0 .. patSize pat -1]
     pure $ WithAccStm perm' pat inputs' acc_lam'
     where

@@ -42,7 +42,7 @@ compileSegMapBody flat_idx pat space (KernelBody _ kstms kres) = do
     emit $ Imp.DebugPrint "SegMap fbody" Nothing
     dIndexSpace (zip is ns') $ tvExp flat_idx
     compileStms (freeIn kres) kstms' $
-      zipWithM_ (writeResult is) (patElements pat) kres
+      zipWithM_ (writeResult is) (patElems pat) kres
 
 compileSegMap ::
   Pat MCMem ->

@@ -65,6 +65,11 @@ standardRules = ruleBook topDownRules bottomUpRules <> loopRules <> basicOpRules
 removeUnnecessaryCopy :: (BuilderOps rep, Aliased rep) => BottomUpRuleBasicOp rep
 removeUnnecessaryCopy (vtable, used) (Pat [d]) _ (Copy v)
   | not (v `UT.isConsumed` used),
+    -- This next line is too conservative, but the problem is that 'v'
+    -- might not look like it has been consumed if it is consumed in
+    -- an outer scope.  This is because the simplifier applies
+    -- bottom-up rules in a kind of deepest-first order.
+    not (patElemName d `UT.isInResult` used) || (patElemName d `UT.isConsumed` used),
     (not (v `UT.used` used) && consumable) || not (patElemName d `UT.isConsumed` used) =
     Simplify $ letBindNames [patElemName d] $ BasicOp $ SubExp $ Var v
   where
@@ -79,7 +84,7 @@ removeUnnecessaryCopy (vtable, used) (Pat [d]) _ (Copy v)
       Just . maybe False (unique . declTypeOf) . ST.entryFParam
     consumableStm e = do
       pat <- stmPat <$> ST.entryStm e
-      pe <- find ((== v) . patElemName) (patElements pat)
+      pe <- find ((== v) . patElemName) (patElems pat)
       guard $ aliasesOf pe == mempty
       pure True
 removeUnnecessaryCopy _ _ _ _ = Skip
@@ -123,7 +128,7 @@ ruleIf _ pat _ (e1, tb, fb, IfDec _ ifsort)
     addStms $ bodyStms branch
     sequence_
       [ certifying cs $ letBindNames [patElemName p] $ BasicOp $ SubExp se
-        | (p, SubExpRes cs se) <- zip (patElements pat) ses
+        | (p, SubExpRes cs se) <- zip (patElems pat) ses
       ]
   where
     checkBranch
@@ -173,7 +178,7 @@ ruleIf _ pat _ (_, tbranch, _, IfDec _ IfFallback)
     addStms $ bodyStms tbranch
     sequence_
       [ certifying cs $ letBindNames [patElemName p] $ BasicOp $ SubExp se
-        | (p, SubExpRes cs se) <- zip (patElements pat) ses
+        | (p, SubExpRes cs se) <- zip (patElems pat) ses
       ]
 ruleIf _ pat _ (cond, tb, fb, _)
   | Body _ _ [SubExpRes tcs (Constant (IntValue t))] <- tb,
@@ -199,7 +204,7 @@ hoistBranchInvariant _ pat _ (cond, tb, fb, IfDec ret ifsort) = Simplify $ do
       fses = bodyResult fb
   (hoistings, (pes, ts, res)) <-
     fmap (fmap unzip3 . partitionEithers) . mapM branchInvariant $
-      zip4 [0 ..] (patElements pat) ret (zip tses fses)
+      zip4 [0 ..] (patElems pat) ret (zip tses fses)
   let ctx_fixes = catMaybes hoistings
       (tses', fses') = unzip res
       tb' = tb {bodyResult = tses'}
@@ -267,7 +272,7 @@ hoistBranchInvariant _ pat _ (cond, tb, fb, IfDec ret ifsort) = Simplify $ do
 removeDeadBranchResult :: BuilderOps rep => BottomUpRuleIf rep
 removeDeadBranchResult (_, used) pat _ (e1, tb, fb, IfDec rettype ifsort)
   | -- Only if there is no existential binding...
-    not $ any (`nameIn` foldMap freeIn (patElements pat)) (patNames pat),
+    not $ any (`nameIn` foldMap freeIn (patElems pat)) (patNames pat),
     -- Figure out which of the names in 'pat' are used...
     patused <- map (`UT.isUsedDirectly` used) $ patNames pat,
     -- If they are not all used, then this rule applies.
@@ -281,7 +286,7 @@ removeDeadBranchResult (_, used) pat _ (e1, tb, fb, IfDec rettype ifsort)
         pick = map snd . filter fst . zip patused
         tb' = tb {bodyResult = pick tses}
         fb' = fb {bodyResult = pick fses}
-        pat' = pick $ patElements pat
+        pat' = pick $ patElems pat
         rettype' = pick rettype
      in Simplify $ letBind (Pat pat') $ If e1 tb' fb' $ IfDec rettype' ifsort
   | otherwise = Skip
@@ -299,7 +304,7 @@ withAccTopDown vtable (Let pat aux (WithAcc inputs lam)) = Simplify . auxing aux
       (acc_res, nonacc_res) =
         splitFromEnd num_nonaccs $ bodyResult $ lambdaBody lam
       (acc_pes, nonacc_pes) =
-        splitFromEnd num_nonaccs $ patElements pat
+        splitFromEnd num_nonaccs $ patElems pat
 
   -- Look at accumulator results.
   (acc_pes', inputs', params', acc_res') <-
@@ -355,7 +360,7 @@ withAccBottomUp (_, utable) (Let pat aux (WithAcc inputs lam))
     let (acc_res, nonacc_res) =
           splitFromEnd num_nonaccs $ bodyResult $ lambdaBody lam
         (acc_pes, nonacc_pes) =
-          splitFromEnd num_nonaccs $ patElements pat
+          splitFromEnd num_nonaccs $ patElems pat
         (cert_params, acc_params) =
           splitAt (length inputs) $ lambdaParams lam
 

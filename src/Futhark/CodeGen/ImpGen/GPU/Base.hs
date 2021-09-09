@@ -383,7 +383,7 @@ compileGroupOp pat (Inner (SegOp (SegMap lvl space _ body))) = do
   whenActive lvl space $
     localOps threadOperations $
       compileStms mempty (kernelBodyStms body) $
-        zipWithM_ (compileThreadResult space) (patElements pat) $
+        zipWithM_ (compileThreadResult space) (patElems pat) $
           kernelBodyResult body
 
   sOp $ Imp.ErrorSync Imp.FenceLocal
@@ -425,7 +425,7 @@ compileGroupOp pat (Inner (SegOp (SegScan lvl space scans _ body))) = do
 
       num_scan_results = sum $ map (length . segBinOpNeutral) scans
 
-  arrs_flat <- mapM flattened $ take num_scan_results $ patElements pat
+  arrs_flat <- mapM flattened $ take num_scan_results $ patElems pat
 
   forM_ scans $ \scan -> do
     let scan_op = segBinOpLambda scan
@@ -435,7 +435,7 @@ compileGroupOp pat (Inner (SegOp (SegRed lvl space ops _ body))) = do
 
   let (ltids, dims) = unzip $ unSegSpace space
       (red_pes, map_pes) =
-        splitAt (segBinOpResults ops) $ patElements pat
+        splitAt (segBinOpResults ops) $ patElems pat
 
       dims' = map toInt64Exp dims
 
@@ -517,7 +517,7 @@ compileGroupOp pat (Inner (SegOp (SegHist lvl space ops _ kbody))) = do
   -- the ops.
   let num_red_res = length ops + sum (map (length . histNeutral) ops)
       (_red_pes, map_pes) =
-        splitAt num_red_res $ patElements pat
+        splitAt num_red_res $ patElems pat
 
   ops' <- prepareIntraGroupSegHist (segGroupSize lvl) ops
 

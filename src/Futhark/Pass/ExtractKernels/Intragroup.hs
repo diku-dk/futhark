@@ -14,7 +14,7 @@ import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 import Futhark.Analysis.PrimExp.Convert
 import qualified Futhark.IR.GPU as Out
-import Futhark.IR.GPU.Kernel hiding (HistOp)
+import Futhark.IR.GPU.Op hiding (HistOp)
 import Futhark.IR.SOACS
 import Futhark.MonadFreshNames
 import Futhark.Pass.ExtractKernels.BlockedKernel
@@ -274,13 +274,13 @@ intraGroupStm lvl stm@(Let pat aux e) = do
     Op (Stream w arrs Sequential accs lam)
       | chunk_size_param : _ <- lambdaParams lam -> do
         types <- asksScope castScope
-        ((), stream_bnds) <-
+        ((), stream_stms) <-
           runBuilderT (sequentialStreamWholeArray pat w accs lam arrs) types
         let replace (Var v) | v == paramName chunk_size_param = w
             replace se = se
             replaceSets (IntraAcc x y log) =
               IntraAcc (S.map (map replace) x) (S.map (map replace) y) log
-        censor replaceSets $ intraGroupStms lvl stream_bnds
+        censor replaceSets $ intraGroupStms lvl stream_stms
     Op (Scatter w lam ivs dests) -> do
       write_i <- newVName "write_i"
       space <- mkSegSpace [(write_i, w)]

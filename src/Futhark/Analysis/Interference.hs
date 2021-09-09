@@ -11,24 +11,24 @@ import Data.Function ((&))
 import Data.Functor ((<&>))
 import Data.Map (Map)
 import qualified Data.Map as M
-import Data.Maybe (catMaybes, fromMaybe)
+import Data.Maybe (catMaybes, fromMaybe, mapMaybe)
 import Data.Set (Set)
 import qualified Data.Set as S
 import Futhark.Analysis.LastUse (LastUseMap)
 import Futhark.IR.GPUMem
 import Futhark.Util (invertMap)
 
--- | The set of `VName` currently in use.
+-- | The set of 'VName' currently in use.
 type InUse = Names
 
--- | The set of `VName` that are no longer in use.
+-- | The set of 'VName' that are no longer in use.
 type LastUsed = Names
 
--- | An interference graph. An element `(x, y)` in the set means that there is
--- an undirected edge between `x` and `y`, and therefore the lifetimes of `x`
--- and `y` overlap and they "interfere" with each other. We assume that pairs
--- are always normalized, such that `x` < `y`, before inserting. This should
--- prevent any duplicates. We also don't allow any pairs where `x == y`.
+-- | An interference graph. An element @(x, y)@ in the set means that there is
+-- an undirected edge between @x@ and @y@, and therefore the lifetimes of @x@
+-- and @y@ overlap and they "interfere" with each other. We assume that pairs
+-- are always normalized, such that @x@ < @y@, before inserting. This should
+-- prevent any duplicates. We also don't allow any pairs where @x == y@.
 type Graph a = Set (a, a)
 
 -- | Insert an edge between two values into the graph.
@@ -52,11 +52,11 @@ analyseStm ::
   m (InUse, LastUsed, Graph VName)
 analyseStm lumap inuse0 stm =
   inScopeOf stm $ do
-    let pat_name = patElemName $ head $ patElements $ stmPat stm
+    let pat_name = patElemName $ head $ patElems $ stmPat stm
 
     new_mems <-
       stmPat stm
-        & patElements
+        & patElems
         & mapM (memInfo . patElemName)
         <&> catMaybes
         <&> namesFromList
@@ -91,6 +91,23 @@ analyseStm lumap inuse0 stm =
             (namesToList $ inuse_outside <> inuse <> lus <> last_use_mems)
       )
 
+-- We conservatively treat all memory arguments to a DoLoop to
+-- interfere with each other, as well as anything used inside the
+-- loop.  This could potentially be improved by looking at the
+-- interference computed by the loop body wrt. the loop arguments, but
+-- probably very few programs would benefit from this.
+analyseLoopParams ::
+  [(FParam GPUMem, SubExp)] ->
+  (InUse, LastUsed, Graph VName) ->
+  (InUse, LastUsed, Graph VName)
+analyseLoopParams merge (inuse, lastused, graph) =
+  (inuse, lastused, cartesian makeEdge mems (mems <> inner_mems) <> graph)
+  where
+    mems = mapMaybe isMemArg merge
+    inner_mems = namesToList lastused <> namesToList inuse
+    isMemArg (Param _ MemMem {}, Var v) = Just v
+    isMemArg _ = Nothing
+
 analyseExp ::
   LocalScope GPUMem m =>
   LastUseMap ->
@@ -103,8 +120,8 @@ analyseExp lumap inuse_outside expr =
       res1 <- analyseBody lumap inuse_outside then_body
       res2 <- analyseBody lumap inuse_outside else_body
       return $ res1 <> res2
-    DoLoop _ _ body -> do
-      analyseBody lumap inuse_outside body
+    DoLoop merge _ body ->
+      analyseLoopParams merge <$> analyseBody lumap inuse_outside body
     Op (Inner (SegOp segop)) -> do
       analyseSegOp lumap inuse_outside segop
     _ ->
@@ -290,18 +307,18 @@ analyseGPU' lumap stms =
         res1 <- analyseGPU' lumap (bodyStms then_body)
         res2 <- analyseGPU' lumap (bodyStms else_body)
         return (res1 <> res2)
-    helper stm@Let {stmExp = DoLoop _ _ body} =
-      inScopeOf stm $
+    helper stm@Let {stmExp = DoLoop merge _ body} =
+      fmap (analyseLoopParams merge) . inScopeOf stm $
         analyseGPU' lumap $ bodyStms body
     helper stm =
       inScopeOf stm $ return mempty
 
-nameInfoToMemInfo :: Mem rep => NameInfo rep -> MemBound NoUniqueness
+nameInfoToMemInfo :: Mem rep inner => NameInfo rep -> MemBound NoUniqueness
 nameInfoToMemInfo info =
   case info of
     FParamName summary -> noUniquenessReturns summary
     LParamName summary -> summary
-    LetName summary -> summary
+    LetName summary -> letDecMem summary
     IndexName it -> MemPrim $ IntType it
 
 memInfo :: LocalScope GPUMem m => VName -> m (Maybe VName)

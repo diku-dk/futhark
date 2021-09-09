@@ -623,8 +623,12 @@ valuesAsVars server names_and_types futhark dir (GenValues gens) = do
   forM_ (zip gen_fs names_and_types) $ \(file, (v, t)) ->
     cmdMaybe $ cmdRestore server (dir </> file) [(v, t)]
 valuesAsVars server names_and_types _ _ (Values vs) = do
-  unless (length vs == length names_and_types) $
-    throwError "Mismatch between number of expected and provided values."
+  let types = map snd names_and_types
+      vs_types = map (V.valueTypeTextNoDims . V.valueType) vs
+  unless (types == vs_types) . throwError . T.unlines $
+    [ "Expected input of types: " <> prettyTextOneLine types,
+      "Provided input of types: " <> prettyTextOneLine vs_types
+    ]
   cmdMaybe . withSystemTempFile "futhark-input" $ \tmpf tmpf_h -> do
     mapM_ (BS.hPutStr tmpf_h . Bin.encode) vs
     hClose tmpf_h

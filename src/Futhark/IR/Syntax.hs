@@ -212,7 +212,7 @@ withoutAttrs (Attrs x) (Attrs y) = Attrs $ x `S.difference` y
 type PatElem rep = PatElemT (LetDec rep)
 
 -- | A pattern is conceptually just a list of names and their types.
-newtype PatT dec = Pat {patElements :: [PatElemT dec]}
+newtype PatT dec = Pat {patElems :: [PatElemT dec]}
   deriving (Ord, Show, Eq)
 
 instance Semigroup (PatT dec) where
@@ -402,6 +402,8 @@ data BasicOp
     -- Consumes the array.  If 'Safe', perform a run-time bounds check
     -- and ignore the write if out of bounds (like @Scatter@).
     Update Safety VName (Slice SubExp) SubExp
+  | FlatIndex VName (FlatSlice SubExp)
+  | FlatUpdate VName (FlatSlice SubExp) VName
   | -- | @concat@0([1],[2, 3, 4]) = [1, 2, 3, 4]@.
     Concat Int VName [VName] SubExp
   | -- | Copy the given array.  The result will not alias anything.
@@ -451,9 +453,9 @@ data ExpT rep
   | -- | Create accumulators backed by the given arrays (which are
     -- consumed) and pass them to the lambda, which must return the
     -- updated accumulators and possibly some extra values.  The
-    -- accumulators are turned back into arrays.  The 'Shape' is the
+    -- accumulators are turned back into arrays.  The t'Shape' is the
     -- write index space.  The corresponding arrays must all have this
-    -- shape outermost.  This construct is not part of 'BasicOp'
+    -- shape outermost.  This construct is not part of t'BasicOp'
     -- because we need the @rep@ parameter.
     WithAcc [(Shape, [VName], Maybe (Lambda rep, [SubExp]))] (Lambda rep)
   | Op (Op rep)

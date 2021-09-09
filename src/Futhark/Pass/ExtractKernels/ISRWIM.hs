@@ -123,8 +123,8 @@ irwim res_pat w comm red_fun red_input
               )
               $ varsRes $ patNames map_pat
         Just m -> localScope (scopeOfLParams map_params) $ do
-          map_body_bnds <- collectStms_ m
-          return $ mkBody map_body_bnds $ varsRes $ patNames map_pat
+          map_body_stms <- collectStms_ m
+          return $ mkBody map_body_stms $ varsRes $ patNames map_pat
 
     let map_fun' = Lambda map_params map_body map_rettype
 
@@ -140,13 +140,13 @@ rwimPossible ::
   Maybe (Pat, Certs, SubExp, Lambda)
 rwimPossible fun
   | Body _ stms res <- lambdaBody fun,
-    [bnd] <- stmsToList stms, -- Body has a single binding
-    map_pat <- stmPat bnd,
+    [stm] <- stmsToList stms, -- Body has a single binding
+    map_pat <- stmPat stm,
     map Var (patNames map_pat) == map resSubExp res, -- Returned verbatim
-    Op (Screma map_w map_arrs form) <- stmExp bnd,
+    Op (Screma map_w map_arrs form) <- stmExp stm,
     Just map_fun <- isMapSOAC form,
     map paramName (lambdaParams fun) == map_arrs =
-    Just (map_pat, stmCerts bnd, map_w, map_fun)
+    Just (map_pat, stmCerts stm, map_w, map_fun)
   | otherwise =
     Nothing
 

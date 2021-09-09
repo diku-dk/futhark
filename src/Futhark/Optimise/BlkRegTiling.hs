@@ -60,7 +60,7 @@ mmBlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kbo
     -- exactly one of the two innermost dimensions of the kernel
     Just var_dims <- isInvarTo1of2InnerDims mempty seg_space variance arrs,
     -- get the variables on which the first result of redomap depends on
-    [redomap_orig_res] <- patElements pat_redomap,
+    [redomap_orig_res] <- patElems pat_redomap,
     Just res_red_var <- M.lookup (patElemName redomap_orig_res) variance, -- variance of the reduce result
 
     -- we furthermore check that code1 is only formed by
@@ -572,13 +572,13 @@ processIndirections ::
   Maybe (Stms GPU, M.Map VName (Stm GPU))
 processIndirections arrs _ acc stm@(Let patt _ (BasicOp (Index _ _)))
   | Just (ss, tab) <- acc,
-    [p] <- patElements patt,
+    [p] <- patElems patt,
     p_nm <- patElemName p,
     nameIn p_nm arrs =
     Just (ss, M.insert p_nm stm tab)
 processIndirections _ res_red_var acc stm'@(Let patt _ _)
   | Just (ss, tab) <- acc,
-    ps <- patElements patt,
+    ps <- patElems patt,
     all (\p -> not (nameIn (patElemName p) res_red_var)) ps =
     Just (ss Seq.|> stm', tab)
   | otherwise = Nothing
@@ -727,7 +727,7 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
     -- exactly one of the two innermost dimensions of the kernel
     Just _ <- isInvarTo2of3InnerDims mempty space variance inp_soac_arrs,
     -- get the free variables on which the result of redomap depends on
-    redomap_orig_res <- patElements pat_redomap,
+    redomap_orig_res <- patElems pat_redomap,
     res_red_var <- -- variance of the reduce result
       mconcat $ mapMaybe ((`M.lookup` variance) . patElemName) redomap_orig_res,
     mempty /= res_red_var,
@@ -999,7 +999,7 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
       (VName, Stm GPU) ->
       Builder GPU (M.Map VName (Stm GPU), M.Map VName (PrimType, Stm GPU))
     insertTranspose variance (gidz, _) (tab_inn, tab_out) (p_nm, stm@(Let patt yy (BasicOp (Index arr_nm slc))))
-      | [p] <- patElements patt,
+      | [p] <- patElems patt,
         ptp <- elemType $ patElemType p,
         p_nm == patElemName p =
         case L.findIndices (variantSliceDim variance gidz) (unSlice slc) of

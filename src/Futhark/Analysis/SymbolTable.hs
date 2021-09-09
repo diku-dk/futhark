@@ -350,14 +350,14 @@ defBndEntry ::
   Names ->
   Stm rep ->
   LetBoundEntry rep
-defBndEntry vtable patElem als bnd =
+defBndEntry vtable patElem als stm =
   LetBoundEntry
     { letBoundDec = patElemDec patElem,
       letBoundAliases = als,
-      letBoundStm = bnd,
+      letBoundStm = stm,
       letBoundIndex = \k ->
-        fmap (indexedAddCerts (stmAuxCerts $ stmAux bnd))
-          . indexExp vtable (stmExp bnd) k
+        fmap (indexedAddCerts (stmAuxCerts $ stmAux stm))
+          . indexExp vtable (stmExp stm) k
     }
 
 bindingEntries ::
@@ -365,9 +365,9 @@ bindingEntries ::
   Stm rep ->
   SymbolTable rep ->
   [LetBoundEntry rep]
-bindingEntries bnd@(Let pat _ _) vtable = do
-  pat_elem <- patElements pat
-  return $ defBndEntry vtable pat_elem (Aliases.aliasesOf pat_elem) bnd
+bindingEntries stm@(Let pat _ _) vtable = do
+  pat_elem <- patElems pat
+  return $ defBndEntry vtable pat_elem (Aliases.aliasesOf pat_elem) stm
 
 adjustSeveral :: Ord k => (v -> v) -> [k] -> M.Map k v -> M.Map k v
 adjustSeveral f = flip $ foldl' $ flip $ M.adjust f
@@ -411,7 +411,7 @@ insertStm ::
   SymbolTable rep
 insertStm stm vtable =
   flip (foldl' $ flip consume) (namesToList stm_consumed) $
-    flip (foldl' addRevAliases) (patElements $ stmPat stm) $
+    flip (foldl' addRevAliases) (patElems $ stmPat stm) $
       insertEntries (zip names $ map LetBound $ bindingEntries stm vtable) vtable
   where
     names = patNames $ stmPat stm

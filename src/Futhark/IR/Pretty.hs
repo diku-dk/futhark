@@ -129,6 +129,9 @@ certAnnots cs
 stmCertAnnots :: Stm rep -> [Doc]
 stmCertAnnots = certAnnots . stmAuxCerts . stmAux
 
+instance Pretty Attrs where
+  ppr = spread . attrAnnots
+
 instance Pretty (PatElemT dec) => Pretty (PatT dec) where
   ppr (Pat xs) = braces $ commastack $ map ppr xs
 
@@ -139,7 +142,7 @@ instance Pretty t => Pretty (Param t) where
   ppr (Param name t) = ppr name <+> colon <+> align (ppr t)
 
 instance PrettyRep rep => Pretty (Stm rep) where
-  ppr bnd@(Let pat aux e) =
+  ppr stm@(Let pat aux e) =
     align . hang 2 $
       text "let" <+> align (ppr pat)
         <+> case (linebreak, stmannot) of
@@ -158,12 +161,18 @@ instance PrettyRep rep => Pretty (Stm rep) where
       stmannot =
         concat
           [ maybeToList (ppExpDec (stmAuxDec aux) e),
-            stmAttrAnnots bnd,
-            stmCertAnnots bnd
+            stmAttrAnnots stm,
+            stmCertAnnots stm
           ]
 
 instance Pretty a => Pretty (Slice a) where
   ppr (Slice xs) = brackets (commasep (map ppr xs))
+
+instance Pretty d => Pretty (FlatDimIndex d) where
+  ppr (FlatDimIndex n s) = ppr n <+> text ":" <+> ppr s
+
+instance Pretty a => Pretty (FlatSlice a) where
+  ppr (FlatSlice offset xs) = brackets (ppr offset <> text ";" <+> commasep (map ppr xs))
 
 instance Pretty BasicOp where
   ppr (SubExp se) = ppr se
@@ -189,6 +198,9 @@ instance Pretty BasicOp where
       with = case safety of
         Unsafe -> text "with"
         Safe -> text "with?"
+  ppr (FlatIndex v slice) = ppr v <> ppr slice
+  ppr (FlatUpdate src slice se) =
+    ppr src <+> text "with" <+> ppr slice <+> text "=" <+> ppr se
   ppr (Iota e x s et) = text "iota" <> et' <> apply [ppr e, ppr x, ppr s]
     where
       et' = text $ show $ primBitSize $ IntType et

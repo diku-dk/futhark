@@ -353,7 +353,7 @@ isMapSOAC (ScremaForm scans reds map_lam) = do
 -- This function is used for extracting and grouping the results of a
 -- scatter. In the SOAC representation, the lambda inside a 'Scatter' returns
 -- all indices and values as one big list. This function groups each value with
--- its corresponding indices (as determined by the 'Shape' of the output array).
+-- its corresponding indices (as determined by the t'Shape' of the output array).
 --
 -- The elements of the resulting list correspond to the shape and name of the
 -- output parameters, in addition to a list of values written to that output
