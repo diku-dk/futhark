@@ -42,12 +42,7 @@ shapeMapping all_params value_arg_types =
     match (Var v, se) = Just (v, se)
     match _ = Nothing
 
-argShapes ::
-  (HasScope SOACS m, Monad m) =>
-  [VName] ->
-  [FParam] ->
-  [Type] ->
-  m [SubExp]
+argShapes :: [VName] -> [FParam] -> [Type] -> InternaliseM [SubExp]
 argShapes shapes all_params valargts = do
   mapping <- shapeMapping all_params valargts
   let addShape name =
