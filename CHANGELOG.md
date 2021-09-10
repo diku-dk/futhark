@@ -23,6 +23,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Don't try to tile inside loops with parameters with variant sizes (#1462).
 
+* Don't consider it an ICE when the user passes invalid command line
+  options (#1464).
+
 ## [0.20.1]
 
 ### Added

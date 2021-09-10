@@ -3,6 +3,7 @@ module Futhark.Util.Options
   ( FunOptDescr,
     mainWithOptions,
     commonOptions,
+    optionsError,
     module System.Console.GetOpt,
   )
 where
@@ -11,6 +12,7 @@ import Control.Monad.IO.Class
 import Data.List (sortBy)
 import Futhark.Version
 import System.Console.GetOpt
+import System.Environment (getProgName)
 import System.Exit
 import System.IO
 
@@ -102,3 +104,11 @@ commonOptions prog usage options =
       putStrLn "Copyright (C) DIKU, University of Copenhagen, released under the ISC license."
       putStrLn "This is free software: you are free to change and redistribute it."
       putStrLn "There is NO WARRANTY, to the extent permitted by law."
+
+-- | Terminate the program with this error message (but don't report
+-- it as an ICE, as happens with 'error').
+optionsError :: String -> IO ()
+optionsError s = do
+  prog <- getProgName
+  hPutStrLn stderr $ prog <> ": " <> s
+  exitWith $ ExitFailure 2
