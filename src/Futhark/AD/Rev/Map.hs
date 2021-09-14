@@ -60,6 +60,23 @@ buildRenamedBody m = do
   body' <- renameBody body
   pure (body', x)
 
+withAcc ::
+  [(Shape, [VName], Maybe (Lambda, [SubExp]))] ->
+  ([VName] -> ADM Result) ->
+  ADM [VName]
+withAcc [] m =
+  mapM (letExp "withacc_res" . BasicOp . SubExp . resSubExp) =<< m []
+withAcc inputs m = do
+  (cert_params, acc_params) <- fmap unzip $
+    forM inputs $ \(shape, arrs, _) -> do
+      cert_param <- newParam "acc_cert_p" $ Prim Unit
+      ts <- mapM (fmap (stripArray (shapeRank shape)) . lookupType) arrs
+      acc_param <- newParam "acc_p" $ Acc (paramName cert_param) shape ts NoUniqueness
+      pure (cert_param, acc_param)
+  acc_lam <-
+    subAD $ mkLambda (cert_params ++ acc_params) $ m $ map paramName acc_params
+  letTupExp "withacc_res" $ WithAcc inputs acc_lam
+
 vjpMap :: VjpOps -> [Adj] -> SubExp -> Lambda -> [VName] -> ADM ()
 vjpMap ops res_adjs w map_lam as
   | Just res_ivs <- mapM isSparse res_adjs = returnSweepCode $ do
@@ -166,23 +183,6 @@ vjpMap ops pat_adj w map_lam as = returnSweepCode $ do
       pure $ lam {lambdaParams = idxs ++ lambdaParams lam}
 
     accAddLambda n t = addIdxParams n =<< addLambda t
-
-    withAcc ::
-      [(Shape, [VName], Maybe (Lambda, [SubExp]))] ->
-      ([VName] -> ADM Result) ->
-      ADM [VName]
-    withAcc [] m =
-      mapM (letExp "withacc_res" . BasicOp . SubExp . resSubExp) =<< m []
-    withAcc inputs m = do
-      (cert_params, acc_params) <- fmap unzip $
-        forM inputs $ \(shape, arrs, _) -> do
-          cert_param <- newParam "acc_cert_p" $ Prim Unit
-          ts <- mapM (fmap (stripArray (shapeRank shape)) . lookupType) arrs
-          acc_param <- newParam "acc_p" $ Acc (paramName cert_param) shape ts NoUniqueness
-          pure (cert_param, acc_param)
-      acc_lam <-
-        subAD $ mkLambda (cert_params ++ acc_params) $ m $ map paramName acc_params
-      letTupExp "withacc_res" $ WithAcc inputs acc_lam
 
     withAccInput (v, (shape, pt)) = do
       v_adj <- lookupAdjVal v
