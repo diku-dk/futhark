@@ -328,8 +328,8 @@ expandSoacInpArr :: [VName] -> FusionGM [VName]
 expandSoacInpArr =
   foldM
     ( \y nm -> do
-        bnd <- asks $ M.lookup nm . soacs
-        case bnd of
+        stm <- asks $ M.lookup nm . soacs
+        case stm of
           Nothing -> return (y ++ [nm])
           Just nns -> return (y ++ nns)
     )
@@ -388,7 +388,7 @@ inlineSOACInputs soac = do
   return $ inputs' `SOAC.setInputs` soac
 
 -- | Attempts to fuse between SOACs. Input:
---   @rem_bnds@ are the bindings remaining in the current body after @orig_soac@.
+--   @rem_stms@ are the bindings remaining in the current body after @orig_soac@.
 --   @lam_used_nms@ the infusible names
 --   @res@ the fusion result (before processing the current soac)
 --   @orig_soac@ and @out_idds@ the current SOAC and its binding pattern
@@ -400,7 +400,7 @@ greedyFuse ::
   FusedRes ->
   (Pat, StmAux (), SOAC, Names) ->
   FusionGM FusedRes
-greedyFuse rem_bnds lam_used_nms res (out_idds, aux, orig_soac, consumed) = do
+greedyFuse rem_stms lam_used_nms res (out_idds, aux, orig_soac, consumed) = do
   soac <- inlineSOACInputs orig_soac
   (inp_nms, other_nms) <- soacInputs soac
   -- Assumption: the free vars in lambda are already in @infusible res@.
@@ -421,7 +421,7 @@ greedyFuse rem_bnds lam_used_nms res (out_idds, aux, orig_soac, consumed) = do
 
   (ok_kers_compat, fused_kers, fused_nms, old_kers, oldker_nms) <-
     if is_screma || any isInfusible out_nms
-      then horizontGreedyFuse rem_bnds res (out_idds, aux, soac, consumed)
+      then horizontGreedyFuse rem_stms res (out_idds, aux, soac, consumed)
       else prodconsGreedyFuse res (out_idds, aux, soac, consumed)
   --
   -- (ii) check whether fusing @soac@ will violate any in-place update
@@ -529,7 +529,7 @@ horizontGreedyFuse ::
   FusedRes ->
   (Pat, StmAux (), SOAC, Names) ->
   FusionGM (Bool, [FusedKer], [KernName], [FusedKer], [KernName])
-horizontGreedyFuse rem_bnds res (out_idds, aux, soac, consumed) = do
+horizontGreedyFuse rem_stms res (out_idds, aux, soac, consumed) = do
   (inp_nms, _) <- soacInputs soac
   let out_nms = patNames out_idds
       infusible_nms = namesFromList $ filter (`nameIn` infusible res) out_nms
@@ -555,10 +555,10 @@ horizontGreedyFuse rem_bnds res (out_idds, aux, soac, consumed) = do
   -- located and sort based on the index so that partial fusion may
   -- succeed.  We use the last position where one of the kernel
   -- outputs occur.
-  let bnd_nms = map (patNames . stmPat) rem_bnds
+  let stm_nms = map (patNames . stmPat) rem_stms
   kernminds <- forM to_fuse_knms $ \ker_nm -> do
     ker <- lookupKernel ker_nm
-    case mapMaybe (\out_nm -> L.findIndex (elem out_nm) bnd_nms) (outNames ker) of
+    case mapMaybe (\out_nm -> L.findIndex (elem out_nm) stm_nms) (outNames ker) of
       [] -> return Nothing
       is -> return $ Just (ker, ker_nm, maxinum is)
 
@@ -570,7 +570,7 @@ horizontGreedyFuse rem_bnds res (out_idds, aux, soac, consumed) = do
   -- kernel until which fusion succeded, and @fused_ker@ is the resulting kernel.
   (_, ok_ind, _, fused_ker, _) <-
     foldM
-      ( \(cur_ok, n, prev_ind, cur_ker, ufus_nms) (ker, _ker_nm, bnd_ind) -> do
+      ( \(cur_ok, n, prev_ind, cur_ker, ufus_nms) (ker, _ker_nm, stm_ind) -> do
           -- check that we still try fusion and that the intermediate
           -- bindings do not use the results of cur_ker
           let curker_outnms = outNames cur_ker
@@ -596,12 +596,12 @@ horizontGreedyFuse rem_bnds res (out_idds, aux, soac, consumed) = do
                   curker_outset
                     `namesIntersect` freeIn (lambdaBody $ SOAC.lambda $ fsoac ker)
 
-          let interm_bnds_ok =
+          let interm_stms_ok =
                 cur_ok && consumer_ok && out_transf_ok && cons_no_out_transf
                   && foldl
-                    ( \ok bnd ->
+                    ( \ok stm ->
                         ok
-                          && not (curker_outset `namesIntersect` freeIn (stmExp bnd))
+                          && not (curker_outset `namesIntersect` freeIn (stmExp stm))
                           -- hardwired to False after first fail
                           -- (i) check that the in-between bindings do
                           --     not use the result of current kernel OR
@@ -614,13 +614,13 @@ horizontGreedyFuse rem_bnds res (out_idds, aux, soac, consumed) = do
                           not
                             ( null $
                                 curker_outnms
-                                  `L.intersect` patNames (stmPat bnd)
+                                  `L.intersect` patNames (stmPat stm)
                             )
                     )
                     True
-                    (drop (prev_ind + 1) $ take bnd_ind rem_bnds)
-          if not interm_bnds_ok
-            then return (False, n, bnd_ind, cur_ker, mempty)
+                    (drop (prev_ind + 1) $ take stm_ind rem_stms)
+          if not interm_stms_ok
+            then return (False, n, stm_ind, cur_ker, mempty)
             else do
               new_ker <-
                 attemptFusion
@@ -630,10 +630,10 @@ horizontGreedyFuse rem_bnds res (out_idds, aux, soac, consumed) = do
                   (fusedConsumed cur_ker)
                   ker
               case new_ker of
-                Nothing -> return (False, n, bnd_ind, cur_ker, mempty)
+                Nothing -> return (False, n, stm_ind, cur_ker, mempty)
                 Just krn ->
                   let krn' = krn {kerAux = aux <> kerAux krn}
-                   in return (True, n + 1, bnd_ind, krn', new_ufus_nms)
+                   in return (True, n + 1, stm_ind, krn', new_ufus_nms)
       )
       (True, 0, 0, soac_kernel, infusible_nms)
       kernminds'
@@ -681,7 +681,7 @@ fusionGatherStms :: FusedRes -> [Stm] -> Result -> FusionGM FusedRes
 -- be considered a stream, to avoid infinite recursion.
 fusionGatherStms
   fres
-  (Let (Pat pes) bndtp (DoLoop merge (ForLoop i it w loop_vars) body) : bnds)
+  (Let (Pat pes) stmtp (DoLoop merge (ForLoop i it w loop_vars) body) : stms)
   res
     | not $ null loop_vars = do
       let (merge_params, merge_init) = unzip merge
@@ -735,9 +735,9 @@ fusionGatherStms
 
       fusionGatherStms
         fres
-        (Let (Pat (pes <> [discard_pe])) bndtp (Op stream) : bnds)
+        (Let (Pat (pes <> [discard_pe])) stmtp (Op stream) : stms)
         res
-fusionGatherStms fres (bnd@(Let pat _ e) : bnds) res = do
+fusionGatherStms fres (stm@(Let pat _ e) : stms) res = do
   maybesoac <- SOAC.fromExp e
   case maybesoac of
     Right soac@(SOAC.Scatter _len lam _ivs _as) -> do
@@ -758,9 +758,9 @@ fusionGatherStms fres (bnd@(Let pat _ e) : bnds) res = do
         concatMap scanNeutral scans <> concatMap redNeutral reds
     Right soac@(SOAC.Stream _ form lam nes _) -> do
       -- a redomap does not neccessarily start a new kernel, e.g.,
-      -- @let a= reduce(+,0,A) in ... bnds ... in let B = map(f,A)@
+      -- @let a= reduce(+,0,A) in ... stms ... in let B = map(f,A)@
       -- can be fused into a redomap that replaces the @map@, if @a@
-      -- and @B@ are defined in the same scope and @bnds@ does not uses @a@.
+      -- and @B@ are defined in the same scope and @stms@ does not uses @a@.
       -- a redomap always starts a new kernel
       let lambdas = case form of
             Parallel _ _ lout -> [lout, lam]
@@ -768,30 +768,30 @@ fusionGatherStms fres (bnd@(Let pat _ e) : bnds) res = do
       reduceLike soac lambdas nes
     _
       | Pat [pe] <- pat,
-        Just (src, trns) <- SOAC.transformFromExp (stmCerts bnd) e ->
-        bindingTransform pe src trns $ fusionGatherStms fres bnds res
+        Just (src, trns) <- SOAC.transformFromExp (stmCerts stm) e ->
+        bindingTransform pe src trns $ fusionGatherStms fres stms res
       | otherwise -> do
         let pat_vars = map (BasicOp . SubExp . Var) $ patNames pat
-        bres <- gatherStmPat pat e $ fusionGatherStms fres bnds res
+        bres <- gatherStmPat pat e $ fusionGatherStms fres stms res
         bres' <- checkForUpdates bres e
         foldM fusionGatherExp bres' (e : pat_vars)
   where
-    aux = stmAux bnd
-    rem_bnds = bnd : bnds
+    aux = stmAux stm
+    rem_stms = stm : stms
     consumed = consumedInExp $ Alias.analyseExp mempty e
 
     reduceLike soac lambdas nes = do
       (used_lam, lres) <- foldM fusionGatherLam (mempty, fres) lambdas
-      bres <- bindingFamily pat $ fusionGatherStms lres bnds res
+      bres <- bindingFamily pat $ fusionGatherStms lres stms res
       bres' <- foldM fusionGatherSubExp bres nes
       consumed' <- varsAliases consumed
-      greedyFuse rem_bnds used_lam bres' (pat, aux, soac, consumed')
+      greedyFuse rem_stms used_lam bres' (pat, aux, soac, consumed')
 
     mapLike fres' soac lambda = do
-      bres <- bindingFamily pat $ fusionGatherStms fres' bnds res
+      bres <- bindingFamily pat $ fusionGatherStms fres' stms res
       (used_lam, blres) <- fusionGatherLam (mempty, bres) lambda
       consumed' <- varsAliases consumed
-      greedyFuse rem_bnds used_lam blres (pat, aux, soac, consumed')
+      greedyFuse rem_stms used_lam blres (pat, aux, soac, consumed')
 fusionGatherStms fres [] res =
   foldM fusionGatherExp fres $ map (BasicOp . SubExp . resSubExp) res
 
@@ -861,8 +861,8 @@ fusionGatherLam (u_set, fres) (Lambda idds body _) = do
   -- cannot be fused from outside the lambda:
   let inp_arrs = namesFromList $ M.keys $ inpArr new_res
   let unfus = infusible new_res <> inp_arrs
-  bnds <- asks $ M.keys . varsInScope
-  let unfus' = unfus `namesIntersection` namesFromList bnds
+  stms <- asks $ M.keys . varsInScope
+  let unfus' = unfus `namesIntersection` namesFromList stms
   -- merge fres with new_res'
   let new_res' = new_res {infusible = unfus'}
   -- merge new_res with fres'
@@ -878,8 +878,8 @@ fuseInStms :: Stms SOACS -> FusionGM (Stms SOACS)
 fuseInStms stms
   | Just (Let pat aux e, stms') <- stmsHead stms = do
     stms'' <- bindingPat pat $ fuseInStms stms'
-    soac_bnds <- replaceSOAC pat aux e
-    pure $ soac_bnds <> stms''
+    soac_stms <- replaceSOAC pat aux e
+    pure $ soac_stms <> stms''
   | otherwise =
     pure mempty
 
@@ -1039,23 +1039,23 @@ copyNewlyConsumed was_consumed soac =
       let free_consumed =
             consumedByLambda lam
               `namesSubtract` namesFromList (map paramName $ lambdaParams lam)
-      (bnds, subst) <-
+      (stms, subst) <-
         foldM copyFree (mempty, mempty) $ namesToList free_consumed
       let lam' = Aliases.removeLambdaAliases lam
       return $
-        if null bnds
+        if null stms
           then lam'
           else
             lam'
               { lambdaBody =
-                  insertStms bnds $
+                  insertStms stms $
                     substituteNames subst $ lambdaBody lam'
               }
 
-    copyFree (bnds, subst) v = do
+    copyFree (stms, subst) v = do
       v_copy <- newVName $ baseString v <> "_copy"
       copy <- mkLetNamesM [v_copy] $ BasicOp $ Copy v
-      return (oneStm copy <> bnds, M.insert v v_copy subst)
+      return (oneStm copy <> stms, M.insert v v_copy subst)
 
 ---------------------------------------------------
 ---------------------------------------------------

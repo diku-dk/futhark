@@ -524,8 +524,8 @@ insertStmsM ::
   m (Body (Rep m)) ->
   m (Body (Rep m))
 insertStmsM m = do
-  (Body _ bnds res, otherbnds) <- collectStms m
-  mkBodyM (otherbnds <> bnds) res
+  (Body _ stms res, otherstms) <- collectStms m
+  mkBodyM (otherstms <> stms) res
 
 -- | Evaluate an action that produces a 'Result' and an auxiliary
 -- value, then return the body constructed from the 'Result' and any
@@ -553,9 +553,9 @@ mapResult ::
   (Result -> Body rep) ->
   Body rep ->
   Body rep
-mapResult f (Body _ bnds res) =
-  let Body _ bnds2 newres = f res
-   in mkBody (bnds <> bnds2) newres
+mapResult f (Body _ stms res) =
+  let Body _ stms2 newres = f res
+   in mkBody (stms <> stms2) newres
 
 -- | Instantiate all existential parts dimensions of the given
 -- type, using a monadic action to create the necessary t'SubExp's.

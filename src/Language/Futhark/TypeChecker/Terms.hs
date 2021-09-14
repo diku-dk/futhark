@@ -942,17 +942,17 @@ checkPat sizes p t m = do
       bindNameMap (patternNameMap p') $ m p'
 
 binding :: [Ident] -> TermTypeM a -> TermTypeM a
-binding bnds = check . handleVars
+binding stms = check . handleVars
   where
     handleVars m =
-      localScope (`bindVars` bnds) $ do
+      localScope (`bindVars` stms) $ do
         -- Those identifiers that can potentially also be sizes are
         -- added as type constraints.  This is necessary so that we
         -- can properly detect scope violations during unification.
         -- We do this for *all* identifiers, not just those that are
         -- integers, because they may become integers later due to
         -- inference...
-        forM_ bnds $ \ident ->
+        forM_ stms $ \ident ->
           constrain (identName ident) $ ParamSize $ srclocOf ident
         m
 
@@ -986,11 +986,11 @@ binding bnds = check . handleVars
       (a, usages) <- collectBindingsOccurences m
       checkOccurences usages
 
-      mapM_ (checkIfUsed usages) bnds
+      mapM_ (checkIfUsed usages) stms
 
       return a
 
-    -- Collect and remove all occurences in @bnds@.  This relies
+    -- Collect and remove all occurences in @stms@.  This relies
     -- on the fact that no variables shadow any other.
     collectBindingsOccurences m = do
       (x, usage) <- collectOccurences m
@@ -1010,7 +1010,7 @@ binding bnds = check . handleVars
                         occ {observed = obs2, consumed = con2}
                       )
               )
-        names = S.fromList $ map identName bnds
+        names = S.fromList $ map identName stms
         divide s = (s `S.intersection` names, s `S.difference` names)
 
 bindingTypes ::

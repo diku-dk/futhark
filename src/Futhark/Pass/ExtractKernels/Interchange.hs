@@ -65,13 +65,13 @@ interchangeLoop
     -- small simplification, we just remove the parameter outright if
     -- it is not used anymore.  This might happen if the parameter was
     -- used just as the inital value of a merge parameter.
-    ((params', arrs'), pre_copy_bnds) <-
+    ((params', arrs'), pre_copy_stms) <-
       runBuilder $
         localScope (scopeOfLParams new_params) $
           unzip . catMaybes <$> mapM copyOrRemoveParam params_and_arrs
 
     let lam = Lambda (params' <> new_params) body rettype
-        map_bnd =
+        map_stm =
           Let loop_pat_expanded aux $
             Op $ Screma w (arrs' <> new_arrs) (mapSOAC lam)
         res = varsRes $ patNames loop_pat_expanded
@@ -79,7 +79,7 @@ interchangeLoop
 
     return $
       SeqLoop perm pat' merge_expanded form $
-        mkBody (pre_copy_bnds <> oneStm map_bnd) res
+        mkBody (pre_copy_stms <> oneStm map_stm) res
     where
       free_in_body = freeIn body
 
@@ -119,11 +119,11 @@ interchangeLoops ::
   SeqLoop ->
   m (Stms SOACS)
 interchangeLoops nest loop = do
-  (loop', bnds) <-
+  (loop', stms) <-
     runBuilder $
       foldM (interchangeLoop isMapParameter) loop $
         reverse $ kernelNestLoops nest
-  return $ bnds <> oneStm (seqLoopStm loop')
+  return $ stms <> oneStm (seqLoopStm loop')
   where
     isMapParameter v =
       fmap snd $
@@ -156,8 +156,8 @@ interchangeBranch1
         mkBranch branch = (renameBody =<<) $ do
           let lam = Lambda params branch lam_ret
               res = varsRes $ patNames branch_pat'
-              map_bnd = Let branch_pat' aux $ Op $ Screma w arrs $ mapSOAC lam
-          return $ mkBody (oneStm map_bnd) res
+              map_stm = Let branch_pat' aux $ Op $ Screma w arrs $ mapSOAC lam
+          return $ mkBody (oneStm map_stm) res
 
     tbranch' <- mkBranch tbranch
     fbranch' <- mkBranch fbranch
@@ -171,9 +171,9 @@ interchangeBranch ::
   Branch ->
   m (Stms SOACS)
 interchangeBranch nest loop = do
-  (loop', bnds) <-
+  (loop', stms) <-
     runBuilder $ foldM interchangeBranch1 loop $ reverse $ kernelNestLoops nest
-  return $ bnds <> oneStm (branchStm loop')
+  return $ stms <> oneStm (branchStm loop')
 
 data WithAccStm
   = WithAccStm [Int] Pat [(Shape, [VName], Maybe (Lambda, [SubExp]))] Lambda

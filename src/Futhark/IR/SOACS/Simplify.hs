@@ -358,16 +358,16 @@ removeReplicateMapping ::
 removeReplicateMapping vtable pat aux op
   | Just (Screma w arrs form) <- asSOAC op,
     Just fun <- isMapSOAC form,
-    Just (bnds, fun', arrs') <- removeReplicateInput vtable fun arrs = Simplify $ do
-    forM_ bnds $ \(vs, cs, e) -> certifying cs $ letBindNames vs e
+    Just (stms, fun', arrs') <- removeReplicateInput vtable fun arrs = Simplify $ do
+    forM_ stms $ \(vs, cs, e) -> certifying cs $ letBindNames vs e
     auxing aux $ letBind pat $ Op $ soacOp $ Screma w arrs' $ mapSOAC fun'
 removeReplicateMapping _ _ _ _ = Skip
 
 -- | Like 'removeReplicateMapping', but for 'Scatter'.
 removeReplicateWrite :: TopDownRuleOp (Wise SOACS)
 removeReplicateWrite vtable pat aux (Scatter len lam ivs as)
-  | Just (bnds, lam', ivs') <- removeReplicateInput vtable lam ivs = Simplify $ do
-    forM_ bnds $ \(vs, cs, e) -> certifying cs $ letBindNames vs e
+  | Just (stms, lam', ivs') <- removeReplicateInput vtable lam ivs = Simplify $ do
+    forM_ stms $ \(vs, cs, e) -> certifying cs $ letBindNames vs e
     auxing aux $ letBind pat $ Op $ Scatter len lam' ivs' as
 removeReplicateWrite _ _ _ _ = Skip
 

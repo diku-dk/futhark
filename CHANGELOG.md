@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [0.21.0]
 
-### Adeed
+### Added
 
 ### Removed
 
@@ -15,9 +15,20 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+## [0.20.2]
+
+### Fixed
+
 * Simplification bug (#1455).
 
 * In-place-lowering bug (#1457).
+
+* Another in-place-lowering bug (#1460).
+
+* Don't try to tile inside loops with parameters with variant sizes (#1462).
+
+* Don't consider it an ICE when the user passes invalid command line
+  options (#1464).
 
 ## [0.20.1]
 

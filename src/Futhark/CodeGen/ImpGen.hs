@@ -666,18 +666,18 @@ compileFunDef (FunDef entry _ fname rettype params body) =
       return (outparams, inparams, results, args)
 
 compileBody :: Pat rep -> Body rep -> ImpM rep r op ()
-compileBody pat (Body _ bnds ses) = do
+compileBody pat (Body _ stms ses) = do
   dests <- destinationFromPat pat
-  compileStms (freeIn ses) bnds $
+  compileStms (freeIn ses) stms $
     forM_ (zip dests ses) $ \(d, SubExpRes _ se) -> copyDWIMDest d [] se []
 
 compileBody' :: [Param dec] -> Body rep -> ImpM rep r op ()
-compileBody' params (Body _ bnds ses) =
-  compileStms (freeIn ses) bnds $
+compileBody' params (Body _ stms ses) =
+  compileStms (freeIn ses) stms $
     forM_ (zip params ses) $ \(param, SubExpRes _ se) -> copyDWIM (paramName param) [] se []
 
 compileLoopBody :: Typed dec => [Param dec] -> Body rep -> ImpM rep r op ()
-compileLoopBody mergeparams (Body _ bnds ses) = do
+compileLoopBody mergeparams (Body _ stms ses) = do
   -- We cannot write the results to the merge parameters immediately,
   -- as some of the results may actually *be* merge parameters, and
   -- would thus be clobbered.  Therefore, we first copy to new
@@ -685,7 +685,7 @@ compileLoopBody mergeparams (Body _ bnds ses) = do
   -- buffer to the merge parameters.  This is efficient, because the
   -- operations are all scalar operations.
   tmpnames <- mapM (newVName . (++ "_tmp") . baseString . paramName) mergeparams
-  compileStms (freeIn ses) bnds $ do
+  compileStms (freeIn ses) stms $ do
     copy_to_merge_params <- forM (zip3 mergeparams tmpnames ses) $ \(p, tmp, SubExpRes _ se) ->
       case typeOf p of
         Prim pt -> do
@@ -1367,9 +1367,14 @@ fullyIndexArray' (MemLoc mem _ ixfun) indices = do
 -- More complicated read/write operations that use index functions.
 
 copy :: CopyCompiler rep r op
-copy bt dest src = do
-  cc <- asks envCopyCompiler
-  cc bt dest src
+copy bt dest src =
+  unless
+    ( memLocName dest == memLocName src
+        && memLocIxFun dest `IxFun.equivalent` memLocIxFun src
+    )
+    $ do
+      cc <- asks envCopyCompiler
+      cc bt dest src
 
 -- | Is this copy really a mapping with transpose?
 isMapTransposeCopy ::

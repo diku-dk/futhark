@@ -103,8 +103,8 @@ transformStm (Let pat aux (If cond tbranch fbranch (IfDec ts IfEquiv))) = do
       bodyStms b
         <> stmsFromList (zipWith bindRes (patElems pat) (bodyResult b))
 transformStm (Let pat aux e) = do
-  (bnds, e') <- transformExp =<< mapExpM transform e
-  return $ bnds <> oneStm (Let pat aux e')
+  (stms, e') <- transformExp =<< mapExpM transform e
+  return $ stms <> oneStm (Let pat aux e')
   where
     transform =
       identityMapper
@@ -501,9 +501,9 @@ expandedVariantAllocations num_threads kspace kstms variant_allocs = do
 
   -- We expand the invariant allocations by adding an inner dimension
   -- equal to the sum of the sizes required by different threads.
-  (alloc_bnds, rebases) <- unzip <$> mapM expand variant_allocs'
+  (alloc_stms, rebases) <- unzip <$> mapM expand variant_allocs'
 
-  return (slice_stms' <> stmsFromList alloc_bnds, mconcat rebases)
+  return (slice_stms' <> stmsFromList alloc_stms, mconcat rebases)
   where
     expand (mem, (offset, total_size, space)) = do
       let allocpat = Pat [PatElem mem $ MemMem space]

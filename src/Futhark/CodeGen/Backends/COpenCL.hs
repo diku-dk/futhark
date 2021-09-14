@@ -423,10 +423,10 @@ launchKernel kernel_name num_workgroups workgroup_dims local_bytes = do
           ++ dims
           ++ " and local work size "
           ++ dims
-          ++ "]; local memory: %d bytes.\n",
+          ++ "; local memory: %d bytes.\n",
         [C.cexp|$string:(pretty kernel_name)|] :
-        map (kernelDim global_work_size) [0 .. kernel_rank -1]
-          ++ map (kernelDim local_work_size) [0 .. kernel_rank -1]
+        map (kernelDim global_work_size) [0 .. kernel_rank - 1]
+          ++ map (kernelDim local_work_size) [0 .. kernel_rank - 1]
           ++ [[C.cexp|(int)$exp:local_bytes|]]
       )
       where
