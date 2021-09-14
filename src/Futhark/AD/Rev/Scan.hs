@@ -1,23 +1,13 @@
 module Futhark.AD.Rev.Scan (diffScan) where
 
 import Control.Monad
-import Control.Monad.State.Strict
-import Data.Bifunctor (first, second)
-import Data.List (foldl', (\\))
-import qualified Data.Map as M
-import Data.Maybe
-import Futhark.AD.Derivatives
 import Futhark.AD.Rev.Monad
-import qualified Futhark.Analysis.Alias as Alias
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.Builder
-import Futhark.IR.Aliases (consumedInStms)
-import Futhark.IR.Prop.Aliases
 import Futhark.IR.SOACS
 import Futhark.Tools
 import Futhark.Transform.Rename
-import Futhark.Transform.Substitute
-import Futhark.Util (chunks, pairs, splitAt3, takeLast, unpairs)
+import Futhark.Util (pairs, unpairs)
 
 data FirstOrSecond = WrtFirst | WrtSecond
 
