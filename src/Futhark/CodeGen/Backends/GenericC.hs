@@ -89,6 +89,7 @@ import qualified Data.Map.Strict as M
 import Data.Maybe
 import qualified Data.Text as T
 import Futhark.CodeGen.Backends.GenericC.CLI (cliDefs)
+import qualified Futhark.CodeGen.Backends.GenericC.Manifest as Manifest
 import Futhark.CodeGen.Backends.GenericC.Options
 import Futhark.CodeGen.Backends.GenericC.Server (serverDefs)
 import Futhark.CodeGen.Backends.SimpleRep
@@ -832,7 +833,7 @@ arrayLibraryFunctions ::
   PrimType ->
   Signedness ->
   Int ->
-  CompilerM op s [C.Definition]
+  CompilerM op s Manifest.ArrayOps
 arrayLibraryFunctions pub space pt signed rank = do
   let pt' = primAPIType signed pt
       name = arrayName pt signed rank
@@ -922,7 +923,8 @@ arrayLibraryFunctions pub space pt signed rank = do
   proto
     [C.cedecl|const typename int64_t* $id:shape_array($ty:ctx_ty *ctx, $ty:array_type *arr);|]
 
-  return
+  mapM_
+    libDecl
     [C.cunit|
           $ty:array_type* $id:new_array($ty:ctx_ty *ctx, const $ty:pt' *data, $params:shape_params) {
             $ty:array_type* bad = NULL;
@@ -967,10 +969,18 @@ arrayLibraryFunctions pub space pt signed rank = do
           }
           |]
 
+  pure $
+    Manifest.ArrayOps
+      { Manifest.arrayFree = T.pack free_array,
+        Manifest.arrayShape = T.pack shape_array,
+        Manifest.arrayValues = T.pack values_array,
+        Manifest.arrayNew = T.pack new_array
+      }
+
 opaqueLibraryFunctions ::
   String ->
   [ValueDesc] ->
-  CompilerM op s [C.Definition]
+  CompilerM op s Manifest.OpaqueOps
 opaqueLibraryFunctions desc vds = do
   name <- publicName $ opaqueName desc vds
   free_opaque <- publicName $ "free_" ++ opaqueName desc vds
@@ -1076,7 +1086,8 @@ opaqueLibraryFunctions desc vds = do
   -- We do not need to enclose the body in a critical section, because
   -- when we operate on the components of the opaque, we are calling
   -- public API functions that do their own locking.
-  return
+  mapM_
+    libDecl
     [C.cunit|
           int $id:free_opaque($ty:ctx_ty *ctx, $ty:opaque_type *obj) {
             int ret = 0, tmp;
@@ -1108,6 +1119,13 @@ opaqueLibraryFunctions desc vds = do
           }
     |]
 
+  pure $
+    Manifest.OpaqueOps
+      { Manifest.opaqueFree = T.pack free_opaque,
+        Manifest.opaqueStore = T.pack store_opaque,
+        Manifest.opaqueRestore = T.pack restore_opaque
+      }
+
 valueDescToCType :: Publicness -> ValueDesc -> CompilerM op s C.Type
 valueDescToCType _ (ScalarValue pt signed _) =
   return $ primAPIType signed pt
@@ -1127,22 +1145,37 @@ opaqueToCType desc vds = do
   mapM_ (valueDescToCType Private) vds
   pure [C.cty|struct $id:name|]
 
-generateAPITypes :: CompilerM op s ()
+generateAPITypes :: CompilerM op s (M.Map T.Text Manifest.Type)
 generateAPITypes = do
-  mapM_ generateArray . M.toList =<< gets compArrayTypes
-  mapM_ generateOpaque . M.toList =<< gets compOpaqueTypes
+  array_ts <- mapM generateArray . M.toList =<< gets compArrayTypes
+  opaque_ts <- mapM generateOpaque . M.toList =<< gets compOpaqueTypes
+  pure $ M.fromList $ catMaybes array_ts <> opaque_ts
   where
     generateArray ((space, signed, pt, rank), pub) = do
       name <- publicName $ arrayName pt signed rank
       let memty = fatMemType space
       libDecl [C.cedecl|struct $id:name { $ty:memty mem; typename int64_t shape[$int:rank]; };|]
-      mapM libDecl =<< arrayLibraryFunctions pub space pt signed rank
+      ops <- arrayLibraryFunctions pub space pt signed rank
+      let pt_name = T.pack $ prettySigned (signed == TypeUnsigned) pt
+          pretty_name = mconcat (replicate rank "[]") <> pt_name
+          arr_type = [C.cty|struct $id:name*|]
+      case pub of
+        Public ->
+          pure $
+            Just
+              ( pretty_name,
+                Manifest.TypeArray (prettyText arr_type) pt_name rank ops
+              )
+        Private ->
+          pure Nothing
 
     generateOpaque (desc, vds) = do
       name <- publicName $ opaqueName desc vds
       members <- zipWithM field vds [(0 :: Int) ..]
       libDecl [C.cedecl|struct $id:name { $sdecls:members };|]
-      mapM libDecl =<< opaqueLibraryFunctions desc vds
+      ops <- opaqueLibraryFunctions desc vds
+      let opaque_type = [C.cty|struct $id:name*|]
+      pure (T.pack desc, Manifest.TypeOpaque (prettyText opaque_type) ops)
 
     field vd@ScalarValue {} i = do
       ct <- valueDescToCType Private vd
@@ -1262,7 +1295,7 @@ onEntryPoint ::
   [C.BlockItem] ->
   Name ->
   Function op ->
-  CompilerM op s (Maybe C.Definition)
+  CompilerM op s (Maybe (C.Definition, (T.Text, Manifest.EntryPoint)))
 onEntryPoint _ _ (Function Nothing _ _ _ _ _) = pure Nothing
 onEntryPoint get_consts fname (Function (Just ename) outputs inputs _ results args) = do
   let out_args = map (\p -> [C.cexp|&$id:(paramName p)|]) outputs
@@ -1317,8 +1350,8 @@ onEntryPoint get_consts fname (Function (Just ename) outputs inputs _ results ar
 
   ops <- asks envOperations
 
-  pure . Just $
-    [C.cedecl|
+  let cdef =
+        [C.cedecl|
        int $id:entry_point_function_name
            ($ty:ctx_ty *ctx,
             $params:entry_point_output_params,
@@ -1332,12 +1365,50 @@ onEntryPoint get_consts fname (Function (Just ename) outputs inputs _ results ar
 
          return ret;
        }|]
+
+      manifest =
+        Manifest.EntryPoint
+          { Manifest.entryPointCFun = T.pack entry_point_function_name,
+            -- Note that our convention about what is "input/output"
+            -- and what is "results/args" is different between the
+            -- manifest and ImpCode.
+            Manifest.entryPointOutputs = map outputManifest results,
+            Manifest.entryPointInputs = map inputManifest args
+          }
+
+  pure $ Just (cdef, (nameToText ename, manifest))
   where
     stubParam (MemParam name space) =
       declMem name space
     stubParam (ScalarParam name ty) = do
       let ty' = primTypeToCType ty
       decl [C.cdecl|$ty:ty' $id:name;|]
+
+    vdTypeAndUnique (TransparentValue _ (ScalarValue pt signed _)) =
+      ( T.pack $ prettySigned (signed == TypeUnsigned) pt,
+        False
+      )
+    vdTypeAndUnique (TransparentValue u (ArrayValue _ _ pt signed shape)) =
+      ( T.pack $
+          mconcat (replicate (length shape) "[]")
+            <> prettySigned (signed == TypeUnsigned) pt,
+        u == Unique
+      )
+    vdTypeAndUnique (OpaqueValue u name _) =
+      (T.pack name, u == Unique)
+
+    outputManifest vd =
+      let (t, u) = vdTypeAndUnique vd
+       in Manifest.Output
+            { Manifest.outputType = t,
+              Manifest.outputUnique = u
+            }
+    inputManifest vd =
+      let (t, u) = vdTypeAndUnique vd
+       in Manifest.Input
+            { Manifest.inputType = t,
+              Manifest.inputUnique = u
+            }
 
 -- | The result of compilation to C is multiple parts, which can be
 -- put together in various ways.  The obvious way is to concatenate
@@ -1350,7 +1421,9 @@ data CParts = CParts
     cUtils :: T.Text,
     cCLI :: T.Text,
     cServer :: T.Text,
-    cLib :: T.Text
+    cLib :: T.Text,
+    -- | The manifest, in JSON format.
+    cJsonManifest :: T.Text
   }
 
 gnuSource :: T.Text
@@ -1387,11 +1460,12 @@ disableWarnings =
 #endif
 |]
 
--- | Produce header and implementation files.
-asLibrary :: CParts -> (T.Text, T.Text)
+-- | Produce header, implementation, and manifest files.
+asLibrary :: CParts -> (T.Text, T.Text, T.Text)
 asLibrary parts =
   ( "#pragma once\n\n" <> cHeader parts,
-    gnuSource <> disableWarnings <> cHeader parts <> cUtils parts <> cLib parts
+    gnuSource <> disableWarnings <> cHeader parts <> cUtils parts <> cLib parts,
+    cJsonManifest parts
   )
 
 -- | As executable with command-line interface.
@@ -1418,7 +1492,7 @@ compileProg ::
   m CParts
 compileProg backend ops extra header_extra spaces options prog = do
   src <- getNameSource
-  let ((prototypes, definitions, entry_point_decls), endstate) =
+  let ((prototypes, definitions, entry_point_decls, manifest), endstate) =
         runCompilerM ops src () compileProg'
       initdecls = initDecls endstate
       entrydecls = entryDecls endstate
@@ -1518,7 +1592,8 @@ $entry_point_decls
         cUtils = utildefs,
         cCLI = clidefs,
         cServer = serverdefs,
-        cLib = libdefs
+        cLib = libdefs,
+        cJsonManifest = Manifest.manifestToJSON manifest
       }
   where
     Definitions consts (Functions funs) = prog
@@ -1535,19 +1610,20 @@ $entry_point_decls
         unzip <$> mapM (compileFun get_consts [[C.cparam|$ty:ctx_ty *ctx|]]) funs
 
       mapM_ earlyDecl memstructs
-      entry_points <-
-        catMaybes <$> mapM (uncurry (onEntryPoint get_consts)) funs
+      (entry_points, entry_points_manifest) <-
+        unzip . catMaybes <$> mapM (uncurry (onEntryPoint get_consts)) funs
 
       extra
 
       mapM_ earlyDecl $ concat memfuns
 
-      commonLibFuns memreport
+      types <- commonLibFuns memreport
 
       return
         ( T.unlines $ map prettyText prototypes,
           T.unlines $ map (prettyText . funcToDef) functions,
-          T.unlines $ map prettyText entry_points
+          T.unlines $ map prettyText entry_points,
+          Manifest.Manifest (M.fromList entry_points_manifest) types backend
         )
 
     funcToDef func = C.FuncDef func loc
@@ -1556,9 +1632,9 @@ $entry_point_decls
           C.OldFunc _ _ _ _ _ _ l -> l
           C.Func _ _ _ _ _ l -> l
 
-commonLibFuns :: [C.BlockItem] -> CompilerM op s ()
+commonLibFuns :: [C.BlockItem] -> CompilerM op s (M.Map T.Text Manifest.Type)
 commonLibFuns memreport = do
-  generateAPITypes
+  types <- generateAPITypes
   ctx <- contextType
   ops <- asks envOperations
   profilereport <- gets $ DL.toList . compProfileItems
@@ -1642,6 +1718,8 @@ commonLibFuns memreport = do
                          return ctx->error != NULL;
                        }|]
     )
+
+  pure types
 
 compileConstants :: Constants op -> CompilerM op s [C.BlockItem]
 compileConstants (Constants ps init_consts) = do
