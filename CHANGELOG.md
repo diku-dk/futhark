@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+* Unique opaque types are named properly in entry points.
+
 ## [0.20.2]
 
 ### Fixed

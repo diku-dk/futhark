@@ -177,6 +177,7 @@ entryPoint name params (eret, crets) =
             ++ "_"
             ++ show (1 + d)
             ++ "d"
+    typeExpOpaqueName (TEUnique te _) = prettyOneLine te
     typeExpOpaqueName te = prettyOneLine te
 
     withoutDims (TEArray te _ _) =
