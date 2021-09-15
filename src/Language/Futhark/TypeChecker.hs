@@ -698,6 +698,7 @@ niceTypeExp :: TypeExp VName -> Bool
 niceTypeExp (TEVar (QualName [] _) _) = True
 niceTypeExp (TEApply te TypeArgExpDim {} _) = niceTypeExp te
 niceTypeExp (TEArray te _ _) = niceTypeExp te
+niceTypeExp (TEUnique te _) = niceTypeExp te
 niceTypeExp _ = False
 
 checkOneDec :: DecBase NoInfo Name -> TypeM (TySet, Env, DecBase Info VName)
