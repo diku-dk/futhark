@@ -1554,7 +1554,7 @@ $timingH
 
   let early_decls = T.unlines $ map prettyText $ DL.toList $ compEarlyDecls endstate
       lib_decls = T.unlines $ map prettyText $ DL.toList $ compLibDecls endstate
-      clidefs = cliDefs options $ Functions entry_funs
+      clidefs = cliDefs options manifest
       serverdefs = serverDefs options $ Functions entry_funs
       libdefs =
         [untrimming|

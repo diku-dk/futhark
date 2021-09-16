@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE Trustworthy #-}
@@ -25,6 +26,7 @@ module Futhark.CodeGen.Backends.SimpleRep
     fromStorage,
     cproduct,
     csum,
+    scalarToPrim,
 
     -- * Primitive value operations
     cScalarDefs,
@@ -139,6 +141,23 @@ opaqueName s vds = "opaque_" ++ hash (zipWith xor [0 ..] $ map ord (s ++ concatM
           )
     iter x = ((x :: Word32) `shiftR` 16) `xor` x
 
+-- | The 'PrimType' (and sign) correspond to a human-readable scalar
+-- type name (e.g. @f64@).  Beware: partial!
+scalarToPrim :: T.Text -> (Signedness, PrimType)
+scalarToPrim "bool" = (TypeDirect, Bool)
+scalarToPrim "i8" = (TypeDirect, IntType Int8)
+scalarToPrim "i16" = (TypeDirect, IntType Int16)
+scalarToPrim "i32" = (TypeDirect, IntType Int32)
+scalarToPrim "i64" = (TypeDirect, IntType Int64)
+scalarToPrim "u8" = (TypeUnsigned, IntType Int8)
+scalarToPrim "u16" = (TypeUnsigned, IntType Int16)
+scalarToPrim "u32" = (TypeUnsigned, IntType Int32)
+scalarToPrim "u64" = (TypeUnsigned, IntType Int64)
+scalarToPrim "f16" = (TypeDirect, FloatType Float16)
+scalarToPrim "f32" = (TypeDirect, FloatType Float32)
+scalarToPrim "f64" = (TypeDirect, FloatType Float64)
+scalarToPrim tname = error $ "scalarToPrim: " <> T.unpack tname
+
 -- | The type used to expose a Futhark value in the C API.  A pointer
 -- in the case of arrays and opaques.
 externalValueType :: ExternalValue -> C.Type
@@ -167,6 +186,10 @@ csum (e : es) = foldl mult e es
 
 instance C.ToIdent Name where
   toIdent = C.toIdent . zEncodeString . nameToString
+
+-- Orphan!
+instance C.ToIdent T.Text where
+  toIdent = C.toIdent . T.unpack
 
 instance C.ToIdent VName where
   toIdent = C.toIdent . zEncodeString . pretty

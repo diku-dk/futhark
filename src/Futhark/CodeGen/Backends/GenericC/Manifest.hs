@@ -68,7 +68,7 @@ data OpaqueOps = OpaqueOps
 -- | Manifest info for a non-scalar type.  Scalar types are not part
 -- of the manifest for a program.
 data Type
-  = -- | ctype, elemtype, rank.
+  = -- | ctype, Futhark elemtype, rank.
     TypeArray T.Text T.Text Int ArrayOps
   | TypeOpaque T.Text OpaqueOps
   deriving (Eq, Ord, Show)
