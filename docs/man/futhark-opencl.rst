@@ -150,6 +150,10 @@ The following additional options are accepted.
 
   Load an OpenCL binary from the indicated file.
 
+-n, --no-print-result
+
+  Do not print the program result.
+
 -p, --platform=NAME
 
   Use the first OpenCL platform whose name contains the given string.
