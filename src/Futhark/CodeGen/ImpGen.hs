@@ -1736,7 +1736,14 @@ sIf :: Imp.TExp Bool -> ImpM rep r op () -> ImpM rep r op () -> ImpM rep r op ()
 sIf cond tbranch fbranch = do
   tbranch' <- collect tbranch
   fbranch' <- collect fbranch
-  emit $ Imp.If cond tbranch' fbranch'
+  -- Avoid generating branch if the condition is known statically.
+  emit $
+    if cond == true
+      then tbranch'
+      else
+        if cond == false
+          then fbranch'
+          else Imp.If cond tbranch' fbranch'
 
 sWhen :: Imp.TExp Bool -> ImpM rep r op () -> ImpM rep r op ()
 sWhen cond tbranch = sIf cond tbranch (return ())
