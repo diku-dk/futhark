@@ -68,6 +68,13 @@ genericOptions =
         optionAction = [C.cstm|binary_output = 1;|]
       },
     Option
+      { optionLongName = "no-print-result",
+        optionShortName = Just 'n',
+        optionArgument = NoArgument,
+        optionDescription = "Do not print the program result.",
+        optionAction = [C.cstm|print_result = 0;|]
+      },
+    Option
       { optionLongName = "help",
         optionShortName = Just 'h',
         optionArgument = NoArgument,
@@ -212,7 +219,7 @@ readInput i (TransparentValue _ (ArrayValue _ _ t ept dims)) =
       arr_ty_name = "futhark_" ++ name
       ty = [C.cty|struct $id:arr_ty_name|]
       rank = length dims
-      dims_exps = [[C.cexp|$id:shape[$int:j]|] | j <- [0 .. rank -1]]
+      dims_exps = [[C.cexp|$id:shape[$int:j]|] | j <- [0 .. rank - 1]]
       dims_s = concat $ replicate rank "[]"
       t' = primAPIType ept t
 
@@ -287,7 +294,7 @@ printStm (TransparentValue _ (ScalarValue bt ept _)) e =
 printStm (TransparentValue _ (ArrayValue _ _ bt ept shape)) e =
   let values_array = "futhark_values_" ++ name
       shape_array = "futhark_shape_" ++ name
-      num_elems = cproduct [[C.cexp|$id:shape_array(ctx, $exp:e)[$int:i]|] | i <- [0 .. rank -1]]
+      num_elems = cproduct [[C.cexp|$id:shape_array(ctx, $exp:e)[$int:i]|] | i <- [0 .. rank - 1]]
    in [C.cstm|{
         $ty:bt' *arr = calloc(sizeof($ty:bt'), $exp:num_elems);
         assert(arr != NULL);
@@ -401,11 +408,13 @@ cliEntryPoint fun@(Function _ _ _ _ results args) = do
      // Free the parsed input.
      $stms:free_parsed
 
-     // Print the final result.
-     if (binary_output) {
-       set_binary_mode(stdout);
+     if (print_result) {
+       // Print the final result.
+       if (binary_output) {
+         set_binary_mode(stdout);
+       }
+       $stms:printstms
      }
-     $stms:printstms
 
      $stms:free_outputs
    }|],
@@ -431,6 +440,7 @@ $esc:("#include <inttypes.h>")
 $esc:(T.unpack valuesH)
 
 static int binary_output = 0;
+static int print_result = 1;
 static typename FILE *runtime_file;
 static int perform_warmup = 0;
 static int num_runs = 1;

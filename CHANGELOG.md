@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+* Executables produced by C backends now take a `--no-print-result` option.
+
 ### Removed
 
 ### Changed
