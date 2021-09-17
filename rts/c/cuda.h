@@ -2,10 +2,10 @@
 
 #define CUDA_SUCCEED_FATAL(x) cuda_api_succeed_fatal(x, #x, __FILE__, __LINE__)
 #define CUDA_SUCCEED_NONFATAL(x) cuda_api_succeed_nonfatal(x, #x, __FILE__, __LINE__)
-#define NVRTC_SUCCEED(x) nvrtc_api_succeed(x, #x, __FILE__, __LINE__)
+#define NVRTC_SUCCEED_FATAL(x) nvrtc_api_succeed_fatal(x, #x, __FILE__, __LINE__)
+#define NVRTC_SUCCEED_NONFATAL(x) nvrtc_api_succeed_nonfatal(x, #x, __FILE__, __LINE__)
 
-#define CUDA_SUCCEED_OR_RETURN(e) {             \
-    char *serror = CUDA_SUCCEED_NONFATAL(e);    \
+#define SUCCEED_OR_RETURN(serror) {               \
     if (serror) {                                 \
       if (!ctx->error) {                          \
         ctx->error = serror;                      \
@@ -15,6 +15,8 @@
       }                                           \
     }                                             \
   }
+
+#define CUDA_SUCCEED_OR_RETURN(e) SUCCEED_OR_RETURN(CUDA_SUCCEED_NONFATAL(e))
 
 // CUDA_SUCCEED_OR_RETURN returns the value of the variable 'bad' in
 // scope.  By default, it will be this one.  Create a local variable
@@ -46,12 +48,23 @@ static char* cuda_api_succeed_nonfatal(CUresult res, const char *call,
   }
 }
 
-static inline void nvrtc_api_succeed(nvrtcResult res, const char *call,
-                                     const char *file, int line) {
+static inline void nvrtc_api_succeed_fatal(nvrtcResult res, const char *call,
+                                           const char *file, int line) {
   if (res != NVRTC_SUCCESS) {
     const char *err_str = nvrtcGetErrorString(res);
     futhark_panic(-1, "%s:%d: NVRTC call\n  %s\nfailed with error code %d (%s)\n",
         file, line, call, res, err_str);
+  }
+}
+
+static char* nvrtc_api_succeed_nonfatal(nvrtcResult res, const char *call,
+                                        const char *file, int line) {
+  if (res != NVRTC_SUCCESS) {
+    const char *err_str = nvrtcGetErrorString(res);
+    return msgprintf("%s:%d: NVRTC call\n  %s\nfailed with error code %d (%s)\n",
+                     file, line, call, res, err_str);
+  } else {
+    return NULL;
   }
 }
 
@@ -306,10 +319,17 @@ static const char *cuda_nvrtc_get_arch(CUdevice dev) {
   return x[chosen].arch_str;
 }
 
-static char *cuda_nvrtc_build(struct cuda_context *ctx, const char *src,
-                              const char *extra_opts[]) {
+static char* cuda_nvrtc_build(struct cuda_context *ctx, const char *src,
+                              const char *extra_opts[], char **ptx) {
   nvrtcProgram prog;
-  NVRTC_SUCCEED(nvrtcCreateProgram(&prog, src, "futhark-cuda", 0, NULL, NULL));
+  char *problem = NULL;
+
+  problem = NVRTC_SUCCEED_NONFATAL(nvrtcCreateProgram(&prog, src, "futhark-cuda", 0, NULL, NULL));
+
+  if (problem) {
+    return problem;
+  }
+
   int arch_set = 0, num_extra_opts;
 
   // nvrtc cannot handle multiple -arch options.  Hence, if one of the
@@ -356,6 +376,7 @@ static char *cuda_nvrtc_build(struct cuda_context *ctx, const char *src,
     opts[i++] = msgprintf("-I%s/include", getenv("CUDA_PATH"));
   }
   opts[i++] = msgprintf("-I/usr/local/cuda/include");
+  opts[i++] = msgprintf("-I/usr/include");
 
   // It is crucial that the extra_opts are last, so that the free()
   // logic below does not cause problems.
@@ -379,25 +400,26 @@ static char *cuda_nvrtc_build(struct cuda_context *ctx, const char *src,
     if (nvrtcGetProgramLogSize(prog, &log_size) == NVRTC_SUCCESS) {
       char *log = (char*) malloc(log_size);
       if (nvrtcGetProgramLog(prog, log) == NVRTC_SUCCESS) {
-        fprintf(stderr,"Compilation log:\n%s\n", log);
+        problem = msgprintf("NVRTC compilation failed.\n\n%s\n", log);
+      } else {
+        problem = msgprintf("Could not retrieve compilation log\n");
       }
       free(log);
     }
-    NVRTC_SUCCEED(res);
+    return problem;
   }
 
   for (i = i_dyn; i < n_opts-num_extra_opts; i++) { free((char *)opts[i]); }
   free(opts);
 
-  char *ptx;
   size_t ptx_size;
-  NVRTC_SUCCEED(nvrtcGetPTXSize(prog, &ptx_size));
-  ptx = (char*) malloc(ptx_size);
-  NVRTC_SUCCEED(nvrtcGetPTX(prog, ptx));
+  NVRTC_SUCCEED_FATAL(nvrtcGetPTXSize(prog, &ptx_size));
+  *ptx = (char*) malloc(ptx_size);
+  NVRTC_SUCCEED_FATAL(nvrtcGetPTX(prog, *ptx));
 
-  NVRTC_SUCCEED(nvrtcDestroyProgram(&prog));
+  NVRTC_SUCCEED_FATAL(nvrtcDestroyProgram(&prog));
 
-  return ptx;
+  return NULL;
 }
 
 static void cuda_size_setup(struct cuda_context *ctx)
@@ -475,9 +497,9 @@ static void cuda_size_setup(struct cuda_context *ctx)
   }
 }
 
-static void cuda_module_setup(struct cuda_context *ctx,
-                              const char *src_fragments[],
-                              const char *extra_opts[]) {
+static char* cuda_module_setup(struct cuda_context *ctx,
+                               const char *src_fragments[],
+                               const char *extra_opts[]) {
   char *ptx = NULL, *src = NULL;
 
   if (ctx->cfg.load_program_from == NULL) {
@@ -500,7 +522,11 @@ static void cuda_module_setup(struct cuda_context *ctx,
   }
 
   if (ptx == NULL) {
-    ptx = cuda_nvrtc_build(ctx, src, extra_opts);
+    char* problem = cuda_nvrtc_build(ctx, src, extra_opts, &ptx);
+    if (problem != NULL) {
+      free(src);
+      return problem;
+    }
   }
 
   if (ctx->cfg.dump_ptx_to != NULL) {
@@ -513,9 +539,11 @@ static void cuda_module_setup(struct cuda_context *ctx,
   if (src != NULL) {
     free(src);
   }
+
+  return NULL;
 }
 
-static void cuda_setup(struct cuda_context *ctx, const char *src_fragments[], const char *extra_opts[]) {
+static char* cuda_setup(struct cuda_context *ctx, const char *src_fragments[], const char *extra_opts[]) {
   CUDA_SUCCEED_FATAL(cuInit(0));
 
   if (cuda_device_setup(ctx) != 0) {
@@ -534,7 +562,7 @@ static void cuda_setup(struct cuda_context *ctx, const char *src_fragments[], co
   ctx->lockstep_width = device_query(ctx->dev, WARP_SIZE);
 
   cuda_size_setup(ctx);
-  cuda_module_setup(ctx, src_fragments, extra_opts);
+  return cuda_module_setup(ctx, src_fragments, extra_opts);
 }
 
 // Count up the runtime all the profiling_records that occured during execution.
