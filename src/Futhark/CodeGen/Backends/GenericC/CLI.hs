@@ -24,9 +24,8 @@ import Futhark.CodeGen.Backends.SimpleRep
     primStorageType,
     scalarToPrim,
   )
-import Futhark.CodeGen.ImpCode
 import Futhark.CodeGen.RTS.C (tuningH, valuesH)
-import Futhark.Util.Pretty (prettyText)
+import Futhark.Util.Pretty (pretty, prettyText)
 import qualified Language.C.Quote.OpenCL as C
 import qualified Language.C.Syntax as C
 
@@ -295,13 +294,13 @@ cliEntryPoint manifest entry_point_name (EntryPoint cfun outputs inputs) =
         printResult manifest $ zip (map outputType outputs) output_vals
 
       ctx_ty = [C.cty|struct futhark_context|]
-      sync_ctx = "futhark_context_sync" :: Name
-      error_ctx = "futhark_context_get_error" :: Name
+      sync_ctx = "futhark_context_sync" :: T.Text
+      error_ctx = "futhark_context_get_error" :: T.Text
 
       cli_entry_point_function_name = "futrts_cli_entry_" ++ T.unpack entry_point_name
 
-      pause_profiling = "futhark_context_pause_profiling" :: Name
-      unpause_profiling = "futhark_context_unpause_profiling" :: Name
+      pause_profiling = "futhark_context_pause_profiling" :: T.Text
+      unpause_profiling = "futhark_context_unpause_profiling" :: T.Text
 
       addrOf e = [C.cexp|&$exp:e|]
 
