@@ -356,6 +356,7 @@ static char *cuda_nvrtc_build(struct cuda_context *ctx, const char *src,
     opts[i++] = msgprintf("-I%s/include", getenv("CUDA_PATH"));
   }
   opts[i++] = msgprintf("-I/usr/local/cuda/include");
+  opts[i++] = msgprintf("-I/usr/include");
 
   // It is crucial that the extra_opts are last, so that the free()
   // logic below does not cause problems.
