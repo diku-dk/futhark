@@ -19,6 +19,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Unique opaque types are named properly in entry points.
 
+* The CUDA backend in library mode no longer `exit()`s the process if
+  NVRTC initialisation fails.
+
 ## [0.20.2]
 
 ### Fixed
