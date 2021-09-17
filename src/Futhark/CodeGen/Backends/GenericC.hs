@@ -1555,7 +1555,7 @@ $timingH
   let early_decls = T.unlines $ map prettyText $ DL.toList $ compEarlyDecls endstate
       lib_decls = T.unlines $ map prettyText $ DL.toList $ compLibDecls endstate
       clidefs = cliDefs options manifest
-      serverdefs = serverDefs options $ Functions entry_funs
+      serverdefs = serverDefs options manifest
       libdefs =
         [untrimming|
 #ifdef _MSC_VER
@@ -1597,7 +1597,6 @@ $entry_point_decls
       }
   where
     Definitions consts (Functions funs) = prog
-    entry_funs = filter (isJust . functionEntry . snd) funs
 
     compileProg' = do
       (memstructs, memfuns, memreport) <- unzip3 <$> mapM defineMemorySpace spaces
