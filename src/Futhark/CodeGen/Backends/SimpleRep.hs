@@ -21,7 +21,6 @@ module Futhark.CodeGen.Backends.SimpleRep
     primAPIType,
     arrayName,
     opaqueName,
-    externalValueType,
     toStorage,
     fromStorage,
     cproduct,
@@ -157,16 +156,6 @@ scalarToPrim "f16" = (TypeDirect, FloatType Float16)
 scalarToPrim "f32" = (TypeDirect, FloatType Float32)
 scalarToPrim "f64" = (TypeDirect, FloatType Float64)
 scalarToPrim tname = error $ "scalarToPrim: " <> T.unpack tname
-
--- | The type used to expose a Futhark value in the C API.  A pointer
--- in the case of arrays and opaques.
-externalValueType :: ExternalValue -> C.Type
-externalValueType (OpaqueValue _ desc vds) =
-  [C.cty|struct $id:("futhark_" ++ opaqueName desc vds)*|]
-externalValueType (TransparentValue _ (ArrayValue _ _ pt signed shape)) =
-  [C.cty|struct $id:("futhark_" ++ arrayName pt signed (length shape))*|]
-externalValueType (TransparentValue _ (ScalarValue pt signed _)) =
-  primAPIType signed pt
 
 -- | Return an expression multiplying together the given expressions.
 -- If an empty list is given, the expression @1@ is returned.
