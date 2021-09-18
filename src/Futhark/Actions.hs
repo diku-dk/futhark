@@ -179,12 +179,14 @@ compileCAction fcfg mode outpath =
       cprog <- handleWarnings fcfg $ SequentialC.compileProg prog
       let cpath = outpath `addExtension` "c"
           hpath = outpath `addExtension` "h"
+          jsonpath = outpath `addExtension` "json"
 
       case mode of
         ToLibrary -> do
-          let (header, impl) = SequentialC.asLibrary cprog
+          let (header, impl, manifest) = SequentialC.asLibrary cprog
           liftIO $ T.writeFile hpath $ cPrependHeader header
           liftIO $ T.writeFile cpath $ cPrependHeader impl
+          liftIO $ T.writeFile jsonpath manifest
         ToExecutable -> do
           liftIO $ T.writeFile cpath $ SequentialC.asExecutable cprog
           runCC cpath outpath ["-O3", "-std=c99"] ["-lm"]
@@ -205,6 +207,7 @@ compileOpenCLAction fcfg mode outpath =
       cprog <- handleWarnings fcfg $ COpenCL.compileProg prog
       let cpath = outpath `addExtension` "c"
           hpath = outpath `addExtension` "h"
+          jsonpath = outpath `addExtension` "json"
           extra_options
             | System.Info.os == "darwin" =
               ["-framework", "OpenCL"]
@@ -215,9 +218,10 @@ compileOpenCLAction fcfg mode outpath =
 
       case mode of
         ToLibrary -> do
-          let (header, impl) = COpenCL.asLibrary cprog
+          let (header, impl, manifest) = COpenCL.asLibrary cprog
           liftIO $ T.writeFile hpath $ cPrependHeader header
           liftIO $ T.writeFile cpath $ cPrependHeader impl
+          liftIO $ T.writeFile jsonpath manifest
         ToExecutable -> do
           liftIO $ T.writeFile cpath $ cPrependHeader $ COpenCL.asExecutable cprog
           runCC cpath outpath ["-O", "-std=c99"] ("-lm" : extra_options)
@@ -238,6 +242,7 @@ compileCUDAAction fcfg mode outpath =
       cprog <- handleWarnings fcfg $ CCUDA.compileProg prog
       let cpath = outpath `addExtension` "c"
           hpath = outpath `addExtension` "h"
+          jsonpath = outpath `addExtension` "json"
           extra_options =
             [ "-lcuda",
               "-lcudart",
@@ -245,9 +250,10 @@ compileCUDAAction fcfg mode outpath =
             ]
       case mode of
         ToLibrary -> do
-          let (header, impl) = CCUDA.asLibrary cprog
+          let (header, impl, manifest) = CCUDA.asLibrary cprog
           liftIO $ T.writeFile hpath $ cPrependHeader header
           liftIO $ T.writeFile cpath $ cPrependHeader impl
+          liftIO $ T.writeFile jsonpath manifest
         ToExecutable -> do
           liftIO $ T.writeFile cpath $ cPrependHeader $ CCUDA.asExecutable cprog
           runCC cpath outpath ["-O", "-std=c99"] ("-lm" : extra_options)
@@ -268,12 +274,14 @@ compileMulticoreAction fcfg mode outpath =
       cprog <- handleWarnings fcfg $ MulticoreC.compileProg prog
       let cpath = outpath `addExtension` "c"
           hpath = outpath `addExtension` "h"
+          jsonpath = outpath `addExtension` "json"
 
       case mode of
         ToLibrary -> do
-          let (header, impl) = MulticoreC.asLibrary cprog
+          let (header, impl, manifest) = MulticoreC.asLibrary cprog
           liftIO $ T.writeFile hpath $ cPrependHeader header
           liftIO $ T.writeFile cpath $ cPrependHeader impl
+          liftIO $ T.writeFile jsonpath manifest
         ToExecutable -> do
           liftIO $ T.writeFile cpath $ cPrependHeader $ MulticoreC.asExecutable cprog
           runCC cpath outpath ["-O3", "-std=c99"] ["-lm", "-pthread"]
@@ -383,7 +391,7 @@ compileCtoWASMAction fcfg mode outpath =
           liftIO $ T.appendFile classpath SequentialWASM.runServer
           runEMCC cpath outpath classpath ["-O3", "-msimd128"] ["-lm"] exps False
     writeLibs cprog jsprog = do
-      let (h, imp) = SequentialC.asLibrary cprog
+      let (h, imp, _) = SequentialC.asLibrary cprog
       liftIO $ T.writeFile hpath h
       liftIO $ T.writeFile cpath imp
       liftIO $ T.writeFile classpath jsprog
@@ -417,7 +425,7 @@ compileMulticoreToWASMAction fcfg mode outpath =
           runEMCC cpath outpath classpath ["-O3", "-msimd128"] ["-lm", "-pthread"] exps False
 
     writeLibs cprog jsprog = do
-      let (h, imp) = MulticoreC.asLibrary cprog
+      let (h, imp, _) = MulticoreC.asLibrary cprog
       liftIO $ T.writeFile hpath h
       liftIO $ T.writeFile cpath imp
       liftIO $ T.writeFile classpath jsprog
