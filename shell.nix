@@ -24,6 +24,7 @@ pkgs.stdenv.mkDerivation {
     pkgs.niv
     pkgs.python3Packages.numpy
     pkgs.python3Packages.pyopencl
+    pkgs.python3Packages.jsonschema
     pkgs.imagemagick # needed for literate tests
   ];
 }
