@@ -99,11 +99,11 @@ internaliseValBind fb@(E.ValBind entry fname retdecl (Info (rettype, _)) tparams
     zeroExts ts = generaliseExtTypes ts ts
 
 generateEntryPoint :: E.EntryPoint -> E.ValBind -> InternaliseM ()
-generateEntryPoint (E.EntryPoint e_paramts e_rettype) vb = localConstsScope $ do
+generateEntryPoint (E.EntryPoint e_params e_rettype) vb = localConstsScope $ do
   let (E.ValBind _ ofname _ (Info (rettype, _)) tparams params _ _ attrs loc) = vb
   bindingFParams tparams params $ \shapeparams params' -> do
     entry_rettype <- internaliseEntryReturnType rettype
-    let entry' = entryPoint (baseName ofname) (zip e_paramts params') (e_rettype, entry_rettype)
+    let entry' = entryPoint (baseName ofname) (zip e_params params') (e_rettype, entry_rettype)
         args = map (I.Var . I.paramName) $ concat params'
 
     (entry_body, ctx_ts) <- buildBody $ do
@@ -131,40 +131,45 @@ generateEntryPoint (E.EntryPoint e_paramts e_rettype) vb = localConstsScope $ do
 
 entryPoint ::
   Name ->
-  [(E.EntryType, [I.FParam])] ->
+  [(E.EntryParam, [I.FParam])] ->
   ( E.EntryType,
     [[I.TypeBase ExtShape Uniqueness]]
   ) ->
   I.EntryPoint
 entryPoint name params (eret, crets) =
   ( name,
-    concatMap (entryPointType . preParam) params,
+    map onParam params,
     case ( isTupleRecord $ entryType eret,
            entryAscribed eret
          ) of
       (Just ts, Just (E.TETuple e_ts _)) ->
-        concatMap entryPointType $
-          zip (zipWith E.EntryType ts (map Just e_ts)) crets
+        zipWith
+          entryPointType
+          (zipWith E.EntryType ts (map Just e_ts))
+          crets
       (Just ts, Nothing) ->
-        concatMap entryPointType $
-          zip (map (`E.EntryType` Nothing) ts) crets
+        zipWith
+          entryPointType
+          (map (`E.EntryType` Nothing) ts)
+          crets
       _ ->
-        entryPointType (eret, concat crets)
+        [entryPointType eret $ concat crets]
   )
   where
-    preParam (e_t, ps) = (e_t, staticShapes $ map I.paramDeclType ps)
+    onParam (E.EntryParam e_p e_t, ps) =
+      I.EntryParam e_p $ entryPointType e_t $ staticShapes $ map I.paramDeclType ps
 
-    entryPointType (t, ts)
+    entryPointType t ts
       | E.Scalar (E.Prim E.Unsigned {}) <- E.entryType t =
-        [I.TypeUnsigned u]
+        I.TypeUnsigned u
       | E.Array _ _ (E.Prim E.Unsigned {}) _ <- E.entryType t =
-        [I.TypeUnsigned u]
+        I.TypeUnsigned u
       | E.Scalar E.Prim {} <- E.entryType t =
-        [I.TypeDirect u]
+        I.TypeDirect u
       | E.Array _ _ E.Prim {} _ <- E.entryType t =
-        [I.TypeDirect u]
+        I.TypeDirect u
       | otherwise =
-        [I.TypeOpaque u desc $ length ts]
+        I.TypeOpaque u desc $ length ts
       where
         u = foldl max Nonunique $ map I.uniqueness ts
         desc = maybe (prettyOneLine t') typeExpOpaqueName $ E.entryAscribed t
@@ -728,8 +733,8 @@ internaliseExp desc (E.Attr attr e loc) = do
     _ ->
       pure e'
   where
-    traceRes tag' e' =
-      mapM (letSubExp desc . BasicOp . Opaque (OpaqueTrace tag')) e'
+    traceRes tag' =
+      mapM (letSubExp desc . BasicOp . Opaque (OpaqueTrace tag'))
     attr' = internaliseAttr attr
     f env
       | attr' == "unsafe",
@@ -1768,12 +1773,12 @@ isOverloadedFunction qname args loc = do
       internaliseOperation desc e $ \v -> do
         r <- I.arrayRank <$> lookupType v
         let zero = intConst Int64 0
-            offsets = offset' : replicate (r -1) zero
+            offsets = offset' : replicate (r - 1) zero
         return $ I.Rotate offsets v
     handleRest [e] "transpose" = Just $ \desc ->
       internaliseOperation desc e $ \v -> do
         r <- I.arrayRank <$> lookupType v
-        return $ I.Rearrange ([1, 0] ++ [2 .. r -1]) v
+        return $ I.Rearrange ([1, 0] ++ [2 .. r - 1]) v
     handleRest [TupLit [x, y] _] "zip" = Just $ \desc ->
       mapM (letSubExp "zip_copy" . BasicOp . Copy)
         =<< ( (++)

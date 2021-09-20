@@ -34,7 +34,7 @@ setFunctionSpace space (Function entry outputs inputs body results args) =
     (map (setParamSpace space) inputs)
     (setCodeSpace space body)
     (map (setExtValueSpace space) results)
-    (map (setExtValueSpace space) args)
+    (map (fmap $ setExtValueSpace space) args)
 
 setParamSpace :: Space -> Param -> Param
 setParamSpace space (MemParam name DefaultSpace) =

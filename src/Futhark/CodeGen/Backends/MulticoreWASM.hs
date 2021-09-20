@@ -55,7 +55,7 @@ fRepMyRep prog =
         Just $
           JSEntryPoint
             { name = nameToString n,
-              parameters = map extToString args,
+              parameters = map (extToString . snd) args,
               ret = map extToString res
             }
    in mapMaybe (function . snd) fs
