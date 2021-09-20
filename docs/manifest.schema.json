@@ -28,6 +28,7 @@
                         "items": {
                             "type": "object",
                             "properties": {
+                                "name": {"type": "string"},
                                 "type": {"type": "string"},
                                 "unique": {"type": "boolean"},
                                 "additionalProperties": false
