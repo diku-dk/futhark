@@ -847,10 +847,10 @@ arrayLibraryFunctions pub space pt signed rank = do
   values_raw_array <- publicName $ "values_raw_" ++ name
   shape_array <- publicName $ "shape_" ++ name
 
-  let shape_names = ["dim" ++ show i | i <- [0 .. rank -1]]
+  let shape_names = ["dim" ++ show i | i <- [0 .. rank - 1]]
       shape_params = [[C.cparam|typename int64_t $id:k|] | k <- shape_names]
       arr_size = cproduct [[C.cexp|$id:k|] | k <- shape_names]
-      arr_size_array = cproduct [[C.cexp|arr->shape[$int:i]|] | i <- [0 .. rank -1]]
+      arr_size_array = cproduct [[C.cexp|arr->shape[$int:i]|] | i <- [0 .. rank - 1]]
   copy <- asks envCopy
 
   memty <- rawMemCType space
@@ -862,7 +862,7 @@ arrayLibraryFunctions pub space pt signed rank = do
           [C.cexp|$exp:arr_size * $int:(primByteSize pt::Int)|]
           space
           [C.cstm|return NULL;|]
-        forM_ [0 .. rank -1] $ \i ->
+        forM_ [0 .. rank - 1] $ \i ->
           let dim_s = "dim" ++ show i
            in stm [C.cstm|arr->shape[$int:i] = $id:dim_s;|]
 
@@ -1016,7 +1016,7 @@ opaqueLibraryFunctions desc vds = do
             shape_array = "futhark_shape_" ++ arr_name
             values_array = "futhark_values_" ++ arr_name
             shape' = [C.cexp|$id:shape_array(ctx, obj->$id:field)|]
-            num_elems = cproduct [[C.cexp|$exp:shape'[$int:j]|] | j <- [0 .. rank -1]]
+            num_elems = cproduct [[C.cexp|$exp:shape'[$int:j]|] | j <- [0 .. rank - 1]]
          in ( storageSize pt rank shape',
               storeValueHeader sign pt rank shape' [C.cexp|out|]
                 ++ [C.cstms|ret |= $id:values_array(ctx, obj->$id:field, (void*)out);
@@ -1029,7 +1029,7 @@ opaqueLibraryFunctions desc vds = do
 
   store_body <- collect $ do
     let (sizes, stores) = unzip $ zipWith storeComponent [0 ..] vds
-        size_vars = map (("size_" ++) . show) [0 .. length sizes -1]
+        size_vars = map (("size_" ++) . show) [0 .. length sizes - 1]
         size_sum = csum [[C.cexp|$id:size|] | size <- size_vars]
     forM_ (zip size_vars sizes) $ \(v, e) ->
       item [C.citem|typename int64_t $id:v = $exp:e;|]
@@ -1051,7 +1051,7 @@ opaqueLibraryFunctions desc vds = do
             new_array = "futhark_new_" ++ arr_name
             dataptr = "data_" ++ show i
             shapearr = "shape_" ++ show i
-            dims = [[C.cexp|$id:shapearr[$int:j]|] | j <- [0 .. rank -1]]
+            dims = [[C.cexp|$id:shapearr[$int:j]|] | j <- [0 .. rank - 1]]
             num_elems = cproduct dims
         item [C.citem|typename int64_t $id:shapearr[$int:rank];|]
         stms $ loadValueHeader sign pt rank [C.cexp|$id:shapearr|] [C.cexp|src|]
@@ -1215,7 +1215,7 @@ prepareEntryInputs args = collect' $ zipWithM prepare [(0 :: Int) ..] args
       checks <- map snd <$> zipWithM (prepareValue Private) (zipWith field [0 ..] vds) vds
       return
         ( [C.cparam|const $ty:ty *$id:pname|],
-          if null $ concat checks
+          if all null checks
             then Nothing
             else Just $ allTrue $ concat checks
         )
@@ -1242,7 +1242,7 @@ prepareEntryInputs args = collect' $ zipWithM prepare [(0 :: Int) ..] args
             )
 
       let (sets, checks) =
-            unzip $ zipWith maybeCopyDim shape [0 .. rank -1]
+            unzip $ zipWith maybeCopyDim shape [0 .. rank - 1]
       stms $ catMaybes sets
 
       return ([C.cty|$ty:ty*|], checks)
@@ -1289,7 +1289,7 @@ prepareEntryOutputs = collect' . zipWithM prepare [(0 :: Int) ..]
             [C.cstm|$exp:dest->shape[$int:i] = $exp:x;|]
           maybeCopyDim (Var d) i =
             [C.cstm|$exp:dest->shape[$int:i] = $id:d;|]
-      stms $ zipWith maybeCopyDim shape [0 .. rank -1]
+      stms $ zipWith maybeCopyDim shape [0 .. rank - 1]
 
 onEntryPoint ::
   [C.BlockItem] ->
@@ -1306,7 +1306,7 @@ onEntryPoint get_consts fname (Function (Just ename) outputs inputs _ results ar
 
   entry_point_function_name <- publicName $ "entry_" ++ nameToString ename
 
-  (inputs', unpack_entry_inputs) <- prepareEntryInputs args
+  (inputs', unpack_entry_inputs) <- prepareEntryInputs $ map snd args
   let (entry_point_input_params, entry_point_input_checks) = unzip inputs'
 
   (entry_point_output_params, pack_entry_outputs) <-
@@ -1403,10 +1403,11 @@ onEntryPoint get_consts fname (Function (Just ename) outputs inputs _ results ar
             { Manifest.outputType = t,
               Manifest.outputUnique = u
             }
-    inputManifest vd =
+    inputManifest (v, vd) =
       let (t, u) = vdTypeAndUnique vd
        in Manifest.Input
-            { Manifest.inputType = t,
+            { Manifest.inputName = nameToText v,
+              Manifest.inputType = t,
               Manifest.inputUnique = u
             }
 

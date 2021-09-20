@@ -313,6 +313,9 @@ instance Pretty EntryPointType where
   ppr (TypeUnsigned u) = ppr u <> "unsigned"
   ppr (TypeOpaque u desc n) = ppr u <> "opaque" <> apply [ppr (show desc), ppr n]
 
+instance Pretty EntryParam where
+  ppr (EntryParam name t) = ppr name <> colon <+> ppr t
+
 instance PrettyRep rep => Pretty (FunDef rep) where
   ppr (FunDef entry attrs name rettype fparams body) =
     annot (attrAnnots attrs) $
