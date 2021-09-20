@@ -26,7 +26,8 @@ import Data.Text.Lazy (toStrict)
 
 -- | Manifest info for an entry point parameter.
 data Input = Input
-  { inputType :: T.Text,
+  { inputName :: T.Text,
+    inputType :: T.Text,
     inputUnique :: Bool
   }
   deriving (Eq, Ord, Show)
@@ -131,9 +132,10 @@ instance JSON.ToJSON Manifest where
             ("unique", toJSON u)
           ]
 
-      onInput (Input t u) =
+      onInput (Input p t u) =
         object
-          [ ("type", toJSON t),
+          [ ("name", toJSON p),
+            ("type", toJSON t),
             ("unique", toJSON u)
           ]
 

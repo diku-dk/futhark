@@ -7,6 +7,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE Strict #-}
 {-# LANGUAGE Trustworthy #-}
+{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeFamilies #-}
 
 module Futhark.CodeGen.ImpGen
@@ -516,11 +517,11 @@ data ArrayDecl = ArrayDecl VName PrimType MemLoc
 compileInParams ::
   Mem rep inner =>
   [FParam rep] ->
-  [EntryPointType] ->
-  ImpM rep r op ([Imp.Param], [ArrayDecl], [Imp.ExternalValue])
-compileInParams params orig_epts = do
+  [EntryParam] ->
+  ImpM rep r op ([Imp.Param], [ArrayDecl], [(Name, Imp.ExternalValue)])
+compileInParams params eparams = do
   let (ctx_params, val_params) =
-        splitAt (length params - sum (map entryPointSize orig_epts)) params
+        splitAt (length params - sum (map (entryPointSize . entryParamType) eparams)) params
   (inparams, arrayds) <- partitionEithers <$> mapM compileInParam (ctx_params ++ val_params)
   let findArray x = find (isArrayDecl x) arrayds
 
@@ -545,22 +546,24 @@ compileInParams params orig_epts = do
           _ ->
             Nothing
 
-      mkExts (TypeOpaque u desc n : epts) fparams =
+      mkExts (EntryParam v (TypeOpaque u desc n) : epts) fparams =
         let (fparams', rest) = splitAt n fparams
-         in Imp.OpaqueValue
-              u
-              desc
-              (mapMaybe (`mkValueDesc` Imp.TypeDirect) fparams') :
+         in ( v,
+              Imp.OpaqueValue
+                u
+                desc
+                (mapMaybe (`mkValueDesc` Imp.TypeDirect) fparams')
+            ) :
             mkExts epts rest
-      mkExts (TypeUnsigned u : epts) (fparam : fparams) =
-        maybeToList (Imp.TransparentValue u <$> mkValueDesc fparam Imp.TypeUnsigned)
+      mkExts (EntryParam v (TypeUnsigned u) : epts) (fparam : fparams) =
+        maybeToList ((v,) . Imp.TransparentValue u <$> mkValueDesc fparam Imp.TypeUnsigned)
           ++ mkExts epts fparams
-      mkExts (TypeDirect u : epts) (fparam : fparams) =
-        maybeToList (Imp.TransparentValue u <$> mkValueDesc fparam Imp.TypeDirect)
+      mkExts (EntryParam v (TypeDirect u) : epts) (fparam : fparams) =
+        maybeToList ((v,) . Imp.TransparentValue u <$> mkValueDesc fparam Imp.TypeDirect)
           ++ mkExts epts fparams
       mkExts _ _ = []
 
-  return (inparams, arrayds, mkExts orig_epts val_params)
+  return (inparams, arrayds, mkExts eparams val_params)
   where
     isArrayDecl x (ArrayDecl y _ _) = x == y
 
@@ -649,7 +652,7 @@ compileFunDef (FunDef entry _ fname rettype params body) =
     (name_entry, params_entry, ret_entry) = case entry of
       Nothing ->
         ( Nothing,
-          replicate (length params) (TypeDirect mempty),
+          replicate (length params) (EntryParam "" $ TypeDirect mempty),
           Nothing
         )
       Just (x, y, z) -> (Just x, y, Just z)
