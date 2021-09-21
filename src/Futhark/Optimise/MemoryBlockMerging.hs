@@ -6,7 +6,7 @@
 -- | This module implements an optimization that tries to statically reuse
 -- kernel-level allocations. The goal is to lower the static memory usage, which
 -- might allow more programs to run using intra-group parallelism.
-module Futhark.Optimise.ReuseAllocations (optimise) where
+module Futhark.Optimise.MemoryBlockMerging (optimise) where
 
 import Control.Exception
 import Control.Monad.Reader
@@ -21,7 +21,7 @@ import qualified Futhark.Analysis.LastUse as LastUse
 import Futhark.Builder.Class
 import Futhark.Construct
 import Futhark.IR.GPUMem
-import qualified Futhark.Optimise.ReuseAllocations.GreedyColoring as GreedyColoring
+import qualified Futhark.Optimise.MemoryBlockMerging.GreedyColoring as GreedyColoring
 import Futhark.Pass (Pass (..), PassM)
 import qualified Futhark.Pass as Pass
 import Futhark.Util (invertMap)

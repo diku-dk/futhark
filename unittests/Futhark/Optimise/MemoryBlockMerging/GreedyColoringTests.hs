@@ -1,4 +1,4 @@
-module Futhark.Optimise.ReuseAllocations.GreedyColoringTests
+module Futhark.Optimise.MemoryBlockMerging.GreedyColoringTests
   ( tests,
   )
 where
@@ -7,7 +7,7 @@ import Control.Arrow ((***))
 import Data.Function ((&))
 import qualified Data.Map as M
 import qualified Data.Set as S
-import qualified Futhark.Optimise.ReuseAllocations.GreedyColoring as GreedyColoring
+import qualified Futhark.Optimise.MemoryBlockMerging.GreedyColoring as GreedyColoring
 import Test.Tasty
 import Test.Tasty.HUnit
 
