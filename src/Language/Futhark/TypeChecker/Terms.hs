@@ -32,6 +32,7 @@ import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import qualified Data.Set as S
+import qualified Data.Version as Version
 import Futhark.IR.Primitive (intByteSize)
 import Futhark.Util (nubOrd)
 import Futhark.Util.Pretty hiding (bool, group, space)
@@ -44,6 +45,7 @@ import qualified Language.Futhark.TypeChecker.Monad as TypeM
 import Language.Futhark.TypeChecker.Types hiding (checkTypeDecl)
 import qualified Language.Futhark.TypeChecker.Types as Types
 import Language.Futhark.TypeChecker.Unify hiding (Usage)
+import qualified Paths_futhark
 import Prelude hiding (mod)
 
 --- Uniqueness
@@ -692,6 +694,23 @@ newArrayType loc desc r = do
 
 --- Errors
 
+errorIndexUrl :: Doc
+errorIndexUrl = version_url <> "error_index.html"
+  where
+    version = Paths_futhark.version
+    base_url = "https://futhark.readthedocs.io/en/"
+    version_url
+      | last (Version.versionBranch version) == 0 = base_url <> "latest/"
+      | otherwise = base_url <> "v" <> text (Version.showVersion version) <> "/"
+
+withIndexLink :: Doc -> Doc -> Doc
+withIndexLink href msg =
+  stack
+    [ msg,
+      "\nFor more information, see:",
+      indent 2 (ppr errorIndexUrl <> "#" <> href)
+    ]
+
 useAfterConsume :: VName -> SrcLoc -> SrcLoc -> TermTypeM a
 useAfterConsume name rloc wloc = do
   name' <- describeVar rloc name
@@ -739,6 +758,11 @@ unexpectedType loc t ts =
     "Type of expression at" <+> text (locStr loc) <+> "must be one of"
       <+> commasep (map ppr ts) <> ", but is"
       <+> ppr t <> "."
+
+notUnique :: (MonadTypeChecker m, Pretty a) => SrcLoc -> a -> StructType -> m b
+notUnique loc v v_t =
+  typeError loc mempty . withIndexLink "not_unique" $
+    pquote (ppr v) <+> "has type" <+> ppr v_t <> ", which is not unique."
 
 --- Basic checking
 
@@ -1620,11 +1644,8 @@ checkExp (AppExp (LetWith dest src slice ve body loc) _) =
 
     (elemt, _) <- sliceShape (Just (loc, Nonrigid)) slice' =<< normTypeFully t
 
-    unless (unique src_t) $
-      typeError loc mempty $
-        "Source" <+> pquote (pprName (identName src))
-          <+> "has type"
-          <+> ppr src_t <> ", which is not unique."
+    unless (unique src_t) $ notUnique loc (pprName (identName src)) $ toStruct src_t
+
     vtable <- asks $ scopeVtable . termScope
     forM_ (aliases src_t) $ \v ->
       case aliasVar v `M.lookup` vtable of
@@ -1655,11 +1676,8 @@ checkExp (Update src slice ve loc) = do
   sequentially (checkExp ve >>= unifies "type of target array" elemt) $ \ve' _ ->
     sequentially (checkExp src >>= unifies "type of target array" t) $ \src' _ -> do
       src_t <- expTypeFully src'
-      unless (unique src_t) $
-        typeError loc mempty $
-          "Source" <+> pquote (ppr src)
-            <+> "has type"
-            <+> ppr src_t <> ", which is not unique."
+
+      unless (unique src_t) $ notUnique loc src $ toStruct src_t
 
       let src_als = aliases src_t
       ve_t <- expTypeFully ve'
@@ -2634,7 +2652,7 @@ literalOverflowCheck = void . check
         _ -> error "Inferred type of float literal is not a float"
     check e@(Negate (IntLit x ty loc1) loc2) =
       e <$ case ty of
-        Info (Scalar (Prim t)) -> warnBounds (inBoundsI (- x) t) (- x) t (loc1 <> loc2)
+        Info (Scalar (Prim t)) -> warnBounds (inBoundsI (-x) t) (-x) t (loc1 <> loc2)
         _ -> error "Inferred type of int literal is not a number"
     check e = astMap identityMapper {mapOnExp = check} e
     bitWidth ty = 8 * intByteSize ty :: Int
