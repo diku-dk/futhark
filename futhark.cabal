@@ -217,8 +217,8 @@ library
       Futhark.Optimise.InPlaceLowering.LowerIntoStm
       Futhark.Optimise.InPlaceLowering.SubstituteIndices
       Futhark.Optimise.InliningDeadFun
-      Futhark.Optimise.ReuseAllocations
-      Futhark.Optimise.ReuseAllocations.GreedyColoring
+      Futhark.Optimise.MemoryBlockMerging
+      Futhark.Optimise.MemoryBlockMerging.GreedyColoring
       Futhark.Optimise.Simplify
       Futhark.Optimise.Simplify.Engine
       Futhark.Optimise.Simplify.Rep
@@ -385,7 +385,7 @@ test-suite unit
       Futhark.IR.PrimitiveTests
       Language.Futhark.CoreTests
       Language.Futhark.SyntaxTests
-      Futhark.Optimise.ReuseAllocations.GreedyColoringTests
+      Futhark.Optimise.MemoryBlockMerging.GreedyColoringTests
       Paths_futhark
   hs-source-dirs:
       unittests
