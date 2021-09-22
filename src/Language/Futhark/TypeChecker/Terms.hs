@@ -761,7 +761,7 @@ unexpectedType loc t ts =
 
 notUnique :: (MonadTypeChecker m, Pretty a) => SrcLoc -> a -> StructType -> m b
 notUnique loc v v_t =
-  typeError loc mempty . withIndexLink "not_unique" $
+  typeError loc mempty . withIndexLink "not-unique" $
     pquote (ppr v) <+> "has type" <+> ppr v_t <> ", which is not unique."
 
 --- Basic checking

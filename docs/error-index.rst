@@ -5,7 +5,7 @@ Error index
 
 Elaboration on type errors produced by the compiler.
 
-.. _not_unique:
+.. _not-unique:
 
 "*x* has type *y*, which is not unique"
 ---------------------------------------
