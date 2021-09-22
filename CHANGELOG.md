@@ -14,6 +14,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * The C backends now generate a manifest when compiling with
   `--library`.  This can be used by FFI generators (#1465).
 
+* The beginnings of a Rust-style error index.
+
 ### Removed
 
 ### Changed
