@@ -695,7 +695,7 @@ newArrayType loc desc r = do
 --- Errors
 
 errorIndexUrl :: Doc
-errorIndexUrl = version_url <> "error_index.html"
+errorIndexUrl = version_url <> "error-index.html"
   where
     version = Paths_futhark.version
     base_url = "https://futhark.readthedocs.io/en/"
