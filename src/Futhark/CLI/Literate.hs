@@ -851,7 +851,7 @@ commandLineOptions =
       "Stop and do not produce output file if any directive fails."
   ]
 
--- | Run @futhark script@.
+-- | Run @futhark literate@.
 main :: String -> [String] -> IO ()
 main = mainWithOptions initialOptions commandLineOptions "program" $ \args opts ->
   case args of
