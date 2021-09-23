@@ -5,11 +5,9 @@ module Futhark.IR.Mem.IxFunTests
   )
 where
 
-import Data.Function ((&))
 import qualified Data.List as DL
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.List.NonEmpty as NE
-import Futhark.Analysis.PrimExp
 import qualified Futhark.IR.Mem.IxFun as IxFunLMAD
 import qualified Futhark.IR.Mem.IxFun.Alg as IxFunAlg
 import Futhark.IR.Mem.IxFunWrapper
@@ -116,7 +114,6 @@ tests =
         test_rebase2,
         test_rebase3,
         test_rebase4_5,
-        test_invIxFun,
         test_flatSlice_iota,
         test_slice_flatSlice_iota,
         test_flatSlice_flatSlice_iota,
@@ -446,178 +443,6 @@ test_rebase4_5 =
           compareOps $
             rebase ixfn_base ixfn_orig
       ]
-
-test_invIxFun :: [TestTree]
-test_invIxFun =
-  [ testCase "Iota" $
-      -- let a = iota n
-      -- let b = a
-      -- let y[i] = b
-      let i_0 = IxFunLMAD.iota [TPrimExp $ LeafExp (VName (nameFromString "n") 0) $ IntType Int64]
-          i_b = i_0
-          i_y = IxFunLMAD.iota [TPrimExp $ LeafExp (VName (nameFromString "n") 0) $ IntType Int64]
-       in case IxFunLMAD.invIxFun i_y i_b of
-            Just i_0' ->
-              let i_b' = IxFunLMAD.rebase i_b i_0'
-               in i_y @=? i_b'
-            Nothing -> assertFailure "Couldn't invert i_b on i_y",
-    testCase "Simple rotation" $
-      -- let a = iota n
-      -- let b = rotate 4 a
-      -- let y[i] = b
-      let i_0 = IxFunLMAD.iota [TPrimExp $ LeafExp (VName (nameFromString "n") 0) $ IntType Int64]
-          i_b = IxFunLMAD.rebase (IxFunLMAD.rotate i_0 [TPrimExp $ ValueExp (IntValue (Int64Value 4))]) i_0
-          i_y = IxFunLMAD.iota [TPrimExp $ LeafExp (VName (nameFromString "n") 0) $ IntType Int64]
-       in case IxFunLMAD.invIxFun i_y i_b of
-            Just i_0' ->
-              let i_b' = IxFunLMAD.rebase i_b i_0'
-               in i_y @=? i_b'
-            Nothing -> assertFailure "Couldn't invert i_b on i_y",
-    testCase "Both rotated rotation" $
-      -- let a = iota n
-      -- let b = rotate 4 a
-      -- let y = map (rotate 20) y
-      -- let y[i] = b
-      let i_0 = IxFunLMAD.iota [TPrimExp $ LeafExp (VName (nameFromString "n") 0) $ IntType Int64]
-          i_b = IxFunLMAD.rebase (IxFunLMAD.rotate i_0 [TPrimExp $ ValueExp (IntValue (Int64Value 4))]) i_0
-          i_y = IxFunLMAD.rebase (IxFunLMAD.rotate i_0 [TPrimExp $ ValueExp (IntValue (Int64Value 20))]) i_0
-       in case IxFunLMAD.invIxFun i_y i_b of
-            Just i_0' ->
-              let i_b' = IxFunLMAD.rebase i_b i_0'
-               in i_y @=? i_b'
-            Nothing -> assertFailure "Couldn't invert i_b on i_y",
-    testCase "Simple negative rotation" $
-      -- let a = iota n
-      -- let b = rotate (-4) a
-      -- let y[i] = b
-      let i_0 = IxFunLMAD.iota [TPrimExp $ LeafExp (VName (nameFromString "n") 0) $ IntType Int64]
-          i_b = IxFunLMAD.rebase (IxFunLMAD.rotate i_0 [TPrimExp $ ValueExp (IntValue (Int64Value (-4)))]) i_0
-          i_y = IxFunLMAD.iota [TPrimExp $ LeafExp (VName (nameFromString "n") 0) $ IntType Int64]
-       in case IxFunLMAD.invIxFun i_y i_b of
-            Just i_0' ->
-              let i_b' = IxFunLMAD.rebase i_b i_0'
-               in i_y @=? i_b'
-            Nothing -> assertFailure "Couldn't invert i_b on i_y",
-    testCase "Rotation on 2-dimensional index function" $
-      -- let a = replicate n (iota (n * 2))
-      -- let b = rotate -1 (map (rotate 5) a)
-      -- let y[i] = b
-      let i_0 =
-            IxFunLMAD.iota
-              [ TPrimExp $ LeafExp (VName (nameFromString "n") 0) $ IntType Int64,
-                TPrimExp $
-                  BinOpExp
-                    (Mul Int64 OverflowUndef)
-                    (ValueExp (IntValue (Int64Value 2)))
-                    (LeafExp (VName (nameFromString "n") 0) $ IntType Int64)
-              ]
-          i_b =
-            IxFunLMAD.rebase
-              ( IxFunLMAD.rotate
-                  i_0
-                  [ TPrimExp $ ValueExp (IntValue (Int64Value (-1))),
-                    TPrimExp $ ValueExp (IntValue (Int64Value 5))
-                  ]
-              )
-              i_0
-          i_y =
-            IxFunLMAD.iota
-              [ TPrimExp $ LeafExp (VName (nameFromString "n") 0) $ IntType Int64,
-                TPrimExp $
-                  BinOpExp
-                    (Mul Int64 OverflowUndef)
-                    (ValueExp (IntValue (Int64Value 2)))
-                    (LeafExp (VName (nameFromString "n") 0) $ IntType Int64)
-              ]
-       in case IxFunLMAD.invIxFun i_y i_b of
-            Just i_0' ->
-              let i_b' = IxFunLMAD.rebase i_b i_0'
-               in i_y @=? i_b'
-            Nothing -> assertFailure "Couldn't invert i_b on i_y",
-    testCase "Cannot invert lossy strides" $
-      -- let a = iota 20
-      -- let b = a[0:20:2]
-      -- let y[i] = b
-      let i_0 = IxFunLMAD.iota [TPrimExp $ LeafExp (VName (nameFromString "n") 0) $ IntType Int64]
-          i_b =
-            IxFunLMAD.slice
-              i_0
-              $ Slice
-                [ DimSlice
-                    (TPrimExp $ ValueExp (IntValue (Int64Value 0)))
-                    (TPrimExp $ ValueExp (IntValue (Int64Value 10)))
-                    (TPrimExp $ ValueExp (IntValue (Int64Value 2)))
-                ]
-          i_y = IxFunLMAD.iota [TPrimExp $ ValueExp (IntValue (Int64Value 10))]
-       in Nothing @=? IxFunLMAD.invIxFun i_y i_b,
-    testCase "Cannot invert lossy slices" $
-      -- let a = iota 20
-      -- let b = a[5:10:1]
-      -- let y[i] = b
-      let i_0 = IxFunLMAD.iota [TPrimExp $ LeafExp (VName (nameFromString "n") 0) $ IntType Int64]
-          i_b =
-            IxFunLMAD.slice
-              i_0
-              $ Slice
-                [ DimSlice
-                    (TPrimExp $ ValueExp (IntValue (Int64Value 5)))
-                    (TPrimExp $ ValueExp (IntValue (Int64Value 10)))
-                    (TPrimExp $ ValueExp (IntValue (Int64Value 1)))
-                ]
-          i_y = IxFunLMAD.iota [TPrimExp $ ValueExp (IntValue (Int64Value 10))]
-       in Nothing @=? IxFunLMAD.invIxFun i_y i_b,
-    testCase "Inverting permutations" $
-      -- let a = replicate n (iota n)
-      -- let b = transpose a
-      -- let y[i] = b
-      let i_0 = IxFunLMAD.iota [TPrimExp $ LeafExp (VName (nameFromString "n") 0) $ IntType Int64, TPrimExp $ LeafExp (VName (nameFromString "n") 0) $ IntType Int64]
-          i_b =
-            IxFunLMAD.permute i_0 [1, 0]
-          i_y =
-            IxFunLMAD.iota
-              [ TPrimExp $ LeafExp (VName (nameFromString "n") 0) $ IntType Int64,
-                TPrimExp $ LeafExp (VName (nameFromString "n") 0) $ IntType Int64
-              ]
-       in case IxFunLMAD.invIxFun i_y i_b of
-            Just i_0' ->
-              let i_b' = IxFunLMAD.rebase i_b i_0'
-               in i_y @=? i_b'
-            Nothing -> assertFailure $ "Couldn't invert i_b on i_y\n" ++ pretty i_0 ++ "\n" ++ pretty i_b,
-    testCase
-      "Cannot invert multi-lmad index functions"
-      $ let i_b =
-              IxFunLMAD.IxFun
-                ( IxFunLMAD.LMAD
-                    (TPrimExp $ ValueExp (IntValue (Int64Value 0)))
-                    [IxFunLMAD.LMADDim (TPrimExp $ ValueExp (IntValue (Int64Value 1))) (TPrimExp $ ValueExp (IntValue (Int64Value 0))) (TPrimExp $ LeafExp (VName (nameFromString "n") 0) $ IntType Int64) 0 IxFunLMAD.Inc]
-                    :| [IxFunLMAD.LMAD 0 [IxFunLMAD.LMADDim (TPrimExp $ ValueExp (IntValue (Int64Value 1))) (TPrimExp $ ValueExp (IntValue (Int64Value 0))) (TPrimExp $ LeafExp (VName (nameFromString "n") 0) $ IntType Int64) 0 IxFunLMAD.Inc]]
-                )
-                [TPrimExp $ LeafExp (VName (nameFromString "n") 0) $ IntType Int64]
-                True
-            i_y = IxFunLMAD.iota [TPrimExp $ LeafExp (VName (nameFromString "n") 0) $ IntType Int64]
-         in Nothing @=? IxFunLMAD.invIxFun i_y i_b,
-    testCase "Base change" $
-      -- let a = iota n
-      -- let b = rotate 4 a
-      -- let y[i] = b
-      let i_b = IxFunLMAD.iota [TPrimExp $ LeafExp (VName (nameFromString "n") 0) $ IntType Int64]
-          i_y =
-            IxFunLMAD.slice
-              (IxFunLMAD.iota [TPrimExp $ LeafExp (VName (nameFromString "m") 0) $ IntType Int64])
-              $ Slice
-                [ DimSlice
-                    (TPrimExp $ ValueExp (IntValue (Int64Value 5)))
-                    (TPrimExp $ LeafExp (VName (nameFromString "n") 0) $ IntType Int64)
-                    (TPrimExp $ ValueExp (IntValue (Int64Value 1)))
-                ]
-       in case IxFunLMAD.invIxFun i_y i_b of
-            Just i_0' ->
-              let i_b' = IxFunLMAD.rebase i_b i_0'
-               in i_y @=? i_b'
-            Nothing -> assertFailure "Couldn't invert i_b on i_y"
-  ]
-    & testGroup "invIxFun"
-    & singleton
 
 test_flatSlice_iota :: [TestTree]
 test_flatSlice_iota =

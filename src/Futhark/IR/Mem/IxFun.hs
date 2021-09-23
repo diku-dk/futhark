@@ -31,7 +31,6 @@ module Futhark.IR.Mem.IxFun
     existentialize,
     closeEnough,
     equivalent,
-    invIxFun,
     hasOneLmad,
     permuteInv,
     conservativeFlatten,
@@ -44,11 +43,11 @@ import Control.Monad.Identity
 import Control.Monad.State
 import Control.Monad.Writer
 import Data.Function (on, (&))
-import Data.List (sort, sortBy, unzip4, zip4, zip5, zipWith5, (\\))
+import Data.List (sort, sortBy, zip4, zip5, zipWith5)
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as M
-import Data.Maybe (isJust, isNothing, mapMaybe)
+import Data.Maybe (isJust)
 --import Futhark.Analysis.PrimExp
 --  ( IntExp,
 --    PrimExp (..),
@@ -65,7 +64,6 @@ import Futhark.IR.Syntax
     FlatSlice (..),
     ShapeChange,
     Slice (..),
-    VName,
     dimFix,
     flatSliceDims,
     flatSliceStrides,
@@ -1106,193 +1104,6 @@ equivalent ixf1 ixf2 =
         == map ldStride (lmadDims lmad2)
         && map ldRotate (lmadDims lmad1)
         == map ldRotate (lmadDims lmad2)
-
--- | The result of @invIxFun ixf_y ixf_b@ is @ixf_0@
---     such that @ixf_y = ixf_b o ixf_0@
--- The main motivation is the coalescing optimization,
---   which fires at points such as: @y[slc] = b@.
--- Denote the index function of @y[slc]@ by @ixf_y@ and
---   the one of @b@ by @ixf_b@. Obviously, after coalescing,
---   the index function of @b@ is the same with that of
---   @y[slc]@, i.e., @ixf_b' = ixf_y = ixf_b o icf_0@.
--- Computing @ixf_0@---i.e., the inverse of @ixf_b@ w.r.t.
---   @ixf_y@---allows us to fix all the aliases of @b@:
--- Case 1: @c = alias b@
---         Originally: @ixf_c = ixf_alias o ixf_b@
---         After the merge of @m_b@ in @m_{y_i}@:
---           @ixf_c' = ixf_c o ixf_0 = ixf_alias o ixf_b o ixf_0@
---         In other words, @ixf_c' = rebase ixf_0 ixf_c@,
---           which ensures the sanity rebasing condition:
---                @base ixf_c == shape ixf_0@
---         Even simpler: @ixf_c' = alias ixf_b'
---          where ixf_b' = the new index function of b after
---          being rebased in @y[slc]@
--- Case 2: @b = alias a@
---         Originally: @ixf_b = ixf_alias o ixf_a@
---         After the merge of @m_b@ in @m_{y_i}@:
---           @ixf_b' = ixf_alias o ixf_a'@
---         Hence recursively:
---           @ixf_a' = invIxFun ixf_b' ixf_alias@
-invIxFunGen ::
-  Eq v =>
-  IxFun (PrimExp v) ->
-  IxFun (PrimExp v) ->
-  Maybe (IxFun (PrimExp v))
-invIxFunGen
-  (IxFun (lmad_y :| []) oshp_y ctg_y)
-  (IxFun (lmad_b :| []) _oshp_b _ctg_b)
-    | -- Sanity condition: both lmads have the same rank:
-      k <- length (lmadDims lmad_y),
-      k == length (lmadDims lmad_b),
-      -- Sanity condition: We cannot invert lossy slices
-      lmadOffset lmad_b == zeroI64PE,
-      -- Intuitively, we work with the invariant:
-      --   @perm_y = perm_b o perm_0  = permuteForward perm_b perm_r@
-      -- And @perm_0@ can be found by taking the inverse:
-      --   @perm_0 = perm_b^{-1} o perm_y = permuteInv perm_b perm_y@
-      perm_y <- lmadPermutation lmad_y,
-      perm_b <- lmadPermutation lmad_b,
-      perm_0 <- permuteInv perm_b perm_y,
-      -- now that we have computed @perm_0@ we need to run the @srnms_b@
-      --   through it, so as to achieve the ordering of @lmad_y@.
-      srnms_b <- permuteInv perm_0 (map (\(LMADDim s r n _ m) -> (s, r, n, m)) (lmadDims lmad_b)),
-      (ss_b, rs_b, ns_b, ms_b) <- unzip4 srnms_b,
-      -- compute somehow the monotonicity of the result
-      ms_0 <- zipWith invMon (map ldMon (lmadDims lmad_y)) ms_b,
-      --  The spans of @n_y == n_b@ for all dimensions, because @ixf_y@ and
-      --        @ixf_b@ need to have the same shape,
-      and $ zipWith (==) ns_b (map ldShape (lmadDims lmad_y)),
-      -- ToDo: is it correct to set @off_0@ to @off_y - off_b@ ???
-      offs_0 <- subtractHelp (lmadOffset lmad_y) (lmadOffset lmad_b) =
-      -- The Implementation Pattern-Macthes 2 cases:
-      let srs_0 =
-            if and $ zipWith eqSpanAndStride (lmadDims lmad_y) $ zip ss_b ns_b
-              then -- (1) when the strides of @lmad_y@ and @lmad_b@ are identical
-              --     across all dims, the rotates are obtained by subtraction:
-
-                let rs_0 = zipWith subtractHelp (map ldRotate $ lmadDims lmad_y) rs_b
-                 in Just (replicate k oneI64PE, rs_0)
-              else -- (2) when the rotates of @lmad_y@ and @lmad_b@ are identical:
-              case invCaseRotateEqual (ss_b, rs_b) of
-                Nothing -> Nothing
-                Just ss_0 -> Just (ss_0, replicate k zeroI64PE)
-       in -- Make the result index function @ixf_0@
-          case srs_0 of
-            Nothing -> Nothing
-            Just (ss_0, rs_0) ->
-              let ldms_0 = zipWith5 LMADDim ss_0 rs_0 ns_b perm_0 ms_0
-                  lmad_0 = LMAD offs_0 ldms_0
-               in Just $ IxFun (lmad_0 :| []) oshp_y ctg_y -- ToDo: can this be relaxed ???
-    where
-      zeroI64PE = ValueExp (IntValue (Int64Value 0))
-      oneI64PE = ValueExp (IntValue (Int64Value 1))
-      mulI64 = Mul Int64 OverflowUndef
-      subI64 = Sub Int64 OverflowUndef
-
-      invMon :: Monotonicity -> Monotonicity -> Monotonicity
-      invMon Inc Inc = Inc
-      invMon Dec Dec = Inc
-      invMon Inc Dec = Dec
-      invMon Dec Inc = Dec
-      invMon _ _ = Unknown
-      eqSpanAndStride (LMADDim s1 _ n1 _ _) (s2, n2) = s1 == s2 && n1 == n2
-      subtractHelp :: Eq v => PrimExp v -> PrimExp v -> PrimExp v
-      subtractHelp r_y r_b
-        | r_y == r_b = zeroI64PE
-        | ValueExp (IntValue (Int64Value rv_y)) <- r_y,
-          ValueExp (IntValue (Int64Value rv_b)) <- r_b =
-          ValueExp (IntValue (Int64Value (rv_y - rv_b)))
-        | otherwise = BinOpExp subI64 r_y r_b
-      invCaseRotateEqual (ss_b, rs_b)
-        | rs_y <- map ldRotate (lmadDims lmad_y),
-          and (zipWith (==) rs_y rs_b),
-          --  Soundness: @s_b@ divides @s_y@ for all dimensions
-          tmp_zip <- zip (map ldStride (lmadDims lmad_y)) ss_b,
-          res_strd <- mapMaybe divStrides tmp_zip,
-          length res_strd == length ss_b =
-          Just res_strd
-        | otherwise = Nothing
-      --
-      -- normalizing a PrimExp product:
-      -- ToDo: all wrong: should not use sets as it eliminates duplicates!
-      normalize :: Eq v => PrimExp v -> (Maybe Int64, Maybe [v], Maybe (PrimExp v))
-      normalize z
-        | ValueExp (IntValue (Int64Value v)) <- z = (Just v, Nothing, Nothing)
-        | LeafExp x (IntType Int64) <- z = (Nothing, Just [x], Nothing)
-        | BinOpExp (Mul Int64 OverflowUndef) (ValueExp (IntValue (Int64Value v_y))) e <- z =
-          let (v_e, xs_e, e_e) = normalize e
-           in (Just $ mulMbVal v_y v_e, xs_e, e_e)
-        | BinOpExp (Mul Int64 OverflowUndef) e (ValueExp (IntValue (Int64Value v_y))) <- z =
-          let (v_e, xs_e, e_e) = normalize e
-           in (Just $ mulMbVal v_y v_e, xs_e, e_e)
-        | BinOpExp (Mul Int64 OverflowUndef) (LeafExp x (IntType Int64)) e <- z =
-          let (v_e, xs_e, e_e) = normalize e
-           in (v_e, Just $ catMbNms [x] xs_e, e_e)
-        | BinOpExp (Mul Int64 OverflowUndef) e (LeafExp x (IntType Int64)) <- z =
-          let (v_e, xs_e, e_e) = normalize e
-           in (v_e, Just $ catMbNms [x] xs_e, e_e)
-        | otherwise = (Nothing, Nothing, Just z)
-      mulMbVal v_1 Nothing = v_1
-      mulMbVal v_1 (Just v_2) = v_1 * v_2
-      catMbNms nms Nothing = nms
-      catMbNms nms1 (Just nms2) = nms1 ++ nms2
-      mkMulPE :: Eq v => Maybe Int64 -> Maybe [v] -> Maybe (PrimExp v) -> PrimExp v
-      mkMulPE Nothing Nothing Nothing = error "In IxFun, mkMulPE, impossible case reached!"
-      mkMulPE Nothing Nothing (Just e) = e
-      mkMulPE (Just v) Nothing Nothing =
-        ValueExp (IntValue (Int64Value v))
-      mkMulPE Nothing (Just xs) Nothing
-        | [] <- xs = error "In IxFun.hs, fun mkMulPE, impossible case reached!"
-        | [x] <- xs = LeafExp x (IntType Int64)
-        | a : as <- xs =
-          BinOpExp mulI64 (LeafExp a (IntType Int64)) $ mkMulPE Nothing (Just as) Nothing
-      mkMulPE (Just v) (Just xs) Nothing =
-        BinOpExp mulI64 (mkMulPE (Just v) Nothing Nothing) $ mkMulPE Nothing (Just xs) Nothing
-      mkMulPE (Just v) Nothing (Just e) =
-        BinOpExp mulI64 (mkMulPE (Just v) Nothing Nothing) e
-      mkMulPE Nothing (Just xs) (Just e) =
-        BinOpExp mulI64 (mkMulPE Nothing (Just xs) Nothing) e
-      mkMulPE (Just v) (Just xs) (Just e) =
-        BinOpExp mulI64 (mkMulPE (Just v) (Just xs) Nothing) e
-      divStrides (s_y, s_b)
-        | s_y /= zeroI64PE && s_b == oneI64PE = Just s_y
-        | s_y == s_b = Just oneI64PE
-        | otherwise = handleSimpleDivs (normalize s_y) (normalize s_b)
-      handleSimpleDivs (Just v_y, xs_y, e_y) (Just v_b, Nothing, e_b) =
-        if (isNothing e_b || e_y == e_b) && v_y `Prelude.rem` v_b == 0
-          then
-            let e = if isNothing e_b then e_y else Nothing
-             in Just $ mkMulPE (Just (v_y `Prelude.div` v_b)) xs_y e
-          else Nothing
-      handleSimpleDivs (v_y, Just xs_y, e_y) (Nothing, Just xs_b, e_b)
-        | Just dff <- foldl subtrctElmFromLst (Just xs_y) xs_b =
-          if isNothing e_b || e_y == e_b
-            then
-              let e = if isNothing e_b then e_y else Nothing
-               in Just $ mkMulPE v_y (Just dff) e
-            else Nothing
-      handleSimpleDivs (Just v_y, Just xs_y, e_y) (Just v_b, Just xs_b, e_b)
-        | Just dff <- foldl subtrctElmFromLst (Just xs_y) xs_b =
-          if (isNothing e_b || e_y == e_b) && v_y `Prelude.rem` v_b == 0
-            then
-              let e = if isNothing e_b then e_y else Nothing
-               in Just $ mkMulPE (Just $ v_y `Prelude.div` v_b) (Just dff) e
-            else Nothing
-      handleSimpleDivs _ _ = Nothing
-      subtrctElmFromLst :: Eq v => Maybe [v] -> v -> Maybe [v]
-      subtrctElmFromLst Nothing _ = Nothing
-      subtrctElmFromLst (Just lst) x =
-        if x `elem` lst then Just ((\\) lst [x]) else Nothing
-invIxFunGen _ _ = Nothing
-
-invIxFun ::
-  IxFun (TPrimExp Int64 VName) ->
-  IxFun (TPrimExp Int64 VName) ->
-  Maybe (IxFun (TPrimExp Int64 VName))
-invIxFun a b =
-  case invIxFunGen (fmap untyped a) (fmap untyped b) of
-    Nothing -> Nothing
-    Just ixf -> Just $ fmap TPrimExp ixf
 
 -- | Computes the maximum span of an 'LMAD'. The result is the lowest and
 -- highest flat values representable by that 'LMAD'.
