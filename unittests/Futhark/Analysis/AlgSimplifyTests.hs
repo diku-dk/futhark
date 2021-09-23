@@ -31,7 +31,7 @@ tests =
         \(TestableExp e) ->
           evalPrimExp (\_ -> Nothing) e
             == evalPrimExp (\_ -> Nothing) (untyped $ simplify mempty (TPrimExp e)),
-      testProperty "flattening does not change result" $ mapSize (\i -> min 10 i) $ \s -> eval (flattenNestedSum s) == eval s
+      testProperty "flattening does not change result" $ mapSize (min 10) $ \s -> eval (flattenNestedSum s) == eval s
     ]
 
 class HasEval nest where

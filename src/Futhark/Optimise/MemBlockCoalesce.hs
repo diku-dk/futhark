@@ -85,7 +85,7 @@ replaceInExp _ (DoLoop loop_inits loop_form (Body dec stms res)) = do
 replaceInExp _ e@(Op (Alloc _ _)) = return e
 replaceInExp _ e@(Op (Inner i)) = do
   on_op <- asks onInner
-  fromMaybe e <$> fmap (Op . Inner) <$> on_op i
+  maybe e (Op . Inner) <$> on_op i
 replaceInExp _ (Op _) = error "Unreachable" -- This shouldn't be possible?
 replaceInExp _ e@WithAcc {} = return e
 replaceInExp _ e@Apply {} = return e
