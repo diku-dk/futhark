@@ -39,21 +39,22 @@ We can always break aliasing by using a ``copy`` expression::
   let z = y with [0] = 0
   in x
 
-.. _not-unique:
+.. _not-consumable:
 
-"*x* has type *y*, which is not unique"
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+"Would consume *x*, which is not consumable"
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-This error message occurs for programs that try to perform an in-place
-update on arrays that are not "unique".  For example, it would occur
-for the following program::
+This error message occurs for programs that try to perform a
+consumption (such as an in-place update) on variables that are not
+consumable.  For example, it would occur for the following program::
 
   let f (a: []i32) =
     let a[0] = a[0]+1
     in a
 
-A *unique array type* is written by prefixing the array type with an
-asterisk, so the program could be fixed by writing it like this::
+Only arrays with a a *unique array type* can be consumed.  Such a type
+is written by prefixing the array type with an asterisk.  The program
+could be fixed by writing it like this::
 
   let f (a: *[]i32) =
     let a[0] = a[0]+1
