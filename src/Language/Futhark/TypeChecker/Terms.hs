@@ -1642,14 +1642,6 @@ checkExp (AppExp (LetWith dest src slice ve body loc) _) =
 
     unless (unique src_t) $ notConsumable loc $ pquote $ pprName $ identName src
 
-    vtable <- asks $ scopeVtable . termScope
-    forM_ (aliases src_t) $ \v ->
-      case aliasVar v `M.lookup` vtable of
-        Just (BoundV Local _ v_t)
-          | not $ unique v_t ->
-            notConsumable loc $ pquote $ pprName $ aliasVar v
-        _ -> return ()
-
     sequentially (unifies "type of target array" (toStruct elemt) =<< checkExp ve) $ \ve' _ -> do
       ve_t <- expTypeFully ve'
       when (AliasBound (identName src') `S.member` aliases ve_t) $
@@ -3201,6 +3193,7 @@ checkIfConsumable loc als = do
         Just (BoundV Local _ t)
           | arrayRank t > 0 -> unique t
           | Scalar TypeVar {} <- t -> unique t
+          | Scalar Arrow {} <- t -> False
           | otherwise -> True
         Just (BoundV Global _ _) -> False
         _ -> True
@@ -3220,7 +3213,8 @@ consume loc als = do
 -- computation.
 consuming :: Ident -> TermTypeM a -> TermTypeM a
 consuming (Ident name (Info t) loc) m = do
-  consume loc $ AliasBound name `S.insert` aliases t
+  t' <- normTypeFully t
+  consume loc $ AliasBound name `S.insert` aliases t'
   localScope consume' m
   where
     consume' scope =
