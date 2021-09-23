@@ -1,5 +1,5 @@
 -- ==
--- error: not consumable
+-- error: "t", but this was consumed
 
 let f(t: ([]i32,*[]i32)): i32 =
   let (a,b) = t
