@@ -7,11 +7,29 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [0.21.0]
 
-### Adeed
+### Added
+
+* Executables produced by C backends now take a `--no-print-result` option.
+
+* The C backends now generate a manifest when compiling with
+  `--library`.  This can be used by FFI generators (#1465).
+
+* The beginnings of a Rust-style error index.
 
 ### Removed
 
 ### Changed
+
+* Renamed the `ReuseAllocations` pass to `MemoryBlockMerging`.
+
+### Fixed
+
+* Unique opaque types are named properly in entry points.
+
+* The CUDA backend in library mode no longer `exit()`s the process if
+  NVRTC initialisation fails.
+
+## [0.20.2]
 
 ### Fixed
 
@@ -22,6 +40,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Another in-place-lowering bug (#1460).
 
 * Don't try to tile inside loops with parameters with variant sizes (#1462).
+
+* Don't consider it an ICE when the user passes invalid command line
+  options (#1464).
 
 ## [0.20.1]
 

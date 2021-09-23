@@ -47,10 +47,11 @@ dumpError config err =
     ExternalError s -> do
       T.hPutStrLn stderr $ prettyText s
       T.hPutStrLn stderr ""
-      T.hPutStrLn stderr "If you find this error message confusing, uninformative, or wrong, please open an issue at\nhttps://github.com/diku-dk/futhark/issues."
+      T.hPutStrLn stderr "If you find this error message confusing, uninformative, or wrong, please open an issue:"
+      T.hPutStrLn stderr "  https://github.com/diku-dk/futhark/issues"
     InternalError s info CompilerBug -> do
-      T.hPutStrLn stderr "Internal compiler error."
-      T.hPutStrLn stderr "Please report this at https://github.com/diku-dk/futhark/issues."
+      T.hPutStrLn stderr "Internal compiler error.  Please report this:"
+      T.hPutStrLn stderr "  https://github.com/diku-dk/futhark/issues"
       report s info
     InternalError s info CompilerLimitation -> do
       T.hPutStrLn stderr "Known compiler limitation encountered.  Sorry."

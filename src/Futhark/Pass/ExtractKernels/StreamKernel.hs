@@ -184,10 +184,10 @@ kerneliseLambda nes lam = do
         | not $ primType $ paramType p =
           mkLet [paramIdent p] $ BasicOp $ Copy v
       mkAccInit p x = mkLet [paramIdent p] $ BasicOp $ SubExp x
-      acc_init_bnds = stmsFromList $ zipWith mkAccInit fold_acc_params nes
+      acc_init_stms = stmsFromList $ zipWith mkAccInit fold_acc_params nes
   return
     lam
-      { lambdaBody = insertStms acc_init_bnds $ lambdaBody lam,
+      { lambdaBody = insertStms acc_init_stms $ lambdaBody lam,
         lambdaParams = thread_index_param : fold_chunk_param : fold_inp_params
       }
 

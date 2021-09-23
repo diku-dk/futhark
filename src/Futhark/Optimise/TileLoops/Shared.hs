@@ -147,19 +147,19 @@ isTileableRedomap stm
     Nothing
 
 defVarianceInStm :: VarianceTable -> Stm GPU -> VarianceTable
-defVarianceInStm variance bnd =
-  foldl' add variance $ patNames $ stmPat bnd
+defVarianceInStm variance stm =
+  foldl' add variance $ patNames $ stmPat stm
   where
     add variance' v = M.insert v binding_variance variance'
     look variance' v = oneName v <> M.findWithDefault mempty v variance'
-    binding_variance = mconcat $ map (look variance) $ namesToList (freeIn bnd)
+    binding_variance = mconcat $ map (look variance) $ namesToList (freeIn stm)
 
 -- just in case you need the Screma being treated differently than
 -- by default; previously Cosmin had to enhance it when dealing with stream.
 varianceInStm :: VarianceTable -> Stm GPU -> VarianceTable
-varianceInStm v0 bnd@(Let _ _ (Op (OtherOp Screma {})))
-  | Just (_, arrs, (_, red_lam, red_nes, map_lam)) <- isTileableRedomap bnd =
-    let v = defVarianceInStm v0 bnd
+varianceInStm v0 stm@(Let _ _ (Op (OtherOp Screma {})))
+  | Just (_, arrs, (_, red_lam, red_nes, map_lam)) <- isTileableRedomap stm =
+    let v = defVarianceInStm v0 stm
         red_ps = lambdaParams red_lam
         map_ps = lambdaParams map_lam
         card_red = length red_nes
@@ -177,7 +177,7 @@ varianceInStm v0 bnd@(Let _ _ (Op (OtherOp Screma {})))
           foldl' f v $
             zip4 arrs (map paramName map_ps) (map paramName acc_lam_f) (map paramName arr_lam_f)
      in varianceInStms v' stm_lam
-varianceInStm v0 bnd = defVarianceInStm v0 bnd
+varianceInStm v0 stm = defVarianceInStm v0 stm
 
 varianceInStms :: VarianceTable -> Stms GPU -> VarianceTable
 varianceInStms = foldl' varianceInStm

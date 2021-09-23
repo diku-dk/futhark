@@ -40,8 +40,8 @@ substituteIndices ::
   IndexSubstitutions ->
   Stms rep ->
   m (IndexSubstitutions, Stms rep)
-substituteIndices substs bnds =
-  runBuilderT (substituteIndicesInStms substs bnds) types
+substituteIndices substs stms =
+  runBuilderT (substituteIndicesInStms substs stms) types
   where
     types = typeEnvFromSubstitutions substs
 

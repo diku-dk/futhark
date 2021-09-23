@@ -26,7 +26,7 @@ import Futhark.Optimise.Fusion
 import Futhark.Optimise.InPlaceLowering
 import Futhark.Optimise.InliningDeadFun
 import qualified Futhark.Optimise.MemBlockCoalesce as MemBlockCoalesce
-import qualified Futhark.Optimise.ReuseAllocations as ReuseAllocations
+import qualified Futhark.Optimise.MemoryBlockMerging as MemoryBlockMerging
 import Futhark.Optimise.Sink
 import Futhark.Optimise.TileLoops
 import Futhark.Optimise.Unstream
@@ -107,7 +107,7 @@ gpuPipeline =
         simplifyGPUMem,
         doubleBufferGPU,
         simplifyGPUMem,
-        ReuseAllocations.optimise,
+        MemoryBlockMerging.optimise,
         simplifyGPUMem,
         expandAllocations,
         simplifyGPUMem

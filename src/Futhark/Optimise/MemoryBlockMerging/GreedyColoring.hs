@@ -1,5 +1,5 @@
 -- | Provides a greedy graph-coloring algorithm.
-module Futhark.Optimise.ReuseAllocations.GreedyColoring (colorGraph, Coloring) where
+module Futhark.Optimise.MemoryBlockMerging.GreedyColoring (colorGraph, Coloring) where
 
 import Data.Function ((&))
 import qualified Data.Map as M

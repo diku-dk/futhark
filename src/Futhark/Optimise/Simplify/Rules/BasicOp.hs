@@ -206,10 +206,10 @@ ruleBasicOp vtable pat _ (CmpOp (CmpEq t) se1 se2)
   | Just m <- simplifyWith se2 se1 = Simplify m
   where
     simplifyWith (Var v) x
-      | Just bnd <- ST.lookupStm v vtable,
-        If p tbranch fbranch _ <- stmExp bnd,
+      | Just stm <- ST.lookupStm v vtable,
+        If p tbranch fbranch _ <- stmExp stm,
         Just (y, z) <-
-          returns v (stmPat bnd) tbranch fbranch,
+          returns v (stmPat stm) tbranch fbranch,
         not $ boundInBody tbranch `namesIntersect` freeIn y,
         not $ boundInBody fbranch `namesIntersect` freeIn z = Just $ do
         eq_x_y <-

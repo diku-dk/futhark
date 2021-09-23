@@ -7,6 +7,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE Strict #-}
 {-# LANGUAGE Trustworthy #-}
+{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeFamilies #-}
 
 module Futhark.CodeGen.ImpGen
@@ -516,11 +517,11 @@ data ArrayDecl = ArrayDecl VName PrimType MemLoc
 compileInParams ::
   Mem rep inner =>
   [FParam rep] ->
-  [EntryPointType] ->
-  ImpM rep r op ([Imp.Param], [ArrayDecl], [Imp.ExternalValue])
-compileInParams params orig_epts = do
+  [EntryParam] ->
+  ImpM rep r op ([Imp.Param], [ArrayDecl], [(Name, Imp.ExternalValue)])
+compileInParams params eparams = do
   let (ctx_params, val_params) =
-        splitAt (length params - sum (map entryPointSize orig_epts)) params
+        splitAt (length params - sum (map (entryPointSize . entryParamType) eparams)) params
   (inparams, arrayds) <- partitionEithers <$> mapM compileInParam (ctx_params ++ val_params)
   let findArray x = find (isArrayDecl x) arrayds
 
@@ -545,22 +546,24 @@ compileInParams params orig_epts = do
           _ ->
             Nothing
 
-      mkExts (TypeOpaque u desc n : epts) fparams =
+      mkExts (EntryParam v (TypeOpaque u desc n) : epts) fparams =
         let (fparams', rest) = splitAt n fparams
-         in Imp.OpaqueValue
-              u
-              desc
-              (mapMaybe (`mkValueDesc` Imp.TypeDirect) fparams') :
+         in ( v,
+              Imp.OpaqueValue
+                u
+                desc
+                (mapMaybe (`mkValueDesc` Imp.TypeDirect) fparams')
+            ) :
             mkExts epts rest
-      mkExts (TypeUnsigned u : epts) (fparam : fparams) =
-        maybeToList (Imp.TransparentValue u <$> mkValueDesc fparam Imp.TypeUnsigned)
+      mkExts (EntryParam v (TypeUnsigned u) : epts) (fparam : fparams) =
+        maybeToList ((v,) . Imp.TransparentValue u <$> mkValueDesc fparam Imp.TypeUnsigned)
           ++ mkExts epts fparams
-      mkExts (TypeDirect u : epts) (fparam : fparams) =
-        maybeToList (Imp.TransparentValue u <$> mkValueDesc fparam Imp.TypeDirect)
+      mkExts (EntryParam v (TypeDirect u) : epts) (fparam : fparams) =
+        maybeToList ((v,) . Imp.TransparentValue u <$> mkValueDesc fparam Imp.TypeDirect)
           ++ mkExts epts fparams
       mkExts _ _ = []
 
-  return (inparams, arrayds, mkExts orig_epts val_params)
+  return (inparams, arrayds, mkExts eparams val_params)
   where
     isArrayDecl x (ArrayDecl y _ _) = x == y
 
@@ -649,7 +652,7 @@ compileFunDef (FunDef entry _ fname rettype params body) =
     (name_entry, params_entry, ret_entry) = case entry of
       Nothing ->
         ( Nothing,
-          replicate (length params) (TypeDirect mempty),
+          replicate (length params) (EntryParam "" $ TypeDirect mempty),
           Nothing
         )
       Just (x, y, z) -> (Just x, y, Just z)
@@ -666,18 +669,18 @@ compileFunDef (FunDef entry _ fname rettype params body) =
       return (outparams, inparams, results, args)
 
 compileBody :: Pat rep -> Body rep -> ImpM rep r op ()
-compileBody pat (Body _ bnds ses) = do
+compileBody pat (Body _ stms ses) = do
   dests <- destinationFromPat pat
-  compileStms (freeIn ses) bnds $
+  compileStms (freeIn ses) stms $
     forM_ (zip dests ses) $ \(d, SubExpRes _ se) -> copyDWIMDest d [] se []
 
 compileBody' :: [Param dec] -> Body rep -> ImpM rep r op ()
-compileBody' params (Body _ bnds ses) =
-  compileStms (freeIn ses) bnds $
+compileBody' params (Body _ stms ses) =
+  compileStms (freeIn ses) stms $
     forM_ (zip params ses) $ \(param, SubExpRes _ se) -> copyDWIM (paramName param) [] se []
 
 compileLoopBody :: Typed dec => [Param dec] -> Body rep -> ImpM rep r op ()
-compileLoopBody mergeparams (Body _ bnds ses) = do
+compileLoopBody mergeparams (Body _ stms ses) = do
   -- We cannot write the results to the merge parameters immediately,
   -- as some of the results may actually *be* merge parameters, and
   -- would thus be clobbered.  Therefore, we first copy to new
@@ -685,7 +688,7 @@ compileLoopBody mergeparams (Body _ bnds ses) = do
   -- buffer to the merge parameters.  This is efficient, because the
   -- operations are all scalar operations.
   tmpnames <- mapM (newVName . (++ "_tmp") . baseString . paramName) mergeparams
-  compileStms (freeIn ses) bnds $ do
+  compileStms (freeIn ses) stms $ do
     copy_to_merge_params <- forM (zip3 mergeparams tmpnames ses) $ \(p, tmp, SubExpRes _ se) ->
       case typeOf p of
         Prim pt -> do
@@ -1702,7 +1705,7 @@ inBounds (Slice slice) dims =
   let condInBounds (DimFix i) d =
         0 .<=. i .&&. i .<. d
       condInBounds (DimSlice i n s) d =
-        0 .<=. i .&&. i + (n -1) * s .<. d
+        0 .<=. i .&&. i + (n - 1) * s .<. d
    in foldl1 (.&&.) $ zipWith condInBounds slice dims
 
 --- Building blocks for constructing code.
@@ -1736,7 +1739,14 @@ sIf :: Imp.TExp Bool -> ImpM rep r op () -> ImpM rep r op () -> ImpM rep r op ()
 sIf cond tbranch fbranch = do
   tbranch' <- collect tbranch
   fbranch' <- collect fbranch
-  emit $ Imp.If cond tbranch' fbranch'
+  -- Avoid generating branch if the condition is known statically.
+  emit $
+    if cond == true
+      then tbranch'
+      else
+        if cond == false
+          then fbranch'
+          else Imp.If cond tbranch' fbranch'
 
 sWhen :: Imp.TExp Bool -> ImpM rep r op () -> ImpM rep r op ()
 sWhen cond tbranch = sIf cond tbranch (return ())
@@ -1792,7 +1802,7 @@ sAllocArrayPerm name pt shape space perm = do
 -- | Uses linear/iota index function.
 sAllocArray :: String -> PrimType -> ShapeBase SubExp -> Space -> ImpM rep r op VName
 sAllocArray name pt shape space =
-  sAllocArrayPerm name pt shape space [0 .. shapeRank shape -1]
+  sAllocArrayPerm name pt shape space [0 .. shapeRank shape - 1]
 
 -- | Uses linear/iota index function.
 sStaticArray :: String -> Space -> PrimType -> Imp.ArrayContents -> ImpM rep r op VName

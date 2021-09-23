@@ -35,7 +35,7 @@ import Futhark.Optimise.Fusion
 import Futhark.Optimise.InPlaceLowering
 import Futhark.Optimise.InliningDeadFun
 import qualified Futhark.Optimise.MemBlockCoalesce as MemBlockCoalesce
-import qualified Futhark.Optimise.ReuseAllocations as ReuseAllocations
+import qualified Futhark.Optimise.MemoryBlockMerging as MemoryBlockMerging
 import Futhark.Optimise.Sink
 import Futhark.Optimise.TileLoops
 import Futhark.Optimise.Unstream
@@ -565,7 +565,7 @@ commandLineOptions =
     allocateOption "a",
     kernelsMemPassOption doubleBufferGPU [],
     kernelsMemPassOption expandAllocations [],
-    kernelsMemPassOption ReuseAllocations.optimise [],
+    kernelsMemPassOption MemoryBlockMerging.optimise [],
     seqMemPassOption MemBlockCoalesce.coalesceSeqMem [],
     cseOption [],
     simplifyOption "e",
