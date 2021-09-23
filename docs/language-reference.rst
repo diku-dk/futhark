@@ -1183,6 +1183,8 @@ Only expression-level type annotations give rise to run-time checks.
 Despite their similar syntax, parameter and return type annotations
 must be valid at compile-time, or type checking will fail.
 
+.. _causality:
+
 Causality restriction
 ~~~~~~~~~~~~~~~~~~~~~
 
