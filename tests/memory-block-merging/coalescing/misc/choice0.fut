@@ -1,7 +1,7 @@
 -- An example of a program where there is a coalescing choice.
 -- ==
--- input { [1, 2] }
--- output { [2, 3, 0, 1] }
+-- input { [1i64, 2i64] }
+-- output { [2i64, 3i64, 0i64, 1i64] }
 -- structure cpu { Alloc 2 }
 -- structure gpu { Alloc 2 }
 

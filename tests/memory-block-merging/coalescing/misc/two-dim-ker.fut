@@ -7,8 +7,8 @@
 -- The GPU pipeline on the other hand does have one copy, and can be reduced
 -- from 4 allocations to 3 allocations with a coalescing.
 -- ==
--- input { [ [ [0, 1], [2, 3] ], [ [4, 5], [6, 7] ] ]  }
--- output { [[[0, 9], [0, 13]]]}
+-- input { [ [ [0i64, 1i64], [2i64, 3i64] ], [ [4i64, 5i64], [6i64, 7i64] ] ]  }
+-- output { [[[0i64, 9i64], [0i64, 13i64]]]}
 -- structure cpu { Alloc 1 }
 -- structure gpu { Alloc 3 }
 
