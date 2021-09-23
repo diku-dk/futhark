@@ -47,6 +47,7 @@ import Futhark.Pass.ExtractKernels
 import Futhark.Pass.ExtractMulticore
 import Futhark.Pass.FirstOrderTransform
 import Futhark.Pass.KernelBabysitting
+import Futhark.Pass.LiftAllocations as LiftAllocations
 import Futhark.Pass.Simplify
 import Futhark.Passes
 import Futhark.TypeCheck (Checkable, checkProg)
@@ -566,6 +567,7 @@ commandLineOptions =
     kernelsMemPassOption doubleBufferGPU [],
     kernelsMemPassOption expandAllocations [],
     kernelsMemPassOption MemoryBlockMerging.optimise [],
+    seqMemPassOption LiftAllocations.liftAllocations [],
     seqMemPassOption MemBlockCoalesce.coalesceSeqMem [],
     cseOption [],
     simplifyOption "e",

@@ -38,6 +38,7 @@ import Futhark.Pass.ExtractKernels
 import Futhark.Pass.ExtractMulticore
 import Futhark.Pass.FirstOrderTransform
 import Futhark.Pass.KernelBabysitting
+import Futhark.Pass.LiftAllocations as LiftAllocations
 import Futhark.Pass.Simplify
 import Futhark.Pipeline
 
@@ -92,6 +93,8 @@ sequentialCpuPipeline =
     >>> passes
       [ performCSE False,
         simplifySeqMem,
+        simplifySeqMem,
+        LiftAllocations.liftAllocations,
         simplifySeqMem,
         MemBlockCoalesce.coalesceSeqMem,
         simplifySeqMem
