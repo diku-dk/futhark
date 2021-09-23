@@ -3,7 +3,8 @@
 Error index
 ===========
 
-Elaboration on type errors produced by the compiler.
+Elaboration on type errors produced by the compiler.  Many error
+messages contain links to the sections below.
 
 Uniqueness errors
 -----------------
@@ -96,7 +97,7 @@ program that used ``f``::
 
 The update of ``b`` is fine, but if ``b`` was allowed to alias ``a``
 (hence occupying the same memory), then we would be modifying ``a`` as
-well ~~ a violation of referential transparency.
+well, which is a violation of referential transparency.
 
 As with most uniqueness errors, it can be fixed by using ``copy xs``
 to break the aliasing.  We can also change the type of ``f`` to take a
