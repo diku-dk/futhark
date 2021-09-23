@@ -752,10 +752,10 @@ unexpectedType loc t ts =
       <+> commasep (map ppr ts) <> ", but is"
       <+> ppr t <> "."
 
-notUnique :: (MonadTypeChecker m, Pretty a) => SrcLoc -> a -> StructType -> m b
-notUnique loc v v_t =
-  typeError loc mempty . withIndexLink "not-unique" $
-    pquote (ppr v) <+> "has type" <+> ppr v_t <> ", which is not unique."
+notConsumable :: MonadTypeChecker m => SrcLoc -> Doc -> m b
+notConsumable loc v =
+  typeError loc mempty . withIndexLink "not-consumable" $
+    "Would consume" <+> v <> ", which is not consumable."
 
 unusedSize :: (MonadTypeChecker m) => SizeBinder VName -> m a
 unusedSize p =
@@ -1640,17 +1640,14 @@ checkExp (AppExp (LetWith dest src slice ve body loc) _) =
 
     (elemt, _) <- sliceShape (Just (loc, Nonrigid)) slice' =<< normTypeFully t
 
-    unless (unique src_t) $ notUnique loc (pprName (identName src)) $ toStruct src_t
+    unless (unique src_t) $ notConsumable loc $ pquote $ pprName $ identName src
 
     vtable <- asks $ scopeVtable . termScope
     forM_ (aliases src_t) $ \v ->
       case aliasVar v `M.lookup` vtable of
         Just (BoundV Local _ v_t)
           | not $ unique v_t ->
-            typeError loc mempty $
-              "Source" <+> pquote (pprName (identName src))
-                <+> "aliases"
-                <+> pquote (pprName (aliasVar v)) <> ", which is not consumable."
+            notConsumable loc $ pquote $ pprName $ aliasVar v
         _ -> return ()
 
     sequentially (unifies "type of target array" (toStruct elemt) =<< checkExp ve) $ \ve' _ -> do
@@ -1673,7 +1670,7 @@ checkExp (Update src slice ve loc) = do
     sequentially (checkExp src >>= unifies "type of target array" t) $ \src' _ -> do
       src_t <- expTypeFully src'
 
-      unless (unique src_t) $ notUnique loc src $ toStruct src_t
+      unless (unique src_t) $ notConsumable loc $ pquote $ ppr src
 
       let src_als = aliases src_t
       ve_t <- expTypeFully ve'
@@ -3209,10 +3206,7 @@ checkIfConsumable loc als = do
         _ -> True
   -- The sort ensures that AliasBound vars are shown before AliasFree.
   case map aliasVar $ sort $ filter (not . consumable . aliasVar) $ S.toList als of
-    v : _ -> do
-      v' <- describeVar loc v
-      typeError loc mempty $
-        "Would consume" <+> v' <> ", which is not allowed."
+    v : _ -> notConsumable loc =<< describeVar loc v
     [] -> return ()
 
 -- | Proclaim that we have written to the given variable.
