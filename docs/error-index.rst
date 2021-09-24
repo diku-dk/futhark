@@ -1,6 +1,6 @@
 .. _error-index:
 
-Error index
+Error Index
 ===========
 
 Elaboration on type errors produced by the compiler.  Many error
