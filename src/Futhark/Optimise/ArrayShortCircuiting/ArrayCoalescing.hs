@@ -2,7 +2,7 @@
 {-# LANGUAGE TypeFamilies #-}
 
 -- | Playground for work on merging memory blocks
-module Futhark.Optimise.MemBlockCoalesce.ArrayCoalescing (mkCoalsTab, CoalsTab) where
+module Futhark.Optimise.ArrayShortCircuiting.ArrayCoalescing (mkCoalsTab, CoalsTab) where
 
 import Control.Arrow
 import qualified Control.Exception.Base as Exc
@@ -14,10 +14,10 @@ import Futhark.Analysis.PrimExp.Convert
 import Futhark.IR.Aliases
 import qualified Futhark.IR.Mem.IxFun as IxFun
 import qualified Futhark.IR.SeqMem as ExpMem
-import Futhark.Optimise.MemBlockCoalesce.DataStructs
-import Futhark.Optimise.MemBlockCoalesce.LastUse
-import Futhark.Optimise.MemBlockCoalesce.MemRefAggreg
-import Futhark.Optimise.MemBlockCoalesce.TopDownAn
+import Futhark.Optimise.ArrayShortCircuiting.DataStructs
+import Futhark.Optimise.ArrayShortCircuiting.LastUse
+import Futhark.Optimise.ArrayShortCircuiting.MemRefAggreg
+import Futhark.Optimise.ArrayShortCircuiting.TopDownAn
 import Prelude
 
 emptyTopDnEnv :: TopDnEnv

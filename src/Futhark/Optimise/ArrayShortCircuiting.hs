@@ -3,7 +3,7 @@
 {-# LANGUAGE TypeFamilies #-}
 
 -- | Playground for work on merging memory blocks
-module Futhark.Optimise.MemBlockCoalesce (printMemoryBlockMerging, coalesceSeqMem) where
+module Futhark.Optimise.ArrayShortCircuiting (printArrayShortCircuiting, optimiseSeqMem) where
 
 import Control.Monad.Reader
 import Data.Function ((&))
@@ -14,8 +14,8 @@ import Futhark.IR.Aliases
 import Futhark.IR.Mem
 import Futhark.IR.Mem.IxFun (substituteInIxFun)
 import Futhark.IR.SeqMem
-import Futhark.Optimise.MemBlockCoalesce.ArrayCoalescing
-import Futhark.Optimise.MemBlockCoalesce.DataStructs
+import Futhark.Optimise.ArrayShortCircuiting.ArrayCoalescing
+import Futhark.Optimise.ArrayShortCircuiting.DataStructs
 import Futhark.Pass (Pass (..))
 import qualified Futhark.Pass as Pass
 import Prelude
@@ -25,8 +25,8 @@ import Prelude
 ----------------------------------------------------------------
 
 -- run it with:  `futhark dev --cpu --merge-mem test.fut`
-printMemoryBlockMerging :: Prog SeqMem -> IO ()
-printMemoryBlockMerging prg = do
+printArrayShortCircuiting :: Prog SeqMem -> IO ()
+printArrayShortCircuiting prg = do
   mapM_ lookAtFunction (progFuns prg)
 
   let coaltab = mkCoalsTab $ AnlAls.aliasAnalysis prg
@@ -43,8 +43,8 @@ data Env inner = Env
 
 type ReplaceM inner a = Reader (Env inner) a
 
-coalesceSeqMem :: Pass SeqMem SeqMem
-coalesceSeqMem = pass mkCoalsTab (return . const Nothing)
+optimiseSeqMem :: Pass SeqMem SeqMem
+optimiseSeqMem = pass mkCoalsTab (return . const Nothing)
 
 pass ::
   (Mem rep inner, LetDec rep ~ LetDecMem, CanBeAliased inner) =>
@@ -52,7 +52,7 @@ pass ::
   (inner -> ReplaceM inner (Maybe inner)) ->
   Pass rep rep
 pass mk on_inner =
-  Pass "Memory Coalescing" "memory coalescing" $ \prog ->
+  Pass "short-circuit" "Array Short-Circuiting" $ \prog ->
     let coaltab = foldMap vartab $ M.elems $ mk $ AnlAls.aliasAnalysis prog
      in Pass.intraproceduralTransformation (onStms coaltab) prog
   where

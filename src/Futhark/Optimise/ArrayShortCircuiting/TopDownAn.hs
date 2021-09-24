@@ -1,7 +1,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
 
-module Futhark.Optimise.MemBlockCoalesce.TopDownAn
+module Futhark.Optimise.ArrayShortCircuiting.TopDownAn
   ( TopDnEnv (..),
     ScopeTab,
     InhibitTab,
@@ -23,7 +23,7 @@ import Futhark.IR.Aliases
 
 import qualified Futhark.IR.Mem.IxFun as IxFun
 import qualified Futhark.IR.SeqMem as ExpMem
-import Futhark.Optimise.MemBlockCoalesce.DataStructs
+import Futhark.Optimise.ArrayShortCircuiting.DataStructs
 
 type ScopeTab = Scope (Aliases ExpMem.SeqMem)
 -- ^ maps array-variable names to various info, including
@@ -186,11 +186,11 @@ topDownLoop td_env (Let _pat _ (DoLoop arginis lform body)) =
                                 updateAlias (m_f, m_alias_f) $
                                 updateAlias (m_r, m_alias_r) m_tab
                 in  m_alias'
-            (_, _, _) -> error "Impossible case reached in file MemBlockCoalesce.TopDownAn.hs, fun topDownLoop!"
+            (_, _, _) -> error "Impossible case reached in file ArrayShortCircuiting.TopDownAn.hs, fun topDownLoop!"
     foldfun _ m_tab _ = m_tab
 --}
 topDownLoop _ _ =
-  error "MemBlockCoalesce.TopDownAn: function topDownLoop should only be called on Loops!"
+  error "ArrayShortCircuiting.TopDownAn: function topDownLoop should only be called on Loops!"
 
 {--
 topDownIf :: TopDnEnv -> CoalsTab -> Stm (Aliases ExpMem.SeqMem) -> TopDnEnv

@@ -2,7 +2,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeFamilies #-}
 
-module Futhark.Optimise.MemBlockCoalesce.DataStructs
+module Futhark.Optimise.ArrayShortCircuiting.DataStructs
   ( Coalesced (..),
     CoalescedKind (..),
     ArrayMemBound (..),

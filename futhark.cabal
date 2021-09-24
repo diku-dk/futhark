@@ -221,12 +221,12 @@ library
       Futhark.Optimise.InliningDeadFun
       Futhark.Optimise.MemoryBlockMerging
       Futhark.Optimise.MemoryBlockMerging.GreedyColoring
-      Futhark.Optimise.MemBlockCoalesce
-      Futhark.Optimise.MemBlockCoalesce.ArrayCoalescing
-      Futhark.Optimise.MemBlockCoalesce.DataStructs
-      Futhark.Optimise.MemBlockCoalesce.LastUse
-      Futhark.Optimise.MemBlockCoalesce.MemRefAggreg
-      Futhark.Optimise.MemBlockCoalesce.TopDownAn
+      Futhark.Optimise.ArrayShortCircuiting
+      Futhark.Optimise.ArrayShortCircuiting.ArrayCoalescing
+      Futhark.Optimise.ArrayShortCircuiting.DataStructs
+      Futhark.Optimise.ArrayShortCircuiting.LastUse
+      Futhark.Optimise.ArrayShortCircuiting.MemRefAggreg
+      Futhark.Optimise.ArrayShortCircuiting.TopDownAn
       Futhark.Optimise.Simplify
       Futhark.Optimise.Simplify.Engine
       Futhark.Optimise.Simplify.Rep

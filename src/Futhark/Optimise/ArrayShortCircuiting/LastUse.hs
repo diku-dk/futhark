@@ -10,12 +10,12 @@
 -- results of a body do not have a last use, and neither do a function
 -- parameters if it happens to not be used inside function's body.  Such cases
 -- are supposed to be treated separately.
-module Futhark.Optimise.MemBlockCoalesce.LastUse (lastUseFun, lastUsePrg) where
+module Futhark.Optimise.ArrayShortCircuiting.LastUse (lastUseFun, lastUsePrg) where
 
 import qualified Data.Map.Strict as M
 import Futhark.IR.Aliases
 import qualified Futhark.IR.SeqMem as ExpMem
-import Futhark.Optimise.MemBlockCoalesce.DataStructs
+import Futhark.Optimise.ArrayShortCircuiting.DataStructs
 import Prelude
 
 -- | Perform last-use analysis on a 'Prog'

@@ -12,7 +12,7 @@ module Futhark.Actions
     impCodeGenAction,
     kernelImpCodeGenAction,
     multicoreImpCodeGenAction,
-    memoryBlockMerging,
+    arrayShortCircuiting,
     metricsAction,
     compileCAction,
     compileCtoWASMAction,
@@ -55,8 +55,8 @@ import Futhark.IR.MCMem (MCMem)
 import Futhark.IR.Prop.Aliases
 import Futhark.IR.SOACS (SOACS)
 import Futhark.IR.SeqMem (SeqMem)
-import qualified Futhark.Optimise.MemBlockCoalesce as Coalesce
-import qualified Futhark.Optimise.MemBlockCoalesce.LastUse
+import qualified Futhark.Optimise.ArrayShortCircuiting as ShortCircuit
+import qualified Futhark.Optimise.ArrayShortCircuiting.LastUse
 import Futhark.Util (runProgramWithExitCode, unixEnvironment)
 import Futhark.Version (versionString)
 import System.Directory
@@ -117,7 +117,7 @@ compareLastUseAction =
       actionDescription = "Compare last use",
       actionProcedure = \prog -> do
         let lastuse1 = fst $ Futhark.Analysis.LastUse.analyseSeqMem prog
-        let lastuse2 = mconcat $ M.elems $ Futhark.Optimise.MemBlockCoalesce.LastUse.lastUsePrg $ aliasAnalysis prog
+        let lastuse2 = mconcat $ M.elems $ Futhark.Optimise.ArrayShortCircuiting.LastUse.lastUsePrg $ aliasAnalysis prog
         if lastuse1 == lastuse2
           then return ()
           else liftIO $ putStrLn ("Last uses differ:\n" <> pretty lastuse1 <> "\n" <> pretty lastuse2)
@@ -158,12 +158,12 @@ multicoreImpCodeGenAction =
       actionProcedure = liftIO . putStrLn . pretty . snd <=< ImpGenMulticore.compileProg
     }
 
-memoryBlockMerging :: Action SeqMem
-memoryBlockMerging =
+arrayShortCircuiting :: Action SeqMem
+arrayShortCircuiting =
   Action
-    { actionName = "Merge memory blocks",
-      actionDescription = "Perform memory block merging and print results",
-      actionProcedure = liftIO . Coalesce.printMemoryBlockMerging
+    { actionName = "Array short circuiting",
+      actionDescription = "Perform array short circuiting and print results",
+      actionProcedure = liftIO . ShortCircuit.printArrayShortCircuiting
     }
 
 -- Lines that we prepend (in comments) to generated code.

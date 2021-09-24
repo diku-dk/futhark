@@ -20,12 +20,12 @@ import Futhark.IR.MCMem (MCMem)
 import Futhark.IR.SOACS (SOACS)
 import Futhark.IR.Seq (Seq)
 import Futhark.IR.SeqMem (SeqMem)
+import qualified Futhark.Optimise.ArrayShortCircuiting as ArrayShortCircuiting
 import Futhark.Optimise.CSE
 import Futhark.Optimise.DoubleBuffer
 import Futhark.Optimise.Fusion
 import Futhark.Optimise.InPlaceLowering
 import Futhark.Optimise.InliningDeadFun
-import qualified Futhark.Optimise.MemBlockCoalesce as MemBlockCoalesce
 import qualified Futhark.Optimise.MemoryBlockMerging as MemoryBlockMerging
 import Futhark.Optimise.Sink
 import Futhark.Optimise.TileLoops
@@ -96,7 +96,7 @@ sequentialCpuPipeline =
         simplifySeqMem,
         LiftAllocations.liftAllocations,
         simplifySeqMem,
-        MemBlockCoalesce.coalesceSeqMem,
+        ArrayShortCircuiting.optimiseSeqMem,
         simplifySeqMem
       ]
 

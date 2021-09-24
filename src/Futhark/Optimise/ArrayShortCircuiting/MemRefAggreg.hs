@@ -1,7 +1,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
 
-module Futhark.Optimise.MemBlockCoalesce.MemRefAggreg
+module Futhark.Optimise.ArrayShortCircuiting.MemRefAggreg
   ( recordMemRefUses,
     freeVarSubstitutions,
     aggSummaryLoopTotal,
@@ -21,8 +21,8 @@ import Futhark.Analysis.PrimExp.Convert
 import Futhark.IR.Aliases
 import qualified Futhark.IR.Mem.IxFun as IxFun
 import qualified Futhark.IR.SeqMem as ExpMem
-import Futhark.Optimise.MemBlockCoalesce.DataStructs
-import Futhark.Optimise.MemBlockCoalesce.TopDownAn
+import Futhark.Optimise.ArrayShortCircuiting.DataStructs
+import Futhark.Optimise.ArrayShortCircuiting.TopDownAn
 import Prelude
 
 -----------------------------------------------------

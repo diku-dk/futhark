@@ -29,12 +29,12 @@ import Futhark.Internalise.Defunctionalise as Defunctionalise
 import Futhark.Internalise.Defunctorise as Defunctorise
 import Futhark.Internalise.LiftLambdas as LiftLambdas
 import Futhark.Internalise.Monomorphise as Monomorphise
+import qualified Futhark.Optimise.ArrayShortCircuiting as ArrayShortCircuiting
 import Futhark.Optimise.CSE
 import Futhark.Optimise.DoubleBuffer
 import Futhark.Optimise.Fusion
 import Futhark.Optimise.InPlaceLowering
 import Futhark.Optimise.InliningDeadFun
-import qualified Futhark.Optimise.MemBlockCoalesce as MemBlockCoalesce
 import qualified Futhark.Optimise.MemoryBlockMerging as MemoryBlockMerging
 import Futhark.Optimise.Sink
 import Futhark.Optimise.TileLoops
@@ -470,9 +470,9 @@ commandLineOptions =
       "Print the resulting IR with aliases.",
     Option
       []
-      ["merge-mem"]
-      (NoArg $ Right $ \opts -> opts {futharkAction = SeqMemAction $ \_ _ _ -> memoryBlockMerging})
-      "Perform memory merging and print the results.",
+      ["print-short-circuit"]
+      (NoArg $ Right $ \opts -> opts {futharkAction = SeqMemAction $ \_ _ _ -> arrayShortCircuiting})
+      "Perform array short-circuiting and print the results.",
     Option
       []
       ["mem-aliases"]
@@ -568,7 +568,7 @@ commandLineOptions =
     kernelsMemPassOption expandAllocations [],
     kernelsMemPassOption MemoryBlockMerging.optimise [],
     seqMemPassOption LiftAllocations.liftAllocations [],
-    seqMemPassOption MemBlockCoalesce.coalesceSeqMem [],
+    seqMemPassOption ArrayShortCircuiting.optimiseSeqMem [],
     cseOption [],
     simplifyOption "e",
     soacsPipelineOption
