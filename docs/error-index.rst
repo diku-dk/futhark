@@ -1,7 +1,7 @@
 .. _error-index:
 
-Error Index
-===========
+Compiler Error Index
+====================
 
 Elaboration on type errors produced by the compiler.  Many error
 messages contain links to the sections below.
