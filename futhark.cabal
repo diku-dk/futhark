@@ -338,7 +338,7 @@ library
     , mtl >=2.2.1
     , neat-interpolation >=0.3
     , parallel >=3.2.1.0
-    , pcg-random >= 0.1
+    , random >= 1.2.0
     , process >=1.4.3.0
     , process-extras >=0.7.2
     , regex-tdfa >=1.2
