@@ -20,8 +20,6 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Changed
 
-* Renamed the `ReuseAllocations` pass to `MemoryBlockMerging`.
-
 ### Fixed
 
 * Unique opaque types are named properly in entry points.
