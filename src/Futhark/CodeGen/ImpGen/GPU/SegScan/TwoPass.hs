@@ -121,18 +121,19 @@ readToScanValues is pes scan
 
 readCarries ::
   Imp.TExp Int64 ->
+  Imp.TExp Int64 ->
   [Imp.TExp Int64] ->
   [Imp.TExp Int64] ->
   [PatElem GPUMem] ->
   SegBinOp GPUMem ->
   InKernelGen ()
-readCarries chunk_offset dims' vec_is pes scan
+readCarries chunk_id chunk_offset dims' vec_is pes scan
   | shapeRank (segBinOpShape scan) > 0 = do
     ltid <- kernelLocalThreadId . kernelConstants <$> askEnv
     -- We may have to reload the carries from the output of the
     -- previous chunk.
     sIf
-      (chunk_offset .>. 0 .&&. ltid .==. 0)
+      (chunk_id .>. 0 .&&. ltid .==. 0)
       ( do
           let is = unflattenIndex dims' $ chunk_offset - 1
           forM_ (zip (xParams scan) pes) $ \(p, pe) ->
@@ -218,6 +219,9 @@ scanStage1 (Pat all_pes) num_groups group_size space scans kbody = do
       sComment "threads in bounds read input" $
         sWhen in_bounds when_in_bounds
 
+      unless (all (null . segBinOpShape) scans) $
+        sOp $ Imp.Barrier Imp.FenceGlobal
+
       forM_ (zip3 per_scan_pes scans all_local_arrs) $
         \(pes, scan@(SegBinOp _ scan_op nes vec_shape), local_arrs) ->
           sComment "do one intra-group scan operation" $ do
@@ -233,7 +237,7 @@ scanStage1 (Pat all_pes) num_groups group_size space scans kbody = do
                   in_bounds
                   ( do
                       readToScanValues (map Imp.vi64 gtids ++ vec_is) pes scan
-                      readCarries (tvExp chunk_offset) dims' vec_is pes scan
+                      readCarries j (tvExp chunk_offset) dims' vec_is pes scan
                   )
                   ( forM_ (zip (yParams scan) (segBinOpNeutral scan)) $ \(p, ne) ->
                       copyDWIMFix (paramName p) [] ne []
