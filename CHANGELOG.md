@@ -16,6 +16,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * The beginnings of a Rust-style error index.
 
+* `scan` on newer CUDA devices is now much faster.
+
 ### Removed
 
 ### Changed
