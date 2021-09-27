@@ -32,7 +32,7 @@ createLocalArrays ::
   Count GroupSize SubExp ->
   SubExp ->
   [PrimType] ->
-  InKernelGen (VName, [VName], [VName], VName, VName, [VName])
+  InKernelGen (VName, [VName], [VName], VName, [VName])
 createLocalArrays (Count groupSize) m types = do
   let groupSizeE = toInt64Exp groupSize
       workSize = toInt64Exp m * groupSizeE
@@ -69,7 +69,6 @@ createLocalArrays (Count groupSize) m types = do
   transposeArrayLength <- dPrimV "trans_arr_len" workSize
 
   sharedId <- sArrayInMem "shared_id" int32 (Shape [constant (1 :: Int32)]) localMem
-  sharedReadOffset <- sArrayInMem "shared_read_offset" int32 (Shape [constant (1 :: Int32)]) localMem
 
   transposedArrays <-
     forM types $ \ty ->
@@ -98,7 +97,7 @@ createLocalArrays (Count groupSize) m types = do
         (Shape [constant (warpSize :: Int64)])
         $ ArrayIn localMem $ IxFun.iotaOffset off' [warpSize]
 
-  return (sharedId, transposedArrays, prefixArrays, sharedReadOffset, warpscan, warpExchanges)
+  return (sharedId, transposedArrays, prefixArrays, warpscan, warpExchanges)
 
 inBlockScanLookback ::
   KernelConstants ->
@@ -268,7 +267,7 @@ compileSegScan pat lvl space scanOp kbody = do
   sKernelThread "segscan" num_groups group_size (segFlat space) $ do
     constants <- kernelConstants <$> askEnv
 
-    (sharedId, transposedArrays, prefixArrays, _, warpscan, exchanges) <-
+    (sharedId, transposedArrays, prefixArrays, warpscan, exchanges) <-
       createLocalArrays (segGroupSize lvl) (intConst Int64 m) tys
 
     dynamicId <- dPrim "dynamic_id" int32
