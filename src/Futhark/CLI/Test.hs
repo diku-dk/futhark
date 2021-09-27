@@ -739,9 +739,17 @@ commandLineOptions =
       "Number of tests to run concurrently."
   ]
 
+excludeBackend :: TestConfig -> TestConfig
+excludeBackend config =
+  config
+    { configExclude =
+        "no_" <> T.pack (configBackend (configPrograms config)) :
+        configExclude config
+    }
+
 -- | Run @futhark test@.
 main :: String -> [String] -> IO ()
 main = mainWithOptions defaultConfig commandLineOptions "options... programs..." $ \progs config ->
   case progs of
     [] -> Nothing
-    _ -> Just $ runTests config progs
+    _ -> Just $ runTests (excludeBackend config) progs

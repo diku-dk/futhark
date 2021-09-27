@@ -506,12 +506,16 @@ commandLineOptions =
     max_timeout :: Int
     max_timeout = maxBound `div` 1000000
 
+excludeBackend :: BenchOptions -> BenchOptions
+excludeBackend config =
+  config {optExcludeCase = "no_" <> optBackend config : optExcludeCase config}
+
 -- | Run @futhark bench@.
 main :: String -> [String] -> IO ()
 main = mainWithOptions initialBenchOptions commandLineOptions "options... programs..." $ \progs config ->
   case progs of
     [] -> Nothing
-    _ -> Just $ runBenchmarks config progs
+    _ -> Just $ runBenchmarks (excludeBackend config) progs
 
 --- The following extracted from hstats package by Marshall Beddoe:
 --- https://hackage.haskell.org/package/hstats-0.3
