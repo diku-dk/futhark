@@ -676,8 +676,8 @@ allocInFunBody ::
   [Maybe Space] ->
   Body fromrep ->
   AllocM fromrep torep (Body torep, [FunReturns])
-allocInFunBody space_oks (Body _ bnds res) =
-  buildBody . allocInStms bnds $ do
+allocInFunBody space_oks (Body _ stms res) =
+  buildBody . allocInStms stms $ do
     res' <- zipWithM ensureDirect space_oks' res
     (mem_ctx_res, mem_ctx_rets) <- unzip . concat <$> mapM bodyReturnMemCtx res'
     pure (mem_ctx_res <> res', mem_ctx_rets)
@@ -738,12 +738,12 @@ allocInExp ::
   (Allocable fromrep torep inner) =>
   Exp fromrep ->
   AllocM fromrep torep (Exp torep)
-allocInExp (DoLoop merge form (Body () bodybnds bodyres)) =
+allocInExp (DoLoop merge form (Body () bodystms bodyres)) =
   allocInMergeParams merge $ \merge' mk_loop_val -> do
     form' <- allocInLoopForm form
     localScope (scopeOf form') $ do
       body' <-
-        buildBody_ . allocInStms bodybnds $ do
+        buildBody_ . allocInStms bodystms $ do
           (val_ses, valres') <- mk_loop_val $ map resSubExp bodyres
           pure $ subExpsRes val_ses <> zipWith SubExpRes (map resCerts bodyres) valres'
       pure $ DoLoop merge' form' body'
@@ -819,8 +819,8 @@ allocInExp (If cond tbranch0 fbranch0 (IfDec rets ifsort)) = do
       Int ->
       Body fromrep ->
       AllocM fromrep torep (Body torep, [Maybe IxFun])
-    allocInIfBody num_vals (Body _ bnds res) =
-      buildBody . allocInStms bnds $ do
+    allocInIfBody num_vals (Body _ stms res) =
+      buildBody . allocInStms stms $ do
         let (_, val_res) = splitFromEnd num_vals res
         mem_ixfs <- mapM (subExpIxFun . resSubExp) val_res
         pure (res, mem_ixfs)
@@ -921,8 +921,8 @@ addResCtxInIfBody ::
   [Maybe Space] ->
   [Maybe (ExtIxFun, [TPrimExp Int64 VName])] ->
   AllocM fromrep torep (Body torep, [BodyReturns])
-addResCtxInIfBody ifrets (Body _ bnds res) spaces substs = buildBody $ do
-  mapM_ addStm bnds
+addResCtxInIfBody ifrets (Body _ stms res) spaces substs = buildBody $ do
+  mapM_ addStm stms
   (ctx, ctx_rets, res', res_rets, total_existentials) <-
     foldM helper ([], [], [], [], 0) (zip4 ifrets res substs spaces)
   pure
@@ -1107,7 +1107,7 @@ simplifiable innerUsage simplifyInnerOp =
     mkExpDecS' _ pat e =
       return $ Engine.mkWiseExpDec pat () e
 
-    mkBodyS' _ bnds res = return $ mkWiseBody () bnds res
+    mkBodyS' _ stms res = return $ mkWiseBody () stms res
 
     protectOp taken pat (Alloc size space) = Just $ do
       tbody <- resultBodyM [size]

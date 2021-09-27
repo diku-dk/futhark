@@ -46,11 +46,11 @@ optimiseStm :: Stm GPU -> TileM (Stms GPU)
 optimiseStm stm@(Let pat aux (Op (SegOp (SegMap lvl@SegThread {} space ts kbody)))) = do
   res3dtiling <- doRegTiling3D stm
   case res3dtiling of
-    Just (extra_bnds, stmt') -> return (extra_bnds <> oneStm stmt')
+    Just (extra_stms, stmt') -> return (extra_stms <> oneStm stmt')
     Nothing -> do
       blkRegTiling_res <- mmBlkRegTiling stm
       case blkRegTiling_res of
-        Just (extra_bnds, stmt') -> return (extra_bnds <> oneStm stmt')
+        Just (extra_stms, stmt') -> return (extra_stms <> oneStm stmt')
         Nothing -> localScope (scopeOfSegSpace space) $ do
           (host_stms, (lvl', space', kbody')) <- tileInKernelBody mempty initial_variance lvl space ts kbody
           return $ host_stms <> oneStm (Let pat aux $ Op $ SegOp $ SegMap lvl' space' ts kbody')
@@ -157,6 +157,7 @@ tileInBody branch_variant initial_variance initial_lvl initial_space res_ts (Bod
             stms_res
       -- Tiling inside for-loop.
       | DoLoop merge (ForLoop i it bound []) loopbody <- stmExp stm_to_tile,
+        not $ any ((`nameIn` freeIn merge) . paramName . fst) merge,
         (prestms', poststms') <-
           preludeToPostlude variance prestms stm_to_tile (stmsFromList poststms) = do
         let branch_variant' =

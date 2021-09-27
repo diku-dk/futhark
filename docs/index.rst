@@ -33,6 +33,7 @@ the `development blog <https://futhark-lang.org/blog.html>`_.
    c-api.rst
    js-api.rst
    package-management.rst
+   error-index.rst
    server-protocol.rst
    c-porting-guide.rst
    versus-other-languages.rst

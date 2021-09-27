@@ -142,7 +142,7 @@ instance Pretty t => Pretty (Param t) where
   ppr (Param name t) = ppr name <+> colon <+> align (ppr t)
 
 instance PrettyRep rep => Pretty (Stm rep) where
-  ppr bnd@(Let pat aux e) =
+  ppr stm@(Let pat aux e) =
     align . hang 2 $
       text "let" <+> align (ppr pat)
         <+> case (linebreak, stmannot) of
@@ -161,8 +161,8 @@ instance PrettyRep rep => Pretty (Stm rep) where
       stmannot =
         concat
           [ maybeToList (ppExpDec (stmAuxDec aux) e),
-            stmAttrAnnots bnd,
-            stmCertAnnots bnd
+            stmAttrAnnots stm,
+            stmCertAnnots stm
           ]
 
 instance Pretty a => Pretty (Slice a) where
@@ -312,6 +312,9 @@ instance Pretty EntryPointType where
   ppr (TypeDirect u) = ppr u <> "direct"
   ppr (TypeUnsigned u) = ppr u <> "unsigned"
   ppr (TypeOpaque u desc n) = ppr u <> "opaque" <> apply [ppr (show desc), ppr n]
+
+instance Pretty EntryParam where
+  ppr (EntryParam name t) = ppr name <> colon <+> ppr t
 
 instance PrettyRep rep => Pretty (FunDef rep) where
   ppr (FunDef entry attrs name rettype fparams body) =

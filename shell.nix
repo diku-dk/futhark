@@ -13,8 +13,6 @@ pkgs.stdenv.mkDerivation {
     pkgs.ghc
     pkgs.haskellPackages.weeder
     pkgs.hlint
-    pkgs.ocl-icd
-    pkgs.opencl-headers
     pkgs.pkgconfig
     pkgs.zlib
     pkgs.zlib.out
@@ -24,6 +22,11 @@ pkgs.stdenv.mkDerivation {
     pkgs.niv
     pkgs.python3Packages.numpy
     pkgs.python3Packages.pyopencl
+    pkgs.python3Packages.jsonschema
     pkgs.imagemagick # needed for literate tests
-  ];
+  ]
+  ++ pkgs.lib.optionals (pkgs.stdenv.isLinux)
+    [ pkgs.opencl-headers
+      pkgs.ocl-icd ]
+  ;
 }

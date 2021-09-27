@@ -381,7 +381,11 @@ generateContextFuns cfg cost_centres kernels sizes failures = do
                  ctx->total_runtime = 0;
                  $stms:init_fields
 
-                 cuda_setup(&ctx->cuda, cuda_program, cfg->nvrtc_opts);
+                 ctx->error = cuda_setup(&ctx->cuda, cuda_program, cfg->nvrtc_opts);
+
+                 if (ctx->error != NULL) {
+                   return NULL;
+                 }
 
                  typename int32_t no_error = -1;
                  CUDA_SUCCEED_FATAL(cuMemAlloc(&ctx->global_failure, sizeof(no_error)));

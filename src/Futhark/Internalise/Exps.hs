@@ -99,11 +99,11 @@ internaliseValBind fb@(E.ValBind entry fname retdecl (Info (rettype, _)) tparams
     zeroExts ts = generaliseExtTypes ts ts
 
 generateEntryPoint :: E.EntryPoint -> E.ValBind -> InternaliseM ()
-generateEntryPoint (E.EntryPoint e_paramts e_rettype) vb = localConstsScope $ do
+generateEntryPoint (E.EntryPoint e_params e_rettype) vb = localConstsScope $ do
   let (E.ValBind _ ofname _ (Info (rettype, _)) tparams params _ _ attrs loc) = vb
   bindingFParams tparams params $ \shapeparams params' -> do
     entry_rettype <- internaliseEntryReturnType rettype
-    let entry' = entryPoint (baseName ofname) (zip e_paramts params') (e_rettype, entry_rettype)
+    let entry' = entryPoint (baseName ofname) (zip e_params params') (e_rettype, entry_rettype)
         args = map (I.Var . I.paramName) $ concat params'
 
     (entry_body, ctx_ts) <- buildBody $ do
@@ -131,40 +131,45 @@ generateEntryPoint (E.EntryPoint e_paramts e_rettype) vb = localConstsScope $ do
 
 entryPoint ::
   Name ->
-  [(E.EntryType, [I.FParam])] ->
+  [(E.EntryParam, [I.FParam])] ->
   ( E.EntryType,
     [[I.TypeBase ExtShape Uniqueness]]
   ) ->
   I.EntryPoint
 entryPoint name params (eret, crets) =
   ( name,
-    concatMap (entryPointType . preParam) params,
+    map onParam params,
     case ( isTupleRecord $ entryType eret,
            entryAscribed eret
          ) of
       (Just ts, Just (E.TETuple e_ts _)) ->
-        concatMap entryPointType $
-          zip (zipWith E.EntryType ts (map Just e_ts)) crets
+        zipWith
+          entryPointType
+          (zipWith E.EntryType ts (map Just e_ts))
+          crets
       (Just ts, Nothing) ->
-        concatMap entryPointType $
-          zip (map (`E.EntryType` Nothing) ts) crets
+        zipWith
+          entryPointType
+          (map (`E.EntryType` Nothing) ts)
+          crets
       _ ->
-        entryPointType (eret, concat crets)
+        [entryPointType eret $ concat crets]
   )
   where
-    preParam (e_t, ps) = (e_t, staticShapes $ map I.paramDeclType ps)
+    onParam (E.EntryParam e_p e_t, ps) =
+      I.EntryParam e_p $ entryPointType e_t $ staticShapes $ map I.paramDeclType ps
 
-    entryPointType (t, ts)
+    entryPointType t ts
       | E.Scalar (E.Prim E.Unsigned {}) <- E.entryType t =
-        [I.TypeUnsigned u]
+        I.TypeUnsigned u
       | E.Array _ _ (E.Prim E.Unsigned {}) _ <- E.entryType t =
-        [I.TypeUnsigned u]
+        I.TypeUnsigned u
       | E.Scalar E.Prim {} <- E.entryType t =
-        [I.TypeDirect u]
+        I.TypeDirect u
       | E.Array _ _ E.Prim {} _ <- E.entryType t =
-        [I.TypeDirect u]
+        I.TypeDirect u
       | otherwise =
-        [I.TypeOpaque u desc $ length ts]
+        I.TypeOpaque u desc $ length ts
       where
         u = foldl max Nonunique $ map I.uniqueness ts
         desc = maybe (prettyOneLine t') typeExpOpaqueName $ E.entryAscribed t
@@ -177,6 +182,7 @@ entryPoint name params (eret, crets) =
             ++ "_"
             ++ show (1 + d)
             ++ "d"
+    typeExpOpaqueName (TEUnique te _) = prettyOneLine te
     typeExpOpaqueName te = prettyOneLine te
 
     withoutDims (TEArray te _ _) =
@@ -431,19 +437,18 @@ internaliseAppExp desc (E.DoLoop sparams mergepat mergeexp form loopbody loc) = 
     sparams' = map (`TypeParamDim` mempty) sparams
 
     forLoop mergepat' shapepat mergeinit form' =
-      bodyFromStms $
-        inScopeOf form' $ do
-          ses <- internaliseExp "loopres" loopbody
-          sets <- mapM subExpType ses
-          shapeargs <- argShapes (map I.paramName shapepat) mergepat' sets
-          return
-            ( subExpsRes $ shapeargs ++ ses,
-              ( form',
-                shapepat,
-                mergepat',
-                mergeinit
-              )
+      bodyFromStms . inScopeOf form' $ do
+        ses <- internaliseExp "loopres" loopbody
+        sets <- mapM subExpType ses
+        shapeargs <- argShapes (map I.paramName shapepat) mergepat' sets
+        pure
+          ( subExpsRes $ shapeargs ++ ses,
+            ( form',
+              shapepat,
+              mergepat',
+              mergeinit
             )
+          )
 
     handleForm mergeinit (E.ForIn x arr) = do
       arr' <- internaliseExpToVars "for_in_arr" arr
@@ -453,17 +458,16 @@ internaliseAppExp desc (E.DoLoop sparams mergepat mergeexp form loopbody loc) = 
       i <- newVName "i"
 
       ts <- mapM subExpType mergeinit
-      bindingLoopParams sparams' mergepat ts $
-        \shapepat mergepat' ->
-          bindingLambdaParams [x] (map rowType arr_ts) $ \x_params -> do
-            let loopvars = zip x_params arr'
-            forLoop mergepat' shapepat mergeinit $
-              I.ForLoop i Int64 w loopvars
+      bindingLoopParams sparams' mergepat ts $ \shapepat mergepat' ->
+        bindingLambdaParams [x] (map rowType arr_ts) $ \x_params -> do
+          let loopvars = zip x_params arr'
+          forLoop mergepat' shapepat mergeinit $
+            I.ForLoop i Int64 w loopvars
     handleForm mergeinit (E.For i num_iterations) = do
       num_iterations' <- internaliseExp1 "upper_bound" num_iterations
       num_iterations_t <- I.subExpType num_iterations'
       it <- case num_iterations_t of
-        I.Prim (IntType it) -> return it
+        I.Prim (IntType it) -> pure it
         _ -> error "internaliseExp DoLoop: invalid type"
 
       ts <- mapM subExpType mergeinit
@@ -483,7 +487,7 @@ internaliseAppExp desc (E.DoLoop sparams mergepat mergeexp form loopbody loc) = 
         -- anything.
         shapeinit <- argShapes (map I.paramName shapepat) mergepat' mergeinit_ts
 
-        (loop_initial_cond, init_loop_cond_bnds) <- collectStms $ do
+        (loop_initial_cond, init_loop_cond_stms) <- collectStms $ do
           forM_ (zip shapepat shapeinit) $ \(p, se) ->
             letBindNames [paramName p] $ BasicOp $ SubExp se
           forM_ (zip mergepat' mergeinit) $ \(p, se) ->
@@ -497,7 +501,7 @@ internaliseAppExp desc (E.DoLoop sparams mergepat mergeexp form loopbody loc) = 
                     _ -> SubExp se
           internaliseExp1 "loop_cond" cond
 
-        addStms init_loop_cond_bnds
+        addStms init_loop_cond_stms
 
         bodyFromStms $ do
           ses <- internaliseExp "loopres" loopbody
@@ -522,7 +526,7 @@ internaliseAppExp desc (E.DoLoop sparams mergepat mergeexp form loopbody loc) = 
             subExpsRes <$> internaliseExp "loop_cond" cond
           loop_end_cond <- bodyBind loop_end_cond_body
 
-          return
+          pure
             ( subExpsRes shapeargs ++ loop_end_cond ++ subExpsRes ses,
               ( I.WhileLoop $ I.paramName loop_while,
                 shapepat,
@@ -567,9 +571,8 @@ internaliseExp desc (E.Parens e _) =
 internaliseExp desc (E.QualParens _ e _) =
   internaliseExp desc e
 internaliseExp desc (E.StringLit vs _) =
-  fmap pure $
-    letSubExp desc $
-      I.BasicOp $ I.ArrayLit (map constant vs) $ I.Prim int8
+  fmap pure . letSubExp desc $
+    I.BasicOp $ I.ArrayLit (map constant vs) $ I.Prim int8
 internaliseExp _ (E.Var (E.QualName _ name) _ _) = do
   subst <- lookupSubst name
   case subst of
@@ -730,8 +733,8 @@ internaliseExp desc (E.Attr attr e loc) = do
     _ ->
       pure e'
   where
-    traceRes tag' e' =
-      mapM (letSubExp desc . BasicOp . Opaque (OpaqueTrace tag')) e'
+    traceRes tag' =
+      mapM (letSubExp desc . BasicOp . Opaque (OpaqueTrace tag'))
     attr' = internaliseAttr attr
     f env
       | attr' == "unsafe",
@@ -1213,9 +1216,8 @@ internaliseStreamRed desc o comm lam0 lam arr = do
     I.BasicOp $ I.SubExp $ constant (0 :: Int64)
   forM_ lam_val_params $ \p ->
     letBindNames [I.paramName p] $
-      I.BasicOp $
-        I.Scratch (I.elemType $ I.paramType p) $
-          I.arrayDims $ I.paramType p
+      I.BasicOp . I.Scratch (I.elemType $ I.paramType p) $
+        I.arrayDims $ I.paramType p
   nes <- bodyBind =<< renameBody lam_body
 
   nes_ts <- mapM I.subExpResType nes
@@ -1348,9 +1350,8 @@ certifyingNonnegative ::
   InternaliseM a
 certifyingNonnegative loc t x m = do
   nonnegative <-
-    letSubExp "nonnegative" $
-      I.BasicOp $
-        CmpOp (CmpSle t) (intConst t 0) x
+    letSubExp "nonnegative" . I.BasicOp $
+      CmpOp (CmpSle t) (intConst t 0) x
   c <- assert "nonzero_cert" nonnegative "negative exponent" loc
   certifying c m
 
@@ -1772,12 +1773,12 @@ isOverloadedFunction qname args loc = do
       internaliseOperation desc e $ \v -> do
         r <- I.arrayRank <$> lookupType v
         let zero = intConst Int64 0
-            offsets = offset' : replicate (r -1) zero
+            offsets = offset' : replicate (r - 1) zero
         return $ I.Rotate offsets v
     handleRest [e] "transpose" = Just $ \desc ->
       internaliseOperation desc e $ \v -> do
         r <- I.arrayRank <$> lookupType v
-        return $ I.Rearrange ([1, 0] ++ [2 .. r -1]) v
+        return $ I.Rearrange ([1, 0] ++ [2 .. r - 1]) v
     handleRest [TupLit [x, y] _] "zip" = Just $ \desc ->
       mapM (letSubExp "zip_copy" . BasicOp . Copy)
         =<< ( (++)

@@ -130,19 +130,19 @@ checkResults ::
   [SubExp] ->
   RuleM rep (Body rep)
 checkResults pat size untouchable it knownBnds params body accs = do
-  ((), bnds) <-
+  ((), stms) <-
     collectStms $
       zipWithM_ checkResult (zip pat res) (zip accparams accs)
-  mkBodyM bnds $ varsRes pat
+  mkBodyM stms $ varsRes pat
   where
-    bndMap = makeBindMap body
+    stmMap = makeBindMap body
     (accparams, _) = splitAt (length accs) params
     res = bodyResult body
 
     nonFree = boundInBody body <> namesFromList params <> untouchable
 
     checkResult (p, SubExpRes _ (Var v)) (accparam, acc)
-      | Just (BasicOp (BinOp bop x y)) <- M.lookup v bndMap,
+      | Just (BasicOp (BinOp bop x y)) <- M.lookup v stmMap,
         x /= y = do
         -- One of x,y must be *this* accumulator, and the other must
         -- be something that is free in the body.

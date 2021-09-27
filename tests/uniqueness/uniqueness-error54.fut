@@ -1,5 +1,5 @@
 -- ==
--- error: aliased to some other tuple component.
+-- error: aliased to some other component.
 
 let dup x = (x,x)
 
