@@ -1,5 +1,5 @@
 -- ==
--- tags { no_opencl }
+-- tags { no_opencl no_cuda no_pyopencl }
 -- structure distributed { SegMap 3 }
 
 let foo [h][w] (seam_energy: [h][w]i64): [h]i64 =
