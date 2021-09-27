@@ -21,7 +21,8 @@ Identifiers and Keywords
 ------------------------
 
 .. productionlist::
-   id: `letter` (`letter` | "_" | "'")* | "_" `id`
+   id: `letter` `constituent`* | "_" `constituent`*
+   constituent: `letter` | `digit` | "_" | "'"
    quals: (`id` ".")+
    qualid: `id` | `quals` `id`
    binop: `opstartchar` `opchar`*
@@ -1181,6 +1182,8 @@ necessary when writing more complicated size functions::
 Only expression-level type annotations give rise to run-time checks.
 Despite their similar syntax, parameter and return type annotations
 must be valid at compile-time, or type checking will fail.
+
+.. _causality:
 
 Causality restriction
 ~~~~~~~~~~~~~~~~~~~~~

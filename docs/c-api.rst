@@ -474,3 +474,46 @@ Violation the restrictions of consumption (see :ref:`api-consumption`)
 can result in undefined behaviour.  This does not matter for programs
 whose entry points do not have unique parameter types
 (:ref:`in-place-updates`).
+
+.. _manifest:
+
+Manifest
+--------
+
+The C backends generate a machine-readable *manifest* in JSON format
+that describes the API of the compiled Futhark program.  Specifically,
+the manifest contains:
+
+* A mapping from the name of each entry point to:
+
+  * The C function name of the entry point.
+
+  * A list of all *inputs*, including their type and whether they are
+    *unique* (consuming).
+
+  * A list of all *outputs*, including their type and whether they are
+    *unique*.
+
+* A mapping from the name of each non-scalar types to:
+
+  * The C type of used to represent type type (which is practice
+    always a pointer of some kind).
+
+  * For arrays, the element type and rank.
+
+  * A mapping from names of *operations* to the name of the C function
+    that implements that operation for the type.  The type of the C
+    functions are as documented above.  The following operations are
+    listed:
+
+    * For arrays: ``free``, ``shape``, ``values``, ``new``.
+
+    * For opaques: ``free``, ``store``, ``restore``.
+
+Manifests are defined by the following JSON Schema:
+
+.. include:: manifest.schema.json
+   :code: json
+
+It is likely that we will add more fields in the future, but it is
+unlikely that we will remove any.

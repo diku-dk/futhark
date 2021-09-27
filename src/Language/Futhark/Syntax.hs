@@ -78,6 +78,7 @@ module Language.Futhark.Syntax
     ValBindBase (..),
     EntryPoint (..),
     EntryType (..),
+    EntryParam (..),
     Liftedness (..),
     TypeBindBase (..),
     TypeParamBase (..),
@@ -971,13 +972,20 @@ data EntryType = EntryType
   }
   deriving (Show)
 
+-- | A parameter of an entry point.
+data EntryParam = EntryParam
+  { entryParamName :: Name,
+    entryParamType :: EntryType
+  }
+  deriving (Show)
+
 -- | Information about the external interface exposed by an entry
 -- point.  The important thing is that that we remember the original
 -- source-language types, without desugaring them at all.  The
 -- annoying thing is that we do not require type annotations on entry
 -- points, so the types can be either ascribed or inferred.
 data EntryPoint = EntryPoint
-  { entryParams :: [EntryType],
+  { entryParams :: [EntryParam],
     entryReturn :: EntryType
   }
   deriving (Show)

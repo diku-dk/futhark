@@ -125,9 +125,9 @@ optimiseBody ::
   Constraints rep =>
   Body (Aliases rep) ->
   ForwardingM rep (Body (Aliases rep))
-optimiseBody (Body als bnds res) = do
-  bnds' <- deepen $ optimiseStms (stmsToList bnds) $ mapM_ (seen . resSubExp) res
-  return $ Body als (stmsFromList bnds') res
+optimiseBody (Body als stms res) = do
+  stms' <- deepen $ optimiseStms (stmsToList stms) $ mapM_ (seen . resSubExp) res
+  return $ Body als (stmsFromList stms') res
   where
     seen Constant {} = return ()
     seen (Var v) = seenVar v
@@ -138,18 +138,18 @@ optimiseStms ::
   ForwardingM rep () ->
   ForwardingM rep [Stm (Aliases rep)]
 optimiseStms [] m = m >> return []
-optimiseStms (bnd : bnds) m = do
-  (bnds', bup) <- tapBottomUp $ bindingStm bnd $ optimiseStms bnds m
-  bnd' <- optimiseInStm bnd
+optimiseStms (stm : stms) m = do
+  (stms', bup) <- tapBottomUp $ bindingStm stm $ optimiseStms stms m
+  stm' <- optimiseInStm stm
   case filter ((`elem` boundHere) . updateValue) $ forwardThese bup of
     [] -> do
-      checkIfForwardableUpdate bnd'
-      return $ bnd' : bnds'
+      checkIfForwardableUpdate stm'
+      return $ stm' : stms'
     updates -> do
       lower <- asks topLowerUpdate
       scope <- askScope
 
-      -- If we forward any updates, we need to remove them from bnds'.
+      -- If we forward any updates, we need to remove them from stms'.
       let updated_names =
             map updateName updates
           notUpdated =
@@ -157,18 +157,18 @@ optimiseStms (bnd : bnds) m = do
 
       -- Condition (5) and (7) are assumed to be checked by
       -- lowerUpdate.
-      case lower scope bnd' updates of
+      case lower scope stm' updates of
         Just lowering -> do
-          new_bnds <- lowering
-          new_bnds' <-
-            optimiseStms new_bnds $
+          new_stms <- lowering
+          new_stms' <-
+            optimiseStms new_stms $
               tell bup {forwardThese = []}
-          return $ new_bnds' ++ filter notUpdated bnds'
+          return $ new_stms' ++ filter notUpdated stms'
         Nothing -> do
-          checkIfForwardableUpdate bnd'
-          return $ bnd' : bnds'
+          checkIfForwardableUpdate stm'
+          return $ stm' : stms'
   where
-    boundHere = patNames $ stmPat bnd
+    boundHere = patNames $ stmPat stm
 
     checkIfForwardableUpdate (Let pat (StmAux cs _ _) e)
       | Pat [PatElem v dec] <- pat,

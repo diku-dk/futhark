@@ -142,7 +142,7 @@ bindableSimpleOps =
   SimpleOps mkExpDecS' mkBodyS' protectHoistedOpS' (const mempty)
   where
     mkExpDecS' _ pat e = return $ mkExpDec pat e
-    mkBodyS' _ bnds res = return $ mkBody bnds res
+    mkBodyS' _ stms res = return $ mkBody stms res
     protectHoistedOpS' _ _ _ = Nothing
 
 newtype SimpleM rep a
@@ -633,15 +633,15 @@ hoistCommon cond ifsort ((res1, usages1), stms1) ((res2, usages2), stms2) = do
           `orIf` isNotHoistableBnd
 
   rules <- asksEngineEnv envRules
-  (body1_bnds', safe1) <-
+  (body1_stms', safe1) <-
     protectIfHoisted cond True $
       hoistStms rules block vtable usages1 stms1
-  (body2_bnds', safe2) <-
+  (body2_stms', safe2) <-
     protectIfHoisted cond False $
       hoistStms rules block vtable usages2 stms2
   let hoistable = safe1 <> safe2
-  body1' <- constructBody body1_bnds' res1
-  body2' <- constructBody body2_bnds' res2
+  body1' <- constructBody body1_stms' res1
+  body2' <- constructBody body2_stms' res2
   return (body1', body2', hoistable)
 
 -- | Simplify a single body.  The @[Diet]@ only covers the value
@@ -651,8 +651,8 @@ simplifyBody ::
   [Diet] ->
   Body rep ->
   SimpleM rep (SimplifiedBody rep Result)
-simplifyBody ds (Body _ bnds res) =
-  simplifyStms bnds $ do
+simplifyBody ds (Body _ stms res) =
+  simplifyStms stms $ do
     res' <- simplifyResult ds res
     return (res', mempty)
 
@@ -709,7 +709,7 @@ inspectStms stms m =
       rules <- asksEngineEnv envRules
       simplified <- topDownSimplifyStm rules vtable stm
       case simplified of
-        Just newbnds -> changed >> inspectStms (newbnds <> stms') m
+        Just newstms -> changed >> inspectStms (newstms <> stms') m
         Nothing -> do
           (x, stms'') <- localVtable (ST.insertStm stm) $ inspectStms stms' m
           return (x, oneStm stm <> stms'')
@@ -881,8 +881,8 @@ instance Simplifiable a => Simplifiable [a] where
 
 instance Simplifiable SubExp where
   simplify (Var name) = do
-    bnd <- ST.lookupSubExp name <$> askVtable
-    case bnd of
+    stm <- ST.lookupSubExp name <$> askVtable
+    case stm of
       Just (Constant v, cs) -> do
         changed
         usedCerts cs

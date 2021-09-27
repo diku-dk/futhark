@@ -591,22 +591,30 @@ entryPoint :: [Pat] -> Maybe (TypeExp VName) -> StructType -> EntryPoint
 entryPoint params orig_ret_te orig_ret =
   EntryPoint (map patternEntry params ++ more_params) rettype'
   where
-    (more_params, rettype') =
-      onRetType orig_ret_te orig_ret
+    (more_params, rettype') = onRetType orig_ret_te orig_ret
 
     patternEntry (PatParens p _) =
       patternEntry p
-    patternEntry (PatAscription _ tdecl _) =
-      EntryType (unInfo (expandedType tdecl)) (Just (declaredType tdecl))
+    patternEntry (PatAscription p tdecl _) =
+      EntryParam (patternName p) $
+        EntryType (unInfo (expandedType tdecl)) (Just (declaredType tdecl))
     patternEntry p =
-      EntryType (patternStructType p) Nothing
+      EntryParam (patternName p) $
+        EntryType (patternStructType p) Nothing
 
-    onRetType (Just (TEArrow _ t1_te t2_te _)) (Scalar (Arrow _ _ t1 t2)) =
+    patternName (Id x _ _) = baseName x
+    patternName (PatParens p _) = patternName p
+    patternName _ = "_"
+
+    pname (Named v) = baseName v
+    pname Unnamed = "_"
+
+    onRetType (Just (TEArrow p t1_te t2_te _)) (Scalar (Arrow _ _ t1 t2)) =
       let (xs, y) = onRetType (Just t2_te) t2
-       in (EntryType t1 (Just t1_te) : xs, y)
-    onRetType _ (Scalar (Arrow _ _ t1 t2)) =
+       in (EntryParam (maybe "_" baseName p) (EntryType t1 (Just t1_te)) : xs, y)
+    onRetType _ (Scalar (Arrow _ p t1 t2)) =
       let (xs, y) = onRetType Nothing t2
-       in (EntryType t1 Nothing : xs, y)
+       in (EntryParam (pname p) (EntryType t1 Nothing) : xs, y)
     onRetType te t =
       ([], EntryType t te)
 
@@ -698,6 +706,7 @@ niceTypeExp :: TypeExp VName -> Bool
 niceTypeExp (TEVar (QualName [] _) _) = True
 niceTypeExp (TEApply te TypeArgExpDim {} _) = niceTypeExp te
 niceTypeExp (TEArray te _ _) = niceTypeExp te
+niceTypeExp (TEUnique te _) = niceTypeExp te
 niceTypeExp _ = False
 
 checkOneDec :: DecBase NoInfo Name -> TypeM (TySet, Env, DecBase Info VName)
