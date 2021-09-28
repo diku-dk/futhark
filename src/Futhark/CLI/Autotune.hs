@@ -87,7 +87,7 @@ serverOptions path opts =
   map opt path
     ++ optExtraOptions opts
   where
-    opt (name, val) = "--size=" ++ name ++ "=" ++ show val
+    opt (name, val) = "--param=" ++ name ++ "=" ++ show val
 
 prepare :: AutotuneOptions -> FutharkExe -> FilePath -> IO [(DatasetName, RunDataset, T.Text)]
 prepare opts futhark prog = do
@@ -187,7 +187,7 @@ thresholdForest :: FilePath -> IO ThresholdForest
 thresholdForest prog = do
   thresholds <-
     getThresholds
-      <$> readProcess ("." </> dropExtension prog) ["--print-sizes"] ""
+      <$> readProcess ("." </> dropExtension prog) ["--print-params"] ""
   let root (v, _) = ((v, False), [])
   return $
     unfoldForest (unfold thresholds) $

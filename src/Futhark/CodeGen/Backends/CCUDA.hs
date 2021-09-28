@@ -248,10 +248,10 @@ cudaMemoryType space =
 
 callKernel :: GC.OpCompiler OpenCL ()
 callKernel (GetSize v key) =
-  GC.stm [C.cstm|$id:v = ctx->sizes.$id:key;|]
+  GC.stm [C.cstm|$id:v = *ctx->tuning_params.$id:key;|]
 callKernel (CmpSizeLe v key x) = do
   x' <- GC.compileExp x
-  GC.stm [C.cstm|$id:v = ctx->sizes.$id:key <= $exp:x';|]
+  GC.stm [C.cstm|$id:v = *ctx->tuning_params.$id:key <= $exp:x';|]
   sizeLoggingCode v key x'
 callKernel (GetSizeMax v size_class) =
   let field = "max_" ++ cudaSizeClass size_class

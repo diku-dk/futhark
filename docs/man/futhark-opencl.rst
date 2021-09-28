@@ -170,11 +170,16 @@ The following additional options are accepted.
   end.  When ``-r`` is used, only the last run will be profiled.
   Implied by ``-D``.
 
---size=ASSIGNMENT
+--param=ASSIGNMENT
 
-  Set a configurable run-time parameter to the given
+  Set a tuning parameter to the given
   value. ``ASSIGNMENT`` must be of the form ``NAME=INT`` Use
   ``--print-sizes`` to see which names are available.
+
+--print-params
+
+  Print all tuning parameters that can be set with ``--param`` or
+  ``--tuning``.
 
 --tuning=FILE
 
