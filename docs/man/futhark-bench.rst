@@ -50,7 +50,8 @@ OPTIONS
 --exclude-case=TAG
 
   Do not run test cases that contain the given tag.  Cases marked with
-  "nobench" or "disable" are ignored by default.
+  "nobench", "disable", or "no_foo" (where *foo* is the backend used)
+  are ignored by default.
 
 --futhark=program
 
