@@ -1639,24 +1639,24 @@ commonLibFuns memreport = do
   ops <- asks envOperations
   profilereport <- gets $ DL.toList . compProfileItems
 
-  publicDef_ "get_num_sizes" InitDecl $ \s ->
+  publicDef_ "get_tuning_param_count" InitDecl $ \s ->
     ( [C.cedecl|int $id:s(void);|],
       [C.cedecl|int $id:s(void) {
-                return sizeof(size_names)/sizeof(size_names[0]);
+                return sizeof(tuning_param_names)/sizeof(tuning_param_names[0]);
               }|]
     )
 
-  publicDef_ "get_size_name" InitDecl $ \s ->
+  publicDef_ "get_tuning_param_name" InitDecl $ \s ->
     ( [C.cedecl|const char* $id:s(int);|],
       [C.cedecl|const char* $id:s(int i) {
-                return size_names[i];
+                return tuning_param_names[i];
               }|]
     )
 
-  publicDef_ "get_size_class" InitDecl $ \s ->
+  publicDef_ "get_tuning_param_class" InitDecl $ \s ->
     ( [C.cedecl|const char* $id:s(int);|],
       [C.cedecl|const char* $id:s(int i) {
-                return size_classes[i];
+                return tuning_param_classes[i];
               }|]
     )
 

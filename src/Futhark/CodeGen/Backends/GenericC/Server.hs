@@ -53,25 +53,25 @@ genericOptions =
                   }|]
       },
     Option
-      { optionLongName = "print-sizes",
+      { optionLongName = "print-params",
         optionShortName = Nothing,
         optionArgument = NoArgument,
-        optionDescription = "Print all sizes that can be set with --size or --tuning.",
+        optionDescription = "Print all tuning parameters that can be set with --param or --tuning.",
         optionAction =
           [C.cstm|{
-                int n = futhark_get_num_sizes();
+                int n = futhark_get_tuning_param_count();
                 for (int i = 0; i < n; i++) {
-                  printf("%s (%s)\n", futhark_get_size_name(i),
-                                      futhark_get_size_class(i));
+                  printf("%s (%s)\n", futhark_get_tuning_param_name(i),
+                                      futhark_get_tuning_param_class(i));
                 }
                 exit(0);
               }|]
       },
     Option
-      { optionLongName = "size",
+      { optionLongName = "param",
         optionShortName = Nothing,
         optionArgument = RequiredArgument "ASSIGNMENT",
-        optionDescription = "Set a configurable run-time parameter to the given value.",
+        optionDescription = "Set a tuning parameter to the given value.",
         optionAction =
           [C.cstm|{
                 char *name = optarg;
@@ -80,7 +80,7 @@ genericOptions =
                 int value = atoi(value_str);
                 if (equals != NULL) {
                   *equals = 0;
-                  if (futhark_context_config_set_size(cfg, name, value) != 0) {
+                  if (futhark_context_config_set_tuning_param(cfg, name, value) != 0) {
                     futhark_panic(1, "Unknown size: %s\n", name);
                   }
                 } else {
@@ -95,7 +95,7 @@ genericOptions =
         optionAction =
           [C.cstm|{
                 char *ret = load_tuning_file(optarg, cfg, (int(*)(void*, const char*, size_t))
-                                                          futhark_context_config_set_size);
+                                                          futhark_context_config_set_tuning_param);
                 if (ret != NULL) {
                   futhark_panic(1, "When loading tuning from '%s': %s\n", optarg, ret);
                 }}|]
