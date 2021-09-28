@@ -326,7 +326,7 @@ int main(int argc, char** argv) {
   }
 
   if (entry_point != NULL) {
-    run_server(&prog, ctx);
+    run_server(&prog, cfg, ctx);
   }
 
   futhark_context_free(ctx);
