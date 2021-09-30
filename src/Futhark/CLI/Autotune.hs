@@ -152,7 +152,7 @@ prepare opts futhark prog = do
 
       -- Setting the tuning parameters is a stateful action, so we
       -- must be careful to restore the defaults below.  This is
-      -- because we rely on parameters no in 'path' to have their
+      -- because we rely on parameters not in 'path' to have their
       -- default value.
       setTuningParams server path
 
