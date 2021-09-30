@@ -75,7 +75,10 @@ configuration may *not* be used for multiple concurrent contexts.
    :c:func:`get_tuning_param_name` for how to query which parameters
    are available.  Most of the tuning parameters are applied only when
    the context is created, but some may be changed even after the
-   context is active.
+   context is active.  At the moment, only parameters of class
+   "threshold" may change after the context has been created.  Use
+   :c:func:`get_tuning_param_class` to determine the class of a tuning
+   parameter.
 
 .. c:function:: int futhark_get_tuning_param_count(void)
 
