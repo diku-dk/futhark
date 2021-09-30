@@ -89,7 +89,7 @@ serverOptions opts =
 setTuningParam :: Server -> String -> Int -> IO ()
 setTuningParam server name val =
   either (error . T.unpack . T.unlines . failureMsg) (const $ pure ())
-    =<< sendCommand server ["set_tuning_param", T.pack name, T.pack (show val)]
+    =<< cmdSetTuningParam server (T.pack name) (T.pack (show val))
 
 setTuningParams :: Server -> Path -> IO ()
 setTuningParams server = mapM_ (uncurry $ setTuningParam server)
