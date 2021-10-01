@@ -86,7 +86,7 @@ mkCoalsTab prg = foldl M.union M.empty $ map mkCoalsTabFun $ progFuns prg
 mkCoalsTabFun :: FunDef (Aliases ExpMem.SeqMem) -> CoalsTab
 mkCoalsTabFun fun@(FunDef _ _ _ _ fpars body) =
   -- First compute last-use information
-  let (_, lutab) = lastUseFun fun
+  let (_, lutab) = lastUseSeqMem fun
       unique_mems = namesFromList $ M.keys $ getUniqueMemFParam fpars
       topenv =
         emptyTopDnEnv

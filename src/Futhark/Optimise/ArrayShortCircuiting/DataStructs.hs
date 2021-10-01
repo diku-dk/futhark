@@ -19,8 +19,6 @@ module Futhark.Optimise.ArrayShortCircuiting.DataStructs
     AccessSummary (..),
     BotUpEnv (..),
     InhibitTab,
-    aliasTransitiveClosure,
-    updateAliasing,
     unionCoalsEntry,
     getArrMemAssocFParam,
     getScopeMemInfo,
@@ -225,50 +223,6 @@ unionCoalsEntry etry1 (CoalsEntry dstmem2 dstind2 alsmem2 vartab2 optdeps2 memre
           vartab = vartab etry1 <> vartab2,
           memrefs = memrefs etry1 <> memrefs2
         }
-
--- | Compute the transititve closure of the aliases of a set of 'Names'.
-aliasTransitiveClosure :: AliasTab -> Names -> Names
-aliasTransitiveClosure alstab args =
-  let res = foldl (<>) args $ mapMaybe (`M.lookup` alstab) $ namesToList args
-   in if res == args
-        then res
-        else aliasTransitiveClosure alstab res
-
--- | Is the 'PatElem' a context parameter in 'Pat', meaning that it is used in
--- 'Pat'.
-isContextParam :: PatElem (Aliases ExpMem.SeqMem) -> Pat (Aliases ExpMem.SeqMem) -> Bool
-isContextParam a pat =
-  not $ patElemName a `nameIn` freeIn pat
-
--- | Update 'AliasTab' given from a given 'Pat'. If given a 'VName' (used to
--- signify the origin of an in-place update), that name is added as an alias to
--- "context parameters" in the pattern.
-updateAliasing ::
-  AliasTab ->
-  Pat (Aliases ExpMem.SeqMem) ->
-  -- | Maybe the old variable of an in-place update
-  Maybe VName ->
-  AliasTab
-updateAliasing stab pat m_ip =
-  foldl updateTab stab $
-    map addMaybe $ patElems pat
-  where
-    addMaybe a =
-      if isContextParam a pat
-        then (a, m_ip)
-        else (a, Nothing)
-    -- Compute the transitive closure of current pattern
-    -- name by concating all its aliases entries in stabb.
-    -- In case of an IN-PLACE update (`mb_v` not Nothing)
-    -- add the previous name to the alias set of the new one.
-    updateTab :: AliasTab -> (PatElem (Aliases ExpMem.SeqMem), Maybe VName) -> AliasTab
-    updateTab stabb (patel, mb_v) =
-      let pat_aliases = unAliases $ fst $ patElemDec patel
-          aliases = pat_aliases <> maybe mempty oneName mb_v
-          aliases' = aliasTransitiveClosure stabb aliases
-       in if aliases' == mempty
-            then stabb
-            else M.insert (patElemName patel) aliases' stabb
 
 -- | Get the names of array 'PatElem's in a 'Pat' and the corresponding
 -- 'ArrayMemBound' information for each array.
