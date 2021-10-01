@@ -71,20 +71,20 @@ configuration may *not* be used for multiple concurrent contexts.
    Set the value of a tuning parameter.  Returns zero on success, and
    non-zero if the parameter cannot be set.  This is usually because a
    parameter of the given name does not exist.  See
-   :c:func:`get_tuning_param_count` and
-   :c:func:`get_tuning_param_name` for how to query which parameters
-   are available.  Most of the tuning parameters are applied only when
-   the context is created, but some may be changed even after the
-   context is active.  At the moment, only parameters of class
-   "threshold" may change after the context has been created.  Use
-   :c:func:`get_tuning_param_class` to determine the class of a tuning
-   parameter.
+   :c:func:`futhark_get_tuning_param_count` and
+   :c:func:`futhark_get_tuning_param_name` for how to query which
+   parameters are available.  Most of the tuning parameters are
+   applied only when the context is created, but some may be changed
+   even after the context is active.  At the moment, only parameters
+   of class "threshold" may change after the context has been created.
+   Use :c:func:`futhark_get_tuning_param_class` to determine the class
+   of a tuning parameter.
 
 .. c:function:: int futhark_get_tuning_param_count(void)
 
    Return the number of available tuning parameters.  Useful for
-   knowing how to call :c:func:`get_tuning_param_name` and
-   :c:func:`get_tuning_param_class`.
+   knowing how to call :c:func:`futhark_get_tuning_param_name` and
+   :c:func:`futhark_get_tuning_param_class`.
 
 .. c:function:: const char* futhark_get_tuning_param_name(int i)
 
