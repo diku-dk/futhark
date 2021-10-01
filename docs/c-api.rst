@@ -88,11 +88,11 @@ configuration may *not* be used for multiple concurrent contexts.
 
 .. c:function:: const char* futhark_get_tuning_param_name(int i)
 
-   Return the name of the *i*th tuning parameter.
+   Return the name of tuning parameter *i*, counting from zero.
 
 .. c:function:: const char* futhark_get_tuning_param_class(int i)
 
-   Return the class of the *i*th tuning parameter.
+   Return the class of tuning parameter *i*, counting from zero.
 
 Context
 -------
