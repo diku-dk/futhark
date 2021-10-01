@@ -661,11 +661,8 @@ Atom : PrimLit        { Literal (fst $1) (snd $1) }
        { IndexSection $4 NoInfo (srcspan $1 $>) }
 
 
-PrimLit :: { (PrimValue, SrcLoc) }
-        : true   { (BoolValue True, $1) }
-        | false  { (BoolValue False, $1) }
-
-        | i8lit   { let L loc (I8LIT num)  = $1 in (SignedValue $ Int8Value num, loc) }
+NumLit :: { (PrimValue, SrcLoc) }
+        : i8lit   { let L loc (I8LIT num)  = $1 in (SignedValue $ Int8Value num, loc) }
         | i16lit  { let L loc (I16LIT num) = $1 in (SignedValue $ Int16Value num, loc) }
         | i32lit  { let L loc (I32LIT num) = $1 in (SignedValue $ Int32Value num, loc) }
         | i64lit  { let L loc (I64LIT num) = $1 in (SignedValue $ Int64Value num, loc) }
@@ -678,6 +675,12 @@ PrimLit :: { (PrimValue, SrcLoc) }
         | f16lit { let L loc (F16LIT num) = $1 in (FloatValue $ Float16Value num, loc) }
         | f32lit { let L loc (F32LIT num) = $1 in (FloatValue $ Float32Value num, loc) }
         | f64lit { let L loc (F64LIT num) = $1 in (FloatValue $ Float64Value num, loc) }
+
+
+PrimLit :: { (PrimValue, SrcLoc) }
+        : true   { (BoolValue True, $1) }
+        | false  { (BoolValue False, $1) }
+        | NumLit { $1 }
 
 Exps1 :: { (UncheckedExp, [UncheckedExp]) }
        : Exps1_ { case reverse (snd $1 : fst $1) of
@@ -789,11 +792,14 @@ CFieldPats1 :: { [(Name, PatBase NoInfo Name)] }
                  | CFieldPat                    { [$1] }
 
 CaseLiteral :: { (PatLit, SrcLoc) }
-             : PrimLit  { (PatLitPrim (fst $1), snd $1) }
-             | charlit  { let L loc (CHARLIT x) = $1
+             : charlit  { let L loc (CHARLIT x) = $1
                           in (PatLitInt (toInteger (ord x)), loc) }
+             | PrimLit  { (PatLitPrim (fst $1), snd $1) }
              | intlit   { let L loc (INTLIT x) = $1 in (PatLitInt x, loc) }
              | floatlit { let L loc (FLOATLIT x) = $1 in (PatLitFloat x, loc) }
+             | '-' NumLit  { (PatLitPrim (primNegate (fst $2)), snd $2) }
+             | '-' intlit   { let L loc (INTLIT x) = $2 in (PatLitInt (negate x), loc) }
+             | '-' floatlit { let L loc (FLOATLIT x) = $2 in (PatLitFloat (negate x), loc) }
 
 LoopForm :: { LoopFormBase NoInfo Name }
 LoopForm : for VarId '<' Exp
@@ -1130,6 +1136,12 @@ floatNegate :: FloatValue -> FloatValue
 floatNegate (Float16Value v) = Float16Value (-v)
 floatNegate (Float32Value v) = Float32Value (-v)
 floatNegate (Float64Value v) = Float64Value (-v)
+
+primNegate :: PrimValue -> PrimValue
+primNegate (FloatValue v) = FloatValue $ floatNegate v
+primNegate (SignedValue v) = SignedValue $ intNegate v
+primNegate (UnsignedValue v) = UnsignedValue $ intNegate v
+primNegate (BoolValue v) = BoolValue $ not v
 
 readLine :: ParserMonad (Maybe T.Text)
 readLine = lift $ lift $ lift readLineFromMonad
