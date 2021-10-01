@@ -20,6 +20,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+* `futhark_context_config_set_profiling` was missing for the `c` backend.
+
 ## [0.20.3]
 
 ### Added

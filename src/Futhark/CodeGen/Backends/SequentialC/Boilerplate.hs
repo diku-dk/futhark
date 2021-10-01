@@ -38,6 +38,13 @@ generateBoilerplate = do
                         }|]
     )
 
+  GC.publicDef_ "context_config_set_profiling" GC.InitDecl $ \s ->
+    ( [C.cedecl|void $id:s(struct $id:cfg* cfg, int flag);|],
+      [C.cedecl|void $id:s(struct $id:cfg* cfg, int flag) {
+                         (void)cfg; (void)flag;
+                       }|]
+    )
+
   GC.publicDef_ "context_config_set_logging" GC.InitDecl $ \s ->
     ( [C.cedecl|void $id:s(struct $id:cfg* cfg, int flag);|],
       [C.cedecl|void $id:s(struct $id:cfg* cfg, int detail) {
