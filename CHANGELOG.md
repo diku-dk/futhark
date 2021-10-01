@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
-* Tuning parameters now (officially) exposes in the C API.
+* Tuning parameters now (officially) exposed in the C API.
 
 * `futhark autotune` is now 2-3x faster on many programs, as it now
   keeps the process running.
