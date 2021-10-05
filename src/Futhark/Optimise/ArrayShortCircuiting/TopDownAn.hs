@@ -11,7 +11,7 @@ module Futhark.Optimise.ArrayShortCircuiting.TopDownAn
     getDirAliasedIxfn,
     addInvAliassesVarTab,
     areAnyAliased,
-    safety2,
+    isInScope,
   )
 where
 
@@ -22,17 +22,17 @@ import Futhark.IR.Aliases
 --import qualified Futhark.IR.Mem.IxFun as IxFun
 
 import qualified Futhark.IR.Mem.IxFun as IxFun
-import qualified Futhark.IR.SeqMem as ExpMem
+import Futhark.IR.SeqMem
 import Futhark.Optimise.ArrayShortCircuiting.DataStructs
 
-type ScopeTab = Scope (Aliases ExpMem.SeqMem)
+type ScopeTab rep = Scope (Aliases rep)
 -- ^ maps array-variable names to various info, including
 --   types, memory block and index function, etc.
 
-type DirAlias = ExpMem.IxFun -> ExpMem.IxFun
+type DirAlias = IxFun -> IxFun
 -- ^ A direct aliasing transformation
 
-type InvAlias = Maybe (ExpMem.IxFun -> ExpMem.IxFun)
+type InvAlias = Maybe (IxFun -> IxFun)
 -- ^ An inverse aliasing transformation
 
 type RangeTab = M.Map VName (PrimExp VName, PrimExp VName)
@@ -41,11 +41,11 @@ type VarAliasTab = M.Map VName (VName, DirAlias, InvAlias)
 
 type MemAliasTab = M.Map VName Names
 
-data TopDnEnv = TopDnEnv
+data TopDnEnv rep = TopDnEnv
   { -- | contains the already allocated memory blocks
     alloc :: AllocTab,
     -- | variable info, including var-to-memblock assocs
-    scope :: ScopeTab,
+    scope :: ScopeTab rep,
     -- | the inherited inhibitions from the previous try
     inhibited :: InhibitTab,
     -- | table holding closed ranges for i64-integral scalars
@@ -61,8 +61,8 @@ data TopDnEnv = TopDnEnv
     m_alias :: MemAliasTab
   }
 
-safety2 :: TopDnEnv -> VName -> Bool
-safety2 td_env m =
+isInScope :: TopDnEnv rep -> VName -> Bool
+isInScope td_env m =
   m `M.member` scope td_env
 
 -- | Get alias and (direct) index function mapping from expression
@@ -70,24 +70,24 @@ safety2 td_env m =
 -- For instance, if the expression is a 'Rotate', returns the value being
 -- rotated as well as a function for rotating an index function the appropriate
 -- amount.
-getDirAliasFromExp :: Exp (Aliases ExpMem.SeqMem) -> Maybe (VName, DirAlias)
+getDirAliasFromExp :: Exp (Aliases rep) -> Maybe (VName, DirAlias)
 getDirAliasFromExp (BasicOp (SubExp (Var x))) = Just (x, id)
 getDirAliasFromExp (BasicOp (Opaque _ (Var x))) = Just (x, id)
 getDirAliasFromExp (BasicOp (Reshape shp_chg x)) =
-  Just (x, (`IxFun.reshape` map (fmap ExpMem.pe64) shp_chg))
+  Just (x, (`IxFun.reshape` map (fmap pe64) shp_chg))
 getDirAliasFromExp (BasicOp (Rearrange perm x)) =
   Just (x, (`IxFun.permute` perm))
 getDirAliasFromExp (BasicOp (Rotate rs x)) =
-  Just (x, (`IxFun.rotate` fmap ExpMem.pe64 rs))
+  Just (x, (`IxFun.rotate` fmap pe64 rs))
 getDirAliasFromExp (BasicOp (Index x slc)) =
-  Just (x, (`IxFun.slice` (Slice $ map (fmap ExpMem.pe64) $ unSlice slc)))
+  Just (x, (`IxFun.slice` (Slice $ map (fmap pe64) $ unSlice slc)))
 getDirAliasFromExp (BasicOp (Update _ x _ _elm)) = Just (x, id)
 getDirAliasFromExp (BasicOp (FlatIndex x (FlatSlice offset idxs))) =
   Just
     ( x,
       ( `IxFun.flatSlice`
-          ( FlatSlice (ExpMem.pe64 offset) $
-              map (fmap ExpMem.pe64) idxs
+          ( FlatSlice (pe64 offset) $
+              map (fmap pe64) idxs
           )
       )
     )
@@ -111,7 +111,7 @@ getDirAliasFromExp _ = Nothing
 --
 -- This function complements 'getDirAliasFromExp' by returning a function that
 -- applies the inverse index function transformation.
-getInvAliasFromExp :: Exp (Aliases ExpMem.SeqMem) -> InvAlias
+getInvAliasFromExp :: Exp (Aliases rep) -> InvAlias
 getInvAliasFromExp (BasicOp (SubExp (Var _))) = Just id
 getInvAliasFromExp (BasicOp (Opaque _ (Var _))) = Just id
 getInvAliasFromExp (BasicOp Update {}) = Just id
@@ -121,8 +121,8 @@ getInvAliasFromExp (BasicOp (Rearrange perm _)) =
 getInvAliasFromExp _ = Nothing
 
 -- | fills in the TopDnEnv table
-topdwnTravBinding :: TopDnEnv -> Stm (Aliases ExpMem.SeqMem) -> TopDnEnv
-topdwnTravBinding env stm@(Let (Pat [pe]) _ (Op (ExpMem.Alloc _ _))) =
+topdwnTravBinding :: Op rep ~ MemOp inner => TopDnEnv rep -> Stm (Aliases rep) -> TopDnEnv rep
+topdwnTravBinding env stm@(Let (Pat [pe]) _ (Op (Alloc _ _))) =
   env {alloc = alloc env <> oneName (patElemName pe), scope = scope env <> scopeOf stm}
 topdwnTravBinding env stm@(Let (Pat [pe]) _ e)
   | Just (x, ixfn) <- getDirAliasFromExp e =
@@ -136,7 +136,7 @@ topdwnTravBinding env stm =
   --       for compound statements such as if, do-loop, etc.
   env {scope = scope env <> scopeOf stm}
 
-topDownLoop :: TopDnEnv -> Stm (Aliases ExpMem.SeqMem) -> TopDnEnv
+topDownLoop :: TopDnEnv rep -> Stm (Aliases rep) -> TopDnEnv rep
 topDownLoop td_env (Let _pat _ (DoLoop arginis lform body)) =
   let scopetab =
         scope td_env
@@ -159,7 +159,7 @@ topDownLoop td_env (Let _pat _ (DoLoop arginis lform body)) =
     --
     -- This is perhaps not ideal for many reasons, so Philip is gonna figure it out.
     foldfun scopetab m_tab (p_el, (f_el, i_se), r_se)
-      | (ExpMem.MemArray _ptp _shp _u (ExpMem.ArrayIn m_p _p_ixfn)) <- snd (patElemDec p_el),
+      | (MemArray _ptp _shp _u (ArrayIn m_p _p_ixfn)) <- snd (patElemDec p_el),
         Var f0 <- i_se,
         Var r  <- r_se =
         let f = paramName f_el
@@ -193,16 +193,16 @@ topDownLoop _ _ =
   error "ArrayShortCircuiting.TopDownAn: function topDownLoop should only be called on Loops!"
 
 {--
-topDownIf :: TopDnEnv -> CoalsTab -> Stm (Aliases ExpMem.SeqMem) -> TopDnEnv
+topDownIf :: TopDnEnv -> CoalsTab -> Stm (Aliases SeqMem) -> TopDnEnv
 topDownIf td_env act_tab stm@(Let patt _ (If _ body_then body_else _)) =
   -- dummy implementation, please fill in
   td_env
 --}
 
 {--
-getTransitiveAlias :: M.Map VName (VName, ExpMem.IxFun -> ExpMem.IxFun) ->
-                      (M.Map VName Coalesced) -> VName -> (ExpMem.IxFun -> ExpMem.IxFun)
-                   -> Maybe ExpMem.IxFun
+getTransitiveAlias :: M.Map VName (VName, IxFun -> IxFun) ->
+                      (M.Map VName Coalesced) -> VName -> (IxFun -> IxFun)
+                   -> Maybe IxFun
 getTransitiveAlias _ vtab b ixfn
   | Just (Coalesced _ (MemBlock _ _ _ b_indfun) _) <- M.lookup b vtab =
     Just (ixfn b_indfun)
@@ -221,15 +221,14 @@ getTransitiveAlias _ _ _ _ = Nothing
 --}
 
 -- | Get direct aliased index function?
-getDirAliasedIxfn :: TopDnEnv -> CoalsTab -> VName -> Maybe (VName, VName, ExpMem.IxFun)
+getDirAliasedIxfn :: HasMemBlock (Aliases rep) => TopDnEnv rep -> CoalsTab -> VName -> Maybe (VName, VName, IxFun)
 getDirAliasedIxfn td_env coals_tab x =
   case getScopeMemInfo x (scope td_env) of
     Just (MemBlock _ _ m_x orig_ixfun) ->
       case M.lookup m_x coals_tab of
         Just coal_etry ->
-          case walkAliasTab (v_alias td_env) (vartab coal_etry) x of
-            Nothing -> error "Should not happen?"
-            Just (m, ixf) -> Just (m_x, m, ixf)
+          let (Coalesced _ (MemBlock _ _ m ixf) _) = walkAliasTab (v_alias td_env) (vartab coal_etry) x
+           in Just (m_x, m, ixf)
         Nothing ->
           -- This value is not subject to coalescing at the moment. Just return the
           -- original index function
@@ -241,15 +240,13 @@ walkAliasTab ::
   VarAliasTab ->
   M.Map VName Coalesced ->
   VName ->
-  Maybe (VName, ExpMem.IxFun)
+  Coalesced
 walkAliasTab _ vtab x
-  | Just (Coalesced _ (MemBlock _ _ new_mem new_ixfun) _subs) <- M.lookup x vtab =
-    Just (new_mem, new_ixfun) -- @x@ is in @vartab@ together with its new ixfun
+  | Just c <- M.lookup x vtab =
+    c -- @x@ is in @vartab@ together with its new ixfun
 walkAliasTab alias_tab vtab x
-  | Just (x0, alias0, _) <- M.lookup x alias_tab,
-    Just (m, ixfn0) <- walkAliasTab alias_tab vtab x0 =
-    -- x = alias0 x0, the new ixfun of @x0@ is recorded in @vartab@ as ixfn0
-    Just (m, alias0 ixfn0)
+  | Just (x0, alias0, _) <- M.lookup x alias_tab =
+    walkAliasTab alias_tab vtab x0
 walkAliasTab _ _ _ = error "impossible"
 
 -- | We assume @x@ is in @vartab@ and we add the variables that @x@ aliases
@@ -264,7 +261,8 @@ walkAliasTab _ _ _ = error "impossible"
 --     @vartab@, of course if their aliasing operations are invertible.
 --   We assume inverting aliases has been performed by the top-down pass.
 addInvAliassesVarTab ::
-  TopDnEnv ->
+  HasMemBlock (Aliases rep) =>
+  TopDnEnv rep ->
   M.Map VName Coalesced ->
   VName ->
   Maybe (M.Map VName Coalesced)
@@ -283,11 +281,11 @@ addInvAliassesVarTab td_env vtab x
                  in addInvAliassesVarTab td_env vartab' x0
 addInvAliassesVarTab _ _ _ = error "impossible"
 
-areAliased :: TopDnEnv -> VName -> VName -> Bool
+areAliased :: TopDnEnv rep -> VName -> VName -> Bool
 areAliased _ m_x m_y =
   -- this is a dummy implementation
   m_x == m_y
 
-areAnyAliased :: TopDnEnv -> VName -> [VName] -> Bool
+areAnyAliased :: TopDnEnv rep -> VName -> [VName] -> Bool
 areAnyAliased td_env m_x =
   any (areAliased td_env m_x)

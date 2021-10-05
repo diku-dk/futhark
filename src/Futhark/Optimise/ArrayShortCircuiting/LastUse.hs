@@ -15,7 +15,7 @@
 -- This pass is different from 'Futhark.Analysis.LastUse' in that memory blocks
 -- are used to alias arrays. For instance, an 'Update' will not result in a last
 -- use of the array being updated, because the result lives in the same memory.
-module Futhark.Optimise.ArrayShortCircuiting.LastUse (lastUseSeqMem, lastUsePrg) where
+module Futhark.Optimise.ArrayShortCircuiting.LastUse (lastUseSeqMem, lastUsePrg, lastUseGPUMem) where
 
 import Control.Monad.Reader
 import Control.Monad.State.Strict
@@ -23,7 +23,7 @@ import qualified Data.Map.Strict as M
 import Data.Maybe
 import Data.Sequence (Seq (..))
 import Futhark.IR.Aliases
-import Futhark.IR.Mem
+import Futhark.IR.GPUMem
 import Futhark.IR.SeqMem
 import Futhark.Optimise.ArrayShortCircuiting.DataStructs
 import Prelude
@@ -49,6 +49,15 @@ lastUseSeqMem (FunDef _ _ fname _ _ body) =
         runReader
           (evalStateT (lastUseBody body (mempty, mempty)) mempty)
           (LastUseReader lastUseSeqOp)
+   in (fname, res)
+
+-- | Perform last-use analysis on a 'FunDef'
+lastUseGPUMem :: FunDef (Aliases GPUMem) -> (Name, LUTabFun)
+lastUseGPUMem (FunDef _ _ fname _ _ body) =
+  let (res, _) =
+        runReader
+          (evalStateT (lastUseBody body (mempty, mempty)) mempty)
+          (LastUseReader lastUseGPUOp)
    in (fname, res)
 
 -- | Performing the last-use analysis on a body.
@@ -184,6 +193,13 @@ lastUseExp e used_nms = do
   let free_in_e = freeIn e
   (used_nms', lu_vars) <- lastUsedInNames used_nms free_in_e
   return (M.empty, lu_vars, used_nms')
+
+lastUseGPUOp :: Op (Aliases GPUMem) -> Names -> LastUseM GPUMem (LUTabFun, Names, Names)
+lastUseGPUOp (Alloc se sp) used_nms = do
+  let free_in_e = freeIn se <> freeIn sp
+  (used_nms', lu_vars) <- lastUsedInNames used_nms free_in_e
+  return (M.empty, lu_vars, used_nms')
+lastUseGPUOp _ _ = undefined
 
 lastUseSeqOp :: Op (Aliases SeqMem) -> Names -> LastUseM SeqMem (LUTabFun, Names, Names)
 lastUseSeqOp (Alloc se sp) used_nms = do

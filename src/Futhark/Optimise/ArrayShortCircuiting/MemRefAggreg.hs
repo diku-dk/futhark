@@ -19,8 +19,8 @@ import qualified Data.Set as S
 
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.IR.Aliases
+import Futhark.IR.Mem
 import qualified Futhark.IR.Mem.IxFun as IxFun
-import qualified Futhark.IR.SeqMem as ExpMem
 import Futhark.Optimise.ArrayShortCircuiting.DataStructs
 import Futhark.Optimise.ArrayShortCircuiting.TopDownAn
 import Prelude
@@ -36,7 +36,7 @@ import Prelude
 -- current scope?"
 freeVarSubstitutions ::
   FreeIn a =>
-  ScopeTab ->
+  ScopeTab rep ->
   ScalarTab ->
   a ->
   Maybe FreeVarSubsts
@@ -59,7 +59,7 @@ freeVarSubstitutions scope0 scals0 indfun =
     getSubstitution _v = Nothing
 
 -- | Translates free variables in an access summary
-translateAccessSummary :: ScopeTab -> ScalarTab -> AccessSummary -> AccessSummary
+translateAccessSummary :: ScopeTab rep -> ScalarTab -> AccessSummary -> AccessSummary
 translateAccessSummary _ _ Undeterminable = Undeterminable
 translateAccessSummary scope0 scals0 (Set slmads)
   | Just subs <- freeVarSubstitutions scope0 scals0 slmads =
@@ -70,12 +70,13 @@ translateAccessSummary _ _ _ = Undeterminable
 
 -- | This function computes the written and read memory references for the current statement
 getUseSumFromStm ::
-  TopDnEnv ->
+  (CanBeAliased inner, ASTRep rep, Op rep ~ MemOp inner, HasMemBlock (Aliases rep)) =>
+  TopDnEnv rep ->
   CoalsTab ->
-  Stm (Aliases ExpMem.SeqMem) ->
+  Stm (Aliases rep) ->
   -- | A pair of written and written+read memory locations, along with their
   -- associated array and the index function used.
-  ([(VName, VName, ExpMem.IxFun)], [(VName, VName, ExpMem.IxFun)])
+  ([(VName, VName, IxFun)], [(VName, VName, IxFun)])
 getUseSumFromStm td_env coal_tab (Let Pat {} _ (BasicOp (Index arr (Slice slc))))
   | Just (MemBlock _ shp _ _) <- getScopeMemInfo arr (scope td_env),
     length slc == length (shapeDims shp) && all isFix slc =
@@ -138,7 +139,7 @@ getUseSumFromStm td_env coal_tab (Let (Pat [x]) _ (BasicOp (FlatUpdate _ (FlatSl
           Nothing -> ([r1], [r1])
           Just r2 -> ([r1], [r1, r2])
 getUseSumFromStm _ _ (Let Pat {} _ BasicOp {}) = ([], [])
-getUseSumFromStm _ _ (Let Pat {} _ (Op (ExpMem.Alloc _ _))) = ([], [])
+getUseSumFromStm _ _ (Let Pat {} _ (Op (Alloc _ _))) = ([], [])
 getUseSumFromStm _ _ stm =
   -- if-then-else, loops are supposed to be treated separately,
   -- calls are not supported, and Ops are not yet supported
@@ -155,9 +156,10 @@ getUseSumFromStm _ _ stm =
 --            indices, and positive constants, such as loop counts. This
 --            should be computed on the top-down pass.
 recordMemRefUses ::
-  TopDnEnv ->
+  (CanBeAliased inner, ASTRep rep, Op rep ~ MemOp inner, HasMemBlock (Aliases rep)) =>
+  TopDnEnv rep ->
   BotUpEnv ->
-  Stm (Aliases ExpMem.SeqMem) ->
+  Stm (Aliases rep) ->
   (CoalsTab, InhibitTab)
 recordMemRefUses td_env bu_env stm =
   let active_tab = activeCoals bu_env
@@ -257,7 +259,7 @@ recordMemRefUses td_env bu_env stm =
 --  possible. Currently the implementations are dummy      --
 --  aiming to be useful only when one of the sets is empty.--
 -------------------------------------------------------------
-noMemOverlap :: TopDnEnv -> AccessSummary -> AccessSummary -> Bool
+noMemOverlap :: TopDnEnv rep -> AccessSummary -> AccessSummary -> Bool
 noMemOverlap _ _ (Set mr)
   | mr == mempty = True
 noMemOverlap _ (Set mr) _
@@ -278,10 +280,10 @@ noMemOverlap _ (Set is) (Set js) =
 --   The current implementation is good for while, but needs
 --     to be refined for @for i < n@ loops
 aggSummaryLoopTotal ::
-  ScopeTab ->
-  ScopeTab ->
+  ScopeTab rep ->
+  ScopeTab rep ->
   ScalarTab ->
-  Maybe (VName, (ExpMem.TPrimExp Int64 VName, ExpMem.TPrimExp Int64 VName)) ->
+  Maybe (VName, (TPrimExp Int64 VName, TPrimExp Int64 VName)) ->
   AccessSummary ->
   AccessSummary
 aggSummaryLoopTotal _ _ _ _ Undeterminable = Undeterminable
@@ -305,10 +307,10 @@ aggSummaryLoopTotal _ _ _ _ _ = Undeterminable
 --   The current implementation is naive in that it treats only
 --     the loop invariant case (same as function @aggSummaryLoopTotal@).
 aggSummaryLoopPartial ::
-  ScopeTab ->
-  ScopeTab ->
+  ScopeTab rep ->
+  ScopeTab rep ->
   ScalarTab ->
-  Maybe (VName, (ExpMem.TPrimExp Int64 VName, ExpMem.TPrimExp Int64 VName)) ->
+  Maybe (VName, (TPrimExp Int64 VName, TPrimExp Int64 VName)) ->
   AccessSummary ->
   AccessSummary
 aggSummaryLoopPartial = aggSummaryLoopTotal

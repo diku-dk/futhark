@@ -1,4 +1,5 @@
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeFamilies #-}
 
@@ -9,6 +10,8 @@ module Futhark.Optimise.ArrayShortCircuiting.DataStructs
     AllocTab,
     AliasTab,
     LUTabFun,
+    CreatesNewArrOp,
+    HasMemBlock,
     LUTabPrg,
     ScalarTab,
     CoalsTab,
@@ -35,13 +38,14 @@ import Data.Maybe
 import qualified Data.Set as S
 import Debug.Trace
 import Futhark.IR.Aliases
+import Futhark.IR.GPUMem
 import qualified Futhark.IR.Mem.IxFun as IxFun
-import qualified Futhark.IR.SeqMem as ExpMem
+import Futhark.IR.SeqMem
 import Futhark.Util.Pretty hiding (float, line, sep, string, (</>), (<|>))
 import Prelude
 
 -- | An LMAD specialized to TPrimExps (a typed primexp)
-type LmadRef = IxFun.LMAD (ExpMem.TPrimExp Int64 VName)
+type LmadRef = IxFun.LMAD (TPrimExp Int64 VName)
 
 -- | Summary of all memory accesses at a given point in the code
 data AccessSummary
@@ -87,10 +91,10 @@ data CoalescedKind
     TransitiveCoal
 
 -- | Information about a memory block: type, shape, name and ixfun.
-data ArrayMemBound = MemBlock PrimType Shape VName ExpMem.IxFun
+data ArrayMemBound = MemBlock PrimType Shape VName IxFun
 
 -- | Free variable substitutions
-type FreeVarSubsts = M.Map VName (ExpMem.TPrimExp Int64 VName)
+type FreeVarSubsts = M.Map VName (TPrimExp Int64 VName)
 
 -- | Coalesced Access Entry
 data Coalesced
@@ -99,7 +103,7 @@ data Coalesced
       -- ^ the kind of coalescing
       ArrayMemBound
       -- ^ destination mem_block info @f_m_x[i]@ (must be ArrayMem)
-      -- (Maybe ExpMem.IxFun) -- the inverse ixfun of a coalesced array, such that
+      -- (Maybe IxFun) -- the inverse ixfun of a coalesced array, such that
       --                     --  ixfuns can be correctly constructed for aliases;
       FreeVarSubsts
       -- ^ substitutions for free vars in index function
@@ -108,7 +112,7 @@ data CoalsEntry = CoalsEntry
   { -- | destination memory block
     dstmem :: VName,
     -- | index function of the destination (used for rebasing)
-    dstind :: ExpMem.IxFun,
+    dstind :: IxFun,
     -- | aliased destination memory blocks can appear
     --   due to repeated (optimistic) coalescing.
     alsmem :: Names,
@@ -152,7 +156,7 @@ type LUTabFun = M.Map VName Names
 type LUTabPrg = M.Map Name LUTabFun
 -- ^ maps function names to last-use tables
 
-type ScalarTab = M.Map VName (ExpMem.PrimExp VName)
+type ScalarTab = M.Map VName (PrimExp VName)
 -- ^ maps a variable name to its PrimExp scalar expression
 
 type CoalsTab = M.Map VName CoalsEntry
@@ -226,68 +230,90 @@ unionCoalsEntry etry1 (CoalsEntry dstmem2 dstind2 alsmem2 vartab2 optdeps2 memre
 
 -- | Get the names of array 'PatElem's in a 'Pat' and the corresponding
 -- 'ArrayMemBound' information for each array.
-getArrMemAssoc :: Pat (Aliases ExpMem.SeqMem) -> [(VName, ArrayMemBound)]
+getArrMemAssoc :: PatT (aliases, LetDecMem) -> [(VName, ArrayMemBound)]
 getArrMemAssoc pat =
   mapMaybe
     ( \patel -> case snd $ patElemDec patel of
-        (ExpMem.MemArray tp shp _ (ExpMem.ArrayIn mem_nm indfun)) ->
+        (MemArray tp shp _ (ArrayIn mem_nm indfun)) ->
           Just (patElemName patel, MemBlock tp shp mem_nm indfun)
-        ExpMem.MemMem _ -> Nothing
-        ExpMem.MemPrim _ -> Nothing
-        ExpMem.MemAcc {} -> Nothing
+        MemMem _ -> Nothing
+        MemPrim _ -> Nothing
+        MemAcc {} -> Nothing
     )
     $ patElems pat
 
 -- | Get the names of arrays in a list of 'FParam' and the corresponding
 -- 'ArrayMemBound' information for each array.
-getArrMemAssocFParam :: [FParam (Aliases ExpMem.SeqMem)] -> [(VName, ArrayMemBound)]
+getArrMemAssocFParam :: [Param FParamMem] -> [(VName, ArrayMemBound)]
 getArrMemAssocFParam =
   mapMaybe
     ( \param -> case paramDec param of
-        (ExpMem.MemArray tp shp _ (ExpMem.ArrayIn mem_nm indfun)) ->
+        (MemArray tp shp _ (ArrayIn mem_nm indfun)) ->
           Just (paramName param, MemBlock tp shp mem_nm indfun)
-        ExpMem.MemMem _ -> Nothing
-        ExpMem.MemPrim _ -> Nothing
-        ExpMem.MemAcc {} -> Nothing
+        MemMem _ -> Nothing
+        MemPrim _ -> Nothing
+        MemAcc {} -> Nothing
     )
 
 -- | Get memory blocks in a list of 'FParam' that are used for unique arrays in
 -- the same list of 'FParam'.
-getUniqueMemFParam :: [FParam (Aliases ExpMem.SeqMem)] -> M.Map VName Space
+getUniqueMemFParam :: [Param FParamMem] -> M.Map VName Space
 getUniqueMemFParam params =
   let mems = M.fromList $ mapMaybe justMem params
       arrayMems = S.fromList $ mapMaybe (justArrayMem . paramDec) params
    in mems `M.restrictKeys` arrayMems
   where
-    justMem (Param nm (ExpMem.MemMem sp)) = Just (nm, sp)
+    justMem (Param nm (MemMem sp)) = Just (nm, sp)
     justMem _ = Nothing
-    justArrayMem (ExpMem.MemArray _ _ Unique (ExpMem.ArrayIn mem_nm _)) = Just mem_nm
+    justArrayMem (MemArray _ _ Unique (ArrayIn mem_nm _)) = Just mem_nm
     justArrayMem _ = Nothing
 
--- | Looks up 'VName' in the given scope. If it is a 'ExpMem.MemArray', return the
--- 'ArrayMemBound' information for the array.
-getScopeMemInfo ::
-  VName ->
-  Scope (Aliases ExpMem.SeqMem) ->
-  Maybe ArrayMemBound
-getScopeMemInfo r scope_env0 =
-  case M.lookup r scope_env0 of
-    Just (LetName (_, ExpMem.MemArray tp shp _ (ExpMem.ArrayIn m idx))) -> Just (MemBlock tp shp m idx)
-    Just (FParamName (ExpMem.MemArray tp shp _ (ExpMem.ArrayIn m idx))) -> Just (MemBlock tp shp m idx)
-    Just (LParamName (ExpMem.MemArray tp shp _ (ExpMem.ArrayIn m idx))) -> Just (MemBlock tp shp m idx)
-    _ -> Nothing
+class HasMemBlock rep where
+  -- | Looks up 'VName' in the given scope. If it is a 'MemArray', return the
+  -- 'ArrayMemBound' information for the array.
+  getScopeMemInfo :: VName -> Scope rep -> Maybe ArrayMemBound
+
+instance HasMemBlock (Aliases SeqMem) where
+  getScopeMemInfo r scope_env0 =
+    case M.lookup r scope_env0 of
+      Just (LetName (_, MemArray tp shp _ (ArrayIn m idx))) -> Just (MemBlock tp shp m idx)
+      Just (FParamName (MemArray tp shp _ (ArrayIn m idx))) -> Just (MemBlock tp shp m idx)
+      Just (LParamName (MemArray tp shp _ (ArrayIn m idx))) -> Just (MemBlock tp shp m idx)
+      _ -> Nothing
+
+instance HasMemBlock (Aliases GPUMem) where
+  getScopeMemInfo r scope_env0 =
+    case M.lookup r scope_env0 of
+      Just (LetName (_, MemArray tp shp _ (ArrayIn m idx))) -> Just (MemBlock tp shp m idx)
+      Just (FParamName (MemArray tp shp _ (ArrayIn m idx))) -> Just (MemBlock tp shp m idx)
+      Just (LParamName (MemArray tp shp _ (ArrayIn m idx))) -> Just (MemBlock tp shp m idx)
+      _ -> Nothing
 
 -- | @True@ if the expression returns a "fresh" array.
-createsNewArrOK :: Exp (Aliases ExpMem.SeqMem) -> Bool
+createsNewArrOK :: CreatesNewArrOp (Op rep) => Exp rep -> Bool
 createsNewArrOK (BasicOp Replicate {}) = True
 createsNewArrOK (BasicOp Iota {}) = True
 createsNewArrOK (BasicOp Manifest {}) = True
-createsNewArrOK (BasicOp ExpMem.Copy {}) = True
+createsNewArrOK (BasicOp Copy {}) = True
 createsNewArrOK (BasicOp Concat {}) = True
 createsNewArrOK (BasicOp ArrayLit {}) = True
 createsNewArrOK (BasicOp Scratch {}) = True
-createsNewArrOK (Op _) = True
+createsNewArrOK (Op op) = createsNewArrOp op
 createsNewArrOK _ = False
+
+class CreatesNewArrOp rep where
+  createsNewArrOp :: rep -> Bool
+
+instance CreatesNewArrOp () where
+  createsNewArrOp () = False
+
+instance CreatesNewArrOp inner => CreatesNewArrOp (MemOp inner) where
+  createsNewArrOp (Alloc _ _) = True
+  createsNewArrOp (Inner inner) = createsNewArrOp inner
+
+instance CreatesNewArrOp inner => CreatesNewArrOp (HostOp (Aliases GPUMem) inner) where
+  createsNewArrOp (OtherOp op) = createsNewArrOp op
+  createsNewArrOp _ = False
 
 -- | Memory-block removal from active-coalescing table
 --   should only be handled via this function, it is easy
