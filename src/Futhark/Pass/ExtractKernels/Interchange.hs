@@ -205,8 +205,7 @@ interchangeWithAcc1
       auxing map_aux . fmap subExpsRes . letTupExp' "withacc_inter" $
         Op $ Screma w (iota_w : map paramName acc_params ++ arrs) (mapSOAC maplam)
     let pat = Pat $ rearrangeShape perm $ patElems map_pat
-        perm' = [0 .. patSize pat -1]
-    pure $ WithAccStm perm' pat inputs' acc_lam'
+    pure $ WithAccStm perm pat inputs' acc_lam'
     where
       newAccLamParams ps = do
         let (cert_ps, acc_ps) = splitAt (length ps `div` 2) ps
