@@ -10,6 +10,7 @@
 -- the interface from 'Pretty'.
 module Futhark.IR.Pretty
   ( prettyTuple,
+    prettyTupleLines,
     pretty,
     PrettyRep (..),
     ppTuple',
@@ -305,7 +306,7 @@ instance PrettyRep rep => Pretty (Lambda rep) where
   ppr (Lambda [] (Body _ stms []) []) | stms == mempty = text "nilFn"
   ppr (Lambda params body rettype) =
     text "\\" <+> ppTuple' params
-      <+/> colon <+> ppTuple' rettype <+> text "->"
+      <+/> colon <+> ppTupleLines' rettype <+> text "->"
       </> indent 2 (ppr body)
 
 instance Pretty EntryPointType where
@@ -351,3 +352,7 @@ instance Pretty d => Pretty (DimIndex d) where
 -- | Like 'prettyTuple', but produces a 'Doc'.
 ppTuple' :: Pretty a => [a] -> Doc
 ppTuple' ets = braces $ commasep $ map (align . ppr) ets
+
+-- | Like 'prettyTupleLines', but produces a 'Doc'.
+ppTupleLines' :: Pretty a => [a] -> Doc
+ppTupleLines' ets = braces $ stack $ punctuate comma $ map (align . ppr) ets

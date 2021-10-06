@@ -122,7 +122,7 @@ instance Checkable rep => Show (ErrorCase rep) where
   show (InvalidPatError pat t desc) =
     "Pat\n" ++ pretty pat
       ++ "\ncannot match value of type\n"
-      ++ prettyTuple t
+      ++ prettyTupleLines t
       ++ end
     where
       end = case desc of
