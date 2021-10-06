@@ -31,7 +31,7 @@ Context creation is parameterised by a configuration object.  Any
 changes to the configuration must be made *before* calling
 :c:func:`futhark_context_new`.  A configuration object must not be
 freed before any context objects for which it is used.  The same
-configuration may be used for multiple concurrent contexts.
+configuration may *not* be used for multiple concurrent contexts.
 
 .. c:struct:: futhark_context_config
 
@@ -65,6 +65,34 @@ configuration may be used for multiple concurrent contexts.
 
    With a nonzero flag, print a running log to standard error of what
    the program is doing.
+
+.. c:function:: int futhark_context_config_set_tuning_param(struct futhark_context_config *cfg, const char *param_name, size_t new_value)
+
+   Set the value of a tuning parameter.  Returns zero on success, and
+   non-zero if the parameter cannot be set.  This is usually because a
+   parameter of the given name does not exist.  See
+   :c:func:`futhark_get_tuning_param_count` and
+   :c:func:`futhark_get_tuning_param_name` for how to query which
+   parameters are available.  Most of the tuning parameters are
+   applied only when the context is created, but some may be changed
+   even after the context is active.  At the moment, only parameters
+   of class "threshold" may change after the context has been created.
+   Use :c:func:`futhark_get_tuning_param_class` to determine the class
+   of a tuning parameter.
+
+.. c:function:: int futhark_get_tuning_param_count(void)
+
+   Return the number of available tuning parameters.  Useful for
+   knowing how to call :c:func:`futhark_get_tuning_param_name` and
+   :c:func:`futhark_get_tuning_param_class`.
+
+.. c:function:: const char* futhark_get_tuning_param_name(int i)
+
+   Return the name of tuning parameter *i*, counting from zero.
+
+.. c:function:: const char* futhark_get_tuning_param_class(int i)
+
+   Return the class of tuning parameter *i*, counting from zero.
 
 Context
 -------
@@ -474,3 +502,46 @@ Violation the restrictions of consumption (see :ref:`api-consumption`)
 can result in undefined behaviour.  This does not matter for programs
 whose entry points do not have unique parameter types
 (:ref:`in-place-updates`).
+
+.. _manifest:
+
+Manifest
+--------
+
+The C backends generate a machine-readable *manifest* in JSON format
+that describes the API of the compiled Futhark program.  Specifically,
+the manifest contains:
+
+* A mapping from the name of each entry point to:
+
+  * The C function name of the entry point.
+
+  * A list of all *inputs*, including their type and whether they are
+    *unique* (consuming).
+
+  * A list of all *outputs*, including their type and whether they are
+    *unique*.
+
+* A mapping from the name of each non-scalar types to:
+
+  * The C type of used to represent type type (which is practice
+    always a pointer of some kind).
+
+  * For arrays, the element type and rank.
+
+  * A mapping from names of *operations* to the name of the C function
+    that implements that operation for the type.  The type of the C
+    functions are as documented above.  The following operations are
+    listed:
+
+    * For arrays: ``free``, ``shape``, ``values``, ``new``.
+
+    * For opaques: ``free``, ``store``, ``restore``.
+
+Manifests are defined by the following JSON Schema:
+
+.. include:: manifest.schema.json
+   :code: json
+
+It is likely that we will add more fields in the future, but it is
+unlikely that we will remove any.

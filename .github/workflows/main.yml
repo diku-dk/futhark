@@ -238,6 +238,11 @@ jobs:
     steps:
     - uses: actions/checkout@v2
 
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y python3-jsonschema
+
     - uses: actions/download-artifact@v2
       with:
         name: futhark-nightly-linux-x86_64.tar.xz
@@ -259,6 +264,11 @@ jobs:
 
     steps:
     - uses: actions/checkout@v2
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y python3-jsonschema
 
     - uses: actions/download-artifact@v2
       with:
@@ -310,7 +320,7 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y opencl-headers nvidia-cuda-dev nvidia-opencl-dev oclgrind
+        sudo apt-get install -y opencl-headers nvidia-cuda-dev nvidia-opencl-dev oclgrind python3-jsonschema
 
     - uses: actions/download-artifact@v2
       with:
@@ -323,7 +333,7 @@ jobs:
         echo "$HOME/.local/bin" >> $GITHUB_PATH
 
     - run: |
-        futhark test -c --no-terminal --backend=opencl --exclude=no_opencl --exclude=compiled --runner=tools/oclgrindrunner.sh tests examples
+        futhark test -c --no-terminal --backend=opencl --exclude=compiled --runner=tools/oclgrindrunner.sh tests examples
 
   test-pyopencl:
     runs-on: ubuntu-20.04
@@ -349,7 +359,7 @@ jobs:
         echo "$HOME/.local/bin" >> $GITHUB_PATH
 
     - run: |
-        futhark test -c --no-terminal --backend=pyopencl --exclude=no_opencl --exclude=compiled --runner=tools/oclgrindrunner.sh tests examples
+        futhark test -c --no-terminal --backend=pyopencl --exclude=compiled --runner=tools/oclgrindrunner.sh tests examples
 
   test-cuda:
     runs-on: ubuntu-20.04
@@ -374,7 +384,7 @@ jobs:
         echo "$HOME/.local/bin" >> $GITHUB_PATH
 
     - run: |
-        futhark test -C --no-terminal --backend=cuda --exclude=no_opencl tests examples
+        futhark test -C --no-terminal --backend=cuda tests examples
 
   test-wasm:
     runs-on: ubuntu-20.04
@@ -544,7 +554,7 @@ jobs:
         echo "$HOME/.local/bin" >> $GITHUB_PATH
 
     - run: |
-        futhark test -C --no-terminal --backend=opencl --exclude=no_opencl  --pass-compiler-option=--Werror futhark-benchmarks
+        futhark test -C --no-terminal --backend=opencl  --pass-compiler-option=--Werror futhark-benchmarks
 
   deploy-nightly:
     runs-on: ubuntu-20.04

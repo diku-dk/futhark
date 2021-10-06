@@ -140,13 +140,13 @@ compileProg mode class_name prog = do
                 [Assign (Var "default_reg_tile_size") $ Var "optarg"]
             },
           Option
-            { optionLongName = "size",
+            { optionLongName = "param",
               optionShortName = Nothing,
-              optionArgument = RequiredArgument "size_assignment",
+              optionArgument = RequiredArgument "param_assignment",
               optionAction =
                 [ Assign
                     ( Index
-                        (Var "sizes")
+                        (Var "params")
                         ( IdxExp
                             ( Index
                                 (Var "optarg")

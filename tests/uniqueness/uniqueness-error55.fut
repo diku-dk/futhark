@@ -1,5 +1,5 @@
 -- ==
--- error: iota.*previously consumed
+-- error: iota.*consumed
 
 let main n =
   let (a,b) = let y = iota n

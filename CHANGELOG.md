@@ -9,11 +9,40 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+* Tuning parameters now (officially) exposed in the C API.
+
+* `futhark autotune` is now 2-3x faster on many programs, as it now
+  keeps the process running.
+
+* Negative numeric literals are now allowed in `case` patterns.
+
 ### Removed
 
 ### Changed
 
 ### Fixed
+
+* `futhark_context_config_set_profiling` was missing for the `c` backend.
+
+## [0.20.3]
+
+### Added
+
+* Executables produced by C backends now take a `--no-print-result` option.
+
+* The C backends now generate a manifest when compiling with
+  `--library`.  This can be used by FFI generators (#1465).
+
+* The beginnings of a Rust-style error index.
+
+* `scan` on newer CUDA devices is now much faster.
+
+### Fixed
+
+* Unique opaque types are named properly in entry points.
+
+* The CUDA backend in library mode no longer `exit()`s the process if
+  NVRTC initialisation fails.
 
 ## [0.20.2]
 

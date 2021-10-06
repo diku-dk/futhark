@@ -109,6 +109,7 @@ library
       Futhark.CodeGen.Backends.COpenCL.Boilerplate
       Futhark.CodeGen.Backends.GenericC
       Futhark.CodeGen.Backends.GenericC.CLI
+      Futhark.CodeGen.Backends.GenericC.Manifest
       Futhark.CodeGen.Backends.GenericC.Options
       Futhark.CodeGen.Backends.GenericC.Server
       Futhark.CodeGen.Backends.GenericPython
@@ -224,8 +225,8 @@ library
       Futhark.Optimise.InPlaceLowering.LowerIntoStm
       Futhark.Optimise.InPlaceLowering.SubstituteIndices
       Futhark.Optimise.InliningDeadFun
-      Futhark.Optimise.ReuseAllocations
-      Futhark.Optimise.ReuseAllocations.GreedyColoring
+      Futhark.Optimise.MemoryBlockMerging
+      Futhark.Optimise.MemoryBlockMerging.GreedyColoring
       Futhark.Optimise.Simplify
       Futhark.Optimise.Simplify.Engine
       Futhark.Optimise.Simplify.Rep
@@ -335,7 +336,7 @@ library
     , filepath >=1.4.1.1
     , free >=4.12.4
     , futhark-data >= 1.0.2.0
-    , futhark-server >= 1.1.0.0
+    , futhark-server >= 1.1.1.0
     , githash >=0.1.6.1
     , half >= 0.3
     , haskeline
@@ -346,7 +347,7 @@ library
     , mtl >=2.2.1
     , neat-interpolation >=0.3
     , parallel >=3.2.1.0
-    , pcg-random >= 0.1
+    , random >= 1.2.0
     , process >=1.4.3.0
     , process-extras >=0.7.2
     , regex-tdfa >=1.2
@@ -393,7 +394,7 @@ test-suite unit
       Futhark.IR.PrimitiveTests
       Language.Futhark.CoreTests
       Language.Futhark.SyntaxTests
-      Futhark.Optimise.ReuseAllocations.GreedyColoringTests
+      Futhark.Optimise.MemoryBlockMerging.GreedyColoringTests
       Paths_futhark
   hs-source-dirs:
       unittests
