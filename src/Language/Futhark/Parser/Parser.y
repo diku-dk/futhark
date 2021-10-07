@@ -389,7 +389,7 @@ BindingId :: { (Name, SrcLoc) }
 Val    :: { ValBindBase NoInfo Name }
 Val     : let BindingId TypeParams FunParams maybeAscription(TypeExpDecl) '=' Exp
           { let (name, _) = $2
-            in ValBind (if name==defaultEntryPoint then Just NoInfo else Nothing) name (fmap declaredType $5) NoInfo
+            in ValBind Nothing name (fmap declaredType $5) NoInfo
                $3 $4 $7 Nothing mempty (srcspan $1 $>)
           }
 
