@@ -26,6 +26,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Correct handling of nested entry points (#1478).
 
+* Incorrect type information recorded when doing in-place lowering (#1481).
+
 ## [0.20.3]
 
 ### Added
