@@ -169,3 +169,28 @@ could merely change the order of statements, such that ``b`` is bound
 first, meaning that the size is available by the time ``a`` is bound.
 In many other cases, we can lift out the "size-producing" expressions
 into a separate ``let``-binding preceding the problematic expressions.
+
+Other errors
+------------
+
+.. _nested-entry:
+
+"Entry points may not be declared inside modules."
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+This occurs when the program uses the ``entry`` keyword inside a
+module::
+
+  module m = {
+    entry f x = x + 1
+  }
+
+Entry points can only be declared at the top level of a file.  When we
+wish to make a function from inside a module available as an entry
+point, we must define a wrapper function::
+
+  module m = {
+    let f x = x + 1
+  }
+
+  entry f = m.f

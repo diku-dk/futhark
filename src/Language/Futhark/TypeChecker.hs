@@ -629,7 +629,8 @@ checkValBind :: ValBindBase NoInfo Name -> TypeM (Env, ValBind)
 checkValBind (ValBind entry fname maybe_tdecl NoInfo tparams params body doc attrs loc) = do
   top_level <- atTopLevel
   when (not top_level && isJust entry) $
-    typeError loc mempty "Entry points may not be declared inside modules."
+    typeError loc mempty $
+      withIndexLink "nested-entry" "Entry points may not be declared inside modules."
 
   (fname', tparams', params', maybe_tdecl', rettype, retext, body') <-
     checkFunDef (fname, maybe_tdecl, tparams, params, body, loc)

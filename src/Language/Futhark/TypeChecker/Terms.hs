@@ -32,7 +32,6 @@ import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import qualified Data.Set as S
-import qualified Data.Version as Version
 import Futhark.IR.Primitive (intByteSize)
 import Futhark.Util (nubOrd)
 import Futhark.Util.Pretty hiding (bool, group, space)
@@ -45,7 +44,6 @@ import qualified Language.Futhark.TypeChecker.Monad as TypeM
 import Language.Futhark.TypeChecker.Types hiding (checkTypeDecl)
 import qualified Language.Futhark.TypeChecker.Types as Types
 import Language.Futhark.TypeChecker.Unify hiding (Usage)
-import qualified Paths_futhark
 import Prelude hiding (mod)
 
 --- Uniqueness
@@ -693,23 +691,6 @@ newArrayType loc desc r = do
     )
 
 --- Errors
-
-errorIndexUrl :: Doc
-errorIndexUrl = version_url <> "error-index.html"
-  where
-    version = Paths_futhark.version
-    base_url = "https://futhark.readthedocs.io/en/"
-    version_url
-      | last (Version.versionBranch version) == 0 = base_url <> "latest/"
-      | otherwise = base_url <> "v" <> text (Version.showVersion version) <> "/"
-
-withIndexLink :: Doc -> Doc -> Doc
-withIndexLink href msg =
-  stack
-    [ msg,
-      "\nFor more information, see:",
-      indent 2 (ppr errorIndexUrl <> "#" <> href)
-    ]
 
 useAfterConsume :: VName -> SrcLoc -> SrcLoc -> TermTypeM a
 useAfterConsume name rloc wloc = do
