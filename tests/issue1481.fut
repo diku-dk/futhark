@@ -148,6 +148,6 @@ module mk_lt (F: field) = {
 module lts = mk_lt (mk_scalar_field f32)
 
 -- ==
--- input { 1i64 20i64 128i64 256i64 }
--- input { 8i64 20i64 128i64 256i64 }
+-- compiled input { 1i64 20i64 128i64 256i64 }
+-- compiled input { 8i64 20i64 128i64 256i64 }
 entry main (nxfm:i64) (lmax:i64) (nlat:i64) (nlon:i64) = lts.bench nxfm lmax nlat nlon
