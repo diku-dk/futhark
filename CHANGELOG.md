@@ -24,6 +24,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * `futhark_context_config_set_profiling` was missing for the `c` backend.
 
+* Correct handling of nested entry points (#1478).
+
 ## [0.20.3]
 
 ### Added

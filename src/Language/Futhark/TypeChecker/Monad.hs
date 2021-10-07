@@ -13,6 +13,8 @@ module Language.Futhark.TypeChecker.Monad
     runTypeM,
     askEnv,
     askImportName,
+    atTopLevel,
+    enteringModule,
     bindSpaced,
     qualifyTypeVars,
     lookupMTy,
@@ -131,7 +133,10 @@ type ImportTable = M.Map String Env
 data Context = Context
   { contextEnv :: Env,
     contextImportTable :: ImportTable,
-    contextImportName :: ImportName
+    contextImportName :: ImportName,
+    -- | Currently type-checking at the top level?  If false, we are
+    -- inside a module.
+    contextAtTopLevel :: Bool
   }
 
 data TypeState = TypeState
@@ -176,7 +181,7 @@ runTypeM ::
   TypeM a ->
   (Warnings, Either TypeError (a, VNameSource))
 runTypeM env imports fpath src (TypeM m) = do
-  let ctx = Context env imports fpath
+  let ctx = Context env imports fpath True
       s = TypeState src mempty
   case runExcept $ runStateT (runReaderT m ctx) s of
     Left (ws, e) -> (ws, Left e)
@@ -189,6 +194,15 @@ askEnv = asks contextEnv
 -- | The name of the current file/import.
 askImportName :: TypeM ImportName
 askImportName = asks contextImportName
+
+-- | Are we type-checking at the top level, or are we inside a nested
+-- module?
+atTopLevel :: TypeM Bool
+atTopLevel = asks contextAtTopLevel
+
+-- | We are now going to type-check the body of a module.
+enteringModule :: TypeM a -> TypeM a
+enteringModule = local $ \ctx -> ctx {contextAtTopLevel = False}
 
 -- | Look up a module type.
 lookupMTy :: SrcLoc -> QualName Name -> TypeM (QualName VName, MTy)
@@ -463,11 +477,11 @@ intrinsicsNameMap = M.fromList $ map mapping $ M.toList intrinsics
 
 -- | The names that are available in the initial environment.
 topLevelNameMap :: NameMap
-topLevelNameMap = M.filterWithKey (\k _ -> atTopLevel k) intrinsicsNameMap
+topLevelNameMap = M.filterWithKey (\k _ -> available k) intrinsicsNameMap
   where
-    atTopLevel :: (Namespace, Name) -> Bool
-    atTopLevel (Type, _) = True
-    atTopLevel (Term, v) = v `S.member` (type_names <> binop_names <> fun_names)
+    available :: (Namespace, Name) -> Bool
+    available (Type, _) = True
+    available (Term, v) = v `S.member` (type_names <> binop_names <> fun_names)
       where
         type_names = S.fromList $ map (nameFromString . pretty) anyPrimType
         binop_names =
@@ -476,4 +490,4 @@ topLevelNameMap = M.filterWithKey (\k _ -> atTopLevel k) intrinsicsNameMap
               (nameFromString . pretty)
               [minBound .. (maxBound :: BinOp)]
         fun_names = S.fromList $ map nameFromString ["shape"]
-    atTopLevel _ = False
+    available _ = False
