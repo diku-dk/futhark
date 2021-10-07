@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
-## [0.21.0]
+## [0.20.4]
 
 ### Added
 
@@ -15,10 +15,6 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   keeps the process running.
 
 * Negative numeric literals are now allowed in `case` patterns.
-
-### Removed
-
-### Changed
 
 ### Fixed
 
