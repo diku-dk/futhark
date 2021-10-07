@@ -21,6 +21,7 @@ module Language.Futhark.TypeChecker.Monad
     lookupImport,
     localEnv,
     TypeError (..),
+    withIndexLink,
     unappliedFunctor,
     unknownVariable,
     unknownType,
@@ -60,6 +61,7 @@ import Data.List (find, isPrefixOf)
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import qualified Data.Set as S
+import qualified Data.Version as Version
 import Futhark.FreshNames hiding (newName)
 import qualified Futhark.FreshNames
 import Futhark.Util.Console
@@ -67,6 +69,7 @@ import Futhark.Util.Pretty hiding (space)
 import Language.Futhark
 import Language.Futhark.Semantic
 import Language.Futhark.Warnings
+import qualified Paths_futhark
 import Prelude hiding (mapM, mod)
 
 -- | A note with extra information regarding a type error.
@@ -93,6 +96,24 @@ instance Pretty TypeError where
   ppr (TypeError loc notes msg) =
     text (inRed $ "Error at " <> locStr loc <> ":")
       </> msg <> ppr notes
+
+errorIndexUrl :: Doc
+errorIndexUrl = version_url <> "error-index.html"
+  where
+    version = Paths_futhark.version
+    base_url = "https://futhark.readthedocs.io/en/"
+    version_url
+      | last (Version.versionBranch version) == 0 = base_url <> "latest/"
+      | otherwise = base_url <> "v" <> text (Version.showVersion version) <> "/"
+
+-- | Attach a reference to documentation explaining the error in more detail.
+withIndexLink :: Doc -> Doc -> Doc
+withIndexLink href msg =
+  stack
+    [ msg,
+      "\nFor more information, see:",
+      indent 2 (ppr errorIndexUrl <> "#" <> href)
+    ]
 
 -- | An unexpected functor appeared!
 unappliedFunctor :: MonadTypeChecker m => SrcLoc -> m a
