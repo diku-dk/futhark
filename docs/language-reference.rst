@@ -453,7 +453,7 @@ literals and variables, but also more complicated forms.
         : | `id`
    size : "[" `id` "]"
    pat:   `id`
-      : | `literal`
+      : | `pat_literal`
       : |  "_"
       : | "(" ")"
       : | "(" `pat` ")"
@@ -462,6 +462,11 @@ literals and variables, but also more complicated forms.
       : | "{" `fieldid` ["=" `pat`] ("," `fieldid` ["=" `pat`])* "}"
       : | `constructor` `pat`*
       : | `pat` ":" `type`
+   pat_literal: [ "-" ] `intnumber`
+              | [ "-" ] `floatnumber`
+              | `charlit`
+              | "true"
+              | "false"
    loopform :   "for" `id` "<" `exp`
             : | "for" `pat` "in" `exp`
             : | "while" `exp`
@@ -1182,6 +1187,8 @@ necessary when writing more complicated size functions::
 Only expression-level type annotations give rise to run-time checks.
 Despite their similar syntax, parameter and return type annotations
 must be valid at compile-time, or type checking will fail.
+
+.. _causality:
 
 Causality restriction
 ~~~~~~~~~~~~~~~~~~~~~

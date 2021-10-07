@@ -178,7 +178,7 @@ data PrimType
   = IntType IntType
   | FloatType FloatType
   | Bool
-  | -- | An informationless type - still takes up space!
+  | -- | An informationless type - An array of this type takes up no space.
     Unit
   deriving (Eq, Ord, Show)
 

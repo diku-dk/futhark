@@ -107,7 +107,7 @@ combineOccurences name (Consumed wloc) (Observed rloc) =
 combineOccurences name (Observed rloc) (Consumed wloc) =
   useAfterConsume name rloc wloc
 combineOccurences name (Consumed loc1) (Consumed loc2) =
-  consumeAfterConsume name (max loc1 loc2) (min loc1 loc2)
+  useAfterConsume name (max loc1 loc2) (min loc1 loc2)
 
 checkOccurences :: Occurences -> TermTypeM ()
 checkOccurences = void . M.traverseWithKey comb . usageMap
@@ -714,16 +714,9 @@ withIndexLink href msg =
 useAfterConsume :: VName -> SrcLoc -> SrcLoc -> TermTypeM a
 useAfterConsume name rloc wloc = do
   name' <- describeVar rloc name
-  typeError rloc mempty $
+  typeError rloc mempty . withIndexLink "use-after-consume" $
     "Using" <+> name' <> ", but this was consumed at"
       <+> text (locStrRel rloc wloc) <> ".  (Possibly through aliasing.)"
-
-consumeAfterConsume :: VName -> SrcLoc -> SrcLoc -> TermTypeM a
-consumeAfterConsume name loc1 loc2 = do
-  name' <- describeVar loc1 name
-  typeError loc2 mempty $
-    "Consuming" <+> name' <> ", but this was previously consumed at"
-      <+> text (locStrRel loc2 loc1) <> "."
 
 badLetWithValue :: (Pretty arr, Pretty src) => arr -> src -> SrcLoc -> TermTypeM a
 badLetWithValue arre vale loc =
@@ -736,17 +729,17 @@ badLetWithValue arre vale loc =
 
 returnAliased :: Name -> Name -> SrcLoc -> TermTypeM ()
 returnAliased fname name loc =
-  typeError loc mempty $
-    "Unique return value of" <+> pquote (pprName fname)
+  typeError loc mempty . withIndexLink "return-aliased" $
+    "Unique-typed return value of" <+> pquote (pprName fname)
       <+> "is aliased to"
-      <+> pquote (pprName name) <> ", which is not consumed."
+      <+> pquote (pprName name) <> ", which is not consumable."
 
 uniqueReturnAliased :: Name -> SrcLoc -> TermTypeM a
 uniqueReturnAliased fname loc =
-  typeError loc mempty $
-    "A unique tuple element of return value of"
+  typeError loc mempty . withIndexLink "unique-return-aliased" $
+    "A unique-typed component of the return value of"
       <+> pquote (pprName fname)
-      <+> "is aliased to some other tuple component."
+      <+> "is aliased to some other component."
 
 unexpectedType :: MonadTypeChecker m => SrcLoc -> StructType -> [StructType] -> m a
 unexpectedType loc _ [] =
@@ -759,10 +752,15 @@ unexpectedType loc t ts =
       <+> commasep (map ppr ts) <> ", but is"
       <+> ppr t <> "."
 
-notUnique :: (MonadTypeChecker m, Pretty a) => SrcLoc -> a -> StructType -> m b
-notUnique loc v v_t =
-  typeError loc mempty . withIndexLink "not-unique" $
-    pquote (ppr v) <+> "has type" <+> ppr v_t <> ", which is not unique."
+notConsumable :: MonadTypeChecker m => SrcLoc -> Doc -> m b
+notConsumable loc v =
+  typeError loc mempty . withIndexLink "not-consumable" $
+    "Would consume" <+> v <> ", which is not consumable."
+
+unusedSize :: (MonadTypeChecker m) => SizeBinder VName -> m a
+unusedSize p =
+  typeError p mempty . withIndexLink "unused-size" $
+    "Size" <+> ppr p <+> "unused in pattern."
 
 --- Basic checking
 
@@ -1141,8 +1139,7 @@ bindingPat sizes p t m = do
     let used_sizes = typeDimNames $ patternStructType p'
     case filter ((`S.notMember` used_sizes) . sizeName) sizes of
       [] -> m p'
-      size : _ ->
-        typeError size mempty $ "Size" <+> ppr size <+> "unused in pattern."
+      size : _ -> unusedSize size
 
 patternDims :: Pat -> [Ident]
 patternDims (PatParens p _) = patternDims p
@@ -1386,11 +1383,10 @@ checkExp (RecordLit fs loc) = do
       maybe_sloc <- gets $ M.lookup f
       case maybe_sloc of
         Just sloc ->
-          lift $
-            typeError rloc mempty $
-              "Field" <+> pquote (ppr f)
-                <+> "previously defined at"
-                <+> text (locStrRel rloc sloc) <> "."
+          lift . typeError rloc mempty $
+            "Field" <+> pquote (ppr f)
+              <+> "previously defined at"
+              <+> text (locStrRel rloc sloc) <> "."
         Nothing -> return ()
 checkExp (ArrayLit all_es _ loc) =
   -- Construct the result type and unify all elements with it.  We
@@ -1644,18 +1640,7 @@ checkExp (AppExp (LetWith dest src slice ve body loc) _) =
 
     (elemt, _) <- sliceShape (Just (loc, Nonrigid)) slice' =<< normTypeFully t
 
-    unless (unique src_t) $ notUnique loc (pprName (identName src)) $ toStruct src_t
-
-    vtable <- asks $ scopeVtable . termScope
-    forM_ (aliases src_t) $ \v ->
-      case aliasVar v `M.lookup` vtable of
-        Just (BoundV Local _ v_t)
-          | not $ unique v_t ->
-            typeError loc mempty $
-              "Source" <+> pquote (pprName (identName src))
-                <+> "aliases"
-                <+> pquote (pprName (aliasVar v)) <> ", which is not consumable."
-        _ -> return ()
+    unless (unique src_t) $ notConsumable loc $ pquote $ pprName $ identName src
 
     sequentially (unifies "type of target array" (toStruct elemt) =<< checkExp ve) $ \ve' _ -> do
       ve_t <- expTypeFully ve'
@@ -1677,7 +1662,7 @@ checkExp (Update src slice ve loc) = do
     sequentially (checkExp src >>= unifies "type of target array" t) $ \src' _ -> do
       src_t <- expTypeFully src'
 
-      unless (unique src_t) $ notUnique loc src $ toStruct src_t
+      unless (unique src_t) $ notConsumable loc $ pquote $ ppr src
 
       let src_als = aliases src_t
       ve_t <- expTypeFully ve'
@@ -2619,7 +2604,7 @@ causalityCheck binding_body = do
 
     causality what loc d dloc t =
       Left $
-        TypeError loc mempty $
+        TypeError loc mempty . withIndexLink "causality-check" $
           "Causality check: size" <+/> pquote (pprName d)
             <+/> "needed for type of"
             <+> what <> colon
@@ -3131,10 +3116,8 @@ letGeneralise defname defloc tparams params rettype =
             rettype'' : map patternStructType params
     case filter ((`S.notMember` used_sizes) . typeParamName) $
       filter isSizeParam tparams' of
-      [] -> return ()
-      tp : _ ->
-        typeError defloc mempty $
-          "Size parameter" <+> pquote (ppr tp) <+> "unused."
+      [] -> pure ()
+      tp : _ -> unusedSize $ SizeBinder (typeParamName tp) (srclocOf tp)
 
     -- We keep those type variables that were not closed over by
     -- let-generalisation.
@@ -3210,15 +3193,13 @@ checkIfConsumable loc als = do
         Just (BoundV Local _ t)
           | arrayRank t > 0 -> unique t
           | Scalar TypeVar {} <- t -> unique t
+          | Scalar Arrow {} <- t -> False
           | otherwise -> True
         Just (BoundV Global _ _) -> False
         _ -> True
   -- The sort ensures that AliasBound vars are shown before AliasFree.
   case map aliasVar $ sort $ filter (not . consumable . aliasVar) $ S.toList als of
-    v : _ -> do
-      v' <- describeVar loc v
-      typeError loc mempty $
-        "Would consume" <+> v' <> ", which is not allowed."
+    v : _ -> notConsumable loc =<< describeVar loc v
     [] -> return ()
 
 -- | Proclaim that we have written to the given variable.
@@ -3232,7 +3213,8 @@ consume loc als = do
 -- computation.
 consuming :: Ident -> TermTypeM a -> TermTypeM a
 consuming (Ident name (Info t) loc) m = do
-  consume loc $ AliasBound name `S.insert` aliases t
+  t' <- normTypeFully t
+  consume loc $ AliasBound name `S.insert` aliases t'
   localScope consume' m
   where
     consume' scope =
