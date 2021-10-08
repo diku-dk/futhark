@@ -1,9 +1,9 @@
 -- This test tracks whether aliasing is propagated properly when
 -- tuples of differing dimensions is used as function parameters.
 -- ==
--- error:
+-- error: "b".*consumed
 
-let f(x: (i32, i32), t: (i32, i32, []i32)): []i32 =
+let f(x: (i32, i32), t: (i32, i32, []i64)): []i64 =
     let (x, y, a) = t in
     a
 

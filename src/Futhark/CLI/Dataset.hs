@@ -1,5 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE Strict #-}
+{-# OPTIONS_GHC -fno-warn-orphans #-}
 
 -- | @futhark dataset@
 module Futhark.CLI.Dataset (main) where
@@ -8,17 +9,19 @@ import Control.Monad
 import Control.Monad.ST
 import qualified Data.Binary as Bin
 import qualified Data.ByteString.Lazy.Char8 as BS
-import qualified Data.Map.Strict as M
 import qualified Data.Text as T
+import qualified Data.Text.IO as T
 import Data.Vector.Generic (freeze)
 import qualified Data.Vector.Storable as SVec
 import qualified Data.Vector.Storable.Mutable as USVec
 import Data.Word
-import Futhark.Test.Values
+import qualified Futhark.Data as V
+import Futhark.Data.Reader (readValues)
+import Futhark.Util (convFloat)
 import Futhark.Util.Options
 import Language.Futhark.Parser
 import Language.Futhark.Pretty ()
-import Language.Futhark.Prop (UncheckedTypeExp, namesToPrimTypes)
+import Language.Futhark.Prop (UncheckedTypeExp)
 import Language.Futhark.Syntax hiding
   ( FloatValue (..),
     IntValue (..),
@@ -28,7 +31,8 @@ import Language.Futhark.Syntax hiding
   )
 import System.Exit
 import System.IO
-import System.Random.PCG (Variate, initialize, uniformR)
+import System.Random (mkStdGen, uniformR)
+import System.Random.Stateful (UniformRange (..))
 
 -- | Run @futhark dataset@.
 main :: String -> [String] -> IO ()
@@ -43,9 +47,9 @@ main = mainWithOptions initialDataOptions commandLineOptions "options..." f
             exitFailure
           Just vs ->
             case format config of
-              Text -> mapM_ (putStrLn . pretty) vs
+              Text -> mapM_ (T.putStrLn . V.valueText) vs
               Binary -> mapM_ (BS.putStr . Bin.encode) vs
-              Type -> mapM_ (putStrLn . pretty . valueType) vs
+              Type -> mapM_ (T.putStrLn . V.valueTypeText . V.valueType) vs
       | otherwise =
         Just $
           zipWithM_
@@ -133,6 +137,7 @@ commandLineOptions =
     setRangeOption "u16" setu16Range,
     setRangeOption "u32" setu32Range,
     setRangeOption "u64" setu64Range,
+    setRangeOption "f16" setf16Range,
     setRangeOption "f32" setf32Range,
     setRangeOption "f64" setf64Range
   ]
@@ -178,11 +183,11 @@ tryMakeGenerator t
       outValue fmt v
   where
     name = "option " ++ t
-    outValue Text = putStrLn . pretty
+    outValue Text = T.putStrLn . V.valueText
     outValue Binary = BS.putStr . Bin.encode
-    outValue Type = putStrLn . pretty . valueType
+    outValue Type = T.putStrLn . V.valueTypeText . V.valueType
 
-toValueType :: UncheckedTypeExp -> Either String ValueType
+toValueType :: UncheckedTypeExp -> Either String V.ValueType
 toValueType TETuple {} = Left "Cannot handle tuples yet."
 toValueType TERecord {} = Left "Cannot handle records yet."
 toValueType TEApply {} = Left "Cannot handle type applications yet."
@@ -191,13 +196,16 @@ toValueType TESum {} = Left "Cannot handle sumtypes yet."
 toValueType (TEUnique t _) = toValueType t
 toValueType (TEArray t d _) = do
   d' <- constantDim d
-  ValueType ds t' <- toValueType t
-  return $ ValueType (d' : ds) t'
+  V.ValueType ds t' <- toValueType t
+  return $ V.ValueType (d' : ds) t'
   where
     constantDim (DimExpConst k _) = Right k
     constantDim _ = Left "Array has non-constant dimension declaration."
 toValueType (TEVar (QualName [] v) _)
-  | Just t <- M.lookup v namesToPrimTypes = Right $ ValueType [] t
+  | Just t <- lookup v m = Right $ V.ValueType [] t
+  where
+    m = map f [minBound .. maxBound]
+    f t = (nameFromText (V.primTypeText t), t)
 toValueType (TEVar v _) =
   Left $ "Unknown type " ++ pretty v
 
@@ -213,6 +221,7 @@ data RandomConfiguration = RandomConfiguration
     u16Range :: Range Word16,
     u32Range :: Range Word32,
     u64Range :: Range Word64,
+    f16Range :: Range Half,
     f32Range :: Range Float,
     f64Range :: Range Double
   }
@@ -243,6 +252,9 @@ setu32Range bounds config = config {u32Range = bounds}
 setu64Range :: Range Word64 -> RandomConfiguration -> RandomConfiguration
 setu64Range bounds config = config {u64Range = bounds}
 
+setf16Range :: Range Half -> RandomConfiguration -> RandomConfiguration
+setf16Range bounds config = config {f16Range = bounds}
+
 setf32Range :: Range Float -> RandomConfiguration -> RandomConfiguration
 setf32Range bounds config = config {f32Range = bounds}
 
@@ -262,44 +274,53 @@ initialRandomConfiguration =
     (minBound, maxBound)
     (0.0, 1.0)
     (0.0, 1.0)
+    (0.0, 1.0)
 
-randomValue :: RandomConfiguration -> ValueType -> Word64 -> Value
-randomValue conf (ValueType ds t) seed =
+randomValue :: RandomConfiguration -> V.ValueType -> Word64 -> V.Value
+randomValue conf (V.ValueType ds t) seed =
   case t of
-    Signed Int8 -> gen i8Range Int8Value
-    Signed Int16 -> gen i16Range Int16Value
-    Signed Int32 -> gen i32Range Int32Value
-    Signed Int64 -> gen i64Range Int64Value
-    Unsigned Int8 -> gen u8Range Word8Value
-    Unsigned Int16 -> gen u16Range Word16Value
-    Unsigned Int32 -> gen u32Range Word32Value
-    Unsigned Int64 -> gen u64Range Word64Value
-    FloatType Float32 -> gen f32Range Float32Value
-    FloatType Float64 -> gen f64Range Float64Value
-    Bool -> gen (const (False, True)) BoolValue
+    V.I8 -> gen i8Range V.I8Value
+    V.I16 -> gen i16Range V.I16Value
+    V.I32 -> gen i32Range V.I32Value
+    V.I64 -> gen i64Range V.I64Value
+    V.U8 -> gen u8Range V.U8Value
+    V.U16 -> gen u16Range V.U16Value
+    V.U32 -> gen u32Range V.U32Value
+    V.U64 -> gen u64Range V.U64Value
+    V.F16 -> gen f16Range V.F16Value
+    V.F32 -> gen f32Range V.F32Value
+    V.F64 -> gen f64Range V.F64Value
+    V.Bool -> gen (const (False, True)) V.BoolValue
   where
     gen range final = randomVector (range conf) final ds seed
 
 randomVector ::
-  (SVec.Storable v, Variate v) =>
+  (SVec.Storable v, UniformRange v) =>
   Range v ->
-  (SVec.Vector Int -> SVec.Vector v -> Value) ->
+  (SVec.Vector Int -> SVec.Vector v -> V.Value) ->
   [Int] ->
   Word64 ->
-  Value
+  V.Value
 randomVector range final ds seed = runST $ do
-  -- USe some nice impure computation where we can preallocate a
+  -- Use some nice impure computation where we can preallocate a
   -- vector of the desired size, populate it via the random number
   -- generator, and then finally reutrn a frozen binary vector.
   arr <- USVec.new n
-  g <- initialize 6364136223846793006 seed
-  let fill i
+  let fill g i
         | i < n = do
-          v <- uniformR range g
+          let (v, g') = uniformR range g
           USVec.write arr i v
-          fill $! i + 1
+          g' `seq` fill g' $! i + 1
         | otherwise =
-          final (SVec.fromList ds) . SVec.convert <$> freeze arr
-  fill 0
+          pure ()
+  fill (mkStdGen $ fromIntegral seed) 0
+  final (SVec.fromList ds) . SVec.convert <$> freeze arr
   where
     n = product ds
+
+-- XXX: The following instance is an orphan.  Maybe it could be
+-- avoided with some newtype trickery or refactoring, but it's so
+-- convenient this way.
+instance UniformRange Half where
+  uniformRM (a, b) g =
+    (convFloat :: Float -> Half) <$> uniformRM (convFloat a, convFloat b) g

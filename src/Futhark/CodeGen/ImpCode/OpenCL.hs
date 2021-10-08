@@ -19,21 +19,22 @@ module Futhark.CodeGen.ImpCode.OpenCL
     KernelTarget (..),
     FailureMsg (..),
     module Futhark.CodeGen.ImpCode,
-    module Futhark.IR.Kernels.Sizes,
+    module Futhark.IR.GPU.Sizes,
   )
 where
 
 import qualified Data.Map as M
+import qualified Data.Text as T
 import Futhark.CodeGen.ImpCode hiding (Code, Function)
 import qualified Futhark.CodeGen.ImpCode as Imp
-import Futhark.IR.Kernels.Sizes
+import Futhark.IR.GPU.Sizes
 import Futhark.Util.Pretty
 
 -- | An program calling OpenCL kernels.
 data Program = Program
-  { openClProgram :: String,
+  { openClProgram :: T.Text,
     -- | Must be prepended to the program.
-    openClPrelude :: String,
+    openClPrelude :: T.Text,
     openClKernelNames :: M.Map KernelName KernelSafety,
     -- | So we can detect whether the device is capable.
     openClUsedTypes :: [PrimType],

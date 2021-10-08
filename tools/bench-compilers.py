@@ -3,7 +3,7 @@
 # Construct PNG graphs of compile- and run-time performance for
 # historical versions of the Futhark compiler.  The legend is almost
 # useless, so manual investigation is needed to get something usable
-# outo f this.
+# out of this.
 #
 # This program is quite naive in its construction of commands passed
 # to os.system, so don't run it from a directory with interesting
@@ -18,7 +18,7 @@
 # Regarding the special 'nightly' version, delete it from the
 # releases/ directory if you want this script to download a newer one.
 #
-# $ ./bench-compilers.py plot_compiletime 0.1.0 0.2.0 0.3.0 0.4.0 0.4.1 0.5.1 0.6.1 0.6.2 0.6.3 0.7.1 0.7.2 0.7.3 0.7.4 0.8.1 0.10.1 0.10.2 0.11.1 0.11.2 0.12.1 0.12.2 0.12.3 0.13.1 0.13.2 0.14.1 0.15.1 0.15.2 0.15.3 0.15.4 0.15.5 0.15.6 0.15.7 0.15.8 nightly
+# $ bench-compilers.py plot_runtime 0.1.0 0.2.0 0.3.0 0.4.0 0.4.1 0.5.1 0.6.1 0.6.2 0.6.3 0.7.1 0.7.2 0.7.3 0.7.4 0.8.1 0.1 0.1 0.10.2 0.11.1 0.11.2 0.12.1 0.12.2 0.12.3 0.13.1 0.13.2 0.14.1 0.15.1 0.15.2 0.15.3 0.15.4 0.15.5 0.15.6 0.15.7 0.15.8 0.16.1 0.16.2 0.16.3 0.16.4 0.16.5 0.17.2 0.17 .3 0.18.1 0.18.2 0.18.3 0.18.4 0.18.5 0.18.6 0.19.1 0.19.2 0.19.3 0.19.4 0.19.5 nightly
 #
 # The example above skips 0.9.1 because a few benchmarks do not
 # validate with it.  Seems like there was a bug with certain

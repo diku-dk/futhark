@@ -35,8 +35,8 @@ OPTIONS
 -h
   Print help text to standard output and exit.
 
---entry NAME
-  Treat the specified top-level function as an entry point.
+--entry-point NAME
+  Treat this top-level function as an entry point.
 
 --library
   Generate a library instead of an executable.  Appends ``.c``/``.h``
@@ -134,21 +134,25 @@ The following additional options are accepted.
 
   Load PTX code from the indicated file.
 
+-n, --no-print-result
+
+  Do not print the program result.
+
 --nvrtc-option=OPT
 
   Add an additional build option to the string passed to NVRTC.  Refer
   to the CUDA documentation for which options are supported.  Be
   careful - some options can easily result in invalid results.
 
---print-sizes
+--param=ASSIGNMENT
 
-  Print all sizes that can be set with ``-size`` or ``--tuning``.
-
---size=ASSIGNMENT
-
-  Set a configurable run-time parameter to the given
+  Set a tuning parameter to the given
   value. ``ASSIGNMENT`` must be of the form ``NAME=INT`` Use
   ``--print-sizes`` to see which names are available.
+
+--print-params
+
+  Print all tuning parameters that can be set with ``--param`` or ``--tuning``.
 
 --tuning=FILE
 
@@ -161,13 +165,19 @@ If run without ``--library``, ``futhark cuda`` will invoke a C
 compiler to compile the generated C program into a binary.  This only
 works if the C compiler can find the necessary CUDA libraries.  On
 most systems, CUDA is installed in ``/usr/local/cuda``, which is
-usually not part of the default compiler search path.  You may need to
+usually not part of the default compiler search path. You may need to
 set the following environment variables before running ``futhark
 cuda``::
 
   LIBRARY_PATH=/usr/local/cuda/lib64
   LD_LIBRARY_PATH=/usr/local/cuda/lib64/
   CPATH=/usr/local/cuda/include
+
+At runtime the generated program must be able to find the CUDA
+installation directory, which is normally located at
+``/usr/local/cuda``.  If you have CUDA installed elsewhere, set any of
+the ``CUDA_HOME``, ``CUDA_ROOT``, or ``CUDA_PATH`` environment
+variables to the proper directory.
 
 SEE ALSO
 ========

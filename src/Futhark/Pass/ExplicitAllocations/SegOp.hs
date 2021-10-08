@@ -9,40 +9,38 @@ module Futhark.Pass.ExplicitAllocations.SegOp
   )
 where
 
-import Futhark.IR.KernelsMem
+import Futhark.IR.GPUMem
 import qualified Futhark.IR.Mem.IxFun as IxFun
 import Futhark.Pass.ExplicitAllocations
 
-instance SizeSubst (SegOp lvl lore) where
+instance SizeSubst (SegOp lvl rep) where
   opSizeSubst _ _ = mempty
 
 allocInKernelBody ::
-  Allocable fromlore tolore =>
-  KernelBody fromlore ->
-  AllocM fromlore tolore (KernelBody tolore)
+  Allocable fromrep torep inner =>
+  KernelBody fromrep ->
+  AllocM fromrep torep (KernelBody torep)
 allocInKernelBody (KernelBody () stms res) =
-  allocInStms stms $ \stms' -> return $ KernelBody () stms' res
+  uncurry (flip (KernelBody ()))
+    <$> collectStms (allocInStms stms (pure res))
 
 allocInLambda ::
-  Allocable fromlore tolore =>
-  [LParam tolore] ->
-  Body fromlore ->
-  [Type] ->
-  AllocM fromlore tolore (Lambda tolore)
-allocInLambda params body rettype = do
-  body' <- localScope (scopeOfLParams params) $
-    allocInStms (bodyStms body) $ \bnds' ->
-      return $ Body () bnds' $ bodyResult body
-  return $ Lambda params body' rettype
+  Allocable fromrep torep inner =>
+  [LParam torep] ->
+  Body fromrep ->
+  AllocM fromrep torep (Lambda torep)
+allocInLambda params body =
+  mkLambda params . allocInStms (bodyStms body) $
+    pure $ bodyResult body
 
 allocInBinOpParams ::
-  Allocable fromlore tolore =>
+  Allocable fromrep torep inner =>
   SubExp ->
   TPrimExp Int64 VName ->
   TPrimExp Int64 VName ->
-  [LParam fromlore] ->
-  [LParam fromlore] ->
-  AllocM fromlore tolore ([LParam tolore], [LParam tolore])
+  [LParam fromrep] ->
+  [LParam fromrep] ->
+  AllocM fromrep torep ([LParam torep], [LParam torep])
 allocInBinOpParams num_threads my_id other_id xs ys = unzip <$> zipWithM alloc xs ys
   where
     alloc x y =
@@ -85,11 +83,11 @@ allocInBinOpParams num_threads my_id other_id xs ys = unzip <$> zipWithM alloc x
             )
 
 allocInBinOpLambda ::
-  Allocable fromlore tolore =>
+  Allocable fromrep torep inner =>
   SubExp ->
   SegSpace ->
-  Lambda fromlore ->
-  AllocM fromlore tolore (Lambda tolore)
+  Lambda fromrep ->
+  AllocM fromrep torep (Lambda torep)
 allocInBinOpLambda num_threads (SegSpace flat _) lam = do
   let (acc_params, arr_params) =
         splitAt (length (lambdaParams lam) `div` 2) $ lambdaParams lam
@@ -98,7 +96,4 @@ allocInBinOpLambda num_threads (SegSpace flat _) lam = do
   (acc_params', arr_params') <-
     allocInBinOpParams num_threads index_x index_y acc_params arr_params
 
-  allocInLambda
-    (acc_params' ++ arr_params')
-    (lambdaBody lam)
-    (lambdaReturnType lam)
+  allocInLambda (acc_params' ++ arr_params') (lambdaBody lam)

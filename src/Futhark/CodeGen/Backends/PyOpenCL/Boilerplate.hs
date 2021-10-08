@@ -5,12 +5,10 @@
 -- | Various boilerplate definitions for the PyOpenCL backend.
 module Futhark.CodeGen.Backends.PyOpenCL.Boilerplate
   ( openClInit,
-    openClPrelude,
   )
 where
 
 import Control.Monad.Identity
-import Data.FileEmbed
 import qualified Data.Map as M
 import qualified Data.Text as T
 import qualified Futhark.CodeGen.Backends.GenericPython as Py
@@ -26,23 +24,18 @@ import Futhark.CodeGen.ImpCode.OpenCL
     untyped,
   )
 import Futhark.CodeGen.OpenCL.Heuristics
-import Futhark.Util.Pretty (prettyText)
+import Futhark.Util.Pretty (pretty, prettyText)
 import NeatInterpolation (text)
 
 errorMsgNumArgs :: ErrorMsg a -> Int
 errorMsgNumArgs = length . errorMsgArgTypes
 
--- | @rts/python/opencl.py@ embedded as a string.
-openClPrelude :: String
-openClPrelude = $(embedStringFile "rts/python/opencl.py")
-
 -- | Python code (as a string) that calls the
 -- @initiatialize_opencl_object@ procedure.  Should be put in the
 -- class constructor.
-openClInit :: [PrimType] -> String -> M.Map Name SizeClass -> [FailureMsg] -> String
+openClInit :: [PrimType] -> String -> M.Map Name SizeClass -> [FailureMsg] -> T.Text
 openClInit types assign sizes failures =
-  T.unpack
-    [text|
+  [text|
 size_heuristics=$size_heuristics
 self.global_failure_args_max = $max_num_args
 self.failure_msgs=$failure_msgs
@@ -82,8 +75,7 @@ formatFailure (FailureMsg (ErrorMsg parts) backtrace) =
        in concatMap escapeChar
 
     onPart (ErrorString s) = formatEscape s
-    onPart ErrorInt32 {} = "{}"
-    onPart ErrorInt64 {} = "{}"
+    onPart ErrorVal {} = "{}"
 
 sizeClassesToPython :: M.Map Name SizeClass -> PyExp
 sizeClassesToPython = Dict . map f . M.toList

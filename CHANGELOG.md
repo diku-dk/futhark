@@ -5,7 +5,219 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
-## [0.20.0]
+## [0.21.0]
+
+### Added
+
+### Removed
+
+### Changed
+
+### Fixed
+
+## [0.20.4]
+
+### Added
+
+* Tuning parameters now (officially) exposed in the C API.
+
+* `futhark autotune` is now 2-3x faster on many programs, as it now
+  keeps the process running.
+
+* Negative numeric literals are now allowed in `case` patterns.
+
+### Fixed
+
+* `futhark_context_config_set_profiling` was missing for the `c` backend.
+
+* Correct handling of nested entry points (#1478).
+
+* Incorrect type information recorded when doing in-place lowering (#1481).
+
+## [0.20.3]
+
+### Added
+
+* Executables produced by C backends now take a `--no-print-result` option.
+
+* The C backends now generate a manifest when compiling with
+  `--library`.  This can be used by FFI generators (#1465).
+
+* The beginnings of a Rust-style error index.
+
+* `scan` on newer CUDA devices is now much faster.
+
+### Fixed
+
+* Unique opaque types are named properly in entry points.
+
+* The CUDA backend in library mode no longer `exit()`s the process if
+  NVRTC initialisation fails.
+
+## [0.20.2]
+
+### Fixed
+
+* Simplification bug (#1455).
+
+* In-place-lowering bug (#1457).
+
+* Another in-place-lowering bug (#1460).
+
+* Don't try to tile inside loops with parameters with variant sizes (#1462).
+
+* Don't consider it an ICE when the user passes invalid command line
+  options (#1464).
+
+## [0.20.1]
+
+### Added
+
+  * The `#[trace]` and `#[break]` attributes now replace the `trace`
+    and `break` functions (although they are still present in
+    slightly-reduced but compatible form).
+
+  * The `#[opaque]` attribute replaces the `opaque` function, which is
+    now deprecated.
+
+  * Tracing now works in compiled code, albeit with several caveats
+    (mainly, it does not work for code running on the GPU).
+
+  * New `wasm` and `wasm-multicore` backends by Philip Lassen.  Still
+    very experimental; do not expect API stability.
+
+  * New intrinsic type `f16`, along with a prelude module `f16`.
+    Implemented with hardware support where it is available, and with
+    `f32`-based emulation where it is not.
+
+  * Sometimes slightly more informative error message when input of
+    the wrong type is passed to a test program.
+
+### Changed
+
+  * The `!` function in the integer modules is now called `not`.
+
+  * `!` is now builtin syntax.  You can no longer define a function
+    called `!`.  It is extremely unlikely this affects you.  This
+    removes the last special-casing of prefix operators.
+
+  * A prefix operator section (i.e. `(!)`) is no longer permitted
+    (and it never was according to the grammar).
+
+  * The offset parameter for the "raw" array creation functions in the
+    C API is now `int64_t` instead of `int`.
+
+### Fixed
+
+  * `i64.abs` was wrong for arguments that did not fit in an `i32`.
+
+  * Some `f32` operations (`**`, `abs`, `max`) would be done in double
+    precision on the CUDA backend.
+
+  * Yet another defunctorisation bug (#1397).
+
+  * The `clz` function would sometimes exhibit undefined behaviour in
+    CPU code (#1415).
+
+  * Operator priority of prefix `-` was wrong - it is now the same as
+    `!` (#1419).
+
+  * `futhark hash` is now invariant to source location as well as
+    stable across OS/compiler/library versions.
+
+  * `futhark literate` is now much better at avoiding unnecessary
+    recalculation.
+
+  * Fixed a hole in size type checking that would usually lead to
+    compiler crashes (#1435).
+
+  * Underscores now allowed in numeric literals in test data (#1440).
+
+  * The `cuda` backend did not use single-pass segmented scans as
+    intended.  Now it does.
+
+## [0.19.7]
+
+### Added
+
+  * A new memory reuse optimisation has been added.  This results in
+    slightly lower footprint for many programs.
+
+  * The `cuda` backend now uses a fast single-pass implementation for
+    segmented `scan`s, due to Morten Tychsen Clausen (#1375).
+
+  * `futhark bench` now prints interim results while it is running.
+
+### Fixed
+
+  * `futhark test` now provides better error message when asked to
+    test an undefined entry point (#1367).
+
+  * `futhark pkg` now detects some nonsensical package paths (#1364).
+
+  * FutharkScript now parses `f x y` as applying `f` to `x` and `y`,
+    rather than as `f (x y)`.
+
+  * Some internal array utility functions would not be generated if
+    entry points exposed both unit arrays and boolean arrays (#1374).
+
+  * Nested reductions used (much) more memory for intermediate results
+    than strictly needed.
+
+  * Size propagation bug in defunctionalisation (#1384).
+
+  * In the C FFI, array types used only internally to implement opaque
+    types are no longer exposed (#1387).
+
+  * `futhark bench` now copes with test programs that consume their
+    input (#1386).  This required an extension of the server protocol
+    as well.
+
+## [0.19.6]
+
+### Added
+
+  * `f32.hypot` and `f64.hypot` are now much more numerically exact in
+    the interpreter.
+
+  * Generated code now contains a header with information about the
+    version of Futhark used (and maybe more information in the
+    future).
+
+  * Testing/benchmarking with large input data (including randomly
+    generated data) is much faster, as each file is now only read
+    once.
+
+  * Test programs may now use arbitrary FutharkScript expressions to
+    produce test input, in particular expressions that produce opaque
+    values.  This affects both testing, benchmarking, and autotuning.
+
+  * Compilation is about 10% faster, especially for large programs.
+
+### Fixed
+
+  * `futhark repl` had trouble with declarations that produced unknown
+    sizes (#1347).
+
+  * Entry points can now have same name as (undocumented!) compiler intrinsics.
+
+  * FutharkScript now detects too many arguments passed to functions.
+
+  * Sequentialisation bug (#1350).
+
+  * Missing causality check for index sections.
+
+  * `futhark test` now reports mismatches using proper indexes (#1356).
+
+  * Missing alias checking in fusion could lead to compiler crash (#1358).
+
+  * The absolute value of NaN is no longer infinity in the interpreter (#1359).
+
+  * Proper detection of zero strides in compiler (#1360).
+
+  * Invalid memory accesses related to internal bookkeeping of bounds checking.
+
+## [0.19.5]
 
 ### Added
 
@@ -18,9 +230,14 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * Added `f32.epsilon` and `f64.epsilon` for the difference between
     1.0 and the next larger representable number.
 
-### Removed
+  * Added `f32.hypot` and `f64.hypot` for your hypothenuse needs (#1344).
 
-### Changed
+  * Local size bindings in `let` expressions, e.g:
+
+    ```
+    let [n] (xs': [n]i32) = filter (>0) xs
+    in ...
+    ```
 
 ### Fixed
 
@@ -34,6 +251,16 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * `futhark autotune` now works with the `cuda` backend (#1312).
 
   * Devious fusion bug (#1322) causing compiler crashes.
+
+  * Memory expansion bug for certain complex GPU kernels (#1328).
+
+  * Complex expressions in index sections (#1332).
+
+  * Handling of sizes in abstract types in the interpreter (#1333).
+
+  * Type checking of explicit size requirements in `loop` parameter (#1324).
+
+  * Various alias checking bugs (#1300, #1340).
 
 ## [0.19.4]
 

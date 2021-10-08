@@ -20,6 +20,7 @@ import qualified Futhark.CodeGen.ImpGen.MPI as ImpGen
 import Futhark.IR.MCMem (MCMem, Prog)
 import Futhark.MonadFreshNames
 import qualified Language.C.Quote.OpenCL as C
+import NeatInterpolation (untrimming)
 
 compileProg ::
   MonadFreshNames m =>
@@ -38,8 +39,9 @@ compileProg =
     <=< ImpGen.compileProg
   where
     mpi_includes =
-      unlines
-        ["#include <mpi.h>"]
+      [untrimming|
+       #include <mpi.h>
+      |]
     generateContext = do
       cfg <- GC.publicDef "context_config" GC.InitDecl $ \s ->
         ( [C.cedecl|struct $id:s;|],
@@ -156,9 +158,17 @@ compileProg =
                                }|]
         )
 
-      GC.earlyDecl [C.cedecl|static const char *size_names[0];|]
-      GC.earlyDecl [C.cedecl|static const char *size_vars[0];|]
-      GC.earlyDecl [C.cedecl|static const char *size_classes[0];|]
+      GC.earlyDecl [C.cedecl|static const char *tuning_param_names[0];|]
+      GC.earlyDecl [C.cedecl|static const char *tuning_param_vars[0];|]
+      GC.earlyDecl [C.cedecl|static const char *tuning_param_classes[0];|]
+
+      GC.publicDef_ "context_config_set_tuning_param" GC.InitDecl $ \s ->
+        ( [C.cedecl|int $id:s(struct $id:cfg* cfg, const char *param_name, size_t param_value);|],
+          [C.cedecl|int $id:s(struct $id:cfg* cfg, const char *param_name, size_t param_value) {
+                        (void)cfg; (void)param_name; (void)param_value;
+                        return 1;
+                      }|]
+        )
 
       GC.publicDef_ "context_config_set_size" GC.InitDecl $ \s ->
         ( [C.cedecl|int $id:s(struct $id:cfg* cfg, const char *size_name, size_t size_value);|],

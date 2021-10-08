@@ -6,22 +6,26 @@
 -- program to an equivalent C program.
 module Futhark.CodeGen.Backends.MulticoreC
   ( compileProg,
+    generateContext,
     GC.CParts (..),
     GC.asLibrary,
     GC.asExecutable,
     GC.asServer,
+    operations,
+    cliOptions,
   )
 where
 
 import Control.Monad
-import Data.FileEmbed
 import qualified Data.Map as M
 import Data.Maybe
+import qualified Data.Text as T
 import qualified Futhark.CodeGen.Backends.GenericC as GC
 import Futhark.CodeGen.Backends.GenericC.Options
 import Futhark.CodeGen.Backends.SimpleRep
 import Futhark.CodeGen.ImpCode.Multicore
 import qualified Futhark.CodeGen.ImpGen.Multicore as ImpGen
+import Futhark.CodeGen.RTS.C (schedulerH)
 import Futhark.IR.MCMem (MCMem, Prog)
 import Futhark.MonadFreshNames
 import qualified Language.C.Quote.OpenCL as C
@@ -43,165 +47,165 @@ compileProg =
         cliOptions
     )
     <=< ImpGen.compileProg
-  where
-    generateContext = do
-      let scheduler_h = $(embedStringFile "rts/c/scheduler.h")
-      mapM_ GC.earlyDecl [C.cunit|$esc:scheduler_h|]
 
-      cfg <- GC.publicDef "context_config" GC.InitDecl $ \s ->
-        ( [C.cedecl|struct $id:s;|],
-          [C.cedecl|struct $id:s { int debugging;
-                                   int profiling;
-                                   int num_threads;
-                                 };|]
-        )
+generateContext :: GC.CompilerM op () ()
+generateContext = do
+  mapM_ GC.earlyDecl [C.cunit|$esc:(T.unpack schedulerH)|]
 
-      GC.publicDef_ "context_config_new" GC.InitDecl $ \s ->
-        ( [C.cedecl|struct $id:cfg* $id:s(void);|],
-          [C.cedecl|struct $id:cfg* $id:s(void) {
-                                 struct $id:cfg *cfg = (struct $id:cfg*) malloc(sizeof(struct $id:cfg));
-                                 if (cfg == NULL) {
-                                   return NULL;
-                                 }
-                                 cfg->debugging = 0;
-                                 cfg->profiling = 0;
-                                 cfg->num_threads = 0;
-                                 return cfg;
-                               }|]
-        )
+  cfg <- GC.publicDef "context_config" GC.InitDecl $ \s ->
+    ( [C.cedecl|struct $id:s;|],
+      [C.cedecl|struct $id:s { int debugging;
+                               int profiling;
+                               int num_threads;
+                             };|]
+    )
 
-      GC.publicDef_ "context_config_free" GC.InitDecl $ \s ->
-        ( [C.cedecl|void $id:s(struct $id:cfg* cfg);|],
-          [C.cedecl|void $id:s(struct $id:cfg* cfg) {
-                                 free(cfg);
-                               }|]
-        )
+  GC.publicDef_ "context_config_new" GC.InitDecl $ \s ->
+    ( [C.cedecl|struct $id:cfg* $id:s(void);|],
+      [C.cedecl|struct $id:cfg* $id:s(void) {
+                             struct $id:cfg *cfg = (struct $id:cfg*) malloc(sizeof(struct $id:cfg));
+                             if (cfg == NULL) {
+                               return NULL;
+                             }
+                             cfg->debugging = 0;
+                             cfg->profiling = 0;
+                             cfg->num_threads = 0;
+                             return cfg;
+                           }|]
+    )
 
-      GC.publicDef_ "context_config_set_debugging" GC.InitDecl $ \s ->
-        ( [C.cedecl|void $id:s(struct $id:cfg* cfg, int flag);|],
-          [C.cedecl|void $id:s(struct $id:cfg* cfg, int detail) {
-                          cfg->debugging = detail;
-                        }|]
-        )
+  GC.publicDef_ "context_config_free" GC.InitDecl $ \s ->
+    ( [C.cedecl|void $id:s(struct $id:cfg* cfg);|],
+      [C.cedecl|void $id:s(struct $id:cfg* cfg) {
+                             free(cfg);
+                           }|]
+    )
 
-      GC.publicDef_ "context_config_set_profiling" GC.InitDecl $ \s ->
-        ( [C.cedecl|void $id:s(struct $id:cfg* cfg, int flag);|],
-          [C.cedecl|void $id:s(struct $id:cfg* cfg, int flag) {
-                          cfg->profiling = flag;
-                        }|]
-        )
+  GC.publicDef_ "context_config_set_debugging" GC.InitDecl $ \s ->
+    ( [C.cedecl|void $id:s(struct $id:cfg* cfg, int flag);|],
+      [C.cedecl|void $id:s(struct $id:cfg* cfg, int detail) {
+                      cfg->debugging = detail;
+                    }|]
+    )
 
-      GC.publicDef_ "context_config_set_logging" GC.InitDecl $ \s ->
-        ( [C.cedecl|void $id:s(struct $id:cfg* cfg, int flag);|],
-          [C.cedecl|void $id:s(struct $id:cfg* cfg, int detail) {
-                                 /* Does nothing for this backend. */
-                                 (void)cfg; (void)detail;
-                               }|]
-        )
+  GC.publicDef_ "context_config_set_profiling" GC.InitDecl $ \s ->
+    ( [C.cedecl|void $id:s(struct $id:cfg* cfg, int flag);|],
+      [C.cedecl|void $id:s(struct $id:cfg* cfg, int flag) {
+                      cfg->profiling = flag;
+                    }|]
+    )
 
-      GC.publicDef_ "context_config_set_num_threads" GC.InitDecl $ \s ->
-        ( [C.cedecl|void $id:s(struct $id:cfg *cfg, int n);|],
-          [C.cedecl|void $id:s(struct $id:cfg *cfg, int n) {
-                                 cfg->num_threads = n;
-                               }|]
-        )
+  GC.publicDef_ "context_config_set_logging" GC.InitDecl $ \s ->
+    ( [C.cedecl|void $id:s(struct $id:cfg* cfg, int flag);|],
+      [C.cedecl|void $id:s(struct $id:cfg* cfg, int detail) {
+                             // Does nothing for this backend.
+                             (void)cfg; (void)detail;
+                           }|]
+    )
 
-      (fields, init_fields) <- GC.contextContents
+  GC.publicDef_ "context_config_set_num_threads" GC.InitDecl $ \s ->
+    ( [C.cedecl|void $id:s(struct $id:cfg *cfg, int n);|],
+      [C.cedecl|void $id:s(struct $id:cfg *cfg, int n) {
+                             cfg->num_threads = n;
+                           }|]
+    )
 
-      ctx <- GC.publicDef "context" GC.InitDecl $ \s ->
-        ( [C.cedecl|struct $id:s;|],
-          [C.cedecl|struct $id:s {
-                          struct scheduler scheduler;
-                          int detail_memory;
-                          int debugging;
-                          int profiling;
-                          int profiling_paused;
-                          int logging;
-                          typename lock_t lock;
-                          char *error;
-                          typename FILE *log;
-                          int total_runs;
-                          long int total_runtime;
-                          $sdecls:fields
+  (fields, init_fields) <- GC.contextContents
 
-                          // Tuning parameters
-                          typename int64_t tuning_timing;
-                          typename int64_t tuning_iter;
-                        };|]
-        )
+  ctx <- GC.publicDef "context" GC.InitDecl $ \s ->
+    ( [C.cedecl|struct $id:s;|],
+      [C.cedecl|struct $id:s {
+                      struct scheduler scheduler;
+                      int detail_memory;
+                      int debugging;
+                      int profiling;
+                      int profiling_paused;
+                      int logging;
+                      typename lock_t lock;
+                      char *error;
+                      typename FILE *log;
+                      int total_runs;
+                      long int total_runtime;
+                      $sdecls:fields
 
-      GC.publicDef_ "context_new" GC.InitDecl $ \s ->
-        ( [C.cedecl|struct $id:ctx* $id:s(struct $id:cfg* cfg);|],
-          [C.cedecl|struct $id:ctx* $id:s(struct $id:cfg* cfg) {
-                 struct $id:ctx* ctx = (struct $id:ctx*) malloc(sizeof(struct $id:ctx));
-                 if (ctx == NULL) {
-                   return NULL;
-                 }
+                      // Tuning parameters
+                      typename int64_t tuning_timing;
+                      typename int64_t tuning_iter;
+                    };|]
+    )
 
-                 // Initialize rand()
-                 fast_srand(time(0));
-                 ctx->detail_memory = cfg->debugging;
-                 ctx->debugging = cfg->debugging;
-                 ctx->profiling = cfg->profiling;
-                 ctx->profiling_paused = 0;
-                 ctx->logging = 0;
-                 ctx->error = NULL;
-                 ctx->log = stderr;
-                 create_lock(&ctx->lock);
+  GC.publicDef_ "context_new" GC.InitDecl $ \s ->
+    ( [C.cedecl|struct $id:ctx* $id:s(struct $id:cfg* cfg);|],
+      [C.cedecl|struct $id:ctx* $id:s(struct $id:cfg* cfg) {
+             struct $id:ctx* ctx = (struct $id:ctx*) malloc(sizeof(struct $id:ctx));
+             if (ctx == NULL) {
+               return NULL;
+             }
 
-                 int tune_kappa = 0;
-                 double kappa = 5.1f * 1000;
+             // Initialize rand()
+             fast_srand(time(0));
+             ctx->detail_memory = cfg->debugging;
+             ctx->debugging = cfg->debugging;
+             ctx->profiling = cfg->profiling;
+             ctx->profiling_paused = 0;
+             ctx->logging = 0;
+             ctx->error = NULL;
+             ctx->log = stderr;
+             create_lock(&ctx->lock);
 
-                 if (tune_kappa) {
-                   if (determine_kappa(&kappa) != 0) {
-                     return NULL;
-                   }
-                 }
+             int tune_kappa = 0;
+             double kappa = 5.1f * 1000;
 
-                 if (scheduler_init(&ctx->scheduler,
-                                    cfg->num_threads > 0 ?
-                                    cfg->num_threads : num_processors(),
-                                    kappa) != 0) {
-                   return NULL;
-                 }
+             if (tune_kappa) {
+               if (determine_kappa(&kappa) != 0) {
+                 return NULL;
+               }
+             }
 
-                 $stms:init_fields
+             if (scheduler_init(&ctx->scheduler,
+                                cfg->num_threads > 0 ?
+                                cfg->num_threads : num_processors(),
+                                kappa) != 0) {
+               return NULL;
+             }
 
-                 init_constants(ctx);
+             $stms:init_fields
 
-                 return ctx;
-              }|]
-        )
+             init_constants(ctx);
 
-      GC.publicDef_ "context_free" GC.InitDecl $ \s ->
-        ( [C.cedecl|void $id:s(struct $id:ctx* ctx);|],
-          [C.cedecl|void $id:s(struct $id:ctx* ctx) {
-                 free_constants(ctx);
-                 (void)scheduler_destroy(&ctx->scheduler);
-                 free_lock(&ctx->lock);
-                 free(ctx);
-               }|]
-        )
+             return ctx;
+          }|]
+    )
 
-      GC.publicDef_ "context_sync" GC.InitDecl $ \s ->
-        ( [C.cedecl|int $id:s(struct $id:ctx* ctx);|],
-          [C.cedecl|int $id:s(struct $id:ctx* ctx) {
-                                 (void)ctx;
-                                 return 0;
-                               }|]
-        )
+  GC.publicDef_ "context_free" GC.InitDecl $ \s ->
+    ( [C.cedecl|void $id:s(struct $id:ctx* ctx);|],
+      [C.cedecl|void $id:s(struct $id:ctx* ctx) {
+             free_constants(ctx);
+             (void)scheduler_destroy(&ctx->scheduler);
+             free_lock(&ctx->lock);
+             free(ctx);
+           }|]
+    )
 
-      GC.earlyDecl [C.cedecl|static const char *size_names[0];|]
-      GC.earlyDecl [C.cedecl|static const char *size_vars[0];|]
-      GC.earlyDecl [C.cedecl|static const char *size_classes[0];|]
+  GC.publicDef_ "context_sync" GC.InitDecl $ \s ->
+    ( [C.cedecl|int $id:s(struct $id:ctx* ctx);|],
+      [C.cedecl|int $id:s(struct $id:ctx* ctx) {
+                             (void)ctx;
+                             return 0;
+                           }|]
+    )
 
-      GC.publicDef_ "context_config_set_size" GC.InitDecl $ \s ->
-        ( [C.cedecl|int $id:s(struct $id:cfg* cfg, const char *size_name, size_t size_value);|],
-          [C.cedecl|int $id:s(struct $id:cfg* cfg, const char *size_name, size_t size_value) {
-                         (void)cfg; (void)size_name; (void)size_value;
-                         return 1;
-                       }|]
-        )
+  GC.earlyDecl [C.cedecl|static const char *tuning_param_names[0];|]
+  GC.earlyDecl [C.cedecl|static const char *tuning_param_vars[0];|]
+  GC.earlyDecl [C.cedecl|static const char *tuning_param_classes[0];|]
+
+  GC.publicDef_ "context_config_set_tuning_param" GC.InitDecl $ \s ->
+    ( [C.cedecl|int $id:s(struct $id:cfg* cfg, const char *param_name, size_t param_value);|],
+      [C.cedecl|int $id:s(struct $id:cfg* cfg, const char *param_name, size_t param_value) {
+                     (void)cfg; (void)param_name; (void)param_value;
+                     return 1;
+                   }|]
+    )
 
 cliOptions :: [Option]
 cliOptions =
@@ -533,7 +537,7 @@ compileOp (Segop name params seq_task par_task retvals (SchedulerInfo nsubtask e
 
   e' <- GC.compileExp e
 
-  let lexical = lexicalMemoryUsage $ Function False [] params seq_code [] []
+  let lexical = lexicalMemoryUsage $ Function Nothing [] params seq_code [] []
 
   fstruct <-
     prepareTaskStruct "task" free_args free_ctypes retval_args retval_ctypes
@@ -558,7 +562,7 @@ compileOp (Segop name params seq_task par_task retvals (SchedulerInfo nsubtask e
   -- Generate the nested segop function if available
   fnpar_task <- case par_task of
     Just (ParallelTask nested_code nested_tid) -> do
-      let lexical_nested = lexicalMemoryUsage $ Function False [] params nested_code [] []
+      let lexical_nested = lexicalMemoryUsage $ Function Nothing [] params nested_code [] []
       fnpar_task <- generateParLoopFn lexical_nested (name ++ "_nested_task") nested_code fstruct free retval nested_tid nsubtask
       GC.stm [C.cstm|$id:ftask_name.nested_fn = $id:fnpar_task;|]
       return $ zip [fnpar_task] [True]
@@ -583,7 +587,7 @@ compileOp (ParLoop s' i prebody body postbody free tid) = do
 
   let lexical =
         lexicalMemoryUsage $
-          Function False [] free (prebody <> body) [] []
+          Function Nothing [] free (prebody <> body) [] []
 
   fstruct <-
     prepareTaskStruct (s' ++ "_parloop_struct") free_args free_ctypes mempty mempty
@@ -647,9 +651,9 @@ compileOp (Atomic aop) =
   atomicOps aop
 
 doAtomic ::
-  (C.ToIdent a1, C.ToIdent a2) =>
+  (C.ToIdent a1) =>
   a1 ->
-  a2 ->
+  VName ->
   Count u (TExp Int32) ->
   Exp ->
   String ->
@@ -658,15 +662,17 @@ doAtomic ::
 doAtomic old arr ind val op ty = do
   ind' <- GC.compileExp $ untyped $ unCount ind
   val' <- GC.compileExp val
-  GC.stm [C.cstm|$id:old = $id:op(&(($ty:ty*)$id:arr.mem)[$exp:ind'], ($ty:ty) $exp:val', __ATOMIC_RELAXED);|]
+  arr' <- GC.rawMem arr
+  GC.stm [C.cstm|$id:old = $id:op(&(($ty:ty*)$exp:arr')[$exp:ind'], ($ty:ty) $exp:val', __ATOMIC_RELAXED);|]
 
 atomicOps :: AtomicOp -> GC.CompilerM op s ()
 atomicOps (AtomicCmpXchg t old arr ind res val) = do
   ind' <- GC.compileExp $ untyped $ unCount ind
   new_val' <- GC.compileExp val
   let cast = [C.cty|$ty:(GC.primTypeToCType t)*|]
+  arr' <- GC.rawMem arr
   GC.stm
-    [C.cstm|$id:res = $id:op(&(($ty:cast)$id:arr.mem)[$exp:ind'],
+    [C.cstm|$id:res = $id:op(&(($ty:cast)$exp:arr')[$exp:ind'],
                 ($ty:cast)&$id:old,
                  $exp:new_val',
                  0, __ATOMIC_SEQ_CST, __ATOMIC_RELAXED);|]

@@ -3,6 +3,7 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 
+-- | Converting 'MC' programs to 'MCMem'.
 module Futhark.Pass.ExplicitAllocations.MC (explicitAllocations) where
 
 import Futhark.IR.MC
@@ -10,7 +11,7 @@ import Futhark.IR.MCMem
 import Futhark.Pass.ExplicitAllocations
 import Futhark.Pass.ExplicitAllocations.SegOp
 
-instance SizeSubst (MCOp lore op) where
+instance SizeSubst (MCOp rep op) where
   opSizeSubst _ _ = mempty
 
 handleSegOp :: SegOp () MC -> AllocM MC MCMem (SegOp () MCMem)
@@ -33,5 +34,6 @@ handleMCOp (ParOp par_op op) =
 handleMCOp (OtherOp soac) =
   error $ "Cannot allocate memory in SOAC: " ++ pretty soac
 
+-- | The pass from 'MC' to 'MCMem'.
 explicitAllocations :: Pass MC MCMem
 explicitAllocations = explicitAllocationsGeneric handleMCOp defaultExpHints

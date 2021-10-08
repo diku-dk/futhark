@@ -1,5 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 
+-- | Building blocks for parsing prim primexpressions.  *Not* an infix
+-- representation.
 module Futhark.Analysis.PrimExp.Parse
   ( pPrimExp,
     pPrimValue,
@@ -42,6 +44,7 @@ pConvOp = choice $ map p allConvOps
 parens :: Parser a -> Parser a
 parens = between (lexeme "(") (lexeme ")")
 
+-- | Parse a 'PrimExp' given a leaf parser.
 pPrimExp :: Parser (v, PrimType) -> Parser (PrimExp v)
 pPrimExp pLeaf =
   choice

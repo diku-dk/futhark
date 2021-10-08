@@ -50,12 +50,12 @@ stageReduction lam nes acc_vs stage_arrays idxs = do
 
   -- Compile the reduction lambdas
   compileStms mempty (bodyStms (lambdaBody lam)) $
-    forM_ (zip acc_vs (bodyResult (lambdaBody lam))) $ \(acc_v, se) ->
+    forM_ (zip acc_vs (bodyResult (lambdaBody lam))) $ \(acc_v, SubExpRes _ se) ->
       copyDWIMFix acc_v [] se []
 
 -- | Generate code for a SegRed construct
 compileSegRed ::
-  Pattern MCMem ->
+  Pat MCMem ->
   SegSpace ->
   [SegBinOp MCMem] ->
   KernelBody MCMem ->
@@ -79,7 +79,7 @@ compileSegRed pat space reds kbody
       -- gtid is the index used to read the input array
       dPrim_ gtid int64
       copyDWIM gtid [] (Var . tvVar $ stage_one_idx) []
-      compileStms mempty (kernelBodyStms kbody) $ stageReduction lam nes acc_vs (map (\(Returns _ se) -> se) (kernelBodyResult kbody)) []
+      compileStms mempty (kernelBodyStms kbody) $ stageReduction lam nes acc_vs (map (\(Returns _ _ se) -> se) (kernelBodyResult kbody)) []
 
     emit $ Imp.Op $ Imp.DistributedLoop "segred" (tvVar stage_one_idx) Imp.Skip stage_one mempty [] $ segFlat space
 
@@ -126,13 +126,13 @@ compileSegRed pat space reds kbody
     -- Node id 0 is the main node
     sIf ((Imp.vi64 . tvVar $ node_id) .==. 0) (emit stage_two) (pure ())
 
-    forM_ (zip (patternNames pat) acc_vs) $ \(v, acc_v) ->
+    forM_ (zip (patNames pat) acc_vs) $ \(v, acc_v) ->
       copyDWIMFix v [] (Var acc_v) []
 compileSegRed _pat _space _reds _kbody = error "Not implemented yet"
 
 -- | Like 'compileSegRed', but where the body is a monadic action.
 compileSegRed' ::
-  Pattern MCMem ->
+  Pat MCMem ->
   SegSpace ->
   [SegBinOp MCMem] ->
   TV Int32 ->

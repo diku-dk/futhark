@@ -188,6 +188,28 @@ jobs:
           nix-shell --pure --run "cabal update"
           nix-shell --pure --run "cabal test"
 
+  build-docs:
+    runs-on: ubuntu-20.04
+
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Install Nix
+      uses: cachix/install-nix-action@v12
+
+    - uses: actions/cache@v2
+      name: Cache ~/.cabal/packages, ~/.cabal/store and dist-newstyle
+      with:
+        path: |
+          ~/.cabal/packages
+          ~/.cabal/store
+          dist-newstyle
+        key: ${{ runner.os }}-${{ hashFiles('nix/sources.json') }}-haddock
+
+    - name: Run haddock
+      run: |
+          nix-shell --pure --run "cabal update"
+          nix-shell --pure --run "cabal haddock"
 
   test-interpreter:
     runs-on: ubuntu-20.04
@@ -216,6 +238,11 @@ jobs:
     steps:
     - uses: actions/checkout@v2
 
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y python3-jsonschema
+
     - uses: actions/download-artifact@v2
       with:
         name: futhark-nightly-linux-x86_64.tar.xz
@@ -227,6 +254,7 @@ jobs:
         echo "$HOME/.local/bin" >> $GITHUB_PATH
 
     - run: |
+        export CFLAGS="-fsanitize=undefined -fno-sanitize-recover -O3"
         futhark test -c --backend=c tests examples --no-tuning
         make -C tests_lib/c -j
 
@@ -236,6 +264,11 @@ jobs:
 
     steps:
     - uses: actions/checkout@v2
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y python3-jsonschema
 
     - uses: actions/download-artifact@v2
       with:
@@ -275,6 +308,7 @@ jobs:
 
     - run: |
         futhark test -c --no-terminal --no-tuning --backend=python --exclude=no_python --exclude=compiled tests examples
+        make -C tests_lib/python -j
 
   test-opencl:
     runs-on: ubuntu-20.04
@@ -286,7 +320,7 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y opencl-headers nvidia-cuda-dev nvidia-opencl-dev oclgrind
+        sudo apt-get install -y opencl-headers nvidia-cuda-dev nvidia-opencl-dev oclgrind python3-jsonschema
 
     - uses: actions/download-artifact@v2
       with:
@@ -299,7 +333,7 @@ jobs:
         echo "$HOME/.local/bin" >> $GITHUB_PATH
 
     - run: |
-        futhark test -c --no-terminal --backend=opencl --exclude=no_opencl --exclude=compiled --runner=tools/oclgrindrunner.sh tests examples
+        futhark test -c --no-terminal --backend=opencl --exclude=compiled --runner=tools/oclgrindrunner.sh tests examples
 
   test-pyopencl:
     runs-on: ubuntu-20.04
@@ -325,7 +359,7 @@ jobs:
         echo "$HOME/.local/bin" >> $GITHUB_PATH
 
     - run: |
-        futhark test -c --no-terminal --backend=pyopencl --exclude=no_opencl --exclude=compiled --runner=tools/oclgrindrunner.sh tests examples
+        futhark test -c --no-terminal --backend=pyopencl --exclude=compiled --runner=tools/oclgrindrunner.sh tests examples
 
   test-cuda:
     runs-on: ubuntu-20.04
@@ -350,7 +384,106 @@ jobs:
         echo "$HOME/.local/bin" >> $GITHUB_PATH
 
     - run: |
-        futhark test -C --no-terminal --backend=cuda --exclude=no_opencl tests examples
+        futhark test -C --no-terminal --backend=cuda tests examples
+
+  test-wasm:
+    runs-on: ubuntu-20.04
+    needs: [build-linux-nix]
+
+    steps:
+    - uses: actions/checkout@v2
+
+    - uses: mymindstorm/setup-emsdk@v7
+      with:
+        version: 2.0.18
+        actions-cache-folder: 'emsdk-cache'
+
+    - uses: actions/setup-node@v1
+      with:
+        node-version: '16.x'
+
+    - uses: actions/download-artifact@v2
+      with:
+        name: futhark-nightly-linux-x86_64.tar.xz
+
+    - name: Install from nightly tarball
+      run: |
+        tar xvf futhark-nightly-linux-x86_64.tar.xz
+        make -C futhark-nightly-linux-x86_64/ install PREFIX=$HOME/.local
+        echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+    - name: Run tests
+      run: |
+        node --version
+        export EMCFLAGS="-sINITIAL_MEMORY=2147418112 -O1" # 2gb - 64kb... largest value of memory
+        futhark test -c --backend=wasm --runner=./tools/node-simd.sh --no-tuning --exclude=no_wasm tests examples
+
+  test-wasm-multicore:
+    runs-on: ubuntu-20.04
+    needs: [build-linux-nix]
+
+    steps:
+    - uses: actions/checkout@v2
+
+    - uses: mymindstorm/setup-emsdk@v7
+      with:
+        version: 2.0.18
+        actions-cache-folder: 'emsdk-cache'
+
+    - uses: actions/setup-node@v1
+      with:
+        node-version: '16.x'
+
+    - uses: actions/download-artifact@v2
+      with:
+        name: futhark-nightly-linux-x86_64.tar.xz
+
+    - name: Install from nightly tarball
+      run: |
+        tar xvf futhark-nightly-linux-x86_64.tar.xz
+        make -C futhark-nightly-linux-x86_64/ install PREFIX=$HOME/.local
+        echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+    - name: Run tests
+      run: |
+        node --version
+        export EMCFLAGS="-sINITIAL_MEMORY=2147418112 -O1 -s PTHREAD_POOL_SIZE=12" # 2gb - 64kb... largest value of memory
+        futhark test -c --backend=wasm-multicore --runner=./tools/node-threaded.sh --no-tuning --exclude=no_wasm tests examples
+
+  test-wasm-lib:
+    runs-on: ubuntu-20.04
+    needs: [build-linux-nix]
+
+    steps:
+    - uses: actions/checkout@v2
+
+    - uses: mymindstorm/setup-emsdk@v7
+      with:
+        version: 2.0.18
+        actions-cache-folder: 'emsdk-cache'
+
+    - uses: actions/setup-node@v1
+      with:
+        node-version: '16.x'
+
+    - name: Install Jest
+      run: |
+        npm install jest --global
+
+    - uses: actions/download-artifact@v2
+      with:
+        name: futhark-nightly-linux-x86_64.tar.xz
+
+    - name: Install from nightly tarball
+      run: |
+        tar xvf futhark-nightly-linux-x86_64.tar.xz
+        make -C futhark-nightly-linux-x86_64/ install PREFIX=$HOME/.local
+        echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+    - name: Run tests
+      run: |
+        make -C tests_lib/javascript
+        make -C tests_lib/web
 
   test-tools:
     runs-on: ubuntu-20.04
@@ -377,6 +510,15 @@ jobs:
 
     - run: |
         cd tests_literate && sh test.sh
+
+    - run: |
+        cd tests_repl && sh test.sh
+
+    - run: |
+        cd tests_bench && sh test.sh
+
+    - run: |
+        cd tests_adhoc && sh test.sh
 
     - run: |
         futhark doc -o prelude-docs prelude
@@ -412,7 +554,7 @@ jobs:
         echo "$HOME/.local/bin" >> $GITHUB_PATH
 
     - run: |
-        futhark test -C --no-terminal --backend=opencl --exclude=no_opencl  --pass-compiler-option=--Werror futhark-benchmarks
+        futhark test -C --no-terminal --backend=opencl  --pass-compiler-option=--Werror futhark-benchmarks
 
   deploy-nightly:
     runs-on: ubuntu-20.04
