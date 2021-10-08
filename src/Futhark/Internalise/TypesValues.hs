@@ -113,7 +113,7 @@ internaliseDim ::
   InternaliseTypeM ExtSize
 internaliseDim d =
   case d of
-    E.AnyDim -> Ext <$> newId
+    E.AnyDim _ -> Ext <$> newId
     E.ConstDim n -> return $ Free $ intConst I.Int64 $ toInteger n
     E.NamedDim name -> namedDim name
   where
@@ -135,9 +135,9 @@ internaliseTypeM orig_t =
     E.Scalar (E.Prim bt) ->
       return [I.Prim $ internalisePrimType bt]
     E.Scalar (E.Record ets)
-      -- XXX: we map empty records to bools, because otherwise
+      -- XXX: we map empty records to units, because otherwise
       -- arrays of unit will lose their sizes.
-      | null ets -> return [I.Prim I.Bool]
+      | null ets -> return [I.Prim I.Unit]
       | otherwise ->
         concat <$> mapM (internaliseTypeM . snd) (E.sortFields ets)
     E.Scalar (E.TypeVar _ u tn [E.TypeArgType arr_t _])
@@ -200,8 +200,11 @@ internaliseSumType cs =
 
 -- | How many core language values are needed to represent one source
 -- language value of the given type?
-internalisedTypeSize :: E.TypeBase (E.DimDecl VName) () -> InternaliseM Int
-internalisedTypeSize = fmap length . internaliseType
+internalisedTypeSize :: E.TypeBase (E.DimDecl VName) als -> InternaliseM Int
+-- A few special cases for performance.
+internalisedTypeSize (E.Scalar (E.Prim _)) = pure 1
+internalisedTypeSize (E.Array _ _ (E.Prim _) _) = pure 1
+internalisedTypeSize t = length <$> internaliseType (t `E.setAliases` ())
 
 -- | Convert an external primitive to an internal primitive.
 internalisePrimType :: E.PrimType -> I.PrimType

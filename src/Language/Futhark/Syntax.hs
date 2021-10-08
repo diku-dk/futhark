@@ -5,11 +5,14 @@
 {-# LANGUAGE Strict #-}
 
 -- | The Futhark source language AST definition.  Many types, such as
--- 'ExpBase'@, are parametrised by type and name representation.  See
--- the @https://futhark.readthedocs.org@ for a language reference, or
--- this module may be a little hard to understand.
+-- 'ExpBase'@, are parametrised by type and name representation.
+-- E.g. in a value of type @ExpBase f vn@, annotations are wrapped in
+-- the functor @f@, and all names are of type @vn@.  See the
+-- @https://futhark.readthedocs.org@ for a language reference, or this
+-- module may be a little hard to understand.
 module Language.Futhark.Syntax
   ( module Language.Futhark.Core,
+    pretty,
 
     -- * Types
     Uniqueness (..),
@@ -21,7 +24,6 @@ module Language.Futhark.Syntax
     ShapeDecl (..),
     shapeRank,
     stripDims,
-    unifyShapes,
     TypeName (..),
     typeNameFromQualName,
     qualNameFromTypeName,
@@ -32,7 +34,7 @@ module Language.Futhark.Syntax
     TypeArgExp (..),
     PName (..),
     ScalarTypeBase (..),
-    PatternType,
+    PatType,
     StructType,
     ValueType,
     Diet (..),
@@ -51,12 +53,16 @@ module Language.Futhark.Syntax
     IdentBase (..),
     Inclusiveness (..),
     DimIndexBase (..),
+    SliceBase,
+    SizeBinder (..),
+    AppExpBase (..),
+    AppRes (..),
     ExpBase (..),
     FieldBase (..),
     CaseBase (..),
     LoopFormBase (..),
     PatLit (..),
-    PatternBase (..),
+    PatBase (..),
 
     -- * Module language
     SpecBase (..),
@@ -72,6 +78,7 @@ module Language.Futhark.Syntax
     ValBindBase (..),
     EntryPoint (..),
     EntryType (..),
+    EntryParam (..),
     Liftedness (..),
     TypeBindBase (..),
     TypeParamBase (..),
@@ -121,18 +128,17 @@ class
     Show (f String),
     Show (f [VName]),
     Show (f ([VName], [VName])),
-    Show (f PatternType),
-    Show (f (PatternType, [VName])),
+    Show (f PatType),
+    Show (f (PatType, [VName])),
     Show (f (StructType, [VName])),
     Show (f EntryPoint),
-    Show (f Int),
     Show (f StructType),
     Show (f (StructType, Maybe VName)),
     Show (f (PName, StructType)),
     Show (f (PName, StructType, Maybe VName)),
     Show (f (Aliasing, StructType)),
     Show (f (M.Map VName VName)),
-    Show (f Uniqueness)
+    Show (f AppRes)
   ) =>
   Showable f vn
 
@@ -247,15 +253,14 @@ data DimDecl vn
     NamedDim (QualName vn)
   | -- | The size is a constant.
     ConstDim Int
-  | -- | No dimension declaration.
-    AnyDim
+  | -- | No known size - but still possibly given a unique name, so we
+    -- can recognise e.g. @type square [n] = [n][n]i32@ and make
+    -- @square []@ do the right thing.  If @Nothing@, then this is a
+    -- name distinct from any other.
+    AnyDim (Maybe vn)
   deriving (Show)
 
-deriving instance Eq (DimDecl Name)
-
 deriving instance Eq (DimDecl VName)
-
-deriving instance Ord (DimDecl Name)
 
 deriving instance Ord (DimDecl VName)
 
@@ -268,13 +273,13 @@ instance Foldable DimDecl where
 instance Traversable DimDecl where
   traverse f (NamedDim qn) = NamedDim <$> traverse f qn
   traverse _ (ConstDim x) = pure $ ConstDim x
-  traverse _ AnyDim = pure AnyDim
+  traverse f (AnyDim v) = AnyDim <$> traverse f v
 
 -- Note that the notion of unifyDims here is intentionally not what we
 -- use when we do real type unification in the type checker.
 instance ArrayDim (DimDecl VName) where
-  unifyDims AnyDim y = Just y
-  unifyDims x AnyDim = Just x
+  unifyDims AnyDim {} y = Just y
+  unifyDims x AnyDim {} = Just x
   unifyDims (NamedDim x) (NamedDim y) | x == y = Just $ NamedDim x
   unifyDims (ConstDim x) (ConstDim y) | x == y = Just $ ConstDim x
   unifyDims _ _ = Nothing
@@ -310,13 +315,6 @@ stripDims :: Int -> ShapeDecl dim -> Maybe (ShapeDecl dim)
 stripDims i (ShapeDecl l)
   | i < length l = Just $ ShapeDecl $ drop i l
   | otherwise = Nothing
-
--- | @unifyShapes x y@ combines @x@ and @y@ to contain their maximum
--- common information, and fails if they conflict.
-unifyShapes :: ArrayDim dim => ShapeDecl dim -> ShapeDecl dim -> Maybe (ShapeDecl dim)
-unifyShapes (ShapeDecl xs) (ShapeDecl ys) = do
-  guard $ length xs == length ys
-  ShapeDecl <$> zipWithM unifyDims xs ys
 
 -- | A type name consists of qualifiers (for error messages) and a
 -- 'VName' (for equality checking).
@@ -428,7 +426,7 @@ type Aliasing = S.Set Alias
 
 -- | A type with aliasing information and shape annotations, used for
 -- describing the type patterns and expressions.
-type PatternType = TypeBase (DimDecl VName) Aliasing
+type PatType = TypeBase (DimDecl VName) Aliasing
 
 -- | A "structural" type with shape annotations and no aliasing
 -- information, used for declarations.
@@ -551,7 +549,7 @@ data Value
 -- bound to the identifier.
 data IdentBase f vn = Ident
   { identName :: vn,
-    identType :: f PatternType,
+    identType :: f PatType,
     identSrcLoc :: SrcLoc
   }
 
@@ -643,6 +641,9 @@ deriving instance Eq (DimIndexBase NoInfo VName)
 
 deriving instance Ord (DimIndexBase NoInfo VName)
 
+-- | A slicing of an array (potentially multiple dimensions).
+type SliceBase f vn = [DimIndexBase f vn]
+
 -- | A name qualified with a breadcrumb of module accesses.
 data QualName vn = QualName
   { qualQuals :: ![vn],
@@ -671,10 +672,110 @@ instance Foldable QualName where
 instance Traversable QualName where
   traverse f (QualName qs v) = QualName <$> traverse f qs <*> f v
 
+-- | A binding of a size in a pattern (essentially a size parameter in
+-- a @let@ expression).
+data SizeBinder vn = SizeBinder {sizeName :: !vn, sizeLoc :: !SrcLoc}
+  deriving (Eq, Ord, Show)
+
+instance Located (SizeBinder vn) where
+  locOf = locOf . sizeLoc
+
+-- | An "application expression" is a semantic (not syntactic)
+-- grouping of expressions that have "funcall-like" semantics, mostly
+-- meaning that they can return existential sizes.  In our type
+-- theory, these are all thought to be bound to names (*Administrative
+-- Normal Form*), but as this is not practical in a real language, we
+-- instead use an annotation ('AppRes') that stores the information we
+-- need, so we can pretend that an application expression was really
+-- bound to a name.
+data AppExpBase f vn
+  = -- | The @Maybe VName@ is a possible existential size that is
+    -- instantiated by this argument.  May have duplicates across the
+    -- program, but they will all produce the same value (the
+    -- expressions will be identical).
+    Apply
+      (ExpBase f vn)
+      (ExpBase f vn)
+      (f (Diet, Maybe VName))
+      SrcLoc
+  | -- | Size coercion: @e :> t@.
+    Coerce (ExpBase f vn) (TypeDeclBase f vn) SrcLoc
+  | Range
+      (ExpBase f vn)
+      (Maybe (ExpBase f vn))
+      (Inclusiveness (ExpBase f vn))
+      SrcLoc
+  | LetPat
+      [SizeBinder vn]
+      (PatBase f vn)
+      (ExpBase f vn)
+      (ExpBase f vn)
+      SrcLoc
+  | LetFun
+      vn
+      ( [TypeParamBase vn],
+        [PatBase f vn],
+        Maybe (TypeExp vn),
+        f StructType,
+        ExpBase f vn
+      )
+      (ExpBase f vn)
+      SrcLoc
+  | If (ExpBase f vn) (ExpBase f vn) (ExpBase f vn) SrcLoc
+  | DoLoop
+      [VName] -- Size parameters.
+      (PatBase f vn) -- Merge variable pattern.
+      (ExpBase f vn) -- Initial values of merge variables.
+      (LoopFormBase f vn) -- Do or while loop.
+      (ExpBase f vn) -- Loop body.
+      SrcLoc
+  | BinOp
+      (QualName vn, SrcLoc)
+      (f PatType)
+      (ExpBase f vn, f (StructType, Maybe VName))
+      (ExpBase f vn, f (StructType, Maybe VName))
+      SrcLoc
+  | LetWith
+      (IdentBase f vn)
+      (IdentBase f vn)
+      (SliceBase f vn)
+      (ExpBase f vn)
+      (ExpBase f vn)
+      SrcLoc
+  | Index (ExpBase f vn) (SliceBase f vn) SrcLoc
+  | -- | A match expression.
+    Match (ExpBase f vn) (NE.NonEmpty (CaseBase f vn)) SrcLoc
+
+deriving instance Showable f vn => Show (AppExpBase f vn)
+
+deriving instance Eq (AppExpBase NoInfo VName)
+
+deriving instance Ord (AppExpBase NoInfo VName)
+
+instance Located (AppExpBase f vn) where
+  locOf (Range _ _ _ pos) = locOf pos
+  locOf (BinOp _ _ _ _ loc) = locOf loc
+  locOf (If _ _ _ loc) = locOf loc
+  locOf (Coerce _ _ loc) = locOf loc
+  locOf (Apply _ _ _ loc) = locOf loc
+  locOf (LetPat _ _ _ _ loc) = locOf loc
+  locOf (LetFun _ _ _ loc) = locOf loc
+  locOf (LetWith _ _ _ _ _ loc) = locOf loc
+  locOf (Index _ _ loc) = locOf loc
+  locOf (DoLoop _ _ _ _ _ loc) = locOf loc
+  locOf (Match _ _ loc) = locOf loc
+
+-- | An annotation inserted by the type checker on constructs that are
+-- "function calls" (either literally or conceptually).  This
+-- annotation encodes the result type, as well as any existential
+-- sizes that are generated here.
+data AppRes = AppRes
+  { appResType :: PatType,
+    appResExt :: [VName]
+  }
+  deriving (Eq, Ord, Show)
+
 -- | The Futhark expression language.
---
--- In a value of type @Exp f vn@, annotations are wrapped in the
--- functor @f@, and all names are of type @vn@.
 --
 -- This allows us to encode whether or not the expression has been
 -- type-checked in the Haskell type of the expression.  Specifically,
@@ -684,12 +785,13 @@ instance Traversable QualName where
 data ExpBase f vn
   = Literal PrimValue SrcLoc
   | -- | A polymorphic integral literal.
-    IntLit Integer (f PatternType) SrcLoc
+    IntLit Integer (f PatType) SrcLoc
   | -- | A polymorphic decimal literal.
-    FloatLit Double (f PatternType) SrcLoc
+    FloatLit Double (f PatType) SrcLoc
   | -- | A string literal is just a fancy syntax for an array
     -- of bytes.
     StringLit [Word8] SrcLoc
+  | Var (QualName vn) (f PatType) SrcLoc
   | -- | A parenthesized expression.
     Parens (ExpBase f vn) SrcLoc
   | QualParens (QualName vn, SrcLoc) (ExpBase f vn) SrcLoc
@@ -699,120 +801,53 @@ data ExpBase f vn
     RecordLit [FieldBase f vn] SrcLoc
   | -- | Array literals, e.g., @[ [1+x, 3], [2, 1+4] ]@.
     -- Second arg is the row type of the rows of the array.
-    ArrayLit [ExpBase f vn] (f PatternType) SrcLoc
-  | Range
-      (ExpBase f vn)
-      (Maybe (ExpBase f vn))
-      (Inclusiveness (ExpBase f vn))
-      (f PatternType, f [VName])
-      SrcLoc
-  | Var (QualName vn) (f PatternType) SrcLoc
-  | -- | Type ascription: @e : t@.
-    Ascript (ExpBase f vn) (TypeDeclBase f vn) SrcLoc
-  | -- | Size coercion: @e :> t@.
-    Coerce (ExpBase f vn) (TypeDeclBase f vn) (f PatternType, f [VName]) SrcLoc
-  | LetPat
-      (PatternBase f vn)
-      (ExpBase f vn)
-      (ExpBase f vn)
-      (f PatternType, f [VName])
-      SrcLoc
-  | LetFun
-      vn
-      ( [TypeParamBase vn],
-        [PatternBase f vn],
-        Maybe (TypeExp vn),
-        f StructType,
-        ExpBase f vn
-      )
-      (ExpBase f vn)
-      (f PatternType)
-      SrcLoc
-  | If (ExpBase f vn) (ExpBase f vn) (ExpBase f vn) (f PatternType, f [VName]) SrcLoc
-  | -- | The @Maybe VName@ is a possible existential size
-    -- that is instantiated by this argument..
-    --
-    -- The @[VName]@ are the existential sizes that come
-    -- into being at this call site.
-    Apply
-      (ExpBase f vn)
-      (ExpBase f vn)
-      (f (Diet, Maybe VName))
-      (f PatternType, f [VName])
-      SrcLoc
+    ArrayLit [ExpBase f vn] (f PatType) SrcLoc
+  | -- | An attribute applied to the following expression.
+    Attr AttrInfo (ExpBase f vn) SrcLoc
+  | Project Name (ExpBase f vn) (f PatType) SrcLoc
   | -- | Numeric negation (ugly special case; Haskell did it first).
     Negate (ExpBase f vn) SrcLoc
-  | Lambda
-      [PatternBase f vn]
-      (ExpBase f vn)
-      (Maybe (TypeExp vn))
-      (f (Aliasing, StructType))
-      SrcLoc
-  | -- | @+@; first two types are operands, third is result.
-    OpSection (QualName vn) (f PatternType) SrcLoc
-  | -- | @2+@; first type is operand, second is result.
-    OpSectionLeft
-      (QualName vn)
-      (f PatternType)
-      (ExpBase f vn)
-      (f (PName, StructType, Maybe VName), f (PName, StructType))
-      (f PatternType, f [VName])
-      SrcLoc
-  | -- | @+2@; first type is operand, second is result.
-    OpSectionRight
-      (QualName vn)
-      (f PatternType)
-      (ExpBase f vn)
-      (f (PName, StructType), f (PName, StructType, Maybe VName))
-      (f PatternType)
-      SrcLoc
-  | -- | Field projection as a section: @(.x.y.z)@.
-    ProjectSection [Name] (f PatternType) SrcLoc
-  | -- | Array indexing as a section: @(.[i,j])@.
-    IndexSection [DimIndexBase f vn] (f PatternType) SrcLoc
-  | DoLoop
-      [VName] -- Size parameters.
-      (PatternBase f vn) -- Merge variable pattern.
-      (ExpBase f vn) -- Initial values of merge variables.
-      (LoopFormBase f vn) -- Do or while loop.
-      (ExpBase f vn) -- Loop body.
-      (f (PatternType, [VName])) -- Return type.
-      SrcLoc
-  | BinOp
-      (QualName vn, SrcLoc)
-      (f PatternType)
-      (ExpBase f vn, f (StructType, Maybe VName))
-      (ExpBase f vn, f (StructType, Maybe VName))
-      (f PatternType)
-      (f [VName])
-      SrcLoc
-  | Project Name (ExpBase f vn) (f PatternType) SrcLoc
-  | -- Primitive array operations
-    LetWith
-      (IdentBase f vn)
-      (IdentBase f vn)
-      [DimIndexBase f vn]
-      (ExpBase f vn)
-      (ExpBase f vn)
-      (f PatternType)
-      SrcLoc
-  | Index (ExpBase f vn) [DimIndexBase f vn] (f PatternType, f [VName]) SrcLoc
-  | Update (ExpBase f vn) [DimIndexBase f vn] (ExpBase f vn) SrcLoc
-  | RecordUpdate (ExpBase f vn) [Name] (ExpBase f vn) (f PatternType) SrcLoc
+  | -- | Logical and bitwise negation.
+    Not (ExpBase f vn) SrcLoc
   | -- | Fail if the first expression does not return true,
     -- and return the value of the second expression if it
     -- does.
     Assert (ExpBase f vn) (ExpBase f vn) (f String) SrcLoc
   | -- | An n-ary value constructor.
-    Constr Name [ExpBase f vn] (f PatternType) SrcLoc
-  | -- | A match expression.
-    Match
+    Constr Name [ExpBase f vn] (f PatType) SrcLoc
+  | Update (ExpBase f vn) (SliceBase f vn) (ExpBase f vn) SrcLoc
+  | RecordUpdate (ExpBase f vn) [Name] (ExpBase f vn) (f PatType) SrcLoc
+  | Lambda
+      [PatBase f vn]
       (ExpBase f vn)
-      (NE.NonEmpty (CaseBase f vn))
-      (f PatternType, f [VName])
+      (Maybe (TypeExp vn))
+      (f (Aliasing, StructType))
       SrcLoc
-  | -- | An attribute applied to the following expression.
-    Attr AttrInfo (ExpBase f vn) SrcLoc
+  | -- | @+@; first two types are operands, third is result.
+    OpSection (QualName vn) (f PatType) SrcLoc
+  | -- | @2+@; first type is operand, second is result.
+    OpSectionLeft
+      (QualName vn)
+      (f PatType)
+      (ExpBase f vn)
+      (f (PName, StructType, Maybe VName), f (PName, StructType))
+      (f PatType, f [VName])
+      SrcLoc
+  | -- | @+2@; first type is operand, second is result.
+    OpSectionRight
+      (QualName vn)
+      (f PatType)
+      (ExpBase f vn)
+      (f (PName, StructType), f (PName, StructType, Maybe VName))
+      (f PatType)
+      SrcLoc
+  | -- | Field projection as a section: @(.x.y.z)@.
+    ProjectSection [Name] (f PatType) SrcLoc
+  | -- | Array indexing as a section: @(.[i,j])@.
+    IndexSection (SliceBase f vn) (f PatType) SrcLoc
+  | -- | Type ascription: @e : t@.
+    Ascript (ExpBase f vn) (TypeDeclBase f vn) SrcLoc
+  | AppExp (AppExpBase f vn) (f AppRes)
 
 deriving instance Showable f vn => Show (ExpBase f vn)
 
@@ -831,18 +866,10 @@ instance Located (ExpBase f vn) where
   locOf (Project _ _ _ pos) = locOf pos
   locOf (ArrayLit _ _ pos) = locOf pos
   locOf (StringLit _ loc) = locOf loc
-  locOf (Range _ _ _ _ pos) = locOf pos
-  locOf (BinOp _ _ _ _ _ _ loc) = locOf loc
-  locOf (If _ _ _ _ pos) = locOf pos
   locOf (Var _ _ loc) = locOf loc
   locOf (Ascript _ _ loc) = locOf loc
-  locOf (Coerce _ _ _ loc) = locOf loc
   locOf (Negate _ pos) = locOf pos
-  locOf (Apply _ _ _ _ loc) = locOf loc
-  locOf (LetPat _ _ _ _ loc) = locOf loc
-  locOf (LetFun _ _ _ _ loc) = locOf loc
-  locOf (LetWith _ _ _ _ _ _ loc) = locOf loc
-  locOf (Index _ _ _ loc) = locOf loc
+  locOf (Not _ pos) = locOf pos
   locOf (Update _ _ _ pos) = locOf pos
   locOf (RecordUpdate _ _ _ _ pos) = locOf pos
   locOf (Lambda _ _ _ _ loc) = locOf loc
@@ -851,16 +878,15 @@ instance Located (ExpBase f vn) where
   locOf (OpSectionRight _ _ _ _ _ loc) = locOf loc
   locOf (ProjectSection _ _ loc) = locOf loc
   locOf (IndexSection _ _ loc) = locOf loc
-  locOf (DoLoop _ _ _ _ _ _ loc) = locOf loc
   locOf (Assert _ _ _ loc) = locOf loc
   locOf (Constr _ _ _ loc) = locOf loc
-  locOf (Match _ _ _ loc) = locOf loc
   locOf (Attr _ _ loc) = locOf loc
+  locOf (AppExp e _) = locOf e
 
 -- | An entry in a record literal.
 data FieldBase f vn
   = RecordFieldExplicit Name (ExpBase f vn) SrcLoc
-  | RecordFieldImplicit vn (f PatternType) SrcLoc
+  | RecordFieldImplicit vn (f PatType) SrcLoc
 
 deriving instance Showable f vn => Show (FieldBase f vn)
 
@@ -873,7 +899,7 @@ instance Located (FieldBase f vn) where
   locOf (RecordFieldImplicit _ _ loc) = locOf loc
 
 -- | A case in a match expression.
-data CaseBase f vn = CasePat (PatternBase f vn) (ExpBase f vn) SrcLoc
+data CaseBase f vn = CasePat (PatBase f vn) (ExpBase f vn) SrcLoc
 
 deriving instance Showable f vn => Show (CaseBase f vn)
 
@@ -887,7 +913,7 @@ instance Located (CaseBase f vn) where
 -- | Whether the loop is a @for@-loop or a @while@-loop.
 data LoopFormBase f vn
   = For (IdentBase f vn) (ExpBase f vn)
-  | ForIn (PatternBase f vn) (ExpBase f vn)
+  | ForIn (PatBase f vn) (ExpBase f vn)
   | While (ExpBase f vn)
 
 deriving instance Showable f vn => Show (LoopFormBase f vn)
@@ -905,31 +931,31 @@ data PatLit
 
 -- | A pattern as used most places where variables are bound (function
 -- parameters, @let@ expressions, etc).
-data PatternBase f vn
-  = TuplePattern [PatternBase f vn] SrcLoc
-  | RecordPattern [(Name, PatternBase f vn)] SrcLoc
-  | PatternParens (PatternBase f vn) SrcLoc
-  | Id vn (f PatternType) SrcLoc
-  | Wildcard (f PatternType) SrcLoc -- Nothing, i.e. underscore.
-  | PatternAscription (PatternBase f vn) (TypeDeclBase f vn) SrcLoc
-  | PatternLit PatLit (f PatternType) SrcLoc
-  | PatternConstr Name (f PatternType) [PatternBase f vn] SrcLoc
+data PatBase f vn
+  = TuplePat [PatBase f vn] SrcLoc
+  | RecordPat [(Name, PatBase f vn)] SrcLoc
+  | PatParens (PatBase f vn) SrcLoc
+  | Id vn (f PatType) SrcLoc
+  | Wildcard (f PatType) SrcLoc -- Nothing, i.e. underscore.
+  | PatAscription (PatBase f vn) (TypeDeclBase f vn) SrcLoc
+  | PatLit PatLit (f PatType) SrcLoc
+  | PatConstr Name (f PatType) [PatBase f vn] SrcLoc
 
-deriving instance Showable f vn => Show (PatternBase f vn)
+deriving instance Showable f vn => Show (PatBase f vn)
 
-deriving instance Eq (PatternBase NoInfo VName)
+deriving instance Eq (PatBase NoInfo VName)
 
-deriving instance Ord (PatternBase NoInfo VName)
+deriving instance Ord (PatBase NoInfo VName)
 
-instance Located (PatternBase f vn) where
-  locOf (TuplePattern _ loc) = locOf loc
-  locOf (RecordPattern _ loc) = locOf loc
-  locOf (PatternParens _ loc) = locOf loc
+instance Located (PatBase f vn) where
+  locOf (TuplePat _ loc) = locOf loc
+  locOf (RecordPat _ loc) = locOf loc
+  locOf (PatParens _ loc) = locOf loc
   locOf (Id _ _ loc) = locOf loc
   locOf (Wildcard _ loc) = locOf loc
-  locOf (PatternAscription _ _ loc) = locOf loc
-  locOf (PatternLit _ _ loc) = locOf loc
-  locOf (PatternConstr _ _ _ loc) = locOf loc
+  locOf (PatAscription _ _ loc) = locOf loc
+  locOf (PatLit _ _ loc) = locOf loc
+  locOf (PatConstr _ _ _ loc) = locOf loc
 
 -- | Documentation strings, including source location.
 data DocComment = DocComment String SrcLoc
@@ -946,13 +972,20 @@ data EntryType = EntryType
   }
   deriving (Show)
 
+-- | A parameter of an entry point.
+data EntryParam = EntryParam
+  { entryParamName :: Name,
+    entryParamType :: EntryType
+  }
+  deriving (Show)
+
 -- | Information about the external interface exposed by an entry
 -- point.  The important thing is that that we remember the original
 -- source-language types, without desugaring them at all.  The
 -- annoying thing is that we do not require type annotations on entry
 -- points, so the types can be either ascribed or inferred.
 data EntryPoint = EntryPoint
-  { entryParams :: [EntryType],
+  { entryParams :: [EntryParam],
     entryReturn :: EntryType
   }
   deriving (Show)
@@ -968,7 +1001,7 @@ data ValBindBase f vn = ValBind
     valBindRetDecl :: Maybe (TypeExp vn),
     valBindRetType :: f (StructType, [VName]),
     valBindTypeParams :: [TypeParamBase vn],
-    valBindParams :: [PatternBase f vn],
+    valBindParams :: [PatBase f vn],
     valBindBody :: ExpBase f vn,
     valBindDoc :: Maybe DocComment,
     valBindAttrs :: [AttrInfo],

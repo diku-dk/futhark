@@ -20,6 +20,7 @@ import qualified Futhark.CodeGen.ImpGen.MPI as ImpGen
 import Futhark.IR.MCMem (MCMem, Prog)
 import Futhark.MonadFreshNames
 import qualified Language.C.Quote.OpenCL as C
+import NeatInterpolation (untrimming)
 
 compileProg ::
   MonadFreshNames m =>
@@ -38,8 +39,9 @@ compileProg =
     <=< ImpGen.compileProg
   where
     mpi_includes =
-      unlines
-        ["#include <mpi.h>"]
+      [untrimming|
+       #include <mpi.h>
+      |]
     generateContext = do
       cfg <- GC.publicDef "context_config" GC.InitDecl $ \s ->
         ( [C.cedecl|struct $id:s;|],
@@ -156,9 +158,17 @@ compileProg =
                                }|]
         )
 
-      GC.earlyDecl [C.cedecl|static const char *size_names[0];|]
-      GC.earlyDecl [C.cedecl|static const char *size_vars[0];|]
-      GC.earlyDecl [C.cedecl|static const char *size_classes[0];|]
+      GC.earlyDecl [C.cedecl|static const char *tuning_param_names[0];|]
+      GC.earlyDecl [C.cedecl|static const char *tuning_param_vars[0];|]
+      GC.earlyDecl [C.cedecl|static const char *tuning_param_classes[0];|]
+
+      GC.publicDef_ "context_config_set_tuning_param" GC.InitDecl $ \s ->
+        ( [C.cedecl|int $id:s(struct $id:cfg* cfg, const char *param_name, size_t param_value);|],
+          [C.cedecl|int $id:s(struct $id:cfg* cfg, const char *param_name, size_t param_value) {
+                        (void)cfg; (void)param_name; (void)param_value;
+                        return 1;
+                      }|]
+        )
 
       GC.publicDef_ "context_config_set_size" GC.InitDecl $ \s ->
         ( [C.cedecl|int $id:s(struct $id:cfg* cfg, const char *size_name, size_t size_value);|],
@@ -206,32 +216,30 @@ compileOp (Segop _name _params code _retvals iterations) = do
   GC.decl [C.cdecl|typename int64_t iterations = $exp:i;|]
   GC.compileCode code
 compileOp (Gather memory type_size) = do
+  ts <- GC.compileExp type_size
   GC.stm
     [C.cstm|
       {
-        uint nb_elements = $id:memory.size / $type_size;
-        uint size_remainder = $type_size *(nb_elements % ctx->world_size);
+        
+        uint nb_elements = $id:memory.size / $exp:ts;
+        uint size_remainder = $exp:ts *(nb_elements % ctx->world_size);
         // Euclidian division, cannot be simplified.
-        uint size = $type_size*(nb_elements / ctx->world_size);
-        if(!ctx->rank){
-          int *recvcounts = malloc(ctx->world_size * sizeof(int));
-          int *displs = malloc(ctx->world_size * sizeof(int));
+        uint size = $exp:ts*(nb_elements / ctx->world_size);
 
-          recvcounts[0] = size + size_remainder;
-          displs[0] = 0;
-          for(int i = 1; i < ctx->world_size; i++){
-            recvcounts[i] = size;
-            displs[i] = recvcounts[i-1] + displs[i-1];
-          }
-          MPI_Gatherv($id:memory.mem, recvcounts[ctx->rank], MPI_BYTE,
-          $id:memory.mem, recvcounts, displs, MPI_BYTE, 0, MPI_COMM_WORLD);
-          free(recvcounts);
-          free(displs);
-        }else{
-          int start = size*ctx->rank + size_remainder;
-          MPI_Gatherv($id:memory.mem+start, size, MPI_BYTE,
-          NULL, NULL, NULL, MPI_BYTE, 0, MPI_COMM_WORLD);
+        int *recvcounts = malloc(ctx->world_size * sizeof(int));
+        int *displs = malloc(ctx->world_size * sizeof(int));
+
+        recvcounts[0] = size + size_remainder;
+        displs[0] = 0;
+        for(int i = 1; i < ctx->world_size; i++){
+          recvcounts[i] = size;
+          displs[i] = recvcounts[i-1] + displs[i-1];
         }
+
+        MPI_Allgatherv($id:memory.mem+displs[ctx->rank], recvcounts[ctx->rank], MPI_BYTE,
+        $id:memory.mem, recvcounts, displs, MPI_BYTE, MPI_COMM_WORLD);
+        free(recvcounts);
+        free(displs);
       }
     |]
 compileOp (DistributedLoop _s i prebody body postbody _ _) = do

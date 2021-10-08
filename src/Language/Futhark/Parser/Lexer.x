@@ -23,7 +23,7 @@ import Data.Function (fix)
 import Data.List
 import Data.Monoid
 import Data.Either
-import Numeric
+import Numeric.Half
 
 import Language.Futhark.Core (Int8, Int16, Int32, Int64,
                               Word8, Word16, Word32, Word64,
@@ -50,9 +50,6 @@ import Futhark.Util.Loc hiding (L)
 
 @identifier = [a-zA-Z] [a-zA-Z0-9_']* | "_" [a-zA-Z0-9] [a-zA-Z0-9_']*
 @qualidentifier = (@identifier ".")+ @identifier
-
-@unop = "!"
-@qualunop = (@identifier ".")+ @unop
 
 $opchar = [\+\-\*\/\%\=\!\>\<\|\&\^\.]
 @binop = ($opchar # \.) $opchar*
@@ -93,6 +90,8 @@ tokens :-
   "..>"                    { tokenC TWO_DOTS_GT }
   "..."                    { tokenC THREE_DOTS }
   ".."                     { tokenC TWO_DOTS }
+  "."                      { tokenC DOT }
+  "!"                      { tokenC BANG }
 
   @intlit i8               { tokenM $ return . I8LIT . readIntegral . T.filter (/= '_') . T.takeWhile (/='i') }
   @intlit i16              { tokenM $ return . I16LIT . readIntegral . T.filter (/= '_') . T.takeWhile (/='i') }
@@ -104,14 +103,16 @@ tokens :-
   @intlit u64              { tokenM $ return . U64LIT . readIntegral . T.filter (/= '_') . T.takeWhile (/='u') }
   @intlit                  { tokenM $ return . INTLIT . readIntegral . T.filter (/= '_') }
 
+  @reallit f16             { tokenM $ fmap F16LIT . tryRead "f16" . suffZero . T.filter (/= '_') . T.takeWhile (/='f') }
   @reallit f32             { tokenM $ fmap F32LIT . tryRead "f32" . suffZero . T.filter (/= '_') . T.takeWhile (/='f') }
   @reallit f64             { tokenM $ fmap F64LIT . tryRead "f64" . suffZero . T.filter (/= '_') . T.takeWhile (/='f') }
   @reallit                 { tokenM $ fmap FLOATLIT . tryRead "f64" . suffZero . T.filter (/= '_') }
+  @hexreallit f16          { tokenM $ fmap F16LIT . readHexRealLit . T.filter (/= '_') . T.dropEnd 3 }
   @hexreallit f32          { tokenM $ fmap F32LIT . readHexRealLit . T.filter (/= '_') . T.dropEnd 3 }
   @hexreallit f64          { tokenM $ fmap F64LIT . readHexRealLit . T.filter (/= '_') . T.dropEnd 3 }
   @hexreallit              { tokenM $ fmap FLOATLIT . readHexRealLit . T.filter (/= '_') }
   "'" @charlit "'"         { tokenM $ fmap CHARLIT . tryRead "char" }
-  \" @stringcharlit* \"    { tokenM $ fmap STRINGLIT . tryRead "string"  }
+  \" @stringcharlit* \"    { tokenM $ fmap (STRINGLIT . T.pack) . tryRead "string"  }
 
   @identifier              { tokenS keyword }
   @identifier "["          { tokenM $ fmap INDEXING . indexing . T.takeWhile (/='[') }
@@ -120,14 +121,10 @@ tokens :-
   @qualidentifier "." "("  { tokenM $ fmap (uncurry QUALPAREN) . mkQualId . T.init . T.takeWhile (/='(') }
   "#" @identifier          { tokenS $ CONSTRUCTOR . nameFromText . T.drop 1 }
 
-  @unop                    { tokenS $ UNOP . nameFromText }
-  @qualunop                { tokenM $ fmap (uncurry QUALUNOP) . mkQualId }
-
   @binop                   { tokenM $ return . symbol [] . nameFromText }
   @qualbinop               { tokenM $ \s -> do (qs,k) <- mkQualId s; return (symbol qs k) }
 
-  "." (@identifier|[0-9]+) { tokenM $ return . PROJ_FIELD . nameFromText . T.drop 1 }
-  "." "["                  { tokenC PROJ_INDEX }
+  "." [0-9]+               { tokenS $ PROJ_INTFIELD . nameFromText . T.drop 1 }
 {
 
 keyword :: T.Text -> Token
@@ -287,15 +284,12 @@ data Token = ID Name
            | INDEXING Name
            | QUALINDEXING [Name] Name
            | QUALPAREN [Name] Name
-           | UNOP Name
-           | QUALUNOP [Name] Name
            | SYMBOL BinOp [Name] Name
            | CONSTRUCTOR Name
-           | PROJ_FIELD Name
-           | PROJ_INDEX
+           | PROJ_INTFIELD Name
 
            | INTLIT Integer
-           | STRINGLIT String
+           | STRINGLIT T.Text
            | I8LIT Int8
            | I16LIT Int16
            | I32LIT Int32
@@ -305,6 +299,7 @@ data Token = ID Name
            | U32LIT Word32
            | U64LIT Word64
            | FLOATLIT Double
+           | F16LIT Half
            | F32LIT Float
            | F64LIT Double
            | CHARLIT Char
@@ -317,6 +312,7 @@ data Token = ID Name
            | APOSTROPHE_THEN_TILDE
            | BACKTICK
            | HASH_LBRACKET
+           | DOT
            | TWO_DOTS
            | TWO_DOTS_LT
            | TWO_DOTS_GT
@@ -335,6 +331,7 @@ data Token = ID Name
            | EQU
            | ASTERISK
            | NEGATE
+           | BANG
            | LTH
            | HAT
            | TILDE

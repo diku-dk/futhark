@@ -15,14 +15,16 @@ writeResult ::
   PatElemT dec ->
   KernelResult ->
   MPIGen ()
-writeResult is pe (Returns _ se) =
+writeResult is pe (Returns _ _ se) =
   copyDWIMFix (patElemName pe) (map Imp.vi64 is) se []
+writeResult _ _ (WriteReturns _ (Shape _) _ _) = do
+    error "writeResult: not implemented yet"
 writeResult _ _ res =
   error $ "writeResult: cannot handle " ++ pretty res
 
 compileSegMapBody ::
   TV Int64 ->
-  Pattern MCMem ->
+  Pat MCMem ->
   SegSpace ->
   KernelBody MCMem ->
   MPIGen Imp.Code
@@ -36,10 +38,10 @@ compileSegMapBody flat_idx pat space (KernelBody _ kstms kres) = do
     emit $ Imp.DebugPrint "SegMap fbody" Nothing
     zipWithM_ dPrimV_ is $ map sExt64 $ unflattenIndex ns' $ tvExp flat_idx
     compileStms (freeIn kres) kstms' $
-      zipWithM_ (writeResult is) (patternElements pat) kres
+      zipWithM_ (writeResult is) (patElems pat) kres
 
 compileSegMap ::
-  Pattern MCMem ->
+  Pat MCMem ->
   SegSpace ->
   KernelBody MCMem ->
   MPIGen Imp.Code
@@ -52,19 +54,14 @@ compileSegMap pat space kbody = do
     free_params <- freeParams body [segFlat space, tvVar flat_par_idx]
     -- Moove allocs outside of body
     let (body_allocs, body') = extractAllocations body
-    -- Get the output array
-    let (out_name, out_pt) =
-          ( case extractOutputMem body of
-              Just (name, pt) -> (name, pt)
-              Nothing -> error "Gather need an output memory"
-          )
+    
+    -- Get the output arrays
+    let out_arrays = extractOutputMem pat
     emit $ Imp.Op $ Imp.DistributedLoop "segmap" (tvVar flat_par_idx) body_allocs body' mempty free_params $ segFlat space
-    gather out_name out_pt
+    forM_ out_arrays $ \(pt, name) -> gather name $ Prim pt 
+    
 
-extractOutputMem :: Imp.Code -> Maybe (VName, PrimType)
-extractOutputMem (a Imp.:>>: b) =
-  case extractOutputMem b of
-    Nothing -> extractOutputMem a
-    Just name -> Just name
-extractOutputMem (Imp.Write output _ pt _ _ _) = Just (output, pt)
-extractOutputMem _ = Nothing
+
+extractOutputMem :: PatT (MemInfo d u MemBind) -> [(PrimType, VName)]
+extractOutputMem pat = map (\(PatElem _ (MemArray out_pt _ _ (ArrayIn out_name _))) -> (out_pt, out_name)) pat_val
+  where Pat pat_val = pat

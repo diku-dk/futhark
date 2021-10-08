@@ -297,6 +297,10 @@ have disabled - see `tools/style-check.sh`).
 Never use braces and semicolons - always use whitespace-based layout
 instead (except for generated code).
 
+### Prefer `pure` to `return`
+
+When writing monadic code, use `pure` instead of `return`.
+
 Design Rules
 ============
 
@@ -313,6 +317,29 @@ Design Rules
     and try to avoid it.  This helps significantly with avoiding
     partial functions.  E.g, if a list must never be empty, represent
     it as a pair of an element and a list instead of just a list.
+
+Notes
+=====
+
+For long comments, we (try to) use the Notes convention from GHC,
+[explained here](https://www.stackbuilders.com/news/the-notes-of-ghc).
+Essentially, instead of writing very long in-line comments that break
+the flow of the code, we write
+
+```
+-- See Note [Foo Bar]
+```
+
+and then somewhere else in the file (perhaps at the bottom), we put
+
+```
+-- Note [Foo Bar]
+--
+-- Here is how you foo the bar...
+```
+
+There is no automation around this or a hard rule for what a "long
+comment" is.  It's just a convention.
 
 Credits
 =======

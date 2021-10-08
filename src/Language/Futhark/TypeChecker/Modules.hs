@@ -44,13 +44,13 @@ substituteTypesInEnv substs env =
       envModTable = M.map (substituteTypesInMod substs) $ envModTable env
     }
   where
-    subT name _
-      | Just (TypeSub (TypeAbbr l ps t)) <- M.lookup name substs = TypeAbbr l ps t
-    subT _ (TypeAbbr l ps t) = TypeAbbr l ps $ substituteTypes substs t
+    subT name (TypeAbbr l _ _)
+      | Just (Subst ps t) <- substs name = TypeAbbr l ps t
+    subT _ (TypeAbbr l ps t) = TypeAbbr l ps $ applySubst substs t
 
 substituteTypesInBoundV :: TypeSubs -> BoundV -> BoundV
 substituteTypesInBoundV substs (BoundV tps t) =
-  BoundV tps (substituteTypes substs t)
+  BoundV tps (applySubst substs t)
 
 -- | All names defined anywhere in the 'Env'.
 allNamesInEnv :: Env -> S.Set VName
@@ -162,8 +162,8 @@ newNamesForMTy orig_mty = do
           TypeArgDim (NamedDim $ QualName (map substitute qs) $ substitute v) loc
         substituteInTypeArg (TypeArgDim (ConstDim x) loc) =
           TypeArgDim (ConstDim x) loc
-        substituteInTypeArg (TypeArgDim AnyDim loc) =
-          TypeArgDim AnyDim loc
+        substituteInTypeArg (TypeArgDim (AnyDim v) loc) =
+          TypeArgDim (AnyDim v) loc
         substituteInTypeArg (TypeArgType t loc) =
           TypeArgType (substituteInType t) loc
 
@@ -191,7 +191,7 @@ refineEnv ::
   StructType ->
   TypeM (QualName VName, TySet, Env)
 refineEnv loc tset env tname ps t
-  | Just (tname', TypeAbbr l cur_ps (Scalar (TypeVar () _ (TypeName qs v) _))) <-
+  | Just (tname', TypeAbbr _ cur_ps (Scalar (TypeVar () _ (TypeName qs v) _))) <-
       findTypeDef tname (ModEnv env),
     QualName (qualQuals tname') v `M.member` tset =
     if paramsMatch cur_ps ps
@@ -200,13 +200,7 @@ refineEnv loc tset env tname ps t
           ( tname',
             QualName qs v `M.delete` tset,
             substituteTypesInEnv
-              ( M.fromList
-                  [ ( qualLeaf tname',
-                      TypeSub $ TypeAbbr l cur_ps t
-                    ),
-                    (v, TypeSub $ TypeAbbr l ps t)
-                  ]
-              )
+              (flip M.lookup $ M.fromList [(qualLeaf tname', Subst cur_ps t), (v, Subst ps t)])
               env
           )
       else
@@ -214,7 +208,7 @@ refineEnv loc tset env tname ps t
           "Cannot refine a type having"
             <+> tpMsg ps <> " with a type having " <> tpMsg cur_ps <> "."
   | otherwise =
-    typeError loc mempty $ ppr tname <+> "is not an abstract type in the module type."
+    typeError loc mempty $ pquote (ppr tname) <+> "is not an abstract type in the module type."
   where
     tpMsg [] = "no type parameters"
     tpMsg xs = "type parameters" <+> spread (map ppr xs)
@@ -303,7 +297,7 @@ resolveAbsTypes mod_abs mod sig_abs loc = do
     emptyDims :: StructType -> Bool
     emptyDims = isNothing . traverseDims onDim
       where
-        onDim _ PosImmediate AnyDim = Nothing
+        onDim _ PosImmediate (AnyDim _) = Nothing
         onDim _ _ d = Just d
 
 resolveMTyNames ::
@@ -401,14 +395,12 @@ matchMTys ::
   Either TypeError (M.Map VName VName)
 matchMTys orig_mty orig_mty_sig =
   matchMTys'
-    ( M.map (DimSub . NamedDim) $
-        resolveMTyNames orig_mty orig_mty_sig
-    )
+    (M.map (SizeSubst . NamedDim) $ resolveMTyNames orig_mty orig_mty_sig)
     orig_mty
     orig_mty_sig
   where
     matchMTys' ::
-      TypeSubs ->
+      M.Map VName (Subst StructType) ->
       MTy ->
       MTy ->
       SrcLoc ->
@@ -433,14 +425,13 @@ matchMTys orig_mty orig_mty_sig =
       abs_substs <- resolveAbsTypes mod_abs mod sig_abs loc
 
       let abs_subst_to_type =
-            old_abs_subst_to_type
-              <> M.map (TypeSub . snd) abs_substs
+            old_abs_subst_to_type <> M.map (substFromAbbr . snd) abs_substs
           abs_name_substs = M.map (qualLeaf . fst) abs_substs
       substs <- matchMods abs_subst_to_type mod sig loc
       return (substs <> abs_name_substs)
 
     matchMods ::
-      TypeSubs ->
+      M.Map VName (Subst StructType) ->
       Mod ->
       Mod ->
       SrcLoc ->
@@ -466,15 +457,14 @@ matchMTys orig_mty orig_mty_sig =
       loc = do
         abs_substs <- resolveAbsTypes mod_abs mod_pmod sig_abs loc
         let abs_subst_to_type =
-              old_abs_subst_to_type
-                <> M.map (TypeSub . snd) abs_substs
+              old_abs_subst_to_type <> M.map (substFromAbbr . snd) abs_substs
             abs_name_substs = M.map (qualLeaf . fst) abs_substs
         pmod_substs <- matchMods abs_subst_to_type mod_pmod sig_pmod loc
         mod_substs <- matchMTys' abs_subst_to_type mod_mod sig_mod loc
         return (pmod_substs <> mod_substs <> abs_name_substs)
 
     matchEnvs ::
-      TypeSubs ->
+      M.Map VName (Subst StructType) ->
       Env ->
       Env ->
       SrcLoc ->
@@ -503,7 +493,7 @@ matchMTys orig_mty orig_mty_sig =
       -- abstract types first.
       val_substs <- fmap M.fromList $
         forM (M.toList $ envVtable sig) $ \(name, spec_bv) -> do
-          let spec_bv' = substituteTypesInBoundV abs_subst_to_type spec_bv
+          let spec_bv' = substituteTypesInBoundV (`M.lookup` abs_subst_to_type) spec_bv
           case findBinding envVtable Term (baseName name) env of
             Just (name', bv) -> matchVal loc name spec_bv' name' bv
             _ -> missingVal loc (baseName name)
@@ -521,7 +511,7 @@ matchMTys orig_mty orig_mty_sig =
 
     matchTypeAbbr ::
       SrcLoc ->
-      TypeSubs ->
+      M.Map VName (Subst StructType) ->
       VName ->
       Liftedness ->
       [TypeParam] ->
@@ -534,7 +524,8 @@ matchMTys orig_mty orig_mty_sig =
     matchTypeAbbr loc abs_subst_to_type spec_name spec_l spec_ps spec_t name l ps t = do
       -- We have to create substitutions for the type parameters, too.
       unless (length spec_ps == length ps) $ nomatch spec_t
-      param_substs <- mconcat <$> zipWithM matchTypeParam spec_ps ps
+      param_substs <-
+        mconcat <$> zipWithM (matchTypeParam (nomatch spec_t)) spec_ps ps
 
       -- Abstract types have a particular restriction to ensure that
       -- if we have a value of an abstract type 't [n]', then there is
@@ -551,7 +542,7 @@ matchMTys orig_mty orig_mty_sig =
                   <+/> pquote (pprName d)
                   <+/> textwrap "is not used as an array size in the definition."
 
-      let spec_t' = substituteTypes (param_substs <> abs_subst_to_type) spec_t
+      let spec_t' = applySubst (`M.lookup` (param_substs <> abs_subst_to_type)) spec_t
       if spec_t' == t
         then return (spec_name, name)
         else nomatch spec_t'
@@ -564,22 +555,14 @@ matchMTys orig_mty orig_mty_sig =
             (spec_l, spec_ps, spec_t')
             (l, ps, t)
 
-        matchTypeParam (TypeParamDim x _) (TypeParamDim y _) =
-          pure $ M.singleton x $ DimSub $ NamedDim $ qualName y
-        matchTypeParam (TypeParamType Unlifted x _) (TypeParamType Unlifted y _) =
-          pure $
-            M.singleton x $
-              TypeSub $
-                TypeAbbr Unlifted [] $
-                  Scalar $ TypeVar () Nonunique (typeName y) []
-        matchTypeParam (TypeParamType _ x _) (TypeParamType Lifted y _) =
-          pure $
-            M.singleton x $
-              TypeSub $
-                TypeAbbr Lifted [] $
-                  Scalar $ TypeVar () Nonunique (typeName y) []
-        matchTypeParam _ _ =
-          nomatch spec_t
+    matchTypeParam _ (TypeParamDim x _) (TypeParamDim y _) =
+      pure $ M.singleton x $ SizeSubst $ NamedDim $ qualName y
+    matchTypeParam _ (TypeParamType spec_l x _) (TypeParamType l y _)
+      | spec_l <= l =
+        pure . M.singleton x . Subst [] $
+          Scalar $ TypeVar () Nonunique (typeName y) []
+    matchTypeParam nomatch _ _ =
+      nomatch
 
     matchVal ::
       SrcLoc ->
@@ -633,9 +616,9 @@ applyFunctor applyloc (FunSig p_abs p_mod body_mty) a_mty = do
   -- Apply type abbreviations from a_mty to body_mty.
   let a_abbrs = mtyTypeAbbrs a_mty
       isSub v = case M.lookup v a_abbrs of
-        Just abbr -> Just $ TypeSub abbr
-        _ -> Just $ DimSub $ NamedDim $ qualName v
+        Just abbr -> Just $ substFromAbbr abbr
+        _ -> Just $ SizeSubst $ NamedDim $ qualName v
       type_subst = M.mapMaybe isSub p_subst
-      body_mty' = substituteTypesInMTy type_subst body_mty
+      body_mty' = substituteTypesInMTy (`M.lookup` type_subst) body_mty
   (body_mty'', body_subst) <- newNamesForMTy body_mty'
   return (body_mty'', p_subst, body_subst)

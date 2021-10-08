@@ -8,6 +8,8 @@ module Futhark.CodeGen.ImpGen.Multicore
   )
 where
 
+import Control.Monad
+import qualified Data.Map as M
 import qualified Futhark.CodeGen.ImpCode.Multicore as Imp
 import Futhark.CodeGen.ImpGen
 import Futhark.CodeGen.ImpGen.Multicore.Base
@@ -17,6 +19,7 @@ import Futhark.CodeGen.ImpGen.Multicore.SegRed
 import Futhark.CodeGen.ImpGen.Multicore.SegScan
 import Futhark.IR.MCMem
 import Futhark.MonadFreshNames
+import Futhark.Util.IntegralExp (rem)
 import Prelude hiding (quot, rem)
 
 -- GCC supported primitve atomic Operations
@@ -41,14 +44,79 @@ compileProg ::
   MonadFreshNames m =>
   Prog MCMem ->
   m (Warnings, Imp.Definitions Imp.Multicore)
-compileProg = Futhark.CodeGen.ImpGen.compileProg (HostEnv gccAtomics) ops Imp.DefaultSpace
+compileProg = Futhark.CodeGen.ImpGen.compileProg (HostEnv gccAtomics mempty) ops Imp.DefaultSpace
   where
-    ops = defaultOperations opCompiler
+    ops =
+      (defaultOperations opCompiler)
+        { opsExpCompiler = compileMCExp
+        }
     opCompiler dest (Alloc e space) = compileAlloc dest e space
     opCompiler dest (Inner op) = compileMCOp dest op
 
+updateAcc :: VName -> [SubExp] -> [SubExp] -> MulticoreGen ()
+updateAcc acc is vs = sComment "UpdateAcc" $ do
+  -- See the ImpGen implementation of UpdateAcc for general notes.
+  let is' = map toInt64Exp is
+  (c, _space, arrs, dims, op) <- lookupAcc acc is'
+  sWhen (inBounds (Slice (map DimFix is')) dims) $
+    case op of
+      Nothing ->
+        forM_ (zip arrs vs) $ \(arr, v) -> copyDWIMFix arr is' v []
+      Just lam -> do
+        dLParams $ lambdaParams lam
+        let (_x_params, y_params) =
+              splitAt (length vs) $ map paramName $ lambdaParams lam
+        forM_ (zip y_params vs) $ \(yp, v) -> copyDWIM yp [] v []
+        atomics <- hostAtomics <$> askEnv
+        case atomicUpdateLocking atomics lam of
+          AtomicPrim f -> f arrs is'
+          AtomicCAS f -> f arrs is'
+          AtomicLocking f -> do
+            c_locks <- M.lookup c . hostLocks <$> askEnv
+            case c_locks of
+              Just (Locks locks num_locks) -> do
+                let locking =
+                      Locking locks 0 1 0 $
+                        pure . (`rem` fromIntegral num_locks) . flattenIndex dims
+                f locking arrs is'
+              Nothing ->
+                error $ "Missing locks for " ++ pretty acc
+
+withAcc ::
+  Pat MCMem ->
+  [(Shape, [VName], Maybe (Lambda MCMem, [SubExp]))] ->
+  Lambda MCMem ->
+  MulticoreGen ()
+withAcc pat inputs lam = do
+  atomics <- hostAtomics <$> askEnv
+  locksForInputs atomics $ zip accs inputs
+  where
+    accs = map paramName $ lambdaParams lam
+    locksForInputs _ [] =
+      defCompileExp pat $ WithAcc inputs lam
+    locksForInputs atomics ((c, (_, _, op)) : inputs')
+      | Just (op_lam, _) <- op,
+        AtomicLocking _ <- atomicUpdateLocking atomics op_lam = do
+        let num_locks = 100151
+        locks_arr <-
+          sStaticArray "withacc_locks" DefaultSpace int32 $
+            Imp.ArrayZeros num_locks
+        let locks = Locks locks_arr num_locks
+            extend env = env {hostLocks = M.insert c locks $ hostLocks env}
+        localEnv extend $ locksForInputs atomics inputs'
+      | otherwise =
+        locksForInputs atomics inputs'
+
+compileMCExp :: ExpCompiler MCMem HostEnv Imp.Multicore
+compileMCExp _ (BasicOp (UpdateAcc acc is vs)) =
+  updateAcc acc is vs
+compileMCExp pat (WithAcc inputs lam) =
+  withAcc pat inputs lam
+compileMCExp dest e =
+  defCompileExp dest e
+
 compileMCOp ::
-  Pattern MCMem ->
+  Pat MCMem ->
   MCOp MCMem () ->
   ImpM MCMem HostEnv Imp.Multicore ()
 compileMCOp _ (OtherOp ()) = pure ()
@@ -88,7 +156,7 @@ compileMCOp pat (ParOp par_op op) = do
   emit $ Imp.Op $ Imp.Segop s free_params seq_task par_task retvals $ scheduling_info (decideScheduling' op seq_code)
 
 compileSegOp ::
-  Pattern MCMem ->
+  Pat MCMem ->
   SegOp () MCMem ->
   TV Int32 ->
   ImpM MCMem HostEnv Imp.Multicore Imp.Code

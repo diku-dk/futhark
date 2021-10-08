@@ -63,40 +63,27 @@ replacing v e = local $ \env ->
 existentials :: Exp -> S.Set VName
 existentials e =
   let here = case e of
-        Apply _ _ (Info (_, pdim)) (_, Info ext) _ ->
-          S.fromList (maybeToList pdim ++ ext)
-        If _ _ _ (_, Info ext) _ ->
-          S.fromList ext
-        LetPat _ _ _ (_, Info ext) _ ->
-          S.fromList ext
-        Coerce _ _ (_, Info ext) _ ->
-          S.fromList ext
-        Range _ _ _ (_, Info ext) _ ->
-          S.fromList ext
-        Index _ _ (_, Info ext) _ ->
-          S.fromList ext
-        Match _ _ (_, Info ext) _ ->
-          S.fromList ext
-        DoLoop _ _ _ _ _ (Info (_, ext)) _ ->
-          S.fromList ext
+        AppExp (Apply _ _ (Info (_, pdim)) _) (Info res) ->
+          S.fromList (maybeToList pdim ++ appResExt res)
+        AppExp _ (Info res) ->
+          S.fromList (appResExt res)
         _ ->
           mempty
 
       m = identityMapper {mapOnExp = \e' -> modify (<> existentials e') >> pure e'}
    in execState (astMap m e) here
 
-liftFunction :: VName -> [TypeParam] -> [Pattern] -> StructType -> Exp -> LiftM Exp
+liftFunction :: VName -> [TypeParam] -> [Pat] -> StructType -> Exp -> LiftM Exp
 liftFunction fname tparams params ret funbody = do
   -- Find free variables
   global <- gets stateGlobal
   let bound =
         global
-          <> foldMap patternNames params
+          <> foldMap patNames params
           <> S.fromList (map typeParamName tparams)
-          <> existentials funbody
 
       free =
-        let immediate_free = FV.freeVars funbody `FV.without` bound
+        let immediate_free = FV.freeVars funbody `FV.without` (bound <> existentials funbody)
             sizes_in_free =
               foldMap typeDimNames $
                 M.elems $ FV.unNameSet immediate_free
@@ -144,12 +131,12 @@ liftFunction fname tparams params ret funbody = do
     apply :: Exp -> [(VName, StructType)] -> Exp
     apply f [] = f
     apply f (p : rem_ps) =
-      let inner_ret = (Info (fromStruct (augType rem_ps)), Info mempty)
-          inner = Apply f (freeVar p) (Info (Observe, Nothing)) inner_ret mempty
+      let inner_ret = AppRes (fromStruct (augType rem_ps)) mempty
+          inner = AppExp (Apply f (freeVar p) (Info (Observe, Nothing)) mempty) (Info inner_ret)
        in apply inner rem_ps
 
 transformExp :: Exp -> LiftM Exp
-transformExp (LetFun fname (tparams, params, _, Info ret, funbody) body _ _) = do
+transformExp (AppExp (LetFun fname (tparams, params, _, Info ret, funbody) body _) _) = do
   funbody' <- transformExp funbody
   fname' <- newVName $ "lifted_" ++ baseString fname
   lifted_call <- liftFunction fname' tparams params ret funbody'

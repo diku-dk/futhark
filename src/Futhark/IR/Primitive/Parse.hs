@@ -48,6 +48,9 @@ pFloatValue :: Parser FloatValue
 pFloatValue =
   choice
     [ pNum,
+      keyword "f16.nan" $> Float16Value (0 / 0),
+      keyword "f16.inf" $> Float16Value (1 / 0),
+      keyword "-f16.inf" $> Float16Value (-1 / 0),
       keyword "f32.nan" $> Float32Value (0 / 0),
       keyword "f32.inf" $> Float32Value (1 / 0),
       keyword "-f32.inf" $> Float32Value (-1 / 0),
@@ -74,7 +77,8 @@ pPrimValue =
   choice
     [ FloatValue <$> pFloatValue,
       IntValue <$> pIntValue,
-      BoolValue <$> pBoolValue
+      BoolValue <$> pBoolValue,
+      UnitValue <$ "()"
     ]
     <?> "primitive value"
 
@@ -90,6 +94,6 @@ pIntType = choice $ map p allIntTypes
 
 pPrimType :: Parser PrimType
 pPrimType =
-  choice [p Bool, p Cert, FloatType <$> pFloatType, IntType <$> pIntType]
+  choice [p Bool, p Unit, FloatType <$> pFloatType, IntType <$> pIntType]
   where
     p t = keyword (prettyText t) $> t

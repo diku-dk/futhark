@@ -1,7 +1,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 
 -- | Alias analysis of a full Futhark program.  Takes as input a
--- program with an arbitrary lore and produces one with aliases.  This
+-- program with an arbitrary rep and produces one with aliases.  This
 -- module does not implement the aliasing logic itself, and derives
 -- its information from definitions in
 -- "Futhark.IR.Prop.Aliases" and
@@ -26,37 +26,37 @@ import Futhark.IR.Aliases
 
 -- | Perform alias analysis on a Futhark program.
 aliasAnalysis ::
-  (ASTLore lore, CanBeAliased (Op lore)) =>
-  Prog lore ->
-  Prog (Aliases lore)
+  (ASTRep rep, CanBeAliased (Op rep)) =>
+  Prog rep ->
+  Prog (Aliases rep)
 aliasAnalysis (Prog consts funs) =
   Prog (fst (analyseStms mempty consts)) (map analyseFun funs)
 
 analyseFun ::
-  (ASTLore lore, CanBeAliased (Op lore)) =>
-  FunDef lore ->
-  FunDef (Aliases lore)
+  (ASTRep rep, CanBeAliased (Op rep)) =>
+  FunDef rep ->
+  FunDef (Aliases rep)
 analyseFun (FunDef entry attrs fname restype params body) =
   FunDef entry attrs fname restype params body'
   where
     body' = analyseBody mempty body
 
 analyseBody ::
-  ( ASTLore lore,
-    CanBeAliased (Op lore)
+  ( ASTRep rep,
+    CanBeAliased (Op rep)
   ) =>
   AliasTable ->
-  Body lore ->
-  Body (Aliases lore)
-analyseBody atable (Body lore stms result) =
+  Body rep ->
+  Body (Aliases rep)
+analyseBody atable (Body rep stms result) =
   let (stms', _atable') = analyseStms atable stms
-   in mkAliasedBody lore stms' result
+   in mkAliasedBody rep stms' result
 
 analyseStms ::
-  (ASTLore lore, CanBeAliased (Op lore)) =>
+  (ASTRep rep, CanBeAliased (Op rep)) =>
   AliasTable ->
-  Stms lore ->
-  (Stms (Aliases lore), AliasesAndConsumed)
+  Stms rep ->
+  (Stms (Aliases rep), AliasesAndConsumed)
 analyseStms orig_aliases =
   foldl' f (mempty, (orig_aliases, mempty)) . stmsToList
   where
@@ -66,21 +66,21 @@ analyseStms orig_aliases =
        in (stms <> oneStm stm', atable')
 
 analyseStm ::
-  (ASTLore lore, CanBeAliased (Op lore)) =>
+  (ASTRep rep, CanBeAliased (Op rep)) =>
   AliasTable ->
-  Stm lore ->
-  Stm (Aliases lore)
+  Stm rep ->
+  Stm (Aliases rep)
 analyseStm aliases (Let pat (StmAux cs attrs dec) e) =
   let e' = analyseExp aliases e
-      pat' = addAliasesToPattern pat e'
-      lore' = (AliasDec $ consumedInExp e', dec)
-   in Let pat' (StmAux cs attrs lore') e'
+      pat' = addAliasesToPat pat e'
+      rep' = (AliasDec $ consumedInExp e', dec)
+   in Let pat' (StmAux cs attrs rep') e'
 
 analyseExp ::
-  (ASTLore lore, CanBeAliased (Op lore)) =>
+  (ASTRep rep, CanBeAliased (Op rep)) =>
   AliasTable ->
-  Exp lore ->
-  Exp (Aliases lore)
+  Exp rep ->
+  Exp (Aliases rep)
 -- Would be better to put this in a BranchType annotation, but that
 -- requires a lot of other work.
 analyseExp aliases (If cond tb fb dec) =
@@ -115,10 +115,10 @@ analyseExp aliases e = mapExp analyse e
         }
 
 analyseLambda ::
-  (ASTLore lore, CanBeAliased (Op lore)) =>
+  (ASTRep rep, CanBeAliased (Op rep)) =>
   AliasTable ->
-  Lambda lore ->
-  Lambda (Aliases lore)
+  Lambda rep ->
+  Lambda (Aliases rep)
 analyseLambda aliases lam =
   let body = analyseBody aliases $ lambdaBody lam
    in lam

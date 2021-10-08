@@ -3,13 +3,16 @@ module Futhark.Util.Options
   ( FunOptDescr,
     mainWithOptions,
     commonOptions,
+    optionsError,
     module System.Console.GetOpt,
   )
 where
 
 import Control.Monad.IO.Class
+import Data.List (sortBy)
 import Futhark.Version
 import System.Console.GetOpt
+import System.Environment (getProgName)
 import System.Exit
 import System.IO
 
@@ -51,7 +54,13 @@ mainWithOptions emptyConfig commandLineOptions usage f prog args =
 helpStr :: String -> String -> [OptDescr a] -> IO String
 helpStr prog usage opts = do
   let header = unlines ["Usage: " ++ prog ++ " " ++ usage, "Options:"]
-  return $ usageInfo header opts
+  return $ usageInfo header $ sortBy cmp opts
+  where
+    -- Sort first by long option, then by short name, then by description.  Hopefully
+    -- everything has a long option.
+    cmp (Option _ (a : _) _ _) (Option _ (b : _) _ _) = compare a b
+    cmp (Option (a : _) _ _ _) (Option (b : _) _ _ _) = compare a b
+    cmp (Option _ _ _ a) (Option _ _ _ b) = compare a b
 
 badOptions :: String -> [String] -> [String] -> [String] -> IO ()
 badOptions usage nonopts errs unrecs = do
@@ -95,3 +104,11 @@ commonOptions prog usage options =
       putStrLn "Copyright (C) DIKU, University of Copenhagen, released under the ISC license."
       putStrLn "This is free software: you are free to change and redistribute it."
       putStrLn "There is NO WARRANTY, to the extent permitted by law."
+
+-- | Terminate the program with this error message (but don't report
+-- it as an ICE, as happens with 'error').
+optionsError :: String -> IO ()
+optionsError s = do
+  prog <- getProgName
+  hPutStrLn stderr $ prog <> ": " <> s
+  exitWith $ ExitFailure 2

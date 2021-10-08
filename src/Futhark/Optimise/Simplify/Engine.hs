@@ -48,7 +48,7 @@ module Futhark.Optimise.Simplify.Engine
     localVtable,
 
     -- * Building blocks
-    SimplifiableLore,
+    SimplifiableRep,
     Simplifiable (..),
     simplifyStms,
     simplifyFun,
@@ -61,7 +61,7 @@ module Futhark.Optimise.Simplify.Engine
     hoistStms,
     blockIf,
     enterLoop,
-    module Futhark.Optimise.Simplify.Lore,
+    module Futhark.Optimise.Simplify.Rep,
   )
 where
 
@@ -75,35 +75,35 @@ import qualified Futhark.Analysis.UsageTable as UT
 import Futhark.Construct
 import Futhark.IR
 import Futhark.IR.Prop.Aliases
-import Futhark.Optimise.Simplify.Lore
+import Futhark.Optimise.Simplify.Rep
 import Futhark.Optimise.Simplify.Rule
-import Futhark.Util (nubOrd, splitFromEnd)
+import Futhark.Util (nubOrd)
 
-data HoistBlockers lore = HoistBlockers
+data HoistBlockers rep = HoistBlockers
   { -- | Blocker for hoisting out of parallel loops.
-    blockHoistPar :: BlockPred (Wise lore),
+    blockHoistPar :: BlockPred (Wise rep),
     -- | Blocker for hoisting out of sequential loops.
-    blockHoistSeq :: BlockPred (Wise lore),
+    blockHoistSeq :: BlockPred (Wise rep),
     -- | Blocker for hoisting out of branches.
-    blockHoistBranch :: BlockPred (Wise lore),
-    isAllocation :: Stm (Wise lore) -> Bool
+    blockHoistBranch :: BlockPred (Wise rep),
+    isAllocation :: Stm (Wise rep) -> Bool
   }
 
-noExtraHoistBlockers :: HoistBlockers lore
+noExtraHoistBlockers :: HoistBlockers rep
 noExtraHoistBlockers =
   HoistBlockers neverBlocks neverBlocks neverBlocks (const False)
 
-neverHoist :: HoistBlockers lore
+neverHoist :: HoistBlockers rep
 neverHoist =
   HoistBlockers alwaysBlocks alwaysBlocks alwaysBlocks (const False)
 
-data Env lore = Env
-  { envRules :: RuleBook (Wise lore),
-    envHoistBlockers :: HoistBlockers lore,
-    envVtable :: ST.SymbolTable (Wise lore)
+data Env rep = Env
+  { envRules :: RuleBook (Wise rep),
+    envHoistBlockers :: HoistBlockers rep,
+    envVtable :: ST.SymbolTable (Wise rep)
   }
 
-emptyEnv :: RuleBook (Wise lore) -> HoistBlockers lore -> Env lore
+emptyEnv :: RuleBook (Wise rep) -> HoistBlockers rep -> Env rep
 emptyEnv rules blockers =
   Env
     { envRules = rules,
@@ -111,60 +111,60 @@ emptyEnv rules blockers =
       envVtable = mempty
     }
 
-type Protect m = SubExp -> Pattern (Lore m) -> Op (Lore m) -> Maybe (m ())
+type Protect m = SubExp -> Pat (Rep m) -> Op (Rep m) -> Maybe (m ())
 
-data SimpleOps lore = SimpleOps
+data SimpleOps rep = SimpleOps
   { mkExpDecS ::
-      ST.SymbolTable (Wise lore) ->
-      Pattern (Wise lore) ->
-      Exp (Wise lore) ->
-      SimpleM lore (ExpDec (Wise lore)),
+      ST.SymbolTable (Wise rep) ->
+      Pat (Wise rep) ->
+      Exp (Wise rep) ->
+      SimpleM rep (ExpDec (Wise rep)),
     mkBodyS ::
-      ST.SymbolTable (Wise lore) ->
-      Stms (Wise lore) ->
+      ST.SymbolTable (Wise rep) ->
+      Stms (Wise rep) ->
       Result ->
-      SimpleM lore (Body (Wise lore)),
+      SimpleM rep (Body (Wise rep)),
     -- | Make a hoisted Op safe.  The SubExp is a boolean
     -- that is true when the value of the statement will
     -- actually be used.
-    protectHoistedOpS :: Protect (Binder (Wise lore)),
-    opUsageS :: Op (Wise lore) -> UT.UsageTable,
-    simplifyOpS :: SimplifyOp lore (Op lore)
+    protectHoistedOpS :: Protect (Builder (Wise rep)),
+    opUsageS :: Op (Wise rep) -> UT.UsageTable,
+    simplifyOpS :: SimplifyOp rep (Op rep)
   }
 
-type SimplifyOp lore op = op -> SimpleM lore (OpWithWisdom op, Stms (Wise lore))
+type SimplifyOp rep op = op -> SimpleM rep (OpWithWisdom op, Stms (Wise rep))
 
 bindableSimpleOps ::
-  (SimplifiableLore lore, Bindable lore) =>
-  SimplifyOp lore (Op lore) ->
-  SimpleOps lore
+  (SimplifiableRep rep, Buildable rep) =>
+  SimplifyOp rep (Op rep) ->
+  SimpleOps rep
 bindableSimpleOps =
   SimpleOps mkExpDecS' mkBodyS' protectHoistedOpS' (const mempty)
   where
     mkExpDecS' _ pat e = return $ mkExpDec pat e
-    mkBodyS' _ bnds res = return $ mkBody bnds res
+    mkBodyS' _ stms res = return $ mkBody stms res
     protectHoistedOpS' _ _ _ = Nothing
 
-newtype SimpleM lore a
+newtype SimpleM rep a
   = SimpleM
       ( ReaderT
-          (SimpleOps lore, Env lore)
-          (State (VNameSource, Bool, Certificates))
+          (SimpleOps rep, Env rep)
+          (State (VNameSource, Bool, Certs))
           a
       )
   deriving
     ( Applicative,
       Functor,
       Monad,
-      MonadReader (SimpleOps lore, Env lore),
-      MonadState (VNameSource, Bool, Certificates)
+      MonadReader (SimpleOps rep, Env rep),
+      MonadState (VNameSource, Bool, Certs)
     )
 
-instance MonadFreshNames (SimpleM lore) where
+instance MonadFreshNames (SimpleM rep) where
   putNameSource src = modify $ \(_, b, c) -> (src, b, c)
   getNameSource = gets $ \(a, _, _) -> a
 
-instance SimplifiableLore lore => HasScope (Wise lore) (SimpleM lore) where
+instance SimplifiableRep rep => HasScope (Wise rep) (SimpleM rep) where
   askScope = ST.toScope <$> askVtable
   lookupType name = do
     vtable <- askVtable
@@ -177,37 +177,37 @@ instance SimplifiableLore lore => HasScope (Wise lore) (SimpleM lore) where
             ++ " in symbol table."
 
 instance
-  SimplifiableLore lore =>
-  LocalScope (Wise lore) (SimpleM lore)
+  SimplifiableRep rep =>
+  LocalScope (Wise rep) (SimpleM rep)
   where
   localScope types = localVtable (<> ST.fromScope types)
 
 runSimpleM ::
-  SimpleM lore a ->
-  SimpleOps lore ->
-  Env lore ->
+  SimpleM rep a ->
+  SimpleOps rep ->
+  Env rep ->
   VNameSource ->
   ((a, Bool), VNameSource)
 runSimpleM (SimpleM m) simpl env src =
   let (x, (src', b, _)) = runState (runReaderT m (simpl, env)) (src, False, mempty)
    in ((x, b), src')
 
-askEngineEnv :: SimpleM lore (Env lore)
+askEngineEnv :: SimpleM rep (Env rep)
 askEngineEnv = asks snd
 
-asksEngineEnv :: (Env lore -> a) -> SimpleM lore a
+asksEngineEnv :: (Env rep -> a) -> SimpleM rep a
 asksEngineEnv f = f <$> askEngineEnv
 
-askVtable :: SimpleM lore (ST.SymbolTable (Wise lore))
+askVtable :: SimpleM rep (ST.SymbolTable (Wise rep))
 askVtable = asksEngineEnv envVtable
 
 localVtable ::
-  (ST.SymbolTable (Wise lore) -> ST.SymbolTable (Wise lore)) ->
-  SimpleM lore a ->
-  SimpleM lore a
+  (ST.SymbolTable (Wise rep) -> ST.SymbolTable (Wise rep)) ->
+  SimpleM rep a ->
+  SimpleM rep a
 localVtable f = local $ \(ops, env) -> (ops, env {envVtable = f $ envVtable env})
 
-collectCerts :: SimpleM lore a -> SimpleM lore (a, Certificates)
+collectCerts :: SimpleM rep a -> SimpleM rep (a, Certs)
 collectCerts m = do
   x <- m
   (a, b, cs) <- get
@@ -216,40 +216,40 @@ collectCerts m = do
 
 -- | Mark that we have changed something and it would be a good idea
 -- to re-run the simplifier.
-changed :: SimpleM lore ()
+changed :: SimpleM rep ()
 changed = modify $ \(src, _, cs) -> (src, True, cs)
 
-usedCerts :: Certificates -> SimpleM lore ()
+usedCerts :: Certs -> SimpleM rep ()
 usedCerts cs = modify $ \(a, b, c) -> (a, b, cs <> c)
 
 -- | Indicate in the symbol table that we have descended into a loop.
-enterLoop :: SimpleM lore a -> SimpleM lore a
+enterLoop :: SimpleM rep a -> SimpleM rep a
 enterLoop = localVtable ST.deepen
 
-bindFParams :: SimplifiableLore lore => [FParam (Wise lore)] -> SimpleM lore a -> SimpleM lore a
+bindFParams :: SimplifiableRep rep => [FParam (Wise rep)] -> SimpleM rep a -> SimpleM rep a
 bindFParams params =
   localVtable $ ST.insertFParams params
 
-bindLParams :: SimplifiableLore lore => [LParam (Wise lore)] -> SimpleM lore a -> SimpleM lore a
+bindLParams :: SimplifiableRep rep => [LParam (Wise rep)] -> SimpleM rep a -> SimpleM rep a
 bindLParams params =
   localVtable $ \vtable -> foldr ST.insertLParam vtable params
 
 bindArrayLParams ::
-  SimplifiableLore lore =>
-  [LParam (Wise lore)] ->
-  SimpleM lore a ->
-  SimpleM lore a
+  SimplifiableRep rep =>
+  [LParam (Wise rep)] ->
+  SimpleM rep a ->
+  SimpleM rep a
 bindArrayLParams params =
   localVtable $ \vtable -> foldl' (flip ST.insertLParam) vtable params
 
 bindMerge ::
-  SimplifiableLore lore =>
-  [(FParam (Wise lore), SubExp, SubExp)] ->
-  SimpleM lore a ->
-  SimpleM lore a
+  SimplifiableRep rep =>
+  [(FParam (Wise rep), SubExp, SubExpRes)] ->
+  SimpleM rep a ->
+  SimpleM rep a
 bindMerge = localVtable . ST.insertLoopMerge
 
-bindLoopVar :: SimplifiableLore lore => VName -> IntType -> SubExp -> SimpleM lore a -> SimpleM lore a
+bindLoopVar :: SimplifiableRep rep => VName -> IntType -> SubExp -> SimpleM rep a -> SimpleM rep a
 bindLoopVar var it bound =
   localVtable $ ST.insertLoopVar var it bound
 
@@ -258,18 +258,18 @@ bindLoopVar var it bound =
 -- them.  (This means such hoisting is not worth it unless they are in
 -- turn hoisted out of a loop somewhere.)
 protectIfHoisted ::
-  SimplifiableLore lore =>
+  SimplifiableRep rep =>
   -- | Branch condition.
   SubExp ->
   -- | Which side of the branch are we
   -- protecting here?
   Bool ->
-  SimpleM lore (a, Stms (Wise lore)) ->
-  SimpleM lore (a, Stms (Wise lore))
+  SimpleM rep (a, Stms (Wise rep)) ->
+  SimpleM rep (a, Stms (Wise rep))
 protectIfHoisted cond side m = do
   (x, stms) <- m
   ops <- asks $ protectHoistedOpS . fst
-  runBinder $ do
+  runBuilder $ do
     if not $ all (safeExp . stmExp) stms
       then do
         cond' <-
@@ -286,16 +286,15 @@ protectIfHoisted cond side m = do
 -- loops, but they most be protected by adding a branch on top of
 -- them.
 protectLoopHoisted ::
-  SimplifiableLore lore =>
-  [(FParam (Wise lore), SubExp)] ->
-  [(FParam (Wise lore), SubExp)] ->
-  LoopForm (Wise lore) ->
-  SimpleM lore (a, Stms (Wise lore)) ->
-  SimpleM lore (a, Stms (Wise lore))
-protectLoopHoisted ctx val form m = do
+  SimplifiableRep rep =>
+  [(FParam (Wise rep), SubExp)] ->
+  LoopForm (Wise rep) ->
+  SimpleM rep (a, Stms (Wise rep)) ->
+  SimpleM rep (a, Stms (Wise rep))
+protectLoopHoisted merge form m = do
   (x, stms) <- m
   ops <- asks $ protectHoistedOpS . fst
-  runBinder $ do
+  runBuilder $ do
     if not $ all (safeExp . stmExp) stms
       then do
         is_nonempty <- checkIfNonEmpty
@@ -307,7 +306,7 @@ protectLoopHoisted ctx val form m = do
       case form of
         WhileLoop cond
           | Just (_, cond_init) <-
-              find ((== cond) . paramName . fst) $ ctx ++ val ->
+              find ((== cond) . paramName . fst) merge ->
             return cond_init
           | otherwise -> return $ constant True -- infinite loop
         ForLoop _ it bound _ ->
@@ -315,26 +314,16 @@ protectLoopHoisted ctx val form m = do
             BasicOp $ CmpOp (CmpSlt it) (intConst it 0) bound
 
 protectIf ::
-  MonadBinder m =>
+  MonadBuilder m =>
   Protect m ->
-  (Exp (Lore m) -> Bool) ->
+  (Exp (Rep m) -> Bool) ->
   SubExp ->
-  Stm (Lore m) ->
+  Stm (Rep m) ->
   m ()
-protectIf
-  _
-  _
-  taken
-  ( Let
-      pat
-      aux
-      (If cond taken_body untaken_body (IfDec if_ts IfFallback))
-    ) = do
-    cond' <- letSubExp "protect_cond_conj" $ BasicOp $ BinOp LogAnd taken cond
-    auxing aux $
-      letBind pat $
-        If cond' taken_body untaken_body $
-          IfDec if_ts IfFallback
+protectIf _ _ taken (Let pat aux (If cond taken_body untaken_body (IfDec if_ts IfFallback))) = do
+  cond' <- letSubExp "protect_cond_conj" $ BasicOp $ BinOp LogAnd taken cond
+  auxing aux . letBind pat $
+    If cond' taken_body untaken_body $ IfDec if_ts IfFallback
 protectIf _ _ taken (Let pat aux (BasicOp (Assert cond msg loc))) = do
   not_taken <- letSubExp "loop_not_taken" $ BasicOp $ UnOp Not taken
   cond' <- letSubExp "protect_assert_disj" $ BasicOp $ BinOp LogOr not_taken cond
@@ -350,19 +339,14 @@ protectIf _ f taken (Let pat aux e)
       Nothing -> do
         taken_body <- eBody [pure e]
         untaken_body <-
-          eBody $
-            map
-              (emptyOfType $ patternContextNames pat)
-              (patternValueTypes pat)
-        if_ts <- expTypesFromPattern pat
-        auxing aux $
-          letBind pat $
-            If taken taken_body untaken_body $
-              IfDec if_ts IfFallback
+          eBody $ map (emptyOfType $ patNames pat) (patTypes pat)
+        if_ts <- expTypesFromPat pat
+        auxing aux . letBind pat $
+          If taken taken_body untaken_body $ IfDec if_ts IfFallback
 protectIf _ _ _ stm =
   addStm stm
 
-makeSafe :: Exp lore -> Maybe (Exp lore)
+makeSafe :: Exp rep -> Maybe (Exp rep)
 makeSafe (BasicOp (BinOp (SDiv t _) x y)) =
   Just $ BasicOp (BinOp (SDiv t Safe) x y)
 makeSafe (BasicOp (BinOp (SDivUp t _) x y)) =
@@ -382,7 +366,7 @@ makeSafe (BasicOp (BinOp (UMod t _) x y)) =
 makeSafe _ =
   Nothing
 
-emptyOfType :: MonadBinder m => [VName] -> Type -> m (Exp (Lore m))
+emptyOfType :: MonadBuilder m => [VName] -> Type -> m (Exp (Rep m))
 emptyOfType _ Mem {} =
   error "emptyOfType: Cannot hoist non-existential memory."
 emptyOfType _ Acc {} =
@@ -399,21 +383,21 @@ emptyOfType ctx_names (Array et shape _) = do
 -- | Statements that are not worth hoisting out of loops, because they
 -- are unsafe, and added safety (by 'protectLoopHoisted') may inhibit
 -- further optimisation..
-notWorthHoisting :: ASTLore lore => BlockPred lore
+notWorthHoisting :: ASTRep rep => BlockPred rep
 notWorthHoisting _ _ (Let pat _ e) =
-  not (safeExp e) && any ((> 0) . arrayRank) (patternTypes pat)
+  not (safeExp e) && any ((> 0) . arrayRank) (patTypes pat)
 
 hoistStms ::
-  SimplifiableLore lore =>
-  RuleBook (Wise lore) ->
-  BlockPred (Wise lore) ->
-  ST.SymbolTable (Wise lore) ->
+  SimplifiableRep rep =>
+  RuleBook (Wise rep) ->
+  BlockPred (Wise rep) ->
+  ST.SymbolTable (Wise rep) ->
   UT.UsageTable ->
-  Stms (Wise lore) ->
+  Stms (Wise rep) ->
   SimpleM
-    lore
-    ( Stms (Wise lore),
-      Stms (Wise lore)
+    rep
+    ( Stms (Wise rep),
+      Stms (Wise rep)
     )
 hoistStms rules block vtable uses orig_stms = do
   (blocked, hoisted) <- simplifyStmsBottomUp vtable uses orig_stms
@@ -465,9 +449,9 @@ hoistStms rules block vtable uses orig_stms = do
             return (uses'', stms' ++ stms)
 
 blockUnhoistedDeps ::
-  ASTLore lore =>
-  [Either (Stm lore) (Stm lore)] ->
-  [Either (Stm lore) (Stm lore)]
+  ASTRep rep =>
+  [Either (Stm rep) (Stm rep)] ->
+  [Either (Stm rep) (Stm rep)]
 blockUnhoistedDeps = snd . mapAccumL block mempty
   where
     block blocked (Left need) =
@@ -478,19 +462,19 @@ blockUnhoistedDeps = snd . mapAccumL block mempty
       | otherwise =
         (blocked, Right need)
 
-provides :: Stm lore -> [VName]
-provides = patternNames . stmPattern
+provides :: Stm rep -> [VName]
+provides = patNames . stmPat
 
 expandUsage ::
-  (ASTLore lore, Aliased lore) =>
-  (Stm lore -> UT.UsageTable) ->
-  ST.SymbolTable lore ->
+  (ASTRep rep, Aliased rep) =>
+  (Stm rep -> UT.UsageTable) ->
+  ST.SymbolTable rep ->
   UT.UsageTable ->
-  Stm lore ->
+  Stm rep ->
   UT.UsageTable
 expandUsage usageInStm vtable utable stm@(Let pat _ e) =
   UT.expand (`ST.lookupAliases` vtable) (usageInStm stm <> usageThroughAliases)
-    <> ( if any (`UT.isSize` utable) (patternNames pat)
+    <> ( if any (`UT.isSize` utable) (patNames pat)
            then UT.sizeUsages (freeIn e)
            else mempty
        )
@@ -499,54 +483,52 @@ expandUsage usageInStm vtable utable stm@(Let pat _ e) =
     usageThroughAliases =
       mconcat $
         mapMaybe usageThroughBindeeAliases $
-          zip (patternNames pat) (patternAliases pat)
+          zip (patNames pat) (patAliases pat)
     usageThroughBindeeAliases (name, aliases) = do
       uses <- UT.lookup name utable
       return $ mconcat $ map (`UT.usage` uses) $ namesToList aliases
 
-type BlockPred lore = ST.SymbolTable lore -> UT.UsageTable -> Stm lore -> Bool
+type BlockPred rep = ST.SymbolTable rep -> UT.UsageTable -> Stm rep -> Bool
 
-neverBlocks :: BlockPred lore
+neverBlocks :: BlockPred rep
 neverBlocks _ _ _ = False
 
-alwaysBlocks :: BlockPred lore
+alwaysBlocks :: BlockPred rep
 alwaysBlocks _ _ _ = True
 
-isFalse :: Bool -> BlockPred lore
+isFalse :: Bool -> BlockPred rep
 isFalse b _ _ _ = not b
 
-orIf :: BlockPred lore -> BlockPred lore -> BlockPred lore
+orIf :: BlockPred rep -> BlockPred rep -> BlockPred rep
 orIf p1 p2 body vtable need = p1 body vtable need || p2 body vtable need
 
-andAlso :: BlockPred lore -> BlockPred lore -> BlockPred lore
+andAlso :: BlockPred rep -> BlockPred rep -> BlockPred rep
 andAlso p1 p2 body vtable need = p1 body vtable need && p2 body vtable need
 
-isConsumed :: BlockPred lore
-isConsumed _ utable = any (`UT.isConsumed` utable) . patternNames . stmPattern
+isConsumed :: BlockPred rep
+isConsumed _ utable = any (`UT.isConsumed` utable) . patNames . stmPat
 
-isOp :: BlockPred lore
+isOp :: BlockPred rep
 isOp _ _ (Let _ _ Op {}) = True
 isOp _ _ _ = False
 
 constructBody ::
-  SimplifiableLore lore =>
-  Stms (Wise lore) ->
+  SimplifiableRep rep =>
+  Stms (Wise rep) ->
   Result ->
-  SimpleM lore (Body (Wise lore))
+  SimpleM rep (Body (Wise rep))
 constructBody stms res =
-  fmap fst $
-    runBinder $
-      insertStmsM $ do
-        addStms stms
-        resultBodyM res
+  fmap fst . runBuilder . buildBody_ $ do
+    addStms stms
+    pure res
 
-type SimplifiedBody lore a = ((a, UT.UsageTable), Stms (Wise lore))
+type SimplifiedBody rep a = ((a, UT.UsageTable), Stms (Wise rep))
 
 blockIf ::
-  SimplifiableLore lore =>
-  BlockPred (Wise lore) ->
-  SimpleM lore (SimplifiedBody lore a) ->
-  SimpleM lore ((Stms (Wise lore), a), Stms (Wise lore))
+  SimplifiableRep rep =>
+  BlockPred (Wise rep) ->
+  SimpleM rep (SimplifiedBody rep a) ->
+  SimpleM rep ((Stms (Wise rep), a), Stms (Wise rep))
 blockIf block m = do
   ((x, usages), stms) <- m
   vtable <- askVtable
@@ -554,10 +536,10 @@ blockIf block m = do
   (blocked, hoisted) <- hoistStms rules block vtable usages stms
   return ((blocked, x), hoisted)
 
-hasFree :: ASTLore lore => Names -> BlockPred lore
+hasFree :: ASTRep rep => Names -> BlockPred rep
 hasFree ks _ _ need = ks `namesIntersect` freeIn need
 
-isNotSafe :: ASTLore lore => BlockPred lore
+isNotSafe :: ASTRep rep => BlockPred rep
 isNotSafe _ _ = not . safeExp . stmExp
 
 isInPlaceBound :: BlockPred m
@@ -566,13 +548,13 @@ isInPlaceBound _ _ = isUpdate . stmExp
     isUpdate (BasicOp Update {}) = True
     isUpdate _ = False
 
-isNotCheap :: ASTLore lore => BlockPred lore
+isNotCheap :: ASTRep rep => BlockPred rep
 isNotCheap _ _ = not . cheapStm
 
-cheapStm :: ASTLore lore => Stm lore -> Bool
+cheapStm :: ASTRep rep => Stm rep -> Bool
 cheapStm = cheapExp . stmExp
 
-cheapExp :: ASTLore lore => Exp lore -> Bool
+cheapExp :: ASTRep rep => Exp rep -> Bool
 cheapExp (BasicOp BinOp {}) = True
 cheapExp (BasicOp SubExp {}) = True
 cheapExp (BasicOp UnOp {}) = True
@@ -589,24 +571,24 @@ cheapExp (Op op) = cheapOp op
 cheapExp _ = True -- Used to be False, but
 -- let's try it out.
 
-stmIs :: (Stm lore -> Bool) -> BlockPred lore
+stmIs :: (Stm rep -> Bool) -> BlockPred rep
 stmIs f _ _ = f
 
-loopInvariantStm :: ASTLore lore => ST.SymbolTable lore -> Stm lore -> Bool
+loopInvariantStm :: ASTRep rep => ST.SymbolTable rep -> Stm rep -> Bool
 loopInvariantStm vtable =
   all (`nameIn` ST.availableAtClosestLoop vtable) . namesToList . freeIn
 
 hoistCommon ::
-  SimplifiableLore lore =>
+  SimplifiableRep rep =>
   SubExp ->
   IfSort ->
-  SimplifiedBody lore Result ->
-  SimplifiedBody lore Result ->
+  SimplifiedBody rep Result ->
+  SimplifiedBody rep Result ->
   SimpleM
-    lore
-    ( Body (Wise lore),
-      Body (Wise lore),
-      Stms (Wise lore)
+    rep
+    ( Body (Wise rep),
+      Body (Wise rep),
+      Stms (Wise rep)
     )
 hoistCommon cond ifsort ((res1, usages1), stms1) ((res2, usages2), stms2) = do
   is_alloc_fun <- asksEngineEnv $ isAllocation . envHoistBlockers
@@ -636,7 +618,7 @@ hoistCommon cond ifsort ((res1, usages1), stms1) ((res2, usages2), stms2) = do
       isNotHoistableBnd _ _ (Let _ _ (BasicOp ArrayLit {})) = False
       isNotHoistableBnd _ _ (Let _ _ (BasicOp SubExp {})) = False
       isNotHoistableBnd _ usages (Let pat _ _)
-        | any (`UT.isSize` usages) $ patternNames pat =
+        | any (`UT.isSize` usages) $ patNames pat =
           False
       isNotHoistableBnd _ _ stm
         | is_alloc_fun stm = False
@@ -651,97 +633,74 @@ hoistCommon cond ifsort ((res1, usages1), stms1) ((res2, usages2), stms2) = do
           `orIf` isNotHoistableBnd
 
   rules <- asksEngineEnv envRules
-  (body1_bnds', safe1) <-
+  (body1_stms', safe1) <-
     protectIfHoisted cond True $
       hoistStms rules block vtable usages1 stms1
-  (body2_bnds', safe2) <-
+  (body2_stms', safe2) <-
     protectIfHoisted cond False $
       hoistStms rules block vtable usages2 stms2
   let hoistable = safe1 <> safe2
-  body1' <- constructBody body1_bnds' res1
-  body2' <- constructBody body2_bnds' res2
+  body1' <- constructBody body1_stms' res1
+  body2' <- constructBody body2_stms' res2
   return (body1', body2', hoistable)
 
 -- | Simplify a single body.  The @[Diet]@ only covers the value
 -- elements, because the context cannot be consumed.
 simplifyBody ::
-  SimplifiableLore lore =>
+  SimplifiableRep rep =>
   [Diet] ->
-  Body lore ->
-  SimpleM lore (SimplifiedBody lore Result)
-simplifyBody ds (Body _ bnds res) =
-  simplifyStms bnds $ do
+  Body rep ->
+  SimpleM rep (SimplifiedBody rep Result)
+simplifyBody ds (Body _ stms res) =
+  simplifyStms stms $ do
     res' <- simplifyResult ds res
     return (res', mempty)
 
 -- | Simplify a single 'Result'.  The @[Diet]@ only covers the value
 -- elements, because the context cannot be consumed.
 simplifyResult ::
-  SimplifiableLore lore =>
-  [Diet] ->
-  Result ->
-  SimpleM lore (Result, UT.UsageTable)
+  SimplifiableRep rep => [Diet] -> Result -> SimpleM rep (Result, UT.UsageTable)
 simplifyResult ds res = do
-  let (ctx_res, val_res) = splitFromEnd (length ds) res
-  -- Copy propagation is a little trickier here, because there is no
-  -- place to put the certificates when copy-propagating a certified
-  -- statement.  However, for results in the *context*, it is OK to
-  -- just throw away the certificates, because for the program to be
-  -- type-correct, those statements must anyway be used (or
-  -- copy-propagated into) the statements producing the value result.
-  (ctx_res', _ctx_res_cs) <- collectCerts $ mapM simplify ctx_res
-  val_res' <- mapM simplify' val_res
-
-  let consumption = consumeResult $ zip ds val_res'
-      res' = ctx_res' <> val_res'
+  res' <- mapM simplify res
+  vtable <- askVtable
+  let consumption = consumeResult vtable $ zip ds res'
   return (res', UT.usages (freeIn res') <> consumption)
-  where
-    simplify' (Var name) = do
-      bnd <- ST.lookupSubExp name <$> askVtable
-      case bnd of
-        Just (Constant v, cs)
-          | cs == mempty -> return $ Constant v
-        Just (Var id', cs)
-          | cs == mempty -> return $ Var id'
-        _ -> return $ Var name
-    simplify' (Constant v) =
-      return $ Constant v
 
 isDoLoopResult :: Result -> UT.UsageTable
 isDoLoopResult = mconcat . map checkForVar
   where
-    checkForVar (Var ident) = UT.inResultUsage ident
+    checkForVar (SubExpRes _ (Var ident)) = UT.inResultUsage ident
     checkForVar _ = mempty
 
 simplifyStms ::
-  SimplifiableLore lore =>
-  Stms lore ->
-  SimpleM lore (a, Stms (Wise lore)) ->
-  SimpleM lore (a, Stms (Wise lore))
+  SimplifiableRep rep =>
+  Stms rep ->
+  SimpleM rep (a, Stms (Wise rep)) ->
+  SimpleM rep (a, Stms (Wise rep))
 simplifyStms stms m =
   case stmsHead stms of
     Nothing -> inspectStms mempty m
     Just (Let pat (StmAux stm_cs attrs dec) e, stms') -> do
       stm_cs' <- simplify stm_cs
       ((e', e_stms), e_cs) <- collectCerts $ simplifyExp e
-      (pat', pat_cs) <- collectCerts $ simplifyPattern pat
+      (pat', pat_cs) <- collectCerts $ simplifyPat pat
       let cs = stm_cs' <> e_cs <> pat_cs
       inspectStms e_stms $
         inspectStm (mkWiseLetStm pat' (StmAux cs attrs dec) e') $
           simplifyStms stms' m
 
 inspectStm ::
-  SimplifiableLore lore =>
-  Stm (Wise lore) ->
-  SimpleM lore (a, Stms (Wise lore)) ->
-  SimpleM lore (a, Stms (Wise lore))
+  SimplifiableRep rep =>
+  Stm (Wise rep) ->
+  SimpleM rep (a, Stms (Wise rep)) ->
+  SimpleM rep (a, Stms (Wise rep))
 inspectStm = inspectStms . oneStm
 
 inspectStms ::
-  SimplifiableLore lore =>
-  Stms (Wise lore) ->
-  SimpleM lore (a, Stms (Wise lore)) ->
-  SimpleM lore (a, Stms (Wise lore))
+  SimplifiableRep rep =>
+  Stms (Wise rep) ->
+  SimpleM rep (a, Stms (Wise rep)) ->
+  SimpleM rep (a, Stms (Wise rep))
 inspectStms stms m =
   case stmsHead stms of
     Nothing -> m
@@ -750,20 +709,20 @@ inspectStms stms m =
       rules <- asksEngineEnv envRules
       simplified <- topDownSimplifyStm rules vtable stm
       case simplified of
-        Just newbnds -> changed >> inspectStms (newbnds <> stms') m
+        Just newstms -> changed >> inspectStms (newstms <> stms') m
         Nothing -> do
           (x, stms'') <- localVtable (ST.insertStm stm) $ inspectStms stms' m
           return (x, oneStm stm <> stms'')
 
-simplifyOp :: Op lore -> SimpleM lore (Op (Wise lore), Stms (Wise lore))
+simplifyOp :: Op rep -> SimpleM rep (Op (Wise rep), Stms (Wise rep))
 simplifyOp op = do
   f <- asks $ simplifyOpS . fst
   f op
 
 simplifyExp ::
-  SimplifiableLore lore =>
-  Exp lore ->
-  SimpleM lore (Exp (Wise lore), Stms (Wise lore))
+  SimplifiableRep rep =>
+  Exp rep ->
+  SimpleM rep (Exp (Wise rep), Stms (Wise rep))
 simplifyExp (If cond tbranch fbranch (IfDec ts ifsort)) = do
   -- Here, we have to check whether 'cond' puts a bound on some free
   -- variable, and if so, chomp it.  We should also try to do CSE
@@ -780,16 +739,12 @@ simplifyExp (If cond tbranch fbranch (IfDec ts ifsort)) = do
   fbranch' <- simplifyBody ds fbranch
   (tbranch'', fbranch'', hoisted) <- hoistCommon cond' ifsort tbranch' fbranch'
   return (If cond' tbranch'' fbranch'' $ IfDec ts' ifsort, hoisted)
-simplifyExp (DoLoop ctx val form loopbody) = do
-  let (ctxparams, ctxinit) = unzip ctx
-      (valparams, valinit) = unzip val
-  ctxparams' <- mapM (traverse simplify) ctxparams
-  ctxinit' <- mapM simplify ctxinit
-  valparams' <- mapM (traverse simplify) valparams
-  valinit' <- mapM simplify valinit
-  let ctx' = zip ctxparams' ctxinit'
-      val' = zip valparams' valinit'
-      diets = map (diet . paramDeclType) valparams'
+simplifyExp (DoLoop merge form loopbody) = do
+  let (params, args) = unzip merge
+  params' <- mapM (traverse simplify) params
+  args' <- mapM simplify args
+  let merge' = zip params' args'
+      diets = map (diet . paramDeclType) params'
   (form', boundnames, wrapbody) <- case form of
     ForLoop loopvar it boundexp loopvars -> do
       boundexp' <- simplify boundexp
@@ -801,7 +756,7 @@ simplifyExp (DoLoop ctx val form loopbody) = do
         ( form',
           namesFromList (loopvar : map paramName loop_params') <> fparamnames,
           bindLoopVar loopvar it boundexp'
-            . protectLoopHoisted ctx' val' form'
+            . protectLoopHoisted merge' form'
             . bindArrayLParams loop_params'
         )
     WhileLoop cond -> do
@@ -809,31 +764,30 @@ simplifyExp (DoLoop ctx val form loopbody) = do
       return
         ( WhileLoop cond',
           fparamnames,
-          protectLoopHoisted ctx' val' (WhileLoop cond')
+          protectLoopHoisted merge' (WhileLoop cond')
         )
   seq_blocker <- asksEngineEnv $ blockHoistSeq . envHoistBlockers
   ((loopstms, loopres), hoisted) <-
-    enterLoop $
-      consumeMerge $
-        bindMerge (zipWith withRes (ctx' ++ val') (bodyResult loopbody)) $
-          wrapbody $
-            blockIf
-              ( hasFree boundnames `orIf` isConsumed
-                  `orIf` seq_blocker
-                  `orIf` notWorthHoisting
-              )
-              $ do
-                ((res, uses), stms) <- simplifyBody diets loopbody
-                return ((res, uses <> isDoLoopResult res), stms)
+    enterLoop . consumeMerge $
+      bindMerge (zipWith withRes merge' (bodyResult loopbody)) $
+        wrapbody $
+          blockIf
+            ( hasFree boundnames `orIf` isConsumed
+                `orIf` seq_blocker
+                `orIf` notWorthHoisting
+            )
+            $ do
+              ((res, uses), stms) <- simplifyBody diets loopbody
+              return ((res, uses <> isDoLoopResult res), stms)
   loopbody' <- constructBody loopstms loopres
-  return (DoLoop ctx' val' form' loopbody', hoisted)
+  return (DoLoop merge' form' loopbody', hoisted)
   where
     fparamnames =
-      namesFromList (map (paramName . fst) $ ctx ++ val)
+      namesFromList (map (paramName . fst) merge)
     consumeMerge =
       localVtable $ flip (foldl' (flip ST.consume)) $ namesToList consumed_by_merge
     consumed_by_merge =
-      freeIn $ map snd $ filter (unique . paramDeclType . fst) val
+      freeIn $ map snd $ filter (unique . paramDeclType . fst) merge
     withRes (p, x) y = (p, x, y)
 simplifyExp (Op op) = do
   (op', stms) <- simplifyOp op
@@ -864,9 +818,9 @@ simplifyExp e = do
   return (e', mempty)
 
 simplifyExpBase ::
-  SimplifiableLore lore =>
-  Exp lore ->
-  SimpleM lore (Exp (Wise lore))
+  SimplifiableRep rep =>
+  Exp rep ->
+  SimpleM rep (Exp (Wise rep))
 simplifyExpBase = mapExpM hoist
   where
     hoist =
@@ -889,21 +843,21 @@ simplifyExpBase = mapExpM hoist
             error "Unhandled Op in simplification engine."
         }
 
-type SimplifiableLore lore =
-  ( ASTLore lore,
-    Simplifiable (LetDec lore),
-    Simplifiable (FParamInfo lore),
-    Simplifiable (LParamInfo lore),
-    Simplifiable (RetType lore),
-    Simplifiable (BranchType lore),
-    CanBeWise (Op lore),
-    ST.IndexOp (OpWithWisdom (Op lore)),
-    BinderOps (Wise lore),
-    IsOp (Op lore)
+type SimplifiableRep rep =
+  ( ASTRep rep,
+    Simplifiable (LetDec rep),
+    Simplifiable (FParamInfo rep),
+    Simplifiable (LParamInfo rep),
+    Simplifiable (RetType rep),
+    Simplifiable (BranchType rep),
+    CanBeWise (Op rep),
+    ST.IndexOp (OpWithWisdom (Op rep)),
+    BuilderOps (Wise rep),
+    IsOp (Op rep)
   )
 
 class Simplifiable e where
-  simplify :: SimplifiableLore lore => e -> SimpleM lore e
+  simplify :: SimplifiableRep rep => e -> SimpleM rep e
 
 instance (Simplifiable a, Simplifiable b) => Simplifiable (a, b) where
   simplify (x, y) = (,) <$> simplify x <*> simplify y
@@ -927,8 +881,8 @@ instance Simplifiable a => Simplifiable [a] where
 
 instance Simplifiable SubExp where
   simplify (Var name) = do
-    bnd <- ST.lookupSubExp name <$> askVtable
-    case bnd of
+    stm <- ST.lookupSubExp name <$> askVtable
+    case stm of
       Just (Constant v, cs) -> do
         changed
         usedCerts cs
@@ -941,16 +895,20 @@ instance Simplifiable SubExp where
   simplify (Constant v) =
     return $ Constant v
 
-simplifyPattern ::
-  (SimplifiableLore lore, Simplifiable dec) =>
-  PatternT dec ->
-  SimpleM lore (PatternT dec)
-simplifyPattern pat =
-  Pattern
-    <$> mapM inspect (patternContextElements pat)
-    <*> mapM inspect (patternValueElements pat)
+instance Simplifiable SubExpRes where
+  simplify (SubExpRes cs se) = do
+    cs' <- simplify cs
+    (se', se_cs) <- collectCerts $ simplify se
+    pure $ SubExpRes (se_cs <> cs') se'
+
+simplifyPat ::
+  (SimplifiableRep rep, Simplifiable dec) =>
+  PatT dec ->
+  SimpleM rep (PatT dec)
+simplifyPat (Pat xs) =
+  Pat <$> mapM inspect xs
   where
-    inspect (PatElem name lore) = PatElem name <$> simplify lore
+    inspect (PatElem name rep) = PatElem name <$> simplify rep
 
 instance Simplifiable () where
   simplify = pure
@@ -993,26 +951,29 @@ instance Simplifiable d => Simplifiable (DimIndex d) where
   simplify (DimFix i) = DimFix <$> simplify i
   simplify (DimSlice i n s) = DimSlice <$> simplify i <*> simplify n <*> simplify s
 
+instance Simplifiable d => Simplifiable (Slice d) where
+  simplify = traverse simplify
+
 simplifyLambda ::
-  SimplifiableLore lore =>
-  Lambda lore ->
-  SimpleM lore (Lambda (Wise lore), Stms (Wise lore))
+  SimplifiableRep rep =>
+  Lambda rep ->
+  SimpleM rep (Lambda (Wise rep), Stms (Wise rep))
 simplifyLambda lam = do
   par_blocker <- asksEngineEnv $ blockHoistPar . envHoistBlockers
   simplifyLambdaMaybeHoist par_blocker lam
 
 simplifyLambdaNoHoisting ::
-  SimplifiableLore lore =>
-  Lambda lore ->
-  SimpleM lore (Lambda (Wise lore))
+  SimplifiableRep rep =>
+  Lambda rep ->
+  SimpleM rep (Lambda (Wise rep))
 simplifyLambdaNoHoisting lam =
   fst <$> simplifyLambdaMaybeHoist (isFalse False) lam
 
 simplifyLambdaMaybeHoist ::
-  SimplifiableLore lore =>
-  BlockPred (Wise lore) ->
-  Lambda lore ->
-  SimpleM lore (Lambda (Wise lore), Stms (Wise lore))
+  SimplifiableRep rep =>
+  BlockPred (Wise rep) ->
+  Lambda rep ->
+  SimpleM rep (Lambda (Wise rep), Stms (Wise rep))
 simplifyLambdaMaybeHoist blocked lam@(Lambda params body rettype) = do
   params' <- mapM (traverse simplify) params
   let paramnames = namesFromList $ boundByLambda lam
@@ -1025,33 +986,33 @@ simplifyLambdaMaybeHoist blocked lam@(Lambda params body rettype) = do
   rettype' <- simplify rettype
   return (Lambda params' body' rettype', hoisted)
 
-consumeResult :: [(Diet, SubExp)] -> UT.UsageTable
-consumeResult = mconcat . map inspect
+consumeResult :: ST.SymbolTable rep -> [(Diet, SubExpRes)] -> UT.UsageTable
+consumeResult vtable = mconcat . map inspect
   where
-    inspect (Consume, se) =
-      mconcat $ map UT.consumedUsage $ namesToList $ subExpAliases se
+    inspect (Consume, SubExpRes _ (Var v)) =
+      mconcat $ map UT.consumedUsage $ v : namesToList (ST.lookupAliases v vtable)
     inspect _ = mempty
 
-instance Simplifiable Certificates where
-  simplify (Certificates ocs) = Certificates . nubOrd . concat <$> mapM check ocs
+instance Simplifiable Certs where
+  simplify (Certs ocs) = Certs . nubOrd . concat <$> mapM check ocs
     where
       check idd = do
         vv <- ST.lookupSubExp idd <$> askVtable
         case vv of
-          Just (Constant Checked, Certificates cs) -> return cs
+          Just (Constant _, Certs cs) -> return cs
           Just (Var idd', _) -> return [idd']
           _ -> return [idd]
 
 insertAllStms ::
-  SimplifiableLore lore =>
-  SimpleM lore (SimplifiedBody lore Result) ->
-  SimpleM lore (Body (Wise lore))
+  SimplifiableRep rep =>
+  SimpleM rep (SimplifiedBody rep Result) ->
+  SimpleM rep (Body (Wise rep))
 insertAllStms = uncurry constructBody . fst <=< blockIf (isFalse False)
 
 simplifyFun ::
-  SimplifiableLore lore =>
-  FunDef lore ->
-  SimpleM lore (FunDef (Wise lore))
+  SimplifiableRep rep =>
+  FunDef rep ->
+  SimpleM rep (FunDef (Wise rep))
 simplifyFun (FunDef entry attrs fname rettype params body) = do
   rettype' <- simplify rettype
   params' <- mapM (traverse simplify) params

@@ -29,14 +29,15 @@ compileProg = Futhark.CodeGen.ImpGen.compileProg Env ops Imp.DefaultSpace
 
 -- Compile seg
 compileMCOp ::
-  Pattern MCMem ->
+  Pat MCMem ->
   MCOp MCMem () ->
   ImpM MCMem Env Imp.MPIOp ()
-compileMCOp _ (OtherOp ()) = pure ()
+compileMCOp _ (OtherOp ()) = error "Unknow op"
 compileMCOp pat (ParOp _par_op op) = do
   -- Contains the arrray size
   let space = getSpace op
 
+  dPrimV_ (segFlat space) (0 :: Imp.TExp Int64)
   seq_code <- compileSegOp pat op
   retvals <- getReturnParams pat op
   iterations <- getIterationDomain op space
@@ -48,13 +49,12 @@ compileMCOp pat (ParOp _par_op op) = do
   emit $ Imp.Op $ Imp.Segop s free_params seq_code retvals (untyped iterations)
 
 compileSegOp ::
-  Pattern MCMem ->
+  Pat MCMem ->
   SegOp () MCMem ->
   ImpM MCMem Env Imp.MPIOp Imp.Code
 compileSegOp pat (SegMap _ space _ kbody) = compileSegMap pat space kbody
-compileSegOp pat (SegRed _ space reds _ kbody) =
-  compileSegRed pat space reds kbody
-compileSegOp _ _ = pure Imp.Skip
+compileSegOp pat (SegRed _ space reds _ kbody) = compileSegRed pat space reds kbody
+compileSegOp _ _ = error "SegOp not implemented yet"
 
 getSpace :: SegOp () MCMem -> SegSpace
 getSpace (SegHist _ space _ _ _) = space

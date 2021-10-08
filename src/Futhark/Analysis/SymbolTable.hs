@@ -15,6 +15,7 @@ module Futhark.Analysis.SymbolTable
     entryLetBoundDec,
     entryIsSize,
     entryStm,
+    entryFParam,
 
     -- * Lookup
     elem,
@@ -60,9 +61,9 @@ import qualified Futhark.IR as AST
 import qualified Futhark.IR.Prop.Aliases as Aliases
 import Prelude hiding (elem, lookup)
 
-data SymbolTable lore = SymbolTable
+data SymbolTable rep = SymbolTable
   { loopDepth :: Int,
-    bindings :: M.Map VName (Entry lore),
+    bindings :: M.Map VName (Entry rep),
     -- | Which names are available just before the most enclosing
     -- loop?
     availableAtClosestLoop :: Names,
@@ -72,7 +73,7 @@ data SymbolTable lore = SymbolTable
     simplifyMemory :: Bool
   }
 
-instance Semigroup (SymbolTable lore) where
+instance Semigroup (SymbolTable rep) where
   table1 <> table2 =
     SymbolTable
       { loopDepth = max (loopDepth table1) (loopDepth table2),
@@ -83,21 +84,21 @@ instance Semigroup (SymbolTable lore) where
         simplifyMemory = simplifyMemory table1 || simplifyMemory table2
       }
 
-instance Monoid (SymbolTable lore) where
+instance Monoid (SymbolTable rep) where
   mempty = empty
 
-empty :: SymbolTable lore
+empty :: SymbolTable rep
 empty = SymbolTable 0 M.empty mempty False
 
-fromScope :: ASTLore lore => Scope lore -> SymbolTable lore
+fromScope :: ASTRep rep => Scope rep -> SymbolTable rep
 fromScope = M.foldlWithKey' insertFreeVar' empty
   where
     insertFreeVar' m k dec = insertFreeVar k dec m
 
-toScope :: SymbolTable lore -> Scope lore
+toScope :: SymbolTable rep -> Scope rep
 toScope = M.map entryInfo . bindings
 
-deepen :: SymbolTable lore -> SymbolTable lore
+deepen :: SymbolTable rep -> SymbolTable rep
 deepen vtable =
   vtable
     { loopDepth = loopDepth vtable + 1,
@@ -108,12 +109,12 @@ deepen vtable =
 data Indexed
   = -- | A PrimExp based on the indexes (that is, without
     -- accessing any actual array).
-    Indexed Certificates (PrimExp VName)
+    Indexed Certs (PrimExp VName)
   | -- | The indexing corresponds to another (perhaps more
     -- advantageous) array.
-    IndexedArray Certificates VName [TPrimExp Int64 VName]
+    IndexedArray Certs VName [TPrimExp Int64 VName]
 
-indexedAddCerts :: Certificates -> Indexed -> Indexed
+indexedAddCerts :: Certs -> Indexed -> Indexed
 indexedAddCerts cs1 (Indexed cs2 v) = Indexed (cs1 <> cs2) v
 indexedAddCerts cs1 (IndexedArray cs2 arr v) = IndexedArray (cs1 <> cs2) arr v
 
@@ -124,59 +125,59 @@ instance FreeIn Indexed where
 -- | Indexing a delayed array if possible.
 type IndexArray = [TPrimExp Int64 VName] -> Maybe Indexed
 
-data Entry lore = Entry
+data Entry rep = Entry
   { -- | True if consumed.
     entryConsumed :: Bool,
     entryDepth :: Int,
     -- | True if this name has been used as an array size,
     -- implying that it is non-negative.
     entryIsSize :: Bool,
-    entryType :: EntryType lore
+    entryType :: EntryType rep
   }
 
-data EntryType lore
-  = LoopVar (LoopVarEntry lore)
-  | LetBound (LetBoundEntry lore)
-  | FParam (FParamEntry lore)
-  | LParam (LParamEntry lore)
-  | FreeVar (FreeVarEntry lore)
+data EntryType rep
+  = LoopVar (LoopVarEntry rep)
+  | LetBound (LetBoundEntry rep)
+  | FParam (FParamEntry rep)
+  | LParam (LParamEntry rep)
+  | FreeVar (FreeVarEntry rep)
 
-data LoopVarEntry lore = LoopVarEntry
+data LoopVarEntry rep = LoopVarEntry
   { loopVarType :: IntType,
     loopVarBound :: SubExp
   }
 
-data LetBoundEntry lore = LetBoundEntry
-  { letBoundDec :: LetDec lore,
+data LetBoundEntry rep = LetBoundEntry
+  { letBoundDec :: LetDec rep,
     letBoundAliases :: Names,
-    letBoundStm :: Stm lore,
+    letBoundStm :: Stm rep,
     -- | Index a delayed array, if possible.
     letBoundIndex :: Int -> IndexArray
   }
 
-data FParamEntry lore = FParamEntry
-  { fparamDec :: FParamInfo lore,
+data FParamEntry rep = FParamEntry
+  { fparamDec :: FParamInfo rep,
     fparamAliases :: Names,
     -- | If a loop parameter, the initial value and the eventual
     -- result.  The result need not be in scope in the symbol table.
     fparamMerge :: Maybe (SubExp, SubExp)
   }
 
-data LParamEntry lore = LParamEntry
-  { lparamDec :: LParamInfo lore,
+data LParamEntry rep = LParamEntry
+  { lparamDec :: LParamInfo rep,
     lparamIndex :: IndexArray
   }
 
-data FreeVarEntry lore = FreeVarEntry
-  { freeVarDec :: NameInfo lore,
+data FreeVarEntry rep = FreeVarEntry
+  { freeVarDec :: NameInfo rep,
     -- | Index a delayed array, if possible.
     freeVarIndex :: VName -> IndexArray
   }
 
-instance ASTLore lore => Typed (Entry lore) where
+instance ASTRep rep => Typed (Entry rep) where
   typeOf = typeOf . entryInfo
 
-entryInfo :: Entry lore -> NameInfo lore
+entryInfo :: Entry rep -> NameInfo rep
 entryInfo e = case entryType e of
   LetBound entry -> LetName $ letBoundDec entry
   LoopVar entry -> IndexName $ loopVarType entry
@@ -184,49 +185,54 @@ entryInfo e = case entryType e of
   LParam entry -> LParamName $ lparamDec entry
   FreeVar entry -> freeVarDec entry
 
-isLetBound :: Entry lore -> Maybe (LetBoundEntry lore)
+isLetBound :: Entry rep -> Maybe (LetBoundEntry rep)
 isLetBound e = case entryType e of
   LetBound entry -> Just entry
   _ -> Nothing
 
-entryStm :: Entry lore -> Maybe (Stm lore)
+entryStm :: Entry rep -> Maybe (Stm rep)
 entryStm = fmap letBoundStm . isLetBound
 
-entryLetBoundDec :: Entry lore -> Maybe (LetDec lore)
+entryFParam :: Entry rep -> Maybe (FParamInfo rep)
+entryFParam e = case entryType e of
+  FParam e' -> Just $ fparamDec e'
+  _ -> Nothing
+
+entryLetBoundDec :: Entry rep -> Maybe (LetDec rep)
 entryLetBoundDec = fmap letBoundDec . isLetBound
 
-elem :: VName -> SymbolTable lore -> Bool
+elem :: VName -> SymbolTable rep -> Bool
 elem name = isJust . lookup name
 
-lookup :: VName -> SymbolTable lore -> Maybe (Entry lore)
+lookup :: VName -> SymbolTable rep -> Maybe (Entry rep)
 lookup name = M.lookup name . bindings
 
-lookupStm :: VName -> SymbolTable lore -> Maybe (Stm lore)
+lookupStm :: VName -> SymbolTable rep -> Maybe (Stm rep)
 lookupStm name vtable = entryStm =<< lookup name vtable
 
-lookupExp :: VName -> SymbolTable lore -> Maybe (Exp lore, Certificates)
+lookupExp :: VName -> SymbolTable rep -> Maybe (Exp rep, Certs)
 lookupExp name vtable = (stmExp &&& stmCerts) <$> lookupStm name vtable
 
-lookupBasicOp :: VName -> SymbolTable lore -> Maybe (BasicOp, Certificates)
+lookupBasicOp :: VName -> SymbolTable rep -> Maybe (BasicOp, Certs)
 lookupBasicOp name vtable = case lookupExp name vtable of
   Just (BasicOp e, cs) -> Just (e, cs)
   _ -> Nothing
 
-lookupType :: ASTLore lore => VName -> SymbolTable lore -> Maybe Type
+lookupType :: ASTRep rep => VName -> SymbolTable rep -> Maybe Type
 lookupType name vtable = typeOf <$> lookup name vtable
 
-lookupSubExpType :: ASTLore lore => SubExp -> SymbolTable lore -> Maybe Type
+lookupSubExpType :: ASTRep rep => SubExp -> SymbolTable rep -> Maybe Type
 lookupSubExpType (Var v) = lookupType v
 lookupSubExpType (Constant v) = const $ Just $ Prim $ primValueType v
 
-lookupSubExp :: VName -> SymbolTable lore -> Maybe (SubExp, Certificates)
+lookupSubExp :: VName -> SymbolTable rep -> Maybe (SubExp, Certs)
 lookupSubExp name vtable = do
   (e, cs) <- lookupExp name vtable
   case e of
     BasicOp (SubExp se) -> Just (se, cs)
     _ -> Nothing
 
-lookupAliases :: VName -> SymbolTable lore -> Names
+lookupAliases :: VName -> SymbolTable rep -> Names
 lookupAliases name vtable =
   case entryType <$> M.lookup name (bindings vtable) of
     Just (LetBound e) -> letBoundAliases e
@@ -235,25 +241,25 @@ lookupAliases name vtable =
 
 -- | If the given variable name is the name of a 'ForLoop' parameter,
 -- then return the bound of that loop.
-lookupLoopVar :: VName -> SymbolTable lore -> Maybe SubExp
+lookupLoopVar :: VName -> SymbolTable rep -> Maybe SubExp
 lookupLoopVar name vtable = do
   LoopVar e <- entryType <$> M.lookup name (bindings vtable)
   return $ loopVarBound e
 
-lookupLoopParam :: VName -> SymbolTable lore -> Maybe (SubExp, SubExp)
+lookupLoopParam :: VName -> SymbolTable rep -> Maybe (SubExp, SubExp)
 lookupLoopParam name vtable = do
   FParam e <- entryType <$> M.lookup name (bindings vtable)
   fparamMerge e
 
 -- | In symbol table and not consumed.
-available :: VName -> SymbolTable lore -> Bool
+available :: VName -> SymbolTable rep -> Bool
 available name = maybe False (not . entryConsumed) . M.lookup name . bindings
 
 index ::
-  ASTLore lore =>
+  ASTRep rep =>
   VName ->
   [SubExp] ->
-  SymbolTable lore ->
+  SymbolTable rep ->
   Maybe Indexed
 index name is table = do
   is' <- mapM asPrimExp is
@@ -266,16 +272,15 @@ index name is table = do
 index' ::
   VName ->
   [TPrimExp Int64 VName] ->
-  SymbolTable lore ->
+  SymbolTable rep ->
   Maybe Indexed
 index' name is vtable = do
   entry <- lookup name vtable
   case entryType entry of
     LetBound entry'
       | Just k <-
-          elemIndex name $
-            patternValueNames $
-              stmPattern $ letBoundStm entry' ->
+          elemIndex name . patNames . stmPat $
+            letBoundStm entry' ->
         letBoundIndex entry' k is
     FreeVar entry' ->
       freeVarIndex entry' name is
@@ -284,8 +289,8 @@ index' name is vtable = do
 
 class IndexOp op where
   indexOp ::
-    (ASTLore lore, IndexOp (Op lore)) =>
-    SymbolTable lore ->
+    (ASTRep rep, IndexOp (Op rep)) =>
+    SymbolTable rep ->
     Int ->
     op ->
     [TPrimExp Int64 VName] ->
@@ -295,9 +300,9 @@ class IndexOp op where
 instance IndexOp ()
 
 indexExp ::
-  (IndexOp (Op lore), ASTLore lore) =>
-  SymbolTable lore ->
-  Exp lore ->
+  (IndexOp (Op rep), ASTRep rep) =>
+  SymbolTable rep ->
+  Exp rep ->
   Int ->
   IndexArray
 indexExp vtable (Op op) k is =
@@ -327,7 +332,7 @@ indexExp table (BasicOp (Reshape newshape v)) _ is
             is
      in index' v is' table
 indexExp table (BasicOp (Index v slice)) _ is =
-  index' v (adjust slice is) table
+  index' v (adjust (unSlice slice) is) table
   where
     adjust (DimFix j : js') is' =
       pe64 j : adjust js' is'
@@ -339,40 +344,40 @@ indexExp table (BasicOp (Index v slice)) _ is =
 indexExp _ _ _ _ = Nothing
 
 defBndEntry ::
-  (ASTLore lore, IndexOp (Op lore)) =>
-  SymbolTable lore ->
-  PatElem lore ->
+  (ASTRep rep, IndexOp (Op rep)) =>
+  SymbolTable rep ->
+  PatElem rep ->
   Names ->
-  Stm lore ->
-  LetBoundEntry lore
-defBndEntry vtable patElem als bnd =
+  Stm rep ->
+  LetBoundEntry rep
+defBndEntry vtable patElem als stm =
   LetBoundEntry
     { letBoundDec = patElemDec patElem,
       letBoundAliases = als,
-      letBoundStm = bnd,
+      letBoundStm = stm,
       letBoundIndex = \k ->
-        fmap (indexedAddCerts (stmAuxCerts $ stmAux bnd))
-          . indexExp vtable (stmExp bnd) k
+        fmap (indexedAddCerts (stmAuxCerts $ stmAux stm))
+          . indexExp vtable (stmExp stm) k
     }
 
 bindingEntries ::
-  (ASTLore lore, Aliases.Aliased lore, IndexOp (Op lore)) =>
-  Stm lore ->
-  SymbolTable lore ->
-  [LetBoundEntry lore]
-bindingEntries bnd@(Let pat _ _) vtable = do
-  pat_elem <- patternElements pat
-  return $ defBndEntry vtable pat_elem (Aliases.aliasesOf pat_elem) bnd
+  (ASTRep rep, Aliases.Aliased rep, IndexOp (Op rep)) =>
+  Stm rep ->
+  SymbolTable rep ->
+  [LetBoundEntry rep]
+bindingEntries stm@(Let pat _ _) vtable = do
+  pat_elem <- patElems pat
+  return $ defBndEntry vtable pat_elem (Aliases.aliasesOf pat_elem) stm
 
 adjustSeveral :: Ord k => (v -> v) -> [k] -> M.Map k v -> M.Map k v
 adjustSeveral f = flip $ foldl' $ flip $ M.adjust f
 
 insertEntry ::
-  ASTLore lore =>
+  ASTRep rep =>
   VName ->
-  EntryType lore ->
-  SymbolTable lore ->
-  SymbolTable lore
+  EntryType rep ->
+  SymbolTable rep ->
+  SymbolTable rep
 insertEntry name entry vtable =
   let entry' =
         Entry
@@ -390,26 +395,26 @@ insertEntry name entry vtable =
         }
 
 insertEntries ::
-  ASTLore lore =>
-  [(VName, EntryType lore)] ->
-  SymbolTable lore ->
-  SymbolTable lore
+  ASTRep rep =>
+  [(VName, EntryType rep)] ->
+  SymbolTable rep ->
+  SymbolTable rep
 insertEntries entries vtable =
   foldl' add vtable entries
   where
     add vtable' (name, entry) = insertEntry name entry vtable'
 
 insertStm ::
-  (ASTLore lore, IndexOp (Op lore), Aliases.Aliased lore) =>
-  Stm lore ->
-  SymbolTable lore ->
-  SymbolTable lore
+  (ASTRep rep, IndexOp (Op rep), Aliases.Aliased rep) =>
+  Stm rep ->
+  SymbolTable rep ->
+  SymbolTable rep
 insertStm stm vtable =
   flip (foldl' $ flip consume) (namesToList stm_consumed) $
-    flip (foldl' addRevAliases) (patternElements $ stmPattern stm) $
+    flip (foldl' addRevAliases) (patElems $ stmPat stm) $
       insertEntries (zip names $ map LetBound $ bindingEntries stm vtable) vtable
   where
-    names = patternNames $ stmPattern stm
+    names = patNames $ stmPat stm
     stm_consumed = expandAliases (Aliases.consumedInStm stm) vtable
     addRevAliases vtable' pe =
       vtable' {bindings = adjustSeveral update inedges $ bindings vtable'}
@@ -429,23 +434,23 @@ insertStm stm vtable =
         update' e = e
 
 insertStms ::
-  (ASTLore lore, IndexOp (Op lore), Aliases.Aliased lore) =>
-  Stms lore ->
-  SymbolTable lore ->
-  SymbolTable lore
+  (ASTRep rep, IndexOp (Op rep), Aliases.Aliased rep) =>
+  Stms rep ->
+  SymbolTable rep ->
+  SymbolTable rep
 insertStms stms vtable = foldl' (flip insertStm) vtable $ stmsToList stms
 
-expandAliases :: Names -> SymbolTable lore -> Names
+expandAliases :: Names -> SymbolTable rep -> Names
 expandAliases names vtable = names <> aliasesOfAliases
   where
     aliasesOfAliases =
       mconcat . map (`lookupAliases` vtable) . namesToList $ names
 
 insertFParam ::
-  ASTLore lore =>
-  AST.FParam lore ->
-  SymbolTable lore ->
-  SymbolTable lore
+  ASTRep rep =>
+  AST.FParam rep ->
+  SymbolTable rep ->
+  SymbolTable rep
 insertFParam fparam = insertEntry name entry
   where
     name = AST.paramName fparam
@@ -458,13 +463,13 @@ insertFParam fparam = insertEntry name entry
           }
 
 insertFParams ::
-  ASTLore lore =>
-  [AST.FParam lore] ->
-  SymbolTable lore ->
-  SymbolTable lore
+  ASTRep rep =>
+  [AST.FParam rep] ->
+  SymbolTable rep ->
+  SymbolTable rep
 insertFParams fparams symtable = foldl' (flip insertFParam) symtable fparams
 
-insertLParam :: ASTLore lore => LParam lore -> SymbolTable lore -> SymbolTable lore
+insertLParam :: ASTRep rep => LParam rep -> SymbolTable rep -> SymbolTable rep
 insertLParam param = insertEntry name bind
   where
     bind =
@@ -483,13 +488,13 @@ insertLParam param = insertEntry name bind
 -- used to help some loop optimisations detect invariant loop
 -- parameters.
 insertLoopMerge ::
-  ASTLore lore =>
-  [(AST.FParam lore, SubExp, SubExp)] ->
-  SymbolTable lore ->
-  SymbolTable lore
+  ASTRep rep =>
+  [(AST.FParam rep, SubExp, SubExpRes)] ->
+  SymbolTable rep ->
+  SymbolTable rep
 insertLoopMerge = flip $ foldl' $ flip bind
   where
-    bind (p, initial, res) =
+    bind (p, initial, SubExpRes _ res) =
       insertEntry (paramName p) $
         FParam
           FParamEntry
@@ -498,7 +503,7 @@ insertLoopMerge = flip $ foldl' $ flip bind
               fparamMerge = Just (initial, res)
             }
 
-insertLoopVar :: ASTLore lore => VName -> IntType -> SubExp -> SymbolTable lore -> SymbolTable lore
+insertLoopVar :: ASTRep rep => VName -> IntType -> SubExp -> SymbolTable rep -> SymbolTable rep
 insertLoopVar name it bound = insertEntry name bind
   where
     bind =
@@ -508,7 +513,7 @@ insertLoopVar name it bound = insertEntry name bind
             loopVarBound = bound
           }
 
-insertFreeVar :: ASTLore lore => VName -> NameInfo lore -> SymbolTable lore -> SymbolTable lore
+insertFreeVar :: ASTRep rep => VName -> NameInfo rep -> SymbolTable rep -> SymbolTable rep
 insertFreeVar name dec = insertEntry name entry
   where
     entry =
@@ -518,7 +523,7 @@ insertFreeVar name dec = insertEntry name entry
             freeVarIndex = \_ _ -> Nothing
           }
 
-consume :: VName -> SymbolTable lore -> SymbolTable lore
+consume :: VName -> SymbolTable rep -> SymbolTable rep
 consume consumee vtable =
   foldl' consume' vtable $
     namesToList $
@@ -529,7 +534,7 @@ consume consumee vtable =
     consume'' e = e {entryConsumed = True}
 
 -- | Hide definitions of those entries that satisfy some predicate.
-hideIf :: (Entry lore -> Bool) -> SymbolTable lore -> SymbolTable lore
+hideIf :: (Entry rep -> Bool) -> SymbolTable rep -> SymbolTable rep
 hideIf hide vtable = vtable {bindings = M.map maybeHide $ bindings vtable}
   where
     maybeHide entry
@@ -546,7 +551,7 @@ hideIf hide vtable = vtable {bindings = M.map maybeHide $ bindings vtable}
 
 -- | Hide these definitions, if they are protected by certificates in
 -- the set of names.
-hideCertified :: Names -> SymbolTable lore -> SymbolTable lore
+hideCertified :: Names -> SymbolTable rep -> SymbolTable rep
 hideCertified to_hide = hideIf $ maybe False hide . entryStm
   where
-    hide = any (`nameIn` to_hide) . unCertificates . stmCerts
+    hide = any (`nameIn` to_hide) . unCerts . stmCerts

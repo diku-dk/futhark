@@ -83,7 +83,7 @@ OPTIONS
 DIRECTIVES
 ==========
 
-A directive is a way to show the result of running a funtion.
+A directive is a way to show the result of running a function.
 Depending on the directive, this can be as simple as printing the
 textual representation of the result, or as complex as running an
 external plotting program and referencing a generated image.
@@ -149,7 +149,7 @@ The following directives are supported:
   * ``[][]f32`` and ``[][]f64``
 
     Interpreted as greyscale. Values should be between 0 and 1, with 0
-    being black and 0 being white.
+    being black and 1 being white.
 
   * ``[][]u8``
 
@@ -189,15 +189,23 @@ FUTHARKSCRIPT
 Only an extremely limited subset of Futhark is supported:
 
 .. productionlist::
-   scriptexp:   `fun` `scriptexp`*
-            : | "(" `scriptexp` ")"
-            : | "(" `scriptexp` ( "," `scriptexp` )+ ")"
+   script_exp:   `fun` `script_exp`*
+            : | "(" `script_exp` ")"
+            : | "(" `script_exp` ( "," `script_exp` )+ ")"
+            : | "[" `script_exp` ( "," `script_exp` )+ "]"
+            : | "empty" "(" ("[" `decimal` "]" )+ `script_type` ")"
             : | "{" "}"
-            : | "{" (`id` = `scriptexp`) ("," `id` = `scriptexp`)* "}"
+            : | "{" (`id` = `script_exp`) ("," `id` = `script_exp`)* "}"
+            : | "let" `script_pat` "=" `script_exp` "in" `script_exp`
             : | `literal`
-   fun:  `id` | "$" `id`
+   script_pat:  `id` | "(" `id` ("," `id`) ")"
+   script_fun:  `id` | "$" `id`
+   script_type: `int_type` | `float_type` | "bool"
 
-Function applications are either of Futhark funtions or *builtin
+Note that empty arrays must be written using the ``empty(t)``
+notation, e.g. ``empty([0]i32)``.
+
+Function applications are either of Futhark functions or *builtin
 functions*.  The latter are prefixed with ``$`` and are magical
 (usually impure) functions that could not possibly be implemented in
 Futhark.  The following builtins are supported:

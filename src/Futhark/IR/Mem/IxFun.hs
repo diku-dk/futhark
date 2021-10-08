@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# OPTIONS_GHC -fno-warn-redundant-constraints #-}
 
@@ -15,6 +16,7 @@ module Futhark.IR.Mem.IxFun
     rotate,
     reshape,
     slice,
+    flatSlice,
     rebase,
     shape,
     rank,
@@ -26,6 +28,7 @@ module Futhark.IR.Mem.IxFun
     leastGeneralGeneralization,
     existentialize,
     closeEnough,
+    equivalent,
   )
 where
 
@@ -33,7 +36,7 @@ import Control.Category
 import Control.Monad.Identity
 import Control.Monad.State
 import Control.Monad.Writer
-import Data.Function (on)
+import Data.Function (on, (&))
 import Data.List (sort, sortBy, zip4, zip5, zipWith5)
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.List.NonEmpty as NE
@@ -51,9 +54,13 @@ import Futhark.IR.Prop
 import Futhark.IR.Syntax
   ( DimChange (..),
     DimIndex (..),
+    FlatDimIndex (..),
+    FlatSlice (..),
     ShapeChange,
-    Slice,
+    Slice (..),
     dimFix,
+    flatSliceDims,
+    flatSliceStrides,
     unitSlice,
   )
 import Futhark.IR.Syntax.Core (Ext (..))
@@ -156,7 +163,7 @@ instance Pretty num => Pretty (IxFun num) where
       semisep
         [ "base: " <> brackets (commasep $ map ppr oshp),
           "contiguous: " <> if cg then "true" else "false",
-          "LMADs: " <> brackets (commasep $ NE.toList $ NE.map ppr lmads)
+          "LMADs: " <> brackets (commastack $ NE.toList $ NE.map ppr lmads)
         ]
 
 instance Substitute num => Substitute (LMAD num) where
@@ -369,11 +376,11 @@ sliceOneLMAD ::
   IxFun num ->
   Slice num ->
   Maybe (IxFun num)
-sliceOneLMAD (IxFun (lmad@(LMAD _ ldims) :| lmads) oshp cg) is = do
+sliceOneLMAD (IxFun (lmad@(LMAD _ ldims) :| lmads) oshp cg) (Slice is) = do
   let perm = lmadPermutation lmad
       is' = permuteInv perm is
-      cg' = cg && slicePreservesContiguous lmad is'
-  guard $ harmlessRotation lmad is'
+      cg' = cg && slicePreservesContiguous lmad (Slice is')
+  guard $ harmlessRotation lmad (Slice is')
   let lmad' = foldl sliceOne (LMAD (lmadOffset lmad) []) $ zip is' ldims
       -- need to remove the fixed dims from the permutation
       perm' =
@@ -384,24 +391,15 @@ sliceOneLMAD (IxFun (lmad@(LMAD _ ldims) :| lmads) oshp cg) is = do
 
   return $ IxFun (setLMADPermutation perm' lmad' :| lmads) oshp cg'
   where
-    updatePerm ps inds = foldl (\acc p -> acc ++ decrease p) [] ps
+    updatePerm ps inds = concatMap decrease ps
       where
         decrease p =
-          let d =
-                foldl
-                  ( \n i ->
-                      if i == p
-                        then -1
-                        else
-                          if i > p
-                            then n
-                            else
-                              if n /= -1
-                                then n + 1
-                                else n
-                  )
-                  0
-                  inds
+          let f n i
+                | i == p = -1
+                | i > p = n
+                | n /= -1 = n + 1
+                | otherwise = n
+              d = foldl f 0 inds
            in [p - d | d /= -1]
 
     harmlessRotation' ::
@@ -423,7 +421,7 @@ sliceOneLMAD (IxFun (lmad@(LMAD _ ldims) :| lmads) oshp cg) is = do
       LMAD num ->
       Slice num ->
       Bool
-    harmlessRotation (LMAD _ dims) iss =
+    harmlessRotation (LMAD _ dims) (Slice iss) =
       and $ zipWith harmlessRotation' dims iss
 
     -- XXX: TODO: what happens to r on a negative-stride slice; is there
@@ -459,7 +457,7 @@ sliceOneLMAD (IxFun (lmad@(LMAD _ ldims) :| lmads) oshp cg) is = do
       LMAD num ->
       Slice num ->
       Bool
-    slicePreservesContiguous (LMAD _ dims) slc =
+    slicePreservesContiguous (LMAD _ dims) (Slice slc) =
       -- remove from the slice the LMAD dimensions that have stride 0.
       -- If the LMAD was contiguous in mem, then these dims will not
       -- influence the contiguousness of the result.
@@ -506,16 +504,47 @@ slice ::
   IxFun num ->
   Slice num ->
   IxFun num
-slice _ [] = error "slice: empty slice"
 slice ixfun@(IxFun (lmad@(LMAD _ _) :| lmads) oshp cg) dim_slices
   -- Avoid identity slicing.
-  | dim_slices == map (unitSlice 0) (shape ixfun) = ixfun
+  | unSlice dim_slices == map (unitSlice 0) (shape ixfun) = ixfun
   | Just ixfun' <- sliceOneLMAD ixfun dim_slices = ixfun'
   | otherwise =
     case sliceOneLMAD (iota (lmadShape lmad)) dim_slices of
       Just (IxFun (lmad' :| []) _ cg') ->
         IxFun (lmad' :| lmad : lmads) oshp (cg && cg')
       _ -> error "slice: reached impossible case"
+
+-- | Flat-slice an index function.
+flatSlice ::
+  (Eq num, IntegralExp num) =>
+  IxFun num ->
+  FlatSlice num ->
+  IxFun num
+flatSlice ixfun@(IxFun (LMAD offset (dim : dims) :| lmads) oshp cg) (FlatSlice new_offset is)
+  | hasContiguousPerm ixfun,
+    ldRotate dim == 0 =
+    let lmad =
+          LMAD
+            (offset + new_offset * ldStride dim)
+            ( map (helper $ ldStride dim) is
+                <> dims
+            )
+            & setLMADPermutation [0 ..]
+     in IxFun (lmad :| lmads) oshp cg
+  where
+    helper s0 (FlatDimIndex n s) =
+      let new_mon = if s0 * s == 1 then Inc else Unknown
+       in LMADDim (s0 * s) 0 n 0 new_mon
+flatSlice (IxFun (lmad :| lmads) oshp cg) s@(FlatSlice new_offset _) =
+  IxFun (LMAD (new_offset * base_stride) (new_dims <> tail_dims) :| lmad : lmads) oshp cg
+  where
+    tail_shapes = tail $ lmadShape lmad
+    base_stride = product tail_shapes
+    tail_strides = tail $ scanr (*) 1 tail_shapes
+    tail_dims = zipWith5 LMADDim tail_strides (repeat 0) tail_shapes [length new_shapes ..] (repeat Inc)
+    new_shapes = flatSliceDims s
+    new_strides = map (* base_stride) $ flatSliceStrides s
+    new_dims = zipWith5 LMADDim new_strides (repeat 0) new_shapes [0 ..] (repeat Inc)
 
 -- | Handle the simple case where all reshape dimensions are coercions.
 reshapeCoercion ::
@@ -862,11 +891,13 @@ flatOneDim (s, r, n) i
   | r == 0 = i * s
   | otherwise = ((i + r) `mod` n) * s
 
--- | Generalised iota with user-specified offset and strides.
+-- | Generalised iota with user-specified offset and rotates.
 makeRotIota ::
   IntegralExp num =>
   Monotonicity ->
+  -- | Offset
   num ->
+  -- | Pairs of shape and rotation
   [(num, num)] ->
   LMAD num
 makeRotIota mon off support
@@ -993,18 +1024,6 @@ existentialize (IxFun (lmad :| []) oshp True)
       stride' <- existentializeExp str
       shape' <- existentializeExp shp
       return $ LMADDim stride' (fmap Free rot) shape' perm mon
-
--- oshp' = LeafExp (Ext 0)
--- lmad' = LMAD lmadOffset' lmadDims'
--- lmadOffset' = LeafExp (Ext 1)
--- (_, lmadDims', lmadDimSubsts) = foldr generalizeDim (2, [], []) $ lmadDims lmad
--- substs = oshp : lmadOffset lmad' : lmadDimSubsts
-
--- generalizeDim :: (Int, [LMADDim num]) -> LMADDim num -> (Int, [LMADDim num])
--- generalizeDim (i, acc) (LMADDim stride rotate shape perm mon) =
---   (i + 3,
---    LMADDim (LeafExp $ Ext i) (LeafExp $ Ext $ i + 1) (LeafExp $ Ext $ i + 2) perm mon,
---    [stride, rotate, shape])
 existentialize _ = return Nothing
 
 -- | When comparing index functions as part of the type check in KernelsMem,
@@ -1028,3 +1047,23 @@ closeEnough ixf1 ixf2 =
       length (lmadDims lmad1) == length (lmadDims lmad2)
         && map ldPerm (lmadDims lmad1)
         == map ldPerm (lmadDims lmad2)
+
+-- | Returns true if two 'IxFun's are equivalent.
+--
+-- Equivalence in this case is defined as having the same number of LMADs, with
+-- each pair of LMADs matching in permutation, offsets, strides and rotations.
+equivalent :: Eq num => IxFun num -> IxFun num -> Bool
+equivalent ixf1 ixf2 =
+  NE.length (ixfunLMADs ixf1) == NE.length (ixfunLMADs ixf2)
+    && all closeEnoughLMADs (NE.zip (ixfunLMADs ixf1) (ixfunLMADs ixf2))
+  where
+    closeEnoughLMADs (lmad1, lmad2) =
+      length (lmadDims lmad1) == length (lmadDims lmad2)
+        && map ldPerm (lmadDims lmad1)
+        == map ldPerm (lmadDims lmad2)
+        && lmadOffset lmad1
+        == lmadOffset lmad2
+        && map ldStride (lmadDims lmad1)
+        == map ldStride (lmadDims lmad2)
+        && map ldRotate (lmadDims lmad1)
+        == map ldRotate (lmadDims lmad2)

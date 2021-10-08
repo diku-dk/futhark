@@ -9,6 +9,7 @@ where
 
 import Control.Applicative
 import Futhark.IR.Primitive
+import Futhark.Util (convFloat)
 import Test.QuickCheck
 import Test.Tasty
 import Test.Tasty.HUnit
@@ -44,10 +45,14 @@ instance Arbitrary IntValue where
         Int64Value <$> arbitrary
       ]
 
+instance Arbitrary Half where
+  arbitrary = (convFloat :: Float -> Half) <$> arbitrary
+
 instance Arbitrary FloatValue where
   arbitrary =
     oneof
-      [ Float32Value <$> arbitrary,
+      [ Float16Value <$> arbitrary,
+        Float32Value <$> arbitrary,
         Float64Value <$> arbitrary
       ]
 
@@ -57,7 +62,7 @@ instance Arbitrary PrimValue where
       [ IntValue <$> arbitrary,
         FloatValue <$> arbitrary,
         BoolValue <$> arbitrary,
-        pure Checked
+        pure UnitValue
       ]
 
 arbitraryPrimValOfType :: PrimType -> Gen PrimValue
@@ -65,7 +70,8 @@ arbitraryPrimValOfType (IntType Int8) = IntValue . Int8Value <$> arbitrary
 arbitraryPrimValOfType (IntType Int16) = IntValue . Int16Value <$> arbitrary
 arbitraryPrimValOfType (IntType Int32) = IntValue . Int32Value <$> arbitrary
 arbitraryPrimValOfType (IntType Int64) = IntValue . Int64Value <$> arbitrary
+arbitraryPrimValOfType (FloatType Float16) = FloatValue . Float16Value <$> arbitrary
 arbitraryPrimValOfType (FloatType Float32) = FloatValue . Float32Value <$> arbitrary
 arbitraryPrimValOfType (FloatType Float64) = FloatValue . Float32Value <$> arbitrary
 arbitraryPrimValOfType Bool = BoolValue <$> arbitrary
-arbitraryPrimValOfType Cert = return Checked
+arbitraryPrimValOfType Unit = return UnitValue

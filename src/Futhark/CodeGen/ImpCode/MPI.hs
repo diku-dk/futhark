@@ -29,7 +29,7 @@ data MPIOp
   | LoadNbNode VName
   | LoadNodeId VName
   | DistributedLoop String VName Code Code Code [Param] VName
-  | Gather VName Int64
+  | Gather VName Imp.Exp
   | CrashWithThisMessage String
   deriving (Show)
 
