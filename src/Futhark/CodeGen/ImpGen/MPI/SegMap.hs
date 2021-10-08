@@ -17,7 +17,7 @@ writeResult ::
   MPIGen ()
 writeResult is pe (Returns _ _ se) =
   copyDWIMFix (patElemName pe) (map Imp.vi64 is) se []
-writeResult _ _ (WriteReturns (Shape _) _ _) = do
+writeResult _ _ (WriteReturns _ (Shape _) _ _) = do
     error "writeResult: not implemented yet"
 writeResult _ _ res =
   error $ "writeResult: cannot handle " ++ pretty res
@@ -62,6 +62,6 @@ compileSegMap pat space kbody = do
     
 
 
-extractOutputMem :: PatternT (MemInfo d u MemBind) -> [(PrimType, VName)]
+extractOutputMem :: PatT (MemInfo d u MemBind) -> [(PrimType, VName)]
 extractOutputMem pat = map (\(PatElem _ (MemArray out_pt _ _ (ArrayIn out_name _))) -> (out_pt, out_name)) pat_val
-  where Pattern _ pat_val = pat
+  where Pat pat_val = pat
