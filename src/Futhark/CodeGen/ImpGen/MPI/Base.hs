@@ -29,7 +29,7 @@ segOpString SegRed {} = return "segred"
 segOpString SegScan {} = return "segscan"
 segOpString SegHist {} = return "seghist"
 
-getReturnParams :: Pattern MCMem -> SegOp () MCMem -> MPIGen [Imp.Param]
+getReturnParams :: Pat MCMem -> SegOp () MCMem -> MPIGen [Imp.Param]
 getReturnParams _ _ = return mempty
 
 freeVariables :: Imp.Code -> [VName] -> [VName]
@@ -42,7 +42,7 @@ toParam name (Mem space) = return $ Imp.MemParam name space
 toParam name Array {} = do
   name_entry <- lookupVar name
   case name_entry of
-    ArrayVar _ (ArrayEntry (MemLocation mem _ _) _) ->
+    ArrayVar _ (ArrayEntry (MemLoc mem _ _) _) ->
       return $ Imp.MemParam mem DefaultSpace
     _ -> error $ "[toParam] Could not handle array for " ++ show name
 toParam name Acc {} = error $ "toParam Acc: " ++ pretty name

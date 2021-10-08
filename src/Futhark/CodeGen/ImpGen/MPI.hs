@@ -29,7 +29,7 @@ compileProg = Futhark.CodeGen.ImpGen.compileProg Env ops Imp.DefaultSpace
 
 -- Compile seg
 compileMCOp ::
-  Pattern MCMem ->
+  Pat MCMem ->
   MCOp MCMem () ->
   ImpM MCMem Env Imp.MPIOp ()
 compileMCOp _ (OtherOp ()) = pure ()
@@ -48,7 +48,7 @@ compileMCOp pat (ParOp _par_op op) = do
   emit $ Imp.Op $ Imp.Segop s free_params seq_code retvals (untyped iterations)
 
 compileSegOp ::
-  Pattern MCMem ->
+  Pat MCMem ->
   SegOp () MCMem ->
   ImpM MCMem Env Imp.MPIOp Imp.Code
 compileSegOp pat (SegMap _ space _ kbody) = compileSegMap pat space kbody
