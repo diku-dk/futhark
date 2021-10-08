@@ -7,7 +7,6 @@
 -- representation.
 module Language.Futhark.Core
   ( Uniqueness (..),
-    Commutativity (..),
 
     -- * Location utilities
     SrcLoc,
@@ -28,14 +27,13 @@ module Language.Futhark.Core
     baseTag,
     baseName,
     baseString,
-    pretty,
     quote,
     pquote,
 
     -- * Special identifiers
     defaultEntryPoint,
 
-    -- * Integer re-export
+    -- * Number re-export
     Int8,
     Int16,
     Int32,
@@ -44,6 +42,7 @@ module Language.Futhark.Core
     Word16,
     Word32,
     Word64,
+    Half,
   )
 where
 
@@ -54,6 +53,7 @@ import qualified Data.Text as T
 import Data.Word (Word16, Word32, Word64, Word8)
 import Futhark.Util.Loc
 import Futhark.Util.Pretty
+import Numeric.Half
 import Prelude hiding (id, (.))
 
 -- | The uniqueness attribute of a type.  This essentially indicates
@@ -75,19 +75,6 @@ instance Monoid Uniqueness where
 instance Pretty Uniqueness where
   ppr Unique = star
   ppr Nonunique = empty
-
--- | Whether some operator is commutative or not.  The 'Monoid'
--- instance returns the least commutative of its arguments.
-data Commutativity
-  = Noncommutative
-  | Commutative
-  deriving (Eq, Ord, Show)
-
-instance Semigroup Commutativity where
-  (<>) = min
-
-instance Monoid Commutativity where
-  mempty = Commutative
 
 -- | The name of the default program entry point (main).
 defaultEntryPoint :: Name

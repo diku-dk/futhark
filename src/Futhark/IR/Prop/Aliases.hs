@@ -14,7 +14,7 @@
 module Futhark.IR.Prop.Aliases
   ( subExpAliases,
     expAliases,
-    patternAliases,
+    patAliases,
     lookupAliases,
     Aliased (..),
     AliasesOf (..),
@@ -40,19 +40,13 @@ import Futhark.IR.Prop.Patterns
 import Futhark.IR.Prop.Types
 import Futhark.IR.Syntax
 
--- | The class of lores that contain aliasing information.
-class
-  ( Decorations lore,
-    AliasedOp (Op lore),
-    AliasesOf (LetDec lore)
-  ) =>
-  Aliased lore
-  where
+-- | The class of representations that contain aliasing information.
+class (RepTypes rep, AliasedOp (Op rep), AliasesOf (LetDec rep)) => Aliased rep where
   -- | The aliases of the body results.
-  bodyAliases :: Body lore -> [Names]
+  bodyAliases :: Body rep -> [Names]
 
   -- | The variables consumed in the body.
-  consumedInBody :: Body lore -> Names
+  consumedInBody :: Body rep -> Names
 
 vnameAliases :: VName -> Names
 vnameAliases = oneName
@@ -64,7 +58,7 @@ subExpAliases (Var v) = vnameAliases v
 
 basicOpAliases :: BasicOp -> [Names]
 basicOpAliases (SubExp se) = [subExpAliases se]
-basicOpAliases (Opaque se) = [subExpAliases se]
+basicOpAliases (Opaque _ se) = [subExpAliases se]
 basicOpAliases (ArrayLit _ _) = [mempty]
 basicOpAliases BinOp {} = [mempty]
 basicOpAliases ConvOp {} = [mempty]
@@ -72,6 +66,8 @@ basicOpAliases CmpOp {} = [mempty]
 basicOpAliases UnOp {} = [mempty]
 basicOpAliases (Index ident _) = [vnameAliases ident]
 basicOpAliases Update {} = [mempty]
+basicOpAliases (FlatIndex ident _) = [vnameAliases ident]
+basicOpAliases FlatUpdate {} = [mempty]
 basicOpAliases Iota {} = [mempty]
 basicOpAliases Replicate {} = [mempty]
 basicOpAliases Scratch {} = [mempty]
@@ -95,7 +91,7 @@ funcallAliases args t =
   returnAliases t [(subExpAliases se, d) | (se, d) <- args]
 
 -- | The aliases of an expression, one per non-context value returned.
-expAliases :: (Aliased lore) => Exp lore -> [Names]
+expAliases :: (Aliased rep) => Exp rep -> [Names]
 expAliases (If _ tb fb dec) =
   drop (length all_aliases - length ts) all_aliases
   where
@@ -105,12 +101,11 @@ expAliases (If _ tb fb dec) =
         (bodyAliases tb, consumedInBody tb)
         (bodyAliases fb, consumedInBody fb)
 expAliases (BasicOp op) = basicOpAliases op
-expAliases (DoLoop ctxmerge valmerge _ loopbody) =
-  map (`namesSubtract` merge_names) val_aliases
+expAliases (DoLoop merge _ loopbody) =
+  map (`namesSubtract` merge_names) aliases
   where
-    (_ctx_aliases, val_aliases) =
-      splitAt (length ctxmerge) $ bodyAliases loopbody
-    merge_names = namesFromList $ map (paramName . fst) $ ctxmerge ++ valmerge
+    aliases = bodyAliases loopbody
+    merge_names = namesFromList $ map (paramName . fst) merge
 expAliases (Apply _ args t _) =
   funcallAliases args $ map declExtTypeOf t
 expAliases (WithAcc inputs lam) =
@@ -132,7 +127,7 @@ returnAliases rts args = map returnType' rts
     returnType' Acc {} =
       error "returnAliases Acc"
     returnType' Mem {} =
-      error "returnAliases Mem"
+      mconcat $ map (uncurry maskAliases) args
 
 maskAliases :: Names -> Diet -> Names
 maskAliases _ Consume = mempty
@@ -140,11 +135,11 @@ maskAliases _ ObservePrim = mempty
 maskAliases als Observe = als
 
 -- | The variables consumed in this statement.
-consumedInStm :: Aliased lore => Stm lore -> Names
+consumedInStm :: Aliased rep => Stm rep -> Names
 consumedInStm = consumedInExp . stmExp
 
 -- | The variables consumed in this expression.
-consumedInExp :: (Aliased lore) => Exp lore -> Names
+consumedInExp :: (Aliased rep) => Exp rep -> Names
 consumedInExp (Apply _ args _ _) =
   mconcat (map (consumeArg . first subExpAliases) args)
   where
@@ -152,7 +147,7 @@ consumedInExp (Apply _ args _ _) =
     consumeArg _ = mempty
 consumedInExp (If _ tb fb _) =
   consumedInBody tb <> consumedInBody fb
-consumedInExp (DoLoop _ merge form body) =
+consumedInExp (DoLoop merge form body) =
   mconcat
     ( map (subExpAliases . snd) $
         filter (unique . paramDeclType . fst) merge
@@ -172,18 +167,19 @@ consumedInExp (WithAcc inputs lam) =
        )
   where
     inputConsumed (_, arrs, _) = namesFromList arrs
-consumedInExp (BasicOp (Update src _ _)) = oneName src
+consumedInExp (BasicOp (Update _ src _ _)) = oneName src
+consumedInExp (BasicOp (FlatUpdate src _ _)) = oneName src
 consumedInExp (BasicOp (UpdateAcc acc _ _)) = oneName acc
 consumedInExp (BasicOp _) = mempty
 consumedInExp (Op op) = consumedInOp op
 
 -- | The variables consumed by this lambda.
-consumedByLambda :: Aliased lore => Lambda lore -> Names
+consumedByLambda :: Aliased rep => Lambda rep -> Names
 consumedByLambda = consumedInBody . lambdaBody
 
 -- | The aliases of each pattern element (including the context).
-patternAliases :: AliasesOf dec => PatternT dec -> [Names]
-patternAliases = map (aliasesOf . patElemDec) . patternElements
+patAliases :: AliasesOf dec => PatT dec -> [Names]
+patAliases = map (aliasesOf . patElemDec) . patElems
 
 -- | Something that contains alias information.
 class AliasesOf a where
@@ -197,7 +193,7 @@ instance AliasesOf dec => AliasesOf (PatElemT dec) where
   aliasesOf = aliasesOf . patElemDec
 
 -- | Also includes the name itself.
-lookupAliases :: AliasesOf (LetDec lore) => VName -> Scope lore -> Names
+lookupAliases :: AliasesOf (LetDec rep) => VName -> Scope rep -> Names
 lookupAliases v scope =
   case M.lookup v scope of
     Just (LetName dec) ->
@@ -220,7 +216,7 @@ type AliasTable = M.Map VName Names
 
 -- | The class of operations that can be given aliasing information.
 -- This is a somewhat subtle concept that is only used in the
--- simplifier and when using "lore adapters".
+-- simplifier and when using "rep adapters".
 class AliasedOp (OpWithAliases op) => CanBeAliased op where
   -- | The op that results when we add aliases to this op.
   type OpWithAliases op :: Data.Kind.Type

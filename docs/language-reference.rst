@@ -21,7 +21,8 @@ Identifiers and Keywords
 ------------------------
 
 .. productionlist::
-   id: `letter` (`letter` | "_" | "'")* | "_" `id`
+   id: `letter` `constituent`* | "_" `constituent`*
+   constituent: `letter` | `digit` | "_" | "'"
    quals: (`id` ".")+
    qualid: `id` | `quals` `id`
    binop: `opstartchar` `opchar`*
@@ -51,13 +52,12 @@ Primitive Types and Values
 Boolean literals are written ``true`` and ``false``.  The primitive
 types in Futhark are the signed integer types ``i8``, ``i16``,
 ``i32``, ``i64``, the unsigned integer types ``u8``, ``u16``, ``u32``,
-``u64``, the floating-point types ``f32``, ``f64``, as well as
-``bool``.  An ``f32`` is always a single-precision float and a ``f64``
-is a double-precision float.
+``u64``, the floating-point types ``f16``, ``f32``, ``f64``, as well
+as ``bool``.
 
 .. productionlist::
    int_type: "i8" | "i16" | "i32" | "i64" | "u8" | "u16" | "u32" | "u64"
-   float_type: "f32" | "f64"
+   float_type: "f16" | "f32" | "f64"
 
 Numeric literals can be suffixed with their intended type.  For
 example ``42i8`` is of type ``i8``, and ``1337e2f64`` is of type
@@ -429,6 +429,8 @@ literals and variables, but also more complicated forms.
    exp:   `atom`
       : | `exp` `qualbinop` `exp`
       : | `exp` `exp`
+      : | "!" `exp`
+      : | "-" `exp`
       : | `constructor` `exp`*
       : | `exp` ":" `type`
       : | `exp` ":>" `type`
@@ -436,7 +438,7 @@ literals and variables, but also more complicated forms.
       : | `exp` [ ".." `exp` ] "..<" `exp`
       : | `exp` [ ".." `exp` ] "..>" `exp`
       : | "if" `exp` "then" `exp` "else" `exp`
-      : | "let" `pat` "=" `exp` "in" `exp`
+      : | "let" `size`* `pat` "=" `exp` "in" `exp`
       : | "let" `id` "[" `index` ("," `index`)* "]" "=" `exp` "in" `exp`
       : | "let" `id` `type_param`* `pat`+ [":" `type`] "=" `exp` "in" `exp`
       : | "(" "\" `pat`+ [":" `type`] "->" `exp` ")"
@@ -449,8 +451,9 @@ literals and variables, but also more complicated forms.
       : | "match" `exp` ("case" `pat` "->" `exp`)+
    field:   `fieldid` "=" `exp`
         : | `id`
+   size : "[" `id` "]"
    pat:   `id`
-      : | `literal`
+      : | `pat_literal`
       : |  "_"
       : | "(" ")"
       : | "(" `pat` ")"
@@ -459,6 +462,11 @@ literals and variables, but also more complicated forms.
       : | "{" `fieldid` ["=" `pat`] ("," `fieldid` ["=" `pat`])* "}"
       : | `constructor` `pat`*
       : | `pat` ":" `type`
+   pat_literal: [ "-" ] `intnumber`
+              | [ "-" ] `floatnumber`
+              | `charlit`
+              | "true"
+              | "false"
    loopform :   "for" `id` "<" `exp`
             : | "for" `pat` "in" `exp`
             : | "while" `exp`
@@ -501,6 +509,10 @@ in natural text.
 * An expression ``(-x)`` is parsed as the variable ``x`` negated and
   enclosed in parentheses, rather than an operator section partially
   applying the infix operator ``-``.
+
+* Function application and prefix operators bind more tightly than any
+  infix operator.  Note that the only prefix operators are ``!`` and
+  ``-``, and more cannot be defined.
 
 * The following table describes the precedence and associativity of
   infix operators.  All operators in the same row have the same
@@ -864,8 +876,15 @@ Evaluate ``e`` and bind the result to the irrefutable pattern ``pat``
 (see :ref:`patterns`) while evaluating ``body``.  The ``in`` keyword
 is optional if ``body`` is a ``let`` expression.
 
+``let [n] pat = e in body``
+...........................
+
+As above, but bind sizes (here ``n``) used in the pattern (here to the
+size of the array being bound).  All sizes must be used in the
+pattern.  Roughly Equivalent to ``let f [n] pat = body in f e``.
+
 ``let a[i] = v in body``
-........................................
+........................
 
 Write ``v`` to ``a[i]`` and evaluate ``body``.  The given index need
 not be complete and can also be a slice, but in these cases, the value
@@ -1169,6 +1188,8 @@ Only expression-level type annotations give rise to run-time checks.
 Despite their similar syntax, parameter and return type annotations
 must be valid at compile-time, or type checking will fail.
 
+.. _causality:
+
 Causality restriction
 ~~~~~~~~~~~~~~~~~~~~~
 
@@ -1393,7 +1414,7 @@ Module System
 .. productionlist::
    mod_bind: "module" `id` `mod_param`* "=" [":" mod_type_exp] "=" `mod_exp`
    mod_param: "(" `id` ":" `mod_type_exp` ")"
-   mod_type_bind: "module" "type" `id` `type_param`* "=" `mod_type_exp`
+   mod_type_bind: "module" "type" `id` "=" `mod_type_exp`
 
 Futhark supports an ML-style higher-order module system.  *Modules*
 can contain types, functions, and other modules and module types.
@@ -1649,6 +1670,32 @@ unspecified which attributes take precedence.
 
 The following expression attributes are supported.
 
+``trace``
+.........
+
+Print the value produced by the attributed expression.  Used for
+debugging.  Somewhat unreliable outside of the interpreter, and in
+particular does not work for GPU device code.
+
+``trace(tag)``
+..............
+
+Like ``trace``, but prefix output with *tag*, which must lexically be
+an identifier.
+
+``break``
+.........
+
+In the interpreter, pause execution *before* evaluating the expression.
+No effect for compiled code.
+
+``opaque``
+..........
+
+The compiler will treat the attributed expression as a black box.
+This is used to work around optimisation deficiencies (or bugs),
+although it should hopefully rarely be necessary.
+
 ``incremental_flattening(no_outer)``
 ....................................
 
@@ -1736,6 +1783,11 @@ The following declaration attributes are supported.
 Do not inline any calls to this function.  If the function is then
 used within a parallel construct (e.g. ``map``), this will likely
 prevent the GPU backends from generating working code.
+
+``inline``
+..........
+
+Always inline calls to this function.
 
 Spec attributes
 ~~~~~~~~~~~~~~~

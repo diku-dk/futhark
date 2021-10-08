@@ -21,6 +21,7 @@ endif
 test: $(patsubst %.fut, do_test_%, $(wildcard *.fut))
 
 do_test_%: test_%
+	./validatemanifest.py ../../docs/manifest.schema.json $*.json
 	./test_$*
 
 test_%: test_%.c %.o
@@ -33,4 +34,4 @@ test_%: test_%.c %.o
 	futhark $(FUTHARK_BACKEND) --library $^
 
 clean:
-	rm -rf test_? ?.c ?.h ?.o $(patsubst %.fut, %.c, $(wildcard *.fut))
+	rm -rf $(patsubst %.c, %, $(wildcard test_*.c)) *.h *.o $(patsubst %.fut, %.c, $(wildcard *.fut))

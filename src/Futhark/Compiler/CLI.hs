@@ -19,7 +19,6 @@ import Futhark.IR.SOACS (SOACS)
 import Futhark.Pipeline
 import Futhark.Util.Options
 import System.FilePath
-import System.IO
 
 -- | Run a parameterised Futhark compiler, where @cfg@ is a user-given
 -- configuration type.  Call this from @main@.
@@ -33,13 +32,13 @@ compilerMain ::
   -- | The longer action description.
   String ->
   -- | The pipeline to use.
-  Pipeline SOACS lore ->
+  Pipeline SOACS rep ->
   -- | The action to take on the result of the pipeline.
   ( FutharkConfig ->
     cfg ->
     CompilerMode ->
     FilePath ->
-    Prog lore ->
+    Prog rep ->
     FutharkM ()
   ) ->
   -- | Program name
@@ -47,16 +46,12 @@ compilerMain ::
   -- | Command line arguments.
   [String] ->
   IO ()
-compilerMain cfg cfg_opts name desc pipeline doIt prog args = do
-  hSetEncoding stdout utf8
-  hSetEncoding stderr utf8
+compilerMain cfg cfg_opts name desc pipeline doIt =
   mainWithOptions
     (newCompilerConfig cfg)
     (commandLineOptions ++ map wrapOption cfg_opts)
     "options... <program.fut>"
     inspectNonOptions
-    prog
-    args
   where
     inspectNonOptions [file] config = Just $ compile config file
     inspectNonOptions _ _ = Nothing
@@ -137,7 +132,7 @@ commandLineOptions =
       "Ignore 'unsafe' in code.",
     Option
       []
-      ["entry-points"]
+      ["entry-point"]
       ( ReqArg
           ( \arg -> Right $ \config ->
               config

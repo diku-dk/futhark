@@ -31,7 +31,7 @@ Context creation is parameterised by a configuration object.  Any
 changes to the configuration must be made *before* calling
 :c:func:`futhark_context_new`.  A configuration object must not be
 freed before any context objects for which it is used.  The same
-configuration may be used for multiple concurrent contexts.
+configuration may *not* be used for multiple concurrent contexts.
 
 .. c:struct:: futhark_context_config
 
@@ -65,6 +65,34 @@ configuration may be used for multiple concurrent contexts.
 
    With a nonzero flag, print a running log to standard error of what
    the program is doing.
+
+.. c:function:: int futhark_context_config_set_tuning_param(struct futhark_context_config *cfg, const char *param_name, size_t new_value)
+
+   Set the value of a tuning parameter.  Returns zero on success, and
+   non-zero if the parameter cannot be set.  This is usually because a
+   parameter of the given name does not exist.  See
+   :c:func:`futhark_get_tuning_param_count` and
+   :c:func:`futhark_get_tuning_param_name` for how to query which
+   parameters are available.  Most of the tuning parameters are
+   applied only when the context is created, but some may be changed
+   even after the context is active.  At the moment, only parameters
+   of class "threshold" may change after the context has been created.
+   Use :c:func:`futhark_get_tuning_param_class` to determine the class
+   of a tuning parameter.
+
+.. c:function:: int futhark_get_tuning_param_count(void)
+
+   Return the number of available tuning parameters.  Useful for
+   knowing how to call :c:func:`futhark_get_tuning_param_name` and
+   :c:func:`futhark_get_tuning_param_class`.
+
+.. c:function:: const char* futhark_get_tuning_param_name(int i)
+
+   Return the name of tuning parameter *i*, counting from zero.
+
+.. c:function:: const char* futhark_get_tuning_param_class(int i)
+
+   Return the class of tuning parameter *i*, counting from zero.
 
 Context
 -------
@@ -148,10 +176,16 @@ Values
 ------
 
 Primitive types (``i32``, ``bool``, etc) are mapped directly to their
-corresponding C type.  For each distinct array type of primitives
-(ignoring sizes), an opaque C struct is defined.  For types that do
-not map cleanly to C, including records, sum types, and arrays of
-tuples, see :ref:`opaques`.
+corresponding C type.  The ``f16`` type is mapped to ``uint16_t``,
+because C does not have a standard ``half`` type.  This integer
+contains the bitwise representation of the ``f16`` value in the IEEE
+754 binary16 format.
+
+For each distinct array type of primitives (ignoring sizes), an opaque
+C struct is defined.  Arrays of ``f16`` are presented as containing
+``uint16_t`` elements.  For types that do not map cleanly to C,
+including records, sum types, and arrays of tuples, see
+:ref:`opaques`.
 
 All array values share a similar API, which is illustrated here for
 the case of the type ``[]i32``.  The creation/retrieval functions are
@@ -281,7 +315,7 @@ For example, this Futhark entry point::
 
 Results in the following C function:
 
-.. c:function:: int futhark_entry_main(struct futhark_context *ctx, int32_t *out0, const struct futhark_i32_1d *in0)
+.. c:function:: int futhark_entry_sum(struct futhark_context *ctx, int32_t *out0, const struct futhark_i32_1d *in0)
 
    Asynchronously call the entry point with the given arguments.  Make
    sure to call :c:func:`futhark_context_sync` before using the value
@@ -300,6 +334,11 @@ even though execution has already (or will) fail.  These problems will
 be reported when :c:func:`futhark_context_sync` is called.  Therefore,
 be careful to check the return code of *both* the entry point itself,
 and :c:func:`futhark_context_sync`.
+
+For the rules on entry points that consume their input, see
+:ref:`api-consumption`.  Note that even if a value has been consumed,
+you must still manually free it.  This is the only operation that is
+permitted on a consumed value.
 
 GPU
 ---
@@ -432,7 +471,6 @@ backend.
    value less than ``1``, then the runtime system will use one thread
    per detected core.
 
-
 General guarantees
 ------------------
 
@@ -459,3 +497,51 @@ Note that for the GPU backends, the underlying API (such as CUDA or
 OpenCL) may perform file system operations during startup, and perhaps
 for caching GPU kernels in some cases.  This is beyond Futhark's
 control.
+
+Violation the restrictions of consumption (see :ref:`api-consumption`)
+can result in undefined behaviour.  This does not matter for programs
+whose entry points do not have unique parameter types
+(:ref:`in-place-updates`).
+
+.. _manifest:
+
+Manifest
+--------
+
+The C backends generate a machine-readable *manifest* in JSON format
+that describes the API of the compiled Futhark program.  Specifically,
+the manifest contains:
+
+* A mapping from the name of each entry point to:
+
+  * The C function name of the entry point.
+
+  * A list of all *inputs*, including their type and whether they are
+    *unique* (consuming).
+
+  * A list of all *outputs*, including their type and whether they are
+    *unique*.
+
+* A mapping from the name of each non-scalar types to:
+
+  * The C type of used to represent type type (which is practice
+    always a pointer of some kind).
+
+  * For arrays, the element type and rank.
+
+  * A mapping from names of *operations* to the name of the C function
+    that implements that operation for the type.  The type of the C
+    functions are as documented above.  The following operations are
+    listed:
+
+    * For arrays: ``free``, ``shape``, ``values``, ``new``.
+
+    * For opaques: ``free``, ``store``, ``restore``.
+
+Manifests are defined by the following JSON Schema:
+
+.. include:: manifest.schema.json
+   :code: json
+
+It is likely that we will add more fields in the future, but it is
+unlikely that we will remove any.

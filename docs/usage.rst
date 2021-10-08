@@ -340,6 +340,38 @@ Return types follow the rules, with one addition:
   rule does not apply when the entry point has been given a return
   type ascription that is not syntactically a tuple type.
 
+.. _api-consumption:
+
+Consumption and Aliasing
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+Futhark's support for :ref:`in-place-updates` has implications for the
+generated API.  Unfortunately, The type system of most languages
+(e.g. C) is not rich enough to express the rules, so they are not
+statically (or currently even dynamically checked).  Since Futhark
+will never infer a unique/consuming type for an entry point parameter,
+this section can be ignored unless uniqueness annotations have been
+manually added to the entry points parameter types.  The rules are
+essentially the same as in the language itself:
+
+1. Each entry point input parameter is either *consuming* or
+   *nonconsuming* (the default).  This corresponds to unique and
+   nonunique types in the original Futhark program.  A value passed
+   for a consuming parameter is considered *consumed*, now has an
+   unspecified value, and may never be used again.  It must still be
+   manually freed, if applicable.
+   Further, any *aliases* of that value are also considered consumed
+   and may not be used.
+
+2. Each entry point output is either *unique* or *nonunique*.  A
+   unique output has no aliases.  A nonunique output aliases *every*
+   nonconsuming input parameter.
+
+Note that these distinctions are currently usually not visible in the
+generated API, and so correct usage requires knowledge of the original
+types in the Futhark function.  The safest strategy is to not expose
+unique types in entry points.
+
 Generating C
 ^^^^^^^^^^^^
 
@@ -352,9 +384,12 @@ Or::
 
   $ futhark opencl --library futlib.fut
 
-This produces two files in the current directory: ``futlib.c`` and
-``futlib.h``.  If we wish (and are on a Unix system), we can then
-compile ``futlib.c`` to an object file like this::
+This produces three files in the current directory: ``futlib.c``,
+``futlib.h``, and ``futlib.json`` ( see :ref:`manifest` for more on
+the latter).
+
+If we wish (and are on a Unix system), we can then compile
+``futlib.c`` to an object file like this::
 
   $ gcc futlib.c -c
 

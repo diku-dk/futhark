@@ -19,18 +19,10 @@ arguments read from standard input, and write the results on standard
 output.
 
 ``futhark run`` is very slow, and in practice only useful for testing,
-teaching, and experimenting with the language.  Certain special
-debugging functions are available in ``futhark run``:
-
-``trace 'a : a -> a``
-  Semantically identity, but prints the value on standard output.
-
-``break 'a : a -> a``
-  Semantically identity, but interrupts execution at the calling
-  point, such that the environment can be inspected.  Continue
-  execution by entering an empty input line.  Breakpoints are only
-  respected when starting a program from the prompt, not when
-  passing a program on the command line.
+teaching, and experimenting with the language.  The ``#[trace]`` and
+``#[break]`` attributes are fully supported in the interpreter.
+Tracing prints values to stdout in contrast to compiled code, which
+prints to stderr.
 
 OPTIONS
 =======

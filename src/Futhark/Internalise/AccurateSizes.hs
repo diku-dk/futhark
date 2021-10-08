@@ -42,28 +42,21 @@ shapeMapping all_params value_arg_types =
     match (Var v, se) = Just (v, se)
     match _ = Nothing
 
-argShapes ::
-  (HasScope SOACS m, Monad m) =>
-  [VName] ->
-  [FParam] ->
-  [Type] ->
-  m [SubExp]
+argShapes :: [VName] -> [FParam] -> [Type] -> InternaliseM [SubExp]
 argShapes shapes all_params valargts = do
   mapping <- shapeMapping all_params valargts
   let addShape name =
         case M.lookup name mapping of
           Just se -> se
-          _ -> intConst Int64 0 -- FIXME: we only need this because
-          -- the defunctionaliser throws away
-          -- sizes.
+          _ -> error $ "argShapes: " ++ pretty name
   return $ map addShape shapes
 
 ensureResultShape ::
   ErrorMsg SubExp ->
   SrcLoc ->
   [Type] ->
-  Body ->
-  InternaliseM Body
+  Result ->
+  InternaliseM Result
 ensureResultShape msg loc =
   ensureResultExtShape msg loc . staticShapes
 
@@ -71,33 +64,28 @@ ensureResultExtShape ::
   ErrorMsg SubExp ->
   SrcLoc ->
   [ExtType] ->
-  Body ->
-  InternaliseM Body
-ensureResultExtShape msg loc rettype body =
-  insertStmsM $ do
-    reses <-
-      bodyBind
-        =<< ensureResultExtShapeNoCtx msg loc rettype body
-    ts <- mapM subExpType reses
-    let ctx = extractShapeContext rettype $ map arrayDims ts
-    mkBodyM mempty $ ctx ++ reses
+  Result ->
+  InternaliseM Result
+ensureResultExtShape msg loc rettype res = do
+  res' <- ensureResultExtShapeNoCtx msg loc rettype res
+  ts <- mapM subExpResType res'
+  let ctx = extractShapeContext rettype $ map arrayDims ts
+  pure $ subExpsRes ctx ++ res'
 
 ensureResultExtShapeNoCtx ::
   ErrorMsg SubExp ->
   SrcLoc ->
   [ExtType] ->
-  Body ->
-  InternaliseM Body
-ensureResultExtShapeNoCtx msg loc rettype body =
-  insertStmsM $ do
-    es <- bodyBind body
-    es_ts <- mapM subExpType es
-    let ext_mapping = shapeExtMapping rettype es_ts
-        rettype' = foldr (uncurry fixExt) rettype $ M.toList ext_mapping
-        assertProperShape t se =
-          let name = "result_proper_shape"
-           in ensureExtShape msg loc t name se
-    resultBodyM =<< zipWithM assertProperShape rettype' es
+  Result ->
+  InternaliseM Result
+ensureResultExtShapeNoCtx msg loc rettype es = do
+  es_ts <- mapM subExpResType es
+  let ext_mapping = shapeExtMapping rettype es_ts
+      rettype' = foldr (uncurry fixExt) rettype $ M.toList ext_mapping
+      assertProperShape t (SubExpRes cs se) =
+        let name = "result_proper_shape"
+         in SubExpRes cs <$> ensureExtShape msg loc t name se
+  zipWithM assertProperShape rettype' es
 
 ensureExtShape ::
   ErrorMsg SubExp ->

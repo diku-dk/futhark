@@ -1,7 +1,8 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 #
 # Compare two JSON files produced by futhark-bench's --json option.
 
+import textwrap
 import json
 import sys
 import numpy as np
@@ -92,7 +93,7 @@ def compare(a_json, b_json):
                     elif v > 1.01:
                         mem_strings.append("%s%4.2fx@%s%s" % (bcolors.FAIL, v, k, bcolors.ENDC))
                 mem_string = "" if not mem_strings else " (mem: %s)" % ", ".join(mem_strings)
-                print('  %s%s%10.2fx%s%s' % ((dataset+':').ljust(64), color, dataset_speedup, bcolors.ENDC, mem_string))
+                print('  %s%s%10.2fx%s%s' % ((textwrap.shorten(dataset, 63)+':').ljust(64), color, dataset_speedup, bcolors.ENDC, mem_string))
 
 
 if __name__ == '__main__':

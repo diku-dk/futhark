@@ -9,5 +9,5 @@ let foo [n][m] (img: [n][m]u32): [n][m]u32 =
 ```
 
 
-![](loadimg-img/8af55c5b45f68f3e-img.png)
+![](loadimg-img/b137ba0033c18d7b522fdc0280b38e05-img.png)
 

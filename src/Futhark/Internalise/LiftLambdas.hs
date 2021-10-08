@@ -73,18 +73,17 @@ existentials e =
       m = identityMapper {mapOnExp = \e' -> modify (<> existentials e') >> pure e'}
    in execState (astMap m e) here
 
-liftFunction :: VName -> [TypeParam] -> [Pattern] -> StructType -> Exp -> LiftM Exp
+liftFunction :: VName -> [TypeParam] -> [Pat] -> StructType -> Exp -> LiftM Exp
 liftFunction fname tparams params ret funbody = do
   -- Find free variables
   global <- gets stateGlobal
   let bound =
         global
-          <> foldMap patternNames params
+          <> foldMap patNames params
           <> S.fromList (map typeParamName tparams)
-          <> existentials funbody
 
       free =
-        let immediate_free = FV.freeVars funbody `FV.without` bound
+        let immediate_free = FV.freeVars funbody `FV.without` (bound <> existentials funbody)
             sizes_in_free =
               foldMap typeDimNames $
                 M.elems $ FV.unNameSet immediate_free

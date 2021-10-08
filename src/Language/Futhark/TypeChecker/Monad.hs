@@ -13,12 +13,15 @@ module Language.Futhark.TypeChecker.Monad
     runTypeM,
     askEnv,
     askImportName,
+    atTopLevel,
+    enteringModule,
     bindSpaced,
     qualifyTypeVars,
     lookupMTy,
     lookupImport,
     localEnv,
     TypeError (..),
+    withIndexLink,
     unappliedFunctor,
     unknownVariable,
     unknownType,
@@ -40,6 +43,7 @@ module Language.Futhark.TypeChecker.Monad
     MTy (..),
     anySignedType,
     anyUnsignedType,
+    anyIntType,
     anyFloatType,
     anyNumberType,
     anyPrimType,
@@ -57,6 +61,7 @@ import Data.List (find, isPrefixOf)
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import qualified Data.Set as S
+import qualified Data.Version as Version
 import Futhark.FreshNames hiding (newName)
 import qualified Futhark.FreshNames
 import Futhark.Util.Console
@@ -64,6 +69,7 @@ import Futhark.Util.Pretty hiding (space)
 import Language.Futhark
 import Language.Futhark.Semantic
 import Language.Futhark.Warnings
+import qualified Paths_futhark
 import Prelude hiding (mapM, mod)
 
 -- | A note with extra information regarding a type error.
@@ -90,6 +96,24 @@ instance Pretty TypeError where
   ppr (TypeError loc notes msg) =
     text (inRed $ "Error at " <> locStr loc <> ":")
       </> msg <> ppr notes
+
+errorIndexUrl :: Doc
+errorIndexUrl = version_url <> "error-index.html"
+  where
+    version = Paths_futhark.version
+    base_url = "https://futhark.readthedocs.io/en/"
+    version_url
+      | last (Version.versionBranch version) == 0 = base_url <> "latest/"
+      | otherwise = base_url <> "v" <> text (Version.showVersion version) <> "/"
+
+-- | Attach a reference to documentation explaining the error in more detail.
+withIndexLink :: Doc -> Doc -> Doc
+withIndexLink href msg =
+  stack
+    [ msg,
+      "\nFor more information, see:",
+      indent 2 (ppr errorIndexUrl <> "#" <> href)
+    ]
 
 -- | An unexpected functor appeared!
 unappliedFunctor :: MonadTypeChecker m => SrcLoc -> m a
@@ -130,7 +154,10 @@ type ImportTable = M.Map String Env
 data Context = Context
   { contextEnv :: Env,
     contextImportTable :: ImportTable,
-    contextImportName :: ImportName
+    contextImportName :: ImportName,
+    -- | Currently type-checking at the top level?  If false, we are
+    -- inside a module.
+    contextAtTopLevel :: Bool
   }
 
 data TypeState = TypeState
@@ -143,10 +170,7 @@ newtype TypeM a
   = TypeM
       ( ReaderT
           Context
-          ( StateT
-              TypeState
-              (Except (Warnings, TypeError))
-          )
+          (StateT TypeState (Except (Warnings, TypeError)))
           a
       )
   deriving
@@ -178,7 +202,7 @@ runTypeM ::
   TypeM a ->
   (Warnings, Either TypeError (a, VNameSource))
 runTypeM env imports fpath src (TypeM m) = do
-  let ctx = Context env imports fpath
+  let ctx = Context env imports fpath True
       s = TypeState src mempty
   case runExcept $ runStateT (runReaderT m ctx) s of
     Left (ws, e) -> (ws, Left e)
@@ -191,6 +215,15 @@ askEnv = asks contextEnv
 -- | The name of the current file/import.
 askImportName :: TypeM ImportName
 askImportName = asks contextImportName
+
+-- | Are we type-checking at the top level, or are we inside a nested
+-- module?
+atTopLevel :: TypeM Bool
+atTopLevel = asks contextAtTopLevel
+
+-- | We are now going to type-check the body of a module.
+enteringModule :: TypeM a -> TypeM a
+enteringModule = local $ \ctx -> ctx {contextAtTopLevel = False}
 
 -- | Look up a module type.
 lookupMTy :: SrcLoc -> QualName Name -> TypeM (QualName VName, MTy)
@@ -236,7 +269,7 @@ class Monad m => MonadTypeChecker m where
 
   lookupType :: SrcLoc -> QualName Name -> m (QualName VName, [TypeParam], StructType, Liftedness)
   lookupMod :: SrcLoc -> QualName Name -> m (QualName VName, Mod)
-  lookupVar :: SrcLoc -> QualName Name -> m (QualName VName, PatternType)
+  lookupVar :: SrcLoc -> QualName Name -> m (QualName VName, PatType)
 
   checkNamedDim :: SrcLoc -> QualName Name -> m (QualName VName)
   checkNamedDim loc v = do
@@ -465,11 +498,11 @@ intrinsicsNameMap = M.fromList $ map mapping $ M.toList intrinsics
 
 -- | The names that are available in the initial environment.
 topLevelNameMap :: NameMap
-topLevelNameMap = M.filterWithKey (\k _ -> atTopLevel k) intrinsicsNameMap
+topLevelNameMap = M.filterWithKey (\k _ -> available k) intrinsicsNameMap
   where
-    atTopLevel :: (Namespace, Name) -> Bool
-    atTopLevel (Type, _) = True
-    atTopLevel (Term, v) = v `S.member` (type_names <> binop_names <> unop_names <> fun_names)
+    available :: (Namespace, Name) -> Bool
+    available (Type, _) = True
+    available (Term, v) = v `S.member` (type_names <> binop_names <> fun_names)
       where
         type_names = S.fromList $ map (nameFromString . pretty) anyPrimType
         binop_names =
@@ -477,6 +510,5 @@ topLevelNameMap = M.filterWithKey (\k _ -> atTopLevel k) intrinsicsNameMap
             map
               (nameFromString . pretty)
               [minBound .. (maxBound :: BinOp)]
-        unop_names = S.fromList $ map nameFromString ["!"]
         fun_names = S.fromList $ map nameFromString ["shape"]
-    atTopLevel _ = False
+    available _ = False

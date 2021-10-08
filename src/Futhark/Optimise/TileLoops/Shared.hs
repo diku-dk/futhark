@@ -1,5 +1,6 @@
 module Futhark.Optimise.TileLoops.Shared
   ( TileM,
+    segMap1D,
     segMap2D,
     segMap3D,
     segScatter2D,
@@ -13,12 +14,34 @@ import Control.Monad.Reader
 import Control.Monad.State
 import Data.List (foldl', zip4)
 import qualified Data.Map as M
-import Futhark.IR.Kernels
+import Futhark.IR.GPU
 import Futhark.MonadFreshNames
 import Futhark.Tools
 import Futhark.Transform.Rename
 
-type TileM = ReaderT (Scope Kernels) (State VNameSource)
+type TileM = ReaderT (Scope GPU) (State VNameSource)
+
+segMap1D ::
+  String ->
+  SegLevel ->
+  ResultManifest ->
+  (VName -> Builder GPU Result) ->
+  Builder GPU [VName]
+segMap1D desc lvl manifest f = do
+  ltid <- newVName "ltid"
+  ltid_flat <- newVName "ltid_flat"
+  let space = SegSpace ltid_flat [(ltid, unCount $ segGroupSize lvl)]
+
+  ((ts, res), stms) <- localScope (scopeOfSegSpace space) . runBuilder $ do
+    res <- f ltid
+    ts <- mapM subExpResType res
+    return (ts, res)
+  Body _ stms' res' <- renameBody $ mkBody stms res
+
+  let ret (SubExpRes cs se) = Returns manifest cs se
+  letTupExp desc $
+    Op . SegOp $
+      SegMap lvl space ts $ KernelBody () stms' $ map ret res'
 
 segMap2D ::
   String -> -- desc
@@ -26,24 +49,24 @@ segMap2D ::
   ResultManifest -> -- manifest
   (SubExp, SubExp) -> -- (dim_x, dim_y)
   ( (VName, VName) -> -- f
-    Binder Kernels [SubExp]
+    Builder GPU Result
   ) ->
-  Binder Kernels [VName]
+  Builder GPU [VName]
 segMap2D desc lvl manifest (dim_y, dim_x) f = do
   ltid_xx <- newVName "ltid_x"
   ltid_flat <- newVName "ltid_flat"
   ltid_yy <- newVName "ltid_y"
   let segspace = SegSpace ltid_flat [(ltid_yy, dim_y), (ltid_xx, dim_x)]
 
-  ((ts, res), stms) <- runBinder $ do
+  ((ts, res), stms) <- localScope (scopeOfSegSpace segspace) . runBuilder $ do
     res <- f (ltid_yy, ltid_xx)
-    ts <- mapM subExpType res
+    ts <- mapM subExpResType res
     return (ts, res)
 
+  let ret (SubExpRes cs se) = Returns manifest cs se
   letTupExp desc <=< renameExp $
-    Op $
-      SegOp $
-        SegMap lvl segspace ts $ KernelBody () stms $ map (Returns manifest) res
+    Op . SegOp $
+      SegMap lvl segspace ts $ KernelBody () stms $ map ret res
 
 segMap3D ::
   String -> -- desc
@@ -51,9 +74,9 @@ segMap3D ::
   ResultManifest -> -- manifest
   (SubExp, SubExp, SubExp) -> -- (dim_z, dim_y, dim_x)
   ( (VName, VName, VName) -> -- f
-    Binder Kernels [SubExp]
+    Builder GPU Result
   ) ->
-  Binder Kernels [VName]
+  Builder GPU [VName]
 segMap3D desc lvl manifest (dim_z, dim_y, dim_x) f = do
   ltid_x <- newVName "ltid_x"
   ltid_flat <- newVName "ltid_flat"
@@ -61,15 +84,15 @@ segMap3D desc lvl manifest (dim_z, dim_y, dim_x) f = do
   ltid_z <- newVName "ltid_z"
   let segspace = SegSpace ltid_flat [(ltid_z, dim_z), (ltid_y, dim_y), (ltid_x, dim_x)]
 
-  ((ts, res), stms) <- runBinder $ do
+  ((ts, res), stms) <- localScope (scopeOfSegSpace segspace) . runBuilder $ do
     res <- f (ltid_z, ltid_y, ltid_x)
-    ts <- mapM subExpType res
+    ts <- mapM subExpResType res
     return (ts, res)
 
+  let ret (SubExpRes cs se) = Returns manifest cs se
   letTupExp desc <=< renameExp $
-    Op $
-      SegOp $
-        SegMap lvl segspace ts $ KernelBody () stms $ map (Returns manifest) res
+    Op . SegOp $
+      SegMap lvl segspace ts $ KernelBody () stms $ map ret res
 
 segScatter2D ::
   String -> -- desc
@@ -77,20 +100,20 @@ segScatter2D ::
   VName ->
   SegLevel -> -- lvl
   (SubExp, SubExp) -> -- (dim_y, dim_x)
-  ((VName, VName) -> Binder Kernels (SubExp, SubExp)) -> -- f
-  Binder Kernels [VName]
+  ((VName, VName) -> Builder GPU (SubExp, SubExp)) -> -- f
+  Builder GPU [VName]
 segScatter2D desc arr_size updt_arr lvl (dim_x, dim_y) f = do
   ltid_x <- newVName "ltid_x"
   ltid_y <- newVName "ltid_y"
   ltid_flat <- newVName "ltid_flat"
   let segspace = SegSpace ltid_flat [(ltid_x, dim_x), (ltid_y, dim_y)]
 
-  ((t_v, res_v, res_i), stms) <- runBinder $ do
+  ((t_v, res_v, res_i), stms) <- runBuilder $ do
     (res_v, res_i) <- f (ltid_x, ltid_y)
     t_v <- subExpType res_v
     return (t_v, res_v, res_i)
 
-  let ret = WriteReturns (Shape [arr_size]) updt_arr [([DimFix res_i], res_v)]
+  let ret = WriteReturns mempty (Shape [arr_size]) updt_arr [(Slice [DimFix res_i], res_v)]
   let body = KernelBody () stms [ret]
 
   letTupExp desc <=< renameExp $ Op $ SegOp $ SegMap lvl segspace [t_v] body
@@ -103,11 +126,11 @@ segScatter2D desc arr_size updt_arr lvl (dim_x, dim_y) f = do
 type VarianceTable = M.Map VName Names
 
 isTileableRedomap ::
-  Stm Kernels ->
+  Stm GPU ->
   Maybe
     ( SubExp,
       [VName],
-      (Commutativity, Lambda Kernels, [SubExp], Lambda Kernels)
+      (Commutativity, Lambda GPU, [SubExp], Lambda GPU)
     )
 isTileableRedomap stm
   | Op (OtherOp (Screma w arrs form)) <- stmExp stm,
@@ -123,20 +146,20 @@ isTileableRedomap stm
   | otherwise =
     Nothing
 
-defVarianceInStm :: VarianceTable -> Stm Kernels -> VarianceTable
-defVarianceInStm variance bnd =
-  foldl' add variance $ patternNames $ stmPattern bnd
+defVarianceInStm :: VarianceTable -> Stm GPU -> VarianceTable
+defVarianceInStm variance stm =
+  foldl' add variance $ patNames $ stmPat stm
   where
     add variance' v = M.insert v binding_variance variance'
     look variance' v = oneName v <> M.findWithDefault mempty v variance'
-    binding_variance = mconcat $ map (look variance) $ namesToList (freeIn bnd)
+    binding_variance = mconcat $ map (look variance) $ namesToList (freeIn stm)
 
 -- just in case you need the Screma being treated differently than
 -- by default; previously Cosmin had to enhance it when dealing with stream.
-varianceInStm :: VarianceTable -> Stm Kernels -> VarianceTable
-varianceInStm v0 bnd@(Let _ _ (Op (OtherOp Screma {})))
-  | Just (_, arrs, (_, red_lam, red_nes, map_lam)) <- isTileableRedomap bnd =
-    let v = defVarianceInStm v0 bnd
+varianceInStm :: VarianceTable -> Stm GPU -> VarianceTable
+varianceInStm v0 stm@(Let _ _ (Op (OtherOp Screma {})))
+  | Just (_, arrs, (_, red_lam, red_nes, map_lam)) <- isTileableRedomap stm =
+    let v = defVarianceInStm v0 stm
         red_ps = lambdaParams red_lam
         map_ps = lambdaParams map_lam
         card_red = length red_nes
@@ -154,7 +177,7 @@ varianceInStm v0 bnd@(Let _ _ (Op (OtherOp Screma {})))
           foldl' f v $
             zip4 arrs (map paramName map_ps) (map paramName acc_lam_f) (map paramName arr_lam_f)
      in varianceInStms v' stm_lam
-varianceInStm v0 bnd = defVarianceInStm v0 bnd
+varianceInStm v0 stm = defVarianceInStm v0 stm
 
-varianceInStms :: VarianceTable -> Stms Kernels -> VarianceTable
+varianceInStms :: VarianceTable -> Stms GPU -> VarianceTable
 varianceInStms = foldl' varianceInStm

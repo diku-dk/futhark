@@ -48,7 +48,7 @@ newShape = Shape . newDims
 
 -- | Construct a 'Reshape' where all dimension changes are
 -- 'DimCoercion's.
-shapeCoerce :: [SubExp] -> VName -> Exp lore
+shapeCoerce :: [SubExp] -> VName -> Exp rep
 shapeCoerce newdims arr =
   BasicOp $ Reshape (map DimCoercion newdims) arr
 

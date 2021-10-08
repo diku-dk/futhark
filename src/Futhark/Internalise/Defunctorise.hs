@@ -169,10 +169,8 @@ extendAbsTypes ascript_substs m = do
   -- we need to make them visible, because substitutions involving
   -- abstract types must be lifted out in transformModBind.
   let subst_abs =
-        S.fromList $
-          map snd $
-            filter ((`S.member` abs) . fst) $
-              M.toList ascript_substs
+        S.fromList . map snd . filter ((`S.member` abs) . fst) $
+          M.toList ascript_substs
   bindingAbs subst_abs m
 
 evalModExp :: ModExp -> TransformM Mod
@@ -254,7 +252,7 @@ transformNames x = do
           mapOnQualName = \v ->
             return $ fst $ lookupSubstInScope v scope,
           mapOnStructType = astMap (substituter scope),
-          mapOnPatternType = astMap (substituter scope)
+          mapOnPatType = astMap (substituter scope)
         }
     onExp scope e =
       -- One expression is tricky, because it interacts with scoping rules.

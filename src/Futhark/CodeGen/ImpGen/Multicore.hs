@@ -58,7 +58,7 @@ updateAcc acc is vs = sComment "UpdateAcc" $ do
   -- See the ImpGen implementation of UpdateAcc for general notes.
   let is' = map toInt64Exp is
   (c, _space, arrs, dims, op) <- lookupAcc acc is'
-  sWhen (inBounds (map DimFix is') dims) $
+  sWhen (inBounds (Slice (map DimFix is')) dims) $
     case op of
       Nothing ->
         forM_ (zip arrs vs) $ \(arr, v) -> copyDWIMFix arr is' v []
@@ -83,7 +83,7 @@ updateAcc acc is vs = sComment "UpdateAcc" $ do
                 error $ "Missing locks for " ++ pretty acc
 
 withAcc ::
-  Pattern MCMem ->
+  Pat MCMem ->
   [(Shape, [VName], Maybe (Lambda MCMem, [SubExp]))] ->
   Lambda MCMem ->
   MulticoreGen ()
@@ -116,7 +116,7 @@ compileMCExp dest e =
   defCompileExp dest e
 
 compileMCOp ::
-  Pattern MCMem ->
+  Pat MCMem ->
   MCOp MCMem () ->
   ImpM MCMem HostEnv Imp.Multicore ()
 compileMCOp _ (OtherOp ()) = pure ()
@@ -156,7 +156,7 @@ compileMCOp pat (ParOp par_op op) = do
   emit $ Imp.Op $ Imp.Segop s free_params seq_task par_task retvals $ scheduling_info (decideScheduling' op seq_code)
 
 compileSegOp ::
-  Pattern MCMem ->
+  Pat MCMem ->
   SegOp () MCMem ->
   TV Int32 ->
   ImpM MCMem HostEnv Imp.Multicore Imp.Code

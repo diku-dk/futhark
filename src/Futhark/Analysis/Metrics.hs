@@ -80,7 +80,7 @@ inside what m = seen what >> censor addWhat m
     addWhat' (ctx, k) = (what : ctx, k)
 
 -- | Compute the metrics for a program.
-progMetrics :: OpMetrics (Op lore) => Prog lore -> AstMetrics
+progMetrics :: OpMetrics (Op rep) => Prog rep -> AstMetrics
 progMetrics prog =
   actualMetrics $
     execWriter $
@@ -88,22 +88,22 @@ progMetrics prog =
         mapM_ funDefMetrics $ progFuns prog
         mapM_ stmMetrics $ progConsts prog
 
-funDefMetrics :: OpMetrics (Op lore) => FunDef lore -> MetricsM ()
+funDefMetrics :: OpMetrics (Op rep) => FunDef rep -> MetricsM ()
 funDefMetrics = bodyMetrics . funDefBody
 
-bodyMetrics :: OpMetrics (Op lore) => Body lore -> MetricsM ()
+bodyMetrics :: OpMetrics (Op rep) => Body rep -> MetricsM ()
 bodyMetrics = mapM_ stmMetrics . bodyStms
 
 -- | Compute metrics for this statement.
-stmMetrics :: OpMetrics (Op lore) => Stm lore -> MetricsM ()
+stmMetrics :: OpMetrics (Op rep) => Stm rep -> MetricsM ()
 stmMetrics = expMetrics . stmExp
 
-expMetrics :: OpMetrics (Op lore) => Exp lore -> MetricsM ()
+expMetrics :: OpMetrics (Op rep) => Exp rep -> MetricsM ()
 expMetrics (BasicOp op) =
-  seen "BasicOp" >> primOpMetrics op
-expMetrics (DoLoop _ _ ForLoop {} body) =
+  seen "BasicOp" >> basicOpMetrics op
+expMetrics (DoLoop _ ForLoop {} body) =
   inside "DoLoop" $ seen "ForLoop" >> bodyMetrics body
-expMetrics (DoLoop _ _ WhileLoop {} body) =
+expMetrics (DoLoop _ WhileLoop {} body) =
   inside "DoLoop" $ seen "WhileLoop" >> bodyMetrics body
 expMetrics (If _ tb fb _) =
   inside "If" $ do
@@ -116,28 +116,30 @@ expMetrics (WithAcc _ lam) =
 expMetrics (Op op) =
   opMetrics op
 
-primOpMetrics :: BasicOp -> MetricsM ()
-primOpMetrics (SubExp _) = seen "SubExp"
-primOpMetrics (Opaque _) = seen "Opaque"
-primOpMetrics ArrayLit {} = seen "ArrayLit"
-primOpMetrics BinOp {} = seen "BinOp"
-primOpMetrics UnOp {} = seen "UnOp"
-primOpMetrics ConvOp {} = seen "ConvOp"
-primOpMetrics CmpOp {} = seen "ConvOp"
-primOpMetrics Assert {} = seen "Assert"
-primOpMetrics Index {} = seen "Index"
-primOpMetrics Update {} = seen "Update"
-primOpMetrics Concat {} = seen "Concat"
-primOpMetrics Copy {} = seen "Copy"
-primOpMetrics Manifest {} = seen "Manifest"
-primOpMetrics Iota {} = seen "Iota"
-primOpMetrics Replicate {} = seen "Replicate"
-primOpMetrics Scratch {} = seen "Scratch"
-primOpMetrics Reshape {} = seen "Reshape"
-primOpMetrics Rearrange {} = seen "Rearrange"
-primOpMetrics Rotate {} = seen "Rotate"
-primOpMetrics UpdateAcc {} = seen "UpdateAcc"
+basicOpMetrics :: BasicOp -> MetricsM ()
+basicOpMetrics (SubExp _) = seen "SubExp"
+basicOpMetrics (Opaque _ _) = seen "Opaque"
+basicOpMetrics ArrayLit {} = seen "ArrayLit"
+basicOpMetrics BinOp {} = seen "BinOp"
+basicOpMetrics UnOp {} = seen "UnOp"
+basicOpMetrics ConvOp {} = seen "ConvOp"
+basicOpMetrics CmpOp {} = seen "ConvOp"
+basicOpMetrics Assert {} = seen "Assert"
+basicOpMetrics Index {} = seen "Index"
+basicOpMetrics Update {} = seen "Update"
+basicOpMetrics FlatIndex {} = seen "FlatIndex"
+basicOpMetrics FlatUpdate {} = seen "FlatUpdate"
+basicOpMetrics Concat {} = seen "Concat"
+basicOpMetrics Copy {} = seen "Copy"
+basicOpMetrics Manifest {} = seen "Manifest"
+basicOpMetrics Iota {} = seen "Iota"
+basicOpMetrics Replicate {} = seen "Replicate"
+basicOpMetrics Scratch {} = seen "Scratch"
+basicOpMetrics Reshape {} = seen "Reshape"
+basicOpMetrics Rearrange {} = seen "Rearrange"
+basicOpMetrics Rotate {} = seen "Rotate"
+basicOpMetrics UpdateAcc {} = seen "UpdateAcc"
 
 -- | Compute metrics for this lambda.
-lambdaMetrics :: OpMetrics (Op lore) => Lambda lore -> MetricsM ()
+lambdaMetrics :: OpMetrics (Op rep) => Lambda rep -> MetricsM ()
 lambdaMetrics = bodyMetrics . lambdaBody

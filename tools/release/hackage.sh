@@ -1,7 +1,6 @@
 #!/bin/sh
 #
-# Generate adists and documentation for Hackage.  Only creates package
-# candidates, which are then manually enabled.
+# Generate sdists and documentation for Hackage, then upload them.
 
 set -e
 
@@ -15,10 +14,10 @@ echo "Generating sdist..."
 cabal sdist --builddir="$dir"
 
 echo "Uploading sdist..."
-cabal upload --username=$user --password=$pass $dir/sdist/*.tar.gz
+cabal upload --publish --username=$user --password=$pass $dir/sdist/*.tar.gz
 
 echo "Generating Haddock..."
 cabal v2-haddock --builddir="$dir" --haddock-for-hackage --enable-doc
 
 echo "Uploading Haddock..."
-cabal upload --username=$user --password=$pass -d $dir/*-docs.tar.gz
+cabal upload --publish --username=$user --password=$pass -d $dir/*-docs.tar.gz
