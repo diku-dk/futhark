@@ -1,3 +1,4 @@
+{-# LANGUAGE LambdaCase #-}
 module Futhark.CodeGen.ImpGen.MPI.SegRed
   ( compileSegRed,
     compileSegRed',
@@ -16,10 +17,20 @@ type DoSegBody = (([(SubExp, [Imp.TExp Int64])] -> MPIGen ()) -> MPIGen ())
 initAccumulators :: [VName] -> [SubExp] -> ImpM lore r op ()
 initAccumulators acc_vs nes =
   -- Assign each acumulator value to the corresponding neutral element
-  forM_ (zip acc_vs nes) $ \(acc_v, ne) -> do
-    ne' <- toExp ne
-    -- "<~~" Untyped assignment.
-    acc_v <~~ ne'
+  forM_ (zip acc_vs nes) $ \(acc_v, ne) -> do 
+    case ne of
+      Constant _ -> do
+        ne' <- toExp ne
+        -- "<~~" Untyped assignment.
+        acc_v <~~ ne'
+      Var v -> do
+        lookupVar v >>= \case
+          ScalarVar _ _ -> do
+            ne' <- toExp ne
+            acc_v <~~ ne'
+          ArrayVar _ _ ->
+            copyDWIMFix acc_v [] (Var v) []
+          _ -> error "Not implemented yet"    
 
 -- Core stage reduction
 stageReduction :: Lambda MCMem -> [SubExp] -> [VName] -> [SubExp] -> [Imp.TExp Int64] -> ImpM MCMem Env Imp.MPIOp ()
@@ -51,11 +62,14 @@ compileSegRed ::
   MPIGen Imp.Code
 compileSegRed pat space reds kbody
   | [(gtid, _w)] <- unSegSpace space,
-    [SegBinOp _ lam nes (Shape [])] <- reds = collect $ do
+    [SegBinOp _comm lam nes (Shape [])] <- reds = collect $ do
     -- Declaration of the accumulator variables
     -- We have multiple accumulators because ie. an array of tuples is represented as multiple arrays.
-    acc_vs <- forM (lambdaReturnType lam) $ \(Prim pt) ->
-      tvVar <$> dPrim "acc" pt
+    acc_vs <- forM (lambdaReturnType lam) $ \case
+      Prim pt -> tvVar <$> dPrim "acc" pt
+      Array pt s _ -> sAllocArray "acc" pt s DefaultSpace
+      Mem _ -> error "Not implemented yet"
+      Acc {} -> error "Not implemented yet"
 
     initAccumulators acc_vs nes
 
@@ -77,21 +91,30 @@ compileSegRed pat space reds kbody
     node_id <- dPrim "node_id" int32
     emit $ Imp.Op $ Imp.LoadNodeId (tvVar node_id)
 
-    -- Allocate memory for stage one arrays
-    stage_one_mems <- forM (lambdaReturnType lam) $ \(Prim pt) ->
-      sAlloc "second_stage_acc" (typeSize $ Array pt (Shape [tvSize nb_nodes]) NoUniqueness) DefaultSpace
+    -- Allocate memory for stage one results array
+    stage_one_mems <- forM (lambdaReturnType lam) $ \case
+      Prim pt ->
+        sAlloc "second_stage_acc" (typeSize $ Array pt (Shape [tvSize nb_nodes]) NoUniqueness) DefaultSpace
+      Array pt _ _ -> do
+        -- TODO : replace dumb value with the correct size.
+        sAlloc "second_stage_acc" (typeSize $ Array pt (Shape [tvSize nb_nodes, Constant $ IntValue $ Int64Value 100]) NoUniqueness) DefaultSpace
+      _ -> error "Not implemented yet"
 
-    -- Declare stage one arrays
-    stage_one_arrays <- forM (zip stage_one_mems (lambdaReturnType lam)) $ \(mem, Prim pt) ->
-      sArrayInMem "second_stage_arr" pt (Shape [Var . tvVar $ nb_nodes]) mem
+    -- Declare stage one results array
+    stage_one_arrays <- forM (zip stage_one_mems (lambdaReturnType lam)) $ \case
+      (mem, Prim pt) -> 
+        sArrayInMem "second_stage_arr" pt (Shape [tvSize nb_nodes]) mem
+      (mem, Array pt _ _) -> do
+        -- TODO : replace dumb value with the correct size.
+        sArrayInMem "second_stage_arr" pt (Shape [tvSize nb_nodes, Constant $ IntValue $ Int64Value 100]) mem
+      _ -> error "Not implemented yet"
 
     -- Store the result of stage one reduction
     forM_ (zip stage_one_arrays acc_vs) $ \(array, acc) ->
       copyDWIMFix array [Imp.vi64 $ tvVar node_id] (Var acc) []
 
     -- Step C : Gather arrays on main node
-    forM_ (zip stage_one_mems (lambdaReturnType lam)) $ \(mem, Prim pt) ->
-      gather mem pt
+    forM_ (zip stage_one_mems (lambdaReturnType lam)) $ uncurry gather
 
     -- Step D : Stage 2 reduction
     stage_two <- collect $ do

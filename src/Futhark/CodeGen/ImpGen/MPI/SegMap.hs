@@ -58,7 +58,7 @@ compileSegMap pat space kbody = do
     -- Get the output arrays
     let out_arrays = extractOutputMem pat
     emit $ Imp.Op $ Imp.DistributedLoop "segmap" (tvVar flat_par_idx) body_allocs body' mempty free_params $ segFlat space
-    forM_ out_arrays $ \(pt, name) -> gather name pt 
+    forM_ out_arrays $ \(pt, name) -> gather name $ Prim pt 
     
 
 

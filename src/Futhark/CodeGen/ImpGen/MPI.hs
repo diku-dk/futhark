@@ -32,11 +32,12 @@ compileMCOp ::
   Pattern MCMem ->
   MCOp MCMem () ->
   ImpM MCMem Env Imp.MPIOp ()
-compileMCOp _ (OtherOp ()) = pure ()
+compileMCOp _ (OtherOp ()) = error "Unknow op"
 compileMCOp pat (ParOp _par_op op) = do
   -- Contains the arrray size
   let space = getSpace op
 
+  dPrimV_ (segFlat space) (0 :: Imp.TExp Int64)
   seq_code <- compileSegOp pat op
   retvals <- getReturnParams pat op
   iterations <- getIterationDomain op space

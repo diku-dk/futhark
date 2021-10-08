@@ -206,13 +206,15 @@ compileOp (Segop _name _params code _retvals iterations) = do
   GC.decl [C.cdecl|typename int64_t iterations = $exp:i;|]
   GC.compileCode code
 compileOp (Gather memory type_size) = do
+  ts <- GC.compileExp type_size
   GC.stm
     [C.cstm|
       {
-        uint nb_elements = $id:memory.size / $type_size;
-        uint size_remainder = $type_size *(nb_elements % ctx->world_size);
+        
+        uint nb_elements = $id:memory.size / $exp:ts;
+        uint size_remainder = $exp:ts *(nb_elements % ctx->world_size);
         // Euclidian division, cannot be simplified.
-        uint size = $type_size*(nb_elements / ctx->world_size);
+        uint size = $exp:ts*(nb_elements / ctx->world_size);
 
         int *recvcounts = malloc(ctx->world_size * sizeof(int));
         int *displs = malloc(ctx->world_size * sizeof(int));
