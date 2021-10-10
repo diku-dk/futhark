@@ -367,12 +367,12 @@ name ``t1`` can be used as a shorthand for the type ``t2``.  Type
 abbreviations do not create distinct types: the types ``t1`` and
 ``t2`` are entirely interchangeable.
 
-If the right-hand side of a type contains anonymous sizes, it must be
-declared "size-lifted" with ``type~``.  If it (potentially) contains a
-function, it must be declared "fully lifted" with ``type^``.  A lifted
-type can also contain anonymous sizes.  Lifted types cannot be put in
-arrays.  Fully lifted types cannot be returned from conditional or
-loop expressions.
+If the right-hand side of a type contains anonymous or explicitly
+existential sizes, it must be declared "size-lifted" with ``type~``.
+If it (potentially) contains a function, it must be declared "fully
+lifted" with ``type^``.  A lifted type can also contain anonymous
+sizes.  Lifted types cannot be put in arrays.  Fully lifted types
+cannot be returned from conditional or loop expressions.
 
 A type abbreviation can have zero or more parameters.  A type
 parameter enclosed with square brackets is a *size parameter*, and
@@ -1048,9 +1048,14 @@ accepted or produced by the function.  For example::
 We use a *size parameter*, ``[n]``, to explicitly quantify sizes.  The
 ``[n]`` parameter is not explicitly passed when calling ``f``.
 Rather, its value is implicitly deduced from the arguments passed for
-the value parameters.  An array can contain *anonymous dimensions*,
-e.g. ``[]i32``, for which the type checker will invent fresh size
-parameters, which ensures that all arrays have a (symbolic) size.
+the value parameters.  An array type can contain *anonymous
+dimensions*, e.g. ``[]i32``, for which the type checker will invent
+fresh size parameters, which ensures that all arrays have a (symbolic)
+size.  On the right-hand side of a function arrow ("return types"),
+this results in an *existential size* that is not known until the
+function is fully applied, e.g::
+
+  val filter [n] 'a : (p: a -> bool) -> (as: [n]a) -> ?[k].[k]a
 
 A size annotation can also be an integer constant (with no suffix).
 Size parameters can be used as ordinary variables within the scope of
@@ -1138,16 +1143,16 @@ ranges <range_upto>`.
 Anonymous size in function return type
 ......................................
 
-Whenever the result of a function application would have an anonymous
+Whenever the result of a function application has an existential
 size, that size is replaced with a fresh unknown size variable.
 
 For example, ``filter`` has the following type::
 
-  val filter [n] 'a : (p: a -> bool) -> (as: [n]a) -> []a
+  val filter [n] 'a : (p: a -> bool) -> (as: [n]a) -> ?[k].[k]a
 
-Naively, an application ``filter f xs`` seems like it would have type
-``[]a``, but a fresh unknown size ``k`` will be created and the actual
-type will be ``[k]a``.
+For an application ``filter f xs``, the type checker invents a fresh
+unknown size ``k'``, and the actual type for this specific application
+will be ``[k']a``.
 
 Branches of ``if`` return arrays of different sizes
 ...................................................
@@ -1336,6 +1341,15 @@ But this is not the case for the function that inlines the definition
 of ``square``::
 
   val g : () -> [][]i32
+
+As this above would be elaborated as follows::
+
+  val g : () -> ?[n][m].[n][m]i32
+
+We can of course explicitly write that the function returns a square
+array of existential size::
+
+  val g : () -> ?[n].[n]i32
 
 .. _in-place-updates:
 
