@@ -87,9 +87,8 @@ sliceShape r slice t@(Array als u et (ShapeDecl orig_dims)) =
       case r of
         Just (loc, Rigid _) -> do
           (d, ext) <-
-            lift $
-              extSize loc $
-                SourceSlice orig_d' (bareExp <$> i) (bareExp <$> j) (bareExp <$> stride)
+            lift . extSize loc $
+              SourceSlice orig_d' (bareExp <$> i) (bareExp <$> j) (bareExp <$> stride)
           modify (maybeToList ext ++)
           return d
         Just (loc, Nonrigid) ->
@@ -133,10 +132,8 @@ lexicalClosure params closure = do
   let isLocal v = case v `M.lookup` vtable of
         Just (BoundV Local _ _) -> True
         _ -> False
-  return $
-    S.map AliasBound $
-      S.filter isLocal $
-        allOccurring closure S.\\ mconcat (map patNames params)
+  pure . S.map AliasBound . S.filter isLocal $
+    allOccurring closure S.\\ mconcat (map patNames params)
 
 noAliasesIfOverloaded :: PatType -> TermTypeM PatType
 noAliasesIfOverloaded t@(Scalar (TypeVar _ u tn [])) = do
@@ -1166,22 +1163,21 @@ causalityCheck binding_body = do
         _ -> Nothing
 
     causality what loc d dloc t =
-      Left $
-        TypeError loc mempty . withIndexLink "causality-check" $
-          "Causality check: size" <+/> pquote (pprName d)
-            <+/> "needed for type of"
-            <+> what <> colon
-            </> indent 2 (ppr t)
-            </> "But"
-            <+> pquote (pprName d)
-            <+> "is computed at"
-            <+/> text (locStrRel loc dloc) <> "."
-            </> ""
-            </> "Hint:"
-            <+> align
-              ( textwrap "Bind the expression producing" <+> pquote (pprName d)
-                  <+> "with 'let' beforehand."
-              )
+      Left . TypeError loc mempty . withIndexLink "causality-check" $
+        "Causality check: size" <+/> pquote (pprName d)
+          <+/> "needed for type of"
+          <+> what <> colon
+          </> indent 2 (ppr t)
+          </> "But"
+          <+> pquote (pprName d)
+          <+> "is computed at"
+          <+/> text (locStrRel loc dloc) <> "."
+          </> ""
+          </> "Hint:"
+          <+> align
+            ( textwrap "Bind the expression producing" <+> pquote (pprName d)
+                <+> "with 'let' beforehand."
+            )
 
 -- | Traverse the expression, emitting warnings if any of the literals overflow
 -- their inferred types
@@ -1458,10 +1454,8 @@ checkGlobalAliases params body_t loc = do
         Just (BoundV Local _ _) -> True
         _ -> False
   let als =
-        filter (not . isLocal) $
-          S.toList $
-            boundArrayAliases body_t
-              `S.difference` foldMap patNames params
+        filter (not . isLocal) . S.toList $
+          boundArrayAliases body_t `S.difference` foldMap patNames params
   case als of
     v : _
       | not $ null params ->
@@ -1684,8 +1678,7 @@ letGeneralise defname defloc tparams params rettype =
     rettype'' <- updateTypes rettype'
 
     let used_sizes =
-          foldMap typeDimNames $
-            rettype'' : map patternStructType params
+          foldMap typeDimNames $ rettype'' : map patternStructType params
     case filter ((`S.notMember` used_sizes) . typeParamName) $
       filter isSizeParam tparams' of
       [] -> pure ()

@@ -176,7 +176,9 @@ checkDoLoop checkExp (mergepat, mergeexp, form, loopbody) loc =
     ((sparams, mergepat', form', loopbody'), bodyflow) <-
       case form of
         For i uboundexp -> do
-          uboundexp' <- require "being the bound in a 'for' loop" anySignedType =<< checkExp uboundexp
+          uboundexp' <-
+            require "being the bound in a 'for' loop" anySignedType
+              =<< checkExp uboundexp
           bound_t <- expTypeFully uboundexp'
           bindingIdent i bound_t $ \i' ->
             noUnique . bindingPat [] mergepat (Ascribed merge_t) $
@@ -326,29 +328,26 @@ checkDoLoop checkExp (mergepat, mergeexp, form, loopbody) loc =
               v : _ <-
                 S.toList $
                   S.map aliasVar (aliases t) `S.intersection` bound_outside =
-              lift $
-                typeError loc mempty $
-                  "Return value for loop parameter"
-                    <+> pquote (pprName pat_v)
-                    <+> "aliases"
-                    <+> pprName v <> "."
+              lift . typeError loc mempty $
+                "Return value for loop parameter"
+                  <+> pquote (pprName pat_v)
+                  <+> "aliases"
+                  <+> pprName v <> "."
             | otherwise = do
               (cons, obs) <- get
               unless (S.null $ aliases t `S.intersection` cons) $
-                lift $
-                  typeError loc mempty $
-                    "Return value for loop parameter"
-                      <+> pquote (pprName pat_v)
-                      <+> "aliases other consumed loop parameter."
+                lift . typeError loc mempty $
+                  "Return value for loop parameter"
+                    <+> pquote (pprName pat_v)
+                    <+> "aliases other consumed loop parameter."
               when
                 ( unique pat_v_t
                     && not (S.null (aliases t `S.intersection` (cons <> obs)))
                 )
-                $ lift $
-                  typeError loc mempty $
-                    "Return value for consuming loop parameter"
-                      <+> pquote (pprName pat_v)
-                      <+> "aliases previously returned value."
+                $ lift . typeError loc mempty $
+                  "Return value for consuming loop parameter"
+                    <+> pquote (pprName pat_v)
+                    <+> "aliases previously returned value."
               if unique pat_v_t
                 then put (cons <> aliases t, obs)
                 else put (cons, obs <> aliases t)
@@ -363,16 +362,10 @@ checkDoLoop checkExp (mergepat, mergeexp, form, loopbody) loc =
           checkMergeReturn (RecordPat pfs patloc) (Scalar (Record tfs)) =
             RecordPat . M.toList <$> sequence pfs' <*> pure patloc
             where
-              pfs' =
-                M.intersectionWith
-                  checkMergeReturn
-                  (M.fromList pfs)
-                  tfs
+              pfs' = M.intersectionWith checkMergeReturn (M.fromList pfs) tfs
           checkMergeReturn (TuplePat pats patloc) t
             | Just ts <- isTupleRecord t =
-              TuplePat
-                <$> zipWithM checkMergeReturn pats ts
-                <*> pure patloc
+              TuplePat <$> zipWithM checkMergeReturn pats ts <*> pure patloc
           checkMergeReturn p _ =
             return p
 
