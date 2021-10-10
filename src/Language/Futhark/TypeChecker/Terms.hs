@@ -74,11 +74,10 @@ sliceShape r slice t@(Array als u et (ShapeDecl orig_dims)) =
     setDims [] = stripArray (length orig_dims) t
     setDims dims' = Array als u et $ ShapeDecl dims'
 
-    -- If the result is supposed to be AnyDim or a nonrigid size
-    -- variable, then don't bother trying to create
-    -- non-existential sizes.  This is necessary to make programs
-    -- type-check without too much ceremony; see
-    -- e.g. tests/inplace5.fut.
+    -- If the result is supposed to be a nonrigid size variable, then
+    -- don't bother trying to create non-existential sizes.  This is
+    -- necessary to make programs type-check without too much
+    -- ceremony; see e.g. tests/inplace5.fut.
     isRigid Rigid {} = True
     isRigid _ = False
     refine_sizes = maybe False (isRigid . snd) r
@@ -945,19 +944,17 @@ checkApply
 
       (argext, parsubst) <-
         case pname of
-          Named pname' -> do
-            (d, argext) <- sizeSubst tp1' argexp
-            return
-              ( argext,
-                (`M.lookup` M.singleton pname' (SizeSubst d))
-              )
+          Named pname'
+            | (Scalar (Prim (Signed Int64))) <- tp1' -> do
+              (d, argext) <- dimFromArg fname argexp
+              pure
+                ( argext,
+                  (`M.lookup` M.singleton pname' (SizeSubst d))
+                )
           _ -> pure (Nothing, const Nothing)
       let tp2'' = applySubst parsubst $ returnType tp2' (diet tp1') argtype'
 
       pure (tp1', tp2'', argext, ext)
-    where
-      sizeSubst (Scalar (Prim (Signed Int64))) e = dimFromArg fname e
-      sizeSubst _ _ = pure (undefined {- AnyDim Nothing -}, Nothing)
 checkApply loc fname tfun@(Scalar TypeVar {}) arg = do
   tv <- newTypeVar loc "b"
   -- Change the uniqueness of the argument type because we never want
@@ -1598,7 +1595,7 @@ closeOverTypes defname defloc tparams paramts ret substs = do
           Just (_, UnknowableSize {}) -> Just $ qualLeaf v
           _ -> Nothing
       mkExt ConstDim {} = Nothing
-      mkExt AnyDim {} = Nothing
+      mkExt AnyDim {} = error "closeOverTypes: AnyDim"
   return
     ( tparams ++ more_tparams,
       injectExt (mapMaybe mkExt (nestedDims ret)) ret,
