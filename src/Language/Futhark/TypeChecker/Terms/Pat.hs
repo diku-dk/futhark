@@ -212,7 +212,7 @@ patternDims (TuplePat pats _) = concatMap patternDims pats
 patternDims (PatAscription p (TypeDecl _ (Info t)) _) =
   patternDims p <> mapMaybe (dimIdent (srclocOf p)) (nestedDims t)
   where
-    dimIdent _ (AnyDim _) = Nothing
+    dimIdent _ (AnyDim _) = error "patternDims: AnyDim"
     dimIdent _ (ConstDim _) = Nothing
     dimIdent _ NamedDim {} = Nothing
 patternDims _ = []

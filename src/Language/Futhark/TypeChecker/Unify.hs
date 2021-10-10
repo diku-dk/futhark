@@ -343,8 +343,7 @@ instantiateEmptyArrayDims tloc r (RetType dims t) = do
     new = newDimVar tloc r . nameFromString . takeWhile isAscii . baseString
     onDim dims' (NamedDim d) =
       NamedDim $ maybe d qualName (lookup (qualLeaf d) dims')
-    onDim _ (ConstDim d) = ConstDim d
-    onDim _ (AnyDim d) = AnyDim d
+    onDim _ d = d
 
 -- | Is the given type variable the name of an abstract type or type
 -- parameter, which we cannot substitute?
@@ -557,7 +556,6 @@ expect usage = unifyWith onDims usage mempty noBreadCrumbs
     -- and yet bound.  It's OK to unify with those.
     onDims bcs bound nonrigid (NamedDim (QualName _ d1)) d2
       | Just lvl1 <- nonrigid d1,
-        not $ isAnyDim d2,
         not (boundParam bound d2) || (d1 `elem` bound) =
         linkVarToDim usage bcs d1 lvl1 d2
     onDims bcs bound nonrigid d1 (NamedDim (QualName _ d2))
@@ -574,8 +572,6 @@ expect usage = unifyWith onDims usage mempty noBreadCrumbs
 
     boundParam bound (NamedDim (QualName _ d)) = d `elem` bound
     boundParam _ _ = False
-
-    isAnyDim _ = False
 
 occursCheck ::
   MonadUnify m =>
