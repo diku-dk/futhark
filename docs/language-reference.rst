@@ -135,14 +135,18 @@ comma-separated values enclosed in square brackets: ``[1,2,3]``.  An
 array type is written as ``[d]t``, where ``t`` is the element type of
 the array, and ``d`` is an integer or variable indicating the size.
 We can often elide ``d`` and write just ``[]`` (an *anonymous size*),
-in which case the size will be inferred.  As an example, an array of
-three integers could be written as ``[1,2,3]``, and has type
-``[3]i32``.  An empty array is written as ``[]``, and its type is
-inferred from its use.  When writing Futhark values for such uses as
-``futhark test`` (but not when writing programs), empty arrays are
-written ``empty([0]t)`` for an empty array of type ``[0]t``.  When
-using ``empty``, all dimensions must be given a size, and at least one
-must be zero, e.g. ``empty([2][0]i32)``.
+in which case the size will be inferred.  An anonymous size is a
+syntactic shorthand, and is always replaced by an actual size by the
+type checker (either via inference or by inventing a new name,
+depending on context).
+
+As an example, an array of three integers could be written as
+``[1,2,3]``, and has type ``[3]i32``.  An empty array is written as
+``[]``, and its type is inferred from its use.  When writing Futhark
+values for such uses as ``futhark test`` (but not when writing
+programs), empty arrays are written ``empty([0]t)`` for an empty array
+of type ``[0]t``.  When using ``empty``, all dimensions must be given
+a size, and at least one must be zero, e.g. ``empty([2][0]i32)``.
 
 Multi-dimensional arrays are supported in Futhark, but they must be
 *regular*, meaning that all inner arrays must have the same shape.
@@ -367,12 +371,12 @@ name ``t1`` can be used as a shorthand for the type ``t2``.  Type
 abbreviations do not create distinct types: the types ``t1`` and
 ``t2`` are entirely interchangeable.
 
-If the right-hand side of a type contains anonymous or explicitly
-existential sizes, it must be declared "size-lifted" with ``type~``.
-If it (potentially) contains a function, it must be declared "fully
-lifted" with ``type^``.  A lifted type can also contain anonymous
-sizes.  Lifted types cannot be put in arrays.  Fully lifted types
-cannot be returned from conditional or loop expressions.
+If the right-hand side of a type contains existential sizes, it must
+be declared "size-lifted" with ``type~``.  If it (potentially)
+contains a function, it must be declared "fully lifted" with
+``type^``.  A lifted type can also contain existential sizes.  Lifted
+types cannot be put in arrays.  Fully lifted types cannot be returned
+from conditional or loop expressions.
 
 A type abbreviation can have zero or more parameters.  A type
 parameter enclosed with square brackets is a *size parameter*, and
@@ -1084,14 +1088,14 @@ operation.  For example, the type of ``concat`` should conceptually be::
   val concat [n] [m] 't : [n]t -> [m]t -> [n+m]t
 
 But this is not presently allowed.  Instead, the return type contains
-an anonymous size::
+an existential size::
 
-  val concat [n] [m] 't : [n]t -> [m]t -> []t
+  val concat [n] [m] 't : [n]t -> [m]t -> ?[k].[k]t
 
 When an application ``concat xs ys`` is found, the result will be of
-type ``[k]t``, where ``k`` is a fresh *unknown* size variable that is
-considered distinct from every other size in the program.  It is often
-necessary to perform a size coercion (see `Size coercion`_) to
+type ``[k']t``, where ``k'`` is a fresh *unknown* size variable that
+is considered distinct from every other size in the program.  It is
+often necessary to perform a size coercion (see `Size coercion`_) to
 convert an unknown size to a known size.
 
 Generally, unknown sizes are constructed whenever the true size cannot
@@ -1140,8 +1144,8 @@ Most complex ranges, such as ``a..<b``, will have an unknown size.
 Exceptions exist for :ref:`general ranges <range>` and :ref:`"upto"
 ranges <range_upto>`.
 
-Anonymous size in function return type
-......................................
+Existential size in function return type
+........................................
 
 Whenever the result of a function application has an existential
 size, that size is replaced with a fresh unknown size variable.
@@ -1271,8 +1275,8 @@ Modules
 When matching a module with a module type (see :ref:`module-system`),
 a non-lifted abstract type (i.e. one that is declared with ``type``
 rather than ``type^``) may not be implemented by a type abbreviation
-that contains any anonymous sizes.  This is to ensure that if we have
-the following::
+that contains any existential sizes.  This is to ensure that if we
+have the following::
 
   module m : { type t } = ...
 
@@ -1284,20 +1288,20 @@ Higher-order functions
 
 When a higher-order function takes a functional argument whose return
 type is a non-lifted type parameter, any instantiation of that type
-parameter must have a non-anonymous size.  If the return type is a
-lifted type parameter, then the instantiation may contain anonymous
+parameter must have a non-existential size.  If the return type is a
+lifted type parameter, then the instantiation may contain existential
 sizes.  This is why the type of ``map`` guarantees regular arrays::
 
   val map [n] 'a 'b : (a -> b) -> [n]a -> [n]b
 
 The type parameter ``b`` can only be replaced with a type that has
-non-anonymous sizes, which means they must be the same for every
+non-existential sizes, which means they must be the same for every
 application of the function.  In contrast, this is the type of the
 pipeline operator::
 
   val (|>) '^a -> '^b : a -> (a -> b) -> b
 
-The provided function can return something with an anonymous size
+The provided function can return something with an existential size
 (such as ``filter``).
 
 A function whose return type has an unknown size
@@ -1305,7 +1309,7 @@ A function whose return type has an unknown size
 
 If a function (named or anonymous) is inferred to have a return type
 that contains an unknown size variable created *within* the function
-body, that size variable will be replaced with an anonymous size.  In
+body, that size variable will be replaced with an existential size.  In
 most cases this is not important, but it means that an expression like
 the following is ill-typed::
 
@@ -1313,7 +1317,7 @@ the following is ill-typed::
 
 This is because the ``(length xs)`` expression gives rise to some
 fresh size ``k``.  The lambda is then assigned the type ``[n]t ->
-[k]i32``, which is immediately turned into ``[n]t -> []i32`` because
+[k]i32``, which is immediately turned into ``[n]t -> ?[k].[k]i32`` because
 ``k`` was generated inside its body.  A function of this type cannot
 be passed to ``map``, as explained before.  The solution is to bind
 ``length`` to a name *before* the lambda.
