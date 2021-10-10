@@ -292,6 +292,9 @@ library
       Language.Futhark.TypeChecker.Modules
       Language.Futhark.TypeChecker.Monad
       Language.Futhark.TypeChecker.Terms
+      Language.Futhark.TypeChecker.Terms.DoLoop
+      Language.Futhark.TypeChecker.Terms.Monad
+      Language.Futhark.TypeChecker.Terms.Pat
       Language.Futhark.TypeChecker.Types
       Language.Futhark.TypeChecker.Unify
       Language.Futhark.Warnings
