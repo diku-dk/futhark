@@ -48,7 +48,7 @@ overloadedTypeVars = mconcat . map f . M.elems
 
 --- Basic checking
 
--- | Determine if the two types of identical, ignoring uniqueness.
+-- | Determine if the two types are identical, ignoring uniqueness.
 -- Mismatched dimensions are turned into fresh rigid type variables.
 -- Causes a 'TypeError' if they fail to match, and otherwise returns
 -- one of them.
