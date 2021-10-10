@@ -182,7 +182,7 @@ evalTypeExp (TEUnique t loc) = do
   (t', svars, RetType dims st, l) <- evalTypeExp t
   unless (mayContainArray st) $
     warn loc $ "Declaring" <+> pquote (ppr st) <+> "as unique has no effect."
-  return (TEUnique t' loc, svars, RetType dims $ st `setUniqueness` Unique, l)
+  pure (TEUnique t' loc, svars, RetType dims $ st `setUniqueness` Unique, l)
   where
     mayContainArray (Scalar Prim {}) = False
     mayContainArray Array {} = True
@@ -271,10 +271,10 @@ evalTypeExp ote@TEApply {} = do
     tloc = srclocOf ote
 
     rootAndArgs :: MonadTypeChecker m => TypeExp Name -> m (QualName Name, SrcLoc, [TypeArgExp Name])
-    rootAndArgs (TEVar qn loc) = return (qn, loc, [])
+    rootAndArgs (TEVar qn loc) = pure (qn, loc, [])
     rootAndArgs (TEApply op arg _) = do
       (op', loc, args) <- rootAndArgs op
-      return (op', loc, args ++ [arg])
+      pure (op', loc, args ++ [arg])
     rootAndArgs te' =
       typeError (srclocOf te') mempty $
         "Type" <+> pquote (ppr te') <+> "is not a type constructor."
@@ -330,11 +330,11 @@ checkForDuplicateNames = (`evalStateT` mempty) . mapM_ check
   where
     check (Id v _ loc) = seen v loc
     check (PatParens p _) = check p
-    check Wildcard {} = return ()
+    check Wildcard {} = pure ()
     check (TuplePat ps _) = mapM_ check ps
     check (RecordPat fs _) = mapM_ (check . snd) fs
     check (PatAscription p _ _) = check p
-    check PatLit {} = return ()
+    check PatLit {} = pure ()
     check (PatConstr _ _ ps _) = mapM_ check ps
 
     seen v loc = do
@@ -389,8 +389,8 @@ checkForDuplicateNamesInType = check mempty
         check (M.insert v loc seen) (TEDim vs t loc)
     check seen (TEDim [] t _) =
       check seen t
-    check _ TEArray {} = return ()
-    check _ TEVar {} = return ()
+    check _ TEArray {} = pure ()
+    check _ TEVar {} = pure ()
 
 -- | @checkTypeParams ps m@ checks the type parameters @ps@, then
 -- invokes the continuation @m@ with the checked parameters, while
@@ -496,10 +496,10 @@ instance Substitutable Pat where
           { mapOnExp = return,
             mapOnName = return,
             mapOnQualName = return,
-            mapOnStructType = return . applySubst f,
-            mapOnPatType = return . applySubst f,
-            mapOnStructRetType = return . applySubst f,
-            mapOnPatRetType = return . applySubst f
+            mapOnStructType = pure . applySubst f,
+            mapOnPatType = pure . applySubst f,
+            mapOnStructRetType = pure . applySubst f,
+            mapOnPatRetType = pure . applySubst f
           }
 
 applyType ::

@@ -159,7 +159,7 @@ usageMap = foldl comb M.empty
     ins v m k = M.insertWith (++) k [v] m
 
 combineOccurrences :: VName -> Usage -> Usage -> TermTypeM Usage
-combineOccurrences _ (Observed loc) (Observed _) = return $ Observed loc
+combineOccurrences _ (Observed loc) (Observed _) = pure $ Observed loc
 combineOccurrences name (Consumed wloc) (Observed rloc) =
   useAfterConsume name rloc wloc
 combineOccurrences name (Observed rloc) (Consumed wloc) =
@@ -170,7 +170,7 @@ combineOccurrences name (Consumed loc1) (Consumed loc2) =
 checkOccurrences :: Occurrences -> TermTypeM ()
 checkOccurrences = void . M.traverseWithKey comb . usageMap
   where
-    comb _ [] = return ()
+    comb _ [] = pure ()
     comb name (u : us) = foldM_ (combineOccurrences name) u us
 
 allObserved :: Occurrences -> Names
@@ -472,7 +472,7 @@ incCounter :: TermTypeM Int
 incCounter = do
   s <- get
   put s {stateCounter = stateCounter s + 1}
-  return $ stateCounter s
+  pure $ stateCounter s
 
 constrain :: VName -> Constraint -> TermTypeM ()
 constrain v c = do
@@ -487,7 +487,7 @@ instance MonadUnify TermTypeM where
     i <- incCounter
     v <- newID $ mkTypeVarName desc i
     constrain v $ NoConstraint Lifted $ mkUsage' loc
-    return $ Scalar $ TypeVar mempty Nonunique (typeName v) []
+    pure $ Scalar $ TypeVar mempty Nonunique (typeName v) []
 
   curLevel = asks termLevel
 
@@ -543,7 +543,7 @@ instantiateTypeScheme loc tparams t = do
   (tparam_names, tparam_substs) <- unzip <$> mapM (instantiateTypeParam loc) tparams
   let substs = M.fromList $ zip tnames tparam_substs
       t' = applySubst (`M.lookup` substs) t
-  return (tparam_names, t')
+  pure (tparam_names, t')
 
 -- | Create a new type name and insert it (unconstrained) in the
 -- substitution map.
@@ -559,10 +559,10 @@ instantiateTypeParam loc tparam = do
   case tparam of
     TypeParamType x _ _ -> do
       constrain v $ NoConstraint x $ mkUsage' loc
-      return (v, Subst [] $ RetType [] $ Scalar $ TypeVar mempty Nonunique (typeName v) [])
+      pure (v, Subst [] $ RetType [] $ Scalar $ TypeVar mempty Nonunique (typeName v) [])
     TypeParamDim {} -> do
       constrain v $ Size Nothing $ mkUsage' loc
-      return (v, SizeSubst $ NamedDim $ qualName v)
+      pure (v, SizeSubst $ NamedDim $ qualName v)
 
 checkQualNameWithEnv :: Namespace -> QualName Name -> SrcLoc -> TermTypeM (TermScope, QualName VName)
 checkQualNameWithEnv space qn@(QualName quals name) loc = do
@@ -571,7 +571,7 @@ checkQualNameWithEnv space qn@(QualName quals name) loc = do
   where
     descend scope []
       | Just name' <- M.lookup (space, name) $ scopeNameMap scope =
-        return (scope, name')
+        pure (scope, name')
       | otherwise =
         unknownVariable space qn loc
     descend scope (q : qs)
@@ -585,7 +585,7 @@ checkQualNameWithEnv space qn@(QualName quals name) loc = do
               checkIntrinsic space qn loc
           ModEnv q_scope -> do
             (scope', QualName qs' name') <- descend (envToTermScope q_scope) qs
-            return (scope', QualName (q' : qs') name')
+            pure (scope', QualName (q' : qs') name')
           ModFun {} -> unappliedFunctor loc
       | otherwise =
         unknownVariable space qn loc
@@ -597,7 +597,7 @@ checkIntrinsic space qn@(QualName _ name) loc
     unless ("/prelude" `isPrefixOf` includeToFilePath me) $
       warn loc "Using intrinsic functions directly can easily crash the compiler or result in wrong code generation."
     scope <- asks termScope
-    return (scope, v)
+    pure (scope, v)
   | otherwise =
     unknownVariable space qn loc
 
@@ -640,7 +640,7 @@ instance MonadTypeChecker TermTypeM where
     (scope, qn'@(QualName _ name)) <- checkQualNameWithEnv Term qn loc
     case M.lookup name $ scopeModTable scope of
       Nothing -> unknownVariable Term qn loc
-      Just m -> return (qn', m)
+      Just m -> pure (qn', m)
 
   lookupVar loc qn = do
     outer_env <- liftTypeM askEnv
@@ -656,11 +656,11 @@ instance MonadTypeChecker TermTypeM where
         | "_" `isPrefixOf` baseString name -> underscoreUse loc qn
         | otherwise -> do
           (tnames, t') <- instantiateTypeScheme loc tparams t
-          return $ qualifyTypeVars outer_env tnames qs t'
+          pure $ qualifyTypeVars outer_env tnames qs t'
       Just EqualityF -> do
         argtype <- newTypeVar loc "t"
         equalityType usage argtype
-        return $
+        pure $
           Scalar . Arrow mempty Unnamed argtype . RetType [] $
             Scalar $ Arrow mempty Unnamed argtype $ RetType [] $ Scalar $ Prim Bool
       Just (OverloadedF ts pts rt) -> do
@@ -668,10 +668,10 @@ instance MonadTypeChecker TermTypeM where
         mustBeOneOf ts usage argtype
         let (pts', rt') = instOverloaded argtype pts rt
             arrow xt yt = Scalar $ Arrow mempty Unnamed xt $ RetType [] yt
-        return $ fromStruct $ foldr arrow rt' pts'
+        pure $ fromStruct $ foldr arrow rt' pts'
 
     observe $ Ident name (Info t) loc
-    return (qn', t)
+    pure (qn', t)
     where
       instOverloaded argtype pts rt =
         ( map (maybe (toStruct argtype) (Scalar . Prim)) pts,
@@ -683,7 +683,7 @@ instance MonadTypeChecker TermTypeM where
     onFailure (CheckingRequired [Scalar $ Prim $ Signed Int64] (toStruct t)) $
       unify (mkUsage loc "use as array size") (toStruct t) $
         Scalar $ Prim $ Signed Int64
-    return v'
+    pure v'
 
   typeError loc notes s = do
     checking <- asks termChecking
@@ -782,14 +782,14 @@ updateTypes = astMap tv
 unifies :: String -> StructType -> Exp -> TermTypeM Exp
 unifies why t e = do
   unify (mkUsage (srclocOf e) why) t . toStruct =<< expType e
-  return e
+  pure e
 
 -- | @require ts e@ causes a 'TypeError' if @expType e@ is not one of
 -- the types in @ts@.  Otherwise, simply returns @e@.
 require :: String -> [PrimType] -> Exp -> TermTypeM Exp
 require why ts e = do
   mustBeOneOf ts (mkUsage (srclocOf e) why) . toStruct =<< expType e
-  return e
+  pure e
 
 renameRetType :: StructRetType -> TermTypeM StructRetType
 renameRetType (RetType dims st)
@@ -818,7 +818,7 @@ termCheckTypeExp te = do
   where
     observeDim (NamedDim v) =
       observe $ Ident (qualLeaf v) (Info $ Scalar $ Prim $ Signed Int64) mempty
-    observeDim _ = return ()
+    observeDim _ = pure ()
 
 checkTypeExpNonrigid :: TypeExp Name -> TermTypeM (TypeExp VName, StructType, [VName])
 checkTypeExpNonrigid te = do
@@ -856,7 +856,7 @@ dimFromExp rf (Parens e _) = dimFromExp rf e
 dimFromExp rf (QualParens _ e _) = dimFromExp rf e
 dimFromExp rf e
   | Just d <- maybeDimFromExp e =
-    return (d, Nothing)
+    pure (d, Nothing)
   | otherwise =
     extSize (srclocOf e) $ rf e
 
@@ -873,7 +873,7 @@ noSizeEscape m = do
   dimtable <- gets stateDimTable
   x <- m
   modify $ \s -> s {stateDimTable = dimtable}
-  return x
+  pure x
 
 --- Control flow
 
@@ -906,7 +906,7 @@ sequentially m1 m2 = do
   (a, m1flow) <- collectOccurrences m1
   (b, m2flow) <- collectOccurrences $ m2 a m1flow
   occur $ m1flow `seqOccurrences` m2flow
-  return b
+  pure b
 
 --- Consumption
 
@@ -967,7 +967,7 @@ checkIfConsumable loc als = do
   -- The sort ensures that AliasBound vars are shown before AliasFree.
   case map aliasVar $ sort $ filter (not . consumable . aliasVar) $ S.toList als of
     v : _ -> notConsumable loc =<< describeVar loc v
-    [] -> return ()
+    [] -> pure ()
 
 -- | Proclaim that we have written to the given variable.
 consume :: SrcLoc -> Aliasing -> TermTypeM ()

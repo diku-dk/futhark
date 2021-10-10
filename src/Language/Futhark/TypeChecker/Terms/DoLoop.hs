@@ -159,12 +159,12 @@ checkDoLoop checkExp (mergepat, mergeexp, form, loopbody) loc =
           let dimToInit (v, SizeSubst d) =
                 constrain v $ Size (Just d) (mkUsage loc "size of loop parameter")
               dimToInit _ =
-                return ()
+                pure ()
           mapM_ dimToInit $ M.toList init_substs
 
           mergepat'' <- applySubst (`M.lookup` init_substs) <$> updateTypes mergepat'
 
-          return (nubOrd sparams, mergepat'')
+          pure (nubOrd sparams, mergepat'')
 
     -- First we do a basic check of the loop body to figure out which of
     -- the merge parameters are being consumed.  For this, we first need
@@ -245,7 +245,7 @@ checkDoLoop checkExp (mergepat, mergeexp, form, loopbody) loc =
         consumeMerge (PatAscription pat _ _) t =
           consumeMerge pat t
         consumeMerge _ _ =
-          return ()
+          pure ()
     consumeMerge mergepat'' =<< expTypeFully mergeexp'
 
     -- dim handling (3)
@@ -352,9 +352,9 @@ checkDoLoop checkExp (mergepat, mergeexp, form, loopbody) loc =
                 then put (cons <> aliases t, obs)
                 else put (cons, obs <> aliases t)
 
-              return $ Id pat_v (Info (combAliases pat_v_t t)) patloc
+              pure $ Id pat_v (Info (combAliases pat_v_t t)) patloc
           checkMergeReturn (Wildcard (Info pat_v_t) patloc) t =
-            return $ Wildcard (Info (combAliases pat_v_t t)) patloc
+            pure $ Wildcard (Info (combAliases pat_v_t t)) patloc
           checkMergeReturn (PatParens p _) t =
             checkMergeReturn p t
           checkMergeReturn (PatAscription p _ _) t =
@@ -367,12 +367,12 @@ checkDoLoop checkExp (mergepat, mergeexp, form, loopbody) loc =
             | Just ts <- isTupleRecord t =
               TuplePat <$> zipWithM checkMergeReturn pats ts <*> pure patloc
           checkMergeReturn p _ =
-            return p
+            pure p
 
       (pat'', (pat_cons, _)) <-
         runStateT (checkMergeReturn pat' body_t) (mempty, mempty)
 
       let body_cons' = body_cons <> S.map aliasVar pat_cons
       if body_cons' == body_cons && patternType pat'' == patternType pat
-        then return pat'
+        then pure pat'
         else convergePat pat'' body_cons' body_t body_loc
