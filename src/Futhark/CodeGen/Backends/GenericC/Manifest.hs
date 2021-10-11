@@ -19,7 +19,9 @@ where
 
 import Data.Aeson (ToJSON (..), object)
 import qualified Data.Aeson as JSON
+import qualified Data.Aeson.Key as JSON
 import Data.Aeson.Text (encodeToLazyText)
+import Data.Bifunctor (bimap)
 import qualified Data.Map as M
 import qualified Data.Text as T
 import Data.Text.Lazy (toStrict)
@@ -112,10 +114,10 @@ instance JSON.ToJSON Manifest where
     object
       [ ("backend", toJSON backend),
         ( "entry_points",
-          object $ M.toList $ fmap onEntryPoint entry_points
+          object $ map (bimap JSON.fromText onEntryPoint) $ M.toList entry_points
         ),
         ( "types",
-          object $ M.toList $ fmap onType types
+          object $ map (bimap JSON.fromText onType) $ M.toList types
         )
       ]
     where

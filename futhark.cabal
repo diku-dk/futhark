@@ -312,7 +312,7 @@ library
       alex:alex
     , happy:happy
   build-depends:
-      aeson < 2
+      aeson >=2.0.0.0
     , ansi-terminal >=0.6.3.1
     , array >=0.4
     , base >=4.13 && <5
@@ -353,7 +353,6 @@ library
     , text >=1.2.2.2
     , time >=1.6.0.1
     , transformers >=0.3
-    , unordered-containers >=0.2.7
     , vector >=0.12
     , vector-binary-instances >=0.2.2.0
     , versions >=5.0.0

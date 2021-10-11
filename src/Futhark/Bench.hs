@@ -21,9 +21,10 @@ where
 import Control.Applicative
 import Control.Monad.Except
 import qualified Data.Aeson as JSON
+import qualified Data.Aeson.Key as JSON
+import qualified Data.Aeson.KeyMap as JSON
 import qualified Data.ByteString.Char8 as SBS
 import qualified Data.ByteString.Lazy.Char8 as LBS
-import qualified Data.HashMap.Strict as HM
 import qualified Data.Map as M
 import Data.Maybe
 import qualified Data.Text as T
@@ -81,19 +82,19 @@ instance JSON.ToJSON DataResults where
 
 instance JSON.FromJSON DataResults where
   parseJSON = JSON.withObject "datasets" $ \o ->
-    DataResults <$> mapM datasetResult (HM.toList o)
+    DataResults <$> mapM datasetResult (JSON.toList o)
     where
       datasetResult (k, v) =
-        DataResult (T.unpack k)
+        DataResult (JSON.toString k)
           <$> ((Right <$> success v) <|> (Left <$> JSON.parseJSON v))
       success = JSON.withObject "result" $ \o ->
         Result <$> o JSON..: "runtimes" <*> o JSON..: "bytes" <*> o JSON..: "stderr"
 
-dataResultJSON :: DataResult -> (T.Text, JSON.Value)
+dataResultJSON :: DataResult -> (JSON.Key, JSON.Value)
 dataResultJSON (DataResult desc (Left err)) =
-  (T.pack desc, JSON.toJSON err)
+  (JSON.fromString desc, JSON.toJSON err)
 dataResultJSON (DataResult desc (Right (Result runtimes bytes progerr))) =
-  ( T.pack desc,
+  ( JSON.fromString desc,
     JSON.object
       [ ("runtimes", JSON.toJSON $ map runMicroseconds runtimes),
         ("bytes", JSON.toJSON bytes),
@@ -101,22 +102,22 @@ dataResultJSON (DataResult desc (Right (Result runtimes bytes progerr))) =
       ]
   )
 
-benchResultJSON :: BenchResult -> (T.Text, JSON.Value)
+benchResultJSON :: BenchResult -> (JSON.Key, JSON.Value)
 benchResultJSON (BenchResult prog r) =
-  ( T.pack prog,
-    JSON.Object $ HM.singleton "datasets" (JSON.toJSON $ DataResults r)
+  ( JSON.fromString prog,
+    JSON.object [("datasets", JSON.toJSON $ DataResults r)]
   )
 
 instance JSON.ToJSON BenchResults where
   toJSON (BenchResults rs) =
-    JSON.Object $ HM.fromList $ map benchResultJSON rs
+    JSON.object $ map benchResultJSON rs
 
 instance JSON.FromJSON BenchResults where
   parseJSON = JSON.withObject "benchmarks" $ \o ->
-    BenchResults <$> mapM onBenchmark (HM.toList o)
+    BenchResults <$> mapM onBenchmark (JSON.toList o)
     where
       onBenchmark (k, v) =
-        BenchResult (T.unpack k)
+        BenchResult (JSON.toString k)
           <$> JSON.withObject "benchmark" onBenchmark' v
       onBenchmark' o =
         fmap unDataResults . JSON.parseJSON =<< o JSON..: "datasets"
