@@ -20,8 +20,26 @@ let
     packageOverrides = pkgs: rec {
       haskellPackages = pkgs.haskellPackages.override {
         overrides = haskellPackagesNew: haskellPackagesOld: rec {
-          versions =
-            haskellPackagesNew.callPackage ./nix/versions.nix { };
+          aeson =
+            haskellPackagesNew.aeson_2_0_1_0;
+
+          time-compat =
+            haskellPackagesNew.time-compat_1_9_6_1;
+
+          semialign =
+            haskellPackagesNew.semialign_1_2;
+
+          hashable =
+            haskellPackagesNew.hashable_1_3_4_1;
+
+          yaml =
+            haskellPackagesNew.yaml_0_11_7_0;
+
+          hpack =
+            haskellPackagesNew.hpack_0_34_5;
+
+          hashable-time =
+            haskellPackagesNew.hashable-time_0_3;
 
           futhark-data =
             haskellPackagesNew.callPackage ./nix/futhark-data.nix { };
