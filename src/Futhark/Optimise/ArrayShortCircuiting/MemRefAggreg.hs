@@ -16,6 +16,7 @@ import qualified Data.Map.Strict as M
 import Data.Maybe
 import qualified Data.Set as S
 import Debug.Trace
+import Futhark.Analysis.AlgSimplify2
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.IR.Aliases
 import Futhark.IR.Mem
@@ -28,6 +29,8 @@ import Futhark.Transform.Substitute
 import Prelude
 
 traceWith s a = trace (s <> ": " <> pretty a) a
+
+traceWith' s a = trace (s <> ": " <> show a) a
 
 -----------------------------------------------------
 -- Some translations of Accesses and Ixfuns        --
@@ -334,8 +337,8 @@ aggSummaryLoopPartial scope_before scope_loop scalars_loop (Just (iterator_var, 
     aggSummaryOne new_var (IxFun.LMAD _ dims) | iterator_var `nameIn` freeIn dims = Undeterminable
     aggSummaryOne new_var (IxFun.LMAD offset0 dims0) =
       let offset = traceWith "offset" $ replaceIteratorWith (typedLeafExp new_var) offset0
-          offsetp1 = traceWith "offsetp1" $ replaceIteratorWith (typedLeafExp new_var + 1) offset0
-          new_stride = traceWith "new_stride" $ offsetp1 - offset
+          offsetp1 = traceWith' "offsetp1" $ replaceIteratorWith (typedLeafExp new_var + 1) offset0
+          new_stride = traceWith "new_stride" $ TPrimExp $ simplify $ untyped $ offsetp1 - offset
           new_offset = replaceIteratorWith lower_bound offset0
           new_span = upper_bound
           new_lmad =

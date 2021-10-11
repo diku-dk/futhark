@@ -119,10 +119,7 @@ mkCoalsTab prg = do
 
 mkCoalsTabGPU :: MonadFreshNames m => Prog (Aliases GPUMem) -> m CoalsTab
 mkCoalsTabGPU prg =
-  -- foldM (<>) mempty $
-  --   map (mkCoalsTabFun (snd . lastUseGPUMem) (ShortCircuitReader shortCircuitGPUMem)) $
-  --     progFuns prg
-  undefined
+  foldl (<>) mempty <$> mapM (mkCoalsTabFun (snd . lastUseGPUMem) (ShortCircuitReader shortCircuitGPUMem)) (progFuns prg)
 
 -- | Given a function, compute the coalescing table
 mkCoalsTabFun ::

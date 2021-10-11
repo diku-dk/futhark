@@ -54,6 +54,7 @@ library
   exposed-modules:
       Futhark.Actions
       Futhark.Analysis.AlgSimplify
+      Futhark.Analysis.AlgSimplify2
       Futhark.Analysis.Alias
       Futhark.Analysis.CallGraph
       Futhark.Analysis.DataDependencies
@@ -219,6 +220,7 @@ library
       Futhark.Optimise.InPlaceLowering.LowerIntoStm
       Futhark.Optimise.InPlaceLowering.SubstituteIndices
       Futhark.Optimise.InliningDeadFun
+      Futhark.Optimise.PhilShortCircuit
       Futhark.Optimise.MemoryBlockMerging
       Futhark.Optimise.MemoryBlockMerging.GreedyColoring
       Futhark.Optimise.ArrayShortCircuiting
@@ -384,6 +386,7 @@ test-suite unit
       Futhark.BenchTests
       Futhark.Pkg.SolveTests
       Futhark.Analysis.AlgSimplifyTests
+      Futhark.Analysis.AlgSimplify2Tests
       Futhark.IR.Prop.RearrangeTests
       Futhark.IR.Prop.ReshapeTests
       Futhark.IR.PropTests
