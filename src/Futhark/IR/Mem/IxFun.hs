@@ -210,6 +210,9 @@ instance FreeIn num => FreeIn (LMAD num) where
 instance FreeIn num => FreeIn (IxFun num) where
   freeIn' = foldMap freeIn'
 
+instance FreeIn num => FreeIn (LMADDim num) where
+  freeIn' (LMADDim s r n _ _) = freeIn' s <> freeIn' r <> freeIn' n
+
 instance Functor LMAD where
   fmap f = runIdentity . traverse (return . f)
 

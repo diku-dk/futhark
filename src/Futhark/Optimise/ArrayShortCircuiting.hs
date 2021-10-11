@@ -3,7 +3,7 @@
 {-# LANGUAGE TypeFamilies #-}
 
 -- | Playground for work on merging memory blocks
-module Futhark.Optimise.ArrayShortCircuiting (printArrayShortCircuiting, optimiseSeqMem) where
+module Futhark.Optimise.ArrayShortCircuiting (printArrayShortCircuiting, printArrayShortCircuitingGPU, optimiseSeqMem, optimiseGPUMem) where
 
 import Control.Monad.Reader
 import Data.Function ((&))
@@ -11,13 +11,16 @@ import qualified Data.Map as M
 import Data.Maybe (fromMaybe)
 import qualified Futhark.Analysis.Alias as AnlAls
 import Futhark.IR.Aliases
+import Futhark.IR.GPUMem
 import Futhark.IR.Mem
 import Futhark.IR.Mem.IxFun (substituteInIxFun)
 import Futhark.IR.SeqMem
+import Futhark.MonadFreshNames
 import Futhark.Optimise.ArrayShortCircuiting.ArrayCoalescing
 import Futhark.Optimise.ArrayShortCircuiting.DataStructs
 import Futhark.Pass (Pass (..))
 import qualified Futhark.Pass as Pass
+import Futhark.Pipeline
 import Prelude
 
 ----------------------------------------------------------------
@@ -25,38 +28,43 @@ import Prelude
 ----------------------------------------------------------------
 
 -- run it with:  `futhark dev --cpu --merge-mem test.fut`
-printArrayShortCircuiting :: Prog SeqMem -> IO ()
+printArrayShortCircuiting :: Prog SeqMem -> FutharkM ()
 printArrayShortCircuiting prg = do
-  mapM_ lookAtFunction (progFuns prg)
+  coaltab <- mkCoalsTab $ AnlAls.aliasAnalysis prg
+  liftIO $ putStrLn $ "COALESCING RESULT:" ++ pretty (length coaltab) ++ "\n" ++ pretty coaltab
 
-  let coaltab = mkCoalsTab $ AnlAls.aliasAnalysis prg
-  putStrLn $ "COALESCING RESULT:" ++ pretty (length coaltab) ++ "\n" ++ pretty coaltab
-
-lookAtFunction :: FunDef SeqMem -> IO ()
-lookAtFunction fdef = do
-  putStrLn $ "Function:\n" ++ pretty fdef
+-- run it with:  `futhark dev --gpu-mem --merge-mem test.fut`
+printArrayShortCircuitingGPU :: Prog GPUMem -> FutharkM ()
+printArrayShortCircuitingGPU prg = do
+  coaltab <- mkCoalsTabGPU $ AnlAls.aliasAnalysis prg
+  liftIO $ putStrLn $ "COALESCING RESULT:" ++ pretty (length coaltab) ++ "\n" ++ pretty coaltab
 
 data Env inner = Env
   { envCoalesceTab :: M.Map VName Coalesced,
-    onInner :: inner -> ReplaceM inner (Maybe inner)
+    onInner :: inner -> ReplaceM inner inner
   }
 
 type ReplaceM inner a = Reader (Env inner) a
 
 optimiseSeqMem :: Pass SeqMem SeqMem
-optimiseSeqMem = pass mkCoalsTab (return . const Nothing)
+optimiseSeqMem = pass "short-circuit" "Array Short-Circuiting" mkCoalsTab return
+
+optimiseGPUMem :: Pass GPUMem GPUMem
+optimiseGPUMem = pass "short-circuit-gpu" "Array Short-Circuiting (GPU)" mkCoalsTabGPU replaceInHostOp
 
 pass ::
   (Mem rep inner, LetDec rep ~ LetDecMem, CanBeAliased inner) =>
-  (Prog (Aliases rep) -> CoalsTab) ->
-  (inner -> ReplaceM inner (Maybe inner)) ->
+  String ->
+  String ->
+  (Prog (Aliases rep) -> Pass.PassM CoalsTab) ->
+  (inner -> ReplaceM inner inner) ->
   Pass rep rep
-pass mk on_inner =
-  Pass "short-circuit" "Array Short-Circuiting" $ \prog ->
-    let coaltab = foldMap vartab $ M.elems $ mk $ AnlAls.aliasAnalysis prog
-     in Pass.intraproceduralTransformation (onStms coaltab) prog
+pass flag desc mk on_inner =
+  Pass flag desc $ \prog -> do
+    coaltab <- foldMap vartab . M.elems <$> mk (AnlAls.aliasAnalysis prog)
+    Pass.intraproceduralTransformation (onStms coaltab) prog
   where
-    onStms coaltab _ stms = do
+    onStms coaltab _ stms =
       return $ runReader (mapM replaceInStm stms) (Env coaltab on_inner)
 
 replaceInStm :: (Mem rep inner, LetDec rep ~ LetDecMem) => Stm rep -> ReplaceM inner (Stm rep)
@@ -85,10 +93,17 @@ replaceInExp _ (DoLoop loop_inits loop_form (Body dec stms res)) = do
 replaceInExp _ e@(Op (Alloc _ _)) = return e
 replaceInExp _ e@(Op (Inner i)) = do
   on_op <- asks onInner
-  maybe e (Op . Inner) <$> on_op i
+  Op . Inner <$> on_op i
 replaceInExp _ (Op _) = error "Unreachable" -- This shouldn't be possible?
 replaceInExp _ e@WithAcc {} = return e
 replaceInExp _ e@Apply {} = return e
+
+replaceInHostOp :: HostOp GPUMem () -> ReplaceM (HostOp GPUMem ()) (HostOp GPUMem ())
+replaceInHostOp (SegOp (SegMap lvl sp tps body)) = do
+  stms <- mapM replaceInStm $ kernelBodyStms body
+  return $ SegOp $ SegMap lvl sp tps $ body {kernelBodyStms = stms}
+replaceInHostOp (SegOp _) = undefined
+replaceInHostOp op = return op
 
 generalizeIxfun :: [PatElemT dec] -> PatElemT LetDecMem -> BodyReturns -> ReplaceM inner BodyReturns
 generalizeIxfun

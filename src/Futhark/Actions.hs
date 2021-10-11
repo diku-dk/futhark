@@ -8,11 +8,13 @@ module Futhark.Actions
     printAliasesAction,
     memAliasesAction,
     compareLastUseAction,
+    compareLastUseGPUMemAction,
     callGraphAction,
     impCodeGenAction,
     kernelImpCodeGenAction,
     multicoreImpCodeGenAction,
     arrayShortCircuiting,
+    arrayShortCircuitingGPU,
     metricsAction,
     compileCAction,
     compileCtoWASMAction,
@@ -116,8 +118,30 @@ compareLastUseAction =
     { actionName = "Compare Last Use",
       actionDescription = "Compare last use",
       actionProcedure = \prog -> do
-        let lastuse1 = fst $ Futhark.Analysis.LastUse.analyseSeqMem prog
-        let lastuse2 = mconcat $ M.elems $ Futhark.Optimise.ArrayShortCircuiting.LastUse.lastUsePrg $ aliasAnalysis prog
+        let lastuse1 = M.filter ((/=) mempty) $ fst $ Futhark.Analysis.LastUse.analyseSeqMem prog
+        let lastuse2 = M.filter ((/=) mempty) $ mconcat $ M.elems $ Futhark.Optimise.ArrayShortCircuiting.LastUse.lastUsePrg $ aliasAnalysis prog
+        if lastuse1 == lastuse2
+          then return ()
+          else liftIO $ putStrLn ("Last uses differ:\n" <> pretty lastuse1 <> "\n" <> pretty lastuse2)
+
+        liftIO $ putStrLn ""
+
+        let allnames1 = mconcat $ M.elems lastuse1
+        let allnames2 = mconcat $ M.elems lastuse2
+        if allnames1 == allnames2
+          then return ()
+          else liftIO $ putStrLn ("Allnames differ:\n" <> pretty allnames1 <> "\n" <> pretty allnames2)
+    }
+
+-- | Print the result to stdout, alias annotations.
+compareLastUseGPUMemAction :: Action GPUMem
+compareLastUseGPUMemAction =
+  Action
+    { actionName = "Compare Last Use GPU",
+      actionDescription = "Compare last use GPU",
+      actionProcedure = \prog -> do
+        let lastuse1 = M.filter ((/=) mempty) $ fst $ Futhark.Analysis.LastUse.analyseGPUMem prog
+        let lastuse2 = M.filter ((/=) mempty) $ mconcat $ M.elems $ Futhark.Optimise.ArrayShortCircuiting.LastUse.lastUsePrgGPU $ aliasAnalysis prog
         if lastuse1 == lastuse2
           then return ()
           else liftIO $ putStrLn ("Last uses differ:\n" <> pretty lastuse1 <> "\n" <> pretty lastuse2)
@@ -163,7 +187,15 @@ arrayShortCircuiting =
   Action
     { actionName = "Array short circuiting",
       actionDescription = "Perform array short circuiting and print results",
-      actionProcedure = liftIO . ShortCircuit.printArrayShortCircuiting
+      actionProcedure = ShortCircuit.printArrayShortCircuiting
+    }
+
+arrayShortCircuitingGPU :: Action GPUMem
+arrayShortCircuitingGPU =
+  Action
+    { actionName = "Array short circuiting GPU",
+      actionDescription = "Perform array short circuiting and print results",
+      actionProcedure = ShortCircuit.printArrayShortCircuitingGPU
     }
 
 -- Lines that we prepend (in comments) to generated code.

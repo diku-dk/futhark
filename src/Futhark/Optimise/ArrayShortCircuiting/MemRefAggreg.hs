@@ -15,15 +15,19 @@ import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import qualified Data.Set as S
---import Debug.Trace
-
+import Debug.Trace
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.IR.Aliases
 import Futhark.IR.Mem
 import qualified Futhark.IR.Mem.IxFun as IxFun
+import Futhark.IR.Prop.Names
+import Futhark.MonadFreshNames
 import Futhark.Optimise.ArrayShortCircuiting.DataStructs
 import Futhark.Optimise.ArrayShortCircuiting.TopDownAn
+import Futhark.Transform.Substitute
 import Prelude
+
+traceWith s a = trace (s <> ": " <> pretty a) a
 
 -----------------------------------------------------
 -- Some translations of Accesses and Ixfuns        --
@@ -64,7 +68,7 @@ translateAccessSummary _ _ Undeterminable = Undeterminable
 translateAccessSummary scope0 scals0 (Set slmads)
   | Just subs <- freeVarSubstitutions scope0 scals0 slmads =
     slmads
-      & S.map (IxFun.substituteInLMAD subs)
+      & S.map (IxFun.substituteInLMAD $ traceWith "freeVarSubs" subs)
       & Set
 translateAccessSummary _ _ _ = Undeterminable
 
@@ -290,9 +294,9 @@ aggSummaryLoopTotal _ _ _ _ Undeterminable = Undeterminable
 aggSummaryLoopTotal _ _ _ _ (Set l)
   | l == mempty = Set mempty
 aggSummaryLoopTotal scope_bef scope_loop scals_loop _ access
-  | Set ls <- translateAccessSummary scope_loop scals_loop access,
+  | Set ls <- traceWith "translateAccesSummary" $ translateAccessSummary scope_loop scals_loop $ traceWith "access" access,
     nms <- foldl (<>) mempty $ map freeIn $ S.toList ls,
-    all inBeforeScope (namesToList nms) =
+    traceWith "all" $ all inBeforeScope $ traceWith "names" $ namesToList nms =
     Set ls
   where
     inBeforeScope v =
@@ -307,10 +311,39 @@ aggSummaryLoopTotal _ _ _ _ _ = Undeterminable
 --   The current implementation is naive in that it treats only
 --     the loop invariant case (same as function @aggSummaryLoopTotal@).
 aggSummaryLoopPartial ::
+  MonadFreshNames m =>
   ScopeTab rep ->
   ScopeTab rep ->
   ScalarTab ->
   Maybe (VName, (TPrimExp Int64 VName, TPrimExp Int64 VName)) ->
   AccessSummary ->
-  AccessSummary
-aggSummaryLoopPartial = aggSummaryLoopTotal
+  m AccessSummary
+aggSummaryLoopPartial _ _ _ _ Undeterminable = return Undeterminable
+aggSummaryLoopPartial _ _ _ Nothing _ = return Undeterminable
+aggSummaryLoopPartial scope_before scope_loop scalars_loop (Just (iterator_var, (lower_bound, upper_bound))) (Set lmads) = do
+  -- map over each index function in the access summary
+  --   Substitube a fresh variable k for the loop iterator
+  --   if k is in stride or span of ixfun: fall back to total
+  --   new_stride = old_offset - old_offset (where k+1 is substituted for k)
+  --   new_offset = old_offset where k = lower bound of iteration
+  --   new_span = upper bound of iteration
+  new_var <- newVName "k"
+  return $ foldMap (aggSummaryOne new_var) lmads
+  where
+    aggSummaryOne :: VName -> LmadRef -> AccessSummary
+    aggSummaryOne new_var (IxFun.LMAD _ dims) | iterator_var `nameIn` freeIn dims = Undeterminable
+    aggSummaryOne new_var (IxFun.LMAD offset0 dims0) =
+      let offset = traceWith "offset" $ replaceIteratorWith (typedLeafExp new_var) offset0
+          offsetp1 = traceWith "offsetp1" $ replaceIteratorWith (typedLeafExp new_var + 1) offset0
+          new_stride = traceWith "new_stride" $ offsetp1 - offset
+          new_offset = replaceIteratorWith lower_bound offset0
+          new_span = upper_bound
+          new_lmad =
+            IxFun.LMAD new_offset $
+              IxFun.LMADDim new_stride 0 new_span 0 IxFun.Inc : map incPerm dims0
+       in if new_var `nameIn` freeIn new_lmad
+            then Undeterminable
+            else Set $ S.singleton $ new_lmad
+    incPerm dim = dim {IxFun.ldPerm = IxFun.ldPerm dim + 1}
+    typedLeafExp se = isInt64 $ LeafExp se (IntType Int64)
+    replaceIteratorWith se = TPrimExp . substituteInPrimExp (M.singleton iterator_var $ untyped se) . untyped

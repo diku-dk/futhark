@@ -36,6 +36,7 @@ import Futhark.Optimise.Fusion
 import Futhark.Optimise.InPlaceLowering
 import Futhark.Optimise.InliningDeadFun
 import qualified Futhark.Optimise.MemoryBlockMerging as MemoryBlockMerging
+import Futhark.Optimise.PhilShortCircuit as PhilShortCircuit
 import Futhark.Optimise.Sink
 import Futhark.Optimise.TileLoops
 import Futhark.Optimise.Unstream
@@ -475,6 +476,11 @@ commandLineOptions =
       "Perform array short-circuiting and print the results.",
     Option
       []
+      ["print-short-circuit-gpu"]
+      (NoArg $ Right $ \opts -> opts {futharkAction = GPUMemAction $ \_ _ _ -> arrayShortCircuitingGPU})
+      "Perform array short-circuiting and print the results.",
+    Option
+      []
       ["mem-aliases"]
       (NoArg $ Right $ \opts -> opts {futharkAction = GPUMemAction $ \_ _ _ -> memAliasesAction})
       "Print memory aliases.",
@@ -483,6 +489,11 @@ commandLineOptions =
       ["compare-last-use"]
       (NoArg $ Right $ \opts -> opts {futharkAction = SeqMemAction $ \_ _ _ -> compareLastUseAction})
       "Compare last use.",
+    Option
+      []
+      ["compare-last-use-gpu"]
+      (NoArg $ Right $ \opts -> opts {futharkAction = GPUMemAction $ \_ _ _ -> compareLastUseGPUMemAction})
+      "Compare last use (GPUMem).",
     Option
       []
       ["call-graph"]
@@ -568,7 +579,9 @@ commandLineOptions =
     kernelsMemPassOption expandAllocations [],
     kernelsMemPassOption MemoryBlockMerging.optimise [],
     seqMemPassOption LiftAllocations.liftAllocations [],
+    seqMemPassOption PhilShortCircuit.shortCircuit [],
     seqMemPassOption ArrayShortCircuiting.optimiseSeqMem [],
+    kernelsMemPassOption ArrayShortCircuiting.optimiseGPUMem [],
     cseOption [],
     simplifyOption "e",
     soacsPipelineOption

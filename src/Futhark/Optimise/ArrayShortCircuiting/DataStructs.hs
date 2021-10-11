@@ -313,7 +313,13 @@ instance CreatesNewArrOp inner => CreatesNewArrOp (MemOp inner) where
 
 instance CreatesNewArrOp inner => CreatesNewArrOp (HostOp (Aliases GPUMem) inner) where
   createsNewArrOp (OtherOp op) = createsNewArrOp op
-  createsNewArrOp _ = False
+  createsNewArrOp (SegOp (SegMap _ _ _ kbody)) = all isReturns $ kernelBodyResult kbody
+  createsNewArrOp (SizeOp _) = False
+  createsNewArrOp _ = undefined
+
+isReturns :: KernelResult -> Bool
+isReturns Returns {} = True
+isReturns _ = False
 
 -- | Memory-block removal from active-coalescing table
 --   should only be handled via this function, it is easy

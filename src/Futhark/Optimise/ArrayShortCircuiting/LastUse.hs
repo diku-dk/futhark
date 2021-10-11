@@ -15,7 +15,7 @@
 -- This pass is different from 'Futhark.Analysis.LastUse' in that memory blocks
 -- are used to alias arrays. For instance, an 'Update' will not result in a last
 -- use of the array being updated, because the result lives in the same memory.
-module Futhark.Optimise.ArrayShortCircuiting.LastUse (lastUseSeqMem, lastUsePrg, lastUseGPUMem) where
+module Futhark.Optimise.ArrayShortCircuiting.LastUse (lastUseSeqMem, lastUsePrg, lastUsePrgGPU, lastUseGPUMem) where
 
 import Control.Monad.Reader
 import Control.Monad.State.Strict
@@ -41,6 +41,10 @@ aliasLookup vname =
 -- | Perform last-use analysis on a 'Prog'
 lastUsePrg :: Prog (Aliases SeqMem) -> LUTabPrg
 lastUsePrg prg = M.fromList $ map lastUseSeqMem $ progFuns prg
+
+-- | Perform last-use analysis on a 'Prog'
+lastUsePrgGPU :: Prog (Aliases GPUMem) -> LUTabPrg
+lastUsePrgGPU prg = M.fromList $ map lastUseGPUMem $ progFuns prg
 
 -- | Perform last-use analysis on a 'FunDef'
 lastUseSeqMem :: FunDef (Aliases SeqMem) -> (Name, LUTabFun)
@@ -83,6 +87,32 @@ lastUseBody bdy@(Body _ stms result) (lutab, used_nms) = do
     lastUseStms stms (lutab, used_nms) $
       namesToList $
         freeIn $ map resSubExp result
+  -- Clean up the used names by recomputing the aliasing transitive-closure
+  -- of the free names in body based on the current alias table @alstab@.
+  used_in_body <- aliasTransitiveClosure $ freeIn bdy
+  return (lutab', used_nms <> used_in_body)
+
+-- | Performing the last-use analysis on a body.
+--
+-- The implementation consists of a bottom-up traversal of the body's statements
+-- in which the the variables lastly used in a statement are computed as the
+-- difference between the free-variables in that stmt and the set of variables
+-- known to be used after that statement.
+lastUseKernelBody ::
+  (CanBeAliased (Op rep), ASTRep rep) =>
+  -- | The body of statements
+  KernelBody (Aliases rep) ->
+  -- | The current last-use table, tupled with the known set of already used names
+  (LUTabFun, Names) ->
+  -- | The result is:
+  --      (i) an updated last-use table,
+  --     (ii) an updated set of used names (including the binding).
+  LastUseM rep (LUTabFun, Names)
+lastUseKernelBody bdy@(KernelBody _ stms result) (lutab, used_nms) = do
+  -- perform analysis bottom-up in bindings: results are known to be used,
+  -- hence they are added to the used_nms set.
+  (lutab', _) <-
+    lastUseStms stms (lutab, used_nms) $ namesToList $ freeIn result
   -- Clean up the used names by recomputing the aliasing transitive-closure
   -- of the free names in body based on the current alias table @alstab@.
   used_in_body <- aliasTransitiveClosure $ freeIn bdy
@@ -157,15 +187,15 @@ lastUseExp (If _ then_body else_body _) used_nms = do
   return (then_lutab <> else_lutab, last_used_arrs, used_nms')
 lastUseExp (DoLoop var_ses _ body) used_nms0 = do
   free_in_body <- aliasTransitiveClosure $ freeIn body
-  -- compute the aliasing transitive closure of initializers
+  -- compute the aliasing transitive closure of initializers that are not last-uses
   var_inis <- catMaybes <$> mapM (initHelper (free_in_body <> used_nms0)) var_ses
   let -- To record last-uses inside the loop body, we call 'lastUseBody' with used-names
       -- being:  (free_in_body - loop-variants-a) + used_nms0. As such we disable cases b)
       -- and c) to produce loop-variant last uses inside the loop, and also we prevent
       -- the free-loop-variables to having last uses inside the loop.
-      free_in_body' = namesSubtract free_in_body $ namesFromList $ map fst var_inis
+      free_in_body' = free_in_body `namesSubtract` namesFromList (map fst var_inis)
       used_nms = used_nms0 <> free_in_body'
-  (body_lutab, _) <- lastUseBody body (M.empty, used_nms)
+  (body_lutab, _) <- lastUseBody body (mempty, used_nms)
 
   -- add var_inis_a to the body_lutab, i.e., record the last-use of
   -- initializer in the corresponding loop variant.
@@ -199,16 +229,25 @@ lastUseGPUOp (Alloc se sp) used_nms = do
   let free_in_e = freeIn se <> freeIn sp
   (used_nms', lu_vars) <- lastUsedInNames used_nms free_in_e
   return (M.empty, lu_vars, used_nms')
-lastUseGPUOp _ _ = undefined
+lastUseGPUOp (Inner (OtherOp ())) used_nms =
+  return (mempty, mempty, used_nms)
+lastUseGPUOp (Inner (SizeOp sop)) used_nms = do
+  (used_nms', lu_vars) <- lastUsedInNames used_nms $ freeIn sop
+  return (mempty, lu_vars, used_nms')
+lastUseGPUOp (Inner (SegOp (SegMap _ _ tps kbody))) used_nms = do
+  (used_nms', lu_vars) <- lastUsedInNames used_nms $ freeIn tps
+  (body_lutab, _) <- lastUseKernelBody kbody (mempty, used_nms')
+  return (body_lutab, lu_vars, used_nms')
+lastUseGPUOp (Inner (SegOp _)) _ =
+  undefined
 
 lastUseSeqOp :: Op (Aliases SeqMem) -> Names -> LastUseM SeqMem (LUTabFun, Names, Names)
 lastUseSeqOp (Alloc se sp) used_nms = do
   let free_in_e = freeIn se <> freeIn sp
   (used_nms', lu_vars) <- lastUsedInNames used_nms free_in_e
-  return (M.empty, lu_vars, used_nms')
-lastUseSeqOp (Inner ()) used_nms = do
-  (used_nms', lu_vars) <- lastUsedInNames used_nms mempty
   return (mempty, lu_vars, used_nms')
+lastUseSeqOp (Inner ()) used_nms = do
+  return (mempty, mempty, used_nms)
 
 ------------------------------------------------------
 
