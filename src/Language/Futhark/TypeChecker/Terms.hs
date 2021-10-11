@@ -919,9 +919,9 @@ checkApply
       argtype' <- normTypeFully argtype
 
       -- Check whether this would produce an impossible return type.
-      let (_, tp2_paramdims) = dimUses $ toStruct tp2'
+      let (tp2_produced_dims, tp2_paramdims) = dimUses $ toStruct tp2'
           problematic = S.fromList ext <> boundInsideType argtype'
-      when (any (`S.member` problematic) tp2_paramdims) $ do
+      when (any (`S.member` problematic) (tp2_paramdims `S.difference` tp2_produced_dims)) $ do
         typeError loc mempty $
           "Existential size would appear in function parameter of return type:"
             </> indent 2 (ppr (RetType ext tp2'))
@@ -1619,7 +1619,8 @@ closeOverTypes defname defloc tparams paramts ret substs = do
     closeOver (k, Size Nothing usage) =
       pure $ Just $ Left $ TypeParamDim k $ srclocOf usage
     closeOver (k, UnknowableSize _ _)
-      | k `S.member` param_sizes = do
+      | k `S.member` param_sizes,
+        k `S.notMember` produced_sizes = do
         notes <- dimNotes defloc $ NamedDim $ qualName k
         typeError defloc notes $
           "Unknowable size" <+> pquote (pprName k)
