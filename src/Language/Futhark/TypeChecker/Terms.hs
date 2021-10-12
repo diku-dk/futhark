@@ -428,7 +428,8 @@ checkExp (QualParens (modname, modnameloc) e loc) = do
       e' <- checkExp e
       pure $ QualParens (modname', modnameloc) e' loc
     ModFun {} ->
-      typeError loc mempty $ "Module" <+> ppr modname <+> " is a parametric module."
+      typeError loc mempty . withIndexLink "module-is-parametric" $
+        "Module" <+> ppr modname <+> " is a parametric module."
   where
     qualifyEnv modname' env =
       env {envNameMap = M.map (qualify' modname') $ envNameMap env}
@@ -596,10 +597,10 @@ checkExp (RecordUpdate src fields ve NoInfo loc) = do
         f_t' <- updateField fs ve_t f_t
         pure $ Scalar $ Record $ M.insert f f_t' m
     updateField _ _ _ =
-      typeError loc mempty $
+      typeError loc mempty . withIndexLink "record-type-not-known" $
         "Full type of"
           </> indent 2 (ppr src)
-          </> textwrap " is not known at this point.  Add a size annotation to the original record to disambiguate."
+          </> textwrap " is not known at this point.  Add a type annotation to the original record to disambiguate."
 
 --
 checkExp (AppExp (Index e slice loc) _) = do
@@ -817,7 +818,7 @@ checkUnmatched e = void $ checkUnmatched' e >> astMap tv e
        in case unmatched $ NE.toList ps of
             [] -> pure ()
             ps' ->
-              typeError loc mempty $
+              typeError loc mempty . withIndexLink "unmatched-cases" $
                 "Unmatched cases in match expression:"
                   </> indent 2 (stack (map ppr ps'))
     checkUnmatched' _ = pure ()
@@ -1262,7 +1263,7 @@ checkFunDef (fname, maybe_retdecl, tparams, params, body, loc) =
     bindSpaced [(Term, fname)] $ do
       fname' <- checkName Term fname loc
       when (nameToString fname `elem` doNotShadow) $
-        typeError loc mempty $
+        typeError loc mempty . withIndexLink "may-not-be-redefined" $
           "The" <+> pprName fname <+> "operator may not be redefined."
 
       pure (fname', tparams', params'', maybe_retdecl'', RetType dims rettype'', retext, body'')
@@ -1285,26 +1286,26 @@ fixOverloadedTypes tyvars_at_toplevel =
         when (v `S.member` tyvars_at_toplevel) $
           warn usage "Defaulting ambiguous type to f64."
       | otherwise =
-        typeError usage mempty $
+        typeError usage mempty . withIndexLink "ambiguous-type" $
           "Type is ambiguous (could be one of" <+> commasep (map ppr ots) <> ")."
             </> "Add a type annotation to disambiguate the type."
     fixOverloaded (_, NoConstraint _ usage) =
-      typeError usage mempty $
+      typeError usage mempty . withIndexLink "ambiguous-type" $
         "Type of expression is ambiguous."
           </> "Add a type annotation to disambiguate the type."
     fixOverloaded (_, Equality usage) =
-      typeError usage mempty $
+      typeError usage mempty . withIndexLink "ambiguous-type" $
         "Type is ambiguous (must be equality type)."
           </> "Add a type annotation to disambiguate the type."
     fixOverloaded (_, HasFields fs usage) =
-      typeError usage mempty $
+      typeError usage mempty . withIndexLink "ambiguous-type" $
         "Type is ambiguous.  Must be record with fields:"
           </> indent 2 (stack $ map field $ M.toList fs)
           </> "Add a type annotation to disambiguate the type."
       where
         field (l, t) = ppr l <> colon <+> align (ppr t)
     fixOverloaded (_, HasConstrs cs usage) =
-      typeError usage mempty $
+      typeError usage mempty . withIndexLink "ambiguous-type" $
         "Type is ambiguous (must be a sum type with constructors:"
           <+> ppr (Sum cs) <> ")."
           </> "Add a type annotation to disambiguate the type."

@@ -358,6 +358,8 @@ value is defined.  A constant value may not have a unique type (see
 (see `Size types`_), new existential sizes will be constructed for
 them.
 
+.. _typeabbrevs:
+
 Type Abbreviations
 ~~~~~~~~~~~~~~~~~~
 
@@ -849,6 +851,8 @@ the code is correct; eliding such checks can lead to memory
 corruption.
 
 This construct is deprecated.  Use the ``#[unsafe]`` attribute instead.
+
+.. _assert:
 
 ``assert cond e``
 .................

@@ -246,8 +246,8 @@ filter (>0)`` part will be fully evaluated to a concrete array before
 We can of course also write it as ``length (filter (>0) xs)``, with no
 use of either pipelining or composition.
 
-Other errors
-------------
+Module errors
+-------------
 
 .. _nested-entry:
 
@@ -271,6 +271,28 @@ point, we must define a wrapper function::
 
   entry f = m.f
 
+.. _module-is-parametric:
+
+"Module *x* is a parametric module
+----------------------------------
+
+A parametric module is a module-level function::
+
+  module PM (P: {val x : i64}) = {
+    let y = x + 2
+  }
+
+If we directly try to access the component of ``PM``, as ``PM.y``, we
+will get an error.  To use ``PM`` we must first apply it to a module
+of the expected type::
+
+  module M = PM { val x = 2 : i64 }
+
+Now we can say ``M.y``.  See :ref:`module-system` for more.
+
+Other errors
+------------
+
 .. _literal-out-of-bounds:
 
 "Literal out of bounds"
@@ -290,3 +312,96 @@ cromulent::
 
 In such cases, the behaviour is overflow (so this is equivalent to
 ``1u8``).
+
+.. _ambiguous-type:
+
+"Type is ambiguous"
+~~~~~~~~~~~~~~~~~~~
+
+There are various cases where the type checker is unable to infer the
+full type of something.  For example::
+
+  let f r = r.x
+
+We know that ``r`` must be a record with a field called ``x``, but
+maybe the record could also have other fields as well.  Instead of
+assuming a perhaps too narrow type, the type checker signals an error.
+The solution is always to add a type annotation in one or more places
+to disambiguate the type::
+
+  let f (r: {x:bool, y:i32}) = r.x
+
+Usually the best spot to add such an annotation is on a function
+parameter, as above.  But for ambiguous sum types, we often have to
+put it on the return type.  Consider::
+
+  let f (x: bool) = #some x
+
+The type of this function is ambiguous, because the type checker must
+know what other possible contructors (apart from ``#some``) are
+possible.  We fix it with a type annotation on the return type::
+
+  let f (x: bool) : (#some bool | #none) = #just x
+
+See :ref:`typeabbrevs` for how to avoid typing long types in several
+places.
+
+.. _may-not-be-redefined:
+
+"The *x* operator may not be redefined"
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The ``&&`` and ``||`` operators have magical short-circuiting
+behaviour, and therefore may not be redefined.  There is no way to
+define your own short-circuiting operators.
+
+.. _unmatched-cases:
+
+"Unmatched cases in match expression"
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Futhark requires ``match`` expressions to be *exhaustive* - that is,
+cover all possible forms of the value being pattern-matches.
+Example::
+
+  let f (x: i32) =
+    match x case 0 -> false
+            case 1 -> true
+
+Usually this is an actual bug, and you fix it by adding the missing
+cases.  But sometimes you *know* that the missing cases will never
+actually occur at run-time.  To satisfy the type checker, you can turn
+the final case into a wildcard that matches anything::
+
+  let f (x: i32) =
+    match x case 0 -> false
+            case _ -> true
+
+Alternatively, you can add a wildcard case that explicitly asserts
+that it should never happen::
+
+  let f (x: i32) =
+    match x case 0 -> false
+            case 1 -> true
+            case _ -> assert false false
+
+:ref:`See here <assert>` for details on how to user ``assert``.
+
+.. _record-type-not-known:
+
+"Full type of *x* is not known at this point"
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+When performing a :ref:`record update <record-update`, the type of the
+field we are updating must be known.  This restriction is based on a
+limitation in the type type checker, so the notion of "known" is a bit
+subtle::
+
+  let f r : {x:i32} = r with x = 0
+
+Even though the return type annotation disambiguates the type, this
+program still fails to type check.  This is because the return type is
+not consulted until *after* the body of the function has been checked.
+The solution is to put a type annotation on the parameter instead::
+
+  let f (r : {x:i32}) = r with x = 0
