@@ -404,6 +404,7 @@ cliDefs options manifest =
 $esc:("#include <getopt.h>")
 $esc:("#include <ctype.h>")
 $esc:("#include <inttypes.h>")
+$esc:("#include <unistd.h>")
 
 $esc:(T.unpack valuesH)
 
@@ -471,6 +472,11 @@ int main(int argc, char** argv) {
         fprintf(stderr, "%s\n", entry_points[i].name);
       }
       return 1;
+    }
+
+    if (isatty(fileno(stdin))) {
+      fprintf(stderr, "Reading input from TTY.\n");
+      fprintf(stderr, "Send EOF (CTRL-d) after typing all input values.\n");
     }
 
     entry_point_fun(ctx);
