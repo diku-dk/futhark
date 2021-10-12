@@ -868,6 +868,8 @@ variable), dead code elimination may remove the assertion.
 Return ``a``, but with the element at position ``i`` changed to
 contain the result of evaluating ``e``.  Consumes ``a``.
 
+.. _record_update:
+
 ``r with f = e``
 .................
 
