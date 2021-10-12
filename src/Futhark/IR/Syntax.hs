@@ -155,6 +155,7 @@ module Futhark.IR.Syntax
     LParam,
     FunDef (..),
     EntryPoint,
+    EntryParam (..),
     EntryPointType (..),
     Prog (..),
 
@@ -553,11 +554,6 @@ deriving instance RepTypes rep => Show (FunDef rep)
 
 deriving instance RepTypes rep => Ord (FunDef rep)
 
--- | Information about the parameters and return value of an entry
--- point.  The first element is for parameters, the second for return
--- value.
-type EntryPoint = (Name, [EntryPointType], [EntryPointType])
-
 -- | Every entry point argument and return value has an annotation
 -- indicating how it maps to the original source program type.
 data EntryPointType
@@ -571,6 +567,17 @@ data EntryPointType
   | -- | Maps directly.
     TypeDirect Uniqueness
   deriving (Eq, Show, Ord)
+
+-- | An entry point parameter, comprising its name and original type.
+data EntryParam = EntryParam
+  { entryParamName :: Name,
+    entryParamType :: EntryPointType
+  }
+  deriving (Eq, Show, Ord)
+
+-- | Information about the inputs and outputs (return value) of an entry
+-- point.
+type EntryPoint = (Name, [EntryParam], [EntryPointType])
 
 -- | An entire Futhark program.
 data Prog rep = Prog

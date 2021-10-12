@@ -171,7 +171,7 @@ data FunctionT a = Function
     functionInput :: [Param],
     functionBody :: Code a,
     functionResult :: [ExternalValue],
-    functionArgs :: [ExternalValue]
+    functionArgs :: [(Name, ExternalValue)]
   }
   deriving (Show)
 
@@ -633,7 +633,7 @@ instance FreeIn a => FreeIn (Functions a) where
     where
       onFun f =
         fvBind pnames $
-          freeIn' (functionBody f) <> freeIn' (functionResult f <> functionArgs f)
+          freeIn' (functionBody f) <> freeIn' (functionResult f <> map snd (functionArgs f))
         where
           pnames =
             namesFromList $ map paramName $ functionInput f <> functionOutput f

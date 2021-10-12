@@ -134,6 +134,10 @@ The following additional options are accepted.
 
   Load PTX code from the indicated file.
 
+-n, --no-print-result
+
+  Do not print the program result.
+
 --nvrtc-option=OPT
 
   Add an additional build option to the string passed to NVRTC.  Refer

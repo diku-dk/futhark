@@ -326,7 +326,7 @@ executableOptions =
        ]
 
 functionExternalValues :: Imp.Function a -> [Imp.ExternalValue]
-functionExternalValues fun = Imp.functionResult fun ++ Imp.functionArgs fun
+functionExternalValues fun = Imp.functionResult fun ++ map snd (Imp.functionArgs fun)
 
 opaqueDefs :: Imp.Functions a -> M.Map String [PyExp]
 opaqueDefs (Imp.Functions funs) =
@@ -826,10 +826,9 @@ prepareEntry (fname, Imp.Function _ outputs inputs _ results args) = do
       _ -> return Nothing
 
   prepareIn <- collect $ do
-    declEntryPointInputSizes args
-    mapM_ entryPointInput $
-      zip3 [0 ..] args $
-        map (Var . extValueDescName) args
+    declEntryPointInputSizes $ map snd args
+    mapM_ entryPointInput . zip3 [0 ..] (map snd args) $
+      map (Var . extValueDescName . snd) args
   (res, prepareOut) <- collect' $ mapM entryPointOutput results
 
   let argexps_lib = map (compileName . Imp.paramName) inputs
@@ -848,7 +847,7 @@ prepareEntry (fname, Imp.Function _ outputs inputs _ results args) = do
         ]
 
   return
-    ( map extValueDescName args,
+    ( map (extValueDescName . snd) args,
       prepareIn,
       call argexps_lib,
       call argexps_bin,
@@ -921,7 +920,7 @@ compileEntryFun sync timing entry
 
 entryTypes :: Imp.Function op -> ([String], [String])
 entryTypes func =
-  ( map desc $ Imp.functionArgs func,
+  ( map (desc . snd) $ Imp.functionArgs func,
     map desc $ Imp.functionResult func
   )
   where
@@ -938,7 +937,7 @@ callEntryFun _ (_, Imp.Function Nothing _ _ _ _ _) = pure Nothing
 callEntryFun pre_timing entry@(fname, Imp.Function (Just ename) _ _ _ _ decl_args) = do
   (_, prepare_in, _, body_bin, _, res, prepare_run) <- prepareEntry entry
 
-  let str_input = map readInput decl_args
+  let str_input = map (readInput . snd) decl_args
       end_of_input = [Exp $ simpleCall "end_of_input" [String $ pretty fname]]
 
       exitcall = [Exp $ simpleCall "sys.exit" [Field (String "Assertion.{} failed") "format(e)"]]

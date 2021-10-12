@@ -50,7 +50,9 @@ pStringLiteral = char '"' >> manyTill L.charLiteral (char '"')
 pName :: Parser Name
 pName =
   lexeme . fmap nameFromString $
-    (:) <$> satisfy isAlpha <*> many (satisfy constituent)
+    (:) <$> satisfy leading <*> many (satisfy constituent)
+  where
+    leading c = isAlpha c || c == '_'
 
 pVName :: Parser VName
 pVName = lexeme $ do
@@ -528,10 +530,11 @@ pEntry :: Parser EntryPoint
 pEntry =
   parens $
     (,,) <$> (nameFromString <$> pStringLiteral)
-      <* pComma <*> pEntryPointTypes
+      <* pComma <*> pEntryPointInputs
       <* pComma <*> pEntryPointTypes
   where
     pEntryPointTypes = braces (pEntryPointType `sepBy` pComma)
+    pEntryPointInputs = braces (pEntryPointInput `sepBy` pComma)
     pEntryPointType = do
       u <- pUniqueness
       choice
@@ -539,6 +542,8 @@ pEntry =
           "unsigned" $> TypeUnsigned u,
           "opaque" *> parens (TypeOpaque u <$> pStringLiteral <* pComma <*> pInt)
         ]
+    pEntryPointInput =
+      EntryParam <$> pName <* pColon <*> pEntryPointType
 
 pFunDef :: PR rep -> Parser (FunDef rep)
 pFunDef pr = do

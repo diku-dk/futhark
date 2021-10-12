@@ -1,0 +1,89 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://futhark-lang.org/manifest.schema.json",
+    "title": "Futhark C Manifest",
+    "description": "The C API presented by a compiled Futhark program",
+    "type": "object",
+    "properties": {
+        "backend": {"type": "string"},
+        "entry_points": {
+            "type": "object",
+            "additionalProperties": {
+                "type": "object",
+                "properties": {
+                    "cfun": {"type": "string"},
+                    "outputs": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "type": {"type": "string"},
+                                "unique": {"type": "boolean"},
+                                "additionalProperties": false
+                            }
+                        }
+                    },
+                    "inputs": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "name": {"type": "string"},
+                                "type": {"type": "string"},
+                                "unique": {"type": "boolean"},
+                                "additionalProperties": false
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "types": {
+            "type": "object",
+            "additionalProperties": {
+                "oneOf": [
+                    { "type": "object",
+                      "properties": {
+                          "kind": {"const": "opaque"},
+                          "ctype": {"type": "string"},
+                          "ops": {
+                              "type": "object",
+                              "properties": {
+                                  "free": {"type": "string"},
+                                  "store": {"type": "string"},
+                                  "restore": {"type": "string"}
+                              },
+                              "additionalProperties": false
+                          }
+                      }
+                    },
+                    { "type": "object",
+                      "properties": {
+                          "kind": {"const": "array"},
+                          "ctype": {"type": "string"},
+                          "rank": {"type": "integer"},
+                          "elemtype": {
+                              "enum":
+                              ["i8", "i16", "i32", "i64",
+                               "u8", "u16", "u32", "u64",
+                               "f16", "f32", "f64",
+                               "bool"]
+                          },
+                          "ops": {
+                              "type": "object",
+                              "properties": {
+                                  "free": {"type": "string"},
+                                  "shape": {"type": "string"},
+                                  "values": {"type": "string"},
+                                  "new": {"type": "string"}
+                              },
+                              "additionalProperties": false
+                          }
+                      }
+                    }]
+            }
+        }
+    },
+    "required": ["backend", "entry_points", "types"],
+    "additionalProperties": false
+}
