@@ -4,5 +4,5 @@
 -- error: Unknowable size.*imposes constraint
 
 let f (x: bool) =
-  let x' = i64.bool x
-  in \(_: [x']bool) -> true
+  let n = if x then 10 else 20
+  in \(_: [n]bool) -> true

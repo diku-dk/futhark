@@ -170,6 +170,82 @@ first, meaning that the size is available by the time ``a`` is bound.
 In many other cases, we can lift out the "size-producing" expressions
 into a separate ``let``-binding preceding the problematic expressions.
 
+.. _unknowable-param-def:
+
+"Unknowable size *x* in parameter of *y*"
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+This error occurs when you define a function that can never be
+applied, as it requires an input of a specific size, and that size is
+not known.  Somewhat contrived example::
+
+  let f (x: bool) =
+    let n = if x then 10 else 20
+    in \(y: [n]bool) -> ...
+
+The above constructs a function that accepts an array of size 10 or
+20, based on the value of ``x`` argument.  But the type of ``f true``
+by itself would be ``?[n].[n]bool -> bool``, where the ``n`` is
+unknown.  There is no way to construct an array of the right size, so
+the type checker rejects this program. (In a fully dependently typed
+language, the type would have been ``[10]bool -> bool``, but Futhark
+does not do any type-level computation.)
+
+In most cases, this error means you have done something you didn't
+actually mean to.  However, in the case that that the above really is
+what you intend, the workaround is to make the function fully
+polymorphic, and then perform a size coercion to the desired size
+inside the function body itself::
+
+  let f (x: bool) =
+    let n = if x then 10 else 20
+    in \(y_any: []bool) ->
+         let y = y_any :> [n]bool
+         in true
+
+This requires a check at run-time, but it is the only way to
+accomplish this in Futhark.
+
+.. _existential-param-ret:
+
+"Existential size would appear in function parameter of return type"
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+This occurs most commonly when we use function composition with one or
+more functions that return an *existential size*.  Example::
+
+  filter (>0) >-> length
+
+The ``filter`` function has this type::
+
+  val filter [n] 't : (t -> bool) -> [n]t -> ?[m].[m]t
+
+That is, ``filter`` returns an array whose size is not known until the
+function actually returns.  The ``length`` function has this type::
+
+  val length [n] 't : [n]t -> i64
+
+Whenever ``length`` occurs (as in the composition above), the type
+checker must *instantiate* the ``[n]`` with the concrete symbolic size
+of its input array.  But in the composition, that size does not
+actually exist until ``filter`` has been run.  For that matter, the
+type checker does not know what ``>->`` does, and for all it knows it
+may actually apply ``filter`` many times to different arrays, yielding
+different sizes.  This makes it impossible to uniquely instantiate the
+type of ``length``, and therefore the program is rejected.
+
+The common workaround is to use *pipelining* instead of composition
+whenever we use functions with existential return types::
+
+  xs |> filter (>0) |> length
+
+This works because ``|>`` is left-associative, and hence the ``xs |>
+filter (>0)`` part will be fully evaluated to a concrete array before
+``length`` is reached.
+
+We can of course also write it as ``length (filter (>0) xs)``, with no
+use of either pipelining or composition.
+
 Other errors
 ------------
 
@@ -194,3 +270,23 @@ point, we must define a wrapper function::
   }
 
   entry f = m.f
+
+.. _literal-out-of-bounds:
+
+"Literal out of bounds"
+~~~~~~~~~~~~~~~~~~~~~~~
+
+This occurs for overloaded constants such as ``1234`` that are
+inferred by context to have a type that is too narrow for their value.
+Example::
+
+  257 : u8
+
+It is not an error to have a *non-overloaded* numeric constant whose
+value is too large for its type.  The following is perfectly
+cromulent::
+
+  257u8
+
+In such cases, the behaviour is overflow (so this is equivalent to
+``1u8``).
