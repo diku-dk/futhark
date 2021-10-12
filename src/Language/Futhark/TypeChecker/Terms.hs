@@ -1036,12 +1036,15 @@ consumeArg :: SrcLoc -> PatType -> Diet -> TermTypeM [Occurrence]
 consumeArg loc (Scalar (Record ets)) (RecordDiet ds) =
   concat . M.elems <$> traverse (uncurry $ consumeArg loc) (M.intersectionWith (,) ets ds)
 consumeArg loc (Array _ Nonunique _ _) Consume =
-  typeError loc mempty "Consuming parameter passed non-unique argument."
+  typeError loc mempty . withIndexLink "consuming-parameter" $
+    "Consuming parameter passed non-unique argument."
 consumeArg loc (Scalar (TypeVar _ Nonunique _ _)) Consume =
-  typeError loc mempty "Consuming parameter passed non-unique argument."
+  typeError loc mempty . withIndexLink "consuming-parameter" $
+    "Consuming parameter passed non-unique argument."
 consumeArg loc (Scalar (Arrow _ _ t1 _)) (FuncDiet d _)
   | not $ contravariantArg t1 d =
-    typeError loc mempty "Non-consuming higher-order parameter passed consuming argument."
+    typeError loc mempty . withIndexLink "consuming-argument" $
+      "Non-consuming higher-order parameter passed consuming argument."
   where
     contravariantArg (Array _ Unique _ _) Observe =
       False
@@ -1451,7 +1454,7 @@ checkGlobalAliases params body_t loc = do
   case als of
     v : _
       | not $ null params ->
-        typeError loc mempty $
+        typeError loc mempty . withIndexLink "alias-free-variable" $
           "Function result aliases the free variable "
             <> pquote (pprName v)
             <> "."
@@ -1520,7 +1523,7 @@ verifyFunctionParams fname params =
   where
     verifyParams forbidden (p : ps)
       | d : _ <- S.toList $ patternDimNames p `S.intersection` forbidden =
-        typeError p mempty $
+        typeError p mempty . withIndexLink "inaccessible-size" $
           "Parameter" <+> pquote (ppr p)
             <+/> "refers to size" <+> pquote (pprName d)
             <> comma
