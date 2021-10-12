@@ -21,6 +21,7 @@ module Futhark.Transform.Rename
     renameLambda,
     renamePat,
     renameSomething,
+    renameBound,
 
     -- * Renaming annotations
     RenameM,
@@ -111,7 +112,7 @@ renamePat ::
   m (PatT dec)
 renamePat = modifyNameSource . runRenamer . rename'
   where
-    rename' pat = bind (patNames pat) $ rename pat
+    rename' pat = renameBound (patNames pat) $ rename pat
 
 -- | Rename the bound variables in something (does not affect free variables).
 renameSomething ::
@@ -180,14 +181,16 @@ instance Rename Ident where
     tp' <- rename tp
     return $ Ident name' tp'
 
-bind :: [VName] -> RenameM a -> RenameM a
-bind vars body = do
+-- | Rename variables in binding position.  The provided VNames are
+-- associated with new, fresh names in the renaming environment.
+renameBound :: [VName] -> RenameM a -> RenameM a
+renameBound vars body = do
   vars' <- mapM newName vars
   -- This works because map union prefers elements from left
   -- operand.
-  local (bind' vars') body
+  local (renameBound' vars') body
   where
-    bind' vars' env =
+    renameBound' vars' env =
       env
         { envNameMap =
             M.fromList (zip vars vars')
@@ -201,13 +204,13 @@ renamingStms stms m = descend mempty stms
   where
     descend stms' rem_stms = case stmsHead rem_stms of
       Nothing -> m stms'
-      Just (stm, rem_stms') -> bind (patNames $ stmPat stm) $ do
+      Just (stm, rem_stms') -> renameBound (patNames $ stmPat stm) $ do
         stm' <- rename stm
         descend (stms' <> oneStm stm') rem_stms'
 
 instance Renameable rep => Rename (FunDef rep) where
   rename (FunDef entry attrs fname ret params body) =
-    bind (map paramName params) $ do
+    renameBound (map paramName params) $ do
       params' <- mapM rename params
       body' <- rename body
       ret' <- rename ret
@@ -258,11 +261,11 @@ instance Renameable rep => Rename (Exp rep) where
       -- It is important that 'i' is renamed before the loop_vars, as
       -- 'i' may be used in the annotations for loop_vars (e.g. index
       -- functions).
-      ForLoop i it boundexp loop_vars -> bind [i] $ do
+      ForLoop i it boundexp loop_vars -> renameBound [i] $ do
         let (arr_params, loop_arrs) = unzip loop_vars
         boundexp' <- rename boundexp
         loop_arrs' <- rename loop_arrs
-        bind (map paramName params ++ map paramName arr_params) $ do
+        renameBound (map paramName params ++ map paramName arr_params) $ do
           params' <- mapM rename params
           arr_params' <- mapM rename arr_params
           i' <- rename i
@@ -273,7 +276,7 @@ instance Renameable rep => Rename (Exp rep) where
               (ForLoop i' it boundexp' $ zip arr_params' loop_arrs')
               loopbody'
       WhileLoop cond ->
-        bind (map paramName params) $ do
+        renameBound (map paramName params) $ do
           params' <- mapM rename params
           loopbody' <- rename loopbody
           cond' <- rename cond
@@ -304,7 +307,7 @@ instance Rename shape => Rename (TypeBase shape u) where
 
 instance Renameable rep => Rename (Lambda rep) where
   rename (Lambda params body ret) =
-    bind (map paramName params) $ do
+    renameBound (map paramName params) $ do
       params' <- mapM rename params
       body' <- rename body
       ret' <- mapM rename ret

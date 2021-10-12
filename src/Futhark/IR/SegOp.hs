@@ -857,11 +857,9 @@ instance
             mapOnSegOpLevel = return . substituteNames subst
           }
 
-instance
-  (ASTRep rep, ASTConstraints lvl) =>
-  Rename (SegOp lvl rep)
-  where
-  rename = mapSegOpM renamer
+instance (ASTRep rep, ASTConstraints lvl) => Rename (SegOp lvl rep) where
+  rename op =
+    renameBound (M.keys (scopeOfSegSpace (segSpace op))) $ mapSegOpM renamer op
     where
       renamer = SegOpMapper rename rename rename rename rename
 
