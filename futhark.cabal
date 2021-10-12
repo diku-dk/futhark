@@ -302,6 +302,9 @@ library
       Language.Futhark.TypeChecker.Modules
       Language.Futhark.TypeChecker.Monad
       Language.Futhark.TypeChecker.Terms
+      Language.Futhark.TypeChecker.Terms.DoLoop
+      Language.Futhark.TypeChecker.Terms.Monad
+      Language.Futhark.TypeChecker.Terms.Pat
       Language.Futhark.TypeChecker.Types
       Language.Futhark.TypeChecker.Unify
       Language.Futhark.Warnings
@@ -337,7 +340,7 @@ library
     , filepath >=1.4.1.1
     , free >=4.12.4
     , futhark-data >= 1.0.2.0
-    , futhark-server >= 1.1.0.0
+    , futhark-server >= 1.1.1.0
     , githash >=0.1.6.1
     , half >= 0.3
     , haskeline
@@ -395,6 +398,8 @@ test-suite unit
       Futhark.IR.PrimitiveTests
       Language.Futhark.CoreTests
       Language.Futhark.SyntaxTests
+      Language.Futhark.TypeCheckerTests
+      Language.Futhark.TypeChecker.TypesTests
       Futhark.Optimise.MemoryBlockMerging.GreedyColoringTests
       Paths_futhark
   hs-source-dirs:

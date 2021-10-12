@@ -116,7 +116,7 @@ generateEntryPoint (E.EntryPoint e_params e_rettype) vb = localConstsScope $ do
         Nothing ->
           fst <$> funcall "entry_result" (E.qualName ofname) args loc
       ctx <-
-        extractShapeContext (concat entry_rettype)
+        extractShapeContext (zeroExts $ concat entry_rettype)
           <$> mapM (fmap I.arrayDims . subExpType) vals
       pure (subExpsRes $ ctx ++ vals, map (const (I.Prim int64)) ctx)
 
@@ -125,9 +125,11 @@ generateEntryPoint (E.EntryPoint e_params e_rettype) vb = localConstsScope $ do
         (Just entry')
         (internaliseAttrs attrs)
         ("entry_" <> baseName ofname)
-        (ctx_ts ++ concat entry_rettype)
+        (ctx_ts ++ zeroExts (concat entry_rettype))
         (shapeparams ++ concat params')
         entry_body
+  where
+    zeroExts ts = generaliseExtTypes ts ts
 
 entryPoint ::
   Name ->
@@ -201,8 +203,8 @@ bodyFromStms m = do
   ((res, a), stms) <- collectStms m
   (,a) <$> mkBodyM stms res
 
-internaliseAppExp :: String -> E.AppExp -> InternaliseM [I.SubExp]
-internaliseAppExp desc (E.Index e idxs loc) = do
+internaliseAppExp :: String -> [VName] -> E.AppExp -> InternaliseM [I.SubExp]
+internaliseAppExp desc _ (E.Index e idxs loc) = do
   vs <- internaliseExpToVars "indexed" e
   dims <- case vs of
     [] -> return [] -- Will this happen?
@@ -212,7 +214,7 @@ internaliseAppExp desc (E.Index e idxs loc) = do
         v_t <- lookupType v
         return $ I.BasicOp $ I.Index v $ fullSlice v_t idxs'
   certifying cs $ letSubExps desc =<< mapM index vs
-internaliseAppExp desc (E.Range start maybe_second end loc) = do
+internaliseAppExp desc _ (E.Range start maybe_second end loc) = do
   start' <- internaliseExp1 "range_start" start
   end' <- internaliseExp1 "range_end" $ case end of
     DownToExclusive e -> e
@@ -350,9 +352,9 @@ internaliseAppExp desc (E.Range start maybe_second end loc) = do
 
   se <- letSubExp desc (I.BasicOp $ I.Iota num_elems start' step it)
   return [se]
-internaliseAppExp desc (E.Coerce e (TypeDecl dt (Info et)) loc) = do
+internaliseAppExp desc ext (E.Coerce e (TypeDecl dt (Info et)) loc) = do
   ses <- internaliseExp desc e
-  ts <- internaliseReturnType et =<< mapM subExpType ses
+  ts <- internaliseReturnType (E.RetType ext et) =<< mapM subExpType ses
   dt' <- typeExpForError dt
   forM (zip ses ts) $ \(e', t') -> do
     dims <- arrayDims <$> subExpType e'
@@ -363,7 +365,7 @@ internaliseAppExp desc (E.Coerce e (TypeDecl dt (Info et)) loc) = do
             ++ dt'
             ++ ["`."]
     ensureExtShape (errorMsg parts) loc (I.fromDecl t') desc e'
-internaliseAppExp desc e@E.Apply {} = do
+internaliseAppExp desc _ e@E.Apply {} = do
   (qfname, args) <- findFuncall e
 
   -- Argument evaluation is outermost-in so that any existential sizes
@@ -389,11 +391,11 @@ internaliseAppExp desc e@E.Apply {} = do
       | otherwise -> do
         args' <- concat . reverse <$> mapM (internaliseArg arg_desc) (reverse args)
         fst <$> funcall desc qfname args' loc
-internaliseAppExp desc (E.LetPat sizes pat e body _) =
+internaliseAppExp desc _ (E.LetPat sizes pat e body _) =
   internalisePat desc sizes pat e body (internaliseExp desc)
-internaliseAppExp _ (E.LetFun ofname _ _ _) =
+internaliseAppExp _ _ (E.LetFun ofname _ _ _) =
   error $ "Unexpected LetFun " ++ pretty ofname
-internaliseAppExp desc (E.DoLoop sparams mergepat mergeexp form loopbody loc) = do
+internaliseAppExp desc _ (E.DoLoop sparams mergepat mergeexp form loopbody loc) = do
   ses <- internaliseExp "loop_init" mergeexp
   ((loopbody', (form', shapepat, mergepat', mergeinit')), initstms) <-
     collectStms $ handleForm ses form
@@ -534,7 +536,7 @@ internaliseAppExp desc (E.DoLoop sparams mergepat mergeexp form loopbody loc) = 
                 loop_initial_cond : mergeinit
               )
             )
-internaliseAppExp desc (E.LetWith name src idxs ve body loc) = do
+internaliseAppExp desc _ (E.LetWith name src idxs ve body loc) = do
   let pat = E.Id (E.identName name) (E.identType name) loc
       src_t = E.fromStruct <$> E.identType src
       e = E.Update (E.Var (E.qualName $ E.identName src) src_t loc) idxs ve loc
@@ -542,7 +544,7 @@ internaliseAppExp desc (E.LetWith name src idxs ve body loc) = do
     E.AppExp
       (E.LetPat [] pat e body loc)
       (Info (AppRes (E.typeOf body) mempty))
-internaliseAppExp desc (E.Match e cs _) = do
+internaliseAppExp desc _ (E.Match e cs _) = do
   ses <- internaliseExp (desc ++ "_scrutinee") e
   case NE.uncons cs of
     (CasePat pCase eCase _, Nothing) -> do
@@ -556,13 +558,13 @@ internaliseAppExp desc (E.Match e cs _) = do
         foldM (\bf c' -> eBody $ return $ generateCaseIf ses c' bf) eLast' $
           reverse $ NE.init cs'
       letTupExp' desc =<< generateCaseIf ses c bFalse
-internaliseAppExp desc (E.If ce te fe _) =
+internaliseAppExp desc _ (E.If ce te fe _) =
   letTupExp' desc
     =<< eIf
       (BasicOp . SubExp <$> internaliseExp1 "cond" ce)
       (internaliseBody (desc <> "_t") te)
       (internaliseBody (desc <> "_f") fe)
-internaliseAppExp _ e@E.BinOp {} =
+internaliseAppExp _ _ e@E.BinOp {} =
   error $ "internaliseAppExp: Unexpected BinOp " ++ pretty e
 
 internaliseExp :: String -> E.Exp -> InternaliseM [I.SubExp]
@@ -579,7 +581,7 @@ internaliseExp _ (E.Var (E.QualName _ name) _ _) = do
     Just substs -> return substs
     Nothing -> pure [I.Var name]
 internaliseExp desc (E.AppExp e (Info appres)) = do
-  ses <- internaliseAppExp desc e
+  ses <- internaliseAppExp desc (appResExt appres) e
   bindExtSizes appres ses
   pure ses
 
@@ -1529,7 +1531,7 @@ bodyExtType (Body _ stms res) =
 internaliseLambda :: InternaliseLambda
 internaliseLambda (E.Parens e _) rowtypes =
   internaliseLambda e rowtypes
-internaliseLambda (E.Lambda params body _ (Info (_, rettype)) _) rowtypes =
+internaliseLambda (E.Lambda params body _ (Info (_, RetType _ rettype)) _) rowtypes =
   bindingLambdaParams params rowtypes $ \params' -> do
     body' <- internaliseBody "lam" body
     rettype' <- internaliseLambdaReturnType rettype =<< bodyExtType body'
@@ -2207,6 +2209,11 @@ typeExpForError (E.TEVar qn _) =
   return [ErrorString $ pretty qn]
 typeExpForError (E.TEUnique te _) =
   ("*" :) <$> typeExpForError te
+typeExpForError (E.TEDim dims te _) =
+  (ErrorString ("?" <> dims' <> ".") :) <$> typeExpForError te
+  where
+    dims' = mconcat (map onDim dims)
+    onDim d = "[" <> pretty d <> "]"
 typeExpForError (E.TEArray te d _) = do
   d' <- dimExpForError d
   te' <- typeExpForError te

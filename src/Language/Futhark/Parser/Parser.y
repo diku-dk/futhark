@@ -151,6 +151,7 @@ import Futhark.Util.Loc hiding (L) -- Lexer has replacements.
       '->'            { L $$ RIGHT_ARROW }
       ':'             { L $$ COLON }
       ':>'            { L $$ COLON_GT }
+      '?'             { L $$ QUESTION_MARK  }
       for             { L $$ FOR }
       do              { L $$ DO }
       with            { L $$ WITH }
@@ -389,7 +390,7 @@ BindingId :: { (Name, SrcLoc) }
 Val    :: { ValBindBase NoInfo Name }
 Val     : let BindingId TypeParams FunParams maybeAscription(TypeExpDecl) '=' Exp
           { let (name, _) = $2
-            in ValBind (if name==defaultEntryPoint then Just NoInfo else Nothing) name (fmap declaredType $5) NoInfo
+            in ValBind Nothing name (fmap declaredType $5) NoInfo
                $3 $4 $7 Nothing mempty (srcspan $1 $>)
           }
 
@@ -407,19 +408,24 @@ TypeExpDecl :: { TypeDeclBase NoInfo Name }
              : TypeExp %prec bottom { TypeDecl $1 NoInfo }
 
 TypeAbbr :: { TypeBindBase NoInfo Name }
-TypeAbbr : type Liftedness id TypeParams '=' TypeExpDecl
+TypeAbbr : type Liftedness id TypeParams '=' TypeExp
            { let L _ (ID name) = $3
-              in TypeBind name $2 $4 $6 Nothing (srcspan $1 $>) }
-         | type Liftedness 'id[' id ']' TypeParams '=' TypeExpDecl
+              in TypeBind name $2 $4 $6 NoInfo Nothing (srcspan $1 $>) }
+         | type Liftedness 'id[' id ']' TypeParams '=' TypeExp
            { let L loc (INDEXING name) = $3; L ploc (ID pname) = $4
-             in TypeBind name $2 (TypeParamDim pname ploc:$6) $8 Nothing (srcspan $1 $>) }
+             in TypeBind name $2 (TypeParamDim pname ploc:$6) $8 NoInfo Nothing (srcspan $1 $>) }
 
 TypeExp :: { UncheckedTypeExp }
          : '(' id ':' TypeExp ')' '->' TypeExp
            { let L _ (ID v) = $2 in TEArrow (Just v) $4 $7 (srcspan $1 $>) }
          | TypeExpTerm '->' TypeExp
            { TEArrow Nothing $1 $3 (srcspan $1 $>) }
+         | '?' TypeExpDims '.' TypeExp { TEDim $2 $4 (srcspan $1 $>) }
          | TypeExpTerm %prec typeprec { $1 }
+
+TypeExpDims :: { [Name] }
+         : '[' id ']'             { let L _ (ID v) = $2 in [v] }
+         | '[' id ']' TypeExpDims { let L _ (ID v) = $2 in v : $4 }
 
 TypeExpTerm :: { UncheckedTypeExp }
          : '*' TypeExpTerm
@@ -661,11 +667,8 @@ Atom : PrimLit        { Literal (fst $1) (snd $1) }
        { IndexSection $4 NoInfo (srcspan $1 $>) }
 
 
-PrimLit :: { (PrimValue, SrcLoc) }
-        : true   { (BoolValue True, $1) }
-        | false  { (BoolValue False, $1) }
-
-        | i8lit   { let L loc (I8LIT num)  = $1 in (SignedValue $ Int8Value num, loc) }
+NumLit :: { (PrimValue, SrcLoc) }
+        : i8lit   { let L loc (I8LIT num)  = $1 in (SignedValue $ Int8Value num, loc) }
         | i16lit  { let L loc (I16LIT num) = $1 in (SignedValue $ Int16Value num, loc) }
         | i32lit  { let L loc (I32LIT num) = $1 in (SignedValue $ Int32Value num, loc) }
         | i64lit  { let L loc (I64LIT num) = $1 in (SignedValue $ Int64Value num, loc) }
@@ -678,6 +681,12 @@ PrimLit :: { (PrimValue, SrcLoc) }
         | f16lit { let L loc (F16LIT num) = $1 in (FloatValue $ Float16Value num, loc) }
         | f32lit { let L loc (F32LIT num) = $1 in (FloatValue $ Float32Value num, loc) }
         | f64lit { let L loc (F64LIT num) = $1 in (FloatValue $ Float64Value num, loc) }
+
+
+PrimLit :: { (PrimValue, SrcLoc) }
+        : true   { (BoolValue True, $1) }
+        | false  { (BoolValue False, $1) }
+        | NumLit { $1 }
 
 Exps1 :: { (UncheckedExp, [UncheckedExp]) }
        : Exps1_ { case reverse (snd $1 : fst $1) of
@@ -789,11 +798,14 @@ CFieldPats1 :: { [(Name, PatBase NoInfo Name)] }
                  | CFieldPat                    { [$1] }
 
 CaseLiteral :: { (PatLit, SrcLoc) }
-             : PrimLit  { (PatLitPrim (fst $1), snd $1) }
-             | charlit  { let L loc (CHARLIT x) = $1
+             : charlit  { let L loc (CHARLIT x) = $1
                           in (PatLitInt (toInteger (ord x)), loc) }
+             | PrimLit  { (PatLitPrim (fst $1), snd $1) }
              | intlit   { let L loc (INTLIT x) = $1 in (PatLitInt x, loc) }
              | floatlit { let L loc (FLOATLIT x) = $1 in (PatLitFloat x, loc) }
+             | '-' NumLit  { (PatLitPrim (primNegate (fst $2)), snd $2) }
+             | '-' intlit   { let L loc (INTLIT x) = $2 in (PatLitInt (negate x), loc) }
+             | '-' floatlit { let L loc (FLOATLIT x) = $2 in (PatLitFloat (negate x), loc) }
 
 LoopForm :: { LoopFormBase NoInfo Name }
 LoopForm : for VarId '<' Exp
@@ -1130,6 +1142,12 @@ floatNegate :: FloatValue -> FloatValue
 floatNegate (Float16Value v) = Float16Value (-v)
 floatNegate (Float32Value v) = Float32Value (-v)
 floatNegate (Float64Value v) = Float64Value (-v)
+
+primNegate :: PrimValue -> PrimValue
+primNegate (FloatValue v) = FloatValue $ floatNegate v
+primNegate (SignedValue v) = SignedValue $ intNegate v
+primNegate (UnsignedValue v) = UnsignedValue $ intNegate v
+primNegate (BoolValue v) = BoolValue $ not v
 
 readLine :: ParserMonad (Maybe T.Text)
 readLine = lift $ lift $ lift readLineFromMonad
