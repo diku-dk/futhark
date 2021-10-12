@@ -392,7 +392,7 @@ that it should never happen::
 "Full type of *x* is not known at this point"
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-When performing a :ref:`record update <record-update`, the type of the
+When performing a :ref:`record update <record_update>`, the type of the
 field we are updating must be known.  This restriction is based on a
 limitation in the type type checker, so the notion of "known" is a bit
 subtle::
