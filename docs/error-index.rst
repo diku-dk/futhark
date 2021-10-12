@@ -385,7 +385,7 @@ that it should never happen::
             case 1 -> true
             case _ -> assert false false
 
-:ref:`See here <assert>` for details on how to user ``assert``.
+:ref:`See here <assert>` for details on how to use ``assert``.
 
 .. _record-type-not-known:
 
