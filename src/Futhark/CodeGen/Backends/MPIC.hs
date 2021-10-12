@@ -220,7 +220,6 @@ compileOp (Gather memory type_size) = do
   GC.stm
     [C.cstm|
       {
-        
         uint nb_elements = $id:memory.size / $exp:ts;
         uint size_remainder = $exp:ts *(nb_elements % ctx->world_size);
         // Euclidian division, cannot be simplified.

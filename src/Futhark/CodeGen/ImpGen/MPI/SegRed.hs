@@ -1,4 +1,5 @@
 {-# LANGUAGE LambdaCase #-}
+
 module Futhark.CodeGen.ImpGen.MPI.SegRed
   ( compileSegRed,
     compileSegRed',
@@ -17,7 +18,7 @@ type DoSegBody = (([(SubExp, [Imp.TExp Int64])] -> MPIGen ()) -> MPIGen ())
 initAccumulators :: [VName] -> [SubExp] -> ImpM lore r op ()
 initAccumulators acc_vs nes =
   -- Assign each acumulator value to the corresponding neutral element
-  forM_ (zip acc_vs nes) $ \(acc_v, ne) -> do 
+  forM_ (zip acc_vs nes) $ \(acc_v, ne) -> do
     case ne of
       Constant _ -> do
         ne' <- toExp ne
@@ -30,7 +31,7 @@ initAccumulators acc_vs nes =
             acc_v <~~ ne'
           ArrayVar _ _ ->
             copyDWIMFix acc_v [] (Var v) []
-          _ -> error "Not implemented yet"    
+          _ -> error "Not implemented yet"
 
 -- Core stage reduction
 stageReduction :: Lambda MCMem -> [SubExp] -> [VName] -> [SubExp] -> [Imp.TExp Int64] -> ImpM MCMem Env Imp.MPIOp ()
@@ -102,7 +103,7 @@ compileSegRed pat space reds kbody
 
     -- Declare stage one results array
     stage_one_arrays <- forM (zip stage_one_mems (lambdaReturnType lam)) $ \case
-      (mem, Prim pt) -> 
+      (mem, Prim pt) ->
         sArrayInMem "second_stage_arr" pt (Shape [tvSize nb_nodes]) mem
       (mem, Array pt _ _) -> do
         -- TODO : replace dumb value with the correct size.
