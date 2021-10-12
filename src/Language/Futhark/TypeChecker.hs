@@ -222,13 +222,6 @@ checkSpecs (ValSpec name tparams vtype doc loc : specs) =
 
         return (tparams', vtype')
 
-    let (params, _) = unfoldFunType $ unInfo $ expandedType vtype'
-    when (null params && any isSizeParam tparams) $
-      typeError
-        loc
-        mempty
-        "Size parameters are only allowed on bindings that also have value parameters."
-
     let binding = BoundV tparams' $ unInfo $ expandedType vtype'
         valenv =
           mempty
