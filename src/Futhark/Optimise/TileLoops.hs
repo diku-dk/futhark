@@ -13,6 +13,7 @@ import Data.Maybe (mapMaybe)
 import qualified Data.Sequence as Seq
 import qualified Futhark.Analysis.Alias as Alias
 import Futhark.IR.GPU
+import qualified Futhark.IR.Mem.IxFun as IxFun
 import Futhark.IR.Prop.Aliases (consumedInStm)
 import Futhark.MonadFreshNames
 import Futhark.Optimise.BlkRegTiling
@@ -21,6 +22,15 @@ import Futhark.Pass
 import Futhark.Tools
 import Futhark.Transform.Rename
 import Prelude hiding (quot)
+import Futhark.Optimise.GenRedOpt
+
+type IxFun = IxFun.IxFun (TPrimExp Int64 VName)
+
+-- | Map from array variable names to their corresponding index functions.
+--   The info is not guaranteed to be exact, e.g., we assume ifs and loops
+--   return arrays layed out in normalized (row-major) form in memory.
+--   We only record aliasing statements, such as transposition, slice, etc.
+type Env = (M.Map VName (Lambda GPU, [SubExp]), M.Map VName IxFun)
 
 -- | The pass definition.
 tileLoops :: Pass GPU GPU
@@ -31,35 +41,49 @@ tileLoops =
     onStms scope stms =
       modifyNameSource $
         runState $
-          runReaderT (optimiseStms stms) scope
+          runReaderT (optimiseStms (M.empty, M.empty) stms) scope
 
-optimiseBody :: Body GPU -> TileM (Body GPU)
-optimiseBody (Body () stms res) =
-  Body () <$> optimiseStms stms <*> pure res
+optimiseBody :: Env -> Body GPU -> TileM (Body GPU)
+optimiseBody env (Body () stms res) =
+  Body () <$> optimiseStms env stms <*> pure res
 
-optimiseStms :: Stms GPU -> TileM (Stms GPU)
-optimiseStms stms =
-  localScope (scopeOf stms) $
-    mconcat <$> mapM optimiseStm (stmsToList stms)
+optimiseStms :: Env -> Stms GPU -> TileM (Stms GPU)
+optimiseStms env stms =
+  localScope (scopeOf stms) $ do
+    (_, stms') <- foldM foldfun (env, mempty) $ stmsToList stms
+    return stms'
+  where
+    foldfun :: (Env, Stms GPU) -> Stm GPU -> TileM (Env, Stms GPU)
+    foldfun (e, ss) s = do
+      (e', s') <- optimiseStm e s
+      return (e', ss <> s')
 
-optimiseStm :: Stm GPU -> TileM (Stms GPU)
-optimiseStm stm@(Let pat aux (Op (SegOp (SegMap lvl@SegThread {} space ts kbody)))) = do
+optimiseStm :: Env -> Stm GPU -> TileM (Env, Stms GPU)
+optimiseStm env stm@(Let pat aux (Op (SegOp (SegMap lvl@SegThread {} space ts kbody)))) = do
+  res_genred_opt <- genRed2MapRed env stm
   res3dtiling <- doRegTiling3D stm
-  case res3dtiling of
-    Just (extra_stms, stmt') -> return (extra_stms <> oneStm stmt')
-    Nothing -> do
-      blkRegTiling_res <- mmBlkRegTiling stm
-      case blkRegTiling_res of
-        Just (extra_stms, stmt') -> return (extra_stms <> oneStm stmt')
-        Nothing -> localScope (scopeOfSegSpace space) $ do
-          (host_stms, (lvl', space', kbody')) <- tileInKernelBody mempty initial_variance lvl space ts kbody
-          return $ host_stms <> oneStm (Let pat aux $ Op $ SegOp $ SegMap lvl' space' ts kbody')
+  stms' <-
+   case res_genred_opt of
+    Just stms -> return stms
+    Nothing ->
+     case res3dtiling of
+      Just (extra_stms, stmt') -> return (extra_stms <> oneStm stmt')
+      Nothing -> do
+        blkRegTiling_res <- mmBlkRegTiling stm
+        case blkRegTiling_res of
+          Just (extra_stms, stmt') -> return (extra_stms <> oneStm stmt')
+          Nothing -> localScope (scopeOfSegSpace space) $ do
+            (host_stms, (lvl', space', kbody')) <- tileInKernelBody mempty initial_variance lvl space ts kbody
+            return $ host_stms <> oneStm (Let pat aux $ Op $ SegOp $ SegMap lvl' space' ts kbody')
+  return (env, stms')
   where
     initial_variance = M.map mempty $ scopeOfSegSpace space
-optimiseStm (Let pat aux e) =
-  pure <$> (Let pat aux <$> mapExpM optimise e)
+optimiseStm env (Let pat aux e) = do
+  env' <- changeEnv env (head $ patNames pat) e
+  e' <- mapExpM (optimise env') e
+  return (env', oneStm $ Let pat aux e')
   where
-    optimise = identityMapper {mapOnBody = \scope -> localScope scope . optimiseBody}
+    optimise env' = identityMapper {mapOnBody = \scope -> localScope scope . optimiseBody env'}
 
 tileInKernelBody ::
   Names ->

@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleContexts #-}
 module Futhark.Optimise.TileLoops.Shared
   ( TileM,
     segMap1D,
@@ -7,6 +8,7 @@ module Futhark.Optimise.TileLoops.Shared
     VarianceTable,
     varianceInStms,
     isTileableRedomap,
+    changeEnv,
   )
 where
 
@@ -15,6 +17,8 @@ import Control.Monad.State
 import Data.List (foldl', zip4)
 import qualified Data.Map as M
 import Futhark.IR.GPU
+import qualified Futhark.IR.Mem.IxFun as IxFun
+import qualified Futhark.IR.SeqMem as ExpMem
 import Futhark.MonadFreshNames
 import Futhark.Tools
 import Futhark.Transform.Rename
@@ -181,3 +185,56 @@ varianceInStm v0 stm = defVarianceInStm v0 stm
 
 varianceInStms :: VarianceTable -> Stms GPU -> VarianceTable
 varianceInStms = foldl' varianceInStm
+
+----------------
+---- Helpers for building the environment that binds array variable names to their index functions
+----------------
+
+type IxFun = IxFun.IxFun (TPrimExp Int64 VName)
+
+type IxFnEnv = M.Map VName IxFun
+type WithEnv = M.Map VName (Lambda GPU, [SubExp])
+type Env = (WithEnv, IxFnEnv)
+
+changeEnv :: Env -> VName -> Exp GPU -> TileM Env
+changeEnv (with_env, ixfn_env) y e = do
+  with_env' <- changeWithEnv with_env e
+  ixfn_env' <- changeIxFnEnv ixfn_env y e
+  return (with_env', ixfn_env')
+
+changeWithEnv :: WithEnv -> Exp GPU -> TileM WithEnv
+changeWithEnv with_env (WithAcc accum_decs inner_lam) = do
+  let bindings = map mapfun accum_decs
+      par_tps  = take (length bindings) $ map paramName $ lambdaParams inner_lam
+      with_env' = M.union with_env $ M.fromList $ zip par_tps bindings
+  return with_env'
+  where
+    mapfun (_, _, Nothing) = error "What the hack is an accumulator without operator?"
+    mapfun (shp, _, Just (lam_inds, ne)) =
+      let len_inds = length $ shapeDims shp
+          lam_op = lam_inds { lambdaParams = drop len_inds $ lambdaParams lam_inds }
+      in  (lam_op, ne)
+changeWithEnv with_env _ = return with_env
+
+composeIxfuns :: IxFnEnv -> VName -> VName -> (IxFun -> IxFun) -> TileM IxFnEnv
+composeIxfuns env y x ixf_fun =
+  case M.lookup x env of
+    Just ixf -> return $ M.insert y (ixf_fun ixf) env
+    Nothing -> do
+      tp <- lookupType x
+      case tp of
+        Array _ptp shp _u -> do
+          let shp' = map ExpMem.pe64 (shapeDims shp)
+          return $ M.insert y (ixf_fun $ IxFun.iota shp') env
+        _ -> return env
+
+changeIxFnEnv :: IxFnEnv -> VName -> Exp GPU -> TileM IxFnEnv
+changeIxFnEnv env y (BasicOp (Reshape shp_chg x)) =
+  composeIxfuns env y x (`IxFun.reshape` map (fmap ExpMem.pe64) shp_chg)
+changeIxFnEnv env y (BasicOp (Rearrange perm x)) =
+  composeIxfuns env y x (`IxFun.permute` perm)
+changeIxFnEnv env y (BasicOp (Rotate rs x)) =
+  composeIxfuns env y x (`IxFun.rotate` fmap ExpMem.pe64 rs)
+changeIxFnEnv env y (BasicOp (Index x slc)) =
+  composeIxfuns env y x (`IxFun.slice` (Slice $ map (fmap ExpMem.pe64) $ unSlice slc))
+changeIxFnEnv env _ _ = return env
