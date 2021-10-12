@@ -922,7 +922,7 @@ checkApply
       let (tp2_produced_dims, tp2_paramdims) = dimUses $ toStruct tp2'
           problematic = S.fromList ext <> boundInsideType argtype'
       when (any (`S.member` problematic) (tp2_paramdims `S.difference` tp2_produced_dims)) $ do
-        typeError loc mempty $
+        typeError loc mempty . withIndexLink "existential-param-ret" $
           "Existential size would appear in function parameter of return type:"
             </> indent 2 (ppr (RetType ext tp2'))
             </> textwrap "This is usually because a higher-order function is used with functional arguments that return existential sizes or locally named sizes, which are then used as parameters of other function arguments."
@@ -1208,7 +1208,7 @@ literalOverflowCheck = void . check
     inBoundsF x Float64 = not $ isInfinite x
     warnBounds inBounds x ty loc =
       unless inBounds $
-        typeError loc mempty $
+        typeError loc mempty . withIndexLink "literal-out-of-bounds" $
           "Literal " <> ppr x
             <> " out of bounds for inferred type "
             <> ppr ty
@@ -1622,9 +1622,9 @@ closeOverTypes defname defloc tparams paramts ret substs = do
       | k `S.member` param_sizes,
         k `S.notMember` produced_sizes = do
         notes <- dimNotes defloc $ NamedDim $ qualName k
-        typeError defloc notes $
+        typeError defloc notes . withIndexLink "unknowable-param-def" $
           "Unknowable size" <+> pquote (pprName k)
-            <+> "imposes constraint on type of"
+            <+> "in parameter of"
             <+> pquote (pprName defname)
             <> ", which is inferred as:"
             </> indent 2 (ppr t)
