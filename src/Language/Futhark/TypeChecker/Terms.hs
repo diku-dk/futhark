@@ -1354,12 +1354,6 @@ checkBinding ::
     )
 checkBinding (fname, maybe_retdecl, tparams, params, body, loc) =
   noUnique . incLevel . bindingParams tparams params $ \tparams' params' -> do
-    when (null params && any isSizeParam tparams) $
-      typeError
-        loc
-        mempty
-        "Size parameters are only allowed on bindings that also have value parameters."
-
     maybe_retdecl' <- forM maybe_retdecl $ \retdecl ->
       checkTypeExpNonrigid retdecl
 
