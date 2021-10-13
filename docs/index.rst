@@ -48,17 +48,17 @@ the `development blog <https://futhark-lang.org/blog.html>`_.
    man/futhark-autotune.rst
    man/futhark-bench.rst
    man/futhark-c.rst
-   man/futhark-multicore.rst
    man/futhark-cuda.rst
    man/futhark-dataset.rst
    man/futhark-doc.rst
+   man/futhark-literate.rst
+   man/futhark-multicore.rst
    man/futhark-opencl.rst
    man/futhark-pkg.rst
    man/futhark-pyopencl.rst
    man/futhark-python.rst
-   man/futhark-wasm.rst
-   man/futhark-wasm-multicore.rst
    man/futhark-repl.rst
    man/futhark-run.rst
-   man/futhark-literate.rst
    man/futhark-test.rst
+   man/futhark-wasm.rst
+   man/futhark-wasm-multicore.rst
