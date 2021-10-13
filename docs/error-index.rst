@@ -127,6 +127,122 @@ inserting copies to break the aliasing::
 
   let main (xs: *[]i32) : (*[]i32, *[]i32) = (xs, copy xs)
 
+.. _consuming-parameter:
+
+"Consuming parameter passed non-unique argument"
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Caused by programs like the following::
+
+  let update (xs: *[]i32) = xs with [0] = 0
+
+  let f (ys: []i32) = update ys
+
+The update ``function`` *consumes* its ``xs`` argument to perform an
+:ref:`in-place update <in-place-updates>`, as denoted by the asterisk
+before the type.  However, the ``f`` function tries to pass an array
+that it is not allowed to consume (no asterisk before the type).
+
+
+One solution is to change the type of ``f`` so that it also consumes
+its input, which allows it to pass it on to ``update``::
+
+  let f (ys: *[]i32) = update ys
+
+Another solution to ``copy`` the array that we pass to ``update``::
+
+  let f (ys: []i32) = update (copy ys)
+
+.. _consuming-argument:
+
+"Non-consuming higher-order parameter passed consuming argument."
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+This error occurs when we have a higher-order function that expects a
+function that does *not* consume its arguments, and we pass it one
+that does::
+
+  let apply 'a 'b (f: a -> b) (x: a) = f x
+
+  let consume (xs: *[]i32) = xs with [0] = 0
+
+  let f (arr: *[]i32) = apply consume arr
+
+We can fix this by changing ``consume`` so that it does not have to
+consume its argument, by adding a ``copy``::
+
+  let consume (xs: []i32) = copy xs with [0] = 0
+
+Or we can create a variant of ``apply`` that accepts a consuming
+function::
+
+  let apply 'a 'b (f: *a -> b) (x: *a) = f x
+
+.. _alias-free-variable:
+
+"Function result aliases the free variable *x*"
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Caused by definitions such as the following::
+
+  let x = [1,2,3]
+
+  let f () = x
+
+To simplify the tracking of aliases, the Futhark type system requires
+that the result of a function may only alias the function parameters,
+not any free variables.  Use ``copy`` to fix this::
+
+  let f () = copy x
+
+.. _inaccessible-size:
+
+"Parameter *x* refers to size *y* which will not be accessible to the caller
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+This happens when the size of an array parameter depends on a name
+that cannot be expressed in the function type::
+
+  let f (x: i64, y: i64) (A: [x]bool) = true
+
+Intuitively, this function might have the following type::
+
+  val f : (x: i64, y: i64) -> [x]bool -> bool
+
+But this is not currently a valid Futhark type.  In a function type,
+each parameter can be named *as a whole*, but it cannot be taken apart
+in a pattern.  In this case, we could fix it by splitting the tuple
+parameter into two separate parameters::
+
+  let f (x: i64) (y: i64) (A: [x]bool) = true
+
+This gives the following type::
+
+  val f : (x: i64) -> (y: i64) -> [x]bool -> bool
+
+Another workaround is to loosen the static safety, and use a size
+coercion to give A its expected size::
+
+  let f (x: i64, y: i64) (A_unsized: []bool) =
+    let A = A_unsized :> [x]bool
+    in true
+
+This will produce a function with the following type::
+
+  val f [d] : (i64, i64) -> [d]bool -> bool
+
+This does however lose the constraint that the size of the array must
+match one of the elements of the tuple, which means the program may
+fail at run-time.
+
+The error is not always due to an explicit type annotation.  It might
+also be due to size inference::
+
+  let f (x: i64, y: i64) (A: []bool) = zip A (iota x)
+
+Here the type rules force ``A`` to have size ``x``, leading to a
+problematic type.  It can be fixed using the techniques above.
+
 Size errors
 -----------
 

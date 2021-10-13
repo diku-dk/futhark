@@ -18,6 +18,7 @@ module Futhark.IR.SOACS.Simplify
     simplifyKnownIterationSOAC,
     removeReplicateMapping,
     liftIdentityMapping,
+    simplifyMapIota,
     SOACS,
   )
 where
@@ -353,8 +354,8 @@ liftIdentityStreaming _ _ _ _ = Skip
 -- | Remove all arguments to the map that are simply replicates.
 -- These can be turned into free variables instead.
 removeReplicateMapping ::
-  (Buildable rep, Simplify.SimplifiableRep rep, HasSOAC (Wise rep)) =>
-  TopDownRuleOp (Wise rep)
+  (Aliased rep, Buildable rep, BuilderOps rep, HasSOAC rep) =>
+  TopDownRuleOp rep
 removeReplicateMapping vtable pat aux op
   | Just (Screma w arrs form) <- asSOAC op,
     Just fun <- isMapSOAC form,
@@ -744,7 +745,7 @@ arrayOpCerts (ArrayRotate cs _ _) = cs
 arrayOpCerts (ArrayCopy cs _) = cs
 arrayOpCerts (ArrayVar cs _) = cs
 
-isArrayOp :: Certs -> AST.Exp (Wise SOACS) -> Maybe ArrayOp
+isArrayOp :: Certs -> AST.Exp rep -> Maybe ArrayOp
 isArrayOp cs (BasicOp (Index arr slice)) =
   Just $ ArrayIndexing cs arr slice
 isArrayOp cs (BasicOp (Rearrange perm arr)) =
@@ -756,21 +757,32 @@ isArrayOp cs (BasicOp (Copy arr)) =
 isArrayOp _ _ =
   Nothing
 
-fromArrayOp :: ArrayOp -> (Certs, AST.Exp (Wise SOACS))
+fromArrayOp :: ArrayOp -> (Certs, AST.Exp rep)
 fromArrayOp (ArrayIndexing cs arr slice) = (cs, BasicOp $ Index arr slice)
 fromArrayOp (ArrayRearrange cs arr perm) = (cs, BasicOp $ Rearrange perm arr)
 fromArrayOp (ArrayRotate cs arr rots) = (cs, BasicOp $ Rotate rots arr)
 fromArrayOp (ArrayCopy cs arr) = (cs, BasicOp $ Copy arr)
 fromArrayOp (ArrayVar cs arr) = (cs, BasicOp $ SubExp $ Var arr)
 
-arrayOps :: AST.Body (Wise SOACS) -> S.Set (AST.Pat (Wise SOACS), ArrayOp)
+arrayOps ::
+  forall rep.
+  (Buildable rep, HasSOAC rep) =>
+  AST.Body rep ->
+  S.Set (AST.Pat rep, ArrayOp)
 arrayOps = mconcat . map onStm . stmsToList . bodyStms
   where
     onStm (Let pat aux e) =
       case isArrayOp (stmAuxCerts aux) e of
         Just op -> S.singleton (pat, op)
         Nothing -> execState (walkExpM walker e) mempty
-    onOp = execWriter . mapSOACM identitySOACMapper {mapOnSOACLambda = onLambda}
+    onOp op
+      | Just soac <- asSOAC op =
+        execWriter $
+          mapSOACM
+            identitySOACMapper {mapOnSOACLambda = onLambda}
+            (soac :: SOAC rep)
+      | otherwise =
+        mempty
     onLambda lam = do
       tell $ arrayOps $ lambdaBody lam
       return lam
@@ -781,9 +793,11 @@ arrayOps = mconcat . map onStm . stmsToList . bodyStms
         }
 
 replaceArrayOps ::
+  forall rep.
+  (Buildable rep, BuilderOps rep, HasSOAC rep) =>
   M.Map ArrayOp ArrayOp ->
-  AST.Body (Wise SOACS) ->
-  AST.Body (Wise SOACS)
+  AST.Body rep ->
+  AST.Body rep
 replaceArrayOps substs (Body _ stms res) =
   mkBody (fmap onStm stms) res
   where
@@ -800,7 +814,12 @@ replaceArrayOps substs (Body _ stms res) =
         { mapOnBody = const $ return . replaceArrayOps substs,
           mapOnOp = return . onOp
         }
-    onOp = runIdentity . mapSOACM identitySOACMapper {mapOnSOACLambda = return . onLambda}
+    onOp op
+      | Just (soac :: SOAC rep) <- asSOAC op =
+        soacOp . runIdentity $
+          mapSOACM identitySOACMapper {mapOnSOACLambda = return . onLambda} soac
+      | otherwise =
+        op
     onLambda lam = lam {lambdaBody = replaceArrayOps substs $ lambdaBody lam}
 
 -- Turn
@@ -818,30 +837,30 @@ replaceArrayOps substs (Body _ stms res) =
 -- case - if you find yourself planning to extend it to handle more
 -- complex situations (rotate or whatnot), consider turning it into a
 -- separate compiler pass instead.
-simplifyMapIota :: TopDownRuleOp (Wise SOACS)
-simplifyMapIota vtable pat aux (Screma w arrs (ScremaForm scan reduce map_lam))
-  | Just (p, _) <- find isIota (zip (lambdaParams map_lam) arrs),
+simplifyMapIota ::
+  forall rep.
+  (Buildable rep, BuilderOps rep, HasSOAC rep) =>
+  TopDownRuleOp rep
+simplifyMapIota vtable pat aux op
+  | Just (Screma w arrs (ScremaForm scan reduce map_lam) :: SOAC rep) <- asSOAC op,
+    Just (p, _) <- find isIota (zip (lambdaParams map_lam) arrs),
     indexings <-
-      filter (indexesWith (paramName p)) $
-        map snd $
-          S.toList $
-            arrayOps $ lambdaBody map_lam,
+      filter (indexesWith (paramName p)) . map snd . S.toList $
+        arrayOps $ lambdaBody map_lam,
     not $ null indexings = Simplify $ do
     -- For each indexing with iota, add the corresponding array to
     -- the Screma, and construct a new lambda parameter.
     (more_arrs, more_params, replacements) <-
-      unzip3 . catMaybes <$> mapM mapOverArr indexings
+      unzip3 . catMaybes <$> mapM (mapOverArr w) indexings
     let substs = M.fromList $ zip indexings replacements
         map_lam' =
           map_lam
             { lambdaParams = lambdaParams map_lam <> more_params,
-              lambdaBody =
-                replaceArrayOps substs $
-                  lambdaBody map_lam
+              lambdaBody = replaceArrayOps substs $ lambdaBody map_lam
             }
 
-    auxing aux $
-      letBind pat $ Op $ Screma w (arrs <> more_arrs) (ScremaForm scan reduce map_lam')
+    auxing aux . letBind pat . Op . soacOp $
+      Screma w (arrs <> more_arrs) (ScremaForm scan reduce map_lam')
   where
     isIota (_, arr) = case ST.lookupBasicOp arr vtable of
       Just (Iota _ (Constant o) (Constant s) _, _) ->
@@ -854,7 +873,7 @@ simplifyMapIota vtable pat aux (Screma w arrs (ScremaForm scan reduce map_lam))
         i == v
     indexesWith _ _ = False
 
-    mapOverArr (ArrayIndexing cs arr slice) = do
+    mapOverArr w (ArrayIndexing cs arr slice) = do
       arr_elem <- newVName $ baseString arr ++ "_elem"
       arr_t <- lookupType arr
       arr' <-
@@ -869,7 +888,7 @@ simplifyMapIota vtable pat aux (Screma w arrs (ScremaForm scan reduce map_lam))
             Param arr_elem (rowType arr_t),
             ArrayIndexing cs arr_elem (Slice (drop 1 (unSlice slice)))
           )
-    mapOverArr _ = return Nothing
+    mapOverArr _ _ = return Nothing
 simplifyMapIota _ _ _ _ = Skip
 
 -- If a Screma's map function contains a transformation

@@ -12,6 +12,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Existential sizes can now be explicitly quantified in type
   expressions (#1308).
 
+* Significantly expanded error index.
+
 ### Removed
 
 ### Changed
