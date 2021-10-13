@@ -812,10 +812,8 @@ simplifyMapIota :: TopDownRuleOp (Wise SOACS)
 simplifyMapIota vtable pat aux (Screma w arrs (ScremaForm scan reduce map_lam))
   | Just (p, _) <- find isIota (zip (lambdaParams map_lam) arrs),
     indexings <-
-      filter (indexesWith (paramName p)) $
-        map snd $
-          S.toList $
-            arrayOps $ lambdaBody map_lam,
+      filter (indexesWith (paramName p)) . map snd . S.toList $
+        arrayOps $ lambdaBody map_lam,
     not $ null indexings = Simplify $ do
     -- For each indexing with iota, add the corresponding array to
     -- the Screma, and construct a new lambda parameter.
