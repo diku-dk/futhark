@@ -1028,7 +1028,7 @@ intrinsics =
                      Scalar t_a,
                      Scalar t_a
                    ]
-                   $ tupleRecord [Scalar t_b, Scalar t_b]
+                   $ RetType [] . Scalar $ tupleRecord [Scalar t_b, Scalar t_b]
                ),
                ( "vjp2",
                  IntrinsicPolyFun
@@ -1037,7 +1037,7 @@ intrinsics =
                      Scalar t_a,
                      Scalar t_b
                    ]
-                   $ tupleRecord [Scalar t_b, Scalar t_a]
+                   $ RetType [] . Scalar $ tupleRecord [Scalar t_b, Scalar t_a]
                )
              ]
           ++

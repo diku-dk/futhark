@@ -92,7 +92,7 @@ kernelRules :: RuleBook (Wise GPU)
 kernelRules =
   standardRules <> segOpRules
     <> ruleBook
-      [ RuleOp redomapIotaToLoop,
+      [ --RuleOp redomapIotaToLoop,
         RuleOp SOAC.simplifyKnownIterationSOAC,
         RuleOp SOAC.removeReplicateMapping,
         RuleOp SOAC.liftIdentityMapping,

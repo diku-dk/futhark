@@ -79,6 +79,8 @@ kernelsPipeline =
       [ simplifyGPU,
         babysitKernels,
         tileLoops,
+        simplifyGPU,
+        --tileLoops,
         unstreamGPU,
         performCSE True,
         simplifyGPU,
