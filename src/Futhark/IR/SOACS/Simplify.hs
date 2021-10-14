@@ -258,10 +258,10 @@ hoistCerts _ _ _ _ =
 
 liftIdentityMapping ::
   forall rep.
-  (Buildable rep, Simplify.SimplifiableRep rep, HasSOAC (Wise rep)) =>
-  TopDownRuleOp (Wise rep)
+  (Buildable rep, BuilderOps rep, HasSOAC rep) =>
+  TopDownRuleOp rep
 liftIdentityMapping _ pat aux op
-  | Just (Screma w arrs form :: SOAC (Wise rep)) <- asSOAC op,
+  | Just (Screma w arrs form :: SOAC rep) <- asSOAC op,
     Just fun <- isMapSOAC form = do
     let inputMap = M.fromList $ zip (map paramName $ lambdaParams fun) arrs
         free = freeIn $ lambdaBody fun
@@ -625,8 +625,8 @@ simplifyClosedFormReduce _ _ _ _ = Skip
 
 -- For now we just remove singleton SOACs.
 simplifyKnownIterationSOAC ::
-  (Buildable rep, Simplify.SimplifiableRep rep, HasSOAC (Wise rep)) =>
-  TopDownRuleOp (Wise rep)
+  (Buildable rep, BuilderOps rep, HasSOAC rep) =>
+  TopDownRuleOp rep
 simplifyKnownIterationSOAC _ pat _ op
   | Just (Screma (Constant k) arrs (ScremaForm scans reds map_lam)) <- asSOAC op,
     oneIsh k = Simplify $ do
