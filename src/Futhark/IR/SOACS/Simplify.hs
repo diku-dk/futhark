@@ -799,14 +799,14 @@ simplifyMapIota vtable pat aux op
   | Just (Screma w arrs (ScremaForm scan reduce map_lam) :: SOAC rep) <- asSOAC op,
     Just (p, _) <- find isIota (zip (lambdaParams map_lam) arrs),
     indexings <-
-      filter (indexesWith (paramName p)) . map snd . S.toList $
+      mapMaybe (indexesWith (paramName p) . snd) . S.toList $
         arrayOps $ lambdaBody map_lam,
     not $ null indexings = Simplify $ do
     -- For each indexing with iota, add the corresponding array to
     -- the Screma, and construct a new lambda parameter.
     (more_arrs, more_params, replacements) <-
       unzip3 . catMaybes <$> mapM (mapOverArr w) indexings
-    let substs = M.fromList $ zip indexings replacements
+    let substs = M.fromList replacements
         map_lam' =
           map_lam
             { lambdaParams = lambdaParams map_lam <> more_params,
@@ -821,26 +821,43 @@ simplifyMapIota vtable pat aux op
         zeroIsh o && oneIsh s
       _ -> False
 
-    indexesWith v (ArrayIndexing cs arr (Slice (DimFix (Var i) : _)))
-      | arr `ST.elem` vtable,
-        all (`ST.elem` vtable) $ unCerts cs =
-        i == v
-    indexesWith _ _ = False
+    -- Find a 'DimFix i', optionally preceded by other DimFixes, and
+    -- if so return those DimFixes.
+    fixWith i (DimFix j : slice)
+      | Var i == j = Just []
+      | otherwise = (j :) <$> fixWith i slice
+    fixWith _ _ = Nothing
 
-    mapOverArr w (ArrayIndexing cs arr slice) = do
-      arr_elem <- newVName $ baseString arr ++ "_elem"
+    indexesWith v idx@(ArrayIndexing cs arr (Slice js))
+      | arr `ST.elem` vtable,
+        all (`ST.elem` vtable) $ unCerts cs,
+        Just js' <- fixWith v js,
+        all (`ST.elem` vtable) $ namesToList $ freeIn js' =
+        Just (js', idx)
+    indexesWith _ _ = Nothing
+
+    properArr [] arr = pure arr
+    properArr js arr = do
       arr_t <- lookupType arr
-      arr' <-
+      letExp (baseString arr) $ BasicOp $ Index arr $ fullSlice arr_t $ map DimFix js
+
+    mapOverArr w (js, ArrayIndexing cs arr slice) = do
+      arr' <- properArr js arr
+      arr_t <- lookupType arr'
+      arr'' <-
         if arraySize 0 arr_t == w
-          then return arr
+          then pure arr'
           else
-            certifying cs . letExp (baseString arr ++ "_prefix") . BasicOp . Index arr $
+            certifying cs . letExp (baseString arr ++ "_prefix") . BasicOp . Index arr' $
               fullSlice arr_t [DimSlice (intConst Int64 0) w (intConst Int64 1)]
-      return $
+      arr_elem <- newVName $ baseString arr ++ "_elem"
+      pure $
         Just
-          ( arr',
+          ( arr'',
             Param arr_elem (rowType arr_t),
-            ArrayIndexing cs arr_elem (Slice (drop 1 (unSlice slice)))
+            ( ArrayIndexing cs arr slice,
+              ArrayIndexing cs arr_elem (Slice (drop (length js + 1) (unSlice slice)))
+            )
           )
     mapOverArr _ _ = return Nothing
 simplifyMapIota _ _ _ _ = Skip
