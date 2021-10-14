@@ -12,6 +12,7 @@ where
 
 import Data.Foldable
 import Data.Function ((&))
+import Data.List (uncons)
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.Map.Strict as M
 import Data.Maybe
@@ -187,29 +188,9 @@ recordMemRefUses td_env bu_env stm =
                         all_aliases = foldl getAliases mempty $ namesToList $ alsmem etry
                         ixfns = map tupThd $ filter ((`nameIn` all_aliases) . tupSnd) stm_uses'
                         lmads' = mapMaybe mbLmad ixfns
-                        lmads =
+                        lmads'' =
                           if length lmads' == length ixfns
-                            then
-                              Set
-                                ( S.fromList $
-                                    traceWith
-                                      ( "Philip m_b: " <> pretty m_b
-                                          -- <> "\nalias_m_b: "
-                                          -- <> pretty alias_m_b
-                                          <> "\ndestmem entry: "
-                                          <> pretty (dstmem etry)
-                                          <> "\nstm_uses': "
-                                          <> pretty stm_uses'
-                                          -- <> "\nall_aliases: "
-                                          -- <> pretty all_aliases
-                                          <> "\nstatement: "
-                                          <> pretty stm
-                                          <> "\nixfns: "
-                                          <> pretty ixfns
-                                          -- <> "\nmb_lmads"
-                                      )
-                                      lmads'
-                                )
+                            then Set $ S.fromList $ lmads'
                             else Undeterminable
 
                         wrt_ixfns = map tupThd $ filter ((`nameIn` alias_m_b) . tupFst) stm_wrts
@@ -221,12 +202,46 @@ recordMemRefUses td_env bu_env stm =
                           if length wrt_tmps == length wrt_ixfns
                             then Set $ S.fromList wrt_tmps
                             else Undeterminable
-                        no_overlap = noMemOverlap td_env prev_use wrt_lmads'
+                        original_mem_aliases =
+                          fmap tupFst stm_uses
+                            & uncons
+                            & fmap fst
+                            & (=<<) (`M.lookup` active_tab)
+                            & fmap alsmem
+                            & fromMaybe mempty
+                        (wrt_lmads'', lmads) =
+                          if m_b `nameIn` original_mem_aliases
+                            then (wrt_lmads' <> lmads'', Set mempty)
+                            else (wrt_lmads', lmads'')
+                        no_overlap = noMemOverlap td_env prev_use wrt_lmads''
                         wrt_lmads =
                           if no_overlap
-                            then Just wrt_lmads'
+                            then Just wrt_lmads''
                             else Nothing
-                     in (wrt_lmads, prev_use, lmads)
+                     in trace
+                          ( "Philip m_b: " <> pretty m_b
+                              <> "\nalias_m_b: "
+                              <> pretty alias_m_b
+                              <> "\ndestmem entry: "
+                              <> pretty (dstmem etry)
+                              <> "\nstm_uses': "
+                              <> pretty stm_uses'
+                              <> "\norig_use: "
+                              <> pretty original_mem_aliases
+                              <> "\nall_aliases: "
+                              <> pretty all_aliases
+                              <> "\nstatement: "
+                              <> pretty stm
+                              <> "\nixfns: "
+                              <> pretty ixfns
+                              <> "\nwrt_lmads: "
+                              <> pretty wrt_lmads
+                              <> "\nprev_use: "
+                              <> pretty prev_use
+                              <> "\nlmads: "
+                              <> pretty lmads
+                          )
+                          (wrt_lmads, prev_use, lmads)
             )
             active_etries
 
