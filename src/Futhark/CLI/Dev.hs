@@ -36,7 +36,6 @@ import Futhark.Optimise.Fusion
 import Futhark.Optimise.InPlaceLowering
 import Futhark.Optimise.InliningDeadFun
 import qualified Futhark.Optimise.MemoryBlockMerging as MemoryBlockMerging
-import Futhark.Optimise.PhilShortCircuit as PhilShortCircuit
 import Futhark.Optimise.Sink
 import Futhark.Optimise.TileLoops
 import Futhark.Optimise.Unstream
@@ -578,8 +577,8 @@ commandLineOptions =
     kernelsMemPassOption doubleBufferGPU [],
     kernelsMemPassOption expandAllocations [],
     kernelsMemPassOption MemoryBlockMerging.optimise [],
-    seqMemPassOption LiftAllocations.liftAllocations [],
-    seqMemPassOption PhilShortCircuit.shortCircuit [],
+    seqMemPassOption LiftAllocations.liftAllocationsSeqMem [],
+    kernelsMemPassOption LiftAllocations.liftAllocationsGPUMem [],
     seqMemPassOption ArrayShortCircuiting.optimiseSeqMem [],
     kernelsMemPassOption ArrayShortCircuiting.optimiseGPUMem [],
     cseOption [],

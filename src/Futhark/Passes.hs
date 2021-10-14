@@ -94,9 +94,9 @@ sequentialCpuPipeline =
       [ performCSE False,
         simplifySeqMem,
         simplifySeqMem,
-        LiftAllocations.liftAllocations,
-        -- simplifySeqMem,
-        -- ArrayShortCircuiting.optimiseSeqMem,
+        LiftAllocations.liftAllocationsSeqMem,
+        simplifySeqMem,
+        ArrayShortCircuiting.optimiseSeqMem,
         simplifySeqMem
       ]
 
@@ -111,11 +111,13 @@ gpuPipeline =
         doubleBufferGPU,
         simplifyGPUMem,
         performCSE False,
+        LiftAllocations.liftAllocationsGPUMem,
+        simplifyGPUMem,
         ArrayShortCircuiting.optimiseGPUMem,
         performCSE False,
         simplifyGPUMem,
-        -- MemoryBlockMerging.optimise,
-        -- simplifyGPUMem,
+        MemoryBlockMerging.optimise,
+        simplifyGPUMem,
         expandAllocations,
         simplifyGPUMem
       ]
