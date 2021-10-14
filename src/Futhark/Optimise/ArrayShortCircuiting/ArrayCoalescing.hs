@@ -14,6 +14,7 @@ import qualified Data.List as L
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import Data.Sequence (Seq (..))
+import qualified Data.Traversable as Traversable
 import Debug.Trace
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.IR.Aliases
@@ -141,7 +142,7 @@ mkCoalsTabFun lufun r fun@(FunDef _ _ _ _ fpars body) = do
   modifyNameSource $ runState (runReaderT m r)
 
 shortCircuitSeqMem :: LUTabFun -> Pat (Aliases SeqMem) -> Op (Aliases SeqMem) -> TopDnEnv SeqMem -> BotUpEnv -> ShortCircuitM SeqMem BotUpEnv
-shortCircuitSeqMem _ _ _ _ bu_env = return bu_env
+shortCircuitSeqMem _ _ _ _ = return
 
 shortCircuitGPUMem :: LUTabFun -> Pat (Aliases GPUMem) -> Op (Aliases GPUMem) -> TopDnEnv GPUMem -> BotUpEnv -> ShortCircuitM GPUMem BotUpEnv
 shortCircuitGPUMem _ _ (Alloc _ _) _ bu_env = return bu_env
@@ -233,8 +234,7 @@ mkCoalsTabStms lutab = traverseStms
     traverseStms (stm :<| stms) td_env bu_env = do
       let td_env' = topdwnTravBinding td_env stm
       bu_env' <- traverseStms stms td_env' bu_env
-      res_env <- mkCoalsTabStm lutab stm td_env' bu_env'
-      return res_env
+      mkCoalsTabStm lutab stm td_env' bu_env'
 
 -- | Array (register) coalescing can have one of three shapes:
 --      a) @let y    = copy(b^{lu})@
@@ -460,7 +460,7 @@ mkCoalsTabStm lutab lstm@(Let pat _ (DoLoop arginis lform body)) td_env bu_env =
                 then (act, inhb) -- ok
                 else markFailedCoal (act, inhb) m_b -- remove from active
           )
-          (actv0, inhibit0)
+          (traceWith "actv0" actv0, inhibit0)
           (getArrMemAssoc pat)
 
       -- iii) Process the loop's body.
@@ -483,11 +483,11 @@ mkCoalsTabStm lutab lstm@(Let pat _ (DoLoop arginis lform body)) td_env bu_env =
       -- ToDo: check that an optimistic dependency is placed on the ini.
       actv2 =
         let subs_res = mkSubsTab pat $ map resSubExp $ bodyResult body
-            actv11 = foldl (transferCoalsToBody subs_res) actv1 res_mem_bdy
+            actv11 = traceWith "actv11" $ foldl (transferCoalsToBody subs_res) (traceWith "actv1" actv1) res_mem_bdy
             subs_arg = mkSubsTab pat $ map (Var . paramName . fst) arginis
-            actv12 = foldl (transferCoalsToBody subs_arg) actv11 res_mem_arg
+            actv12 = traceWith "actv12" $ foldl (transferCoalsToBody subs_arg) actv11 res_mem_arg
             subs_ini = mkSubsTab pat $ map snd arginis
-         in foldl (transferCoalsToBody subs_ini) actv12 res_mem_ini
+         in traceWith ("pat: " <> pretty pat_val_elms <> " actv2") $ foldl (transferCoalsToBody subs_ini) actv12 res_mem_ini
       -- foldl (transferCoalsToBody M.empty) actv1 (res_mem_bdy++res_mem_arg++res_mem_ini)
       -- The code below adds an aliasing relation to the loop-arg memory
       --   so that to prevent, e.g., the coalescing of an iterative stencil
@@ -529,34 +529,34 @@ mkCoalsTabStm lutab lstm@(Let pat _ (DoLoop arginis lform body)) td_env bu_env =
       (res_actv0, res_succ0, res_inhb0) = (activeCoals res_env_body, successCoals res_env_body, inhibit res_env_body)
       -- iv) Aggregate memory references across loop and filter unsound coalescing
       -- a) Filter the active-table by the FIRST SOUNDNESS condition, namely:
-      --     W_i does not overlap with Union_{j=0..i-1} U_j,
+      --     W_i does not overlap with Union_{j=i+1..n} U_j,
       --     where W_i corresponds to the Write set of src mem-block m_b,
       --     and U_j correspond to the uses of the destination
       --     mem-block m_y, in which m_b is coalesced into.
       --     W_i and U_j correspond to the accesses within the loop body.
       mb_loop_idx = mbLoopIndexRange lform
-  res_actv1 <- filterMapM1 (loopSoundness1Entry (scope td_env') scals_loop mb_loop_idx) res_actv0
+  res_actv1 <- filterMapM1 (loopSoundness1Entry (scope td_env') scals_loop mb_loop_idx) $ traceWith "res_actv0" res_actv0
 
   -- b) Update the memory-reference summaries across loop:
   --   W = Union_{i=0..n-1} W_i Union W_{before-loop}
   --   U = Union_{i=0..n-1} U_i Union U_{before-loop}
-  -- res_actv2 = M.map (aggAcrossLoopEntry (scope td_env') scals_loop mb_loop_idx) res_actv1
-  let res_actv2 = M.map (aggAcrossLoopEntry (scope td_env') scals_loop undefined) res_actv1
+  res_actv2 <- Traversable.mapM (aggAcrossLoopEntry (scope td_env') scals_loop mb_loop_idx) $ traceWith "res_actv1" res_actv1
 
-      -- c) check soundness of the successful promotions for:
-      --      - the entries that have been promoted to success during the loop-body pass
-      --      - for all the entries of active table
-      --    Filter the entries by the SECOND SOUNDNESS CONDITION, namely:
-      --      Union_{i=1..n-1} W_i does not overlap the before-the-loop uses
-      --        of the destination memory block.
+  -- c) check soundness of the successful promotions for:
+  --      - the entries that have been promoted to success during the loop-body pass
+  --      - for all the entries of active table
+  --    Filter the entries by the SECOND SOUNDNESS CONDITION, namely:
+  --      Union_{i=1..n-1} W_i does not overlap the before-the-loop uses
+  --        of the destination memory block.
+  let res_actv3 = traceWith "res_actv3" $ M.filterWithKey (loopSoundness2Entry actv3) $ traceWith "res_actv2" res_actv2
+
       tmp_succ =
         M.filterWithKey (okLookup actv3) $
           M.difference res_succ0 (successCoals bu_env)
-      ver_succ = M.filterWithKey (loopSoundness2Entry actv3) tmp_succ
+      ver_succ = M.filterWithKey (loopSoundness2Entry actv3) $ traceWith "soundness2?" tmp_succ
       suc_fail = M.difference tmp_succ ver_succ
       (res_succ, res_inhb1) = foldl markFailedCoal (res_succ0, res_inhb0) $ M.keys suc_fail
       --
-      res_actv3 = M.filterWithKey (loopSoundness2Entry actv3) res_actv2
       act_fail = M.difference res_actv0 res_actv3
       (_, res_inhb) = foldl markFailedCoal (res_actv0, res_inhb1) $ M.keys act_fail
       res_actv =
@@ -569,7 +569,7 @@ mkCoalsTabStm lutab lstm@(Let pat _ (DoLoop arginis lform body)) td_env bu_env =
           L.zip4 patmems argmems resmems inimems
   return bu_env {activeCoals = fin_actv1, successCoals = fin_succ1, inhibit = fin_inhb1}
   where
-    filterMapM1 f m = liftM M.fromAscList $ filterM (f . snd) $ M.toAscList m
+    filterMapM1 f m = fmap M.fromAscList $ filterM (f . snd) $ M.toAscList m
     getAllocs tab (Let (Pat [pe]) _ (Op (Alloc _ _))) =
       tab <> oneName (patElemName pe)
     getAllocs tab _ = tab
@@ -658,7 +658,7 @@ mkCoalsTabStm lutab lstm@(Let pat _ (DoLoop arginis lform body)) td_env bu_env =
       LoopForm (Aliases rep) ->
       Maybe (VName, (TPrimExp Int64 VName, TPrimExp Int64 VName))
     mbLoopIndexRange (WhileLoop _) = Nothing
-    mbLoopIndexRange (ForLoop inm _inttp seN _) = Just (inm, (pe64 se0, pe64 seN - pe64 se1))
+    mbLoopIndexRange (ForLoop inm _inttp seN _) = Just (inm, (pe64 se0, pe64 seN))
     addBeforeLoop actv_bef m_b etry =
       case M.lookup m_b actv_bef of
         Nothing -> etry
@@ -671,26 +671,32 @@ mkCoalsTabStm lutab lstm@(Let pat _ (DoLoop arginis lform body)) td_env bu_env =
     --   Maybe (VName, (TPrimExp Int64 VName, TPrimExp Int64 VName)) ->
     --   CoalsEntry ->
     --   CoalsEntry
-    aggAcrossLoopEntry scope_loop scal_tab idx etry =
-      let wrts =
-            aggSummaryLoopTotal (scope td_env) scope_loop scal_tab idx $
-              (srcwrts . memrefs) etry
-          uses =
-            aggSummaryLoopTotal (scope td_env) scope_loop scal_tab idx $
-              (dstrefs . memrefs) etry
-       in etry {memrefs = MemRefs uses wrts}
-    -- loopSoundness1Entry ::
-    --   ScopeTab rep ->
-    --   ScalarTab ->
-    --   Maybe (VName, (TPrimExp Int64 VName, TPrimExp Int64 VName)) ->
-    --   CoalsEntry ->
-    --   Bool
+    aggAcrossLoopEntry scope_loop scal_tab idx etry = do
+      wrts <-
+        aggSummaryLoopTotal (scope td_env) scope_loop scal_tab idx $
+          (srcwrts . memrefs) etry
+      uses <-
+        aggSummaryLoopTotal (scope td_env) scope_loop scal_tab idx $
+          (dstrefs . memrefs) etry
+      return $ trace ("wrts: " <> pretty wrts <> "\nuses: " <> pretty uses) $ etry {memrefs = MemRefs uses wrts}
     loopSoundness1Entry scope_loop scal_tab idx etry = do
       let wrt_i = (srcwrts . memrefs) etry
       use_p <-
         aggSummaryLoopPartial (scope td_env) scope_loop scal_tab idx $
           dstrefs $ memrefs etry
-      let res = noMemOverlap td_env wrt_i use_p
+      let res =
+            traceWith
+              ( "alsmems: "
+                  <> pretty (alsmem etry)
+                  <> "\nidx: "
+                  <> pretty idx
+                  <> "\nwrt_i: "
+                  <> pretty wrt_i
+                  <> "\nuse_p: "
+                  <> pretty use_p
+                  <> "\nnoMemOverlap"
+              )
+              $ noMemOverlap td_env wrt_i use_p
       return $
         res
           || trace
@@ -705,13 +711,13 @@ mkCoalsTabStm lutab lstm@(Let pat _ (DoLoop arginis lform body)) td_env bu_env =
             False
     loopSoundness2Entry :: CoalsTab -> VName -> CoalsEntry -> Bool
     loopSoundness2Entry old_actv m_b etry =
-      case M.lookup m_b old_actv of
+      case traceWith "Soundness2Entry" $ M.lookup (traceWith "m_b" m_b) old_actv of
         Nothing -> True
         Just etry0 ->
-          let uses_before = (dstrefs . memrefs) etry0
-              write_loop = (srcwrts . memrefs) etry
+          let uses_before = traceWith "uses_before" $ (dstrefs . memrefs) etry0
+              write_loop = traceWith "writes_loop" $ (srcwrts . memrefs) etry
            in ( noMemOverlap td_env write_loop uses_before
-                  || trace ("Soundess2 fails for " ++ pretty m_b ++ " : " ++ pretty uses_before ++ " and " ++ pretty write_loop) False
+                  || trace ("Soundness2 fails for " ++ pretty m_b ++ " : " ++ pretty uses_before ++ " and " ++ pretty write_loop) False
               )
 
 -- The case of in-place update:

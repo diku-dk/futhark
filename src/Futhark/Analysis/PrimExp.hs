@@ -217,6 +217,7 @@ constFoldPrimExp (BinOpExp LogOr x y)
   | oneIshExp y = y
   | zeroIshExp x = y
   | zeroIshExp y = x
+constFoldPrimExp (UnOpExp Abs {} x) | not $ negativeIshExp x = x
 constFoldPrimExp e = e
 
 -- | The class of numeric types that can be used for constructing
@@ -313,8 +314,8 @@ instance (NumExp t, Pretty v) => Num (TPrimExp t v) where
     | otherwise = numBad "*" (x, y)
 
   abs (TPrimExp x)
-    | IntType t <- primExpType x = TPrimExp $ UnOpExp (Abs t) x
-    | FloatType t <- primExpType x = TPrimExp $ UnOpExp (FAbs t) x
+    | IntType t <- primExpType x = TPrimExp $ constFoldPrimExp $ UnOpExp (Abs t) x
+    | FloatType t <- primExpType x = TPrimExp $ constFoldPrimExp $ UnOpExp (FAbs t) x
     | otherwise = numBad "abs" x
 
   signum (TPrimExp x)
@@ -556,6 +557,11 @@ zeroIshExp _ = False
 oneIshExp :: PrimExp v -> Bool
 oneIshExp (ValueExp v) = oneIsh v
 oneIshExp _ = False
+
+-- | Is the expression a constant negative of some sort?
+negativeIshExp :: PrimExp v -> Bool
+negativeIshExp (ValueExp v) = negativeIsh v
+negativeIshExp _ = False
 
 -- | If the given 'PrimExp' is a constant of the wrong integer type,
 -- coerce it to the given integer type.  This is a workaround for an

@@ -48,6 +48,8 @@ import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as M
 import Data.Maybe (isJust)
+import Debug.Trace
+import qualified Futhark.Analysis.AlgSimplify2 as AlgSimplify2
 --import Futhark.Analysis.PrimExp
 --  ( IntExp,
 --    PrimExp (..),
@@ -69,12 +71,14 @@ import Futhark.IR.Syntax
     flatSliceStrides,
     unitSlice,
   )
-import Futhark.IR.Syntax.Core (Ext (..))
+import Futhark.IR.Syntax.Core (Ext (..), VName)
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
 import Futhark.Util.IntegralExp
 import Futhark.Util.Pretty
 import Prelude hiding (id, mod, (.))
+
+traceWith s a = trace (s <> ": " <> pretty a) a
 
 type Shape num = [num]
 
@@ -1129,12 +1133,29 @@ flatSpan (LMAD ofs dims) =
 -- Since not all LMADs can actually be flattened, we try to overestimate the
 -- flattened array instead. This means that any "holes" in betwen dimensions
 -- will get filled out.
-conservativeFlatten :: (IntegralExp e, Ord e) => LMAD e -> LMAD e
+-- conservativeFlatten :: (IntegralExp e, Ord e, Pretty e) => LMAD e -> LMAD e
+conservativeFlatten :: LMAD (TPrimExp Int64 VName) -> LMAD (TPrimExp Int64 VName)
+conservativeFlatten l@(LMAD offset []) =
+  LMAD offset [LMADDim 1 0 1 0 Unknown]
 conservativeFlatten l@(LMAD _ dims) =
   LMAD offset [LMADDim strd 0 (shp + 1) 0 Unknown]
   where
-    strd = foldl Futhark.Util.IntegralExp.gcd (ldStride $ head dims) $ map ldStride dims
-    (offset, shp) = flatSpan l
+    strd =
+      traceWith "strd" $
+        foldl
+          (\x y -> traceWith "gcd" $ Futhark.Util.IntegralExp.gcd x y)
+          ( traceWith
+              ( "rem: "
+                  <> (pretty . isInt64 . constFoldPrimExp . untyped)
+                    ( (isInt64 $ constFoldPrimExp $ untyped $ abs $ ldStride $ head dims)
+                        `Futhark.Util.IntegralExp.rem` (isInt64 $ constFoldPrimExp $ untyped $ abs $ ldStride $ head dims)
+                    )
+                  <> "\nstride head"
+              )
+              $ ldStride $ head dims
+          )
+          $ traceWith "stride rest" $ map ldStride dims
+    (offset, shp) = traceWith "flatspan" $ flatSpan l
 
 -- | Returns @True@ if the two 'LMAD's could be proven disjoint.
 --
@@ -1143,7 +1164,7 @@ conservativeFlatten l@(LMAD _ dims) =
 -- as soon as more than one dimension is involved, things get more
 -- tricky. Currently, we try to 'conservativelyFlatten' any LMAD with more than
 -- one dimension.
-disjoint :: (IntegralExp e, Ord e) => LMAD e -> LMAD e -> Bool
+disjoint :: LMAD (TPrimExp Int64 VName) -> LMAD (TPrimExp Int64 VName) -> Bool
 disjoint (LMAD offset1 [dim1]) (LMAD offset2 [dim2]) =
   not (divides (Futhark.Util.IntegralExp.gcd (ldStride dim1) (ldStride dim2)) (offset1 - offset2))
     || offset1 >= max offset2 (offset2 + ldShape dim2 * ldStride dim2)
@@ -1152,5 +1173,20 @@ disjoint (LMAD offset1 [dim1]) (LMAD offset2 [dim2]) =
     divides x y = Futhark.Util.IntegralExp.mod y x == 0
 disjoint lmad1 lmad2 =
   disjoint
-    (conservativeFlatten lmad1)
-    (conservativeFlatten lmad2)
+    (traceWith "cons1" $ conservativeFlatten lmad1)
+    (traceWith "cons2" $ conservativeFlatten lmad2)
+
+data Interval = Interval
+  { lowerBound :: TPrimExp Int64 VName,
+    numElements :: TPrimExp Int64 VName,
+    stride :: TPrimExp Int64 VName
+  }
+
+lmadToInterval :: LMAD (TPrimExp Int64 VName) -> Maybe [Interval]
+lmadToInterval lmad@(LMAD offset []) = Just [Interval offset 1 1]
+lmadToInterval lmad@(LMAD offset dims0) =
+  fmap reverse $ foldl helper (Just []) dims
+  where
+    dims = permuteInv (lmadPermutation lmad) dims0
+    offset' = AlgSimplify2.sumOfProducts $ untyped offset
+    helper acc (LMADDim stride _ shp _ _) = undefined

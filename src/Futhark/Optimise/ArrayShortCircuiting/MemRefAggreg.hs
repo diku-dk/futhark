@@ -10,6 +10,7 @@ module Futhark.Optimise.ArrayShortCircuiting.MemRefAggreg
   )
 where
 
+import Data.Foldable
 import Data.Function ((&))
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.Map.Strict as M
@@ -82,7 +83,7 @@ getUseSumFromStm ::
   CoalsTab ->
   Stm (Aliases rep) ->
   -- | A pair of written and written+read memory locations, along with their
-  -- associated array and the index function used.
+  -- associated array and the index function used
   ([(VName, VName, IxFun)], [(VName, VName, IxFun)])
 getUseSumFromStm td_env coal_tab (Let Pat {} _ (BasicOp (Index arr (Slice slc))))
   | Just (MemBlock _ shp _ _) <- getScopeMemInfo arr (scope td_env),
@@ -174,50 +175,60 @@ recordMemRefUses td_env bu_env stm =
       (stm_wrts, stm_uses) = getUseSumFromStm td_env active_tab stm
       active_etries = M.toList active_tab
 
-      (mb_wrts, prev_uses) =
-        unzip $
+      (mb_wrts, prev_uses, mb_lmads) =
+        unzip3 $
           map
             ( \(m_b, etry) ->
                 if null stm_wrts
-                  then (Just $ Set mempty, dstrefs (memrefs etry))
+                  then (Just $ Set mempty, dstrefs (memrefs etry), Set mempty)
                   else
                     let alias_m_b = getAliases mempty m_b
-                        ixfns = map tupThd $ filter ((`nameIn` alias_m_b) . tupFst) stm_wrts
-                        wrt_tmps = mapMaybe mbLmad ixfns
-                        wrt_lmads =
-                          if length wrt_tmps == length ixfns
-                            then Set $ S.fromList wrt_tmps
+                        stm_uses' = filter (not . (`nameIn` alias_m_b) . tupFst) stm_uses
+                        all_aliases = foldl getAliases mempty $ namesToList $ alsmem etry
+                        ixfns = map tupThd $ filter ((`nameIn` all_aliases) . tupSnd) stm_uses'
+                        lmads' = mapMaybe mbLmad ixfns
+                        lmads =
+                          if length lmads' == length ixfns
+                            then
+                              Set
+                                ( S.fromList $
+                                    traceWith
+                                      ( "Philip m_b: " <> pretty m_b
+                                          -- <> "\nalias_m_b: "
+                                          -- <> pretty alias_m_b
+                                          <> "\ndestmem entry: "
+                                          <> pretty (dstmem etry)
+                                          <> "\nstm_uses': "
+                                          <> pretty stm_uses'
+                                          -- <> "\nall_aliases: "
+                                          -- <> pretty all_aliases
+                                          <> "\nstatement: "
+                                          <> pretty stm
+                                          <> "\nixfns: "
+                                          <> pretty ixfns
+                                          -- <> "\nmb_lmads"
+                                      )
+                                      lmads'
+                                )
                             else Undeterminable
+
+                        wrt_ixfns = map tupThd $ filter ((`nameIn` alias_m_b) . tupFst) stm_wrts
+                        wrt_tmps = mapMaybe mbLmad wrt_ixfns
                         prev_use =
                           translateAccessSummary (scope td_env) (scals bu_env) $
                             (dstrefs . memrefs) etry
-                        no_overlap = noMemOverlap td_env prev_use wrt_lmads
-                     in if no_overlap
-                          then (Just wrt_lmads, prev_use)
-                          else --trace ("No overlap fails: "++pretty (m_b, dstmem etry, wrt_lmads)) $
-                            (Nothing, prev_use)
+                        wrt_lmads' =
+                          if length wrt_tmps == length wrt_ixfns
+                            then Set $ S.fromList wrt_tmps
+                            else Undeterminable
+                        no_overlap = noMemOverlap td_env prev_use wrt_lmads'
+                        wrt_lmads =
+                          if no_overlap
+                            then Just wrt_lmads'
+                            else Nothing
+                     in (wrt_lmads, prev_use, lmads)
             )
             active_etries
-
-      mb_lmads =
-        map
-          ( \(m_b, etry) ->
-              if null stm_uses
-                then Set mempty
-                else
-                  let -- get rid of the read and write to m_b, those are not relevant
-                      alias_m_b = getAliases mempty m_b
-                      stm_uses' = filter (not . (`nameIn` alias_m_b) . tupFst) stm_uses
-                      all_aliases = foldl getAliases mempty $ namesToList $ alsmem etry
-                      ixfns = map tupThd $ filter ((`nameIn` all_aliases) . tupSnd) stm_uses'
-                      lmads =
-                        --trace ("MemRefUses for: "++pretty (m_b,dstmem etry)++" "++pretty stm_uses') $
-                        mapMaybe mbLmad ixfns
-                   in if length lmads == length ixfns
-                        then Set (S.fromList lmads)
-                        else Undeterminable
-          )
-          active_etries
 
       -- keep only the entries that do not overlap with the memory
       -- blocks defined in @pat@ or @inner_free_vars@.
@@ -239,7 +250,7 @@ recordMemRefUses td_env bu_env stm =
             filter (not . okMemRef) $
               zip mb_wrts active_etries
       (_, inhibit_tab1) = foldl markFailedCoal (failed_tab, inhibit_tab) (M.keys failed_tab)
-   in (active_tab1, inhibit_tab1)
+   in trace "END OF RECORDMEMREFUSES" (active_tab1, inhibit_tab1)
   where
     tupFst (a, _, _) = a
     tupSnd (_, b, _) = b
@@ -268,16 +279,16 @@ recordMemRefUses td_env bu_env stm =
 -------------------------------------------------------------
 noMemOverlap :: TopDnEnv rep -> AccessSummary -> AccessSummary -> Bool
 noMemOverlap _ _ (Set mr)
-  | mr == mempty = True
+  | mr == mempty = traceWith "empty 1" True
 noMemOverlap _ (Set mr) _
-  | mr == mempty = True
-noMemOverlap _ (Set ml) (Set mr)
-  | mr == ml = False
+  | mr == mempty = traceWith "empty 2" True
+-- noMemOverlap _ (Set ml) (Set mr)
+--   | mr == ml = False || False
 noMemOverlap _ Undeterminable _ = False
 noMemOverlap _ _ Undeterminable = False
 noMemOverlap _ (Set is) (Set js) =
   -- TODO Expand this to be able to handle eg. nw
-  all (\i -> all (IxFun.disjoint i) $ S.toList js) $ S.toList is
+  traceWith "all" $ all (\i -> all (IxFun.disjoint i) $ traceWith "js" $ S.toList js) $ traceWith "is" $ S.toList is
 
 -- | Suppossed to aggregate the iteration-level summaries
 --     across a loop of index i = 0 .. n-1
@@ -287,30 +298,36 @@ noMemOverlap _ (Set is) (Set js) =
 --   The current implementation is good for while, but needs
 --     to be refined for @for i < n@ loops
 aggSummaryLoopTotal ::
+  MonadFreshNames m =>
   ScopeTab rep ->
   ScopeTab rep ->
   ScalarTab ->
   Maybe (VName, (TPrimExp Int64 VName, TPrimExp Int64 VName)) ->
   AccessSummary ->
-  AccessSummary
-aggSummaryLoopTotal _ _ _ _ Undeterminable = Undeterminable
+  m AccessSummary
+aggSummaryLoopTotal _ _ _ _ Undeterminable = return Undeterminable
 aggSummaryLoopTotal _ _ _ _ (Set l)
-  | l == mempty = Set mempty
+  | l == mempty = return $ Set mempty
 aggSummaryLoopTotal scope_bef scope_loop scals_loop _ access
   | Set ls <- traceWith "translateAccesSummary" $ translateAccessSummary scope_loop scals_loop $ traceWith "access" access,
     nms <- foldl (<>) mempty $ map freeIn $ S.toList ls,
-    traceWith "all" $ all inBeforeScope $ traceWith "names" $ namesToList nms =
-    Set ls
+    traceWith "all" $ all inBeforeScope $ traceWith "names" $ namesToList nms = do
+    return $ Set ls
   where
     inBeforeScope v =
       case M.lookup v scope_bef of
         Nothing -> False
         Just _ -> True
-aggSummaryLoopTotal _ _ _ _ _ = Undeterminable
+aggSummaryLoopTotal scope_before scope_loop scalars_loop (Just (iterator_var, (lower_bound, upper_bound))) (Set lmads) =
+  mconcat
+    <$> mapM
+      (aggSummaryOne (traceWith ("aggSummaaryLoopTotal.\nlower_bound: " <> pretty lower_bound <> "\nupper_bound: " <> pretty upper_bound <> "\niterator_var") iterator_var) lower_bound upper_bound)
+      (S.toList lmads)
+aggSummaryLoopTotal _ _ _ _ _ = return Undeterminable
 
 -- | Suppossed to partially aggregate the iteration-level summaries
 --     across a loop of index i = 0 .. n-1. This means that it
---     computes the summary: Union_{j=0..i-1} Access_j
+--     computes the summary: Union_{j=i+1..n} Access_j
 --   The current implementation is naive in that it treats only
 --     the loop invariant case (same as function @aggSummaryLoopTotal@).
 aggSummaryLoopPartial ::
@@ -330,23 +347,33 @@ aggSummaryLoopPartial scope_before scope_loop scalars_loop (Just (iterator_var, 
   --   new_stride = old_offset - old_offset (where k+1 is substituted for k)
   --   new_offset = old_offset where k = lower bound of iteration
   --   new_span = upper bound of iteration
+  mconcat
+    <$> mapM
+      ( aggSummaryOne
+          iterator_var
+          (isInt64 (LeafExp iterator_var $ IntType Int64) + 1)
+          (upper_bound - typedLeafExp iterator_var - 1)
+      )
+      (S.toList lmads)
+
+aggSummaryOne :: MonadFreshNames m => VName -> TPrimExp Int64 VName -> TPrimExp Int64 VName -> LmadRef -> m AccessSummary
+aggSummaryOne iterator_var lower_bound upper_bound (IxFun.LMAD _ dims) | iterator_var `nameIn` freeIn dims = return Undeterminable
+aggSummaryOne iterator_var lower_bound span (IxFun.LMAD offset0 dims0) = do
   new_var <- newVName "k"
-  return $ foldMap (aggSummaryOne new_var) lmads
+  let offset = traceWith "offset" $ replaceIteratorWith (typedLeafExp new_var) offset0
+      offsetp1 = traceWith' "offsetp1" $ replaceIteratorWith (typedLeafExp new_var + 1) offset0
+      new_stride = traceWith "new_stride" $ TPrimExp $ constFoldPrimExp $ simplify $ untyped $ offsetp1 - offset
+      new_offset = replaceIteratorWith lower_bound offset0
+      new_lmad =
+        traceWith "new_lmad" $
+          IxFun.LMAD new_offset $
+            IxFun.LMADDim new_stride 0 span 0 IxFun.Inc : map incPerm dims0
+  if new_var `nameIn` freeIn new_lmad
+    then return Undeterminable
+    else return $ Set $ S.singleton new_lmad
   where
-    aggSummaryOne :: VName -> LmadRef -> AccessSummary
-    aggSummaryOne new_var (IxFun.LMAD _ dims) | iterator_var `nameIn` freeIn dims = Undeterminable
-    aggSummaryOne new_var (IxFun.LMAD offset0 dims0) =
-      let offset = traceWith "offset" $ replaceIteratorWith (typedLeafExp new_var) offset0
-          offsetp1 = traceWith' "offsetp1" $ replaceIteratorWith (typedLeafExp new_var + 1) offset0
-          new_stride = traceWith "new_stride" $ TPrimExp $ simplify $ untyped $ offsetp1 - offset
-          new_offset = replaceIteratorWith lower_bound offset0
-          new_span = upper_bound
-          new_lmad =
-            IxFun.LMAD new_offset $
-              IxFun.LMADDim new_stride 0 new_span 0 IxFun.Inc : map incPerm dims0
-       in if new_var `nameIn` freeIn new_lmad
-            then Undeterminable
-            else Set $ S.singleton $ new_lmad
     incPerm dim = dim {IxFun.ldPerm = IxFun.ldPerm dim + 1}
-    typedLeafExp se = isInt64 $ LeafExp se (IntType Int64)
     replaceIteratorWith se = TPrimExp . substituteInPrimExp (M.singleton iterator_var $ untyped se) . untyped
+
+typedLeafExp :: VName -> TPrimExp Int64 VName
+typedLeafExp vname = isInt64 $ LeafExp vname (IntType Int64)

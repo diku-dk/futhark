@@ -1,4 +1,3 @@
-{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# OPTIONS_GHC -fno-warn-unused-matches #-}
 {-# OPTIONS_GHC -fno-warn-unused-top-binds #-}
@@ -7,6 +6,7 @@ module Futhark.Analysis.AlgSimplify2
   ( Prod (..),
     SofP,
     simplify,
+    sumOfProducts,
   )
 where
 

@@ -118,8 +118,8 @@ compareLastUseAction =
     { actionName = "Compare Last Use",
       actionDescription = "Compare last use",
       actionProcedure = \prog -> do
-        let lastuse1 = M.filter ((/=) mempty) $ fst $ Futhark.Analysis.LastUse.analyseSeqMem prog
-        let lastuse2 = M.filter ((/=) mempty) $ mconcat $ M.elems $ Futhark.Optimise.ArrayShortCircuiting.LastUse.lastUsePrg $ aliasAnalysis prog
+        let lastuse1 = M.filter (mempty /=) $ fst $ Futhark.Analysis.LastUse.analyseSeqMem prog
+        let lastuse2 = M.filter (mempty /=) $ mconcat $ M.elems $ Futhark.Optimise.ArrayShortCircuiting.LastUse.lastUsePrg $ aliasAnalysis prog
         if lastuse1 == lastuse2
           then return ()
           else liftIO $ putStrLn ("Last uses differ:\n" <> pretty lastuse1 <> "\n" <> pretty lastuse2)
@@ -140,8 +140,8 @@ compareLastUseGPUMemAction =
     { actionName = "Compare Last Use GPU",
       actionDescription = "Compare last use GPU",
       actionProcedure = \prog -> do
-        let lastuse1 = M.filter ((/=) mempty) $ fst $ Futhark.Analysis.LastUse.analyseGPUMem prog
-        let lastuse2 = M.filter ((/=) mempty) $ mconcat $ M.elems $ Futhark.Optimise.ArrayShortCircuiting.LastUse.lastUsePrgGPU $ aliasAnalysis prog
+        let lastuse1 = M.filter (mempty /=) $ fst $ Futhark.Analysis.LastUse.analyseGPUMem prog
+        let lastuse2 = M.filter (mempty /=) $ mconcat $ M.elems $ Futhark.Optimise.ArrayShortCircuiting.LastUse.lastUsePrgGPU $ aliasAnalysis prog
         if lastuse1 == lastuse2
           then return ()
           else liftIO $ putStrLn ("Last uses differ:\n" <> pretty lastuse1 <> "\n" <> pretty lastuse2)

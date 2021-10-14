@@ -95,8 +95,8 @@ sequentialCpuPipeline =
         simplifySeqMem,
         simplifySeqMem,
         LiftAllocations.liftAllocations,
-        simplifySeqMem,
-        ArrayShortCircuiting.optimiseSeqMem,
+        -- simplifySeqMem,
+        -- ArrayShortCircuiting.optimiseSeqMem,
         simplifySeqMem
       ]
 
@@ -114,8 +114,8 @@ gpuPipeline =
         ArrayShortCircuiting.optimiseGPUMem,
         performCSE False,
         simplifyGPUMem,
-        MemoryBlockMerging.optimise,
-        simplifyGPUMem,
+        -- MemoryBlockMerging.optimise,
+        -- simplifyGPUMem,
         expandAllocations,
         simplifyGPUMem
       ]
