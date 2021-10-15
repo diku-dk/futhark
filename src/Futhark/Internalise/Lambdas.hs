@@ -132,7 +132,7 @@ internalisePartitionLambda internaliseLambda k lam args = do
           BasicOp $
             CmpOp (CmpEq int64) eq_class $
               intConst Int64 $ toInteger i
-      fmap (map I.Var) . letTupExp "part_res"
+      letTupExp' "part_res"
         =<< eIf
           (eSubExp is_i)
           (pure $ resultBody $ result i)
