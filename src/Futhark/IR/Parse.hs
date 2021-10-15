@@ -367,7 +367,7 @@ pBranchTypes :: PR rep -> Parser [BranchType rep]
 pBranchTypes pr = braces $ pBranchType pr `sepBy` pComma
 
 pParam :: Parser t -> Parser (Param t)
-pParam p = Param <$> pVName <*> (pColon *> p)
+pParam p = Param <$> pAttrs <*> pVName <*> (pColon *> p)
 
 pFParam :: PR rep -> Parser (FParam rep)
 pFParam = pParam . pFParamInfo

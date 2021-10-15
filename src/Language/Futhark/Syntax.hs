@@ -980,6 +980,7 @@ data PatBase f vn
   | PatAscription (PatBase f vn) (TypeDeclBase f vn) SrcLoc
   | PatLit PatLit (f PatType) SrcLoc
   | PatConstr Name (f PatType) [PatBase f vn] SrcLoc
+  | PatAttr (AttrInfo vn) (PatBase f vn) SrcLoc
 
 deriving instance Showable f vn => Show (PatBase f vn)
 
@@ -996,6 +997,7 @@ instance Located (PatBase f vn) where
   locOf (PatAscription _ _ loc) = locOf loc
   locOf (PatLit _ _ loc) = locOf loc
   locOf (PatConstr _ _ _ loc) = locOf loc
+  locOf (PatAttr _ _ loc) = locOf loc
 
 -- | Documentation strings, including source location.
 data DocComment = DocComment String SrcLoc

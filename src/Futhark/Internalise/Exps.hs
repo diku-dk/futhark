@@ -32,17 +32,6 @@ transformProg always_safe vbinds = do
     runInternaliseM always_safe (internaliseValBinds vbinds)
   I.renameProg $ I.Prog consts funs
 
-internaliseAttr :: E.AttrInfo VName -> InternaliseM Attr
-internaliseAttr (E.AttrAtom (E.AtomName v) _) =
-  pure $ I.AttrName v
-internaliseAttr (E.AttrAtom (E.AtomInt x) _) =
-  pure $ I.AttrInt x
-internaliseAttr (E.AttrComp f attrs _) =
-  I.AttrComp f <$> mapM internaliseAttr attrs
-
-internaliseAttrs :: [E.AttrInfo VName] -> InternaliseM Attrs
-internaliseAttrs = fmap (mconcat . map oneAttr) . mapM internaliseAttr
-
 internaliseValBinds :: [E.ValBind] -> InternaliseM ()
 internaliseValBinds = mapM_ internaliseValBind
 
@@ -878,6 +867,8 @@ generateCond orig_p orig_ses = do
       return ([], id_ses, rest_ses)
     compares (E.PatParens pat _) ses =
       compares pat ses
+    compares (E.PatAttr _ pat _) ses =
+      compares pat ses
     -- XXX: treat empty tuples and records as bool.
     compares (E.TuplePat [] loc) ses =
       compares (E.Wildcard (Info $ E.Scalar $ E.Prim E.Bool) loc) ses
@@ -1279,7 +1270,7 @@ internaliseStreamAcc desc dest op lam bs = do
   let dest_w = arraysSize 0 dest_ts
       acc_t = Acc acc_cert_v (Shape [dest_w]) (map rowType dest_ts) NoUniqueness
   acc_p <- newParam "acc_p" acc_t
-  withacc_lam <- mkLambda [Param acc_cert_v (I.Prim I.Unit), acc_p] $ do
+  withacc_lam <- mkLambda [Param mempty acc_cert_v (I.Prim I.Unit), acc_p] $ do
     lam' <-
       internaliseMapLambda internaliseLambda lam $
         map I.Var $ paramName acc_p : bs'
@@ -1881,7 +1872,7 @@ isOverloadedFunction qname args loc = do
       let bodyTypes = concat (replicate (length sv_ts) indexType) ++ map (I.stripArray dim) sa_ts
           paramTypes = indexType <> map rowType sv_ts
           bodyNames = indexName <> valueNames
-          bodyParams = zipWith I.Param bodyNames paramTypes
+          bodyParams = zipWith (I.Param mempty) bodyNames paramTypes
 
       -- This body is pretty boring right now, as every input is exactly the output.
       -- But it can get funky later on if fused with something else.
@@ -2084,9 +2075,9 @@ partitionWithSOACS k lam arrs = do
     _ -> error "partitionWithSOACS"
 
   add_lam_x_params <-
-    replicateM k $ I.Param <$> newVName "x" <*> pure (I.Prim int64)
+    replicateM k $ newParam "x" (I.Prim int64)
   add_lam_y_params <-
-    replicateM k $ I.Param <$> newVName "y" <*> pure (I.Prim int64)
+    replicateM k $ newParam "y" (I.Prim int64)
   add_lam_body <- runBodyBuilder $
     localScope (scopeOfLParams $ add_lam_x_params ++ add_lam_y_params) $
       fmap resultBody $
@@ -2133,10 +2124,9 @@ partitionWithSOACS k lam arrs = do
 
   -- Now write into the result.
   write_lam <- do
-    c_param <- I.Param <$> newVName "c" <*> pure (I.Prim int64)
-    offset_params <- replicateM k $ I.Param <$> newVName "offset" <*> pure (I.Prim int64)
-    value_params <- forM arr_ts $ \arr_t ->
-      I.Param <$> newVName "v" <*> pure (I.rowType arr_t)
+    c_param <- newParam "c" (I.Prim int64)
+    offset_params <- replicateM k $ newParam "offset" (I.Prim int64)
+    value_params <- mapM (newParam "v" . I.rowType) arr_ts
     (offset, offset_stms) <-
       collectStms $
         mkOffsetLambdaBody

@@ -770,9 +770,10 @@ CInnerPat :: { PatBase NoInfo Name }
                | '(' BindingBinOp ')'               { Id $2 NoInfo (srcspan $1 $>) }
                | '_'                                { Wildcard NoInfo $1 }
                | '(' ')'                            { TuplePat [] (srcspan $1 $>) }
-               | '(' CPat ')'                   { PatParens $2 (srcspan $1 $>) }
-               | '(' CPat ',' CPats1 ')'    { TuplePat ($2:$4) (srcspan $1 $>) }
-               | '{' CFieldPats '}'             { RecordPat $2 (srcspan $1 $>) }
+               | '(' CPat ')'                       { PatParens $2 (srcspan $1 $>) }
+               | '#[' AttrInfo ']' CPat             { PatAttr $2 $4 (srcspan $1 $>) }
+               | '(' CPat ',' CPats1 ')'            { TuplePat ($2:$4) (srcspan $1 $>) }
+               | '{' CFieldPats '}'                 { RecordPat $2 (srcspan $1 $>) }
                | CaseLiteral                        { PatLit (fst $1) NoInfo (snd $1) }
                | Constr                             { let (n, loc) = $1
                                                       in PatConstr n NoInfo [] loc }
@@ -863,11 +864,12 @@ Pats1 :: { [PatBase NoInfo Name] }
 
 InnerPat :: { PatBase NoInfo Name }
 InnerPat : id                               { let L loc (ID name) = $1 in Id name NoInfo loc }
-             | '(' BindingBinOp ')'             { Id $2 NoInfo (srcspan $1 $>) }
-             | '_'                              { Wildcard NoInfo $1 }
-             | '(' ')'                          { TuplePat [] (srcspan $1 $>) }
+             | '(' BindingBinOp ')'         { Id $2 NoInfo (srcspan $1 $>) }
+             | '_'                          { Wildcard NoInfo $1 }
+             | '(' ')'                      { TuplePat [] (srcspan $1 $>) }
              | '(' Pat ')'                  { PatParens $2 (srcspan $1 $>) }
-             | '(' Pat ',' Pats1 ')'    { TuplePat ($2:$4) (srcspan $1 $>) }
+             | '#[' AttrInfo ']' Pat        { PatAttr $2 $4 (srcspan $1 $>) }
+             | '(' Pat ',' Pats1 ')'        { TuplePat ($2:$4) (srcspan $1 $>) }
              | '{' FieldPats '}'            { RecordPat $2 (srcspan $1 $>) }
 
 FieldPat :: { (Name, PatBase NoInfo Name) }

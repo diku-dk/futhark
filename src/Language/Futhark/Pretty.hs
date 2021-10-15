@@ -407,6 +407,7 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (PatBase f vn) where
     Nothing -> text "_"
   ppr (PatLit e _ _) = ppr e
   ppr (PatConstr n _ ps _) = text "#" <> ppr n <+> sep (map ppr ps)
+  ppr (PatAttr attr p _) = text "#[" <> ppr attr <> text "]" <+/> ppr p
 
 ppAscription :: Pretty t => Maybe t -> Doc
 ppAscription Nothing = mempty

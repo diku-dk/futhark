@@ -801,6 +801,7 @@ instance Pretty (Unmatched (PatBase Info VName)) where
     where
       ppr' (PatAscription p t _) = ppr p <> ":" <+> ppr t
       ppr' (PatParens p _) = parens $ ppr' p
+      ppr' (PatAttr _ p _) = parens $ ppr' p
       ppr' (Id v _ _) = pprName v
       ppr' (TuplePat pats _) = parens $ commasep $ map ppr' pats
       ppr' (RecordPat fs _) = braces $ commasep $ map ppField fs
