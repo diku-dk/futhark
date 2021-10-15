@@ -277,8 +277,8 @@ runCompiledEntry futhark server program (InputOutputs entry run_cases) = do
     Left (CmdFailure _ err) ->
       pure [Failure err]
     Right (output_types', input_types') -> do
-      let outs = ["out" <> T.pack (show i) | i <- [0 .. length output_types' -1]]
-          ins = ["in" <> T.pack (show i) | i <- [0 .. length input_types' -1]]
+      let outs = ["out" <> T.pack (show i) | i <- [0 .. length output_types' - 1]]
+          ins = ["in" <> T.pack (show i) | i <- [0 .. length input_types' - 1]]
           onRes = either (Failure . pure) (const Success)
       mapM (fmap onRes . runCompiledCase input_types' outs ins) run_cases
   where
@@ -732,16 +732,24 @@ commandLineOptions =
                   | n' > 0 ->
                     Right $ \config -> config {configConcurrency = Just n'}
                 _ ->
-                  Left $ error $ "'" ++ n ++ "' is not a positive integer."
+                  Left . optionsError $ "'" ++ n ++ "' is not a positive integer."
           )
           "NUM"
       )
       "Number of tests to run concurrently."
   ]
 
+excludeBackend :: TestConfig -> TestConfig
+excludeBackend config =
+  config
+    { configExclude =
+        "no_" <> T.pack (configBackend (configPrograms config)) :
+        configExclude config
+    }
+
 -- | Run @futhark test@.
 main :: String -> [String] -> IO ()
 main = mainWithOptions defaultConfig commandLineOptions "options... programs..." $ \progs config ->
   case progs of
     [] -> Nothing
-    _ -> Just $ runTests config progs
+    _ -> Just $ runTests (excludeBackend config) progs

@@ -5,7 +5,76 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
-## [0.20.0]
+## [0.21.0]
+
+### Added
+
+* Existential sizes can now be explicitly quantified in type
+  expressions (#1308).
+
+* Significantly expanded error index.
+
+### Removed
+
+### Changed
+
+### Fixed
+
+## [0.20.4]
+
+### Added
+
+* Tuning parameters now (officially) exposed in the C API.
+
+* `futhark autotune` is now 2-3x faster on many programs, as it now
+  keeps the process running.
+
+* Negative numeric literals are now allowed in `case` patterns.
+
+### Fixed
+
+* `futhark_context_config_set_profiling` was missing for the `c` backend.
+
+* Correct handling of nested entry points (#1478).
+
+* Incorrect type information recorded when doing in-place lowering (#1481).
+
+## [0.20.3]
+
+### Added
+
+* Executables produced by C backends now take a `--no-print-result` option.
+
+* The C backends now generate a manifest when compiling with
+  `--library`.  This can be used by FFI generators (#1465).
+
+* The beginnings of a Rust-style error index.
+
+* `scan` on newer CUDA devices is now much faster.
+
+### Fixed
+
+* Unique opaque types are named properly in entry points.
+
+* The CUDA backend in library mode no longer `exit()`s the process if
+  NVRTC initialisation fails.
+
+## [0.20.2]
+
+### Fixed
+
+* Simplification bug (#1455).
+
+* In-place-lowering bug (#1457).
+
+* Another in-place-lowering bug (#1460).
+
+* Don't try to tile inside loops with parameters with variant sizes (#1462).
+
+* Don't consider it an ICE when the user passes invalid command line
+  options (#1464).
+
+## [0.20.1]
 
 ### Added
 
@@ -29,8 +98,6 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * Sometimes slightly more informative error message when input of
     the wrong type is passed to a test program.
 
-### Removed
-
 ### Changed
 
   * The `!` function in the integer modules is now called `not`.
@@ -39,7 +106,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
     called `!`.  It is extremely unlikely this affects you.  This
     removes the last special-casing of prefix operators.
 
-  * A prefix operator section (i.e.. `(!)`) is no longer permitted
+  * A prefix operator section (i.e. `(!)`) is no longer permitted
     (and it never was according to the grammar).
 
   * The offset parameter for the "raw" array creation functions in the
@@ -70,6 +137,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
     compiler crashes (#1435).
 
   * Underscores now allowed in numeric literals in test data (#1440).
+
+  * The `cuda` backend did not use single-pass segmented scans as
+    intended.  Now it does.
 
 ## [0.19.7]
 

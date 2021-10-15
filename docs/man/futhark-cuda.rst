@@ -134,21 +134,25 @@ The following additional options are accepted.
 
   Load PTX code from the indicated file.
 
+-n, --no-print-result
+
+  Do not print the program result.
+
 --nvrtc-option=OPT
 
   Add an additional build option to the string passed to NVRTC.  Refer
   to the CUDA documentation for which options are supported.  Be
   careful - some options can easily result in invalid results.
 
---print-sizes
+--param=ASSIGNMENT
 
-  Print all sizes that can be set with ``-size`` or ``--tuning``.
-
---size=ASSIGNMENT
-
-  Set a configurable run-time parameter to the given
+  Set a tuning parameter to the given
   value. ``ASSIGNMENT`` must be of the form ``NAME=INT`` Use
   ``--print-sizes`` to see which names are available.
+
+--print-params
+
+  Print all tuning parameters that can be set with ``--param`` or ``--tuning``.
 
 --tuning=FILE
 

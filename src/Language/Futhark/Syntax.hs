@@ -34,8 +34,11 @@ module Language.Futhark.Syntax
     TypeArgExp (..),
     PName (..),
     ScalarTypeBase (..),
+    RetTypeBase (..),
     PatType,
     StructType,
+    StructRetType,
+    PatRetType,
     ValueType,
     Diet (..),
     TypeDeclBase (..),
@@ -78,6 +81,7 @@ module Language.Futhark.Syntax
     ValBindBase (..),
     EntryPoint (..),
     EntryType (..),
+    EntryParam (..),
     Liftedness (..),
     TypeBindBase (..),
     TypeParamBase (..),
@@ -130,12 +134,15 @@ class
     Show (f PatType),
     Show (f (PatType, [VName])),
     Show (f (StructType, [VName])),
+    Show (f (StructRetType, [VName])),
     Show (f EntryPoint),
     Show (f StructType),
+    Show (f StructRetType),
+    Show (f PatRetType),
     Show (f (StructType, Maybe VName)),
     Show (f (PName, StructType)),
     Show (f (PName, StructType, Maybe VName)),
-    Show (f (Aliasing, StructType)),
+    Show (f (Aliasing, StructRetType)),
     Show (f (M.Map VName VName)),
     Show (f AppRes)
   ) =>
@@ -255,7 +262,9 @@ data DimDecl vn
   | -- | No known size - but still possibly given a unique name, so we
     -- can recognise e.g. @type square [n] = [n][n]i32@ and make
     -- @square []@ do the right thing.  If @Nothing@, then this is a
-    -- name distinct from any other.
+    -- name distinct from any other.  The type checker should _never_
+    -- produce these - they are a (hopefully temporary) thing
+    -- introduced by defunctorisation and monomorphisation.
     AnyDim (Maybe vn)
   deriving (Show)
 
@@ -345,6 +354,23 @@ instance Eq PName where
 instance Ord PName where
   _ <= _ = True
 
+-- | Types that can appear to the right of a function arrow.  This
+-- just means they can be existentially quantified.
+data RetTypeBase dim as = RetType
+  { retDims :: [VName],
+    retType :: TypeBase dim as
+  }
+  deriving (Eq, Ord, Show)
+
+instance Bitraversable RetTypeBase where
+  bitraverse f g (RetType dims t) = RetType dims <$> bitraverse f g t
+
+instance Bifunctor RetTypeBase where
+  bimap = bimapDefault
+
+instance Bifoldable RetTypeBase where
+  bifoldMap = bifoldMapDefault
+
 -- | Types that can be elements of arrays.  This representation does
 -- allow arrays of records of functions, which is nonsensical, but it
 -- convolutes the code too much if we try to statically rule it out.
@@ -355,7 +381,7 @@ data ScalarTypeBase dim as
   | Sum (M.Map Name [TypeBase dim as])
   | -- | The aliasing corresponds to the lexical
     -- closure of the function.
-    Arrow as PName (TypeBase dim as) (TypeBase dim as)
+    Arrow as PName (TypeBase dim as) (RetTypeBase dim as)
   deriving (Eq, Ord, Show)
 
 instance Bitraversable ScalarTypeBase where
@@ -434,6 +460,12 @@ type StructType = TypeBase (DimDecl VName) ()
 -- | A value type contains full, manifest size information.
 type ValueType = TypeBase Int64 ()
 
+-- | The return type version of 'StructType'.
+type StructRetType = RetTypeBase (DimDecl VName) ()
+
+-- | The return type version of 'PatternType'.
+type PatRetType = RetTypeBase (DimDecl VName) Aliasing
+
 -- | A dimension declaration expression for use in a 'TypeExp'.
 data DimExp vn
   = -- | The size of the dimension is this name, which
@@ -465,6 +497,7 @@ data TypeExp vn
   | TEApply (TypeExp vn) (TypeArgExp vn) SrcLoc
   | TEArrow (Maybe vn) (TypeExp vn) (TypeExp vn) SrcLoc
   | TESum [(Name, [TypeExp vn])] SrcLoc
+  | TEDim [vn] (TypeExp vn) SrcLoc
   deriving (Show)
 
 deriving instance Eq (TypeExp Name)
@@ -484,6 +517,7 @@ instance Located (TypeExp vn) where
   locOf (TEApply _ _ loc) = locOf loc
   locOf (TEArrow _ _ _ loc) = locOf loc
   locOf (TESum _ loc) = locOf loc
+  locOf (TEDim _ _ loc) = locOf loc
 
 -- | A type argument expression passed to a type constructor.
 data TypeArgExp vn
@@ -715,7 +749,7 @@ data AppExpBase f vn
       ( [TypeParamBase vn],
         [PatBase f vn],
         Maybe (TypeExp vn),
-        f StructType,
+        f StructRetType,
         ExpBase f vn
       )
       (ExpBase f vn)
@@ -820,7 +854,7 @@ data ExpBase f vn
       [PatBase f vn]
       (ExpBase f vn)
       (Maybe (TypeExp vn))
-      (f (Aliasing, StructType))
+      (f (Aliasing, StructRetType))
       SrcLoc
   | -- | @+@; first two types are operands, third is result.
     OpSection (QualName vn) (f PatType) SrcLoc
@@ -830,7 +864,7 @@ data ExpBase f vn
       (f PatType)
       (ExpBase f vn)
       (f (PName, StructType, Maybe VName), f (PName, StructType))
-      (f PatType, f [VName])
+      (f PatRetType, f [VName])
       SrcLoc
   | -- | @+2@; first type is operand, second is result.
     OpSectionRight
@@ -838,7 +872,7 @@ data ExpBase f vn
       (f PatType)
       (ExpBase f vn)
       (f (PName, StructType), f (PName, StructType, Maybe VName))
-      (f PatType)
+      (f PatRetType)
       SrcLoc
   | -- | Field projection as a section: @(.x.y.z)@.
     ProjectSection [Name] (f PatType) SrcLoc
@@ -971,13 +1005,20 @@ data EntryType = EntryType
   }
   deriving (Show)
 
+-- | A parameter of an entry point.
+data EntryParam = EntryParam
+  { entryParamName :: Name,
+    entryParamType :: EntryType
+  }
+  deriving (Show)
+
 -- | Information about the external interface exposed by an entry
 -- point.  The important thing is that that we remember the original
 -- source-language types, without desugaring them at all.  The
 -- annoying thing is that we do not require type annotations on entry
 -- points, so the types can be either ascribed or inferred.
 data EntryPoint = EntryPoint
-  { entryParams :: [EntryType],
+  { entryParams :: [EntryParam],
     entryReturn :: EntryType
   }
   deriving (Show)
@@ -991,7 +1032,7 @@ data ValBindBase f vn = ValBind
     valBindEntryPoint :: Maybe (f EntryPoint),
     valBindName :: vn,
     valBindRetDecl :: Maybe (TypeExp vn),
-    valBindRetType :: f (StructType, [VName]),
+    valBindRetType :: f (StructRetType, [VName]),
     valBindTypeParams :: [TypeParamBase vn],
     valBindParams :: [PatBase f vn],
     valBindBody :: ExpBase f vn,
@@ -1010,7 +1051,8 @@ data TypeBindBase f vn = TypeBind
   { typeAlias :: vn,
     typeLiftedness :: Liftedness,
     typeParams :: [TypeParamBase vn],
-    typeExp :: TypeDeclBase f vn,
+    typeExp :: TypeExp vn,
+    typeElab :: f StructRetType,
     typeDoc :: Maybe DocComment,
     typeBindLocation :: SrcLoc
   }

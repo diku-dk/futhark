@@ -230,7 +230,7 @@ progressBar cur bound steps =
     cell i
       | i' * step_size <= cur' = char 9
       | otherwise =
-        char (floor (((cur' - (i' -1) * step_size) * num_chars) / step_size))
+        char (floor (((cur' - (i' - 1) * step_size) * num_chars) / step_size))
       where
         i' = fromIntegral i
 
@@ -359,7 +359,7 @@ commandLineOptions =
                       { optRuns = n'
                       }
                 _ ->
-                  Left $ error $ "'" ++ n ++ "' is not a positive integer."
+                  Left . optionsError $ "'" ++ n ++ "' is not a positive integer."
           )
           "RUNS"
       )
@@ -427,12 +427,8 @@ commandLineOptions =
                   | n' < max_timeout ->
                     Right $ \config -> config {optTimeout = fromIntegral n'}
                 _ ->
-                  Left $
-                    error $
-                      "'" ++ n
-                        ++ "' is not an integer smaller than"
-                        ++ show max_timeout
-                        ++ "."
+                  Left . optionsError $
+                    "'" ++ n ++ "' is not an integer smaller than" ++ show max_timeout ++ "."
           )
           "SECONDS"
       )
@@ -495,7 +491,7 @@ commandLineOptions =
                   | n' > 0 ->
                     Right $ \config -> config {optConcurrency = Just n'}
                 _ ->
-                  Left $ error $ "'" ++ n ++ "' is not a positive integer."
+                  Left . optionsError $ "'" ++ n ++ "' is not a positive integer."
           )
           "NUM"
       )
@@ -510,12 +506,16 @@ commandLineOptions =
     max_timeout :: Int
     max_timeout = maxBound `div` 1000000
 
+excludeBackend :: BenchOptions -> BenchOptions
+excludeBackend config =
+  config {optExcludeCase = "no_" <> optBackend config : optExcludeCase config}
+
 -- | Run @futhark bench@.
 main :: String -> [String] -> IO ()
 main = mainWithOptions initialBenchOptions commandLineOptions "options... programs..." $ \progs config ->
   case progs of
     [] -> Nothing
-    _ -> Just $ runBenchmarks config progs
+    _ -> Just $ runBenchmarks (excludeBackend config) progs
 
 --- The following extracted from hstats package by Marshall Beddoe:
 --- https://hackage.haskell.org/package/hstats-0.3
