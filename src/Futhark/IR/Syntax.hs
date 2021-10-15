@@ -1,6 +1,5 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE Strict #-}
 {-# LANGUAGE Trustworthy #-}
@@ -111,13 +110,6 @@ module Futhark.IR.Syntax
     TypeBase (..),
     Diet (..),
 
-    -- * Attributes
-    Attr (..),
-    Attrs (..),
-    oneAttr,
-    inAttrs,
-    withoutAttrs,
-
     -- * Abstract syntax tree
     Ident (..),
     SubExp (..),
@@ -174,7 +166,6 @@ where
 import Control.Category
 import Data.Foldable
 import qualified Data.Sequence as Seq
-import qualified Data.Set as S
 import Data.String
 import Data.Traversable (fmapDefault, foldMapDefault)
 import Futhark.IR.Rep
@@ -182,33 +173,6 @@ import Futhark.IR.Syntax.Core
 import Futhark.Util.Pretty (pretty)
 import Language.Futhark.Core
 import Prelude hiding (id, (.))
-
--- | A single attribute.
-data Attr
-  = AttrName Name
-  | AttrInt Integer
-  | AttrComp Name [Attr]
-  deriving (Ord, Show, Eq)
-
-instance IsString Attr where
-  fromString = AttrName . fromString
-
--- | Every statement is associated with a set of attributes, which can
--- have various effects throughout the compiler.
-newtype Attrs = Attrs {unAttrs :: S.Set Attr}
-  deriving (Ord, Show, Eq, Monoid, Semigroup)
-
--- | Construct 'Attrs' from a single 'Attr'.
-oneAttr :: Attr -> Attrs
-oneAttr = Attrs . S.singleton
-
--- | Is the given attribute to be found in the attribute set?
-inAttrs :: Attr -> Attrs -> Bool
-inAttrs attr (Attrs attrs) = attr `S.member` attrs
-
--- | @x `withoutAttrs` y@ gives @x@ except for any attributes also in @y@.
-withoutAttrs :: Attrs -> Attrs -> Attrs
-withoutAttrs (Attrs x) (Attrs y) = Attrs $ x `S.difference` y
 
 -- | A type alias for namespace control.
 type PatElem rep = PatElemT (LetDec rep)

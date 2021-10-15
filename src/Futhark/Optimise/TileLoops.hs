@@ -379,8 +379,8 @@ tileDoLoop initial_space variance prestms used_in_body (host_stms, tiling, tiled
           inScopeOf precomputed_variant_prestms $
             doPrelude tiling privstms precomputed_variant_prestms live_set
 
-        mergeparams' <- forM mergeparams $ \(Param pname pt) ->
-          Param <$> newVName (baseString pname ++ "_group") <*> pure (tileDim pt)
+        mergeparams' <- forM mergeparams $ \(Param attrs pname pt) ->
+          Param attrs <$> newVName (baseString pname ++ "_group") <*> pure (tileDim pt)
 
         let merge_ts = map paramType mergeparams
 

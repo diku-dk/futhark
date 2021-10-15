@@ -476,6 +476,7 @@ literals and variables, but also more complicated forms.
       : | "{" `fieldid` ["=" `pat`] ("," `fieldid` ["=" `pat`])* "}"
       : | `constructor` `pat`*
       : | `pat` ":" `type`
+      : | "#[" `attr` "]" `pat`
    pat_literal: [ "-" ] `intnumber`
               | [ "-" ] `floatnumber`
               | `charlit`
@@ -1681,16 +1682,16 @@ Attributes
        :   `decimal`
        : | `id` "(" [`attr` ("," `attr`)*] ")"
 
-An expression, declaration, or module type spec can be prefixed with
-an attribute, written as ``#[attr]``.  This may affect how it is
-treated by the compiler or other tools.  In no case will attributes
-affect or change the *semantics* of a program, but it may affect how
-well it compiles and runs (or in some cases, whether it compiles or
-runs at all).  Unknown attributes are silently ignored.  Most have no
-effect in the interpreter.  An attribute can be either an *atom*,
-written as an identifier or number, or *compound*, consisting of an
-identifier and a comma-separated sequence of attributes.  The latter
-is used for grouping and encoding of more complex information.
+An expression, declaration, pattern, or module type spec can be
+prefixed with an attribute, written as ``#[attr]``.  This may affect
+how it is treated by the compiler or other tools.  In no case will
+attributes affect or change the *semantics* of a program, but it may
+affect how well it compiles and runs (or in some cases, whether it
+compiles or runs at all).  Unknown attributes are silently ignored.
+Most have no effect in the interpreter.  An attribute can be either an
+*atom*, written as an identifier or number, or *compound*, consisting
+of an identifier and a comma-separated sequence of attributes.  The
+latter is used for grouping and encoding of more complex information.
 
 Expression attributes
 ~~~~~~~~~~~~~~~~~~~~~
@@ -1821,6 +1822,13 @@ prevent the GPU backends from generating working code.
 ..........
 
 Always inline calls to this function.
+
+Pattern attributes
+~~~~~~~~~~~~~~~~~~
+
+No pattern attributes are currently supported by the compiler itself,
+although they are syntactically permitted and may be used by other
+tools.
 
 Spec attributes
 ~~~~~~~~~~~~~~~

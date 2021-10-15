@@ -654,6 +654,9 @@ transformPat (RecordPat fields loc) = do
 transformPat (PatParens pat loc) = do
   (pat', rr) <- transformPat pat
   return (PatParens pat' loc, rr)
+transformPat (PatAttr attr pat loc) = do
+  (pat', rr) <- transformPat pat
+  return (PatAttr attr pat' loc, rr)
 transformPat (Wildcard (Info t) loc) = do
   t' <- transformType t
   return (wildcard t' loc, mempty)
@@ -866,6 +869,7 @@ substPat entry f pat = case pat of
     where
       substField (n, p) = (n, substPat entry f p)
   PatParens p loc -> PatParens (substPat entry f p) loc
+  PatAttr attr p loc -> PatAttr attr (substPat entry f p) loc
   Id vn (Info tp) loc -> Id vn (Info $ f tp) loc
   Wildcard (Info tp) loc -> Wildcard (Info $ f tp) loc
   PatAscription p td loc

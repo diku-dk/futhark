@@ -16,6 +16,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Attributes can now be numeric.
 
+* Patterns can now have attributes.  None have any effect at the
+  moment.
+
 ### Removed
 
 ### Changed

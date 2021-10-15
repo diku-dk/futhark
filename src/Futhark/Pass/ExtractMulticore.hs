@@ -50,7 +50,7 @@ instance MonadLogger ExtractM where
   addLog _ = pure ()
 
 indexArray :: VName -> LParam SOACS -> VName -> Stm MC
-indexArray i (Param p t) arr =
+indexArray i (Param _ p t) arr =
   Let (Pat [PatElem p t]) (defAux ()) . BasicOp $
     case t of
       Acc {} -> SubExp $ Var arr
@@ -164,7 +164,7 @@ unstreamLambda attrs nes lam = do
   let (chunk_param, acc_params, slice_params) =
         partitionChunkedFoldParameters (length nes) (lambdaParams lam)
 
-  inp_params <- forM slice_params $ \(Param p t) ->
+  inp_params <- forM slice_params $ \(Param _ p t) ->
     newParam (baseString p) (rowType t)
 
   body <- runBodyBuilder $

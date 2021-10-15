@@ -109,8 +109,8 @@ inBlockScanLookback ::
 inBlockScanLookback constants arrs_full_size flag_arr arrs scan_lam = everythingVolatile $ do
   flg_x <- dPrim "flg_x" p_int8
   flg_y <- dPrim "flg_y" p_int8
-  let flg_param_x = Param (tvVar flg_x) (MemPrim p_int8)
-      flg_param_y = Param (tvVar flg_y) (MemPrim p_int8)
+  let flg_param_x = Param mempty (tvVar flg_x) (MemPrim p_int8)
+      flg_param_y = Param mempty (tvVar flg_y) (MemPrim p_int8)
       flg_y_exp = tvExp flg_y
       statusP = (2 :: Imp.TExp Int8)
       statusX = (0 :: Imp.TExp Int8)

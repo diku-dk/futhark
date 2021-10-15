@@ -269,9 +269,7 @@ lowerUpdateIntoLoop scope updates pat val form body = do
           )
         return $
           Right
-            ( Param
-                mergename
-                (toDecl (typeOf mergedec) Unique),
+            ( Param mempty mergename (toDecl (typeOf mergedec) Unique),
               Var source
             )
       | otherwise = return $ Left $ mergeParam summary

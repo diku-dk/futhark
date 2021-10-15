@@ -141,7 +141,8 @@ instance Pretty t => Pretty (PatElemT t) where
   ppr (PatElem name t) = ppr name <+> colon <+> align (ppr t)
 
 instance Pretty t => Pretty (Param t) where
-  ppr (Param name t) = ppr name <+> colon <+> align (ppr t)
+  ppr (Param attrs name t) =
+    annot (attrAnnots attrs) $ ppr name <+> colon <+> align (ppr t)
 
 instance PrettyRep rep => Pretty (Stm rep) where
   ppr stm@(Let pat aux e) =

@@ -850,13 +850,13 @@ simplifyMapIota vtable pat aux op
           else
             certifying cs . letExp (baseString arr ++ "_prefix") . BasicOp . Index arr' $
               fullSlice arr_t [DimSlice (intConst Int64 0) w (intConst Int64 1)]
-      arr_elem <- newVName $ baseString arr ++ "_elem"
+      arr_elem_param <- newParam (baseString arr ++ "_elem") (rowType arr_t)
       pure $
         Just
           ( arr'',
-            Param arr_elem (rowType arr_t),
+            arr_elem_param,
             ( ArrayIndexing cs arr slice,
-              ArrayIndexing cs arr_elem (Slice (drop (length js + 1) (unSlice slice)))
+              ArrayIndexing cs (paramName arr_elem_param) (Slice (drop (length js + 1) (unSlice slice)))
             )
           )
     mapOverArr _ _ = return Nothing
@@ -936,7 +936,7 @@ moveTransformToInput vtable pat aux (Screma w arrs (ScremaForm scan reduce map_l
         return $
           Just
             ( arr_transformed,
-              Param arr_transformed_row (rowType arr_transformed_t),
+              Param mempty arr_transformed_row (rowType arr_transformed_t),
               ArrayVar mempty arr_transformed_row
             )
     mapOverArr _ = return Nothing

@@ -358,7 +358,7 @@ allocInFParam param pspace =
       let memname = baseString (paramName param) <> "_mem"
           ixfun = IxFun.iota $ map pe64 $ shapeDims shape
       mem <- lift $ newVName memname
-      tell ([], [Param mem $ MemMem pspace])
+      tell ([], [Param (paramAttrs param) mem $ MemMem pspace])
       return param {paramDec = MemArray pt shape u $ ArrayIn mem ixfun}
     Prim pt ->
       return param {paramDec = MemPrim pt}
@@ -437,11 +437,11 @@ allocInMergeParams merge m = do
                 (_, v') <- lift $ allocLinearArray DefaultSpace (baseString v) v
                 allocInMergeParam (mergeparam, Var v')
               else do
-                mem_name <- newVName "mem_param"
-                tell ([], [Param mem_name $ MemMem v_mem_space])
+                p <- newParam "mem_param" $ MemMem v_mem_space
+                tell ([], [p])
 
                 pure
-                  ( mergeparam {paramDec = MemArray pt shape u $ ArrayIn mem_name v_ixfun},
+                  ( mergeparam {paramDec = MemArray pt shape u $ ArrayIn (paramName p) v_ixfun},
                     Var v,
                     scalarRes param_t v_mem_space v_ixfun
                   )
@@ -452,11 +452,8 @@ allocInMergeParams merge m = do
 
             (ctx_params, param_ixfun_substs) <-
               fmap unzip . forM substs $ \e -> do
-                vname <- lift $ newVName "ctx_param_ext"
-                pure
-                  ( Param vname $ MemPrim $ primExpType $ untyped e,
-                    fmap Free $ pe64 $ Var vname
-                  )
+                p <- newParam "ctx_param_ext" $ MemPrim $ primExpType $ untyped e
+                pure (p, fmap Free $ le64 $ paramName p)
 
             tell (ctx_params, [])
 
@@ -466,11 +463,10 @@ allocInMergeParams merge m = do
                   (M.fromList $ zip (fmap Ext [0 ..]) param_ixfun_substs)
                   ext_ixfun
 
-            mem_name <- newVName "mem_param"
-            tell ([], [Param mem_name $ MemMem v_mem_space'])
-
+            mem_param <- newParam "mem_param" $ MemMem v_mem_space'
+            tell ([], [mem_param])
             pure
-              ( mergeparam {paramDec = MemArray pt shape u $ ArrayIn mem_name param_ixfun},
+              ( mergeparam {paramDec = MemArray pt shape u $ ArrayIn (paramName mem_param) param_ixfun},
                 v',
                 ensureArrayIn v_mem_space'
               )
@@ -828,11 +824,11 @@ allocInExp (WithAcc inputs bodylam) =
   WithAcc <$> mapM onInput inputs <*> onLambda bodylam
   where
     onLambda lam = do
-      params <- forM (lambdaParams lam) $ \(Param pv t) ->
+      params <- forM (lambdaParams lam) $ \(Param attrs pv t) ->
         case t of
-          Prim Unit -> pure $ Param pv $ MemPrim Unit
-          Acc acc ispace ts u -> pure $ Param pv $ MemAcc acc ispace ts u
-          _ -> error $ "Unexpected WithAcc lambda param: " ++ pretty (Param pv t)
+          Prim Unit -> pure $ Param attrs pv $ MemPrim Unit
+          Acc acc ispace ts u -> pure $ Param attrs pv $ MemAcc acc ispace ts u
+          _ -> error $ "Unexpected WithAcc lambda param: " ++ pretty (Param attrs pv t)
       allocInLambda params (lambdaBody lam)
 
     onInput (shape, arrs, op) =
@@ -843,7 +839,7 @@ allocInExp (WithAcc inputs bodylam) =
           num_is = shapeRank accshape
           (i_params, x_params, y_params) =
             splitAt3 num_is num_vs $ lambdaParams lam
-          i_params' = map ((`Param` MemPrim int64) . paramName) i_params
+          i_params' = map (\(Param attrs v _) -> Param attrs v $ MemPrim int64) i_params
           is = map (DimFix . Var . paramName) i_params'
       x_params' <- zipWithM (onXParam is) x_params arrs
       y_params' <- zipWithM (onYParam is) y_params arrs
@@ -853,26 +849,26 @@ allocInExp (WithAcc inputs bodylam) =
           (lambdaBody lam)
       return (lam', nes)
 
-    mkP p pt shape u mem ixfun is =
-      Param p . MemArray pt shape u . ArrayIn mem . IxFun.slice ixfun $
+    mkP attrs p pt shape u mem ixfun is =
+      Param attrs p . MemArray pt shape u . ArrayIn mem . IxFun.slice ixfun $
         fmap pe64 $ Slice $ is ++ map sliceDim (shapeDims shape)
 
-    onXParam _ (Param p (Prim t)) _ =
-      return $ Param p (MemPrim t)
-    onXParam is (Param p (Array pt shape u)) arr = do
+    onXParam _ (Param attrs p (Prim t)) _ =
+      pure $ Param attrs p (MemPrim t)
+    onXParam is (Param attrs p (Array pt shape u)) arr = do
       (mem, ixfun) <- lookupArraySummary arr
-      return $ mkP p pt shape u mem ixfun is
+      pure $ mkP attrs p pt shape u mem ixfun is
     onXParam _ p _ =
       error $ "Cannot handle MkAcc param: " ++ pretty p
 
-    onYParam _ (Param p (Prim t)) _ =
-      return $ Param p (MemPrim t)
-    onYParam is (Param p (Array pt shape u)) arr = do
+    onYParam _ (Param attrs p (Prim t)) _ =
+      pure $ Param attrs p $ MemPrim t
+    onYParam is (Param attrs p (Array pt shape u)) arr = do
       arr_t <- lookupType arr
       mem <- allocForArray arr_t DefaultSpace
       let base_dims = map pe64 $ arrayDims arr_t
           ixfun = IxFun.iota base_dims
-      pure $ mkP p pt shape u mem ixfun is
+      pure $ mkP attrs p pt shape u mem ixfun is
     onYParam _ p _ =
       error $ "Cannot handle MkAcc param: " ++ pretty p
 allocInExp e = mapExpM alloc e

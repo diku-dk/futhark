@@ -90,8 +90,9 @@ instance Substitute dec => Substitute (StmAux dec) where
       (substituteNames substs dec)
 
 instance Substitute dec => Substitute (Param dec) where
-  substituteNames substs (Param name dec) =
+  substituteNames substs (Param attrs name dec) =
     Param
+      (substituteNames substs attrs)
       (substituteNames substs name)
       (substituteNames substs dec)
 

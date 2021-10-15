@@ -442,8 +442,8 @@ binLambda bop arg_t ret_t = do
   return
     Lambda
       { lambdaParams =
-          [ Param x (Prim arg_t),
-            Param y (Prim arg_t)
+          [ Param mempty x (Prim arg_t),
+            Param mempty y (Prim arg_t)
           ],
         lambdaReturnType = [Prim ret_t],
         lambdaBody = body

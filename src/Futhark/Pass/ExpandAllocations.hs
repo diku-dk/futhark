@@ -814,7 +814,7 @@ sliceKernelSizes num_threads sizes space kstms = do
             BinOp (SMax Int64) (Var $ paramName x) (Var $ paramName y)
     return $ Lambda (xs ++ ys) (mkBody stms zs) i64s
 
-  flat_gtid_lparam <- Param <$> newVName "flat_gtid" <*> pure (Prim (IntType Int64))
+  flat_gtid_lparam <- newParam "flat_gtid" (Prim (IntType Int64))
 
   (size_lam', _) <- flip runBuilderT kernels_scope $ do
     params <- replicateM num_sizes $ newParam "x" (Prim int64)

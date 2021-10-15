@@ -131,9 +131,7 @@ fromSOAC' bound (SOAC.Screma w (SOAC.ScremaForm [] [] lam) inps) = do
                   substituteNames subst $ lambdaBody lam,
                 lambdaParams =
                   lambdaParams lam
-                    ++ [ Param name t
-                         | Ident name t <- newParams
-                       ]
+                    ++ [Param mempty name t | Ident name t <- newParams]
               }
       return $ Just $ MapNest w lam' [] inps'
   where
@@ -152,7 +150,7 @@ toSOAC ::
 toSOAC (MapNest w lam [] inps) =
   return $ SOAC.Screma w (Futhark.mapSOAC lam) inps
 toSOAC (MapNest w lam (Nesting npnames nres nrettype nw : ns) inps) = do
-  let nparams = zipWith Param npnames $ map SOAC.inputRowType inps
+  let nparams = zipWith (Param mempty) npnames $ map SOAC.inputRowType inps
   body <- runBodyBuilder $
     localScope (scopeOfLParams nparams) $ do
       letBindNames nres =<< SOAC.toExp

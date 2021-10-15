@@ -289,6 +289,8 @@ checkDoLoop checkExp (mergepat, mergeexp, form, loopbody) loc =
             Wildcard (Info $ t `setUniqueness` Nonunique) wloc
           uniquePat (PatParens p ploc) =
             PatParens (uniquePat p) ploc
+          uniquePat (PatAttr attr p ploc) =
+            PatAttr attr (uniquePat p) ploc
           uniquePat (Id name (Info t) iloc)
             | name `S.member` consumed_merge =
               let t' = t `setUniqueness` Unique `setAliases` mempty

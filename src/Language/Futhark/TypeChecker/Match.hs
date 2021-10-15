@@ -54,6 +54,7 @@ patternToMatch :: Pat -> Match
 patternToMatch (Id _ (Info t) _) = MatchWild $ toStruct t
 patternToMatch (Wildcard (Info t) _) = MatchWild $ toStruct t
 patternToMatch (PatParens p _) = patternToMatch p
+patternToMatch (PatAttr _ p _) = patternToMatch p
 patternToMatch (PatAscription p _ _) = patternToMatch p
 patternToMatch (PatLit l (Info t) _) =
   MatchConstr (ConstrLit l) [] $ toStruct t
