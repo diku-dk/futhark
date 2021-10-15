@@ -536,7 +536,8 @@ jobs:
     steps:
     - uses: actions/checkout@v2
       with:
-        submodules: true
+        submodules: recursive # for git-annex to work.
+        fetch-depth: 0        #
 
     - name: Install dependencies
       run: |
@@ -552,6 +553,9 @@ jobs:
         tar xvf futhark-nightly-linux-x86_64.tar.xz
         make -C futhark-nightly-linux-x86_64/ install PREFIX=$HOME/.local
         echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+    - run: |
+        cd futhark-benchmarks && pwd && git-annex get
 
     - run: |
         futhark test -C --no-terminal --backend=opencl  --pass-compiler-option=--Werror futhark-benchmarks
