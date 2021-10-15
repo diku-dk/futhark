@@ -541,7 +541,7 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y opencl-headers nvidia-cuda-dev nvidia-opencl-dev
+        sudo apt-get install -y opencl-headers nvidia-cuda-dev nvidia-opencl-dev git-annex
 
     - uses: actions/download-artifact@v2
       with:
