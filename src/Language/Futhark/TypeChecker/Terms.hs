@@ -752,7 +752,7 @@ checkExp (AppExp (Match e cs loc) _) =
       t
     pure $ AppExp (Match e' cs' loc) (Info $ AppRes t retext)
 checkExp (Attr info e loc) =
-  Attr info <$> checkExp e <*> pure loc
+  Attr <$> checkAttr info <*> checkExp e <*> pure loc
 
 checkCases ::
   PatType ->

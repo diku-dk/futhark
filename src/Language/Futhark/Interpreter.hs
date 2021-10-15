@@ -1093,14 +1093,14 @@ eval env (Constr c es (Info t) _) = do
   vs <- mapM (eval env) es
   shape <- typeValueShape env $ toStruct t
   return $ ValueSum shape c vs
-eval env (Attr (AttrAtom "break") e loc) = do
+eval env (Attr (AttrAtom (AtomName "break") _) e loc) = do
   break (locOf loc)
   eval env e
-eval env (Attr (AttrAtom "trace") e loc) = do
+eval env (Attr (AttrAtom (AtomName "trace") _) e loc) = do
   v <- eval env e
   trace (locStr (locOf loc)) v
   pure v
-eval env (Attr (AttrComp "trace" [AttrAtom tag]) e _) = do
+eval env (Attr (AttrComp "trace" [AttrAtom (AtomName tag) _] _) e _) = do
   v <- eval env e
   trace (nameToString tag) v
   pure v

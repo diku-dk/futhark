@@ -93,6 +93,7 @@ tokens :-
   ".."                     { tokenC TWO_DOTS }
   "."                      { tokenC DOT }
   "!"                      { tokenC BANG }
+  "$"                      { tokenC DOLLAR }
 
   @intlit i8               { tokenM $ return . I8LIT . readIntegral . T.filter (/= '_') . T.takeWhile (/='i') }
   @intlit i16              { tokenM $ return . I16LIT . readIntegral . T.filter (/= '_') . T.takeWhile (/='i') }
@@ -334,6 +335,7 @@ data Token = ID Name
            | ASTERISK
            | NEGATE
            | BANG
+           | DOLLAR
            | LTH
            | HAT
            | TILDE

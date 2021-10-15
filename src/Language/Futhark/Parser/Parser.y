@@ -890,12 +890,16 @@ FieldPats1 :: { [(Name, PatBase NoInfo Name)] }
 maybeAscription(p) : ':' p { Just $2 }
                    |       { Nothing }
 
-AttrInfo :: { AttrInfo }
-         : id { let L _ (ID s) = $1 in AttrAtom s }
-         | id '('       ')' { let L _ (ID s) = $1 in AttrComp s [] }
-         | id '(' Attrs ')' { let L _ (ID s) = $1 in AttrComp s $3 }
+AttrAtom :: { (AttrAtom Name, SrcLoc) }
+          : id     { let L loc (ID s) =     $1 in (AtomName s, loc) }
+          | intlit { let L loc (INTLIT x) = $1 in (AtomInt x, loc) }
 
-Attrs :: { [AttrInfo] }
+AttrInfo :: { AttrInfo Name }
+         : AttrAtom         { uncurry AttrAtom $1 }
+         | id '('       ')' { let L _ (ID s) = $1 in AttrComp s [] (srcspan $1 $>) }
+         | id '(' Attrs ')' { let L _ (ID s) = $1 in AttrComp s $3 (srcspan $1 $>) }
+
+Attrs :: { [AttrInfo Name] }
        : AttrInfo           { [$1] }
        | AttrInfo ',' Attrs { $1 : $3 }
 
@@ -1006,14 +1010,14 @@ addDocSpec doc (TypeSpec l name ps _ loc) = TypeSpec l name ps (Just doc) loc
 addDocSpec doc (ModSpec name se _ loc) = ModSpec name se (Just doc) loc
 addDocSpec _ spec = spec
 
-addAttr :: AttrInfo -> UncheckedDec -> UncheckedDec
+addAttr :: AttrInfo Name -> UncheckedDec -> UncheckedDec
 addAttr attr (ValDec val) =
   ValDec $ val { valBindAttrs = attr : valBindAttrs val }
 addAttr attr dec =
   dec
 
 -- We will extend this function once we actually start tracking these.
-addAttrSpec :: AttrInfo -> UncheckedSpec -> UncheckedSpec
+addAttrSpec :: AttrInfo Name -> UncheckedSpec -> UncheckedSpec
 addAttrSpec _attr dec = dec
 
 reverseNonempty :: (a, [a]) -> (a, [a])

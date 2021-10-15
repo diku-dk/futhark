@@ -185,12 +185,13 @@ import Prelude hiding (id, (.))
 
 -- | A single attribute.
 data Attr
-  = AttrAtom Name
+  = AttrName Name
+  | AttrInt Integer
   | AttrComp Name [Attr]
   deriving (Ord, Show, Eq)
 
 instance IsString Attr where
-  fromString = AttrAtom . fromString
+  fromString = AttrName . fromString
 
 -- | Every statement is associated with a set of attributes, which can
 -- have various effects throughout the compiler.

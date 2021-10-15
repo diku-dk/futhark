@@ -30,6 +30,7 @@ module Language.Futhark.TypeChecker.Monad
     aNote,
     MonadTypeChecker (..),
     checkName,
+    checkAttr,
     badOnLeft,
     module Language.Futhark.Warnings,
     Env (..),
@@ -528,3 +529,12 @@ mkTypeVarName desc i =
   desc <> nameFromString (mapMaybe subscript (show i))
   where
     subscript = flip lookup $ zip "0123456789" "₀₁₂₃₄₅₆₇₈₉"
+
+-- | Type-check an attribute.
+checkAttr :: MonadTypeChecker m => AttrInfo Name -> m (AttrInfo VName)
+checkAttr (AttrComp f attrs loc) =
+  AttrComp f <$> mapM checkAttr attrs <*> pure loc
+checkAttr (AttrAtom (AtomName v) loc) =
+  pure $ AttrAtom (AtomName v) loc
+checkAttr (AttrAtom (AtomInt x) loc) =
+  pure $ AttrAtom (AtomInt x) loc

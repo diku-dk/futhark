@@ -322,11 +322,15 @@ pBasicOp =
     ]
 
 pAttr :: Parser Attr
-pAttr = do
-  v <- pName
+pAttr =
   choice
-    [ AttrComp v <$> parens (pAttr `sepBy` pComma),
-      pure $ AttrAtom v
+    [ AttrInt . toInteger <$> pInt,
+      do
+        v <- pName
+        choice
+          [ AttrComp v <$> parens (pAttr `sepBy` pComma),
+            pure $ AttrName v
+          ]
     ]
 
 pAttrs :: Parser Attrs

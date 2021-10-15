@@ -32,12 +32,16 @@ transformProg always_safe vbinds = do
     runInternaliseM always_safe (internaliseValBinds vbinds)
   I.renameProg $ I.Prog consts funs
 
-internaliseAttr :: E.AttrInfo -> Attr
-internaliseAttr (E.AttrAtom v) = I.AttrAtom v
-internaliseAttr (E.AttrComp f attrs) = I.AttrComp f $ map internaliseAttr attrs
+internaliseAttr :: E.AttrInfo VName -> InternaliseM Attr
+internaliseAttr (E.AttrAtom (E.AtomName v) _) =
+  pure $ I.AttrName v
+internaliseAttr (E.AttrAtom (E.AtomInt x) _) =
+  pure $ I.AttrInt x
+internaliseAttr (E.AttrComp f attrs _) =
+  I.AttrComp f <$> mapM internaliseAttr attrs
 
-internaliseAttrs :: [E.AttrInfo] -> Attrs
-internaliseAttrs = mconcat . map (oneAttr . internaliseAttr)
+internaliseAttrs :: [E.AttrInfo VName] -> InternaliseM Attrs
+internaliseAttrs = fmap (mconcat . map oneAttr) . mapM internaliseAttr
 
 internaliseValBinds :: [E.ValBind] -> InternaliseM ()
 internaliseValBinds = mapM_ internaliseValBind
@@ -71,10 +75,12 @@ internaliseValBind fb@(E.ValBind entry fname retdecl (Info (rettype, _)) tparams
 
       let all_params = shapeparams ++ concat params'
 
+      attrs' <- internaliseAttrs attrs
+
       let fd =
             I.FunDef
               Nothing
-              (internaliseAttrs attrs)
+              attrs'
               (internaliseFunName fname)
               rettype'
               all_params
@@ -120,10 +126,11 @@ generateEntryPoint (E.EntryPoint e_params e_rettype) vb = localConstsScope $ do
           <$> mapM (fmap I.arrayDims . subExpType) vals
       pure (subExpsRes $ ctx ++ vals, map (const (I.Prim int64)) ctx)
 
+    attrs' <- internaliseAttrs attrs
     addFunDef $
       I.FunDef
         (Just entry')
-        (internaliseAttrs attrs)
+        attrs'
         ("entry_" <> baseName ofname)
         (ctx_ts ++ zeroExts (concat entry_rettype))
         (shapeparams ++ concat params')
@@ -724,11 +731,12 @@ internaliseExp desc (E.RecordUpdate src fields ve _ _) = do
         return $ bef ++ src'' ++ aft
     replace _ _ ve' _ = return ve'
 internaliseExp desc (E.Attr attr e loc) = do
-  e' <- local f $ internaliseExp desc e
+  attr' <- internaliseAttr attr
+  e' <- local (f attr') $ internaliseExp desc e
   case attr' of
     "trace" ->
       traceRes (locStr loc) e'
-    I.AttrComp "trace" [I.AttrAtom tag] ->
+    I.AttrComp "trace" [I.AttrName tag] ->
       traceRes (nameToString tag) e'
     "opaque" ->
       mapM (letSubExp desc . BasicOp . Opaque OpaqueNil) e'
@@ -737,8 +745,7 @@ internaliseExp desc (E.Attr attr e loc) = do
   where
     traceRes tag' =
       mapM (letSubExp desc . BasicOp . Opaque (OpaqueTrace tag'))
-    attr' = internaliseAttr attr
-    f env
+    f attr' env
       | attr' == "unsafe",
         not $ envSafe env =
         env {envDoBoundsChecks = False}

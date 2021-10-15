@@ -667,7 +667,8 @@ checkValBind (ValBind entry fname maybe_tdecl NoInfo tparams params body doc att
             </> "\nwill have an opaque type, so the result will likely not be usable."
     _ -> return ()
 
-  let vb = ValBind entry' fname' maybe_tdecl' (Info (rettype, retext)) tparams' params' body' doc attrs loc
+  attrs' <- mapM checkAttr attrs
+  let vb = ValBind entry' fname' maybe_tdecl' (Info (rettype, retext)) tparams' params' body' doc attrs' loc
   return
     ( mempty
         { envVtable =
