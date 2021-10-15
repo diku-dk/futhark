@@ -111,7 +111,8 @@ instance PrettyRep rep => Pretty (Body rep) where
         </> text "in" <+> braces (commasep $ map ppr res)
 
 instance Pretty Attr where
-  ppr (AttrAtom v) = ppr v
+  ppr (AttrName v) = ppr v
+  ppr (AttrInt x) = ppr x
   ppr (AttrComp f attrs) = ppr f <> parens (commasep $ map ppr attrs)
 
 attrAnnots :: Attrs -> [Doc]

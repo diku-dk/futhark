@@ -1678,6 +1678,7 @@ Attributes
 
 .. productionlist::
    attr:   `id`
+       :   `decimal`
        : | `id` "(" [`attr` ("," `attr`)*] ")"
 
 An expression, declaration, or module type spec can be prefixed with
@@ -1687,7 +1688,7 @@ affect or change the *semantics* of a program, but it may affect how
 well it compiles and runs (or in some cases, whether it compiles or
 runs at all).  Unknown attributes are silently ignored.  Most have no
 effect in the interpreter.  An attribute can be either an *atom*,
-written as just an identifier, or *compound*, consisting of an
+written as an identifier or number, or *compound*, consisting of an
 identifier and a comma-separated sequence of attributes.  The latter
 is used for grouping and encoding of more complex information.
 

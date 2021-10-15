@@ -14,6 +14,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Significantly expanded error index.
 
+* Attributes can now be numeric.
+
 ### Removed
 
 ### Changed

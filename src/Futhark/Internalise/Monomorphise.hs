@@ -67,7 +67,7 @@ data PolyBinding
         StructRetType,
         [VName],
         Exp,
-        [AttrInfo],
+        [AttrInfo VName],
         SrcLoc
       )
 
