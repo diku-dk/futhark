@@ -457,7 +457,7 @@ literals and variables, but also more complicated forms.
       : | "let" `id` `type_param`* `pat`+ [":" `type`] "=" `exp` "in" `exp`
       : | "(" "\" `pat`+ [":" `type`] "->" `exp` ")"
       : | "loop" `pat` [("=" `exp`)] `loopform` "do" `exp`
-      : | "#[" attr "]" `exp`
+      : | "#[" `attr` "]" `exp`
       : | "unsafe" `exp`
       : | "assert" `atom` `atom`
       : | `exp` "with" "[" `index` ("," `index`)* "]" "=" `exp`
