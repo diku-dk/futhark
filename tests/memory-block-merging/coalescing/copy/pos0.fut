@@ -6,7 +6,7 @@
 -- structure cpu { Alloc 1 }
 -- structure gpu { Alloc 1 }
 
-let main [n] (ns: [n]i32): [n]i32 =
+let main [n] (ns: *[n]i32): *[n]i32 =
   let t0 = map (+ 1) ns -- Will use the memory of t1.
   let t1 = copy t0
   in t1

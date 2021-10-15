@@ -26,8 +26,7 @@
 -- compiled random input { [256][256][256]i32 1i64 [256]i32 }
 -- auto output
 -- structure cpu { Alloc 0 }
-
--- structure gpu { Alloc 0 }
+-- structure gpu { Alloc 2 }
 
 let main [n] (t1: *[n][n][n]i32) (i: i64) (xs: [n]i32): *[n][n][n]i32 =
   #[incremental_flattening(only_intra)]
