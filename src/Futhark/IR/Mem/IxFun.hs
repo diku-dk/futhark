@@ -1137,6 +1137,8 @@ flatSpan (LMAD ofs dims) =
 conservativeFlatten :: LMAD (TPrimExp Int64 VName) -> LMAD (TPrimExp Int64 VName)
 conservativeFlatten l@(LMAD offset []) =
   LMAD offset [LMADDim 1 0 1 0 Unknown]
+conservativeFlatten l@(LMAD _ [_]) =
+  l
 conservativeFlatten l@(LMAD _ dims) =
   LMAD offset [LMADDim strd 0 (shp + 1) 0 Unknown]
   where

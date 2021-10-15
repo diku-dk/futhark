@@ -53,6 +53,7 @@ module Futhark.Util
     atMostChars,
     invertMap,
     cartesian,
+    fixPoint,
   )
 where
 
@@ -464,3 +465,8 @@ cartesian :: (Monoid m, Foldable t) => (a -> a -> m) -> t a -> t a -> m
 cartesian f xs ys =
   [(x, y) | x <- toList xs, y <- toList ys]
     & foldMap (uncurry f)
+
+fixPoint :: Eq a => (a -> a) -> a -> a
+fixPoint f x =
+  let x' = f x
+   in if x' == x then x else fixPoint f x'

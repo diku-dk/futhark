@@ -521,7 +521,7 @@ mkCoalsTabStm lutab lstm@(Let pat _ (DoLoop arginis lform body)) td_env bu_env =
       (bodyStms body)
       td_env'
       ( bu_env
-          { activeCoals = actv4,
+          { activeCoals = traceWith "actv4" actv4,
             inhibit = inhibit1
           }
       )
@@ -690,8 +690,18 @@ mkCoalsTabStm lutab lstm@(Let pat _ (DoLoop arginis lform body)) td_env bu_env =
                   <> pretty (alsmem etry)
                   <> "\nidx: "
                   <> pretty idx
+                  <> "\nscope: "
+                  -- <> pretty (scope td_env)
+                  -- <> "\nscope_loop: "
+                  -- <> pretty scope_loop
+                  -- <> "\nscal_tab: "
+                  <> pretty scal_tab
+                  <> "\nscal_tab: "
+                  <> pretty scal_tab
                   <> "\nwrt_i: "
                   <> pretty wrt_i
+                  <> "\ndstrefs: "
+                  <> pretty (dstrefs $ memrefs etry)
                   <> "\nuse_p: "
                   <> pretty use_p
                   <> "\nnoMemOverlap"

@@ -28,7 +28,7 @@ import Futhark.MonadFreshNames
 import Futhark.Optimise.ArrayShortCircuiting.DataStructs
 import Futhark.Optimise.ArrayShortCircuiting.TopDownAn
 import Futhark.Transform.Substitute
-import Prelude
+import Futhark.Util
 
 traceWith s a = trace (s <> ": " <> pretty a) a
 
@@ -173,75 +173,72 @@ recordMemRefUses ::
 recordMemRefUses td_env bu_env stm =
   let active_tab = activeCoals bu_env
       inhibit_tab = inhibit bu_env
-      (stm_wrts, stm_uses) = getUseSumFromStm td_env active_tab stm
+      (stm_wrts, stm_uses) = traceWith ("stm: " <> pretty stm <> "\nuseSumFromStm") $ getUseSumFromStm td_env active_tab stm
       active_etries = M.toList active_tab
 
       (mb_wrts, prev_uses, mb_lmads) =
         unzip3 $
           map
             ( \(m_b, etry) ->
-                if null stm_wrts
-                  then (Just $ Set mempty, dstrefs (memrefs etry), Set mempty)
-                  else
-                    let alias_m_b = getAliases mempty m_b
-                        stm_uses' = filter (not . (`nameIn` alias_m_b) . tupFst) stm_uses
-                        all_aliases = foldl getAliases mempty $ namesToList $ alsmem etry
-                        ixfns = map tupThd $ filter ((`nameIn` all_aliases) . tupSnd) stm_uses'
-                        lmads' = mapMaybe mbLmad ixfns
-                        lmads'' =
-                          if length lmads' == length ixfns
-                            then Set $ S.fromList $ lmads'
-                            else Undeterminable
+                let alias_m_b = getAliases mempty m_b
+                    stm_uses' = filter (not . (`nameIn` alias_m_b) . tupFst) stm_uses
+                    all_aliases = foldl getAliases mempty $ namesToList $ alsmem etry
+                    ixfns = map tupThd $ filter ((`nameIn` all_aliases) . tupSnd) stm_uses'
+                    lmads' = mapMaybe mbLmad ixfns
+                    lmads'' =
+                      if length lmads' == length ixfns
+                        then Set $ S.fromList $ lmads'
+                        else Undeterminable
 
-                        wrt_ixfns = map tupThd $ filter ((`nameIn` alias_m_b) . tupFst) stm_wrts
-                        wrt_tmps = mapMaybe mbLmad wrt_ixfns
-                        prev_use =
-                          translateAccessSummary (scope td_env) (scals bu_env) $
-                            (dstrefs . memrefs) etry
-                        wrt_lmads' =
-                          if length wrt_tmps == length wrt_ixfns
-                            then Set $ S.fromList wrt_tmps
-                            else Undeterminable
-                        original_mem_aliases =
-                          fmap tupFst stm_uses
-                            & uncons
-                            & fmap fst
-                            & (=<<) (`M.lookup` active_tab)
-                            & fmap alsmem
-                            & fromMaybe mempty
-                        (wrt_lmads'', lmads) =
-                          if m_b `nameIn` original_mem_aliases
-                            then (wrt_lmads' <> lmads'', Set mempty)
-                            else (wrt_lmads', lmads'')
-                        no_overlap = noMemOverlap td_env prev_use wrt_lmads''
-                        wrt_lmads =
-                          if no_overlap
-                            then Just wrt_lmads''
-                            else Nothing
-                     in trace
-                          ( "Philip m_b: " <> pretty m_b
-                              <> "\nalias_m_b: "
-                              <> pretty alias_m_b
-                              <> "\ndestmem entry: "
-                              <> pretty (dstmem etry)
-                              <> "\nstm_uses': "
-                              <> pretty stm_uses'
-                              <> "\norig_use: "
-                              <> pretty original_mem_aliases
-                              <> "\nall_aliases: "
-                              <> pretty all_aliases
-                              <> "\nstatement: "
-                              <> pretty stm
-                              <> "\nixfns: "
-                              <> pretty ixfns
-                              <> "\nwrt_lmads: "
-                              <> pretty wrt_lmads
-                              <> "\nprev_use: "
-                              <> pretty prev_use
-                              <> "\nlmads: "
-                              <> pretty lmads
-                          )
-                          (wrt_lmads, prev_use, lmads)
+                    wrt_ixfns = map tupThd $ filter ((`nameIn` alias_m_b) . tupFst) stm_wrts
+                    wrt_tmps = mapMaybe mbLmad wrt_ixfns
+                    prev_use =
+                      translateAccessSummary (scope td_env) (scals bu_env) $
+                        (dstrefs . memrefs) etry
+                    wrt_lmads' =
+                      if length wrt_tmps == length wrt_ixfns
+                        then Set $ S.fromList wrt_tmps
+                        else Undeterminable
+                    original_mem_aliases =
+                      fmap tupFst stm_uses
+                        & uncons
+                        & fmap fst
+                        & (=<<) (`M.lookup` active_tab)
+                        & fmap alsmem
+                        & fromMaybe mempty
+                    (wrt_lmads'', lmads) =
+                      if m_b `nameIn` original_mem_aliases
+                        then (wrt_lmads' <> lmads'', Set mempty)
+                        else (wrt_lmads', lmads'')
+                    no_overlap = noMemOverlap td_env prev_use wrt_lmads''
+                    wrt_lmads =
+                      if no_overlap
+                        then Just wrt_lmads''
+                        else Nothing
+                 in trace
+                      ( "Philip m_b: " <> pretty m_b
+                          <> "\nalias_m_b: "
+                          <> pretty alias_m_b
+                          <> "\ndestmem entry: "
+                          <> pretty (dstmem etry)
+                          <> "\nstm_uses': "
+                          <> pretty stm_uses'
+                          <> "\norig_use: "
+                          <> pretty original_mem_aliases
+                          <> "\nall_aliases: "
+                          <> pretty all_aliases
+                          <> "\nstatement: "
+                          <> pretty stm
+                          <> "\nixfns: "
+                          <> pretty ixfns
+                          <> "\nwrt_lmads: "
+                          <> pretty wrt_lmads
+                          <> "\nprev_use: "
+                          <> pretty prev_use
+                          <> "\nlmads: "
+                          <> pretty lmads
+                      )
+                      (wrt_lmads, prev_use, lmads)
             )
             active_etries
 
@@ -369,18 +366,18 @@ aggSummaryLoopPartial scope_before scope_loop scalars_loop (Just (iterator_var, 
           (isInt64 (LeafExp iterator_var $ IntType Int64) + 1)
           (upper_bound - typedLeafExp iterator_var - 1)
       )
-      (S.toList lmads)
+      (map (fixPoint $ IxFun.substituteInLMAD $ fmap TPrimExp scalars_loop) $ S.toList lmads)
 
 aggSummaryOne :: MonadFreshNames m => VName -> TPrimExp Int64 VName -> TPrimExp Int64 VName -> LmadRef -> m AccessSummary
 aggSummaryOne iterator_var lower_bound upper_bound (IxFun.LMAD _ dims) | iterator_var `nameIn` freeIn dims = return Undeterminable
-aggSummaryOne iterator_var lower_bound span (IxFun.LMAD offset0 dims0) = do
+aggSummaryOne iterator_var lower_bound span lmad@(IxFun.LMAD offset0 dims0) = do
   new_var <- newVName "k"
   let offset = traceWith "offset" $ replaceIteratorWith (typedLeafExp new_var) offset0
-      offsetp1 = traceWith' "offsetp1" $ replaceIteratorWith (typedLeafExp new_var + 1) offset0
+      offsetp1 = traceWith "offsetp1" $ replaceIteratorWith (typedLeafExp new_var + 1) offset0
       new_stride = traceWith "new_stride" $ TPrimExp $ constFoldPrimExp $ simplify $ untyped $ offsetp1 - offset
       new_offset = replaceIteratorWith lower_bound offset0
       new_lmad =
-        traceWith "new_lmad" $
+        traceWith ("old_lmad: " <> pretty lmad <> "\nnew_lmad") $
           IxFun.LMAD new_offset $
             IxFun.LMADDim new_stride 0 span 0 IxFun.Inc : map incPerm dims0
   if new_var `nameIn` freeIn new_lmad
