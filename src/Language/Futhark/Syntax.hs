@@ -470,7 +470,7 @@ type ValueType = TypeBase Int64 ()
 -- | The return type version of 'StructType'.
 type StructRetType = RetTypeBase (DimDecl VName) ()
 
--- | The return type version of 'PatternType'.
+-- | The return type version of 'PatType'.
 type PatRetType = RetTypeBase (DimDecl VName) Aliasing
 
 -- | A dimension declaration expression for use in a 'TypeExp'.
