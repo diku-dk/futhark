@@ -111,7 +111,6 @@ import Control.Monad.Identity
 import Control.Monad.State
 import Data.List (sortOn)
 import qualified Data.Map.Strict as M
-import qualified Data.Set as S
 import Futhark.Builder
 import Futhark.IR
 import Futhark.Util (maybeNth)
@@ -157,8 +156,6 @@ letSubExps ::
   m [SubExp]
 letSubExps desc = mapM $ letSubExp desc
 
--- | Only returns those pattern names that are not used in the pattern
--- itself (the "non-existential" part, you could say).
 letTupExp ::
   (MonadBuilder m) =>
   String ->
@@ -170,8 +167,7 @@ letTupExp name e = do
   e_t <- expExtType e
   names <- replicateM (length e_t) $ newVName name
   letBindNames names e
-  let ctx = shapeContext e_t
-  pure $ map fst $ filter ((`S.notMember` ctx) . snd) $ zip names [0 ..]
+  pure names
 
 letTupExp' ::
   (MonadBuilder m) =>
