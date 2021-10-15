@@ -111,7 +111,8 @@ instance PrettyRep rep => Pretty (Body rep) where
         </> text "in" <+> braces (commasep $ map ppr res)
 
 instance Pretty Attr where
-  ppr (AttrAtom v) = ppr v
+  ppr (AttrName v) = ppr v
+  ppr (AttrInt x) = ppr x
   ppr (AttrComp f attrs) = ppr f <> parens (commasep $ map ppr attrs)
 
 attrAnnots :: Attrs -> [Doc]
@@ -140,7 +141,8 @@ instance Pretty t => Pretty (PatElemT t) where
   ppr (PatElem name t) = ppr name <+> colon <+> align (ppr t)
 
 instance Pretty t => Pretty (Param t) where
-  ppr (Param name t) = ppr name <+> colon <+> align (ppr t)
+  ppr (Param attrs name t) =
+    annot (attrAnnots attrs) $ ppr name <+> colon <+> align (ppr t)
 
 instance PrettyRep rep => Pretty (Stm rep) where
   ppr stm@(Let pat aux e) =

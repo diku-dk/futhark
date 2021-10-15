@@ -76,6 +76,7 @@ tokens :-
   "}"                      { tokenC RCURLY }
   ","                      { tokenC COMMA }
   "_"                      { tokenC UNDERSCORE }
+  "?"                      { tokenC QUESTION_MARK }
   "->"                     { tokenC RIGHT_ARROW }
   ":"                      { tokenC COLON }
   ":>"                     { tokenC COLON_GT }
@@ -92,6 +93,7 @@ tokens :-
   ".."                     { tokenC TWO_DOTS }
   "."                      { tokenC DOT }
   "!"                      { tokenC BANG }
+  "$"                      { tokenC DOLLAR }
 
   @intlit i8               { tokenM $ return . I8LIT . readIntegral . T.filter (/= '_') . T.takeWhile (/='i') }
   @intlit i16              { tokenM $ return . I16LIT . readIntegral . T.filter (/= '_') . T.takeWhile (/='i') }
@@ -327,11 +329,13 @@ data Token = ID Name
            | COMMA
            | UNDERSCORE
            | RIGHT_ARROW
+           | QUESTION_MARK
 
            | EQU
            | ASTERISK
            | NEGATE
            | BANG
+           | DOLLAR
            | LTH
            | HAT
            | TILDE

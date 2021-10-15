@@ -9,12 +9,15 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
-* Tuning parameters now (officially) exposed in the C API.
+* Existential sizes can now be explicitly quantified in type
+  expressions (#1308).
 
-* `futhark autotune` is now 2-3x faster on many programs, as it now
-  keeps the process running.
+* Significantly expanded error index.
 
-* Negative numeric literals are now allowed in `case` patterns.
+* Attributes can now be numeric.
+
+* Patterns can now have attributes.  None have any effect at the
+  moment.
 
 ### Removed
 
@@ -22,7 +25,24 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+## [0.20.4]
+
+### Added
+
+* Tuning parameters now (officially) exposed in the C API.
+
+* `futhark autotune` is now 2-3x faster on many programs, as it now
+  keeps the process running.
+
+* Negative numeric literals are now allowed in `case` patterns.
+
+### Fixed
+
 * `futhark_context_config_set_profiling` was missing for the `c` backend.
+
+* Correct handling of nested entry points (#1478).
+
+* Incorrect type information recorded when doing in-place lowering (#1481).
 
 ## [0.20.3]
 

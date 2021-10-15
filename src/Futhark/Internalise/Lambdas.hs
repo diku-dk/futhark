@@ -42,7 +42,7 @@ internaliseStreamMapLambda ::
   InternaliseM I.Lambda
 internaliseStreamMapLambda internaliseLambda lam args = do
   chunk_size <- newVName "chunk_size"
-  let chunk_param = I.Param chunk_size (I.Prim int64)
+  let chunk_param = I.Param mempty chunk_size (I.Prim int64)
       outer = (`setOuterSize` I.Var chunk_size)
   localScope (scopeOfLParams [chunk_param]) $ do
     argtypes <- mapM I.subExpType args
@@ -89,7 +89,7 @@ internaliseStreamLambda ::
   InternaliseM ([LParam], Body)
 internaliseStreamLambda internaliseLambda lam rowts = do
   chunk_size <- newVName "chunk_size"
-  let chunk_param = I.Param chunk_size $ I.Prim int64
+  let chunk_param = I.Param mempty chunk_size $ I.Prim int64
       chunktypes = map (`arrayOfRow` I.Var chunk_size) rowts
   localScope (scopeOfLParams [chunk_param]) $ do
     (lam_params, orig_body, _) <-
@@ -97,8 +97,8 @@ internaliseStreamLambda internaliseLambda lam rowts = do
     let orig_chunk_param : params = lam_params
     body <- runBodyBuilder $ do
       letBindNames [paramName orig_chunk_param] $ I.BasicOp $ I.SubExp $ I.Var chunk_size
-      return orig_body
-    return (chunk_param : params, body)
+      pure orig_body
+    pure (chunk_param : params, body)
 
 -- Given @k@ lambdas, this will return a lambda that returns an
 -- (k+2)-element tuple of integers.  The first element is the
@@ -132,7 +132,7 @@ internalisePartitionLambda internaliseLambda k lam args = do
           BasicOp $
             CmpOp (CmpEq int64) eq_class $
               intConst Int64 $ toInteger i
-      fmap (map I.Var) . letTupExp "part_res"
+      letTupExp' "part_res"
         =<< eIf
           (eSubExp is_i)
           (pure $ resultBody $ result i)
