@@ -17,7 +17,7 @@ import Futhark.Compiler
 import Futhark.Test
 import Futhark.Util (hashText)
 import Futhark.Util.Options
-import Futhark.Util.Pretty (prettyText)
+import Futhark.Util.Pretty (prettyTextOneLine)
 import System.Environment (getExecutablePath)
 import System.Exit
 import System.FilePath
@@ -44,7 +44,7 @@ mainHash = mainWithOptions () [] "program" $ \args () ->
       prog <- filter (not . isBuiltin . fst) <$> readUntypedProgramOrDie file
       -- The 'map snd' is an attempt to get rid of the file names so
       -- they won't affect the hashing.
-      liftIO $ T.putStrLn $ hashText $ prettyText $ map snd prog
+      liftIO $ T.putStrLn $ hashText $ prettyTextOneLine $ map snd prog
     _ -> Nothing
 
 -- | @futhark dataget@
