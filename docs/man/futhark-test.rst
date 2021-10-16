@@ -193,6 +193,14 @@ OPTIONS
   ``foo.fut`` will be passed the tuning file ``foo.fut.tuning`` if it
   exists.
 
+ENVIRONMENT VARIABLES
+=====================
+
+``TMPDIR``
+
+  Directory used for temporary files such as gunzipped datasets and
+  log files.
+
 EXAMPLES
 ========
 
