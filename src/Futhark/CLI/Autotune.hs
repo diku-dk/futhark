@@ -32,12 +32,13 @@ data AutotuneOptions = AutotuneOptions
     optExtraOptions :: [String],
     optVerbose :: Int,
     optTimeout :: Int,
-    optDefaultThreshold :: Int
+    optDefaultThreshold :: Int,
+    optTestSpec :: Maybe FilePath
   }
 
 initialAutotuneOptions :: AutotuneOptions
 initialAutotuneOptions =
-  AutotuneOptions "opencl" Nothing 10 (Just "tuning") [] 0 60 thresholdMax
+  AutotuneOptions "opencl" Nothing 10 (Just "tuning") [] 0 60 thresholdMax Nothing
 
 compileOptions :: AutotuneOptions -> IO CompileOptions
 compileOptions opts = do
@@ -101,7 +102,9 @@ restoreTuningParams opts server = mapM_ opt
 
 prepare :: AutotuneOptions -> FutharkExe -> FilePath -> IO [(DatasetName, RunDataset, T.Text)]
 prepare opts futhark prog = do
-  spec <- testSpecFromProgramOrDie prog
+  spec <-
+    maybe (testSpecFromProgramOrDie prog) testSpecFromFileOrDie $
+      optTestSpec opts
   copts <- compileOptions opts
 
   truns <-
@@ -476,7 +479,12 @@ commandLineOptions =
       "v"
       ["verbose"]
       (NoArg $ Right $ \config -> config {optVerbose = optVerbose config + 1})
-      "Enable logging.  Pass multiple times for more."
+      "Enable logging.  Pass multiple times for more.",
+    Option
+      []
+      ["spec-file"]
+      (ReqArg (\s -> Right $ \config -> config {optTestSpec = Just s}) "FILE")
+      "Use test specification from this file."
   ]
 
 -- | Run @futhark autotune@
