@@ -7,6 +7,8 @@ module Futhark.Test.Spec
     testSpecFromProgramOrDie,
     testSpecsFromPaths,
     testSpecsFromPathsOrDie,
+    testSpecFromFile,
+    testSpecFromFileOrDie,
     ProgramTest (..),
     StructureTest (..),
     StructurePipeline (..),
@@ -405,6 +407,11 @@ testSpecFromProgramOrDie prog = do
       exitFailure
     Right spec -> pure spec
 
+testPrograms :: FilePath -> IO [FilePath]
+testPrograms dir = filter isFut <$> directoryContents dir
+  where
+    isFut = (== ".fut") . takeExtension
+
 -- | Read test specifications from the given path, which can be a file
 -- or directory containing @.fut@ files and further directories.
 testSpecsFromPath :: FilePath -> IO (Either String [(FilePath, ProgramTest)])
@@ -436,7 +443,21 @@ testSpecsFromPathsOrDie dirs = do
       exitFailure
     Right specs -> pure specs
 
-testPrograms :: FilePath -> IO [FilePath]
-testPrograms dir = filter isFut <$> directoryContents dir
-  where
-    isFut = (== ".fut") . takeExtension
+-- | Read a test specification from a file.  Expects only a single
+-- block, and no comment prefixes.
+testSpecFromFile :: FilePath -> IO (Either String ProgramTest)
+testSpecFromFile path =
+  ( either (Left . errorBundlePretty) Right . parse (testSpec space) path
+      <$> T.readFile path
+  )
+    `catch` couldNotRead
+
+-- | Like 'testSpecFromFile', but kills the process on errors.
+testSpecFromFileOrDie :: FilePath -> IO ProgramTest
+testSpecFromFileOrDie dirs = do
+  spec_or_err <- testSpecFromFile dirs
+  case spec_or_err of
+    Left err -> do
+      putStrLn err
+      exitFailure
+    Right spec -> pure spec

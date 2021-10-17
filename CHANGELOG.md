@@ -19,6 +19,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Patterns can now have attributes.  None have any effect at the
   moment.
 
+* `futhark autotune` and `futhark bench` now take a `--spec-file`
+  option for loading a test specification from another file.
+
 ### Removed
 
 ### Changed
