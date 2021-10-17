@@ -160,29 +160,23 @@ data Success
 
 type Parser = Parsec Void T.Text
 
-postlexeme :: Parser ()
-postlexeme = void $ hspace *> optional (try $ eol *> "--" *> postlexeme)
-
-lexeme :: Parser a -> Parser a
-lexeme p = p <* postlexeme
+lexeme :: Parser () -> Parser a -> Parser a
+lexeme sep p = p <* sep
 
 -- Like 'lexeme', but does not consume trailing linebreaks.
 lexeme' :: Parser a -> Parser a
 lexeme' p = p <* hspace
 
-lexstr :: T.Text -> Parser ()
-lexstr = void . try . lexeme . string
-
 -- Like 'lexstr', but does not consume trailing linebreaks.
 lexstr' :: T.Text -> Parser ()
 lexstr' = void . try . lexeme' . string
 
-braces :: Parser a -> Parser a
-braces p = lexstr "{" *> p <* lexstr "}"
+inBraces :: Parser () -> Parser a -> Parser a
+inBraces sep = between (lexeme sep "{") (lexeme sep "}")
 
-parseNatural :: Parser Int
-parseNatural =
-  lexeme $ foldl' addDigit 0 . map num <$> some digitChar
+parseNatural :: Parser () -> Parser Int
+parseNatural sep =
+  lexeme sep $ foldl' addDigit 0 . map num <$> some digitChar
   where
     addDigit acc x = acc * 10 + x
     num c = ord c - ord '0'
@@ -196,42 +190,42 @@ restOfLine = do
 restOfLine_ :: Parser T.Text
 restOfLine_ = takeWhileP Nothing (/= '\n')
 
-parseDescription :: Parser T.Text
-parseDescription =
+parseDescription :: Parser () -> Parser T.Text
+parseDescription sep =
   T.unlines <$> pDescLine `manyTill` pDescriptionSeparator
   where
-    pDescLine = "--" *> restOfLine
-    pDescriptionSeparator = void $ "-- ==" *> postlexeme
+    pDescLine = restOfLine <* sep
+    pDescriptionSeparator = void $ "==" *> sep
 
-parseTags :: Parser [T.Text]
-parseTags = lexeme' "tags" *> braces (many parseTag) <|> pure []
+parseTags :: Parser () -> Parser [T.Text]
+parseTags sep = lexeme' "tags" *> inBraces sep (many parseTag) <|> pure []
   where
-    parseTag = T.pack <$> lexeme (some $ satisfy tagConstituent)
+    parseTag = T.pack <$> lexeme sep (some $ satisfy tagConstituent)
 
 tagConstituent :: Char -> Bool
 tagConstituent c = isAlphaNum c || c == '_' || c == '-'
 
-parseAction :: Parser TestAction
-parseAction =
+parseAction :: Parser () -> Parser TestAction
+parseAction sep =
   choice
-    [ CompileTimeFailure <$> (lexstr' "error:" *> parseExpectedError),
-      RunCases <$> parseInputOutputs
-        <*> many parseExpectedStructure
-        <*> many parseWarning
+    [ CompileTimeFailure <$> (lexstr' "error:" *> parseExpectedError sep),
+      RunCases <$> parseInputOutputs sep
+        <*> many (parseExpectedStructure sep)
+        <*> many (parseWarning sep)
     ]
 
-parseInputOutputs :: Parser [InputOutputs]
-parseInputOutputs = do
-  entrys <- parseEntryPoints
-  cases <- parseRunCases
+parseInputOutputs :: Parser () -> Parser [InputOutputs]
+parseInputOutputs sep = do
+  entrys <- parseEntryPoints sep
+  cases <- parseRunCases sep
   pure $
     if null cases
       then []
       else map (`InputOutputs` cases) entrys
 
-parseEntryPoints :: Parser [T.Text]
-parseEntryPoints =
-  (lexeme' "entry:" *> many entry <* postlexeme) <|> pure ["main"]
+parseEntryPoints :: Parser () -> Parser [T.Text]
+parseEntryPoints sep =
+  (lexeme' "entry:" *> many entry <* sep) <|> pure ["main"]
   where
     constituent c = not (isSpace c) && c /= '}'
     entry = lexeme' $ T.pack <$> some (satisfy constituent)
@@ -242,23 +236,23 @@ parseRunTags = many . try . lexeme' $ do
   guard $ s `notElem` ["input", "structure", "warning"]
   pure s
 
-parseRunCases :: Parser [TestRun]
-parseRunCases = parseRunCases' (0 :: Int)
+parseRunCases :: Parser () -> Parser [TestRun]
+parseRunCases sep = parseRunCases' (0 :: Int)
   where
     parseRunCases' i =
       (:) <$> parseRunCase i <*> parseRunCases' (i + 1)
         <|> pure []
     parseRunCase i = do
       tags <- parseRunTags
-      lexstr "input"
+      void $ lexeme sep "input"
       input <-
         if "random" `elem` tags
-          then parseRandomValues
+          then parseRandomValues sep
           else
             if "script" `elem` tags
-              then parseScriptValues
-              else parseValues
-      expr <- parseExpectedResult
+              then parseScriptValues sep
+              else parseValues sep
+      expr <- parseExpectedResult sep
       pure $ TestRun tags input expr i $ desc i input
 
     -- If the file is gzipped, we strip the 'gz' extension from
@@ -284,81 +278,83 @@ parseRunCases = parseRunCases' (0 :: Int)
     desc _ (ScriptFile path) =
       path
 
-parseExpectedResult :: Parser (ExpectedResult Success)
-parseExpectedResult =
+parseExpectedResult :: Parser () -> Parser (ExpectedResult Success)
+parseExpectedResult sep =
   choice
-    [ lexstr "auto" *> lexstr "output" $> Succeeds (Just SuccessGenerateValues),
-      Succeeds . Just . SuccessValues <$> (lexstr "output" *> parseValues),
-      RunTimeFailure <$> (lexstr "error:" *> parseExpectedError),
+    [ lexeme sep "auto" *> lexeme sep "output" $> Succeeds (Just SuccessGenerateValues),
+      Succeeds . Just . SuccessValues <$> (lexeme sep "output" *> parseValues sep),
+      RunTimeFailure <$> (lexeme sep "error:" *> parseExpectedError sep),
       pure (Succeeds Nothing)
     ]
 
-parseExpectedError :: Parser ExpectedError
-parseExpectedError = lexeme $ do
-  s <- T.strip <$> restOfLine_ <* postlexeme
+parseExpectedError :: Parser () -> Parser ExpectedError
+parseExpectedError sep = lexeme sep $ do
+  s <- T.strip <$> restOfLine_ <* sep
   if T.null s
     then pure AnyError
     else -- blankCompOpt creates a regular expression that treats
     -- newlines like ordinary characters, which is what we want.
       ThisError s <$> makeRegexOptsM blankCompOpt defaultExecOpt (T.unpack s)
 
-parseScriptValues :: Parser Values
-parseScriptValues =
+parseScriptValues :: Parser () -> Parser Values
+parseScriptValues sep =
   choice
-    [ ScriptValues <$> braces (Script.parseExp postlexeme),
-      ScriptFile . T.unpack <$> (lexstr "@" *> lexeme nextWord)
+    [ ScriptValues <$> inBraces sep (Script.parseExp sep),
+      ScriptFile . T.unpack <$> (lexeme sep "@" *> lexeme sep nextWord)
     ]
   where
     nextWord = takeWhileP Nothing $ not . isSpace
 
-parseRandomValues :: Parser Values
-parseRandomValues = GenValues <$> braces (many parseGenValue)
+parseRandomValues :: Parser () -> Parser Values
+parseRandomValues sep = GenValues <$> inBraces sep (many (parseGenValue sep))
 
-parseGenValue :: Parser GenValue
-parseGenValue =
+parseGenValue :: Parser () -> Parser GenValue
+parseGenValue sep =
   choice
-    [ GenValue <$> lexeme parseType,
-      GenPrim <$> lexeme V.parsePrimValue
+    [ GenValue <$> lexeme sep parseType,
+      GenPrim <$> lexeme sep V.parsePrimValue
     ]
 
-parseValues :: Parser Values
-parseValues =
+parseValues :: Parser () -> Parser Values
+parseValues sep =
   choice
-    [ Values <$> braces (many $ parseValue postlexeme),
-      InFile . T.unpack <$> (lexstr "@" *> lexeme nextWord)
+    [ Values <$> inBraces sep (many $ parseValue sep),
+      InFile . T.unpack <$> (lexeme sep "@" *> lexeme sep nextWord)
     ]
   where
     nextWord = takeWhileP Nothing $ not . isSpace
 
-parseWarning :: Parser WarningTest
-parseWarning = lexstr "warning:" >> parseExpectedWarning
+parseWarning :: Parser () -> Parser WarningTest
+parseWarning sep = lexeme sep "warning:" >> parseExpectedWarning
   where
-    parseExpectedWarning = lexeme $ do
+    parseExpectedWarning = lexeme sep $ do
       s <- T.strip <$> restOfLine_
       ExpectedWarning s <$> makeRegexOptsM blankCompOpt defaultExecOpt (T.unpack s)
 
-parseExpectedStructure :: Parser StructureTest
-parseExpectedStructure =
-  lexstr "structure" *> (StructureTest <$> optimisePipeline <*> parseMetrics)
+parseExpectedStructure :: Parser () -> Parser StructureTest
+parseExpectedStructure sep =
+  lexeme sep "structure" *> (StructureTest <$> optimisePipeline sep <*> parseMetrics sep)
 
-optimisePipeline :: Parser StructurePipeline
-optimisePipeline =
-  lexstr "distributed" $> KernelsPipeline
-    <|> lexstr "gpu" $> GpuPipeline
-    <|> lexstr "cpu" $> SequentialCpuPipeline
-    <|> lexstr "internalised" $> NoPipeline
-    <|> pure SOACSPipeline
+optimisePipeline :: Parser () -> Parser StructurePipeline
+optimisePipeline sep =
+  choice
+    [ lexeme sep "distributed" $> KernelsPipeline,
+      lexeme sep "gpu" $> GpuPipeline,
+      lexeme sep "cpu" $> SequentialCpuPipeline,
+      lexeme sep "internalised" $> NoPipeline,
+      pure SOACSPipeline
+    ]
 
-parseMetrics :: Parser AstMetrics
-parseMetrics =
-  braces . fmap (AstMetrics . M.fromList) . many $
-    (,) <$> (T.pack <$> lexeme (some (satisfy constituent))) <*> parseNatural
+parseMetrics :: Parser () -> Parser AstMetrics
+parseMetrics sep =
+  inBraces sep . fmap (AstMetrics . M.fromList) . many $
+    (,) <$> (T.pack <$> lexeme sep (some (satisfy constituent))) <*> parseNatural sep
   where
     constituent c = isAlpha c || c == '/'
 
-testSpec :: Parser ProgramTest
-testSpec =
-  ProgramTest <$> parseDescription <*> parseTags <*> parseAction
+testSpec :: Parser () -> Parser ProgramTest
+testSpec sep =
+  ProgramTest <$> parseDescription sep <*> parseTags sep <*> parseAction sep
 
 couldNotRead :: IOError -> IO (Either String a)
 couldNotRead = pure . Left . show
@@ -366,7 +362,8 @@ couldNotRead = pure . Left . show
 pProgramTest :: Parser ProgramTest
 pProgramTest = do
   void $ many pNonTestLine
-  maybe_spec <- optional testSpec <* pEndOfTestBlock <* many pNonTestLine
+  maybe_spec <-
+    optional ("--" *> sep *> testSpec sep) <* pEndOfTestBlock <* many pNonTestLine
   case maybe_spec of
     Just spec
       | RunCases old_cases structures warnings <- testAction spec -> do
@@ -378,6 +375,8 @@ pProgramTest = do
     Nothing ->
       eof $> noTest
   where
+    sep = void $ hspace *> optional (try $ eol *> "--" *> sep)
+
     noTest =
       ProgramTest mempty mempty (RunCases mempty mempty mempty)
 
@@ -386,7 +385,7 @@ pProgramTest = do
     pNonTestLine =
       void $ notFollowedBy "-- ==" *> restOfLine
     pInputOutputs =
-      parseDescription *> parseInputOutputs <* pEndOfTestBlock
+      "--" *> sep *> parseDescription sep *> parseInputOutputs sep <* pEndOfTestBlock
 
 -- | Read the test specification from the given Futhark program.
 testSpecFromProgram :: FilePath -> IO (Either String ProgramTest)
