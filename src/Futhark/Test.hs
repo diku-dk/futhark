@@ -217,11 +217,9 @@ braces p = lexstr "{" *> p <* lexstr "}"
 
 parseNatural :: Parser Int
 parseNatural =
-  lexeme $
-    foldl' (\acc x -> acc * 10 + x) 0
-      . map num
-      <$> some digitChar
+  lexeme $ foldl' addDigit 0 . map num <$> some digitChar
   where
+    addDigit acc x = acc * 10 + x
     num c = ord c - ord '0'
 
 restOfLine :: Parser T.Text
@@ -250,25 +248,25 @@ tagConstituent c = isAlphaNum c || c == '_' || c == '-'
 
 parseAction :: Parser TestAction
 parseAction =
-  CompileTimeFailure <$> (lexstr' "error:" *> parseExpectedError)
-    <|> ( RunCases <$> parseInputOutputs
-            <*> many parseExpectedStructure
-            <*> many parseWarning
-        )
+  choice
+    [ CompileTimeFailure <$> (lexstr' "error:" *> parseExpectedError),
+      RunCases <$> parseInputOutputs
+        <*> many parseExpectedStructure
+        <*> many parseWarning
+    ]
 
 parseInputOutputs :: Parser [InputOutputs]
 parseInputOutputs = do
   entrys <- parseEntryPoints
   cases <- parseRunCases
-  return $
+  pure $
     if null cases
       then []
       else map (`InputOutputs` cases) entrys
 
 parseEntryPoints :: Parser [T.Text]
 parseEntryPoints =
-  (lexeme' "entry:" *> many entry <* postlexeme)
-    <|> pure ["main"]
+  (lexeme' "entry:" *> many entry <* postlexeme) <|> pure ["main"]
   where
     constituent c = not (isSpace c) && c /= '}'
     entry = lexeme' $ T.pack <$> some (satisfy constituent)
@@ -277,7 +275,7 @@ parseRunTags :: Parser [String]
 parseRunTags = many . try . lexeme' $ do
   s <- some $ satisfy tagConstituent
   guard $ s `notElem` ["input", "structure", "warning"]
-  return s
+  pure s
 
 parseRunCases :: Parser [TestRun]
 parseRunCases = parseRunCases' (0 :: Int)
@@ -296,7 +294,7 @@ parseRunCases = parseRunCases' (0 :: Int)
               then parseScriptValues
               else parseValues
       expr <- parseExpectedResult
-      return $ TestRun tags input expr i $ desc i input
+      pure $ TestRun tags input expr i $ desc i input
 
     -- If the file is gzipped, we strip the 'gz' extension from
     -- the dataset name.  This makes it more convenient to rename
@@ -323,16 +321,18 @@ parseRunCases = parseRunCases' (0 :: Int)
 
 parseExpectedResult :: Parser (ExpectedResult Success)
 parseExpectedResult =
-  (lexstr "auto" *> lexstr "output" $> Succeeds (Just SuccessGenerateValues))
-    <|> (Succeeds . Just . SuccessValues <$> (lexstr "output" *> parseValues))
-    <|> (RunTimeFailure <$> (lexstr "error:" *> parseExpectedError))
-    <|> pure (Succeeds Nothing)
+  choice
+    [ lexstr "auto" *> lexstr "output" $> Succeeds (Just SuccessGenerateValues),
+      Succeeds . Just . SuccessValues <$> (lexstr "output" *> parseValues),
+      RunTimeFailure <$> (lexstr "error:" *> parseExpectedError),
+      pure (Succeeds Nothing)
+    ]
 
 parseExpectedError :: Parser ExpectedError
 parseExpectedError = lexeme $ do
   s <- T.strip <$> restOfLine_ <* postlexeme
   if T.null s
-    then return AnyError
+    then pure AnyError
     else -- blankCompOpt creates a regular expression that treats
     -- newlines like ordinary characters, which is what we want.
       ThisError s <$> makeRegexOptsM blankCompOpt defaultExecOpt (T.unpack s)
@@ -374,8 +374,7 @@ parseWarning = lexstr "warning:" >> parseExpectedWarning
 
 parseExpectedStructure :: Parser StructureTest
 parseExpectedStructure =
-  lexstr "structure"
-    *> (StructureTest <$> optimisePipeline <*> parseMetrics)
+  lexstr "structure" *> (StructureTest <$> optimisePipeline <*> parseMetrics)
 
 optimisePipeline :: Parser StructurePipeline
 optimisePipeline =
@@ -387,10 +386,8 @@ optimisePipeline =
 
 parseMetrics :: Parser AstMetrics
 parseMetrics =
-  braces $
-    fmap (AstMetrics . M.fromList) $
-      many $
-        (,) <$> (T.pack <$> lexeme (some (satisfy constituent))) <*> parseNatural
+  braces . fmap (AstMetrics . M.fromList) . many $
+    (,) <$> (T.pack <$> lexeme (some (satisfy constituent))) <*> parseNatural
   where
     constituent c = isAlpha c || c == '/'
 
@@ -399,7 +396,7 @@ testSpec =
   ProgramTest <$> parseDescription <*> parseTags <*> parseAction
 
 couldNotRead :: IOError -> IO (Either String a)
-couldNotRead = return . Left . show
+couldNotRead = pure . Left . show
 
 pProgramTest :: Parser ProgramTest
 pProgramTest = do
@@ -442,7 +439,7 @@ testSpecFromFileOrDie prog = do
     Left err -> do
       putStrLn err
       exitFailure
-    Right spec -> return spec
+    Right spec -> pure spec
 
 -- | Read test specifications from the given path, which can be a file
 -- or directory containing @.fut@ files and further directories.
@@ -450,10 +447,10 @@ testSpecsFromPath :: FilePath -> IO (Either String [(FilePath, ProgramTest)])
 testSpecsFromPath path = do
   programs_or_err <- (Right <$> testPrograms path) `catch` couldNotRead
   case programs_or_err of
-    Left err -> return $ Left err
+    Left err -> pure $ Left err
     Right programs -> do
       specs_or_errs <- mapM testSpecFromFile programs
-      return $ zip programs <$> sequence specs_or_errs
+      pure $ zip programs <$> sequence specs_or_errs
 
 -- | Read test specifications from the given paths, which can be a
 -- files or directories containing @.fut@ files and further
@@ -473,7 +470,7 @@ testSpecsFromPathsOrDie dirs = do
     Left err -> do
       putStrLn err
       exitFailure
-    Right specs -> return specs
+    Right specs -> pure specs
 
 testPrograms :: FilePath -> IO [FilePath]
 testPrograms dir = filter isFut <$> directoryContents dir
@@ -498,12 +495,12 @@ newtype FutharkExe = FutharkExe FilePath
 -- read relative to.
 getValues :: (MonadFail m, MonadIO m) => FutharkExe -> FilePath -> Values -> m [V.Value]
 getValues _ _ (Values vs) =
-  return vs
+  pure vs
 getValues futhark dir v = do
   s <- getValuesBS futhark dir v
   case valuesFromByteString file s of
     Left e -> fail e
-    Right vs -> return vs
+    Right vs -> pure vs
   where
     file = case v of
       Values {} -> "<values>"
@@ -522,14 +519,14 @@ readAndDecompress file = E.try $ do
 -- guarantee that the resulting byte string yields a readable value.
 getValuesBS :: (MonadFail m, MonadIO m) => FutharkExe -> FilePath -> Values -> m BS.ByteString
 getValuesBS _ _ (Values vs) =
-  return $ BS.fromStrict $ T.encodeUtf8 $ T.unlines $ map V.valueText vs
+  pure $ BS.fromStrict $ T.encodeUtf8 $ T.unlines $ map V.valueText vs
 getValuesBS _ dir (InFile file) =
   case takeExtension file of
     ".gz" -> liftIO $ do
       s <- readAndDecompress file'
       case s of
         Left e -> fail $ show file ++ ": " ++ show e
-        Right s' -> return s'
+        Right s' -> pure s'
     _ -> liftIO $ BS.readFile file'
   where
     file' = dir </> file
@@ -665,7 +662,7 @@ getGenFile futhark dir gen = do
       withFile (dir </> file) ReadMode (fmap (== genFileSize gen) . hFileSize)
         `catch` \ex ->
           if isDoesNotExistError ex
-            then return False
+            then pure False
             else E.throw ex
   unless exists_and_proper_size $
     liftIO $ do
@@ -686,7 +683,7 @@ genValues (FutharkExe futhark) gens = do
   (code, stdout, stderr) <- readProcessWithExitCode futhark ("dataset" : args) mempty
   case code of
     ExitSuccess ->
-      return stdout
+      pure stdout
     ExitFailure e ->
       fail $
         "'futhark dataset' failed with exit code " ++ show e ++ " and stderr:\n"
@@ -749,9 +746,9 @@ getExpectedResult futhark prog entry tr =
                   testRunReferenceOutput prog entry tr
             }
     Succeeds Nothing ->
-      return $ Succeeds Nothing
+      pure $ Succeeds Nothing
     RunTimeFailure err ->
-      return $ RunTimeFailure err
+      pure $ RunTimeFailure err
 
 -- | The name we use for compiled programs.
 binaryName :: FilePath -> FilePath
@@ -773,8 +770,8 @@ compileProgram extra_options (FutharkExe futhark) backend program = do
   case futcode of
     ExitFailure 127 -> throwError [progNotFound $ T.pack futhark]
     ExitFailure _ -> throwError [T.decodeUtf8 stderr]
-    ExitSuccess -> return ()
-  return (stdout, stderr)
+    ExitSuccess -> pure ()
+  pure (stdout, stderr)
   where
     binOutputf = binaryName program
     options = [program, "-o", binOutputf] ++ extra_options
@@ -840,7 +837,7 @@ ensureReferenceOutput concurrency futhark compiler prog ios = do
         (code, stdout, stderr) <- runProgram futhark "" ["-b"] prog entry $ runInput tr
         case code of
           ExitFailure e ->
-            return $
+            pure $
               Left
                 [ T.pack $
                     "Reference dataset generation failed with exit code "
@@ -852,11 +849,11 @@ ensureReferenceOutput concurrency futhark compiler prog ios = do
             let f = file (entry, tr)
             liftIO $ createDirectoryIfMissing True $ takeDirectory f
             SBS.writeFile f stdout
-            return $ Right ()
+            pure $ Right ()
 
     case sequence_ res of
       Left err -> throwError err
-      Right () -> return ()
+      Right () -> pure ()
   where
     file (entry, tr) =
       takeDirectory prog </> testRunReferenceOutput prog entry tr
@@ -875,16 +872,16 @@ ensureReferenceOutput concurrency futhark compiler prog ios = do
 -- argument is the extension of the tuning file, or 'Nothing' if none
 -- should be used.
 determineTuning :: MonadIO m => Maybe FilePath -> FilePath -> m ([String], String)
-determineTuning Nothing _ = return ([], mempty)
+determineTuning Nothing _ = pure ([], mempty)
 determineTuning (Just ext) program = do
   exists <- liftIO $ doesFileExist (program <.> ext)
   if exists
     then
-      return
+      pure
         ( ["--tuning", program <.> ext],
           " (using " <> takeFileName (program <.> ext) <> ")"
         )
-    else return ([], mempty)
+    else pure ([], mempty)
 
 -- | Check that the result is as expected, and write files and throw
 -- an error if not.
@@ -909,7 +906,7 @@ checkResult program expected_vs actual_vs =
             then mempty
             else "\n...and " <> prettyText (length mismatches) <> " other mismatches."
     [] ->
-      return ()
+      pure ()
 
 -- | Create a Futhark server configuration suitable for use when
 -- testing/benchmarking Futhark programs.
