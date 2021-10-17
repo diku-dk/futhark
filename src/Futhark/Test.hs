@@ -740,18 +740,14 @@ getExpectedResult futhark prog entry tr =
     (Succeeds (Just (SuccessValues vals))) ->
       Succeeds . Just <$> getValues futhark (takeDirectory prog) vals
     Succeeds (Just SuccessGenerateValues) ->
-      getExpectedResult
-        futhark
-        prog
-        entry
-        tr
-          { runExpectedResult =
-              Succeeds $
-                Just $
-                  SuccessValues $
-                    InFile $
-                      testRunReferenceOutput prog entry tr
-          }
+      getExpectedResult futhark prog entry tr'
+      where
+        tr' =
+          tr
+            { runExpectedResult =
+                Succeeds . Just . SuccessValues . InFile $
+                  testRunReferenceOutput prog entry tr
+            }
     Succeeds Nothing ->
       return $ Succeeds Nothing
     RunTimeFailure err ->
