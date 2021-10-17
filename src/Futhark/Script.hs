@@ -15,6 +15,7 @@ module Futhark.Script
     Func (..),
     Exp (..),
     parseExp,
+    parseExpFromText,
     varsInExp,
     ScriptValueType (..),
     ScriptValue (..),
@@ -49,8 +50,9 @@ import Futhark.Server
 import Futhark.Server.Values (getValue, putValue)
 import qualified Futhark.Test.Values as V
 import Futhark.Util (nubOrd)
-import Futhark.Util.Pretty hiding (float, line, sep, string, (</>), (<|>))
+import Futhark.Util.Pretty hiding (float, line, sep, space, string, (</>), (<|>))
 import Text.Megaparsec
+import Text.Megaparsec.Char (space)
 import Text.Megaparsec.Char.Lexer (charLiteral)
 
 -- | Like a 'Server', but keeps a bit more state to make FutharkScript
@@ -126,7 +128,7 @@ inParens sep = between (lexeme sep "(") (lexeme sep ")")
 inBraces :: Parser () -> Parser a -> Parser a
 inBraces sep = between (lexeme sep "{") (lexeme sep "}")
 
--- | Parse a FutharkScript expression.
+-- | Parse a FutharkScript expression, given a whitespace parser.
 parseExp :: Parser () -> Parser Exp
 parseExp sep =
   choice
@@ -175,6 +177,11 @@ parseExp sep =
       pure v
       where
         constituent c = isAlphaNum c || c == '_'
+
+-- | Parse a FutharkScript expression with normal whitespace handling.
+parseExpFromText :: FilePath -> T.Text -> Either T.Text Exp
+parseExpFromText f s =
+  either (Left . T.pack . errorBundlePretty) Right $ parse (parseExp space) f s
 
 readVar :: (MonadError T.Text m, MonadIO m) => Server -> VarName -> m V.Value
 readVar server v =

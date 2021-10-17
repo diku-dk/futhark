@@ -59,8 +59,6 @@ import System.IO (IOMode (..), hClose, hFileSize, withFile)
 import System.IO.Error
 import System.IO.Temp
 import System.Process.ByteString (readProcessWithExitCode)
-import Text.Megaparsec hiding (many, some)
-import Text.Megaparsec.Char
 import Prelude
 
 -- | Try to parse a several values from a byte string.  The 'String'
@@ -225,8 +223,7 @@ valuesAsVars server names_and_types _ _ (ScriptValues e) =
       throwError $ "Unknown builtin procedure: " <> f
 valuesAsVars server names_and_types futhark dir (ScriptFile f) = do
   e <-
-    either (throwError . T.pack . errorBundlePretty) pure
-      . parse (Script.parseExp space) f
+    either throwError pure . Script.parseExpFromText f
       =<< liftIO (T.readFile (dir </> f))
   valuesAsVars server names_and_types futhark dir (ScriptValues e)
 
