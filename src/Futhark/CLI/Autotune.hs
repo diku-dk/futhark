@@ -101,7 +101,7 @@ restoreTuningParams opts server = mapM_ opt
 
 prepare :: AutotuneOptions -> FutharkExe -> FilePath -> IO [(DatasetName, RunDataset, T.Text)]
 prepare opts futhark prog = do
-  spec <- testSpecFromFileOrDie prog
+  spec <- testSpecFromProgramOrDie prog
   copts <- compileOptions opts
 
   truns <-
