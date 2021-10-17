@@ -865,9 +865,11 @@ ensureReferenceOutput concurrency futhark compiler prog ios = do
 
     isReferenceMissing (entry, tr)
       | Succeeds (Just SuccessGenerateValues) <- runExpectedResult tr =
-        liftIO . fmap not . doesFileExist . file $ (entry, tr)
+        liftIO $
+          ((<) <$> getModificationTime (file (entry, tr)) <*> getModificationTime prog)
+            `catch` (\e -> if isDoesNotExistError e then pure True else E.throw e)
       | otherwise =
-        return False
+        pure False
 
 -- | Determine the --tuning options to pass to the program.  The first
 -- argument is the extension of the tuning file, or 'Nothing' if none
