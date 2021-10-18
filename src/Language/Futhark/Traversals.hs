@@ -351,6 +351,8 @@ instance ASTMappable (PatBase Info VName) where
     PatLit v <$> (Info <$> mapOnPatType tv t) <*> pure loc
   astMap tv (PatConstr n (Info t) ps loc) =
     PatConstr n <$> (Info <$> mapOnPatType tv t) <*> mapM (astMap tv) ps <*> pure loc
+  astMap tv (PatAttr attr p loc) =
+    PatAttr attr <$> astMap tv p <*> pure loc
 
 instance ASTMappable (FieldBase Info VName) where
   astMap tv (RecordFieldExplicit name e loc) =
@@ -405,6 +407,7 @@ barePat (PatAscription pat (TypeDecl t _) loc) =
   PatAscription (barePat pat) (TypeDecl t NoInfo) loc
 barePat (PatLit v _ loc) = PatLit v NoInfo loc
 barePat (PatConstr c _ ps loc) = PatConstr c NoInfo (map barePat ps) loc
+barePat (PatAttr attr p loc) = PatAttr attr (barePat p) loc
 
 bareDimIndex :: DimIndexBase Info VName -> DimIndexBase NoInfo VName
 bareDimIndex (DimFix e) =

@@ -32,13 +32,6 @@ transformProg always_safe vbinds = do
     runInternaliseM always_safe (internaliseValBinds vbinds)
   I.renameProg $ I.Prog consts funs
 
-internaliseAttr :: E.AttrInfo -> Attr
-internaliseAttr (E.AttrAtom v) = I.AttrAtom v
-internaliseAttr (E.AttrComp f attrs) = I.AttrComp f $ map internaliseAttr attrs
-
-internaliseAttrs :: [E.AttrInfo] -> Attrs
-internaliseAttrs = mconcat . map (oneAttr . internaliseAttr)
-
 internaliseValBinds :: [E.ValBind] -> InternaliseM ()
 internaliseValBinds = mapM_ internaliseValBind
 
@@ -71,10 +64,12 @@ internaliseValBind fb@(E.ValBind entry fname retdecl (Info (rettype, _)) tparams
 
       let all_params = shapeparams ++ concat params'
 
+      attrs' <- internaliseAttrs attrs
+
       let fd =
             I.FunDef
               Nothing
-              (internaliseAttrs attrs)
+              attrs'
               (internaliseFunName fname)
               rettype'
               all_params
@@ -120,10 +115,11 @@ generateEntryPoint (E.EntryPoint e_params e_rettype) vb = localConstsScope $ do
           <$> mapM (fmap I.arrayDims . subExpType) vals
       pure (subExpsRes $ ctx ++ vals, map (const (I.Prim int64)) ctx)
 
+    attrs' <- internaliseAttrs attrs
     addFunDef $
       I.FunDef
         (Just entry')
-        (internaliseAttrs attrs)
+        attrs'
         ("entry_" <> baseName ofname)
         (ctx_ts ++ zeroExts (concat entry_rettype))
         (shapeparams ++ concat params')
@@ -202,6 +198,25 @@ bodyFromStms ::
 bodyFromStms m = do
   ((res, a), stms) <- collectStms m
   (,a) <$> mkBodyM stms res
+
+-- | Only returns those pattern names that are not used in the pattern
+-- itself (the "non-existential" part, you could say).
+letValExp :: String -> I.Exp -> InternaliseM [VName]
+letValExp name e = do
+  e_t <- expExtType e
+  names <- replicateM (length e_t) $ newVName name
+  letBindNames names e
+  let ctx = shapeContext e_t
+  pure $ map fst $ filter ((`S.notMember` ctx) . snd) $ zip names [0 ..]
+
+letValExp' :: String -> I.Exp -> InternaliseM [SubExp]
+letValExp' _ (BasicOp (SubExp se)) = pure [se]
+letValExp' name ses = map I.Var <$> letValExp name ses
+
+eValBody :: [InternaliseM I.Exp] -> InternaliseM I.Body
+eValBody es = buildBody_ $ do
+  es' <- sequence es
+  varsRes . concat <$> mapM (letValExp "x") es'
 
 internaliseAppExp :: String -> [VName] -> E.AppExp -> InternaliseM [I.SubExp]
 internaliseAppExp desc _ (E.Index e idxs loc) = do
@@ -387,7 +402,7 @@ internaliseAppExp desc _ e@E.Apply {} = do
         let tag ses = [(se, I.Observe) | se <- ses]
         args' <- reverse <$> mapM (internaliseArg arg_desc) (reverse args)
         let args'' = concatMap tag args'
-        letTupExp' desc $ I.Apply fname args'' [I.Prim rettype] (Safe, loc, [])
+        letValExp' desc $ I.Apply fname args'' [I.Prim rettype] (Safe, loc, [])
       | otherwise -> do
         args' <- concat . reverse <$> mapM (internaliseArg arg_desc) (reverse args)
         fst <$> funcall desc qfname args' loc
@@ -434,7 +449,7 @@ internaliseAppExp desc _ (E.DoLoop sparams mergepat mergeexp form loopbody loc) 
   map I.Var . dropCond
     <$> attributing
       attrs
-      (letTupExp desc (I.DoLoop (ctxmerge <> valmerge) form' loopbody''))
+      (letValExp desc (I.DoLoop (ctxmerge <> valmerge) form' loopbody''))
   where
     sparams' = map (`TypeParamDim` mempty) sparams
 
@@ -555,11 +570,11 @@ internaliseAppExp desc _ (E.Match e cs _) = do
       bFalse <- do
         (_, pertinent) <- generateCond pLast ses
         eLast' <- internalisePat' [] pLast pertinent eLast (internaliseBody desc)
-        foldM (\bf c' -> eBody $ return $ generateCaseIf ses c' bf) eLast' $
+        foldM (\bf c' -> eValBody $ return $ generateCaseIf ses c' bf) eLast' $
           reverse $ NE.init cs'
-      letTupExp' desc =<< generateCaseIf ses c bFalse
+      letValExp' desc =<< generateCaseIf ses c bFalse
 internaliseAppExp desc _ (E.If ce te fe _) =
-  letTupExp' desc
+  letValExp' desc
     =<< eIf
       (BasicOp . SubExp <$> internaliseExp1 "cond" ce)
       (internaliseBody (desc <> "_t") te)
@@ -724,11 +739,12 @@ internaliseExp desc (E.RecordUpdate src fields ve _ _) = do
         return $ bef ++ src'' ++ aft
     replace _ _ ve' _ = return ve'
 internaliseExp desc (E.Attr attr e loc) = do
-  e' <- local f $ internaliseExp desc e
+  attr' <- internaliseAttr attr
+  e' <- local (f attr') $ internaliseExp desc e
   case attr' of
     "trace" ->
       traceRes (locStr loc) e'
-    I.AttrComp "trace" [I.AttrAtom tag] ->
+    I.AttrComp "trace" [I.AttrName tag] ->
       traceRes (nameToString tag) e'
     "opaque" ->
       mapM (letSubExp desc . BasicOp . Opaque OpaqueNil) e'
@@ -737,8 +753,7 @@ internaliseExp desc (E.Attr attr e loc) = do
   where
     traceRes tag' =
       mapM (letSubExp desc . BasicOp . Opaque (OpaqueTrace tag'))
-    attr' = internaliseAttr attr
-    f env
+    f attr' env
       | attr' == "unsafe",
         not $ envSafe env =
         env {envDoBoundsChecks = False}
@@ -870,6 +885,8 @@ generateCond orig_p orig_ses = do
       let (id_ses, rest_ses) = splitAt n ses
       return ([], id_ses, rest_ses)
     compares (E.PatParens pat _) ses =
+      compares pat ses
+    compares (E.PatAttr _ pat _) ses =
       compares pat ses
     -- XXX: treat empty tuples and records as bool.
     compares (E.TuplePat [] loc) ses =
@@ -1111,7 +1128,7 @@ internaliseScanOrReduce desc what f (lam, ne, arr, loc) = do
   arrts <- mapM lookupType arrs
   lam' <- internaliseFoldLambda internaliseLambda lam nests arrts
   w <- arraysSize 0 <$> mapM lookupType arrs
-  letTupExp' desc . I.Op =<< f w lam' nes' arrs
+  letValExp' desc . I.Op =<< f w lam' nes' arrs
 
 internaliseHist ::
   String ->
@@ -1180,7 +1197,7 @@ internaliseHist desc rf hist op ne buckets img loc = do
       letExp (baseString buckets') $
         I.BasicOp $ I.Reshape (reshapeOuter [DimCoercion w_img] 1 b_shape) buckets'
 
-  letTupExp' desc . I.Op $
+  letValExp' desc . I.Op $
     I.Hist w_img [HistOp w_hist rf' hist' ne_shp op'] lam' $ buckets'' : img'
 
 internaliseStreamMap ::
@@ -1194,7 +1211,7 @@ internaliseStreamMap desc o lam arr = do
   lam' <- internaliseStreamMapLambda internaliseLambda lam $ map I.Var arrs
   w <- arraysSize 0 <$> mapM lookupType arrs
   let form = I.Parallel o Commutative (I.Lambda [] (mkBody mempty []) [])
-  letTupExp' desc $ I.Op $ I.Stream w arrs form [] lam'
+  letValExp' desc $ I.Op $ I.Stream w arrs form [] lam'
 
 internaliseStreamRed ::
   String ->
@@ -1254,7 +1271,7 @@ internaliseStreamRed desc o comm lam0 lam arr = do
 
   let form = I.Parallel o comm lam0'
   w <- arraysSize 0 <$> mapM lookupType arrs
-  letTupExp' desc $ I.Op $ I.Stream w arrs form (map resSubExp nes) lam'
+  letValExp' desc $ I.Op $ I.Stream w arrs form (map resSubExp nes) lam'
 
 internaliseStreamAcc ::
   String ->
@@ -1272,12 +1289,12 @@ internaliseStreamAcc desc dest op lam bs = do
   let dest_w = arraysSize 0 dest_ts
       acc_t = Acc acc_cert_v (Shape [dest_w]) (map rowType dest_ts) NoUniqueness
   acc_p <- newParam "acc_p" acc_t
-  withacc_lam <- mkLambda [Param acc_cert_v (I.Prim I.Unit), acc_p] $ do
+  withacc_lam <- mkLambda [Param mempty acc_cert_v (I.Prim I.Unit), acc_p] $ do
     lam' <-
       internaliseMapLambda internaliseLambda lam $
         map I.Var $ paramName acc_p : bs'
     w <- arraysSize 0 <$> mapM lookupType bs'
-    fmap subExpsRes . letTupExp' "acc_res" $
+    fmap subExpsRes . letValExp' "acc_res" $
       I.Op $ I.Screma w (paramName acc_p : bs') (I.mapSOAC lam')
 
   op' <-
@@ -1888,7 +1905,7 @@ isOverloadedFunction qname args loc = do
       let bodyTypes = concat (replicate (length sv_ts) indexType) ++ map (I.stripArray dim) sa_ts
           paramTypes = indexType <> map rowType sv_ts
           bodyNames = indexName <> valueNames
-          bodyParams = zipWith I.Param bodyNames paramTypes
+          bodyParams = zipWith (I.Param mempty) bodyNames paramTypes
 
       -- This body is pretty boring right now, as every input is exactly the output.
       -- But it can get funky later on if fused with something else.
@@ -2051,9 +2068,8 @@ funcall desc (QualName _ fname) args loc = do
       safety <- askSafety
       attrs <- asks envAttrs
       ses <-
-        attributing attrs $
-          letTupExp' desc $
-            I.Apply (internaliseFunName fname) (zip args' diets) ts (safety, loc, mempty)
+        attributing attrs . letValExp' desc $
+          I.Apply (internaliseFunName fname) (zip args' diets) ts (safety, loc, mempty)
       return (ses, map I.fromDecl ts)
 
 -- Bind existential names defined by an expression, based on the
@@ -2091,9 +2107,9 @@ partitionWithSOACS k lam arrs = do
     _ -> error "partitionWithSOACS"
 
   add_lam_x_params <-
-    replicateM k $ I.Param <$> newVName "x" <*> pure (I.Prim int64)
+    replicateM k $ newParam "x" (I.Prim int64)
   add_lam_y_params <-
-    replicateM k $ I.Param <$> newVName "y" <*> pure (I.Prim int64)
+    replicateM k $ newParam "y" (I.Prim int64)
   add_lam_body <- runBodyBuilder $
     localScope (scopeOfLParams $ add_lam_x_params ++ add_lam_y_params) $
       fmap resultBody $
@@ -2140,10 +2156,9 @@ partitionWithSOACS k lam arrs = do
 
   -- Now write into the result.
   write_lam <- do
-    c_param <- I.Param <$> newVName "c" <*> pure (I.Prim int64)
-    offset_params <- replicateM k $ I.Param <$> newVName "offset" <*> pure (I.Prim int64)
-    value_params <- forM arr_ts $ \arr_t ->
-      I.Param <$> newVName "v" <*> pure (I.rowType arr_t)
+    c_param <- newParam "c" (I.Prim int64)
+    offset_params <- replicateM k $ newParam "offset" (I.Prim int64)
+    value_params <- mapM (newParam "v" . I.rowType) arr_ts
     (offset, offset_stms) <-
       collectStms $
         mkOffsetLambdaBody

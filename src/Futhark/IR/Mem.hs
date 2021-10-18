@@ -607,7 +607,7 @@ matchLoopResultMem params = matchRetTypeToResult rettype
       MemAcc acc ispace ts u
     toRet (MemArray pt shape u (ArrayIn mem ixfun))
       | Just i <- mem `elemIndex` param_names,
-        Param _ (MemMem space) : _ <- drop i params =
+        Param _ _ (MemMem space) : _ <- drop i params =
         MemArray pt shape' u $ ReturnsNewBlock space i ixfun'
       | otherwise =
         MemArray pt shape' u $ ReturnsInBlock mem ixfun'

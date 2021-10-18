@@ -14,11 +14,22 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Significantly expanded error index.
 
+* Attributes can now be numeric.
+
+* Patterns can now have attributes.  None have any effect at the
+  moment.
+
+* `futhark autotune` and `futhark bench` now take a `--spec-file`
+  option for loading a test specification from another file.
+
 ### Removed
 
 ### Changed
 
 ### Fixed
+
+* `auto output` reference datasets are now recreated when the program
+  is newer than the data files.
 
 ## [0.20.4]
 
