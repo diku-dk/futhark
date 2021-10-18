@@ -1168,7 +1168,7 @@ conservativeFlatten l@(LMAD _ dims) =
 -- one dimension.
 disjoint :: LMAD (TPrimExp Int64 VName) -> LMAD (TPrimExp Int64 VName) -> Bool
 disjoint (LMAD offset1 [dim1]) (LMAD offset2 [dim2]) =
-  not (divides (Futhark.Util.IntegralExp.gcd (ldStride dim1) (ldStride dim2)) (offset1 - offset2))
+  not (divides (Futhark.Util.IntegralExp.gcd (traceWith "gcd stride 1" $ ldStride dim1) (traceWith "gcd stride 2" $ ldStride dim2)) (offset1 - offset2))
     || offset1 >= max offset2 (offset2 + ldShape dim2 * ldStride dim2)
     || offset2 >= max offset1 (offset1 + ldShape dim1 * ldStride dim1)
   where

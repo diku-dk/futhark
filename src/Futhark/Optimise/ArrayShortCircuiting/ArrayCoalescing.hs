@@ -767,7 +767,9 @@ mkCoalsTabStm lutab stm@(Let pat@(Pat [x']) _ e@(BasicOp (Update _ x _ _elm))) t
           -- (c) this stm is also a potential source for coalescing, so process it
           actv'' = mkCoalsHelper3PatternMatch pat e lutab td_env (successCoals bu_env) actv' inhbt'
       return $
-        bu_env {activeCoals = actv'', inhibit = inhbt'}
+        trace
+          ("stm: " <> pretty stm <> "\nactv'': " <> pretty actv'' <> "\ninhbt': " <> pretty inhbt')
+          $ bu_env {activeCoals = actv'', inhibit = inhbt'}
 --
 mkCoalsTabStm _ (Let pat _ (BasicOp Update {})) _ _ =
   error $ "In ArrayCoalescing.hs, fun mkCoalsTabStm, illegal pattern for in-place update: " ++ pretty pat

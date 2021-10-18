@@ -22,7 +22,7 @@ let main [n] (i: i64) (ns: [n]i32) (mss: [n][n]i32): [n][n]i32 =
   --
   -- The fusion does not happen in the GPU pipeline, so in that case it is the
   -- same as pos3.fut, meaning it gets a coalescing.
-  let t1 = map (\ms -> map (+ 1) ms) mss
+  let t1 = map (map (+ 1)) mss
 
   let k = 1
   let t0 = map (+ k) ns

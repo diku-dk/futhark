@@ -42,6 +42,9 @@ class (Num e, Eq e) => IntegralExp e where
   gcd :: e -> e -> e
   gcd x y = gcd' (abs x) (abs y)
     where
+      gcd' a b | a == b = a
+      gcd' 1 _ = 1
+      gcd' _ 1 = 1
       gcd' a 0 = a
       gcd' a b = gcd' b (a `Futhark.Util.IntegralExp.rem` b)
 

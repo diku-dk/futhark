@@ -216,7 +216,10 @@ recordMemRefUses td_env bu_env stm =
                         then Just wrt_lmads''
                         else Nothing
                  in trace
-                      ( "Philip m_b: " <> pretty m_b
+                      ( "Philip statement: "
+                          <> pretty stm
+                          <> "m_b: "
+                          <> pretty m_b
                           <> "\nalias_m_b: "
                           <> pretty alias_m_b
                           <> "\ndestmem entry: "
@@ -227,8 +230,6 @@ recordMemRefUses td_env bu_env stm =
                           <> pretty original_mem_aliases
                           <> "\nall_aliases: "
                           <> pretty all_aliases
-                          <> "\nstatement: "
-                          <> pretty stm
                           <> "\nixfns: "
                           <> pretty ixfns
                           <> "\nwrt_lmads: "
