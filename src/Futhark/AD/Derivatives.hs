@@ -196,18 +196,20 @@ pdBuiltin "tanh32" [x] =
   Just [untyped $ 1 - tanh (isF32 x) ** 2]
 pdBuiltin "tanh64" [x] =
   Just [untyped $ 1 - tanh (isF64 x) ** 2]
--- More problematic derivatives follow bellow
-pdBuiltin "round32" [_] =
-  Just [fConst Float32 0]
-pdBuiltin "round64" [_] =
-  Just [fConst Float64 0]
-pdBuiltin "ceil32" [_] =
-  Just [fConst Float32 0]
-pdBuiltin "ceil64" [_] =
-  Just [fConst Float64 0]
-pdBuiltin "floor32" [_] =
-  Just [fConst Float32 0]
-pdBuiltin "floor64" [_] =
-  Just [fConst Float64 0]
-pdBuiltin _ _ =
-  Nothing
+-- More problematic derivatives follow below.
+pdBuiltin "isnan16" [_] = Just [untyped false]
+pdBuiltin "isnan32" [_] = Just [untyped false]
+pdBuiltin "isnan64" [_] = Just [untyped false]
+pdBuiltin "isinf16" [_] = Just [untyped false]
+pdBuiltin "isinf32" [_] = Just [untyped false]
+pdBuiltin "isinf64" [_] = Just [untyped false]
+pdBuiltin "round16" [_] = Just [fConst Float32 0]
+pdBuiltin "round32" [_] = Just [fConst Float32 0]
+pdBuiltin "round64" [_] = Just [fConst Float64 0]
+pdBuiltin "ceil16" [_] = Just [fConst Float32 0]
+pdBuiltin "ceil32" [_] = Just [fConst Float32 0]
+pdBuiltin "ceil64" [_] = Just [fConst Float64 0]
+pdBuiltin "floor16" [_] = Just [fConst Float32 0]
+pdBuiltin "floor32" [_] = Just [fConst Float32 0]
+pdBuiltin "floor64" [_] = Just [fConst Float64 0]
+pdBuiltin _ _ = Nothing

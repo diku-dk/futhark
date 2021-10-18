@@ -131,12 +131,12 @@ instance TanBuilder (PatT (TypeBase s u)) where
   bundleNew (Pat pes) = Pat <$> bundleNew pes
 
 instance TanBuilder (Param (TypeBase s u)) where
-  newTan (Param p t) = do
+  newTan (Param _ p t) = do
     PatElem p' t' <- newTan $ PatElem p t
-    return $ Param p' t'
-  bundleNew param@(Param _ (Prim Unit)) =
+    return $ Param mempty p' t'
+  bundleNew param@(Param _ _ (Prim Unit)) =
     pure [param]
-  bundleNew param@(Param _ t) = do
+  bundleNew param@(Param _ _ t) = do
     param' <- newTan param
     if isAcc t
       then return [param']

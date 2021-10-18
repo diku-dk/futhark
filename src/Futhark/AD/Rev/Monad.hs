@@ -285,15 +285,17 @@ tabNest = tabNest' []
 addLambda :: Type -> ADM Lambda
 addLambda (Prim pt) = binOpLambda (addBinOp pt) pt
 addLambda t@Array {} = do
-  xs <- newVName "xs"
-  ys <- newVName "ys"
+  xs_p <- newParam "xs" t
+  ys_p <- newParam "ys" t
   lam <- addLambda $ rowType t
   body <- insertStmsM $ do
-    res <- letSubExp "lam_map" $ Op $ Screma (arraySize 0 t) [xs, ys] (mapSOAC lam)
+    res <-
+      letSubExp "lam_map" . Op $
+        Screma (arraySize 0 t) [paramName xs_p, paramName ys_p] (mapSOAC lam)
     pure $ resultBody [res]
   pure
     Lambda
-      { lambdaParams = [Param xs t, Param ys t],
+      { lambdaParams = [xs_p, ys_p],
         lambdaReturnType = [t],
         lambdaBody = body
       }

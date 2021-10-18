@@ -66,7 +66,7 @@ mkScanLinFunO t = do
   tmp <- mapM newVName ["a1", "b1", "a2", "b2"]
   let [a1, b1, a2, b2] = tmp
       pet = primExpFromSubExp pt . Var
-  lam <- mkLambda (map (`Param` t) [a1, b1, a2, b2]) . fmap varsRes $
+  lam <- mkLambda (map (\v -> Param mempty v t) [a1, b1, a2, b2]) . fmap varsRes $
     tabNest (arrayRank t) [a1, b1, a2, b2] $ \_ [a1', b1', a2', b2'] -> do
       x <- letExp "x" <=< toExp $ pet a2' ~+~ pet b2' ~*~ pet a1'
       y <- letExp "y" <=< toExp $ pet b1' ~*~ pet b2'
