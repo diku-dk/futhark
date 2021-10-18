@@ -60,7 +60,7 @@ optimiseStms env stms =
 
 optimiseStm :: Env -> Stm GPU -> TileM (Env, Stms GPU)
 optimiseStm env stm@(Let pat aux (Op (SegOp (SegMap lvl@SegThread {} space ts kbody)))) = do
-  res_genred_opt <- genRed2MapRed env stm
+  res_genred_opt <- genRedOpts env stm
   res3dtiling <- doRegTiling3D stm
   stms' <-
    case res_genred_opt of

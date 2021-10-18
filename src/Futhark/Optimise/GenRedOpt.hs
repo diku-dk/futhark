@@ -3,8 +3,10 @@
 {-# LANGUAGE TupleSections #-}
 
 -- | Tries to turn a generalized reduction kernel into
---     a more specialized construct, for example a reduce
---     or a histogram.
+--     a more specialized construct, for example:
+--       (a) a map nest with a sequential redomap ripe for tiling
+--       (b) a SegRed kernel followed by a smallish accumulation kernel.
+--       (c) a histogram (for this we need to track the withAccs)
 --   The idea is to identify the first accumulation and
 --     to separate the initial kernels into two:
 --     1. the code up to and including the accumulation,
@@ -14,12 +16,7 @@
 --   Since this is mostly prototyping, when the accumulation
 --     can be rewritten as a map-reduce, we sequentialize the
 --     map-reduce, as to potentially enable tiling oportunities.
---     We also have an over-simplisitic cost model that can result
---     in performance loss.  A full implementation should improve
---     the cost model and it should generate two kernels: one in
---     which the map-reduce is sequentialized and also a SegRed kernel
---     that exploits that parallelism.
-module Futhark.Optimise.GenRedOpt (genRed2MapRed) where
+module Futhark.Optimise.GenRedOpt (genRedOpts) where
 
 --import Control.Monad.Reader
 import qualified Data.List as L
@@ -39,11 +36,27 @@ import Debug.Trace
 type IxFun = IxFun.IxFun (TPrimExp Int64 VName)
 type Env = (M.Map VName (Lambda GPU, [SubExp]), M.Map VName IxFun)
 
+genRedOpts :: Env -> Stm GPU -> TileM (Maybe (Stms GPU))
+genRedOpts env ker
+  | Just (stms_before, ker_failed) <- genRed2Tile2d env ker = do
+    mb_stms_after <- genRedOpts env ker_failed
+    case mb_stms_after of
+      Just stms_after -> return $ stms_before <> stms_after
+      Nothing -> return $ stms_before <> oneStm ker_failed
+genRedOpts env ker
+  | Just (stms_before, ker_failed) <- genRed2SegRed env ker = do
+    mb_stms_after <- genRedOpts env ker_failed
+    case mb_stms_after of
+      Just stms_after -> return $ stms_before <> stms_after
+      Nothing -> return $ stms_before <> oneStm ker_failed
+genRedOpts _ _ =
+  return Nothing
+
 se1 :: SubExp
 se1 = intConst Int64 1
 
-genRed2MapRed :: Env -> Stm GPU -> TileM (Maybe (Stms GPU))
-genRed2MapRed env kerstm@(Let pat_ker aux (Op (SegOp (SegMap seg_thd seg_space kres_tps old_kbody))))
+genRed2Tile2d :: Env -> Stm GPU -> TileM (Maybe (Stms GPU))
+genRed2Tile2d env kerstm@(Let pat_ker aux (Op (SegOp (SegMap seg_thd seg_space kres_tps old_kbody))))
   | (SegThread _ seg_group_size _novirt) <- trace ("Cosmin Segmap stmt: "++pretty kerstm) seg_thd,
     --novirt == SegNoVirtFull || novirt == SegNoVirt,
     KernelBody () kstms kres <- old_kbody,
@@ -165,7 +178,11 @@ genRed2MapRed env kerstm@(Let pat_ker aux (Op (SegOp (SegMap seg_thd seg_space k
         let acc_deps = M.findWithDefault mempty pat_acc_nm variance
         in  any (`nameIn` acc_deps) $ patNames pat
 
-genRed2MapRed _ _ =
+genRed2Tile2d _ _ =
+  return Nothing
+
+genRed2SegRed :: Env -> Stm GPU -> TileM (Maybe (Stms GPU))
+genRed2SegRed _ _ =
   return Nothing
 
 -- | Tries to identify the following pattern:
