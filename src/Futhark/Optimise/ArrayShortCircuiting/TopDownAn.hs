@@ -16,7 +16,6 @@ module Futhark.Optimise.ArrayShortCircuiting.TopDownAn
 where
 
 import qualified Data.Map.Strict as M
-import Debug.Trace
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.IR.Aliases
 --import qualified Futhark.IR.Mem.IxFun as IxFun
@@ -269,7 +268,7 @@ addInvAliassesVarTab td_env vtab x
   | Just (Coalesced _ (MemBlock _ _ m_y x_ixfun) fv_subs) <- M.lookup x vtab =
     case M.lookup x (v_alias td_env) of
       Nothing -> Just vtab
-      Just (nm, _, Nothing) -> trace ("Fails Inversion: " ++ pretty (x, nm, M.keys (v_alias td_env))) Nothing -- can't invert ixfun, conservatively fail!
+      Just (nm, _, Nothing) -> Nothing -- can't invert ixfun, conservatively fail!
       Just (x0, _, Just inv_alias0) ->
         let x_ixfn0 = inv_alias0 x_ixfun
          in case getScopeMemInfo x0 (scope td_env) of

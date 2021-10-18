@@ -48,7 +48,6 @@ import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as M
 import Data.Maybe (isJust)
-import Debug.Trace
 import qualified Futhark.Analysis.AlgSimplify2 as AlgSimplify2
 --import Futhark.Analysis.PrimExp
 --  ( IntExp,
@@ -77,8 +76,6 @@ import Futhark.Transform.Substitute
 import Futhark.Util.IntegralExp
 import Futhark.Util.Pretty
 import Prelude hiding (id, mod, (.))
-
-traceWith s a = trace (s <> ": " <> pretty a) a
 
 type Shape num = [num]
 
@@ -1143,21 +1140,12 @@ conservativeFlatten l@(LMAD _ dims) =
   LMAD offset [LMADDim strd 0 (shp + 1) 0 Unknown]
   where
     strd =
-      traceWith "strd" $
-        foldl
-          (\x y -> traceWith "gcd" $ Futhark.Util.IntegralExp.gcd x y)
-          ( traceWith
-              ( "rem: "
-                  <> (pretty . isInt64 . constFoldPrimExp . untyped)
-                    ( (isInt64 $ constFoldPrimExp $ untyped $ abs $ ldStride $ head dims)
-                        `Futhark.Util.IntegralExp.rem` (isInt64 $ constFoldPrimExp $ untyped $ abs $ ldStride $ head dims)
-                    )
-                  <> "\nstride head"
-              )
-              $ ldStride $ head dims
-          )
-          $ traceWith "stride rest" $ map ldStride dims
-    (offset, shp) = traceWith "flatspan" $ flatSpan l
+      foldl
+        (\x y -> Futhark.Util.IntegralExp.gcd x y)
+        ( ldStride $ head dims
+        )
+        $ map ldStride dims
+    (offset, shp) = flatSpan l
 
 -- | Returns @True@ if the two 'LMAD's could be proven disjoint.
 --
@@ -1168,15 +1156,15 @@ conservativeFlatten l@(LMAD _ dims) =
 -- one dimension.
 disjoint :: LMAD (TPrimExp Int64 VName) -> LMAD (TPrimExp Int64 VName) -> Bool
 disjoint (LMAD offset1 [dim1]) (LMAD offset2 [dim2]) =
-  not (divides (Futhark.Util.IntegralExp.gcd (traceWith "gcd stride 1" $ ldStride dim1) (traceWith "gcd stride 2" $ ldStride dim2)) (offset1 - offset2))
+  not (divides (Futhark.Util.IntegralExp.gcd (ldStride dim1) (ldStride dim2)) (offset1 - offset2))
     || offset1 >= max offset2 (offset2 + ldShape dim2 * ldStride dim2)
     || offset2 >= max offset1 (offset1 + ldShape dim1 * ldStride dim1)
   where
     divides x y = Futhark.Util.IntegralExp.mod y x == 0
 disjoint lmad1 lmad2 =
   disjoint
-    (traceWith "cons1" $ conservativeFlatten lmad1)
-    (traceWith "cons2" $ conservativeFlatten lmad2)
+    (conservativeFlatten lmad1)
+    (conservativeFlatten lmad2)
 
 data Interval = Interval
   { lowerBound :: TPrimExp Int64 VName,

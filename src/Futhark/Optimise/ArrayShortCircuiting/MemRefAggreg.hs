@@ -17,7 +17,6 @@ import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import qualified Data.Set as S
-import Debug.Trace
 import Futhark.Analysis.AlgSimplify2
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.IR.Aliases
@@ -29,10 +28,6 @@ import Futhark.Optimise.ArrayShortCircuiting.DataStructs
 import Futhark.Optimise.ArrayShortCircuiting.TopDownAn
 import Futhark.Transform.Substitute
 import Futhark.Util
-
-traceWith s a = trace (s <> ": " <> pretty a) a
-
-traceWith' s a = trace (s <> ": " <> show a) a
 
 -----------------------------------------------------
 -- Some translations of Accesses and Ixfuns        --
@@ -73,7 +68,7 @@ translateAccessSummary _ _ Undeterminable = Undeterminable
 translateAccessSummary scope0 scals0 (Set slmads)
   | Just subs <- freeVarSubstitutions scope0 scals0 slmads =
     slmads
-      & S.map (IxFun.substituteInLMAD $ traceWith "freeVarSubs" subs)
+      & S.map (IxFun.substituteInLMAD subs)
       & Set
 translateAccessSummary _ _ _ = Undeterminable
 
@@ -173,7 +168,7 @@ recordMemRefUses ::
 recordMemRefUses td_env bu_env stm =
   let active_tab = activeCoals bu_env
       inhibit_tab = inhibit bu_env
-      (stm_wrts, stm_uses) = traceWith ("stm: " <> pretty stm <> "\nuseSumFromStm") $ getUseSumFromStm td_env active_tab stm
+      (stm_wrts, stm_uses) = getUseSumFromStm td_env active_tab stm
       active_etries = M.toList active_tab
 
       (mb_wrts, prev_uses, mb_lmads) =
@@ -215,31 +210,7 @@ recordMemRefUses td_env bu_env stm =
                       if no_overlap
                         then Just wrt_lmads''
                         else Nothing
-                 in trace
-                      ( "Philip statement: "
-                          <> pretty stm
-                          <> "m_b: "
-                          <> pretty m_b
-                          <> "\nalias_m_b: "
-                          <> pretty alias_m_b
-                          <> "\ndestmem entry: "
-                          <> pretty (dstmem etry)
-                          <> "\nstm_uses': "
-                          <> pretty stm_uses'
-                          <> "\norig_use: "
-                          <> pretty original_mem_aliases
-                          <> "\nall_aliases: "
-                          <> pretty all_aliases
-                          <> "\nixfns: "
-                          <> pretty ixfns
-                          <> "\nwrt_lmads: "
-                          <> pretty wrt_lmads
-                          <> "\nprev_use: "
-                          <> pretty prev_use
-                          <> "\nlmads: "
-                          <> pretty lmads
-                      )
-                      (wrt_lmads, prev_use, lmads)
+                 in (wrt_lmads, prev_use, lmads)
             )
             active_etries
 
@@ -263,7 +234,7 @@ recordMemRefUses td_env bu_env stm =
             filter (not . okMemRef) $
               zip mb_wrts active_etries
       (_, inhibit_tab1) = foldl markFailedCoal (failed_tab, inhibit_tab) (M.keys failed_tab)
-   in trace "END OF RECORDMEMREFUSES" (active_tab1, inhibit_tab1)
+   in (active_tab1, inhibit_tab1)
   where
     tupFst (a, _, _) = a
     tupSnd (_, b, _) = b
@@ -292,16 +263,16 @@ recordMemRefUses td_env bu_env stm =
 -------------------------------------------------------------
 noMemOverlap :: TopDnEnv rep -> AccessSummary -> AccessSummary -> Bool
 noMemOverlap _ _ (Set mr)
-  | mr == mempty = traceWith "empty 1" True
+  | mr == mempty = True
 noMemOverlap _ (Set mr) _
-  | mr == mempty = traceWith "empty 2" True
+  | mr == mempty = True
 -- noMemOverlap _ (Set ml) (Set mr)
 --   | mr == ml = False || False
 noMemOverlap _ Undeterminable _ = False
 noMemOverlap _ _ Undeterminable = False
 noMemOverlap _ (Set is) (Set js) =
   -- TODO Expand this to be able to handle eg. nw
-  traceWith "all" $ all (\i -> all (IxFun.disjoint i) $ traceWith "js" $ S.toList js) $ traceWith "is" $ S.toList is
+  all (\i -> all (IxFun.disjoint i) $ S.toList js) $ S.toList is
 
 -- | Suppossed to aggregate the iteration-level summaries
 --     across a loop of index i = 0 .. n-1
@@ -322,9 +293,9 @@ aggSummaryLoopTotal _ _ _ _ Undeterminable = return Undeterminable
 aggSummaryLoopTotal _ _ _ _ (Set l)
   | l == mempty = return $ Set mempty
 aggSummaryLoopTotal scope_bef scope_loop scals_loop _ access
-  | Set ls <- traceWith "translateAccesSummary" $ translateAccessSummary scope_loop scals_loop $ traceWith "access" access,
+  | Set ls <- translateAccessSummary scope_loop scals_loop access,
     nms <- foldl (<>) mempty $ map freeIn $ S.toList ls,
-    traceWith "all" $ all inBeforeScope $ traceWith "names" $ namesToList nms = do
+    all inBeforeScope $ namesToList nms = do
     return $ Set ls
   where
     inBeforeScope v =
@@ -334,7 +305,7 @@ aggSummaryLoopTotal scope_bef scope_loop scals_loop _ access
 aggSummaryLoopTotal scope_before scope_loop scalars_loop (Just (iterator_var, (lower_bound, upper_bound))) (Set lmads) =
   mconcat
     <$> mapM
-      (aggSummaryOne (traceWith ("aggSummaaryLoopTotal.\nlower_bound: " <> pretty lower_bound <> "\nupper_bound: " <> pretty upper_bound <> "\niterator_var") iterator_var) lower_bound upper_bound)
+      (aggSummaryOne iterator_var lower_bound upper_bound)
       (S.toList lmads)
 aggSummaryLoopTotal _ _ _ _ _ = return Undeterminable
 
@@ -373,14 +344,13 @@ aggSummaryOne :: MonadFreshNames m => VName -> TPrimExp Int64 VName -> TPrimExp 
 aggSummaryOne iterator_var lower_bound upper_bound (IxFun.LMAD _ dims) | iterator_var `nameIn` freeIn dims = return Undeterminable
 aggSummaryOne iterator_var lower_bound span lmad@(IxFun.LMAD offset0 dims0) = do
   new_var <- newVName "k"
-  let offset = traceWith "offset" $ replaceIteratorWith (typedLeafExp new_var) offset0
-      offsetp1 = traceWith "offsetp1" $ replaceIteratorWith (typedLeafExp new_var + 1) offset0
-      new_stride = traceWith "new_stride" $ TPrimExp $ constFoldPrimExp $ simplify $ untyped $ offsetp1 - offset
+  let offset = replaceIteratorWith (typedLeafExp new_var) offset0
+      offsetp1 = replaceIteratorWith (typedLeafExp new_var + 1) offset0
+      new_stride = TPrimExp $ constFoldPrimExp $ simplify $ untyped $ offsetp1 - offset
       new_offset = replaceIteratorWith lower_bound offset0
       new_lmad =
-        traceWith ("old_lmad: " <> pretty lmad <> "\nnew_lmad") $
-          IxFun.LMAD new_offset $
-            IxFun.LMADDim new_stride 0 span 0 IxFun.Inc : map incPerm dims0
+        IxFun.LMAD new_offset $
+          IxFun.LMADDim new_stride 0 span 0 IxFun.Inc : map incPerm dims0
   if new_var `nameIn` freeIn new_lmad
     then return Undeterminable
     else return $ Set $ S.singleton new_lmad

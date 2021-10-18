@@ -36,7 +36,6 @@ where
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import qualified Data.Set as S
-import Debug.Trace
 import Futhark.IR.Aliases
 import Futhark.IR.GPUMem
 import qualified Futhark.IR.Mem.IxFun as IxFun
@@ -337,11 +336,9 @@ markFailedCoal (coal_tab, inhb_tab) src_mem =
     Just coale ->
       let failed_set = oneName $ dstmem coale
           failed_set' = failed_set <> fromMaybe mempty (M.lookup src_mem inhb_tab)
-       in trace
-            ("Failed Coalesce: " ++ pretty src_mem ++ "->" ++ pretty (dstmem coale))
-            ( M.delete src_mem coal_tab,
-              M.insert src_mem failed_set' inhb_tab
-            )
+       in ( M.delete src_mem coal_tab,
+            M.insert src_mem failed_set' inhb_tab
+          )
 
 -- | A poor attempt at a pretty printer of the Coalescing Table
 prettyCoalTab :: CoalsTab -> String

@@ -10,7 +10,6 @@ module Futhark.Pass.LiftAllocations (liftAllocationsSeqMem, liftAllocationsGPUMe
 
 import Control.Monad.Reader
 import Data.Sequence (Seq (..))
-import Debug.Trace
 import Futhark.IR.GPUMem
 import Futhark.IR.SeqMem
 import Futhark.Pass (Pass (..))
@@ -107,7 +106,7 @@ liftAllocationsInStms (stms :|> stm@(Let pat _ _)) lifted acc to_lift = do
 liftAllocationsInHostOp :: HostOp GPUMem () -> LiftM (HostOp GPUMem ()) (HostOp GPUMem ())
 liftAllocationsInHostOp (SegOp (SegMap lvl sp tps body)) = do
   stms <- liftAllocationsInStms (kernelBodyStms body) mempty mempty mempty
-  return $ trace "liftAllocationsInHostOp" $ SegOp $ SegMap lvl sp tps $ body {kernelBodyStms = stms}
+  return $ SegOp $ SegMap lvl sp tps $ body {kernelBodyStms = stms}
 liftAllocationsInHostOp (SegOp (SegRed lvl sp binops tps body)) = do
   stms <- liftAllocationsInStms (kernelBodyStms body) mempty mempty mempty
   return $ SegOp $ SegRed lvl sp binops tps $ body {kernelBodyStms = stms}
