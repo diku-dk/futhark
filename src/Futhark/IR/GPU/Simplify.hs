@@ -93,10 +93,11 @@ kernelRules =
   standardRules <> segOpRules
     <> ruleBook
       [ --RuleOp redomapIotaToLoop,
+        RuleOp SOAC.simplifyMapIota,
+        RuleOp SOAC.removeUnusedSOACInput,
         RuleOp SOAC.simplifyKnownIterationSOAC,
         RuleOp SOAC.removeReplicateMapping,
-        RuleOp SOAC.liftIdentityMapping,
-        RuleOp SOAC.simplifyMapIota
+        RuleOp SOAC.liftIdentityMapping
       ]
       [ RuleBasicOp removeUnnecessaryCopy
       ]

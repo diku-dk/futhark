@@ -27,6 +27,7 @@ import Futhark.Optimise.InPlaceLowering
 import Futhark.Optimise.InliningDeadFun
 import qualified Futhark.Optimise.MemoryBlockMerging as MemoryBlockMerging
 import Futhark.Optimise.Sink
+import Futhark.Optimise.GenRedOpt
 import Futhark.Optimise.TileLoops
 import Futhark.Optimise.Unstream
 import Futhark.Pass.AD
@@ -78,9 +79,11 @@ kernelsPipeline =
     >>> passes
       [ simplifyGPU,
         babysitKernels,
-        tileLoops,
+        simplifyGPU,
+        optimiseGenRed,
         simplifyGPU,
         --tileLoops,
+        --simplifyGPU,
         unstreamGPU,
         performCSE True,
         simplifyGPU,

@@ -22,7 +22,6 @@ import Futhark.Pass
 import Futhark.Tools
 import Futhark.Transform.Rename
 import Prelude hiding (quot)
-import Futhark.Optimise.GenRedOpt
 
 type IxFun = IxFun.IxFun (TPrimExp Int64 VName)
 
@@ -60,12 +59,8 @@ optimiseStms env stms =
 
 optimiseStm :: Env -> Stm GPU -> TileM (Env, Stms GPU)
 optimiseStm env stm@(Let pat aux (Op (SegOp (SegMap lvl@SegThread {} space ts kbody)))) = do
-  res_genred_opt <- genRedOpts env stm
-  res3dtiling <- doRegTiling3D stm
+  res3dtiling <- localScope (scopeOfSegSpace space) $ doRegTiling3D stm
   stms' <-
-   case res_genred_opt of
-    Just stms -> return stms
-    Nothing ->
      case res3dtiling of
       Just (extra_stms, stmt') -> return (extra_stms <> oneStm stmt')
       Nothing -> do

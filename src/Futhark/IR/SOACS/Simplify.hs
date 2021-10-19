@@ -17,6 +17,7 @@ module Futhark.IR.SOACS.Simplify
     HasSOAC (..),
     simplifyKnownIterationSOAC,
     removeReplicateMapping,
+    removeUnusedSOACInput,
     liftIdentityMapping,
     simplifyMapIota,
     SOACS,
@@ -410,17 +411,21 @@ removeReplicateInput vtable fun arrs
         Left (p, v)
 
 -- | Remove inputs that are not used inside the SOAC.
-removeUnusedSOACInput :: TopDownRuleOp (Wise SOACS)
-removeUnusedSOACInput _ pat aux (Screma w arrs (ScremaForm scan reduce map_lam))
-  | (used, unused) <- partition usedInput params_and_arrs,
+removeUnusedSOACInput ::
+  forall rep.
+  (Aliased rep, Buildable rep, BuilderOps rep, HasSOAC rep) =>
+  TopDownRuleOp rep
+removeUnusedSOACInput _ pat aux op
+  | Just (Screma w arrs form :: SOAC rep) <- asSOAC op,
+    ScremaForm scan reduce map_lam <- form,
+    (used, unused) <- partition (usedInput map_lam) (zip (lambdaParams map_lam) arrs),
     not (null unused) = Simplify $ do
     let (used_params, used_arrs) = unzip used
         map_lam' = map_lam {lambdaParams = used_params}
-    auxing aux $ letBind pat $ Op $ Screma w used_arrs (ScremaForm scan reduce map_lam')
+    auxing aux $ letBind pat $ Op $ soacOp $ Screma w used_arrs (ScremaForm scan reduce map_lam')
   where
-    params_and_arrs = zip (lambdaParams map_lam) arrs
-    used_in_body = freeIn $ lambdaBody map_lam
-    usedInput (param, _) = paramName param `nameIn` used_in_body
+    used_in_body map_lam = freeIn $ lambdaBody map_lam
+    usedInput map_lam (param, _) = paramName param `nameIn` (used_in_body map_lam)
 removeUnusedSOACInput _ _ _ _ = Skip
 
 removeDeadMapping :: BottomUpRuleOp (Wise SOACS)
