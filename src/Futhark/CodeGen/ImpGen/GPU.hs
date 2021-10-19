@@ -242,8 +242,10 @@ expCompiler (Pat [pe]) (BasicOp (Iota n x s et)) = do
   s' <- toExp s
 
   sIota (patElemName pe) (toInt64Exp n) x' s' et
-expCompiler (Pat [pe]) (BasicOp (Replicate _ se)) =
-  sReplicate (patElemName pe) se
+expCompiler (Pat [pe]) (BasicOp (Replicate _ se))
+  | Acc {} <- patElemType pe = pure ()
+  | otherwise =
+    sReplicate (patElemName pe) se
 -- Allocation in the "local" space is just a placeholder.
 expCompiler _ (Op (Alloc _ (Space "local"))) =
   return ()
