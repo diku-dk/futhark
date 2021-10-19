@@ -412,7 +412,10 @@ mmBlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kbo
               letExp "res_reshaped" $ BasicOp $ Reshape (map DimNew new_shape) epilogue_res
 
         -- now the case for accumulator result:
-        epilogue_res_acc <- do
+        epilogue_res_acc <-
+          if primType res_tp -- ugly, please fix me
+          then return redomap_res -- epilogue_res_list
+          else do
             acc_0 <- getAccumFV res_tp
             rssss_list <- segMap2D "rssss" segthd_lvl ResultMaySimplify (ty, tx) $ \(ltid_y, ltid_x) -> do
                 let rss_init = acc_0
