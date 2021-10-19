@@ -201,7 +201,7 @@ genRed2Tile2d env kerstm@(Let pat_ker aux (Op (SegOp (SegMap seg_thd seg_space k
       -- is a subexp invariant to a gid of a parallel dimension?
       isSeInvar2 variance gid (Var x) =
         let x_deps = M.findWithDefault mempty x variance
-        in  not $ nameIn gid x_deps
+        in  gid /= x && (not (nameIn gid x_deps))
       isSeInvar2 _ _ _ = True
       -- is a DimIndex invar to a gid of a parallel dimension?
       isDimIdxInvar2 variance gid (DimFix d) =
@@ -215,9 +215,13 @@ genRed2Tile2d env kerstm@(Let pat_ker aux (Op (SegOp (SegMap seg_thd seg_space k
       isTileable :: VName -> [(VName, SubExp)] -> VarianceTable -> VName -> Stm GPU -> Bool
       isTileable seq_gid gid_dims variance acc_nm (Let (Pat [pel]) _ (BasicOp (Index _ slc)))
         | acc_deps <- M.findWithDefault mempty acc_nm variance,
-          nameIn (patElemName pel) acc_deps = do
-            isSliceInvar2 variance slc (map fst gid_dims) ||
-             isSliceInvar2 variance slc [seq_gid]
+          nameIn (patElemName pel) acc_deps =
+          let invar_par = isSliceInvar2 variance slc (map fst gid_dims)
+              invar_seq = isSliceInvar2 variance slc [seq_gid]
+          --in  invar_par || invar_seq
+          in  trace ("!!!!!!!!!!!!!!Slice "++pretty slc ++" is invariant to: "++pretty gid_dims++" "++
+                       pretty seq_gid++" answer: "++pretty invar_par++" "++pretty invar_seq) $
+                        invar_par || invar_seq
       -- this relies on the cost model, that currently accepts only
       -- global-memory reads, and for example rejects in-place updates
       -- or loops inside the code that is transformed in a redomap.
@@ -254,13 +258,15 @@ transposeFVs fvs variance gid stms = do
         [ii] <- iis,
         -- generalize below: treat any rearange and add to tab if not there.
         Nothing <- M.lookup arr tab,
-        length dims == 2,
-        ii == 0 = do
+        ii /= length dims - 1,
+        perm <- [0..ii-1] ++ [ii+1..length dims - 1] ++ [ii] = do
+--        length dims == 2,
+--        ii == 0 = do
         (arr_tr, stms_tr) <- runBuilderT' $ do
-            arr' <- letExp (baseString arr ++ "_trsp") $ BasicOp $ Rearrange [1,0] arr --Manifest [1,0] arr
+            arr' <- letExp (baseString arr ++ "_trsp") $ BasicOp $ Rearrange perm arr --Manifest [1,0] arr
             letExp (baseString arr' ++ "_opaque") $ BasicOp $ Opaque OpaqueNil $ Var arr'
-        let tab' = M.insert arr ([1::Int,0], arr_tr, stms_tr) tab
-            slc' = Slice $ map (\i -> dims !! i) [1,0]
+        let tab' = M.insert arr (perm, arr_tr, stms_tr) tab
+            slc' = Slice $ map (\i -> dims !! i) perm
             stm' = Let pat aux $ BasicOp $ Index arr_tr slc'
         return (tab', stm')
       where

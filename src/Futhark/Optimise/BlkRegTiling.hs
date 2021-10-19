@@ -31,7 +31,7 @@ import Futhark.Tools
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
 
-import Debug.Trace
+--import Debug.Trace
 
 mmBlkRegTiling :: Stm GPU -> TileM (Maybe (Stms GPU, Stm GPU))
 mmBlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kbody))))
@@ -360,6 +360,14 @@ mmBlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kbo
         --        res = if (iii+ltid_y*ry+i < height_A && jjj+ltid_x*rx+j < width_B)
         --              then code2' else dummy
         --        final_res[i,j] = res
+        if primType res_tp
+        then mkEpiloguePrimRes segthd_lvl (redomap_orig_res, redomap_res) (res_nm,res_tp)
+                               (ty, tx, ry, rx) (iii,jjj) (gtid_y, gtid_x)
+                               (height_A, width_B, rem_outer_dims) code2'
+        else mkEpilogueAccRes segthd_lvl (redomap_orig_res, redomap_res) (res_nm,res_tp)
+                              (ty, tx, ry, rx) (iii,jjj) (gtid_y, gtid_x)
+                              (height_A, width_B, rem_outer_dims) code2'
+{--
         epilogue_res <-
           if patElemName redomap_orig_res == res_nm || isAccType res_tp -- ugly, please fix me
             then return redomap_res -- epilogue_res_list
@@ -453,7 +461,7 @@ mmBlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kbo
         then return [RegTileReturns mempty regtile_ret_dims epilogue_res']
         else --accumulator type (Cosmin tries to extend this case)
              return [Returns ResultMaySimplify (Certs []) $ Var epilogue_res_acc]
-
+--}
       let level' = SegGroup (Count grid_size) (Count group_size) SegNoVirt
           space' = SegSpace gid_flat (rem_outer_dims ++ [(gid_y, gridDim_y), (gid_x, gridDim_x)])
           kbody' = KernelBody () stms_seggroup ret_seggroup
@@ -474,6 +482,105 @@ mmBlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kbo
         [acc_0] -> return acc_0
         _ -> error "Impossible case reached when treating accumulators!"
     getAccumFV tp = error ("Should be an accumulator type at this point, given: "++pretty tp)
+
+    -- support for non-empty code2'
+    --  segmap (ltid_y < ty, ltid_x < tx) {
+    --    for i < ry do
+    --      for j < rx do
+    --        res = if (iii+ltid_y*ry+i < height_A && jjj+ltid_x*rx+j < width_B)
+    --              then code2' else dummy
+    --        final_res[i,j] = res
+    mkEpiloguePrimRes segthd_lvl (redomap_orig_res, redomap_res) (res_nm,res_tp)
+                      (ty, tx, ry, rx) (iii,jjj) (gtid_y, gtid_x)
+                      (height_A, width_B, rem_outer_dims) code2' = do
+      epilogue_res <-
+        if patElemName redomap_orig_res == res_nm
+        then return redomap_res -- epilogue_res_list
+        else do 
+              rssss_list <- segMap2D "rssss" segthd_lvl ResultPrivate (ty, tx) $ \(ltid_y, ltid_x) -> do
+                rss_init <- scratch "rss_init" (elemType res_tp) [ry, rx]
+                css <- index "redomap_thd" redomap_res [ltid_y, ltid_x]
+                ii <- letExp "ii" =<< toExp (le64 iii + le64 ltid_y * pe64 ry)
+                jj <- letExp "jj" =<< toExp (le64 jjj + le64 ltid_x * pe64 rx)
+                rss <- forLoop ry [rss_init] $ \i [rss_merge] -> do
+                  rss' <- forLoop rx [rss_merge] $ \j [rss_merge'] -> do
+                    c <- index "redomap_elm" css [i, j]
+                    cpy_stm <- mkLetNamesM [patElemName redomap_orig_res] $ BasicOp $ SubExp $ Var c
+                    addStm cpy_stm
+                    letBindNames [gtid_y] =<< toExp (le64 ii + le64 i)
+                    letBindNames [gtid_x] =<< toExp (le64 jj + le64 j)
+
+                    res_el <-
+                      letSubExp "res_elem"
+                        =<< eIf
+                          ( toExp $
+                              le64 gtid_y .<. pe64 height_A
+                                .&&. le64 gtid_x .<. pe64 width_B
+                          )
+                          ( do
+                              addStms code2'
+                              resultBodyM [Var res_nm]
+                          )
+                          (eBody [eBlank res_tp])
+                    rss'' <- update' "rss" rss_merge' [i, j] res_el
+                    resultBodyM [Var rss'']
+                  resultBodyM [Var rss']
+                return [varRes rss]
+              let rssss : _ = rssss_list
+              return rssss
+
+      let regtile_ret_dims =
+              map (\(_, sz) -> (sz, se1, se1)) rem_outer_dims
+                ++ [(height_A, ty, ry), (width_B, tx, rx)]
+
+      -- Add dummy dimensions to tile to reflect the outer dimensions.
+      epilogue_res' <-
+          if null rem_outer_dims
+          then return epilogue_res
+          else do
+                epilogue_t <- lookupType epilogue_res
+                let (block_dims, rest_dims) = splitAt 2 $ arrayDims epilogue_t
+                    ones = map (const $ intConst Int64 1) rem_outer_dims
+                    new_shape = concat [ones, block_dims, ones, rest_dims]
+                letExp "res_reshaped" $ BasicOp $ Reshape (map DimNew new_shape) epilogue_res
+      return  [RegTileReturns mempty regtile_ret_dims epilogue_res']
+    -- epilogue for accumulator result type
+    mkEpilogueAccRes segthd_lvl (redomap_orig_res, redomap_res) (res_nm,res_tp)
+                      (ty, tx, ry, rx) (iii,jjj) (gtid_y, gtid_x)
+                      (height_A, width_B, _rem_outer_dims) code2' = do
+      acc_0 <- getAccumFV res_tp
+      rssss_list <- segMap2D "rssss" segthd_lvl ResultMaySimplify (ty, tx) $ \(ltid_y, ltid_x) -> do
+          let rss_init = acc_0
+          css <- index "redomap_thd" redomap_res [ltid_y, ltid_x]
+          ii <- letExp "ii" =<< toExp (le64 iii + le64 ltid_y * pe64 ry)
+          jj <- letExp "jj" =<< toExp (le64 jjj + le64 ltid_x * pe64 rx)
+          rss <- forLoop ry [rss_init] $ \i [rss_merge] -> do
+            rss' <- forLoop rx [rss_merge] $ \j [rss_merge'] -> do
+              c <- index "redomap_elm" css [i, j]
+              cpy_stm <- mkLetNamesM [patElemName redomap_orig_res] $ BasicOp $ SubExp $ Var c
+              addStm cpy_stm
+              letBindNames [gtid_y] =<< toExp (le64 ii + le64 i)
+              letBindNames [gtid_x] =<< toExp (le64 jj + le64 j)
+              let code2_subs = substituteNames (M.singleton acc_0 rss_merge') code2'
+
+              res_el <-
+                letSubExp "res_elem"
+                  =<< eIf
+                        ( toExp $
+                            le64 gtid_y .<. pe64 height_A
+                              .&&. le64 gtid_x .<. pe64 width_B
+                        )
+                        ( do
+                            addStms code2_subs
+                            resultBodyM [Var res_nm]
+                        )
+                        (resultBodyM [Var rss_merge'])
+              resultBodyM [res_el]
+            resultBodyM [Var rss']
+          return [varRes rss]
+      let epilogue_res_acc : _ = rssss_list
+      return [Returns ResultMaySimplify (Certs []) $ Var epilogue_res_acc]
+            
 mmBlkRegTiling _ = return Nothing
 
 ceilDiv :: MonadBuilder m => SubExp -> SubExp -> m (Exp (Rep m))
