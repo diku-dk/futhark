@@ -257,7 +257,8 @@ transposeFVs fvs variance gid stms = do
         length dims == 2,
         ii == 0 = do
         (arr_tr, stms_tr) <- runBuilderT' $ do
-            letExp (baseString arr ++ "_trsp") $ BasicOp $ Manifest [1,0] arr--Rearrange [1, 0] arr
+            arr' <- letExp (baseString arr ++ "_trsp") $ BasicOp $ Rearrange [1,0] arr --Manifest [1,0] arr
+            letExp (baseString arr' ++ "_opaque") $ BasicOp $ Opaque OpaqueNil $ Var arr'
         let tab' = M.insert arr ([1::Int,0], arr_tr, stms_tr) tab
             slc' = Slice $ map (\i -> dims !! i) [1,0]
             stm' = Let pat aux $ BasicOp $ Index arr_tr slc'

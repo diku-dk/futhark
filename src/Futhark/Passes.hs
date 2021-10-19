@@ -78,12 +78,12 @@ kernelsPipeline =
     >>> onePass extractKernels
     >>> passes
       [ simplifyGPU,
-        babysitKernels,
-        simplifyGPU,
         optimiseGenRed,
         simplifyGPU,
-        --tileLoops,
-        --simplifyGPU,
+        babysitKernels,
+        simplifyGPU,
+        tileLoops,
+        simplifyGPU,
         unstreamGPU,
         performCSE True,
         simplifyGPU,
