@@ -909,10 +909,9 @@ defCompileBasicOp (Pat [pe]) (Iota n e s it) = do
   sFor "i" (toInt64Exp n) $ \i -> do
     let i' = sExt it $ untyped i
     x <-
-      dPrimV "x" $
-        TPrimExp $
-          BinOpExp (Add it OverflowUndef) e' $
-            BinOpExp (Mul it OverflowUndef) i' s'
+      dPrimV "x" . TPrimExp $
+        BinOpExp (Add it OverflowUndef) e' $
+          BinOpExp (Mul it OverflowUndef) i' s'
     copyDWIM (patElemName pe) [DimFix i] (Var (tvVar x)) []
 defCompileBasicOp (Pat [pe]) (Copy src) =
   copyDWIM (patElemName pe) [] (Var src) []
