@@ -896,11 +896,13 @@ defCompileBasicOp (Pat [pe]) (FlatUpdate _ slice v) = do
   copy (elemType (patElemType pe)) (flatSliceMemLoc pe_loc slice') v_loc
   where
     slice' = fmap toInt64Exp slice
-defCompileBasicOp (Pat [pe]) (Replicate (Shape ds) se) = do
-  ds' <- mapM toExp ds
-  is <- replicateM (length ds) (newVName "i")
-  copy_elem <- collect $ copyDWIM (patElemName pe) (map (DimFix . Imp.vi64) is) se []
-  emit $ foldl (.) id (zipWith Imp.For is ds') copy_elem
+defCompileBasicOp (Pat [pe]) (Replicate (Shape ds) se)
+  | Acc {} <- patElemType pe = pure ()
+  | otherwise = do
+    ds' <- mapM toExp ds
+    is <- replicateM (length ds) (newVName "i")
+    copy_elem <- collect $ copyDWIM (patElemName pe) (map (DimFix . Imp.vi64) is) se []
+    emit $ foldl (.) id (zipWith Imp.For is ds') copy_elem
 defCompileBasicOp _ Scratch {} =
   return ()
 defCompileBasicOp (Pat [pe]) (Iota n e s it) = do
