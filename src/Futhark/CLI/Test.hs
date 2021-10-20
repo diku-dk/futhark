@@ -125,11 +125,11 @@ optimisedProgramMetrics programs pipeline program =
   case pipeline of
     SOACSPipeline ->
       check ["-s"]
-    KernelsPipeline ->
-      check ["--gpu"]
-    SequentialCpuPipeline ->
-      check ["--seq-mem"]
     GpuPipeline ->
+      check ["--gpu"]
+    SeqMemPipeline ->
+      check ["--seq-mem"]
+    GpuMemPipeline ->
       check ["--gpu-mem"]
     NoPipeline ->
       check []
@@ -154,9 +154,9 @@ testMetrics programs program (StructureTest pipeline (AstMetrics expected)) =
   where
     maybePipeline :: StructurePipeline -> T.Text
     maybePipeline SOACSPipeline = "(soacs) "
-    maybePipeline KernelsPipeline = "(kernels) "
-    maybePipeline SequentialCpuPipeline = "(seq-mem) "
-    maybePipeline GpuPipeline = "(gpu-mem) "
+    maybePipeline GpuPipeline = "(kernels) "
+    maybePipeline SeqMemPipeline = "(seq-mem) "
+    maybePipeline GpuMemPipeline = "(gpu-mem) "
     maybePipeline NoPipeline = ""
 
     ok (AstMetrics metrics) (name, expected_occurences) =

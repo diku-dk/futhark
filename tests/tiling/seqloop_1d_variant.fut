@@ -2,7 +2,7 @@
 -- that this generates working code.
 -- ==
 -- random input { [1000][3][3]f32 }
--- structure distributed { SegMap/DoLoop/DoLoop/SegMap 2 }
+-- structure gpu { SegMap/DoLoop/DoLoop/SegMap 2 }
 
 let argmax (arr: []f32) =
   reduce_comm (\(a,i) (b,j) ->

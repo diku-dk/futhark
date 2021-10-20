@@ -12,7 +12,7 @@
 --     scan
 --
 -- ==
--- structure distributed { SegMap 1 }
+-- structure gpu { SegMap 1 }
 
 let combineVs [n] (n_row: [n]f64, vol_row: [n]f64, dr_row: [n]f64): [n]f64 =
     map2 (+) dr_row (map2 (*) n_row vol_row)
