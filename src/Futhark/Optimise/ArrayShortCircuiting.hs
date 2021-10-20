@@ -126,8 +126,8 @@ replaceInIfBody b@(Body _ stms _) = do
   return $ b {bodyStms = stms'}
 
 replaceInFParam :: Param FParamMem -> ReplaceM inner (Param FParamMem)
-replaceInFParam p@(Param vname (MemArray _ _ u _)) = do
-  fromMaybe p <$> lookupAndReplace vname Param u
+replaceInFParam p@(Param _ vname (MemArray _ _ u _)) = do
+  fromMaybe p <$> lookupAndReplace vname (Param mempty) u
 replaceInFParam p = return p
 
 lookupAndReplace ::

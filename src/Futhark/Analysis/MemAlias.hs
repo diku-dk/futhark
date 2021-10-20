@@ -114,7 +114,7 @@ analyzeFun f =
     & mconcat
     & analyzeStms (bodyStms $ funDefBody f)
   where
-    justMem (Param v (MemMem _)) = Just $ singleton v mempty
+    justMem (Param _ v (MemMem _)) = Just $ singleton v mempty
     justMem _ = Nothing
 
 transitiveClosure :: MemAliases -> MemAliases

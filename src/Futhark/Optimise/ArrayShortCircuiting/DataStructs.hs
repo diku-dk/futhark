@@ -262,7 +262,7 @@ getUniqueMemFParam params =
       arrayMems = S.fromList $ mapMaybe (justArrayMem . paramDec) params
    in mems `M.restrictKeys` arrayMems
   where
-    justMem (Param nm (MemMem sp)) = Just (nm, sp)
+    justMem (Param _ nm (MemMem sp)) = Just (nm, sp)
     justMem _ = Nothing
     justArrayMem (MemArray _ _ Unique (ArrayIn mem_nm _)) = Just mem_nm
     justArrayMem _ = Nothing
