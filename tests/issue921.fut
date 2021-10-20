@@ -1,5 +1,5 @@
 -- ==
--- structure distributed { SegMap 2 }
+-- structure gpu { SegMap 2 }
 
 let main (b1: bool) (b2: bool) (xs: [3]i32) (ys: [3]i32) =
   map (\x -> if b1

@@ -111,7 +111,7 @@
 -- -0.000443f32, 0.000283f32, -0.000084f32, 0.000129f32, 0.000419f32,
 -- -0.000178f32, -0.001124f32, -0.001211f32, 0.000297f32, 0.000291f32,
 -- 0.001163f32, 0.001455f32]]}
--- structure distributed { SegRed 1 SegMap 4 }
+-- structure gpu { SegRed 1 SegMap 4 }
 
 
 let main (nfeatures: i64) (npoints: i64) (nclusters: i64): [nclusters][nfeatures]f32 =

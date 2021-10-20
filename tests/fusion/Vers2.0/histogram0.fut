@@ -5,7 +5,7 @@
 -- output {
 --   [100.0f32, 100.0f32, 100.0f32]
 -- }
--- structure distributed {
+-- structure gpu {
 --   Iota 0
 -- }
 

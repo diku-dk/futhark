@@ -1,6 +1,6 @@
 -- Sinking should be as deep as possible.
 -- ==
--- structure distributed {
+-- structure gpu {
 --   /Index 1
 --   /If/False/If/True/Index 1
 --   /If/False/If/False/If/True/Index 1

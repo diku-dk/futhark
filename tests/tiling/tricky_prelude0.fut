@@ -1,7 +1,7 @@
 -- A case of tiling with a complex dependency.
 -- ==
 -- compiled random input { [100]i32 } auto output
--- structure distributed { SegMap/DoLoop/SegMap 2 }
+-- structure gpu { SegMap/DoLoop/SegMap 2 }
 
 let main (xs: []i32) =
   map (\x ->

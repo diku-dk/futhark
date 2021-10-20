@@ -1,6 +1,6 @@
 -- Sinking can be safe even in the presence of in-place updates.
 -- ==
--- structure distributed { /SegMap/Index 1 }
+-- structure gpu { /SegMap/Index 1 }
 
 let main (n: i64) (as: []i32) (bs: []i32) (cs: []i32) (ds: []i32) (es: []i32) =
   map5 (\a b c d e ->

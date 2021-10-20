@@ -1,7 +1,7 @@
 -- Sometimes it is quite important that the parallelism in an array
 -- indexing result is exploited.
 -- ==
--- structure distributed { SegMap 2 }
+-- structure gpu { SegMap 2 }
 
 let main (is: []i32) (xss: [][]f32) =
   map (\i -> xss[i]) is

@@ -1,6 +1,6 @@
 -- Careful; this one cannot be sunk.
 -- ==
--- structure distributed { /Index 5 }
+-- structure gpu { /Index 5 }
 
 let main (arr: *[](i32, i32, i32, i32, i32)) =
   let (a,b,c,d,e) = arr[0]

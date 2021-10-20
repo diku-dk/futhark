@@ -1,5 +1,5 @@
 -- ==
--- structure distributed { Manifest 1 }
+-- structure gpu { Manifest 1 }
 
 
 let smoothen [n] (xs: [n]f32) =

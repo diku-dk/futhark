@@ -1,6 +1,6 @@
 -- this is a code snippet from bfast; it should transpose `y_error`
 -- ==
--- structure distributed {Manifest 0}
+-- structure gpu {Manifest 0}
 
 let main [m][n] (nss: [m]i64) (hs: [m]i64) (y_errors: [m][n]f32) : [m]f32 =
   zip3 y_errors nss hs |>

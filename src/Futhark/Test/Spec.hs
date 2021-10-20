@@ -87,10 +87,10 @@ instance Show ExpectedError where
 
 -- | How a program can be transformed.
 data StructurePipeline
-  = KernelsPipeline
+  = GpuPipeline
   | SOACSPipeline
-  | SequentialCpuPipeline
-  | GpuPipeline
+  | SeqMemPipeline
+  | GpuMemPipeline
   | NoPipeline
   deriving (Show)
 
@@ -340,9 +340,9 @@ parseExpectedStructure sep =
 optimisePipeline :: Parser () -> Parser StructurePipeline
 optimisePipeline sep =
   choice
-    [ lexeme sep "distributed" $> KernelsPipeline,
+    [ lexeme sep "gpu-mem" $> GpuMemPipeline,
       lexeme sep "gpu" $> GpuPipeline,
-      lexeme sep "cpu" $> SequentialCpuPipeline,
+      lexeme sep "seq-mem" $> SeqMemPipeline,
       lexeme sep "internalised" $> NoPipeline,
       pure SOACSPipeline
     ]

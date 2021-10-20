@@ -2,7 +2,7 @@
 -- postlude.
 -- ==
 -- random input { 3 [10][20]i32 [10]i32 } auto output
--- structure distributed { SegMap/DoLoop/DoLoop/SegMap 2 }
+-- structure gpu { SegMap/DoLoop/DoLoop/SegMap 2 }
 
 let main (n: i32) (xs: [][]i32) (ys: []i32) =
   map (\y ->

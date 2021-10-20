@@ -18,7 +18,7 @@
 --   [[18, 17], [8, 10]]
 -- }
 --
--- structure distributed { Map/DoLoop 0 }
+-- structure gpu { Map/DoLoop 0 }
 
 let main [n][m][k] (a: [n][m][k]i32): [n][k]i32 =
   let acc = replicate k 0 in

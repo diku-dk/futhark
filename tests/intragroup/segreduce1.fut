@@ -2,7 +2,7 @@
 -- ==
 -- random input { [1][1][256]i32 } auto output
 -- compiled random input { [10][10][256]i32 } auto output
--- structure distributed { SegMap/SegRed 1 }
+-- structure gpu { SegMap/SegRed 1 }
 
 let main =
   map (\xss ->

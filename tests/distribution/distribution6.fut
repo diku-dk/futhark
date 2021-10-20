@@ -1,5 +1,5 @@
 -- ==
--- structure distributed { SegMap 1 }
+-- structure gpu { SegMap 1 }
 --
 
 let main(outer_loop_count: i64, a: []i64): [][]i64 =
