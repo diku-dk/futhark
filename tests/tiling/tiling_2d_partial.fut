@@ -12,7 +12,7 @@
 --   [256][10][256]i32
 --   [10]i32
 -- } auto output
--- structure distributed { SegMap/DoLoop/SegMap 2 }
+-- structure gpu { SegMap/DoLoop/SegMap 2 }
 
 let main [a][b][c] (xs: [a][c]i32) (ys: [c][b]i32) (zsss: [b][c][a]i32) (vs: [c]i32) =
   map2 (\xs' zss ->

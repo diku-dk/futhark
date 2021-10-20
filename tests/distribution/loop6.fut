@@ -1,6 +1,6 @@
 -- Interchange of a loop where some parts are dead after the loop.
 -- ==
--- structure distributed { /SegMap 0 /DoLoop 1 /DoLoop/SegMap 1 }
+-- structure gpu { /SegMap 0 /DoLoop 1 /DoLoop/SegMap 1 }
 
 let main [m] [n] (xss: *[m][n]i64) =
   #[incremental_flattening(only_inner)]
