@@ -266,8 +266,6 @@ noMemOverlap _ _ (Set mr)
   | mr == mempty = True
 noMemOverlap _ (Set mr) _
   | mr == mempty = True
--- noMemOverlap _ (Set ml) (Set mr)
---   | mr == ml = False || False
 noMemOverlap _ Undeterminable _ = False
 noMemOverlap _ _ Undeterminable = False
 noMemOverlap _ (Set is) (Set js) =

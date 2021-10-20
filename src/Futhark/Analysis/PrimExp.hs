@@ -55,6 +55,7 @@ module Futhark.Analysis.PrimExp
     zExt64,
     fMin64,
     fMax64,
+    positiveIshExp,
   )
 where
 
@@ -218,6 +219,18 @@ constFoldPrimExp (BinOpExp LogOr x y)
   | zeroIshExp x = y
   | zeroIshExp y = x
 constFoldPrimExp (UnOpExp Abs {} x) | not $ negativeIshExp x = x
+constFoldPrimExp (BinOpExp UMod {} x y)
+  | sameIshExp x y,
+    IntType it <- primExpType x =
+    ValueExp $ IntValue $ intValue it $ 0
+constFoldPrimExp (BinOpExp SMod {} x y)
+  | sameIshExp x y,
+    IntType it <- primExpType x =
+    ValueExp $ IntValue $ intValue it $ 0
+constFoldPrimExp (BinOpExp SRem {} x y)
+  | sameIshExp x y,
+    IntType it <- primExpType x =
+    ValueExp $ IntValue $ intValue it $ 0
 constFoldPrimExp e = e
 
 -- | The class of numeric types that can be used for constructing
@@ -397,7 +410,7 @@ instance (IntExp t, Pretty v, Eq v) => IntegralExp (TPrimExp t v) where
 
   TPrimExp x `mod` TPrimExp y
     | Just z <- msum [asIntOp (`SMod` Unsafe) x y] =
-      TPrimExp z
+      TPrimExp $ constFoldPrimExp z
     | otherwise = numBad "mod" (x, y)
 
   TPrimExp x `quot` TPrimExp y
@@ -562,6 +575,14 @@ oneIshExp _ = False
 negativeIshExp :: PrimExp v -> Bool
 negativeIshExp (ValueExp v) = negativeIsh v
 negativeIshExp _ = False
+
+positiveIshExp :: PrimExp v -> Bool
+positiveIshExp (ValueExp v) = positiveIsh v
+positiveIshExp _ = False
+
+sameIshExp :: PrimExp v -> PrimExp v -> Bool
+sameIshExp (ValueExp v1) (ValueExp v2) = v1 == v2
+sameIshExp _ _ = False
 
 -- | If the given 'PrimExp' is a constant of the wrong integer type,
 -- coerce it to the given integer type.  This is a workaround for an

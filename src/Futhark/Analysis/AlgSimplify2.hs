@@ -6,12 +6,16 @@ module Futhark.Analysis.AlgSimplify2
   ( Prod (..),
     SofP,
     simplify,
+    simplify',
     sumOfProducts,
+    sumToExp,
+    prodToExp,
   )
 where
 
 import Data.Bits (xor)
 import Data.Function ((&))
+import Data.List (sort)
 import qualified Data.Map as M
 import Data.Maybe (mapMaybe)
 import Futhark.Analysis.PrimExp
@@ -21,6 +25,8 @@ import GHC.Generics
 import Prelude hiding (negate)
 
 type Exp = PrimExp VName
+
+type TExp = TPrimExp Int64 VName
 
 data Prod = Prod
   { negated :: Bool,
@@ -35,15 +41,21 @@ instance Pretty Prod where
 type SofP = [Prod]
 
 sumOfProducts :: Exp -> SofP
-sumOfProducts (BinOpExp (Add Int64 OverflowUndef) e1 e2) =
-  sumOfProducts e1 <> sumOfProducts e2
-sumOfProducts (BinOpExp (Sub Int64 OverflowUndef) (ValueExp (IntValue (Int64Value 0))) e) =
-  map negate $ sumOfProducts e
-sumOfProducts (BinOpExp (Sub Int64 OverflowUndef) e1 e2) =
-  sumOfProducts e1 <> map negate (sumOfProducts e2)
-sumOfProducts (BinOpExp (Mul Int64 OverflowUndef) e1 e2) =
-  sumOfProducts e1 `mult` sumOfProducts e2
-sumOfProducts e = [Prod False [e]]
+sumOfProducts = map sortProduct . sumOfProducts'
+
+sortProduct :: Prod -> Prod
+sortProduct (Prod n as) = Prod n $ sort as
+
+sumOfProducts' :: Exp -> SofP
+sumOfProducts' (BinOpExp (Add Int64 OverflowUndef) e1 e2) =
+  sumOfProducts' e1 <> sumOfProducts' e2
+sumOfProducts' (BinOpExp (Sub Int64 OverflowUndef) (ValueExp (IntValue (Int64Value 0))) e) =
+  map negate $ sumOfProducts' e
+sumOfProducts' (BinOpExp (Sub Int64 OverflowUndef) e1 e2) =
+  sumOfProducts' e1 <> map negate (sumOfProducts' e2)
+sumOfProducts' (BinOpExp (Mul Int64 OverflowUndef) e1 e2) =
+  sumOfProducts' e1 `mult` sumOfProducts' e2
+sumOfProducts' e = [Prod False [e]]
 
 mult :: SofP -> SofP -> SofP
 mult xs ys = [Prod (b `xor` b') (x <> y) | Prod b x <- xs, Prod b' y <- ys]
@@ -66,6 +78,9 @@ prodToExp (Prod False (atom : atoms)) =
 
 simplify :: Exp -> Exp
 simplify = sumToExp . removeNegations . sumOfProducts
+
+simplify' :: TExp -> TExp
+simplify' = TPrimExp . simplify . untyped
 
 removeNegations :: SofP -> SofP
 removeNegations [] = []
