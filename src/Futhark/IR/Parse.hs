@@ -322,11 +322,15 @@ pBasicOp =
     ]
 
 pAttr :: Parser Attr
-pAttr = do
-  v <- pName
+pAttr =
   choice
-    [ AttrComp v <$> parens (pAttr `sepBy` pComma),
-      pure $ AttrAtom v
+    [ AttrInt . toInteger <$> pInt,
+      do
+        v <- pName
+        choice
+          [ AttrComp v <$> parens (pAttr `sepBy` pComma),
+            pure $ AttrName v
+          ]
     ]
 
 pAttrs :: Parser Attrs
@@ -363,7 +367,7 @@ pBranchTypes :: PR rep -> Parser [BranchType rep]
 pBranchTypes pr = braces $ pBranchType pr `sepBy` pComma
 
 pParam :: Parser t -> Parser (Param t)
-pParam p = Param <$> pVName <*> (pColon *> p)
+pParam p = Param <$> pAttrs <*> pVName <*> (pColon *> p)
 
 pFParam :: PR rep -> Parser (FParam rep)
 pFParam = pParam . pFParamInfo

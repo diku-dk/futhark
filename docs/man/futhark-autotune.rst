@@ -53,6 +53,13 @@ OPTIONS
   Print verbose information about what the tuner is doing.  Pass
   multiple times to increase the amount of information printed.
 
+--spec-file=FILE
+
+  Ignore the test specification in the program file(s), and instead
+  load them from this other file.  These external test specifications
+  use the same syntax as normal, but *without* line comment prefixes A
+  ``==`` is still expected.
+
 --tuning=EXTENSION
 
   Change the extension used for tuning files (``.tuning`` by default).

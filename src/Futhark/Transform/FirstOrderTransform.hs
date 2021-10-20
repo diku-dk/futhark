@@ -406,7 +406,7 @@ loopMerge vars = loopMerge' $ zip vars $ repeat Unique
 
 loopMerge' :: [(Ident, Uniqueness)] -> [SubExp] -> [(Param DeclType, SubExp)]
 loopMerge' vars vals =
-  [ (Param pname $ toDecl ptype u, val)
+  [ (Param mempty pname $ toDecl ptype u, val)
     | ((Ident pname ptype, u), val) <- zip vars vals
   ]
 

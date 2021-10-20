@@ -151,6 +151,7 @@ import Futhark.Util.Loc hiding (L) -- Lexer has replacements.
       '->'            { L $$ RIGHT_ARROW }
       ':'             { L $$ COLON }
       ':>'            { L $$ COLON_GT }
+      '?'             { L $$ QUESTION_MARK  }
       for             { L $$ FOR }
       do              { L $$ DO }
       with            { L $$ WITH }
@@ -389,7 +390,7 @@ BindingId :: { (Name, SrcLoc) }
 Val    :: { ValBindBase NoInfo Name }
 Val     : let BindingId TypeParams FunParams maybeAscription(TypeExpDecl) '=' Exp
           { let (name, _) = $2
-            in ValBind (if name==defaultEntryPoint then Just NoInfo else Nothing) name (fmap declaredType $5) NoInfo
+            in ValBind Nothing name (fmap declaredType $5) NoInfo
                $3 $4 $7 Nothing mempty (srcspan $1 $>)
           }
 
@@ -407,19 +408,24 @@ TypeExpDecl :: { TypeDeclBase NoInfo Name }
              : TypeExp %prec bottom { TypeDecl $1 NoInfo }
 
 TypeAbbr :: { TypeBindBase NoInfo Name }
-TypeAbbr : type Liftedness id TypeParams '=' TypeExpDecl
+TypeAbbr : type Liftedness id TypeParams '=' TypeExp
            { let L _ (ID name) = $3
-              in TypeBind name $2 $4 $6 Nothing (srcspan $1 $>) }
-         | type Liftedness 'id[' id ']' TypeParams '=' TypeExpDecl
+              in TypeBind name $2 $4 $6 NoInfo Nothing (srcspan $1 $>) }
+         | type Liftedness 'id[' id ']' TypeParams '=' TypeExp
            { let L loc (INDEXING name) = $3; L ploc (ID pname) = $4
-             in TypeBind name $2 (TypeParamDim pname ploc:$6) $8 Nothing (srcspan $1 $>) }
+             in TypeBind name $2 (TypeParamDim pname ploc:$6) $8 NoInfo Nothing (srcspan $1 $>) }
 
 TypeExp :: { UncheckedTypeExp }
          : '(' id ':' TypeExp ')' '->' TypeExp
            { let L _ (ID v) = $2 in TEArrow (Just v) $4 $7 (srcspan $1 $>) }
          | TypeExpTerm '->' TypeExp
            { TEArrow Nothing $1 $3 (srcspan $1 $>) }
+         | '?' TypeExpDims '.' TypeExp { TEDim $2 $4 (srcspan $1 $>) }
          | TypeExpTerm %prec typeprec { $1 }
+
+TypeExpDims :: { [Name] }
+         : '[' id ']'             { let L _ (ID v) = $2 in [v] }
+         | '[' id ']' TypeExpDims { let L _ (ID v) = $2 in v : $4 }
 
 TypeExpTerm :: { UncheckedTypeExp }
          : '*' TypeExpTerm
@@ -749,11 +755,12 @@ Case :: { CaseBase NoInfo Name }
         { let loc = srcspan $1 $> in CasePat $2 $> loc }
 
 CPat :: { PatBase NoInfo Name }
-          : CInnerPat ':' TypeExpDecl { PatAscription $1 $3 (srcspan $1 $>) }
+          : '#[' AttrInfo ']' CPat    { PatAttr $2 $4 (srcspan $1 $>) }
+          | CInnerPat ':' TypeExpDecl { PatAscription $1 $3 (srcspan $1 $>) }
           | CInnerPat                 { $1 }
-          | Constr ConstrFields           { let (n, loc) = $1;
-                                                loc' = srcspan loc $>
-                                            in PatConstr n NoInfo $2 loc'}
+          | Constr ConstrFields       { let (n, loc) = $1;
+                                            loc' = srcspan loc $>
+                                        in PatConstr n NoInfo $2 loc'}
 
 CPats1 :: { [PatBase NoInfo Name] }
            : CPat               { [$1] }
@@ -764,9 +771,9 @@ CInnerPat :: { PatBase NoInfo Name }
                | '(' BindingBinOp ')'               { Id $2 NoInfo (srcspan $1 $>) }
                | '_'                                { Wildcard NoInfo $1 }
                | '(' ')'                            { TuplePat [] (srcspan $1 $>) }
-               | '(' CPat ')'                   { PatParens $2 (srcspan $1 $>) }
-               | '(' CPat ',' CPats1 ')'    { TuplePat ($2:$4) (srcspan $1 $>) }
-               | '{' CFieldPats '}'             { RecordPat $2 (srcspan $1 $>) }
+               | '(' CPat ')'                       { PatParens $2 (srcspan $1 $>) }
+               | '(' CPat ',' CPats1 ')'            { TuplePat ($2:$4) (srcspan $1 $>) }
+               | '{' CFieldPats '}'                 { RecordPat $2 (srcspan $1 $>) }
                | CaseLiteral                        { PatLit (fst $1) NoInfo (snd $1) }
                | Constr                             { let (n, loc) = $1
                                                       in PatConstr n NoInfo [] loc }
@@ -848,20 +855,21 @@ FieldId :: { (Name, SrcLoc) }
          | intlit { let L loc (INTLIT n) = $1 in (nameFromString (show n), loc) }
 
 Pat :: { PatBase NoInfo Name }
-Pat : InnerPat ':' TypeExpDecl { PatAscription $1 $3 (srcspan $1 $>) }
-        | InnerPat                 { $1 }
+     : '#[' AttrInfo ']' Pat  { PatAttr $2 $4 (srcspan $1 $>) }
+     | InnerPat ':' TypeExpDecl { PatAscription $1 $3 (srcspan $1 $>) }
+     | InnerPat                 { $1 }
 
 Pats1 :: { [PatBase NoInfo Name] }
-           : Pat               { [$1] }
-           | Pat ',' Pats1 { $1 : $3 }
+       : Pat                    { [$1] }
+       | Pat ',' Pats1          { $1 : $3 }
 
 InnerPat :: { PatBase NoInfo Name }
 InnerPat : id                               { let L loc (ID name) = $1 in Id name NoInfo loc }
-             | '(' BindingBinOp ')'             { Id $2 NoInfo (srcspan $1 $>) }
-             | '_'                              { Wildcard NoInfo $1 }
-             | '(' ')'                          { TuplePat [] (srcspan $1 $>) }
+             | '(' BindingBinOp ')'         { Id $2 NoInfo (srcspan $1 $>) }
+             | '_'                          { Wildcard NoInfo $1 }
+             | '(' ')'                      { TuplePat [] (srcspan $1 $>) }
              | '(' Pat ')'                  { PatParens $2 (srcspan $1 $>) }
-             | '(' Pat ',' Pats1 ')'    { TuplePat ($2:$4) (srcspan $1 $>) }
+             | '(' Pat ',' Pats1 ')'        { TuplePat ($2:$4) (srcspan $1 $>) }
              | '{' FieldPats '}'            { RecordPat $2 (srcspan $1 $>) }
 
 FieldPat :: { (Name, PatBase NoInfo Name) }
@@ -884,12 +892,16 @@ FieldPats1 :: { [(Name, PatBase NoInfo Name)] }
 maybeAscription(p) : ':' p { Just $2 }
                    |       { Nothing }
 
-AttrInfo :: { AttrInfo }
-         : id { let L _ (ID s) = $1 in AttrAtom s }
-         | id '('       ')' { let L _ (ID s) = $1 in AttrComp s [] }
-         | id '(' Attrs ')' { let L _ (ID s) = $1 in AttrComp s $3 }
+AttrAtom :: { (AttrAtom Name, SrcLoc) }
+          : id     { let L loc (ID s) =     $1 in (AtomName s, loc) }
+          | intlit { let L loc (INTLIT x) = $1 in (AtomInt x, loc) }
 
-Attrs :: { [AttrInfo] }
+AttrInfo :: { AttrInfo Name }
+         : AttrAtom         { uncurry AttrAtom $1 }
+         | id '('       ')' { let L _ (ID s) = $1 in AttrComp s [] (srcspan $1 $>) }
+         | id '(' Attrs ')' { let L _ (ID s) = $1 in AttrComp s $3 (srcspan $1 $>) }
+
+Attrs :: { [AttrInfo Name] }
        : AttrInfo           { [$1] }
        | AttrInfo ',' Attrs { $1 : $3 }
 
@@ -1000,14 +1012,14 @@ addDocSpec doc (TypeSpec l name ps _ loc) = TypeSpec l name ps (Just doc) loc
 addDocSpec doc (ModSpec name se _ loc) = ModSpec name se (Just doc) loc
 addDocSpec _ spec = spec
 
-addAttr :: AttrInfo -> UncheckedDec -> UncheckedDec
+addAttr :: AttrInfo Name -> UncheckedDec -> UncheckedDec
 addAttr attr (ValDec val) =
   ValDec $ val { valBindAttrs = attr : valBindAttrs val }
 addAttr attr dec =
   dec
 
 -- We will extend this function once we actually start tracking these.
-addAttrSpec :: AttrInfo -> UncheckedSpec -> UncheckedSpec
+addAttrSpec :: AttrInfo Name -> UncheckedSpec -> UncheckedSpec
 addAttrSpec _attr dec = dec
 
 reverseNonempty :: (a, [a]) -> (a, [a])

@@ -339,7 +339,7 @@ instance FreeIn shape => FreeIn (TypeBase shape u) where
   freeIn' (Acc acc ispace ts _) = freeIn' (acc, ispace, ts)
 
 instance FreeIn dec => FreeIn (Param dec) where
-  freeIn' (Param _ dec) = freeIn' dec
+  freeIn' (Param attrs _ dec) = freeIn' attrs <> freeIn' dec
 
 instance FreeIn dec => FreeIn (PatElemT dec) where
   freeIn' (PatElem _ dec) = freeIn' dec

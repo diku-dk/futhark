@@ -98,7 +98,7 @@ analyseLoopParams merge (inuse, lastused, graph) =
   where
     mems = mapMaybe isMemArg merge
     inner_mems = namesToList lastused <> namesToList inuse
-    isMemArg (Param _ MemMem {}, Var v) = Just v
+    isMemArg (Param _ _ MemMem {}, Var v) = Just v
     isMemArg _ = Nothing
 
 analyseExp ::

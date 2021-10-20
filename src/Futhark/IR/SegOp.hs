@@ -766,12 +766,11 @@ identitySegOpMapper =
     }
 
 mapOnSegSpace ::
-  Monad f =>
-  SegOpMapper lvl frep trep f ->
-  SegSpace ->
-  f SegSpace
+  Monad f => SegOpMapper lvl frep trep f -> SegSpace -> f SegSpace
 mapOnSegSpace tv (SegSpace phys dims) =
-  SegSpace phys <$> traverse (traverse $ mapOnSegOpSubExp tv) dims
+  SegSpace
+    <$> mapOnSegOpVName tv phys
+    <*> traverse (bitraverse (mapOnSegOpVName tv) (mapOnSegOpSubExp tv)) dims
 
 mapSegBinOp ::
   Monad m =>
@@ -857,11 +856,9 @@ instance
             mapOnSegOpLevel = return . substituteNames subst
           }
 
-instance
-  (ASTRep rep, ASTConstraints lvl) =>
-  Rename (SegOp lvl rep)
-  where
-  rename = mapSegOpM renamer
+instance (ASTRep rep, ASTConstraints lvl) => Rename (SegOp lvl rep) where
+  rename op =
+    renameBound (M.keys (scopeOfSegSpace (segSpace op))) $ mapSegOpM renamer op
     where
       renamer = SegOpMapper rename rename rename rename rename
 
@@ -869,7 +866,9 @@ instance
   (ASTRep rep, FreeIn (LParamInfo rep), FreeIn lvl) =>
   FreeIn (SegOp lvl rep)
   where
-  freeIn' e = flip execState mempty $ mapSegOpM free e
+  freeIn' e =
+    fvBind (namesFromList $ M.keys $ scopeOfSegSpace (segSpace e)) $
+      flip execState mempty $ mapSegOpM free e
     where
       walk f x = modify (<> f x) >> return x
       free =

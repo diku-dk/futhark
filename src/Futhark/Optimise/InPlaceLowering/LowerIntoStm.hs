@@ -150,7 +150,7 @@ lowerUpdatesIntoSegMap scope pat updates kspace kbody = do
               traverse (toSubExp "index") $
                 fixSlice (fmap pe64 slice) $ map (pe64 . Var) gtids
 
-          let res_dims = arrayDims $ snd bindee_dec
+          let res_dims = take (length slice') $ arrayDims $ snd bindee_dec
               ret' = WriteReturns cs (Shape res_dims) src [(Slice $ map DimFix slice', se)]
 
           v_aliased <- newName v
@@ -269,9 +269,7 @@ lowerUpdateIntoLoop scope updates pat val form body = do
           )
         return $
           Right
-            ( Param
-                mergename
-                (toDecl (typeOf mergedec) Unique),
+            ( Param mempty mergename (toDecl (typeOf mergedec) Unique),
               Var source
             )
       | otherwise = return $ Left $ mergeParam summary

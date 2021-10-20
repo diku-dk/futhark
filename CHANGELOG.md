@@ -9,6 +9,40 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+### Removed
+
+### Changed
+
+### Fixed
+
+## [0.20.5]
+
+### Added
+
+* Existential sizes can now be explicitly quantified in type
+  expressions (#1308).
+
+* Significantly expanded error index.
+
+* Attributes can now be numeric.
+
+* Patterns can now have attributes.  None have any effect at the
+  moment.
+
+* `futhark autotune` and `futhark bench` now take a `--spec-file`
+  option for loading a test specification from another file.
+
+### Fixed
+
+* `auto output` reference datasets are now recreated when the program
+  is newer than the data files.
+
+* Exotic hoisting bug (#1490).
+
+## [0.20.4]
+
+### Added
+
 * Tuning parameters now (officially) exposed in the C API.
 
 * `futhark autotune` is now 2-3x faster on many programs, as it now
@@ -16,13 +50,13 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Negative numeric literals are now allowed in `case` patterns.
 
-### Removed
-
-### Changed
-
 ### Fixed
 
 * `futhark_context_config_set_profiling` was missing for the `c` backend.
+
+* Correct handling of nested entry points (#1478).
+
+* Incorrect type information recorded when doing in-place lowering (#1481).
 
 ## [0.20.3]
 

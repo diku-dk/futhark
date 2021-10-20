@@ -229,7 +229,7 @@ jobs:
         echo "$HOME/.local/bin" >> $GITHUB_PATH
 
     - run: |
-        futhark test -i tests examples
+        futhark test -i tests
 
   test-c:
     runs-on: ubuntu-20.04
@@ -255,7 +255,7 @@ jobs:
 
     - run: |
         export CFLAGS="-fsanitize=undefined -fno-sanitize-recover -O3"
-        futhark test -c --backend=c tests examples --no-tuning
+        futhark test -c --backend=c tests --no-tuning
         make -C tests_lib/c -j
 
   test-multicore:
@@ -281,7 +281,7 @@ jobs:
         echo "$HOME/.local/bin" >> $GITHUB_PATH
 
     - run: |
-        futhark test -c --backend=multicore tests examples --no-tuning
+        futhark test -c --backend=multicore tests --no-tuning
         make -C tests_lib/c FUTHARK_BACKEND=multicore
 
   test-python:
@@ -307,7 +307,7 @@ jobs:
         echo "$HOME/.local/bin" >> $GITHUB_PATH
 
     - run: |
-        futhark test -c --no-terminal --no-tuning --backend=python --exclude=no_python --exclude=compiled tests examples
+        futhark test -c --no-terminal --no-tuning --backend=python --exclude=no_python --exclude=compiled tests
         make -C tests_lib/python -j
 
   test-opencl:
@@ -333,7 +333,7 @@ jobs:
         echo "$HOME/.local/bin" >> $GITHUB_PATH
 
     - run: |
-        futhark test -c --no-terminal --backend=opencl --exclude=compiled --runner=tools/oclgrindrunner.sh tests examples
+        futhark test -c --no-terminal --backend=opencl --exclude=compiled --runner=tools/oclgrindrunner.sh tests
 
   test-pyopencl:
     runs-on: ubuntu-20.04
@@ -359,7 +359,7 @@ jobs:
         echo "$HOME/.local/bin" >> $GITHUB_PATH
 
     - run: |
-        futhark test -c --no-terminal --backend=pyopencl --exclude=compiled --runner=tools/oclgrindrunner.sh tests examples
+        futhark test -c --no-terminal --backend=pyopencl --exclude=compiled --runner=tools/oclgrindrunner.sh tests
 
   test-cuda:
     runs-on: ubuntu-20.04
@@ -384,7 +384,7 @@ jobs:
         echo "$HOME/.local/bin" >> $GITHUB_PATH
 
     - run: |
-        futhark test -C --no-terminal --backend=cuda tests examples
+        futhark test -C --no-terminal --backend=cuda tests
 
   test-wasm:
     runs-on: ubuntu-20.04
@@ -416,7 +416,7 @@ jobs:
       run: |
         node --version
         export EMCFLAGS="-sINITIAL_MEMORY=2147418112 -O1" # 2gb - 64kb... largest value of memory
-        futhark test -c --backend=wasm --runner=./tools/node-simd.sh --no-tuning --exclude=no_wasm tests examples
+        futhark test -c --backend=wasm --runner=./tools/node-simd.sh --no-tuning --exclude=no_wasm tests
 
   test-wasm-multicore:
     runs-on: ubuntu-20.04
@@ -448,7 +448,7 @@ jobs:
       run: |
         node --version
         export EMCFLAGS="-sINITIAL_MEMORY=2147418112 -O1 -s PTHREAD_POOL_SIZE=12" # 2gb - 64kb... largest value of memory
-        futhark test -c --backend=wasm-multicore --runner=./tools/node-threaded.sh --no-tuning --exclude=no_wasm tests examples
+        futhark test -c --backend=wasm-multicore --runner=./tools/node-threaded.sh --no-tuning --exclude=no_wasm tests
 
   test-wasm-lib:
     runs-on: ubuntu-20.04
@@ -536,12 +536,13 @@ jobs:
     steps:
     - uses: actions/checkout@v2
       with:
-        submodules: true
+        submodules: recursive # for git-annex to work.
+        fetch-depth: 0        #
 
     - name: Install dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y opencl-headers nvidia-cuda-dev nvidia-opencl-dev
+        sudo apt-get install -y opencl-headers nvidia-cuda-dev nvidia-opencl-dev git-annex
 
     - uses: actions/download-artifact@v2
       with:
@@ -552,6 +553,9 @@ jobs:
         tar xvf futhark-nightly-linux-x86_64.tar.xz
         make -C futhark-nightly-linux-x86_64/ install PREFIX=$HOME/.local
         echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+    - run: |
+        cd futhark-benchmarks && pwd && git-annex get
 
     - run: |
         futhark test -C --no-terminal --backend=opencl  --pass-compiler-option=--Werror futhark-benchmarks

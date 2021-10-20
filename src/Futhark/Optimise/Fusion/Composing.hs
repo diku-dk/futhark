@@ -69,7 +69,7 @@ fuseMaps unfus_nms lam1 inp1 out1 lam2 inp2 = (lam2', M.elems inputmap)
     lam2' =
       lam2
         { lambdaParams =
-            [ Param name t
+            [ Param mempty name t
               | Ident name t <- lam2redparams ++ M.keys inputmap
             ],
           lambdaBody = new_body2'

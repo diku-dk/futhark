@@ -104,6 +104,7 @@ Compound Types and Values
        : | `sum_type`
        : | `function_type`
        : | `type_application`
+       : | `existential_size`
 
 Compound types can be constructed based on the primitive types.  The
 Futhark type system is entirely structural, and type abbreviations are
@@ -134,14 +135,18 @@ comma-separated values enclosed in square brackets: ``[1,2,3]``.  An
 array type is written as ``[d]t``, where ``t`` is the element type of
 the array, and ``d`` is an integer or variable indicating the size.
 We can often elide ``d`` and write just ``[]`` (an *anonymous size*),
-in which case the size will be inferred.  As an example, an array of
-three integers could be written as ``[1,2,3]``, and has type
-``[3]i32``.  An empty array is written as ``[]``, and its type is
-inferred from its use.  When writing Futhark values for such uses as
-``futhark test`` (but not when writing programs), empty arrays are
-written ``empty([0]t)`` for an empty array of type ``[0]t``.  When
-using ``empty``, all dimensions must be given a size, and at least one
-must be zero, e.g. ``empty([2][0]i32)``.
+in which case the size will be inferred.  An anonymous size is a
+syntactic shorthand, and is always replaced by an actual size by the
+type checker (either via inference or by inventing a new name,
+depending on context).
+
+As an example, an array of three integers could be written as
+``[1,2,3]``, and has type ``[3]i32``.  An empty array is written as
+``[]``, and its type is inferred from its use.  When writing Futhark
+values for such uses as ``futhark test`` (but not when writing
+programs), empty arrays are written ``empty([0]t)`` for an empty array
+of type ``[0]t``.  When using ``empty``, all dimensions must be given
+a size, and at least one must be zero, e.g. ``empty([2][0]i32)``.
 
 Multi-dimensional arrays are supported in Futhark, but they must be
 *regular*, meaning that all inner arrays must have the same shape.
@@ -199,6 +204,13 @@ String literals are supported, but only as syntactic sugar for UTF-8
 encoded arrays of ``u8`` values.  There is no character type in
 Futhark, but character literals are interpreted as integers of the
 corresponding Unicode code point.
+
+.. productionlist::
+   existential_size: "?" ("[" `id` "]")+ "." `type`
+
+An existential size quantifier brings an unknown size into scope
+within a type.  This can be used to encode constraints for statically
+unknowable array sizes.
 
 Declarations
 ------------
@@ -346,6 +358,8 @@ value is defined.  A constant value may not have a unique type (see
 (see `Size types`_), new existential sizes will be constructed for
 them.
 
+.. _typeabbrevs:
+
 Type Abbreviations
 ~~~~~~~~~~~~~~~~~~
 
@@ -359,12 +373,12 @@ name ``t1`` can be used as a shorthand for the type ``t2``.  Type
 abbreviations do not create distinct types: the types ``t1`` and
 ``t2`` are entirely interchangeable.
 
-If the right-hand side of a type contains anonymous sizes, it must be
-declared "size-lifted" with ``type~``.  If it (potentially) contains a
-function, it must be declared "fully lifted" with ``type^``.  A lifted
-type can also contain anonymous sizes.  Lifted types cannot be put in
-arrays.  Fully lifted types cannot be returned from conditional or
-loop expressions.
+If the right-hand side of a type contains existential sizes, it must
+be declared "size-lifted" with ``type~``.  If it (potentially)
+contains a function, it must be declared "fully lifted" with
+``type^``.  A lifted type can also contain existential sizes.  Lifted
+types cannot be put in arrays.  Fully lifted types cannot be returned
+from conditional or loop expressions.
 
 A type abbreviation can have zero or more parameters.  A type
 parameter enclosed with square brackets is a *size parameter*, and
@@ -443,7 +457,7 @@ literals and variables, but also more complicated forms.
       : | "let" `id` `type_param`* `pat`+ [":" `type`] "=" `exp` "in" `exp`
       : | "(" "\" `pat`+ [":" `type`] "->" `exp` ")"
       : | "loop" `pat` [("=" `exp`)] `loopform` "do" `exp`
-      : | "#[" attr "]" `exp`
+      : | "#[" `attr` "]" `exp`
       : | "unsafe" `exp`
       : | "assert" `atom` `atom`
       : | `exp` "with" "[" `index` ("," `index`)* "]" "=" `exp`
@@ -462,6 +476,7 @@ literals and variables, but also more complicated forms.
       : | "{" `fieldid` ["=" `pat`] ("," `fieldid` ["=" `pat`])* "}"
       : | `constructor` `pat`*
       : | `pat` ":" `type`
+      : | "#[" `attr` "]" `pat`
    pat_literal: [ "-" ] `intnumber`
               | [ "-" ] `floatnumber`
               | `charlit`
@@ -838,6 +853,8 @@ corruption.
 
 This construct is deprecated.  Use the ``#[unsafe]`` attribute instead.
 
+.. _assert:
+
 ``assert cond e``
 .................
 
@@ -851,6 +868,8 @@ variable), dead code elimination may remove the assertion.
 
 Return ``a``, but with the element at position ``i`` changed to
 contain the result of evaluating ``e``.  Consumes ``a``.
+
+.. _record_update:
 
 ``r with f = e``
 .................
@@ -1040,9 +1059,14 @@ accepted or produced by the function.  For example::
 We use a *size parameter*, ``[n]``, to explicitly quantify sizes.  The
 ``[n]`` parameter is not explicitly passed when calling ``f``.
 Rather, its value is implicitly deduced from the arguments passed for
-the value parameters.  An array can contain *anonymous dimensions*,
-e.g. ``[]i32``, for which the type checker will invent fresh size
-parameters, which ensures that all arrays have a (symbolic) size.
+the value parameters.  An array type can contain *anonymous
+dimensions*, e.g. ``[]i32``, for which the type checker will invent
+fresh size parameters, which ensures that all arrays have a (symbolic)
+size.  On the right-hand side of a function arrow ("return types"),
+this results in an *existential size* that is not known until the
+function is fully applied, e.g::
+
+  val filter [n] 'a : (p: a -> bool) -> (as: [n]a) -> ?[k].[k]a
 
 A size annotation can also be an integer constant (with no suffix).
 Size parameters can be used as ordinary variables within the scope of
@@ -1071,14 +1095,14 @@ operation.  For example, the type of ``concat`` should conceptually be::
   val concat [n] [m] 't : [n]t -> [m]t -> [n+m]t
 
 But this is not presently allowed.  Instead, the return type contains
-an anonymous size::
+an existential size::
 
-  val concat [n] [m] 't : [n]t -> [m]t -> []t
+  val concat [n] [m] 't : [n]t -> [m]t -> ?[k].[k]t
 
 When an application ``concat xs ys`` is found, the result will be of
-type ``[k]t``, where ``k`` is a fresh *unknown* size variable that is
-considered distinct from every other size in the program.  It is often
-necessary to perform a size coercion (see `Size coercion`_) to
+type ``[k']t``, where ``k'`` is a fresh *unknown* size variable that
+is considered distinct from every other size in the program.  It is
+often necessary to perform a size coercion (see `Size coercion`_) to
 convert an unknown size to a known size.
 
 Generally, unknown sizes are constructed whenever the true size cannot
@@ -1127,19 +1151,19 @@ Most complex ranges, such as ``a..<b``, will have an unknown size.
 Exceptions exist for :ref:`general ranges <range>` and :ref:`"upto"
 ranges <range_upto>`.
 
-Anonymous size in function return type
-......................................
+Existential size in function return type
+........................................
 
-Whenever the result of a function application would have an anonymous
+Whenever the result of a function application has an existential
 size, that size is replaced with a fresh unknown size variable.
 
 For example, ``filter`` has the following type::
 
-  val filter [n] 'a : (p: a -> bool) -> (as: [n]a) -> []a
+  val filter [n] 'a : (p: a -> bool) -> (as: [n]a) -> ?[k].[k]a
 
-Naively, an application ``filter f xs`` seems like it would have type
-``[]a``, but a fresh unknown size ``k`` will be created and the actual
-type will be ``[k]a``.
+For an application ``filter f xs``, the type checker invents a fresh
+unknown size ``k'``, and the actual type for this specific application
+will be ``[k']a``.
 
 Branches of ``if`` return arrays of different sizes
 ...................................................
@@ -1258,8 +1282,8 @@ Modules
 When matching a module with a module type (see :ref:`module-system`),
 a non-lifted abstract type (i.e. one that is declared with ``type``
 rather than ``type^``) may not be implemented by a type abbreviation
-that contains any anonymous sizes.  This is to ensure that if we have
-the following::
+that contains any existential sizes.  This is to ensure that if we
+have the following::
 
   module m : { type t } = ...
 
@@ -1271,20 +1295,20 @@ Higher-order functions
 
 When a higher-order function takes a functional argument whose return
 type is a non-lifted type parameter, any instantiation of that type
-parameter must have a non-anonymous size.  If the return type is a
-lifted type parameter, then the instantiation may contain anonymous
+parameter must have a non-existential size.  If the return type is a
+lifted type parameter, then the instantiation may contain existential
 sizes.  This is why the type of ``map`` guarantees regular arrays::
 
   val map [n] 'a 'b : (a -> b) -> [n]a -> [n]b
 
 The type parameter ``b`` can only be replaced with a type that has
-non-anonymous sizes, which means they must be the same for every
+non-existential sizes, which means they must be the same for every
 application of the function.  In contrast, this is the type of the
 pipeline operator::
 
   val (|>) '^a -> '^b : a -> (a -> b) -> b
 
-The provided function can return something with an anonymous size
+The provided function can return something with an existential size
 (such as ``filter``).
 
 A function whose return type has an unknown size
@@ -1292,7 +1316,7 @@ A function whose return type has an unknown size
 
 If a function (named or anonymous) is inferred to have a return type
 that contains an unknown size variable created *within* the function
-body, that size variable will be replaced with an anonymous size.  In
+body, that size variable will be replaced with an existential size.  In
 most cases this is not important, but it means that an expression like
 the following is ill-typed::
 
@@ -1300,7 +1324,7 @@ the following is ill-typed::
 
 This is because the ``(length xs)`` expression gives rise to some
 fresh size ``k``.  The lambda is then assigned the type ``[n]t ->
-[k]i32``, which is immediately turned into ``[n]t -> []i32`` because
+[k]i32``, which is immediately turned into ``[n]t -> ?[k].[k]i32`` because
 ``k`` was generated inside its body.  A function of this type cannot
 be passed to ``map``, as explained before.  The solution is to bind
 ``length`` to a name *before* the lambda.
@@ -1328,6 +1352,15 @@ But this is not the case for the function that inlines the definition
 of ``square``::
 
   val g : () -> [][]i32
+
+As this above would be elaborated as follows::
+
+  val g : () -> ?[n][m].[n][m]i32
+
+We can of course explicitly write that the function returns a square
+array of existential size::
+
+  val g : () -> ?[n].[n]i32
 
 .. _in-place-updates:
 
@@ -1646,18 +1679,19 @@ Attributes
 
 .. productionlist::
    attr:   `id`
+       :   `decimal`
        : | `id` "(" [`attr` ("," `attr`)*] ")"
 
-An expression, declaration, or module type spec can be prefixed with
-an attribute, written as ``#[attr]``.  This may affect how it is
-treated by the compiler or other tools.  In no case will attributes
-affect or change the *semantics* of a program, but it may affect how
-well it compiles and runs (or in some cases, whether it compiles or
-runs at all).  Unknown attributes are silently ignored.  Most have no
-effect in the interpreter.  An attribute can be either an *atom*,
-written as just an identifier, or *compound*, consisting of an
-identifier and a comma-separated sequence of attributes.  The latter
-is used for grouping and encoding of more complex information.
+An expression, declaration, pattern, or module type spec can be
+prefixed with an attribute, written as ``#[attr]``.  This may affect
+how it is treated by the compiler or other tools.  In no case will
+attributes affect or change the *semantics* of a program, but it may
+affect how well it compiles and runs (or in some cases, whether it
+compiles or runs at all).  Unknown attributes are silently ignored.
+Most have no effect in the interpreter.  An attribute can be either an
+*atom*, written as an identifier or number, or *compound*, consisting
+of an identifier and a comma-separated sequence of attributes.  The
+latter is used for grouping and encoding of more complex information.
 
 Expression attributes
 ~~~~~~~~~~~~~~~~~~~~~
@@ -1788,6 +1822,13 @@ prevent the GPU backends from generating working code.
 ..........
 
 Always inline calls to this function.
+
+Pattern attributes
+~~~~~~~~~~~~~~~~~~
+
+No pattern attributes are currently supported by the compiler itself,
+although they are syntactically permitted and may be used by other
+tools.
 
 Spec attributes
 ~~~~~~~~~~~~~~~

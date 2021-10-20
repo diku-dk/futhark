@@ -45,12 +45,14 @@ substituteTypesInEnv substs env =
     }
   where
     subT name (TypeAbbr l _ _)
-      | Just (Subst ps t) <- substs name = TypeAbbr l ps t
-    subT _ (TypeAbbr l ps t) = TypeAbbr l ps $ applySubst substs t
+      | Just (Subst ps rt) <- substs name = TypeAbbr l ps rt
+    subT _ (TypeAbbr l ps (RetType dims t)) =
+      TypeAbbr l ps $ applySubst substs $ RetType dims t
 
 substituteTypesInBoundV :: TypeSubs -> BoundV -> BoundV
 substituteTypesInBoundV substs (BoundV tps t) =
-  BoundV tps (applySubst substs t)
+  let RetType dims t' = applySubst substs $ RetType [] t
+   in BoundV (tps ++ map (`TypeParamDim` mempty) dims) t'
 
 -- | All names defined anywhere in the 'Env'.
 allNamesInEnv :: Env -> S.Set VName
@@ -128,8 +130,8 @@ newNamesForMTy orig_mty = do
             (substituteInMod mod)
             (substituteInMTy substs mty)
 
-        substituteInTypeBinding (TypeAbbr l ps t) =
-          TypeAbbr l (map substituteInTypeParam ps) $ substituteInType t
+        substituteInTypeBinding (TypeAbbr l ps (RetType dims t)) =
+          TypeAbbr l (map substituteInTypeParam ps) $ RetType dims $ substituteInType t
 
         substituteInTypeParam (TypeParamDim p loc) =
           TypeParamDim (substitute p) loc
@@ -149,8 +151,8 @@ newNamesForMTy orig_mty = do
           Scalar $ Sum $ (fmap . fmap) substituteInType ts
         substituteInType (Array () u t shape) =
           arrayOf (substituteInType $ Scalar t) (substituteInShape shape) u
-        substituteInType (Scalar (Arrow als v t1 t2)) =
-          Scalar $ Arrow als v (substituteInType t1) (substituteInType t2)
+        substituteInType (Scalar (Arrow als v t1 (RetType dims t2))) =
+          Scalar $ Arrow als v (substituteInType t1) $ RetType dims $ substituteInType t2
 
         substituteInShape (ShapeDecl ds) =
           ShapeDecl $ map substituteInDim ds
@@ -191,7 +193,7 @@ refineEnv ::
   StructType ->
   TypeM (QualName VName, TySet, Env)
 refineEnv loc tset env tname ps t
-  | Just (tname', TypeAbbr _ cur_ps (Scalar (TypeVar () _ (TypeName qs v) _))) <-
+  | Just (tname', TypeAbbr _ cur_ps (RetType _ (Scalar (TypeVar () _ (TypeName qs v) _)))) <-
       findTypeDef tname (ModEnv env),
     QualName (qualQuals tname') v `M.member` tset =
     if paramsMatch cur_ps ps
@@ -200,7 +202,12 @@ refineEnv loc tset env tname ps t
           ( tname',
             QualName qs v `M.delete` tset,
             substituteTypesInEnv
-              (flip M.lookup $ M.fromList [(qualLeaf tname', Subst cur_ps t), (v, Subst ps t)])
+              ( flip M.lookup $
+                  M.fromList
+                    [ (qualLeaf tname', Subst cur_ps $ RetType [] t),
+                      (v, Subst ps $ RetType [] t)
+                    ]
+              )
               env
           )
       else
@@ -252,35 +259,33 @@ resolveAbsTypes mod_abs mod sig_abs loc = do
           zip
             (map (fmap baseName . fst) $ M.toList mod_abs)
             (M.toList mod_abs)
-  fmap M.fromList $
-    forM (M.toList sig_abs) $ \(name, name_l) ->
-      case findTypeDef (fmap baseName name) mod of
-        Just (name', TypeAbbr mod_l ps t)
-          | mod_l > name_l ->
-            mismatchedLiftedness
-              name_l
-              (map qualLeaf $ M.keys mod_abs)
-              (qualLeaf name)
-              (mod_l, ps, t)
-          | name_l < SizeLifted,
-            emptyDims t ->
-            anonymousSizes
-              (map qualLeaf $ M.keys mod_abs)
-              (qualLeaf name)
-              (mod_l, ps, t)
-          | Just (abs_name, _) <- M.lookup (fmap baseName name) abs_mapping ->
-            return (qualLeaf name, (abs_name, TypeAbbr name_l ps t))
-          | otherwise ->
-            return (qualLeaf name, (name', TypeAbbr name_l ps t))
-        _ ->
-          missingType loc $ fmap baseName name
+  fmap M.fromList . forM (M.toList sig_abs) $ \(name, name_l) ->
+    case findTypeDef (fmap baseName name) mod of
+      Just (name', TypeAbbr mod_l ps t)
+        | mod_l > name_l ->
+          mismatchedLiftedness
+            name_l
+            (map qualLeaf $ M.keys mod_abs)
+            (qualLeaf name)
+            (mod_l, ps, t)
+        | name_l < SizeLifted,
+          not $ null $ retDims t ->
+          anonymousSizes
+            (map qualLeaf $ M.keys mod_abs)
+            (qualLeaf name)
+            (mod_l, ps, t)
+        | Just (abs_name, _) <- M.lookup (fmap baseName name) abs_mapping ->
+          return (qualLeaf name, (abs_name, TypeAbbr name_l ps t))
+        | otherwise ->
+          return (qualLeaf name, (name', TypeAbbr name_l ps t))
+      _ ->
+        missingType loc $ fmap baseName name
   where
     mismatchedLiftedness name_l abs name mod_t =
-      Left $
-        TypeError loc mempty $
-          "Module defines"
-            </> indent 2 (ppTypeAbbr abs name mod_t)
-            </> "but module type requires" <+> text what <> "."
+      Left . TypeError loc mempty $
+        "Module defines"
+          </> indent 2 (ppTypeAbbr abs name mod_t)
+          </> "but module type requires" <+> text what <> "."
       where
         what = case name_l of
           Unlifted -> "a non-lifted type"
@@ -293,12 +298,6 @@ resolveAbsTypes mod_abs mod sig_abs loc = do
           "Module defines"
             </> indent 2 (ppTypeAbbr abs name mod_t)
             </> "which contains anonymous sizes, but module type requires non-lifted type."
-
-    emptyDims :: StructType -> Bool
-    emptyDims = isNothing . traverseDims onDim
-      where
-        onDim _ PosImmediate (AnyDim _) = Nothing
-        onDim _ _ d = Just d
 
 resolveMTyNames ::
   MTy ->
@@ -361,8 +360,8 @@ mismatchedType ::
   SrcLoc ->
   [VName] ->
   VName ->
-  (Liftedness, [TypeParam], StructType) ->
-  (Liftedness, [TypeParam], StructType) ->
+  (Liftedness, [TypeParam], StructRetType) ->
+  (Liftedness, [TypeParam], StructRetType) ->
   Either TypeError b
 mismatchedType loc abs name spec_t env_t =
   Left $
@@ -372,8 +371,8 @@ mismatchedType loc abs name spec_t env_t =
         </> "but module type requires"
         </> indent 2 (ppTypeAbbr abs name spec_t)
 
-ppTypeAbbr :: [VName] -> VName -> (Liftedness, [TypeParam], StructType) -> Doc
-ppTypeAbbr abs name (l, ps, Scalar (TypeVar () _ tn args))
+ppTypeAbbr :: [VName] -> VName -> (Liftedness, [TypeParam], StructRetType) -> Doc
+ppTypeAbbr abs name (l, ps, RetType [] (Scalar (TypeVar () _ tn args)))
   | typeLeaf tn `elem` abs,
     map typeParamToArg ps == args =
     "type" <> ppr l <+> pprName name
@@ -400,7 +399,7 @@ matchMTys orig_mty orig_mty_sig =
     orig_mty_sig
   where
     matchMTys' ::
-      M.Map VName (Subst StructType) ->
+      M.Map VName (Subst StructRetType) ->
       MTy ->
       MTy ->
       SrcLoc ->
@@ -431,7 +430,7 @@ matchMTys orig_mty orig_mty_sig =
       return (substs <> abs_name_substs)
 
     matchMods ::
-      M.Map VName (Subst StructType) ->
+      M.Map VName (Subst StructRetType) ->
       Mod ->
       Mod ->
       SrcLoc ->
@@ -464,7 +463,7 @@ matchMTys orig_mty orig_mty_sig =
         return (pmod_substs <> mod_substs <> abs_name_substs)
 
     matchEnvs ::
-      M.Map VName (Subst StructType) ->
+      M.Map VName (Subst StructRetType) ->
       Env ->
       Env ->
       SrcLoc ->
@@ -478,12 +477,8 @@ matchMTys orig_mty orig_mty_sig =
 
       -- Check that all type abbreviations are correctly defined.
       abbr_name_substs <- fmap M.fromList $
-        forM
-          ( filter (isVisible . fst) $
-              M.toList $
-                envTypeTable sig
-          )
-          $ \(name, TypeAbbr spec_l spec_ps spec_t) ->
+        forM (filter (isVisible . fst) $ M.toList $ envTypeTable sig) $
+          \(name, TypeAbbr spec_l spec_ps spec_t) ->
             case findBinding envTypeTable Type (baseName name) env of
               Just (name', TypeAbbr l ps t) ->
                 matchTypeAbbr loc abs_subst_to_type name spec_l spec_ps spec_t name' l ps t
@@ -511,15 +506,15 @@ matchMTys orig_mty orig_mty_sig =
 
     matchTypeAbbr ::
       SrcLoc ->
-      M.Map VName (Subst StructType) ->
+      M.Map VName (Subst StructRetType) ->
       VName ->
       Liftedness ->
       [TypeParam] ->
-      StructType ->
+      StructRetType ->
       VName ->
       Liftedness ->
       [TypeParam] ->
-      StructType ->
+      StructRetType ->
       Either TypeError (VName, VName)
     matchTypeAbbr loc abs_subst_to_type spec_name spec_l spec_ps spec_t name l ps t = do
       -- We have to create substitutions for the type parameters, too.
@@ -531,16 +526,15 @@ matchMTys orig_mty orig_mty_sig =
       -- if we have a value of an abstract type 't [n]', then there is
       -- an array of size 'n' somewhere inside.
       when (M.member spec_name abs_subst_to_type) $
-        case S.toList (mustBeExplicitInType t) `intersect` map typeParamName ps of
+        case S.toList (mustBeExplicitInType (retType t)) `intersect` map typeParamName ps of
           [] -> return ()
           d : _ ->
-            Left $
-              TypeError loc mempty $
-                "Type"
-                  </> indent 2 (ppTypeAbbr [] name (l, ps, t))
-                  </> textwrap "cannot be made abstract because size parameter"
-                  <+/> pquote (pprName d)
-                  <+/> textwrap "is not used as an array size in the definition."
+            Left . TypeError loc mempty $
+              "Type"
+                </> indent 2 (ppTypeAbbr [] name (l, ps, t))
+                </> textwrap "cannot be made abstract because size parameter"
+                <+/> pquote (pprName d)
+                <+/> textwrap "is not used as an array size in the definition."
 
       let spec_t' = applySubst (`M.lookup` (param_substs <> abs_subst_to_type)) spec_t
       if spec_t' == t
@@ -559,7 +553,7 @@ matchMTys orig_mty orig_mty_sig =
       pure $ M.singleton x $ SizeSubst $ NamedDim $ qualName y
     matchTypeParam _ (TypeParamType spec_l x _) (TypeParamType l y _)
       | spec_l <= l =
-        pure . M.singleton x . Subst [] $
+        pure . M.singleton x . Subst [] . RetType [] $
           Scalar $ TypeVar () Nonunique (typeName y) []
     matchTypeParam nomatch _ _ =
       nomatch
