@@ -402,7 +402,6 @@ diffLoop
                 localScope (scopeOfPat $ Pat accs) $ do
                   let body_adj =
                         Body () stms_adj' $ varsRes (loop_param_adjs <> loop_free_adjs <> loop_vars_adjs)
-
                   adjs' <-
                     letTupExp "loop_adj" $
                       substituteNames loop_var_arrays_substs $
@@ -411,9 +410,10 @@ diffLoop
                           form'
                           body_adj
 
-                  zipWithM_ insSubExpAdj (map snd param_tuples') $ take (length loop_param_adjs) adjs'
-                  zipWithM_ (\v v_adj -> do insAdj v v_adj; (void . lookupAdjVal) v) loop_free $ take (length loop_free_adjs) $ drop (length loop_param_adjs) adjs'
-                  zipWithM_ (\v v_adj -> do insAdj v v_adj; void $ lookupAdjVal v) loop_var_arrays $ drop (length loop_param_adjs + length loop_free_adjs) adjs'
+                  returnSweepCode $ do
+                    zipWithM_ insSubExpAdj (map snd param_tuples') $ take (length loop_param_adjs) adjs'
+                    zipWithM_ (\v v_adj -> do insAdj v v_adj; (void . lookupAdjVal) v) loop_free $ take (length loop_free_adjs) $ drop (length loop_param_adjs) adjs'
+                    zipWithM_ (\v v_adj -> do insAdj v v_adj; void $ lookupAdjVal v) loop_var_arrays $ drop (length loop_param_adjs + length loop_free_adjs) adjs'
           _ -> error "diffLoop: unexpected non-loop expression."
 diffLoop _ _ _ _ = error "diffLoop: unexpected non-loop expression."
 
@@ -465,31 +465,32 @@ diffStm stm _ = error $ "diffStm unhandled:\n" ++ pretty stm
 
 diffStms :: Stms SOACS -> ADM ()
 diffStms all_stms
-  | Just (stm, stms) <- stmsHead all_stms =
-    diffStm stm $ diffStms stms
+  | Just (stm, stms) <- stmsHead all_stms = do
+    (subst, copy_stms) <- copyConsumedArrsInStm stm
+    let (stm', stms') = substituteNames subst (stm, stms)
+    diffStms copy_stms >> diffStm stm' (diffStms stms')
   | otherwise =
     pure ()
 
--- | Create copies of all arrays consumed in the given statements, and
+-- | Create copies of all arrays consumed in the given statement, and
 -- return statements which include copies of the consumed arrays.
 --
 -- See Note [Consumption].
-copyConsumedArrsInStms :: Stms SOACS -> ADM (Stms SOACS)
-copyConsumedArrsInStms ss = inScopeOf ss $ collectStms_ $ copyConsumedArrsInStms' ss
+copyConsumedArrsInStm :: Stm -> ADM (Substitutions, Stms SOACS)
+copyConsumedArrsInStm s = inScopeOf s $ collectStms $ copyConsumedArrsInStm' s
   where
-    copyConsumedArrsInStms' all_stms
-      | Just (stm, stms) <- stmsHead all_stms = do
-        let onConsumed v = inScopeOf all_stms $ do
-              v_t <- lookupType v
-              case v_t of
-                Acc {} -> error $ "copyConsumedArrsInStms: Acc " <> pretty v
-                Array {} -> do
-                  addSubstitution v =<< letExp (baseString v <> "_ad_copy") (BasicOp $ Copy v)
-                _ -> pure mempty
-        addStm stm
-        mconcat <$> mapM onConsumed (namesToList $ consumedInStms $ fst (Alias.analyseStms mempty (oneStm stm)))
-        copyConsumedArrsInStms' stms
-      | otherwise = pure ()
+    copyConsumedArrsInStm' stm =
+      let onConsumed v = inScopeOf s $ do
+            v_t <- lookupType v
+            case v_t of
+              Acc {} -> error $ "copyConsumedArrsInStms: Acc " <> pretty v
+              Array {} -> do
+                v' <- letExp (baseString v <> "_ad_copy") (BasicOp $ Copy v)
+                addSubstitution v' v
+                return [(v, v')]
+              _ -> return mempty
+       in M.fromList . mconcat
+            <$> mapM onConsumed (namesToList $ consumedInStms $ fst (Alias.analyseStms mempty (oneStm stm)))
 
 copyConsumedArrsInBody :: Body -> ADM Substitutions
 copyConsumedArrsInBody b =
@@ -509,7 +510,7 @@ diffBody res_adjs get_adjs_for (Body () stms res) = subAD $
         onResult (SubExpRes _ (Var v)) v_adj = void $ updateAdj v =<< adjVal v_adj
     (adjs, stms') <- collectStms $ do
       zipWithM_ onResult (takeLast (length res_adjs) res) res_adjs
-      diffStms =<< copyConsumedArrsInStms stms
+      diffStms stms
       mapM lookupAdjVal get_adjs_for
     pure $ Body () stms' $ res <> varsRes adjs
 
