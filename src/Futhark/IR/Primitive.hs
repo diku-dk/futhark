@@ -97,7 +97,6 @@ module Futhark.IR.Primitive
     oneIsh,
     oneIshInt,
     negativeIsh,
-    positiveIsh,
     primBitSize,
     primByteSize,
     intByteSize,
@@ -1596,15 +1595,6 @@ negativeIsh (FloatValue (Float64Value k)) = k < 0
 negativeIsh (BoolValue _) = False
 negativeIsh UnitValue = False
 
--- | Is the given value kind of positive?
-positiveIsh :: PrimValue -> Bool
-positiveIsh (IntValue k) = positiveIshInt k
-positiveIsh (FloatValue (Float16Value k)) = k > 0
-positiveIsh (FloatValue (Float32Value k)) = k > 0
-positiveIsh (FloatValue (Float64Value k)) = k > 0
-positiveIsh (BoolValue _) = False
-positiveIsh UnitValue = False
-
 -- | Is the given integer value kind of zero?
 zeroIshInt :: IntValue -> Bool
 zeroIshInt (Int8Value k) = k == 0
@@ -1618,13 +1608,6 @@ oneIshInt (Int8Value k) = k == 1
 oneIshInt (Int16Value k) = k == 1
 oneIshInt (Int32Value k) = k == 1
 oneIshInt (Int64Value k) = k == 1
-
--- | Is the given integer value kind of positive?
-positiveIshInt :: IntValue -> Bool
-positiveIshInt (Int8Value k) = k > 0
-positiveIshInt (Int16Value k) = k > 0
-positiveIshInt (Int32Value k) = k > 0
-positiveIshInt (Int64Value k) = k > 0
 
 -- | Is the given integer value kind of negative?
 negativeIshInt :: IntValue -> Bool

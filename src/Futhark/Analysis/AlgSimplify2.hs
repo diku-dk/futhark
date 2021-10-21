@@ -5,6 +5,7 @@
 module Futhark.Analysis.AlgSimplify2
   ( Prod (..),
     SofP,
+    simplify0,
     simplify,
     simplify',
     sumOfProducts,
@@ -47,13 +48,13 @@ sortProduct :: Prod -> Prod
 sortProduct (Prod n as) = Prod n $ sort as
 
 sumOfProducts' :: Exp -> SofP
-sumOfProducts' (BinOpExp (Add Int64 OverflowUndef) e1 e2) =
+sumOfProducts' (BinOpExp (Add Int64 _) e1 e2) =
   sumOfProducts' e1 <> sumOfProducts' e2
-sumOfProducts' (BinOpExp (Sub Int64 OverflowUndef) (ValueExp (IntValue (Int64Value 0))) e) =
+sumOfProducts' (BinOpExp (Sub Int64 _) (ValueExp (IntValue (Int64Value 0))) e) =
   map negate $ sumOfProducts' e
-sumOfProducts' (BinOpExp (Sub Int64 OverflowUndef) e1 e2) =
+sumOfProducts' (BinOpExp (Sub Int64 _) e1 e2) =
   sumOfProducts' e1 <> map negate (sumOfProducts' e2)
-sumOfProducts' (BinOpExp (Mul Int64 OverflowUndef) e1 e2) =
+sumOfProducts' (BinOpExp (Mul Int64 _) e1 e2) =
   sumOfProducts' e1 `mult` sumOfProducts' e2
 sumOfProducts' e = [Prod False [e]]
 
@@ -76,8 +77,11 @@ prodToExp (Prod True atoms) =
 prodToExp (Prod False (atom : atoms)) =
   foldl (BinOpExp $ Mul Int64 OverflowUndef) atom atoms
 
+simplify0 :: Exp -> SofP
+simplify0 = removeNegations . sumOfProducts
+
 simplify :: Exp -> Exp
-simplify = sumToExp . removeNegations . sumOfProducts
+simplify = sumToExp . simplify0
 
 simplify' :: TExp -> TExp
 simplify' = TPrimExp . simplify . untyped

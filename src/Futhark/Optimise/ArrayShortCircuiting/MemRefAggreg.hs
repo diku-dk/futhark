@@ -268,9 +268,9 @@ noMemOverlap _ (Set mr) _
   | mr == mempty = True
 noMemOverlap _ Undeterminable _ = False
 noMemOverlap _ _ Undeterminable = False
-noMemOverlap _ (Set is) (Set js) =
+noMemOverlap td_env (Set is) (Set js) =
   -- TODO Expand this to be able to handle eg. nw
-  all (\i -> all (IxFun.disjoint i) $ S.toList js) $ S.toList is
+  all (\i -> all (IxFun.disjoint (usage_table td_env) i) $ S.toList js) $ S.toList is
 
 -- | Suppossed to aggregate the iteration-level summaries
 --     across a loop of index i = 0 .. n-1

@@ -17,9 +17,9 @@ where
 
 import qualified Data.Map.Strict as M
 import Futhark.Analysis.PrimExp.Convert
-import Futhark.IR.Aliases
 --import qualified Futhark.IR.Mem.IxFun as IxFun
-
+import Futhark.Analysis.UsageTable
+import Futhark.IR.Aliases
 import qualified Futhark.IR.Mem.IxFun as IxFun
 import Futhark.IR.SeqMem
 import Futhark.Optimise.ArrayShortCircuiting.DataStructs
@@ -57,7 +57,11 @@ data TopDnEnv rep = TopDnEnv
     v_alias :: VarAliasTab,
     -- | keeps track of memory block aliasing.
     --   this needs to be implemented
-    m_alias :: MemAliasTab
+    m_alias :: MemAliasTab,
+    -- | Contains usage information about the variables in the program. Used to
+    -- determine if a variable is a size.
+    usage_table :: UsageTable,
+    scalar_table :: M.Map VName (PrimExp VName)
   }
 
 isInScope :: TopDnEnv rep -> VName -> Bool
@@ -120,20 +124,29 @@ getInvAliasFromExp (BasicOp (Rearrange perm _)) =
 getInvAliasFromExp _ = Nothing
 
 -- | fills in the TopDnEnv table
-topdwnTravBinding :: Op rep ~ MemOp inner => TopDnEnv rep -> Stm (Aliases rep) -> TopDnEnv rep
+topdwnTravBinding ::
+  (ASTRep rep, Op rep ~ MemOp inner, CanBeAliased inner) =>
+  TopDnEnv rep ->
+  Stm (Aliases rep) ->
+  TopDnEnv rep
 topdwnTravBinding env stm@(Let (Pat [pe]) _ (Op (Alloc _ _))) =
-  env {alloc = alloc env <> oneName (patElemName pe), scope = scope env <> scopeOf stm}
+  env
+    { alloc = alloc env <> oneName (patElemName pe),
+      scope = scope env <> scopeOf stm,
+      usage_table = usageInStm stm <> usage_table env
+    }
 topdwnTravBinding env stm@(Let (Pat [pe]) _ e)
   | Just (x, ixfn) <- getDirAliasFromExp e =
     let ixfn_inv = getInvAliasFromExp e
      in env
           { v_alias = M.insert (patElemName pe) (x, ixfn, ixfn_inv) (v_alias env),
-            scope = scope env <> scopeOf stm
+            scope = scope env <> scopeOf stm,
+            usage_table = usageInStm stm <> usage_table env
           }
 topdwnTravBinding env stm =
   -- ToDo: remember to update scope info appropriately
   --       for compound statements such as if, do-loop, etc.
-  env {scope = scope env <> scopeOf stm}
+  env {scope = scope env <> scopeOf stm, usage_table = usageInStm stm <> usage_table env}
 
 topDownLoop :: TopDnEnv rep -> Stm (Aliases rep) -> TopDnEnv rep
 topDownLoop td_env (Let _pat _ (DoLoop arginis lform body)) =

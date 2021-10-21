@@ -64,6 +64,10 @@ instance Semigroup AccessSummary where
 instance Monoid AccessSummary where
   mempty = Set mempty
 
+instance FreeIn AccessSummary where
+  freeIn' Undeterminable = mempty
+  freeIn' (Set s) = freeIn' s
+
 data MemRefs = MemRefs
   { -- | The access summary of all references (reads
     -- and writes) to the destination of a coalescing entry

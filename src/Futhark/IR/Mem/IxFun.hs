@@ -57,6 +57,7 @@ import qualified Futhark.Analysis.AlgSimplify2 as AlgSimplify2
 --  )
 import Futhark.Analysis.PrimExp.Convert --(substituteInPrimExp)
 import qualified Futhark.Analysis.PrimExp.Generalize as PEG
+import Futhark.Analysis.UsageTable
 import Futhark.IR.Prop
 import Futhark.IR.Syntax
   ( DimChange (..),
@@ -1163,18 +1164,32 @@ gcd x y = gcd' (abs x) (abs y)
 -- as soon as more than one dimension is involved, things get more
 -- tricky. Currently, we try to 'conservativelyFlatten' any LMAD with more than
 -- one dimension.
-disjoint :: LMAD (TPrimExp Int64 VName) -> LMAD (TPrimExp Int64 VName) -> Bool
-disjoint (LMAD offset1 [dim1]) (LMAD offset2 [dim2]) =
+disjoint :: UsageTable -> LMAD (TPrimExp Int64 VName) -> LMAD (TPrimExp Int64 VName) -> Bool
+disjoint ut (LMAD offset1 [dim1]) (LMAD offset2 [dim2]) =
   doesNotDivide (gcd (ldStride dim1) (ldStride dim2)) (offset1 - offset2)
-    || (positiveIshExp $ AlgSimplify2.simplify $ untyped $ offset1 - (offset2 + (ldShape dim2 - 1) * ldStride dim2))
-    || (positiveIshExp $ AlgSimplify2.simplify $ untyped $ offset2 - (offset1 + (ldShape dim1 - 1) * ldStride dim1))
+    || (nonNegativeish ut $ AlgSimplify2.simplify0 $ untyped $ offset1 - (offset2 + (ldShape dim2 - 1) * ldStride dim2))
+    || (nonNegativeish ut $ AlgSimplify2.simplify0 $ untyped $ offset2 - (offset1 + (ldShape dim1 - 1) * ldStride dim1))
   where
     doesNotDivide :: TPrimExp Int64 VName -> TPrimExp Int64 VName -> Bool
     doesNotDivide x y = maybe False not $ primBool $ (TPrimExp $ constFoldPrimExp $ untyped $ Futhark.Util.IntegralExp.mod y x :: TPrimExp Int64 VName) .==. 0
-disjoint lmad1 lmad2 =
+disjoint ut lmad1 lmad2 =
   disjoint
+    ut
     (conservativeFlatten lmad1)
     (conservativeFlatten lmad2)
+
+nonNegativeish :: UsageTable -> AlgSimplify2.SofP -> Bool
+nonNegativeish ut prods = all (nonNegativeishProd ut) prods
+
+nonNegativeishProd :: UsageTable -> AlgSimplify2.Prod -> Bool
+nonNegativeishProd ut (AlgSimplify2.Prod True _) = False
+nonNegativeishProd ut (AlgSimplify2.Prod False as) =
+  all (nonNegativeishExp ut) as
+
+nonNegativeishExp :: UsageTable -> PrimExp VName -> Bool
+nonNegativeishExp ut (ValueExp v) = not $ negativeIsh v
+nonNegativeishExp ut (LeafExp vname _) = isSize vname ut
+nonNegativeishExp ut _ = False
 
 data Interval = Interval
   { lowerBound :: TPrimExp Int64 VName,

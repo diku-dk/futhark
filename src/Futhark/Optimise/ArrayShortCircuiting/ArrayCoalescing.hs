@@ -35,6 +35,12 @@ type Coalesceable rep inner =
     LetDec rep ~ LetDecMem
   )
 
+newtype ComputeScalarTableOnOp rep = ComputeScalarTableOnOp
+  { scalarTableOnOp :: ScopeTab rep -> Op (Aliases rep) -> ScalarTableM rep (M.Map VName (PrimExp VName))
+  }
+
+type ScalarTableM rep a = Reader (ComputeScalarTableOnOp rep) a
+
 newtype ShortCircuitReader rep = ShortCircuitReader
   { onOp :: LUTabFun -> Pat (Aliases rep) -> Op (Aliases rep) -> TopDnEnv rep -> BotUpEnv -> ShortCircuitM rep BotUpEnv
   }
@@ -54,7 +60,9 @@ emptyTopDnEnv =
       inhibited = mempty,
       ranges = mempty,
       v_alias = mempty,
-      m_alias = mempty
+      m_alias = mempty,
+      usage_table = mempty,
+      scalar_table = mempty
     }
 
 emptyBotUpEnv :: BotUpEnv
@@ -109,7 +117,14 @@ prettyInhibitTab tab =
 -- | Given a program, compute the coalescing table by folding over each function.
 mkCoalsTab :: MonadFreshNames m => Prog (Aliases SeqMem) -> m CoalsTab
 mkCoalsTab prg = do
-  foldl (<>) mempty <$> mapM (mkCoalsTabFun (snd . lastUseSeqMem) (ShortCircuitReader shortCircuitSeqMem)) (progFuns prg)
+  foldl (<>) mempty
+    <$> mapM
+      ( mkCoalsTabFun
+          (snd . lastUseSeqMem)
+          (ShortCircuitReader shortCircuitSeqMem)
+          (ComputeScalarTableOnOp $ const $ const $ return mempty)
+      )
+      (progFuns prg)
 
 -- coals <- mapM (flip runReaderT (ShortCircuitReader shortCircuitSeqMem) . mkCoalsTabFun (snd . lastUseSeqMem) $
 --     progFuns prg
@@ -117,23 +132,40 @@ mkCoalsTab prg = do
 
 mkCoalsTabGPU :: MonadFreshNames m => Prog (Aliases GPUMem) -> m CoalsTab
 mkCoalsTabGPU prg =
-  foldl (<>) mempty <$> mapM (mkCoalsTabFun (snd . lastUseGPUMem) (ShortCircuitReader shortCircuitGPUMem)) (progFuns prg)
+  foldl (<>) mempty
+    <$> mapM
+      ( mkCoalsTabFun
+          (snd . lastUseGPUMem)
+          (ShortCircuitReader shortCircuitGPUMem)
+          (ComputeScalarTableOnOp computeScalarTableGPUMem)
+      )
+      (progFuns prg)
 
 -- | Given a function, compute the coalescing table
 mkCoalsTabFun ::
   (MonadFreshNames m, Coalesceable rep inner, FParamInfo rep ~ FParamMem) =>
   (FunDef (Aliases rep) -> LUTabFun) ->
   ShortCircuitReader rep ->
+  ComputeScalarTableOnOp rep ->
   FunDef (Aliases rep) ->
   m CoalsTab
-mkCoalsTabFun lufun r fun@(FunDef _ _ _ _ fpars body) = do
+mkCoalsTabFun lufun r computeScalarOnOp fun@(FunDef _ _ _ _ fpars body) = do
   -- First compute last-use information
   let lutab = lufun fun
       unique_mems = namesFromList $ M.keys $ getUniqueMemFParam fpars
+      scalar_table =
+        runReader
+          ( mconcat
+              <$> mapM
+                (computeScalarTable $ scopeOf fun <> scopeOf (bodyStms body))
+                (stmsToList $ bodyStms body)
+          )
+          computeScalarOnOp
       topenv =
         emptyTopDnEnv
           { scope = scopeOfFParams fpars,
-            alloc = unique_mems
+            alloc = unique_mems,
+            scalar_table = scalar_table
           }
       ShortCircuitM m = fixPointCoalesce lutab fpars body topenv
   modifyNameSource $ runState (runReaderT m r)
@@ -663,7 +695,7 @@ mkCoalsTabStm lutab lstm@(Let pat _ (DoLoop arginis lform body)) td_env bu_env =
     loopSoundness1Entry scope_loop scal_tab idx etry = do
       let wrt_i = (srcwrts . memrefs) etry
       use_p <-
-        aggSummaryLoopPartial (scope td_env) scope_loop scal_tab idx $
+        aggSummaryLoopPartial (scope td_env) scope_loop (scal_tab <> scalar_table td_env) idx $
           dstrefs $ memrefs etry
       let res =
             noMemOverlap td_env wrt_i use_p
@@ -1089,3 +1121,39 @@ mkSubsTab pat res =
       | (_, MemPrim (IntType Int64)) <- patElemDec a = Just (patElemName a, le64 v)
     mki64subst (a, se@(Constant (IntValue (Int64Value _)))) = Just (patElemName a, pe64 se)
     mki64subst _ = Nothing
+
+computeScalarTable ::
+  (Coalesceable rep inner) =>
+  ScopeTab rep ->
+  Stm (Aliases rep) ->
+  ScalarTableM rep (M.Map VName (PrimExp VName))
+computeScalarTable scope_table (Let (Pat [pe]) _ e)
+  | Just primexp <- primExpFromExp (basePMconv scope_table mempty) e =
+    return $ M.singleton (patElemName pe) primexp
+computeScalarTable scope_table (Let _ _ (DoLoop loop_inits loop_form body)) =
+  mconcat
+    <$> ( mapM
+            ( computeScalarTable $
+                scope_table
+                  <> scopeOfFParams (map fst loop_inits)
+                  <> scopeOf loop_form
+                  <> scopeOf (bodyStms body)
+            )
+            $ stmsToList $ bodyStms body
+        )
+computeScalarTable scope_table (Let _ _ (If _ then_body else_body _)) =
+  (<>)
+    <$> (mconcat <$> mapM (computeScalarTable scope_table) (stmsToList $ bodyStms then_body))
+    <*> (mconcat <$> mapM (computeScalarTable scope_table) (stmsToList $ bodyStms else_body))
+computeScalarTable scope_table (Let _ _ (Op op)) = do
+  on_op <- asks scalarTableOnOp
+  on_op scope_table op
+computeScalarTable _ _ = return mempty
+
+computeScalarTableGPUMem :: ScopeTab GPUMem -> Op (Aliases GPUMem) -> ScalarTableM GPUMem (M.Map VName (PrimExp VName))
+computeScalarTableGPUMem scope_table (Alloc _ _) = return mempty
+computeScalarTableGPUMem scope_table (Inner (SegOp (SegMap _ _ _ body))) =
+  mconcat
+    <$> mapM
+      (computeScalarTable $ scope_table <> scopeOf (kernelBodyStms body))
+      (stmsToList $ kernelBodyStms body)

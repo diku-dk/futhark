@@ -55,7 +55,6 @@ module Futhark.Analysis.PrimExp
     zExt64,
     fMin64,
     fMax64,
-    positiveIshExp,
   )
 where
 
@@ -575,10 +574,6 @@ oneIshExp _ = False
 negativeIshExp :: PrimExp v -> Bool
 negativeIshExp (ValueExp v) = negativeIsh v
 negativeIshExp _ = False
-
-positiveIshExp :: PrimExp v -> Bool
-positiveIshExp (ValueExp v) = positiveIsh v
-positiveIshExp _ = False
 
 sameIshExp :: PrimExp v -> PrimExp v -> Bool
 sameIshExp (ValueExp v1) (ValueExp v2) = v1 == v2
