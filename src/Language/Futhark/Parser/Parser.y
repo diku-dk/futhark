@@ -755,11 +755,12 @@ Case :: { CaseBase NoInfo Name }
         { let loc = srcspan $1 $> in CasePat $2 $> loc }
 
 CPat :: { PatBase NoInfo Name }
-          : CInnerPat ':' TypeExpDecl { PatAscription $1 $3 (srcspan $1 $>) }
+          : '#[' AttrInfo ']' CPat    { PatAttr $2 $4 (srcspan $1 $>) }
+          | CInnerPat ':' TypeExpDecl { PatAscription $1 $3 (srcspan $1 $>) }
           | CInnerPat                 { $1 }
-          | Constr ConstrFields           { let (n, loc) = $1;
-                                                loc' = srcspan loc $>
-                                            in PatConstr n NoInfo $2 loc'}
+          | Constr ConstrFields       { let (n, loc) = $1;
+                                            loc' = srcspan loc $>
+                                        in PatConstr n NoInfo $2 loc'}
 
 CPats1 :: { [PatBase NoInfo Name] }
            : CPat               { [$1] }
@@ -771,7 +772,6 @@ CInnerPat :: { PatBase NoInfo Name }
                | '_'                                { Wildcard NoInfo $1 }
                | '(' ')'                            { TuplePat [] (srcspan $1 $>) }
                | '(' CPat ')'                       { PatParens $2 (srcspan $1 $>) }
-               | '#[' AttrInfo ']' CPat             { PatAttr $2 $4 (srcspan $1 $>) }
                | '(' CPat ',' CPats1 ')'            { TuplePat ($2:$4) (srcspan $1 $>) }
                | '{' CFieldPats '}'                 { RecordPat $2 (srcspan $1 $>) }
                | CaseLiteral                        { PatLit (fst $1) NoInfo (snd $1) }
@@ -855,12 +855,13 @@ FieldId :: { (Name, SrcLoc) }
          | intlit { let L loc (INTLIT n) = $1 in (nameFromString (show n), loc) }
 
 Pat :: { PatBase NoInfo Name }
-Pat : InnerPat ':' TypeExpDecl { PatAscription $1 $3 (srcspan $1 $>) }
-        | InnerPat                 { $1 }
+     : '#[' AttrInfo ']' Pat  { PatAttr $2 $4 (srcspan $1 $>) }
+     | InnerPat ':' TypeExpDecl { PatAscription $1 $3 (srcspan $1 $>) }
+     | InnerPat                 { $1 }
 
 Pats1 :: { [PatBase NoInfo Name] }
-           : Pat               { [$1] }
-           | Pat ',' Pats1 { $1 : $3 }
+       : Pat                    { [$1] }
+       | Pat ',' Pats1          { $1 : $3 }
 
 InnerPat :: { PatBase NoInfo Name }
 InnerPat : id                               { let L loc (ID name) = $1 in Id name NoInfo loc }
@@ -868,7 +869,6 @@ InnerPat : id                               { let L loc (ID name) = $1 in Id nam
              | '_'                          { Wildcard NoInfo $1 }
              | '(' ')'                      { TuplePat [] (srcspan $1 $>) }
              | '(' Pat ')'                  { PatParens $2 (srcspan $1 $>) }
-             | '#[' AttrInfo ']' Pat        { PatAttr $2 $4 (srcspan $1 $>) }
              | '(' Pat ',' Pats1 ')'        { TuplePat ($2:$4) (srcspan $1 $>) }
              | '{' FieldPats '}'            { RecordPat $2 (srcspan $1 $>) }
 
