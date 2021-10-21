@@ -60,6 +60,7 @@ library
       Futhark.AD.Rev.Monad
       Futhark.AD.Rev.Reduce
       Futhark.AD.Rev.Scan
+      Futhark.AD.Rev.Scatter
       Futhark.AD.Rev.SOAC
       Futhark.Analysis.Alias
       Futhark.Analysis.CallGraph
