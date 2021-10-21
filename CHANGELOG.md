@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+* Fixes to extremely exotic GPU scans involving array operators.
+
 ## [0.20.5]
 
 ### Added

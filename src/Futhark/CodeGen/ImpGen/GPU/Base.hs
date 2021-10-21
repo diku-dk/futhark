@@ -1141,35 +1141,35 @@ groupScan seg_flag arrs_full_size w lam arrs = do
 
     barrier
 
-  let read_carry_in = do
+  no_carry_in <- dPrimVE "no_carry_in" $ is_first_block .||. bNot ltid_in_bounds
+
+  let read_carry_in = sUnless no_carry_in $ do
         forM_ (zip x_params y_params) $ \(x, y) ->
           copyDWIM (paramName y) [] (Var (paramName x)) []
         zipWithM_ readPrevBlockResult x_params arrs
 
-      y_to_x = forM_ (zip x_params y_params) $ \(x, y) ->
-        when (primType (paramType x)) $
-          copyDWIM (paramName x) [] (Var (paramName y)) []
-
       op_to_x
         | Nothing <- seg_flag =
-          compileBody' x_params $ lambdaBody lam
+          sUnless no_carry_in $ compileBody' x_params $ lambdaBody lam
         | Just flag_true <- seg_flag = do
           inactive <-
             dPrimVE "inactive" $ flag_true (block_id * block_size -1) ltid32
-          sWhen inactive y_to_x
+          sUnless no_carry_in . sWhen inactive . forM_ (zip x_params y_params) $ \(x, y) ->
+            copyDWIM (paramName x) [] (Var (paramName y)) []
+          -- The convoluted control flow is to ensure all threads
+          -- hit this barrier (if applicable).
           when array_scan barrier
-          sUnless inactive $ compileBody' x_params $ lambdaBody lam
+          sUnless no_carry_in $ sUnless inactive $ compileBody' x_params $ lambdaBody lam
 
       write_final_result =
         forM_ (zip x_params arrs) $ \(p, arr) ->
           when (primType $ paramType p) $
             copyDWIM arr [DimFix ltid] (Var $ paramName p) []
 
-  sComment "carry-in for every block except the first" $
-    sUnless (is_first_block .||. bNot ltid_in_bounds) $ do
-      sComment "read operands" read_carry_in
-      sComment "perform operation" op_to_x
-      sComment "write final result" write_final_result
+  sComment "carry-in for every block except the first" $ do
+    sComment "read operands" read_carry_in
+    sComment "perform operation" op_to_x
+    sComment "write final result" $ sUnless no_carry_in write_final_result
 
   barrier
 
@@ -1195,9 +1195,7 @@ inBlockScan ::
   InKernelGen ()
 inBlockScan constants seg_flag arrs_full_size lockstep_width block_size active arrs barrier scan_lam = everythingVolatile $ do
   skip_threads <- dPrim "skip_threads" int32
-  let in_block_thread_active =
-        tvExp skip_threads .<=. in_block_id
-      actual_params = lambdaParams scan_lam
+  let actual_params = lambdaParams scan_lam
       (x_params, y_params) =
         splitAt (length actual_params `div` 2) actual_params
       y_to_x =
@@ -1215,16 +1213,21 @@ inBlockScan constants seg_flag arrs_full_size lockstep_width block_size active a
 
   when array_scan barrier
 
-  let op_to_x
+  let op_to_x in_block_thread_active
         | Nothing <- seg_flag =
-          compileBody' x_params $ lambdaBody scan_lam
+          sWhen in_block_thread_active $
+            compileBody' x_params $ lambdaBody scan_lam
         | Just flag_true <- seg_flag = do
           inactive <-
-            dPrimVE "inactive" $
-              flag_true (ltid32 - tvExp skip_threads) ltid32
-          sWhen inactive y_to_x
+            dPrimVE "inactive" $ flag_true (ltid32 - tvExp skip_threads) ltid32
+          sWhen (in_block_thread_active .&&. inactive) $
+            forM_ (zip x_params y_params) $ \(x, y) ->
+              copyDWIM (paramName x) [] (Var (paramName y)) []
+          -- The convoluted control flow is to ensure all threads
+          -- hit this barrier (if applicable).
           when array_scan barrier
-          sUnless inactive $ compileBody' x_params $ lambdaBody scan_lam
+          sWhen in_block_thread_active . sUnless inactive $
+            compileBody' x_params $ lambdaBody scan_lam
 
       maybeBarrier =
         sWhen
@@ -1234,16 +1237,17 @@ inBlockScan constants seg_flag arrs_full_size lockstep_width block_size active a
   sComment "in-block scan (hopefully no barriers needed)" $ do
     skip_threads <-- 1
     sWhile (tvExp skip_threads .<. block_size) $ do
-      sWhen (in_block_thread_active .&&. active) $ do
-        sComment "read operands" $
-          zipWithM_ (readParam (sExt64 $ tvExp skip_threads)) x_params arrs
-        sComment "perform operation" op_to_x
+      thread_active <-
+        dPrimVE "thread_active" $ tvExp skip_threads .<=. in_block_id .&&. active
+
+      sWhen thread_active . sComment "read operands" $
+        zipWithM_ (readParam (sExt64 $ tvExp skip_threads)) x_params arrs
+      sComment "perform operation" $ op_to_x thread_active
 
       maybeBarrier
 
-      sWhen (in_block_thread_active .&&. active) $
-        sComment "write result" $
-          sequence_ $ zipWith3 writeResult x_params y_params arrs
+      sWhen thread_active . sComment "write result" $
+        sequence_ $ zipWith3 writeResult x_params y_params arrs
 
       maybeBarrier
 
