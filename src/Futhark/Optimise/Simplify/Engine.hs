@@ -850,6 +850,7 @@ type SimplifiableRep rep =
     Simplifiable (LParamInfo rep),
     Simplifiable (RetType rep),
     Simplifiable (BranchType rep),
+    TraverseOpStms (Wise rep),
     CanBeWise (Op rep),
     ST.IndexOp (OpWithWisdom (Op rep)),
     BuilderOps (Wise rep),

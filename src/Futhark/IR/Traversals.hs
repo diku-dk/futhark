@@ -32,6 +32,11 @@ module Futhark.IR.Traversals
     Walker (..),
     identityWalker,
     walkExpM,
+
+    -- * Ops
+    TraverseOpStms (..),
+    OpStmsTraverser,
+    traverseLambdaStms,
   )
 where
 
@@ -344,3 +349,18 @@ walkExpM tv (DoLoop merge form loopbody) = do
     (params, args) = unzip merge
 walkExpM tv (Op op) =
   walkOnOp tv op
+
+-- | A function for monadically traversing any sub-statements of the
+-- given op for some representation.
+type OpStmsTraverser m op rep = (Scope rep -> Stms rep -> m (Stms rep)) -> op -> m op
+
+-- | This representatin supports an 'OpStmsTraverser' for its 'Op'.
+-- This is used for some simplification rules.
+class TraverseOpStms rep where
+  -- | Transform every sub-'Stms' of this op.
+  traverseOpStms :: Monad m => OpStmsTraverser m (Op rep) rep
+
+-- | A helper for defining 'traverseOpStms'.
+traverseLambdaStms :: Monad m => OpStmsTraverser m (Lambda rep) rep
+traverseLambdaStms f (Lambda ps (Body dec stms res) ret) =
+  Lambda ps <$> (Body dec <$> f (scopeOfLParams ps) stms <*> pure res) <*> pure ret

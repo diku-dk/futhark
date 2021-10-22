@@ -47,6 +47,7 @@ module Futhark.IR.SOACS.SOAC
     SOACMapper (..),
     identitySOACMapper,
     mapSOACM,
+    traverseSOACStms,
   )
 where
 
@@ -447,6 +448,12 @@ mapSOACM tv (Screma w arrs (ScremaForm scans reds map_lam)) =
               )
             <*> mapOnSOACLambda tv map_lam
         )
+
+-- | A helper for defining 'TraverseOpStms'.
+traverseSOACStms :: Monad m => OpStmsTraverser m (SOAC rep) rep
+traverseSOACStms f = mapSOACM mapper
+  where
+    mapper = identitySOACMapper {mapOnSOACLambda = traverseLambdaStms f}
 
 instance ASTRep rep => FreeIn (SOAC rep) where
   freeIn' = flip execState mempty . mapSOACM free

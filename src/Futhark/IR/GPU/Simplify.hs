@@ -75,6 +75,9 @@ simplifyKernelOp _ (SizeOp (CalcNumGroups w max_num_groups group_size)) = do
   w' <- Engine.simplify w
   return (SizeOp $ CalcNumGroups w' max_num_groups group_size, mempty)
 
+instance TraverseOpStms (Wise GPU) where
+  traverseOpStms = traverseHostOpStms traverseSOACStms
+
 instance BuilderOps (Wise GPU)
 
 instance HasSegOp (Wise GPU) where

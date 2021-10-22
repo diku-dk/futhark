@@ -61,6 +61,9 @@ instance BuilderOps (Engine.Wise MC)
 
 instance PrettyRep MC
 
+instance TraverseOpStms (Engine.Wise MC) where
+  traverseOpStms = traverseMCOpStms traverseSOACStms
+
 simpleMC :: Simplify.SimpleOps MC
 simpleMC = Simplify.bindableSimpleOps $ simplifyMCOp SOAC.simplifySOAC
 

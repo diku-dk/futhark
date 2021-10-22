@@ -61,10 +61,16 @@ instance BuilderOps SeqMem where
   mkBodyB stms res = return $ Body () stms res
   mkLetNamesB = mkLetNamesB' ()
 
+instance TraverseOpStms SeqMem where
+  traverseOpStms _ = pure
+
 instance BuilderOps (Engine.Wise SeqMem) where
   mkExpDecB pat e = return $ Engine.mkWiseExpDec pat () e
   mkBodyB stms res = return $ Engine.mkWiseBody () stms res
   mkLetNamesB = mkLetNamesB''
+
+instance TraverseOpStms (Engine.Wise SeqMem) where
+  traverseOpStms _ = pure
 
 simplifyProg :: Prog SeqMem -> PassM (Prog SeqMem)
 simplifyProg = simplifyProgGeneric simpleSeqMem

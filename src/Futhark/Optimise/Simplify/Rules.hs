@@ -21,8 +21,9 @@ module Futhark.Optimise.Simplify.Rules
 where
 
 import Control.Monad
+import Control.Monad.State
 import Data.Either
-import Data.List (find, unzip4, zip4)
+import Data.List (find, insert, unzip4, zip4)
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import Futhark.Analysis.PrimExp.Convert
@@ -45,7 +46,7 @@ topDownRules =
     RuleGeneric withAccTopDown
   ]
 
-bottomUpRules :: BuilderOps rep => [BottomUpRule rep]
+bottomUpRules :: (BuilderOps rep, TraverseOpStms rep) => [BottomUpRule rep]
 bottomUpRules =
   [ RuleIf removeDeadBranchResult,
     RuleGeneric withAccBottomUp,
@@ -55,7 +56,7 @@ bottomUpRules =
 -- | A set of standard simplification rules.  These assume pure
 -- functional semantics, and so probably should not be applied after
 -- memory block merging.
-standardRules :: (BuilderOps rep, Aliased rep) => RuleBook rep
+standardRules :: (BuilderOps rep, TraverseOpStms rep, Aliased rep) => RuleBook rep
 standardRules = ruleBook topDownRules bottomUpRules <> loopRules <> basicOpRules
 
 -- | Turn @copy(x)@ into @x@ iff @x@ is not used after this copy
@@ -353,8 +354,29 @@ withAccTopDown vtable (Let pat aux (WithAcc inputs lam)) = Simplify . auxing aux
       pure $ Just x
 withAccTopDown _ _ = Skip
 
-withAccBottomUp :: BuilderOps rep => BottomUpRuleGeneric rep
--- Eliminate dead results.
+elimUpdates :: (ASTRep rep, TraverseOpStms rep) => [VName] -> Body rep -> (Body rep, [VName])
+elimUpdates get_rid_of = flip runState mempty . onBody
+  where
+    onBody body = do
+      stms' <- onStms $ bodyStms body
+      pure body {bodyStms = stms'}
+    onStms = traverse onStm
+    onStm (Let pat@(Pat [PatElem _ dec]) aux (BasicOp (UpdateAcc acc _ _)))
+      | Acc c _ _ _ <- typeOf dec,
+        c `elem` get_rid_of = do
+        modify (insert c)
+        pure $ Let pat aux $ BasicOp $ SubExp $ Var acc
+    onStm (Let pat aux e) = Let pat aux <$> onExp e
+    onExp = mapExpM mapper
+      where
+        mapper =
+          identityMapper
+            { mapOnOp = traverseOpStms (\_ stms -> onStms stms),
+              mapOnBody = \_ body -> onBody body
+            }
+
+withAccBottomUp :: (TraverseOpStms rep, BuilderOps rep) => BottomUpRuleGeneric rep
+-- Eliminate dead results.  See Note [Dead Code Elimination for WithAcc]
 withAccBottomUp (_, utable) (Let pat aux (WithAcc inputs lam))
   | not $ all (`UT.used` utable) $ patNames pat = Simplify $ do
     let (acc_res, nonacc_res) =
@@ -365,32 +387,33 @@ withAccBottomUp (_, utable) (Let pat aux (WithAcc inputs lam))
           splitAt (length inputs) $ lambdaParams lam
 
     -- Eliminate unused accumulator results
-    let (acc_pes', inputs', param_pairs, acc_res') =
-          unzip4 . filter keepAccRes $
-            zip4
+    let get_rid_of =
+          map snd . filter getRidOf $
+            zip
               (chunks (map inputArrs inputs) acc_pes)
-              inputs
-              (zip cert_params acc_params)
-              acc_res
-        (cert_params', acc_params') = unzip param_pairs
+              $ map paramName cert_params
 
     -- Eliminate unused non-accumulator results
     let (nonacc_pes', nonacc_res') =
           unzip $ filter keepNonAccRes $ zip nonacc_pes nonacc_res
 
-    when (concat acc_pes' == acc_pes && nonacc_pes' == nonacc_pes) cannotSimplify
+    when (null get_rid_of && nonacc_pes' == nonacc_pes) cannotSimplify
 
-    let pes' = concat acc_pes' ++ nonacc_pes'
+    let (body', eliminated) = elimUpdates get_rid_of $ lambdaBody lam
 
-    lam' <- mkLambda (cert_params' ++ acc_params') $ do
-      void $ bodyBind $ lambdaBody lam
-      pure $ acc_res' ++ nonacc_res'
+    when (null eliminated && nonacc_pes' == nonacc_pes) cannotSimplify
 
-    auxing aux $ letBind (Pat pes') $ WithAcc inputs' lam'
+    let pes' = acc_pes ++ nonacc_pes'
+
+    lam' <- mkLambda (cert_params ++ acc_params) $ do
+      void $ bodyBind body'
+      pure $ acc_res ++ nonacc_res'
+
+    auxing aux $ letBind (Pat pes') $ WithAcc inputs lam'
   where
     num_nonaccs = length (lambdaReturnType lam) - length inputs
     inputArrs (_, arrs, _) = length arrs
-    keepAccRes (pes, _, _, _) = any ((`UT.used` utable) . patElemName) pes
+    getRidOf (pes, _) = not $ any ((`UT.used` utable) . patElemName) pes
     keepNonAccRes (pe, _) = patElemName pe `UT.used` utable
 withAccBottomUp _ _ = Skip
 
@@ -403,3 +426,46 @@ isCt1 _ = False
 isCt0 :: SubExp -> Bool
 isCt0 (Constant v) = zeroIsh v
 isCt0 _ = False
+
+-- Note [Dead Code Elimination for WithAcc]
+--
+-- Our static semantics for accumulators are basically those of linear
+-- types.  This makes dead code elimination somewhat tricky.  First,
+-- what we consider dead code is when we have a WithAcc where at least
+-- one of the array results (that internally correspond to an
+-- accumulator) are unused.  E.g
+--
+-- let {X',Y'} =
+--   with_acc {X, Y} (\X_p Y_p X_acc Y_acc -> ... {X_acc', Y_acc'})
+--
+-- where X' is not used later.  Note that Y' is still used later.  If
+-- none of the results of the WithAcc are used, then the Stm as a
+-- whole is dead and can be removed.  That's the trivial case, done
+-- implicitly by the simplifier.  The interesting case is exactly when
+-- some of the results are unused.  How do we get rid of them?
+--
+-- Naively, we might just remove them:
+--
+-- let Y' =
+--   with_acc Y (\Y_p Y_acc -> ... Y_acc')
+--
+-- This is safe *only* if X_acc is used *only* in the result (i.e. an
+-- "identity" WithAcc).  Otherwise we end up with references to X_acc,
+-- which no longer exists.  This simple case is actually handled in
+-- the withAccTopDown rule, and is easy enough.
+--
+-- What we actually do when we decide to eliminate X_acc is that we
+-- inspect the body of the WithAcc and eliminate all UpdateAcc
+-- operations that refer to the same accumulator as X_acc (identified
+-- by the X_p token).  I.e. we turn every
+--
+-- let B = update_acc(A, ...)
+--
+-- where 'A' is ultimately decided from X_acc into
+--
+-- let B = A
+--
+-- That's it!  We then let ordinary dead code elimination eventually
+-- simplify the body enough that we have an "identity" WithAcc.  There
+-- is no _guarantee_ that this will happen, but our general dead code
+-- elimination tends to be pretty good.
