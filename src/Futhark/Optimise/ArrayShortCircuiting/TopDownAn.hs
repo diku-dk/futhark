@@ -146,7 +146,10 @@ topdwnTravBinding env stm@(Let (Pat [pe]) _ e)
 topdwnTravBinding env stm =
   -- ToDo: remember to update scope info appropriately
   --       for compound statements such as if, do-loop, etc.
-  env {scope = scope env <> scopeOf stm, usage_table = usageInStm stm <> usage_table env}
+  env
+    { scope = scope env <> scopeOf stm,
+      usage_table = usageInStm stm <> usage_table env
+    }
 
 topDownLoop :: TopDnEnv rep -> Stm (Aliases rep) -> TopDnEnv rep
 topDownLoop td_env (Let _pat _ (DoLoop arginis lform body)) =
@@ -155,9 +158,13 @@ topDownLoop td_env (Let _pat _ (DoLoop arginis lform body)) =
           <> scopeOfFParams (map fst arginis)
           <> scopeOf lform --scopeOfLoopForm lform))
           <> scopeOf (bodyStms body)
+      usages =
+        usage_table td_env <> case lform of
+          ForLoop v _ _ _ -> sizeUsage v
+          _ -> mempty
    in -- foldl (foldfun scopetab_loop) (m_alias td_env) $
       --   zip3 (patternValueElements pat) arginis bdy_ress
-      td_env {scope = scopetab}
+      td_env {scope = scopetab, usage_table = usages}
 {--
   where
     updateAlias (m, m_al) tab =

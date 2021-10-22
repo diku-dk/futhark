@@ -17,6 +17,7 @@ import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import qualified Data.Set as S
+import Debug.Trace
 import Futhark.Analysis.AlgSimplify2
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.IR.Aliases
@@ -28,6 +29,8 @@ import Futhark.Optimise.ArrayShortCircuiting.DataStructs
 import Futhark.Optimise.ArrayShortCircuiting.TopDownAn
 import Futhark.Transform.Substitute
 import Futhark.Util
+
+traceWith s a = trace (s <> ": " <> pretty a) a
 
 -----------------------------------------------------
 -- Some translations of Accesses and Ixfuns        --
@@ -268,9 +271,12 @@ noMemOverlap _ (Set mr) _
   | mr == mempty = True
 noMemOverlap _ Undeterminable _ = False
 noMemOverlap _ _ Undeterminable = False
-noMemOverlap td_env (Set is) (Set js) =
+noMemOverlap td_env (Set is0) (Set js0) =
   -- TODO Expand this to be able to handle eg. nw
-  all (\i -> all (IxFun.disjoint (usage_table td_env) i) $ S.toList js) $ S.toList is
+  all (\i -> all (IxFun.disjoint (usage_table td_env) i) $ traceWith "js" js) $ traceWith "is" is
+  where
+    is = map (fixPoint (IxFun.substituteInLMAD $ fmap TPrimExp $ scalar_table td_env)) $ S.toList is0
+    js = map (fixPoint (IxFun.substituteInLMAD $ fmap TPrimExp $ scalar_table td_env)) $ S.toList js0
 
 -- | Suppossed to aggregate the iteration-level summaries
 --     across a loop of index i = 0 .. n-1
@@ -304,7 +310,7 @@ aggSummaryLoopTotal scope_before scope_loop scalars_loop (Just (iterator_var, (l
   mconcat
     <$> mapM
       (aggSummaryOne iterator_var lower_bound upper_bound)
-      (S.toList lmads)
+      (map (traceWith "fixpoint" . fixPoint (IxFun.substituteInLMAD $ fmap TPrimExp scalars_loop)) $ S.toList lmads)
 aggSummaryLoopTotal _ _ _ _ _ = return Undeterminable
 
 -- | Suppossed to partially aggregate the iteration-level summaries
@@ -333,10 +339,10 @@ aggSummaryLoopPartial scope_before scope_loop scalars_loop (Just (iterator_var, 
     <$> mapM
       ( aggSummaryOne
           iterator_var
-          (isInt64 (LeafExp iterator_var $ IntType Int64) + 1)
-          (upper_bound - typedLeafExp iterator_var - 1)
+          (traceWith "lower_bound" $ isInt64 (LeafExp iterator_var $ IntType Int64) + 1)
+          (traceWith "upper_bound" $ upper_bound - typedLeafExp iterator_var - 1)
       )
-      (map (fixPoint $ IxFun.substituteInLMAD $ fmap TPrimExp scalars_loop) $ S.toList lmads)
+      (map (traceWith "fixpoint" . fixPoint (IxFun.substituteInLMAD $ fmap TPrimExp scalars_loop)) $ S.toList lmads)
 
 aggSummaryOne :: MonadFreshNames m => VName -> TPrimExp Int64 VName -> TPrimExp Int64 VName -> LmadRef -> m AccessSummary
 aggSummaryOne iterator_var lower_bound upper_bound (IxFun.LMAD _ dims) | iterator_var `nameIn` freeIn dims = return Undeterminable

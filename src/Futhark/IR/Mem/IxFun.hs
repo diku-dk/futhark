@@ -48,6 +48,7 @@ import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as M
 import Data.Maybe (fromMaybe, isJust)
+import Debug.Trace
 import qualified Futhark.Analysis.AlgSimplify2 as AlgSimplify2
 --import Futhark.Analysis.PrimExp
 --  ( IntExp,
@@ -77,6 +78,8 @@ import Futhark.Transform.Substitute
 import Futhark.Util.IntegralExp
 import Futhark.Util.Pretty
 import Prelude hiding (gcd, id, mod, (.))
+
+traceWith s a = trace (s <> ": " <> pretty a) a
 
 type Shape num = [num]
 
@@ -1155,7 +1158,7 @@ gcd x y = gcd' (abs x) (abs y)
     gcd' 1 _ = 1
     gcd' _ 1 = 1
     gcd' a 0 = a
-    gcd' a b = gcd' b (a `Futhark.Util.IntegralExp.rem` b)
+    gcd' a b = undefined -- gcd' b (a `Futhark.Util.IntegralExp.rem` b)
 
 -- | Returns @True@ if the two 'LMAD's could be proven disjoint.
 --
@@ -1165,10 +1168,10 @@ gcd x y = gcd' (abs x) (abs y)
 -- tricky. Currently, we try to 'conservativelyFlatten' any LMAD with more than
 -- one dimension.
 disjoint :: UsageTable -> LMAD (TPrimExp Int64 VName) -> LMAD (TPrimExp Int64 VName) -> Bool
-disjoint ut (LMAD offset1 [dim1]) (LMAD offset2 [dim2]) =
+disjoint ut l1@(LMAD offset1 [dim1]) l2@(LMAD offset2 [dim2]) =
   doesNotDivide (gcd (ldStride dim1) (ldStride dim2)) (offset1 - offset2)
-    || (nonNegativeish ut $ AlgSimplify2.simplify0 $ untyped $ offset1 - (offset2 + (ldShape dim2 - 1) * ldStride dim2))
-    || (nonNegativeish ut $ AlgSimplify2.simplify0 $ untyped $ offset2 - (offset1 + (ldShape dim1 - 1) * ldStride dim1))
+    || (traceWith "result?" $ nonNegativeish ut $ traceWith ("l1: " <> pretty l1 <> "\nl2: " <> pretty l2 <> "\ndisjoint1") $ AlgSimplify2.simplify0 $ untyped $ offset1 - (offset2 + (ldShape dim2 - 1) * ldStride dim2))
+    || (traceWith "result?" $ nonNegativeish ut $ traceWith "disjoint2" $ AlgSimplify2.simplify0 $ untyped $ offset2 - (offset1 + (ldShape dim1 - 1) * ldStride dim1))
   where
     doesNotDivide :: TPrimExp Int64 VName -> TPrimExp Int64 VName -> Bool
     doesNotDivide x y = maybe False not $ primBool $ (TPrimExp $ constFoldPrimExp $ untyped $ Futhark.Util.IntegralExp.mod y x :: TPrimExp Int64 VName) .==. 0

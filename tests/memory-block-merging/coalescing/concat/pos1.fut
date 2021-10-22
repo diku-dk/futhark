@@ -2,7 +2,7 @@
 -- array.  Requires allocation hoisting of the memory block for 't3'.
 -- ==
 -- input { [5, 15]
---         0
+--         0i64
 --       }
 -- output { [[6, 16, 10, 30, 1, 5],
 --           [0,  0,  0,  0, 0, 0]]
@@ -10,7 +10,7 @@
 -- structure cpu { Alloc 1 }
 -- structure gpu { Alloc 1 }
 
-let main [n] (ns: [n]i32) (i: i32): [][]i32 =
+let main [n] (ns: [n]i32) (i: i64): [][]i32 =
   let t3 = unflatten n (n * 3) (replicate (n * n * 3) 0)
   let t0 = map (+ 1) ns -- Will use the memory of t3.
   let t1 = map (* 2) ns -- Will use the memory of t3.

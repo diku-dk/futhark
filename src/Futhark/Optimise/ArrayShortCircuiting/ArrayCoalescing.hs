@@ -15,7 +15,9 @@ import qualified Data.Map.Strict as M
 import Data.Maybe
 import Data.Sequence (Seq (..))
 import qualified Data.Traversable as Traversable
+import Debug.Trace
 import Futhark.Analysis.PrimExp.Convert
+import Futhark.Analysis.UsageTable
 import Futhark.IR.Aliases
 import Futhark.IR.GPUMem
 import qualified Futhark.IR.Mem.IxFun as IxFun
@@ -25,6 +27,8 @@ import Futhark.Optimise.ArrayShortCircuiting.DataStructs
 import Futhark.Optimise.ArrayShortCircuiting.LastUse
 import Futhark.Optimise.ArrayShortCircuiting.MemRefAggreg
 import Futhark.Optimise.ArrayShortCircuiting.TopDownAn
+
+traceWith s a = trace (s <> ": " <> pretty a) a
 
 type Coalesceable rep inner =
   ( CreatesNewArrOp (OpWithAliases inner),
@@ -165,10 +169,15 @@ mkCoalsTabFun lufun r computeScalarOnOp fun@(FunDef _ _ _ _ fpars body) = do
         emptyTopDnEnv
           { scope = scopeOfFParams fpars,
             alloc = unique_mems,
-            scalar_table = scalar_table
+            scalar_table = scalar_table,
+            usage_table = sizeUsages $ foldMap paramSizes fpars
           }
       ShortCircuitM m = fixPointCoalesce lutab fpars body topenv
   modifyNameSource $ runState (runReaderT m r)
+
+paramSizes :: Param FParamMem -> Names
+paramSizes (Param _ _ (MemArray _ shp _ _)) = freeIn shp
+paramSizes _ = mempty
 
 shortCircuitSeqMem :: LUTabFun -> Pat (Aliases SeqMem) -> Op (Aliases SeqMem) -> TopDnEnv SeqMem -> BotUpEnv -> ShortCircuitM SeqMem BotUpEnv
 shortCircuitSeqMem _ _ _ _ = return
@@ -440,7 +449,6 @@ mkCoalsTabStm lutab (Let patt _ (If _ body_then body_else _)) td_env bu_env = do
 
 mkCoalsTabStm lutab lstm@(Let pat _ (DoLoop arginis lform body)) td_env bu_env = do
   let pat_val_elms = patElems pat
-      td_env' = topDownLoop td_env lstm
       allocs_bdy = foldl getAllocs (alloc td_env') $ bodyStms body
       td_env_allocs = td_env' {alloc = allocs_bdy}
 
@@ -586,6 +594,7 @@ mkCoalsTabStm lutab lstm@(Let pat _ (DoLoop arginis lform body)) td_env bu_env =
           L.zip4 patmems argmems resmems inimems
   return bu_env {activeCoals = fin_actv1, successCoals = fin_succ1, inhibit = fin_inhb1}
   where
+    td_env' = topDownLoop td_env lstm
     filterMapM1 f m = fmap M.fromAscList $ filterM (f . snd) $ M.toAscList m
     getAllocs tab (Let (Pat [pe]) _ (Op (Alloc _ _))) =
       tab <> oneName (patElemName pe)
@@ -691,23 +700,53 @@ mkCoalsTabStm lutab lstm@(Let pat _ (DoLoop arginis lform body)) td_env bu_env =
       uses <-
         aggSummaryLoopTotal (scope td_env) scope_loop scal_tab idx $
           (dstrefs . memrefs) etry
-      return $ etry {memrefs = MemRefs uses wrts}
+      return $ trace ("wrts: " <> pretty wrts <> "\nuses: " <> pretty uses) $ etry {memrefs = MemRefs uses wrts}
     loopSoundness1Entry scope_loop scal_tab idx etry = do
       let wrt_i = (srcwrts . memrefs) etry
       use_p <-
         aggSummaryLoopPartial (scope td_env) scope_loop (scal_tab <> scalar_table td_env) idx $
           dstrefs $ memrefs etry
       let res =
-            noMemOverlap td_env wrt_i use_p
-      return res
+            traceWith
+              ( "alsmems: "
+                  <> pretty (alsmem etry)
+                  <> "\nidx: "
+                  <> pretty idx
+                  <> "\nscal_tab: "
+                  <> pretty (scal_tab <> scalar_table td_env)
+                  <> "\ndstrefs: "
+                  <> pretty (dstrefs $ memrefs etry)
+                  <> "\nusages of dstrefs: "
+                  <> pretty (map (\x -> (x, isSize x $ usage_table td_env')) $ namesToList $ freeIn $ dstrefs $ memrefs $ etry)
+                  <> "\nwrt_i: "
+                  <> pretty wrt_i
+                  <> "\nuse_p: "
+                  <> pretty use_p
+                  <> "\nnoMemOverlap"
+              )
+              $ noMemOverlap td_env' wrt_i use_p
+      return $
+        res
+          || trace
+            ( "Soundness1 fails.\nidx: " <> pretty idx <> "\netry: " <> pretty etry
+                <> "\nwrt_i: "
+                <> pretty wrt_i
+                <> "\nuse_p: "
+                <> pretty use_p
+                <> "\ndstrefs memrefs etry: "
+                <> pretty (dstrefs (memrefs etry))
+            )
+            False
     loopSoundness2Entry :: CoalsTab -> VName -> CoalsEntry -> Bool
     loopSoundness2Entry old_actv m_b etry =
-      case M.lookup m_b old_actv of
+      case traceWith "Soundness2Entry" $ M.lookup (traceWith "m_b" m_b) old_actv of
         Nothing -> True
         Just etry0 ->
-          let uses_before = (dstrefs . memrefs) etry0
-              write_loop = (srcwrts . memrefs) etry
-           in noMemOverlap td_env write_loop uses_before
+          let uses_before = traceWith "uses_before" $ (dstrefs . memrefs) etry0
+              write_loop = traceWith "writes_loop" $ (srcwrts . memrefs) etry
+           in ( noMemOverlap td_env write_loop uses_before
+                  || trace ("Soundness2 fails for " ++ pretty m_b ++ " : " ++ pretty uses_before ++ " and " ++ pretty write_loop) False
+              )
 
 -- The case of in-place update:
 --   @let x' = x with slice <- elm@
