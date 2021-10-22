@@ -165,6 +165,9 @@ simplifySOAC (Screma w arrs (ScremaForm scans reds map_lam)) = do
 
 instance BuilderOps (Wise SOACS)
 
+instance TraverseOpStms (Wise SOACS) where
+  traverseOpStms = traverseSOACStms
+
 fixLambdaParams ::
   (MonadBuilder m, Buildable (Rep m), BuilderOps (Rep m)) =>
   AST.Lambda (Rep m) ->

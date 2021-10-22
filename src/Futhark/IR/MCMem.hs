@@ -79,6 +79,9 @@ instance BuilderOps (Engine.Wise MCMem) where
   mkBodyB stms res = return $ Engine.mkWiseBody () stms res
   mkLetNamesB = mkLetNamesB''
 
+instance TraverseOpStms (Engine.Wise MCMem) where
+  traverseOpStms = traverseMemOpStms (traverseMCOpStms (const pure))
+
 simplifyProg :: Prog MCMem -> PassM (Prog MCMem)
 simplifyProg = simplifyProgGeneric simpleMCMem
 
