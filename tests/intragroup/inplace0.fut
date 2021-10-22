@@ -2,7 +2,7 @@
 -- be sure only one thread writes.
 -- ==
 -- random input { [1][256]f32 } auto output
--- structure distributed { SegMap/SegScan 2 SegMap/Update 1 }
+-- structure gpu { SegMap/SegScan 2 SegMap/Update 1 }
 
 let main (xss: [][]f32) =
   #[incremental_flattening(only_intra)]
