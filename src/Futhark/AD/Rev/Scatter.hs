@@ -98,25 +98,27 @@ vjpScatter1 pys aux (w, ass, (shp, num_vals, xs)) m = do
       replicate (shapeRank shp) (Prim int64) ++ replicate (shapeRank shp) val_t
   addStm $ Let (Pat [pys]) aux $ Op $ Scatter w id_lam ass [(shp, num_vals, xs)]
   m
-  let ys = patElemName pys
-  ys_adj <- lookupAdjVal ys
-  -- computing vs_ctrbs and updating vs_adj
-  vs_ctrbs <- mkGather inds_as ys_adj xs_t
-  zipWithM_ updateAdj val_as vs_ctrbs -- use Slice?
-  -- creating xs_adj
-  zeros <-
-    replicateM (length val_as) . letExp "zeros" $
-      zeroExp $ xs_t `setOuterSize` w
-  let f_tps = replicate (rank * num_vals) (Prim int64) ++ replicate num_vals val_t
-  f <- mkIdentityLambda f_tps
-  xs_adj <-
-    letExp (baseString xs ++ "_adj") . Op $
-      Scatter w f (all_inds ++ zeros) [(shp, num_vals, ys_adj)]
-  insAdj xs xs_adj -- reusing the ys_adj for xs_adj!
-  -- re-creating xs -- here we will unsafely use the same name as in fwd sweep:
-  f' <- mkIdentityLambda f_tps
-  auxing aux . letBindNames [xs] . Op $
-    Scatter w f' (all_inds ++ xs_saves) [(shp, num_vals, ys)]
+  returnSweepCode $ do
+    let ys = patElemName pys
+    ys_adj <- lookupAdjVal ys
+    -- computing vs_ctrbs and updating vs_adj
+    vs_ctrbs <- mkGather inds_as ys_adj xs_t
+    zipWithM_ updateAdj val_as vs_ctrbs -- use Slice?
+    -- creating xs_adj
+    zeros <-
+      replicateM (length val_as) . letExp "zeros" $
+        zeroExp $ xs_t `setOuterSize` w
+    let f_tps = replicate (rank * num_vals) (Prim int64) ++ replicate num_vals val_t
+    f <- mkIdentityLambda f_tps
+    xs_adj <-
+      letExp (baseString xs ++ "_adj") . Op $
+        Scatter w f (all_inds ++ zeros) [(shp, num_vals, ys_adj)]
+    insAdj xs xs_adj -- reusing the ys_adj for xs_adj!
+    f' <- mkIdentityLambda f_tps
+    xs_reconstructed <-
+      auxing aux . letExp (baseString xs <> "_reconstructed") . Op $
+        Scatter w f' (all_inds ++ xs_saves) [(shp, num_vals, ys)]
+    addSubstitution xs xs_reconstructed
   where
     -- Creates a potential map-nest that indexes in full the array,
     --   and applies the condition of indices within bounds at the
