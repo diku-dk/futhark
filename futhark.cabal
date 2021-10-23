@@ -62,6 +62,8 @@ library
       Futhark.Analysis.LastUse
       Futhark.Analysis.Metrics
       Futhark.Analysis.Metrics.Type
+      Futhark.Analysis.MigrationGraph
+      Futhark.Analysis.MigrationTable
       Futhark.Analysis.PrimExp
       Futhark.Analysis.PrimExp.Convert
       Futhark.Analysis.PrimExp.Generalize
@@ -252,6 +254,7 @@ library
       Futhark.Pass.ExtractMulticore
       Futhark.Pass.FirstOrderTransform
       Futhark.Pass.KernelBabysitting
+      Futhark.Pass.ReduceDeviceReads
       Futhark.Pass.Simplify
       Futhark.Passes
       Futhark.Pipeline
