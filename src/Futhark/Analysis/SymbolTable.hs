@@ -165,11 +165,13 @@ data FParamEntry rep = FParamEntry
 
 data LParamEntry rep = LParamEntry
   { lparamDec :: LParamInfo rep,
+    lparamAliases :: Names,
     lparamIndex :: IndexArray
   }
 
 data FreeVarEntry rep = FreeVarEntry
   { freeVarDec :: NameInfo rep,
+    freeVarAliases :: Names,
     -- | Index a delayed array, if possible.
     freeVarIndex :: VName -> IndexArray
   }
@@ -200,6 +202,13 @@ entryFParam e = case entryType e of
 
 entryLetBoundDec :: Entry rep -> Maybe (LetDec rep)
 entryLetBoundDec = fmap letBoundDec . isLetBound
+
+entryAliases :: EntryType rep -> Names
+entryAliases (LetBound e) = letBoundAliases e
+entryAliases (FParam e) = fparamAliases e
+entryAliases (LParam e) = lparamAliases e
+entryAliases (FreeVar e) = freeVarAliases e
+entryAliases (LoopVar _) = mempty -- Integers have no aliases.
 
 elem :: VName -> SymbolTable rep -> Bool
 elem name = isJust . lookup name
@@ -234,10 +243,7 @@ lookupSubExp name vtable = do
 
 lookupAliases :: VName -> SymbolTable rep -> Names
 lookupAliases name vtable =
-  case entryType <$> M.lookup name (bindings vtable) of
-    Just (LetBound e) -> letBoundAliases e
-    Just (FParam e) -> fparamAliases e
-    _ -> mempty
+  maybe mempty (entryAliases . entryType) $ M.lookup name (bindings vtable)
 
 -- | If the given variable name is the name of a 'ForLoop' parameter,
 -- then return the bound of that loop.
@@ -431,6 +437,16 @@ insertStm stm vtable =
             entry
               { fparamAliases = oneName (patElemName pe) <> fparamAliases entry
               }
+        update' (LParam entry) =
+          LParam
+            entry
+              { lparamAliases = oneName (patElemName pe) <> lparamAliases entry
+              }
+        update' (FreeVar entry) =
+          FreeVar
+            entry
+              { freeVarAliases = oneName (patElemName pe) <> freeVarAliases entry
+              }
         update' e = e
 
 insertStms ::
@@ -476,6 +492,7 @@ insertLParam param = insertEntry name bind
       LParam
         LParamEntry
           { lparamDec = AST.paramDec param,
+            lparamAliases = mempty,
             lparamIndex = const Nothing
           }
     name = AST.paramName param
@@ -520,7 +537,8 @@ insertFreeVar name dec = insertEntry name entry
       FreeVar
         FreeVarEntry
           { freeVarDec = dec,
-            freeVarIndex = \_ _ -> Nothing
+            freeVarIndex = \_ _ -> Nothing,
+            freeVarAliases = mempty
           }
 
 consume :: VName -> SymbolTable rep -> SymbolTable rep
@@ -544,7 +562,8 @@ hideIf hide vtable = vtable {bindings = M.map maybeHide $ bindings vtable}
               FreeVar
                 FreeVarEntry
                   { freeVarDec = entryInfo entry,
-                    freeVarIndex = \_ _ -> Nothing
+                    freeVarIndex = \_ _ -> Nothing,
+                    freeVarAliases = entryAliases $ entryType entry
                   }
           }
       | otherwise = entry
