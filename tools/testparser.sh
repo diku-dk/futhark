@@ -27,7 +27,7 @@ if [ "$TESTPARSER_WORKER" ]; then
         fi
     }
     for f in "$@"; do
-        if futhark check $f 2>/dev/null; then
+        if futhark check $f 2>/dev/null && ! (fgrep 'tags { disable }' -q $f) ; then
             testwith $f soacs -s
             testwith $f mc -s --extract-multicore
             testwith $f gpu --gpu
