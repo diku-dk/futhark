@@ -175,15 +175,14 @@ getGraph = get
 
 
 
--- Returns all variables that the computation of this statement directly depends
--- upon. Statement certificates are not included, and all kernel body
--- dependencies are excluded.
+-- Returns all scalar variables that the computation of this statement directly
+-- depends upon. Kernel body dependencies are excluded.
 operands :: Stm GPU -> Set Id
 operands (Let _ _ e) =
-  -- TODO: May return variables that are guaranteed to be on the host.
-  --       Excluding those variable is more efficient but requires a custom tree
-  --       walking implementation. It is questionable whether this is worth
-  --       optimizing.
+  -- TODO: May return variables that are guaranteed to be on the host, such as
+  --       size parameters. Excluding those variables is more efficient but
+  --       requires a custom tree walking implementation. Whether this is worth
+  --       optimizing is questionable.
   ST.execState (walkExpM operandsCollector e) S.empty
 
 -- Operand collection monad.
@@ -192,9 +191,10 @@ type CollectState = ST.State (Set Id)
 operandsCollector :: Walker GPU CollectState
 operandsCollector = identityWalker
   {
+    -- VNames are only used to declare names and refer to arrays. All scalar
+    -- usages are declared using SubExp. No array usage is declared with SubExp.
     walkOnSubExp = collectSubExp,
     walkOnBody   = collectBody,
-    walkOnVName  = collectVName,
     walkOnOp     = collectOp
   }
 
@@ -203,22 +203,9 @@ collectId i = do
   s <- ST.get
   ST.put $ S.insert i s
 
-collectVName :: VName -> CollectState ()
-collectVName = collectId . nameToId
-
 collectSubExp :: SubExp -> CollectState () 
-collectSubExp (Var v) = collectVName v
+collectSubExp (Var v) = collectId $ nameToId v
 collectSubExp _       = return ()
-
-collectType :: Type -> CollectState ()
-collectType (Acc acc ispace ts _) = do
-  collectVName acc
-  mapM_ collectSubExp ispace
-  mapM_ collectType ts
-collectType (Array _ (Shape ds) _) =
-  mapM_ collectSubExp ds
-collectType _ =
-  return ()
 
 collectBody :: Scope GPU -> Body GPU -> CollectState ()
 collectBody scope (Body _ stms _) = do
@@ -230,40 +217,28 @@ collectBody scope (Body _ stms _) = do
     f stm s   = operands stm `S.union` (s \\ bound stm) 
     bound stm = S.fromList $ map nameToId $ patNames $ stmPat stm
 
+-- Assumes that size parameters always are computed on host, which means Types,
+-- Shapes, and SegSpaces never contain variable names of interest. Mem types
+-- have not been introduced yet. SegLevels depend upon tunable runtime
+-- constants rather than program computed values. The GPU cannot allocate arrays
+-- so array references always reside on host.
 collectOp :: Op GPU -> CollectState ()
-collectOp (SegOp (SegMap lvl space ts _)) = do
-  mapM_ collectId (namesToIds $ freeIn lvl)
-  mapM_ collectSubExp (segSpaceDims space)
-  mapM_ collectType ts
-collectOp (SegOp (SegRed lvl space ops ts _)) = do
-  mapM_ collectId (namesToIds $ freeIn lvl)
-  mapM_ collectSubExp (segSpaceDims space)
+collectOp (SegOp (SegRed _ _ ops _ _)) =
   mapM_ collectSegBinOp ops
-  mapM_ collectType ts
-collectOp (SegOp (SegScan lvl space ops ts _)) = do
-  mapM_ collectId (namesToIds $ freeIn lvl)
-  mapM_ collectSubExp (segSpaceDims space)
+collectOp (SegOp (SegScan _ _ ops _ _)) =
   mapM_ collectSegBinOp ops
-  mapM_ collectType ts
-collectOp (SegOp (SegHist lvl space ops ts _)) = do
-  mapM_ collectId (namesToIds $ freeIn lvl)
-  mapM_ collectSubExp (segSpaceDims space)
+collectOp (SegOp (SegHist _ _ ops _ _)) =
   mapM_ collectHistOp ops
-  mapM_ collectType ts
-collectOp (GPUBody ts _) = do
-  mapM_ collectType ts
+collectOp (SegOp _)     = return ()
+collectOp (GPUBody _ _) = return ()
 collectOp op =
   mapM_ collectId (namesToIds $ freeIn op)
 
 collectSegBinOp :: SegBinOp GPU -> CollectState ()
-collectSegBinOp (SegBinOp _ _ nes (Shape ds)) = do
+collectSegBinOp (SegBinOp _ _ nes _) =
   mapM_ collectSubExp nes
-  mapM_ collectSubExp ds
 
 collectHistOp :: HistOp GPU -> CollectState ()
-collectHistOp (HistOp w rf arrs nes (Shape ds) _) = do
-  collectSubExp w
-  collectSubExp rf
-  mapM_ collectVName arrs
+collectHistOp (HistOp _ rf _ nes _ _) = do
+  collectSubExp rf          -- When is this not a constant?
   mapM_ collectSubExp nes
-  mapM_ collectSubExp ds
