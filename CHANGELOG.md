@@ -20,6 +20,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Fixes to extremely exotic GPU scans involving array operators.
 
+* Missing alias tracking led to invalid rewrites, causing a compiler
+  crash (#1499).
+
 ## [0.20.5]
 
 ### Added
