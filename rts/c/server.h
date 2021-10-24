@@ -170,7 +170,7 @@ struct futhark_prog {
 
 struct server_state {
   struct futhark_prog prog;
-  struct futhark_context *cfg;
+  struct futhark_context_config *cfg;
   struct futhark_context *ctx;
   int variables_capacity;
   struct variable *variables;
