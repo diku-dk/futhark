@@ -1132,6 +1132,9 @@ static int scheduler_destroy(struct scheduler *scheduler) {
     CHECK_ERR(pthread_join(scheduler->workers[i].thread, NULL), "pthread_join");
   }
 
+  // And then destroy our local queue.
+  subtask_queue_destroy(&worker_local->q);
+
   free(scheduler->workers);
 
   return 0;
