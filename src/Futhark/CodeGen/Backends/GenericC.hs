@@ -253,8 +253,9 @@ defError msg stacktrace = do
   let formatstr' = "Error: " <> formatstr <> "\n\nBacktrace:\n%s"
   items
     [C.citems|ctx->error = msgprintf($string:formatstr', $args:formatargs, $string:stacktrace);
-                  $items:free_all_mem
-                  return 1;|]
+              $items:free_all_mem
+              err = 1;
+              goto cleanup;|]
 
 defCall :: CallCompiler op s
 defCall dests fname args = do
