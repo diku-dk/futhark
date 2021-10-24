@@ -40,52 +40,51 @@ internaliseFunName = nameFromString . pretty
 
 internaliseValBind :: E.ValBind -> InternaliseM ()
 internaliseValBind fb@(E.ValBind entry fname retdecl (Info (rettype, _)) tparams params body _ attrs loc) = do
-  localConstsScope $
-    bindingFParams tparams params $ \shapeparams params' -> do
-      let shapenames = map I.paramName shapeparams
+  localConstsScope . bindingFParams tparams params $ \shapeparams params' -> do
+    let shapenames = map I.paramName shapeparams
 
-      msg <- case retdecl of
-        Just dt ->
-          errorMsg
-            . ("Function return value does not match shape of type " :)
-            <$> typeExpForError dt
-        Nothing -> return $ errorMsg ["Function return value does not match shape of declared return type."]
+    msg <- case retdecl of
+      Just dt ->
+        errorMsg
+          . ("Function return value does not match shape of type " :)
+          <$> typeExpForError dt
+      Nothing -> return $ errorMsg ["Function return value does not match shape of declared return type."]
 
-      (body', rettype') <- buildBody $ do
-        body_res <- internaliseExp (baseString fname <> "_res") body
-        rettype' <-
-          fmap zeroExts . internaliseReturnType rettype =<< mapM subExpType body_res
-        body_res' <-
-          ensureResultExtShape msg loc (map I.fromDecl rettype') $ subExpsRes body_res
-        pure
-          ( body_res',
-            replicate (length (shapeContext rettype')) (I.Prim int64) ++ rettype'
+    (body', rettype') <- buildBody $ do
+      body_res <- internaliseExp (baseString fname <> "_res") body
+      rettype' <-
+        fmap zeroExts . internaliseReturnType rettype =<< mapM subExpType body_res
+      body_res' <-
+        ensureResultExtShape msg loc (map I.fromDecl rettype') $ subExpsRes body_res
+      pure
+        ( body_res',
+          replicate (length (shapeContext rettype')) (I.Prim int64) ++ rettype'
+        )
+
+    let all_params = shapeparams ++ concat params'
+
+    attrs' <- internaliseAttrs attrs
+
+    let fd =
+          I.FunDef
+            Nothing
+            attrs'
+            (internaliseFunName fname)
+            rettype'
+            all_params
+            body'
+
+    if null params'
+      then bindConstant fname fd
+      else
+        bindFunction
+          fname
+          fd
+          ( shapenames,
+            map declTypeOf $ concat params',
+            all_params,
+            applyRetType rettype' all_params
           )
-
-      let all_params = shapeparams ++ concat params'
-
-      attrs' <- internaliseAttrs attrs
-
-      let fd =
-            I.FunDef
-              Nothing
-              attrs'
-              (internaliseFunName fname)
-              rettype'
-              all_params
-              body'
-
-      if null params'
-        then bindConstant fname fd
-        else
-          bindFunction
-            fname
-            fd
-            ( shapenames,
-              map declTypeOf $ concat params',
-              all_params,
-              applyRetType rettype' all_params
-            )
 
   case entry of
     Just (Info entry') -> generateEntryPoint entry' fb
@@ -973,11 +972,9 @@ internaliseDimIndex ::
 internaliseDimIndex w (E.DimFix i) = do
   (i', _) <- internaliseDimExp "i" i
   let lowerBound =
-        I.BasicOp $
-          I.CmpOp (I.CmpSle I.Int64) (I.constant (0 :: I.Int64)) i'
+        I.BasicOp $ I.CmpOp (I.CmpSle I.Int64) (I.constant (0 :: I.Int64)) i'
       upperBound =
-        I.BasicOp $
-          I.CmpOp (I.CmpSlt I.Int64) i' w
+        I.BasicOp $ I.CmpOp (I.CmpSlt I.Int64) i' w
   ok <- letSubExp "bounds_check" =<< eBinOp I.LogAnd (pure lowerBound) (pure upperBound)
   return (I.DimFix i', ok, [ErrorVal int64 i'])
 
@@ -1193,9 +1190,8 @@ internaliseHist desc rf hist op ne buckets img loc = do
       "length of index and value array does not match"
       loc
   buckets'' <-
-    certifying c $
-      letExp (baseString buckets') $
-        I.BasicOp $ I.Reshape (reshapeOuter [DimCoercion w_img] 1 b_shape) buckets'
+    certifying c . letExp (baseString buckets') $
+      I.BasicOp $ I.Reshape (reshapeOuter [DimCoercion w_img] 1 b_shape) buckets'
 
   letValExp' desc . I.Op $
     I.Hist w_img (buckets'' : img') [HistOp w_hist rf' hist' ne_shp op'] lam'
