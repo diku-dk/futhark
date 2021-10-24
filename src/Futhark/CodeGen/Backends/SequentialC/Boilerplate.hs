@@ -53,7 +53,7 @@ generateBoilerplate = do
                                }|]
     )
 
-  (fields, init_fields) <- GC.contextContents
+  (fields, init_fields, free_fields) <- GC.contextContents
 
   ctx <- GC.publicDef "context" GC.InitDecl $ \s ->
     ( [C.cedecl|struct $id:s;|],
@@ -93,6 +93,7 @@ generateBoilerplate = do
   GC.publicDef_ "context_free" GC.InitDecl $ \s ->
     ( [C.cedecl|void $id:s(struct $id:ctx* ctx);|],
       [C.cedecl|void $id:s(struct $id:ctx* ctx) {
+                                 $stms:free_fields
                                  free_constants(ctx);
                                  free_lock(&ctx->lock);
                                  free(ctx);

@@ -110,7 +110,7 @@ generateContext = do
                            }|]
     )
 
-  (fields, init_fields) <- GC.contextContents
+  (fields, init_fields, free_fields) <- GC.contextContents
 
   ctx <- GC.publicDef "context" GC.InitDecl $ \s ->
     ( [C.cedecl|struct $id:s;|],
@@ -180,6 +180,7 @@ generateContext = do
   GC.publicDef_ "context_free" GC.InitDecl $ \s ->
     ( [C.cedecl|void $id:s(struct $id:ctx* ctx);|],
       [C.cedecl|void $id:s(struct $id:ctx* ctx) {
+             $stms:free_fields
              free_constants(ctx);
              (void)scheduler_destroy(&ctx->scheduler);
              free_lock(&ctx->lock);
@@ -408,9 +409,21 @@ multiCoreReport names = report_kernels
 
 addBenchmarkFields :: Name -> Maybe VName -> GC.CompilerM op s ()
 addBenchmarkFields name (Just _) = do
-  GC.contextField (functionRuntime name) [C.cty|typename int64_t*|] $ Just [C.cexp|calloc(sizeof(typename int64_t), ctx->scheduler.num_threads)|]
-  GC.contextField (functionRuns name) [C.cty|int*|] $ Just [C.cexp|calloc(sizeof(int), ctx->scheduler.num_threads)|]
-  GC.contextField (functionIter name) [C.cty|typename int64_t*|] $ Just [C.cexp|calloc(sizeof(sizeof(typename int64_t)), ctx->scheduler.num_threads)|]
+  GC.contextFieldDyn
+    (functionRuntime name)
+    [C.cty|typename int64_t*|]
+    [C.cexp|calloc(sizeof(typename int64_t), ctx->scheduler.num_threads)|]
+    [C.cstm|free($id:(functionRuntime name));|]
+  GC.contextFieldDyn
+    (functionRuns name)
+    [C.cty|int*|]
+    [C.cexp|calloc(sizeof(int), ctx->scheduler.num_threads)|]
+    [C.cstm|free($id:(functionRuns name));|]
+  GC.contextFieldDyn
+    (functionIter name)
+    [C.cty|typename int64_t*|]
+    [C.cexp|calloc(sizeof(sizeof(typename int64_t)), ctx->scheduler.num_threads)|]
+    [C.cstm|free($id:(functionIter name));|]
 addBenchmarkFields name Nothing = do
   GC.contextField (functionRuntime name) [C.cty|typename int64_t|] $ Just [C.cexp|0|]
   GC.contextField (functionRuns name) [C.cty|int|] $ Just [C.cexp|0|]
