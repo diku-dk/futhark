@@ -1,3 +1,6 @@
+-- ==
+-- tags { no_opencl no_cuda no_pyopencl }
+
 let Lmx [nlat] (m:i64) (n:i64) (amm:f32) (cx:[nlat]f32) (x:[nlat]f32) =
   let X = replicate n 0
   let m' = f32.i64 m
