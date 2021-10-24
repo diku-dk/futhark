@@ -216,6 +216,7 @@ entryAliases (LParam e) = lparamAliases e
 entryAliases (FreeVar e) = freeVarAliases e
 entryAliases (LoopVar _) = mempty -- Integers have no aliases.
 
+-- | You almost always want 'available' instead of this one.
 elem :: VName -> SymbolTable rep -> Bool
 elem name = isJust . lookup name
 
@@ -333,7 +334,8 @@ indexExp table (BasicOp (Replicate (Shape ds) v)) _ is
   | length ds == length is,
     Just (Prim t) <- lookupSubExpType v table =
     Just $ Indexed mempty $ primExpFromSubExp t v
-indexExp table (BasicOp (Replicate (Shape [_]) (Var v))) _ (_ : is) =
+indexExp table (BasicOp (Replicate (Shape [_]) (Var v))) _ (_ : is) = do
+  guard $ v `available` table
   index' v is table
 indexExp table (BasicOp (Reshape newshape v)) _ is
   | Just oldshape <- arrayDims <$> lookupType v table =
@@ -343,7 +345,8 @@ indexExp table (BasicOp (Reshape newshape v)) _ is
             (map pe64 $ newDims newshape)
             is
      in index' v is' table
-indexExp table (BasicOp (Index v slice)) _ is =
+indexExp table (BasicOp (Index v slice)) _ is = do
+  guard $ v `available` table
   index' v (adjust (unSlice slice) is) table
   where
     adjust (DimFix j : js') is' =
