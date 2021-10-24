@@ -930,11 +930,7 @@ defuncApply depth e@(AppExp (Apply e1 e2 d loc) t@(Info (AppRes ret ext))) = do
     DynamicFun _ sv -> do
       let (argtypes', rettype) = dynamicFunType sv argtypes
           restype = foldFunType argtypes' (RetType [] rettype) `setAliases` aliases ret
-          -- FIXME: what if this application returns both a function
-          -- and a value?
-          callret
-            | orderZero ret = AppRes ret ext
-            | otherwise = AppRes restype ext
+          callret = AppRes (combineTypeShapes ret restype) ext
           apply_e = AppExp (Apply e1' e2' d loc) (Info callret)
       return (apply_e, sv)
     -- Propagate the 'IntrinsicsSV' until we reach the outermost application,
