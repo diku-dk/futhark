@@ -581,7 +581,7 @@ static inline int run_subtask(struct worker* worker, struct subtask* subtask)
 #endif
   worker->nested++;
   int err = subtask->fn(subtask->args, subtask->start, subtask->end,
-                        subtask->chunkable ? worker->tid : subtask->id,
+                        subtask->id,
                         worker->tid);
   worker->nested--;
   // Some error occured during some other subtask
