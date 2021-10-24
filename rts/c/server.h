@@ -661,6 +661,7 @@ void run_server(struct futhark_prog *prog,
     ok();
   }
 
+  free(s.variables);
   free(line);
 }
 
