@@ -53,6 +53,7 @@ simplifyIndexing vtable seType idd (Slice inds) consuming =
       | Just inds' <- sliceIndices (Slice inds),
         Just (ST.IndexedArray cs arr inds'') <- ST.index idd inds' vtable,
         all (worthInlining . untyped) inds'',
+        arr `ST.available` vtable,
         all (`ST.elem` vtable) (unCerts cs) ->
         Just $
           IndexResult cs arr . Slice . map DimFix
