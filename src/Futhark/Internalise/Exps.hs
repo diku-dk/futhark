@@ -40,52 +40,51 @@ internaliseFunName = nameFromString . pretty
 
 internaliseValBind :: E.ValBind -> InternaliseM ()
 internaliseValBind fb@(E.ValBind entry fname retdecl (Info (rettype, _)) tparams params body _ attrs loc) = do
-  localConstsScope $
-    bindingFParams tparams params $ \shapeparams params' -> do
-      let shapenames = map I.paramName shapeparams
+  localConstsScope . bindingFParams tparams params $ \shapeparams params' -> do
+    let shapenames = map I.paramName shapeparams
 
-      msg <- case retdecl of
-        Just dt ->
-          errorMsg
-            . ("Function return value does not match shape of type " :)
-            <$> typeExpForError dt
-        Nothing -> return $ errorMsg ["Function return value does not match shape of declared return type."]
+    msg <- case retdecl of
+      Just dt ->
+        errorMsg
+          . ("Function return value does not match shape of type " :)
+          <$> typeExpForError dt
+      Nothing -> return $ errorMsg ["Function return value does not match shape of declared return type."]
 
-      (body', rettype') <- buildBody $ do
-        body_res <- internaliseExp (baseString fname <> "_res") body
-        rettype' <-
-          fmap zeroExts . internaliseReturnType rettype =<< mapM subExpType body_res
-        body_res' <-
-          ensureResultExtShape msg loc (map I.fromDecl rettype') $ subExpsRes body_res
-        pure
-          ( body_res',
-            replicate (length (shapeContext rettype')) (I.Prim int64) ++ rettype'
+    (body', rettype') <- buildBody $ do
+      body_res <- internaliseExp (baseString fname <> "_res") body
+      rettype' <-
+        fmap zeroExts . internaliseReturnType rettype =<< mapM subExpType body_res
+      body_res' <-
+        ensureResultExtShape msg loc (map I.fromDecl rettype') $ subExpsRes body_res
+      pure
+        ( body_res',
+          replicate (length (shapeContext rettype')) (I.Prim int64) ++ rettype'
+        )
+
+    let all_params = shapeparams ++ concat params'
+
+    attrs' <- internaliseAttrs attrs
+
+    let fd =
+          I.FunDef
+            Nothing
+            attrs'
+            (internaliseFunName fname)
+            rettype'
+            all_params
+            body'
+
+    if null params'
+      then bindConstant fname fd
+      else
+        bindFunction
+          fname
+          fd
+          ( shapenames,
+            map declTypeOf $ concat params',
+            all_params,
+            applyRetType rettype' all_params
           )
-
-      let all_params = shapeparams ++ concat params'
-
-      attrs' <- internaliseAttrs attrs
-
-      let fd =
-            I.FunDef
-              Nothing
-              attrs'
-              (internaliseFunName fname)
-              rettype'
-              all_params
-              body'
-
-      if null params'
-        then bindConstant fname fd
-        else
-          bindFunction
-            fname
-            fd
-            ( shapenames,
-              map declTypeOf $ concat params',
-              all_params,
-              applyRetType rettype' all_params
-            )
 
   case entry of
     Just (Info entry') -> generateEntryPoint entry' fb
