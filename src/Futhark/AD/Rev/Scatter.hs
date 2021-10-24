@@ -96,7 +96,7 @@ vjpScatter1 pys aux (w, ass, (shp, num_vals, xs)) m = do
   id_lam <-
     mkIdentityLambda $
       replicate (shapeRank shp) (Prim int64) ++ replicate (shapeRank shp) val_t
-  addStm $ Let (Pat [pys]) aux $ Op $ Scatter w id_lam ass [(shp, num_vals, xs)]
+  addStm $ Let (Pat [pys]) aux $ Op $ Scatter w ass id_lam [(shp, num_vals, xs)]
   m
   returnSweepCode $ do
     let ys = patElemName pys
@@ -112,12 +112,12 @@ vjpScatter1 pys aux (w, ass, (shp, num_vals, xs)) m = do
     f <- mkIdentityLambda f_tps
     xs_adj <-
       letExp (baseString xs ++ "_adj") . Op $
-        Scatter w f (all_inds ++ zeros) [(shp, num_vals, ys_adj)]
+        Scatter w (all_inds ++ zeros) f [(shp, num_vals, ys_adj)]
     insAdj xs xs_adj -- reusing the ys_adj for xs_adj!
     f' <- mkIdentityLambda f_tps
     xs_reconstructed <-
       auxing aux . letExp (baseString xs <> "_reconstructed") . Op $
-        Scatter w f' (all_inds ++ xs_saves) [(shp, num_vals, ys)]
+        Scatter w (all_inds ++ xs_saves) f' [(shp, num_vals, ys)]
     addSubstitution xs xs_reconstructed
   where
     -- Creates a potential map-nest that indexes in full the array,
@@ -139,10 +139,10 @@ vjpScatter ::
   VjpOps ->
   Pat ->
   StmAux () ->
-  (SubExp, Lambda, [VName], [(Shape, Int, VName)]) ->
+  (SubExp, [VName], Lambda, [(Shape, Int, VName)]) ->
   ADM () ->
   ADM ()
-vjpScatter ops (Pat pes) aux (w, lam, ass, written_info) m
+vjpScatter ops (Pat pes) aux (w, ass, lam, written_info) m
   | isIdentityLambda lam,
     [(shp, num_vals, xs)] <- written_info,
     [pys] <- pes =
@@ -172,7 +172,7 @@ vjpScatter ops (Pat pes) aux (w, lam, ass, written_info) m
         f <- mkIdentityLambda (replicate num_inds (Prim int64) ++ vtps)
         let stm =
               Let (Pat [pe]) aux . Op $
-                Scatter w f (curr_inds ++ curr_vals) [info]
+                Scatter w (curr_inds ++ curr_vals) f [info]
         stms_rest <- chunkScatterInps (other_inds, other_vals) rest
         pure $ stm : stms_rest
     diffScatters all_stms

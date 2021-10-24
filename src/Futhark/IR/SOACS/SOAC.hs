@@ -117,13 +117,13 @@ data SOAC rep
     -- will correspond to the first two output values, and so on. For this
     -- example, <lambda> should return a total of 11 values, 8 index values and
     -- 3 output values.
-    Scatter SubExp (Lambda rep) [VName] [(Shape, Int, VName)]
+    Scatter SubExp [VName] (Lambda rep) [(Shape, Int, VName)]
   | -- | @Hist <length> <dest-arrays-and-ops> <bucket fun> <input arrays>@
     --
     -- The first SubExp is the length of the input arrays. The first
     -- list describes the operations to perform.  The t'Lambda' is the
     -- bucket function.  Finally comes the input images.
-    Hist SubExp [HistOp rep] (Lambda rep) [VName]
+    Hist SubExp [VName] [HistOp rep] (Lambda rep)
   | -- FIXME: this should not be here
     JVP (Lambda rep) [SubExp] [SubExp]
   | -- FIXME: this should not be here
@@ -425,11 +425,11 @@ mapSOACM tv (Stream size arrs form accs lam) =
       Parallel o comm <$> mapOnSOACLambda tv lam0
     mapOnStreamForm Sequential =
       pure Sequential
-mapSOACM tv (Scatter len lam ivs as) =
+mapSOACM tv (Scatter w ivs lam as) =
   Scatter
-    <$> mapOnSOACSubExp tv len
-    <*> mapOnSOACLambda tv lam
+    <$> mapOnSOACSubExp tv w
     <*> mapM (mapOnSOACVName tv) ivs
+    <*> mapOnSOACLambda tv lam
     <*> mapM
       ( \(aw, an, a) ->
           (,,) <$> mapM (mapOnSOACSubExp tv) aw
@@ -437,20 +437,20 @@ mapSOACM tv (Scatter len lam ivs as) =
             <*> mapOnSOACVName tv a
       )
       as
-mapSOACM tv (Hist len ops bucket_fun imgs) =
+mapSOACM tv (Hist w arrs ops bucket_fun) =
   Hist
-    <$> mapOnSOACSubExp tv len
+    <$> mapOnSOACSubExp tv w
+    <*> mapM (mapOnSOACVName tv) arrs
     <*> mapM
-      ( \(HistOp e rf arrs nes op) ->
+      ( \(HistOp e rf op_arrs nes op) ->
           HistOp <$> mapOnSOACSubExp tv e
             <*> mapOnSOACSubExp tv rf
-            <*> mapM (mapOnSOACVName tv) arrs
+            <*> mapM (mapOnSOACVName tv) op_arrs
             <*> mapM (mapOnSOACSubExp tv) nes
             <*> mapOnSOACLambda tv op
       )
       ops
     <*> mapOnSOACLambda tv bucket_fun
-    <*> mapM (mapOnSOACVName tv) imgs
 mapSOACM tv (Screma w arrs (ScremaForm scans reds map_lam)) =
   Screma <$> mapOnSOACSubExp tv w
     <*> mapM (mapOnSOACVName tv) arrs
@@ -517,13 +517,13 @@ soacType (Stream outersize _ _ accs lam) =
     nms = map paramName $ take (1 + length accs) params
     substs = M.fromList $ zip nms (outersize : accs)
     Lambda params _ rtp = lam
-soacType (Scatter _w lam _ivs as) =
+soacType (Scatter _w _ivs lam dests) =
   zipWith arrayOfShape val_ts ws
   where
     indexes = sum $ zipWith (*) ns $ map length ws
     val_ts = drop indexes $ lambdaReturnType lam
-    (ws, ns, _) = unzip3 as
-soacType (Hist _len ops _bucket_fun _imgs) = do
+    (ws, ns, _) = unzip3 dests
+soacType (Hist _ _ ops _bucket_fun) = do
   op <- ops
   map (`arrayOfRow` histWidth op) (lambdaReturnType $ histOp op)
 soacType (Screma w _arrs form) =
@@ -559,7 +559,7 @@ instance (ASTRep rep, Aliased rep) => AliasedOp (SOAC rep) where
         zip (map paramName $ drop 1 $ lambdaParams lam) (accs ++ map Var arrs)
   consumedInOp (Scatter _ _ _ as) =
     namesFromList $ map (\(_, _, a) -> a) as
-  consumedInOp (Hist _ ops _ _) =
+  consumedInOp (Hist _ _ ops _) =
     namesFromList $ concatMap histDest ops
 
 mapHistOp ::
@@ -589,14 +589,14 @@ instance
       analyseStreamForm (Parallel o comm lam0) =
         Parallel o comm (Alias.analyseLambda aliases lam0)
       analyseStreamForm Sequential = Sequential
-  addOpAliases aliases (Scatter len lam ivs as) =
-    Scatter len (Alias.analyseLambda aliases lam) ivs as
-  addOpAliases aliases (Hist len ops bucket_fun imgs) =
+  addOpAliases aliases (Scatter len arrs lam dests) =
+    Scatter len arrs (Alias.analyseLambda aliases lam) dests
+  addOpAliases aliases (Hist w arrs ops bucket_fun) =
     Hist
-      len
+      w
+      arrs
       (map (mapHistOp (Alias.analyseLambda aliases)) ops)
       (Alias.analyseLambda aliases bucket_fun)
-      imgs
   addOpAliases aliases (Screma w arrs (ScremaForm scans reds map_lam)) =
     Screma w arrs $
       ScremaForm
@@ -708,7 +708,7 @@ typeCheckSOAC (Stream size arrexps form accexps lam) = do
   -- arr, so we can later check that aliases of arr are not used inside lam.
   let fake_lamarrs' = map asArg lamarrs'
   TC.checkLambda lam $ asArg inttp : accargs ++ fake_lamarrs'
-typeCheckSOAC (Scatter w lam ivs as) = do
+typeCheckSOAC (Scatter w arrs lam as) = do
   -- Requirements:
   --
   --   0. @lambdaReturnType@ of @lam@ must be a list
@@ -725,7 +725,7 @@ typeCheckSOAC (Scatter w lam ivs as) = do
   --      of a requirement, so that e.g. the source is not hoisted out of a
   --      loop, which will mean it cannot be consumed.
   --
-  --   5. Each of ivs must be an array matching a corresponding lambda
+  --   5. Each of arrs must be an array matching a corresponding lambda
   --      parameters.
   --
   -- Code:
@@ -760,10 +760,10 @@ typeCheckSOAC (Scatter w lam ivs as) = do
     TC.consume =<< TC.lookupAliases a
 
   -- 5.
-  arrargs <- TC.checkSOACArrayArgs w ivs
+  arrargs <- TC.checkSOACArrayArgs w arrs
   TC.checkLambda lam arrargs
-typeCheckSOAC (Hist len ops bucket_fun imgs) = do
-  TC.require [Prim int64] len
+typeCheckSOAC (Hist w arrs ops bucket_fun) = do
+  TC.require [Prim int64] w
 
   -- Check the operators.
   forM_ ops $ \(HistOp dest_w rf dests nes op) -> do
@@ -788,7 +788,7 @@ typeCheckSOAC (Hist len ops bucket_fun imgs) = do
       TC.consume =<< TC.lookupAliases dest
 
   -- Types of input arrays must equal parameter types for bucket function.
-  img' <- TC.checkSOACArrayArgs len imgs
+  img' <- TC.checkSOACArrayArgs w arrs
   TC.checkLambda bucket_fun img'
 
   -- Return type of bucket function must be an index for each
@@ -853,9 +853,9 @@ instance OpMetrics (Op rep) => OpMetrics (SOAC rep) where
     inside "JVP" $ lambdaMetrics lam
   opMetrics (Stream _ _ _ _ lam) =
     inside "Stream" $ lambdaMetrics lam
-  opMetrics (Scatter _len lam _ivs _as) =
+  opMetrics (Scatter _len _ lam _) =
     inside "Scatter" $ lambdaMetrics lam
-  opMetrics (Hist _len ops bucket_fun _imgs) =
+  opMetrics (Hist _ _ ops bucket_fun) =
     inside "Hist" $ mapM_ (lambdaMetrics . histOp) ops >> lambdaMetrics bucket_fun
   opMetrics (Screma _ _ (ScremaForm scans reds map_lam)) =
     inside "Screma" $ do
@@ -903,15 +903,16 @@ instance PrettyRep rep => PP.Pretty (SOAC rep) where
                 </> ppTuple' acc <> comma
                 </> ppr lam
             )
-  ppr (Scatter w lam ivs as) =
+  ppr (Scatter w arrs lam dests) =
     "scatter"
       <> parens
         ( ppr w <> comma
+            </> ppTuple' arrs <> comma
             </> ppr lam <> comma
-            </> commasep (ppTuple' ivs : map ppr as)
+            </> commasep (map ppr dests)
         )
-  ppr (Hist len ops bucket_fun imgs) =
-    ppHist len ops bucket_fun imgs
+  ppr (Hist w arrs ops bucket_fun) =
+    ppHist w arrs ops bucket_fun
   ppr (Screma w arrs (ScremaForm scans reds map_lam))
     | null scans,
       null reds =
@@ -969,20 +970,20 @@ instance PrettyRep rep => Pretty (Reduce rep) where
 ppHist ::
   (PrettyRep rep, Pretty inp) =>
   SubExp ->
+  [inp] ->
   [HistOp rep] ->
   Lambda rep ->
-  [inp] ->
   Doc
-ppHist len ops bucket_fun imgs =
+ppHist w arrs ops bucket_fun =
   text "hist"
     <> parens
-      ( ppr len <> comma
+      ( ppr w <> comma
+          </> ppTuple' arrs <> comma
           </> PP.braces (mconcat $ intersperse (comma <> PP.line) $ map ppOp ops) <> comma
-          </> ppr bucket_fun <> comma
-          </> commasep (map ppr imgs)
+          </> ppr bucket_fun
       )
   where
-    ppOp (HistOp w rf dests nes op) =
-      ppr w <> comma <+> ppr rf <> comma <+> PP.braces (commasep $ map ppr dests) <> comma
-        </> PP.braces (commasep $ map ppr nes) <> comma
+    ppOp (HistOp dest_w rf dests nes op) =
+      ppr dest_w <> comma <+> ppr rf <> comma <+> PP.braces (commasep $ map ppr dests) <> comma
+        </> ppTuple' nes <> comma
         </> ppr op

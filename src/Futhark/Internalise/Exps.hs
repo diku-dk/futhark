@@ -1198,7 +1198,7 @@ internaliseHist desc rf hist op ne buckets img loc = do
         I.BasicOp $ I.Reshape (reshapeOuter [DimCoercion w_img] 1 b_shape) buckets'
 
   letValExp' desc . I.Op $
-    I.Hist w_img [HistOp w_hist rf' hist' ne_shp op'] lam' $ buckets'' : img'
+    I.Hist w_img (buckets'' : img') [HistOp w_hist rf' hist' ne_shp op'] lam'
 
 internaliseStreamMap ::
   String ->
@@ -1928,7 +1928,7 @@ isOverloadedFunction qname args loc = do
           sivs = si' <> svs'
 
       let sa_ws = map (Shape . take dim . arrayDims) sa_ts
-      letTupExp' desc $ I.Op $ I.Scatter si_w lam sivs $ zip3 sa_ws (repeat 1) sas
+      letTupExp' desc $ I.Op $ I.Scatter si_w sivs lam $ zip3 sa_ws (repeat 1) sas
 
 flatIndexHelper :: String -> SrcLoc -> E.Exp -> E.Exp -> [(E.Exp, E.Exp)] -> InternaliseM [SubExp]
 flatIndexHelper desc loc arr offset slices = do
@@ -2178,13 +2178,9 @@ partitionWithSOACS k lam arrs = do
                 ++ I.varsRes (map I.paramName value_params)
         }
   results <-
-    letTupExp "partition_res" $
-      I.Op $
-        I.Scatter
-          w
-          write_lam
-          (classes : all_offsets ++ arrs)
-          $ zip3 (repeat $ Shape [w]) (repeat 1) blanks
+    letTupExp "partition_res" . I.Op $
+      I.Scatter w (classes : all_offsets ++ arrs) write_lam $
+        zip3 (repeat $ Shape [w]) (repeat 1) blanks
   sizes' <-
     letSubExp "partition_sizes" $
       I.BasicOp $
