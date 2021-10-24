@@ -72,6 +72,7 @@ module Futhark.CodeGen.Backends.GenericC
     rawMemCType,
     cproduct,
     fatMemType,
+    freeAllocatedMem,
 
     -- * Building Blocks
     primTypeToCType,
@@ -246,9 +247,12 @@ errorMsgString (ErrorMsg parts) = do
   (formatstrs, formatargs) <- unzip <$> mapM onPart parts
   pure (mconcat formatstrs, formatargs)
 
+freeAllocatedMem :: CompilerM op s [C.BlockItem]
+freeAllocatedMem = collect $ mapM_ (uncurry unRefMem) =<< gets compDeclaredMem
+
 defError :: ErrorCompiler op s
 defError msg stacktrace = do
-  free_all_mem <- collect $ mapM_ (uncurry unRefMem) =<< gets compDeclaredMem
+  free_all_mem <- freeAllocatedMem
   (formatstr, formatargs) <- errorMsgString msg
   let formatstr' = "Error: " <> formatstr <> "\n\nBacktrace:\n%s"
   items
