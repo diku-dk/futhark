@@ -973,11 +973,9 @@ internaliseDimIndex ::
 internaliseDimIndex w (E.DimFix i) = do
   (i', _) <- internaliseDimExp "i" i
   let lowerBound =
-        I.BasicOp $
-          I.CmpOp (I.CmpSle I.Int64) (I.constant (0 :: I.Int64)) i'
+        I.BasicOp $ I.CmpOp (I.CmpSle I.Int64) (I.constant (0 :: I.Int64)) i'
       upperBound =
-        I.BasicOp $
-          I.CmpOp (I.CmpSlt I.Int64) i' w
+        I.BasicOp $ I.CmpOp (I.CmpSlt I.Int64) i' w
   ok <- letSubExp "bounds_check" =<< eBinOp I.LogAnd (pure lowerBound) (pure upperBound)
   return (I.DimFix i', ok, [ErrorVal int64 i'])
 
@@ -1193,9 +1191,8 @@ internaliseHist desc rf hist op ne buckets img loc = do
       "length of index and value array does not match"
       loc
   buckets'' <-
-    certifying c $
-      letExp (baseString buckets') $
-        I.BasicOp $ I.Reshape (reshapeOuter [DimCoercion w_img] 1 b_shape) buckets'
+    certifying c . letExp (baseString buckets') $
+      I.BasicOp $ I.Reshape (reshapeOuter [DimCoercion w_img] 1 b_shape) buckets'
 
   letValExp' desc . I.Op $
     I.Hist w_img (buckets'' : img') [HistOp w_hist rf' hist' ne_shp op'] lam'
