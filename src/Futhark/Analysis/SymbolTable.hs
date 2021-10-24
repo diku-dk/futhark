@@ -16,6 +16,7 @@ module Futhark.Analysis.SymbolTable
     entryIsSize,
     entryStm,
     entryFParam,
+    entryLParam,
 
     -- * Lookup
     elem,
@@ -198,6 +199,11 @@ entryStm = fmap letBoundStm . isLetBound
 entryFParam :: Entry rep -> Maybe (FParamInfo rep)
 entryFParam e = case entryType e of
   FParam e' -> Just $ fparamDec e'
+  _ -> Nothing
+
+entryLParam :: Entry rep -> Maybe (LParamInfo rep)
+entryLParam e = case entryType e of
+  LParam e' -> Just $ lparamDec e'
   _ -> Nothing
 
 entryLetBoundDec :: Entry rep -> Maybe (LetDec rep)
