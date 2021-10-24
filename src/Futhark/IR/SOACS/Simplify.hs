@@ -878,13 +878,10 @@ moveTransformToInput vtable pat aux soac@(Screma w arrs (ScremaForm scan reduce 
 
     when (null more_arrs) cannotSimplify
 
-    let substs = M.fromList $ zip ops replacements
-        map_lam' =
+    let map_lam' =
           map_lam
             { lambdaParams = lambdaParams map_lam <> more_params,
-              lambdaBody =
-                replaceArrayOps substs $
-                  lambdaBody map_lam
+              lambdaBody = replaceArrayOps (M.fromList replacements) $ lambdaBody map_lam
             }
 
     auxing aux $
@@ -942,11 +939,11 @@ moveTransformToInput vtable pat aux soac@(Screma w arrs (ScremaForm scan reduce 
                 BasicOp $ SubExp $ Var arr
         arr_transformed_t <- lookupType arr_transformed
         arr_transformed_row <- newVName $ baseString arr ++ "_transformed_row"
-        return $
+        pure $
           Just
             ( arr_transformed,
               Param mempty arr_transformed_row (rowType arr_transformed_t),
-              ArrayVar mempty arr_transformed_row
+              (op, ArrayVar mempty arr_transformed_row)
             )
     mapOverArr _ = return Nothing
 moveTransformToInput _ _ _ _ =
