@@ -423,8 +423,8 @@ hoistStms rules block vtable uses orig_stms = do
         vtables = scanl (flip ST.insertStm) vtable' $ stmsToList stms
 
     hoistable usageInStm (uses', stms) (stm, vtable')
-      | not $ any (`UT.isUsedDirectly` uses') $ provides stm -- Dead statement.
-        =
+      | not $ any (`UT.isUsedDirectly` uses') $ provides stm =
+        -- Dead statement.
         return (uses', stms)
       | otherwise = do
         res <-
@@ -446,7 +446,7 @@ hoistStms rules block vtable uses orig_stms = do
           Just optimstms -> do
             changed
             (uses'', stms') <- simplifyStmsBottomUp' vtable' uses' optimstms
-            return (uses'', stms' ++ stms)
+            return (uses'', stms' <> stms)
 
 blockUnhoistedDeps ::
   ASTRep rep =>
@@ -473,17 +473,17 @@ expandUsage ::
   Stm rep ->
   UT.UsageTable
 expandUsage usageInStm vtable utable stm@(Let pat _ e) =
-  UT.expand (`ST.lookupAliases` vtable) (usageInStm stm <> usageThroughAliases)
-    <> ( if any (`UT.isSize` utable) (patNames pat)
-           then UT.sizeUsages (freeIn e)
-           else mempty
-       )
-    <> utable
+  stmUsages <> utable
   where
+    stmUsages =
+      UT.expand (`ST.lookupAliases` vtable) (usageInStm stm <> usageThroughAliases)
+        <> ( if any (`UT.isSize` utable) (patNames pat)
+               then UT.sizeUsages (freeIn e)
+               else mempty
+           )
     usageThroughAliases =
-      mconcat $
-        mapMaybe usageThroughBindeeAliases $
-          zip (patNames pat) (patAliases pat)
+      mconcat . mapMaybe usageThroughBindeeAliases $
+        zip (patNames pat) (patAliases pat)
     usageThroughBindeeAliases (name, aliases) = do
       uses <- UT.lookup name utable
       return $ mconcat $ map (`UT.usage` uses) $ namesToList aliases
@@ -979,10 +979,9 @@ simplifyLambdaMaybeHoist blocked lam@(Lambda params body rettype) = do
   params' <- mapM (traverse simplify) params
   let paramnames = namesFromList $ boundByLambda lam
   ((lamstms, lamres), hoisted) <-
-    enterLoop $
-      bindLParams params' $
-        blockIf (blocked `orIf` hasFree paramnames `orIf` isConsumed) $
-          simplifyBody (map (const Observe) rettype) body
+    enterLoop . bindLParams params' $
+      blockIf (blocked `orIf` hasFree paramnames `orIf` isConsumed) $
+        simplifyBody (map (const Observe) rettype) body
   body' <- constructBody lamstms lamres
   rettype' <- simplify rettype
   return (Lambda params' body' rettype', hoisted)

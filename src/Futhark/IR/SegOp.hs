@@ -1035,7 +1035,7 @@ instance ASTRep rep => ST.IndexOp (SegOp lvl rep) where
         | [v] <- patNames $ stmPat stm,
           BasicOp (Index arr slice) <- stmExp stm,
           length (sliceDims slice) == length excess_is,
-          arr `ST.elem` vtable,
+          arr `ST.available` vtable,
           Just (slice', cs) <- asPrimExpSlice table slice =
           let idx =
                 ST.IndexedArray

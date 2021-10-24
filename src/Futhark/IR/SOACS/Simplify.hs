@@ -880,7 +880,7 @@ simplifyMapIota _ _ _ _ = Skip
 -- corresponding to that transformation performed on the rows of the
 -- full array.
 moveTransformToInput :: TopDownRuleOp (Wise SOACS)
-moveTransformToInput vtable pat aux (Screma w arrs (ScremaForm scan reduce map_lam))
+moveTransformToInput vtable pat aux soac@(Screma w arrs (ScremaForm scan reduce map_lam))
   | ops <- map snd $ filter arrayIsMapParam $ S.toList $ arrayOps $ lambdaBody map_lam,
     not $ null ops = Simplify $ do
     (more_arrs, more_params, replacements) <-
@@ -900,6 +900,11 @@ moveTransformToInput vtable pat aux (Screma w arrs (ScremaForm scan reduce map_l
     auxing aux $
       letBind pat $ Op $ Screma w (arrs <> more_arrs) (ScremaForm scan reduce map_lam')
   where
+    -- It is not safe to move the transform if the root array is being
+    -- consumed by the Screma.  This is a bit too conservative - it's
+    -- actually safe if we completely replace the original input, but
+    -- this rule is not that precise.
+    consumed = consumedInOp soac
     map_param_names = map paramName (lambdaParams map_lam)
     topLevelPat = (`elem` fmap stmPat (bodyStms (lambdaBody map_lam)))
     onlyUsedOnce arr =
@@ -928,7 +933,8 @@ moveTransformToInput vtable pat aux (Screma w arrs (ScremaForm scan reduce map_l
       False
 
     mapOverArr op
-      | Just (_, arr) <- find ((== arrayOpArr op) . fst) (zip map_param_names arrs) = do
+      | Just (_, arr) <- find ((== arrayOpArr op) . fst) (zip map_param_names arrs),
+        not $ arr `nameIn` consumed = do
         arr_t <- lookupType arr
         let whole_dim = DimSlice (intConst Int64 0) (arraySize 0 arr_t) (intConst Int64 1)
         arr_transformed <- certifying (arrayOpCerts op) $
