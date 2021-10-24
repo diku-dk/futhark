@@ -94,10 +94,15 @@ getIterationDomain _ space = do
 -- When the SegRed's return value is a scalar
 -- we perform a call by value-result in the segop function
 getReturnParams :: Pat MCMem -> SegOp () MCMem -> MulticoreGen [Imp.Param]
-getReturnParams pat SegRed {} = do
-  let retvals = map patElemName $ patElems pat
-  retvals_ts <- mapM lookupType retvals
-  concat <$> zipWithM toParam retvals retvals_ts
+getReturnParams pat SegRed {} =
+  -- It's a good idea to make sure any prim values are initialised, as
+  -- we will load them (redundantly) in the task code, and
+  -- uninitialised values are UB.
+  fmap concat . forM (patElems pat) $ \pe -> do
+    case patElemType pe of
+      Prim pt -> patElemName pe <~~ ValueExp (blankPrimValue pt)
+      _ -> pure ()
+    toParam (patElemName pe) (patElemType pe)
 getReturnParams _ _ = return mempty
 
 renameSegBinOp :: [SegBinOp MCMem] -> MulticoreGen [SegBinOp MCMem]
