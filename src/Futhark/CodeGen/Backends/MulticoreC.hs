@@ -413,17 +413,17 @@ addBenchmarkFields name (Just _) = do
     (functionRuntime name)
     [C.cty|typename int64_t*|]
     [C.cexp|calloc(sizeof(typename int64_t), ctx->scheduler.num_threads)|]
-    [C.cstm|free($id:(functionRuntime name));|]
+    [C.cstm|free(ctx->$id:(functionRuntime name));|]
   GC.contextFieldDyn
     (functionRuns name)
     [C.cty|int*|]
     [C.cexp|calloc(sizeof(int), ctx->scheduler.num_threads)|]
-    [C.cstm|free($id:(functionRuns name));|]
+    [C.cstm|free(ctx->$id:(functionRuns name));|]
   GC.contextFieldDyn
     (functionIter name)
     [C.cty|typename int64_t*|]
     [C.cexp|calloc(sizeof(sizeof(typename int64_t)), ctx->scheduler.num_threads)|]
-    [C.cstm|free($id:(functionIter name));|]
+    [C.cstm|free(ctx->$id:(functionIter name));|]
 addBenchmarkFields name Nothing = do
   GC.contextField (functionRuntime name) [C.cty|typename int64_t|] $ Just [C.cexp|0|]
   GC.contextField (functionRuns name) [C.cty|int|] $ Just [C.cexp|0|]
