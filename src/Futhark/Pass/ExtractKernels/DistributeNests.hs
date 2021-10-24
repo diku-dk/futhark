@@ -468,7 +468,7 @@ maybeDistributeStm (Let pat aux (Op (Screma w arrs form))) acc
     distributeMapBodyStms acc stms
 
 -- Parallelise segmented scatters.
-maybeDistributeStm stm@(Let pat (StmAux cs _ _) (Op (Scatter w lam ivs as))) acc =
+maybeDistributeStm stm@(Let pat (StmAux cs _ _) (Op (Scatter w ivs lam as))) acc =
   distributeSingleStm acc stm >>= \case
     Just (kernels, res, nest, acc')
       | Just (perm, pat_unused) <- permutationAndMissing pat res ->
@@ -481,7 +481,7 @@ maybeDistributeStm stm@(Let pat (StmAux cs _ _) (Op (Scatter w lam ivs as))) acc
     _ ->
       addStmToAcc stm acc
 -- Parallelise segmented Hist.
-maybeDistributeStm stm@(Let pat (StmAux cs _ _) (Op (Hist w ops lam as))) acc =
+maybeDistributeStm stm@(Let pat (StmAux cs _ _) (Op (Hist w as ops lam))) acc =
   distributeSingleStm acc stm >>= \case
     Just (kernels, res, nest, acc')
       | Just (perm, pat_unused) <- permutationAndMissing pat res ->

@@ -397,8 +397,7 @@ instance PP.Pretty Input where
 
 instance PrettyRep rep => PP.Pretty (SOAC rep) where
   ppr (Screma w form arrs) = Futhark.ppScrema w arrs form
-  ppr (Hist len ops bucket_fun imgs) =
-    Futhark.ppHist len ops bucket_fun imgs
+  ppr (Hist len ops bucket_fun imgs) = Futhark.ppHist len imgs ops bucket_fun
   ppr soac = text $ show soac
 
 -- | Returns the inputs used in a SOAC.
@@ -478,19 +477,15 @@ toExp ::
 toExp soac = Op <$> toSOAC soac
 
 -- | Convert a SOAC to a Futhark-level SOAC.
-toSOAC ::
-  MonadBuilder m =>
-  SOAC (Rep m) ->
-  m (Futhark.SOAC (Rep m))
+toSOAC :: MonadBuilder m => SOAC (Rep m) -> m (Futhark.SOAC (Rep m))
 toSOAC (Stream w form lam nes inps) =
   Futhark.Stream w <$> inputsToSubExps inps <*> pure form <*> pure nes <*> pure lam
-toSOAC (Scatter len lam ivs dests) = do
-  ivs' <- inputsToSubExps ivs
-  return $ Futhark.Scatter len lam ivs' dests
+toSOAC (Scatter w lam ivs dests) =
+  Futhark.Scatter w <$> inputsToSubExps ivs <*> pure lam <*> pure dests
 toSOAC (Screma w form arrs) =
   Futhark.Screma w <$> inputsToSubExps arrs <*> pure form
-toSOAC (Hist w ops lam inps) =
-  Futhark.Hist w ops lam <$> inputsToSubExps inps
+toSOAC (Hist w ops lam arrs) =
+  Futhark.Hist w <$> inputsToSubExps arrs <*> pure ops <*> pure lam
 
 -- | The reason why some expression cannot be converted to a 'SOAC'
 -- value.
@@ -508,11 +503,11 @@ fromExp ::
   m (Either NotSOAC (SOAC rep))
 fromExp (Op (Futhark.Stream w as form nes lam)) =
   Right . Stream w form lam nes <$> traverse varInput as
-fromExp (Op (Futhark.Scatter len lam ivs as)) =
-  Right <$> (Scatter len lam <$> traverse varInput ivs <*> pure as)
+fromExp (Op (Futhark.Scatter w ivs lam as)) =
+  Right <$> (Scatter w lam <$> traverse varInput ivs <*> pure as)
 fromExp (Op (Futhark.Screma w arrs form)) =
   Right . Screma w form <$> traverse varInput arrs
-fromExp (Op (Futhark.Hist w ops lam arrs)) =
+fromExp (Op (Futhark.Hist w arrs ops lam)) =
   Right . Hist w ops lam <$> traverse varInput arrs
 fromExp _ = pure $ Left NotSOAC
 
