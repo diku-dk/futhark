@@ -9,6 +9,7 @@
 -- also re-exported from here.
 module Futhark.IR.MC.Op
   ( MCOp (..),
+    traverseMCOpStms,
     typeCheckMCOp,
     simplifyMCOp,
     module Futhark.IR.SegOp,
@@ -50,6 +51,11 @@ data MCOp rep op
   | -- | Something else (in practice often a SOAC).
     OtherOp op
   deriving (Eq, Ord, Show)
+
+traverseMCOpStms :: Monad m => OpStmsTraverser m op rep -> OpStmsTraverser m (MCOp rep op) rep
+traverseMCOpStms _ f (ParOp par_op op) =
+  ParOp <$> traverse (traverseSegOpStms f) par_op <*> traverseSegOpStms f op
+traverseMCOpStms onInner f (OtherOp op) = OtherOp <$> onInner f op
 
 instance (ASTRep rep, Substitute op) => Substitute (MCOp rep op) where
   substituteNames substs (ParOp par_op op) =

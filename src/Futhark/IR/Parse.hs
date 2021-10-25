@@ -606,8 +606,8 @@ pSOAC pr =
       keyword "scatter"
         *> parens
           ( SOAC.Scatter <$> pSubExp <* pComma
-              <*> pLambda pr <* pComma
-              <*> braces (pVName `sepBy` pComma)
+              <*> braces (pVName `sepBy` pComma) <* pComma
+              <*> pLambda pr
               <*> many (pComma *> pDest)
           )
       where
@@ -618,9 +618,9 @@ pSOAC pr =
         *> parens
           ( SOAC.Hist
               <$> pSubExp <* pComma
+              <*> braces (pVName `sepBy` pComma) <* pComma
               <*> braces (pHistOp `sepBy` pComma) <* pComma
               <*> pLambda pr
-              <*> many (pComma *> pVName)
           )
       where
         pHistOp =

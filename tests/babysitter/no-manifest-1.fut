@@ -1,6 +1,6 @@
 -- this is a simplified version of batch matrix inversion: it should not introduce a transposition for A[i,j]
 -- ==
--- structure distributed {Manifest 0}
+-- structure gpu {Manifest 0}
 
 let gauss_jordan [nm] (n:i64) (m:i64) (A: *[nm]f32): [nm]f32 =
     loop A for i < n do

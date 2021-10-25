@@ -117,6 +117,10 @@ data Adj
   | AdjZero Shape PrimType
   deriving (Eq, Ord, Show)
 
+instance Substitute Adj where
+  substituteNames m (AdjVal (Var v)) = AdjVal $ Var $ substituteNames m v
+  substituteNames _ adj = adj
+
 zeroArray :: MonadBuilder m => Shape -> Type -> m VName
 zeroArray shape t = do
   zero <- letSubExp "zero" $ zeroExp t
@@ -233,6 +237,7 @@ returnSweepCode m = do
   (a, stms) <- collectStms m
   substs <- gets stateSubsts
   addStms $ substituteNames substs stms
+  modify $ \env -> env {stateAdjs = M.fromList $ map (substituteNames substs) $ M.toList $ stateAdjs env}
   pure a
 
 addSubstitution :: VName -> VName -> ADM ()

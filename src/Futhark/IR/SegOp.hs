@@ -40,6 +40,7 @@ module Futhark.IR.SegOp
     SegOpMapper (..),
     identitySegOpMapper,
     mapSegOpM,
+    traverseSegOpStms,
 
     -- * Simplification
     simplifySegOp,
@@ -841,6 +842,20 @@ mapOnSegOpType tv (Array et shape u) =
   Array et <$> traverse (mapOnSegOpSubExp tv) shape <*> pure u
 mapOnSegOpType _tv (Mem s) = pure $ Mem s
 
+-- | A helper for defining 'TraverseOpStms'.
+traverseSegOpStms :: Monad m => OpStmsTraverser m (SegOp lvl rep) rep
+traverseSegOpStms f segop = mapSegOpM mapper segop
+  where
+    seg_scope = scopeOfSegSpace (segSpace segop)
+    f' scope = f (seg_scope <> scope)
+    mapper =
+      identitySegOpMapper
+        { mapOnSegOpLambda = traverseLambdaStms f',
+          mapOnSegOpBody = onBody
+        }
+    onBody (KernelBody dec stms res) =
+      KernelBody dec <$> f seg_scope stms <*> pure res
+
 instance
   (ASTRep rep, Substitute lvl) =>
   Substitute (SegOp lvl rep)
@@ -1020,7 +1035,7 @@ instance ASTRep rep => ST.IndexOp (SegOp lvl rep) where
         | [v] <- patNames $ stmPat stm,
           BasicOp (Index arr slice) <- stmExp stm,
           length (sliceDims slice) == length excess_is,
-          arr `ST.elem` vtable,
+          arr `ST.available` vtable,
           Just (slice', cs) <- asPrimExpSlice table slice =
           let idx =
                 ST.IndexedArray

@@ -9,6 +9,30 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+* Much better code generation for segmented scans with vectorisable
+  operators.
+
+### Removed
+
+### Changed
+
+### Fixed
+
+* Fixes to extremely exotic GPU scans involving array operators.
+
+* Missing alias tracking led to invalid rewrites, causing a compiler
+  crash (#1499).
+
+* Top-level bindings with existential sizes were mishandled (#1500).
+
+* A variety of memory leaks in the multicore backend, mostly (or
+  perhaps exclusively) centered around context freeing or failing
+  programs - this should not have affected many people.
+
+## [0.20.5]
+
+### Added
+
 * Existential sizes can now be explicitly quantified in type
   expressions (#1308).
 
@@ -22,14 +46,12 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * `futhark autotune` and `futhark bench` now take a `--spec-file`
   option for loading a test specification from another file.
 
-### Removed
-
-### Changed
-
 ### Fixed
 
 * `auto output` reference datasets are now recreated when the program
   is newer than the data files.
+
+* Exotic hoisting bug (#1490).
 
 ## [0.20.4]
 

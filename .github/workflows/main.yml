@@ -254,7 +254,7 @@ jobs:
         echo "$HOME/.local/bin" >> $GITHUB_PATH
 
     - run: |
-        export CFLAGS="-fsanitize=undefined -fno-sanitize-recover -O3"
+        export CFLAGS="-fsanitize=undefined -fsanitize=address -fno-sanitize-recover -O"
         futhark test -c --backend=c tests --no-tuning
         make -C tests_lib/c -j
 
@@ -281,6 +281,7 @@ jobs:
         echo "$HOME/.local/bin" >> $GITHUB_PATH
 
     - run: |
+        export CFLAGS="-fsanitize=undefined -fsanitize=address -fno-sanitize-recover -O"
         futhark test -c --backend=multicore tests --no-tuning
         make -C tests_lib/c FUTHARK_BACKEND=multicore
 

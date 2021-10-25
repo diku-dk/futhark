@@ -324,7 +324,7 @@ transformSOAC pat _ (Screma w arrs form)
     -- anything, so split it up and try again.
     scope <- castScope <$> askScope
     transformStms =<< runBuilderT_ (dissectScrema pat w form arrs) scope
-transformSOAC pat _ (Scatter w lam ivs dests) = do
+transformSOAC pat _ (Scatter w ivs lam dests) = do
   (gtid, space) <- mkSegSpace w
 
   Body () kstms res <- mapLambdaToBody transformBody gtid lam ivs
@@ -344,7 +344,7 @@ transformSOAC pat _ (Scatter w lam ivs dests) = do
         Op $
           ParOp Nothing $
             SegMap () space rets kbody
-transformSOAC pat _ (Hist w hists map_lam arrs) = do
+transformSOAC pat _ (Hist w arrs hists map_lam) = do
   (seq_hist_stms, seq_op) <-
     transformHist DoNotRename sequentialiseBody w hists map_lam arrs
 

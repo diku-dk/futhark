@@ -2,7 +2,7 @@
 --
 -- ==
 --
--- structure distributed { Map/Loop 0 }
+-- structure gpu { Map/Loop 0 }
 
 
 let main [n][k] (m: i32) (a: [n][k]i32): [n][k]i32 =

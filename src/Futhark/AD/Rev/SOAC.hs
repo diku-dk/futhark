@@ -11,6 +11,7 @@ import Futhark.AD.Rev.Map
 import Futhark.AD.Rev.Monad
 import Futhark.AD.Rev.Reduce
 import Futhark.AD.Rev.Scan
+import Futhark.AD.Rev.Scatter
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.Builder
 import Futhark.IR.SOACS
@@ -83,5 +84,7 @@ vjpSOAC ops pat _aux (Screma w as form) m
     (mapstm, redstm) <-
       redomapToMapAndReduce pat (w, reds, map_lam, as)
     vjpStm ops mapstm $ vjpStm ops redstm m
+vjpSOAC ops pat aux (Scatter w lam ass written_info) m =
+  vjpScatter ops pat aux (w, lam, ass, written_info) m
 vjpSOAC _ _ _ soac _ =
   error $ "vjpSOAC unhandled:\n" ++ pretty soac
