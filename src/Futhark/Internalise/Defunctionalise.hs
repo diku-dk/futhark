@@ -1247,7 +1247,7 @@ svFromType t = Dynamic t
 -- transformed result as well as an environment that binds the name of
 -- the value binding to the static value of the transformed body.  The
 -- boolean is true if the function is a 'DynamicFun'.
-defuncValBind :: ValBind -> DefM (ValBind, Env, Bool)
+defuncValBind :: ValBind -> DefM (ValBind, Env)
 -- Eta-expand entry points with a functional return type.
 defuncValBind (ValBind entry name _ (Info (RetType _ rettype, retext)) tparams params body _ attrs loc)
   | Scalar Arrow {} <- rettype = do
@@ -1301,11 +1301,7 @@ defuncValBind valbind@(ValBind _ name retdecl (Info (RetType ret_dims rettype, r
       M.singleton name $
         Binding
           (Just (first (map typeParamName) (valBindTypeScheme valbind)))
-          sv,
-      case sv of
-        DynamicFun {} -> True
-        Dynamic {} -> True
-        _ -> False
+          sv
     )
   where
     anyDimIfNotBound bound_sizes (NamedDim v)
@@ -1316,11 +1312,9 @@ defuncValBind valbind@(ValBind _ name retdecl (Info (RetType ret_dims rettype, r
 defuncVals :: [ValBind] -> DefM ()
 defuncVals [] = pure ()
 defuncVals (valbind : ds) = do
-  (valbind', env, dyn) <- defuncValBind valbind
+  (valbind', env) <- defuncValBind valbind
   addValBind valbind'
-  let globals =
-        (if dyn then (valBindName valbind' :) else id) $
-          snd (unInfo (valBindRetType valbind'))
+  let globals = valBindName valbind' : snd (unInfo (valBindRetType valbind'))
   localEnv env $ areGlobal globals $ defuncVals ds
 
 {-# NOINLINE transformProg #-}
