@@ -42,6 +42,7 @@ module Futhark.IR.Syntax.Core
     oneAttr,
     inAttrs,
     withoutAttrs,
+    mapAttrs,
 
     -- * Values
     PrimValue (..),
@@ -547,3 +548,7 @@ inAttrs attr (Attrs attrs) = attr `S.member` attrs
 -- | @x `withoutAttrs` y@ gives @x@ except for any attributes also in @y@.
 withoutAttrs :: Attrs -> Attrs -> Attrs
 withoutAttrs (Attrs x) (Attrs y) = Attrs $ x `S.difference` y
+
+-- | Map a function over an attribute set.
+mapAttrs :: (Attr -> a) -> Attrs -> [a]
+mapAttrs f (Attrs attrs) = map f $ S.toList attrs

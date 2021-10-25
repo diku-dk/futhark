@@ -13,18 +13,15 @@
 module Futhark.AD.Rev (revVJP) where
 
 import Control.Monad
-import Control.Monad.State.Strict
-import Data.List ((\\))
 import qualified Data.Map as M
-import Data.Maybe
 import Futhark.AD.Derivatives
+import Futhark.AD.Rev.Loop
 import Futhark.AD.Rev.Monad
 import Futhark.AD.Rev.SOAC
 import qualified Futhark.Analysis.Alias as Alias
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.Builder
 import Futhark.IR.Aliases (consumedInStms)
-import Futhark.IR.Prop.Aliases
 import Futhark.IR.SOACS
 import Futhark.Tools
 import Futhark.Transform.Rename
@@ -228,195 +225,6 @@ diffBasicOp pat aux e m =
 vjpOps :: VjpOps
 vjpOps = VjpOps diffLambda diffStm
 
-setLoopTape :: VName -> VName -> ADM ()
-setLoopTape v vs = modify $ \env ->
-  env {stateLoopTape = M.insert v vs $ stateLoopTape env}
-
-lookupLoopTape :: VName -> ADM VName
-lookupLoopTape v = do
-  maybeVs <- gets $ M.lookup v . stateLoopTape
-  case maybeVs of
-    Nothing -> error "lookupLoopTape: didn't find stored values"
-    Just vs -> pure vs
-
-diffLoop :: Pat -> StmAux () -> ExpT SOACS -> ADM () -> ADM ()
-diffLoop
-  (Pat pats)
-  aux
-  loop@( DoLoop
-           param_tuples
-           form@(ForLoop i _it bound _loop_vars)
-           body@(Body () stms res)
-         )
-  m = do
-    loop_acc_pats <- fwdLoop
-    m
-    revLoop loop_acc_pats
-    where
-      loop_params = map fst param_tuples
-      loop_param_names = map paramName loop_params
-
-      fwdLoop :: ADM [PatElem]
-      fwdLoop = do
-        bound64 <- asIntS Int64 bound
-        (loop_acc_pats, loop_acc_params) <- fmap unzip $
-          forM loop_params $ \(Param _ v t) -> do
-            acc <- newVName $ baseString v <> "_acc"
-            pat_acc <- newVName $ baseString v <> "_acc"
-            setLoopTape v pat_acc
-            let loop_acc_param = Param mempty acc $ arrayOf t (Shape [bound64]) Unique
-                loop_acc_pat = PatElem pat_acc $ arrayOf t (Shape [bound64]) NoUniqueness
-            return (loop_acc_pat, loop_acc_param)
-
-        zero_accs <- forM loop_params $ \(Param _ v t) ->
-          letSubExp (baseString v <> "_zero_acc")
-            =<< eBlank (arrayOf t (Shape [bound64]) NoUniqueness)
-
-        (loop_acc_params_ret, stms') <- collectStms $
-          localScope (scopeOfFParams $ loop_acc_params <> loop_params) $
-            inScopeOf form $ do
-              copy_substs <- copyConsumedArrsInBody body
-              addStms stms
-              i64 <- asIntS Int64 $ Var i
-              forM (zip loop_params loop_acc_params) $ \(Param _ v _, Param _ acc t) -> do
-                acc' <-
-                  letInPlace "loop_acc" acc (fullSlice (fromDecl t) [DimFix i64]) $
-                    substituteNames copy_substs $ BasicOp $ SubExp $ Var v
-                return $ Param mempty acc' (fromDecl t)
-
-        let body' = mkBody stms' $ res <> varsRes (map paramName loop_acc_params_ret)
-            pat' = Pat $ pats <> loop_acc_pats
-            param_tuples' = param_tuples <> zip loop_acc_params zero_accs
-        addStm $ Let pat' aux $ DoLoop param_tuples' form body'
-        return loop_acc_pats
-
-      revLoop :: [PatElem] -> ADM ()
-      revLoop accs = do
-        loop' <- renameSomething loop
-
-        case loop' of
-          DoLoop param_tuples' form'@(ForLoop i' it' bound' loop_vars') (Body () stms' res') -> do
-            let loop_params' = map fst param_tuples'
-                loop_param_names' = map paramName loop_params'
-                subst_loop_tape v v' = lookupLoopTape v >>= setLoopTape v'
-                res_vname (SubExpRes _ (Constant _)) = Nothing
-                res_vname (SubExpRes _ (Var v)) = Just v
-                loop_res = mapMaybe res_vname res'
-                loop_var_arrays = map snd loop_vars'
-                loop_var_param_names = map (paramName . fst) loop_vars'
-                getVName Constant {} = Nothing
-                getVName (Var v) = Just v
-                loop_free = (namesToList (freeIn loop') \\ loop_var_arrays) \\ mapMaybe (getVName . snd) param_tuples'
-
-            zipWithM_ subst_loop_tape loop_param_names loop_param_names'
-
-            let build_param_tuples_adj r (PatElem pat _, Param _ _ t) =
-                  case res_vname r of
-                    Just v -> do
-                      pat_adj <- lookupAdjVal pat
-                      v_adj <- adjVName v
-                      return $ Just (Param mempty v_adj (toDecl (fromDecl t) Unique), Var pat_adj)
-                    _ -> return Nothing
-
-            param_tuples_res_adj <- catMaybes <$> zipWithM build_param_tuples_adj res' (zip pats loop_params')
-
-            param_tuples_free_adj <-
-              forM loop_free $ \v -> do
-                adj_v <- adjVName v
-                adj_init <- lookupAdjVal v
-                t <- lookupType adj_init
-                return (Param mempty adj_v (toDecl t Unique), Var adj_init)
-
-            param_tuples_loop_vars_adj <- forM loop_vars' $ \(_, vs) -> do
-              adj_vs <- adjVName vs
-              adj_init <- lookupAdjVal vs
-              t <- lookupType vs
-              return (Param mempty adj_vs (toDecl t Unique), Var adj_init)
-
-            let param_tuples_adj = param_tuples_res_adj <> param_tuples_free_adj <> param_tuples_loop_vars_adj
-
-            bound_minus_one <-
-              inScopeOf form $
-                let one = Constant $ IntValue $ intValue it' (1 :: Int)
-                 in letSubExp "bound_minus_one" $ BasicOp $ BinOp (Sub it' OverflowUndef) bound' one
-            loop_var_arrays_substs <- fmap M.fromList $
-              inScopeOf form $ do
-                forM loop_var_arrays $ \xs -> do
-                  xs_t <- lookupType xs
-                  xs_rev <-
-                    letExp "reverse" $
-                      BasicOp $
-                        Index xs $
-                          fullSlice
-                            xs_t
-                            [DimSlice bound_minus_one bound' (Constant (IntValue (Int64Value (-1))))]
-                  return (xs, xs_rev)
-
-            ((i_reverse, i_reverse64), index_stms) <- collectStms $
-              inScopeOf form' $ do
-                i_reverse <- letExp "i" $ BasicOp $ BinOp (Sub it' OverflowWrap) bound_minus_one (Var i')
-                i_reverse64 <- asIntS Int64 $ Var i_reverse
-                return (i_reverse, i_reverse64)
-
-            ((loop_param_adjs, loop_free_adjs, loop_vars_adjs), stms_adj) <- collectStms $
-              subAD $
-                localScope (scopeOfFParams $ map fst param_tuples_adj) $
-                  localScope (scopeOfFParams loop_params') $
-                    inScopeOf form' $ do
-                      zipWithM_
-                        (\(p, _) v -> insAdj v (paramName p))
-                        param_tuples_adj
-                        (loop_res <> loop_free <> loop_var_arrays)
-                      diffStms stms'
-                      loop_free_adjs <- mapM lookupAdjVal loop_free
-                      loop_param_adjs <- mapM (lookupAdjVal . paramName) loop_params'
-                      let f vs v = do
-                            vs_t <- lookupType vs
-                            v_adj <- lookupAdjVal v
-                            updateAdjSlice (fullSlice vs_t [DimFix i_reverse64]) vs v_adj
-                      zipWithM_ f loop_var_arrays loop_var_param_names
-                      loop_vars_adjs <- mapM lookupAdjVal loop_var_arrays
-                      return (loop_param_adjs, loop_free_adjs, loop_vars_adjs)
-
-            let restore v = localScope (scopeOfFParams loop_params') $ do
-                  vs <- lookupLoopTape v
-                  vs_t <- lookupType vs
-                  v' <- letExp "restore" $ BasicOp $ Index vs $ fullSlice vs_t [DimFix i_reverse64]
-                  t <- lookupType v
-                  let consumed = namesToList $ consumedInStms $ fst $ Alias.analyseStms mempty stms_adj
-                  v'' <- case (t, v `elem` consumed) of
-                    (Array {}, True) -> letExp "restore_copy" $ BasicOp $ Copy v'
-                    _ -> return v'
-                  return (v, v'')
-
-            (_, stms_adj') <-
-              inScopeOf form' $
-                localScope (mconcat $ map scopeOfPatElem accs) $
-                  collectStms $ do
-                    addStms index_stms
-                    substs <- mapM (restore . paramName) loop_params'
-                    addStms $ substituteNames (M.insert i' i_reverse $ M.fromList substs) stms_adj
-
-            inScopeOf stms_adj' $
-              localScope (scopeOfFParams $ map fst param_tuples_adj) $
-                localScope (scopeOfPat $ Pat accs) $ do
-                  let body_adj =
-                        Body () stms_adj' $ varsRes (loop_param_adjs <> loop_free_adjs <> loop_vars_adjs)
-                  adjs' <-
-                    letTupExp "loop_adj" $
-                      substituteNames loop_var_arrays_substs $
-                        DoLoop
-                          param_tuples_adj
-                          form'
-                          body_adj
-
-                  returnSweepCode $ do
-                    zipWithM_ insSubExpAdj (map snd param_tuples') $ take (length loop_param_adjs) adjs'
-                    zipWithM_ (\v v_adj -> do insAdj v v_adj; (void . lookupAdjVal) v) loop_free $ take (length loop_free_adjs) $ drop (length loop_param_adjs) adjs'
-                    zipWithM_ (\v v_adj -> do insAdj v v_adj; void $ lookupAdjVal v) loop_var_arrays $ drop (length loop_param_adjs + length loop_free_adjs) adjs'
-          _ -> error $ "diffLoop: unexpected non-loop expression:\n" ++ pretty loop
-diffLoop _ _ e _ = error $ "diffLoop: unexpected non-loop expression:\n" ++ pretty e
-
 diffStm :: Stm -> ADM () -> ADM ()
 diffStm (Let pat aux (BasicOp e)) m =
   diffBasicOp pat aux e m
@@ -469,7 +277,7 @@ diffStm stm@(Let pat _ (If cond tbody fbody _)) m = do
 diffStm (Let pat aux (Op soac)) m =
   vjpSOAC vjpOps pat aux soac m
 diffStm (Let pat aux loop@DoLoop {}) m =
-  diffLoop pat aux loop m
+  diffLoop diffStms pat aux loop m
 diffStm stm _ = error $ "diffStm unhandled:\n" ++ pretty stm
 
 diffStms :: Stms SOACS -> ADM ()
@@ -501,17 +309,6 @@ copyConsumedArrsInStm s = inScopeOf s $ collectStms $ copyConsumedArrsInStm' s
        in M.fromList . mconcat
             <$> mapM onConsumed (namesToList $ consumedInStms $ fst (Alias.analyseStms mempty (oneStm stm)))
 
-copyConsumedArrsInBody :: Body -> ADM Substitutions
-copyConsumedArrsInBody b =
-  mconcat <$> mapM onConsumed (namesToList $ consumedInBody (Alias.analyseBody mempty b))
-  where
-    onConsumed v = do
-      v_t <- lookupType v
-      case v_t of
-        Acc {} -> error $ "copyConsumedArrs: Acc " <> pretty v
-        Array {} -> M.singleton v <$> letExp (baseString v <> "_ad_copy") (BasicOp $ Copy v)
-        _ -> pure mempty
-
 diffBody :: [Adj] -> [VName] -> Body -> ADM Body
 diffBody res_adjs get_adjs_for (Body () stms res) = subAD $
   subSubsts $ do
@@ -519,7 +316,7 @@ diffBody res_adjs get_adjs_for (Body () stms res) = subAD $
         onResult (SubExpRes _ (Var v)) v_adj = void $ updateAdj v =<< adjVal v_adj
     (adjs, stms') <- collectStms $ do
       zipWithM_ onResult (takeLast (length res_adjs) res) res_adjs
-      diffStms stms
+      diffStms =<< stripmineStms stms
       mapM lookupAdjVal get_adjs_for
     pure $ Body () stms' $ res <> varsRes adjs
 
