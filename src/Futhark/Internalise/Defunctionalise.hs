@@ -883,12 +883,8 @@ defuncApply depth e@(AppExp (Apply e1 e2 d loc) t@(Info (AppRes ret ext))) = do
             Var
               fname'
               ( Info
-                  ( Scalar $
-                      Arrow mempty Unnamed (fromStruct t1) $
-                        RetType [] $
-                          Scalar $
-                            Arrow mempty Unnamed (fromStruct t2) $
-                              RetType [] rettype
+                  ( Scalar . Arrow mempty Unnamed (fromStruct t1) . RetType [] $
+                      Scalar . Arrow mempty Unnamed (fromStruct t2) $ RetType [] rettype
                   )
               )
               loc
