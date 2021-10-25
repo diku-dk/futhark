@@ -72,8 +72,8 @@ localNewEnv env = local $ \(globals, old_env) ->
 askEnv :: DefM Env
 askEnv = asks snd
 
-isGlobal :: VName -> DefM a -> DefM a
-isGlobal v = local $ Arrow.first (S.insert v)
+areGlobal :: [VName] -> DefM a -> DefM a
+areGlobal vs = local $ Arrow.first (S.fromList vs <>)
 
 replaceTypeSizes ::
   M.Map VName SizeSubst ->
@@ -1318,10 +1318,10 @@ defuncVals [] = pure ()
 defuncVals (valbind : ds) = do
   (valbind', env, dyn) <- defuncValBind valbind
   addValBind valbind'
-  localEnv env $
-    if dyn
-      then isGlobal (valBindName valbind') $ defuncVals ds
-      else defuncVals ds
+  let globals =
+        (if dyn then (valBindName valbind' :) else id) $
+          snd (unInfo (valBindRetType valbind'))
+  localEnv env $ areGlobal globals $ defuncVals ds
 
 {-# NOINLINE transformProg #-}
 
