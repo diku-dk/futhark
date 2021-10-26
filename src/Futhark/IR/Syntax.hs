@@ -132,6 +132,7 @@ module Futhark.IR.Syntax
     OpaqueOp (..),
     DimChange (..),
     ShapeChange,
+    WithAccInput,
     ExpT (..),
     Exp,
     LoopForm (..),
@@ -406,6 +407,12 @@ data BasicOp
     UpdateAcc VName [SubExp] [SubExp]
   deriving (Eq, Ord, Show)
 
+-- | The input to a 'WithAcc' construct.  Comprises the index space of
+-- the accumulator, the underlying arrays, and possibly a combining
+-- function.
+type WithAccInput rep =
+  (Shape, [VName], Maybe (Lambda rep, [SubExp]))
+
 -- | The root Futhark expression type.  The v'Op' constructor contains
 -- a rep-specific operation.  Do-loops, branches and function calls
 -- are special.  Everything else is a simple t'BasicOp'.
@@ -423,7 +430,7 @@ data ExpT rep
     -- write index space.  The corresponding arrays must all have this
     -- shape outermost.  This construct is not part of t'BasicOp'
     -- because we need the @rep@ parameter.
-    WithAcc [(Shape, [VName], Maybe (Lambda rep, [SubExp]))] (Lambda rep)
+    WithAcc [WithAccInput rep] (Lambda rep)
   | Op (Op rep)
 
 deriving instance RepTypes rep => Eq (ExpT rep)

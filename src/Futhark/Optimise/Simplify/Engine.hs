@@ -802,7 +802,11 @@ simplifyExp (WithAcc inputs lam) = do
         nes' <- simplify nes
         return (Just (op_lam', nes'), op_lam_stms)
     (,op_stms) <$> ((,,op') <$> simplify shape <*> simplify arrs)
-  (lam', lam_stms) <- simplifyLambda lam
+  (lam', lam_stms) <-
+    simplifyLambdaWithBody (isFalse True) lam $
+      localVtable (ST.noteAccTokens (zip (map paramName (lambdaParams lam)) inputs')) $
+        simplifyBody (map (const Observe) (lambdaReturnType lam)) $
+          lambdaBody lam
   pure (WithAcc inputs' lam', mconcat inputs_stms <> lam_stms)
 
 -- Special case for simplification of commutative BinOps where we
@@ -975,13 +979,22 @@ simplifyLambdaMaybeHoist ::
   BlockPred (Wise rep) ->
   Lambda rep ->
   SimpleM rep (Lambda (Wise rep), Stms (Wise rep))
-simplifyLambdaMaybeHoist blocked lam@(Lambda params body rettype) = do
+simplifyLambdaMaybeHoist blocked lam =
+  simplifyLambdaWithBody blocked lam $
+    simplifyBody (map (const Observe) (lambdaReturnType lam)) $ lambdaBody lam
+
+simplifyLambdaWithBody ::
+  SimplifiableRep rep =>
+  BlockPred (Wise rep) ->
+  Lambda rep ->
+  SimpleM rep (SimplifiedBody rep Result) ->
+  SimpleM rep (Lambda (Wise rep), Stms (Wise rep))
+simplifyLambdaWithBody blocked lam@(Lambda params _body rettype) m = do
   params' <- mapM (traverse simplify) params
   let paramnames = namesFromList $ boundByLambda lam
   ((lamstms, lamres), hoisted) <-
     enterLoop . bindLParams params' $
-      blockIf (blocked `orIf` hasFree paramnames `orIf` isConsumed) $
-        simplifyBody (map (const Observe) rettype) body
+      blockIf (blocked `orIf` hasFree paramnames `orIf` isConsumed) m
   body' <- constructBody lamstms lamres
   rettype' <- simplify rettype
   return (Lambda params' body' rettype', hoisted)

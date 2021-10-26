@@ -382,6 +382,14 @@ ruleBasicOp vtable pat aux (SubExp (Var v))
     cs' /= cs =
     Simplify . certifying (Certs cs') $
       letBind pat $ BasicOp $ SubExp $ Var v
+-- Remove UpdateAccs that contribute the neutral value, which is
+-- always a no-op.
+ruleBasicOp vtable pat aux (UpdateAcc acc _ vs)
+  | Pat [pe] <- pat,
+    Acc token _ _ _ <- patElemType pe,
+    Just (_, _, Just (_, ne)) <- ST.entryAccInput =<< ST.lookup token vtable,
+    vs == ne =
+    Simplify . auxing aux $ letBind pat $ BasicOp $ SubExp $ Var acc
 ruleBasicOp _ _ _ _ =
   Skip
 
