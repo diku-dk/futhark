@@ -1,12 +1,13 @@
 module Futhark.Analysis.MigrationGraph where
 
-import Data.Foldable (foldMap')
-import Data.Set
+import Data.IntSet
 import qualified Data.IntMap.Strict as IM
 import Futhark.IR.GPU
 
 -- | A handle that identifies a specific 'Vertex'.
 type Id = Int
+
+type IdSet = IntSet
 
 -- | Maps a name to its corresponding vertex handle.
 nameToId :: VName -> Id
@@ -55,7 +56,7 @@ data Edges
     ToSink
   | -- | All vertices that the vertex has a declared edge to, and which of
     -- those edges that are not exhausted nor reversed, if not all.
-    ToNodes (Set Id) (Maybe (Set Id))
+    ToNodes (IdSet) (Maybe (IdSet))
 
 instance Semigroup Edges where
   ToSink <> _ = ToSink
@@ -65,7 +66,7 @@ instance Semigroup Edges where
 
 instance Monoid Edges where
   -- The empty set of edges.
-  mempty = ToNodes Data.Set.empty Nothing
+  mempty = ToNodes Data.IntSet.empty Nothing
  
 -- | Route tracking for some vertex.
 -- If a route passes through the vertex then both an ingoing and an outgoing
@@ -96,6 +97,9 @@ empty = Graph (IM.empty)
 
 addEdges :: Edges -> Id -> Graph -> Graph
 addEdges es i g = g
+
+connectFromSource :: Id -> Graph -> Graph
+connectFromSource i g = g
 
 connectToSink :: Id -> Graph -> Graph
 connectToSink i g = g
