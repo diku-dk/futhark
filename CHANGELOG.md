@@ -23,7 +23,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Missing alias tracking led to invalid rewrites, causing a compiler
   crash (#1499).
 
-* Top-level bindings with existential sizes were mishandled (#1500).
+* Top-level bindings with existential sizes were mishandled (#1500, #1501).
 
 * A variety of memory leaks in the multicore backend, mostly (or
   perhaps exclusively) centered around context freeing or failing
