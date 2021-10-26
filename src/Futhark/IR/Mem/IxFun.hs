@@ -1135,30 +1135,31 @@ flatSpan (LMAD ofs dims) =
 -- flattened array instead. This means that any "holes" in betwen dimensions
 -- will get filled out.
 -- conservativeFlatten :: (IntegralExp e, Ord e, Pretty e) => LMAD e -> LMAD e
-conservativeFlatten :: LMAD (TPrimExp Int64 VName) -> LMAD (TPrimExp Int64 VName)
+conservativeFlatten :: LMAD (TPrimExp Int64 VName) -> Maybe (LMAD (TPrimExp Int64 VName))
 conservativeFlatten l@(LMAD offset []) =
-  LMAD offset [LMADDim 1 0 1 0 Inc]
+  return $ LMAD offset [LMADDim 1 0 1 0 Inc]
 conservativeFlatten l@(LMAD _ [_]) =
-  l
-conservativeFlatten l@(LMAD _ dims) =
-  LMAD offset [LMADDim strd 0 (shp + 1) 0 Unknown]
+  return $ l
+conservativeFlatten l@(LMAD _ dims) = do
+  strd <-
+    foldM
+      (\x y -> gcd x y)
+      ( ldStride $ head dims
+      )
+      $ map ldStride dims
+
+  return $ LMAD offset [LMADDim strd 0 (shp + 1) 0 Unknown]
   where
-    strd =
-      foldl
-        (\x y -> gcd x y)
-        ( ldStride $ head dims
-        )
-        $ map ldStride dims
     (offset, shp) = flatSpan l
 
-gcd :: TPrimExp Int64 VName -> TPrimExp Int64 VName -> TPrimExp Int64 VName
+gcd :: TPrimExp Int64 VName -> TPrimExp Int64 VName -> Maybe (TPrimExp Int64 VName)
 gcd x y = gcd' (abs x) (abs y)
   where
-    gcd' a b | a == b = a
-    gcd' 1 _ = 1
-    gcd' _ 1 = 1
-    gcd' a 0 = a
-    gcd' a b = undefined -- gcd' b (a `Futhark.Util.IntegralExp.rem` b)
+    gcd' a b | a == b = Just a
+    gcd' 1 _ = Just 1
+    gcd' _ 1 = Just 1
+    gcd' a 0 = Just a
+    gcd' a b = Nothing -- gcd' b (a `Futhark.Util.IntegralExp.rem` b)
 
 -- | Returns @True@ if the two 'LMAD's could be proven disjoint.
 --
@@ -1173,13 +1174,13 @@ disjoint ut l1@(LMAD offset1 [dim1]) l2@(LMAD offset2 [dim2]) =
     || (traceWith "result?" $ nonNegativeish ut $ traceWith ("l1: " <> pretty l1 <> "\nl2: " <> pretty l2 <> "\ndisjoint1") $ AlgSimplify2.simplify0 $ untyped $ offset1 - (offset2 + (ldShape dim2 - 1) * ldStride dim2))
     || (traceWith "result?" $ nonNegativeish ut $ traceWith "disjoint2" $ AlgSimplify2.simplify0 $ untyped $ offset2 - (offset1 + (ldShape dim1 - 1) * ldStride dim1))
   where
-    doesNotDivide :: TPrimExp Int64 VName -> TPrimExp Int64 VName -> Bool
-    doesNotDivide x y = maybe False not $ primBool $ (TPrimExp $ constFoldPrimExp $ untyped $ Futhark.Util.IntegralExp.mod y x :: TPrimExp Int64 VName) .==. 0
+    doesNotDivide :: Maybe (TPrimExp Int64 VName) -> TPrimExp Int64 VName -> Bool
+    doesNotDivide (Just x) y = maybe False not $ primBool $ (TPrimExp $ constFoldPrimExp $ untyped $ Futhark.Util.IntegralExp.mod y x :: TPrimExp Int64 VName) .==. 0
+    doesNotDivide _ _ = False
 disjoint ut lmad1 lmad2 =
-  disjoint
-    ut
-    (conservativeFlatten lmad1)
-    (conservativeFlatten lmad2)
+  case (conservativeFlatten lmad1, conservativeFlatten lmad2) of
+    (Just lmad1', Just lmad2') -> disjoint ut lmad1' lmad2'
+    _ -> False
 
 nonNegativeish :: UsageTable -> AlgSimplify2.SofP -> Bool
 nonNegativeish ut prods = all (nonNegativeishProd ut) prods
