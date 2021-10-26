@@ -11,6 +11,7 @@ module Futhark.Analysis.SymbolTable
     -- * Entries
     Entry,
     deepen,
+    entryAccInput,
     entryDepth,
     entryLetBoundDec,
     entryIsSize,
@@ -47,6 +48,7 @@ module Futhark.Analysis.SymbolTable
 
     -- * Misc
     hideCertified,
+    noteAccTokens,
   )
 where
 
@@ -133,6 +135,9 @@ data Entry rep = Entry
     -- | True if this name has been used as an array size,
     -- implying that it is non-negative.
     entryIsSize :: Bool,
+    -- | For names that are tokens of an accumulator, this is the
+    -- corresponding combining function and neutral element.
+    entryAccInput :: Maybe (WithAccInput rep),
     entryType :: EntryType rep
   }
 
@@ -399,6 +404,7 @@ insertEntry name entry vtable =
           { entryConsumed = False,
             entryDepth = loopDepth vtable,
             entryIsSize = False,
+            entryAccInput = Nothing,
             entryType = entry
           }
       dims = mapMaybe subExpVar $ arrayDims $ typeOf entry'
@@ -583,3 +589,21 @@ hideCertified :: Names -> SymbolTable rep -> SymbolTable rep
 hideCertified to_hide = hideIf $ maybe False hide . entryStm
   where
     hide = any (`nameIn` to_hide) . unCerts . stmCerts
+
+-- | Note that these names are tokens for the corresponding
+-- accumulators.  The names must already be present in the symbol
+-- table.
+noteAccTokens ::
+  [(VName, WithAccInput rep)] ->
+  SymbolTable rep ->
+  SymbolTable rep
+noteAccTokens = flip (foldl' f)
+  where
+    f vtable (v, accum) =
+      case M.lookup v $ bindings vtable of
+        Nothing -> vtable
+        Just e ->
+          vtable
+            { bindings =
+                M.insert v (e {entryAccInput = Just accum}) $ bindings vtable
+            }
