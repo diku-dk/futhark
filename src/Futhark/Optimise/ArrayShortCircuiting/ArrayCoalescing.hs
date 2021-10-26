@@ -220,7 +220,7 @@ shortCircuitGPUMem lutab pat@(Pat ps) (Inner (SegOp (SegMap lvl space tps kernel
         foldl
           ( \bu_env_f (m_b, m_y, ixf) ->
               let active_coals = activeCoals bu_env_f
-                  as = ixfunToAccessSummary ixf
+                  as = translateAccessSummary (scope td_env) (scalar_table td_env) $ ixfunToAccessSummary ixf
                in case M.lookup m_b active_coals of
                     Just coal_entry ->
                       let mrefs =

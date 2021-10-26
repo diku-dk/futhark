@@ -4,6 +4,7 @@
 module Futhark.Optimise.ArrayShortCircuiting.MemRefAggreg
   ( recordMemRefUses,
     freeVarSubstitutions,
+    translateAccessSummary,
     aggSummaryLoopTotal,
     aggSummaryLoopPartial,
     aggSummaryMapPartial,
