@@ -414,8 +414,8 @@ diffLoop
                     zipWithM_ insSubExpAdj (map snd param_tuples') $ take (length loop_param_adjs) adjs'
                     zipWithM_ (\v v_adj -> do insAdj v v_adj; (void . lookupAdjVal) v) loop_free $ take (length loop_free_adjs) $ drop (length loop_param_adjs) adjs'
                     zipWithM_ (\v v_adj -> do insAdj v v_adj; void $ lookupAdjVal v) loop_var_arrays $ drop (length loop_param_adjs + length loop_free_adjs) adjs'
-          _ -> error "diffLoop: unexpected non-loop expression."
-diffLoop _ _ _ _ = error "diffLoop: unexpected non-loop expression."
+          _ -> error $ "diffLoop: unexpected non-loop expression:\n" ++ pretty loop
+diffLoop _ _ e _ = error $ "diffLoop: unexpected non-loop expression:\n" ++ pretty e
 
 diffStm :: Stm -> ADM () -> ADM ()
 diffStm (Let pat aux (BasicOp e)) m =
