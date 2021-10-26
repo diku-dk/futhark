@@ -368,19 +368,20 @@ aggSummaryMapPartial scalars [(gtid, size)] (Set lmads0) = do
 aggSummaryMapPartial _ _ _ = return Undeterminable
 
 aggSummaryOne :: MonadFreshNames m => VName -> TPrimExp Int64 VName -> TPrimExp Int64 VName -> LmadRef -> m AccessSummary
-aggSummaryOne iterator_var lower_bound upper_bound (IxFun.LMAD _ dims) | iterator_var `nameIn` freeIn dims = return Undeterminable
-aggSummaryOne iterator_var lower_bound span lmad@(IxFun.LMAD offset0 dims0) = do
-  new_var <- newVName "k"
-  let offset = replaceIteratorWith (typedLeafExp new_var) offset0
-      offsetp1 = replaceIteratorWith (typedLeafExp new_var + 1) offset0
-      new_stride = TPrimExp $ constFoldPrimExp $ simplify $ untyped $ offsetp1 - offset
-      new_offset = replaceIteratorWith lower_bound offset0
-      new_lmad =
-        IxFun.LMAD new_offset $
-          IxFun.LMADDim new_stride 0 span 0 IxFun.Inc : map incPerm dims0
-  if new_var `nameIn` freeIn new_lmad
-    then return Undeterminable
-    else return $ Set $ S.singleton new_lmad
+aggSummaryOne iterator_var lower_bound span lmad@(IxFun.LMAD offset0 dims0)
+  | iterator_var `nameIn` freeIn dims0 = return Undeterminable
+  | otherwise = do
+    new_var <- newVName "k"
+    let offset = replaceIteratorWith (typedLeafExp new_var) offset0
+        offsetp1 = replaceIteratorWith (typedLeafExp new_var + 1) offset0
+        new_stride = TPrimExp $ constFoldPrimExp $ simplify $ untyped $ offsetp1 - offset
+        new_offset = replaceIteratorWith lower_bound offset0
+        new_lmad =
+          IxFun.LMAD new_offset $
+            IxFun.LMADDim new_stride 0 span 0 IxFun.Inc : map incPerm dims0
+    if new_var `nameIn` freeIn new_lmad
+      then return Undeterminable
+      else return $ Set $ S.singleton new_lmad
   where
     incPerm dim = dim {IxFun.ldPerm = IxFun.ldPerm dim + 1}
     replaceIteratorWith se = TPrimExp . substituteInPrimExp (M.singleton iterator_var $ untyped se) . untyped
