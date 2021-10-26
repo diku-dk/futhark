@@ -1,6 +1,7 @@
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeFamilies #-}
 
 -- | Playground for work on merging memory blocks
@@ -234,11 +235,11 @@ shortCircuitGPUMem lutab pat@(Pat ps) (Inner (SegOp (SegMap lvl space tps kernel
   let bu_env''' = bu_env'' {activeCoals = actv}
 
   -- Process pattern and return values
-  let mergee_writes = mapMaybe (getDirAliasedIxfn td_env (activeCoals bu_env''') . patElemName) ps
+  let mergee_writes = mapMaybe (\p -> fmap (p,) $ getDirAliasedIxfn td_env (activeCoals bu_env''') $ patElemName p) ps
       -- Now, for each mergee write, we need to check that it doesn't overlap with any previous uses of the destination.
       bu_env'''' =
         foldl
-          ( \bu_env_f (m_b, m_y, ixf) ->
+          ( \bu_env_f (p, (m_b, m_y, ixf)) ->
               let active_coals = activeCoals bu_env_f
                   as = ixfunToAccessSummary ixf
                in case M.lookup m_b $ activeCoals bu_env of
@@ -256,12 +257,28 @@ shortCircuitGPUMem lutab pat@(Pat ps) (Inner (SegOp (SegMap lvl space tps kernel
                                   <> pretty (alsmem coal_entry)
                                   <> "\ndstind: "
                                   <> pretty (dstind coal_entry)
+                                  <> "\nvartab: "
+                                  <> pretty (vartab coal_entry)
+                                  <> "\np: "
+                                  <> pretty p
                                   <> "\nmemrefs"
                               )
                               $ memrefs coal_entry
                        in if noMemOverlap td_env as $ dstrefs mrefs
                             then
-                              let (ac, succ) = trace ("MARKING " <> pretty m_b <> " AS SUCCESS!") $ markSuccessCoal (activeCoals bu_env_f, successCoals bu_env_f) m_b coal_entry
+                              let entry = case M.lookup (patElemName p) $ vartab coal_entry of
+                                    Nothing -> trace "Nothing1" coal_entry
+                                    Just (Coalesced knd mbd@(MemBlock _ _ _ ixfn) subs0) ->
+                                      case freeVarSubstitutions (scope td_env) (scalar_table td_env) ixfn of
+                                        Just fv_subst -> coal_entry {vartab = M.insert (patElemName p) (Coalesced knd mbd $ traceWith "fv_subst" fv_subst) (vartab coal_entry)}
+                                        Nothing -> trace "Nothing2" coal_entry
+                                  (ac, succ) =
+                                    trace
+                                      ( "MARKING " <> pretty m_b
+                                          <> " AS SUCCESS! with entry: "
+                                          <> pretty entry
+                                      )
+                                      $ markSuccessCoal (activeCoals bu_env_f, successCoals bu_env_f) m_b entry
                                in bu_env_f {activeCoals = ac, successCoals = succ}
                             else
                               let (ac, inh) = trace ("MARKING " <> pretty m_b <> " AS FAILED (2)") $ markFailedCoal (activeCoals bu_env_f, inhibit bu_env_f) m_b
