@@ -27,6 +27,7 @@ import Data.Bits
 import qualified Data.Foldable as Foldable
 import qualified Data.IntMap.Strict as IM
 import Data.List (foldl')
+import Data.Maybe (mapMaybe)
 import Futhark.IR
 import Futhark.IR.Prop.Aliases
 import Prelude hiding (lookup)
@@ -185,6 +186,8 @@ usageInExp (BasicOp (Update _ src _ _)) =
   consumedUsage src
 usageInExp (BasicOp (FlatUpdate src _ _)) =
   consumedUsage src
+usageInExp (BasicOp (Index _ slc)) =
+  sizeUsages $ freeIn $ mapMaybe dimFix $ unSlice slc
 usageInExp (Op op) =
   mconcat $ map consumedUsage (namesToList $ consumedInOp op)
 usageInExp (BasicOp _) = mempty
