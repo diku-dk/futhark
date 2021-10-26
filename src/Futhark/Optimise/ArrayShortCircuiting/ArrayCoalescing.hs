@@ -227,7 +227,9 @@ shortCircuitGPUMem lutab pat@(Pat ps) (Inner (SegOp (SegMap lvl space tps kernel
                             traceWith ("Processing m_b: " <> pretty m_b <> "\nas: " <> pretty as <> "\nmemrefs") $
                               memrefs coal_entry
                        in if noMemOverlap td_env as $ dstrefs mrefs
-                            then bu_env_f {activeCoals = M.insert m_b (coal_entry {memrefs = mrefs {srcwrts = srcwrts mrefs <> as}}) active_coals}
+                            then
+                              let (ac, succ) = markSuccessCoal (activeCoals bu_env_f, successCoals bu_env_f) m_b coal_entry
+                               in bu_env_f {activeCoals = ac, successCoals = succ}
                             else
                               let (ac, inh) = markFailedCoal (activeCoals bu_env_f, inhibit bu_env_f) m_b
                                in bu_env_f {activeCoals = ac, inhibit = inh}
