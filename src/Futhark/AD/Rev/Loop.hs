@@ -206,7 +206,7 @@ diffLoop
                 loop_acc_pat = PatElem pat_acc $ arrayOf t (Shape [bound64]) NoUniqueness
             return (loop_acc_pat, loop_acc_param)
 
-        zero_accs <- forM loop_params $ \(Param _ v t) ->
+        zero_accs <- forM loop_params_to_copy $ \(Param _ v t) ->
           letSubExp (baseString v <> "_zero_acc")
             =<< eBlank (arrayOf t (Shape [bound64]) NoUniqueness)
 
@@ -216,7 +216,7 @@ diffLoop
               copy_substs <- copyConsumedArrsInBody dont_copy body
               addStms stms
               i64 <- asIntS Int64 $ Var i
-              forM (zip loop_params loop_acc_params) $ \(Param _ v _, Param _ acc t) -> do
+              forM (zip loop_params_to_copy loop_acc_params) $ \(Param _ v _, Param _ acc t) -> do
                 acc' <-
                   letInPlace "loop_acc" acc (fullSlice (fromDecl t) [DimFix i64]) $
                     substituteNames copy_substs $ BasicOp $ SubExp $ Var v
