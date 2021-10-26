@@ -10,13 +10,13 @@ import Control.Arrow
 import qualified Control.Exception.Base as Exc
 import Control.Monad.Reader
 import Control.Monad.State.Strict
+import qualified Data.Bifunctor as Bifunctor
 import qualified Data.List as L
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import Data.Sequence (Seq (..))
 import qualified Data.Set as S
-import qualified Data.Traversable as Traversable
 import Debug.Trace
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.Analysis.UsageTable
@@ -196,42 +196,75 @@ shortCircuitGPUMem lutab pat@(Pat ps) (Inner (SegOp (SegMap lvl space tps kernel
           td_env
           (patElems pat)
   bu_env' <- mkCoalsTabStms lutab (kernelBodyStms kernel_body) td_env $ bu_env {activeCoals = actv0, inhibit = inhibit0}
-  -- let (actv1, inhibit1, successCoals1) =
-  --       foldl foldFun (actv0, inhibit0, successCoals bu_env') $ patElems pat
 
-  -- Check partial overlap, meaning for each iteration
+  -- Check partial overlap
   bu_env'' <-
     foldM
       ( \bu_env_f (k, entry) -> do
           destination_uses <- aggSummaryMapPartial (scalar_table td_env) (unSegSpace space) $ dstrefs $ memrefs entry
-          if traceWith ("filter entry: " <> pretty entry <> "\ndestination_uses: " <> pretty destination_uses <> "\nnoMemOverlap") $ noMemOverlap td_env destination_uses $ srcwrts $ memrefs entry
+          if traceWith
+            ( "k: " <> pretty k
+                <> "\nfilter entry: "
+                <> pretty entry
+                <> "\ndstrefs: "
+                <> pretty (dstrefs $ memrefs entry)
+                <> "\ndestination_uses: "
+                <> pretty destination_uses
+                <> "\nsrcwrts: "
+                <> pretty (srcwrts $ memrefs entry)
+                <> "\nnoMemOverlap"
+            )
+            $ noMemOverlap td_env destination_uses $ srcwrts $ memrefs entry
             then return bu_env_f
             else do
-              let (ac, inh) = markFailedCoal (activeCoals bu_env_f, inhibit bu_env_f) k
+              let (ac, inh) = trace ("MARKING " <> pretty k <> " AS FAILED") $ markFailedCoal (activeCoals bu_env_f, inhibit bu_env_f) k
               return $ bu_env_f {activeCoals = ac, inhibit = inh}
       )
-      bu_env
+      bu_env'
       $ M.toList $ activeCoals bu_env'
 
+  actv <-
+    mapM
+      ( \entry -> do
+          wrts <- aggSummaryMapTotal (scope td_env) (scope td_env) (scalar_table td_env) [] $ srcwrts $ memrefs entry
+          uses <- aggSummaryMapTotal (scope td_env) (scope td_env) (scalar_table td_env) [] $ dstrefs $ memrefs entry
+          return $ entry {memrefs = MemRefs uses wrts}
+      )
+      $ activeCoals bu_env''
+  let bu_env''' = bu_env'' {activeCoals = actv}
+
   -- Process pattern and return values
-  let mergee_writes = mapMaybe (getDirAliasedIxfn td_env (activeCoals bu_env'') . patElemName) ps
+  let mergee_writes = mapMaybe (getDirAliasedIxfn td_env (activeCoals bu_env''') . patElemName) ps
       -- Now, for each mergee write, we need to check that it doesn't overlap with any previous uses of the destination.
-      bu_env''' =
+      bu_env'''' =
         foldl
           ( \bu_env_f (m_b, m_y, ixf) ->
               let active_coals = activeCoals bu_env_f
-                  as = translateAccessSummary (scope td_env) (scalar_table td_env) $ ixfunToAccessSummary ixf
-               in case M.lookup m_b active_coals of
+                  as = ixfunToAccessSummary ixf
+               in case M.lookup m_b $ activeCoals bu_env of
                     Just coal_entry ->
                       let mrefs =
-                            traceWith ("Processing m_b: " <> pretty m_b <> "\nas: " <> pretty as <> "\nmemrefs") $
-                              memrefs coal_entry
+                            traceWith
+                              ( "Processing m_b: " <> pretty m_b
+                                  <> "\nm_y: "
+                                  <> pretty m_y
+                                  <> "\nixf: "
+                                  <> pretty ixf
+                                  <> "\nas: "
+                                  <> pretty as
+                                  <> "\nalsmem: "
+                                  <> pretty (alsmem coal_entry)
+                                  <> "\ndstind: "
+                                  <> pretty (dstind coal_entry)
+                                  <> "\nmemrefs"
+                              )
+                              $ memrefs coal_entry
                        in if noMemOverlap td_env as $ dstrefs mrefs
                             then
-                              let (ac, succ) = markSuccessCoal (activeCoals bu_env_f, successCoals bu_env_f) m_b coal_entry
+                              let (ac, succ) = trace ("MARKING " <> pretty m_b <> " AS SUCCESS!") $ markSuccessCoal (activeCoals bu_env_f, successCoals bu_env_f) m_b coal_entry
                                in bu_env_f {activeCoals = ac, successCoals = succ}
                             else
-                              let (ac, inh) = markFailedCoal (activeCoals bu_env_f, inhibit bu_env_f) m_b
+                              let (ac, inh) = trace ("MARKING " <> pretty m_b <> " AS FAILED (2)") $ markFailedCoal (activeCoals bu_env_f, inhibit bu_env_f) m_b
                                in bu_env_f {activeCoals = ac, inhibit = inh}
                     coal_entry -> trace ("Lookup failed?\ncoals_entry: " <> pretty coal_entry <> "\nas: " <> pretty as) bu_env_f
           )
@@ -244,30 +277,22 @@ shortCircuitGPUMem lutab pat@(Pat ps) (Inner (SegOp (SegMap lvl space tps kernel
           <> "\ninhibit0: "
           <> pretty inhibit0
           <> "\nactv after: "
-          <> pretty (activeCoals bu_env''')
+          <> pretty (activeCoals bu_env'''')
           <> "\ninhibit after: "
-          <> pretty (inhibit bu_env''')
-          -- <> "\nsrcwrts for bu_env: "
-          -- <> pretty (srcwrts $ memrefs $ snd $ head $ M.toList $ activeCoals bu_env)
-          -- <> "\ndstrefs for bu_env: "
-          -- <> pretty (dstrefs $ memrefs $ snd $ head $ M.toList $ activeCoals bu_env)
-          -- <> "\nsrcwrts for bu_env': "
-          -- <> pretty (srcwrts $ memrefs $ snd $ head $ M.toList $ activeCoals bu_env')
-          -- <> "\ndstrefs for bu_env': "
-          -- <> pretty (dstrefs $ memrefs $ snd $ head $ M.toList $ activeCoals bu_env')
-          -- <> "\nsrcwrts for bu_env'': "
-          -- <> pretty (srcwrts $ memrefs $ snd $ head $ M.toList $ activeCoals bu_env'')
-          -- <> "\ndstrefs for bu_env'': "
-          -- <> pretty (dstrefs $ memrefs $ snd $ head $ M.toList $ activeCoals bu_env'')
-          -- <> "\nsrcwrts for bu_env''': "
-          -- <> pretty (srcwrts $ memrefs $ snd $ head $ M.toList $ activeCoals bu_env''')
-          -- <> "\ndstrefs for bu_env''': "
-          -- <> pretty (dstrefs $ memrefs $ snd $ head $ M.toList $ activeCoals bu_env''')
+          <> pretty (inhibit bu_env'''')
+          <> "\nmemrefs for bu_env: "
+          <> pretty (map (Bifunctor.second memrefs) $ M.toList $ activeCoals bu_env)
+          <> "\nmemrefs for bu_env': "
+          <> pretty (map (Bifunctor.second memrefs) $ M.toList $ activeCoals bu_env')
+          <> "\nmemfrefs for bu_env'': "
+          <> pretty (map (Bifunctor.second memrefs) $ M.toList $ activeCoals bu_env'')
+          <> "\nmemrefs for bu_env'': "
+          <> pretty (map (Bifunctor.second memrefs) $ M.toList $ activeCoals bu_env'''')
           -- <> "\nnomemoverlap: "
-          -- <> pretty (noMemOverlap td_env (srcwrts $ memrefs $ snd $ head $ M.toList $ activeCoals bu_env''') (dstrefs $ memrefs $ snd $ head $ M.toList $ activeCoals bu_env'''))
+          -- <> pretty (noMemOverlap td_env (srcwrts $ memrefs $ snd $ head $ tail $ M.toList $ activeCoals bu_env'''') (dstrefs $ memrefs $ snd $ head $ tail $ M.toList $ activeCoals bu_env''''))
       )
       --  $ bu_env' {activeCoals = actv1, successCoals = successCoals1, inhibit = inhibit1}
-      $ bu_env'''
+      $ bu_env''''
 -- where
 --   foldFun (act, inhb, succ) (PatElem name (_, MemArray _ _ _ (ArrayIn mem ixfun)))
 --     | Just info <- M.lookup mem act =
@@ -641,7 +666,7 @@ mkCoalsTabStm lutab lstm@(Let pat _ (DoLoop arginis lform body)) td_env bu_env =
   -- b) Update the memory-reference summaries across loop:
   --   W = Union_{i=0..n-1} W_i Union W_{before-loop}
   --   U = Union_{i=0..n-1} U_i Union U_{before-loop}
-  res_actv2 <- Traversable.mapM (aggAcrossLoopEntry (scope td_env') scals_loop mb_loop_idx) res_actv1
+  res_actv2 <- mapM (aggAcrossLoopEntry (scope td_env') scals_loop mb_loop_idx) res_actv1
 
   -- c) check soundness of the successful promotions for:
   --      - the entries that have been promoted to success during the loop-body pass
