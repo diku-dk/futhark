@@ -1,9 +1,11 @@
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE TypeFamilies #-}
 
 module Futhark.Optimise.ArrayShortCircuiting.TopDownAn
   ( TopDnEnv (..),
     ScopeTab,
+    HasUsage,
     InhibitTab,
     RangeTab,
     topdwnTravBinding,
@@ -16,13 +18,17 @@ module Futhark.Optimise.ArrayShortCircuiting.TopDownAn
 where
 
 import qualified Data.Map.Strict as M
+import Debug.Trace
 import Futhark.Analysis.PrimExp.Convert
 --import qualified Futhark.IR.Mem.IxFun as IxFun
 import Futhark.Analysis.UsageTable
 import Futhark.IR.Aliases
+import Futhark.IR.GPUMem
 import qualified Futhark.IR.Mem.IxFun as IxFun
 import Futhark.IR.SeqMem
 import Futhark.Optimise.ArrayShortCircuiting.DataStructs
+
+traceWith' s a = trace (s <> ": " <> show a) a
 
 type ScopeTab rep = Scope (Aliases rep)
 -- ^ maps array-variable names to various info, including
@@ -123,9 +129,27 @@ getInvAliasFromExp (BasicOp (Rearrange perm _)) =
    in Just (`IxFun.permute` perm')
 getInvAliasFromExp _ = Nothing
 
+class HasUsage inner where
+  computeUsage :: [VName] -> inner -> UsageTable
+
+  scopeHelper :: inner -> Scope rep
+
+instance HasUsage (HostOp (Aliases GPUMem) ()) where
+  computeUsage _ (SegOp seg_op) =
+    foldMap (sizeUsage . fst) $ unSegSpace $ segSpace seg_op
+  computeUsage [vname] (SizeOp _) = sizeUsage vname
+  computeUsage _ _ = mempty
+
+  scopeHelper (SegOp seg_op) = scopeOfSegSpace $ segSpace seg_op
+  scopeHelper _ = mempty
+
+instance HasUsage () where
+  computeUsage _ () = mempty
+  scopeHelper () = mempty
+
 -- | fills in the TopDnEnv table
 topdwnTravBinding ::
-  (ASTRep rep, Op rep ~ MemOp inner, CanBeAliased inner) =>
+  (ASTRep rep, Op rep ~ MemOp inner, CanBeAliased inner, HasUsage (OpWithAliases inner)) =>
   TopDnEnv rep ->
   Stm (Aliases rep) ->
   TopDnEnv rep
@@ -134,6 +158,11 @@ topdwnTravBinding env stm@(Let (Pat [pe]) _ (Op (Alloc _ _))) =
     { alloc = alloc env <> oneName (patElemName pe),
       scope = scope env <> scopeOf stm,
       usage_table = usageInStm stm <> usage_table env
+    }
+topdwnTravBinding env stm@(Let pat _ (Op (Inner inner))) =
+  env
+    { scope = scope env <> scopeOf stm <> scopeHelper inner,
+      usage_table = computeUsage (patNames pat) inner <> usageInStm stm <> usage_table env
     }
 topdwnTravBinding env stm@(Let (Pat [pe]) _ e)
   | Just (x, ixfn) <- getDirAliasFromExp e =
@@ -238,7 +267,9 @@ getTransitiveAlias alias_tab vtab b ixfn
 getTransitiveAlias _ _ _ _ = Nothing
 --}
 
--- | Get direct aliased index function?
+-- | Get direct aliased index function?  Returns a triple of current memory
+-- block to be coalesced, the destination memory block and the index function of
+-- the access in the space of the destination block.
 getDirAliasedIxfn :: HasMemBlock (Aliases rep) => TopDnEnv rep -> CoalsTab -> VName -> Maybe (VName, VName, IxFun)
 getDirAliasedIxfn td_env coals_tab x =
   case getScopeMemInfo x (scope td_env) of

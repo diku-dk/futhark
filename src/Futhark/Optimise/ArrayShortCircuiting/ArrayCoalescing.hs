@@ -11,9 +11,11 @@ import qualified Control.Exception.Base as Exc
 import Control.Monad.Reader
 import Control.Monad.State.Strict
 import qualified Data.List as L
+import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import Data.Sequence (Seq (..))
+import qualified Data.Set as S
 import qualified Data.Traversable as Traversable
 import Debug.Trace
 import Futhark.Analysis.PrimExp.Convert
@@ -36,7 +38,8 @@ type Coalesceable rep inner =
     CanBeAliased inner,
     Op rep ~ MemOp inner,
     HasMemBlock (Aliases rep),
-    LetDec rep ~ LetDecMem
+    LetDec rep ~ LetDecMem,
+    HasUsage (OpWithAliases inner)
   )
 
 newtype ComputeScalarTableOnOp rep = ComputeScalarTableOnOp
@@ -184,7 +187,7 @@ shortCircuitSeqMem _ _ _ _ = return
 
 shortCircuitGPUMem :: LUTabFun -> Pat (Aliases GPUMem) -> Op (Aliases GPUMem) -> TopDnEnv GPUMem -> BotUpEnv -> ShortCircuitM GPUMem BotUpEnv
 shortCircuitGPUMem _ _ (Alloc _ _) _ bu_env = return bu_env
-shortCircuitGPUMem lutab pat (Inner (SegOp (SegMap lvl space tps kernel_body))) td_env bu_env = do
+shortCircuitGPUMem lutab pat@(Pat ps) (Inner (SegOp (SegMap lvl space tps kernel_body))) td_env bu_env = do
   let (actv0, inhibit0) =
         filterSafetyCond2and5
           (activeCoals bu_env)
@@ -193,15 +196,83 @@ shortCircuitGPUMem lutab pat (Inner (SegOp (SegMap lvl space tps kernel_body))) 
           td_env
           (patElems pat)
   bu_env' <- mkCoalsTabStms lutab (kernelBodyStms kernel_body) td_env $ bu_env {activeCoals = actv0, inhibit = inhibit0}
-  let ((actv1, inhibit1), successCoals1) =
-        foldl foldFun ((actv0, inhibit0), successCoals bu_env') $ patElems pat
-  return $ bu_env' {activeCoals = actv1, successCoals = successCoals1, inhibit = inhibit1}
-  where
-    foldFun ((act, inhb), succ) (PatElem name (_, MemArray _ _ _ (ArrayIn mem ixfun)))
-      | Just info <- M.lookup mem act =
-        let (act', succ') = markSuccessCoal (act, succ) mem info
-         in ((act', inhb), succ')
-    foldFun res _ = res
+  -- let (actv1, inhibit1, successCoals1) =
+  --       foldl foldFun (actv0, inhibit0, successCoals bu_env') $ patElems pat
+
+  -- Check partial overlap, meaning for each iteration
+  bu_env'' <-
+    foldM
+      ( \bu_env_f (k, entry) -> do
+          destination_uses <- aggSummaryMapPartial (scalar_table td_env) (unSegSpace space) $ dstrefs $ memrefs entry
+          if traceWith ("filter entry: " <> pretty entry <> "\ndestination_uses: " <> pretty destination_uses <> "\nnoMemOverlap") $ noMemOverlap td_env destination_uses $ srcwrts $ memrefs entry
+            then return bu_env_f
+            else do
+              let (ac, inh) = markFailedCoal (activeCoals bu_env_f, inhibit bu_env_f) k
+              return $ bu_env_f {activeCoals = ac, inhibit = inh}
+      )
+      bu_env
+      $ M.toList $ activeCoals bu_env'
+
+  -- Process pattern and return values
+  let mergee_writes = mapMaybe (getDirAliasedIxfn td_env (activeCoals bu_env'') . patElemName) ps
+      -- Now, for each mergee write, we need to check that it doesn't overlap with any previous uses of the destination.
+      bu_env''' =
+        foldl
+          ( \bu_env_f (m_b, m_y, ixf) ->
+              let active_coals = activeCoals bu_env_f
+                  as = ixfunToAccessSummary ixf
+               in case M.lookup m_b active_coals of
+                    Just coal_entry ->
+                      let mrefs =
+                            traceWith ("Processing m_b: " <> pretty m_b <> "\nas: " <> pretty as <> "\nmemrefs") $
+                              memrefs coal_entry
+                       in if noMemOverlap td_env as $ dstrefs mrefs
+                            then bu_env_f {activeCoals = M.insert m_b (coal_entry {memrefs = mrefs {srcwrts = srcwrts mrefs <> as}}) active_coals}
+                            else
+                              let (ac, inh) = markFailedCoal (activeCoals bu_env_f, inhibit bu_env_f) m_b
+                               in bu_env_f {activeCoals = ac, inhibit = inh}
+                    coal_entry -> trace ("Lookup failed?\ncoals_entry: " <> pretty coal_entry <> "\nas: " <> pretty as) bu_env_f
+          )
+          bu_env''
+          $ trace ("mergee_writes: " <> pretty mergee_writes) mergee_writes
+  return $
+    trace
+      ( "\nsegmap: " <> pretty (patElems pat) <> "\nactv0: "
+          <> pretty actv0
+          <> "\ninhibit0: "
+          <> pretty inhibit0
+          <> "\nactv after: "
+          <> pretty (activeCoals bu_env''')
+          <> "\ninhibit after: "
+          <> pretty (inhibit bu_env''')
+          -- <> "\nsrcwrts for bu_env: "
+          -- <> pretty (srcwrts $ memrefs $ snd $ head $ M.toList $ activeCoals bu_env)
+          -- <> "\ndstrefs for bu_env: "
+          -- <> pretty (dstrefs $ memrefs $ snd $ head $ M.toList $ activeCoals bu_env)
+          -- <> "\nsrcwrts for bu_env': "
+          -- <> pretty (srcwrts $ memrefs $ snd $ head $ M.toList $ activeCoals bu_env')
+          -- <> "\ndstrefs for bu_env': "
+          -- <> pretty (dstrefs $ memrefs $ snd $ head $ M.toList $ activeCoals bu_env')
+          -- <> "\nsrcwrts for bu_env'': "
+          -- <> pretty (srcwrts $ memrefs $ snd $ head $ M.toList $ activeCoals bu_env'')
+          -- <> "\ndstrefs for bu_env'': "
+          -- <> pretty (dstrefs $ memrefs $ snd $ head $ M.toList $ activeCoals bu_env'')
+          -- <> "\nsrcwrts for bu_env''': "
+          -- <> pretty (srcwrts $ memrefs $ snd $ head $ M.toList $ activeCoals bu_env''')
+          -- <> "\ndstrefs for bu_env''': "
+          -- <> pretty (dstrefs $ memrefs $ snd $ head $ M.toList $ activeCoals bu_env''')
+          -- <> "\nnomemoverlap: "
+          -- <> pretty (noMemOverlap td_env (srcwrts $ memrefs $ snd $ head $ M.toList $ activeCoals bu_env''') (dstrefs $ memrefs $ snd $ head $ M.toList $ activeCoals bu_env'''))
+      )
+      --  $ bu_env' {activeCoals = actv1, successCoals = successCoals1, inhibit = inhibit1}
+      $ bu_env'''
+-- where
+--   foldFun (act, inhb, succ) (PatElem name (_, MemArray _ _ _ (ArrayIn mem ixfun)))
+--     | Just info <- M.lookup mem act =
+--       -- Check that ixfun doesn't overlap with any destination uses in info?
+--       let (act', succ') = markSuccessCoal (act, succ) (traceWith "success mem" mem) (traceWith "success info" info)
+--        in (act', inhb, succ')
+--   foldFun res _ = res
 shortCircuitGPUMem _ _ (Inner (SizeOp _)) _ bu_env = return bu_env
 shortCircuitGPUMem _ _ op _ _ = undefined
 
@@ -224,7 +295,9 @@ fixPointCoalesce lutab fpar bdy topenv = do
       inhb_tab'' = M.unionWith (<>) failed_optdeps inhb_tab'
    in --new_inhibited = M.unionWith (<>) inhb_tab'' (inhibited topenv)
       if not $ M.null actv_tab'
-        then error ("COALESCING ROOT: BROKEN INV, active not empty: " ++ pretty (M.keys actv_tab'))
+        then -- error ("COALESCING ROOT: BROKEN INV, active not empty: " ++ pretty (M.keys actv_tab'))
+        -- Anything that hasn't failed, we can assume succeeded?
+          return $ snd $ foldl (\acc (src, entry) -> markSuccessCoal acc src entry) (actv_tab', succ_tab') $ M.toList actv_tab'
         else
           if M.null $ inhb_tab'' `M.difference` inhibited topenv
             then return succ_tab'
@@ -595,7 +668,6 @@ mkCoalsTabStm lutab lstm@(Let pat _ (DoLoop arginis lform body)) td_env bu_env =
   return bu_env {activeCoals = fin_actv1, successCoals = fin_succ1, inhibit = fin_inhb1}
   where
     td_env' = topDownLoop td_env lstm
-    filterMapM1 f m = fmap M.fromAscList $ filterM (f . snd) $ M.toAscList m
     getAllocs tab (Let (Pat [pe]) _ (Op (Alloc _ _))) =
       tab <> oneName (patElemName pe)
     getAllocs tab _ = tab
@@ -790,7 +862,8 @@ mkCoalsTabStm lutab stm@(Let pat@(Pat [x']) _ e@(BasicOp (Update _ x _ _elm))) t
 mkCoalsTabStm _ (Let pat _ (BasicOp Update {})) _ _ =
   error $ "In ArrayCoalescing.hs, fun mkCoalsTabStm, illegal pattern for in-place update: " ++ pretty pat
 -- default handling
-mkCoalsTabStm lutab stm@(Let pat _ (Op op)) td_env bu_env = do
+mkCoalsTabStm lutab stm@(Let pat@(Pat ps) _ (Op op)) td_env bu_env = do
+  -- Process body
   on_op <- asks onOp
   on_op lutab pat op td_env bu_env
 mkCoalsTabStm lutab stm@(Let pat _ e) td_env bu_env = do
@@ -863,6 +936,10 @@ mkCoalsTabStm lutab stm@(Let pat _ e) td_env bu_env = do
 
                                     ((M.insert mb info' a_acc, inhb), s_acc)
                         safe_5 -> (failed, s_acc) -- fail!
+
+ixfunToAccessSummary :: IxFun.IxFun (TPrimExp Int64 VName) -> AccessSummary
+ixfunToAccessSummary (IxFun.IxFun (lmad NE.:| []) _ _) = Set $ S.singleton lmad
+ixfunToAccessSummary _ = Undeterminable
 
 -- | Check safety conditions 2 and 5 and update new substitutions:
 -- called on the pat-elements of loop and if-then-else expressions.
@@ -1191,8 +1268,28 @@ computeScalarTable _ _ = return mempty
 
 computeScalarTableGPUMem :: ScopeTab GPUMem -> Op (Aliases GPUMem) -> ScalarTableM GPUMem (M.Map VName (PrimExp VName))
 computeScalarTableGPUMem scope_table (Alloc _ _) = return mempty
-computeScalarTableGPUMem scope_table (Inner (SegOp (SegMap _ _ _ body))) =
+computeScalarTableGPUMem scope_table (Inner (SegOp (SegMap _ sp _ body))) = do
   mconcat
     <$> mapM
       (computeScalarTable $ scope_table <> scopeOf (kernelBodyStms body))
       (stmsToList $ kernelBodyStms body)
+computeScalarTableGPUMem scope_table (Inner (SegOp (SegRed _ _ _ _ body))) =
+  mconcat
+    <$> mapM
+      (computeScalarTable $ scope_table <> scopeOf (kernelBodyStms body))
+      (stmsToList $ kernelBodyStms body)
+computeScalarTableGPUMem scope_table (Inner (SegOp (SegScan _ _ _ _ body))) =
+  mconcat
+    <$> mapM
+      (computeScalarTable $ scope_table <> scopeOf (kernelBodyStms body))
+      (stmsToList $ kernelBodyStms body)
+computeScalarTableGPUMem scope_table (Inner (SegOp (SegHist _ _ _ _ body))) =
+  mconcat
+    <$> mapM
+      (computeScalarTable $ scope_table <> scopeOf (kernelBodyStms body))
+      (stmsToList $ kernelBodyStms body)
+computeScalarTableGPUMem scope_table (Inner (SizeOp size_op)) = return mempty
+computeScalarTableGPUMem scope_table (Inner (OtherOp ())) = return mempty
+
+filterMapM1 :: (Eq k, Monad m) => (v -> m Bool) -> M.Map k v -> m (M.Map k v)
+filterMapM1 f m = fmap M.fromAscList $ filterM (f . snd) $ M.toAscList m

@@ -6,12 +6,14 @@ module Futhark.Optimise.ArrayShortCircuiting.MemRefAggreg
     freeVarSubstitutions,
     aggSummaryLoopTotal,
     aggSummaryLoopPartial,
+    aggSummaryMapPartial,
     noMemOverlap,
   )
 where
 
 import Data.Foldable
 import Data.Function ((&))
+import Data.Functor ((<&>))
 import Data.List (uncons)
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.Map.Strict as M
@@ -53,12 +55,12 @@ freeVarSubstitutions scope0 scals0 indfun =
     freeVarSubstitutions' :: FreeVarSubsts -> [VName] -> Maybe FreeVarSubsts
     freeVarSubstitutions' subs [] = Just subs
     freeVarSubstitutions' subs0 fvs =
-      let fvs_not_in_scope = filter (`M.notMember` scope0) fvs
+      let fvs_not_in_scope = traceWith "fvs_not_in_scope" $ filter (`M.notMember` scope0) fvs
        in case unzip <$> mapM getSubstitution fvs_not_in_scope of
             -- We require that all free variables can be substituted
             Just (subs, new_fvs) ->
               freeVarSubstitutions' (subs0 <> mconcat subs) $ concat new_fvs
-            _ -> Nothing
+            Nothing -> Nothing
     getSubstitution v
       | Just pe <- M.lookup v scals0,
         IntType Int64 <- primExpType pe =
@@ -171,7 +173,7 @@ recordMemRefUses ::
 recordMemRefUses td_env bu_env stm =
   let active_tab = activeCoals bu_env
       inhibit_tab = inhibit bu_env
-      (stm_wrts, stm_uses) = getUseSumFromStm td_env active_tab stm
+      (stm_wrts, stm_uses) = traceWith ("stm: " <> pretty stm <> "\nuseSums") $ getUseSumFromStm td_env active_tab stm
       active_etries = M.toList active_tab
 
       (mb_wrts, prev_uses, mb_lmads) =
@@ -213,7 +215,7 @@ recordMemRefUses td_env bu_env stm =
                       if no_overlap
                         then Just wrt_lmads''
                         else Nothing
-                 in (wrt_lmads, prev_use, lmads)
+                 in traceWith ("m_b: " <> pretty m_b <> "\nixfns: " <> pretty ixfns <> "\nlmads': " <> pretty lmads' <> "\nlmads'': " <> pretty lmads'' <> "\nresult") (wrt_lmads, prev_use, lmads)
             )
             active_etries
 
@@ -249,14 +251,20 @@ recordMemRefUses td_env bu_env stm =
         <> acc
         <> fromMaybe mempty (M.lookup m (m_alias td_env))
     mbLmad indfun
-      | Just subs <- freeVarSubstitutions (scope td_env) (scals bu_env) indfun,
-        (IxFun.IxFun (lmad :| []) _ _) <- IxFun.substituteInIxFun subs indfun =
+      | -- indfun' <- traceWith "normalize" $ normalizeIxfun indfun,
+        Just subs <- traceWith "freevar subs" $ freeVarSubstitutions (scope td_env) (scals bu_env) indfun,
+        (IxFun.IxFun (lmad :| []) _ _) <- traceWith "subinfun" $ IxFun.substituteInIxFun subs indfun =
         Just lmad
-    mbLmad _ = Nothing
+    mbLmad x = trace ("mbLmad nothing: " <> pretty x) Nothing
     addLmads (Just wrts) uses etry =
       etry {memrefs = MemRefs uses wrts <> memrefs etry}
     addLmads _ _ _ =
       error "Impossible case reached because we have filtered Nothings before"
+
+normalizeIxfun :: IxFun.IxFun (TPrimExp Int64 VName) -> IxFun.IxFun (TPrimExp Int64 VName)
+normalizeIxfun ixf@(IxFun.IxFun (IxFun.LMAD offset [] :| []) _ _) =
+  ixf {IxFun.ixfunLMADs = (IxFun.LMAD offset [IxFun.LMADDim 1 0 1 0 IxFun.Inc] :| [])}
+normalizeIxfun ixf = ixf
 
 -------------------------------------------------------------
 -- Helper Functions for Partial and Total Loop Aggregation --
@@ -343,6 +351,21 @@ aggSummaryLoopPartial scope_before scope_loop scalars_loop (Just (iterator_var, 
           (traceWith "upper_bound" $ upper_bound - typedLeafExp iterator_var - 1)
       )
       (map (traceWith "fixpoint" . fixPoint (IxFun.substituteInLMAD $ fmap TPrimExp scalars_loop)) $ S.toList lmads)
+
+aggSummaryMapPartial :: MonadFreshNames m => ScalarTab -> [(VName, SubExp)] -> AccessSummary -> m AccessSummary
+aggSummaryMapPartial scalars [(gtid, size)] (Set lmads0) = do
+  mapM
+    helper
+    [ (0, isInt64 (LeafExp gtid $ IntType Int64) - 1),
+      ( isInt64 (LeafExp gtid $ IntType Int64) + 1,
+        isInt64 (primExpFromSubExp (IntType Int64) size) - 1
+      )
+    ]
+    <&> mconcat
+  where
+    lmads = map (fixPoint (IxFun.substituteInLMAD $ fmap TPrimExp scalars)) $ S.toList lmads0
+    helper (x, y) = mconcat <$> mapM (aggSummaryOne gtid x y) lmads
+aggSummaryMapPartial _ _ _ = return Undeterminable
 
 aggSummaryOne :: MonadFreshNames m => VName -> TPrimExp Int64 VName -> TPrimExp Int64 VName -> LmadRef -> m AccessSummary
 aggSummaryOne iterator_var lower_bound upper_bound (IxFun.LMAD _ dims) | iterator_var `nameIn` freeIn dims = return Undeterminable
