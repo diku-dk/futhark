@@ -388,7 +388,7 @@ fwdStm stm@(Let pat aux (BasicOp e)) = do
     addStm stm
   basicFwd pat aux e
 fwdStm stm@(Let pat _ (Apply f args _ _))
-  | Just (_, argts) <- M.lookup f builtInFunctions = do
+  | Just (ret, argts) <- M.lookup f builtInFunctions = do
     addStm stm
     arg_tans <-
       zipWith primExpFromSubExp argts <$> mapM (tangent . fst) args
@@ -397,9 +397,18 @@ fwdStm stm@(Let pat _ (Apply f args _ _))
     case pdBuiltin f arg_pes of
       Nothing ->
         error $ "No partial derivative defined for builtin function: " ++ pretty f
-      Just derivs ->
+      Just derivs -> do
+        let convertTo tt e
+              | e_t == tt = e
+              | otherwise =
+                case (tt, e_t) of
+                  (IntType tt', IntType ft) -> ConvOpExp (SExt ft tt') e
+                  (FloatType tt', FloatType ft) -> ConvOpExp (FPConv ft tt') e
+                  _ -> error $ "fwdStm.convertTo: " ++ pretty (tt, e_t)
+              where
+                e_t = primExpType e
         zipWithM_ (letBindNames . pure) (patNames pat_tan)
-          =<< mapM toExp (zipWith (~*~) arg_tans derivs)
+          =<< mapM toExp (zipWith (~*~) (map (convertTo ret) arg_tans) derivs)
 fwdStm (Let pat aux (If cond t f (IfDec ret ifsort))) = do
   t' <- slocal' $ fwdBody t
   f' <- slocal' $ fwdBody f

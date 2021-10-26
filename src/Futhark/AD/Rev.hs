@@ -428,13 +428,22 @@ diffStm stm@(Let pat _ (Apply f args _ _)) m
     pat_adj <- lookupAdjVal =<< patName pat
     let arg_pes = zipWith primExpFromSubExp argts (map fst args)
         pat_adj' = primExpFromSubExp ret (Var pat_adj)
+        convert ft tt
+          | ft == tt = id
+        convert (IntType ft) (IntType tt) =
+          ConvOpExp (SExt ft tt)
+        convert (FloatType ft) (FloatType tt) =
+          ConvOpExp (FPConv ft tt)
+        convert ft tt =
+          error $ "diffStm.convert: " ++ pretty (ft, tt)
 
     contribs <-
       case pdBuiltin f arg_pes of
         Nothing ->
           error $ "No partial derivative defined for builtin function: " ++ pretty f
         Just derivs ->
-          mapM (letExp "contrib" <=< toExp . (pat_adj' ~*~)) derivs
+          forM (zip derivs argts) $ \(deriv, argt) ->
+            letExp "contrib" <=< toExp . convert ret argt $ pat_adj' ~*~ deriv
 
     zipWithM_ updateSubExpAdj (map fst args) contribs
 diffStm stm@(Let pat _ (If cond tbody fbody _)) m = do
