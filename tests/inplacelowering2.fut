@@ -1,8 +1,8 @@
 -- ==
 -- input { [[0,0,0], [0,0,0]] }
 -- output { [[2,3,4], [0,0,0]] }
--- structure cpu { Update 1 }
--- structure gpu { Update 0 }
+-- structure seq-mem { Update 1 }
+-- structure gpu-mem { Update 0 }
 
 let main [n] (xs: *[][n]i32) =
   #[unsafe]

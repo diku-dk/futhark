@@ -117,6 +117,10 @@ data Adj
   | AdjZero Shape PrimType
   deriving (Eq, Ord, Show)
 
+instance Substitute Adj where
+  substituteNames m (AdjVal (Var v)) = AdjVal $ Var $ substituteNames m v
+  substituteNames _ adj = adj
+
 zeroArray :: MonadBuilder m => Shape -> Type -> m VName
 zeroArray shape t = do
   zero <- letSubExp "zero" $ zeroExp t
@@ -233,6 +237,7 @@ returnSweepCode m = do
   (a, stms) <- collectStms m
   substs <- gets stateSubsts
   addStms $ substituteNames substs stms
+  modify $ \env -> env {stateAdjs = M.fromList $ map (substituteNames substs) $ M.toList $ stateAdjs env}
   pure a
 
 addSubstitution :: VName -> VName -> ADM ()
@@ -285,15 +290,17 @@ tabNest = tabNest' []
 addLambda :: Type -> ADM Lambda
 addLambda (Prim pt) = binOpLambda (addBinOp pt) pt
 addLambda t@Array {} = do
-  xs <- newVName "xs"
-  ys <- newVName "ys"
+  xs_p <- newParam "xs" t
+  ys_p <- newParam "ys" t
   lam <- addLambda $ rowType t
   body <- insertStmsM $ do
-    res <- letSubExp "lam_map" $ Op $ Screma (arraySize 0 t) [xs, ys] (mapSOAC lam)
+    res <-
+      letSubExp "lam_map" . Op $
+        Screma (arraySize 0 t) [paramName xs_p, paramName ys_p] (mapSOAC lam)
     pure $ resultBody [res]
   pure
     Lambda
-      { lambdaParams = [Param xs t, Param ys t],
+      { lambdaParams = [xs_p, ys_p],
         lambdaReturnType = [t],
         lambdaBody = body
       }

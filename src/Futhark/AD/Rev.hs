@@ -260,15 +260,15 @@ diffLoop
       fwdLoop = do
         bound64 <- asIntS Int64 bound
         (loop_acc_pats, loop_acc_params) <- fmap unzip $
-          forM loop_params $ \(Param v t) -> do
+          forM loop_params $ \(Param _ v t) -> do
             acc <- newVName $ baseString v <> "_acc"
             pat_acc <- newVName $ baseString v <> "_acc"
             setLoopTape v pat_acc
-            let loop_acc_param = Param acc $ arrayOf t (Shape [bound64]) Unique
+            let loop_acc_param = Param mempty acc $ arrayOf t (Shape [bound64]) Unique
                 loop_acc_pat = PatElem pat_acc $ arrayOf t (Shape [bound64]) NoUniqueness
             return (loop_acc_pat, loop_acc_param)
 
-        zero_accs <- forM loop_params $ \(Param v t) ->
+        zero_accs <- forM loop_params $ \(Param _ v t) ->
           letSubExp (baseString v <> "_zero_acc")
             =<< eBlank (arrayOf t (Shape [bound64]) NoUniqueness)
 
@@ -278,11 +278,11 @@ diffLoop
               copy_substs <- copyConsumedArrsInBody body
               addStms stms
               i64 <- asIntS Int64 $ Var i
-              forM (zip loop_params loop_acc_params) $ \(Param v _, Param acc t) -> do
+              forM (zip loop_params loop_acc_params) $ \(Param _ v _, Param _ acc t) -> do
                 acc' <-
                   letInPlace "loop_acc" acc (fullSlice (fromDecl t) [DimFix i64]) $
                     substituteNames copy_substs $ BasicOp $ SubExp $ Var v
-                return $ Param acc' (fromDecl t)
+                return $ Param mempty acc' (fromDecl t)
 
         let body' = mkBody stms' $ res <> varsRes (map paramName loop_acc_params_ret)
             pat' = Pat $ pats <> loop_acc_pats
@@ -310,12 +310,12 @@ diffLoop
 
             zipWithM_ subst_loop_tape loop_param_names loop_param_names'
 
-            let build_param_tuples_adj r (PatElem pat _, Param _ t) =
+            let build_param_tuples_adj r (PatElem pat _, Param _ _ t) =
                   case res_vname r of
                     Just v -> do
                       pat_adj <- lookupAdjVal pat
                       v_adj <- adjVName v
-                      return $ Just (Param v_adj (toDecl (fromDecl t) Unique), Var pat_adj)
+                      return $ Just (Param mempty v_adj (toDecl (fromDecl t) Unique), Var pat_adj)
                     _ -> return Nothing
 
             param_tuples_res_adj <- catMaybes <$> zipWithM build_param_tuples_adj res' (zip pats loop_params')
@@ -324,14 +324,14 @@ diffLoop
               forM loop_free $ \v -> do
                 adj_v <- adjVName v
                 adj_init <- lookupAdjVal v
-                t <- lookupType v
-                return (Param adj_v (toDecl t Unique), Var adj_init)
+                t <- lookupType adj_init
+                return (Param mempty adj_v (toDecl t Unique), Var adj_init)
 
             param_tuples_loop_vars_adj <- forM loop_vars' $ \(_, vs) -> do
               adj_vs <- adjVName vs
               adj_init <- lookupAdjVal vs
               t <- lookupType vs
-              return (Param adj_vs (toDecl t Unique), Var adj_init)
+              return (Param mempty adj_vs (toDecl t Unique), Var adj_init)
 
             let param_tuples_adj = param_tuples_res_adj <> param_tuples_free_adj <> param_tuples_loop_vars_adj
 
@@ -363,7 +363,10 @@ diffLoop
                 localScope (scopeOfFParams $ map fst param_tuples_adj) $
                   localScope (scopeOfFParams loop_params') $
                     inScopeOf form' $ do
-                      zipWithM_ (\(Param p _, _) v -> insAdj v p) param_tuples_adj (loop_res <> loop_free <> loop_var_arrays)
+                      zipWithM_
+                        (\(p, _) v -> insAdj v (paramName p))
+                        param_tuples_adj
+                        (loop_res <> loop_free <> loop_var_arrays)
                       diffStms stms'
                       loop_free_adjs <- mapM lookupAdjVal loop_free
                       loop_param_adjs <- mapM (lookupAdjVal . paramName) loop_params'
@@ -399,7 +402,6 @@ diffLoop
                 localScope (scopeOfPat $ Pat accs) $ do
                   let body_adj =
                         Body () stms_adj' $ varsRes (loop_param_adjs <> loop_free_adjs <> loop_vars_adjs)
-
                   adjs' <-
                     letTupExp "loop_adj" $
                       substituteNames loop_var_arrays_substs $
@@ -408,9 +410,10 @@ diffLoop
                           form'
                           body_adj
 
-                  zipWithM_ insSubExpAdj (map snd param_tuples') $ take (length loop_param_adjs) adjs'
-                  zipWithM_ (\v v_adj -> do insAdj v v_adj; (void . lookupAdjVal) v) loop_free $ take (length loop_free_adjs) $ drop (length loop_param_adjs) adjs'
-                  zipWithM_ (\v v_adj -> do insAdj v v_adj; void $ lookupAdjVal v) loop_var_arrays $ drop (length loop_param_adjs + length loop_free_adjs) adjs'
+                  returnSweepCode $ do
+                    zipWithM_ insSubExpAdj (map snd param_tuples') $ take (length loop_param_adjs) adjs'
+                    zipWithM_ (\v v_adj -> do insAdj v v_adj; (void . lookupAdjVal) v) loop_free $ take (length loop_free_adjs) $ drop (length loop_param_adjs) adjs'
+                    zipWithM_ (\v v_adj -> do insAdj v v_adj; void $ lookupAdjVal v) loop_var_arrays $ drop (length loop_param_adjs + length loop_free_adjs) adjs'
           _ -> error "diffLoop: unexpected non-loop expression."
 diffLoop _ _ _ _ = error "diffLoop: unexpected non-loop expression."
 
@@ -462,31 +465,32 @@ diffStm stm _ = error $ "diffStm unhandled:\n" ++ pretty stm
 
 diffStms :: Stms SOACS -> ADM ()
 diffStms all_stms
-  | Just (stm, stms) <- stmsHead all_stms =
-    diffStm stm $ diffStms stms
+  | Just (stm, stms) <- stmsHead all_stms = do
+    (subst, copy_stms) <- copyConsumedArrsInStm stm
+    let (stm', stms') = substituteNames subst (stm, stms)
+    diffStms copy_stms >> diffStm stm' (diffStms stms')
   | otherwise =
     pure ()
 
--- | Create copies of all arrays consumed in the given statements, and
+-- | Create copies of all arrays consumed in the given statement, and
 -- return statements which include copies of the consumed arrays.
 --
 -- See Note [Consumption].
-copyConsumedArrsInStms :: Stms SOACS -> ADM (Stms SOACS)
-copyConsumedArrsInStms ss = inScopeOf ss $ collectStms_ $ copyConsumedArrsInStms' ss
+copyConsumedArrsInStm :: Stm -> ADM (Substitutions, Stms SOACS)
+copyConsumedArrsInStm s = inScopeOf s $ collectStms $ copyConsumedArrsInStm' s
   where
-    copyConsumedArrsInStms' all_stms
-      | Just (stm, stms) <- stmsHead all_stms = do
-        let onConsumed v = inScopeOf all_stms $ do
-              v_t <- lookupType v
-              case v_t of
-                Acc {} -> error $ "copyConsumedArrsInStms: Acc " <> pretty v
-                Array {} -> do
-                  addSubstitution v =<< letExp (baseString v <> "_ad_copy") (BasicOp $ Copy v)
-                _ -> pure mempty
-        addStm stm
-        mconcat <$> mapM onConsumed (namesToList $ consumedInStms $ fst (Alias.analyseStms mempty (oneStm stm)))
-        copyConsumedArrsInStms' stms
-      | otherwise = pure ()
+    copyConsumedArrsInStm' stm =
+      let onConsumed v = inScopeOf s $ do
+            v_t <- lookupType v
+            case v_t of
+              Acc {} -> error $ "copyConsumedArrsInStms: Acc " <> pretty v
+              Array {} -> do
+                v' <- letExp (baseString v <> "_ad_copy") (BasicOp $ Copy v)
+                addSubstitution v' v
+                return [(v, v')]
+              _ -> return mempty
+       in M.fromList . mconcat
+            <$> mapM onConsumed (namesToList $ consumedInStms $ fst (Alias.analyseStms mempty (oneStm stm)))
 
 copyConsumedArrsInBody :: Body -> ADM Substitutions
 copyConsumedArrsInBody b =
@@ -506,7 +510,7 @@ diffBody res_adjs get_adjs_for (Body () stms res) = subAD $
         onResult (SubExpRes _ (Var v)) v_adj = void $ updateAdj v =<< adjVal v_adj
     (adjs, stms') <- collectStms $ do
       zipWithM_ onResult (takeLast (length res_adjs) res) res_adjs
-      diffStms =<< copyConsumedArrsInStms stms
+      diffStms stms
       mapM lookupAdjVal get_adjs_for
     pure $ Body () stms' $ res <> varsRes adjs
 
@@ -522,7 +526,7 @@ revVJP :: MonadFreshNames m => Scope SOACS -> Lambda -> m Lambda
 revVJP scope (Lambda params body ts) =
   runADM . localScope (scope <> scopeOfLParams params) $ do
     params_adj <- forM (zip (map resSubExp (bodyResult body)) ts) $ \(se, t) ->
-      Param <$> maybe (newVName "const_adj") adjVName (subExpVar se) <*> pure t
+      Param mempty <$> maybe (newVName "const_adj") adjVName (subExpVar se) <*> pure t
 
     Body () stms res <-
       localScope (scopeOfLParams params_adj) $

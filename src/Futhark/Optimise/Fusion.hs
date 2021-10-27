@@ -686,18 +686,18 @@ fusionGatherStms
     | not $ null loop_vars = do
       let (merge_params, merge_init) = unzip merge
           (loop_params, loop_arrs) = unzip loop_vars
-      chunk_size <- newVName "chunk_size"
-      offset <- newVName "offset"
-      let chunk_param = Param chunk_size $ Prim int64
-          offset_param = Param offset $ Prim $ IntType it
+      chunk_param <- newParam "chunk_size" $ Prim int64
+      offset_param <- newParam "offset" $ Prim $ IntType it
+      let offset = paramName offset_param
+          chunk_size = paramName chunk_param
 
       acc_params <- forM merge_params $ \p ->
-        Param <$> newVName (baseString (paramName p) ++ "_outer")
-          <*> pure (paramType p)
+        newParam (baseString (paramName p) ++ "_outer") (paramType p)
 
       chunked_params <- forM loop_vars $ \(p, arr) ->
-        Param <$> newVName (baseString arr ++ "_chunk")
-          <*> pure (paramType p `arrayOfRow` Futhark.Var chunk_size)
+        newParam
+          (baseString arr ++ "_chunk")
+          (paramType p `arrayOfRow` Futhark.Var chunk_size)
 
       let lam_params = chunk_param : acc_params ++ [offset_param] ++ chunked_params
 

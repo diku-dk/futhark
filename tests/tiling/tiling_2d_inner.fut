@@ -1,7 +1,7 @@
 -- 2D tiling with extra dimensions on top.
 -- ==
 -- compiled random input { [2][40][40]i32 [2][40][40]i32 } auto output
--- structure distributed { SegMap/DoLoop/DoLoop/SegMap 4
+-- structure gpu { SegMap/DoLoop/DoLoop/SegMap 4
 -- SegMap/DoLoop/DoLoop/DoLoop/SegMap 2
 -- SegMap/SegMap 1
 -- SegMap/DoLoop/DoLoop/SegMap/DoLoop 3 }

@@ -330,6 +330,7 @@ checkForDuplicateNames = (`evalStateT` mempty) . mapM_ check
   where
     check (Id v _ loc) = seen v loc
     check (PatParens p _) = check p
+    check (PatAttr _ p _) = check p
     check Wildcard {} = pure ()
     check (TuplePat ps _) = mapM_ check ps
     check (RecordPat fs _) = mapM_ (check . snd) fs

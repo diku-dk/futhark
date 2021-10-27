@@ -3,8 +3,10 @@
 {-# LANGUAGE TupleSections #-}
 
 -- | Tries to turn a generalized reduction kernel into
---     a more specialized construct, for example a reduce
---     or a histogram.
+--     a more specialized construct, for example:
+--       (a) a map nest with a sequential redomap ripe for tiling
+--       (b) a SegRed kernel followed by a smallish accumulation kernel.
+--       (c) a histogram (for this we need to track the withAccs)
 --   The idea is to identify the first accumulation and
 --     to separate the initial kernels into two:
 --     1. the code up to and including the accumulation,
@@ -14,14 +16,10 @@
 --   Since this is mostly prototyping, when the accumulation
 --     can be rewritten as a map-reduce, we sequentialize the
 --     map-reduce, as to potentially enable tiling oportunities.
---     We also have an over-simplisitic cost model that can result
---     in performance loss.  A full implementation should improve
---     the cost model and it should generate two kernels: one in
---     which the map-reduce is sequentialized and also a SegRed kernel
---     that exploits that parallelism.
-module Futhark.Optimise.GenRedOpt (genRed2MapRed) where
+module Futhark.Optimise.GenRedOpt (optimiseGenRed) where
 
---import Control.Monad.Reader
+import Control.Monad.Reader
+import Control.Monad.State
 import qualified Data.List as L
 import qualified Data.Map.Strict as M
 import Data.Maybe
@@ -30,6 +28,7 @@ import Futhark.IR.GPU
 import Futhark.Builder
 --import Futhark.MonadFreshNames
 import Futhark.Optimise.TileLoops.Shared
+import Futhark.Pass
 import Futhark.Tools
 import Futhark.Transform.Rename
 import qualified Futhark.IR.Mem.IxFun as IxFun
@@ -39,12 +38,73 @@ import Debug.Trace
 type IxFun = IxFun.IxFun (TPrimExp Int64 VName)
 type Env = (M.Map VName (Lambda GPU, [SubExp]), M.Map VName IxFun)
 
+type GenRedM = ReaderT (Scope GPU) (State VNameSource)
+
+-- | The pass definition.
+optimiseGenRed :: Pass GPU GPU
+optimiseGenRed =
+  Pass "optimise generalized reductions" "Specializes generalized reductions into map-reductions or histograms" $
+    intraproceduralTransformation onStms
+  where
+    onStms scope stms =
+      modifyNameSource $
+        runState $
+          runReaderT (optimiseStms (M.empty, M.empty) stms) scope
+
+optimiseBody :: Env -> Body GPU -> GenRedM (Body GPU)
+optimiseBody env (Body () stms res) =
+  Body () <$> optimiseStms env stms <*> pure res
+
+optimiseStms :: Env -> Stms GPU -> GenRedM (Stms GPU)
+optimiseStms env stms =
+  localScope (scopeOf stms) $ do
+    (_, stms') <- foldM foldfun (env, mempty) $ stmsToList stms
+    return stms'
+  where
+    foldfun :: (Env, Stms GPU) -> Stm GPU -> GenRedM (Env, Stms GPU)
+    foldfun (e, ss) s = do
+      (e', s') <- optimiseStm e s
+      return (e', ss <> s')
+
+optimiseStm :: Env -> Stm GPU -> GenRedM (Env, Stms GPU)
+optimiseStm env stm@(Let _ _ (Op (SegOp (SegMap SegThread{} _ _ _)))) = do
+  res_genred_opt <- genRedOpts env stm
+  let stms' =
+        case res_genred_opt of
+          Just stms -> stms
+          Nothing   -> oneStm stm
+  return (env, stms')
+
+optimiseStm env (Let pat aux e) = do
+  env' <- changeEnv env (head $ patNames pat) e
+  e' <- mapExpM (optimise env') e
+  return (env', oneStm $ Let pat aux e')
+  where
+    optimise env' = identityMapper {mapOnBody = \scope -> localScope scope . optimiseBody env'}
+------------------------
+
+genRedOpts :: Env -> Stm GPU -> GenRedM (Maybe (Stms GPU))
+genRedOpts env ker = do
+  res_tile <- genRed2Tile2d env ker
+  case res_tile of
+    Nothing -> do
+      res_sgrd <- genRed2SegRed env ker
+      helperGenRed res_sgrd
+    _ -> helperGenRed res_tile
+  where
+    helperGenRed Nothing = return Nothing
+    helperGenRed (Just (stms_before, ker_snd)) = do
+      mb_stms_after <- genRedOpts env ker_snd
+      case mb_stms_after of
+        Just stms_after -> return $ Just $ stms_before <> stms_after
+        Nothing -> return $ Just $ stms_before <> oneStm ker_snd
+
 se1 :: SubExp
 se1 = intConst Int64 1
 
-genRed2MapRed :: Env -> Stm GPU -> TileM (Maybe (Stms GPU))
-genRed2MapRed env kerstm@(Let pat_ker aux (Op (SegOp (SegMap seg_thd seg_space kres_tps old_kbody))))
-  | (SegThread _ seg_group_size _novirt) <- trace ("Cosmin Segmap stmt: "++pretty kerstm) seg_thd,
+genRed2Tile2d :: Env -> Stm GPU -> GenRedM (Maybe (Stms GPU, Stm GPU))
+genRed2Tile2d env kerstm@(Let pat_ker aux (Op (SegOp (SegMap seg_thd seg_space kres_tps old_kbody))))
+  | (SegThread _ seg_group_size _novirt) <- seg_thd,
     --novirt == SegNoVirtFull || novirt == SegNoVirt,
     KernelBody () kstms kres <- old_kbody,
     Just (css, r_ses) <- allGoodReturns kres,
@@ -73,7 +133,8 @@ genRed2MapRed env kerstm@(Let pat_ker aux (Op (SegOp (SegMap seg_thd seg_space k
     --   memory accesses: if more than two are re-executed, then we
     --   should abort.
     cost <- costRedundantExecution variance pat_acc_nm r_ses kstms,
-    trace ("Redundant cost is: "++printCost cost) $ maxCost cost (Small 2) == Small 2 = do
+    --trace ("Redundant cost is: "++printCost cost) $
+    maxCost cost (Small 2) == Small 2 = do
     -- 1. create the first kernel
     acc_tp <- lookupType acc_nm
     let inv_dim_len = (segSpaceDims seg_space) !! gid_ind
@@ -90,8 +151,9 @@ genRed2MapRed env kerstm@(Let pat_ker aux (Op (SegOp (SegMap seg_thd seg_space k
         code1' = stmsFromList $
                  filter (dependsOnAcc pat_acc_nm variance) $
                  stmsToList code1
-        map_lam_body = mkBody code1' $ map (SubExpRes (Certs [])) acc_vals
-        map_lam0 = Lambda [Param invar_gid (Prim int64)] map_lam_body el_tps
+    (code1'', code1_tr_host) <- transposeFVs (freeIn kerstm) variance invar_gid code1'
+    let map_lam_body = mkBody code1'' $ map (SubExpRes (Certs [])) acc_vals
+        map_lam0 = Lambda [Param mempty invar_gid (Prim int64)] map_lam_body el_tps
     map_lam <- renameLambda map_lam0
     (k1_res, ker1_stms) <- runBuilderT' $ do
         iota <- letExp "iota" $ BasicOp $ Iota inv_dim_len (intConst Int64 0) (intConst Int64 1) Int64
@@ -124,9 +186,9 @@ genRed2MapRed env kerstm@(Let pat_ker aux (Op (SegOp (SegMap seg_thd seg_space k
     return $
       trace ("\nIdentified Potential for Optimizing Gen Red, acc-stm:\n"++
              pretty accum_stmt++"\n invar to:"++pretty (invar_gid, gid_ind)++
-             "\nkernel code:\n"++pretty kerstm++"\n first redomap kernel:\n"++
-             pretty ker1
-            ) $ Just (host_stms1 <> oneStm ker1 <> oneStm ker2)
+             -- "\nkernel code:\n"++pretty kerstm++
+             "\n first redomap kernel:\n"++pretty ker1++"\n transpositions: "++pretty code1_tr_host
+            ) $ Just (code1_tr_host <> host_stms1 <> oneStm ker1, ker2)
     where
       ceilDiv x y = pure $ BasicOp $ BinOp (SDivUp Int64 Unsafe) x y
       getAccLambda acc_tp =
@@ -139,7 +201,7 @@ genRed2MapRed env kerstm@(Let pat_ker aux (Op (SegOp (SegMap seg_thd seg_space k
       -- is a subexp invariant to a gid of a parallel dimension?
       isSeInvar2 variance gid (Var x) =
         let x_deps = M.findWithDefault mempty x variance
-        in  not $ nameIn gid x_deps
+        in  gid /= x && (not (nameIn gid x_deps))
       isSeInvar2 _ _ _ = True
       -- is a DimIndex invar to a gid of a parallel dimension?
       isDimIdxInvar2 variance gid (DimFix d) =
@@ -153,9 +215,13 @@ genRed2MapRed env kerstm@(Let pat_ker aux (Op (SegOp (SegMap seg_thd seg_space k
       isTileable :: VName -> [(VName, SubExp)] -> VarianceTable -> VName -> Stm GPU -> Bool
       isTileable seq_gid gid_dims variance acc_nm (Let (Pat [pel]) _ (BasicOp (Index _ slc)))
         | acc_deps <- M.findWithDefault mempty acc_nm variance,
-          nameIn (patElemName pel) acc_deps = do
-            isSliceInvar2 variance slc (map fst gid_dims) ||
-             isSliceInvar2 variance slc [seq_gid]
+          nameIn (patElemName pel) acc_deps =
+          let invar_par = isSliceInvar2 variance slc (map fst gid_dims)
+              invar_seq = isSliceInvar2 variance slc [seq_gid]
+          --in  invar_par || invar_seq
+          in  trace ("!!!!!!!!!!!!!!Slice "++pretty slc ++" is invariant to: "++pretty gid_dims++" "++
+                       pretty seq_gid++" answer: "++pretty invar_par++" "++pretty invar_seq) $
+                        invar_par || invar_seq
       -- this relies on the cost model, that currently accepts only
       -- global-memory reads, and for example rejects in-place updates
       -- or loops inside the code that is transformed in a redomap.
@@ -165,8 +231,51 @@ genRed2MapRed env kerstm@(Let pat_ker aux (Op (SegOp (SegMap seg_thd seg_space k
         let acc_deps = M.findWithDefault mempty pat_acc_nm variance
         in  any (`nameIn` acc_deps) $ patNames pat
 
-genRed2MapRed _ _ =
+genRed2Tile2d _ _ =
   return Nothing
+
+genRed2SegRed :: Env -> Stm GPU -> GenRedM (Maybe (Stms GPU, Stm GPU))
+genRed2SegRed _ _ =
+  return Nothing
+
+-- M.Map VName ([Int], VName, Stms GPU)
+transposeFVs :: Names -> VarianceTable -> VName -> Stms GPU
+             -> GenRedM (Stms GPU, Stms GPU)
+transposeFVs fvs variance gid stms = do
+  (tab, stms') <- foldM foldfun (M.empty, mempty) $ stmsToList stms
+  let stms_host = M.foldr (\ (_,_,s) ss -> ss <> s) mempty tab
+  return (stms', stms_host)
+  where
+    foldfun (tab, all_stms) stm = do
+      (tab', stm') <- transposeFV (tab, stm)
+      return (tab', all_stms <> oneStm stm')
+    -- ToDo: currently handles only 2-dim arrays, please generalize
+    transposeFV (tab, Let pat aux (BasicOp (Index arr slc)))
+      | dims <- unSlice slc,
+        all isFixDim dims,
+        nameIn arr fvs,
+        iis <- L.findIndices depOnGid dims,
+        [ii] <- iis,
+        -- generalize below: treat any rearange and add to tab if not there.
+        Nothing <- M.lookup arr tab,
+        ii /= length dims - 1,
+        perm <- [0..ii-1] ++ [ii+1..length dims - 1] ++ [ii] = do
+--        length dims == 2,
+--        ii == 0 = do
+        (arr_tr, stms_tr) <- runBuilderT' $ do
+            arr' <- letExp (baseString arr ++ "_trsp") $ BasicOp $ Rearrange perm arr --Manifest [1,0] arr
+            letExp (baseString arr' ++ "_opaque") $ BasicOp $ Opaque OpaqueNil $ Var arr'
+        let tab' = M.insert arr (perm, arr_tr, stms_tr) tab
+            slc' = Slice $ map (\i -> dims !! i) perm
+            stm' = Let pat aux $ BasicOp $ Index arr_tr slc'
+        return (tab', stm')
+      where
+        isFixDim (DimFix{}) = True
+        isFixDim _ = False
+        depOnGid (DimFix (Var nm)) =
+          gid == nm || nameIn gid (M.findWithDefault mempty nm variance)
+        depOnGid _ = False
+    transposeFV r = return r
 
 -- | Tries to identify the following pattern:
 --   code followed by some UpdateAcc-statement
@@ -249,8 +358,8 @@ costRedundantExecution variance pat_acc_nm r_ses kstms =
       vartab_cut_acc = varianceInStmsWithout (oneName pat_acc_nm) mempty kstms
       res_deps = mconcat $ map (findDeps vartab_cut_acc) $ mapMaybe se2nm r_ses
       common_deps = namesIntersection res_deps acc_deps
-  in  trace ("Common deps: "++pretty common_deps) $
-        foldl (addCostOfStmt common_deps) (Small 0) kstms
+  in  --trace ("Common deps: "++pretty common_deps) $
+      foldl (addCostOfStmt common_deps) (Small 0) kstms
   where
     se2nm (Var nm) = Just nm
     se2nm _ = Nothing

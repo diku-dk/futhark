@@ -131,12 +131,12 @@ instance TanBuilder (PatT (TypeBase s u)) where
   bundleNew (Pat pes) = Pat <$> bundleNew pes
 
 instance TanBuilder (Param (TypeBase s u)) where
-  newTan (Param p t) = do
+  newTan (Param _ p t) = do
     PatElem p' t' <- newTan $ PatElem p t
-    return $ Param p' t'
-  bundleNew param@(Param _ (Prim Unit)) =
+    return $ Param mempty p' t'
+  bundleNew param@(Param _ _ (Prim Unit)) =
     pure [param]
-  bundleNew param@(Param _ t) = do
+  bundleNew param@(Param _ _ t) = do
     param' <- newTan param
     if isAcc t
       then return [param']
@@ -326,11 +326,11 @@ fwdSOAC pat aux (Stream size xs form nes lam) = do
       lam0' <- fwdLambda lam0
       let form' = Parallel o comm lam0'
       addStm $ Let pat' aux $ Op $ Stream size xs' form' nes' lam'
-fwdSOAC pat aux (Hist len ops bucket_fun imgs) = do
+fwdSOAC pat aux (Hist w arrs ops bucket_fun) = do
   pat_tan <- newTan pat
   ops' <- mapM fwdHist ops
   bucket_fun' <- fwdLambda bucket_fun
-  addStm $ Let (pat <> pat_tan) aux $ Op $ Hist len ops' bucket_fun' imgs
+  addStm $ Let (pat <> pat_tan) aux $ Op $ Hist w arrs ops' bucket_fun'
   where
     fwdHist :: HistOp SOACS -> ADM (HistOp SOACS)
     fwdHist (HistOp width rf dest nes op) = do
@@ -345,14 +345,14 @@ fwdSOAC pat aux (Hist len ops bucket_fun imgs) = do
             histNeutral = interleave nes nes_tan,
             histOp = op'
           }
-fwdSOAC (Pat pes) aux (Scatter len lam ivs as) = do
+fwdSOAC (Pat pes) aux (Scatter w ivs lam as) = do
   as_tan <- mapM (\(s, n, a) -> do a_tan <- tangent a; return (s, n, a_tan)) as
   pes_tan <- newTan pes
   ivs' <- bundleTan ivs
   let (as_ws, as_ns, _as_vs) = unzip3 as
       n_indices = sum $ zipWith (*) as_ns $ map length as_ws
   lam' <- fwdScatterLambda n_indices lam
-  let s = Let (Pat (pes ++ pes_tan)) aux $ Op $ Scatter len lam' ivs' $ as ++ as_tan
+  let s = Let (Pat (pes ++ pes_tan)) aux $ Op $ Scatter w ivs' lam' $ as ++ as_tan
   addStm s
   where
     fwdScatterLambda :: Int -> Lambda -> ADM Lambda

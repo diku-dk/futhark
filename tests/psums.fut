@@ -1,7 +1,7 @@
 -- ==
 -- random input { [100][10]i32 }
 -- auto output
--- structure gpu { Alloc 3 }
+-- structure gpu-mem { Alloc 3 }
 
 let psum = scan (+) 0
 

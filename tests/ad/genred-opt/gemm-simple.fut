@@ -1,16 +1,16 @@
 -- ==
 -- entry: rev_J
--- compiled input
--- {
--- [[1.0,2.0],[3.0,4.0]] [[5.0,6.0],[7.0,8.0]]
--- }
+-- compiled random input { 0.5f32 0.7f32 [1024][1024]f32 [1024][1024]f32 [1024][1024]f32 [1024][1024]f32} auto output
 
-let dotprod xs ys = f64.sum (map2 (*) xs ys)
+type real = f32
+let real_sum = f32.sum
 
-let gemm [m][n][q] (alpha:f64) (beta: f64) (xss: [m][q]f64, yss: [q][n]f64, css: [m][n]f64) =
+let dotprod xs ys = real_sum (map2 (*) xs ys)
+
+let gemm [m][n][q] (alpha:real) (beta: real) (xss: [m][q]real, yss: [q][n]real, css: [m][n]real) =
   map2 (\xs cs -> map2 (\ys c -> c*alpha + beta*(dotprod xs ys)) (transpose yss) cs) xss css
 
-entry rev_J [n][m][q] (alpha:f64) (beta: f64) (xss: [m][q]f64) (yss: [q][n]f64) (css: [m][n]f64) (res_adj: [m][n]f64) =
+entry rev_J [n][m][q] (alpha: real) (beta: real) (xss: [m][q]real) (yss: [q][n]real) (css: [m][n]real) (res_adj: [m][n]real) =
   vjp (gemm alpha beta) (xss, yss, css) res_adj
 
 

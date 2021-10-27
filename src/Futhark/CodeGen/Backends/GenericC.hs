@@ -65,12 +65,14 @@ module Futhark.CodeGen.Backends.GenericC
     publicName,
     contextType,
     contextField,
+    contextFieldDyn,
     memToCType,
     cacheMem,
     fatMemory,
     rawMemCType,
     cproduct,
     fatMemType,
+    freeAllocatedMem,
 
     -- * Building Blocks
     primTypeToCType,
@@ -84,6 +86,7 @@ import Control.Monad.Reader
 import Control.Monad.State
 import Data.Bifunctor (first)
 import qualified Data.DList as DL
+import Data.List (unzip4)
 import Data.Loc
 import qualified Data.Map.Strict as M
 import Data.Maybe
@@ -119,7 +122,7 @@ data CompilerState s = CompilerState
     compUserState :: s,
     compHeaderDecls :: M.Map HeaderSection (DL.DList C.Definition),
     compLibDecls :: DL.DList C.Definition,
-    compCtxFields :: DL.DList (C.Id, C.Type, Maybe C.Exp),
+    compCtxFields :: DL.DList (C.Id, C.Type, Maybe C.Exp, Maybe C.Stm),
     compProfileItems :: DL.DList C.BlockItem,
     compClearItems :: DL.DList C.BlockItem,
     compDeclaredMem :: [(VName, Space)],
@@ -244,15 +247,19 @@ errorMsgString (ErrorMsg parts) = do
   (formatstrs, formatargs) <- unzip <$> mapM onPart parts
   pure (mconcat formatstrs, formatargs)
 
+freeAllocatedMem :: CompilerM op s [C.BlockItem]
+freeAllocatedMem = collect $ mapM_ (uncurry unRefMem) =<< gets compDeclaredMem
+
 defError :: ErrorCompiler op s
 defError msg stacktrace = do
-  free_all_mem <- collect $ mapM_ (uncurry unRefMem) =<< gets compDeclaredMem
+  free_all_mem <- freeAllocatedMem
   (formatstr, formatargs) <- errorMsgString msg
   let formatstr' = "Error: " <> formatstr <> "\n\nBacktrace:\n%s"
   items
     [C.citems|ctx->error = msgprintf($string:formatstr', $args:formatargs, $string:stacktrace);
-                  $items:free_all_mem
-                  return 1;|]
+              $items:free_all_mem
+              err = 1;
+              goto cleanup;|]
 
 defCall :: CallCompiler op s
 defCall dests fname args = do
@@ -366,9 +373,10 @@ opaqueDecls = declsCode isOpaqueDecl
 entryDecls = declsCode (== EntryDecl)
 miscDecls = declsCode (== MiscDecl)
 
-contextContents :: CompilerM op s ([C.FieldGroup], [C.Stm])
+contextContents :: CompilerM op s ([C.FieldGroup], [C.Stm], [C.Stm])
 contextContents = do
-  (field_names, field_types, field_values) <- gets $ unzip3 . DL.toList . compCtxFields
+  (field_names, field_types, field_values, field_frees) <-
+    gets $ unzip4 . DL.toList . compCtxFields
   let fields =
         [ [C.csdecl|$ty:ty $id:name;|]
           | (name, ty) <- zip field_names field_types
@@ -377,7 +385,7 @@ contextContents = do
         [ [C.cstm|ctx->$id:name = $exp:e;|]
           | (name, Just e) <- zip field_names field_values
         ]
-  return (fields, init_fields)
+  return (fields, init_fields, catMaybes field_frees)
 
 contextFinalInits :: CompilerM op s [C.Stm]
 contextFinalInits = gets compInit
@@ -503,7 +511,11 @@ earlyDecl def = modify $ \s ->
 
 contextField :: C.Id -> C.Type -> Maybe C.Exp -> CompilerM op s ()
 contextField name ty initial = modify $ \s ->
-  s {compCtxFields = compCtxFields s <> DL.singleton (name, ty, initial)}
+  s {compCtxFields = compCtxFields s <> DL.singleton (name, ty, initial, Nothing)}
+
+contextFieldDyn :: C.Id -> C.Type -> C.Exp -> C.Stm -> CompilerM op s ()
+contextFieldDyn name ty initial free = modify $ \s ->
+  s {compCtxFields = compCtxFields s <> DL.singleton (name, ty, Just initial, Just free)}
 
 profileReport :: C.BlockItem -> CompilerM op s ()
 profileReport x = modify $ \s ->

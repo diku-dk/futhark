@@ -3,7 +3,9 @@
 
 -- | Internalising bindings.
 module Futhark.Internalise.Bindings
-  ( bindingFParams,
+  ( internaliseAttrs,
+    internaliseAttr,
+    bindingFParams,
     bindingLoopParams,
     bindingLambdaParams,
     stmPat,
@@ -11,6 +13,7 @@ module Futhark.Internalise.Bindings
 where
 
 import Control.Monad.Reader hiding (mapM)
+import Data.Bifunctor
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import qualified Futhark.IR.SOACS as I
@@ -18,6 +21,17 @@ import Futhark.Internalise.Monad
 import Futhark.Internalise.TypesValues
 import Futhark.Util
 import Language.Futhark as E hiding (matchDims)
+
+internaliseAttr :: E.AttrInfo VName -> InternaliseM I.Attr
+internaliseAttr (E.AttrAtom (E.AtomName v) _) =
+  pure $ I.AttrName v
+internaliseAttr (E.AttrAtom (E.AtomInt x) _) =
+  pure $ I.AttrInt x
+internaliseAttr (E.AttrComp f attrs _) =
+  I.AttrComp f <$> mapM internaliseAttr attrs
+
+internaliseAttrs :: [E.AttrInfo VName] -> InternaliseM I.Attrs
+internaliseAttrs = fmap (mconcat . map I.oneAttr) . mapM internaliseAttr
 
 bindingFParams ::
   [E.TypeParam] ->
@@ -29,11 +43,11 @@ bindingFParams tparams params m = do
   let params_idents = concat flattened_params
   params_ts <-
     internaliseParamTypes $
-      map (flip E.setAliases () . E.unInfo . E.identType) params_idents
+      map (flip E.setAliases () . E.unInfo . E.identType . fst) params_idents
   let num_param_idents = map length flattened_params
       num_param_ts = map (sum . map length) $ chunks num_param_idents params_ts
 
-  let shape_params = [I.Param v $ I.Prim I.int64 | E.TypeParamDim v _ <- tparams]
+  let shape_params = [I.Param mempty v $ I.Prim I.int64 | E.TypeParamDim v _ <- tparams]
       shape_subst = M.fromList [(I.paramName p, [I.Var $ I.paramName p]) | p <- shape_params]
   bindingFlatPat params_idents (concat params_ts) $ \valueparams -> do
     let (certparams, valueparams') = unzip $ map fixAccParam (concat valueparams)
@@ -41,9 +55,9 @@ bindingFParams tparams params m = do
       substitutingVars shape_subst $
         m (catMaybes certparams ++ shape_params) $ chunks num_param_ts valueparams'
   where
-    fixAccParam (I.Param pv (I.Acc acc ispace ts u)) =
-      ( Just (I.Param acc $ I.Prim I.Unit),
-        I.Param pv (I.Acc acc ispace ts u)
+    fixAccParam (I.Param attrs pv (I.Acc acc ispace ts u)) =
+      ( Just (I.Param attrs acc $ I.Prim I.Unit),
+        I.Param attrs pv (I.Acc acc ispace ts u)
       )
     fixAccParam p = (Nothing, p)
 
@@ -57,7 +71,7 @@ bindingLoopParams tparams pat ts m = do
   pat_idents <- flattenPat pat
   pat_ts <- internaliseLoopParamType (E.patternStructType pat) ts
 
-  let shape_params = [I.Param v $ I.Prim I.int64 | E.TypeParamDim v _ <- tparams]
+  let shape_params = [I.Param mempty v $ I.Prim I.int64 | E.TypeParamDim v _ <- tparams]
       shape_subst = M.fromList [(I.paramName p, [I.Var $ I.paramName p]) | p <- shape_params]
 
   bindingFlatPat pat_idents pat_ts $ \valueparams ->
@@ -77,7 +91,7 @@ bindingLambdaParams params ts m = do
 
 processFlatPat ::
   Show t =>
-  [E.Ident] ->
+  [(E.Ident, [E.AttrInfo VName])] ->
   [t] ->
   InternaliseM ([[I.Param t]], VarSubsts)
 processFlatPat x y = processFlatPat' [] x y
@@ -85,16 +99,17 @@ processFlatPat x y = processFlatPat' [] x y
     processFlatPat' pat [] _ = do
       let (vs, substs) = unzip pat
       return (reverse vs, M.fromList substs)
-    processFlatPat' pat (p : rest) ts = do
-      (ps, rest_ts) <- handleMapping ts <$> internaliseBindee p
+    processFlatPat' pat ((p, attrs) : rest) ts = do
+      attrs' <- internaliseAttrs attrs
+      (ps, rest_ts) <- handleMapping attrs' ts <$> internaliseBindee p
       processFlatPat' ((ps, (E.identName p, map (I.Var . I.paramName) ps)) : pat) rest rest_ts
 
-    handleMapping ts [] =
+    handleMapping _ ts [] =
       ([], ts)
-    handleMapping (t : ts) (r : rs) =
-      let (ps, ts') = handleMapping ts rs
-       in (I.Param r t : ps, ts')
-    handleMapping [] _ =
+    handleMapping attrs (t : ts) (r : rs) =
+      let (ps, ts') = handleMapping attrs ts rs
+       in (I.Param attrs r t : ps, ts')
+    handleMapping _ [] _ =
       error $ "handleMapping: insufficient identifiers in pattern." ++ show (x, y)
 
     internaliseBindee :: E.Ident -> InternaliseM [VName]
@@ -107,7 +122,7 @@ processFlatPat x y = processFlatPat' [] x y
 
 bindingFlatPat ::
   Show t =>
-  [E.Ident] ->
+  [(E.Ident, [E.AttrInfo VName])] ->
   [t] ->
   ([[I.Param t]] -> InternaliseM a) ->
   InternaliseM a
@@ -117,16 +132,18 @@ bindingFlatPat idents ts m = do
     m ps
 
 -- | Flatten a pattern.  Returns a list of identifiers.
-flattenPat :: MonadFreshNames m => E.Pat -> m [E.Ident]
+flattenPat :: MonadFreshNames m => E.Pat -> m [(E.Ident, [E.AttrInfo VName])]
 flattenPat = flattenPat'
   where
     flattenPat' (E.PatParens p _) =
       flattenPat' p
+    flattenPat' (E.PatAttr attr p _) =
+      map (second (attr :)) <$> flattenPat' p
     flattenPat' (E.Wildcard t loc) = do
       name <- newVName "nameless"
       flattenPat' $ E.Id name t loc
     flattenPat' (E.Id v (Info t) loc) =
-      return [E.Ident v (Info t) loc]
+      return [(E.Ident v (Info t) loc, mempty)]
     -- XXX: treat empty tuples and records as unit.
     flattenPat' (E.TuplePat [] loc) =
       flattenPat' (E.Wildcard (Info $ E.Scalar $ E.Record mempty) loc)

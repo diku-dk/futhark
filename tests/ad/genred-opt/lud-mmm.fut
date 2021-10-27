@@ -1,6 +1,6 @@
 -- ==
 --
--- compiled random input {[128][32][32]f32 [128][32][32]f32 [128][128][32][32]f32} auto output
+-- compiled random input {[128][32][32]f32 [128][32][32]f32 [128][128][32][32]f32 [128][128][32][32]f32} auto output
 
 -- Alternatively try this with default_tile_size=8 and default_reg_tile_size=2
 -- compiled random input {[256][16][16]f32 [256][16][16]f32 [256][256][16][16]f32} auto output

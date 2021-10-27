@@ -17,6 +17,7 @@ module Futhark.IR.SOACS.Simplify
     HasSOAC (..),
     simplifyKnownIterationSOAC,
     removeReplicateMapping,
+    removeUnusedSOACInput,
     liftIdentityMapping,
     simplifyMapIota,
     SOACS,
@@ -122,13 +123,13 @@ simplifySOAC (Stream outerdim arr form nes lam) = do
       return (Parallel o comm lam0', hoisted)
     simplifyStreamForm Sequential =
       return (Sequential, mempty)
-simplifySOAC (Scatter len lam ivs as) = do
-  len' <- Engine.simplify len
+simplifySOAC (Scatter w ivs lam as) = do
+  w' <- Engine.simplify w
   (lam', hoisted) <- Engine.simplifyLambda lam
   ivs' <- mapM Engine.simplify ivs
   as' <- mapM Engine.simplify as
-  return (Scatter len' lam' ivs' as', hoisted)
-simplifySOAC (Hist w ops bfun imgs) = do
+  return (Scatter w' ivs' lam' as', hoisted)
+simplifySOAC (Hist w imgs ops bfun) = do
   w' <- Engine.simplify w
   (ops', hoisted) <- fmap unzip $
     forM ops $ \(HistOp dests_w rf dests nes op) -> do
@@ -140,7 +141,7 @@ simplifySOAC (Hist w ops bfun imgs) = do
       return (HistOp dests_w' rf' dests' nes' op', hoisted)
   imgs' <- mapM Engine.simplify imgs
   (bfun', bfun_hoisted) <- Engine.simplifyLambda bfun
-  return (Hist w' ops' bfun' imgs', mconcat hoisted <> bfun_hoisted)
+  return (Hist w' imgs' ops' bfun', mconcat hoisted <> bfun_hoisted)
 simplifySOAC (Screma w arrs (ScremaForm scans reds map_lam)) = do
   (scans', scans_hoisted) <- fmap unzip $
     forM scans $ \(Scan lam nes) -> do
@@ -164,6 +165,9 @@ simplifySOAC (Screma w arrs (ScremaForm scans reds map_lam)) = do
     <*> pure (mconcat scans_hoisted <> mconcat reds_hoisted <> map_lam_hoisted)
 
 instance BuilderOps (Wise SOACS)
+
+instance TraverseOpStms (Wise SOACS) where
+  traverseOpStms = traverseSOACStms
 
 fixLambdaParams ::
   (MonadBuilder m, Buildable (Rep m), BuilderOps (Rep m)) =>
@@ -366,10 +370,10 @@ removeReplicateMapping _ _ _ _ = Skip
 
 -- | Like 'removeReplicateMapping', but for 'Scatter'.
 removeReplicateWrite :: TopDownRuleOp (Wise SOACS)
-removeReplicateWrite vtable pat aux (Scatter len lam ivs as)
+removeReplicateWrite vtable pat aux (Scatter w ivs lam as)
   | Just (stms, lam', ivs') <- removeReplicateInput vtable lam ivs = Simplify $ do
     forM_ stms $ \(vs, cs, e) -> certifying cs $ letBindNames vs e
-    auxing aux $ letBind pat $ Op $ Scatter len lam' ivs' as
+    auxing aux $ letBind pat $ Op $ Scatter w ivs' lam' as
 removeReplicateWrite _ _ _ _ = Skip
 
 removeReplicateInput ::
@@ -410,17 +414,21 @@ removeReplicateInput vtable fun arrs
         Left (p, v)
 
 -- | Remove inputs that are not used inside the SOAC.
-removeUnusedSOACInput :: TopDownRuleOp (Wise SOACS)
-removeUnusedSOACInput _ pat aux (Screma w arrs (ScremaForm scan reduce map_lam))
-  | (used, unused) <- partition usedInput params_and_arrs,
+removeUnusedSOACInput ::
+  forall rep.
+  (Aliased rep, Buildable rep, BuilderOps rep, HasSOAC rep) =>
+  TopDownRuleOp rep
+removeUnusedSOACInput _ pat aux op
+  | Just (Screma w arrs form :: SOAC rep) <- asSOAC op,
+    ScremaForm scan reduce map_lam <- form,
+    (used, unused) <- partition (usedInput map_lam) (zip (lambdaParams map_lam) arrs),
     not (null unused) = Simplify $ do
     let (used_params, used_arrs) = unzip used
         map_lam' = map_lam {lambdaParams = used_params}
-    auxing aux $ letBind pat $ Op $ Screma w used_arrs (ScremaForm scan reduce map_lam')
+    auxing aux $ letBind pat $ Op $ soacOp $ Screma w used_arrs (ScremaForm scan reduce map_lam')
   where
-    params_and_arrs = zip (lambdaParams map_lam) arrs
-    used_in_body = freeIn $ lambdaBody map_lam
-    usedInput (param, _) = paramName param `nameIn` used_in_body
+    used_in_body map_lam = freeIn $ lambdaBody map_lam
+    usedInput map_lam (param, _) = paramName param `nameIn` (used_in_body map_lam)
 removeUnusedSOACInput _ _ _ _ = Skip
 
 removeDeadMapping :: BottomUpRuleOp (Wise SOACS)
@@ -563,7 +571,7 @@ removeDeadReduction _ _ _ _ = Skip
 
 -- | If we are writing to an array that is never used, get rid of it.
 removeDeadWrite :: BottomUpRuleOp (Wise SOACS)
-removeDeadWrite (_, used) pat aux (Scatter w fun arrs dests) =
+removeDeadWrite (_, used) pat aux (Scatter w arrs fun dests) =
   let (i_ses, v_ses) = unzip $ groupScatterResults' dests $ bodyResult $ lambdaBody fun
       (i_ts, v_ts) = unzip $ groupScatterResults' dests $ lambdaReturnType fun
       isUsed (bindee, _, _, _, _, _) = (`UT.used` used) $ patElemName bindee
@@ -576,15 +584,14 @@ removeDeadWrite (_, used) pat aux (Scatter w fun arrs dests) =
           }
    in if pat /= Pat pat'
         then
-          Simplify $
-            auxing aux $
-              letBind (Pat pat') $ Op $ Scatter w fun' arrs dests'
+          Simplify . auxing aux $
+            letBind (Pat pat') $ Op $ Scatter w arrs fun' dests'
         else Skip
 removeDeadWrite _ _ _ _ = Skip
 
 -- handles now concatenation of more than two arrays
 fuseConcatScatter :: TopDownRuleOp (Wise SOACS)
-fuseConcatScatter vtable pat _ (Scatter _ fun arrs dests)
+fuseConcatScatter vtable pat _ (Scatter _ arrs fun dests)
   | Just (ws@(w' : _), xss, css) <- unzip3 <$> mapM isConcat arrs,
     xivs <- transpose xss,
     all (w' ==) ws = Simplify $ do
@@ -603,7 +610,7 @@ fuseConcatScatter vtable pat _ (Scatter _ fun arrs dests)
               lambdaReturnType = mix its <> mix vts
             }
     certifying (mconcat css) . letBind pat . Op $
-      Scatter w' fun' (concat xivs) $ map (incWrites r) dests
+      Scatter w' (concat xivs) fun' $ map (incWrites r) dests
   where
     sizeOf :: VName -> Maybe SubExp
     sizeOf x = arraySize 0 . typeOf <$> ST.lookup x vtable
@@ -860,13 +867,13 @@ simplifyMapIota vtable pat aux op
           else
             certifying cs . letExp (baseString arr ++ "_prefix") . BasicOp . Index arr' $
               fullSlice arr_t [DimSlice (intConst Int64 0) w (intConst Int64 1)]
-      arr_elem <- newVName $ baseString arr ++ "_elem"
+      arr_elem_param <- newParam (baseString arr ++ "_elem") (rowType arr_t)
       pure $
         Just
           ( arr'',
-            Param arr_elem (rowType arr_t),
+            arr_elem_param,
             ( ArrayIndexing cs arr slice,
-              ArrayIndexing cs arr_elem (Slice (drop (length js + 1) (unSlice slice)))
+              ArrayIndexing cs (paramName arr_elem_param) (Slice (drop (length js + 1) (unSlice slice)))
             )
           )
     mapOverArr _ _ = return Nothing
@@ -877,7 +884,7 @@ simplifyMapIota _ _ _ _ = Skip
 -- corresponding to that transformation performed on the rows of the
 -- full array.
 moveTransformToInput :: TopDownRuleOp (Wise SOACS)
-moveTransformToInput vtable pat aux (Screma w arrs (ScremaForm scan reduce map_lam))
+moveTransformToInput vtable pat aux soac@(Screma w arrs (ScremaForm scan reduce map_lam))
   | ops <- map snd $ filter arrayIsMapParam $ S.toList $ arrayOps $ lambdaBody map_lam,
     not $ null ops = Simplify $ do
     (more_arrs, more_params, replacements) <-
@@ -885,18 +892,20 @@ moveTransformToInput vtable pat aux (Screma w arrs (ScremaForm scan reduce map_l
 
     when (null more_arrs) cannotSimplify
 
-    let substs = M.fromList $ zip ops replacements
-        map_lam' =
+    let map_lam' =
           map_lam
             { lambdaParams = lambdaParams map_lam <> more_params,
-              lambdaBody =
-                replaceArrayOps substs $
-                  lambdaBody map_lam
+              lambdaBody = replaceArrayOps (M.fromList replacements) $ lambdaBody map_lam
             }
 
     auxing aux $
       letBind pat $ Op $ Screma w (arrs <> more_arrs) (ScremaForm scan reduce map_lam')
   where
+    -- It is not safe to move the transform if the root array is being
+    -- consumed by the Screma.  This is a bit too conservative - it's
+    -- actually safe if we completely replace the original input, but
+    -- this rule is not that precise.
+    consumed = consumedInOp soac
     map_param_names = map paramName (lambdaParams map_lam)
     topLevelPat = (`elem` fmap stmPat (bodyStms (lambdaBody map_lam)))
     onlyUsedOnce arr =
@@ -925,7 +934,8 @@ moveTransformToInput vtable pat aux (Screma w arrs (ScremaForm scan reduce map_l
       False
 
     mapOverArr op
-      | Just (_, arr) <- find ((== arrayOpArr op) . fst) (zip map_param_names arrs) = do
+      | Just (_, arr) <- find ((== arrayOpArr op) . fst) (zip map_param_names arrs),
+        not $ arr `nameIn` consumed = do
         arr_t <- lookupType arr
         let whole_dim = DimSlice (intConst Int64 0) (arraySize 0 arr_t) (intConst Int64 1)
         arr_transformed <- certifying (arrayOpCerts op) $
@@ -943,11 +953,11 @@ moveTransformToInput vtable pat aux (Screma w arrs (ScremaForm scan reduce map_l
                 BasicOp $ SubExp $ Var arr
         arr_transformed_t <- lookupType arr_transformed
         arr_transformed_row <- newVName $ baseString arr ++ "_transformed_row"
-        return $
+        pure $
           Just
             ( arr_transformed,
-              Param arr_transformed_row (rowType arr_transformed_t),
-              ArrayVar mempty arr_transformed_row
+              Param mempty arr_transformed_row (rowType arr_transformed_t),
+              (op, ArrayVar mempty arr_transformed_row)
             )
     mapOverArr _ = return Nothing
 moveTransformToInput _ _ _ _ =

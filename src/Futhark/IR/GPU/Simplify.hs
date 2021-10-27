@@ -75,6 +75,9 @@ simplifyKernelOp _ (SizeOp (CalcNumGroups w max_num_groups group_size)) = do
   w' <- Engine.simplify w
   return (SizeOp $ CalcNumGroups w' max_num_groups group_size, mempty)
 
+instance TraverseOpStms (Wise GPU) where
+  traverseOpStms = traverseHostOpStms traverseSOACStms
+
 instance BuilderOps (Wise GPU)
 
 instance HasSegOp (Wise GPU) where
@@ -93,10 +96,11 @@ kernelRules =
   standardRules <> segOpRules
     <> ruleBook
       [ --RuleOp redomapIotaToLoop,
+        RuleOp SOAC.simplifyMapIota,
+        RuleOp SOAC.removeUnusedSOACInput,
         RuleOp SOAC.simplifyKnownIterationSOAC,
         RuleOp SOAC.removeReplicateMapping,
-        RuleOp SOAC.liftIdentityMapping,
-        RuleOp SOAC.simplifyMapIota
+        RuleOp SOAC.liftIdentityMapping
       ]
       [ RuleBasicOp removeUnnecessaryCopy
       ]

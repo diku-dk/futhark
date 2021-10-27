@@ -99,6 +99,13 @@ OPTIONS
   Do not run the compiler, and instead assume that each benchmark
   program has already been compiled.  Use with caution.
 
+--spec-file=FILE
+
+  Ignore the test specification in the program file(s), and instead
+  load them from this other file.  These external test specifications
+  use the same syntax as normal, but *without* line comment prefixes.
+  A ``==`` is still expected.
+
 --timeout=seconds
 
   If the runtime for a dataset exceeds this integral number of

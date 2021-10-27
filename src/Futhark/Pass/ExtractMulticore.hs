@@ -50,7 +50,7 @@ instance MonadLogger ExtractM where
   addLog _ = pure ()
 
 indexArray :: VName -> LParam SOACS -> VName -> Stm MC
-indexArray i (Param p t) arr =
+indexArray i (Param _ p t) arr =
   Let (Pat [PatElem p t]) (defAux ()) . BasicOp $
     case t of
       Acc {} -> SubExp $ Var arr
@@ -164,7 +164,7 @@ unstreamLambda attrs nes lam = do
   let (chunk_param, acc_params, slice_params) =
         partitionChunkedFoldParameters (length nes) (lambdaParams lam)
 
-  inp_params <- forM slice_params $ \(Param p t) ->
+  inp_params <- forM slice_params $ \(Param _ p t) ->
     newParam (baseString p) (rowType t)
 
   body <- runBodyBuilder $
@@ -324,7 +324,7 @@ transformSOAC pat _ (Screma w arrs form)
     -- anything, so split it up and try again.
     scope <- castScope <$> askScope
     transformStms =<< runBuilderT_ (dissectScrema pat w form arrs) scope
-transformSOAC pat _ (Scatter w lam ivs dests) = do
+transformSOAC pat _ (Scatter w ivs lam dests) = do
   (gtid, space) <- mkSegSpace w
 
   Body () kstms res <- mapLambdaToBody transformBody gtid lam ivs
@@ -344,7 +344,7 @@ transformSOAC pat _ (Scatter w lam ivs dests) = do
         Op $
           ParOp Nothing $
             SegMap () space rets kbody
-transformSOAC pat _ (Hist w hists map_lam arrs) = do
+transformSOAC pat _ (Hist w arrs hists map_lam) = do
   (seq_hist_stms, seq_op) <-
     transformHist DoNotRename sequentialiseBody w hists map_lam arrs
 
