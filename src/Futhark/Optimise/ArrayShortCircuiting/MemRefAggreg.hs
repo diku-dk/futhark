@@ -65,8 +65,8 @@ freeVarSubstitutions scope0 scals0 indfun =
             Nothing -> Nothing
     getSubstitution v
       | Just pe <- M.lookup v scals0,
-        IntType Int64 <- primExpType pe =
-        Just (M.singleton v $ isInt64 pe, namesToList $ freeIn pe)
+        IntType it <- primExpType pe =
+        Just (M.singleton v $ TPrimExp pe, namesToList $ freeIn pe)
     getSubstitution _v = Nothing
 
 -- | Translates free variables in an access summary
