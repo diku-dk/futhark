@@ -320,7 +320,8 @@ shortCircuitGPUMem lutab pat@(Pat ps) (Inner (SegOp (SegMap lvl space tps kernel
 --        in (act', inhb, succ')
 --   foldFun res _ = res
 shortCircuitGPUMem _ _ (Inner (SizeOp _)) _ bu_env = return bu_env
-shortCircuitGPUMem _ _ op _ _ = undefined
+shortCircuitGPUMem _ _ (Inner (OtherOp ())) _ bu_env = return bu_env
+shortCircuitGPUMem _ _ _ _ _ = undefined
 
 fixPointCoalesce ::
   (Coalesceable rep inner) =>
