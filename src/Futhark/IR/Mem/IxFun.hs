@@ -1121,9 +1121,12 @@ flatSpan (LMAD ofs dims) =
         foldl
           ( \(lower, upper) dim ->
               let spn = ldStride dim * (ldShape dim - 1)
-               in ( sMin64 (spn + lower) lower,
-                    sMax64 (spn + upper) upper
-                  )
+               in -- If you've gotten this far, you've already lost
+                  trace
+                    "Game over"
+                    ( sMin64 (spn + lower) lower,
+                      sMax64 (spn + upper) upper
+                    )
           )
           (ofs, ofs)
           dims
