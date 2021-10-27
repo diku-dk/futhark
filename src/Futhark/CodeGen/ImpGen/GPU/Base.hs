@@ -753,6 +753,10 @@ atomicUpdateCAS space t arr old bucket x do_op = do
   -- While-loop: Try to insert your value
   let (toBits, fromBits) =
         case t of
+          FloatType Float16 ->
+            ( \v -> Imp.FunExp "to_bits16" [v] int16,
+              \v -> Imp.FunExp "from_bits16" [v] t
+            )
           FloatType Float32 ->
             ( \v -> Imp.FunExp "to_bits32" [v] int32,
               \v -> Imp.FunExp "from_bits32" [v] t
@@ -764,6 +768,7 @@ atomicUpdateCAS space t arr old bucket x do_op = do
           _ -> (id, id)
 
       int
+        | primBitSize t == 16 = int16
         | primBitSize t == 32 = int32
         | otherwise = int64
 
@@ -774,15 +779,14 @@ atomicUpdateCAS space t arr old bucket x do_op = do
     old_bits_v <- newVName "old_bits"
     dPrim_ old_bits_v int
     let old_bits = Imp.var old_bits_v int
-    sOp $
-      Imp.Atomic space $
-        Imp.AtomicCmpXchg
-          int
-          old_bits_v
-          arr'
-          bucket_offset
-          (toBits (Imp.var assumed t))
-          (toBits (Imp.var x t))
+    sOp . Imp.Atomic space $
+      Imp.AtomicCmpXchg
+        int
+        old_bits_v
+        arr'
+        bucket_offset
+        (toBits (Imp.var assumed t))
+        (toBits (Imp.var x t))
     old <~~ fromBits old_bits
     let won = CmpOpExp (CmpEq int) (toBits (Imp.var assumed t)) old_bits
     sWhen (isBool won) (run_loop <-- false)

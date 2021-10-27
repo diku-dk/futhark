@@ -239,12 +239,9 @@ onKernel target kernel = do
           GC.blockScope $ GC.compileCode $ kernelBody kernel
       kstate = GC.compUserState cstate
 
-      use_params = mapMaybe useAsParam $ kernelUses kernel
-
       (local_memory_args, local_memory_params, local_memory_init) =
-        unzip3 $
-          flip evalState (blankNameSource :: VNameSource) $
-            mapM (prepareLocalMemory target) $ kernelLocalMemory kstate
+        unzip3 . flip evalState (blankNameSource :: VNameSource) $
+          mapM (prepareLocalMemory target) $ kernelLocalMemory kstate
 
       -- CUDA has very strict restrictions on the number of blocks
       -- permitted along the 'y' and 'z' dimensions of the grid
@@ -274,6 +271,9 @@ onKernel target kernel = do
             )
 
       (const_defs, const_undefs) = unzip $ mapMaybe constDef $ kernelUses kernel
+
+  let (use_params, unpack_params) =
+        unzip $ mapMaybe useAsParam $ kernelUses kernel
 
   let (safety, error_init)
         -- We conservatively assume that any called function can fail.
@@ -324,6 +324,7 @@ onKernel target kernel = do
 
       kernel_fun =
         [C.cfun|__kernel void $id:name ($params:params) {
+                  $items:(mconcat unpack_params)
                   $items:const_defs
                   $items:block_dim_init
                   $items:local_memory_init
@@ -368,16 +369,24 @@ onKernel target kernel = do
           [C.citem|volatile $ty:defaultMemBlockType $id:mem = &shared_mem[$id:param];|]
         )
 
-useAsParam :: KernelUse -> Maybe C.Param
-useAsParam (ScalarUse name bt) =
-  let ctp = case bt of
+useAsParam :: KernelUse -> Maybe (C.Param, [C.BlockItem])
+useAsParam (ScalarUse name pt) = do
+  let name_bits = zEncodeString (pretty name) <> "_bits"
+      ctp = case pt of
         -- OpenCL does not permit bool as a kernel parameter type.
         Bool -> [C.cty|unsigned char|]
         Unit -> [C.cty|unsigned char|]
-        _ -> GC.primTypeToCType bt
-   in Just [C.cparam|$ty:ctp $id:name|]
+        _ -> primStorageType pt
+  if ctp == primTypeToCType pt
+    then Just ([C.cparam|$ty:ctp $id:name|], [])
+    else
+      let name_bits_e = [C.cexp|$id:name_bits|]
+       in Just
+            ( [C.cparam|$ty:ctp $id:name_bits|],
+              [[C.citem|$ty:(primTypeToCType pt) $id:name = $exp:(fromStorage pt name_bits_e);|]]
+            )
 useAsParam (MemoryUse name) =
-  Just [C.cparam|__global $ty:defaultMemBlockType $id:name|]
+  Just ([C.cparam|__global $ty:defaultMemBlockType $id:name|], [])
 useAsParam ConstUse {} =
   Nothing
 

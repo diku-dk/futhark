@@ -48,6 +48,9 @@ module Futhark.AD.Rev.Monad
     addLambda,
     --
     VjpOps (..),
+    --
+    setLoopTape,
+    lookupLoopTape,
   )
 where
 
@@ -448,3 +451,10 @@ data VjpOps = VjpOps
   { vjpLambda :: [Adj] -> [VName] -> Lambda -> ADM Lambda,
     vjpStm :: Stm -> ADM () -> ADM ()
   }
+
+setLoopTape :: VName -> VName -> ADM ()
+setLoopTape v vs = modify $ \env ->
+  env {stateLoopTape = M.insert v vs $ stateLoopTape env}
+
+lookupLoopTape :: VName -> ADM (Maybe VName)
+lookupLoopTape v = gets $ M.lookup v . stateLoopTape

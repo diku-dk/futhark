@@ -56,6 +56,7 @@ library
       Futhark.AD.Derivatives
       Futhark.AD.Fwd
       Futhark.AD.Rev
+      Futhark.AD.Rev.Loop
       Futhark.AD.Rev.Map
       Futhark.AD.Rev.Monad
       Futhark.AD.Rev.Reduce

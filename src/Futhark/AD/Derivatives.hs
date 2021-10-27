@@ -81,6 +81,7 @@ pdBinOp (UDivUp it _) a b =
   intBinOp derivs derivs derivs derivs it a b
   where
     derivs x y = (1 `quot` y, negate (x `quot` (y * y)))
+pdBinOp (UMod it _) _ _ = (iConst it 1, iConst it 0) -- FIXME
 pdBinOp (SMod it _) _ _ = (iConst it 1, iConst it 0) -- FIXME
 pdBinOp (SMax it) a b =
   intBinOp derivs derivs derivs derivs it a b
@@ -90,6 +91,13 @@ pdBinOp (SMin it) a b =
   intBinOp derivs derivs derivs derivs it a b
   where
     derivs x y = (fromBoolExp (x .<=. y), fromBoolExp (x .>. y))
+--
+pdBinOp (LShr it) a b =
+  pdBinOp (UDiv it Unsafe) a $
+    BinOpExp (Pow it) (ValueExp (IntValue (intValue it (2 :: Int)))) b
+pdBinOp (And it) _a _b = (iConst it 0, iConst it 0) -- FIXME
+pdBinOp (Or it) _a _b = (iConst it 0, iConst it 0) -- FIXME
+pdBinOp (Xor it) _a _b = (iConst it 0, iConst it 0) -- FIXME
 --
 pdBinOp (FAdd ft) _ _ = (fConst ft 1, fConst ft 1)
 pdBinOp (FSub ft) _ _ = (fConst ft 1, fConst ft (-1))
@@ -203,13 +211,17 @@ pdBuiltin "isnan64" [_] = Just [untyped false]
 pdBuiltin "isinf16" [_] = Just [untyped false]
 pdBuiltin "isinf32" [_] = Just [untyped false]
 pdBuiltin "isinf64" [_] = Just [untyped false]
-pdBuiltin "round16" [_] = Just [fConst Float32 0]
+pdBuiltin "round16" [_] = Just [fConst Float16 0]
 pdBuiltin "round32" [_] = Just [fConst Float32 0]
 pdBuiltin "round64" [_] = Just [fConst Float64 0]
-pdBuiltin "ceil16" [_] = Just [fConst Float32 0]
+pdBuiltin "ceil16" [_] = Just [fConst Float16 0]
 pdBuiltin "ceil32" [_] = Just [fConst Float32 0]
 pdBuiltin "ceil64" [_] = Just [fConst Float64 0]
-pdBuiltin "floor16" [_] = Just [fConst Float32 0]
+pdBuiltin "floor16" [_] = Just [fConst Float16 0]
 pdBuiltin "floor32" [_] = Just [fConst Float32 0]
 pdBuiltin "floor64" [_] = Just [fConst Float64 0]
+pdBuiltin "clz8" [_] = Just [iConst Int32 0]
+pdBuiltin "clz16" [_] = Just [iConst Int32 0]
+pdBuiltin "clz32" [_] = Just [iConst Int32 0]
+pdBuiltin "clz64" [_] = Just [iConst Int32 0]
 pdBuiltin _ _ = Nothing

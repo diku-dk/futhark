@@ -72,8 +72,8 @@ localNewEnv env = local $ \(globals, old_env) ->
 askEnv :: DefM Env
 askEnv = asks snd
 
-isGlobal :: VName -> DefM a -> DefM a
-isGlobal v = local $ Arrow.first (S.insert v)
+areGlobal :: [VName] -> DefM a -> DefM a
+areGlobal vs = local $ Arrow.first (S.fromList vs <>)
 
 replaceTypeSizes ::
   M.Map VName SizeSubst ->
@@ -883,12 +883,8 @@ defuncApply depth e@(AppExp (Apply e1 e2 d loc) t@(Info (AppRes ret ext))) = do
             Var
               fname'
               ( Info
-                  ( Scalar $
-                      Arrow mempty Unnamed (fromStruct t1) $
-                        RetType [] $
-                          Scalar $
-                            Arrow mempty Unnamed (fromStruct t2) $
-                              RetType [] rettype
+                  ( Scalar . Arrow mempty Unnamed (fromStruct t1) . RetType [] $
+                      Scalar . Arrow mempty Unnamed (fromStruct t2) $ RetType [] rettype
                   )
               )
               loc
@@ -1251,7 +1247,7 @@ svFromType t = Dynamic t
 -- transformed result as well as an environment that binds the name of
 -- the value binding to the static value of the transformed body.  The
 -- boolean is true if the function is a 'DynamicFun'.
-defuncValBind :: ValBind -> DefM (ValBind, Env, Bool)
+defuncValBind :: ValBind -> DefM (ValBind, Env)
 -- Eta-expand entry points with a functional return type.
 defuncValBind (ValBind entry name _ (Info (RetType _ rettype, retext)) tparams params body _ attrs loc)
   | Scalar Arrow {} <- rettype = do
@@ -1305,11 +1301,7 @@ defuncValBind valbind@(ValBind _ name retdecl (Info (RetType ret_dims rettype, r
       M.singleton name $
         Binding
           (Just (first (map typeParamName) (valBindTypeScheme valbind)))
-          sv,
-      case sv of
-        DynamicFun {} -> True
-        Dynamic {} -> True
-        _ -> False
+          sv
     )
   where
     anyDimIfNotBound bound_sizes (NamedDim v)
@@ -1320,12 +1312,10 @@ defuncValBind valbind@(ValBind _ name retdecl (Info (RetType ret_dims rettype, r
 defuncVals :: [ValBind] -> DefM ()
 defuncVals [] = pure ()
 defuncVals (valbind : ds) = do
-  (valbind', env, dyn) <- defuncValBind valbind
+  (valbind', env) <- defuncValBind valbind
   addValBind valbind'
-  localEnv env $
-    if dyn
-      then isGlobal (valBindName valbind') $ defuncVals ds
-      else defuncVals ds
+  let globals = valBindName valbind' : snd (unInfo (valBindRetType valbind'))
+  localEnv env $ areGlobal globals $ defuncVals ds
 
 {-# NOINLINE transformProg #-}
 
