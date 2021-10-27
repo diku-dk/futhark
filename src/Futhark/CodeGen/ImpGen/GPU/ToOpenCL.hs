@@ -371,7 +371,7 @@ onKernel target kernel = do
 
 useAsParam :: KernelUse -> Maybe (C.Param, [C.BlockItem])
 useAsParam (ScalarUse name pt) = do
-  let name_bits = pretty name <> "_bits"
+  let name_bits = zEncodeString (pretty name) <> "_bits"
       ctp = case pt of
         -- OpenCL does not permit bool as a kernel parameter type.
         Bool -> [C.cty|unsigned char|]
