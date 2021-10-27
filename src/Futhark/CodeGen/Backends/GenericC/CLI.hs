@@ -19,7 +19,6 @@ import Futhark.CodeGen.Backends.GenericC.Manifest
 import Futhark.CodeGen.Backends.GenericC.Options
 import Futhark.CodeGen.Backends.SimpleRep
   ( cproduct,
-    fromStorage,
     primAPIType,
     primStorageType,
     scalarToPrim,
@@ -176,7 +175,7 @@ readInput manifest i tname =
             [C.cstm|;|],
             [C.cstm|;|],
             [C.cstm|;|],
-            fromStorage t [C.cexp|$id:dest|]
+            [C.cexp|$id:dest|]
           )
     Just (TypeOpaque desc _) ->
       ( [C.citems|futhark_panic(1, "Cannot read input #%d of type %s\n", $int:i, $string:(T.unpack desc));|],
