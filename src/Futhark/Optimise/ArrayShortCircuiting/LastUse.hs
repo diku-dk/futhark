@@ -236,10 +236,23 @@ lastUseGPUOp (Inner (SizeOp sop)) used_nms = do
   return (mempty, lu_vars, used_nms')
 lastUseGPUOp (Inner (SegOp (SegMap _ _ tps kbody))) used_nms = do
   (used_nms', lu_vars) <- lastUsedInNames used_nms $ freeIn tps
-  (body_lutab, _) <- lastUseKernelBody kbody (mempty, used_nms')
-  return (body_lutab, lu_vars, used_nms')
-lastUseGPUOp (Inner (SegOp _)) _ =
-  undefined
+  (body_lutab, used_nms'') <- lastUseKernelBody kbody (mempty, used_nms')
+  return (body_lutab, lu_vars, used_nms' <> used_nms'')
+lastUseGPUOp (Inner (SegOp (SegRed _ _ _ tps kbody))) used_nms = do
+  -- TODO: Handle SegBinOp
+  (used_nms', lu_vars) <- lastUsedInNames used_nms $ freeIn tps
+  (body_lutab, used_nms'') <- lastUseKernelBody kbody (mempty, used_nms')
+  return (body_lutab, lu_vars, used_nms' <> used_nms'')
+lastUseGPUOp (Inner (SegOp (SegScan _ _ _ tps kbody))) used_nms = do
+  -- TODO: Handle SegBinOp
+  (used_nms', lu_vars) <- lastUsedInNames used_nms $ freeIn tps
+  (body_lutab, used_nms'') <- lastUseKernelBody kbody (mempty, used_nms')
+  return (body_lutab, lu_vars, used_nms' <> used_nms'')
+lastUseGPUOp (Inner (SegOp (SegHist _ _ _ tps kbody))) used_nms = do
+  -- TODO: Handle SegBinOp
+  (used_nms', lu_vars) <- lastUsedInNames used_nms $ freeIn tps
+  (body_lutab, used_nms'') <- lastUseKernelBody kbody (mempty, used_nms')
+  return (body_lutab, lu_vars, used_nms' <> used_nms'')
 
 lastUseSeqOp :: Op (Aliases SeqMem) -> Names -> LastUseM SeqMem (LUTabFun, Names, Names)
 lastUseSeqOp (Alloc se sp) used_nms = do
