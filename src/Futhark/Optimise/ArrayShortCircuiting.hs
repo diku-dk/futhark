@@ -21,7 +21,7 @@ import Futhark.Optimise.ArrayShortCircuiting.DataStructs
 import Futhark.Pass (Pass (..))
 import qualified Futhark.Pass as Pass
 import Futhark.Pipeline
-import Prelude
+import Futhark.Util
 
 ----------------------------------------------------------------
 --- Printer/Tester Main Program
@@ -139,7 +139,8 @@ lookupAndReplace vname f u = do
   coaltab <- asks envCoalesceTab
   case M.lookup vname coaltab of
     Just (Coalesced _ (MemBlock pt shp mem ixfun) subs) ->
-      substituteInIxFun subs ixfun
+      ixfun
+        & fixPoint (substituteInIxFun subs)
         & ArrayIn mem
         & MemArray pt shp u
         & f vname
