@@ -29,6 +29,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   perhaps exclusively) centered around context freeing or failing
   programs - this should not have affected many people.
 
+* Various fixes to `f16` handling in the GPU backends.
+
 ## [0.20.5]
 
 ### Added

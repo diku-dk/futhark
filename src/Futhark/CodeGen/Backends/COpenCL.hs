@@ -18,6 +18,7 @@ import Data.List (intercalate)
 import Futhark.CodeGen.Backends.COpenCL.Boilerplate
 import qualified Futhark.CodeGen.Backends.GenericC as GC
 import Futhark.CodeGen.Backends.GenericC.Options
+import Futhark.CodeGen.Backends.SimpleRep (primStorageType, toStorage)
 import Futhark.CodeGen.ImpCode.OpenCL
 import qualified Futhark.CodeGen.ImpGen.OpenCL as ImpGen
 import Futhark.IR.GPUMem hiding
@@ -344,8 +345,17 @@ callKernel (LaunchKernel safety name args num_workgroups workgroup_size) = do
   when (safety >= SafetyFull) $
     GC.stm [C.cstm|ctx->failure_is_an_option = 1;|]
   where
-    setKernelArg i (ValueKArg e bt) = do
-      v <- GC.compileExpToName "kernel_arg" bt e
+    setKernelArg i (ValueKArg e pt) = do
+      v <- case pt of
+        -- We always transfer f16 values to the kernel as 16 bits, but
+        -- the actual host type may be typedef'd to a 32-bit float.
+        -- This requires some care.
+        FloatType Float16 -> do
+          v <- newVName "kernel_arg"
+          e' <- toStorage pt <$> GC.compileExp e
+          GC.decl [C.cdecl|$ty:(primStorageType pt) $id:v = $e';|]
+          pure v
+        _ -> GC.compileExpToName "kernel_arg" pt e
       GC.stm
         [C.cstm|
             OPENCL_SUCCEED_OR_RETURN(clSetKernelArg(ctx->$id:name, $int:i, sizeof($id:v), &$id:v));
