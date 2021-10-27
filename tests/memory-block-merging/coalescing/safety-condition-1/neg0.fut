@@ -2,21 +2,23 @@
 -- after the coalescing-enabling line (in 'zs').
 -- ==
 -- input { 3i64
---         [0, 1, 2, 3]
+--         [0i64, 1i64, 2i64, 3i64]
 --       }
--- output { [[0, 1, 2, 3],
---           [4, 5, 6, 7],
---           [8, 9,10,11],
---           [1, 2, 3, 4]]
---          [2, 3, 4, 5]
+-- output { [[0i64, 1i64, 2i64, 3i64],
+--           [4i64, 5i64, 6i64, 7i64],
+--           [8i64, 9i64, 10i64, 11i64],
+--           [1i64, 2i64, 3i64, 4i64]]
+--          [2i64, 3i64, 4i64, 5i64]
 --        }
--- structure cpu { Alloc 2 }
+-- structure cpu { Alloc 3 }
 -- structure gpu { Alloc 2 }
 
-let main [n] (i: i64) (ys0: [n]i32): ([n][n]i32, [n]i32) =
+let main [n] (i: i64) (ys0: [n]i64): ([n][n]i64, [n]i64) =
+  let xs = tabulate_2d n n (\i j -> i*n + j) |> opaque
+
   let ys = map (+ 1) ys0
-  let xs = iota (n * n) |> map i32.i64 |> unflatten n n
   let xs[i] = ys
-  let zs = map (+ 1) ys -- This gets handled by the separate memory reuse
-                        -- transformation.
+
+  let zs = map (+ 1) ys -- This could also be a short-circuit point in SeqMem
+
   in (xs, zs)

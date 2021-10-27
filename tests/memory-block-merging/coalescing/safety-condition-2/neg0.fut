@@ -13,6 +13,6 @@
 -- structure gpu { Alloc 1 }
 
 let main [n] (i: i64) (ys: [n]i64): [n][n]i64 =
-  let xs = unflatten n n (iota (n * n))
+  let xs = tabulate_2d n n (\i j -> i * n + j)
   let xs[i] = ys
   in xs
