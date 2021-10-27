@@ -265,21 +265,23 @@ shortCircuitGPUMem lutab pat@(Pat ps) (Inner (SegOp (SegMap lvl space tps kernel
                               )
                               $ memrefs coal_entry
                        in if noMemOverlap td_env as $ dstrefs mrefs
-                            then
-                              let entry = case M.lookup (patElemName p) $ vartab coal_entry of
-                                    Nothing -> trace "Nothing1" coal_entry
-                                    Just (Coalesced knd mbd@(MemBlock _ _ _ ixfn) subs0) ->
-                                      case freeVarSubstitutions (scope td_env) (scalar_table td_env) ixfn of
-                                        Just fv_subst -> coal_entry {vartab = M.insert (patElemName p) (Coalesced knd mbd $ traceWith "fv_subst" fv_subst) (vartab coal_entry)}
-                                        Nothing -> trace "Nothing2" coal_entry
-                                  (ac, succ) =
-                                    trace
-                                      ( "MARKING " <> pretty m_b
-                                          <> " AS SUCCESS! with entry: "
-                                          <> pretty entry
-                                      )
-                                      $ markSuccessCoal (activeCoals bu_env_f, successCoals bu_env_f) m_b entry
-                               in bu_env_f {activeCoals = ac, successCoals = succ}
+                            then case M.lookup (patElemName p) $ vartab coal_entry of
+                              Nothing -> trace "Nothing1" bu_env_f
+                              Just (Coalesced knd mbd@(MemBlock _ _ _ ixfn) subs0) ->
+                                case freeVarSubstitutions (scope td_env) (scalar_table td_env) ixfn of
+                                  Just fv_subst ->
+                                    let entry = coal_entry {vartab = M.insert (patElemName p) (Coalesced knd mbd $ traceWith "fv_subst" fv_subst) (vartab coal_entry)}
+                                        (ac, succ) =
+                                          trace
+                                            ( "MARKING " <> pretty m_b
+                                                <> " AS SUCCESS! with entry: "
+                                                <> pretty entry
+                                            )
+                                            $ markSuccessCoal (activeCoals bu_env_f, successCoals bu_env_f) m_b entry
+                                     in bu_env_f {activeCoals = ac, successCoals = succ}
+                                  Nothing ->
+                                    let (ac, inh) = trace ("MARKING " <> pretty m_b <> " AS FAILED (3)") $ markFailedCoal (activeCoals bu_env_f, inhibit bu_env_f) m_b
+                                     in bu_env_f {activeCoals = ac, inhibit = inh}
                             else
                               let (ac, inh) = trace ("MARKING " <> pretty m_b <> " AS FAILED (2)") $ markFailedCoal (activeCoals bu_env_f, inhibit bu_env_f) m_b
                                in bu_env_f {activeCoals = ac, inhibit = inh}
