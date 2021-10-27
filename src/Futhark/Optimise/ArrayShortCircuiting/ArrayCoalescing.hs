@@ -330,7 +330,7 @@ fixPointCoalesce ::
   TopDnEnv rep ->
   ShortCircuitM rep CoalsTab
 fixPointCoalesce lutab fpar bdy topenv = do
-  buenv <- mkCoalsTabStms lutab (bodyStms bdy) topenv emptyBotUpEnv
+  buenv <- mkCoalsTabStms lutab (bodyStms bdy) topenv (emptyBotUpEnv {inhibit = inhibited topenv})
   let (succ_tab, actv_tab, inhb_tab) = (successCoals buenv, activeCoals buenv, inhibit buenv)
       -- remove @fpar@ from @actv_tab@, as function's parameters cannot be merged
       mems = map ((\(MemBlock _ _ m _) -> m) . snd) $ getArrMemAssocFParam fpar

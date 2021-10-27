@@ -7,6 +7,9 @@
 -- structure gpu { Alloc 1 }
 
 let main [n] (ns: [n]i32): [][]i32 =
+  -- Will be the only remaining memory block.
+  let t3 = replicate 2 (replicate (n * 2) 0)
+
   -- Will initially be set to use the memory of t1.  Will end up using the
   -- memory of t3 through t2 through t1.
   let t0 = map (+ 1) ns
@@ -18,8 +21,6 @@ let main [n] (ns: [n]i32): [][]i32 =
   -- Will use index 1 of the memory of t3.
   let t2 = concat_to (n * 2) ns t1
 
-  -- Will be the only remaining memory block.
-  let t3 = replicate 2 (replicate (n * 2) 0)
   let t3[1] = t2
 
   in t3
