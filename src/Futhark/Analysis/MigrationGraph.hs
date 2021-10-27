@@ -47,6 +47,15 @@ data Vertex = Vertex
     vertexEdges :: Edges
   }
 
+-- | Constructs a 'Vertex' with no route or edges declared.
+vertex :: Id -> BodyInfo -> Vertex
+vertex i bi = Vertex {
+    vertexId      = i,
+    vertexBody    = bi,
+    vertexRouting = NoRoute,
+    vertexEdges   = mempty
+  }
+
 -- | All relevant edges that have been declared from some vertex, plus
 -- bookkeeping to track their exhaustion and reversal.
 data Edges
@@ -67,6 +76,10 @@ instance Semigroup Edges where
 instance Monoid Edges where
   -- The empty set of edges.
   mempty = ToNodes Data.IntSet.empty Nothing
+
+-- Creates a set of edges where no edge is reversed or exhausted.
+declareEdges :: [Id] -> Edges
+declareEdges is = ToNodes (fromList is) Nothing
  
 -- | Route tracking for some vertex.
 -- If a route passes through the vertex then both an ingoing and an outgoing
@@ -88,21 +101,59 @@ data Routing
 -- exhausted edge.
 data Exhaustion = Exhausted | NotExhausted
 
+type Sink = ()
+
 -- | A map from vertex 'Id' to corresponding 'Vertex', unless that vertex has
 -- been marked as a sink.
-newtype Graph = Graph (IM.IntMap (Maybe Vertex))
+newtype Graph = Graph (IM.IntMap (Either Sink Vertex))
 
+-- | The empty graph.
 empty :: Graph
 empty = Graph (IM.empty)
 
-addEdges :: Edges -> Id -> Graph -> Graph
-addEdges es i g = g
+-- | Insert a new vertex in the graph. If its variable already is represented
+-- in the graph, the existing binding (vertex or sink) is replaced with the
+-- supplied vertex.
+insert :: Vertex -> Graph -> Graph
+insert v (Graph m) = Graph $ IM.insert (vertexId v) (Right v) m
 
-connectFromSource :: Id -> Graph -> Graph
-connectFromSource i g = g
+-- | Adjust the vertex with this specific id. When no vertex with that id is a
+-- member of the graph, the original graph is returned.
+adjust :: (Vertex -> Vertex) -> Id -> Graph -> Graph
+adjust f i (Graph m) = Graph $ IM.adjust f' i m
+  where
+    f' (Right v) = Right (f v)
+    f' x         = x
 
+-- | Connect the vertex with this id to a sink. When no vertex with that id is a
+-- member of the graph, the original graph is returned.
 connectToSink :: Id -> Graph -> Graph
-connectToSink i g = g
+connectToSink = adjust $ \v -> v { vertexEdges = ToSink }
+
+-- | Add these edges to the vertex with this id. When no vertex with that id is
+-- a member of the graph, the original graph is returned.
+addEdges :: Edges -> Id -> Graph -> Graph
+addEdges es = adjust $ \v -> v { vertexEdges = es <> vertexEdges v }
+
+
+
+
+
+
+
+insertSink :: Id -> Graph -> Graph
+insertSink i g = g
+
+insertWith :: (Vertex -> Vertex -> Vertex) -> Vertex -> Graph -> Graph
+insertWith f i g = g
+
+delete :: Id -> Graph -> Graph
+delete i g = g
+
+
+
+member :: Id -> Graph -> Bool
+member i g = False
 
 
 

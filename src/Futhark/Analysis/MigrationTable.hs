@@ -18,7 +18,7 @@ import qualified Data.Map as M
 import Data.Maybe (fromMaybe, isNothing)
 import Data.Set (Set, (\\))
 import qualified Data.Set as S
-import Futhark.Analysis.MigrationGraph hiding (empty)
+import Futhark.Analysis.MigrationGraph hiding (empty, addEdges)
 import qualified Futhark.Analysis.MigrationGraph as MG
 import Futhark.IR.GPU
 
@@ -137,23 +137,60 @@ analyseStms hof usage stms =
 buildGraph :: HostOnlyFuns -> HostUsage -> Stms GPU -> Graph
 buildGraph hof usage stms =
   let g = execGrapher hof (graphStms stms)
-  in foldr MG.connectToSink g usage
+  in foldl' (flip MG.connectToSink) g usage
 
-type Grapher = RWS (HostOnlyFuns, BodyInfo) StmInfo (Graph, IdSet)
+type Grapher = RWS (HostOnlyFuns, BodyInfo) StmInfo State
+
+data State = State {
+    stateGraph :: Graph,
+    stateGraphedScalars :: IdSet,
+    stateSources :: Sources,
+    stateHostOnlyAccOps :: Set VName
+  }
+
+type Sources = ([Id], [Id]) -- Unrouted sources, routed sources
 
 execGrapher :: HostOnlyFuns -> Grapher a -> Graph
-execGrapher hof g = fst . fst $ execRWS g env st
+execGrapher hof g = stateGraph . fst $ execRWS g env st
   where
     env      = (hof, rootInfo)
-    st       = (MG.empty, IS.empty)
+    st       = State MG.empty IS.empty ([], []) S.empty
     rootInfo = BodyInfo 0 Nothing
 
+-- | Get the graph under construction.
 getGraph :: Grapher Graph
-getGraph = gets fst
+getGraph = gets stateGraph
+
+-- Update graph under construction.
+modifyGraph :: (Graph -> Graph) -> Grapher ()
+modifyGraph f =
+  modify $ \s -> s { stateGraph = f (stateGraph s) }
 
 -- All scalar variables that have been added to the graph so far.
 getGraphedScalars :: Grapher IdSet
-getGraphedScalars = gets snd
+getGraphedScalars = gets stateGraphedScalars
+
+-- Update the contents of the graphed scalar set.
+modifyGraphedScalars :: (IdSet -> IdSet) -> Grapher ()
+modifyGraphedScalars f =
+  modify $ \s -> s { stateGraphedScalars = f (stateGraphedScalars s) }
+
+-- All source connected vertices that have been added to the graph so far.
+getSources :: Grapher Sources
+getSources = gets stateSources
+
+-- Update the set source connected vertices.
+modifySources :: (Sources -> Sources) -> Grapher ()
+modifySources f =
+  modify $ \s -> s { stateSources = f (stateSources s) }
+
+-- Is an accumulator associated with an operator that only can execute on host?
+isAccOpHostOnly :: VName -> Grapher Bool
+isAccOpHostOnly a = gets $ (S.member a) . stateHostOnlyAccOps
+
+-- Get the 'BodyInfo' corresponding to the current body.
+getBodyInfo :: Grapher BodyInfo
+getBodyInfo = asks $ snd
 
 -- Can applications of this function be moved to device?
 isHostOnlyFun :: Name -> Grapher Bool
@@ -171,45 +208,87 @@ graphStms = mapM_ graphStm
 
 graphStm :: Stm GPU -> Grapher ()
 graphStm stm = do
-  let b = scopeOf stm
+  let b = boundBy stm
   let e = stmExp stm 
   ho <- isHostOnly stm
   if ho then graphHostOnly e else case e of
-    BasicOp (Assert {})    -> graphAssert    b e
-    BasicOp (Index {})     -> graphRead      b e
-    BasicOp (UpdateAcc {}) -> graphUpdateAcc b e
-    BasicOp _              -> graphSimple    b e
-    Apply {}               -> graphSimple    b e
-    If {}                  -> graphIf        b e
-    DoLoop {}              -> graphLoop      b e
-    WithAcc {}             -> graphWithAcc   b e
-    Op _                   -> graphHostOnly    e
+    BasicOp (Assert {})    -> graphAssert    (one b) e
+    BasicOp (Index {})     -> graphRead      (one b) e
+    BasicOp (UpdateAcc {}) -> graphUpdateAcc (one b) e
+    BasicOp _              -> graphSimple         b  e
+    Apply {}               -> graphSimple         b  e
+    If {}                  -> graphIf             b  e
+    DoLoop {}              -> graphLoop           b  e
+    WithAcc {}             -> graphWithAcc        b  e
+    Op _                   -> graphHostOnly          e
+  where
+    one [x] = x
+    one _   = error "type error: unexpected number of pattern elements"
 
-type Bound = Scope GPU
+type Bound = [(Id, Type)]
+
+boundBy :: Stm GPU -> Bound
+boundBy (Let (Pat pes) _ _) = map f pes
+  where
+    f (PatElem v dec) = (nameToId v, typeOf dec)
 
 graphHostOnly :: Exp GPU -> Grapher ()
-graphHostOnly e = return ()
+graphHostOnly e = do
+  -- Connect the vertices of all operands to sinks to mark that they are
+  -- required on host. Transitive reads that they depend upon can be delayed
+  -- no further.
+  ops <- graphedScalarOperands e
+  addEdges MG.ToSink ops
+  modifyGraphedScalars (\s -> s `IS.difference` ops)
 
-graphAssert :: Bound -> Exp GPU -> Grapher ()
-graphAssert b e = return ()
+graphAssert :: (Id, Type) -> Exp GPU -> Grapher ()
+graphAssert b e = do
+  -- In the worst case, each assertion moved to device costs an extra read
+  -- during next (read) synchronization. To ensure that the number of reads
+  -- does not increase by moving assertions, each assertion must in itself
+  -- delay one read. By connecting assertion certificates to sinks, a set of
+  -- assertions will only be moved to device if they delay a greater number
+  -- of reads.
+  graphSimple [b] e
+  modifyGraph (MG.connectToSink $ fst b)
 
-graphRead :: Bound -> Exp GPU -> Grapher ()
-graphRead b e = return ()
+graphRead :: (Id, Type) -> Exp GPU -> Grapher ()
+graphRead (i, t) e = do
+  ops <- graphedScalarOperands e
+  addSource i t
+  addEdges (MG.declareEdges [i]) ops
 
-graphUpdateAcc :: Bound -> Exp GPU -> Grapher ()
-graphUpdateAcc b e = return ()
+graphUpdateAcc :: (Id, Type) -> Exp GPU -> Grapher ()
+graphUpdateAcc b e | (_, Acc a _ _ _) <- b = do
+  ho <- isAccOpHostOnly a
+  if ho then graphHostOnly e -- op is host-only => UpdateAcc is host-only
+        else graphRead b e   -- ensure UpdateAcc is moved to device
+graphUpdateAcc _ _ = error
+  "type error: UpdateAcc did not produce accumulator typed value"
 
 graphSimple :: Bound -> Exp GPU -> Grapher ()
-graphSimple b e = return ()
+graphSimple b e = do
+  -- Only add vertices to the graph if they have a transitive dependency to
+  -- an array read. Transitive dependencies through variables required on host
+  -- (those that are connected to sinks) do not count.
+  ops <- graphedScalarOperands e
+  if IS.null ops then return ()
+  else do
+    forM_ b (uncurry addVertex)
+    addEdges (MG.declareEdges $ fst $ unzip b) ops
 
 graphIf :: Bound -> Exp GPU -> Grapher ()
-graphIf b e = return ()
+graphIf b e = return () -- TODO
 
 graphLoop :: Bound -> Exp GPU -> Grapher ()
-graphLoop b e = return ()
+graphLoop b e = return () -- TODO
 
 graphWithAcc :: Bound -> Exp GPU -> Grapher ()
-graphWithAcc b e = return ()
+graphWithAcc b e = return () -- TODO
+
+
+
+
 
 
 
@@ -241,6 +320,25 @@ instance Monoid StmInfo where
 
 
 
+-- | Adds a vertex to the graph for the given 'Id'.
+addVertex :: Id -> Type -> Grapher ()
+addVertex i t = do
+  bi <- getBodyInfo
+  let v = MG.vertex i bi
+  when (isScalarType t) $ modifyGraphedScalars (IS.insert i)
+  modifyGraph (MG.insert v)
+
+-- | Adds a source connected vertex to the graph for the given 'Id'.
+addSource :: Id -> Type -> Grapher ()
+addSource i t = do
+  addVertex i t
+  modifySources $ \(r, u) -> (r, i:u)
+
+-- | Adds the given edges to each vertex identified by the 'IdSet'.
+addEdges :: Edges -> IdSet -> Grapher ()
+addEdges es is =
+  modifyGraph $ \g -> IS.foldl' (flip $ MG.addEdges es) g is
+
 -- Reduces the variables to just the 'Id's of those that are scalars and which
 -- have been graphed.
 onlyGraphedScalars :: Foldable t => t VName -> Grapher IdSet
@@ -249,7 +347,9 @@ onlyGraphedScalars vs = do
   gss <- getGraphedScalars
   return (IS.intersection is gss)
 
--- Returns all non-kernel scalar operands that previously have been graphed.
+-- Returns all non-kernel scalar operands that previously have been graphed,
+-- minus those that have been connected to sinks. That is all operands with
+-- statements that can be moved to device to potentially avoid a read.
 graphedScalarOperands :: Exp GPU -> Grapher IdSet
 graphedScalarOperands e = onlyGraphedScalars $ fst (collect e)
   where
