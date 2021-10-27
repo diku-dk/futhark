@@ -275,13 +275,13 @@ diffLoop
               forM loop_free $ \v -> do
                 adj_v <- adjVName v
                 adj_init <- lookupAdjVal v
-                t <- lookupType v
+                t <- lookupType adj_init
                 return (Param mempty adj_v (toDecl t Unique), Var adj_init)
 
             param_tuples_loop_vars_adj <- forM loop_vars' $ \(_, vs) -> do
               adj_vs <- adjVName vs
               adj_init <- lookupAdjVal vs
-              t <- lookupType vs
+              t <- lookupType adj_init
               return (Param mempty adj_vs (toDecl t Unique), Var adj_init)
 
             let param_tuples_adj = param_tuples_res_adj <> param_tuples_free_adj <> param_tuples_loop_vars_adj
