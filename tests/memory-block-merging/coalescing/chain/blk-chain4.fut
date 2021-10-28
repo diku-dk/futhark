@@ -11,12 +11,10 @@
 --           [15, 15, 15]]
 --        }
 -- structure cpu { Alloc 1 }
--- structure gpu { Alloc 2 }
+-- structure gpu { Alloc 3 }
 
 -- The GPU pipeline has additional allocations for the two 'replicate'
--- expressions, though the reuse transformation merges them.
-
--- I think we need two-dimensional overlap checking for this to work.
+-- expressions.
 
 let main [n] (a: [n]i32): [][n]i32 =
   let x    = map (\i -> replicate n (i + 10)) a |> opaque

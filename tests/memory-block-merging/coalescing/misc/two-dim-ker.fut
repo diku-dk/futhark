@@ -4,13 +4,11 @@
 -- compiler makes sure there is only a single alloc before we even get to memory
 -- block merging.
 --
--- The GPU pipeline on the other hand does have one copy, and can be reduced
--- from 4 allocations to 3 allocations with a coalescing.
 -- ==
 -- input { [ [ [0i64, 1i64], [2i64, 3i64] ], [ [4i64, 5i64], [6i64, 7i64] ] ]  }
 -- output { [[[0i64, 9i64], [0i64, 13i64]]]}
--- structure cpu { Alloc 1 }
--- structure gpu { Alloc 3 }
+-- structure cpu { Alloc 2 }
+-- structure gpu { Alloc 2 }
 
 let main [n] (xsss: [n][n][n]i64): [][n][n]i64 =
   let (_,asss) = split (1) xsss
