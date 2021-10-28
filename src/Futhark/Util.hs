@@ -54,6 +54,7 @@ module Futhark.Util
     zEncodeString,
     atMostChars,
     invertMap,
+    traverseFold,
   )
 where
 
@@ -66,6 +67,7 @@ import qualified Data.ByteString as BS
 import qualified Data.ByteString.Base16 as Base16
 import Data.Char
 import Data.Either
+import Data.Foldable (fold)
 import Data.Function ((&))
 import Data.List (foldl', genericDrop, genericSplitAt, sort)
 import qualified Data.List.NonEmpty as NE
@@ -469,3 +471,6 @@ invertMap m =
   M.toList m
     & fmap (swap . first S.singleton)
     & foldr (uncurry $ M.insertWith (<>)) mempty
+
+traverseFold :: (Monoid m, Traversable t, Applicative f) => (a -> f m) -> t a -> f m
+traverseFold f = fmap fold . traverse f
