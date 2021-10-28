@@ -21,6 +21,7 @@ import qualified Data.Map as M
 import Data.Maybe (mapMaybe)
 import Futhark.Analysis.PrimExp
 import Futhark.IR.Syntax.Core
+import Futhark.Util
 import Futhark.Util.Pretty
 import GHC.Generics
 import Prelude hiding (negate)
@@ -65,20 +66,21 @@ negate :: Prod -> Prod
 negate p = p {negated = not $ negated p}
 
 sumToExp :: SofP -> Exp
-sumToExp [] =
-  ValueExp $ IntValue $ Int64Value 0
+sumToExp [] = val 0
 sumToExp [x] = prodToExp x
-sumToExp (x : xs) = foldl (BinOpExp $ Add Int64 OverflowUndef) (prodToExp x) $ map prodToExp xs
+sumToExp (x : xs) =
+  foldl (BinOpExp $ Add Int64 OverflowUndef) (prodToExp x) $
+    map prodToExp xs
 
 prodToExp :: Prod -> Exp
-prodToExp (Prod _ []) = ValueExp $ IntValue $ Int64Value 0
+prodToExp (Prod _ []) = val 1
 prodToExp (Prod True atoms) =
-  foldl (BinOpExp $ Mul Int64 OverflowUndef) (ValueExp $ IntValue $ Int64Value $ -1) atoms
+  foldl (BinOpExp $ Mul Int64 OverflowUndef) (val (-1)) atoms
 prodToExp (Prod False (atom : atoms)) =
   foldl (BinOpExp $ Mul Int64 OverflowUndef) atom atoms
 
 simplify0 :: Exp -> SofP
-simplify0 = removeNegations . sumOfProducts
+simplify0 = fixPoint (mapMaybe applyZero . map removeOnes . removeNegations) . sumOfProducts
 
 simplify :: Exp -> Exp
 simplify = sumToExp . simplify0
@@ -86,9 +88,21 @@ simplify = sumToExp . simplify0
 simplify' :: TExp -> TExp
 simplify' = TPrimExp . simplify . untyped
 
+applyZero :: Prod -> Maybe Prod
+applyZero p@(Prod neg atoms)
+  | any (== val 0) atoms = Nothing
+  | otherwise = Just p
+
+removeOnes :: Prod -> Prod
+removeOnes (Prod neg atoms) =
+  Prod neg $ filter (/= val 1) atoms
+
 removeNegations :: SofP -> SofP
 removeNegations [] = []
 removeNegations (t : ts) =
   case break (== negate t) ts of
     (start, _ : rest) -> removeNegations $ start <> rest
     _ -> t : removeNegations ts
+
+val :: Int64 -> Exp
+val = ValueExp . IntValue . Int64Value
