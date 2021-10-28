@@ -1115,22 +1115,16 @@ equivalent ixf1 ixf2 =
 
 -- | Computes the maximum span of an 'LMAD'. The result is the lowest and
 -- highest flat values representable by that 'LMAD'.
-flatSpan :: LMAD (TPrimExp Int64 VName) -> (TPrimExp Int64 VName, TPrimExp Int64 VName)
-flatSpan (LMAD ofs dims) =
-  let (l, u) =
-        foldl
-          ( \(lower, upper) dim ->
-              let spn = ldStride dim * (ldShape dim - 1)
-               in -- If you've gotten this far, you've already lost
-                  trace
-                    "Game over"
-                    ( sMin64 (spn + lower) lower,
-                      sMax64 (spn + upper) upper
-                    )
-          )
-          (ofs, ofs)
-          dims
-   in (l, u)
+flatSpan :: LMAD (TPrimExp Int64 VName) -> (TPrimExp Int64 VName)
+flatSpan (LMAD _ dims) =
+  foldr
+    ( \dim upper ->
+        let spn = ldStride dim * (ldShape dim - 1)
+         in -- If you've gotten this far, you've already lost
+            trace "Game over" (spn + upper)
+    )
+    0
+    dims
 
 -- | Conservatively flatten a list of LMAD dimensions
 --
@@ -1143,18 +1137,19 @@ conservativeFlatten l@(LMAD offset []) =
   return $ LMAD offset [LMADDim 1 0 1 0 Inc]
 conservativeFlatten l@(LMAD _ [_]) =
   return $ l
-conservativeFlatten l@(LMAD _ dims) = do
+conservativeFlatten l@(LMAD offset dims) = do
   strd <-
     foldM
       (\x y -> gcd x y)
-      ( ldStride $ head dims
-      )
+      (ldStride $ head dims)
       $ map ldStride dims
 
   return $ LMAD offset [LMADDim strd 0 (shp + 1) 0 Unknown]
   where
-    (offset, shp) = flatSpan l
+    shp = flatSpan l
 
+-- | Very conservative GCD calculation. Returns 'Nothing' if the result cannot
+-- be immediately determined. Does not recurse at all.
 gcd :: TPrimExp Int64 VName -> TPrimExp Int64 VName -> Maybe (TPrimExp Int64 VName)
 gcd x y = gcd' (abs x) (abs y)
   where
