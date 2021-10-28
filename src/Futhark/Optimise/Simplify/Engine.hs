@@ -542,11 +542,10 @@ hasFree ks _ _ need = ks `namesIntersect` freeIn need
 isNotSafe :: ASTRep rep => BlockPred rep
 isNotSafe _ _ = not . safeExp . stmExp
 
-isInPlaceBound :: BlockPred m
-isInPlaceBound _ _ = isUpdate . stmExp
+isConsuming :: Aliased rep => BlockPred rep
+isConsuming _ _ = isUpdate . stmExp
   where
-    isUpdate (BasicOp Update {}) = True
-    isUpdate _ = False
+    isUpdate e = consumedInExp e /= mempty
 
 isNotCheap :: ASTRep rep => BlockPred rep
 isNotCheap _ _ = not . cheapStm
@@ -629,7 +628,7 @@ hoistCommon cond ifsort ((res1, usages1), stms1) ((res2, usages2), stms2) = do
       block =
         branch_blocker
           `orIf` ((isNotSafe `orIf` isNotCheap) `andAlso` stmIs (not . desirableToHoist))
-          `orIf` isInPlaceBound
+          `orIf` isConsuming
           `orIf` isNotHoistableBnd
 
   rules <- asksEngineEnv envRules
