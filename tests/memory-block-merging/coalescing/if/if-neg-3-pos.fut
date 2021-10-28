@@ -6,6 +6,8 @@
 -- in a different representation: This program calculates the exact same thing
 -- as if-neg-3.fut, and yet this one is able to do two more coalescings just by
 -- moving a statement.
+--
+-- However, existentials in ifs are not supported yet.
 -- ==
 -- input { true
 --         [[9, 9], [9, 9]]
@@ -14,8 +16,8 @@
 -- output { [[2, 5], [9, 9]]
 --          2
 --        }
--- structure cpu { Alloc 0 }
--- structure gpu { Alloc 0 }
+-- structure cpu { Alloc 2 }
+-- structure gpu { Alloc 2 }
 
 let main [n] (cond: bool) (x: *[n][n]i32) (a: [n]i32): (*[n][n]i32, i32) =
   let b = map (+ 1) a
