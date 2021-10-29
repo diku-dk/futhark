@@ -102,7 +102,15 @@ replaceInHostOp :: HostOp GPUMem () -> ReplaceM (HostOp GPUMem ()) (HostOp GPUMe
 replaceInHostOp (SegOp (SegMap lvl sp tps body)) = do
   stms <- mapM replaceInStm $ kernelBodyStms body
   return $ SegOp $ SegMap lvl sp tps $ body {kernelBodyStms = stms}
-replaceInHostOp (SegOp _) = undefined
+replaceInHostOp (SegOp (SegRed lvl sp binops tps body)) = do
+  stms <- mapM replaceInStm $ kernelBodyStms body
+  return $ SegOp $ SegRed lvl sp binops tps body
+replaceInHostOp (SegOp (SegScan lvl sp binops tps body)) = do
+  stms <- mapM replaceInStm $ kernelBodyStms body
+  return $ SegOp $ SegScan lvl sp binops tps body
+replaceInHostOp (SegOp (SegHist lvl sp hist_ops tps body)) = do
+  stms <- mapM replaceInStm $ kernelBodyStms body
+  return $ SegOp $ SegHist lvl sp hist_ops tps body
 replaceInHostOp op = return op
 
 generalizeIxfun :: [PatElemT dec] -> PatElemT LetDecMem -> BodyReturns -> ReplaceM inner BodyReturns

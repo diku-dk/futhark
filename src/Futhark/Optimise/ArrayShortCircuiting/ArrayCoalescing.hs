@@ -185,7 +185,29 @@ shortCircuitSeqMem _ _ _ _ = return
 
 shortCircuitGPUMem :: LUTabFun -> Pat (Aliases GPUMem) -> Op (Aliases GPUMem) -> TopDnEnv GPUMem -> BotUpEnv -> ShortCircuitM GPUMem BotUpEnv
 shortCircuitGPUMem _ _ (Alloc _ _) _ bu_env = return bu_env
-shortCircuitGPUMem lutab pat@(Pat ps) e@(Inner (SegOp (SegMap lvl space tps kernel_body))) td_env bu_env = do
+shortCircuitGPUMem lutab pat@(Pat ps) e@(Inner (SegOp (SegMap _ space _ kernel_body))) td_env bu_env =
+  shortCircuitGPUMemHelper lutab pat space kernel_body td_env bu_env
+shortCircuitGPUMem lutab pat@(Pat ps) e@(Inner (SegOp (SegRed _ space binops _ kernel_body))) td_env bu_env =
+  let to_fail = M.filter (\entry -> namesFromList (M.keys $ vartab entry) `namesIntersect` foldMap (freeIn . segBinOpLambda) binops) $ activeCoals bu_env
+      (active, inh) = foldl markFailedCoal (activeCoals bu_env, inhibit bu_env) $ M.keys to_fail
+      bu_env' = bu_env {activeCoals = active, inhibit = inh}
+   in shortCircuitGPUMemHelper lutab pat space kernel_body td_env bu_env'
+shortCircuitGPUMem lutab pat@(Pat ps) e@(Inner (SegOp (SegScan _ space binops _ kernel_body))) td_env bu_env =
+  let to_fail = M.filter (\entry -> namesFromList (M.keys $ vartab entry) `namesIntersect` foldMap (freeIn . segBinOpLambda) binops) $ activeCoals bu_env
+      (active, inh) = foldl markFailedCoal (activeCoals bu_env, inhibit bu_env) $ M.keys to_fail
+      bu_env' = bu_env {activeCoals = active, inhibit = inh}
+   in shortCircuitGPUMemHelper lutab pat space kernel_body td_env bu_env'
+shortCircuitGPUMem lutab pat@(Pat ps) e@(Inner (SegOp (SegHist _ space binops _ kernel_body))) td_env bu_env =
+  let to_fail = M.filter (\entry -> namesFromList (M.keys $ vartab entry) `namesIntersect` foldMap (freeIn . histOp) binops) $ activeCoals bu_env
+      (active, inh) = foldl markFailedCoal (activeCoals bu_env, inhibit bu_env) $ M.keys to_fail
+      bu_env' = bu_env {activeCoals = active, inhibit = inh}
+   in shortCircuitGPUMemHelper lutab pat space kernel_body td_env bu_env'
+shortCircuitGPUMem _ _ (Inner (SizeOp _)) _ bu_env = return bu_env
+shortCircuitGPUMem _ _ (Inner (OtherOp ())) _ bu_env = return bu_env
+shortCircuitGPUMem _ _ _ _ _ = undefined
+
+shortCircuitGPUMemHelper :: LUTabFun -> Pat (Aliases GPUMem) -> SegSpace -> KernelBody (Aliases GPUMem) -> TopDnEnv GPUMem -> BotUpEnv -> ShortCircuitM GPUMem BotUpEnv
+shortCircuitGPUMemHelper lutab pat@(Pat ps) space kernel_body td_env bu_env = do
   let (actv0, inhibit0) =
         filterSafetyCond2and5
           (activeCoals bu_env)
@@ -193,7 +215,7 @@ shortCircuitGPUMem lutab pat@(Pat ps) e@(Inner (SegOp (SegMap lvl space tps kern
           (scals bu_env)
           td_env
           (patElems pat)
-      (actv_return, inhibit_return) = foldl makeSegMapCoals (actv0, inhibit0) $ zip ps $ kernelBodyResult kernel_body
+      (actv_return, inhibit_return) = foldl (makeSegMapCoals td_env space kernel_body) (actv0, inhibit0) $ zip ps $ kernelBodyResult kernel_body
   bu_env' <- mkCoalsTabStms lutab (kernelBodyStms kernel_body) td_env $ bu_env {activeCoals = actv0 <> actv_return, inhibit = inhibit_return}
 
   -- Check partial overlap
@@ -312,66 +334,56 @@ shortCircuitGPUMem lutab pat@(Pat ps) e@(Inner (SegOp (SegMap lvl space tps kern
       )
       --  $ bu_env' {activeCoals = actv1, successCoals = successCoals1, inhibit = inhibit1}
       $ bu_env''''
-  where
-    -- where
-    --   foldFun (act, inhb, succ) (PatElem name (_, MemArray _ _ _ (ArrayIn mem ixfun)))
-    --     | Just info <- M.lookup mem act =
-    --       -- Check that ixfun doesn't overlap with any destination uses in info?
-    --       let (act', succ') = markSuccessCoal (act, succ) (traceWith "success mem" mem) (traceWith "success info" info)
-    --        in (act', inhb, succ')
-    --   foldFun res _ = res
 
-    makeSegMapCoals (active, inhibit) x@(PatElem pat_name (_, MemArray _ _ _ (ArrayIn pat_mem pat_ixf)), Returns _ _ (Var return_name))
-      | Just mb@(MemBlock tp shp return_mem return_ixf) <-
-          traceWith
-            ( "x: " <> pretty x
-                <> "\nscope: "
-                <> pretty (M.keys $ scope td_env <> scopeOf (kernelBodyStms kernel_body))
-                <> "\ngetScopeMemInfo for: "
-                <> pretty return_name
-            )
-            $ getScopeMemInfo return_name $ scope td_env <> scopeOf (kernelBodyStms kernel_body) =
-        case M.lookup pat_mem active of
-          Nothing ->
-            -- We are not in a transitive case
-            if IxFun.hasOneLmad pat_ixf
-              then case ( maybe False (pat_mem `nameIn`) $ M.lookup return_mem inhibit,
-                          Coalesced InPlaceCoal mb mempty
-                            & M.singleton return_name
-                            & flip (addInvAliassesVarTab td_env) return_name
-                        ) of
-                (False, Just vtab) ->
-                  (active <> traceWith "Adding segmap coal entry!" (M.singleton return_mem $ CoalsEntry pat_mem pat_ixf (oneName pat_mem) vtab mempty mempty), inhibit)
-                _ -> (active, inhibit)
-              else (active, inhibit)
-          Just trans ->
-            case ( maybe False (dstmem trans `nameIn`) $ M.lookup return_mem inhibit,
-                   Coalesced InPlaceCoal (MemBlock tp shp (dstmem trans) (dstind trans)) mempty
-                     & M.singleton return_name
-                     & flip (addInvAliassesVarTab td_env) return_name
-                     & fmap (M.adjust (\(Coalesced knd (MemBlock pt shp mem ixf) subst) -> Coalesced knd (MemBlock pt shp mem $ traceWith "segmap ixf after" $ IxFun.slice (traceWith "segmap ixf before" ixf) $ traceWith "fullSlice" $ fullSlice shp $ traceWith "segmap slice" $ Slice $ map (DimFix . TPrimExp . flip LeafExp (IntType Int64) . fst) $ unSegSpace space) subst) return_name)
-                 ) of
-              (False, Just vtab) ->
-                let opts = if dstmem trans == pat_mem then mempty else M.insert pat_name pat_mem $ optdeps trans
-                 in ( traceWith "Adding transitive segmap coal entry!" $
-                        M.insert
-                          return_mem
-                          ( CoalsEntry
-                              (dstmem trans)
-                              (dstind trans)
-                              (oneName pat_mem <> alsmem trans)
-                              vtab
-                              opts
-                              mempty
-                          )
-                          active,
-                      inhibit
-                    )
-              _ -> (active, inhibit)
-    makeSegMapCoals x _ = x
-shortCircuitGPUMem _ _ (Inner (SizeOp _)) _ bu_env = return bu_env
-shortCircuitGPUMem _ _ (Inner (OtherOp ())) _ bu_env = return bu_env
-shortCircuitGPUMem _ _ _ _ _ = undefined
+makeSegMapCoals :: TopDnEnv GPUMem -> SegSpace -> KernelBody (Aliases GPUMem) -> (CoalsTab, InhibitTab) -> (PatElemT (VarAliases, LetDecMem), KernelResult) -> (CoalsTab, InhibitTab)
+makeSegMapCoals td_env space kernel_body (active, inhibit) x@(PatElem pat_name (_, MemArray _ _ _ (ArrayIn pat_mem pat_ixf)), Returns _ _ (Var return_name))
+  | Just mb@(MemBlock tp shp return_mem return_ixf) <-
+      traceWith
+        ( "x: " <> pretty x
+            <> "\nscope: "
+            <> pretty (M.keys $ scope td_env <> scopeOf (kernelBodyStms kernel_body))
+            <> "\ngetScopeMemInfo for: "
+            <> pretty return_name
+        )
+        $ getScopeMemInfo return_name $ scope td_env <> scopeOf (kernelBodyStms kernel_body) =
+    case M.lookup pat_mem active of
+      Nothing ->
+        -- We are not in a transitive case
+        if IxFun.hasOneLmad pat_ixf
+          then case ( maybe False (pat_mem `nameIn`) $ M.lookup return_mem inhibit,
+                      Coalesced InPlaceCoal mb mempty
+                        & M.singleton return_name
+                        & flip (addInvAliassesVarTab td_env) return_name
+                    ) of
+            (False, Just vtab) ->
+              (active <> traceWith "Adding segmap coal entry!" (M.singleton return_mem $ CoalsEntry pat_mem pat_ixf (oneName pat_mem) vtab mempty mempty), inhibit)
+            _ -> (active, inhibit)
+          else (active, inhibit)
+      Just trans ->
+        case ( maybe False (dstmem trans `nameIn`) $ M.lookup return_mem inhibit,
+               Coalesced InPlaceCoal (MemBlock tp shp (dstmem trans) (dstind trans)) mempty
+                 & M.singleton return_name
+                 & flip (addInvAliassesVarTab td_env) return_name
+                 & fmap (M.adjust (\(Coalesced knd (MemBlock pt shp mem ixf) subst) -> Coalesced knd (MemBlock pt shp mem $ traceWith "segmap ixf after" $ IxFun.slice (traceWith "segmap ixf before" ixf) $ traceWith "fullSlice" $ fullSlice shp $ traceWith "segmap slice" $ Slice $ map (DimFix . TPrimExp . flip LeafExp (IntType Int64) . fst) $ unSegSpace space) subst) return_name)
+             ) of
+          (False, Just vtab) ->
+            let opts = if dstmem trans == pat_mem then mempty else M.insert pat_name pat_mem $ optdeps trans
+             in ( traceWith "Adding transitive segmap coal entry!" $
+                    M.insert
+                      return_mem
+                      ( CoalsEntry
+                          (dstmem trans)
+                          (dstind trans)
+                          (oneName pat_mem <> alsmem trans)
+                          vtab
+                          opts
+                          mempty
+                      )
+                      active,
+                  inhibit
+                )
+          _ -> (active, inhibit)
+makeSegMapCoals _ _ _ x _ = x
 
 fullSlice :: ShapeBase SubExp -> Slice (TPrimExp Int64 VName) -> Slice (TPrimExp Int64 VName)
 fullSlice (Shape shp) (Slice slc) = Slice $ slc ++ (map (\d -> DimSlice 0 (TPrimExp $ primExpFromSubExp (IntType Int64) d) 1) $ drop (length shp - length slc) shp)
