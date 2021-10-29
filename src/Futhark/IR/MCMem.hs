@@ -63,7 +63,7 @@ instance TC.Checkable MCMem where
   checkLParamDec = checkMemInfo
   checkLetBoundDec = checkMemInfo
   checkRetType = mapM_ (TC.checkExtType . declExtTypeOf)
-  primFParam name t = return $ Param name (MemPrim t)
+  primFParam name t = return $ Param mempty name (MemPrim t)
   matchPat = matchPatToExp
   matchReturnType = matchFunctionReturnType
   matchBranchType = matchBranchReturnType
@@ -78,6 +78,9 @@ instance BuilderOps (Engine.Wise MCMem) where
   mkExpDecB pat e = return $ Engine.mkWiseExpDec pat () e
   mkBodyB stms res = return $ Engine.mkWiseBody () stms res
   mkLetNamesB = mkLetNamesB''
+
+instance TraverseOpStms (Engine.Wise MCMem) where
+  traverseOpStms = traverseMemOpStms (traverseMCOpStms (const pure))
 
 simplifyProg :: Prog MCMem -> PassM (Prog MCMem)
 simplifyProg = simplifyProgGeneric simpleMCMem

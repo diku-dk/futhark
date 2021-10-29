@@ -66,7 +66,7 @@ instance TC.Checkable GPUMem where
   checkLParamDec = checkMemInfo
   checkLetBoundDec = checkMemInfo
   checkRetType = mapM_ $ TC.checkExtType . declExtTypeOf
-  primFParam name t = return $ Param name (MemPrim t)
+  primFParam name t = return $ Param mempty name (MemPrim t)
   matchPat = matchPatToExp
   matchReturnType = matchFunctionReturnType
   matchBranchType = matchBranchReturnType
@@ -81,6 +81,9 @@ instance BuilderOps (Engine.Wise GPUMem) where
   mkExpDecB pat e = return $ Engine.mkWiseExpDec pat () e
   mkBodyB stms res = return $ Engine.mkWiseBody () stms res
   mkLetNamesB = mkLetNamesB''
+
+instance TraverseOpStms (Engine.Wise GPUMem) where
+  traverseOpStms = traverseMemOpStms (traverseHostOpStms (const pure))
 
 simplifyProg :: Prog GPUMem -> PassM (Prog GPUMem)
 simplifyProg = simplifyProgGeneric simpleGPUMem

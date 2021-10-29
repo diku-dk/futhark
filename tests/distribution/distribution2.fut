@@ -2,7 +2,7 @@
 -- blackScholes computation from GenericPricing.
 --
 -- ==
--- structure distributed {
+-- structure gpu {
 --   SegMap 6
 --   DoLoop 10
 -- }

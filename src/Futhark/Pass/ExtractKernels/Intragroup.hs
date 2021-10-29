@@ -261,7 +261,7 @@ intraGroupStm lvl stm@(Let pat aux e) = do
         certifying (stmAuxCerts aux) $
           addStms =<< segRed lvl' pat w [SegBinOp comm red_lam' nes mempty] map_lam' arrs [] []
         parallelMin [w]
-    Op (Hist w ops bucket_fun arrs) -> do
+    Op (Hist w arrs ops bucket_fun) -> do
       ops' <- forM ops $ \(HistOp num_bins rf dests nes op) -> do
         (op', nes', shape) <- determineReduceOp op nes
         let op'' = soacsLambdaToGPU op'
@@ -281,7 +281,7 @@ intraGroupStm lvl stm@(Let pat aux e) = do
             replaceSets (IntraAcc x y log) =
               IntraAcc (S.map (map replace) x) (S.map (map replace) y) log
         censor replaceSets $ intraGroupStms lvl stream_stms
-    Op (Scatter w lam ivs dests) -> do
+    Op (Scatter w ivs lam dests) -> do
       write_i <- newVName "write_i"
       space <- mkSegSpace [(write_i, w)]
 

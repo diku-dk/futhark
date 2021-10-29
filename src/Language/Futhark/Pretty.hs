@@ -364,9 +364,13 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (ExpBase f vn) where
     text "#[" <> ppr attr <> text "]" </> pprPrec (-1) e
   pprPrec i (AppExp e _) = pprPrec i e
 
-instance Pretty AttrInfo where
-  ppr (AttrAtom attr) = ppr attr
-  ppr (AttrComp f attrs) = ppr f <> parens (commasep $ map ppr attrs)
+instance IsName vn => Pretty (AttrAtom vn) where
+  ppr (AtomName v) = ppr v
+  ppr (AtomInt x) = ppr x
+
+instance IsName vn => Pretty (AttrInfo vn) where
+  ppr (AttrAtom attr _) = ppr attr
+  ppr (AttrComp f attrs _) = ppr f <> parens (commasep $ map ppr attrs)
 
 instance (Eq vn, IsName vn, Annot f) => Pretty (FieldBase f vn) where
   ppr (RecordFieldExplicit name e _) = ppr name <> equals <> ppr e
@@ -403,6 +407,7 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (PatBase f vn) where
     Nothing -> text "_"
   ppr (PatLit e _ _) = ppr e
   ppr (PatConstr n _ ps _) = text "#" <> ppr n <+> sep (map ppr ps)
+  ppr (PatAttr attr p _) = text "#[" <> ppr attr <> text "]" <+/> ppr p
 
 ppAscription :: Pretty t => Maybe t -> Doc
 ppAscription Nothing = mempty

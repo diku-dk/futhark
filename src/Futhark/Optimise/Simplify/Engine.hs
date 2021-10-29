@@ -423,8 +423,8 @@ hoistStms rules block vtable uses orig_stms = do
         vtables = scanl (flip ST.insertStm) vtable' $ stmsToList stms
 
     hoistable usageInStm (uses', stms) (stm, vtable')
-      | not $ any (`UT.isUsedDirectly` uses') $ provides stm -- Dead statement.
-        =
+      | not $ any (`UT.isUsedDirectly` uses') $ provides stm =
+        -- Dead statement.
         return (uses', stms)
       | otherwise = do
         res <-
@@ -446,7 +446,7 @@ hoistStms rules block vtable uses orig_stms = do
           Just optimstms -> do
             changed
             (uses'', stms') <- simplifyStmsBottomUp' vtable' uses' optimstms
-            return (uses'', stms' ++ stms)
+            return (uses'', stms' <> stms)
 
 blockUnhoistedDeps ::
   ASTRep rep =>
@@ -473,17 +473,17 @@ expandUsage ::
   Stm rep ->
   UT.UsageTable
 expandUsage usageInStm vtable utable stm@(Let pat _ e) =
-  UT.expand (`ST.lookupAliases` vtable) (usageInStm stm <> usageThroughAliases)
-    <> ( if any (`UT.isSize` utable) (patNames pat)
-           then UT.sizeUsages (freeIn e)
-           else mempty
-       )
-    <> utable
+  stmUsages <> utable
   where
+    stmUsages =
+      UT.expand (`ST.lookupAliases` vtable) (usageInStm stm <> usageThroughAliases)
+        <> ( if any (`UT.isSize` utable) (patNames pat)
+               then UT.sizeUsages (freeIn e)
+               else mempty
+           )
     usageThroughAliases =
-      mconcat $
-        mapMaybe usageThroughBindeeAliases $
-          zip (patNames pat) (patAliases pat)
+      mconcat . mapMaybe usageThroughBindeeAliases $
+        zip (patNames pat) (patAliases pat)
     usageThroughBindeeAliases (name, aliases) = do
       uses <- UT.lookup name utable
       return $ mconcat $ map (`UT.usage` uses) $ namesToList aliases
@@ -542,11 +542,10 @@ hasFree ks _ _ need = ks `namesIntersect` freeIn need
 isNotSafe :: ASTRep rep => BlockPred rep
 isNotSafe _ _ = not . safeExp . stmExp
 
-isInPlaceBound :: BlockPred m
-isInPlaceBound _ _ = isUpdate . stmExp
+isConsuming :: Aliased rep => BlockPred rep
+isConsuming _ _ = isUpdate . stmExp
   where
-    isUpdate (BasicOp Update {}) = True
-    isUpdate _ = False
+    isUpdate e = consumedInExp e /= mempty
 
 isNotCheap :: ASTRep rep => BlockPred rep
 isNotCheap _ _ = not . cheapStm
@@ -629,7 +628,7 @@ hoistCommon cond ifsort ((res1, usages1), stms1) ((res2, usages2), stms2) = do
       block =
         branch_blocker
           `orIf` ((isNotSafe `orIf` isNotCheap) `andAlso` stmIs (not . desirableToHoist))
-          `orIf` isInPlaceBound
+          `orIf` isConsuming
           `orIf` isNotHoistableBnd
 
   rules <- asksEngineEnv envRules
@@ -802,7 +801,11 @@ simplifyExp (WithAcc inputs lam) = do
         nes' <- simplify nes
         return (Just (op_lam', nes'), op_lam_stms)
     (,op_stms) <$> ((,,op') <$> simplify shape <*> simplify arrs)
-  (lam', lam_stms) <- simplifyLambda lam
+  (lam', lam_stms) <-
+    simplifyLambdaWithBody (isFalse True) lam $
+      localVtable (ST.noteAccTokens (zip (map paramName (lambdaParams lam)) inputs')) $
+        simplifyBody (map (const Observe) (lambdaReturnType lam)) $
+          lambdaBody lam
   pure (WithAcc inputs' lam', mconcat inputs_stms <> lam_stms)
 
 -- Special case for simplification of commutative BinOps where we
@@ -850,6 +853,7 @@ type SimplifiableRep rep =
     Simplifiable (LParamInfo rep),
     Simplifiable (RetType rep),
     Simplifiable (BranchType rep),
+    TraverseOpStms (Wise rep),
     CanBeWise (Op rep),
     ST.IndexOp (OpWithWisdom (Op rep)),
     BuilderOps (Wise rep),
@@ -974,14 +978,22 @@ simplifyLambdaMaybeHoist ::
   BlockPred (Wise rep) ->
   Lambda rep ->
   SimpleM rep (Lambda (Wise rep), Stms (Wise rep))
-simplifyLambdaMaybeHoist blocked lam@(Lambda params body rettype) = do
+simplifyLambdaMaybeHoist blocked lam =
+  simplifyLambdaWithBody blocked lam $
+    simplifyBody (map (const Observe) (lambdaReturnType lam)) $ lambdaBody lam
+
+simplifyLambdaWithBody ::
+  SimplifiableRep rep =>
+  BlockPred (Wise rep) ->
+  Lambda rep ->
+  SimpleM rep (SimplifiedBody rep Result) ->
+  SimpleM rep (Lambda (Wise rep), Stms (Wise rep))
+simplifyLambdaWithBody blocked lam@(Lambda params _body rettype) m = do
   params' <- mapM (traverse simplify) params
   let paramnames = namesFromList $ boundByLambda lam
   ((lamstms, lamres), hoisted) <-
-    enterLoop $
-      bindLParams params' $
-        blockIf (blocked `orIf` hasFree paramnames `orIf` isConsumed) $
-          simplifyBody (map (const Observe) rettype) body
+    enterLoop . bindLParams params' $
+      blockIf (blocked `orIf` hasFree paramnames `orIf` isConsumed) m
   body' <- constructBody lamstms lamres
   rettype' <- simplify rettype
   return (Lambda params' body' rettype', hoisted)

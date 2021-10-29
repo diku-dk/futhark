@@ -297,7 +297,7 @@ generateContextFuns ::
   GC.CompilerM OpenCL () ()
 generateContextFuns cfg cost_centres kernels sizes failures = do
   final_inits <- GC.contextFinalInits
-  (fields, init_fields) <- GC.contextContents
+  (fields, init_fields, free_fields) <- GC.contextContents
   let forCostCentre name =
         [ ( [C.csdecl|typename int64_t $id:(kernelRuntime name);|],
             [C.cstm|ctx->$id:(kernelRuntime name) = 0;|]
@@ -411,6 +411,7 @@ generateContextFuns cfg cost_centres kernels sizes failures = do
   GC.publicDef_ "context_free" GC.InitDecl $ \s ->
     ( [C.cedecl|void $id:s(struct $id:ctx* ctx);|],
       [C.cedecl|void $id:s(struct $id:ctx* ctx) {
+                                 $stms:free_fields
                                  free_constants(ctx);
                                  cuda_cleanup(&ctx->cuda);
                                  free_lock(&ctx->lock);
