@@ -119,6 +119,12 @@ instance Pretty (ShapeDecl Int64) where
 instance Pretty (ShapeDecl Bool) where
   ppr (ShapeDecl ds) = mconcat (map (brackets . ppr) ds)
 
+instance Pretty (ShapeDecl dim) => Pretty (RetTypeBase dim as) where
+  ppr = pprPrec 0
+  pprPrec p (RetType [] t) = pprPrec p t
+  pprPrec _ (RetType dims t) =
+    text "?" <> mconcat (map (brackets . pprName) dims) <> text "." <> ppr t
+
 instance Pretty (ShapeDecl dim) => Pretty (ScalarTypeBase dim as) where
   ppr = pprPrec 0
   pprPrec _ (Prim et) = ppr et
@@ -175,6 +181,8 @@ instance (Eq vn, IsName vn) => Pretty (TypeExp vn) where
     align $ cat $ punctuate (text " |" <> softline) $ map ppConstr cs
     where
       ppConstr (name, fs) = text "#" <> ppr name <+> sep (map ppr fs)
+  ppr (TEDim dims te _) =
+    text "?" <> mconcat (map (brackets . pprName) dims) <> text "." <> ppr te
 
 instance (Eq vn, IsName vn) => Pretty (TypeArgExp vn) where
   ppr (TypeArgExpDim d _) = brackets $ ppr d
@@ -433,11 +441,11 @@ instance Pretty Liftedness where
   ppr Lifted = text "^"
 
 instance (Eq vn, IsName vn, Annot f) => Pretty (TypeBindBase f vn) where
-  ppr (TypeBind name l params usertype _ _) =
+  ppr (TypeBind name l params te rt _ _) =
     text "type" <> ppr l <+> pprName name
       <+> spread (map ppr params)
       <+> equals
-      <+> ppr usertype
+      <+> maybe (ppr te) ppr (unAnnot rt)
 
 instance (Eq vn, IsName vn) => Pretty (TypeParamBase vn) where
   ppr (TypeParamDim name _) = brackets $ pprName name

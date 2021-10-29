@@ -95,7 +95,8 @@ kernelRules =
       [ RuleOp redomapIotaToLoop,
         RuleOp SOAC.simplifyKnownIterationSOAC,
         RuleOp SOAC.removeReplicateMapping,
-        RuleOp SOAC.liftIdentityMapping
+        RuleOp SOAC.liftIdentityMapping,
+        RuleOp SOAC.simplifyMapIota
       ]
       [ RuleBasicOp removeUnnecessaryCopy
       ]
