@@ -362,21 +362,23 @@ updateAdjSlice (Slice [DimFix i]) v d =
 updateAdjSlice slice v d = do
   t <- lookupType v
   v_adj <- lookupAdjVal v
-  let isDimFix (DimFix i) = i
-      isDimFix _ =
-        error $ "Invalid slice for accumulator update: " ++ pretty slice
   v_adj_t <- lookupType v_adj
   v_adj' <- case v_adj_t of
-    Acc {} ->
-      letExp (baseString v_adj) . BasicOp $
-        UpdateAcc v_adj (map isDimFix (unSlice slice)) [Var d]
+    Acc {} -> do
+      let dims = sliceDims slice
+      ~[v_adj'] <-
+        tabNest (length dims) [d, v_adj] $ \is [d', v_adj'] -> do
+          slice' <-
+            traverse (toSubExp "index") $
+              fixSlice (fmap pe64 slice) $ map le64 is
+          letTupExp (baseString v_adj') . BasicOp $
+            UpdateAcc v_adj' slice' [Var d']
+      pure v_adj'
     _ -> do
       v_adjslice <-
         if primType t
           then pure v_adj
-          else
-            letExp (baseString v ++ "_slice") $
-              BasicOp $ Index v_adj slice
+          else letExp (baseString v ++ "_slice") $ BasicOp $ Index v_adj slice
       letInPlace "updated_adj" v_adj slice =<< addExp v_adjslice d
   insAdj v v_adj'
 
