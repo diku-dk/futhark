@@ -16,7 +16,7 @@ where
 import Data.Foldable
 import Data.Function ((&))
 import Data.Functor ((<&>))
-import Data.List (uncons)
+import Data.List (intersect, uncons)
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.Map.Strict as M
 import Data.Maybe
@@ -87,70 +87,65 @@ getUseSumFromStm ::
   Stm (Aliases rep) ->
   -- | A pair of written and written+read memory locations, along with their
   -- associated array and the index function used
-  ([(VName, VName, IxFun)], [(VName, VName, IxFun)])
+  Maybe ([(VName, VName, IxFun)], [(VName, VName, IxFun)])
 getUseSumFromStm td_env coal_tab (Let Pat {} _ (BasicOp (Index arr (Slice slc))))
   | Just (MemBlock _ shp _ _) <- getScopeMemInfo arr (scope td_env),
-    length slc == length (shapeDims shp) && all isFix slc =
-    case getDirAliasedIxfn td_env coal_tab arr of
-      Nothing -> error "impossible"
-      Just (mem_b, mem_arr, ixfn_arr) ->
-        let new_ixfn = IxFun.slice ixfn_arr $ Slice $ map (fmap pe64) slc
-         in ([], [(mem_b, mem_arr, new_ixfn)])
+    length slc == length (shapeDims shp) && all isFix slc = do
+    (mem_b, mem_arr, ixfn_arr) <- getDirAliasedIxfn td_env coal_tab $ traceWith "in here?" arr
+    let new_ixfn = IxFun.slice ixfn_arr $ Slice $ map (fmap pe64) slc
+    return ([], [(mem_b, mem_arr, new_ixfn)])
   where
     isFix DimFix {} = True
     isFix _ = False
-getUseSumFromStm _ _ (Let Pat {} _ (BasicOp Index {})) = ([], []) -- incomplete slices
+getUseSumFromStm _ _ (Let Pat {} _ (BasicOp Index {})) = Just ([], []) -- incomplete slices
 getUseSumFromStm td_env coal_tab (Let (Pat pes) _ (BasicOp (ArrayLit ses _))) =
   let rds = mapMaybe (getDirAliasedIxfn td_env coal_tab) $ mapMaybe seName ses
       wrts = mapMaybe (getDirAliasedIxfn td_env coal_tab . patElemName) pes
-   in (wrts, wrts ++ rds)
+   in Just (wrts, wrts ++ rds)
   where
     seName (Var a) = Just a
     seName (Constant _) = Nothing
 -- In place update @x[slc] <- a@. In the "in-place update" case,
 --   summaries should be added after the old variable @x@ has
 --   been added in the active coalesced table.
-getUseSumFromStm td_env coal_tab (Let (Pat [x']) _ (BasicOp (Update _ _x (Slice slc) a_se)))
-  | Just (m_b, m_x, x_ixfn) <- getDirAliasedIxfn td_env coal_tab (patElemName x') =
-    let x_ixfn_slc = IxFun.slice x_ixfn $ Slice $ map (fmap pe64) slc
-        r1 = (m_b, m_x, x_ixfn_slc)
-     in case a_se of
-          Constant _ -> ([r1], [r1])
-          Var a -> case getDirAliasedIxfn td_env coal_tab a of
-            Nothing -> ([r1], [r1])
-            Just r2 -> ([r1], [r1, r2])
-getUseSumFromStm _ _ (Let Pat {} _ (BasicOp Update {})) = error "impossible"
-getUseSumFromStm td_env coal_tab (Let (Pat [y]) _ (BasicOp (Copy x))) =
+getUseSumFromStm td_env coal_tab (Let (Pat [x']) _ (BasicOp (Update _ _x (Slice slc) a_se))) = do
+  (m_b, m_x, x_ixfn) <- getDirAliasedIxfn td_env coal_tab (patElemName x')
+  let x_ixfn_slc = IxFun.slice x_ixfn $ Slice $ map (fmap pe64) slc
+      r1 = (m_b, m_x, x_ixfn_slc)
+  case a_se of
+    Constant _ -> Just ([r1], [r1])
+    Var a -> case getDirAliasedIxfn td_env coal_tab a of
+      Nothing -> Just ([r1], [r1])
+      Just r2 -> Just ([r1], [r1, r2])
+getUseSumFromStm td_env coal_tab (Let (Pat [y]) _ (BasicOp (Copy x))) = do
   -- y = copy x
-  let wrt = getDirAliasedIxfn td_env coal_tab $ patElemName y
-      rd = getDirAliasedIxfn td_env coal_tab x
-   in case (wrt, rd) of
-        (Just w, Just r) -> ([w], [w, r])
-        _ -> error $ "Impossible, " ++ pretty x ++ " should be an array"
+  wrt <- getDirAliasedIxfn td_env coal_tab $ patElemName y
+  rd <- getDirAliasedIxfn td_env coal_tab x
+  return ([wrt], [wrt, rd])
 getUseSumFromStm _ _ (Let Pat {} _ (BasicOp Copy {})) = error "Impossible"
 getUseSumFromStm td_env coal_tab (Let (Pat ys) _ (BasicOp (Concat _i a bs _ses))) =
   -- concat
   let ws = mapMaybe (getDirAliasedIxfn td_env coal_tab . patElemName) ys
       rs = mapMaybe (getDirAliasedIxfn td_env coal_tab) (a : bs)
-   in (ws, ws ++ rs)
+   in Just (ws, ws ++ rs)
 getUseSumFromStm td_env coal_tab (Let (Pat ys) _ (BasicOp (Manifest _perm x))) =
   let ws = mapMaybe (getDirAliasedIxfn td_env coal_tab . patElemName) ys
       rs = mapMaybe (getDirAliasedIxfn td_env coal_tab) [x]
-   in (ws, ws ++ rs)
+   in Just (ws, ws ++ rs)
 getUseSumFromStm td_env coal_tab (Let (Pat ys) _ (BasicOp (Replicate _shp se))) =
   let ws = mapMaybe (getDirAliasedIxfn td_env coal_tab . patElemName) ys
    in case se of
-        Constant _ -> (ws, ws)
-        Var x -> (ws, ws ++ mapMaybe (getDirAliasedIxfn td_env coal_tab) [x])
+        Constant _ -> Just (ws, ws)
+        Var x -> Just (ws, ws ++ mapMaybe (getDirAliasedIxfn td_env coal_tab) [x])
 getUseSumFromStm td_env coal_tab (Let (Pat [x]) _ (BasicOp (FlatUpdate _ (FlatSlice offset slc) v)))
   | Just (m_b, m_x, x_ixfn) <- getDirAliasedIxfn td_env coal_tab (patElemName x) =
     let x_ixfn_slc = IxFun.flatSlice x_ixfn $ FlatSlice (pe64 offset) $ map (fmap pe64) slc
         r1 = (m_b, m_x, x_ixfn_slc)
      in case getDirAliasedIxfn td_env coal_tab v of
-          Nothing -> ([r1], [r1])
-          Just r2 -> ([r1], [r1, r2])
-getUseSumFromStm _ _ (Let Pat {} _ BasicOp {}) = ([], [])
-getUseSumFromStm _ _ (Let Pat {} _ (Op (Alloc _ _))) = ([], [])
+          Nothing -> Just ([r1], [r1])
+          Just r2 -> Just ([r1], [r1, r2])
+getUseSumFromStm _ _ (Let Pat {} _ BasicOp {}) = Just ([], [])
+getUseSumFromStm _ _ (Let Pat {} _ (Op (Alloc _ _))) = Just ([], [])
 getUseSumFromStm _ _ stm =
   -- if-then-else, loops are supposed to be treated separately,
   -- calls are not supported, and Ops are not yet supported
@@ -175,79 +170,106 @@ recordMemRefUses ::
 recordMemRefUses td_env bu_env stm =
   let active_tab = activeCoals bu_env
       inhibit_tab = inhibit bu_env
-      (stm_wrts, stm_uses) = traceWith ("stm: " <> pretty stm <> "\nuseSums") $ getUseSumFromStm td_env active_tab stm
       active_etries = M.toList active_tab
-
-      (mb_wrts, prev_uses, mb_lmads) =
-        unzip3 $
-          map
-            ( \(m_b, etry) ->
-                let alias_m_b = getAliases mempty m_b
-                    stm_uses' = filter (not . (`nameIn` alias_m_b) . tupFst) stm_uses
-                    all_aliases = foldl getAliases mempty $ namesToList $ alsmem etry
-                    ixfns = map tupThd $ filter ((`nameIn` all_aliases) . tupSnd) stm_uses'
-                    lmads' = mapMaybe mbLmad ixfns
-                    lmads'' =
-                      if length lmads' == length ixfns
-                        then Set $ S.fromList $ lmads'
-                        else Undeterminable
-
-                    wrt_ixfns = map tupThd $ filter ((`nameIn` alias_m_b) . tupFst) stm_wrts
-                    wrt_tmps = mapMaybe mbLmad wrt_ixfns
-                    prev_use =
-                      translateAccessSummary (scope td_env) (scals bu_env) $
-                        (dstrefs . memrefs) etry
-                    wrt_lmads' =
-                      if length wrt_tmps == length wrt_ixfns
-                        then Set $ S.fromList wrt_tmps
-                        else Undeterminable
-                    original_mem_aliases =
-                      fmap tupFst stm_uses
-                        & uncons
-                        & fmap fst
-                        & (=<<) (`M.lookup` active_tab)
-                        & fmap alsmem
-                        & fromMaybe mempty
-                    (wrt_lmads'', lmads) =
-                      if m_b `nameIn` original_mem_aliases
-                        then (wrt_lmads' <> lmads'', Set mempty)
-                        else (wrt_lmads', lmads'')
-                    no_overlap = noMemOverlap td_env prev_use wrt_lmads''
-                    wrt_lmads =
-                      if no_overlap
-                        then Just wrt_lmads''
-                        else Nothing
-                 in traceWith ("m_b: " <> pretty m_b <> "\nixfns: " <> pretty ixfns <> "\nlmads': " <> pretty lmads' <> "\nlmads'': " <> pretty lmads'' <> "\nresult") (wrt_lmads, prev_use, lmads)
+   in case traceWith "useSums" $ getUseSumFromStm td_env active_tab $ traceWith "stm" stm of
+        Nothing ->
+          foldl
+            ( \state (m_b, entry) ->
+                if not $ null $ patNames (stmPat stm) `intersect` M.keys (vartab entry)
+                  then markFailedCoal state m_b
+                  else state
             )
-            active_etries
+            (active_tab, inhibit_tab)
+            $ M.toList active_tab
+        Just (stm_wrts, stm_uses) ->
+          let (mb_wrts, prev_uses, mb_lmads) =
+                unzip3 $
+                  map
+                    ( \(m_b, etry) ->
+                        let alias_m_b = getAliases mempty m_b
+                            stm_uses' = filter (not . (`nameIn` alias_m_b) . tupFst) stm_uses
+                            all_aliases = foldl getAliases mempty $ namesToList $ alsmem etry
+                            ixfns = map tupThd $ filter ((`nameIn` all_aliases) . tupSnd) stm_uses'
+                            lmads' = mapMaybe mbLmad ixfns
+                            lmads'' =
+                              if length lmads' == length ixfns
+                                then Set $ S.fromList $ lmads'
+                                else Undeterminable
 
-      -- keep only the entries that do not overlap with the memory
-      -- blocks defined in @pat@ or @inner_free_vars@.
-      -- the others must be recorded in @inhibit_tab@ because
-      -- they violate the 3rd safety condition.
-      active_tab1 =
-        M.fromList $
-          map
-            ( \(wrts, (uses, prev_use, (k, etry))) ->
-                let mrefs' = (memrefs etry) {dstrefs = prev_use}
-                    etry' = etry {memrefs = mrefs'}
-                 in (k, addLmads wrts uses etry')
-            )
-            $ filter okMemRef $
-              zip mb_wrts $ zip3 mb_lmads prev_uses active_etries
-      failed_tab =
-        M.fromList $
-          map snd $
-            filter (not . okMemRef) $
-              zip mb_wrts active_etries
-      (_, inhibit_tab1) = foldl markFailedCoal (failed_tab, inhibit_tab) (M.keys failed_tab)
-   in (active_tab1, inhibit_tab1)
+                            wrt_ixfns = map tupThd $ filter ((`nameIn` alias_m_b) . tupFst) stm_wrts
+                            wrt_tmps = mapMaybe mbLmad wrt_ixfns
+                            prev_use =
+                              translateAccessSummary (scope td_env) (scals bu_env) $
+                                (dstrefs . memrefs) etry
+                            wrt_lmads' =
+                              if length wrt_tmps == length wrt_ixfns
+                                then Set $ S.fromList wrt_tmps
+                                else Undeterminable
+                            original_mem_aliases =
+                              fmap tupFst stm_uses
+                                & uncons
+                                & fmap fst
+                                & (=<<) (`M.lookup` active_tab)
+                                & fmap alsmem
+                                & fromMaybe mempty
+                            (wrt_lmads'', lmads) =
+                              if m_b `nameIn` original_mem_aliases
+                                then (wrt_lmads' <> lmads'', Set mempty)
+                                else (wrt_lmads', lmads'')
+                            no_overlap = noMemOverlap td_env prev_use wrt_lmads''
+                            wrt_lmads =
+                              if no_overlap
+                                then Just wrt_lmads''
+                                else Nothing
+                         in traceWith
+                              ( "m_b: "
+                                  <> pretty m_b
+                                  <> "\nixfns: "
+                                  <> pretty ixfns
+                                  <> "\nlmads': "
+                                  <> pretty lmads'
+                                  <> "\nlmads'': "
+                                  <> pretty lmads''
+                                  <> "\nprev_use: "
+                                  <> pretty prev_use
+                                  <> "\nwrt_lmads'': "
+                                  <> pretty wrt_lmads''
+                                  <> "\nno_overlap: "
+                                  <> pretty no_overlap
+                                  <> "\nresult"
+                              )
+                              (wrt_lmads, prev_use, lmads)
+                    )
+                    active_etries
+
+              -- keep only the entries that do not overlap with the memory
+              -- blocks defined in @pat@ or @inner_free_vars@.
+              -- the others must be recorded in @inhibit_tab@ because
+              -- they violate the 3rd safety condition.
+              active_tab1 =
+                M.fromList $
+                  trace "here?" $
+                    map
+                      ( \(wrts, (uses, prev_use, (k, etry))) ->
+                          let mrefs' = (memrefs etry) {dstrefs = prev_use}
+                              etry' = etry {memrefs = mrefs'}
+                           in (k, addLmads wrts uses etry')
+                      )
+                      $ trace "there?" $
+                        filter (isJust . fst) $
+                          traceWith ("balba: " <> pretty stm <> "\nblab") $
+                            zip mb_wrts $ zip3 (traceWith "mb" mb_lmads) (traceWith "prev" prev_uses) $ traceWith "active?" active_etries
+              failed_tab =
+                M.fromList $
+                  map snd $
+                    filter (not . isJust . fst) $
+                      zip mb_wrts $ trace "active2?" active_etries
+              (_, inhibit_tab1) = foldl markFailedCoal (failed_tab, inhibit_tab) $ trace "active3" (M.keys failed_tab)
+           in trace "done in recordmemref?" (active_tab1, inhibit_tab1)
   where
     tupFst (a, _, _) = a
     tupSnd (_, b, _) = b
     tupThd (_, _, c) = c
-    okMemRef (Nothing, _) = False
-    okMemRef (_, _) = True
     getAliases acc m =
       oneName m
         <> acc

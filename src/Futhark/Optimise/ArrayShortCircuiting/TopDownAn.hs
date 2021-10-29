@@ -30,6 +30,8 @@ import Futhark.Optimise.ArrayShortCircuiting.DataStructs
 
 traceWith' s a = trace (s <> ": " <> show a) a
 
+traceWith s a = trace (s <> ": " <> pretty a) a
+
 type ScopeTab rep = Scope (Aliases rep)
 -- ^ maps array-variable names to various info, including
 --   types, memory block and index function, etc.
@@ -149,7 +151,7 @@ instance HasUsage () where
 
 -- | fills in the TopDnEnv table
 topdwnTravBinding ::
-  (ASTRep rep, Op rep ~ MemOp inner, CanBeAliased inner, HasUsage (OpWithAliases inner)) =>
+  (ASTRep rep, Op rep ~ MemOp inner, CanBeAliased inner, HasUsage (OpWithAliases inner), HasMemBlock (Aliases rep)) =>
   TopDnEnv rep ->
   Stm (Aliases rep) ->
   TopDnEnv rep
@@ -164,8 +166,25 @@ topdwnTravBinding env stm@(Let pat _ (Op (Inner inner))) =
     { scope = scope env <> scopeOf stm <> scopeHelper inner,
       usage_table = computeUsage (patNames pat) inner <> usageInStm stm <> usage_table env
     }
+-- topdwnTravBinding env stm@(Let pat _ e@(If cond then_body else_body _)) =
+--   let res = getDirAliasFromExp e
+--       new_aliases =
+--         foldMap
+--           ( \(pe, then_res, else_res) -> case (getScopeMemInfo (patElemName pe) (scope env <> scopeOf stm), then_res, else_res) of
+--               (Just (MemBlock _ _ m_x ixf), Var v1, Var v2) ->
+--                 if not $ m_x `elem` patNames pat && v1 == v2
+--                   then M.singleton (patElemName pe) (v1, id, Nothing)
+--                   else mempty
+--               Nothing -> mempty
+--           )
+--           $ zip3 (patElems pat) (map resSubExp $ bodyResult then_body) (trace ("diralias: " <> res) $ map resSubExp $ bodyResult else_body)
+--    in env
+--         { v_alias = v_alias env <> new_aliases,
+--           scope = scope env <> scopeOf stm,
+--           usage_table = usageInStm stm <> usage_table env
+--         }
 topdwnTravBinding env stm@(Let (Pat [pe]) _ e)
-  | Just (x, ixfn) <- getDirAliasFromExp e =
+  | Just (x, ixfn) <- (\e -> trace ("YIP! stm: " <> pretty stm <> "\nalias: " <> show (fmap fst e)) e) $ getDirAliasFromExp e =
     let ixfn_inv = getInvAliasFromExp e
      in env
           { v_alias = M.insert (patElemName pe) (x, ixfn, ixfn_inv) (v_alias env),
@@ -272,12 +291,12 @@ getTransitiveAlias _ _ _ _ = Nothing
 -- the access in the space of the destination block.
 getDirAliasedIxfn :: HasMemBlock (Aliases rep) => TopDnEnv rep -> CoalsTab -> VName -> Maybe (VName, VName, IxFun)
 getDirAliasedIxfn td_env coals_tab x =
-  case getScopeMemInfo x (scope td_env) of
+  case traceWith "scopeMemInfo" $ getScopeMemInfo x (scope td_env) of
     Just (MemBlock _ _ m_x orig_ixfun) ->
-      case M.lookup m_x coals_tab of
-        Just coal_etry ->
-          let (Coalesced _ (MemBlock _ _ m ixf) _) = walkAliasTab (v_alias td_env) (vartab coal_etry) x
-           in Just (m_x, m, ixf)
+      case traceWith "coal_entry" $ M.lookup m_x coals_tab of
+        Just coal_etry -> do
+          (Coalesced _ (MemBlock _ _ m ixf) _) <- walkAliasTab (v_alias td_env) (vartab coal_etry) $ traceWith "getdir" x
+          return (m_x, m, ixf)
         Nothing ->
           -- This value is not subject to coalescing at the moment. Just return the
           -- original index function
@@ -289,14 +308,14 @@ walkAliasTab ::
   VarAliasTab ->
   M.Map VName Coalesced ->
   VName ->
-  Coalesced
+  Maybe Coalesced
 walkAliasTab _ vtab x
   | Just c <- M.lookup x vtab =
-    c -- @x@ is in @vartab@ together with its new ixfun
+    Just c -- @x@ is in @vartab@ together with its new ixfun
 walkAliasTab alias_tab vtab x
   | Just (x0, alias0, _) <- M.lookup x alias_tab =
-    walkAliasTab alias_tab vtab x0
-walkAliasTab _ _ _ = error "impossible"
+    walkAliasTab alias_tab vtab $ trace ("found alias for " <> pretty x) x0
+walkAliasTab alias_tab vtab x = Nothing -- error ("impossible!\nCouldn't find " <> pretty x <> " in vtab: " <> pretty vtab)
 
 -- | We assume @x@ is in @vartab@ and we add the variables that @x@ aliases
 --   for as long as possible following a chain of direct-aliasing operators,
