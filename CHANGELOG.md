@@ -9,12 +9,18 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
-* Much better code generation for segmented scans with vectorisable
-  operators.
-
 ### Removed
 
 ### Changed
+
+### Fixed
+
+## [0.20.6]
+
+### Added
+
+* Much better code generation for segmented scans with vectorisable
+  operators.
 
 ### Fixed
 
