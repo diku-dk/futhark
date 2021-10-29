@@ -1,5 +1,5 @@
 -- ==
--- structure distributed { SegMap 1 }
+-- structure gpu { SegMap 1 }
 
 let main iss =
   map (\is ->

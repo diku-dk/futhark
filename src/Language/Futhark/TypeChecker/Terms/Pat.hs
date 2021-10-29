@@ -256,6 +256,8 @@ checkPat' ::
   TermTypeM Pat
 checkPat' sizes (PatParens p loc) t =
   PatParens <$> checkPat' sizes p t <*> pure loc
+checkPat' sizes (PatAttr attr p loc) t =
+  PatAttr <$> checkAttr attr <*> checkPat' sizes p t <*> pure loc
 checkPat' _ (Id name _ loc) _
   | name' `elem` doNotShadow =
     typeError loc mempty $ "The" <+> text name' <+> "operator may not be redefined."

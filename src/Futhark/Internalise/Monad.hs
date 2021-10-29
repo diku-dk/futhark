@@ -35,7 +35,6 @@ import qualified Data.Map.Strict as M
 import Futhark.IR.SOACS
 import Futhark.MonadFreshNames
 import Futhark.Tools
-import Futhark.Util (takeLast)
 
 type FunInfo =
   ( [VName],
@@ -152,7 +151,7 @@ bindConstant :: VName -> FunDef SOACS -> InternaliseM ()
 bindConstant cname fd = do
   let stms = bodyStms $ funDefBody fd
       substs =
-        takeLast (length (funDefRetType fd)) $
+        drop (length (shapeContext (funDefRetType fd))) $
           map resSubExp $ bodyResult $ funDefBody fd
   addStms stms
   modify $ \s ->

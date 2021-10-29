@@ -13,6 +13,7 @@ module Futhark.IR.GPU.Op
 
     -- * Host operations
     HostOp (..),
+    traverseHostOpStms,
     typeCheckHostOp,
 
     -- * SegOp refinements
@@ -240,6 +241,15 @@ data HostOp rep op
   | SizeOp SizeOp
   | OtherOp op
   deriving (Eq, Ord, Show)
+
+-- | A helper for defining 'TraverseOpStms'.
+traverseHostOpStms ::
+  Monad m =>
+  OpStmsTraverser m op rep ->
+  OpStmsTraverser m (HostOp rep op) rep
+traverseHostOpStms _ f (SegOp segop) = SegOp <$> traverseSegOpStms f segop
+traverseHostOpStms _ _ (SizeOp sizeop) = pure $ SizeOp sizeop
+traverseHostOpStms onOtherOp f (OtherOp other) = OtherOp <$> onOtherOp f other
 
 instance (ASTRep rep, Substitute op) => Substitute (HostOp rep op) where
   substituteNames substs (SegOp op) =

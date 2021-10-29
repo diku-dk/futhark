@@ -11,7 +11,7 @@
 --     reduce (which becomes a segmented reduction)
 --
 -- ==
--- structure distributed {
+-- structure gpu {
 --   SegMap 2 SegRed 1
 -- }
 

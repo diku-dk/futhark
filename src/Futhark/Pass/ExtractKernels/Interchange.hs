@@ -56,7 +56,7 @@ interchangeLoop
     let loop_pat_expanded =
           Pat $ map expandPatElem $ patElems loop_pat
         new_params =
-          [Param pname $ fromDecl ptype | (Param pname ptype, _) <- merge]
+          [Param attrs pname $ fromDecl ptype | (Param attrs pname ptype, _) <- merge]
         new_arrs = map (paramName . fst) merge_expanded
         rettype = map rowType $ patTypes loop_pat_expanded
 
@@ -210,8 +210,8 @@ interchangeWithAcc1
       newAccLamParams ps = do
         let (cert_ps, acc_ps) = splitAt (length ps `div` 2) ps
         -- Should not rename the certificates.
-        acc_ps' <- forM acc_ps $ \(Param v t) ->
-          newParam (baseString v) t
+        acc_ps' <- forM acc_ps $ \(Param attrs v t) ->
+          Param attrs <$> newVName (baseString v) <*> pure t
         pure $ cert_ps <> acc_ps'
 
       num_accs = length inputs

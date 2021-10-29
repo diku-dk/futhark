@@ -6,7 +6,7 @@
 --
 -- ==
 --
--- structure distributed { SegMap 1 DoLoop 2 }
+-- structure gpu { SegMap 1 DoLoop 2 }
 
 let fftmp (num_paths: i64) (md_c: [][]f64) (zi: []f64): [num_paths]f64 =
   #[incremental_flattening(only_outer)]

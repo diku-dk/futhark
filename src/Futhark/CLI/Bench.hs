@@ -48,7 +48,8 @@ data BenchOptions = BenchOptions
     optEntryPoint :: Maybe String,
     optTuning :: Maybe String,
     optConcurrency :: Maybe Int,
-    optVerbose :: Int
+    optVerbose :: Int,
+    optTestSpec :: Maybe FilePath
   }
 
 initialBenchOptions :: BenchOptions
@@ -69,6 +70,7 @@ initialBenchOptions =
     (Just "tuning")
     Nothing
     0
+    Nothing
 
 runBenchmarks :: BenchOptions -> [FilePath] -> IO ()
 runBenchmarks opts paths = do
@@ -132,7 +134,8 @@ compileBenchmark ::
   BenchOptions ->
   (FilePath, ProgramTest) ->
   IO (Either SkipReason (FilePath, [InputOutputs]))
-compileBenchmark opts (program, spec) =
+compileBenchmark opts (program, program_spec) = do
+  spec <- maybe (pure program_spec) testSpecFromFileOrDie $ optTestSpec opts
   case testAction spec of
     RunCases cases _ _
       | "nobench" `notElem` testTags spec,
@@ -496,6 +499,11 @@ commandLineOptions =
           "NUM"
       )
       "Number of benchmarks to prepare (not run) concurrently.",
+    Option
+      []
+      ["spec-file"]
+      (ReqArg (\s -> Right $ \config -> config {optTestSpec = Just s}) "FILE")
+      "Use test specification from this file.",
     Option
       "v"
       ["verbose"]

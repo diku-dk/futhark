@@ -52,6 +52,7 @@ module Language.Futhark.Syntax
 
     -- * Abstract syntax tree
     AttrInfo (..),
+    AttrAtom (..),
     BinOp (..),
     IdentBase (..),
     Inclusiveness (..),
@@ -236,10 +237,16 @@ instance IsPrimValue Double where
 instance IsPrimValue Bool where
   primValue = BoolValue
 
+-- | The value of an 'AttrAtom'.
+data AttrAtom vn
+  = AtomName Name
+  | AtomInt Integer
+  deriving (Eq, Ord, Show)
+
 -- | The payload of an attribute.
-data AttrInfo
-  = AttrAtom Name
-  | AttrComp Name [AttrInfo]
+data AttrInfo vn
+  = AttrAtom (AttrAtom vn) SrcLoc
+  | AttrComp Name [AttrInfo vn] SrcLoc
   deriving (Eq, Ord, Show)
 
 -- | A type class for things that can be array dimensions.
@@ -463,7 +470,7 @@ type ValueType = TypeBase Int64 ()
 -- | The return type version of 'StructType'.
 type StructRetType = RetTypeBase (DimDecl VName) ()
 
--- | The return type version of 'PatternType'.
+-- | The return type version of 'PatType'.
 type PatRetType = RetTypeBase (DimDecl VName) Aliasing
 
 -- | A dimension declaration expression for use in a 'TypeExp'.
@@ -836,7 +843,7 @@ data ExpBase f vn
     -- Second arg is the row type of the rows of the array.
     ArrayLit [ExpBase f vn] (f PatType) SrcLoc
   | -- | An attribute applied to the following expression.
-    Attr AttrInfo (ExpBase f vn) SrcLoc
+    Attr (AttrInfo vn) (ExpBase f vn) SrcLoc
   | Project Name (ExpBase f vn) (f PatType) SrcLoc
   | -- | Numeric negation (ugly special case; Haskell did it first).
     Negate (ExpBase f vn) SrcLoc
@@ -973,6 +980,7 @@ data PatBase f vn
   | PatAscription (PatBase f vn) (TypeDeclBase f vn) SrcLoc
   | PatLit PatLit (f PatType) SrcLoc
   | PatConstr Name (f PatType) [PatBase f vn] SrcLoc
+  | PatAttr (AttrInfo vn) (PatBase f vn) SrcLoc
 
 deriving instance Showable f vn => Show (PatBase f vn)
 
@@ -989,6 +997,7 @@ instance Located (PatBase f vn) where
   locOf (PatAscription _ _ loc) = locOf loc
   locOf (PatLit _ _ loc) = locOf loc
   locOf (PatConstr _ _ _ loc) = locOf loc
+  locOf (PatAttr _ _ loc) = locOf loc
 
 -- | Documentation strings, including source location.
 data DocComment = DocComment String SrcLoc
@@ -1037,7 +1046,7 @@ data ValBindBase f vn = ValBind
     valBindParams :: [PatBase f vn],
     valBindBody :: ExpBase f vn,
     valBindDoc :: Maybe DocComment,
-    valBindAttrs :: [AttrInfo],
+    valBindAttrs :: [AttrInfo vn],
     valBindLocation :: SrcLoc
   }
 

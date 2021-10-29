@@ -62,6 +62,7 @@ module Futhark.IR.Mem
     RetTypeMem,
     BranchTypeMem,
     MemOp (..),
+    traverseMemOpStms,
     MemInfo (..),
     MemBound,
     MemBind (..),
@@ -181,6 +182,14 @@ data MemOp inner
     Alloc SubExp Space
   | Inner inner
   deriving (Eq, Ord, Show)
+
+-- | A helper for defining 'TraverseOpStms'.
+traverseMemOpStms ::
+  Monad m =>
+  OpStmsTraverser m inner rep ->
+  OpStmsTraverser m (MemOp inner) rep
+traverseMemOpStms _ _ op@Alloc {} = pure op
+traverseMemOpStms onInner f (Inner inner) = Inner <$> onInner f inner
 
 instance FreeIn inner => FreeIn (MemOp inner) where
   freeIn' (Alloc size _) = freeIn' size
@@ -607,7 +616,7 @@ matchLoopResultMem params = matchRetTypeToResult rettype
       MemAcc acc ispace ts u
     toRet (MemArray pt shape u (ArrayIn mem ixfun))
       | Just i <- mem `elemIndex` param_names,
-        Param _ (MemMem space) : _ <- drop i params =
+        Param _ _ (MemMem space) : _ <- drop i params =
         MemArray pt shape' u $ ReturnsNewBlock space i ixfun'
       | otherwise =
         MemArray pt shape' u $ ReturnsInBlock mem ixfun'
