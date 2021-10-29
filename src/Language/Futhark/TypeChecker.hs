@@ -19,7 +19,7 @@ where
 
 import Control.Monad.Except
 import Control.Monad.Writer hiding (Sum)
-import Data.Bifunctor (second)
+import Data.Bifunctor (first, second)
 import Data.Char (isAlpha, isAlphaNum)
 import Data.Either
 import Data.List (isPrefixOf)
@@ -130,7 +130,7 @@ initialEnv =
     intrinsicsModule = Env mempty initialTypeTable mempty mempty intrinsicsNameMap
 
     addIntrinsicT (name, IntrinsicType l ps t) =
-      Just (name, TypeAbbr l ps t)
+      Just (name, TypeAbbr l ps $ RetType [] t)
     addIntrinsicT _ =
       Nothing
 
@@ -165,7 +165,7 @@ checkForDuplicateDecs =
 
     f (ValDec vb) =
       check Term (valBindName vb) (srclocOf vb)
-    f (TypeDec (TypeBind name _ _ _ _ loc)) =
+    f (TypeDec (TypeBind name _ _ _ _ _ loc)) =
       check Type name loc
     f (SigDec (SigBind name _ _ loc)) =
       check Signature name loc
@@ -189,15 +189,16 @@ bindingTypeParams tparams = localEnv env
       mempty
         { envTypeTable =
             M.singleton v $
-              TypeAbbr l [] $
-                Scalar $ TypeVar () Nonunique (typeName v) []
+              TypeAbbr l [] . RetType [] . Scalar $
+                TypeVar () Nonunique (typeName v) []
         }
 
-emptyDimParam :: StructType -> Bool
-emptyDimParam = isNothing . traverseDims onDim
-  where
-    onDim _ pos (AnyDim _) | pos `elem` [PosImmediate, PosParam] = Nothing
-    onDim _ _ d = Just d
+checkTypeDecl ::
+  TypeDeclBase NoInfo Name ->
+  TypeM ([VName], TypeDeclBase Info VName, Liftedness)
+checkTypeDecl (TypeDecl te NoInfo) = do
+  (te', svars, RetType dims st, l) <- checkTypeExp te
+  pure (svars ++ dims, TypeDecl te' $ Info st, l)
 
 -- In this function, after the recursion, we add the Env of the
 -- current Spec *after* the one that is returned from the recursive
@@ -212,20 +213,14 @@ checkSpecs (ValSpec name tparams vtype doc loc : specs) =
     name' <- checkName Term name loc
     (tparams', vtype') <-
       checkTypeParams tparams $ \tparams' -> bindingTypeParams tparams' $ do
-        (vtype', _) <- checkTypeDecl vtype
+        (ext, vtype', _) <- checkTypeDecl vtype
+
+        unless (null ext) $
+          typeError loc mempty $
+            "All function parameters must have non-anonymous sizes."
+              </> "Hint: add size parameters to" <+> pquote (pprName name') <> "."
+
         return (tparams', vtype')
-
-    when (emptyDimParam $ unInfo $ expandedType vtype') $
-      typeError loc mempty $
-        "All function parameters must have non-anonymous sizes."
-          </> "Hint: add size parameters to" <+> pquote (pprName name') <> "."
-
-    let (params, _) = unfoldFunType $ unInfo $ expandedType vtype'
-    when (null params && any isSizeParam tparams) $
-      typeError
-        loc
-        mempty
-        "Size parameters are only allowed on bindings that also have value parameters."
 
     let binding = BoundV tparams' $ unInfo $ expandedType vtype'
         valenv =
@@ -258,10 +253,9 @@ checkSpecs (TypeSpec l name ps doc loc : specs) =
                   M.singleton (Type, name) $ qualName name',
                 envTypeTable =
                   M.singleton name' $
-                    TypeAbbr l ps' $
-                      Scalar $
-                        TypeVar () Nonunique (typeName name') $
-                          map typeParamToArg ps'
+                    TypeAbbr l ps' . RetType [] . Scalar $
+                      TypeVar () Nonunique (typeName name') $
+                        map typeParamToArg ps'
               }
       (abstypes, env, specs') <- localEnv tenv $ checkSpecs specs
       return
@@ -317,7 +311,9 @@ checkSigExp (SigSpecs specs loc) = do
 checkSigExp (SigWith s (TypeRef tname ps td trloc) loc) = do
   (abs, s_abs, s_env, s') <- checkSigExpToEnv s
   checkTypeParams ps $ \ps' -> do
-    (td', _) <- bindingTypeParams ps' $ checkTypeDecl td
+    (ext, td', _) <- bindingTypeParams ps' $ checkTypeDecl td
+    unless (null ext) $
+      typeError td' mempty "Anonymous dimensions are not allowed here."
     (tname', s_abs', s_env') <- refineEnv loc s_abs s_env tname ps' $ unInfo $ expandedType td'
     return (abs, MTy s_abs' $ ModEnv s_env', SigWith s' (TypeRef tname' ps' td' trloc) loc)
 checkSigExp (SigArrow maybe_pname e1 e2 loc) = do
@@ -532,7 +528,7 @@ checkForDuplicateSpecs =
 
     f (ValSpec name _ _ _ loc) =
       check Term name loc
-    f (TypeAbbrSpec (TypeBind name _ _ _ _ loc)) =
+    f (TypeAbbrSpec (TypeBind name _ _ _ _ _ loc)) =
       check Type name loc
     f (TypeSpec _ name _ _ loc) =
       check Type name loc
@@ -544,11 +540,12 @@ checkForDuplicateSpecs =
 checkTypeBind ::
   TypeBindBase NoInfo Name ->
   TypeM (Env, TypeBindBase Info VName)
-checkTypeBind (TypeBind name l tps td doc loc) =
+checkTypeBind (TypeBind name l tps te NoInfo doc loc) =
   checkTypeParams tps $ \tps' -> do
-    (td', l') <- bindingTypeParams tps' $ checkTypeDecl td
+    (te', svars, RetType dims t, l') <- bindingTypeParams tps' $ checkTypeExp te
+    let elab_t = RetType (svars ++ dims) t
 
-    let used_dims = typeDimNames $ unInfo $ expandedType td'
+    let used_dims = typeDimNames t
     case filter ((`S.notMember` used_dims) . typeParamName) $
       filter isSizeParam tps' of
       [] -> return ()
@@ -568,9 +565,9 @@ checkTypeBind (TypeBind name l tps td doc loc) =
             "Non-size-lifted type abbreviations may not contain size-lifted types."
               </> "Hint: consider using 'type~'."
       (Unlifted, _)
-        | emptyDimParam $ unInfo $ expandedType td' ->
+        | not $ null $ svars ++ dims ->
           typeError loc mempty $
-            "Non-lifted type abbreviations may not use anonymous sizes in their definition."
+            "Non-lifted type abbreviations may not use existential sizes in their definition."
               </> "Hint: use 'type~' or add size parameters to"
               <+> pquote (pprName name) <> "."
       _ -> return ()
@@ -580,18 +577,23 @@ checkTypeBind (TypeBind name l tps td doc loc) =
       return
         ( mempty
             { envTypeTable =
-                M.singleton name' $ TypeAbbr l tps' $ unInfo $ expandedType td',
+                M.singleton name' $ TypeAbbr l tps' elab_t,
               envNameMap =
                 M.singleton (Type, name) $ qualName name'
             },
-          TypeBind name' l tps' td' doc loc
+          TypeBind name' l tps' te' (Info elab_t) doc loc
         )
 
-entryPoint :: [Pat] -> Maybe (TypeExp VName) -> StructType -> EntryPoint
-entryPoint params orig_ret_te orig_ret =
+entryPoint :: [Pat] -> Maybe (TypeExp VName) -> StructRetType -> EntryPoint
+entryPoint params orig_ret_te (RetType ret orig_ret) =
   EntryPoint (map patternEntry params ++ more_params) rettype'
   where
-    (more_params, rettype') = onRetType orig_ret_te orig_ret
+    (more_params, rettype') = onRetType orig_ret_te $ first extToAny orig_ret
+
+    -- Since the entry point type is not a RetType but just a plain
+    -- StructType, we have to remove any existentially bound sizes.
+    extToAny (NamedDim v) | qualLeaf v `elem` ret = AnyDim Nothing
+    extToAny d = d
 
     patternEntry (PatParens p _) =
       patternEntry p
@@ -608,11 +610,10 @@ entryPoint params orig_ret_te orig_ret =
 
     pname (Named v) = baseName v
     pname Unnamed = "_"
-
-    onRetType (Just (TEArrow p t1_te t2_te _)) (Scalar (Arrow _ _ t1 t2)) =
+    onRetType (Just (TEArrow p t1_te t2_te _)) (Scalar (Arrow _ _ t1 (RetType _ t2))) =
       let (xs, y) = onRetType (Just t2_te) t2
        in (EntryParam (maybe "_" baseName p) (EntryType t1 (Just t1_te)) : xs, y)
-    onRetType _ (Scalar (Arrow _ p t1 t2)) =
+    onRetType _ (Scalar (Arrow _ p t1 (RetType _ t2))) =
       let (xs, y) = onRetType Nothing t2
        in (EntryParam (pname p) (EntryType t1 Nothing) : xs, y)
     onRetType te t =
@@ -632,10 +633,10 @@ checkValBind (ValBind entry fname maybe_tdecl NoInfo tparams params body doc att
     typeError loc mempty $
       withIndexLink "nested-entry" "Entry points may not be declared inside modules."
 
-  (fname', tparams', params', maybe_tdecl', rettype, retext, body') <-
+  (fname', tparams', params', maybe_tdecl', rettype@(RetType _ rettype_t), retext, body') <-
     checkFunDef (fname, maybe_tdecl, tparams, params, body, loc)
 
-  let (rettype_params, rettype') = unfoldFunType rettype
+  let (rettype_params, rettype') = unfoldFunType rettype_t
       entry' = Info (entryPoint params' maybe_tdecl' rettype) <$ entry
 
   case entry' of
@@ -659,7 +660,7 @@ checkValBind (ValBind entry fname maybe_tdecl NoInfo tparams params body doc att
           "Entry point parameter\n"
             </> indent 2 (ppr p)
             </> "\nwill have an opaque type, so the entry point will likely not be callable."
-      | nastyReturnType maybe_tdecl' rettype ->
+      | nastyReturnType maybe_tdecl' rettype_t ->
         warn loc $
           "Entry point return type\n"
             </> indent 2 (ppr rettype)
@@ -683,9 +684,9 @@ nastyType t@Array {} = nastyType $ stripArray 1 t
 nastyType _ = True
 
 nastyReturnType :: Monoid als => Maybe (TypeExp VName) -> TypeBase dim als -> Bool
-nastyReturnType Nothing (Scalar (Arrow _ _ t1 t2)) =
+nastyReturnType Nothing (Scalar (Arrow _ _ t1 (RetType _ t2))) =
   nastyType t1 || nastyReturnType Nothing t2
-nastyReturnType (Just (TEArrow _ te1 te2 _)) (Scalar (Arrow _ _ t1 t2)) =
+nastyReturnType (Just (TEArrow _ te1 te2 _)) (Scalar (Arrow _ _ t1 (RetType _ t2))) =
   (not (niceTypeExp te1) && nastyType t1)
     || nastyReturnType (Just te2) t2
 nastyReturnType (Just te) _
