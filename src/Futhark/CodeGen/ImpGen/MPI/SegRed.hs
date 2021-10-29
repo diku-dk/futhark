@@ -62,7 +62,7 @@ compileSegRed ::
   KernelBody MCMem ->
   MPIGen Imp.Code
 compileSegRed pat space reds kbody
-  | [(gtid, _w)] <- unSegSpace space,
+  | [(gtid, _nb_elements)] <- unSegSpace space,
     [SegBinOp _comm lam nes (Shape [])] <- reds = collect $ do
     -- Declaration of the accumulator variables
     -- We have multiple accumulators because ie. an array of tuples is represented as multiple arrays.
@@ -96,18 +96,16 @@ compileSegRed pat space reds kbody
     stage_one_mems <- forM (lambdaReturnType lam) $ \case
       Prim pt ->
         sAlloc "second_stage_acc" (typeSize $ Array pt (Shape [tvSize nb_nodes]) NoUniqueness) DefaultSpace
-      Array pt _ _ -> do
-        -- TODO : replace dumb value with the correct size.
-        sAlloc "second_stage_acc" (typeSize $ Array pt (Shape [tvSize nb_nodes, Constant $ IntValue $ Int64Value 100]) NoUniqueness) DefaultSpace
+      Array pt s _ -> do
+        sAlloc "second_stage_acc" (typeSize $ Array pt (Shape [tvSize nb_nodes, (\(Shape d) -> head d) s]) NoUniqueness) DefaultSpace
       _ -> error "Not implemented yet"
 
     -- Declare stage one results array
     stage_one_arrays <- forM (zip stage_one_mems (lambdaReturnType lam)) $ \case
       (mem, Prim pt) ->
         sArrayInMem "second_stage_arr" pt (Shape [tvSize nb_nodes]) mem
-      (mem, Array pt _ _) -> do
-        -- TODO : replace dumb value with the correct size.
-        sArrayInMem "second_stage_arr" pt (Shape [tvSize nb_nodes, Constant $ IntValue $ Int64Value 100]) mem
+      (mem, Array pt s _) -> do
+        sArrayInMem "second_stage_arr" pt (Shape [tvSize nb_nodes, (\(Shape d) -> head d) s]) mem
       _ -> error "Not implemented yet"
 
     -- Store the result of stage one reduction
