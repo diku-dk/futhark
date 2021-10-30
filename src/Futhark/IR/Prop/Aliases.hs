@@ -101,11 +101,14 @@ expAliases (If _ tb fb dec) =
         (bodyAliases tb, consumedInBody tb)
         (bodyAliases fb, consumedInBody fb)
 expAliases (BasicOp op) = basicOpAliases op
-expAliases (DoLoop merge _ loopbody) =
-  map (`namesSubtract` merge_names) aliases
+expAliases (DoLoop merge _ loopbody) = do
+  ((p, arg), als) <- zip merge $ bodyAliases loopbody
+  let als' = als `namesSubtract` param_names
+  if unique $ paramDeclType p
+    then pure mempty
+    else pure $ als' <> subExpAliases arg
   where
-    aliases = bodyAliases loopbody
-    merge_names = namesFromList $ map (paramName . fst) merge
+    param_names = namesFromList $ map (paramName . fst) merge
 expAliases (Apply _ args t _) =
   funcallAliases args $ map declExtTypeOf t
 expAliases (WithAcc inputs lam) =
