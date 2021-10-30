@@ -407,9 +407,7 @@ fixPointCoalesce lutab fpar bdy topenv = do
       inhb_tab'' = M.unionWith (<>) failed_optdeps (traceWith "inhb_tab'" inhb_tab')
    in --new_inhibited = M.unionWith (<>) inhb_tab'' (inhibited topenv)
       if not $ M.null actv_tab'
-        then -- error ("COALESCING ROOT: BROKEN INV, active not empty: " ++ pretty (M.keys actv_tab'))
-        -- Anything that hasn't failed, we can assume succeeded?
-          return $ snd $ foldl (\acc (src, entry) -> markSuccessCoal acc src entry) (actv_tab', succ_tab') $ M.toList actv_tab'
+        then error ("COALESCING ROOT: BROKEN INV, active not empty: " ++ pretty (M.keys actv_tab'))
         else
           if M.null $ inhb_tab'' `M.difference` inhibited topenv
             then return succ_tab'
