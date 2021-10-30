@@ -89,9 +89,12 @@ interchangeLoop
         | otherwise =
           return $ Just (param, arr)
 
-      expandedInit _ (Var v)
+      expandedInit param_name (Var v)
         | Just arr <- isMapParameter v =
-          return $ Var arr
+          -- We need to copy because otherwise the result of the
+          -- loop will alias the input (if the number of iterations
+          -- is 0), which is a problem if the result is consumed.
+          letSubExp (param_name <> "_copied_init") $ BasicOp $ Copy arr
       expandedInit param_name se =
         letSubExp (param_name <> "_expanded_init") $
           BasicOp $ Replicate (Shape [w]) se
@@ -99,8 +102,10 @@ interchangeLoop
       expand (merge_param, merge_init) = do
         expanded_param <-
           newParam (param_name <> "_expanded") $
-            arrayOf (paramDeclType merge_param) (Shape [w]) $
-              uniqueness $ declTypeOf merge_param
+            -- FIXME: Unique here is a hack to make sure the copy from
+            -- expandedInit is not prematurely simplified away.  It'd
+            -- be better to fix this somewhere else...
+            arrayOf (paramDeclType merge_param) (Shape [w]) Unique
         expanded_init <- expandedInit param_name merge_init
         return (expanded_param, expanded_init)
         where
