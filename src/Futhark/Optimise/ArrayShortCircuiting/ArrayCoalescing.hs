@@ -1120,15 +1120,15 @@ filterSafetyCond2and5 act_coal inhb_coal scals_env td_env =
                             case freeVarSubstitutions (scope td_env) scals_env b_indfun' of
                               Nothing -> failed
                               Just fv_subst ->
-                                let mem_info = Coalesced TransitiveCoal (MemBlock tp0 shp0 x_mem b_indfun') fv_subst
+                                let mem_info = traceWith ("filterMemInsert.\nb: " <> pretty b <> "\nmem_info") $ Coalesced TransitiveCoal (MemBlock tp0 shp0 x_mem b_indfun') fv_subst
                                     info' = info {vartab = M.insert b mem_info vtab}
                                  in (M.insert m_b info' acc, inhb)
-                      Just (Coalesced k mblk@(MemBlock _ _ _ new_indfun) _) ->
+                      Just (Coalesced k mblk@(MemBlock pt shp mem new_indfun) _) ->
                         let safe_2 = isInScope td_env x_mem
                          in case freeVarSubstitutions (scope td_env) scals_env new_indfun of
                               Just fv_subst
                                 | safe_2 ->
-                                  let mem_info = Coalesced k mblk fv_subst
+                                  let mem_info = traceWith ("filterMemInsert2.\nvtab: " <> pretty vtab <> "\nk: " <> pretty k <> "\nb: " <> pretty b <> "\nmem_info") $ Coalesced k (MemBlock pt shp x_mem new_indfun) fv_subst
                                       info' = info {vartab = M.insert b mem_info vtab}
                                    in (M.insert m_b info' acc, inhb)
                               safe_5 ->
