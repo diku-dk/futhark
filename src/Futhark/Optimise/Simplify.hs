@@ -76,7 +76,7 @@ simplifyProg simpl rules blockers (Prog consts funs) = do
       (_, consts'') <-
         Engine.simplifyStms consts' (pure (((), mempty), mempty))
       (consts''', _) <-
-        Engine.hoistStms rules (Engine.isFalse False) mempty uses consts''
+        Engine.hoistStms rules (Engine.isFalse False) mempty (consts'', uses)
       pure (ST.insertStms consts''' mempty, consts''')
 
 -- | Run a simplification operation to convergence.
@@ -163,7 +163,7 @@ simplifyStms simpl rules blockers scope =
             UT.usages (namesFromList (M.keys (scopeOf stms)))
       (((), usage), stms') <-
         Engine.simplifyStms stms (pure (((), all_used), mempty))
-      fst <$> Engine.hoistStms rules (Engine.isFalse False) vtable usage stms'
+      fst <$> Engine.hoistStms rules (Engine.isFalse False) vtable (stms', usage)
 
 loopUntilConvergence ::
   (MonadFreshNames m, Engine.SimplifiableRep rep) =>

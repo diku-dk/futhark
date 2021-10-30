@@ -387,6 +387,8 @@ notWorthHoisting :: ASTRep rep => BlockPred rep
 notWorthHoisting _ _ (Let pat _ e) =
   not (safeExp e) && any ((> 0) . arrayRank) (patTypes pat)
 
+-- Top-down simplify a statement (including copy propagation into the
+-- pattern and such).  Does not recurse into any sub-Bodies or Ops.
 nonrecSimplifyStm ::
   SimplifiableRep rep =>
   Stm (Wise rep) ->
@@ -397,37 +399,38 @@ nonrecSimplifyStm (Let pat (StmAux cs attrs (_, dec)) e) = do
   let aux' = StmAux (cs' <> pat_cs) attrs dec
   mkWiseLetStm pat' aux' <$> simplifyExpBase e
 
+-- Bottom-up simplify a statement.  Recurses into sub-Bodies and Ops.
+-- Does not copy-propagate into the pattern and similar, as it is
+-- assumed 'nonrecSimplifyStm' has already touched it (and worst case,
+-- it'll get it on the next round of the overall fixpoint iteration.)
 recSimplifyStm ::
   SimplifiableRep rep =>
   Stm (Wise rep) ->
   UT.UsageTable ->
   SimpleM rep (Stms (Wise rep), Stm (Wise rep))
 recSimplifyStm (Let pat (StmAux cs attrs (_, dec)) e) usage = do
-  cs' <- simplify cs
-  (pat', pat_cs) <- collectCerts $ simplifyPat $ removePatWisdom pat
-  ((e', e_stms), e_cs) <- collectCerts $ simplifyExp usage pat e
-  let aux' = StmAux (cs' <> e_cs <> pat_cs) attrs dec
-  pure (e_stms, mkWiseLetStm pat' aux' e')
+  ((e', e_hoisted), e_cs) <- collectCerts $ simplifyExp usage pat e
+  let aux' = StmAux (cs <> e_cs) attrs dec
+  pure (e_hoisted, mkWiseLetStm (removePatWisdom pat) aux' e')
 
 hoistStms ::
   SimplifiableRep rep =>
   RuleBook (Wise rep) ->
   BlockPred (Wise rep) ->
   ST.SymbolTable (Wise rep) ->
-  UT.UsageTable ->
-  Stms (Wise rep) ->
+  (Stms (Wise rep), UT.UsageTable) ->
   SimpleM rep (Stms (Wise rep), Stms (Wise rep))
-hoistStms rules block orig_vtable uses orig_stms = do
-  (blocked, hoisted) <- simplifyStmsBottomUp orig_vtable uses orig_stms
+hoistStms rules block orig_vtable (orig_stms, orig_uses) = do
+  (blocked, hoisted) <- simplifyStmsBottomUp orig_vtable orig_uses orig_stms
   unless (null hoisted) changed
-  return (stmsFromList blocked, stmsFromList hoisted)
+  pure (stmsFromList blocked, stmsFromList hoisted)
   where
     simplifyStmsBottomUp vtable' uses' stms = do
       (_, stms') <- simplifyStmsBottomUp' vtable' uses' stms
       -- We need to do a final pass to ensure that nothing is
       -- hoisted past something that it depends on.
       let (blocked, hoisted) = partitionEithers $ blockUnhoistedDeps stms'
-      return (blocked, hoisted)
+      pure (blocked, hoisted)
 
     simplifyStmsBottomUp' vtable' uses' stms = do
       opUsage <- asks $ opUsageS . fst
@@ -475,7 +478,7 @@ hoistStms rules block orig_vtable uses orig_stms = do
     hoistable usageInStm (uses', stms) (stm, vtable')
       | not $ any (`UT.isUsedDirectly` uses') $ provides stm =
         -- Dead statement.
-        return (uses', stms)
+        pure (uses', stms)
       | otherwise = do
         (stm_stms, stm') <- localVtable (const vtable') (recSimplifyStm stm uses')
         descend usageInStm vtable' stm_stms $ process usageInStm stm' stms uses'
@@ -565,7 +568,7 @@ blockIf block m = do
   ((x, usages), stms) <- m
   vtable <- askVtable
   rules <- asksEngineEnv envRules
-  (blocked, hoisted) <- hoistStms rules block vtable usages stms
+  (blocked, hoisted) <- hoistStms rules block vtable (stms, usages)
   return ((blocked, x), hoisted)
 
 hasFree :: ASTRep rep => Names -> BlockPred rep
@@ -666,10 +669,10 @@ hoistCommon cond ifsort ((res1, usages1), stms1) ((res2, usages2), stms2) = do
   rules <- asksEngineEnv envRules
   (body1_stms', safe1) <-
     protectIfHoisted cond True $
-      hoistStms rules block vtable usages1 stms1
+      hoistStms rules block vtable (stms1, usages1)
   (body2_stms', safe2) <-
     protectIfHoisted cond False $
-      hoistStms rules block vtable usages2 stms2
+      hoistStms rules block vtable (stms2, usages2)
   let hoistable = safe1 <> safe2
   body1' <- constructBody body1_stms' res1
   body2' <- constructBody body2_stms' res2
