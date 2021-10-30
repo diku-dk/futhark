@@ -113,6 +113,8 @@ emptyEnv rules blockers =
 
 type Protect m = SubExp -> Pat (Rep m) -> Op (Rep m) -> Maybe (m ())
 
+type SimplifyOp rep op = op -> SimpleM rep (op, Stms (Wise rep))
+
 data SimpleOps rep = SimpleOps
   { mkExpDecS ::
       ST.SymbolTable (Wise rep) ->
@@ -129,14 +131,12 @@ data SimpleOps rep = SimpleOps
     -- actually be used.
     protectHoistedOpS :: Protect (Builder (Wise rep)),
     opUsageS :: Op (Wise rep) -> UT.UsageTable,
-    simplifyOpS :: SimplifyOp rep (Op rep)
+    simplifyOpS :: SimplifyOp rep (Op (Wise rep))
   }
-
-type SimplifyOp rep op = op -> SimpleM rep (OpWithWisdom op, Stms (Wise rep))
 
 bindableSimpleOps ::
   (SimplifiableRep rep, Buildable rep) =>
-  SimplifyOp rep (Op rep) ->
+  SimplifyOp rep (Op (Wise rep)) ->
   SimpleOps rep
 bindableSimpleOps =
   SimpleOps mkExpDecS' mkBodyS' protectHoistedOpS' (const mempty)
@@ -387,6 +387,28 @@ notWorthHoisting :: ASTRep rep => BlockPred rep
 notWorthHoisting _ _ (Let pat _ e) =
   not (safeExp e) && any ((> 0) . arrayRank) (patTypes pat)
 
+nonrecSimplifyStm ::
+  SimplifiableRep rep =>
+  Stm (Wise rep) ->
+  SimpleM rep (Stm (Wise rep))
+nonrecSimplifyStm (Let pat (StmAux cs attrs (_, dec)) e) = do
+  cs' <- simplify cs
+  (pat', pat_cs) <- collectCerts $ simplifyPat $ removePatWisdom pat
+  let aux' = StmAux (cs' <> pat_cs) attrs dec
+  mkWiseLetStm pat' aux' <$> simplifyExpBase e
+
+recSimplifyStm ::
+  SimplifiableRep rep =>
+  Stm (Wise rep) ->
+  UT.UsageTable ->
+  SimpleM rep (Stms (Wise rep), Stm (Wise rep))
+recSimplifyStm (Let pat (StmAux cs attrs (_, dec)) e) usage = do
+  cs' <- simplify cs
+  (pat', pat_cs) <- collectCerts $ simplifyPat $ removePatWisdom pat
+  ((e', e_stms), e_cs) <- collectCerts $ simplifyExp usage pat e
+  let aux' = StmAux (cs' <> e_cs <> pat_cs) attrs dec
+  pure (e_stms, mkWiseLetStm pat' aux' e')
+
 hoistStms ::
   SimplifiableRep rep =>
   RuleBook (Wise rep) ->
@@ -394,13 +416,9 @@ hoistStms ::
   ST.SymbolTable (Wise rep) ->
   UT.UsageTable ->
   Stms (Wise rep) ->
-  SimpleM
-    rep
-    ( Stms (Wise rep),
-      Stms (Wise rep)
-    )
-hoistStms rules block vtable uses orig_stms = do
-  (blocked, hoisted) <- simplifyStmsBottomUp vtable uses orig_stms
+  SimpleM rep (Stms (Wise rep), Stms (Wise rep))
+hoistStms rules block orig_vtable uses orig_stms = do
+  (blocked, hoisted) <- simplifyStmsBottomUp orig_vtable uses orig_stms
   unless (null hoisted) changed
   return (stmsFromList blocked, stmsFromList hoisted)
   where
@@ -422,31 +440,45 @@ hoistStms rules block vtable uses orig_stms = do
       where
         vtables = scanl (flip ST.insertStm) vtable' $ stmsToList stms
 
+    descend usageInStm vtable' stms m =
+      case stmsHead stms of
+        Nothing -> m vtable'
+        Just (stms_h, stms_t) -> do
+          let vtable'' = ST.insertStm stms_h vtable'
+          (usage, stms_t') <- descend usageInStm vtable'' stms_t m
+          process usageInStm stms_h stms_t' usage vtable''
+
+    process usageInStm stm stms uses' vtable' = do
+      res <-
+        localVtable (const vtable') $
+          bottomUpSimplifyStm rules (vtable', uses') stm
+      case res of
+        Nothing -- Nothing to optimise - see if hoistable.
+          | block vtable' uses' stm ->
+            -- No, not hoistable.
+            pure
+              ( expandUsage usageInStm vtable' uses' stm
+                  `UT.without` provides stm,
+                Left stm : stms
+              )
+          | otherwise ->
+            -- Yes, hoistable.
+            pure
+              ( expandUsage usageInStm vtable' uses' stm,
+                Right stm : stms
+              )
+        Just optimstms -> do
+          changed
+          descend usageInStm vtable' optimstms $ \_ ->
+            pure (uses', stms)
+
     hoistable usageInStm (uses', stms) (stm, vtable')
       | not $ any (`UT.isUsedDirectly` uses') $ provides stm =
         -- Dead statement.
         return (uses', stms)
       | otherwise = do
-        res <-
-          localVtable (const vtable') $
-            bottomUpSimplifyStm rules (vtable', uses') stm
-        case res of
-          Nothing -- Nothing to optimise - see if hoistable.
-            | block vtable' uses' stm ->
-              return
-                ( expandUsage usageInStm vtable' uses' stm
-                    `UT.without` provides stm,
-                  Left stm : stms
-                )
-            | otherwise ->
-              return
-                ( expandUsage usageInStm vtable' uses' stm,
-                  Right stm : stms
-                )
-          Just optimstms -> do
-            changed
-            (uses'', stms') <- simplifyStmsBottomUp' vtable' uses' optimstms
-            return (uses'', stms' <> stms)
+        (stm_stms, stm') <- localVtable (const vtable') (recSimplifyStm stm uses')
+        descend usageInStm vtable' stm_stms $ process usageInStm stm' stms uses'
 
 blockUnhoistedDeps ::
   ASTRep rep =>
@@ -647,13 +679,14 @@ hoistCommon cond ifsort ((res1, usages1), stms1) ((res2, usages2), stms2) = do
 -- elements, because the context cannot be consumed.
 simplifyBody ::
   SimplifiableRep rep =>
+  UT.UsageTable ->
   [Diet] ->
-  Body rep ->
+  Body (Wise rep) ->
   SimpleM rep (SimplifiedBody rep Result)
-simplifyBody ds (Body _ stms res) =
+simplifyBody usages ds (Body _ stms res) =
   simplifyStms stms $ do
-    res' <- simplifyResult ds res
-    return (res', mempty)
+    (res', res_usages) <- simplifyResult ds res
+    pure ((res', res_usages <> usages), mempty)
 
 -- | Simplify a single 'Result'.  The @[Diet]@ only covers the value
 -- elements, because the context cannot be consumed.
@@ -671,74 +704,55 @@ isDoLoopResult = mconcat . map checkForVar
     checkForVar (SubExpRes _ (Var ident)) = UT.inResultUsage ident
     checkForVar _ = mempty
 
+patElemDiet :: UT.UsageTable -> PatElemT a -> Diet
+patElemDiet usage pe
+  | patElemName pe `UT.isConsumed` usage = Consume
+  | otherwise = Observe
+
 simplifyStms ::
   SimplifiableRep rep =>
-  Stms rep ->
-  SimpleM rep (a, Stms (Wise rep)) ->
-  SimpleM rep (a, Stms (Wise rep))
-simplifyStms stms m =
-  case stmsHead stms of
-    Nothing -> inspectStms mempty m
-    Just (Let pat (StmAux stm_cs attrs dec) e, stms') -> do
-      stm_cs' <- simplify stm_cs
-      ((e', e_stms), e_cs) <- collectCerts $ simplifyExp e
-      (pat', pat_cs) <- collectCerts $ simplifyPat pat
-      let cs = stm_cs' <> e_cs <> pat_cs
-      inspectStms e_stms $
-        inspectStm (mkWiseLetStm pat' (StmAux cs attrs dec) e') $
-          simplifyStms stms' m
-
-inspectStm ::
-  SimplifiableRep rep =>
-  Stm (Wise rep) ->
-  SimpleM rep (a, Stms (Wise rep)) ->
-  SimpleM rep (a, Stms (Wise rep))
-inspectStm = inspectStms . oneStm
-
-inspectStms ::
-  SimplifiableRep rep =>
   Stms (Wise rep) ->
-  SimpleM rep (a, Stms (Wise rep)) ->
-  SimpleM rep (a, Stms (Wise rep))
-inspectStms stms m =
+  SimpleM rep (SimplifiedBody rep a) ->
+  SimpleM rep (SimplifiedBody rep a)
+simplifyStms stms m =
   case stmsHead stms of
     Nothing -> m
     Just (stm, stms') -> do
       vtable <- askVtable
       rules <- asksEngineEnv envRules
-      simplified <- topDownSimplifyStm rules vtable stm
-      case simplified of
-        Just newstms -> changed >> inspectStms (newstms <> stms') m
-        Nothing -> do
-          (x, stms'') <- localVtable (ST.insertStm stm) $ inspectStms stms' m
-          return (x, oneStm stm <> stms'')
+      stm' <- nonrecSimplifyStm stm
+      simplified <- topDownSimplifyStm rules vtable stm'
 
-simplifyOp :: Op rep -> SimpleM rep (Op (Wise rep), Stms (Wise rep))
+      case simplified of
+        Just newstms -> changed >> simplifyStms (newstms <> stms') m
+        Nothing -> do
+          ((x, usage), stms'') <-
+            localVtable (ST.insertStm stm') $ simplifyStms stms' m
+          pure ((x, usage), oneStm stm' <> stms'')
+
+simplifyOp :: Op (Wise rep) -> SimpleM rep (Op (Wise rep), Stms (Wise rep))
 simplifyOp op = do
   f <- asks $ simplifyOpS . fst
   f op
 
 simplifyExp ::
   SimplifiableRep rep =>
-  Exp rep ->
+  UT.UsageTable ->
+  Pat (Wise rep) ->
+  Exp (Wise rep) ->
   SimpleM rep (Exp (Wise rep), Stms (Wise rep))
-simplifyExp (If cond tbranch fbranch (IfDec ts ifsort)) = do
+simplifyExp usage (Pat pes) (If cond tbranch fbranch (IfDec ts ifsort)) = do
   -- Here, we have to check whether 'cond' puts a bound on some free
   -- variable, and if so, chomp it.  We should also try to do CSE
   -- across branches.
+  let ds = map (patElemDiet usage) pes
   cond' <- simplify cond
   ts' <- mapM simplify ts
-  -- FIXME: we have to be conservative about the diet here, because we
-  -- lack proper ifnormation.  Something is wrong with the order in
-  -- which the simplifier does things - it should be purely bottom-up
-  -- (or else, If expressions should indicate explicitly the diet of
-  -- their return types).
-  let ds = map (const Consume) ts
-  tbranch' <- simplifyBody ds tbranch
-  fbranch' <- simplifyBody ds fbranch
+  tbranch' <- simplifyBody usage ds tbranch
+  fbranch' <- simplifyBody usage ds fbranch
   (tbranch'', fbranch'', hoisted) <- hoistCommon cond' ifsort tbranch' fbranch'
   return (If cond' tbranch'' fbranch'' $ IfDec ts' ifsort, hoisted)
-simplifyExp (DoLoop merge form loopbody) = do
+simplifyExp usage _ (DoLoop merge form loopbody) = do
   let (params, args) = unzip merge
   params' <- mapM (traverse simplify) params
   args' <- mapM simplify args
@@ -776,7 +790,7 @@ simplifyExp (DoLoop merge form loopbody) = do
                 `orIf` notWorthHoisting
             )
             $ do
-              ((res, uses), stms) <- simplifyBody diets loopbody
+              ((res, uses), stms) <- simplifyBody usage diets loopbody
               return ((res, uses <> isDoLoopResult res), stms)
   loopbody' <- constructBody loopstms loopres
   return (DoLoop merge' form' loopbody', hoisted)
@@ -788,10 +802,10 @@ simplifyExp (DoLoop merge form loopbody) = do
     consumed_by_merge =
       freeIn $ map snd $ filter (unique . paramDeclType . fst) merge
     withRes (p, x) y = (p, x, y)
-simplifyExp (Op op) = do
+simplifyExp _ _ (Op op) = do
   (op', stms) <- simplifyOp op
   return (Op op', stms)
-simplifyExp (WithAcc inputs lam) = do
+simplifyExp usage _ (WithAcc inputs lam) = do
   (inputs', inputs_stms) <- fmap unzip . forM inputs $ \(shape, arrs, op) -> do
     (op', op_stms) <- case op of
       Nothing ->
@@ -801,49 +815,32 @@ simplifyExp (WithAcc inputs lam) = do
         nes' <- simplify nes
         return (Just (op_lam', nes'), op_lam_stms)
     (,op_stms) <$> ((,,op') <$> simplify shape <*> simplify arrs)
-  (lam', lam_stms) <-
-    simplifyLambdaWithBody (isFalse True) lam $
-      localVtable (ST.noteAccTokens (zip (map paramName (lambdaParams lam)) inputs')) $
-        simplifyBody (map (const Observe) (lambdaReturnType lam)) $
-          lambdaBody lam
+  let noteAcc = ST.noteAccTokens (zip (map paramName (lambdaParams lam)) inputs')
+  (lam', lam_stms) <- simplifyLambdaWith noteAcc (isFalse True) usage lam
   pure (WithAcc inputs' lam', mconcat inputs_stms <> lam_stms)
+simplifyExp _ _ e = do
+  e' <- simplifyExpBase e
+  pure (e', mempty)
 
+-- The simple nonrecursive case that we can perform without bottom-up
+-- information.
+simplifyExpBase :: SimplifiableRep rep => Exp (Wise rep) -> SimpleM rep (Exp (Wise rep))
 -- Special case for simplification of commutative BinOps where we
 -- arrange the operands in sorted order.  This can make expressions
 -- more identical, which helps CSE.
-simplifyExp (BasicOp (BinOp op x y))
+simplifyExpBase (BasicOp (BinOp op x y))
   | commutativeBinOp op = do
     x' <- simplify x
     y' <- simplify y
-    return (BasicOp $ BinOp op (min x' y') (max x' y'), mempty)
-simplifyExp e = do
-  e' <- simplifyExpBase e
-  return (e', mempty)
-
-simplifyExpBase ::
-  SimplifiableRep rep =>
-  Exp rep ->
-  SimpleM rep (Exp (Wise rep))
-simplifyExpBase = mapExpM hoist
+    pure $ BasicOp $ BinOp op (min x' y') (max x' y')
+simplifyExpBase e = mapExpM hoist e
   where
     hoist =
-      Mapper
-        { -- Bodies are handled explicitly because we need to
-          -- provide their result diet.
-          mapOnBody =
-            error "Unhandled body in simplification engine.",
-          mapOnSubExp = simplify,
-          -- Lambdas are handled explicitly because we need to
-          -- bind their parameters.
+      identityMapper
+        { mapOnSubExp = simplify,
           mapOnVName = simplify,
           mapOnRetType = simplify,
-          mapOnBranchType = simplify,
-          mapOnFParam =
-            error "Unhandled FParam in simplification engine.",
-          mapOnLParam =
-            error "Unhandled LParam in simplification engine.",
-          mapOnOp =
-            error "Unhandled Op in simplification engine."
+          mapOnBranchType = simplify
         }
 
 type SimplifiableRep rep =
@@ -960,40 +957,41 @@ instance Simplifiable d => Simplifiable (Slice d) where
 
 simplifyLambda ::
   SimplifiableRep rep =>
-  Lambda rep ->
+  Lambda (Wise rep) ->
   SimpleM rep (Lambda (Wise rep), Stms (Wise rep))
 simplifyLambda lam = do
   par_blocker <- asksEngineEnv $ blockHoistPar . envHoistBlockers
-  simplifyLambdaMaybeHoist par_blocker lam
+  simplifyLambdaMaybeHoist par_blocker mempty lam
 
 simplifyLambdaNoHoisting ::
   SimplifiableRep rep =>
-  Lambda rep ->
+  Lambda (Wise rep) ->
   SimpleM rep (Lambda (Wise rep))
 simplifyLambdaNoHoisting lam =
-  fst <$> simplifyLambdaMaybeHoist (isFalse False) lam
+  fst <$> simplifyLambdaMaybeHoist (isFalse False) mempty lam
 
 simplifyLambdaMaybeHoist ::
   SimplifiableRep rep =>
   BlockPred (Wise rep) ->
-  Lambda rep ->
+  UT.UsageTable ->
+  Lambda (Wise rep) ->
   SimpleM rep (Lambda (Wise rep), Stms (Wise rep))
-simplifyLambdaMaybeHoist blocked lam =
-  simplifyLambdaWithBody blocked lam $
-    simplifyBody (map (const Observe) (lambdaReturnType lam)) $ lambdaBody lam
+simplifyLambdaMaybeHoist = simplifyLambdaWith id
 
-simplifyLambdaWithBody ::
+simplifyLambdaWith ::
   SimplifiableRep rep =>
+  (ST.SymbolTable (Wise rep) -> ST.SymbolTable (Wise rep)) ->
   BlockPred (Wise rep) ->
-  Lambda rep ->
-  SimpleM rep (SimplifiedBody rep Result) ->
+  UT.UsageTable ->
+  Lambda (Wise rep) ->
   SimpleM rep (Lambda (Wise rep), Stms (Wise rep))
-simplifyLambdaWithBody blocked lam@(Lambda params _body rettype) m = do
+simplifyLambdaWith f blocked usage lam@(Lambda params body rettype) = do
   params' <- mapM (traverse simplify) params
   let paramnames = namesFromList $ boundByLambda lam
   ((lamstms, lamres), hoisted) <-
-    enterLoop . bindLParams params' $
-      blockIf (blocked `orIf` hasFree paramnames `orIf` isConsumed) m
+    enterLoop . bindLParams params' . localVtable f $
+      blockIf (blocked `orIf` hasFree paramnames `orIf` isConsumed) $
+        simplifyBody usage (map (const Observe) rettype) body
   body' <- constructBody lamstms lamres
   rettype' <- simplify rettype
   return (Lambda params' body' rettype', hoisted)
@@ -1023,11 +1021,11 @@ insertAllStms = uncurry constructBody . fst <=< blockIf (isFalse False)
 
 simplifyFun ::
   SimplifiableRep rep =>
-  FunDef rep ->
+  FunDef (Wise rep) ->
   SimpleM rep (FunDef (Wise rep))
 simplifyFun (FunDef entry attrs fname rettype params body) = do
   rettype' <- simplify rettype
   params' <- mapM (traverse simplify) params
   let ds = map (diet . declExtTypeOf) rettype'
-  body' <- bindFParams params $ insertAllStms $ simplifyBody ds body
-  return $ FunDef entry attrs fname rettype' params' body'
+  body' <- bindFParams params $ insertAllStms $ simplifyBody mempty ds body
+  pure $ FunDef entry attrs fname rettype' params' body'

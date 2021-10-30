@@ -996,6 +996,10 @@ instance
           return
           return
 
+informKernelBody :: Informing rep => KernelBody rep -> KernelBody (Wise rep)
+informKernelBody (KernelBody dec stms res) =
+  mkWiseKernelBody dec (informStms stms) res
+
 instance
   (CanBeWise (Op rep), ASTRep rep, ASTConstraints lvl) =>
   CanBeWise (SegOp lvl rep)
@@ -1009,6 +1013,16 @@ instance
           return
           (return . removeLambdaWisdom)
           (return . removeKernelBodyWisdom)
+          return
+          return
+
+  addOpWisdom = runIdentity . mapSegOpM add
+    where
+      add =
+        SegOpMapper
+          return
+          (return . informLambda)
+          (return . informKernelBody)
           return
           return
 
@@ -1124,7 +1138,7 @@ mkKernelBodyM stms kres = do
 simplifyKernelBody ::
   (Engine.SimplifiableRep rep, BodyDec rep ~ ()) =>
   SegSpace ->
-  KernelBody rep ->
+  KernelBody (Wise rep) ->
   Engine.SimpleM rep (KernelBody (Wise rep), Stms (Wise rep))
 simplifyKernelBody space (KernelBody _ stms res) = do
   par_blocker <- Engine.asksEngineEnv $ Engine.blockHoistPar . Engine.envHoistBlockers
@@ -1165,7 +1179,7 @@ segSpaceSymbolTable (SegSpace flat gtids_and_dims) =
 
 simplifySegBinOp ::
   Engine.SimplifiableRep rep =>
-  SegBinOp rep ->
+  SegBinOp (Wise rep) ->
   Engine.SimpleM rep (SegBinOp (Wise rep), Stms (Wise rep))
 simplifySegBinOp (SegBinOp comm lam nes shape) = do
   (lam', hoisted) <-
@@ -1181,7 +1195,7 @@ simplifySegOp ::
     BodyDec rep ~ (),
     Engine.Simplifiable lvl
   ) =>
-  SegOp lvl rep ->
+  SegOp lvl (Wise rep) ->
   Engine.SimpleM rep (SegOp lvl (Wise rep), Stms (Wise rep))
 simplifySegOp (SegMap lvl space ts kbody) = do
   (lvl', space', ts') <- Engine.simplify (lvl, space, ts)

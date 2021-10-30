@@ -401,7 +401,7 @@ transformStm path (Let res_pat aux (Op (Screma w arrs form)))
           | otherwise = comm,
     Just do_irwim <- irwim res_pat w comm' red_fun $ zip nes arrs = do
     types <- asksScope scopeForSOACs
-    (_, stms) <- fst <$> runBuilderT (simplifyStms =<< collectStms_ (auxing aux do_irwim)) types
+    stms <- fst <$> runBuilderT (simplifyStms =<< collectStms_ (auxing aux do_irwim)) types
     transformStms path $ stmsToList stms
 transformStm path (Let pat aux@(StmAux cs _ _) (Op (Screma w arrs form)))
   | Just (reds, map_lam) <- isRedomapSOAC form = do
@@ -426,10 +426,8 @@ transformStm path (Let pat aux@(StmAux cs _ _) (Op (Screma w arrs form)))
           (mapstm, redstm) <-
             redomapToMapAndReduce pat (w, reds, map_lam, arrs)
           types <- asksScope scopeForSOACs
-          transformStms path' . stmsToList <=< (`runBuilderT_` types) $ do
-            (_, stms) <-
-              simplifyStms (stmsFromList [certify cs mapstm, certify cs redstm])
-            addStms stms
+          transformStms path' . stmsToList <=< (`runBuilderT_` types) $
+            addStms =<< simplifyStms (stmsFromList [certify cs mapstm, certify cs redstm])
 
         innerParallelBody path' =
           renameBody
