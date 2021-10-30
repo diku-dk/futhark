@@ -1,6 +1,8 @@
 -- ==
 -- entry: rev_J
+-- compiled random input { [1024][80]f32 [80][1024]f32 [1024][1024]f32} auto output
 -- compiled random input { [1024][1024]f32 [1024][1024]f32 [1024][1024]f32} auto output
+-- compiled random input { [2048][1024]f32 [1024][2048]f32 [2048][2048]f32} auto output
 
 -- compiled input
 -- {
