@@ -242,6 +242,8 @@ instance CanBeWise inner => CanBeWise (MemOp inner) where
   type OpWithWisdom (MemOp inner) = MemOp (OpWithWisdom inner)
   removeOpWisdom (Alloc size space) = Alloc size space
   removeOpWisdom (Inner k) = Inner $ removeOpWisdom k
+  addOpWisdom (Alloc size space) = Alloc size space
+  addOpWisdom (Inner k) = Inner $ addOpWisdom k
 
 instance ST.IndexOp inner => ST.IndexOp (MemOp inner) where
   indexOp vtable k (Inner op) is = ST.indexOp vtable k op is

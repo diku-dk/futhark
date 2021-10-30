@@ -1095,7 +1095,7 @@ simplifiable ::
     Mem rep inner
   ) =>
   (Engine.OpWithWisdom inner -> UT.UsageTable) ->
-  (inner -> Engine.SimpleM rep (Engine.OpWithWisdom inner, Stms (Engine.Wise rep))) ->
+  (Engine.OpWithWisdom inner -> Engine.SimpleM rep (Engine.OpWithWisdom inner, Stms (Engine.Wise rep))) ->
   SimpleOps rep
 simplifiable innerUsage simplifyInnerOp =
   SimpleOps mkExpDecS' mkBodyS' protectOp opUsage simplifyOp
