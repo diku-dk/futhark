@@ -184,7 +184,7 @@ topdwnTravBinding env stm@(Let pat _ (Op (Inner inner))) =
 --           usage_table = usageInStm stm <> usage_table env
 --         }
 topdwnTravBinding env stm@(Let (Pat [pe]) _ e)
-  | Just (x, ixfn) <- (\e -> trace ("YIP! stm: " <> pretty stm <> "\nalias: " <> show (fmap fst e)) e) $ getDirAliasFromExp e =
+  | Just (x, ixfn) <- getDirAliasFromExp e =
     let ixfn_inv = getInvAliasFromExp e
      in env
           { v_alias = M.insert (patElemName pe) (x, ixfn, ixfn_inv) (v_alias env),
@@ -291,11 +291,11 @@ getTransitiveAlias _ _ _ _ = Nothing
 -- the access in the space of the destination block.
 getDirAliasedIxfn :: HasMemBlock (Aliases rep) => TopDnEnv rep -> CoalsTab -> VName -> Maybe (VName, VName, IxFun)
 getDirAliasedIxfn td_env coals_tab x =
-  case traceWith "scopeMemInfo" $ getScopeMemInfo x (scope td_env) of
+  case getScopeMemInfo x (scope td_env) of
     Just (MemBlock _ _ m_x orig_ixfun) ->
-      case traceWith "coal_entry" $ M.lookup m_x coals_tab of
+      case M.lookup m_x coals_tab of
         Just coal_etry -> do
-          (Coalesced _ (MemBlock _ _ m ixf) _) <- walkAliasTab (v_alias td_env) (vartab coal_etry) $ traceWith "getdir" x
+          (Coalesced _ (MemBlock _ _ m ixf) _) <- walkAliasTab (v_alias td_env) (vartab coal_etry) x
           return (m_x, m, ixf)
         Nothing ->
           -- This value is not subject to coalescing at the moment. Just return the
@@ -337,7 +337,7 @@ addInvAliassesVarTab ::
 addInvAliassesVarTab td_env vtab x
   | Just (Coalesced _ (MemBlock _ _ m_y x_ixfun) fv_subs) <- M.lookup x vtab =
     case M.lookup x (v_alias td_env) of
-      Nothing -> Just vtab
+      Nothing -> Just $ trace ("addInvAliassesVarTab\nx not found: " <> pretty x) vtab
       Just (nm, _, Nothing) -> Nothing -- can't invert ixfun, conservatively fail!
       Just (x0, _, Just inv_alias0) ->
         let x_ixfn0 = inv_alias0 x_ixfun
@@ -346,7 +346,7 @@ addInvAliassesVarTab td_env vtab x
               Just (MemBlock ptp shp _ _) ->
                 let coal = Coalesced TransitiveCoal (MemBlock ptp shp m_y x_ixfn0) fv_subs
                     vartab' = M.insert x0 coal vtab
-                 in addInvAliassesVarTab td_env vartab' x0
+                 in addInvAliassesVarTab td_env vartab' $ trace ("addInvAliassesVarTab\nx: " <> pretty x <> "\nx_ixfun: " <> pretty x_ixfun <> "\nx0: " <> pretty x0 <> "\nx_ixfn0: " <> pretty x_ixfn0) x0
 addInvAliassesVarTab _ _ _ = error "impossible"
 
 areAliased :: TopDnEnv rep -> VName -> VName -> Bool

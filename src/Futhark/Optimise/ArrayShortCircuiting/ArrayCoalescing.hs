@@ -364,7 +364,25 @@ makeSegMapCoals td_env space kernel_body (active, inhibit) x@(PatElem pat_name (
                Coalesced InPlaceCoal (MemBlock tp shp (dstmem trans) (dstind trans)) mempty
                  & M.singleton return_name
                  & flip (addInvAliassesVarTab td_env) return_name
-                 & fmap (M.adjust (\(Coalesced knd (MemBlock pt shp mem ixf) subst) -> Coalesced knd (MemBlock pt shp mem $ traceWith "segmap ixf after" $ IxFun.slice (traceWith "segmap ixf before" ixf) $ traceWith "fullSlice" $ fullSlice shp $ traceWith "segmap slice" $ Slice $ map (DimFix . TPrimExp . flip LeafExp (IntType Int64) . fst) $ unSegSpace space) subst) return_name)
+                 & fmap
+                   ( M.adjust
+                       ( \(Coalesced knd (MemBlock pt shp mem ixf) subst) ->
+                           Coalesced
+                             knd
+                             ( MemBlock pt shp mem $
+                                 traceWith "trans segmap ixf after" $
+                                   IxFun.slice (traceWith "segmap ixf before" ixf) $
+                                     traceWith "fullSlice" $
+                                       fullSlice shp $
+                                         traceWith "segmap slice" $
+                                           Slice $
+                                             map (DimFix . TPrimExp . flip LeafExp (IntType Int64) . fst) $
+                                               unSegSpace space
+                             )
+                             subst
+                       )
+                       return_name
+                   )
              ) of
           (False, Just vtab) ->
             let opts = if dstmem trans == pat_mem then mempty else M.insert pat_name pat_mem $ optdeps trans
@@ -449,7 +467,7 @@ mkCoalsTabStms lutab = traverseStms
   where
     traverseStms Empty _ bu_env = return bu_env
     traverseStms (stm :<| stms) td_env bu_env = do
-      let td_env' = (\x -> trace ("TOPDOWN stm: " <> pretty stm <> "\ntd_env' vtab: " <> pretty (fmap (\(y, _, _) -> y) $ v_alias x)) x) $ topdwnTravBinding td_env stm
+      let td_env' = topdwnTravBinding td_env stm
       bu_env' <- traverseStms stms td_env' bu_env
       mkCoalsTabStm lutab (trace ("\nprocessing stm: " <> pretty (stmPat stm) <> "\n") stm) td_env' bu_env'
 
@@ -778,7 +796,7 @@ mkCoalsTabStm lutab lstm@(Let pat _ (DoLoop arginis lform body)) td_env bu_env =
       (fin_actv2, fin_inhb2) =
         M.foldlWithKey
           ( \acc k entry ->
-              if k `nameIn` namesFromList (traceWith ("filtering!!\nactive: " <> pretty fin_actv1 <> "\narginis: " <> pretty arginis <> "\nargmems") $ map (paramName . fst) arginis)
+              if k `nameIn` namesFromList (map (paramName . fst) arginis)
                 then markFailedCoal acc k
                 else acc
           )
@@ -974,7 +992,7 @@ mkCoalsTabStm lutab stm@(Let pat@(Pat [x']) _ e@(BasicOp (Update _ x _ _elm))) t
                         markFailedCoal (actv, inhbt) m_x
 
           -- (c) this stm is also a potential source for coalescing, so process it
-          actv'' = mkCoalsHelper3PatternMatch pat e lutab td_env (successCoals bu_env) actv' $ traceWith ("in Update?\nold: " <> pretty (inhibit bu_env) <> "\nthe first: " <> pretty inhbt <> "\nthe last") inhbt'
+          actv'' = mkCoalsHelper3PatternMatch pat e lutab td_env (successCoals bu_env) actv' inhbt'
       return $
         bu_env {activeCoals = actv'', inhibit = inhbt'}
 --
@@ -1152,11 +1170,16 @@ mkCoalsHelper3PatternMatch pat e lutab td_env successCoals_tab activeCoals_tab i
             InPlaceCoal -> activeCoals_tab
             _ -> successCoals_tab
           (m_yx, ind_yx, mem_yx_al, x_deps) =
-            case M.lookup m_x proper_coals_tab of
+            case traceWith ("pat: " <> pretty pat <> "\nknd: " <> pretty knd <> "\nlookup proper_coals_tab\nm_b: " <> pretty m_b <> "\nm_x: " <> pretty m_x <> "\nresult") $ M.lookup m_x proper_coals_tab of
               Nothing ->
                 (m_x, alias_fn ind_x, oneName m_x, M.empty)
-              Just (CoalsEntry m_y ind_y y_al _ x_deps0 _) ->
-                (m_y, alias_fn ind_y, oneName m_x <> y_al, x_deps0)
+              Just (CoalsEntry m_y ind_y y_al vtab x_deps0 _) ->
+                let ind = case M.lookup x vtab of
+                      Just (Coalesced _ (MemBlock _ _ _ ixf) _) ->
+                        ixf
+                      Nothing ->
+                        ind_y
+                 in (m_y, alias_fn ind, oneName m_x <> y_al, x_deps0)
           success0 = IxFun.hasOneLmad ind_yx
           m_b_aliased_m_yx = areAnyAliased td_env m_b [m_yx] -- m_b \= m_yx
        in case (success0, not m_b_aliased_m_yx, isInScope td_env m_yx) of -- nameIn m_yx (alloc td_env)

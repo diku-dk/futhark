@@ -149,7 +149,9 @@ getUseSumFromStm _ _ (Let Pat {} _ (Op (Alloc _ _))) = Just ([], [])
 getUseSumFromStm _ _ stm =
   -- if-then-else, loops are supposed to be treated separately,
   -- calls are not supported, and Ops are not yet supported
-  error ("In MemRefAggreg.hs, getUseSumFromStm, unsuported case of stm being: " ++ pretty stm)
+  -- error
+  --   ("In MemRefAggreg.hs, getUseSumFromStm, unsuported case of stm being: " ++ pretty stm)
+  Nothing
 
 -- | This function:
 --     1. computes the written and read memory references for the current statement
@@ -248,24 +250,21 @@ recordMemRefUses td_env bu_env stm =
               -- they violate the 3rd safety condition.
               active_tab1 =
                 M.fromList $
-                  trace "here?" $
-                    map
-                      ( \(wrts, (uses, prev_use, (k, etry))) ->
-                          let mrefs' = (memrefs etry) {dstrefs = prev_use}
-                              etry' = etry {memrefs = mrefs'}
-                           in (k, addLmads wrts uses etry')
-                      )
-                      $ trace "there?" $
-                        filter (isJust . fst) $
-                          traceWith ("balba: " <> pretty stm <> "\nblab") $
-                            zip mb_wrts $ zip3 (traceWith "mb" mb_lmads) (traceWith "prev" prev_uses) $ traceWith "active?" active_etries
+                  map
+                    ( \(wrts, (uses, prev_use, (k, etry))) ->
+                        let mrefs' = (memrefs etry) {dstrefs = prev_use}
+                            etry' = etry {memrefs = mrefs'}
+                         in (k, addLmads wrts uses etry')
+                    )
+                    $ filter (isJust . fst) $
+                      zip mb_wrts $ zip3 mb_lmads prev_uses active_etries
               failed_tab =
                 M.fromList $
                   map snd $
                     filter (not . isJust . fst) $
-                      zip mb_wrts $ trace "active2?" active_etries
-              (_, inhibit_tab1) = foldl markFailedCoal (failed_tab, inhibit_tab) $ trace "active3" (M.keys failed_tab)
-           in trace "done in recordmemref?" (active_tab1, inhibit_tab1)
+                      zip mb_wrts active_etries
+              (_, inhibit_tab1) = foldl markFailedCoal (failed_tab, inhibit_tab) $ M.keys failed_tab
+           in (active_tab1, inhibit_tab1)
   where
     tupFst (a, _, _) = a
     tupSnd (_, b, _) = b
@@ -276,10 +275,10 @@ recordMemRefUses td_env bu_env stm =
         <> fromMaybe mempty (M.lookup m (m_alias td_env))
     mbLmad indfun
       | -- indfun' <- traceWith "normalize" $ normalizeIxfun indfun,
-        Just subs <- traceWith "freevar subs" $ freeVarSubstitutions (scope td_env) (scals bu_env) indfun,
-        (IxFun.IxFun (lmad :| []) _ _) <- traceWith "subinfun" $ IxFun.substituteInIxFun subs indfun =
+        Just subs <- freeVarSubstitutions (scope td_env) (scals bu_env) indfun,
+        (IxFun.IxFun (lmad :| []) _ _) <- IxFun.substituteInIxFun subs indfun =
         Just lmad
-    mbLmad x = trace ("mbLmad nothing: " <> pretty x) Nothing
+    mbLmad x = Nothing
     addLmads (Just wrts) uses etry =
       etry {memrefs = MemRefs uses wrts <> memrefs etry}
     addLmads _ _ _ =
@@ -305,7 +304,7 @@ noMemOverlap _ Undeterminable _ = False
 noMemOverlap _ _ Undeterminable = False
 noMemOverlap td_env (Set is0) (Set js0) =
   -- TODO Expand this to be able to handle eg. nw
-  all (\i -> all (IxFun.disjoint (usage_table td_env) i) $ traceWith "js" js) $ traceWith "is" is
+  all (\i -> all (IxFun.disjoint (usage_table td_env) i) js) is
   where
     is = map (fixPoint (IxFun.substituteInLMAD $ fmap TPrimExp $ scalar_table td_env)) $ S.toList is0
     js = map (fixPoint (IxFun.substituteInLMAD $ fmap TPrimExp $ scalar_table td_env)) $ S.toList js0
@@ -342,7 +341,7 @@ aggSummaryLoopTotal scope_before scope_loop scalars_loop (Just (iterator_var, (l
   mconcat
     <$> mapM
       (aggSummaryOne iterator_var lower_bound upper_bound)
-      (map (traceWith "fixpoint" . fixPoint (IxFun.substituteInLMAD $ fmap TPrimExp scalars_loop)) $ S.toList lmads)
+      (map (fixPoint (IxFun.substituteInLMAD $ fmap TPrimExp scalars_loop)) $ S.toList lmads)
 aggSummaryLoopTotal _ _ _ _ _ = return Undeterminable
 
 -- | Suppossed to partially aggregate the iteration-level summaries
@@ -371,10 +370,10 @@ aggSummaryLoopPartial scope_before scope_loop scalars_loop (Just (iterator_var, 
     <$> mapM
       ( aggSummaryOne
           iterator_var
-          (traceWith "lower_bound" $ isInt64 (LeafExp iterator_var $ IntType Int64) + 1)
-          (traceWith "upper_bound" $ upper_bound - typedLeafExp iterator_var - 1)
+          (isInt64 (LeafExp iterator_var $ IntType Int64) + 1)
+          (upper_bound - typedLeafExp iterator_var - 1)
       )
-      (map (traceWith "fixpoint" . fixPoint (IxFun.substituteInLMAD $ fmap TPrimExp scalars_loop)) $ S.toList lmads)
+      (map (fixPoint (IxFun.substituteInLMAD $ fmap TPrimExp scalars_loop)) $ S.toList lmads)
 
 aggSummaryMapPartial :: MonadFreshNames m => ScalarTab -> [(VName, SubExp)] -> AccessSummary -> m AccessSummary
 aggSummaryMapPartial scalars [(gtid, size)] (Set lmads0) = do
