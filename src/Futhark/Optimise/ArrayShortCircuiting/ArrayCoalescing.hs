@@ -775,7 +775,16 @@ mkCoalsTabStm lutab lstm@(Let pat _ (DoLoop arginis lform body)) td_env bu_env =
       ((fin_actv1, fin_inhb1), fin_succ1) =
         foldl foldFunOptimPromotion ((res_actv, res_inhb), res_succ) $
           L.zip4 patmems argmems resmems inimems
-  return bu_env {activeCoals = fin_actv1, successCoals = fin_succ1, inhibit = fin_inhb1}
+      (fin_actv2, fin_inhb2) =
+        M.foldlWithKey
+          ( \acc k entry ->
+              if k `nameIn` namesFromList (traceWith ("filtering!!\nactive: " <> pretty fin_actv1 <> "\narginis: " <> pretty arginis <> "\nargmems") $ map (paramName . fst) arginis)
+                then markFailedCoal acc k
+                else acc
+          )
+          (fin_actv1, fin_inhb1)
+          fin_actv1
+  return bu_env {activeCoals = fin_actv2, successCoals = fin_succ1, inhibit = fin_inhb2}
   where
     td_env' = topDownLoop td_env lstm
     getAllocs tab (Let (Pat [pe]) _ (Op (Alloc _ _))) =
