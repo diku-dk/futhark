@@ -20,7 +20,6 @@ module Futhark.Optimise.Simplify
   )
 where
 
-import qualified Data.Map as M
 import qualified Futhark.Analysis.SymbolTable as ST
 import qualified Futhark.Analysis.UsageTable as UT
 import Futhark.IR
@@ -73,11 +72,8 @@ simplifyProg simpl rules blockers (Prog consts funs) = do
         mempty
 
     onConsts uses consts' = do
-      (_, consts'') <-
-        Engine.simplifyStms consts' (pure (((), mempty), mempty))
-      (consts''', _) <-
-        Engine.hoistStms rules (Engine.isFalse False) mempty (consts'', uses)
-      pure (ST.insertStms consts''' mempty, consts''')
+      consts'' <- Engine.simplifyStmsWithUsage uses consts'
+      pure (ST.insertStms consts'' mempty, consts'')
 
 -- | Run a simplification operation to convergence.
 simplifySomething ::
@@ -157,13 +153,7 @@ simplifyStms simpl rules blockers scope =
     . informStms
   where
     vtable = ST.fromScope $ addScopeWisdom scope
-    f stms = do
-      -- Avoid everything getting simplified away as dead code.
-      let all_used =
-            UT.usages (namesFromList (M.keys (scopeOf stms)))
-      (((), usage), stms') <-
-        Engine.simplifyStms stms (pure (((), all_used), mempty))
-      fst <$> Engine.hoistStms rules (Engine.isFalse False) vtable (stms', usage)
+    f stms = Engine.simplifyStms stms
 
 loopUntilConvergence ::
   (MonadFreshNames m, Engine.SimplifiableRep rep) =>

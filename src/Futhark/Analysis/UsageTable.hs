@@ -19,6 +19,7 @@ module Futhark.Analysis.UsageTable
     sizeUsage,
     sizeUsages,
     Usages,
+    consumedU,
     usageInStm,
   )
 where
