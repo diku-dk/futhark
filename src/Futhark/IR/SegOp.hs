@@ -1143,23 +1143,23 @@ simplifyKernelBody ::
 simplifyKernelBody space (KernelBody _ stms res) = do
   par_blocker <- Engine.asksEngineEnv $ Engine.blockHoistPar . Engine.envHoistBlockers
 
+  let blocker =
+        Engine.hasFree bound_here
+          `Engine.orIf` Engine.isOp
+          `Engine.orIf` par_blocker
+          `Engine.orIf` Engine.isConsumed
+
   -- Ensure we do not try to use anything that is consumed in the result.
-  ((body_stms, body_res), hoisted) <-
+  (body_res, body_stms, hoisted) <-
     Engine.localVtable (flip (foldl' (flip ST.consume)) (foldMap consumedInResult res))
       . Engine.localVtable (<> scope_vtable)
       . Engine.localVtable (\vtable -> vtable {ST.simplifyMemory = True})
       . Engine.enterLoop
-      $ Engine.blockIf
-        ( Engine.hasFree bound_here
-            `Engine.orIf` Engine.isOp
-            `Engine.orIf` par_blocker
-            `Engine.orIf` Engine.isConsumed
-        )
-        $ Engine.simplifyStms stms $ do
-          res' <-
-            Engine.localVtable (ST.hideCertified $ namesFromList $ M.keys $ scopeOf stms) $
-              mapM Engine.simplify res
-          return ((res', UT.usages $ freeIn res'), mempty)
+      $ Engine.blockIf blocker stms $ do
+        res' <-
+          Engine.localVtable (ST.hideCertified $ namesFromList $ M.keys $ scopeOf stms) $
+            mapM Engine.simplify res
+        pure (res', UT.usages $ freeIn res')
 
   return (mkWiseKernelBody () body_stms body_res, hoisted)
   where

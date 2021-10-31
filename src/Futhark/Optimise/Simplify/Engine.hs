@@ -50,13 +50,13 @@ module Futhark.Optimise.Simplify.Engine
     -- * Building blocks
     SimplifiableRep,
     Simplifiable (..),
-    simplifyStms,
     simplifyFun,
+    simplifyStms,
+    simplifyStmsWithUsage,
     simplifyLambda,
     simplifyLambdaNoHoisting,
     bindLParams,
     simplifyBody,
-    SimplifiedBody,
     ST.SymbolTable,
     hoistStms,
     blockIf,
@@ -69,6 +69,7 @@ import Control.Monad.Reader
 import Control.Monad.State.Strict
 import Data.Either
 import Data.List (find, foldl', mapAccumL)
+import qualified Data.Map as M
 import Data.Maybe
 import qualified Futhark.Analysis.SymbolTable as ST
 import qualified Futhark.Analysis.UsageTable as UT
@@ -264,21 +265,21 @@ protectIfHoisted ::
   -- | Which side of the branch are we
   -- protecting here?
   Bool ->
-  SimpleM rep (a, Stms (Wise rep)) ->
-  SimpleM rep (a, Stms (Wise rep))
+  SimpleM rep (Stms (Wise rep), a) ->
+  SimpleM rep (Stms (Wise rep), a)
 protectIfHoisted cond side m = do
-  (x, stms) <- m
+  (hoisted, x) <- m
   ops <- asks $ protectHoistedOpS . fst
-  runBuilder $ do
-    if not $ all (safeExp . stmExp) stms
+  hoisted' <- runBuilder_ $ do
+    if not $ all (safeExp . stmExp) hoisted
       then do
         cond' <-
           if side
             then return cond
             else letSubExp "cond_neg" $ BasicOp $ UnOp Not cond
-        mapM_ (protectIf ops unsafeOrCostly cond') stms
-      else addStms stms
-    return x
+        mapM_ (protectIf ops unsafeOrCostly cond') hoisted
+      else addStms hoisted
+  pure (hoisted', x)
   where
     unsafeOrCostly e = not (safeExp e) || not (cheapExp e)
 
@@ -289,18 +290,18 @@ protectLoopHoisted ::
   SimplifiableRep rep =>
   [(FParam (Wise rep), SubExp)] ->
   LoopForm (Wise rep) ->
-  SimpleM rep (a, Stms (Wise rep)) ->
-  SimpleM rep (a, Stms (Wise rep))
+  SimpleM rep (a, b, Stms (Wise rep)) ->
+  SimpleM rep (a, b, Stms (Wise rep))
 protectLoopHoisted merge form m = do
-  (x, stms) <- m
+  (x, y, stms) <- m
   ops <- asks $ protectHoistedOpS . fst
-  runBuilder $ do
+  stms' <- runBuilder_ $ do
     if not $ all (safeExp . stmExp) stms
       then do
         is_nonempty <- checkIfNonEmpty
         mapM_ (protectIf ops (not . safeExp) is_nonempty) stms
       else addStms stms
-    return x
+  pure (x, y, stms')
   where
     checkIfNonEmpty =
       case form of
@@ -417,71 +418,84 @@ hoistStms ::
   SimplifiableRep rep =>
   RuleBook (Wise rep) ->
   BlockPred (Wise rep) ->
-  ST.SymbolTable (Wise rep) ->
-  (Stms (Wise rep), UT.UsageTable) ->
-  SimpleM rep (Stms (Wise rep), Stms (Wise rep))
-hoistStms rules block orig_vtable (orig_stms, orig_uses) = do
-  (blocked, hoisted) <- simplifyStmsBottomUp orig_vtable orig_uses orig_stms
+  Stms (Wise rep) ->
+  SimpleM rep (a, UT.UsageTable) ->
+  SimpleM rep (a, Stms (Wise rep), Stms (Wise rep))
+hoistStms rules block orig_stms final = do
+  (a, blocked, hoisted) <- simplifyStmsBottomUp orig_stms
   unless (null hoisted) changed
-  pure (stmsFromList blocked, stmsFromList hoisted)
+  pure (a, stmsFromList blocked, stmsFromList hoisted)
   where
-    simplifyStmsBottomUp vtable' uses' stms = do
-      (_, stms') <- simplifyStmsBottomUp' vtable' uses' stms
-      -- We need to do a final pass to ensure that nothing is
-      -- hoisted past something that it depends on.
-      let (blocked, hoisted) = partitionEithers $ blockUnhoistedDeps stms'
-      pure (blocked, hoisted)
-
-    simplifyStmsBottomUp' vtable' uses' stms = do
+    simplifyStmsBottomUp stms = do
       opUsage <- asks $ opUsageS . fst
       let usageInStm stm =
             UT.usageInStm stm
               <> case stmExp stm of
                 Op op -> opUsage op
                 _ -> mempty
-      foldM (hoistable usageInStm) (uses', []) $ reverse $ zip (stmsToList stms) vtables
-      where
-        vtables = scanl (flip ST.insertStm) vtable' $ stmsToList stms
+      (x, _, stms') <- hoistableStms usageInStm stms
+      -- We need to do a final pass to ensure that nothing is
+      -- hoisted past something that it depends on.
+      let (blocked, hoisted) = partitionEithers $ blockUnhoistedDeps stms'
+      pure (x, blocked, hoisted)
 
-    descend usageInStm vtable' stms m =
+    descend usageInStm stms m =
       case stmsHead stms of
-        Nothing -> m vtable'
-        Just (stms_h, stms_t) -> do
-          let vtable'' = ST.insertStm stms_h vtable'
-          (usage, stms_t') <- descend usageInStm vtable'' stms_t m
-          process usageInStm stms_h stms_t' usage vtable''
+        Nothing -> m
+        Just (stms_h, stms_t) -> localVtable (ST.insertStm stms_h) $ do
+          (x, usage, stms_t') <- descend usageInStm stms_t m
+          process usageInStm stms_h stms_t' usage x
 
-    process usageInStm stm stms uses' vtable' = do
-      res <-
-        localVtable (const vtable') $
-          bottomUpSimplifyStm rules (vtable', uses') stm
+    process usageInStm stm stms usage x = do
+      vtable <- askVtable
+      res <- bottomUpSimplifyStm rules (vtable, usage) stm
       case res of
         Nothing -- Nothing to optimise - see if hoistable.
-          | block vtable' uses' stm ->
+          | block vtable usage stm ->
             -- No, not hoistable.
             pure
-              ( expandUsage usageInStm vtable' uses' stm
+              ( x,
+                expandUsage usageInStm vtable usage stm
                   `UT.without` provides stm,
                 Left stm : stms
               )
           | otherwise ->
             -- Yes, hoistable.
             pure
-              ( expandUsage usageInStm vtable' uses' stm,
+              ( x,
+                expandUsage usageInStm vtable usage stm,
                 Right stm : stms
               )
         Just optimstms -> do
           changed
-          descend usageInStm vtable' optimstms $ \_ ->
-            pure (uses', stms)
+          descend usageInStm optimstms $ pure (x, usage, stms)
 
-    hoistable usageInStm (uses', stms) (stm, vtable')
-      | not $ any (`UT.isUsedDirectly` uses') $ provides stm =
-        -- Dead statement.
-        pure (uses', stms)
-      | otherwise = do
-        (stm_stms, stm') <- localVtable (const vtable') (recSimplifyStm stm uses')
-        descend usageInStm vtable' stm_stms $ process usageInStm stm' stms uses'
+    hoistableStms usageInStm stms =
+      case stmsHead stms of
+        Nothing -> do
+          (x, usage) <- final
+          pure (x, usage, mempty)
+        Just (stms_h, stms_t) -> do
+          stms_h' <- nonrecSimplifyStm stms_h
+
+          vtable <- askVtable
+          simplified <- topDownSimplifyStm rules vtable stms_h'
+
+          case simplified of
+            Just newstms -> do
+              changed
+              hoistableStms usageInStm (newstms <> stms_t)
+            Nothing -> do
+              (x, usage, stms_t') <-
+                localVtable (ST.insertStm stms_h') $
+                  hoistableStms usageInStm stms_t
+              if not $ any (`UT.isUsedDirectly` usage) $ provides stms_h'
+                then -- Dead statement.
+                  pure (x, usage, stms_t')
+                else do
+                  (stms_h_stms, stms_h'') <- recSimplifyStm stms_h' usage
+                  descend usageInStm stms_h_stms $
+                    process usageInStm stms_h'' stms_t' usage x
 
 blockUnhoistedDeps ::
   ASTRep rep =>
@@ -557,19 +571,15 @@ constructBody stms res =
     addStms stms
     pure res
 
-type SimplifiedBody rep a = ((a, UT.UsageTable), Stms (Wise rep))
-
 blockIf ::
   SimplifiableRep rep =>
   BlockPred (Wise rep) ->
-  SimpleM rep (SimplifiedBody rep a) ->
-  SimpleM rep ((Stms (Wise rep), a), Stms (Wise rep))
-blockIf block m = do
-  ((x, usages), stms) <- m
-  vtable <- askVtable
+  Stms (Wise rep) ->
+  SimpleM rep (a, UT.UsageTable) ->
+  SimpleM rep (a, Stms (Wise rep), Stms (Wise rep))
+blockIf block stms m = do
   rules <- asksEngineEnv envRules
-  (blocked, hoisted) <- hoistStms rules block vtable (stms, usages)
-  return ((blocked, x), hoisted)
+  hoistStms rules block stms m
 
 hasFree :: ASTRep rep => Names -> BlockPred rep
 hasFree ks _ _ need = ks `namesIntersect` freeIn need
@@ -614,17 +624,19 @@ loopInvariantStm vtable =
 
 hoistCommon ::
   SimplifiableRep rep =>
+  UT.UsageTable ->
+  [UT.Usages] ->
   SubExp ->
   IfSort ->
-  SimplifiedBody rep Result ->
-  SimplifiedBody rep Result ->
+  Body (Wise rep) ->
+  Body (Wise rep) ->
   SimpleM
     rep
     ( Body (Wise rep),
       Body (Wise rep),
       Stms (Wise rep)
     )
-hoistCommon cond ifsort ((res1, usages1), stms1) ((res2, usages2), stms2) = do
+hoistCommon res_usage res_usages cond ifsort body1 body2 = do
   is_alloc_fun <- asksEngineEnv $ isAllocation . envHoistBlockers
   branch_blocker <- asksEngineEnv $ blockHoistBranch . envHoistBlockers
   vtable <- askVtable
@@ -651,8 +663,8 @@ hoistCommon cond ifsort ((res1, usages1), stms1) ((res2, usages2), stms2) = do
       -- possible.
       isNotHoistableBnd _ _ (Let _ _ (BasicOp ArrayLit {})) = False
       isNotHoistableBnd _ _ (Let _ _ (BasicOp SubExp {})) = False
-      isNotHoistableBnd _ usages (Let pat _ _)
-        | any (`UT.isSize` usages) $ patNames pat =
+      isNotHoistableBnd _ usage (Let pat _ _)
+        | any (`UT.isSize` usage) $ patNames pat =
           False
       isNotHoistableBnd _ _ stm
         | is_alloc_fun stm = False
@@ -666,40 +678,55 @@ hoistCommon cond ifsort ((res1, usages1), stms1) ((res2, usages2), stms2) = do
           `orIf` isConsuming
           `orIf` isNotHoistableBnd
 
-  rules <- asksEngineEnv envRules
-  (body1_stms', safe1) <-
+  (hoisted1, body1') <-
     protectIfHoisted cond True $
-      hoistStms rules block vtable (stms1, usages1)
-  (body2_stms', safe2) <-
+      simplifyBody block res_usage res_usages body1
+  (hoisted2, body2') <-
     protectIfHoisted cond False $
-      hoistStms rules block vtable (stms2, usages2)
-  let hoistable = safe1 <> safe2
-  body1' <- constructBody body1_stms' res1
-  body2' <- constructBody body2_stms' res2
-  return (body1', body2', hoistable)
+      simplifyBody block res_usage res_usages body2
+  return (body1', body2', hoisted1 <> hoisted2)
 
--- | Simplify a single body.  The @[Diet]@ only covers the value
--- elements, because the context cannot be consumed.
+-- | Simplify a single body.
 simplifyBody ::
   SimplifiableRep rep =>
+  BlockPred (Wise rep) ->
   UT.UsageTable ->
-  [Diet] ->
+  [UT.Usages] ->
   Body (Wise rep) ->
-  SimpleM rep (SimplifiedBody rep Result)
-simplifyBody usages ds (Body _ stms res) =
-  simplifyStms stms $ do
-    (res', res_usages) <- simplifyResult ds res
-    pure ((res', res_usages <> usages), mempty)
+  SimpleM rep (Stms (Wise rep), Body (Wise rep))
+simplifyBody blocker usage res_usages (Body _ stms res) = do
+  (res', stms', hoisted) <-
+    blockIf blocker stms $ do
+      (res', res_usage) <- simplifyResult res_usages res
+      pure (res', res_usage <> usage)
+  body' <- constructBody stms' res'
+  pure (hoisted, body')
+
+-- | Simplify a single body.
+simplifyBodyNoHoisting ::
+  SimplifiableRep rep =>
+  UT.UsageTable ->
+  [UT.Usages] ->
+  Body (Wise rep) ->
+  SimpleM rep (Body (Wise rep))
+simplifyBodyNoHoisting usage res_usages body =
+  snd <$> simplifyBody (isFalse False) usage res_usages body
+
+usageFromDiet :: Diet -> UT.Usages
+usageFromDiet Consume = UT.consumedU
+usageFromDiet _ = mempty
 
 -- | Simplify a single 'Result'.  The @[Diet]@ only covers the value
 -- elements, because the context cannot be consumed.
 simplifyResult ::
-  SimplifiableRep rep => [Diet] -> Result -> SimpleM rep (Result, UT.UsageTable)
-simplifyResult ds res = do
+  SimplifiableRep rep => [UT.Usages] -> Result -> SimpleM rep (Result, UT.UsageTable)
+simplifyResult usages res = do
   res' <- mapM simplify res
   vtable <- askVtable
-  let consumption = consumeResult vtable $ zip ds res'
-  return (res', UT.usages (freeIn res') <> consumption)
+  let more_usages = mconcat $ do
+        (u, Var v) <- zip usages $ map resSubExp res
+        map (`UT.usage` u) $ v : namesToList (ST.lookupAliases v vtable)
+  return (res', UT.usages (freeIn res') <> more_usages)
 
 isDoLoopResult :: Result -> UT.UsageTable
 isDoLoopResult = mconcat . map checkForVar
@@ -707,31 +734,24 @@ isDoLoopResult = mconcat . map checkForVar
     checkForVar (SubExpRes _ (Var ident)) = UT.inResultUsage ident
     checkForVar _ = mempty
 
-patElemDiet :: UT.UsageTable -> PatElemT a -> Diet
-patElemDiet usage pe
-  | patElemName pe `UT.isConsumed` usage = Consume
-  | otherwise = Observe
-
 simplifyStms ::
   SimplifiableRep rep =>
   Stms (Wise rep) ->
-  SimpleM rep (SimplifiedBody rep a) ->
-  SimpleM rep (SimplifiedBody rep a)
-simplifyStms stms m =
-  case stmsHead stms of
-    Nothing -> m
-    Just (stm, stms') -> do
-      vtable <- askVtable
-      rules <- asksEngineEnv envRules
-      stm' <- nonrecSimplifyStm stm
-      simplified <- topDownSimplifyStm rules vtable stm'
+  SimpleM rep (Stms (Wise rep))
+simplifyStms stms = do
+  simplifyStmsWithUsage all_used stms
+  where
+    all_used =
+      UT.usages (namesFromList (M.keys (scopeOf stms)))
 
-      case simplified of
-        Just newstms -> changed >> simplifyStms (newstms <> stms') m
-        Nothing -> do
-          ((x, usage), stms'') <-
-            localVtable (ST.insertStm stm') $ simplifyStms stms' m
-          pure ((x, usage), oneStm stm' <> stms'')
+simplifyStmsWithUsage ::
+  SimplifiableRep rep =>
+  UT.UsageTable ->
+  Stms (Wise rep) ->
+  SimpleM rep (Stms (Wise rep))
+simplifyStmsWithUsage usage stms = do
+  ((), stms', _) <- blockIf (isFalse False) stms $ pure ((), usage)
+  pure stms'
 
 simplifyOp :: Op (Wise rep) -> SimpleM rep (Op (Wise rep), Stms (Wise rep))
 simplifyOp op = do
@@ -748,19 +768,17 @@ simplifyExp usage (Pat pes) (If cond tbranch fbranch (IfDec ts ifsort)) = do
   -- Here, we have to check whether 'cond' puts a bound on some free
   -- variable, and if so, chomp it.  We should also try to do CSE
   -- across branches.
-  let ds = map (patElemDiet usage) pes
+  let pes_usages = map (fromMaybe mempty . (`UT.lookup` usage) . patElemName) pes
   cond' <- simplify cond
   ts' <- mapM simplify ts
-  tbranch' <- simplifyBody usage ds tbranch
-  fbranch' <- simplifyBody usage ds fbranch
-  (tbranch'', fbranch'', hoisted) <- hoistCommon cond' ifsort tbranch' fbranch'
-  return (If cond' tbranch'' fbranch'' $ IfDec ts' ifsort, hoisted)
-simplifyExp usage _ (DoLoop merge form loopbody) = do
+  (tbranch', fbranch', hoisted) <-
+    hoistCommon usage pes_usages cond' ifsort tbranch fbranch
+  return (If cond' tbranch' fbranch' $ IfDec ts' ifsort, hoisted)
+simplifyExp _ _ (DoLoop merge form loopbody) = do
   let (params, args) = unzip merge
   params' <- mapM (traverse simplify) params
   args' <- mapM simplify args
   let merge' = zip params' args'
-      diets = map (diet . paramDeclType) params'
   (form', boundnames, wrapbody) <- case form of
     ForLoop loopvar it boundexp loopvars -> do
       boundexp' <- simplify boundexp
@@ -783,18 +801,22 @@ simplifyExp usage _ (DoLoop merge form loopbody) = do
           protectLoopHoisted merge' (WhileLoop cond')
         )
   seq_blocker <- asksEngineEnv $ blockHoistSeq . envHoistBlockers
-  ((loopstms, loopres), hoisted) <-
+  (loopres, loopstms, hoisted) <-
     enterLoop . consumeMerge $
-      bindMerge (zipWith withRes merge' (bodyResult loopbody)) $
-        wrapbody $
-          blockIf
-            ( hasFree boundnames `orIf` isConsumed
-                `orIf` seq_blocker
-                `orIf` notWorthHoisting
-            )
-            $ do
-              ((res, uses), stms) <- simplifyBody usage diets loopbody
-              return ((res, uses <> isDoLoopResult res), stms)
+      bindMerge (zipWith withRes merge' (bodyResult loopbody)) . wrapbody $
+        blockIf
+          ( hasFree boundnames `orIf` isConsumed
+              `orIf` seq_blocker
+              `orIf` notWorthHoisting
+          )
+          (bodyStms loopbody)
+          $ do
+            let params_usages =
+                  map
+                    (\p -> if unique (paramDeclType p) then UT.consumedU else mempty)
+                    params'
+            (res, uses) <- simplifyResult params_usages $ bodyResult loopbody
+            pure (res, uses <> isDoLoopResult res)
   loopbody' <- constructBody loopstms loopres
   return (DoLoop merge' form' loopbody', hoisted)
   where
@@ -991,20 +1013,15 @@ simplifyLambdaWith ::
 simplifyLambdaWith f blocked usage lam@(Lambda params body rettype) = do
   params' <- mapM (traverse simplify) params
   let paramnames = namesFromList $ boundByLambda lam
-  ((lamstms, lamres), hoisted) <-
+  (hoisted, body') <-
     enterLoop . bindLParams params' . localVtable f $
-      blockIf (blocked `orIf` hasFree paramnames `orIf` isConsumed) $
-        simplifyBody usage (map (const Observe) rettype) body
-  body' <- constructBody lamstms lamres
+      simplifyBody
+        (blocked `orIf` hasFree paramnames `orIf` isConsumed)
+        usage
+        (map (const mempty) rettype)
+        body
   rettype' <- simplify rettype
   return (Lambda params' body' rettype', hoisted)
-
-consumeResult :: ST.SymbolTable rep -> [(Diet, SubExpRes)] -> UT.UsageTable
-consumeResult vtable = mconcat . map inspect
-  where
-    inspect (Consume, SubExpRes _ (Var v)) =
-      mconcat $ map UT.consumedUsage $ v : namesToList (ST.lookupAliases v vtable)
-    inspect _ = mempty
 
 instance Simplifiable Certs where
   simplify (Certs ocs) = Certs . nubOrd . concat <$> mapM check ocs
@@ -1016,12 +1033,6 @@ instance Simplifiable Certs where
           Just (Var idd', _) -> return [idd']
           _ -> return [idd]
 
-insertAllStms ::
-  SimplifiableRep rep =>
-  SimpleM rep (SimplifiedBody rep Result) ->
-  SimpleM rep (Body (Wise rep))
-insertAllStms = uncurry constructBody . fst <=< blockIf (isFalse False)
-
 simplifyFun ::
   SimplifiableRep rep =>
   FunDef (Wise rep) ->
@@ -1029,6 +1040,6 @@ simplifyFun ::
 simplifyFun (FunDef entry attrs fname rettype params body) = do
   rettype' <- simplify rettype
   params' <- mapM (traverse simplify) params
-  let ds = map (diet . declExtTypeOf) rettype'
-  body' <- bindFParams params $ insertAllStms $ simplifyBody mempty ds body
+  let usages = map (usageFromDiet . diet . declExtTypeOf) rettype'
+  body' <- bindFParams params $ simplifyBodyNoHoisting mempty usages body
   pure $ FunDef entry attrs fname rettype' params' body'
