@@ -1,13 +1,14 @@
 module Futhark.Analysis.MigrationGraph where
 
-import Data.IntSet
+import qualified Data.IntSet as IS
 import qualified Data.IntMap.Strict as IM
+import Data.List (foldl')
 import Futhark.IR.GPU
 
 -- | A handle that identifies a specific 'Vertex'.
 type Id = Int
 
-type IdSet = IntSet
+type IdSet = IS.IntSet
 
 -- | Maps a name to its corresponding vertex handle.
 nameToId :: VName -> Id
@@ -25,13 +26,14 @@ type ForkDepth = Int
 --   1) increases from u to v, then u is within a conditional branch.
 --   2) decreases from u to v, then v binds the result of two or more branches.
 
--- Combined information on the immediate parent body that a variable is
--- declared within.
-data BodyInfo = BodyInfo
+-- Metadata on the environment that a variable is declared within.
+data Meta = Meta
   { -- | The fork depth of the variable. See 'ForkDepth'.
-    bodyForkDepth :: ForkDepth,
-    -- | The innermost loop body that the variable is declared within, if any.
-    bodyLoopId :: Maybe Id
+    metaForkDepth :: ForkDepth,
+    -- | An id for the subgraph within which the variable exists, usually
+    -- defined at the body level. A read may only be delayed to a point within
+    -- its own subgraph.
+    metaGraphId :: Maybe Id
   }
 
 -- | A graph representation of some program variable.
@@ -39,8 +41,8 @@ data Vertex = Vertex
   { -- | The handle for this vertex in the graph.
     vertexId :: Id,
     -- | How many branch bodies this variable binding is nested within, and
-    -- in which loop body it is declared, if any.
-    vertexBody :: BodyInfo,
+    -- in which subgraph it exists.
+    vertexMeta :: Meta,
     -- | Whether a route passes through this vertex, and from where.
     vertexRouting :: Routing,
     -- | Handles of vertices that this vertex has an edge to.
@@ -48,10 +50,10 @@ data Vertex = Vertex
   }
 
 -- | Constructs a 'Vertex' with no route or edges declared.
-vertex :: Id -> BodyInfo -> Vertex
-vertex i bi = Vertex {
+vertex :: Id -> Meta -> Vertex
+vertex i m = Vertex {
     vertexId      = i,
-    vertexBody    = bi,
+    vertexMeta    = m,
     vertexRouting = NoRoute,
     vertexEdges   = mempty
   }
@@ -75,11 +77,15 @@ instance Semigroup Edges where
 
 instance Monoid Edges where
   -- The empty set of edges.
-  mempty = ToNodes Data.IntSet.empty Nothing
+  mempty = ToNodes IS.empty Nothing
 
 -- Creates a set of edges where no edge is reversed or exhausted.
 declareEdges :: [Id] -> Edges
-declareEdges is = ToNodes (fromList is) Nothing
+declareEdges is = ToNodes (IS.fromList is) Nothing
+
+-- Like 'declareEdges' but for a single vertex.
+oneEdge :: Id -> Edges
+oneEdge i = ToNodes (IS.singleton i) Nothing
  
 -- | Route tracking for some vertex.
 -- If a route passes through the vertex then both an ingoing and an outgoing
@@ -101,29 +107,22 @@ data Routing
 -- exhausted edge.
 data Exhaustion = Exhausted | NotExhausted
 
-type Sink = ()
-
--- | A map from vertex 'Id' to corresponding 'Vertex', unless that vertex has
--- been marked as a sink.
-newtype Graph = Graph (IM.IntMap (Either Sink Vertex))
+-- | A map from vertex 'Id' to its corresponding 'Vertex'.
+newtype Graph = Graph (IM.IntMap Vertex)
 
 -- | The empty graph.
 empty :: Graph
 empty = Graph (IM.empty)
 
 -- | Insert a new vertex in the graph. If its variable already is represented
--- in the graph, the existing binding (vertex or sink) is replaced with the
--- supplied vertex.
+-- in the graph, the existing vertex is replaced with the supplied vertex.
 insert :: Vertex -> Graph -> Graph
-insert v (Graph m) = Graph $ IM.insert (vertexId v) (Right v) m
+insert v (Graph m) = Graph $ IM.insert (vertexId v) v m
 
 -- | Adjust the vertex with this specific id. When no vertex with that id is a
 -- member of the graph, the original graph is returned.
 adjust :: (Vertex -> Vertex) -> Id -> Graph -> Graph
-adjust f i (Graph m) = Graph $ IM.adjust f' i m
-  where
-    f' (Right v) = Right (f v)
-    f' x         = x
+adjust f i (Graph m) = Graph $ IM.adjust f i m
 
 -- | Connect the vertex with this id to a sink. When no vertex with that id is a
 -- member of the graph, the original graph is returned.
@@ -135,25 +134,47 @@ connectToSink = adjust $ \v -> v { vertexEdges = ToSink }
 addEdges :: Edges -> Id -> Graph -> Graph
 addEdges es = adjust $ \v -> v { vertexEdges = es <> vertexEdges v }
 
-
-
-
-
-
-
-insertSink :: Id -> Graph -> Graph
-insertSink i g = g
-
-insertWith :: (Vertex -> Vertex -> Vertex) -> Vertex -> Graph -> Graph
-insertWith f i g = g
-
-delete :: Id -> Graph -> Graph
-delete i g = g
-
-
-
+-- | Does a vertex for the given id exist in the graph?
 member :: Id -> Graph -> Bool
-member i g = False
+member i (Graph m) = IM.member i m
+
+-- | Returns the vertex from the graph with the given id.
+get :: Id -> Graph -> Maybe Vertex
+get i (Graph m) = IM.lookup i m
+
+
+-- | Which vertices that were visited during a previous failed routing attempt.
+-- Such set is valid until edges are added or removed from its corresponding
+-- graph, which will happen if a routing attempt succeeds.
+type Visited = IdSet
+
+-- | @route v src g@ attempts to find a route in @g@ from the source connected
+-- vertex @src@. @v@ is the set of vertices that were visited during a previous
+-- failed routing attempt; see 'Visited' for how long such set it valid.
+-- If the routing attempt fails, an updated visited set and graph is returned.
+-- Upon success the id for the last vertex along the created route is returned
+-- instead, along with an updated graph wherein edges along the route have been
+-- reversed. In either case edges may be exhausted in the updated graph.
+route :: Visited -> Id -> Graph -> (Either Visited Id, Graph)
+route v src g = (Left v, g) -- TODO
+
+-- | @routeMany v srcs g@ attempts to find a route in @g@ from every vertex in
+-- in @srcs@. @v@ is the set of vertices that were visited during a previous
+-- failed routing attempt; see 'Visited' for how long such set it valid.
+-- Returns a (possibly empty) visited set corresponding to the last routing
+-- attempt made, the ids for the last vertices along the created routes, and an
+-- updated graph.
+routeMany :: Visited -> [Id] -> Graph -> (Visited, [Id], Graph)
+routeMany visited srcs graph =
+  foldl' f (visited, [], graph) srcs
+  where
+    f (v, snks, g) src =
+      case route v src g of
+        (Left   v', g') -> (v', snks, g')
+        (Right snk, g') -> (IS.empty, snk:snks, g')
+
+
+
 
 
 
