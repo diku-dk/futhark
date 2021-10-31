@@ -51,6 +51,8 @@ module Futhark.AD.Rev.Monad
     --
     setLoopTape,
     lookupLoopTape,
+    substLoopTape,
+    renameLoopTape,
   )
 where
 
@@ -454,9 +456,24 @@ data VjpOps = VjpOps
     vjpStm :: Stm -> ADM () -> ADM ()
   }
 
+-- | @setLoopTape v vs@ establishes @vs@ as the name of the array
+-- where values of loop parameter @v@ from the forward pass are
+-- stored.
 setLoopTape :: VName -> VName -> ADM ()
 setLoopTape v vs = modify $ \env ->
   env {stateLoopTape = M.insert v vs $ stateLoopTape env}
 
+-- | Look-up the name of the array where @v@ is stored.
 lookupLoopTape :: VName -> ADM (Maybe VName)
 lookupLoopTape v = gets $ M.lookup v . stateLoopTape
+
+-- | @substLoopTape v v'@ substitutes the key @v@ for @v'@. That is,
+-- if @v |-> vs@ then after the substitution @v' |-> vs@ (and @v@
+-- points to nothing).
+substLoopTape :: VName -> VName -> ADM ()
+substLoopTape v v' = mapM_ (setLoopTape v') =<< lookupLoopTape v
+
+-- | Renames the keys of the loop tape. Useful for fixing the
+-- the names in the loop tape after a loop rename.
+renameLoopTape :: Substitutions -> ADM ()
+renameLoopTape = mapM_ (uncurry substLoopTape) . M.toList

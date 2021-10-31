@@ -309,6 +309,11 @@ copyConsumedArrsInStm s = inScopeOf s $ collectStms $ copyConsumedArrsInStm' s
        in M.fromList . mconcat
             <$> mapM onConsumed (namesToList $ consumedInStms $ fst (Alias.analyseStms mempty (oneStm stm)))
 
+-- | Preprocess statements before differentiating.
+-- For now, it's just stripmining.
+preprocess :: Stms SOACS -> ADM (Stms SOACS)
+preprocess = stripmineStms
+
 diffBody :: [Adj] -> [VName] -> Body -> ADM Body
 diffBody res_adjs get_adjs_for (Body () stms res) = subAD $
   subSubsts $ do
@@ -316,7 +321,7 @@ diffBody res_adjs get_adjs_for (Body () stms res) = subAD $
         onResult (SubExpRes _ (Var v)) v_adj = void $ updateAdj v =<< adjVal v_adj
     (adjs, stms') <- collectStms $ do
       zipWithM_ onResult (takeLast (length res_adjs) res) res_adjs
-      diffStms =<< stripmineStms stms
+      diffStms =<< preprocess stms
       mapM lookupAdjVal get_adjs_for
     pure $ Body () stms' $ res <> varsRes adjs
 

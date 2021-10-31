@@ -162,6 +162,7 @@ module Futhark.IR.Syntax
     subExpsRes,
     varRes,
     varsRes,
+    subExpResVName,
   )
 where
 
@@ -279,6 +280,11 @@ subExpsRes = map subExpRes
 -- | Construct a 'Result' from variable names.
 varsRes :: [VName] -> Result
 varsRes = map varRes
+
+-- | The 'VName' of a 'SubExpRes', if it exists.
+subExpResVName :: SubExpRes -> Maybe VName
+subExpResVName (SubExpRes _ (Var v)) = Just v
+subExpResVName _ = Nothing
 
 -- | The result of a body is a sequence of subexpressions.
 type Result = [SubExpRes]
