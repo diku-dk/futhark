@@ -30,13 +30,13 @@ import Futhark.Util
 -- run it with:  `futhark dev --cpu --merge-mem test.fut`
 printArrayShortCircuiting :: Prog SeqMem -> FutharkM ()
 printArrayShortCircuiting prg = do
-  coaltab <- mkCoalsTab $ AnlAls.aliasAnalysis prg
+  coaltab <- mkCoalsTab undefined --- $ AnlAls.aliasAnalysis undefined prg
   liftIO $ putStrLn $ "COALESCING RESULT:" ++ pretty (length coaltab) ++ "\n" ++ pretty coaltab
 
 -- run it with:  `futhark dev --gpu-mem --merge-mem test.fut`
 printArrayShortCircuitingGPU :: Prog GPUMem -> FutharkM ()
 printArrayShortCircuitingGPU prg = do
-  coaltab <- mkCoalsTabGPU $ AnlAls.aliasAnalysis prg
+  coaltab <- mkCoalsTabGPU undefined --- $ AnlAls.aliasAnalysis prg
   liftIO $ putStrLn $ "COALESCING RESULT:" ++ pretty (length coaltab) ++ "\n" ++ pretty coaltab
 
 data Env inner = Env
@@ -56,16 +56,17 @@ pass ::
   (Mem rep inner, LetDec rep ~ LetDecMem, CanBeAliased inner) =>
   String ->
   String ->
-  (Prog (Aliases rep) -> Pass.PassM CoalsTab) ->
+  (FunDef (Aliases rep) -> Pass.PassM CoalsTab) ->
   (inner -> ReplaceM inner inner) ->
   Pass rep rep
 pass flag desc mk on_inner =
-  Pass flag desc $ \prog -> do
-    coaltab <- foldMap vartab . M.elems <$> mk (AnlAls.aliasAnalysis prog)
-    Pass.intraproceduralTransformation (onStms coaltab) prog
+  Pass flag desc $
+    Pass.intraproceduralTransformationWithConsts return $ \_ f -> do
+      coaltab <- foldMap vartab . M.elems <$> mk (AnlAls.analyseFun f)
+      return $ f {funDefBody = onBody coaltab $ funDefBody f}
   where
-    onStms coaltab _ stms =
-      return $ runReader (mapM replaceInStm stms) (Env coaltab on_inner)
+    onBody coaltab body =
+      body {bodyStms = runReader (mapM replaceInStm $ bodyStms body) (Env coaltab on_inner)}
 
 replaceInStm :: (Mem rep inner, LetDec rep ~ LetDecMem) => Stm rep -> ReplaceM inner (Stm rep)
 replaceInStm (Let (Pat elems) d e) = do

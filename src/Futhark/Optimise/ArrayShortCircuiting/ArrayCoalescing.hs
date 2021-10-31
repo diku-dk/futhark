@@ -124,27 +124,19 @@ prettyInhibitTab tab =
 --------------------------------------------------------------------------------
 
 -- | Given a program, compute the coalescing table by folding over each function.
-mkCoalsTab :: MonadFreshNames m => Prog (Aliases SeqMem) -> m CoalsTab
-mkCoalsTab prg = do
-  foldl (<>) mempty
-    <$> mapM
-      ( mkCoalsTabFun
-          (snd . lastUseSeqMem)
-          (ShortCircuitReader shortCircuitSeqMem)
-          (ComputeScalarTableOnOp $ const $ const $ return mempty)
-      )
-      (progFuns prg)
+mkCoalsTab :: MonadFreshNames m => FunDef (Aliases SeqMem) -> m CoalsTab
+mkCoalsTab =
+  mkCoalsTabFun
+    (snd . lastUseSeqMem)
+    (ShortCircuitReader shortCircuitSeqMem)
+    (ComputeScalarTableOnOp $ const $ const $ return mempty)
 
-mkCoalsTabGPU :: MonadFreshNames m => Prog (Aliases GPUMem) -> m CoalsTab
-mkCoalsTabGPU prg =
-  foldl (<>) mempty
-    <$> mapM
-      ( mkCoalsTabFun
-          (snd . lastUseGPUMem)
-          (ShortCircuitReader shortCircuitGPUMem)
-          (ComputeScalarTableOnOp computeScalarTableGPUMem)
-      )
-      (progFuns prg)
+mkCoalsTabGPU :: MonadFreshNames m => FunDef (Aliases GPUMem) -> m CoalsTab
+mkCoalsTabGPU =
+  mkCoalsTabFun
+    (snd . lastUseGPUMem)
+    (ShortCircuitReader shortCircuitGPUMem)
+    (ComputeScalarTableOnOp computeScalarTableGPUMem)
 
 -- | Given a function, compute the coalescing table
 mkCoalsTabFun ::
