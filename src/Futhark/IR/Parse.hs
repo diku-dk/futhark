@@ -52,7 +52,7 @@ pName =
   lexeme . fmap nameFromString $
     (:) <$> satisfy leading <*> many (satisfy constituent)
   where
-    leading c = isAlpha c || c == '_'
+    leading c = isAlpha c || c `elem` ("_+-*/%=!<>|&^." :: String)
 
 pVName :: Parser VName
 pVName = lexeme $ do
