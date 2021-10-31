@@ -981,9 +981,9 @@ mkCoalsTabStm lutab stm@(Let pat@(Pat [x']) _ e@(BasicOp (Update _ x _ _elm))) t
               Just info ->
                 case M.lookup (patElemName x') (vartab info) of
                   Nothing ->
-                    error "In ArrayCoalescing.hs, fun mkCoalsTabStm, case in-place update!"
-                  -- this case should not happen, but if it can that just fail conservatively
-                  -- markFailedCoal (actv, inhbt) m_x
+                    -- error "In ArrayCoalescing.hs, fun mkCoalsTabStm, case in-place update!"
+                    -- this case should not happen, but if it can that just fail conservatively
+                    markFailedCoal (actv, inhbt) m_x
                   Just (Coalesced k mblk@(MemBlock _ _ _ x_indfun) _) ->
                     case freeVarSubstitutions (scope td_env) (scals bu_env) x_indfun of
                       Just fv_subs
