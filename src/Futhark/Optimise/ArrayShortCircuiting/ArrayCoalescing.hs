@@ -366,14 +366,14 @@ makeSegMapCoals td_env space kernel_body (active, inhibit) x@(PatElem pat_name (
                  & flip (addInvAliassesVarTab td_env) return_name
                  & fmap
                    ( M.adjust
-                       ( \(Coalesced knd (MemBlock pt shp mem ixf) subst) ->
+                       ( \(Coalesced knd (MemBlock pt shp mem ixf@(IxFun.IxFun _ base_shape _)) subst) ->
                            Coalesced
                              knd
                              ( MemBlock pt shp mem $
                                  traceWith "trans segmap ixf after" $
                                    IxFun.slice (traceWith "segmap ixf before" ixf) $
                                      traceWith "fullSlice" $
-                                       fullSlice shp $
+                                       fullSlice base_shape $
                                          traceWith "segmap slice" $
                                            Slice $
                                              map (DimFix . TPrimExp . flip LeafExp (IntType Int64) . fst) $
@@ -401,10 +401,18 @@ makeSegMapCoals td_env space kernel_body (active, inhibit) x@(PatElem pat_name (
                   inhibit
                 )
           _ -> (active, inhibit)
-makeSegMapCoals _ _ _ x _ = x
+makeSegMapCoals td_env _ _ x (_, WriteReturns _ _ return_name _) =
+  case getScopeMemInfo return_name $ scope td_env of
+    Just mb@(MemBlock _ _ return_mem _) -> markFailedCoal x return_mem
+    Nothing -> error "Should not happen?"
+makeSegMapCoals td_env _ _ x (_, result) =
+  freeIn result
+    & namesToList
+    & mapMaybe (flip getScopeMemInfo $ scope td_env)
+    & foldr (\(MemBlock _ _ mem _) -> flip markFailedCoal mem) x
 
-fullSlice :: ShapeBase SubExp -> Slice (TPrimExp Int64 VName) -> Slice (TPrimExp Int64 VName)
-fullSlice (Shape shp) (Slice slc) = Slice $ slc ++ (map (\d -> DimSlice 0 (TPrimExp $ primExpFromSubExp (IntType Int64) d) 1) $ drop (length shp - length slc) shp)
+fullSlice :: [TPrimExp Int64 VName] -> Slice (TPrimExp Int64 VName) -> Slice (TPrimExp Int64 VName)
+fullSlice shp (Slice slc) = Slice $ slc ++ (traceWith "extra" $ map (\d -> DimSlice 0 d 1) $ drop (traceWith "length slc" $ length slc) $ traceWith "shp" shp)
 
 fixPointCoalesce ::
   (Coalesceable rep inner) =>
