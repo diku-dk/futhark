@@ -188,6 +188,58 @@ stripmineStm stm = return $ oneStm stm
 stripmineStms :: Stms SOACS -> ADM (Stms SOACS)
 stripmineStms = traverseFold stripmineStm
 
+-- | Forward pass transformation of a loop. This includes modifying the loop
+-- to save the loop values at each iteration onto a tape as well as copying
+-- any consumed arrays in the loop's body and consuming said copies in lieu of
+-- the originals (which will be consumed later in the reverse pass).
+fwdLoop ::
+  Pat ->
+  StmAux () ->
+  ExpT SOACS ->
+  ADM ()
+fwdLoop (Pat pats) aux loop =
+  bindForLoop loop $ \val_pats form i _it bound _loop_vars body -> do
+    bound64 <- asIntS Int64 bound
+    let loop_params = map fst val_pats
+        is_true_dep = inAttrs (AttrName "true_dep") . paramAttrs
+        dont_copy_params = filter is_true_dep loop_params
+        dont_copy = map paramName dont_copy_params
+        loop_params_to_copy = loop_params \\ dont_copy_params
+
+    empty_saved_array <-
+      forM loop_params_to_copy $ \p ->
+        letSubExp (baseString (paramName p) <> "_empty_saved")
+          =<< eBlank (arrayOf (paramDec p) (Shape [bound64]) NoUniqueness)
+
+    (body', (saved_pats, saved_params)) <- buildBody $
+      localScope (scopeOfFParams loop_params) $
+        inScopeOf form $ do
+          copy_substs <- copyConsumedArrsInBody dont_copy body
+          addStms $ bodyStms body
+          i_i64 <- asIntS Int64 $ Var i
+          (saved_updates, saved_pats_params) <- fmap unzip $
+            forM loop_params_to_copy $ \p -> do
+              let v = paramName p
+                  t = paramDec p
+              saved_param_v <- newVName $ baseString v <> "_saved"
+              saved_pat_v <- newVName $ baseString v <> "_saved"
+              setLoopTape v saved_pat_v
+              let saved_param = Param mempty saved_param_v $ arrayOf t (Shape [bound64]) Unique
+                  saved_pat = PatElem saved_pat_v $ arrayOf t (Shape [bound64]) NoUniqueness
+              saved_update <-
+                localScope (scopeOfFParams [saved_param]) $
+                  letInPlace
+                    (baseString v <> "_saved_update")
+                    saved_param_v
+                    (fullSlice (fromDecl $ paramDec saved_param) [DimFix i_i64])
+                    $ substituteNames copy_substs $ BasicOp $ SubExp $ Var v
+              return (saved_update, (saved_pat, saved_param))
+          return (bodyResult body <> varsRes saved_updates, unzip saved_pats_params)
+
+    let pat' = Pat $ pats <> saved_pats
+        val_pats' = val_pats <> zip saved_params empty_saved_array
+    addStm $ Let pat' aux $ DoLoop val_pats' form body'
+
 diffLoop ::
   (Stms SOACS -> ADM ()) ->
   Pat ->
@@ -201,13 +253,13 @@ diffLoop
   aux
   loop@( DoLoop
            val_pats
-           form@(ForLoop i _it bound _loop_vars)
-           body@(Body () stms res)
+           form@ForLoop {}
+           _body
          )
   m = do
-    loop_acc_pats <- fwdLoop
+    fwdLoop (Pat pats) aux loop
     m
-    revLoop loop_acc_pats
+    revLoop
     where
       loop_params = map fst val_pats
       loop_param_names = map paramName loop_params
@@ -216,45 +268,9 @@ diffLoop
 
       dont_copy_params = filter is_true_dep loop_params
       dont_copy = map paramName dont_copy_params
-      loop_params_to_copy = loop_params \\ dont_copy_params
 
-      fwdLoop :: ADM [PatElem]
-      fwdLoop = do
-        bound64 <- asIntS Int64 bound
-
-        (loop_acc_pats, loop_acc_params) <- fmap unzip $
-          forM loop_params_to_copy $ \(Param _ v t) -> do
-            acc <- newVName $ baseString v <> "_acc"
-            pat_acc <- newVName $ baseString v <> "_acc"
-            setLoopTape v pat_acc
-            let loop_acc_param = Param mempty acc $ arrayOf t (Shape [bound64]) Unique
-                loop_acc_pat = PatElem pat_acc $ arrayOf t (Shape [bound64]) NoUniqueness
-            return (loop_acc_pat, loop_acc_param)
-
-        zero_accs <- forM loop_params_to_copy $ \(Param _ v t) ->
-          letSubExp (baseString v <> "_zero_acc")
-            =<< eBlank (arrayOf t (Shape [bound64]) NoUniqueness)
-
-        (loop_acc_params_ret, stms') <- collectStms $
-          localScope (scopeOfFParams $ loop_acc_params <> loop_params) $
-            inScopeOf form $ do
-              copy_substs <- copyConsumedArrsInBody dont_copy body
-              addStms stms
-              i64 <- asIntS Int64 $ Var i
-              forM (zip loop_params_to_copy loop_acc_params) $ \(Param _ v _, Param _ acc t) -> do
-                acc' <-
-                  letInPlace "loop_acc" acc (fullSlice (fromDecl t) [DimFix i64]) $
-                    substituteNames copy_substs $ BasicOp $ SubExp $ Var v
-                return $ Param mempty acc' (fromDecl t)
-
-        let body' = mkBody stms' $ res <> varsRes (map paramName loop_acc_params_ret)
-            pat' = Pat $ pats <> loop_acc_pats
-            val_pats' = val_pats <> zip loop_acc_params zero_accs
-        addStm $ Let pat' aux $ DoLoop val_pats' form body'
-        return loop_acc_pats
-
-      revLoop :: [PatElem] -> ADM ()
-      revLoop accs = do
+      revLoop :: ADM ()
+      revLoop = do
         loop' <- renameSomething loop
 
         case loop' of
@@ -346,6 +362,7 @@ diffLoop
                       diffStms stms'
                       loop_free_adjs <- mapM lookupAdjVal loop_free
                       loop_param_adjs <- mapM (lookupAdjVal . paramName) loop_params'
+
                       let f vs v = do
                             vs_t <- lookupType vs
                             v_adj <- lookupAdjVal v
@@ -373,15 +390,15 @@ diffLoop
 
             (_, stms_adj') <-
               inScopeOf form' $
-                localScope (mconcat $ map scopeOfPatElem accs) $
-                  collectStms $ do
-                    addStms index_stms
-                    substs <- catMaybes <$> mapM (restore . paramName) loop_params'
-                    addStms $ substituteNames (M.insert i' i_reverse $ M.fromList substs) stms_adj
+                collectStms $ do
+                  addStms index_stms
+                  substs <- catMaybes <$> mapM (restore . paramName) loop_params'
+
+                  addStms $ substituteNames (M.insert i' i_reverse $ M.fromList substs) stms_adj
 
             inScopeOf stms_adj' $
               localScope (scopeOfFParams $ map fst val_pats_adj) $
-                localScope (scopeOfPat $ Pat accs) $ do
+                do
                   let body_adj =
                         Body () stms_adj' $ varsRes (loop_param_adjs <> loop_free_adjs <> loop_vars_adjs)
                   adjs' <-
