@@ -207,7 +207,7 @@ lastUseExp (DoLoop var_ses _ body) used_nms0 = do
       -- the result used names are:
       fpar_nms = namesFromList $ map (identName . paramIdent . fst) var_ses
       used_nms' = (free_in_body <> (freeIn $ map snd var_ses)) `namesSubtract` fpar_nms
-      used_nms_res = used_nms0 <> used_nms'
+      used_nms_res = used_nms0 <> used_nms' <> freeIn (bodyResult body)
 
       -- the last-uses at loop-statement level are the loop free variables that
       -- do not belong to @used_nms0@; this includes the initializers of b), @lu_ini_b@
