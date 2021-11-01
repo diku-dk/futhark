@@ -189,11 +189,32 @@ shortCircuitGPUMem lutab pat@(Pat ps) e@(Inner (SegOp (SegScan _ space binops _ 
       (active, inh) = foldl markFailedCoal (activeCoals bu_env, inhibit bu_env) $ M.keys to_fail
       bu_env' = bu_env {activeCoals = active, inhibit = inh}
    in shortCircuitGPUMemHelper lutab pat space kernel_body td_env bu_env'
-shortCircuitGPUMem lutab pat@(Pat ps) e@(Inner (SegOp (SegHist _ space binops _ kernel_body))) td_env bu_env =
-  let to_fail = M.filter (\entry -> namesFromList (M.keys $ vartab entry) `namesIntersect` foldMap (freeIn . histOp) binops) $ activeCoals bu_env
+shortCircuitGPUMem lutab pat@(Pat ps) e@(Inner (SegOp (SegHist _ space histops _ kernel_body))) td_env bu_env = do
+  -- Need to take zipped patterns and histDest (flattened) and insert transitive coalesces
+  let to_fail = M.filter (\entry -> namesFromList (M.keys $ vartab entry) `namesIntersect` foldMap (freeIn . histOp) histops) $ activeCoals bu_env
       (active, inh) = foldl markFailedCoal (activeCoals bu_env, inhibit bu_env) $ M.keys to_fail
       bu_env' = bu_env {activeCoals = active, inhibit = inh}
-   in shortCircuitGPUMemHelper lutab pat space kernel_body td_env bu_env'
+  bu_env'' <- shortCircuitGPUMemHelper lutab pat space kernel_body td_env bu_env'
+  return $
+    foldl
+      ( \acc (PatElem p _, hist_dest) ->
+          case ( getScopeMemInfo p $ scope td_env,
+                 getScopeMemInfo hist_dest $ scope td_env
+               ) of
+            (Just (MemBlock _ _ p_mem _), Just (MemBlock _ _ dest_mem _)) ->
+              case M.lookup p_mem $ successCoals acc of
+                Just entry ->
+                  -- Update this entry with an optdep for the memory block of hist_dest
+                  let entry' = entry {optdeps = M.insert p p_mem $ optdeps entry}
+                   in acc
+                        { successCoals = M.insert p_mem entry' $ successCoals acc,
+                          activeCoals = M.insert dest_mem entry $ activeCoals acc
+                        }
+                Nothing -> acc
+            _ -> acc
+      )
+      bu_env''
+      $ zip ps $ concatMap histDest histops
 shortCircuitGPUMem _ _ (Inner (SizeOp _)) _ bu_env = return bu_env
 shortCircuitGPUMem _ _ (Inner (OtherOp ())) _ bu_env = return bu_env
 shortCircuitGPUMem _ _ _ _ _ = undefined
