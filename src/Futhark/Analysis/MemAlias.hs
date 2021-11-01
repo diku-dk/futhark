@@ -1,16 +1,25 @@
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE TypeFamilies #-}
+
 module Futhark.Analysis.MemAlias
-  ( analyze,
+  ( analyzeSeqMem,
+    analyzeGPUMem,
     canBeSameMemory,
+    aliasesOf,
     MemAliases,
   )
 where
 
+import Control.Monad.Reader
 import Data.Bifunctor
 import Data.Function ((&))
+import Data.Functor ((<&>))
 import qualified Data.Map as M
 import Data.Maybe (fromJust, mapMaybe)
 import qualified Data.Set as S
 import Futhark.IR.GPUMem
+import Futhark.IR.SeqMem
+import Futhark.Util
 import Futhark.Util.Pretty
 
 -- For our purposes, memory aliases are a bijective function: If @a@ aliases
@@ -30,7 +39,7 @@ newtype MemAliases = MemAliases (M.Map VName Names)
   deriving (Show, Eq)
 
 instance Semigroup MemAliases where
-  (<>) = join
+  (MemAliases m1) <> (MemAliases m2) = MemAliases $ M.unionWith (<>) m1 m2
 
 instance Monoid MemAliases where
   mempty = MemAliases mempty
@@ -41,9 +50,6 @@ instance Pretty MemAliases where
 addAlias :: VName -> VName -> MemAliases -> MemAliases
 addAlias v1 v2 m =
   m <> singleton v1 (oneName v2) <> singleton v2 mempty
-
-join :: MemAliases -> MemAliases -> MemAliases
-join (MemAliases m1) (MemAliases m2) = MemAliases $ M.unionWith (<>) m1 m2
 
 singleton :: VName -> Names -> MemAliases
 singleton v ns = MemAliases $ M.singleton v ns
@@ -63,26 +69,36 @@ aliasesOf (MemAliases m) v = fromJust $ M.lookup v m
 isIn :: VName -> MemAliases -> Bool
 isIn v (MemAliases m) = v `S.member` M.keysSet m
 
-analyzeStm :: MemAliases -> Stm GPUMem -> MemAliases
+newtype Env inner = Env {onInner :: MemAliases -> inner -> MemAliasesM inner MemAliases}
+
+type MemAliasesM inner a = Reader (Env inner) a
+
+analyzeHostOp :: MemAliases -> HostOp GPUMem () -> MemAliasesM (HostOp GPUMem ()) MemAliases
+analyzeHostOp m (SegOp (SegMap _ _ _ kbody)) =
+  analyzeStms (kernelBodyStms kbody) m
+analyzeHostOp m (SegOp (SegRed _ _ _ _ kbody)) =
+  analyzeStms (kernelBodyStms kbody) m
+analyzeHostOp m (SegOp (SegScan _ _ _ _ kbody)) =
+  analyzeStms (kernelBodyStms kbody) m
+analyzeHostOp m (SegOp (SegHist _ _ _ _ kbody)) =
+  analyzeStms (kernelBodyStms kbody) m
+
+analyzeStm :: (Mem rep inner, LetDec rep ~ LetDecMem) => MemAliases -> Stm rep -> MemAliasesM inner MemAliases
 analyzeStm m (Let (Pat [PatElem vname _]) _ (Op (Alloc _ _))) =
-  m <> singleton vname mempty
-analyzeStm m (Let _ _ (Op (Inner (SegOp (SegMap _ _ _ kbody))))) =
-  analyzeStms (kernelBodyStms kbody) m
-analyzeStm m (Let _ _ (Op (Inner (SegOp (SegRed _ _ _ _ kbody))))) =
-  analyzeStms (kernelBodyStms kbody) m
-analyzeStm m (Let _ _ (Op (Inner (SegOp (SegScan _ _ _ _ kbody))))) =
-  analyzeStms (kernelBodyStms kbody) m
-analyzeStm m (Let _ _ (Op (Inner (SegOp (SegHist _ _ _ _ kbody))))) =
-  analyzeStms (kernelBodyStms kbody) m
-analyzeStm m (Let pat _ (If _ then_body else_body _)) =
-  let m' =
-        analyzeStms (bodyStms then_body) m
-          & analyzeStms (bodyStms else_body)
-   in zip (patNames pat) (map resSubExp $ bodyResult then_body)
-        <> zip (patNames pat) (map resSubExp $ bodyResult else_body)
-        & mapMaybe (filterFun m')
-        & foldr (uncurry addAlias) m'
-analyzeStm m (Let pat _ (DoLoop params _ body)) =
+  return $ m <> singleton vname mempty
+analyzeStm m (Let pat _ (Op (Inner inner))) = do
+  on_inner <- asks onInner
+  on_inner m inner
+analyzeStm m (Let pat _ (If _ then_body else_body _)) = do
+  m' <-
+    analyzeStms (bodyStms then_body) m
+      >>= analyzeStms (bodyStms else_body)
+  zip (patNames pat) (map resSubExp $ bodyResult then_body)
+    <> zip (patNames pat) (map resSubExp $ bodyResult else_body)
+    & mapMaybe (filterFun m')
+    & foldr (uncurry addAlias) m'
+    & return
+analyzeStm m (Let pat _ (DoLoop params _ body)) = do
   let m_init =
         map snd params
           & zip (patNames pat)
@@ -91,23 +107,22 @@ analyzeStm m (Let pat _ (DoLoop params _ body)) =
       m_params =
         mapMaybe (filterFun m_init . first paramName) params
           & foldr (uncurry addAlias) m_init
-      m_body = analyzeStms (bodyStms body) m_params
-      m_res =
-        zip (patNames pat) (map resSubExp $ bodyResult body)
-          & mapMaybe (filterFun m_body)
-          & foldr (uncurry addAlias) m_body
-   in m_res
-analyzeStm m _ = m
+  m_body <- analyzeStms (bodyStms body) m_params
+  zip (patNames pat) (map resSubExp $ bodyResult body)
+    & mapMaybe (filterFun m_body)
+    & foldr (uncurry addAlias) m_body
+    & return
+analyzeStm m _ = return m
 
 filterFun :: MemAliases -> (VName, SubExp) -> Maybe (VName, VName)
 filterFun m' (v, Var v') | v' `isIn` m' = Just (v, v')
 filterFun _ _ = Nothing
 
-analyzeStms :: Stms GPUMem -> MemAliases -> MemAliases
+analyzeStms :: (Mem rep inner, LetDec rep ~ LetDecMem) => Stms rep -> MemAliases -> MemAliasesM inner MemAliases
 analyzeStms =
-  flip $ foldl analyzeStm
+  flip $ foldM analyzeStm
 
-analyzeFun :: FunDef GPUMem -> MemAliases
+analyzeFun :: (Mem rep inner, LetDec rep ~ LetDecMem) => FunDef rep -> MemAliasesM inner MemAliases
 analyzeFun f =
   funDefParams f
     & mapMaybe justMem
@@ -119,19 +134,23 @@ analyzeFun f =
 
 transitiveClosure :: MemAliases -> MemAliases
 transitiveClosure ma@(MemAliases m) =
-  let new =
-        M.foldMapWithKey
-          ( \k ns ->
-              namesToList ns
-                & foldMap (aliasesOf ma)
-                & singleton k
-          )
-          m
-          <> ma
-   in if new == ma then ma else transitiveClosure new
+  M.foldMapWithKey
+    ( \k ns ->
+        namesToList ns
+          & foldMap (aliasesOf ma)
+          & singleton k
+    )
+    m
+    <> ma
 
-analyze :: Prog GPUMem -> MemAliases
+analyzeSeqMem :: Prog SeqMem -> MemAliases
+analyzeSeqMem prog = runReader (analyze prog) $ Env $ \x _ -> return x
+
+analyzeGPUMem :: Prog GPUMem -> MemAliases
+analyzeGPUMem prog = runReader (analyze prog) $ Env analyzeHostOp
+
+analyze :: (Mem rep inner, LetDec rep ~ LetDecMem) => Prog rep -> MemAliasesM inner MemAliases
 analyze prog =
   progFuns prog
-    & foldl (\m f -> analyzeFun f <> m) (MemAliases mempty)
-    & transitiveClosure
+    & foldM (\m f -> (<>) m <$> analyzeFun f) (MemAliases mempty)
+    <&> fixPoint transitiveClosure

@@ -481,7 +481,7 @@ commandLineOptions =
     Option
       []
       ["mem-aliases"]
-      (NoArg $ Right $ \opts -> opts {futharkAction = GPUMemAction $ \_ _ _ -> memAliasesAction})
+      (NoArg $ Right $ \opts -> opts {futharkAction = SeqMemAction $ \_ _ _ -> memAliasesAction})
       "Print memory aliases.",
     Option
       []

@@ -85,12 +85,12 @@ printAliasesAction =
     }
 
 -- | Print the result to stdout, alias annotations.
-memAliasesAction :: Action GPUMem
+memAliasesAction :: Action SeqMem
 memAliasesAction =
   Action
     { actionName = "mem alias",
       actionDescription = "Print memory aliases on standard output.",
-      actionProcedure = liftIO . putStrLn . pretty . MA.analyze
+      actionProcedure = liftIO . putStrLn . pretty . MA.analyzeSeqMem
     }
 
 -- | Print call graph to stdout.
