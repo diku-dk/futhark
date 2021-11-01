@@ -114,7 +114,7 @@ valBindDefs vbind =
   where
     vbind_t =
       foldFunType (map patternStructType (valBindParams vbind)) $
-        fst $ unInfo $ valBindRetType vbind
+        unInfo $ valBindRetType vbind
 
 typeBindDefs :: TypeBind -> Defs
 typeBindDefs tbind =

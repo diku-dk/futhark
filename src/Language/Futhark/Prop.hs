@@ -28,6 +28,7 @@ module Language.Futhark.Prop
     -- * Queries on expressions
     typeOf,
     valBindTypeScheme,
+    valBindBound,
     funType,
 
     -- * Queries on patterns and params
@@ -619,8 +620,18 @@ unfoldFunType t = ([], t)
 valBindTypeScheme :: ValBindBase Info VName -> ([TypeParamBase VName], StructType)
 valBindTypeScheme vb =
   ( valBindTypeParams vb,
-    funType (valBindParams vb) (fst (unInfo (valBindRetType vb)))
+    funType (valBindParams vb) (unInfo (valBindRetType vb))
   )
+
+-- | The names that are brought into scope by this value binding (not
+-- including its own parameter names, but including any existential
+-- sizes).
+valBindBound :: ValBindBase Info VName -> [VName]
+valBindBound vb =
+  valBindName vb :
+  case valBindParams vb of
+    [] -> retDims (unInfo (valBindRetType vb))
+    _ -> []
 
 -- | The type of a function with the given parameters and return type.
 funType :: [PatBase Info VName] -> StructRetType -> StructType
