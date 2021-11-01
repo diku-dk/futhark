@@ -631,9 +631,8 @@ substNamesInSubExp subs (Var idd) =
 instance (ASTRep rep, CanBeWise (Op rep)) => CanBeWise (SOAC rep) where
   type OpWithWisdom (SOAC rep) = SOAC (Wise rep)
 
-  removeOpWisdom = runIdentity . mapSOACM remove
-    where
-      remove = SOACMapper return (return . removeLambdaWisdom) return
+  removeOpWisdom = runIdentity . mapSOACM (SOACMapper pure (pure . removeLambdaWisdom) pure)
+  addOpWisdom = runIdentity . mapSOACM (SOACMapper pure (pure . informLambda) pure)
 
 instance RepTypes rep => ST.IndexOp (SOAC rep) where
   indexOp vtable k soac [i] = do

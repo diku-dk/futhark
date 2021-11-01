@@ -496,7 +496,7 @@ checkExp (AppExp (LetPat sizes pat e body loc) _) =
         Ident (sizeName size) (Info (Scalar $ Prim $ Signed Int64)) (srclocOf size)
 checkExp (AppExp (LetFun name (tparams, params, maybe_retdecl, NoInfo, e) body loc) _) =
   sequentially (checkBinding (name, maybe_retdecl, tparams, params, e, loc)) $
-    \(tparams', params', maybe_retdecl', rettype, _, e') closure -> do
+    \(tparams', params', maybe_retdecl', rettype, e') closure -> do
       closure' <- lexicalClosure params' closure
 
       bindSpaced [(Term, name)] $ do
@@ -1067,7 +1067,7 @@ checkOneExp :: UncheckedExp -> TypeM ([TypeParam], Exp)
 checkOneExp e = fmap fst . runTermTypeM $ do
   e' <- checkExp e
   let t = toStruct $ typeOf e'
-  (tparams, _, _, _) <-
+  (tparams, _, _) <-
     letGeneralise (nameFromString "<exp>") (srclocOf e) [] [] t
   fixOverloadedTypes $ typeVars t
   e'' <- updateTypes e'
@@ -1236,12 +1236,11 @@ checkFunDef ::
       [Pat],
       Maybe (TypeExp VName),
       StructRetType,
-      [VName],
       Exp
     )
 checkFunDef (fname, maybe_retdecl, tparams, params, body, loc) =
   fmap fst . runTermTypeM $ do
-    (tparams', params', maybe_retdecl', RetType dims rettype', retext, body') <-
+    (tparams', params', maybe_retdecl', RetType dims rettype', body') <-
       checkBinding (fname, maybe_retdecl, tparams, params, body, loc)
 
     -- Since this is a top-level function, we also resolve overloaded
@@ -1270,7 +1269,7 @@ checkFunDef (fname, maybe_retdecl, tparams, params, body, loc) =
         typeError loc mempty . withIndexLink "may-not-be-redefined" $
           "The" <+> pprName fname <+> "operator may not be redefined."
 
-      pure (fname', tparams', params'', maybe_retdecl'', RetType dims rettype'', retext, body'')
+      pure (fname', tparams', params'', maybe_retdecl'', RetType dims rettype'', body'')
 
 -- | This is "fixing" as in "setting them", not "correcting them".  We
 -- only make very conservative fixing.
@@ -1354,7 +1353,6 @@ checkBinding ::
       [Pat],
       Maybe (TypeExp VName),
       StructRetType,
-      [VName],
       Exp
     )
 checkBinding (fname, maybe_retdecl, tparams, params, body, loc) =
@@ -1391,12 +1389,12 @@ checkBinding (fname, maybe_retdecl, tparams, params, body, loc) =
 
     verifyFunctionParams (Just fname) params''
 
-    (tparams'', params''', rettype'', retext) <-
+    (tparams'', params''', rettype'') <-
       letGeneralise fname loc tparams' params'' rettype
 
     checkGlobalAliases params'' body_t loc
 
-    pure (tparams'', params''', maybe_retdecl'', rettype'', retext, body')
+    pure (tparams'', params''', maybe_retdecl'', rettype'', body')
   where
     checkReturnAlias rettp params' =
       foldM_ (checkReturnAlias' params') S.empty . returnAliasing rettp
@@ -1584,7 +1582,7 @@ closeOverTypes ::
   [StructType] ->
   StructType ->
   Constraints ->
-  TermTypeM ([TypeParam], StructRetType, [VName])
+  TermTypeM ([TypeParam], StructRetType)
 closeOverTypes defname defloc tparams paramts ret substs = do
   (more_tparams, retext) <-
     partitionEithers . catMaybes
@@ -1597,8 +1595,7 @@ closeOverTypes defname defloc tparams paramts ret substs = do
       mkExt AnyDim {} = error "closeOverTypes: AnyDim"
   return
     ( tparams ++ more_tparams,
-      injectExt (mapMaybe mkExt (nestedDims ret)) ret,
-      retext
+      injectExt (retext ++ mapMaybe mkExt (nestedDims ret)) ret
     )
   where
     t = foldFunType paramts $ RetType [] ret
@@ -1638,7 +1635,7 @@ letGeneralise ::
   [TypeParam] ->
   [Pat] ->
   StructType ->
-  TermTypeM ([TypeParam], [Pat], StructRetType, [VName])
+  TermTypeM ([TypeParam], [Pat], StructRetType)
 letGeneralise defname defloc tparams params rettype =
   onFailure (CheckingLetGeneralise defname) $ do
     now_substs <- getConstraints
@@ -1663,7 +1660,7 @@ letGeneralise defname defloc tparams params rettype =
     let candidate k (lvl, _) = (k `S.notMember` keep_type_vars) && lvl >= cur_lvl
         new_substs = M.filterWithKey candidate now_substs
 
-    (tparams', RetType ret_dims rettype', retext) <-
+    (tparams', RetType ret_dims rettype') <-
       closeOverTypes
         defname
         defloc
@@ -1685,7 +1682,7 @@ letGeneralise defname defloc tparams params rettype =
     -- let-generalisation.
     modifyConstraints $ M.filterWithKey $ \k _ -> k `notElem` map typeParamName tparams'
 
-    pure (tparams', params, RetType ret_dims rettype'', retext)
+    pure (tparams', params, RetType ret_dims rettype'')
 
 checkFunBody ::
   [Pat] ->

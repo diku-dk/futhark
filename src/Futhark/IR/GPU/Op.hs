@@ -310,6 +310,10 @@ instance (CanBeWise (Op rep), CanBeWise op, ASTRep rep) => CanBeWise (HostOp rep
   removeOpWisdom (OtherOp op) = OtherOp $ removeOpWisdom op
   removeOpWisdom (SizeOp op) = SizeOp op
 
+  addOpWisdom (SegOp op) = SegOp $ addOpWisdom op
+  addOpWisdom (OtherOp op) = OtherOp $ addOpWisdom op
+  addOpWisdom (SizeOp op) = SizeOp op
+
 instance (ASTRep rep, ST.IndexOp op) => ST.IndexOp (HostOp rep op) where
   indexOp vtable k (SegOp op) is = ST.indexOp vtable k op is
   indexOp vtable k (OtherOp op) is = ST.indexOp vtable k op is

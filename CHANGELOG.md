@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+* Some incorrect removal of copies (#1505).
+
+* Handling of parametric modules with top-level existentials (#1510).
+
 ## [0.20.6]
 
 ### Added

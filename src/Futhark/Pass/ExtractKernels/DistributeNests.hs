@@ -341,7 +341,7 @@ distributeMapBodyStms orig_acc = distribute <=< onStms orig_acc . stmsToList
       types <- asksScope scopeForSOACs
       stream_stms <-
         snd <$> runBuilderT (sequentialStreamWholeArray pat w accs lam arrs) types
-      (_, stream_stms') <-
+      stream_stms' <-
         runReaderT (copyPropagateInStms simpleSOACS types stream_stms) types
       onStms acc $ stmsToList (fmap (certify cs) stream_stms') ++ stms
     onStms acc (stm : stms) =
@@ -406,8 +406,7 @@ maybeDistributeStm stm@(Let pat aux (DoLoop merge form@ForLoop {} body)) acc
             -- (which are now innermost).
             stms <-
               (`runReaderT` types) $
-                fmap snd . simplifyStms
-                  =<< interchangeLoops nest' (SeqLoop perm pat merge form body)
+                simplifyStms =<< interchangeLoops nest' (SeqLoop perm pat merge form body)
             onTopLevelStms stms
             return acc'
       _ ->
@@ -430,8 +429,7 @@ maybeDistributeStm stm@(Let pat _ (If cond tbranch fbranch ret)) acc
             let branch = Branch perm pat cond tbranch fbranch ret
             stms <-
               (`runReaderT` types) $
-                fmap snd . simplifyStms
-                  =<< interchangeBranch nest' branch
+                simplifyStms =<< interchangeBranch nest' branch
             onTopLevelStms stms
             return acc'
       _ ->
@@ -453,7 +451,7 @@ maybeDistributeStm stm@(Let pat _ (WithAcc inputs lam)) acc
             let withacc = WithAccStm perm pat inputs lam
             stms <-
               (`runReaderT` types) $
-                fmap snd . simplifyStms =<< interchangeWithAcc nest' withacc
+                simplifyStms =<< interchangeWithAcc nest' withacc
             onTopLevelStms stms
             return acc'
       _ ->
