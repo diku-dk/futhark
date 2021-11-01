@@ -1275,16 +1275,17 @@ defuncValBind valbind@(ValBind _ name retdecl (Info (RetType ret_dims rettype)) 
         -- applications of lifted functions, we don't properly update
         -- the types in the return type annotation.
         combineTypeShapes rettype $ first (anyDimIfNotBound bound_sizes) $ toStruct $ typeOf body'
+      ret_dims' = filter (`S.member` typeDimNames rettype') ret_dims
   (missing_dims, params'') <- sizesForAll bound_sizes params'
 
-  return
+  pure
     ( valbind
         { valBindRetDecl = retdecl,
           valBindRetType =
             Info $
               if null params'
-                then RetType ret_dims $ rettype' `setUniqueness` Nonunique
-                else RetType ret_dims rettype',
+                then RetType ret_dims' $ rettype' `setUniqueness` Nonunique
+                else RetType ret_dims' rettype',
           valBindTypeParams =
             map (`TypeParamDim` mempty) $ tparams' ++ missing_dims,
           valBindParams = params'',
