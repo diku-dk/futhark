@@ -51,10 +51,8 @@ addValBind :: ValBind -> LiftM ()
 addValBind vb = modify $ \s ->
   s
     { stateValBinds = vb : stateValBinds s,
-      stateGlobal = foldl' (flip S.insert) (stateGlobal s) names
+      stateGlobal = foldl' (flip S.insert) (stateGlobal s) (valBindBound vb)
     }
-  where
-    names = valBindName vb : snd (unInfo (valBindRetType vb))
 
 replacing :: VName -> Exp -> LiftM a -> LiftM a
 replacing v e = local $ \env ->
@@ -111,7 +109,7 @@ liftFunction fname tparams params (RetType dims ret) funbody = do
         valBindTypeParams = tparams,
         valBindParams = free_params ++ params,
         valBindRetDecl = Nothing,
-        valBindRetType = Info (RetType dims ret, mempty),
+        valBindRetType = Info (RetType dims ret),
         valBindBody = funbody,
         valBindDoc = Nothing,
         valBindAttrs = mempty,

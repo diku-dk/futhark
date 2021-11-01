@@ -1049,16 +1049,12 @@ liftValDec fname (RetType ret_dims ret) dims pats body = addValBind dec
     mkExt _ = Nothing
     rettype_st = RetType (mapMaybe mkExt (S.toList (typeDimNames ret)) ++ ret_dims) ret
 
-    (valbind_t, valbind_ext) =
-      case pats of
-        [] -> (RetType [] $ retType rettype_st, retDims rettype_st)
-        _ -> (rettype_st, [])
     dec =
       ValBind
         { valBindEntryPoint = Nothing,
           valBindName = fname,
           valBindRetDecl = Nothing,
-          valBindRetType = Info (valbind_t, valbind_ext),
+          valBindRetType = Info rettype_st,
           valBindTypeParams = dims',
           valBindParams = pats,
           valBindBody = body,
@@ -1249,7 +1245,7 @@ svFromType t = Dynamic t
 -- boolean is true if the function is a 'DynamicFun'.
 defuncValBind :: ValBind -> DefM (ValBind, Env)
 -- Eta-expand entry points with a functional return type.
-defuncValBind (ValBind entry name _ (Info (RetType _ rettype, retext)) tparams params body _ attrs loc)
+defuncValBind (ValBind entry name _ (Info (RetType _ rettype)) tparams params body _ attrs loc)
   | Scalar Arrow {} <- rettype = do
     (body_pats, body', rettype') <- etaExpand (fromStruct rettype) body
     defuncValBind $
@@ -1257,14 +1253,14 @@ defuncValBind (ValBind entry name _ (Info (RetType _ rettype, retext)) tparams p
         entry
         name
         Nothing
-        (Info (rettype', retext))
+        (Info rettype')
         tparams
         (params <> body_pats)
         body'
         Nothing
         attrs
         loc
-defuncValBind valbind@(ValBind _ name retdecl (Info (RetType ret_dims rettype, retext)) tparams params body _ _ _) = do
+defuncValBind valbind@(ValBind _ name retdecl (Info (RetType ret_dims rettype)) tparams params body _ _ _) = do
   when (any isTypeParam tparams) $
     error $
       prettyName name ++ " has type parameters, "
@@ -1285,14 +1281,10 @@ defuncValBind valbind@(ValBind _ name retdecl (Info (RetType ret_dims rettype, r
     ( valbind
         { valBindRetDecl = retdecl,
           valBindRetType =
-            Info
-              ( if null params'
-                  then
-                    ( RetType [] $ rettype' `setUniqueness` Nonunique,
-                      retext
-                    )
-                  else (RetType ret_dims rettype', retext)
-              ),
+            Info $
+              if null params'
+                then RetType ret_dims $ rettype' `setUniqueness` Nonunique
+                else RetType ret_dims rettype',
           valBindTypeParams =
             map (`TypeParamDim` mempty) $ tparams' ++ missing_dims,
           valBindParams = params'',
@@ -1314,7 +1306,7 @@ defuncVals [] = pure ()
 defuncVals (valbind : ds) = do
   (valbind', env) <- defuncValBind valbind
   addValBind valbind'
-  let globals = valBindName valbind' : snd (unInfo (valBindRetType valbind'))
+  let globals = valBindBound valbind'
   localEnv env $ areGlobal globals $ defuncVals ds
 
 {-# NOINLINE transformProg #-}
