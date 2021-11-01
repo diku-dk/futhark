@@ -313,8 +313,9 @@ walkAliasTab _ vtab x
   | Just c <- M.lookup x vtab =
     Just c -- @x@ is in @vartab@ together with its new ixfun
 walkAliasTab alias_tab vtab x
-  | Just (x0, alias0, _) <- M.lookup x alias_tab =
-    walkAliasTab alias_tab vtab $ trace ("found alias for " <> pretty x) x0
+  | Just (x0, alias0, _) <- M.lookup x alias_tab = do
+    Coalesced knd (MemBlock pt shp vname ixf) substs <- walkAliasTab alias_tab vtab $ trace ("found alias for " <> pretty x) x0
+    return $ Coalesced knd (MemBlock pt shp vname $ alias0 ixf) substs
 walkAliasTab alias_tab vtab x = Nothing -- error ("impossible!\nCouldn't find " <> pretty x <> " in vtab: " <> pretty vtab)
 
 -- | We assume @x@ is in @vartab@ and we add the variables that @x@ aliases
