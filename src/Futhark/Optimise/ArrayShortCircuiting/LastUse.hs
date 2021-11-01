@@ -22,11 +22,14 @@ import Control.Monad.State.Strict
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import Data.Sequence (Seq (..))
+import Debug.Trace
 import Futhark.IR.Aliases
 import Futhark.IR.GPUMem
 import Futhark.IR.SeqMem
 import Futhark.Optimise.ArrayShortCircuiting.DataStructs
 import Prelude
+
+traceWith s a = trace (s <> ": " <> pretty a) a
 
 newtype LastUseReader rep = LastUseReader
   { onOp :: Op (Aliases rep) -> Names -> LastUseM rep (LUTabFun, Names, Names)
@@ -194,12 +197,12 @@ lastUseExp (DoLoop var_ses _ body) used_nms0 = do
       -- and c) to produce loop-variant last uses inside the loop, and also we prevent
       -- the free-loop-variables to having last uses inside the loop.
       free_in_body' = free_in_body `namesSubtract` namesFromList (map fst var_inis)
-      used_nms = used_nms0 <> free_in_body'
+      used_nms = used_nms0 <> free_in_body' <> freeIn (bodyResult body)
   (body_lutab, _) <- lastUseBody body (mempty, used_nms)
 
   -- add var_inis_a to the body_lutab, i.e., record the last-use of
   -- initializer in the corresponding loop variant.
-  let lutab_res = body_lutab <> M.fromList var_inis
+  let lutab_res = body_lutab <> (traceWith "CHREVROLET" $ M.fromList var_inis)
 
       -- the result used names are:
       fpar_nms = namesFromList $ map (identName . paramIdent . fst) var_ses
