@@ -42,9 +42,8 @@ makeLocalArrays (Count group_size) num_threads scans = do
             MemArray pt shape _ (ArrayIn mem _) -> do
               let shape' = Shape [num_threads] <> shape
               arr <-
-                lift $
-                  sArray "scan_arr" pt shape' $
-                    ArrayIn mem $ IxFun.iota $ map pe64 $ shapeDims shape'
+                lift . sArray "scan_arr" pt shape' mem $
+                  IxFun.iota $ map pe64 $ shapeDims shape'
               return (arr, [])
             _ -> do
               let pt = elemType $ paramType p
