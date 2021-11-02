@@ -1902,7 +1902,7 @@ readScalarPointerWithQuals quals_f dest i elemtype space vol = do
   return $ derefPointer dest i [C.cty|$tyquals:quals' $ty:elemtype*|]
 
 compileExpToName :: String -> PrimType -> Exp -> CompilerM op s VName
-compileExpToName _ _ (LeafExp (ScalarVar v) _) =
+compileExpToName _ _ (LeafExp v _) =
   return v
 compileExpToName desc t e = do
   desc' <- newVName desc
@@ -1911,29 +1911,7 @@ compileExpToName desc t e = do
   return desc'
 
 compileExp :: Exp -> CompilerM op s C.Exp
-compileExp = compilePrimExp compileLeaf
-  where
-    compileLeaf (ScalarVar src) =
-      return [C.cexp|$id:src|]
-    compileLeaf (Index _ _ Unit __ _) =
-      pure $ C.toExp UnitValue mempty
-    compileLeaf (Index src (Count iexp) restype DefaultSpace vol) = do
-      src' <- rawMem src
-      fmap (fromStorage restype) $
-        derefPointer src'
-          <$> compileExp (untyped iexp)
-          <*> pure [C.cty|$tyquals:(volQuals vol) $ty:(primStorageType restype)*|]
-    compileLeaf (Index src (Count iexp) restype (Space space) vol) =
-      fmap (fromStorage restype) . join $
-        asks envReadScalar
-          <*> rawMem src
-          <*> compileExp (untyped iexp)
-          <*> pure (primStorageType restype)
-          <*> pure space
-          <*> pure vol
-    compileLeaf (Index src (Count iexp) _ ScalarSpace {} _) = do
-      iexp' <- compileExp $ untyped iexp
-      return [C.cexp|$id:src[$exp:iexp']|]
+compileExp = compilePrimExp $ \v -> pure [C.cexp|$id:v|]
 
 -- | Tell me how to compile a @v@, and I'll Compile any @PrimExp v@ for you.
 compilePrimExp :: Monad m => (v -> m C.Exp) -> PrimExp v -> m C.Exp
@@ -2146,6 +2124,29 @@ compileCode (Write dest (Count idx) elemtype (Space space) vol elemexp) =
       <*> pure space
       <*> pure vol
       <*> (toStorage elemtype <$> compileExp elemexp)
+compileCode (Read x _ _ Unit __ _) =
+  stm [C.cstm|$id:x = $exp:(UnitValue);|]
+compileCode (Read x src (Count iexp) restype DefaultSpace vol) = do
+  src' <- rawMem src
+  e <-
+    fmap (fromStorage restype) $
+      derefPointer src'
+        <$> compileExp (untyped iexp)
+        <*> pure [C.cty|$tyquals:(volQuals vol) $ty:(primStorageType restype)*|]
+  stm [C.cstm|$id:x = $exp:e;|]
+compileCode (Read x src (Count iexp) restype (Space space) vol) = do
+  e <-
+    fmap (fromStorage restype) . join $
+      asks envReadScalar
+        <*> rawMem src
+        <*> compileExp (untyped iexp)
+        <*> pure (primStorageType restype)
+        <*> pure space
+        <*> pure vol
+  stm [C.cstm|$id:x = $exp:e;|]
+compileCode (Read x src (Count iexp) _ ScalarSpace {} _) = do
+  iexp' <- compileExp $ untyped iexp
+  stm [C.cstm|$id:x = $id:src[$exp:iexp'];|]
 compileCode (DeclareMem name space) =
   declMem name space
 compileCode (DeclareScalar name vol t) = do
@@ -2178,7 +2179,7 @@ compileCode (DeclareArray name (Space space) t vs) =
 -- For assignments of the form 'x = x OP e', we generate C assignment
 -- operators to make the resulting code slightly nicer.  This has no
 -- effect on performance.
-compileCode (SetScalar dest (BinOpExp op (LeafExp (ScalarVar x) _) y))
+compileCode (SetScalar dest (BinOpExp op (LeafExp x _) y))
   | dest == x,
     Just f <- assignmentOperator op = do
     y' <- compileExp y

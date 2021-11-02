@@ -76,26 +76,21 @@ simplifyLambda =
 simplifyStms ::
   (HasScope SOACS m, MonadFreshNames m) =>
   Stms SOACS ->
-  m (ST.SymbolTable (Wise SOACS), Stms SOACS)
+  m (Stms SOACS)
 simplifyStms stms = do
   scope <- askScope
-  Simplify.simplifyStms
-    simpleSOACS
-    soacRules
-    Engine.noExtraHoistBlockers
-    scope
-    stms
+  Simplify.simplifyStms simpleSOACS soacRules Engine.noExtraHoistBlockers scope stms
 
 simplifyConsts ::
   MonadFreshNames m =>
   Stms SOACS ->
-  m (ST.SymbolTable (Wise SOACS), Stms SOACS)
+  m (Stms SOACS)
 simplifyConsts =
   Simplify.simplifyStms simpleSOACS soacRules Engine.noExtraHoistBlockers mempty
 
 simplifySOAC ::
   Simplify.SimplifiableRep rep =>
-  Simplify.SimplifyOp rep (SOAC rep)
+  Simplify.SimplifyOp rep (SOAC (Wise rep))
 simplifySOAC (Stream outerdim arr form nes lam) = do
   outerdim' <- Engine.simplify outerdim
   (form', form_hoisted) <- simplifyStreamForm form

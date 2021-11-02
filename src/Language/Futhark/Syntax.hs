@@ -1041,7 +1041,9 @@ data ValBindBase f vn = ValBind
     valBindEntryPoint :: Maybe (f EntryPoint),
     valBindName :: vn,
     valBindRetDecl :: Maybe (TypeExp vn),
-    valBindRetType :: f (StructRetType, [VName]),
+    -- | If 'valBindParams' is null, then the 'retDims' are brought
+    -- into scope at this point.
+    valBindRetType :: f StructRetType,
     valBindTypeParams :: [TypeParamBase vn],
     valBindParams :: [PatBase f vn],
     valBindBody :: ExpBase f vn,
