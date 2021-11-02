@@ -138,8 +138,8 @@ intermediateArrays (Count group_size) num_threads (SegBinOp _ red_op nes _) = do
     case paramDec p of
       MemArray pt shape _ (ArrayIn mem _) -> do
         let shape' = Shape [num_threads] <> shape
-        sArray "red_arr" pt shape' $
-          ArrayIn mem $ IxFun.iota $ map pe64 $ shapeDims shape'
+        sArray "red_arr" pt shape' mem $
+          IxFun.iota $ map pe64 $ shapeDims shape'
       _ -> do
         let pt = elemType $ paramType p
             shape = Shape [group_size]

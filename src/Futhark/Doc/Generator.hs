@@ -396,7 +396,7 @@ synopsisValBind vb = Just $ do
   return $ specRow lhs (mhs <> " : ") rhs
 
 valBindHtml :: Html -> ValBind -> DocM (Html, Html, Html)
-valBindHtml name (ValBind _ _ retdecl (Info (rettype, _)) tparams params _ _ _ _) = do
+valBindHtml name (ValBind _ _ retdecl (Info rettype) tparams params _ _ _ _) = do
   let tparams' = mconcat $ map ((" " <>) . typeParamHtml) tparams
       noLink' =
         noLink $
@@ -836,7 +836,7 @@ describeDec _ ImportDec {} = Nothing
 valBindWhat :: ValBind -> IndexWhat
 valBindWhat vb
   | null (valBindParams vb),
-    RetType _ t <- fst $ unInfo $ valBindRetType vb,
+    RetType _ t <- unInfo $ valBindRetType vb,
     orderZero t =
     IndexValue
   | otherwise =

@@ -47,8 +47,8 @@ simplifyKernelOp ::
     BodyDec rep ~ ()
   ) =>
   Simplify.SimplifyOp rep op ->
-  HostOp rep op ->
-  Engine.SimpleM rep (HostOp (Wise rep) (OpWithWisdom op), Stms (Wise rep))
+  HostOp (Wise rep) op ->
+  Engine.SimpleM rep (HostOp (Wise rep) op, Stms (Wise rep))
 simplifyKernelOp f (OtherOp op) = do
   (op', stms) <- f op
   return (OtherOp op', stms)

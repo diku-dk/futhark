@@ -469,7 +469,7 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (ValBindBase f vn) where
       fun
         | isJust entry = "entry"
         | otherwise = "let"
-      retdecl' = case (ppr . fst <$> unAnnot rettype) `mplus` (ppr <$> retdecl) of
+      retdecl' = case (ppr <$> unAnnot rettype) `mplus` (ppr <$> retdecl) of
         Just rettype' -> colon <+> align rettype'
         Nothing -> mempty
 

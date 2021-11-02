@@ -32,6 +32,7 @@ module Futhark.Pass.ExtractKernels.Distribution
     innermostKernelNesting,
     pushKernelNesting,
     pushInnerKernelNesting,
+    scopeOfKernelNest,
     kernelNestLoops,
     kernelNestWidths,
     boundInKernelNest,
@@ -127,7 +128,7 @@ data LoopNesting = MapNesting
   }
   deriving (Show)
 
-scopeOfLoopNesting :: DistRep rep => LoopNesting -> Scope rep
+scopeOfLoopNesting :: (LParamInfo rep ~ Type) => LoopNesting -> Scope rep
 scopeOfLoopNesting = scopeOfLParams . map fst . loopNestingParamsAndArrs
 
 ppLoopNesting :: LoopNesting -> String
@@ -233,6 +234,9 @@ newKernel nest = (nest, [])
 
 kernelNestLoops :: KernelNest -> [LoopNesting]
 kernelNestLoops (loop, loops) = loop : loops
+
+scopeOfKernelNest :: LParamInfo rep ~ Type => KernelNest -> Scope rep
+scopeOfKernelNest = foldMap scopeOfLoopNesting . kernelNestLoops
 
 boundInKernelNest :: KernelNest -> Names
 boundInKernelNest = mconcat . boundInKernelNests
