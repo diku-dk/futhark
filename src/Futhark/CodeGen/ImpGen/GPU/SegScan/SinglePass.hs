@@ -326,7 +326,7 @@ compileSegScan pat lvl space scanOp kbody = do
 
                 -- Write map results to their global memory destinations
                 forM_ (zip (takeLast (length map_res) all_pes) map_res) $ \(dest, src) ->
-                  copyDWIMFix (patElemName dest) (map Imp.vi64 gtids) (kernelResultSubExp src) []
+                  copyDWIMFix (patElemName dest) (map Imp.le64 gtids) (kernelResultSubExp src) []
 
                 -- Write to-scan results to private memory.
                 forM_ (zip privateArrays $ map kernelResultSubExp all_scan_res) $ \(dest, src) ->
@@ -622,7 +622,7 @@ compileSegScan pat lvl space scanOp kbody = do
           sWhen (flat_idx .<. n) $ do
             copyDWIMFix
               dest
-              (map Imp.vi64 gtids)
+              (map Imp.le64 gtids)
               (Var locmem)
               [sExt64 $ flat_idx - tvExp blockOff]
         sOp localBarrier

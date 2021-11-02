@@ -183,7 +183,7 @@ nonsegmentedReduction segred_pat num_groups group_size space reds body = do
       dims' = map toInt64Exp dims
       num_groups' = fmap toInt64Exp num_groups
       group_size' = fmap toInt64Exp group_size
-      global_tid = Imp.vi64 $ segFlat space
+      global_tid = Imp.le64 $ segFlat space
       w = last dims'
 
   counter <-
@@ -478,7 +478,7 @@ largeSegmentsReduction segred_pat num_groups group_size space reds body = do
                   pes
                   group_id
                   flat_segment_id
-                  (map Imp.vi64 segment_gtids)
+                  (map Imp.le64 segment_gtids)
                   (sExt64 first_group_for_segment)
                   groups_per_segment
                   slug
@@ -498,7 +498,7 @@ largeSegmentsReduction segred_pat num_groups group_size space reds body = do
               forM_ (zip slugs segred_pes) $ \(slug, pes) ->
                 sWhen (local_tid .==. 0) $
                   forM_ (zip pes (slugAccs slug)) $ \(v, (acc, acc_is)) ->
-                    copyDWIMFix (patElemName v) (map Imp.vi64 segment_gtids) (Var acc) acc_is
+                    copyDWIMFix (patElemName v) (map Imp.le64 segment_gtids) (Var acc) acc_is
 
       sIf (groups_per_segment .==. 1) one_group_per_segment multiple_groups_per_segment
 
@@ -635,7 +635,7 @@ reductionStageZero constants ispace num_elements global_tid elems_per_thread thr
     gtid
       <-- case comm of
         Commutative ->
-          global_tid + Imp.vi64 threads_per_segment * i
+          global_tid + Imp.le64 threads_per_segment * i
         Noncommutative ->
           let index_in_segment = global_tid `quot` kernelGroupSize constants
            in sExt64 local_tid

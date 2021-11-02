@@ -784,7 +784,7 @@ defCompileExp pat (DoLoop merge form body) = do
     ForLoop i _ bound loopvars -> do
       let setLoopParam (p, a)
             | Prim _ <- paramType p =
-              copyDWIM (paramName p) [] (Var a) [DimFix $ Imp.vi64 i]
+              copyDWIM (paramName p) [] (Var a) [DimFix $ Imp.le64 i]
             | otherwise =
               return ()
 
@@ -898,7 +898,7 @@ defCompileBasicOp (Pat [pe]) (Replicate (Shape ds) se)
   | otherwise = do
     ds' <- mapM toExp ds
     is <- replicateM (length ds) (newVName "i")
-    copy_elem <- collect $ copyDWIM (patElemName pe) (map (DimFix . Imp.vi64) is) se []
+    copy_elem <- collect $ copyDWIM (patElemName pe) (map (DimFix . Imp.le64) is) se []
     emit $ foldl (.) id (zipWith Imp.For is ds') copy_elem
 defCompileBasicOp _ Scratch {} =
   return ()
@@ -1488,7 +1488,7 @@ copyElementWise :: CopyCompiler rep r op
 copyElementWise bt dest src = do
   let bounds = IxFun.shape $ memLocIxFun src
   is <- replicateM (length bounds) (newVName "i")
-  let ivars = map Imp.vi64 is
+  let ivars = map Imp.le64 is
   (destmem, destspace, destidx) <- fullyIndexArray' dest ivars
   (srcmem, srcspace, srcidx) <- fullyIndexArray' src ivars
   vol <- asks envVolatility
@@ -1894,7 +1894,7 @@ dIndexSpace vs_ds j = do
   where
     loop ((v, size) : rest) i = do
       dPrimV_ v (i `quot` size)
-      i' <- dPrimVE "remnant" $ i - Imp.vi64 v * size
+      i' <- dPrimVE "remnant" $ i - Imp.le64 v * size
       loop rest i'
     loop _ _ = pure ()
 
@@ -1908,4 +1908,4 @@ dIndexSpace' ::
 dIndexSpace' desc ds j = do
   ivs <- replicateM (length ds) (newVName desc)
   dIndexSpace (zip ivs ds) j
-  pure $ map Imp.vi64 ivs
+  pure $ map Imp.le64 ivs

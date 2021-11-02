@@ -120,7 +120,7 @@ scanStage1 pat space scan_ops kbody = do
             compileStms mempty (bodyStms $ lamBody scan_op) $
               forM_ (zip3 acc pes $ map resSubExp $ bodyResult $ lamBody scan_op) $
                 \(acc', pe, se) -> do
-                  copyDWIMFix (patElemName pe) (map Imp.vi64 is ++ vec_is) se []
+                  copyDWIMFix (patElemName pe) (map Imp.le64 is ++ vec_is) se []
                   copyDWIMFix acc' vec_is se []
 
   free_params <- freeParams (prebody <> body) (segFlat space : [tvVar iter])
@@ -240,7 +240,7 @@ scanStage3 pat space scan_ops kbody = do
             compileStms mempty (bodyStms $ lamBody scan_op) $
               forM_ (zip3 pes (map resSubExp $ bodyResult $ lamBody scan_op) acc) $
                 \(pe, se, acc') -> do
-                  copyDWIMFix (patElemName pe) (map Imp.vi64 is ++ vec_is) se []
+                  copyDWIMFix (patElemName pe) (map Imp.le64 is ++ vec_is) se []
                   copyDWIMFix acc' vec_is se []
 
   free_params' <- freeParams (prebody <> body) (segFlat space : [tvVar iter])
@@ -298,10 +298,10 @@ compileSegScanBody segment_i pat space scan_ops kbody = do
 
           sComment "write mapped values results to memory" $
             forM_ (zip (drop (length $ segBinOpNeutral scan_op) $ patElems pat) map_res) $ \(pe, se) ->
-              copyDWIMFix (patElemName pe) (map Imp.vi64 is) (kernelResultSubExp se) []
+              copyDWIMFix (patElemName pe) (map Imp.le64 is) (kernelResultSubExp se) []
 
           sComment "combine with carry and write to memory" $
             compileStms mempty (bodyStms $ lambdaBody $ segBinOpLambda scan_op) $
               forM_ (zip3 scan_x_params scan_pes $ map resSubExp $ bodyResult $ lambdaBody $ segBinOpLambda scan_op) $ \(p, pe, se) -> do
-                copyDWIMFix (patElemName pe) (map Imp.vi64 is) se []
+                copyDWIMFix (patElemName pe) (map Imp.le64 is) se []
                 copyDWIMFix (paramName p) [] se []
