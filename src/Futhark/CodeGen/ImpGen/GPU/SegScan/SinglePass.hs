@@ -85,7 +85,8 @@ createLocalArrays (Count groupSize) m types = do
         "local_prefix_arr"
         ty
         (Shape [groupSize])
-        $ ArrayIn localMem $ IxFun.iotaOffset off' [pe64 groupSize]
+        localMem
+        $ IxFun.iotaOffset off' [pe64 groupSize]
 
   warpscan <- sArrayInMem "warpscan" int8 (Shape [constant (warpSize :: Int64)]) localMem
   warpExchanges <-
@@ -95,7 +96,8 @@ createLocalArrays (Count groupSize) m types = do
         "warp_exchange"
         ty
         (Shape [constant (warpSize :: Int64)])
-        $ ArrayIn localMem $ IxFun.iotaOffset off' [warpSize]
+        localMem
+        $ IxFun.iotaOffset off' [warpSize]
 
   return (sharedId, transposedArrays, prefixArrays, warpscan, warpExchanges)
 

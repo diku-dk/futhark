@@ -107,16 +107,13 @@ computeHistoUsage space op = do
     let subhistos_shape =
           Shape (map snd segment_dims ++ [tvSize num_subhistos])
             <> stripDims num_segments (arrayShape dest_t)
-        subhistos_membind =
-          ArrayIn subhistos_mem $
-            IxFun.iota $
-              map pe64 $ shapeDims subhistos_shape
     subhistos <-
       sArray
         (baseString dest ++ "_subhistos")
         (elemType dest_t)
         subhistos_shape
-        subhistos_membind
+        subhistos_mem
+        $ IxFun.iota $ map pe64 $ shapeDims subhistos_shape
 
     return $
       SubhistosInfo subhistos $ do

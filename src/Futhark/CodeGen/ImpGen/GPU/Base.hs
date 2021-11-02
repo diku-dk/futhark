@@ -350,10 +350,8 @@ prepareIntraGroupSegHist group_size =
               locks_t = Array int32 (Shape [unCount group_size]) NoUniqueness
 
           locks_mem <- sAlloc "locks_mem" (typeSize locks_t) $ Space "local"
-          dArray locks int32 (arrayShape locks_t) $
-            ArrayIn locks_mem $
-              IxFun.iota $
-                map pe64 $ arrayDims locks_t
+          dArray locks int32 (arrayShape locks_t) locks_mem $
+            IxFun.iota $ map pe64 $ arrayDims locks_t
 
           sComment "All locks start out unlocked" $
             groupCoverSpace [kernelGroupSize constants] $ \is ->
@@ -421,7 +419,8 @@ compileGroupOp pat (Inner (SegOp (SegScan lvl space scans _ body))) = do
           (baseString (patElemName pe) ++ "_flat")
           (elemType pe_t)
           (Shape arr_dims)
-          $ ArrayIn mem $ IxFun.iota $ map pe64 arr_dims
+          mem
+          $ IxFun.iota $ map pe64 arr_dims
 
       num_scan_results = sum $ map (length . segBinOpNeutral) scans
 
@@ -481,9 +480,8 @@ compileGroupOp pat (Inner (SegOp (SegRed lvl space ops _ body))) = do
                   Shape $
                     Var (tvVar dims_flat) :
                     drop (length ltids) (memLocShape arr_loc)
-            sArray "red_arr_flat" pt flat_shape $
-              ArrayIn (memLocName arr_loc) $
-                IxFun.iota $ map pe64 $ shapeDims flat_shape
+            sArray "red_arr_flat" pt flat_shape (memLocName arr_loc) $
+              IxFun.iota $ map pe64 $ shapeDims flat_shape
 
       let segment_size = last dims'
           crossesSegment from to =
@@ -1509,10 +1507,8 @@ replicateForType bt = do
         shape = Shape [Var num_elems]
     function fname [] params $ do
       arr <-
-        sArray "arr" bt shape $
-          ArrayIn mem $
-            IxFun.iota $
-              map pe64 $ shapeDims shape
+        sArray "arr" bt shape mem $
+          IxFun.iota $ map pe64 $ shapeDims shape
       sReplicateKernel arr $ Var val
 
   return fname
@@ -1606,10 +1602,8 @@ iotaForType bt = do
 
     function fname [] params $ do
       arr <-
-        sArray "arr" (IntType bt) shape $
-          ArrayIn mem $
-            IxFun.iota $
-              map pe64 $ shapeDims shape
+        sArray "arr" (IntType bt) shape mem $
+          IxFun.iota $ map pe64 $ shapeDims shape
       sIotaKernel arr (sExt64 n') x' s' bt
 
   return fname

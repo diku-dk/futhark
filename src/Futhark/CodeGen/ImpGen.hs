@@ -1134,10 +1134,12 @@ dScope ::
   ImpM rep r op ()
 dScope e = mapM_ (uncurry $ dInfo e) . M.toList
 
-dArray :: VName -> PrimType -> ShapeBase SubExp -> MemBind -> ImpM rep r op ()
-dArray name bt shape membind =
-  addVar name $
-    memBoundToVarEntry Nothing $ MemArray bt shape NoUniqueness membind
+dArray :: VName -> PrimType -> ShapeBase SubExp -> VName -> IxFun -> ImpM rep r op ()
+dArray name pt shape mem ixfun =
+  addVar name $ ArrayVar Nothing $ ArrayEntry location pt
+  where
+    location =
+      MemLoc mem (shapeDims shape) $ fmap (fmap Imp.ScalarVar) ixfun
 
 everythingVolatile :: ImpM rep r op a -> ImpM rep r op a
 everythingVolatile = local $ \env -> env {envVolatility = Imp.Volatile}
@@ -1778,18 +1780,17 @@ sAlloc name size space = do
   sAlloc_ name' size space
   return name'
 
-sArray :: String -> PrimType -> ShapeBase SubExp -> MemBind -> ImpM rep r op VName
-sArray name bt shape membind = do
+sArray :: String -> PrimType -> ShapeBase SubExp -> VName -> IxFun -> ImpM rep r op VName
+sArray name bt shape mem ixfun = do
   name' <- newVName name
-  dArray name' bt shape membind
+  dArray name' bt shape mem ixfun
   return name'
 
 -- | Declare an array in row-major order in the given memory block.
 sArrayInMem :: String -> PrimType -> ShapeBase SubExp -> VName -> ImpM rep r op VName
 sArrayInMem name pt shape mem =
-  sArray name pt shape $
-    ArrayIn mem $
-      IxFun.iota $ map (isInt64 . primExpFromSubExp int64) $ shapeDims shape
+  sArray name pt shape mem $
+    IxFun.iota $ map (isInt64 . primExpFromSubExp int64) $ shapeDims shape
 
 -- | Like 'sAllocArray', but permute the in-memory representation of the indices as specified.
 sAllocArrayPerm :: String -> PrimType -> ShapeBase SubExp -> Space -> [Int] -> ImpM rep r op VName
@@ -1797,8 +1798,8 @@ sAllocArrayPerm name pt shape space perm = do
   let permuted_dims = rearrangeShape perm $ shapeDims shape
   mem <- sAlloc (name ++ "_mem") (typeSize (Array pt shape NoUniqueness)) space
   let iota_ixfun = IxFun.iota $ map (isInt64 . primExpFromSubExp int64) permuted_dims
-  sArray name pt shape $
-    ArrayIn mem $ IxFun.permute iota_ixfun $ rearrangeInverse perm
+  sArray name pt shape mem $
+    IxFun.permute iota_ixfun $ rearrangeInverse perm
 
 -- | Uses linear/iota index function.
 sAllocArray :: String -> PrimType -> ShapeBase SubExp -> Space -> ImpM rep r op VName
@@ -1815,7 +1816,7 @@ sStaticArray name space pt vs = do
   mem <- newVNameForFun $ name ++ "_mem"
   emit $ Imp.DeclareArray mem space pt vs
   addVar mem $ MemVar Nothing $ MemEntry space
-  sArray name pt shape $ ArrayIn mem $ IxFun.iota [fromIntegral num_elems]
+  sArray name pt shape mem $ IxFun.iota [fromIntegral num_elems]
 
 sWrite :: VName -> [Imp.TExp Int64] -> Imp.Exp -> ImpM rep r op ()
 sWrite arr is v = do
