@@ -584,7 +584,7 @@ kernelArgs :: Kernel -> [KernelArg]
 kernelArgs = mapMaybe useToArg . kernelUses
   where
     useToArg (MemoryUse mem) = Just $ MemKArg mem
-    useToArg (ScalarUse v bt) = Just $ ValueKArg (LeafExp (ScalarVar v) bt) bt
+    useToArg (ScalarUse v pt) = Just $ ValueKArg (LeafExp v pt) pt
     useToArg ConstUse {} = Nothing
 
 nextErrorLabel :: GC.CompilerM KernelOp KernelState String
@@ -668,7 +668,7 @@ inKernelOperations mode body =
         pendingError False
         GC.stm [C.cstm|$id:label: barrier($exp:(fence f));|]
         GC.stm [C.cstm|if (local_failure) { return; }|]
-      GC.stm [C.cstm|barrier(CLK_LOCAL_MEM_FENCE);|] -- intentional
+      GC.stm [C.cstm|barrier($exp:(fence f));|]
       GC.modifyUserState $ \s -> s {kernelHasBarriers = True}
       incErrorLabel
     kernelOps (Atomic space aop) = atomicOps space aop
@@ -853,6 +853,8 @@ typesInCode
     typesInExp e1 <> typesInExp e2 <> typesInExp e3
 typesInCode (Write _ (Count (TPrimExp e1)) t _ _ e2) =
   typesInExp e1 <> S.singleton t <> typesInExp e2
+typesInCode (Read _ _ (Count (TPrimExp e1)) t _ _) =
+  typesInExp e1 <> S.singleton t
 typesInCode (SetScalar _ e) = typesInExp e
 typesInCode SetMem {} = mempty
 typesInCode (Call _ _ es) = mconcat $ map typesInArg es
@@ -876,5 +878,4 @@ typesInExp (ConvOpExp op e) = S.fromList [from, to] <> typesInExp e
     (from, to) = convOpType op
 typesInExp (UnOpExp _ e) = typesInExp e
 typesInExp (FunExp _ args t) = S.singleton t <> mconcat (map typesInExp args)
-typesInExp (LeafExp (Index _ (Count (TPrimExp e)) t _ _) _) = S.singleton t <> typesInExp e
-typesInExp (LeafExp ScalarVar {} _) = mempty
+typesInExp LeafExp {} = mempty

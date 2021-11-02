@@ -117,7 +117,7 @@ compileThreadResult ::
   KernelResult ->
   MulticoreGen ()
 compileThreadResult space pe (Returns _ _ what) = do
-  let is = map (Imp.vi64 . fst) $ unSegSpace space
+  let is = map (Imp.le64 . fst) $ unSegSpace space
   copyDWIMFix (patElemName pe) is what []
 compileThreadResult _ _ ConcatReturns {} =
   compilerBugS "compileThreadResult: ConcatReturn unhandled."

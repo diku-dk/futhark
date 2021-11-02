@@ -36,7 +36,7 @@ module Futhark.CodeGen.ImpGen.GPU.Base
 where
 
 import Control.Monad.Except
-import Data.List (zip4)
+import Data.List (foldl', zip4)
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import qualified Data.Set as S
@@ -350,10 +350,8 @@ prepareIntraGroupSegHist group_size =
               locks_t = Array int32 (Shape [unCount group_size]) NoUniqueness
 
           locks_mem <- sAlloc "locks_mem" (typeSize locks_t) $ Space "local"
-          dArray locks int32 (arrayShape locks_t) $
-            ArrayIn locks_mem $
-              IxFun.iota $
-                map pe64 $ arrayDims locks_t
+          dArray locks int32 (arrayShape locks_t) locks_mem $
+            IxFun.iota $ map pe64 $ arrayDims locks_t
 
           sComment "All locks start out unlocked" $
             groupCoverSpace [kernelGroupSize constants] $ \is ->
@@ -371,6 +369,21 @@ whenActive lvl space m
     if [group_size] == map (toInt64Exp . snd) (unSegSpace space)
       then m
       else sWhen (isActive $ unSegSpace space) m
+
+-- Which fence do we need to protect shared access to this memory space?
+fenceForSpace :: Space -> Imp.Fence
+fenceForSpace (Space "local") = Imp.FenceLocal
+fenceForSpace _ = Imp.FenceGlobal
+
+-- If we are touching these arrays, which kind of fence do we need?
+fenceForArrays :: [VName] -> InKernelGen Imp.Fence
+fenceForArrays = fmap (foldl' max Imp.FenceLocal) . mapM need
+  where
+    need arr =
+      fmap (fenceForSpace . entryMemSpace) . lookupMemory
+        . memLocName
+        . entryArrayLoc
+        =<< lookupArray arr
 
 compileGroupOp :: OpCompiler GPUMem KernelEnv Imp.KernelOp
 compileGroupOp pat (Alloc size space) =
@@ -397,11 +410,12 @@ compileGroupOp pat (Inner (SegOp (SegScan lvl space scans _ body))) = do
       forM_ (zip (patNames pat) $ kernelBodyResult body) $ \(dest, res) ->
         copyDWIMFix
           dest
-          (map Imp.vi64 ltids)
+          (map Imp.le64 ltids)
           (kernelResultSubExp res)
           []
 
-  sOp $ Imp.ErrorSync Imp.FenceLocal
+  fence <- fenceForArrays $ patNames pat
+  sOp $ Imp.ErrorSync fence
 
   let segment_size = last dims'
       crossesSegment from to =
@@ -409,11 +423,10 @@ compileGroupOp pat (Inner (SegOp (SegScan lvl space scans _ body))) = do
 
   -- groupScan needs to treat the scan output as a one-dimensional
   -- array of scan elements, so we invent some new flattened arrays
-  -- here.  XXX: this assumes that the original index function is just
-  -- row-major, but does not actually verify it.
+  -- here.
   dims_flat <- dPrimV "dims_flat" $ product dims'
   let flattened pe = do
-        MemLoc mem _ _ <-
+        MemLoc mem _ ixfun <-
           entryArrayLoc <$> lookupArray (patElemName pe)
         let pe_t = typeOf pe
             arr_dims = Var (tvVar dims_flat) : drop (length dims') (arrayDims pe_t)
@@ -421,7 +434,8 @@ compileGroupOp pat (Inner (SegOp (SegScan lvl space scans _ body))) = do
           (baseString (patElemName pe) ++ "_flat")
           (elemType pe_t)
           (Shape arr_dims)
-          $ ArrayIn mem $ IxFun.iota $ map pe64 arr_dims
+          mem
+          $ IxFun.reshape ixfun $ map (DimNew . pe64) arr_dims
 
       num_scan_results = sum $ map (length . segBinOpNeutral) scans
 
@@ -450,7 +464,7 @@ compileGroupOp pat (Inner (SegOp (SegRed lvl space ops _ body))) = do
       let (red_res, map_res) =
             splitAt (segBinOpResults ops) $ kernelBodyResult body
       forM_ (zip tmp_arrs red_res) $ \(dest, res) ->
-        copyDWIMFix dest (map Imp.vi64 ltids) (kernelResultSubExp res) []
+        copyDWIMFix dest (map Imp.le64 ltids) (kernelResultSubExp res) []
       zipWithM_ (compileThreadResult space) map_pes map_res
 
   sOp $ Imp.ErrorSync Imp.FenceLocal
@@ -481,9 +495,8 @@ compileGroupOp pat (Inner (SegOp (SegRed lvl space ops _ body))) = do
                   Shape $
                     Var (tvVar dims_flat) :
                     drop (length ltids) (memLocShape arr_loc)
-            sArray "red_arr_flat" pt flat_shape $
-              ArrayIn (memLocName arr_loc) $
-                IxFun.iota $ map pe64 $ shapeDims flat_shape
+            sArray "red_arr_flat" pt flat_shape (memLocName arr_loc) $
+              IxFun.iota $ map pe64 $ shapeDims flat_shape
 
       let segment_size = last dims'
           crossesSegment from to =
@@ -537,7 +550,7 @@ compileGroupOp pat (Inner (SegOp (SegHist lvl space ops _ kbody))) = do
           let bin' = toInt64Exp bin
               dest_w' = toInt64Exp dest_w
               bin_in_bounds = 0 .<=. bin' .&&. bin' .<. dest_w'
-              bin_is = map Imp.vi64 (init ltids) ++ [bin']
+              bin_is = map Imp.le64 (init ltids) ++ [bin']
               vs_params = takeLast (length op_vs) $ lambdaParams lam
 
           sComment "perform atomic updates" $
@@ -703,9 +716,7 @@ atomicUpdateLocking _ op = AtomicLocking $ \locking space arrs bucket -> do
           sComment "update global result" $
             zipWithM_ (writeArray bucket) arrs $ map (Var . paramName) acc_params
 
-      fence = case space of
-        Space "local" -> sOp $ Imp.MemFence Imp.FenceLocal
-        _ -> sOp $ Imp.MemFence Imp.FenceGlobal
+      fence = sOp $ Imp.MemFence $ fenceForSpace space
 
   -- While-loop: Try to insert your value
   sWhile (tvExp continue) $ do
@@ -823,8 +834,7 @@ isConstExp ::
   ImpM rep r op (Maybe Imp.KernelConstExp)
 isConstExp vtable size = do
   fname <- askFunction
-  let onLeaf (Imp.ScalarVar name) _ = lookupConstExp name
-      onLeaf Imp.Index {} _ = Nothing
+  let onLeaf name _ = lookupConstExp name
       lookupConstExp name =
         constExp =<< hasExp =<< M.lookup name vtable
       constExp (Op (Inner (SizeOp (GetSize key _)))) =
@@ -887,16 +897,16 @@ kernelInitialisationSimple (Count num_groups) (Count group_size) = do
   inner_group_size <- newVName "group_size"
   let constants =
         KernelConstants
-          (Imp.vi32 global_tid)
-          (Imp.vi32 local_tid)
-          (Imp.vi32 group_id)
+          (Imp.le32 global_tid)
+          (Imp.le32 local_tid)
+          (Imp.le32 group_id)
           global_tid
           local_tid
           group_id
           num_groups
           group_size
           (sExt32 (group_size * num_groups))
-          (Imp.vi32 wave_size)
+          (Imp.le32 wave_size)
           true
           mempty
 
@@ -922,7 +932,7 @@ isActive limit = case actives of
   where
     (is, ws) = unzip limit
     actives = zipWith active is $ map toInt64Exp ws
-    active i = (Imp.vi64 i .<.)
+    active i = (Imp.le64 i .<.)
 
 -- | Change every memory block to be in the global address space,
 -- except those who are in the local memory space.  This only affects
@@ -1056,6 +1066,8 @@ groupScan seg_flag arrs_full_size w lam arrs = do
 
   ltid_in_bounds <- dPrimVE "ltid_in_bounds" $ ltid .<. w
 
+  fence <- fenceForArrays arrs
+
   -- The scan works by splitting the group into blocks, which are
   -- scanned separately.  Typically, these blocks are smaller than
   -- the lockstep width, which enables barrier-free execution inside
@@ -1085,7 +1097,7 @@ groupScan seg_flag arrs_full_size w lam arrs = do
         | array_scan =
           sOp $ Imp.Barrier Imp.FenceGlobal
         | otherwise =
-          sOp $ Imp.Barrier Imp.FenceLocal
+          sOp $ Imp.Barrier fence
 
       group_offset = sExt64 (kernelGroupId constants) * kernelGroupSize constants
 
@@ -1311,9 +1323,9 @@ simpleKernelConstants kernel_size desc = do
 
   return
     ( KernelConstants
-        (Imp.vi32 thread_gtid)
-        (Imp.vi32 thread_ltid)
-        (Imp.vi32 group_id)
+        (Imp.le32 thread_gtid)
+        (Imp.le32 thread_ltid)
+        (Imp.le32 group_id)
         thread_gtid
         thread_ltid
         group_id
@@ -1321,7 +1333,7 @@ simpleKernelConstants kernel_size desc = do
         group_size
         (sExt32 (group_size * num_groups))
         0
-        (Imp.vi64 thread_gtid .<. kernel_size)
+        (Imp.le64 thread_gtid .<. kernel_size)
         mempty,
       set_constants
     )
@@ -1356,7 +1368,7 @@ virtualiseGroups SegVirt required_groups m = do
     sOp $ Imp.Barrier Imp.FenceGlobal
 virtualiseGroups _ _ m = do
   gid <- kernelGroupIdVar . kernelConstants <$> askEnv
-  m $ Imp.vi32 gid
+  m $ Imp.le32 gid
 
 sKernelThread ::
   String ->
@@ -1509,10 +1521,8 @@ replicateForType bt = do
         shape = Shape [Var num_elems]
     function fname [] params $ do
       arr <-
-        sArray "arr" bt shape $
-          ArrayIn mem $
-            IxFun.iota $
-              map pe64 $ shapeDims shape
+        sArray "arr" bt shape mem $
+          IxFun.iota $ map pe64 $ shapeDims shape
       sReplicateKernel arr $ Var val
 
   return fname
@@ -1600,16 +1610,14 @@ iotaForType bt = do
             Imp.ScalarParam s $ IntType bt
           ]
         shape = Shape [Var n]
-        n' = Imp.vi64 n
+        n' = Imp.le64 n
         x' = Imp.var x $ IntType bt
         s' = Imp.var s $ IntType bt
 
     function fname [] params $ do
       arr <-
-        sArray "arr" (IntType bt) shape $
-          ArrayIn mem $
-            IxFun.iota $
-              map pe64 $ shapeDims shape
+        sArray "arr" (IntType bt) shape mem $
+          IxFun.iota $ map pe64 $ shapeDims shape
       sIotaKernel arr (sExt64 n') x' s' bt
 
   return fname
@@ -1635,7 +1643,7 @@ sIota arr n x s et = do
     else sIotaKernel arr n x s et
 
 sCopy :: CopyCompiler GPUMem HostEnv Imp.HostOp
-sCopy bt destloc@(MemLoc destmem _ _) srcloc@(MemLoc srcmem srcdims _) = do
+sCopy pt destloc@(MemLoc destmem _ _) srcloc@(MemLoc srcmem srcdims _) = do
   -- Note that the shape of the destination and the source are
   -- necessarily the same.
   let shape = map toInt64Exp srcdims
@@ -1658,10 +1666,10 @@ sCopy bt destloc@(MemLoc destmem _ _) srcloc@(MemLoc srcmem srcdims _) = do
     (_, destspace, destidx) <- fullyIndexArray' destloc is
     (_, srcspace, srcidx) <- fullyIndexArray' srcloc is
 
-    sWhen (gtid .<. kernel_size) $
-      emit $
-        Imp.Write destmem destidx bt destspace Imp.Nonvolatile $
-          Imp.index srcmem srcidx bt srcspace Imp.Nonvolatile
+    sWhen (gtid .<. kernel_size) $ do
+      tmp <- tvVar <$> dPrim "tmp" pt
+      emit $ Imp.Read tmp srcmem srcidx pt srcspace Imp.Nonvolatile
+      emit $ Imp.Write destmem destidx pt destspace Imp.Nonvolatile $ Imp.var tmp pt
 
 compileGroupResult ::
   SegSpace ->
@@ -1691,7 +1699,7 @@ compileGroupResult _ pe (TileReturns _ [(w, per_group_elems)] what) = do
 compileGroupResult space pe (TileReturns _ dims what) = do
   let gids = map fst $ unSegSpace space
       out_tile_sizes = map (toInt64Exp . snd) dims
-      group_is = zipWith (*) (map Imp.vi64 gids) out_tile_sizes
+      group_is = zipWith (*) (map Imp.le64 gids) out_tile_sizes
   local_is <- localThreadIDs $ map snd dims
   is_for_thread <-
     mapM (dPrimV "thread_out_index") $
@@ -1709,7 +1717,7 @@ compileGroupResult space pe (RegTileReturns _ dims_n_tiles what) = do
       reg_tiles' = map toInt64Exp reg_tiles
 
   -- Which group tile is this group responsible for?
-  let group_tile_is = map Imp.vi64 gids
+  let group_tile_is = map Imp.le64 gids
 
   -- Within the group tile, which register tile is this thread
   -- responsible for?
@@ -1739,7 +1747,7 @@ compileGroupResult space pe (RegTileReturns _ dims_n_tiles what) = do
 compileGroupResult space pe (Returns _ _ what) = do
   constants <- kernelConstants <$> askEnv
   in_local_memory <- arrayInLocalMemory what
-  let gids = map (Imp.vi64 . fst) $ unSegSpace space
+  let gids = map (Imp.le64 . fst) $ unSegSpace space
 
   if not in_local_memory
     then
@@ -1764,7 +1772,7 @@ compileThreadResult ::
 compileThreadResult _ _ RegTileReturns {} =
   compilerLimitationS "compileThreadResult: RegTileReturns not yet handled."
 compileThreadResult space pe (Returns _ _ what) = do
-  let is = map (Imp.vi64 . fst) $ unSegSpace space
+  let is = map (Imp.le64 . fst) $ unSegSpace space
   copyDWIMFix (patElemName pe) is what []
 compileThreadResult _ pe (ConcatReturns _ SplitContiguous _ per_thread_elems what) = do
   constants <- kernelConstants <$> askEnv
