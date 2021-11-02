@@ -367,9 +367,28 @@ makeSegMapCoals td_env space kernel_body (active, inhibit) x@(PatElem pat_name (
                       Coalesced InPlaceCoal mb mempty
                         & M.singleton return_name
                         & flip (addInvAliassesVarTab td_env) return_name
+                        & fmap
+                          ( M.adjust
+                              ( \(Coalesced knd (MemBlock pt shp mem ixf@(IxFun.IxFun _ base_shape _)) subst) ->
+                                  Coalesced
+                                    knd
+                                    ( MemBlock pt shp pat_mem $
+                                        traceWith "non-trans segmap ixf after" $
+                                          IxFun.slice (traceWith "segmap ixf before" pat_ixf) $
+                                            traceWith "fullSlice" $
+                                              fullSlice (IxFun.shape pat_ixf) $
+                                                traceWith "segmap slice" $
+                                                  Slice $
+                                                    map (DimFix . TPrimExp . flip LeafExp (IntType Int64) . fst) $
+                                                      unSegSpace space
+                                    )
+                                    subst
+                              )
+                              return_name
+                          )
                     ) of
             (False, Just vtab) ->
-              (active <> traceWith "Adding segmap coal entry!" (M.singleton return_mem $ CoalsEntry pat_mem pat_ixf (oneName pat_mem) vtab mempty mempty), inhibit)
+              (active <> traceWith "Adding segmap coal entry BOBOB!" (M.singleton return_mem $ CoalsEntry pat_mem (traceWith "pat_ixf'" pat_ixf) (oneName pat_mem) vtab mempty mempty), inhibit)
             _ -> (active, inhibit)
           else (active, inhibit)
       Just trans ->
