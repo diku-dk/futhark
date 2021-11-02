@@ -205,7 +205,7 @@ topDownLoop td_env (Let _pat _ (DoLoop arginis lform body)) =
         scope td_env
           <> scopeOfFParams (map fst arginis)
           <> scopeOf lform --scopeOfLoopForm lform))
-          <> scopeOf (bodyStms body)
+          -- <> scopeOf (bodyStms body)
       usages =
         usage_table td_env <> case lform of
           ForLoop v _ _ _ -> sizeUsage v

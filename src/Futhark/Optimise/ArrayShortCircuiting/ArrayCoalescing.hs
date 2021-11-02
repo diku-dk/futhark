@@ -696,7 +696,7 @@ mkCoalsTabStm lutab (Let patt _ (If _ body_then body_else _)) td_env bu_env = do
 mkCoalsTabStm lutab lstm@(Let pat _ (DoLoop arginis lform body)) td_env bu_env = do
   let pat_val_elms = patElems pat
       allocs_bdy = foldl getAllocs (alloc td_env') $ bodyStms body
-      td_env_allocs = td_env' {alloc = allocs_bdy}
+      td_env_allocs = td_env' {alloc = allocs_bdy, scope = scope td_env' <> scopeOf (bodyStms body)}
 
       --  i) Filter @activeCoals@ by the 2nd, 3rd AND 5th safety conditions. In
       --  other words, for each active coalescing target, the creation of the
@@ -807,12 +807,12 @@ mkCoalsTabStm lutab lstm@(Let pat _ (DoLoop arginis lform body)) td_env bu_env =
       --     mem-block m_y, in which m_b is coalesced into.
       --     W_i and U_j correspond to the accesses within the loop body.
       mb_loop_idx = mbLoopIndexRange lform
-  res_actv1 <- filterMapM1 (loopSoundness1Entry (scope td_env') scals_loop mb_loop_idx) res_actv0
+  res_actv1 <- filterMapM1 (loopSoundness1Entry (scope td_env' <> scopeOf (bodyStms body)) scals_loop mb_loop_idx) res_actv0
 
   -- b) Update the memory-reference summaries across loop:
   --   W = Union_{i=0..n-1} W_i Union W_{before-loop}
   --   U = Union_{i=0..n-1} U_i Union U_{before-loop}
-  res_actv2 <- mapM (aggAcrossLoopEntry (scope td_env') scals_loop mb_loop_idx) res_actv1
+  res_actv2 <- mapM (aggAcrossLoopEntry (scope td_env' <> scopeOf (bodyStms body)) scals_loop mb_loop_idx) res_actv1
 
   -- c) check soundness of the successful promotions for:
   --      - the entries that have been promoted to success during the loop-body pass
