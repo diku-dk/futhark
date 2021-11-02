@@ -177,24 +177,24 @@ shortCircuitSeqMem _ _ _ _ = return
 
 shortCircuitGPUMem :: LUTabFun -> Pat (Aliases GPUMem) -> Op (Aliases GPUMem) -> TopDnEnv GPUMem -> BotUpEnv -> ShortCircuitM GPUMem BotUpEnv
 shortCircuitGPUMem _ _ (Alloc _ _) _ bu_env = return bu_env
-shortCircuitGPUMem lutab pat@(Pat ps) e@(Inner (SegOp (SegMap _ space _ kernel_body))) td_env bu_env =
-  shortCircuitGPUMemHelper lutab pat space kernel_body td_env bu_env
-shortCircuitGPUMem lutab pat@(Pat ps) e@(Inner (SegOp (SegRed _ space binops _ kernel_body))) td_env bu_env =
+shortCircuitGPUMem lutab pat@(Pat ps) e@(Inner (SegOp (SegMap lvl space _ kernel_body))) td_env bu_env =
+  shortCircuitGPUMemHelper lvl lutab pat space kernel_body td_env bu_env
+shortCircuitGPUMem lutab pat@(Pat ps) e@(Inner (SegOp (SegRed lvl space binops _ kernel_body))) td_env bu_env =
   let to_fail = M.filter (\entry -> namesFromList (M.keys $ vartab entry) `namesIntersect` foldMap (freeIn . segBinOpLambda) binops) $ activeCoals bu_env
       (active, inh) = foldl markFailedCoal (activeCoals bu_env, inhibit bu_env) $ M.keys to_fail
       bu_env' = bu_env {activeCoals = active, inhibit = inh}
-   in shortCircuitGPUMemHelper lutab pat space kernel_body td_env bu_env'
-shortCircuitGPUMem lutab pat@(Pat ps) e@(Inner (SegOp (SegScan _ space binops _ kernel_body))) td_env bu_env =
+   in shortCircuitGPUMemHelper lvl lutab pat space kernel_body td_env bu_env'
+shortCircuitGPUMem lutab pat@(Pat ps) e@(Inner (SegOp (SegScan lvl space binops _ kernel_body))) td_env bu_env =
   let to_fail = M.filter (\entry -> namesFromList (M.keys $ vartab entry) `namesIntersect` foldMap (freeIn . segBinOpLambda) binops) $ activeCoals bu_env
       (active, inh) = foldl markFailedCoal (activeCoals bu_env, inhibit bu_env) $ M.keys to_fail
       bu_env' = bu_env {activeCoals = active, inhibit = inh}
-   in shortCircuitGPUMemHelper lutab pat space kernel_body td_env bu_env'
-shortCircuitGPUMem lutab pat@(Pat ps) e@(Inner (SegOp (SegHist _ space histops _ kernel_body))) td_env bu_env = do
+   in shortCircuitGPUMemHelper lvl lutab pat space kernel_body td_env bu_env'
+shortCircuitGPUMem lutab pat@(Pat ps) e@(Inner (SegOp (SegHist lvl space histops _ kernel_body))) td_env bu_env = do
   -- Need to take zipped patterns and histDest (flattened) and insert transitive coalesces
   let to_fail = M.filter (\entry -> namesFromList (M.keys $ vartab entry) `namesIntersect` foldMap (freeIn . histOp) histops) $ activeCoals bu_env
       (active, inh) = foldl markFailedCoal (activeCoals bu_env, inhibit bu_env) $ M.keys to_fail
       bu_env' = bu_env {activeCoals = active, inhibit = inh}
-  bu_env'' <- shortCircuitGPUMemHelper lutab pat space kernel_body td_env bu_env'
+  bu_env'' <- shortCircuitGPUMemHelper lvl lutab pat space kernel_body td_env bu_env'
   return $
     foldl
       ( \acc (PatElem p _, hist_dest) ->
@@ -219,8 +219,12 @@ shortCircuitGPUMem _ _ (Inner (SizeOp _)) _ bu_env = return bu_env
 shortCircuitGPUMem _ _ (Inner (OtherOp ())) _ bu_env = return bu_env
 shortCircuitGPUMem _ _ _ _ _ = undefined
 
-shortCircuitGPUMemHelper :: LUTabFun -> Pat (Aliases GPUMem) -> SegSpace -> KernelBody (Aliases GPUMem) -> TopDnEnv GPUMem -> BotUpEnv -> ShortCircuitM GPUMem BotUpEnv
-shortCircuitGPUMemHelper lutab pat@(Pat ps) space kernel_body td_env bu_env = do
+isSegThread :: SegLevel -> Bool
+isSegThread SegThread {} = True
+isSegThread _ = False
+
+shortCircuitGPUMemHelper :: SegLevel -> LUTabFun -> Pat (Aliases GPUMem) -> SegSpace -> KernelBody (Aliases GPUMem) -> TopDnEnv GPUMem -> BotUpEnv -> ShortCircuitM GPUMem BotUpEnv
+shortCircuitGPUMemHelper lvl lutab pat@(Pat ps) space kernel_body td_env bu_env = do
   let (actv0, inhibit0) =
         filterSafetyCond2and5
           (activeCoals bu_env)
@@ -228,7 +232,7 @@ shortCircuitGPUMemHelper lutab pat@(Pat ps) space kernel_body td_env bu_env = do
           (scals bu_env)
           td_env
           (patElems pat)
-      (actv_return, inhibit_return) = foldl (makeSegMapCoals td_env space kernel_body) (actv0, inhibit0) $ zip ps $ kernelBodyResult kernel_body
+      (actv_return, inhibit_return) = foldl (makeSegMapCoals lvl td_env space kernel_body) (actv0, inhibit0) $ zip ps $ kernelBodyResult kernel_body
   bu_env' <- mkCoalsTabStms lutab (kernelBodyStms kernel_body) td_env $ bu_env {activeCoals = actv0 <> actv_return, inhibit = inhibit_return}
 
   -- Check partial overlap
@@ -348,8 +352,8 @@ shortCircuitGPUMemHelper lutab pat@(Pat ps) space kernel_body td_env bu_env = do
       --  $ bu_env' {activeCoals = actv1, successCoals = successCoals1, inhibit = inhibit1}
       $ bu_env''''
 
-makeSegMapCoals :: TopDnEnv GPUMem -> SegSpace -> KernelBody (Aliases GPUMem) -> (CoalsTab, InhibitTab) -> (PatElemT (VarAliases, LetDecMem), KernelResult) -> (CoalsTab, InhibitTab)
-makeSegMapCoals td_env space kernel_body (active, inhibit) x@(PatElem pat_name (_, MemArray _ _ _ (ArrayIn pat_mem pat_ixf)), Returns _ _ (Var return_name))
+makeSegMapCoals :: SegLevel -> TopDnEnv GPUMem -> SegSpace -> KernelBody (Aliases GPUMem) -> (CoalsTab, InhibitTab) -> (PatElemT (VarAliases, LetDecMem), KernelResult) -> (CoalsTab, InhibitTab)
+makeSegMapCoals lvl td_env space kernel_body (active, inhibit) x@(PatElem pat_name (_, MemArray _ _ _ (ArrayIn pat_mem pat_ixf)), Returns _ _ (Var return_name))
   | Just mb@(MemBlock tp shp return_mem return_ixf) <-
       traceWith
         ( "x: " <> pretty x
@@ -358,7 +362,8 @@ makeSegMapCoals td_env space kernel_body (active, inhibit) x@(PatElem pat_name (
             <> "\ngetScopeMemInfo for: "
             <> pretty return_name
         )
-        $ getScopeMemInfo return_name $ scope td_env <> scopeOf (kernelBodyStms kernel_body) =
+        $ getScopeMemInfo return_name $ scope td_env <> scopeOf (kernelBodyStms kernel_body),
+    isSegThread lvl =
     case M.lookup pat_mem active of
       Nothing ->
         -- We are not in a transitive case
@@ -433,11 +438,11 @@ makeSegMapCoals td_env space kernel_body (active, inhibit) x@(PatElem pat_name (
                   inhibit
                 )
           _ -> (active, inhibit)
-makeSegMapCoals td_env _ _ x (_, WriteReturns _ _ return_name _) =
+makeSegMapCoals _ td_env _ _ x (_, WriteReturns _ _ return_name _) =
   case getScopeMemInfo return_name $ scope td_env of
     Just mb@(MemBlock _ _ return_mem _) -> markFailedCoal x return_mem
     Nothing -> error "Should not happen?"
-makeSegMapCoals td_env _ _ x (_, result) =
+makeSegMapCoals _ td_env _ _ x (_, result) =
   freeIn result
     & namesToList
     & mapMaybe (flip getScopeMemInfo $ scope td_env)
