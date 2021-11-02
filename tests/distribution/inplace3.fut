@@ -2,7 +2,7 @@
 -- produce a sequential Update statement.
 -- ==
 -- random input { [2][12]i64 } auto output
--- structure distributed { SegMap/Update 0 }
+-- structure gpu { SegMap/Update 0 }
 
 let main [n][m] (xss: *[n][m]i64) =
   map (\xs -> copy xs with [0:10] = iota 10) xss

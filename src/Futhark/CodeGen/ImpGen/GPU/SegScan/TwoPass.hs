@@ -42,9 +42,8 @@ makeLocalArrays (Count group_size) num_threads scans = do
             MemArray pt shape _ (ArrayIn mem _) -> do
               let shape' = Shape [num_threads] <> shape
               arr <-
-                lift $
-                  sArray "scan_arr" pt shape' $
-                    ArrayIn mem $ IxFun.iota $ map pe64 $ shapeDims shape'
+                lift . sArray "scan_arr" pt shape' mem $
+                  IxFun.iota $ map pe64 $ shapeDims shape'
               return (arr, [])
             _ -> do
               let pt = elemType $ paramType p
@@ -100,7 +99,7 @@ writeToScanValues gtids (pes, scan, scan_res)
     forM_ (zip pes scan_res) $ \(pe, res) ->
       copyDWIMFix
         (patElemName pe)
-        (map Imp.vi64 gtids)
+        (map Imp.le64 gtids)
         (kernelResultSubExp res)
         []
   | otherwise =
@@ -196,7 +195,7 @@ scanStage1 (Pat all_pes) num_groups group_size space scans kbody = do
       let per_scan_pes = segBinOpChunks scans all_pes
 
           in_bounds =
-            foldl1 (.&&.) $ zipWith (.<.) (map Imp.vi64 gtids) dims'
+            foldl1 (.&&.) $ zipWith (.<.) (map Imp.le64 gtids) dims'
 
           when_in_bounds = compileStms mempty (kernelBodyStms kbody) $ do
             let (all_scan_res, map_res) =
@@ -212,7 +211,7 @@ scanStage1 (Pat all_pes) num_groups group_size space scans kbody = do
               forM_ (zip (takeLast (length map_res) all_pes) map_res) $ \(pe, se) ->
                 copyDWIMFix
                   (patElemName pe)
-                  (map Imp.vi64 gtids)
+                  (map Imp.le64 gtids)
                   (kernelResultSubExp se)
                   []
 
@@ -236,7 +235,7 @@ scanStage1 (Pat all_pes) num_groups group_size space scans kbody = do
                 sIf
                   in_bounds
                   ( do
-                      readToScanValues (map Imp.vi64 gtids ++ vec_is) pes scan
+                      readToScanValues (map Imp.le64 gtids ++ vec_is) pes scan
                       readCarries j (tvExp chunk_offset) dims' vec_is pes scan
                   )
                   ( forM_ (zip (yParams scan) (segBinOpNeutral scan)) $ \(p, ne) ->
@@ -272,7 +271,7 @@ scanStage1 (Pat all_pes) num_groups group_size space scans kbody = do
                   forM_ (zip3 rets pes local_arrs) $ \(t, pe, arr) ->
                     copyDWIMFix
                       (patElemName pe)
-                      (map Imp.vi64 gtids ++ vec_is)
+                      (map Imp.le64 gtids ++ vec_is)
                       (Var arr)
                       [localArrayIndex constants t]
 
@@ -356,10 +355,10 @@ scanStage2 (Pat all_pes) stage1_num_threads elems_per_group num_groups crossesSe
     forM_ (zip4 scans per_scan_local_arrs per_scan_rets per_scan_pes) $
       \(SegBinOp _ scan_op nes vec_shape, local_arrs, rets, pes) ->
         sLoopNest vec_shape $ \vec_is -> do
-          let glob_is = map Imp.vi64 gtids ++ vec_is
+          let glob_is = map Imp.le64 gtids ++ vec_is
 
               in_bounds =
-                foldl1 (.&&.) $ zipWith (.<.) (map Imp.vi64 gtids) dims'
+                foldl1 (.&&.) $ zipWith (.<.) (map Imp.le64 gtids) dims'
 
               when_in_bounds = forM_ (zip3 rets local_arrs pes) $ \(t, arr, pe) ->
                 copyDWIMFix
@@ -437,7 +436,7 @@ scanStage3 (Pat all_pes) num_groups group_size elems_per_group crossesSegment sp
       -- then the carry was updated in stage 2), and we are not crossing
       -- a segment boundary.
       let in_bounds =
-            foldl1 (.&&.) $ zipWith (.<.) (map Imp.vi64 gtids) dims'
+            foldl1 (.&&.) $ zipWith (.<.) (map Imp.le64 gtids) dims'
           crosses_segment =
             fromMaybe false $
               crossesSegment
@@ -468,14 +467,14 @@ scanStage3 (Pat all_pes) num_groups group_size elems_per_group crossesSegment sp
                     (paramName p)
                     []
                     (Var $ patElemName pe)
-                    (map Imp.vi64 gtids ++ vec_is)
+                    (map Imp.le64 gtids ++ vec_is)
 
                 compileBody' scan_x_params $ lambdaBody scan_op
 
                 forM_ (zip scan_x_params pes) $ \(p, pe) ->
                   copyDWIMFix
                     (patElemName pe)
-                    (map Imp.vi64 gtids ++ vec_is)
+                    (map Imp.le64 gtids ++ vec_is)
                     (Var $ paramName p)
                     []
 

@@ -65,7 +65,6 @@ data PolyBinding
         [TypeParam],
         [Pat],
         StructRetType,
-        [VName],
         Exp,
         [AttrInfo VName],
         SrcLoc
@@ -300,7 +299,7 @@ transformAppExp (LetFun fname (tparams, params, retdecl, Info ret, body) e loc) 
     -- filter those that are monomorphic versions of the current let-bound
     -- function and insert them at this point, and propagate the rest.
     rr <- asks envRecordReplacements
-    let funbind = PolyBinding rr (fname, tparams, params, ret, [], body, mempty, loc)
+    let funbind = PolyBinding rr (fname, tparams, params, ret, body, mempty, loc)
     pass $ do
       (e', bs) <- listen $ extendEnv fname funbind $ transformExp e
       -- Do not remember this one for next time we monomorphise this
@@ -625,7 +624,7 @@ noticeDims = mapM_ notice . nestedDims
 -- monomorphic functions with the given expression at the bottom.
 unfoldLetFuns :: [ValBind] -> Exp -> Exp
 unfoldLetFuns [] e = e
-unfoldLetFuns (ValBind _ fname _ (Info (rettype, _)) dim_params params body _ _ loc : rest) e =
+unfoldLetFuns (ValBind _ fname _ (Info rettype) dim_params params body _ _ loc : rest) e =
   AppExp (LetFun fname (dim_params, params, Nothing, Info rettype, body) e' loc) (Info $ AppRes e_t mempty)
   where
     e' = unfoldLetFuns rest e
@@ -731,7 +730,7 @@ monomorphiseBinding ::
   PolyBinding ->
   MonoType ->
   MonoM (VName, InferSizeArgs, ValBind)
-monomorphiseBinding entry (PolyBinding rr (name, tparams, params, rettype, retext, body, attrs, loc)) inst_t =
+monomorphiseBinding entry (PolyBinding rr (name, tparams, params, rettype, body, attrs, loc)) inst_t =
   replaceRecordReplacements rr $ do
     let bind_t = foldFunType (map patternStructType params) rettype
     (substs, t_shape_params) <- typeSubstsM loc (noSizes bind_t) $ noNamedParams inst_t
@@ -762,14 +761,14 @@ monomorphiseBinding entry (PolyBinding rr (name, tparams, params, rettype, retex
               name'
               (shape_params_explicit ++ shape_params_implicit)
               params''
-              (rettype', retext)
+              rettype'
               body''
           else
             toValBinding
               name'
               shape_params_implicit
               (map shapeParam shape_params_explicit ++ params'')
-              (rettype', retext)
+              rettype'
               body''
       )
   where
@@ -879,13 +878,13 @@ substPat entry f pat = case pat of
   PatConstr n (Info tp) ps loc -> PatConstr n (Info $ f tp) ps loc
 
 toPolyBinding :: ValBind -> PolyBinding
-toPolyBinding (ValBind _ name _ (Info (rettype, retext)) tparams params body _ attrs loc) =
-  PolyBinding mempty (name, tparams, params, rettype, retext, body, attrs, loc)
+toPolyBinding (ValBind _ name _ (Info rettype) tparams params body _ attrs loc) =
+  PolyBinding mempty (name, tparams, params, rettype, body, attrs, loc)
 
 -- Remove all type variables and type abbreviations from a value binding.
 removeTypeVariables :: Bool -> ValBind -> MonoM ValBind
 removeTypeVariables entry valbind = do
-  let (ValBind _ _ _ (Info (RetType dims rettype, retext)) _ pats body _ _ _) = valbind
+  let (ValBind _ _ _ (Info (RetType dims rettype)) _ pats body _ _ _) = valbind
   subs <- asks $ M.map substFromAbbr . envTypeBindings
   let mapper =
         ASTMapper
@@ -904,7 +903,7 @@ removeTypeVariables entry valbind = do
 
   return
     valbind
-      { valBindRetType = Info (applySubst (`M.lookup` subs) $ RetType dims rettype, retext),
+      { valBindRetType = Info (applySubst (`M.lookup` subs) $ RetType dims rettype),
         valBindParams = map (substPat entry $ applySubst (`M.lookup` subs)) pats,
         valBindBody = body'
       }
@@ -925,7 +924,7 @@ transformValBind valbind = do
       removeTypeVariablesInType $
         foldFunType
           (map patternStructType (valBindParams valbind))
-          $ fst $ unInfo $ valBindRetType valbind
+          $ unInfo $ valBindRetType valbind
     (name, infer, valbind'') <- monomorphiseBinding True valbind' $ monoType t
     tell $ Seq.singleton (name, valbind'' {valBindEntryPoint = valBindEntryPoint valbind})
     addLifted (valBindName valbind) (monoType t) (name, infer)

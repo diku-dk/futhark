@@ -1,0 +1,41 @@
+-- Can we do operations on f16s, even though these are not natively supported?
+-- ==
+--
+-- input  {
+--   [0f16, 0f16, 0f16, 0f16, 0f16]
+--   [1i16, 1i16, 1i16, 1i16, 1i16]
+--   [1f16, 1f16, 1f16, 1f16, 1f16]
+-- }
+-- output {
+--   [0f16, 5f16, 0f16, 0f16, 0f16]
+-- }
+--
+-- input  {
+--   [0f16, 0f16, 0f16, 0f16, 0f16]
+--   [1i16, 1i16, 4i16, 4i16, 4i16]
+--   [0.1f16, 0.1f16, 0.4f16, 0.4f16, 0.4f16]
+-- }
+-- output {
+--   [0f16, 0.2f16, 0f16, 0f16, 1.2f16]
+-- }
+--
+-- input  {
+--   [1f16, 2f16, 3f16, 4f16, 5f16]
+--   [1i16, 1i16, 4i16, 4i16, 4i16]
+--   [1f16, 1f16, 4f16, 4f16, 4f16]
+-- }
+-- output {
+--   [1f16, 4f16, 3f16, 4f16, 17f16]
+-- }
+--
+-- input  {
+--   [1f16, f16.nan, 3f16, 4f16, 5f16]
+--   [1i16, 1i16, 4i16, 4i16, 4i16]
+--   [1f16, 1f16, 4f16, 4f16, 4f16]
+-- }
+-- output {
+--   [1f16, f16.nan, 3f16, 4f16, 17f16]
+-- }
+
+let main [m][n] (hist : *[n]f16) (is: [m]i16) (image : [m]f16) : [n]f16 =
+  reduce_by_index hist (+) 0f16 (map i64.i16 is) image

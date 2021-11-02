@@ -15,6 +15,35 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+* Some incorrect removal of copies (#1505).
+
+* Handling of parametric modules with top-level existentials (#1510).
+
+* Module substitution fix (#1512).  Unfortunately this makes some type
+  errors a bit misleading.
+
+## [0.20.6]
+
+### Added
+
+* Much better code generation for segmented scans with vectorisable
+  operators.
+
+### Fixed
+
+* Fixes to extremely exotic GPU scans involving array operators.
+
+* Missing alias tracking led to invalid rewrites, causing a compiler
+  crash (#1499).
+
+* Top-level bindings with existential sizes were mishandled (#1500, #1501).
+
+* A variety of memory leaks in the multicore backend, mostly (or
+  perhaps exclusively) centered around context freeing or failing
+  programs - this should not have affected many people.
+
+* Various fixes to `f16` handling in the GPU backends.
+
 ## [0.20.5]
 
 ### Added

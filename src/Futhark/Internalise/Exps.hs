@@ -39,53 +39,52 @@ internaliseFunName :: VName -> Name
 internaliseFunName = nameFromString . pretty
 
 internaliseValBind :: E.ValBind -> InternaliseM ()
-internaliseValBind fb@(E.ValBind entry fname retdecl (Info (rettype, _)) tparams params body _ attrs loc) = do
-  localConstsScope $
-    bindingFParams tparams params $ \shapeparams params' -> do
-      let shapenames = map I.paramName shapeparams
+internaliseValBind fb@(E.ValBind entry fname retdecl (Info rettype) tparams params body _ attrs loc) = do
+  localConstsScope . bindingFParams tparams params $ \shapeparams params' -> do
+    let shapenames = map I.paramName shapeparams
 
-      msg <- case retdecl of
-        Just dt ->
-          errorMsg
-            . ("Function return value does not match shape of type " :)
-            <$> typeExpForError dt
-        Nothing -> return $ errorMsg ["Function return value does not match shape of declared return type."]
+    msg <- case retdecl of
+      Just dt ->
+        errorMsg
+          . ("Function return value does not match shape of type " :)
+          <$> typeExpForError dt
+      Nothing -> return $ errorMsg ["Function return value does not match shape of declared return type."]
 
-      (body', rettype') <- buildBody $ do
-        body_res <- internaliseExp (baseString fname <> "_res") body
-        rettype' <-
-          fmap zeroExts . internaliseReturnType rettype =<< mapM subExpType body_res
-        body_res' <-
-          ensureResultExtShape msg loc (map I.fromDecl rettype') $ subExpsRes body_res
-        pure
-          ( body_res',
-            replicate (length (shapeContext rettype')) (I.Prim int64) ++ rettype'
+    (body', rettype') <- buildBody $ do
+      body_res <- internaliseExp (baseString fname <> "_res") body
+      rettype' <-
+        fmap zeroExts . internaliseReturnType rettype =<< mapM subExpType body_res
+      body_res' <-
+        ensureResultExtShape msg loc (map I.fromDecl rettype') $ subExpsRes body_res
+      pure
+        ( body_res',
+          replicate (length (shapeContext rettype')) (I.Prim int64) ++ rettype'
+        )
+
+    let all_params = shapeparams ++ concat params'
+
+    attrs' <- internaliseAttrs attrs
+
+    let fd =
+          I.FunDef
+            Nothing
+            attrs'
+            (internaliseFunName fname)
+            rettype'
+            all_params
+            body'
+
+    if null params'
+      then bindConstant fname fd
+      else
+        bindFunction
+          fname
+          fd
+          ( shapenames,
+            map declTypeOf $ concat params',
+            all_params,
+            applyRetType rettype' all_params
           )
-
-      let all_params = shapeparams ++ concat params'
-
-      attrs' <- internaliseAttrs attrs
-
-      let fd =
-            I.FunDef
-              Nothing
-              attrs'
-              (internaliseFunName fname)
-              rettype'
-              all_params
-              body'
-
-      if null params'
-        then bindConstant fname fd
-        else
-          bindFunction
-            fname
-            fd
-            ( shapenames,
-              map declTypeOf $ concat params',
-              all_params,
-              applyRetType rettype' all_params
-            )
 
   case entry of
     Just (Info entry') -> generateEntryPoint entry' fb
@@ -95,7 +94,7 @@ internaliseValBind fb@(E.ValBind entry fname retdecl (Info (rettype, _)) tparams
 
 generateEntryPoint :: E.EntryPoint -> E.ValBind -> InternaliseM ()
 generateEntryPoint (E.EntryPoint e_params e_rettype) vb = localConstsScope $ do
-  let (E.ValBind _ ofname _ (Info (rettype, _)) tparams params _ _ attrs loc) = vb
+  let (E.ValBind _ ofname _ (Info rettype) tparams params _ _ attrs loc) = vb
   bindingFParams tparams params $ \shapeparams params' -> do
     entry_rettype <- internaliseEntryReturnType rettype
     let entry' = entryPoint (baseName ofname) (zip e_params params') (e_rettype, entry_rettype)
@@ -973,11 +972,9 @@ internaliseDimIndex ::
 internaliseDimIndex w (E.DimFix i) = do
   (i', _) <- internaliseDimExp "i" i
   let lowerBound =
-        I.BasicOp $
-          I.CmpOp (I.CmpSle I.Int64) (I.constant (0 :: I.Int64)) i'
+        I.BasicOp $ I.CmpOp (I.CmpSle I.Int64) (I.constant (0 :: I.Int64)) i'
       upperBound =
-        I.BasicOp $
-          I.CmpOp (I.CmpSlt I.Int64) i' w
+        I.BasicOp $ I.CmpOp (I.CmpSlt I.Int64) i' w
   ok <- letSubExp "bounds_check" =<< eBinOp I.LogAnd (pure lowerBound) (pure upperBound)
   return (I.DimFix i', ok, [ErrorVal int64 i'])
 
@@ -1193,12 +1190,11 @@ internaliseHist desc rf hist op ne buckets img loc = do
       "length of index and value array does not match"
       loc
   buckets'' <-
-    certifying c $
-      letExp (baseString buckets') $
-        I.BasicOp $ I.Reshape (reshapeOuter [DimCoercion w_img] 1 b_shape) buckets'
+    certifying c . letExp (baseString buckets') $
+      I.BasicOp $ I.Reshape (reshapeOuter [DimCoercion w_img] 1 b_shape) buckets'
 
   letValExp' desc . I.Op $
-    I.Hist w_img [HistOp w_hist rf' hist' ne_shp op'] lam' $ buckets'' : img'
+    I.Hist w_img (buckets'' : img') [HistOp w_hist rf' hist' ne_shp op'] lam'
 
 internaliseStreamMap ::
   String ->
@@ -1914,7 +1910,7 @@ isOverloadedFunction qname args loc = do
           sivs = si' <> svs'
 
       let sa_ws = map (Shape . take dim . arrayDims) sa_ts
-      letTupExp' desc $ I.Op $ I.Scatter si_w lam sivs $ zip3 sa_ws (repeat 1) sas
+      letTupExp' desc $ I.Op $ I.Scatter si_w sivs lam $ zip3 sa_ws (repeat 1) sas
 
 flatIndexHelper :: String -> SrcLoc -> E.Exp -> E.Exp -> [(E.Exp, E.Exp)] -> InternaliseM [SubExp]
 flatIndexHelper desc loc arr offset slices = do
@@ -2164,13 +2160,9 @@ partitionWithSOACS k lam arrs = do
                 ++ I.varsRes (map I.paramName value_params)
         }
   results <-
-    letTupExp "partition_res" $
-      I.Op $
-        I.Scatter
-          w
-          write_lam
-          (classes : all_offsets ++ arrs)
-          $ zip3 (repeat $ Shape [w]) (repeat 1) blanks
+    letTupExp "partition_res" . I.Op $
+      I.Scatter w (classes : all_offsets ++ arrs) write_lam $
+        zip3 (repeat $ Shape [w]) (repeat 1) blanks
   sizes' <-
     letSubExp "partition_sizes" $
       I.BasicOp $

@@ -65,12 +65,14 @@ module Futhark.CodeGen.Backends.GenericC
     publicName,
     contextType,
     contextField,
+    contextFieldDyn,
     memToCType,
     cacheMem,
     fatMemory,
     rawMemCType,
     cproduct,
     fatMemType,
+    freeAllocatedMem,
 
     -- * Building Blocks
     primTypeToCType,
@@ -84,6 +86,7 @@ import Control.Monad.Reader
 import Control.Monad.State
 import Data.Bifunctor (first)
 import qualified Data.DList as DL
+import Data.List (unzip4)
 import Data.Loc
 import qualified Data.Map.Strict as M
 import Data.Maybe
@@ -119,7 +122,7 @@ data CompilerState s = CompilerState
     compUserState :: s,
     compHeaderDecls :: M.Map HeaderSection (DL.DList C.Definition),
     compLibDecls :: DL.DList C.Definition,
-    compCtxFields :: DL.DList (C.Id, C.Type, Maybe C.Exp),
+    compCtxFields :: DL.DList (C.Id, C.Type, Maybe C.Exp, Maybe C.Stm),
     compProfileItems :: DL.DList C.BlockItem,
     compClearItems :: DL.DList C.BlockItem,
     compDeclaredMem :: [(VName, Space)],
@@ -244,15 +247,19 @@ errorMsgString (ErrorMsg parts) = do
   (formatstrs, formatargs) <- unzip <$> mapM onPart parts
   pure (mconcat formatstrs, formatargs)
 
+freeAllocatedMem :: CompilerM op s [C.BlockItem]
+freeAllocatedMem = collect $ mapM_ (uncurry unRefMem) =<< gets compDeclaredMem
+
 defError :: ErrorCompiler op s
 defError msg stacktrace = do
-  free_all_mem <- collect $ mapM_ (uncurry unRefMem) =<< gets compDeclaredMem
+  free_all_mem <- freeAllocatedMem
   (formatstr, formatargs) <- errorMsgString msg
   let formatstr' = "Error: " <> formatstr <> "\n\nBacktrace:\n%s"
   items
     [C.citems|ctx->error = msgprintf($string:formatstr', $args:formatargs, $string:stacktrace);
-                  $items:free_all_mem
-                  return 1;|]
+              $items:free_all_mem
+              err = 1;
+              goto cleanup;|]
 
 defCall :: CallCompiler op s
 defCall dests fname args = do
@@ -366,9 +373,10 @@ opaqueDecls = declsCode isOpaqueDecl
 entryDecls = declsCode (== EntryDecl)
 miscDecls = declsCode (== MiscDecl)
 
-contextContents :: CompilerM op s ([C.FieldGroup], [C.Stm])
+contextContents :: CompilerM op s ([C.FieldGroup], [C.Stm], [C.Stm])
 contextContents = do
-  (field_names, field_types, field_values) <- gets $ unzip3 . DL.toList . compCtxFields
+  (field_names, field_types, field_values, field_frees) <-
+    gets $ unzip4 . DL.toList . compCtxFields
   let fields =
         [ [C.csdecl|$ty:ty $id:name;|]
           | (name, ty) <- zip field_names field_types
@@ -377,7 +385,7 @@ contextContents = do
         [ [C.cstm|ctx->$id:name = $exp:e;|]
           | (name, Just e) <- zip field_names field_values
         ]
-  return (fields, init_fields)
+  return (fields, init_fields, catMaybes field_frees)
 
 contextFinalInits :: CompilerM op s [C.Stm]
 contextFinalInits = gets compInit
@@ -503,7 +511,11 @@ earlyDecl def = modify $ \s ->
 
 contextField :: C.Id -> C.Type -> Maybe C.Exp -> CompilerM op s ()
 contextField name ty initial = modify $ \s ->
-  s {compCtxFields = compCtxFields s <> DL.singleton (name, ty, initial)}
+  s {compCtxFields = compCtxFields s <> DL.singleton (name, ty, initial, Nothing)}
+
+contextFieldDyn :: C.Id -> C.Type -> C.Exp -> C.Stm -> CompilerM op s ()
+contextFieldDyn name ty initial free = modify $ \s ->
+  s {compCtxFields = compCtxFields s <> DL.singleton (name, ty, Just initial, Just free)}
 
 profileReport :: C.BlockItem -> CompilerM op s ()
 profileReport x = modify $ \s ->
@@ -1890,7 +1902,7 @@ readScalarPointerWithQuals quals_f dest i elemtype space vol = do
   return $ derefPointer dest i [C.cty|$tyquals:quals' $ty:elemtype*|]
 
 compileExpToName :: String -> PrimType -> Exp -> CompilerM op s VName
-compileExpToName _ _ (LeafExp (ScalarVar v) _) =
+compileExpToName _ _ (LeafExp v _) =
   return v
 compileExpToName desc t e = do
   desc' <- newVName desc
@@ -1899,29 +1911,7 @@ compileExpToName desc t e = do
   return desc'
 
 compileExp :: Exp -> CompilerM op s C.Exp
-compileExp = compilePrimExp compileLeaf
-  where
-    compileLeaf (ScalarVar src) =
-      return [C.cexp|$id:src|]
-    compileLeaf (Index _ _ Unit __ _) =
-      pure $ C.toExp UnitValue mempty
-    compileLeaf (Index src (Count iexp) restype DefaultSpace vol) = do
-      src' <- rawMem src
-      fmap (fromStorage restype) $
-        derefPointer src'
-          <$> compileExp (untyped iexp)
-          <*> pure [C.cty|$tyquals:(volQuals vol) $ty:(primStorageType restype)*|]
-    compileLeaf (Index src (Count iexp) restype (Space space) vol) =
-      fmap (fromStorage restype) . join $
-        asks envReadScalar
-          <*> rawMem src
-          <*> compileExp (untyped iexp)
-          <*> pure (primStorageType restype)
-          <*> pure space
-          <*> pure vol
-    compileLeaf (Index src (Count iexp) _ ScalarSpace {} _) = do
-      iexp' <- compileExp $ untyped iexp
-      return [C.cexp|$id:src[$exp:iexp']|]
+compileExp = compilePrimExp $ \v -> pure [C.cexp|$id:v|]
 
 -- | Tell me how to compile a @v@, and I'll Compile any @PrimExp v@ for you.
 compilePrimExp :: Monad m => (v -> m C.Exp) -> PrimExp v -> m C.Exp
@@ -2134,6 +2124,29 @@ compileCode (Write dest (Count idx) elemtype (Space space) vol elemexp) =
       <*> pure space
       <*> pure vol
       <*> (toStorage elemtype <$> compileExp elemexp)
+compileCode (Read x _ _ Unit __ _) =
+  stm [C.cstm|$id:x = $exp:(UnitValue);|]
+compileCode (Read x src (Count iexp) restype DefaultSpace vol) = do
+  src' <- rawMem src
+  e <-
+    fmap (fromStorage restype) $
+      derefPointer src'
+        <$> compileExp (untyped iexp)
+        <*> pure [C.cty|$tyquals:(volQuals vol) $ty:(primStorageType restype)*|]
+  stm [C.cstm|$id:x = $exp:e;|]
+compileCode (Read x src (Count iexp) restype (Space space) vol) = do
+  e <-
+    fmap (fromStorage restype) . join $
+      asks envReadScalar
+        <*> rawMem src
+        <*> compileExp (untyped iexp)
+        <*> pure (primStorageType restype)
+        <*> pure space
+        <*> pure vol
+  stm [C.cstm|$id:x = $exp:e;|]
+compileCode (Read x src (Count iexp) _ ScalarSpace {} _) = do
+  iexp' <- compileExp $ untyped iexp
+  stm [C.cstm|$id:x = $id:src[$exp:iexp'];|]
 compileCode (DeclareMem name space) =
   declMem name space
 compileCode (DeclareScalar name vol t) = do
@@ -2166,7 +2179,7 @@ compileCode (DeclareArray name (Space space) t vs) =
 -- For assignments of the form 'x = x OP e', we generate C assignment
 -- operators to make the resulting code slightly nicer.  This has no
 -- effect on performance.
-compileCode (SetScalar dest (BinOpExp op (LeafExp (ScalarVar x) _) y))
+compileCode (SetScalar dest (BinOpExp op (LeafExp x _) y))
   | dest == x,
     Just f <- assignmentOperator op = do
     y' <- compileExp y

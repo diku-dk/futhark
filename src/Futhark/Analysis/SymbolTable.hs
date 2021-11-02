@@ -11,11 +11,13 @@ module Futhark.Analysis.SymbolTable
     -- * Entries
     Entry,
     deepen,
+    entryAccInput,
     entryDepth,
     entryLetBoundDec,
     entryIsSize,
     entryStm,
     entryFParam,
+    entryLParam,
 
     -- * Lookup
     elem,
@@ -46,6 +48,7 @@ module Futhark.Analysis.SymbolTable
 
     -- * Misc
     hideCertified,
+    noteAccTokens,
   )
 where
 
@@ -132,6 +135,9 @@ data Entry rep = Entry
     -- | True if this name has been used as an array size,
     -- implying that it is non-negative.
     entryIsSize :: Bool,
+    -- | For names that are tokens of an accumulator, this is the
+    -- corresponding combining function and neutral element.
+    entryAccInput :: Maybe (WithAccInput rep),
     entryType :: EntryType rep
   }
 
@@ -165,11 +171,13 @@ data FParamEntry rep = FParamEntry
 
 data LParamEntry rep = LParamEntry
   { lparamDec :: LParamInfo rep,
+    lparamAliases :: Names,
     lparamIndex :: IndexArray
   }
 
 data FreeVarEntry rep = FreeVarEntry
   { freeVarDec :: NameInfo rep,
+    freeVarAliases :: Names,
     -- | Index a delayed array, if possible.
     freeVarIndex :: VName -> IndexArray
   }
@@ -198,9 +206,22 @@ entryFParam e = case entryType e of
   FParam e' -> Just $ fparamDec e'
   _ -> Nothing
 
+entryLParam :: Entry rep -> Maybe (LParamInfo rep)
+entryLParam e = case entryType e of
+  LParam e' -> Just $ lparamDec e'
+  _ -> Nothing
+
 entryLetBoundDec :: Entry rep -> Maybe (LetDec rep)
 entryLetBoundDec = fmap letBoundDec . isLetBound
 
+entryAliases :: EntryType rep -> Names
+entryAliases (LetBound e) = letBoundAliases e
+entryAliases (FParam e) = fparamAliases e
+entryAliases (LParam e) = lparamAliases e
+entryAliases (FreeVar e) = freeVarAliases e
+entryAliases (LoopVar _) = mempty -- Integers have no aliases.
+
+-- | You almost always want 'available' instead of this one.
 elem :: VName -> SymbolTable rep -> Bool
 elem name = isJust . lookup name
 
@@ -234,10 +255,7 @@ lookupSubExp name vtable = do
 
 lookupAliases :: VName -> SymbolTable rep -> Names
 lookupAliases name vtable =
-  case entryType <$> M.lookup name (bindings vtable) of
-    Just (LetBound e) -> letBoundAliases e
-    Just (FParam e) -> fparamAliases e
-    _ -> mempty
+  maybe mempty (entryAliases . entryType) $ M.lookup name (bindings vtable)
 
 -- | If the given variable name is the name of a 'ForLoop' parameter,
 -- then return the bound of that loop.
@@ -321,7 +339,8 @@ indexExp table (BasicOp (Replicate (Shape ds) v)) _ is
   | length ds == length is,
     Just (Prim t) <- lookupSubExpType v table =
     Just $ Indexed mempty $ primExpFromSubExp t v
-indexExp table (BasicOp (Replicate (Shape [_]) (Var v))) _ (_ : is) =
+indexExp table (BasicOp (Replicate (Shape [_]) (Var v))) _ (_ : is) = do
+  guard $ v `available` table
   index' v is table
 indexExp table (BasicOp (Reshape newshape v)) _ is
   | Just oldshape <- arrayDims <$> lookupType v table =
@@ -331,7 +350,8 @@ indexExp table (BasicOp (Reshape newshape v)) _ is
             (map pe64 $ newDims newshape)
             is
      in index' v is' table
-indexExp table (BasicOp (Index v slice)) _ is =
+indexExp table (BasicOp (Index v slice)) _ is = do
+  guard $ v `available` table
   index' v (adjust (unSlice slice) is) table
   where
     adjust (DimFix j : js') is' =
@@ -384,6 +404,7 @@ insertEntry name entry vtable =
           { entryConsumed = False,
             entryDepth = loopDepth vtable,
             entryIsSize = False,
+            entryAccInput = Nothing,
             entryType = entry
           }
       dims = mapMaybe subExpVar $ arrayDims $ typeOf entry'
@@ -431,6 +452,16 @@ insertStm stm vtable =
             entry
               { fparamAliases = oneName (patElemName pe) <> fparamAliases entry
               }
+        update' (LParam entry) =
+          LParam
+            entry
+              { lparamAliases = oneName (patElemName pe) <> lparamAliases entry
+              }
+        update' (FreeVar entry) =
+          FreeVar
+            entry
+              { freeVarAliases = oneName (patElemName pe) <> freeVarAliases entry
+              }
         update' e = e
 
 insertStms ::
@@ -476,6 +507,7 @@ insertLParam param = insertEntry name bind
       LParam
         LParamEntry
           { lparamDec = AST.paramDec param,
+            lparamAliases = mempty,
             lparamIndex = const Nothing
           }
     name = AST.paramName param
@@ -520,7 +552,8 @@ insertFreeVar name dec = insertEntry name entry
       FreeVar
         FreeVarEntry
           { freeVarDec = dec,
-            freeVarIndex = \_ _ -> Nothing
+            freeVarIndex = \_ _ -> Nothing,
+            freeVarAliases = mempty
           }
 
 consume :: VName -> SymbolTable rep -> SymbolTable rep
@@ -544,7 +577,8 @@ hideIf hide vtable = vtable {bindings = M.map maybeHide $ bindings vtable}
               FreeVar
                 FreeVarEntry
                   { freeVarDec = entryInfo entry,
-                    freeVarIndex = \_ _ -> Nothing
+                    freeVarIndex = \_ _ -> Nothing,
+                    freeVarAliases = entryAliases $ entryType entry
                   }
           }
       | otherwise = entry
@@ -555,3 +589,21 @@ hideCertified :: Names -> SymbolTable rep -> SymbolTable rep
 hideCertified to_hide = hideIf $ maybe False hide . entryStm
   where
     hide = any (`nameIn` to_hide) . unCerts . stmCerts
+
+-- | Note that these names are tokens for the corresponding
+-- accumulators.  The names must already be present in the symbol
+-- table.
+noteAccTokens ::
+  [(VName, WithAccInput rep)] ->
+  SymbolTable rep ->
+  SymbolTable rep
+noteAccTokens = flip (foldl' f)
+  where
+    f vtable (v, accum) =
+      case M.lookup v $ bindings vtable of
+        Nothing -> vtable
+        Just e ->
+          vtable
+            { bindings =
+                M.insert v (e {entryAccInput = Just accum}) $ bindings vtable
+            }

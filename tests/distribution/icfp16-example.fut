@@ -19,7 +19,7 @@
 --    [276i32, 142i32, 92i32],
 --    [662i32, 1090i32, 1728i32]]
 -- }
--- structure distributed {
+-- structure gpu {
 --   DoLoop/SegMap 1
 --   SegMap 2
 --   SegRed 1

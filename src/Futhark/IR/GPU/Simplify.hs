@@ -47,8 +47,8 @@ simplifyKernelOp ::
     BodyDec rep ~ ()
   ) =>
   Simplify.SimplifyOp rep op ->
-  HostOp rep op ->
-  Engine.SimpleM rep (HostOp (Wise rep) (OpWithWisdom op), Stms (Wise rep))
+  HostOp (Wise rep) op ->
+  Engine.SimpleM rep (HostOp (Wise rep) op, Stms (Wise rep))
 simplifyKernelOp f (OtherOp op) = do
   (op', stms) <- f op
   return (OtherOp op', stms)
@@ -74,6 +74,9 @@ simplifyKernelOp _ (SizeOp (CmpSizeLe key size_class x)) = do
 simplifyKernelOp _ (SizeOp (CalcNumGroups w max_num_groups group_size)) = do
   w' <- Engine.simplify w
   return (SizeOp $ CalcNumGroups w' max_num_groups group_size, mempty)
+
+instance TraverseOpStms (Wise GPU) where
+  traverseOpStms = traverseHostOpStms traverseSOACStms
 
 instance BuilderOps (Wise GPU)
 

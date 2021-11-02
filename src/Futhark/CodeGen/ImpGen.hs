@@ -194,7 +194,7 @@ defaultOperations opc =
       opsAllocCompilers = mempty
     }
 
--- | When an array is dared, this is where it is stored.
+-- | When an array is declared, this is where it is stored.
 data MemLoc = MemLoc
   { memLocName :: VName,
     memLocShape :: [Imp.DimSize],
@@ -499,14 +499,11 @@ compileInParam ::
   ImpM rep r op (Either Imp.Param ArrayDecl)
 compileInParam fparam = case paramDec fparam of
   MemPrim bt ->
-    return $ Left $ Imp.ScalarParam name bt
+    pure $ Left $ Imp.ScalarParam name bt
   MemMem space ->
-    return $ Left $ Imp.MemParam name space
+    pure $ Left $ Imp.MemParam name space
   MemArray bt shape _ (ArrayIn mem ixfun) ->
-    return $
-      Right $
-        ArrayDecl name bt $
-          MemLoc mem (shapeDims shape) $ fmap (fmap Imp.ScalarVar) ixfun
+    pure $ Right $ ArrayDecl name bt $ MemLoc mem (shapeDims shape) ixfun
   MemAcc {} ->
     error "Functions may not have accumulator parameters."
   where
@@ -787,7 +784,7 @@ defCompileExp pat (DoLoop merge form body) = do
     ForLoop i _ bound loopvars -> do
       let setLoopParam (p, a)
             | Prim _ <- paramType p =
-              copyDWIM (paramName p) [] (Var a) [DimFix $ Imp.vi64 i]
+              copyDWIM (paramName p) [] (Var a) [DimFix $ Imp.le64 i]
             | otherwise =
               return ()
 
@@ -901,7 +898,7 @@ defCompileBasicOp (Pat [pe]) (Replicate (Shape ds) se)
   | otherwise = do
     ds' <- mapM toExp ds
     is <- replicateM (length ds) (newVName "i")
-    copy_elem <- collect $ copyDWIM (patElemName pe) (map (DimFix . Imp.vi64) is) se []
+    copy_elem <- collect $ copyDWIM (patElemName pe) (map (DimFix . Imp.le64) is) se []
     emit $ foldl (.) id (zipWith Imp.For is ds') copy_elem
 defCompileBasicOp _ Scratch {} =
   return ()
@@ -1091,7 +1088,7 @@ memBoundToVarEntry e (MemMem space) =
 memBoundToVarEntry e (MemAcc acc ispace ts _) =
   AccVar e (acc, ispace, ts)
 memBoundToVarEntry e (MemArray bt shape _ (ArrayIn mem ixfun)) =
-  let location = MemLoc mem (shapeDims shape) $ fmap (fmap Imp.ScalarVar) ixfun
+  let location = MemLoc mem (shapeDims shape) ixfun
    in ArrayVar
         e
         ArrayEntry
@@ -1134,10 +1131,12 @@ dScope ::
   ImpM rep r op ()
 dScope e = mapM_ (uncurry $ dInfo e) . M.toList
 
-dArray :: VName -> PrimType -> ShapeBase SubExp -> MemBind -> ImpM rep r op ()
-dArray name bt shape membind =
-  addVar name $
-    memBoundToVarEntry Nothing $ MemArray bt shape NoUniqueness membind
+dArray :: VName -> PrimType -> ShapeBase SubExp -> VName -> IxFun -> ImpM rep r op ()
+dArray name pt shape mem ixfun =
+  addVar name $ ArrayVar Nothing $ ArrayEntry location pt
+  where
+    location =
+      MemLoc mem (shapeDims shape) ixfun
 
 everythingVolatile :: ImpM rep r op a -> ImpM rep r op a
 everythingVolatile = local $ \env -> env {envVolatility = Imp.Volatile}
@@ -1207,8 +1206,8 @@ instance ToExp SubExp where
   toExp' t (Var v) = Imp.var v t
 
 instance ToExp (PrimExp VName) where
-  toExp = pure . fmap Imp.ScalarVar
-  toExp' _ = fmap Imp.ScalarVar
+  toExp = pure
+  toExp' _ = id
 
 addVar :: VName -> VarEntry rep -> ImpM rep r op ()
 addVar name entry =
@@ -1489,14 +1488,18 @@ copyElementWise :: CopyCompiler rep r op
 copyElementWise bt dest src = do
   let bounds = IxFun.shape $ memLocIxFun src
   is <- replicateM (length bounds) (newVName "i")
-  let ivars = map Imp.vi64 is
+  let ivars = map Imp.le64 is
   (destmem, destspace, destidx) <- fullyIndexArray' dest ivars
   (srcmem, srcspace, srcidx) <- fullyIndexArray' src ivars
   vol <- asks envVolatility
+  tmp <- newVName "tmp"
   emit $
     foldl (.) id (zipWith Imp.For is $ map untyped bounds) $
-      Imp.Write destmem destidx bt destspace vol $
-        Imp.index srcmem srcidx bt srcspace vol
+      mconcat
+        [ Imp.DeclareScalar tmp vol bt,
+          Imp.Read tmp srcmem srcidx bt srcspace vol,
+          Imp.Write destmem destidx bt destspace vol $ Imp.var tmp bt
+        ]
 
 -- | Copy from here to there; both destination and source may be
 -- indexeded.
@@ -1522,9 +1525,10 @@ copyArrayDWIM
       (srcmem, srcspace, srcoffset) <-
         fullyIndexArray' srclocation srcis
       vol <- asks envVolatility
-      return $
-        Imp.Write targetmem targetoffset bt destspace vol $
-          Imp.index srcmem srcoffset bt srcspace vol
+      collect $ do
+        tmp <- tvVar <$> dPrim "tmp" bt
+        emit $ Imp.Read tmp srcmem srcoffset bt srcspace vol
+        emit $ Imp.Write targetmem targetoffset bt destspace vol $ Imp.var tmp bt
     | otherwise = do
       let destslice' = fullSliceNum (map toInt64Exp destshape) destslice
           srcslice' = fullSliceNum (map toInt64Exp srcshape) srcslice
@@ -1609,7 +1613,7 @@ copyDWIMDest dest dest_slice (Var src) src_slice = do
         (mem, space, i) <-
           fullyIndexArray' (entryArrayLoc arr) src_is
         vol <- asks envVolatility
-        emit $ Imp.SetScalar name $ Imp.index mem i bt space vol
+        emit $ Imp.Read name mem i bt space vol
       | otherwise ->
         error $
           unwords
@@ -1778,18 +1782,17 @@ sAlloc name size space = do
   sAlloc_ name' size space
   return name'
 
-sArray :: String -> PrimType -> ShapeBase SubExp -> MemBind -> ImpM rep r op VName
-sArray name bt shape membind = do
+sArray :: String -> PrimType -> ShapeBase SubExp -> VName -> IxFun -> ImpM rep r op VName
+sArray name bt shape mem ixfun = do
   name' <- newVName name
-  dArray name' bt shape membind
+  dArray name' bt shape mem ixfun
   return name'
 
 -- | Declare an array in row-major order in the given memory block.
 sArrayInMem :: String -> PrimType -> ShapeBase SubExp -> VName -> ImpM rep r op VName
 sArrayInMem name pt shape mem =
-  sArray name pt shape $
-    ArrayIn mem $
-      IxFun.iota $ map (isInt64 . primExpFromSubExp int64) $ shapeDims shape
+  sArray name pt shape mem $
+    IxFun.iota $ map (isInt64 . primExpFromSubExp int64) $ shapeDims shape
 
 -- | Like 'sAllocArray', but permute the in-memory representation of the indices as specified.
 sAllocArrayPerm :: String -> PrimType -> ShapeBase SubExp -> Space -> [Int] -> ImpM rep r op VName
@@ -1797,8 +1800,8 @@ sAllocArrayPerm name pt shape space perm = do
   let permuted_dims = rearrangeShape perm $ shapeDims shape
   mem <- sAlloc (name ++ "_mem") (typeSize (Array pt shape NoUniqueness)) space
   let iota_ixfun = IxFun.iota $ map (isInt64 . primExpFromSubExp int64) permuted_dims
-  sArray name pt shape $
-    ArrayIn mem $ IxFun.permute iota_ixfun $ rearrangeInverse perm
+  sArray name pt shape mem $
+    IxFun.permute iota_ixfun $ rearrangeInverse perm
 
 -- | Uses linear/iota index function.
 sAllocArray :: String -> PrimType -> ShapeBase SubExp -> Space -> ImpM rep r op VName
@@ -1815,7 +1818,7 @@ sStaticArray name space pt vs = do
   mem <- newVNameForFun $ name ++ "_mem"
   emit $ Imp.DeclareArray mem space pt vs
   addVar mem $ MemVar Nothing $ MemEntry space
-  sArray name pt shape $ ArrayIn mem $ IxFun.iota [fromIntegral num_elems]
+  sArray name pt shape mem $ IxFun.iota [fromIntegral num_elems]
 
 sWrite :: VName -> [Imp.TExp Int64] -> Imp.Exp -> ImpM rep r op ()
 sWrite arr is v = do
@@ -1891,7 +1894,7 @@ dIndexSpace vs_ds j = do
   where
     loop ((v, size) : rest) i = do
       dPrimV_ v (i `quot` size)
-      i' <- dPrimVE "remnant" $ i - Imp.vi64 v * size
+      i' <- dPrimVE "remnant" $ i - Imp.le64 v * size
       loop rest i'
     loop _ _ = pure ()
 
@@ -1905,4 +1908,4 @@ dIndexSpace' ::
 dIndexSpace' desc ds j = do
   ivs <- replicateM (length ds) (newVName desc)
   dIndexSpace (zip ivs ds) j
-  pure $ map Imp.vi64 ivs
+  pure $ map Imp.le64 ivs

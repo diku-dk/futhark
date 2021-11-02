@@ -94,10 +94,15 @@ getIterationDomain _ space = do
 -- When the SegRed's return value is a scalar
 -- we perform a call by value-result in the segop function
 getReturnParams :: Pat MCMem -> SegOp () MCMem -> MulticoreGen [Imp.Param]
-getReturnParams pat SegRed {} = do
-  let retvals = map patElemName $ patElems pat
-  retvals_ts <- mapM lookupType retvals
-  concat <$> zipWithM toParam retvals retvals_ts
+getReturnParams pat SegRed {} =
+  -- It's a good idea to make sure any prim values are initialised, as
+  -- we will load them (redundantly) in the task code, and
+  -- uninitialised values are UB.
+  fmap concat . forM (patElems pat) $ \pe -> do
+    case patElemType pe of
+      Prim pt -> patElemName pe <~~ ValueExp (blankPrimValue pt)
+      _ -> pure ()
+    toParam (patElemName pe) (patElemType pe)
 getReturnParams _ _ = return mempty
 
 renameSegBinOp :: [SegBinOp MCMem] -> MulticoreGen [SegBinOp MCMem]
@@ -112,7 +117,7 @@ compileThreadResult ::
   KernelResult ->
   MulticoreGen ()
 compileThreadResult space pe (Returns _ _ what) = do
-  let is = map (Imp.vi64 . fst) $ unSegSpace space
+  let is = map (Imp.le64 . fst) $ unSegSpace space
   copyDWIMFix (patElemName pe) is what []
 compileThreadResult _ _ ConcatReturns {} =
   compilerBugS "compileThreadResult: ConcatReturn unhandled."
@@ -371,50 +376,50 @@ atomicUpdateCAS ::
   MulticoreGen () ->
   MulticoreGen ()
 atomicUpdateCAS t arr old bucket x do_op = do
-  -- Code generation target:
-  --
-  -- old = d_his[idx];
-  -- do {
-  --   assumed = old;
-  --   x = do_op(assumed, y);
-  --   old = atomicCAS(&d_his[idx], assumed, tmp);
-  -- } while(assumed != old);
   run_loop <- dPrimV "run_loop" (0 :: Imp.TExp Int32)
-  everythingVolatile $ copyDWIMFix old [] (Var arr) bucket
   (arr', _a_space, bucket_offset) <- fullyIndexArray arr bucket
 
   bytes <- toIntegral $ primBitSize t
-  (to, from) <- getBitConvertFunc $ primBitSize t
-  -- While-loop: Try to insert your value
-  let (toBits, _fromBits) =
+  let (toBits, fromBits) =
         case t of
-          FloatType _ ->
-            ( \v -> Imp.FunExp to [v] bytes,
-              \v -> Imp.FunExp from [v] t
+          FloatType Float16 ->
+            ( \v -> Imp.FunExp "to_bits16" [v] int16,
+              \v -> Imp.FunExp "from_bits16" [v] t
+            )
+          FloatType Float32 ->
+            ( \v -> Imp.FunExp "to_bits32" [v] int32,
+              \v -> Imp.FunExp "from_bits32" [v] t
+            )
+          FloatType Float64 ->
+            ( \v -> Imp.FunExp "to_bits64" [v] int64,
+              \v -> Imp.FunExp "from_bits64" [v] t
             )
           _ -> (id, id)
 
+      int
+        | primBitSize t == 16 = int16
+        | primBitSize t == 32 = int32
+        | otherwise = int64
+
+  everythingVolatile $ copyDWIMFix old [] (Var arr) bucket
+
+  old_bits_v <- tvVar <$> dPrim "old_bits" int
+  old_bits_v <~~ toBits (Imp.var old t)
+  let old_bits = Imp.var old_bits_v int
+
+  -- While-loop: Try to insert your value
   sWhile (tvExp run_loop .==. 0) $ do
     x <~~ Imp.var old t
     do_op -- Writes result into x
-    sOp $
-      Imp.Atomic $
-        Imp.AtomicCmpXchg
-          bytes
-          old
-          arr'
-          (sExt32 <$> bucket_offset)
-          (tvVar run_loop)
-          (toBits (Imp.var x t))
-
--- TODO for supporting 8 and 16 bits (and 128)
--- we need a functions for converting to and from bits
-getBitConvertFunc :: Int -> MulticoreGen (String, String)
--- getBitConvertFunc 8 = return $ ("to_bits8, from_bits8")
--- getBitConvertFunc 16 = return $ ("to_bits8, from_bits8")
-getBitConvertFunc 32 = return ("to_bits32", "from_bits32")
-getBitConvertFunc 64 = return ("to_bits64", "from_bits64")
-getBitConvertFunc b = error $ "number of bytes is not supported " ++ pretty b
+    sOp . Imp.Atomic $
+      Imp.AtomicCmpXchg
+        bytes
+        old_bits_v
+        arr'
+        (sExt32 <$> bucket_offset)
+        (tvVar run_loop)
+        (toBits (Imp.var x t))
+    old <~~ fromBits old_bits
 
 supportedPrims :: Int -> Bool
 supportedPrims 8 = True

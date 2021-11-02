@@ -62,6 +62,7 @@ module Futhark.IR.Mem
     RetTypeMem,
     BranchTypeMem,
     MemOp (..),
+    traverseMemOpStms,
     MemInfo (..),
     MemBound,
     MemBind (..),
@@ -182,6 +183,14 @@ data MemOp inner
   | Inner inner
   deriving (Eq, Ord, Show)
 
+-- | A helper for defining 'TraverseOpStms'.
+traverseMemOpStms ::
+  Monad m =>
+  OpStmsTraverser m inner rep ->
+  OpStmsTraverser m (MemOp inner) rep
+traverseMemOpStms _ _ op@Alloc {} = pure op
+traverseMemOpStms onInner f (Inner inner) = Inner <$> onInner f inner
+
 instance FreeIn inner => FreeIn (MemOp inner) where
   freeIn' (Alloc size _) = freeIn' size
   freeIn' (Inner k) = freeIn' k
@@ -233,6 +242,8 @@ instance CanBeWise inner => CanBeWise (MemOp inner) where
   type OpWithWisdom (MemOp inner) = MemOp (OpWithWisdom inner)
   removeOpWisdom (Alloc size space) = Alloc size space
   removeOpWisdom (Inner k) = Inner $ removeOpWisdom k
+  addOpWisdom (Alloc size space) = Alloc size space
+  addOpWisdom (Inner k) = Inner $ addOpWisdom k
 
 instance ST.IndexOp inner => ST.IndexOp (MemOp inner) where
   indexOp vtable k (Inner op) is = ST.indexOp vtable k op is
