@@ -136,9 +136,9 @@ instance Pretty Kernel where
         )
 
 -- | When we do a barrier or fence, is it at the local or global
--- level?
+-- level?  By the 'Ord' instance, global is greater than local.
 data Fence = FenceLocal | FenceGlobal
-  deriving (Show)
+  deriving (Show, Eq, Ord)
 
 -- | An operation that occurs within a kernel body.
 data KernelOp
