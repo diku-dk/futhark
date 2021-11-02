@@ -48,7 +48,6 @@ import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as M
 import Data.Maybe (fromMaybe, isJust)
-import Debug.Trace
 import qualified Futhark.Analysis.AlgSimplify2 as AlgSimplify2
 --import Futhark.Analysis.PrimExp
 --  ( IntExp,
@@ -78,6 +77,8 @@ import Futhark.Transform.Substitute
 import Futhark.Util.IntegralExp
 import Futhark.Util.Pretty
 import Prelude hiding (gcd, id, mod, (.))
+
+trace s a = a
 
 traceWith s a = trace (s <> ": " <> pretty a) a
 
@@ -1169,15 +1170,29 @@ gcd x y = gcd' (abs x) (abs y)
 disjoint :: UsageTable -> LMAD (TPrimExp Int64 VName) -> LMAD (TPrimExp Int64 VName) -> Bool
 disjoint ut l1@(LMAD offset1 [dim1]) l2@(LMAD offset2 [dim2]) =
   doesNotDivide (gcd (ldStride dim1) (ldStride dim2)) (offset1 - offset2)
-    || (traceWith "result?" $ nonNegativeish ut $ traceWith ("l1: " <> pretty l1 <> "\nl2: " <> pretty l2 <> "\ndisjoint1") $ AlgSimplify2.simplify0 $ untyped $ offset1 - (offset2 + (ldShape dim2 - 1) * ldStride dim2))
-    || (traceWith "result?" $ nonNegativeish ut $ traceWith "disjoint2" $ AlgSimplify2.simplify0 $ untyped $ offset2 - (offset1 + (ldShape dim1 - 1) * ldStride dim1))
+    || ( traceWith "result?" $
+           nonNegativeish ut $
+             traceWith ("l1: " <> pretty l1 <> "\nl2: " <> pretty l2 <> "\ndisjoint1") $
+               AlgSimplify2.simplify0 $
+                 traceWith "before simplify" $
+                   untyped $
+                     offset1 - (offset2 + (ldShape dim2 - 1) * ldStride dim2)
+       )
+    || ( traceWith "result?" $
+           nonNegativeish ut $
+             traceWith "disjoint2" $
+               AlgSimplify2.simplify0 $
+                 traceWith "before simplify" $
+                   untyped $
+                     offset2 - (offset1 + (ldShape dim1 - 1) * ldStride dim1)
+       )
   where
     doesNotDivide :: Maybe (TPrimExp Int64 VName) -> TPrimExp Int64 VName -> Bool
     doesNotDivide (Just x) y = maybe False not $ primBool $ (TPrimExp $ constFoldPrimExp $ untyped $ Futhark.Util.IntegralExp.mod y x :: TPrimExp Int64 VName) .==. 0
     doesNotDivide _ _ = False
 disjoint ut lmad1 lmad2 =
   case (conservativeFlatten lmad1, conservativeFlatten lmad2) of
-    (Just lmad1', Just lmad2') -> disjoint ut lmad1' lmad2'
+    (Just lmad1', Just lmad2') -> disjoint ut (traceWith "flattened 1" lmad1') (traceWith "flattened 2" lmad2')
     _ -> False
 
 nonNegativeish :: UsageTable -> AlgSimplify2.SofP -> Bool

@@ -19,7 +19,6 @@ import qualified Data.Map.Strict as M
 import Data.Maybe
 import Data.Sequence (Seq (..))
 import qualified Data.Set as S
-import Debug.Trace
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.Analysis.UsageTable
 import Futhark.IR.Aliases
@@ -31,6 +30,8 @@ import Futhark.Optimise.ArrayShortCircuiting.DataStructs
 import Futhark.Optimise.ArrayShortCircuiting.LastUse
 import Futhark.Optimise.ArrayShortCircuiting.MemRefAggreg
 import Futhark.Optimise.ArrayShortCircuiting.TopDownAn
+
+trace s a = a
 
 traceWith s a = trace (s <> ": " <> pretty a) a
 

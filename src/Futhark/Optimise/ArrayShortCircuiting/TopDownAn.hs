@@ -18,7 +18,6 @@ module Futhark.Optimise.ArrayShortCircuiting.TopDownAn
 where
 
 import qualified Data.Map.Strict as M
-import Debug.Trace
 import Futhark.Analysis.PrimExp.Convert
 --import qualified Futhark.IR.Mem.IxFun as IxFun
 import Futhark.Analysis.UsageTable
@@ -27,6 +26,8 @@ import Futhark.IR.GPUMem
 import qualified Futhark.IR.Mem.IxFun as IxFun
 import Futhark.IR.SeqMem
 import Futhark.Optimise.ArrayShortCircuiting.DataStructs
+
+trace s a = a
 
 traceWith' s a = trace (s <> ": " <> show a) a
 

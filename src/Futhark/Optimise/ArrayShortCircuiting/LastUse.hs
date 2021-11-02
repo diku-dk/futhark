@@ -22,12 +22,13 @@ import Control.Monad.State.Strict
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import Data.Sequence (Seq (..))
-import Debug.Trace
 import Futhark.IR.Aliases
 import Futhark.IR.GPUMem
 import Futhark.IR.SeqMem
 import Futhark.Optimise.ArrayShortCircuiting.DataStructs
 import Prelude
+
+trace s a = a
 
 traceWith s a = trace (s <> ": " <> pretty a) a
 
