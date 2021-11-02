@@ -668,7 +668,7 @@ inKernelOperations mode body =
         pendingError False
         GC.stm [C.cstm|$id:label: barrier($exp:(fence f));|]
         GC.stm [C.cstm|if (local_failure) { return; }|]
-      GC.stm [C.cstm|barrier(CLK_LOCAL_MEM_FENCE);|] -- intentional
+      GC.stm [C.cstm|barrier($exp:(fence f));|]
       GC.modifyUserState $ \s -> s {kernelHasBarriers = True}
       incErrorLabel
     kernelOps (Atomic space aop) = atomicOps space aop

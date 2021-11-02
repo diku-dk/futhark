@@ -36,7 +36,7 @@ module Futhark.CodeGen.ImpGen.GPU.Base
 where
 
 import Control.Monad.Except
-import Data.List (zip4)
+import Data.List (foldl', zip4)
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import qualified Data.Set as S
@@ -370,6 +370,21 @@ whenActive lvl space m
       then m
       else sWhen (isActive $ unSegSpace space) m
 
+-- Which fence do we need to protect shared access to this memory space?
+fenceForSpace :: Space -> Imp.Fence
+fenceForSpace (Space "local") = Imp.FenceLocal
+fenceForSpace _ = Imp.FenceGlobal
+
+-- If we are touching these arrays, which kind of fence do we need?
+fenceForArrays :: [VName] -> InKernelGen Imp.Fence
+fenceForArrays = fmap (foldl' max Imp.FenceLocal) . mapM need
+  where
+    need arr =
+      fmap (fenceForSpace . entryMemSpace) . lookupMemory
+        . memLocName
+        . entryArrayLoc
+        =<< lookupArray arr
+
 compileGroupOp :: OpCompiler GPUMem KernelEnv Imp.KernelOp
 compileGroupOp pat (Alloc size space) =
   kernelAlloc pat size space
@@ -399,7 +414,8 @@ compileGroupOp pat (Inner (SegOp (SegScan lvl space scans _ body))) = do
           (kernelResultSubExp res)
           []
 
-  sOp $ Imp.ErrorSync Imp.FenceLocal
+  fence <- fenceForArrays $ patNames pat
+  sOp $ Imp.ErrorSync fence
 
   let segment_size = last dims'
       crossesSegment from to =
@@ -407,11 +423,10 @@ compileGroupOp pat (Inner (SegOp (SegScan lvl space scans _ body))) = do
 
   -- groupScan needs to treat the scan output as a one-dimensional
   -- array of scan elements, so we invent some new flattened arrays
-  -- here.  XXX: this assumes that the original index function is just
-  -- row-major, but does not actually verify it.
+  -- here.
   dims_flat <- dPrimV "dims_flat" $ product dims'
   let flattened pe = do
-        MemLoc mem _ _ <-
+        MemLoc mem _ ixfun <-
           entryArrayLoc <$> lookupArray (patElemName pe)
         let pe_t = typeOf pe
             arr_dims = Var (tvVar dims_flat) : drop (length dims') (arrayDims pe_t)
@@ -420,7 +435,7 @@ compileGroupOp pat (Inner (SegOp (SegScan lvl space scans _ body))) = do
           (elemType pe_t)
           (Shape arr_dims)
           mem
-          $ IxFun.iota $ map pe64 arr_dims
+          $ IxFun.reshape ixfun $ map (DimNew . pe64) arr_dims
 
       num_scan_results = sum $ map (length . segBinOpNeutral) scans
 
@@ -701,9 +716,7 @@ atomicUpdateLocking _ op = AtomicLocking $ \locking space arrs bucket -> do
           sComment "update global result" $
             zipWithM_ (writeArray bucket) arrs $ map (Var . paramName) acc_params
 
-      fence = case space of
-        Space "local" -> sOp $ Imp.MemFence Imp.FenceLocal
-        _ -> sOp $ Imp.MemFence Imp.FenceGlobal
+      fence = sOp $ Imp.MemFence $ fenceForSpace space
 
   -- While-loop: Try to insert your value
   sWhile (tvExp continue) $ do
@@ -1053,6 +1066,8 @@ groupScan seg_flag arrs_full_size w lam arrs = do
 
   ltid_in_bounds <- dPrimVE "ltid_in_bounds" $ ltid .<. w
 
+  fence <- fenceForArrays arrs
+
   -- The scan works by splitting the group into blocks, which are
   -- scanned separately.  Typically, these blocks are smaller than
   -- the lockstep width, which enables barrier-free execution inside
@@ -1082,7 +1097,7 @@ groupScan seg_flag arrs_full_size w lam arrs = do
         | array_scan =
           sOp $ Imp.Barrier Imp.FenceGlobal
         | otherwise =
-          sOp $ Imp.Barrier Imp.FenceLocal
+          sOp $ Imp.Barrier fence
 
       group_offset = sExt64 (kernelGroupId constants) * kernelGroupSize constants
 
