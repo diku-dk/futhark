@@ -410,7 +410,7 @@ compileGroupOp pat (Inner (SegOp (SegScan lvl space scans _ body))) = do
       forM_ (zip (patNames pat) $ kernelBodyResult body) $ \(dest, res) ->
         copyDWIMFix
           dest
-          (map Imp.vi64 ltids)
+          (map Imp.le64 ltids)
           (kernelResultSubExp res)
           []
 
@@ -464,7 +464,7 @@ compileGroupOp pat (Inner (SegOp (SegRed lvl space ops _ body))) = do
       let (red_res, map_res) =
             splitAt (segBinOpResults ops) $ kernelBodyResult body
       forM_ (zip tmp_arrs red_res) $ \(dest, res) ->
-        copyDWIMFix dest (map Imp.vi64 ltids) (kernelResultSubExp res) []
+        copyDWIMFix dest (map Imp.le64 ltids) (kernelResultSubExp res) []
       zipWithM_ (compileThreadResult space) map_pes map_res
 
   sOp $ Imp.ErrorSync Imp.FenceLocal
@@ -550,7 +550,7 @@ compileGroupOp pat (Inner (SegOp (SegHist lvl space ops _ kbody))) = do
           let bin' = toInt64Exp bin
               dest_w' = toInt64Exp dest_w
               bin_in_bounds = 0 .<=. bin' .&&. bin' .<. dest_w'
-              bin_is = map Imp.vi64 (init ltids) ++ [bin']
+              bin_is = map Imp.le64 (init ltids) ++ [bin']
               vs_params = takeLast (length op_vs) $ lambdaParams lam
 
           sComment "perform atomic updates" $
@@ -897,16 +897,16 @@ kernelInitialisationSimple (Count num_groups) (Count group_size) = do
   inner_group_size <- newVName "group_size"
   let constants =
         KernelConstants
-          (Imp.vi32 global_tid)
-          (Imp.vi32 local_tid)
-          (Imp.vi32 group_id)
+          (Imp.le32 global_tid)
+          (Imp.le32 local_tid)
+          (Imp.le32 group_id)
           global_tid
           local_tid
           group_id
           num_groups
           group_size
           (sExt32 (group_size * num_groups))
-          (Imp.vi32 wave_size)
+          (Imp.le32 wave_size)
           true
           mempty
 
@@ -932,7 +932,7 @@ isActive limit = case actives of
   where
     (is, ws) = unzip limit
     actives = zipWith active is $ map toInt64Exp ws
-    active i = (Imp.vi64 i .<.)
+    active i = (Imp.le64 i .<.)
 
 -- | Change every memory block to be in the global address space,
 -- except those who are in the local memory space.  This only affects
@@ -1323,9 +1323,9 @@ simpleKernelConstants kernel_size desc = do
 
   return
     ( KernelConstants
-        (Imp.vi32 thread_gtid)
-        (Imp.vi32 thread_ltid)
-        (Imp.vi32 group_id)
+        (Imp.le32 thread_gtid)
+        (Imp.le32 thread_ltid)
+        (Imp.le32 group_id)
         thread_gtid
         thread_ltid
         group_id
@@ -1333,7 +1333,7 @@ simpleKernelConstants kernel_size desc = do
         group_size
         (sExt32 (group_size * num_groups))
         0
-        (Imp.vi64 thread_gtid .<. kernel_size)
+        (Imp.le64 thread_gtid .<. kernel_size)
         mempty,
       set_constants
     )
@@ -1368,7 +1368,7 @@ virtualiseGroups SegVirt required_groups m = do
     sOp $ Imp.Barrier Imp.FenceGlobal
 virtualiseGroups _ _ m = do
   gid <- kernelGroupIdVar . kernelConstants <$> askEnv
-  m $ Imp.vi32 gid
+  m $ Imp.le32 gid
 
 sKernelThread ::
   String ->
@@ -1610,7 +1610,7 @@ iotaForType bt = do
             Imp.ScalarParam s $ IntType bt
           ]
         shape = Shape [Var n]
-        n' = Imp.vi64 n
+        n' = Imp.le64 n
         x' = Imp.var x $ IntType bt
         s' = Imp.var s $ IntType bt
 
@@ -1699,7 +1699,7 @@ compileGroupResult _ pe (TileReturns _ [(w, per_group_elems)] what) = do
 compileGroupResult space pe (TileReturns _ dims what) = do
   let gids = map fst $ unSegSpace space
       out_tile_sizes = map (toInt64Exp . snd) dims
-      group_is = zipWith (*) (map Imp.vi64 gids) out_tile_sizes
+      group_is = zipWith (*) (map Imp.le64 gids) out_tile_sizes
   local_is <- localThreadIDs $ map snd dims
   is_for_thread <-
     mapM (dPrimV "thread_out_index") $
@@ -1717,7 +1717,7 @@ compileGroupResult space pe (RegTileReturns _ dims_n_tiles what) = do
       reg_tiles' = map toInt64Exp reg_tiles
 
   -- Which group tile is this group responsible for?
-  let group_tile_is = map Imp.vi64 gids
+  let group_tile_is = map Imp.le64 gids
 
   -- Within the group tile, which register tile is this thread
   -- responsible for?
@@ -1747,7 +1747,7 @@ compileGroupResult space pe (RegTileReturns _ dims_n_tiles what) = do
 compileGroupResult space pe (Returns _ _ what) = do
   constants <- kernelConstants <$> askEnv
   in_local_memory <- arrayInLocalMemory what
-  let gids = map (Imp.vi64 . fst) $ unSegSpace space
+  let gids = map (Imp.le64 . fst) $ unSegSpace space
 
   if not in_local_memory
     then
@@ -1772,7 +1772,7 @@ compileThreadResult ::
 compileThreadResult _ _ RegTileReturns {} =
   compilerLimitationS "compileThreadResult: RegTileReturns not yet handled."
 compileThreadResult space pe (Returns _ _ what) = do
-  let is = map (Imp.vi64 . fst) $ unSegSpace space
+  let is = map (Imp.le64 . fst) $ unSegSpace space
   copyDWIMFix (patElemName pe) is what []
 compileThreadResult _ pe (ConcatReturns _ SplitContiguous _ per_thread_elems what) = do
   constants <- kernelConstants <$> askEnv

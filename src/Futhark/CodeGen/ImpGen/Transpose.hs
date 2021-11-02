@@ -46,9 +46,9 @@ mapTransposeFunction fname pt =
     []
     params
     ( mconcat
-        [ dec r $ vi64 re - vi64 rb,
-          dec c $ vi64 ce - vi64 cb,
-          If (vi64 num_arrays .==. 1) doTranspose doMapTranspose
+        [ dec r $ le64 re - le64 rb,
+          dec c $ le64 ce - le64 cb,
+          If (le64 num_arrays .==. 1) doTranspose doMapTranspose
         ]
     )
     []
@@ -112,22 +112,22 @@ mapTransposeFunction fname pt =
     dec v e = DeclareScalar v Nonvolatile int32 <> SetScalar v (untyped e)
 
     naiveTranspose =
-      For j (untyped $ vi64 c) $
-        For i (untyped $ vi64 r) $
-          let i' = vi64 i + vi64 rb
-              j' = vi64 j + vi64 cb
+      For j (untyped $ le64 c) $
+        For i (untyped $ le64 r) $
+          let i' = le64 i + le64 rb
+              j' = le64 j + le64 cb
            in mconcat
                 [ DeclareScalar val Nonvolatile pt,
                   Read
                     val
                     srcmem
-                    (elements $ vi64 srcoffset + i' * vi64 m + j')
+                    (elements $ le64 srcoffset + i' * le64 m + j')
                     pt
                     DefaultSpace
                     Nonvolatile,
                   Write
                     destmem
-                    (elements $ vi64 destoffset + j' * vi64 n + i')
+                    (elements $ le64 destoffset + j' * le64 n + i')
                     pt
                     DefaultSpace
                     Nonvolatile
@@ -136,12 +136,12 @@ mapTransposeFunction fname pt =
 
     recArgs (cb', ce', rb', re') =
       [ MemArg destmem,
-        ExpArg $ untyped $ vi64 destoffset,
+        ExpArg $ untyped $ le64 destoffset,
         MemArg srcmem,
-        ExpArg $ untyped $ vi64 srcoffset,
-        ExpArg $ untyped $ vi64 num_arrays,
-        ExpArg $ untyped $ vi64 m,
-        ExpArg $ untyped $ vi64 n,
+        ExpArg $ untyped $ le64 srcoffset,
+        ExpArg $ untyped $ le64 num_arrays,
+        ExpArg $ untyped $ le64 m,
+        ExpArg $ untyped $ le64 n,
         ExpArg $ untyped cb',
         ExpArg $ untyped ce',
         ExpArg $ untyped rb',
@@ -152,28 +152,28 @@ mapTransposeFunction fname pt =
     doTranspose =
       mconcat
         [ If
-            (vi64 r .<=. cutoff .&&. vi64 c .<=. cutoff)
+            (le64 r .<=. cutoff .&&. le64 c .<=. cutoff)
             naiveTranspose
             $ If
-              (vi64 r .>=. vi64 c)
+              (le64 r .>=. le64 c)
               ( Call
                   []
                   fname
                   ( recArgs
-                      ( vi64 cb,
-                        vi64 ce,
-                        vi64 rb,
-                        vi64 rb + (vi64 r `quot` 2)
+                      ( le64 cb,
+                        le64 ce,
+                        le64 rb,
+                        le64 rb + (le64 r `quot` 2)
                       )
                   )
                   <> Call
                     []
                     fname
                     ( recArgs
-                        ( vi64 cb,
-                          vi64 ce,
-                          vi64 rb + vi64 r `quot` 2,
-                          vi64 re
+                        ( le64 cb,
+                          le64 ce,
+                          le64 rb + le64 r `quot` 2,
+                          le64 re
                         )
                     )
               )
@@ -181,20 +181,20 @@ mapTransposeFunction fname pt =
                   []
                   fname
                   ( recArgs
-                      ( vi64 cb,
-                        vi64 cb + (vi64 c `quot` 2),
-                        vi64 rb,
-                        vi64 re
+                      ( le64 cb,
+                        le64 cb + (le64 c `quot` 2),
+                        le64 rb,
+                        le64 re
                       )
                   )
                   <> Call
                     []
                     fname
                     ( recArgs
-                        ( vi64 cb + vi64 c `quot` 2,
-                          vi64 ce,
-                          vi64 rb,
-                          vi64 re
+                        ( le64 cb + le64 c `quot` 2,
+                          le64 ce,
+                          le64 rb,
+                          le64 re
                         )
                     )
               )
@@ -203,19 +203,19 @@ mapTransposeFunction fname pt =
     doMapTranspose =
       -- In the map-transpose case, we assume that cb==rb==0, ce==m,
       -- re==n.
-      For i (untyped $ vi64 num_arrays) $
+      For i (untyped $ le64 num_arrays) $
         Call
           []
           fname
           [ MemArg destmem,
-            ExpArg $ untyped $ vi64 destoffset + vi64 i * vi64 m * vi64 n,
+            ExpArg $ untyped $ le64 destoffset + le64 i * le64 m * le64 n,
             MemArg srcmem,
-            ExpArg $ untyped $ vi64 srcoffset + vi64 i * vi64 m * vi64 n,
+            ExpArg $ untyped $ le64 srcoffset + le64 i * le64 m * le64 n,
             ExpArg $ untyped (1 :: TExp Int64),
-            ExpArg $ untyped $ vi64 m,
-            ExpArg $ untyped $ vi64 n,
-            ExpArg $ untyped $ vi64 cb,
-            ExpArg $ untyped $ vi64 ce,
-            ExpArg $ untyped $ vi64 rb,
-            ExpArg $ untyped $ vi64 re
+            ExpArg $ untyped $ le64 m,
+            ExpArg $ untyped $ le64 n,
+            ExpArg $ untyped $ le64 cb,
+            ExpArg $ untyped $ le64 ce,
+            ExpArg $ untyped $ le64 rb,
+            ExpArg $ untyped $ le64 re
           ]

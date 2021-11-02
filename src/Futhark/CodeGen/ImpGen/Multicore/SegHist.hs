@@ -122,11 +122,11 @@ atomicHistogram pat flat_idx space histops kbody = do
 
           sComment "save map-out results" $
             forM_ (zip map_pes map_res) $ \(pe, res) ->
-              copyDWIMFix (patElemName pe) (map Imp.vi64 is) (kernelResultSubExp res) []
+              copyDWIMFix (patElemName pe) (map Imp.le64 is) (kernelResultSubExp res) []
 
           sComment "perform updates" $
             sWhen bucket_in_bounds $ do
-              let bucket_is = map Imp.vi64 (init is) ++ [bucket']
+              let bucket_is = map Imp.le64 (init is) ++ [bucket']
               dLParams $ lambdaParams lam
               sLoopNest shape $ \is' -> do
                 forM_ (zip vs_params vs') $ \(p, res) ->
@@ -186,7 +186,7 @@ subHistogram pat flat_idx space histops num_histos kbody = do
       let shape = Shape [tvSize num_histos] <> arrayShape t
       sAllocArray "subhistogram" (elemType t) shape DefaultSpace
 
-  let tid' = Imp.vi64 $ segFlat space
+  let tid' = Imp.le64 $ segFlat space
       flat_idx' = tvExp flat_idx
 
   (local_subhistograms, prebody) <- collect' $ do
@@ -221,7 +221,7 @@ subHistogram pat flat_idx space histops num_histos kbody = do
         forM_ (zip map_pes map_res) $ \(pe, res) ->
           copyDWIMFix
             (patElemName pe)
-            (map Imp.vi64 is)
+            (map Imp.le64 is)
             (kernelResultSubExp res)
             []
 
@@ -274,7 +274,7 @@ subHistogram pat flat_idx space histops num_histos kbody = do
       red_cont $
         flip map hists $ \subhisto ->
           ( Var subhisto,
-            map Imp.vi64 $
+            map Imp.le64 $
               map fst segment_dims ++ [subhistogram_id, bucket_id]
           )
 
@@ -343,7 +343,7 @@ compileSegHistBody idx pat space histops kbody = do
 
             sComment "save map-out results" $
               forM_ (zip map_pes map_res) $ \(pe, res) ->
-                copyDWIMFix (patElemName pe) (map Imp.vi64 is) res []
+                copyDWIMFix (patElemName pe) (map Imp.le64 is) res []
 
             sComment "perform updates" $
               sWhen bucket_in_bounds $ do
@@ -352,10 +352,10 @@ compileSegHistBody idx pat space histops kbody = do
                   -- Index
                   let buck = toInt64Exp bucket
                   forM_ (zip red_pes is_params) $ \(pe, p) ->
-                    copyDWIMFix (paramName p) [] (Var $ patElemName pe) (map Imp.vi64 (init is) ++ [buck] ++ vec_is)
+                    copyDWIMFix (paramName p) [] (Var $ patElemName pe) (map Imp.le64 (init is) ++ [buck] ++ vec_is)
                   -- Value at index
                   forM_ (zip vs_params vs') $ \(p, v) ->
                     copyDWIMFix (paramName p) [] v vec_is
                   compileStms mempty (bodyStms $ lambdaBody lam) $
                     forM_ (zip red_pes $ map resSubExp $ bodyResult $ lambdaBody lam) $
-                      \(pe, se) -> copyDWIMFix (patElemName pe) (map Imp.vi64 (init is) ++ [buck] ++ vec_is) se []
+                      \(pe, se) -> copyDWIMFix (patElemName pe) (map Imp.le64 (init is) ++ [buck] ++ vec_is) se []

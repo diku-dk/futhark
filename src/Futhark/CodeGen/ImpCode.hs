@@ -32,8 +32,6 @@ module Futhark.CodeGen.ImpCode
     Volatility (..),
     Arg (..),
     var,
-    vi32,
-    vi64,
     ErrorMsg (..),
     ErrorMsgPart (..),
     errorMsgArgTypes,
@@ -54,6 +52,7 @@ module Futhark.CodeGen.ImpCode
     module Language.Futhark.Core,
     module Futhark.IR.Primitive,
     module Futhark.Analysis.PrimExp,
+    module Futhark.Analysis.PrimExp.Convert,
     module Futhark.IR.GPU.Sizes,
     module Futhark.IR.Prop.Names,
   )
@@ -64,6 +63,7 @@ import qualified Data.Map as M
 import qualified Data.Set as S
 import Data.Traversable
 import Futhark.Analysis.PrimExp
+import Futhark.Analysis.PrimExp.Convert
 import Futhark.IR.GPU.Sizes (Count (..))
 import Futhark.IR.Pretty ()
 import Futhark.IR.Primitive
@@ -375,14 +375,6 @@ withElemType (Count e) t = bytes $ sExt64 e * primByteSize t
 -- | Turn a 'VName' into a 'Exp'.
 var :: VName -> PrimType -> Exp
 var = LeafExp
-
--- | Turn a 'VName' into a v'Int32' 'Exp'.
-vi32 :: VName -> TExp Int32
-vi32 = TPrimExp . flip var (IntType Int32)
-
--- | Turn a 'VName' into a v'Int64' 'Exp'.
-vi64 :: VName -> TExp Int64
-vi64 = TPrimExp . flip var (IntType Int64)
 
 -- Prettyprinting definitions.
 
