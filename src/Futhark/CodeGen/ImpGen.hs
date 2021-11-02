@@ -499,14 +499,11 @@ compileInParam ::
   ImpM rep r op (Either Imp.Param ArrayDecl)
 compileInParam fparam = case paramDec fparam of
   MemPrim bt ->
-    return $ Left $ Imp.ScalarParam name bt
+    pure $ Left $ Imp.ScalarParam name bt
   MemMem space ->
-    return $ Left $ Imp.MemParam name space
+    pure $ Left $ Imp.MemParam name space
   MemArray bt shape _ (ArrayIn mem ixfun) ->
-    return $
-      Right $
-        ArrayDecl name bt $
-          MemLoc mem (shapeDims shape) $ fmap (fmap Imp.ScalarVar) ixfun
+    pure $ Right $ ArrayDecl name bt $ MemLoc mem (shapeDims shape) ixfun
   MemAcc {} ->
     error "Functions may not have accumulator parameters."
   where
@@ -1091,7 +1088,7 @@ memBoundToVarEntry e (MemMem space) =
 memBoundToVarEntry e (MemAcc acc ispace ts _) =
   AccVar e (acc, ispace, ts)
 memBoundToVarEntry e (MemArray bt shape _ (ArrayIn mem ixfun)) =
-  let location = MemLoc mem (shapeDims shape) $ fmap (fmap Imp.ScalarVar) ixfun
+  let location = MemLoc mem (shapeDims shape) ixfun
    in ArrayVar
         e
         ArrayEntry
@@ -1139,7 +1136,7 @@ dArray name pt shape mem ixfun =
   addVar name $ ArrayVar Nothing $ ArrayEntry location pt
   where
     location =
-      MemLoc mem (shapeDims shape) $ fmap (fmap Imp.ScalarVar) ixfun
+      MemLoc mem (shapeDims shape) ixfun
 
 everythingVolatile :: ImpM rep r op a -> ImpM rep r op a
 everythingVolatile = local $ \env -> env {envVolatility = Imp.Volatile}
@@ -1209,8 +1206,8 @@ instance ToExp SubExp where
   toExp' t (Var v) = Imp.var v t
 
 instance ToExp (PrimExp VName) where
-  toExp = pure . fmap Imp.ScalarVar
-  toExp' _ = fmap Imp.ScalarVar
+  toExp = pure
+  toExp' _ = id
 
 addVar :: VName -> VarEntry rep -> ImpM rep r op ()
 addVar name entry =
@@ -1495,10 +1492,14 @@ copyElementWise bt dest src = do
   (destmem, destspace, destidx) <- fullyIndexArray' dest ivars
   (srcmem, srcspace, srcidx) <- fullyIndexArray' src ivars
   vol <- asks envVolatility
+  tmp <- newVName "tmp"
   emit $
     foldl (.) id (zipWith Imp.For is $ map untyped bounds) $
-      Imp.Write destmem destidx bt destspace vol $
-        Imp.index srcmem srcidx bt srcspace vol
+      mconcat
+        [ Imp.DeclareScalar tmp vol bt,
+          Imp.Read tmp srcmem srcidx bt srcspace vol,
+          Imp.Write destmem destidx bt destspace vol $ Imp.var tmp bt
+        ]
 
 -- | Copy from here to there; both destination and source may be
 -- indexeded.
@@ -1524,9 +1525,10 @@ copyArrayDWIM
       (srcmem, srcspace, srcoffset) <-
         fullyIndexArray' srclocation srcis
       vol <- asks envVolatility
-      return $
-        Imp.Write targetmem targetoffset bt destspace vol $
-          Imp.index srcmem srcoffset bt srcspace vol
+      collect $ do
+        tmp <- tvVar <$> dPrim "tmp" bt
+        emit $ Imp.Read tmp srcmem srcoffset bt srcspace vol
+        emit $ Imp.Write targetmem targetoffset bt destspace vol $ Imp.var tmp bt
     | otherwise = do
       let destslice' = fullSliceNum (map toInt64Exp destshape) destslice
           srcslice' = fullSliceNum (map toInt64Exp srcshape) srcslice
@@ -1611,7 +1613,7 @@ copyDWIMDest dest dest_slice (Var src) src_slice = do
         (mem, space, i) <-
           fullyIndexArray' (entryArrayLoc arr) src_is
         vol <- asks envVolatility
-        emit $ Imp.SetScalar name $ Imp.index mem i bt space vol
+        emit $ Imp.Read name mem i bt space vol
       | otherwise ->
         error $
           unwords
