@@ -194,7 +194,7 @@ defaultOperations opc =
       opsAllocCompilers = mempty
     }
 
--- | When an array is dared, this is where it is stored.
+-- | When an array is declared, this is where it is stored.
 data MemLoc = MemLoc
   { memLocName :: VName,
     memLocShape :: [Imp.DimSize],
