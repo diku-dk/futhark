@@ -85,7 +85,8 @@ mapTransposeFunction fname pt =
       r,
       c,
       i,
-      j
+      j,
+      val
       ] =
         zipWith
           (VName . nameFromString)
@@ -103,7 +104,8 @@ mapTransposeFunction fname pt =
             "r",
             "c",
             "i",
-            "j" -- local
+            "j", -- local
+            "val"
           ]
           [0 ..]
 
@@ -114,18 +116,23 @@ mapTransposeFunction fname pt =
         For i (untyped $ vi64 r) $
           let i' = vi64 i + vi64 rb
               j' = vi64 j + vi64 cb
-           in Write
-                destmem
-                (elements $ vi64 destoffset + j' * vi64 n + i')
-                pt
-                DefaultSpace
-                Nonvolatile
-                $ index
-                  srcmem
-                  (elements $ vi64 srcoffset + i' * vi64 m + j')
-                  pt
-                  DefaultSpace
-                  Nonvolatile
+           in mconcat
+                [ DeclareScalar val Nonvolatile pt,
+                  Read
+                    val
+                    srcmem
+                    (elements $ vi64 srcoffset + i' * vi64 m + j')
+                    pt
+                    DefaultSpace
+                    Nonvolatile,
+                  Write
+                    destmem
+                    (elements $ vi64 destoffset + j' * vi64 n + i')
+                    pt
+                    DefaultSpace
+                    Nonvolatile
+                    (var val pt)
+                ]
 
     recArgs (cb', ce', rb', re') =
       [ MemArg destmem,

@@ -821,8 +821,7 @@ isConstExp ::
   ImpM rep r op (Maybe Imp.KernelConstExp)
 isConstExp vtable size = do
   fname <- askFunction
-  let onLeaf (Imp.ScalarVar name) _ = lookupConstExp name
-      onLeaf Imp.Index {} _ = Nothing
+  let onLeaf name _ = lookupConstExp name
       lookupConstExp name =
         constExp =<< hasExp =<< M.lookup name vtable
       constExp (Op (Inner (SizeOp (GetSize key _)))) =
@@ -1629,7 +1628,7 @@ sIota arr n x s et = do
     else sIotaKernel arr n x s et
 
 sCopy :: CopyCompiler GPUMem HostEnv Imp.HostOp
-sCopy bt destloc@(MemLoc destmem _ _) srcloc@(MemLoc srcmem srcdims _) = do
+sCopy pt destloc@(MemLoc destmem _ _) srcloc@(MemLoc srcmem srcdims _) = do
   -- Note that the shape of the destination and the source are
   -- necessarily the same.
   let shape = map toInt64Exp srcdims
@@ -1652,10 +1651,10 @@ sCopy bt destloc@(MemLoc destmem _ _) srcloc@(MemLoc srcmem srcdims _) = do
     (_, destspace, destidx) <- fullyIndexArray' destloc is
     (_, srcspace, srcidx) <- fullyIndexArray' srcloc is
 
-    sWhen (gtid .<. kernel_size) $
-      emit $
-        Imp.Write destmem destidx bt destspace Imp.Nonvolatile $
-          Imp.index srcmem srcidx bt srcspace Imp.Nonvolatile
+    sWhen (gtid .<. kernel_size) $ do
+      tmp <- tvVar <$> dPrim "tmp" pt
+      emit $ Imp.Read tmp srcmem srcidx pt srcspace Imp.Nonvolatile
+      emit $ Imp.Write destmem destidx pt destspace Imp.Nonvolatile $ Imp.var tmp pt
 
 compileGroupResult ::
   SegSpace ->

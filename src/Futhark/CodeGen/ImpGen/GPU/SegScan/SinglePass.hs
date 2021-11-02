@@ -247,10 +247,10 @@ compileSegScan pat lvl space scanOp kbody = do
       m :: Num a => a
       m = fromIntegral $ max 1 $ min mem_constraint reg_constraint
 
-  emit $ Imp.DebugPrint "SegScan: number of elements processed sequentially per thread is m:" $ Just $ untyped (m :: TPrimExp Int32 Imp.ExpLeaf)
-  emit $ Imp.DebugPrint "SegScan: memory constraints is: " $ Just $ untyped (fromIntegral mem_constraint :: TPrimExp Int32 Imp.ExpLeaf)
-  emit $ Imp.DebugPrint "SegScan: register constraints is: " $ Just $ untyped (fromIntegral reg_constraint :: TPrimExp Int32 Imp.ExpLeaf)
-  emit $ Imp.DebugPrint "SegScan: sumT' is: " $ Just $ untyped (fromIntegral sumT' :: TPrimExp Int32 Imp.ExpLeaf)
+  emit $ Imp.DebugPrint "SegScan: number of elements processed sequentially per thread is m:" $ Just $ untyped (m :: Imp.TExp Int32)
+  emit $ Imp.DebugPrint "SegScan: memory constraints is: " $ Just $ untyped (fromIntegral mem_constraint :: Imp.TExp Int32)
+  emit $ Imp.DebugPrint "SegScan: register constraints is: " $ Just $ untyped (fromIntegral reg_constraint :: Imp.TExp Int32)
+  emit $ Imp.DebugPrint "SegScan: sumT' is: " $ Just $ untyped (fromIntegral sumT' :: Imp.TExp Int32)
 
   -- Allocate the shared memory for output component
   numThreads <- dPrimV "numThreads" num_threads

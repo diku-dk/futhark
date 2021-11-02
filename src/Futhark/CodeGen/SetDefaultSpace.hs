@@ -56,7 +56,7 @@ setValueSpace _ (ScalarValue bt ept v) =
 
 setCodeSpace :: Space -> Code op -> Code op
 setCodeSpace space (Allocate v e old_space) =
-  Allocate v (fmap (setTExpSpace space) e) $ setSpace space old_space
+  Allocate v e $ setSpace space old_space
 setCodeSpace space (Free v old_space) =
   Free v $ setSpace space old_space
 setCodeSpace space (DeclareMem name old_space) =
@@ -64,66 +64,42 @@ setCodeSpace space (DeclareMem name old_space) =
 setCodeSpace space (DeclareArray name _ t vs) =
   DeclareArray name space t vs
 setCodeSpace space (Copy dest dest_offset dest_space src src_offset src_space n) =
-  Copy
-    dest
-    (fmap (setTExpSpace space) dest_offset)
-    dest_space'
-    src
-    (fmap (setTExpSpace space) src_offset)
-    src_space'
-    $ fmap (setTExpSpace space) n
+  Copy dest dest_offset dest_space' src src_offset src_space' n
   where
     dest_space' = setSpace space dest_space
     src_space' = setSpace space src_space
 setCodeSpace space (Write dest dest_offset bt dest_space vol e) =
-  Write
-    dest
-    (fmap (setTExpSpace space) dest_offset)
-    bt
-    (setSpace space dest_space)
-    vol
-    (setExpSpace space e)
+  Write dest dest_offset bt (setSpace space dest_space) vol e
+setCodeSpace space (Read x dest dest_offset bt dest_space vol) =
+  Read x dest dest_offset bt (setSpace space dest_space) vol
 setCodeSpace space (c1 :>>: c2) =
   setCodeSpace space c1 :>>: setCodeSpace space c2
 setCodeSpace space (For i e body) =
-  For i (setExpSpace space e) $ setCodeSpace space body
+  For i e $ setCodeSpace space body
 setCodeSpace space (While e body) =
-  While (setTExpSpace space e) $ setCodeSpace space body
+  While e $ setCodeSpace space body
 setCodeSpace space (If e c1 c2) =
-  If (setTExpSpace space e) (setCodeSpace space c1) (setCodeSpace space c2)
+  If e (setCodeSpace space c1) (setCodeSpace space c2)
 setCodeSpace space (Comment s c) =
   Comment s $ setCodeSpace space c
 setCodeSpace _ Skip =
   Skip
 setCodeSpace _ (DeclareScalar name vol bt) =
   DeclareScalar name vol bt
-setCodeSpace space (SetScalar name e) =
-  SetScalar name $ setExpSpace space e
+setCodeSpace _ (SetScalar name e) =
+  SetScalar name e
 setCodeSpace space (SetMem to from old_space) =
   SetMem to from $ setSpace space old_space
-setCodeSpace space (Call dests fname args) =
-  Call dests fname $ map setArgSpace args
-  where
-    setArgSpace (MemArg m) = MemArg m
-    setArgSpace (ExpArg e) = ExpArg $ setExpSpace space e
-setCodeSpace space (Assert e msg loc) =
-  Assert (setExpSpace space e) (fmap (setExpSpace space) msg) loc
-setCodeSpace space (DebugPrint s v) =
-  DebugPrint s $ fmap (setExpSpace space) v
-setCodeSpace space (TracePrint msg) =
-  TracePrint $ fmap (setExpSpace space) msg
+setCodeSpace _ (Call dests fname args) =
+  Call dests fname args
+setCodeSpace _ (Assert e msg loc) =
+  Assert e msg loc
+setCodeSpace _ (DebugPrint s v) =
+  DebugPrint s v
+setCodeSpace _ (TracePrint msg) =
+  TracePrint msg
 setCodeSpace _ (Op op) =
   Op op
-
-setExpSpace :: Space -> Exp -> Exp
-setExpSpace space = fmap setLeafSpace
-  where
-    setLeafSpace (Index mem i bt DefaultSpace vol) =
-      Index mem i bt space vol
-    setLeafSpace e = e
-
-setTExpSpace :: Space -> TExp t -> TExp t
-setTExpSpace space = TPrimExp . setExpSpace space . untyped
 
 setSpace :: Space -> Space -> Space
 setSpace space DefaultSpace = space

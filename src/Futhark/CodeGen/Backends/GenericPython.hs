@@ -1172,24 +1172,7 @@ compilePrimExp f (Imp.FunExp h args _) =
   simpleCall (futharkFun (pretty h)) <$> mapM (compilePrimExp f) args
 
 compileExp :: Imp.Exp -> CompilerM op s PyExp
-compileExp = compilePrimExp compileLeaf
-  where
-    compileLeaf (Imp.ScalarVar vname) =
-      compileVar vname
-    compileLeaf (Imp.Index _ _ Unit _ _) =
-      return $ compilePrimValue UnitValue
-    compileLeaf (Imp.Index src (Imp.Count iexp) restype (Imp.Space space) _) =
-      join $
-        asks envReadScalar
-          <*> compileVar src
-          <*> compileExp (Imp.untyped iexp)
-          <*> pure restype
-          <*> pure space
-    compileLeaf (Imp.Index src (Imp.Count iexp) bt _ _) = do
-      iexp' <- compileExp $ Imp.untyped iexp
-      let bt' = compilePrimType bt
-      src' <- compileVar src
-      return $ fromStorage bt $ simpleCall "indexArray" [src', iexp', Var bt']
+compileExp = compilePrimExp compileVar
 
 errorMsgString :: Imp.ErrorMsg Imp.Exp -> CompilerM op s (String, [PyExp])
 errorMsgString (Imp.ErrorMsg parts) = do
@@ -1351,4 +1334,22 @@ compileCode (Imp.Write dest (Imp.Count idx) elemtype _ _ elemexp) = do
   elemexp' <- toStorage elemtype <$> compileExp elemexp
   dest' <- compileVar dest
   stm $ Exp $ simpleCall "writeScalarArray" [dest', idx', elemexp']
+compileCode (Imp.Read x _ _ Unit _ _) =
+  stm =<< Assign <$> compileVar x <*> pure (compilePrimValue UnitValue)
+compileCode (Imp.Read x src (Imp.Count iexp) restype (Imp.Space space) _) = do
+  x' <- compileVar x
+  e <-
+    join $
+      asks envReadScalar
+        <*> compileVar src
+        <*> compileExp (Imp.untyped iexp)
+        <*> pure restype
+        <*> pure space
+  stm $ Assign x' e
+compileCode (Imp.Read x src (Imp.Count iexp) bt _ _) = do
+  x' <- compileVar x
+  iexp' <- compileExp $ Imp.untyped iexp
+  let bt' = compilePrimType bt
+  src' <- compileVar src
+  stm $ Assign x' $ fromStorage bt $ simpleCall "indexArray" [src', iexp', Var bt']
 compileCode Imp.Skip = return ()
