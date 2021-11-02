@@ -204,7 +204,7 @@ readLibrary ::
   [FilePath] ->
   m (E.Warnings, Imports, VNameSource)
 readLibrary extra_eps fps =
-  typeCheckProgram emptyBasis . setEntryPoints extra_eps fps
+  typeCheckProgram emptyBasis . setEntryPoints (E.defaultEntryPoint : extra_eps) fps
     =<< readUntypedLibrary fps
 
 -- | Read and type-check Futhark imports (no @.fut@ extension; may

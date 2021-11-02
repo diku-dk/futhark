@@ -2,7 +2,6 @@
 -- for ICFP 2016.
 --
 -- ==
--- tags { no_opencl }
 -- input {
 --   [[1,2,3],[3,2,1],[4,5,6]]
 -- }
@@ -20,7 +19,7 @@
 --    [276i32, 142i32, 92i32],
 --    [662i32, 1090i32, 1728i32]]
 -- }
--- structure distributed {
+-- structure gpu {
 --   DoLoop/SegMap 1
 --   SegMap 2
 --   SegRed 1

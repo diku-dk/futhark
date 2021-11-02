@@ -133,6 +133,11 @@ Corresponds to :c:func:`futhark_context_unpause_profiling`.
 
 Corresponds to :c:func:`futhark_context_report`.
 
+``set_tuning_param``
+....................
+
+Corresponds to :c:func:`futhark_context_config_set_tuning_param`.
+
 Environment Variables
 ---------------------
 

@@ -7,6 +7,7 @@ module Futhark.Util.Pretty
     pretty,
     prettyDoc,
     prettyTuple,
+    prettyTupleLines,
     prettyText,
     prettyTextOneLine,
     prettyOneLine,
@@ -53,6 +54,12 @@ ppTuple' ets = braces $ commasep $ map (align . ppr) ets
 -- | Prettyprint a list enclosed in curly braces.
 prettyTuple :: Pretty a => [a] -> String
 prettyTuple = PP.pretty 80 . ppTuple'
+
+-- | Like 'prettyTuple', but put a linebreak after every element.
+prettyTupleLines :: Pretty a => [a] -> String
+prettyTupleLines = PP.pretty 80 . ppTupleLines'
+  where
+    ppTupleLines' ets = braces $ stack $ punctuate comma $ map (align . ppr) ets
 
 -- | The document @'apply' ds@ separates @ds@ with commas and encloses them with
 -- parentheses.

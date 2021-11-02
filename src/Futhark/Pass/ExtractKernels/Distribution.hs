@@ -32,6 +32,7 @@ module Futhark.Pass.ExtractKernels.Distribution
     innermostKernelNesting,
     pushKernelNesting,
     pushInnerKernelNesting,
+    scopeOfKernelNest,
     kernelNestLoops,
     kernelNestWidths,
     boundInKernelNest,
@@ -127,7 +128,7 @@ data LoopNesting = MapNesting
   }
   deriving (Show)
 
-scopeOfLoopNesting :: DistRep rep => LoopNesting -> Scope rep
+scopeOfLoopNesting :: (LParamInfo rep ~ Type) => LoopNesting -> Scope rep
 scopeOfLoopNesting = scopeOfLParams . map fst . loopNestingParamsAndArrs
 
 ppLoopNesting :: LoopNesting -> String
@@ -234,6 +235,9 @@ newKernel nest = (nest, [])
 kernelNestLoops :: KernelNest -> [LoopNesting]
 kernelNestLoops (loop, loops) = loop : loops
 
+scopeOfKernelNest :: LParamInfo rep ~ Type => KernelNest -> Scope rep
+scopeOfKernelNest = foldMap scopeOfLoopNesting . kernelNestLoops
+
 boundInKernelNest :: KernelNest -> Names
 boundInKernelNest = mconcat . boundInKernelNests
 
@@ -294,7 +298,7 @@ flatKernel (MapNesting _ _ nesting_w params_and_arrs, []) = do
   i <- newVName "gtid"
   let inps =
         [ KernelInput pname ptype arr [Var i]
-          | (Param pname ptype, arr) <- params_and_arrs
+          | (Param _ pname ptype, arr) <- params_and_arrs
         ]
   return ([(i, nesting_w)], inps)
 flatKernel (MapNesting _ _ nesting_w params_and_arrs, nest : nests) = do
@@ -317,7 +321,7 @@ flatKernel (MapNesting _ _ nesting_w params_and_arrs, nest : nests) = do
   where
     extra_inps i =
       [ KernelInput pname ptype arr [Var i]
-        | (Param pname ptype, arr) <- params_and_arrs
+        | (Param _ pname ptype, arr) <- params_and_arrs
       ]
 
 -- | Description of distribution to do.
@@ -421,13 +425,13 @@ createKernelNest (inner_nest, nests) distrib_body = do
                       newIdent (baseString pname ++ "_r") $
                         arrayOfRow ptype w
                     return
-                      ( Param pname ptype,
+                      ( Param mempty pname ptype,
                         arr,
                         True
                       )
                   Just arr ->
                     return
-                      ( Param pname ptype,
+                      ( Param mempty pname ptype,
                         arr,
                         False
                       )

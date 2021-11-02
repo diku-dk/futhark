@@ -9,6 +9,7 @@
 -- also re-exported from here.
 module Futhark.IR.MC.Op
   ( MCOp (..),
+    traverseMCOpStms,
     typeCheckMCOp,
     simplifyMCOp,
     module Futhark.IR.SegOp,
@@ -50,6 +51,11 @@ data MCOp rep op
   | -- | Something else (in practice often a SOAC).
     OtherOp op
   deriving (Eq, Ord, Show)
+
+traverseMCOpStms :: Monad m => OpStmsTraverser m op rep -> OpStmsTraverser m (MCOp rep op) rep
+traverseMCOpStms _ f (ParOp par_op op) =
+  ParOp <$> traverse (traverseSegOpStms f) par_op <*> traverseSegOpStms f op
+traverseMCOpStms onInner f (OtherOp op) = OtherOp <$> onInner f op
 
 instance (ASTRep rep, Substitute op) => Substitute (MCOp rep op) where
   substituteNames substs (ParOp par_op op) =
@@ -113,6 +119,11 @@ instance
   removeOpWisdom (OtherOp op) =
     OtherOp $ removeOpWisdom op
 
+  addOpWisdom (ParOp par_op op) =
+    ParOp (addOpWisdom <$> par_op) (addOpWisdom op)
+  addOpWisdom (OtherOp op) =
+    OtherOp $ addOpWisdom op
+
 instance (ASTRep rep, ST.IndexOp op) => ST.IndexOp (MCOp rep op) where
   indexOp vtable k (ParOp _ op) is = ST.indexOp vtable k op is
   indexOp vtable k (OtherOp op) is = ST.indexOp vtable k op is
@@ -146,8 +157,8 @@ simplifyMCOp ::
     BodyDec rep ~ ()
   ) =>
   Simplify.SimplifyOp rep op ->
-  MCOp rep op ->
-  Engine.SimpleM rep (MCOp (Wise rep) (OpWithWisdom op), Stms (Wise rep))
+  MCOp (Wise rep) op ->
+  Engine.SimpleM rep (MCOp (Wise rep) op, Stms (Wise rep))
 simplifyMCOp f (OtherOp op) = do
   (op', stms) <- f op
   return (OtherOp op', stms)

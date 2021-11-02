@@ -122,7 +122,7 @@ instance Checkable rep => Show (ErrorCase rep) where
   show (InvalidPatError pat t desc) =
     "Pat\n" ++ pretty pat
       ++ "\ncannot match value of type\n"
-      ++ prettyTuple t
+      ++ prettyTupleLines t
       ++ end
     where
       end = case desc of
@@ -1503,7 +1503,7 @@ class (ASTRep rep, CanBeAliased (Op rep), CheckableOp rep) => Checkable rep wher
   matchPat pat = matchExtPat pat <=< expExtType
 
   default primFParam :: FParamInfo rep ~ DeclType => VName -> PrimType -> TypeM rep (FParam (Aliases rep))
-  primFParam name t = return $ Param name (Prim t)
+  primFParam name t = return $ Param mempty name (Prim t)
 
   default matchReturnType :: RetType rep ~ DeclExtType => [RetType rep] -> Result -> TypeM rep ()
   matchReturnType = matchExtReturnType . map fromDecl

@@ -1,7 +1,7 @@
 -- Slightly odd result due to interchange.
 -- ==
 -- random input { [10][10][10]i32 } auto output
--- structure distributed {
+-- structure gpu {
 --   /DoLoop 1
 --   /DoLoop/SegRed 1
 --   /DoLoop/SegMap 1

@@ -32,7 +32,7 @@ createLocalArrays ::
   Count GroupSize SubExp ->
   SubExp ->
   [PrimType] ->
-  InKernelGen (VName, [VName], [VName], VName, VName, [VName])
+  InKernelGen (VName, [VName], [VName], VName, [VName])
 createLocalArrays (Count groupSize) m types = do
   let groupSizeE = toInt64Exp groupSize
       workSize = toInt64Exp m * groupSizeE
@@ -69,7 +69,6 @@ createLocalArrays (Count groupSize) m types = do
   transposeArrayLength <- dPrimV "trans_arr_len" workSize
 
   sharedId <- sArrayInMem "shared_id" int32 (Shape [constant (1 :: Int32)]) localMem
-  sharedReadOffset <- sArrayInMem "shared_read_offset" int32 (Shape [constant (1 :: Int32)]) localMem
 
   transposedArrays <-
     forM types $ \ty ->
@@ -86,7 +85,8 @@ createLocalArrays (Count groupSize) m types = do
         "local_prefix_arr"
         ty
         (Shape [groupSize])
-        $ ArrayIn localMem $ IxFun.iotaOffset off' [pe64 groupSize]
+        localMem
+        $ IxFun.iotaOffset off' [pe64 groupSize]
 
   warpscan <- sArrayInMem "warpscan" int8 (Shape [constant (warpSize :: Int64)]) localMem
   warpExchanges <-
@@ -96,9 +96,115 @@ createLocalArrays (Count groupSize) m types = do
         "warp_exchange"
         ty
         (Shape [constant (warpSize :: Int64)])
-        $ ArrayIn localMem $ IxFun.iotaOffset off' [warpSize]
+        localMem
+        $ IxFun.iotaOffset off' [warpSize]
 
-  return (sharedId, transposedArrays, prefixArrays, sharedReadOffset, warpscan, warpExchanges)
+  return (sharedId, transposedArrays, prefixArrays, warpscan, warpExchanges)
+
+inBlockScanLookback ::
+  KernelConstants ->
+  Imp.TExp Int64 ->
+  VName ->
+  [VName] ->
+  Lambda GPUMem ->
+  InKernelGen ()
+inBlockScanLookback constants arrs_full_size flag_arr arrs scan_lam = everythingVolatile $ do
+  flg_x <- dPrim "flg_x" p_int8
+  flg_y <- dPrim "flg_y" p_int8
+  let flg_param_x = Param mempty (tvVar flg_x) (MemPrim p_int8)
+      flg_param_y = Param mempty (tvVar flg_y) (MemPrim p_int8)
+      flg_y_exp = tvExp flg_y
+      statusP = (2 :: Imp.TExp Int8)
+      statusX = (0 :: Imp.TExp Int8)
+
+  dLParams (lambdaParams scan_lam)
+
+  skip_threads <- dPrim "skip_threads" int32
+  let in_block_thread_active =
+        tvExp skip_threads .<=. in_block_id
+      actual_params = lambdaParams scan_lam
+      (x_params, y_params) =
+        splitAt (length actual_params `div` 2) actual_params
+      y_to_x =
+        forM_ (zip x_params y_params) $ \(x, y) ->
+          when (primType (paramType x)) $
+            copyDWIM (paramName x) [] (Var (paramName y)) []
+      y_to_x_flg =
+        copyDWIM (tvVar flg_x) [] (Var (tvVar flg_y)) []
+
+  -- Set initial y values
+  sComment "read input for in-block scan" $ do
+    zipWithM_ readInitial (flg_param_y : y_params) (flag_arr : arrs)
+    -- Since the final result is expected to be in x_params, we may
+    -- need to copy it there for the first thread in the block.
+    sWhen (in_block_id .==. 0) $ do
+      y_to_x
+      y_to_x_flg
+
+  when array_scan barrier
+
+  let op_to_x = do
+        sIf
+          (flg_y_exp .==. statusP .||. flg_y_exp .==. statusX)
+          ( do
+              y_to_x_flg
+              y_to_x
+          )
+          (compileBody' x_params $ lambdaBody scan_lam)
+
+  sComment "in-block scan (hopefully no barriers needed)" $ do
+    skip_threads <-- 1
+
+    sWhile (tvExp skip_threads .<. block_size) $ do
+      sWhen in_block_thread_active $ do
+        sComment "read operands" $
+          zipWithM_
+            (readParam (sExt64 $ tvExp skip_threads))
+            (flg_param_x : x_params)
+            (flag_arr : arrs)
+        sComment "perform operation" op_to_x
+
+        sComment "write result" $
+          sequence_ $
+            zipWith3
+              writeResult
+              (flg_param_x : x_params)
+              (flg_param_y : y_params)
+              (flag_arr : arrs)
+
+      skip_threads <-- tvExp skip_threads * 2
+  where
+    p_int8 = IntType Int8
+    block_size = 32
+    block_id = ltid32 `quot` block_size
+    in_block_id = ltid32 - block_id * block_size
+    ltid32 = kernelLocalThreadId constants
+    ltid = sExt64 ltid32
+    gtid = sExt64 $ kernelGlobalThreadId constants
+    array_scan = not $ all primType $ lambdaReturnType scan_lam
+    barrier
+      | array_scan =
+        sOp $ Imp.Barrier Imp.FenceGlobal
+      | otherwise =
+        sOp $ Imp.Barrier Imp.FenceLocal
+
+    readInitial p arr
+      | primType $ paramType p =
+        copyDWIM (paramName p) [] (Var arr) [DimFix ltid]
+      | otherwise =
+        copyDWIM (paramName p) [] (Var arr) [DimFix gtid]
+    readParam behind p arr
+      | primType $ paramType p =
+        copyDWIM (paramName p) [] (Var arr) [DimFix $ ltid - behind]
+      | otherwise =
+        copyDWIM (paramName p) [] (Var arr) [DimFix $ gtid - behind + arrs_full_size]
+
+    writeResult x y arr
+      | primType $ paramType x = do
+        copyDWIM arr [DimFix ltid] (Var $ paramName x) []
+        copyDWIM (paramName y) [] (Var $ paramName x) []
+      | otherwise =
+        copyDWIM (paramName y) [] (Var $ paramName x) []
 
 -- | Compile 'SegScan' instance to host-level code with calls to a
 -- single-pass kernel.
@@ -127,12 +233,6 @@ compileSegScan pat lvl space scanOp kbody = do
       statusX = 0
       statusA = 1
       statusP = 2
-      makeStatusUsed flag used = tvExp flag .|. (tvExp used .<<. 2)
-      unmakeStatusUsed :: TV Int8 -> TV Int8 -> TV Int8 -> InKernelGen ()
-      unmakeStatusUsed flagUsed flag used = do
-        used <-- tvExp flagUsed .>>. 2
-        flag <-- tvExp flagUsed .&. 3
-
       sumT :: Integer
       maxT :: Integer
       sumT = foldl (\bytes typ -> bytes + primByteSize typ) 0 tys
@@ -140,13 +240,17 @@ compileSegScan pat lvl space scanOp kbody = do
       sumT' = foldl (\bytes typ -> bytes + primByteSize' typ) 0 tys `div` 4
       maxT = maximum (map primByteSize tys)
       -- TODO: Make these constants dynamic by querying device
-      -- RTX 2080 Ti constants (CC 7.5)
       k_reg = 64
-      k_mem = 48 --12*4
+      k_mem = 95
       mem_constraint = max k_mem sumT `div` maxT
-      reg_constraint = (k_reg -1 - sumT') `div` (2 * sumT' + 3)
+      reg_constraint = (k_reg - 1 - sumT') `div` (2 * sumT')
       m :: Num a => a
       m = fromIntegral $ max 1 $ min mem_constraint reg_constraint
+
+  emit $ Imp.DebugPrint "SegScan: number of elements processed sequentially per thread is m:" $ Just $ untyped (m :: Imp.TExp Int32)
+  emit $ Imp.DebugPrint "SegScan: memory constraints is: " $ Just $ untyped (fromIntegral mem_constraint :: Imp.TExp Int32)
+  emit $ Imp.DebugPrint "SegScan: register constraints is: " $ Just $ untyped (fromIntegral reg_constraint :: Imp.TExp Int32)
+  emit $ Imp.DebugPrint "SegScan: sumT' is: " $ Just $ untyped (fromIntegral sumT' :: Imp.TExp Int32)
 
   -- Allocate the shared memory for output component
   numThreads <- dPrimV "numThreads" num_threads
@@ -165,7 +269,7 @@ compileSegScan pat lvl space scanOp kbody = do
   sKernelThread "segscan" num_groups group_size (segFlat space) $ do
     constants <- kernelConstants <$> askEnv
 
-    (sharedId, transposedArrays, prefixArrays, sharedReadOffset, warpscan, exchanges) <-
+    (sharedId, transposedArrays, prefixArrays, warpscan, exchanges) <-
       createLocalArrays (segGroupSize lvl) (intConst Int64 m) tys
 
     dynamicId <- dPrim "dynamic_id" int32
@@ -222,7 +326,7 @@ compileSegScan pat lvl space scanOp kbody = do
 
                 -- Write map results to their global memory destinations
                 forM_ (zip (takeLast (length map_res) all_pes) map_res) $ \(dest, src) ->
-                  copyDWIMFix (patElemName dest) (map Imp.vi64 gtids) (kernelResultSubExp src) []
+                  copyDWIMFix (patElemName dest) (map Imp.le64 gtids) (kernelResultSubExp src) []
 
                 -- Write to-scan results to private memory.
                 forM_ (zip privateArrays $ map kernelResultSubExp all_scan_res) $ \(dest, src) ->
@@ -317,7 +421,7 @@ compileSegScan pat lvl space scanOp kbody = do
     sComment "Perform lookback" $ do
       sWhen (blockNewSgm .&&. kernelLocalThreadId constants .==. 0) $ do
         everythingVolatile $
-          forM_ (zip incprefixArrays accs) $ \(incprefixArray, acc) ->
+          forM_ (zip accs incprefixArrays) $ \(acc, incprefixArray) ->
             copyDWIMFix incprefixArray [tvExp dynamicId] (tvSize acc) []
         sOp globalFence
         everythingVolatile $
@@ -347,7 +451,8 @@ compileSegScan pat lvl space scanOp kbody = do
                 everythingVolatile $
                   copyDWIMFix statusFlags [tvExp dynamicId] (intConst Int8 statusP) []
             )
-          copyDWIMFix warpscan [0] (Var statusFlags) [tvExp dynamicId - 1]
+          everythingVolatile $
+            copyDWIMFix warpscan [0] (Var statusFlags) [tvExp dynamicId - 1]
         -- sWhen
         sOp localFence
 
@@ -375,8 +480,7 @@ compileSegScan pat lvl space scanOp kbody = do
                 readI <- dPrimV "read_i" $ tvExp readOffset + kernelLocalThreadId constants
                 aggrs <- forM (zip scanOpNe tys) $ \(ne, ty) ->
                   dPrimV "aggr" $ TPrimExp $ toExp' ty ne
-                flag <- dPrimV "flag" statusX
-                used <- dPrimV "used" 0
+                flag <- dPrimV "flag" (statusX :: Imp.TExp Int8)
                 everythingVolatile . sWhen (tvExp readI .>=. 0) $ do
                   sIf
                     (sameSegment readI)
@@ -390,81 +494,49 @@ compileSegScan pat lvl space scanOp kbody = do
                           ( sWhen (tvExp flag .==. statusA) $ do
                               forM_ (zip aggrs aggregateArrays) $ \(aggr, aggregate) ->
                                 copyDWIMFix (tvVar aggr) [] (Var aggregate) [sExt64 $ tvExp readI]
-                              used <-- 1
                           )
                     )
                     (copyDWIMFix (tvVar flag) [] (intConst Int8 statusP) [])
                 -- end sIf
                 -- end sWhen
+
                 forM_ (zip exchanges aggrs) $ \(exchange, aggr) ->
                   copyDWIMFix exchange [sExt64 $ kernelLocalThreadId constants] (tvSize aggr) []
-                tmp <- dPrimV "tmp" $ makeStatusUsed flag used
-                copyDWIMFix warpscan [sExt64 $ kernelLocalThreadId constants] (tvSize tmp) []
-                sOp localFence
+                copyDWIMFix warpscan [sExt64 $ kernelLocalThreadId constants] (tvSize flag) []
 
-                (warpscanMem, warpscanSpace, warpscanOff) <-
-                  fullyIndexArray warpscan [sExt64 warpSize - 1]
-                flag <-- TPrimExp (Imp.index warpscanMem warpscanOff int8 warpscanSpace Imp.Volatile)
-                sWhen (kernelLocalThreadId constants .==. 0) $ do
-                  -- TODO: This is a single-threaded reduce
-                  sIf
-                    (bNot $ tvExp flag .==. statusP)
-                    ( do
-                        scanOp'' <- renameLambda scanOp'
-                        let (agg1s, agg2s) = splitAt (length tys) $ map paramName $ lambdaParams scanOp''
+                -- execute warp-parallel reduction but only if the last read flag in not STATUS_P
+                copyDWIMFix (tvVar flag) [] (Var warpscan) [sExt64 warpSize - 1]
+                sWhen (tvExp flag .<. (2 :: Imp.TExp Int8)) $ do
+                  lam' <- renameLambda scanOp'
+                  inBlockScanLookback
+                    constants
+                    (tvExp numThreads)
+                    warpscan
+                    exchanges
+                    lam'
 
-                        forM_ (zip3 agg1s scanOpNe tys) $ \(agg1, ne, ty) ->
-                          dPrimV_ agg1 $ TPrimExp $ toExp' ty ne
-                        zipWithM_ dPrim_ agg2s tys
+                -- all threads of the warp read the result of reduction
+                copyDWIMFix (tvVar flag) [] (Var warpscan) [sExt64 warpSize - 1]
+                forM_ (zip aggrs exchanges) $ \(aggr, exchange) ->
+                  copyDWIMFix (tvVar aggr) [] (Var exchange) [sExt64 warpSize - 1]
+                -- update read offset
+                sIf
+                  (tvExp flag .==. statusP)
+                  (readOffset <-- loopStop)
+                  ( sWhen (tvExp flag .==. statusA) $ do
+                      readOffset <-- tvExp readOffset - zExt32 warpSize
+                  )
 
-                        flag1 <- dPrimV "flag1" statusX
-                        flag2 <- dPrim "flag2" int8
-                        used1 <- dPrimV "used1" 0
-                        used2 <- dPrim "used2" int8
-                        sFor "i" warpSize $ \i -> do
-                          copyDWIMFix (tvVar flag2) [] (Var warpscan) [sExt64 i]
-                          unmakeStatusUsed flag2 flag2 used2
-                          forM_ (zip agg2s exchanges) $ \(agg2, exchange) ->
-                            copyDWIMFix agg2 [] (Var exchange) [sExt64 i]
-                          sIf
-                            (bNot $ tvExp flag2 .==. statusA)
-                            ( do
-                                flag1 <-- tvExp flag2
-                                used1 <-- tvExp used2
-                                forM_ (zip3 agg1s tys agg2s) $ \(agg1, ty, agg2) ->
-                                  agg1 <~~ toExp' ty (Var agg2)
-                            )
-                            ( do
-                                used1 <-- tvExp used1 + tvExp used2
-                                compileStms mempty (bodyStms $ lambdaBody scanOp'') $
-                                  forM_ (zip3 agg1s tys $ map resSubExp $ bodyResult $ lambdaBody scanOp'') $
-                                    \(agg1, ty, res) -> agg1 <~~ toExp' ty res
-                            )
-                        flag <-- tvExp flag1
-                        used <-- tvExp used1
-                        forM_ (zip3 aggrs tys agg1s) $ \(aggr, ty, agg1) ->
-                          tvVar aggr <~~ toExp' ty (Var agg1)
-                    )
-                    -- else
-                    ( forM_ (zip aggrs exchanges) $ \(aggr, exchange) ->
-                        copyDWIMFix (tvVar aggr) [] (Var exchange) [sExt64 warpSize - 1]
-                    )
-                  -- end sIf
-                  sIf
-                    (tvExp flag .==. statusP)
-                    (readOffset <-- loopStop)
-                    (readOffset <-- tvExp readOffset - zExt32 (tvExp used))
-                  copyDWIMFix sharedReadOffset [0] (tvSize readOffset) []
-                  scanOp''' <- renameLambda scanOp'
-                  let (xs, ys) = splitAt (length tys) $ map paramName $ lambdaParams scanOp'''
+                -- update prefix if flag different than STATUS_X:
+                sWhen (tvExp flag .>. (statusX :: Imp.TExp Int8)) $ do
+                  lam <- renameLambda scanOp'
+                  let (xs, ys) = splitAt (length tys) $ map paramName $ lambdaParams lam
                   forM_ (zip xs aggrs) $ \(x, aggr) -> dPrimV_ x (tvExp aggr)
                   forM_ (zip ys prefixes) $ \(y, prefix) -> dPrimV_ y (tvExp prefix)
-                  compileStms mempty (bodyStms $ lambdaBody scanOp''') $
-                    forM_ (zip3 prefixes tys $ map resSubExp $ bodyResult $ lambdaBody scanOp''') $
+                  compileStms mempty (bodyStms $ lambdaBody lam) $
+                    forM_ (zip3 prefixes tys $ map resSubExp $ bodyResult $ lambdaBody lam) $
                       \(prefix, ty, res) -> prefix <-- TPrimExp (toExp' ty res)
-                -- end sWhen
                 sOp localFence
-                copyDWIMFix (tvVar readOffset) [] (Var sharedReadOffset) [0]
           )
         -- end sWhile
         -- end sIf
@@ -532,33 +604,28 @@ compileSegScan pat lvl space scanOp kbody = do
               \(dest, res) ->
                 copyDWIMFix dest [i] res []
 
-    sComment "Transpose scan output" $ do
-      forM_ (zip transposedArrays privateArrays) $ \(trans, priv) -> do
-        sOp localBarrier
+    sComment "Transpose scan output and Write it to global memory in coalesced fashion" $ do
+      forM_ (zip3 transposedArrays privateArrays $ map patElemName all_pes) $ \(locmem, priv, dest) -> do
+        --sOp localBarrier
         sFor "i" m $ \i -> do
           sharedIdx <-
             dPrimV "sharedIdx" $
               sExt64 (kernelLocalThreadId constants * m) + i
-          copyDWIMFix trans [tvExp sharedIdx] (Var priv) [i]
+          copyDWIMFix locmem [tvExp sharedIdx] (Var priv) [i]
         sOp localBarrier
         sFor "i" m $ \i -> do
-          sharedIdx <-
-            dPrimV "sharedIdx" $
-              kernelLocalThreadId constants
-                + sExt32 (kernelGroupSize constants * i)
-          copyDWIMFix priv [i] (Var trans) [sExt64 $ tvExp sharedIdx]
-      sOp localBarrier
-
-    sComment "Write block scan results to global memory" $
-      sFor "i" m $ \i -> do
-        flat_idx <-
-          dPrimVE "flat_idx" $
-            tvExp blockOff + kernelGroupSize constants * i
-              + sExt64 (kernelLocalThreadId constants)
-        dIndexSpace (zip gtids dims') flat_idx
-        sWhen (flat_idx .<. n) $ do
-          forM_ (zip (map patElemName all_pes) privateArrays) $ \(dest, src) ->
-            copyDWIMFix dest (map Imp.vi64 gtids) (Var src) [i]
+          flat_idx <-
+            dPrimVE "flat_idx" $
+              tvExp blockOff + kernelGroupSize constants * i
+                + sExt64 (kernelLocalThreadId constants)
+          dIndexSpace (zip gtids dims') flat_idx
+          sWhen (flat_idx .<. n) $ do
+            copyDWIMFix
+              dest
+              (map Imp.le64 gtids)
+              (Var locmem)
+              [sExt64 $ flat_idx - tvExp blockOff]
+        sOp localBarrier
 
     sComment "If this is the last block, reset the dynamicId" $
       sWhen (tvExp dynamicId .==. unCount num_groups - 1) $

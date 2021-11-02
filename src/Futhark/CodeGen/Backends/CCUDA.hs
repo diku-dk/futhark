@@ -18,6 +18,7 @@ import Futhark.CodeGen.Backends.CCUDA.Boilerplate
 import Futhark.CodeGen.Backends.COpenCL.Boilerplate (commonOptions, sizeLoggingCode)
 import qualified Futhark.CodeGen.Backends.GenericC as GC
 import Futhark.CodeGen.Backends.GenericC.Options
+import Futhark.CodeGen.Backends.SimpleRep (primStorageType, toStorage)
 import Futhark.CodeGen.ImpCode.OpenCL
 import qualified Futhark.CodeGen.ImpGen.CUDA as ImpGen
 import Futhark.IR.GPUMem hiding
@@ -248,10 +249,10 @@ cudaMemoryType space =
 
 callKernel :: GC.OpCompiler OpenCL ()
 callKernel (GetSize v key) =
-  GC.stm [C.cstm|$id:v = ctx->sizes.$id:key;|]
+  GC.stm [C.cstm|$id:v = *ctx->tuning_params.$id:key;|]
 callKernel (CmpSizeLe v key x) = do
   x' <- GC.compileExp x
-  GC.stm [C.cstm|$id:v = ctx->sizes.$id:key <= $exp:x';|]
+  GC.stm [C.cstm|$id:v = *ctx->tuning_params.$id:key <= $exp:x';|]
   sizeLoggingCode v key x'
 callKernel (GetSizeMax v size_class) =
   let field = "max_" ++ cudaSizeClass size_class
@@ -359,6 +360,11 @@ callKernel (LaunchKernel safety kernel_name args num_blocks block_size) = do
     expNotZero e = [C.cexp|$exp:e != 0|]
     expAnd a b = [C.cexp|$exp:a && $exp:b|]
     expsNotZero = foldl expAnd [C.cexp|1|] . map expNotZero
+    mkArgs (ValueKArg e t@(FloatType Float16)) = do
+      arg <- newVName "kernel_arg"
+      e' <- GC.compileExp e
+      GC.item [C.citem|$ty:(primStorageType t) $id:arg = $exp:(toStorage t e');|]
+      pure (arg, Nothing)
     mkArgs (ValueKArg e t) =
       (,Nothing) <$> GC.compileExpToName "kernel_arg" t e
     mkArgs (MemKArg v) = do

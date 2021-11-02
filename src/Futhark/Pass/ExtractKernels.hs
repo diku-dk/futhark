@@ -402,7 +402,7 @@ transformStm path (Let res_pat aux (Op (Screma w arrs form)))
           | otherwise = comm,
     Just do_irwim <- irwim res_pat w comm' red_fun $ zip nes arrs = do
     types <- asksScope scopeForSOACs
-    (_, stms) <- fst <$> runBuilderT (simplifyStms =<< collectStms_ (auxing aux do_irwim)) types
+    stms <- fst <$> runBuilderT (simplifyStms =<< collectStms_ (auxing aux do_irwim)) types
     transformStms path $ stmsToList stms
 transformStm path (Let pat aux@(StmAux cs _ _) (Op (Screma w arrs form)))
   | Just (reds, map_lam) <- isRedomapSOAC form = do
@@ -427,10 +427,8 @@ transformStm path (Let pat aux@(StmAux cs _ _) (Op (Screma w arrs form)))
           (mapstm, redstm) <-
             redomapToMapAndReduce pat (w, reds, map_lam, arrs)
           types <- asksScope scopeForSOACs
-          transformStms path' . stmsToList <=< (`runBuilderT_` types) $ do
-            (_, stms) <-
-              simplifyStms (stmsFromList [certify cs mapstm, certify cs redstm])
-            addStms stms
+          transformStms path' . stmsToList <=< (`runBuilderT_` types) $
+            addStms =<< simplifyStms (stmsFromList [certify cs mapstm, certify cs redstm])
 
         innerParallelBody path' =
           renameBody
@@ -542,7 +540,7 @@ transformStm path (Let pat _ (Op (Stream w arrs Sequential nes fold_fun))) = do
   types <- asksScope scopeForSOACs
   transformStms path . stmsToList . snd
     =<< runBuilderT (sequentialStreamWholeArray pat w nes fold_fun arrs) types
-transformStm _ (Let pat (StmAux cs _ _) (Op (Scatter w lam ivs as))) = runBuilder_ $ do
+transformStm _ (Let pat (StmAux cs _ _) (Op (Scatter w ivs lam as))) = runBuilder_ $ do
   let lam' = soacsLambdaToGPU lam
   write_i <- newVName "write_i"
   let (as_ws, _, _) = unzip3 as
@@ -568,7 +566,7 @@ transformStm _ (Let pat (StmAux cs _ _) (Op (Scatter w lam ivs as))) = runBuilde
   certifying cs $ do
     addStms stms
     letBind pat $ Op $ SegOp kernel
-transformStm _ (Let orig_pat (StmAux cs _ _) (Op (Hist w ops bucket_fun imgs))) = do
+transformStm _ (Let orig_pat (StmAux cs _ _) (Op (Hist w imgs ops bucket_fun))) = do
   let bfun' = soacsLambdaToGPU bucket_fun
 
   -- It is important not to launch unnecessarily many threads for
@@ -593,7 +591,7 @@ transformStm _ (Let pat (StmAux cs _ _) (Op (Stencil ws _p (StencilStatic stenci
           p = maybe 0 length $ maybeHead stencil_is
 
       stencil_params' <- fmap concat $
-        forM stencil_params $ \(Param v t) -> do
+        forM stencil_params $ \(Param _ v t) -> do
           let t' = stripArray 1 t
           params <- replicateM p $ newParam (baseString v <> "_elem") t'
           letBindNames [v] $ BasicOp $ ArrayLit (map (Var . paramName) params) t'
@@ -657,7 +655,7 @@ worthIntraGroup lam = bodyInterest (lambdaBody lam) > 1
       | Op (Screma w _ form) <- stmExp stm,
         Just lam' <- isMapSOAC form =
         mapLike w lam'
-      | Op (Scatter w lam' _ _) <- stmExp stm =
+      | Op (Scatter w _ lam' _) <- stmExp stm =
         mapLike w lam'
       | DoLoop _ _ body <- stmExp stm =
         bodyInterest body * 10

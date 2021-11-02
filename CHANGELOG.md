@@ -7,11 +7,107 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [0.21.0]
 
-### Adeed
+### Added
 
 ### Removed
 
 ### Changed
+
+### Fixed
+
+* Some incorrect removal of copies (#1505).
+
+* Handling of parametric modules with top-level existentials (#1510).
+
+* Module substitution fix (#1512).  Unfortunately this makes some type
+  errors a bit misleading.
+
+## [0.20.6]
+
+### Added
+
+* Much better code generation for segmented scans with vectorisable
+  operators.
+
+### Fixed
+
+* Fixes to extremely exotic GPU scans involving array operators.
+
+* Missing alias tracking led to invalid rewrites, causing a compiler
+  crash (#1499).
+
+* Top-level bindings with existential sizes were mishandled (#1500, #1501).
+
+* A variety of memory leaks in the multicore backend, mostly (or
+  perhaps exclusively) centered around context freeing or failing
+  programs - this should not have affected many people.
+
+* Various fixes to `f16` handling in the GPU backends.
+
+## [0.20.5]
+
+### Added
+
+* Existential sizes can now be explicitly quantified in type
+  expressions (#1308).
+
+* Significantly expanded error index.
+
+* Attributes can now be numeric.
+
+* Patterns can now have attributes.  None have any effect at the
+  moment.
+
+* `futhark autotune` and `futhark bench` now take a `--spec-file`
+  option for loading a test specification from another file.
+
+### Fixed
+
+* `auto output` reference datasets are now recreated when the program
+  is newer than the data files.
+
+* Exotic hoisting bug (#1490).
+
+## [0.20.4]
+
+### Added
+
+* Tuning parameters now (officially) exposed in the C API.
+
+* `futhark autotune` is now 2-3x faster on many programs, as it now
+  keeps the process running.
+
+* Negative numeric literals are now allowed in `case` patterns.
+
+### Fixed
+
+* `futhark_context_config_set_profiling` was missing for the `c` backend.
+
+* Correct handling of nested entry points (#1478).
+
+* Incorrect type information recorded when doing in-place lowering (#1481).
+
+## [0.20.3]
+
+### Added
+
+* Executables produced by C backends now take a `--no-print-result` option.
+
+* The C backends now generate a manifest when compiling with
+  `--library`.  This can be used by FFI generators (#1465).
+
+* The beginnings of a Rust-style error index.
+
+* `scan` on newer CUDA devices is now much faster.
+
+### Fixed
+
+* Unique opaque types are named properly in entry points.
+
+* The CUDA backend in library mode no longer `exit()`s the process if
+  NVRTC initialisation fails.
+
+## [0.20.2]
 
 ### Fixed
 
@@ -22,6 +118,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Another in-place-lowering bug (#1460).
 
 * Don't try to tile inside loops with parameters with variant sizes (#1462).
+
+* Don't consider it an ICE when the user passes invalid command line
+  options (#1464).
 
 ## [0.20.1]
 

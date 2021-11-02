@@ -38,6 +38,13 @@ generateBoilerplate = do
                         }|]
     )
 
+  GC.publicDef_ "context_config_set_profiling" GC.InitDecl $ \s ->
+    ( [C.cedecl|void $id:s(struct $id:cfg* cfg, int flag);|],
+      [C.cedecl|void $id:s(struct $id:cfg* cfg, int flag) {
+                         (void)cfg; (void)flag;
+                       }|]
+    )
+
   GC.publicDef_ "context_config_set_logging" GC.InitDecl $ \s ->
     ( [C.cedecl|void $id:s(struct $id:cfg* cfg, int flag);|],
       [C.cedecl|void $id:s(struct $id:cfg* cfg, int detail) {
@@ -46,7 +53,7 @@ generateBoilerplate = do
                                }|]
     )
 
-  (fields, init_fields) <- GC.contextContents
+  (fields, init_fields, free_fields) <- GC.contextContents
 
   ctx <- GC.publicDef "context" GC.InitDecl $ \s ->
     ( [C.cedecl|struct $id:s;|],
@@ -86,6 +93,7 @@ generateBoilerplate = do
   GC.publicDef_ "context_free" GC.InitDecl $ \s ->
     ( [C.cedecl|void $id:s(struct $id:ctx* ctx);|],
       [C.cedecl|void $id:s(struct $id:ctx* ctx) {
+                                 $stms:free_fields
                                  free_constants(ctx);
                                  free_lock(&ctx->lock);
                                  free(ctx);
@@ -100,14 +108,14 @@ generateBoilerplate = do
                                }|]
     )
 
-  GC.earlyDecl [C.cedecl|static const char *size_names[0];|]
-  GC.earlyDecl [C.cedecl|static const char *size_vars[0];|]
-  GC.earlyDecl [C.cedecl|static const char *size_classes[0];|]
+  GC.earlyDecl [C.cedecl|static const char *tuning_param_names[0];|]
+  GC.earlyDecl [C.cedecl|static const char *tuning_param_vars[0];|]
+  GC.earlyDecl [C.cedecl|static const char *tuning_param_classes[0];|]
 
-  GC.publicDef_ "context_config_set_size" GC.InitDecl $ \s ->
-    ( [C.cedecl|int $id:s(struct $id:cfg* cfg, const char *size_name, size_t size_value);|],
-      [C.cedecl|int $id:s(struct $id:cfg* cfg, const char *size_name, size_t size_value) {
-                         (void)cfg; (void)size_name; (void)size_value;
+  GC.publicDef_ "context_config_set_tuning_param" GC.InitDecl $ \s ->
+    ( [C.cedecl|int $id:s(struct $id:cfg* cfg, const char *param_name, size_t param_value);|],
+      [C.cedecl|int $id:s(struct $id:cfg* cfg, const char *param_name, size_t param_value) {
+                         (void)cfg; (void)param_name; (void)param_value;
                          return 1;
                        }|]
     )

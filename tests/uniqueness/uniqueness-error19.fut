@@ -1,6 +1,6 @@
 -- Test that you cannot consume free variables in a loop.
 -- ==
--- error: not unique
+-- error: not consumable
 
 let main =
   let n = 10

@@ -581,7 +581,7 @@ static inline int run_subtask(struct worker* worker, struct subtask* subtask)
 #endif
   worker->nested++;
   int err = subtask->fn(subtask->args, subtask->start, subtask->end,
-                        subtask->chunkable ? worker->tid : subtask->id,
+                        subtask->id,
                         worker->tid);
   worker->nested--;
   // Some error occured during some other subtask
@@ -1131,6 +1131,9 @@ static int scheduler_destroy(struct scheduler *scheduler) {
     struct worker *cur_worker = &scheduler->workers[i];
     CHECK_ERR(pthread_join(scheduler->workers[i].thread, NULL), "pthread_join");
   }
+
+  // And then destroy our local queue.
+  subtask_queue_destroy(&worker_local->q);
 
   free(scheduler->workers);
 

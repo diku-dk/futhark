@@ -55,7 +55,7 @@ def get_prefered_context(interactive=False, platform_pref=None, device_pref=None
                 device_matches += 1
     raise Exception('No OpenCL platform and device matching constraints found.')
 
-def size_assignment(s):
+def param_assignment(s):
     name, value = s.split('=')
     return (name, int(value))
 

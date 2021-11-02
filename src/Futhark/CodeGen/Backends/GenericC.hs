@@ -65,12 +65,14 @@ module Futhark.CodeGen.Backends.GenericC
     publicName,
     contextType,
     contextField,
+    contextFieldDyn,
     memToCType,
     cacheMem,
     fatMemory,
     rawMemCType,
     cproduct,
     fatMemType,
+    freeAllocatedMem,
 
     -- * Building Blocks
     primTypeToCType,
@@ -84,11 +86,13 @@ import Control.Monad.Reader
 import Control.Monad.State
 import Data.Bifunctor (first)
 import qualified Data.DList as DL
+import Data.List (unzip4)
 import Data.Loc
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import qualified Data.Text as T
 import Futhark.CodeGen.Backends.GenericC.CLI (cliDefs)
+import qualified Futhark.CodeGen.Backends.GenericC.Manifest as Manifest
 import Futhark.CodeGen.Backends.GenericC.Options
 import Futhark.CodeGen.Backends.GenericC.Server (serverDefs)
 import Futhark.CodeGen.Backends.SimpleRep
@@ -118,7 +122,7 @@ data CompilerState s = CompilerState
     compUserState :: s,
     compHeaderDecls :: M.Map HeaderSection (DL.DList C.Definition),
     compLibDecls :: DL.DList C.Definition,
-    compCtxFields :: DL.DList (C.Id, C.Type, Maybe C.Exp),
+    compCtxFields :: DL.DList (C.Id, C.Type, Maybe C.Exp, Maybe C.Stm),
     compProfileItems :: DL.DList C.BlockItem,
     compClearItems :: DL.DList C.BlockItem,
     compDeclaredMem :: [(VName, Space)],
@@ -243,15 +247,19 @@ errorMsgString (ErrorMsg parts) = do
   (formatstrs, formatargs) <- unzip <$> mapM onPart parts
   pure (mconcat formatstrs, formatargs)
 
+freeAllocatedMem :: CompilerM op s [C.BlockItem]
+freeAllocatedMem = collect $ mapM_ (uncurry unRefMem) =<< gets compDeclaredMem
+
 defError :: ErrorCompiler op s
 defError msg stacktrace = do
-  free_all_mem <- collect $ mapM_ (uncurry unRefMem) =<< gets compDeclaredMem
+  free_all_mem <- freeAllocatedMem
   (formatstr, formatargs) <- errorMsgString msg
   let formatstr' = "Error: " <> formatstr <> "\n\nBacktrace:\n%s"
   items
     [C.citems|ctx->error = msgprintf($string:formatstr', $args:formatargs, $string:stacktrace);
-                  $items:free_all_mem
-                  return 1;|]
+              $items:free_all_mem
+              err = 1;
+              goto cleanup;|]
 
 defCall :: CallCompiler op s
 defCall dests fname args = do
@@ -365,9 +373,10 @@ opaqueDecls = declsCode isOpaqueDecl
 entryDecls = declsCode (== EntryDecl)
 miscDecls = declsCode (== MiscDecl)
 
-contextContents :: CompilerM op s ([C.FieldGroup], [C.Stm])
+contextContents :: CompilerM op s ([C.FieldGroup], [C.Stm], [C.Stm])
 contextContents = do
-  (field_names, field_types, field_values) <- gets $ unzip3 . DL.toList . compCtxFields
+  (field_names, field_types, field_values, field_frees) <-
+    gets $ unzip4 . DL.toList . compCtxFields
   let fields =
         [ [C.csdecl|$ty:ty $id:name;|]
           | (name, ty) <- zip field_names field_types
@@ -376,7 +385,7 @@ contextContents = do
         [ [C.cstm|ctx->$id:name = $exp:e;|]
           | (name, Just e) <- zip field_names field_values
         ]
-  return (fields, init_fields)
+  return (fields, init_fields, catMaybes field_frees)
 
 contextFinalInits :: CompilerM op s [C.Stm]
 contextFinalInits = gets compInit
@@ -502,7 +511,11 @@ earlyDecl def = modify $ \s ->
 
 contextField :: C.Id -> C.Type -> Maybe C.Exp -> CompilerM op s ()
 contextField name ty initial = modify $ \s ->
-  s {compCtxFields = compCtxFields s <> DL.singleton (name, ty, initial)}
+  s {compCtxFields = compCtxFields s <> DL.singleton (name, ty, initial, Nothing)}
+
+contextFieldDyn :: C.Id -> C.Type -> C.Exp -> C.Stm -> CompilerM op s ()
+contextFieldDyn name ty initial free = modify $ \s ->
+  s {compCtxFields = compCtxFields s <> DL.singleton (name, ty, Just initial, Just free)}
 
 profileReport :: C.BlockItem -> CompilerM op s ()
 profileReport x = modify $ \s ->
@@ -832,7 +845,7 @@ arrayLibraryFunctions ::
   PrimType ->
   Signedness ->
   Int ->
-  CompilerM op s [C.Definition]
+  CompilerM op s Manifest.ArrayOps
 arrayLibraryFunctions pub space pt signed rank = do
   let pt' = primAPIType signed pt
       name = arrayName pt signed rank
@@ -846,10 +859,10 @@ arrayLibraryFunctions pub space pt signed rank = do
   values_raw_array <- publicName $ "values_raw_" ++ name
   shape_array <- publicName $ "shape_" ++ name
 
-  let shape_names = ["dim" ++ show i | i <- [0 .. rank -1]]
+  let shape_names = ["dim" ++ show i | i <- [0 .. rank - 1]]
       shape_params = [[C.cparam|typename int64_t $id:k|] | k <- shape_names]
       arr_size = cproduct [[C.cexp|$id:k|] | k <- shape_names]
-      arr_size_array = cproduct [[C.cexp|arr->shape[$int:i]|] | i <- [0 .. rank -1]]
+      arr_size_array = cproduct [[C.cexp|arr->shape[$int:i]|] | i <- [0 .. rank - 1]]
   copy <- asks envCopy
 
   memty <- rawMemCType space
@@ -861,7 +874,7 @@ arrayLibraryFunctions pub space pt signed rank = do
           [C.cexp|$exp:arr_size * $int:(primByteSize pt::Int)|]
           space
           [C.cstm|return NULL;|]
-        forM_ [0 .. rank -1] $ \i ->
+        forM_ [0 .. rank - 1] $ \i ->
           let dim_s = "dim" ++ show i
            in stm [C.cstm|arr->shape[$int:i] = $id:dim_s;|]
 
@@ -922,7 +935,8 @@ arrayLibraryFunctions pub space pt signed rank = do
   proto
     [C.cedecl|const typename int64_t* $id:shape_array($ty:ctx_ty *ctx, $ty:array_type *arr);|]
 
-  return
+  mapM_
+    libDecl
     [C.cunit|
           $ty:array_type* $id:new_array($ty:ctx_ty *ctx, const $ty:pt' *data, $params:shape_params) {
             $ty:array_type* bad = NULL;
@@ -967,10 +981,18 @@ arrayLibraryFunctions pub space pt signed rank = do
           }
           |]
 
+  pure $
+    Manifest.ArrayOps
+      { Manifest.arrayFree = T.pack free_array,
+        Manifest.arrayShape = T.pack shape_array,
+        Manifest.arrayValues = T.pack values_array,
+        Manifest.arrayNew = T.pack new_array
+      }
+
 opaqueLibraryFunctions ::
   String ->
   [ValueDesc] ->
-  CompilerM op s [C.Definition]
+  CompilerM op s Manifest.OpaqueOps
 opaqueLibraryFunctions desc vds = do
   name <- publicName $ opaqueName desc vds
   free_opaque <- publicName $ "free_" ++ opaqueName desc vds
@@ -1006,7 +1028,7 @@ opaqueLibraryFunctions desc vds = do
             shape_array = "futhark_shape_" ++ arr_name
             values_array = "futhark_values_" ++ arr_name
             shape' = [C.cexp|$id:shape_array(ctx, obj->$id:field)|]
-            num_elems = cproduct [[C.cexp|$exp:shape'[$int:j]|] | j <- [0 .. rank -1]]
+            num_elems = cproduct [[C.cexp|$exp:shape'[$int:j]|] | j <- [0 .. rank - 1]]
          in ( storageSize pt rank shape',
               storeValueHeader sign pt rank shape' [C.cexp|out|]
                 ++ [C.cstms|ret |= $id:values_array(ctx, obj->$id:field, (void*)out);
@@ -1019,7 +1041,7 @@ opaqueLibraryFunctions desc vds = do
 
   store_body <- collect $ do
     let (sizes, stores) = unzip $ zipWith storeComponent [0 ..] vds
-        size_vars = map (("size_" ++) . show) [0 .. length sizes -1]
+        size_vars = map (("size_" ++) . show) [0 .. length sizes - 1]
         size_sum = csum [[C.cexp|$id:size|] | size <- size_vars]
     forM_ (zip size_vars sizes) $ \(v, e) ->
       item [C.citem|typename int64_t $id:v = $exp:e;|]
@@ -1041,7 +1063,7 @@ opaqueLibraryFunctions desc vds = do
             new_array = "futhark_new_" ++ arr_name
             dataptr = "data_" ++ show i
             shapearr = "shape_" ++ show i
-            dims = [[C.cexp|$id:shapearr[$int:j]|] | j <- [0 .. rank -1]]
+            dims = [[C.cexp|$id:shapearr[$int:j]|] | j <- [0 .. rank - 1]]
             num_elems = cproduct dims
         item [C.citem|typename int64_t $id:shapearr[$int:rank];|]
         stms $ loadValueHeader sign pt rank [C.cexp|$id:shapearr|] [C.cexp|src|]
@@ -1076,7 +1098,8 @@ opaqueLibraryFunctions desc vds = do
   -- We do not need to enclose the body in a critical section, because
   -- when we operate on the components of the opaque, we are calling
   -- public API functions that do their own locking.
-  return
+  mapM_
+    libDecl
     [C.cunit|
           int $id:free_opaque($ty:ctx_ty *ctx, $ty:opaque_type *obj) {
             int ret = 0, tmp;
@@ -1108,6 +1131,13 @@ opaqueLibraryFunctions desc vds = do
           }
     |]
 
+  pure $
+    Manifest.OpaqueOps
+      { Manifest.opaqueFree = T.pack free_opaque,
+        Manifest.opaqueStore = T.pack store_opaque,
+        Manifest.opaqueRestore = T.pack restore_opaque
+      }
+
 valueDescToCType :: Publicness -> ValueDesc -> CompilerM op s C.Type
 valueDescToCType _ (ScalarValue pt signed _) =
   return $ primAPIType signed pt
@@ -1127,22 +1157,37 @@ opaqueToCType desc vds = do
   mapM_ (valueDescToCType Private) vds
   pure [C.cty|struct $id:name|]
 
-generateAPITypes :: CompilerM op s ()
+generateAPITypes :: CompilerM op s (M.Map T.Text Manifest.Type)
 generateAPITypes = do
-  mapM_ generateArray . M.toList =<< gets compArrayTypes
-  mapM_ generateOpaque . M.toList =<< gets compOpaqueTypes
+  array_ts <- mapM generateArray . M.toList =<< gets compArrayTypes
+  opaque_ts <- mapM generateOpaque . M.toList =<< gets compOpaqueTypes
+  pure $ M.fromList $ catMaybes array_ts <> opaque_ts
   where
     generateArray ((space, signed, pt, rank), pub) = do
       name <- publicName $ arrayName pt signed rank
       let memty = fatMemType space
       libDecl [C.cedecl|struct $id:name { $ty:memty mem; typename int64_t shape[$int:rank]; };|]
-      mapM libDecl =<< arrayLibraryFunctions pub space pt signed rank
+      ops <- arrayLibraryFunctions pub space pt signed rank
+      let pt_name = T.pack $ prettySigned (signed == TypeUnsigned) pt
+          pretty_name = mconcat (replicate rank "[]") <> pt_name
+          arr_type = [C.cty|struct $id:name*|]
+      case pub of
+        Public ->
+          pure $
+            Just
+              ( pretty_name,
+                Manifest.TypeArray (prettyText arr_type) pt_name rank ops
+              )
+        Private ->
+          pure Nothing
 
     generateOpaque (desc, vds) = do
       name <- publicName $ opaqueName desc vds
       members <- zipWithM field vds [(0 :: Int) ..]
       libDecl [C.cedecl|struct $id:name { $sdecls:members };|]
-      mapM libDecl =<< opaqueLibraryFunctions desc vds
+      ops <- opaqueLibraryFunctions desc vds
+      let opaque_type = [C.cty|struct $id:name*|]
+      pure (T.pack desc, Manifest.TypeOpaque (prettyText opaque_type) ops)
 
     field vd@ScalarValue {} i = do
       ct <- valueDescToCType Private vd
@@ -1182,7 +1227,7 @@ prepareEntryInputs args = collect' $ zipWithM prepare [(0 :: Int) ..] args
       checks <- map snd <$> zipWithM (prepareValue Private) (zipWith field [0 ..] vds) vds
       return
         ( [C.cparam|const $ty:ty *$id:pname|],
-          if null $ concat checks
+          if all null checks
             then Nothing
             else Just $ allTrue $ concat checks
         )
@@ -1209,7 +1254,7 @@ prepareEntryInputs args = collect' $ zipWithM prepare [(0 :: Int) ..] args
             )
 
       let (sets, checks) =
-            unzip $ zipWith maybeCopyDim shape [0 .. rank -1]
+            unzip $ zipWith maybeCopyDim shape [0 .. rank - 1]
       stms $ catMaybes sets
 
       return ([C.cty|$ty:ty*|], checks)
@@ -1256,13 +1301,13 @@ prepareEntryOutputs = collect' . zipWithM prepare [(0 :: Int) ..]
             [C.cstm|$exp:dest->shape[$int:i] = $exp:x;|]
           maybeCopyDim (Var d) i =
             [C.cstm|$exp:dest->shape[$int:i] = $id:d;|]
-      stms $ zipWith maybeCopyDim shape [0 .. rank -1]
+      stms $ zipWith maybeCopyDim shape [0 .. rank - 1]
 
 onEntryPoint ::
   [C.BlockItem] ->
   Name ->
   Function op ->
-  CompilerM op s (Maybe C.Definition)
+  CompilerM op s (Maybe (C.Definition, (T.Text, Manifest.EntryPoint)))
 onEntryPoint _ _ (Function Nothing _ _ _ _ _) = pure Nothing
 onEntryPoint get_consts fname (Function (Just ename) outputs inputs _ results args) = do
   let out_args = map (\p -> [C.cexp|&$id:(paramName p)|]) outputs
@@ -1273,7 +1318,7 @@ onEntryPoint get_consts fname (Function (Just ename) outputs inputs _ results ar
 
   entry_point_function_name <- publicName $ "entry_" ++ nameToString ename
 
-  (inputs', unpack_entry_inputs) <- prepareEntryInputs args
+  (inputs', unpack_entry_inputs) <- prepareEntryInputs $ map snd args
   let (entry_point_input_params, entry_point_input_checks) = unzip inputs'
 
   (entry_point_output_params, pack_entry_outputs) <-
@@ -1317,8 +1362,8 @@ onEntryPoint get_consts fname (Function (Just ename) outputs inputs _ results ar
 
   ops <- asks envOperations
 
-  pure . Just $
-    [C.cedecl|
+  let cdef =
+        [C.cedecl|
        int $id:entry_point_function_name
            ($ty:ctx_ty *ctx,
             $params:entry_point_output_params,
@@ -1332,12 +1377,51 @@ onEntryPoint get_consts fname (Function (Just ename) outputs inputs _ results ar
 
          return ret;
        }|]
+
+      manifest =
+        Manifest.EntryPoint
+          { Manifest.entryPointCFun = T.pack entry_point_function_name,
+            -- Note that our convention about what is "input/output"
+            -- and what is "results/args" is different between the
+            -- manifest and ImpCode.
+            Manifest.entryPointOutputs = map outputManifest results,
+            Manifest.entryPointInputs = map inputManifest args
+          }
+
+  pure $ Just (cdef, (nameToText ename, manifest))
   where
     stubParam (MemParam name space) =
       declMem name space
     stubParam (ScalarParam name ty) = do
       let ty' = primTypeToCType ty
       decl [C.cdecl|$ty:ty' $id:name;|]
+
+    vdTypeAndUnique (TransparentValue _ (ScalarValue pt signed _)) =
+      ( T.pack $ prettySigned (signed == TypeUnsigned) pt,
+        False
+      )
+    vdTypeAndUnique (TransparentValue u (ArrayValue _ _ pt signed shape)) =
+      ( T.pack $
+          mconcat (replicate (length shape) "[]")
+            <> prettySigned (signed == TypeUnsigned) pt,
+        u == Unique
+      )
+    vdTypeAndUnique (OpaqueValue u name _) =
+      (T.pack name, u == Unique)
+
+    outputManifest vd =
+      let (t, u) = vdTypeAndUnique vd
+       in Manifest.Output
+            { Manifest.outputType = t,
+              Manifest.outputUnique = u
+            }
+    inputManifest (v, vd) =
+      let (t, u) = vdTypeAndUnique vd
+       in Manifest.Input
+            { Manifest.inputName = nameToText v,
+              Manifest.inputType = t,
+              Manifest.inputUnique = u
+            }
 
 -- | The result of compilation to C is multiple parts, which can be
 -- put together in various ways.  The obvious way is to concatenate
@@ -1350,7 +1434,9 @@ data CParts = CParts
     cUtils :: T.Text,
     cCLI :: T.Text,
     cServer :: T.Text,
-    cLib :: T.Text
+    cLib :: T.Text,
+    -- | The manifest, in JSON format.
+    cJsonManifest :: T.Text
   }
 
 gnuSource :: T.Text
@@ -1387,11 +1473,12 @@ disableWarnings =
 #endif
 |]
 
--- | Produce header and implementation files.
-asLibrary :: CParts -> (T.Text, T.Text)
+-- | Produce header, implementation, and manifest files.
+asLibrary :: CParts -> (T.Text, T.Text, T.Text)
 asLibrary parts =
   ( "#pragma once\n\n" <> cHeader parts,
-    gnuSource <> disableWarnings <> cHeader parts <> cUtils parts <> cLib parts
+    gnuSource <> disableWarnings <> cHeader parts <> cUtils parts <> cLib parts,
+    cJsonManifest parts
   )
 
 -- | As executable with command-line interface.
@@ -1418,7 +1505,7 @@ compileProg ::
   m CParts
 compileProg backend ops extra header_extra spaces options prog = do
   src <- getNameSource
-  let ((prototypes, definitions, entry_point_decls), endstate) =
+  let ((prototypes, definitions, entry_point_decls, manifest), endstate) =
         runCompilerM ops src () compileProg'
       initdecls = initDecls endstate
       entrydecls = entryDecls endstate
@@ -1480,8 +1567,8 @@ $timingH
 
   let early_decls = T.unlines $ map prettyText $ DL.toList $ compEarlyDecls endstate
       lib_decls = T.unlines $ map prettyText $ DL.toList $ compLibDecls endstate
-      clidefs = cliDefs options $ Functions entry_funs
-      serverdefs = serverDefs options $ Functions entry_funs
+      clidefs = cliDefs options manifest
+      serverdefs = serverDefs options manifest
       libdefs =
         [untrimming|
 #ifdef _MSC_VER
@@ -1518,11 +1605,11 @@ $entry_point_decls
         cUtils = utildefs,
         cCLI = clidefs,
         cServer = serverdefs,
-        cLib = libdefs
+        cLib = libdefs,
+        cJsonManifest = Manifest.manifestToJSON manifest
       }
   where
     Definitions consts (Functions funs) = prog
-    entry_funs = filter (isJust . functionEntry . snd) funs
 
     compileProg' = do
       (memstructs, memfuns, memreport) <- unzip3 <$> mapM defineMemorySpace spaces
@@ -1535,19 +1622,20 @@ $entry_point_decls
         unzip <$> mapM (compileFun get_consts [[C.cparam|$ty:ctx_ty *ctx|]]) funs
 
       mapM_ earlyDecl memstructs
-      entry_points <-
-        catMaybes <$> mapM (uncurry (onEntryPoint get_consts)) funs
+      (entry_points, entry_points_manifest) <-
+        unzip . catMaybes <$> mapM (uncurry (onEntryPoint get_consts)) funs
 
       extra
 
       mapM_ earlyDecl $ concat memfuns
 
-      commonLibFuns memreport
+      types <- commonLibFuns memreport
 
       return
         ( T.unlines $ map prettyText prototypes,
           T.unlines $ map (prettyText . funcToDef) functions,
-          T.unlines $ map prettyText entry_points
+          T.unlines $ map prettyText entry_points,
+          Manifest.Manifest (M.fromList entry_points_manifest) types backend
         )
 
     funcToDef func = C.FuncDef func loc
@@ -1556,31 +1644,31 @@ $entry_point_decls
           C.OldFunc _ _ _ _ _ _ l -> l
           C.Func _ _ _ _ _ l -> l
 
-commonLibFuns :: [C.BlockItem] -> CompilerM op s ()
+commonLibFuns :: [C.BlockItem] -> CompilerM op s (M.Map T.Text Manifest.Type)
 commonLibFuns memreport = do
-  generateAPITypes
+  types <- generateAPITypes
   ctx <- contextType
   ops <- asks envOperations
   profilereport <- gets $ DL.toList . compProfileItems
 
-  publicDef_ "get_num_sizes" InitDecl $ \s ->
+  publicDef_ "get_tuning_param_count" InitDecl $ \s ->
     ( [C.cedecl|int $id:s(void);|],
       [C.cedecl|int $id:s(void) {
-                return sizeof(size_names)/sizeof(size_names[0]);
+                return sizeof(tuning_param_names)/sizeof(tuning_param_names[0]);
               }|]
     )
 
-  publicDef_ "get_size_name" InitDecl $ \s ->
+  publicDef_ "get_tuning_param_name" InitDecl $ \s ->
     ( [C.cedecl|const char* $id:s(int);|],
       [C.cedecl|const char* $id:s(int i) {
-                return size_names[i];
+                return tuning_param_names[i];
               }|]
     )
 
-  publicDef_ "get_size_class" InitDecl $ \s ->
+  publicDef_ "get_tuning_param_class" InitDecl $ \s ->
     ( [C.cedecl|const char* $id:s(int);|],
       [C.cedecl|const char* $id:s(int i) {
-                return size_classes[i];
+                return tuning_param_classes[i];
               }|]
     )
 
@@ -1642,6 +1730,8 @@ commonLibFuns memreport = do
                          return ctx->error != NULL;
                        }|]
     )
+
+  pure types
 
 compileConstants :: Constants op -> CompilerM op s [C.BlockItem]
 compileConstants (Constants ps init_consts) = do
@@ -1812,7 +1902,7 @@ readScalarPointerWithQuals quals_f dest i elemtype space vol = do
   return $ derefPointer dest i [C.cty|$tyquals:quals' $ty:elemtype*|]
 
 compileExpToName :: String -> PrimType -> Exp -> CompilerM op s VName
-compileExpToName _ _ (LeafExp (ScalarVar v) _) =
+compileExpToName _ _ (LeafExp v _) =
   return v
 compileExpToName desc t e = do
   desc' <- newVName desc
@@ -1821,29 +1911,7 @@ compileExpToName desc t e = do
   return desc'
 
 compileExp :: Exp -> CompilerM op s C.Exp
-compileExp = compilePrimExp compileLeaf
-  where
-    compileLeaf (ScalarVar src) =
-      return [C.cexp|$id:src|]
-    compileLeaf (Index _ _ Unit __ _) =
-      pure $ C.toExp UnitValue mempty
-    compileLeaf (Index src (Count iexp) restype DefaultSpace vol) = do
-      src' <- rawMem src
-      fmap (fromStorage restype) $
-        derefPointer src'
-          <$> compileExp (untyped iexp)
-          <*> pure [C.cty|$tyquals:(volQuals vol) $ty:(primStorageType restype)*|]
-    compileLeaf (Index src (Count iexp) restype (Space space) vol) =
-      fmap (fromStorage restype) . join $
-        asks envReadScalar
-          <*> rawMem src
-          <*> compileExp (untyped iexp)
-          <*> pure (primStorageType restype)
-          <*> pure space
-          <*> pure vol
-    compileLeaf (Index src (Count iexp) _ ScalarSpace {} _) = do
-      iexp' <- compileExp $ untyped iexp
-      return [C.cexp|$id:src[$exp:iexp']|]
+compileExp = compilePrimExp $ \v -> pure [C.cexp|$id:v|]
 
 -- | Tell me how to compile a @v@, and I'll Compile any @PrimExp v@ for you.
 compilePrimExp :: Monad m => (v -> m C.Exp) -> PrimExp v -> m C.Exp
@@ -2056,6 +2124,29 @@ compileCode (Write dest (Count idx) elemtype (Space space) vol elemexp) =
       <*> pure space
       <*> pure vol
       <*> (toStorage elemtype <$> compileExp elemexp)
+compileCode (Read x _ _ Unit __ _) =
+  stm [C.cstm|$id:x = $exp:(UnitValue);|]
+compileCode (Read x src (Count iexp) restype DefaultSpace vol) = do
+  src' <- rawMem src
+  e <-
+    fmap (fromStorage restype) $
+      derefPointer src'
+        <$> compileExp (untyped iexp)
+        <*> pure [C.cty|$tyquals:(volQuals vol) $ty:(primStorageType restype)*|]
+  stm [C.cstm|$id:x = $exp:e;|]
+compileCode (Read x src (Count iexp) restype (Space space) vol) = do
+  e <-
+    fmap (fromStorage restype) . join $
+      asks envReadScalar
+        <*> rawMem src
+        <*> compileExp (untyped iexp)
+        <*> pure (primStorageType restype)
+        <*> pure space
+        <*> pure vol
+  stm [C.cstm|$id:x = $exp:e;|]
+compileCode (Read x src (Count iexp) _ ScalarSpace {} _) = do
+  iexp' <- compileExp $ untyped iexp
+  stm [C.cstm|$id:x = $id:src[$exp:iexp'];|]
 compileCode (DeclareMem name space) =
   declMem name space
 compileCode (DeclareScalar name vol t) = do
@@ -2088,7 +2179,7 @@ compileCode (DeclareArray name (Space space) t vs) =
 -- For assignments of the form 'x = x OP e', we generate C assignment
 -- operators to make the resulting code slightly nicer.  This has no
 -- effect on performance.
-compileCode (SetScalar dest (BinOpExp op (LeafExp (ScalarVar x) _) y))
+compileCode (SetScalar dest (BinOpExp op (LeafExp x _) y))
   | dest == x,
     Just f <- assignmentOperator op = do
     y' <- compileExp y

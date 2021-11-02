@@ -101,6 +101,7 @@ library
       Futhark.CodeGen.Backends.COpenCL.Boilerplate
       Futhark.CodeGen.Backends.GenericC
       Futhark.CodeGen.Backends.GenericC.CLI
+      Futhark.CodeGen.Backends.GenericC.Manifest
       Futhark.CodeGen.Backends.GenericC.Options
       Futhark.CodeGen.Backends.GenericC.Server
       Futhark.CodeGen.Backends.GenericPython
@@ -217,8 +218,8 @@ library
       Futhark.Optimise.InPlaceLowering.LowerIntoStm
       Futhark.Optimise.InPlaceLowering.SubstituteIndices
       Futhark.Optimise.InliningDeadFun
-      Futhark.Optimise.ReuseAllocations
-      Futhark.Optimise.ReuseAllocations.GreedyColoring
+      Futhark.Optimise.MemoryBlockMerging
+      Futhark.Optimise.MemoryBlockMerging.GreedyColoring
       Futhark.Optimise.Simplify
       Futhark.Optimise.Simplify.Engine
       Futhark.Optimise.Simplify.Rep
@@ -260,6 +261,7 @@ library
       Futhark.Pkg.Types
       Futhark.Script
       Futhark.Test
+      Futhark.Test.Spec
       Futhark.Test.Values
       Futhark.Tools
       Futhark.Transform.CopyPropagate
@@ -292,6 +294,9 @@ library
       Language.Futhark.TypeChecker.Modules
       Language.Futhark.TypeChecker.Monad
       Language.Futhark.TypeChecker.Terms
+      Language.Futhark.TypeChecker.Terms.DoLoop
+      Language.Futhark.TypeChecker.Terms.Monad
+      Language.Futhark.TypeChecker.Terms.Pat
       Language.Futhark.TypeChecker.Types
       Language.Futhark.TypeChecker.Unify
       Language.Futhark.Warnings
@@ -308,7 +313,7 @@ library
       alex:alex
     , happy:happy
   build-depends:
-      aeson >=1.0.0.0
+      aeson >=2.0.0.0
     , ansi-terminal >=0.6.3.1
     , array >=0.4
     , base >=4.13 && <5
@@ -327,7 +332,7 @@ library
     , filepath >=1.4.1.1
     , free >=4.12.4
     , futhark-data >= 1.0.2.0
-    , futhark-server >= 1.1.0.0
+    , futhark-server >= 1.1.2.0
     , githash >=0.1.6.1
     , half >= 0.3
     , haskeline
@@ -338,7 +343,7 @@ library
     , mtl >=2.2.1
     , neat-interpolation >=0.3
     , parallel >=3.2.1.0
-    , pcg-random >= 0.1
+    , random >= 1.2.0
     , process >=1.4.3.0
     , process-extras >=0.7.2
     , regex-tdfa >=1.2
@@ -349,7 +354,6 @@ library
     , text >=1.2.2.2
     , time >=1.6.0.1
     , transformers >=0.3
-    , unordered-containers >=0.2.7
     , vector >=0.12
     , vector-binary-instances >=0.2.2.0
     , versions >=5.0.0
@@ -385,7 +389,9 @@ test-suite unit
       Futhark.IR.PrimitiveTests
       Language.Futhark.CoreTests
       Language.Futhark.SyntaxTests
-      Futhark.Optimise.ReuseAllocations.GreedyColoringTests
+      Language.Futhark.TypeCheckerTests
+      Language.Futhark.TypeChecker.TypesTests
+      Futhark.Optimise.MemoryBlockMerging.GreedyColoringTests
       Paths_futhark
   hs-source-dirs:
       unittests

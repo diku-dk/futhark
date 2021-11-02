@@ -1,6 +1,6 @@
 -- ==
 -- input { [1,2,3] } output { [3,4,5] }
--- structure distributed { SegMap/Apply 1 }
+-- structure gpu { SegMap/Apply 1 }
 
 let f (x: i32) = x + 2
 

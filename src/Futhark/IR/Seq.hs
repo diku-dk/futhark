@@ -50,9 +50,15 @@ instance Buildable Seq where
 
 instance BuilderOps Seq
 
+instance TraverseOpStms Seq where
+  traverseOpStms _ = pure
+
 instance PrettyRep Seq
 
 instance BuilderOps (Engine.Wise Seq)
+
+instance TraverseOpStms (Engine.Wise Seq) where
+  traverseOpStms _ = pure
 
 simpleSeq :: Simplify.SimpleOps Seq
 simpleSeq = Simplify.bindableSimpleOps (const $ pure ((), mempty))

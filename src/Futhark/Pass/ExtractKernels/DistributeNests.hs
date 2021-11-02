@@ -341,7 +341,7 @@ distributeMapBodyStms orig_acc = distribute <=< onStms orig_acc . stmsToList
       types <- asksScope scopeForSOACs
       stream_stms <-
         snd <$> runBuilderT (sequentialStreamWholeArray pat w accs lam arrs) types
-      (_, stream_stms') <-
+      stream_stms' <-
         runReaderT (copyPropagateInStms simpleSOACS types stream_stms) types
       onStms acc $ stmsToList (fmap (certify cs) stream_stms') ++ stms
     onStms acc (stm : stms) =
@@ -406,8 +406,7 @@ maybeDistributeStm stm@(Let pat aux (DoLoop merge form@ForLoop {} body)) acc
             -- (which are now innermost).
             stms <-
               (`runReaderT` types) $
-                fmap snd . simplifyStms
-                  =<< interchangeLoops nest' (SeqLoop perm pat merge form body)
+                simplifyStms =<< interchangeLoops nest' (SeqLoop perm pat merge form body)
             onTopLevelStms stms
             return acc'
       _ ->
@@ -430,8 +429,7 @@ maybeDistributeStm stm@(Let pat _ (If cond tbranch fbranch ret)) acc
             let branch = Branch perm pat cond tbranch fbranch ret
             stms <-
               (`runReaderT` types) $
-                fmap snd . simplifyStms
-                  =<< interchangeBranch nest' branch
+                simplifyStms =<< interchangeBranch nest' branch
             onTopLevelStms stms
             return acc'
       _ ->
@@ -453,7 +451,7 @@ maybeDistributeStm stm@(Let pat _ (WithAcc inputs lam)) acc
             let withacc = WithAccStm perm pat inputs lam
             stms <-
               (`runReaderT` types) $
-                fmap snd . simplifyStms =<< interchangeWithAcc nest' withacc
+                simplifyStms =<< interchangeWithAcc nest' withacc
             onTopLevelStms stms
             return acc'
       _ ->
@@ -468,7 +466,7 @@ maybeDistributeStm (Let pat aux (Op (Screma w arrs form))) acc
     distributeMapBodyStms acc stms
 
 -- Parallelise segmented scatters.
-maybeDistributeStm stm@(Let pat (StmAux cs _ _) (Op (Scatter w lam ivs as))) acc =
+maybeDistributeStm stm@(Let pat (StmAux cs _ _) (Op (Scatter w ivs lam as))) acc =
   distributeSingleStm acc stm >>= \case
     Just (kernels, res, nest, acc')
       | Just (perm, pat_unused) <- permutationAndMissing pat res ->
@@ -481,7 +479,7 @@ maybeDistributeStm stm@(Let pat (StmAux cs _ _) (Op (Scatter w lam ivs as))) acc
     _ ->
       addStmToAcc stm acc
 -- Parallelise segmented Hist.
-maybeDistributeStm stm@(Let pat (StmAux cs _ _) (Op (Hist w ops lam as))) acc =
+maybeDistributeStm stm@(Let pat (StmAux cs _ _) (Op (Hist w as ops lam))) acc =
   distributeSingleStm acc stm >>= \case
     Just (kernels, res, nest, acc')
       | Just (perm, pat_unused) <- permutationAndMissing pat res ->
@@ -523,9 +521,8 @@ maybeDistributeStm stm@(Let pat (StmAux cs _ _) (Op (Screma w arrs form))) acc
           localScope (typeEnvFromDistAcc acc') $ do
             nest' <- expandKernelNest pat_unused nest
             map_lam' <- soacsLambda map_lam
-            lam' <- soacsLambda lam
             localScope (typeEnvFromDistAcc acc') $
-              segmentedScanomapKernel nest' perm w lam' map_lam' nes arrs
+              segmentedScanomapKernel nest' perm w lam map_lam' nes arrs
                 >>= kernelOrNot cs stm acc kernels acc'
       _ ->
         addStmToAcc stm acc
@@ -1019,16 +1016,20 @@ segmentedScanomapKernel ::
   KernelNest ->
   [Int] ->
   SubExp ->
-  Lambda rep ->
+  Lambda SOACS ->
   Lambda rep ->
   [SubExp] ->
   [VName] ->
   DistNestT rep m (Maybe (Stms rep))
 segmentedScanomapKernel nest perm segment_size lam map_lam nes arrs = do
   mk_lvl <- asks distSegLevel
+  onLambda <- asks distOnSOACSLambda
+  let onLambda' = fmap fst . runBuilder . onLambda
   isSegmentedOp nest perm (freeIn lam) (freeIn map_lam) nes [] $
     \pat ispace inps nes' _ -> do
-      let scan_op = SegBinOp Noncommutative lam nes' mempty
+      (lam', nes'', shape) <- determineReduceOp lam nes'
+      lam'' <- onLambda' lam'
+      let scan_op = SegBinOp Noncommutative lam'' nes'' shape
       lvl <- mk_lvl (segment_size : map snd ispace) "segscan" $ NoRecommendation SegNoVirt
       addStms =<< traverse renameStm
         =<< segScan lvl pat segment_size [scan_op] map_lam arrs ispace inps

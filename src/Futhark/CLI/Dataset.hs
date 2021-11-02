@@ -31,7 +31,8 @@ import Language.Futhark.Syntax hiding
   )
 import System.Exit
 import System.IO
-import System.Random.PCG (Variate (..), initialize)
+import System.Random (mkStdGen, uniformR)
+import System.Random.Stateful (UniformRange (..))
 
 -- | Run @futhark dataset@.
 main :: String -> [String] -> IO ()
@@ -192,6 +193,7 @@ toValueType TERecord {} = Left "Cannot handle records yet."
 toValueType TEApply {} = Left "Cannot handle type applications yet."
 toValueType TEArrow {} = Left "Cannot generate functions."
 toValueType TESum {} = Left "Cannot handle sumtypes yet."
+toValueType TEDim {} = Left "Cannot handle existential sizes."
 toValueType (TEUnique t _) = toValueType t
 toValueType (TEArray t d _) = do
   d' <- constantDim d
@@ -294,34 +296,32 @@ randomValue conf (V.ValueType ds t) seed =
     gen range final = randomVector (range conf) final ds seed
 
 randomVector ::
-  (SVec.Storable v, Variate v) =>
+  (SVec.Storable v, UniformRange v) =>
   Range v ->
   (SVec.Vector Int -> SVec.Vector v -> V.Value) ->
   [Int] ->
   Word64 ->
   V.Value
 randomVector range final ds seed = runST $ do
-  -- USe some nice impure computation where we can preallocate a
+  -- Use some nice impure computation where we can preallocate a
   -- vector of the desired size, populate it via the random number
   -- generator, and then finally reutrn a frozen binary vector.
   arr <- USVec.new n
-  g <- initialize 6364136223846793006 seed
-  let fill i
+  let fill g i
         | i < n = do
-          v <- uniformR range g
+          let (v, g') = uniformR range g
           USVec.write arr i v
-          fill $! i + 1
+          g' `seq` fill g' $! i + 1
         | otherwise =
-          final (SVec.fromList ds) . SVec.convert <$> freeze arr
-  fill 0
+          pure ()
+  fill (mkStdGen $ fromIntegral seed) 0
+  final (SVec.fromList ds) . SVec.convert <$> freeze arr
   where
     n = product ds
 
 -- XXX: The following instance is an orphan.  Maybe it could be
 -- avoided with some newtype trickery or refactoring, but it's so
 -- convenient this way.
-instance Variate Half where
-  uniformR (a, b) g = do
-    (convFloat :: Float -> Half) <$> uniformR (convFloat a, convFloat b) g
-  uniform = uniformR (0, 1)
-  uniformB b = uniformR (0, b)
+instance UniformRange Half where
+  uniformRM (a, b) g =
+    (convFloat :: Float -> Half) <$> uniformRM (convFloat a, convFloat b) g

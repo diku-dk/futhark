@@ -233,6 +233,9 @@ ruleBasicOp vtable pat _ (CmpOp (CmpEq t) se1 se2)
           zip (map resSubExp (bodyResult tbranch)) (map resSubExp (bodyResult fbranch))
 ruleBasicOp _ pat _ (Replicate (Shape []) se@Constant {}) =
   Simplify $ letBind pat $ BasicOp $ SubExp se
+ruleBasicOp _ pat _ (Replicate _ se)
+  | [Acc {}] <- patTypes pat =
+    Simplify $ letBind pat $ BasicOp $ SubExp se
 ruleBasicOp _ pat _ (Replicate (Shape []) (Var v)) = Simplify $ do
   v_t <- lookupType v
   letBind pat $
@@ -379,6 +382,14 @@ ruleBasicOp vtable pat aux (SubExp (Var v))
     cs' /= cs =
     Simplify . certifying (Certs cs') $
       letBind pat $ BasicOp $ SubExp $ Var v
+-- Remove UpdateAccs that contribute the neutral value, which is
+-- always a no-op.
+ruleBasicOp vtable pat aux (UpdateAcc acc _ vs)
+  | Pat [pe] <- pat,
+    Acc token _ _ _ <- patElemType pe,
+    Just (_, _, Just (_, ne)) <- ST.entryAccInput =<< ST.lookup token vtable,
+    vs == ne =
+    Simplify . auxing aux $ letBind pat $ BasicOp $ SubExp $ Var acc
 ruleBasicOp _ _ _ _ =
   Skip
 
