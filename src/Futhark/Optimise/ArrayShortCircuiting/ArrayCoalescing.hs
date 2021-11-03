@@ -20,7 +20,6 @@ import Data.Maybe
 import Data.Sequence (Seq (..))
 import qualified Data.Set as S
 import Futhark.Analysis.PrimExp.Convert
-import Futhark.Analysis.UsageTable
 import Futhark.IR.Aliases
 import Futhark.IR.GPUMem
 import qualified Futhark.IR.Mem.IxFun as IxFun
@@ -42,7 +41,7 @@ type Coalesceable rep inner =
     Op rep ~ MemOp inner,
     HasMemBlock (Aliases rep),
     LetDec rep ~ LetDecMem,
-    HasUsage (OpWithAliases inner)
+    TopDownHelper (OpWithAliases inner)
   )
 
 newtype ComputeScalarTableOnOp rep = ComputeScalarTableOnOp
@@ -71,7 +70,7 @@ emptyTopDnEnv =
       ranges = mempty,
       v_alias = mempty,
       m_alias = mempty,
-      usage_table = mempty,
+      nonNegatives = mempty,
       scalar_table = mempty
     }
 
@@ -164,7 +163,7 @@ mkCoalsTabFun lufun r computeScalarOnOp fun@(FunDef _ _ _ _ fpars body) = do
           { scope = scopeOfFParams fpars,
             alloc = unique_mems,
             scalar_table = scalar_table,
-            usage_table = sizeUsages $ foldMap paramSizes fpars
+            nonNegatives = foldMap paramSizes fpars
           }
       ShortCircuitM m = fixPointCoalesce lutab fpars body topenv
   modifyNameSource $ runState (runReaderT m r)
@@ -972,7 +971,7 @@ mkCoalsTabStm lutab lstm@(Let pat _ (DoLoop arginis lform body)) td_env bu_env =
                   <> "\ndstrefs: "
                   <> pretty (dstrefs $ memrefs etry)
                   <> "\nusages of dstrefs: "
-                  <> pretty (map (\x -> (x, isSize x $ usage_table td_env')) $ namesToList $ freeIn $ dstrefs $ memrefs $ etry)
+                  <> pretty (map (\x -> (x, x `nameIn` nonNegatives td_env')) $ namesToList $ freeIn $ dstrefs $ memrefs $ etry)
                   <> "\nwrt_i: "
                   <> pretty wrt_i
                   <> "\nuse_p: "

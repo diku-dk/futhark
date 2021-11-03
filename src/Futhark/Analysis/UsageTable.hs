@@ -187,8 +187,6 @@ usageInExp (BasicOp (Update _ src _ _)) =
   consumedUsage src
 usageInExp (BasicOp (FlatUpdate src _ _)) =
   consumedUsage src
-usageInExp (BasicOp (Index _ slc)) =
-  sizeUsages $ freeIn $ mapMaybe dimFix $ unSlice slc
 usageInExp (Op op) =
   mconcat $ map consumedUsage (namesToList $ consumedInOp op)
 usageInExp (BasicOp _) = mempty

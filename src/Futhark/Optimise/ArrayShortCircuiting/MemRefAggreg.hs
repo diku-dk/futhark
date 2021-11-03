@@ -305,7 +305,7 @@ noMemOverlap _ Undeterminable _ = False
 noMemOverlap _ _ Undeterminable = False
 noMemOverlap td_env (Set is0) (Set js0) =
   -- TODO Expand this to be able to handle eg. nw
-  all (\i -> all (IxFun.disjoint (usage_table td_env) i) js) is
+  all (\i -> all (IxFun.disjoint (nonNegatives td_env) i) js) is
   where
     is = map (fixPoint (IxFun.substituteInLMAD $ fmap TPrimExp $ scalar_table td_env)) $ S.toList is0
     js = map (fixPoint (IxFun.substituteInLMAD $ fmap TPrimExp $ scalar_table td_env)) $ S.toList js0

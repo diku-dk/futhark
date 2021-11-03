@@ -57,7 +57,6 @@ import qualified Futhark.Analysis.AlgSimplify2 as AlgSimplify2
 --  )
 import Futhark.Analysis.PrimExp.Convert --(substituteInPrimExp)
 import qualified Futhark.Analysis.PrimExp.Generalize as PEG
-import Futhark.Analysis.UsageTable
 import Futhark.IR.Prop
 import Futhark.IR.Syntax
   ( DimChange (..),
@@ -1167,11 +1166,11 @@ gcd x y = gcd' (abs x) (abs y)
 -- as soon as more than one dimension is involved, things get more
 -- tricky. Currently, we try to 'conservativelyFlatten' any LMAD with more than
 -- one dimension.
-disjoint :: UsageTable -> LMAD (TPrimExp Int64 VName) -> LMAD (TPrimExp Int64 VName) -> Bool
-disjoint ut l1@(LMAD offset1 [dim1]) l2@(LMAD offset2 [dim2]) =
+disjoint :: Names -> LMAD (TPrimExp Int64 VName) -> LMAD (TPrimExp Int64 VName) -> Bool
+disjoint non_negatives l1@(LMAD offset1 [dim1]) l2@(LMAD offset2 [dim2]) =
   doesNotDivide (gcd (ldStride dim1) (ldStride dim2)) (offset1 - offset2)
     || ( traceWith "result?" $
-           nonNegativeish ut $
+           nonNegativeish non_negatives $
              traceWith ("l1: " <> pretty l1 <> "\nl2: " <> pretty l2 <> "\ndisjoint1") $
                AlgSimplify2.simplify0 $
                  traceWith "before simplify" $
@@ -1179,7 +1178,7 @@ disjoint ut l1@(LMAD offset1 [dim1]) l2@(LMAD offset2 [dim2]) =
                      offset1 - (offset2 + (ldShape dim2 - 1) * ldStride dim2)
        )
     || ( traceWith "result?" $
-           nonNegativeish ut $
+           nonNegativeish non_negatives $
              traceWith "disjoint2" $
                AlgSimplify2.simplify0 $
                  traceWith "before simplify" $
@@ -1190,23 +1189,23 @@ disjoint ut l1@(LMAD offset1 [dim1]) l2@(LMAD offset2 [dim2]) =
     doesNotDivide :: Maybe (TPrimExp Int64 VName) -> TPrimExp Int64 VName -> Bool
     doesNotDivide (Just x) y = maybe False not $ primBool $ (TPrimExp $ constFoldPrimExp $ untyped $ Futhark.Util.IntegralExp.mod y x :: TPrimExp Int64 VName) .==. 0
     doesNotDivide _ _ = False
-disjoint ut lmad1 lmad2 =
+disjoint non_negatives lmad1 lmad2 =
   case (conservativeFlatten lmad1, conservativeFlatten lmad2) of
-    (Just lmad1', Just lmad2') -> disjoint ut (traceWith "flattened 1" lmad1') (traceWith "flattened 2" lmad2')
+    (Just lmad1', Just lmad2') -> disjoint non_negatives (traceWith "flattened 1" lmad1') (traceWith "flattened 2" lmad2')
     _ -> False
 
-nonNegativeish :: UsageTable -> AlgSimplify2.SofP -> Bool
-nonNegativeish ut prods = all (nonNegativeishProd ut) prods
+nonNegativeish :: Names -> AlgSimplify2.SofP -> Bool
+nonNegativeish non_negatives prods = all (nonNegativeishProd non_negatives) prods
 
-nonNegativeishProd :: UsageTable -> AlgSimplify2.Prod -> Bool
-nonNegativeishProd ut (AlgSimplify2.Prod True _) = False
-nonNegativeishProd ut (AlgSimplify2.Prod False as) =
-  all (nonNegativeishExp ut) as
+nonNegativeishProd :: Names -> AlgSimplify2.Prod -> Bool
+nonNegativeishProd non_negatives (AlgSimplify2.Prod True _) = False
+nonNegativeishProd non_negatives (AlgSimplify2.Prod False as) =
+  all (nonNegativeishExp non_negatives) as
 
-nonNegativeishExp :: UsageTable -> PrimExp VName -> Bool
-nonNegativeishExp ut (ValueExp v) = not $ negativeIsh v
-nonNegativeishExp ut (LeafExp vname _) = isSize vname ut
-nonNegativeishExp ut _ = False
+nonNegativeishExp :: Names -> PrimExp VName -> Bool
+nonNegativeishExp non_negatives (ValueExp v) = not $ negativeIsh v
+nonNegativeishExp non_negatives (LeafExp vname _) = vname `nameIn` non_negatives
+nonNegativeishExp _ _ = False
 
 data Interval = Interval
   { lowerBound :: TPrimExp Int64 VName,

@@ -5,7 +5,7 @@
 module Futhark.Optimise.ArrayShortCircuiting.TopDownAn
   ( TopDnEnv (..),
     ScopeTab,
-    HasUsage,
+    TopDownHelper,
     InhibitTab,
     RangeTab,
     topdwnTravBinding,
@@ -18,9 +18,10 @@ module Futhark.Optimise.ArrayShortCircuiting.TopDownAn
 where
 
 import qualified Data.Map.Strict as M
+import Data.Maybe
 import Futhark.Analysis.PrimExp.Convert
 --import qualified Futhark.IR.Mem.IxFun as IxFun
-import Futhark.Analysis.UsageTable
+import Futhark.Analysis.SymbolTable
 import Futhark.IR.Aliases
 import Futhark.IR.GPUMem
 import qualified Futhark.IR.Mem.IxFun as IxFun
@@ -67,9 +68,9 @@ data TopDnEnv rep = TopDnEnv
     -- | keeps track of memory block aliasing.
     --   this needs to be implemented
     m_alias :: MemAliasTab,
-    -- | Contains usage information about the variables in the program. Used to
-    -- determine if a variable is a size.
-    usage_table :: UsageTable,
+    -- | Contains symbol information about the variables in the program. Used to
+    -- determine if a variable is non-negative.
+    nonNegatives :: Names,
     scalar_table :: M.Map VName (PrimExp VName)
   }
 
@@ -132,40 +133,40 @@ getInvAliasFromExp (BasicOp (Rearrange perm _)) =
    in Just (`IxFun.permute` perm')
 getInvAliasFromExp _ = Nothing
 
-class HasUsage inner where
-  computeUsage :: [VName] -> inner -> UsageTable
+class TopDownHelper inner where
+  innerNonNegatives :: [VName] -> inner -> Names
 
   scopeHelper :: inner -> Scope rep
 
-instance HasUsage (HostOp (Aliases GPUMem) ()) where
-  computeUsage _ (SegOp seg_op) =
-    foldMap (sizeUsage . fst) $ unSegSpace $ segSpace seg_op
-  computeUsage [vname] (SizeOp _) = sizeUsage vname
-  computeUsage _ _ = mempty
+instance TopDownHelper (HostOp (Aliases GPUMem) ()) where
+  innerNonNegatives _ (SegOp seg_op) =
+    foldMap (oneName . fst) $ unSegSpace $ segSpace seg_op
+  innerNonNegatives [vname] (SizeOp _) = oneName vname
+  innerNonNegatives _ _ = mempty
 
   scopeHelper (SegOp seg_op) = scopeOfSegSpace $ segSpace seg_op
   scopeHelper _ = mempty
 
-instance HasUsage () where
-  computeUsage _ () = mempty
+instance TopDownHelper () where
+  innerNonNegatives _ () = mempty
   scopeHelper () = mempty
 
 -- | fills in the TopDnEnv table
 topdwnTravBinding ::
-  (ASTRep rep, Op rep ~ MemOp inner, CanBeAliased inner, HasUsage (OpWithAliases inner), HasMemBlock (Aliases rep)) =>
+  (ASTRep rep, Op rep ~ MemOp inner, CanBeAliased inner, TopDownHelper (OpWithAliases inner), HasMemBlock (Aliases rep)) =>
   TopDnEnv rep ->
   Stm (Aliases rep) ->
   TopDnEnv rep
-topdwnTravBinding env stm@(Let (Pat [pe]) _ (Op (Alloc _ _))) =
+topdwnTravBinding env stm@(Let (Pat [pe]) _ (Op (Alloc (Var vname) _))) =
   env
     { alloc = alloc env <> oneName (patElemName pe),
       scope = scope env <> scopeOf stm,
-      usage_table = usageInStm stm <> usage_table env
+      nonNegatives = nonNegatives env <> oneName vname
     }
 topdwnTravBinding env stm@(Let pat _ (Op (Inner inner))) =
   env
     { scope = scope env <> scopeOf stm <> scopeHelper inner,
-      usage_table = computeUsage (patNames pat) inner <> usageInStm stm <> usage_table env
+      nonNegatives = nonNegatives env <> innerNonNegatives (patNames pat) inner
     }
 -- topdwnTravBinding env stm@(Let pat _ e@(If cond then_body else_body _)) =
 --   let res = getDirAliasFromExp e
@@ -190,15 +191,29 @@ topdwnTravBinding env stm@(Let (Pat [pe]) _ e)
      in env
           { v_alias = M.insert (patElemName pe) (x, ixfn, ixfn_inv) (v_alias env),
             scope = scope env <> scopeOf stm,
-            usage_table = usageInStm stm <> usage_table env
+            nonNegatives =
+              nonNegatives env
+                <> nonNegativesInPat (stmPat stm)
           }
 topdwnTravBinding env stm =
   -- ToDo: remember to update scope info appropriately
   --       for compound statements such as if, do-loop, etc.
   env
     { scope = scope env <> scopeOf stm,
-      usage_table = usageInStm stm <> usage_table env
+      nonNegatives =
+        nonNegatives env
+          <> nonNegativesInPat (stmPat stm)
     }
+
+nonNegativesInPat :: Typed rep => PatT rep -> Names
+nonNegativesInPat (Pat elems) =
+  foldMap (namesFromList . mapMaybe subExpVar . arrayDims . typeOf) elems
+
+nonNegativesInExp :: Exp rep -> Names
+nonNegativesInExp (BasicOp (Index _ slc)) =
+  freeIn $ mapMaybe dimFix $ unSlice slc
+nonNegativesInExp (BasicOp (Update _ _ slc _)) =
+  freeIn $ mapMaybe dimFix $ unSlice slc
 
 topDownLoop :: TopDnEnv rep -> Stm (Aliases rep) -> TopDnEnv rep
 topDownLoop td_env (Let _pat _ (DoLoop arginis lform body)) =
@@ -207,13 +222,13 @@ topDownLoop td_env (Let _pat _ (DoLoop arginis lform body)) =
           <> scopeOfFParams (map fst arginis)
           <> scopeOf lform --scopeOfLoopForm lform))
           -- <> scopeOf (bodyStms body)
-      usages =
-        usage_table td_env <> case lform of
-          ForLoop v _ _ _ -> sizeUsage v
+      non_negatives =
+        nonNegatives td_env <> case lform of
+          ForLoop v _ _ _ -> oneName v
           _ -> mempty
    in -- foldl (foldfun scopetab_loop) (m_alias td_env) $
       --   zip3 (patternValueElements pat) arginis bdy_ress
-      td_env {scope = scopetab, usage_table = usages}
+      td_env {scope = scopetab, nonNegatives = non_negatives}
 {--
   where
     updateAlias (m, m_al) tab =
