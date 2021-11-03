@@ -39,6 +39,7 @@ import Futhark.Pass.ExtractMulticore
 import Futhark.Pass.FirstOrderTransform
 import Futhark.Pass.KernelBabysitting
 import Futhark.Pass.LiftAllocations as LiftAllocations
+import Futhark.Pass.LowerAllocations as LowerAllocations
 import Futhark.Pass.Simplify
 import Futhark.Pipeline
 
@@ -97,6 +98,10 @@ sequentialCpuPipeline =
         LiftAllocations.liftAllocationsSeqMem,
         simplifySeqMem,
         ArrayShortCircuiting.optimiseSeqMem,
+        simplifySeqMem,
+        performCSE False,
+        simplifySeqMem,
+        LowerAllocations.lowerAllocationsSeqMem,
         simplifySeqMem
       ]
 
@@ -114,6 +119,10 @@ gpuPipeline =
         LiftAllocations.liftAllocationsGPUMem,
         simplifyGPUMem,
         ArrayShortCircuiting.optimiseGPUMem,
+        simplifyGPUMem,
+        performCSE False,
+        simplifyGPUMem,
+        LowerAllocations.lowerAllocationsGPUMem,
         performCSE False,
         simplifyGPUMem,
         MemoryBlockMerging.optimise,
