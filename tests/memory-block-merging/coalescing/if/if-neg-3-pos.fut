@@ -16,8 +16,8 @@
 -- output { [[2, 5], [9, 9]]
 --          2
 --        }
--- structure cpu { Alloc 2 }
--- structure gpu { Alloc 2 }
+-- structure seq-mem { Alloc 2 }
+-- structure gpu-mem { Alloc 2 }
 
 let main [n] (cond: bool) (x: *[n][n]i32) (a: [n]i32): (*[n][n]i32, i32) =
   let b = map (+ 1) a

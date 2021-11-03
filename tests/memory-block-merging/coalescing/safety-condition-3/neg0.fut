@@ -11,8 +11,8 @@
 --           [4, 5]]
 --          6
 --        }
--- structure cpu { Alloc 2 }
--- structure gpu { Alloc 2 }
+-- structure seq-mem { Alloc 2 }
+-- structure gpu-mem { Alloc 2 }
 
 let main [n] (xs: *[n][n]i32) (ys0: [n]i32) (i: i64): ([n][n]i32, i32) =
   let ys = map (+ 1) ys0

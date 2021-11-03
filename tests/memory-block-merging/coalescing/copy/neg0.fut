@@ -12,8 +12,8 @@
 --           [7, 1, 8],
 --           [0, 1, 2]]
 --        }
--- structure cpu { Alloc 2 }
--- structure gpu { Alloc 1 }
+-- structure seq-mem { Alloc 2 }
+-- structure gpu-mem { Alloc 1 }
 
 let main [n] (i: i64) (ns: [n]i32) (mss: [n][n]i32): [n][n]i32 =
   -- For the CPU pipeline, t1 and t0 can be fused into a single outer map.  This

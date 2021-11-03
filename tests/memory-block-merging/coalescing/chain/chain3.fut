@@ -9,8 +9,8 @@
 -- output { [[[4, 4], [3, 5]], [[1, 1], [1, 1]]]
 --          [[7, 7], [7, 7]]
 --        }
--- structure cpu { Alloc 3 }
--- structure gpu { Alloc 3 }
+-- structure seq-mem { Alloc 3 }
+-- structure gpu-mem { Alloc 3 }
 
 let main [n] (vss0: [n][n]i32)
              (ns: [n]i32)

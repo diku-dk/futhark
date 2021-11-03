@@ -2,8 +2,8 @@
 -- but currently we just test that the final number of allocations match (it is
 -- the same for the other hoisting tests).
 -- ==
--- structure cpu { Alloc 1 }
--- structure gpu { Alloc 1 }
+-- structure seq-mem { Alloc 1 }
+-- structure gpu-mem { Alloc 1 }
 
 let main (length0: i64, length1: i64): []i32 =
   let temp0 = replicate length0 1i32

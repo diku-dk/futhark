@@ -1,8 +1,8 @@
 -- ==
 -- input { [[1i64,2i64,3i64],[4i64,5i64,6i64],[7i64,8i64,9i64]] 1i64 }
 -- output { [[1i64,1i64,1i64], [5i64,6i64,7i64], [8i64,9i64,10i64]] }
--- structure gpu { Alloc 2 }
--- structure cpu { Alloc 2 }
+-- structure gpu-mem { Alloc 2 }
+-- structure seq-mem { Alloc 2 }
 
 let main [n] (xss: [n][n]i64) (i: i64) =
   -- The basis array

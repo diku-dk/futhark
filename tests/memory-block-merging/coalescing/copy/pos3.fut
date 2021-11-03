@@ -10,8 +10,8 @@
 --           [7, 1, 8],
 --           [0, 1, 2]]
 --        }
--- structure cpu { Alloc 1 }
--- structure gpu { Alloc 1 }
+-- structure seq-mem { Alloc 1 }
+-- structure gpu-mem { Alloc 1 }
 
 let main [n] (i: i64) (ns: [n]i32) (mss: [n][n]i32): [n][n]i32 =
   -- This is the basis array in which everything will be put.

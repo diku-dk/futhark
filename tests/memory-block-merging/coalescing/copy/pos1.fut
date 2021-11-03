@@ -8,8 +8,8 @@
 --           [8i64, 1i64, 8i64],
 --           [0i64, 1i64, 2i64]]
 --        }
--- structure cpu { Alloc 2 }
--- structure gpu { Alloc 2 }
+-- structure seq-mem { Alloc 2 }
+-- structure gpu-mem { Alloc 2 }
 
 let main [n] (i: i64) (ns: [n]i64): [n][n]i64 =
   let t1 = replicate n (iota n)

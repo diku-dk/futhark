@@ -9,8 +9,8 @@
 --       }
 -- output { [5, 8]
 --        }
--- structure cpu { Alloc 2 }
--- structure gpu { Alloc 2 }
+-- structure seq-mem { Alloc 2 }
+-- structure gpu-mem { Alloc 2 }
 
 let main [n] (a0: [n]i32) (n_iter: i64): []i32 =
   let a2 = loop a = a0 for _i < n_iter do

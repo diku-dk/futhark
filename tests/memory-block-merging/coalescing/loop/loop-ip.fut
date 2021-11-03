@@ -6,8 +6,8 @@
 -- output {
 --          [ [1i32, 9i32], [1i32, 3i32] ]
 --        }
--- structure cpu { Alloc 0 }
--- structure gpu { Alloc 0 }
+-- structure seq-mem { Alloc 0 }
+-- structure gpu-mem { Alloc 0 }
 
 -- Code below should result in 1 mem-block coalescing,
 -- corresponding to 4 coalesced variables.

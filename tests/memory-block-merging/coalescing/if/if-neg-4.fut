@@ -8,8 +8,8 @@
 -- output { [[1, 2], [0, 0]]
 --          10 10
 --        }
--- structure cpu { Alloc 3 }
--- structure gpu { Alloc 3 }
+-- structure seq-mem { Alloc 3 }
+-- structure gpu-mem { Alloc 3 }
 
 let main [n] (cond0: bool) (cond1: bool)
               (y0: [n]i32) (z0: [n]i32)

@@ -11,8 +11,8 @@
 --           [8, 1, 8],
 --           [0, 1, 2]]
 --        }
--- structure cpu { Alloc 0 }
--- structure gpu { Alloc 0 }
+-- structure seq-mem { Alloc 0 }
+-- structure gpu-mem { Alloc 0 }
 
 let main [n] (t1: *[n][n]i32) (i: i64) (ns: [n]i32): [n][n]i32 =
   let t0 = map (+ 1) ns -- Will use the memory of t1[i].

@@ -2,8 +2,8 @@
 -- ==
 -- input { [1i64, 2i64] }
 -- output { [2i64, 3i64, 0i64, 1i64] }
--- structure cpu { Alloc 2 }
--- structure gpu { Alloc 2 }
+-- structure seq-mem { Alloc 2 }
+-- structure gpu-mem { Alloc 2 }
 
 let main (ns: []i64): []i64 =
   let t0 = map (+ 1) ns

@@ -7,8 +7,8 @@
 --       }
 -- output { [[5, 5], [1, 2]]
 --        }
--- structure cpu { Alloc 1 }
--- structure gpu { Alloc 1 }
+-- structure seq-mem { Alloc 1 }
+-- structure gpu-mem { Alloc 1 }
 
 let main [n] (ns: [n]i32) (t1: *[n][n]i32) (i0: i32): [][]i32 =
   let t0 = map (+ 1) ns

@@ -10,8 +10,8 @@
 --          , [ [0i32, 0i32], [2i32, 4i32] ]
 --          ]
 --        }
--- structure cpu { Alloc 1 }
--- structure gpu { Alloc 1 }
+-- structure seq-mem { Alloc 1 }
+-- structure gpu-mem { Alloc 1 }
 
 -- Number of coalescing is 1, but corresponds to 4 coalescing
 -- operations on the same memory block, i.e.,

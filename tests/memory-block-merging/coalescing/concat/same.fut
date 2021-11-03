@@ -6,8 +6,8 @@
 -- ==
 -- input { [13, 4] }
 -- output { [130, 40, 130, 40] }
--- structure cpu { Alloc 1 }
--- structure gpu { Alloc 1 }
+-- structure seq-mem { Alloc 1 }
+-- structure gpu-mem { Alloc 1 }
 
 let main (xs: []i32): []i32 =
   let ys = map (* 10) xs

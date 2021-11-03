@@ -6,8 +6,8 @@
 -- output { [[6, 16, 10, 30, 1, 5],
 --           [0,  0,  0,  0, 0, 0]]
 --        }
--- structure cpu { Alloc 4 }
--- structure gpu { Alloc 4 }
+-- structure seq-mem { Alloc 4 }
+-- structure gpu-mem { Alloc 4 }
 
 let main [n] (ns: [n]i32) (i: i32): [][]i32 =
   let t0 = map (+ 1) ns -- Will use the memory of t3.

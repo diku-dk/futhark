@@ -3,8 +3,8 @@
 -- ==
 -- input { [7, 0, 7] }
 -- output { [[0, 0, 0, 0, 0, 0], [7, 0, 7, 8, 1, 8]] }
--- structure cpu { Alloc 1 }
--- structure gpu { Alloc 1 }
+-- structure seq-mem { Alloc 1 }
+-- structure gpu-mem { Alloc 1 }
 
 let main [n] (ns: [n]i32): [][]i32 =
   -- Will be the only remaining memory block.

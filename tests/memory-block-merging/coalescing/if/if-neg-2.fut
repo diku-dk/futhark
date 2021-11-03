@@ -8,8 +8,8 @@
 --          [ [1i32, 2i32], [2i32, 3i32] ]
 --          3i32
 --        }
--- structure cpu { Alloc 2 }
--- structure gpu { Alloc 2 }
+-- structure seq-mem { Alloc 2 }
+-- structure gpu-mem { Alloc 2 }
 
 -- There should be no coalescing here because `x` is
 -- used during the lifetime of `r`, which also prevents

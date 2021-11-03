@@ -9,8 +9,8 @@
 --           [3i64, 4i64, 5i64],
 --           [6i64, 7i64, 8i64]]
 --        }
--- structure cpu { Alloc 1 }
--- structure gpu { Alloc 1 }
+-- structure seq-mem { Alloc 1 }
+-- structure gpu-mem { Alloc 1 }
 
 let main [n] (i: i64) (ys: [n]i64): [n][n]i64 =
   let xs = tabulate_2d n n (\i j -> i * n + j)

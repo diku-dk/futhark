@@ -10,8 +10,8 @@
 --           [[1, 1],
 --            [1, 1]]]
 --        }
--- structure cpu { Alloc 1 }
--- structure gpu { Alloc 1 }
+-- structure seq-mem { Alloc 1 }
+-- structure gpu-mem { Alloc 1 }
 
 let main [n] (ns: [n]i32)
              (i: i32)

@@ -8,8 +8,8 @@
 --       }
 -- output { [[1i64, 4i64], [1i64, 2i64]]
 --        }
--- structure cpu { Alloc 0 }
--- structure gpu { Alloc 0 }
+-- structure seq-mem { Alloc 0 }
+-- structure gpu-mem { Alloc 0 }
 
 let main [n] (xs: *[n][n]i64) (cond: bool) (i: i64): [n][n]i64 =
   -- Both branches will use the memory of ys, which will use the memory of

@@ -10,8 +10,8 @@
 --           [1i64, 2i64, 3i64, 4i64]]
 --          [2i64, 3i64, 4i64, 5i64]
 --        }
--- structure cpu { Alloc 3 }
--- structure gpu { Alloc 3 }
+-- structure seq-mem { Alloc 3 }
+-- structure gpu-mem { Alloc 3 }
 
 let main [n] (i: i64) (ys0: [n]i64): ([n][n]i64, [n]i64) =
   let xs = tabulate_2d n n (\i j -> i*n + j) |> opaque

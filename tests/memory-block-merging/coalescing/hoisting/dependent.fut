@@ -1,7 +1,7 @@
 -- A small chain of coalescings.
 -- ==
--- structure cpu { Alloc 1 }
--- structure gpu { Alloc 1 }
+-- structure seq-mem { Alloc 1 }
+-- structure gpu-mem { Alloc 1 }
 
 let main (length: i64): []i32 =
   let temp = replicate length 1i32

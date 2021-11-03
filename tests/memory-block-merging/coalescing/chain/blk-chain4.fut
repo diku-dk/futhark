@@ -10,8 +10,8 @@
 --           [13, 13, 13],
 --           [15, 15, 15]]
 --        }
--- structure cpu { Alloc 1 }
--- structure gpu { Alloc 3 }
+-- structure seq-mem { Alloc 1 }
+-- structure gpu-mem { Alloc 3 }
 
 -- The GPU pipeline has additional allocations for the two 'replicate'
 -- expressions.

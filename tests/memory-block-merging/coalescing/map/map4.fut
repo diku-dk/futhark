@@ -3,8 +3,8 @@
 -- output { [[0i64, 8i64, 18i64],
 --           [1i64, 9i64, 19i64],
 --           [2i64, 10i64, 20i64]] }
--- structure gpu { Alloc 1 }
--- structure cpu { Alloc 2 }
+-- structure gpu-mem { Alloc 1 }
+-- structure seq-mem { Alloc 2 }
 
 let main [n] (xs: [n]i64): [n][n]i64 =
   map (\j ->
