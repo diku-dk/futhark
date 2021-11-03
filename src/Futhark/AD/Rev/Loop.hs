@@ -14,6 +14,7 @@ import Futhark.AD.Rev.Monad
 import qualified Futhark.Analysis.Alias as Alias
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.Builder
+import Futhark.Error (compilerLimitationS)
 import Futhark.IR.Aliases (consumedInStms)
 import Futhark.IR.SOACS
 import Futhark.Tools
@@ -429,7 +430,7 @@ diffLoop diffStms pat aux loop m
           (bound : _) -> do
             for_loop <- convertWhileLoop bound loop
             diffLoop diffStms pat aux for_loop m
-          _ -> error "diffLoop: while loops requre a bound attribute" -- this should be a user error
+          _ -> compilerLimitationS "While-loops requre a #[bound(n)] attribute when differentiated with vjp."
   | otherwise = do
     fwdLoop pat aux loop
     m
