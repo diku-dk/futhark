@@ -15,12 +15,11 @@ import qualified Futhark.Analysis.Alias as Alias
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.Builder
 import Futhark.IR.Aliases (consumedInStms)
-import Futhark.IR.Prop.Aliases
 import Futhark.IR.SOACS
 import Futhark.Tools
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
-import Futhark.Util
+import Futhark.Util (traverseFold)
 
 -- | A convenience function to bring the components of a for-loop into
 -- scope and throw an error if the passed 'ExpT' is not a for-loop.
@@ -256,6 +255,8 @@ valPatAdj v = do
 valPatAdjs :: LoopInfo [VName] -> ADM (LoopInfo [(Param DeclType, SubExp)])
 valPatAdjs = (mapM . mapM) valPatAdj
 
+-- | Reverses a loop by substituting the loop index as well as reversing
+-- the arrays that loop variables are bound to.
 reverseIndices :: ExpT SOACS -> ADM (Substitutions, Substitutions, Stms SOACS)
 reverseIndices loop = do
   bindForLoop loop $ \_val_pats form i it bound loop_vars _body -> do
@@ -264,7 +265,7 @@ reverseIndices loop = do
         let one = Constant $ IntValue $ intValue it (1 :: Int)
          in letSubExp "bound-1" $ BasicOp $ BinOp (Sub it OverflowUndef) bound one
 
-    loop_var_arrays_substs <- fmap M.fromList $
+    var_arrays_substs <- fmap M.fromList $
       inScopeOf form $ do
         forM (map snd loop_vars) $ \xs -> do
           xs_t <- lookupType xs
@@ -277,13 +278,15 @@ reverseIndices loop = do
                     [DimSlice bound_minus_one bound (Constant (IntValue (Int64Value (-1))))]
           return (xs, xs_rev)
 
-    (i_rev, index_stms) <- collectStms $
+    (i_rev, i_stms) <- collectStms $
       inScopeOf form $ do
         letExp (baseString i <> "_rev") $
           BasicOp $ BinOp (Sub it OverflowWrap) bound_minus_one (Var i)
 
-    return (loop_var_arrays_substs, M.singleton i i_rev, index_stms)
+    return (var_arrays_substs, M.singleton i i_rev, i_stms)
 
+-- | Returns a substitution which substitutes values in the reverse
+-- loop body with values from the tape.
 restore :: Stms SOACS -> [Param DeclType] -> VName -> ADM Substitutions
 restore stms_adj loop_params' i' =
   M.fromList . catMaybes <$> mapM f loop_params'
@@ -309,29 +312,34 @@ restore stms_adj loop_params' i' =
         v = paramName p
         consumed = namesToList $ consumedInStms $ fst $ Alias.analyseStms mempty stms_adj
 
+-- | A type to keep track of and seperate values corresponding to different
+-- parts of the loop.
 data LoopInfo a = LoopInfo
   { loopRes :: a,
     loopFree :: a,
-    loopVars :: a
+    loopVars :: a,
+    loopVals :: a
   }
   deriving (Functor, Foldable, Traversable, Show)
 
+-- | Transforms a for-loop into its revers-mode derivative.
 revLoop :: (Stms SOACS -> ADM ()) -> Pat -> ExpT SOACS -> ADM ()
 revLoop diffStms pat loop =
   bindForLoop loop $ \val_pats _form _i _it _bound _loop_vars _body ->
     renameForLoop loop $
       \loop' val_pats' form' i' _it' _bound' loop_vars' body' -> do
         let loop_params = map fst val_pats
-            loop_params' = map fst val_pats'
+            (loop_params', loop_vals') = unzip val_pats'
+            loop_var_arrays' = map snd loop_vars'
             getVName Constant {} = Nothing
             getVName (Var v) = Just v
-            loop_val_names =
+            loop_vnames =
               LoopInfo
                 { loopRes = mapMaybe subExpResVName $ bodyResult body',
                   loopFree =
-                    (namesToList (freeIn loop') \\ map snd loop_vars')
-                      \\ mapMaybe (getVName . snd) val_pats',
-                  loopVars = map snd loop_vars'
+                    (namesToList (freeIn loop') \\ loop_var_arrays') \\ mapMaybe getVName loop_vals',
+                  loopVars = loop_var_arrays',
+                  loopVals = mapMaybe getVName loop_vals'
                 }
 
         renameLoopTape $ M.fromList $ zip (map paramName loop_params) (map paramName loop_params')
@@ -341,55 +349,54 @@ revLoop diffStms pat loop =
             Just v -> setAdj v =<< lookupAdj (patElemName pe)
             Nothing -> return ()
 
-        val_pat_adjs <- valPatAdjs loop_val_names
+        (var_array_substs, i_subst, i_stms) <-
+          reverseIndices loop'
+
+        val_pat_adjs <- valPatAdjs loop_vnames
         let val_pat_adjs_list = concat $ toList val_pat_adjs
 
         (loop_adjs, stms_adj) <- collectStms $
-          subAD $
-            localScope (scopeOfFParams (map fst val_pat_adjs_list <> loop_params')) $
-              inScopeOf form' $ do
-                zipWithM_
-                  (\val_pat v -> insAdj v (paramName $ fst val_pat))
-                  val_pat_adjs_list
-                  (concat $ toList loop_val_names)
-                diffStms $ bodyStms body'
-
-                let update_var_arrays v vs = do
-                      vs_t <- lookupType vs
-                      v_adj <- lookupAdjVal v
-                      updateAdjSlice (fullSlice vs_t [DimFix $ Var i']) vs v_adj
-                zipWithM_
-                  update_var_arrays
-                  (map (paramName . fst) loop_vars')
-                  (loopVars loop_val_names)
-
-                loop_res_adjs <- mapM (lookupAdjVal . paramName) loop_params'
-                loop_free_adjs <- mapM lookupAdjVal $ loopFree loop_val_names
-                loop_vars_adjs <- mapM lookupAdjVal $ loopVars loop_val_names
-
-                return $
-                  LoopInfo
-                    { loopRes = loop_res_adjs,
-                      loopFree = loop_free_adjs,
-                      loopVars = loop_vars_adjs
-                    }
-
-        (loop_var_arrays_substs, i_subst, index_stms) <-
-          reverseIndices loop'
-
-        (_, stms_adj') <-
           inScopeOf form' $
-            localScope (scopeOfFParams loop_params') $ do
-              collectStms $ do
-                addStms index_stms
-                (substs, restore_stms) <-
-                  collectStms $ restore stms_adj loop_params' i'
-                addStms $ substituteNames i_subst restore_stms
-                addStms $ substituteNames i_subst $ substituteNames substs stms_adj
+            localScope (scopeOfFParams (map fst val_pat_adjs_list <> loop_params')) $ do
+              addStms i_stms
+              (loop_adjs, stms_adj) <- collectStms $
+                subAD $ do
+                  zipWithM_
+                    (\val_pat v -> insAdj v (paramName $ fst val_pat))
+                    val_pat_adjs_list
+                    (concat $ toList loop_vnames)
+                  diffStms $ bodyStms body'
 
-        inScopeOf stms_adj' $
+                  let update_var_arrays v vs = do
+                        vs_t <- lookupType vs
+                        v_adj <- lookupAdjVal v
+                        updateAdjSlice (fullSlice vs_t [DimFix $ Var i']) vs v_adj
+                  zipWithM_
+                    update_var_arrays
+                    (map (paramName . fst) loop_vars')
+                    (loopVars loop_vnames)
+
+                  loop_res_adjs <- mapM (lookupAdjVal . paramName) loop_params'
+                  loop_free_adjs <- mapM lookupAdjVal $ loopFree loop_vnames
+                  loop_vars_adjs <- mapM lookupAdjVal $ loopVars loop_vnames
+                  loop_vals_adjs <- mapM lookupAdjVal $ loopVals loop_vnames
+
+                  return $
+                    LoopInfo
+                      { loopRes = loop_res_adjs,
+                        loopFree = loop_free_adjs,
+                        loopVars = loop_vars_adjs,
+                        loopVals = loop_vals_adjs
+                      }
+              (substs, restore_stms) <-
+                collectStms $ restore stms_adj loop_params' i'
+              addStms $ substituteNames i_subst restore_stms
+              addStms $ substituteNames i_subst $ substituteNames substs stms_adj
+              return loop_adjs
+
+        inScopeOf stms_adj $
           localScope (scopeOfFParams $ map fst val_pat_adjs_list) $ do
-            let body_adj = mkBody stms_adj' $ varsRes $ concat $ toList loop_adjs
+            let body_adj = mkBody stms_adj $ varsRes $ concat $ toList loop_adjs
                 restore_true_deps = M.fromList $
                   flip mapMaybe (zip loop_params' $ patElems pat) $ \(p, pe) ->
                     if p `elem` filter (inAttrs (AttrName "true_dep") . paramAttrs) loop_params'
@@ -397,17 +404,21 @@ revLoop diffStms pat loop =
                       else Nothing
             adjs' <-
               letTupExp "loop_adj" $
-                substituteNames (restore_true_deps <> loop_var_arrays_substs) $
+                substituteNames (restore_true_deps <> var_array_substs) $
                   DoLoop val_pat_adjs_list form' body_adj
-            let (loop_res_adjs, loop_free_var_adjs) =
+            let (loop_res_adjs, loop_free_var_val_adjs) =
                   splitAt (length $ loopRes loop_adjs) adjs'
-                (loop_free_adjs, loop_var_adjs) =
-                  splitAt (length $ loopFree loop_adjs) loop_free_var_adjs
+                (loop_free_adjs, loop_var_val_adjs) =
+                  splitAt (length $ loopFree loop_adjs) loop_free_var_val_adjs
+                (loop_var_adjs, loop_val_adjs) =
+                  splitAt (length $ loopVars loop_adjs) loop_var_val_adjs
             returnSweepCode $ do
-              zipWithM_ insSubExpAdj (map snd val_pats') loop_res_adjs
-              zipWithM_ insAdj (loopFree loop_val_names) loop_free_adjs
-              zipWithM_ insAdj (loopVars loop_val_names) loop_var_adjs
+              zipWithM_ insSubExpAdj loop_vals' loop_res_adjs
+              zipWithM_ insAdj (loopFree loop_vnames) loop_free_adjs
+              zipWithM_ insAdj (loopVars loop_vnames) loop_var_adjs
+              zipWithM_ updateAdj (loopVals loop_vnames) loop_val_adjs
 
+-- | Transforms a any loop into its revers-mode derivative.
 diffLoop :: (Stms SOACS -> ADM ()) -> Pat -> StmAux () -> ExpT SOACS -> ADM () -> ADM ()
 diffLoop diffStms pat aux loop m
   | isWhileLoop loop =
@@ -418,19 +429,8 @@ diffLoop diffStms pat aux loop m
           (bound : _) -> do
             for_loop <- convertWhileLoop bound loop
             diffLoop diffStms pat aux for_loop m
-          _ -> error "diffLoop: while loops requre a bound attribute" -- this should be a type error
+          _ -> error "diffLoop: while loops requre a bound attribute" -- this should be a user error
   | otherwise = do
     fwdLoop pat aux loop
     m
     revLoop diffStms pat loop
-
-copyConsumedArrsInBody :: [VName] -> Body -> ADM Substitutions
-copyConsumedArrsInBody dontCopy b =
-  mconcat <$> mapM onConsumed (filter (`notElem` dontCopy) $ namesToList $ consumedInBody (Alias.analyseBody mempty b))
-  where
-    onConsumed v = do
-      v_t <- lookupType v
-      case v_t of
-        Acc {} -> error $ "copyConsumedArrs: Acc " <> pretty v
-        Array {} -> M.singleton v <$> letExp (baseString v <> "_ad_copy") (BasicOp $ Copy v)
-        _ -> pure mempty
