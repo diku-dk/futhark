@@ -18,10 +18,8 @@ import Futhark.AD.Derivatives
 import Futhark.AD.Rev.Loop
 import Futhark.AD.Rev.Monad
 import Futhark.AD.Rev.SOAC
-import qualified Futhark.Analysis.Alias as Alias
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.Builder
-import Futhark.IR.Aliases (consumedInStms)
 import Futhark.IR.SOACS
 import Futhark.Tools
 import Futhark.Transform.Rename
@@ -289,25 +287,10 @@ diffStms all_stms
   | otherwise =
     pure ()
 
--- | Create copies of all arrays consumed in the given statement, and
--- return statements which include copies of the consumed arrays.
---
--- See Note [Consumption].
-copyConsumedArrsInStm :: Stm -> ADM (Substitutions, Stms SOACS)
-copyConsumedArrsInStm s = inScopeOf s $ collectStms $ copyConsumedArrsInStm' s
-  where
-    copyConsumedArrsInStm' stm =
-      let onConsumed v = inScopeOf s $ do
-            v_t <- lookupType v
-            case v_t of
-              Acc {} -> error $ "copyConsumedArrsInStms: Acc " <> pretty v
-              Array {} -> do
-                v' <- letExp (baseString v <> "_ad_copy") (BasicOp $ Copy v)
-                addSubstitution v' v
-                return [(v, v')]
-              _ -> return mempty
-       in M.fromList . mconcat
-            <$> mapM onConsumed (namesToList $ consumedInStms $ fst (Alias.analyseStms mempty (oneStm stm)))
+-- | Preprocess statements before differentiating.
+-- For now, it's just stripmining.
+preprocess :: Stms SOACS -> ADM (Stms SOACS)
+preprocess = stripmineStms
 
 diffBody :: [Adj] -> [VName] -> Body -> ADM Body
 diffBody res_adjs get_adjs_for (Body () stms res) = subAD $
@@ -316,7 +299,7 @@ diffBody res_adjs get_adjs_for (Body () stms res) = subAD $
         onResult (SubExpRes _ (Var v)) v_adj = void $ updateAdj v =<< adjVal v_adj
     (adjs, stms') <- collectStms $ do
       zipWithM_ onResult (takeLast (length res_adjs) res) res_adjs
-      diffStms =<< stripmineStms stms
+      diffStms =<< preprocess stms
       mapM lookupAdjVal get_adjs_for
     pure $ Body () stms' $ res <> varsRes adjs
 
@@ -343,36 +326,3 @@ revVJP scope (Lambda params body ts) =
     let body' = Body () stms res
 
     pure $ Lambda (params ++ params_adj) body' (ts <> map paramType params)
-
--- Note [Consumption]
---
--- Parts of this transformation depends on duplicating computation.
--- This is a problem when a primal expression consumes arrays (via
--- e.g. Update).  For example, consider how we handle this conditional:
---
---   if b then ys with [0] = 0 else ys
---
--- This consumes the array 'ys', which means that when we later
--- generate code for the return sweep, we can no longer use 'ys'.
--- This is a problem, because when we call 'diffBody' on the branch
--- bodies, we'll keep the primal code (maybe it'll be removed by
--- simplification later - we cannot know).  A similar issue occurs for
--- SOACs.  Our solution is to make copies of all consumes arrays:
---
---  let ys_copy = copy ys
---
--- Then we generate code for the return sweep as normal, but replace
--- _every instance_ of 'ys' in the generated code with 'ys_copy'.
--- This works because Futhark does not have *semantic* in-place
--- updates - any uniqueness violation can be replaced with copies (on
--- arrays, anyway).
---
--- If we are lucky, the uses of 'ys_copy' will be removed by
--- simplification, and there will be no overhead.  But even if not,
--- this is still (asymptotically) efficient because the array that is
--- being consumed must in any case have been produced within the code
--- that we are differentiating, so a copy is at most a scalar
--- overhead.  This is _not_ the case when loops are involved.
---
--- Also, the above only works for arrays, not accumulator variables.
--- Those will need some other mechanism.
