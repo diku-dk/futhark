@@ -9,12 +9,25 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
-* Much better code generation for segmented scans with vectorisable
-  operators.
-
 ### Removed
 
 ### Changed
+
+### Fixed
+
+* Some incorrect removal of copies (#1505).
+
+* Handling of parametric modules with top-level existentials (#1510).
+
+* Module substitution fix (#1512).  Unfortunately this makes some type
+  errors a bit misleading.
+
+## [0.20.6]
+
+### Added
+
+* Much better code generation for segmented scans with vectorisable
+  operators.
 
 ### Fixed
 

@@ -485,8 +485,7 @@ expandedVariantAllocations num_threads kspace kstms variant_allocs = do
     sliceKernelSizes num_threads variant_sizes kspace kstms
   -- Note the recursive call to expand allocations inside the newly
   -- produced kernels.
-  (_, slice_stms_tmp) <-
-    simplifyStms =<< explicitAllocationsInStms slice_stms
+  slice_stms_tmp <- simplifyStms =<< explicitAllocationsInStms slice_stms
   slice_stms' <- transformStms slice_stms_tmp
 
   let variant_allocs' :: [(VName, (SubExp, SubExp, Space))]

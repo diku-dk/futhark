@@ -31,7 +31,7 @@ import Futhark.Util
 simpleGeneric ::
   (SimplifyMemory rep inner) =>
   (OpWithWisdom inner -> UT.UsageTable) ->
-  Simplify.SimplifyOp rep inner ->
+  Simplify.SimplifyOp rep (OpWithWisdom inner) ->
   Simplify.SimpleOps rep
 simpleGeneric = simplifiable
 
@@ -64,7 +64,7 @@ simplifyStmsGeneric ::
   ) =>
   Simplify.SimpleOps rep ->
   Stms rep ->
-  m (ST.SymbolTable (Wise rep), Stms rep)
+  m (Stms rep)
 simplifyStmsGeneric ops stms = do
   scope <- askScope
   Simplify.simplifyStms

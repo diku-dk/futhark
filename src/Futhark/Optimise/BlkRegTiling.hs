@@ -68,7 +68,7 @@ mmBlkRegTilingAcc (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_
       (rx, ry, tx, ty, tk, tk_div_tx, tk_div_ty, tx_rx, ty_ry, a_loc_sz, b_loc_sz) <-
         mkTileMemSizes height_A width_B common_dim
 
-      rk <- letSubExp "rk" $ BasicOp $ SubExp $ intConst Int64 8
+      rk <- letSubExp "rk" $ BasicOp $ SubExp $ intConst Int64 16
       tk_rk <- letSubExp "tk_rk" =<< toExp (pe64 tk * pe64 rk)
       gridDim_t <- letSubExp "gridDim_t" =<< ceilDiv common_dim tk_rk
       gridDim_x <- letSubExp "gridDim_x" =<< ceilDiv width_B tx_rx
