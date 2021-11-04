@@ -419,19 +419,27 @@ internaliseAppExp desc _ (E.DoLoop sparams mergepat mergeexp form loopbody loc) 
 
   ctxinit <- argShapes (map I.paramName shapepat) mergepat' mergeinit_ts'
 
-  let ctxmerge = zip shapepat ctxinit
-      valmerge = zip mergepat' mergeinit'
-      dropCond = case form of
+  -- Ensure that the initial loop values match the shapes of the loop
+  -- parameters.  XXX: Ideally they should already match (by the
+  -- source language type rules), but some of our transformations
+  -- (esp. defunctionalisation) strips out some size information.  For
+  -- a type-correct source program, these reshapes should simplify
+  -- away.
+  let args = ctxinit ++ mergeinit'
+  args' <-
+    ensureArgShapes
+      "initial loop values have right shape"
+      loc
+      (map I.paramName shapepat)
+      (map paramType $ shapepat ++ mergepat')
+      args
+
+  let dropCond = case form of
         E.While {} -> drop 1
         _ -> id
 
-  -- Ensure that the result of the loop matches the shapes of the
-  -- merge parameters.  XXX: Ideally they should already match (by
-  -- the source language type rules), but some of our
-  -- transformations (esp. defunctionalisation) strips out some size
-  -- information.  For a type-correct source program, these reshapes
-  -- should simplify away.
-  let merge = ctxmerge ++ valmerge
+  -- As above, ensure that the result has the right shape.
+  let merge = zip (shapepat ++ mergepat') args'
       merge_ts = map (I.paramType . fst) merge
   loopbody'' <-
     localScope (scopeOfFParams $ map fst merge) . inScopeOf form' . buildBody_ $
@@ -439,7 +447,7 @@ internaliseAppExp desc _ (E.DoLoop sparams mergepat mergeexp form loopbody loc) 
         . ensureArgShapes
           "shape of loop result does not match shapes in loop parameter"
           loc
-          (map (I.paramName . fst) ctxmerge)
+          (map (I.paramName . fst) merge)
           merge_ts
         . map resSubExp
         =<< bodyBind loopbody'
@@ -448,7 +456,7 @@ internaliseAppExp desc _ (E.DoLoop sparams mergepat mergeexp form loopbody loc) 
   map I.Var . dropCond
     <$> attributing
       attrs
-      (letValExp desc (I.DoLoop (ctxmerge <> valmerge) form' loopbody''))
+      (letValExp desc (I.DoLoop merge form' loopbody''))
   where
     sparams' = map (`TypeParamDim` mempty) sparams
 
