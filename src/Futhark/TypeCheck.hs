@@ -1012,6 +1012,8 @@ checkExp (DoLoop merge form loopbody) = do
   let (mergepat, mergeexps) = unzip merge
   mergeargs <- mapM checkArg mergeexps
 
+  checkLoopArgs
+
   binding (scopeOf form) $ do
     form_consumable <- checkForm mergeargs form
 
@@ -1097,6 +1099,20 @@ checkExp (DoLoop merge form loopbody) = do
           paramts = map paramDeclType funparams
       checkFuncall Nothing paramts mergeargs
       pure mempty
+
+    checkLoopArgs = do
+      let (params, args) = unzip merge
+
+      argtypes <- mapM subExpType args
+
+      let expected = expectedTypes (map paramName params) params args
+      unless (expected == argtypes) . bad . TypeError . pretty $
+        "Loop parameters"
+          </> indent 2 (ppTuple' params)
+          </> "cannot accept initial values"
+          </> indent 2 (ppTuple' args)
+          </> "of types"
+          </> indent 2 (ppTuple' argtypes)
 checkExp (WithAcc inputs lam) = do
   unless (length (lambdaParams lam) == 2 * num_accs) $
     bad . TypeError $
