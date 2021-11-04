@@ -243,11 +243,7 @@ boundInKernelNest = mconcat . boundInKernelNests
 
 boundInKernelNests :: KernelNest -> [Names]
 boundInKernelNests =
-  map
-    ( namesFromList
-        . map (paramName . fst)
-        . loopNestingParamsAndArrs
-    )
+  map (namesFromList . map (paramName . fst) . loopNestingParamsAndArrs)
     . kernelNestLoops
 
 kernelNestWidths :: KernelNest -> [SubExp]
