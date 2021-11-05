@@ -19,8 +19,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Handling of parametric modules with top-level existentials (#1510).
 
-* Module substitution fix (#1512).  Unfortunately this makes some type
-  errors a bit misleading.
+* Module substitution fixes (#1512, #1518).
 
 ## [0.20.6]
 
