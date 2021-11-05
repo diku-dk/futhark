@@ -366,6 +366,8 @@ shortCircuitGPUMemHelper lvl lutab pat@(Pat ps) space kernel_body td_env bu_env 
 ixfunPermutation :: IxFun -> [Int]
 ixfunPermutation = map IxFun.ldPerm . IxFun.lmadDims . NE.head . IxFun.ixfunLMADs
 
+-- | Given a pattern element and the corresponding kernel result, try to put the
+-- kernel result directly in the memory block of pattern element
 makeSegMapCoals :: SegLevel -> TopDnEnv GPUMem -> SegSpace -> KernelBody (Aliases GPUMem) -> (CoalsTab, InhibitTab) -> (PatElemT (VarAliases, LetDecMem), KernelResult) -> (CoalsTab, InhibitTab)
 makeSegMapCoals lvl td_env space kernel_body (active, inhibit) x@(PatElem pat_name (_, MemArray _ _ _ (ArrayIn pat_mem pat_ixf)), Returns _ _ (Var return_name))
   | Just mb@(MemBlock tp shp return_mem return_ixf) <-
