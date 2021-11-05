@@ -1,2 +1,2 @@
 pyyaml>=4.2b1
-sphinx==3.0.3
+sphinx>=4.2.0
