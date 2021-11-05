@@ -190,16 +190,14 @@ evalModExp (ModApply f arg (Info p_substs) (Info b_substs) loc) = do
     ModFun f_abs f_closure f_p f_body ->
       bindingAbs (f_abs <> S.fromList (unInfo (modParamAbs f_p)))
         . extendAbsTypes b_substs
-        . extendScope f_closure
+        . localScope (const f_closure) -- Start afresh.
         . generating
         $ do
           outer_substs <- scopeSubsts <$> askScope
           abs <- asks envAbs
           let forward (k, v) = (lookupSubst k outer_substs, v)
               p_substs' = M.fromList $ map forward $ M.toList p_substs
-              keep k _ =
-                k `M.member` p_substs'
-                  || k `S.member` abs
+              keep k _ = k `M.member` p_substs' || k `S.member` abs
               abs_substs =
                 M.filterWithKey keep $
                   M.map (`lookupSubst` scopeSubsts (modScope arg_mod)) p_substs'
@@ -215,7 +213,7 @@ evalModExp (ModApply f arg (Info p_substs) (Info b_substs) loc) = do
             $ do
               substs <- scopeSubsts <$> askScope
               x <- evalModExp f_body
-              return $
+              pure $
                 addSubsts abs abs_substs $
                   -- The next one is dubious, but is necessary to
                   -- propagate substitutions from the argument (see
