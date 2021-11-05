@@ -94,7 +94,12 @@ data CoalescedKind
     TransitiveCoal
 
 -- | Information about a memory block: type, shape, name and ixfun.
-data ArrayMemBound = MemBlock PrimType Shape VName IxFun
+data ArrayMemBound = MemBlock
+  { primType :: PrimType,
+    shape :: Shape,
+    memName :: VName,
+    ixfun :: IxFun
+  }
 
 -- | Free variable substitutions
 type FreeVarSubsts = M.Map VName (TPrimExp Int64 VName)

@@ -307,15 +307,26 @@ shortCircuitGPUMemHelper lvl lutab pat@(Pat ps) space kernel_body td_env bu_env 
                               Just (Coalesced knd mbd@(MemBlock _ _ _ ixfn) subs0) ->
                                 case freeVarSubstitutions (scope td_env) (scalar_table td_env) ixfn of
                                   Just fv_subst ->
-                                    let entry = coal_entry {vartab = M.insert (patElemName p) (Coalesced knd mbd $ traceWith "fv_subst" fv_subst) (vartab coal_entry)}
-                                        (ac, succ) =
-                                          trace
-                                            ( "MARKING " <> pretty m_b
-                                                <> " AS SUCCESS! with entry: "
-                                                <> pretty entry
-                                            )
-                                            $ markSuccessCoal (activeCoals bu_env_f, successCoals bu_env_f) m_b entry
-                                     in bu_env_f {activeCoals = ac, successCoals = succ}
+                                    if ixfunPermutation ixfn == ixfunPermutation (ixfun $ fromJust $ getScopeMemInfo (patElemName p) $ scope td_env)
+                                      then
+                                        let entry = coal_entry {vartab = M.insert (patElemName p) (Coalesced knd mbd $ traceWith "fv_subst" fv_subst) (vartab coal_entry)}
+                                            (ac, succ) =
+                                              trace
+                                                ( "MARKING " <> pretty m_b
+                                                    <> " AS SUCCESS!\nixf: "
+                                                    <> pretty ixf
+                                                    <> "\nixfn: "
+                                                    <> pretty ixfn
+                                                    <> "\nmeminfo: "
+                                                    <> pretty (fromJust $ getScopeMemInfo (patElemName p) (scope td_env))
+                                                    <> "\nwith entry: "
+                                                    <> pretty entry
+                                                )
+                                                $ markSuccessCoal (activeCoals bu_env_f, successCoals bu_env_f) m_b entry
+                                         in bu_env_f {activeCoals = ac, successCoals = succ}
+                                      else
+                                        let (ac, inh) = markFailedCoal (activeCoals bu_env_f, inhibit bu_env_f) m_b
+                                         in bu_env_f {activeCoals = ac, inhibit = inh}
                                   Nothing ->
                                     let (ac, inh) = trace ("MARKING " <> pretty m_b <> " AS FAILED (3)") $ markFailedCoal (activeCoals bu_env_f, inhibit bu_env_f) m_b
                                      in bu_env_f {activeCoals = ac, inhibit = inh}
@@ -351,6 +362,9 @@ shortCircuitGPUMemHelper lvl lutab pat@(Pat ps) space kernel_body td_env bu_env 
       )
       --  $ bu_env' {activeCoals = actv1, successCoals = successCoals1, inhibit = inhibit1}
       $ bu_env''''
+
+ixfunPermutation :: IxFun -> [Int]
+ixfunPermutation = map IxFun.ldPerm . IxFun.lmadDims . NE.head . IxFun.ixfunLMADs
 
 makeSegMapCoals :: SegLevel -> TopDnEnv GPUMem -> SegSpace -> KernelBody (Aliases GPUMem) -> (CoalsTab, InhibitTab) -> (PatElemT (VarAliases, LetDecMem), KernelResult) -> (CoalsTab, InhibitTab)
 makeSegMapCoals lvl td_env space kernel_body (active, inhibit) x@(PatElem pat_name (_, MemArray _ _ _ (ArrayIn pat_mem pat_ixf)), Returns _ _ (Var return_name))
