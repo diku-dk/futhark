@@ -157,9 +157,9 @@ topdwnTravBinding ::
   TopDnEnv rep ->
   Stm (Aliases rep) ->
   TopDnEnv rep
-topdwnTravBinding env stm@(Let (Pat [pe]) _ (Op (Alloc (Var vname) _))) =
+topdwnTravBinding env stm@(Let (Pat [pe]) _ (Op (Alloc (Var vname) sp))) =
   env
-    { alloc = alloc env <> oneName (patElemName pe),
+    { alloc = M.insert (patElemName pe) sp $ alloc env,
       scope = scope env <> scopeOf stm,
       nonNegatives = nonNegatives env <> oneName vname
     }

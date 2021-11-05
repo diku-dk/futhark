@@ -149,7 +149,7 @@ mkCoalsTabFun ::
 mkCoalsTabFun lufun r computeScalarOnOp fun@(FunDef _ _ _ _ fpars body) = do
   -- First compute last-use information
   let lutab = traceWith "lutab" $ lufun fun
-      unique_mems = namesFromList $ M.keys $ getUniqueMemFParam fpars
+      unique_mems = getUniqueMemFParam fpars
       scalar_table =
         runReader
           ( mconcat
@@ -379,7 +379,10 @@ makeSegMapCoals lvl td_env space kernel_body (active, inhibit) x@(PatElem pat_na
             <> pretty return_name
         )
         $ getScopeMemInfo return_name $ scope td_env <> scopeOf (kernelBodyStms kernel_body),
-    isSegThread lvl =
+    isSegThread lvl,
+    MemMem pat_space <- runReader (lookupMemInfo $ pat_mem) $ removeScopeAliases $ scope td_env,
+    MemMem return_space <- runReader (lookupMemInfo return_mem) $ removeScopeAliases $ scope td_env <> scopeOf (kernelBodyStms kernel_body) <> scopeOfSegSpace space,
+    pat_space == return_space =
     case M.lookup pat_mem active of
       Nothing ->
         -- We are not in a transitive case
@@ -866,8 +869,8 @@ mkCoalsTabStm lutab lstm@(Let pat _ (DoLoop arginis lform body)) td_env bu_env =
   return bu_env {activeCoals = fin_actv2, successCoals = fin_succ1, inhibit = fin_inhb2}
   where
     td_env' = topDownLoop td_env lstm
-    getAllocs tab (Let (Pat [pe]) _ (Op (Alloc _ _))) =
-      tab <> oneName (patElemName pe)
+    getAllocs tab (Let (Pat [pe]) _ (Op (Alloc _ sp))) =
+      M.insert (patElemName pe) sp tab
     getAllocs tab _ = tab
     okLookup tab m _
       | Just _ <- M.lookup m tab = True
@@ -886,7 +889,7 @@ mkCoalsTabStm lutab lstm@(Let pat _ (DoLoop arginis lform body)) td_env bu_env =
         Just (MemBlock _ _ m_r _) <- getScopeMemInfo r (scope td_env'),
         Just nms <- M.lookup a lutab,
         nameIn a0 nms,
-        nameIn m_r (alloc td_env') =
+        m_r `elem` (M.keys $ alloc td_env') =
         Just ((b, m_b), (a, m_a), (a0, m_a0), (r, m_r))
     mapmbFun _ _ (_patel, (_arg, _ini), _bdyres) = Nothing
     --trace ("COALESCING loop FAILED "++pretty patel++" "++pretty arg ++ pretty ini ++ pretty bdyres)

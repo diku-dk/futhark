@@ -7,8 +7,9 @@
 -- ==
 -- input { [ [ [0i64, 1i64], [2i64, 3i64] ], [ [4i64, 5i64], [6i64, 7i64] ] ]  }
 -- output { [[[0i64, 9i64], [0i64, 13i64]]]}
+-- random input { [128][128][128]i64 }
 -- structure seq-mem { Alloc 2 }
--- structure gpu-mem { Alloc 2 }
+-- structure gpu-mem { Alloc 3 }
 
 let main [n] (xsss: [n][n][n]i64): [][n][n]i64 =
   let (_,asss) = split (1) xsss

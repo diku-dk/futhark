@@ -152,7 +152,7 @@ data CoalsEntry = CoalsEntry
     memrefs :: MemRefs
   }
 
-type AllocTab = Names
+type AllocTab = M.Map VName Space
 -- ^ the allocatted memory blocks
 
 type AliasTab = M.Map VName Names
