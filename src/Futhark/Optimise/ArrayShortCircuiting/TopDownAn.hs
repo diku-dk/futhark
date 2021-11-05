@@ -214,6 +214,7 @@ nonNegativesInExp (BasicOp (Index _ slc)) =
   freeIn $ mapMaybe dimFix $ unSlice slc
 nonNegativesInExp (BasicOp (Update _ _ slc _)) =
   freeIn $ mapMaybe dimFix $ unSlice slc
+nonNegativesInExp _ = mempty
 
 topDownLoop :: TopDnEnv rep -> Stm (Aliases rep) -> TopDnEnv rep
 topDownLoop td_env (Let _pat _ (DoLoop arginis lform body)) =
