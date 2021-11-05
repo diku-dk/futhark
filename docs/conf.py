@@ -109,8 +109,8 @@ class FutharkLexer(RegexLexer):
     tokens = {
         'root': [
             (r'(if|then|else|let|loop|in|val|for|do|with|local|open|include|import|type|entry|module|while|module)\b', token.Keyword),
-            (r"[a-zA-Z_][a-zA-Z0-9_']*", token.Name),
-            (r"-- .*", token.Comment),
+            (r"#?[a-zA-Z_][a-zA-Z0-9_']*", token.Name),
+            (r"--.*", token.Comment),
             (r'.', token.Text)
         ]
     }
