@@ -48,6 +48,7 @@ import Futhark.Pass.ExtractMulticore
 import Futhark.Pass.FirstOrderTransform
 import Futhark.Pass.KernelBabysitting
 import Futhark.Pass.LiftAllocations as LiftAllocations
+import Futhark.Pass.LowerAllocations as LowerAllocations
 import Futhark.Pass.Simplify
 import Futhark.Passes
 import Futhark.TypeCheck (Checkable, checkProg)
@@ -579,6 +580,8 @@ commandLineOptions =
     kernelsMemPassOption MemoryBlockMerging.optimise [],
     seqMemPassOption LiftAllocations.liftAllocationsSeqMem [],
     kernelsMemPassOption LiftAllocations.liftAllocationsGPUMem [],
+    seqMemPassOption LowerAllocations.lowerAllocationsSeqMem [],
+    kernelsMemPassOption LowerAllocations.lowerAllocationsGPUMem [],
     seqMemPassOption ArrayShortCircuiting.optimiseSeqMem [],
     kernelsMemPassOption ArrayShortCircuiting.optimiseGPUMem [],
     cseOption [],
