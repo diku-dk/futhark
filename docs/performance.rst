@@ -8,7 +8,11 @@ Futhark code.  Ideally you'd need to know nothing more than an
 abstract cost model, but sometimes it is useful to have an idea of how
 the compiler will transform your program, what values look like in
 memory, and what kind of code the compiler will generate for you.
-Such details are documented below.
+These details are documented below.  Don't be discouraged by the
+complexities mentioned here - most Futhark programs are written
+without worrying about any of these details, and they still manage to
+run with good performance.  This document focuses on corner cases and
+pitfalls, which easily makes for depressing reading.
 
 Parallelism
 -----------
@@ -51,6 +55,12 @@ interchanging the ``reduce`` and ``map``::
 
   map (reduce (+) 0) (transpose xss)
 
+Avoid reductions over tiny arrays, e.g. ``reduce (+) 0 [x,y,z]``.  In
+such cases the compiler will generate complex code to exploit a
+negligible amount of parallelism.  Instead, just unroll the loop
+manually (``x+y+z``) or perhaps use ``foldl (+) 0 [x,z,y]``, which
+produces a sequential loop.
+
 Histograms
 ~~~~~~~~~~
 
@@ -68,8 +78,7 @@ reduction.
 Particularly with the GPU backends, ``reduce_by_index`` is much faster
 when the operator involves a single 32-bit or 64-bit value.  Even if
 you really want an 8-bit or 16-bit result, it may be faster to compute
-it as a 32-bit and 64-bit quantity, and then mask off the excess bits
-after the histogram has been computed.
+it with a 32-bit or 64-bit type and manually mask off the excess bits.
 
 Nested parallelism
 ~~~~~~~~~~~~~~~~~~
@@ -303,6 +312,9 @@ row-major order.  However, depending on how the array is traversed,
 the compiler may insert code to represent it in some other order.  For
 particularly tricky programs, an array may even be duplicated in
 memory, represented in different ways, to ensure efficient traversal.
+This means you should normally *not* worry about how to represent your
+arrays to ensure coalesced access on GPUs or similar.  That is the
+compiler's job.
 
 Crucial Optimisations
 ---------------------
@@ -331,14 +343,14 @@ Not all producer-consumer relationships between SOACs can be fused.
 Generally, ``map`` can always be fused as a producer, but ``scan``,
 ``reduce``, and similar SOACs can only act as consumers.
 
-*Horisontal fusion* occurs when two SOACs take as input the same
+*Horizontal fusion* occurs when two SOACs take as input the same
 array, but are not themselves in a producer-consumer relationship.
 Example::
 
    (map f xs, map g xs)
 
 Such cases are fused into a single operation that traverses ``xs``
-just once.  More than two SOACs can be involved in horisontal fusion,
+just once.  More than two SOACs can be involved in horizontal fusion,
 and they need not be of the same kind (e.g. one could be a ``map`` and
 the other a ``reduce``).
 
@@ -370,7 +382,7 @@ copy.  An incomplete list follows:
 
 * An array is copied whenever it becomes the element of another
   multidimensional array.  This is most obviously the case for array
-  literals (``[x,y,z]``), but also for ``map`` experssions where the
+  literals (``[x,y,z]``), but also for ``map`` expressions where the
   mapped function returns an array.
 
 Note that this notion of "views" is not part of the Futhark type
@@ -395,3 +407,18 @@ tuples or records instead.  `This post
 <https://futhark-lang.org/blog/2019-01-13-giving-programmers-what-they-want.html>`_
 contains more information on how and why.  If in doubt, try both and
 measure which is faster.
+
+Inlining
+--------
+
+The compiler currently inlines all functions at their call site,
+unless they have been marked with the ``noinline`` attribute (see
+:ref:`attributes`).  This can lead to code explosion, which mostly
+results in slow compile times, but can also affect run-time
+performance.  In many cases this is currently unavoidable, but
+sometimes the program can be rewritten such that instead of calling
+the same function in multiple places, it is called in a single place,
+in a loop.  E.g. we might rewrite ``f x (f y (f z v))`` as::
+
+  loop acc = v for a in [z,y,x] do
+    f a acc
