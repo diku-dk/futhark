@@ -304,13 +304,7 @@ transformModBind mb = do
         (maybeAscript (srclocOf mb) (modSignature mb) $ modExp mb)
         $ modParams mb
   mname <- transformName $ modName mb
-  abs <- asks envAbs
-  -- Copy substitutions involving abstract types out, because they are
-  -- always resolved at the outermost level.
-  let abs_substs =
-        M.filterWithKey (const . flip S.member abs) $
-          scopeSubsts $ modScope mod
-  return $ Scope abs_substs $ M.singleton mname mod
+  return $ Scope (scopeSubsts $ modScope mod) $ M.singleton mname mod
 
 transformDecs :: [Dec] -> TransformM Scope
 transformDecs ds =
