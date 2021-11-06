@@ -33,7 +33,7 @@ this distinction, each function is described by *two* costs: the
 *work*, which is the total amount of operations, and the *span*
 (sometimes called *depth*) which is intuitively the "longest chain of
 sequential dependencies".  We say that ``foldl`` has span *O(n)*,
-while ``reduce`` has span *O(n log(n))*.  This explains that
+while ``reduce`` has span *O(log(n))*.  This explains that
 ``reduce`` is more parallel than ``foldl``.  The documentation for a
 Futhark function should mention both its work and span.  `See this
 <https://sigkill.dk/writings/par/cost.html>`_ for more details on
