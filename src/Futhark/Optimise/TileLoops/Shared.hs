@@ -27,7 +27,6 @@ import Control.Monad.State
 import Data.List (foldl', zip4)
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.Map as M
-import Debug.Trace
 import Futhark.IR.GPU
 import qualified Futhark.IR.Mem.IxFun as IxFun
 import qualified Futhark.IR.SeqMem as ExpMem
@@ -498,7 +497,7 @@ kkLoopBody
           slc_X == slc_X',
           Nothing <- M.lookup x ixfn_env =
           True -- if not in the table, we assume not-transposed!
-      isInnerCoal (_, ixfn_env) slc_X stm@(Let pat _ (BasicOp (Index x _)))
+      isInnerCoal (_, ixfn_env) slc_X (Let pat _ (BasicOp (Index x _)))
         | [slc_X'] <- map patElemName (patElems pat),
           slc_X == slc_X',
           Just ixf_fn <- M.lookup x ixfn_env,
@@ -508,7 +507,7 @@ kkLoopBody
               last_perm = IxFun.ldPerm $ last lmad_dims
               stride = IxFun.ldStride $ last lmad_dims
               res = last_perm == q -1 && (stride == pe64 (intConst Int64 1))
-           in trace ("Coal: " ++ pretty slc_X ++ "stm: " ++ pretty stm ++ " res: " ++ pretty res) res
+           in res
       isInnerCoal _ _ _ = error "TileLoops/Shared.hs: not an error, but I would like to know why!"
       --
       copyGlb2ShMem ::
@@ -520,7 +519,7 @@ kkLoopBody
             is_inner_coal = isInnerCoal env inp_X load_X
             str_A = baseString inp_X
         x_loc <-
-          if trace ("is coalesced: " ++ pretty is_inner_coal) is_inner_coal
+          if is_inner_coal
             then forLoop r_par [x_loc_init'] $ \i0 [a_loc_merge] -> do
               loop_a_loc <- forLoop tseq_div_tpar [a_loc_merge] $ \k0 [a_loc_merge'] -> do
                 scatter_a_loc <-
