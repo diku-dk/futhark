@@ -33,15 +33,18 @@ import Futhark.Transform.Substitute
 
 --import Debug.Trace
 
-mmBlkRegTiling :: Stm GPU -> TileM (Maybe (Stms GPU, Stm GPU))
-mmBlkRegTiling stm = do
-  res <- mmBlkRegTilingAcc stm
+-- ToDo: we need tx == ty (named t_par), and rx == ry (named r_par)
+--       in order to handle all the cases without transpositions.
+--       additionally, of course, we need that tk is a multiple of t_par.
+mmBlkRegTiling :: Env -> Stm GPU -> TileM (Maybe (Stms GPU, Stm GPU))
+mmBlkRegTiling env stm = do
+  res <- mmBlkRegTilingAcc env stm
   case res of
-    Nothing -> mmBlkRegTilingNrm stm
+    Nothing -> mmBlkRegTilingNrm env stm
     _ -> return res
 
-mmBlkRegTilingAcc :: Stm GPU -> TileM (Maybe (Stms GPU, Stm GPU))
-mmBlkRegTilingAcc (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kbody))))
+mmBlkRegTilingAcc :: Env -> Stm GPU -> TileM (Maybe (Stms GPU, Stm GPU))
+mmBlkRegTilingAcc env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kbody))))
   | KernelBody () kstms [Returns ResultMaySimplify cs (Var res_nm)] <- old_kbody,
     cs == mempty,
     -- check kernel has one result of primitive type
@@ -54,13 +57,13 @@ mmBlkRegTilingAcc (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_
     rem_outer_dims <- reverse rem_outer_dims_rev,
     Just
       ( code2',
-        (load_A, inp_A, load_B, inp_B),
-        (map_t1, map_t2, red_t),
+        (load_A, inp_A, map_t1, load_B, inp_B, map_t2),
         common_dim,
         var_dims,
-        (map_lam, red_lam, red_ne, redomap_orig_res)
+        (map_lam, red_lam, red_ne, redomap_orig_res, red_t)
         ) <-
-      matchesBlkRegTile seg_space kstms = do
+      matchesBlkRegTile seg_space kstms,
+    checkAccumulatesRedomapRes res_nm code2' redomap_orig_res = do
     -- Here we start the implementation --
     ---- in this binder: host code and outer seggroup (ie. the new kernel) ----
     (new_kernel, host_stms) <- runBuilder $ do
@@ -68,19 +71,21 @@ mmBlkRegTilingAcc (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_
       (rx, ry, tx, ty, tk, tk_div_tx, tk_div_ty, tx_rx, ty_ry, a_loc_sz, b_loc_sz) <-
         mkTileMemSizes height_A width_B common_dim
 
-      rk <- letSubExp "rk" $ BasicOp $ SubExp $ intConst Int64 16
+      rk <- letSubExp "rk" $ BasicOp $ SubExp $ intConst Int64 8 -- 16 and 8 seem good values
       tk_rk <- letSubExp "tk_rk" =<< toExp (pe64 tk * pe64 rk)
+
       gridDim_t <- letSubExp "gridDim_t" =<< ceilDiv common_dim tk_rk
-      gridDim_x <- letSubExp "gridDim_x" =<< ceilDiv width_B tx_rx
       gridDim_y <- letSubExp "gridDim_y" =<< ceilDiv height_A ty_ry
+      gridDim_x <- letSubExp "gridDim_x" =<< ceilDiv width_B tx_rx
+
       let gridxyt_pexp = pe64 gridDim_y * pe64 gridDim_x * pe64 gridDim_t
       let grid_pexp =
             foldl (\x d -> pe64 d * x) gridxyt_pexp $
               map snd rem_outer_dims_rev
       (grid_size, group_size, segthd_lvl) <- mkNewSegthdLvl tx ty grid_pexp
 
-      gid_t <- newVName "gid_t"
       (gid_x, gid_y, gid_flat) <- mkGidsXYF
+      gid_t <- newVName "gid_t"
 
       ---- in this binder: outer seggroup ----
       (ret_seggroup, stms_seggroup) <- runBuilder $ do
@@ -108,7 +113,7 @@ mmBlkRegTilingAcc (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_
                 (gtid_x, width_B, gtid_y, height_A, common_dim),
                 (a_loc_sz, b_loc_sz),
                 (iii, jjj),
-                (load_A, inp_A, load_B, inp_B),
+                (load_A, inp_A, map_t1, load_B, inp_B, map_t2),
                 (map_lam, red_lam)
               )
 
@@ -117,7 +122,7 @@ mmBlkRegTilingAcc (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_
             \kk0 [thd_res_merge, a_loc_merge, b_loc_merge] -> do
               off_t <- letExp "off_t" =<< toExp (pe64 rk * le64 gid_t + le64 kk0)
               process_full_tiles <-
-                kkLoopBody ct_arg off_t (thd_res_merge, a_loc_merge, b_loc_merge) False
+                kkLoopBody env ct_arg off_t (thd_res_merge, a_loc_merge, b_loc_merge) False
 
               resultBodyM $ map Var process_full_tiles
 
@@ -134,7 +139,7 @@ mmBlkRegTilingAcc (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_
               ( do
                   off_t <- letExp "off_t" =<< toExp (pe64 rk * le64 gid_t + le64 full_tiles)
                   process_sprs_tile <-
-                    kkLoopBody ct_arg off_t (prologue_res, a_loc_reuse, b_loc_reuse) False
+                    kkLoopBody env ct_arg off_t (prologue_res, a_loc_reuse, b_loc_reuse) False
 
                   resultBodyM $ map Var process_sprs_tile
               )
@@ -177,6 +182,19 @@ mmBlkRegTilingAcc (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_
         [acc_0] -> return acc_0
         _ -> error "Impossible case reached when treating accumulators!"
     getAccumFV tp = error ("Should be an accumulator type at this point, given: " ++ pretty tp)
+    --
+    -- checks that the redomap result is used directly as the accumulated value,
+    -- in which case it is safe to parallelize the innermost dimension (of tile tk)
+    checkAccumulatesRedomapRes res_nm acc_code redomap_orig_res = do
+      foldl getAccumStm False $ reverse $ stmsToList acc_code
+      where
+        getAccumStm True _ = True
+        getAccumStm False (Let (Pat [pat_el]) _aux (BasicOp (UpdateAcc _acc_nm _ind vals)))
+          | [v] <- vals,
+            patElemName pat_el == res_nm =
+            v == Var redomap_orig_res
+        getAccumStm False _ = False
+    --
     -- epilogue for accumulator result type
     mkEpilogueAccRes
       segthd_lvl
@@ -212,13 +230,13 @@ mmBlkRegTilingAcc (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_
           return [varRes rss]
         let epilogue_res_acc : _ = rssss_list
         return [Returns ResultMaySimplify (Certs []) $ Var epilogue_res_acc]
-mmBlkRegTilingAcc _ = return Nothing
+mmBlkRegTilingAcc _ _ = return Nothing
 
 --------------------------
 --------------------------
 
-mmBlkRegTilingNrm :: Stm GPU -> TileM (Maybe (Stms GPU, Stm GPU))
-mmBlkRegTilingNrm (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kbody))))
+mmBlkRegTilingNrm :: Env -> Stm GPU -> TileM (Maybe (Stms GPU, Stm GPU))
+mmBlkRegTilingNrm env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kbody))))
   | KernelBody () kstms [Returns ResultMaySimplify cs (Var res_nm)] <- old_kbody,
     cs == mempty,
     -- check kernel has one result of primitive type
@@ -231,11 +249,10 @@ mmBlkRegTilingNrm (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_
     rem_outer_dims <- reverse rem_outer_dims_rev,
     Just
       ( code2',
-        (load_A, inp_A, load_B, inp_B),
-        (map_t1, map_t2, red_t),
+        (load_A, inp_A, map_t1, load_B, inp_B, map_t2),
         common_dim,
         var_dims,
-        (map_lam, red_lam, red_ne, redomap_orig_res)
+        (map_lam, red_lam, red_ne, redomap_orig_res, red_t)
         ) <-
       matchesBlkRegTile seg_space kstms = do
     -- Here we start the implementation
@@ -280,7 +297,7 @@ mmBlkRegTilingNrm (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_
                 (gtid_x, width_B, gtid_y, height_A, common_dim),
                 (a_loc_sz, b_loc_sz),
                 (iii, jjj),
-                (load_A, inp_A, load_B, inp_B),
+                (load_A, inp_A, map_t1, load_B, inp_B, map_t2),
                 (map_lam, red_lam)
               )
 
@@ -288,14 +305,14 @@ mmBlkRegTilingNrm (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_
           forLoop' (Var full_tiles) [cssss, a_loc_init, b_loc_init] $
             \kk0 [thd_res_merge, a_loc_merge, b_loc_merge] -> do
               process_full_tiles <-
-                kkLoopBody ct_arg kk0 (thd_res_merge, a_loc_merge, b_loc_merge) False
+                kkLoopBody env ct_arg kk0 (thd_res_merge, a_loc_merge, b_loc_merge) False
 
               resultBodyM $ map Var process_full_tiles
 
         let prologue_res : a_loc_reuse : b_loc_reuse : _ = prologue_res_list
 
         -- build epilogue.
-        epilogue_res_list <- kkLoopBody ct_arg full_tiles (prologue_res, a_loc_reuse, b_loc_reuse) True
+        epilogue_res_list <- kkLoopBody env ct_arg full_tiles (prologue_res, a_loc_reuse, b_loc_reuse) True
 
         let redomap_res : _ = epilogue_res_list
 
@@ -376,7 +393,7 @@ mmBlkRegTilingNrm (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_
                   new_shape = concat [ones, block_dims, ones, rest_dims]
               letExp "res_reshaped" $ BasicOp $ Reshape (map DimNew new_shape) epilogue_res
         return [RegTileReturns mempty regtile_ret_dims epilogue_res']
-mmBlkRegTilingNrm _ = return Nothing
+mmBlkRegTilingNrm _ _ = return Nothing
 
 -- pattern match the properties of the code that we look to
 -- tile: a redomap whose two input arrays are each invariant
@@ -386,11 +403,10 @@ matchesBlkRegTile ::
   Stms GPU ->
   Maybe
     ( Stms GPU,
-      (Stm GPU, VName, Stm GPU, VName),
-      (PrimType, PrimType, PrimType),
+      (Stm GPU, VName, PrimType, Stm GPU, VName, PrimType),
       SubExp,
       [Int],
-      (Lambda GPU, Lambda GPU, SubExp, VName)
+      (Lambda GPU, Lambda GPU, SubExp, VName, PrimType)
     )
 matchesBlkRegTile seg_space kstms
   | -- build the variance table, that records, for
@@ -411,8 +427,8 @@ matchesBlkRegTile seg_space kstms
     [map_t1t, map_t2t] <- map paramDec $ lambdaParams map_lam,
     [red_t1, _] <- map paramDec $ lambdaParams red_lam,
     primType map_t1t && primType map_t2t && primType red_t1,
-    map_t1 <- elemType map_t1t,
-    map_t2 <- elemType map_t2t,
+    map_t1_0 <- elemType map_t1t,
+    map_t2_0 <- elemType map_t2t,
     -- checks that the input arrays to redomap are variant to
     -- exactly one of the two innermost dimensions of the kernel
     Just var_dims <- isInvarTo1of2InnerDims mempty seg_space variance arrs,
@@ -433,19 +449,18 @@ matchesBlkRegTile seg_space kstms
     -- identify load_A, load_B
     tmp_stms <- mapMaybe (`M.lookup` tab_inv_stm) arrs,
     length tmp_stms == length arrs =
-    let zip_AB = zip tmp_stms arrs
-        [(load_A, inp_A), (load_B, inp_B)] =
+    let zip_AB = zip3 tmp_stms arrs [map_t1_0, map_t2_0]
+        [(load_A, inp_A, map_t1), (load_B, inp_B, map_t2)] =
           if var_dims == [0, 1]
             then zip_AB
             else reverse zip_AB
         code2' = code2'' <> code2
      in Just
           ( code2',
-            (load_A, inp_A, load_B, inp_B),
-            (map_t1, map_t2, elemType red_t1),
+            (load_A, inp_A, map_t1, load_B, inp_B, map_t2),
             common_dim,
             var_dims,
-            (map_lam, red_lam, red_ne, redomap_orig_res)
+            (map_lam, red_lam, red_ne, redomap_orig_res, elemType red_t1)
           )
 matchesBlkRegTile _ _ = Nothing
 
@@ -488,13 +503,19 @@ mkTileMemSizes height_A width_B common_dim = do
   tx_rx <- letSubExp "TxRx" =<< toExp (pe64 tx * pe64 rx)
   ty_ry <- letSubExp "TyRy" =<< toExp (pe64 ty * pe64 ry)
 
+  let pad_term = sMax64 (pe64 tk) (pe64 ty * pe64 ry)
+  -- if A not transposed, its shmem should be [ty*ry][tk]
+  -- we pad to [ty*ry][tk+1] size to minimize bank conflicts
   a_loc_sz <-
     letSubExp "a_loc_sz"
-      =<< toExp (pe64 ty * pe64 ry * pe64 tk)
-
+      =<< toExp (pe64 ty * pe64 ry * pe64 tk + pad_term)
+  -- if B is transposed, its shmem should be [tk][tx*rx]
+  -- we pad as above, by assuming tx*rx == ty*ry >= tk
+  -- ToDo: we can decrease the size by checking at this
+  --       point whether A and B are transposed (or not).
   b_loc_sz <-
     letSubExp "b_loc_sz"
-      =<< toExp (pe64 tk * pe64 tx * pe64 rx)
+      =<< toExp (pe64 tx * pe64 rx * pe64 tk + pad_term) -- (pe64 tk * pe64 tx * pe64 rx)
   return (rx, ry, tx, ty, tk, tk_div_tx, tk_div_ty, tx_rx, ty_ry, a_loc_sz, b_loc_sz)
 
 mkNewSegthdLvl ::
@@ -510,8 +531,8 @@ mkNewSegthdLvl tx ty grid_pexp = do
 
 mkGidsXYF :: Builder GPU (VName, VName, VName)
 mkGidsXYF = do
-  gid_x <- newVName "gid_x"
   gid_y <- newVName "gid_y"
+  gid_x <- newVName "gid_x"
   gid_flat <- newVName "gid_flat"
   return (gid_x, gid_y, gid_flat)
 

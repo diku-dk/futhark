@@ -13,7 +13,6 @@ import Data.Maybe (mapMaybe)
 import qualified Data.Sequence as Seq
 import qualified Futhark.Analysis.Alias as Alias
 import Futhark.IR.GPU
-import qualified Futhark.IR.Mem.IxFun as IxFun
 import Futhark.IR.Prop.Aliases (consumedInStm)
 import Futhark.MonadFreshNames
 import Futhark.Optimise.BlkRegTiling
@@ -22,14 +21,6 @@ import Futhark.Pass
 import Futhark.Tools
 import Futhark.Transform.Rename
 import Prelude hiding (quot)
-
-type IxFun = IxFun.IxFun (TPrimExp Int64 VName)
-
--- | Map from array variable names to their corresponding index functions.
---   The info is not guaranteed to be exact, e.g., we assume ifs and loops
---   return arrays layed out in normalized (row-major) form in memory.
---   We only record aliasing statements, such as transposition, slice, etc.
-type Env = (M.Map VName (Lambda GPU, [SubExp]), M.Map VName IxFun)
 
 -- | The pass definition.
 tileLoops :: Pass GPU GPU
@@ -61,10 +52,10 @@ optimiseStm :: Env -> Stm GPU -> TileM (Env, Stms GPU)
 optimiseStm env stm@(Let pat aux (Op (SegOp (SegMap lvl@SegThread {} space ts kbody)))) = do
   res3dtiling <- localScope (scopeOfSegSpace space) $ doRegTiling3D stm
   stms' <-
-     case res3dtiling of
+    case res3dtiling of
       Just (extra_stms, stmt') -> return (extra_stms <> oneStm stmt')
       Nothing -> do
-        blkRegTiling_res <- mmBlkRegTiling stm
+        blkRegTiling_res <- mmBlkRegTiling env stm
         case blkRegTiling_res of
           Just (extra_stms, stmt') -> return (extra_stms <> oneStm stmt')
           Nothing -> localScope (scopeOfSegSpace space) $ do

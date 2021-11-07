@@ -2,6 +2,7 @@
 
 module Futhark.Optimise.TileLoops.Shared
   ( TileM,
+    Env,
     scratch,
     index,
     update,
@@ -24,7 +25,9 @@ where
 import Control.Monad.Reader
 import Control.Monad.State
 import Data.List (foldl', zip4)
+import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.Map as M
+import Debug.Trace
 import Futhark.IR.GPU
 import qualified Futhark.IR.Mem.IxFun as IxFun
 import qualified Futhark.IR.SeqMem as ExpMem
@@ -33,6 +36,9 @@ import Futhark.Tools
 import Futhark.Transform.Rename
 
 type TileM = ReaderT (Scope GPU) (State VNameSource)
+
+--type IxFun = IxFun.IxFun (TPrimExp Int64 VName)
+--type Env = (M.Map VName (Lambda GPU, [SubExp]), M.Map VName IxFun)
 
 scratch :: MonadBuilder m => String -> PrimType -> [SubExp] -> m VName
 scratch se_name t shape = letExp se_name $ BasicOp $ Scratch t shape
@@ -156,8 +162,8 @@ segMap2D ::
   Builder GPU [VName]
 segMap2D desc lvl manifest (dim_y, dim_x) f = do
   ltid_xx <- newVName "ltid_x"
-  ltid_flat <- newVName "ltid_flat"
   ltid_yy <- newVName "ltid_y"
+  ltid_flat <- newVName "ltid_flat"
   let segspace = SegSpace ltid_flat [(ltid_yy, dim_y), (ltid_xx, dim_x)]
 
   ((ts, res), stms) <- localScope (scopeOfSegSpace segspace) . runBuilder $ do
@@ -180,10 +186,10 @@ segMap3D ::
   ) ->
   Builder GPU [VName]
 segMap3D desc lvl manifest (dim_z, dim_y, dim_x) f = do
-  ltid_x <- newVName "ltid_x"
   ltid_flat <- newVName "ltid_flat"
-  ltid_y <- newVName "ltid_y"
   ltid_z <- newVName "ltid_z"
+  ltid_y <- newVName "ltid_y"
+  ltid_x <- newVName "ltid_x"
   let segspace = SegSpace ltid_flat [(ltid_z, dim_z), (ltid_y, dim_y), (ltid_x, dim_x)]
 
   ((ts, res), stms) <- localScope (scopeOfSegSpace segspace) . runBuilder $ do
@@ -197,21 +203,21 @@ segMap3D desc lvl manifest (dim_z, dim_y, dim_x) f = do
       SegMap lvl segspace ts $ KernelBody () stms $ map ret res
 
 segScatter2D ::
-  String -> -- desc
-  SubExp -> -- arr_size
+  String ->
+  SubExp ->
   VName ->
-  SegLevel -> -- lvl
-  (SubExp, SubExp) -> -- (dim_y, dim_x)
-  ((VName, VName) -> Builder GPU (SubExp, SubExp)) -> -- f
+  SegLevel ->
+  (SubExp, SubExp) ->
+  ((VName, VName) -> Builder GPU (SubExp, SubExp)) ->
   Builder GPU [VName]
 segScatter2D desc arr_size updt_arr lvl (dim_x, dim_y) f = do
-  ltid_x <- newVName "ltid_x"
-  ltid_y <- newVName "ltid_y"
   ltid_flat <- newVName "ltid_flat"
-  let segspace = SegSpace ltid_flat [(ltid_x, dim_x), (ltid_y, dim_y)]
+  ltid_y <- newVName "ltid_y"
+  ltid_x <- newVName "ltid_x"
+  let segspace = SegSpace ltid_flat [(ltid_y, dim_y), (ltid_x, dim_x)]
 
   ((t_v, res_v, res_i), stms) <- runBuilder $ do
-    (res_v, res_i) <- f (ltid_x, ltid_y)
+    (res_v, res_i) <- f (ltid_y, ltid_x)
     t_v <- subExpType res_v
     return (t_v, res_v, res_i)
 
@@ -290,6 +296,10 @@ varianceInStms = foldl' varianceInStm
 
 type IxFun = IxFun.IxFun (TPrimExp Int64 VName)
 
+-- | Map from array variable names to their corresponding index functions.
+--   The info is not guaranteed to be exact, e.g., we assume ifs and loops
+--   return arrays layed out in normalized (row-major) form in memory.
+--   We only record aliasing statements, such as transposition, slice, etc.
 type IxFnEnv = M.Map VName IxFun
 
 type WithEnv = M.Map VName (Lambda GPU, [SubExp])
@@ -331,25 +341,39 @@ composeIxfuns env y x ixf_fun =
 changeIxFnEnv :: IxFnEnv -> VName -> Exp GPU -> TileM IxFnEnv
 changeIxFnEnv env y (BasicOp (Reshape shp_chg x)) =
   composeIxfuns env y x (`IxFun.reshape` map (fmap ExpMem.pe64) shp_chg)
+changeIxFnEnv env y (BasicOp (Manifest perm x)) = do
+  tp <- lookupType x
+  case tp of
+    Array _ptp shp _u -> do
+      let shp' = map ExpMem.pe64 (shapeDims shp)
+      let ixfn = IxFun.permute (IxFun.iota shp') perm
+      return $ M.insert y ixfn env
+    _ -> error "In TileLoops/Shared.hs, changeIxFnEnv: manifest applied to a non-array!"
 changeIxFnEnv env y (BasicOp (Rearrange perm x)) =
   composeIxfuns env y x (`IxFun.permute` perm)
 changeIxFnEnv env y (BasicOp (Rotate rs x)) =
   composeIxfuns env y x (`IxFun.rotate` fmap ExpMem.pe64 rs)
 changeIxFnEnv env y (BasicOp (Index x slc)) =
   composeIxfuns env y x (`IxFun.slice` (Slice $ map (fmap ExpMem.pe64) $ unSlice slc))
+changeIxFnEnv env y (BasicOp (Opaque _ (Var x))) =
+  composeIxfuns env y x id
 changeIxFnEnv env _ _ = return env
+
+se1 :: SubExp
+se1 = intConst Int64 1
 
 --------
 --- Main helper function for Register-and-Block Tiling
 --------
 kkLoopBody ::
+  Env ->
   ( (SubExp, SubExp, SubExp, SubExp, SubExp, SubExp, SubExp, SubExp),
     SegLevel,
     [Int],
     (VName, SubExp, VName, SubExp, SubExp),
     (SubExp, SubExp),
     (VName, VName),
-    (Stm GPU, VName, Stm GPU, VName),
+    (Stm GPU, VName, PrimType, Stm GPU, VName, PrimType),
     (Lambda GPU, Lambda GPU)
   ) ->
   VName ->
@@ -357,102 +381,28 @@ kkLoopBody ::
   Bool ->
   Builder GPU [VName]
 kkLoopBody
-  ( (rx, ry, tx, ty, tk, tk_div_tx, tk_div_ty, tx_rx),
+  env
+  ( (rx, ry, tx, ty, tk, tk_div_tx, _tk_div_ty, tx_rx),
     segthd_lvl,
     var_dims,
     (gtid_x, width_B, gtid_y, height_A, common_dim),
     (a_loc_sz, b_loc_sz),
     (iii, jjj),
-    (load_A, inp_A, load_B, inp_B),
+    (load_A, inp_A, pt_A, load_B, inp_B, pt_B),
     (map_lam, red_lam)
     )
   kk0
   (thd_res_merge, a_loc_init', b_loc_init')
   epilogue = do
-    let [map_t1, map_t2] = map (elemType . paramDec) $ lambdaParams map_lam
+    let (map_t1, map_t2) = (pt_A, pt_B)
     kk <- letExp "kk" =<< toExp (le64 kk0 * pe64 tk)
-    a_loc <- forLoop ry [a_loc_init'] $ \i0 [a_loc_merge] -> do
-      loop_a_loc <- forLoop tk_div_tx [a_loc_merge] $ \k0 [a_loc_merge'] -> do
-        scatter_a_loc <- segScatter2D "A_glb2loc" a_loc_sz a_loc_merge' segthd_lvl (ty, tx) $
-          \(thd_y, thd_x) -> do
-            k <- letExp "k" =<< toExp (le64 thd_x + le64 k0 * pe64 tx)
-            i <- letExp "i" =<< toExp (le64 thd_y + le64 i0 * pe64 ty)
-
-            letBindNames [gtid_y] =<< toExp (le64 iii + le64 i)
-            a_col_idx <- letExp "A_col_idx" =<< toExp (le64 kk + le64 k)
-
-            a_elem <-
-              letSubExp "A_elem"
-                =<< eIf
-                  ( toExp $
-                      le64 gtid_y .<. pe64 height_A
-                        .&&. if epilogue
-                          then le64 a_col_idx .<. pe64 common_dim
-                          else true
-                  )
-                  ( do
-                      addStm load_A
-                      res <- index "A_elem" inp_A [a_col_idx]
-                      resultBodyM [Var res]
-                  )
-                  (eBody [eBlank $ Prim map_t1])
-            a_loc_ind <-
-              letSubExp "a_loc_ind"
-                =<< eIf
-                  (toExp $ le64 k .<. pe64 tk)
-                  ( toExp (le64 k + le64 i * pe64 tk)
-                      >>= letTupExp' "loc_fi"
-                      >>= resultBodyM
-                  )
-                  (eBody [pure $ BasicOp $ SubExp $ intConst Int64 (-1)])
-            return (a_elem, a_loc_ind)
-        resultBodyM $ map Var scatter_a_loc
-      resultBodyM [Var loop_a_loc]
+    -- copy A to local memory
+    (a_loc, aCopyLoc2Reg) <-
+      copyGlb2ShMem kk (gtid_y, iii, map_t1, height_A, inp_A, load_A, a_loc_sz, a_loc_init')
 
     -- copy B from global to shared memory
-    b_loc <- forLoop tk_div_ty [b_loc_init'] $ \k0 [b_loc_merge] -> do
-      loop_b_loc <- forLoop rx [b_loc_merge] $ \j0 [b_loc_merge'] -> do
-        scatter_b_loc <- segScatter2D
-          "B_glb2loc"
-          b_loc_sz
-          b_loc_merge'
-          segthd_lvl
-          (ty, tx)
-          $ \(thd_y, thd_x) -> do
-            k <- letExp "k" =<< toExp (le64 thd_y + le64 k0 * pe64 ty)
-            j <- letExp "j" =<< toExp (le64 thd_x + le64 j0 * pe64 tx)
-
-            letBindNames [gtid_x] =<< toExp (le64 jjj + le64 j)
-            b_row_idx <- letExp "B_row_idx" =<< toExp (le64 kk + le64 k)
-
-            b_elem <-
-              letSubExp "B_elem"
-                =<< eIf
-                  ( toExp $
-                      le64 gtid_x .<. pe64 width_B
-                        .&&. if epilogue
-                          then le64 b_row_idx .<. pe64 common_dim
-                          else true
-                  )
-                  ( do
-                      addStm load_B
-                      res <- index "B_elem" inp_B [b_row_idx]
-                      resultBodyM [Var res]
-                  )
-                  (eBody [eBlank $ Prim map_t2])
-
-            b_loc_ind <-
-              letSubExp "b_loc_ind"
-                =<< eIf
-                  (toExp $ le64 k .<. pe64 tk)
-                  ( toExp (le64 j + le64 k * pe64 tx_rx)
-                      >>= letTupExp' "loc_fi"
-                      >>= resultBodyM
-                  )
-                  (eBody [pure $ BasicOp $ SubExp $ intConst Int64 (-1)])
-            return (b_elem, b_loc_ind)
-        resultBodyM $ map Var scatter_b_loc
-      resultBodyM [Var loop_b_loc]
+    (b_loc, bCopyLoc2Reg) <-
+      copyGlb2ShMem kk (gtid_x, jjj, map_t2, width_B, inp_B, load_B, b_loc_sz, b_loc_init')
 
     -- inner loop updating this thread's accumulator (loop k in mmm_kernels).
     thd_acc <- forLoop tk [thd_res_merge] $ \k [acc_merge] ->
@@ -468,37 +418,11 @@ kkLoopBody
           ( do
               reg_mem <- segMap2D "reg_mem" segthd_lvl ResultPrivate (ty, tx) $
                 \(ltid_y, ltid_x) -> do
-                  asss_init <- scratch "asss_init" map_t1 [ry]
-                  bsss_init <- scratch "bsss_init" map_t2 [rx]
-
-                  asss <- forLoop ry [asss_init] $ \i [asss_merge] -> do
-                    a_loc_ind <-
-                      letExp "a_loc_ind"
-                        =<< toExp
-                          ( le64 k
-                              + (le64 ltid_y * pe64 ry + le64 i) * pe64 tk
-                          )
-
-                    asss <-
-                      index "A_loc_elem" a_loc [a_loc_ind]
-                        >>= update "asss" asss_merge [i]
-                    resultBodyM [Var asss]
-
-                  bsss <- forLoop rx [bsss_init] $ \j [bsss_merge] -> do
-                    b_loc_ind <-
-                      letExp "b_loc_ind"
-                        =<< toExp
-                          ( le64 j
-                              + le64 k * pe64 tx_rx
-                              + le64 ltid_x * pe64 rx
-                          )
-
-                    bsss <-
-                      index "B_loc_elem" b_loc [b_loc_ind]
-                        >>= update "bsss" bsss_merge [j]
-                    resultBodyM [Var bsss]
+                  -- copy A from local memory to registers
+                  asss <- aCopyLoc2Reg k ltid_y
+                  -- copy B from local memory to registers
+                  bsss <- bCopyLoc2Reg k ltid_x
                   return $ varsRes [asss, bsss]
-
               let [asss, bsss] = reg_mem
 
               -- the actual redomap.
@@ -548,3 +472,131 @@ kkLoopBody
           )
           (resultBodyM [Var acc_merge])
     return [thd_acc, a_loc, b_loc]
+    where
+      mk_ik is_coal (thd_y, thd_x) (i0, k0)
+        | is_coal = do
+          -- not-transposed case (i.e., already coalesced)
+          let (t_par, t_seq) = (tx, tk)
+          k <- letExp "k" =<< toExp (le64 thd_x + le64 k0 * pe64 t_par)
+          i <- letExp "i" =<< toExp (le64 thd_y + le64 i0 * pe64 t_par)
+          -- we have padded to minimize bank conflicts,
+          -- hence the length of inner dim is (t_seq + 1)
+          let e = le64 k + le64 i * (pe64 t_seq + pe64 se1)
+          return (i, k, e)
+      mk_ik _ (thd_y, thd_x) (i0, k0) = do
+        -- matrix is transposed case (i.e., uncoalesced):
+        let (t_par, tr_par) = (tx, tx_rx)
+        k <- letExp "k" =<< toExp (le64 thd_y + le64 k0 * pe64 t_par)
+        i <- letExp "i" =<< toExp (le64 thd_x + le64 i0 * pe64 t_par)
+        -- we have padded to minimize bank conflicts,
+        -- hence the length of inner dim is (tr_par + 1)
+        let e = le64 i + le64 k * (pe64 tr_par + pe64 se1)
+        return (i, k, e)
+      isInnerCoal :: Env -> VName -> Stm GPU -> Bool
+      isInnerCoal (_, ixfn_env) slc_X (Let pat _ (BasicOp (Index x _)))
+        | [slc_X'] <- map patElemName (patElems pat),
+          slc_X == slc_X',
+          Nothing <- M.lookup x ixfn_env =
+          True -- if not in the table, we assume not-transposed!
+      isInnerCoal (_, ixfn_env) slc_X stm@(Let pat _ (BasicOp (Index x _)))
+        | [slc_X'] <- map patElemName (patElems pat),
+          slc_X == slc_X',
+          Just ixf_fn <- M.lookup x ixfn_env,
+          (IxFun.IxFun (lmad :| []) _ _) <- ixf_fn =
+          let lmad_dims = IxFun.lmadDims lmad
+              q = length lmad_dims
+              last_perm = IxFun.ldPerm $ last lmad_dims
+              stride = IxFun.ldStride $ last lmad_dims
+              res = last_perm == q -1 && (stride == pe64 (intConst Int64 1))
+           in trace ("Coal: " ++ pretty slc_X ++ "stm: " ++ pretty stm ++ " res: " ++ pretty res) res
+      isInnerCoal _ _ _ = error "TileLoops/Shared.hs: not an error, but I would like to know why!"
+      --
+      copyGlb2ShMem ::
+        VName ->
+        (VName, VName, PrimType, SubExp, VName, Stm GPU, SubExp, VName) ->
+        Builder GPU (VName, VName -> VName -> Builder GPU VName)
+      copyGlb2ShMem kk (gtid, ii, ptp_X_el, parlen_X, inp_X, load_X, loc_sz_X, x_loc_init') = do
+        let (t_par, r_par, tseq_div_tpar) = (tx, rx, tk_div_tx)
+            is_inner_coal = isInnerCoal env inp_X load_X
+            str_A = baseString inp_X
+        x_loc <-
+          if trace ("is coalesced: " ++ pretty is_inner_coal) is_inner_coal
+            then forLoop r_par [x_loc_init'] $ \i0 [a_loc_merge] -> do
+              loop_a_loc <- forLoop tseq_div_tpar [a_loc_merge] $ \k0 [a_loc_merge'] -> do
+                scatter_a_loc <-
+                  segScatter2D (str_A ++ "_glb2loc") loc_sz_X a_loc_merge' segthd_lvl (t_par, t_par) $
+                    scatterFun is_inner_coal (i0, k0)
+                resultBodyM $ map Var scatter_a_loc
+              resultBodyM [Var loop_a_loc]
+            else forLoop tseq_div_tpar [x_loc_init'] $ \k0 [b_loc_merge] -> do
+              loop_b_loc <- forLoop r_par [b_loc_merge] $ \j0 [b_loc_merge'] -> do
+                scatter_b_loc <-
+                  segScatter2D (str_A ++ "_glb2loc") loc_sz_X b_loc_merge' segthd_lvl (t_par, t_par) $
+                    scatterFun is_inner_coal (j0, k0)
+                resultBodyM $ map Var scatter_b_loc
+              resultBodyM [Var loop_b_loc]
+        return (x_loc, copyLoc2Reg is_inner_coal str_A x_loc)
+        where
+          copyLoc2Reg ::
+            Bool ->
+            String ->
+            VName ->
+            VName ->
+            VName ->
+            Builder GPU VName
+          copyLoc2Reg is_inner_coal str_A x_loc k ltid_yx = do
+            let (r_par, t_seq, tr_par) = (rx, tk, tx_rx)
+            xsss_init <- scratch (str_A ++ "_init_regs") ptp_X_el [r_par]
+            forLoop r_par [xsss_init] $ \ij [xsss_merge] -> do
+              x_loc_ind <-
+                letExp (str_A ++ "_loc_ind")
+                  =<< toExp
+                    ( if is_inner_coal
+                        then le64 k + (le64 ltid_yx * pe64 r_par + le64 ij) * (pe64 t_seq + pe64 se1)
+                        else le64 ij + le64 ltid_yx * pe64 r_par + le64 k * (pe64 tr_par + pe64 se1)
+                    )
+              xsss <-
+                index (str_A ++ "_loc_elem") x_loc [x_loc_ind]
+                  >>= update (str_A ++ "_regs") xsss_merge [ij]
+              resultBodyM [Var xsss]
+          --
+          scatterFun ::
+            Bool ->
+            (VName, VName) ->
+            (VName, VName) ->
+            Builder GPU (SubExp, SubExp)
+          scatterFun is_inner_coal (i0, k0) (thd_y, thd_x) = do
+            let str_A = baseString inp_X
+                t_seq = tk
+            --k <- letExp "k" =<< toExp (le64 thd_x + le64 k0 * pe64 tx)
+            --i <- letExp "i" =<< toExp (le64 thd_y + le64 i0 * pe64 ty)
+            (i, k, epx_loc_fi) <- mk_ik is_inner_coal (thd_y, thd_x) (i0, k0)
+            letBindNames [gtid] =<< toExp (le64 ii + le64 i)
+            a_seqdim_idx <- letExp (str_A ++ "_seqdim_idx") =<< toExp (le64 kk + le64 k)
+
+            a_elem <-
+              letSubExp (str_A ++ "_elem")
+                =<< eIf
+                  ( toExp $
+                      le64 gtid .<. pe64 parlen_X
+                        .&&. if epilogue
+                          then le64 a_seqdim_idx .<. pe64 common_dim
+                          else true
+                  )
+                  ( do
+                      addStm load_X
+                      res <- index "A_elem" inp_X [a_seqdim_idx]
+                      resultBodyM [Var res]
+                  )
+                  (eBody [eBlank $ Prim ptp_X_el])
+
+            a_loc_ind <-
+              letSubExp (str_A ++ "_loc_ind")
+                =<< eIf
+                  (toExp $ le64 k .<. pe64 t_seq)
+                  ( toExp epx_loc_fi -- (le64 k + le64 i * pe64 t_seq)
+                      >>= letTupExp' "loc_fi"
+                      >>= resultBodyM
+                  )
+                  (eBody [pure $ BasicOp $ SubExp $ intConst Int64 (-1)])
+            return (a_elem, a_loc_ind)

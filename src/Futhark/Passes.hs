@@ -23,11 +23,11 @@ import Futhark.IR.SeqMem (SeqMem)
 import Futhark.Optimise.CSE
 import Futhark.Optimise.DoubleBuffer
 import Futhark.Optimise.Fusion
+import Futhark.Optimise.GenRedOpt
 import Futhark.Optimise.InPlaceLowering
 import Futhark.Optimise.InliningDeadFun
 import qualified Futhark.Optimise.MemoryBlockMerging as MemoryBlockMerging
 import Futhark.Optimise.Sink
-import Futhark.Optimise.GenRedOpt
 import Futhark.Optimise.TileLoops
 import Futhark.Optimise.Unstream
 import Futhark.Pass.AD
@@ -80,9 +80,9 @@ kernelsPipeline =
       [ simplifyGPU,
         optimiseGenRed,
         simplifyGPU,
-        babysitKernels,
-        simplifyGPU,
         tileLoops,
+        simplifyGPU,
+        babysitKernels,
         simplifyGPU,
         unstreamGPU,
         performCSE True,
