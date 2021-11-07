@@ -12,6 +12,7 @@ import Control.Monad.Reader
 import Data.Function ((&))
 import qualified Data.Map as M
 import Data.Sequence (Seq (..))
+import qualified Data.Sequence as Seq
 import Futhark.IR.GPUMem
 import Futhark.IR.SeqMem
 import Futhark.Pass (Pass (..))
@@ -61,9 +62,7 @@ lowerAllocationsInStms ::
   -- | The other statements processed so far
   Stms rep ->
   LowerM inner (Stms rep)
-lowerAllocationsInStms Empty allocs acc
-  | allocs == mempty = return acc
-  | otherwise = error "Impossible, there shouldn't be any allocs left"
+lowerAllocationsInStms Empty allocs acc = return $ acc <> Seq.fromList (M.elems allocs)
 lowerAllocationsInStms (stm@(Let (Pat [PatElem vname _]) _ (Op (Alloc _ _))) :<| stms) allocs acc =
   lowerAllocationsInStms stms (M.insert vname stm allocs) acc
 lowerAllocationsInStms (stm@(Let pat _ (Op (Inner inner))) :<| stms) alloc acc = do
