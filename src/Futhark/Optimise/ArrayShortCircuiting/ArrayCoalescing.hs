@@ -30,10 +30,6 @@ import Futhark.Optimise.ArrayShortCircuiting.LastUse
 import Futhark.Optimise.ArrayShortCircuiting.MemRefAggreg
 import Futhark.Optimise.ArrayShortCircuiting.TopDownAn
 
-trace s a = a
-
-traceWith s a = trace (s <> ": " <> pretty a) a
-
 type Coalesceable rep inner =
   ( CreatesNewArrOp (OpWithAliases inner),
     ASTRep rep,
@@ -110,7 +106,7 @@ markSuccessCoal ::
   (CoalsTab, CoalsTab)
 markSuccessCoal (actv, succc) m_b info_b =
   ( M.delete m_b actv,
-    appendCoalsInfo (traceWith "MARKING SUCCESS!" m_b) info_b succc
+    appendCoalsInfo m_b info_b succc
   )
 
 -- | Prettyprint the inhibit table
@@ -148,7 +144,7 @@ mkCoalsTabFun ::
   m CoalsTab
 mkCoalsTabFun lufun r computeScalarOnOp fun@(FunDef _ _ _ _ fpars body) = do
   -- First compute last-use information
-  let lutab = traceWith "lutab" $ lufun fun
+  let lutab = lufun fun
       unique_mems = getUniqueMemFParam fpars
       scalar_table =
         runReader
@@ -240,22 +236,10 @@ shortCircuitGPUMemHelper lvl lutab pat@(Pat ps) space kernel_body td_env bu_env 
     foldM
       ( \bu_env_f (k, entry) -> do
           destination_uses <- aggSummaryMapPartial (scalar_table td_env) (unSegSpace space) $ dstrefs $ memrefs entry
-          if traceWith
-            ( "k: " <> pretty k
-                <> "\nfilter entry: "
-                <> pretty entry
-                <> "\ndstrefs: "
-                <> pretty (dstrefs $ memrefs entry)
-                <> "\ndestination_uses: "
-                <> pretty destination_uses
-                <> "\nsrcwrts: "
-                <> pretty (srcwrts $ memrefs entry)
-                <> "\nnoMemOverlap"
-            )
-            $ noMemOverlap td_env destination_uses $ srcwrts $ memrefs entry
+          if noMemOverlap td_env destination_uses $ srcwrts $ memrefs entry
             then return bu_env_f
             else do
-              let (ac, inh) = trace ("MARKING " <> pretty k <> " AS FAILED") $ markFailedCoal (activeCoals bu_env_f, inhibit bu_env_f) k
+              let (ac, inh) = markFailedCoal (activeCoals bu_env_f, inhibit bu_env_f) k
               return $ bu_env_f {activeCoals = ac, inhibit = inh}
       )
       bu_env'
@@ -282,86 +266,34 @@ shortCircuitGPUMemHelper lvl lutab pat@(Pat ps) space kernel_body td_env bu_env 
                in case M.lookup m_b $ activeCoals bu_env of
                     Just coal_entry ->
                       let mrefs =
-                            traceWith
-                              ( "Processing m_b: " <> pretty m_b
-                                  <> "\nm_y: "
-                                  <> pretty m_y
-                                  <> "\nixf: "
-                                  <> pretty ixf
-                                  <> "\nas: "
-                                  <> pretty as
-                                  <> "\nalsmem: "
-                                  <> pretty (alsmem coal_entry)
-                                  <> "\ndstind: "
-                                  <> pretty (dstind coal_entry)
-                                  <> "\nvartab: "
-                                  <> pretty (vartab coal_entry)
-                                  <> "\np: "
-                                  <> pretty p
-                                  <> "\nmemrefs"
-                              )
-                              $ memrefs coal_entry
+                            memrefs coal_entry
                        in if noMemOverlap td_env as $ dstrefs mrefs
                             then case M.lookup (patElemName p) $ vartab coal_entry of
-                              Nothing -> trace "Nothing1" bu_env_f
+                              Nothing -> bu_env_f
                               Just (Coalesced knd mbd@(MemBlock _ _ _ ixfn) subs0) ->
                                 case freeVarSubstitutions (scope td_env) (scalar_table td_env) ixfn of
                                   Just fv_subst ->
                                     if ixfunPermutation ixfn == ixfunPermutation (ixfun $ fromJust $ getScopeMemInfo (patElemName p) $ scope td_env)
                                       then
-                                        let entry = coal_entry {vartab = M.insert (patElemName p) (Coalesced knd mbd $ traceWith "fv_subst" fv_subst) (vartab coal_entry)}
+                                        let entry = coal_entry {vartab = M.insert (patElemName p) (Coalesced knd mbd fv_subst) (vartab coal_entry)}
                                             (ac, succ) =
-                                              trace
-                                                ( "MARKING " <> pretty m_b
-                                                    <> " AS SUCCESS!\nixf: "
-                                                    <> pretty ixf
-                                                    <> "\nixfn: "
-                                                    <> pretty ixfn
-                                                    <> "\nmeminfo: "
-                                                    <> pretty (fromJust $ getScopeMemInfo (patElemName p) (scope td_env))
-                                                    <> "\nwith entry: "
-                                                    <> pretty entry
-                                                )
-                                                $ markSuccessCoal (activeCoals bu_env_f, successCoals bu_env_f) m_b entry
+                                              markSuccessCoal (activeCoals bu_env_f, successCoals bu_env_f) m_b entry
                                          in bu_env_f {activeCoals = ac, successCoals = succ}
                                       else
                                         let (ac, inh) = markFailedCoal (activeCoals bu_env_f, inhibit bu_env_f) m_b
                                          in bu_env_f {activeCoals = ac, inhibit = inh}
                                   Nothing ->
-                                    let (ac, inh) = trace ("MARKING " <> pretty m_b <> " AS FAILED (3)") $ markFailedCoal (activeCoals bu_env_f, inhibit bu_env_f) m_b
+                                    let (ac, inh) = markFailedCoal (activeCoals bu_env_f, inhibit bu_env_f) m_b
                                      in bu_env_f {activeCoals = ac, inhibit = inh}
                             else
-                              let (ac, inh) = trace ("MARKING " <> pretty m_b <> " AS FAILED (2)") $ markFailedCoal (activeCoals bu_env_f, inhibit bu_env_f) m_b
+                              let (ac, inh) = markFailedCoal (activeCoals bu_env_f, inhibit bu_env_f) m_b
                                in bu_env_f {activeCoals = ac, inhibit = inh}
-                    coal_entry -> trace ("Lookup failed?\ncoals_entry: " <> pretty coal_entry <> "\nas: " <> pretty as) bu_env_f
+                    coal_entry -> bu_env_f
           )
           bu_env''
-          $ trace ("mergee_writes: " <> pretty mergee_writes) mergee_writes
+          mergee_writes
   return $
-    trace
-      ( "\nsegmap: " <> pretty (patElems pat) <> "\nactv0: "
-          <> pretty actv0
-          <> "\ninhibit0: "
-          <> pretty inhibit0
-          <> "\nactv_return: "
-          <> pretty (actv_return)
-          <> "\nactv after: "
-          <> pretty (activeCoals bu_env'''')
-          <> "\ninhibit after: "
-          <> pretty (inhibit bu_env'''')
-          <> "\nmemrefs for bu_env: "
-          <> pretty (map (Bifunctor.second memrefs) $ M.toList $ activeCoals bu_env)
-          <> "\nmemrefs for bu_env': "
-          <> pretty (map (Bifunctor.second memrefs) $ M.toList $ activeCoals bu_env')
-          <> "\nmemfrefs for bu_env'': "
-          <> pretty (map (Bifunctor.second memrefs) $ M.toList $ activeCoals bu_env'')
-          <> "\nmemrefs for bu_env'': "
-          <> pretty (map (Bifunctor.second memrefs) $ M.toList $ activeCoals bu_env'''')
-          -- <> "\nnomemoverlap: "
-          -- <> pretty (noMemOverlap td_env (srcwrts $ memrefs $ snd $ head $ tail $ M.toList $ activeCoals bu_env'''') (dstrefs $ memrefs $ snd $ head $ tail $ M.toList $ activeCoals bu_env''''))
-      )
-      --  $ bu_env' {activeCoals = actv1, successCoals = successCoals1, inhibit = inhibit1}
-      $ bu_env''''
+    bu_env''''
 
 ixfunPermutation :: IxFun -> [Int]
 ixfunPermutation = map IxFun.ldPerm . IxFun.lmadDims . NE.head . IxFun.ixfunLMADs
@@ -371,14 +303,7 @@ ixfunPermutation = map IxFun.ldPerm . IxFun.lmadDims . NE.head . IxFun.ixfunLMAD
 makeSegMapCoals :: SegLevel -> TopDnEnv GPUMem -> SegSpace -> KernelBody (Aliases GPUMem) -> (CoalsTab, InhibitTab) -> (PatElemT (VarAliases, LetDecMem), KernelResult) -> (CoalsTab, InhibitTab)
 makeSegMapCoals lvl td_env space kernel_body (active, inhibit) x@(PatElem pat_name (_, MemArray _ _ _ (ArrayIn pat_mem pat_ixf)), Returns _ _ (Var return_name))
   | Just mb@(MemBlock tp shp return_mem return_ixf) <-
-      traceWith
-        ( "x: " <> pretty x
-            <> "\nscope: "
-            <> pretty (M.keys $ scope td_env <> scopeOf (kernelBodyStms kernel_body))
-            <> "\ngetScopeMemInfo for: "
-            <> pretty return_name
-        )
-        $ getScopeMemInfo return_name $ scope td_env <> scopeOf (kernelBodyStms kernel_body),
+      getScopeMemInfo return_name $ scope td_env <> scopeOf (kernelBodyStms kernel_body),
     isSegThread lvl,
     MemMem pat_space <- runReader (lookupMemInfo $ pat_mem) $ removeScopeAliases $ scope td_env,
     MemMem return_space <- runReader (lookupMemInfo return_mem) $ removeScopeAliases $ scope td_env <> scopeOf (kernelBodyStms kernel_body) <> scopeOfSegSpace space,
@@ -397,14 +322,11 @@ makeSegMapCoals lvl td_env space kernel_body (active, inhibit) x@(PatElem pat_na
                                   Coalesced
                                     knd
                                     ( MemBlock pt shp pat_mem $
-                                        traceWith "non-trans segmap ixf after" $
-                                          IxFun.slice (traceWith "segmap ixf before" pat_ixf) $
-                                            traceWith "fullSlice" $
-                                              fullSlice (IxFun.shape pat_ixf) $
-                                                traceWith "segmap slice" $
-                                                  Slice $
-                                                    map (DimFix . TPrimExp . flip LeafExp (IntType Int64) . fst) $
-                                                      unSegSpace space
+                                        IxFun.slice pat_ixf $
+                                          fullSlice (IxFun.shape pat_ixf) $
+                                            Slice $
+                                              map (DimFix . TPrimExp . flip LeafExp (IntType Int64) . fst) $
+                                                unSegSpace space
                                     )
                                     subst
                               )
@@ -412,7 +334,7 @@ makeSegMapCoals lvl td_env space kernel_body (active, inhibit) x@(PatElem pat_na
                           )
                     ) of
             (False, Just vtab) ->
-              (active <> traceWith "Adding segmap coal entry BOBOB!" (M.singleton return_mem $ CoalsEntry pat_mem (traceWith "pat_ixf'" pat_ixf) (oneName pat_mem) vtab mempty mempty), inhibit)
+              (active <> M.singleton return_mem (CoalsEntry pat_mem pat_ixf (oneName pat_mem) vtab mempty mempty), inhibit)
             _ -> (active, inhibit)
           else (active, inhibit)
       Just trans ->
@@ -426,14 +348,11 @@ makeSegMapCoals lvl td_env space kernel_body (active, inhibit) x@(PatElem pat_na
                            Coalesced
                              knd
                              ( MemBlock pt shp mem $
-                                 traceWith "trans segmap ixf after" $
-                                   IxFun.slice (traceWith "segmap ixf before" ixf) $
-                                     traceWith "fullSlice" $
-                                       fullSlice base_shape $
-                                         traceWith "segmap slice" $
-                                           Slice $
-                                             map (DimFix . TPrimExp . flip LeafExp (IntType Int64) . fst) $
-                                               unSegSpace space
+                                 IxFun.slice ixf $
+                                   fullSlice base_shape $
+                                     Slice $
+                                       map (DimFix . TPrimExp . flip LeafExp (IntType Int64) . fst) $
+                                         unSegSpace space
                              )
                              subst
                        )
@@ -442,18 +361,17 @@ makeSegMapCoals lvl td_env space kernel_body (active, inhibit) x@(PatElem pat_na
              ) of
           (False, Just vtab) ->
             let opts = if dstmem trans == pat_mem then mempty else M.insert pat_name pat_mem $ optdeps trans
-             in ( traceWith "Adding transitive segmap coal entry!" $
-                    M.insert
-                      return_mem
-                      ( CoalsEntry
-                          (dstmem trans)
-                          (dstind trans)
-                          (oneName pat_mem <> alsmem trans)
-                          vtab
-                          opts
-                          mempty
-                      )
-                      active,
+             in ( M.insert
+                    return_mem
+                    ( CoalsEntry
+                        (dstmem trans)
+                        (dstind trans)
+                        (oneName pat_mem <> alsmem trans)
+                        vtab
+                        opts
+                        mempty
+                    )
+                    active,
                   inhibit
                 )
           _ -> (active, inhibit)
@@ -468,7 +386,7 @@ makeSegMapCoals _ td_env _ _ x (_, result) =
     & foldr (\(MemBlock _ _ mem _) -> flip markFailedCoal mem) x
 
 fullSlice :: [TPrimExp Int64 VName] -> Slice (TPrimExp Int64 VName) -> Slice (TPrimExp Int64 VName)
-fullSlice shp (Slice slc) = Slice $ slc ++ (traceWith "extra" $ map (\d -> DimSlice 0 d 1) $ drop (traceWith "length slc" $ length slc) $ traceWith "shp" shp)
+fullSlice shp (Slice slc) = Slice $ slc ++ (map (\d -> DimSlice 0 d 1) $ drop (length slc) shp)
 
 fixPointCoalesce ::
   (Coalesceable rep inner) =>
@@ -486,14 +404,14 @@ fixPointCoalesce lutab fpar bdy topenv = do
         foldl markFailedCoal (actv_tab, inhb_tab) mems
 
       (succ_tab', failed_optdeps) = fixPointFilterDeps succ_tab M.empty
-      inhb_tab'' = M.unionWith (<>) failed_optdeps (traceWith "inhb_tab'" inhb_tab')
+      inhb_tab'' = M.unionWith (<>) failed_optdeps inhb_tab'
    in --new_inhibited = M.unionWith (<>) inhb_tab'' (inhibited topenv)
       if not $ M.null actv_tab'
         then error ("COALESCING ROOT: BROKEN INV, active not empty: " ++ pretty (M.keys actv_tab'))
         else
           if M.null $ inhb_tab'' `M.difference` inhibited topenv
             then return succ_tab'
-            else fixPointCoalesce lutab fpar bdy (topenv {inhibited = traceWith "inhb_tab''" inhb_tab''}) --new_inhibited })
+            else fixPointCoalesce lutab fpar bdy (topenv {inhibited = inhb_tab''}) --new_inhibited })
             -- helper to helper
   where
     fixPointFilterDeps :: CoalsTab -> InhibitTab -> (CoalsTab, InhibitTab)
@@ -533,7 +451,7 @@ mkCoalsTabStms lutab = traverseStms
     traverseStms (stm :<| stms) td_env bu_env = do
       let td_env' = topdwnTravBinding td_env stm
       bu_env' <- traverseStms stms td_env' bu_env
-      mkCoalsTabStm lutab (trace ("\nprocessing stm: " <> pretty (stmPat stm) <> "\n") stm) td_env' bu_env'
+      mkCoalsTabStm lutab stm td_env' bu_env'
 
 -- | Array (register) coalescing can have one of three shapes:
 --      a) @let y    = copy(b^{lu})@
@@ -973,53 +891,22 @@ mkCoalsTabStm lutab lstm@(Let pat _ (DoLoop arginis lform body)) td_env bu_env =
       uses <-
         aggSummaryLoopTotal (scope td_env) scope_loop scal_tab idx $
           (dstrefs . memrefs) etry
-      return $ trace ("wrts: " <> pretty wrts <> "\nuses: " <> pretty uses) $ etry {memrefs = MemRefs uses wrts}
+      return $ etry {memrefs = MemRefs uses wrts}
     loopSoundness1Entry scope_loop scal_tab idx etry = do
       let wrt_i = (srcwrts . memrefs) etry
       use_p <-
         aggSummaryLoopPartial (scope td_env) scope_loop (scal_tab <> scalar_table td_env) idx $
           dstrefs $ memrefs etry
-      let res =
-            traceWith
-              ( "alsmems: "
-                  <> pretty (alsmem etry)
-                  <> "\nidx: "
-                  <> pretty idx
-                  <> "\nscal_tab: "
-                  <> pretty (scal_tab <> scalar_table td_env)
-                  <> "\ndstrefs: "
-                  <> pretty (dstrefs $ memrefs etry)
-                  <> "\nusages of dstrefs: "
-                  <> pretty (map (\x -> (x, x `nameIn` nonNegatives td_env')) $ namesToList $ freeIn $ dstrefs $ memrefs $ etry)
-                  <> "\nwrt_i: "
-                  <> pretty wrt_i
-                  <> "\nuse_p: "
-                  <> pretty use_p
-                  <> "\nnoMemOverlap"
-              )
-              $ noMemOverlap td_env' wrt_i use_p
       return $
-        res
-          || trace
-            ( "Soundness1 fails.\nidx: " <> pretty idx <> "\netry: " <> pretty etry
-                <> "\nwrt_i: "
-                <> pretty wrt_i
-                <> "\nuse_p: "
-                <> pretty use_p
-                <> "\ndstrefs memrefs etry: "
-                <> pretty (dstrefs (memrefs etry))
-            )
-            False
+        noMemOverlap td_env' wrt_i use_p
     loopSoundness2Entry :: CoalsTab -> VName -> CoalsEntry -> Bool
     loopSoundness2Entry old_actv m_b etry =
-      case traceWith "Soundness2Entry" $ M.lookup (traceWith "m_b" m_b) old_actv of
+      case M.lookup m_b old_actv of
         Nothing -> True
         Just etry0 ->
-          let uses_before = traceWith "uses_before" $ (dstrefs . memrefs) etry0
-              write_loop = traceWith "writes_loop" $ (srcwrts . memrefs) etry
-           in ( noMemOverlap td_env write_loop uses_before
-                  || trace ("Soundness2 fails for " ++ pretty m_b ++ " : " ++ pretty uses_before ++ " and " ++ pretty write_loop) False
-              )
+          let uses_before = (dstrefs . memrefs) etry0
+              write_loop = (srcwrts . memrefs) etry
+           in noMemOverlap td_env write_loop uses_before
 
 -- The case of in-place update:
 --   @let x' = x with slice <- elm@
@@ -1184,7 +1071,7 @@ filterSafetyCond2and5 act_coal inhb_coal scals_env td_env =
                             case freeVarSubstitutions (scope td_env) scals_env b_indfun' of
                               Nothing -> failed
                               Just fv_subst ->
-                                let mem_info = traceWith ("filterMemInsert.\nb: " <> pretty b <> "\nmem_info") $ Coalesced TransitiveCoal (MemBlock tp0 shp0 x_mem b_indfun') fv_subst
+                                let mem_info = Coalesced TransitiveCoal (MemBlock tp0 shp0 x_mem b_indfun') fv_subst
                                     info' = info {vartab = M.insert b mem_info vtab}
                                  in (M.insert m_b info' acc, inhb)
                       Just (Coalesced k mblk@(MemBlock pt shp mem new_indfun) _) ->
@@ -1192,7 +1079,7 @@ filterSafetyCond2and5 act_coal inhb_coal scals_env td_env =
                          in case freeVarSubstitutions (scope td_env) scals_env new_indfun of
                               Just fv_subst
                                 | safe_2 ->
-                                  let mem_info = traceWith ("filterMemInsert2.\nvtab: " <> pretty vtab <> "\nk: " <> pretty k <> "\nb: " <> pretty b <> "\nmem_info") $ Coalesced k (MemBlock pt shp x_mem new_indfun) fv_subst
+                                  let mem_info = Coalesced k (MemBlock pt shp x_mem new_indfun) fv_subst
                                       info' = info {vartab = M.insert b mem_info vtab}
                                    in (M.insert m_b info' acc, inhb)
                               safe_5 ->
@@ -1234,7 +1121,7 @@ mkCoalsHelper3PatternMatch pat e lutab td_env successCoals_tab activeCoals_tab i
             InPlaceCoal -> activeCoals_tab
             _ -> successCoals_tab
           (m_yx, ind_yx, mem_yx_al, x_deps) =
-            case traceWith ("pat: " <> pretty pat <> "\nknd: " <> pretty knd <> "\nlookup proper_coals_tab\nm_b: " <> pretty m_b <> "\nm_x: " <> pretty m_x <> "\nresult") $ M.lookup m_x proper_coals_tab of
+            case M.lookup m_x proper_coals_tab of
               Nothing ->
                 (m_x, alias_fn ind_x, oneName m_x, M.empty)
               Just (CoalsEntry m_y ind_y y_al vtab x_deps0 _) ->
@@ -1282,7 +1169,7 @@ mkCoalsHelper3PatternMatch pat e lutab td_env successCoals_tab activeCoals_tab i
                               vtab'
                               opts'
                               mempty
-                       in M.insert (trace ("Inserting new coalescing: " <> pretty m_b <> "\nentry: " <> pretty coal_etry <> "\ninhibit_tab: " <> pretty inhibit_tab) m_b) coal_etry acc
+                       in M.insert m_b coal_etry acc
             _ -> acc
 mkCoalsHelper3PatternMatch _ _ _ _ _ _ _ =
   error "In ArrayCoalescing.hs, fun mkCoalsHelper3PatternMatch: Unreachable!!!"

@@ -28,12 +28,6 @@ import qualified Futhark.IR.Mem.IxFun as IxFun
 import Futhark.IR.SeqMem
 import Futhark.Optimise.ArrayShortCircuiting.DataStructs
 
-trace s a = a
-
-traceWith' s a = trace (s <> ": " <> show a) a
-
-traceWith s a = trace (s <> ": " <> pretty a) a
-
 type ScopeTab rep = Scope (Aliases rep)
 -- ^ maps array-variable names to various info, including
 --   types, memory block and index function, etc.
@@ -331,7 +325,7 @@ walkAliasTab _ vtab x
     Just c -- @x@ is in @vartab@ together with its new ixfun
 walkAliasTab alias_tab vtab x
   | Just (x0, alias0, _) <- M.lookup x alias_tab = do
-    Coalesced knd (MemBlock pt shp vname ixf) substs <- walkAliasTab alias_tab vtab $ trace ("found alias for " <> pretty x) x0
+    Coalesced knd (MemBlock pt shp vname ixf) substs <- walkAliasTab alias_tab vtab x0
     return $ Coalesced knd (MemBlock pt shp vname $ alias0 ixf) substs
 walkAliasTab alias_tab vtab x = Nothing -- error ("impossible!\nCouldn't find " <> pretty x <> " in vtab: " <> pretty vtab)
 
@@ -355,7 +349,7 @@ addInvAliassesVarTab ::
 addInvAliassesVarTab td_env vtab x
   | Just (Coalesced _ (MemBlock _ _ m_y x_ixfun) fv_subs) <- M.lookup x vtab =
     case M.lookup x (v_alias td_env) of
-      Nothing -> Just $ trace ("addInvAliassesVarTab\nx not found: " <> pretty x) vtab
+      Nothing -> Just vtab
       Just (nm, _, Nothing) -> Nothing -- can't invert ixfun, conservatively fail!
       Just (x0, _, Just inv_alias0) ->
         let x_ixfn0 = inv_alias0 x_ixfun
@@ -364,7 +358,7 @@ addInvAliassesVarTab td_env vtab x
               Just (MemBlock ptp shp _ _) ->
                 let coal = Coalesced TransitiveCoal (MemBlock ptp shp m_y x_ixfn0) fv_subs
                     vartab' = M.insert x0 coal vtab
-                 in addInvAliassesVarTab td_env vartab' $ trace ("addInvAliassesVarTab\nx: " <> pretty x <> "\nx_ixfun: " <> pretty x_ixfun <> "\nx0: " <> pretty x0 <> "\nx_ixfn0: " <> pretty x_ixfn0) x0
+                 in addInvAliassesVarTab td_env vartab' x0
 addInvAliassesVarTab _ _ _ = error "impossible"
 
 areAliased :: TopDnEnv rep -> VName -> VName -> Bool

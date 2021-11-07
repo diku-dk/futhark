@@ -28,10 +28,6 @@ import Futhark.IR.SeqMem
 import Futhark.Optimise.ArrayShortCircuiting.DataStructs
 import Prelude
 
-trace s a = a
-
-traceWith s a = trace (s <> ": " <> pretty a) a
-
 newtype LastUseReader rep = LastUseReader
   { onOp :: Op (Aliases rep) -> Names -> LastUseM rep (LUTabFun, Names, Names)
   }
@@ -203,7 +199,7 @@ lastUseExp (DoLoop var_ses _ body) used_nms0 = do
 
   -- add var_inis_a to the body_lutab, i.e., record the last-use of
   -- initializer in the corresponding loop variant.
-  let lutab_res = body_lutab <> (traceWith "CHREVROLET" $ M.fromList var_inis)
+  let lutab_res = body_lutab <> M.fromList var_inis
 
       -- the result used names are:
       fpar_nms = namesFromList $ map (identName . paramIdent . fst) var_ses

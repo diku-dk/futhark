@@ -33,10 +33,6 @@ import Futhark.Optimise.ArrayShortCircuiting.TopDownAn
 import Futhark.Transform.Substitute
 import Futhark.Util
 
-trace s a = a
-
-traceWith s a = trace (s <> ": " <> pretty a) a
-
 -----------------------------------------------------
 -- Some translations of Accesses and Ixfuns        --
 -----------------------------------------------------
@@ -58,7 +54,7 @@ freeVarSubstitutions scope0 scals0 indfun =
     freeVarSubstitutions' :: FreeVarSubsts -> [VName] -> Maybe FreeVarSubsts
     freeVarSubstitutions' subs [] = Just subs
     freeVarSubstitutions' subs0 fvs =
-      let fvs_not_in_scope = traceWith "fvs_not_in_scope" $ filter (`M.notMember` scope0) fvs
+      let fvs_not_in_scope = filter (`M.notMember` scope0) fvs
        in case unzip <$> mapM getSubstitution fvs_not_in_scope of
             -- We require that all free variables can be substituted
             Just (subs, new_fvs) ->
@@ -92,7 +88,7 @@ getUseSumFromStm ::
 getUseSumFromStm td_env coal_tab (Let Pat {} _ (BasicOp (Index arr (Slice slc))))
   | Just (MemBlock _ shp _ _) <- getScopeMemInfo arr (scope td_env),
     length slc == length (shapeDims shp) && all isFix slc = do
-    (mem_b, mem_arr, ixfn_arr) <- getDirAliasedIxfn td_env coal_tab $ traceWith "in here?" arr
+    (mem_b, mem_arr, ixfn_arr) <- getDirAliasedIxfn td_env coal_tab arr
     let new_ixfn = IxFun.slice ixfn_arr $ Slice $ map (fmap pe64) slc
     return ([], [(mem_b, mem_arr, new_ixfn)])
   where
@@ -174,7 +170,7 @@ recordMemRefUses td_env bu_env stm =
   let active_tab = activeCoals bu_env
       inhibit_tab = inhibit bu_env
       active_etries = M.toList active_tab
-   in case traceWith "useSums" $ getUseSumFromStm td_env active_tab $ traceWith "stm" stm of
+   in case getUseSumFromStm td_env active_tab stm of
         Nothing ->
           foldl
             ( \state (m_b, entry) ->
@@ -224,24 +220,7 @@ recordMemRefUses td_env bu_env stm =
                               if no_overlap
                                 then Just wrt_lmads''
                                 else Nothing
-                         in traceWith
-                              ( "m_b: "
-                                  <> pretty m_b
-                                  <> "\nixfns: "
-                                  <> pretty ixfns
-                                  <> "\nlmads': "
-                                  <> pretty lmads'
-                                  <> "\nlmads'': "
-                                  <> pretty lmads''
-                                  <> "\nprev_use: "
-                                  <> pretty prev_use
-                                  <> "\nwrt_lmads'': "
-                                  <> pretty wrt_lmads''
-                                  <> "\nno_overlap: "
-                                  <> pretty no_overlap
-                                  <> "\nresult"
-                              )
-                              (wrt_lmads, prev_use, lmads)
+                         in (wrt_lmads, prev_use, lmads)
                     )
                     active_etries
 
@@ -275,8 +254,7 @@ recordMemRefUses td_env bu_env stm =
         <> acc
         <> fromMaybe mempty (M.lookup m (m_alias td_env))
     mbLmad indfun
-      | -- indfun' <- traceWith "normalize" $ normalizeIxfun indfun,
-        Just subs <- freeVarSubstitutions (scope td_env) (scals bu_env) indfun,
+      | Just subs <- freeVarSubstitutions (scope td_env) (scals bu_env) indfun,
         (IxFun.IxFun (lmad :| []) _ _) <- IxFun.substituteInIxFun subs indfun =
         Just lmad
     mbLmad x = Nothing
