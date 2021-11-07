@@ -1111,7 +1111,7 @@ equivalent ixf1 ixf2 =
 
 -- | Computes the maximum span of an 'LMAD'. The result is the lowest and
 -- highest flat values representable by that 'LMAD'.
-flatSpan :: LMAD (TPrimExp Int64 VName) -> (TPrimExp Int64 VName)
+flatSpan :: LMAD (TPrimExp Int64 VName) -> TPrimExp Int64 VName
 flatSpan (LMAD _ dims) =
   foldr
     ( \dim upper ->
@@ -1132,11 +1132,11 @@ conservativeFlatten :: LMAD (TPrimExp Int64 VName) -> Maybe (LMAD (TPrimExp Int6
 conservativeFlatten l@(LMAD offset []) =
   return $ LMAD offset [LMADDim 1 0 1 0 Inc]
 conservativeFlatten l@(LMAD _ [_]) =
-  return $ l
+  return l
 conservativeFlatten l@(LMAD offset dims) = do
   strd <-
     foldM
-      (\x y -> gcd x y)
+      gcd
       (ldStride $ head dims)
       $ map ldStride dims
 
@@ -1165,16 +1165,18 @@ gcd x y = gcd' (abs x) (abs y)
 disjoint :: Names -> LMAD (TPrimExp Int64 VName) -> LMAD (TPrimExp Int64 VName) -> Bool
 disjoint non_negatives l1@(LMAD offset1 [dim1]) l2@(LMAD offset2 [dim2]) =
   doesNotDivide (gcd (ldStride dim1) (ldStride dim2)) (offset1 - offset2)
-    || ( nonNegativeish non_negatives $
-           AlgSimplify2.simplify0 $
-             untyped $
-               offset1 - (offset2 + (ldShape dim2 - 1) * ldStride dim2)
-       )
-    || ( nonNegativeish non_negatives $
-           AlgSimplify2.simplify0 $
-             untyped $
-               offset2 - (offset1 + (ldShape dim1 - 1) * ldStride dim1)
-       )
+    || nonNegativeish
+      non_negatives
+      ( offset1 - (offset2 + (ldShape dim2 - 1) * ldStride dim2)
+          & untyped
+          & AlgSimplify2.simplify0
+      )
+    || nonNegativeish
+      non_negatives
+      ( offset2 - (offset1 + (ldShape dim1 - 1) * ldStride dim1)
+          & untyped
+          & AlgSimplify2.simplify0
+      )
   where
     doesNotDivide :: Maybe (TPrimExp Int64 VName) -> TPrimExp Int64 VName -> Bool
     doesNotDivide (Just x) y = maybe False not $ primBool $ (TPrimExp $ constFoldPrimExp $ untyped $ Futhark.Util.IntegralExp.mod y x :: TPrimExp Int64 VName) .==. 0
@@ -1185,7 +1187,7 @@ disjoint non_negatives lmad1 lmad2 =
     _ -> False
 
 nonNegativeish :: Names -> AlgSimplify2.SofP -> Bool
-nonNegativeish non_negatives prods = all (nonNegativeishProd non_negatives) prods
+nonNegativeish non_negatives = all (nonNegativeishProd non_negatives)
 
 nonNegativeishProd :: Names -> AlgSimplify2.Prod -> Bool
 nonNegativeishProd non_negatives (AlgSimplify2.Prod True _) = False
@@ -1222,7 +1224,7 @@ lmadToInterval lmad@(LMAD offset dims) =
 
     helper :: [Interval] -> AlgSimplify2.SofP -> [LMADDim (TPrimExp Int64 VName)] -> Maybe [Interval]
     helper acc sofp (LMADDim stride _ shp _ _ : dims) =
-      let (to_add, the_rest) = partition (any (== untyped stride) . AlgSimplify2.atoms) sofp
+      let (to_add, the_rest) = partition (elem (untyped stride) . AlgSimplify2.atoms) sofp
           new_offset = TPrimExp $ AlgSimplify2.sumToExp to_add
        in helper (Interval new_offset (AlgSimplify2.simplify' $ shp - 1) (AlgSimplify2.simplify' stride) : acc) the_rest dims
     helper acc [] [] = Just $ reverse acc

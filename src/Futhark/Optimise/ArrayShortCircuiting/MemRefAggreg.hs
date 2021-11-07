@@ -192,7 +192,7 @@ recordMemRefUses td_env bu_env stm =
                             lmads' = mapMaybe mbLmad ixfns
                             lmads'' =
                               if length lmads' == length ixfns
-                                then Set $ S.fromList $ lmads'
+                                then Set $ S.fromList lmads'
                                 else Undeterminable
 
                             wrt_ixfns = map tupThd $ filter ((`nameIn` alias_m_b) . tupFst) stm_wrts
@@ -209,8 +209,7 @@ recordMemRefUses td_env bu_env stm =
                                 & uncons
                                 & fmap fst
                                 & (=<<) (`M.lookup` active_tab)
-                                & fmap alsmem
-                                & fromMaybe mempty
+                                & maybe mempty alsmem
                             (wrt_lmads'', lmads) =
                               if m_b `nameIn` original_mem_aliases
                                 then (wrt_lmads' <> lmads'', Set mempty)
@@ -241,7 +240,7 @@ recordMemRefUses td_env bu_env stm =
               failed_tab =
                 M.fromList $
                   map snd $
-                    filter (not . isJust . fst) $
+                    filter (isNothing . fst) $
                       zip mb_wrts active_etries
               (_, inhibit_tab1) = foldl markFailedCoal (failed_tab, inhibit_tab) $ M.keys failed_tab
            in (active_tab1, inhibit_tab1)
@@ -265,7 +264,7 @@ recordMemRefUses td_env bu_env stm =
 
 normalizeIxfun :: IxFun.IxFun (TPrimExp Int64 VName) -> IxFun.IxFun (TPrimExp Int64 VName)
 normalizeIxfun ixf@(IxFun.IxFun (IxFun.LMAD offset [] :| []) _ _) =
-  ixf {IxFun.ixfunLMADs = (IxFun.LMAD offset [IxFun.LMADDim 1 0 1 0 IxFun.Inc] :| [])}
+  ixf {IxFun.ixfunLMADs = IxFun.LMAD offset [IxFun.LMADDim 1 0 1 0 IxFun.Inc] :| []}
 normalizeIxfun ixf = ixf
 
 -------------------------------------------------------------
@@ -285,8 +284,8 @@ noMemOverlap td_env (Set is0) (Set js0) =
   -- TODO Expand this to be able to handle eg. nw
   all (\i -> all (IxFun.disjoint (nonNegatives td_env) i) js) is
   where
-    is = map (fixPoint (IxFun.substituteInLMAD $ fmap TPrimExp $ scalar_table td_env)) $ S.toList is0
-    js = map (fixPoint (IxFun.substituteInLMAD $ fmap TPrimExp $ scalar_table td_env)) $ S.toList js0
+    is = map (fixPoint (IxFun.substituteInLMAD $ TPrimExp <$> scalar_table td_env)) $ S.toList is0
+    js = map (fixPoint (IxFun.substituteInLMAD $ TPrimExp <$> scalar_table td_env)) $ S.toList js0
 
 -- | Suppossed to aggregate the iteration-level summaries
 --     across a loop of index i = 0 .. n-1
@@ -319,8 +318,10 @@ aggSummaryLoopTotal scope_bef scope_loop scals_loop _ access
 aggSummaryLoopTotal scope_before scope_loop scalars_loop (Just (iterator_var, (lower_bound, upper_bound))) (Set lmads) =
   mconcat
     <$> mapM
-      (aggSummaryOne iterator_var lower_bound upper_bound)
-      (map (fixPoint (IxFun.substituteInLMAD $ fmap TPrimExp scalars_loop)) $ S.toList lmads)
+      ( aggSummaryOne iterator_var lower_bound upper_bound
+          . fixPoint (IxFun.substituteInLMAD $ fmap TPrimExp scalars_loop)
+      )
+      (S.toList lmads)
 aggSummaryLoopTotal _ _ _ _ _ = return Undeterminable
 
 -- | Suppossed to partially aggregate the iteration-level summaries
@@ -351,8 +352,9 @@ aggSummaryLoopPartial scope_before scope_loop scalars_loop (Just (iterator_var, 
           iterator_var
           (isInt64 (LeafExp iterator_var $ IntType Int64) + 1)
           (upper_bound - typedLeafExp iterator_var - 1)
+          . fixPoint (IxFun.substituteInLMAD $ fmap TPrimExp scalars_loop)
       )
-      (map (fixPoint (IxFun.substituteInLMAD $ fmap TPrimExp scalars_loop)) $ S.toList lmads)
+      (S.toList lmads)
 
 aggSummaryMapPartial :: MonadFreshNames m => ScalarTab -> [(VName, SubExp)] -> AccessSummary -> m AccessSummary
 aggSummaryMapPartial scalars [(gtid, size)] (Set lmads0) = do

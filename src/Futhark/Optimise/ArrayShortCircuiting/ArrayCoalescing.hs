@@ -292,8 +292,7 @@ shortCircuitGPUMemHelper lvl lutab pat@(Pat ps) space kernel_body td_env bu_env 
           )
           bu_env''
           mergee_writes
-  return $
-    bu_env''''
+  return bu_env''''
 
 ixfunPermutation :: IxFun -> [Int]
 ixfunPermutation = map IxFun.ldPerm . IxFun.lmadDims . NE.head . IxFun.ixfunLMADs
@@ -305,7 +304,7 @@ makeSegMapCoals lvl td_env space kernel_body (active, inhibit) x@(PatElem pat_na
   | Just mb@(MemBlock tp shp return_mem return_ixf) <-
       getScopeMemInfo return_name $ scope td_env <> scopeOf (kernelBodyStms kernel_body),
     isSegThread lvl,
-    MemMem pat_space <- runReader (lookupMemInfo $ pat_mem) $ removeScopeAliases $ scope td_env,
+    MemMem pat_space <- runReader (lookupMemInfo pat_mem) $ removeScopeAliases $ scope td_env,
     MemMem return_space <- runReader (lookupMemInfo return_mem) $ removeScopeAliases $ scope td_env <> scopeOf (kernelBodyStms kernel_body) <> scopeOfSegSpace space,
     pat_space == return_space =
     case M.lookup pat_mem active of
@@ -386,7 +385,8 @@ makeSegMapCoals _ td_env _ _ x (_, result) =
     & foldr (\(MemBlock _ _ mem _) -> flip markFailedCoal mem) x
 
 fullSlice :: [TPrimExp Int64 VName] -> Slice (TPrimExp Int64 VName) -> Slice (TPrimExp Int64 VName)
-fullSlice shp (Slice slc) = Slice $ slc ++ (map (\d -> DimSlice 0 d 1) $ drop (length slc) shp)
+fullSlice shp (Slice slc) =
+  Slice $ slc ++ map (\d -> DimSlice 0 d 1) (drop (length slc) shp)
 
 fixPointCoalesce ::
   (Coalesceable rep inner) =>
@@ -807,7 +807,7 @@ mkCoalsTabStm lutab lstm@(Let pat _ (DoLoop arginis lform body)) td_env bu_env =
         Just (MemBlock _ _ m_r _) <- getScopeMemInfo r (scope td_env'),
         Just nms <- M.lookup a lutab,
         nameIn a0 nms,
-        m_r `elem` (M.keys $ alloc td_env') =
+        m_r `elem` M.keys (alloc td_env') =
         Just ((b, m_b), (a, m_a), (a0, m_a0), (r, m_r))
     mapmbFun _ _ (_patel, (_arg, _ini), _bdyres) = Nothing
     --trace ("COALESCING loop FAILED "++pretty patel++" "++pretty arg ++ pretty ini ++ pretty bdyres)
@@ -1341,15 +1341,14 @@ computeScalarTable scope_table (Let (Pat [pe]) _ e)
     return $ M.singleton (patElemName pe) primexp
 computeScalarTable scope_table (Let _ _ (DoLoop loop_inits loop_form body)) =
   mconcat
-    <$> ( mapM
-            ( computeScalarTable $
-                scope_table
-                  <> scopeOfFParams (map fst loop_inits)
-                  <> scopeOf loop_form
-                  <> scopeOf (bodyStms body)
-            )
-            $ stmsToList $ bodyStms body
-        )
+    <$> mapM
+      ( computeScalarTable $
+          scope_table
+            <> scopeOfFParams (map fst loop_inits)
+            <> scopeOf loop_form
+            <> scopeOf (bodyStms body)
+      )
+      (stmsToList $ bodyStms body)
 computeScalarTable scope_table (Let _ _ (If _ then_body else_body _)) =
   (<>)
     <$> (mconcat <$> mapM (computeScalarTable scope_table) (stmsToList $ bodyStms then_body))

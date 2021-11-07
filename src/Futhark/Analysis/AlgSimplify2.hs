@@ -80,7 +80,7 @@ prodToExp (Prod False (atom : atoms)) =
   foldl (BinOpExp $ Mul Int64 OverflowUndef) atom atoms
 
 simplify0 :: Exp -> SofP
-simplify0 = fixPoint (mapMaybe applyZero . map removeOnes . removeNegations) . sumOfProducts
+simplify0 = fixPoint (mapMaybe (applyZero . removeOnes) . removeNegations) . sumOfProducts
 
 simplify :: Exp -> Exp
 simplify = sumToExp . simplify0
@@ -90,7 +90,7 @@ simplify' = TPrimExp . simplify . untyped
 
 applyZero :: Prod -> Maybe Prod
 applyZero p@(Prod neg atoms)
-  | any (== val 0) atoms = Nothing
+  | val 0 `elem` atoms = Nothing
   | otherwise = Just p
 
 removeOnes :: Prod -> Prod

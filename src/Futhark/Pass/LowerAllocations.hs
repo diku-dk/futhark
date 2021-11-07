@@ -68,7 +68,7 @@ lowerAllocationsInStms (stm@(Let (Pat [PatElem vname _]) _ (Op (Alloc _ _))) :<|
 lowerAllocationsInStms (stm@(Let pat _ (Op (Inner inner))) :<| stms) alloc acc = do
   on_inner <- asks onInner
   inner' <- on_inner inner
-  let stm' = stm {stmExp = Op $ Inner $ inner'}
+  let stm' = stm {stmExp = Op $ Inner inner'}
       (alloc', acc') =
         freeIn stm `namesIntersection` namesFromList (M.keys alloc)
           & namesToList

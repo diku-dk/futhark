@@ -67,7 +67,7 @@ liftAllocationsInStms (stms :|> stm@(Let (Pat [PatElem vname _]) _ (Op (Alloc _ 
 liftAllocationsInStms (stms :|> stm@(Let pat _ (Op (Inner inner)))) lifted acc to_lift = do
   on_inner <- asks onInner
   inner' <- on_inner inner
-  let stm' = stm {stmExp = Op $ Inner $ inner'}
+  let stm' = stm {stmExp = Op $ Inner inner'}
       pat_names = namesFromList $ patNames pat
   if pat_names `namesIntersect` to_lift
     then liftAllocationsInStms stms (stm' :<| lifted) acc ((to_lift `namesSubtract` pat_names) <> freeIn stm)
