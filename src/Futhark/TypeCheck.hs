@@ -1037,15 +1037,14 @@ checkExp (DoLoop merge form loopbody) = do
           checkBodyDec $ snd $ bodyDec loopbody
 
           checkStms (bodyStms loopbody) $ do
-            checkResult $ bodyResult loopbody
+            context "In loop body result" $
+              checkResult $ bodyResult loopbody
 
             context "When matching result of body with loop parameters" $
               matchLoopResult (map fst merge) $ bodyResult loopbody
 
             let bound_here =
-                  namesFromList $
-                    M.keys $
-                      scopeOf $ bodyStms loopbody
+                  namesFromList $ M.keys $ scopeOf $ bodyStms loopbody
             map (`namesSubtract` bound_here)
               <$> mapM (subExpAliasesM . resSubExp) (bodyResult loopbody)
   where
