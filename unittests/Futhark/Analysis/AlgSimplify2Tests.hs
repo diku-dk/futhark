@@ -25,7 +25,7 @@ tests :: TestTree
 tests =
   testGroup
     "AlgSimplify2Tests"
-    [ testProperty "simplify is idempotent" $ \(TestableExp e) -> simplify e == (simplify $ simplify e),
+    [ testProperty "simplify is idempotent" $ \(TestableExp e) -> simplify e == simplify (simplify e),
       testProperty "simplify doesn't change exp evalutation result" $
         \(TestableExp e) ->
           evalPrimExp (\_ -> Nothing) e

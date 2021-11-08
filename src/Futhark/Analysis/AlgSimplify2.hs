@@ -54,6 +54,8 @@ sumOfProducts' (BinOpExp (Sub Int64 _) e1 e2) =
   sumOfProducts' e1 <> map negate (sumOfProducts' e2)
 sumOfProducts' (BinOpExp (Mul Int64 _) e1 e2) =
   sumOfProducts' e1 `mult` sumOfProducts' e2
+sumOfProducts' (ValueExp (IntValue (Int64Value i))) =
+  [Prod (i < 0) [ValueExp $ IntValue $ Int64Value $ abs i]]
 sumOfProducts' e = [Prod False [e]]
 
 mult :: SofP -> SofP -> SofP
@@ -92,7 +94,8 @@ applyZero p@(Prod neg as)
 
 removeOnes :: Prod -> Prod
 removeOnes (Prod neg as) =
-  Prod neg $ filter (/= val 1) as
+  let as' = filter (/= val 1) as
+   in Prod neg $ if null as' then [ValueExp $ IntValue $ Int64Value 1] else as'
 
 removeNegations :: SofP -> SofP
 removeNegations [] = []
