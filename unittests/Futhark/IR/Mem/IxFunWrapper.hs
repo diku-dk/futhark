@@ -9,11 +9,9 @@ module Futhark.IR.Mem.IxFunWrapper
     slice,
     flatSlice,
     rebase,
-    disjoint,
   )
 where
 
-import Data.List.NonEmpty
 import qualified Futhark.IR.Mem.IxFun as I
 import qualified Futhark.IR.Mem.IxFun.Alg as IA
 import Futhark.IR.Syntax (FlatSlice, ShapeChange, Slice)
@@ -74,11 +72,3 @@ rebase ::
   IxFun num ->
   IxFun num
 rebase (l, a) (l1, a1) = (I.rebase l l1, IA.rebase a a1)
-
-disjoint ::
-  (Ord num, IntegralExp num, Enum num) =>
-  IxFun num ->
-  IxFun num ->
-  (Bool, Bool)
-disjoint (I.IxFun (l :| []) _ _, a) (I.IxFun (l1 :| []) _ _, a1) = (I.disjoint l l1, IA.disjoint a a1)
-disjoint (_, a) (_, a1) = (undefined, IA.disjoint a a1)
