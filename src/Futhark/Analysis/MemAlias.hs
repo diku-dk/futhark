@@ -82,11 +82,12 @@ analyzeHostOp m (SegOp (SegScan _ _ _ _ kbody)) =
   analyzeStms (kernelBodyStms kbody) m
 analyzeHostOp m (SegOp (SegHist _ _ _ _ kbody)) =
   analyzeStms (kernelBodyStms kbody) m
+analyzeHostOp _ _ = return mempty
 
 analyzeStm :: (Mem rep inner, LetDec rep ~ LetDecMem) => MemAliases -> Stm rep -> MemAliasesM inner MemAliases
 analyzeStm m (Let (Pat [PatElem vname _]) _ (Op (Alloc _ _))) =
   return $ m <> singleton vname mempty
-analyzeStm m (Let pat _ (Op (Inner inner))) = do
+analyzeStm m (Let _ _ (Op (Inner inner))) = do
   on_inner <- asks onInner
   on_inner m inner
 analyzeStm m (Let pat _ (If _ then_body else_body _)) = do

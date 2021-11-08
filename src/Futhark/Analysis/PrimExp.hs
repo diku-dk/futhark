@@ -221,15 +221,15 @@ constFoldPrimExp (UnOpExp Abs {} x) | not $ negativeIshExp x = x
 constFoldPrimExp (BinOpExp UMod {} x y)
   | sameIshExp x y,
     IntType it <- primExpType x =
-    ValueExp $ IntValue $ intValue it 0
+    ValueExp $ IntValue $ intValue it (0 :: Integer)
 constFoldPrimExp (BinOpExp SMod {} x y)
   | sameIshExp x y,
     IntType it <- primExpType x =
-    ValueExp $ IntValue $ intValue it 0
+    ValueExp $ IntValue $ intValue it (0 :: Integer)
 constFoldPrimExp (BinOpExp SRem {} x y)
   | sameIshExp x y,
     IntType it <- primExpType x =
-    ValueExp $ IntValue $ intValue it 0
+    ValueExp $ IntValue $ intValue it (0 :: Integer)
 constFoldPrimExp e = e
 
 -- | The class of numeric types that can be used for constructing

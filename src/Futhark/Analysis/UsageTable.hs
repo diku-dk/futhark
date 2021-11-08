@@ -28,7 +28,6 @@ import Data.Bits
 import qualified Data.Foldable as Foldable
 import qualified Data.IntMap.Strict as IM
 import Data.List (foldl')
-import Data.Maybe (mapMaybe)
 import Futhark.IR
 import Futhark.IR.Prop.Aliases
 import Prelude hiding (lookup)

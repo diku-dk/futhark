@@ -15,15 +15,12 @@ module Futhark.Analysis.AlgSimplify2
 where
 
 import Data.Bits (xor)
-import Data.Function ((&))
 import Data.List (sort)
-import qualified Data.Map as M
 import Data.Maybe (mapMaybe)
 import Futhark.Analysis.PrimExp
 import Futhark.IR.Syntax.Core
 import Futhark.Util
 import Futhark.Util.Pretty
-import GHC.Generics
 import Prelude hiding (negate)
 
 type Exp = PrimExp VName
@@ -74,10 +71,10 @@ sumToExp (x : xs) =
 
 prodToExp :: Prod -> Exp
 prodToExp (Prod _ []) = val 1
-prodToExp (Prod True atoms) =
-  foldl (BinOpExp $ Mul Int64 OverflowUndef) (val (-1)) atoms
-prodToExp (Prod False (atom : atoms)) =
-  foldl (BinOpExp $ Mul Int64 OverflowUndef) atom atoms
+prodToExp (Prod True as) =
+  foldl (BinOpExp $ Mul Int64 OverflowUndef) (val (-1)) as
+prodToExp (Prod False (a : as)) =
+  foldl (BinOpExp $ Mul Int64 OverflowUndef) a as
 
 simplify0 :: Exp -> SofP
 simplify0 = fixPoint (mapMaybe (applyZero . removeOnes) . removeNegations) . sumOfProducts
@@ -89,13 +86,13 @@ simplify' :: TExp -> TExp
 simplify' = TPrimExp . simplify . untyped
 
 applyZero :: Prod -> Maybe Prod
-applyZero p@(Prod neg atoms)
-  | val 0 `elem` atoms = Nothing
+applyZero p@(Prod neg as)
+  | val 0 `elem` as = Nothing
   | otherwise = Just p
 
 removeOnes :: Prod -> Prod
-removeOnes (Prod neg atoms) =
-  Prod neg $ filter (/= val 1) atoms
+removeOnes (Prod neg as) =
+  Prod neg $ filter (/= val 1) as
 
 removeNegations :: SofP -> SofP
 removeNegations [] = []

@@ -35,6 +35,13 @@ module Futhark.IR.Mem.IxFun
     permuteInv,
     conservativeFlatten,
     disjoint,
+    -- Some of these may not be needed
+    lmadToInterval,
+    intervalOverlap,
+    primInt,
+    primBool,
+    intervalPairs,
+    strideOverlap,
   )
 where
 
@@ -1129,7 +1136,7 @@ flatSpan (LMAD _ dims) =
 -- will get filled out.
 -- conservativeFlatten :: (IntegralExp e, Ord e, Pretty e) => LMAD e -> LMAD e
 conservativeFlatten :: LMAD (TPrimExp Int64 VName) -> Maybe (LMAD (TPrimExp Int64 VName))
-conservativeFlatten l@(LMAD offset []) =
+conservativeFlatten (LMAD offset []) =
   return $ LMAD offset [LMADDim 1 0 1 0 Inc]
 conservativeFlatten l@(LMAD _ [_]) =
   return l
@@ -1139,7 +1146,6 @@ conservativeFlatten l@(LMAD offset dims) = do
       gcd
       (ldStride $ head dims)
       $ map ldStride dims
-
   return $ LMAD offset [LMADDim strd 0 (shp + 1) 0 Unknown]
   where
     shp = flatSpan l
@@ -1153,7 +1159,7 @@ gcd x y = gcd' (abs x) (abs y)
     gcd' 1 _ = Just 1
     gcd' _ 1 = Just 1
     gcd' a 0 = Just a
-    gcd' a b = Nothing -- gcd' b (a `Futhark.Util.IntegralExp.rem` b)
+    gcd' _ _ = Nothing -- gcd' b (a `Futhark.Util.IntegralExp.rem` b)
 
 -- | Returns @True@ if the two 'LMAD's could be proven disjoint.
 --
@@ -1163,7 +1169,7 @@ gcd x y = gcd' (abs x) (abs y)
 -- tricky. Currently, we try to 'conservativelyFlatten' any LMAD with more than
 -- one dimension.
 disjoint :: Names -> LMAD (TPrimExp Int64 VName) -> LMAD (TPrimExp Int64 VName) -> Bool
-disjoint non_negatives l1@(LMAD offset1 [dim1]) l2@(LMAD offset2 [dim2]) =
+disjoint non_negatives (LMAD offset1 [dim1]) (LMAD offset2 [dim2]) =
   doesNotDivide (gcd (ldStride dim1) (ldStride dim2)) (offset1 - offset2)
     || nonNegativeish
       non_negatives
@@ -1179,7 +1185,14 @@ disjoint non_negatives l1@(LMAD offset1 [dim1]) l2@(LMAD offset2 [dim2]) =
       )
   where
     doesNotDivide :: Maybe (TPrimExp Int64 VName) -> TPrimExp Int64 VName -> Bool
-    doesNotDivide (Just x) y = maybe False not $ primBool $ (TPrimExp $ constFoldPrimExp $ untyped $ Futhark.Util.IntegralExp.mod y x :: TPrimExp Int64 VName) .==. 0
+    doesNotDivide (Just x) y =
+      Futhark.Util.IntegralExp.mod y x
+        & untyped
+        & constFoldPrimExp
+        & TPrimExp
+        & (.==.) (0 :: TPrimExp Int64 VName)
+        & primBool
+        & maybe False not
     doesNotDivide _ _ = False
 disjoint non_negatives lmad1 lmad2 =
   case (conservativeFlatten lmad1, conservativeFlatten lmad2) of
@@ -1190,12 +1203,12 @@ nonNegativeish :: Names -> AlgSimplify2.SofP -> Bool
 nonNegativeish non_negatives = all (nonNegativeishProd non_negatives)
 
 nonNegativeishProd :: Names -> AlgSimplify2.Prod -> Bool
-nonNegativeishProd non_negatives (AlgSimplify2.Prod True _) = False
+nonNegativeishProd _ (AlgSimplify2.Prod True _) = False
 nonNegativeishProd non_negatives (AlgSimplify2.Prod False as) =
   all (nonNegativeishExp non_negatives) as
 
 nonNegativeishExp :: Names -> PrimExp VName -> Bool
-nonNegativeishExp non_negatives (ValueExp v) = not $ negativeIsh v
+nonNegativeishExp _ (ValueExp v) = not $ negativeIsh v
 nonNegativeishExp non_negatives (LeafExp vname _) = vname `nameIn` non_negatives
 nonNegativeishExp _ _ = False
 
@@ -1216,17 +1229,26 @@ instance Pretty Interval where
         ]
 
 lmadToInterval :: LMAD (TPrimExp Int64 VName) -> Maybe [Interval]
-lmadToInterval lmad@(LMAD offset []) = Just [Interval offset 1 1]
-lmadToInterval lmad@(LMAD offset dims) =
-  helper [] offset' $ permuteInv (lmadPermutation lmad) dims
+lmadToInterval (LMAD offset []) = Just [Interval offset 1 1]
+lmadToInterval lmad@(LMAD offset dims0) =
+  helper [] offset' $ permuteInv (lmadPermutation lmad) dims0
   where
     offset' = AlgSimplify2.sumOfProducts $ untyped offset
 
-    helper :: [Interval] -> AlgSimplify2.SofP -> [LMADDim (TPrimExp Int64 VName)] -> Maybe [Interval]
-    helper acc sofp (LMADDim stride _ shp _ _ : dims) =
-      let (to_add, the_rest) = partition (elem (untyped stride) . AlgSimplify2.atoms) sofp
+    helper ::
+      [Interval] ->
+      AlgSimplify2.SofP ->
+      [LMADDim (TPrimExp Int64 VName)] ->
+      Maybe [Interval]
+    helper acc sofp (LMADDim strd _ shp _ _ : dims) =
+      let (to_add, the_rest) = partition (elem (untyped strd) . AlgSimplify2.atoms) sofp
           new_offset = TPrimExp $ AlgSimplify2.sumToExp to_add
-       in helper (Interval new_offset (AlgSimplify2.simplify' $ shp - 1) (AlgSimplify2.simplify' stride) : acc) the_rest dims
+          new_interval =
+            Interval
+              new_offset
+              (AlgSimplify2.simplify' $ shp - 1)
+              (AlgSimplify2.simplify' strd)
+       in helper (new_interval : acc) the_rest dims
     helper acc [] [] = Just $ reverse acc
     helper _ _ _ = Nothing
 
@@ -1256,7 +1278,7 @@ intervalPairs :: [(Interval, Interval)] -> [Interval] -> [Interval] -> [(Interva
 intervalPairs acc [] [] = reverse acc
 intervalPairs acc (i@(Interval lb _ st) : is) [] = intervalPairs ((i, Interval lb 1 st) : acc) is []
 intervalPairs acc [] (i@(Interval lb _ st) : is) = intervalPairs ((Interval lb 1 st, i) : acc) [] is
-intervalPairs acc (i1@(Interval lb1 ne1 st1) : is1) (i2@(Interval lb2 ne2 st2) : is2)
+intervalPairs acc (i1@(Interval lb1 _ st1) : is1) (i2@(Interval lb2 _ st2) : is2)
   | st1 == st2 = intervalPairs ((i1, i2) : acc) is1 is2
   | otherwise =
     let res1 = intervalPairs ((i1, Interval lb1 1 st1) : acc) is1 (i2 : is2)
@@ -1271,6 +1293,7 @@ strideOverlap is =
   selfOverlap' 0 $ reverse is
   where
     selfOverlap' acc (x : xs) =
-      let span = (lowerBound x + numElements x - 1) * stride x
-       in fromMaybe True (primBool $ acc .<. stride x) && selfOverlap' (acc + span) xs
-    selfOverlap' acc _ = False
+      let interval_span = (lowerBound x + numElements x - 1) * stride x
+       in fromMaybe True (primBool $ acc .<. stride x)
+            && selfOverlap' (acc + interval_span) xs
+    selfOverlap' _ _ = False

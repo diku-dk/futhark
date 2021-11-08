@@ -471,29 +471,9 @@ commandLineOptions =
       "Print the resulting IR with aliases.",
     Option
       []
-      ["print-short-circuit"]
-      (NoArg $ Right $ \opts -> opts {futharkAction = SeqMemAction $ \_ _ _ -> arrayShortCircuiting})
-      "Perform array short-circuiting and print the results.",
-    Option
-      []
-      ["print-short-circuit-gpu"]
-      (NoArg $ Right $ \opts -> opts {futharkAction = GPUMemAction $ \_ _ _ -> arrayShortCircuitingGPU})
-      "Perform array short-circuiting and print the results.",
-    Option
-      []
       ["mem-aliases"]
       (NoArg $ Right $ \opts -> opts {futharkAction = SeqMemAction $ \_ _ _ -> memAliasesAction})
       "Print memory aliases.",
-    Option
-      []
-      ["compare-last-use"]
-      (NoArg $ Right $ \opts -> opts {futharkAction = SeqMemAction $ \_ _ _ -> compareLastUseAction})
-      "Compare last use.",
-    Option
-      []
-      ["compare-last-use-gpu"]
-      (NoArg $ Right $ \opts -> opts {futharkAction = GPUMemAction $ \_ _ _ -> compareLastUseGPUMemAction})
-      "Compare last use (GPUMem).",
     Option
       []
       ["call-graph"]

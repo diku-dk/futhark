@@ -20,12 +20,9 @@ where
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import Futhark.Analysis.PrimExp.Convert
---import qualified Futhark.IR.Mem.IxFun as IxFun
-import Futhark.Analysis.SymbolTable
 import Futhark.IR.Aliases
 import Futhark.IR.GPUMem
 import qualified Futhark.IR.Mem.IxFun as IxFun
-import Futhark.IR.SeqMem
 import Futhark.Optimise.ArrayShortCircuiting.DataStructs
 
 type ScopeTab rep = Scope (Aliases rep)
@@ -65,7 +62,7 @@ data TopDnEnv rep = TopDnEnv
     -- | Contains symbol information about the variables in the program. Used to
     -- determine if a variable is non-negative.
     nonNegatives :: Names,
-    scalar_table :: M.Map VName (PrimExp VName)
+    scalarTable :: M.Map VName (PrimExp VName)
   }
 
 isInScope :: TopDnEnv rep -> VName -> Bool
@@ -147,7 +144,7 @@ instance TopDownHelper () where
 
 -- | fills in the TopDnEnv table
 topdwnTravBinding ::
-  (ASTRep rep, Op rep ~ MemOp inner, CanBeAliased inner, TopDownHelper (OpWithAliases inner), HasMemBlock (Aliases rep)) =>
+  (ASTRep rep, Op rep ~ MemOp inner, TopDownHelper (OpWithAliases inner)) =>
   TopDnEnv rep ->
   Stm (Aliases rep) ->
   TopDnEnv rep
@@ -190,8 +187,6 @@ topdwnTravBinding env stm@(Let (Pat [pe]) _ e)
                 <> nonNegativesInPat (stmPat stm)
           }
 topdwnTravBinding env stm =
-  -- ToDo: remember to update scope info appropriately
-  --       for compound statements such as if, do-loop, etc.
   env
     { scope = scope env <> scopeOf stm,
       nonNegatives =
@@ -203,99 +198,19 @@ nonNegativesInPat :: Typed rep => PatT rep -> Names
 nonNegativesInPat (Pat elems) =
   foldMap (namesFromList . mapMaybe subExpVar . arrayDims . typeOf) elems
 
-nonNegativesInExp :: Exp rep -> Names
-nonNegativesInExp (BasicOp (Index _ slc)) =
-  freeIn $ mapMaybe dimFix $ unSlice slc
-nonNegativesInExp (BasicOp (Update _ _ slc _)) =
-  freeIn $ mapMaybe dimFix $ unSlice slc
-nonNegativesInExp _ = mempty
-
 topDownLoop :: TopDnEnv rep -> Stm (Aliases rep) -> TopDnEnv rep
-topDownLoop td_env (Let _pat _ (DoLoop arginis lform body)) =
+topDownLoop td_env (Let _pat _ (DoLoop arginis lform _)) =
   let scopetab =
         scope td_env
           <> scopeOfFParams (map fst arginis)
-          <> scopeOf lform --scopeOfLoopForm lform))
-          -- <> scopeOf (bodyStms body)
+          <> scopeOf lform
       non_negatives =
         nonNegatives td_env <> case lform of
           ForLoop v _ _ _ -> oneName v
           _ -> mempty
-   in -- foldl (foldfun scopetab_loop) (m_alias td_env) $
-      --   zip3 (patternValueElements pat) arginis bdy_ress
-      td_env {scope = scopetab, nonNegatives = non_negatives}
-{--
-  where
-    updateAlias (m, m_al) tab =
-      let m_al' = case M.lookup m tab of
-                    Just m_al0 -> m_al <> m_al0
-                    Nothing    -> m_al
-      in  if m_al == mempty
-          then tab
-          else M.insert m m_al' tab
-    --
-    -- This is perhaps not ideal for many reasons, so Philip is gonna figure it out.
-    foldfun scopetab m_tab (p_el, (f_el, i_se), r_se)
-      | (MemArray _ptp _shp _u (ArrayIn m_p _p_ixfn)) <- snd (patElemDec p_el),
-        Var f0 <- i_se,
-        Var r  <- r_se =
-        let f = paramName f_el
-        in case ( getScopeMemInfo f  scopetab
-                , getScopeMemInfo f0 scopetab
-                , getScopeMemInfo r  scopetab ) of
-            ((Just (MemBlock _ _ m_f _), Just (MemBlock _ _ m_f0 _), Just (MemBlock _ _ m_r _))) ->
-                -- ToDo: this does not support the double buffering case such as:
-                --       @loop (a,b) = (a0,b0) for i<n do@
-                --       @    let x = map (stencil a) (iota n)@
-                --       @    let b[0:n] = x@
-                --       @    in  (b,a)@
-                --   where we denoted by @n@ the legth of @a@ and @b@
-                --   The idea is to observe that if the memory blocks of @a0@ and @b0@
-                --     are not aliased, then the memory blocks of @a@ and @b@ are not
-                --     aliased either, because we always switch them in the result.
-                --   Obviously the current implementation does not supports that because
-                --     it uses a simple fold and does not check for these kind of inversion
-                --     patterns. Obviously, this can be generalized to a klick of size > 2.
-                let m_alias_p = oneName m_f0 <> oneName m_f <> oneName m_r
-                    m_alias_f = oneName m_f0 <> oneName m_r
-                    m_alias_r = oneName m_f0 <> oneName m_f
-                    m_alias'  = updateAlias (m_p, m_alias_p) $
-                                updateAlias (m_f, m_alias_f) $
-                                updateAlias (m_r, m_alias_r) m_tab
-                in  m_alias'
-            (_, _, _) -> error "Impossible case reached in file ArrayShortCircuiting.TopDownAn.hs, fun topDownLoop!"
-    foldfun _ m_tab _ = m_tab
---}
+   in td_env {scope = scopetab, nonNegatives = non_negatives}
 topDownLoop _ _ =
   error "ArrayShortCircuiting.TopDownAn: function topDownLoop should only be called on Loops!"
-
-{--
-topDownIf :: TopDnEnv -> CoalsTab -> Stm (Aliases SeqMem) -> TopDnEnv
-topDownIf td_env act_tab stm@(Let patt _ (If _ body_then body_else _)) =
-  -- dummy implementation, please fill in
-  td_env
---}
-
-{--
-getTransitiveAlias :: M.Map VName (VName, IxFun -> IxFun) ->
-                      (M.Map VName Coalesced) -> VName -> (IxFun -> IxFun)
-                   -> Maybe IxFun
-getTransitiveAlias _ vtab b ixfn
-  | Just (Coalesced _ (MemBlock _ _ _ b_indfun) _) <- M.lookup b vtab =
-    Just (ixfn b_indfun)
-getTransitiveAlias alias_tab vtab b ixfn
-  | Just (x,alias_fn) <- M.lookup b alias_tab =
-  -- ^ 1. case: @b = alias x@;
-  --   we find a potential alias of @b@, named @(x,ixfn0)@, by lookup in @td_env@
-  case M.lookup x vtab of
-    Just (Coalesced _ (MemBlock _ _ _ x_indfun) _) ->
-      -- ^ 2. if @x@ is in @vtab@, then we know the root index function
-      --      and we can compose it with the remaining ixfuns to compute
-      --      the index function of @b@
-      Just ((ixfn . alias_fn) x_indfun)
-    Nothing -> getTransitiveAlias alias_tab vtab x (ixfn . alias_fn)
-getTransitiveAlias _ _ _ _ = Nothing
---}
 
 -- | Get direct aliased index function?  Returns a triple of current memory
 -- block to be coalesced, the destination memory block and the index function of
@@ -327,7 +242,7 @@ walkAliasTab alias_tab vtab x
   | Just (x0, alias0, _) <- M.lookup x alias_tab = do
     Coalesced knd (MemBlock pt shp vname ixf) substs <- walkAliasTab alias_tab vtab x0
     return $ Coalesced knd (MemBlock pt shp vname $ alias0 ixf) substs
-walkAliasTab alias_tab vtab x = Nothing -- error ("impossible!\nCouldn't find " <> pretty x <> " in vtab: " <> pretty vtab)
+walkAliasTab _ _ _ = Nothing
 
 -- | We assume @x@ is in @vartab@ and we add the variables that @x@ aliases
 --   for as long as possible following a chain of direct-aliasing operators,
@@ -350,7 +265,7 @@ addInvAliassesVarTab td_env vtab x
   | Just (Coalesced _ (MemBlock _ _ m_y x_ixfun) fv_subs) <- M.lookup x vtab =
     case M.lookup x (v_alias td_env) of
       Nothing -> Just vtab
-      Just (nm, _, Nothing) -> Nothing -- can't invert ixfun, conservatively fail!
+      Just (_, _, Nothing) -> Nothing -- can't invert ixfun, conservatively fail!
       Just (x0, _, Just inv_alias0) ->
         let x_ixfn0 = inv_alias0 x_ixfun
          in case getScopeMemInfo x0 (scope td_env) of

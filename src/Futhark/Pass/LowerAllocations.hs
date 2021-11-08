@@ -65,62 +65,38 @@ lowerAllocationsInStms ::
 lowerAllocationsInStms Empty allocs acc = return $ acc <> Seq.fromList (M.elems allocs)
 lowerAllocationsInStms (stm@(Let (Pat [PatElem vname _]) _ (Op (Alloc _ _))) :<| stms) allocs acc =
   lowerAllocationsInStms stms (M.insert vname stm allocs) acc
-lowerAllocationsInStms (stm@(Let pat _ (Op (Inner inner))) :<| stms) alloc acc = do
+lowerAllocationsInStms (stm0@(Let _ _ (Op (Inner inner))) :<| stms) alloc0 acc0 = do
   on_inner <- asks onInner
   inner' <- on_inner inner
-  let stm' = stm {stmExp = Op $ Inner inner'}
-      (alloc', acc') =
-        freeIn stm `namesIntersection` namesFromList (M.keys alloc)
-          & namesToList
-          & foldl
-            ( \(alloc', acc') name ->
-                ( M.delete name alloc',
-                  acc' :|> alloc' M.! name
-                )
-            )
-            (alloc, acc)
-  lowerAllocationsInStms stms alloc' (acc' :|> stm')
-lowerAllocationsInStms (stm@(Let pat _ (If cond then_body else_body dec)) :<| stms) alloc acc = do
+  let stm = stm0 {stmExp = Op $ Inner inner'}
+      (alloc, acc) = insertLoweredAllocs (freeIn stm0) alloc0 acc0
+  lowerAllocationsInStms stms alloc (acc :|> stm)
+lowerAllocationsInStms (stm@(Let _ _ (If cond then_body else_body dec)) :<| stms) alloc acc = do
   then_body' <- lowerAllocationsInBody then_body
   else_body' <- lowerAllocationsInBody else_body
   let stm' = stm {stmExp = If cond then_body' else_body' dec}
-      (alloc', acc') =
-        freeIn stm `namesIntersection` namesFromList (M.keys alloc)
-          & namesToList
-          & foldl
-            ( \(alloc', acc') name ->
-                ( M.delete name alloc',
-                  acc' :|> alloc' M.! name
-                )
-            )
-            (alloc, acc)
+      (alloc', acc') = insertLoweredAllocs (freeIn stm) alloc acc
   lowerAllocationsInStms stms alloc' (acc' :|> stm')
-lowerAllocationsInStms (stm@(Let pat _ (DoLoop params form body)) :<| stms) alloc acc = do
+lowerAllocationsInStms (stm@(Let _ _ (DoLoop params form body)) :<| stms) alloc acc = do
   body' <- lowerAllocationsInBody body
   let stm' = stm {stmExp = DoLoop params form body'}
-      (alloc', acc') =
-        freeIn stm `namesIntersection` namesFromList (M.keys alloc)
-          & namesToList
-          & foldl
-            ( \(alloc', acc') name ->
-                ( M.delete name alloc',
-                  acc' :|> alloc' M.! name
-                )
-            )
-            (alloc, acc)
+      (alloc', acc') = insertLoweredAllocs (freeIn stm) alloc acc
   lowerAllocationsInStms stms alloc' (acc' :|> stm')
-lowerAllocationsInStms (stm@(Let pat _ _) :<| stms) alloc acc = do
-  let (alloc', acc') =
-        freeIn stm `namesIntersection` namesFromList (M.keys alloc)
-          & namesToList
-          & foldl
-            ( \(alloc', acc') name ->
-                ( M.delete name alloc',
-                  acc' :|> alloc' M.! name
-                )
-            )
-            (alloc, acc)
+lowerAllocationsInStms (stm :<| stms) alloc acc = do
+  let (alloc', acc') = insertLoweredAllocs (freeIn stm) alloc acc
   lowerAllocationsInStms stms alloc' (acc' :|> stm)
+
+insertLoweredAllocs :: Names -> M.Map VName (Stm rep) -> Stms rep -> (M.Map VName (Stm rep), Stms rep)
+insertLoweredAllocs frees alloc acc =
+  frees `namesIntersection` namesFromList (M.keys alloc)
+    & namesToList
+    & foldl
+      ( \(alloc', acc') name ->
+          ( M.delete name alloc',
+            acc' :|> alloc' M.! name
+          )
+      )
+      (alloc, acc)
 
 lowerAllocationsInHostOp :: HostOp GPUMem () -> LowerM (HostOp GPUMem ()) (HostOp GPUMem ())
 lowerAllocationsInHostOp (SegOp (SegMap lvl sp tps body)) = do
