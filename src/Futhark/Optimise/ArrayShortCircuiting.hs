@@ -3,7 +3,7 @@
 {-# LANGUAGE TypeFamilies #-}
 
 -- | Playground for work on merging memory blocks
-module Futhark.Optimise.ArrayShortCircuiting (printArrayShortCircuiting, printArrayShortCircuitingGPU, optimiseSeqMem, optimiseGPUMem) where
+module Futhark.Optimise.ArrayShortCircuiting (optimiseSeqMem, optimiseGPUMem) where
 
 import Control.Monad.Reader
 import Data.Function ((&))
@@ -12,32 +12,17 @@ import Data.Maybe (fromMaybe)
 import qualified Futhark.Analysis.Alias as AnlAls
 import Futhark.IR.Aliases
 import Futhark.IR.GPUMem
-import Futhark.IR.Mem
 import Futhark.IR.Mem.IxFun (substituteInIxFun)
 import Futhark.IR.SeqMem
-import Futhark.MonadFreshNames
 import Futhark.Optimise.ArrayShortCircuiting.ArrayCoalescing
 import Futhark.Optimise.ArrayShortCircuiting.DataStructs
 import Futhark.Pass (Pass (..))
 import qualified Futhark.Pass as Pass
-import Futhark.Pipeline
 import Futhark.Util
 
 ----------------------------------------------------------------
 --- Printer/Tester Main Program
 ----------------------------------------------------------------
-
--- run it with:  `futhark dev --cpu --merge-mem test.fut`
-printArrayShortCircuiting :: Prog SeqMem -> FutharkM ()
-printArrayShortCircuiting prg = do
-  coaltab <- mkCoalsTab undefined --- $ AnlAls.aliasAnalysis undefined prg
-  liftIO $ putStrLn $ "COALESCING RESULT:" ++ pretty (length coaltab) ++ "\n" ++ pretty coaltab
-
--- run it with:  `futhark dev --gpu-mem --merge-mem test.fut`
-printArrayShortCircuitingGPU :: Prog GPUMem -> FutharkM ()
-printArrayShortCircuitingGPU prg = do
-  coaltab <- mkCoalsTabGPU undefined --- $ AnlAls.aliasAnalysis prg
-  liftIO $ putStrLn $ "COALESCING RESULT:" ++ pretty (length coaltab) ++ "\n" ++ pretty coaltab
 
 data Env inner = Env
   { envCoalesceTab :: M.Map VName Coalesced,
@@ -92,7 +77,7 @@ replaceInExp _ (DoLoop loop_inits loop_form (Body dec stms res)) = do
   stms' <- mapM replaceInStm stms
   return $ DoLoop (zip loop_inits' $ map snd loop_inits) loop_form $ Body dec stms' res
 replaceInExp _ e@(Op (Alloc _ _)) = return e
-replaceInExp _ e@(Op (Inner i)) = do
+replaceInExp _ (Op (Inner i)) = do
   on_op <- asks onInner
   Op . Inner <$> on_op i
 replaceInExp _ (Op _) = error "Unreachable" -- This shouldn't be possible?
@@ -105,24 +90,24 @@ replaceInHostOp (SegOp (SegMap lvl sp tps body)) = do
   return $ SegOp $ SegMap lvl sp tps $ body {kernelBodyStms = stms}
 replaceInHostOp (SegOp (SegRed lvl sp binops tps body)) = do
   stms <- mapM replaceInStm $ kernelBodyStms body
-  return $ SegOp $ SegRed lvl sp binops tps body
+  return $ SegOp $ SegRed lvl sp binops tps $ body {kernelBodyStms = stms}
 replaceInHostOp (SegOp (SegScan lvl sp binops tps body)) = do
   stms <- mapM replaceInStm $ kernelBodyStms body
-  return $ SegOp $ SegScan lvl sp binops tps body
+  return $ SegOp $ SegScan lvl sp binops tps $ body {kernelBodyStms = stms}
 replaceInHostOp (SegOp (SegHist lvl sp hist_ops tps body)) = do
   stms <- mapM replaceInStm $ kernelBodyStms body
-  return $ SegOp $ SegHist lvl sp hist_ops tps body
+  return $ SegOp $ SegHist lvl sp hist_ops tps $ body {kernelBodyStms = stms}
 replaceInHostOp op = return op
 
 generalizeIxfun :: [PatElemT dec] -> PatElemT LetDecMem -> BodyReturns -> ReplaceM inner BodyReturns
 generalizeIxfun
   pat_elems
-  (PatElem vname (MemArray _ _ _ (ArrayIn mem ixfun)))
+  (PatElem vname (MemArray _ _ _ (ArrayIn mem ixf)))
   m@(MemArray pt shp u _) = do
     coaltab <- asks envCoalesceTab
     if vname `M.member` coaltab
       then
-        existentialiseIxFun (map patElemName pat_elems) ixfun
+        existentialiseIxFun (map patElemName pat_elems) ixf
           & ReturnsInBlock mem
           & MemArray pt shp u
           & return
@@ -147,8 +132,8 @@ lookupAndReplace ::
 lookupAndReplace vname f u = do
   coaltab <- asks envCoalesceTab
   case M.lookup vname coaltab of
-    Just (Coalesced _ (MemBlock pt shp mem ixfun) subs) ->
-      ixfun
+    Just (Coalesced _ (MemBlock pt shp mem ixf) subs) ->
+      ixf
         & fixPoint (substituteInIxFun subs)
         & ArrayIn mem
         & MemArray pt shp u
