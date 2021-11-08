@@ -171,7 +171,8 @@ shortCircuitGPUMem lutab pat (Inner (SegOp (SegRed lvl space binops _ kernel_bod
   let to_fail = M.filter (\entry -> namesFromList (M.keys $ vartab entry) `namesIntersect` foldMap (freeIn . segBinOpLambda) binops) $ activeCoals bu_env
       (active, inh) = foldl markFailedCoal (activeCoals bu_env, inhibit bu_env) $ M.keys to_fail
       bu_env' = bu_env {activeCoals = active, inhibit = inh}
-   in shortCircuitGPUMemHelper lvl lutab pat space kernel_body td_env bu_env'
+      space' = space {unSegSpace = init $ unSegSpace space}
+   in shortCircuitGPUMemHelper lvl lutab pat space' kernel_body td_env bu_env'
 shortCircuitGPUMem lutab pat (Inner (SegOp (SegScan lvl space binops _ kernel_body))) td_env bu_env =
   let to_fail = M.filter (\entry -> namesFromList (M.keys $ vartab entry) `namesIntersect` foldMap (freeIn . segBinOpLambda) binops) $ activeCoals bu_env
       (active, inh) = foldl markFailedCoal (activeCoals bu_env, inhibit bu_env) $ M.keys to_fail
