@@ -109,7 +109,6 @@ callKernelRules =
   standardRules
     <> ruleBook
       [ RuleBasicOp copyCopyToCopy,
-        RuleBasicOp removeIdentityCopy,
         RuleIf unExistentialiseMemory,
         RuleOp decertifySafeAlloc
       ]
@@ -206,22 +205,6 @@ copyCopyToCopy vtable pat _ (Copy v0)
         letExp "rearrange_v0" $ BasicOp $ Rearrange perm v2
     letBind pat $ BasicOp $ Copy v0'
 copyCopyToCopy _ _ _ _ = Skip
-
--- | If the destination of a copy is the same as the source, just
--- remove it.
-removeIdentityCopy ::
-  ( BuilderOps rep,
-    LetDec rep ~ (VarWisdom, MemBound u)
-  ) =>
-  TopDownRuleBasicOp rep
-removeIdentityCopy vtable pat@(Pat [pe]) _ (Copy v)
-  | (_, MemArray _ _ _ (ArrayIn dest_mem dest_ixfun)) <- patElemDec pe,
-    Just (_, MemArray _ _ _ (ArrayIn src_mem src_ixfun)) <-
-      ST.entryLetBoundDec =<< ST.lookup v vtable,
-    dest_mem == src_mem,
-    dest_ixfun == src_ixfun =
-    Simplify $ letBind pat $ BasicOp $ SubExp $ Var v
-removeIdentityCopy _ _ _ _ = Skip
 
 -- If an allocation is statically known to be safe, then we can remove
 -- the certificates on it.  This can help hoist things that would
