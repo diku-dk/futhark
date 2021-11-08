@@ -74,8 +74,7 @@ emptyBotUpEnv =
     { scals = mempty,
       activeCoals = mempty,
       successCoals = mempty,
-      inhibit = mempty,
-      consumed = mempty
+      inhibit = mempty
     }
 
 -- | basic conversion of a Var Expression to a PrimExp
@@ -497,14 +496,10 @@ mkCoalsTabStm ::
   TopDnEnv rep ->
   BotUpEnv ->
   ShortCircuitM rep BotUpEnv
-mkCoalsTabStm _ stm@(Let (Pat [pe]) _ e) td_env bu_env
+mkCoalsTabStm _ (Let (Pat [pe]) _ e) td_env bu_env
   | Just primexp <- primExpFromExp (basePMconv (scope td_env) (scals bu_env)) e =
-    return $
-      bu_env
-        { scals = M.insert (patElemName pe) primexp (scals bu_env),
-          consumed = consumedInStm stm <> consumed bu_env
-        }
-mkCoalsTabStm lutab stm@(Let patt _ (If _ body_then body_else _)) td_env bu_env = do
+    return $ bu_env {scals = M.insert (patElemName pe) primexp (scals bu_env)}
+mkCoalsTabStm lutab (Let patt _ (If _ body_then body_else _)) td_env bu_env = do
   let pat_val_elms = patElems patt
       -- ToDo: 1. we need to record existential memory blocks in alias table on the top-down pass.
       --       2. need to extend the scope table
@@ -595,13 +590,7 @@ mkCoalsTabStm lutab stm@(Let patt _ (If _ body_then body_else _)) td_env bu_env 
         --trace ("COALESCING IF inhibits: " ++ prettyInhibitTab inhibit_res0 ++ " " ++ prettyInhibitTab inhb_then1 ++ " " ++ prettyInhibitTab inhb_else1) $
         M.unionWith (<>) inhibit1 $ -- inhibit_res0 $
           M.unionWith (<>) inhb_then1 inhb_else1
-  return
-    bu_env
-      { activeCoals = actv_res,
-        successCoals = succ_res,
-        inhibit = inhibit_res,
-        consumed = consumed res_then <> consumed res_else <> consumed bu_env <> consumedInStm stm
-      }
+  return bu_env {activeCoals = actv_res, successCoals = succ_res, inhibit = inhibit_res}
   where
     foldfun _ ((act, _), _) ((m_b, _, _, _), (_, _, _, _))
       | Nothing <- M.lookup m_b act =
@@ -804,13 +793,7 @@ mkCoalsTabStm lutab lstm@(Let pat _ (DoLoop arginis lform body)) td_env bu_env =
           )
           (fin_actv1, fin_inhb1)
           fin_actv1
-  return
-    bu_env
-      { activeCoals = fin_actv2,
-        successCoals = fin_succ1,
-        inhibit = fin_inhb2,
-        consumed = consumed bu_env <> consumed res_env_body <> consumedInStm lstm
-      }
+  return bu_env {activeCoals = fin_actv2, successCoals = fin_succ1, inhibit = fin_inhb2}
   where
     allocs_bdy = foldl getAllocs (alloc td_env') $ bodyStms body
     td_env_allocs = td_env' {alloc = allocs_bdy, scope = scope td_env' <> scopeOf (bodyStms body)}
@@ -941,7 +924,7 @@ mkCoalsTabStm lutab stm@(Let pat@(Pat [x']) _ e@(BasicOp (Update _ x _ _elm))) t
   | [(_, MemBlock _ _ m_x _)] <- getArrMemAssoc pat =
     do
       -- (a) filter by the 3rd safety for @elm@ and @x'@
-      let (actv, inhbt) = recordMemRefUses (consumed bu_env) td_env bu_env stm
+      let (actv, inhbt) = recordMemRefUses td_env bu_env stm
           -- mkCoalsHelper1FilterActive pat (se2names elm) (scope td_env) (scals bu_env)
           --                                      (activeCoals bu_env) (inhibit bu_env)
           -- (b) if @x'@ is in active coalesced table, then add an entry for @x@ as well
@@ -972,11 +955,7 @@ mkCoalsTabStm lutab stm@(Let pat@(Pat [x']) _ e@(BasicOp (Update _ x _ _elm))) t
           -- (c) this stm is also a potential source for coalescing, so process it
           actv'' = mkCoalsHelper3PatternMatch pat e lutab td_env (successCoals bu_env) actv' inhbt'
       return $
-        bu_env
-          { activeCoals = actv'',
-            inhibit = inhbt',
-            consumed = consumed bu_env <> consumedInStm stm
-          }
+        bu_env {activeCoals = actv'', inhibit = inhbt'}
 --
 mkCoalsTabStm _ (Let pat _ (BasicOp Update {})) _ _ =
   error $ "In ArrayCoalescing.hs, fun mkCoalsTabStm, illegal pattern for in-place update: " ++ pretty pat
@@ -990,7 +969,7 @@ mkCoalsTabStm lutab stm@(Let pat _ e) td_env bu_env = do
   --      this is now relaxed by use of LMAD eqs:
   --      the memory referenced in stm are added to memrefs::dstrefs
   --      in corresponding coal-tab entries.
-  let (activeCoals', inhibit') = recordMemRefUses (consumed bu_env <> consumedInStm stm) td_env bu_env stm
+  let (activeCoals', inhibit') = recordMemRefUses td_env bu_env stm
       -- mkCoalsHelper1FilterActive pat (freeIn e) (scope td_env) (scals bu_env)
       --                           (activeCoals bu_env) (inhibit bu_env)
 
@@ -1005,13 +984,7 @@ mkCoalsTabStm lutab stm@(Let pat _ e) td_env bu_env = do
 
       -- iii) record a potentially coalesced statement in @activeCoals@
       activeCoals''' = mkCoalsHelper3PatternMatch pat e lutab td_env successCoals' activeCoals'' (inhibited td_env)
-  return
-    bu_env
-      { activeCoals = activeCoals''',
-        inhibit = inhibit'',
-        successCoals = successCoals',
-        consumed = consumed bu_env <> consumedInStm stm
-      }
+  return bu_env {activeCoals = activeCoals''', inhibit = inhibit'', successCoals = successCoals'}
   where
     foldfun safe_4 ((a_acc, inhb), s_acc) (b, MemBlock tp shp mb _b_indfun) =
       case M.lookup mb a_acc of

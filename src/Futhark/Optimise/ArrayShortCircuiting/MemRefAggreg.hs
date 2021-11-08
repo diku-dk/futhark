@@ -76,14 +76,13 @@ translateAccessSummary _ _ _ = Undeterminable
 -- | This function computes the written and read memory references for the current statement
 getUseSumFromStm ::
   (Op rep ~ MemOp inner, HasMemBlock (Aliases rep)) =>
-  Names ->
   TopDnEnv rep ->
   CoalsTab ->
   Stm (Aliases rep) ->
   -- | A pair of written and written+read memory locations, along with their
   -- associated array and the index function used
   Maybe ([(VName, VName, IxFun)], [(VName, VName, IxFun)])
-getUseSumFromStm _ td_env coal_tab (Let Pat {} _ (BasicOp (Index arr (Slice slc))))
+getUseSumFromStm td_env coal_tab (Let Pat {} _ (BasicOp (Index arr (Slice slc))))
   | Just (MemBlock _ shp _ _) <- getScopeMemInfo arr (scope td_env),
     length slc == length (shapeDims shp) && all isFix slc = do
     (mem_b, mem_arr, ixfn_arr) <- getDirAliasedIxfn td_env coal_tab arr
@@ -92,8 +91,8 @@ getUseSumFromStm _ td_env coal_tab (Let Pat {} _ (BasicOp (Index arr (Slice slc)
   where
     isFix DimFix {} = True
     isFix _ = False
-getUseSumFromStm _ _ _ (Let Pat {} _ (BasicOp Index {})) = Just ([], []) -- incomplete slices
-getUseSumFromStm _ td_env coal_tab (Let (Pat pes) _ (BasicOp (ArrayLit ses _))) =
+getUseSumFromStm _ _ (Let Pat {} _ (BasicOp Index {})) = Just ([], []) -- incomplete slices
+getUseSumFromStm td_env coal_tab (Let (Pat pes) _ (BasicOp (ArrayLit ses _))) =
   let rds = mapMaybe (getDirAliasedIxfn td_env coal_tab) $ mapMaybe seName ses
       wrts = mapMaybe (getDirAliasedIxfn td_env coal_tab . patElemName) pes
    in Just (wrts, wrts ++ rds)
@@ -103,7 +102,7 @@ getUseSumFromStm _ td_env coal_tab (Let (Pat pes) _ (BasicOp (ArrayLit ses _))) 
 -- In place update @x[slc] <- a@. In the "in-place update" case,
 --   summaries should be added after the old variable @x@ has
 --   been added in the active coalesced table.
-getUseSumFromStm _ td_env coal_tab (Let (Pat [x']) _ (BasicOp (Update _ _x (Slice slc) a_se))) = do
+getUseSumFromStm td_env coal_tab (Let (Pat [x']) _ (BasicOp (Update _ _x (Slice slc) a_se))) = do
   (m_b, m_x, x_ixfn) <- getDirAliasedIxfn td_env coal_tab (patElemName x')
   let x_ixfn_slc = IxFun.slice x_ixfn $ Slice $ map (fmap pe64) slc
       r1 = (m_b, m_x, x_ixfn_slc)
@@ -112,43 +111,36 @@ getUseSumFromStm _ td_env coal_tab (Let (Pat [x']) _ (BasicOp (Update _ _x (Slic
     Var a -> case getDirAliasedIxfn td_env coal_tab a of
       Nothing -> Just ([r1], [r1])
       Just r2 -> Just ([r1], [r1, r2])
-getUseSumFromStm cons td_env coal_tab (Let (Pat [y]) _ (BasicOp (Copy x))) =
+getUseSumFromStm td_env coal_tab (Let (Pat [y]) _ (BasicOp (Copy x))) = do
   -- y = copy x
-
-  -- We should not short-circuit something which is consumed later. While the
-  -- resulting code may be valid-ish, the type checker will reject any writes to
-  -- something that is consumed later.
-  if (oneName x <> lookupAliases x (scope td_env)) `namesIntersect` cons
-    then Nothing
-    else do
-      wrt <- getDirAliasedIxfn td_env coal_tab $ patElemName y
-      rd <- getDirAliasedIxfn td_env coal_tab x
-      return ([wrt], [wrt, rd])
-getUseSumFromStm _ _ _ (Let Pat {} _ (BasicOp Copy {})) = error "Impossible"
-getUseSumFromStm _ td_env coal_tab (Let (Pat ys) _ (BasicOp (Concat _i a bs _ses))) =
+  wrt <- getDirAliasedIxfn td_env coal_tab $ patElemName y
+  rd <- getDirAliasedIxfn td_env coal_tab x
+  return ([wrt], [wrt, rd])
+getUseSumFromStm _ _ (Let Pat {} _ (BasicOp Copy {})) = error "Impossible"
+getUseSumFromStm td_env coal_tab (Let (Pat ys) _ (BasicOp (Concat _i a bs _ses))) =
   -- concat
   let ws = mapMaybe (getDirAliasedIxfn td_env coal_tab . patElemName) ys
       rs = mapMaybe (getDirAliasedIxfn td_env coal_tab) (a : bs)
    in Just (ws, ws ++ rs)
-getUseSumFromStm _ td_env coal_tab (Let (Pat ys) _ (BasicOp (Manifest _perm x))) =
+getUseSumFromStm td_env coal_tab (Let (Pat ys) _ (BasicOp (Manifest _perm x))) =
   let ws = mapMaybe (getDirAliasedIxfn td_env coal_tab . patElemName) ys
       rs = mapMaybe (getDirAliasedIxfn td_env coal_tab) [x]
    in Just (ws, ws ++ rs)
-getUseSumFromStm _ td_env coal_tab (Let (Pat ys) _ (BasicOp (Replicate _shp se))) =
+getUseSumFromStm td_env coal_tab (Let (Pat ys) _ (BasicOp (Replicate _shp se))) =
   let ws = mapMaybe (getDirAliasedIxfn td_env coal_tab . patElemName) ys
    in case se of
         Constant _ -> Just (ws, ws)
         Var x -> Just (ws, ws ++ mapMaybe (getDirAliasedIxfn td_env coal_tab) [x])
-getUseSumFromStm _ td_env coal_tab (Let (Pat [x]) _ (BasicOp (FlatUpdate _ (FlatSlice offset slc) v)))
+getUseSumFromStm td_env coal_tab (Let (Pat [x]) _ (BasicOp (FlatUpdate _ (FlatSlice offset slc) v)))
   | Just (m_b, m_x, x_ixfn) <- getDirAliasedIxfn td_env coal_tab (patElemName x) =
     let x_ixfn_slc = IxFun.flatSlice x_ixfn $ FlatSlice (pe64 offset) $ map (fmap pe64) slc
         r1 = (m_b, m_x, x_ixfn_slc)
      in case getDirAliasedIxfn td_env coal_tab v of
           Nothing -> Just ([r1], [r1])
           Just r2 -> Just ([r1], [r1, r2])
-getUseSumFromStm _ _ _ (Let Pat {} _ BasicOp {}) = Just ([], [])
-getUseSumFromStm _ _ _ (Let Pat {} _ (Op (Alloc _ _))) = Just ([], [])
-getUseSumFromStm _ _ _ _ =
+getUseSumFromStm _ _ (Let Pat {} _ BasicOp {}) = Just ([], [])
+getUseSumFromStm _ _ (Let Pat {} _ (Op (Alloc _ _))) = Just ([], [])
+getUseSumFromStm _ _ _ =
   -- if-then-else, loops are supposed to be treated separately,
   -- calls are not supported, and Ops are not yet supported
   -- error
@@ -167,16 +159,15 @@ getUseSumFromStm _ _ _ _ =
 --            should be computed on the top-down pass.
 recordMemRefUses ::
   (Op rep ~ MemOp inner, HasMemBlock (Aliases rep)) =>
-  Names ->
   TopDnEnv rep ->
   BotUpEnv ->
   Stm (Aliases rep) ->
   (CoalsTab, InhibitTab)
-recordMemRefUses cons td_env bu_env stm =
+recordMemRefUses td_env bu_env stm =
   let active_tab = activeCoals bu_env
       inhibit_tab = inhibit bu_env
       active_etries = M.toList active_tab
-   in case getUseSumFromStm cons td_env active_tab stm of
+   in case getUseSumFromStm td_env active_tab stm of
         Nothing ->
           foldl
             ( \state (m_b, entry) ->

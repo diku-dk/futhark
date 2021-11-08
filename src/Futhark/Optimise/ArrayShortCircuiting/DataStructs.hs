@@ -187,8 +187,7 @@ data BotUpEnv = BotUpEnv
     successCoals :: CoalsTab,
     -- | The coalescing failures from this pass. We will no longer try to merge
     -- these memory blocks.
-    inhibit :: InhibitTab,
-    consumed :: Names
+    inhibit :: InhibitTab
   }
 
 instance Pretty AccessSummary where
