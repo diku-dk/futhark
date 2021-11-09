@@ -19,7 +19,6 @@ import Data.Bifunctor (second)
 import Data.List (foldl')
 import qualified Data.Map as M
 import Data.Maybe
-import Futhark.CodeGen.ImpCode.GPU (bytes)
 import qualified Futhark.CodeGen.ImpCode.GPU as Imp
 import Futhark.CodeGen.ImpGen hiding (compileProg)
 import qualified Futhark.CodeGen.ImpGen
@@ -290,15 +289,15 @@ callKernelCopy bt destloc@(MemLoc destmem _ destIxFun) srcloc@(MemLoc srcmem src
     let num_elems = Imp.elements $ product $ map toInt64Exp srcshape
     srcspace <- entryMemSpace <$> lookupMemory srcmem
     destspace <- entryMemSpace <$> lookupMemory destmem
-    emit $
-      Imp.Copy
-        destmem
-        (bytes $ sExt64 destoffset)
-        destspace
-        srcmem
-        (bytes $ sExt64 srcoffset)
-        srcspace
-        $ num_elems `Imp.withElemType` bt
+    sCopy
+      destmem
+      (sExt64 destoffset)
+      destspace
+      srcmem
+      (sExt64 srcoffset)
+      srcspace
+      num_elems
+      bt
   | otherwise = sCopyKernel bt destloc srcloc
 
 mapTransposeForType :: PrimType -> CallKernelGen Name

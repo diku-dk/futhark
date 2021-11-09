@@ -113,6 +113,7 @@ module Futhark.CodeGen.ImpGen
     sWrite,
     sUpdate,
     sLoopNest,
+    sCopy,
     (<--),
     (<~~),
     function,
@@ -1435,7 +1436,7 @@ mapTransposeForType bt = do
 
   return fname
 
--- | Use an 'Imp.Copy' if possible, otherwise 'copyElementWise'.
+-- | Use 'sCopy' if possible, otherwise 'copyElementWise'.
 defaultCopy :: CopyCompiler rep r op
 defaultCopy pt dest src
   | Just (destoffset, srcoffset, num_arrays, size_x, size_y) <-
@@ -1462,16 +1463,7 @@ defaultCopy pt dest src
     destspace <- entryMemSpace <$> lookupMemory destmem
     if isScalarSpace srcspace || isScalarSpace destspace
       then copyElementWise pt dest src
-      else
-        emit $
-          Imp.Copy
-            destmem
-            (bytes destoffset)
-            destspace
-            srcmem
-            (bytes srcoffset)
-            srcspace
-            $ num_elems `withElemType` pt
+      else sCopy destmem destoffset destspace srcmem srcoffset srcspace num_elems pt
   | otherwise =
     copyElementWise pt dest src
   where
@@ -1838,6 +1830,35 @@ sLoopNest = sLoopNest' [] . shapeDims
     sLoopNest' is [] f = f $ reverse is
     sLoopNest' is (d : ds) f =
       sFor "nest_i" (toInt64Exp d) $ \i -> sLoopNest' (i : is) ds f
+
+sCopy ::
+  VName ->
+  Imp.TExp Int64 ->
+  Space ->
+  VName ->
+  Imp.TExp Int64 ->
+  Space ->
+  Count Elements (Imp.TExp Int64) ->
+  PrimType ->
+  ImpM rep r op ()
+sCopy destmem destoffset destspace srcmem srcoffset srcspace num_elems pt =
+  if destmem == srcmem
+    then
+      sUnless
+        (destoffset .==. srcoffset)
+        the_copy
+    else the_copy
+  where
+    the_copy =
+      emit $
+        Imp.Copy
+          destmem
+          (bytes destoffset)
+          destspace
+          srcmem
+          (bytes srcoffset)
+          srcspace
+          $ num_elems `withElemType` pt
 
 -- | Untyped assignment.
 (<~~) :: VName -> Imp.Exp -> ImpM rep r op ()
