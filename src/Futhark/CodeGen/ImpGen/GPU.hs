@@ -299,7 +299,7 @@ callKernelCopy bt destloc@(MemLoc destmem _ destIxFun) srcloc@(MemLoc srcmem src
         (bytes $ sExt64 srcoffset)
         srcspace
         $ num_elems `Imp.withElemType` bt
-  | otherwise = sCopy bt destloc srcloc
+  | otherwise = sCopyKernel bt destloc srcloc
 
 mapTransposeForType :: PrimType -> CallKernelGen Name
 mapTransposeForType bt = do

@@ -19,7 +19,7 @@ module Futhark.CodeGen.ImpGen.GPU.Base
     sKernelGroup,
     sReplicate,
     sIota,
-    sCopy,
+    sCopyKernel,
     compileThreadResult,
     compileGroupResult,
     virtualiseGroups,
@@ -1642,8 +1642,8 @@ sIota arr n x s et = do
           [Imp.MemArg arr_mem, Imp.ExpArg $ untyped n, Imp.ExpArg x, Imp.ExpArg s]
     else sIotaKernel arr n x s et
 
-sCopy :: CopyCompiler GPUMem HostEnv Imp.HostOp
-sCopy pt destloc@(MemLoc destmem _ _) srcloc@(MemLoc srcmem srcdims _) = do
+sCopyKernel :: CopyCompiler GPUMem HostEnv Imp.HostOp
+sCopyKernel pt destloc@(MemLoc destmem _ _) srcloc@(MemLoc srcmem srcdims _) = do
   -- Note that the shape of the destination and the source are
   -- necessarily the same.
   let shape = map toInt64Exp srcdims
