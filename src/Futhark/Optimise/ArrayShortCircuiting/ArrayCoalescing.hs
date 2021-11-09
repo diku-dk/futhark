@@ -920,7 +920,7 @@ mkCoalsTabStm lutab lstm@(Let pat _ (DoLoop arginis lform body)) td_env bu_env =
 
 -- The case of in-place update:
 --   @let x' = x with slice <- elm@
-mkCoalsTabStm lutab stm@(Let pat@(Pat [x']) _ e@(BasicOp (Update _ x _ _elm))) td_env bu_env
+mkCoalsTabStm lutab stm@(Let pat@(Pat [x']) _ e@(BasicOp (Update safety x _ _elm))) td_env bu_env
   | [(_, MemBlock _ _ m_x _)] <- getArrMemAssoc pat =
     do
       -- (a) filter by the 3rd safety for @elm@ and @x'@
@@ -953,7 +953,7 @@ mkCoalsTabStm lutab stm@(Let pat@(Pat [x']) _ e@(BasicOp (Update _ x _ _elm))) t
                         markFailedCoal (actv, inhbt) m_x
 
           -- (c) this stm is also a potential source for coalescing, so process it
-          actv'' = mkCoalsHelper3PatternMatch pat e lutab td_env (successCoals bu_env) actv' inhbt'
+          actv'' = if safety == Unsafe then mkCoalsHelper3PatternMatch pat e lutab td_env (successCoals bu_env) actv' inhbt' else actv'
       return $
         bu_env {activeCoals = actv'', inhibit = inhbt'}
 --
