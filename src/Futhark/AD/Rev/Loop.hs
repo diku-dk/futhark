@@ -434,7 +434,7 @@ revLoop diffStms pat loop =
               zipWithM_ insAdj (loopVars loop_vnames) loop_var_adjs
               zipWithM_ updateAdj (loopVals loop_vnames) loop_val_adjs
 
--- | Transforms a any loop into its reverse-mode derivative.
+-- | Transforms a loop into its reverse-mode derivative.
 diffLoop :: (Stms SOACS -> ADM ()) -> Pat -> StmAux () -> ExpT SOACS -> ADM () -> ADM ()
 diffLoop diffStms pat aux loop m
   | isWhileLoop loop =
