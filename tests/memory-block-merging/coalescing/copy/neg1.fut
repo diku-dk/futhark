@@ -12,7 +12,6 @@
 --           [6, 7, 8]]
 --        }
 -- structure seq-mem { Alloc 1 }
-
 -- structure gpu-mem { Alloc 1 }
 
 let main [n] (t1: *[n][n]i32) (i: i64) (ns: [n]i32): [n][n]i32 =
