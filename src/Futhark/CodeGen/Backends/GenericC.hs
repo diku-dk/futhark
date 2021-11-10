@@ -271,8 +271,9 @@ defCall dests fname args = do
     [dest]
       | isBuiltInFunction fname ->
         stm [C.cstm|$id:dest = $id:(funName fname)($args:args');|]
-    _ ->
-      item [C.citem|if ($id:(funName fname)($args:args') != 0) { err = 1; goto cleanup; }|]
+    _ -> do
+      free_all_mem <- freeAllocatedMem
+      item [C.citem|if ($id:(funName fname)($args:args') != 0) { $items:free_all_mem err = 1; goto cleanup; }|]
 
 -- | A set of operations that fail for every operation involving
 -- non-default memory spaces.  Uses plain pointers and @malloc@ for

@@ -14,14 +14,14 @@ futhark autotune [options...] <program.fut>
 DESCRIPTION
 ===========
 
-``futhark-autotune`` attemps to find optimal values for threshold
+``futhark autotune`` attemps to find optimal values for threshold
 parameters given representative datasets.  This is done by repeatedly
 running running the program through :ref:`futhark-bench(1)` with
-different values for the threshold parameters.  When
-``futhark-autotune`` finishes tuning a program ``foo.fut``, the
-results are written to ``foo.fut.tuning``, which will then
-automatically be picked up by subsequent uses of
-:ref:`futhark-bench(1)` and :ref:`futhark-test(1)`.
+different values for the threshold parameters.  When ``futhark
+autotune`` finishes tuning a program ``foo.fut``, the results are
+written to ``foo.fut.tuning``, which will then automatically be picked
+up by subsequent uses of :ref:`futhark-bench(1)` and
+:ref:`futhark-test(1)`.
 
 
 OPTIONS
