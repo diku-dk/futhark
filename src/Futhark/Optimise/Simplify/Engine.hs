@@ -1014,7 +1014,7 @@ simplifyLambdaWith f blocked usage lam@(Lambda params body rettype) = do
   params' <- mapM (traverse simplify) params
   let paramnames = namesFromList $ boundByLambda lam
   (hoisted, body') <-
-    enterLoop . bindLParams params' . localVtable f $
+    bindLParams params' . localVtable f $
       simplifyBody
         (blocked `orIf` hasFree paramnames `orIf` isConsumed)
         usage
