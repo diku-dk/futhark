@@ -641,7 +641,7 @@ hoistCommon res_usage res_usages cond ifsort body1 body2 = do
   branch_blocker <- asksEngineEnv $ blockHoistBranch . envHoistBlockers
   vtable <- askVtable
   let -- We are unwilling to hoist things that are unsafe or costly,
-
+      -- except if they are invariant to the most enclosing loop,
       -- because in that case they will also be hoisted past that
       -- loop.
       --
