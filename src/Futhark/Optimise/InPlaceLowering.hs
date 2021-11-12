@@ -59,6 +59,8 @@
 --    (8) The result of the loop may not alias the merge parameter
 --    @r1@.
 --
+--    (9) @y@ or its aliases may not be used after the loop.
+--
 -- FIXME: the implementation is not finished yet.  Specifically, not
 -- all of the above conditions are checked.
 module Futhark.Optimise.InPlaceLowering
@@ -146,6 +148,7 @@ optimiseStms (stm : stms) m = do
   -- XXX: unfortunate that we cannot handle duplicate update values.
   -- Would be good to improve this.  See inplacelowering6.fut.
   case nubByOrd (comparing updateValue)
+    . filter (not . (`nameIn` bottomUpSeen bup) . updateSource) -- (9)
     . filter ((`elem` boundHere) . updateValue)
     $ forwardThese bup of
     [] -> do
@@ -178,7 +181,8 @@ optimiseStms (stm : stms) m = do
       | Pat [PatElem v dec] <- pat,
         BasicOp (Update Unsafe src slice (Var ve)) <- e =
         maybeForward ve v dec cs src slice
-    checkIfForwardableUpdate _ = pure ()
+    checkIfForwardableUpdate stm' =
+      mapM_ seenVar $ namesToList $ freeIn $ stmExp stm'
 
 optimiseInStm :: Constraints rep => Stm (Aliases rep) -> ForwardingM rep (Stm (Aliases rep))
 optimiseInStm (Let pat dec e) =
