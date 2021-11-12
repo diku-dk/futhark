@@ -105,7 +105,7 @@ pdBinOp (FMul _) x y = (y, x)
 pdBinOp (FDiv ft) a b =
   floatBinOp derivs derivs derivs ft a b
   where
-    derivs x y = (1 / y, negate (x / (y ** 2)))
+    derivs x y = (1 / y, negate (x / (y * y)))
 pdBinOp (FPow ft) a b =
   floatBinOp derivs derivs derivs ft a b
   where
@@ -163,47 +163,47 @@ pdBuiltin "cosh32" [x] =
 pdBuiltin "cosh64" [x] =
   Just [untyped $ sinh (isF64 x)]
 pdBuiltin "tan32" [x] =
-  Just [untyped $ 1 / (cos (isF32 x) ** 2)]
+  Just [untyped $ 1 / (cos (isF32 x) * cos (isF32 x))]
 pdBuiltin "tan64" [x] =
-  Just [untyped $ 1 / (cos (isF64 x) ** 2)]
+  Just [untyped $ 1 / (cos (isF64 x) * cos (isF64 x))]
 pdBuiltin "asin32" [x] =
-  Just [untyped $ 1 / sqrt (1 - isF32 x ** 2)]
+  Just [untyped $ 1 / sqrt (1 - isF32 x * isF32 x)]
 pdBuiltin "asin64" [x] =
-  Just [untyped $ 1 / sqrt (1 - isF64 x ** 2)]
+  Just [untyped $ 1 / sqrt (1 - isF64 x * isF64 x)]
 pdBuiltin "asinh32" [x] =
-  Just [untyped $ 1 / sqrt (1 + isF32 x ** 2)]
+  Just [untyped $ 1 / sqrt (1 + isF32 x * isF32 x)]
 pdBuiltin "asinh64" [x] =
-  Just [untyped $ 1 / sqrt (1 + isF64 x ** 2)]
+  Just [untyped $ 1 / sqrt (1 + isF64 x * isF64 x)]
 pdBuiltin "acos32" [x] =
-  Just [untyped $ - 1 / sqrt (1 - isF32 x ** 2)]
+  Just [untyped $ - 1 / sqrt (1 - isF32 x * isF32 x)]
 pdBuiltin "acos64" [x] =
-  Just [untyped $ - 1 / sqrt (1 - isF64 x ** 2)]
+  Just [untyped $ - 1 / sqrt (1 - isF64 x * isF64 x)]
 pdBuiltin "acosh32" [x] =
-  Just [untyped $ 1 / sqrt (isF32 x ** 2 - 1)]
+  Just [untyped $ 1 / sqrt (isF32 x * isF32 x - 1)]
 pdBuiltin "acosh64" [x] =
-  Just [untyped $ 1 / sqrt (isF64 x ** 2 - 1)]
+  Just [untyped $ 1 / sqrt (isF64 x * isF64 x - 1)]
 pdBuiltin "atan32" [x] =
-  Just [untyped $ 1 / (1 + isF32 x ** 2)]
+  Just [untyped $ 1 / (1 + isF32 x * isF32 x)]
 pdBuiltin "atan64" [x] =
-  Just [untyped $ 1 / (1 + isF64 x ** 2)]
+  Just [untyped $ 1 / (1 + isF64 x * isF64 x)]
 pdBuiltin "atanh32" [x] =
-  Just [untyped $ cosh (isF32 x) ** 2]
+  Just [untyped $ cosh (isF32 x) * cosh (isF32 x)]
 pdBuiltin "atanh64" [x] =
-  Just [untyped $ cosh (isF64 x) ** 2]
+  Just [untyped $ cosh (isF64 x) * cosh (isF64 x)]
 pdBuiltin "atan2_32" [x, y] =
   Just
-    [ untyped $ - isF32 y / (isF32 x ** 2 + isF32 y ** 2),
-      untyped $ - isF32 x / (isF32 x ** 2 + isF32 y ** 2)
+    [ untyped $ - isF32 y / (isF32 x * isF32 x + isF32 y * isF32 y),
+      untyped $ - isF32 x / (isF32 x * isF32 x + isF32 y * isF32 y)
     ]
 pdBuiltin "atan2_64" [x, y] =
   Just
-    [ untyped $ - isF64 y / (isF64 x ** 2 + isF64 y ** 2),
-      untyped $ - isF64 x / (isF64 x ** 2 + isF64 y ** 2)
+    [ untyped $ - isF64 y / (isF64 x * isF64 x + isF64 y * isF64 y),
+      untyped $ - isF64 x / (isF64 x * isF64 x + isF64 y * isF64 y)
     ]
 pdBuiltin "tanh32" [x] =
-  Just [untyped $ 1 - tanh (isF32 x) ** 2]
+  Just [untyped $ 1 - tanh (isF32 x) * tanh (isF32 x)]
 pdBuiltin "tanh64" [x] =
-  Just [untyped $ 1 - tanh (isF64 x) ** 2]
+  Just [untyped $ 1 - tanh (isF64 x) * tanh (isF64 x)]
 -- More problematic derivatives follow below.
 pdBuiltin "isnan16" [_] = Just [untyped false]
 pdBuiltin "isnan32" [_] = Just [untyped false]
