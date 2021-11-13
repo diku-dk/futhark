@@ -21,6 +21,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Module substitution fixes (#1512, #1518).
 
+* Invalid in-place lowering (#1523).
+
 ## [0.20.6]
 
 ### Added
