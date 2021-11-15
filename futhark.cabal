@@ -62,8 +62,8 @@ library
       Futhark.Analysis.LastUse
       Futhark.Analysis.Metrics
       Futhark.Analysis.Metrics.Type
-      Futhark.Analysis.MigrationGraph
       Futhark.Analysis.MigrationTable
+      Futhark.Analysis.MigrationTable.Graph
       Futhark.Analysis.PrimExp
       Futhark.Analysis.PrimExp.Convert
       Futhark.Analysis.PrimExp.Generalize

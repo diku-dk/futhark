@@ -19,8 +19,8 @@ import qualified Data.Map as M
 import Data.Maybe (fromMaybe, isNothing)
 import Data.Set (Set, (\\))
 import qualified Data.Set as S
-import Futhark.Analysis.MigrationGraph hiding (empty, addEdges, get)
-import qualified Futhark.Analysis.MigrationGraph as MG
+import Futhark.Analysis.MigrationTable.Graph hiding (empty, addEdges, get)
+import qualified Futhark.Analysis.MigrationTable.Graph as MG
 import Futhark.IR.GPU
 
 -- | Where the value bound by a name should be computed.
