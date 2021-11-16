@@ -35,13 +35,15 @@ module Futhark.IR.Mem.IxFun
     permuteInv,
     conservativeFlatten,
     disjoint,
+    disjoint2,
     -- Some of these may not be needed
-    lmadToInterval,
+    lmadToIntervals,
     intervalOverlap,
+    distributeOffset,
     primInt,
     primBool,
     intervalPairs,
-    strideOverlap,
+    selfOverlap,
   )
 where
 
@@ -50,19 +52,13 @@ import Control.Monad.Identity
 import Control.Monad.State
 import Control.Monad.Writer
 import Data.Function (on, (&))
-import Data.List (partition, sort, sortBy, zip4, zip5, zipWith5)
+import Data.List (delete, find, intersect, partition, sort, sortBy, zip4, zip5, zipWith5, (\\))
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as M
-import Data.Maybe (fromMaybe, isJust)
+import Data.Maybe (isJust)
 import qualified Futhark.Analysis.AlgSimplify2 as AlgSimplify2
---import Futhark.Analysis.PrimExp
---  ( IntExp,
---    PrimExp (..),
---    TPrimExp (..),
---    primExpType,
---  )
-import Futhark.Analysis.PrimExp.Convert --(substituteInPrimExp)
+import Futhark.Analysis.PrimExp.Convert
 import qualified Futhark.Analysis.PrimExp.Generalize as PEG
 import Futhark.IR.Prop
 import Futhark.IR.Syntax
@@ -77,7 +73,7 @@ import Futhark.IR.Syntax
     flatSliceStrides,
     unitSlice,
   )
-import Futhark.IR.Syntax.Core (Ext (..), VName)
+import Futhark.IR.Syntax.Core (Ext (..), VName (..))
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
 import Futhark.Util.IntegralExp
@@ -1212,6 +1208,30 @@ nonNegativeishExp _ (ValueExp v) = not $ negativeIsh v
 nonNegativeishExp non_negatives (LeafExp vname _) = vname `nameIn` non_negatives
 nonNegativeishExp _ _ = False
 
+lessThanish :: Names -> TPrimExp Int64 VName -> TPrimExp Int64 VName -> Bool
+lessThanish non_negatives e1 e2 =
+  e2 - e1
+    & untyped
+    & AlgSimplify2.simplify0
+    & nonNegativeish non_negatives
+
+disjoint2 :: Names -> LMAD (TPrimExp Int64 VName) -> LMAD (TPrimExp Int64 VName) -> Bool
+disjoint2 non_negatives lmad1 lmad2 =
+  let (offset1, interval1) = lmadToIntervals lmad1
+      (offset2, interval2) = lmadToIntervals lmad2
+      (neg_offset, pos_offset) = partition AlgSimplify2.negated $ offset1 `AlgSimplify2.sub` offset2
+      (interval1', interval2') = unzip $ intervalPairs interval1 interval2
+   in case ( distributeOffset pos_offset interval1',
+             distributeOffset (map AlgSimplify2.negate neg_offset) interval2'
+           ) of
+        (Just interval1'', Just interval2'') ->
+          not (selfOverlap non_negatives interval1'')
+            && not (selfOverlap non_negatives interval2'')
+            && any
+              (not . uncurry (intervalOverlap non_negatives))
+              (zip interval1'' interval2'')
+        _ -> False
+
 data Interval = Interval
   { lowerBound :: TPrimExp Int64 VName,
     numElements :: TPrimExp Int64 VName,
@@ -1228,39 +1248,54 @@ instance Pretty Interval where
           "stride: " <> ppr st
         ]
 
-lmadToInterval :: LMAD (TPrimExp Int64 VName) -> Maybe [Interval]
-lmadToInterval (LMAD offset []) = Just [Interval offset 1 1]
-lmadToInterval lmad@(LMAD offset dims0) =
-  helper [] offset' $ permuteInv (lmadPermutation lmad) dims0
+lmadToIntervals :: LMAD (TPrimExp Int64 VName) -> (AlgSimplify2.SofP, [Interval])
+lmadToIntervals (LMAD offset []) = (AlgSimplify2.simplify0 $ untyped offset, [Interval 0 1 1])
+lmadToIntervals lmad@(LMAD offset dims0) =
+  (offset', map helper $ permuteInv (lmadPermutation lmad) dims0)
   where
-    offset' = AlgSimplify2.sumOfProducts $ untyped offset
+    offset' = AlgSimplify2.simplify0 $ untyped offset
 
-    helper ::
-      [Interval] ->
-      AlgSimplify2.SofP ->
-      [LMADDim (TPrimExp Int64 VName)] ->
-      Maybe [Interval]
-    helper acc sofp (LMADDim strd _ shp _ _ : dims) =
-      let (to_add, the_rest) = partition (elem (untyped strd) . AlgSimplify2.atoms) sofp
-          new_offset = TPrimExp $ AlgSimplify2.sumToExp to_add
-          new_interval =
-            Interval
-              new_offset
-              (AlgSimplify2.simplify' $ shp - 1)
-              (AlgSimplify2.simplify' strd)
-       in helper (new_interval : acc) the_rest dims
-    helper acc [] [] = Just $ reverse acc
-    helper _ _ _ = Nothing
+    helper :: LMADDim (TPrimExp Int64 VName) -> Interval
+    helper (LMADDim strd _ shp _ _) = do
+      Interval 0 (AlgSimplify2.simplify' shp) (AlgSimplify2.simplify' strd)
 
-intervalOverlap :: Interval -> Interval -> Bool
-intervalOverlap (Interval lb1 ne1 st1) (Interval lb2 ne2 st2)
+distributeOffset :: MonadFail m => AlgSimplify2.SofP -> [Interval] -> m [Interval]
+distributeOffset _ [] = fail "Impossible!?"
+distributeOffset offset [Interval lb ne 1] = return $ [Interval (lb + TPrimExp (AlgSimplify2.sumToExp offset)) ne 1]
+distributeOffset offset (Interval lb ne st0 : is) = do
+  -- If a term 't' in the offset contains a multiple of the stride: Subtract `t`
+  -- from the offset, add `t / st` to the lower bound.
+  --
+  -- Example: The offset is `a + b * b * 2` and the stride is `b * b`. The
+  -- remaining offset should be `a` and the new lower bound should be `2`.
+  AlgSimplify2.Prod n st <-
+    maybe (fail "Stride should have exactly one term") return $
+      justOne $
+        AlgSimplify2.simplify0 $ untyped st0
+  -- We do not support negative strides here. They should've been normalized.
+  if n
+    then fail "Stride should be positive"
+    else case find ((==) st . intersect st . AlgSimplify2.atoms) offset of
+      Just t@(AlgSimplify2.Prod False as') ->
+        distributeOffset (t `delete` offset) $ Interval (lb + TPrimExp (AlgSimplify2.sumToExp $ [AlgSimplify2.Prod False $ as' \\ st])) ne st0 : is
+      Just (AlgSimplify2.Prod True _) -> fail "Offset term should be positive"
+      Nothing -> do
+        rest <- distributeOffset offset is
+        return $ Interval lb ne st0 : rest
+  where
+    justOne :: [a] -> Maybe a
+    justOne [a] = Just a
+    justOne _ = Nothing
+
+intervalOverlap :: Names -> Interval -> Interval -> Bool
+intervalOverlap non_negatives (Interval lb1 ne1 st1) (Interval lb2 ne2 st2)
   | st1 == st2,
-    Just True <- primBool $ lb1 .<. lb2,
-    Just True <- primBool $ lb1 + ne1 * st1 .<. lb2 =
+    lessThanish non_negatives lb1 lb2,
+    lessThanish non_negatives (lb1 + (ne1 - 1) * st1) lb2 =
     False
   | st1 == st2,
-    Just True <- primBool $ lb2 .<. lb1,
-    Just True <- primBool $ lb2 + ne2 * st2 .<. lb1 =
+    lessThanish non_negatives lb2 lb1,
+    lessThanish non_negatives (lb2 + (ne2 - 1) * st2) lb1 =
     False
   | otherwise = True
 
@@ -1274,26 +1309,32 @@ primInt p
   | Just (IntValue (Int64Value i)) <- evalPrimExp (const Nothing) $ untyped p = Just i
   | otherwise = Nothing
 
-intervalPairs :: [(Interval, Interval)] -> [Interval] -> [Interval] -> [(Interval, Interval)]
-intervalPairs acc [] [] = reverse acc
-intervalPairs acc (i@(Interval lb _ st) : is) [] = intervalPairs ((i, Interval lb 1 st) : acc) is []
-intervalPairs acc [] (i@(Interval lb _ st) : is) = intervalPairs ((Interval lb 1 st, i) : acc) [] is
-intervalPairs acc (i1@(Interval lb1 _ st1) : is1) (i2@(Interval lb2 _ st2) : is2)
-  | st1 == st2 = intervalPairs ((i1, i2) : acc) is1 is2
-  | otherwise =
-    let res1 = intervalPairs ((i1, Interval lb1 1 st1) : acc) is1 (i2 : is2)
-        res2 = intervalPairs ((Interval lb2 1 st2, i2) : acc) (i1 : is1) is2
-     in if length res1 <= length res2
-          then res1
-          else res2
+intervalPairs :: [Interval] -> [Interval] -> [(Interval, Interval)]
+intervalPairs = intervalPairs' []
+  where
+    intervalPairs' :: [(Interval, Interval)] -> [Interval] -> [Interval] -> [(Interval, Interval)]
+    intervalPairs' acc [] [] = reverse acc
+    intervalPairs' acc (i@(Interval lb _ st) : is) [] = intervalPairs' ((i, Interval lb 1 st) : acc) is []
+    intervalPairs' acc [] (i@(Interval lb _ st) : is) = intervalPairs' ((Interval lb 1 st, i) : acc) [] is
+    intervalPairs' acc (i1@(Interval lb1 _ st1) : is1) (i2@(Interval lb2 _ st2) : is2)
+      | st1 == st2 = intervalPairs' ((i1, i2) : acc) is1 is2
+      | otherwise =
+        let res1 = intervalPairs' ((i1, Interval lb1 1 st1) : acc) is1 (i2 : is2)
+            res2 = intervalPairs' ((Interval lb2 1 st2, i2) : acc) (i1 : is1) is2
+         in if length res1 <= length res2
+              then res1
+              else res2
 
-strideOverlap :: [Interval] -> Bool
-strideOverlap is =
-  -- TODO: We need to do something clever using some ranges of known values
+-- | Returns true if the intervals are self-overlapping, meaning that for a
+-- given dimension d, the stride of d is larger than the aggregate spans of the
+-- lower dimensions.
+selfOverlap :: Names -> [Interval] -> Bool
+selfOverlap non_negatives is =
+  -- TODO: Do we need to do something clever using some ranges of known values?
   selfOverlap' 0 $ reverse is
   where
     selfOverlap' acc (x : xs) =
       let interval_span = (lowerBound x + numElements x - 1) * stride x
-       in fromMaybe True (primBool $ acc .<. stride x)
+       in lessThanish non_negatives (AlgSimplify2.simplify' acc) (AlgSimplify2.simplify' $ stride x)
             && selfOverlap' (acc + interval_span) xs
-    selfOverlap' _ _ = False
+    selfOverlap' _ [] = False

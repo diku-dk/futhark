@@ -11,6 +11,9 @@ module Futhark.Analysis.AlgSimplify2
     sumOfProducts,
     sumToExp,
     prodToExp,
+    add,
+    sub,
+    negate,
   )
 where
 
@@ -73,16 +76,20 @@ sumToExp (x : xs) =
 
 prodToExp :: Prod -> Exp
 prodToExp (Prod _ []) = val 1
+prodToExp (Prod True [ValueExp (IntValue (Int64Value i))]) = ValueExp $ IntValue $ Int64Value (- i)
 prodToExp (Prod True as) =
   foldl (BinOpExp $ Mul Int64 OverflowUndef) (val (-1)) as
 prodToExp (Prod False (a : as)) =
   foldl (BinOpExp $ Mul Int64 OverflowUndef) a as
 
+simplifySofP :: SofP -> SofP
+simplifySofP = fixPoint (mapMaybe (applyZero . removeOnes) . removeNegations)
+
 simplify0 :: Exp -> SofP
-simplify0 = fixPoint (mapMaybe (applyZero . removeOnes) . removeNegations) . sumOfProducts
+simplify0 = simplifySofP . sumOfProducts
 
 simplify :: Exp -> Exp
-simplify = sumToExp . simplify0
+simplify = constFoldPrimExp . sumToExp . simplify0
 
 simplify' :: TExp -> TExp
 simplify' = TPrimExp . simplify . untyped
@@ -106,3 +113,9 @@ removeNegations (t : ts) =
 
 val :: Int64 -> Exp
 val = ValueExp . IntValue . Int64Value
+
+add :: SofP -> SofP -> SofP
+add ps1 ps2 = simplifySofP $ ps1 <> ps2
+
+sub :: SofP -> SofP -> SofP
+sub ps1 ps2 = add ps1 $ map negate ps2
