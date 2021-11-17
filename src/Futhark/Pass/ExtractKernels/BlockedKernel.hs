@@ -51,24 +51,25 @@ mkSegSpace dims = SegSpace <$> newVName "phys_tid" <*> pure dims
 
 prepareRedOrScan ::
   (MonadBuilder m, DistRep (Rep m)) =>
+  Certs ->
   SubExp ->
   Lambda (Rep m) ->
   [VName] ->
   [(VName, SubExp)] ->
   [KernelInput] ->
   m (SegSpace, KernelBody (Rep m))
-prepareRedOrScan w map_lam arrs ispace inps = do
+prepareRedOrScan cs w map_lam arrs ispace inps = do
   gtid <- newVName "gtid"
   space <- mkSegSpace $ ispace ++ [(gtid, w)]
   kbody <- fmap (uncurry (flip (KernelBody ()))) $
     runBuilder $
       localScope (scopeOfSegSpace space) $ do
         mapM_ readKernelInput inps
-        mapM_ readKernelInput $ do
+        certifying cs . mapM_ readKernelInput $ do
           (p, arr) <- zip (lambdaParams map_lam) arrs
           pure $ KernelInput (paramName p) (paramType p) arr [Var gtid]
         res <- bodyBind (lambdaBody map_lam)
-        forM res $ \(SubExpRes cs se) -> pure $ Returns ResultMaySimplify cs se
+        forM res $ \(SubExpRes res_cs se) -> pure $ Returns ResultMaySimplify res_cs se
 
   return (space, kbody)
 
@@ -76,6 +77,7 @@ segRed ::
   (MonadFreshNames m, DistRep rep, HasScope rep m) =>
   SegOpLevel rep ->
   Pat rep ->
+  Certs ->
   SubExp -> -- segment size
   [SegBinOp rep] ->
   Lambda rep ->
@@ -83,8 +85,8 @@ segRed ::
   [(VName, SubExp)] -> -- ispace = pair of (gtid, size) for the maps on "top" of this reduction
   [KernelInput] -> -- inps = inputs that can be looked up by using the gtids from ispace
   m (Stms rep)
-segRed lvl pat w ops map_lam arrs ispace inps = runBuilder_ $ do
-  (kspace, kbody) <- prepareRedOrScan w map_lam arrs ispace inps
+segRed lvl pat cs w ops map_lam arrs ispace inps = runBuilder_ $ do
+  (kspace, kbody) <- prepareRedOrScan cs w map_lam arrs ispace inps
   letBind pat $
     Op $
       segOp $
@@ -94,6 +96,7 @@ segScan ::
   (MonadFreshNames m, DistRep rep, HasScope rep m) =>
   SegOpLevel rep ->
   Pat rep ->
+  Certs ->
   SubExp -> -- segment size
   [SegBinOp rep] ->
   Lambda rep ->
@@ -101,8 +104,8 @@ segScan ::
   [(VName, SubExp)] -> -- ispace = pair of (gtid, size) for the maps on "top" of this scan
   [KernelInput] -> -- inps = inputs that can be looked up by using the gtids from ispace
   m (Stms rep)
-segScan lvl pat w ops map_lam arrs ispace inps = runBuilder_ $ do
-  (kspace, kbody) <- prepareRedOrScan w map_lam arrs ispace inps
+segScan lvl pat cs w ops map_lam arrs ispace inps = runBuilder_ $ do
+  (kspace, kbody) <- prepareRedOrScan cs w map_lam arrs ispace inps
   letBind pat $
     Op $
       segOp $
@@ -119,7 +122,7 @@ segMap ::
   [KernelInput] -> -- inps = inputs that can be looked up by using the gtids from ispace
   m (Stms rep)
 segMap lvl pat w map_lam arrs ispace inps = runBuilder_ $ do
-  (kspace, kbody) <- prepareRedOrScan w map_lam arrs ispace inps
+  (kspace, kbody) <- prepareRedOrScan mempty w map_lam arrs ispace inps
   letBind pat $
     Op $
       segOp $
@@ -163,7 +166,7 @@ nonSegRed ::
   m (Stms rep)
 nonSegRed lvl pat w ops map_lam arrs = runBuilder_ $ do
   (pat', ispace, read_dummy) <- dummyDim pat
-  addStms =<< segRed lvl pat' w ops map_lam arrs ispace []
+  addStms =<< segRed lvl pat' mempty w ops map_lam arrs ispace []
   read_dummy
 
 segHist ::

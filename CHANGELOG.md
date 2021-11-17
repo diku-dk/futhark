@@ -25,6 +25,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Incorrect code generation for some intra-group parallel code versions.
 
+* Flattening crash in the presence of irregular parallelism (#1525).
+
 ## [0.20.6]
 
 ### Added
