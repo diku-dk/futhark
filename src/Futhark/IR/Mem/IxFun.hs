@@ -1260,7 +1260,7 @@ lmadToIntervals lmad@(LMAD offset dims0) =
       Interval 0 (AlgSimplify2.simplify' shp) (AlgSimplify2.simplify' strd)
 
 distributeOffset :: MonadFail m => AlgSimplify2.SofP -> [Interval] -> m [Interval]
-distributeOffset _ [] = fail "Impossible!?"
+distributeOffset _ [] = fail "Cannot distribute offset across empty interval"
 distributeOffset offset [Interval lb ne 1] = return $ [Interval (lb + TPrimExp (AlgSimplify2.sumToExp offset)) ne 1]
 distributeOffset offset (Interval lb ne st0 : is) = do
   -- If a term 't' in the offset contains a multiple of the stride: Subtract `t`
