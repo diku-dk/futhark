@@ -55,8 +55,8 @@ sizeHeuristicsTable =
     -- to perform well in practice.
     SizeHeuristic "" DeviceGPU NumGroups $ 4 * max_compute_units,
     SizeHeuristic "" DeviceGPU GroupSize 256,
-    SizeHeuristic "" DeviceGPU TileSize 32,
-    SizeHeuristic "" DeviceGPU RegTileSize 2,
+    SizeHeuristic "" DeviceGPU TileSize 16,
+    SizeHeuristic "" DeviceGPU RegTileSize 5,
     SizeHeuristic "" DeviceGPU Threshold $ 32 * 1024,
     SizeHeuristic "" DeviceCPU LockstepWidth 1,
     SizeHeuristic "" DeviceCPU NumGroups max_compute_units,
