@@ -393,7 +393,7 @@ transformStm path (Let res_pat (StmAux cs _ _) (Op (Screma w arrs form)))
     let map_lam_sequential = soacsLambdaToGPU map_lam
     lvl <- segThreadCapped [w] "segscan" $ NoRecommendation SegNoVirt
     addStms . fmap (certify cs)
-      =<< segScan lvl res_pat w scan_ops map_lam_sequential arrs [] []
+      =<< segScan lvl res_pat mempty w scan_ops map_lam_sequential arrs [] []
 transformStm path (Let res_pat aux (Op (Screma w arrs form)))
   | Just [Reduce comm red_fun nes] <- isReduceSOAC form,
     let comm'
