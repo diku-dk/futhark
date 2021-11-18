@@ -32,6 +32,9 @@ module Futhark.Analysis.MigrationTable.Graph (
   Routing (..),
   Exhaustion (..),
   Edges (..),
+  EdgeType (..),
+  Visited,
+  Result (..),
 
   -- * Construction
   empty,
@@ -40,6 +43,7 @@ module Futhark.Analysis.MigrationTable.Graph (
   vertex,
   declareEdges,
   oneEdge,
+  none,
 
   -- * Insertion
   insert,
@@ -56,10 +60,14 @@ module Futhark.Analysis.MigrationTable.Graph (
   -- * Routing
   route,
   routeMany,
+
+  -- * Traversal
+  reduce,
 ) where
 
 import qualified Data.IntSet as IS
 import qualified Data.IntMap.Strict as IM
+import qualified Data.Map.Lazy as M
 import Data.List (foldl')
 import Data.Maybe (fromJust)
 import Futhark.IR.GPU hiding (Result)
@@ -151,6 +159,28 @@ instance Monoid Edges where
   -- The empty set of edges.
   mempty = ToNodes IS.empty Nothing
 
+-- | Whether a vertex is reached via a normal or reversed edge.
+data EdgeType = Normal | Reversed
+     deriving (Eq, Ord)
+
+-- | State that tracks which vertices a traversal has visited, caching immediate
+-- computations.
+data Visited a = Visited { visited :: M.Map (EdgeType, Id) (Result a) }
+
+-- | The result of a graph traversal that may abort early in case a sink is
+-- reached.
+data Result a
+  -- | The traversal finished without encountering a sink, producing this value.
+  = Produced a
+  -- | The traversal was aborted because a sink was reached.
+  | FoundSink
+  deriving (Eq)
+
+instance Semigroup a => Semigroup (Result a) where
+  FoundSink <> _ = FoundSink
+  _ <> FoundSink = FoundSink
+  Produced x <> Produced y = Produced (x <> y)
+
 
 {- CONSTRUCTION -}
 
@@ -183,6 +213,10 @@ declareEdges is = ToNodes (IS.fromList is) Nothing
 -- | Like 'declareEdges' but for a single vertex.
 oneEdge :: Id -> Edges
 oneEdge i = ToNodes (IS.singleton i) Nothing
+
+-- | Initial 'Visited' state before any vertex has been visited.
+none :: Visited a
+none = Visited M.empty
 
 
 {- INSERTION -}
@@ -252,9 +286,79 @@ routeMany srcs graph =
         (Just snk, g') -> (snk:snks, g')
 
 
+{- TRAVERSAL -}
+
+
+-- | @reduce g r vs et i@ returns 'FoundSink' if a sink can be reached via the
+-- vertex @v@ with id @i@ in @g@. Otherwise it returns 'Produced' @(r x et v)@
+-- where @x@ is the '<>' aggregate of all values produced by reducing the
+-- vertices that are available via @v@'s' edges.
+-- @et@ identifies the type of edge that @v@ is accessed by and thereby which
+-- edges of @v@ that are available. @vs@ caches reductions of vertices that
+-- previously have been visited in the graph.
+--
+-- The reduction of a cyclic reference resolves to 'mempty'.
+reduce :: Monoid a
+       => Graph
+       -> (a -> EdgeType -> Vertex -> a)
+       -> Visited a
+       -> EdgeType
+       -> Id
+       -> (Result a, Visited a)
+reduce g r vs et i
+  | Just res <- M.lookup (et, i) (visited vs)
+  = (res, vs)
+
+  | Just v <- get i g
+  = reduceVertex v
+
+  | otherwise -- shouldn't happen
+  = (Produced mempty, vs)
+
+  where
+    reduceVertex v =
+      let (res, vs') = reduceEdges v
+      in case res of
+           Produced x -> cached (Produced $ r x et v) vs'
+           FoundSink  -> cached res vs'
+
+    cached res vs0 =
+      let vs1 = Visited (M.insert (et, i) res $ visited vs0)
+      in (res, vs1)
+
+    reduceEdges v =
+      case (et, vertexRouting v) of
+          (Normal,   FromSource)     -> (Produced mempty, vs)
+          (Normal,   FromNode rev _) -> entry (reduceReversed rev)
+          (Reversed, FromNode rev _) -> entry (reduceAll rev $ vertexEdges v)
+          _                          -> entry (reduceNormals $ vertexEdges v)
+
+    -- Handle cycles
+    entry f = f $ Visited $ M.insert (et, i) (Produced mempty) (visited vs)
+
+    reduceReversed rev vs' = reduce g r vs' Reversed rev
+
+    reduceAll rev es vs0 =
+      let (res, vs1) = reduceNormals es vs0 in
+      case res of
+        Produced _ ->
+          let (res', vs2) = reduceReversed rev vs1
+          in (res <> res', vs2)
+        FoundSink ->
+          (res, vs1)
+
+    reduceNormals ToSink         vs' = (FoundSink, vs')
+    reduceNormals (ToNodes es _) vs' = reduceNorms mempty (IS.elems es) vs'
+
+    reduceNorms x []     vs0 = (Produced x, vs0)
+    reduceNorms x (e:es) vs0 =
+      let (res, vs1) = reduce g r vs0 Normal e in
+      case res of
+        Produced y -> reduceNorms (x <> y) es vs1
+        FoundSink  -> (res, vs1)
+
 
 {- INTERNALS BELOW -}
-
 
 
 -- | A set of vertices visited by a graph traversal, and at what depth they were
@@ -289,9 +393,6 @@ instance Semigroup RoutingResult where
 instance Monoid RoutingResult where
   mempty = DeadEnd
 
--- | Whether a vertex is reached via a normal or reversed edge.
-data EdgeType = Normal | Reversed
-
 route' :: Pending
        -> Depth
        -> Maybe Id
@@ -325,8 +426,10 @@ route' p d prev et i g
       -- that no (new) cycle can start here.
       Reversed -> let (res, g') = routeNormals (fromJust $ get i g) g p
                   in (fst foundCycle <> res, g')
+
   | Just v <- get i g
   = routeVertex v
+
   | otherwise
   = backtrack
 
@@ -424,268 +527,3 @@ route' p d prev et i g
         SinkFound _          -> (res, g1, es)
         CycleDetected _ _ p1 -> let (res', g2, es') = routeNorms es g1 p1
                                 in (res <> res', g2, e:es')
-
-
-
-
-
-
-
-{-
-
--- Produces a value from a vertex given the type of edge it is accessed via and
--- the combined value of all edge vertices, excluding those that are supersets
--- of the value that will be produced. The latter may occur in case of cycles.
-type Reducer a = a -> EdgeType -> Vertex -> a
-
--- | Search the graph for a sink, starting with the vertex of the provided id.
--- All edges will be traversed, even the exhausted, and the visited vertices
--- will 
-search :: Monoid a  -- associative <>
-       => Reducer a    -- map vertex to a
-       -> a            -- initial a
-       -> EdgeType
-       -> Id
-       -> Graph
-       -> Result a
-searchAll s et i g = error
-
-
-
-data Result a
-  = Produced a
-  | FoundSink
-
--- | A path to some vertex. The head is the vertex that was reached, along with
--- the type of edge is was found via.
-type Path [(EdgeType, Id)]
-
--- 
-
-
--- Cycle of values all produce the same result
-
-
-
-
-
--- | Searches the edge u->v where u is absent if it is a source.
-type EdgeSearcher m = Maybe Vertex -> EdgeType -> Vertex -> m Search
-
--- | Control flow of a graph search.
-data Search
-  = Continue -- ^ No result was found in this branch of the search tree.
-  | Complete -- ^ The search was successful.
-
--- | Continue the search.
-continue :: Monad m => m Search
-continue = return Continue
-
--- | @a `andThen` b@ first searches @a@, and if no result is found, continues
--- to search @b@.
-andThen :: Monad m => m Search -> m Search -> m Search
-andThen first next = do
-  s <- first
-  case s of
-    Continue -> next
-    _        -> return s
-
--- | Search the non-source, non-sink vertices that some vertex has an edge to,
--- returning as soon a result is found or when the search space has been
--- exhausted.
-searchEdges :: Monad m
-            => EdgeSearcher m
-            -> EdgeType -- How the vertex is accessed.
-            -> Vertex   -- The vertex.
-            -> Graph    -- The graph that contains the vertex and its edges.
-            -> m Search
-searchEdges search et u g =
-  case (et, vertexRouting u) of
-    (Normal,   FromSource  ) -> continue
-    (Normal,   FromNode i _) -> searchVertex (search (Just u) Reversed) i g
-    (Reversed, FromNode i _) -> do
-      searchNormals `andThen` searchVertex (search (Just u) Reversed) i g
-    _ -> searchNormals
-  where
-    searchNormals
-      | ToSink       <- vertexEdges u = continue
-      | ToNodes es _ <- vertexEdges u = searchNorms es
-
-    searchNorms es =
-      case IS.minView es of
-        Nothing       -> continue
-        Just (i, es') -> do
-          let searchEdge = searchVertex (search (Just u) Normal) i g
-          searchEdge `andThen` searchNorms es'
-
--- | Search the vertex with the given id in the graph.
-searchVertex :: Monad m
-             => (Vertex -> m Search)
-             -> Id
-             -> Graph
-             -> m Search
-searchVertex f i g
-  | Just v <- get i g = f v
-  | otherwise         = continue
-
-
--}
-
-
-
-
-
-{-
--- | A set of vertices visited by a graph traversal. Used to detect cycles.
-type Visited = IdSet
-
--- | Visits all vertices reachable from some vertex, including the vertex
--- itself. All edges will be traversed, also those that are exhausted.
--- Each vertex will be visited at most once.
-walk :: Monad m =>
-     -> Commander m -- Callback to control traversal.
-     -> Visited     -- Vertices visited so far.
-     -> Id          -- Id of the previous vertex.
-     -> EdgeType    -- The kind of edge this vertex is reached via.
-     -> Id          -- Id of this vertex.
-     -> Graph       -- The graph.
-     -> m (Command, Visited)
-walk _ vs _ _ i g
-  | IS.member i vs
-  = return (Continue, g, vs)
-walk _ vs _ _ i g
-  | Nothing <- get i g
-  = return (Continue, g, vs)
-walk f vs prev et i g
-  | Just v <- get i g
-  = do cmd <- f prev et v
-       let vs' = IS.insert i vs
-       case cmd of
-         Complete  -> return (Complete, g, vs')
-         Backtrack -> return (Continue, g, vs')
-         Continue  -> walkVertex f vs' prev et v g
-
-
-
-
--- The result of searching a vertex via an edge.
-data SearchResult
-  -- | Exhausted search via this edge.
-  = DeadEnd
-  -- | Search had to backtrack because a cycle was detected. The first set is
-  -- all members of the cycle(s) that search backtracked from, the second set
-  -- is the cycle members that search have yet to backtrack from.
-  | CycleDetected IdSet IdSet
-  -- Search had to backtrack for another reason.
-  | EarlyReturn
-  -- | A path was found to this sink via the edge.
-  | SinkFound Id
-  -- | Search completed with some other result.
-  | Abort
-
-
-
-
-search :: Monad m =>
-       -> SearchType    -- Whether to traverse exhausted edges.
-       -> Commander m a -- Callback to control search.
-       -> Visited       -- Vertices visited by the search so far.
-       -> Id            -- Id of the previous vertex.
-       -> EdgeType      -- The kind of edge this vertex is reached via.
-       -> Id            -- Id of this vertex.
-       -> Graph         -- The graph.
-       -> m (SearchResult a, Graph, Visited)
-search _ _ vs _ _ i g
-  | IS.member i vs
-  = let res = CycleDetected IS.empty (IS.singleton i)
-    in return (res, g, IS.insert i vs)
-search _ _ vs _ _ i g
-  | Nothing <- get i g
-  = (DeadEnd, g, IS.insert i vs)
-search sType f vs prev et i g
-  | Just v <- get i g
-  = do cmd <- f prev et v
-       let vs' = IS.insert i vs
-       case cmd of
-         Complete r -> return (Result r, g, vs')
-         Backtrack  -> return (EarlyReturn, g, vs')
-         Continue   -> searchVertex sType f vs' prev et v g
-
-
-
-
-
-
-searchVertex :: Monad m =>
-             -> SearchType    -- Whether to traverse exhausted edges.
-             -> Commander m a -- Callback to control search.
-             -> Visited       -- Vertices visited so far, incl. this
-             -> Id            -- Id of the previous vertex.
-             -> EdgeType      -- The kind of edge this vertex is reached via.
-             -> Vertex        -- This vertex.
-             -> Graph         -- The graph.
-             -> m (SearchResult a, Graph, Visited)
-searchVertex sType f vs prev Normal v g =
-  let i = vertexId v in
-  case vertexRouting v of
-    FromSource ->
-      return (DeadEnd, g, vs)
-    FromNode _ Exhausted | NonExhausted <- sType ->
-      return (DeadEnd, g, vs)
-    FromNode from _ -> do
-      (res, g', vs') <- search sType f vs i Reversed from g
-      case res of
-        DeadEnd ->
-          let v'  = v { vertexRouting = FromNode from Exhausted }
-              g'' = insert v' g'
-          in return (res, g'', vs')
-        CycleDetected bf bh ->
-          let bh' = bh
-        SinkFound _ ->
-          let v'  = v { vertexRouting = FromNode prev NotExhausted }
-              g'' = insert v' g'
-          in return (res, g'', vs')
-        _ -> return (res, g', vs')
-
-    NoRoute -> 
-
-  = DeadEnd
-  -- | Search had to backtrack because a cycle was detected. The first set is
-  -- all members of the cycle(s) that search backtracked from, the second set
-  -- is the cycle members that search have yet to backtrack from.
-  | CycleDetected IdSet IdSet
-  -- Search had to backtrack for another reason.
-  | EarlyReturn
-  -- | A path was found to this sink via the edge.
-  | SinkFound Id
-  -- | Search completed with some other result.
-  | Result a
-
-vertexWalk :: Id -> EdgeType -> Vertex -> Vertex
-vertexWalk prev Normal v
-  | NoRoute <- vertexRouting v
-  = -- All edges
-vertexWalk prev Normal v
-  | FromSource <- vertexRouting v
-  = -- no edges
-vertexWalk prev Normal v
-  | FromNode _ Exhausted <- vertexRouting v
-  = -- no edges
-vertexWalk prev Normal v
-  | FromNode from NotExhausted <- vertexRouting v
-  = -- from is only edge
-vertexWalk prev Reversed v
-  | NoRoute <- vertexRouting v
-  = 
-vertexWalk prev Reversed v
-  | FromSource <- vertexRouting v
-  =
-vertexWalk prev Reversed v
-  | FromNode _ Exhausted <- vertexRouting v
-  =
-vertexWalk prev Reversed v
-  | FromNode from NotExhausted <- vertexRouting v
-  =
-
-
--}

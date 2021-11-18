@@ -19,7 +19,7 @@ import qualified Data.Map as M
 import Data.Maybe (fromMaybe, isNothing)
 import Data.Set (Set, (\\))
 import qualified Data.Set as S
-import Futhark.Analysis.MigrationTable.Graph hiding (empty, addEdges, get)
+import Futhark.Analysis.MigrationTable.Graph hiding (empty, none, addEdges, get)
 import qualified Futhark.Analysis.MigrationTable.Graph as MG
 import Futhark.IR.GPU
 
@@ -249,7 +249,7 @@ data BodyStats = BodyStats
     -- as operands within the body, including those that have been added
     -- by the body itself. Variables with vertices connected to sinks may
     -- be excluded.
-    bodyOperands :: IdSet
+    bodyOperands :: Operands
   }
 
 instance Semigroup BodyStats where
@@ -262,6 +262,9 @@ instance Monoid BodyStats where
   mempty = BodyStats { bodyHostOnly = False,
                        bodyReads    = False,
                        bodyOperands = IS.empty}
+
+-- | Ids for all variables used as an operand.
+type Operands = IdSet
 
 data State = State
   {
@@ -522,8 +525,7 @@ graphAccOp i ts op = do
 
   -- Finish graphing the operator based on the determined action type.
   case act' of
-    HostOp    -> do { put st'; tell bs;
-                      _ <- censorRoutes i IS.empty ops; return () }
+    HostOp    -> do { put st'; tell bs; censorRoutes i ops }
     DeviceOp  -> addSource (i, Prim Unit) -- no sink possible ==> no edges
     NeutralOp -> do { addVertex (i, Prim Unit); addEdges (oneEdge i) ops }
 
@@ -542,133 +544,48 @@ graphLoop b params lform body =
 
 
 
--- | Ids for all variables used as an operand.
-type Operands = IdSet
 
--- | A reach map maps a vertex to all vertices within some set that it can
--- reach within a graph, provided it cannot reach a sink.
-type ReachMap = IM.IntMap Reaches
 
--- | All vertices of interest that can be reached from some vertex.
-data Reaches
-  -- | A sink can be reached.
-  = Sink
-  -- | These vertices can be reached.
-  | Vars IdSet
-  -- | The vertices that can be reached are those that this other vertex
-  -- can reach.
-  | Ref Id Int
 
--- | Can a sink be reached?
-isSink :: Reaches -> Bool
-isSink Sink = True
-isSink _    = False
 
-instance Semigroup Reaches where
-  Sink <> _ = Sink
-  _ <> Sink = Sink
-  (Ref r1 d1) <> (Ref r2 d2)
-    | d1 < d2   = Ref r1 d1
-    | otherwise = Ref r2 d2
-  (Ref r d) <> _ = Ref r d
-  _ <> (Ref r d) = Ref r d
-  (Vars a) <> (Vars b) = Vars (IS.union a b)
 
-instance Monoid Reaches where
-  mempty = Vars IS.empty
-
--- | @censorRoutes si terms ops@ routes all possible routes within the subgraph
--- identified by @si@ and then connects all operands in @ops@ to sinks if they
--- can reach a subgraph sink. Returns a reach map for the operands to the
--- variables in @terms@.
+-- | @censorRoutes si ops@ routes all possible routes within the subgraph
+-- identified by @si@ and then connects each operand in @ops@ to a sink if it
+-- can reach a subgraph sink.
 --
 -- Assumption: The subgraph with the given id has just been created and no path
 -- exists from it to an external sink.
-censorRoutes :: Id -> IdSet -> Operands -> Grapher ReachMap
-censorRoutes si terms ops = do
+censorRoutes :: Id -> Operands -> Grapher ()
+censorRoutes si ops = do
   routeSubgraph si
   -- Connect operands to sinks if they can reach a sink within the subgraph.
   -- This ensures additional reads cannot occur by delaying any reads into it.
   g <- getGraph
-  let reachMap = IS.foldl' (reachMapper g) IM.empty ops
-  let canReachSink = \i -> isSink (reachMap IM.! i)
-  mapM_ (\i -> when (canReachSink i) $ requiredOnHost i) (IS.elems ops)
-  return reachMap
+  _ <- foldM (sinker g) MG.none (IS.elems ops)
+  return ()
   where
-    reachMapper g rm i
-      | Just v  <- MG.get i g
-      = fst $ execRWS (traverseVertex 0 g Normal v) () rm
+    sinker g vs i
+      | Just v <- MG.get i g
+      , ToNodes es _ <- vertexEdges v
+      = do let (sinkFound, vs') = foldl' (findSink g) (False, vs) (IS.elems es)
+           when sinkFound (requiredOnHost i)
+           return vs'
 
       | otherwise
-      = rm -- shouldn't happen
+      = return vs -- shouldn't happen
 
-    traverseEdges d g et v =
-      MG.searchEdges (traverser d g) et v g
-
-    traverser d g from v
-      | gi <- metaGraphId $ vertexMeta v
-      , gi /= (Just si)
-      = continue -- only traverse subgraph
-
-      | otherwise = do
-        let et = maybe Normal snd from
-        rm <- get
-        case IM.lookup (vertexId v) rm of
-          Just rs -> reaches rs
-          Nothing -> traverseVertex d g et v
-    
-    -- Output is:
-    -- 1) Current Reaches value, at most one indirection if Ref.
-    -- 2) The union of all variables of interest reached so far.
-    -- 3) Cycle members.
-    reaches rs
-      | Ref {} <- rs
-      = do { tell (rs, mempty, IS.empty); continue }
+    findSink g (sinkFound, vs) i
+      | not sinkFound
+      , Just v <- MG.get i g
+      , Just gid <- metaGraphId (vertexMeta v)
+      , gid == si
+      = let res = MG.reduce g (\_ _ _ -> ()) vs Normal i
+        in first (== FoundSink) res
 
       | otherwise
-      = do { tell (acyclic rs); continue }
+      = (sinkFound, vs)
 
-    acyclic rs = (rs, rs, IS.empty)
-
-    traverseVertex d g et v = do
-      let i = vertexId v
-      rm <- get
-      -- The vertex might be the start of a cycle. To handle we prematurely set
-      -- its Reaches value to be a self-reference. Before returning from
-      -- traverseVertex the value must be updated to either be a non-Ref Reaches
-      -- value or a reference to a vertex further up the search tree.
-      let rm1       = IM.insert i (Ref i d) rm
-      let traversal = (sinkCheck v >> termCheck i >> traverseEdges (d+1) g et v)
-      let (rm2, w)  = execRWS traversal () rm1
-      let (rm', w') = handleCycle i rm2 w
-      let (val, _, _) = w'
-      put $ IM.insert i val rm' -- replace self-reference
-      tell w'
-      continue
-
-    sinkCheck v
-      | NoRoute <- vertexRouting v
-      , ToSink <- vertexEdges v
-      = reaches Sink
-
-      | otherwise
-      = continue
-
-    termCheck i
-      | IS.member i terms
-      = reaches (Vars $ IS.singleton i)
-
-      | otherwise
-      = continue
-
-    handleCycle i rm w@(val, rs, vs) =
-      let rm' = IS.foldr' (\oi m -> IM.insert oi rs m) rm vs
-          w'  = (val, rs, IS.insert i vs)
-      in case val of
-          Ref ref _
-            | ref == i  -> (rm', acyclic rs) -- Exiting cycle
-            | otherwise -> (rm,  w')         -- Inside cycle
-          _             -> (rm,  w)          -- Outside cycle
+    first f (a, b) = (f a, b)
 
 -- | Routes all possible routes within the subgraph identified by this id.
 --
@@ -677,9 +594,9 @@ censorRoutes si terms ops = do
 routeSubgraph :: Id -> Grapher ()
 routeSubgraph si = do
   st <- get
-  let g      = stateGraph st
-  let (r, u) = stateSources st
-  let (ss, u') = span (inSubGraph si g) u
+  let g           = stateGraph st
+  let (r, u)      = stateSources st
+  let (ss, u')    = span (inSubGraph si g) u
   let (sinks, g') = MG.routeMany ss g
   put $ st { stateGraph   = g',
              stateSources = (ss ++ r, u'),
