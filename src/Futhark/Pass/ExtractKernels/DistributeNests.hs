@@ -526,6 +526,14 @@ maybeDistributeStm stm@(Let pat (StmAux cs _ _) (Op (Screma w arrs form))) acc
                 >>= kernelOrNot mempty stm acc kernels acc'
       _ ->
         addStmToAcc stm acc
+-- If the map function of the reduction contains parallelism we split
+-- it, so that the parallelism can be exploited.
+maybeDistributeStm (Let pat aux (Op (Screma w arrs form))) acc
+  | Just (reds, map_lam) <- isRedomapSOAC form,
+    lambdaContainsParallelism map_lam = do
+    (mapstm, redstm) <-
+      redomapToMapAndReduce pat (w, reds, map_lam, arrs)
+    distributeMapBodyStms acc $ oneStm mapstm {stmAux = aux} <> oneStm redstm
 -- if the reduction can be distributed by itself, we will turn it into a
 -- segmented reduce.
 --
