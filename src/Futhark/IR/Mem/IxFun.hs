@@ -1219,7 +1219,9 @@ disjoint2 :: Names -> LMAD (TPrimExp Int64 VName) -> LMAD (TPrimExp Int64 VName)
 disjoint2 non_negatives lmad1 lmad2 =
   let (offset1, interval1) = lmadToIntervals lmad1
       (offset2, interval2) = lmadToIntervals lmad2
-      (neg_offset, pos_offset) = partition AlgSimplify2.negated $ offset1 `AlgSimplify2.sub` offset2
+      (neg_offset, pos_offset) =
+        partition AlgSimplify2.negated $
+          offset1 `AlgSimplify2.sub` offset2
       (interval1', interval2') = unzip $ intervalPairs interval1 interval2
    in case ( distributeOffset pos_offset interval1',
              distributeOffset (map AlgSimplify2.negate neg_offset) interval2'
