@@ -37,6 +37,9 @@ import Futhark.Util (splitFromEnd)
 -- alongside its result pattern.
 data SeqLoop = SeqLoop [Int] Pat [(FParam, SubExp)] (LoopForm SOACS) Body
 
+loopPerm :: SeqLoop -> [Int]
+loopPerm (SeqLoop perm _ _ _ _) = perm
+
 seqLoopStm :: SeqLoop -> Stm
 seqLoopStm (SeqLoop _ pat merge form body) =
   Let pat (defAux ()) $ DoLoop merge form body
@@ -175,7 +178,8 @@ interchangeLoops full_nest = recurse (kernelNestLoops full_nest)
           then recurse ns loop'
           else
             let loop_stm = seqLoopStm loop'
-             in pure $ snd $ manifestMaps ns (patNames (stmPat loop_stm)) $ stms <> oneStm loop_stm
+                names = rearrangeShape (loopPerm loop') (patNames (stmPat loop_stm))
+             in pure $ snd $ manifestMaps ns names $ stms <> oneStm loop_stm
       | otherwise = pure $ oneStm $ seqLoopStm loop
 
 data Branch = Branch [Int] Pat SubExp Body Body (IfDec (BranchType SOACS))
