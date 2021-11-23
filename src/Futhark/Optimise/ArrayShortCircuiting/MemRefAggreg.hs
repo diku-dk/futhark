@@ -354,7 +354,7 @@ aggSummaryMapPartial scalars [(gtid, size)] (Set lmads0) = do
     helper
     [ (0, isInt64 (LeafExp gtid $ IntType Int64) - 1),
       ( isInt64 (LeafExp gtid $ IntType Int64) + 1,
-        isInt64 (primExpFromSubExp (IntType Int64) size) - 1
+        isInt64 (primExpFromSubExp (IntType Int64) size) - (isInt64 $ LeafExp gtid $ IntType Int64) - 1
       )
     ]
     <&> mconcat
