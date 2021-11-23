@@ -621,7 +621,7 @@ def write_value_text(v, out=sys.stdout):
         out.write("%di32" % v)
     elif type(v) == np.int64:
         out.write("%di64" % v)
-    elif type(v) in [np.bool, np.bool_]:
+    elif type(v) in [bool, np.bool_]:
         if v:
             out.write("true")
         else:
