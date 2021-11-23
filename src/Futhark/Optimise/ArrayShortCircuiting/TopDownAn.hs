@@ -62,7 +62,10 @@ data TopDnEnv rep = TopDnEnv
     -- | Contains symbol information about the variables in the program. Used to
     -- determine if a variable is non-negative.
     nonNegatives :: Names,
-    scalarTable :: M.Map VName (PrimExp VName)
+    scalarTable :: M.Map VName (PrimExp VName),
+    -- | A list of known relations of the form 'VName' @<@ 'SubExp', typically
+    -- gotten from 'LoopForm' and 'SegSpace'.
+    knownLessThan :: [(VName, SubExp)]
   }
 
 isInScope :: TopDnEnv rep -> VName -> Bool
@@ -127,6 +130,8 @@ getInvAliasFromExp _ = Nothing
 class TopDownHelper inner where
   innerNonNegatives :: [VName] -> inner -> Names
 
+  innerKnownLessThan :: inner -> [(VName, SubExp)]
+
   scopeHelper :: inner -> Scope rep
 
 instance TopDownHelper (HostOp (Aliases GPUMem) ()) where
@@ -135,11 +140,16 @@ instance TopDownHelper (HostOp (Aliases GPUMem) ()) where
   innerNonNegatives [vname] (SizeOp _) = oneName vname
   innerNonNegatives _ _ = mempty
 
+  innerKnownLessThan (SegOp seg_op) =
+    unSegSpace $ segSpace seg_op
+  innerKnownLessThan _ = mempty
+
   scopeHelper (SegOp seg_op) = scopeOfSegSpace $ segSpace seg_op
   scopeHelper _ = mempty
 
 instance TopDownHelper () where
   innerNonNegatives _ () = mempty
+  innerKnownLessThan () = mempty
   scopeHelper () = mempty
 
 -- | fills in the TopDnEnv table
@@ -157,7 +167,8 @@ topdwnTravBinding env stm@(Let (Pat [pe]) _ (Op (Alloc (Var vname) sp))) =
 topdwnTravBinding env stm@(Let pat _ (Op (Inner inner))) =
   env
     { scope = scope env <> scopeOf stm <> scopeHelper inner,
-      nonNegatives = nonNegatives env <> innerNonNegatives (patNames pat) inner
+      nonNegatives = nonNegatives env <> innerNonNegatives (patNames pat) inner,
+      knownLessThan = knownLessThan env <> innerKnownLessThan inner
     }
 -- topdwnTravBinding env stm@(Let pat _ e@(If cond then_body else_body _)) =
 --   let res = getDirAliasFromExp e
@@ -208,7 +219,15 @@ topDownLoop td_env (Let _pat _ (DoLoop arginis lform _)) =
         nonNegatives td_env <> case lform of
           ForLoop v _ _ _ -> oneName v
           _ -> mempty
-   in td_env {scope = scopetab, nonNegatives = non_negatives}
+      less_than =
+        case lform of
+          ForLoop v _ b _ -> [(v, b)]
+          _ -> mempty
+   in td_env
+        { scope = scopetab,
+          nonNegatives = non_negatives,
+          knownLessThan = less_than <> knownLessThan td_env
+        }
 topDownLoop _ _ =
   error "ArrayShortCircuiting.TopDownAn: function topDownLoop should only be called on Loops!"
 

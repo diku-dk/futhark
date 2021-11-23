@@ -17,6 +17,7 @@ import qualified Data.Map.Strict as M
 import Data.Maybe
 import Data.Sequence (Seq (..))
 import qualified Data.Set as S
+import Debug.Trace
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.IR.Aliases
 import Futhark.IR.GPUMem
@@ -27,6 +28,10 @@ import Futhark.Optimise.ArrayShortCircuiting.DataStructs
 import Futhark.Optimise.ArrayShortCircuiting.LastUse
 import Futhark.Optimise.ArrayShortCircuiting.MemRefAggreg
 import Futhark.Optimise.ArrayShortCircuiting.TopDownAn
+import Futhark.Util.Pretty (Pretty)
+
+traceWith :: Pretty a => String -> a -> a
+traceWith s a = trace (s <> ": " <> pretty a) a
 
 type Coalesceable rep inner =
   ( CreatesNewArrOp (OpWithAliases inner),
@@ -65,7 +70,8 @@ emptyTopDnEnv =
       v_alias = mempty,
       m_alias = mempty,
       nonNegatives = mempty,
-      scalarTable = mempty
+      scalarTable = mempty,
+      knownLessThan = mempty
     }
 
 emptyBotUpEnv :: BotUpEnv
@@ -262,7 +268,10 @@ shortCircuitGPUMemHelper ::
   TopDnEnv GPUMem ->
   BotUpEnv ->
   ShortCircuitM GPUMem BotUpEnv
-shortCircuitGPUMemHelper num_reds lvl lutab pat@(Pat ps) space kernel_body td_env bu_env = do
+shortCircuitGPUMemHelper num_reds lvl lutab pat@(Pat ps0) space0 kernel_body td_env bu_env = do
+  -- We need to drop the last element of the 'SegSpace' for pattern elements
+  -- that correspond to reductions.
+  let ps_and_space = zip ps0 (replicate num_reds (dropLastSegSpace space0) <> repeat space0)
   -- Create coalescing relations between pattern elements and kernel body
   -- results
   let (actv0, inhibit0) =
@@ -272,17 +281,63 @@ shortCircuitGPUMemHelper num_reds lvl lutab pat@(Pat ps) space kernel_body td_en
           (scals bu_env)
           td_env
           (patElems pat)
-      (actv_return, inhibit_return) = foldl (makeSegMapCoals lvl td_env space kernel_body) (actv0, inhibit0) $ zip3 (replicate num_reds True ++ repeat False) ps $ kernelBodyResult kernel_body
+      (actv_return, inhibit_return) = foldl (makeSegMapCoals lvl td_env kernel_body) (actv0, inhibit0) $ zip ps_and_space $ kernelBodyResult kernel_body
 
   -- Process kernel body statements
   bu_env' <- mkCoalsTabStms lutab (kernelBodyStms kernel_body) td_env $ bu_env {activeCoals = actv0 <> actv_return, inhibit = inhibit_return}
 
-  -- Check partial overlap
+  -- Check partial overlap.
+  --
+  -- Okay, this does not currently work. The reason is that the source writes
+  -- are not updated correctly. For a given entry point 'b = segmap (...)', the
+  -- segmap constitutes a source write to the whole index function. But for
+  -- checking the partial overlap (between different threads of the segmap), we
+  -- also need to consider the partial access summary.
+  --
+  -- So, for each entry point, if any of the entries in the vartab correspond to
+  -- any of the patterns in the statement, we need to compute a partial access
+  -- summary for that statement and use that in addition to the original source
+  -- writes. That temporary access summary is the used to determine if there's
+  -- an overlap in between the threads. Oh, but also remember that the index
+  -- function of the result needs to be projected into the index function of the
+  -- destination. And what if there are more than one entry-point that matches
+  -- in the vartab? Just add them all up? Yes
+  --
+  -- We also need to subtract the current index from the destination uses?
   bu_env'' <-
     foldM
       ( \bu_env_f (k, entry) -> do
-          destination_uses <- aggSummaryMapPartial (scalarTable td_env) (unSegSpace space) $ dstrefs $ memrefs entry
-          if noMemOverlap td_env destination_uses $ srcwrts $ memrefs entry
+          thread_writes <-
+            mconcat
+              <$> mapM
+                ( \(p, space) -> case M.lookup (patElemName p) $ vartab entry of
+                    Just (Coalesced _ (MemBlock _ _ _ ixf) _) ->
+                      -- aggSummaryMapPartial (scalarTable td_env) (unSegSpace space) $
+                      return $
+                        ixfunToAccessSummary $
+                          IxFun.slice (traceWith "ixf" ixf) $
+                            fullSlice (IxFun.shape ixf) $
+                              Slice $
+                                map (DimFix . TPrimExp . flip LeafExp (IntType Int64) . fst) $
+                                  unSegSpace space
+                    Nothing -> return mempty
+                )
+                ps_and_space
+          let source_writes = traceWith "srcwrts" (srcwrts (memrefs entry)) <> traceWith "thread_writes" thread_writes
+          destination_uses <- aggSummaryMapPartial (scalarTable td_env) (unSegSpace space0) $ dstrefs $ memrefs entry
+          if traceWith
+            ( "k: " <> pretty k
+                <> "\ndstmem: "
+                <> pretty (dstmem entry)
+                <> "\nmemrefs: "
+                <> pretty (memrefs entry)
+                <> "\nvartab: "
+                <> pretty (vartab entry)
+                <> "\ndestination_uses: "
+                <> pretty destination_uses
+                <> "\nnoMemOverlap"
+            )
+            $ noMemOverlap td_env destination_uses source_writes
             then return bu_env_f
             else do
               let (ac, inh) = markFailedCoal (activeCoals bu_env_f, inhibit bu_env_f) k
@@ -296,13 +351,13 @@ shortCircuitGPUMemHelper num_reds lvl lutab pat@(Pat ps) space kernel_body td_en
       ( \entry -> do
           wrts <- aggSummaryMapTotal (scope td_env) (scope td_env) (scalarTable td_env) [] $ srcwrts $ memrefs entry
           uses <- aggSummaryMapTotal (scope td_env) (scope td_env) (scalarTable td_env) [] $ dstrefs $ memrefs entry
-          return $ entry {memrefs = MemRefs uses wrts}
+          return $ entry {memrefs = traceWith "new MemRefs" $ MemRefs uses wrts}
       )
       $ activeCoals bu_env''
   let bu_env''' = bu_env'' {activeCoals = actv}
 
   -- Process pattern and return values
-  let mergee_writes = mapMaybe (\p -> fmap (p,) $ getDirAliasedIxfn td_env (activeCoals bu_env''') $ patElemName p) ps
+  let mergee_writes = mapMaybe (\(p, _) -> fmap (p,) $ getDirAliasedIxfn td_env (activeCoals bu_env''') $ patElemName p) ps_and_space
       -- Now, for each mergee write, we need to check that it doesn't overlap with any previous uses of the destination.
       bu_env'''' =
         foldl
@@ -344,10 +399,9 @@ ixfunPermutation = map IxFun.ldPerm . IxFun.lmadDims . NE.head . IxFun.ixfunLMAD
 
 -- | Given a pattern element and the corresponding kernel result, try to put the
 -- kernel result directly in the memory block of pattern element
-makeSegMapCoals :: SegLevel -> TopDnEnv GPUMem -> SegSpace -> KernelBody (Aliases GPUMem) -> (CoalsTab, InhibitTab) -> (Bool, PatElemT (VarAliases, LetDecMem), KernelResult) -> (CoalsTab, InhibitTab)
-makeSegMapCoals lvl td_env space0 kernel_body (active, inhb) (is_red, PatElem pat_name (_, MemArray _ _ _ (ArrayIn pat_mem pat_ixf)), Returns _ _ (Var return_name))
-  | space <- if is_red then dropLastSegSpace space0 else space0,
-    Just mb@(MemBlock tp return_shp return_mem _) <-
+makeSegMapCoals :: SegLevel -> TopDnEnv GPUMem -> KernelBody (Aliases GPUMem) -> (CoalsTab, InhibitTab) -> ((PatElemT (VarAliases, LetDecMem), SegSpace), KernelResult) -> (CoalsTab, InhibitTab)
+makeSegMapCoals lvl td_env kernel_body (active, inhb) ((PatElem pat_name (_, MemArray _ _ _ (ArrayIn pat_mem pat_ixf)), space), Returns _ _ (Var return_name))
+  | Just mb@(MemBlock tp return_shp return_mem _) <-
       getScopeMemInfo return_name $ scope td_env <> scopeOf (kernelBodyStms kernel_body),
     isSegThread lvl,
     MemMem pat_space <- runReader (lookupMemInfo pat_mem) $ removeScopeAliases $ scope td_env,
@@ -420,11 +474,11 @@ makeSegMapCoals lvl td_env space0 kernel_body (active, inhb) (is_red, PatElem pa
                   inhb
                 )
           _ -> (active, inhb)
-makeSegMapCoals _ td_env _ _ x (_, _, WriteReturns _ _ return_name _) =
+makeSegMapCoals _ td_env _ x ((_, _), WriteReturns _ _ return_name _) =
   case getScopeMemInfo return_name $ scope td_env of
     Just (MemBlock _ _ return_mem _) -> markFailedCoal x return_mem
     Nothing -> error "Should not happen?"
-makeSegMapCoals _ td_env _ _ x (_, _, result) =
+makeSegMapCoals _ td_env _ x ((_, _), result) =
   freeIn result
     & namesToList
     & mapMaybe (flip getScopeMemInfo $ scope td_env)
