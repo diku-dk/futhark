@@ -441,7 +441,14 @@ deriving instance RepTypes rep => Ord (ExpT rep)
 
 -- | For-loop or while-loop?
 data LoopForm rep
-  = ForLoop VName IntType SubExp [(LParam rep, VName)]
+  = ForLoop
+      VName
+      -- ^ The loop iterator var
+      IntType
+      -- ^ The type of the loop iterator var
+      SubExp
+      -- ^ The upper bound
+      [(LParam rep, VName)]
   | WhileLoop VName
 
 deriving instance RepTypes rep => Eq (LoopForm rep)

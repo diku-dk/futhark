@@ -111,7 +111,8 @@ markSuccessCoal (actv, succc) m_b info_b =
 --- Main Coalescing Transformation computes a successful coalescing table    ---
 --------------------------------------------------------------------------------
 
--- | Given a program, compute the coalescing table by folding over each function.
+-- | Given a 'FunDef' in 'SegMem' representation, compute the coalescing table
+-- by folding over each function.
 mkCoalsTab :: MonadFreshNames m => FunDef (Aliases SeqMem) -> m CoalsTab
 mkCoalsTab =
   mkCoalsTabFun
@@ -119,6 +120,8 @@ mkCoalsTab =
     (ShortCircuitReader shortCircuitSeqMem)
     (ComputeScalarTableOnOp $ const $ const $ return mempty)
 
+-- | Given a 'FunDef' in 'GPUMem' representation, compute the coalescing table
+-- by folding over each function.
 mkCoalsTabGPU :: MonadFreshNames m => FunDef (Aliases GPUMem) -> m CoalsTab
 mkCoalsTabGPU =
   mkCoalsTabFun
@@ -160,14 +163,27 @@ paramSizes :: Param FParamMem -> Names
 paramSizes (Param _ _ (MemArray _ shp _ _)) = freeIn shp
 paramSizes _ = mempty
 
+-- | Short-circuit handler for a 'SeqMem' 'Op'.
+--
+-- Because 'SeqMem' don't have any special operation, simply return the input
+-- 'BotUpEnv'.
 shortCircuitSeqMem :: LUTabFun -> Pat (Aliases SeqMem) -> Op (Aliases SeqMem) -> TopDnEnv SeqMem -> BotUpEnv -> ShortCircuitM SeqMem BotUpEnv
 shortCircuitSeqMem _ _ _ _ = return
 
+-- | Short-circuit handler for 'GPUMem' 'Op'.
+--
+-- When the 'Op' is a 'SegOp', we handle it accordingly, otherwise we do
+-- nothing.
 shortCircuitGPUMem :: LUTabFun -> Pat (Aliases GPUMem) -> Op (Aliases GPUMem) -> TopDnEnv GPUMem -> BotUpEnv -> ShortCircuitM GPUMem BotUpEnv
 shortCircuitGPUMem _ _ (Alloc _ _) _ bu_env = return bu_env
 shortCircuitGPUMem lutab pat (Inner (SegOp (SegMap lvl space _ kernel_body))) td_env bu_env =
+  -- No special handling necessary for 'SegMap'. Just call the helper-function.
   shortCircuitGPUMemHelper 0 lvl lutab pat space kernel_body td_env bu_env
 shortCircuitGPUMem lutab pat (Inner (SegOp (SegRed lvl space binops _ kernel_body))) td_env bu_env =
+  -- When handling 'SegRed', we we first invalidate all active coalesce-entries
+  -- where any of the variables in 'vartab' are also free in the list of
+  -- 'SegBinOp'. In other words, anything that is used as part of the reduction
+  -- step should probably not be coalesced.
   let to_fail = M.filter (\entry -> namesFromList (M.keys $ vartab entry) `namesIntersect` foldMap (freeIn . segBinOpLambda) binops) $ activeCoals bu_env
       (active, inh) = foldl markFailedCoal (activeCoals bu_env, inhibit bu_env) $ M.keys to_fail
       bu_env' = bu_env {activeCoals = active, inhibit = inh}
@@ -180,6 +196,8 @@ shortCircuitGPUMem lutab pat (Inner (SegOp (SegRed lvl space binops _ kernel_bod
       let shp = Shape segment_dims <> segBinOpShape op
       map (`arrayOfShape` shp) (lambdaReturnType $ segBinOpLambda op)
 shortCircuitGPUMem lutab pat (Inner (SegOp (SegScan lvl space binops _ kernel_body))) td_env bu_env =
+  -- Like in the handling of 'SegRed', we do not want to coalesce anything that
+  -- is used in the 'SegBinOp'
   let to_fail = M.filter (\entry -> namesFromList (M.keys $ vartab entry) `namesIntersect` foldMap (freeIn . segBinOpLambda) binops) $ activeCoals bu_env
       (active, inh) = foldl markFailedCoal (activeCoals bu_env, inhibit bu_env) $ M.keys to_fail
       bu_env' = bu_env {activeCoals = active, inhibit = inh}
@@ -220,6 +238,19 @@ isSegThread :: SegLevel -> Bool
 isSegThread SegThread {} = True
 isSegThread _ = False
 
+-- | A helper for all the different kinds of 'SegOp'.
+--
+-- Consists of four parts:
+--
+-- 1. Create coalescing relations between the pattern elements and the kernel
+-- body results using 'makeSegMapCoals'.
+--
+-- 2. Process the statements of the 'KernelBody'.
+--
+-- 3. Check the overlap between the different threads.
+--
+-- 4. Mark active coalescings as finished, since a 'SegOp' is an array creation
+-- point.
 shortCircuitGPUMemHelper ::
   -- | The number of returns for which we should drop the last seg space
   Int ->
@@ -232,6 +263,8 @@ shortCircuitGPUMemHelper ::
   BotUpEnv ->
   ShortCircuitM GPUMem BotUpEnv
 shortCircuitGPUMemHelper num_reds lvl lutab pat@(Pat ps) space kernel_body td_env bu_env = do
+  -- Create coalescing relations between pattern elements and kernel body
+  -- results
   let (actv0, inhibit0) =
         filterSafetyCond2and5
           (activeCoals bu_env)
@@ -240,6 +273,8 @@ shortCircuitGPUMemHelper num_reds lvl lutab pat@(Pat ps) space kernel_body td_en
           td_env
           (patElems pat)
       (actv_return, inhibit_return) = foldl (makeSegMapCoals lvl td_env space kernel_body) (actv0, inhibit0) $ zip3 (replicate num_reds True ++ repeat False) ps $ kernelBodyResult kernel_body
+
+  -- Process kernel body statements
   bu_env' <- mkCoalsTabStms lutab (kernelBodyStms kernel_body) td_env $ bu_env {activeCoals = actv0 <> actv_return, inhibit = inhibit_return}
 
   -- Check partial overlap
