@@ -14,7 +14,7 @@ import Data.Function ((&))
 import Data.List (subsequences)
 import qualified Data.Map as M
 import Data.Maybe (fromMaybe, mapMaybe)
-import Futhark.Analysis.AlgSimplify2
+import Futhark.Analysis.AlgSimplify2 hiding (add, sub)
 import Futhark.Analysis.PrimExp
 import Futhark.IR.Syntax.Core
 import Test.Tasty
