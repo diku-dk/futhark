@@ -68,6 +68,7 @@ import Futhark.IR.Syntax
     FlatSlice (..),
     ShapeChange,
     Slice (..),
+    SubExp,
     dimFix,
     flatSliceDims,
     flatSliceStrides,
@@ -76,6 +77,7 @@ import Futhark.IR.Syntax
 import Futhark.IR.Syntax.Core (Ext (..), VName (..))
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
+import Futhark.Util (fixPoint)
 import Futhark.Util.IntegralExp
 import Futhark.Util.Pretty
 import Prelude hiding (gcd, id, mod, (.))
@@ -1164,21 +1166,19 @@ gcd x y = gcd' (abs x) (abs y)
 -- as soon as more than one dimension is involved, things get more
 -- tricky. Currently, we try to 'conservativelyFlatten' any LMAD with more than
 -- one dimension.
-disjoint :: Names -> LMAD (TPrimExp Int64 VName) -> LMAD (TPrimExp Int64 VName) -> Bool
-disjoint non_negatives (LMAD offset1 [dim1]) (LMAD offset2 [dim2]) =
+disjoint :: [(VName, SubExp)] -> Names -> LMAD (TPrimExp Int64 VName) -> LMAD (TPrimExp Int64 VName) -> Bool
+disjoint less_thans non_negatives (LMAD offset1 [dim1]) (LMAD offset2 [dim2]) =
   doesNotDivide (gcd (ldStride dim1) (ldStride dim2)) (offset1 - offset2)
-    || nonNegativeish
+    || lessThanish
+      less_thans
       non_negatives
-      ( offset1 - (offset2 + (ldShape dim2 - 1) * ldStride dim2)
-          & untyped
-          & AlgSimplify2.simplify0
-      )
-    || nonNegativeish
+      (offset2 + (ldShape dim2 - 1) * ldStride dim2)
+      offset1
+    || lessThanish
+      less_thans
       non_negatives
-      ( offset2 - (offset1 + (ldShape dim1 - 1) * ldStride dim1)
-          & untyped
-          & AlgSimplify2.simplify0
-      )
+      (offset1 + (ldShape dim1 - 1) * ldStride dim1)
+      offset2
   where
     doesNotDivide :: Maybe (TPrimExp Int64 VName) -> TPrimExp Int64 VName -> Bool
     doesNotDivide (Just x) y =
@@ -1190,11 +1190,17 @@ disjoint non_negatives (LMAD offset1 [dim1]) (LMAD offset2 [dim2]) =
         & primBool
         & maybe False not
     doesNotDivide _ _ = False
-disjoint non_negatives lmad1 lmad2 =
+disjoint less_thans non_negatives lmad1 lmad2 =
   case (conservativeFlatten lmad1, conservativeFlatten lmad2) of
-    (Just lmad1', Just lmad2') -> disjoint non_negatives lmad1' lmad2'
+    (Just lmad1', Just lmad2') -> disjoint less_thans non_negatives lmad1' lmad2'
     _ -> False
 
+-- | Given a list of 'Names' that we know are non-negative (>= 0), determine
+-- whether we can say for sure that the given 'AlgSimplify2.SofP' is
+-- non-negative. Conservatively returns 'False' if there is any doubt.
+--
+-- TODO: We need to expand this to be able to handle cases such as @i*n + g < (i
+-- + 1) * n@, if it is known that @g < n@, eg. from a 'SegSpace' or a loop form.
 nonNegativeish :: Names -> AlgSimplify2.SofP -> Bool
 nonNegativeish non_negatives = all (nonNegativeishProd non_negatives)
 
@@ -1208,15 +1214,29 @@ nonNegativeishExp _ (ValueExp v) = not $ negativeIsh v
 nonNegativeishExp non_negatives (LeafExp vname _) = vname `nameIn` non_negatives
 nonNegativeishExp _ _ = False
 
-lessThanish :: Names -> TPrimExp Int64 VName -> TPrimExp Int64 VName -> Bool
-lessThanish non_negatives e1 e2 =
-  e2 - e1
-    & untyped
-    & AlgSimplify2.simplify0
-    & nonNegativeish non_negatives
+lessThanish :: [(VName, SubExp)] -> Names -> TPrimExp Int64 VName -> TPrimExp Int64 VName -> Bool
+lessThanish less_thans non_negatives e1 e2 =
+  case e2 - e1 & untyped & AlgSimplify2.simplify0 of
+    [] -> False
+    simplified ->
+      nonNegativeish non_negatives $
+        fixPoint (`removeLessThans` less_thans) simplified
 
-disjoint2 :: Names -> LMAD (TPrimExp Int64 VName) -> LMAD (TPrimExp Int64 VName) -> Bool
-disjoint2 non_negatives lmad1 lmad2 =
+removeLessThans :: AlgSimplify2.SofP -> [(VName, SubExp)] -> AlgSimplify2.SofP
+removeLessThans =
+  foldl
+    ( \sofp (i, bound) ->
+        let to_remove =
+              [ AlgSimplify2.Prod True [LeafExp i $ IntType Int64],
+                AlgSimplify2.Prod False [primExpFromSubExp (IntType Int64) bound]
+              ]
+         in case to_remove `intersect` sofp of
+              to_remove' | to_remove' == to_remove -> sofp \\ to_remove
+              _ -> sofp
+    )
+
+disjoint2 :: [(VName, SubExp)] -> Names -> LMAD (TPrimExp Int64 VName) -> LMAD (TPrimExp Int64 VName) -> Bool
+disjoint2 less_thans non_negatives lmad1 lmad2 =
   let (offset1, interval1) = lmadToIntervals lmad1
       (offset2, interval2) = lmadToIntervals lmad2
       (neg_offset, pos_offset) =
@@ -1227,10 +1247,10 @@ disjoint2 non_negatives lmad1 lmad2 =
              distributeOffset (map AlgSimplify2.negate neg_offset) interval2'
            ) of
         (Just interval1'', Just interval2'') ->
-          not (selfOverlap non_negatives interval1'')
-            && not (selfOverlap non_negatives interval2'')
+          not (selfOverlap less_thans non_negatives interval1'')
+            && not (selfOverlap less_thans non_negatives interval2'')
             && any
-              (not . uncurry (intervalOverlap non_negatives))
+              (not . uncurry (intervalOverlap less_thans non_negatives))
               (zip interval1'' interval2'')
         _ -> False
 
@@ -1263,7 +1283,7 @@ lmadToIntervals lmad@(LMAD offset dims0) =
 
 distributeOffset :: MonadFail m => AlgSimplify2.SofP -> [Interval] -> m [Interval]
 distributeOffset _ [] = fail "Cannot distribute offset across empty interval"
-distributeOffset offset [Interval lb ne 1] = return $ [Interval (lb + TPrimExp (AlgSimplify2.sumToExp offset)) ne 1]
+distributeOffset offset [Interval lb ne 1] = return [Interval (lb + TPrimExp (AlgSimplify2.sumToExp offset)) ne 1]
 distributeOffset offset (Interval lb ne st0 : is) = do
   -- If a term 't' in the offset contains a multiple of the stride: Subtract `t`
   -- from the offset, add `t / st` to the lower bound.
@@ -1279,7 +1299,7 @@ distributeOffset offset (Interval lb ne st0 : is) = do
     then fail "Stride should be positive"
     else case find ((==) st . intersect st . AlgSimplify2.atoms) offset of
       Just t@(AlgSimplify2.Prod False as') ->
-        distributeOffset (t `delete` offset) $ Interval (lb + TPrimExp (AlgSimplify2.sumToExp $ [AlgSimplify2.Prod False $ as' \\ st])) ne st0 : is
+        distributeOffset (t `delete` offset) $ Interval (lb + TPrimExp (AlgSimplify2.sumToExp [AlgSimplify2.Prod False $ as' \\ st])) ne st0 : is
       Just (AlgSimplify2.Prod True _) -> fail "Offset term should be positive"
       Nothing -> do
         rest <- distributeOffset offset is
@@ -1289,15 +1309,15 @@ distributeOffset offset (Interval lb ne st0 : is) = do
     justOne [a] = Just a
     justOne _ = Nothing
 
-intervalOverlap :: Names -> Interval -> Interval -> Bool
-intervalOverlap non_negatives (Interval lb1 ne1 st1) (Interval lb2 ne2 st2)
+intervalOverlap :: [(VName, SubExp)] -> Names -> Interval -> Interval -> Bool
+intervalOverlap less_thans non_negatives (Interval lb1 ne1 st1) (Interval lb2 ne2 st2)
   | st1 == st2,
-    lessThanish non_negatives lb1 lb2,
-    lessThanish non_negatives (lb1 + (ne1 - 1) * st1) lb2 =
+    lessThanish less_thans non_negatives lb1 lb2,
+    lessThanish less_thans non_negatives (lb1 + (ne1 - 1) * st1) lb2 =
     False
   | st1 == st2,
-    lessThanish non_negatives lb2 lb1,
-    lessThanish non_negatives (lb2 + (ne2 - 1) * st2) lb1 =
+    lessThanish less_thans non_negatives lb2 lb1,
+    lessThanish less_thans non_negatives (lb2 + (ne2 - 1) * st2) lb1 =
     False
   | otherwise = True
 
@@ -1330,13 +1350,13 @@ intervalPairs = intervalPairs' []
 -- | Returns true if the intervals are self-overlapping, meaning that for a
 -- given dimension d, the stride of d is larger than the aggregate spans of the
 -- lower dimensions.
-selfOverlap :: Names -> [Interval] -> Bool
-selfOverlap non_negatives is =
+selfOverlap :: [(VName, SubExp)] -> Names -> [Interval] -> Bool
+selfOverlap less_thans non_negatives is =
   -- TODO: Do we need to do something clever using some ranges of known values?
   selfOverlap' 0 $ reverse is
   where
     selfOverlap' acc (x : xs) =
       let interval_span = (lowerBound x + numElements x - 1) * stride x
-       in lessThanish non_negatives (AlgSimplify2.simplify' acc) (AlgSimplify2.simplify' $ stride x)
+       in lessThanish less_thans non_negatives (AlgSimplify2.simplify' acc) (AlgSimplify2.simplify' $ stride x)
             && selfOverlap' (acc + interval_span) xs
     selfOverlap' _ [] = False

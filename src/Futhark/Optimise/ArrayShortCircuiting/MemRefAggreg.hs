@@ -13,6 +13,7 @@ module Futhark.Optimise.ArrayShortCircuiting.MemRefAggreg
   )
 where
 
+import Control.Monad
 import Data.Function ((&))
 import Data.Functor ((<&>))
 import Data.List (intersect, uncons)
@@ -274,7 +275,7 @@ noMemOverlap _ Undeterminable _ = False
 noMemOverlap _ _ Undeterminable = False
 noMemOverlap td_env (Set is0) (Set js0) =
   -- TODO Expand this to be able to handle eg. nw
-  all (\i -> all (\j -> IxFun.disjoint (nonNegatives td_env) i j || IxFun.disjoint2 (nonNegatives td_env) i j) js) is
+  all (\i -> all (\j -> IxFun.disjoint (knownLessThan td_env) (nonNegatives td_env) i j || IxFun.disjoint2 (knownLessThan td_env) (nonNegatives td_env) i j) js) is
   where
     is = map (fixPoint (IxFun.substituteInLMAD $ TPrimExp <$> scalarTable td_env)) $ S.toList is0
     js = map (fixPoint (IxFun.substituteInLMAD $ TPrimExp <$> scalarTable td_env)) $ S.toList js0
@@ -316,11 +317,9 @@ aggSummaryLoopTotal _ _ scalars_loop (Just (iterator_var, (lower_bound, upper_bo
       (S.toList lmads)
 aggSummaryLoopTotal _ _ _ _ _ = return Undeterminable
 
--- | Suppossed to partially aggregate the iteration-level summaries
+-- | Partially aggregate the iteration-level summaries
 --     across a loop of index i = 0 .. n-1. This means that it
 --     computes the summary: Union_{j=i+1..n} Access_j
---   The current implementation is naive in that it treats only
---     the loop invariant case (same as function @aggSummaryLoopTotal@).
 aggSummaryLoopPartial ::
   MonadFreshNames m =>
   ScopeTab rep ->
@@ -348,22 +347,44 @@ aggSummaryLoopPartial _ _ scalars_loop (Just (iterator_var, (_, upper_bound))) (
       )
       (S.toList lmads)
 
-aggSummaryMapPartial :: MonadFreshNames m => ScalarTab -> [(VName, SubExp)] -> AccessSummary -> m AccessSummary
-aggSummaryMapPartial scalars [(gtid, size)] (Set lmads0) = do
+aggSummaryMapPartial :: MonadFreshNames m => ScopeTab rep -> ScopeTab rep -> ScalarTab -> [(VName, SubExp)] -> AccessSummary -> m AccessSummary
+aggSummaryMapPartial _ _ _ [] _ = return mempty
+aggSummaryMapPartial _ _ _ _ (Set lmads)
+  | lmads == mempty = return mempty
+aggSummaryMapPartial scope_before scope_loop scalars ((gtid, size) : rest) as = do
+  total_inner <-
+    foldM
+      ( \as' (gtid', size') -> case as' of
+          Set lmads ->
+            mconcat
+              <$> mapM
+                ( aggSummaryOne gtid' 0 $
+                    TPrimExp $
+                      primExpFromSubExp (IntType Int64) size'
+                )
+                (S.toList lmads)
+          Undeterminable -> return Undeterminable
+      )
+      as
+      $ reverse rest
+  this_dim <- aggSummaryMapPartialOne scalars (gtid, size) total_inner
+  rest' <- aggSummaryMapPartial scope_before scope_loop scalars rest as
+  return $ this_dim <> rest'
+
+aggSummaryMapPartialOne :: MonadFreshNames m => ScalarTab -> (VName, SubExp) -> AccessSummary -> m AccessSummary
+aggSummaryMapPartialOne _ _ Undeterminable = return Undeterminable
+aggSummaryMapPartialOne scalars (gtid, size) (Set lmads0) =
   mapM
     helper
     [ (0, isInt64 (LeafExp gtid $ IntType Int64) - 1),
       ( isInt64 (LeafExp gtid $ IntType Int64) + 1,
-        isInt64 (primExpFromSubExp (IntType Int64) size) - (isInt64 $ LeafExp gtid $ IntType Int64) - 1
+        isInt64 (primExpFromSubExp (IntType Int64) size) - isInt64 (LeafExp gtid $ IntType Int64) - 1
       )
     ]
     <&> mconcat
   where
     lmads = map (fixPoint (IxFun.substituteInLMAD $ fmap TPrimExp scalars)) $ S.toList lmads0
     helper (x, y) = mconcat <$> mapM (aggSummaryOne gtid x y) lmads
-aggSummaryMapPartial _ _ (Set lmads)
-  | lmads == mempty = return mempty
-aggSummaryMapPartial _ _ _ = return Undeterminable
 
 aggSummaryMapTotal :: MonadFreshNames m => ScopeTab rep -> ScopeTab rep -> ScalarTab -> [(VName, SubExp)] -> AccessSummary -> m AccessSummary
 aggSummaryMapTotal scope_before scope_loop scalars _ access

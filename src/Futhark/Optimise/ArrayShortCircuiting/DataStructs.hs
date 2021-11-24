@@ -30,6 +30,7 @@ module Futhark.Optimise.ArrayShortCircuiting.DataStructs
     getArrMemAssoc,
     getUniqueMemFParam,
     markFailedCoal,
+    accessSubtract,
   )
 where
 
@@ -67,6 +68,11 @@ instance Monoid AccessSummary where
 instance FreeIn AccessSummary where
   freeIn' Undeterminable = mempty
   freeIn' (Set s) = freeIn' s
+
+accessSubtract :: AccessSummary -> AccessSummary -> AccessSummary
+accessSubtract Undeterminable _ = Undeterminable
+accessSubtract _ Undeterminable = Undeterminable
+accessSubtract (Set s1) (Set s2) = Set $ s1 S.\\ s2
 
 data MemRefs = MemRefs
   { -- | The access summary of all references (reads

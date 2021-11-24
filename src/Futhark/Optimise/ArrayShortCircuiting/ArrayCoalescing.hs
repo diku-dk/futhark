@@ -17,7 +17,6 @@ import qualified Data.Map.Strict as M
 import Data.Maybe
 import Data.Sequence (Seq (..))
 import qualified Data.Set as S
-import Debug.Trace
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.IR.Aliases
 import Futhark.IR.GPUMem
@@ -28,10 +27,6 @@ import Futhark.Optimise.ArrayShortCircuiting.DataStructs
 import Futhark.Optimise.ArrayShortCircuiting.LastUse
 import Futhark.Optimise.ArrayShortCircuiting.MemRefAggreg
 import Futhark.Optimise.ArrayShortCircuiting.TopDownAn
-import Futhark.Util.Pretty (Pretty)
-
-traceWith :: Pretty a => String -> a -> a
-traceWith s a = trace (s <> ": " <> pretty a) a
 
 type Coalesceable rep inner =
   ( CreatesNewArrOp (OpWithAliases inner),
@@ -315,7 +310,7 @@ shortCircuitGPUMemHelper num_reds lvl lutab pat@(Pat ps0) space0 kernel_body td_
                       -- aggSummaryMapPartial (scalarTable td_env) (unSegSpace space) $
                       return $
                         ixfunToAccessSummary $
-                          IxFun.slice (traceWith "ixf" ixf) $
+                          IxFun.slice ixf $
                             fullSlice (IxFun.shape ixf) $
                               Slice $
                                 map (DimFix . TPrimExp . flip LeafExp (IntType Int64) . fst) $
@@ -323,21 +318,12 @@ shortCircuitGPUMemHelper num_reds lvl lutab pat@(Pat ps0) space0 kernel_body td_
                     Nothing -> return mempty
                 )
                 ps_and_space
-          let source_writes = traceWith "srcwrts" (srcwrts (memrefs entry)) <> traceWith "thread_writes" thread_writes
-          destination_uses <- aggSummaryMapPartial (scalarTable td_env) (unSegSpace space0) $ dstrefs $ memrefs entry
-          if traceWith
-            ( "k: " <> pretty k
-                <> "\ndstmem: "
-                <> pretty (dstmem entry)
-                <> "\nmemrefs: "
-                <> pretty (memrefs entry)
-                <> "\nvartab: "
-                <> pretty (vartab entry)
-                <> "\ndestination_uses: "
-                <> pretty destination_uses
-                <> "\nnoMemOverlap"
-            )
-            $ noMemOverlap td_env destination_uses source_writes
+          let source_writes = srcwrts (memrefs entry) <> thread_writes
+          destination_uses <-
+            aggSummaryMapPartial (scope td_env) (scope td_env) (scalarTable td_env) (unSegSpace space0) $
+              dstrefs (memrefs entry)
+                `accessSubtract` dstrefs (maybe mempty memrefs $ M.lookup k $ activeCoals bu_env)
+          if noMemOverlap td_env destination_uses source_writes
             then return bu_env_f
             else do
               let (ac, inh) = markFailedCoal (activeCoals bu_env_f, inhibit bu_env_f) k
@@ -351,7 +337,7 @@ shortCircuitGPUMemHelper num_reds lvl lutab pat@(Pat ps0) space0 kernel_body td_
       ( \entry -> do
           wrts <- aggSummaryMapTotal (scope td_env) (scope td_env) (scalarTable td_env) [] $ srcwrts $ memrefs entry
           uses <- aggSummaryMapTotal (scope td_env) (scope td_env) (scalarTable td_env) [] $ dstrefs $ memrefs entry
-          return $ entry {memrefs = traceWith "new MemRefs" $ MemRefs uses wrts}
+          return $ entry {memrefs = MemRefs uses wrts}
       )
       $ activeCoals bu_env''
   let bu_env''' = bu_env'' {activeCoals = actv}
@@ -1380,41 +1366,38 @@ transferCoalsToBody ::
   CoalsTab ->
   (VName, VName, VName, VName) ->
   CoalsTab
-transferCoalsToBody exist_subs activeCoals_tab (m_b, b, r, m_r) =
-  -- the @Nothing@ pattern for the two @case ... of@ cannot happen
-  -- because they were already cheked in @findMemBodyResult@
-  case M.lookup m_b activeCoals_tab of
-    Nothing -> error "Impossible"
-    Just etry ->
-      case M.lookup b (vartab etry) of
-        Nothing -> error "Impossible"
-        Just (Coalesced knd (MemBlock btp shp _ ind_b) subst_b) ->
-          -- by definition of if-stmt, r and b have the same basic type, shape and
-          -- index function, hence, for example, do not need to rebase
-          -- We will check whether it is translatable at the definition point of r.
-          let ind_r = IxFun.substituteInIxFun exist_subs ind_b
-              subst_r = M.union exist_subs subst_b
-              mem_info = Coalesced knd (MemBlock btp shp (dstmem etry) ind_r) subst_r
-           in if m_r == m_b -- already unified, just add binding for @r@
-                then
-                  let etry' =
-                        etry
-                          { optdeps = M.insert b m_b (optdeps etry),
-                            vartab = M.insert r mem_info (vartab etry)
-                          }
-                   in M.insert m_r etry' activeCoals_tab
-                else -- make them both optimistically depend on each other
+transferCoalsToBody exist_subs activeCoals_tab (m_b, b, r, m_r)
+  | -- the @Nothing@ pattern for the two lookups cannot happen
+    -- because they were already cheked in @findMemBodyResult@
+    Just etry <- M.lookup m_b activeCoals_tab,
+    Just (Coalesced knd (MemBlock btp shp _ ind_b) subst_b) <- M.lookup b $ vartab etry =
+    -- by definition of if-stmt, r and b have the same basic type, shape and
+    -- index function, hence, for example, do not need to rebase
+    -- We will check whether it is translatable at the definition point of r.
+    let ind_r = IxFun.substituteInIxFun exist_subs ind_b
+        subst_r = M.union exist_subs subst_b
+        mem_info = Coalesced knd (MemBlock btp shp (dstmem etry) ind_r) subst_r
+     in if m_r == m_b -- already unified, just add binding for @r@
+          then
+            let etry' =
+                  etry
+                    { optdeps = M.insert b m_b (optdeps etry),
+                      vartab = M.insert r mem_info (vartab etry)
+                    }
+             in M.insert m_r etry' activeCoals_tab
+          else -- make them both optimistically depend on each other
 
-                  let opts_x_new = M.insert r m_r (optdeps etry)
-                      -- Here we should translate the @ind_b@ field of @mem_info@
-                      -- across the existential introduced by the if-then-else
-                      coal_etry =
-                        etry
-                          { vartab = M.singleton r mem_info,
-                            optdeps = M.insert b m_b (optdeps etry)
-                          }
-                   in M.insert m_b (etry {optdeps = opts_x_new}) $
-                        M.insert m_r coal_etry activeCoals_tab
+            let opts_x_new = M.insert r m_r (optdeps etry)
+                -- Here we should translate the @ind_b@ field of @mem_info@
+                -- across the existential introduced by the if-then-else
+                coal_etry =
+                  etry
+                    { vartab = M.singleton r mem_info,
+                      optdeps = M.insert b m_b (optdeps etry)
+                    }
+             in M.insert m_b (etry {optdeps = opts_x_new}) $
+                  M.insert m_r coal_etry activeCoals_tab
+  | otherwise = error "Impossible"
 
 mkSubsTab ::
   PatT (aliases, LetDecMem) ->
