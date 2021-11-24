@@ -31,8 +31,9 @@ module Futhark.IR.Prop.Aliases
   )
 where
 
-import Control.Arrow (first)
+import Data.Bifunctor (first, second)
 import qualified Data.Kind
+import Data.List (find)
 import qualified Data.Map as M
 import Futhark.IR.Prop (IsOp, NameInfo (..), Scope)
 import Futhark.IR.Prop.Names
@@ -102,13 +103,24 @@ expAliases (If _ tb fb dec) =
         (bodyAliases fb, consumedInBody fb)
 expAliases (BasicOp op) = basicOpAliases op
 expAliases (DoLoop merge _ loopbody) = do
-  ((p, arg), als) <- zip merge $ bodyAliases loopbody
+  (p, als) <-
+    transitive . zip params $ zipWith mappend arg_aliases (bodyAliases loopbody)
   let als' = als `namesSubtract` param_names
   if unique $ paramDeclType p
     then pure mempty
-    else pure $ als' <> subExpAliases arg
+    else pure als'
   where
-    param_names = namesFromList $ map (paramName . fst) merge
+    arg_aliases = map (subExpAliases . snd) merge
+    params = map fst merge
+    param_names = namesFromList $ map paramName params
+    transitive merge_and_als =
+      let merge_and_als' = map (second expand) merge_and_als
+       in if merge_and_als' == merge_and_als
+            then merge_and_als
+            else transitive merge_and_als'
+      where
+        look v = maybe mempty snd $ find ((== v) . paramName . fst) merge_and_als
+        expand als = als <> foldMap look (namesToList als)
 expAliases (Apply _ args t _) =
   funcallAliases args $ map declExtTypeOf t
 expAliases (WithAcc inputs lam) =
