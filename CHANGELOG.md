@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+* Better exploitation of parallelism in fused nested segmented
+  reductions.
+
 ### Removed
 
 ### Changed
@@ -24,6 +27,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Invalid in-place lowering (#1523).
 
 * Incorrect code generation for some intra-group parallel code versions.
+
+* Flattening crash in the presence of irregular parallelism (#1525).
 
 ## [0.20.6]
 
