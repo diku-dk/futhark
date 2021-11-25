@@ -791,16 +791,6 @@ require why ts e = do
   mustBeOneOf ts (mkUsage (srclocOf e) why) . toStruct =<< expType e
   pure e
 
-renameRetType :: StructRetType -> TermTypeM StructRetType
-renameRetType (RetType dims st)
-  | dims /= mempty = do
-    dims' <- mapM newName dims
-    let m = M.fromList $ zip dims $ map (SizeSubst . NamedDim . qualName) dims'
-        st' = applySubst (`M.lookup` m) st
-    pure $ RetType dims' st'
-  | otherwise =
-    pure $ RetType dims st
-
 termCheckTypeExp :: TypeExp Name -> TermTypeM (TypeExp VName, [VName], StructRetType)
 termCheckTypeExp te = do
   (te', svars, rettype, _l) <- checkTypeExp te

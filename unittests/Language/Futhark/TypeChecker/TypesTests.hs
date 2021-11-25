@@ -46,13 +46,20 @@ evalTest te expected =
                       TypeParamType Lifted "b_1102" mempty
                     ]
                     "a_1101 -> b_1102"
+                ),
+                ( "pair_1200",
+                  TypeAbbr
+                    SizeLifted
+                    []
+                    "?[n_1201][m_1202].([n_1201]i64, [m_1202]i64)"
                 )
               ]
               <> envTypeTable initialEnv,
           envNameMap =
             M.fromList
               [ ((Type, "square"), "square_1000"),
-                ((Type, "fun"), "fun_1100")
+                ((Type, "fun"), "fun_1100"),
+                ((Type, "pair"), "pair_1200")
               ]
               <> envNameMap initialEnv
         }
@@ -114,7 +121,13 @@ evalTests =
         ([], "bool -> ?[d_0].[d_0]i32 -> bool"),
       evalTest
         "bool -> fun bool ([]i32)"
-        ([], "bool -> ?[d_0].bool -> [d_0]i32")
+        ([], "bool -> ?[d_0].bool -> [d_0]i32"),
+      evalTest
+        "pair"
+        ([], "?[n_0][m_1].([n_0]i64, [m_1]i64)"),
+      evalTest
+        "(pair,pair)"
+        ([], "?[n_0][m_1][n_2][m_3].(([n_0]i64, [m_1]i64), ([n_2]i64, [m_3]i64))")
     ]
 
 substTest :: M.Map VName (Subst StructRetType) -> StructRetType -> StructRetType -> TestTree
