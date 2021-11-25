@@ -32,6 +32,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Incorrect substitution of type abbreviations with hidden sizes (#1531).
 
+* Proper handling of NaN in `min`/`max` functions for
+  `f16`/`f32`/`f64` in interpreter (#1528).
+
 ## [0.20.6]
 
 ### Added
