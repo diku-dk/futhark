@@ -30,6 +30,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Flattening crash in the presence of irregular parallelism (#1525).
 
+* Incorrect substitution of type abbreviations with hidden sizes (#1531).
+
 ## [0.20.6]
 
 ### Added
