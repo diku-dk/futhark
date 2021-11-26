@@ -1441,26 +1441,11 @@ computeScalarTable _ _ = return mempty
 
 computeScalarTableGPUMem :: ScopeTab GPUMem -> Op (Aliases GPUMem) -> ScalarTableM GPUMem (M.Map VName (PrimExp VName))
 computeScalarTableGPUMem _ (Alloc _ _) = return mempty
-computeScalarTableGPUMem scope_table (Inner (SegOp (SegMap _ _ _ body))) = do
+computeScalarTableGPUMem scope_table (Inner (SegOp segop)) = do
   mconcat
     <$> mapM
-      (computeScalarTable $ scope_table <> scopeOf (kernelBodyStms body))
-      (stmsToList $ kernelBodyStms body)
-computeScalarTableGPUMem scope_table (Inner (SegOp (SegRed _ _ _ _ body))) =
-  mconcat
-    <$> mapM
-      (computeScalarTable $ scope_table <> scopeOf (kernelBodyStms body))
-      (stmsToList $ kernelBodyStms body)
-computeScalarTableGPUMem scope_table (Inner (SegOp (SegScan _ _ _ _ body))) =
-  mconcat
-    <$> mapM
-      (computeScalarTable $ scope_table <> scopeOf (kernelBodyStms body))
-      (stmsToList $ kernelBodyStms body)
-computeScalarTableGPUMem scope_table (Inner (SegOp (SegHist _ _ _ _ body))) =
-  mconcat
-    <$> mapM
-      (computeScalarTable $ scope_table <> scopeOf (kernelBodyStms body))
-      (stmsToList $ kernelBodyStms body)
+      (computeScalarTable $ scope_table <> scopeOf (kernelBodyStms $ segBody segop) <> scopeOfSegSpace (segSpace segop))
+      (stmsToList $ kernelBodyStms $ segBody segop)
 computeScalarTableGPUMem _ (Inner (SizeOp _)) = return mempty
 computeScalarTableGPUMem _ (Inner (OtherOp ())) = return mempty
 
