@@ -104,10 +104,10 @@ def umaxN(x,y):
   return signed(max(unsigned(x),unsigned(y)))
 
 def fminN(x,y):
-  return min(x,y)
+  return np.fmin(x,y)
 
 def fmaxN(x,y):
-  return max(x,y)
+  return np.fmax(x,y)
 
 def powN(x,y):
   return x ** y
