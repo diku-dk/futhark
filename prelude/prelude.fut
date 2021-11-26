@@ -16,6 +16,10 @@ let r64 (x: i32): f64 = f64.i32 x
 -- | Create integer from double-precision float.
 let t64 (x: f64): i32 = i32.f64 x
 
+-- | Negate a boolean.  `not x` is the same as `!x`.  This function is
+-- mostly useful for passing to `map
+let not (x: bool): bool = !x
+
 -- | Semantically just identity, but serves as an optimisation
 -- inhibitor.  The compiler will treat this function as a black box.
 -- You can use this to work around optimisation deficiencies (or
