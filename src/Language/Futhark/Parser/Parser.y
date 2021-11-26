@@ -646,8 +646,6 @@ Atom : PrimLit        { Literal (fst $1) (snd $1) }
          QualParens (QualName qs name, loc) $2 (srcspan $1 $>) }
 
      -- Operator sections.
-     | '(' '!' ')'
-        { Var (qualName "!") NoInfo (srcspan $2 $>) }
      | '(' '-' ')'
         { OpSection (qualName (nameFromString "-")) NoInfo (srcspan $1 $>) }
      | '(' Exp2 '-' ')'
