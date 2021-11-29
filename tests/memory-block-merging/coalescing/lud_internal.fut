@@ -17,26 +17,15 @@ let lud_internal [m][b] (top_per: [m][b][b]f32) (lft_per: [m][b][b]f32) (mat_sli
        ) mat_slice lft_per
 
 let main [num_blocks][b] (matb: *[num_blocks][num_blocks][b][b]f32) =
-  let n = b * num_blocks
+  let top_per_irreg = matb[0,1:num_blocks]
 
-  let step = 0
+  let col_slice = matb[1:num_blocks,0]
 
-  let slice_size = step + 1 - num_blocks
-  let diag = iota (b * b) |> map f32.i64 |> unflatten b b |> opaque
-  let top_per_irreg = matb[step,step+1:num_blocks]
-
-  -- 3. compute the left perimeter and update matrix
-  let col_slice = matb[step+1:num_blocks,step]
-  -- let lft_per_irreg = lud_perimeter_lower diag col_slice
-
-  -- 4. compute the internal blocks
-  let inner_slice = matb[step+1:num_blocks,step+1:num_blocks]
-  -- let internal = lud_internal top_per_irreg (opaque lft_per_irreg) inner_slice
+  let inner_slice = matb[1:num_blocks,1:num_blocks]
   let internal = lud_internal top_per_irreg col_slice inner_slice
 
-  -- let matb[step+1:, step] = lft_per_irreg --
-  let matb[step+1:, step] = opaque (copy col_slice)
-  let matb[step+1:, step+1:] = internal
+  let matb[1:, 0] = opaque (copy col_slice)
+  let matb[1:, 1:] = internal
 
 
   in matb
