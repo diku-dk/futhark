@@ -1313,11 +1313,11 @@ intervalOverlap :: [(VName, SubExp)] -> Names -> Interval -> Interval -> Bool
 intervalOverlap less_thans non_negatives (Interval lb1 ne1 st1) (Interval lb2 ne2 st2)
   | st1 == st2,
     lessThanish less_thans non_negatives lb1 lb2,
-    lessThanish less_thans non_negatives (lb1 + (ne1 - 1) * st1) lb2 =
+    lessThanish less_thans non_negatives (lb1 + ne1 - 1) lb2 =
     False
   | st1 == st2,
     lessThanish less_thans non_negatives lb2 lb1,
-    lessThanish less_thans non_negatives (lb2 + (ne2 - 1) * st2) lb1 =
+    lessThanish less_thans non_negatives (lb2 + ne2 - 1) lb1 =
     False
   | otherwise = True
 
