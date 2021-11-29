@@ -376,7 +376,7 @@ shortCircuitGPUMemHelper num_reds lvl lutab pat@(Pat ps0) space0 kernel_body td_
                                in bu_env_f {activeCoals = ac, inhibit = inh}
                     _ -> bu_env_f
           )
-          bu_env''
+          bu_env'''
           mergee_writes
   return bu_env''''
 
