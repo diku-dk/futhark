@@ -248,17 +248,21 @@ let any [n] 'a (f: a -> bool) (as: [n]a): bool =
 -- for index in 0..length is-1:
 --   i = is[index]
 --   v = vs[index]
---   as[i] = v
+--   if ( i >= 0 && i < length as )
+--   then { as[i] = v }
+--   else { }
 -- ```
 --
 -- The `is` and `vs` arrays must have the same outer size.  `scatter`
 -- acts in-place and consumes the `as` array, returning a new array
 -- that has the same type and elements as `as`, except for the indices
--- in `is`.  If `is` contains duplicates (i.e. several writes are
--- performed to the same location), the result is unspecified.  It is
--- not guaranteed that one of the duplicate writes will complete
--- atomically - they may be interleaved.  See `reduce_by_index`@term
--- for a function that can handle this case deterministically.
+-- in `is`. Notice that writing outside the index domain of the target
+-- array has no effect. If `is` contains duplicates for valid indexes
+-- into the target array (i.e., several writes are performed to the
+-- same location), the result is unspecified.  It is not guaranteed
+-- that one of the duplicate writes will complete atomically - they
+-- may be interleaved.  See `reduce_by_index`@term for a function that
+-- can handle this case deterministically.
 --
 -- This is technically not a second-order operation, but it is defined
 -- here because it is closely related to the SOACs.
