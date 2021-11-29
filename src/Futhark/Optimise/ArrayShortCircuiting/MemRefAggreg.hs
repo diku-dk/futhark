@@ -395,8 +395,9 @@ aggSummaryMapTotal scope_before scope_loop scalars _ access
   | otherwise = return Undeterminable
 
 aggSummaryOne :: MonadFreshNames m => VName -> TPrimExp Int64 VName -> TPrimExp Int64 VName -> LmadRef -> m AccessSummary
-aggSummaryOne iterator_var lower_bound spn (IxFun.LMAD offset0 dims0)
+aggSummaryOne iterator_var lower_bound spn lmad@(IxFun.LMAD offset0 dims0)
   | iterator_var `nameIn` freeIn dims0 = return Undeterminable
+  | not $ iterator_var `nameIn` freeIn offset0 = return $ Set $ S.singleton lmad
   | otherwise = do
     new_var <- newVName "k"
     let offset = replaceIteratorWith (typedLeafExp new_var) offset0
