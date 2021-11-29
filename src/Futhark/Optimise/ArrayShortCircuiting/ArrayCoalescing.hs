@@ -335,8 +335,8 @@ shortCircuitGPUMemHelper num_reds lvl lutab pat@(Pat ps0) space0 kernel_body td_
   actv <-
     mapM
       ( \entry -> do
-          wrts <- aggSummaryMapTotal (scope td_env) (scope td_env) (scalarTable td_env) [] $ srcwrts $ memrefs entry
-          uses <- aggSummaryMapTotal (scope td_env) (scope td_env) (scalarTable td_env) [] $ dstrefs $ memrefs entry
+          wrts <- aggSummaryMapTotal (scope td_env) (scope td_env) (scalarTable td_env) (unSegSpace space0) $ srcwrts $ memrefs entry
+          uses <- aggSummaryMapTotal (scope td_env) (scope td_env) (scalarTable td_env) (unSegSpace space0) $ dstrefs $ memrefs entry
           return $ entry {memrefs = MemRefs uses wrts}
       )
       $ activeCoals bu_env''
