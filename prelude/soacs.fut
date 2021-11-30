@@ -245,12 +245,11 @@ let any [n] 'a (f: a -> bool) (as: [n]a): bool =
 -- code:
 --
 -- ```
--- for index in 0..length is-1:
---   i = is[index]
---   v = vs[index]
---   if ( i >= 0 && i < length as )
---   then { as[i] = v }
---   else { }
+-- for j in 0...length is-1:
+--   i = is[j]
+--   v = vs[j]
+--   if i >= 0 && i < length as:
+--     as[i] = v
 -- ```
 --
 -- The `is` and `vs` arrays must have the same outer size.  `scatter`
