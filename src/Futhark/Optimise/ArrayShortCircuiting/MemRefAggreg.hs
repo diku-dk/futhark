@@ -196,7 +196,7 @@ recordMemRefUses td_env bu_env stm =
                             wrt_ixfns = map tupThd $ filter ((`nameIn` alias_m_b) . tupFst) stm_wrts
                             wrt_tmps = mapMaybe mbLmad wrt_ixfns
                             prev_use =
-                              translateAccessSummary (scope td_env) (scals bu_env) $
+                              translateAccessSummary (scope td_env) (scalarTable td_env) $
                                 (dstrefs . memrefs) etry
                             wrt_lmads' =
                               if length wrt_tmps == length wrt_ixfns
