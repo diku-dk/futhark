@@ -1432,8 +1432,8 @@ computeScalarTable scope_table (Let _ _ (DoLoop loop_inits loop_form body)) =
       (stmsToList $ bodyStms body)
 computeScalarTable scope_table (Let _ _ (If _ then_body else_body _)) =
   (<>)
-    <$> (mconcat <$> mapM (computeScalarTable scope_table) (stmsToList $ bodyStms then_body))
-    <*> (mconcat <$> mapM (computeScalarTable scope_table) (stmsToList $ bodyStms else_body))
+    <$> (mconcat <$> mapM (computeScalarTable $ scope_table <> scopeOf (bodyStms then_body)) (stmsToList $ bodyStms then_body))
+    <*> (mconcat <$> mapM (computeScalarTable $ scope_table <> scopeOf (bodyStms else_body)) (stmsToList $ bodyStms else_body))
 computeScalarTable scope_table (Let _ _ (Op op)) = do
   on_op <- asks scalarTableOnOp
   on_op scope_table op
