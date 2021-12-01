@@ -1719,7 +1719,7 @@ checkFunBody params body maybe_rettype loc = do
       -- We also have to make sure that uniqueness matches.  This is done
       -- explicitly, because uniqueness is ignored by unification.
       rettype' <- normTypeFully rettype
-      body_t'' <- normTypeFully rettype -- Substs may have changed.
+      body_t'' <- normTypeFully body_t' -- Substs may have changed.
       unless (toStructural body_t'' `subtypeOf` toStructural rettype') $
         typeError (srclocOf body) mempty $
           "Body type" </> indent 2 (ppr body_t'')

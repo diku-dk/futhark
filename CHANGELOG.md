@@ -17,6 +17,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Alias tracking of sum types.
 
+* Proper checking that a function declared to return a unique-typed
+  value actually does so.
+
 ## [0.20.7]
 
 ### Added

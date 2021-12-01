@@ -70,7 +70,7 @@ let concat [n] [m] 't (xs: [n]t) (ys: [m]t): *[]t = xs ++ ys
 -- | Concatenation where the result has a predetermined size.  If the
 -- provided size is wrong, the function will fail with a run-time
 -- error.
-let concat_to [n] [m] 't (k: i64) (xs: [n]t) (ys: [m]t): *[k]t = xs ++ ys :> [k]t
+let concat_to [n] [m] 't (k: i64) (xs: [n]t) (ys: [m]t): *[k]t = xs ++ ys :> *[k]t
 
 -- | Rotate an array some number of elements to the left.  A negative
 -- rotation amount is also supported.
@@ -78,7 +78,7 @@ let concat_to [n] [m] 't (k: i64) (xs: [n]t) (ys: [m]t): *[k]t = xs ++ ys :> [k]
 -- For example, if `b==rotate r a`, then `b[x] = a[x+r]`.
 --
 -- **Complexity:** O(1).
-let rotate [n] 't (r: i64) (xs: [n]t): [n]t = intrinsics.rotate (r, xs) :> [n]t
+let rotate [n] 't (r: i64) (xs: [n]t): [n]t = intrinsics.rotate (r, xs) :> *[n]t
 
 -- | Construct an array of consecutive integers of the given length,
 -- starting at 0.

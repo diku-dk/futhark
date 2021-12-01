@@ -1,6 +1,6 @@
 -- Record updates should respect uniqueness and aliases.
 -- ==
--- error: "s"
+-- error: not a subtype
 
 type^ state = { size: i64, world: []i32 }
 
