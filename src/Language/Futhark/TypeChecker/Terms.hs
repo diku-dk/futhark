@@ -1030,12 +1030,16 @@ maskAliases t Consume = t `setAliases` mempty
 maskAliases t Observe = t
 maskAliases (Scalar (Record ets)) (RecordDiet ds) =
   Scalar $ Record $ M.intersectionWith maskAliases ets ds
+maskAliases (Scalar (Sum ets)) (SumDiet ds) =
+  Scalar $ Sum $ M.intersectionWith (zipWith maskAliases) ets ds
 maskAliases t FuncDiet {} = t
 maskAliases _ _ = error "Invalid arguments passed to maskAliases."
 
 consumeArg :: SrcLoc -> PatType -> Diet -> TermTypeM [Occurrence]
 consumeArg loc (Scalar (Record ets)) (RecordDiet ds) =
   concat . M.elems <$> traverse (uncurry $ consumeArg loc) (M.intersectionWith (,) ets ds)
+consumeArg loc (Scalar (Sum ets)) (SumDiet ds) =
+  concat <$> traverse (uncurry $ consumeArg loc) (concat $ M.elems $ M.intersectionWith zip ets ds)
 consumeArg loc (Array _ Nonunique _ _) Consume =
   typeError loc mempty . withIndexLink "consuming-parameter" $
     "Consuming parameter passed non-unique argument."

@@ -277,7 +277,7 @@ diet (Array _ Unique _ _) = Consume
 diet (Array _ Nonunique _ _) = Observe
 diet (Scalar (TypeVar _ Unique _ _)) = Consume
 diet (Scalar (TypeVar _ Nonunique _ _)) = Observe
-diet (Scalar Sum {}) = Observe
+diet (Scalar (Sum cs)) = SumDiet $ M.map (map diet) cs
 
 -- | Convert any type to one that has rank information, no alias
 -- information, and no embedded names.

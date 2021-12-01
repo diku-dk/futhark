@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+* Alias tracking of sum types.
+
 ## [0.20.7]
 
 ### Added
