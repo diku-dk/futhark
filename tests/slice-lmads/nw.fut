@@ -91,7 +91,7 @@ let process_block [b][bp1]
                          in  v ))
         in scatter_2d block inds vals
 
-  in block[1:, 1:] :> [b][b]i32
+  in block[1:, 1:] :> *[b][b]i32
 
 entry nw_flat [n]
               (block_size: i64)

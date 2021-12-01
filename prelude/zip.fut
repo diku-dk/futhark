@@ -19,7 +19,7 @@ let zip [n] 'a 'b (as: [n]a) (bs: [n]b): *[n](a,b) =
 
 -- | Construct an array of pairs from two arrays.
 let zip2 [n] 'a 'b (as: [n]a) (bs: [n]b): *[n](a,b) =
-  zip as bs :> [n](a,b)
+  zip as bs :> *[n](a,b)
 
 -- | As `zip2`@term, but with one more array.
 let zip3 [n] 'a 'b 'c (as: [n]a) (bs: [n]b) (cs: [n]c): *[n](a,b,c) =
