@@ -14,11 +14,12 @@ module Futhark.Analysis.AlgSimplify2
     add,
     sub,
     negate,
+    isMultipleOf,
   )
 where
 
 import Data.Bits (xor)
-import Data.List (sort)
+import Data.List (sort, (\\))
 import Data.Maybe (mapMaybe)
 import Futhark.Analysis.PrimExp
 import Futhark.IR.Syntax.Core
@@ -119,3 +120,8 @@ add ps1 ps2 = simplifySofP $ ps1 <> ps2
 
 sub :: SofP -> SofP -> SofP
 sub ps1 ps2 = add ps1 $ map negate ps2
+
+isMultipleOf :: Prod -> [Exp] -> Bool
+isMultipleOf (Prod _ as) term =
+  let quotient = as \\ term
+   in sort (quotient <> term) == sort as

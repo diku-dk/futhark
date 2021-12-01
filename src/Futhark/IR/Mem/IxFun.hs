@@ -1290,14 +1290,14 @@ distributeOffset offset (Interval lb ne st0 : is) = do
   --
   -- Example: The offset is `a + b * b * 2` and the stride is `b * b`. The
   -- remaining offset should be `a` and the new lower bound should be `2`.
-  AlgSimplify2.Prod n st <-
+  AlgSimplify2.Prod neg st <-
     maybe (fail "Stride should have exactly one term") return $
       justOne $
         AlgSimplify2.simplify0 $ untyped st0
   -- We do not support negative strides here. They should've been normalized.
-  if n
+  if neg
     then fail "Stride should be positive"
-    else case find ((==) st . intersect st . AlgSimplify2.atoms) offset of
+    else case find (`AlgSimplify2.isMultipleOf` st) offset of
       Just t@(AlgSimplify2.Prod False as') ->
         distributeOffset (t `delete` offset) $ Interval (lb + TPrimExp (AlgSimplify2.sumToExp [AlgSimplify2.Prod False $ as' \\ st])) ne st0 : is
       Just (AlgSimplify2.Prod True _) -> fail "Offset term should be positive"
