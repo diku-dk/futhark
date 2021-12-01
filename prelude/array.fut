@@ -75,7 +75,7 @@ let concat_to [n] [m] 't (k: i64) (xs: [n]t) (ys: [m]t): *[k]t = xs ++ ys :> [k]
 -- | Rotate an array some number of elements to the left.  A negative
 -- rotation amount is also supported.
 --
--- For example, if `b==rotate r a`, then `b[x+r] = a[x]`.
+-- For example, if `b==rotate r a`, then `b[x] = a[x+r]`.
 --
 -- **Complexity:** O(1).
 let rotate [n] 't (r: i64) (xs: [n]t): [n]t = intrinsics.rotate (r, xs) :> [n]t
