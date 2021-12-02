@@ -248,19 +248,16 @@ badLetWithValue arre vale loc =
       </> indent 2 (ppr vale)
       </> "Hint: use" <+> pquote "copy" <+> "to remove aliases from the value."
 
-returnAliased :: Name -> Name -> SrcLoc -> TermTypeM ()
-returnAliased fname name loc =
+returnAliased :: Name -> SrcLoc -> TermTypeM ()
+returnAliased name loc =
   typeError loc mempty . withIndexLink "return-aliased" $
-    "Unique-typed return value of" <+> pquote (pprName fname)
-      <+> "is aliased to"
+    "Unique-typed return value is aliased to"
       <+> pquote (pprName name) <> ", which is not consumable."
 
-uniqueReturnAliased :: Name -> SrcLoc -> TermTypeM a
-uniqueReturnAliased fname loc =
+uniqueReturnAliased :: SrcLoc -> TermTypeM a
+uniqueReturnAliased loc =
   typeError loc mempty . withIndexLink "unique-return-aliased" $
-    "A unique-typed component of the return value of"
-      <+> pquote (pprName fname)
-      <+> "is aliased to some other component."
+    "A unique-typed component of the return value is aliased to some other component."
 
 unexpectedType :: MonadTypeChecker m => SrcLoc -> StructType -> [StructType] -> m a
 unexpectedType loc _ [] =

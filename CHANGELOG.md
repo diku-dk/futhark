@@ -20,6 +20,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Proper checking that a function declared to return a unique-typed
   value actually does so.
 
+* Faulty uniqueness checking and inference for lambdas (#1535).
+
 ## [0.20.7]
 
 ### Added

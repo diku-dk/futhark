@@ -8,4 +8,4 @@
 import "intrinsics"
 
 let main (xs: *[]i32) =
-  scatter_stream xs (\acc _ -> acc) (iota 10)
+  scatter_stream xs (\(acc: *acc ([]i32)) _ -> acc) (iota 10)
