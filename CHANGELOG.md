@@ -24,6 +24,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Faulty uniqueness checking and inference for lambdas (#1535).
 
+* Monomorphisation would duplicate functions under rare circumstances
+  (#1537).
+
 ## [0.20.7]
 
 ### Added
