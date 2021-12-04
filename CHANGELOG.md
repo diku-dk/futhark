@@ -27,6 +27,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Monomorphisation would duplicate functions under rare circumstances
   (#1537).
 
+* Interpreter didn't check that the arguments passed to `unflatten`
+  made sense (#1539).
+
 ## [0.20.7]
 
 ### Added
