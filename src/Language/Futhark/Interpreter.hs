@@ -1879,10 +1879,19 @@ initialCtx =
         return $ toArray (ShapeDim (n * m) shape) $ concatMap (snd . fromArray) xs'
     def "unflatten" = Just $
       fun3t $ \n m xs -> do
-        let (ShapeDim _ innershape, xs') = fromArray xs
+        let (ShapeDim xs_size innershape, xs') = fromArray xs
             rowshape = ShapeDim (asInt64 m) innershape
             shape = ShapeDim (asInt64 n) rowshape
-        return $ toArray shape $ map (toArray rowshape) $ chunk (asInt m) xs'
+        if asInt64 n * asInt64 m /= xs_size
+          then
+            bad mempty mempty $
+              "Cannot unflatten array of shape [" <> pretty xs_size
+                <> "] to array of shape ["
+                <> pretty (asInt64 n)
+                <> "]["
+                <> pretty (asInt64 m)
+                <> "]"
+          else pure $ toArray shape $ map (toArray rowshape) $ chunk (asInt m) xs'
     def "acc" = Nothing
     def s | nameFromString s `M.member` namesToPrimTypes = Nothing
     def s = error $ "Missing intrinsic: " ++ s

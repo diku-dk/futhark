@@ -1758,7 +1758,16 @@ isOverloadedFunction qname args loc = do
         assert
           "dim_ok_cert"
           dim_ok
-          "new shape has different number of elements than old shape"
+          ( ErrorMsg
+              [ "Cannot unflatten array of shape [",
+                ErrorVal int64 old_dim,
+                "] to array of shape [",
+                ErrorVal int64 n',
+                "][",
+                ErrorVal int64 m',
+                "]"
+              ]
+          )
           loc
       certifying dim_ok_cert $
         forM arrs $ \arr' -> do
