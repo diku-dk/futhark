@@ -103,7 +103,8 @@ generateConfigFuns sizes = do
   GC.earlyDecl [C.cedecl|struct tuning_params { $sdecls:size_decls };|]
   cfg <- GC.publicDef "context_config" GC.InitDecl $ \s ->
     ( [C.cedecl|struct $id:s;|],
-      [C.cedecl|struct $id:s { struct cuda_config cu_cfg;
+      [C.cedecl|struct $id:s {int in_use;
+                              struct cuda_config cu_cfg;
                               int profiling;
                               typename int64_t tuning_params[$int:num_sizes];
                               int num_nvrtc_opts;
@@ -122,6 +123,7 @@ generateConfigFuns sizes = do
                          if (cfg == NULL) {
                            return NULL;
                          }
+                         cfg->in_use = 0;
 
                          cfg->profiling = 0;
                          cfg->num_nvrtc_opts = 0;
@@ -138,6 +140,7 @@ generateConfigFuns sizes = do
   GC.publicDef_ "context_config_free" GC.InitDecl $ \s ->
     ( [C.cedecl|void $id:s(struct $id:cfg* cfg);|],
       [C.cedecl|void $id:s(struct $id:cfg* cfg) {
+                         assert(!cfg->in_use);
                          free(cfg->nvrtc_opts);
                          free(cfg);
                        }|]
@@ -324,6 +327,7 @@ generateContextFuns cfg cost_centres kernels sizes failures = do
   ctx <- GC.publicDef "context" GC.InitDecl $ \s ->
     ( [C.cedecl|struct $id:s;|],
       [C.cedecl|struct $id:s {
+                         struct $id:cfg* cfg;
                          int detail_memory;
                          int debugging;
                          int profiling;
@@ -357,10 +361,13 @@ generateContextFuns cfg cost_centres kernels sizes failures = do
   GC.publicDef_ "context_new" GC.InitDecl $ \s ->
     ( [C.cedecl|struct $id:ctx* $id:s(struct $id:cfg* cfg);|],
       [C.cedecl|struct $id:ctx* $id:s(struct $id:cfg* cfg) {
+                 assert(!cfg->in_use);
                  struct $id:ctx* ctx = (struct $id:ctx*) malloc(sizeof(struct $id:ctx));
                  if (ctx == NULL) {
                    return NULL;
                  }
+                 ctx->cfg = cfg;
+                 ctx->cfg->in_use = 1;
                  ctx->debugging = ctx->detail_memory = cfg->cu_cfg.debugging;
                  ctx->profiling = cfg->profiling;
                  ctx->profiling_paused = 0;
@@ -415,6 +422,7 @@ generateContextFuns cfg cost_centres kernels sizes failures = do
                                  free_constants(ctx);
                                  cuda_cleanup(&ctx->cuda);
                                  free_lock(&ctx->lock);
+                                 ctx->cfg->in_use = 0;
                                  free(ctx);
                                }|]
     )
