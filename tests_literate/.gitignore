@@ -4,3 +4,4 @@
 !/expected/
 !.gitignore
 !test.sh
+!data/
