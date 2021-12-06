@@ -30,6 +30,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Interpreter didn't check that the arguments passed to `unflatten`
   made sense (#1539).
 
+* `futhark literate` now supports a `$loaddata` builtin function for
+  passing datasets to Futhark programs.
+
 ## [0.20.7]
 
 ### Added
