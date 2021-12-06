@@ -838,12 +838,12 @@ commandLineOptions =
       "v"
       ["verbose"]
       (NoArg $ Right $ \config -> config {scriptVerbose = scriptVerbose config + 1})
-      "Enable logging.  Pass multiple times for more.",
+      "Enable logging. Pass multiple times for more.",
     Option
       "o"
       ["output"]
       (ReqArg (\opt -> Right $ \config -> config {scriptOutput = Just opt}) "FILE")
-      "Enable logging.  Pass multiple times for more.",
+      "Override output file. Image directory is set to basename appended with -img/.",
     Option
       []
       ["stop-on-error"]
