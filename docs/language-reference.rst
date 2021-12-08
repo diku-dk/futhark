@@ -507,7 +507,7 @@ in natural text.
 * An expression ``x.y`` may either be a reference to the name ``y`` in
   the module ``x``, or the field ``y`` in the record ``x``.  Modules
   and values occupy the same name space, so this is disambiguated by
-  the type of ``x``.
+  whether ``x`` is a value or module.
 
 * A type ascription (``exp : type``) cannot appear as an array
   index, as it conflicts with the syntax for slicing.
@@ -779,9 +779,9 @@ are:
 
       Company any two values of numeric type for equality.
 
-  ```f```
+  ```op```
 
-      Use ``f``, which may be any non-operator function name, as an
+      Use ``op``, which may be any non-operator function name, as an
       infix operator.
 
 ``x && y``
