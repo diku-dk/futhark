@@ -540,6 +540,7 @@ in natural text.
   =================  =============
   left               ``,``
   left               ``:``, ``:>``
+  left               ```op```
   left               ``||``
   left               ``&&``
   left               ``<=`` ``>=`` ``>`` ``<`` ``==`` ``!=``
@@ -777,6 +778,11 @@ are:
   ``<``, ``<=``.  ``>``, ``>=``
 
       Company any two values of numeric type for equality.
+
+  ```f```
+
+      Use ``f``, which may be any non-operator function name, as an
+      infix operator.
 
 ``x && y``
 ..........
