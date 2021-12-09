@@ -4,4 +4,4 @@
 
 module m = { let r = { x = 2 } }
 
-let main (x: i32) = m.r.x + x
+def main (x: i32) = m.r.x + x

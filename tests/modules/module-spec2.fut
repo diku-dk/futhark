@@ -34,4 +34,4 @@ module M = {
 
 module MT_I = M.T MT3_twice
 
-let main(x: i32) = MT1_plus.f x x + MT_I.g x
+def main(x: i32) = MT1_plus.f x x + MT_I.g x

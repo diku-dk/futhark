@@ -2,7 +2,7 @@
 -- ==
 -- compiled input { 100004i64 } auto output
 
-let main (n: i64) =
+def main (n: i64) =
   let f k (chunk: [k]i32) =
     let x = if k == 0 then 0 else chunk[0]
     in map (+x+1) (map i32.i64 (iota k))

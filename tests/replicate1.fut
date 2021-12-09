@@ -4,7 +4,7 @@
 -- input { 20i64 } output { 3810 }
 -- compiled no_python no_wasm input { 2000i64 } output { -296967286i32 }
 -- structure gpu { Replicate 1 }
-let main(n: i64): i32 =
+def main(n: i64): i32 =
   let x  = iota n
   let y  = replicate n x
   -- Hack to force manifestation.

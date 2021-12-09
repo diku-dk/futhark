@@ -2,7 +2,7 @@
 -- ==
 -- input { } output { 4 }
 
-let the_value = 2
+def the_value = 2
 
 module M = {
   let the_value = 4
@@ -10,4 +10,4 @@ module M = {
 
 open M
 
-let main = the_value
+def main = the_value

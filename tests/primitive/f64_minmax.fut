@@ -9,6 +9,6 @@
 -- input { -1f64 f64.inf } output { f64.inf -1f64 }
 -- input { -1f64 -f64.inf } output { -1f64 -f64.inf }
 
-let main(x: f64) (y: f64): (f64,f64) =
+def main(x: f64) (y: f64): (f64,f64) =
   (f64.max x y,
    f64.min x y)

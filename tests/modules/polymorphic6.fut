@@ -14,5 +14,5 @@ module m = mk_m {
   let f (x, _) = x
 }
 
-let main (x: i32) =
+def main (x: i32) =
   m.g (x,x)

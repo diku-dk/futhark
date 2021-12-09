@@ -3,4 +3,4 @@
 
 import "include_basic"
 
-let main x = importe_function x
+def main x = importe_function x

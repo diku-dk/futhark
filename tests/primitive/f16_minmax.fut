@@ -9,6 +9,6 @@
 -- input { -1f16 f16.inf } output { f16.inf -1f16 }
 -- input { -1f16 -f16.inf } output { -1f16 -f16.inf }
 
-let main(x: f16) (y: f16): (f16,f16) =
+def main(x: f16) (y: f16): (f16,f16) =
   (f16.max x y,
    f16.min x y)

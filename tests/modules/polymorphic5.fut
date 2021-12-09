@@ -6,4 +6,4 @@ module m: { val id : i32 -> i32 } = {
   let id x = x
 }
 
-let main (x: i32) = m.id x
+def main (x: i32) = m.id x

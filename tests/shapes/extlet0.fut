@@ -2,5 +2,5 @@
 -- ==
 -- input { 1i64 } output { 1i64 }
 
-let main n =
+def main n =
   length (let m = n in iota m)

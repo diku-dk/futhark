@@ -4,4 +4,4 @@
 
 module m : { type t val x: t} = { type t = i32 let x = 0 }
 
-let main = m.x
+def main = m.x

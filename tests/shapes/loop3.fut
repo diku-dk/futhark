@@ -3,6 +3,6 @@
 -- ==
 -- error: \[1\]i32
 
-let main (n: i32) : [1]i32 =
+def main (n: i32) : [1]i32 =
   loop xs = replicate 1 0i32 for _i < n do
     xs ++ xs

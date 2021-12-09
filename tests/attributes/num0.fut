@@ -2,4 +2,4 @@
 
 #[1]
 #[how_cool(1337)]
-let main = true
+def main = true

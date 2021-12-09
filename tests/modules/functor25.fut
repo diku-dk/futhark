@@ -15,4 +15,4 @@ module mk_sm (R: {}) = {
 module sm = mk_sm {}
 module m2 = mk_m2 sm
 
-let main = m2.f2
+def main = m2.f2

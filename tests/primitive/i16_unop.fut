@@ -20,7 +20,7 @@
 -- input { 2 -8i16 } output { -1i16 }
 
 
-let main (f: i32) (x: i16): i16 =
+def main (f: i32) (x: i16): i16 =
   if      f == 0 then -x
   else if f == 1 then i16.abs(x)
   else                i16.sgn(x)

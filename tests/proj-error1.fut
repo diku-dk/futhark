@@ -2,4 +2,4 @@
 -- ==
 -- error: ambiguous
 
-let f = (.a)
+def f = (.a)

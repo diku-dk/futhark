@@ -16,4 +16,4 @@ module m = pm {
   let f (x: i32) = x
 }
 
-let main (x: i32) = m.test x
+def main (x: i32) = m.test x

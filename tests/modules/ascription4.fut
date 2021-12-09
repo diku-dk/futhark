@@ -8,4 +8,4 @@ module M = {
   let f(x: i32): *[]i32 = replicate (i64.i32 x) 0
 }: S
 
-let main(n: i32): []i32 = M.f n
+def main(n: i32): []i32 = M.f n

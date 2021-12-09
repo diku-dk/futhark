@@ -1,7 +1,7 @@
 -- ==
 -- structure gpu { SegMap 1 }
 
-let main iss =
+def main iss =
   map (\is ->
          let acc = replicate 3 0
          let acc[is[0]] = 1

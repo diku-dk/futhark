@@ -48,7 +48,7 @@
 -- input { 4 -1i32  0i32 } output { -1i32 }
 -- input { 4 -1i32  1i32 } output { -1i32 }
 
-let main (f: i32) (x: i32) (y: i32): i32 =
+def main (f: i32) (x: i32) (y: i32): i32 =
   if      f == 0 then x & y
   else if f == 1 then x | y
   else if f == 2 then x ^ y

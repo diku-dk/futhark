@@ -11,4 +11,4 @@ module m: mt = {
     map (\_ -> x) (iota n)
 }
 
-let main (n: i32) (x: bool) = m.replicate (i64.i32 n) x
+def main (n: i32) (x: bool) = m.replicate (i64.i32 n) x

@@ -9,4 +9,4 @@ module has_has_x = {
   module has_x = has_x
 }
 
-let main = has_has_x.(has_x.x)
+def main = has_has_x.(has_x.x)

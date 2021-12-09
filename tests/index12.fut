@@ -3,6 +3,6 @@
 -- input { [1,2,3] }
 -- output { [3,1] }
 
-let main (xs: []i32) =
+def main (xs: []i32) =
   let ys = rotate (-1) xs
   in ys[0:2]

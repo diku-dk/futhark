@@ -14,7 +14,7 @@
 --    5.444444444444444] }
 
 
-let main [n] (num_iterations: i64) (a: [n]f64): []f64 =
+def main [n] (num_iterations: i64) (a: [n]f64): []f64 =
   loop (a) for i < num_iterations do
     map (\(i: i64): f64  ->
           let x = if i == 0 then a[i] else a[i-1]

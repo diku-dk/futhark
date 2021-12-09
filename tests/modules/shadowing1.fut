@@ -9,7 +9,7 @@
 -- }
 
 type best_type = f64
-let best_number(): best_type = 6.0
+def best_number(): best_type = 6.0
 module M0 = {
   type best_type = i32
   let best_number(): best_type = 6
@@ -18,4 +18,4 @@ module M0 = {
   }
 }
 
-let main: (f64, i32, i32) = (best_number() , M0.best_number() , M0.M1.best_number())
+def main: (f64, i32, i32) = (best_number() , M0.best_number() , M0.M1.best_number())

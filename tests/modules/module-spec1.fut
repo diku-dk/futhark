@@ -15,4 +15,4 @@ module M = PM({
   }
 })
 
-let main(n: i32) = M.iterate n
+def main(n: i32) = M.iterate n

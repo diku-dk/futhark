@@ -8,7 +8,7 @@
 --  2
 -- }
 
-let number(): i32 = 1
+def number(): i32 = 1
 module M0 = {
   let number(): i32 = 2
   module M1 = {
@@ -16,4 +16,4 @@ module M0 = {
   }
 }
 
-let main: i32 = M0.M1.foo()
+def main: i32 = M0.M1.foo()

@@ -9,9 +9,14 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+* Top-level value definitions can (and should) now be declared with
+  with `def`, although `let` still works.
+
 ### Removed
 
 ### Changed
+
+* `def` is now a reserved word.
 
 ### Fixed
 

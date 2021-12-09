@@ -25,7 +25,7 @@
 --   SegRed 1
 -- }
 
-let main [n][m] (pss: [n][m]i32): ([n][m][m]i32, [n][m]i32) =
+def main [n][m] (pss: [n][m]i32): ([n][m][m]i32, [n][m]i32) =
   let (asss, bss) =
     #[incremental_flattening(only_inner)]
     unzip(map (\(ps: []i32): ([m][m]i32, [m]i32)  ->

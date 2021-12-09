@@ -10,7 +10,7 @@
 --   [811930.0f32, 93312.0f32, 1166400.0f32, 3626700.0f32, 886464.0f32, 2475000.0f32, 7840800.0f32, 8820900.0f32]
 -- }
 
-let main [n] (is: [n]i64) (vs: [n]f32) (xs: [n]f32) (ys_bar: *[n]f32) =
+def main [n] (is: [n]i64) (vs: [n]f32) (xs: [n]f32) (ys_bar: *[n]f32) =
   let map_res_1 = map2 (*) xs vs
   let zip_copy = copy map_res_1
   let map_res_2 = map2 (*) vs zip_copy

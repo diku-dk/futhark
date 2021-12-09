@@ -4,6 +4,6 @@
 -- input { 3i64 [[1,2],[3,4]] }
 -- output { [[[1,2],[3,4]],[[1,2],[3,4]],[[1,2],[3,4]]] }
 
-let apply 'a '^b (f: a -> b) (x: a) = f x
+def apply 'a '^b (f: a -> b) (x: a) = f x
 
-let main (n: i64) (d: [][]i32) = apply (replicate n) d
+def main (n: i64) (d: [][]i32) = apply (replicate n) d

@@ -10,7 +10,7 @@ module pm (P: { val frob 'a [n]: [n]a -> []a }) = {
 module double = pm { let frob 'a (xs: []a) = concat xs xs }
 module reverse = pm { let frob 'a (xs: []a) = xs[::-1] }
 
-let main (xs: []i32) (ys: []bool) =
+def main (xs: []i32) (ys: []bool) =
   let (a,b) = double.frob_two xs ys
   let (c,d) = reverse.frob_two xs ys
   in (a,b,c,d)

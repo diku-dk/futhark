@@ -27,4 +27,4 @@ module use_a (d: a) = {
 
 module f = use_a a_impl
 
-let main = f.b_to_i64 10
+def main = f.b_to_i64 10

@@ -2,4 +2,4 @@
 -- ==
 -- input { 1 } output { 3 }
 
-let main x = (\y -> x + y) 2
+def main x = (\y -> x + y) 2

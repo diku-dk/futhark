@@ -3,9 +3,9 @@
 -- ==
 -- error: consuming
 
-let apply 'a 'b (f: a -> b) (x: a) = (f x, f x)
+def apply 'a 'b (f: a -> b) (x: a) = (f x, f x)
 
-let consume (xs: *[]i32) = 0
+def consume (xs: *[]i32) = 0
 
-let main (arr: *[]i32) =
+def main (arr: *[]i32) =
  apply consume arr

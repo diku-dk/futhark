@@ -2,4 +2,4 @@
 -- ==
 -- error: Causality
 
-let main (xs: [][]f64) i j = (.[i:j]) <| iota (i+j)
+def main (xs: [][]f64) i j = (.[i:j]) <| iota (i+j)

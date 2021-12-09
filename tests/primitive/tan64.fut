@@ -4,4 +4,4 @@
 -- input { 0.78539819f64 } output { 1f64 }
 -- input { -0.78539819f64 } output { -1f64 }
 
-let main(x: f64): f64 = f64.tan x
+def main(x: f64): f64 = f64.tan x

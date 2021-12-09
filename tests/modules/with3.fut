@@ -12,4 +12,4 @@ module pm (R: has_t) (V: has_x with t = R.t) =
 
 module m = pm { type t = i32} { type t = i32 let x = 2 }
 
-let main (y: i32) = y + m.x
+def main (y: i32) = y + m.x

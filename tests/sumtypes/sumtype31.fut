@@ -2,5 +2,5 @@
 -- ==
 -- error: sum type
 
-let main (x: f32) (y: f32) =
+def main (x: f32) (y: f32) =
   #foo x > #foo y

@@ -10,7 +10,7 @@
 -- structure {
 --   Screma 1
 -- }
-let main(inp: []i32): ([]i32, []i32, []i32) =
+def main(inp: []i32): ([]i32, []i32, []i32) =
   let a = map (+1) inp
   let b = scan (+) 0 a
   let c = scan (*) 1 a in

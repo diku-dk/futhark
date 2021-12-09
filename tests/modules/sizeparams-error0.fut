@@ -15,5 +15,5 @@ module M0: MT = {
   let first (x: intvec) = x[0]
 }
 
-let main(x: i32): i32 =
+def main(x: i32): i32 =
   M0.first (M0.singleton x)

@@ -1,4 +1,4 @@
-let main (data: *[]i32) : []i32 =
+def main (data: *[]i32) : []i32 =
   let old_data = copy data
 
   let (data, _) =

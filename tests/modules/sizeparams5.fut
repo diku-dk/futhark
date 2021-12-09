@@ -6,4 +6,4 @@ module m : {
   let mk () = ()
 }
 
-let f '~a (b: bool) : m.t a = m.mk ()
+def f '~a (b: bool) : m.t a = m.mk ()

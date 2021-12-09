@@ -12,4 +12,4 @@ module twice = twice_ : repeater
 
 module twice_mult = twice {type t = i32 let f (x: t) = x * 2}
 
-let main(x: i32) = twice_mult.g x
+def main(x: i32) = twice_mult.g x

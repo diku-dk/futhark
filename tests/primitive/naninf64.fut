@@ -9,7 +9,7 @@
 -- input { -f64.inf }
 -- output { false false false true true false true false }
 
-let main(x: f64) =
+def main(x: f64) =
   (x == f64.nan,
    x < f64.nan,
    x <= f64.nan,

@@ -28,5 +28,5 @@
 --   [0i64, 5i64, 1i64, 0i64, 4i64]
 -- }
 
-let main [m] (n: i64) (is: [m]i32) (image: [m]i32) : [n]i64 =
+def main [m] (n: i64) (is: [m]i32) (image: [m]i32) : [n]i64 =
   reduce_by_index (replicate n 0) (i64.^) 0 (map i64.i32 is) (map i64.i32 image)

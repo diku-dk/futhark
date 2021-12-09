@@ -27,4 +27,4 @@ module enum_module : foobar_mod = {
 
 module sum_enum = sum enum_module
 
-let main : i32 = sum_enum.sum [enum_module.foo, enum_module.bar, enum_module.foo]
+def main : i32 = sum_enum.sum [enum_module.foo, enum_module.bar, enum_module.foo]

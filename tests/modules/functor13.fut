@@ -22,4 +22,4 @@ module m1 = { let f (x: i32) = x + 1 }
 module m2 = pm2(m1)
 module m3 = pm2(m1)
 
-let main(x: i32) = m2.h (m3.h x)
+def main(x: i32) = m2.h (m3.h x)

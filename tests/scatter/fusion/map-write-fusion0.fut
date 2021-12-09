@@ -10,7 +10,7 @@
 -- }
 -- structure { Screma 0 Scatter 1 }
 
-let main [k][n] (indexes: [k]i64)
+def main [k][n] (indexes: [k]i64)
                 (values: [k]i64)
                 (array: *[n]i64): [n]i64 =
   let indexes' = map (+1) indexes

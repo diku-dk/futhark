@@ -18,4 +18,4 @@ module uniform_int_distribution (E: {
 
 module dist = uniform_int_distribution pcg32
 
-let main = dist.v
+def main = dist.v

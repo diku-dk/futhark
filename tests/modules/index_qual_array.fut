@@ -5,4 +5,4 @@ module M = {
   let a: []i32 = [1,2,3]
 }
 
-let main(x: i32): i32 = M.a[0] + x
+def main(x: i32): i32 = M.a[0] + x

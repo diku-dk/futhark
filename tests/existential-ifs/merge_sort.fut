@@ -36,7 +36,7 @@ local let kernel_par [n] 't ((<=): t -> t -> bool) (a: *[n]t) (p: i64) (q: i64) 
       (iota n)
 
 -- | Sort an array in increasing order.
-let merge_sort [n] 't ((<=): t -> t -> bool) (xs: [n]t): *[n]t =
+def merge_sort [n] 't ((<=): t -> t -> bool) (xs: [n]t): *[n]t =
   -- We need to pad the array so that its size is a power of 2.  We do
   -- this by first finding the largest element in the input, and then
   -- using that for the padding.  Then we know that the padding will
@@ -46,7 +46,7 @@ let merge_sort [n] 't ((<=): t -> t -> bool) (xs: [n]t): *[n]t =
         loop xs for j < i+1 do kernel_par (<=) xs i j)[:n]
 
 -- | Like `merge_sort`, but sort based on key function.
-let merge_sort_by_key [n] 't 'k (key: t -> k) ((<=): k -> k -> bool) (xs: [n]t): [n]t =
+def merge_sort_by_key [n] 't 'k (key: t -> k) ((<=): k -> k -> bool) (xs: [n]t): [n]t =
   zip (map key xs) (iota n)
   |> merge_sort (\(x, _) (y, _) -> x <= y)
   |> map (\(_, i) -> xs[i])

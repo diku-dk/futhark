@@ -5,4 +5,4 @@
 
 module F(S:{val x:i32}): {val y:i32} = {let z:i32 = 2}
 
-let main(): i32 = 0
+def main(): i32 = 0

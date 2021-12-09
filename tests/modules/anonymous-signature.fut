@@ -7,4 +7,4 @@ module M: {val x: i32} = {
   let y: i32 = 3
 }
 
-let main(x: i32) = M.x + x
+def main(x: i32) = M.x + x

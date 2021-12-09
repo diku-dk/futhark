@@ -17,4 +17,4 @@ module times_2: i32_operation = { type t = i32 let f (x: i32) = x * 2 }
 module times_4: i32_operation = twice(times_2)
 module times_16: i32_operation = twice(times_4)
 
-let main (x: i32) = times_16.f x
+def main (x: i32) = times_16.f x

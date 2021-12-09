@@ -1,7 +1,7 @@
 -- ==
 -- structure { Scatter 1 Screma 1 }
 
-let main [n_indices]
+def main [n_indices]
         (scan_num_edges: [n_indices]i64,
          write_inds: [n_indices]i64,
          active_starts: [n_indices]i32) =

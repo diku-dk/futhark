@@ -1,6 +1,6 @@
 -- ==
 -- error: aliases previously returned value
-let main(): ([]f64,[][]f64) =
+def main(): ([]f64,[][]f64) =
   let e_rows = []
   let arr = copy(e_rows)
   let acc = copy([1.0]) in

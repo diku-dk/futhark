@@ -5,4 +5,4 @@
 -- input { -1f32 } output { 3.1415927f32 }
 
 
-let main(x: f32): f32 = f32.acos(x)
+def main(x: f32): f32 = f32.acos(x)

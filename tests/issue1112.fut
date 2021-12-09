@@ -1,19 +1,19 @@
 type triad 't = (t, t, t)
-let triadMap 'a 'b (f:a->b) (A:triad a) : triad b = (f A.0, f A.1, f A.2)
-let triadMap2 'a 'b 'c (f:a->b->c) (A:triad a) (B:triad b): triad c = (f A.0 B.0, f A.1 B.1, f A.2 B.2)
-let triadFold 'a (f:a->a->a) (A:triad a) : a = f A.0 <| f A.1 A.2
+def triadMap 'a 'b (f:a->b) (A:triad a) : triad b = (f A.0, f A.1, f A.2)
+def triadMap2 'a 'b 'c (f:a->b->c) (A:triad a) (B:triad b): triad c = (f A.0 B.0, f A.1 B.1, f A.2 B.2)
+def triadFold 'a (f:a->a->a) (A:triad a) : a = f A.0 <| f A.1 A.2
 
 type v3 = triad f32
 type m33 = triad v3
 
 type quaternion = {r:f32, v:v3}
 
-let v3sum (v:v3) : f32 = triadFold (+) v
-let v3add (a:v3) (b:v3) : v3  = triadMap2 (+) a b
-let v3mul (a:v3) (b:v3) : v3  = triadMap2 (*) a b
-let v3dot (a:v3) (b:v3) : f32 = v3mul a b |> v3sum
+def v3sum (v:v3) : f32 = triadFold (+) v
+def v3add (a:v3) (b:v3) : v3  = triadMap2 (+) a b
+def v3mul (a:v3) (b:v3) : v3  = triadMap2 (*) a b
+def v3dot (a:v3) (b:v3) : f32 = v3mul a b |> v3sum
 
-let gauss_jordan [m] [n] (A:[m][n]f32) =
+def gauss_jordan [m] [n] (A:[m][n]f32) =
     loop A for i < i64.min m n do
         let icol = map (\row -> row[i]) A
         let (j,_) = map f32.abs icol
@@ -34,17 +34,17 @@ let gauss_jordan [m] [n] (A:[m][n]f32) =
                         else let f = f32.neg A[j,i]
                              in map2 (f32.fma f) irow A[j]) (iota m)
 
-let hStack [m][n][l] (A:[m][n]f32) (B:[m][l]f32) = map2 (concat_to (n+l)) A B
-let vStack [m][n][l] (A:[m][n]f32) (B:[l][n]f32) = concat_to (m+l) A B
+def hStack [m][n][l] (A:[m][n]f32) (B:[m][l]f32) = map2 (concat_to (n+l)) A B
+def vStack [m][n][l] (A:[m][n]f32) (B:[l][n]f32) = concat_to (m+l) A B
 
-let solveAB [m][n] (A:[m][m]f32) (B:[m][n]f32) : [m][n]f32 =
+def solveAB [m][n] (A:[m][m]f32) (B:[m][n]f32) : [m][n]f32 =
     let AB = hStack A B |> gauss_jordan
     in AB[0:m, m:(m+n)] :> [m][n]f32
 
-let solveAb [m] (A:[m][m]f32) (b:[m]f32) =
+def solveAb [m] (A:[m][m]f32) (b:[m]f32) =
   unflatten m 1 b |> solveAB A |> flatten_to m
 
-let main u_bs (points':[]v3) (forces:[](v3,v3)) =
+def main u_bs (points':[]v3) (forces:[](v3,v3)) =
     let C (x,y,z) =
         [ ( 1,  0,  0)
         , ( 0,  1,  0)

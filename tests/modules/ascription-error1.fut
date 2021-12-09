@@ -11,4 +11,4 @@ module Struct: SIG = {
   let g (x: i32): i32 = x + 3
 }
 
-let main(x: i32): i32 = Struct.g x
+def main(x: i32): i32 = Struct.g x

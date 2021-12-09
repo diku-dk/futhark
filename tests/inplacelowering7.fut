@@ -4,7 +4,7 @@
 -- structure seq-mem { Update 2 }
 -- structure gpu-mem { Update 1 }
 
-let main (n: i64) (xs: *[]i32) =
+def main (n: i64) (xs: *[]i32) =
   #[unsafe]
   let r = map i32.i64 (map (+2) (iota n))
   let x = xs[0]

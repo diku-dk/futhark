@@ -29,4 +29,4 @@ module mk_has_y (E: engine) = {
 
 module m1 = mk_has_y an_engine
 
-let main (x: i32) = m1.y + x
+def main (x: i32) = m1.y + x

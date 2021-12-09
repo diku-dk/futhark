@@ -5,4 +5,4 @@
 
 type ints [n] = [n]i32
 
-let main [n] (_: ints [n]) : i64 = n
+def main [n] (_: ints [n]) : i64 = n

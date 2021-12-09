@@ -15,4 +15,4 @@ module i8_cell = {
 
 module m = mk_has_cell i8_cell
 
-let main (x: m.cell) = x
+def main (x: m.cell) = x

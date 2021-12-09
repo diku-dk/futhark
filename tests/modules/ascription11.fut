@@ -17,4 +17,4 @@ module logistic_regression (dummy: {}) : optimizable = {
 module logreg_m = logistic_regression {}
 module sgd = stochastic_gradient_descent logreg_m
 
-let main (x: i32) = sgd.loss.i32 x
+def main (x: i32) = sgd.loss.i32 x

@@ -20,4 +20,4 @@ module m2: has_t = {
   let ap = (+)
 }
 
-let main (x: i32) = (m1.ap m1.v x, m2.ap m2.v x)
+def main (x: i32) = (m1.ap m1.v x, m2.ap m2.v x)

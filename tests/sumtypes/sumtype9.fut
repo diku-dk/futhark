@@ -5,7 +5,7 @@
 
 type foobar = #foo i32 | #bar i16
 
-let main : i32 =
+def main : i32 =
   match ((#bar 1) : foobar)
     case (#foo _)  -> 1
     case (#bar _)  -> 2

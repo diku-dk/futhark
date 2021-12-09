@@ -10,6 +10,6 @@ module m : mt = {
   let f (xs: *[]i32) = xs with [0] = xs[0] + 1
 }
 
-let main (x: i32) =
+def main (x: i32) =
   let f = \(xs: *m.t) -> m.f xs
   in f (m.mk x)

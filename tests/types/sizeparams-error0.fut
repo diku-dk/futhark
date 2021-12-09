@@ -4,4 +4,4 @@
 
 type ints [n] = [n]i32
 
-let main(n: i32): ints = iota n
+def main(n: i32): ints = iota n

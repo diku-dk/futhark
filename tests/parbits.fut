@@ -4,7 +4,7 @@
 -- ==
 -- compiled random input { [100]u8 [100]u16 [100]u32 [100]u64 } auto output
 
-let main (u8s: []u8) (u16s: []u16) (u32s: []u32) (u64s: []u64) =
+def main (u8s: []u8) (u16s: []u16) (u32s: []u32) (u64s: []u64) =
   (map u8.popc u8s,
    map u16.popc u16s,
    map u32.popc u32s,
