@@ -63,7 +63,7 @@
       <keyword>let</keyword>
       <keyword>loop</keyword>
       <keyword>with</keyword>
-      <keyword>fun</keyword>
+      <keyword>def</keyword>
       <keyword>entry</keyword>
       <keyword>fn</keyword>
       <keyword>for</keyword>
@@ -78,18 +78,6 @@
       
       <keyword>open</keyword>
       <keyword>import</keyword>
-      
-      <keyword>empty</keyword>
-      
-      <!-- Perhaps arbitrary, but these are keywords, because they do not
-      take the 'fun' syntax as their primary input. -->
-      <keyword>reshape</keyword>
-      <keyword>rearrange</keyword>
-      <keyword>rotate</keyword>
-      <keyword>split</keyword>
-      <keyword>concat</keyword>
-      <keyword>zip</keyword>
-      <keyword>unzip</keyword>
     </context>
 
     <context id="builtin-functionlikes" style-ref="builtin-functionlikes">
