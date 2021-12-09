@@ -7,4 +7,4 @@ module type MONOID = {
   val op: t -> t -> t
 }
 
-let main(): i32 = 0
+def main(): i32 = 0

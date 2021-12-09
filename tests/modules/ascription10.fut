@@ -18,4 +18,4 @@ module mt (optable: optimizable) = {
 
 module m = mt opaque
 
-let main (x: i32) = m.loss.i32 x
+def main (x: i32) = m.loss.i32 x

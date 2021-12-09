@@ -14,4 +14,4 @@ module mk2 (P: {val n: i64}) = {
 
 module m = mk2 { let n = 10i64 }
 
-let main = m.f
+def main = m.f

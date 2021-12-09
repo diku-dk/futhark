@@ -31,7 +31,7 @@
 --   [0, 0, 0, 0, 0]
 -- }
 
-let main [m] (n: i64) (is: [m]i32) (image: [m]i32) : ([n]i32, [n]i32) =
+def main [m] (n: i64) (is: [m]i32) (image: [m]i32) : ([n]i32, [n]i32) =
   (reduce_by_index (replicate n 0) i32.min i32.highest (map i64.i32 is) image,
    map i32.u32
        (reduce_by_index (replicate n 0) u32.min u32.highest

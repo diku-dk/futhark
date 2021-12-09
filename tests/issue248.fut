@@ -4,9 +4,9 @@
 -- input { [67,67,67,65,65,67,66,65,65,68,65,66,67,65,65,67,68,67,65,67,68,68,66,67,68,68,67,67,67,66,65,68,67,66,67,67,67,65,67,67,67,66,67,67,66,65,67,67] }
 -- output { true }
 
-let eqb (x: bool) (y: bool): bool =
+def eqb (x: bool) (y: bool): bool =
   (! ((x || y)) || (x && y))
-let reshape_int (l: i64) (x: []i32): []i32 =
+def reshape_int (l: i64) (x: []i32): []i32 =
   let roundUp = ((l + (length x - 1)) / length x) in
   let extend = flatten (replicate (roundUp) (x)) in
   let (v1, _) = split (l) (extend) in

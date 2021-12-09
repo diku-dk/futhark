@@ -44,7 +44,7 @@
 -- }
 
 
-let tridagSeq [n][m] (a:  [n]f32,b: *[m]f32,c: [m]f32,y: *[m]f32 ): *[m]f32 =
+def tridagSeq [n][m] (a:  [n]f32,b: *[m]f32,c: [m]f32,y: *[m]f32 ): *[m]f32 =
     let (y,b) = loop ((y, b))
       for i < n-1 do
         let i    = i + 1
@@ -59,7 +59,7 @@ let tridagSeq [n][m] (a:  [n]f32,b: *[m]f32,c: [m]f32,y: *[m]f32 ): *[m]f32 =
                let y[i] = (y[i] - c[i]*y[i+1]) / b[i]
                in  y
 
-let implicitMethod [n][m] (myD:  [m][3]f32,  myDD: [m][3]f32,
+def implicitMethod [n][m] (myD:  [m][3]f32,  myDD: [m][3]f32,
                            myMu: [n][m]f32, myVar: [n][m]f32,
                            u: [n][m]f32)
                           (dtInv: f32): *[n][m]f32 =
@@ -73,7 +73,7 @@ let implicitMethod [n][m] (myD:  [m][3]f32,  myDD: [m][3]f32,
                               (zip4 (mu_row) (var_row) myD myDD))
          in tridagSeq( a, copy b, c, copy u_row )) (zip3 myMu myVar u)
 
-let main [m][n] (myD:  [m][3]f32) (myDD: [m][3]f32)
+def main [m][n] (myD:  [m][3]f32) (myDD: [m][3]f32)
                 (myMu: [n][m]f32) (myVar: [n][m]f32)
                 (u: *[n][m]f32)   (dtInv: f32)
                 (num_samples: i64): *[num_samples][n][m]f32 =

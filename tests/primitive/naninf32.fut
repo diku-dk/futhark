@@ -10,7 +10,7 @@
 -- output { false false false true true false true false }
 
 
-let main(x: f32) =
+def main(x: f32) =
   (x == f32.nan,
    x < f32.nan,
    x <= f32.nan,

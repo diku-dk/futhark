@@ -2,6 +2,6 @@
 -- ==
 -- input { 3i64 } output { [0i64,1i64,2i64] }
 
-let iiota [n] : [n]i64 = iota n
+def iiota [n] : [n]i64 = iota n
 
-let main x = copy iiota : [x]i64
+def main x = copy iiota : [x]i64

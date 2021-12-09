@@ -9,7 +9,7 @@
 -- output {
 --   [1i64, 6i64, 15i64, 28i64]
 -- }
-let main (xs: []i64): []i64 =
+def main (xs: []i64): []i64 =
   map (\(x: i64)  ->
         let arr = #[unsafe] 0..<(2 * x)
         let arr' = #[unsafe] unflatten 2 x arr in

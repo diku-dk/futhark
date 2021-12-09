@@ -2,13 +2,13 @@
 -- structure gpu { Manifest 1 }
 
 
-let smoothen [n] (xs: [n]f32) =
+def smoothen [n] (xs: [n]f32) =
   let pick i = xs[i64.min (n-1) (i64.max 0 i)]
   in tabulate n (\i -> pick (i-2) + pick (i-1) *4 +
                        pick i * 6 +
                        pick (i+1) * 4 + pick (i+2))
 
-let main xss =
+def main xss =
   xss |>
   transpose |>
   map transpose |>

@@ -1,7 +1,7 @@
 -- ==
 -- error: iota.*consumed
 
-let main n =
+def main n =
   let (a,b) = let y = iota n
               in (y,y)
   let a[0] = 0

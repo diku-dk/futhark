@@ -9,12 +9,12 @@
 
 import "intrinsics"
 
-let f (acc: *acc ([]i32)) i =
+def f (acc: *acc ([]i32)) i =
   let acc = write acc (i*2) (i32.i64 i)
   let acc = write acc (i*2+1) (i32.i64 i)
   in acc
 
-let main b (xs: *[]i32) =
+def main b (xs: *[]i32) =
   if b
   then reduce_by_index_stream xs (+) 0 f (iota 10)
   else scatter_stream xs f (iota 10)

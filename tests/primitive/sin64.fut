@@ -6,4 +6,4 @@
 -- input { -3.1415927 } output { 8.742278e-8 }
 
 
-let main(x: f64): f64 = f64.sin(x)
+def main(x: f64): f64 = f64.sin(x)

@@ -11,7 +11,7 @@ module IntLib = {
   let numberFour(): i32 = 4
 }
 
-let localplus(a: i32, b: i32): i32 = IntLib.plus (a,b)
+def localplus(a: i32, b: i32): i32 = IntLib.plus (a,b)
 
-let main (a: i32) (b: i32): i32 =
+def main (a: i32) (b: i32): i32 =
   localplus(a,b)

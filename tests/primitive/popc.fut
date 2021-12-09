@@ -5,7 +5,7 @@
 -- input { 4294967295u64 } output { 8i32 16i32 32i32 32i32 8i32 16i32 32i32 32i32 }
 -- input { 18446744073709551615u64 } output { 8i32 16i32 32i32 64i32 8i32 16i32 32i32 64i32 }
 
-let main (x: u64) =
+def main (x: u64) =
   (i8.popc (i8.u64 x),
    i16.popc (i16.u64 x),
    i32.popc (i32.u64 x),

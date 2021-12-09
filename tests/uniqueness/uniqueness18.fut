@@ -4,5 +4,5 @@
 -- ==
 -- structure { Map 0 Copy 1 }
 
-let main(as: []i32): *[]i32 =
+def main(as: []i32): *[]i32 =
   map (\x -> x) as

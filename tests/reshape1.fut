@@ -9,8 +9,8 @@
 -- error: Cannot unflatten array of shape \[3\] to array of shape \[1\]\[1\]
 
 
-let intsqrt(x: i64): i64 =
+def intsqrt(x: i64): i64 =
     i64.f32(f32.sqrt(f32.i64(x)))
 
-let main [n] (a: [n]i64): [][]i64 =
+def main [n] (a: [n]i64): [][]i64 =
     unflatten (intsqrt n) (intsqrt n) a

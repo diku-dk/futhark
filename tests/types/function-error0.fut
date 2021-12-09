@@ -2,6 +2,6 @@
 -- ==
 -- error: Cannot apply "f"
 
-let f 't (x: t) (y: t) = (x,y)
+def f 't (x: t) (y: t) = (x,y)
 
-let main () = f 1 false
+def main () = f 1 false

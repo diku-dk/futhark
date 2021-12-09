@@ -28,4 +28,4 @@ module frob_int (E: has_int) = {
 
 module m = frob_int has_quux
 
-let main (x: i32) = m.really_frob x
+def main (x: i32) = m.really_frob x

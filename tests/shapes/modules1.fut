@@ -13,4 +13,4 @@ module m = {
   val mk : (n: i64) -> t [n]
 }
 
-let main x = (x+2) |> m.mk |> m.f
+def main x = (x+2) |> m.mk |> m.f

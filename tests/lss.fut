@@ -12,7 +12,7 @@
 -- output { 5 }
 
 -- The two relations must describe a transitive relation.
-let lss [n] 't (pred1: t -> bool) (pred2: t -> t -> bool) (xs: [n]t) =
+def lss [n] 't (pred1: t -> bool) (pred2: t -> t -> bool) (xs: [n]t) =
   let max = i32.max
 
   let redOp (lssx, lisx, lcsx, tlx, firstx, lastx)
@@ -32,5 +32,5 @@ let lss [n] 't (pred1: t -> bool) (pred2: t -> t -> bool) (xs: [n]t) =
 
   in (reduce redOp (0,0,0,0,xs[0],xs[0]) (map mapOp xs)).0
 
-let main (xs: []i32): i32 =
+def main (xs: []i32): i32 =
   lss (\_ -> true) (\(x: i32) y -> x <= y) xs

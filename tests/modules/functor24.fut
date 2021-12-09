@@ -16,4 +16,4 @@ module big_field (M: abs) = {
 
 module mod = big_field (fieldtype abs)
 
-let main (a: mod.t) = a
+def main (a: mod.t) = a

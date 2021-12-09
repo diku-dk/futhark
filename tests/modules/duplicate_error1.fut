@@ -8,4 +8,4 @@ module Foo = {
 type foo = i32
 type foo = float
 
-let main(): i32 = 0
+def main(): i32 = 0

@@ -16,28 +16,28 @@
 
 type complex = (f32, f32)
 
-let dot(c: complex): f32 =
+def dot(c: complex): f32 =
   let (r, i) = c
   in r * r + i * i
 
-let multComplex(x: complex, y: complex): complex =
+def multComplex(x: complex, y: complex): complex =
   let (a, b) = x
   let (c, d) = y
   in (a*c - b * d,
       a*d + b * c)
 
-let addComplex(x: complex, y: complex): complex =
+def addComplex(x: complex, y: complex): complex =
   let (a, b) = x
   let (c, d) = y
   in (a + c,
       b + d)
 
-let divergence(depth: i32, c0: complex): i32 =
+def divergence(depth: i32, c0: complex): i32 =
   (loop (c, i) = (c0, 0) while i < depth && dot(c) < 4.0 do
      (addComplex(c0, multComplex(c, c)),
       i + 1)).1
 
-let main (screenX: i64) (screenY: i64) (depth: i32) (xmin: f32) (ymin: f32) (xmax: f32) (ymax: f32): [screenX][screenY]i32 =
+def main (screenX: i64) (screenY: i64) (depth: i32) (xmin: f32) (ymin: f32) (xmax: f32) (ymax: f32): [screenX][screenY]i32 =
   let sizex = xmax - xmin
   let sizey = ymax - ymin
   in map (\x: [screenY]i32  ->

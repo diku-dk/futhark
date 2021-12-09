@@ -3,4 +3,4 @@
 -- ==
 -- error: functional
 
-let f x = ([x], x 2)
+def f x = ([x], x 2)

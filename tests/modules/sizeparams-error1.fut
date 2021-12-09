@@ -14,4 +14,4 @@ module M_k2: MT = {
   type k_ints = ints [2]
 }
 
-let main(n: i32): M_k2.k_ints = iota n
+def main(n: i32): M_k2.k_ints = iota n

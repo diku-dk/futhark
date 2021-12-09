@@ -1,4 +1,4 @@
-let foo x =
+def foo x =
   #[sequential]
   let n = 2i64
   let ys = replicate n 0
@@ -7,4 +7,4 @@ let foo x =
   let baz = all (\i -> ys[i] == 0) (0..<n)
   in bar && baz
 
-let main xs = map foo xs
+def main xs = map foo xs

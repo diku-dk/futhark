@@ -16,12 +16,12 @@
 -- }
 -- output { [[0.500000], [0.750000], [0.250000], [0.375000], [0.875000], [0.625000], [0.125000], [0.187500], [0.687500], [0.937500]] }
 
-let grayCode(x: i32): i32 = (x >> 1) ^ x
+def grayCode(x: i32): i32 = (x >> 1) ^ x
 
 ----------------------------------------
 --- Sobol Generator
 ----------------------------------------
-let testBit(n: i32, ind: i32): bool =
+def testBit(n: i32, ind: i32): bool =
     let t = (1 << ind) in (n & t) == t
 
 -----------------------------------------------------------------
@@ -30,20 +30,20 @@ let testBit(n: i32, ind: i32): bool =
 ----    Currently Futhark hoists it outside, but this will
 ----    not allow fusing the filter with reduce -> redomap,
 -----------------------------------------------------------------
-let xorInds [num_bits] (n: i32) (dir_vs: [num_bits]i32): i32 =
+def xorInds [num_bits] (n: i32) (dir_vs: [num_bits]i32): i32 =
     let reldv_vals = map (\(dv: i32, i): i32  ->
                             if testBit(grayCode(n),i32.i64 i)
                             then dv else 0
                         ) (zip (dir_vs) (iota(num_bits)) ) in
     reduce (^) 0 (reldv_vals )
 
-let sobolIndI [len] (dir_vs:  [len][]i32, n: i32 ): [len]i32 =
+def sobolIndI [len] (dir_vs:  [len][]i32, n: i32 ): [len]i32 =
     map (xorInds(n)) (dir_vs )
 
 --------------------------------
 ---- STRENGTH-REDUCED FORMULA
 --------------------------------
-let index_of_least_significant_0(num_bits: i32, n: i32): i32 =
+def index_of_least_significant_0(num_bits: i32, n: i32): i32 =
   let (goon,k) = (true,0) in
   let (_,k,_) = loop ((goon,k,n)) for i < num_bits do
     if(goon)
@@ -53,19 +53,19 @@ let index_of_least_significant_0(num_bits: i32, n: i32): i32 =
     else      (false,k,   n   )
   in k
 
-let sobolRecI [len][num_bits] (sob_dir_vs: [len][num_bits]i32, prev: []i32, n: i32): [len]i32 =
+def sobolRecI [len][num_bits] (sob_dir_vs: [len][num_bits]i32, prev: []i32, n: i32): [len]i32 =
   let bit = index_of_least_significant_0(i32.i64 num_bits,n) in
   map  (\(vct_prev: ([]i32,i32)): i32  ->
          let (vct_row, prev) = vct_prev in
          vct_row[bit] ^ prev
       ) (zip (sob_dir_vs) prev)
 
-let recM [len][num_bits] (sob_dirs:  [len][num_bits]i32, i: i32 ): [len]i32 =
+def recM [len][num_bits] (sob_dirs:  [len][num_bits]i32, i: i32 ): [len]i32 =
   let bit= index_of_least_significant_0(i32.i64 num_bits,i) in
   map (\(row: []i32): i32 -> row[bit]) (sob_dirs )
 
 -- computes sobol numbers: n,..,n+chunk-1
-let sobolChunk [len] [num_bits] (dir_vs: [len][num_bits]i32) (n: i32) (chunk: i64): [chunk][len]f64 =
+def sobolChunk [len] [num_bits] (dir_vs: [len][num_bits]i32) (n: i32) (chunk: i64): [chunk][len]f64 =
   let sob_fact= 1.0 / f64.i64(1 << num_bits)
   let sob_beg = sobolIndI(dir_vs, n+1)
   let contrbs = map (\k ->
@@ -86,7 +86,7 @@ let sobolChunk [len] [num_bits] (dir_vs: [len][num_bits]i32) (n: i32) (chunk: i6
 -- MAIN
 ----------------------------------------
 
-let main [num_bits] (num_mc_it: i64)
+def main [num_bits] (num_mc_it: i64)
                     (dir_vs_nosz: [][num_bits]i32)
                     (num_dates: i32)
                     (num_und: i32): [][]f64 =

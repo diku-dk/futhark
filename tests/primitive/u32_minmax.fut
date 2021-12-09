@@ -5,6 +5,6 @@
 -- input { 1u32 4294967295u32 } output { 4294967295u32 1u32 }
 
 
-let main(x: u32) (y: u32): (u32,u32) =
+def main(x: u32) (y: u32): (u32,u32) =
   (u32.max x y,
    u32.min x y)

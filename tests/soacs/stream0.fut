@@ -5,7 +5,7 @@
 -- input { 10i64 1 1 }
 -- output { [[0], [1], [1], [1], [1], [1], [1], [1], [1], [1]] }
 
-let main(num_mc_it: i64)
+def main(num_mc_it: i64)
         (num_dates: i32)
         (num_und: i32): [][]i32 =
   let sobvctsz  = num_dates*num_und in

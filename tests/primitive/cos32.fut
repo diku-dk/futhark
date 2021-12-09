@@ -6,4 +6,4 @@
 -- input { -3.1415927f32 } output { -1f32 }
 
 
-let main(x: f32): f32 = f32.cos(x)
+def main(x: f32): f32 = f32.cos(x)

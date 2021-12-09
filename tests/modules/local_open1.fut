@@ -4,9 +4,9 @@
 
 module m0 = {
 module m1 = {
-let x = 2
+def x = 2
 }
-let x = 3
+def x = 3
 }
 
-let main(x: i32) = x + m0.(x + m1.(x))
+def main(x: i32) = x + m0.(x + m1.(x))

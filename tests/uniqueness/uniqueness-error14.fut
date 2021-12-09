@@ -3,7 +3,7 @@
 -- ==
 -- error: Type of expression
 
-let main(): i32 =
+def main(): i32 =
   let arr = copy(iota(10))
   let barr = copy(iota(10)) in
   let arr = loop arr for i < 10 do

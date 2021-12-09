@@ -25,4 +25,4 @@ module M = {
 module T1a = M.T1({let f (x: i32) (y: i32) = x + y})
 module T = T1a.T2({let f (x: i32) (y: i32) = x * y})
 
-let main (x: i32) = T.g x
+def main (x: i32) = T.g x

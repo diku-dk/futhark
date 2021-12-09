@@ -6,4 +6,4 @@ module m : {
   let mk (n: i64) : t = #foo (replicate n 0)
 }
 
-let main n = m.mk n
+def main n = m.mk n

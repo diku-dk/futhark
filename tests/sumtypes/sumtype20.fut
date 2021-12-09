@@ -5,7 +5,7 @@
 type some   = #none | #some i32 i32
 type foobar = #foo i32 some i32
 
-let main : i32 =
+def main : i32 =
 --   match (#foo 1 (#some 2) 3) : foobar
 --   case (#foo 1 (#some 2) 3) -> 1
   match (#some 1 2) : some

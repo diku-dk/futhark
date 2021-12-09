@@ -11,6 +11,6 @@ module m : mt = {
   let mk b = [b]
 }
 
-let main b =
+def main b =
   let [n] (_: m.arr [n]) = m.mk b
   in n

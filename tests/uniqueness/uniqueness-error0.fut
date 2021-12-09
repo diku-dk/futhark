@@ -2,7 +2,7 @@
 -- ==
 -- error: "b".*consumed
 
-let main(): i64 =
+def main(): i64 =
   let a = iota(10)
   let b:*[]i64 = a
   let b[0] = 1

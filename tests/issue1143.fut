@@ -1,28 +1,28 @@
-let dotprod [n] (xs: [n]f32) (ys: [n]f32): f32 =
+def dotprod [n] (xs: [n]f32) (ys: [n]f32): f32 =
   reduce (+) 0.0 (map2 (*) xs ys)
 
-let house [d] (x: [d]f32): ([d]f32, f32) =
+def house [d] (x: [d]f32): ([d]f32, f32) =
   let dot = dotprod x x
   let dot' = dot - x[0]**2 + x[0]**2
   let beta = if dot' != 0 then 2.0/dot' else 0
   in (x, beta)
 
-let matmul [n][p][m] (xss: [n][p]f32) (yss: [p][m]f32): [n][m]f32 =
+def matmul [n][p][m] (xss: [n][p]f32) (yss: [p][m]f32): [n][m]f32 =
   map (\xs -> map (dotprod xs) (transpose yss)) xss
 
-let outer [n][m] (xs: [n]f32) (ys: [m]f32): [n][m]f32 =
+def outer [n][m] (xs: [n]f32) (ys: [m]f32): [n][m]f32 =
   matmul (map (\x -> [x]) xs) [ys]
 
-let matsub [m][n] (xss: [m][n]f32) (yss: [m][n]f32): *[m][n]f32 =
+def matsub [m][n] (xss: [m][n]f32) (yss: [m][n]f32): *[m][n]f32 =
   map2 (\xs ys -> map2 (-) xs ys) xss yss
 
-let matadd [m][n] (xss: [m][n]f32) (yss: [m][n]f32): [m][n]f32 =
+def matadd [m][n] (xss: [m][n]f32) (yss: [m][n]f32): [m][n]f32 =
   map2 (\xs ys -> map2 (+) xs ys) xss yss
 
-let matmul_scalar [m][n] (xss: [m][n]f32) (k: f32): *[m][n]f32 =
+def matmul_scalar [m][n] (xss: [m][n]f32) (k: f32): *[m][n]f32 =
   map (map (*k)) xss
 
-let block_householder [m][n] (A: [m][n]f32) (r: i64): ([][]f32, [][]f32) =
+def block_householder [m][n] (A: [m][n]f32) (r: i64): ([][]f32, [][]f32) =
   #[unsafe]
   let Q = replicate m (replicate m 0)
   let (Q,A) =
@@ -44,4 +44,4 @@ let block_householder [m][n] (A: [m][n]f32) (r: i64): ([][]f32, [][]f32) =
     in (Q,A)
   in (Q,A)
 
-let main arrs r = map (\arr -> block_householder arr r) arrs
+def main arrs r = map (\arr -> block_householder arr r) arrs

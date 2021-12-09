@@ -1,9 +1,9 @@
 -- ==
 -- error: "b".*consumed
 
-let f(a: *[]i64, i: i32, v: i64): i64 = let a[i]=v in a[i]
+def f(a: *[]i64, i: i32, v: i64): i64 = let a[i]=v in a[i]
 
-let main(): i64 =
+def main(): i64 =
     let n = 10
     let a = iota(n)
     let b = a -- a and b are aliases.

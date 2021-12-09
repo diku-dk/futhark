@@ -31,5 +31,5 @@ module m1 = {
 
 module m2 = f2(m1)
 
-let main [n] (bs: [n]bool) =
+def main [n] (bs: [n]bool) =
   unzip (m2.init bs)

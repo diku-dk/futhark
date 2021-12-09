@@ -5,7 +5,7 @@
 -- structure { Screma 1 }
 -- structure gpu { SegRed 1 SegScan 1 }
 
-let main (xs: []i32) =
+def main (xs: []i32) =
   (reduce (+) 0 xs,
    scan (&&) true (map (<0) xs),
    reduce (*) 0 xs)

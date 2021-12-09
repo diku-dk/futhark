@@ -6,7 +6,7 @@
 -- input { 2u16 } output { 32769u32 }
 -- input { 33799u16 } output { 28110u32 }
 
-let main(a: u16): u32 =
+def main(a: u16): u32 =
   let b = 0x10001u32
   let u = 0i32
   let v = 1i32 in

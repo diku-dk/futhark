@@ -3,5 +3,5 @@
 -- ==
 -- error: functional
 
-let main (xs : []i32) =
+def main (xs : []i32) =
   map (\(x:i32) -> \(y:i32) -> x+y) xs

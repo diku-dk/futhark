@@ -3,7 +3,7 @@
 -- input { [ [1.0, 3.0, 5.0, 7.0, 9.0, 11.0], [0.0, 2.0, 4.0, 6.0, 8.0, 10.0] ] }
 -- output { [[3.0f64, 2.0f64, 2.0f64, 2.0f64, 2.75f64, -11.25f64], [2.0f64, 2.0f64, 2.0f64, 2.0f64, 2.0f64, -10.0f64]] }
 
-let brownian_bridge [num_dates] (gauss: [num_dates]f64): [num_dates]f64 =
+def brownian_bridge [num_dates] (gauss: [num_dates]f64): [num_dates]f64 =
 
   let bbrow = replicate num_dates 0.0
   let bbrow[ num_dates-1 ] = 0.5 * gauss[0]
@@ -21,5 +21,5 @@ let brownian_bridge [num_dates] (gauss: [num_dates]f64): [num_dates]f64 =
       in  bbrow
   in bbrow
 
-let main [m] [num_dates] (gausses: [m][num_dates]f64) : [m][num_dates]f64 =
+def main [m] [num_dates] (gausses: [m][num_dates]f64) : [m][num_dates]f64 =
     map brownian_bridge gausses

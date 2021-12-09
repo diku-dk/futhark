@@ -2,7 +2,7 @@
 -- ==
 -- error: not consumable
 
-let main =
+def main =
   let n = 10
   let a = iota(n)
   let b = iota(n)

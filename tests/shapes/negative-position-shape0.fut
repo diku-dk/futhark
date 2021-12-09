@@ -3,6 +3,6 @@
 -- ==
 -- input {} output { 3i64 }
 
-let f [n] (_g: i32 -> [n]i32) : i64 = n
+def f [n] (_g: i32 -> [n]i32) : i64 = n
 
-let main = f (replicate 3)
+def main = f (replicate 3)

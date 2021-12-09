@@ -10,7 +10,7 @@ type some 't    = #none | #some t
 type^ mooboo '^t = #moo t (some i32) | #boo
 type^ foobar     = #foo (mooboo (i32 -> i32)) | #bar (i32 -> i32)
 
-let main : i32 =
+def main : i32 =
   match (#foo (#moo (+1) #none)) : foobar
   case #bar f    -> 0
   case #foo #boo -> 2

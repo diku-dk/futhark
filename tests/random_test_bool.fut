@@ -3,4 +3,4 @@
 -- ==
 -- random input { [100]bool } auto output
 
-let main (bs: []bool) = reduce (&&) true bs
+def main (bs: []bool) = reduce (&&) true bs

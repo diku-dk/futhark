@@ -2,5 +2,5 @@
 -- ==
 -- error:
 
-let f r = let y: f32 = r.l
+def f r = let y: f32 = r.l
           in (r: {l: i32})

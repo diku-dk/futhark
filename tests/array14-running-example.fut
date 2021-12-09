@@ -1,7 +1,7 @@
 -- Example program from the ARRAY'14 paper.
 -- ==
 
-let main [k][m][n] (xs: [k]i64, as: [m][n]f64): [][]f64 =
+def main [k][m][n] (xs: [k]i64, as: [m][n]f64): [][]f64 =
   map  (\(e: (i64, []f64))  ->
          #[unsafe]
          let (i, a) = e in

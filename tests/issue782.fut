@@ -25,4 +25,4 @@ module wrapper (bar: bar)
 
 module wrapped = wrapper bar_f32 foo_f32
 
-let main (s: f32): f32 = wrapped.baz s
+def main (s: f32): f32 = wrapped.baz s

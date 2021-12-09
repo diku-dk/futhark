@@ -6,4 +6,4 @@
 -- input { -3.1415927 } output { -1.0 }
 
 
-let main(x: f64): f64 = f64.cos(x)
+def main(x: f64): f64 = f64.cos(x)

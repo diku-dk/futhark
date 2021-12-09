@@ -5,4 +5,4 @@
 -- output {
 --   [1, 3, 6, 10, 15, 21, 28, 36, 45]
 -- }
-let main(a: []i32): []i32 = scan (+) 0 a
+def main(a: []i32): []i32 = scan (+) 0 a

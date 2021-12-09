@@ -10,5 +10,5 @@
 -- }
 -- structure { Scatter 1 }
 
-let main [n] (k: i64) (array: *[n]i32): [n]i32 =
+def main [n] (k: i64) (array: *[n]i32): [n]i32 =
   scatter array (iota k) (map (\x -> i32.i64 x-9) (iota k))

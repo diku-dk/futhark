@@ -2,4 +2,4 @@
 -- ==
 -- error: equality
 
-let main 't (x: t) = x == x
+def main 't (x: t) = x == x

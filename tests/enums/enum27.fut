@@ -19,7 +19,7 @@ module enum_module : foobar_mod = {
 
 }
 
-let main : i32 = match (enum_module.f enum_module.foo)
+def main : i32 = match (enum_module.f enum_module.foo)
                   case 1 -> 3
                   case 2 -> 4
                   case _ -> 5

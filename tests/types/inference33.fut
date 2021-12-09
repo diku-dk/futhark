@@ -4,6 +4,6 @@
 -- ==
 -- input { 2u8 } output { 3u8 }
 
-let main (x: u8) =
+def main (x: u8) =
   let inc y = y + 1
   in inc x

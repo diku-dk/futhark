@@ -1,7 +1,7 @@
-let number = 123 + 456 : i64
+def number = 123 + 456 : i64
 
-let array = iota number
+def array = iota number
 
-let sum = i64.sum array
+def sum = i64.sum array
 
-let main = sum
+def main = sum

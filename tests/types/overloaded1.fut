@@ -2,4 +2,4 @@
 -- ==
 -- warning: ambiguous
 
-let plus x y = x + y
+def plus x y = x + y

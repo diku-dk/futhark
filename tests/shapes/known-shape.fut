@@ -13,7 +13,7 @@
 --    [10, 11, 12, 13, 14, 15, 16, 17]]
 -- }
 
-let main (n: i64) (m: i64) (k: i64): [n][k]i32 =
+def main (n: i64) (m: i64) (k: i64): [n][k]i32 =
   let a = replicate n (iota m) in
   map2 (\(i: i64) (r: [m]i64): [k]i32  ->
             let x = reduce (+) 0 r

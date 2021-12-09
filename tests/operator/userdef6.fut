@@ -4,8 +4,8 @@
 -- output { [[1],[2],[3]] [[true]]
 --          [[1],[2],[3]] [[true]] }
 
-let (++) 't (xs: []t) (ys: []t) = xs
+def (++) 't (xs: []t) (ys: []t) = xs
 
-let main (xss: [][]i32) (yss: [][]i32) (ass: [][]bool) (bss: [][]bool) =
+def main (xss: [][]i32) (yss: [][]i32) (ass: [][]bool) (bss: [][]bool) =
   (map2 (++) xss yss, map2 (++) ass bss,
    map (++[1]) xss, map ([true]++) bss)

@@ -6,5 +6,5 @@ type Object
   = #PassiveObject ObjectGeom
   | #Light ([3]f64)
 
-let main (_: i32) : Object =
+def main (_: i32) : Object =
   #PassiveObject (#Block [ 1.0, -1.6,  1.2])

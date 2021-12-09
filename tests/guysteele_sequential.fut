@@ -8,16 +8,16 @@
 -- input { [2,6,3,5,2,8,1,4,2,2,5,3,5,7,4,1] }
 -- output { 35 }
 
-let min(x: i32) (y: i32): i32 =
+def min(x: i32) (y: i32): i32 =
   if x < y then x else y
 
-let max(x: i32) (y: i32): i32 =
+def max(x: i32) (y: i32): i32 =
   if x < y then y else x
 
-let reverse [n] (a: [n]i32): [n]i32 =
+def reverse [n] (a: [n]i32): [n]i32 =
   map (\(i: i64): i32 -> a[n-i-1]) (iota(n))
 
-let main(a: []i32): i32 =
+def main(a: []i32): i32 =
   let highestToTheLeft = scan max 0 a
   let highestToTheRight = reverse(scan max 0 (reverse(a)))
   let waterLevels = map2 min highestToTheLeft highestToTheRight in

@@ -3,7 +3,7 @@
 -- Revealed a bug in in-place-lowering.
 -- ==
 
-let main [numD]
+def main [numD]
         (points: [numD]f32)
         (numBins: i32)
         (numBins2: i64)

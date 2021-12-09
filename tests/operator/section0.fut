@@ -2,8 +2,8 @@
 -- ==
 -- input { 5 3 } output { 2 2 -2 }
 
-let (-^) (x: i32) (y: i32) = x - y
-let main (x: i32) (y: i32) =
+def (-^) (x: i32) (y: i32) = x - y
+def main (x: i32) (y: i32) =
   ( (-^) x y
   , (x -^) y
   , (-^ x) y)

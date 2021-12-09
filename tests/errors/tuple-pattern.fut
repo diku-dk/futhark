@@ -3,6 +3,6 @@
 -- ==
 -- error: match
 
-let main(): i32 =
+def main(): i32 =
   let (x,y) = (1,2,3)
   in x+y

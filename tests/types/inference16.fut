@@ -2,4 +2,4 @@
 -- ==
 -- input { 2 } output { true }
 
-let main x = x == 2
+def main x = x == 2

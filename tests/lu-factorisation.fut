@@ -11,7 +11,7 @@
 -- }
 
 
-let lu_inplace [n] (a: *[n][]f64): (*[][]f64, *[][]f64) =
+def lu_inplace [n] (a: *[n][]f64): (*[][]f64, *[][]f64) =
   let (_,l,u) = loop (a,l,u) = (a,
                                 replicate n (replicate n 0.0),
                                 replicate n (replicate n 0.0)) for k < n do
@@ -27,5 +27,5 @@ let lu_inplace [n] (a: *[n][]f64): (*[][]f64, *[][]f64) =
       in (a,l,u)
   in (l,u)
 
-let main(a: [][]f64): ([][]f64, [][]f64) =
+def main(a: [][]f64): ([][]f64, [][]f64) =
   lu_inplace(copy(a))

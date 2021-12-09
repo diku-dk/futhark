@@ -11,7 +11,7 @@
 -- output { [[[0.000000]], [[0.674490]]] }
 -- structure seq-mem { Update 2 }
 
-let doInPlaceUpdate [num_dates]
+def doInPlaceUpdate [num_dates]
                    (bb_inds: [3][num_dates]i32)
                    (bb_data: [3][num_dates]f64)
                    (gauss: [num_dates]f64): [num_dates]f64 =
@@ -19,7 +19,7 @@ let doInPlaceUpdate [num_dates]
     let bbrow[ 0 ] = gauss[0]
     in bbrow
 
-let mapInPlaceUpdate [num_dates][num_und]
+def mapInPlaceUpdate [num_dates][num_und]
                     (bb_inds: [3][num_dates]i32)
                     (bb_data: [3][num_dates]f64)
                     (gauss2dT: [num_und][num_dates]f64): [num_und][num_dates]f64 =
@@ -29,7 +29,7 @@ let mapInPlaceUpdate [num_dates][num_und]
 -- MAIN
 ----------------------------------------
 
-let main [n][num_dates][num_und]
+def main [n][num_dates][num_und]
         (bb_inds: [3][num_dates]i32)
         (bb_data: [3][num_dates]f64)
         (gauss_mat: [n][num_und][num_dates]f64): [][][]f64 =

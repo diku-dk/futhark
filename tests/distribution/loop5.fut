@@ -4,7 +4,7 @@
 --
 -- structure gpu { Map/Loop 0 }
 
-let main [n][m][k] (a: *[n][m][k]i32): [n][m][k]i32 =
+def main [n][m][k] (a: *[n][m][k]i32): [n][m][k]i32 =
   map (\(a_r: [m][k]i32): [m][k]i32  ->
         loop(a_r) for i < m do
           map (\(a_r_r: [k]i32): *[k]i32  ->

@@ -6,4 +6,4 @@
 -- input { -3.1415927f32 } output { 8.742278e-8f32 }
 
 
-let main(x: f32): f32 = f32.sin(x)
+def main(x: f32): f32 = f32.sin(x)

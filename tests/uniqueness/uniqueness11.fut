@@ -7,11 +7,11 @@
 --   0i64
 -- }
 
-let f (x: i64) = x
+def f (x: i64) = x
 
-let g (x: i64) = x
+def g (x: i64) = x
 
-let main: i64 =
+def main: i64 =
   let a      = iota(10)
   let x      = map f a
   let a[1]   = 3

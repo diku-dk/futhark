@@ -3,7 +3,7 @@
 -- input { [1, -2, 3, 4, -1, 5, -6, 1] }
 -- output { 11 }
 
-let main(xs: []i32): i32 =
+def main(xs: []i32): i32 =
   let max = i32.max
   let redOp (mssx, misx, mcsx, tsx) (mssy, misy, mcsy, tsy) =
     ( max mssx (max mssy (mcsx + misy))

@@ -20,7 +20,7 @@
 -- input { 2 4294967288u32 } output { 1u32 }
 
 
-let main (f: i32) (x: u32): u32 =
+def main (f: i32) (x: u32): u32 =
   if      f == 0 then -x
   else if f == 1 then u32.abs(x)
   else                u32.sgn(x)

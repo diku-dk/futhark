@@ -11,7 +11,7 @@
 --      Screma 1
 -- }
 --
-let main(arr: []f64): ([]f64,[]f64,[]f64) =
+def main(arr: []f64): ([]f64,[]f64,[]f64) =
     let x = map     (+ 1.0) arr
     let y = map2    (+) x arr
     let r = map     (+ 5.0) arr in

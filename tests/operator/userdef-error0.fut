@@ -2,6 +2,6 @@
 -- ==
 -- error: &&
 
-let (x: bool) && (y: bool) = x
+def (x: bool) && (y: bool) = x
 
-let main(x: bool) = x && x
+def main(x: bool) = x && x

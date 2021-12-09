@@ -2,7 +2,7 @@
 -- ==
 -- error:
 
-let f : bool =
+def f : bool =
   match #foo
   case #foo -> true
   case #bar -> true

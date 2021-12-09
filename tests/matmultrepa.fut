@@ -13,19 +13,19 @@
 -- compiled random input { [31][32]i32 [32][31]i32 } auto output
 -- compiled random input { [128][17]i32 [17][128]i32 } auto output
 -- structure { /Screma 1 /Screma/Screma 1 Screma/Screma/Screma 1 }
-let redplus1(a: []i32): i32 = reduce (+) 0 a
-let redplus2 [n][m] (a: [n][m]i32): [n]i32 = map redplus1 a
+def redplus1(a: []i32): i32 = reduce (+) 0 a
+def redplus2 [n][m] (a: [n][m]i32): [n]i32 = map redplus1 a
 
-let mul1 [m]    (a: [m]i32, b: [m]i32): [m]i32 = map2 (*) a b
-let mul2 [n][m] (a: [n][m]i32, b: [n][m]i32): [n][m]i32 = map mul1 (zip a b)
+def mul1 [m]    (a: [m]i32, b: [m]i32): [m]i32 = map2 (*) a b
+def mul2 [n][m] (a: [n][m]i32, b: [n][m]i32): [n][m]i32 = map mul1 (zip a b)
 
-let replin [m] (n: i64) (a: [m]i32): [n][m]i32 = replicate n a
+def replin [m] (n: i64) (a: [m]i32): [n][m]i32 = replicate n a
 
-let matmultFun [n][m] (a: [n][m]i32, b: [m][n]i32 ): [n][n]i32 =
+def matmultFun [n][m] (a: [n][m]i32, b: [m][n]i32 ): [n][n]i32 =
     let br  = replicate n (transpose b)
     let ar  = map       (replin n) a
     let abr = map   mul2 (zip ar br)
     in map redplus2 abr
 
-let main [n][m] (x: [n][m]i32) (y: [m][n]i32): [n][n]i32 =
+def main [n][m] (x: [n][m]i32) (y: [m][n]i32): [n][n]i32 =
   matmultFun(x, y)

@@ -2,9 +2,9 @@
 -- ==
 -- error: consumed
 
-let f(x: i32): i32 = x
+def f(x: i32): i32 = x
 
-let main(): i32 =
+def main(): i32 =
     let n = 10
     let a = iota(n)
     let b = iota(n)

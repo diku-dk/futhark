@@ -2,8 +2,8 @@
 -- ==
 -- error: do not match
 
-let ap 'a (f: a -> a) (x: a) =
+def ap 'a (f: a -> a) (x: a) =
   f x
 
-let main [n] (arr: [n]i32) =
+def main [n] (arr: [n]i32) =
   ap (\xs -> xs ++ xs) arr

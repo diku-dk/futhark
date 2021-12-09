@@ -5,6 +5,6 @@
 -- input { 1u16 65535u16 } output { 65535u16 1u16 }
 
 
-let main(x: u16) (y: u16): (u16,u16) =
+def main(x: u16) (y: u16): (u16,u16) =
   (u16.max x y,
    u16.min x y)

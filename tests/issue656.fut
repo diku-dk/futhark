@@ -3,7 +3,7 @@
 -- might alias some other array (specifically 'xs'), and the result
 -- then went on to be consumed in the 'scatter's.
 
-let main [n] (xs:[n]i32) (is:[n]i32) =
+def main [n] (xs:[n]i32) (is:[n]i32) =
   let bits1 = map (&1) xs
   let bits0 = map (1-) bits1
   let idxs0 = map2 (*) bits0 (scan (+) 0 bits0)

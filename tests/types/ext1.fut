@@ -4,11 +4,11 @@
 
 type^ t = ?[n].([n]bool, bool -> [n]bool)
 
-let v x : t =
+def v x : t =
   let x' = x + 1
   in (replicate x' true,
       \b -> replicate x' b)
 
-let main x =
+def main x =
   let (arr, f) = v x
   in unzip (zip arr (f false))

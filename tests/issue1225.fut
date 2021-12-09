@@ -1,4 +1,4 @@
-let main [h][w] (pic: [h][w][3]u8) idxArr : [][][3]u8 =
+def main [h][w] (pic: [h][w][3]u8) idxArr : [][][3]u8 =
   let wm1 = w-1
   in map2 (\(row: [][3]u8) i ->
              if i == 0

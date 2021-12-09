@@ -3,7 +3,7 @@
 -- ==
 -- structure { Scatter 2 }
 
-let main [k] (indexes: [k]i64,
+def main [k] (indexes: [k]i64,
               values1: [k]i64,
               values2: [k]i64,
               array1: *[k]i64,

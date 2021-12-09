@@ -16,4 +16,4 @@ module foo = {
 
 module k_means_em = pm (pm foo : mixture)
 
-let main (x: k_means_em.V.t) = x
+def main (x: k_means_em.V.t) = x

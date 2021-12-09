@@ -5,6 +5,6 @@
 
 type foobar = #foo | #bar
 
-let f : i32 =
+def f : i32 =
   match #foo : foobar
     case (((((#foo))))) -> 1

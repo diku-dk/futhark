@@ -14,14 +14,14 @@
 
 -- constants
 
-let strike(): i32 = 100
-let bankDays(): i32 = 252
-let s0(): i32 = 100
-let r(): f32 = 0.03
-let alpha(): f32 = 0.07
-let sigma(): f32 = 0.20
+def strike(): i32 = 100
+def bankDays(): i32 = 252
+def s0(): i32 = 100
+def r(): f32 = 0.03
+def alpha(): f32 = 0.07
+def sigma(): f32 = 0.20
 
-let binom(expiry: i32): f32 =
+def binom(expiry: i32): f32 =
   let n = i64.i32 (expiry * bankDays())
   let dt = f32.i32(expiry) / f32.i64(n)
   let u = f32.exp(alpha()*dt+sigma()*f32.sqrt(dt))
@@ -50,5 +50,5 @@ let binom(expiry: i32): f32 =
       (map (qDR*) (put_init))))
   in put[0]
 
-let main(expiry: i32): f32 =
+def main(expiry: i32): f32 =
   binom(expiry)

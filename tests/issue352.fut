@@ -282,7 +282,7 @@ module R = S2.Reduce { type t = f64
 		 	 let y = v[1]
 			 in f64.bool(x*x+y*y < 1f64) }
 
-let pi (n:i32) : f64 =
+def pi (n:i32) : f64 =
   R.run n * 4.0 / f64.i32 (n)
 
-let main (n: i32) : f64 = pi 10000
+def main (n: i32) : f64 = pi 10000

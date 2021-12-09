@@ -13,4 +13,4 @@ module m : mt = {
   let len (f: abs) = f true
 }
 
-let main (x: i32) = m.len (m.mk x)
+def main (x: i32) = m.len (m.mk x)

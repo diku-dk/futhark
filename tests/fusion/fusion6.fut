@@ -1,7 +1,7 @@
 -- ==
 -- structure { Screma 1 Scatter 1 }
 
-let main [n] (xs: [n]i32): [n]i32 =
+def main [n] (xs: [n]i32): [n]i32 =
   let num x = x&1
   let pairwise op (a1,b1) (a2,b2) =
     (a1 `op` a2, b1 `op` b2)

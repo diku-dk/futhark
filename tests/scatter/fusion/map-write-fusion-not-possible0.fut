@@ -3,7 +3,7 @@
 -- ==
 -- structure { Screma 1 Scatter 1 }
 
-let main [k][n] (indexes: [k]i64,
+def main [k][n] (indexes: [k]i64,
                  values: [k]i32,
                  array: *[n]i32): ([n]i32, [k]i32) =
   let (indexes', baggage) = unzip(map (\(i, v) ->

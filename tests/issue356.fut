@@ -288,7 +288,7 @@ module Sobol (DM: sobol_dir) (X: { val D : i64 }) : sobol = {
 
 module S2 = Sobol x.sobol_dir { let D = 2i64 }
 
-let mean [n] (xs: [n]f64) : f64 =
+def mean [n] (xs: [n]f64) : f64 =
   reduce (+) 0.0 xs / f64.i64(n)
 
 module R = S2.Reduce { type t = i64
@@ -299,15 +299,15 @@ module R = S2.Reduce { type t = i64
                          let y = v[1]
                          in i64.bool(x*x+y*y < 1f64) }
 
-let norm (x:u32) : f64 = f64.u32(x)/S2.norm
+def norm (x:u32) : f64 = f64.u32(x)/S2.norm
 
-let norms [n] (xs:[n]u32) : [n]f64 = map norm xs
+def norms [n] (xs:[n]u32) : [n]f64 = map norm xs
 
-let normss [n] [D] (xs:[n][D]u32) : [n][D]f64 = map norms xs
+def normss [n] [D] (xs:[n][D]u32) : [n][D]f64 = map norms xs
 
-let means [n] [D] (xs:[D][n]f64) : [D]f64 = map mean xs
+def means [n] [D] (xs:[D][n]f64) : [D]f64 = map mean xs
 
-let main (n: i64) =
+def main (n: i64) =
   let offs = i64.u32 2323234545
   let a = S2.chunki offs n
   let b = map S2.independent (map (+offs) (iota n))

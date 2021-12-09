@@ -1,4 +1,4 @@
 -- ==
 -- error: (out of bounds.*)
 
-let main : u8 = -4
+def main : u8 = -4

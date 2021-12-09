@@ -27,4 +27,4 @@ module f64_sqrt: operation with a = f64 with b = f64 = {
 
 module mysqrt = compose { module F = i32_to_f64 module G = f64_sqrt }
 
-let main(x: i32) = mysqrt.f x
+def main(x: i32) = mysqrt.f x

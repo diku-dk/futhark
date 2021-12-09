@@ -18,4 +18,4 @@ module sum_module : foobar_mod = {
   let bar = (#bar (+5)) : foobar
 }
 
-let main : i32 = sum_module.f sum_module.bar 10
+def main : i32 = sum_module.f sum_module.bar 10

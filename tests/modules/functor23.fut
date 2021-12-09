@@ -24,5 +24,5 @@ module M_a: has_a with a = i32 = {
 
 module M_a_a = pm M_a
 
-let main (x: i32) =
+def main (x: i32) =
   M_a_a.f (x, x)

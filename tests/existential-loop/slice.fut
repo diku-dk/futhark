@@ -4,7 +4,7 @@
 -- output { 52043i32 }
 -- structure gpu-mem { Copy 0 }
 
-let main [n] (a: [n]i32): i32 =
+def main [n] (a: [n]i32): i32 =
   let b = loop xs = a[1:] for i < n / 2 - 2 do
           xs[i:]                 -- This will result in a copy, but it needn't
   in reduce (+) 0 b

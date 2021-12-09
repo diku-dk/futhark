@@ -4,7 +4,7 @@
 -- output {
 --   0
 -- }
-let main: i32 =
+def main: i32 =
   let n = 10
   let a = iota(n)
   let b = iota(n)

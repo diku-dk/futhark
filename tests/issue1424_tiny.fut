@@ -3,7 +3,7 @@
 -- input { 2 [1,2,3] [42] } auto output
 -- structure gpu-mem {SegMap 1}
 
-let main n (xs: []i32) (unit: [1]i32) =
+def main n (xs: []i32) (unit: [1]i32) =
   #[sequential_inner]
   map (\x ->
          let arr = replicate 1 x

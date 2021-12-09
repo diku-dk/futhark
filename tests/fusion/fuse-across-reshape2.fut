@@ -4,7 +4,7 @@
 -- output {
 --   [[0, 9, 18], [27, 36, 45], [54, 63, 72]]
 -- }
-let main: [][]i32 =
+def main: [][]i32 =
   let n = 9
   let a = map (\i -> replicate n (i32.i64 i))
               (iota n)

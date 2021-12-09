@@ -11,7 +11,7 @@
 
 
 
-let sgmPrefSum [n] (flags: [n]i32) (data: [n]i32) : [n]i32 =
+def sgmPrefSum [n] (flags: [n]i32) (data: [n]i32) : [n]i32 =
     (unzip (scan (\(x_flag,x) (y_flag,y) ->
                     let flag = x_flag | y_flag in
                     if y_flag != 0
@@ -20,7 +20,7 @@ let sgmPrefSum [n] (flags: [n]i32) (data: [n]i32) : [n]i32 =
             (0, 0)
             (zip flags data))).1
 
-let bin_packing_ffh [q] (w: i32) (all_perm  : *[q]i32) (all_data0 :  [q]i32) =
+def bin_packing_ffh [q] (w: i32) (all_perm  : *[q]i32) (all_data0 :  [q]i32) =
     let all_data = scatter (replicate q 0) (map i64.i32 all_perm) all_data0
     let len   = q
     let cur_shape = replicate 0 0
@@ -96,5 +96,5 @@ let bin_packing_ffh [q] (w: i32) (all_perm  : *[q]i32) (all_data0 :  [q]i32) =
             in  (num_moves, all_perm, all_data, cur_shape, true, count+1)
       in  all_perm
 
-let main [arr_len] (arr : [arr_len]i32) =
+def main [arr_len] (arr : [arr_len]i32) =
   bin_packing_ffh 10 (map i32.i64 (iota arr_len)) arr

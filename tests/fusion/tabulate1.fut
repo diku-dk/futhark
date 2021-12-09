@@ -4,6 +4,6 @@
 -- input { 3i64 [1,2,3] } output { [1,4,9] }
 -- structure { Screma 1 }
 
-let main [k] (n: i64) (xs: [k]i32) =
+def main [k] (n: i64) (xs: [k]i32) =
   let ys = map (\i -> #[unsafe] xs[i]) (iota n)
   in map (\i -> ys[i] * xs[i]) (iota n)

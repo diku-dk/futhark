@@ -11,10 +11,10 @@
 
 import "intrinsics"
 
-let f n (acc: *acc ([](f32,i64))) (i, x) =
+def f n (acc: *acc ([](f32,i64))) (i, x) =
   write acc (i%n) (x, i)
 
-let main n (xs: []f32) =
+def main n (xs: []f32) =
   let op = (\(a,i) (b,j) ->
               if a < b
               then (b,j)

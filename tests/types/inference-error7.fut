@@ -2,4 +2,4 @@
 -- ==
 -- error: ambiguous
 
-let add x y = x == y
+def add x y = x == y

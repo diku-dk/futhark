@@ -2,4 +2,4 @@
 -- ==
 -- error:
 
-let x = match 5
+def x = match 5

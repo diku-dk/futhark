@@ -5,4 +5,4 @@
 
 type ints [n] = [n]i64
 
-let main (n: i64) = iota n :> ints [3]
+def main (n: i64) = iota n :> ints [3]

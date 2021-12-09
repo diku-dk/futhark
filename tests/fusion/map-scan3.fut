@@ -20,7 +20,7 @@
 --   /Screma/Stream 1
 --   /Screma 1
 -- }
-let main(n: i64) (m: i64): i32 =
+def main(n: i64) (m: i64): i32 =
   let factors = map (^123) (iota n)
   let res = map (\factor ->
                    reduce (+) 0 (scan (+) 0 (map i32.i64 (map (*factor) (iota m)))))

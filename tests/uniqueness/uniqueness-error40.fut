@@ -3,9 +3,9 @@
 -- ==
 -- error: consumable
 
-let polyid 't (x: t) = x
+def polyid 't (x: t) = x
 
-let main (xs: []i32) =
+def main (xs: []i32) =
   let ys = polyid xs
   let ys[0] = 42
   in ys

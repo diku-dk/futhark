@@ -1,4 +1,4 @@
-let main [n] (xss: [][n]i64) (x: i64) =
+def main [n] (xss: [][n]i64) (x: i64) =
 
   map (\xs -> #[sequential]
               loop (xs, x) for _i < n do

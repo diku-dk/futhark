@@ -16,4 +16,4 @@ module M0: MT = {
 
 module M1: MT = M0
 
-let main() = M1.M.f (M0.M.x)
+def main() = M1.M.f (M0.M.x)

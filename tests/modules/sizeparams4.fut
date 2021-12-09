@@ -13,4 +13,4 @@ module m : mt = {
   let len [n] (_: [n]i64) = i32.i64 n
 }
 
-let main (x: i32) = m.len (m.mk x)
+def main (x: i32) = m.len (m.mk x)

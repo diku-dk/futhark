@@ -7,4 +7,4 @@
 module has_abs = import "has_abs"
 module subdir_has_abs = import "subdir/has_abs"
 
-let main = has_abs.eq has_abs.x subdir_has_abs.x
+def main = has_abs.eq has_abs.x subdir_has_abs.x

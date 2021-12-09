@@ -5,7 +5,7 @@
 -- output { [1, 2, 3, 4, 0, 1, 2, 3, 4, 0, 1, 2, 3, 4, 0, 0] }
 -- structure { Concat 0 Scatter 1 }
 
-let main [k][n] (arr: *[k]i32) (xs: [n]i32) =
+def main [k][n] (arr: *[k]i32) (xs: [n]i32) =
   let (a, b) =
     unzip (map (\x -> ((i64.i32 x,1,i64.i32 x+1,2),(i64.i32 x+2,i64.i32 x+3,3,4))) xs)
   let m = n + n + n + n

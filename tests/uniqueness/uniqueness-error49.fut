@@ -2,5 +2,5 @@
 -- ==
 -- error: Would consume variable "xs"
 
-let f 't (x: t) = id (x : t)
-let main (xs: []i32) = f xs with [0] = 0
+def f 't (x: t) = id (x : t)
+def main (xs: []i32) = f xs with [0] = 0

@@ -12,7 +12,7 @@
 --   [9,5,6]
 -- }
 
-let main [k][n]
+def main [k][n]
         (indexes: [k]i32)
         (values: [k]i32)
         (array1: *[n]i32)

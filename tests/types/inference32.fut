@@ -3,6 +3,6 @@
 -- ==
 -- error: passed non-unique argument
 
-let consume (xs: *[]i32) = xs
+def consume (xs: *[]i32) = xs
 
-let main (xs: []i32) = (\xs -> consume xs) xs
+def main (xs: []i32) = (\xs -> consume xs) xs

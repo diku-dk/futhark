@@ -2,5 +2,5 @@
 -- ==
 -- structure { Assert 0 }
 
-let main [n] (xs: [n]i32) =
+def main [n] (xs: [n]i32) =
   loop acc = 0 for i < n do acc + xs[i]

@@ -4,4 +4,4 @@
 -- input { 0.78539819f32 } output { 1f32 }
 -- input { -0.78539819f32 } output { -1f32 }
 
-let main(x: f32): f32 = f32.tan x
+def main(x: f32): f32 = f32.tan x

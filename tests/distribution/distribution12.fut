@@ -2,4 +2,4 @@
 -- ==
 -- structure gpu { SegMap 1 }
 
-let main (xsss: [][][]i32) = map (map (map (+1))) xsss
+def main (xsss: [][][]i32) = map (map (map (+1))) xsss

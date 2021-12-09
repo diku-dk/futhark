@@ -1,8 +1,8 @@
-let reduce_by_index_stream [k] 'a 'b
+def reduce_by_index_stream [k] 'a 'b
                            (dest: *[k]a) (f: *[k]a -> b -> *[k]a) : *[k]a =
   dest
 
-let pairInteraction [n] 'a 'b (ne: b) (add: b-> b -> b) (potential: a -> a -> b)
+def pairInteraction [n] 'a 'b (ne: b) (add: b-> b -> b) (potential: a -> a -> b)
                               (coordinates: [n]a) =
   let interaction [k] (acc: *[k]b) (i: i64, j: i64) : *([k]b) =
     let cI = coordinates[i]

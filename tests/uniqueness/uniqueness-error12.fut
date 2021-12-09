@@ -2,10 +2,10 @@
 -- ==
 -- error: consumption
 
-let f(a: *[]i64) (i: i64): []i64 =
+def f(a: *[]i64) (i: i64): []i64 =
   let a[i] = 0 in a
 
-let main(): [][]i32 =
+def main(): [][]i32 =
     let n = 10
     let a = iota(n)
     let b = iota(n) in

@@ -6,7 +6,7 @@
 type^ mooboo = #moo (i32 -> i32) | #boo i32
 type^ foobar = #foo (mooboo -> i32 -> i32) | #bar
 
-let main : i32 =
+def main : i32 =
     let f (mb : mooboo) x = match mb
                  case (#moo g) -> g x
                  case (#boo _) -> 0

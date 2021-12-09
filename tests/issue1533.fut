@@ -6,44 +6,44 @@
 
 
 type complex = {r:f64, i:f64}
-let complex r i : complex = {r, i}
-let real r = complex r 0
-let imag i = complex 0 i
-let zero = complex 0 0
+def complex r i : complex = {r, i}
+def real r = complex r 0
+def imag i = complex 0 i
+def zero = complex 0 0
 
-let conjC (a:complex) : complex = {r = a.r, i = -a.i}
+def conjC (a:complex) : complex = {r = a.r, i = -a.i}
 
-let addC (a:complex) (b:complex) : complex = {r=a.r+b.r, i=a.i+b.i}
-let subC (a:complex) (b:complex) : complex = {r=a.r-b.r, i=a.i-b.i}
-let mulC (a:complex) (b:complex) : complex = {r=a.r*b.r-a.i*b.i, i=a.r*b.i+a.i*b.r}
+def addC (a:complex) (b:complex) : complex = {r=a.r+b.r, i=a.i+b.i}
+def subC (a:complex) (b:complex) : complex = {r=a.r-b.r, i=a.i-b.i}
+def mulC (a:complex) (b:complex) : complex = {r=a.r*b.r-a.i*b.i, i=a.r*b.i+a.i*b.r}
 
 type triad 't = (t, t, t)
-let triadMap 'a 'b (f:a->b) (A:triad a) : triad b = (f A.0, f A.1, f A.2)
-let triadMap2 'a 'b 'c (f:a->b->c) (A:triad a) (B:triad b): triad c = (f A.0 B.0, f A.1 B.1, f A.2 B.2)
-let triadFold 'a (f:a->a->a) (A:triad a) : a = f A.0 <| f A.1 A.2
+def triadMap 'a 'b (f:a->b) (A:triad a) : triad b = (f A.0, f A.1, f A.2)
+def triadMap2 'a 'b 'c (f:a->b->c) (A:triad a) (B:triad b): triad c = (f A.0 B.0, f A.1 B.1, f A.2 B.2)
+def triadFold 'a (f:a->a->a) (A:triad a) : a = f A.0 <| f A.1 A.2
 
 type v3 = triad f64
 
-let v3sum (v:v3) : f64 = triadFold (+) v
-let v3add (a:v3) (b:v3) : v3  = triadMap2 (+) a b
-let v3sub (a:v3) (b:v3) : v3  = triadMap2 (-) a b
-let v3mul (a:v3) (b:v3) : v3  = triadMap2 (*) a b
-let v3dot (a:v3) (b:v3) : f64 = v3mul a b |> v3sum
-let scaleV3 (f:f64) = triadMap (*f)
-let v3abs a = f64.sqrt (v3dot a a)
+def v3sum (v:v3) : f64 = triadFold (+) v
+def v3add (a:v3) (b:v3) : v3  = triadMap2 (+) a b
+def v3sub (a:v3) (b:v3) : v3  = triadMap2 (-) a b
+def v3mul (a:v3) (b:v3) : v3  = triadMap2 (*) a b
+def v3dot (a:v3) (b:v3) : f64 = v3mul a b |> v3sum
+def scaleV3 (f:f64) = triadMap (*f)
+def v3abs a = f64.sqrt (v3dot a a)
 
 
-let fromReal : (f64 -> complex) = real
-let fromReal1d = map fromReal
-let fromReal2d = map fromReal1d
-let fromReal3d = map fromReal2d
+def fromReal : (f64 -> complex) = real
+def fromReal1d = map fromReal
+def fromReal2d = map fromReal1d
+def fromReal3d = map fromReal2d
 
-let toReal : (complex -> f64) = (.r)
-let toReal1d = map toReal
-let toReal2d = map toReal1d
-let toReal3d = map toReal2d
+def toReal : (complex -> f64) = (.r)
+def toReal1d = map toReal
+def toReal2d = map toReal1d
+def toReal3d = map toReal2d
 
-let gfft [n] (xs:[n]complex) : [n]complex =
+def gfft [n] (xs:[n]complex) : [n]complex =
     let startTheta = f64.pi * f64.from_fraction 2 n
     let ms = n >> 1
     let iteration ((xs:[n]complex), e, theta0) =
@@ -61,7 +61,7 @@ let gfft [n] (xs:[n]complex) : [n]complex =
         in (xs', e + 1, theta0 * 2)
     in (iterate 2 iteration (xs, 0, startTheta)).0
 
-let fft3 [m][n][k] (A:[m][n][k]complex) =
+def fft3 [m][n][k] (A:[m][n][k]complex) =
   #[unsafe]
   #[incremental_flattening(only_inner)]
   tabulate_2d n k (\i j -> gfft A[:,i,j])

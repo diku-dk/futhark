@@ -2,6 +2,6 @@
 -- ==
 -- input { 2 } output { [2] }
 
-let f x = [x]
+def f x = [x]
 
-let main (x: i32) = f x
+def main (x: i32) = f x

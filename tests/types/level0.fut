@@ -2,6 +2,6 @@
 -- ==
 -- error: "b".*scope
 
-let f x =
+def f x =
   let g 'b (y: b) = if true then y else x
   in g

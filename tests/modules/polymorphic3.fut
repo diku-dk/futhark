@@ -9,5 +9,5 @@ module pm (P: { type~ vector 't val reverse 't: vector t -> vector t }) = {
 
 module m = pm { type~ vector 't = ?[k].[k]t let reverse 't (xs: []t) = xs[::-1] }
 
-let main (x: i32) (y: i32) = m.reverse_pair (iota (i64.i32 x),
+def main (x: i32) (y: i32) = m.reverse_pair (iota (i64.i32 x),
                                              map f64.i64 (iota (i64.i32 y)))

@@ -41,4 +41,4 @@ module bar = k_means_mixture foo
 module baz = bar : mixture
 module k_means_em = em baz
 
-let main (x: k_means_em.mixture.V.t) = x
+def main (x: k_means_em.mixture.V.t) = x

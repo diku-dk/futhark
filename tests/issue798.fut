@@ -4,4 +4,4 @@ module m = {
   type t = i32
 }
 
-let main (m: m.t) = m
+def main (m: m.t) = m

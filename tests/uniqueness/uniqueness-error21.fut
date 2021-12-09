@@ -3,7 +3,7 @@
 -- ==
 -- error: "DT".*consumed
 
-let floydSbsImp(N: i32, D: *[][]i32): [][]i32 =
+def floydSbsImp(N: i32, D: *[][]i32): [][]i32 =
     let DT = transpose(D) -- DT aliases D.
     in loop D for i < N do
          loop D for j < N do

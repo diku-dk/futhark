@@ -2,7 +2,7 @@
 -- ==
 -- error: consumed
 
-let main(): *[]i64 =
+def main(): *[]i64 =
   let n = 10
   let a = iota(n)
   let c = let a = a let a[0] = 42 in a

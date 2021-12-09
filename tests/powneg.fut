@@ -3,4 +3,4 @@
 -- ==
 -- input { true } error:
 
-let main b = if b then 2 ** -1 else 0
+def main b = if b then 2 ** -1 else 0

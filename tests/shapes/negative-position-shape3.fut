@@ -2,4 +2,4 @@
 -- ==
 -- error: Entry point
 
-let main [n] (x: i32) : [n]i32 = replicate n x
+def main [n] (x: i32) : [n]i32 = replicate n x

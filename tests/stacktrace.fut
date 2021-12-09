@@ -4,10 +4,10 @@
 -- input { [1] 1 }
 -- error: stacktrace.fut:7.*stacktrace.fut:9.*stacktrace.fut:11.*stacktrace.fut:13
 
-let f (xs: []i32) (i: i32) = xs[i]
+def f (xs: []i32) (i: i32) = xs[i]
 
-let g (xs: []i32) (i: i32) = f xs i
+def g (xs: []i32) (i: i32) = f xs i
 
-let h (xs: []i32) (i: i32) = g xs i
+def h (xs: []i32) (i: i32) = g xs i
 
-let main (xs: []i32) (i: i32) = h xs i
+def main (xs: []i32) (i: i32) = h xs i

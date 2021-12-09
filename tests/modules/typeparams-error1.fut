@@ -12,4 +12,4 @@ module M1: MT = {
   type i32matrix = [][2]f32
 }
 
-let main() = 2
+def main() = 2

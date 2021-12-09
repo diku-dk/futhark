@@ -6,14 +6,14 @@
 -- ==
 -- structure gpu { SegRed 2 }
 
-let max(a: f32) (b: f32): f32 = if(a < b) then b else a
+def max(a: f32) (b: f32): f32 = if(a < b) then b else a
 
-let exactYhat(xs: []f32, x: f32): f32 =
+def exactYhat(xs: []f32, x: f32): f32 =
   let ups = map (+x) xs
   let lo = reduce max (0.0) ups
   in lo + ups[0]
 
-let main (xs: []f32, mux: f32, eps: f32): f32 =
+def main (xs: []f32, mux: f32, eps: f32): f32 =
   let g = exactYhat(xs, mux + eps)
   let h = exactYhat(xs, mux - eps)
   in g + h

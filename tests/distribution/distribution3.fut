@@ -3,7 +3,7 @@
 -- compiled random input { [10][8][32]i32 } auto output
 -- structure gpu { SegScan 4 }
 
-let main [k][n][m] (a: [k][n][m]i32): [][][]i32 =
+def main [k][n][m] (a: [k][n][m]i32): [][][]i32 =
   map (\(a_row: [][]i32): [m][n]i32  ->
         let b = map (\(a_row_row: []i32)  ->
                       scan (+) 0 (a_row_row)

@@ -2,4 +2,4 @@
 -- ==
 -- error: Dimensions.*do not match
 
-let main [n] (xs: [n]i32) : [n]i32 = iota (length xs)
+def main [n] (xs: [n]i32) : [n]i32 = iota (length xs)

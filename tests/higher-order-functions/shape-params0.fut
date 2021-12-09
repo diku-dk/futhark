@@ -5,10 +5,10 @@
 -- ==
 -- input { [2,3,5,1] [6,5,2,6] } output { [8,8,7,7] }
 
-let map2 'a 'b 'c [m] (f: a -> b -> c) (xs: [m]a) (ys: [m]b): [m]c =
+def map2 'a 'b 'c [m] (f: a -> b -> c) (xs: [m]a) (ys: [m]b): [m]c =
   map (\(x,y) -> f x y) (zip xs ys)
 
-let add (x: i32) (y: i32) = x + y
+def add (x: i32) (y: i32) = x + y
 
-let main (xs: []i32) (ys: []i32) =
+def main (xs: []i32) (ys: []i32) =
   map2 add xs ys

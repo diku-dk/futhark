@@ -23,7 +23,7 @@
 --   in scatter flattened is' vs |> unflatten h w
 
 
-let main [k][n][m]
+def main [k][n][m]
         (indexes1: [k]i32)
         (indexes2: [k]i32)
         (values: [k]i32)

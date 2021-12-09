@@ -4,6 +4,6 @@
 
 type pairvec [m] = [m](i32,i32)
 
-let main (n:i64) (e: i32): []i32 =
+def main (n:i64) (e: i32): []i32 =
   let a: pairvec [] = replicate (2*n) (e,e)
   in (unzip a).0

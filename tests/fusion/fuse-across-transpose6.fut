@@ -38,7 +38,7 @@
 -- }
 -- structure { /Screma 1 /Screma/Screma 1 /Screma/Screma/Screma 1 }
 
-let correlateDeltas [num_und][num_dates]
+def correlateDeltas [num_und][num_dates]
                    (md_c: [num_und][num_und]f32,
                     zds: [num_dates][num_und]f32): [num_dates][num_und]f32 =
   map (\(zi: [num_und]f32): [num_und]f32  ->
@@ -49,13 +49,13 @@ let correlateDeltas [num_und][num_dates]
             ) (iota(num_und) )
      ) zds
 
-let combineVs [num_und]
+def combineVs [num_und]
              (n_row:   [num_und]f32,
               vol_row: [num_und]f32,
               dr_row: [num_und]f32 ): [num_und]f32 =
   map2 (+) dr_row (map2 (*) n_row vol_row)
 
-let mkPrices [num_dates][num_und]
+def mkPrices [num_dates][num_und]
             (md_vols: [num_dates][num_und]f32,
              md_drifts: [num_dates][num_und]f32,
              noises: [num_dates][num_und]f32): [num_dates][num_und]f32 =
@@ -66,7 +66,7 @@ let mkPrices [num_dates][num_und]
   in  scan (\x y -> map2 (*) x y) (replicate num_und 1.0) (e_rows )
 
   -- Formerly blackScholes.
-let main [num_dates][num_und]
+def main [num_dates][num_und]
         (md_c: [num_und][num_und]f32)
         (md_vols: [num_dates][num_und]f32)
         (md_drifts: [num_dates][num_und]f32)

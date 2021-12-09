@@ -5,7 +5,7 @@
 
 type animal = #dog | #cat | #mouse | #bird
 
-let main : i32 =
+def main : i32 =
   match #mouse : animal
     case #dog   -> 6
     case #bird  -> 9

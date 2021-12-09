@@ -2,5 +2,5 @@
 -- ==
 -- error: "\^"
 
-let hit_register (x : f32) (y : f32) : bool =
+def hit_register (x : f32) (y : f32) : bool =
     ((x - 1.0)^2.0 + (y - 1.0)^2.0) <= 1.0

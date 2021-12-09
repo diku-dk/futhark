@@ -3,6 +3,6 @@
 -- ==
 -- compiled random input { [30000]bool [30000][256]f32 }
 
-let main bs xss =
+def main bs xss =
   #[incremental_flattening(only_intra)]
   map2 (\b xs -> if b then xs else iterate 10 (scan (+) 0f32) xs) bs xss

@@ -3,8 +3,8 @@
 -- ==
 -- input { 2 } output { [2] }
 
-let id '^a (x: a) = x
+def id '^a (x: a) = x
 
-let array 't (f: t -> i32) (t: t) = [f t]
+def array 't (f: t -> i32) (t: t) = [f t]
 
-let main (x: i32) = array id x
+def main (x: i32) = array id x

@@ -5,10 +5,10 @@
 --   52i64
 -- }
 -- structure { Replicate 0 }
-let getInt (): i64 = if((1-1)*3 + (3/3 - 1) == 0) then (15 / 3)*2 else 10000000
-let plus1 [n] (x: [n]i64) = map (\(y: i64): i64->y+1) x
+def getInt (): i64 = if((1-1)*3 + (3/3 - 1) == 0) then (15 / 3)*2 else 10000000
+def plus1 [n] (x: [n]i64) = map (\(y: i64): i64->y+1) x
 
-let main: i64 =
+def main: i64 =
     let n  = getInt()            -- Int
     let x  = iota(n)             -- [#n]Int
     let m  = (n*1)+(n*0)         -- n :: Int

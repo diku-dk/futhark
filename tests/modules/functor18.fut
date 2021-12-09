@@ -19,4 +19,4 @@ module F_2 = F twice add_one
 module F_3 = F thrice add_one
 module F_6 = F twice F_3
 
-let main(x: i32) = (F_2.f x, F_3.f x, F_6.f x)
+def main(x: i32) = (F_2.f x, F_3.f x, F_6.f x)

@@ -6,7 +6,7 @@
 -- input { -1f32 1f32 } output { false true 0xbf800000u32 -1f32 }
 
 
-let main (x: f32) (y: f32): (bool, bool, u32, f32) =
+def main (x: f32) (y: f32): (bool, bool, u32, f32) =
   (f32.isinf(x / y),
    f32.isnan(f32.sqrt(x)),
    f32.to_bits x,

@@ -15,4 +15,4 @@
 -- input { f64.nan } output { f64.nan }
 -- input { -0f64 } output { -0f64 }
 
-let main = f64.ceil
+def main = f64.ceil

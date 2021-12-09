@@ -3,4 +3,4 @@
 
 type sometype 'a = #someval a
 
-let error : i32 -> sometype ([]i32) = \_ -> #someval []
+def error : i32 -> sometype ([]i32) = \_ -> #someval []

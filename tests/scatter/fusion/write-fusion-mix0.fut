@@ -14,7 +14,7 @@
 -- }
 -- structure { Scatter 1 }
 
-let main [k][n] (indexes0: [k]i64)
+def main [k][n] (indexes0: [k]i64)
                 (indexes1: [k]i64)
                 (values0: [k]i32)
                 (values1: [k]i32)

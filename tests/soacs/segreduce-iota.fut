@@ -6,6 +6,6 @@
 -- random input { 1000i64 2i64 } auto output
 -- random input { 1000i64 0i64 } auto output
 
-let array n m = map (\i -> replicate m (i32.i64 i)) (iota n)
+def array n m = map (\i -> replicate m (i32.i64 i)) (iota n)
 
 entry main n m: []i32 = array n m |> map i32.sum

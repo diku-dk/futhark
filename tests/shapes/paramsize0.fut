@@ -4,7 +4,7 @@
 
 type^ f = (k: i64) -> [k]i32 -> i64
 
-let f : f = \n (xs: [n]i32) -> length xs
+def f : f = \n (xs: [n]i32) -> length xs
 
-let main [K] (input: [K]i32) =
+def main [K] (input: [K]i32) =
   f K input

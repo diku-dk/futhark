@@ -1,14 +1,14 @@
 -- Date computations.  Some complex scalar expressions and a branch.
 -- Once messed up the simplifier.
 
-let mod(x: i32, y: i32): i32 = x - (x/y)*y
+def mod(x: i32, y: i32): i32 = x - (x/y)*y
 
-let hours_in_dayI: i32 = 24
-let minutes_in_dayI: i32 = hours_in_dayI * 60
-let minutes_to_noonI: i32 = (hours_in_dayI / 2) * 60
-let minutes_in_day: f64 = 24.0*60.0
+def hours_in_dayI: i32 = 24
+def minutes_in_dayI: i32 = hours_in_dayI * 60
+def minutes_to_noonI: i32 = (hours_in_dayI / 2) * 60
+def minutes_in_day: f64 = 24.0*60.0
 
-let date_of_gregorian(date:  (i32,i32,i32,i32,i32)): i32 =
+def date_of_gregorian(date:  (i32,i32,i32,i32,i32)): i32 =
   let (year, month, day, hour, mins) = date
   let ym =
       if(month == 1 || month == 2)
@@ -22,7 +22,7 @@ let date_of_gregorian(date:  (i32,i32,i32,i32,i32)): i32 =
 
   in tmp * minutes_in_dayI + hour * 60 + mins
 
-let gregorian_of_date (minutes_since_epoch:  i32 ): (i32,i32,i32,i32,i32) =
+def gregorian_of_date (minutes_since_epoch:  i32 ): (i32,i32,i32,i32,i32) =
   let jul = minutes_since_epoch / minutes_in_dayI
   let l = jul + 68569 + 2444238
   let n = ( 4 * l ) / 146097
@@ -46,5 +46,5 @@ let gregorian_of_date (minutes_since_epoch:  i32 ): (i32,i32,i32,i32,i32) =
   --else [#year = y; month = m; day = d; hour = daytime / 60; minute = daytime mod 60]
   else (y, m, d, daytime / 60, mod(daytime, 60) )
 
-let main(x: i32): i32 =
+def main(x: i32): i32 =
   date_of_gregorian(gregorian_of_date(x))

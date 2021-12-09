@@ -5,9 +5,9 @@
 -- output {
 --   -1i64
 -- }
-let neg(x: i64): i64 = -x
+def neg(x: i64): i64 = -x
 
-let main(a: i64): i64 =
+def main(a: i64): i64 =
   let b = a + 100
   let x = iota(a)
   let c = b + 200

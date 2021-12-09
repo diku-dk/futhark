@@ -48,7 +48,7 @@
 -- input { 4 -1i16  0i16 } output { -1i16 }
 -- input { 4 -1i16  1i16 } output { -1i16 }
 
-let main (f: i32) (x: i16) (y: i16): i16 =
+def main (f: i32) (x: i16) (y: i16): i16 =
   if      f == 0 then x & y
   else if f == 1 then x | y
   else if f == 2 then x ^ y

@@ -2,4 +2,4 @@
 -- ==
 -- error: n
 
-let main [n] (x: i32) = n
+def main [n] (x: i32) = n

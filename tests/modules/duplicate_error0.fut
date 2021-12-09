@@ -5,7 +5,7 @@
 module Foo = {
   let foo(): i32 = 1
 }
-let bar(): i32 = 1
-let bar(): i32 = 2
+def bar(): i32 = 1
+def bar(): i32 = 2
 
-let main(): i32 = 0
+def main(): i32 = 0

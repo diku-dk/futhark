@@ -2,6 +2,6 @@
 -- ==
 -- error:
 
-let f : bool =
+def f : bool =
   match (true, false)
     case (false, true) -> false

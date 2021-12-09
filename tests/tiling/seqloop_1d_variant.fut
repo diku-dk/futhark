@@ -4,7 +4,7 @@
 -- random input { [1000][3][3]f32 }
 -- structure gpu { SegMap/DoLoop/DoLoop/SegMap 2 }
 
-let argmax (arr: []f32) =
+def argmax (arr: []f32) =
   reduce_comm (\(a,i) (b,j) ->
                  if a < b
                  then (b,j)
@@ -14,9 +14,9 @@ let argmax (arr: []f32) =
               (0, 0)
               (zip arr (indices arr))
 
-let f [m] [n] (A:[m][n]f32) =
+def f [m] [n] (A:[m][n]f32) =
   loop A for i < i64.min m n do
   let j = A[i:,i] |> map f32.abs |> argmax |> (.1) |> (+i)
   in map (map (*A[j,j])) A
 
-let main ms = #[sequential_inner] map f ms
+def main ms = #[sequential_inner] map f ms

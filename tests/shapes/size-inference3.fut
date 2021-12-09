@@ -3,4 +3,4 @@
 -- ==
 -- error:
 
-let main xs = zip xs (iota xs[0])
+def main xs = zip xs (iota xs[0])

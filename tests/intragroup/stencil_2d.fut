@@ -4,9 +4,9 @@
 -- random no_python compiled input { 1000 [100][16][16]bool } auto output
 -- random no_python compiled input { 3000 [100][16][16]bool } auto output
 
-let bint: bool -> i32 = i32.bool
+def bint: bool -> i32 = i32.bool
 
-let all_neighbours [n][m] (world: [n][m]bool): [n][m]i32 =
+def all_neighbours [n][m] (world: [n][m]bool): [n][m]i32 =
     let ns  = map (rotate (-1)) world
     let ss  = map (rotate   1)  world
     let ws  = rotate      (-1)  world
@@ -23,7 +23,7 @@ let all_neighbours [n][m] (world: [n][m]bool): [n][m]i32 =
              (zip3 nws_r ns_r nes_r) (zip3 ws_r world_r es_r) (zip3 sws_r ss_r ses_r))
             (zip3 nws ns nes) (zip3 ws world es) (zip3 sws ss ses)
 
-let iteration [n][m] (board: [n][m]bool): [n][m]bool =
+def iteration [n][m] (board: [n][m]bool): [n][m]bool =
   let lives = all_neighbours(board) in
   map2 (\(lives_r: []i32) (board_r: []bool)  ->
             map2 (\(neighbors: i32) (alive: bool): bool  ->
@@ -35,8 +35,8 @@ let iteration [n][m] (board: [n][m]bool): [n][m]bool =
                     lives_r board_r)
            lives board
 
-let life (iterations: i32) (board: [][]bool) =
+def life (iterations: i32) (board: [][]bool) =
   loop board for _i < iterations do iteration board
 
-let main (iterations: i32) (board: [][][]bool) =
+def main (iterations: i32) (board: [][][]bool) =
   map (life iterations) board

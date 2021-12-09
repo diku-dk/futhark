@@ -1,6 +1,6 @@
 -- ==
 -- error: Default
 
-let example a b = a + b
+def example a b = a + b
 
-let example2 a = example a 1.0
+def example2 a = example a 1.0

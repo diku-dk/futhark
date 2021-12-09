@@ -21,11 +21,11 @@ type triangle_projected = (point_projected, point_projected, point_projected)
 type point_barycentric = (i32, i32racer.point3D, f32racer.point3D)
 type rectangle = (i32racer.point2D, i32racer.point2D)
 
-let barycentric_coordinates ({x, y}: i32racer.point2D) (triangle: triangle_projected) =
+def barycentric_coordinates ({x, y}: i32racer.point2D) (triangle: triangle_projected) =
   let ({x=xp0, y=yp0, z=_}, {x=xp1, y=yp1, z=_}, {x=xp2, y=yp2, z=_}) = triangle
   in ((yp1 - yp2) * (x - xp2) + (xp2 - xp1) * (y - yp2))
 
-let main
+def main
   [tn]
   (triangles_projected: [tn]triangle_projected)
   (w: i32) (h: i32) rects

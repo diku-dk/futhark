@@ -3,9 +3,9 @@
 -- ==
 -- error: functional
 
-let app (f : (i32 -> i32) -> (i32 -> i32)) : i32 =
+def app (f : (i32 -> i32) -> (i32 -> i32)) : i32 =
   f (\(x:i32) -> x+x) 42
 
-let id 'a (x:a) : a = x
+def id 'a (x:a) : a = x
 
-let main : i32 = app id
+def main : i32 = app id

@@ -18,37 +18,37 @@
 -- }
 
 
-let pi: f32 = f32.acos 0.0 * 2.0
+def pi: f32 = f32.acos 0.0 * 2.0
 
 type complex = (f32, f32)
 
-let complexAdd ((a, b): complex) ((c, d): complex): complex =
+def complexAdd ((a, b): complex) ((c, d): complex): complex =
   (a+c, b+d)
 
-let complexMult ((a,b): complex) ((c,d): complex): complex =
+def complexMult ((a,b): complex) ((c,d): complex): complex =
   (a*c - b*d,
    a*d + b*c)
 
-let toComplex (a: f32): complex = (a, 0f32)
+def toComplex (a: f32): complex = (a, 0f32)
 
-let complexExp ((a,b): complex): complex =
+def complexExp ((a,b): complex): complex =
   complexMult (toComplex (f32.exp a)) (f32.cos b, f32.sin b)
 
-let toPolar ((a,b): complex): (f32, f32) =
+def toPolar ((a,b): complex): (f32, f32) =
   (f32.sqrt (a*a + b*b),
    f32.atan (b/a))
 
-let fromPolar (r: f32, angle: f32): complex =
+def fromPolar (r: f32, angle: f32): complex =
   (r * f32.cos angle,
    r * f32.sin angle)
 
-let complexPow (c: complex) (n: i32): complex =
+def complexPow (c: complex) (n: i32): complex =
   let (r, angle) = toPolar c
   let (r', angle') = (r ** f32.i32 n,
                       f32.i32 n * angle)
   in fromPolar (r', angle')
 
-let f [n] (a: [n]f32) (j: i32): complex =
+def f [n] (a: [n]f32) (j: i32): complex =
   let x = complexExp (complexMult (-2.0,0.0)
                       (complexMult (toComplex pi)
                        (complexMult (0.0, 1.0)
@@ -58,7 +58,7 @@ let f [n] (a: [n]f32) (j: i32): complex =
    (map toComplex a)
    (map (complexPow x) (map (j*) (map i32.i64 (iota n)))))
 
-let sft [n] (a: [n]f32): [n]complex =
+def sft [n] (a: [n]f32): [n]complex =
   map (f a) (map i32.i64 (iota n))
 
-let main [n] (a: [n]f32): ([n]f32, [n]f32) = unzip (sft a)
+def main [n] (a: [n]f32): ([n]f32, [n]f32) = unzip (sft a)

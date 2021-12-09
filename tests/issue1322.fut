@@ -1,4 +1,4 @@
-let resolve_fns [n] (a: [n]bool) (data: [n]i32) =
+def resolve_fns [n] (a: [n]bool) (data: [n]i32) =
     let b = map (== 0) data
     let d =
         b
@@ -14,7 +14,7 @@ let resolve_fns [n] (a: [n]bool) (data: [n]i32) =
     let new_data = scatter (copy data) is d
     in (g, new_data)
 
-let resolve_vars [n] (a: [n]bool) =
+def resolve_vars [n] (a: [n]bool) =
     let valid = reduce (&&) true a
     let data = map i32.bool a
     in (valid, data)

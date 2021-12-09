@@ -5,4 +5,4 @@
 -- input { -1f64 } output { 3.1415927f64 }
 
 
-let main(x: f64): f64 = f64.acos(x)
+def main(x: f64): f64 = f64.acos(x)

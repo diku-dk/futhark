@@ -1,7 +1,7 @@
-let foo [n] (m: i64) (A: [n][n]i32) =
+def foo [n] (m: i64) (A: [n][n]i32) =
   let on_row row i = let padding = replicate n 0
                      let padding[i] = 10
                      in concat row padding :> [m]i32
   in map2 on_row A (iota n)
 
-let main [n] (As: [][n][n]i32) = map (foo (n*2)) As
+def main [n] (As: [][n][n]i32) = map (foo (n*2)) As

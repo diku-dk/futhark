@@ -3,7 +3,7 @@
 -- ==
 -- input { 12 } output { 17 }
 
-let main (x : i32) =
+def main (x : i32) =
   let f = let b = 2 in
           let g = let a = 1 in
                   let h = \(x:i32) -> x+a

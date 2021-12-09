@@ -3,8 +3,8 @@
 -- ==
 -- input { } output { [0,0,0] }
 
-let n: i64 = 3
+def n: i64 = 3
 
-let x: [n]i32 = replicate n 0
+def x: [n]i32 = replicate n 0
 
-let main: []i32 = copy x
+def main: []i32 = copy x

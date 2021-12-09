@@ -12,4 +12,4 @@ module intmat = PM {
   let mk (n: i64) = replicate n 0
 }
 
-let main (n: i32) (x: i32) = intmat.can_be_bad (i64.i32 n) (i64.i32 x)
+def main (n: i32) (x: i32) = intmat.can_be_bad (i64.i32 n) (i64.i32 x)

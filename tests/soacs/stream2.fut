@@ -6,7 +6,7 @@
 -- compiled input { 1000000i64 } output { 1783293664i32 }
 
 -- This is just a fancy way of summing iota.
-let main (n: i64) =
+def main (n: i64) =
   let sumup k (chunk: [k]i32): i32 =
     if k == 0 then 0
     else let j = chunk[0]

@@ -2,9 +2,9 @@
 -- ==
 -- error: Cannot apply "f"
 
-let f(a: *[]i32): []i32 = a
+def f(a: *[]i32): []i32 = a
 
-let main(): ([]i32, []i32) =
+def main(): ([]i32, []i32) =
     let n = 10
     let a = iota(n)
     let b = iota(n)
