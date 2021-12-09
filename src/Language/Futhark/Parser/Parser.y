@@ -749,7 +749,9 @@ LetExp :: { UncheckedExp }
 LetBody :: { UncheckedExp }
     : in Exp %prec letprec { $2 }
     | LetExp %prec letprec { $1 }
-    | error {% throwError "Unexpected end of file - missing \"in\"?" }
+    | def {% parseErrorAt $1 (Just "Unexpected \"def\" - missing \"in\"?") }
+    | type {% parseErrorAt $1 (Just "Unexpected \"type\" - missing \"in\"?") }
+    | module {% parseErrorAt $1 (Just "Unexpected \"module\" - missing \"in\"?") }
 
 MatchExp :: { UncheckedExp }
           : match Exp Cases
