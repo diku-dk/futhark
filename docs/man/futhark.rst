@@ -51,7 +51,8 @@ futhark defs PROGRAM
 --------------------
 
 Print names and locations of every top-level definition in the program
-(including top levels of modules), one per line.
+(including top levels of modules), one per line.  The program need not
+be type-correct, but it must be contain syntax errors.
 
 futhark dev options... PROGRAM
 ------------------------------

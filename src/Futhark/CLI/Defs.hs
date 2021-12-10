@@ -10,7 +10,7 @@ import qualified Data.Text.IO as T
 import Futhark.Compiler
 import Futhark.Util.Loc
 import Futhark.Util.Options
-import Language.Futhark.Syntax
+import Language.Futhark
 
 isBuiltin :: String -> Bool
 isBuiltin = ("prelude/" `isPrefixOf`)
@@ -29,15 +29,13 @@ printDef :: Def -> IO ()
 printDef (Def k name loc) = do
   T.putStrLn $ T.unwords [kindText k, nameToText name, T.pack (locStr loc)]
 
-defsIn :: FileModule -> Seq.Seq Def
-defsIn = defsInProg . fileProg
+defsInProg :: UncheckedProg -> Seq.Seq Def
+defsInProg = foldMap defsInDec . progDecs
   where
-    defsInProg = foldMap defsInDec . progDecs
-
     defsInDec (ValDec vb) =
-      Seq.singleton $ Def Value (baseName (valBindName vb)) (locOf vb)
+      Seq.singleton $ Def Value (valBindName vb) (locOf vb)
     defsInDec (TypeDec tb) =
-      Seq.singleton $ Def Type (baseName (typeAlias tb)) (locOf tb)
+      Seq.singleton $ Def Type (typeAlias tb) (locOf tb)
     defsInDec (LocalDec d _) = defsInDec d
     defsInDec (OpenDec me _) = defsInModExp me
     defsInDec (ModDec mb) = defsInModExp $ modExp mb
@@ -57,7 +55,7 @@ main :: String -> [String] -> IO ()
 main = mainWithOptions () [] "program" $ \args () ->
   case args of
     [file] -> Just $ do
-      (_, imports, _) <- readProgramOrDie file
-      mapM_ printDef . foldMap (defsIn . snd) $
-        filter (not . isBuiltin . fst) imports
+      prog <- readUntypedProgramOrDie file
+      mapM_ printDef . foldMap (defsInProg . snd) $
+        filter (not . isBuiltin . fst) prog
     _ -> Nothing
