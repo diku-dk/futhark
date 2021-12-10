@@ -7,7 +7,7 @@
 type foo = i32
 def foo(a: i32): foo = a + a
 module Foo = {
-  let one(): i32 = 1
+  def one(): i32 = 1
 }
 
 def main(x: i32): i32 = x

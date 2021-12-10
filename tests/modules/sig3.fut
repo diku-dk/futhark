@@ -7,7 +7,7 @@ module type mt = {
 }
 
 module m: mt = {
-  let replicate 't (n: i64) (x: t): [n]t =
+  def replicate 't (n: i64) (x: t): [n]t =
     map (\_ -> x) (iota n)
 }
 

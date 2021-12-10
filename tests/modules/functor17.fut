@@ -7,7 +7,7 @@ module PM(P: {type^ r}) = {
 
   type t = i32
 
-  let f [n] (r: P.r) (a: [n]t) = (r,a)
+  def f [n] (r: P.r) (a: [n]t) = (r,a)
 }
 
 module PMI = PM {type^ r = []f64}

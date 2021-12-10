@@ -7,8 +7,8 @@
 -- }
 
 module IntLib = {
-  let plus(a: i32, b: i32): i32 = a + b
-  let numberFour(): i32 = 4
+  def plus(a: i32, b: i32): i32 = a + b
+  def numberFour(): i32 = 4
 }
 
 def localplus(a: i32, b: i32): i32 = IntLib.plus (a,b)

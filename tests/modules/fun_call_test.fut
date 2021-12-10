@@ -9,16 +9,16 @@ def min(a: i32) (b: i32): i32 = if(a<b) then a else b
 def plus1(a:  []i32,  b: []i32): []i32 = [1]
 
 module M0 = {
-    let min1 [n] (a: [n]i32, b: [n]i32) = map2 min a b
-    let redmin1(a:  []i32): i32 = reduce min 1200 a
-    let redmin2 [n] (a: [n][]i32): [n]i32 = map redmin1 a
+    def min1 [n] (a: [n]i32, b: [n]i32) = map2 min a b
+    def redmin1(a:  []i32): i32 = reduce min 1200 a
+    def redmin2 [n] (a: [n][]i32): [n]i32 = map redmin1 a
 
     module M1 = {
-        let plus1 [n] (a:  [n]i32,  b: [n]i32): [n]i32 = map2 (+) a b
-        let plus2 [n][k] (a: [n][k]i32, b: [n][k]i32): [n][k]i32 = map plus1 (zip a b)
+        def plus1 [n] (a:  [n]i32,  b: [n]i32): [n]i32 = map2 (+) a b
+        def plus2 [n][k] (a: [n][k]i32, b: [n][k]i32): [n][k]i32 = map plus1 (zip a b)
       }
 
-    let replin [k] (len: i64) (a: [k]i32): [len][k]i32 = replicate len a
+    def replin [k] (len: i64) (a: [k]i32): [len][k]i32 = replicate len a
   }
 
 def floydSbsFun (n: i64) (d: [n][n]i32 ): [][]i32 =

@@ -11,8 +11,8 @@ module type MT = {
 
 module M0: MT = {
   type intvec = [3]i32
-  let singleton (x: i32) = [x,x,x]
-  let first (x: intvec) = x[0]
+  def singleton (x: i32) = [x,x,x]
+  def first (x: intvec) = x[0]
 }
 
 def main(x: i32): i32 =

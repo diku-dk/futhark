@@ -5,7 +5,7 @@
 
 module pm (P: {type t}) (X: {}) = {
   open P
-  let id_t (x: t): t = x
+  def id_t (x: t): t = x
 }
 
 module p_is_i32 = { type t = i32 }

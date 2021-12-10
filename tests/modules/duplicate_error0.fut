@@ -3,7 +3,7 @@
 -- error: .*Dup.*
 
 module Foo = {
-  let foo(): i32 = 1
+  def foo(): i32 = 1
 }
 def bar(): i32 = 1
 def bar(): i32 = 2

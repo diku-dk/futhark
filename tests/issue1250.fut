@@ -8,7 +8,7 @@ module type mt = {
 
 module i8mt = {
   type t = i8
-  let to_i64 = i8.to_i64
+  def to_i64 = i8.to_i64
 }
 
 module type a = {
@@ -22,7 +22,7 @@ module a_impl = {
 }
 
 module use_a (d: a) = {
-    let b_to_i64 (b: d.b.t) = d.b.to_i64 b
+    def b_to_i64 (b: d.b.t) = d.b.to_i64 b
 }
 
 module f = use_a a_impl

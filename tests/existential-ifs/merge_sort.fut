@@ -4,7 +4,7 @@
 -- the array to the next power of two, so a poor fit for some array
 -- sizes.
 
-local let log2 (n: i64) : i64 =
+local def log2 (n: i64) : i64 =
   let r = 0
   let (r, _) = loop (r,n) while 1 < n do
     let n = n / 2
@@ -12,7 +12,7 @@ local let log2 (n: i64) : i64 =
     in (r,n)
   in r
 
-local let ensure_pow_2 [n] 't ((<=): t -> t -> bool) (xs: [n]t): (*[]t, i64) =
+local def ensure_pow_2 [n] 't ((<=): t -> t -> bool) (xs: [n]t): (*[]t, i64) =
   if n == 0 then (copy xs, 0) else
   let d = log2 n
   in if n == 2**d
@@ -21,7 +21,7 @@ local let ensure_pow_2 [n] 't ((<=): t -> t -> bool) (xs: [n]t): (*[]t, i64) =
           in (concat xs (replicate (2**(d+1) - n) largest),
               d+1)
 
-local let kernel_par [n] 't ((<=): t -> t -> bool) (a: *[n]t) (p: i64) (q: i64) : *[n]t =
+local def kernel_par [n] 't ((<=): t -> t -> bool) (a: *[n]t) (p: i64) (q: i64) : *[n]t =
   let d = 1 << (p-q) in
   map (\i -> let a_i = a[i]
              let up1 = ((i >> p) & 2) == 0

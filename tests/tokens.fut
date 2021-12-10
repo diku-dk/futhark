@@ -20,7 +20,7 @@ module tokens : {
   val tokens [n] : [n]u8 -> ?[k][w].(token [w] -> ?[m].[m]u8, [k](token [w]))
 } = {
   type token [w] = ([w](), i64, i64)
-  let tokens [n] (s: [n]u8) =
+  def tokens [n] (s: [n]u8) =
     let rep = replicate 0 ()
     in
     (\(_, i, k) -> #[unsafe] s[i:i+k],

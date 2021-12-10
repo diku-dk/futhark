@@ -1,5 +1,5 @@
 module edge_handling (mapper: {}) = {
-  let handle (g: i32): f32 =
+  def handle (g: i32): f32 =
 
     let base (): f32 = f32.i32 g
 

@@ -3,7 +3,7 @@
 -- error: .*Dup.*
 
 module Foo = {
-  let foo(): foo = 1
+  def foo(): foo = 1
 }
 type foo = i32
 type foo = float

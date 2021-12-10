@@ -6,16 +6,16 @@ module type ModuleType = {
 }
 
 module moduleinst: ModuleType = {
-    let someVal = 0i32
+    def someVal = 0i32
 }
 
 module ModuleTypeOps (x: ModuleType) = {
-    let valGetter = x.someVal
+    def valGetter = x.someVal
 }
 
 module HigherModule (unused: dummy) = {
     open ModuleTypeOps moduleinst
-    let myGet = valGetter
+    def myGet = valGetter
 }
 
 open ModuleTypeOps moduleinst

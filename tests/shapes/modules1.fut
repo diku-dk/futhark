@@ -5,8 +5,8 @@
 
 module m = {
   type^ t [n] = [n]i32 -> i64
-  let f [n] (_: t [n]) = 0
-  let mk (n: i64) : t [n] = \(xs: [n]i32) -> n
+  def f [n] (_: t [n]) = 0
+  def mk (n: i64) : t [n] = \(xs: [n]i32) -> n
 } : {
   type^ t [n]
   val f [n] : (x: t [n]) -> i32

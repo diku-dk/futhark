@@ -8,7 +8,7 @@ module type mt = {
 
 module m : mt = {
   type arr [n] = [n]bool
-  let mk b = [b]
+  def mk b = [b]
 }
 
 def main b =
