@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Top-level value definitions can (and should) now be declared with
   with `def`, although `let` still works.
 
+* New tool: `futhark defs`, for printing locations of top-level
+  definitions.
+
 ### Removed
 
 ### Changed

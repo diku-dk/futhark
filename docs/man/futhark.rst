@@ -47,6 +47,12 @@ Find the test dataset whose description contains ``DATASET``
 (e.g. ``#1``) and print it in binary representation to standard
 output.  This does not work for ``script`` datasets.
 
+futhark defs PROGRAM
+--------------------
+
+Print names and locations of every top-level definition in the program
+(including top levels of modules), one per line.
+
 futhark dev options... PROGRAM
 ------------------------------
 
