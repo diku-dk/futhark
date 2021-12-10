@@ -80,6 +80,7 @@ library
       Futhark.CLI.Check
       Futhark.CLI.Datacmp
       Futhark.CLI.Dataset
+      Futhark.CLI.Defs
       Futhark.CLI.Dev
       Futhark.CLI.Doc
       Futhark.CLI.Literate
