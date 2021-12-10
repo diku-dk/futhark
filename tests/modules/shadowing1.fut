@@ -12,9 +12,9 @@ type best_type = f64
 def best_number(): best_type = 6.0
 module M0 = {
   type best_type = i32
-  let best_number(): best_type = 6
+  def best_number(): best_type = 6
   module M1 = {
-    let best_number(): best_type = 6
+    def best_number(): best_type = 6
   }
 }
 

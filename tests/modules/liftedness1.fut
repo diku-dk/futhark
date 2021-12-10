@@ -9,5 +9,5 @@ module type mt = {
 
 module m : mt = {
   type~ t = [][]i32
-  let f [n] (_: [n][n]i32) = n
+  def f [n] (_: [n][n]i32) = n
 }

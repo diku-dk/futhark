@@ -2,7 +2,7 @@
 -- ==
 
 module has_x = {
-  let x = 1i32
+  def x = 1i32
 }
 
 module has_has_x = {

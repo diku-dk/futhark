@@ -3,7 +3,7 @@
 -- input { 2 true } output { 2 true }
 
 module f(P: {type t}) = {
-  let id (x: P.t) = x
+  def id (x: P.t) = x
 }
 
 module m1 = f({type t = i32})

@@ -10,12 +10,12 @@ module type newint = {
 
 module newf32 : newreal with t = f32 = {
   type t = f32
-  let f32 = f32.f32
+  def f32 = f32.f32
 }
 
 module newi32 : newint with t = i32 = {
   type t = i32
-  let f32 = i32.f32
+  def f32 = i32.f32
 }
 
 module type mixture = {

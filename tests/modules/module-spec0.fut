@@ -7,7 +7,7 @@ module type MT = {
 }
 
 module M1: MT = {
-  module M = { let x = 2 }
+  module M = { def x = 2 }
 }
 
 def main = M1.M.x

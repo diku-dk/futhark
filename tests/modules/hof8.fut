@@ -3,4 +3,4 @@
 -- ==
 -- error: might contain function
 
-module m = \(p: {type ^a}) -> { let v: []p.a = [] }
+module m = \(p: {type ^a}) -> { def v: []p.a = [] }

@@ -1,7 +1,7 @@
 def dot [n] (x: [n]bool) (y: [n]bool):i64 =
   i64.sum (map2 (\x y -> i64.bool <| x && y) x y)
 
-local let choose (n:i64) (k:i64):f32 =
+local def choose (n:i64) (k:i64):f32 =
   f32.product (map (\i -> f32.i64 (n+1-i)/f32.i64 i) (1...k))
 
 def kc [m] (x: [m]bool) (y: [m]bool) (d:i64):f32 =

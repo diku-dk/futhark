@@ -12,7 +12,7 @@ module f1(R0: { type cell }) = {
 module f2(R1: { type cell }) = {
   module L = f1(R1)
   open L
-  let id (x: cell) = x
+  def id (x: cell) = x
 }
 
 module m2 = f2({type cell = i32})

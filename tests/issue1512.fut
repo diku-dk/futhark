@@ -3,11 +3,11 @@ module type Size = {
 }
 
 module SizeOps (size: Size) = {
-  let test (arr: []i64) = arr :> [size.n]i64
+  def test (arr: []i64) = arr :> [size.n]i64
 }
 
 module mySize = {
-  let n = 4i64
+  def n = 4i64
 } : Size
 
 module mySizeOps = SizeOps mySize

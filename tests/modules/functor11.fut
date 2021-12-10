@@ -11,14 +11,14 @@ module type mt = {
 module f1(R: mt) = {
   type cell = R.cell
 
-  let init [n] (bs: [n]bool): [n]cell =
+  def init [n] (bs: [n]bool): [n]cell =
     map R.init bs
 }
 
 module f2(R: mt) = {
   module m = {
     type cell = (R.cell, i32)
-    let init (b: bool) = (R.init b, 0)
+    def init (b: bool) = (R.init b, 0)
   }
   module m' = f1(m)
   open m'
@@ -26,7 +26,7 @@ module f2(R: mt) = {
 
 module m1 = {
   type cell = bool
-  let init (b: bool) = b
+  def init (b: bool) = b
 }
 
 module m2 = f2(m1)

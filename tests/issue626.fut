@@ -8,7 +8,7 @@ module type m1 = {
 
 module m1 : m1 = {
     type t = [1]f32
-    let get (t: *t) (v: f32): f32 = t[0]
+    def get (t: *t) (v: f32): f32 = t[0]
 }
 
 entry read (t: *[1]m1.t): []f32 = map2 m1.get t [0]

@@ -1,7 +1,7 @@
 -- ==
 -- error: Unexpected "def"
 
-let f x =
+def f x =
   let x' = x + 2
 
 def g x =

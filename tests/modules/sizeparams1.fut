@@ -11,7 +11,7 @@ module type MT = {
 }
 
 module M_k2: MT = {
-  let k = 2i64
+  def k = 2i64
   type k_ints = ints [k]
 }
 

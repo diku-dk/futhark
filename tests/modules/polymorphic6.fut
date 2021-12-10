@@ -6,12 +6,12 @@ module mk_m (P: {
   type t
   val f: t -> i32
 }) = {
-  let g (x: P.t) = P.f x
+  def g (x: P.t) = P.f x
 }
 
 module m = mk_m {
   type t = (i32, i32)
-  let f (x, _) = x
+  def f (x, _) = x
 }
 
 def main (x: i32) =

@@ -5,9 +5,9 @@ module type scenario = {
 }
 
 module scenario: scenario = {
-  let numbers (): []i64 = []
+  def numbers (): []i64 = []
 
-  let n_numbers: i64 =
+  def n_numbers: i64 =
     loop i = 0
     while length (numbers ()) != 0
     do i + 1

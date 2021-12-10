@@ -7,7 +7,7 @@ module type MT = {
 }
 
 module M1: MT = {
-  module M(P: {val y:i32}) = { let x = P.y }
+  module M(P: {val y:i32}) = { def x = P.y }
 }
 
 def main() = M1.M.x

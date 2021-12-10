@@ -10,9 +10,9 @@
 
 def number(): i32 = 1
 module M0 = {
-  let number(): i32 = 2
+  def number(): i32 = 2
   module M1 = {
-    let foo(): i32 = number()
+    def foo(): i32 = number()
   }
 }
 

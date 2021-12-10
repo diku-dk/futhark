@@ -9,8 +9,8 @@ module type MT = {
 module M0: MT = {
   module M = {
     type t = i32
-    let x = 0
-    let f (y: t) = y + 1
+    def x = 0
+    def f (y: t) = y + 1
   }
 }
 

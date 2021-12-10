@@ -10,14 +10,14 @@ module type MT = {
 
 module M0: MT = {
   type t 'a = (a,a)
-  let pack (xs: []i32) = (xs[0], xs[1])
-  let unpack (x: i32, y: i32) = [x,y]
+  def pack (xs: []i32) = (xs[0], xs[1])
+  def unpack (x: i32, y: i32) = [x,y]
 }
 
 module M1: MT = {
   type t 'a = [2]a
-  let pack (xs: []i32) = [xs[0], xs[1]]
-  let unpack (xs: t i32) = xs
+  def pack (xs: []i32) = [xs[0], xs[1]]
+  def unpack (xs: t i32) = xs
 }
 
 def main (x: i32) (y: i32): []i32 =
