@@ -23,6 +23,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+* Contrived intra-group code versions with no actual parallelism would
+  be given a group size of zero (#1524).
+
 ## [0.20.8]
 
 ### Added
