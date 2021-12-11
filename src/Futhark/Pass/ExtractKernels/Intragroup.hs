@@ -81,7 +81,7 @@ intraGroupParallelise knest lam = runMaybeT $ do
 
   ((intra_avail_par, kspace, read_input_stms), prelude_stms) <- lift $
     runBuilder $ do
-      let foldBinOp' _ [] = eSubExp $ intConst Int64 0
+      let foldBinOp' _ [] = eSubExp $ intConst Int64 1
           foldBinOp' bop (x : xs) = foldBinOp bop x xs
       ws_min <-
         mapM (letSubExp "one_intra_par_min" <=< foldBinOp' (Mul Int64 OverflowUndef)) $
@@ -93,8 +93,7 @@ intraGroupParallelise knest lam = runMaybeT $ do
       -- The amount of parallelism available *in the worst case* is
       -- equal to the smallest parallel loop, or *at least* 1.
       intra_avail_par <-
-        letSubExp "intra_avail_par"
-          =<< foldBinOp (SMin Int64) (intConst Int64 1) ws_avail
+        letSubExp "intra_avail_par" =<< foldBinOp' (SMin Int64) ws_avail
 
       -- The group size is either the maximum of the minimum parallelism
       -- exploited, or the desired parallelism (bounded by the max group
