@@ -91,8 +91,10 @@ intraGroupParallelise knest lam = runMaybeT $ do
           filter (not . null) wss_avail
 
       -- The amount of parallelism available *in the worst case* is
-      -- equal to the smallest parallel loop.
-      intra_avail_par <- letSubExp "intra_avail_par" =<< foldBinOp' (SMin Int64) ws_avail
+      -- equal to the smallest parallel loop, or *at least* 1.
+      intra_avail_par <-
+        letSubExp "intra_avail_par"
+          =<< foldBinOp (SMin Int64) (intConst Int64 1) ws_avail
 
       -- The group size is either the maximum of the minimum parallelism
       -- exploited, or the desired parallelism (bounded by the max group
