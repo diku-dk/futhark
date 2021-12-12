@@ -10,16 +10,16 @@
 
 type md5 = (u32, u32, u32, u32)
 
-let us32 (x: i32) = u32.i32 x
+def us32 (x: i32) = u32.i32 x
 
-let rs: [64]u32 =
+def rs: [64]u32 =
   map us32
   [ 7, 12, 17, 22,  7, 12, 17, 22,  7, 12, 17, 22,  7, 12, 17, 22,
     5,  9, 14, 20,  5,  9, 14, 20,  5,  9, 14, 20,  5,  9, 14, 20,
     4, 11, 16, 23,  4, 11, 16, 23,  4, 11, 16, 23,  4, 11, 16, 23,
     6, 10, 15, 21,  6, 10, 15, 21,  6, 10, 15, 21,  6, 10, 15, 21 ]
 
-let ks: [64]u32 =
+def ks: [64]u32 =
   [ 0xd76aa478, 0xe8c7b756, 0x242070db, 0xc1bdceee ,
     0xf57c0faf, 0x4787c62a, 0xa8304613, 0xfd469501 ,
     0x698098d8, 0x8b44f7af, 0xffff5bb1, 0x895cd7be ,
@@ -37,24 +37,24 @@ let ks: [64]u32 =
     0x6fa87e4f, 0xfe2ce6e0, 0xa3014314, 0x4e0811a1 ,
     0xf7537e82, 0xbd3af235, 0x2ad7d2bb, 0xeb86d391 ]
 
-let rotate_left(x: u32, c: u32): u32 = (x << c) | (x >> (32u32 - c))
+def rotate_left(x: u32, c: u32): u32 = (x << c) | (x >> (32u32 - c))
 
-let bytes(x: u32): [4]u8 = [u8.u32(x),
+def bytes(x: u32): [4]u8 = [u8.u32(x),
                             u8.u32(x/0x100u32),
                             u8.u32(x/0x10000u32),
                             u8.u32(x/0x1000000u32)]
 
-let unbytes(bs: [4]u8): u32 =
+def unbytes(bs: [4]u8): u32 =
   u32.u8(bs[0]) +
   u32.u8(bs[1]) * 0x100u32 +
   u32.u8(bs[2]) * 0x10000u32 +
   u32.u8(bs[3]) * 0x1000000u32
 
-let unbytes_block(block: [64]u8): [16]u32 =
+def unbytes_block(block: [64]u8): [16]u32 =
   map unbytes (unflatten 16 4 block)
 
 -- Process 512 bits of the input.
-let md5_chunk ((a0,b0,c0,d0): md5) (m: [16]u32): md5 =
+def md5_chunk ((a0,b0,c0,d0): md5) (m: [16]u32): md5 =
   loop (a,b,c,d) = (a0,b0,c0,d0) for i < 64 do
     let (f,g) =
       if      i < 16 then ((b & c) | (!b & d),
@@ -67,7 +67,7 @@ let md5_chunk ((a0,b0,c0,d0): md5) (m: [16]u32): md5 =
                            (7u32*u32.i32 i)        % 16u32)
     in (d, b + rotate_left(a + f + ks[i] + m[i32.u32 g], rs[i]), b, c)
 
-let md5 [n] (ms: [n][16]u32): md5 =
+def md5 [n] (ms: [n][16]u32): md5 =
   let a0 = 0x67452301_u32
   let b0 = 0xefcdab89_u32
   let c0 = 0x98badcfe_u32
@@ -76,7 +76,7 @@ let md5 [n] (ms: [n][16]u32): md5 =
        let (a,b,c,d) = md5_chunk (a0,b0,c0,d0) ms[i]
        in (a0+a, b0+b, c0+c, d0+d)
 
-let main [n] (ms: [n]u8): [16]u8 =
+def main [n] (ms: [n]u8): [16]u8 =
   let padding = 64 - (n % 64)
   let n_padded = n + padding
   let ms_padded = ms ++

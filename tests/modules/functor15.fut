@@ -8,10 +8,10 @@ module type MT1 = {
 
 module M = {
   module T(P: MT1) = {
-    let g(x: i32) = P.f x x
+    def g(x: i32) = P.f x x
   }
 }
 
-module T = M.T({let f (x: i32) (y: i32) = x + y})
+module T = M.T({def f (x: i32) (y: i32) = x + y})
 
-let main (x: i32) = T.g x
+def main (x: i32) = T.g x

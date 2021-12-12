@@ -1,4 +1,4 @@
 -- ==
 -- error: (out of bounds.*)
 
-let main : f32 = -1e40
+def main : f32 = -1e40

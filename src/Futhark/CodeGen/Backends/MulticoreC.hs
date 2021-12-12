@@ -54,7 +54,8 @@ generateContext = do
 
   cfg <- GC.publicDef "context_config" GC.InitDecl $ \s ->
     ( [C.cedecl|struct $id:s;|],
-      [C.cedecl|struct $id:s { int debugging;
+      [C.cedecl|struct $id:s { int in_use;
+                               int debugging;
                                int profiling;
                                int num_threads;
                              };|]
@@ -67,6 +68,7 @@ generateContext = do
                              if (cfg == NULL) {
                                return NULL;
                              }
+                             cfg->in_use = 0;
                              cfg->debugging = 0;
                              cfg->profiling = 0;
                              cfg->num_threads = 0;
@@ -77,6 +79,7 @@ generateContext = do
   GC.publicDef_ "context_config_free" GC.InitDecl $ \s ->
     ( [C.cedecl|void $id:s(struct $id:cfg* cfg);|],
       [C.cedecl|void $id:s(struct $id:cfg* cfg) {
+                             assert(!cfg->in_use);
                              free(cfg);
                            }|]
     )
@@ -115,6 +118,7 @@ generateContext = do
   ctx <- GC.publicDef "context" GC.InitDecl $ \s ->
     ( [C.cedecl|struct $id:s;|],
       [C.cedecl|struct $id:s {
+                      struct $id:cfg* cfg;
                       struct scheduler scheduler;
                       int detail_memory;
                       int debugging;
@@ -137,10 +141,13 @@ generateContext = do
   GC.publicDef_ "context_new" GC.InitDecl $ \s ->
     ( [C.cedecl|struct $id:ctx* $id:s(struct $id:cfg* cfg);|],
       [C.cedecl|struct $id:ctx* $id:s(struct $id:cfg* cfg) {
+             assert(!cfg->in_use);
              struct $id:ctx* ctx = (struct $id:ctx*) malloc(sizeof(struct $id:ctx));
              if (ctx == NULL) {
                return NULL;
              }
+             ctx->cfg = cfg;
+             ctx->cfg->in_use = 1;
 
              // Initialize rand()
              fast_srand(time(0));
@@ -184,6 +191,7 @@ generateContext = do
              free_constants(ctx);
              (void)scheduler_destroy(&ctx->scheduler);
              free_lock(&ctx->lock);
+             ctx->cfg->in_use = 0;
              free(ctx);
            }|]
     )

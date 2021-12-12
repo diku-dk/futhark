@@ -4,7 +4,7 @@
 -- the array to the next power of two, so a poor fit for some array
 -- sizes.
 
-local let log2 (n: i64) : i64 =
+local def log2 (n: i64) : i64 =
   let r = 0
   let (r, _) = loop (r,n) while 1 < n do
     let n = n / 2
@@ -12,7 +12,7 @@ local let log2 (n: i64) : i64 =
     in (r,n)
   in r
 
-local let ensure_pow_2 [n] 't ((<=): t -> t -> bool) (xs: [n]t): (*[]t, i64) =
+local def ensure_pow_2 [n] 't ((<=): t -> t -> bool) (xs: [n]t): (*[]t, i64) =
   if n == 0 then (copy xs, 0) else
   let d = log2 n
   in if n == 2**d
@@ -21,7 +21,7 @@ local let ensure_pow_2 [n] 't ((<=): t -> t -> bool) (xs: [n]t): (*[]t, i64) =
           in (concat xs (replicate (2**(d+1) - n) largest),
               d+1)
 
-local let kernel_par [n] 't ((<=): t -> t -> bool) (a: *[n]t) (p: i64) (q: i64) : *[n]t =
+local def kernel_par [n] 't ((<=): t -> t -> bool) (a: *[n]t) (p: i64) (q: i64) : *[n]t =
   let d = 1 << (p-q) in
   map (\i -> let a_i = a[i]
              let up1 = ((i >> p) & 2) == 0
@@ -36,7 +36,7 @@ local let kernel_par [n] 't ((<=): t -> t -> bool) (a: *[n]t) (p: i64) (q: i64) 
       (iota n)
 
 -- | Sort an array in increasing order.
-let merge_sort [n] 't ((<=): t -> t -> bool) (xs: [n]t): *[n]t =
+def merge_sort [n] 't ((<=): t -> t -> bool) (xs: [n]t): *[n]t =
   -- We need to pad the array so that its size is a power of 2.  We do
   -- this by first finding the largest element in the input, and then
   -- using that for the padding.  Then we know that the padding will
@@ -46,7 +46,7 @@ let merge_sort [n] 't ((<=): t -> t -> bool) (xs: [n]t): *[n]t =
         loop xs for j < i+1 do kernel_par (<=) xs i j)[:n]
 
 -- | Like `merge_sort`, but sort based on key function.
-let merge_sort_by_key [n] 't 'k (key: t -> k) ((<=): k -> k -> bool) (xs: [n]t): [n]t =
+def merge_sort_by_key [n] 't 'k (key: t -> k) ((<=): k -> k -> bool) (xs: [n]t): [n]t =
   zip (map key xs) (iota n)
   |> merge_sort (\(x, _) (y, _) -> x <= y)
   |> map (\(_, i) -> xs[i])

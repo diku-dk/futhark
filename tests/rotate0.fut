@@ -10,4 +10,4 @@
 -- output { empty([0]i32) }
 -- structure { Rotate 1 }
 
-let main (x: i64) (y: i64) (as: []i32) = rotate x (rotate y as)
+def main (x: i64) (y: i64) (as: []i32) = rotate x (rotate y as)

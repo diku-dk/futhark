@@ -47,7 +47,7 @@ import Futhark.IR.Syntax hiding
   )
 import qualified Futhark.IR.Syntax as AST
 import Futhark.IR.Traversals
-import qualified Futhark.TypeCheck as TypeCheck
+import qualified Futhark.IR.TypeCheck as TC
 
 -- This module could be written much nicer if Haskell had functors
 -- like Standard ML.  Instead, we have to abuse the namespace/module
@@ -80,10 +80,10 @@ type RetType = AST.RetType SOACS
 
 type PatElem = AST.PatElem SOACS
 
-instance TypeCheck.CheckableOp SOACS where
+instance TC.CheckableOp SOACS where
   checkOp = typeCheckSOAC
 
-instance TypeCheck.Checkable SOACS
+instance TC.Checkable SOACS
 
 instance Buildable SOACS where
   mkBody = AST.Body ()

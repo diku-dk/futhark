@@ -4,7 +4,7 @@
 -- compiled input { 2.0 [1.0,2.0,3.0] }
 -- output { [1.0,2.0,3.0] }
 
-let onehot n i : [n]f64 =
+def onehot n i : [n]f64 =
   tabulate n (\j -> f64.bool (i==j))
 
 entry fwd_J [n] (c: f64) (xs: [n]f64) =

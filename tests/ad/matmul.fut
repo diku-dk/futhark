@@ -16,11 +16,11 @@
 --    [0.000000f64, 1.000000f64]]]]
 -- }
 
-let dotprod xs ys = f64.sum (map2 (+) xs ys)
+def dotprod xs ys = f64.sum (map2 (+) xs ys)
 
-let matmul xss yss = map (\xs -> map (dotprod xs) (transpose yss)) xss
+def matmul xss yss = map (\xs -> map (dotprod xs) (transpose yss)) xss
 
-let onehot_2d n m p : [n][m]f64 =
+def onehot_2d n m p : [n][m]f64 =
   tabulate_2d n m (\i j -> f64.bool ((i,j)==p))
 
 entry fwd_J [n][m][p] (xss: [n][m]f64) (yss: [m][p]f64) =

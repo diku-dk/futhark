@@ -61,6 +61,7 @@ import Futhark.Util.Loc hiding (L) -- Lexer has replacements.
       then            { L $$ THEN }
       else            { L $$ ELSE }
       let             { L $$ LET }
+      def             { L $$ DEF }
       loop            { L $$ LOOP }
       in              { L $$ IN }
       match           { L $$ MATCH }
@@ -388,7 +389,7 @@ BindingId :: { (Name, SrcLoc) }
      | '(' BindingBinOp ')' { ($2, $1) }
 
 Val    :: { ValBindBase NoInfo Name }
-Val     : let BindingId TypeParams FunParams maybeAscription(TypeExpDecl) '=' Exp
+Val     : def BindingId TypeParams FunParams maybeAscription(TypeExpDecl) '=' Exp
           { let (name, _) = $2
             in ValBind Nothing name (fmap declaredType $5) NoInfo
                $3 $4 $7 Nothing mempty (srcspan $1 $>)
@@ -399,6 +400,17 @@ Val     : let BindingId TypeParams FunParams maybeAscription(TypeExpDecl) '=' Ex
             in ValBind (Just NoInfo) name (fmap declaredType $5) NoInfo
                $3 $4 $7 Nothing mempty (srcspan $1 $>) }
 
+        | def FunParam BindingBinOp FunParam maybeAscription(TypeExpDecl) '=' Exp
+          { ValBind Nothing $3 (fmap declaredType $5) NoInfo [] [$2,$4] $7
+            Nothing mempty (srcspan $1 $>)
+          }
+
+        -- The next two for backwards compatibility.
+        | let BindingId TypeParams FunParams maybeAscription(TypeExpDecl) '=' Exp
+          { let (name, _) = $2
+            in ValBind Nothing name (fmap declaredType $5) NoInfo
+               $3 $4 $7 Nothing mempty (srcspan $1 $>)
+          }
         | let FunParam BindingBinOp FunParam maybeAscription(TypeExpDecl) '=' Exp
           { ValBind Nothing $3 (fmap declaredType $5) NoInfo [] [$2,$4] $7
             Nothing mempty (srcspan $1 $>)
@@ -646,8 +658,6 @@ Atom : PrimLit        { Literal (fst $1) (snd $1) }
          QualParens (QualName qs name, loc) $2 (srcspan $1 $>) }
 
      -- Operator sections.
-     | '(' '!' ')'
-        { Var (qualName "!") NoInfo (srcspan $2 $>) }
      | '(' '-' ')'
         { OpSection (qualName (nameFromString "-")) NoInfo (srcspan $1 $>) }
      | '(' Exp2 '-' ')'
@@ -739,7 +749,9 @@ LetExp :: { UncheckedExp }
 LetBody :: { UncheckedExp }
     : in Exp %prec letprec { $2 }
     | LetExp %prec letprec { $1 }
-    | error {% throwError "Unexpected end of file - missing \"in\"?" }
+    | def {% parseErrorAt $1 (Just "Unexpected \"def\" - missing \"in\"?") }
+    | type {% parseErrorAt $1 (Just "Unexpected \"type\" - missing \"in\"?") }
+    | module {% parseErrorAt $1 (Just "Unexpected \"module\" - missing \"in\"?") }
 
 MatchExp :: { UncheckedExp }
           : match Exp Cases

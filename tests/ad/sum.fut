@@ -4,7 +4,7 @@
 -- compiled input { [1.0, 2.0, 3.0, 4.0, 5.0, 6.0] }
 -- output { [1.0, 1.0, 1.0, 1.0, 1.0, 1.0] }
 
-let sum [n] (xs: [n]f64) =
+def sum [n] (xs: [n]f64) =
   reduce (+) 0 xs
 
 entry rev [n] (xs: [n]f64) =

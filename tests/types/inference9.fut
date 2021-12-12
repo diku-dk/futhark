@@ -2,4 +2,4 @@
 -- ==
 -- input { true } output { true }
 
-let main x = if x then true else false
+def main x = if x then true else false

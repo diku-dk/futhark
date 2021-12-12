@@ -4,6 +4,6 @@
 
 type t = #c i32
 
-let main =
+def main =
   let ts = [#c 1, #c false] : []t
   in 0i32

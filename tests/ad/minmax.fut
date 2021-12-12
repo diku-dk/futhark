@@ -6,7 +6,7 @@
 --        }
 -- structure { /Screma 3 }
 
-let f xs = let ys = map f64.abs xs
+def f xs = let ys = map f64.abs xs
            in (f64.minimum ys, f64.maximum ys)
 
 entry rev [n] (xs: [n]f64) =

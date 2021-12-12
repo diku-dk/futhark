@@ -695,10 +695,20 @@ doBinOp SQuot {} = doRiskyIntBinOp doSQuot
 doBinOp SRem {} = doRiskyIntBinOp doSRem
 doBinOp SMin {} = doIntBinOp doSMin
 doBinOp UMin {} = doIntBinOp doUMin
-doBinOp FMin {} = doFloatBinOp min min min
+doBinOp FMin {} = doFloatBinOp fmin fmin fmin
+  where
+    fmin x y
+      | isNaN x = y
+      | isNaN y = x
+      | otherwise = min x y
 doBinOp SMax {} = doIntBinOp doSMax
 doBinOp UMax {} = doIntBinOp doUMax
-doBinOp FMax {} = doFloatBinOp max max max
+doBinOp FMax {} = doFloatBinOp fmax fmax fmax
+  where
+    fmax x y
+      | isNaN x = y
+      | isNaN y = x
+      | otherwise = max x y
 doBinOp Shl {} = doIntBinOp doShl
 doBinOp LShr {} = doIntBinOp doLShr
 doBinOp AShr {} = doIntBinOp doAShr

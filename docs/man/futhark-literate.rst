@@ -213,6 +213,11 @@ Futhark.  The following builtins are supported:
 * ``$loadimg "file"`` reads an image from the given file and returns
   it as a row-major ``[][]u32`` array with each pixel encoded as ARGB.
 
+* ``$loaddata "file"`` reads a dataset from the given file. When the file
+  contains a singular value, it is returned as value. Otherwise, a tuple
+  of values is returned, which should be destructured before use. For example:
+  ``let (a, b) = $loaddata "foo.in" in bar a b``.
+
 SAFETY
 ======
 

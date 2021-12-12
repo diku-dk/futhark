@@ -2,8 +2,8 @@
 
 module m = {
   type t = i32
-  let x = 0i32
-  let eq = (i32.==)
+  def x = 0i32
+  def eq = (i32.==)
 }
 
 open (m : {

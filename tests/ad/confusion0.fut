@@ -2,10 +2,10 @@
 -- entry: fwd rev
 -- compiled input { 1 2 } output { 1 }
 
-let d f x =
+def d f x =
   jvp f x 1
 
-let drev f x =
+def drev f x =
   vjp f x 1
 
 entry fwd x y =

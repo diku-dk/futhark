@@ -4,7 +4,7 @@
 
 type planet = #mercury | #venus | #earth | #mars
 
-let x = match 2
+def x = match 2
           case #mercury -> 3
           case #venus   -> 1
           case #earth   -> true

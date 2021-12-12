@@ -1,4 +1,4 @@
-let test [n] (xs: [n]f64) =
+def test [n] (xs: [n]f64) =
   let xs' = copy xs
   let xs'' = copy xs
   in xs' with [1] =  xs''[1]

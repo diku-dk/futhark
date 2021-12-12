@@ -7,7 +7,7 @@
 --   false
 --   0
 -- }
-let main(n: i64): (bool,i32) =
+def main(n: i64): (bool,i32) =
   let (a,b) = reduce (\(accx,accy) (x,y): (bool,i32)  ->
                        (accx && x, y)) (false,0) (
                      zip (replicate n true) (replicate n 1)) in

@@ -13,16 +13,16 @@ module type foo = {
 
 module foo_f32 = {
   type foo_in = f32
-  let foo (x: foo_in): f32 = x
+  def foo (x: foo_in): f32 = x
 }
 
 type some_type = i8
 
 module wrapper (bar: bar)
                (foo: foo with foo_in = bar.bar some_type) = {
-  let baz (x: bar.bar some_type): f32 = foo.foo x
+  def baz (x: bar.bar some_type): f32 = foo.foo x
 }
 
 module wrapped = wrapper bar_f32 foo_f32
 
-let main (s: f32): f32 = wrapped.baz s
+def main (s: f32): f32 = wrapped.baz s

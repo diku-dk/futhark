@@ -13,13 +13,13 @@
 --  [[0f32, 0f32], [0f32, 0f32], [0f32, 0f32], [31f32, 24f32]]]
 -- }
 
-let primal [n] (xs: [n](f32,f32)) =
+def primal [n] (xs: [n](f32,f32)) =
   scan (\(a1,b1) (a2,b2) -> (a2 + b2*a1, b1*b2)) (0,1) xs
 
-let fromarrs = map (\x -> (x[0],x[1]))
-let toarrs = map (\(a,b) -> [a,b])
+def fromarrs = map (\x -> (x[0],x[1]))
+def toarrs = map (\(a,b) -> [a,b])
 
-let onehot_2d n m x y =
+def onehot_2d n m x y =
   tabulate_2d n m (\i j -> f32.bool((i,j) == (x,y)))
 
 entry fwd_J [n] (input: [n][2]f32) =

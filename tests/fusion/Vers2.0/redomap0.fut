@@ -12,7 +12,7 @@
 -- }
 --
 
-let main(arr: []f32): (f32,[]f32,[]f32) =
+def main(arr: []f32): (f32,[]f32,[]f32) =
     let x = map (+1.0) arr
     let y = map2 (+) x arr
     let r = reduce (+) (0.0) arr in

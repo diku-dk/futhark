@@ -15,7 +15,7 @@
 --   SegMap 2 SegRed 1
 -- }
 
-let main [k][n][an][bn] (a: [n][an][k]i32) (b: [n][bn]i32): ([][]i32,[][]i32) =
+def main [k][n][an][bn] (a: [n][an][k]i32) (b: [n][bn]i32): ([][]i32,[][]i32) =
   #[incremental_flattening(only_inner)]
   unzip(
     #[incremental_flattening(only_inner)]

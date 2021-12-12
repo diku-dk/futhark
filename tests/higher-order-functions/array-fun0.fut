@@ -2,6 +2,6 @@
 -- ==
 -- error: functional
 
-let f (x:i32) : i32 = x+x
-let g (x:i32) : i32 = x+1
-let arr = [f, g]
+def f (x:i32) : i32 = x+x
+def g (x:i32) : i32 = x+1
+def arr = [f, g]

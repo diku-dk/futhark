@@ -6,7 +6,7 @@
 -- output { [1.0, 0.0] }
 -- structure { /Screma 2 }
 
-let f = map f64.abs >-> f64.maximum
+def f = map f64.abs >-> f64.maximum
 
 entry rev [n] (xs: [n]f64) =
   vjp f xs 1

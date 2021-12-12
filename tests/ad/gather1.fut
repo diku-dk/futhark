@@ -25,14 +25,14 @@
 -- }
 
 
-let gather xs is = map (\(i: i64) -> xs[i]) is
+def gather xs is = map (\(i: i64) -> xs[i]) is
 
-let mapgather xss is = map (`gather` is) xss
+def mapgather xss is = map (`gather` is) xss
 
-let onehot n i : [n]f64 =
+def onehot n i : [n]f64 =
   tabulate n (\j -> f64.bool (i==j))
 
-let onehot_2d n m p : [n][m]f64 =
+def onehot_2d n m p : [n][m]f64 =
   tabulate_2d n m (\i j -> f64.bool ((i,j)==p))
 
 entry fwd_J [n][m][k] (xs: [n][m]f64) (is: [k]i64) =

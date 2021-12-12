@@ -13,7 +13,7 @@
 --           [0.0, 0.0, 0.0, 1.0]]
 --        }
 
-let gather xs is = map (\(i: i64) -> xs[i]) is
+def gather xs is = map (\(i: i64) -> xs[i]) is
 
 entry fwd_J [n] [m] (xs: [n]f64) (is: [m]i64) =
   transpose (tabulate n (\j -> jvp (`gather` is) xs (replicate n 0 with [j] = 1)))

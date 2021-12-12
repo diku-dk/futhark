@@ -8,9 +8,9 @@ module type mt = {
 
 module m : mt = {
   type arr [n] = [n]bool
-  let mk b = [b]
+  def mk b = [b]
 }
 
-let main b =
+def main b =
   let [n] (_: m.arr [n]) = m.mk b
   in n

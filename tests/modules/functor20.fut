@@ -9,7 +9,7 @@ module type integral = {
 
 module quux = {
   type t = i32
-  let frob (x: i32) = x + 1
+  def frob (x: i32) = x + 1
 }
 
 module type has_int = {
@@ -23,9 +23,9 @@ module mk_has_int (T: integral): has_int with int.t = T.t = {
 module has_quux = mk_has_int quux
 
 module frob_int (E: has_int) = {
-  let really_frob (x: E.int.t) = E.int.frob x
+  def really_frob (x: E.int.t) = E.int.frob x
 }
 
 module m = frob_int has_quux
 
-let main (x: i32) = m.really_frob x
+def main (x: i32) = m.really_frob x

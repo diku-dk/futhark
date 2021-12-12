@@ -2,7 +2,7 @@
 -- ==
 -- structure gpu {Manifest 0}
 
-let gauss_jordan [nm] (n:i64) (m:i64) (A: *[nm]f32): [nm]f32 =
+def gauss_jordan [nm] (n:i64) (m:i64) (A: *[nm]f32): [nm]f32 =
     loop A for i < n do
       -- the loop is outside the kernel, and hence `i` is a free
       -- variable in the kernel; hence fixing coalescing will likely
@@ -19,7 +19,7 @@ let gauss_jordan [nm] (n:i64) (m:i64) (A: *[nm]f32): [nm]f32 =
                    ) (iota nm)
       in  scatter A (iota nm) A'
 
-let mat_inv [n] (A: [n][n]f32): [n][n]f32 =
+def mat_inv [n] (A: [n][n]f32): [n][n]f32 =
     let m = 2*n
     -- Pad the matrix with the identity matrix.
     let Ap = map (\ind -> let (i, j) = (ind / m, ind % m)
@@ -36,6 +36,6 @@ let mat_inv [n] (A: [n][n]f32): [n][n]f32 =
     -- Drop the identity matrix at the front.
     in Ap'[0:n,n:n * 2] :> [n][n]f32
 
-let main [m][n] (X : [m][n][n]f32) : [m][n][n]f32 =
+def main [m][n] (X : [m][n][n]f32) : [m][n][n]f32 =
   #[incremental_flattening(only_inner)]
   map mat_inv X

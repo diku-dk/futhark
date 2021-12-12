@@ -1,4 +1,4 @@
-let pow y x = loop acc = 1 for _i < y do
+def pow y x = loop acc = 1 for _i < y do
 	        acc * x
 -- ==
 -- entry: prim

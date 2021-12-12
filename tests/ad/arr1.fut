@@ -1,4 +1,4 @@
-let f (x, y) : [2]f64 = [x+y, x*y]
+def f (x, y) : [2]f64 = [x+y, x*y]
 
 -- ==
 -- entry: f_vjp f_jvp

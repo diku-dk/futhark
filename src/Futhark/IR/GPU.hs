@@ -25,7 +25,7 @@ import Futhark.IR.Prop
 import Futhark.IR.SOACS.SOAC hiding (HistOp (..))
 import Futhark.IR.Syntax
 import Futhark.IR.Traversals
-import qualified Futhark.TypeCheck as TypeCheck
+import qualified Futhark.IR.TypeCheck as TC
 
 -- | The phantom data type for the kernels representation.
 data GPU
@@ -36,13 +36,13 @@ instance RepTypes GPU where
 instance ASTRep GPU where
   expTypesFromPat = return . expExtTypesFromPat
 
-instance TypeCheck.CheckableOp GPU where
+instance TC.CheckableOp GPU where
   checkOp = typeCheckGPUOp Nothing
     where
       typeCheckGPUOp lvl =
         typeCheckHostOp (typeCheckGPUOp . Just) lvl typeCheckSOAC
 
-instance TypeCheck.Checkable GPU
+instance TC.Checkable GPU
 
 instance Buildable GPU where
   mkBody = Body ()

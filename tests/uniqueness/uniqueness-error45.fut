@@ -2,8 +2,8 @@
 -- ==
 -- error: aliases the free variable "global"
 
-let global: []i32 = [1,2,3]
+def global: []i32 = [1,2,3]
 
-let main =
+def main =
   let f (b: bool) = if b then global else []
   in f

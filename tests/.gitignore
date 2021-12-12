@@ -1,6 +1,5 @@
 *
 !.gitignore
-!/**/
 !*.fut
 !*.tuning
 !*.futharkscript

@@ -1,4 +1,4 @@
 -- Important that size is existential.
-let values = [1] ++ [2]
+def values = [1] ++ [2]
 
-let main = copy values
+def main = copy values

@@ -13,9 +13,9 @@ module type SIG = {
 module Struct: SIG = {
   type t = (i32,i32)
 
-  let x: (i32, i32) = (2,2)
+  def x: (i32, i32) = (2,2)
 
-  let f (as: []t): t = reduce (\(a,b) (c,d) -> (a+c,b+d)) (0,0) as
+  def f (as: []t): t = reduce (\(a,b) (c,d) -> (a+c,b+d)) (0,0) as
 }
 
-let main(xs: []i32) (ys: []i32) = Struct.f (zip xs ys) : Struct.t
+def main(xs: []i32) (ys: []i32) = Struct.f (zip xs ys) : Struct.t

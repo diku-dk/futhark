@@ -4,11 +4,11 @@
 -- input {}
 -- output { 8 }
 
-let f (x: i32) (y: i32) =
+def f (x: i32) (y: i32) =
   let z = x + y
   in z
 
-let a = f 1 2
-let b = f 2 3
+def a = f 1 2
+def b = f 2 3
 
-let main = a + b
+def main = a + b

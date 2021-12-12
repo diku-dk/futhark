@@ -1,4 +1,4 @@
-let main (r_sigma: f32) (I_tiled: [][][]f32) =
+def main (r_sigma: f32) (I_tiled: [][][]f32) =
   let nz' = i64.f32 (1/r_sigma + 0.5)
   let bin v = i64.f32 (v/r_sigma + 0.5)
   let intensity cell =

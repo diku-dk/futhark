@@ -10,8 +10,8 @@ module type MT = {
 }
 
 module M_k2: MT = {
-  let k = 2i64
+  def k = 2i64
   type k_ints = ints [2]
 }
 
-let main(n: i32): M_k2.k_ints = iota n
+def main(n: i32): M_k2.k_ints = iota n

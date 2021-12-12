@@ -2,6 +2,6 @@
 -- ==
 -- error: "n".*scope violation
 
-let main (xs: []i32) =
+def main (xs: []i32) =
   let n = 2+3
   in zip (iota n) xs

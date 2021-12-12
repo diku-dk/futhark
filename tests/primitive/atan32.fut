@@ -5,4 +5,4 @@
 -- input { -1f32 } output { -0.78539819f32 }
 
 
-let main(x: f32): f32 = f32.atan x
+def main(x: f32): f32 = f32.atan x

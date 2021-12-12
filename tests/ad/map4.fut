@@ -6,13 +6,13 @@
 -- [[[2, 0, 0], [1, 1, 0], [1, 0, 1]], [[1, 1, 0], [0, 2, 0], [0, 1, 1]], [[1, 0, 1], [0, 1, 1], [0, 0, 2]]]
 -- }
 
-let f (xs: []i32) =
+def f (xs: []i32) =
   map (\x -> map (+x) xs) xs
 
-let onehot n i : [n]i32 =
+def onehot n i : [n]i32 =
   tabulate n (\j -> i32.bool (i==j))
 
-let onehot_2d n m p : [n][m]i32 =
+def onehot_2d n m p : [n][m]i32 =
   tabulate_2d n m (\i j -> i32.bool ((i,j)==p))
 
 entry fwd_J [n] (xs: [n]i32) =

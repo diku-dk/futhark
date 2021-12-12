@@ -16,22 +16,22 @@ module type MT3 = {
 
 module MT3_twice: MT3 = {
   module T(P: MT1): MT2 = {
-    let g (x: i32) = P.f x x
+    def g (x: i32) = P.f x x
   }
 }
 
 module  MT1_plus: MT1 = {
-  let f (x: i32) (y: i32) = x + y
+  def f (x: i32) (y: i32) = x + y
 }
 
 module M = {
   module T(P: MT3) = {
     module P_T_I = P.T MT1_plus
 
-    let g(x: i32) = P_T_I.g x
+    def g(x: i32) = P_T_I.g x
   }
 }
 
 module MT_I = M.T MT3_twice
 
-let main(x: i32) = MT1_plus.f x x + MT_I.g x
+def main(x: i32) = MT1_plus.f x x + MT_I.g x

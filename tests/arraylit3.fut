@@ -3,5 +3,5 @@
 -- input { 2 } output { [2,2] }
 -- structure { ArrayLit 0 Replicate 1}
 
-let main (x: i32): []i32 =
+def main (x: i32): []i32 =
   [x,x]

@@ -5,7 +5,7 @@
 -- compiled input { false 5.0 7.0 }
 -- output { 0.14285 -0.102041 }
 
-let f (b, x, y) : f64 =
+def f (b, x, y) : f64 =
   if b then x*y else x/y
 
 entry f_jvp b x y =

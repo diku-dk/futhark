@@ -3,9 +3,9 @@
 -- error: x.*i32.*f32
 
 module F (P: { val x: i32 }) = {
-  let x: i32 = P.x + 1
+  def x: i32 = P.x + 1
 }
 
-module F' = F({let x: f32 = 1.0f32})
+module F' = F({def x: f32 = 1.0f32})
 
-let main(): i32 = F'.x
+def main(): i32 = F'.x

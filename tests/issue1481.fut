@@ -11,50 +11,50 @@ module type field = {
 module mk_scalar_field (R: real) = {
     module R = R
     type t = R.t
-    let zero = R.i64 0
-    let (+) (x:t) (y:t): t = R.(x + y)
-    let (*) (a:R.t) (x:t): t = R.(a * x)
-    let tab3 i j k: t = R.((i64 i)+(i64 j)+(i64 k))
+    def zero = R.i64 0
+    def (+) (x:t) (y:t): t = R.(x + y)
+    def (*) (a:R.t) (x:t): t = R.(a * x)
+    def tab3 i j k: t = R.((i64 i)+(i64 j)+(i64 k))
 }
 
 module mk_lt (F: field) = {
     module R = F.R
-    let rm1 = R.i64 (-1)
-    let r0 = R.i64 0
-    let r1 = R.i64 1
-    let r2 = R.i64 2
-    let r3 = R.i64 3
-    let r4 = R.i64 4
+    def rm1 = R.i64 (-1)
+    def r0 = R.i64 0
+    def r1 = R.i64 1
+    def r2 = R.i64 2
+    def r3 = R.i64 3
+    def r4 = R.i64 4
 
-    let len_q (N:i64): i64 = (N + 1) * (N + 2) // 2
+    def len_q (N:i64): i64 = (N + 1) * (N + 2) // 2
 
-    let gen_ml (N:i64): [](i64,i64) =
+    def gen_ml (N:i64): [](i64,i64) =
         loop ml = [(0,0)] for i < ((len_q N)-1) do
             let (m,l) = ml[i]
             let nl = if N == l then m + 1 else l + 1
             let nm = if N == l then m + 1 else m
             in ml ++ [(nm,nl)]
 
-    let all_amm (N:i64): []R.t = iota N
+    def all_amm (N:i64): []R.t = iota N
         |> map (\i -> R.i64(i + 1))
         |> map (\k -> R.((r2*k+r1)/(r2*k)))
         |> ([r1]++)
         |> scan (R.*) r1
         |> map (\el -> R.(sqrt(el/(r4*pi))))
 
-    let amn (m:R.t) (n:R.t): R.t = R.(sqrt((r4*n*n - r1)/(n*n - m*m)))
+    def amn (m:R.t) (n:R.t): R.t = R.(sqrt((r4*n*n - r1)/(n*n - m*m)))
 
-    let bmn (m:R.t) (n:R.t): R.t =
+    def bmn (m:R.t) (n:R.t): R.t =
         let l = R.((r2*n + r1)/(r2*n - r3))
         let r = R.(((n - r1)*(n - r1) - m*m)/(n*n - m*m))
         in R.(rm1*sqrt(l * r))
 
-    let lat_grid (nlat:i64): []R.t = iota nlat
+    def lat_grid (nlat:i64): []R.t = iota nlat
         |> map R.i64
         |> map (\x -> R.(cos (x / (i64 nlat) * pi)))
 
     -- m<n
-    let Lmx' [nlat] (m:i64) (np1:i64) (amm:R.t) (cx:[nlat]R.t) (x:[nlat]F.t): [np1]F.t =
+    def Lmx' [nlat] (m:i64) (np1:i64) (amm:R.t) (cx:[nlat]R.t) (x:[nlat]F.t): [np1]F.t =
         let n = np1 - 1
         let X = tabulate np1 (\i -> F.zero)
         let m' = R.i64 m
@@ -79,7 +79,7 @@ module mk_lt (F: field) = {
         in X
 
     -- n==m and m<n
-    let Lmx [nlat] (m:i64) (np1:i64) (amm:R.t) (cx:[nlat]R.t) (x:[nlat]F.t): [np1]F.t =
+    def Lmx [nlat] (m:i64) (np1:i64) (amm:R.t) (cx:[nlat]R.t) (x:[nlat]F.t): [np1]F.t =
         let n = np1 - 1
         let X = tabulate np1 (\i -> F.zero)
         let m' = R.i64 m
@@ -90,7 +90,7 @@ module mk_lt (F: field) = {
         in
         if (n-m)==0 then X else Lmx' m np1 amm cx x
 
-    let iLmX' [nlat] (m:i64) (np1:i64) (amm:R.t) (cx:[nlat]R.t) (X:[np1]F.t): [nlat]F.t =
+    def iLmX' [nlat] (m:i64) (np1:i64) (amm:R.t) (cx:[nlat]R.t) (X:[np1]F.t): [nlat]F.t =
         let n = np1 - 1
         let x = tabulate nlat (\i -> F.zero)
         let m' = R.i64 m
@@ -115,7 +115,7 @@ module mk_lt (F: field) = {
                     in (x, pi, p1)
         in x
 
-    let iLmX [nlat] (m:i64) (np1:i64) (amm:R.t) (cx:[nlat]R.t) (X:[np1]F.t): [nlat]F.t =
+    def iLmX [nlat] (m:i64) (np1:i64) (amm:R.t) (cx:[nlat]R.t) (X:[np1]F.t): [nlat]F.t =
         let n = np1 - 1
         let x = tabulate nlat (\i -> F.zero)
         let m' = R.i64 m
@@ -127,15 +127,15 @@ module mk_lt (F: field) = {
         in
         if (n-m)==0 then x else iLmX' m np1 amm cx X
 
-    let lt [np1][nlon][nlat] (amm:[np1]R.t) (cx:[nlat]R.t) (x:[nlon][nlat]F.t): [np1][np1]F.t =
+    def lt [np1][nlon][nlat] (amm:[np1]R.t) (cx:[nlat]R.t) (x:[nlon][nlat]F.t): [np1][np1]F.t =
         map2 (\m x -> Lmx m np1 amm[m] cx x) (iota np1) x[:np1] :> [np1][np1]F.t
 
-    let ilt [np1][nlon][nlat] (amm:[np1]R.t) (cx:[nlat]R.t) (X:[np1][np1]F.t): [nlon][nlat]F.t =
+    def ilt [np1][nlon][nlat] (amm:[np1]R.t) (cx:[nlat]R.t) (X:[np1][np1]F.t): [nlon][nlat]F.t =
         let out = tabulate_2d nlon nlat (\_ _ -> F.zero)
         let out[:np1] = map2 (\m x -> iLmX m np1 amm[m] cx x) (iota np1) X
         in out :> [nlon][nlat]F.t
 
-    let bench (nxfm:i64) (lmax:i64) (nlat:i64) (nlon:i64): [nxfm][nlon][nlat]F.t =
+    def bench (nxfm:i64) (lmax:i64) (nlat:i64) (nlon:i64): [nxfm][nlon][nlat]F.t =
         -- lmax > nlat
         let amm = all_amm lmax
         let x = tabulate_3d nxfm nlon nlat F.tab3

@@ -4,4 +4,4 @@
 
 type vector 't = []t
 
-let main(n: i32): vector = iota n
+def main(n: i32): vector = iota n

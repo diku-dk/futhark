@@ -2,8 +2,8 @@
 -- ==
 -- input {} output { 1 }
 
-let x = 1
+def x = 1
 
-open { local let x = 2 }
+open { local def x = 2 }
 
-let main = x
+def main = x

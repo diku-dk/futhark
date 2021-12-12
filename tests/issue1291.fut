@@ -1,4 +1,4 @@
-let main [n] (is : [n]i64) (ys_bar: *[n]f32) =
+def main [n] (is : [n]i64) (ys_bar: *[n]f32) =
   let scatter_res_adj_gather =
       map(\ is_elem -> ys_bar[is_elem] ) is
   let zeros = replicate n 0.0f32
