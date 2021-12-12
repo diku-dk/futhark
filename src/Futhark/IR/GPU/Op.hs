@@ -32,11 +32,11 @@ import Futhark.IR.Aliases (Aliases)
 import Futhark.IR.GPU.Sizes
 import Futhark.IR.Prop.Aliases
 import Futhark.IR.SegOp
+import qualified Futhark.IR.TypeCheck as TC
 import qualified Futhark.Optimise.Simplify.Engine as Engine
 import Futhark.Optimise.Simplify.Rep
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
-import qualified Futhark.TypeCheck as TC
 import Futhark.Util.Pretty
   ( commasep,
     parens,

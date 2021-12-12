@@ -68,10 +68,10 @@ import Futhark.Construct
 import Futhark.IR
 import Futhark.IR.Aliases (Aliases, removeLambdaAliases)
 import Futhark.IR.Prop.Aliases
+import qualified Futhark.IR.TypeCheck as TC
 import Futhark.Optimise.Simplify.Rep
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
-import qualified Futhark.TypeCheck as TC
 import Futhark.Util (chunks, maybeNth)
 import Futhark.Util.Pretty (Doc, Pretty, comma, commasep, parens, ppr, text, (<+>), (</>))
 import qualified Futhark.Util.Pretty as PP

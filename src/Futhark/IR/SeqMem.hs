@@ -19,10 +19,10 @@ where
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.IR.Mem
 import Futhark.IR.Mem.Simplify
+import qualified Futhark.IR.TypeCheck as TC
 import qualified Futhark.Optimise.Simplify.Engine as Engine
 import Futhark.Pass
 import Futhark.Pass.ExplicitAllocations (BuilderOps (..), mkLetNamesB', mkLetNamesB'')
-import qualified Futhark.TypeCheck as TC
 
 data SeqMem
 

@@ -30,11 +30,11 @@ import qualified Futhark.IR.SOACS.Simplify as SOAC
 import Futhark.IR.SegOp
 import Futhark.IR.Syntax
 import Futhark.IR.Traversals
+import qualified Futhark.IR.TypeCheck as TypeCheck
 import qualified Futhark.Optimise.Simplify as Simplify
 import qualified Futhark.Optimise.Simplify.Engine as Engine
 import Futhark.Optimise.Simplify.Rules
 import Futhark.Pass
-import qualified Futhark.TypeCheck as TypeCheck
 
 data MC
 

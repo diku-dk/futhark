@@ -38,9 +38,9 @@ import Data.Time.Clock
 import qualified Futhark.Analysis.Alias as Alias
 import Futhark.Error
 import Futhark.IR (PrettyRep, Prog)
+import Futhark.IR.TypeCheck
 import Futhark.MonadFreshNames
 import Futhark.Pass
-import Futhark.TypeCheck
 import Futhark.Util.Log
 import Futhark.Util.Pretty (prettyText)
 import System.IO

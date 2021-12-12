@@ -128,11 +128,11 @@ import Futhark.IR.Prop
 import Futhark.IR.Prop.Aliases
 import Futhark.IR.Syntax
 import Futhark.IR.Traversals
+import qualified Futhark.IR.TypeCheck as TC
 import qualified Futhark.Optimise.Simplify.Engine as Engine
 import Futhark.Optimise.Simplify.Rep
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
-import qualified Futhark.TypeCheck as TC
 import Futhark.Util
 import Futhark.Util.Pretty (indent, ppr, text, (<+>), (</>))
 import qualified Futhark.Util.Pretty as PP

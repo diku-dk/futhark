@@ -24,11 +24,11 @@ import Futhark.IR.GPU.Op
 import Futhark.IR.GPU.Simplify (simplifyKernelOp)
 import Futhark.IR.Mem
 import Futhark.IR.Mem.Simplify
+import qualified Futhark.IR.TypeCheck as TC
 import Futhark.MonadFreshNames
 import qualified Futhark.Optimise.Simplify.Engine as Engine
 import Futhark.Pass
 import Futhark.Pass.ExplicitAllocations (BuilderOps (..), mkLetNamesB', mkLetNamesB'')
-import qualified Futhark.TypeCheck as TC
 
 data GPUMem
 
