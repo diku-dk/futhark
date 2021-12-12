@@ -195,6 +195,7 @@ library
       Futhark.IR.Syntax
       Futhark.IR.Syntax.Core
       Futhark.IR.Traversals
+      Futhark.IR.TypeCheck
       Futhark.Internalise
       Futhark.Internalise.AccurateSizes
       Futhark.Internalise.Bindings
@@ -268,7 +269,6 @@ library
       Futhark.Transform.FirstOrderTransform
       Futhark.Transform.Rename
       Futhark.Transform.Substitute
-      Futhark.TypeCheck
       Futhark.Util
       Futhark.Util.Console
       Futhark.Util.IntegralExp
