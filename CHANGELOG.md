@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+* Allocation insertion pass bug (#1546).
+
 ## [0.21.1]
 
 ### Added
