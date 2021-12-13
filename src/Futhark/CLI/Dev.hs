@@ -561,9 +561,17 @@ commandLineOptions =
       ["gpu-mem"],
     pipelineOption
       getSOACSProg
+      "Seq"
+      Seq
+      "Run the sequential CPU compilation pipeline"
+      sequentialPipeline
+      []
+      ["seq"],
+    pipelineOption
+      getSOACSProg
       "SeqMem"
       SeqMem
-      "Run the sequential CPU compilation pipeline"
+      "Run the sequential CPU+memory compilation pipeline"
       sequentialCpuPipeline
       []
       ["seq-mem"],
