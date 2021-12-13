@@ -121,7 +121,7 @@ instance Representation UntypedPassState where
   representation (Seq _) = "Seq"
   representation (GPUMem _) = "GPUMem"
   representation (MCMem _) = "MCMem"
-  representation (SeqMem _) = "SeqMEm"
+  representation (SeqMem _) = "SeqMem"
 
 instance PP.Pretty UntypedPassState where
   ppr (SOACS prog) = PP.ppr prog
