@@ -965,9 +965,8 @@ addResCtxInIfBody ifrets (Body _ stms res) spaces substs = buildBody $ do
     inspect k (Array pt shape u) space =
       let space' = fromMaybe DefaultSpace space
           bodyret =
-            MemArray pt shape u $
-              ReturnsNewBlock space' k $
-                IxFun.iota $ map convert $ shapeDims shape
+            MemArray pt shape u . ReturnsNewBlock space' k $
+              IxFun.iota $ map convert $ shapeDims shape
        in bodyret
     inspect _ (Acc acc ispace ts u) _ = MemAcc acc ispace ts u
     inspect _ (Prim pt) _ = MemPrim pt
