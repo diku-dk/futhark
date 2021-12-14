@@ -14,7 +14,7 @@ import Control.Monad.Trans.RWS.Lazy
 import Control.Parallel.Strategies (parMap, rpar)
 import qualified Data.IntMap.Strict as IM
 import qualified Data.IntSet as IS
-import Data.List (foldl')
+import Data.List (foldl', find)
 import qualified Data.Map as M
 import Data.Maybe (fromMaybe, isNothing)
 import Data.Set (Set, (\\))
@@ -336,6 +336,10 @@ graphIdFor i =
     let meta = envMeta env
     in env { envMeta = meta { metaGraphId = Just i } }
 
+-- | Capture body stats produced by the given action.
+captureBodyStats :: Grapher a -> Grapher BodyStats
+captureBodyStats = (fmap snd) . listen
+
 -- | Add these entries to the 'ActionTable' for this action.
 withActions :: Grapher a -> ActionTable -> Grapher a
 withActions g table = local f g
@@ -359,7 +363,7 @@ getMeta = asks envMeta
 
 
 graphBody :: BodyT GPU -> Grapher BodyStats
-graphBody b = fmap snd $ listen $ graphStms (bodyStms b)
+graphBody b = captureBodyStats $ graphStms (bodyStms b)
 
 graphStms :: Stms GPU -> Grapher ()
 graphStms = mapM_ graphStm
@@ -489,7 +493,8 @@ graphWithAcc bs inputs f = do
 
     extract (Acc a _ ts _, (_, _, Nothing))      = (nameToId a, ts, Nothing)
     extract (Acc a _ ts _, (_, _, Just (op, _))) = (nameToId a, ts, Just op)
-    extract _ = (0, [], Nothing) -- should never happen
+    extract _ = error -- should never happen
+      "type error: WithAcc expression did not return accumulator"
 
     toSet (SubExpRes _ (Var v)) = S.singleton v
     toSet _                     = S.empty
@@ -537,17 +542,157 @@ graphLoop :: [Binding]
           -> LoopForm GPU
           -> BodyT GPU
           -> Grapher ()
-graphLoop b params lform body =
-  return () -- TODO
+graphLoop [] _ _ _ =
+  -- We expect each loop to bind a value or be eliminated.
+  unexpectedError
+graphLoop (b:bs) params lform body = do
+  -- Graph loop params and body while capturing statistics.
+  g0 <- getGraph
+  stats <- captureBodyStats (subgraphId `graphIdFor` graphTheLoop)
+  let ho  = bodyHostOnly stats
+  let ops = IS.filter (\oi -> MG.member oi g0) (bodyOperands stats)
+  connectLoop -- merge return values with params
 
+  -- Route the sources within the loop body in isolation.
+  ss <- routeSubgraph subgraphId
 
+  -- Graph the variables bound by the loop. A device read can be delayed
+  -- from one iteration to the next, so the corresponding variables bound
+  -- by the loop must be treated as a sources.
+  mapM_ graphBinding loopValues
+  g1 <- getGraph
+  let (dbs, vs) = foldl' (deviceBindings g1) (IS.empty, MG.none) ss
+  modifySources $ \(r, u) -> (r, (IS.toList dbs) ++ u)
 
+  -- Connect operands to sinks if they can reach a sink within the loop.
+  -- Otherwise connect them to the loop bound variables that they can
+  -- reach and exhaust their normal entry edges into the loop.
+  foldM_ connectOperand vs (IS.elems ops)
 
+  -- If the loop contains host-only statements then it must execute on
+  -- host and the loop condition must be read from device if that is where
+  -- it resides.
+  -- Otherwise it might be beneficial to move the whole loop to device, to
+  -- avoid reading the (initial) loop condition value. This must be balanced
+  -- against the need to read the values bound by the loop statement.
+  case (ho, lform) of
+    (True,  ForLoop _ _ (Var v) _)
+      -> requiredOnHost (nameToId v)
+    (False, ForLoop _ _ n@(Var _) _)
+      -> addEdges (ToNodes bindings Nothing) =<< onlyGraphedScalar n
+    (True,  WhileLoop v)
+      -> requiredOnHost (nameToId v)
+    (False, WhileLoop v)
+      | i <- nameToId v
+      , Just (_, _, c, _) <- find (\(_, p, _, _) -> p == i) loopValues
+      , Var _ <- c
+      -> addEdges (ToNodes bindings Nothing) =<< onlyGraphedScalar c
+    _ -> return ()
+  where
+    subgraphId = fst b
 
+    loopValues =
+      let tmp  = zip3 (b:bs) params (bodyResult body)
+          tmp' = (flip map) tmp $
+                 \(bnd, (p, pval), res) ->
+                   let i = nameToId (paramName p)
+                   in (bnd, i, pval, resSubExp res)
+      in filter (\((_, t), _, _, _) -> isScalarType t) tmp'
 
+    bindings = IS.fromList $ map (\((i, _), _, _, _) -> i) loopValues
 
+    graphTheLoop = do
+      mapM_ graphParam loopValues
+      case lform of
+        ForLoop _ _ _ elems -> mapM_ graphForInElem elems
+        _                   -> return ()
+      graphStms (bodyStms body)
 
+    graphParam ((_, t), p, pval, _)
+      = do
+        -- It is unknown whether a read can be delayed via the parameter from
+        -- one iteration to the next, so we have to create a vertex even if the
+        -- initial value never depends on a read.
+        addVertex (p, t)
+        ops <- onlyGraphedScalar pval
+        addEdges (MG.oneEdge p) ops
 
+    graphForInElem (p, _) =
+      when (isScalar p) $ addSource (nameToId $ paramName p, typeOf p)
+
+    connectLoop = mapM_ connectLoopParam loopValues
+
+    connectLoopParam (_, p, _, res)
+      | Var v <- res
+      , op <- nameToId v
+      , op /= p
+      = addEdges (MG.oneEdge op) (IS.singleton p)
+
+      | otherwise
+      = return ()
+
+    graphBinding (bnd, p, _, _) =
+      createNode bnd (IS.singleton p)
+
+    deviceBindings g (s, vs) i =
+      let (r, vs') = MG.reduce g bindingReach vs Normal i
+      in case r of
+           Produced s' -> (s <> s', vs')
+           _           -> unexpectedError
+
+    bindingReach s _ v =
+      let i = vertexId v
+      in if IS.member i bindings
+         then IS.insert i s
+         else s
+
+    connectOperand vs i = do
+      g <- getGraph
+      case MG.get i g of
+        Nothing -> return vs
+        Just v ->
+          case vertexEdges v of
+            ToSink -> return vs
+            ToNodes es Nothing ->
+              connectOp g vs i es
+            ToNodes _ (Just nx) ->
+              connectOp g vs i nx
+              
+    connectOp g vs i es = do
+      let st             = (IS.empty, [], vs)
+      let (res, nx, vs') = findBindings g st (IS.elems es)
+      case res of
+        FoundSink     -> requiredOnHost i
+        Produced bnds -> modifyGraph $ MG.adjust (f nx bnds) i
+      return vs'
+      
+    f nx bnds v
+      | ToNodes es _ <- vertexEdges v
+      = let nx' = bnds <> IS.fromList nx
+            es' = ToNodes (bnds <> es) (Just nx')
+        in v { vertexEdges = es' }
+
+      | otherwise
+      = v
+
+    findBindings _ (bnds, nx, vs) []
+      = (Produced bnds, nx, vs)
+    findBindings g (bnds, nx, vs) (i:is)
+      | Just v <- MG.get i g
+      , Just gid <- metaGraphId (vertexMeta v)
+      , gid == subgraphId -- only search the subgraph
+      = let (res, vs') = MG.reduce g bindingReach vs Normal i
+        in case res of
+             FoundSink      -> (FoundSink, [], vs')
+             Produced bnds' -> findBindings g (bnds <> bnds', nx, vs') is
+
+      | otherwise -- don't exhaust
+      = findBindings g (bnds, i:nx, vs) is
+
+-- | The error raised in any situation that was thought to be impossible.
+unexpectedError :: a
+unexpectedError =
+  error "Unexpected error occurred in Futhark.Analysis.MigrationTable"
 
 -- | @censorRoutes si ops@ routes all possible routes within the subgraph
 -- identified by @si@ and then connects each operand in @ops@ to a sink if it
@@ -557,7 +702,7 @@ graphLoop b params lform body =
 -- exists from it to an external sink.
 censorRoutes :: Id -> Operands -> Grapher ()
 censorRoutes si ops = do
-  routeSubgraph si
+  _ <- routeSubgraph si
   -- Connect operands to sinks if they can reach a sink within the subgraph.
   -- This ensures additional reads cannot occur by delaying any reads into it.
   g <- getGraph
@@ -578,20 +723,18 @@ censorRoutes si ops = do
       | not sinkFound
       , Just v <- MG.get i g
       , Just gid <- metaGraphId (vertexMeta v)
-      , gid == si
-      = let res = MG.reduce g (\_ _ _ -> ()) vs Normal i
-        in first (== FoundSink) res
+      , gid == si -- only search the subgraph
+      = MG.canReachSink g vs Normal i
 
       | otherwise
       = (sinkFound, vs)
 
-    first f (a, b) = (f a, b)
-
 -- | Routes all possible routes within the subgraph identified by this id.
+-- Returns the ids of the source connected vertices that were attempted routed.
 --
 -- Assumption: The subgraph with the given id has just been created and no path
 -- exists from it to an external sink.
-routeSubgraph :: Id -> Grapher ()
+routeSubgraph :: Id -> Grapher [Id]
 routeSubgraph si = do
   st <- get
   let g           = stateGraph st
@@ -601,6 +744,7 @@ routeSubgraph si = do
   put $ st { stateGraph   = g',
              stateSources = (ss ++ r, u'),
              stateSinks   = sinks ++ (stateSinks st) }
+  return ss
 
 -- | @inSubGraph si g i@ returns whether @g@ contains a vertex with id @i@ and
 -- subgraph id @si@.
@@ -651,6 +795,15 @@ requiredOnHost :: Id -> Grapher ()
 requiredOnHost i = do
   modifyGraph (MG.connectToSink i)
   modifyGraphedScalars (IS.delete i)
+
+-- Like 'onlyGraphedScalars' but for a single 'SubExp'.
+onlyGraphedScalar :: SubExp -> Grapher IdSet
+onlyGraphedScalar (Constant _) = return (IS.empty)
+onlyGraphedScalar (Var v) = do
+  let i = nameToId v
+  gss <- getGraphedScalars
+  if IS.member i gss then return (IS.singleton i)
+                     else return IS.empty
 
 -- Reduces the variables to just the 'Id's of those that are scalars and which
 -- have a vertex representation in the graph, excluding those that have been
