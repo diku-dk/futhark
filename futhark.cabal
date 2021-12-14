@@ -1,6 +1,6 @@
 cabal-version: 2.4
 name:           futhark
-version:        0.21.0
+version:        0.21.1
 synopsis:       An optimising compiler for a functional, array-oriented language.
 
 description:    Futhark is a small programming language designed to be compiled to
@@ -82,6 +82,7 @@ library
       Futhark.CLI.Check
       Futhark.CLI.Datacmp
       Futhark.CLI.Dataset
+      Futhark.CLI.Defs
       Futhark.CLI.Dev
       Futhark.CLI.Doc
       Futhark.CLI.Literate
@@ -263,6 +264,7 @@ library
       Futhark.Pkg.Types
       Futhark.Script
       Futhark.Test
+      Futhark.Test.Spec
       Futhark.Test.Values
       Futhark.Tools
       Futhark.Transform.CopyPropagate
@@ -314,7 +316,7 @@ library
       alex:alex
     , happy:happy
   build-depends:
-      aeson >=1.0.0.0
+      aeson >=2.0.0.0
     , ansi-terminal >=0.6.3.1
     , array >=0.4
     , base >=4.13 && <5
@@ -332,8 +334,8 @@ library
     , file-embed >=0.0.14.0
     , filepath >=1.4.1.1
     , free >=4.12.4
-    , futhark-data >= 1.0.2.0
-    , futhark-server >= 1.1.1.0
+    , futhark-data >= 1.0.3.0
+    , futhark-server >= 1.1.2.0
     , githash >=0.1.6.1
     , half >= 0.3
     , haskeline
@@ -355,7 +357,6 @@ library
     , text >=1.2.2.2
     , time >=1.6.0.1
     , transformers >=0.3
-    , unordered-containers >=0.2.7
     , vector >=0.12
     , vector-binary-instances >=0.2.2.0
     , versions >=5.0.0

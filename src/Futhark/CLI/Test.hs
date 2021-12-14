@@ -125,11 +125,11 @@ optimisedProgramMetrics programs pipeline program =
   case pipeline of
     SOACSPipeline ->
       check ["-s"]
-    KernelsPipeline ->
-      check ["--gpu"]
-    SequentialCpuPipeline ->
-      check ["--seq-mem"]
     GpuPipeline ->
+      check ["--gpu"]
+    SeqMemPipeline ->
+      check ["--seq-mem"]
+    GpuMemPipeline ->
       check ["--gpu-mem"]
     NoPipeline ->
       check []
@@ -152,17 +152,24 @@ testMetrics programs program (StructureTest pipeline (AstMetrics expected)) =
     actual <- optimisedProgramMetrics programs pipeline program
     accErrors_ $ map (ok actual) $ M.toList expected
   where
+    maybePipeline :: StructurePipeline -> T.Text
+    maybePipeline SOACSPipeline = "(soacs) "
+    maybePipeline GpuPipeline = "(kernels) "
+    maybePipeline SeqMemPipeline = "(seq-mem) "
+    maybePipeline GpuMemPipeline = "(gpu-mem) "
+    maybePipeline NoPipeline = ""
+
     ok (AstMetrics metrics) (name, expected_occurences) =
       case M.lookup name metrics of
         Nothing
           | expected_occurences > 0 ->
             throwError $
-              name <> " should have occurred " <> T.pack (show expected_occurences)
+              name <> maybePipeline pipeline <> " should have occurred " <> T.pack (show expected_occurences)
                 <> " times, but did not occur at all in optimised program."
         Just actual_occurences
           | expected_occurences /= actual_occurences ->
             throwError $
-              name <> " should have occurred " <> T.pack (show expected_occurences)
+              name <> maybePipeline pipeline <> " should have occurred " <> T.pack (show expected_occurences)
                 <> " times, but occurred "
                 <> T.pack (show actual_occurences)
                 <> " times."

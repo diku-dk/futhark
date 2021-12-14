@@ -1,9 +1,9 @@
 -- A case of tiling with a complex dependency.
 -- ==
 -- compiled random input { [100]i32 } auto output
--- structure distributed { SegMap/DoLoop/SegMap 2 }
+-- structure gpu { SegMap/DoLoop/SegMap 2 }
 
-let main (xs: []i32) =
+def main (xs: []i32) =
   map (\x ->
          let y = x + 2 -- Used in postlude.
          let z = loop z=0 while z < 1337 do z * 2 + y -- Uses 'y', but

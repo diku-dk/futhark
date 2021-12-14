@@ -8,11 +8,11 @@
 
 import "intrinsics"
 
-let dotprod [n] (a: [n]f32) (b: [n]f32): f32 =
+def dotprod [n] (a: [n]f32) (b: [n]f32): f32 =
   map2 (*) a b
        |> reduce (+) 0
 
-let lud_diagonal [b] (a: [b][b]f32): *[b][b]f32 =
+def lud_diagonal [b] (a: [b][b]f32): *[b][b]f32 =
   map1 (\mat ->
           let mat = copy mat
           in loop (mat: *[b][b]f32) for i < b-1 do
@@ -34,7 +34,7 @@ let lud_diagonal [b] (a: [b][b]f32): *[b][b]f32 =
        ) (unflatten (opaque 1) b a)
        |> head
 
-let lud_perimeter_upper [m][b] (diag: [b][b]f32) (a0s: [m][b][b]f32): *[m][b][b]f32 =
+def lud_perimeter_upper [m][b] (diag: [b][b]f32) (a0s: [m][b][b]f32): *[m][b][b]f32 =
     let a1s = map (\ (x: [b][b]f32): [b][b]f32  -> transpose(x)) a0s in
     let a2s =
         map  (\a1: [b][b]f32  ->
@@ -47,7 +47,7 @@ let lud_perimeter_upper [m][b] (diag: [b][b]f32) (a0s: [m][b][b]f32): *[m][b][b]
              ) a1s
     in map (\x: [b][b]f32 -> transpose(x)) a2s
 
-let lud_perimeter_lower [b][m] (diag: [b][b]f32) (mat: [m][b][b]f32): *[m][b][b]f32 =
+def lud_perimeter_lower [b][m] (diag: [b][b]f32) (mat: [m][b][b]f32): *[m][b][b]f32 =
   map (\blk: [b][b]f32  ->
         map  (\ (row0: [b]f32): *[b]f32  ->   -- Lower
                 loop row = copy row0 for j < b do
@@ -58,7 +58,7 @@ let lud_perimeter_lower [b][m] (diag: [b][b]f32) (mat: [m][b][b]f32): *[m][b][b]
             ) blk
       ) mat
 
-let lud_internal [m][b] (top_per: [m][b][b]f32) (lft_per: [m][b][b]f32) (mat_slice: [m][m][b][b]f32): *[m][m][b][b]f32 =
+def lud_internal [m][b] (top_per: [m][b][b]f32) (lft_per: [m][b][b]f32) (mat_slice: [m][m][b][b]f32): *[m][m][b][b]f32 =
   let top_slice = map transpose top_per in
   map (\(mat_arr: [m][b][b]f32, lft: [b][b]f32): [m][b][b]f32  ->
         map (\ (mat_blk: [b][b]f32, top: [b][b]f32): [b][b]f32  ->

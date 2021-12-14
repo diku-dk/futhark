@@ -5,11 +5,11 @@
 -- output {
 --   [100.0f32, 100.0f32, 100.0f32]
 -- }
--- structure distributed {
+-- structure gpu {
 --   Iota 0
 -- }
 
-let main(n_histo: i64) (n_image: i64): [n_histo]f32 =
+def main(n_histo: i64) (n_image: i64): [n_histo]f32 =
   let as = map i32.i64 (iota n_image) in
   reduce_stream_per (\a b  ->
                        map2 (+) a b)

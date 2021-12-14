@@ -3,7 +3,7 @@
 -- ==
 -- input { [1,2,3] } output { [2,3] }
 
-let main [n] (xs: [n]i32) =
+def main [n] (xs: [n]i32) =
   let res =
     let m = n - 1
     in map (+1) (take m xs)

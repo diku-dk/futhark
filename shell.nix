@@ -10,6 +10,7 @@ pkgs.stdenv.mkDerivation {
     pkgs.curl
     pkgs.file
     pkgs.git
+    pkgs.git-annex
     pkgs.ghc
     pkgs.haskellPackages.weeder
     pkgs.hlint

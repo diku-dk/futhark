@@ -2,4 +2,4 @@
 -- ==
 -- input { 0 } output { [0,1] }
 
-let main x = [x, 1]
+def main x = [x, 1]

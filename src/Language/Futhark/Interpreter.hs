@@ -751,20 +751,22 @@ evalFunctionBinding ::
   Env ->
   [TypeParam] ->
   [Pat] ->
-  StructType ->
-  [VName] ->
+  StructRetType ->
   Exp ->
   EvalM TermBinding
-evalFunctionBinding env tparams ps ret retext fbody = do
-  let ret' = evalType env ret
+evalFunctionBinding env tparams ps ret fbody = do
+  let ret' = evalType env $ retType ret
       arrow (xp, xt) yt = Scalar $ Arrow () xp xt $ RetType [] yt
       ftype = foldr (arrow . patternParam) ret' ps
+      retext = case ps of
+        [] -> retDims ret
+        _ -> []
 
   -- Distinguish polymorphic and non-polymorphic bindings here.
   if null tparams
     then
       TermValue (Just $ T.BoundV [] ftype)
-        <$> (returned env ret retext =<< evalFunction env [] ps fbody ret')
+        <$> (returned env (retType ret) retext =<< evalFunction env [] ps fbody ret')
     else return $
       TermPoly (Just $ T.BoundV [] ftype) $ \ftype' -> do
         let tparam_names = map typeParamName tparams
@@ -777,7 +779,7 @@ evalFunctionBinding env tparams ps ret retext fbody = do
             missing_sizes =
               filter (`M.notMember` envTerm env') $
                 map typeParamName (filter isSizeParam tparams)
-        returned env ret retext =<< evalFunction env' missing_sizes ps fbody ret'
+        returned env (retType ret) retext =<< evalFunction env' missing_sizes ps fbody ret'
 
 evalArg :: Env -> Exp -> Maybe VName -> EvalM Value
 evalArg env e ext = do
@@ -863,8 +865,8 @@ evalAppExp env (LetPat sizes p e body _) = do
       v_s = valueShape v
       env'' = env' <> i64Env (resolveExistentials (map sizeName sizes) p_t v_s)
   eval env'' body
-evalAppExp env (LetFun f (tparams, ps, _, Info (RetType _ ret), fbody) body _) = do
-  binding <- evalFunctionBinding env tparams ps ret [] fbody
+evalAppExp env (LetFun f (tparams, ps, _, Info ret, fbody) body _) = do
+  binding <- evalFunctionBinding env tparams ps ret fbody
   eval (env {envTerm = M.insert f binding $ envTerm env}) body
 evalAppExp
   env
@@ -1093,14 +1095,14 @@ eval env (Constr c es (Info t) _) = do
   vs <- mapM (eval env) es
   shape <- typeValueShape env $ toStruct t
   return $ ValueSum shape c vs
-eval env (Attr (AttrAtom "break") e loc) = do
+eval env (Attr (AttrAtom (AtomName "break") _) e loc) = do
   break (locOf loc)
   eval env e
-eval env (Attr (AttrAtom "trace") e loc) = do
+eval env (Attr (AttrAtom (AtomName "trace") _) e loc) = do
   v <- eval env e
   trace (locStr (locOf loc)) v
   pure v
-eval env (Attr (AttrComp "trace" [AttrAtom tag]) e _) = do
+eval env (Attr (AttrComp "trace" [AttrAtom (AtomName tag) _] _) e _) = do
   v <- eval env e
   trace (nameToString tag) v
   pure v
@@ -1187,8 +1189,8 @@ evalModExp env (ModApply f e (Info psubst) (Info rsubst) _) = do
     _ -> error "Expected ModuleFun."
 
 evalDec :: Env -> Dec -> EvalM Env
-evalDec env (ValDec (ValBind _ v _ (Info (RetType _ ret, retext)) tparams ps fbody _ _ _)) = do
-  binding <- evalFunctionBinding env tparams ps ret retext fbody
+evalDec env (ValDec (ValBind _ v _ (Info ret) tparams ps fbody _ _ _)) = do
+  binding <- evalFunctionBinding env tparams ps ret fbody
   return $ env {envTerm = M.insert v binding $ envTerm env}
 evalDec env (OpenDec me _) = do
   me' <- evalModExp env me
@@ -1877,10 +1879,19 @@ initialCtx =
         return $ toArray (ShapeDim (n * m) shape) $ concatMap (snd . fromArray) xs'
     def "unflatten" = Just $
       fun3t $ \n m xs -> do
-        let (ShapeDim _ innershape, xs') = fromArray xs
+        let (ShapeDim xs_size innershape, xs') = fromArray xs
             rowshape = ShapeDim (asInt64 m) innershape
             shape = ShapeDim (asInt64 n) rowshape
-        return $ toArray shape $ map (toArray rowshape) $ chunk (asInt m) xs'
+        if asInt64 n * asInt64 m /= xs_size
+          then
+            bad mempty mempty $
+              "Cannot unflatten array of shape [" <> pretty xs_size
+                <> "] to array of shape ["
+                <> pretty (asInt64 n)
+                <> "]["
+                <> pretty (asInt64 m)
+                <> "]"
+          else pure $ toArray shape $ map (toArray rowshape) $ chunk (asInt m) xs'
     def "acc" = Nothing
     def s | nameFromString s `M.member` namesToPrimTypes = Nothing
     def s = error $ "Missing intrinsic: " ++ s

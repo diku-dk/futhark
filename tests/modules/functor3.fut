@@ -13,9 +13,9 @@ module rgba_colour: colour = {
 module colourspace(C: colour) = {
   open C
 
-  let frob (x: colour): colour = x
+  def frob (x: colour): colour = x
 }
 
 module rgba = colourspace(rgba_colour)
 
-let main = 2
+def main = 2

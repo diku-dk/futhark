@@ -93,6 +93,7 @@ tokens :-
   ".."                     { tokenC TWO_DOTS }
   "."                      { tokenC DOT }
   "!"                      { tokenC BANG }
+  "$"                      { tokenC DOLLAR }
 
   @intlit i8               { tokenM $ return . I8LIT . readIntegral . T.filter (/= '_') . T.takeWhile (/='i') }
   @intlit i16              { tokenM $ return . I16LIT . readIntegral . T.filter (/= '_') . T.takeWhile (/='i') }
@@ -136,6 +137,7 @@ keyword s =
     "if"           -> IF
     "then"         -> THEN
     "else"         -> ELSE
+    "def"          -> DEF
     "let"          -> LET
     "loop"         -> LOOP
     "in"           -> IN
@@ -334,6 +336,7 @@ data Token = ID Name
            | ASTERISK
            | NEGATE
            | BANG
+           | DOLLAR
            | LTH
            | HAT
            | TILDE
@@ -342,6 +345,7 @@ data Token = ID Name
            | IF
            | THEN
            | ELSE
+           | DEF
            | LET
            | LOOP
            | IN

@@ -2,4 +2,4 @@
 -- ==
 -- error: polymorphic
 
-let main 't (x: t) = x
+def main 't (x: t) = x

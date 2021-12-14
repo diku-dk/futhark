@@ -41,13 +41,13 @@
 
 import "intrinsics"
 
-let mkVal [bp1][b] (y:i32) (x:i32) (pen:i32) (block:[bp1][bp1]i32) (ref:[b][b]i32) : i32 =
+def mkVal [bp1][b] (y:i32) (x:i32) (pen:i32) (block:[bp1][bp1]i32) (ref:[b][b]i32) : i32 =
   #[unsafe]
   i32.max (block[y, x - 1] - pen) (block[y - 1, x] - pen)
   |> i32.max (block[y - 1, x - 1] + ref[y - 1, x - 1])
 
 
-let process_block [b][bp1]
+def process_block [b][bp1]
                   (penalty: i32)
                   (block: [bp1][bp1]i32)
                   (ref: [b][b]i32): *[b][b]i32 =
@@ -91,7 +91,7 @@ let process_block [b][bp1]
                          in  v ))
         in scatter_2d block inds vals
 
-  in block[1:, 1:] :> [b][b]i32
+  in block[1:, 1:] :> *[b][b]i32
 
 entry nw_flat [n]
               (block_size: i64)

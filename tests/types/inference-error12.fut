@@ -2,5 +2,5 @@
 -- ==
 -- error: expected type
 
-let f r = let y = r.l2
+def f r = let y = r.l2
           in (r: {l1: i32})

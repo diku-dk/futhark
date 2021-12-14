@@ -3,11 +3,11 @@
 -- ==
 -- input { [1, 2, 3] } output { [42, 2, 3] }
 
-let id (xs: []i32) = xs
+def id (xs: []i32) = xs
 
-let polyid 't (x: t) = x
+def polyid 't (x: t) = x
 
-let main (xs: *[]i32) =
+def main (xs: *[]i32) =
   let ys = id xs
   let ys = polyid xs
   let ys[0] = 42

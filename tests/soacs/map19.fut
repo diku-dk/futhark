@@ -5,5 +5,5 @@
 -- output { [[0, 2, 3], [0, 5, 6]] }
 -- structure { Copy 0 }
 
-let main (xss: *[][]i32) =
+def main (xss: *[][]i32) =
   map (\xs -> copy xs with [0] = 0) xss

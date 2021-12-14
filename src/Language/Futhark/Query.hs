@@ -55,8 +55,8 @@ patternDefs (TuplePat pats _) =
   mconcat $ map patternDefs pats
 patternDefs (RecordPat fields _) =
   mconcat $ map (patternDefs . snd) fields
-patternDefs (PatParens pat _) =
-  patternDefs pat
+patternDefs (PatParens pat _) = patternDefs pat
+patternDefs (PatAttr _ pat _) = patternDefs pat
 patternDefs Wildcard {} = mempty
 patternDefs PatLit {} = mempty
 patternDefs (PatAscription pat _ _) =
@@ -114,7 +114,7 @@ valBindDefs vbind =
   where
     vbind_t =
       foldFunType (map patternStructType (valBindParams vbind)) $
-        fst $ unInfo $ valBindRetType vbind
+        unInfo $ valBindRetType vbind
 
 typeBindDefs :: TypeBind -> Defs
 typeBindDefs tbind =
@@ -246,6 +246,8 @@ atPosInPat (TuplePat pats _) pos =
 atPosInPat (RecordPat fields _) pos =
   msum $ map ((`atPosInPat` pos) . snd) fields
 atPosInPat (PatParens pat _) pos =
+  atPosInPat pat pos
+atPosInPat (PatAttr _ pat _) pos =
   atPosInPat pat pos
 atPosInPat (PatAscription pat tdecl _) pos =
   atPosInPat pat pos `mplus` atPosInTypeExp (declaredType tdecl) pos

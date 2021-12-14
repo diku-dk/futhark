@@ -3,7 +3,7 @@
 -- ==
 -- structure { /Screma 1 }
 
-let main [n][m] (as: [n]i32, bs: [m]bool): [n]i32 =
+def main [n][m] (as: [n]i32, bs: [m]bool): [n]i32 =
   let css = map (\(b: bool): [n]i32  ->
                   if b then map i32.i64 (iota n) else as) bs
   let dss = map  (\(cs: []i32): [n]i32  ->

@@ -2,4 +2,4 @@
 -- ==
 -- input { [true, false] } output { false }
 
-let main xs = reduce (&&) true xs
+def main xs = reduce (&&) true xs

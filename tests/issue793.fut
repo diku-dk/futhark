@@ -5,19 +5,19 @@ type Sphere = {pos: [3]f32, radius: f32, color: [4]u8}
 type Intersection = {t: f32, index: i64, prim: u8}
 
 -- constants
-let DROP_OFF = 100f32
+def DROP_OFF = 100f32
 -- ray intersection primitive cases
-let P_NONE = 0:u8
-let P_SPHERE = 1:u8
-let P_LIGHT = 2:u8
-let P_POLYGON = 3:u8
+def P_NONE = 0:u8
+def P_SPHERE = 1:u8
+def P_LIGHT = 2:u8
+def P_POLYGON = 3:u8
 
 -- render functions:
 
-let dot [n] (a: [n]f32) (b: [n]f32): f32 =
+def dot [n] (a: [n]f32) (b: [n]f32): f32 =
     reduce (+) 0 (map2 (*) a b)
 
-let sphereIntersect (rayO: [3]f32) (rayD: [3]f32) (s: Sphere): f32 =
+def sphereIntersect (rayO: [3]f32) (rayD: [3]f32) (s: Sphere): f32 =
     let d = map2 (-) s.pos rayO
     let b = dot d rayD
     let c = (dot d d) - s.radius * s.radius
@@ -27,7 +27,7 @@ let sphereIntersect (rayO: [3]f32) (rayD: [3]f32) (s: Sphere): f32 =
         in if (0 < t) then t else DROP_OFF
 
 -- render function
-let render [nspheres] [nlights]
+def render [nspheres] [nlights]
            (dim: [2]i64)
            (spheres: [nspheres]Sphere)
            (lights: [nlights]Sphere)
@@ -68,7 +68,7 @@ let render [nspheres] [nlights]
         ) pixIndices
 
 -- entry point
-let main [s] (width: i64)
+def main [s] (width: i64)
              (height: i64)
              -- spheres and lights
              (numS: i64)

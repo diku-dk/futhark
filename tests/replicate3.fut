@@ -2,7 +2,7 @@
 -- ==
 -- structure { Reshape 1 }
 
-let main [n] (b: [n]i32, m: i64) =
+def main [n] (b: [n]i32, m: i64) =
   let x = n * m
   let c = b :> [x]i32
   let d = replicate 10 c

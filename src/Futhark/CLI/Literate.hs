@@ -27,6 +27,7 @@ import qualified Data.Vector.Storable.ByteString as SVec
 import Data.Void
 import Data.Word (Word32, Word8)
 import Futhark.Data
+import Futhark.Data.Reader
 import Futhark.Script
 import Futhark.Server
 import Futhark.Test
@@ -463,6 +464,18 @@ loadImage imgfile =
     void $ system "convert" [imgfile, "-type", "TrueColorAlpha", bmpfile] mempty
     loadBMP bmpfile
 
+loadData :: FilePath -> ScriptM (Compound Value)
+loadData datafile = do
+  contents <- liftIO $ LBS.readFile datafile
+  let maybe_vs = readValues contents
+  case maybe_vs of
+    Nothing ->
+      throwError $ "Failed to read data file " <> T.pack datafile
+    Just [v] ->
+      pure $ ValueAtom v
+    Just vs ->
+      pure $ ValueTuple $ map ValueAtom vs
+
 literateBuiltin :: EvalBuiltin ScriptM
 literateBuiltin "loadimg" vs =
   case vs of
@@ -472,7 +485,17 @@ literateBuiltin "loadimg" vs =
         loadImage path'
     _ ->
       throwError $
-        "$imgfile does not accept arguments of types: "
+        "$loadimg does not accept arguments of types: "
+          <> T.intercalate ", " (map (prettyText . fmap valueType) vs)
+literateBuiltin "loaddata" vs =
+  case vs of
+    [ValueAtom v]
+      | Just path <- getValue v -> do
+        let path' = map (chr . fromIntegral) (path :: [Word8])
+        loadData path'
+    _ ->
+      throwError $
+        "$loaddata does not accept arguments of types: "
           <> T.intercalate ", " (map (prettyText . fmap valueType) vs)
 literateBuiltin f _ =
   throwError $ "Unknown builtin function $" <> prettyText f
@@ -838,12 +861,12 @@ commandLineOptions =
       "v"
       ["verbose"]
       (NoArg $ Right $ \config -> config {scriptVerbose = scriptVerbose config + 1})
-      "Enable logging.  Pass multiple times for more.",
+      "Enable logging. Pass multiple times for more.",
     Option
       "o"
       ["output"]
       (ReqArg (\opt -> Right $ \config -> config {scriptOutput = Just opt}) "FILE")
-      "Enable logging.  Pass multiple times for more.",
+      "Override output file. Image directory is set to basename appended with -img/.",
     Option
       []
       ["stop-on-error"]

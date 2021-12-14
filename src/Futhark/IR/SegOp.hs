@@ -40,6 +40,7 @@ module Futhark.IR.SegOp
     SegOpMapper (..),
     identitySegOpMapper,
     mapSegOpM,
+    traverseSegOpStms,
 
     -- * Simplification
     simplifySegOp,
@@ -841,6 +842,20 @@ mapOnSegOpType tv (Array et shape u) =
   Array et <$> traverse (mapOnSegOpSubExp tv) shape <*> pure u
 mapOnSegOpType _tv (Mem s) = pure $ Mem s
 
+-- | A helper for defining 'TraverseOpStms'.
+traverseSegOpStms :: Monad m => OpStmsTraverser m (SegOp lvl rep) rep
+traverseSegOpStms f segop = mapSegOpM mapper segop
+  where
+    seg_scope = scopeOfSegSpace (segSpace segop)
+    f' scope = f (seg_scope <> scope)
+    mapper =
+      identitySegOpMapper
+        { mapOnSegOpLambda = traverseLambdaStms f',
+          mapOnSegOpBody = onBody
+        }
+    onBody (KernelBody dec stms res) =
+      KernelBody dec <$> f seg_scope stms <*> pure res
+
 instance
   (ASTRep rep, Substitute lvl) =>
   Substitute (SegOp lvl rep)
@@ -981,6 +996,10 @@ instance
           return
           return
 
+informKernelBody :: Informing rep => KernelBody rep -> KernelBody (Wise rep)
+informKernelBody (KernelBody dec stms res) =
+  mkWiseKernelBody dec (informStms stms) res
+
 instance
   (CanBeWise (Op rep), ASTRep rep, ASTConstraints lvl) =>
   CanBeWise (SegOp lvl rep)
@@ -994,6 +1013,16 @@ instance
           return
           (return . removeLambdaWisdom)
           (return . removeKernelBodyWisdom)
+          return
+          return
+
+  addOpWisdom = runIdentity . mapSegOpM add
+    where
+      add =
+        SegOpMapper
+          return
+          (return . informLambda)
+          (return . informKernelBody)
           return
           return
 
@@ -1020,7 +1049,7 @@ instance ASTRep rep => ST.IndexOp (SegOp lvl rep) where
         | [v] <- patNames $ stmPat stm,
           BasicOp (Index arr slice) <- stmExp stm,
           length (sliceDims slice) == length excess_is,
-          arr `ST.elem` vtable,
+          arr `ST.available` vtable,
           Just (slice', cs) <- asPrimExpSlice table slice =
           let idx =
                 ST.IndexedArray
@@ -1109,28 +1138,28 @@ mkKernelBodyM stms kres = do
 simplifyKernelBody ::
   (Engine.SimplifiableRep rep, BodyDec rep ~ ()) =>
   SegSpace ->
-  KernelBody rep ->
+  KernelBody (Wise rep) ->
   Engine.SimpleM rep (KernelBody (Wise rep), Stms (Wise rep))
 simplifyKernelBody space (KernelBody _ stms res) = do
   par_blocker <- Engine.asksEngineEnv $ Engine.blockHoistPar . Engine.envHoistBlockers
 
+  let blocker =
+        Engine.hasFree bound_here
+          `Engine.orIf` Engine.isOp
+          `Engine.orIf` par_blocker
+          `Engine.orIf` Engine.isConsumed
+
   -- Ensure we do not try to use anything that is consumed in the result.
-  ((body_stms, body_res), hoisted) <-
+  (body_res, body_stms, hoisted) <-
     Engine.localVtable (flip (foldl' (flip ST.consume)) (foldMap consumedInResult res))
       . Engine.localVtable (<> scope_vtable)
       . Engine.localVtable (\vtable -> vtable {ST.simplifyMemory = True})
       . Engine.enterLoop
-      $ Engine.blockIf
-        ( Engine.hasFree bound_here
-            `Engine.orIf` Engine.isOp
-            `Engine.orIf` par_blocker
-            `Engine.orIf` Engine.isConsumed
-        )
-        $ Engine.simplifyStms stms $ do
-          res' <-
-            Engine.localVtable (ST.hideCertified $ namesFromList $ M.keys $ scopeOf stms) $
-              mapM Engine.simplify res
-          return ((res', UT.usages $ freeIn res'), mempty)
+      $ Engine.blockIf blocker stms $ do
+        res' <-
+          Engine.localVtable (ST.hideCertified $ namesFromList $ M.keys $ scopeOf stms) $
+            mapM Engine.simplify res
+        pure (res', UT.usages $ freeIn res')
 
   return (mkWiseKernelBody () body_stms body_res, hoisted)
   where
@@ -1150,7 +1179,7 @@ segSpaceSymbolTable (SegSpace flat gtids_and_dims) =
 
 simplifySegBinOp ::
   Engine.SimplifiableRep rep =>
-  SegBinOp rep ->
+  SegBinOp (Wise rep) ->
   Engine.SimpleM rep (SegBinOp (Wise rep), Stms (Wise rep))
 simplifySegBinOp (SegBinOp comm lam nes shape) = do
   (lam', hoisted) <-
@@ -1166,7 +1195,7 @@ simplifySegOp ::
     BodyDec rep ~ (),
     Engine.Simplifiable lvl
   ) =>
-  SegOp lvl rep ->
+  SegOp lvl (Wise rep) ->
   Engine.SimpleM rep (SegOp lvl (Wise rep), Stms (Wise rep))
 simplifySegOp (SegMap lvl space ts kbody) = do
   (lvl', space', ts') <- Engine.simplify (lvl, space, ts)

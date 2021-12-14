@@ -1,7 +1,6 @@
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE Strict #-}
-{-# LANGUAGE TupleSections #-}
 
 module Futhark.Optimise.Simplify
   ( simplifyProg,
@@ -21,7 +20,6 @@ module Futhark.Optimise.Simplify
   )
 where
 
-import Data.Bifunctor (second)
 import qualified Futhark.Analysis.SymbolTable as ST
 import qualified Futhark.Analysis.UsageTable as UT
 import Futhark.IR
@@ -43,24 +41,22 @@ simplifyProg ::
   PassM (Prog rep)
 simplifyProg simpl rules blockers (Prog consts funs) = do
   (consts_vtable, consts') <-
-    simplifyConsts
-      (UT.usages $ foldMap freeIn funs)
-      (mempty, consts)
+    simplifyConsts (UT.usages $ foldMap freeIn funs) (mempty, informStms consts)
 
   -- We deepen the vtable so it will look like the constants are in an
   -- "outer loop"; this communicates useful information to some
   -- simplification rules (e.g. seee issue #1302).
-  funs' <- parPass (simplifyFun' $ ST.deepen consts_vtable) funs
+  funs' <- parPass (simplifyFun' (ST.deepen consts_vtable) . informFunDef) funs
   let funs_uses = UT.usages $ foldMap freeIn funs'
 
   (_, consts'') <- simplifyConsts funs_uses (mempty, consts')
 
-  return $ Prog consts'' funs'
+  pure $ Prog (fmap removeStmWisdom consts'') (fmap removeFunDefWisdom funs')
   where
     simplifyFun' consts_vtable =
       simplifySomething
         (Engine.localVtable (consts_vtable <>) . Engine.simplifyFun)
-        removeFunDefWisdom
+        id
         simpl
         rules
         blockers
@@ -69,18 +65,15 @@ simplifyProg simpl rules blockers (Prog consts funs) = do
     simplifyConsts uses =
       simplifySomething
         (onConsts uses . snd)
-        (second (removeStmWisdom <$>))
+        id
         simpl
         rules
         blockers
         mempty
 
     onConsts uses consts' = do
-      (_, consts'') <-
-        Engine.simplifyStms consts' (pure ((), mempty))
-      (consts''', _) <-
-        Engine.hoistStms rules (Engine.isFalse False) mempty uses consts''
-      return (ST.insertStms consts''' mempty, consts''')
+      consts'' <- Engine.simplifyStmsWithUsage uses consts'
+      pure (ST.insertStms consts'' mempty, consts'')
 
 -- | Run a simplification operation to convergence.
 simplifySomething ::
@@ -111,7 +104,16 @@ simplifyFun ::
   ST.SymbolTable (Wise rep) ->
   FunDef rep ->
   m (FunDef rep)
-simplifyFun = simplifySomething Engine.simplifyFun removeFunDefWisdom
+simplifyFun simpl rules blockers vtable fd =
+  removeFunDefWisdom
+    <$> simplifySomething
+      Engine.simplifyFun
+      id
+      simpl
+      rules
+      blockers
+      vtable
+      (informFunDef fd)
 
 -- | Simplify just a single t'Lambda'.
 simplifyLambda ::
@@ -126,14 +128,15 @@ simplifyLambda ::
   m (Lambda rep)
 simplifyLambda simpl rules blockers orig_lam = do
   vtable <- ST.fromScope . addScopeWisdom <$> askScope
-  simplifySomething
-    Engine.simplifyLambdaNoHoisting
-    removeLambdaWisdom
-    simpl
-    rules
-    blockers
-    vtable
-    orig_lam
+  removeLambdaWisdom
+    <$> simplifySomething
+      Engine.simplifyLambdaNoHoisting
+      id
+      simpl
+      rules
+      blockers
+      vtable
+      (informLambda orig_lam)
 
 -- | Simplify a sequence of 'Stm's.
 simplifyStms ::
@@ -143,14 +146,14 @@ simplifyStms ::
   Engine.HoistBlockers rep ->
   Scope rep ->
   Stms rep ->
-  m (ST.SymbolTable (Wise rep), Stms rep)
+  m (Stms rep)
 simplifyStms simpl rules blockers scope =
-  simplifySomething f g simpl rules blockers vtable . (mempty,)
+  fmap (fmap removeStmWisdom)
+    . simplifySomething f id simpl rules blockers vtable
+    . informStms
   where
     vtable = ST.fromScope $ addScopeWisdom scope
-    f (_, stms) =
-      Engine.simplifyStms stms ((,mempty) <$> Engine.askVtable)
-    g = second $ fmap removeStmWisdom
+    f stms = Engine.simplifyStms stms
 
 loopUntilConvergence ::
   (MonadFreshNames m, Engine.SimplifiableRep rep) =>
@@ -162,4 +165,4 @@ loopUntilConvergence ::
   m a
 loopUntilConvergence env simpl f g x = do
   (x', changed) <- modifyNameSource $ Engine.runSimpleM (f x) simpl env
-  if changed then loopUntilConvergence env simpl f g (g x') else return $ g x'
+  if changed then loopUntilConvergence env simpl f g (g x') else pure $ g x'

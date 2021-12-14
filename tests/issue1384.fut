@@ -1,7 +1,7 @@
-let loess_proc [n_m] (q: i64) (m_fun: i64 -> i64) (max_dist: [n_m]f32) : ([n_m]f32, [n_m]f32) =
+def loess_proc [n_m] (q: i64) (m_fun: i64 -> i64) (max_dist: [n_m]f32) : ([n_m]f32, [n_m]f32) =
   (max_dist, max_dist)
 
-let loess_l [m] [n] [n_m] (xx_l: [m][n]f32)
+def loess_l [m] [n] [n_m] (xx_l: [m][n]f32)
                           (yy_l: [m][n]f32)
                           (q: i64)
                           (m_fun: i64 -> i64)

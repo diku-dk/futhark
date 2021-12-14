@@ -9,4 +9,4 @@
 -- input { -1f64 -1f64 } output { -2.356194f64 }
 
 
-let main (x: f64) (y: f64): f64 = f64.atan2 x y
+def main (x: f64) (y: f64): f64 = f64.atan2 x y

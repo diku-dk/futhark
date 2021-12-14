@@ -17,7 +17,7 @@ writeResult ::
   KernelResult ->
   MulticoreGen ()
 writeResult is pe (Returns _ _ se) =
-  copyDWIMFix (patElemName pe) (map Imp.vi64 is) se []
+  copyDWIMFix (patElemName pe) (map Imp.le64 is) se []
 writeResult _ pe (WriteReturns _ (Shape rws) _ idx_vals) = do
   let (iss, vs) = unzip idx_vals
       rws' = map toInt64Exp rws

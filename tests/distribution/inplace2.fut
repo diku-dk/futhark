@@ -5,5 +5,5 @@
 -- output { [[42,2], [3,1337]] }
 -- structure { Copy 0 }
 
-let main (xss: *[][]i32) (is: []i32) (vs: []i32) =
+def main (xss: *[][]i32) (is: []i32) (vs: []i32) =
   map3 (\(xs: []i32) i v -> copy xs with [i] = v) xss is vs

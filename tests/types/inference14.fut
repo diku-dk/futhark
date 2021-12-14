@@ -2,4 +2,4 @@
 -- ==
 -- input { 1 } output { 3 }
 
-let main x = x + 2
+def main x = x + 2

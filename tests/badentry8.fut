@@ -5,4 +5,4 @@
 type t1 = {x:i32}
 type t2 = t1
 
-let main : t1 -> t2 = id
+def main : t1 -> t2 = id

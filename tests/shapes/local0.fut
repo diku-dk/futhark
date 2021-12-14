@@ -1,9 +1,9 @@
 -- A location function with some shape stuff.  Crashed the
 -- defunctionaliser once.
 
-let getneighbors (_: i32): []f64 = []
+def getneighbors (_: i32): []f64 = []
 
-let main (x: i32) =
+def main (x: i32) =
   let objxy = getneighbors x
 
   let flikelihood (_: i32) : []i64 =

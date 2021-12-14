@@ -28,6 +28,7 @@ module Language.Futhark.Prop
     -- * Queries on expressions
     typeOf,
     valBindTypeScheme,
+    valBindBound,
     funType,
 
     -- * Queries on patterns and params
@@ -276,7 +277,7 @@ diet (Array _ Unique _ _) = Consume
 diet (Array _ Nonunique _ _) = Observe
 diet (Scalar (TypeVar _ Unique _ _)) = Consume
 diet (Scalar (TypeVar _ Nonunique _ _)) = Observe
-diet (Scalar Sum {}) = Observe
+diet (Scalar (Sum cs)) = SumDiet $ M.map (map diet) cs
 
 -- | Convert any type to one that has rank information, no alias
 -- information, and no embedded names.
@@ -619,8 +620,18 @@ unfoldFunType t = ([], t)
 valBindTypeScheme :: ValBindBase Info VName -> ([TypeParamBase VName], StructType)
 valBindTypeScheme vb =
   ( valBindTypeParams vb,
-    funType (valBindParams vb) (fst (unInfo (valBindRetType vb)))
+    funType (valBindParams vb) (unInfo (valBindRetType vb))
   )
+
+-- | The names that are brought into scope by this value binding (not
+-- including its own parameter names, but including any existential
+-- sizes).
+valBindBound :: ValBindBase Info VName -> [VName]
+valBindBound vb =
+  valBindName vb :
+  case valBindParams vb of
+    [] -> retDims (unInfo (valBindRetType vb))
+    _ -> []
 
 -- | The type of a function with the given parameters and return type.
 funType :: [PatBase Info VName] -> StructRetType -> StructType
@@ -668,6 +679,7 @@ patternDimNames (PatAscription p (TypeDecl _ (Info t)) _) =
   patternDimNames p <> typeDimNames t
 patternDimNames (PatLit _ (Info tp) _) = typeDimNames tp
 patternDimNames (PatConstr _ _ ps _) = foldMap patternDimNames ps
+patternDimNames (PatAttr _ p _) = patternDimNames p
 
 -- | Extract all the shape names that occur free in a given type.
 typeDimNames :: TypeBase (DimDecl VName) als -> S.Set VName
@@ -688,6 +700,7 @@ patternOrderZero pat = case pat of
   PatAscription p _ _ -> patternOrderZero p
   PatLit _ (Info t) _ -> orderZero t
   PatConstr _ _ ps _ -> all patternOrderZero ps
+  PatAttr _ p _ -> patternOrderZero p
 
 -- | The set of identifiers bound in a pattern.
 patIdents :: (Functor f, Ord vn) => PatBase f vn -> S.Set (IdentBase f vn)
@@ -699,6 +712,7 @@ patIdents Wildcard {} = mempty
 patIdents (PatAscription p _ _) = patIdents p
 patIdents PatLit {} = mempty
 patIdents (PatConstr _ _ ps _) = mconcat $ map patIdents ps
+patIdents (PatAttr _ p _) = patIdents p
 
 -- | The set of names bound in a pattern.
 patNames :: (Functor f, Ord vn) => PatBase f vn -> S.Set vn
@@ -710,6 +724,7 @@ patNames Wildcard {} = mempty
 patNames (PatAscription p _ _) = patNames p
 patNames PatLit {} = mempty
 patNames (PatConstr _ _ ps _) = mconcat $ map patNames ps
+patNames (PatAttr _ p _) = patNames p
 
 -- | A mapping from names bound in a map to their identifier.
 patternMap :: (Functor f) => PatBase f VName -> M.Map VName (IdentBase f VName)
@@ -728,6 +743,7 @@ patternType (RecordPat fs _) = Scalar $ Record $ patternType <$> M.fromList fs
 patternType (PatAscription p _ _) = patternType p
 patternType (PatLit _ (Info t) _) = t
 patternType (PatConstr _ (Info t) _ _) = t
+patternType (PatAttr _ p _) = patternType p
 
 -- | The type matched by the pattern, including shape declarations if present.
 patternStructType :: PatBase Info VName -> StructType
@@ -737,6 +753,8 @@ patternStructType = toStruct . patternType
 -- to a named parameter of some type?
 patternParam :: PatBase Info VName -> (PName, StructType)
 patternParam (PatParens p _) =
+  patternParam p
+patternParam (PatAttr _ p _) =
   patternParam p
 patternParam (PatAscription (Id v _ _) td _) =
   (Named v, unInfo $ expandedType td)

@@ -5,7 +5,100 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
-## [0.21.0]
+## [0.21.1]
+
+### Added
+
+* Top-level value definitions can (and should) now be declared with
+  with `def`, although `let` still works.
+
+* New tool: `futhark defs`, for printing locations of top-level
+  definitions.
+
+### Changed
+
+* `def` is now a reserved word.
+
+### Fixed
+
+* Contrived intra-group code versions with no actual parallelism would
+  be given a group size of zero (#1524).
+
+## [0.20.8]
+
+### Added
+
+* `futhark repl` now allows Ctrl-c to interrupt execution.
+
+### Fixed
+
+* Alias tracking of sum types.
+
+* Proper checking that a function declared to return a unique-typed
+  value actually does so.
+
+* Faulty uniqueness checking and inference for lambdas (#1535).
+
+* Monomorphisation would duplicate functions under rare circumstances
+  (#1537).
+
+* Interpreter didn't check that the arguments passed to `unflatten`
+  made sense (#1539).
+
+* `futhark literate` now supports a `$loaddata` builtin function for
+  passing datasets to Futhark programs.
+
+## [0.20.7]
+
+### Added
+
+* Better exploitation of parallelism in fused nested segmented
+  reductions.
+
+* Prelude function `not` for negating booleans.
+
+### Fixed
+
+* Some incorrect removal of copies (#1505).
+
+* Handling of parametric modules with top-level existentials (#1510).
+
+* Module substitution fixes (#1512, #1518).
+
+* Invalid in-place lowering (#1523).
+
+* Incorrect code generation for some intra-group parallel code versions.
+
+* Flattening crash in the presence of irregular parallelism (#1525).
+
+* Incorrect substitution of type abbreviations with hidden sizes (#1531).
+
+* Proper handling of NaN in `min`/`max` functions for
+  `f16`/`f32`/`f64` in interpreter (#1528).
+
+## [0.20.6]
+
+### Added
+
+* Much better code generation for segmented scans with vectorisable
+  operators.
+
+### Fixed
+
+* Fixes to extremely exotic GPU scans involving array operators.
+
+* Missing alias tracking led to invalid rewrites, causing a compiler
+  crash (#1499).
+
+* Top-level bindings with existential sizes were mishandled (#1500, #1501).
+
+* A variety of memory leaks in the multicore backend, mostly (or
+  perhaps exclusively) centered around context freeing or failing
+  programs - this should not have affected many people.
+
+* Various fixes to `f16` handling in the GPU backends.
+
+## [0.20.5]
 
 ### Added
 
@@ -14,11 +107,20 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Significantly expanded error index.
 
-### Removed
+* Attributes can now be numeric.
 
-### Changed
+* Patterns can now have attributes.  None have any effect at the
+  moment.
+
+* `futhark autotune` and `futhark bench` now take a `--spec-file`
+  option for loading a test specification from another file.
 
 ### Fixed
+
+* `auto output` reference datasets are now recreated when the program
+  is newer than the data files.
+
+* Exotic hoisting bug (#1490).
 
 ## [0.20.4]
 

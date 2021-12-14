@@ -1012,6 +1012,8 @@ checkExp (DoLoop merge form loopbody) = do
   let (mergepat, mergeexps) = unzip merge
   mergeargs <- mapM checkArg mergeexps
 
+  checkLoopArgs
+
   binding (scopeOf form) $ do
     form_consumable <- checkForm mergeargs form
 
@@ -1035,15 +1037,14 @@ checkExp (DoLoop merge form loopbody) = do
           checkBodyDec $ snd $ bodyDec loopbody
 
           checkStms (bodyStms loopbody) $ do
-            checkResult $ bodyResult loopbody
+            context "In loop body result" $
+              checkResult $ bodyResult loopbody
 
             context "When matching result of body with loop parameters" $
               matchLoopResult (map fst merge) $ bodyResult loopbody
 
             let bound_here =
-                  namesFromList $
-                    M.keys $
-                      scopeOf $ bodyStms loopbody
+                  namesFromList $ M.keys $ scopeOf $ bodyStms loopbody
             map (`namesSubtract` bound_here)
               <$> mapM (subExpAliasesM . resSubExp) (bodyResult loopbody)
   where
@@ -1097,6 +1098,20 @@ checkExp (DoLoop merge form loopbody) = do
           paramts = map paramDeclType funparams
       checkFuncall Nothing paramts mergeargs
       pure mempty
+
+    checkLoopArgs = do
+      let (params, args) = unzip merge
+
+      argtypes <- mapM subExpType args
+
+      let expected = expectedTypes (map paramName params) params args
+      unless (expected == argtypes) . bad . TypeError . pretty $
+        "Loop parameters"
+          </> indent 2 (ppTuple' params)
+          </> "cannot accept initial values"
+          </> indent 2 (ppTuple' args)
+          </> "of types"
+          </> indent 2 (ppTuple' argtypes)
 checkExp (WithAcc inputs lam) = do
   unless (length (lambdaParams lam) == 2 * num_accs) $
     bad . TypeError $
@@ -1503,7 +1518,7 @@ class (ASTRep rep, CanBeAliased (Op rep), CheckableOp rep) => Checkable rep wher
   matchPat pat = matchExtPat pat <=< expExtType
 
   default primFParam :: FParamInfo rep ~ DeclType => VName -> PrimType -> TypeM rep (FParam (Aliases rep))
-  primFParam name t = return $ Param name (Prim t)
+  primFParam name t = return $ Param mempty name (Prim t)
 
   default matchReturnType :: RetType rep ~ DeclExtType => [RetType rep] -> Result -> TypeM rep ()
   matchReturnType = matchExtReturnType . map fromDecl

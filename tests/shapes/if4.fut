@@ -2,7 +2,7 @@
 -- ==
 -- input { false } output { [1,2] [3,4] }
 
-let main (b: bool) =
+def main (b: bool) =
   let (xs, ys) = if b
                  then ([1,2,3], [4,5,6])
                  else ([1,2], [3,4])

@@ -156,7 +156,7 @@ reductionStage1 space slugs kbody = do
   postbody <- collect $
     forM_ (zip slugs slug_local_accs) $ \(slug, local_accs) ->
       forM (zip (slugResArrs slug) local_accs) $ \(acc, local_acc) ->
-        copyDWIMFix acc [Imp.vi64 $ segFlat space] (Var local_acc) []
+        copyDWIMFix acc [Imp.le64 $ segFlat space] (Var local_acc) []
 
   free_params <- freeParams (prebody <> fbody <> postbody) (segFlat space : [tvVar flat_idx])
   let (body_allocs, fbody') = extractAllocations fbody
@@ -170,7 +170,7 @@ reductionStage2 ::
   MulticoreGen ()
 reductionStage2 pat space nsubtasks slugs = do
   let per_red_pes = segBinOpChunks (map slugOp slugs) $ patElems pat
-      phys_id = Imp.vi64 (segFlat space)
+      phys_id = Imp.le64 (segFlat space)
   sComment "neutral-initialise the output" $
     forM_ (zip (map slugOp slugs) per_red_pes) $ \(red, red_res) ->
       forM_ (zip red_res $ segBinOpNeutral red) $ \(pe, ne) ->
@@ -235,7 +235,7 @@ compileSegRedBody n_segments pat space reds kbody = do
       forM_ (zip per_red_pes reds) $ \(pes, red) ->
         forM_ (zip pes (segBinOpNeutral red)) $ \(pe, ne) ->
           sLoopNest (segBinOpShape red) $ \vec_is ->
-            copyDWIMFix (patElemName pe) (map Imp.vi64 (init is) ++ vec_is) ne []
+            copyDWIMFix (patElemName pe) (map Imp.le64 (init is) ++ vec_is) ne []
 
     sComment "main body" $ do
       dScope Nothing $ scopeOfLParams $ concatMap (lambdaParams . segBinOpLambda) reds
@@ -252,7 +252,7 @@ compileSegRedBody n_segments pat space reds kbody = do
               sComment "load accum" $ do
                 let acc_params = take (length (segBinOpNeutral red)) $ (lambdaParams . segBinOpLambda) red
                 forM_ (zip acc_params pes) $ \(p, pe) ->
-                  copyDWIMFix (paramName p) [] (Var $ patElemName pe) (map Imp.vi64 (init is) ++ vec_is)
+                  copyDWIMFix (paramName p) [] (Var $ patElemName pe) (map Imp.le64 (init is) ++ vec_is)
 
               sComment "load new val" $ do
                 let next_params = drop (length (segBinOpNeutral red)) $ (lambdaParams . segBinOpLambda) red
@@ -264,4 +264,4 @@ compileSegRedBody n_segments pat space reds kbody = do
                 compileStms mempty (bodyStms lbody) $
                   sComment "write back to res" $
                     forM_ (zip pes $ map resSubExp $ bodyResult lbody) $
-                      \(pe, se') -> copyDWIMFix (patElemName pe) (map Imp.vi64 (init is) ++ vec_is) se' []
+                      \(pe, se') -> copyDWIMFix (patElemName pe) (map Imp.le64 (init is) ++ vec_is) se' []

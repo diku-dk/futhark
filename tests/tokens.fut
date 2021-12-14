@@ -2,7 +2,7 @@
 -- input { [102u8, 111u8, 111u8, 32u8, 98u8, 97u8, 114u8, 32u8, 98u8, 97u8, 122u8] 1 }
 -- output { [98u8, 97u8, 114u8] }
 
-let segmented_scan 't [n] (g:t->t->t) (ne: t) (flags: [n]bool) (vals: [n]t): [n]t =
+def segmented_scan 't [n] (g:t->t->t) (ne: t) (flags: [n]bool) (vals: [n]t): [n]t =
   let pairs = scan ( \ (v1,f1) (v2,f2) ->
                        let f = f1 || f2
                        let v = if f2 then v2 else g v1 v2
@@ -10,17 +10,17 @@ let segmented_scan 't [n] (g:t->t->t) (ne: t) (flags: [n]bool) (vals: [n]t): [n]
   let (res,_) = unzip pairs
   in res
 
-let is_space (x: u8) = x == ' '
-let isnt_space x = !(is_space x)
+def is_space (x: u8) = x == ' '
+def isnt_space x = !(is_space x)
 
-let f &&& g = \x -> (f x, g x)
+def f &&& g = \x -> (f x, g x)
 
 module tokens : {
   type token [w]
   val tokens [n] : [n]u8 -> ?[k][w].(token [w] -> ?[m].[m]u8, [k](token [w]))
 } = {
   type token [w] = ([w](), i64, i64)
-  let tokens [n] (s: [n]u8) =
+  def tokens [n] (s: [n]u8) =
     let rep = replicate 0 ()
     in
     (\(_, i, k) -> #[unsafe] s[i:i+k],
@@ -32,6 +32,6 @@ module tokens : {
      |> map (\(i,(x,_)) -> (rep,i-x+1,x)))
 }
 
-let main xs i =
+def main xs i =
   let (f, ts) = tokens.tokens xs
   in f ts[i]

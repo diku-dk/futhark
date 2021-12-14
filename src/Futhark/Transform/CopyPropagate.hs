@@ -32,7 +32,7 @@ copyPropagateInStms ::
   SimpleOps rep ->
   Scope rep ->
   Stms rep ->
-  m (ST.SymbolTable (Wise rep), Stms rep)
+  m (Stms rep)
 copyPropagateInStms simpl = simplifyStms simpl mempty neverHoist
 
 -- | Run copy propagation on a function.

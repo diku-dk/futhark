@@ -1,4 +1,4 @@
-let main (i: i32) =
+def main (i: i32) =
   let xs = [0]
   let a = xs[0]
   let xs[i] = a

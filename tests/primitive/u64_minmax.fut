@@ -5,6 +5,6 @@
 -- input { 1u64 18446744073709551615u64 } output { 18446744073709551615u64 1u64 }
 
 
-let main(x: u64) (y: u64): (u64,u64) =
+def main(x: u64) (y: u64): (u64,u64) =
   (u64.max x y,
    u64.min x y)

@@ -5,4 +5,4 @@
 
 type t = t
 
-let main(x: t): t = x
+def main(x: t): t = x

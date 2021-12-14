@@ -8,7 +8,7 @@ module type m = {
 
 module m: m = {
     type^ t = []f32
-    let r (t: *t): *t = t
+    def r (t: *t): *t = t
 }
 
 entry r (t: *m.t): *m.t = m.r t

@@ -6,5 +6,5 @@
 -- output {
 --   285
 -- }
-let main(a: []i32) (b: []i32): i32 =
+def main(a: []i32) (b: []i32): i32 =
     reduce (+) 0 (map2 (*) a b)

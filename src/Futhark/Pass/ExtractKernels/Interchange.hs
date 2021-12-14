@@ -27,13 +27,18 @@ import Futhark.Pass.ExtractKernels.Distribution
   ( KernelNest,
     LoopNesting (..),
     kernelNestLoops,
+    scopeOfKernelNest,
   )
 import Futhark.Tools
 import Futhark.Transform.Rename
+import Futhark.Util (splitFromEnd)
 
 -- | An encoding of a sequential do-loop with no existential context,
 -- alongside its result pattern.
 data SeqLoop = SeqLoop [Int] Pat [(FParam, SubExp)] (LoopForm SOACS) Body
+
+loopPerm :: SeqLoop -> [Int]
+loopPerm (SeqLoop perm _ _ _ _) = perm
 
 seqLoopStm :: SeqLoop -> Stm
 seqLoopStm (SeqLoop _ pat merge form body) =
@@ -56,7 +61,7 @@ interchangeLoop
     let loop_pat_expanded =
           Pat $ map expandPatElem $ patElems loop_pat
         new_params =
-          [Param pname $ fromDecl ptype | (Param pname ptype, _) <- merge]
+          [Param attrs pname $ fromDecl ptype | (Param attrs pname ptype, _) <- merge]
         new_arrs = map (paramName . fst) merge_expanded
         rettype = map rowType $ patTypes loop_pat_expanded
 
@@ -77,7 +82,7 @@ interchangeLoop
         res = varsRes $ patNames loop_pat_expanded
         pat' = Pat $ rearrangeShape perm $ patElems pat
 
-    return $
+    pure $
       SeqLoop perm pat' merge_expanded form $
         mkBody (pre_copy_stms <> oneStm map_stm) res
     where
@@ -91,7 +96,7 @@ interchangeLoop
 
       expandedInit _ (Var v)
         | Just arr <- isMapParameter v =
-          return $ Var arr
+          pure $ Var arr
       expandedInit param_name se =
         letSubExp (param_name <> "_expanded_init") $
           BasicOp $ Replicate (Shape [w]) se
@@ -99,8 +104,10 @@ interchangeLoop
       expand (merge_param, merge_init) = do
         expanded_param <-
           newParam (param_name <> "_expanded") $
-            arrayOf (paramDeclType merge_param) (Shape [w]) $
-              uniqueness $ declTypeOf merge_param
+            -- FIXME: Unique here is a hack to make sure the copy from
+            -- makeCopyInitial is not prematurely simplified away.
+            -- It'd be better to fix this somewhere else...
+            arrayOf (paramDeclType merge_param) (Shape [w]) Unique
         expanded_init <- expandedInit param_name merge_init
         return (expanded_param, expanded_init)
         where
@@ -108,6 +115,39 @@ interchangeLoop
 
       expandPatElem (PatElem name t) =
         PatElem name $ arrayOfRow t w
+
+-- We need to copy some initial arguments because otherwise the result
+-- of the loop might alias the input (if the number of iterations is
+-- 0), which is a problem if the result is consumed.
+maybeCopyInitial ::
+  (MonadBuilder m) =>
+  (VName -> Bool) ->
+  SeqLoop ->
+  m SeqLoop
+maybeCopyInitial isMapInput (SeqLoop perm loop_pat merge form body) =
+  SeqLoop perm loop_pat <$> mapM f merge <*> pure form <*> pure body
+  where
+    f (p, Var arg)
+      | isMapInput arg =
+        (p,) <$> letSubExp (baseString (paramName p) <> "_inter_copy") (BasicOp $ Copy arg)
+    f (p, arg) =
+      pure (p, arg)
+
+manifestMaps :: [LoopNesting] -> [VName] -> Stms SOACS -> ([VName], Stms SOACS)
+manifestMaps [] res stms = (res, stms)
+manifestMaps (n : ns) res stms =
+  let (res', stms') = manifestMaps ns res stms
+      (params, arrs) = unzip $ loopNestingParamsAndArrs n
+      lam =
+        Lambda
+          params
+          (mkBody stms' $ varsRes res')
+          (map rowType $ patTypes (loopNestingPat n))
+   in ( patNames $ loopNestingPat n,
+        oneStm $
+          Let (loopNestingPat n) (loopNestingAux n) $
+            Op $ Screma (loopNestingWidth n) arrs (mapSOAC lam)
+      )
 
 -- | Given a (parallel) map nesting and an inner sequential loop, move
 -- the maps inside the sequential loop.  The result is several
@@ -118,17 +158,29 @@ interchangeLoops ::
   KernelNest ->
   SeqLoop ->
   m (Stms SOACS)
-interchangeLoops nest loop = do
-  (loop', stms) <-
-    runBuilder $
-      foldM (interchangeLoop isMapParameter) loop $
-        reverse $ kernelNestLoops nest
-  return $ stms <> oneStm (seqLoopStm loop')
+interchangeLoops full_nest = recurse (kernelNestLoops full_nest)
   where
-    isMapParameter v =
-      fmap snd $
-        find ((== v) . paramName . fst) $
-          concatMap loopNestingParamsAndArrs $ kernelNestLoops nest
+    recurse nest loop
+      | (ns, [n]) <- splitFromEnd 1 nest = do
+        let isMapParameter v =
+              snd <$> find ((== v) . paramName . fst) (loopNestingParamsAndArrs n)
+            isMapInput v =
+              v `elem` map snd (loopNestingParamsAndArrs n)
+        (loop', stms) <-
+          runBuilder . localScope (scopeOfKernelNest full_nest) $
+            maybeCopyInitial isMapInput
+              =<< interchangeLoop isMapParameter loop n
+
+        -- Only safe to continue interchanging if we didn't need to add
+        -- any new statements; otherwise we manifest the remaining nests
+        -- as Maps and hand them back to the flattener.
+        if null stms
+          then recurse ns loop'
+          else
+            let loop_stm = seqLoopStm loop'
+                names = rearrangeShape (loopPerm loop') (patNames (stmPat loop_stm))
+             in pure $ snd $ manifestMaps ns names $ stms <> oneStm loop_stm
+      | otherwise = pure $ oneStm $ seqLoopStm loop
 
 data Branch = Branch [Int] Pat SubExp Body Body (IfDec (BranchType SOACS))
 
@@ -210,8 +262,8 @@ interchangeWithAcc1
       newAccLamParams ps = do
         let (cert_ps, acc_ps) = splitAt (length ps `div` 2) ps
         -- Should not rename the certificates.
-        acc_ps' <- forM acc_ps $ \(Param v t) ->
-          newParam (baseString v) t
+        acc_ps' <- forM acc_ps $ \(Param attrs v t) ->
+          Param attrs <$> newVName (baseString v) <*> pure t
         pure $ cert_ps <> acc_ps'
 
       num_accs = length inputs

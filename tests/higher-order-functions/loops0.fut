@@ -2,8 +2,8 @@
 -- ==
 -- error: used as loop variable
 
-let id 'a (x : a) : a = x
+def id 'a (x : a) : a = x
 
-let main (n : i32) =
+def main (n : i32) =
   loop f = id for i < n do
     \(y:i32) -> f y

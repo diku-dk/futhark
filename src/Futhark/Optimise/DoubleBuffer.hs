@@ -256,7 +256,7 @@ optimiseLoop pat merge body = do
   pure (outer_stms_1 <> outer_stms_2, pat'', merge'', body'')
 
 isArrayIn :: VName -> Param FParamMem -> Bool
-isArrayIn x (Param _ (MemArray _ _ _ (ArrayIn y _))) = x == y
+isArrayIn x (Param _ _ (MemArray _ _ _ (ArrayIn y _))) = x == y
 isArrayIn _ _ = False
 
 optimiseLoopBySwitching :: Constraints rep inner => OptimiseLoop rep
@@ -288,9 +288,7 @@ optimiseLoopBySwitching (Pat pes) merge (Body _ body_stms body_res) = do
             <$> newVName (baseString (patElemName pe) <> "_unused")
             <*> pure (MemMem space)
         param_out <-
-          Param
-            <$> newVName (baseString (paramName param) <> "_out")
-            <*> pure (MemMem space)
+          newParam (baseString (paramName param) <> "_out") (MemMem space)
         addStm res_v_alloc
         pure
           ( ( M.insert (paramName param) arr_mem_in buffered,
@@ -309,7 +307,7 @@ optimiseLoopBySwitching (Pat pes) merge (Body _ body_stms body_res) = do
             ([pe], [(param, arg)], [res])
           )
 
-    maybeCopyInitial buffered (param@(Param _ (MemArray _ _ _ (ArrayIn mem _))), Var arg)
+    maybeCopyInitial buffered (param@(Param _ _ (MemArray _ _ _ (ArrayIn mem _))), Var arg)
       | Just mem' <- mem `M.lookup` buffered = do
         arg_info <- lookupMemInfo arg
         case arg_info of
@@ -317,9 +315,15 @@ optimiseLoopBySwitching (Pat pes) merge (Body _ body_stms body_res) = do
             arg_copy <- newVName (baseString arg <> "_dbcopy")
             letBind (Pat [PatElem arg_copy $ MemArray pt shape u $ ArrayIn mem' arg_ixfun]) $
               BasicOp $ Copy arg
-            pure (param, Var arg_copy)
-          _ -> pure (param, Var arg)
+            -- We need to make this parameter unique to avoid invalid
+            -- hoisting (see #1533), because we are invalidating the
+            -- underlying memory.
+            pure (fmap mkUnique param, Var arg_copy)
+          _ -> pure (fmap mkUnique param, Var arg)
     maybeCopyInitial _ (param, arg) = pure (param, arg)
+
+    mkUnique (MemArray bt shape _ ret) = MemArray bt shape Unique ret
+    mkUnique x = x
 
 optimiseLoopByCopying :: Constraints rep inner => OptimiseLoop rep
 optimiseLoopByCopying pat merge body = do
@@ -414,14 +418,14 @@ allocStms ::
   DoubleBufferM rep ([(FParam rep, SubExp)], [Stm rep])
 allocStms merge = runWriterT . zipWithM allocation merge
   where
-    allocation m@(Param pname _, _) (BufferAlloc name size space b) = do
+    allocation m@(Param attrs pname _, _) (BufferAlloc name size space b) = do
       stms <- lift $
         runBuilder_ $ do
           size' <- toSubExp "double_buffer_size" size
           letBindNames [name] $ Op $ Alloc size' space
       tell $ stmsToList stms
       if b
-        then pure (Param pname $ MemMem space, Var name)
+        then pure (Param attrs pname $ MemMem space, Var name)
         else pure m
     allocation (f, Var v) (BufferCopy mem _ _ b) | b = do
       v_copy <- lift $ newVName $ baseString v ++ "_double_buffer_copy"
@@ -429,10 +433,7 @@ allocStms merge = runWriterT . zipWithM allocation merge
       let bt = elemType $ paramType f
           shape = arrayShape $ paramType f
           bound = MemArray bt shape NoUniqueness $ ArrayIn mem v_ixfun
-      tell
-        [ Let (Pat [PatElem v_copy bound]) (defAux ()) $
-            BasicOp $ Copy v
-        ]
+      tell [Let (Pat [PatElem v_copy bound]) (defAux ()) $ BasicOp $ Copy v]
       -- It is important that we treat this as a consumption, to
       -- avoid the Copy from being hoisted out of any enclosing
       -- loops.  Since we re-use (=overwrite) memory in the loop,

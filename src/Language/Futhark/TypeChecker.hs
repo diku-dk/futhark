@@ -633,7 +633,7 @@ checkValBind (ValBind entry fname maybe_tdecl NoInfo tparams params body doc att
     typeError loc mempty $
       withIndexLink "nested-entry" "Entry points may not be declared inside modules."
 
-  (fname', tparams', params', maybe_tdecl', rettype@(RetType _ rettype_t), retext, body') <-
+  (fname', tparams', params', maybe_tdecl', rettype@(RetType _ rettype_t), body') <-
     checkFunDef (fname, maybe_tdecl, tparams, params, body, loc)
 
   let (rettype_params, rettype') = unfoldFunType rettype_t
@@ -667,7 +667,8 @@ checkValBind (ValBind entry fname maybe_tdecl NoInfo tparams params body doc att
             </> "\nwill have an opaque type, so the result will likely not be usable."
     _ -> return ()
 
-  let vb = ValBind entry' fname' maybe_tdecl' (Info (rettype, retext)) tparams' params' body' doc attrs loc
+  attrs' <- mapM checkAttr attrs
+  let vb = ValBind entry' fname' maybe_tdecl' (Info rettype) tparams' params' body' doc attrs' loc
   return
     ( mempty
         { envVtable =

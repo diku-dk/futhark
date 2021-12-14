@@ -173,14 +173,12 @@ transformSOAC pat (Screma w arrs form@(ScremaForm scans reds map_lam)) = do
           Nothing
             | paramName p `nameIn` lam_cons -> do
               p' <-
-                letExp (baseString (paramName p)) $
-                  BasicOp $
-                    Index arr $ fullSlice arr_t [DimFix $ Var i]
+                letExp (baseString (paramName p)) . BasicOp $
+                  Index arr $ fullSlice arr_t [DimFix $ Var i]
               letBindNames [paramName p] $ BasicOp $ Copy p'
             | otherwise ->
               letBindNames [paramName p] $
-                BasicOp $
-                  Index arr $ fullSlice arr_t [DimFix $ Var i]
+                BasicOp $ Index arr $ fullSlice arr_t [DimFix $ Var i]
 
       -- Insert the statements of the lambda.  We have taken care to
       -- ensure that the parameters are bound at this point.
@@ -274,7 +272,7 @@ transformSOAC pat (Stream w arrs _ nes lam) = do
       mkBodyM mempty $ res ++ subExpsRes mapout_res'
 
   letBind pat $ DoLoop merge loop_form loop_body
-transformSOAC pat (Scatter len lam ivs as) = do
+transformSOAC pat (Scatter len ivs lam as) = do
   iter <- newVName "write_iter"
 
   let (as_ws, as_ns, as_vs) = unzip3 as
@@ -301,7 +299,7 @@ transformSOAC pat (Scatter len lam ivs as) = do
         foldM saveInArray arr indexes'
       return $ resultBody (map Var ress)
   letBind pat $ DoLoop merge (ForLoop iter Int64 len []) loopBody
-transformSOAC pat (Hist len ops bucket_fun imgs) = do
+transformSOAC pat (Hist len imgs ops bucket_fun) = do
   iter <- newVName "iter"
 
   -- Bind arguments to parameters for the merge-variables.
@@ -343,8 +341,7 @@ transformSOAC pat (Hist len ops bucket_fun imgs) = do
 
           -- Apply operator.
           h_val' <-
-            bindLambda (histOp op) $
-              map (BasicOp . SubExp) $ h_val ++ val
+            bindLambda (histOp op) $ map (BasicOp . SubExp) $ h_val ++ val
 
           -- Write values back to histograms.
           hist' <- forM (zip hist h_val') $ \(arr, SubExpRes cs v) -> do
@@ -406,7 +403,7 @@ loopMerge vars = loopMerge' $ zip vars $ repeat Unique
 
 loopMerge' :: [(Ident, Uniqueness)] -> [SubExp] -> [(Param DeclType, SubExp)]
 loopMerge' vars vals =
-  [ (Param pname $ toDecl ptype u, val)
+  [ (Param mempty pname $ toDecl ptype u, val)
     | ((Ident pname ptype, u), val) <- zip vars vals
   ]
 

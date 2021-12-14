@@ -4,9 +4,9 @@
 -- be revised.
 --
 -- ==
--- structure distributed { If/Kernel 0 }
+-- structure gpu { If/Kernel 0 }
 
-let main(a: [][]i32): [][]i32 =
+def main(a: [][]i32): [][]i32 =
   map (\a_r  ->
         if a_r[0] > 0
         then map (*2) (a_r)

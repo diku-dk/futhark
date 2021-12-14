@@ -248,8 +248,10 @@ expCompiler (Pat [pe]) (BasicOp (Iota n x s et)) = do
   s' <- toExp s
 
   sIota (patElemName pe) (toInt64Exp n) x' s' et
-expCompiler (Pat [pe]) (BasicOp (Replicate _ se)) =
-  sReplicate (patElemName pe) se
+expCompiler (Pat [pe]) (BasicOp (Replicate _ se))
+  | Acc {} <- patElemType pe = pure ()
+  | otherwise =
+    sReplicate (patElemName pe) se
 -- Allocation in the "local" space is just a placeholder.
 expCompiler _ (Op (Alloc _ (Space "local"))) =
   return ()
@@ -371,18 +373,18 @@ mapTransposeFunction bt =
     -- When an input array has either width==1 or height==1, performing a
     -- transpose will be the same as performing a copy.
     can_use_copy =
-      let onearr = Imp.vi32 num_arrays .==. 1
-          height_is_one = Imp.vi32 y .==. 1
-          width_is_one = Imp.vi32 x .==. 1
+      let onearr = Imp.le32 num_arrays .==. 1
+          height_is_one = Imp.le32 y .==. 1
+          width_is_one = Imp.le32 x .==. 1
        in onearr .&&. (width_is_one .||. height_is_one)
 
     transpose_code =
       Imp.If input_is_empty mempty $
         mconcat
           [ Imp.DeclareScalar muly Imp.Nonvolatile (IntType Int32),
-            Imp.SetScalar muly $ untyped $ block_dim `quot` Imp.vi32 x,
+            Imp.SetScalar muly $ untyped $ block_dim `quot` Imp.le32 x,
             Imp.DeclareScalar mulx Imp.Nonvolatile (IntType Int32),
-            Imp.SetScalar mulx $ untyped $ block_dim `quot` Imp.vi32 y,
+            Imp.SetScalar mulx $ untyped $ block_dim `quot` Imp.le32 y,
             Imp.If can_use_copy copy_code $
               Imp.If should_use_lowwidth (callTransposeKernel TransposeLowWidth) $
                 Imp.If should_use_lowheight (callTransposeKernel TransposeLowHeight) $
@@ -391,28 +393,28 @@ mapTransposeFunction bt =
           ]
 
     input_is_empty =
-      Imp.vi32 num_arrays .==. 0 .||. Imp.vi32 x .==. 0 .||. Imp.vi32 y .==. 0
+      Imp.le32 num_arrays .==. 0 .||. Imp.le32 x .==. 0 .||. Imp.le32 y .==. 0
 
     should_use_small =
-      Imp.vi32 x .<=. (block_dim `quot` 2)
-        .&&. Imp.vi32 y .<=. (block_dim `quot` 2)
+      Imp.le32 x .<=. (block_dim `quot` 2)
+        .&&. Imp.le32 y .<=. (block_dim `quot` 2)
 
     should_use_lowwidth =
-      Imp.vi32 x .<=. (block_dim `quot` 2)
-        .&&. block_dim .<. Imp.vi32 y
+      Imp.le32 x .<=. (block_dim `quot` 2)
+        .&&. block_dim .<. Imp.le32 y
 
     should_use_lowheight =
-      Imp.vi32 y .<=. (block_dim `quot` 2)
-        .&&. block_dim .<. Imp.vi32 x
+      Imp.le32 y .<=. (block_dim `quot` 2)
+        .&&. block_dim .<. Imp.le32 x
 
     copy_code =
-      let num_bytes = sExt64 $ Imp.vi32 x * Imp.vi32 y * primByteSize bt
+      let num_bytes = sExt64 $ Imp.le32 x * Imp.le32 y * primByteSize bt
        in Imp.Copy
             destmem
-            (Imp.Count $ sExt64 $ Imp.vi32 destoffset)
+            (Imp.Count $ sExt64 $ Imp.le32 destoffset)
             space
             srcmem
-            (Imp.Count $ sExt64 $ Imp.vi32 srcoffset)
+            (Imp.Count $ sExt64 $ Imp.le32 srcoffset)
             space
             (Imp.Count num_bytes)
 
@@ -422,14 +424,14 @@ mapTransposeFunction bt =
           (mapTransposeName bt)
           block_dim_int
           ( destmem,
-            Imp.vi32 destoffset,
+            Imp.le32 destoffset,
             srcmem,
-            Imp.vi32 srcoffset,
-            Imp.vi32 x,
-            Imp.vi32 y,
-            Imp.vi32 mulx,
-            Imp.vi32 muly,
-            Imp.vi32 num_arrays,
+            Imp.le32 srcoffset,
+            Imp.le32 x,
+            Imp.le32 y,
+            Imp.le32 mulx,
+            Imp.le32 muly,
+            Imp.le32 num_arrays,
             block
           )
           bt

@@ -32,6 +32,7 @@ module Futhark.Pass.ExtractKernels.Distribution
     innermostKernelNesting,
     pushKernelNesting,
     pushInnerKernelNesting,
+    scopeOfKernelNest,
     kernelNestLoops,
     kernelNestWidths,
     boundInKernelNest,
@@ -81,8 +82,7 @@ ppTargets :: Targets -> String
 ppTargets (Targets target targets) =
   unlines $ map ppTarget $ targets ++ [target]
   where
-    ppTarget (pat, res) =
-      pretty pat ++ " <- " ++ pretty res
+    ppTarget (pat, res) = pretty pat ++ " <- " ++ pretty res
 
 singleTarget :: Target -> Targets
 singleTarget = flip Targets []
@@ -127,7 +127,7 @@ data LoopNesting = MapNesting
   }
   deriving (Show)
 
-scopeOfLoopNesting :: DistRep rep => LoopNesting -> Scope rep
+scopeOfLoopNesting :: (LParamInfo rep ~ Type) => LoopNesting -> Scope rep
 scopeOfLoopNesting = scopeOfLParams . map fst . loopNestingParamsAndArrs
 
 ppLoopNesting :: LoopNesting -> String
@@ -141,10 +141,7 @@ loopNestingParams = map fst . loopNestingParamsAndArrs
 
 instance FreeIn LoopNesting where
   freeIn' (MapNesting pat aux w params_and_arrs) =
-    freeIn' pat
-      <> freeIn' aux
-      <> freeIn' w
-      <> freeIn' params_and_arrs
+    freeIn' pat <> freeIn' aux <> freeIn' w <> freeIn' params_and_arrs
 
 data Nesting = Nesting
   { nestingLetBound :: Names,
@@ -164,8 +161,7 @@ ppNestings :: Nestings -> String
 ppNestings (nesting, nestings) =
   unlines $ map ppNesting $ nestings ++ [nesting]
   where
-    ppNesting (Nesting _ loop) =
-      ppLoopNesting loop
+    ppNesting (Nesting _ loop) = ppLoopNesting loop
 
 singleNesting :: Nesting -> Nestings
 singleNesting = (,[])
@@ -234,16 +230,15 @@ newKernel nest = (nest, [])
 kernelNestLoops :: KernelNest -> [LoopNesting]
 kernelNestLoops (loop, loops) = loop : loops
 
+scopeOfKernelNest :: LParamInfo rep ~ Type => KernelNest -> Scope rep
+scopeOfKernelNest = foldMap scopeOfLoopNesting . kernelNestLoops
+
 boundInKernelNest :: KernelNest -> Names
 boundInKernelNest = mconcat . boundInKernelNests
 
 boundInKernelNests :: KernelNest -> [Names]
 boundInKernelNests =
-  map
-    ( namesFromList
-        . map (paramName . fst)
-        . loopNestingParamsAndArrs
-    )
+  map (namesFromList . map (paramName . fst) . loopNestingParamsAndArrs)
     . kernelNestLoops
 
 kernelNestWidths :: KernelNest -> [SubExp]
@@ -286,15 +281,12 @@ constructKernel mk_lvl kernel_nest inner_body = runBuilderT' $ do
 flatKernel ::
   MonadFreshNames m =>
   KernelNest ->
-  m
-    ( [(VName, SubExp)],
-      [KernelInput]
-    )
+  m ([(VName, SubExp)], [KernelInput])
 flatKernel (MapNesting _ _ nesting_w params_and_arrs, []) = do
   i <- newVName "gtid"
   let inps =
         [ KernelInput pname ptype arr [Var i]
-          | (Param pname ptype, arr) <- params_and_arrs
+          | (Param _ pname ptype, arr) <- params_and_arrs
         ]
   return ([(i, nesting_w)], inps)
 flatKernel (MapNesting _ _ nesting_w params_and_arrs, nest : nests) = do
@@ -317,7 +309,7 @@ flatKernel (MapNesting _ _ nesting_w params_and_arrs, nest : nests) = do
   where
     extra_inps i =
       [ KernelInput pname ptype arr [Var i]
-        | (Param pname ptype, arr) <- params_and_arrs
+        | (Param _ pname ptype, arr) <- params_and_arrs
       ]
 
 -- | Description of distribution to do.
@@ -376,9 +368,7 @@ createKernelNest (inner_nest, nests) distrib_body = do
   runMaybeT $ fmap prepare $ recurse $ zip nests targets
   where
     prepare (x, _, z) = (z, x)
-    bound_in_nest =
-      mconcat $ map boundInNesting $ inner_nest : nests
-
+    bound_in_nest = mconcat $ map boundInNesting $ inner_nest : nests
     distributableType =
       (== mempty) . namesIntersection bound_in_nest . freeIn . arrayDims
 
@@ -418,16 +408,15 @@ createKernelNest (inner_nest, nests) distrib_body = do
                 case M.lookup pname identity_map of
                   Nothing -> do
                     arr <-
-                      newIdent (baseString pname ++ "_r") $
-                        arrayOfRow ptype w
+                      newIdent (baseString pname ++ "_r") $ arrayOfRow ptype w
                     return
-                      ( Param pname ptype,
+                      ( Param mempty pname ptype,
                         arr,
                         True
                       )
                   Just arr ->
                     return
-                      ( Param pname ptype,
+                      ( Param mempty pname ptype,
                         arr,
                         False
                       )
@@ -462,9 +451,7 @@ createKernelNest (inner_nest, nests) distrib_body = do
             addTarget (free_arrs_pat, varsRes $ map paramName free_params_pat)
           )
 
-    recurse ::
-      [(Nesting, Target)] ->
-      MaybeT m (KernelNest, Names, Targets)
+    recurse :: [(Nesting, Target)] -> MaybeT m (KernelNest, Names, Targets)
     recurse [] =
       distributeAtNesting
         inner_nest
@@ -500,9 +487,7 @@ removeUnusedNestingParts used (MapNesting pat aux w params_and_arrs) =
   where
     (params, arrs) = unzip params_and_arrs
     (used_params, used_arrs) =
-      unzip $
-        filter ((`nameIn` used) . paramName . fst) $
-          zip params arrs
+      unzip $ filter ((`nameIn` used) . paramName . fst) $ zip params arrs
 
 removeIdentityMappingGeneral ::
   Names ->

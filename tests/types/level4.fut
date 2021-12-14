@@ -3,7 +3,7 @@
 -- ==
 -- error: "n".*scope violation
 
-let main x =
+def main x =
   let f (n: i64) (xs: [n]i32) = zip xs (match x case #ys (ys: [n]i32) -> ys
                                                 case _ -> xs)
   let x' = (x : (#ys ([]i32) | #null))

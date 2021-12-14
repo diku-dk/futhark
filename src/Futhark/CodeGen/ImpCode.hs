@@ -27,15 +27,11 @@ module Futhark.CodeGen.ImpCode
     SpaceId,
     Code (..),
     PrimValue (..),
-    ExpLeaf (..),
     Exp,
     TExp,
     Volatility (..),
     Arg (..),
     var,
-    vi32,
-    vi64,
-    index,
     ErrorMsg (..),
     ErrorMsgPart (..),
     errorMsgArgTypes,
@@ -56,6 +52,7 @@ module Futhark.CodeGen.ImpCode
     module Language.Futhark.Core,
     module Futhark.IR.Primitive,
     module Futhark.Analysis.PrimExp,
+    module Futhark.Analysis.PrimExp.Convert,
     module Futhark.IR.GPU.Sizes,
     module Futhark.IR.Prop.Names,
   )
@@ -66,6 +63,7 @@ import qualified Data.Map as M
 import qualified Data.Set as S
 import Data.Traversable
 import Futhark.Analysis.PrimExp
+import Futhark.Analysis.PrimExp.Convert
 import Futhark.IR.GPU.Sizes (Count (..))
 import Futhark.IR.Pretty ()
 import Futhark.IR.Primitive
@@ -244,10 +242,14 @@ data Code a
     -- @mem@ offset by @i@ elements of type @t@.  The
     -- 'Space' argument is the memory space of @mem@
     -- (technically redundant, but convenient).  Note that
-    -- /reading/ is done with an 'Exp' ('Index').
+    -- /reading/ is done with an 'Exp' ('Read').
     Write VName (Count Elements (TExp Int64)) PrimType Space Volatility Exp
   | -- | Set a scalar variable.
     SetScalar VName Exp
+  | -- | Read a scalar from memory from memory.  The first 'VName' is
+    -- the target scalar variable, and the remaining arguments have
+    -- the same meaning as with 'Write'.
+    Read VName VName (Count Elements (TExp Int64)) PrimType Space Volatility
   | -- | Must be in same space.
     SetMem VName VName Space
   | -- | Function call.  The results are written to the
@@ -338,22 +340,12 @@ calledFuncs (Comment _ x) = calledFuncs x
 calledFuncs (Call _ f _) = S.singleton f
 calledFuncs _ = mempty
 
--- | The leaves of an 'Exp'.
-data ExpLeaf
-  = -- | A scalar variable.  The type is stored in the
-    -- 'LeafExp' constructor itself.
-    ScalarVar VName
-  | -- | Reading a value from memory.  The arguments have
-    -- the same meaning as with 'Write'.
-    Index VName (Count Elements (TExp Int64)) PrimType Space Volatility
-  deriving (Eq, Show)
-
 -- | A side-effect free expression whose execution will produce a
 -- single primitive value.
-type Exp = PrimExp ExpLeaf
+type Exp = PrimExp VName
 
 -- | Like 'Exp', but with a required/known type.
-type TExp t = TPrimExp t ExpLeaf
+type TExp t = TPrimExp t VName
 
 -- | A function call argument.
 data Arg
@@ -380,21 +372,9 @@ bytes = Count
 withElemType :: Count Elements (TExp Int64) -> PrimType -> Count Bytes (TExp Int64)
 withElemType (Count e) t = bytes $ sExt64 e * primByteSize t
 
--- | Turn a 'VName' into a 'Imp.ScalarVar'.
+-- | Turn a 'VName' into a 'Exp'.
 var :: VName -> PrimType -> Exp
-var = LeafExp . ScalarVar
-
--- | Turn a 'VName' into a v'Int32' 'Imp.ScalarVar'.
-vi32 :: VName -> TExp Int32
-vi32 = TPrimExp . flip var (IntType Int32)
-
--- | Turn a 'VName' into a v'Int64' 'Imp.ScalarVar'.
-vi64 :: VName -> TExp Int64
-vi64 = TPrimExp . flip var (IntType Int64)
-
--- | Concise wrapper for using 'Index'.
-index :: VName -> Count Elements (TExp Int64) -> PrimType -> Space -> Volatility -> Exp
-index arr i t s vol = LeafExp (Index arr i t s vol) t
+var = LeafExp
 
 -- Prettyprinting definitions.
 
@@ -495,6 +475,13 @@ instance Pretty op => Pretty (Code op) where
       vol' = case vol of
         Volatile -> text "volatile "
         Nonvolatile -> mempty
+  ppr (Read name v is bt space vol) =
+    ppr name <+> text "<-"
+      <+> ppr v <> langle <> vol' <> ppr bt <> ppr space <> rangle <> brackets (ppr is)
+    where
+      vol' = case vol of
+        Volatile -> text "volatile "
+        Nonvolatile -> mempty
   ppr (SetScalar name val) =
     ppr name <+> text "<-" <+> ppr val
   ppr (SetMem dest from space) =
@@ -532,16 +519,6 @@ instance Pretty op => Pretty (Code op) where
 instance Pretty Arg where
   ppr (MemArg m) = ppr m
   ppr (ExpArg e) = ppr e
-
-instance Pretty ExpLeaf where
-  ppr (ScalarVar v) =
-    ppr v
-  ppr (Index v is bt space vol) =
-    ppr v <> langle <> vol' <> ppr bt <> ppr space <> rangle <> brackets (ppr is)
-    where
-      vol' = case vol of
-        Volatile -> text "volatile "
-        Nonvolatile -> mempty
 
 instance Functor Functions where
   fmap = fmapDefault
@@ -598,6 +575,8 @@ instance Traversable Code where
     pure $ Copy dest destoffset destspace src srcoffset srcspace size
   traverse _ (Write name i bt val space vol) =
     pure $ Write name i bt val space vol
+  traverse _ (Read x name i bt space vol) =
+    pure $ Read x name i bt space vol
   traverse _ (SetScalar name val) =
     pure $ SetScalar name val
   traverse _ (SetMem dest from space) =
@@ -669,6 +648,8 @@ instance FreeIn a => FreeIn (Code a) where
     freeIn' x <> freeIn' y
   freeIn' (Write v i _ _ _ e) =
     freeIn' v <> freeIn' i <> freeIn' e
+  freeIn' (Read x v i _ _ _) =
+    freeIn' x <> freeIn' v <> freeIn' i
   freeIn' (SetScalar x y) =
     freeIn' x <> freeIn' y
   freeIn' (Call dests _ args) =
@@ -685,10 +666,6 @@ instance FreeIn a => FreeIn (Code a) where
     maybe mempty freeIn' v
   freeIn' (TracePrint msg) =
     foldMap freeIn' msg
-
-instance FreeIn ExpLeaf where
-  freeIn' (Index v e _ _ _) = freeIn' v <> freeIn' e
-  freeIn' (ScalarVar v) = freeIn' v
 
 instance FreeIn Arg where
   freeIn' (MemArg m) = freeIn' m

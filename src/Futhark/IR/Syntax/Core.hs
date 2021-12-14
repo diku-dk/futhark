@@ -1,5 +1,6 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE Strict #-}
 
@@ -35,6 +36,13 @@ module Futhark.IR.Syntax.Core
     ErrorMsgPart (..),
     errorMsgArgTypes,
 
+    -- * Attributes
+    Attr (..),
+    Attrs (..),
+    oneAttr,
+    inAttrs,
+    withoutAttrs,
+
     -- * Values
     PrimValue (..),
 
@@ -68,6 +76,7 @@ import Data.Bifunctor
 import Data.Bitraversable
 import qualified Data.Map.Strict as M
 import Data.Maybe
+import qualified Data.Set as S
 import Data.String
 import Data.Traversable (fmapDefault, foldMapDefault)
 import Futhark.IR.Primitive
@@ -306,7 +315,10 @@ data SubExp
 
 -- | A function or lambda parameter.
 data Param dec = Param
-  { -- | Name of the parameter.
+  { -- | Attributes of the parameter.  When constructing a parameter,
+    -- feel free to just pass 'mempty'.
+    paramAttrs :: Attrs,
+    -- | Name of the parameter.
     paramName :: VName,
     -- | Function parameter decoration.
     paramDec :: dec
@@ -320,7 +332,7 @@ instance Functor Param where
   fmap = fmapDefault
 
 instance Traversable Param where
-  traverse f (Param name dec) = Param name <$> f dec
+  traverse f (Param attr name dec) = Param attr name <$> f dec
 
 -- | How to index a single dimension of an array.
 data DimIndex d
@@ -508,3 +520,30 @@ errorMsgArgTypes (ErrorMsg parts) = mapMaybe onPart parts
   where
     onPart ErrorString {} = Nothing
     onPart (ErrorVal t _) = Just t
+
+-- | A single attribute.
+data Attr
+  = AttrName Name
+  | AttrInt Integer
+  | AttrComp Name [Attr]
+  deriving (Ord, Show, Eq)
+
+instance IsString Attr where
+  fromString = AttrName . fromString
+
+-- | Every statement is associated with a set of attributes, which can
+-- have various effects throughout the compiler.
+newtype Attrs = Attrs {unAttrs :: S.Set Attr}
+  deriving (Ord, Show, Eq, Monoid, Semigroup)
+
+-- | Construct 'Attrs' from a single 'Attr'.
+oneAttr :: Attr -> Attrs
+oneAttr = Attrs . S.singleton
+
+-- | Is the given attribute to be found in the attribute set?
+inAttrs :: Attr -> Attrs -> Bool
+inAttrs attr (Attrs attrs) = attr `S.member` attrs
+
+-- | @x `withoutAttrs` y@ gives @x@ except for any attributes also in @y@.
+withoutAttrs :: Attrs -> Attrs -> Attrs
+withoutAttrs (Attrs x) (Attrs y) = Attrs $ x `S.difference` y

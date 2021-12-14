@@ -2,6 +2,6 @@
 -- ==
 -- input { 1 } output { 3 }
 
-module m = { let r = { x = 2 } }
+module m = { def r = { x = 2 } }
 
-let main (x: i32) = m.r.x + x
+def main (x: i32) = m.r.x + x

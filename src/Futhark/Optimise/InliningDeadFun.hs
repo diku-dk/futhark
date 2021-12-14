@@ -26,7 +26,7 @@ import Futhark.IR.SOACS.Simplify
     simplifyFun,
   )
 import Futhark.Optimise.CSE
-import Futhark.Optimise.Simplify.Rep (addScopeWisdom)
+import Futhark.Optimise.Simplify.Rep (addScopeWisdom, informStms)
 import Futhark.Pass
 import Futhark.Transform.CopyPropagate
   ( copyPropagateInFun,
@@ -81,9 +81,11 @@ inlineFunctions simplify_rate cg what_should_be_inlined prog = do
                 fdmap $ filter ((`S.member` to_inline_now) . funDefName) dont_inline_in
           (vtable', consts') <-
             if any (`calledByConsts` cg) to_inline_now
-              then
-                simplifyConsts . performCSEOnStms True
-                  =<< inlineInStms inlinemap consts
+              then do
+                consts' <-
+                  simplifyConsts . performCSEOnStms True
+                    =<< inlineInStms inlinemap consts
+                pure (ST.insertStms (informStms consts') mempty, consts')
               else pure (vtable, consts)
 
           let simplifyFun' fd
@@ -94,7 +96,8 @@ inlineFunctions simplify_rate cg what_should_be_inlined prog = do
                 | otherwise =
                   copyPropagateInFun simpleSOACS vtable' fd
 
-              onFun = simplifyFun' <=< inlineInFunDef inlinemap
+              onFun fd =
+                simplifyFun' <=< inlineInFunDef inlinemap $ fd
 
           to_inline_in' <- parMapM onFun to_inline_in
 

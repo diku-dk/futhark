@@ -8,18 +8,18 @@ module type mt = {
 }
 
 module pm1(R: mt): {val g: i32->i32} = {
-  let helper(x: i32) =  R.f (R.f x)
-  let g(x: i32): i32 = helper x
+  def helper(x: i32) =  R.f (R.f x)
+  def g(x: i32): i32 = helper x
 }
 
 module pm2(R: mt) = {
   module tmp = pm1(R)
-  let h(x: i32): i32 = tmp.g (tmp.g x)
+  def h(x: i32): i32 = tmp.g (tmp.g x)
 }
 
-module m1 = { let f (x: i32) = x + 1 }
+module m1 = { def f (x: i32) = x + 1 }
 
 module m2 = pm2(m1)
 module m3 = pm2(m1)
 
-let main(x: i32) = m2.h (m3.h x)
+def main(x: i32) = m2.h (m3.h x)
