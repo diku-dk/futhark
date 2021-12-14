@@ -345,7 +345,7 @@ prepareIntraGroupSegHist group_size =
           locks <- newVName "locks"
 
           let num_locks = toInt64Exp $ unCount group_size
-              dims = map toInt64Exp $ shapeDims (histShape op) ++ [histWidth op]
+              dims = map toInt64Exp $ shapeDims (histOpShape op) ++ [histWidth op]
               l' = Locking locks 0 1 0 (pure . (`rem` num_locks) . flattenIndex dims)
               locks_t = Array int32 (Shape [unCount group_size]) NoUniqueness
 

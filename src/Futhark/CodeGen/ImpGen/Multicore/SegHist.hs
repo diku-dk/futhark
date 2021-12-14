@@ -83,7 +83,7 @@ onOpAtomic op = do
       let num_locks = 100151 -- This number is taken from the GPU backend
           dims =
             map toInt64Exp $
-              shapeDims (histShape op) ++ [histWidth op]
+              shapeDims (histOpShape op) ++ [histWidth op]
       locks <-
         sStaticArray "hist_locks" DefaultSpace int32 $
           Imp.ArrayZeros num_locks
@@ -203,7 +203,7 @@ subHistogram pat flat_idx space histops num_histos kbody = do
           (tid' .==. 0)
           (copyDWIMFix hist [] (Var $ patElemName pe) [])
           ( sFor "i" (toInt64Exp $ histWidth histop) $ \i ->
-              sLoopNest (histShape histop) $ \vec_is ->
+              sLoopNest (histOpShape histop) $ \vec_is ->
                 copyDWIMFix hist (i : vec_is) ne []
           )
 
@@ -267,7 +267,7 @@ subHistogram pat flat_idx space histops num_histos kbody = do
               ++ [(bucket_id, num_buckets)]
               ++ [(subhistogram_id, tvSize num_histos)]
 
-        segred_op = SegBinOp Noncommutative (histOp op) (histNeutral op) (histShape op)
+        segred_op = SegBinOp Noncommutative (histOp op) (histNeutral op) (histOpShape op)
 
     nsubtasks_red <- dPrim "num_tasks" $ IntType Int32
     red_code <- compileSegRed' (Pat red_pes) segred_space [segred_op] nsubtasks_red $ \red_cont ->
