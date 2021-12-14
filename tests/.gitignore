@@ -1,5 +1,9 @@
 *
-!.gitignore
-!*.fut
-!*.tuning
-!*.futharkscript
+!*/
+*/*
+!/**/*.*
+/**/data
+/**/*.c
+/**/*.expected
+/**/*.actual
+/**/*.wasm
