@@ -135,7 +135,7 @@ data HistOp rep = HistOp
     -- SOACS representation), these are the logical
     -- "dimensions".  This is used to generate more efficient
     -- code.
-    histShape :: Shape,
+    histOpShape :: Shape,
     histOp :: Lambda rep
   }
   deriving (Eq, Ord, Show)
@@ -147,7 +147,7 @@ histType :: HistOp rep -> [Type]
 histType op =
   map
     ( (`arrayOfRow` histWidth op)
-        . (`arrayOfShape` histShape op)
+        . (`arrayOfShape` histOpShape op)
     )
     $ lambdaReturnType $ histOp op
 
@@ -610,7 +610,7 @@ segOpType (SegScan _ space scans ts kbody) =
       map (`arrayOfShape` shape) (lambdaReturnType $ segBinOpLambda op)
 segOpType (SegHist _ space ops _ _) = do
   op <- ops
-  let shape = Shape (segment_dims <> [histWidth op]) <> histShape op
+  let shape = Shape (segment_dims <> [histWidth op]) <> histOpShape op
   map (`arrayOfShape` shape) (lambdaReturnType $ histOp op)
   where
     dims = segSpaceDims space

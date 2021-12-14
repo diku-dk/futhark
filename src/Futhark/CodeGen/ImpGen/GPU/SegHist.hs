@@ -75,7 +75,7 @@ histoSpaceUsage op =
     map
       ( typeSize
           . (`arrayOfRow` histWidth op)
-          . (`arrayOfShape` histShape op)
+          . (`arrayOfShape` histOpShape op)
       )
       $ lambdaReturnType $ histOp op
 
@@ -180,7 +180,7 @@ prepareAtomicUpdateGlobal l dests slug =
       let num_locks = 100151
           dims =
             map toInt64Exp $
-              shapeDims (histShape (slugOp slug))
+              shapeDims (histOpShape (slugOp slug))
                 ++ [ tvSize (slugNumSubhistos slug),
                      histWidth (slugOp slug)
                    ]
@@ -305,13 +305,13 @@ prepareIntermediateArraysGlobal passage hist_T hist_N slugs = do
           sExt32 $
             unCount $
               sum $
-                map (typeSize . (`arrayOfShape` histShape op)) $
+                map (typeSize . (`arrayOfShape` histOpShape op)) $
                   Prim int32 : lambdaReturnType (histOp op)
         _ ->
           sExt32 $
             unCount $
               sum $
-                map (typeSize . (`arrayOfShape` histShape op)) $
+                map (typeSize . (`arrayOfShape` histOpShape op)) $
                   lambdaReturnType (histOp op)
 
     onOp hist_L2 hist_M_min hist_S hist_RACE_exp l slug = do
@@ -540,7 +540,7 @@ prepareIntermediateArraysLocal num_subhistos_per_group groups_per_segment space 
             let lock_shape =
                   Shape $
                     tvSize num_subhistos_per_group :
-                    shapeDims (histShape op)
+                    shapeDims (histOpShape op)
                       ++ [hist_H_chk]
 
             let dims = map toInt64Exp $ shapeDims lock_shape
@@ -620,7 +620,7 @@ histKernelLocalPass
     histo_sizes <- forM (zip slugs hist_H_chks) $ \(slug, hist_H_chk) -> do
       let histo_dims =
             tvExp hist_H_chk :
-            map toInt64Exp (shapeDims (histShape (slugOp slug)))
+            map toInt64Exp (shapeDims (histOpShape (slugOp slug)))
       histo_size <-
         dPrimVE "histo_size" $ product histo_dims
       let group_hists_size =
@@ -707,7 +707,7 @@ histKernelLocalPass
               sIf
                 (global_subhisto_i .==. 0)
                 (copyDWIMFix dest_local local_is (Var dest_global) global_is)
-                ( sLoopNest (histShape op) $ \is ->
+                ( sLoopNest (histOpShape op) $ \is ->
                     copyDWIMFix dest_local (local_is ++ is) ne []
                 )
 
@@ -771,7 +771,7 @@ histKernelLocalPass
                     - sExt64 chk_i * head histo_dims
             let trunc_histo_dims =
                   tvExp trunc_H :
-                  map toInt64Exp (shapeDims (histShape (slugOp slug)))
+                  map toInt64Exp (shapeDims (histOpShape (slugOp slug)))
             trunc_histo_size <- dPrimVE "histo_size" $ sExt32 $ product trunc_histo_dims
 
             sFor "local_i" bins_per_thread $ \i -> do
@@ -1122,7 +1122,7 @@ compileSegHist (Pat pes) num_groups group_size space ops kbody = do
         subhistogram_id <- newVName "subhistogram_id"
         vector_ids <-
           mapM (const $ newVName "vector_id") $
-            shapeDims $ histShape op
+            shapeDims $ histOpShape op
 
         flat_gtid <- newVName "flat_gtid"
 
@@ -1131,7 +1131,7 @@ compileSegHist (Pat pes) num_groups group_size space ops kbody = do
               SegSpace flat_gtid $
                 segment_dims
                   ++ [(bucket_id, num_buckets)]
-                  ++ zip vector_ids (shapeDims $ histShape op)
+                  ++ zip vector_ids (shapeDims $ histOpShape op)
                   ++ [(subhistogram_id, Var $ tvVar num_histos)]
 
         let segred_op = SegBinOp Commutative (histOp op) (histNeutral op) mempty
