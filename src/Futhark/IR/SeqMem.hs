@@ -19,10 +19,10 @@ where
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.IR.Mem
 import Futhark.IR.Mem.Simplify
+import qualified Futhark.IR.TypeCheck as TC
 import qualified Futhark.Optimise.Simplify.Engine as Engine
 import Futhark.Pass
 import Futhark.Pass.ExplicitAllocations (BuilderOps (..), mkLetNamesB', mkLetNamesB'')
-import qualified Futhark.TypeCheck as TC
 
 data SeqMem
 
@@ -37,10 +37,6 @@ instance RepTypes SeqMem where
 instance ASTRep SeqMem where
   expTypesFromPat = return . map snd . bodyReturnsFromPat
 
-instance OpReturns SeqMem where
-  opReturns (Alloc _ space) = return [MemMem space]
-  opReturns (Inner ()) = pure []
-
 instance PrettyRep SeqMem
 
 instance TC.CheckableOp SeqMem where
@@ -54,7 +50,7 @@ instance TC.Checkable SeqMem where
   checkLParamDec = checkMemInfo
   checkLetBoundDec = checkMemInfo
   checkRetType = mapM_ (TC.checkExtType . declExtTypeOf)
-  primFParam name t = return $ Param name (MemPrim t)
+  primFParam name t = return $ Param mempty name (MemPrim t)
   matchPat = matchPatToExp
   matchReturnType = matchFunctionReturnType
   matchBranchType = matchBranchReturnType
@@ -65,10 +61,16 @@ instance BuilderOps SeqMem where
   mkBodyB stms res = return $ Body () stms res
   mkLetNamesB = mkLetNamesB' ()
 
+instance TraverseOpStms SeqMem where
+  traverseOpStms _ = pure
+
 instance BuilderOps (Engine.Wise SeqMem) where
   mkExpDecB pat e = return $ Engine.mkWiseExpDec pat () e
   mkBodyB stms res = return $ Engine.mkWiseBody () stms res
   mkLetNamesB = mkLetNamesB''
+
+instance TraverseOpStms (Engine.Wise SeqMem) where
+  traverseOpStms _ = pure
 
 simplifyProg :: Prog SeqMem -> PassM (Prog SeqMem)
 simplifyProg = simplifyProgGeneric simpleSeqMem

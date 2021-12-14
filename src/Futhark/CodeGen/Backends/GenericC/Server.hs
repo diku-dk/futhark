@@ -13,12 +13,14 @@ module Futhark.CodeGen.Backends.GenericC.Server
 where
 
 import Data.Bifunctor (first, second)
-import Data.FileEmbed
 import qualified Data.Map as M
-import Data.Maybe
+import qualified Data.Text as T
+import Futhark.CodeGen.Backends.GenericC.Manifest
 import Futhark.CodeGen.Backends.GenericC.Options
 import Futhark.CodeGen.Backends.SimpleRep
-import Futhark.CodeGen.ImpCode
+import Futhark.CodeGen.RTS.C (serverH, tuningH, valuesH)
+import Futhark.Util (zEncodeString)
+import Futhark.Util.Pretty (prettyText)
 import qualified Language.C.Quote.OpenCL as C
 import qualified Language.C.Syntax as C
 
@@ -51,25 +53,25 @@ genericOptions =
                   }|]
       },
     Option
-      { optionLongName = "print-sizes",
+      { optionLongName = "print-params",
         optionShortName = Nothing,
         optionArgument = NoArgument,
-        optionDescription = "Print all sizes that can be set with --size or --tuning.",
+        optionDescription = "Print all tuning parameters that can be set with --param or --tuning.",
         optionAction =
           [C.cstm|{
-                int n = futhark_get_num_sizes();
+                int n = futhark_get_tuning_param_count();
                 for (int i = 0; i < n; i++) {
-                  printf("%s (%s)\n", futhark_get_size_name(i),
-                                      futhark_get_size_class(i));
+                  printf("%s (%s)\n", futhark_get_tuning_param_name(i),
+                                      futhark_get_tuning_param_class(i));
                 }
                 exit(0);
               }|]
       },
     Option
-      { optionLongName = "size",
+      { optionLongName = "param",
         optionShortName = Nothing,
         optionArgument = RequiredArgument "ASSIGNMENT",
-        optionDescription = "Set a configurable run-time parameter to the given value.",
+        optionDescription = "Set a tuning parameter to the given value.",
         optionAction =
           [C.cstm|{
                 char *name = optarg;
@@ -78,7 +80,7 @@ genericOptions =
                 int value = atoi(value_str);
                 if (equals != NULL) {
                   *equals = 0;
-                  if (futhark_context_config_set_size(cfg, name, value) != 0) {
+                  if (futhark_context_config_set_tuning_param(cfg, name, value) != 0) {
                     futhark_panic(1, "Unknown size: %s\n", name);
                   }
                 } else {
@@ -93,198 +95,182 @@ genericOptions =
         optionAction =
           [C.cstm|{
                 char *ret = load_tuning_file(optarg, cfg, (int(*)(void*, const char*, size_t))
-                                                          futhark_context_config_set_size);
+                                                          futhark_context_config_set_tuning_param);
                 if (ret != NULL) {
                   futhark_panic(1, "When loading tuning from '%s': %s\n", optarg, ret);
                 }}|]
       }
   ]
 
-typeStructName :: ExternalValue -> String
-typeStructName (TransparentValue _ (ScalarValue pt signed _)) =
-  let name = prettySigned (signed == TypeUnsigned) pt
-   in "type_" ++ name
-typeStructName (TransparentValue _ (ArrayValue _ _ pt signed shape)) =
-  let rank = length shape
-      name = arrayName pt signed rank
-   in "type_" ++ name
-typeStructName (OpaqueValue _ name vds) =
-  "type_" ++ opaqueName name vds
+typeStructName :: T.Text -> String
+typeStructName tname = "type_" <> zEncodeString (T.unpack tname)
 
-valueDescBoilerplate :: ExternalValue -> (String, (C.Initializer, [C.Definition]))
-valueDescBoilerplate ev@(TransparentValue _ (ScalarValue pt signed _)) =
-  let name = prettySigned (signed == TypeUnsigned) pt
-      type_name = typeStructName ev
-   in (name, ([C.cinit|&$id:type_name|], mempty))
-valueDescBoilerplate ev@(TransparentValue _ (ArrayValue _ _ pt signed shape)) =
-  let rank = length shape
-      name = arrayName pt signed rank
-      pt_name = prettySigned (signed == TypeUnsigned) pt
-      pretty_name = concat (replicate rank "[]") ++ pt_name
-      type_name = typeStructName ev
+typeBoilerplate :: (T.Text, Type) -> (C.Initializer, [C.Definition])
+typeBoilerplate (tname, TypeArray _ et rank ops) =
+  let type_name = typeStructName tname
       aux_name = type_name ++ "_aux"
-      info_name = pt_name ++ "_info"
-      array_new = "futhark_new_" ++ name
-      array_new_wrap = "futhark_new_" ++ name ++ "_wrap"
-      array_free = "futhark_free_" ++ name
-      array_shape = "futhark_shape_" ++ name
-      array_values = "futhark_values_" ++ name
+      info_name = T.unpack et ++ "_info"
       shape_args = [[C.cexp|shape[$int:i]|] | i <- [0 .. rank -1]]
-   in ( name,
-        ( [C.cinit|&$id:type_name|],
-          [C.cunit|
+      array_new_wrap = arrayNew ops <> "_wrap"
+   in ( [C.cinit|&$id:type_name|],
+        [C.cunit|
               void* $id:array_new_wrap(struct futhark_context *ctx,
                                        const void* p,
                                        const typename int64_t* shape) {
-                return $id:array_new(ctx, p, $args:shape_args);
+                return $id:(arrayNew ops)(ctx, p, $args:shape_args);
               }
               struct array_aux $id:aux_name = {
-                .name = $string:pretty_name,
+                .name = $string:(T.unpack tname),
                 .rank = $int:rank,
                 .info = &$id:info_name,
                 .new = (typename array_new_fn)$id:array_new_wrap,
-                .free = (typename array_free_fn)$id:array_free,
-                .shape = (typename array_shape_fn)$id:array_shape,
-                .values = (typename array_values_fn)$id:array_values
+                .free = (typename array_free_fn)$id:(arrayFree ops),
+                .shape = (typename array_shape_fn)$id:(arrayShape ops),
+                .values = (typename array_values_fn)$id:(arrayValues ops)
               };
               struct type $id:type_name = {
-                .name = $string:pretty_name,
+                .name = $string:(T.unpack tname),
                 .restore = (typename restore_fn)restore_array,
                 .store = (typename store_fn)store_array,
                 .free = (typename free_fn)free_array,
                 .aux = &$id:aux_name
               };|]
-        )
       )
-valueDescBoilerplate ev@(OpaqueValue _ name vds) =
-  let type_name = typeStructName ev
+typeBoilerplate (tname, TypeOpaque _ ops) =
+  let type_name = typeStructName tname
       aux_name = type_name ++ "_aux"
-      opaque_free = "futhark_free_" ++ opaqueName name vds
-      opaque_store = "futhark_store_" ++ opaqueName name vds
-      opaque_restore = "futhark_restore_" ++ opaqueName name vds
-   in ( name,
-        ( [C.cinit|&$id:type_name|],
-          [C.cunit|
+   in ( [C.cinit|&$id:type_name|],
+        [C.cunit|
               struct opaque_aux $id:aux_name = {
-                .store = (typename opaque_store_fn)$id:opaque_store,
-                .restore = (typename opaque_restore_fn)$id:opaque_restore,
-                .free = (typename opaque_free_fn)$id:opaque_free
+                .store = (typename opaque_store_fn)$id:(opaqueStore ops),
+                .restore = (typename opaque_restore_fn)$id:(opaqueRestore ops),
+                .free = (typename opaque_free_fn)$id:(opaqueFree ops)
               };
               struct type $id:type_name = {
-                .name = $string:name,
+                .name = $string:(T.unpack tname),
                 .restore = (typename restore_fn)restore_opaque,
                 .store = (typename store_fn)store_opaque,
                 .free = (typename free_fn)free_opaque,
                 .aux = &$id:aux_name
               };|]
-        )
       )
 
-functionExternalValues :: Function a -> [ExternalValue]
-functionExternalValues fun = functionResult fun ++ functionArgs fun
+entryTypeBoilerplate :: Manifest -> ([C.Initializer], [C.Definition])
+entryTypeBoilerplate =
+  second concat . unzip . map typeBoilerplate . M.toList . manifestTypes
 
-entryTypeBoilerplate :: Functions a -> ([C.Initializer], [C.Definition])
-entryTypeBoilerplate (Functions funs) =
-  second concat . unzip . M.elems . M.fromList . map valueDescBoilerplate
-    . concatMap (functionExternalValues . snd)
-    . filter (isJust . functionEntry . snd)
-    $ funs
-
-oneEntryBoilerplate :: (Name, Function a) -> Maybe ([C.Definition], C.Initializer)
-oneEntryBoilerplate (name, fun) = do
-  ename <- functionEntry fun
-  let entry_f = "futhark_entry_" ++ pretty ename
-      call_f = "call_" ++ pretty name
-      out_types = functionResult fun
-      in_types = functionArgs fun
-      out_types_name = pretty name ++ "_out_types"
-      in_types_name = pretty name ++ "_in_types"
-      out_unique_name = pretty name ++ "_out_unique"
-      in_unique_name = pretty name ++ "_in_unique"
+oneEntryBoilerplate :: Manifest -> (T.Text, EntryPoint) -> ([C.Definition], C.Initializer)
+oneEntryBoilerplate manifest (name, EntryPoint cfun outputs inputs) =
+  let call_f = "call_" ++ T.unpack name
+      out_types = map outputType outputs
+      in_types = map inputType inputs
+      out_types_name = T.unpack name ++ "_out_types"
+      in_types_name = T.unpack name ++ "_in_types"
+      out_unique_name = T.unpack name ++ "_out_unique"
+      in_unique_name = T.unpack name ++ "_in_unique"
       (out_items, out_args)
         | null out_types = ([C.citems|(void)outs;|], mempty)
         | otherwise = unzip $ zipWith loadOut [0 ..] out_types
       (in_items, in_args)
         | null in_types = ([C.citems|(void)ins;|], mempty)
         | otherwise = unzip $ zipWith loadIn [0 ..] in_types
-  pure
-    ( [C.cunit|
+   in ( [C.cunit|
                 struct type* $id:out_types_name[] = {
                   $inits:(map typeStructInit out_types),
                   NULL
                 };
                 bool $id:out_unique_name[] = {
-                  $inits:(map typeUniqueInit out_types)
+                  $inits:(map outputUniqueInit outputs)
                 };
                 struct type* $id:in_types_name[] = {
                   $inits:(map typeStructInit in_types),
                   NULL
                 };
                 bool $id:in_unique_name[] = {
-                  $inits:(map typeUniqueInit in_types)
+                  $inits:(map inputUniqueInit inputs)
                 };
                 int $id:call_f(struct futhark_context *ctx, void **outs, void **ins) {
                   $items:out_items
                   $items:in_items
-                  return $id:entry_f(ctx, $args:out_args, $args:in_args);
+                  return $id:cfun(ctx, $args:out_args, $args:in_args);
                 }
                 |],
-      [C.cinit|{
-            .name = $string:(pretty ename),
+        [C.cinit|{
+            .name = $string:(T.unpack name),
             .f = $id:call_f,
             .in_types = $id:in_types_name,
             .out_types = $id:out_types_name,
             .in_unique = $id:in_unique_name,
             .out_unique = $id:out_unique_name
             }|]
-    )
+      )
   where
-    typeStructInit t = [C.cinit|&$id:(typeStructName t)|]
-    typeUniqueInit t =
-      case typeUnique t of
-        Unique -> [C.cinit|true|]
-        Nonunique -> [C.cinit|false|]
+    typeStructInit tname = [C.cinit|&$id:(typeStructName tname)|]
+    inputUniqueInit = uniqueInit . inputUnique
+    outputUniqueInit = uniqueInit . outputUnique
+    uniqueInit True = [C.cinit|true|]
+    uniqueInit False = [C.cinit|false|]
 
-    typeUnique (TransparentValue u _) = u
-    typeUnique (OpaqueValue u _ _) = u
+    cType tname =
+      case M.lookup tname $ manifestTypes manifest of
+        Just (TypeArray ctype _ _ _) -> [C.cty|typename $id:(T.unpack ctype)|]
+        Just (TypeOpaque ctype _) -> [C.cty|typename $id:(T.unpack ctype)|]
+        Nothing -> uncurry primAPIType $ scalarToPrim tname
 
-    loadOut i ev =
+    loadOut i tname =
       let v = "out" ++ show (i :: Int)
-       in ( [C.citem|$ty:(externalValueType ev) *$id:v = outs[$int:i];|],
+       in ( [C.citem|$ty:(cType tname) *$id:v = outs[$int:i];|],
             [C.cexp|$id:v|]
           )
-    loadIn i ev =
+    loadIn i tname =
       let v = "in" ++ show (i :: Int)
-          evt = externalValueType ev
-       in ( [C.citem|$ty:evt $id:v = *($ty:evt*)ins[$int:i];|],
+       in ( [C.citem|$ty:(cType tname) $id:v = *($ty:(cType tname)*)ins[$int:i];|],
             [C.cexp|$id:v|]
           )
 
-entryBoilerplate :: Functions a -> ([C.Definition], [C.Initializer])
-entryBoilerplate (Functions funs) =
-  first concat $ unzip $ mapMaybe oneEntryBoilerplate funs
+entryBoilerplate :: Manifest -> ([C.Definition], [C.Initializer])
+entryBoilerplate manifest =
+  first concat $
+    unzip $
+      map (oneEntryBoilerplate manifest) $
+        M.toList $ manifestEntryPoints manifest
 
 mkBoilerplate ::
-  Functions a ->
+  Manifest ->
   ([C.Definition], [C.Initializer], [C.Initializer])
-mkBoilerplate funs =
-  let (type_inits, type_defs) = entryTypeBoilerplate funs
-      (entry_defs, entry_inits) = entryBoilerplate funs
-   in (type_defs ++ entry_defs, type_inits, entry_inits)
+mkBoilerplate manifest =
+  let (type_inits, type_defs) = entryTypeBoilerplate manifest
+      (entry_defs, entry_inits) = entryBoilerplate manifest
+      scalar_type_inits = map scalarTypeInit scalar_types
+   in (type_defs ++ entry_defs, scalar_type_inits ++ type_inits, entry_inits)
+  where
+    scalarTypeInit tname = [C.cinit|&$id:(typeStructName tname)|]
+    scalar_types =
+      [ "i8",
+        "i16",
+        "i32",
+        "i64",
+        "u8",
+        "u16",
+        "u32",
+        "u64",
+        "f16",
+        "f32",
+        "f64",
+        "bool"
+      ]
 
 {-# NOINLINE serverDefs #-}
 
 -- | Generate Futhark server executable code.
-serverDefs :: [Option] -> Functions a -> [C.Definition]
-serverDefs options funs =
-  let server_h = $(embedStringFile "rts/c/server.h")
-      values_h = $(embedStringFile "rts/c/values.h")
-      tuning_h = $(embedStringFile "rts/c/tuning.h")
-      option_parser =
+serverDefs :: [Option] -> Manifest -> T.Text
+serverDefs options manifest =
+  let option_parser =
         generateOptionParser "parse_options" $ genericOptions ++ options
       (boilerplate_defs, type_inits, entry_point_inits) =
-        mkBoilerplate funs
-   in [C.cunit|
+        mkBoilerplate manifest
+   in prettyText
+        [C.cunit|
 $esc:("#include <getopt.h>")
 $esc:("#include <ctype.h>")
 $esc:("#include <inttypes.h>")
@@ -292,9 +278,9 @@ $esc:("#include <inttypes.h>")
 // If the entry point is NULL, the program will terminate after doing initialisation and such.  It is not used for anything else in server mode.
 static const char *entry_point = "main";
 
-$esc:values_h
-$esc:server_h
-$esc:tuning_h
+$esc:(T.unpack valuesH)
+$esc:(T.unpack serverH)
+$esc:(T.unpack tuningH)
 
 $edecls:boilerplate_defs
 
@@ -340,7 +326,7 @@ int main(int argc, char** argv) {
   }
 
   if (entry_point != NULL) {
-    run_server(&prog, ctx);
+    run_server(&prog, cfg, ctx);
   }
 
   futhark_context_free(ctx);

@@ -28,14 +28,14 @@ type env [grid_h][grid_w][n_agents] = {
     agent_list: [n_agents]agent
   }
 
-let bounded (max: f32)
+def bounded (max: f32)
             (x: f32)
             : f32 =
   if x >= 0 && x < max
   then x
   else (x + max) f32.% max
 
-let loc2grid (grid_size: i64)
+def loc2grid (grid_size: i64)
              (real_loc: f32)
              : i64 =
   let gs_f = f32.i64 grid_size
@@ -43,7 +43,7 @@ let loc2grid (grid_size: i64)
      then i64.f32 real_loc
      else i64.f32 (bounded gs_f real_loc)
 
-let read_sensor [xn] [yn]
+def read_sensor [xn] [yn]
                 (p: model_params)
                 (trail_map: [yn][xn]f32)
                 (x: f32, y: f32)
@@ -53,7 +53,7 @@ let read_sensor [xn] [yn]
   let sy = f32.sin ang * p.sensor_offset + y |> loc2grid yn
   in trail_map[sy,sx]
 
-let move_step (p: model_params)
+def move_step (p: model_params)
               ({loc=(x: f32, y: f32),
                 ang: f32} : agent)
               : agent =
@@ -61,7 +61,7 @@ let move_step (p: model_params)
   let y_ = y + p.step_size * f32.sin ang
   in {loc=(x_, y_), ang}
 
-let step_agent (p: model_params)
+def step_agent (p: model_params)
                (trail_map: [][]f32)
                ({loc,ang}: agent)
                : (agent, (i64, i64)) =
@@ -75,7 +75,7 @@ let step_agent (p: model_params)
                       else move_step p {loc, ang=ang + p.rot_angle})
   in (stepped, (i64.f32 loc.0, i64.f32 loc.1))
 
-let step_agents [h][w][a]
+def step_agents [h][w][a]
                 ({model_params, trail_map, agent_list}: env[h][w][a])
                 : env[h][w][a] =
   let (stepped, deposits) = unzip (map (step_agent model_params trail_map) agent_list)
@@ -83,7 +83,7 @@ let step_agents [h][w][a]
   let deposited = reduce_by_index (flatten trail_map) (+) 0 flat_deposits (replicate a model_params.deposit_amount)
   in {model_params, trail_map=unflatten h w deposited, agent_list=stepped}
 
-let disperse_cell [h][w]
+def disperse_cell [h][w]
                   (p: model_params)
                   (trail_map: [h][w]f32)
                   (x: i64) (y: i64)
@@ -96,21 +96,21 @@ let disperse_cell [h][w]
   let sum = trail_map[x,y] + reduce (+) 0 neighbors
   in p.decay * sum / 9
 
-let disperse_trail [h][w][a]
+def disperse_trail [h][w][a]
                    ({model_params, trail_map, agent_list}: env[h][w][a])
                    : env[h][w][a] =
   {model_params, agent_list,
    trail_map=tabulate_2d h w (disperse_cell model_params trail_map)}
 
-let simulation_step [h][w][a]
+def simulation_step [h][w][a]
                     (e: env[h][w][a])
                     : env[h][w][a] =
   e |> step_agents |> disperse_trail
 
-let to_deg (rad: f32): i32 = 180 * rad / f32.pi |> f32.round |> i64.f32
-let to_rad (deg: i64): f32 = f32.i64 deg * f32.pi / 180
+def to_deg (rad: f32): i32 = 180 * rad / f32.pi |> f32.round |> i64.f32
+def to_rad (deg: i64): f32 = f32.i64 deg * f32.pi / 180
 
-let build_test_env [h][w][a]
+def build_test_env [h][w][a]
                    (trail_map: [h][w]f32)
                    (agent_xs: [a]f32)
                    (agent_ys: [a]f32)

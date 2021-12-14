@@ -13,7 +13,7 @@
 --   /Scatter 1
 -- }
 
-let main [n][m] (is: [n]i64) (vs: [n]f32) (xs: *[m]f32) =
+def main [n][m] (is: [n]i64) (vs: [n]f32) (xs: *[m]f32) =
   let is' = map (+5) is
   let vs' = map2 (\ i v -> v * f32.i64 i) is vs
   let res1 = scatter xs is' vs'

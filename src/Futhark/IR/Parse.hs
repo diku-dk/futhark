@@ -50,7 +50,9 @@ pStringLiteral = char '"' >> manyTill L.charLiteral (char '"')
 pName :: Parser Name
 pName =
   lexeme . fmap nameFromString $
-    (:) <$> satisfy isAlpha <*> many (satisfy constituent)
+    (:) <$> satisfy leading <*> many (satisfy constituent)
+  where
+    leading c = isAlpha c || c `elem` ("_+-*/%=!<>|&^." :: String)
 
 pVName :: Parser VName
 pVName = lexeme $ do
@@ -320,11 +322,15 @@ pBasicOp =
     ]
 
 pAttr :: Parser Attr
-pAttr = do
-  v <- pName
+pAttr =
   choice
-    [ AttrComp v <$> parens (pAttr `sepBy` pComma),
-      pure $ AttrAtom v
+    [ AttrInt . toInteger <$> pInt,
+      do
+        v <- pName
+        choice
+          [ AttrComp v <$> parens (pAttr `sepBy` pComma),
+            pure $ AttrName v
+          ]
     ]
 
 pAttrs :: Parser Attrs
@@ -361,7 +367,7 @@ pBranchTypes :: PR rep -> Parser [BranchType rep]
 pBranchTypes pr = braces $ pBranchType pr `sepBy` pComma
 
 pParam :: Parser t -> Parser (Param t)
-pParam p = Param <$> pVName <*> (pColon *> p)
+pParam p = Param <$> pAttrs <*> pVName <*> (pColon *> p)
 
 pFParam :: PR rep -> Parser (FParam rep)
 pFParam = pParam . pFParamInfo
@@ -528,10 +534,11 @@ pEntry :: Parser EntryPoint
 pEntry =
   parens $
     (,,) <$> (nameFromString <$> pStringLiteral)
-      <* pComma <*> pEntryPointTypes
+      <* pComma <*> pEntryPointInputs
       <* pComma <*> pEntryPointTypes
   where
     pEntryPointTypes = braces (pEntryPointType `sepBy` pComma)
+    pEntryPointInputs = braces (pEntryPointInput `sepBy` pComma)
     pEntryPointType = do
       u <- pUniqueness
       choice
@@ -539,6 +546,8 @@ pEntry =
           "unsigned" $> TypeUnsigned u,
           "opaque" *> parens (TypeOpaque u <$> pStringLiteral <* pComma <*> pInt)
         ]
+    pEntryPointInput =
+      EntryParam <$> pName <* pColon <*> pEntryPointType
 
 pFunDef :: PR rep -> Parser (FunDef rep)
 pFunDef pr = do
@@ -595,8 +604,8 @@ pSOAC pr =
       keyword "scatter"
         *> parens
           ( SOAC.Scatter <$> pSubExp <* pComma
-              <*> pLambda pr <* pComma
-              <*> braces (pVName `sepBy` pComma)
+              <*> braces (pVName `sepBy` pComma) <* pComma
+              <*> pLambda pr
               <*> many (pComma *> pDest)
           )
       where
@@ -607,9 +616,9 @@ pSOAC pr =
         *> parens
           ( SOAC.Hist
               <$> pSubExp <* pComma
+              <*> braces (pVName `sepBy` pComma) <* pComma
               <*> braces (pHistOp `sepBy` pComma) <* pComma
               <*> pLambda pr
-              <*> many (pComma *> pVName)
           )
       where
         pHistOp =
@@ -868,17 +877,17 @@ pIxFunBase pNum =
       mon <- pLab "monotonicity" $ brackets (pMon `sepBy` pComma)
       pure $ IxFun.LMAD offset $ zipWith5 IxFun.LMADDim strides rotates shape perm mon
 
-pPrimExpLeaf :: Parser (VName, PrimType)
-pPrimExpLeaf = (,int64) <$> pVName
+pPrimExpLeaf :: Parser VName
+pPrimExpLeaf = pVName
 
-pExtPrimExpLeaf :: Parser (Ext VName, PrimType)
-pExtPrimExpLeaf = (,int64) <$> pExt pVName
+pExtPrimExpLeaf :: Parser (Ext VName)
+pExtPrimExpLeaf = pExt pVName
 
 pIxFun :: Parser IxFun
-pIxFun = pIxFunBase $ isInt64 <$> pPrimExp pPrimExpLeaf
+pIxFun = pIxFunBase $ isInt64 <$> pPrimExp int64 pPrimExpLeaf
 
 pExtIxFun :: Parser ExtIxFun
-pExtIxFun = pIxFunBase $ isInt64 <$> pPrimExp pExtPrimExpLeaf
+pExtIxFun = pIxFunBase $ isInt64 <$> pPrimExp int64 pExtPrimExpLeaf
 
 pMemInfo :: Parser d -> Parser u -> Parser ret -> Parser (MemInfo d u ret)
 pMemInfo pd pu pret =

@@ -117,14 +117,12 @@ hoistLoopInvariantMergeVariables vtable pat aux (merge, form, loopbody) = do
     checkInvariance
       (pat_name, (mergeParam, mergeInit), resExp)
       (invariant, explpat', merge', resExps)
-        | not (unique (paramDeclType mergeParam))
-            || arrayRank (paramDeclType mergeParam) == 1,
-          isInvariant,
+        | isInvariant,
           -- Also do not remove the condition in a while-loop.
           not $ paramName mergeParam `nameIn` freeIn form =
-          let (bnd, explpat'') =
+          let (stm, explpat'') =
                 removeFromResult (mergeParam, mergeInit) explpat'
-           in ( maybe id (:) bnd $ (paramIdent mergeParam, mergeInit) : invariant,
+           in ( maybe id (:) stm $ (paramIdent mergeParam, mergeInit) : invariant,
                 explpat'',
                 merge',
                 resExps

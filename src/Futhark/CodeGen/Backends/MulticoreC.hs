@@ -17,14 +17,15 @@ module Futhark.CodeGen.Backends.MulticoreC
 where
 
 import Control.Monad
-import Data.FileEmbed
 import qualified Data.Map as M
 import Data.Maybe
+import qualified Data.Text as T
 import qualified Futhark.CodeGen.Backends.GenericC as GC
 import Futhark.CodeGen.Backends.GenericC.Options
 import Futhark.CodeGen.Backends.SimpleRep
 import Futhark.CodeGen.ImpCode.Multicore
 import qualified Futhark.CodeGen.ImpGen.Multicore as ImpGen
+import Futhark.CodeGen.RTS.C (schedulerH)
 import Futhark.IR.MCMem (MCMem, Prog)
 import Futhark.MonadFreshNames
 import qualified Language.C.Quote.OpenCL as C
@@ -49,12 +50,12 @@ compileProg =
 
 generateContext :: GC.CompilerM op () ()
 generateContext = do
-  let scheduler_h = $(embedStringFile "rts/c/scheduler.h")
-  mapM_ GC.earlyDecl [C.cunit|$esc:scheduler_h|]
+  mapM_ GC.earlyDecl [C.cunit|$esc:(T.unpack schedulerH)|]
 
   cfg <- GC.publicDef "context_config" GC.InitDecl $ \s ->
     ( [C.cedecl|struct $id:s;|],
-      [C.cedecl|struct $id:s { int debugging;
+      [C.cedecl|struct $id:s { int in_use;
+                               int debugging;
                                int profiling;
                                int num_threads;
                              };|]
@@ -67,6 +68,7 @@ generateContext = do
                              if (cfg == NULL) {
                                return NULL;
                              }
+                             cfg->in_use = 0;
                              cfg->debugging = 0;
                              cfg->profiling = 0;
                              cfg->num_threads = 0;
@@ -77,6 +79,7 @@ generateContext = do
   GC.publicDef_ "context_config_free" GC.InitDecl $ \s ->
     ( [C.cedecl|void $id:s(struct $id:cfg* cfg);|],
       [C.cedecl|void $id:s(struct $id:cfg* cfg) {
+                             assert(!cfg->in_use);
                              free(cfg);
                            }|]
     )
@@ -98,7 +101,7 @@ generateContext = do
   GC.publicDef_ "context_config_set_logging" GC.InitDecl $ \s ->
     ( [C.cedecl|void $id:s(struct $id:cfg* cfg, int flag);|],
       [C.cedecl|void $id:s(struct $id:cfg* cfg, int detail) {
-                             /* Does nothing for this backend. */
+                             // Does nothing for this backend.
                              (void)cfg; (void)detail;
                            }|]
     )
@@ -110,11 +113,12 @@ generateContext = do
                            }|]
     )
 
-  (fields, init_fields) <- GC.contextContents
+  (fields, init_fields, free_fields) <- GC.contextContents
 
   ctx <- GC.publicDef "context" GC.InitDecl $ \s ->
     ( [C.cedecl|struct $id:s;|],
       [C.cedecl|struct $id:s {
+                      struct $id:cfg* cfg;
                       struct scheduler scheduler;
                       int detail_memory;
                       int debugging;
@@ -137,10 +141,13 @@ generateContext = do
   GC.publicDef_ "context_new" GC.InitDecl $ \s ->
     ( [C.cedecl|struct $id:ctx* $id:s(struct $id:cfg* cfg);|],
       [C.cedecl|struct $id:ctx* $id:s(struct $id:cfg* cfg) {
+             assert(!cfg->in_use);
              struct $id:ctx* ctx = (struct $id:ctx*) malloc(sizeof(struct $id:ctx));
              if (ctx == NULL) {
                return NULL;
              }
+             ctx->cfg = cfg;
+             ctx->cfg->in_use = 1;
 
              // Initialize rand()
              fast_srand(time(0));
@@ -180,9 +187,11 @@ generateContext = do
   GC.publicDef_ "context_free" GC.InitDecl $ \s ->
     ( [C.cedecl|void $id:s(struct $id:ctx* ctx);|],
       [C.cedecl|void $id:s(struct $id:ctx* ctx) {
+             $stms:free_fields
              free_constants(ctx);
              (void)scheduler_destroy(&ctx->scheduler);
              free_lock(&ctx->lock);
+             ctx->cfg->in_use = 0;
              free(ctx);
            }|]
     )
@@ -195,14 +204,14 @@ generateContext = do
                            }|]
     )
 
-  GC.earlyDecl [C.cedecl|static const char *size_names[0];|]
-  GC.earlyDecl [C.cedecl|static const char *size_vars[0];|]
-  GC.earlyDecl [C.cedecl|static const char *size_classes[0];|]
+  GC.earlyDecl [C.cedecl|static const char *tuning_param_names[0];|]
+  GC.earlyDecl [C.cedecl|static const char *tuning_param_vars[0];|]
+  GC.earlyDecl [C.cedecl|static const char *tuning_param_classes[0];|]
 
-  GC.publicDef_ "context_config_set_size" GC.InitDecl $ \s ->
-    ( [C.cedecl|int $id:s(struct $id:cfg* cfg, const char *size_name, size_t size_value);|],
-      [C.cedecl|int $id:s(struct $id:cfg* cfg, const char *size_name, size_t size_value) {
-                     (void)cfg; (void)size_name; (void)size_value;
+  GC.publicDef_ "context_config_set_tuning_param" GC.InitDecl $ \s ->
+    ( [C.cedecl|int $id:s(struct $id:cfg* cfg, const char *param_name, size_t param_value);|],
+      [C.cedecl|int $id:s(struct $id:cfg* cfg, const char *param_name, size_t param_value) {
+                     (void)cfg; (void)param_name; (void)param_value;
                      return 1;
                    }|]
     )
@@ -408,9 +417,21 @@ multiCoreReport names = report_kernels
 
 addBenchmarkFields :: Name -> Maybe VName -> GC.CompilerM op s ()
 addBenchmarkFields name (Just _) = do
-  GC.contextField (functionRuntime name) [C.cty|typename int64_t*|] $ Just [C.cexp|calloc(sizeof(typename int64_t), ctx->scheduler.num_threads)|]
-  GC.contextField (functionRuns name) [C.cty|int*|] $ Just [C.cexp|calloc(sizeof(int), ctx->scheduler.num_threads)|]
-  GC.contextField (functionIter name) [C.cty|typename int64_t*|] $ Just [C.cexp|calloc(sizeof(sizeof(typename int64_t)), ctx->scheduler.num_threads)|]
+  GC.contextFieldDyn
+    (functionRuntime name)
+    [C.cty|typename int64_t*|]
+    [C.cexp|calloc(sizeof(typename int64_t), ctx->scheduler.num_threads)|]
+    [C.cstm|free(ctx->$id:(functionRuntime name));|]
+  GC.contextFieldDyn
+    (functionRuns name)
+    [C.cty|int*|]
+    [C.cexp|calloc(sizeof(int), ctx->scheduler.num_threads)|]
+    [C.cstm|free(ctx->$id:(functionRuns name));|]
+  GC.contextFieldDyn
+    (functionIter name)
+    [C.cty|typename int64_t*|]
+    [C.cexp|calloc(sizeof(sizeof(typename int64_t)), ctx->scheduler.num_threads)|]
+    [C.cstm|free(ctx->$id:(functionIter name));|]
 addBenchmarkFields name Nothing = do
   GC.contextField (functionRuntime name) [C.cty|typename int64_t|] $ Just [C.cexp|0|]
   GC.contextField (functionRuns name) [C.cty|int|] $ Just [C.cexp|0|]
@@ -489,7 +510,7 @@ generateParLoopFn lexical basename code fstruct free retval tid ntasks = do
           mapM_ GC.item decl_cached
           code' <- GC.blockScope $ GC.compileCode code
           mapM_ GC.item [C.citems|$items:code'|]
-          mapM_ GC.stm free_cached
+          GC.stm [C.cstm|cleanup: {$stms:free_cached}|]
     return
       [C.cedecl|int $id:s(void *args, typename int64_t iterations, int tid, struct scheduler_info info) {
                            int err = 0;
@@ -498,8 +519,9 @@ generateParLoopFn lexical basename code fstruct free retval tid ntasks = do
                            struct $id:fstruct *$id:fstruct = (struct $id:fstruct*) args;
                            struct futhark_context *ctx = $id:fstruct->ctx;
                            $items:fbody
-                           $stms:(compileWriteBackResVals fstruct retval_args retval_ctypes)
-                           cleanup: {}
+                           if (err == 0) {
+                             $stms:(compileWriteBackResVals fstruct retval_args retval_ctypes)
+                           }
                            return err;
                       }|]
 
@@ -570,11 +592,14 @@ compileOp (Segop name params seq_task par_task retvals (SchedulerInfo nsubtask e
       GC.stm [C.cstm|$id:ftask_name.nested_fn=NULL;|]
       return mempty
 
+  free_all_mem <- GC.freeAllocatedMem
   let ftask_err = fpar_task <> "_err"
-  let code =
+      code =
         [C.citems|int $id:ftask_err = scheduler_prepare_task(&ctx->scheduler, &$id:ftask_name);
                   if ($id:ftask_err != 0) {
-                    err = 1; goto cleanup;
+                    $items:free_all_mem;
+                    err = 1;
+                    goto cleanup;
                   }|]
 
   mapM_ GC.item code

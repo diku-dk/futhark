@@ -24,8 +24,9 @@ import Control.Monad.Except
 import Control.Monad.Reader
 import Control.Monad.Trans.State
 import Data.Array
+import qualified Data.ByteString as BS
 import qualified Data.Text as T
-import Codec.Binary.UTF8.String (encode)
+import qualified Data.Text.Encoding as T
 import Data.Char (ord)
 import Data.Maybe (fromMaybe, fromJust)
 import Data.List (genericLength)
@@ -60,6 +61,7 @@ import Futhark.Util.Loc hiding (L) -- Lexer has replacements.
       then            { L $$ THEN }
       else            { L $$ ELSE }
       let             { L $$ LET }
+      def             { L $$ DEF }
       loop            { L $$ LOOP }
       in              { L $$ IN }
       match           { L $$ MATCH }
@@ -86,6 +88,7 @@ import Futhark.Util.Loc hiding (L) -- Lexer has replacements.
       u32lit          { L _ (U32LIT _) }
       u64lit          { L _ (U64LIT _) }
       floatlit        { L _ (FLOATLIT _) }
+      f16lit          { L _ (F16LIT _) }
       f32lit          { L _ (F32LIT _) }
       f64lit          { L _ (F64LIT _) }
       stringlit       { L _ (STRINGLIT _) }
@@ -149,6 +152,7 @@ import Futhark.Util.Loc hiding (L) -- Lexer has replacements.
       '->'            { L $$ RIGHT_ARROW }
       ':'             { L $$ COLON }
       ':>'            { L $$ COLON_GT }
+      '?'             { L $$ QUESTION_MARK  }
       for             { L $$ FOR }
       do              { L $$ DO }
       with            { L $$ WITH }
@@ -220,7 +224,7 @@ Dec_ :: { UncheckedDec }
     | ModBind           { ModDec $1 }
     | open ModExp       { OpenDec $2 $1 }
     | import stringlit
-      { let L _ (STRINGLIT s) = $2 in ImportDec s NoInfo (srcspan $1 $>) }
+      { let L _ (STRINGLIT s) = $2 in ImportDec (T.unpack s) NoInfo (srcspan $1 $>) }
     | local Dec         { LocalDec $2 (srcspan $1 $>) }
     | '#[' AttrInfo ']' Dec_
                         { addAttr $2 $4 }
@@ -252,7 +256,7 @@ ModExp :: { UncheckedModExp }
         | '\\' ModParam maybeAscription(SimpleSigExp) '->' ModExp
           { ModLambda $2 (fmap (,NoInfo) $3) $5 (srcspan $1 $>) }
         | import stringlit
-          { let L _ (STRINGLIT s) = $2 in ModImport s NoInfo (srcspan $1 $>) }
+          { let L _ (STRINGLIT s) = $2 in ModImport (T.unpack s) NoInfo (srcspan $1 $>) }
         | ModExpApply
           { $1 }
         | ModExpAtom
@@ -385,9 +389,9 @@ BindingId :: { (Name, SrcLoc) }
      | '(' BindingBinOp ')' { ($2, $1) }
 
 Val    :: { ValBindBase NoInfo Name }
-Val     : let BindingId TypeParams FunParams maybeAscription(TypeExpDecl) '=' Exp
+Val     : def BindingId TypeParams FunParams maybeAscription(TypeExpDecl) '=' Exp
           { let (name, _) = $2
-            in ValBind (if name==defaultEntryPoint then Just NoInfo else Nothing) name (fmap declaredType $5) NoInfo
+            in ValBind Nothing name (fmap declaredType $5) NoInfo
                $3 $4 $7 Nothing mempty (srcspan $1 $>)
           }
 
@@ -396,6 +400,17 @@ Val     : let BindingId TypeParams FunParams maybeAscription(TypeExpDecl) '=' Ex
             in ValBind (Just NoInfo) name (fmap declaredType $5) NoInfo
                $3 $4 $7 Nothing mempty (srcspan $1 $>) }
 
+        | def FunParam BindingBinOp FunParam maybeAscription(TypeExpDecl) '=' Exp
+          { ValBind Nothing $3 (fmap declaredType $5) NoInfo [] [$2,$4] $7
+            Nothing mempty (srcspan $1 $>)
+          }
+
+        -- The next two for backwards compatibility.
+        | let BindingId TypeParams FunParams maybeAscription(TypeExpDecl) '=' Exp
+          { let (name, _) = $2
+            in ValBind Nothing name (fmap declaredType $5) NoInfo
+               $3 $4 $7 Nothing mempty (srcspan $1 $>)
+          }
         | let FunParam BindingBinOp FunParam maybeAscription(TypeExpDecl) '=' Exp
           { ValBind Nothing $3 (fmap declaredType $5) NoInfo [] [$2,$4] $7
             Nothing mempty (srcspan $1 $>)
@@ -405,19 +420,24 @@ TypeExpDecl :: { TypeDeclBase NoInfo Name }
              : TypeExp %prec bottom { TypeDecl $1 NoInfo }
 
 TypeAbbr :: { TypeBindBase NoInfo Name }
-TypeAbbr : type Liftedness id TypeParams '=' TypeExpDecl
+TypeAbbr : type Liftedness id TypeParams '=' TypeExp
            { let L _ (ID name) = $3
-              in TypeBind name $2 $4 $6 Nothing (srcspan $1 $>) }
-         | type Liftedness 'id[' id ']' TypeParams '=' TypeExpDecl
+              in TypeBind name $2 $4 $6 NoInfo Nothing (srcspan $1 $>) }
+         | type Liftedness 'id[' id ']' TypeParams '=' TypeExp
            { let L loc (INDEXING name) = $3; L ploc (ID pname) = $4
-             in TypeBind name $2 (TypeParamDim pname ploc:$6) $8 Nothing (srcspan $1 $>) }
+             in TypeBind name $2 (TypeParamDim pname ploc:$6) $8 NoInfo Nothing (srcspan $1 $>) }
 
 TypeExp :: { UncheckedTypeExp }
          : '(' id ':' TypeExp ')' '->' TypeExp
            { let L _ (ID v) = $2 in TEArrow (Just v) $4 $7 (srcspan $1 $>) }
          | TypeExpTerm '->' TypeExp
            { TEArrow Nothing $1 $3 (srcspan $1 $>) }
+         | '?' TypeExpDims '.' TypeExp { TEDim $2 $4 (srcspan $1 $>) }
          | TypeExpTerm %prec typeprec { $1 }
+
+TypeExpDims :: { [Name] }
+         : '[' id ']'             { let L _ (ID v) = $2 in [v] }
+         | '[' id ']' TypeExpDims { let L _ (ID v) = $2 in v : $4 }
 
 TypeExpTerm :: { UncheckedTypeExp }
          : '*' TypeExpTerm
@@ -614,7 +634,7 @@ Atom : PrimLit        { Literal (fst $1) (snd $1) }
      | intlit         { let L loc (INTLIT x) = $1 in IntLit x NoInfo loc }
      | floatlit       { let L loc (FLOATLIT x) = $1 in FloatLit x NoInfo loc }
      | stringlit      { let L loc (STRINGLIT s) = $1 in
-                        StringLit (encode s) loc }
+                        StringLit (BS.unpack (T.encodeUtf8 s)) loc }
      | '(' Exp ')' FieldAccesses
        { foldl (\x (y, _) -> Project y x NoInfo (srclocOf x))
                (Parens $2 (srcspan $1 ($3:map snd $>)))
@@ -638,8 +658,6 @@ Atom : PrimLit        { Literal (fst $1) (snd $1) }
          QualParens (QualName qs name, loc) $2 (srcspan $1 $>) }
 
      -- Operator sections.
-     | '(' '!' ')'
-        { Var (qualName "!") NoInfo (srcspan $2 $>) }
      | '(' '-' ')'
         { OpSection (qualName (nameFromString "-")) NoInfo (srcspan $1 $>) }
      | '(' Exp2 '-' ')'
@@ -659,11 +677,8 @@ Atom : PrimLit        { Literal (fst $1) (snd $1) }
        { IndexSection $4 NoInfo (srcspan $1 $>) }
 
 
-PrimLit :: { (PrimValue, SrcLoc) }
-        : true   { (BoolValue True, $1) }
-        | false  { (BoolValue False, $1) }
-
-        | i8lit   { let L loc (I8LIT num)  = $1 in (SignedValue $ Int8Value num, loc) }
+NumLit :: { (PrimValue, SrcLoc) }
+        : i8lit   { let L loc (I8LIT num)  = $1 in (SignedValue $ Int8Value num, loc) }
         | i16lit  { let L loc (I16LIT num) = $1 in (SignedValue $ Int16Value num, loc) }
         | i32lit  { let L loc (I32LIT num) = $1 in (SignedValue $ Int32Value num, loc) }
         | i64lit  { let L loc (I64LIT num) = $1 in (SignedValue $ Int64Value num, loc) }
@@ -673,8 +688,15 @@ PrimLit :: { (PrimValue, SrcLoc) }
         | u32lit { let L loc (U32LIT num) = $1 in (UnsignedValue $ Int32Value $ fromIntegral num, loc) }
         | u64lit { let L loc (U64LIT num) = $1 in (UnsignedValue $ Int64Value $ fromIntegral num, loc) }
 
+        | f16lit { let L loc (F16LIT num) = $1 in (FloatValue $ Float16Value num, loc) }
         | f32lit { let L loc (F32LIT num) = $1 in (FloatValue $ Float32Value num, loc) }
         | f64lit { let L loc (F64LIT num) = $1 in (FloatValue $ Float64Value num, loc) }
+
+
+PrimLit :: { (PrimValue, SrcLoc) }
+        : true   { (BoolValue True, $1) }
+        | false  { (BoolValue False, $1) }
+        | NumLit { $1 }
 
 Exps1 :: { (UncheckedExp, [UncheckedExp]) }
        : Exps1_ { case reverse (snd $1 : fst $1) of
@@ -727,7 +749,9 @@ LetExp :: { UncheckedExp }
 LetBody :: { UncheckedExp }
     : in Exp %prec letprec { $2 }
     | LetExp %prec letprec { $1 }
-    | error {% throwError "Unexpected end of file - missing \"in\"?" }
+    | def {% parseErrorAt $1 (Just "Unexpected \"def\" - missing \"in\"?") }
+    | type {% parseErrorAt $1 (Just "Unexpected \"type\" - missing \"in\"?") }
+    | module {% parseErrorAt $1 (Just "Unexpected \"module\" - missing \"in\"?") }
 
 MatchExp :: { UncheckedExp }
           : match Exp Cases
@@ -743,11 +767,12 @@ Case :: { CaseBase NoInfo Name }
         { let loc = srcspan $1 $> in CasePat $2 $> loc }
 
 CPat :: { PatBase NoInfo Name }
-          : CInnerPat ':' TypeExpDecl { PatAscription $1 $3 (srcspan $1 $>) }
+          : '#[' AttrInfo ']' CPat    { PatAttr $2 $4 (srcspan $1 $>) }
+          | CInnerPat ':' TypeExpDecl { PatAscription $1 $3 (srcspan $1 $>) }
           | CInnerPat                 { $1 }
-          | Constr ConstrFields           { let (n, loc) = $1;
-                                                loc' = srcspan loc $>
-                                            in PatConstr n NoInfo $2 loc'}
+          | Constr ConstrFields       { let (n, loc) = $1;
+                                            loc' = srcspan loc $>
+                                        in PatConstr n NoInfo $2 loc'}
 
 CPats1 :: { [PatBase NoInfo Name] }
            : CPat               { [$1] }
@@ -758,9 +783,9 @@ CInnerPat :: { PatBase NoInfo Name }
                | '(' BindingBinOp ')'               { Id $2 NoInfo (srcspan $1 $>) }
                | '_'                                { Wildcard NoInfo $1 }
                | '(' ')'                            { TuplePat [] (srcspan $1 $>) }
-               | '(' CPat ')'                   { PatParens $2 (srcspan $1 $>) }
-               | '(' CPat ',' CPats1 ')'    { TuplePat ($2:$4) (srcspan $1 $>) }
-               | '{' CFieldPats '}'             { RecordPat $2 (srcspan $1 $>) }
+               | '(' CPat ')'                       { PatParens $2 (srcspan $1 $>) }
+               | '(' CPat ',' CPats1 ')'            { TuplePat ($2:$4) (srcspan $1 $>) }
+               | '{' CFieldPats '}'                 { RecordPat $2 (srcspan $1 $>) }
                | CaseLiteral                        { PatLit (fst $1) NoInfo (snd $1) }
                | Constr                             { let (n, loc) = $1
                                                       in PatConstr n NoInfo [] loc }
@@ -786,11 +811,14 @@ CFieldPats1 :: { [(Name, PatBase NoInfo Name)] }
                  | CFieldPat                    { [$1] }
 
 CaseLiteral :: { (PatLit, SrcLoc) }
-             : PrimLit  { (PatLitPrim (fst $1), snd $1) }
-             | charlit  { let L loc (CHARLIT x) = $1
+             : charlit  { let L loc (CHARLIT x) = $1
                           in (PatLitInt (toInteger (ord x)), loc) }
+             | PrimLit  { (PatLitPrim (fst $1), snd $1) }
              | intlit   { let L loc (INTLIT x) = $1 in (PatLitInt x, loc) }
              | floatlit { let L loc (FLOATLIT x) = $1 in (PatLitFloat x, loc) }
+             | '-' NumLit  { (PatLitPrim (primNegate (fst $2)), snd $2) }
+             | '-' intlit   { let L loc (INTLIT x) = $2 in (PatLitInt (negate x), loc) }
+             | '-' floatlit { let L loc (FLOATLIT x) = $2 in (PatLitFloat (negate x), loc) }
 
 LoopForm :: { LoopFormBase NoInfo Name }
 LoopForm : for VarId '<' Exp
@@ -839,20 +867,21 @@ FieldId :: { (Name, SrcLoc) }
          | intlit { let L loc (INTLIT n) = $1 in (nameFromString (show n), loc) }
 
 Pat :: { PatBase NoInfo Name }
-Pat : InnerPat ':' TypeExpDecl { PatAscription $1 $3 (srcspan $1 $>) }
-        | InnerPat                 { $1 }
+     : '#[' AttrInfo ']' Pat  { PatAttr $2 $4 (srcspan $1 $>) }
+     | InnerPat ':' TypeExpDecl { PatAscription $1 $3 (srcspan $1 $>) }
+     | InnerPat                 { $1 }
 
 Pats1 :: { [PatBase NoInfo Name] }
-           : Pat               { [$1] }
-           | Pat ',' Pats1 { $1 : $3 }
+       : Pat                    { [$1] }
+       | Pat ',' Pats1          { $1 : $3 }
 
 InnerPat :: { PatBase NoInfo Name }
 InnerPat : id                               { let L loc (ID name) = $1 in Id name NoInfo loc }
-             | '(' BindingBinOp ')'             { Id $2 NoInfo (srcspan $1 $>) }
-             | '_'                              { Wildcard NoInfo $1 }
-             | '(' ')'                          { TuplePat [] (srcspan $1 $>) }
+             | '(' BindingBinOp ')'         { Id $2 NoInfo (srcspan $1 $>) }
+             | '_'                          { Wildcard NoInfo $1 }
+             | '(' ')'                      { TuplePat [] (srcspan $1 $>) }
              | '(' Pat ')'                  { PatParens $2 (srcspan $1 $>) }
-             | '(' Pat ',' Pats1 ')'    { TuplePat ($2:$4) (srcspan $1 $>) }
+             | '(' Pat ',' Pats1 ')'        { TuplePat ($2:$4) (srcspan $1 $>) }
              | '{' FieldPats '}'            { RecordPat $2 (srcspan $1 $>) }
 
 FieldPat :: { (Name, PatBase NoInfo Name) }
@@ -875,12 +904,16 @@ FieldPats1 :: { [(Name, PatBase NoInfo Name)] }
 maybeAscription(p) : ':' p { Just $2 }
                    |       { Nothing }
 
-AttrInfo :: { AttrInfo }
-         : id { let L _ (ID s) = $1 in AttrAtom s }
-         | id '('       ')' { let L _ (ID s) = $1 in AttrComp s [] }
-         | id '(' Attrs ')' { let L _ (ID s) = $1 in AttrComp s $3 }
+AttrAtom :: { (AttrAtom Name, SrcLoc) }
+          : id     { let L loc (ID s) =     $1 in (AtomName s, loc) }
+          | intlit { let L loc (INTLIT x) = $1 in (AtomInt x, loc) }
 
-Attrs :: { [AttrInfo] }
+AttrInfo :: { AttrInfo Name }
+         : AttrAtom         { uncurry AttrAtom $1 }
+         | id '('       ')' { let L _ (ID s) = $1 in AttrComp s [] (srcspan $1 $>) }
+         | id '(' Attrs ')' { let L _ (ID s) = $1 in AttrComp s $3 (srcspan $1 $>) }
+
+Attrs :: { [AttrInfo Name] }
        : AttrInfo           { [$1] }
        | AttrInfo ',' Attrs { $1 : $3 }
 
@@ -909,7 +942,7 @@ FloatValue :: { Value }
 
 StringValue :: { Value }
 StringValue : stringlit  { let L pos (STRINGLIT s) = $1 in
-                           ArrayValue (arrayFromList $ map (PrimValue . UnsignedValue . Int8Value . fromIntegral) $ encode s) $ Scalar $ Prim $ Signed Int32 }
+                           ArrayValue (arrayFromList $ map (PrimValue . UnsignedValue . Int8Value . fromIntegral) $ BS.unpack $ T.encodeUtf8 s) $ Scalar $ Prim $ Signed Int32 }
 
 BoolValue :: { Value }
 BoolValue : true           { PrimValue $ BoolValue True }
@@ -930,10 +963,13 @@ UnsignedLit :: { (IntValue, SrcLoc) }
             | u64lit { let L pos (U64LIT num) = $1 in (Int64Value $ fromIntegral num, pos) }
 
 FloatLit :: { (FloatValue, SrcLoc) }
-         : f32lit { let L loc (F32LIT num) = $1 in (Float32Value num, loc) }
+         : f16lit { let L loc (F16LIT num) = $1 in (Float16Value num, loc) }
+         | f32lit { let L loc (F32LIT num) = $1 in (Float32Value num, loc) }
          | f64lit { let L loc (F64LIT num) = $1 in (Float64Value num, loc) }
          | QualName {% let (qn, loc) = $1 in
                        case qn of
+                         QualName ["f16"] "inf" -> return (Float16Value (1/0), loc)
+                         QualName ["f16"] "nan" -> return (Float16Value (0/0), loc)
                          QualName ["f32"] "inf" -> return (Float32Value (1/0), loc)
                          QualName ["f32"] "nan" -> return (Float32Value (0/0), loc)
                          QualName ["f64"] "inf" -> return (Float64Value (1/0), loc)
@@ -988,14 +1024,14 @@ addDocSpec doc (TypeSpec l name ps _ loc) = TypeSpec l name ps (Just doc) loc
 addDocSpec doc (ModSpec name se _ loc) = ModSpec name se (Just doc) loc
 addDocSpec _ spec = spec
 
-addAttr :: AttrInfo -> UncheckedDec -> UncheckedDec
+addAttr :: AttrInfo Name -> UncheckedDec -> UncheckedDec
 addAttr attr (ValDec val) =
   ValDec $ val { valBindAttrs = attr : valBindAttrs val }
 addAttr attr dec =
   dec
 
 -- We will extend this function once we actually start tracking these.
-addAttrSpec :: AttrInfo -> UncheckedSpec -> UncheckedSpec
+addAttrSpec :: AttrInfo Name -> UncheckedSpec -> UncheckedSpec
 addAttrSpec _attr dec = dec
 
 reverseNonempty :: (a, [a]) -> (a, [a])
@@ -1121,8 +1157,15 @@ intNegate (Int32Value v) = Int32Value (-v)
 intNegate (Int64Value v) = Int64Value (-v)
 
 floatNegate :: FloatValue -> FloatValue
+floatNegate (Float16Value v) = Float16Value (-v)
 floatNegate (Float32Value v) = Float32Value (-v)
 floatNegate (Float64Value v) = Float64Value (-v)
+
+primNegate :: PrimValue -> PrimValue
+primNegate (FloatValue v) = FloatValue $ floatNegate v
+primNegate (SignedValue v) = SignedValue $ intNegate v
+primNegate (UnsignedValue v) = UnsignedValue $ intNegate v
+primNegate (BoolValue v) = BoolValue $ not v
 
 readLine :: ParserMonad (Maybe T.Text)
 readLine = lift $ lift $ lift readLineFromMonad

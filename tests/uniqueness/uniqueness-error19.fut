@@ -1,8 +1,8 @@
 -- Test that you cannot consume free variables in a loop.
 -- ==
--- error: not unique
+-- error: not consumable
 
-let main =
+def main =
   let n = 10
   let a = iota(n)
   let b = iota(n)

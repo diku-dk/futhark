@@ -107,16 +107,13 @@ computeHistoUsage space op = do
     let subhistos_shape =
           Shape (map snd segment_dims ++ [tvSize num_subhistos])
             <> stripDims num_segments (arrayShape dest_t)
-        subhistos_membind =
-          ArrayIn subhistos_mem $
-            IxFun.iota $
-              map pe64 $ shapeDims subhistos_shape
     subhistos <-
       sArray
         (baseString dest ++ "_subhistos")
         (elemType dest_t)
         subhistos_shape
-        subhistos_membind
+        subhistos_mem
+        $ IxFun.iota $ map pe64 $ shapeDims subhistos_shape
 
     return $
       SubhistosInfo subhistos $ do
@@ -436,7 +433,7 @@ histKernelGlobalPass map_pes num_groups group_size space slugs kbody histograms 
             forM_ (zip map_pes map_res) $ \(pe, res) ->
               copyDWIMFix
                 (patElemName pe)
-                (map (Imp.vi64 . fst) $ unSegSpace space)
+                (map (Imp.le64 . fst) $ unSegSpace space)
                 (kernelResultSubExp res)
                 []
 
@@ -463,7 +460,7 @@ histKernelGlobalPass map_pes num_groups group_size space slugs kbody histograms 
 
                   sWhen bucket_in_bounds $ do
                     let bucket_is =
-                          map Imp.vi64 (init space_is)
+                          map Imp.le64 (init space_is)
                             ++ [sExt64 subhisto_ind, bucket']
                     dLParams $ lambdaParams lam
                     sLoopNest shape $ \is -> do
@@ -705,7 +702,7 @@ histKernelLocalPass
         sComment "initialize histograms in local memory" $
           onAllHistograms $ \dest_local dest_global op ne local_subhisto_i global_subhisto_i local_bucket_is global_bucket_is ->
             sComment "First subhistogram is initialised from global memory; others with neutral element." $ do
-              let global_is = map Imp.vi64 segment_is ++ [0] ++ global_bucket_is
+              let global_is = map Imp.le64 segment_is ++ [0] ++ global_bucket_is
                   local_is = sExt64 local_subhisto_i : local_bucket_is
               sIf
                 (global_subhisto_i .==. 0)
@@ -735,7 +732,7 @@ histKernelLocalPass
                 forM_ (zip map_pes map_res) $ \(pe, se) ->
                   copyDWIMFix
                     (patElemName pe)
-                    (map Imp.vi64 space_is)
+                    (map Imp.le64 space_is)
                     se
                     []
 
@@ -815,7 +812,7 @@ histKernelLocalPass
 
                 sComment "Put final bucket value in global memory." $ do
                   let global_is =
-                        map Imp.vi64 segment_is
+                        map Imp.le64 segment_is
                           ++ [sExt64 group_id `rem` unCount groups_per_segment]
                           ++ global_bucket_is
                   forM_ (zip xparams global_dests) $ \(xp, global_dest) ->
@@ -1142,7 +1139,7 @@ compileSegHist (Pat pes) num_groups group_size space ops kbody = do
           red_cont $
             flip map subhistos $ \subhisto ->
               ( Var subhisto,
-                map Imp.vi64 $
+                map Imp.le64 $
                   map fst segment_dims ++ [subhistogram_id, bucket_id] ++ vector_ids
               )
 

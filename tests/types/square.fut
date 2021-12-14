@@ -5,8 +5,8 @@
 
 type square [n] 't = [n][n]t
 
-let ext_square n : square [] i64 = tabulate_2d (n+1) (n+1) (\i j -> i + j)
+def ext_square n : square [] i64 = tabulate_2d (n+1) (n+1) (\i j -> i + j)
 
-let tr_square [n] 't (s: square [n] t) : square [n] t = transpose s
+def tr_square [n] 't (s: square [n] t) : square [n] t = transpose s
 
-let main n = tr_square (ext_square n)
+def main n = tr_square (ext_square n)

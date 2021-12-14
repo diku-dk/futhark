@@ -5,5 +5,5 @@
 -- input { 0i64 empty([0]i64) } output { 0i64 }
 -- structure { /DoLoop/BinOp 2 }
 
-let main [n] (a: i64) (xs: [n]i64) =
+def main [n] (a: i64) (xs: [n]i64) =
   loop acc = 0 for x in xs do acc + x*(a/n)

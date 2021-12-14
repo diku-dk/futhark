@@ -28,6 +28,7 @@ module Language.Futhark.Prop
     -- * Queries on expressions
     typeOf,
     valBindTypeScheme,
+    valBindBound,
     funType,
 
     -- * Queries on patterns and params
@@ -65,7 +66,6 @@ module Language.Futhark.Prop
     addAliases,
     setUniqueness,
     noSizes,
-    anySizes,
     traverseDims,
     DimPos (..),
     mustBeExplicit,
@@ -132,7 +132,7 @@ arrayShape :: TypeBase dim as -> ShapeDecl dim
 arrayShape (Array _ _ _ ds) = ds
 arrayShape _ = mempty
 
--- | Return any shape declarations in the type, with duplicates
+-- | Return any free shape declarations in the type, with duplicates
 -- removed.
 nestedDims :: TypeBase (DimDecl VName) as -> [DimDecl VName]
 nestedDims t =
@@ -145,8 +145,10 @@ nestedDims t =
       mempty
     Scalar (Sum cs) ->
       nubOrd $ foldMap (foldMap nestedDims) cs
-    Scalar (Arrow _ v t1 t2) ->
-      filter (notV v) $ nestedDims t1 <> nestedDims t2
+    Scalar (Arrow _ v t1 (RetType dims t2)) ->
+      filter (notV v) $ filter (`notElem` dims') $ nestedDims t1 <> nestedDims t2
+      where
+        dims' = map (NamedDim . qualName) dims
     Scalar (TypeVar _ _ _ targs) ->
       concatMap typeArgDims targs
   where
@@ -159,10 +161,6 @@ nestedDims t =
 -- | Change the shape of a type to be just the rank.
 noSizes :: TypeBase (DimDecl vn) as -> TypeBase () as
 noSizes = first $ const ()
-
--- | Change all size annotations to be 'AnyDim'.
-anySizes :: TypeBase (DimDecl vn) as -> TypeBase (DimDecl vn) as
-anySizes = first $ const $ AnyDim Nothing
 
 -- | Where does this dimension occur?
 data DimPos
@@ -203,12 +201,14 @@ traverseDims f = go mempty PosImmediate
       Scalar . Sum <$> traverse (traverse (go bound b)) cs
     go _ _ (Scalar (Prim t)) =
       pure $ Scalar $ Prim t
-    go bound _ (Scalar (Arrow als p t1 t2)) =
-      Scalar <$> (Arrow als p <$> go bound' PosParam t1 <*> go bound' PosReturn t2)
+    go bound _ (Scalar (Arrow als p t1 (RetType dims t2))) =
+      Scalar <$> (Arrow als p <$> go bound' PosParam t1 <*> (RetType dims <$> go bound' PosReturn t2))
       where
-        bound' = case p of
-          Named p' -> S.insert p' bound
-          Unnamed -> bound
+        bound' =
+          S.fromList dims
+            <> case p of
+              Named p' -> S.insert p' bound
+              Unnamed -> bound
 
     onTypeArg bound b (TypeArgDim d loc) =
       TypeArgDim <$> f bound b d <*> pure loc
@@ -272,12 +272,12 @@ aliases = bifoldMap (const mempty) id
 diet :: TypeBase shape as -> Diet
 diet (Scalar (Record ets)) = RecordDiet $ fmap diet ets
 diet (Scalar (Prim _)) = Observe
-diet (Scalar (Arrow _ _ t1 t2)) = FuncDiet (diet t1) (diet t2)
+diet (Scalar (Arrow _ _ t1 (RetType _ t2))) = FuncDiet (diet t1) (diet t2)
 diet (Array _ Unique _ _) = Consume
 diet (Array _ Nonunique _ _) = Observe
 diet (Scalar (TypeVar _ Unique _ _)) = Consume
 diet (Scalar (TypeVar _ Nonunique _ _)) = Observe
-diet (Scalar Sum {}) = Observe
+diet (Scalar (Sum cs)) = SumDiet $ M.map (map diet) cs
 
 -- | Convert any type to one that has rank information, no alias
 -- information, and no embedded names.
@@ -348,8 +348,8 @@ stripArray _ t = t
 
 -- | Create a record type corresponding to a tuple with the given
 -- element types.
-tupleRecord :: [TypeBase dim as] -> TypeBase dim as
-tupleRecord = Scalar . Record . M.fromList . zip tupleFieldNames
+tupleRecord :: [TypeBase dim as] -> ScalarTypeBase dim as
+tupleRecord = Record . M.fromList . zip tupleFieldNames
 
 -- | Does this type corespond to a tuple?  If so, return the elements
 -- of that tuple.
@@ -423,8 +423,8 @@ combineTypeShapes (Scalar (Sum cs1)) (Scalar (Sum cs2))
         M.map
           (uncurry $ zipWith combineTypeShapes)
           (M.intersectionWith (,) cs1 cs2)
-combineTypeShapes (Scalar (Arrow als1 p1 a1 b1)) (Scalar (Arrow als2 _p2 a2 b2)) =
-  Scalar $ Arrow (als1 <> als2) p1 (combineTypeShapes a1 a2) (combineTypeShapes b1 b2)
+combineTypeShapes (Scalar (Arrow als1 p1 a1 (RetType dims1 b1))) (Scalar (Arrow als2 _p2 a2 (RetType _ b2))) =
+  Scalar $ Arrow (als1 <> als2) p1 (combineTypeShapes a1 a2) (RetType dims1 (combineTypeShapes b1 b2))
 combineTypeShapes (Scalar (TypeVar als1 u1 v targs1)) (Scalar (TypeVar als2 _ _ targs2)) =
   Scalar $ TypeVar (als1 <> als2) u1 v $ zipWith f targs1 targs2
   where
@@ -441,44 +441,59 @@ combineTypeShapes (Array als1 u1 et1 shape1) (Array als2 _u2 et2 _shape2) =
     u1
 combineTypeShapes _ new_tp = new_tp
 
--- | Match the dimensions of otherwise assumed-equal types.
+-- | Match the dimensions of otherwise assumed-equal types.  The
+-- combining function is also passed the names bound within the type
+-- (from named parameters or return types).
 matchDims ::
+  forall as m d1 d2.
   (Monoid as, Monad m) =>
-  (d1 -> d2 -> m d1) ->
+  ([VName] -> d1 -> d2 -> m d1) ->
   TypeBase d1 as ->
   TypeBase d2 as ->
   m (TypeBase d1 as)
-matchDims onDims t1 t2 =
-  case (t1, t2) of
-    (Array als1 u1 et1 shape1, Array als2 u2 et2 shape2) ->
-      flip setAliases (als1 <> als2)
-        <$> ( arrayOf
-                <$> matchDims onDims (Scalar et1) (Scalar et2)
-                <*> onShapes shape1 shape2
-                <*> pure (min u1 u2)
-            )
-    (Scalar (Record f1), Scalar (Record f2)) ->
-      Scalar . Record
-        <$> traverse (uncurry (matchDims onDims)) (M.intersectionWith (,) f1 f2)
-    (Scalar (Sum cs1), Scalar (Sum cs2)) ->
-      Scalar . Sum
-        <$> traverse
-          (traverse (uncurry (matchDims onDims)))
-          (M.intersectionWith zip cs1 cs2)
-    (Scalar (Arrow als1 p1 a1 b1), Scalar (Arrow als2 _p2 a2 b2)) ->
-      Scalar
-        <$> (Arrow (als1 <> als2) p1 <$> matchDims onDims a1 a2 <*> matchDims onDims b1 b2)
-    ( Scalar (TypeVar als1 u v targs1),
-      Scalar (TypeVar als2 _ _ targs2)
-      ) ->
-        Scalar . TypeVar (als1 <> als2) u v <$> zipWithM matchTypeArg targs1 targs2
-    _ -> return t1
+matchDims onDims = matchDims' mempty
   where
-    matchTypeArg ta@TypeArgType {} _ = return ta
-    matchTypeArg a _ = return a
+    matchDims' ::
+      forall as'. Monoid as' => [VName] -> TypeBase d1 as' -> TypeBase d2 as' -> m (TypeBase d1 as')
+    matchDims' bound t1 t2 =
+      case (t1, t2) of
+        (Array als1 u1 et1 shape1, Array als2 u2 et2 shape2) ->
+          flip setAliases (als1 <> als2)
+            <$> ( arrayOf
+                    <$> matchDims' bound (Scalar et1) (Scalar et2)
+                    <*> onShapes bound shape1 shape2
+                    <*> pure (min u1 u2)
+                )
+        (Scalar (Record f1), Scalar (Record f2)) ->
+          Scalar . Record
+            <$> traverse (uncurry (matchDims' bound)) (M.intersectionWith (,) f1 f2)
+        (Scalar (Sum cs1), Scalar (Sum cs2)) ->
+          Scalar . Sum
+            <$> traverse
+              (traverse (uncurry (matchDims' bound)))
+              (M.intersectionWith zip cs1 cs2)
+        ( Scalar (Arrow als1 p1 a1 (RetType dims1 b1)),
+          Scalar (Arrow als2 p2 a2 (RetType dims2 b2))
+          ) ->
+            let bound' = mapMaybe maybePName [p1, p2] <> dims1 <> dims2 <> bound
+             in Scalar
+                  <$> ( Arrow (als1 <> als2) p1 <$> matchDims' bound' a1 a2
+                          <*> (RetType dims1 <$> matchDims' bound' b1 b2)
+                      )
+        ( Scalar (TypeVar als1 u v targs1),
+          Scalar (TypeVar als2 _ _ targs2)
+          ) ->
+            Scalar . TypeVar (als1 <> als2) u v <$> zipWithM matchTypeArg targs1 targs2
+        _ -> return t1
 
-    onShapes shape1 shape2 =
-      ShapeDecl <$> zipWithM onDims (shapeDims shape1) (shapeDims shape2)
+    matchTypeArg ta@TypeArgType {} _ = pure ta
+    matchTypeArg a _ = pure a
+
+    maybePName (Named v) = Just v
+    maybePName Unnamed = Nothing
+
+    onShapes bound shape1 shape2 =
+      ShapeDecl <$> zipWithM (onDims bound) (shapeDims shape1) (shapeDims shape2)
 
 -- | Set the uniqueness attribute of a type.  If the type is a record
 -- or sum type, the uniqueness of its components will be modified.
@@ -513,6 +528,7 @@ intValueType Int32Value {} = Int32
 intValueType Int64Value {} = Int64
 
 floatValueType :: FloatValue -> FloatType
+floatValueType Float16Value {} = Float16
 floatValueType Float32Value {} = Float32
 floatValueType Float64Value {} = Float64
 
@@ -528,19 +544,6 @@ valueType :: Value -> ValueType
 valueType (PrimValue bv) = Scalar $ Prim $ primValueType bv
 valueType (ArrayValue _ t) = t
 
--- | The type is leaving a scope, so clean up any aliases that
--- reference the bound variables, and turn any dimensions that name
--- them into AnyDim instead.
-unscopeType :: S.Set VName -> PatType -> PatType
-unscopeType bound_here t = first onDim $ t `addAliases` S.map unbind
-  where
-    unbind (AliasBound v) | v `S.member` bound_here = AliasFree v
-    unbind a = a
-    onDim (NamedDim qn)
-      | qualLeaf qn `S.member` bound_here =
-        AnyDim $ Just $ qualLeaf qn
-    onDim d = d
-
 -- | The type of an Futhark term.  The aliasing will refer to itself, if
 -- the term is a non-tuple-typed variable.
 typeOf :: ExpBase Info VName -> PatType
@@ -549,7 +552,7 @@ typeOf (IntLit _ (Info t) _) = t
 typeOf (FloatLit _ (Info t) _) = t
 typeOf (Parens e _) = typeOf e
 typeOf (QualParens _ e _) = typeOf e
-typeOf (TupLit es _) = tupleRecord $ map typeOf es
+typeOf (TupLit es _) = Scalar $ tupleRecord $ map typeOf es
 typeOf (RecordLit fs _) =
   -- Reverse, because M.unions is biased to the left.
   Scalar $ Record $ M.unions $ reverse $ map record fs
@@ -575,14 +578,14 @@ typeOf (Update e _ _ _) = typeOf e `setAliases` mempty
 typeOf (RecordUpdate _ _ _ (Info t) _) = t
 typeOf (Assert _ e _ _) = typeOf e
 typeOf (Lambda params _ _ (Info (als, t)) _) =
-  unscopeType bound_here $ foldr (arrow . patternParam) t params `setAliases` als
+  let RetType [] t' = foldr (arrow . patternParam) t params
+   in t' `setAliases` als
   where
-    bound_here =
-      S.map identName (mconcat $ map patIdents params)
-        `S.difference` S.fromList (mapMaybe (named . patternParam) params)
-    arrow (px, tx) y = Scalar $ Arrow () px tx y
-    named (Named x, _) = Just x
-    named (Unnamed, _) = Nothing
+    arrow (Named v, x) (RetType dims y)
+      | v `S.member` typeDimNames y =
+        RetType [] $ Scalar $ Arrow () (Named v) x $ RetType (v : dims) y
+    arrow (pn, tx) y =
+      RetType [] $ Scalar $ Arrow () pn tx y
 typeOf (OpSection _ (Info t) _) =
   t
 typeOf (OpSectionLeft _ _ _ (_, Info (pn, pt2)) (Info ret, _) _) =
@@ -597,15 +600,17 @@ typeOf (AppExp _ (Info res)) = appResType res
 
 -- | @foldFunType ts ret@ creates a function type ('Arrow') that takes
 -- @ts@ as parameters and returns @ret@.
-foldFunType :: Monoid as => [TypeBase dim as] -> TypeBase dim as -> TypeBase dim as
-foldFunType ps ret = foldr arrow ret ps
+foldFunType :: Monoid as => [TypeBase dim as] -> RetTypeBase dim as -> TypeBase dim as
+foldFunType ps ret =
+  let RetType _ t = foldr arrow ret ps
+   in t
   where
-    arrow t1 t2 = Scalar $ Arrow mempty Unnamed t1 t2
+    arrow t1 t2 = RetType [] $ Scalar $ Arrow mempty Unnamed t1 t2
 
 -- | Extract the parameter types and return type from a type.
 -- If the type is not an arrow type, the list of parameter types is empty.
 unfoldFunType :: TypeBase dim as -> ([TypeBase dim as], TypeBase dim as)
-unfoldFunType (Scalar (Arrow _ _ t1 t2)) =
+unfoldFunType (Scalar (Arrow _ _ t1 (RetType _ t2))) =
   let (ps, r) = unfoldFunType t2
    in (t1 : ps, r)
 unfoldFunType t = ([], t)
@@ -615,14 +620,26 @@ unfoldFunType t = ([], t)
 valBindTypeScheme :: ValBindBase Info VName -> ([TypeParamBase VName], StructType)
 valBindTypeScheme vb =
   ( valBindTypeParams vb,
-    funType (valBindParams vb) (fst (unInfo (valBindRetType vb)))
+    funType (valBindParams vb) (unInfo (valBindRetType vb))
   )
 
+-- | The names that are brought into scope by this value binding (not
+-- including its own parameter names, but including any existential
+-- sizes).
+valBindBound :: ValBindBase Info VName -> [VName]
+valBindBound vb =
+  valBindName vb :
+  case valBindParams vb of
+    [] -> retDims (unInfo (valBindRetType vb))
+    _ -> []
+
 -- | The type of a function with the given parameters and return type.
-funType :: [PatBase Info VName] -> StructType -> StructType
-funType params ret = foldr (arrow . patternParam) ret params
+funType :: [PatBase Info VName] -> StructRetType -> StructType
+funType params ret =
+  let RetType _ t = foldr (arrow . patternParam) ret params
+   in t
   where
-    arrow (xp, xt) yt = Scalar $ Arrow () xp xt yt
+    arrow (xp, xt) yt = RetType [] $ Scalar $ Arrow () xp xt yt
 
 -- | The type names mentioned in a type.
 typeVars :: Monoid as => TypeBase dim as -> S.Set VName
@@ -631,7 +648,7 @@ typeVars t =
     Scalar Prim {} -> mempty
     Scalar (TypeVar _ _ tn targs) ->
       mconcat $ typeVarFree tn : map typeArgFree targs
-    Scalar (Arrow _ _ t1 t2) -> typeVars t1 <> typeVars t2
+    Scalar (Arrow _ _ t1 (RetType _ t2)) -> typeVars t1 <> typeVars t2
     Scalar (Record fields) -> foldMap typeVars fields
     Scalar (Sum cs) -> mconcat $ (foldMap . fmap) typeVars cs
     Array _ _ rt _ -> typeVars $ Scalar rt
@@ -662,12 +679,12 @@ patternDimNames (PatAscription p (TypeDecl _ (Info t)) _) =
   patternDimNames p <> typeDimNames t
 patternDimNames (PatLit _ (Info tp) _) = typeDimNames tp
 patternDimNames (PatConstr _ _ ps _) = foldMap patternDimNames ps
+patternDimNames (PatAttr _ p _) = patternDimNames p
 
--- | Extract all the shape names that occur in a given type.
+-- | Extract all the shape names that occur free in a given type.
 typeDimNames :: TypeBase (DimDecl VName) als -> S.Set VName
 typeDimNames = foldMap dimName . nestedDims
   where
-    dimName :: DimDecl VName -> S.Set VName
     dimName (NamedDim qn) = S.singleton $ qualLeaf qn
     dimName _ = mempty
 
@@ -683,6 +700,7 @@ patternOrderZero pat = case pat of
   PatAscription p _ _ -> patternOrderZero p
   PatLit _ (Info t) _ -> orderZero t
   PatConstr _ _ ps _ -> all patternOrderZero ps
+  PatAttr _ p _ -> patternOrderZero p
 
 -- | The set of identifiers bound in a pattern.
 patIdents :: (Functor f, Ord vn) => PatBase f vn -> S.Set (IdentBase f vn)
@@ -694,6 +712,7 @@ patIdents Wildcard {} = mempty
 patIdents (PatAscription p _ _) = patIdents p
 patIdents PatLit {} = mempty
 patIdents (PatConstr _ _ ps _) = mconcat $ map patIdents ps
+patIdents (PatAttr _ p _) = patIdents p
 
 -- | The set of names bound in a pattern.
 patNames :: (Functor f, Ord vn) => PatBase f vn -> S.Set vn
@@ -705,6 +724,7 @@ patNames Wildcard {} = mempty
 patNames (PatAscription p _ _) = patNames p
 patNames PatLit {} = mempty
 patNames (PatConstr _ _ ps _) = mconcat $ map patNames ps
+patNames (PatAttr _ p _) = patNames p
 
 -- | A mapping from names bound in a map to their identifier.
 patternMap :: (Functor f) => PatBase f VName -> M.Map VName (IdentBase f VName)
@@ -718,11 +738,12 @@ patternType :: PatBase Info VName -> PatType
 patternType (Wildcard (Info t) _) = t
 patternType (PatParens p _) = patternType p
 patternType (Id _ (Info t) _) = t
-patternType (TuplePat pats _) = tupleRecord $ map patternType pats
+patternType (TuplePat pats _) = Scalar $ tupleRecord $ map patternType pats
 patternType (RecordPat fs _) = Scalar $ Record $ patternType <$> M.fromList fs
 patternType (PatAscription p _ _) = patternType p
 patternType (PatLit _ (Info t) _) = t
 patternType (PatConstr _ (Info t) _ _) = t
+patternType (PatAttr _ p _) = patternType p
 
 -- | The type matched by the pattern, including shape declarations if present.
 patternStructType :: PatBase Info VName -> StructType
@@ -732,6 +753,8 @@ patternStructType = toStruct . patternType
 -- to a named parameter of some type?
 patternParam :: PatBase Info VName -> (PName, StructType)
 patternParam (PatParens p _) =
+  patternParam p
+patternParam (PatAttr _ p _) =
   patternParam p
 patternParam (PatAscription (Id v _ _) td _) =
   (Named v, unInfo $ expandedType td)
@@ -761,7 +784,7 @@ namesToPrimTypes =
 data Intrinsic
   = IntrinsicMonoFun [PrimType] PrimType
   | IntrinsicOverloadedFun [PrimType] [Maybe PrimType] (Maybe PrimType)
-  | IntrinsicPolyFun [TypeParamBase VName] [StructType] StructType
+  | IntrinsicPolyFun [TypeParamBase VName] [StructType] (RetTypeBase (DimDecl VName) ())
   | IntrinsicType Liftedness [TypeParamBase VName] StructType
   | IntrinsicEquality -- Special cased.
 
@@ -816,7 +839,7 @@ intrinsics =
                  IntrinsicPolyFun
                    [tp_a, sp_n, sp_m]
                    [Array () Nonunique t_a (shape [n, m])]
-                   $ Array () Nonunique t_a (ShapeDecl [AnyDim Nothing])
+                   $ RetType [k] $ Array () Nonunique t_a $ shape [k]
                ),
                ( "unflatten",
                  IntrinsicPolyFun
@@ -825,25 +848,26 @@ intrinsics =
                      Scalar $ Prim $ Signed Int64,
                      Array () Nonunique t_a (shape [n])
                    ]
-                   $ Array () Nonunique t_a $ ShapeDecl [AnyDim Nothing, AnyDim Nothing]
+                   $ RetType [k, m] $
+                     Array () Nonunique t_a $ shape [k, m]
                ),
                ( "concat",
                  IntrinsicPolyFun
                    [tp_a, sp_n, sp_m]
                    [arr_a $ shape [n], arr_a $ shape [m]]
-                   $ uarr_a $ ShapeDecl [AnyDim Nothing]
+                   $ RetType [k] $ uarr_a $ shape [k]
                ),
                ( "rotate",
                  IntrinsicPolyFun
                    [tp_a, sp_n]
                    [Scalar $ Prim $ Signed Int64, arr_a $ shape [n]]
-                   $ arr_a $ shape [n]
+                   $ RetType [] $ arr_a $ shape [n]
                ),
                ( "transpose",
                  IntrinsicPolyFun
                    [tp_a, sp_n, sp_m]
                    [arr_a $ shape [n, m]]
-                   $ arr_a $ shape [m, n]
+                   $ RetType [] $ arr_a $ shape [m, n]
                ),
                ( "scatter",
                  IntrinsicPolyFun
@@ -852,7 +876,7 @@ intrinsics =
                      Array () Nonunique (Prim $ Signed Int64) (shape [l]),
                      Array () Nonunique t_a (shape [l])
                    ]
-                   $ Array () Unique t_a (shape [n])
+                   $ RetType [] $ Array () Unique t_a (shape [n])
                ),
                ( "scatter_2d",
                  IntrinsicPolyFun
@@ -861,7 +885,7 @@ intrinsics =
                      Array () Nonunique (tupInt64 2) (shape [l]),
                      Array () Nonunique t_a (shape [l])
                    ]
-                   $ uarr_a $ shape [n, m]
+                   $ RetType [] $ uarr_a $ shape [n, m]
                ),
                ( "scatter_3d",
                  IntrinsicPolyFun
@@ -870,21 +894,20 @@ intrinsics =
                      Array () Nonunique (tupInt64 3) (shape [l]),
                      Array () Nonunique t_a (shape [l])
                    ]
-                   (uarr_a $ shape [n, m, k])
+                   $ RetType [] $ uarr_a $ shape [n, m, k]
                ),
                ( "zip",
                  IntrinsicPolyFun
                    [tp_a, tp_b, sp_n]
                    [arr_a (shape [n]), arr_b (shape [n])]
-                   $ tuple_uarr (Scalar t_a) (Scalar t_b) $ shape [n]
+                   $ RetType [] $ tuple_uarr (Scalar t_a) (Scalar t_b) $ shape [n]
                ),
                ( "unzip",
                  IntrinsicPolyFun
                    [tp_a, tp_b, sp_n]
                    [tuple_arr (Scalar t_a) (Scalar t_b) $ shape [n]]
-                   ( Scalar . Record . M.fromList $
-                       zip tupleFieldNames [arr_a $ shape [n], arr_b $ shape [n]]
-                   )
+                   $ RetType [] . Scalar . Record . M.fromList $
+                     zip tupleFieldNames [arr_a $ shape [n], arr_b $ shape [n]]
                ),
                ( "hist",
                  IntrinsicPolyFun
@@ -896,7 +919,7 @@ intrinsics =
                      Array () Nonunique (Prim $ Signed Int64) (shape [m]),
                      arr_a (shape [m])
                    ]
-                   (uarr_a $ shape [n])
+                   $ RetType [] $ uarr_a $ shape [n]
                ),
                ( "map",
                  IntrinsicPolyFun
@@ -904,7 +927,7 @@ intrinsics =
                    [ Scalar t_a `arr` Scalar t_b,
                      arr_a $ shape [n]
                    ]
-                   $ uarr_b $ shape [n]
+                   $ RetType [] $ uarr_b $ shape [n]
                ),
                ( "reduce",
                  IntrinsicPolyFun
@@ -913,7 +936,7 @@ intrinsics =
                      Scalar t_a,
                      arr_a $ shape [n]
                    ]
-                   $ Scalar t_a
+                   $ RetType [] $ Scalar t_a
                ),
                ( "reduce_comm",
                  IntrinsicPolyFun
@@ -922,7 +945,7 @@ intrinsics =
                      Scalar t_a,
                      arr_a $ shape [n]
                    ]
-                   $ Scalar t_a
+                   $ RetType [] $ Scalar t_a
                ),
                ( "scan",
                  IntrinsicPolyFun
@@ -931,7 +954,7 @@ intrinsics =
                      Scalar t_a,
                      arr_a $ shape [n]
                    ]
-                   $ uarr_a $ shape [n]
+                   $ RetType [] $ uarr_a $ shape [n]
                ),
                ( "partition",
                  IntrinsicPolyFun
@@ -940,10 +963,11 @@ intrinsics =
                      Scalar t_a `arr` Scalar (Prim $ Signed Int64),
                      arr_a $ shape [n]
                    ]
-                   ( tupleRecord
-                       [ uarr_a $ ShapeDecl [AnyDim Nothing],
-                         Array () Unique (Prim $ Signed Int64) (shape [n])
-                       ]
+                   ( RetType [m] . Scalar $
+                       tupleRecord
+                         [ uarr_a $ shape [k],
+                           Array () Unique (Prim $ Signed Int64) (shape [n])
+                         ]
                    )
                ),
                ( "map_stream",
@@ -952,7 +976,7 @@ intrinsics =
                    [ Scalar (Prim $ Signed Int64) `karr` (arr_ka `arr` arr_kb),
                      arr_a $ shape [n]
                    ]
-                   $ uarr_b $ shape [n]
+                   $ RetType [] $ uarr_b $ shape [n]
                ),
                ( "map_stream_per",
                  IntrinsicPolyFun
@@ -960,7 +984,7 @@ intrinsics =
                    [ Scalar (Prim $ Signed Int64) `karr` (arr_ka `arr` arr_kb),
                      arr_a $ shape [n]
                    ]
-                   (uarr_b $ shape [n])
+                   $ RetType [] $ uarr_b $ shape [n]
                ),
                ( "reduce_stream",
                  IntrinsicPolyFun
@@ -969,7 +993,7 @@ intrinsics =
                      Scalar (Prim $ Signed Int64) `karr` (arr_ka `arr` Scalar t_b),
                      arr_a $ shape [n]
                    ]
-                   $ Scalar t_b
+                   $ RetType [] $ Scalar t_b
                ),
                ( "reduce_stream_per",
                  IntrinsicPolyFun
@@ -978,7 +1002,7 @@ intrinsics =
                      Scalar (Prim $ Signed Int64) `karr` (arr_ka `arr` Scalar t_b),
                      arr_a $ shape [n]
                    ]
-                   $ Scalar t_b
+                   $ RetType [] $ Scalar t_b
                ),
                ( "acc_write",
                  IntrinsicPolyFun
@@ -987,7 +1011,7 @@ intrinsics =
                      Scalar (Prim $ Signed Int64),
                      Scalar t_a
                    ]
-                   $ Scalar $ accType arr_ka
+                   $ RetType [] $ Scalar $ accType arr_ka
                ),
                ( "scatter_stream",
                  IntrinsicPolyFun
@@ -999,7 +1023,7 @@ intrinsics =
                              ),
                      arr_b $ shape [n]
                    ]
-                   uarr_ka
+                   $ RetType [] uarr_ka
                ),
                ( "hist_stream",
                  IntrinsicPolyFun
@@ -1013,7 +1037,7 @@ intrinsics =
                              ),
                      arr_b $ shape [n]
                    ]
-                   $ uarr_a $ shape [k]
+                   $ RetType [] $ uarr_a $ shape [k]
                )
              ]
           ++
@@ -1028,7 +1052,7 @@ intrinsics =
                   Scalar (Prim $ Signed Int64),
                   Scalar (Prim $ Signed Int64)
                 ]
-                $ arr_a $ ShapeDecl [AnyDim Nothing, AnyDim Nothing]
+                $ RetType [m, k] $ arr_a $ shape [m, k]
             ),
             ( "flat_update_2d",
               IntrinsicPolyFun
@@ -1039,7 +1063,7 @@ intrinsics =
                   Scalar (Prim $ Signed Int64),
                   arr_a $ shape [k, l]
                 ]
-                $ uarr_a $ shape [n]
+                $ RetType [] $ uarr_a $ shape [n]
             ),
             ( "flat_index_3d",
               IntrinsicPolyFun
@@ -1053,7 +1077,7 @@ intrinsics =
                   Scalar (Prim $ Signed Int64),
                   Scalar (Prim $ Signed Int64)
                 ]
-                $ arr_a $ ShapeDecl [AnyDim Nothing, AnyDim Nothing, AnyDim Nothing]
+                $ RetType [m, k, l] $ arr_a $ shape [m, k, l]
             ),
             ( "flat_update_3d",
               IntrinsicPolyFun
@@ -1065,7 +1089,7 @@ intrinsics =
                   Scalar (Prim $ Signed Int64),
                   arr_a $ shape [k, l, p]
                 ]
-                $ uarr_a $ shape [n]
+                $ RetType [] $ uarr_a $ shape [n]
             ),
             ( "flat_index_4d",
               IntrinsicPolyFun
@@ -1081,7 +1105,7 @@ intrinsics =
                   Scalar (Prim $ Signed Int64),
                   Scalar (Prim $ Signed Int64)
                 ]
-                $ arr_a $ ShapeDecl [AnyDim Nothing, AnyDim Nothing, AnyDim Nothing, AnyDim Nothing]
+                $ RetType [m, k, l, p] $ arr_a $ shape [m, k, l, p]
             ),
             ( "flat_update_4d",
               IntrinsicPolyFun
@@ -1094,7 +1118,7 @@ intrinsics =
                   Scalar (Prim $ Signed Int64),
                   arr_a $ shape [k, l, p, q]
                 ]
-                $ uarr_a $ shape [n]
+                $ RetType [] $ uarr_a $ shape [n]
             )
           ]
   where
@@ -1121,12 +1145,12 @@ intrinsics =
         (Record (M.fromList $ zip tupleFieldNames [x, y]))
     tuple_uarr x y s = tuple_arr x y s `setUniqueness` Unique
 
-    arr x y = Scalar $ Arrow mempty Unnamed x y
+    arr x y = Scalar $ Arrow mempty Unnamed x (RetType [] y)
 
     arr_ka = Array () Nonunique t_a (ShapeDecl [NamedDim $ qualName k])
     uarr_ka = Array () Unique t_a (ShapeDecl [NamedDim $ qualName k])
     arr_kb = Array () Nonunique t_b (ShapeDecl [NamedDim $ qualName k])
-    karr x y = Scalar $ Arrow mempty (Named k) x y
+    karr x y = Scalar $ Arrow mempty (Named k) x (RetType [] y)
 
     accType t =
       TypeVar () Unique (typeName (fst intrinsicAcc)) [TypeArgType t mempty]

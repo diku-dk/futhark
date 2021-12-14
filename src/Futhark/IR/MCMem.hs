@@ -22,10 +22,10 @@ import Futhark.IR.MC.Op
 import Futhark.IR.Mem
 import Futhark.IR.Mem.Simplify
 import Futhark.IR.SegOp
+import qualified Futhark.IR.TypeCheck as TC
 import qualified Futhark.Optimise.Simplify.Engine as Engine
 import Futhark.Pass
 import Futhark.Pass.ExplicitAllocations (BuilderOps (..), mkLetNamesB', mkLetNamesB'')
-import qualified Futhark.TypeCheck as TC
 
 data MCMem
 
@@ -40,10 +40,13 @@ instance RepTypes MCMem where
 instance ASTRep MCMem where
   expTypesFromPat = return . map snd . bodyReturnsFromPat
 
-instance OpReturns MCMem where
-  opReturns (Alloc _ space) = return [MemMem space]
-  opReturns (Inner (ParOp _ op)) = segOpReturns op
-  opReturns (Inner (OtherOp ())) = pure []
+instance OpReturns (MCOp MCMem ()) where
+  opReturns (ParOp _ op) = segOpReturns op
+  opReturns (OtherOp ()) = pure []
+
+instance OpReturns (MCOp (Engine.Wise MCMem) ()) where
+  opReturns (ParOp _ op) = segOpReturns op
+  opReturns k = extReturns <$> opType k
 
 instance PrettyRep MCMem
 
@@ -60,7 +63,7 @@ instance TC.Checkable MCMem where
   checkLParamDec = checkMemInfo
   checkLetBoundDec = checkMemInfo
   checkRetType = mapM_ (TC.checkExtType . declExtTypeOf)
-  primFParam name t = return $ Param name (MemPrim t)
+  primFParam name t = return $ Param mempty name (MemPrim t)
   matchPat = matchPatToExp
   matchReturnType = matchFunctionReturnType
   matchBranchType = matchBranchReturnType
@@ -75,6 +78,9 @@ instance BuilderOps (Engine.Wise MCMem) where
   mkExpDecB pat e = return $ Engine.mkWiseExpDec pat () e
   mkBodyB stms res = return $ Engine.mkWiseBody () stms res
   mkLetNamesB = mkLetNamesB''
+
+instance TraverseOpStms (Engine.Wise MCMem) where
+  traverseOpStms = traverseMemOpStms (traverseMCOpStms (const pure))
 
 simplifyProg :: Prog MCMem -> PassM (Prog MCMem)
 simplifyProg = simplifyProgGeneric simpleMCMem

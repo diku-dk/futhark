@@ -69,18 +69,18 @@ fuseMaps unfus_nms lam1 inp1 out1 lam2 inp2 = (lam2', M.elems inputmap)
     lam2' =
       lam2
         { lambdaParams =
-            [ Param name t
+            [ Param mempty name t
               | Ident name t <- lam2redparams ++ M.keys inputmap
             ],
           lambdaBody = new_body2'
         }
     new_body2 =
-      let bnds res =
+      let stms res =
             [ certify cs $ mkLet [p] $ BasicOp $ SubExp e
               | (p, SubExpRes cs e) <- zip pat res
             ]
           bindLambda res =
-            stmsFromList (bnds res) `insertStms` makeCopiesInner (lambdaBody lam2)
+            stmsFromList (stms res) `insertStms` makeCopiesInner (lambdaBody lam2)
        in makeCopies $ mapResult bindLambda (lambdaBody lam1)
     new_body2_rses = bodyResult new_body2
     new_body2' =
@@ -107,7 +107,7 @@ fuseInputs ::
     Body rep -> Body rep
   )
 fuseInputs unfus_nms lam1 inp1 out1 lam2 inp2 =
-  (lam2redparams, unfus_vars, outbnds, inputmap, makeCopies, makeCopiesInner)
+  (lam2redparams, unfus_vars, outstms, inputmap, makeCopies, makeCopiesInner)
   where
     (lam2redparams, lam2arrparams) =
       splitAt (length lam2params - length inp2) lam2params
@@ -120,7 +120,7 @@ fuseInputs unfus_nms lam1 inp1 out1 lam2 inp2 =
     outins =
       uncurry (outParams $ map fst out1) $
         unzip $ M.toList lam2inputmap'
-    outbnds = filterOutParams out1 outins
+    outstms = filterOutParams out1 outins
     (inputmap, makeCopies) =
       removeDuplicateInputs $ originputmap `M.difference` outins
     -- Cosmin: @unfus_vars@ is supposed to be the lam2 vars corresponding to unfus_nms (?)

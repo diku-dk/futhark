@@ -15,4 +15,4 @@
 -- input { f32.nan } output { f32.nan }
 -- input { -0f32 } output { -0f32 }
 
-let main = f32.round
+def main = f32.round

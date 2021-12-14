@@ -18,7 +18,7 @@ body {
     letter-spacing: -0.01em;
     line-height: 150%;
     text-align: center;
-    background-image: url(background_b01.png);
+    background-color: #fff9e5;
     color: black;
     padding: 0;
     border-right: 1px solid #5f021f;
@@ -28,12 +28,13 @@ body {
 }
 
 div.document {
-    background-color: #fff9e5;
     text-align: left;
     background-repeat: repeat-x;
+}
 
-    -moz-box-shadow: 2px 2px 5px #000;
-    -webkit-box-shadow: 2px 2px 5px #000;
+div.documentwrapper {
+    float: left;
+    width: 100%;
 }
 
 div.bodywrapper {
@@ -44,20 +45,25 @@ div.bodywrapper {
 div.body {
     margin: 0;
     padding: 0.5em 20px 20px 20px;
-    max-width: 750px;
-    margin-left: auto;
-    margin-right: auto;
 }
+
+{%- if theme_rightsidebar|tobool %}
+div.bodywrapper {
+    margin: 0 calc({{ theme_sidebarwidth|todim }} + 30px) 0 0;
+    border-right: 1px solid #ccc;
+}
+{%- else %}
+div.bodywrapper {
+    margin: 0 0 0 calc({{ theme_sidebarwidth|todim }} + 30px);
+}
+{%- endif %}
 
 div.related {
     font-size: 1em;
-
-    -moz-box-shadow: 2px 2px 5px #000;
-    -webkit-box-shadow: 2px 2px 5px #000;
 }
 
 div.related ul {
-    background-color: #5f021f;
+    background-color: ##5f021f;
     height: 100%;
     overflow: hidden;
     border-top: 1px solid #ddd;
@@ -65,7 +71,6 @@ div.related ul {
 }
 
 div.related ul li {
-    color: white;
     margin: 0;
     padding: 0;
     height: 2em;
@@ -81,11 +86,9 @@ div.related ul li a {
     margin: 0;
     padding: 0 5px 0 5px;
     line-height: 1.75em;
-    color: #fff;
 }
 
 div.related ul li a:hover {
-    color: #fff;
     text-decoration: underline;
 }
 
@@ -94,9 +97,11 @@ div.sphinxsidebarwrapper {
 }
 
 div.sphinxsidebar {
-    margin: 0;
     padding: 0.5em 12px 12px 12px;
-    width: 210px;
+    width: {{ theme_sidebarwidth|todim }};
+    {%- if theme_rightsidebar|tobool %}
+    float: right;
+    {%- endif %}
     font-size: 1em;
     text-align: left;
 }
@@ -130,16 +135,12 @@ div.sphinxsidebar input {
 }
 
 div.footer {
-    background-color: white;
     color: #5f021f;
     padding: 3px 8px 3px 0;
     clear: both;
     font-size: 0.8em;
     text-align: right;
     border-bottom: 1px solid #5f021f;
-
-    -moz-box-shadow: 2px 2px 5px #000;
-    -webkit-box-shadow: 2px 2px 5px #000;
 }
 
 div.footer a {
@@ -168,7 +169,7 @@ div.body a {
 }
 
 h1, h2, h3 {
-    color: #5f021f;
+    color: {{ theme_maincolor }};
 }
 
 h1 {
@@ -269,10 +270,6 @@ pre {
     padding: 0.5em;
 }
 
-.literal {
-    background-color: #eeeeee;
-}
-
 pre a {
     color: inherit;
     text-decoration: underline;
@@ -307,7 +304,7 @@ div.admonition {
     font-size: 0.9em;
     margin: 1em 0 1em 0;
     border: 3px solid #cccccc;
-    background-color: #f7f7f7;
+    background-color: #165e83;
     padding: 0;
 }
 
@@ -334,7 +331,7 @@ div.admonition p.admonition-title {
     color: white;
     border-bottom: 3px solid #cccccc;
     font-weight: bold;
-    background-color: #5f021f;
+    background-color: #165e83;
 }
 
 div.danger    { border: 3px solid #f0908d; background-color: #f0cfa0; }
@@ -400,6 +397,15 @@ p.versionchanged span.versionmodified {
     margin-right: 0.2em;
     padding: 0.1em;
     background-color: #DCE6A0;
+}
+
+dl.field-list > dt {
+    color: white;
+    background-color: #82A0BE;
+}
+
+dl.field-list > dd {
+    background-color: #f7f7f7;
 }
 
 /* -- table styles ---------------------------------------------------------- */
@@ -488,12 +494,5 @@ body {
 only screen and (-webkit-min-device-pixel-ratio: 2),
 only screen and (min-device-pixel-ratio: 2) {
 }
-
-/* EXERCISES */
-
-.solution .last {
-    display: none;
-}
-
 
 /* -- end ------------------------------------------------------------------- */

@@ -4,10 +4,10 @@
 -- ==
 -- error: in-place
 
-let swap 't (i: i32) (j: i32) (xs: *[]t) =
+def swap 't (i: i32) (j: i32) (xs: *[]t) =
   let xs_i = xs[i]
   let xs[i] = xs[j]
   let xs[j] = xs_i
   in xs
 
-let main (xs: *[][]i32) = swap 0 1 xs
+def main (xs: *[][]i32) = swap 0 1 xs

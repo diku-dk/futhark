@@ -1,6 +1,5 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE Strict #-}
 {-# LANGUAGE Trustworthy #-}
@@ -111,13 +110,6 @@ module Futhark.IR.Syntax
     TypeBase (..),
     Diet (..),
 
-    -- * Attributes
-    Attr (..),
-    Attrs (..),
-    oneAttr,
-    inAttrs,
-    withoutAttrs,
-
     -- * Abstract syntax tree
     Ident (..),
     SubExp (..),
@@ -140,6 +132,7 @@ module Futhark.IR.Syntax
     OpaqueOp (..),
     DimChange (..),
     ShapeChange,
+    WithAccInput,
     ExpT (..),
     Exp,
     LoopForm (..),
@@ -155,6 +148,7 @@ module Futhark.IR.Syntax
     LParam,
     FunDef (..),
     EntryPoint,
+    EntryParam (..),
     EntryPointType (..),
     Prog (..),
 
@@ -173,7 +167,6 @@ where
 import Control.Category
 import Data.Foldable
 import qualified Data.Sequence as Seq
-import qualified Data.Set as S
 import Data.String
 import Data.Traversable (fmapDefault, foldMapDefault)
 import Futhark.IR.Rep
@@ -181,32 +174,6 @@ import Futhark.IR.Syntax.Core
 import Futhark.Util.Pretty (pretty)
 import Language.Futhark.Core
 import Prelude hiding (id, (.))
-
--- | A single attribute.
-data Attr
-  = AttrAtom Name
-  | AttrComp Name [Attr]
-  deriving (Ord, Show, Eq)
-
-instance IsString Attr where
-  fromString = AttrAtom . fromString
-
--- | Every statement is associated with a set of attributes, which can
--- have various effects throughout the compiler.
-newtype Attrs = Attrs {unAttrs :: S.Set Attr}
-  deriving (Ord, Show, Eq, Monoid, Semigroup)
-
--- | Construct 'Attrs' from a single 'Attr'.
-oneAttr :: Attr -> Attrs
-oneAttr = Attrs . S.singleton
-
--- | Is the given attribute to be found in the attribute set?
-inAttrs :: Attr -> Attrs -> Bool
-inAttrs attr (Attrs attrs) = attr `S.member` attrs
-
--- | @x `withoutAttrs` y@ gives @x@ except for any attributes also in @y@.
-withoutAttrs :: Attrs -> Attrs -> Attrs
-withoutAttrs (Attrs x) (Attrs y) = Attrs $ x `S.difference` y
 
 -- | A type alias for namespace control.
 type PatElem rep = PatElemT (LetDec rep)
@@ -440,6 +407,12 @@ data BasicOp
     UpdateAcc VName [SubExp] [SubExp]
   deriving (Eq, Ord, Show)
 
+-- | The input to a 'WithAcc' construct.  Comprises the index space of
+-- the accumulator, the underlying arrays, and possibly a combining
+-- function.
+type WithAccInput rep =
+  (Shape, [VName], Maybe (Lambda rep, [SubExp]))
+
 -- | The root Futhark expression type.  The v'Op' constructor contains
 -- a rep-specific operation.  Do-loops, branches and function calls
 -- are special.  Everything else is a simple t'BasicOp'.
@@ -453,11 +426,11 @@ data ExpT rep
   | -- | Create accumulators backed by the given arrays (which are
     -- consumed) and pass them to the lambda, which must return the
     -- updated accumulators and possibly some extra values.  The
-    -- accumulators are turned back into arrays.  The 'Shape' is the
+    -- accumulators are turned back into arrays.  The t'Shape' is the
     -- write index space.  The corresponding arrays must all have this
-    -- shape outermost.  This construct is not part of 'BasicOp'
+    -- shape outermost.  This construct is not part of t'BasicOp'
     -- because we need the @rep@ parameter.
-    WithAcc [(Shape, [VName], Maybe (Lambda rep, [SubExp]))] (Lambda rep)
+    WithAcc [WithAccInput rep] (Lambda rep)
   | Op (Op rep)
 
 deriving instance RepTypes rep => Eq (ExpT rep)
@@ -546,11 +519,6 @@ deriving instance RepTypes rep => Show (FunDef rep)
 
 deriving instance RepTypes rep => Ord (FunDef rep)
 
--- | Information about the parameters and return value of an entry
--- point.  The first element is for parameters, the second for return
--- value.
-type EntryPoint = (Name, [EntryPointType], [EntryPointType])
-
 -- | Every entry point argument and return value has an annotation
 -- indicating how it maps to the original source program type.
 data EntryPointType
@@ -564,6 +532,17 @@ data EntryPointType
   | -- | Maps directly.
     TypeDirect Uniqueness
   deriving (Eq, Show, Ord)
+
+-- | An entry point parameter, comprising its name and original type.
+data EntryParam = EntryParam
+  { entryParamName :: Name,
+    entryParamType :: EntryPointType
+  }
+  deriving (Eq, Show, Ord)
+
+-- | Information about the inputs and outputs (return value) of an entry
+-- point.
+type EntryPoint = (Name, [EntryParam], [EntryPointType])
 
 -- | An entire Futhark program.
 data Prog rep = Prog

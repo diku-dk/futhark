@@ -2,4 +2,4 @@
 -- ==
 -- input { [0] } error:
 
-let main (xs: []i32) = map (2/) xs
+def main (xs: []i32) = map (2/) xs

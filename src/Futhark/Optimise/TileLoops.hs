@@ -46,11 +46,11 @@ optimiseStm :: Stm GPU -> TileM (Stms GPU)
 optimiseStm stm@(Let pat aux (Op (SegOp (SegMap lvl@SegThread {} space ts kbody)))) = do
   res3dtiling <- doRegTiling3D stm
   case res3dtiling of
-    Just (extra_bnds, stmt') -> return (extra_bnds <> oneStm stmt')
+    Just (extra_stms, stmt') -> return (extra_stms <> oneStm stmt')
     Nothing -> do
       blkRegTiling_res <- mmBlkRegTiling stm
       case blkRegTiling_res of
-        Just (extra_bnds, stmt') -> return (extra_bnds <> oneStm stmt')
+        Just (extra_stms, stmt') -> return (extra_stms <> oneStm stmt')
         Nothing -> localScope (scopeOfSegSpace space) $ do
           (host_stms, (lvl', space', kbody')) <- tileInKernelBody mempty initial_variance lvl space ts kbody
           return $ host_stms <> oneStm (Let pat aux $ Op $ SegOp $ SegMap lvl' space' ts kbody')
@@ -157,6 +157,7 @@ tileInBody branch_variant initial_variance initial_lvl initial_space res_ts (Bod
             stms_res
       -- Tiling inside for-loop.
       | DoLoop merge (ForLoop i it bound []) loopbody <- stmExp stm_to_tile,
+        not $ any ((`nameIn` freeIn merge) . paramName . fst) merge,
         (prestms', poststms') <-
           preludeToPostlude variance prestms stm_to_tile (stmsFromList poststms) = do
         let branch_variant' =
@@ -278,6 +279,7 @@ partitionPrelude variance prestms private used_after =
       foldMap consumedInStm $ fst $ Alias.analyseStms mempty prestms
 
     mustBeInlinedExp (BasicOp (Index _ slice)) = not $ null $ sliceDims slice
+    mustBeInlinedExp (BasicOp Iota {}) = True
     mustBeInlinedExp (BasicOp Rotate {}) = True
     mustBeInlinedExp (BasicOp Rearrange {}) = True
     mustBeInlinedExp (BasicOp Reshape {}) = True
@@ -378,8 +380,8 @@ tileDoLoop initial_space variance prestms used_in_body (host_stms, tiling, tiled
           inScopeOf precomputed_variant_prestms $
             doPrelude tiling privstms precomputed_variant_prestms live_set
 
-        mergeparams' <- forM mergeparams $ \(Param pname pt) ->
-          Param <$> newVName (baseString pname ++ "_group") <*> pure (tileDim pt)
+        mergeparams' <- forM mergeparams $ \(Param attrs pname pt) ->
+          Param attrs <$> newVName (baseString pname ++ "_group") <*> pure (tileDim pt)
 
         let merge_ts = map paramType mergeparams
 
@@ -436,11 +438,10 @@ doPrelude tiling privstms prestms prestms_live =
   tilingSegMap tiling "prelude" (scalarLevel tiling) ResultPrivate $
     \in_bounds slice -> do
       ts <- mapM lookupType prestms_live
-      fmap varsRes $
-        protectOutOfBounds "pre" in_bounds ts $ do
-          addPrivStms slice privstms
-          addStms prestms
-          pure $ varsRes prestms_live
+      fmap varsRes . protectOutOfBounds "pre" in_bounds ts $ do
+        addPrivStms slice privstms
+        addStms prestms
+        pure $ varsRes prestms_live
 
 liveSet :: FreeIn a => Stms GPU -> a -> Names
 liveSet stms after =
@@ -794,7 +795,7 @@ readTile1D tile_size gid gtid num_groups group_size kind privstms tile_id inputs
       fmap varsRes $
         case kind of
           TilePartial ->
-            letTupExp "pre"
+            letTupExp "pre1d"
               =<< eIf
                 (toExp $ pe64 j .<. pe64 w)
                 (resultBody <$> mapM (fmap Var . readTileElem) arrs)
@@ -1055,7 +1056,7 @@ readTile2D (kdim_x, kdim_y) (gtid_x, gtid_y) (gid_x, gid_y) tile_size num_groups
       fmap varsRes $
         case kind of
           TilePartial ->
-            mapM (letExp "pre" <=< readTileElemIfInBounds) arrs_and_perms
+            mapM (letExp "pre2d" <=< readTileElemIfInBounds) arrs_and_perms
           TileFull ->
             mapM readTileElem arrs_and_perms
 

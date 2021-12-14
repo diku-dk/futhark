@@ -1,25 +1,29 @@
 // Start of values.js
+var futharkPrimtypes =
+  new Set([
+    'i8',
+    'i16',
+    'i32',
+    'i64',
+    'u8',
+    'u16',
+    'u32',
+    'u64',
+    'f16',
+    'f32',
+    'f64',
+    'bool']);
 
-var type_strs = { "Int8Array" : '  i8',
-                  "Int16Array" : ' i16',
-                  "Int32Array" : ' i32',
-                  "BigInt64Array" : ' i64',
-                  "Uint8Array" : '  u8',
-                  "Uint16Array" :  ' u16',
-                  "Uint32Array" :  ' u32',
-                  "BigUint64Array" :  ' u64',
-                  "Float32Array" : ' f32',
-                  "Float64Array" : ' f64',
-                };
 
 var typToType = { '  i8' : Int8Array ,
                   ' i16' : Int16Array ,
                   ' i32' : Int32Array ,
                   ' i64' : BigInt64Array ,
                   '  u8' : Uint8Array ,
-                  ' u16' :  Uint16Array ,
-                  ' u32' :  Uint32Array ,
-                  ' u64' :  BigUint64Array ,
+                  ' u16' : Uint16Array ,
+                  ' u32' : Uint32Array ,
+                  ' u64' : BigUint64Array ,
+                  ' f16' : Uint16Array ,
                   ' f32' : Float32Array ,
                   ' f64' : Float64Array ,
                   'bool' : Uint8Array
@@ -46,6 +50,7 @@ var typToSize = {
   " i16" : 2,
   " u32" : 4,
   " i32" : 4,
+  " f16" : 2,
   " f32" : 4,
   " u64" : 8,
   " i64" : 8,
@@ -134,7 +139,7 @@ class Reader {
     }
   }
 
-  read_binary() {
+  read_binary(typename, dim) {
     // Skip leading white space
     while (this.buff.slice(0, 1).toString().trim() == "") {
       this.buff = this.buff.slice(1);
@@ -149,7 +154,14 @@ class Reader {
     var num_dim = this.buff[2];
     var typ = this.buff.slice(3, 7);
     this.buff = this.buff.slice(7);
-    if (num_dim == 0) {
+    var exp_typ = "[]".repeat(dim) + typename;
+    var given_typ = "[]".repeat(num_dim) + typ.toString().trim();
+    console.log(exp_typ);
+    console.log(given_typ);
+    if (exp_typ !== given_typ) {
+      throw ("Expected type : " + exp_typ + ", Actual type : " + given_typ);
+    }
+    if (num_dim === 0) {
       return this.read_bin_scalar(typ);
     } else {
       return this.read_bin_array(num_dim, typ);
@@ -167,8 +179,17 @@ function skip_spaces(reader) {
 }
 
 function read_value(typename, reader) {
-  // TODO include typename in implementation
-  var val = reader.read_binary();
+  var typ = typename;
+  var dim = 0;
+  while (typ.slice(0, 2) === "[]") {
+    dim = dim + 1;
+    typ = typ.slice(2);
+  }
+  if (!futharkPrimtypes.has(typ)) {
+    throw ("Unkown type: " + typ);
+  }
+
+  var val = reader.read_binary(typ, dim);
   return val;
 }
 

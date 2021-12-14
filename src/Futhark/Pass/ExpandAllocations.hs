@@ -103,8 +103,8 @@ transformStm (Let pat aux (If cond tbranch fbranch (IfDec ts IfEquiv))) = do
       bodyStms b
         <> stmsFromList (zipWith bindRes (patElems pat) (bodyResult b))
 transformStm (Let pat aux e) = do
-  (bnds, e') <- transformExp =<< mapExpM transform e
-  return $ bnds <> oneStm (Let pat aux e')
+  (stms, e') <- transformExp =<< mapExpM transform e
+  return $ stms <> oneStm (Let pat aux e')
   where
     transform =
       identityMapper
@@ -485,8 +485,7 @@ expandedVariantAllocations num_threads kspace kstms variant_allocs = do
     sliceKernelSizes num_threads variant_sizes kspace kstms
   -- Note the recursive call to expand allocations inside the newly
   -- produced kernels.
-  (_, slice_stms_tmp) <-
-    simplifyStms =<< explicitAllocationsInStms slice_stms
+  slice_stms_tmp <- simplifyStms =<< explicitAllocationsInStms slice_stms
   slice_stms' <- transformStms slice_stms_tmp
 
   let variant_allocs' :: [(VName, (SubExp, SubExp, Space))]
@@ -501,9 +500,9 @@ expandedVariantAllocations num_threads kspace kstms variant_allocs = do
 
   -- We expand the invariant allocations by adding an inner dimension
   -- equal to the sum of the sizes required by different threads.
-  (alloc_bnds, rebases) <- unzip <$> mapM expand variant_allocs'
+  (alloc_stms, rebases) <- unzip <$> mapM expand variant_allocs'
 
-  return (slice_stms' <> stmsFromList alloc_bnds, mconcat rebases)
+  return (slice_stms' <> stmsFromList alloc_stms, mconcat rebases)
   where
     expand (mem, (offset, total_size, space)) = do
       let allocpat = Pat [PatElem mem $ MemMem space]
@@ -815,7 +814,7 @@ sliceKernelSizes num_threads sizes space kstms = do
             BinOp (SMax Int64) (Var $ paramName x) (Var $ paramName y)
     return $ Lambda (xs ++ ys) (mkBody stms zs) i64s
 
-  flat_gtid_lparam <- Param <$> newVName "flat_gtid" <*> pure (Prim (IntType Int64))
+  flat_gtid_lparam <- newParam "flat_gtid" (Prim (IntType Int64))
 
   (size_lam', _) <- flip runBuilderT kernels_scope $ do
     params <- replicateM num_sizes $ newParam "x" (Prim int64)

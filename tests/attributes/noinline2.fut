@@ -2,7 +2,7 @@
 -- structure { Apply 1 }
 
 #[noinline]
-let f (x: i32) = x + 2
+def f (x: i32) = x + 2
 
-let main x =
+def main x =
   f x

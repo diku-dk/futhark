@@ -2,6 +2,6 @@
 -- ==
 -- error: consumed
 
-let main ((++): *[]i32) =
+def main ((++): *[]i32) =
   let _ = (++) with [0] = 0
   in (++)

@@ -16,18 +16,19 @@ module Futhark.CodeGen.Backends.GenericWASM
   )
 where
 
-import Data.FileEmbed
 import Data.List (intercalate, nub)
 import qualified Data.Text as T
 import qualified Futhark.CodeGen.Backends.GenericC as GC
 import Futhark.CodeGen.Backends.SimpleRep (opaqueName)
 import qualified Futhark.CodeGen.ImpCode.Sequential as Imp
+import Futhark.CodeGen.RTS.JavaScript
 import Futhark.IR.Primitive
 import NeatInterpolation (text)
 
 extToString :: Imp.ExternalValue -> String
 extToString (Imp.TransparentValue u (Imp.ArrayValue vn _ pt s dimSize)) =
   concat (replicate (length dimSize) "[]") ++ extToString (Imp.TransparentValue u (Imp.ScalarValue pt s vn))
+extToString (Imp.TransparentValue _ (Imp.ScalarValue (FloatType Float16) _ _)) = "f16"
 extToString (Imp.TransparentValue _ (Imp.ScalarValue (FloatType Float32) _ _)) = "f32"
 extToString (Imp.TransparentValue _ (Imp.ScalarValue (FloatType Float64) _ _)) = "f64"
 extToString (Imp.TransparentValue _ (Imp.ScalarValue (IntType Int8) Imp.TypeDirect _)) = "i8"
@@ -39,8 +40,8 @@ extToString (Imp.TransparentValue _ (Imp.ScalarValue (IntType Int16) Imp.TypeUns
 extToString (Imp.TransparentValue _ (Imp.ScalarValue (IntType Int32) Imp.TypeUnsigned _)) = "u32"
 extToString (Imp.TransparentValue _ (Imp.ScalarValue (IntType Int64) Imp.TypeUnsigned _)) = "u64"
 extToString (Imp.TransparentValue _ (Imp.ScalarValue Bool _ _)) = "bool"
+extToString (Imp.TransparentValue _ (Imp.ScalarValue Unit _ _)) = error "extToString: Unit"
 extToString (Imp.OpaqueValue _ oname vds) = opaqueName oname vds
-extToString ev = error $ "extToString: missing case: " ++ show ev
 
 type EntryPointType = String
 
@@ -74,20 +75,11 @@ emccExportNames jses =
 javascriptWrapper :: [JSEntryPoint] -> T.Text
 javascriptWrapper entryPoints =
   T.unlines
-    [ jsServer,
-      jsValues,
-      jsClasses,
+    [ serverJs,
+      valuesJs,
+      wrapperclassesJs,
       classFutharkContext entryPoints
     ]
-
-jsServer :: T.Text
-jsServer = $(embedStringFile "rts/javascript/server.js")
-
-jsValues :: T.Text
-jsValues = $(embedStringFile "rts/javascript/values.js")
-
-jsClasses :: T.Text
-jsClasses = $(embedStringFile "rts/javascript/wrapperclasses.js")
 
 classFutharkContext :: [JSEntryPoint] -> T.Text
 classFutharkContext entryPoints =
@@ -252,6 +244,7 @@ typeSize typ =
     "u16" -> 2
     "u32" -> 4
     "u64" -> 8
+    "f16" -> 2
     "f32" -> 4
     "f64" -> 8
     "bool" -> 1
@@ -268,6 +261,7 @@ typeShift typ =
     "u16" -> 1
     "u32" -> 2
     "u64" -> 3
+    "f16" -> 1
     "f32" -> 2
     "f64" -> 3
     "bool" -> 0
@@ -284,6 +278,7 @@ typeHeap typ =
     "u16" -> "this.wasm.HEAPU16"
     "u32" -> "this.wasm.HEAPU32"
     "u64" -> "(new BigUint64Array(this.wasm.HEAP64.buffer))"
+    "f16" -> "this.wasm.HEAPU16"
     "f32" -> "this.wasm.HEAPF32"
     "f64" -> "this.wasm.HEAPF64"
     "bool" -> "this.wasm.HEAP8"
@@ -314,7 +309,7 @@ toFutharkArray typ =
     heap = typeHeap ftype
     signature = ftype ++ "_" ++ show d ++ "d"
     new = T.pack $ "new_" ++ signature
-    fnew = T.pack $ "_futhark_new_" ++ signature
+    fnew = T.pack $ "this.wasm._futhark_new_" ++ signature
     fshape = "this.wasm._futhark_shape_" ++ signature
     fvalues = "this.wasm._futhark_values_raw_" ++ signature
     ffree = "this.wasm._futhark_free_" ++ signature
@@ -324,7 +319,7 @@ toFutharkArray typ =
     arraynd_flat = if d > 1 then arraynd ++ ".flat()" else arraynd
     arraynd_dims = intercalate ", " [arraynd ++ mult i "[0]" ++ ".length" | i <- [0 .. d -1]]
     dims = T.pack $ intercalate ", " ["d" ++ show i | i <- [0 .. d -1]]
-    dims_multiplied = T.pack $ intercalate "*" ["d" ++ show i | i <- [0 .. d -1]]
+    dims_multiplied = T.pack $ intercalate "*" ["Number(d" ++ show i ++ ")" | i <- [0 .. d -1]]
     bigint_dims = T.pack $ intercalate ", " ["BigInt(d" ++ show i ++ ")" | i <- [0 .. d -1]]
     mult i s = concat $ replicate i s
     (arraynd_p, arraynd_flat_p, arraynd_dims_p) = (T.pack arraynd, T.pack arraynd_flat, T.pack arraynd_dims)

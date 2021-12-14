@@ -75,15 +75,15 @@ rephrasePatElem rephraser (PatElem ident from) =
 
 -- | Rephrase a parameter.
 rephraseParam :: Monad m => (from -> m to) -> Param from -> m (Param to)
-rephraseParam rephraser (Param name from) =
-  Param name <$> rephraser from
+rephraseParam rephraser (Param attrs name from) =
+  Param attrs name <$> rephraser from
 
 -- | Rephrase a body.
 rephraseBody :: Monad m => Rephraser m from to -> Body from -> m (Body to)
-rephraseBody rephraser (Body rep bnds res) =
+rephraseBody rephraser (Body rep stms res) =
   Body
     <$> rephraseBodyDec rephraser rep
-    <*> (stmsFromList <$> mapM (rephraseStm rephraser) (stmsToList bnds))
+    <*> (stmsFromList <$> mapM (rephraseStm rephraser) (stmsToList stms))
     <*> pure res
 
 -- | Rephrase a lambda.

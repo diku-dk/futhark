@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE TupleSections #-}
 
@@ -17,6 +18,7 @@ import Futhark.CodeGen.Backends.CCUDA.Boilerplate
 import Futhark.CodeGen.Backends.COpenCL.Boilerplate (commonOptions, sizeLoggingCode)
 import qualified Futhark.CodeGen.Backends.GenericC as GC
 import Futhark.CodeGen.Backends.GenericC.Options
+import Futhark.CodeGen.Backends.SimpleRep (primStorageType, toStorage)
 import Futhark.CodeGen.ImpCode.OpenCL
 import qualified Futhark.CodeGen.ImpGen.CUDA as ImpGen
 import Futhark.IR.GPUMem hiding
@@ -26,6 +28,7 @@ import Futhark.IR.GPUMem hiding
   )
 import Futhark.MonadFreshNames
 import qualified Language.C.Quote.OpenCL as C
+import NeatInterpolation (untrimming)
 
 -- | Compile the program to C with calls to CUDA.
 compileProg :: MonadFreshNames m => Prog GPUMem -> m (ImpGen.Warnings, GC.CParts)
@@ -75,11 +78,11 @@ compileProg prog = do
             )
         }
     cuda_includes =
-      unlines
-        [ "#include <cuda.h>",
-          "#include <cuda_runtime.h>",
-          "#include <nvrtc.h>"
-        ]
+      [untrimming|
+       #include <cuda.h>
+       #include <cuda_runtime.h>
+       #include <nvrtc.h>
+      |]
 
 cliOptions :: [Option]
 cliOptions =
@@ -172,7 +175,7 @@ readCUDAScalar _ _ _ space _ =
 
 allocateCUDABuffer :: GC.Allocate OpenCL ()
 allocateCUDABuffer mem size tag "device" =
-  GC.stm [C.cstm|CUDA_SUCCEED_OR_RETURN(cuda_alloc(&ctx->cuda, $exp:size, $exp:tag, &$exp:mem));|]
+  GC.stm [C.cstm|CUDA_SUCCEED_OR_RETURN(cuda_alloc(&ctx->cuda, (size_t)$exp:size, $exp:tag, &$exp:mem));|]
 allocateCUDABuffer _ _ _ space =
   error $ "Cannot allocate in '" ++ space ++ "' memory space."
 
@@ -197,7 +200,7 @@ copyCUDAMemory dstmem dstidx dstSpace srcmem srcidx srcSpace nbytes = do
                 }
                 |]
   where
-    memcpyFun DefaultSpace (Space "device") = ("cuMemcpyDtoH", copyDevToHost)
+    memcpyFun DefaultSpace (Space "device") = ("cuMemcpyDtoH" :: String, copyDevToHost)
     memcpyFun (Space "device") DefaultSpace = ("cuMemcpyHtoD", copyHostToDev)
     memcpyFun (Space "device") (Space "device") = ("cuMemcpy", copyDevToDev)
     memcpyFun _ _ =
@@ -213,7 +216,7 @@ staticCUDAArray name "device" t vs = do
   name_realtype <- newVName $ baseString name ++ "_realtype"
   num_elems <- case vs of
     ArrayValues vs' -> do
-      let vs'' = [[C.cinit|$exp:v|] | v <- map GC.compilePrimValue vs']
+      let vs'' = [[C.cinit|$exp:v|] | v <- vs']
       GC.earlyDecl [C.cedecl|static $ty:ct $id:name_realtype[$int:(length vs'')] = {$inits:vs''};|]
       return $ length vs''
     ArrayZeros n -> do
@@ -246,10 +249,10 @@ cudaMemoryType space =
 
 callKernel :: GC.OpCompiler OpenCL ()
 callKernel (GetSize v key) =
-  GC.stm [C.cstm|$id:v = ctx->sizes.$id:key;|]
+  GC.stm [C.cstm|$id:v = *ctx->tuning_params.$id:key;|]
 callKernel (CmpSizeLe v key x) = do
   x' <- GC.compileExp x
-  GC.stm [C.cstm|$id:v = ctx->sizes.$id:key <= $exp:x';|]
+  GC.stm [C.cstm|$id:v = *ctx->tuning_params.$id:key <= $exp:x';|]
   sizeLoggingCode v key x'
 callKernel (GetSizeMax v size_class) =
   let field = "max_" ++ cudaSizeClass size_class
@@ -357,6 +360,11 @@ callKernel (LaunchKernel safety kernel_name args num_blocks block_size) = do
     expNotZero e = [C.cexp|$exp:e != 0|]
     expAnd a b = [C.cexp|$exp:a && $exp:b|]
     expsNotZero = foldl expAnd [C.cexp|1|] . map expNotZero
+    mkArgs (ValueKArg e t@(FloatType Float16)) = do
+      arg <- newVName "kernel_arg"
+      e' <- GC.compileExp e
+      GC.item [C.citem|$ty:(primStorageType t) $id:arg = $exp:(toStorage t e');|]
+      pure (arg, Nothing)
     mkArgs (ValueKArg e t) =
       (,Nothing) <$> GC.compileExpToName "kernel_arg" t e
     mkArgs (MemKArg v) = do

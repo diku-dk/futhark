@@ -75,7 +75,7 @@ newtype RuleM rep a = RuleM (BuilderT rep (StateT VNameSource Maybe) a)
 instance (ASTRep rep, BuilderOps rep) => MonadBuilder (RuleM rep) where
   type Rep (RuleM rep) = rep
   mkExpDecM pat e = RuleM $ mkExpDecM pat e
-  mkBodyM bnds res = RuleM $ mkBodyM bnds res
+  mkBodyM stms res = RuleM $ mkBodyM stms res
   mkLetNamesM pat e = RuleM $ mkLetNamesM pat e
 
   addStms = RuleM . addStms
@@ -253,8 +253,8 @@ ruleBook topdowns bottomups =
     forOp RuleGeneric {} = True
     forOp _ = False
 
--- | @simplifyStm lookup bnd@ performs simplification of the
--- binding @bnd@.  If simplification is possible, a replacement list
+-- | @simplifyStm lookup stm@ performs simplification of the
+-- binding @stm@.  If simplification is possible, a replacement list
 -- of bindings is returned, that bind at least the same names as the
 -- original binding (and possibly more, for intermediate results).
 topDownSimplifyStm ::
@@ -265,8 +265,8 @@ topDownSimplifyStm ::
   m (Maybe (Stms rep))
 topDownSimplifyStm = applyRules . bookTopDownRules
 
--- | @simplifyStm uses bnd@ performs simplification of the binding
--- @bnd@.  If simplification is possible, a replacement list of
+-- | @simplifyStm uses stm@ performs simplification of the binding
+-- @stm@.  If simplification is possible, a replacement list of
 -- bindings is returned, that bind at least the same names as the
 -- original binding (and possibly more, for intermediate results).
 -- The first argument is the set of names used after this binding.

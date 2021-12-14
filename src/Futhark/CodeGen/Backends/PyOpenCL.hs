@@ -16,6 +16,7 @@ import Futhark.CodeGen.Backends.GenericPython.Options
 import Futhark.CodeGen.Backends.PyOpenCL.Boilerplate
 import qualified Futhark.CodeGen.ImpCode.OpenCL as Imp
 import qualified Futhark.CodeGen.ImpGen.OpenCL as ImpGen
+import Futhark.CodeGen.RTS.Python (openclPy)
 import Futhark.IR.GPUMem (GPUMem, Prog)
 import Futhark.MonadFreshNames
 import Futhark.Util (zEncodeString)
@@ -61,14 +62,14 @@ compileProg mode class_name prog = do
           Assign (Var "default_num_groups") None,
           Assign (Var "default_tile_size") None,
           Assign (Var "default_reg_tile_size") None,
-          Assign (Var "fut_opencl_src") $ RawStringLiteral $ opencl_prelude ++ opencl_code
+          Assign (Var "fut_opencl_src") $ RawStringLiteral $ opencl_prelude <> opencl_code
         ]
 
   let imports =
         [ Import "sys" Nothing,
           Import "numpy" $ Just "np",
           Import "ctypes" $ Just "ct",
-          Escape openClPrelude,
+          Escape openclPy,
           Import "pyopencl.array" Nothing,
           Import "time" Nothing
         ]
@@ -139,13 +140,13 @@ compileProg mode class_name prog = do
                 [Assign (Var "default_reg_tile_size") $ Var "optarg"]
             },
           Option
-            { optionLongName = "size",
+            { optionLongName = "param",
               optionShortName = Nothing,
-              optionArgument = RequiredArgument "size_assignment",
+              optionArgument = RequiredArgument "param_assignment",
               optionAction =
                 [ Assign
                     ( Index
-                        (Var "sizes")
+                        (Var "params")
                         ( IdxExp
                             ( Index
                                 (Var "optarg")
@@ -254,9 +255,8 @@ launchKernel kernel_name safety kernel_dims workgroup_dims args = do
   finishIfSynchronous
   where
     processKernelArg :: Imp.KernelArg -> Py.CompilerM op s PyExp
-    processKernelArg (Imp.ValueKArg e bt) = do
-      e' <- Py.compileExp e
-      return $ Py.simpleCall (Py.compilePrimToNp bt) [e']
+    processKernelArg (Imp.ValueKArg e bt) =
+      Py.toStorage bt <$> Py.compileExp e
     processKernelArg (Imp.MemKArg v) = Py.compileVar v
     processKernelArg (Imp.SharedMemoryKArg (Imp.Count num_bytes)) = do
       num_bytes' <- Py.compileExp num_bytes
@@ -425,7 +425,7 @@ packArrayOutput mem "device" bt ept dims = do
       (Var "cl.array.Array")
       [ Arg $ Var "self.queue",
         Arg $ Tuple dims',
-        Arg $ Var $ Py.compilePrimTypeExt bt ept,
+        Arg $ Var $ Py.compilePrimToExtNp bt ept,
         ArgKeyword "data" mem'
       ]
 packArrayOutput _ sid _ _ _ =

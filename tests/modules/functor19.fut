@@ -4,12 +4,12 @@
 -- input {} output {7}
 
 module pm (A: {val x: i32}) (B: {val y: i32}) = {
-  let z = A.x + B.y
+  def z = A.x + B.y
 }
 
-module cm = pm { let x = 2 }
+module cm = pm { def x = 2 }
 
-module m1 = cm { let y = 1 }
-module m2 = cm { let y = 2 }
+module m1 = cm { def y = 1 }
+module m2 = cm { def y = 2 }
 
-let main = m1.z + m2.z
+def main = m1.z + m2.z

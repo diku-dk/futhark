@@ -15,9 +15,9 @@ module Language.Futhark.Pretty
   )
 where
 
-import Codec.Binary.UTF8.String (decode)
 import Control.Monad
 import Data.Array
+import Data.Char (chr)
 import Data.Functor
 import Data.List (intersperse)
 import qualified Data.List.NonEmpty as NE
@@ -119,6 +119,12 @@ instance Pretty (ShapeDecl Int64) where
 instance Pretty (ShapeDecl Bool) where
   ppr (ShapeDecl ds) = mconcat (map (brackets . ppr) ds)
 
+instance Pretty (ShapeDecl dim) => Pretty (RetTypeBase dim as) where
+  ppr = pprPrec 0
+  pprPrec p (RetType [] t) = pprPrec p t
+  pprPrec _ (RetType dims t) =
+    text "?" <> mconcat (map (brackets . pprName) dims) <> text "." <> ppr t
+
 instance Pretty (ShapeDecl dim) => Pretty (ScalarTypeBase dim as) where
   ppr = pprPrec 0
   pprPrec _ (Prim et) = ppr et
@@ -175,6 +181,8 @@ instance (Eq vn, IsName vn) => Pretty (TypeExp vn) where
     align $ cat $ punctuate (text " |" <> softline) $ map ppConstr cs
     where
       ppConstr (name, fs) = text "#" <> ppr name <+> sep (map ppr fs)
+  ppr (TEDim dims te _) =
+    text "?" <> mconcat (map (brackets . pprName) dims) <> text "." <> ppr te
 
 instance (Eq vn, IsName vn) => Pretty (TypeArgExp vn) where
   ppr (TypeArgExpDim d _) = brackets $ ppr d
@@ -320,7 +328,7 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (ExpBase f vn) where
             text "@" <> parens (align $ ppr t)
         _ -> mempty
   pprPrec _ (StringLit s _) =
-    text $ show $ decode s
+    text $ show $ map (chr . fromIntegral) s
   pprPrec _ (Project k e _ _) = ppr e <> text "." <> ppr k
   pprPrec _ (Negate e _) = text "-" <> ppr e
   pprPrec _ (Not e _) = text "-" <> ppr e
@@ -356,9 +364,13 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (ExpBase f vn) where
     text "#[" <> ppr attr <> text "]" </> pprPrec (-1) e
   pprPrec i (AppExp e _) = pprPrec i e
 
-instance Pretty AttrInfo where
-  ppr (AttrAtom attr) = ppr attr
-  ppr (AttrComp f attrs) = ppr f <> parens (commasep $ map ppr attrs)
+instance IsName vn => Pretty (AttrAtom vn) where
+  ppr (AtomName v) = ppr v
+  ppr (AtomInt x) = ppr x
+
+instance IsName vn => Pretty (AttrInfo vn) where
+  ppr (AttrAtom attr _) = ppr attr
+  ppr (AttrComp f attrs _) = ppr f <> parens (commasep $ map ppr attrs)
 
 instance (Eq vn, IsName vn, Annot f) => Pretty (FieldBase f vn) where
   ppr (RecordFieldExplicit name e _) = ppr name <> equals <> ppr e
@@ -395,6 +407,7 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (PatBase f vn) where
     Nothing -> text "_"
   ppr (PatLit e _ _) = ppr e
   ppr (PatConstr n _ ps _) = text "#" <> ppr n <+> sep (map ppr ps)
+  ppr (PatAttr attr p _) = text "#[" <> ppr attr <> text "]" <+/> ppr p
 
 ppAscription :: Pretty t => Maybe t -> Doc
 ppAscription Nothing = mempty
@@ -433,11 +446,11 @@ instance Pretty Liftedness where
   ppr Lifted = text "^"
 
 instance (Eq vn, IsName vn, Annot f) => Pretty (TypeBindBase f vn) where
-  ppr (TypeBind name l params usertype _ _) =
+  ppr (TypeBind name l params te rt _ _) =
     text "type" <> ppr l <+> pprName name
       <+> spread (map ppr params)
       <+> equals
-      <+> ppr usertype
+      <+> maybe (ppr te) ppr (unAnnot rt)
 
 instance (Eq vn, IsName vn) => Pretty (TypeParamBase vn) where
   ppr (TypeParamDim name _) = brackets $ pprName name
@@ -455,8 +468,8 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (ValBindBase f vn) where
     where
       fun
         | isJust entry = "entry"
-        | otherwise = "let"
-      retdecl' = case (ppr . fst <$> unAnnot rettype) `mplus` (ppr <$> retdecl) of
+        | otherwise = "def"
+      retdecl' = case (ppr <$> unAnnot rettype) `mplus` (ppr <$> retdecl) of
         Just rettype' -> colon <+> align rettype'
         Nothing -> mempty
 

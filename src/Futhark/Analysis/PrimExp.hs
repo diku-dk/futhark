@@ -13,6 +13,7 @@ module Futhark.Analysis.PrimExp
     isInt32,
     isInt64,
     isBool,
+    isF16,
     isF32,
     isF64,
     evalPrimExp,
@@ -147,6 +148,10 @@ isInt64 = TPrimExp
 isBool :: PrimExp v -> TPrimExp Bool v
 isBool = TPrimExp
 
+-- | This expression is of type t'Half'.
+isF16 :: PrimExp v -> TPrimExp Half v
+isF16 = TPrimExp
+
 -- | This expression is of type t'Float'.
 isF32 :: PrimExp v -> TPrimExp Float v
 isF32 = TPrimExp
@@ -258,6 +263,10 @@ class NumExp t => FloatExp t where
   -- | Construct a typed expression from a rational.
   fromRational' :: Rational -> TPrimExp t v
 
+instance NumExp Half where
+  fromInteger' = isF16 . ValueExp . FloatValue . Float16Value . fromInteger
+  fromBoolExp = isF16 . ConvOpExp (SIToFP Int16 Float16) . ConvOpExp (BToI Int16) . untyped
+
 instance NumExp Float where
   fromInteger' = isF32 . ValueExp . FloatValue . Float32Value . fromInteger
   fromBoolExp = isF32 . ConvOpExp (SIToFP Int32 Float32) . ConvOpExp (BToI Int32) . untyped
@@ -265,6 +274,9 @@ instance NumExp Float where
 instance NumExp Double where
   fromInteger' = TPrimExp . ValueExp . FloatValue . Float64Value . fromInteger
   fromBoolExp = isF64 . ConvOpExp (SIToFP Int32 Float64) . ConvOpExp (BToI Int32) . untyped
+
+instance FloatExp Half where
+  fromRational' = TPrimExp . ValueExp . FloatValue . Float16Value . fromRational
 
 instance FloatExp Float where
   fromRational' = TPrimExp . ValueExp . FloatValue . Float32Value . fromRational
@@ -317,6 +329,24 @@ instance (FloatExp t, Pretty v) => Fractional (TPrimExp t v) where
     | otherwise = numBad "/" (x, y)
 
   fromRational = fromRational'
+
+instance Pretty v => Floating (TPrimExp Half v) where
+  x ** y = isF16 $ BinOpExp (FPow Float16) (untyped x) (untyped y)
+  pi = isF16 $ ValueExp $ FloatValue $ Float16Value pi
+  exp x = isF16 $ FunExp "exp16" [untyped x] $ FloatType Float16
+  log x = isF16 $ FunExp "log16" [untyped x] $ FloatType Float16
+  sin x = isF16 $ FunExp "sin16" [untyped x] $ FloatType Float16
+  cos x = isF16 $ FunExp "cos16" [untyped x] $ FloatType Float16
+  tan x = isF16 $ FunExp "tan16" [untyped x] $ FloatType Float16
+  asin x = isF16 $ FunExp "asin16" [untyped x] $ FloatType Float16
+  acos x = isF16 $ FunExp "acos16" [untyped x] $ FloatType Float16
+  atan x = isF16 $ FunExp "atan16" [untyped x] $ FloatType Float16
+  sinh x = isF16 $ FunExp "sinh16" [untyped x] $ FloatType Float16
+  cosh x = isF16 $ FunExp "cosh16" [untyped x] $ FloatType Float16
+  tanh x = isF16 $ FunExp "tanh16" [untyped x] $ FloatType Float16
+  asinh x = isF16 $ FunExp "asinh16" [untyped x] $ FloatType Float16
+  acosh x = isF16 $ FunExp "acosh16" [untyped x] $ FloatType Float16
+  atanh x = isF16 $ FunExp "atanh16" [untyped x] $ FloatType Float16
 
 instance Pretty v => Floating (TPrimExp Float v) where
   x ** y = isF32 $ BinOpExp (FPow Float32) (untyped x) (untyped y)

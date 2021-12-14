@@ -28,7 +28,7 @@
 -- A monad that implements 'MonadBuilder' tracks the statements added
 -- so far, the current names in scope, and allows you to add
 -- additional statements with 'addStm'.  Any monad that implements
--- 'MonadBuilder' also implements the t'REp' type family, which
+-- 'MonadBuilder' also implements the t'Rep' type family, which
 -- indicates which rep it works with.  Inside a 'MonadBuilder' we can
 -- use 'collectStms' to gather up the 'Stms' added with 'addStm' in
 -- some nested computation.
@@ -111,7 +111,6 @@ import Control.Monad.Identity
 import Control.Monad.State
 import Data.List (sortOn)
 import qualified Data.Map.Strict as M
-import qualified Data.Set as S
 import Futhark.Builder
 import Futhark.IR
 import Futhark.Util (maybeNth)
@@ -157,8 +156,6 @@ letSubExps ::
   m [SubExp]
 letSubExps desc = mapM $ letSubExp desc
 
--- | Only returns those pattern names that are not used in the pattern
--- itself (the "non-existential" part, you could say).
 letTupExp ::
   (MonadBuilder m) =>
   String ->
@@ -170,8 +167,7 @@ letTupExp name e = do
   e_t <- expExtType e
   names <- replicateM (length e_t) $ newVName name
   letBindNames names e
-  let ctx = shapeContext e_t
-  pure $ map fst $ filter ((`S.notMember` ctx) . snd) $ zip names [0 ..]
+  pure names
 
 letTupExp' ::
   (MonadBuilder m) =>
@@ -442,8 +438,8 @@ binLambda bop arg_t ret_t = do
   return
     Lambda
       { lambdaParams =
-          [ Param x (Prim arg_t),
-            Param y (Prim arg_t)
+          [ Param mempty x (Prim arg_t),
+            Param mempty y (Prim arg_t)
           ],
         lambdaReturnType = [Prim ret_t],
         lambdaBody = body
@@ -515,8 +511,8 @@ insertStmsM ::
   m (Body (Rep m)) ->
   m (Body (Rep m))
 insertStmsM m = do
-  (Body _ bnds res, otherbnds) <- collectStms m
-  mkBodyM (otherbnds <> bnds) res
+  (Body _ stms res, otherstms) <- collectStms m
+  mkBodyM (otherstms <> stms) res
 
 -- | Evaluate an action that produces a 'Result' and an auxiliary
 -- value, then return the body constructed from the 'Result' and any
@@ -544,9 +540,9 @@ mapResult ::
   (Result -> Body rep) ->
   Body rep ->
   Body rep
-mapResult f (Body _ bnds res) =
-  let Body _ bnds2 newres = f res
-   in mkBody (bnds <> bnds2) newres
+mapResult f (Body _ stms res) =
+  let Body _ stms2 newres = f res
+   in mkBody (stms <> stms2) newres
 
 -- | Instantiate all existential parts dimensions of the given
 -- type, using a monadic action to create the necessary t'SubExp's.

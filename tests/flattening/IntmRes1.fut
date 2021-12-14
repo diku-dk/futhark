@@ -12,10 +12,10 @@
 --    [24, 25, 26],
 --    [33, 34, 35]]
 -- }
-let addToRow [n] (xs: [n]i32, y: i32): [n]i32 =
+def addToRow [n] (xs: [n]i32, y: i32): [n]i32 =
   map (\(x: i32): i32  -> x+y) xs
 
-let main (xss: [][]i32) (cs: []i32) (y: i32): [][]i32 =
+def main (xss: [][]i32) (cs: []i32) (y: i32): [][]i32 =
   map  (\(xs: []i32, c: i32)  ->
          let y' = y * c + c
          let zs = addToRow(xs,y') in

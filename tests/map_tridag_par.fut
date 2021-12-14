@@ -22,7 +22,7 @@
 -- 0.590000f32, 0.800000f32, 1.040000f32, 1.340000f32, 1.710000f32,
 -- 2.170000f32] }
 
-let tridagPar [n] (a:  [n]f32, b: []f32, c: []f32, y: []f32 ): *[n]f32 =
+def tridagPar [n] (a:  [n]f32, b: []f32, c: []f32, y: []f32 ): *[n]f32 =
 ----------------------------------------------------
   -- Recurrence 1: b[i] = b[i] - a[i]*c[i-1]/b[i-1] --
   --   solved by scan with 2x2 matrix mult operator --
@@ -90,7 +90,7 @@ let tridagPar [n] (a:  [n]f32, b: []f32, c: []f32, y: []f32 ): *[n]f32 =
   let y    = map  (\i: f32  -> y[n-i-1]) (iota n)
   in y
 
-let map_tridag_par
+def map_tridag_par
         [inner][outer]
         (myD:  [inner][3]f32, myDD: [inner][3]f32,
          myMu: [outer][inner]f32,  myVar: [outer][inner]f32,
@@ -106,10 +106,10 @@ let map_tridag_par
           ) myMu myVar u
 
 -- To avoid floating-point jitter.
-let trunc2dec (x: f32) =
+def trunc2dec (x: f32) =
   f32.abs (f32.i32 (i32.f32 (x*100.0))/100.0)
 
-let main (outer: i64) (inner: i64) =
+def main (outer: i64) (inner: i64) =
   let myD = replicate inner [0.10, 0.20, 0.30]
   let myDD = replicate inner [0.20, 0.30, 0.40]
   let scale (s: i64) (x: i64) =

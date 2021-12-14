@@ -21,7 +21,8 @@ Identifiers and Keywords
 ------------------------
 
 .. productionlist::
-   id: `letter` (`letter` | "_" | "'")* | "_" `id`
+   id: `letter` `constituent`* | "_" `constituent`*
+   constituent: `letter` | `digit` | "_" | "'"
    quals: (`id` ".")+
    qualid: `id` | `quals` `id`
    binop: `opstartchar` `opchar`*
@@ -51,13 +52,12 @@ Primitive Types and Values
 Boolean literals are written ``true`` and ``false``.  The primitive
 types in Futhark are the signed integer types ``i8``, ``i16``,
 ``i32``, ``i64``, the unsigned integer types ``u8``, ``u16``, ``u32``,
-``u64``, the floating-point types ``f32``, ``f64``, as well as
-``bool``.  An ``f32`` is always a single-precision float and a ``f64``
-is a double-precision float.
+``u64``, the floating-point types ``f16``, ``f32``, ``f64``, as well
+as ``bool``.
 
 .. productionlist::
    int_type: "i8" | "i16" | "i32" | "i64" | "u8" | "u16" | "u32" | "u64"
-   float_type: "f32" | "f64"
+   float_type: "f16" | "f32" | "f64"
 
 Numeric literals can be suffixed with their intended type.  For
 example ``42i8`` is of type ``i8``, and ``1337e2f64`` is of type
@@ -104,6 +104,7 @@ Compound Types and Values
        : | `sum_type`
        : | `function_type`
        : | `type_application`
+       : | `existential_size`
 
 Compound types can be constructed based on the primitive types.  The
 Futhark type system is entirely structural, and type abbreviations are
@@ -134,14 +135,18 @@ comma-separated values enclosed in square brackets: ``[1,2,3]``.  An
 array type is written as ``[d]t``, where ``t`` is the element type of
 the array, and ``d`` is an integer or variable indicating the size.
 We can often elide ``d`` and write just ``[]`` (an *anonymous size*),
-in which case the size will be inferred.  As an example, an array of
-three integers could be written as ``[1,2,3]``, and has type
-``[3]i32``.  An empty array is written as ``[]``, and its type is
-inferred from its use.  When writing Futhark values for such uses as
-``futhark test`` (but not when writing programs), empty arrays are
-written ``empty([0]t)`` for an empty array of type ``[0]t``.  When
-using ``empty``, all dimensions must be given a size, and at least one
-must be zero, e.g. ``empty([2][0]i32)``.
+in which case the size will be inferred.  An anonymous size is a
+syntactic shorthand, and is always replaced by an actual size by the
+type checker (either via inference or by inventing a new name,
+depending on context).
+
+As an example, an array of three integers could be written as
+``[1,2,3]``, and has type ``[3]i32``.  An empty array is written as
+``[]``, and its type is inferred from its use.  When writing Futhark
+values for such uses as ``futhark test`` (but not when writing
+programs), empty arrays are written ``empty([0]t)`` for an empty array
+of type ``[0]t``.  When using ``empty``, all dimensions must be given
+a size, and at least one must be zero, e.g. ``empty([2][0]i32)``.
 
 Multi-dimensional arrays are supported in Futhark, but they must be
 *regular*, meaning that all inner arrays must have the same shape.
@@ -200,6 +205,13 @@ encoded arrays of ``u8`` values.  There is no character type in
 Futhark, but character literals are interpreted as integers of the
 corresponding Unicode code point.
 
+.. productionlist::
+   existential_size: "?" ("[" `id` "]")+ "." `type`
+
+An existential size quantifier brings an unknown size into scope
+within a type.  This can be used to encode constraints for statically
+unknowable array sizes.
+
 Declarations
 ------------
 
@@ -208,7 +220,7 @@ declaration is processed in order, and a declaration can only refer to
 names bound by preceding declarations.
 
 .. productionlist::
-   dec:   `fun_bind` | `val_bind` | `type_bind` | `mod_bind` | `mod_type_bind`
+   dec:   `val_bind` | `type_bind` | `mod_bind` | `mod_type_bind`
       : | "open" `mod_exp`
       : | "import" `stringlit`
       : | "local" `dec`
@@ -227,17 +239,16 @@ Declaring Functions and Values
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. productionlist::
-   fun_bind:   ("let" | "entry") (`id` | "(" `binop` ")") `type_param`* `pat`+ [":" `type`] "=" `exp`
-           : | ("let" | "entry") `pat` `binop` `pat` [":" `type`] "=" `exp`
+   val_bind:   ("def" | "entry" | "let") (`id` | "(" `binop` ")") `type_param`* `pat`+ [":" `type`] "=" `exp`
+           : | ("def" | "entry" | "let") `pat` `binop` `pat` [":" `type`] "=" `exp`
 
-.. productionlist::
-   val_bind: "let" `id` [":" `type`] "=" `exp`
+**Note:** using ``let`` to define top-level bindings is deprecated.
 
-Functions and values must be defined before they are used.  A function
+Functions and constants must be defined before they are used.  A function
 declaration must specify the name, parameters, and body
 of the function::
 
-  let name params...: rettype = body
+  def name params...: rettype = body
 
 Hindley-Milner-style type inference is supported.  A parameter may be
 given a type with the notation ``(name: type)``.  Functions may not be
@@ -246,13 +257,13 @@ parameter types; see `Size Types`_.  A function can be *polymorphic*
 by using type parameters, in the same way as for `Type
 Abbreviations`_::
 
-  let reverse [n] 't (xs: [n]t): [n]t = xs[::-1]
+  def reverse [n] 't (xs: [n]t): [n]t = xs[::-1]
 
 Type parameters for a function do not need to cover the types of all
 parameters.  The type checker will add more if necessary.  For
 example, the following is well typed::
 
-  let pair 'a (x: a) y = (x, y)
+  def pair 'a (x: a) y = (x, y)
 
 A new type variable will be invented for the parameter ``y``.
 
@@ -262,7 +273,7 @@ passed for a type parameter *t*, all other arguments passed of type
 *t* must have the same shape as *v*.  For example, consider the following
 definition::
 
-  let pair 't (x: t) (y: t) = (x, y)
+  def pair 't (x: t) (y: t) = (x, y)
 
 The application ``pair [1] [2,3]`` will fail at run-time.
 
@@ -275,16 +286,16 @@ User-Defined Operators
 
 Infix operators are defined much like functions::
 
-  let (p1: t1) op (p2: t2): rt = ...
+  def (p1: t1) op (p2: t2): rt = ...
 
 For example::
 
-  let (a:i32,b:i32) +^ (c:i32,d:i32) = (a+c, b+d)
+  def (a:i32,b:i32) +^ (c:i32,d:i32) = (a+c, b+d)
 
 We can also define operators by enclosing the operator name in
 parentheses and suffixing the parameters, as an ordinary function::
 
-  let (+^) (a:i32,b:i32) (c:i32,d:i32) = (a+c, b+d)
+  def (+^) (a:i32,b:i32) (c:i32,d:i32) = (a+c, b+d)
 
 This is necessary when defining a polymorphic operator.
 
@@ -308,7 +319,7 @@ inaccessible, except through the ``intrinsics`` module.
 An infix operator can also be defined with prefix notation, like an
 ordinary function, by enclosing it in parentheses::
 
-  let (+) (x: i32) (y: i32) = x - y
+  def (+) (x: i32) (y: i32) = x - y
 
 This is necessary when defining operators that take type or shape
 parameters.
@@ -318,7 +329,7 @@ parameters.
 Entry Points
 ~~~~~~~~~~~~
 
-Apart from declaring a function with the keyword ``let``, it can also
+Apart from declaring a function with the keyword ``def``, it can also
 be declared with ``entry``.  When the Futhark program is compiled any
 top-level function declared with ``entry`` will be exposed as an entry
 point.  If the Futhark program has been compiled as a library, these
@@ -337,7 +348,7 @@ Value Declarations
 
 A named value/constant can be declared as follows::
 
-  let name: type = definition
+  def name: type = definition
 
 The definition can be an arbitrary expression, including function
 calls and other values, although they must be in scope before the
@@ -345,6 +356,8 @@ value is defined.  A constant value may not have a unique type (see
 `In-place updates`_).  If the return type contains any anonymous sizes
 (see `Size types`_), new existential sizes will be constructed for
 them.
+
+.. _typeabbrevs:
 
 Type Abbreviations
 ~~~~~~~~~~~~~~~~~~
@@ -359,12 +372,12 @@ name ``t1`` can be used as a shorthand for the type ``t2``.  Type
 abbreviations do not create distinct types: the types ``t1`` and
 ``t2`` are entirely interchangeable.
 
-If the right-hand side of a type contains anonymous sizes, it must be
-declared "size-lifted" with ``type~``.  If it (potentially) contains a
-function, it must be declared "fully lifted" with ``type^``.  A lifted
-type can also contain anonymous sizes.  Lifted types cannot be put in
-arrays.  Fully lifted types cannot be returned from conditional or
-loop expressions.
+If the right-hand side of a type contains existential sizes, it must
+be declared "size-lifted" with ``type~``.  If it (potentially)
+contains a function, it must be declared "fully lifted" with
+``type^``.  A lifted type can also contain existential sizes.  Lifted
+types cannot be put in arrays.  Fully lifted types cannot be returned
+from conditional or loop expressions.
 
 A type abbreviation can have zero or more parameters.  A type
 parameter enclosed with square brackets is a *size parameter*, and
@@ -375,7 +388,7 @@ brackets.  Example::
 
   type two_intvecs [n] = ([n]i32, [n]i32)
 
-  let x: two_intvecs [2] = (iota 2, replicate 2 0)
+  def x: two_intvecs [2] = (iota 2, replicate 2 0)
 
 Size parameters work much like shape declarations for arrays.  Like
 shape declarations, they can be elided via square brackets containing
@@ -390,7 +403,7 @@ prefixed with single quotes::
 
   type two_vecs [n] 't = ([n]t, [n]t)
   type two_intvecs [n] = two_vecs [n] i32
-  let x: two_vecs [2] i32 = (iota 2, replicate 2 0)
+  def x: two_vecs [2] i32 = (iota 2, replicate 2 0)
 
 A *size-lifted type parameter* is prefixed with ``'~``, and a *fully
 lifted type parameter* with ``'^``.  These have the same rules and
@@ -443,7 +456,7 @@ literals and variables, but also more complicated forms.
       : | "let" `id` `type_param`* `pat`+ [":" `type`] "=" `exp` "in" `exp`
       : | "(" "\" `pat`+ [":" `type`] "->" `exp` ")"
       : | "loop" `pat` [("=" `exp`)] `loopform` "do" `exp`
-      : | "#[" attr "]" `exp`
+      : | "#[" `attr` "]" `exp`
       : | "unsafe" `exp`
       : | "assert" `atom` `atom`
       : | `exp` "with" "[" `index` ("," `index`)* "]" "=" `exp`
@@ -453,7 +466,7 @@ literals and variables, but also more complicated forms.
         : | `id`
    size : "[" `id` "]"
    pat:   `id`
-      : | `literal`
+      : | `pat_literal`
       : |  "_"
       : | "(" ")"
       : | "(" `pat` ")"
@@ -462,6 +475,12 @@ literals and variables, but also more complicated forms.
       : | "{" `fieldid` ["=" `pat`] ("," `fieldid` ["=" `pat`])* "}"
       : | `constructor` `pat`*
       : | `pat` ":" `type`
+      : | "#[" `attr` "]" `pat`
+   pat_literal: [ "-" ] `intnumber`
+              | [ "-" ] `floatnumber`
+              | `charlit`
+              | "true"
+              | "false"
    loopform :   "for" `id` "<" `exp`
             : | "for" `pat` "in" `exp`
             : | "while" `exp`
@@ -487,7 +506,7 @@ in natural text.
 * An expression ``x.y`` may either be a reference to the name ``y`` in
   the module ``x``, or the field ``y`` in the record ``x``.  Modules
   and values occupy the same name space, so this is disambiguated by
-  the type of ``x``.
+  whether ``x`` is a value or module.
 
 * A type ascription (``exp : type``) cannot appear as an array
   index, as it conflicts with the syntax for slicing.
@@ -520,6 +539,7 @@ in natural text.
   =================  =============
   left               ``,``
   left               ``:``, ``:>``
+  left               ```op```
   left               ``||``
   left               ``&&``
   left               ``<=`` ``>=`` ``>`` ``<`` ``==`` ``!=``
@@ -758,6 +778,11 @@ are:
 
       Company any two values of numeric type for equality.
 
+  ```op```
+
+      Use ``op``, which may be any non-operator function name, as an
+      infix operator.
+
 ``x && y``
 ..........
 
@@ -833,6 +858,8 @@ corruption.
 
 This construct is deprecated.  Use the ``#[unsafe]`` attribute instead.
 
+.. _assert:
+
 ``assert cond e``
 .................
 
@@ -846,6 +873,8 @@ variable), dead code elimination may remove the assertion.
 
 Return ``a``, but with the element at position ``i`` changed to
 contain the result of evaluating ``e``.  Consumes ``a``.
+
+.. _record_update:
 
 ``r with f = e``
 .................
@@ -1029,15 +1058,20 @@ parameters), as well as in return types, *size annotations* may be
 used to express invariants about the shapes of arrays that are
 accepted or produced by the function.  For example::
 
-  let f [n] (a: [n]i32) (b: [n]i32): [n]i32 =
+  def f [n] (a: [n]i32) (b: [n]i32): [n]i32 =
     map2 (+) a b
 
 We use a *size parameter*, ``[n]``, to explicitly quantify sizes.  The
 ``[n]`` parameter is not explicitly passed when calling ``f``.
 Rather, its value is implicitly deduced from the arguments passed for
-the value parameters.  An array can contain *anonymous dimensions*,
-e.g. ``[]i32``, for which the type checker will invent fresh size
-parameters, which ensures that all arrays have a (symbolic) size.
+the value parameters.  An array type can contain *anonymous
+dimensions*, e.g. ``[]i32``, for which the type checker will invent
+fresh size parameters, which ensures that all arrays have a (symbolic)
+size.  On the right-hand side of a function arrow ("return types"),
+this results in an *existential size* that is not known until the
+function is fully applied, e.g::
+
+  val filter [n] 'a : (p: a -> bool) -> (as: [n]a) -> ?[k].[k]a
 
 A size annotation can also be an integer constant (with no suffix).
 Size parameters can be used as ordinary variables within the scope of
@@ -1047,7 +1081,7 @@ constraints imposed by size annotations.
 *Size-dependent types* are supported, as the names of parameters can
 be used in the return type of a function::
 
-  let replicate 't (n: i64) (x: t): [n]t = ...
+  def replicate 't (n: i64) (x: t): [n]t = ...
 
 An application ``replicate 10 0`` will have type ``[10]i32``.
 
@@ -1066,14 +1100,14 @@ operation.  For example, the type of ``concat`` should conceptually be::
   val concat [n] [m] 't : [n]t -> [m]t -> [n+m]t
 
 But this is not presently allowed.  Instead, the return type contains
-an anonymous size::
+an existential size::
 
-  val concat [n] [m] 't : [n]t -> [m]t -> []t
+  val concat [n] [m] 't : [n]t -> [m]t -> ?[k].[k]t
 
 When an application ``concat xs ys`` is found, the result will be of
-type ``[k]t``, where ``k`` is a fresh *unknown* size variable that is
-considered distinct from every other size in the program.  It is often
-necessary to perform a size coercion (see `Size coercion`_) to
+type ``[k']t``, where ``k'`` is a fresh *unknown* size variable that
+is considered distinct from every other size in the program.  It is
+often necessary to perform a size coercion (see `Size coercion`_) to
 convert an unknown size to a known size.
 
 Generally, unknown sizes are constructed whenever the true size cannot
@@ -1122,19 +1156,19 @@ Most complex ranges, such as ``a..<b``, will have an unknown size.
 Exceptions exist for :ref:`general ranges <range>` and :ref:`"upto"
 ranges <range_upto>`.
 
-Anonymous size in function return type
-......................................
+Existential size in function return type
+........................................
 
-Whenever the result of a function application would have an anonymous
+Whenever the result of a function application has an existential
 size, that size is replaced with a fresh unknown size variable.
 
 For example, ``filter`` has the following type::
 
-  val filter [n] 'a : (p: a -> bool) -> (as: [n]a) -> []a
+  val filter [n] 'a : (p: a -> bool) -> (as: [n]a) -> ?[k].[k]a
 
-Naively, an application ``filter f xs`` seems like it would have type
-``[]a``, but a fresh unknown size ``k`` will be created and the actual
-type will be ``[k]a``.
+For an application ``filter f xs``, the type checker invents a fresh
+unknown size ``k'``, and the actual type for this specific application
+will be ``[k']a``.
 
 Branches of ``if`` return arrays of different sizes
 ...................................................
@@ -1176,12 +1210,14 @@ runtime-checked coercion of one size to another.  Since size
 annotations can refer only to variables and constants, this is
 necessary when writing more complicated size functions::
 
-  let concat_to 'a (m: i32) (a: []a) (b: []a) : [m]a =
+  def concat_to 'a (m: i32) (a: []a) (b: []a) : [m]a =
     a ++ b :> [m]a
 
 Only expression-level type annotations give rise to run-time checks.
 Despite their similar syntax, parameter and return type annotations
 must be valid at compile-time, or type checking will fail.
+
+.. _causality:
 
 Causality restriction
 ~~~~~~~~~~~~~~~~~~~~~
@@ -1191,11 +1227,11 @@ sizes of concrete values passed along as parameters.  This means that
 any size parameter must be used as the size of some parameter.  This
 is an error::
 
-  let f [n] (x: i32) = n
+  def f [n] (x: i32) = n
 
 The following is not an error::
 
-  let f [n] (g: [n]i32 -> [n]i32) = ...
+  def f [n] (g: [n]i32 -> [n]i32) = ...
 
 However, using this function comes with a constraint: whenever an
 application ``f x`` occurs, the value of the size parameter must be
@@ -1211,7 +1247,7 @@ The causality restriction only occurs when a function has size
 parameters whose first use is *not* as a concrete array size.  For
 example, it does not apply to uses of the following function::
 
-  let f [n] (arr: [n]i32) (g: [n]i32 -> [n]i32) = ...
+  def f [n] (arr: [n]i32) (g: [n]i32 -> [n]i32) = ...
 
 This is because the proper value of ``n`` can be read directly from
 the actual size of the array.
@@ -1225,7 +1261,7 @@ example, in the following program we are forcing the elements of ``a``
 to be the same as the elements of ``b``, but the size of the elements
 of ``b`` are not known at the time ``a`` is constructed::
 
-  let main (b: bool) (xs: []i32) =
+  def main (b: bool) (xs: []i32) =
     let a = [] : [][]i32
     let b = [filter (>0) xs]
     in a[0] == b[0]
@@ -1241,7 +1277,7 @@ This is illegal::
 
   type sum = #foo ([]i32) | #bar ([]i32)
 
-  let main (xs: *[]i32) =
+  def main (xs: *[]i32) =
     let v : sum = #foo xs
     in xs
 
@@ -1251,8 +1287,8 @@ Modules
 When matching a module with a module type (see :ref:`module-system`),
 a non-lifted abstract type (i.e. one that is declared with ``type``
 rather than ``type^``) may not be implemented by a type abbreviation
-that contains any anonymous sizes.  This is to ensure that if we have
-the following::
+that contains any existential sizes.  This is to ensure that if we
+have the following::
 
   module m : { type t } = ...
 
@@ -1264,20 +1300,20 @@ Higher-order functions
 
 When a higher-order function takes a functional argument whose return
 type is a non-lifted type parameter, any instantiation of that type
-parameter must have a non-anonymous size.  If the return type is a
-lifted type parameter, then the instantiation may contain anonymous
+parameter must have a non-existential size.  If the return type is a
+lifted type parameter, then the instantiation may contain existential
 sizes.  This is why the type of ``map`` guarantees regular arrays::
 
   val map [n] 'a 'b : (a -> b) -> [n]a -> [n]b
 
 The type parameter ``b`` can only be replaced with a type that has
-non-anonymous sizes, which means they must be the same for every
+non-existential sizes, which means they must be the same for every
 application of the function.  In contrast, this is the type of the
 pipeline operator::
 
   val (|>) '^a -> '^b : a -> (a -> b) -> b
 
-The provided function can return something with an anonymous size
+The provided function can return something with an existential size
 (such as ``filter``).
 
 A function whose return type has an unknown size
@@ -1285,7 +1321,7 @@ A function whose return type has an unknown size
 
 If a function (named or anonymous) is inferred to have a return type
 that contains an unknown size variable created *within* the function
-body, that size variable will be replaced with an anonymous size.  In
+body, that size variable will be replaced with an existential size.  In
 most cases this is not important, but it means that an expression like
 the following is ill-typed::
 
@@ -1293,7 +1329,7 @@ the following is ill-typed::
 
 This is because the ``(length xs)`` expression gives rise to some
 fresh size ``k``.  The lambda is then assigned the type ``[n]t ->
-[k]i32``, which is immediately turned into ``[n]t -> []i32`` because
+[k]i32``, which is immediately turned into ``[n]t -> ?[k].[k]i32`` because
 ``k`` was generated inside its body.  A function of this type cannot
 be passed to ``map``, as explained before.  The solution is to bind
 ``length`` to a name *before* the lambda.
@@ -1322,6 +1358,15 @@ of ``square``::
 
   val g : () -> [][]i32
 
+As this above would be elaborated as follows::
+
+  val g : () -> ?[n][m].[n][m]i32
+
+We can of course explicitly write that the function returns a square
+array of existential size::
+
+  val g : () -> ?[n].[n]i32
+
 .. _in-place-updates:
 
 In-place Updates
@@ -1342,7 +1387,7 @@ Generally, most language constructs produce new arrays, but some
 When defining a function parameter or return type, we can mark it as
 *unique* by prefixing it with an asterisk.  For example::
 
-  let modify (a: *[]i32) (i: i32) (x: i32): *[]i32 =
+  def modify (a: *[]i32) (i: i32) (x: i32): *[]i32 =
     a with [i] = a[i] + x
 
 For bulk in-place updates with multiple values, use the ``scatter``
@@ -1432,7 +1477,7 @@ enclosed in curly braces::
 
   module Vec3 = {
     type t = ( f32 , f32 , f32 )
-    let add(a: t) (b: t): t =
+    def add(a: t) (b: t): t =
       let (a1, a2, a3) = a in
       let (b1, b2, b3) = b in
       (a1 + b1, a2 + b2 , a3 + b3)
@@ -1444,7 +1489,7 @@ Functions and types within modules can be accessed using dot
 notation::
 
     type vector = Vec3.t
-    let double(v: vector): vector = Vec3.add v v
+    def double(v: vector): vector = Vec3.add v v
 
 We can also use ``open Vec3`` to bring the names defined by ``Vec3``
 into the current scope.  Multiple modules can be opened simultaneously
@@ -1499,7 +1544,7 @@ Parametric modules allow us to write definitions that abstract over
 modules.  For example::
 
   module Times = \(M: Addable) -> {
-    let times (x: M.t) (k: i32): M.t =
+    def times (x: M.t) (k: i32): M.t =
       loop x' = x for i < k do
         M.add x' x
   }
@@ -1639,18 +1684,19 @@ Attributes
 
 .. productionlist::
    attr:   `id`
+       :   `decimal`
        : | `id` "(" [`attr` ("," `attr`)*] ")"
 
-An expression, declaration, or module type spec can be prefixed with
-an attribute, written as ``#[attr]``.  This may affect how it is
-treated by the compiler or other tools.  In no case will attributes
-affect or change the *semantics* of a program, but it may affect how
-well it compiles and runs (or in some cases, whether it compiles or
-runs at all).  Unknown attributes are silently ignored.  Most have no
-effect in the interpreter.  An attribute can be either an *atom*,
-written as just an identifier, or *compound*, consisting of an
-identifier and a comma-separated sequence of attributes.  The latter
-is used for grouping and encoding of more complex information.
+An expression, declaration, pattern, or module type spec can be
+prefixed with an attribute, written as ``#[attr]``.  This may affect
+how it is treated by the compiler or other tools.  In no case will
+attributes affect or change the *semantics* of a program, but it may
+affect how well it compiles and runs (or in some cases, whether it
+compiles or runs at all).  Unknown attributes are silently ignored.
+Most have no effect in the interpreter.  An attribute can be either an
+*atom*, written as an identifier or number, or *compound*, consisting
+of an identifier and a comma-separated sequence of attributes.  The
+latter is used for grouping and encoding of more complex information.
 
 Expression attributes
 ~~~~~~~~~~~~~~~~~~~~~
@@ -1776,6 +1822,18 @@ The following declaration attributes are supported.
 Do not inline any calls to this function.  If the function is then
 used within a parallel construct (e.g. ``map``), this will likely
 prevent the GPU backends from generating working code.
+
+``inline``
+..........
+
+Always inline calls to this function.
+
+Pattern attributes
+~~~~~~~~~~~~~~~~~~
+
+No pattern attributes are currently supported by the compiler itself,
+although they are syntactically permitted and may be used by other
+tools.
 
 Spec attributes
 ~~~~~~~~~~~~~~~

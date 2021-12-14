@@ -3,8 +3,8 @@
 -- ==
 -- error:
 
-let cond '^a (b : bool) (x : a) (y : a) : a =
+def cond '^a (b : bool) (x : a) (y : a) : a =
   if b then x else y
 
-let main (b : bool) (x : i32) : i32 =
+def main (b : bool) (x : i32) : i32 =
   cond b x 0

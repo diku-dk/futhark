@@ -3,9 +3,9 @@
 -- because the simplifier will have removed them, but they sometimes
 -- occur after loop interchange.
 -- ==
--- structure distributed { SegMap 1 }
+-- structure gpu { SegMap 1 }
 
-let main [n] (datas: *[][n]i32) (is: []i64) =
+def main [n] (datas: *[][n]i32) (is: []i64) =
   #[incremental_flattening(only_inner)]
   map (\(data: [n]i32, old_data: [n]i32) ->
        let (data, _) =

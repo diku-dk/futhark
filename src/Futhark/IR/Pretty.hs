@@ -10,6 +10,7 @@
 -- the interface from 'Pretty'.
 module Futhark.IR.Pretty
   ( prettyTuple,
+    prettyTupleLines,
     pretty,
     PrettyRep (..),
     ppTuple',
@@ -110,7 +111,8 @@ instance PrettyRep rep => Pretty (Body rep) where
         </> text "in" <+> braces (commasep $ map ppr res)
 
 instance Pretty Attr where
-  ppr (AttrAtom v) = ppr v
+  ppr (AttrName v) = ppr v
+  ppr (AttrInt x) = ppr x
   ppr (AttrComp f attrs) = ppr f <> parens (commasep $ map ppr attrs)
 
 attrAnnots :: Attrs -> [Doc]
@@ -129,6 +131,9 @@ certAnnots cs
 stmCertAnnots :: Stm rep -> [Doc]
 stmCertAnnots = certAnnots . stmAuxCerts . stmAux
 
+instance Pretty Attrs where
+  ppr = spread . attrAnnots
+
 instance Pretty (PatElemT dec) => Pretty (PatT dec) where
   ppr (Pat xs) = braces $ commastack $ map ppr xs
 
@@ -136,10 +141,11 @@ instance Pretty t => Pretty (PatElemT t) where
   ppr (PatElem name t) = ppr name <+> colon <+> align (ppr t)
 
 instance Pretty t => Pretty (Param t) where
-  ppr (Param name t) = ppr name <+> colon <+> align (ppr t)
+  ppr (Param attrs name t) =
+    annot (attrAnnots attrs) $ ppr name <+> colon <+> align (ppr t)
 
 instance PrettyRep rep => Pretty (Stm rep) where
-  ppr bnd@(Let pat aux e) =
+  ppr stm@(Let pat aux e) =
     align . hang 2 $
       text "let" <+> align (ppr pat)
         <+> case (linebreak, stmannot) of
@@ -158,8 +164,8 @@ instance PrettyRep rep => Pretty (Stm rep) where
       stmannot =
         concat
           [ maybeToList (ppExpDec (stmAuxDec aux) e),
-            stmAttrAnnots bnd,
-            stmCertAnnots bnd
+            stmAttrAnnots stm,
+            stmCertAnnots stm
           ]
 
 instance Pretty a => Pretty (Slice a) where
@@ -302,13 +308,16 @@ instance PrettyRep rep => Pretty (Lambda rep) where
   ppr (Lambda [] (Body _ stms []) []) | stms == mempty = text "nilFn"
   ppr (Lambda params body rettype) =
     text "\\" <+> ppTuple' params
-      <+/> colon <+> ppTuple' rettype <+> text "->"
+      <+/> colon <+> ppTupleLines' rettype <+> text "->"
       </> indent 2 (ppr body)
 
 instance Pretty EntryPointType where
   ppr (TypeDirect u) = ppr u <> "direct"
   ppr (TypeUnsigned u) = ppr u <> "unsigned"
   ppr (TypeOpaque u desc n) = ppr u <> "opaque" <> apply [ppr (show desc), ppr n]
+
+instance Pretty EntryParam where
+  ppr (EntryParam name t) = ppr name <> colon <+> ppr t
 
 instance PrettyRep rep => Pretty (FunDef rep) where
   ppr (FunDef entry attrs name rettype fparams body) =
@@ -345,3 +354,7 @@ instance Pretty d => Pretty (DimIndex d) where
 -- | Like 'prettyTuple', but produces a 'Doc'.
 ppTuple' :: Pretty a => [a] -> Doc
 ppTuple' ets = braces $ commasep $ map (align . ppr) ets
+
+-- | Like 'prettyTupleLines', but produces a 'Doc'.
+ppTupleLines' :: Pretty a => [a] -> Doc
+ppTupleLines' ets = braces $ stack $ punctuate comma $ map (align . ppr) ets

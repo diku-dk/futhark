@@ -2,7 +2,7 @@
 -- ==
 -- input { 1 2 } output { 1 2 }
 
-let curry f x y = f (x, y)
-let id x = x
+def curry f x y = f (x, y)
+def id x = x
 
-let main (x: i32) (y: i32) = curry id x y
+def main (x: i32) (y: i32) = curry id x y

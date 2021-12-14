@@ -51,10 +51,8 @@ addValBind :: ValBind -> LiftM ()
 addValBind vb = modify $ \s ->
   s
     { stateValBinds = vb : stateValBinds s,
-      stateGlobal = foldl' (flip S.insert) (stateGlobal s) names
+      stateGlobal = foldl' (flip S.insert) (stateGlobal s) (valBindBound vb)
     }
-  where
-    names = valBindName vb : snd (unInfo (valBindRetType vb))
 
 replacing :: VName -> Exp -> LiftM a -> LiftM a
 replacing v e = local $ \env ->
@@ -73,18 +71,18 @@ existentials e =
       m = identityMapper {mapOnExp = \e' -> modify (<> existentials e') >> pure e'}
    in execState (astMap m e) here
 
-liftFunction :: VName -> [TypeParam] -> [Pat] -> StructType -> Exp -> LiftM Exp
-liftFunction fname tparams params ret funbody = do
+liftFunction :: VName -> [TypeParam] -> [Pat] -> StructRetType -> Exp -> LiftM Exp
+liftFunction fname tparams params (RetType dims ret) funbody = do
   -- Find free variables
   global <- gets stateGlobal
   let bound =
         global
           <> foldMap patNames params
           <> S.fromList (map typeParamName tparams)
-          <> existentials funbody
+          <> S.fromList dims
 
       free =
-        let immediate_free = FV.freeVars funbody `FV.without` bound
+        let immediate_free = FV.freeVars funbody `FV.without` (bound <> existentials funbody)
             sizes_in_free =
               foldMap typeDimNames $
                 M.elems $ FV.unNameSet immediate_free
@@ -111,7 +109,7 @@ liftFunction fname tparams params ret funbody = do
         valBindTypeParams = tparams,
         valBindParams = free_params ++ params,
         valBindRetDecl = Nothing,
-        valBindRetType = Info (ret, mempty),
+        valBindRetType = Info (RetType dims ret),
         valBindBody = funbody,
         valBindDoc = Nothing,
         valBindAttrs = mempty,
@@ -124,10 +122,10 @@ liftFunction fname tparams params ret funbody = do
       (Var (qualName fname) (Info (augType $ free_dims ++ free_nondims)) mempty)
       $ free_dims ++ free_nondims
   where
-    orig_type = funType params ret
+    orig_type = funType params $ RetType dims ret
     mkParam (v, t) = Id v (Info (fromStruct t)) mempty
     freeVar (v, t) = Var (qualName v) (Info (fromStruct t)) mempty
-    augType rem_free = fromStruct $ funType (map mkParam rem_free) orig_type
+    augType rem_free = fromStruct $ funType (map mkParam rem_free) $ RetType [] orig_type
 
     apply :: Exp -> [(VName, StructType)] -> Exp
     apply f [] = f

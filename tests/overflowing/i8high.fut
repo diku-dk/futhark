@@ -1,4 +1,4 @@
 -- ==
 -- error: (out of bounds.*)
 
-let main : i8 = 128
+def main : i8 = 128

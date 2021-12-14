@@ -1,4 +1,5 @@
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE TupleSections #-}
 
@@ -17,6 +18,7 @@ import Data.List (intercalate)
 import Futhark.CodeGen.Backends.COpenCL.Boilerplate
 import qualified Futhark.CodeGen.Backends.GenericC as GC
 import Futhark.CodeGen.Backends.GenericC.Options
+import Futhark.CodeGen.Backends.SimpleRep (primStorageType, toStorage)
 import Futhark.CodeGen.ImpCode.OpenCL
 import qualified Futhark.CodeGen.ImpGen.OpenCL as ImpGen
 import Futhark.IR.GPUMem hiding
@@ -27,6 +29,7 @@ import Futhark.IR.GPUMem hiding
 import Futhark.MonadFreshNames
 import qualified Language.C.Quote.OpenCL as C
 import qualified Language.C.Syntax as C
+import NeatInterpolation (untrimming)
 
 -- | Compile the program to C with calls to OpenCL.
 compileProg :: MonadFreshNames m => Prog GPUMem -> m (ImpGen.Warnings, GC.CParts)
@@ -81,16 +84,16 @@ compileProg prog = do
           GC.opsFatMemory = True
         }
     include_opencl_h =
-      unlines
-        [ "#define CL_TARGET_OPENCL_VERSION 120",
-          "#define CL_USE_DEPRECATED_OPENCL_1_2_APIS",
-          "#ifdef __APPLE__",
-          "#define CL_SILENCE_DEPRECATION",
-          "#include <OpenCL/cl.h>",
-          "#else",
-          "#include <CL/cl.h>",
-          "#endif"
-        ]
+      [untrimming|
+       #define CL_TARGET_OPENCL_VERSION 120
+       #define CL_USE_DEPRECATED_OPENCL_1_2_APIS
+       #ifdef __APPLE__
+       #define CL_SILENCE_DEPRECATION
+       #include <OpenCL/cl.h>
+       #else
+       #include <CL/cl.h>
+       #endif
+       |]
 
 cliOptions :: [Option]
 cliOptions =
@@ -208,7 +211,7 @@ readOpenCLScalar _ _ _ space _ =
 
 allocateOpenCLBuffer :: GC.Allocate OpenCL ()
 allocateOpenCLBuffer mem size tag "device" =
-  GC.stm [C.cstm|OPENCL_SUCCEED_OR_RETURN(opencl_alloc(&ctx->opencl, $exp:size, $exp:tag, &$exp:mem));|]
+  GC.stm [C.cstm|OPENCL_SUCCEED_OR_RETURN(opencl_alloc(&ctx->opencl, (size_t)$exp:size, $exp:tag, &$exp:mem));|]
 allocateOpenCLBuffer _ _ _ space =
   error $ "Cannot allocate in '" ++ space ++ "' space."
 
@@ -229,7 +232,7 @@ copyOpenCLMemory destmem destidx DefaultSpace srcmem srcidx (Space "device") nby
       OPENCL_SUCCEED_OR_RETURN(
         clEnqueueReadBuffer(ctx->opencl.queue, $exp:srcmem,
                             ctx->failure_is_an_option ? CL_FALSE : CL_TRUE,
-                            $exp:srcidx, $exp:nbytes,
+                            (size_t)$exp:srcidx, (size_t)$exp:nbytes,
                             $exp:destmem + $exp:destidx,
                             0, NULL, $exp:(profilingEvent copyHostToDev)));
       if (ctx->failure_is_an_option &&
@@ -242,7 +245,7 @@ copyOpenCLMemory destmem destidx (Space "device") srcmem srcidx DefaultSpace nby
     if ($exp:nbytes > 0) {
       OPENCL_SUCCEED_OR_RETURN(
         clEnqueueWriteBuffer(ctx->opencl.queue, $exp:destmem, CL_TRUE,
-                             $exp:destidx, $exp:nbytes,
+                             (size_t)$exp:destidx, (size_t)$exp:nbytes,
                              $exp:srcmem + $exp:srcidx,
                              0, NULL, $exp:(profilingEvent copyDevToHost)));
     }
@@ -256,8 +259,8 @@ copyOpenCLMemory destmem destidx (Space "device") srcmem srcidx (Space "device")
       OPENCL_SUCCEED_OR_RETURN(
         clEnqueueCopyBuffer(ctx->opencl.queue,
                             $exp:srcmem, $exp:destmem,
-                            $exp:srcidx, $exp:destidx,
-                            $exp:nbytes,
+                            (size_t)$exp:srcidx, (size_t)$exp:destidx,
+                            (size_t)$exp:nbytes,
                             0, NULL, $exp:(profilingEvent copyDevToDev)));
       if (ctx->debugging) {
         OPENCL_SUCCEED_FATAL(clFinish(ctx->opencl.queue));
@@ -280,7 +283,7 @@ staticOpenCLArray name "device" t vs = do
   name_realtype <- newVName $ baseString name ++ "_realtype"
   num_elems <- case vs of
     ArrayValues vs' -> do
-      let vs'' = [[C.cinit|$exp:v|] | v <- map GC.compilePrimValue vs']
+      let vs'' = [[C.cinit|$exp:v|] | v <- vs']
       GC.earlyDecl [C.cedecl|static $ty:ct $id:name_realtype[$int:(length vs'')] = {$inits:vs''};|]
       return $ length vs''
     ArrayZeros n -> do
@@ -313,10 +316,10 @@ staticOpenCLArray _ space _ _ =
 
 callKernel :: GC.OpCompiler OpenCL ()
 callKernel (GetSize v key) =
-  GC.stm [C.cstm|$id:v = ctx->sizes.$id:key;|]
+  GC.stm [C.cstm|$id:v = *ctx->tuning_params.$id:key;|]
 callKernel (CmpSizeLe v key x) = do
   x' <- GC.compileExp x
-  GC.stm [C.cstm|$id:v = ctx->sizes.$id:key <= $exp:x';|]
+  GC.stm [C.cstm|$id:v = *ctx->tuning_params.$id:key <= $exp:x';|]
   sizeLoggingCode v key x'
 callKernel (GetSizeMax v size_class) =
   let field = "max_" ++ pretty size_class
@@ -342,8 +345,17 @@ callKernel (LaunchKernel safety name args num_workgroups workgroup_size) = do
   when (safety >= SafetyFull) $
     GC.stm [C.cstm|ctx->failure_is_an_option = 1;|]
   where
-    setKernelArg i (ValueKArg e bt) = do
-      v <- GC.compileExpToName "kernel_arg" bt e
+    setKernelArg i (ValueKArg e pt) = do
+      v <- case pt of
+        -- We always transfer f16 values to the kernel as 16 bits, but
+        -- the actual host type may be typedef'd to a 32-bit float.
+        -- This requires some care.
+        FloatType Float16 -> do
+          v <- newVName "kernel_arg"
+          e' <- toStorage pt <$> GC.compileExp e
+          GC.decl [C.cdecl|$ty:(primStorageType pt) $id:v = $e';|]
+          pure v
+        _ -> GC.compileExpToName "kernel_arg" pt e
       GC.stm
         [C.cstm|
             OPENCL_SUCCEED_OR_RETURN(clSetKernelArg(ctx->$id:name, $int:i, sizeof($id:v), &$id:v));
@@ -358,7 +370,7 @@ callKernel (LaunchKernel safety name args num_workgroups workgroup_size) = do
       num_bytes' <- GC.compileExp $ unCount num_bytes
       GC.stm
         [C.cstm|
-            OPENCL_SUCCEED_OR_RETURN(clSetKernelArg(ctx->$id:name, $int:i, $exp:num_bytes', NULL));
+            OPENCL_SUCCEED_OR_RETURN(clSetKernelArg(ctx->$id:name, $int:i, (size_t)$exp:num_bytes', NULL));
             |]
 
     localBytes cur (SharedMemoryKArg num_bytes) = do
@@ -408,7 +420,7 @@ launchKernel kernel_name num_workgroups workgroup_dims local_bytes = do
     kernel_rank = length kernel_dims
     kernel_dims = zipWith multExp (map toSize num_workgroups) (map toSize workgroup_dims)
     kernel_dims' = map toInit kernel_dims
-    workgroup_dims' = map toInit workgroup_dims
+    workgroup_dims' = map (toInit . toSize) workgroup_dims
     total_elements = foldl multExp [C.cexp|1|] kernel_dims
 
     toInit e = [C.cinit|$exp:e|]
@@ -421,10 +433,10 @@ launchKernel kernel_name num_workgroups workgroup_dims local_bytes = do
           ++ dims
           ++ " and local work size "
           ++ dims
-          ++ "]; local memory: %d bytes.\n",
+          ++ "; local memory: %d bytes.\n",
         [C.cexp|$string:(pretty kernel_name)|] :
-        map (kernelDim global_work_size) [0 .. kernel_rank -1]
-          ++ map (kernelDim local_work_size) [0 .. kernel_rank -1]
+        map (kernelDim global_work_size) [0 .. kernel_rank - 1]
+          ++ map (kernelDim local_work_size) [0 .. kernel_rank - 1]
           ++ [[C.cexp|(int)$exp:local_bytes|]]
       )
       where

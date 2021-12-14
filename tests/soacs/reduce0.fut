@@ -10,7 +10,7 @@
 -- output { 704982704 }
 -- compiled input { 100000000 }
 -- output { 887459712 }
--- structure distributed { Iota 0 }
+-- structure gpu { Iota 0 }
 
-let main(n: i32): i32 =
+def main(n: i32): i32 =
   reduce (+) 0 (0..<n)

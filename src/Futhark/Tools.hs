@@ -27,8 +27,6 @@ import Futhark.Util
 --
 -- Reuses the original pattern for the @reduce@, and creates a new
 -- pattern with new 'Ident's for the result of the @map@.
---
--- Only handles a pattern with an empty 'patternContextElements'.
 redomapToMapAndReduce ::
   ( MonadFreshNames m,
     Buildable rep,

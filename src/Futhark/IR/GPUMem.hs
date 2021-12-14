@@ -24,11 +24,11 @@ import Futhark.IR.GPU.Op
 import Futhark.IR.GPU.Simplify (simplifyKernelOp)
 import Futhark.IR.Mem
 import Futhark.IR.Mem.Simplify
+import qualified Futhark.IR.TypeCheck as TC
 import Futhark.MonadFreshNames
 import qualified Futhark.Optimise.Simplify.Engine as Engine
 import Futhark.Pass
 import Futhark.Pass.ExplicitAllocations (BuilderOps (..), mkLetNamesB', mkLetNamesB'')
-import qualified Futhark.TypeCheck as TC
 
 data GPUMem
 
@@ -43,10 +43,12 @@ instance RepTypes GPUMem where
 instance ASTRep GPUMem where
   expTypesFromPat = return . map snd . bodyReturnsFromPat
 
-instance OpReturns GPUMem where
-  opReturns (Alloc _ space) =
-    return [MemMem space]
-  opReturns (Inner (SegOp op)) = segOpReturns op
+instance OpReturns (HostOp GPUMem ()) where
+  opReturns (SegOp op) = segOpReturns op
+  opReturns k = extReturns <$> opType k
+
+instance OpReturns (HostOp (Engine.Wise GPUMem) ()) where
+  opReturns (SegOp op) = segOpReturns op
   opReturns k = extReturns <$> opType k
 
 instance PrettyRep GPUMem
@@ -64,7 +66,7 @@ instance TC.Checkable GPUMem where
   checkLParamDec = checkMemInfo
   checkLetBoundDec = checkMemInfo
   checkRetType = mapM_ $ TC.checkExtType . declExtTypeOf
-  primFParam name t = return $ Param name (MemPrim t)
+  primFParam name t = return $ Param mempty name (MemPrim t)
   matchPat = matchPatToExp
   matchReturnType = matchFunctionReturnType
   matchBranchType = matchBranchReturnType
@@ -80,16 +82,14 @@ instance BuilderOps (Engine.Wise GPUMem) where
   mkBodyB stms res = return $ Engine.mkWiseBody () stms res
   mkLetNamesB = mkLetNamesB''
 
+instance TraverseOpStms (Engine.Wise GPUMem) where
+  traverseOpStms = traverseMemOpStms (traverseHostOpStms (const pure))
+
 simplifyProg :: Prog GPUMem -> PassM (Prog GPUMem)
 simplifyProg = simplifyProgGeneric simpleGPUMem
 
 simplifyStms ::
-  (HasScope GPUMem m, MonadFreshNames m) =>
-  Stms GPUMem ->
-  m
-    ( Engine.SymbolTable (Engine.Wise GPUMem),
-      Stms GPUMem
-    )
+  (HasScope GPUMem m, MonadFreshNames m) => Stms GPUMem -> m (Stms GPUMem)
 simplifyStms = simplifyStmsGeneric simpleGPUMem
 
 simpleGPUMem :: Engine.SimpleOps GPUMem

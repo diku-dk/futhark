@@ -1,5 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 
+-- | Building blocks for parsing prim primexpressions.  *Not* an infix
+-- representation.
 module Futhark.Analysis.PrimExp.Parse
   ( pPrimExp,
     pPrimValue,
@@ -42,14 +44,28 @@ pConvOp = choice $ map p allConvOps
 parens :: Parser a -> Parser a
 parens = between (lexeme "(") (lexeme ")")
 
-pPrimExp :: Parser (v, PrimType) -> Parser (PrimExp v)
-pPrimExp pLeaf =
+-- | Parse a 'PrimExp' given a leaf parser.
+pPrimExp :: PrimType -> Parser v -> Parser (PrimExp v)
+pPrimExp t pLeaf =
   choice
-    [ uncurry LeafExp <$> pLeaf,
+    [ flip LeafExp t <$> pLeaf,
       ValueExp <$> pPrimValue,
-      BinOpExp <$> pBinOp <*> pPrimExp pLeaf <*> pPrimExp pLeaf,
-      CmpOpExp <$> pCmpOp <*> pPrimExp pLeaf <*> pPrimExp pLeaf,
-      ConvOpExp <$> pConvOp <*> pPrimExp pLeaf,
-      UnOpExp <$> pUnOp <*> pPrimExp pLeaf,
-      parens $ pPrimExp pLeaf
+      pBinOp >>= binOpExp,
+      pCmpOp >>= cmpOpExp,
+      pConvOp >>= convOpExp,
+      pUnOp >>= unOpExp,
+      parens $ pPrimExp t pLeaf
     ]
+  where
+    binOpExp op =
+      BinOpExp op
+        <$> pPrimExp (binOpType op) pLeaf
+        <*> pPrimExp (binOpType op) pLeaf
+    cmpOpExp op =
+      CmpOpExp op
+        <$> pPrimExp (cmpOpType op) pLeaf
+        <*> pPrimExp (cmpOpType op) pLeaf
+    convOpExp op =
+      ConvOpExp op <$> pPrimExp (fst (convOpType op)) pLeaf
+    unOpExp op =
+      UnOpExp op <$> pPrimExp (unOpType op) pLeaf

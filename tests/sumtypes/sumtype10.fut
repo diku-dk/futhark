@@ -4,6 +4,6 @@
 
 type foobar = #foo i32 | #bar i32
 
-let main : i32 =
+def main : i32 =
   match ((#bar 12) : foobar)
   case (#foo _)  -> 1

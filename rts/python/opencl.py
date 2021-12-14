@@ -55,7 +55,7 @@ def get_prefered_context(interactive=False, platform_pref=None, device_pref=None
                 device_matches += 1
     raise Exception('No OpenCL platform and device matching constraints found.')
 
-def size_assignment(s):
+def param_assignment(s):
     name, value = s.split('=')
     return (name, int(value))
 
@@ -214,9 +214,16 @@ def initialise_opencl_object(self,
     # compiler should provide us with the variables to which
     # parameters are mapped.
     if (len(program_src) >= 0):
-        return cl.Program(self.ctx, program_src).build(
-            ["-DLOCKSTEP_WIDTH={}".format(lockstep_width)]
-            + ["-D{}={}".format(s.replace('z', 'zz').replace('.', 'zi').replace('#', 'zh'),v) for (s,v) in self.sizes.items()])
+        build_options = []
+
+        build_options += ["-DLOCKSTEP_WIDTH={}".format(lockstep_width)]
+
+        build_options += ["-D{}={}".format(s.replace('z', 'zz').replace('.', 'zi').replace('#', 'zh'),v) for (s,v) in self.sizes.items()]
+
+        if (self.platform.name == 'Oclgrind'):
+            build_options += ['-DEMULATE_F16']
+
+        return cl.Program(self.ctx, program_src).build(build_options)
 
 def opencl_alloc(self, min_size, tag):
     min_size = 1 if min_size == 0 else min_size

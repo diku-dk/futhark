@@ -107,7 +107,7 @@ static int read_str_array_elems(FILE *f,
   int ret;
   int first = 1;
   char *knows_dimsize = (char*) calloc((size_t)dims, sizeof(char));
-  int cur_dim = dims-1;
+  int cur_dim = (int)dims-1;
   int64_t *elems_read_in_dim = (int64_t*) calloc((size_t)dims, sizeof(int64_t));
 
   while (1) {
@@ -337,16 +337,40 @@ static int read_str_u64(char *buf, void* dest) {
   READ_STR(SCNu64, uint64_t, "u64");
 }
 
+static int read_str_f16(char *buf, void* dest) {
+  remove_underscores(buf);
+  if (strcmp(buf, "f16.nan") == 0) {
+    *(uint16_t*)dest = float2halfbits(NAN);
+    return 0;
+  } else if (strcmp(buf, "f16.inf") == 0) {
+    *(uint16_t*)dest = float2halfbits(INFINITY);
+    return 0;
+  } else if (strcmp(buf, "-f16.inf") == 0) {
+    *(uint16_t*)dest = float2halfbits(-INFINITY);
+    return 0;
+  } else {
+    int j;
+    float x;
+    if (sscanf(buf, "%f%n", &x, &j) == 1) {
+      if (strcmp(buf+j, "") == 0 || strcmp(buf+j, "f16") == 0) {
+        *(uint16_t*)dest = float2halfbits(x);
+        return 0;
+      }
+    }
+    return 1;
+  }
+}
+
 static int read_str_f32(char *buf, void* dest) {
   remove_underscores(buf);
   if (strcmp(buf, "f32.nan") == 0) {
-    *(float*)dest = NAN;
+    *(float*)dest = (float)NAN;
     return 0;
   } else if (strcmp(buf, "f32.inf") == 0) {
-    *(float*)dest = INFINITY;
+    *(float*)dest = (float)INFINITY;
     return 0;
   } else if (strcmp(buf, "-f32.inf") == 0) {
-    *(float*)dest = -INFINITY;
+    *(float*)dest = (float)-INFINITY;
     return 0;
   } else {
     READ_STR("f", float, "f32");
@@ -356,13 +380,13 @@ static int read_str_f32(char *buf, void* dest) {
 static int read_str_f64(char *buf, void* dest) {
   remove_underscores(buf);
   if (strcmp(buf, "f64.nan") == 0) {
-    *(double*)dest = NAN;
+    *(double*)dest = (double)NAN;
     return 0;
   } else if (strcmp(buf, "f64.inf") == 0) {
-    *(double*)dest = INFINITY;
+    *(double*)dest = (double)INFINITY;
     return 0;
   } else if (strcmp(buf, "-f64.inf") == 0) {
-    *(double*)dest = -INFINITY;
+    *(double*)dest = (double)-INFINITY;
     return 0;
   } else {
     READ_STR("lf", double, "f64");
@@ -413,6 +437,19 @@ static int write_str_u64(FILE *out, uint64_t *src) {
   return fprintf(out, "%"PRIu64"u64", *src);
 }
 
+static int write_str_f16(FILE *out, uint16_t *src) {
+  float x = halfbits2float(*src);
+  if (isnan(x)) {
+    return fprintf(out, "f16.nan");
+  } else if (isinf(x) && x >= 0) {
+    return fprintf(out, "f16.inf");
+  } else if (isinf(x)) {
+    return fprintf(out, "-f16.inf");
+  } else {
+    return fprintf(out, "%.6ff16", x);
+  }
+}
+
 static int write_str_f32(FILE *out, float *src) {
   float x = *src;
   if (isnan(x)) {
@@ -448,10 +485,10 @@ static int write_str_bool(FILE *out, void *src) {
 #define BINARY_FORMAT_VERSION 2
 #define IS_BIG_ENDIAN (!*(unsigned char *)&(uint16_t){1})
 
-static void flip_bytes(int elem_size, unsigned char *elem) {
-  for (int j=0; j<elem_size/2; j++) {
+static void flip_bytes(size_t elem_size, unsigned char *elem) {
+  for (size_t j=0; j<elem_size/2; j++) {
     unsigned char head = elem[j];
-    int tail_index = elem_size-1-j;
+    size_t tail_index = elem_size-1-j;
     elem[j] = elem[tail_index];
     elem[tail_index] = head;
   }
@@ -472,7 +509,7 @@ static void set_binary_mode(FILE *f) {
 #endif
 
 static int read_byte(FILE *f, void* dest) {
-  int num_elems_read = fread(dest, 1, 1, f);
+  size_t num_elems_read = fread(dest, 1, 1, f);
   return num_elems_read == 1 ? 0 : 1;
 }
 
@@ -510,6 +547,9 @@ static const struct primtype_info_t u32_info =
 static const struct primtype_info_t u64_info =
   {.binname = " u64", .type_name = "u64",  .size = 8,
    .write_str = (writer)write_str_u64, .read_str = (str_reader)read_str_u64};
+static const struct primtype_info_t f16_info =
+  {.binname = " f16", .type_name = "f16",  .size = 2,
+   .write_str = (writer)write_str_f16, .read_str = (str_reader)read_str_f16};
 static const struct primtype_info_t f32_info =
   {.binname = " f32", .type_name = "f32",  .size = 4,
    .write_str = (writer)write_str_f32, .read_str = (str_reader)read_str_f32};
@@ -523,7 +563,7 @@ static const struct primtype_info_t bool_info =
 static const struct primtype_info_t* primtypes[] = {
   &i8_info, &i16_info, &i32_info, &i64_info,
   &u8_info, &u16_info, &u32_info, &u64_info,
-  &f32_info, &f64_info,
+  &f16_info, &f32_info, &f64_info,
   &bool_info,
   NULL // NULL-terminated
 };
@@ -612,7 +652,7 @@ static int read_bin_array(FILE *f,
   int64_t elem_count = 1;
   for (int i=0; i<dims; i++) {
     int64_t bin_shape;
-    ret = fread(&bin_shape, sizeof(bin_shape), 1, f);
+    ret = (int)fread(&bin_shape, sizeof(bin_shape), 1, f);
     if (ret != 1) {
       futhark_panic(1, "binary-input: Couldn't read size for dimension %i of array.\n", i);
     }
@@ -640,7 +680,7 @@ static int read_bin_array(FILE *f,
   // If we're on big endian platform we must change all multibyte elements
   // from using little endian to big endian
   if (IS_BIG_ENDIAN && elem_size != 1) {
-    flip_bytes(elem_size, (unsigned char*) *data);
+    flip_bytes((size_t)elem_size, (unsigned char*) *data);
   }
 
   return 0;
@@ -671,7 +711,7 @@ static int write_str_array(FILE *out,
                            const int64_t *shape,
                            int8_t rank) {
   if (rank==0) {
-    elem_type->write_str(out, (void*)data);
+    elem_type->write_str(out, (const void*)data);
   } else {
     int64_t len = (int64_t)shape[0];
     int64_t slice_size = 1;
@@ -691,7 +731,7 @@ static int write_str_array(FILE *out,
     } else if (rank==1) {
       fputc('[', out);
       for (int64_t i = 0; i < len; i++) {
-        elem_type->write_str(out, (void*) (data + i * elem_size));
+        elem_type->write_str(out, (const void*) (data + i * elem_size));
         if (i != len-1) {
           fprintf(out, ", ");
         }
@@ -763,8 +803,8 @@ static int read_scalar(FILE *f,
     return expected_type->read_str(buf, dest);
   } else {
     read_bin_ensure_scalar(f, expected_type);
-    int64_t elem_size = expected_type->size;
-    int num_elems_read = fread(dest, (size_t)elem_size, 1, f);
+    size_t elem_size = (size_t)expected_type->size;
+    size_t num_elems_read = fread(dest, elem_size, 1, f);
     if (IS_BIG_ENDIAN) {
       flip_bytes(elem_size, (unsigned char*) dest);
     }

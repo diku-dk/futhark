@@ -7,6 +7,7 @@ module Futhark.Util.Pretty
     pretty,
     prettyDoc,
     prettyTuple,
+    prettyTupleLines,
     prettyText,
     prettyTextOneLine,
     prettyOneLine,
@@ -22,6 +23,7 @@ where
 
 import Data.Text (Text)
 import qualified Data.Text.Lazy as LT
+import Numeric.Half
 import Text.PrettyPrint.Mainland hiding (pretty)
 import qualified Text.PrettyPrint.Mainland as PP
 import Text.PrettyPrint.Mainland.Class
@@ -52,6 +54,12 @@ ppTuple' ets = braces $ commasep $ map (align . ppr) ets
 -- | Prettyprint a list enclosed in curly braces.
 prettyTuple :: Pretty a => [a] -> String
 prettyTuple = PP.pretty 80 . ppTuple'
+
+-- | Like 'prettyTuple', but put a linebreak after every element.
+prettyTupleLines :: Pretty a => [a] -> String
+prettyTupleLines = PP.pretty 80 . ppTupleLines'
+  where
+    ppTupleLines' ets = braces $ stack $ punctuate comma $ map (align . ppr) ets
 
 -- | The document @'apply' ds@ separates @ds@ with commas and encloses them with
 -- parentheses.
@@ -94,3 +102,6 @@ shorten a
 -- | Like 'commasep', but a newline after every comma.
 commastack :: [Doc] -> Doc
 commastack = align . stack . punctuate comma
+
+instance Pretty Half where
+  ppr = text . show

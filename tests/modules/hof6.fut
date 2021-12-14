@@ -4,4 +4,4 @@
 
 module m = { type^ t = i32 -> i32 } : { type ^t }
 
-let x: []m.t = []
+def x: []m.t = []

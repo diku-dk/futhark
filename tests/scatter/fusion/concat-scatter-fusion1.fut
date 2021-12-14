@@ -5,7 +5,7 @@
 --          [4, 6, 2, 2, 2, 4, 6, 2, 2, 2] }
 -- structure { Concat 0 Scatter 1 }
 
-let main [n] (xs: [n]i32) =
+def main [n] (xs: [n]i32) =
   let dest = replicate 10 (1,2)
   let (is0, vs0, is1, vs1) =
     unzip4 (map (\x -> (i64.i32 x,(3,4),i64.i32 x+1,(5,6))) xs)

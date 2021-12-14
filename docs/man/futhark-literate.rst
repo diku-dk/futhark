@@ -149,7 +149,7 @@ The following directives are supported:
   * ``[][]f32`` and ``[][]f64``
 
     Interpreted as greyscale. Values should be between 0 and 1, with 0
-    being black and 0 being white.
+    being black and 1 being white.
 
   * ``[][]u8``
 
@@ -212,6 +212,11 @@ Futhark.  The following builtins are supported:
 
 * ``$loadimg "file"`` reads an image from the given file and returns
   it as a row-major ``[][]u32`` array with each pixel encoded as ARGB.
+
+* ``$loaddata "file"`` reads a dataset from the given file. When the file
+  contains a singular value, it is returned as value. Otherwise, a tuple
+  of values is returned, which should be destructured before use. For example:
+  ``let (a, b) = $loaddata "foo.in" in bar a b``.
 
 SAFETY
 ======

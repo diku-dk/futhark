@@ -102,7 +102,7 @@ stmMetrics = expMetrics . stmExp
 
 expMetrics :: OpMetrics (Op rep) => Exp rep -> MetricsM ()
 expMetrics (BasicOp op) =
-  seen "BasicOp" >> primOpMetrics op
+  seen "BasicOp" >> basicOpMetrics op
 expMetrics (DoLoop _ ForLoop {} body) =
   inside "DoLoop" $ seen "ForLoop" >> bodyMetrics body
 expMetrics (DoLoop _ WhileLoop {} body) =
@@ -114,33 +114,33 @@ expMetrics (If _ tb fb _) =
 expMetrics Apply {} =
   seen "Apply"
 expMetrics (WithAcc _ lam) =
-  inside "MkAcc" $ lambdaMetrics lam
+  inside "WithAcc" $ lambdaMetrics lam
 expMetrics (Op op) =
   opMetrics op
 
-primOpMetrics :: BasicOp -> MetricsM ()
-primOpMetrics (SubExp _) = seen "SubExp"
-primOpMetrics (Opaque _ _) = seen "Opaque"
-primOpMetrics ArrayLit {} = seen "ArrayLit"
-primOpMetrics BinOp {} = seen "BinOp"
-primOpMetrics UnOp {} = seen "UnOp"
-primOpMetrics ConvOp {} = seen "ConvOp"
-primOpMetrics CmpOp {} = seen "ConvOp"
-primOpMetrics Assert {} = seen "Assert"
-primOpMetrics Index {} = seen "Index"
-primOpMetrics Update {} = seen "Update"
-primOpMetrics FlatIndex {} = seen "FlatIndex"
-primOpMetrics FlatUpdate {} = seen "FlatUpdate"
-primOpMetrics Concat {} = seen "Concat"
-primOpMetrics Copy {} = seen "Copy"
-primOpMetrics Manifest {} = seen "Manifest"
-primOpMetrics Iota {} = seen "Iota"
-primOpMetrics Replicate {} = seen "Replicate"
-primOpMetrics Scratch {} = seen "Scratch"
-primOpMetrics Reshape {} = seen "Reshape"
-primOpMetrics Rearrange {} = seen "Rearrange"
-primOpMetrics Rotate {} = seen "Rotate"
-primOpMetrics UpdateAcc {} = seen "UpdateAcc"
+basicOpMetrics :: BasicOp -> MetricsM ()
+basicOpMetrics (SubExp _) = seen "SubExp"
+basicOpMetrics (Opaque _ _) = seen "Opaque"
+basicOpMetrics ArrayLit {} = seen "ArrayLit"
+basicOpMetrics BinOp {} = seen "BinOp"
+basicOpMetrics UnOp {} = seen "UnOp"
+basicOpMetrics ConvOp {} = seen "ConvOp"
+basicOpMetrics CmpOp {} = seen "ConvOp"
+basicOpMetrics Assert {} = seen "Assert"
+basicOpMetrics Index {} = seen "Index"
+basicOpMetrics Update {} = seen "Update"
+basicOpMetrics FlatIndex {} = seen "FlatIndex"
+basicOpMetrics FlatUpdate {} = seen "FlatUpdate"
+basicOpMetrics Concat {} = seen "Concat"
+basicOpMetrics Copy {} = seen "Copy"
+basicOpMetrics Manifest {} = seen "Manifest"
+basicOpMetrics Iota {} = seen "Iota"
+basicOpMetrics Replicate {} = seen "Replicate"
+basicOpMetrics Scratch {} = seen "Scratch"
+basicOpMetrics Reshape {} = seen "Reshape"
+basicOpMetrics Rearrange {} = seen "Rearrange"
+basicOpMetrics Rotate {} = seen "Rotate"
+basicOpMetrics UpdateAcc {} = seen "UpdateAcc"
 
 -- | Compute metrics for this lambda.
 lambdaMetrics :: OpMetrics (Op rep) => Lambda rep -> MetricsM ()

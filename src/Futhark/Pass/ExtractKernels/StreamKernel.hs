@@ -175,19 +175,18 @@ kerneliseLambda ::
   Lambda GPU ->
   m (Lambda GPU)
 kerneliseLambda nes lam = do
-  thread_index <- newVName "thread_index"
-  let thread_index_param = Param thread_index $ Prim int64
-      (fold_chunk_param, fold_acc_params, fold_inp_params) =
+  thread_index_param <- newParam "thread_index" $ Prim int64
+  let (fold_chunk_param, fold_acc_params, fold_inp_params) =
         partitionChunkedFoldParameters (length nes) $ lambdaParams lam
 
       mkAccInit p (Var v)
         | not $ primType $ paramType p =
           mkLet [paramIdent p] $ BasicOp $ Copy v
       mkAccInit p x = mkLet [paramIdent p] $ BasicOp $ SubExp x
-      acc_init_bnds = stmsFromList $ zipWith mkAccInit fold_acc_params nes
+      acc_init_stms = stmsFromList $ zipWith mkAccInit fold_acc_params nes
   return
     lam
-      { lambdaBody = insertStms acc_init_bnds $ lambdaBody lam,
+      { lambdaBody = insertStms acc_init_stms $ lambdaBody lam,
         lambdaParams = thread_index_param : fold_chunk_param : fold_inp_params
       }
 

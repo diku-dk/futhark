@@ -32,12 +32,13 @@ data AutotuneOptions = AutotuneOptions
     optExtraOptions :: [String],
     optVerbose :: Int,
     optTimeout :: Int,
-    optDefaultThreshold :: Int
+    optDefaultThreshold :: Int,
+    optTestSpec :: Maybe FilePath
   }
 
 initialAutotuneOptions :: AutotuneOptions
 initialAutotuneOptions =
-  AutotuneOptions "opencl" Nothing 10 (Just "tuning") [] 0 60 thresholdMax
+  AutotuneOptions "opencl" Nothing 10 (Just "tuning") [] 0 60 thresholdMax Nothing
 
 compileOptions :: AutotuneOptions -> IO CompileOptions
 compileOptions opts = do
@@ -75,23 +76,35 @@ comparisons = mapMaybe isComparison . lines
       val' <- readMaybe val
       return (thresh, val')
 
-type RunDataset = Int -> Path -> IO (Either String ([(String, Int)], Int))
+type RunDataset = Server -> Int -> Path -> IO (Either String ([(String, Int)], Int))
 
 type DatasetName = String
 
-serverOptions :: Path -> AutotuneOptions -> [String]
-serverOptions path opts =
+serverOptions :: AutotuneOptions -> [String]
+serverOptions opts =
   "--default-threshold" :
   show (optDefaultThreshold opts) :
   "-L" :
-  map opt path
-    ++ optExtraOptions opts
+  optExtraOptions opts
+
+setTuningParam :: Server -> String -> Int -> IO ()
+setTuningParam server name val =
+  either (error . T.unpack . T.unlines . failureMsg) (const $ pure ())
+    =<< cmdSetTuningParam server (T.pack name) (T.pack (show val))
+
+setTuningParams :: Server -> Path -> IO ()
+setTuningParams server = mapM_ (uncurry $ setTuningParam server)
+
+restoreTuningParams :: AutotuneOptions -> Server -> Path -> IO ()
+restoreTuningParams opts server = mapM_ opt
   where
-    opt (name, val) = "--size=" ++ name ++ "=" ++ show val
+    opt (name, _) = setTuningParam server name (optDefaultThreshold opts)
 
 prepare :: AutotuneOptions -> FutharkExe -> FilePath -> IO [(DatasetName, RunDataset, T.Text)]
 prepare opts futhark prog = do
-  spec <- testSpecFromFileOrDie prog
+  spec <-
+    maybe (testSpecFromProgramOrDie prog) testSpecFromFileOrDie $
+      optTestSpec opts
   copts <- compileOptions opts
 
   truns <-
@@ -116,7 +129,10 @@ prepare opts futhark prog = do
         case runExpectedResult trun of
           Succeeds expected
             | null (runTags trun `intersect` ["notune", "disable"]) ->
-              Just (runDescription trun, run entry_point trun expected)
+              Just
+                ( runDescription trun,
+                  \server -> run server entry_point trun expected
+                )
           _ -> Nothing
 
   fmap concat . forM truns $ \ios -> do
@@ -125,7 +141,7 @@ prepare opts futhark prog = do
     forM cases $ \(dataset, do_run) ->
       return (dataset, do_run, iosEntryPoint ios)
   where
-    run entry_point trun expected timeout path = do
+    run server entry_point trun expected timeout path = do
       let bestRuntime :: ([RunResult], T.Text) -> ([(String, Int)], Int)
           bestRuntime (runres, errout) =
             ( comparisons (T.unpack errout),
@@ -135,23 +151,25 @@ prepare opts futhark prog = do
           ropts = runOptions timeout opts
 
       when (optVerbose opts > 1) $
-        putStrLn $ "Running with options: " ++ unwords (serverOptions path opts)
+        putStrLn $ "Trying path: " ++ show path
 
-      -- XXX: it is really inefficient to start a new server for every
-      -- run, but unfortunately we can only set threshold parameters
-      -- on startup.
-      let progbin = "." </> dropExtension prog
-      withServer (futharkServerCfg progbin (serverOptions path opts)) $ \server ->
-        either (Left . T.unpack) (Right . bestRuntime)
-          <$> benchmarkDataset
-            server
-            ropts
-            futhark
-            prog
-            entry_point
-            (runInput trun)
-            expected
-            (testRunReferenceOutput prog entry_point trun)
+      -- Setting the tuning parameters is a stateful action, so we
+      -- must be careful to restore the defaults below.  This is
+      -- because we rely on parameters not in 'path' to have their
+      -- default value.
+      setTuningParams server path
+
+      either (Left . T.unpack) (Right . bestRuntime)
+        <$> benchmarkDataset
+          server
+          ropts
+          futhark
+          prog
+          entry_point
+          (runInput trun)
+          expected
+          (testRunReferenceOutput prog entry_point trun)
+        <* restoreTuningParams opts server path
 
 --- Benchmarking a program
 
@@ -187,7 +205,7 @@ thresholdForest :: FilePath -> IO ThresholdForest
 thresholdForest prog = do
   thresholds <-
     getThresholds
-      <$> readProcess ("." </> dropExtension prog) ["--print-sizes"] ""
+      <$> readProcess ("." </> dropExtension prog) ["--print-params"] ""
   let root (v, _) = ((v, False), [])
   return $
     unfoldForest (unfold thresholds) $
@@ -226,11 +244,12 @@ thresholdForest prog = do
 
 tuneThreshold ::
   AutotuneOptions ->
+  Server ->
   [(DatasetName, RunDataset, T.Text)] ->
   Path ->
   (String, Path) ->
   IO Path
-tuneThreshold opts datasets already_tuned (v, _v_path) = do
+tuneThreshold opts server datasets already_tuned (v, _v_path) = do
   tune_result <-
     foldM tuneDataset Nothing datasets
   case tune_result of
@@ -259,6 +278,7 @@ tuneThreshold opts datasets already_tuned (v, _v_path) = do
 
           sample_run <-
             run
+              server
               (optTimeout opts)
               ((v, maybe thresholdMax snd thresholds) : already_tuned)
 
@@ -281,7 +301,7 @@ tuneThreshold opts datasets already_tuned (v, _v_path) = do
 
                   runner :: Int -> Int -> IO (Maybe Int)
                   runner timeout' threshold = do
-                    res <- run timeout' ((v, threshold) : already_tuned)
+                    res <- run server timeout' ((v, threshold) : already_tuned)
                     case res of
                       Right (_, runTime) ->
                         return $ Just runTime
@@ -365,7 +385,11 @@ tune opts prog = do
   when (optVerbose opts > 0) $
     putStrLn $ ("Threshold forest:\n" ++) $ drawForest $ map (fmap show) forest
 
-  foldM (tuneThreshold opts datasets) [] $ tuningPaths forest
+  let progbin = "." </> dropExtension prog
+  putStrLn $ "Running with options: " ++ unwords (serverOptions opts)
+
+  withServer (futharkServerCfg progbin (serverOptions opts)) $ \server ->
+    foldM (tuneThreshold opts server datasets) [] $ tuningPaths forest
 
 runAutotuner :: AutotuneOptions -> FilePath -> IO ()
 runAutotuner opts prog = do
@@ -455,16 +479,17 @@ commandLineOptions =
       "v"
       ["verbose"]
       (NoArg $ Right $ \config -> config {optVerbose = optVerbose config + 1})
-      "Enable logging.  Pass multiple times for more."
+      "Enable logging.  Pass multiple times for more.",
+    Option
+      []
+      ["spec-file"]
+      (ReqArg (\s -> Right $ \config -> config {optTestSpec = Just s}) "FILE")
+      "Use test specification from this file."
   ]
 
 -- | Run @futhark autotune@
 main :: String -> [String] -> IO ()
-main = mainWithOptions
-  initialAutotuneOptions
-  commandLineOptions
-  "options... program"
-  $ \progs config ->
-    case progs of
-      [prog] -> Just $ runAutotuner config prog
-      _ -> Nothing
+main = mainWithOptions initialAutotuneOptions commandLineOptions "options... program" $ \progs config ->
+  case progs of
+    [prog] -> Just $ runAutotuner config prog
+    _ -> Nothing

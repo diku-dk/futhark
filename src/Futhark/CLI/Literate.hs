@@ -14,7 +14,6 @@ import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as LBS
 import Data.Char
 import Data.Functor
-import Data.Hashable (hash)
 import Data.Int (Int64)
 import Data.List (foldl', transpose)
 import qualified Data.Map as M
@@ -28,13 +27,14 @@ import qualified Data.Vector.Storable.ByteString as SVec
 import Data.Void
 import Data.Word (Word32, Word8)
 import Futhark.Data
+import Futhark.Data.Reader
 import Futhark.Script
 import Futhark.Server
 import Futhark.Test
 import Futhark.Test.Values
 import Futhark.Util
   ( directoryContents,
-    hashIntText,
+    hashText,
     nubOrd,
     runProgramWithExitCode,
   )
@@ -464,6 +464,18 @@ loadImage imgfile =
     void $ system "convert" [imgfile, "-type", "TrueColorAlpha", bmpfile] mempty
     loadBMP bmpfile
 
+loadData :: FilePath -> ScriptM (Compound Value)
+loadData datafile = do
+  contents <- liftIO $ LBS.readFile datafile
+  let maybe_vs = readValues contents
+  case maybe_vs of
+    Nothing ->
+      throwError $ "Failed to read data file " <> T.pack datafile
+    Just [v] ->
+      pure $ ValueAtom v
+    Just vs ->
+      pure $ ValueTuple $ map ValueAtom vs
+
 literateBuiltin :: EvalBuiltin ScriptM
 literateBuiltin "loadimg" vs =
   case vs of
@@ -473,7 +485,17 @@ literateBuiltin "loadimg" vs =
         loadImage path'
     _ ->
       throwError $
-        "$imgfile does not accept arguments of types: "
+        "$loadimg does not accept arguments of types: "
+          <> T.intercalate ", " (map (prettyText . fmap valueType) vs)
+literateBuiltin "loaddata" vs =
+  case vs of
+    [ValueAtom v]
+      | Just path <- getValue v -> do
+        let path' = map (chr . fromIntegral) (path :: [Word8])
+        loadData path'
+    _ ->
+      throwError $
+        "$loaddata does not accept arguments of types: "
           <> T.intercalate ", " (map (prettyText . fmap valueType) vs)
 literateBuiltin f _ =
   throwError $ "Unknown builtin function $" <> prettyText f
@@ -504,23 +526,35 @@ initialOptions =
 
 data Env = Env
   { envImgDir :: FilePath,
+    -- | Image dir relative to program.
+    envRelImgDir :: FilePath,
     envOpts :: Options,
     envServer :: ScriptServer,
-    envHash :: Int
+    envHash :: T.Text
   }
 
-newFile :: Env -> FilePath -> (FilePath -> ScriptM ()) -> ScriptM FilePath
-newFile env template m = do
-  let fname =
-        envImgDir env
-          </> T.unpack (hashIntText (envHash env)) <> "-" <> template
+newFileWorker :: Env -> FilePath -> (FilePath -> ScriptM ()) -> ScriptM (FilePath, FilePath)
+newFileWorker env template m = do
+  let fname_base = T.unpack (envHash env) <> "-" <> template
+      fname = envImgDir env </> fname_base
+      fname_rel = envRelImgDir env </> fname_base
   exists <- liftIO $ doesFileExist fname
   liftIO $ createDirectoryIfMissing True $ envImgDir env
   when (exists && scriptVerbose (envOpts env) > 0) $
     liftIO $ T.hPutStrLn stderr $ "Using existing file: " <> T.pack fname
-  unless exists $ m fname
+  unless exists $ do
+    when (scriptVerbose (envOpts env) > 0) $
+      liftIO $ T.hPutStrLn stderr $ "Generating new file: " <> T.pack fname
+    m fname
   modify $ \s -> s {stateFiles = S.insert fname $ stateFiles s}
-  pure fname
+  pure (fname, fname_rel)
+
+newFile :: Env -> FilePath -> (FilePath -> ScriptM ()) -> ScriptM FilePath
+newFile env template m = snd <$> newFileWorker env template m
+
+newFileContents :: Env -> FilePath -> (FilePath -> ScriptM ()) -> ScriptM T.Text
+newFileContents env template m =
+  liftIO . T.readFile . fst =<< newFileWorker env template m
 
 processDirective :: Env -> Directive -> ScriptM T.Text
 processDirective env (DirectiveBrief d) =
@@ -528,12 +562,15 @@ processDirective env (DirectiveBrief d) =
 processDirective env (DirectiveCovert d) =
   processDirective env d
 processDirective env (DirectiveRes e) = do
-  v <- either nope pure =<< evalExpToGround literateBuiltin (envServer env) e
+  result <-
+    newFileContents env "eval.txt" $ \resultf -> do
+      v <- either nope pure =<< evalExpToGround literateBuiltin (envServer env) e
+      liftIO $ T.writeFile resultf $ prettyText v
   pure $
     T.unlines
       [ "",
         "```",
-        prettyText v,
+        result,
         "```",
         ""
       ]
@@ -542,40 +579,38 @@ processDirective env (DirectiveRes e) = do
       throwError $ "Cannot show value of type " <> prettyText t
 --
 processDirective env (DirectiveImg e) = do
-  maybe_v <- evalExpToGround literateBuiltin (envServer env) e
-  case maybe_v of
-    Right (ValueAtom v)
-      | Just bmp <- valueToBMP v -> do
-        pngfile <- withTempDir $ \dir -> do
-          let bmpfile = dir </> "img.bmp"
-          liftIO $ LBS.writeFile bmpfile bmp
-          newFile env "img.png" $ \pngfile ->
+  fmap imgBlock . newFile env "img.png" $ \pngfile -> do
+    maybe_v <- evalExpToGround literateBuiltin (envServer env) e
+    case maybe_v of
+      Right (ValueAtom v)
+        | Just bmp <- valueToBMP v -> do
+          withTempDir $ \dir -> do
+            let bmpfile = dir </> "img.bmp"
+            liftIO $ LBS.writeFile bmpfile bmp
             void $ system "convert" [bmpfile, pngfile] mempty
-        pure $ imgBlock pngfile
-    Right v ->
-      nope $ fmap valueType v
-    Left t ->
-      nope t
+      Right v ->
+        nope $ fmap valueType v
+      Left t ->
+        nope t
   where
     nope t =
       throwError $
         "Cannot create image from value of type " <> prettyText t
 --
 processDirective env (DirectivePlot e size) = do
-  maybe_v <- evalExpToGround literateBuiltin (envServer env) e
-  case maybe_v of
-    Right v
-      | Just vs <- plottable2d v -> do
-        pngfile <- newFile env "plot.png" $ plotWith [(Nothing, vs)]
-        pure $ imgBlock pngfile
-    Right (ValueRecord m)
-      | Just m' <- traverse plottable2d m -> do
-        pngfile <- newFile env "plot.png" $ plotWith $ map (first Just) $ M.toList m'
-        pure $ imgBlock pngfile
-    Right v ->
-      throwError $ "Cannot plot value of type " <> prettyText (fmap valueType v)
-    Left t ->
-      throwError $ "Cannot plot opaque value of type " <> prettyText t
+  fmap imgBlock . newFile env "plot.png" $ \pngfile -> do
+    maybe_v <- evalExpToGround literateBuiltin (envServer env) e
+    case maybe_v of
+      Right v
+        | Just vs <- plottable2d v ->
+          plotWith [(Nothing, vs)] pngfile
+      Right (ValueRecord m)
+        | Just m' <- traverse plottable2d m -> do
+          plotWith (map (first Just) $ M.toList m') pngfile
+      Right v ->
+        throwError $ "Cannot plot value of type " <> prettyText (fmap valueType v)
+      Left t ->
+        throwError $ "Cannot plot opaque value of type " <> prettyText t
   where
     plottable2d v = do
       [x, y] <- plottable v
@@ -607,16 +642,16 @@ processDirective env (DirectivePlot e size) = do
         void $ system "gnuplot" [] script
 --
 processDirective env (DirectiveGnuplot e script) = do
-  maybe_v <- evalExpToGround literateBuiltin (envServer env) e
-  case maybe_v of
-    Right (ValueRecord m)
-      | Just m' <- traverse plottable m -> do
-        pngfile <- newFile env "plot.png" $ plotWith $ M.toList m'
-        pure $ imgBlock pngfile
-    Right v ->
-      throwError $ "Cannot plot value of type " <> prettyText (fmap valueType v)
-    Left t ->
-      throwError $ "Cannot plot opaque value of type " <> prettyText t
+  fmap imgBlock . newFile env "plot.png" $ \pngfile -> do
+    maybe_v <- evalExpToGround literateBuiltin (envServer env) e
+    case maybe_v of
+      Right (ValueRecord m)
+        | Just m' <- traverse plottable m ->
+          plotWith (M.toList m') pngfile
+      Right v ->
+        throwError $ "Cannot plot value of type " <> prettyText (fmap valueType v)
+      Left t ->
+        throwError $ "Cannot plot opaque value of type " <> prettyText t
   where
     plotWith xys pngfile = withGnuplotData [] xys $ \_ sets -> do
       let script' =
@@ -632,12 +667,11 @@ processDirective env (DirectiveVideo e params) = do
   when (format `notElem` ["webm", "gif"]) $
     throwError $ "Unknown video format: " <> format
 
-  v <- evalExp literateBuiltin (envServer env) e
-  let nope =
-        throwError $
-          "Cannot produce video from value of type " <> prettyText (fmap scriptValueType v)
-
-  videofile <- newFile env ("video" <.> T.unpack format) $ \videofile ->
+  fmap (videoBlock params) . newFile env ("video" <.> T.unpack format) $ \videofile -> do
+    v <- evalExp literateBuiltin (envServer env) e
+    let nope =
+          throwError $
+            "Cannot produce video from value of type " <> prettyText (fmap scriptValueType v)
     case v of
       ValueAtom SValue {} -> do
         ValueAtom arr <- getExpValue (envServer env) v
@@ -659,8 +693,6 @@ processDirective env (DirectiveVideo e params) = do
             onWebM videofile =<< bmpsToVideo dir
       _ ->
         nope
-
-  pure $ videoBlock params videofile
   where
     framerate = fromMaybe 30 $ videoFPS params
     format = fromMaybe "webm" $ videoFormat params
@@ -742,7 +774,7 @@ processBlock env (BlockDirective directive) = do
           "```\n" <> prettyText (pprDirective False directive) <> "\n```\n"
         _ ->
           "```\n" <> prettyText (pprDirective True directive) <> "\n```\n"
-      env' = env {envHash = hash (envHash env, prettyText directive)}
+      env' = env {envHash = hashText (envHash env <> prettyText directive)}
   (r, files) <- runScriptM $ processDirective env' directive
   case r of
     Left err -> failed prompt err files
@@ -829,12 +861,12 @@ commandLineOptions =
       "v"
       ["verbose"]
       (NoArg $ Right $ \config -> config {scriptVerbose = scriptVerbose config + 1})
-      "Enable logging.  Pass multiple times for more.",
+      "Enable logging. Pass multiple times for more.",
     Option
       "o"
       ["output"]
       (ReqArg (\opt -> Right $ \config -> config {scriptOutput = Just opt}) "FILE")
-      "Enable logging.  Pass multiple times for more.",
+      "Override output file. Image directory is set to basename appended with -img/.",
     Option
       []
       ["stop-on-error"]
@@ -842,7 +874,7 @@ commandLineOptions =
       "Stop and do not produce output file if any directive fails."
   ]
 
--- | Run @futhark script@.
+-- | Run @futhark literate@.
 main :: String -> [String] -> IO ()
 main = mainWithOptions initialOptions commandLineOptions "program" $ \args opts ->
   case args of
@@ -873,11 +905,12 @@ main = mainWithOptions initialOptions commandLineOptions "program" $ \args opts 
             T.hPutStrLn stderr err
             exitFailure
       proghash <-
-        either onError (pure . hash) <=< runExceptT $
+        either onError pure <=< runExceptT $
           system futhark ["hash", prog] mempty
 
       let mdfile = fromMaybe (prog `replaceExtension` "md") $ scriptOutput opts
-          imgdir = dropExtension mdfile <> "-img"
+          imgdir_rel = dropExtension (takeFileName mdfile) <> "-img"
+          imgdir = takeDirectory mdfile </> imgdir_rel
           run_options = scriptExtraOptions opts
           cfg = futharkServerCfg ("." </> dropExtension prog) run_options
 
@@ -887,7 +920,8 @@ main = mainWithOptions initialOptions commandLineOptions "program" $ \args opts 
                 { envServer = server,
                   envOpts = opts,
                   envHash = proghash,
-                  envImgDir = imgdir
+                  envImgDir = imgdir,
+                  envRelImgDir = imgdir_rel
                 }
         (failure, md) <- processScript env script
         T.writeFile mdfile md

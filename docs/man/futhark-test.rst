@@ -144,7 +144,8 @@ OPTIONS
 --exclude=tag
 
   Do not run test cases that contain the given tag.  Cases marked with
-  "disable" are ignored by default.
+  "disable" are ignored by default, as are cases marked "no_foo",
+  where *foo* is the backend used.
 
 -i
   Only interpret - do not run any compilers.
@@ -191,6 +192,14 @@ OPTIONS
   example, given ``--tuning=tuning`` (the default), the program
   ``foo.fut`` will be passed the tuning file ``foo.fut.tuning`` if it
   exists.
+
+ENVIRONMENT VARIABLES
+=====================
+
+``TMPDIR``
+
+  Directory used for temporary files such as gunzipped datasets and
+  log files.
 
 EXAMPLES
 ========

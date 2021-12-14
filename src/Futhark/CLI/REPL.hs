@@ -53,7 +53,7 @@ main = mainWithOptions () [] "options... [program.fut]" run
     run [prog] _ = Just $ repl $ Just prog
     run _ _ = Nothing
 
-data StopReason = EOF | Stop | Exit | Load FilePath
+data StopReason = EOF | Stop | Exit | Load FilePath | Interrupt
 
 repl :: Maybe FilePath -> IO ()
 repl maybe_prog = do
@@ -66,11 +66,18 @@ repl maybe_prog = do
     putStrLn ""
 
   let toploop s = do
-        (stop, s') <- runStateT (runExceptT $ runFutharkiM $ forever readEvalPrint) s
+        (stop, s') <-
+          Haskeline.handleInterrupt (pure (Left Interrupt, s))
+            . Haskeline.withInterrupt
+            $ runStateT (runExceptT $ runFutharkiM $ forever readEvalPrint) s
+
         case stop of
           Left Stop -> finish s'
           Left EOF -> finish s'
           Left Exit -> finish s'
+          Left Interrupt -> do
+            liftIO $ T.putStrLn "Interrupted"
+            toploop s' {futharkiCount = futharkiCount s' + 1}
           Left (Load file) -> do
             liftIO $ T.putStrLn $ "Loading " <> T.pack file
             maybe_new_state <-

@@ -2,10 +2,14 @@
 
 // Forward declarations of things that we technically don't know until
 // the application header file is included, but which we need.
+struct futhark_context_config;
 struct futhark_context;
 char *futhark_context_get_error(struct futhark_context *ctx);
 int futhark_context_sync(struct futhark_context *ctx);
 int futhark_context_clear_caches(struct futhark_context *ctx);
+int futhark_context_config_set_tuning_param(struct futhark_context_config *cfg,
+                                            const char *param_name,
+                                            size_t new_value);
 
 typedef int (*restore_fn)(const void*, FILE *, struct futhark_context*, void*);
 typedef void (*store_fn)(const void*, FILE *, struct futhark_context*, void*);
@@ -57,6 +61,7 @@ DEF_SCALAR_TYPE(u8);
 DEF_SCALAR_TYPE(u16);
 DEF_SCALAR_TYPE(u32);
 DEF_SCALAR_TYPE(u64);
+DEF_SCALAR_TYPE(f16);
 DEF_SCALAR_TYPE(f32);
 DEF_SCALAR_TYPE(f64);
 DEF_SCALAR_TYPE(bool);
@@ -75,6 +80,7 @@ struct value {
     uint32_t v_u32;
     uint64_t v_u64;
 
+    uint16_t v_f16;
     float v_f32;
     double v_f64;
 
@@ -106,6 +112,9 @@ void* value_ptr(struct value *v) {
   }
   if (v->type == &type_u64) {
     return &v->value.v_u64;
+  }
+  if (v->type == &type_f16) {
+    return &v->value.v_f16;
   }
   if (v->type == &type_f32) {
     return &v->value.v_f32;
@@ -161,6 +170,7 @@ struct futhark_prog {
 
 struct server_state {
   struct futhark_prog prog;
+  struct futhark_context_config *cfg;
   struct futhark_context *ctx;
   int variables_capacity;
   struct variable *variables;
@@ -268,7 +278,9 @@ void error_check(struct server_state *s, int err) {
   if (err != 0) {
     failure();
     char *error = futhark_context_get_error(s->ctx);
-    puts(error);
+    if (error != NULL) {
+      puts(error);
+    }
     free(error);
   }
 }
@@ -519,6 +531,19 @@ void cmd_report(struct server_state *s, const char *args[]) {
   free(report);
 }
 
+void cmd_set_tuning_param(struct server_state *s, const char *args[]) {
+  const char *param = get_arg(args, 0);
+  const char *val_s = get_arg(args, 1);
+  size_t val = atol(val_s);
+  int err = futhark_context_config_set_tuning_param(s->cfg, param, val);
+
+  error_check(s, err);
+
+  if (err != 0) {
+    printf("Failed to set tuning parameter %s to %ld\n", param, (long)val);
+  }
+}
+
 char *next_word(char **line) {
   char *p = *line;
 
@@ -603,17 +628,22 @@ void process_line(struct server_state *s, char *line) {
     cmd_unpause_profiling(s, tokens+1);
   } else if (strcmp(command, "report") == 0) {
     cmd_report(s, tokens+1);
+  } else if (strcmp(command, "set_tuning_param") == 0) {
+    cmd_set_tuning_param(s, tokens+1);
   } else {
     futhark_panic(1, "Unknown command: %s\n", command);
   }
 }
 
-void run_server(struct futhark_prog *prog, struct futhark_context *ctx) {
+void run_server(struct futhark_prog *prog,
+                struct futhark_context_config *cfg,
+                struct futhark_context *ctx) {
   char *line = NULL;
   size_t buflen = 0;
   ssize_t linelen;
 
   struct server_state s = {
+    .cfg = cfg,
     .ctx = ctx,
     .variables_capacity = 100,
     .prog = *prog
@@ -631,6 +661,7 @@ void run_server(struct futhark_prog *prog, struct futhark_context *ctx) {
     ok();
   }
 
+  free(s.variables);
   free(line);
 }
 

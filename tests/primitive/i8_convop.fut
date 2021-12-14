@@ -7,7 +7,7 @@
 -- input { -128i8 } output { true -128i8 -128i16 -128i32 -128i64
 --                           128u8 128u16 128u32 128u64 }
 
-let main(x: i8): (bool,i8,i16,i32,i64, u8, u16, u32, u64) =
+def main(x: i8): (bool,i8,i16,i32,i64, u8, u16, u32, u64) =
   (bool.i8(x),
    i8.i8(x), i16.i8(x), i32.i8(x), i64.i8(x),
    u8.i8(x), u16.i8(x), u32.i8(x), u64.i8(x))

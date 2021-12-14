@@ -13,24 +13,25 @@ where
 import Control.Monad.Identity
 import Control.Monad.Reader
 import Control.Monad.State
-import Data.FileEmbed
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import qualified Data.Set as S
+import qualified Data.Text as T
 import qualified Futhark.CodeGen.Backends.GenericC as GC
 import Futhark.CodeGen.Backends.SimpleRep
 import Futhark.CodeGen.ImpCode.GPU hiding (Program)
 import qualified Futhark.CodeGen.ImpCode.GPU as ImpGPU
 import Futhark.CodeGen.ImpCode.OpenCL hiding (Program)
 import qualified Futhark.CodeGen.ImpCode.OpenCL as ImpOpenCL
+import Futhark.CodeGen.RTS.C (atomicsH, halfH)
 import Futhark.Error (compilerLimitationS)
 import Futhark.IR.Prop (isBuiltInFunction)
 import Futhark.MonadFreshNames
 import Futhark.Util (zEncodeString)
-import Futhark.Util.Pretty (prettyOneLine)
-import qualified Language.C.Quote.CUDA as CUDAC
+import Futhark.Util.Pretty (prettyOneLine, prettyText)
 import qualified Language.C.Quote.OpenCL as C
 import qualified Language.C.Syntax as C
+import NeatInterpolation (untrimming)
 
 kernelsToCUDA, kernelsToOpenCL :: ImpGPU.Program -> ImpOpenCL.Program
 kernelsToCUDA = translateGPU TargetCUDA
@@ -63,10 +64,10 @@ translateGPU target prog =
       opencl_code = openClCode $ map snd $ M.elems kernels
 
       opencl_prelude =
-        unlines
-          [ pretty $ genPrelude target used_types,
-            unlines $ map pretty device_prototypes,
-            unlines $ map pretty device_defs
+        T.unlines
+          [ genPrelude target used_types,
+            T.unlines $ map prettyText device_prototypes,
+            T.unlines $ map prettyText device_defs
           ]
    in ImpOpenCL.Program
         opencl_code
@@ -238,12 +239,9 @@ onKernel target kernel = do
           GC.blockScope $ GC.compileCode $ kernelBody kernel
       kstate = GC.compUserState cstate
 
-      use_params = mapMaybe useAsParam $ kernelUses kernel
-
       (local_memory_args, local_memory_params, local_memory_init) =
-        unzip3 $
-          flip evalState (blankNameSource :: VNameSource) $
-            mapM (prepareLocalMemory target) $ kernelLocalMemory kstate
+        unzip3 . flip evalState (blankNameSource :: VNameSource) $
+          mapM (prepareLocalMemory target) $ kernelLocalMemory kstate
 
       -- CUDA has very strict restrictions on the number of blocks
       -- permitted along the 'y' and 'z' dimensions of the grid
@@ -273,6 +271,9 @@ onKernel target kernel = do
             )
 
       (const_defs, const_undefs) = unzip $ mapMaybe constDef $ kernelUses kernel
+
+  let (use_params, unpack_params) =
+        unzip $ mapMaybe useAsParam $ kernelUses kernel
 
   let (safety, error_init)
         -- We conservatively assume that any called function can fail.
@@ -323,6 +324,7 @@ onKernel target kernel = do
 
       kernel_fun =
         [C.cfun|__kernel void $id:name ($params:params) {
+                  $items:(mconcat unpack_params)
                   $items:const_defs
                   $items:block_dim_init
                   $items:local_memory_init
@@ -367,16 +369,24 @@ onKernel target kernel = do
           [C.citem|volatile $ty:defaultMemBlockType $id:mem = &shared_mem[$id:param];|]
         )
 
-useAsParam :: KernelUse -> Maybe C.Param
-useAsParam (ScalarUse name bt) =
-  let ctp = case bt of
+useAsParam :: KernelUse -> Maybe (C.Param, [C.BlockItem])
+useAsParam (ScalarUse name pt) = do
+  let name_bits = zEncodeString (pretty name) <> "_bits"
+      ctp = case pt of
         -- OpenCL does not permit bool as a kernel parameter type.
         Bool -> [C.cty|unsigned char|]
         Unit -> [C.cty|unsigned char|]
-        _ -> GC.primTypeToCType bt
-   in Just [C.cparam|$ty:ctp $id:name|]
+        _ -> primStorageType pt
+  if ctp == primTypeToCType pt
+    then Just ([C.cparam|$ty:ctp $id:name|], [])
+    else
+      let name_bits_e = [C.cexp|$id:name_bits|]
+       in Just
+            ( [C.cparam|$ty:ctp $id:name_bits|],
+              [[C.citem|$ty:(primTypeToCType pt) $id:name = $exp:(fromStorage pt name_bits_e);|]]
+            )
 useAsParam (MemoryUse name) =
-  Just [C.cparam|__global $ty:defaultMemBlockType $id:name|]
+  Just ([C.cparam|__global $ty:defaultMemBlockType $id:name|], [])
 useAsParam ConstUse {} =
   Nothing
 
@@ -395,42 +405,34 @@ constDef (ConstUse v e) =
     undef = "#undef " ++ pretty (C.toIdent v mempty)
 constDef _ = Nothing
 
-openClCode :: [C.Func] -> String
+openClCode :: [C.Func] -> T.Text
 openClCode kernels =
-  pretty [C.cunit|$edecls:funcs|]
+  prettyText [C.cunit|$edecls:funcs|]
   where
     funcs =
       [ [C.cedecl|$func:kernel_func|]
         | kernel_func <- kernels
       ]
 
-atomicsDefs :: String
-atomicsDefs = $(embedStringFile "rts/c/atomics.h")
-
-genOpenClPrelude :: S.Set PrimType -> [C.Definition]
+genOpenClPrelude :: S.Set PrimType -> T.Text
 genOpenClPrelude ts =
-  -- Clang-based OpenCL implementations need this for 'static' to work.
-  [ [C.cedecl|$esc:("#ifdef cl_clang_storage_class_specifiers")|],
-    [C.cedecl|$esc:("#pragma OPENCL EXTENSION cl_clang_storage_class_specifiers : enable")|],
-    [C.cedecl|$esc:("#endif")|],
-    [C.cedecl|$esc:("#pragma OPENCL EXTENSION cl_khr_byte_addressable_store : enable")|]
-  ]
-    ++ concat
-      [ [C.cunit|$esc:("#pragma OPENCL EXTENSION cl_khr_fp64 : enable")
-                 $esc:("#define FUTHARK_F64_ENABLED")|]
-        | uses_float64
-      ]
-    ++ [C.cunit|
-/* Some OpenCL programs dislike empty progams, or programs with no kernels.
- * Declare a dummy kernel to ensure they remain our friends. */
+  [untrimming|
+// Clang-based OpenCL implementations need this for 'static' to work.
+#ifdef cl_clang_storage_class_specifiers
+#pragma OPENCL EXTENSION cl_clang_storage_class_specifiers : enable
+#endif
+#pragma OPENCL EXTENSION cl_khr_byte_addressable_store : enable
+$enable_f64
+// Some OpenCL programs dislike empty progams, or programs with no kernels.
+// Declare a dummy kernel to ensure they remain our friends.
 __kernel void dummy_kernel(__global unsigned char *dummy, int n)
 {
     const int thread_gid = get_global_id(0);
     if (thread_gid >= n) return;
 }
 
-$esc:("#pragma OPENCL EXTENSION cl_khr_int64_base_atomics : enable")
-$esc:("#pragma OPENCL EXTENSION cl_khr_int64_extended_atomics : enable")
+#pragma OPENCL EXTENSION cl_khr_int64_base_atomics : enable
+#pragma OPENCL EXTENSION cl_khr_int64_extended_atomics : enable
 
 typedef char int8_t;
 typedef short int16_t;
@@ -444,40 +446,36 @@ typedef ulong uint64_t;
 
 // NVIDIAs OpenCL does not create device-wide memory fences (see #734), so we
 // use inline assembly if we detect we are on an NVIDIA GPU.
-$esc:("#ifdef cl_nv_pragma_unroll")
+#ifdef cl_nv_pragma_unroll
 static inline void mem_fence_global() {
   asm("membar.gl;");
 }
-$esc:("#else")
+#else
 static inline void mem_fence_global() {
   mem_fence(CLK_LOCAL_MEM_FENCE | CLK_GLOBAL_MEM_FENCE);
 }
-$esc:("#endif")
+#endif
 static inline void mem_fence_local() {
   mem_fence(CLK_LOCAL_MEM_FENCE);
 }
 |]
-    ++ cIntOps
-    ++ cFloat32Ops
-    ++ cFloat32Funs
-    ++ (if uses_float64 then cFloat64Ops ++ cFloat64Funs ++ cFloatConvOps else [])
-    ++ [[C.cedecl|$esc:atomicsDefs|]]
+    <> halfH
+    <> cScalarDefs
+    <> atomicsH
   where
-    uses_float64 = FloatType Float64 `S.member` ts
+    enable_f64
+      | FloatType Float64 `S.member` ts =
+        [untrimming|
+         #pragma OPENCL EXTENSION cl_khr_fp64 : enable
+         #define FUTHARK_F64_ENABLED
+         |]
+      | otherwise = mempty
 
-genCUDAPrelude :: [C.Definition]
+genCUDAPrelude :: T.Text
 genCUDAPrelude =
-  cudafy ++ ops
-  where
-    ops =
-      cIntOps ++ cFloat32Ops ++ cFloat32Funs ++ cFloat64Ops
-        ++ cFloat64Funs
-        ++ cFloatConvOps
-        ++ [[C.cedecl|$esc:atomicsDefs|]]
-    cudafy =
-      [CUDAC.cunit|
-$esc:("#define FUTHARK_CUDA")
-$esc:("#define FUTHARK_F64_ENABLED")
+  [untrimming|
+#define FUTHARK_CUDA
+#define FUTHARK_F64_ENABLED
 
 typedef char int8_t;
 typedef short int16_t;
@@ -491,16 +489,15 @@ typedef uint8_t uchar;
 typedef uint16_t ushort;
 typedef uint32_t uint;
 typedef uint64_t ulong;
-$esc:("#define __kernel extern \"C\" __global__ __launch_bounds__(MAX_THREADS_PER_BLOCK)")
-$esc:("#define __global")
-$esc:("#define __local")
-$esc:("#define __private")
-$esc:("#define __constant")
-$esc:("#define __write_only")
-$esc:("#define __read_only")
+#define __kernel extern "C" __global__ __launch_bounds__(MAX_THREADS_PER_BLOCK)
+#define __global
+#define __local
+#define __private
+#define __constant
+#define __write_only
+#define __read_only
 
-static inline int get_group_id_fn(int block_dim0, int block_dim1, int block_dim2, int d)
-{
+static inline int get_group_id_fn(int block_dim0, int block_dim1, int block_dim2, int d) {
   switch (d) {
     case 0: d = block_dim0; break;
     case 1: d = block_dim1; break;
@@ -513,10 +510,9 @@ static inline int get_group_id_fn(int block_dim0, int block_dim1, int block_dim2
     default: return 0;
   }
 }
-$esc:("#define get_group_id(d) get_group_id_fn(block_dim0, block_dim1, block_dim2, d)")
+#define get_group_id(d) get_group_id_fn(block_dim0, block_dim1, block_dim2, d)
 
-static inline int get_num_groups_fn(int block_dim0, int block_dim1, int block_dim2, int d)
-{
+static inline int get_num_groups_fn(int block_dim0, int block_dim1, int block_dim2, int d) {
   switch (d) {
     case 0: d = block_dim0; break;
     case 1: d = block_dim1; break;
@@ -529,10 +525,9 @@ static inline int get_num_groups_fn(int block_dim0, int block_dim1, int block_di
     default: return 0;
   }
 }
-$esc:("#define get_num_groups(d) get_num_groups_fn(block_dim0, block_dim1, block_dim2, d)")
+#define get_num_groups(d) get_num_groups_fn(block_dim0, block_dim1, block_dim2, d)
 
-static inline int get_local_id(int d)
-{
+static inline int get_local_id(int d) {
   switch (d) {
     case 0: return threadIdx.x;
     case 1: return threadIdx.y;
@@ -541,8 +536,7 @@ static inline int get_local_id(int d)
   }
 }
 
-static inline int get_local_size(int d)
-{
+static inline int get_local_size(int d) {
   switch (d) {
     case 0: return blockDim.x;
     case 1: return blockDim.y;
@@ -551,21 +545,18 @@ static inline int get_local_size(int d)
   }
 }
 
-static inline int get_global_id_fn(int block_dim0, int block_dim1, int block_dim2, int d)
-{
+static inline int get_global_id_fn(int block_dim0, int block_dim1, int block_dim2, int d) {
   return get_group_id(d) * get_local_size(d) + get_local_id(d);
 }
-$esc:("#define get_global_id(d) get_global_id_fn(block_dim0, block_dim1, block_dim2, d)")
+#define get_global_id(d) get_global_id_fn(block_dim0, block_dim1, block_dim2, d)
 
-static inline int get_global_size(int block_dim0, int block_dim1, int block_dim2, int d)
-{
+static inline int get_global_size(int block_dim0, int block_dim1, int block_dim2, int d) {
   return get_num_groups(d) * get_local_size(d);
 }
 
-$esc:("#define CLK_LOCAL_MEM_FENCE 1")
-$esc:("#define CLK_GLOBAL_MEM_FENCE 2")
-static inline void barrier(int x)
-{
+#define CLK_LOCAL_MEM_FENCE 1
+#define CLK_GLOBAL_MEM_FENCE 2
+static inline void barrier(int x) {
   __syncthreads();
 }
 static inline void mem_fence_local() {
@@ -575,10 +566,13 @@ static inline void mem_fence_global() {
   __threadfence();
 }
 
-$esc:("#define NAN (0.0/0.0)")
-$esc:("#define INFINITY (1.0/0.0)")
+#define NAN (0.0/0.0)
+#define INFINITY (1.0/0.0)
 extern volatile __shared__ unsigned char shared_mem[];
 |]
+    <> halfH
+    <> cScalarDefs
+    <> atomicsH
 
 compilePrimExp :: PrimExp KernelConst -> C.Exp
 compilePrimExp e = runIdentity $ GC.compilePrimExp compileKernelConst e
@@ -590,7 +584,7 @@ kernelArgs :: Kernel -> [KernelArg]
 kernelArgs = mapMaybe useToArg . kernelUses
   where
     useToArg (MemoryUse mem) = Just $ MemKArg mem
-    useToArg (ScalarUse v bt) = Just $ ValueKArg (LeafExp (ScalarVar v) bt) bt
+    useToArg (ScalarUse v pt) = Just $ ValueKArg (LeafExp v pt) pt
     useToArg ConstUse {} = Nothing
 
 nextErrorLabel :: GC.CompilerM KernelOp KernelState String
@@ -674,7 +668,7 @@ inKernelOperations mode body =
         pendingError False
         GC.stm [C.cstm|$id:label: barrier($exp:(fence f));|]
         GC.stm [C.cstm|if (local_failure) { return; }|]
-      GC.stm [C.cstm|barrier(CLK_LOCAL_MEM_FENCE);|] -- intentional
+      GC.stm [C.cstm|barrier($exp:(fence f));|]
       GC.modifyUserState $ \s -> s {kernelHasBarriers = True}
       incErrorLabel
     kernelOps (Atomic space aop) = atomicOps space aop
@@ -738,8 +732,8 @@ inKernelOperations mode body =
     --
     atomicOps s (AtomicAdd t old arr ind val) =
       doAtomic s t old arr ind val "atomic_add" [C.cty|int|]
-    atomicOps s (AtomicFAdd Float32 old arr ind val) =
-      doAtomic s Float32 old arr ind val "atomic_fadd" [C.cty|float|]
+    atomicOps s (AtomicFAdd t old arr ind val) =
+      doAtomic s t old arr ind val "atomic_fadd" [C.cty|float|]
     atomicOps s (AtomicSMax t old arr ind val) =
       doAtomic s t old arr ind val "atomic_smax" [C.cty|int|]
     atomicOps s (AtomicSMin t old arr ind val) =
@@ -859,6 +853,8 @@ typesInCode
     typesInExp e1 <> typesInExp e2 <> typesInExp e3
 typesInCode (Write _ (Count (TPrimExp e1)) t _ _ e2) =
   typesInExp e1 <> S.singleton t <> typesInExp e2
+typesInCode (Read _ _ (Count (TPrimExp e1)) t _ _) =
+  typesInExp e1 <> S.singleton t
 typesInCode (SetScalar _ e) = typesInExp e
 typesInCode SetMem {} = mempty
 typesInCode (Call _ _ es) = mconcat $ map typesInArg es
@@ -882,5 +878,4 @@ typesInExp (ConvOpExp op e) = S.fromList [from, to] <> typesInExp e
     (from, to) = convOpType op
 typesInExp (UnOpExp _ e) = typesInExp e
 typesInExp (FunExp _ args t) = S.singleton t <> mconcat (map typesInExp args)
-typesInExp (LeafExp (Index _ (Count (TPrimExp e)) t _ _) _) = S.singleton t <> typesInExp e
-typesInExp (LeafExp ScalarVar {} _) = mempty
+typesInExp LeafExp {} = mempty

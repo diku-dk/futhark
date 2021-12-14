@@ -1,3 +1,4 @@
+{-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE TypeFamilies #-}
@@ -21,6 +22,13 @@ module Futhark.Optimise.Simplify.Rep
     mkWiseLetStm,
     mkWiseExpDec,
     CanBeWise (..),
+
+    -- * Constructing representation
+    Informing,
+    informLambda,
+    informFunDef,
+    informStms,
+    informBody,
   )
 where
 
@@ -208,15 +216,15 @@ mkWiseBody ::
   Stms (Wise rep) ->
   Result ->
   Body (Wise rep)
-mkWiseBody dec bnds res =
+mkWiseBody dec stms res =
   Body
-    ( BodyWisdom aliases consumed (AliasDec $ freeIn $ freeInStmsAndRes bnds res),
+    ( BodyWisdom aliases consumed (AliasDec $ freeIn $ freeInStmsAndRes stms res),
       dec
     )
-    bnds
+    stms
     res
   where
-    (aliases, consumed) = Aliases.mkBodyAliases bnds res
+    (aliases, consumed) = Aliases.mkBodyAliases stms res
 
 mkWiseLetStm ::
   (ASTRep rep, CanBeWise (Op rep)) =>
@@ -254,9 +262,13 @@ instance (Buildable rep, CanBeWise (Op rep)) => Buildable (Wise rep) where
       Let pat dec _ <- mkLetNames names $ removeExpWisdom e
       return $ mkWiseLetStm pat dec e
 
-  mkBody bnds res =
-    let Body bodyrep _ _ = mkBody (fmap removeStmWisdom bnds) res
-     in mkWiseBody bodyrep bnds res
+  mkBody stms res =
+    let Body bodyrep _ _ = mkBody (fmap removeStmWisdom stms) res
+     in mkWiseBody bodyrep stms res
+
+-- | Constraints that let us transform a representation into a 'Wise'
+-- representation.
+type Informing rep = (ASTRep rep, CanBeWise (Op rep))
 
 class
   ( AliasedOp (OpWithWisdom op),
@@ -266,7 +278,47 @@ class
   where
   type OpWithWisdom op :: Data.Kind.Type
   removeOpWisdom :: OpWithWisdom op -> op
+  addOpWisdom :: op -> OpWithWisdom op
 
 instance CanBeWise () where
   type OpWithWisdom () = ()
   removeOpWisdom () = ()
+  addOpWisdom () = ()
+
+informStm :: Informing rep => Stm rep -> Stm (Wise rep)
+informStm (Let pat aux e) = mkWiseLetStm pat aux $ informExp e
+
+informStms :: Informing rep => Stms rep -> Stms (Wise rep)
+informStms = fmap informStm
+
+informBody :: Informing rep => Body rep -> Body (Wise rep)
+informBody (Body dec stms res) = mkWiseBody dec (informStms stms) res
+
+informLambda :: Informing rep => Lambda rep -> Lambda (Wise rep)
+informLambda (Lambda ps body ret) = Lambda ps (informBody body) ret
+
+informExp :: Informing rep => Exp rep -> Exp (Wise rep)
+informExp (If cond tbranch fbranch (IfDec ts ifsort)) =
+  If cond (informBody tbranch) (informBody fbranch) (IfDec ts ifsort)
+informExp (DoLoop merge form loopbody) =
+  let form' = case form of
+        ForLoop i it bound params -> ForLoop i it bound params
+        WhileLoop cond -> WhileLoop cond
+   in DoLoop merge form' $ informBody loopbody
+informExp e = runIdentity $ mapExpM mapper e
+  where
+    mapper =
+      Mapper
+        { mapOnBody = const $ pure . informBody,
+          mapOnSubExp = pure,
+          mapOnVName = pure,
+          mapOnRetType = pure,
+          mapOnBranchType = pure,
+          mapOnFParam = pure,
+          mapOnLParam = pure,
+          mapOnOp = pure . addOpWisdom
+        }
+
+informFunDef :: Informing rep => FunDef rep -> FunDef (Wise rep)
+informFunDef (FunDef entry attrs fname rettype params body) =
+  FunDef entry attrs fname rettype params $ informBody body

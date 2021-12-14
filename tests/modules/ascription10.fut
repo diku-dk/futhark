@@ -2,7 +2,7 @@
 
 module type number = { type t val i32: i32 -> t }
 
-module has_number: number with t = i32 = { type t = i32 let i32 (x: i32) = x }
+module has_number: number with t = i32 = { type t = i32 def i32 (x: i32) = x }
 
 module type optimizable = {
   module loss: number
@@ -18,4 +18,4 @@ module mt (optable: optimizable) = {
 
 module m = mt opaque
 
-let main (x: i32) = m.loss.i32 x
+def main (x: i32) = m.loss.i32 x

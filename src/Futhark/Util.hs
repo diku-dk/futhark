@@ -10,6 +10,7 @@
 -- compatible).
 module Futhark.Util
   ( nubOrd,
+    nubByOrd,
     mapAccumLM,
     maxinum,
     chunk,
@@ -23,7 +24,7 @@ module Futhark.Util
     splitFromEnd,
     splitAt3,
     focusNth,
-    hashIntText,
+    hashText,
     unixEnvironment,
     isEnvVarAtLeast,
     fancyTerminal,
@@ -46,6 +47,7 @@ module Futhark.Util
     trim,
     pmapIO,
     readFileSafely,
+    convFloat,
     UserString,
     EncodedString,
     zEncodeString,
@@ -58,17 +60,17 @@ import Control.Arrow (first)
 import Control.Concurrent
 import Control.Exception
 import Control.Monad
+import Crypto.Hash.MD5 as MD5
 import qualified Data.ByteString as BS
+import qualified Data.ByteString.Base16 as Base16
 import Data.Char
 import Data.Either
 import Data.Function ((&))
-import Data.List (foldl', genericDrop, genericSplitAt, sort)
+import Data.List (foldl', genericDrop, genericSplitAt, sortBy)
 import qualified Data.List.NonEmpty as NE
-import Data.Map (Map)
-import qualified Data.Map as Map
+import qualified Data.Map as M
 import Data.Maybe
-import Data.Set (Set)
-import qualified Data.Set as Set
+import qualified Data.Set as S
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import qualified Data.Text.Encoding.Error as T
@@ -84,12 +86,17 @@ import System.IO (hIsTerminalDevice, stdout)
 import System.IO.Error (isDoesNotExistError)
 import System.IO.Unsafe
 import System.Process.ByteString
-import Text.Printf
 import Text.Read (readMaybe)
 
 -- | Like 'nub', but without the quadratic runtime.
 nubOrd :: Ord a => [a] -> [a]
-nubOrd = map NE.head . NE.group . sort
+nubOrd = nubByOrd compare
+
+-- | Like 'nubBy', but without the quadratic runtime.
+nubByOrd :: (a -> a -> Ordering) -> [a] -> [a]
+nubByOrd cmp = map NE.head . NE.groupBy eq . sortBy cmp
+  where
+    eq x y = cmp x y == EQ
 
 -- | Like 'Data.Traversable.mapAccumL', but monadic.
 mapAccumLM ::
@@ -171,10 +178,11 @@ focusNth i xs
   | (bef, x : aft) <- genericSplitAt i xs = Just (bef, x, aft)
   | otherwise = Nothing
 
--- | Convert the given integer (implied to be a hash digest) to a
--- hexadecimal non-negative number.
-hashIntText :: Int -> T.Text
-hashIntText x = T.pack $ printf "%x" (fromIntegral x :: Word)
+-- | Compute a hash of a text that is stable across OS versions.
+-- Returns the hash as a text as well, ready for human consumption.
+hashText :: T.Text -> T.Text
+hashText =
+  T.decodeUtf8With T.lenientDecode . Base16.encode . MD5.hash . T.encodeUtf8
 
 {-# NOINLINE unixEnvironment #-}
 
@@ -358,6 +366,15 @@ readFileSafely filepath =
       | otherwise =
         return $ Just $ Left $ show e
 
+-- | Convert between different floating-point types, preserving
+-- infinities and NaNs.
+convFloat :: (RealFloat from, RealFloat to) => from -> to
+convFloat v
+  | isInfinite v, v > 0 = 1 / 0
+  | isInfinite v, v < 0 = -1 / 0
+  | isNaN v = 0 / 0
+  | otherwise = fromRational $ toRational v
+
 -- Z-encoding from https://ghc.haskell.org/trac/ghc/wiki/Commentary/Compiler/SymbolNames
 --
 -- Slightly simplified as we do not need it to deal with tuples and
@@ -440,8 +457,8 @@ atMostChars n s
   | length s > n = take (n -3) s ++ "..."
   | otherwise = s
 
-invertMap :: (Ord v, Ord k) => Map k v -> Map v (Set k)
+invertMap :: (Ord v, Ord k) => M.Map k v -> M.Map v (S.Set k)
 invertMap m =
-  Map.toList m
-    & fmap (swap . first Set.singleton)
-    & foldr (uncurry $ Map.insertWith (<>)) mempty
+  M.toList m
+    & fmap (swap . first S.singleton)
+    & foldr (uncurry $ M.insertWith (<>)) mempty

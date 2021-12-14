@@ -21,7 +21,7 @@
 -- @
 --   map
 --     map(f)
---     bnds_a...
+--     stms_a...
 --     map(g)
 -- @
 --
@@ -31,7 +31,7 @@
 --   map
 --     map(f)
 --   map
---     bnds_a
+--     stms_a
 --   map
 --     map(g)
 -- @
@@ -40,7 +40,7 @@
 --
 --  (0) it can be done without creating irregular arrays.
 --      Specifically, the size of the arrays created by @map(f)@, by
---      @map(g)@ and whatever is created by @bnds_a@ that is also used
+--      @map(g)@ and whatever is created by @stms_a@ that is also used
 --      in @map(g)@, must be invariant to the outermost loop.
 --
 --  (1) the maps are _balanced_.  That is, the functions @f@ and @g@
@@ -48,7 +48,7 @@
 --
 -- The advantage is that the map-nests containing @map(f)@ and
 -- @map(g)@ can now be trivially flattened at no cost, thus exposing
--- more parallelism.  Note that the @bnds_a@ map constitutes array
+-- more parallelism.  Note that the @stms_a@ map constitutes array
 -- expansion, which requires additional storage.
 --
 -- = Distributing Sequential Loops
@@ -249,20 +249,20 @@ type GPUStms = Stms Out.GPU
 
 transformBody :: KernelPath -> Body -> DistribM (Out.Body Out.GPU)
 transformBody path body = do
-  bnds <- transformStms path $ stmsToList $ bodyStms body
-  return $ mkBody bnds $ bodyResult body
+  stms <- transformStms path $ stmsToList $ bodyStms body
+  return $ mkBody stms $ bodyResult body
 
 transformStms :: KernelPath -> [Stm] -> DistribM GPUStms
 transformStms _ [] =
   return mempty
-transformStms path (bnd : bnds) =
-  sequentialisedUnbalancedStm bnd >>= \case
+transformStms path (stm : stms) =
+  sequentialisedUnbalancedStm stm >>= \case
     Nothing -> do
-      bnd' <- transformStm path bnd
-      inScopeOf bnd' $
-        (bnd' <>) <$> transformStms path bnds
-    Just bnds' ->
-      transformStms path $ stmsToList bnds' <> bnds
+      stm' <- transformStm path stm
+      inScopeOf stm' $
+        (stm' <>) <$> transformStms path stms
+    Just stms' ->
+      transformStms path $ stmsToList stms' <> stms
 
 unbalancedLambda :: Lambda -> Bool
 unbalancedLambda orig_lam =
@@ -393,7 +393,7 @@ transformStm path (Let res_pat (StmAux cs _ _) (Op (Screma w arrs form)))
     let map_lam_sequential = soacsLambdaToGPU map_lam
     lvl <- segThreadCapped [w] "segscan" $ NoRecommendation SegNoVirt
     addStms . fmap (certify cs)
-      =<< segScan lvl res_pat w scan_ops map_lam_sequential arrs [] []
+      =<< segScan lvl res_pat mempty w scan_ops map_lam_sequential arrs [] []
 transformStm path (Let res_pat aux (Op (Screma w arrs form)))
   | Just [Reduce comm red_fun nes] <- isReduceSOAC form,
     let comm'
@@ -401,8 +401,8 @@ transformStm path (Let res_pat aux (Op (Screma w arrs form)))
           | otherwise = comm,
     Just do_irwim <- irwim res_pat w comm' red_fun $ zip nes arrs = do
     types <- asksScope scopeForSOACs
-    (_, bnds) <- fst <$> runBuilderT (simplifyStms =<< collectStms_ (auxing aux do_irwim)) types
-    transformStms path $ stmsToList bnds
+    stms <- fst <$> runBuilderT (simplifyStms =<< collectStms_ (auxing aux do_irwim)) types
+    transformStms path $ stmsToList stms
 transformStm path (Let pat aux@(StmAux cs _ _) (Op (Screma w arrs form)))
   | Just (reds, map_lam) <- isRedomapSOAC form = do
     let paralleliseOuter = runBuilder_ $ do
@@ -426,10 +426,8 @@ transformStm path (Let pat aux@(StmAux cs _ _) (Op (Screma w arrs form)))
           (mapstm, redstm) <-
             redomapToMapAndReduce pat (w, reds, map_lam, arrs)
           types <- asksScope scopeForSOACs
-          transformStms path' . stmsToList <=< (`runBuilderT_` types) $ do
-            (_, stms) <-
-              simplifyStms (stmsFromList [certify cs mapstm, certify cs redstm])
-            addStms stms
+          transformStms path' . stmsToList <=< (`runBuilderT_` types) $
+            addStms =<< simplifyStms (stmsFromList [certify cs mapstm, certify cs redstm])
 
         innerParallelBody path' =
           renameBody
@@ -541,7 +539,7 @@ transformStm path (Let pat _ (Op (Stream w arrs Sequential nes fold_fun))) = do
   types <- asksScope scopeForSOACs
   transformStms path . stmsToList . snd
     =<< runBuilderT (sequentialStreamWholeArray pat w nes fold_fun arrs) types
-transformStm _ (Let pat (StmAux cs _ _) (Op (Scatter w lam ivs as))) = runBuilder_ $ do
+transformStm _ (Let pat (StmAux cs _ _) (Op (Scatter w ivs lam as))) = runBuilder_ $ do
   let lam' = soacsLambdaToGPU lam
   write_i <- newVName "write_i"
   let (as_ws, _, _) = unzip3 as
@@ -567,7 +565,7 @@ transformStm _ (Let pat (StmAux cs _ _) (Op (Scatter w lam ivs as))) = runBuilde
   certifying cs $ do
     addStms stms
     letBind pat $ Op $ SegOp kernel
-transformStm _ (Let orig_pat (StmAux cs _ _) (Op (Hist w ops bucket_fun imgs))) = do
+transformStm _ (Let orig_pat (StmAux cs _ _) (Op (Hist w imgs ops bucket_fun))) = do
   let bfun' = soacsLambdaToGPU bucket_fun
 
   -- It is important not to launch unnecessarily many threads for
@@ -578,8 +576,8 @@ transformStm _ (Let orig_pat (StmAux cs _ _) (Op (Hist w ops bucket_fun imgs))) 
     addStms =<< histKernel onLambda lvl orig_pat [] [] cs w ops bfun' imgs
   where
     onLambda = pure . soacsLambdaToGPU
-transformStm _ bnd =
-  runBuilder_ $ FOT.transformStmRecursively bnd
+transformStm _ stm =
+  runBuilder_ $ FOT.transformStmRecursively stm
 
 sufficientParallelism ::
   String ->
@@ -604,7 +602,7 @@ worthIntraGroup lam = bodyInterest (lambdaBody lam) > 1
       | Op (Screma w _ form) <- stmExp stm,
         Just lam' <- isMapSOAC form =
         mapLike w lam'
-      | Op (Scatter w lam' _ _) <- stmExp stm =
+      | Op (Scatter w _ lam' _) <- stmExp stm =
         mapLike w lam'
       | DoLoop _ _ body <- stmExp stm =
         bodyInterest body * 10
@@ -915,12 +913,12 @@ onInnerMap path maploop@(MapLoop pat aux w lam arrs) acc
           -- sequentialising.  This is only OK as long as further
           -- versioning does not take place down that branch (it currently
           -- does not).
-          (sequentialised_kernel, nestw_bnds) <- localScope extra_scope $ do
+          (sequentialised_kernel, nestw_stms) <- localScope extra_scope $ do
             let sequentialised_lam = soacsLambdaToGPU lam'
             constructKernel segThreadCapped nest' $ lambdaBody sequentialised_lam
 
           let outer_pat = loopNestingPat $ fst nest
-          (nestw_bnds <>)
+          (nestw_stms <>)
             <$> onMap'
               nest'
               path

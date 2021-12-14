@@ -4,7 +4,7 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# OPTIONS_GHC -Wno-overlapping-patterns -Wno-incomplete-patterns -Wno-incomplete-uni-patterns -Wno-incomplete-record-updates #-}
 
--- | Some simplification rules for 'BasicOp'.
+-- | Some simplification rules for t'BasicOp'.
 module Futhark.Optimise.Simplify.Rules.BasicOp
   ( basicOpRules,
   )
@@ -206,10 +206,10 @@ ruleBasicOp vtable pat _ (CmpOp (CmpEq t) se1 se2)
   | Just m <- simplifyWith se2 se1 = Simplify m
   where
     simplifyWith (Var v) x
-      | Just bnd <- ST.lookupStm v vtable,
-        If p tbranch fbranch _ <- stmExp bnd,
+      | Just stm <- ST.lookupStm v vtable,
+        If p tbranch fbranch _ <- stmExp stm,
         Just (y, z) <-
-          returns v (stmPat bnd) tbranch fbranch,
+          returns v (stmPat stm) tbranch fbranch,
         not $ boundInBody tbranch `namesIntersect` freeIn y,
         not $ boundInBody fbranch `namesIntersect` freeIn z = Just $ do
         eq_x_y <-
@@ -233,6 +233,9 @@ ruleBasicOp vtable pat _ (CmpOp (CmpEq t) se1 se2)
           zip (map resSubExp (bodyResult tbranch)) (map resSubExp (bodyResult fbranch))
 ruleBasicOp _ pat _ (Replicate (Shape []) se@Constant {}) =
   Simplify $ letBind pat $ BasicOp $ SubExp se
+ruleBasicOp _ pat _ (Replicate _ se)
+  | [Acc {}] <- patTypes pat =
+    Simplify $ letBind pat $ BasicOp $ SubExp se
 ruleBasicOp _ pat _ (Replicate (Shape []) (Var v)) = Simplify $ do
   v_t <- lookupType v
   letBind pat $
@@ -270,9 +273,12 @@ ruleBasicOp vtable pat aux (Index idd slice)
             mapM (toSubExp "new_index") new_inds
           certifying idd_cs . auxing aux $
             letBind pat $ BasicOp $ Index idd2 $ Slice $ map DimFix new_inds'
-ruleBasicOp _ pat _ (BinOp (Pow t) e1 e2)
-  | e1 == intConst t 2 =
-    Simplify $ letBind pat $ BasicOp $ BinOp (Shl t) (intConst t 1) e2
+
+-- Copying an iota is pointless; just make it an iota instead.
+ruleBasicOp vtable pat aux (Copy v)
+  | Just (Iota n x s it, v_cs) <- ST.lookupBasicOp v vtable =
+    Simplify . certifying v_cs . auxing aux $
+      letBind pat $ BasicOp $ Iota n x s it
 -- Handle identity permutation.
 ruleBasicOp _ pat _ (Rearrange perm v)
   | sort perm == perm =
@@ -280,10 +286,8 @@ ruleBasicOp _ pat _ (Rearrange perm v)
 ruleBasicOp vtable pat aux (Rearrange perm v)
   | Just (BasicOp (Rearrange perm2 e), v_cs) <- ST.lookupExp v vtable =
     -- Rearranging a rearranging: compose the permutations.
-    Simplify $
-      certifying v_cs $
-        auxing aux $
-          letBind pat $ BasicOp $ Rearrange (perm `rearrangeCompose` perm2) e
+    Simplify . certifying v_cs . auxing aux $
+      letBind pat $ BasicOp $ Rearrange (perm `rearrangeCompose` perm2) e
 ruleBasicOp vtable pat aux (Rearrange perm v)
   | Just (BasicOp (Rotate offsets v2), v_cs) <- ST.lookupExp v vtable,
     Just (BasicOp (Rearrange perm3 v3), v2_cs) <- ST.lookupExp v2 vtable = Simplify $ do
@@ -378,6 +382,14 @@ ruleBasicOp vtable pat aux (SubExp (Var v))
     cs' /= cs =
     Simplify . certifying (Certs cs') $
       letBind pat $ BasicOp $ SubExp $ Var v
+-- Remove UpdateAccs that contribute the neutral value, which is
+-- always a no-op.
+ruleBasicOp vtable pat aux (UpdateAcc acc _ vs)
+  | Pat [pe] <- pat,
+    Acc token _ _ _ <- patElemType pe,
+    Just (_, _, Just (_, ne)) <- ST.entryAccInput =<< ST.lookup token vtable,
+    vs == ne =
+    Simplify . auxing aux $ letBind pat $ BasicOp $ SubExp $ Var acc
 ruleBasicOp _ _ _ _ =
   Skip
 
@@ -391,7 +403,7 @@ bottomUpRules =
   [ RuleBasicOp simplifyConcat
   ]
 
--- | A set of simplification rules for 'BasicOp's.  Includes rules
+-- | A set of simplification rules for t'BasicOp's.  Includes rules
 -- from "Futhark.Optimise.Simplify.Rules.Simple".
 basicOpRules :: (BuilderOps rep, Aliased rep) => RuleBook rep
 basicOpRules = ruleBook topDownRules bottomUpRules <> loopRules

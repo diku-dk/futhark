@@ -7,7 +7,7 @@
 -- input { 65535u16 } output { true -1i8 -1i16 65535i32 65535i64
 --                           255u8 65535u16 65535u32 65535u64 }
 
-let main(x: u16): (bool,i8,i16,i32,i64, u8, u16, u32, u64) =
+def main(x: u16): (bool,i8,i16,i32,i64, u8, u16, u32, u64) =
   (bool.u16(x),
    i8.u16(x), i16.u16(x), i32.u16(x), i64.u16(x),
    u8.u16(x), u16.u16(x), u32.u16(x), u64.u16(x))

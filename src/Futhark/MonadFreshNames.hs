@@ -123,7 +123,7 @@ newParam ::
   m (Param dec)
 newParam s t = do
   s' <- newID $ nameFromString s
-  return $ Param s' t
+  return $ Param mempty s' t
 
 -- Utility instance defintions for MTL classes.  This requires
 -- UndecidableInstances, but saves on typing elsewhere.

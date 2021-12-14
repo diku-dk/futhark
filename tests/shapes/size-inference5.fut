@@ -2,4 +2,4 @@
 -- ==
 -- error: refers to size "n"
 
-let f xs n = zip xs (iota n)
+def f xs n = zip xs (iota n)

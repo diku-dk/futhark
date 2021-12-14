@@ -50,7 +50,8 @@ OPTIONS
 --exclude-case=TAG
 
   Do not run test cases that contain the given tag.  Cases marked with
-  "nobench" or "disable" are ignored by default.
+  "nobench", "disable", or "no_foo" (where *foo* is the backend used)
+  are ignored by default.
 
 --futhark=program
 
@@ -97,6 +98,13 @@ OPTIONS
 
   Do not run the compiler, and instead assume that each benchmark
   program has already been compiled.  Use with caution.
+
+--spec-file=FILE
+
+  Ignore the test specification in the program file(s), and instead
+  load them from this other file.  These external test specifications
+  use the same syntax as normal, but *without* line comment prefixes.
+  A ``==`` is still expected.
 
 --timeout=seconds
 

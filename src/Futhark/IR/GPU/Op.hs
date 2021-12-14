@@ -13,6 +13,7 @@ module Futhark.IR.GPU.Op
 
     -- * Host operations
     HostOp (..),
+    traverseHostOpStms,
     typeCheckHostOp,
 
     -- * SegOp refinements
@@ -33,11 +34,11 @@ import Futhark.IR.Aliases (Aliases, removeBodyAliases)
 import Futhark.IR.GPU.Sizes
 import Futhark.IR.Prop.Aliases
 import Futhark.IR.SegOp
+import qualified Futhark.IR.TypeCheck as TC
 import qualified Futhark.Optimise.Simplify.Engine as Engine
 import Futhark.Optimise.Simplify.Rep
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
-import qualified Futhark.TypeCheck as TC
 import Futhark.Util.Pretty
   ( commasep,
     parens,
@@ -245,6 +246,18 @@ data HostOp rep op
     GPUBody [Type] (Body rep)
   deriving (Eq, Ord, Show)
 
+-- | A helper for defining 'TraverseOpStms'.
+traverseHostOpStms ::
+  Monad m =>
+  OpStmsTraverser m op rep ->
+  OpStmsTraverser m (HostOp rep op) rep
+traverseHostOpStms _ f (SegOp segop) = SegOp <$> traverseSegOpStms f segop
+traverseHostOpStms _ _ (SizeOp sizeop) = pure $ SizeOp sizeop
+traverseHostOpStms onOtherOp f (OtherOp other) = OtherOp <$> onOtherOp f other
+traverseHostOpStms _ f (GPUBody ts body) = do
+  stms <- f mempty $ bodyStms body
+  pure $ GPUBody ts $ body {bodyStms = stms}
+
 instance (ASTRep rep, Substitute op) => Substitute (HostOp rep op) where
   substituteNames substs (SegOp op) =
     SegOp $ substituteNames substs op
@@ -316,6 +329,11 @@ instance (CanBeWise (Op rep), CanBeWise op, ASTRep rep) => CanBeWise (HostOp rep
   removeOpWisdom (OtherOp op) = OtherOp $ removeOpWisdom op
   removeOpWisdom (SizeOp op) = SizeOp op
   removeOpWisdom (GPUBody ts body) = GPUBody ts $ removeBodyWisdom body
+
+  addOpWisdom (SegOp op) = SegOp $ addOpWisdom op
+  addOpWisdom (OtherOp op) = OtherOp $ addOpWisdom op
+  addOpWisdom (SizeOp op) = SizeOp op
+  addOpWisdom (GPUBody ts body) = GPUBody ts $ informBody body
 
 instance (ASTRep rep, ST.IndexOp op) => ST.IndexOp (HostOp rep op) where
   indexOp vtable k (SegOp op) is = ST.indexOp vtable k op is

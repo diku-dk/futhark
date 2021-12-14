@@ -25,7 +25,7 @@ import Futhark.Optimise.DoubleBuffer
 import Futhark.Optimise.Fusion
 import Futhark.Optimise.InPlaceLowering
 import Futhark.Optimise.InliningDeadFun
-import qualified Futhark.Optimise.ReuseAllocations as ReuseAllocations
+import qualified Futhark.Optimise.MemoryBlockMerging as MemoryBlockMerging
 import Futhark.Optimise.Sink
 import Futhark.Optimise.TileLoops
 import Futhark.Optimise.Unstream
@@ -44,7 +44,9 @@ standardPipeline :: Pipeline SOACS SOACS
 standardPipeline =
   passes
     [ simplifySOACS,
-      inlineFunctions,
+      inlineConservatively,
+      simplifySOACS,
+      inlineAggressively,
       simplifySOACS,
       performCSE True,
       simplifySOACS,
@@ -88,7 +90,6 @@ sequentialCpuPipeline =
     >>> onePass Seq.explicitAllocations
     >>> passes
       [ performCSE False,
-        simplifySeqMem,
         simplifySeqMem
       ]
 
@@ -102,7 +103,7 @@ gpuPipeline =
         simplifyGPUMem,
         doubleBufferGPU,
         simplifyGPUMem,
-        ReuseAllocations.optimise,
+        MemoryBlockMerging.optimise,
         simplifyGPUMem,
         expandAllocations,
         simplifyGPUMem

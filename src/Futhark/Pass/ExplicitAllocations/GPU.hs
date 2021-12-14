@@ -79,7 +79,7 @@ handleHostOp (SegOp op) =
 handleHostOp (GPUBody ts (Body _ stms res)) =
   fmap (Inner . GPUBody ts) . buildBody_ . allocInStms stms $ pure res
 
-kernelExpHints :: Allocator GPUMem m => Exp GPUMem -> m [ExpHint]
+kernelExpHints :: Exp GPUMem -> AllocM GPU GPUMem [ExpHint]
 kernelExpHints (BasicOp (Manifest perm v)) = do
   dims <- arrayDims <$> lookupType v
   let perm_inv = rearrangeInverse perm
@@ -97,12 +97,11 @@ kernelExpHints e =
   return $ replicate (expExtTypeSize e) NoHint
 
 mapResultHint ::
-  Allocator rep m =>
   SegLevel ->
   SegSpace ->
   Type ->
   KernelResult ->
-  m ExpHint
+  AllocM GPU GPUMem ExpHint
 mapResultHint lvl space = hint
   where
     num_threads =
@@ -116,11 +115,13 @@ mapResultHint lvl space = hint
 
     hint t Returns {}
       | coalesceReturnOfShape (primByteSize (elemType t)) $ arrayDims t = do
+        chunkmap <- asks chunkMap
         let space_dims = segSpaceDims space
-        t_dims <- mapM dimAllocationSize $ arrayDims t
+            t_dims = map (dimAllocationSize chunkmap) $ arrayDims t
         return $ Hint (innermost space_dims t_dims) DefaultSpace
     hint t (ConcatReturns _ SplitStrided {} w _ _) = do
-      t_dims <- mapM dimAllocationSize $ arrayDims t
+      chunkmap <- asks chunkMap
+      let t_dims = map (dimAllocationSize chunkmap) $ arrayDims t
       return $ Hint (innermost [w] t_dims) DefaultSpace
     hint Prim {} (ConcatReturns _ SplitContiguous w elems_per_thread _) = do
       let ixfun_base = IxFun.iota [sExt64 num_threads, pe64 elems_per_thread]
@@ -146,13 +147,13 @@ semiStatic :: S.Set VName -> SubExp -> Bool
 semiStatic _ Constant {} = True
 semiStatic consts (Var v) = v `S.member` consts
 
-inGroupExpHints :: Allocator GPUMem m => Exp GPUMem -> m [ExpHint]
+inGroupExpHints :: Exp GPUMem -> AllocM GPU GPUMem [ExpHint]
 inGroupExpHints (Op (Inner (SegOp (SegMap _ space ts body))))
   | any private $ kernelBodyResult body = do
-    consts <- askConsts
-    return $ do
+    consts <- asks envConsts
+    pure $ do
       (t, r) <- zip ts $ kernelBodyResult body
-      return $
+      pure $
         if private r && all (semiStatic consts) (arrayDims t)
           then
             let seg_dims = map pe64 $ segSpaceDims space
@@ -167,20 +168,20 @@ inGroupExpHints (Op (Inner (SegOp (SegMap _ space ts body))))
   where
     private (Returns ResultPrivate _ _) = True
     private _ = False
-inGroupExpHints e = return $ replicate (expExtTypeSize e) NoHint
+inGroupExpHints e = pure $ replicate (expExtTypeSize e) NoHint
 
-inThreadExpHints :: Allocator GPUMem m => Exp GPUMem -> m [ExpHint]
+inThreadExpHints :: Exp GPUMem -> AllocM GPU GPUMem [ExpHint]
 inThreadExpHints e = do
-  consts <- askConsts
+  consts <- asks envConsts
   mapM (maybePrivate consts) =<< expExtType e
   where
     maybePrivate consts t
       | Just (Array pt shape _) <- hasStaticShape t,
         all (semiStatic consts) $ shapeDims shape = do
         let ixfun = IxFun.iota $ map pe64 $ shapeDims shape
-        return $ Hint ixfun $ ScalarSpace (shapeDims shape) pt
+        pure $ Hint ixfun $ ScalarSpace (shapeDims shape) pt
       | otherwise =
-        return NoHint
+        pure NoHint
 
 -- | The pass from 'GPU' to 'GPUMem'.
 explicitAllocations :: Pass GPU GPUMem

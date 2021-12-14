@@ -5,9 +5,9 @@
 -- output { 4 }
 
 type foo = i32
-let foo(a: i32): foo = a + a
+def foo(a: i32): foo = a + a
 module Foo = {
-  let one(): i32 = 1
+  def one(): i32 = 1
 }
 
-let main(x: i32): i32 = x
+def main(x: i32): i32 = x

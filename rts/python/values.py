@@ -249,6 +249,24 @@ def read_str_decimal(f):
         expt = b'0'
     return float(sign + bef + b'.' + aft + b'E' + expt)
 
+def read_str_f16(f):
+    skip_spaces(f)
+    try:
+        parse_specific_string(f, 'f16.nan')
+        return np.float32(np.nan)
+    except ValueError:
+        try:
+            parse_specific_string(f, 'f16.inf')
+            return np.float32(np.inf)
+        except ValueError:
+            try:
+               parse_specific_string(f, '-f16.inf')
+               return np.float32(-np.inf)
+            except ValueError:
+               x = read_str_decimal(f)
+               optional_specific_string(f, 'f16')
+               return x
+
 def read_str_f32(f):
     skip_spaces(f)
     try:
@@ -385,6 +403,7 @@ read_bin_u16 = mk_bin_scalar_reader('u16')
 read_bin_u32 = mk_bin_scalar_reader('u32')
 read_bin_u64 = mk_bin_scalar_reader('u64')
 
+read_bin_f16 = mk_bin_scalar_reader('f16')
 read_bin_f32 = mk_bin_scalar_reader('f32')
 read_bin_f64 = mk_bin_scalar_reader('f64')
 
@@ -459,6 +478,13 @@ FUTHARK_PRIMTYPES = {
             'str_reader': read_str_u64,
             'bin_format': 'Q',
             'numpy_type': np.uint64 },
+
+    'f16': {'binname' : b" f16",
+            'size' : 2,
+            'bin_reader': read_bin_f16,
+            'str_reader': read_str_f16,
+            'bin_format': 'e',
+            'numpy_type': np.float16 },
 
     'f32': {'binname' : b" f32",
             'size' : 4,
@@ -595,11 +621,21 @@ def write_value_text(v, out=sys.stdout):
         out.write("%di32" % v)
     elif type(v) == np.int64:
         out.write("%di64" % v)
-    elif type(v) in [np.bool, np.bool_]:
+    elif type(v) in [bool, np.bool_]:
         if v:
             out.write("true")
         else:
             out.write("false")
+    elif type(v) == np.float16:
+        if np.isnan(v):
+            out.write('f16.nan')
+        elif np.isinf(v):
+            if v >= 0:
+                out.write('f16.inf')
+            else:
+                out.write('-f16.inf')
+        else:
+            out.write("%.6ff16" % v)
     elif type(v) == np.float32:
         if np.isnan(v):
             out.write('f32.nan')
@@ -644,6 +680,7 @@ type_strs = { np.dtype('int8'): b'  i8',
               np.dtype('uint16'): b' u16',
               np.dtype('uint32'): b' u32',
               np.dtype('uint64'): b' u64',
+              np.dtype('float16'): b' f16',
               np.dtype('float32'): b' f32',
               np.dtype('float64'): b' f64',
               np.dtype('bool'): b'bool'}

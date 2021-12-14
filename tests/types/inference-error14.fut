@@ -2,4 +2,4 @@
 -- ==
 -- error: ambiguous
 
-let f x = x.l
+def f x = x.l

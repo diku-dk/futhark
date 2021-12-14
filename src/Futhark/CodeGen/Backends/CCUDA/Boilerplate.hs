@@ -9,9 +9,9 @@ module Futhark.CodeGen.Backends.CCUDA.Boilerplate
   )
 where
 
-import Data.FileEmbed (embedStringFile)
 import qualified Data.Map as M
 import Data.Maybe
+import qualified Data.Text as T
 import Futhark.CodeGen.Backends.COpenCL.Boilerplate
   ( copyDevToDev,
     copyDevToHost,
@@ -25,6 +25,7 @@ import Futhark.CodeGen.Backends.COpenCL.Boilerplate
   )
 import qualified Futhark.CodeGen.Backends.GenericC as GC
 import Futhark.CodeGen.ImpCode.OpenCL
+import Futhark.CodeGen.RTS.C (cudaH, freeListH)
 import Futhark.Util (chunk, zEncodeString)
 import qualified Language.C.Quote.OpenCL as C
 import qualified Language.C.Syntax as C
@@ -54,8 +55,8 @@ profilingEnclosure name =
 -- | Called after most code has been generated to generate the bulk of
 -- the boilerplate.
 generateBoilerplate ::
-  String ->
-  String ->
+  T.Text ->
+  T.Text ->
   [Name] ->
   M.Map KernelName KernelSafety ->
   M.Map Name SizeClass ->
@@ -68,8 +69,8 @@ generateBoilerplate cuda_program cuda_prelude cost_centres kernels sizes failure
       $esc:("#include <cuda.h>")
       $esc:("#include <nvrtc.h>")
       $esc:("typedef CUdeviceptr fl_mem_t;")
-      $esc:free_list_h
-      $esc:cuda_h
+      $esc:(T.unpack freeListH)
+      $esc:(T.unpack cudaH)
       const char *cuda_program[] = {$inits:fragments, NULL};
       |]
 
@@ -80,11 +81,10 @@ generateBoilerplate cuda_program cuda_prelude cost_centres kernels sizes failure
   GC.profileReport [C.citem|CUDA_SUCCEED_FATAL(cuda_tally_profiling_records(&ctx->cuda));|]
   mapM_ GC.profileReport $ costCentreReport $ cost_centres ++ M.keys kernels
   where
-    cuda_h = $(embedStringFile "rts/c/cuda.h")
-    free_list_h = $(embedStringFile "rts/c/free_list.h")
     fragments =
-      map (\s -> [C.cinit|$string:s|]) $
-        chunk 2000 (cuda_prelude ++ cuda_program)
+      [ [C.cinit|$string:s|]
+        | s <- chunk 2000 $ T.unpack $ cuda_prelude <> cuda_program
+      ]
 
 generateSizeFuns :: M.Map Name SizeClass -> GC.CompilerM OpenCL () ()
 generateSizeFuns sizes = do
@@ -92,27 +92,28 @@ generateSizeFuns sizes = do
       size_var_inits = map (\k -> [C.cinit|$string:(zEncodeString (pretty k))|]) $ M.keys sizes
       size_class_inits = map (\c -> [C.cinit|$string:(pretty c)|]) $ M.elems sizes
 
-  GC.earlyDecl [C.cedecl|static const char *size_names[] = { $inits:size_name_inits };|]
-  GC.earlyDecl [C.cedecl|static const char *size_vars[] = { $inits:size_var_inits };|]
-  GC.earlyDecl [C.cedecl|static const char *size_classes[] = { $inits:size_class_inits };|]
+  GC.earlyDecl [C.cedecl|static const char *tuning_param_names[] = { $inits:size_name_inits };|]
+  GC.earlyDecl [C.cedecl|static const char *tuning_param_vars[] = { $inits:size_var_inits };|]
+  GC.earlyDecl [C.cedecl|static const char *tuning_param_classes[] = { $inits:size_class_inits };|]
 
 generateConfigFuns :: M.Map Name SizeClass -> GC.CompilerM OpenCL () String
 generateConfigFuns sizes = do
-  let size_decls = map (\k -> [C.csdecl|typename int64_t $id:k;|]) $ M.keys sizes
+  let size_decls = map (\k -> [C.csdecl|typename int64_t *$id:k;|]) $ M.keys sizes
       num_sizes = M.size sizes
-  GC.earlyDecl [C.cedecl|struct sizes { $sdecls:size_decls };|]
+  GC.earlyDecl [C.cedecl|struct tuning_params { $sdecls:size_decls };|]
   cfg <- GC.publicDef "context_config" GC.InitDecl $ \s ->
     ( [C.cedecl|struct $id:s;|],
-      [C.cedecl|struct $id:s { struct cuda_config cu_cfg;
+      [C.cedecl|struct $id:s {int in_use;
+                              struct cuda_config cu_cfg;
                               int profiling;
-                              typename int64_t sizes[$int:num_sizes];
+                              typename int64_t tuning_params[$int:num_sizes];
                               int num_nvrtc_opts;
                               const char **nvrtc_opts;
                             };|]
     )
 
   let size_value_inits = zipWith sizeInit [0 .. M.size sizes -1] (M.elems sizes)
-      sizeInit i size = [C.cstm|cfg->sizes[$int:i] = $int:val;|]
+      sizeInit i size = [C.cstm|cfg->tuning_params[$int:i] = $int:val;|]
         where
           val = fromMaybe 0 $ sizeDefault size
   GC.publicDef_ "context_config_new" GC.InitDecl $ \s ->
@@ -122,6 +123,7 @@ generateConfigFuns sizes = do
                          if (cfg == NULL) {
                            return NULL;
                          }
+                         cfg->in_use = 0;
 
                          cfg->profiling = 0;
                          cfg->num_nvrtc_opts = 0;
@@ -129,8 +131,8 @@ generateConfigFuns sizes = do
                          cfg->nvrtc_opts[0] = NULL;
                          $stms:size_value_inits
                          cuda_config_init(&cfg->cu_cfg, $int:num_sizes,
-                                          size_names, size_vars,
-                                          cfg->sizes, size_classes);
+                                          tuning_param_names, tuning_param_vars,
+                                          cfg->tuning_params, tuning_param_classes);
                          return cfg;
                        }|]
     )
@@ -138,6 +140,7 @@ generateConfigFuns sizes = do
   GC.publicDef_ "context_config_free" GC.InitDecl $ \s ->
     ( [C.cedecl|void $id:s(struct $id:cfg* cfg);|],
       [C.cedecl|void $id:s(struct $id:cfg* cfg) {
+                         assert(!cfg->in_use);
                          free(cfg->nvrtc_opts);
                          free(cfg);
                        }|]
@@ -247,39 +250,39 @@ generateConfigFuns sizes = do
                        }|]
     )
 
-  GC.publicDef_ "context_config_set_size" GC.InitDecl $ \s ->
-    ( [C.cedecl|int $id:s(struct $id:cfg* cfg, const char *size_name, size_t size_value);|],
-      [C.cedecl|int $id:s(struct $id:cfg* cfg, const char *size_name, size_t size_value) {
+  GC.publicDef_ "context_config_set_tuning_param" GC.InitDecl $ \s ->
+    ( [C.cedecl|int $id:s(struct $id:cfg* cfg, const char *param_name, size_t new_value);|],
+      [C.cedecl|int $id:s(struct $id:cfg* cfg, const char *param_name, size_t new_value) {
 
                          for (int i = 0; i < $int:num_sizes; i++) {
-                           if (strcmp(size_name, size_names[i]) == 0) {
-                             cfg->sizes[i] = size_value;
+                           if (strcmp(param_name, tuning_param_names[i]) == 0) {
+                             cfg->tuning_params[i] = new_value;
                              return 0;
                            }
                          }
 
-                         if (strcmp(size_name, "default_group_size") == 0) {
-                           cfg->cu_cfg.default_block_size = size_value;
+                         if (strcmp(param_name, "default_group_size") == 0) {
+                           cfg->cu_cfg.default_block_size = new_value;
                            return 0;
                          }
 
-                         if (strcmp(size_name, "default_num_groups") == 0) {
-                           cfg->cu_cfg.default_grid_size = size_value;
+                         if (strcmp(param_name, "default_num_groups") == 0) {
+                           cfg->cu_cfg.default_grid_size = new_value;
                            return 0;
                          }
 
-                         if (strcmp(size_name, "default_threshold") == 0) {
-                           cfg->cu_cfg.default_threshold = size_value;
+                         if (strcmp(param_name, "default_threshold") == 0) {
+                           cfg->cu_cfg.default_threshold = new_value;
                            return 0;
                          }
 
-                         if (strcmp(size_name, "default_tile_size") == 0) {
-                           cfg->cu_cfg.default_tile_size = size_value;
+                         if (strcmp(param_name, "default_tile_size") == 0) {
+                           cfg->cu_cfg.default_tile_size = new_value;
                            return 0;
                          }
 
-                         if (strcmp(size_name, "default_reg_tile_size") == 0) {
-                           cfg->cu_cfg.default_reg_tile_size = size_value;
+                         if (strcmp(param_name, "default_reg_tile_size") == 0) {
+                           cfg->cu_cfg.default_reg_tile_size = new_value;
                            return 0;
                          }
 
@@ -297,7 +300,7 @@ generateContextFuns ::
   GC.CompilerM OpenCL () ()
 generateContextFuns cfg cost_centres kernels sizes failures = do
   final_inits <- GC.contextFinalInits
-  (fields, init_fields) <- GC.contextContents
+  (fields, init_fields, free_fields) <- GC.contextContents
   let forCostCentre name =
         [ ( [C.csdecl|typename int64_t $id:(kernelRuntime name);|],
             [C.cstm|ctx->$id:(kernelRuntime name) = 0;|]
@@ -324,6 +327,7 @@ generateContextFuns cfg cost_centres kernels sizes failures = do
   ctx <- GC.publicDef "context" GC.InitDecl $ \s ->
     ( [C.cedecl|struct $id:s;|],
       [C.cedecl|struct $id:s {
+                         struct $id:cfg* cfg;
                          int detail_memory;
                          int debugging;
                          int profiling;
@@ -337,7 +341,7 @@ generateContextFuns cfg cost_centres kernels sizes failures = do
                          typename CUdeviceptr global_failure;
                          typename CUdeviceptr global_failure_args;
                          struct cuda_context cuda;
-                         struct sizes sizes;
+                         struct tuning_params tuning_params;
                          // True if a potentially failing kernel has been enqueued.
                          typename int32_t failure_is_an_option;
 
@@ -346,9 +350,9 @@ generateContextFuns cfg cost_centres kernels sizes failures = do
                        };|]
     )
 
-  let set_sizes =
+  let set_tuning_params =
         zipWith
-          (\i k -> [C.cstm|ctx->sizes.$id:k = cfg->sizes[$int:i];|])
+          (\i k -> [C.cstm|ctx->tuning_params.$id:k = &cfg->tuning_params[$int:i];|])
           [(0 :: Int) ..]
           $ M.keys sizes
       max_failure_args =
@@ -357,10 +361,13 @@ generateContextFuns cfg cost_centres kernels sizes failures = do
   GC.publicDef_ "context_new" GC.InitDecl $ \s ->
     ( [C.cedecl|struct $id:ctx* $id:s(struct $id:cfg* cfg);|],
       [C.cedecl|struct $id:ctx* $id:s(struct $id:cfg* cfg) {
+                 assert(!cfg->in_use);
                  struct $id:ctx* ctx = (struct $id:ctx*) malloc(sizeof(struct $id:ctx));
                  if (ctx == NULL) {
                    return NULL;
                  }
+                 ctx->cfg = cfg;
+                 ctx->cfg->in_use = 1;
                  ctx->debugging = ctx->detail_memory = cfg->cu_cfg.debugging;
                  ctx->profiling = cfg->profiling;
                  ctx->profiling_paused = 0;
@@ -381,7 +388,11 @@ generateContextFuns cfg cost_centres kernels sizes failures = do
                  ctx->total_runtime = 0;
                  $stms:init_fields
 
-                 cuda_setup(&ctx->cuda, cuda_program, cfg->nvrtc_opts);
+                 ctx->error = cuda_setup(&ctx->cuda, cuda_program, cfg->nvrtc_opts);
+
+                 if (ctx->error != NULL) {
+                   return NULL;
+                 }
 
                  typename int32_t no_error = -1;
                  CUDA_SUCCEED_FATAL(cuMemAlloc(&ctx->global_failure, sizeof(no_error)));
@@ -392,7 +403,7 @@ generateContextFuns cfg cost_centres kernels sizes failures = do
                  $stms:init_kernel_fields
 
                  $stms:final_inits
-                 $stms:set_sizes
+                 $stms:set_tuning_params
 
                  init_constants(ctx);
                  // Clear the free list of any deallocations that occurred while initialising constants.
@@ -407,9 +418,11 @@ generateContextFuns cfg cost_centres kernels sizes failures = do
   GC.publicDef_ "context_free" GC.InitDecl $ \s ->
     ( [C.cedecl|void $id:s(struct $id:ctx* ctx);|],
       [C.cedecl|void $id:s(struct $id:ctx* ctx) {
+                                 $stms:free_fields
                                  free_constants(ctx);
                                  cuda_cleanup(&ctx->cuda);
                                  free_lock(&ctx->lock);
+                                 ctx->cfg->in_use = 0;
                                  free(ctx);
                                }|]
     )

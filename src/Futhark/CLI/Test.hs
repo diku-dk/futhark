@@ -74,11 +74,12 @@ data TestResult
   deriving (Eq, Show)
 
 pureTestResults :: IO [TestResult] -> TestM ()
-pureTestResults m =
-  mapM_ check =<< liftIO m
+pureTestResults m = do
+  errs <- foldr collectErrors mempty <$> liftIO m
+  unless (null errs) $ E.throwError $ concat errs
   where
-    check Success = pure ()
-    check (Failure err) = E.throwError err
+    collectErrors Success errs = errs
+    collectErrors (Failure err) errs = err : errs
 
 withProgramServer :: FilePath -> FilePath -> [String] -> (Server -> IO [TestResult]) -> TestM ()
 withProgramServer program runner extra_options f = do
@@ -124,11 +125,11 @@ optimisedProgramMetrics programs pipeline program =
   case pipeline of
     SOACSPipeline ->
       check ["-s"]
-    KernelsPipeline ->
-      check ["--gpu"]
-    SequentialCpuPipeline ->
-      check ["--seq-mem"]
     GpuPipeline ->
+      check ["--gpu"]
+    SeqMemPipeline ->
+      check ["--seq-mem"]
+    GpuMemPipeline ->
       check ["--gpu-mem"]
     NoPipeline ->
       check []
@@ -151,17 +152,24 @@ testMetrics programs program (StructureTest pipeline (AstMetrics expected)) =
     actual <- optimisedProgramMetrics programs pipeline program
     accErrors_ $ map (ok actual) $ M.toList expected
   where
+    maybePipeline :: StructurePipeline -> T.Text
+    maybePipeline SOACSPipeline = "(soacs) "
+    maybePipeline GpuPipeline = "(kernels) "
+    maybePipeline SeqMemPipeline = "(seq-mem) "
+    maybePipeline GpuMemPipeline = "(gpu-mem) "
+    maybePipeline NoPipeline = ""
+
     ok (AstMetrics metrics) (name, expected_occurences) =
       case M.lookup name metrics of
         Nothing
           | expected_occurences > 0 ->
             throwError $
-              name <> " should have occurred " <> T.pack (show expected_occurences)
+              name <> maybePipeline pipeline <> " should have occurred " <> T.pack (show expected_occurences)
                 <> " times, but did not occur at all in optimised program."
         Just actual_occurences
           | expected_occurences /= actual_occurences ->
             throwError $
-              name <> " should have occurred " <> T.pack (show expected_occurences)
+              name <> maybePipeline pipeline <> " should have occurred " <> T.pack (show expected_occurences)
                 <> " times, but occurred "
                 <> T.pack (show actual_occurences)
                 <> " times."
@@ -276,8 +284,8 @@ runCompiledEntry futhark server program (InputOutputs entry run_cases) = do
     Left (CmdFailure _ err) ->
       pure [Failure err]
     Right (output_types', input_types') -> do
-      let outs = ["out" <> T.pack (show i) | i <- [0 .. length output_types' -1]]
-          ins = ["in" <> T.pack (show i) | i <- [0 .. length input_types' -1]]
+      let outs = ["out" <> T.pack (show i) | i <- [0 .. length output_types' - 1]]
+          ins = ["in" <> T.pack (show i) | i <- [0 .. length input_types' - 1]]
           onRes = either (Failure . pure) (const Success)
       mapM (fmap onRes . runCompiledCase input_types' outs ins) run_cases
   where
@@ -731,16 +739,24 @@ commandLineOptions =
                   | n' > 0 ->
                     Right $ \config -> config {configConcurrency = Just n'}
                 _ ->
-                  Left $ error $ "'" ++ n ++ "' is not a positive integer."
+                  Left . optionsError $ "'" ++ n ++ "' is not a positive integer."
           )
           "NUM"
       )
       "Number of tests to run concurrently."
   ]
 
+excludeBackend :: TestConfig -> TestConfig
+excludeBackend config =
+  config
+    { configExclude =
+        "no_" <> T.pack (configBackend (configPrograms config)) :
+        configExclude config
+    }
+
 -- | Run @futhark test@.
 main :: String -> [String] -> IO ()
 main = mainWithOptions defaultConfig commandLineOptions "options... programs..." $ \progs config ->
   case progs of
     [] -> Nothing
-    _ -> Just $ runTests config progs
+    _ -> Just $ runTests (excludeBackend config) progs

@@ -1,23 +1,23 @@
-let dot [n] (x: [n]bool) (y: [n]bool):i64 =
+def dot [n] (x: [n]bool) (y: [n]bool):i64 =
   i64.sum (map2 (\x y -> i64.bool <| x && y) x y)
 
-local let choose (n:i64) (k:i64):f32 =
+local def choose (n:i64) (k:i64):f32 =
   f32.product (map (\i -> f32.i64 (n+1-i)/f32.i64 i) (1...k))
 
-let kc [m] (x: [m]bool) (y: [m]bool) (d:i64):f32 =
+def kc [m] (x: [m]bool) (y: [m]bool) (d:i64):f32 =
   f32.sum (map (choose (dot x y)) (1...d))
 
-let norm [m] (k: [m]bool -> [m]bool -> f32) (x: [m]bool) (y: [m]bool) :f32 =
+def norm [m] (k: [m]bool -> [m]bool -> f32) (x: [m]bool) (y: [m]bool) :f32 =
   let xy = k x y
   let xx = k x x
   let yy = k y y
   in xy / (f32.sqrt xx * f32.sqrt yy)
 
-let kcn x y d = norm (\x y -> kc x y d) x y
+def kcn x y d = norm (\x y -> kc x y d) x y
 
 type centroid [n][m] = {d: i64, w: [n]f32, trx: [n][m]bool, try: [n]bool}
 
-let predict [n][m][k] (c: centroid[n][m]) (xs: [k][m]bool): [k]f32 =
+def predict [n][m][k] (c: centroid[n][m]) (xs: [k][m]bool): [k]f32 =
   map (\x -> f32.sum (map2 (\w x' -> w * kcn x x' c.d) c.w c.trx)) xs
 
 entry lto [n][m] (c:centroid[n][m]) =

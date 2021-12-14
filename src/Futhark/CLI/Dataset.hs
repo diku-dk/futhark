@@ -1,5 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE Strict #-}
+{-# OPTIONS_GHC -fno-warn-orphans #-}
 
 -- | @futhark dataset@
 module Futhark.CLI.Dataset (main) where
@@ -16,6 +17,7 @@ import qualified Data.Vector.Storable.Mutable as USVec
 import Data.Word
 import qualified Futhark.Data as V
 import Futhark.Data.Reader (readValues)
+import Futhark.Util (convFloat)
 import Futhark.Util.Options
 import Language.Futhark.Parser
 import Language.Futhark.Pretty ()
@@ -29,7 +31,8 @@ import Language.Futhark.Syntax hiding
   )
 import System.Exit
 import System.IO
-import System.Random.PCG (Variate, initialize, uniformR)
+import System.Random (mkStdGen, uniformR)
+import System.Random.Stateful (UniformRange (..))
 
 -- | Run @futhark dataset@.
 main :: String -> [String] -> IO ()
@@ -134,6 +137,7 @@ commandLineOptions =
     setRangeOption "u16" setu16Range,
     setRangeOption "u32" setu32Range,
     setRangeOption "u64" setu64Range,
+    setRangeOption "f16" setf16Range,
     setRangeOption "f32" setf32Range,
     setRangeOption "f64" setf64Range
   ]
@@ -189,6 +193,7 @@ toValueType TERecord {} = Left "Cannot handle records yet."
 toValueType TEApply {} = Left "Cannot handle type applications yet."
 toValueType TEArrow {} = Left "Cannot generate functions."
 toValueType TESum {} = Left "Cannot handle sumtypes yet."
+toValueType TEDim {} = Left "Cannot handle existential sizes."
 toValueType (TEUnique t _) = toValueType t
 toValueType (TEArray t d _) = do
   d' <- constantDim d
@@ -217,6 +222,7 @@ data RandomConfiguration = RandomConfiguration
     u16Range :: Range Word16,
     u32Range :: Range Word32,
     u64Range :: Range Word64,
+    f16Range :: Range Half,
     f32Range :: Range Float,
     f64Range :: Range Double
   }
@@ -247,6 +253,9 @@ setu32Range bounds config = config {u32Range = bounds}
 setu64Range :: Range Word64 -> RandomConfiguration -> RandomConfiguration
 setu64Range bounds config = config {u64Range = bounds}
 
+setf16Range :: Range Half -> RandomConfiguration -> RandomConfiguration
+setf16Range bounds config = config {f16Range = bounds}
+
 setf32Range :: Range Float -> RandomConfiguration -> RandomConfiguration
 setf32Range bounds config = config {f32Range = bounds}
 
@@ -266,6 +275,7 @@ initialRandomConfiguration =
     (minBound, maxBound)
     (0.0, 1.0)
     (0.0, 1.0)
+    (0.0, 1.0)
 
 randomValue :: RandomConfiguration -> V.ValueType -> Word64 -> V.Value
 randomValue conf (V.ValueType ds t) seed =
@@ -278,6 +288,7 @@ randomValue conf (V.ValueType ds t) seed =
     V.U16 -> gen u16Range V.U16Value
     V.U32 -> gen u32Range V.U32Value
     V.U64 -> gen u64Range V.U64Value
+    V.F16 -> gen f16Range V.F16Value
     V.F32 -> gen f32Range V.F32Value
     V.F64 -> gen f64Range V.F64Value
     V.Bool -> gen (const (False, True)) V.BoolValue
@@ -285,25 +296,32 @@ randomValue conf (V.ValueType ds t) seed =
     gen range final = randomVector (range conf) final ds seed
 
 randomVector ::
-  (SVec.Storable v, Variate v) =>
+  (SVec.Storable v, UniformRange v) =>
   Range v ->
   (SVec.Vector Int -> SVec.Vector v -> V.Value) ->
   [Int] ->
   Word64 ->
   V.Value
 randomVector range final ds seed = runST $ do
-  -- USe some nice impure computation where we can preallocate a
+  -- Use some nice impure computation where we can preallocate a
   -- vector of the desired size, populate it via the random number
   -- generator, and then finally reutrn a frozen binary vector.
   arr <- USVec.new n
-  g <- initialize 6364136223846793006 seed
-  let fill i
+  let fill g i
         | i < n = do
-          v <- uniformR range g
+          let (v, g') = uniformR range g
           USVec.write arr i v
-          fill $! i + 1
+          g' `seq` fill g' $! i + 1
         | otherwise =
-          final (SVec.fromList ds) . SVec.convert <$> freeze arr
-  fill 0
+          pure ()
+  fill (mkStdGen $ fromIntegral seed) 0
+  final (SVec.fromList ds) . SVec.convert <$> freeze arr
   where
     n = product ds
+
+-- XXX: The following instance is an orphan.  Maybe it could be
+-- avoided with some newtype trickery or refactoring, but it's so
+-- convenient this way.
+instance UniformRange Half where
+  uniformRM (a, b) g =
+    (convFloat :: Float -> Half) <$> uniformRM (convFloat a, convFloat b) g

@@ -2,7 +2,6 @@
 -- for ICFP 2016.
 --
 -- ==
--- tags { no_opencl }
 -- input {
 --   [[1,2,3],[3,2,1],[4,5,6]]
 -- }
@@ -20,13 +19,13 @@
 --    [276i32, 142i32, 92i32],
 --    [662i32, 1090i32, 1728i32]]
 -- }
--- structure distributed {
+-- structure gpu {
 --   DoLoop/SegMap 1
 --   SegMap 2
 --   SegRed 1
 -- }
 
-let main [n][m] (pss: [n][m]i32): ([n][m][m]i32, [n][m]i32) =
+def main [n][m] (pss: [n][m]i32): ([n][m][m]i32, [n][m]i32) =
   let (asss, bss) =
     #[incremental_flattening(only_inner)]
     unzip(map (\(ps: []i32): ([m][m]i32, [m]i32)  ->

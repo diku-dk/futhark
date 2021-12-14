@@ -35,7 +35,7 @@ from sphinx.highlighting import lexers
 # ones.
 extensions = [
     'sphinx.ext.todo',
-    'sphinx.ext.mathjax',
+    'sphinx.ext.mathjax'
 ]
 
 # Add any paths that contain templates here, relative to this directory.
@@ -83,7 +83,7 @@ release = version
 
 # List of patterns, relative to source directory, that match files and
 # directories to ignore when looking for source files.
-exclude_patterns = ['_build']
+exclude_patterns = ['_build', 'lib']
 
 # The reST default role (used for this markup: `text`) to use for all
 # documents.
@@ -108,9 +108,9 @@ class FutharkLexer(RegexLexer):
 
     tokens = {
         'root': [
-            (r'(if|then|else|let|loop|in|val|for|do|with|local|open|include|import|type|entry|module|while|module)\b', token.Keyword),
-            (r"[a-zA-Z_][a-zA-Z0-9_']*", token.Name),
-            (r"-- .*", token.Comment),
+            (r'(if|then|else|let|loop|in|val|for|do|with|local|open|include|import|type|def|entry|module|while|module)\b', token.Keyword),
+            (r"#?[a-zA-Z_][a-zA-Z0-9_']*", token.Name),
+            (r"--.*", token.Comment),
             (r'.', token.Text)
         ]
     }

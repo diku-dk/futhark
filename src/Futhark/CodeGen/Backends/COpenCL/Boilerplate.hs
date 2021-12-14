@@ -21,13 +21,14 @@ module Futhark.CodeGen.Backends.COpenCL.Boilerplate
 where
 
 import Control.Monad.State
-import Data.FileEmbed
 import qualified Data.Map as M
 import Data.Maybe
+import qualified Data.Text as T
 import qualified Futhark.CodeGen.Backends.GenericC as GC
 import Futhark.CodeGen.Backends.GenericC.Options
 import Futhark.CodeGen.ImpCode.OpenCL
 import Futhark.CodeGen.OpenCL.Heuristics
+import Futhark.CodeGen.RTS.C (freeListH, openclH)
 import Futhark.Util (chunk, zEncodeString)
 import Futhark.Util.Pretty (prettyOneLine)
 import qualified Language.C.Quote.OpenCL as C
@@ -70,8 +71,8 @@ profilingEvent name =
 -- | Called after most code has been generated to generate the bulk of
 -- the boilerplate.
 generateBoilerplate ::
-  String ->
-  String ->
+  T.Text ->
+  T.Text ->
   [Name] ->
   M.Map KernelName KernelSafety ->
   [PrimType] ->
@@ -82,7 +83,7 @@ generateBoilerplate opencl_code opencl_prelude cost_centres kernels types sizes 
   final_inits <- GC.contextFinalInits
 
   let (ctx_opencl_fields, ctx_opencl_inits, top_decls, later_top_decls) =
-        openClDecls cost_centres kernels opencl_code opencl_prelude
+        openClDecls cost_centres kernels (opencl_prelude <> opencl_code)
 
   mapM_ GC.earlyDecl top_decls
 
@@ -91,23 +92,24 @@ generateBoilerplate opencl_code opencl_prelude cost_centres kernels types sizes 
       size_class_inits = map (\c -> [C.cinit|$string:(pretty c)|]) $ M.elems sizes
       num_sizes = M.size sizes
 
-  GC.earlyDecl [C.cedecl|static const char *size_names[] = { $inits:size_name_inits };|]
-  GC.earlyDecl [C.cedecl|static const char *size_vars[] = { $inits:size_var_inits };|]
-  GC.earlyDecl [C.cedecl|static const char *size_classes[] = { $inits:size_class_inits };|]
+  GC.earlyDecl [C.cedecl|static const char *tuning_param_names[] = { $inits:size_name_inits };|]
+  GC.earlyDecl [C.cedecl|static const char *tuning_param_vars[] = { $inits:size_var_inits };|]
+  GC.earlyDecl [C.cedecl|static const char *tuning_param_classes[] = { $inits:size_class_inits };|]
 
-  let size_decls = map (\k -> [C.csdecl|typename int64_t $id:k;|]) $ M.keys sizes
-  GC.earlyDecl [C.cedecl|struct sizes { $sdecls:size_decls };|]
+  let size_decls = map (\k -> [C.csdecl|typename int64_t *$id:k;|]) $ M.keys sizes
+  GC.earlyDecl [C.cedecl|struct tuning_params { $sdecls:size_decls };|]
   cfg <- GC.publicDef "context_config" GC.InitDecl $ \s ->
     ( [C.cedecl|struct $id:s;|],
-      [C.cedecl|struct $id:s { struct opencl_config opencl;
-                              typename int64_t sizes[$int:num_sizes];
-                              int num_build_opts;
-                              const char **build_opts;
+      [C.cedecl|struct $id:s { int in_use;
+                               struct opencl_config opencl;
+                               typename int64_t tuning_params[$int:num_sizes];
+                               int num_build_opts;
+                               const char **build_opts;
                             };|]
     )
 
   let size_value_inits = zipWith sizeInit [0 .. M.size sizes -1] (M.elems sizes)
-      sizeInit i size = [C.cstm|cfg->sizes[$int:i] = $int:val;|]
+      sizeInit i size = [C.cstm|cfg->tuning_params[$int:i] = $int:val;|]
         where
           val = fromMaybe 0 $ sizeDefault size
   GC.publicDef_ "context_config_new" GC.InitDecl $ \s ->
@@ -118,13 +120,14 @@ generateBoilerplate opencl_code opencl_prelude cost_centres kernels types sizes 
                            return NULL;
                          }
 
+                         cfg->in_use = 0;
                          cfg->num_build_opts = 0;
                          cfg->build_opts = (const char**) malloc(sizeof(const char*));
                          cfg->build_opts[0] = NULL;
                          $stms:size_value_inits
                          opencl_config_init(&cfg->opencl, $int:num_sizes,
-                                            size_names, size_vars,
-                                            cfg->sizes, size_classes);
+                                            tuning_param_names, tuning_param_vars,
+                                            cfg->tuning_params, tuning_param_classes);
                          return cfg;
                        }|]
     )
@@ -132,6 +135,7 @@ generateBoilerplate opencl_code opencl_prelude cost_centres kernels types sizes 
   GC.publicDef_ "context_config_free" GC.InitDecl $ \s ->
     ( [C.cedecl|void $id:s(struct $id:cfg* cfg);|],
       [C.cedecl|void $id:s(struct $id:cfg* cfg) {
+                         assert(!cfg->in_use);
                          free(cfg->build_opts);
                          free(cfg);
                        }|]
@@ -262,39 +266,39 @@ generateBoilerplate opencl_code opencl_prelude cost_centres kernels types sizes 
                        }|]
     )
 
-  GC.publicDef_ "context_config_set_size" GC.InitDecl $ \s ->
-    ( [C.cedecl|int $id:s(struct $id:cfg* cfg, const char *size_name, size_t size_value);|],
-      [C.cedecl|int $id:s(struct $id:cfg* cfg, const char *size_name, size_t size_value) {
+  GC.publicDef_ "context_config_set_tuning_param" GC.InitDecl $ \s ->
+    ( [C.cedecl|int $id:s(struct $id:cfg* cfg, const char *param_name, size_t new_value);|],
+      [C.cedecl|int $id:s(struct $id:cfg* cfg, const char *param_name, size_t new_value) {
 
                          for (int i = 0; i < $int:num_sizes; i++) {
-                           if (strcmp(size_name, size_names[i]) == 0) {
-                             cfg->sizes[i] = size_value;
+                           if (strcmp(param_name, tuning_param_names[i]) == 0) {
+                             cfg->tuning_params[i] = new_value;
                              return 0;
                            }
                          }
 
-                         if (strcmp(size_name, "default_group_size") == 0) {
-                           cfg->opencl.default_group_size = size_value;
+                         if (strcmp(param_name, "default_group_size") == 0) {
+                           cfg->opencl.default_group_size = new_value;
                            return 0;
                          }
 
-                         if (strcmp(size_name, "default_num_groups") == 0) {
-                           cfg->opencl.default_num_groups = size_value;
+                         if (strcmp(param_name, "default_num_groups") == 0) {
+                           cfg->opencl.default_num_groups = new_value;
                            return 0;
                          }
 
-                         if (strcmp(size_name, "default_threshold") == 0) {
-                           cfg->opencl.default_threshold = size_value;
+                         if (strcmp(param_name, "default_threshold") == 0) {
+                           cfg->opencl.default_threshold = new_value;
                            return 0;
                          }
 
-                         if (strcmp(size_name, "default_tile_size") == 0) {
-                           cfg->opencl.default_tile_size = size_value;
+                         if (strcmp(param_name, "default_tile_size") == 0) {
+                           cfg->opencl.default_tile_size = new_value;
                            return 0;
                          }
 
-                         if (strcmp(size_name, "default_reg_tile_size") == 0) {
-                           cfg->opencl.default_reg_tile_size = size_value;
+                         if (strcmp(param_name, "default_reg_tile_size") == 0) {
+                           cfg->opencl.default_reg_tile_size = new_value;
                            return 0;
                          }
 
@@ -302,10 +306,11 @@ generateBoilerplate opencl_code opencl_prelude cost_centres kernels types sizes 
                        }|]
     )
 
-  (fields, init_fields) <- GC.contextContents
+  (fields, init_fields, free_fields) <- GC.contextContents
   ctx <- GC.publicDef "context" GC.InitDecl $ \s ->
     ( [C.cedecl|struct $id:s;|],
       [C.cedecl|struct $id:s {
+                         struct $id:cfg* cfg;
                          int detail_memory;
                          int debugging;
                          int profiling;
@@ -319,7 +324,7 @@ generateBoilerplate opencl_code opencl_prelude cost_centres kernels types sizes 
                          typename cl_mem global_failure;
                          typename cl_mem global_failure_args;
                          struct opencl_context opencl;
-                         struct sizes sizes;
+                         struct tuning_params tuning_params;
                          // True if a potentially failing kernel has been enqueued.
                          typename cl_int failure_is_an_option;
                        };|]
@@ -349,9 +354,9 @@ generateBoilerplate opencl_code opencl_prelude cost_centres kernels types sizes 
                      $stms:ctx_opencl_inits
   }|]
 
-  let set_sizes =
+  let set_tuning_params =
         zipWith
-          (\i k -> [C.cstm|ctx->sizes.$id:k = cfg->sizes[$int:i];|])
+          (\i k -> [C.cstm|ctx->tuning_params.$id:k = &cfg->tuning_params[$int:i];|])
           [(0 :: Int) ..]
           $ M.keys sizes
       max_failure_args =
@@ -379,7 +384,7 @@ generateBoilerplate opencl_code opencl_prelude cost_centres kernels types sizes 
                      $stms:(map loadKernel (M.toList kernels))
 
                      $stms:final_inits
-                     $stms:set_sizes
+                     $stms:set_tuning_params
 
                      init_constants(ctx);
                      // Clear the free list of any deallocations that occurred while initialising constants.
@@ -399,10 +404,13 @@ generateBoilerplate opencl_code opencl_prelude cost_centres kernels types sizes 
   GC.publicDef_ "context_new" GC.InitDecl $ \s ->
     ( [C.cedecl|struct $id:ctx* $id:s(struct $id:cfg* cfg);|],
       [C.cedecl|struct $id:ctx* $id:s(struct $id:cfg* cfg) {
+                          assert(!cfg->in_use);
                           struct $id:ctx* ctx = (struct $id:ctx*) malloc(sizeof(struct $id:ctx));
                           if (ctx == NULL) {
                             return NULL;
                           }
+                          ctx->cfg = cfg;
+                          ctx->cfg->in_use = 1;
 
                           int required_types = 0;
                           $stms:set_required_types
@@ -417,10 +425,13 @@ generateBoilerplate opencl_code opencl_prelude cost_centres kernels types sizes 
   GC.publicDef_ "context_new_with_command_queue" GC.InitDecl $ \s ->
     ( [C.cedecl|struct $id:ctx* $id:s(struct $id:cfg* cfg, typename cl_command_queue queue);|],
       [C.cedecl|struct $id:ctx* $id:s(struct $id:cfg* cfg, typename cl_command_queue queue) {
+                          assert(!cfg->in_use);
                           struct $id:ctx* ctx = (struct $id:ctx*) malloc(sizeof(struct $id:ctx));
                           if (ctx == NULL) {
                             return NULL;
                           }
+                          ctx->cfg = cfg;
+                          ctx->cfg->in_use = 1;
 
                           int required_types = 0;
                           $stms:set_required_types
@@ -435,10 +446,12 @@ generateBoilerplate opencl_code opencl_prelude cost_centres kernels types sizes 
   GC.publicDef_ "context_free" GC.InitDecl $ \s ->
     ( [C.cedecl|void $id:s(struct $id:ctx* ctx);|],
       [C.cedecl|void $id:s(struct $id:ctx* ctx) {
+                                 $stms:free_fields
                                  free_constants(ctx);
                                  free_lock(&ctx->lock);
                                  $stms:(map releaseKernel (M.toList kernels))
                                  teardown_opencl(&ctx->opencl);
+                                 ctx->cfg->in_use = 0;
                                  free(ctx);
                                }|]
     )
@@ -505,17 +518,18 @@ generateBoilerplate opencl_code opencl_prelude cost_centres kernels types sizes 
 openClDecls ::
   [Name] ->
   M.Map KernelName KernelSafety ->
-  String ->
-  String ->
+  T.Text ->
   ([C.FieldGroup], [C.Stm], [C.Definition], [C.Definition])
-openClDecls cost_centres kernels opencl_program opencl_prelude =
+openClDecls cost_centres kernels opencl_program =
   (ctx_fields, ctx_inits, openCL_boilerplate, openCL_load)
   where
     opencl_program_fragments =
       -- Some C compilers limit the size of literal strings, so
       -- chunk the entire program into small bits here, and
       -- concatenate it again at runtime.
-      [[C.cinit|$string:s|] | s <- chunk 2000 (opencl_prelude ++ opencl_program)]
+      [ [C.cinit|$string:s|]
+        | s <- chunk 2000 $ T.unpack opencl_program
+      ]
 
     ctx_fields =
       [ [C.csdecl|int total_runs;|],
@@ -549,15 +563,12 @@ void post_opencl_setup(struct opencl_context *ctx, struct opencl_device_option *
 }|]
       ]
 
-    free_list_h = $(embedStringFile "rts/c/free_list.h")
-    openCL_h = $(embedStringFile "rts/c/opencl.h")
-
     program_fragments = opencl_program_fragments ++ [[C.cinit|NULL|]]
     openCL_boilerplate =
       [C.cunit|
           $esc:("typedef cl_mem fl_mem_t;")
-          $esc:free_list_h
-          $esc:openCL_h
+          $esc:(T.unpack freeListH)
+          $esc:(T.unpack openclH)
           static const char *opencl_program[] = {$inits:program_fragments};|]
 
 loadKernel :: (KernelName, KernelSafety) -> C.Stm

@@ -5,9 +5,9 @@
 
 import "intrinsics"
 
-let f 't (x: t) (acc: *acc ([]t)) (is: []i32) =
+def f 't (x: t) (acc: *acc ([]t)) (is: []i32) =
   loop acc for i in is do
     write acc (i64.i32 i) x
 
-let main (xs: *[][]i32) is =
+def main (xs: *[][]i32) is =
   scatter_stream xs (f [1,2,3]) is
