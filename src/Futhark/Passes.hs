@@ -92,7 +92,6 @@ sequentialCpuPipeline =
     >>> onePass Seq.explicitAllocations
     >>> passes
       [ performCSE False,
-        simplifySeqMem,
         simplifySeqMem
       ]
 

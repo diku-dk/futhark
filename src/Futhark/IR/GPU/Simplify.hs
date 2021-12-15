@@ -76,10 +76,8 @@ simplifyKernelOp _ (SizeOp (CalcNumGroups w max_num_groups group_size)) = do
   return (SizeOp $ CalcNumGroups w' max_num_groups group_size, mempty)
 simplifyKernelOp _ (GPUBody ts body) = do
   ts' <- Engine.simplify ts
-  ((bodystms, bodyres), hoisted) <-
-    Engine.blockIf keepOnGPU $
-      Engine.simplifyBody (map (const Consume) ts) body
-  body' <- Engine.constructBody bodystms bodyres
+  (hoisted, body') <-
+    Engine.simplifyBody keepOnGPU mempty (map (const mempty) ts) body
   pure (GPUBody ts' body', hoisted)
   where
     keepOnGPU _ _ = keepExpOnGPU . stmExp

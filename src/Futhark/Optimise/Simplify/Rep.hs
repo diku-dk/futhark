@@ -28,6 +28,7 @@ module Futhark.Optimise.Simplify.Rep
     informLambda,
     informFunDef,
     informStms,
+    informBody,
   )
 where
 

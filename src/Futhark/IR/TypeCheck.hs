@@ -11,7 +11,7 @@
 {-# LANGUAGE TypeFamilies #-}
 
 -- | The type checker checks whether the program is type-consistent.
-module Futhark.TypeCheck
+module Futhark.IR.TypeCheck
   ( -- * Interface
     checkProg,
     TypeError (..),

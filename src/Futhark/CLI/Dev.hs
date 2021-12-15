@@ -25,6 +25,7 @@ import Futhark.IR.Prop.Aliases (CanBeAliased)
 import qualified Futhark.IR.SOACS as SOACS
 import qualified Futhark.IR.Seq as Seq
 import qualified Futhark.IR.SeqMem as SeqMem
+import Futhark.IR.TypeCheck (Checkable, checkProg)
 import Futhark.Internalise.Defunctionalise as Defunctionalise
 import Futhark.Internalise.Defunctorise as Defunctorise
 import Futhark.Internalise.LiftLambdas as LiftLambdas
@@ -48,7 +49,6 @@ import Futhark.Pass.FirstOrderTransform
 import Futhark.Pass.KernelBabysitting
 import Futhark.Pass.Simplify
 import Futhark.Passes
-import Futhark.TypeCheck (Checkable, checkProg)
 import Futhark.Util.Log
 import Futhark.Util.Options
 import qualified Futhark.Util.Pretty as PP
@@ -121,7 +121,7 @@ instance Representation UntypedPassState where
   representation (Seq _) = "Seq"
   representation (GPUMem _) = "GPUMem"
   representation (MCMem _) = "MCMem"
-  representation (SeqMem _) = "SeqMEm"
+  representation (SeqMem _) = "SeqMem"
 
 instance PP.Pretty UntypedPassState where
   ppr (SOACS prog) = PP.ppr prog
@@ -561,9 +561,17 @@ commandLineOptions =
       ["gpu-mem"],
     pipelineOption
       getSOACSProg
+      "Seq"
+      Seq
+      "Run the sequential CPU compilation pipeline"
+      sequentialPipeline
+      []
+      ["seq"],
+    pipelineOption
+      getSOACSProg
       "SeqMem"
       SeqMem
-      "Run the sequential CPU compilation pipeline"
+      "Run the sequential CPU+memory compilation pipeline"
       sequentialCpuPipeline
       []
       ["seq-mem"],
