@@ -5,16 +5,17 @@ import Futhark.IR.GPU
 import Futhark.Pass
 
 reduceDeviceReads :: Pass GPU GPU
-reduceDeviceReads = Pass
-  "reduce device reads"
-  "Move host statements to device to reduce data transfers from device to host."
-  reduceProgram
+reduceDeviceReads =
+  Pass
+    "reduce device reads"
+    "Move host statements to device to reduce data transfers from device."
+    reduceProgram
 
 reduceProgram :: Prog GPU -> PassM (Prog GPU)
 reduceProgram prog@(Prog consts funs) = do
-  let mt   = analyseProg prog
+  let mt = analyseProg prog
   consts' <- reduceStms mt consts
-  funs'   <- parPass (reduceFunDef mt) funs
+  funs' <- parPass (reduceFunDef mt) funs
   pure (Prog consts' funs')
 
 reduceFunDef :: MigrationTable -> FunDef GPU -> PassM (FunDef GPU)
@@ -26,4 +27,4 @@ reduceFunDef mt fd = do
 reduceStms :: MigrationTable -> Stms GPU -> PassM (Stms GPU)
 reduceStms mt stms = pure stms
 
--- TODO: Run ormulu and hlint
+-- TODO: Run ormolu and hlint
