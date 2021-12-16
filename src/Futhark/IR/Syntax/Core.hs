@@ -19,6 +19,7 @@ module Futhark.IR.Syntax.Core
     NoUniqueness (..),
     ShapeBase (..),
     Shape,
+    stripDims,
     Ext (..),
     ExtSize,
     ExtShape,
@@ -116,6 +117,11 @@ instance Semigroup (ShapeBase d) where
 instance Monoid (ShapeBase d) where
   mempty = Shape mempty
 
+-- | @stripDims n shape@ strips the outer @n@ dimensions from
+-- @shape@.
+stripDims :: Int -> ShapeBase d -> ShapeBase d
+stripDims n (Shape dims) = Shape $ drop n dims
+
 -- | The size of an array as a list of subexpressions.  If a variable,
 -- that variable must be in scope where this array is used.
 type Shape = ShapeBase SubExp
@@ -153,21 +159,15 @@ class (Monoid a, Eq a, Ord a) => ArrayShape a where
   -- | Return the rank of an array with the given size.
   shapeRank :: a -> Int
 
-  -- | @stripDims n shape@ strips the outer @n@ dimensions from
-  -- @shape@.
-  stripDims :: Int -> a -> a
-
   -- | Check whether one shape if a subset of another shape.
   subShapeOf :: a -> a -> Bool
 
 instance ArrayShape (ShapeBase SubExp) where
   shapeRank (Shape l) = length l
-  stripDims n (Shape dims) = Shape $ drop n dims
   subShapeOf = (==)
 
 instance ArrayShape (ShapeBase ExtSize) where
   shapeRank (Shape l) = length l
-  stripDims n (Shape dims) = Shape $ drop n dims
   subShapeOf (Shape ds1) (Shape ds2) =
     -- Must agree on Free dimensions, and ds1 may not be existential
     -- where ds2 is Free.  Existentials must also be congruent.
@@ -195,7 +195,6 @@ instance Monoid Rank where
 
 instance ArrayShape Rank where
   shapeRank (Rank x) = x
-  stripDims n (Rank x) = Rank $ x - n
   subShapeOf = (==)
 
 -- | The memory space of a block.  If 'DefaultSpace', this is the "default"
