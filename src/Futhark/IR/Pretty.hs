@@ -308,7 +308,7 @@ instance PrettyRep rep => Pretty (Lambda rep) where
   ppr (Lambda [] (Body _ stms []) []) | stms == mempty = text "nilFn"
   ppr (Lambda params body rettype) =
     text "\\" <+> ppTuple' params
-      <+/> colon <+> ppTupleLines' rettype <+> text "->"
+      </> indent 2 (colon <+> ppTupleLines' rettype <+> text "->")
       </> indent 2 (ppr body)
 
 instance Pretty EntryPointType where
