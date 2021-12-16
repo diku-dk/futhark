@@ -225,7 +225,7 @@ onKernels f =
 optimise :: Pass GPUMem GPUMem
 optimise =
   Pass "reuse allocations" "reuse allocations" $ \prog ->
-    let (lumap, _) = LastUse.analyseProg prog
+    let (lumap, _) = LastUse.analyseGPUMem prog
         graph =
           foldMap
             ( \f ->
