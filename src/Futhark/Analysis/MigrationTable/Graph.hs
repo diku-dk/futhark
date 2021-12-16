@@ -157,9 +157,9 @@ instance Semigroup Edges where
   (ToNodes a1 Nothing) <> (ToNodes a2 Nothing) =
     ToNodes (a1 <> a2) Nothing
   (ToNodes a1 (Just e1)) <> (ToNodes a2 Nothing) =
-    ToNodes (a1 <> a2) $ Just (e1 <> (IS.difference a2 a1))
+    ToNodes (a1 <> a2) $ Just (e1 <> IS.difference a2 a1)
   (ToNodes a1 Nothing) <> (ToNodes a2 (Just e2)) =
-    ToNodes (a1 <> a2) $ Just (e2 <> (IS.difference a1 a2))
+    ToNodes (a1 <> a2) $ Just (e2 <> IS.difference a1 a2)
   (ToNodes a1 (Just e1)) <> (ToNodes a2 (Just e2)) =
     let a = IS.difference e2 (IS.difference a1 e1)
         b = IS.difference e1 (IS.difference a2 e2)
@@ -175,7 +175,7 @@ data EdgeType = Normal | Reversed
 
 -- | State that tracks which vertices a traversal has visited, caching immediate
 -- computations.
-data Visited a = Visited { visited :: M.Map (EdgeType, Id) a }
+newtype Visited a = Visited { visited :: M.Map (EdgeType, Id) a }
 
 -- | The result of a graph traversal that may abort early in case a sink is
 -- reached.
@@ -197,7 +197,7 @@ instance Semigroup a => Semigroup (Result a) where
 
 -- | The empty graph.
 empty :: Graph
-empty = Graph (IM.empty)
+empty = Graph IM.empty
 
 -- | Maps a name to its corresponding vertex handle.
 nameToId :: VName -> Id
@@ -566,7 +566,7 @@ route' p d prev et i g
 
     routeReversed rev g0 p0 =
       let (res, g') = route' p0 (d+1) (Just i) Reversed rev g0
-          exhaust = (flip adjust) i $ \v -> 
+          exhaust = flip adjust i $ \v -> 
             v { vertexRouting = FromNode rev Exhausted }
       in case (res, et) of
            (DeadEnd, _)
@@ -605,7 +605,7 @@ route' p d prev et i g
                 Just es' -> routeNorms (IS.toAscList es') g0 p0
                 Nothing  -> routeNorms (IS.toAscList es ) g0 p0
             edges = ToNodes es (Just $ IS.fromDistinctAscList nx')
-            exhaust = (flip adjust) i $ \v' -> 
+            exhaust = flip adjust i $ \v' -> 
               v' { vertexEdges = ToNodes es (Just IS.empty) }
         in case (res, et) of
              (DeadEnd, _)

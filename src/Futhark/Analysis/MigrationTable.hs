@@ -51,15 +51,15 @@ statusOf v (MigrationTable mt) =
 -- | Should this whole statement be moved from host to device?
 moveToDevice :: Stm GPU -> MigrationTable -> Bool
 moveToDevice (Let (Pat ((PatElem v _):_)) _ (BasicOp _)) mt =
-  (statusOf v mt) /= StayOnHost
-moveToDevice (Let (Pat ((PatElem v _):_)) _ (Apply _ _ _ _)) mt =
-  (statusOf v mt) /= StayOnHost
+  statusOf v mt /= StayOnHost
+moveToDevice (Let (Pat ((PatElem v _):_)) _ Apply {}) mt =
+  statusOf v mt /= StayOnHost
 moveToDevice (Let _ _ (If (Var v) _ _ _)) mt =
-  (statusOf v mt) == MoveToDevice
+  statusOf v mt == MoveToDevice
 moveToDevice (Let _ _ (DoLoop _ (ForLoop _ _ (Var v) _) _)) mt =
-  (statusOf v mt) == MoveToDevice
+  statusOf v mt == MoveToDevice
 moveToDevice (Let _ _ (DoLoop _ (WhileLoop v) _)) mt =
-  (statusOf v mt) == MoveToDevice
+  statusOf v mt == MoveToDevice
 -- BasicOp and Apply statements might not bind any variables.
 -- If statements might use a constant branch condition.
 -- For loop statements might use a constant number of iterations.
@@ -70,7 +70,7 @@ moveToDevice _ _ = False
 -- | Will the variable by this name still be used on host after all statements
 -- identified by this table have been migrated?
 usedOnHost :: VName -> MigrationTable -> Bool
-usedOnHost v mt = (statusOf v mt) == UsedOnHost
+usedOnHost v mt = statusOf v mt == UsedOnHost
 
 -- | Merges two migration tables that are assumed to be disjoint.
 merge :: MigrationTable -> MigrationTable -> MigrationTable
@@ -95,7 +95,7 @@ hostOnlyFunDefs :: [FunDef GPU] -> HostOnlyFuns
 hostOnlyFunDefs funs =
   let ns = map funDefName funs
       m  = M.fromList $ zip ns (map checkFunDef funs)
-  in (S.fromList ns) \\ (keysToSet $ rmHostOnly m)
+  in S.fromList ns \\ keysToSet (rmHostOnly m)
   where
     keysToSet = S.fromAscList . M.keys
 
@@ -147,11 +147,11 @@ checkFunDef fun = do
     checkExp (Apply n _ _ _)           = Just (S.singleton n)
     checkExp (If _ t f _)              = do s1 <- checkBody t
                                             s2 <- checkBody f
-                                            return $ s1 `S.union` s2
+                                            pure $ s1 `S.union` s2
     checkExp (DoLoop params form body) = do checkLParams params
                                             checkLoopForm form
                                             checkBody body
-    checkExp _                         = Just (S.empty)
+    checkExp _                         = Just S.empty
 
 -- | Analyses top-level constants.
 analyseConsts :: HostOnlyFuns -> Stms GPU -> MigrationTable
@@ -170,7 +170,7 @@ analyseFunDef hof fd =
       stms  = bodyStms body
   in analyseStms hof usage stms
   where
-    f ((SubExpRes _ (Var v)), t) | isScalarType t = [nameToId v]
+    f (SubExpRes _ (Var v), t) | isScalarType t = [nameToId v]
     f _                                           = []
 
 isScalar :: Typed t => t -> Bool
@@ -194,6 +194,7 @@ analyseStms hof usage stms =
       (snks2, g')        = MG.routeMany unrouted g
   -- TODO: Mark D
   -- TODO: Make reads conditional
+  -- TODO: Run ormulu
   in empty -- TODO
 
 buildGraph :: HostOnlyFuns -> HostUsage -> Stms GPU -> (Graph, Sources, Sinks)
@@ -338,13 +339,13 @@ graphIdFor i =
 
 -- | Capture body stats produced by the given action.
 captureBodyStats :: Grapher a -> Grapher BodyStats
-captureBodyStats = (fmap snd) . listen
+captureBodyStats = fmap snd . listen
 
 -- | Add these entries to the 'ActionTable' for this action.
 withActions :: Grapher a -> ActionTable -> Grapher a
 withActions g table = local f g
   where
-    f env = env { envActionTable = table <> (envActionTable env) }
+    f env = env { envActionTable = table <> envActionTable env }
 
 
 -- | Can applications of this function be moved to device?
@@ -355,7 +356,7 @@ isHostOnlyFun n = asks $ S.member n . envHostOnlyFuns
 getAction :: Id -> Grapher GraphAction
 getAction i = do
   table <- asks envActionTable
-  return (table IM.! i)
+  pure (table IM.! i)
 
 -- | Get the 'Meta' corresponding to the current body.
 getMeta :: Grapher Meta
@@ -373,9 +374,9 @@ graphStm stm = do
   let b = boundBy stm
   let e = stmExp stm 
   case e of
-    BasicOp (Assert {})      -> graphAssert    (one b) e
-    BasicOp (Index {})       -> graphRead      (one b) e
-    BasicOp (UpdateAcc {})   -> graphUpdateAcc (one b) e
+    BasicOp Assert {}        -> graphAssert    (one b) e
+    BasicOp Index {}         -> graphRead      (one b) e
+    BasicOp UpdateAcc {}     -> graphUpdateAcc (one b) e
     BasicOp _                -> graphSimple  b e
     Apply n _ _ _            -> graphApply n b e
     If cond tbody fbody _    -> graphIf b cond tbody fbody
@@ -410,10 +411,10 @@ graphSimple bs e = do
   -- an array read. Transitive dependencies through variables required on host
   -- (those that are connected to sinks) do not count.
   ops <- graphedScalarOperands e
-  if IS.null ops then return ()
+  if IS.null ops then pure ()
   else do
     mapM_ addVertex bs
-    addEdges (MG.declareEdges $ fst $ unzip bs) ops
+    addEdges (MG.declareEdges $ map fst bs) ops
 
 graphAssert :: Binding -> Exp GPU -> Grapher ()
 graphAssert b e = do
@@ -455,19 +456,19 @@ graphApply n b e = do
 
 graphIf :: [Binding] -> SubExp -> BodyT GPU -> BodyT GPU -> Grapher ()
 graphIf bs cond tbody fbody = do
-  ho <- incForkDepthFor (do {
-          tstats <- graphBody tbody ;
-          fstats <- graphBody fbody ;
-          return $ (bodyHostOnly tstats) || (bodyHostOnly fstats)
-        })
+  ho <- incForkDepthFor (
+          do tstats <- graphBody tbody
+             fstats <- graphBody fbody
+             pure $ bodyHostOnly tstats || bodyHostOnly fstats
+        )
   ci <- case (ho, cond) of
-          (True, Var v)  -> do { requiredOnHost (nameToId v); return IS.empty }
+          (True, Var v)  -> requiredOnHost (nameToId v) >> pure IS.empty
           (False, Var v) -> onlyGraphedScalars [v]
-          (_, _)         -> return IS.empty
+          (_, _)         -> pure IS.empty
   ret <- zipWithM (f ci) (bodyResult tbody) (bodyResult fbody)
   mapM_ (uncurry createNode) $ zip bs ret
   where
-    f ci a b = fmap (ci <>) $ onlyGraphedScalars $ (toSet a) <> (toSet b)
+    f ci a b = fmap (ci <>) $ onlyGraphedScalars $ toSet a <> toSet b
 
     toSet (SubExpRes _ (Var v)) = S.singleton v
     toSet _                     = S.empty
@@ -482,14 +483,16 @@ graphWithAcc bs inputs f = do
   -- based on which statements their associated accumulator operators
   -- evaluate, which is captured as 'GraphAction's. The actions are made
   -- available until the associated accumulators no longer are in scope.
-  actions <- fmap IM.fromList $ mapM (graph . extract) accs
+  actions <- IM.fromList <$> mapM (graph . extract) accs
   let body = lambdaBody f
-  (graphStms $ bodyStms body) `withActions` actions
+  graphStms (bodyStms body) `withActions` actions
   -- Connect return variables to bound values.
   ret <- mapM (onlyGraphedScalars . toSet) (bodyResult body)
   mapM_ (uncurry createNode) $ zip bs ret
   where
-    graph (i, ts, op) = do { a <- graphAccOp i ts op; return (i, a) }
+    graph (i, ts, op) = do
+      a <- graphAccOp i ts op
+      pure (i, a)
 
     extract (Acc a _ ts _, (_, _, Nothing))      = (nameToId a, ts, Nothing)
     extract (Acc a _ ts _, (_, _, Just (op, _))) = (nameToId a, ts, Just op)
@@ -526,16 +529,19 @@ graphAccOp i ts op = do
 
   -- Determine which external variables the operator depends upon.
   let g   = stateGraph st
-  let ops = IS.filter (\oi -> MG.member oi g) (bodyOperands bs)
+  let ops = IS.filter (`MG.member` g) (bodyOperands bs)
 
   -- Finish graphing the operator based on the determined action type.
   case act' of
-    HostOp    -> do { put st'; tell bs; censorRoutes i ops }
+    HostOp    -> do put st'
+                    tell bs
+                    censorRoutes i ops
     DeviceOp  -> addSource (i, Prim Unit) -- no sink possible ==> no edges
-    NeutralOp -> do { addVertex (i, Prim Unit); addEdges (oneEdge i) ops }
+    NeutralOp -> do addVertex (i, Prim Unit)
+                    addEdges (oneEdge i) ops
 
   -- Report how 'UpdateAcc' statements that use this operator should be graphed.
-  return act'
+  pure act'
 
 graphLoop :: [Binding]
           -> [(FParam GPU, SubExp)]
@@ -550,7 +556,7 @@ graphLoop (b:bs) params lform body = do
   g0 <- getGraph
   stats <- captureBodyStats (subgraphId `graphIdFor` graphTheLoop)
   let ho  = bodyHostOnly stats
-  let ops = IS.filter (\oi -> MG.member oi g0) (bodyOperands stats)
+  let ops = IS.filter (`MG.member` g0) (bodyOperands stats)
   connectLoop -- merge return values with params
 
   -- Route the sources within the loop body in isolation.
@@ -562,7 +568,7 @@ graphLoop (b:bs) params lform body = do
   mapM_ graphBinding loopValues
   g1 <- getGraph
   let (dbs, vs) = foldl' (deviceBindings g1) (IS.empty, MG.none) ss
-  modifySources $ \(r, u) -> (r, (IS.toList dbs) ++ u)
+  modifySources $ \(r, u) -> (r, IS.toList dbs ++ u)
 
   -- Connect operands to sinks if they can reach a sink within the loop.
   -- Otherwise connect them to the loop bound variables that they can
@@ -587,13 +593,13 @@ graphLoop (b:bs) params lform body = do
       , Just (_, _, c, _) <- find (\(_, p, _, _) -> p == i) loopValues
       , Var _ <- c
       -> addEdges (ToNodes bindings Nothing) =<< onlyGraphedScalar c
-    _ -> return ()
+    _ -> pure ()
   where
     subgraphId = fst b
 
     loopValues =
       let tmp  = zip3 (b:bs) params (bodyResult body)
-          tmp' = (flip map) tmp $
+          tmp' = flip map tmp $
                  \(bnd, (p, pval), res) ->
                    let i = nameToId (paramName p)
                    in (bnd, i, pval, resSubExp res)
@@ -605,7 +611,7 @@ graphLoop (b:bs) params lform body = do
       mapM_ graphParam loopValues
       case lform of
         ForLoop _ _ _ elems -> mapM_ graphForInElem elems
-        _                   -> return ()
+        _                   -> pure ()
       graphStms (bodyStms body)
 
     graphParam ((_, t), p, pval, _)
@@ -629,7 +635,7 @@ graphLoop (b:bs) params lform body = do
       = addEdges (MG.oneEdge op) (IS.singleton p)
 
       | otherwise
-      = return ()
+      = pure ()
 
     graphBinding (bnd, p, _, _) =
       createNode bnd (IS.singleton p)
@@ -649,10 +655,10 @@ graphLoop (b:bs) params lform body = do
     connectOperand vs i = do
       g <- getGraph
       case MG.get i g of
-        Nothing -> return vs
+        Nothing -> pure vs
         Just v ->
           case vertexEdges v of
-            ToSink -> return vs
+            ToSink -> pure vs
             ToNodes es Nothing ->
               connectOp g vs i es
             ToNodes _ (Just nx) ->
@@ -664,7 +670,7 @@ graphLoop (b:bs) params lform body = do
       case res of
         FoundSink     -> requiredOnHost i
         Produced bnds -> modifyGraph $ MG.adjust (f nx bnds) i
-      return vs'
+      pure vs'
       
     f nx bnds v
       | ToNodes es _ <- vertexEdges v
@@ -706,18 +712,17 @@ censorRoutes si ops = do
   -- Connect operands to sinks if they can reach a sink within the subgraph.
   -- This ensures additional reads cannot occur by delaying any reads into it.
   g <- getGraph
-  _ <- foldM (sinker g) MG.none (IS.elems ops)
-  return ()
+  foldM_ (sinker g) MG.none (IS.elems ops)
   where
     sinker g vs i
       | Just v <- MG.get i g
       , ToNodes es _ <- vertexEdges v
       = do let (sinkFound, vs') = foldl' (findSink g) (False, vs) (IS.elems es)
            when sinkFound (requiredOnHost i)
-           return vs'
+           pure vs'
 
       | otherwise
-      = return vs -- shouldn't happen
+      = pure vs -- shouldn't happen
 
     findSink g (sinkFound, vs) i
       | not sinkFound
@@ -743,8 +748,8 @@ routeSubgraph si = do
   let (sinks, g') = MG.routeMany ss g
   put $ st { stateGraph   = g',
              stateSources = (ss ++ r, u'),
-             stateSinks   = sinks ++ (stateSinks st) }
-  return ss
+             stateSinks   = sinks ++ stateSinks st }
+  pure ss
 
 -- | @inSubGraph si g i@ returns whether @g@ contains a vertex with id @i@ and
 -- subgraph id @si@.
@@ -760,7 +765,7 @@ inSubGraph _ _ _
 -- is not empty.
 createNode :: Binding -> Operands -> Grapher ()
 createNode b ops =
-  if IS.null ops then return ()
+  if IS.null ops then pure ()
   else do
     addVertex b
     addEdges (oneEdge $ fst b) ops
@@ -777,15 +782,15 @@ addVertex (i, t) = do
 addSource :: Binding -> Grapher ()
 addSource b = do
   addVertex b
-  modifySources $ \(r, u) -> (r, (fst b):u)
+  modifySources $ \(r, u) -> (r, fst b : u)
 
 -- | Adds the given edges to each vertex identified by the 'IdSet'. It is
 -- assumed that all vertices reside within the body that currently is being
 -- graphed.
 addEdges :: Edges -> IdSet -> Grapher ()
 addEdges ToSink is = do
-  modifyGraph $ \g -> IS.foldl' (flip $ MG.connectToSink) g is
-  modifyGraphedScalars (\s -> s `IS.difference` is)
+  modifyGraph $ \g -> IS.foldl' (flip MG.connectToSink) g is
+  modifyGraphedScalars (`IS.difference` is)
 addEdges es is = do
   modifyGraph $ \g -> IS.foldl' (flip $ MG.addEdges es) g is
   tell $ mempty { bodyOperands = is }
@@ -798,12 +803,12 @@ requiredOnHost i = do
 
 -- Like 'onlyGraphedScalars' but for a single 'SubExp'.
 onlyGraphedScalar :: SubExp -> Grapher IdSet
-onlyGraphedScalar (Constant _) = return (IS.empty)
+onlyGraphedScalar (Constant _) = pure IS.empty
 onlyGraphedScalar (Var v) = do
   let i = nameToId v
   gss <- getGraphedScalars
-  if IS.member i gss then return (IS.singleton i)
-                     else return IS.empty
+  if IS.member i gss then pure (IS.singleton i)
+                     else pure IS.empty
 
 -- Reduces the variables to just the 'Id's of those that are scalars and which
 -- have a vertex representation in the graph, excluding those that have been
@@ -811,8 +816,7 @@ onlyGraphedScalar (Var v) = do
 onlyGraphedScalars :: Foldable t => t VName -> Grapher IdSet
 onlyGraphedScalars vs = do
   let is = foldl' (\s v -> IS.insert (nameToId v) s) IS.empty vs
-  gss <- getGraphedScalars
-  return (IS.intersection is gss)
+  IS.intersection is <$> getGraphedScalars
 
 -- Returns all non-kernel scalar operands that have a vertex representation in
 -- the graph, excluding those that have been connected to sinks. That is all
@@ -839,7 +843,7 @@ graphedScalarOperands e = onlyGraphedScalars $ fst (collect e)
 
     -- Capture the tokens of accumulators used on host.
     collectStm (Let pat _ ua)
-      | BasicOp (UpdateAcc {}) <- ua
+      | BasicOp UpdateAcc {} <- ua
       , Pat [pe] <- pat
       , Acc a _ _ _ <- typeOf pe
       = captureAcc a <> collectBasic ua
@@ -848,7 +852,7 @@ graphedScalarOperands e = onlyGraphedScalars $ fst (collect e)
     collectLForm (ForLoop _ _ b _) = collectSE b
     collectLForm (WhileLoop _)     = none
 
-    collect b@(BasicOp {})   = collectBasic b
+    collect b@BasicOp {}     = collectBasic b
     collect (Apply _ ps _ _) = foldMap (collectSE . fst) ps
     collect (If c t f _)     = collectSE c <> collectBody t <> collectBody f
     collect (DoLoop ps lf b) = foldMap (collectSE . snd) ps <>
@@ -863,7 +867,7 @@ graphedScalarOperands e = onlyGraphedScalars $ fst (collect e)
     collectWithAcc inputs f =
       let bops = collectBody (lambdaBody f)
           accs = take (length inputs) (lambdaReturnType f)
-          used = (flip map) accs $ \(Acc a _ _ _) -> S.member a (snd bops)
+          used = flip map accs $ \(Acc a _ _ _) -> S.member a (snd bops)
       in bops <> foldMap collectAcc (zip used inputs)
     
     collectAcc (_,    (_, _, Nothing))        = none
@@ -877,7 +881,7 @@ graphedScalarOperands e = onlyGraphedScalars $ fst (collect e)
     collectHostOp (SegOp (SegRed _ _ ops _ _))  = foldMap collectSegBinOp ops
     collectHostOp (SegOp (SegScan _ _ ops _ _)) = foldMap collectSegBinOp ops
     collectHostOp (SegOp (SegHist _ _ ops _ _)) = foldMap collectHistOp ops
-    collectHostOp (SegOp (SegMap {}))           = none
+    collectHostOp (SegOp SegMap {})             = none
     collectHostOp (GPUBody _ _)                 = none
     collectHostOp op = operands $ IM.elems $ namesIntMap $ freeIn op
 
