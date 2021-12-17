@@ -329,47 +329,43 @@ routeMany srcs graph =
 
 {- TRAVERSAL -}
 
--- | @fold g f vs et i@ visits each vertex in @g@ reachable from the vertex
--- with handle @i@, accessed via an edge of type @et@. Each vertex @v@ may be
--- visited up to two times, once for each type of edge @e@ pointing to it,
--- and each time @f e v@ is evaluated to produce a 'Monoid' result. All 'Monoid'
--- results are combined via the '<>' operator and returned.
--- The @vs@ set records which @f e v@ evaluations already have taken place. The
--- function returns an updated 'Visited' set recording the evaluations it has
--- performed.
+-- | @fold g f (a, vs) et i@ folds @f@ over the vertices in @g@ that can be
+-- reached from the vertex with handle @i@, as when accessed via an edge of
+-- type @et@.
+-- Each vertex @v@ may be visited up to two times, once for each type of edge
+-- @e@ pointing to it, and each time @f a e v@ is evaluated to produce an
+-- updated @a@ value to be used in future @f@ evaluations or to be returned.
+-- The @vs@ set records which @f a e v@ evaluations already have taken place.
+-- The function returns an updated 'Visited' set recording the evaluations it
+-- has performed.
 fold ::
-  Monoid a =>
   Graph ->
-  (EdgeType -> Vertex -> a) ->
-  Visited () ->
+  (a -> EdgeType -> Vertex -> a) ->
+  (a, Visited ()) ->
   EdgeType ->
   Id ->
   (a, Visited ())
-fold g f vs0 =
-  fold' (mempty, vs0)
+fold g f (res, vs) et i
+  | M.notMember (et, i) (visited vs),
+    Just v <- get i g =
+    let res' = f res et v
+        vs' = Visited $ M.insert (et, i) () (visited vs)
+        st = (res', vs')
+     in case (et, vertexRouting v) of
+          (Normal, FromSource) -> st
+          (Normal, FromNode rev _) -> foldReversed st rev
+          (Reversed, FromNode rev _) -> foldAll st rev (vertexEdges v)
+          _ -> foldNormals st (vertexEdges v)
+  | otherwise =
+    (res, vs)
   where
-    fold' (res, vs) et i
-      | M.notMember (et, i) (visited vs),
-        Just v <- get i g =
-        let res' = res <> f et v
-            vs' = Visited $ M.insert (et, i) () (visited vs)
-            st = (res', vs')
-         in case (et, vertexRouting v) of
-              (Normal, FromSource) -> st
-              (Normal, FromNode rev _) -> foldReversed st rev
-              (Reversed, FromNode rev _) -> foldAll st rev (vertexEdges v)
-              _ -> foldNormals st (vertexEdges v)
-      | otherwise =
-        (res, vs)
-
-    foldReversed st rev = fold' st Reversed rev
+    foldReversed st rev = fold g f st Reversed rev
 
     foldAll st rev es = foldReversed (foldNormals st es) rev
 
     foldNormals st ToSink = st
     foldNormals st (ToNodes es _) =
-      let fn s = fold' s Normal
-       in IS.foldl' fn st es
+      IS.foldl' (\s -> fold g f s Normal) st es
 
 -- | @reduce g r vs et i@ returns 'FoundSink' if a sink can be reached via the
 -- vertex @v@ with id @i@ in @g@. Otherwise it returns 'Produced' @(r x et v)@

@@ -20,7 +20,7 @@ import qualified Data.Map as M
 import Data.Maybe (fromMaybe, isNothing)
 import Data.Set (Set, (\\))
 import qualified Data.Set as S
-import Futhark.Analysis.MigrationTable.Graph hiding (addEdges, empty, get, none)
+import Futhark.Analysis.MigrationTable.Graph hiding (addEdges, get, none)
 import qualified Futhark.Analysis.MigrationTable.Graph as MG
 import Futhark.IR.GPU
 
@@ -76,10 +76,6 @@ usedOnHost v mt = statusOf v mt == UsedOnHost
 -- | Merges two migration tables that are assumed to be disjoint.
 merge :: MigrationTable -> MigrationTable -> MigrationTable
 merge (MigrationTable a) (MigrationTable b) = MigrationTable (a `IM.union` b)
-
--- | The empty migration table.
-empty :: MigrationTable
-empty = MigrationTable IM.empty
 
 -- | Analyses a program to return a migration table that covers all its
 -- statements and variables.
@@ -193,12 +189,36 @@ type HostUsage = [Id]
 -- constants and function parameters are assumed to reside on host.
 analyseStms :: HostOnlyFuns -> HostUsage -> Stms GPU -> MigrationTable
 analyseStms hof usage stms =
-  let (g, srcs, snks1) = buildGraph hof usage stms
+  let (g, srcs, _) = buildGraph hof usage stms
       (routed, unrouted) = srcs
-      (snks2, g') = MG.routeMany unrouted g
-   in -- TODO: Mark D
-      -- TODO: Make reads conditional
-      empty -- TODO
+      (_, g') = MG.routeMany unrouted g -- hereby routed
+      f a = MG.fold g' visit a Normal
+      st = foldl' f (initial, MG.none) unrouted
+      (vr, vn, tn) = fst $ foldl' f st routed
+   in -- TODO: Delay reads into (deeper) branches
+
+      MigrationTable $
+        IM.unions
+          [ IM.fromSet (const MoveToDevice) vr,
+            IM.fromSet (const MoveToDevice) vn,
+            -- Read by host if not reached by a reversed edge
+            IM.fromSet (const UsedOnHost) tn
+          ]
+  where
+    -- 1) Visited by reversed edge.
+    -- 2) Visited by normal edge, no route.
+    -- 3) Visited by normal edge, had route; will potentially be read by host.
+    initial = (IS.empty, IS.empty, IS.empty)
+
+    visit (vr, vn, tn) Reversed v =
+      let vr' = IS.insert (vertexId v) vr
+       in (vr', vn, tn)
+    visit (vr, vn, tn) Normal v@Vertex{vertexRouting = NoRoute} =
+        let vn' = IS.insert (vertexId v) vn
+         in (vr, vn', tn)
+    visit (vr, vn, tn) Normal v =
+      let tn' = IS.insert (vertexId v) tn
+       in (vr, vn, tn')
 
 buildGraph :: HostOnlyFuns -> HostUsage -> Stms GPU -> (Graph, Sources, Sinks)
 buildGraph hof usage stms =
@@ -305,10 +325,6 @@ getGraph = gets stateGraph
 -- | All scalar variables with a vertex representation in the graph.
 getGraphedScalars :: Grapher IdSet
 getGraphedScalars = gets stateGraphedScalars
-
--- | All source connected vertices that have been added to the graph so far.
-getSources :: Grapher Sources
-getSources = gets stateSources
 
 -- | Update graph under construction.
 modifyGraph :: (Graph -> Graph) -> Grapher ()
