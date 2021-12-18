@@ -19,6 +19,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Allocation insertion pass bug (#1546).
 
+* An exotic bug involving TLS and dynamically loading code generated
+  by the `multicore` backend.
+
 ## [0.21.1]
 
 ### Added
