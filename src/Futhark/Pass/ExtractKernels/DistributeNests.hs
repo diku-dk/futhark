@@ -974,10 +974,10 @@ histKernel ::
   [VName] ->
   m (Stms (Rep m))
 histKernel onLambda lvl orig_pat ispace inputs cs hist_w ops lam arrs = runBuilderT'_ $ do
-  ops' <- forM ops $ \(SOACS.HistOp num_bins rf dests nes op) -> do
+  ops' <- forM ops $ \(SOACS.HistOp dest_shape rf dests nes op) -> do
     (op', nes', shape) <- determineReduceOp op nes
     op'' <- lift $ onLambda op'
-    return $ HistOp num_bins rf dests nes' shape op''
+    return $ HistOp dest_shape rf dests nes' shape op''
 
   let isDest = flip elem $ concatMap histDest ops'
       inputs' = filter (not . isDest . kernelInputArray) inputs

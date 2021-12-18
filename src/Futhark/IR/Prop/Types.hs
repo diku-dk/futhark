@@ -19,6 +19,7 @@ module Futhark.IR.Prop.Types
     setOuterSize,
     setDimSize,
     setOuterDim,
+    setOuterDims,
     setDim,
     setArrayDims,
     peelArray,
@@ -219,6 +220,10 @@ setDimSize i t e = t `setArrayShape` setDim i (arrayShape t) e
 -- | Replace the outermost dimension of an array shape.
 setOuterDim :: ShapeBase d -> d -> ShapeBase d
 setOuterDim = setDim 0
+
+-- | Replace some outermost dimensions of an array shape.
+setOuterDims :: ShapeBase d -> Int -> ShapeBase d -> ShapeBase d
+setOuterDims old k new = new <> stripDims k old
 
 -- | Replace the specified dimension of an array shape.
 setDim :: Int -> ShapeBase d -> d -> ShapeBase d

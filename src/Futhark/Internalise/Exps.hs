@@ -1136,6 +1136,7 @@ internaliseScanOrReduce desc what f (lam, ne, arr, loc) = do
   letValExp' desc . I.Op =<< f w lam' nes' arrs
 
 internaliseHist ::
+  Int ->
   String ->
   E.Exp ->
   E.Exp ->
@@ -1145,13 +1146,11 @@ internaliseHist ::
   E.Exp ->
   SrcLoc ->
   InternaliseM [SubExp]
-internaliseHist desc rf hist op ne buckets img loc = do
+internaliseHist dim desc rf hist op ne buckets img loc = do
   rf' <- internaliseExp1 "hist_rf" rf
   ne' <- internaliseExp "hist_ne" ne
   hist' <- internaliseExpToVars "hist_hist" hist
-  buckets' <-
-    letExp "hist_buckets" . BasicOp . SubExp
-      =<< internaliseExp1 "hist_buckets" buckets
+  buckets' <- internaliseExpToVars "hist_buckets" buckets
   img' <- internaliseExpToVars "hist_img" img
 
   -- reshape neutral element to have same size as the destination array
@@ -1164,15 +1163,15 @@ internaliseHist desc rf hist op ne buckets img loc = do
       "hist_ne_right_shape"
       n
   ne_ts <- mapM I.subExpType ne_shp
-  his_ts <- mapM lookupType hist'
+  his_ts <- mapM (fmap (I.stripArray (dim -1)) . lookupType) hist'
   op' <- internaliseFoldLambda internaliseLambda op ne_ts his_ts
 
   -- reshape return type of bucket function to have same size as neutral element
   -- (modulo the index)
-  bucket_param <- newParam "bucket_p" $ I.Prim int64
+  bucket_params <- replicateM dim (newParam "bucket_p" $ I.Prim int64)
   img_params <- mapM (newParam "img_p" . rowType) =<< mapM lookupType img'
-  let params = bucket_param : img_params
-      rettype = I.Prim int64 : ne_ts
+  let params = bucket_params ++ img_params
+      rettype = replicate dim (I.Prim int64) ++ ne_ts
       body = mkBody mempty $ varsRes $ map paramName params
   lam' <-
     mkLambda params $
@@ -1183,26 +1182,11 @@ internaliseHist desc rf hist op ne buckets img loc = do
         =<< bodyBind body
 
   -- get sizes of histogram and image arrays
-  w_hist <- arraysSize 0 <$> mapM lookupType hist'
-  w_img <- arraysSize 0 <$> mapM lookupType img'
-
-  -- Generate an assertion and reshapes to ensure that buckets' and
-  -- img' are the same size.
-  b_shape <- I.arrayShape <$> lookupType buckets'
-  let b_w = shapeSize 0 b_shape
-  cmp <- letSubExp "bucket_cmp" $ I.BasicOp $ I.CmpOp (I.CmpEq I.int64) b_w w_img
-  c <-
-    assert
-      "bucket_cert"
-      cmp
-      "length of index and value array does not match"
-      loc
-  buckets'' <-
-    certifying c . letExp (baseString buckets') $
-      I.BasicOp $ I.Reshape (reshapeOuter [DimCoercion w_img] 1 b_shape) buckets'
+  shape_hist <- Shape . take dim . I.arrayDims <$> lookupType (head hist')
+  w_img <- I.arraySize 0 <$> lookupType (head img')
 
   letValExp' desc . I.Op $
-    I.Hist w_img (buckets'' : img') [HistOp w_hist rf' hist' ne_shp op'] lam'
+    I.Hist w_img (buckets' ++ img') [HistOp shape_hist rf' hist' ne_shp op'] lam'
 
 internaliseStreamMap ::
   String ->
@@ -1723,8 +1707,12 @@ isOverloadedFunction qname args loc = do
       internaliseStreamMap desc InOrder f arr
     handleSOACs [TupLit [f, arr] _] "map_stream_per" = Just $ \desc ->
       internaliseStreamMap desc Disorder f arr
-    handleSOACs [TupLit [rf, dest, op, ne, buckets, img] _] "hist" = Just $ \desc ->
-      internaliseHist desc rf dest op ne buckets img loc
+    handleSOACs [TupLit [rf, dest, op, ne, buckets, img] _] "hist_1d" = Just $ \desc ->
+      internaliseHist 1 desc rf dest op ne buckets img loc
+    handleSOACs [TupLit [rf, dest, op, ne, buckets, img] _] "hist_2d" = Just $ \desc ->
+      internaliseHist 2 desc rf dest op ne buckets img loc
+    handleSOACs [TupLit [rf, dest, op, ne, buckets, img] _] "hist_3d" = Just $ \desc ->
+      internaliseHist 3 desc rf dest op ne buckets img loc
     handleSOACs _ _ = Nothing
 
     handleAccs [TupLit [dest, f, bs] _] "scatter_stream" = Just $ \desc ->

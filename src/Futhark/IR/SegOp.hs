@@ -24,6 +24,7 @@ module Futhark.IR.SegOp
     -- * Details
     HistOp (..),
     histType,
+    splitHistResults,
     SegBinOp (..),
     segBinOpResults,
     segBinOpChunks,
@@ -126,7 +127,7 @@ instance Rename SplitOrdering where
 
 -- | An operator for 'SegHist'.
 data HistOp rep = HistOp
-  { histWidth :: SubExp,
+  { histShape :: Shape,
     histRaceFactor :: SubExp,
     histDest :: [VName],
     histNeutral :: [SubExp],
@@ -145,11 +146,19 @@ data HistOp rep = HistOp
 -- dealing with a segmented histogram.
 histType :: HistOp rep -> [Type]
 histType op =
-  map
-    ( (`arrayOfRow` histWidth op)
-        . (`arrayOfShape` histOpShape op)
-    )
-    $ lambdaReturnType $ histOp op
+  map (`arrayOfShape` (histShape op <> histOpShape op)) $
+    lambdaReturnType $ histOp op
+
+-- | Split reduction results returned by a 'KernelBody' into those
+-- that correspond to indexes for the 'HistOps', and those that
+-- correspond to value.
+splitHistResults :: [HistOp rep] -> [SubExp] -> [([SubExp], [SubExp])]
+splitHistResults ops res =
+  let ranks = map (shapeRank . histShape) ops
+      (idxs, vals) = splitAt (sum ranks) res
+   in zip
+        (chunks ranks idxs)
+        (chunks (map (length . histDest) ops) vals)
 
 -- | An operator for 'SegScan' and 'SegRed'.
 data SegBinOp rep = SegBinOp
@@ -610,7 +619,7 @@ segOpType (SegScan _ space scans ts kbody) =
       map (`arrayOfShape` shape) (lambdaReturnType $ segBinOpLambda op)
 segOpType (SegHist _ space ops _ _) = do
   op <- ops
-  let shape = Shape (segment_dims <> [histWidth op]) <> histOpShape op
+  let shape = Shape segment_dims <> histShape op <> histOpShape op
   map (`arrayOfShape` shape) (lambdaReturnType $ histOp op)
   where
     dims = segSpaceDims space
@@ -667,8 +676,8 @@ typeCheckSegOp checkLvl (SegHist lvl space ops ts kbody) = do
   mapM_ TC.checkType ts
 
   TC.binding (scopeOfSegSpace space) $ do
-    nes_ts <- forM ops $ \(HistOp dest_w rf dests nes shape op) -> do
-      TC.require [Prim int64] dest_w
+    nes_ts <- forM ops $ \(HistOp dest_shape rf dests nes shape op) -> do
+      mapM_ (TC.require [Prim int64]) dest_shape
       TC.require [Prim int64] rf
       nes' <- mapM TC.checkArg nes
       mapM_ (TC.require [Prim int64]) $ shapeDims shape
@@ -686,9 +695,9 @@ typeCheckSegOp checkLvl (SegHist lvl space ops ts kbody) = do
               ++ prettyTuple nes_t
 
       -- Arrays must have proper type.
-      let dest_shape = Shape (segment_dims <> [dest_w]) <> shape
+      let dest_shape' = Shape segment_dims <> dest_shape <> shape
       forM_ (zip nes_t dests) $ \(t, dest) -> do
-        TC.requireI [t `arrayOfShape` dest_shape] dest
+        TC.requireI [t `arrayOfShape` dest_shape'] dest
         TC.consume =<< TC.lookupAliases dest
 
       return $ map (`arrayOfShape` shape) nes_t
@@ -697,7 +706,9 @@ typeCheckSegOp checkLvl (SegHist lvl space ops ts kbody) = do
 
     -- Return type of bucket function must be an index for each
     -- operation followed by the values to write.
-    let bucket_ret_t = replicate (length ops) (Prim int64) ++ concat nes_ts
+    let bucket_ret_t =
+          concatMap ((`replicate` Prim int64) . shapeRank . histShape) ops
+            ++ concat nes_ts
     unless (bucket_ret_t == ts) $
       TC.bad $
         TC.TypeError $
@@ -819,7 +830,7 @@ mapSegOpM tv (SegHist lvl space ops ts body) =
     <*> mapOnSegOpBody tv body
   where
     onHistOp (HistOp w rf arrs nes shape op) =
-      HistOp <$> mapOnSegOpSubExp tv w
+      HistOp <$> mapM (mapOnSegOpSubExp tv) w
         <*> mapOnSegOpSubExp tv rf
         <*> mapM (mapOnSegOpVName tv) arrs
         <*> mapM (mapOnSegOpSubExp tv) nes

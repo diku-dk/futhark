@@ -459,7 +459,7 @@ typeOf (Screma w form _) =
   scremaType w form
 typeOf (Hist _ ops _ _) = do
   op <- ops
-  map (`arrayOfRow` histWidth op) (lambdaReturnType $ histOp op)
+  map (`arrayOfShape` histShape op) (lambdaReturnType $ histOp op)
 
 -- | The "width" of a SOAC is the expected outer size of its array
 -- inputs _after_ input-transforms have been carried out.

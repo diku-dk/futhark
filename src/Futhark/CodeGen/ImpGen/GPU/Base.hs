@@ -345,7 +345,7 @@ prepareIntraGroupSegHist group_size =
           locks <- newVName "locks"
 
           let num_locks = toInt64Exp $ unCount group_size
-              dims = map toInt64Exp $ shapeDims (histOpShape op) ++ [histWidth op]
+              dims = map toInt64Exp $ shapeDims (histOpShape op <> histShape op)
               l' = Locking locks 0 1 0 (pure . (`rem` num_locks) . flattenIndex dims)
               locks_t = Array int32 (Shape [unCount group_size]) NoUniqueness
 
@@ -545,10 +545,10 @@ compileGroupOp pat (Inner (SegOp (SegHist lvl space ops _ kbody))) = do
       let vs_per_op = chunks (map (length . histDest) ops) red_vs
 
       forM_ (zip4 red_is vs_per_op ops' ops) $
-        \(bin, op_vs, do_op, HistOp dest_w _ _ _ shape lam) -> do
+        \(bin, op_vs, do_op, HistOp dest_shape _ _ _ shape lam) -> do
           let bin' = toInt64Exp bin
-              dest_w' = toInt64Exp dest_w
-              bin_in_bounds = 0 .<=. bin' .&&. bin' .<. dest_w'
+              dest_shape' = map toInt64Exp $ shapeDims dest_shape
+              bin_in_bounds = inBounds (Slice (map DimFix [bin'])) dest_shape'
               bin_is = map Imp.le64 (init ltids) ++ [bin']
               vs_params = takeLast (length op_vs) $ lambdaParams lam
 

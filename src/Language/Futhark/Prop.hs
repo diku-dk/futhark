@@ -909,17 +909,41 @@ intrinsics =
                    $ RetType [] . Scalar . Record . M.fromList $
                      zip tupleFieldNames [arr_a $ shape [n], arr_b $ shape [n]]
                ),
-               ( "hist",
+               ( "hist_1d",
                  IntrinsicPolyFun
                    [tp_a, sp_n, sp_m]
                    [ Scalar $ Prim $ Signed Int64,
-                     uarr_a $ shape [n],
+                     uarr_a $ shape [m],
                      Scalar t_a `arr` (Scalar t_a `arr` Scalar t_a),
                      Scalar t_a,
-                     Array () Nonunique (Prim $ Signed Int64) (shape [m]),
-                     arr_a (shape [m])
+                     Array () Nonunique (tupInt64 1) (shape [n]),
+                     arr_a (shape [n])
                    ]
-                   $ RetType [] $ uarr_a $ shape [n]
+                   $ RetType [] $ uarr_a $ shape [m]
+               ),
+               ( "hist_2d",
+                 IntrinsicPolyFun
+                   [tp_a, sp_n, sp_m, sp_k]
+                   [ Scalar $ Prim $ Signed Int64,
+                     uarr_a $ shape [m, k],
+                     Scalar t_a `arr` (Scalar t_a `arr` Scalar t_a),
+                     Scalar t_a,
+                     Array () Nonunique (tupInt64 2) (shape [n]),
+                     arr_a (shape [n])
+                   ]
+                   $ RetType [] $ uarr_a $ shape [m, k]
+               ),
+               ( "hist_3d",
+                 IntrinsicPolyFun
+                   [tp_a, sp_n, sp_m, sp_k, sp_l]
+                   [ Scalar $ Prim $ Signed Int64,
+                     uarr_a $ shape [m, k, l],
+                     Scalar t_a `arr` (Scalar t_a `arr` Scalar t_a),
+                     Scalar t_a,
+                     Array () Nonunique (tupInt64 3) (shape [n]),
+                     arr_a (shape [n])
+                   ]
+                   $ RetType [] $ uarr_a $ shape [m, k, l]
                ),
                ( "map",
                  IntrinsicPolyFun
@@ -1226,9 +1250,10 @@ intrinsics =
     intrinsicBinOp Geq = ordering
     intrinsicBinOp _ = Nothing
 
+    tupInt64 1 =
+      Prim $ Signed Int64
     tupInt64 x =
-      Record . M.fromList . zip tupleFieldNames $
-        replicate x $ Scalar $ Prim $ Signed Int64
+      tupleRecord $ replicate x $ Scalar $ Prim $ Signed Int64
 
 -- | The largest tag used by an intrinsic - this can be used to
 -- determine whether a 'VName' refers to an intrinsic or a user-defined name.
