@@ -132,8 +132,16 @@ def reduce_comm [n] 'a (op: a -> a -> a) (ne: a) (as: [n]a): a =
 --
 -- In practice, the *O(n)* behaviour only occurs if *m* is also very
 -- large.
-def reduce_by_index 'a [m] [n] (dest : *[m]a) (f : a -> a -> a) (ne : a) (is : [n]i64) (as : [n]a) : *[m]a =
-  intrinsics.hist (1, dest, f, ne, is, as) :> *[m]a
+def reduce_by_index 'a [n] [m] (dest : *[m]a) (f : a -> a -> a) (ne : a) (is : [n]i64) (as : [n]a) : *[m]a =
+  intrinsics.hist_1d (1, dest, f, ne, is, as)
+
+-- | As `reduce_by_index`, but with two-dimensional indexes.
+def reduce_by_index_2d 'a [n] [m] [k] (dest : *[m][k]a) (f : a -> a -> a) (ne : a) (is : [n](i64,i64)) (as : [n]a) : *[m][k]a =
+  intrinsics.hist_2d (1, dest, f, ne, is, as)
+
+-- | As `reduce_by_index`, but with three-dimensional indexes.
+def reduce_by_index_3d 'a [n] [m] [k] [l] (dest : *[m][k][l]a) (f : a -> a -> a) (ne : a) (is : [n](i64,i64,i64)) (as : [n]a) : *[m][k][l]a =
+  intrinsics.hist_3d (1, dest, f, ne, is, as)
 
 -- | Inclusive prefix scan.  Has the same caveats with respect to
 -- associativity and complexity as `reduce`.

@@ -623,7 +623,7 @@ pSOAC pr =
       where
         pHistOp =
           SOAC.HistOp
-            <$> pSubExp <* pComma
+            <$> pShape <* pComma
             <*> pSubExp <* pComma
             <*> braces (pVName `sepBy` pComma) <* pComma
             <*> braces (pSubExp `sepBy` pComma) <* pComma
@@ -804,7 +804,7 @@ pSegOp pr pLvl =
       pure $ SegOp.SegBinOp comm lam nes shape
     pHistOp =
       SegOp.HistOp
-        <$> pSubExp <* pComma
+        <$> pShape <* pComma
         <*> pSubExp <* pComma
         <*> braces (pVName `sepBy` pComma) <* pComma
         <*> braces (pSubExp `sepBy` pComma) <* pComma

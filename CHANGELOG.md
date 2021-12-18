@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+* New functions: `reduce_by_index_2d`, `reduce_by_index_3d`.
+
 ### Removed
 
 ### Changed
