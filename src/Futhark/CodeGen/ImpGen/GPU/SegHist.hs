@@ -757,8 +757,7 @@ histKernelLocalPass
                           .&&. chk_beg .<=. flat_bucket
                           .&&. flat_bucket .<. (chk_beg + tvExp hist_H_chk)
                       bucket_is =
-                        sExt64 thread_local_subhisto_i :
-                        unflattenIndex dest_shape' (flat_bucket - chk_beg)
+                        [sExt64 thread_local_subhisto_i, flat_bucket - chk_beg]
                       vs_params = takeLast (length vs') $ lambdaParams lam
 
                   sComment "perform atomic updates" $
