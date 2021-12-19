@@ -1621,7 +1621,9 @@ copyDWIMDest dest dest_slice (Var src) src_slice = do
               pretty name,
               "and array-typed source",
               pretty src,
-              "with slice",
+              "of shape",
+              pretty (entryArrayShape arr),
+              "sliced with",
               pretty src_slice
             ]
     (ArrayDestination (Just dest_loc), ArrayVar _ src_arr) -> do
