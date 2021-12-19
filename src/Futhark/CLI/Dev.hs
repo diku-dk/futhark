@@ -122,7 +122,7 @@ instance Representation UntypedPassState where
   representation (Seq _) = "Seq"
   representation (GPUMem _) = "GPUMem"
   representation (MCMem _) = "MCMem"
-  representation (SeqMem _) = "SeqMEm"
+  representation (SeqMem _) = "SeqMem"
 
 instance PP.Pretty UntypedPassState where
   ppr (SOACS prog) = PP.ppr prog
@@ -563,9 +563,17 @@ commandLineOptions =
       ["gpu-mem"],
     pipelineOption
       getSOACSProg
+      "Seq"
+      Seq
+      "Run the sequential CPU compilation pipeline"
+      sequentialPipeline
+      []
+      ["seq"],
+    pipelineOption
+      getSOACSProg
       "SeqMem"
       SeqMem
-      "Run the sequential CPU compilation pipeline"
+      "Run the sequential CPU+memory compilation pipeline"
       sequentialCpuPipeline
       []
       ["seq-mem"],

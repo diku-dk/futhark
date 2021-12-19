@@ -9,11 +9,20 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+* New functions: `reduce_by_index_2d`, `reduce_by_index_3d`.
+
+* Manifests now contain compiler version information.
+
 ### Removed
 
 ### Changed
 
 ### Fixed
+
+* Allocation insertion pass bug (#1546).
+
+* An exotic bug involving TLS and dynamically loading code generated
+  by the `multicore` backend.
 
 ## [0.21.1]
 

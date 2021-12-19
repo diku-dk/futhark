@@ -112,7 +112,6 @@ library
       Futhark.CodeGen.Backends.COpenCL.Boilerplate
       Futhark.CodeGen.Backends.GenericC
       Futhark.CodeGen.Backends.GenericC.CLI
-      Futhark.CodeGen.Backends.GenericC.Manifest
       Futhark.CodeGen.Backends.GenericC.Options
       Futhark.CodeGen.Backends.GenericC.Server
       Futhark.CodeGen.Backends.GenericPython
@@ -344,6 +343,7 @@ library
     , free >=4.12.4
     , futhark-data >= 1.0.3.0
     , futhark-server >= 1.1.2.0
+    , futhark-manifest >= 1.0.0.0
     , githash >=0.1.6.1
     , half >= 0.3
     , haskeline
