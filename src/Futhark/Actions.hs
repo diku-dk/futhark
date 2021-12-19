@@ -176,7 +176,7 @@ compileCAction fcfg mode outpath =
     }
   where
     helper prog = do
-      cprog <- handleWarnings fcfg $ SequentialC.compileProg prog
+      cprog <- handleWarnings fcfg $ SequentialC.compileProg (T.pack versionString) prog
       let cpath = outpath `addExtension` "c"
           hpath = outpath `addExtension` "h"
           jsonpath = outpath `addExtension` "json"
@@ -204,7 +204,7 @@ compileOpenCLAction fcfg mode outpath =
     }
   where
     helper prog = do
-      cprog <- handleWarnings fcfg $ COpenCL.compileProg prog
+      cprog <- handleWarnings fcfg $ COpenCL.compileProg (T.pack versionString) prog
       let cpath = outpath `addExtension` "c"
           hpath = outpath `addExtension` "h"
           jsonpath = outpath `addExtension` "json"
@@ -239,7 +239,7 @@ compileCUDAAction fcfg mode outpath =
     }
   where
     helper prog = do
-      cprog <- handleWarnings fcfg $ CCUDA.compileProg prog
+      cprog <- handleWarnings fcfg $ CCUDA.compileProg (T.pack versionString) prog
       let cpath = outpath `addExtension` "c"
           hpath = outpath `addExtension` "h"
           jsonpath = outpath `addExtension` "json"
@@ -271,7 +271,7 @@ compileMulticoreAction fcfg mode outpath =
     }
   where
     helper prog = do
-      cprog <- handleWarnings fcfg $ MulticoreC.compileProg prog
+      cprog <- handleWarnings fcfg $ MulticoreC.compileProg (T.pack versionString) prog
       let cpath = outpath `addExtension` "c"
           hpath = outpath `addExtension` "h"
           jsonpath = outpath `addExtension` "json"
@@ -379,7 +379,9 @@ compileCtoWASMAction fcfg mode outpath =
     }
   where
     helper prog = do
-      (cprog, jsprog, exps) <- handleWarnings fcfg $ SequentialWASM.compileProg prog
+      (cprog, jsprog, exps) <-
+        handleWarnings fcfg $
+          SequentialWASM.compileProg (T.pack versionString) prog
       case mode of
         ToLibrary -> do
           writeLibs cprog jsprog
@@ -411,7 +413,9 @@ compileMulticoreToWASMAction fcfg mode outpath =
     }
   where
     helper prog = do
-      (cprog, jsprog, exps) <- handleWarnings fcfg $ MulticoreWASM.compileProg prog
+      (cprog, jsprog, exps) <-
+        handleWarnings fcfg $
+          MulticoreWASM.compileProg (T.pack versionString) prog
 
       case mode of
         ToLibrary -> do

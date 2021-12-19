@@ -6,6 +6,7 @@
     "type": "object",
     "properties": {
         "backend": {"type": "string"},
+        "version": {"type": "string"},
         "entry_points": {
             "type": "object",
             "additionalProperties": {

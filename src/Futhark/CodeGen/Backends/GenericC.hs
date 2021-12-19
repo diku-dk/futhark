@@ -92,13 +92,13 @@ import qualified Data.Map.Strict as M
 import Data.Maybe
 import qualified Data.Text as T
 import Futhark.CodeGen.Backends.GenericC.CLI (cliDefs)
-import qualified Futhark.CodeGen.Backends.GenericC.Manifest as Manifest
 import Futhark.CodeGen.Backends.GenericC.Options
 import Futhark.CodeGen.Backends.GenericC.Server (serverDefs)
 import Futhark.CodeGen.Backends.SimpleRep
 import Futhark.CodeGen.ImpCode
 import Futhark.CodeGen.RTS.C (halfH, lockH, timingH, utilH)
 import Futhark.IR.Prop (isBuiltInFunction)
+import qualified Futhark.Manifest as Manifest
 import Futhark.MonadFreshNames
 import Futhark.Util.Pretty (prettyText)
 import qualified Language.C.Quote.OpenCL as C
@@ -1497,6 +1497,7 @@ asServer parts =
 compileProg ::
   MonadFreshNames m =>
   T.Text ->
+  T.Text ->
   Operations op () ->
   CompilerM op () () ->
   T.Text ->
@@ -1504,7 +1505,7 @@ compileProg ::
   [Option] ->
   Definitions op ->
   m CParts
-compileProg backend ops extra header_extra spaces options prog = do
+compileProg backend version ops extra header_extra spaces options prog = do
   src <- getNameSource
   let ((prototypes, definitions, entry_point_decls, manifest), endstate) =
         runCompilerM ops src () compileProg'
@@ -1636,7 +1637,7 @@ $entry_point_decls
         ( T.unlines $ map prettyText prototypes,
           T.unlines $ map (prettyText . funcToDef) functions,
           T.unlines $ map prettyText entry_points,
-          Manifest.Manifest (M.fromList entry_points_manifest) types backend
+          Manifest.Manifest (M.fromList entry_points_manifest) types backend version
         )
 
     funcToDef func = C.FuncDef func loc

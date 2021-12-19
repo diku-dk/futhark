@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * New functions: `reduce_by_index_2d`, `reduce_by_index_3d`.
 
+* Manifests now contain compiler version information.
+
 ### Removed
 
 ### Changed
