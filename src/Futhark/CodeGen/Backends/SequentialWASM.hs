@@ -26,13 +26,14 @@ import Futhark.IR.SeqMem
 import Futhark.MonadFreshNames
 
 -- | Compile the program to sequential C with a JavaScript wrapper.
-compileProg :: MonadFreshNames m => Prog SeqMem -> m (ImpGen.Warnings, (GC.CParts, T.Text, [String]))
-compileProg prog = do
+compileProg :: MonadFreshNames m => T.Text -> Prog SeqMem -> m (ImpGen.Warnings, (GC.CParts, T.Text, [String]))
+compileProg version prog = do
   (ws, prog') <- ImpGen.compileProg prog
 
   prog'' <-
     GC.compileProg
       "wasm"
+      version
       operations
       generateBoilerplate
       ""

@@ -33,13 +33,12 @@ import qualified Language.C.Syntax as C
 
 -- | Compile the program to ImpCode with multicore operations.
 compileProg ::
-  MonadFreshNames m =>
-  Prog MCMem ->
-  m (ImpGen.Warnings, GC.CParts)
-compileProg =
+  MonadFreshNames m => T.Text -> Prog MCMem -> m (ImpGen.Warnings, GC.CParts)
+compileProg version =
   traverse
     ( GC.compileProg
         "multicore"
+        version
         operations
         generateContext
         ""

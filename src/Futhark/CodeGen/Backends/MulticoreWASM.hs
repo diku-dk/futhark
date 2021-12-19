@@ -25,13 +25,18 @@ import qualified Futhark.CodeGen.ImpGen.Multicore as ImpGen
 import Futhark.IR.MCMem
 import Futhark.MonadFreshNames
 
-compileProg :: MonadFreshNames m => Prog MCMem -> m (ImpGen.Warnings, (GC.CParts, T.Text, [String]))
-compileProg prog = do
+compileProg ::
+  MonadFreshNames m =>
+  T.Text ->
+  Prog MCMem ->
+  m (ImpGen.Warnings, (GC.CParts, T.Text, [String]))
+compileProg version prog = do
   (ws, prog') <- ImpGen.compileProg prog
 
   prog'' <-
     GC.compileProg
       "wasm_multicore"
+      version
       MC.operations
       MC.generateContext
       ""
