@@ -23,6 +23,7 @@ import Futhark.IR.SeqMem (SeqMem)
 import Futhark.Optimise.CSE
 import Futhark.Optimise.DoubleBuffer
 import Futhark.Optimise.Fusion
+import Futhark.Optimise.HistAccs
 import Futhark.Optimise.InPlaceLowering
 import Futhark.Optimise.InliningDeadFun
 import qualified Futhark.Optimise.MemoryBlockMerging as MemoryBlockMerging
@@ -77,6 +78,7 @@ kernelsPipeline =
     >>> onePass extractKernels
     >>> passes
       [ simplifyGPU,
+        histAccsGPU,
         babysitKernels,
         tileLoops,
         unstreamGPU,
