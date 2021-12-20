@@ -33,6 +33,7 @@ import Futhark.Internalise.Monomorphise as Monomorphise
 import Futhark.Optimise.CSE
 import Futhark.Optimise.DoubleBuffer
 import Futhark.Optimise.Fusion
+import Futhark.Optimise.HistAccs
 import Futhark.Optimise.InPlaceLowering
 import Futhark.Optimise.InliningDeadFun
 import qualified Futhark.Optimise.MemoryBlockMerging as MemoryBlockMerging
@@ -529,6 +530,7 @@ commandLineOptions =
     soacsPassOption algebraicDifferentiation [],
     kernelsPassOption babysitKernels [],
     kernelsPassOption tileLoops [],
+    kernelsPassOption histAccsGPU [],
     kernelsPassOption unstreamGPU [],
     kernelsPassOption sinkGPU [],
     typedPassOption soacsProg GPU extractKernels [],

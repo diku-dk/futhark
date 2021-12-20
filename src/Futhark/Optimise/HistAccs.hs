@@ -71,7 +71,7 @@ addArrsToAcc lvl shape arrs acc = do
   gtids <- replicateM (shapeRank shape) (newVName "gtid")
   let space = SegSpace flat $ zip gtids $ shapeDims shape
 
-  (acc', stms) <- collectStms $ do
+  (acc', stms) <- localScope (scopeOfSegSpace space) . collectStms $ do
     vs <- forM arrs $ \arr -> do
       arr_t <- lookupType arr
       letSubExp (baseString arr <> "_elem") $
@@ -96,7 +96,7 @@ flatKernelBody space kbody = do
 
   let space' = SegSpace (segFlat space) [(gtid, dims_prod)]
 
-  kbody_stms <- collectStms_ $ do
+  kbody_stms <- localScope (scopeOfSegSpace space') . collectStms_ $ do
     let new_inds =
           unflattenIndex (map pe64 (segSpaceDims space)) (pe64 $ Var gtid)
     zipWithM_ letBindNames (map (pure . fst) (unSegSpace space))
@@ -118,7 +118,8 @@ optimiseStm accs (Let pat aux (WithAcc inputs lam)) = do
 optimiseStm accs (Let pat aux (Op (SegOp (SegMap lvl space _ kbody))))
   | accs /= mempty,
     Just (kbody', (acc_shape, _, Just (acc_lam, acc_nes)), acc) <-
-      mkHistBody accs kbody = runBuilder_ $ do
+      mkHistBody accs kbody,
+    all primType $ lambdaReturnType acc_lam = runBuilder_ $ do
     hist_dests <- forM acc_nes $ \ne ->
       letExp "hist_dest" $ BasicOp $ Replicate acc_shape ne
 
