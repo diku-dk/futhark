@@ -72,6 +72,7 @@ import qualified Data.IntSet as IS
 import Data.List (foldl')
 import qualified Data.Map.Lazy as M
 import Data.Maybe (fromJust)
+import Futhark.Error
 import Futhark.IR.GPU hiding (Result)
 
 {- TYPES -}
@@ -313,8 +314,9 @@ route src g =
   case route' IM.empty 0 Nothing Normal src g of
     (DeadEnd, g') -> (Nothing, g')
     (SinkFound snk, g') -> (Just snk, g')
-    _ ->
-      error "Unexpected error occurred in Futhark.Analysis.MigrationTable.Graph"
+    (CycleDetected {}, _) ->
+      compilerBugS
+        "Routing did not escape cycle in Futhark.Analysis.MigrationTable.Graph."
 
 -- | @routeMany srcs g@ attempts to create a 'route' in @g@ from every vertex
 -- in @srcs@. Returns the ids for the vertices connected to all found sinks.

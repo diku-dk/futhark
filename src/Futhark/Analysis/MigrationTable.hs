@@ -22,6 +22,7 @@ import Data.Set (Set, (\\))
 import qualified Data.Set as S
 import Futhark.Analysis.MigrationTable.Graph hiding (addEdges, get, none)
 import qualified Futhark.Analysis.MigrationTable.Graph as MG
+import Futhark.Error
 import Futhark.IR.GPU
 
 -- | Where the value bound by a name should be computed.
@@ -213,9 +214,9 @@ analyseStms hof usage stms =
     visit (vr, vn, tn) Reversed v =
       let vr' = IS.insert (vertexId v) vr
        in (vr', vn, tn)
-    visit (vr, vn, tn) Normal v@Vertex{vertexRouting = NoRoute} =
-        let vn' = IS.insert (vertexId v) vn
-         in (vr, vn', tn)
+    visit (vr, vn, tn) Normal v@Vertex {vertexRouting = NoRoute} =
+      let vn' = IS.insert (vertexId v) vn
+       in (vr, vn', tn)
     visit (vr, vn, tn) Normal v =
       let tn' = IS.insert (vertexId v) tn
        in (vr, vn, tn')
@@ -411,7 +412,7 @@ graphStm stm = do
       graphHostOnly e
   where
     one [x] = x
-    one _ = error "type error: unexpected number of pattern elements"
+    one _ = compilerBugS "Type error: unexpected number of pattern elements."
 
 -- The vertex handle for a variable and its type.
 type Binding = (Id, Type)
@@ -475,8 +476,8 @@ graphUpdateAcc b e | (_, Acc a _ _ _) <- b = do
       -- all usage sites will be moved too.
       addEdges (oneEdge $ fst b) (IS.insert ai ops)
 graphUpdateAcc _ _ =
-  error -- should never happen
-    "type error: UpdateAcc did not produce accumulator typed value"
+  compilerBugS
+    "Type error: UpdateAcc did not produce accumulator typed value."
 
 graphApply :: Name -> [Binding] -> Exp GPU -> Grapher ()
 graphApply n b e = do
@@ -531,8 +532,7 @@ graphWithAcc bs inputs f = do
     extract (Acc a _ ts _, (_, _, Nothing)) = (nameToId a, ts, Nothing)
     extract (Acc a _ ts _, (_, _, Just (op, _))) = (nameToId a, ts, Just op)
     extract _ =
-      error -- should never happen
-        "type error: WithAcc expression did not return accumulator"
+      compilerBugS "Type error: WithAcc expression did not return accumulator."
 
     toSet (SubExpRes _ (Var v)) = S.singleton v
     toSet _ = S.empty
@@ -589,7 +589,7 @@ graphLoop ::
   Grapher ()
 graphLoop [] _ _ _ =
   -- We expect each loop to bind a value or be eliminated.
-  unexpectedError
+  compilerBugS "Loop statement bound no variable; should have been eliminated."
 graphLoop (b : bs) params lform body = do
   -- Graph loop params and body while capturing statistics.
   g0 <- getGraph
@@ -650,7 +650,7 @@ graphLoop (b : bs) params lform body = do
       mapM_ graphParam loopValues
       case lform of
         ForLoop _ _ _ elems -> mapM_ graphForInElem elems
-        _ -> pure ()
+        WhileLoop _ -> pure ()
       graphStms (bodyStms body)
 
     graphParam ((_, t), p, pval, _) =
@@ -682,7 +682,10 @@ graphLoop (b : bs) params lform body = do
       let (r, vs') = MG.reduce g bindingReach vs Normal i
        in case r of
             Produced s' -> (s <> s', vs')
-            _ -> unexpectedError
+            _ ->
+              compilerBugS
+                "Migration graph sink could be reached from source after it\
+                \ had been attempted routed."
 
     bindingReach s _ v =
       let i = vertexId v
@@ -732,11 +735,6 @@ graphLoop (b : bs) params lform body = do
       | otherwise =
         -- don't exhaust
         findBindings g (bnds, i : nx, vs) is
-
--- | The error raised in any situation that was thought to be impossible.
-unexpectedError :: a
-unexpectedError =
-  error "Unexpected error occurred in Futhark.Analysis.MigrationTable"
 
 -- | @censorRoutes si ops@ routes all possible routes within the subgraph
 -- identified by @si@ and then connects each operand in @ops@ to a sink if it
