@@ -1,9 +1,13 @@
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeFamilies #-}
 
 -- | Provides last-use analysis for Futhark programs.
-module Futhark.Analysis.LastUse (LastUseMap, analyseProg) where
+module Futhark.Analysis.LastUse (LastUseMap, analyseGPUMem, analyseSeqMem) where
 
+import Control.Monad.Reader
 import Data.Bifunctor (first)
 import Data.Foldable
 import Data.Function ((&))
@@ -13,6 +17,7 @@ import Data.Tuple
 import Futhark.Analysis.Alias (aliasAnalysis)
 import Futhark.IR.Aliases
 import Futhark.IR.GPUMem
+import Futhark.IR.SeqMem
 
 -- | `LastUseMap` tells which names were last used in a given statement.
 -- Statements are uniquely identified by the `VName` of the first value
@@ -27,31 +32,93 @@ type LastUse = Map VName VName
 -- or otherwise.
 type Used = Names
 
+type LastUseOp rep =
+  VName -> (LastUse, Used) -> Op (Aliases rep) -> LastUseM rep
+
+newtype Env rep = Env {envLastUseOp :: LastUseOp rep}
+
+type LastUseM rep = Reader (Env rep) (LastUse, Used)
+
+analyseGPUMem :: Prog GPUMem -> (LastUseMap, Used)
+analyseGPUMem = analyseProg analyseGPUOp
+
+analyseSeqMem :: Prog SeqMem -> (LastUseMap, Used)
+analyseSeqMem = analyseProg analyseSeqOp
+
+analyseGPUOp :: LastUseOp GPUMem
+analyseGPUOp pat_name (lumap, used) (Alloc se sp) = do
+  let nms = (freeIn se <> freeIn sp) `namesSubtract` used
+  return (insertNames pat_name nms lumap, used <> nms)
+analyseGPUOp pat_name (lumap, used) (Inner (SizeOp sop)) = do
+  let nms = freeIn sop `namesSubtract` used
+  return (insertNames pat_name nms lumap, used <> nms)
+analyseGPUOp _ (lumap, used) (Inner (OtherOp ())) =
+  return (lumap, used)
+analyseGPUOp pat_name (lumap, used) (Inner (SegOp (SegMap lvl _ tps body))) = do
+  (lumap', used') <- analyseKernelBody (lumap, used) body
+  let nms = (freeIn lvl <> freeIn tps) `namesSubtract` used'
+  return (insertNames pat_name nms lumap', used' <> nms)
+analyseGPUOp pat_name (lumap, used) (Inner (SegOp (SegRed lvl _ binops tps body))) =
+  segOpHelper pat_name lumap used lvl binops tps body
+analyseGPUOp pat_name (lumap, used) (Inner (SegOp (SegScan lvl _ binops tps body))) =
+  segOpHelper pat_name lumap used lvl binops tps body
+analyseGPUOp pat_name (lumap, used) (Inner (SegOp (SegHist lvl _ binops tps body))) = do
+  (lumap', used') <- foldM analyseHistOp (lumap, used) $ reverse binops
+  (lumap'', used'') <- analyseKernelBody (lumap', used') body
+  let nms = (freeIn lvl <> freeIn tps) `namesSubtract` used''
+  return (insertNames pat_name nms lumap'', used'' <> nms)
+
+segOpHelper ::
+  (FreeIn (OpWithAliases (Op rep)), ASTRep rep) =>
+  VName ->
+  LastUse ->
+  Used ->
+  SegLevel ->
+  [SegBinOp (Aliases rep)] ->
+  [Type] ->
+  KernelBody (Aliases rep) ->
+  LastUseM rep
+segOpHelper pat_name lumap used lvl binops tps body = do
+  (lumap', used') <- foldM analyseSegBinOp (lumap, used) $ reverse binops
+  (lumap'', used'') <- analyseKernelBody (lumap', used') body
+  let nms = (freeIn lvl <> freeIn tps) `namesSubtract` used''
+  return (insertNames pat_name nms lumap'', used'' <> nms)
+
+analyseSeqOp :: LastUseOp SeqMem
+analyseSeqOp pat_name (lumap, used) (Alloc se sp) = do
+  let nms = (freeIn se <> freeIn sp) `namesSubtract` used
+  return (insertNames pat_name nms lumap, used <> nms)
+analyseSeqOp _ (lumap, used) (Inner ()) =
+  return (lumap, used)
+
 -- | Analyses a program to return a last-use map, mapping each simple statement
 -- in the program to the values that were last used within that statement, and
 -- the set of all `VName` that were used inside.
-analyseProg :: Prog GPUMem -> (LastUseMap, Used)
-analyseProg prog =
-  let consts =
-        progConsts prog
-          & concatMap (toList . fmap patElemName . patElems . stmPat)
-          & namesFromList
-      funs = progFuns $ aliasAnalysis prog
-      (lus, used) = foldMap (analyseFun mempty consts) funs
-   in (flipMap lus, used)
+analyseProg :: (CanBeAliased (Op rep), Mem rep inner) => LastUseOp rep -> Prog rep -> (LastUseMap, Used)
+analyseProg onOp prog =
+  runReader helper (Env onOp)
+  where
+    helper = do
+      let consts =
+            progConsts prog
+              & concatMap (toList . fmap patElemName . patElems . stmPat)
+              & namesFromList
+          funs = progFuns $ aliasAnalysis prog
+      (lus, used) <- mconcat <$> mapM (analyseFun mempty consts) funs
+      return (flipMap lus, used)
 
-analyseFun :: LastUse -> Used -> FunDef (Aliases GPUMem) -> (LastUse, Used)
-analyseFun lumap used fun =
-  let (lumap', used') = analyseBody lumap used $ funDefBody fun
-   in (lumap', used' <> freeIn (funDefParams fun))
+analyseFun :: (FreeIn (OpWithAliases (Op rep)), ASTRep rep) => LastUse -> Used -> FunDef (Aliases rep) -> LastUseM rep
+analyseFun lumap used fun = do
+  (lumap', used') <- analyseBody lumap used $ funDefBody fun
+  return (lumap', used' <> freeIn (funDefParams fun))
 
-analyseStms :: LastUse -> Used -> Stms (Aliases GPUMem) -> (LastUse, Used)
-analyseStms lumap used stms = foldr analyseStm (lumap, used) $ stmsToList stms
+analyseStms :: (FreeIn (OpWithAliases (Op rep)), ASTRep rep) => LastUse -> Used -> Stms (Aliases rep) -> LastUseM rep
+analyseStms lumap used stms = foldM analyseStm (lumap, used) $ reverse $ stmsToList stms
 
-analyseStm :: Stm (Aliases GPUMem) -> (LastUse, Used) -> (LastUse, Used)
-analyseStm (Let pat _ e) (lumap0, used0) =
+analyseStm :: (FreeIn (OpWithAliases (Op rep)), ASTRep rep) => (LastUse, Used) -> Stm (Aliases rep) -> LastUseM rep
+analyseStm (lumap0, used0) (Let pat _ e) = do
   let (lumap', used') = patElems pat & foldl helper (lumap0, used0)
-   in analyseExp (lumap', used') e
+  analyseExp (lumap', used') e
   where
     helper (lumap_acc, used_acc) (PatElem name (aliases, _)) =
       -- Any aliases of `name` should have the same last-use as `name`
@@ -63,92 +130,72 @@ analyseStm (Let pat _ e) (lumap0, used0) =
       )
 
     pat_name = patElemName $ head $ patElems pat
-    analyseExp :: (LastUse, Used) -> Exp (Aliases GPUMem) -> (LastUse, Used)
-    analyseExp (lumap, used) (BasicOp _) =
+
+    analyseExp (lumap, used) (BasicOp _) = do
       let nms = freeIn e `namesSubtract` used
-       in (insertNames pat_name nms lumap, used <> nms)
-    analyseExp (lumap, used) (Apply _ args _ _) =
+      return (insertNames pat_name nms lumap, used <> nms)
+    analyseExp (lumap, used) (Apply _ args _ _) = do
       let nms = freeIn $ map fst args
-       in (insertNames pat_name nms lumap, used <> nms)
-    analyseExp (lumap, used) (If cse then_body else_body dec) =
-      let (lumap_then, used_then) = analyseBody lumap used then_body
-          (lumap_else, used_else) = analyseBody lumap used else_body
-          used' = used_then <> used_else
-          nms = ((freeIn cse <> freeIn dec) `namesSubtract` used')
-       in (insertNames pat_name nms (lumap_then <> lumap_else), used' <> nms)
-    analyseExp (lumap, used) (DoLoop merge form body) =
-      let (lumap', used') = analyseBody lumap used body
-          nms = (freeIn merge <> freeIn form) `namesSubtract` used'
-       in (insertNames pat_name nms lumap', used' <> nms)
-    analyseExp (lumap, used) (Op (Alloc se sp)) =
-      let nms = (freeIn se <> freeIn sp) `namesSubtract` used
-       in (insertNames pat_name nms lumap, used <> nms)
-    analyseExp (lumap, used) (Op (Inner (SizeOp sop))) =
-      let nms = freeIn sop `namesSubtract` used
-       in (insertNames pat_name nms lumap, used <> nms)
-    analyseExp (lumap, used) (Op (Inner (OtherOp ()))) =
-      (lumap, used)
-    analyseExp (lumap, used) (Op (Inner (SegOp (SegMap lvl _ tps body)))) =
-      let (lumap', used') = analyseKernelBody (lumap, used) body
-          nms = (freeIn lvl <> freeIn tps) `namesSubtract` used'
-       in (insertNames pat_name nms lumap', used' <> nms)
-    analyseExp (lumap, used) (Op (Inner (SegOp (SegRed lvl _ binops tps body)))) =
-      segOpHelper lumap used lvl binops tps body
-    analyseExp (lumap, used) (Op (Inner (SegOp (SegScan lvl _ binops tps body)))) =
-      segOpHelper lumap used lvl binops tps body
-    analyseExp (lumap, used) (Op (Inner (SegOp (SegHist lvl _ binops tps body)))) =
-      let (lumap', used') = foldr analyseHistOp (lumap, used) binops
-          (lumap'', used'') = analyseKernelBody (lumap', used') body
-          nms = (freeIn lvl <> freeIn tps) `namesSubtract` used''
-       in (insertNames pat_name nms lumap'', used'' <> nms)
+      return (insertNames pat_name nms lumap, used <> nms)
+    analyseExp (lumap, used) (If cse then_body else_body dec) = do
+      (lumap_then, used_then) <- analyseBody lumap used then_body
+      (lumap_else, used_else) <- analyseBody lumap used else_body
+      let used' = used_then <> used_else
+          nms = (freeIn cse <> freeIn dec) `namesSubtract` used'
+      return (insertNames pat_name nms (lumap_then <> lumap_else), used' <> nms)
+    analyseExp (lumap, used) (DoLoop merge form body) = do
+      (lumap', used') <- analyseBody lumap used body
+      let nms = (freeIn merge <> freeIn form) `namesSubtract` used'
+      return (insertNames pat_name nms lumap', used' <> nms)
+    analyseExp (lumap, used) (Op op) = do
+      onOp <- asks envLastUseOp
+      onOp pat_name (lumap, used) op
     analyseExp (lumap, used) (WithAcc _ l) =
       analyseLambda (lumap, used) l
-    segOpHelper lumap used lvl binops tps body =
-      let (lumap', used') = foldr analyseSegBinOp (lumap, used) binops
-          (lumap'', used'') = analyseKernelBody (lumap', used') body
-          nms = (freeIn lvl <> freeIn tps) `namesSubtract` used''
-       in (insertNames pat_name nms lumap'', used'' <> nms)
 
-analyseBody :: LastUse -> Used -> Body (Aliases GPUMem) -> (LastUse, Used)
-analyseBody lumap used (Body _ stms result) =
+analyseBody :: (FreeIn (OpWithAliases (Op rep)), ASTRep rep) => LastUse -> Used -> Body (Aliases rep) -> LastUseM rep
+analyseBody lumap used (Body _ stms result) = do
   let used' = used <> freeIn result
-   in analyseStms lumap used' stms
+  analyseStms lumap used' stms
 
 analyseKernelBody ::
+  (FreeIn (OpWithAliases (Op rep)), ASTRep rep) =>
   (LastUse, Used) ->
-  KernelBody (Aliases GPUMem) ->
-  (LastUse, Used)
+  KernelBody (Aliases rep) ->
+  LastUseM rep
 analyseKernelBody (lumap, used) (KernelBody _ stms result) =
   let used' = used <> freeIn result
    in analyseStms lumap used' stms
 
 analyseSegBinOp ::
-  SegBinOp (Aliases GPUMem) ->
+  (FreeIn (OpWithAliases (Op rep)), ASTRep rep) =>
   (LastUse, Used) ->
-  (LastUse, Used)
-analyseSegBinOp (SegBinOp _ lambda neutral shp) (lumap, used) =
-  let (lumap', used') = analyseLambda (lumap, used) lambda
-      nms = (freeIn neutral <> freeIn shp) `namesSubtract` used'
-   in (lumap', used' <> nms)
+  SegBinOp (Aliases rep) ->
+  LastUseM rep
+analyseSegBinOp (lumap, used) (SegBinOp _ lambda neutral shp) = do
+  (lumap', used') <- analyseLambda (lumap, used) lambda
+  let nms = (freeIn neutral <> freeIn shp) `namesSubtract` used'
+  return (lumap', used' <> nms)
 
 analyseHistOp ::
-  HistOp (Aliases GPUMem) ->
+  (FreeIn (OpWithAliases (Op rep)), ASTRep rep) =>
   (LastUse, Used) ->
-  (LastUse, Used)
-analyseHistOp (HistOp width race dest neutral shp lambda) (lumap, used) =
-  let (lumap', used') = analyseLambda (lumap, used) lambda
-      nms =
+  HistOp (Aliases rep) ->
+  LastUseM rep
+analyseHistOp (lumap, used) (HistOp width race dest neutral shp lambda) = do
+  (lumap', used') <- analyseLambda (lumap, used) lambda
+  let nms =
         ( freeIn width <> freeIn race <> freeIn dest <> freeIn neutral
             <> freeIn shp
         )
           `namesSubtract` used'
-   in (lumap', used' <> nms)
+  return (lumap', used' <> nms)
 
-analyseLambda :: (LastUse, Used) -> Lambda (Aliases GPUMem) -> (LastUse, Used)
-analyseLambda (lumap, used) (Lambda params body ret) =
-  let (lumap', used') = analyseBody lumap used body
-      used'' = used' <> freeIn params <> freeIn ret
-   in (lumap', used'')
+analyseLambda :: (FreeIn (OpWithAliases (Op rep)), ASTRep rep) => (LastUse, Used) -> Lambda (Aliases rep) -> LastUseM rep
+analyseLambda (lumap, used) (Lambda params body ret) = do
+  (lumap', used') <- analyseBody lumap used body
+  let used'' = used' <> freeIn params <> freeIn ret
+  return (lumap', used'')
 
 flipMap :: Map VName VName -> Map VName Names
 flipMap m =

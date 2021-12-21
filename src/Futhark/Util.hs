@@ -56,6 +56,7 @@ module Futhark.Util
     atMostChars,
     invertMap,
     traverseFold,
+    fixPoint,
   )
 where
 
@@ -481,3 +482,8 @@ invertMap m =
 
 traverseFold :: (Monoid m, Traversable t, Applicative f) => (a -> f m) -> t a -> f m
 traverseFold f = fmap fold . traverse f
+
+fixPoint :: Eq a => (a -> a) -> a -> a
+fixPoint f x =
+  let x' = f x
+   in if x' == x then x else fixPoint f x'

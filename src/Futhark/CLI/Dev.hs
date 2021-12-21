@@ -456,6 +456,30 @@ commandLineOptions =
       "Print the resulting IR with aliases.",
     Option
       []
+      ["print-last-use-gpu"]
+      ( NoArg $
+          Right $ \opts ->
+            opts {futharkAction = GPUMemAction $ \_ _ _ -> printLastUseGPU}
+      )
+      "Print last use information.",
+    Option
+      []
+      ["print-interference-gpu"]
+      ( NoArg $
+          Right $ \opts ->
+            opts {futharkAction = GPUMemAction $ \_ _ _ -> printInterferenceGPU}
+      )
+      "Print interference information.",
+    Option
+      []
+      ["print-mem-alias-gpu"]
+      ( NoArg $
+          Right $ \opts ->
+            opts {futharkAction = GPUMemAction $ \_ _ _ -> printMemAliasGPU}
+      )
+      "Print memory alias information.",
+    Option
+      []
       ["call-graph"]
       (NoArg $ Right $ \opts -> opts {futharkAction = SOACSAction callGraphAction})
       "Print the resulting call graph.",
