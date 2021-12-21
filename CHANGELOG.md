@@ -24,6 +24,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * An exotic bug involving TLS and dynamically loading code generated
   by the `multicore` backend.
 
+* Unconstrained ambiguous types now default to `()` (#1552).  This
+  should essentially never have any observable impact, except that
+  more programs will type check.
+
 ## [0.21.1]
 
 ### Added
