@@ -789,9 +789,13 @@ histKernelLocalPass
                 -- We are responsible for compacting the flat bin 'j', which
                 -- we immediately unflatten.
                 let local_bucket_is = unflattenIndex histo_dims $ sExt64 j
+                    nested_hist_size =
+                      map toInt64Exp $ shapeDims $ histShape $ slugOp slug
                     global_bucket_is =
-                      head local_bucket_is + sExt64 chk_i * hist_H_chk :
-                      tail local_bucket_is
+                      unflattenIndex
+                        nested_hist_size
+                        (head local_bucket_is + sExt64 chk_i * hist_H_chk)
+                        ++ tail local_bucket_is
                 dLParams $ lambdaParams $ histOp $ slugOp slug
                 let (global_dests, local_dests) = unzip dests
                     (xparams, yparams) =
