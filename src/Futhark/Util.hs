@@ -53,6 +53,7 @@ module Futhark.Util
     zEncodeString,
     atMostChars,
     invertMap,
+    fixPoint,
   )
 where
 
@@ -462,3 +463,8 @@ invertMap m =
   M.toList m
     & fmap (swap . first S.singleton)
     & foldr (uncurry $ M.insertWith (<>)) mempty
+
+fixPoint :: Eq a => (a -> a) -> a -> a
+fixPoint f x =
+  let x' = f x
+   in if x' == x then x else fixPoint f x'

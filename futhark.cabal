@@ -60,6 +60,7 @@ library
       Futhark.Analysis.HORep.SOAC
       Futhark.Analysis.Interference
       Futhark.Analysis.LastUse
+      Futhark.Analysis.MemAlias
       Futhark.Analysis.Metrics
       Futhark.Analysis.Metrics.Type
       Futhark.Analysis.PrimExp

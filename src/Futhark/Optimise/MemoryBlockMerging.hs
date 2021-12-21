@@ -8,7 +8,6 @@
 module Futhark.Optimise.MemoryBlockMerging (optimise) where
 
 import Control.Exception
-import Control.Monad.Reader
 import Control.Monad.State.Strict
 import Data.Function ((&))
 import Data.Map (Map, (!))
@@ -16,7 +15,6 @@ import qualified Data.Map as M
 import Data.Set (Set)
 import qualified Data.Set as S
 import qualified Futhark.Analysis.Interference as Interference
-import qualified Futhark.Analysis.LastUse as LastUse
 import Futhark.Builder.Class
 import Futhark.Construct
 import Futhark.IR.GPUMem
@@ -194,17 +192,7 @@ onKernels f stms = inScopeOf stms $ mapM helper stms
 optimise :: Pass GPUMem GPUMem
 optimise =
   Pass "reuse allocations" "reuse allocations" $ \prog ->
-    let (lumap, _) = LastUse.analyseProg prog
-        graph =
-          foldMap
-            ( \f ->
-                runReader
-                  ( Interference.analyseGPU lumap $
-                      bodyStms $ funDefBody f
-                  )
-                  $ scopeOf f
-            )
-            $ progFuns prog
+    let graph = Interference.analyseProgGPU prog
      in Pass.intraproceduralTransformation (onStms graph) prog
   where
     onStms ::
