@@ -277,6 +277,7 @@ optimiseLoopBySwitching (Pat pes) merge (Body _ body_stms body_res) = do
         -- memory block?
         [arr_param] <- filter (isArrayIn (paramName param)) $ map fst merge,
         MemArray pt _ _ (ArrayIn _ ixfun) <- paramDec arr_param,
+        not $ merge_bound `namesIntersect` freeIn (IxFun.base ixfun),
         Var res_v <- resSubExp res,
         Just (res_v_alloc, body_stms'') <- extractAllocOf merge_bound res_v body_stms' = do
         num_bytes <-

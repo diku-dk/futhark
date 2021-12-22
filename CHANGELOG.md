@@ -28,6 +28,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   should essentially never have any observable impact, except that
   more programs will type check.
 
+* Double buffering compiler crash (#1553).
+
 ## [0.21.1]
 
 ### Added
