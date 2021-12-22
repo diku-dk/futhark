@@ -5,17 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
-## [0.22.0]
+## [0.21.2]
 
 ### Added
 
 * New functions: `reduce_by_index_2d`, `reduce_by_index_3d`.
 
 * Manifests now contain compiler version information.
-
-### Removed
-
-### Changed
 
 ### Fixed
 
