@@ -185,7 +185,6 @@ newtype PkgM a = PkgM {unPkgM :: ReaderT PkgConfig (StateT (PkgRegistry PkgM) IO
 
 instance Monad PkgM where
   PkgM m >>= f = PkgM $ m >>= unPkgM . f
-  return = PkgM . return
 
 instance MonadFail PkgM where
   fail s = liftIO $ do
