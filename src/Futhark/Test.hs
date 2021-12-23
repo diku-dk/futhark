@@ -78,20 +78,18 @@ newtype FutharkExe = FutharkExe FilePath
 -- executable, and the second is the directory which file paths are
 -- read relative to.
 getValues :: (MonadFail m, MonadIO m) => FutharkExe -> FilePath -> Values -> m [V.Value]
-getValues _ _ (Values vs) =
-  pure vs
+getValues _ _ (Values vs) = pure vs
 getValues futhark dir v = do
   s <- getValuesBS futhark dir v
-  case valuesFromByteString file s of
+  case valuesFromByteString (fileName v) s of
     Left e -> fail e
     Right vs -> pure vs
   where
-    file = case v of
-      Values {} -> "<values>"
-      InFile f -> f
-      GenValues {} -> "<randomly generated>"
-      ScriptValues {} -> "<FutharkScript expression>"
-      ScriptFile f -> f
+    fileName Values {} = "<values>"
+    fileName GenValues {} = "<randomly generated>"
+    fileName ScriptValues {} = "<FutharkScript expression>"
+    fileName (InFile f) = f
+    fileName (ScriptFile f) = f
 
 readAndDecompress :: FilePath -> IO (Either DecompressError BS.ByteString)
 readAndDecompress file = E.try $ do
