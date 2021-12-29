@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+* Overloaded number literals cannot be sum types (#1557).
+
 ## [0.21.2]
 
 ### Added

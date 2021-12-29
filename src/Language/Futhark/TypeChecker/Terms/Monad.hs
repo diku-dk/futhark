@@ -356,7 +356,7 @@ instance Pretty Checking where
     where
       expected' = commasep (map ppr expected)
   ppr (CheckingBranches t1 t2) =
-    "Conditional branches differ in type."
+    "Branches differ in type."
       </> "Former:" <+> ppr t1
       </> "Latter:" <+> ppr t2
 
