@@ -998,9 +998,8 @@ mustHaveConstr usage c t fs = do
           | otherwise ->
             unifyError usage mempty noBreadCrumbs $
               "Different arity for constructor" <+> pquote (ppr c) <+> "."
-    _ -> do
+    _ ->
       unify usage t $ Scalar $ Sum $ M.singleton c fs
-      return ()
 
 mustHaveFieldWith ::
   MonadUnify m =>
