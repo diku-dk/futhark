@@ -71,6 +71,20 @@ scanExc desc scan arrs = do
     nes = scanNeutral scan
     ts = lambdaReturnType $ scanLambda scan
 
+mkF :: Lambda -> ADM ([VName], Lambda)
+mkF lam = do
+  lam_l <- renameLambda lam
+  lam_r <- renameLambda lam
+  let q = length $ lambdaReturnType lam
+      (lps, aps) = splitAt q $ lambdaParams lam_l
+      (ips, rps) = splitAt q $ lambdaParams lam_r
+  lam' <- mkLambda (lps <> aps <> rps) $ do
+    lam_l_res <- bodyBind $ lambdaBody lam_l
+    forM_ (zip ips lam_l_res) $ \(ip, SubExpRes cs se) ->
+      certifying cs $ letBindNames [paramName ip] $ BasicOp $ SubExp se
+    bodyBind $ lambdaBody lam_r
+  pure (map paramName aps, lam')
+
 diffReduce :: VjpOps -> [VName] -> SubExp -> [VName] -> Reduce SOACS -> ADM ()
 diffReduce _ops [adj] w [a] red
   | Just [(op, _, _, _)] <- lamIsBinOp $ redLambda red,
@@ -83,6 +97,98 @@ diffReduce _ops [adj] w [a] red
     isAdd FAdd {} = True
     isAdd Add {} = True
     isAdd _ = False
+--
+-- Differentiating a general single reduce:
+--    let y = reduce \odot ne as
+-- Forward sweep:
+--    let ls = scan_exc \odot  ne as
+--    let rs = scan_exc \odot' ne (reverse as)
+-- Reverse sweep:
+--    let as_c = map3 (f_bar y_bar) ls as (reverse rs)
+-- where
+--   x \odot' y = y \odot x
+--   y_bar is the adjoint of the result y
+--   f l_i a_i r_i = l_i \odot a_i \odot r_i
+--   f_bar = the reverse diff of f with respect to a_i under the adjoint y_bar
+-- The plan is to create
+--   one scanomap SOAC which computes ls and rs
+--   another map which computes as_c
+--
+diffReduce ops pat_adj n as red = do
+  let (lam0, ne) = (redLambda red, redNeutral red)
+  let alphas = lambdaReturnType lam0
+  lam <- renameLambda lam0
+  lam' <- renameLambda lam0 {lambdaParams = flipParams $ lambdaParams lam0}
+  par_i <- newParam "i" $ Prim int64
+  -- phase1: build the scanomap soac
+  g_bdy <- mkFusedMapBody par_i ne alphas
+  let g_lam = Lambda [par_i] g_bdy (alphas ++ alphas)
+  (r_scan, scan_stms) <- runBuilderT' $ do
+    iota <- letExp "iota" $ BasicOp $ Iota n se0 se1 Int64
+    letTupExp "adj_ctrb_scan" $
+      Op $
+        Screma n [iota] $ ScremaForm [Scan lam ne, Scan lam' ne] [] g_lam
+  addStms scan_stms
+  let (ls_arr, rs_arr) = splitAt (length ne) r_scan
+  -- phase2: build the following map:
+  (as_params, f) <- mkF $ redLambda red
+  f_adj <- vjpLambda ops (map adjFromVar pat_adj) as_params f
+  --
+  par_i' <- newParam "i" $ Prim int64
+  let i' = paramName par_i'
+      f_adj_params = lambdaParams f_adj
+      (ls_as_ps, rs_ps) = splitAt (2 * length ne) f_adj_params
+      scp_params = par_i' : ls_as_ps ++ zipWith (Param mempty) pat_adj alphas
+  f_adj_body <- runBodyBuilder . localScope (scopeOfLParams scp_params) $ do
+    nmim1 <- letSubExp "n_i_1" =<< toExp (pe64 n - (le64 i' + pe64 se1))
+    let idx_stms = map (mkIdxStm nmim1) $ zip3 alphas rs_arr $ map paramName rs_ps
+    addStms (stmsFromList idx_stms)
+    pure $ lambdaBody f_adj
+  let map_lam = Lambda (par_i' : ls_as_ps) f_adj_body alphas
+  (as_adj, map_stms) <- runBuilderT' $ do
+    iota <- letExp "iota" $ BasicOp $ Iota n se0 se1 Int64
+    letTupExp "adj_ctrb_scan" $
+      Op $
+        Screma n (iota : ls_arr ++ as) $
+          ScremaForm [] [] map_lam
+  addStms map_stms
+  -- finally add contributions to the adjoint of as
+  zipWithM_ updateAdj as as_adj
+  where
+    se0 = intConst Int64 0
+    se1 = intConst Int64 1
+    addFixIdx2FullSlice idx t =
+      let full_dims = unSlice $ fullSlice t []
+       in Slice $ DimFix idx : full_dims
+    flipParams ps = uncurry (flip (++)) $ splitAt (length ps `div` 2) ps
+    mkFusedMapBody par_i ne alphas = do
+      let i = paramName par_i
+      runBodyBuilder . localScope (scopeOfLParams [par_i]) $
+        eBody
+          [ eIf
+              (toExp $ le64 i .>. pe64 se0)
+              ( do
+                  ((rs1, rs2), stms) <- runBuilderT' . localScope (scopeOfLParams [par_i]) $ do
+                    im1 <- letSubExp "i_1" =<< toExp (le64 i - pe64 se1)
+                    nmi <- letSubExp "n_i" =<< toExp (pe64 n - le64 i)
+                    tmp <- forM (zip as alphas) $ \(x, t) -> do
+                      x1 <-
+                        letSubExp (baseString x ++ "_elem_1") $
+                          BasicOp $ Index x $ addFixIdx2FullSlice im1 t
+                      x2 <-
+                        letSubExp (baseString x ++ "_elem_2") $
+                          BasicOp $ Index x $ addFixIdx2FullSlice nmi t
+                      return (x1, x2)
+                    return (unzip tmp)
+                  addStms stms
+                  resultBodyM (rs1 ++ rs2)
+              )
+              (resultBodyM (ne ++ ne))
+          ]
+    mkIdxStm idx (t, r_arr, r) =
+      mkLet [Ident r t] $ BasicOp $ Index r_arr $ addFixIdx2FullSlice idx t
+--
+-- previous buggy version is unreachable now
 diffReduce ops pat_adj w as red = do
   red' <- renameRed red
   flip_red <- renameRed =<< flipReduce red
@@ -109,19 +215,6 @@ diffReduce ops pat_adj w as red = do
       lam' <- renameLambda lam {lambdaParams = flipParams $ lambdaParams lam}
       pure $ Reduce comm lam' nes
     flipParams ps = uncurry (flip (++)) $ splitAt (length ps `div` 2) ps
-
-    mkF lam = do
-      lam_l <- renameLambda lam
-      lam_r <- renameLambda lam
-      let n = length $ lambdaReturnType lam
-          (lps, aps) = splitAt n $ lambdaParams lam_l
-          (ips, rps) = splitAt n $ lambdaParams lam_r
-      lam' <- mkLambda (lps <> aps <> rps) $ do
-        lam_l_res <- bodyBind $ lambdaBody lam_l
-        forM_ (zip ips lam_l_res) $ \(ip, SubExpRes cs se) ->
-          certifying cs $ letBindNames [paramName ip] $ BasicOp $ SubExp se
-        bodyBind $ lambdaBody lam_r
-      pure (map paramName aps, lam')
 
 --
 -- Special case of reduce with min/max:
