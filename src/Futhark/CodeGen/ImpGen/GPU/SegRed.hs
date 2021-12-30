@@ -446,7 +446,7 @@ largeSegmentsReduction segred_pat num_groups group_size space reds body = do
             `rem` (sExt64 (unCount group_size') * groups_per_segment)
 
       let first_group_for_segment = sExt64 flat_segment_id * groups_per_segment
-      dIndexSpace (zip segment_gtids (init dims')) $sExt64 flat_segment_id
+      dIndexSpace (zip segment_gtids (init dims')) $ sExt64 flat_segment_id
       dPrim_ (last gtids) int64
       let num_elements = Imp.elements $ toInt64Exp w
 

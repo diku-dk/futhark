@@ -1303,10 +1303,12 @@ fixOverloadedTypes tyvars_at_toplevel =
         typeError usage mempty . withIndexLink "ambiguous-type" $
           "Type is ambiguous (could be one of" <+> commasep (map ppr ots) <> ")."
             </> "Add a type annotation to disambiguate the type."
-    fixOverloaded (_, NoConstraint _ usage) =
-      typeError usage mempty . withIndexLink "ambiguous-type" $
-        "Type of expression is ambiguous."
-          </> "Add a type annotation to disambiguate the type."
+    fixOverloaded (v, NoConstraint _ usage) = do
+      -- See #1552.
+      unify usage (Scalar (TypeVar () Nonunique (typeName v) [])) $
+        Scalar $ tupleRecord []
+      when (v `S.member` tyvars_at_toplevel) $
+        warn usage "Defaulting ambiguous type to ()."
     fixOverloaded (_, Equality usage) =
       typeError usage mempty . withIndexLink "ambiguous-type" $
         "Type is ambiguous (must be equality type)."

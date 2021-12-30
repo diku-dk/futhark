@@ -113,6 +113,16 @@ import Control.Category
 import qualified Data.Binary.Get as G
 import qualified Data.Binary.Put as P
 import Data.Bits
+  ( complement,
+    countLeadingZeros,
+    countTrailingZeros,
+    popCount,
+    shift,
+    shiftR,
+    xor,
+    (.&.),
+    (.|.),
+  )
 import Data.Fixed (mod') -- Weird location.
 import Data.Int (Int16, Int32, Int64, Int8)
 import qualified Data.Map as M
