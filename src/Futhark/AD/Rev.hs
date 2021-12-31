@@ -284,6 +284,8 @@ diffStms all_stms
     (subst, copy_stms) <- copyConsumedArrsInStm stm
     let (stm', stms') = substituteNames subst (stm, stms)
     diffStms copy_stms >> diffStm stm' (diffStms stms')
+    forM_ (M.toList subst) $ \(from, to) ->
+      setAdj from =<< lookupAdj to
   | otherwise =
     pure ()
 

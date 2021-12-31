@@ -278,7 +278,6 @@ returnSweepCode m = do
   (a, stms) <- collectStms m
   substs <- gets stateSubsts
   addStms $ substituteNames substs stms
-  modify $ \env -> env {stateAdjs = M.fromList $ map (substituteNames substs) $ M.toList $ stateAdjs env}
   pure a
 
 addSubstitution :: VName -> VName -> ADM ()

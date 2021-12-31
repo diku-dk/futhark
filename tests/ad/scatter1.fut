@@ -1,6 +1,5 @@
 -- Simple scatter, differentiating wrt. target.
 -- ==
--- tags { disable }
 -- entry: fwd rev
 -- compiled input { [0f64, 0f64, 0f64, 0f64] [0i64, 1i64] [1f64, 2f64] }
 -- output {

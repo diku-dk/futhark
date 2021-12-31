@@ -98,8 +98,14 @@ vjpScatter1 pys aux (w, ass, (shp, num_vals, xs)) m = do
       replicate (shapeRank shp) (Prim int64) ++ replicate (shapeRank shp) val_t
   addStm $ Let (Pat [pys]) aux $ Op $ Scatter w ass id_lam [(shp, num_vals, xs)]
   m
+  let ys = patElemName pys
+  -- XXX: Since our restoration of xs will consume ys, we have to
+  -- make a copy of ys in the chance that it is actually the result
+  -- of the program.  In that case the asymptotics will not be
+  -- (locally) preserved, but since ys must necessarily have been
+  -- constructed somewhere close, they are probably globally OK.
+  ys_copy <- letExp (baseString ys <> "_copy") $ BasicOp $ Copy ys
   returnSweepCode $ do
-    let ys = patElemName pys
     ys_adj <- lookupAdjVal ys
     -- computing vs_ctrbs and updating vs_adj
     vs_ctrbs <- mkGather inds_as ys_adj xs_t
@@ -115,10 +121,11 @@ vjpScatter1 pys aux (w, ass, (shp, num_vals, xs)) m = do
         Scatter w (all_inds ++ zeros) f [(shp, num_vals, ys_adj)]
     insAdj xs xs_adj -- reusing the ys_adj for xs_adj!
     f' <- mkIdentityLambda f_tps
-    xs_reconstructed <-
-      auxing aux . letExp (baseString xs <> "_reconstructed") . Op $
+    xs_rc <-
+      auxing aux . letExp (baseString xs <> "_rc") . Op $
         Scatter w (all_inds ++ xs_saves) f' [(shp, num_vals, ys)]
-    addSubstitution xs xs_reconstructed
+    addSubstitution xs xs_rc
+    addSubstitution ys ys_copy
   where
     -- Creates a potential map-nest that indexes in full the array,
     --   and applies the condition of indices within bounds at the
