@@ -1189,7 +1189,7 @@ groupScan seg_flag arrs_full_size w lam arrs = do
   barrier
 
   sComment "restore correct values for first block" $
-    sWhen is_first_block $
+    sWhen (is_first_block .&&. ltid_in_bounds) $
       forM_ (zip3 x_params y_params arrs) $ \(x, y, arr) ->
         if primType (paramType y)
           then copyDWIM arr [DimFix ltid] (Var $ paramName y) []
