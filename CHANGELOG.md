@@ -17,6 +17,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Overloaded number literals cannot be sum types (#1557).
 
+* Defective GPU code generation for vectorised non-commutative
+  operatators (#1559).
+
 ## [0.21.2]
 
 ### Added
