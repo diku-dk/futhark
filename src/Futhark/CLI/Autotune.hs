@@ -415,9 +415,8 @@ tune opts prog = do
   putStrLn $ "Running with options: " ++ unwords (serverOptions opts)
 
   withServer (futharkServerCfg progbin (serverOptions opts)) $ \server ->
-    fmap fst $
-      foldM (tuneThreshold opts server datasets) ([], mempty) $
-        tuningPaths forest
+    fmap fst . foldM (tuneThreshold opts server datasets) ([], mempty) $
+      tuningPaths forest
 
 runAutotuner :: AutotuneOptions -> FilePath -> IO ()
 runAutotuner opts prog = do
