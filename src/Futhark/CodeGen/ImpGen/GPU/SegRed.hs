@@ -162,7 +162,7 @@ groupResultArrays (Count virt_num_groups) (Count group_size) reds =
     forM (lambdaReturnType lam) $ \t -> do
       let pt = elemType t
           extra_dim
-            | primType t = intConst Int64 1
+            | primType t, shapeRank shape == 0 = intConst Int64 1
             | otherwise = group_size
           full_shape = Shape [extra_dim, virt_num_groups] <> shape <> arrayShape t
           -- Move the groupsize dimension last to ensure coalesced
@@ -695,11 +695,8 @@ reductionStageOne constants ispace num_elements global_tid elems_per_thread thre
     reductionStageZero constants ispace num_elements global_tid elems_per_thread threads_per_segment slugs body
 
   case slugsComm slugs of
-    Noncommutative ->
-      forM_ slugs $ \slug ->
-        forM_ (zip (accParams slug) (slugAccs slug)) $ \(p, (acc, acc_is)) ->
-          copyDWIMFix (paramName p) [] (Var acc) acc_is
-    _ -> doTheReduction
+    Noncommutative -> pure ()
+    Commutative -> doTheReduction
 
   return slugs_op_renamed
 
