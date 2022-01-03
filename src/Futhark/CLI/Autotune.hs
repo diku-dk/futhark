@@ -312,8 +312,10 @@ tuneThreshold opts server datasets already_tuned (v, _v_path) = do
                 putStrLn $ unwords ("Got ePars: " : map show ePars)
 
               newMax <- binarySearch runner (t, tMax) ePars
-              let newMinIdx = pred <$> elemIndex newMax ePars
-              let newMin = maxinum $ catMaybes [Just tMin, newMinIdx]
+              let newMinIdx = do
+                    i <- pred <$> elemIndex newMax ePars
+                    if i < 0 then fail "Invalid lower index" else return i
+              let newMin = maxinum $ catMaybes [Just tMin, fmap (ePars !!) newMinIdx]
               return $ Just (newMin, newMax)
 
     bestPair :: [(Int, Int)] -> (Int, Int)
