@@ -728,14 +728,10 @@ unAllocGPUStms = unAllocStms False
       Just <$> (Let <$> unAllocPat pat <*> pure dec <*> mapExpM unAlloc' e)
 
     unAllocLambda (Lambda params body ret) =
-      Lambda (unParams params) <$> unAllocBody body <*> pure ret
+      Lambda (map unParam params) <$> unAllocBody body <*> pure ret
 
-    unParams = mapMaybe $ traverse unMem
-
-    unAllocPat pat@(Pat merge) =
-      Pat <$> maybe bad return (mapM (rephrasePatElem unMem) merge)
-      where
-        bad = Left $ "Cannot handle memory in pattern " ++ pretty pat
+    unAllocPat (Pat pes) =
+      Pat <$> mapM (rephrasePatElem (Right . unMem)) pes
 
     unAllocOp Alloc {} = Left "unAllocOp: unhandled Alloc"
     unAllocOp (Inner OtherOp {}) = Left "unAllocOp: unhandled OtherOp"
@@ -749,39 +745,35 @@ unAllocGPUStms = unAllocStms False
               mapOnSegOpBody = unAllocKernelBody
             }
 
-    unParam p = maybe bad return $ traverse unMem p
-      where
-        bad = Left $ "Cannot handle memory-typed parameter '" ++ pretty p ++ "'"
+    unParam = fmap unMem
 
-    unT t = maybe bad return $ unMem t
-      where
-        bad = Left $ "Cannot handle memory type '" ++ pretty t ++ "'"
+    unT = Right . unMem
 
     unAlloc' =
       Mapper
         { mapOnBody = const unAllocBody,
           mapOnRetType = unT,
           mapOnBranchType = unT,
-          mapOnFParam = unParam,
-          mapOnLParam = unParam,
+          mapOnFParam = Right . unParam,
+          mapOnLParam = Right . unParam,
           mapOnOp = unAllocOp,
           mapOnSubExp = Right,
           mapOnVName = Right
         }
 
-unMem :: MemInfo d u ret -> Maybe (TypeBase (ShapeBase d) u)
-unMem (MemPrim pt) = Just $ Prim pt
-unMem (MemArray pt shape u _) = Just $ Array pt shape u
-unMem (MemAcc acc ispace ts u) = Just $ Acc acc ispace ts u
-unMem MemMem {} = Nothing
+unMem :: MemInfo d u ret -> TypeBase (ShapeBase d) u
+unMem (MemPrim pt) = Prim pt
+unMem (MemArray pt shape u _) = Array pt shape u
+unMem (MemAcc acc ispace ts u) = Acc acc ispace ts u
+unMem MemMem {} = Prim Unit
 
 unAllocScope :: Scope GPUMem -> Scope GPU.GPU
-unAllocScope = M.mapMaybe unInfo
+unAllocScope = M.map unInfo
   where
-    unInfo (LetName dec) = LetName <$> unMem dec
-    unInfo (FParamName dec) = FParamName <$> unMem dec
-    unInfo (LParamName dec) = LParamName <$> unMem dec
-    unInfo (IndexName it) = Just $ IndexName it
+    unInfo (LetName dec) = LetName $ unMem dec
+    unInfo (FParamName dec) = FParamName $ unMem dec
+    unInfo (LParamName dec) = LParamName $ unMem dec
+    unInfo (IndexName it) = IndexName it
 
 removeCommonSizes ::
   Extraction ->
