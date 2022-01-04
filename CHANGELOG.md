@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Parse errors now list possible expected tokens.
 
+* Lexer errors now mention the file.
+
 ### Removed
 
 ### Changed
