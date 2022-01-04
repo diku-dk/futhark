@@ -53,6 +53,7 @@ import Futhark.Util.Loc hiding (L) -- Lexer has replacements.
 
 %tokentype { L Token }
 %error { parseError }
+%errorhandlertype explist
 %monad { ParserMonad }
 %lexer { lexer } { L _ EOF }
 
@@ -1195,13 +1196,18 @@ lexer cont = do
       putTokens (xs, pos)
       cont x
 
-parseError :: L Token -> ParserMonad a
-parseError (L loc EOF) =
-  parseErrorAt (srclocOf loc) $ Just "unexpected end of file."
-parseError (L loc DOC{}) =
+parseError :: (L Token, [String]) -> ParserMonad a
+parseError (L loc EOF, expected) =
+  parseErrorAt (srclocOf loc) $ Just $
+  unlines ["unexpected end of file.",
+           "Expected one of the following: " ++ unwords expected]
+parseError (L loc DOC{}, _) =
   parseErrorAt (srclocOf loc) $
   Just "documentation comments ('-- |') are only permitted when preceding declarations."
-parseError tok = parseErrorAt (srclocOf tok) Nothing
+parseError (L loc tok, expected) =
+  parseErrorAt loc $ Just $
+  unlines ["unexpected " ++ show tok,
+          "Expected one of the following: " ++ unwords expected]
 
 parseErrorAt :: SrcLoc -> Maybe String -> ParserMonad a
 parseErrorAt loc Nothing = throwError $ "Error at " ++ locStr loc ++ ": Parse error."
