@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+* Parse errors now list possible expected tokens.
+
+* Lexer errors now mention the file.
+
 ### Removed
 
 ### Changed
@@ -16,6 +20,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 ### Fixed
 
 * Overloaded number literals cannot be sum types (#1557).
+
+* Defective GPU code generation for vectorised non-commutative
+  operatators (#1559).
 
 ## [0.21.2]
 

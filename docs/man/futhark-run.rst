@@ -9,14 +9,14 @@ futhark-run
 SYNOPSIS
 ========
 
-futhark run <program.fut>
+futhark run [options...] <program.fut>
 
 DESCRIPTION
 ===========
 
-Execute the given program by evaluating the ``main`` function with
-arguments read from standard input, and write the results on standard
-output.
+Execute the given program by evaluating an entry point (``main`` by
+default) with arguments read from standard input, and write the
+results on standard output.
 
 ``futhark run`` is very slow, and in practice only useful for testing,
 teaching, and experimenting with the language.  The ``#[trace]`` and
