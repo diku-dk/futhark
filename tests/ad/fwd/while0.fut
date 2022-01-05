@@ -1,4 +1,4 @@
-let pow y x = let (_, res) = loop (i, acc) = (0, 1) while i < y do
+def pow y x = let (_, res) = loop (i, acc) = (0, 1) while i < y do
 	                  (i + 1, acc * x)
               in res
 -- ==

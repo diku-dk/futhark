@@ -8,7 +8,7 @@
 --   [21.0f32, 0.0f32, 0.0f32, 0.0f32, 36.0f32, 0.0f32, 0.0f32, 0.0f32]
 -- }
 
-let main [n] (is : [n]i64) (ys_bar: *[n]f32) =
+def main [n] (is : [n]i64) (ys_bar: *[n]f32) =
   let scatter_res_adj_gather =
     map (\ is_elem -> if is_elem >= 0 && is_elem < n
     	 			  then ys_bar[is_elem] else 0

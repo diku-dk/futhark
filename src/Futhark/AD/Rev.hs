@@ -31,7 +31,7 @@ patName (Pat [pe]) = pure $ patElemName pe
 patName pat = error $ "Expected single-element pattern: " ++ pretty pat
 
 -- The vast majority of BasicOps require no special treatment in the
--- forward pass and produce one value (and hence once adjoint).  We
+-- forward pass and produce one value (and hence one adjoint).  We
 -- deal with that case here.
 commonBasicOp :: Pat -> StmAux () -> BasicOp -> ADM () -> ADM (VName, VName)
 commonBasicOp pat aux op m = do
@@ -284,6 +284,8 @@ diffStms all_stms
     (subst, copy_stms) <- copyConsumedArrsInStm stm
     let (stm', stms') = substituteNames subst (stm, stms)
     diffStms copy_stms >> diffStm stm' (diffStms stms')
+    forM_ (M.toList subst) $ \(from, to) ->
+      setAdj from =<< lookupAdj to
   | otherwise =
     pure ()
 

@@ -1,4 +1,4 @@
-let main [n] (xs: [n]i64): [][]i64 =
+def main [n] (xs: [n]i64): [][]i64 =
   if n == 2
      then map (\_ -> xs) (iota n)
      else let largest = xs[0]

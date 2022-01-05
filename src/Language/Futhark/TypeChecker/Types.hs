@@ -7,6 +7,7 @@
 -- | Type checker building blocks that do not involve unification.
 module Language.Futhark.TypeChecker.Types
   ( checkTypeExp,
+    renameRetType,
     unifyTypesU,
     subtypeOf,
     subuniqueOf,
@@ -109,14 +110,27 @@ subuniqueOf :: Uniqueness -> Uniqueness -> Bool
 subuniqueOf Nonunique Unique = False
 subuniqueOf _ _ = True
 
+-- | Ensure that the dimensions of the RetType are unique by
+-- generating new names for them.  This is to avoid name capture.
+renameRetType :: MonadTypeChecker m => StructRetType -> m StructRetType
+renameRetType (RetType dims st)
+  | dims /= mempty = do
+    dims' <- mapM newName dims
+    let m = M.fromList $ zip dims $ map (SizeSubst . NamedDim . qualName) dims'
+        st' = applySubst (`M.lookup` m) st
+    pure $ RetType dims' st'
+  | otherwise =
+    pure $ RetType dims st
+
 evalTypeExp ::
   MonadTypeChecker m =>
   TypeExp Name ->
   m (TypeExp VName, [VName], StructRetType, Liftedness)
 evalTypeExp (TEVar name loc) = do
   (name', ps, t, l) <- lookupType loc name
+  t' <- renameRetType t
   case ps of
-    [] -> pure (TEVar name' loc, [], t, l)
+    [] -> pure (TEVar name' loc, [], t', l)
     _ ->
       typeError loc mempty $
         "Type constructor" <+> pquote (spread (ppr name : map ppr ps))
@@ -252,7 +266,8 @@ evalTypeExp t@(TESum cs loc) = do
     )
 evalTypeExp ote@TEApply {} = do
   (tname, tname_loc, targs) <- rootAndArgs ote
-  (tname', ps, RetType t_dims t, l) <- lookupType tloc tname
+  (tname', ps, tname_t, l) <- lookupType tloc tname
+  RetType t_dims t <- renameRetType tname_t
   if length ps /= length targs
     then
       typeError tloc mempty $

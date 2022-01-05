@@ -10,14 +10,14 @@ module type has_t = {
 
 module m1: has_t = {
   type^ t = i32 -> i32
-  let v = (+2)
-  let ap f x = f x
+  def v = (+2)
+  def ap f x = f x
 }
 
 module m2: has_t = {
   type t = i32
-  let v = 1
-  let ap = (+)
+  def v = 1
+  def ap = (+)
 }
 
-let main (x: i32) = (m1.ap m1.v x, m2.ap m2.v x)
+def main (x: i32) = (m1.ap m1.v x, m2.ap m2.v x)

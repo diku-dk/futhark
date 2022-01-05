@@ -1621,7 +1621,9 @@ copyDWIMDest dest dest_slice (Var src) src_slice = do
               pretty name,
               "and array-typed source",
               pretty src,
-              "with slice",
+              "of shape",
+              pretty (entryArrayShape arr),
+              "sliced with",
               pretty src_slice
             ]
     (ArrayDestination (Just dest_loc), ArrayVar _ src_arr) -> do
@@ -1629,7 +1631,8 @@ copyDWIMDest dest dest_slice (Var src) src_slice = do
           bt = entryArrayElemType src_arr
       emit =<< copyArrayDWIM bt dest_loc dest_slice src_loc src_slice
     (ArrayDestination (Just dest_loc), ScalarVar _ (ScalarEntry bt))
-      | Just dest_is <- mapM dimFix dest_slice -> do
+      | Just dest_is <- mapM dimFix dest_slice,
+        length dest_is == length (memLocShape dest_loc) -> do
         (dest_mem, dest_space, dest_i) <- fullyIndexArray' dest_loc dest_is
         vol <- asks envVolatility
         emit $ Imp.Write dest_mem dest_i bt dest_space vol (Imp.var src bt)

@@ -107,7 +107,7 @@ simplifySOAC (Stream outerdim arr form nes lam) = do
   (form', form_hoisted) <- simplifyStreamForm form
   nes' <- mapM Engine.simplify nes
   arr' <- mapM Engine.simplify arr
-  (lam', lam_hoisted) <- Engine.simplifyLambda lam
+  (lam', lam_hoisted) <- Engine.enterLoop $ Engine.simplifyLambda lam
   return
     ( Stream outerdim' arr' form' nes' lam',
       form_hoisted <> lam_hoisted
@@ -120,7 +120,7 @@ simplifySOAC (Stream outerdim arr form nes lam) = do
       return (Sequential, mempty)
 simplifySOAC (Scatter w ivs lam as) = do
   w' <- Engine.simplify w
-  (lam', hoisted) <- Engine.simplifyLambda lam
+  (lam', hoisted) <- Engine.enterLoop $ Engine.simplifyLambda lam
   ivs' <- mapM Engine.simplify ivs
   as' <- mapM Engine.simplify as
   return (Scatter w' ivs' lam' as', hoisted)
@@ -132,10 +132,10 @@ simplifySOAC (Hist w imgs ops bfun) = do
       rf' <- Engine.simplify rf
       dests' <- Engine.simplify dests
       nes' <- mapM Engine.simplify nes
-      (op', hoisted) <- Engine.simplifyLambda op
+      (op', hoisted) <- Engine.enterLoop $ Engine.simplifyLambda op
       return (HistOp dests_w' rf' dests' nes' op', hoisted)
   imgs' <- mapM Engine.simplify imgs
-  (bfun', bfun_hoisted) <- Engine.simplifyLambda bfun
+  (bfun', bfun_hoisted) <- Engine.enterLoop $ Engine.simplifyLambda bfun
   return (Hist w' imgs' ops' bfun', mconcat hoisted <> bfun_hoisted)
 simplifySOAC (Screma w arrs (ScremaForm scans reds map_lam)) = do
   (scans', scans_hoisted) <- fmap unzip $
@@ -150,7 +150,7 @@ simplifySOAC (Screma w arrs (ScremaForm scans reds map_lam)) = do
       nes' <- Engine.simplify nes
       return (Reduce comm lam' nes', hoisted)
 
-  (map_lam', map_lam_hoisted) <- Engine.simplifyLambda map_lam
+  (map_lam', map_lam_hoisted) <- Engine.enterLoop $ Engine.simplifyLambda map_lam
 
   (,)
     <$> ( Screma <$> Engine.simplify w

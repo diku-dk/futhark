@@ -3,7 +3,7 @@
 -- compiled input { true [1.0,2.0,3.0] }
 -- output { [[0.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]] }
 
-let f b (xs: []f64) =
+def f b (xs: []f64) =
   let ys = copy xs
   in if b then ys with [0] = 0 else ys
 

@@ -9,8 +9,8 @@ module type mt = {
 
 module m : mt = {
   type~ abs = []i64
-  let mk (n: i32) = iota (i64.i32 n)
-  let len [n] (_: [n]i64) = i32.i64 n
+  def mk (n: i32) = iota (i64.i32 n)
+  def len [n] (_: [n]i64) = i32.i64 n
 }
 
-let main (x: i32) = m.len (m.mk x)
+def main (x: i32) = m.len (m.mk x)

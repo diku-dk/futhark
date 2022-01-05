@@ -9,8 +9,8 @@ module type mt = {
 
 module m : mt = {
   type^ abs = bool -> i32
-  let mk (n: i32) = \_ -> n
-  let len (f: abs) = f true
+  def mk (n: i32) = \_ -> n
+  def len (f: abs) = f true
 }
 
-let main (x: i32) = m.len (m.mk x)
+def main (x: i32) = m.len (m.mk x)

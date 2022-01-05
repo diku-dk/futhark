@@ -59,6 +59,8 @@
 --    (8) The result of the loop may not alias the merge parameter
 --    @r1@.
 --
+--    (9) @y@ or its aliases may not be used after the loop.
+--
 -- FIXME: the implementation is not finished yet.  Specifically, not
 -- all of the above conditions are checked.
 module Futhark.Optimise.InPlaceLowering
@@ -70,6 +72,7 @@ where
 
 import Control.Monad.RWS
 import qualified Data.Map.Strict as M
+import Data.Ord (comparing)
 import Futhark.Analysis.Alias
 import Futhark.Builder
 import Futhark.IR.Aliases
@@ -78,6 +81,7 @@ import Futhark.IR.MC
 import Futhark.IR.Seq (Seq)
 import Futhark.Optimise.InPlaceLowering.LowerIntoStm
 import Futhark.Pass
+import Futhark.Util (nubByOrd)
 
 -- | Apply the in-place lowering optimisation to the given program.
 inPlaceLoweringGPU :: Pass GPU GPU
@@ -137,14 +141,19 @@ optimiseStms ::
   [Stm (Aliases rep)] ->
   ForwardingM rep () ->
   ForwardingM rep [Stm (Aliases rep)]
-optimiseStms [] m = m >> return []
+optimiseStms [] m = m >> pure []
 optimiseStms (stm : stms) m = do
   (stms', bup) <- tapBottomUp $ bindingStm stm $ optimiseStms stms m
   stm' <- optimiseInStm stm
-  case filter ((`elem` boundHere) . updateValue) $ forwardThese bup of
+  -- XXX: unfortunate that we cannot handle duplicate update values.
+  -- Would be good to improve this.  See inplacelowering6.fut.
+  case nubByOrd (comparing updateValue)
+    . filter (not . (`nameIn` bottomUpSeen bup) . updateSource) -- (9)
+    . filter ((`elem` boundHere) . updateValue)
+    $ forwardThese bup of
     [] -> do
       checkIfForwardableUpdate stm'
-      return $ stm' : stms'
+      pure $ stm' : stms'
     updates -> do
       lower <- asks topLowerUpdate
       scope <- askScope
@@ -160,13 +169,11 @@ optimiseStms (stm : stms) m = do
       case lower scope stm' updates of
         Just lowering -> do
           new_stms <- lowering
-          new_stms' <-
-            optimiseStms new_stms $
-              tell bup {forwardThese = []}
-          return $ new_stms' ++ filter notUpdated stms'
+          new_stms' <- optimiseStms new_stms $ tell bup {forwardThese = []}
+          pure $ new_stms' ++ filter notUpdated stms'
         Nothing -> do
           checkIfForwardableUpdate stm'
-          return $ stm' : stms'
+          pure $ stm' : stms'
   where
     boundHere = patNames $ stmPat stm
 
@@ -174,7 +181,8 @@ optimiseStms (stm : stms) m = do
       | Pat [PatElem v dec] <- pat,
         BasicOp (Update Unsafe src slice (Var ve)) <- e =
         maybeForward ve v dec cs src slice
-    checkIfForwardableUpdate _ = return ()
+    checkIfForwardableUpdate stm' =
+      mapM_ seenVar $ namesToList $ freeIn $ stmExp stm'
 
 optimiseInStm :: Constraints rep => Stm (Aliases rep) -> ForwardingM rep (Stm (Aliases rep))
 optimiseInStm (Let pat dec e) =

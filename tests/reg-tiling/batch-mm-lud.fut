@@ -3,7 +3,7 @@
 -- no_python compiled random input { [128][16][16]f32 [128][16][16]f32 [128][128][16][16]f32 } auto output
 
 
-let main [m][b] (Bs: [m][b][b]f32)
+def main [m][b] (Bs: [m][b][b]f32)
                 (As: [m][b][b]f32)
                 (Css: [m][m][b][b]f32): *[m][m][b][b]f32 =
   let Btrs = map transpose Bs in

@@ -6,6 +6,9 @@
 module Futhark.Actions
   ( printAction,
     printAliasesAction,
+    printLastUseGPU,
+    printInterferenceGPU,
+    printMemAliasGPU,
     callGraphAction,
     impCodeGenAction,
     kernelImpCodeGenAction,
@@ -30,6 +33,9 @@ import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import Futhark.Analysis.Alias
 import Futhark.Analysis.CallGraph (buildCallGraph)
+import qualified Futhark.Analysis.Interference as Interference
+import qualified Futhark.Analysis.LastUse as LastUse
+import qualified Futhark.Analysis.MemAlias as MemAlias
 import Futhark.Analysis.Metrics
 import qualified Futhark.CodeGen.Backends.CCUDA as CCUDA
 import qualified Futhark.CodeGen.Backends.COpenCL as COpenCL
@@ -72,6 +78,33 @@ printAliasesAction =
     { actionName = "Prettyprint",
       actionDescription = "Prettyprint the resulting internal representation on standard output.",
       actionProcedure = liftIO . putStrLn . pretty . aliasAnalysis
+    }
+
+-- | Print last use information to stdout.
+printLastUseGPU :: Action GPUMem
+printLastUseGPU =
+  Action
+    { actionName = "print last use gpu",
+      actionDescription = "Print last use information on gpu.",
+      actionProcedure = liftIO . putStrLn . pretty . LastUse.analyseGPUMem
+    }
+
+-- | Print interference information to stdout.
+printInterferenceGPU :: Action GPUMem
+printInterferenceGPU =
+  Action
+    { actionName = "print interference gpu",
+      actionDescription = "Print interference information on gpu.",
+      actionProcedure = liftIO . putStrLn . pretty . Interference.analyseProgGPU
+    }
+
+-- | Print memory alias information to stdout
+printMemAliasGPU :: Action GPUMem
+printMemAliasGPU =
+  Action
+    { actionName = "print mem alias gpu",
+      actionDescription = "Print memory alias information on gpu.",
+      actionProcedure = liftIO . putStrLn . pretty . MemAlias.analyzeGPUMem
     }
 
 -- | Print call graph to stdout.
@@ -176,7 +209,7 @@ compileCAction fcfg mode outpath =
     }
   where
     helper prog = do
-      cprog <- handleWarnings fcfg $ SequentialC.compileProg prog
+      cprog <- handleWarnings fcfg $ SequentialC.compileProg (T.pack versionString) prog
       let cpath = outpath `addExtension` "c"
           hpath = outpath `addExtension` "h"
           jsonpath = outpath `addExtension` "json"
@@ -204,7 +237,7 @@ compileOpenCLAction fcfg mode outpath =
     }
   where
     helper prog = do
-      cprog <- handleWarnings fcfg $ COpenCL.compileProg prog
+      cprog <- handleWarnings fcfg $ COpenCL.compileProg (T.pack versionString) prog
       let cpath = outpath `addExtension` "c"
           hpath = outpath `addExtension` "h"
           jsonpath = outpath `addExtension` "json"
@@ -239,7 +272,7 @@ compileCUDAAction fcfg mode outpath =
     }
   where
     helper prog = do
-      cprog <- handleWarnings fcfg $ CCUDA.compileProg prog
+      cprog <- handleWarnings fcfg $ CCUDA.compileProg (T.pack versionString) prog
       let cpath = outpath `addExtension` "c"
           hpath = outpath `addExtension` "h"
           jsonpath = outpath `addExtension` "json"
@@ -271,7 +304,7 @@ compileMulticoreAction fcfg mode outpath =
     }
   where
     helper prog = do
-      cprog <- handleWarnings fcfg $ MulticoreC.compileProg prog
+      cprog <- handleWarnings fcfg $ MulticoreC.compileProg (T.pack versionString) prog
       let cpath = outpath `addExtension` "c"
           hpath = outpath `addExtension` "h"
           jsonpath = outpath `addExtension` "json"
@@ -379,7 +412,9 @@ compileCtoWASMAction fcfg mode outpath =
     }
   where
     helper prog = do
-      (cprog, jsprog, exps) <- handleWarnings fcfg $ SequentialWASM.compileProg prog
+      (cprog, jsprog, exps) <-
+        handleWarnings fcfg $
+          SequentialWASM.compileProg (T.pack versionString) prog
       case mode of
         ToLibrary -> do
           writeLibs cprog jsprog
@@ -411,7 +446,9 @@ compileMulticoreToWASMAction fcfg mode outpath =
     }
   where
     helper prog = do
-      (cprog, jsprog, exps) <- handleWarnings fcfg $ MulticoreWASM.compileProg prog
+      (cprog, jsprog, exps) <-
+        handleWarnings fcfg $
+          MulticoreWASM.compileProg (T.pack versionString) prog
 
       case mode of
         ToLibrary -> do

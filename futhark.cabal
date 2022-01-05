@@ -1,6 +1,6 @@
 cabal-version: 2.4
 name:           futhark
-version:        0.21.0
+version:        0.22.0
 synopsis:       An optimising compiler for a functional, array-oriented language.
 
 description:    Futhark is a small programming language designed to be compiled to
@@ -70,6 +70,7 @@ library
       Futhark.Analysis.HORep.SOAC
       Futhark.Analysis.Interference
       Futhark.Analysis.LastUse
+      Futhark.Analysis.MemAlias
       Futhark.Analysis.Metrics
       Futhark.Analysis.Metrics.Type
       Futhark.Analysis.PrimExp
@@ -90,6 +91,7 @@ library
       Futhark.CLI.Check
       Futhark.CLI.Datacmp
       Futhark.CLI.Dataset
+      Futhark.CLI.Defs
       Futhark.CLI.Dev
       Futhark.CLI.Doc
       Futhark.CLI.Literate
@@ -111,7 +113,6 @@ library
       Futhark.CodeGen.Backends.COpenCL.Boilerplate
       Futhark.CodeGen.Backends.GenericC
       Futhark.CodeGen.Backends.GenericC.CLI
-      Futhark.CodeGen.Backends.GenericC.Manifest
       Futhark.CodeGen.Backends.GenericC.Options
       Futhark.CodeGen.Backends.GenericC.Server
       Futhark.CodeGen.Backends.GenericPython
@@ -204,6 +205,7 @@ library
       Futhark.IR.Syntax
       Futhark.IR.Syntax.Core
       Futhark.IR.Traversals
+      Futhark.IR.TypeCheck
       Futhark.Internalise
       Futhark.Internalise.AccurateSizes
       Futhark.Internalise.Bindings
@@ -224,6 +226,7 @@ library
       Futhark.Optimise.Fusion.Composing
       Futhark.Optimise.Fusion.LoopKernel
       Futhark.Optimise.GenRedOpt
+      Futhark.Optimise.HistAccs
       Futhark.Optimise.InPlaceLowering
       Futhark.Optimise.InPlaceLowering.LowerIntoStm
       Futhark.Optimise.InPlaceLowering.SubstituteIndices
@@ -279,7 +282,6 @@ library
       Futhark.Transform.FirstOrderTransform
       Futhark.Transform.Rename
       Futhark.Transform.Substitute
-      Futhark.TypeCheck
       Futhark.Util
       Futhark.Util.Console
       Futhark.Util.IntegralExp
@@ -319,7 +321,7 @@ library
       Paths_futhark
   hs-source-dirs:
       src
-  ghc-options: -Wall -Wcompat -Wredundant-constraints -Wincomplete-record-updates -Wmissing-export-lists
+  ghc-options: -Wall -Wcompat -Wno-incomplete-uni-patterns -Wredundant-constraints -Wincomplete-record-updates -Wmissing-export-lists
   build-tool-depends:
       alex:alex
     , happy:happy
@@ -342,8 +344,9 @@ library
     , file-embed >=0.0.14.0
     , filepath >=1.4.1.1
     , free >=4.12.4
-    , futhark-data >= 1.0.2.0
+    , futhark-data >= 1.0.3.0
     , futhark-server >= 1.1.2.0
+    , futhark-manifest >= 1.0.0.0
     , githash >=0.1.6.1
     , half >= 0.3
     , haskeline
@@ -376,7 +379,7 @@ executable futhark
   main-is: src/futhark.hs
   other-modules:
       Paths_futhark
-  ghc-options: -Wall -Wcompat -Wredundant-constraints -Wincomplete-record-updates -Wmissing-export-lists -threaded -rtsopts "-with-rtsopts=-N -qg1 -A16M"
+  ghc-options: -Wall -Wcompat -Wno-incomplete-uni-patterns -Wredundant-constraints -Wincomplete-record-updates -Wmissing-export-lists -threaded -rtsopts "-with-rtsopts=-N -qg1 -A16M"
   build-depends:
       base
     , futhark

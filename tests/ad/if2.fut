@@ -6,7 +6,7 @@
 -- output { [3.0, 0.0, -1.0] }
 -- structure { If/Replicate 0 }
 
-let f x : f64 =
+def f x : f64 =
   #[unsafe]
   let z = if x[0] < 0 then x[0] else x[1]
   let y = x[2]

@@ -1,6 +1,6 @@
 -- test mpr sim with ad for params
 
-let pi = 3.141592653589793f32
+def pi = 3.141592653589793f32
 
 -- some type abbreviations
 type mpr_pars = {G: f32, I: f32, Delta: f32, eta: f32, tau: f32, J: f32}
@@ -11,7 +11,7 @@ type mpr_hist [t] [n] = [t] mpr_net [n]
 type connectome [n] = {weights: [n][n]f32, idelays: [n][n]i64}
 
 -- do one time step w/ Euler
-let mpr_step [t] [n] (now: i64) (dt: f32) (buf: *mpr_hist[t][n]) (conn: connectome[n]) (p: mpr_pars): *mpr_hist[t][n] =
+def mpr_step [t] [n] (now: i64) (dt: f32) (buf: *mpr_hist[t][n]) (conn: connectome[n]) (p: mpr_pars): *mpr_hist[t][n] =
 
     -- define individual derivatives as in mpr pdq
     let dr r V = 1/p.tau * ( p.Delta / (pi * p.tau) + 2 * V * r)
@@ -34,33 +34,33 @@ let mpr_step [t] [n] (now: i64) (dt: f32) (buf: *mpr_hist[t][n]) (conn: connecto
     let (er, eV) = unzip erV
     let hrV = map3 (\r V c -> (dr r V, dV r V c)) er eV r_c
            |> map2 (\(r, V) (dr, dV) -> (r + dt * dr, V + dt * dV)) (last buf)
-           |> map1 (\(r, V) -> (if r >= 0f32 then r else 0f32, V))    
+           |> map1 (\(r, V) -> (if r >= 0f32 then r else 0f32, V))
 
     -- return updated buffer
     in buf with [now + 1] = copy hrV
 
-let run_mpr [t] [n] (horizon: i64) (dt: f32) (buf: mpr_hist[t][n]) (conn: connectome[n]) (p: mpr_pars): mpr_hist[t][n] =
+def run_mpr [t] [n] (horizon: i64) (dt: f32) (buf: mpr_hist[t][n]) (conn: connectome[n]) (p: mpr_pars): mpr_hist[t][n] =
     loop buf = copy buf
         for now < (t - horizon - 1) do mpr_step (now + horizon) dt buf conn p
 
-let mpr_pars_with_G (p: mpr_pars) (new_G: f32): mpr_pars = 
+def mpr_pars_with_G (p: mpr_pars) (new_G: f32): mpr_pars =
     let new_p = copy p
     in new_p with G = new_G
 
-let loss [t] [n] (x:mpr_hist[t][n]): f32 =
+def loss [t] [n] (x:mpr_hist[t][n]): f32 =
     let r = map unzip x[t-10:] |> unzip |> (.0)
     let sum = map (reduce (+) 0f32) r |> reduce (+) 0f32
     in
     sum
 
-let sweep [t] [n] (ng: i64) (horizon: i64) (dt: f32) (buf: mpr_hist[t][n]) (conn: connectome[n]) (p: mpr_pars): [ng]f32 =
+def sweep [t] [n] (ng: i64) (horizon: i64) (dt: f32) (buf: mpr_hist[t][n]) (conn: connectome[n]) (p: mpr_pars): [ng]f32 =
     let Gs = tabulate ng (\i -> 0.0 + (f32.i64 i) * 0.1)
     let do_one G = run_mpr horizon dt buf conn (mpr_pars_with_G p G) |> loss
     in map (\g -> vjp do_one g 1f32) Gs
 
 -- ==
 -- compiled input { 1i64 5i64 10i64 7i64 }
-let main (ng: i64) (nh: i64) (nt: i64) (nn: i64) =
+def main (ng: i64) (nh: i64) (nt: i64) (nn: i64) =
     let dt = 0.01f32
     let buf = tabulate_2d (nt + nh) nn (\i j -> (0.1f32, -2.0f32))
     let conn = {weights=tabulate_2d nn nn (\i j -> 0.1f32),

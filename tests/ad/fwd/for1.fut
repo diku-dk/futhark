@@ -1,5 +1,5 @@
 -- computes x^2*y^3
-let pow y x = loop acc = 1 for i in [y, y*y] do
+def pow y x = loop acc = 1 for i in [y, y*y] do
 	        acc * x * i
 -- ==
 -- entry: prim

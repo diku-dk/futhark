@@ -14,7 +14,6 @@ import Futhark.AD.Rev.Monad
 import qualified Futhark.Analysis.Alias as Alias
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.Builder
-import Futhark.Error (compilerLimitationS)
 import Futhark.IR.Aliases (consumedInStms)
 import Futhark.IR.SOACS
 import Futhark.Tools
@@ -79,16 +78,32 @@ removeLoopVars loop =
     let Body aux' stms' res' = substituteNames (M.fromList substs_list) body
     return $ DoLoop val_pats form $ Body aux' (subst_stms <> stms') res'
 
+-- | Augments a while-loop to also compute the number of iterations.
+computeWhileIters :: ExpT SOACS -> ADM SubExp
+computeWhileIters (DoLoop val_pats (WhileLoop b) body) = do
+  bound_v <- newVName "bound"
+  let t = Prim $ IntType Int64
+      bound_param = Param mempty bound_v t
+  bound_init <- letSubExp "bound_init" $ zeroExp t
+  body' <- localScope (scopeOfFParams [bound_param]) $
+    buildBody_ $ do
+      bound_plus_one <-
+        let one = Constant $ IntValue $ intValue Int64 (1 :: Int)
+         in letSubExp "bound+1" $ BasicOp $ BinOp (Add Int64 OverflowUndef) (Var bound_v) one
+      addStms $ bodyStms body
+      return (pure (subExpRes bound_plus_one) <> bodyResult body)
+  res <- letTupExp' "loop" $ DoLoop ((bound_param, bound_init) : val_pats) (WhileLoop b) body'
+  return $ head res
+computeWhileIters e = error $ "convertWhileIters: not a while-loop:\n" <> pretty e
+
 -- | Converts a 'WhileLoop' into a 'ForLoop'. Requires that the
 -- surrounding 'DoLoop' is annotated with a @#[bound(n)]@ attribute,
 -- where @n@ is an upper bound on the number of iterations of the
 -- while-loop. The resulting for-loop will execute for @n@ iterations on
 -- all inputs, so the tighter the bound the better.
-convertWhileLoop :: Integer -> ExpT SOACS -> ADM (ExpT SOACS)
-convertWhileLoop bound (DoLoop val_pats (WhileLoop cond) body) =
+convertWhileLoop :: SubExp -> ExpT SOACS -> ADM (ExpT SOACS)
+convertWhileLoop bound_se (DoLoop val_pats (WhileLoop cond) body) =
   localScope (scopeOfFParams $ map fst val_pats) $ do
-    let it = Int64
-        bound_se = Constant $ IntValue $ intValue it bound
     i <- newVName "i"
     body' <-
       eBody
@@ -97,8 +112,8 @@ convertWhileLoop bound (DoLoop val_pats (WhileLoop cond) body) =
             (return body)
             (resultBodyM $ map (Var . paramName . fst) val_pats)
         ]
-    return $ DoLoop val_pats (ForLoop i it bound_se mempty) body'
-convertWhileLoop _ e = error $ "convertWhileLoop: not a while-loop:\n" <> pretty e
+    return $ DoLoop val_pats (ForLoop i Int64 bound_se mempty) body'
+convertWhileLoop _ e = error $ "convertWhileLoopBound: not a while-loop:\n" <> pretty e
 
 -- | @nestifyLoop n bound loop@ transforms a loop into a depth-@n@ loop nest
 -- of @bound@-iteration loops. This transformation does not preserve
@@ -419,7 +434,7 @@ revLoop diffStms pat loop =
               zipWithM_ insAdj (loopVars loop_vnames) loop_var_adjs
               zipWithM_ updateAdj (loopVals loop_vnames) loop_val_adjs
 
--- | Transforms a any loop into its reverse-mode derivative.
+-- | Transforms a loop into its reverse-mode derivative.
 diffLoop :: (Stms SOACS -> ADM ()) -> Pat -> StmAux () -> ExpT SOACS -> ADM () -> ADM ()
 diffLoop diffStms pat aux loop m
   | isWhileLoop loop =
@@ -428,9 +443,13 @@ diffLoop diffStms pat aux loop m
         bounds = catMaybes $ mapAttrs getBound $ stmAuxAttrs aux
      in case bounds of
           (bound : _) -> do
-            for_loop <- convertWhileLoop bound loop
+            let bound_se = Constant $ IntValue $ intValue Int64 bound
+            for_loop <- convertWhileLoop bound_se loop
             diffLoop diffStms pat aux for_loop m
-          _ -> compilerLimitationS "While-loops requre a #[bound(n)] attribute when differentiated with vjp."
+          _ -> do
+            bound <- computeWhileIters loop
+            for_loop <- convertWhileLoop bound =<< renameExp loop
+            diffLoop diffStms pat aux for_loop m
   | otherwise = do
     fwdLoop pat aux loop
     m

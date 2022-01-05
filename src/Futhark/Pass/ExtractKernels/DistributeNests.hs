@@ -522,10 +522,18 @@ maybeDistributeStm stm@(Let pat (StmAux cs _ _) (Op (Screma w arrs form))) acc
             nest' <- expandKernelNest pat_unused nest
             map_lam' <- soacsLambda map_lam
             localScope (typeEnvFromDistAcc acc') $
-              segmentedScanomapKernel nest' perm w lam map_lam' nes arrs
-                >>= kernelOrNot cs stm acc kernels acc'
+              segmentedScanomapKernel nest' perm cs w lam map_lam' nes arrs
+                >>= kernelOrNot mempty stm acc kernels acc'
       _ ->
         addStmToAcc stm acc
+-- If the map function of the reduction contains parallelism we split
+-- it, so that the parallelism can be exploited.
+maybeDistributeStm (Let pat aux (Op (Screma w arrs form))) acc
+  | Just (reds, map_lam) <- isRedomapSOAC form,
+    lambdaContainsParallelism map_lam = do
+    (mapstm, redstm) <-
+      redomapToMapAndReduce pat (w, reds, map_lam, arrs)
+    distributeMapBodyStms acc $ oneStm mapstm {stmAux = aux} <> oneStm redstm
 -- if the reduction can be distributed by itself, we will turn it into a
 -- segmented reduce.
 --
@@ -549,8 +557,8 @@ maybeDistributeStm stm@(Let pat (StmAux cs _ _) (Op (Screma w arrs form))) acc
                   | commutativeLambda lam = Commutative
                   | otherwise = comm
 
-            regularSegmentedRedomapKernel nest' perm w comm' lam' map_lam' nes arrs
-              >>= kernelOrNot cs stm acc kernels acc'
+            regularSegmentedRedomapKernel nest' perm cs w comm' lam' map_lam' nes arrs
+              >>= kernelOrNot mempty stm acc kernels acc'
       _ ->
         addStmToAcc stm acc
 maybeDistributeStm (Let pat (StmAux cs _ _) (Op (Screma w arrs form))) acc = do
@@ -966,10 +974,10 @@ histKernel ::
   [VName] ->
   m (Stms (Rep m))
 histKernel onLambda lvl orig_pat ispace inputs cs hist_w ops lam arrs = runBuilderT'_ $ do
-  ops' <- forM ops $ \(SOACS.HistOp num_bins rf dests nes op) -> do
+  ops' <- forM ops $ \(SOACS.HistOp dest_shape rf dests nes op) -> do
     (op', nes', shape) <- determineReduceOp op nes
     op'' <- lift $ onLambda op'
-    return $ HistOp num_bins rf dests nes' shape op''
+    return $ HistOp dest_shape rf dests nes' shape op''
 
   let isDest = flip elem $ concatMap histDest ops'
       inputs' = filter (not . isDest . kernelInputArray) inputs
@@ -1015,13 +1023,14 @@ segmentedScanomapKernel ::
   (MonadFreshNames m, LocalScope rep m, DistRep rep) =>
   KernelNest ->
   [Int] ->
+  Certs ->
   SubExp ->
   Lambda SOACS ->
   Lambda rep ->
   [SubExp] ->
   [VName] ->
   DistNestT rep m (Maybe (Stms rep))
-segmentedScanomapKernel nest perm segment_size lam map_lam nes arrs = do
+segmentedScanomapKernel nest perm cs segment_size lam map_lam nes arrs = do
   mk_lvl <- asks distSegLevel
   onLambda <- asks distOnSOACSLambda
   let onLambda' = fmap fst . runBuilder . onLambda
@@ -1032,12 +1041,13 @@ segmentedScanomapKernel nest perm segment_size lam map_lam nes arrs = do
       let scan_op = SegBinOp Noncommutative lam'' nes'' shape
       lvl <- mk_lvl (segment_size : map snd ispace) "segscan" $ NoRecommendation SegNoVirt
       addStms =<< traverse renameStm
-        =<< segScan lvl pat segment_size [scan_op] map_lam arrs ispace inps
+        =<< segScan lvl pat cs segment_size [scan_op] map_lam arrs ispace inps
 
 regularSegmentedRedomapKernel ::
   (MonadFreshNames m, LocalScope rep m, DistRep rep) =>
   KernelNest ->
   [Int] ->
+  Certs ->
   SubExp ->
   Commutativity ->
   Lambda rep ->
@@ -1045,14 +1055,14 @@ regularSegmentedRedomapKernel ::
   [SubExp] ->
   [VName] ->
   DistNestT rep m (Maybe (Stms rep))
-regularSegmentedRedomapKernel nest perm segment_size comm lam map_lam nes arrs = do
+regularSegmentedRedomapKernel nest perm cs segment_size comm lam map_lam nes arrs = do
   mk_lvl <- asks distSegLevel
   isSegmentedOp nest perm (freeIn lam) (freeIn map_lam) nes [] $
     \pat ispace inps nes' _ -> do
       let red_op = SegBinOp comm lam nes' mempty
       lvl <- mk_lvl (segment_size : map snd ispace) "segred" $ NoRecommendation SegNoVirt
       addStms =<< traverse renameStm
-        =<< segRed lvl pat segment_size [red_op] map_lam arrs ispace inps
+        =<< segRed lvl pat cs segment_size [red_op] map_lam arrs ispace inps
 
 isSegmentedOp ::
   (MonadFreshNames m, LocalScope rep m, DistRep rep) =>

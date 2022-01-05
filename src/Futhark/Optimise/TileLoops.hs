@@ -289,6 +289,7 @@ partitionPrelude variance prestms private used_after =
       foldMap consumedInStm $ fst $ Alias.analyseStms mempty prestms
 
     mustBeInlinedExp (BasicOp (Index _ slice)) = not $ null $ sliceDims slice
+    mustBeInlinedExp (BasicOp Iota {}) = True
     mustBeInlinedExp (BasicOp Rotate {}) = True
     mustBeInlinedExp (BasicOp Rearrange {}) = True
     mustBeInlinedExp (BasicOp Reshape {}) = True
@@ -447,11 +448,10 @@ doPrelude tiling privstms prestms prestms_live =
   tilingSegMap tiling "prelude" (scalarLevel tiling) ResultPrivate $
     \in_bounds slice -> do
       ts <- mapM lookupType prestms_live
-      fmap varsRes $
-        protectOutOfBounds "pre" in_bounds ts $ do
-          addPrivStms slice privstms
-          addStms prestms
-          pure $ varsRes prestms_live
+      fmap varsRes . protectOutOfBounds "pre" in_bounds ts $ do
+        addPrivStms slice privstms
+        addStms prestms
+        pure $ varsRes prestms_live
 
 liveSet :: FreeIn a => Stms GPU -> a -> Names
 liveSet stms after =
@@ -805,7 +805,7 @@ readTile1D tile_size gid gtid num_groups group_size kind privstms tile_id inputs
       fmap varsRes $
         case kind of
           TilePartial ->
-            letTupExp "pre"
+            letTupExp "pre1d"
               =<< eIf
                 (toExp $ pe64 j .<. pe64 w)
                 (resultBody <$> mapM (fmap Var . readTileElem) arrs)
@@ -1066,7 +1066,7 @@ readTile2D (kdim_x, kdim_y) (gtid_x, gtid_y) (gid_x, gid_y) tile_size num_groups
       fmap varsRes $
         case kind of
           TilePartial ->
-            mapM (letExp "pre" <=< readTileElemIfInBounds) arrs_and_perms
+            mapM (letExp "pre2d" <=< readTileElemIfInBounds) arrs_and_perms
           TileFull ->
             mapM readTileElem arrs_and_perms
 

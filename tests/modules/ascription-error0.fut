@@ -12,9 +12,9 @@ val extract: t -> i32
 module Struct: SIG = {
 type t = i32
 
-let inject (x: i32): i32 = x
-let extract (x: i32): i32 = x
+def inject (x: i32): i32 = x
+def extract (x: i32): i32 = x
 }
 
-let main(x: i32): i32 =
+def main(x: i32): i32 =
   Struct.inject x

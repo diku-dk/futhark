@@ -10,6 +10,7 @@
 -- compatible).
 module Futhark.Util
   ( nubOrd,
+    nubByOrd,
     mapAccumLM,
     maxinum,
     chunk,
@@ -55,6 +56,7 @@ module Futhark.Util
     atMostChars,
     invertMap,
     traverseFold,
+    fixPoint,
   )
 where
 
@@ -69,7 +71,7 @@ import Data.Char
 import Data.Either
 import Data.Foldable (fold)
 import Data.Function ((&))
-import Data.List (foldl', genericDrop, genericSplitAt, sort)
+import Data.List (foldl', genericDrop, genericSplitAt, sortBy)
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map as M
 import Data.Maybe
@@ -93,7 +95,13 @@ import Text.Read (readMaybe)
 
 -- | Like 'nub', but without the quadratic runtime.
 nubOrd :: Ord a => [a] -> [a]
-nubOrd = map NE.head . NE.group . sort
+nubOrd = nubByOrd compare
+
+-- | Like 'nubBy', but without the quadratic runtime.
+nubByOrd :: (a -> a -> Ordering) -> [a] -> [a]
+nubByOrd cmp = map NE.head . NE.groupBy eq . sortBy cmp
+  where
+    eq x y = cmp x y == EQ
 
 -- | Like 'Data.Traversable.mapAccumL', but monadic.
 mapAccumLM ::
@@ -474,3 +482,8 @@ invertMap m =
 
 traverseFold :: (Monoid m, Traversable t, Applicative f) => (a -> f m) -> t a -> f m
 traverseFold f = fmap fold . traverse f
+
+fixPoint :: Eq a => (a -> a) -> a -> a
+fixPoint f x =
+  let x' = f x
+   in if x' == x then x else fixPoint f x'

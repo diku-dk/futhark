@@ -5,7 +5,7 @@
 
 type foobar = #foo | #bar
 
-let main : i32 = if (#foo : foobar) == #bar
+def main : i32 = if (#foo : foobar) == #bar
                  then 1
                  else if (#bar : foobar) == #bar
                       then 2

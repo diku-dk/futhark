@@ -81,7 +81,7 @@ intraGroupParallelise knest lam = runMaybeT $ do
 
   ((intra_avail_par, kspace, read_input_stms), prelude_stms) <- lift $
     runBuilder $ do
-      let foldBinOp' _ [] = eSubExp $ intConst Int64 0
+      let foldBinOp' _ [] = eSubExp $ intConst Int64 1
           foldBinOp' bop (x : xs) = foldBinOp bop x xs
       ws_min <-
         mapM (letSubExp "one_intra_par_min" <=< foldBinOp' (Mul Int64 OverflowUndef)) $
@@ -91,8 +91,9 @@ intraGroupParallelise knest lam = runMaybeT $ do
           filter (not . null) wss_avail
 
       -- The amount of parallelism available *in the worst case* is
-      -- equal to the smallest parallel loop.
-      intra_avail_par <- letSubExp "intra_avail_par" =<< foldBinOp' (SMin Int64) ws_avail
+      -- equal to the smallest parallel loop, or *at least* 1.
+      intra_avail_par <-
+        letSubExp "intra_avail_par" =<< foldBinOp' (SMin Int64) ws_avail
 
       -- The group size is either the maximum of the minimum parallelism
       -- exploited, or the desired parallelism (bounded by the max group
@@ -251,7 +252,7 @@ intraGroupStm lvl stm@(Let pat aux e) = do
         let scanfun' = soacsLambdaToGPU scanfun
             mapfun' = soacsLambdaToGPU mapfun
         certifying (stmAuxCerts aux) $
-          addStms =<< segScan lvl' pat w [SegBinOp Noncommutative scanfun' nes mempty] mapfun' arrs [] []
+          addStms =<< segScan lvl' pat mempty w [SegBinOp Noncommutative scanfun' nes mempty] mapfun' arrs [] []
         parallelMin [w]
     Op (Screma w arrs form)
       | Just (reds, map_lam) <- isRedomapSOAC form,
@@ -259,7 +260,7 @@ intraGroupStm lvl stm@(Let pat aux e) = do
         let red_lam' = soacsLambdaToGPU red_lam
             map_lam' = soacsLambdaToGPU map_lam
         certifying (stmAuxCerts aux) $
-          addStms =<< segRed lvl' pat w [SegBinOp comm red_lam' nes mempty] map_lam' arrs [] []
+          addStms =<< segRed lvl' pat mempty w [SegBinOp comm red_lam' nes mempty] map_lam' arrs [] []
         parallelMin [w]
     Op (Hist w arrs ops bucket_fun) -> do
       ops' <- forM ops $ \(HistOp num_bins rf dests nes op) -> do

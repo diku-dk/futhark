@@ -1,4 +1,4 @@
-let f x =
+def f x =
   let vs = [x, x*x, x*x*x]
   in scatter (replicate 5 1) [0,1,2] vs
 

@@ -1,4 +1,4 @@
-let f x = map (*(x*x)) [0,1,2]
+def f x = map (*(x*x)) [0,1,2]
 
 -- ==
 -- entry: f_jvp 

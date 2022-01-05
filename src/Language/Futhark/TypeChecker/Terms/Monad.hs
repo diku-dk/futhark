@@ -248,19 +248,16 @@ badLetWithValue arre vale loc =
       </> indent 2 (ppr vale)
       </> "Hint: use" <+> pquote "copy" <+> "to remove aliases from the value."
 
-returnAliased :: Name -> Name -> SrcLoc -> TermTypeM ()
-returnAliased fname name loc =
+returnAliased :: Name -> SrcLoc -> TermTypeM ()
+returnAliased name loc =
   typeError loc mempty . withIndexLink "return-aliased" $
-    "Unique-typed return value of" <+> pquote (pprName fname)
-      <+> "is aliased to"
+    "Unique-typed return value is aliased to"
       <+> pquote (pprName name) <> ", which is not consumable."
 
-uniqueReturnAliased :: Name -> SrcLoc -> TermTypeM a
-uniqueReturnAliased fname loc =
+uniqueReturnAliased :: SrcLoc -> TermTypeM a
+uniqueReturnAliased loc =
   typeError loc mempty . withIndexLink "unique-return-aliased" $
-    "A unique-typed component of the return value of"
-      <+> pquote (pprName fname)
-      <+> "is aliased to some other component."
+    "A unique-typed component of the return value is aliased to some other component."
 
 unexpectedType :: MonadTypeChecker m => SrcLoc -> StructType -> [StructType] -> m a
 unexpectedType loc _ [] =
@@ -359,7 +356,7 @@ instance Pretty Checking where
     where
       expected' = commasep (map ppr expected)
   ppr (CheckingBranches t1 t2) =
-    "Conditional branches differ in type."
+    "Branches differ in type."
       </> "Former:" <+> ppr t1
       </> "Latter:" <+> ppr t2
 
@@ -790,16 +787,6 @@ require :: String -> [PrimType] -> Exp -> TermTypeM Exp
 require why ts e = do
   mustBeOneOf ts (mkUsage (srclocOf e) why) . toStruct =<< expType e
   pure e
-
-renameRetType :: StructRetType -> TermTypeM StructRetType
-renameRetType (RetType dims st)
-  | dims /= mempty = do
-    dims' <- mapM newName dims
-    let m = M.fromList $ zip dims $ map (SizeSubst . NamedDim . qualName) dims'
-        st' = applySubst (`M.lookup` m) st
-    pure $ RetType dims' st'
-  | otherwise =
-    pure $ RetType dims st
 
 termCheckTypeExp :: TypeExp Name -> TermTypeM (TypeExp VName, [VName], StructRetType)
 termCheckTypeExp te = do

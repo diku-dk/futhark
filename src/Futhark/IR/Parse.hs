@@ -625,7 +625,7 @@ pSOAC pr =
       where
         pHistOp =
           SOAC.HistOp
-            <$> pSubExp <* pComma
+            <$> pShape <* pComma
             <*> pSubExp <* pComma
             <*> braces (pVName `sepBy` pComma) <* pComma
             <*> braces (pSubExp `sepBy` pComma) <* pComma
@@ -818,7 +818,7 @@ pSegOp pr pLvl =
       pure $ SegOp.SegBinOp comm lam nes shape
     pHistOp =
       SegOp.HistOp
-        <$> pSubExp <* pComma
+        <$> pShape <* pComma
         <*> pSubExp <* pComma
         <*> braces (pVName `sepBy` pComma) <* pComma
         <*> braces (pSubExp `sepBy` pComma) <* pComma
@@ -890,17 +890,17 @@ pIxFunBase pNum =
       mon <- pLab "monotonicity" $ brackets (pMon `sepBy` pComma)
       pure $ IxFun.LMAD offset $ zipWith5 IxFun.LMADDim strides rotates shape perm mon
 
-pPrimExpLeaf :: Parser (VName, PrimType)
-pPrimExpLeaf = (,int64) <$> pVName
+pPrimExpLeaf :: Parser VName
+pPrimExpLeaf = pVName
 
-pExtPrimExpLeaf :: Parser (Ext VName, PrimType)
-pExtPrimExpLeaf = (,int64) <$> pExt pVName
+pExtPrimExpLeaf :: Parser (Ext VName)
+pExtPrimExpLeaf = pExt pVName
 
 pIxFun :: Parser IxFun
-pIxFun = pIxFunBase $ isInt64 <$> pPrimExp pPrimExpLeaf
+pIxFun = pIxFunBase $ isInt64 <$> pPrimExp int64 pPrimExpLeaf
 
 pExtIxFun :: Parser ExtIxFun
-pExtIxFun = pIxFunBase $ isInt64 <$> pPrimExp pExtPrimExpLeaf
+pExtIxFun = pIxFunBase $ isInt64 <$> pPrimExp int64 pExtPrimExpLeaf
 
 pMemInfo :: Parser d -> Parser u -> Parser ret -> Parser (MemInfo d u ret)
 pMemInfo pd pu pret =

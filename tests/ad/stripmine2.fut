@@ -1,4 +1,4 @@
-let pow_list [n] y (xs :[n]i32) =
+def pow_list [n] y (xs :[n]i32) =
   #[stripmine(2)]
   loop accs = (replicate n 1) for _i < y do
 	  map2 (*) accs xs

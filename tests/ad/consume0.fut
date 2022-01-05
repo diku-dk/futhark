@@ -3,7 +3,7 @@
 -- compiled input { [1.0,2.0,3.0] }
 -- output { [[0.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]] }
 
-let f (xs: []f64) =
+def f (xs: []f64) =
   copy xs with [0] = 0
 
 entry fwd [n] (xs: *[n]f64) =

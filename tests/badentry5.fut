@@ -2,6 +2,6 @@
 -- ==
 -- warning: Entry point parameter
 
-module m : { type t val x: t} = { type t = i32 let x = 0 }
+module m : { type t val x: t} = { type t = i32 def x = 0 }
 
-let main (x: m.t) = 0i32
+def main (x: m.t) = 0i32

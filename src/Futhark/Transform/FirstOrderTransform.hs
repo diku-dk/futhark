@@ -177,14 +177,12 @@ transformSOAC pat (Screma w arrs form@(ScremaForm scans reds map_lam)) = do
           Nothing
             | paramName p `nameIn` lam_cons -> do
               p' <-
-                letExp (baseString (paramName p)) $
-                  BasicOp $
-                    Index arr $ fullSlice arr_t [DimFix $ Var i]
+                letExp (baseString (paramName p)) . BasicOp $
+                  Index arr $ fullSlice arr_t [DimFix $ Var i]
               letBindNames [paramName p] $ BasicOp $ Copy p'
             | otherwise ->
               letBindNames [paramName p] $
-                BasicOp $
-                  Index arr $ fullSlice arr_t [DimFix $ Var i]
+                BasicOp $ Index arr $ fullSlice arr_t [DimFix $ Var i]
 
       -- Insert the statements of the lambda.  We have taken care to
       -- ensure that the parameters are bound at this point.
@@ -323,36 +321,35 @@ transformSOAC pat (Hist len imgs ops bucket_fun) = do
     imgs'' <- map resSubExp <$> bindLambda bucket_fun (map (BasicOp . SubExp) imgs')
 
     -- Split out values from bucket function.
-    let lens = length ops
-        inds = take lens imgs''
+    let lens = sum $ map (shapeRank . histShape) ops
+        ops_inds = chunks (map (shapeRank . histShape) ops) (take lens imgs'')
         vals = chunks (map (length . lambdaReturnType . histOp) ops) $ drop lens imgs''
         hists_out' =
           chunks (map (length . lambdaReturnType . histOp) ops) $
             map identName hists_out
 
-    hists_out'' <- forM (zip4 hists_out' ops inds vals) $ \(hist, op, idx, val) -> do
+    hists_out'' <- forM (zip4 hists_out' ops ops_inds vals) $ \(hist, op, idxs, val) -> do
       -- Check whether the indexes are in-bound.  If they are not, we
       -- return the histograms unchanged.
       let outside_bounds_branch = buildBody_ $ pure $ varsRes hist
           oob = case hist of
             [] -> eSubExp $ constant True
-            arr : _ -> eOutOfBounds arr [eSubExp idx]
+            arr : _ -> eOutOfBounds arr $ map eSubExp idxs
 
       letTupExp "new_histo" <=< eIf oob outside_bounds_branch $
         buildBody_ $ do
           -- Read values from histogram.
           h_val <- forM hist $ \arr -> do
             arr_t <- lookupType arr
-            letSubExp "read_hist" $ BasicOp $ Index arr $ fullSlice arr_t [DimFix idx]
+            letSubExp "read_hist" $ BasicOp $ Index arr $ fullSlice arr_t $ map DimFix idxs
 
           -- Apply operator.
-          h_val' <-
-            bindLambda (histOp op) $ map (BasicOp . SubExp) $ h_val ++ val
+          h_val' <- bindLambda (histOp op) $ map (BasicOp . SubExp) $ h_val ++ val
 
           -- Write values back to histograms.
           hist' <- forM (zip hist h_val') $ \(arr, SubExpRes cs v) -> do
             arr_t <- lookupType arr
-            certifying cs . letInPlace "hist_out" arr (fullSlice arr_t [DimFix idx]) $
+            certifying cs . letInPlace "hist_out" arr (fullSlice arr_t $ map DimFix idxs) $
               BasicOp $ SubExp v
 
           pure $ varsRes hist'

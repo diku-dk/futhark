@@ -31,10 +31,14 @@ import Futhark.Pass.ExtractKernels.Distribution
   )
 import Futhark.Tools
 import Futhark.Transform.Rename
+import Futhark.Util (splitFromEnd)
 
 -- | An encoding of a sequential do-loop with no existential context,
 -- alongside its result pattern.
 data SeqLoop = SeqLoop [Int] Pat [(FParam, SubExp)] (LoopForm SOACS) Body
+
+loopPerm :: SeqLoop -> [Int]
+loopPerm (SeqLoop perm _ _ _ _) = perm
 
 seqLoopStm :: SeqLoop -> Stm
 seqLoopStm (SeqLoop _ pat merge form body) =
@@ -129,6 +133,22 @@ maybeCopyInitial isMapInput (SeqLoop perm loop_pat merge form body) =
     f (p, arg) =
       pure (p, arg)
 
+manifestMaps :: [LoopNesting] -> [VName] -> Stms SOACS -> ([VName], Stms SOACS)
+manifestMaps [] res stms = (res, stms)
+manifestMaps (n : ns) res stms =
+  let (res', stms') = manifestMaps ns res stms
+      (params, arrs) = unzip $ loopNestingParamsAndArrs n
+      lam =
+        Lambda
+          params
+          (mkBody stms' $ varsRes res')
+          (map rowType $ patTypes (loopNestingPat n))
+   in ( patNames $ loopNestingPat n,
+        oneStm $
+          Let (loopNestingPat n) (loopNestingAux n) $
+            Op $ Screma (loopNestingWidth n) arrs (mapSOAC lam)
+      )
+
 -- | Given a (parallel) map nesting and an inner sequential loop, move
 -- the maps inside the sequential loop.  The result is several
 -- statements - one of these will be the loop, which will then contain
@@ -138,19 +158,29 @@ interchangeLoops ::
   KernelNest ->
   SeqLoop ->
   m (Stms SOACS)
-interchangeLoops nest loop = do
-  (loop', stms) <-
-    runBuilder . localScope (scopeOfKernelNest nest) $
-      maybeCopyInitial isMapInput
-        =<< foldM (interchangeLoop isMapParameter) loop (reverse $ kernelNestLoops nest)
-  return $ stms <> oneStm (seqLoopStm loop')
+interchangeLoops full_nest = recurse (kernelNestLoops full_nest)
   where
-    isMapParameter v =
-      fmap snd . find ((== v) . paramName . fst) $
-        concatMap loopNestingParamsAndArrs $ kernelNestLoops nest
-    isMapInput v =
-      elem v . map snd . concatMap loopNestingParamsAndArrs $
-        kernelNestLoops nest
+    recurse nest loop
+      | (ns, [n]) <- splitFromEnd 1 nest = do
+        let isMapParameter v =
+              snd <$> find ((== v) . paramName . fst) (loopNestingParamsAndArrs n)
+            isMapInput v =
+              v `elem` map snd (loopNestingParamsAndArrs n)
+        (loop', stms) <-
+          runBuilder . localScope (scopeOfKernelNest full_nest) $
+            maybeCopyInitial isMapInput
+              =<< interchangeLoop isMapParameter loop n
+
+        -- Only safe to continue interchanging if we didn't need to add
+        -- any new statements; otherwise we manifest the remaining nests
+        -- as Maps and hand them back to the flattener.
+        if null stms
+          then recurse ns loop'
+          else
+            let loop_stm = seqLoopStm loop'
+                names = rearrangeShape (loopPerm loop') (patNames (stmPat loop_stm))
+             in pure $ snd $ manifestMaps ns names $ stms <> oneStm loop_stm
+      | otherwise = pure $ oneStm $ seqLoopStm loop
 
 data Branch = Branch [Int] Pat SubExp Body Body (IfDec (BranchType SOACS))
 

@@ -3,11 +3,11 @@
 -- compiled input { [true] [[1.0,2.0,3.0]] [[0.0,1.0,0.0]] }
 -- output { [[0.000000f64, 1.000000f64, 0.000000f64]] }
 
-let f b (xs: []f64) =
+def f b (xs: []f64) =
   let ys = copy xs
   in if b then ys with [0] = 0 else ys
 
-let g bs (xss: [][]f64) =
+def g bs (xss: [][]f64) =
   #[unsafe]
   map2 f bs (copy xss)
 

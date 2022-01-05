@@ -22,10 +22,10 @@ import Futhark.IR.MC.Op
 import Futhark.IR.Mem
 import Futhark.IR.Mem.Simplify
 import Futhark.IR.SegOp
+import qualified Futhark.IR.TypeCheck as TC
 import qualified Futhark.Optimise.Simplify.Engine as Engine
 import Futhark.Pass
 import Futhark.Pass.ExplicitAllocations (BuilderOps (..), mkLetNamesB', mkLetNamesB'')
-import qualified Futhark.TypeCheck as TC
 
 data MCMem
 

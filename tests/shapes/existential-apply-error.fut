@@ -2,7 +2,7 @@
 -- ==
 -- error: existential
 
-let apply 'a 'b (f: a -> b) (x: a): b =
+def apply 'a 'b (f: a -> b) (x: a): b =
   f x
 
-let main (n: i32) = apply iota n
+def main (n: i32) = apply iota n

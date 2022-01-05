@@ -6,11 +6,11 @@
 
 type foo = i32
 module Foo = {
-  let foo(): i32 = 1
+  def foo(): i32 = 1
   module Foo = {
     type foo = f64
-    let foo(): foo = 2.0
+    def foo(): foo = 2.0
   }
 }
 
-let main: (foo, Foo.Foo.foo) = ( Foo.foo() , Foo.Foo.foo())
+def main: (foo, Foo.Foo.foo) = ( Foo.foo() , Foo.Foo.foo())

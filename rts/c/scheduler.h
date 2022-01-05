@@ -1113,6 +1113,10 @@ static int scheduler_init(struct scheduler *scheduler,
 }
 
 static int scheduler_destroy(struct scheduler *scheduler) {
+  // We assume that this function is called by the thread controlling
+  // the first worker, which is why we treat scheduler->workers[0]
+  // specially here.
+
   // First mark them all as dead.
   for (int i = 1; i < scheduler->num_threads; i++) {
     struct worker *cur_worker = &scheduler->workers[i];
@@ -1132,8 +1136,8 @@ static int scheduler_destroy(struct scheduler *scheduler) {
     CHECK_ERR(pthread_join(scheduler->workers[i].thread, NULL), "pthread_join");
   }
 
-  // And then destroy our local queue.
-  subtask_queue_destroy(&worker_local->q);
+  // And then destroy our own queue.
+  subtask_queue_destroy(&scheduler->workers[0].q);
 
   free(scheduler->workers);
 

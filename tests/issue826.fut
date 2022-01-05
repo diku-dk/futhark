@@ -1,4 +1,4 @@
-let main (xss: [][]i32) =
+def main (xss: [][]i32) =
   map (\xs ->
          let sum = i32.sum xs
          let xs' = copy xs

@@ -3,7 +3,7 @@
 -- compiled input { 5.0 7.0 }
 -- output { 1.0 1.0 }
 
-let f (x,y) = x + y : f64
+def f (x,y) = x + y : f64
 
 entry f_jvp x y =
   (jvp f (x,y) (1,0),

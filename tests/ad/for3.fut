@@ -1,4 +1,4 @@
-let square [n] (xs: [n]i32) =
+def square [n] (xs: [n]i32) =
   let xs' = copy xs
   in loop xs'' = xs' for i < n do
        let a = xs''[i]

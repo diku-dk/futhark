@@ -3,5 +3,5 @@
 -- input {  true 1i64 2i64 } output { 1i64 }
 -- input { false 1i64 2i64 } output { 2i64 }
 
-let main b n m =
+def main b n m =
   length (if b then iota n else iota m)

@@ -3,5 +3,5 @@
 -- input { }
 -- output { 1 }
 
-let main : i32 = match (\x -> x + 1)
+def main : i32 = match (\x -> x + 1)
                   case y -> 1

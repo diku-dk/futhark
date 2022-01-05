@@ -12,7 +12,7 @@
 -- compiled input { 1000000 } output { 3.141696f32 }
 -- compiled input { 10000000 } output { 3.141595f32 }
 
-let dirvcts(): [2][30]i32 =
+def dirvcts(): [2][30]i32 =
     [
             [
                 536870912, 268435456, 134217728, 67108864, 33554432, 16777216, 8388608, 4194304, 2097152, 1048576, 524288, 262144, 131072, 65536, 32768, 16384, 8192, 4096, 2048, 1024, 512, 256, 128, 64, 32, 16, 8, 4, 2, 1
@@ -23,30 +23,30 @@ let dirvcts(): [2][30]i32 =
     ]
 
 
-let grayCode(x: i32): i32 = (x >> 1) ^ x
+def grayCode(x: i32): i32 = (x >> 1) ^ x
 
 ----------------------------------------
 --- Sobol Generator
 ----------------------------------------
-let testBit(n: i32, ind: i32): bool =
+def testBit(n: i32, ind: i32): bool =
     let t = (1 << ind) in (n & t) == t
 
-let xorInds [num_bits] (n: i32) (dir_vs: [num_bits]i32): i32 =
+def xorInds [num_bits] (n: i32) (dir_vs: [num_bits]i32): i32 =
     let reldv_vals = map2 (\ dv i  ->
                                 if testBit(grayCode n,i32.i64 i)
                                 then dv else 0)
                              dir_vs (iota num_bits)
     in reduce (^) 0 reldv_vals
 
-let sobolIndI [m] [num_bits] (dir_vs: [m][num_bits]i32, n: i64): [m]i32 =
+def sobolIndI [m] [num_bits] (dir_vs: [m][num_bits]i32, n: i64): [m]i32 =
     map (xorInds (i32.i64 n)) dir_vs
 
-let sobolIndR [m] [num_bits] (dir_vs:  [m][num_bits]i32) (n: i64): [m]f32 =
+def sobolIndR [m] [num_bits] (dir_vs:  [m][num_bits]i32) (n: i64): [m]f32 =
     let divisor = 2.0 ** f32.i64(num_bits)
     let arri    = sobolIndI( dir_vs, n )
     in map (\x -> f32.i32 x / divisor) arri
 
-let main(n: i32): f32 =
+def main(n: i32): f32 =
     let rand_nums = map (sobolIndR (dirvcts())) (iota (i64.i32 n))
     let dists     = map (\xy ->
                            let (x,y) = (xy[0],xy[1]) in f32.sqrt(x*x + y*y))

@@ -3,6 +3,6 @@
 -- ==
 -- error: "n".*scope violation
 
-let main (ys: []i32) =
+def main (ys: []i32) =
   let f [n] (xs: [n]i32) = zip xs ys
   in f

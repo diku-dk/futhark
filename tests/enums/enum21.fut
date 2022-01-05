@@ -4,7 +4,7 @@
 
 type planet = #mercury | #venus | #earth | #mars
 
-let main : i32 = match (1, #mars : planet, 5)
+def main : i32 = match (1, #mars : planet, 5)
                   case (1, #mercury, 5) -> 1
                   case (1, #venus, 5)   -> 2
                   case (1, #earth, 5)   -> 3

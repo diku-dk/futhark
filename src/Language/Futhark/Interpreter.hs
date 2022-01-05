@@ -26,6 +26,7 @@ where
 
 import Control.Monad.Except
 import Control.Monad.Free.Church
+import Control.Monad.Identity
 import Control.Monad.Reader
 import Control.Monad.State
 import Control.Monad.Trans.Maybe
@@ -620,25 +621,41 @@ indexArray (IndexingSlice start end stride : is) (ValueArray (ShapeDim _ rowshap
   toArray' (indexShape is rowshape) <$> mapM (indexArray is . (arr !)) js
 indexArray _ v = Just v
 
-updateArray :: [Indexing] -> Value -> Value -> Maybe Value
-updateArray (IndexingFix i : is) (ValueArray shape arr) v
+writeArray :: [Indexing] -> Value -> Value -> Maybe Value
+writeArray slice x y = runIdentity $ updateArray (\_ y' -> pure y') slice x y
+
+updateArray ::
+  Monad m =>
+  (Value -> Value -> m Value) ->
+  [Indexing] ->
+  Value ->
+  Value ->
+  m (Maybe Value)
+updateArray f (IndexingFix i : is) (ValueArray shape arr) v
   | i >= 0,
     i < n = do
-    v' <- updateArray is (arr ! i') v
-    Just $ ValueArray shape $ arr // [(i', v')]
+    v' <- updateArray f is (arr ! i') v
+    pure $ do
+      v'' <- v'
+      Just $ ValueArray shape $ arr // [(i', v'')]
   | otherwise =
-    Nothing
+    pure Nothing
   where
     n = arrayLength arr
     i' = fromIntegral i
-updateArray (IndexingSlice start end stride : is) (ValueArray shape arr) (ValueArray _ v) = do
-  arr_is <- indexesFor start end stride $ arrayLength arr
-  guard $ length arr_is == arrayLength v
-  let update arr' (i, v') = do
-        x <- updateArray is (arr ! i) v'
-        return $ arr' // [(i, x)]
-  fmap (ValueArray shape) $ foldM update arr $ zip arr_is $ elems v
-updateArray _ _ v = Just v
+updateArray f (IndexingSlice start end stride : is) (ValueArray shape arr) (ValueArray _ v)
+  | Just arr_is <- indexesFor start end stride $ arrayLength arr,
+    length arr_is == arrayLength v = do
+    let update (Just arr') (i, v') = do
+          x <- updateArray f is (arr ! i) v'
+          pure $ do
+            x' <- x
+            Just $ arr' // [(i, x')]
+        update Nothing _ = pure Nothing
+    fmap (fmap (ValueArray shape)) $ foldM update (Just arr) $ zip arr_is $ elems v
+  | otherwise =
+    pure Nothing
+updateArray f _ x y = Just <$> f x y
 
 evalDimIndex :: Env -> DimIndex -> EvalM Indexing
 evalDimIndex env (DimFix x) =
@@ -903,7 +920,7 @@ evalAppExp env (LetWith dest src is v body loc) = do
   let Ident src_vn (Info src_t) _ = src
   dest' <-
     maybe oob return
-      =<< updateArray <$> mapM (evalDimIndex env) is
+      =<< writeArray <$> mapM (evalDimIndex env) is
       <*> evalTermVar env (qualName src_vn) (toStruct src_t)
       <*> eval env v
   let t = T.BoundV [] $ toStruct $ unInfo $ identType dest
@@ -1044,7 +1061,7 @@ eval env (Not e _) = do
     _ -> error $ "Cannot logically negate " ++ pretty ev
 eval env (Update src is v loc) =
   maybe oob return
-    =<< updateArray <$> mapM (evalDimIndex env) is <*> eval env src <*> eval env v
+    =<< writeArray <$> mapM (evalDimIndex env) is <*> eval env src <*> eval env v
   where
     oob = bad loc env "Bad update"
 eval env (RecordUpdate src all_fs v _ _) =
@@ -1611,7 +1628,7 @@ initialCtx =
       where
         update :: Value -> (Maybe [Value], Value) -> Value
         update arr (Just idxs@[_, _], v) =
-          fromMaybe arr $ updateArray (map (IndexingFix . asInt64) idxs) arr v
+          fromMaybe arr $ writeArray (map (IndexingFix . asInt64) idxs) arr v
         update _ _ =
           error "scatter_2d expects 2-dimensional indices"
     def "scatter_3d" = Just $
@@ -1626,27 +1643,42 @@ initialCtx =
       where
         update :: Value -> (Maybe [Value], Value) -> Value
         update arr (Just idxs@[_, _, _], v) =
-          fromMaybe arr $ updateArray (map (IndexingFix . asInt64) idxs) arr v
+          fromMaybe arr $ writeArray (map (IndexingFix . asInt64) idxs) arr v
         update _ _ =
           error "scatter_3d expects 3-dimensional indices"
-    def "hist" = Just $
-      fun6t $ \_ arr fun _ is vs ->
-        case arr of
-          ValueArray shape arr' ->
-            ValueArray shape
-              <$> foldM
-                (update fun)
-                arr'
-                (zip (map asInt $ snd $ fromArray is) (snd $ fromArray vs))
-          _ ->
-            error $ "hist expects array, but got: " ++ pretty arr
+    def "hist_1d" = Just . fun6t $ \_ arr fun _ is vs ->
+      foldM
+        (update fun)
+        arr
+        (zip (map asInt64 $ snd $ fromArray is) (snd $ fromArray vs))
       where
-        update fun arr' (i, v) =
-          if i >= 0 && i < arrayLength arr'
-            then do
-              v' <- apply2 noLoc mempty fun (arr' ! i) v
-              return $ arr' // [(i, v')]
-            else return arr'
+        op = apply2 mempty mempty
+        update fun arr (i, v) =
+          fromMaybe arr <$> updateArray (op fun) [IndexingFix i] arr v
+    def "hist_2d" = Just . fun6t $ \_ arr fun _ is vs ->
+      foldM
+        (update fun)
+        arr
+        (zip (map fromTuple $ snd $ fromArray is) (snd $ fromArray vs))
+      where
+        op = apply2 mempty mempty
+        update fun arr (Just idxs@[_, _], v) =
+          fromMaybe arr
+            <$> updateArray (op fun) (map (IndexingFix . asInt64) idxs) arr v
+        update _ _ _ =
+          error "hist_2d: bad index value"
+    def "hist_3d" = Just . fun6t $ \_ arr fun _ is vs ->
+      foldM
+        (update fun)
+        arr
+        (zip (map fromTuple $ snd $ fromArray is) (snd $ fromArray vs))
+      where
+        op = apply2 mempty mempty
+        update fun arr (Just idxs@[_, _, _], v) =
+          fromMaybe arr
+            <$> updateArray (op fun) (map (IndexingFix . asInt64) idxs) arr v
+        update _ _ _ =
+          error "hist_2d: bad index value"
     def "partition" = Just $
       fun3t $ \k f xs -> do
         let (ShapeDim _ rowshape, xs') = fromArray xs
@@ -1739,7 +1771,7 @@ initialCtx =
         ShapeDim n1 (ShapeDim n2 _) -> do
           let iota x = [0 .. x -1]
               f arr' (i, j) =
-                updateArray [IndexingFix $ offset' + i * s1' + j * s2'] arr'
+                writeArray [IndexingFix $ offset' + i * s1' + j * s2'] arr'
                   =<< indexArray [IndexingFix i, IndexingFix j] v
           case foldM f arr [(i, j) | i <- iota n1, j <- iota n2] of
             Just arr' -> pure arr'
@@ -1779,7 +1811,7 @@ initialCtx =
         ShapeDim n1 (ShapeDim n2 (ShapeDim n3 _)) -> do
           let iota x = [0 .. x -1]
               f arr' (i, j, l) =
-                updateArray [IndexingFix $ offset' + i * s1' + j * s2' + l * s3'] arr'
+                writeArray [IndexingFix $ offset' + i * s1' + j * s2' + l * s3'] arr'
                   =<< indexArray [IndexingFix i, IndexingFix j, IndexingFix l] v
           case foldM f arr [(i, j, l) | i <- iota n1, j <- iota n2, l <- iota n3] of
             Just arr' -> pure arr'
@@ -1823,7 +1855,7 @@ initialCtx =
         ShapeDim n1 (ShapeDim n2 (ShapeDim n3 (ShapeDim n4 _))) -> do
           let iota x = [0 .. x -1]
               f arr' (i, j, l, m) =
-                updateArray [IndexingFix $ offset' + i * s1' + j * s2' + l * s3' + m * s4'] arr'
+                writeArray [IndexingFix $ offset' + i * s1' + j * s2' + l * s3' + m * s4'] arr'
                   =<< indexArray [IndexingFix i, IndexingFix j, IndexingFix l, IndexingFix m] v
           case foldM f arr [(i, j, l, m) | i <- iota n1, j <- iota n2, l <- iota n3, m <- iota n4] of
             Just arr' -> pure arr'
@@ -1879,10 +1911,19 @@ initialCtx =
         return $ toArray (ShapeDim (n * m) shape) $ concatMap (snd . fromArray) xs'
     def "unflatten" = Just $
       fun3t $ \n m xs -> do
-        let (ShapeDim _ innershape, xs') = fromArray xs
+        let (ShapeDim xs_size innershape, xs') = fromArray xs
             rowshape = ShapeDim (asInt64 m) innershape
             shape = ShapeDim (asInt64 n) rowshape
-        return $ toArray shape $ map (toArray rowshape) $ chunk (asInt m) xs'
+        if asInt64 n * asInt64 m /= xs_size
+          then
+            bad mempty mempty $
+              "Cannot unflatten array of shape [" <> pretty xs_size
+                <> "] to array of shape ["
+                <> pretty (asInt64 n)
+                <> "]["
+                <> pretty (asInt64 m)
+                <> "]"
+          else pure $ toArray shape $ map (toArray rowshape) $ chunk (asInt m) xs'
     def "vjp2" = Just $
       fun3t $ \_ _ _ -> bad noLoc mempty "Interpreter does not support autodiff."
     def "jvp2" = Just $

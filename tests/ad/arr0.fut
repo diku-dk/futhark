@@ -1,4 +1,4 @@
-let f (xs: [2]f64) = xs[0] * xs[1]
+def f (xs: [2]f64) = xs[0] * xs[1]
 
 -- ==
 -- entry: f_jvp

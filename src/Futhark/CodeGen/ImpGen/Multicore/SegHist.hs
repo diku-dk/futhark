@@ -4,7 +4,7 @@ module Futhark.CodeGen.ImpGen.Multicore.SegHist
 where
 
 import Control.Monad
-import Data.List (zip4, zip5)
+import Data.List (zip4)
 import qualified Futhark.CodeGen.ImpCode.Multicore as Imp
 import Futhark.CodeGen.ImpGen
 import Futhark.CodeGen.ImpGen.Multicore.Base
@@ -33,6 +33,9 @@ compileSegHist pat space histops kbody nsubtasks
 segHistOpChunks :: [HistOp rep] -> [a] -> [[a]]
 segHistOpChunks = chunks . map (length . histNeutral)
 
+histSize :: HistOp MCMem -> Imp.TExp Int64
+histSize = product . map toInt64Exp . shapeDims . histShape
+
 nonsegmentedHist ::
   Pat MCMem ->
   SegSpace ->
@@ -44,7 +47,7 @@ nonsegmentedHist pat space histops kbody num_histos = do
   let ns = map snd $ unSegSpace space
       ns_64 = map toInt64Exp ns
       num_histos' = tvExp num_histos
-      hist_width = toInt64Exp $ histWidth $ head histops
+      hist_width = histSize $ head histops
       use_subhistogram = sExt64 num_histos' * hist_width .<=. product ns_64
 
   histops' <- renameHistOpLambda histops
@@ -81,9 +84,7 @@ onOpAtomic op = do
       -- Allocate a static array of locks
       -- as in the GPU backend
       let num_locks = 100151 -- This number is taken from the GPU backend
-          dims =
-            map toInt64Exp $
-              shapeDims (histShape op) ++ [histWidth op]
+          dims = map toInt64Exp $ shapeDims (histOpShape op <> histShape op)
       locks <-
         sStaticArray "hist_locks" DefaultSpace int32 $
           Imp.ArrayZeros num_locks
@@ -108,17 +109,17 @@ atomicHistogram pat flat_idx space histops kbody = do
   body <- collect $ do
     zipWithM_ dPrimV_ is $ unflattenIndex ns_64 $ tvExp flat_idx
     compileStms mempty (kernelBodyStms kbody) $ do
-      let (red_res, map_res) = splitFromEnd (length map_pes) $ kernelBodyResult kbody
-          perOp = chunks $ map (length . histDest) histops
-          (buckets, vs) = splitAt (length histops) red_res
+      let (red_res, map_res) =
+            splitFromEnd (length map_pes) $ kernelBodyResult kbody
+          red_res_split = splitHistResults histops $ map kernelResultSubExp red_res
 
       let pes_per_op = chunks (map (length . histDest) histops) all_red_pes
-      forM_ (zip5 histops (perOp vs) buckets atomicOps pes_per_op) $
-        \(HistOp dest_w _ _ _ shape lam, vs', bucket, do_op, dest_res) -> do
+      forM_ (zip4 histops red_res_split atomicOps pes_per_op) $
+        \(HistOp dest_shape _ _ _ shape lam, (bucket, vs'), do_op, dest_res) -> do
           let (_is_params, vs_params) = splitAt (length vs') $ lambdaParams lam
-              dest_w' = toInt64Exp dest_w
-              bucket' = toInt64Exp $ kernelResultSubExp bucket
-              bucket_in_bounds = bucket' .<. dest_w' .&&. 0 .<=. bucket'
+              dest_shape' = map toInt64Exp $ shapeDims dest_shape
+              bucket' = map toInt64Exp bucket
+              bucket_in_bounds = inBounds (Slice (map DimFix bucket')) dest_shape'
 
           sComment "save map-out results" $
             forM_ (zip map_pes map_res) $ \(pe, res) ->
@@ -126,11 +127,11 @@ atomicHistogram pat flat_idx space histops kbody = do
 
           sComment "perform updates" $
             sWhen bucket_in_bounds $ do
-              let bucket_is = map Imp.le64 (init is) ++ [bucket']
+              let bucket_is = map Imp.le64 (init is) ++ bucket'
               dLParams $ lambdaParams lam
               sLoopNest shape $ \is' -> do
                 forM_ (zip vs_params vs') $ \(p, res) ->
-                  copyDWIMFix (paramName p) [] (kernelResultSubExp res) is'
+                  copyDWIMFix (paramName p) [] res is'
                 do_op (map patElemName dest_res) (bucket_is ++ is')
 
   free_params <- freeParams body (segFlat space : [tvVar flat_idx])
@@ -202,9 +203,9 @@ subHistogram pat flat_idx space histops num_histos kbody = do
         sIf
           (tid' .==. 0)
           (copyDWIMFix hist [] (Var $ patElemName pe) [])
-          ( sFor "i" (toInt64Exp $ histWidth histop) $ \i ->
-              sLoopNest (histShape histop) $ \vec_is ->
-                copyDWIMFix hist (i : vec_is) ne []
+          ( sLoopNest (histShape histop) $ \shape_is ->
+              sLoopNest (histOpShape histop) $ \vec_is ->
+                copyDWIMFix hist (shape_is <> vec_is) ne []
           )
 
       return op_local_subhistograms
@@ -213,37 +214,32 @@ subHistogram pat flat_idx space histops num_histos kbody = do
   body <- collect $ do
     zipWithM_ dPrimV_ is $ unflattenIndex ns_64 $ sExt64 flat_idx'
     compileStms mempty (kernelBodyStms kbody) $ do
-      let (red_res, map_res) = splitFromEnd (length map_pes) $ kernelBodyResult kbody
-          (buckets, vs) = splitAt (length histops) red_res
-          perOp = chunks $ map (length . histDest) histops
+      let (red_res, map_res) =
+            splitFromEnd (length map_pes) $
+              map kernelResultSubExp $ kernelBodyResult kbody
 
       sComment "save map-out results" $
         forM_ (zip map_pes map_res) $ \(pe, res) ->
-          copyDWIMFix
-            (patElemName pe)
-            (map Imp.le64 is)
-            (kernelResultSubExp res)
-            []
+          copyDWIMFix (patElemName pe) (map Imp.le64 is) res []
 
-      forM_ (zip4 histops local_subhistograms buckets (perOp vs)) $
-        \( histop@(HistOp dest_w _ _ _ shape lam),
+      forM_ (zip3 histops local_subhistograms (splitHistResults histops red_res)) $
+        \( histop@(HistOp dest_shape _ _ _ shape lam),
            histop_subhistograms,
-           bucket,
-           vs'
+           (bucket, vs')
            ) -> do
-            let bucket' = toInt64Exp $ kernelResultSubExp bucket
-                dest_w' = toInt64Exp dest_w
-                bucket_in_bounds = bucket' .<. dest_w' .&&. 0 .<=. bucket'
+            let bucket' = map toInt64Exp bucket
+                dest_shape' = map toInt64Exp $ shapeDims dest_shape
+                bucket_in_bounds =
+                  inBounds (Slice (map DimFix bucket')) dest_shape'
                 vs_params = takeLast (length vs') $ lambdaParams lam
-                bucket_is = [bucket']
 
             sComment "perform updates" $
               sWhen bucket_in_bounds $ do
                 dLParams $ lambdaParams lam
                 sLoopNest shape $ \is' -> do
                   forM_ (zip vs_params vs') $ \(p, res) ->
-                    copyDWIMFix (paramName p) [] (kernelResultSubExp res) is'
-                  updateHisto histop histop_subhistograms (bucket_is ++ is')
+                    copyDWIMFix (paramName p) [] res is'
+                  updateHisto histop histop_subhistograms (bucket' ++ is')
 
   -- Copy the task-local subhistograms to the global subhistograms,
   -- where they will be combined.
@@ -257,17 +253,17 @@ subHistogram pat flat_idx space histops num_histos kbody = do
 
   -- Perform a segmented reduction over the subhistograms
   forM_ (zip3 per_red_pes global_subhistograms histops) $ \(red_pes, hists, op) -> do
-    bucket_id <- newVName "bucket_id"
+    bucket_ids <-
+      replicateM (shapeRank (histShape op)) (newVName "bucket_id")
     subhistogram_id <- newVName "subhistogram_id"
 
-    let num_buckets = histWidth op
-        segred_space =
+    let segred_space =
           SegSpace (segFlat space) $
             segment_dims
-              ++ [(bucket_id, num_buckets)]
+              ++ zip bucket_ids (shapeDims (histShape op))
               ++ [(subhistogram_id, tvSize num_histos)]
 
-        segred_op = SegBinOp Noncommutative (histOp op) (histNeutral op) (histShape op)
+        segred_op = SegBinOp Noncommutative (histOp op) (histNeutral op) (histOpShape op)
 
     nsubtasks_red <- dPrim "num_tasks" $ IntType Int32
     red_code <- compileSegRed' (Pat red_pes) segred_space [segred_op] nsubtasks_red $ \red_cont ->
@@ -275,7 +271,7 @@ subHistogram pat flat_idx space histops num_histos kbody = do
         flip map hists $ \subhisto ->
           ( Var subhisto,
             map Imp.le64 $
-              map fst segment_dims ++ [subhistogram_id, bucket_id]
+              map fst segment_dims ++ [subhistogram_id] ++ bucket_ids
           )
 
     let ns_red = map (toInt64Exp . snd) $ unSegSpace segred_space
@@ -331,15 +327,12 @@ compileSegHistBody idx pat space histops kbody = do
         let (red_res, map_res) =
               splitFromEnd (length map_pes) $
                 map kernelResultSubExp $ kernelBodyResult kbody
-            (buckets, vs) = splitAt (length histops) red_res
-            perOp = chunks $ map (length . histDest) histops
-
-        forM_ (zip4 per_red_pes histops (perOp vs) buckets) $
-          \(red_pes, HistOp dest_w _ _ _ shape lam, vs', bucket) -> do
+        forM_ (zip3 per_red_pes histops (splitHistResults histops red_res)) $
+          \(red_pes, HistOp dest_shape _ _ _ shape lam, (bucket, vs')) -> do
             let (is_params, vs_params) = splitAt (length vs') $ lambdaParams lam
-                bucket' = toInt64Exp bucket
-                dest_w' = toInt64Exp dest_w
-                bucket_in_bounds = bucket' .<. dest_w' .&&. 0 .<=. bucket'
+                bucket' = map toInt64Exp bucket
+                dest_shape' = map toInt64Exp $ shapeDims dest_shape
+                bucket_in_bounds = inBounds (Slice (map DimFix bucket')) dest_shape'
 
             sComment "save map-out results" $
               forM_ (zip map_pes map_res) $ \(pe, res) ->
@@ -350,12 +343,20 @@ compileSegHistBody idx pat space histops kbody = do
                 dLParams $ lambdaParams lam
                 sLoopNest shape $ \vec_is -> do
                   -- Index
-                  let buck = toInt64Exp bucket
                   forM_ (zip red_pes is_params) $ \(pe, p) ->
-                    copyDWIMFix (paramName p) [] (Var $ patElemName pe) (map Imp.le64 (init is) ++ [buck] ++ vec_is)
+                    copyDWIMFix
+                      (paramName p)
+                      []
+                      (Var $ patElemName pe)
+                      (map Imp.le64 (init is) ++ bucket' ++ vec_is)
                   -- Value at index
                   forM_ (zip vs_params vs') $ \(p, v) ->
                     copyDWIMFix (paramName p) [] v vec_is
                   compileStms mempty (bodyStms $ lambdaBody lam) $
                     forM_ (zip red_pes $ map resSubExp $ bodyResult $ lambdaBody lam) $
-                      \(pe, se) -> copyDWIMFix (patElemName pe) (map Imp.le64 (init is) ++ [buck] ++ vec_is) se []
+                      \(pe, se) ->
+                        copyDWIMFix
+                          (patElemName pe)
+                          (map Imp.le64 (init is) ++ bucket' ++ vec_is)
+                          se
+                          []

@@ -1,4 +1,4 @@
-let mult_list xs =
+def mult_list xs =
   loop start = 1 for x in xs do
     x * x
 			   

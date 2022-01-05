@@ -2,4 +2,4 @@
 -- ==
 -- error: \*\[.*\]i32
 
-let main (x: []i32) = x : *[]i32
+def main (x: []i32) = x : *[]i32

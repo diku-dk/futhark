@@ -68,10 +68,10 @@ import Futhark.Construct
 import Futhark.IR
 import Futhark.IR.Aliases (Aliases, removeLambdaAliases)
 import Futhark.IR.Prop.Aliases
+import qualified Futhark.IR.TypeCheck as TC
 import Futhark.Optimise.Simplify.Rep
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
-import qualified Futhark.TypeCheck as TC
 import Futhark.Util (chunks, maybeNth)
 import Futhark.Util.Pretty (Doc, Pretty, comma, commasep, parens, ppr, text, (<+>), (</>))
 import qualified Futhark.Util.Pretty as PP
@@ -135,7 +135,7 @@ data SOAC rep
 
 -- | Information about computing a single histogram.
 data HistOp rep = HistOp
-  { histWidth :: SubExp,
+  { histShape :: Shape,
     -- | Race factor @RF@ means that only @1/RF@
     -- bins are used.
     histRaceFactor :: SubExp,
@@ -442,8 +442,8 @@ mapSOACM tv (Hist w arrs ops bucket_fun) =
     <$> mapOnSOACSubExp tv w
     <*> mapM (mapOnSOACVName tv) arrs
     <*> mapM
-      ( \(HistOp e rf op_arrs nes op) ->
-          HistOp <$> mapOnSOACSubExp tv e
+      ( \(HistOp shape rf op_arrs nes op) ->
+          HistOp <$> mapM (mapOnSOACSubExp tv) shape
             <*> mapOnSOACSubExp tv rf
             <*> mapM (mapOnSOACVName tv) op_arrs
             <*> mapM (mapOnSOACSubExp tv) nes
@@ -525,7 +525,7 @@ soacType (Scatter _w _ivs lam dests) =
     (ws, ns, _) = unzip3 dests
 soacType (Hist _ _ ops _bucket_fun) = do
   op <- ops
-  map (`arrayOfRow` histWidth op) (lambdaReturnType $ histOp op)
+  map (`arrayOfShape` histShape op) (lambdaReturnType $ histOp op)
 soacType (Screma w _arrs form) =
   scremaType w form
 
@@ -765,9 +765,9 @@ typeCheckSOAC (Hist w arrs ops bucket_fun) = do
   TC.require [Prim int64] w
 
   -- Check the operators.
-  forM_ ops $ \(HistOp dest_w rf dests nes op) -> do
+  forM_ ops $ \(HistOp dest_shape rf dests nes op) -> do
     nes' <- mapM TC.checkArg nes
-    TC.require [Prim int64] dest_w
+    mapM_ (TC.require [Prim int64]) dest_shape
     TC.require [Prim int64] rf
 
     -- Operator type must match the type of neutral elements.
@@ -783,7 +783,7 @@ typeCheckSOAC (Hist w arrs ops bucket_fun) = do
 
     -- Arrays must have proper type.
     forM_ (zip nes_t dests) $ \(t, dest) -> do
-      TC.requireI [t `arrayOfRow` dest_w] dest
+      TC.requireI [t `arrayOfShape` dest_shape] dest
       TC.consume =<< TC.lookupAliases dest
 
   -- Types of input arrays must equal parameter types for bucket function.
@@ -793,7 +793,9 @@ typeCheckSOAC (Hist w arrs ops bucket_fun) = do
   -- Return type of bucket function must be an index for each
   -- operation followed by the values to write.
   nes_ts <- concat <$> mapM (mapM subExpType . histNeutral) ops
-  let bucket_ret_t = replicate (length ops) (Prim int64) ++ nes_ts
+  let bucket_ret_t =
+        concatMap ((`replicate` Prim int64) . shapeRank . histShape) ops
+          ++ nes_ts
   unless (bucket_ret_t == lambdaReturnType bucket_fun) $
     TC.bad $
       TC.TypeError $

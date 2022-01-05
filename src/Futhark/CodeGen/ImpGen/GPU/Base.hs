@@ -345,7 +345,7 @@ prepareIntraGroupSegHist group_size =
           locks <- newVName "locks"
 
           let num_locks = toInt64Exp $ unCount group_size
-              dims = map toInt64Exp $ shapeDims (histShape op) ++ [histWidth op]
+              dims = map toInt64Exp $ shapeDims (histOpShape op <> histShape op)
               l' = Locking locks 0 1 0 (pure . (`rem` num_locks) . flattenIndex dims)
               locks_t = Array int32 (Shape [unCount group_size]) NoUniqueness
 
@@ -393,11 +393,10 @@ compileGroupOp pat (Inner (SizeOp (SplitSpace o w i elems_per_thread))) =
 compileGroupOp pat (Inner (SegOp (SegMap lvl space _ body))) = do
   void $ compileGroupSpace lvl space
 
-  whenActive lvl space $
-    localOps threadOperations $
-      compileStms mempty (kernelBodyStms body) $
-        zipWithM_ (compileThreadResult space) (patElems pat) $
-          kernelBodyResult body
+  whenActive lvl space . localOps threadOperations $
+    compileStms mempty (kernelBodyStms body) $
+      zipWithM_ (compileThreadResult space) (patElems pat) $
+        kernelBodyResult body
 
   sOp $ Imp.ErrorSync Imp.FenceLocal
 compileGroupOp pat (Inner (SegOp (SegScan lvl space scans _ body))) = do
@@ -405,7 +404,7 @@ compileGroupOp pat (Inner (SegOp (SegScan lvl space scans _ body))) = do
   let (ltids, dims) = unzip $ unSegSpace space
       dims' = map toInt64Exp dims
 
-  whenActive lvl space $
+  whenActive lvl space . localOps threadOperations $
     compileStms mempty (kernelBodyStms body) $
       forM_ (zip (patNames pat) $ kernelBodyResult body) $ \(dest, res) ->
         copyDWIMFix
@@ -459,7 +458,7 @@ compileGroupOp pat (Inner (SegOp (SegRed lvl space ops _ body))) = do
   tmp_arrs <- mapM mkTempArr $ concatMap (lambdaReturnType . segBinOpLambda) ops
   let tmps_for_ops = chunks (map (length . segBinOpNeutral) ops) tmp_arrs
 
-  whenActive lvl space $
+  whenActive lvl space . localOps threadOperations $
     compileStms mempty (kernelBodyStms body) $ do
       let (red_res, map_res) =
             splitAt (segBinOpResults ops) $ kernelBodyResult body
@@ -537,7 +536,7 @@ compileGroupOp pat (Inner (SegOp (SegHist lvl space ops _ kbody))) = do
   -- Ensure that all locks have been initialised.
   sOp $ Imp.Barrier Imp.FenceLocal
 
-  whenActive lvl space $
+  whenActive lvl space . localOps threadOperations $
     compileStms mempty (kernelBodyStms kbody) $ do
       let (red_res, map_res) = splitAt num_red_res $ kernelBodyResult kbody
           (red_is, red_vs) = splitAt (length ops) $ map kernelResultSubExp red_res
@@ -546,10 +545,10 @@ compileGroupOp pat (Inner (SegOp (SegHist lvl space ops _ kbody))) = do
       let vs_per_op = chunks (map (length . histDest) ops) red_vs
 
       forM_ (zip4 red_is vs_per_op ops' ops) $
-        \(bin, op_vs, do_op, HistOp dest_w _ _ _ shape lam) -> do
+        \(bin, op_vs, do_op, HistOp dest_shape _ _ _ shape lam) -> do
           let bin' = toInt64Exp bin
-              dest_w' = toInt64Exp dest_w
-              bin_in_bounds = 0 .<=. bin' .&&. bin' .<. dest_w'
+              dest_shape' = map toInt64Exp $ shapeDims dest_shape
+              bin_in_bounds = inBounds (Slice (map DimFix [bin'])) dest_shape'
               bin_is = map Imp.le64 (init ltids) ++ [bin']
               vs_params = takeLast (length op_vs) $ lambdaParams lam
 
@@ -1190,7 +1189,7 @@ groupScan seg_flag arrs_full_size w lam arrs = do
   barrier
 
   sComment "restore correct values for first block" $
-    sWhen is_first_block $
+    sWhen (is_first_block .&&. ltid_in_bounds) $
       forM_ (zip3 x_params y_params arrs) $ \(x, y, arr) ->
         if primType (paramType y)
           then copyDWIM arr [DimFix ltid] (Var $ paramName y) []

@@ -6,7 +6,7 @@
 -- input { [1,2,3,4,5,6,8,9] 2 }
 -- output { 1i64 }
 
-let main [n] (as: [n]i32) (value: i32): i64 =
+def main [n] (as: [n]i32) (value: i32): i64 =
   let low = 0
   let high = n-1
   let (low, _) = loop ((low,high)) while low <= high do

@@ -1,6 +1,5 @@
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE TypeFamilies #-}
 
 -- | This module implements an optimization that tries to statically reuse
@@ -9,7 +8,6 @@
 module Futhark.Optimise.MemoryBlockMerging (optimise) where
 
 import Control.Exception
-import Control.Monad.Reader
 import Control.Monad.State.Strict
 import Data.Function ((&))
 import Data.Map (Map, (!))
@@ -17,7 +15,6 @@ import qualified Data.Map as M
 import Data.Set (Set)
 import qualified Data.Set as S
 import qualified Futhark.Analysis.Interference as Interference
-import qualified Futhark.Analysis.LastUse as LastUse
 import Futhark.Builder.Class
 import Futhark.Construct
 import Futhark.IR.GPUMem
@@ -100,34 +97,8 @@ maxSubExp = helper . S.toList
       return s
     helper [] = error "impossible"
 
-definedInExp :: Exp GPUMem -> Set VName
-definedInExp (Op (Inner (SegOp segop))) =
-  definedInSegOp segop
-definedInExp (If _ then_body else_body _) =
-  foldMap definedInStm (bodyStms then_body)
-    <> foldMap definedInStm (bodyStms else_body)
-definedInExp (DoLoop _ _ body) =
-  foldMap definedInStm $ bodyStms body
-definedInExp _ = mempty
-
-definedInStm :: Stm GPUMem -> Set VName
-definedInStm Let {stmPat = Pat merge, stmExp} =
-  let definedInside = merge & fmap patElemName & S.fromList
-   in definedInExp stmExp <> definedInside
-
-definedInSegOp :: SegOp lvl GPUMem -> Set VName
-definedInSegOp (SegMap _ _ _ body) =
-  foldMap definedInStm $ kernelBodyStms body
-definedInSegOp (SegRed _ _ _ _ body) =
-  foldMap definedInStm $ kernelBodyStms body
-definedInSegOp (SegScan _ _ _ _ body) =
-  foldMap definedInStm $ kernelBodyStms body
-definedInSegOp (SegHist _ _ _ _ body) =
-  foldMap definedInStm $ kernelBodyStms body
-
-isKernelInvariant :: SegOp lvl GPUMem -> (SubExp, space) -> Bool
-isKernelInvariant segop (Var vname, _) =
-  not $ vname `S.member` definedInSegOp segop
+isKernelInvariant :: Scope GPUMem -> (SubExp, space) -> Bool
+isKernelInvariant scope (Var vname, _) = vname `M.member` scope
 isKernelInvariant _ _ = True
 
 onKernelBodyStms ::
@@ -158,7 +129,8 @@ optimiseKernel ::
   m (SegOp lvl GPUMem)
 optimiseKernel graph segop0 = do
   segop <- onKernelBodyStms segop0 $ onKernels $ optimiseKernel graph
-  let allocs = M.filter (isKernelInvariant segop) $ getAllocsSegOp segop
+  scope_here <- askScope
+  let allocs = M.filter (isKernelInvariant scope_here) $ getAllocsSegOp segop
       (colorspaces, coloring) =
         GreedyColoring.colorGraph
           (fmap snd allocs)
@@ -194,48 +166,33 @@ onKernels ::
   (SegOp SegLevel GPUMem -> m (SegOp SegLevel GPUMem)) ->
   Stms GPUMem ->
   m (Stms GPUMem)
-onKernels f =
-  mapM helper
+onKernels f stms = inScopeOf stms $ mapM helper stms
   where
-    helper stm@Let {stmExp = Op (Inner (SegOp segop))} =
-      inScopeOf stm $ do
-        exp' <- f segop
-        return $ stm {stmExp = Op $ Inner $ SegOp exp'}
-    helper stm@Let {stmExp = If c then_body else_body dec} =
-      inScopeOf stm $ do
-        then_body_stms <- f `onKernels` bodyStms then_body
-        else_body_stms <- f `onKernels` bodyStms else_body
-        return $
-          stm
-            { stmExp =
-                If
-                  c
-                  (then_body {bodyStms = then_body_stms})
-                  (else_body {bodyStms = else_body_stms})
-                  dec
-            }
-    helper stm@Let {stmExp = DoLoop merge form body} =
-      inScopeOf stm $ do
-        stms <- f `onKernels` bodyStms body
-        return $ stm {stmExp = DoLoop merge form (body {bodyStms = stms})}
-    helper stm =
-      inScopeOf stm $ return stm
+    helper stm@Let {stmExp = Op (Inner (SegOp segop))} = do
+      exp' <- f segop
+      return $ stm {stmExp = Op $ Inner $ SegOp exp'}
+    helper stm@Let {stmExp = If c then_body else_body dec} = do
+      then_body_stms <- f `onKernels` bodyStms then_body
+      else_body_stms <- f `onKernels` bodyStms else_body
+      return $
+        stm
+          { stmExp =
+              If
+                c
+                (then_body {bodyStms = then_body_stms})
+                (else_body {bodyStms = else_body_stms})
+                dec
+          }
+    helper stm@Let {stmExp = DoLoop merge form body} = do
+      body_stms <- f `onKernels` bodyStms body
+      return $ stm {stmExp = DoLoop merge form (body {bodyStms = body_stms})}
+    helper stm = return stm
 
 -- | Perform the reuse-allocations optimization.
 optimise :: Pass GPUMem GPUMem
 optimise =
   Pass "reuse allocations" "reuse allocations" $ \prog ->
-    let (lumap, _) = LastUse.analyseProg prog
-        graph =
-          foldMap
-            ( \f ->
-                runReader
-                  ( Interference.analyseGPU lumap $
-                      bodyStms $ funDefBody f
-                  )
-                  $ scopeOf f
-            )
-            $ progFuns prog
+    let graph = Interference.analyseProgGPU prog
      in Pass.intraproceduralTransformation (onStms graph) prog
   where
     onStms ::

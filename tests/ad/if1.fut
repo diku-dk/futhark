@@ -5,7 +5,7 @@
 -- compiled input { true 5.0 }
 -- output { 11.0 }
 
-let f (b, x) : f64 =
+def f (b, x) : f64 =
   let y = if b then x*x else x
   let z = y + x
   in z

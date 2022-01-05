@@ -7,4 +7,4 @@
 -- input { 10f64 }
 -- output { 2.302585092994046f64 3.321928094887362f64 1f64 }
 
-let main x = (f64.log x, f64.log2 x, f64.log10 x)
+def main x = (f64.log x, f64.log2 x, f64.log10 x)

@@ -16,10 +16,10 @@
 -- structure gpu { DoLoop/SegMap 1 DoLoop 2 }
 
 
-let combineVs [n] (n_row: [n]f64, vol_row: [n]f64, dr_row: [n]f64): [n]f64 =
+def combineVs [n] (n_row: [n]f64, vol_row: [n]f64, dr_row: [n]f64): [n]f64 =
     map2 (+) dr_row (map2 (*) n_row vol_row)
 
-let mkPrices [num_und][num_dates]
+def mkPrices [num_und][num_dates]
           (md_starts: [num_und]f64, md_vols: [num_dates][num_und]f64,
 	   md_drifts: [num_dates][num_und]f64, noises: [num_dates][num_und]f64): [num_dates][num_und]f64 =
   let e_rows = map (\(x: []f64)  ->
@@ -29,7 +29,7 @@ let mkPrices [num_und][num_dates]
              map2 (*) x y)
      md_starts e_rows
 
-let main(n: i32,
+def main(n: i32,
                     md_vols: [][]f64,
                     md_drifts: [][]f64,
                     md_starts: []f64,

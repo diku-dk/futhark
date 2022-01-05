@@ -1,4 +1,4 @@
-let pow y x =
+def pow y x =
   #[stripmine(3)]
   loop acc = 1 for _i < y do
 		acc * x

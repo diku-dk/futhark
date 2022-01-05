@@ -1,4 +1,4 @@
-let pow y x =
+def pow y x =
   let (_, res) =
     #[bound(1000)]
     loop (i, acc) = (0, 1) while i < y do

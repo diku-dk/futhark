@@ -18,8 +18,10 @@ module Futhark.Analysis.UsageTable
     inResultUsage,
     sizeUsage,
     sizeUsages,
+    withoutU,
     Usages,
     consumedU,
+    presentU,
     usageInStm,
   )
 where
@@ -138,7 +140,7 @@ sizeU = Usages 8
 matches :: Usages -> Usages -> Bool
 matches (Usages x) (Usages y) = x == (x .&. y)
 
--- | x - y, but for Usages.
+-- | x - y, but for 'Usages'.
 withoutU :: Usages -> Usages -> Usages
 withoutU (Usages x) (Usages y) = Usages $ x .&. complement y
 

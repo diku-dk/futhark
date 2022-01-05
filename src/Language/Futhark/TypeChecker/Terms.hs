@@ -636,7 +636,9 @@ checkExp (Lambda params body rettype_te NoInfo loc) =
 
     (rettype', rettype_st) <-
       case rettype_checked of
-        Just (te, st, ext) ->
+        Just (te, st, ext) -> do
+          let st_structural = toStructural st
+          checkReturnAlias loc st_structural params'' body_t
           pure (Just te, RetType ext st)
         Nothing -> do
           ret <-
@@ -944,6 +946,11 @@ checkApply
       checkIfConsumable loc $ S.map AliasBound $ allConsumed occurs
       occur occurs
 
+      -- Unification ignores uniqueness in higher-order arguments, so
+      -- we check for that here.
+      unless (toStructural argtype' `subtypeOf` toStructural tp1') $
+        typeError loc mempty "Uniqueness does not match."
+
       (argext, parsubst) <-
         case pname of
           Named pname'
@@ -1030,12 +1037,16 @@ maskAliases t Consume = t `setAliases` mempty
 maskAliases t Observe = t
 maskAliases (Scalar (Record ets)) (RecordDiet ds) =
   Scalar $ Record $ M.intersectionWith maskAliases ets ds
+maskAliases (Scalar (Sum ets)) (SumDiet ds) =
+  Scalar $ Sum $ M.intersectionWith (zipWith maskAliases) ets ds
 maskAliases t FuncDiet {} = t
 maskAliases _ _ = error "Invalid arguments passed to maskAliases."
 
 consumeArg :: SrcLoc -> PatType -> Diet -> TermTypeM [Occurrence]
 consumeArg loc (Scalar (Record ets)) (RecordDiet ds) =
   concat . M.elems <$> traverse (uncurry $ consumeArg loc) (M.intersectionWith (,) ets ds)
+consumeArg loc (Scalar (Sum ets)) (SumDiet ds) =
+  concat <$> traverse (uncurry $ consumeArg loc) (concat $ M.elems $ M.intersectionWith zip ets ds)
 consumeArg loc (Array _ Nonunique _ _) Consume =
   typeError loc mempty . withIndexLink "consuming-parameter" $
     "Consuming parameter passed non-unique argument."
@@ -1292,10 +1303,12 @@ fixOverloadedTypes tyvars_at_toplevel =
         typeError usage mempty . withIndexLink "ambiguous-type" $
           "Type is ambiguous (could be one of" <+> commasep (map ppr ots) <> ")."
             </> "Add a type annotation to disambiguate the type."
-    fixOverloaded (_, NoConstraint _ usage) =
-      typeError usage mempty . withIndexLink "ambiguous-type" $
-        "Type of expression is ambiguous."
-          </> "Add a type annotation to disambiguate the type."
+    fixOverloaded (v, NoConstraint _ usage) = do
+      -- See #1552.
+      unify usage (Scalar (TypeVar () Nonunique (typeName v) [])) $
+        Scalar $ tupleRecord []
+      when (v `S.member` tyvars_at_toplevel) $
+        warn usage "Defaulting ambiguous type to ()."
     fixOverloaded (_, Equality usage) =
       typeError usage mempty . withIndexLink "ambiguous-type" $
         "Type is ambiguous (must be equality type)."
@@ -1340,6 +1353,38 @@ inferredReturnType loc params t =
   where
     hidden = hiddenParamNames params
 
+checkReturnAlias :: SrcLoc -> TypeBase () () -> [Pat] -> PatType -> TermTypeM ()
+checkReturnAlias loc rettp params =
+  foldM_ (checkReturnAlias' params) S.empty . returnAliasing rettp
+  where
+    checkReturnAlias' params' seen (Unique, names)
+      | any (`S.member` S.map snd seen) $ S.toList names =
+        uniqueReturnAliased loc
+      | otherwise = do
+        notAliasingParam params' names
+        pure $ seen `S.union` tag Unique names
+    checkReturnAlias' _ seen (Nonunique, names)
+      | any (`S.member` seen) $ S.toList $ tag Unique names =
+        uniqueReturnAliased loc
+      | otherwise = pure $ seen `S.union` tag Nonunique names
+
+    notAliasingParam params' names =
+      forM_ params' $ \p ->
+        let consumedNonunique p' =
+              not (unique $ unInfo $ identType p') && (identName p' `S.member` names)
+         in case find consumedNonunique $ S.toList $ patIdents p of
+              Just p' ->
+                returnAliased (baseName $ identName p') loc
+              Nothing ->
+                pure ()
+
+    tag u = S.map (u,)
+
+    returnAliasing (Scalar (Record ets1)) (Scalar (Record ets2)) =
+      concat $ M.elems $ M.intersectionWith returnAliasing ets1 ets2
+    returnAliasing expected got =
+      [(uniqueness expected, S.map aliasVar $ aliases got)]
+
 checkBinding ::
   ( Name,
     Maybe UncheckedTypeExp,
@@ -1357,8 +1402,7 @@ checkBinding ::
     )
 checkBinding (fname, maybe_retdecl, tparams, params, body, loc) =
   noUnique . incLevel . bindingParams tparams params $ \tparams' params' -> do
-    maybe_retdecl' <- forM maybe_retdecl $ \retdecl ->
-      checkTypeExpNonrigid retdecl
+    maybe_retdecl' <- traverse checkTypeExpNonrigid maybe_retdecl
 
     body' <-
       checkFunBody
@@ -1373,7 +1417,7 @@ checkBinding (fname, maybe_retdecl, tparams, params, body, loc) =
     (maybe_retdecl'', rettype) <- case maybe_retdecl' of
       Just (retdecl', ret, _) -> do
         let rettype_structural = toStructural ret
-        checkReturnAlias rettype_structural params'' body_t
+        checkReturnAlias loc rettype_structural params'' body_t
 
         when (null params) $ nothingMustBeUnique loc rettype_structural
 
@@ -1395,36 +1439,6 @@ checkBinding (fname, maybe_retdecl, tparams, params, body, loc) =
     checkGlobalAliases params'' body_t loc
 
     pure (tparams'', params''', maybe_retdecl'', rettype'', body')
-  where
-    checkReturnAlias rettp params' =
-      foldM_ (checkReturnAlias' params') S.empty . returnAliasing rettp
-    checkReturnAlias' params' seen (Unique, names)
-      | any (`S.member` S.map snd seen) $ S.toList names =
-        uniqueReturnAliased fname loc
-      | otherwise = do
-        notAliasingParam params' names
-        pure $ seen `S.union` tag Unique names
-    checkReturnAlias' _ seen (Nonunique, names)
-      | any (`S.member` seen) $ S.toList $ tag Unique names =
-        uniqueReturnAliased fname loc
-      | otherwise = pure $ seen `S.union` tag Nonunique names
-
-    notAliasingParam params' names =
-      forM_ params' $ \p ->
-        let consumedNonunique p' =
-              not (unique $ unInfo $ identType p') && (identName p' `S.member` names)
-         in case find consumedNonunique $ S.toList $ patIdents p of
-              Just p' ->
-                returnAliased fname (baseName $ identName p') loc
-              Nothing ->
-                pure ()
-
-    tag u = S.map (u,)
-
-    returnAliasing (Scalar (Record ets1)) (Scalar (Record ets2)) =
-      concat $ M.elems $ M.intersectionWith returnAliasing ets1 ets2
-    returnAliasing expected got =
-      [(uniqueness expected, S.map aliasVar $ aliases got)]
 
 -- | Extract all the shape names that occur in positive position
 -- (roughly, left side of an arrow) in a given type.
@@ -1715,7 +1729,7 @@ checkFunBody params body maybe_rettype loc = do
       -- We also have to make sure that uniqueness matches.  This is done
       -- explicitly, because uniqueness is ignored by unification.
       rettype' <- normTypeFully rettype
-      body_t'' <- normTypeFully rettype -- Substs may have changed.
+      body_t'' <- normTypeFully body_t' -- Substs may have changed.
       unless (toStructural body_t'' `subtypeOf` toStructural rettype') $
         typeError (srclocOf body) mempty $
           "Body type" </> indent 2 (ppr body_t'')

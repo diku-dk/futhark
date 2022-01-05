@@ -1,4 +1,4 @@
-let test [n] (xs: [n]i32) =
+def test [n] (xs: [n]i32) =
   let xs' = copy xs
   in loop xs'' = xs' for i < n do
        let foo = xs'' with [i] = 1

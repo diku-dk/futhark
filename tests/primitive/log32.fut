@@ -7,4 +7,4 @@
 -- input { 10f32 }
 -- output { 2.302585092994046f32 3.321928094887362f32 1f32 }
 
-let main x = (f32.log x, f32.log2 x, f32.log10 x)
+def main x = (f32.log x, f32.log2 x, f32.log10 x)

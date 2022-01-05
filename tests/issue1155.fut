@@ -7,5 +7,5 @@ module type Addable = {
 }
 module Add_f32:Addable = {
 	type t = f32
-	let add a b = a + b
+	def add a b = a + b
 }

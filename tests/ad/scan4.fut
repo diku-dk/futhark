@@ -9,11 +9,11 @@
 --  [[1f32, 24f32], [1f32, 16f32], [1f32, 12f32], [1f32, 24f32]]]
 -- }
 
-let primal [n] (xs: [n](f32,f32)) =
+def primal [n] (xs: [n](f32,f32)) =
   scan (\(a1,b1) (a2,b2) -> (a1+a2, b1*b2)) (0,1) xs
 
-let fromarrs = map (\x -> (x[0],x[1]))
-let toarrs = map (\(a,b) -> [a,b])
+def fromarrs = map (\x -> (x[0],x[1]))
+def toarrs = map (\(a,b) -> [a,b])
 
 entry fwd_J [n] (input: [n][2]f32) =
   let input = fromarrs input

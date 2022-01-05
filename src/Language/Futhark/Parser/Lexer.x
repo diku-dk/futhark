@@ -137,6 +137,7 @@ keyword s =
     "if"           -> IF
     "then"         -> THEN
     "else"         -> ELSE
+    "def"          -> DEF
     "let"          -> LET
     "loop"         -> LOOP
     "in"           -> IN
@@ -344,6 +345,7 @@ data Token = ID Name
            | IF
            | THEN
            | ELSE
+           | DEF
            | LET
            | LOOP
            | IN
@@ -380,6 +382,22 @@ runAlex' start_pos input__ (Alex f) =
                     , alex_scd = 0}) of Left msg -> Left msg
                                         Right ( _, a ) -> Right a
 
+
+getToken :: FilePath -> Alex (Lexeme Token)
+getToken file = do
+  inp__@(_,_,_,n) <- alexGetInput
+  sc <- alexGetStartCode
+  case alexScan inp__ sc of
+    AlexEOF -> alexEOF
+    AlexError ((AlexPn _ line column),_,_,_) ->
+      alexError $ "Error at " ++ file ++ ":" ++ show line ++ ":" ++ show column ++ ": lexical error."
+    AlexSkip  inp__' _len -> do
+      alexSetInput inp__'
+      getToken file
+    AlexToken inp__'@(_,_,_,n') _ action -> let len = n'-n in do
+      alexSetInput inp__'
+      action (ignorePendingBytes inp__) len
+
 -- | Given a starting position, produce tokens from the given text (or
 -- a lexer error).  Returns the final position.
 scanTokensText :: Pos -> T.Text -> Either String ([L Token], Pos)
@@ -389,7 +407,7 @@ scanTokens :: Pos -> BS.ByteString -> Either String ([L Token], Pos)
 scanTokens (Pos file start_line start_col start_off) str =
   runAlex' (AlexPn start_off start_line start_col) str $ do
   fix $ \loop -> do
-    tok <- alexMonadScan
+    tok <- getToken file
     case tok of
       (start, end, EOF) ->
         return ([], posnToPos end)

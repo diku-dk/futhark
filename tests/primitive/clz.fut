@@ -5,7 +5,7 @@
 -- input { 4294967295u64 } output { 0i32 0i32 0i32 32i32 0i32 0i32 0i32 32i32 }
 -- input { 18446744073709551615u64 } output { 0i32 0i32 0i32 0i32 0i32 0i32 0i32 0i32 }
 
-let main (x: u64) =
+def main (x: u64) =
   (i8.clz (i8.u64 x),
    i16.clz (i16.u64 x),
    i32.clz (i32.u64 x),

@@ -6,7 +6,7 @@
 --          4.353770450191565f64 -16.849170784854458f64 143.57670512770449f64 27.347943833848472f64
 --        }
 
-let lighthouse (nu, gamma, omega, t) =
+def lighthouse (nu, gamma, omega, t) =
   let y1 = (nu * f64.tan(omega * t)) / (gamma - f64.tan(omega * t))
   let y2 = (gamma * nu * f64.tan(omega * t)) / (gamma - f64.tan(omega * t))
   in (y1, y2)

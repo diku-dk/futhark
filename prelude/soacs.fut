@@ -47,7 +47,7 @@ import "zip"
 -- **Work:** *O(n ✕ W(f))*
 --
 -- **Span:** *O(S(f))*
-let map 'a [n] 'x (f: a -> x) (as: [n]a): *[n]x =
+def map 'a [n] 'x (f: a -> x) (as: [n]a): *[n]x =
   intrinsics.map (f, as) :> *[n]x
 
 -- | Apply the given function to each element of a single array.
@@ -55,7 +55,7 @@ let map 'a [n] 'x (f: a -> x) (as: [n]a): *[n]x =
 -- **Work:** *O(n ✕ W(f))*
 --
 -- **Span:** *O(S(f))*
-let map1 'a [n] 'x (f: a -> x) (as: [n]a): *[n]x =
+def map1 'a [n] 'x (f: a -> x) (as: [n]a): *[n]x =
   map f as
 
 -- | As `map1`@term, but with one more array.
@@ -63,7 +63,7 @@ let map1 'a [n] 'x (f: a -> x) (as: [n]a): *[n]x =
 -- **Work:** *O(n ✕ W(f))*
 --
 -- **Span:** *O(S(f))*
-let map2 'a 'b [n] 'x (f: a -> b -> x) (as: [n]a) (bs: [n]b): *[n]x =
+def map2 'a 'b [n] 'x (f: a -> b -> x) (as: [n]a) (bs: [n]b): *[n]x =
   map (\(a, b) -> f a b) (zip2 as bs)
 
 -- | As `map2`@term, but with one more array.
@@ -71,7 +71,7 @@ let map2 'a 'b [n] 'x (f: a -> b -> x) (as: [n]a) (bs: [n]b): *[n]x =
 -- **Work:** *O(n ✕ W(f))*
 --
 -- **Span:** *O(S(f))*
-let map3 'a 'b 'c [n] 'x (f: a -> b -> c -> x) (as: [n]a) (bs: [n]b) (cs: [n]c): *[n]x =
+def map3 'a 'b 'c [n] 'x (f: a -> b -> c -> x) (as: [n]a) (bs: [n]b) (cs: [n]c): *[n]x =
   map (\(a, b, c) -> f a b c) (zip3 as bs cs)
 
 -- | As `map3`@term, but with one more array.
@@ -79,7 +79,7 @@ let map3 'a 'b 'c [n] 'x (f: a -> b -> c -> x) (as: [n]a) (bs: [n]b) (cs: [n]c):
 -- **Work:** *O(n ✕ W(f))*
 --
 -- **Span:** *O(S(f))*
-let map4 'a 'b 'c 'd [n] 'x (f: a -> b -> c -> d -> x) (as: [n]a) (bs: [n]b) (cs: [n]c) (ds: [n]d): *[n]x =
+def map4 'a 'b 'c 'd [n] 'x (f: a -> b -> c -> d -> x) (as: [n]a) (bs: [n]b) (cs: [n]c) (ds: [n]d): *[n]x =
   map (\(a, b, c, d) -> f a b c d) (zip4 as bs cs ds)
 
 -- | As `map3`@term, but with one more array.
@@ -87,7 +87,7 @@ let map4 'a 'b 'c 'd [n] 'x (f: a -> b -> c -> d -> x) (as: [n]a) (bs: [n]b) (cs
 -- **Work:** *O(n ✕ W(f))*
 --
 -- **Span:** *O(S(f))*
-let map5 'a 'b 'c 'd 'e [n] 'x (f: a -> b -> c -> d -> e -> x) (as: [n]a) (bs: [n]b) (cs: [n]c) (ds: [n]d) (es: [n]e): *[n]x =
+def map5 'a 'b 'c 'd 'e [n] 'x (f: a -> b -> c -> d -> e -> x) (as: [n]a) (bs: [n]b) (cs: [n]c) (ds: [n]d) (es: [n]e): *[n]x =
   map (\(a, b, c, d, e) -> f a b c d e) (zip5 as bs cs ds es)
 
 -- | Reduce the array `as` with `op`, with `ne` as the neutral
@@ -103,7 +103,7 @@ let map5 'a 'b 'c 'd 'e [n] 'x (f: a -> b -> c -> d -> e -> x) (as: [n]a) (bs: [
 --
 -- Note that the complexity implies that parallelism in the combining
 -- operator will *not* be exploited.
-let reduce [n] 'a (op: a -> a -> a) (ne: a) (as: [n]a): a =
+def reduce [n] 'a (op: a -> a -> a) (ne: a) (as: [n]a): a =
   intrinsics.reduce (op, ne, as)
 
 -- | As `reduce`, but the operator must also be commutative.  This is
@@ -114,7 +114,7 @@ let reduce [n] 'a (op: a -> a -> a) (ne: a) (as: [n]a): a =
 -- **Work:** *O(n ✕ W(op))*
 --
 -- **Span:** *O(log(n) ✕ W(op))*
-let reduce_comm [n] 'a (op: a -> a -> a) (ne: a) (as: [n]a): a =
+def reduce_comm [n] 'a (op: a -> a -> a) (ne: a) (as: [n]a): a =
   intrinsics.reduce_comm (op, ne, as)
 
 -- | `reduce_by_index dest f ne is as` returns `dest`, but with each
@@ -132,8 +132,16 @@ let reduce_comm [n] 'a (op: a -> a -> a) (ne: a) (as: [n]a): a =
 --
 -- In practice, the *O(n)* behaviour only occurs if *m* is also very
 -- large.
-let reduce_by_index 'a [m] [n] (dest : *[m]a) (f : a -> a -> a) (ne : a) (is : [n]i64) (as : [n]a) : *[m]a =
-  intrinsics.hist (1, dest, f, ne, is, as) :> *[m]a
+def reduce_by_index 'a [n] [m] (dest : *[m]a) (f : a -> a -> a) (ne : a) (is : [n]i64) (as : [n]a) : *[m]a =
+  intrinsics.hist_1d (1, dest, f, ne, is, as)
+
+-- | As `reduce_by_index`, but with two-dimensional indexes.
+def reduce_by_index_2d 'a [n] [m] [k] (dest : *[m][k]a) (f : a -> a -> a) (ne : a) (is : [n](i64,i64)) (as : [n]a) : *[m][k]a =
+  intrinsics.hist_2d (1, dest, f, ne, is, as)
+
+-- | As `reduce_by_index`, but with three-dimensional indexes.
+def reduce_by_index_3d 'a [n] [m] [k] [l] (dest : *[m][k][l]a) (f : a -> a -> a) (ne : a) (is : [n](i64,i64,i64)) (as : [n]a) : *[m][k][l]a =
+  intrinsics.hist_3d (1, dest, f, ne, is, as)
 
 -- | Inclusive prefix scan.  Has the same caveats with respect to
 -- associativity and complexity as `reduce`.
@@ -141,7 +149,7 @@ let reduce_by_index 'a [m] [n] (dest : *[m]a) (f : a -> a -> a) (ne : a) (is : [
 -- **Work:** *O(n ✕ W(op))*
 --
 -- **Span:** *O(log(n) ✕ W(op))*
-let scan [n] 'a (op: a -> a -> a) (ne: a) (as: [n]a): *[n]a =
+def scan [n] 'a (op: a -> a -> a) (ne: a) (as: [n]a): *[n]a =
   intrinsics.scan (op, ne, as) :> *[n]a
 
 -- | Remove all those elements of `as` that do not satisfy the
@@ -150,7 +158,7 @@ let scan [n] 'a (op: a -> a -> a) (ne: a) (as: [n]a): *[n]a =
 -- **Work:** *O(n ✕ W(p))*
 --
 -- **Span:** *O(log(n) ✕ W(p))*
-let filter [n] 'a (p: a -> bool) (as: [n]a): *[]a =
+def filter [n] 'a (p: a -> bool) (as: [n]a): *[]a =
   let (as', is) = intrinsics.partition (1, \x -> if p x then 0 else 1, as)
   in as'[:is[0]]
 
@@ -160,7 +168,7 @@ let filter [n] 'a (p: a -> bool) (as: [n]a): *[]a =
 -- **Work:** *O(n ✕ W(p))*
 --
 -- **Span:** *O(log(n) ✕ W(p))*
-let partition [n] 'a (p: a -> bool) (as: [n]a): ([]a, []a) =
+def partition [n] 'a (p: a -> bool) (as: [n]a): ([]a, []a) =
   let p' x = if p x then 0 else 1
   let (as', is) = intrinsics.partition (2, p', as)
   in (as'[0:is[0]], as'[is[0]:n])
@@ -170,7 +178,7 @@ let partition [n] 'a (p: a -> bool) (as: [n]a): ([]a, []a) =
 -- **Work:** *O(n ✕ (W(p1) + W(p2)))*
 --
 -- **Span:** *O(log(n) ✕ (W(p1) + W(p2)))*
-let partition2 [n] 'a (p1: a -> bool) (p2: a -> bool) (as: [n]a): ([]a, []a, []a) =
+def partition2 [n] 'a (p1: a -> bool) (p2: a -> bool) (as: [n]a): ([]a, []a, []a) =
   let p' x = if p1 x then 0 else if p2 x then 1 else 2
   let (as', is) = intrinsics.partition (3, p', as)
   in (as'[0:is[0]], as'[is[0]:is[0]+is[1]], as'[is[0]+is[1]:n])
@@ -190,7 +198,7 @@ let partition2 [n] 'a (p1: a -> bool) (p2: a -> bool) (as: [n]a): ([]a, []a, []a
 -- **Work:** *O(n ✕ W(op) + W(f))*
 --
 -- **Span:** *O(log(n) ✕ W(op))*
-let reduce_stream [n] 'a 'b (op: b -> b -> b) (f: (k: i64) -> [k]a -> b) (as: [n]a): b =
+def reduce_stream [n] 'a 'b (op: b -> b -> b) (f: (k: i64) -> [k]a -> b) (as: [n]a): b =
   intrinsics.reduce_stream (op, f, as)
 
 -- | As `reduce_stream`@term, but the chunks do not necessarily
@@ -200,7 +208,7 @@ let reduce_stream [n] 'a 'b (op: b -> b -> b) (f: (k: i64) -> [k]a -> b) (as: [n
 -- **Work:** *O(n ✕ W(op) + W(f))*
 --
 -- **Span:** *O(log(n) ✕ W(op))*
-let reduce_stream_per [n] 'a 'b (op: b -> b -> b) (f: (k: i64) -> [k]a -> b) (as: [n]a): b =
+def reduce_stream_per [n] 'a 'b (op: b -> b -> b) (f: (k: i64) -> [k]a -> b) (as: [n]a): b =
   intrinsics.reduce_stream_per (op, f, as)
 
 -- | Similar to `reduce_stream`@term, except that each chunk must produce
@@ -210,7 +218,7 @@ let reduce_stream_per [n] 'a 'b (op: b -> b -> b) (f: (k: i64) -> [k]a -> b) (as
 -- **Work:** *O(n ✕ W(f))*
 --
 -- **Span:** *O(S(f))*
-let map_stream [n] 'a 'b (f: (k: i64) -> [k]a -> [k]b) (as: [n]a): *[n]b =
+def map_stream [n] 'a 'b (f: (k: i64) -> [k]a -> [k]b) (as: [n]a): *[n]b =
   intrinsics.map_stream (f, as) :> *[n]b
 
 -- | Similar to `map_stream`@term, but the chunks do not necessarily
@@ -220,7 +228,7 @@ let map_stream [n] 'a 'b (f: (k: i64) -> [k]a -> [k]b) (as: [n]a): *[n]b =
 -- **Work:** *O(n ✕ W(f))*
 --
 -- **Span:** *O(S(f))*
-let map_stream_per [n] 'a 'b (f: (k: i64) -> [k]a -> [k]b) (as: [n]a): *[n]b =
+def map_stream_per [n] 'a 'b (f: (k: i64) -> [k]a -> [k]b) (as: [n]a): *[n]b =
   intrinsics.map_stream_per (f, as) :> *[n]b
 
 -- | Return `true` if the given function returns `true` for all
@@ -229,7 +237,7 @@ let map_stream_per [n] 'a 'b (f: (k: i64) -> [k]a -> [k]b) (as: [n]a): *[n]b =
 -- **Work:** *O(n ✕ W(f))*
 --
 -- **Span:** *O(log(n) + S(f))*
-let all [n] 'a (f: a -> bool) (as: [n]a): bool =
+def all [n] 'a (f: a -> bool) (as: [n]a): bool =
   reduce (&&) true (map f as)
 
 -- | Return `true` if the given function returns `true` for any
@@ -238,27 +246,30 @@ let all [n] 'a (f: a -> bool) (as: [n]a): bool =
 -- **Work:** *O(n ✕ W(f))*
 --
 -- **Span:** *O(log(n) + S(f))*
-let any [n] 'a (f: a -> bool) (as: [n]a): bool =
+def any [n] 'a (f: a -> bool) (as: [n]a): bool =
   reduce (||) false (map f as)
 
 -- | `scatter as is vs` calculates the equivalent of this imperative
 -- code:
 --
 -- ```
--- for index in 0..length is-1:
---   i = is[index]
---   v = vs[index]
---   as[i] = v
+-- for j in 0...length is-1:
+--   i = is[j]
+--   v = vs[j]
+--   if i >= 0 && i < length as:
+--     as[i] = v
 -- ```
 --
 -- The `is` and `vs` arrays must have the same outer size.  `scatter`
 -- acts in-place and consumes the `as` array, returning a new array
 -- that has the same type and elements as `as`, except for the indices
--- in `is`.  If `is` contains duplicates (i.e. several writes are
--- performed to the same location), the result is unspecified.  It is
--- not guaranteed that one of the duplicate writes will complete
--- atomically - they may be interleaved.  See `reduce_by_index`@term
--- for a function that can handle this case deterministically.
+-- in `is`. Notice that writing outside the index domain of the target
+-- array has no effect. If `is` contains duplicates for valid indexes
+-- into the target array (i.e., several writes are performed to the
+-- same location), the result is unspecified.  It is not guaranteed
+-- that one of the duplicate writes will complete atomically - they
+-- may be interleaved.  See `reduce_by_index`@term for a function that
+-- can handle this case deterministically.
 --
 -- This is technically not a second-order operation, but it is defined
 -- here because it is closely related to the SOACs.
@@ -266,7 +277,7 @@ let any [n] 'a (f: a -> bool) (as: [n]a): bool =
 -- **Work:** *O(n)*
 --
 -- **Span:** *O(1)*
-let scatter 't [m] [n] (dest: *[m]t) (is: [n]i64) (vs: [n]t): *[m]t =
+def scatter 't [m] [n] (dest: *[m]t) (is: [n]i64) (vs: [n]t): *[m]t =
   intrinsics.scatter (dest, is, vs) :> *[m]t
 
 -- | `scatter_2d as is vs` is the equivalent of a `scatter` on a 2-dimensional
@@ -275,7 +286,7 @@ let scatter 't [m] [n] (dest: *[m]t) (is: [n]i64) (vs: [n]t): *[m]t =
 -- **Work:** *O(n)*
 --
 -- **Span:** *O(1)*
-let scatter_2d 't [m] [n] [l] (dest: *[m][n]t) (is: [l](i64, i64)) (vs: [l]t): *[m][n]t =
+def scatter_2d 't [m] [n] [l] (dest: *[m][n]t) (is: [l](i64, i64)) (vs: [l]t): *[m][n]t =
   intrinsics.scatter_2d (dest, is, vs) :> *[m][n]t
 
 -- | `scatter_3d as is vs` is the equivalent of a `scatter` on a 3-dimensional
@@ -284,5 +295,5 @@ let scatter_2d 't [m] [n] [l] (dest: *[m][n]t) (is: [l](i64, i64)) (vs: [l]t): *
 -- **Work:** *O(n)*
 --
 -- **Span:** *O(1)*
-let scatter_3d 't [m] [n] [o] [l] (dest: *[m][n][o]t) (is: [l](i64, i64, i64)) (vs: [l]t): *[m][n][o]t =
+def scatter_3d 't [m] [n] [o] [l] (dest: *[m][n][o]t) (is: [l](i64, i64, i64)) (vs: [l]t): *[m][n][o]t =
   intrinsics.scatter_3d (dest, is, vs) :> *[m][n][o]t

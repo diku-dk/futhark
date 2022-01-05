@@ -11,7 +11,7 @@
 -- }
 -- structure { Scatter 1 }
 
-let main [k][n] (numbers: [k]i64)
+def main [k][n] (numbers: [k]i64)
                 (array0: *[n]i64)
                 (array1: *[n]i64): ([n]i64, [n]i64) =
   let indexes0 = map (+1) numbers

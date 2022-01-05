@@ -2,7 +2,7 @@
 -- causes the 'n' name to disappear.
 -- ==
 
-module sobol_dir = { let n: i32 = 1 }
+module sobol_dir = { def n: i32 = 1 }
 
 module type sobol_dir = {}
 

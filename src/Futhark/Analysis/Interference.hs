@@ -3,7 +3,7 @@
 {-# LANGUAGE TypeFamilies #-}
 
 -- | Interference analysis for Futhark programs.
-module Futhark.Analysis.Interference (Graph, analyseGPU) where
+module Futhark.Analysis.Interference (Graph, analyseProgGPU) where
 
 import Control.Monad.Reader
 import Data.Foldable (toList)
@@ -15,6 +15,8 @@ import Data.Maybe (catMaybes, fromMaybe, mapMaybe)
 import Data.Set (Set)
 import qualified Data.Set as S
 import Futhark.Analysis.LastUse (LastUseMap)
+import qualified Futhark.Analysis.LastUse as LastUse
+import qualified Futhark.Analysis.MemAlias as MemAlias
 import Futhark.IR.GPUMem
 import Futhark.Util (invertMap)
 
@@ -41,8 +43,7 @@ makeEdge v1 v2
 -- combinator function.
 cartesian :: (Monoid m, Foldable t) => (a -> a -> m) -> t a -> t a -> m
 cartesian f xs ys =
-  [(x, y) | x <- toList xs, y <- toList ys]
-    & foldMap (uncurry f)
+  foldMap (uncurry f) [(x, y) | x <- toList xs, y <- toList ys]
 
 analyseStm ::
   LocalScope GPUMem m =>
@@ -215,6 +216,29 @@ analyseLambda ::
   m (InUse, LastUsed, Graph VName)
 analyseLambda lumap inuse (Lambda _ body _) =
   analyseBody lumap inuse body
+
+analyseProgGPU :: Prog GPUMem -> Graph VName
+analyseProgGPU prog =
+  let (lumap, _) = LastUse.analyseGPUMem prog
+      graph =
+        foldMap
+          ( \f ->
+              runReader (analyseGPU lumap $ bodyStms $ funDefBody f) $
+                scopeOf f
+          )
+          $ progFuns prog
+      graph' = applyAliases (MemAlias.analyzeGPUMem prog) graph
+   in graph'
+
+applyAliases :: MemAlias.MemAliases -> Graph VName -> Graph VName
+applyAliases aliases =
+  -- For each pair @(x, y)@ in graph, all memory aliases of x should interfere with all memory aliases of y
+  foldMap
+    ( \(x, y) ->
+        let xs = MemAlias.aliasesOf aliases x <> oneName x
+            ys = MemAlias.aliasesOf aliases y <> oneName y
+         in cartesian makeEdge (namesToList xs) (namesToList ys)
+    )
 
 -- | Perform interference analysis on the given statements. The result is a
 -- triple of the names currently in use, names that hit their last use somewhere

@@ -278,14 +278,13 @@ returnSweepCode m = do
   (a, stms) <- collectStms m
   substs <- gets stateSubsts
   addStms $ substituteNames substs stms
-  modify $ \env -> env {stateAdjs = M.fromList $ map (substituteNames substs) $ M.toList $ stateAdjs env}
   pure a
 
 addSubstitution :: VName -> VName -> ADM ()
 addSubstitution v v' = modify $ \env ->
   env {stateSubsts = M.insert v v' $ stateSubsts env}
 
--- While evaluationg this action, pretend these variables have no
+-- While evaluating this action, pretend these variables have no
 -- adjoints.  Restore current adjoints afterwards.  This is used for
 -- handling certain nested operations. XXX: feels like this should
 -- really be part of subAD, somehow.  Main challenge is that we don't

@@ -15,30 +15,30 @@ type Distance = f64
 type Radius = f64
 type BlockHalfWidths = Vec
 
-let vmap (f: f64 -> f64) (v : Vec) =
+def vmap (f: f64 -> f64) (v : Vec) =
   {x = f v.x, y = f v.y, z = f v.z}
 
-let (a: Vec) <-> (b: Vec) =
+def (a: Vec) <-> (b: Vec) =
   {x = a.x-b.x, y = a.y-b.y, z = a.z-b.z}
 
-let rotateY (theta: f64) ({x,y,z} : Vec) =
+def rotateY (theta: f64) ({x,y,z} : Vec) =
   let cos_theta = f64.cos theta
   let sin_theta = f64.sin theta
   in { x = f64.(cos_theta * x - sin_theta * z)
      , y
      , z = f64.(sin_theta * x + cos_theta * z)}
 
-let dot (a: Vec) (b: Vec) : f64 =
+def dot (a: Vec) (b: Vec) : f64 =
   a.x * b.x + a.y * b.y + a.z * b.z
 
-let norm v = f64.sqrt (dot v v)
+def norm v = f64.sqrt (dot v v)
 
 type Object
   = #Wall Direction Distance
   | #Block Position BlockHalfWidths Angle
   | #Sphere Position Radius
 
-let sdObject (obj:Object) (pos:Position) : Distance =
+def sdObject (obj:Object) (pos:Position) : Distance =
   match obj
   case #Wall nor d -> f64.(d + dot nor pos)
   case #Block blockPos halfWidths angle ->
@@ -48,16 +48,16 @@ let sdObject (obj:Object) (pos:Position) : Distance =
     let pos' = pos <-> spherePos
     in f64.(max (norm pos' - r) 0)
 
-let vec x y z : Vec = {x,y,z}
-let unvec ({x,y,z}: Vec) = (x,y,z)
+def vec x y z : Vec = {x,y,z}
+def unvec ({x,y,z}: Vec) = (x,y,z)
 
-let wall : Object = #Wall (vec 1 0 0) 2
+def wall : Object = #Wall (vec 1 0 0) 2
 
-let sphere : Object = #Sphere (vec (-1.0) (-1.2) 0.2) 0.8
+def sphere : Object = #Sphere (vec (-1.0) (-1.2) 0.2) 0.8
 
-let block : Object = #Block (vec 1.0 (-1.6) 1.2) (vec 0.6 0.8 0.6) (-0.5)
+def block : Object = #Block (vec 1.0 (-1.6) 1.2) (vec 0.6 0.8 0.6) (-0.5)
 
-let get_obj (i: i32) =
+def get_obj (i: i32) =
   match i
   case 0 -> wall
   case 1 -> sphere

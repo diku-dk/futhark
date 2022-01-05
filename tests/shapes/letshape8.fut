@@ -1,6 +1,6 @@
 -- ==
 -- error: Cannot bind \[n\]
 
-let main =
+def main =
   let [n] (f: [n]bool -> [n]bool) = (\(xs: [10]bool) -> xs)
   in n

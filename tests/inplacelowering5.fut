@@ -14,13 +14,13 @@
 --  [[0i64, 0i64], [0i64, 1i64]]]
 -- }
 
-let update [n] (mat: *[n][n]i64): *[n][n]i64 =
+def update [n] (mat: *[n][n]i64): *[n][n]i64 =
     let mat = transpose mat
     in mat with [n-1] = iota n
 
-let run (t:i64) (n:i64): [n][n]i64 =
+def run (t:i64) (n:i64): [n][n]i64 =
     let mat = tabulate_2d n n (+) in
     loop (mat) for i < t do update mat
 
-let main (t:i64) (n:i64) =
+def main (t:i64) (n:i64) =
     map (\i -> run t n) (iota 10)

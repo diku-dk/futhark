@@ -1,6 +1,6 @@
 import "../../accs/intrinsics"
        
-let f (acc : *acc([]i32)) i = write acc i (i32.i64 i) -- square entries
+def f (acc : *acc([]i32)) i = write acc i (i32.i64 i) -- square entries
 
 -- ==
 -- entry: prim

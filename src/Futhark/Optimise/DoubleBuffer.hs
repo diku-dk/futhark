@@ -277,6 +277,7 @@ optimiseLoopBySwitching (Pat pes) merge (Body _ body_stms body_res) = do
         -- memory block?
         [arr_param] <- filter (isArrayIn (paramName param)) $ map fst merge,
         MemArray pt _ _ (ArrayIn _ ixfun) <- paramDec arr_param,
+        not $ merge_bound `namesIntersect` freeIn (IxFun.base ixfun),
         Var res_v <- resSubExp res,
         Just (res_v_alloc, body_stms'') <- extractAllocOf merge_bound res_v body_stms' = do
         num_bytes <-
@@ -315,9 +316,15 @@ optimiseLoopBySwitching (Pat pes) merge (Body _ body_stms body_res) = do
             arg_copy <- newVName (baseString arg <> "_dbcopy")
             letBind (Pat [PatElem arg_copy $ MemArray pt shape u $ ArrayIn mem' arg_ixfun]) $
               BasicOp $ Copy arg
-            pure (param, Var arg_copy)
-          _ -> pure (param, Var arg)
+            -- We need to make this parameter unique to avoid invalid
+            -- hoisting (see #1533), because we are invalidating the
+            -- underlying memory.
+            pure (fmap mkUnique param, Var arg_copy)
+          _ -> pure (fmap mkUnique param, Var arg)
     maybeCopyInitial _ (param, arg) = pure (param, arg)
+
+    mkUnique (MemArray bt shape _ ret) = MemArray bt shape Unique ret
+    mkUnique x = x
 
 optimiseLoopByCopying :: Constraints rep inner => OptimiseLoop rep
 optimiseLoopByCopying pat merge body = do

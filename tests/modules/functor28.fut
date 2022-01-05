@@ -10,12 +10,12 @@ module type newint = {
 
 module newf32 : newreal with t = f32 = {
   type t = f32
-  let f32 = f32.f32
+  def f32 = f32.f32
 }
 
 module newi32 : newint with t = i32 = {
   type t = i32
-  let f32 = i32.f32
+  def f32 = i32.f32
 }
 
 module type mixture = {
@@ -41,4 +41,4 @@ module bar = k_means_mixture foo
 module baz = bar : mixture
 module k_means_em = em baz
 
-let main (x: k_means_em.mixture.V.t) = x
+def main (x: k_means_em.mixture.V.t) = x

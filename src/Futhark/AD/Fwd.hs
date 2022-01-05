@@ -333,13 +333,13 @@ fwdSOAC pat aux (Hist w arrs ops bucket_fun) = do
   addStm $ Let (pat <> pat_tan) aux $ Op $ Hist w arrs ops' bucket_fun'
   where
     fwdHist :: HistOp SOACS -> ADM (HistOp SOACS)
-    fwdHist (HistOp width rf dest nes op) = do
+    fwdHist (HistOp shape rf dest nes op) = do
       dest' <- bundleTan dest
       nes_tan <- mapM (fmap Var . zeroFromSubExp) nes
       op' <- fwdLambda op
       return $
         HistOp
-          { histWidth = width,
+          { histShape = shape,
             histRaceFactor = rf,
             histDest = dest',
             histNeutral = interleave nes nes_tan,

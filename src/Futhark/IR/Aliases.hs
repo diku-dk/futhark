@@ -170,7 +170,7 @@ resultAliasComment name als =
     als' ->
       Just $
         PP.oneLine $
-          PP.text "-- Result of " <> PP.ppr name <> PP.text " aliases "
+          PP.text "-- Result for " <> PP.ppr name <> PP.text " aliases "
             <> PP.commasep (map PP.ppr als')
 
 removeAliases :: CanBeAliased (Op rep) => Rephraser Identity (Aliases rep) rep

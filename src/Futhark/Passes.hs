@@ -24,6 +24,7 @@ import Futhark.Optimise.CSE
 import Futhark.Optimise.DoubleBuffer
 import Futhark.Optimise.Fusion
 import Futhark.Optimise.GenRedOpt
+import Futhark.Optimise.HistAccs
 import Futhark.Optimise.InPlaceLowering
 import Futhark.Optimise.InliningDeadFun
 import qualified Futhark.Optimise.MemoryBlockMerging as MemoryBlockMerging
@@ -80,6 +81,8 @@ kernelsPipeline =
       [ simplifyGPU,
         optimiseGenRed,
         simplifyGPU,
+        histAccsGPU,
+        babysitKernels,
         tileLoops,
         simplifyGPU,
         babysitKernels,
@@ -106,7 +109,6 @@ sequentialCpuPipeline =
     >>> onePass Seq.explicitAllocations
     >>> passes
       [ performCSE False,
-        simplifySeqMem,
         simplifySeqMem
       ]
 

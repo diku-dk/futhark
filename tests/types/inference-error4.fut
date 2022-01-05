@@ -3,4 +3,4 @@
 -- ==
 -- error: functional
 
-let f x = (loop x = x for i < 10 do x, x 2)
+def f x = (loop x = x for i < 10 do x, x 2)

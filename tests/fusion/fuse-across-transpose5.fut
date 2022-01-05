@@ -5,7 +5,7 @@
 -- output {
 --   [[0, 1, 2], [0, 2, 4], [0, 3, 6]]
 -- }
-let main [n][m] (a: [n][m]i32): [][]i32 =
+def main [n][m] (a: [n][m]i32): [][]i32 =
   let foo = replicate m (map i32.i64 (iota n))
   let bar = replicate m (map i32.i64 (iota n))
   let b = replicate n (map i32.i64 (iota m))
