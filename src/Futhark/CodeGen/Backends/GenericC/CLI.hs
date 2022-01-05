@@ -15,7 +15,6 @@ where
 import Data.List (unzip5)
 import qualified Data.Map as M
 import qualified Data.Text as T
-import Futhark.CodeGen.Backends.GenericC.Manifest
 import Futhark.CodeGen.Backends.GenericC.Options
 import Futhark.CodeGen.Backends.SimpleRep
   ( cproduct,
@@ -24,6 +23,7 @@ import Futhark.CodeGen.Backends.SimpleRep
     scalarToPrim,
   )
 import Futhark.CodeGen.RTS.C (tuningH, valuesH)
+import Futhark.Manifest
 import Futhark.Util.Pretty (pretty, prettyText)
 import qualified Language.C.Quote.OpenCL as C
 import qualified Language.C.Syntax as C

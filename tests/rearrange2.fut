@@ -7,5 +7,5 @@
 --                                                                           500,
 --                                                                           600]]]
 -- }
-let main(a: [][][]i32): [][][]i32 =
+def main(a: [][][]i32): [][][]i32 =
   map transpose a

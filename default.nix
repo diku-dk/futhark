@@ -21,22 +21,27 @@ let
       haskellPackages = pkgs.haskellPackages.override {
         overrides = haskellPackagesNew: haskellPackagesOld: rec {
           aeson =
-            haskellPackagesNew.aeson_2_0_1_0;
+            haskellPackagesNew.aeson_2_0_2_0;
 
           time-compat =
             haskellPackagesNew.time-compat_1_9_6_1;
 
           semialign =
-            haskellPackagesNew.semialign_1_2;
+            haskellPackagesNew.semialign_1_2_0_1;
 
           hashable =
-            haskellPackagesNew.hashable_1_3_4_1;
+            haskellPackagesNew.hashable_1_4_0_1;
 
-          yaml =
-            haskellPackagesNew.yaml_0_11_7_0;
+          OneTuple =
+            haskellPackagesNew.OneTuple_0_3_1;
 
-          hpack =
-            haskellPackagesNew.hpack_0_34_5;
+          # Need to disable the test suite as otherwise we have a
+          # circular dependency with quickcheck-instances.
+          text-short =
+            pkgs.haskell.lib.dontCheck haskellPackagesNew.text-short_0_1_4;
+
+          quickcheck-instances =
+            haskellPackagesNew.quickcheck-instances_0_3_27;
 
           hashable-time =
             haskellPackagesNew.hashable-time_0_3;
@@ -46,6 +51,9 @@ let
 
           futhark-server =
             haskellPackagesNew.callPackage ./nix/futhark-server.nix { };
+
+          futhark-manifest =
+            haskellPackagesNew.callPackage ./nix/futhark-manifest.nix { };
 
           futhark =
             # callCabal2Nix does not do a great job at determining
@@ -69,7 +77,7 @@ let
             pkgs.haskell.lib.overrideCabal
               (pkgs.haskell.lib.addBuildTools
                 (haskellPackagesNew.callCabal2nix "futhark" (cleanSource ./.) { })
-                [ pkgs.python37Packages.sphinx ])
+                [ pkgs.python39Packages.sphinx ])
               ( _drv: {
                 isLibrary = false;
                 isExecutable = true;

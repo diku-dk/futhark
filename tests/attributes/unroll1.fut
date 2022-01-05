@@ -4,7 +4,7 @@
 -- structure { DoLoop 1 }
 -- warning: #\[unroll\]
 
-let main (n: i32) (xs: *[]i32) =
+def main (n: i32) (xs: *[]i32) =
   #[unroll]
   loop xs for i < n do
     let xs[i] = i in xs

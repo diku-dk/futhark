@@ -19,6 +19,7 @@ module Futhark.IR.Prop.Types
     setOuterSize,
     setDimSize,
     setOuterDim,
+    setOuterDims,
     setDim,
     setArrayDims,
     peelArray,
@@ -220,6 +221,10 @@ setDimSize i t e = t `setArrayShape` setDim i (arrayShape t) e
 setOuterDim :: ShapeBase d -> d -> ShapeBase d
 setOuterDim = setDim 0
 
+-- | Replace some outermost dimensions of an array shape.
+setOuterDims :: ShapeBase d -> Int -> ShapeBase d -> ShapeBase d
+setOuterDims old k new = new <> stripDims k old
+
 -- | Replace the specified dimension of an array shape.
 setDim :: Int -> ShapeBase d -> d -> ShapeBase d
 setDim i (Shape ds) e = Shape $ take i ds ++ e : drop (i + 1) ds
@@ -227,11 +232,7 @@ setDim i (Shape ds) e = Shape $ take i ds ++ e : drop (i + 1) ds
 -- | @peelArray n t@ returns the type resulting from peeling the first
 -- @n@ array dimensions from @t@.  Returns @Nothing@ if @t@ has less
 -- than @n@ dimensions.
-peelArray ::
-  ArrayShape shape =>
-  Int ->
-  TypeBase shape u ->
-  Maybe (TypeBase shape u)
+peelArray :: Int -> TypeBase Shape u -> Maybe (TypeBase Shape u)
 peelArray 0 t = Just t
 peelArray n (Array et shape u)
   | shapeRank shape == n = Just $ Prim et
@@ -241,7 +242,7 @@ peelArray _ _ = Nothing
 -- | @stripArray n t@ removes the @n@ outermost layers of the array.
 -- Essentially, it is the type of indexing an array of type @t@ with
 -- @n@ indexes.
-stripArray :: ArrayShape shape => Int -> TypeBase shape u -> TypeBase shape u
+stripArray :: Int -> TypeBase Shape u -> TypeBase Shape u
 stripArray n (Array et shape u)
   | n < shapeRank shape = Array et (stripDims n shape) u
   | otherwise = Prim et
@@ -278,7 +279,7 @@ arraysSize i (t : _) = arraySize i t
 
 -- | Return the immediate row-type of an array.  For @[[int]]@, this
 -- would be @[int]@.
-rowType :: ArrayShape shape => TypeBase shape u -> TypeBase shape u
+rowType :: TypeBase Shape u -> TypeBase Shape u
 rowType = stripArray 1
 
 -- | A type is a primitive type if it is not an array or memory block.

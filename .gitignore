@@ -15,6 +15,9 @@ dist-newstyle
 # Ignore Stack junk
 .stack-work
 
+# Ignore IDE info
+.hie
+
 # Ignore side-effects of compilation.
 *.aux
 *.log

@@ -137,6 +137,7 @@ keyword s =
     "if"           -> IF
     "then"         -> THEN
     "else"         -> ELSE
+    "def"          -> DEF
     "let"          -> LET
     "loop"         -> LOOP
     "in"           -> IN
@@ -344,6 +345,7 @@ data Token = ID Name
            | IF
            | THEN
            | ELSE
+           | DEF
            | LET
            | LOOP
            | IN

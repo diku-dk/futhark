@@ -1,6 +1,6 @@
 type t = #foo | #bar
 
-let main (x:i32) =
+def main (x:i32) =
   match #foo : t
   case #foo ->
     let xs = filter (>x) [1,2,3]

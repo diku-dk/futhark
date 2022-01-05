@@ -10,7 +10,7 @@ module type to_i32 = {
 
 module i32 = {
   type t = i32
-  let to_i32 (x: i32) = x
+  def to_i32 (x: i32) = x
 }
 
 module type engine = {
@@ -20,13 +20,13 @@ module type engine = {
 
 module an_engine = {
   module int = i32
-  let min = 1
+  def min = 1
 }
 
 module mk_has_y (E: engine) = {
-  let y = E.int.to_i32 E.min
+  def y = E.int.to_i32 E.min
 }
 
 module m1 = mk_has_y an_engine
 
-let main (x: i32) = m1.y + x
+def main (x: i32) = m1.y + x

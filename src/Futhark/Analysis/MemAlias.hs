@@ -15,7 +15,7 @@ import Data.Bifunctor
 import Data.Function ((&))
 import Data.Functor ((<&>))
 import qualified Data.Map as M
-import Data.Maybe (fromJust, mapMaybe)
+import Data.Maybe (fromMaybe, mapMaybe)
 import qualified Data.Set as S
 import Futhark.IR.GPUMem
 import Futhark.IR.SeqMem
@@ -64,7 +64,7 @@ canBeSameMemory (MemAliases m) v1 v2 =
     Nothing -> error $ "VName not found in MemAliases: " <> pretty v1
 
 aliasesOf :: MemAliases -> VName -> Names
-aliasesOf (MemAliases m) v = fromJust $ M.lookup v m
+aliasesOf (MemAliases m) v = fromMaybe mempty $ M.lookup v m
 
 isIn :: VName -> MemAliases -> Bool
 isIn v (MemAliases m) = v `S.member` M.keysSet m
@@ -145,13 +145,17 @@ transitiveClosure ma@(MemAliases m) =
     <> ma
 
 analyzeSeqMem :: Prog SeqMem -> MemAliases
-analyzeSeqMem prog = runReader (analyze prog) $ Env $ \x _ -> return x
+analyzeSeqMem prog = completeBijection $ runReader (analyze prog) $ Env $ \x _ -> return x
 
 analyzeGPUMem :: Prog GPUMem -> MemAliases
-analyzeGPUMem prog = runReader (analyze prog) $ Env analyzeHostOp
+analyzeGPUMem prog = completeBijection $ runReader (analyze prog) $ Env analyzeHostOp
 
 analyze :: (Mem rep inner, LetDec rep ~ LetDecMem) => Prog rep -> MemAliasesM inner MemAliases
 analyze prog =
   progFuns prog
     & foldM (\m f -> (<>) m <$> analyzeFun f) (MemAliases mempty)
     <&> fixPoint transitiveClosure
+
+completeBijection :: MemAliases -> MemAliases
+completeBijection ma@(MemAliases m) =
+  M.foldMapWithKey (\k ns -> foldMap (`singleton` oneName k) (namesToList ns)) m <> ma

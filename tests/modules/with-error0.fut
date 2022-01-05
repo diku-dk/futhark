@@ -8,4 +8,4 @@ module type has_inner = { module inner: has_t }
 
 module m: has_inner with inner.t = bool = { module inner = { type t = i32 } }
 
-let main(): m.inner.t = 2
+def main(): m.inner.t = 2

@@ -113,6 +113,16 @@ import Control.Category
 import qualified Data.Binary.Get as G
 import qualified Data.Binary.Put as P
 import Data.Bits
+  ( complement,
+    countLeadingZeros,
+    countTrailingZeros,
+    popCount,
+    shift,
+    shiftR,
+    xor,
+    (.&.),
+    (.|.),
+  )
 import Data.Fixed (mod') -- Weird location.
 import Data.Int (Int16, Int32, Int64, Int8)
 import qualified Data.Map as M
@@ -695,10 +705,20 @@ doBinOp SQuot {} = doRiskyIntBinOp doSQuot
 doBinOp SRem {} = doRiskyIntBinOp doSRem
 doBinOp SMin {} = doIntBinOp doSMin
 doBinOp UMin {} = doIntBinOp doUMin
-doBinOp FMin {} = doFloatBinOp min min min
+doBinOp FMin {} = doFloatBinOp fmin fmin fmin
+  where
+    fmin x y
+      | isNaN x = y
+      | isNaN y = x
+      | otherwise = min x y
 doBinOp SMax {} = doIntBinOp doSMax
 doBinOp UMax {} = doIntBinOp doUMax
-doBinOp FMax {} = doFloatBinOp max max max
+doBinOp FMax {} = doFloatBinOp fmax fmax fmax
+  where
+    fmax x y
+      | isNaN x = y
+      | isNaN y = x
+      | otherwise = max x y
 doBinOp Shl {} = doIntBinOp doShl
 doBinOp LShr {} = doIntBinOp doLShr
 doBinOp AShr {} = doIntBinOp doAShr

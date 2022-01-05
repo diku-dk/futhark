@@ -3,4 +3,4 @@
 -- ==
 -- error: Expression does not have expected type
 
-let main [n][m] (x: [n][m]i32) = x : []i32
+def main [n][m] (x: [n][m]i32) = x : []i32

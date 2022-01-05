@@ -6,10 +6,10 @@ module type mt = {
 
 module m : mt = {
   type~ t = []i32
-  let mk (x: i32) = [x]
-  let f (xs: *[]i32) = xs with [0] = xs[0] + 1
+  def mk (x: i32) = [x]
+  def f (xs: *[]i32) = xs with [0] = xs[0] + 1
 }
 
-let main (x: i32) =
+def main (x: i32) =
   let f = \(xs: *m.t) -> m.f xs
   in f (m.mk x)

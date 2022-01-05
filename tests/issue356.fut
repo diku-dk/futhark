@@ -11,7 +11,7 @@ module sobol_dir : {
   val a : [50]u32
   val s : [50]i64
 } = {
-  let m : [50][8]u32 =
+  def m : [50][8]u32 =
     [[1u32, 0u32, 0u32, 0u32, 0u32, 0u32, 0u32, 0u32],
      [1u32, 3u32, 0u32, 0u32, 0u32, 0u32, 0u32, 0u32],
      [1u32, 3u32, 1u32, 0u32, 0u32, 0u32, 0u32, 0u32],
@@ -62,7 +62,7 @@ module sobol_dir : {
      [1u32, 1u32, 3u32, 1u32, 11u32, 31u32, 97u32, 225u32],
      [1u32, 1u32, 1u32, 3u32, 23u32, 43u32, 57u32, 177u32],
      [1u32, 3u32, 7u32, 7u32, 17u32, 17u32, 37u32, 71u32]]
-  let a : [50]u32 =
+  def a : [50]u32 =
     [0u32,
      1u32,
      1u32,
@@ -113,7 +113,7 @@ module sobol_dir : {
      84u32,
      97u32,
      103u32]
-  let s : [50]i64 =
+  def s : [50]i64 =
     [1i64,
      2i64,
      3i64,
@@ -191,7 +191,7 @@ module type sobol = {
 }
 
 module Sobol (DM: sobol_dir) (X: { val D : i64 }) : sobol = {
-  let D = X.D
+  def D = X.D
 
   -- Compute direction vectors. In general, some work can be saved if
   -- we know the number of sobol numbers (N) up front. Here, however,
@@ -200,10 +200,10 @@ module Sobol (DM: sobol_dir) (X: { val D : i64 }) : sobol = {
   -- needed).
 
   --let L = 32i64
-  let L = 16i64
+  def L = 16i64
 
   -- direction vector for dimension j
-  let dirvec (j:i64) : [L]u32 =
+  def dirvec (j:i64) : [L]u32 =
     if j == 0 then
        map (\i -> 1u32 << (u32.i64(L)-u32.i64(i+1))
            ) (iota L)
@@ -222,40 +222,40 @@ module Sobol (DM: sobol_dir) (X: { val D : i64 }) : sobol = {
            in (i+1, V with [i] = vi)
        in V
 
-  let index_of_least_significant_0(x: i64): i64 =
+  def index_of_least_significant_0(x: i64): i64 =
     loop i = 0 while i < 64 && ((x>>i)&1) != 0 do i + 1
 
-  let norm = 2.0 f64.** f64.i64(L)
+  def norm = 2.0 f64.** f64.i64(L)
 
-  let grayCode (x: i64): i64 = (x >> 1) ^ x
+  def grayCode (x: i64): i64 = (x >> 1) ^ x
 
-  let testBit (n: i64) (ind:i64) : bool =
+  def testBit (n: i64) (ind:i64) : bool =
     let t = (1 << ind) in (n & t) == t
 
-  let dirvecs : [D][L]u32 =
+  def dirvecs : [D][L]u32 =
     map dirvec (iota D)
 
-  let recSob (i:i64) (dirvec:[L]u32) (x:u32) : u32 =
+  def recSob (i:i64) (dirvec:[L]u32) (x:u32) : u32 =
     x ^ dirvec[index_of_least_significant_0 i]
 
-  let recurrent (i:i64) (xs:[D]u32) : [D]u32 =
+  def recurrent (i:i64) (xs:[D]u32) : [D]u32 =
     map2 (recSob i) dirvecs xs
 
-  let indSob (n: i64) (dirvec: [L]u32): u32 =
+  def indSob (n: i64) (dirvec: [L]u32): u32 =
     let reldv_vals = map2 (\dv i -> if testBit (grayCode n) i then dv else 0u32)
                           dirvec (iota L)
     in reduce (^) 0u32 reldv_vals
 
-  let independent (i:i64) : [D]u32 =
+  def independent (i:i64) : [D]u32 =
     map (indSob i) dirvecs
 
   -- utils
-  let recM (i:i64) : [D]u32 =
+  def recM (i:i64) : [D]u32 =
     let bit = index_of_least_significant_0 i
     in map (\row -> row[bit]) dirvecs
 
   -- computes sobol numbers: offs,..,offs+chunk-1
-  let chunk (offs:i64) (n:i64) : [n][D]f64 =
+  def chunk (offs:i64) (n:i64) : [n][D]f64 =
     let sob_beg = independent offs
     let contrbs = map (\(k:i64): [D]u32  ->
                        if k==0 then sob_beg
@@ -264,7 +264,7 @@ module Sobol (DM: sobol_dir) (X: { val D : i64 }) : sobol = {
     let vct_ints = scan (\x y -> map2 (^) x y) (replicate D 0u32) contrbs
     in map (\xs -> map (\x -> f64.u32(x)/norm) xs) vct_ints
 
-  let chunki (offs:i64) (n:i64) : [n][D]u32 =
+  def chunki (offs:i64) (n:i64) : [n][D]u32 =
     let sob_beg = independent offs
     let contrbs = map (\(k:i64): [D]u32  ->
                        if k==0 then sob_beg
@@ -277,7 +277,7 @@ module Sobol (DM: sobol_dir) (X: { val D : i64 }) : sobol = {
                        val op	: 	t -> t -> t
                        val f : [D]f64 -> t }) : { val run : i64 -> X.t } =
   {
-    let run (N:i64) : X.t =
+    def run (N:i64) : X.t =
       reduce_stream_per X.op (\sz (ns:[sz]i64) : X.t ->
                              if sz > 0 then reduce X.op X.ne (map X.f (chunk ns[0] sz))
                              else X.ne)
@@ -286,28 +286,28 @@ module Sobol (DM: sobol_dir) (X: { val D : i64 }) : sobol = {
   }
 }
 
-module S2 = Sobol x.sobol_dir { let D = 2i64 }
+module S2 = Sobol x.sobol_dir { def D = 2i64 }
 
-let mean [n] (xs: [n]f64) : f64 =
+def mean [n] (xs: [n]f64) : f64 =
   reduce (+) 0.0 xs / f64.i64(n)
 
 module R = S2.Reduce { type t = i64
-                       let ne = 0i64
-                       let op (x:i64) (y:i64) = x i64.+ y
-                       let f (v : [S2.D]f64) : t =
+                       def ne = 0i64
+                       def op (x:i64) (y:i64) = x i64.+ y
+                       def f (v : [S2.D]f64) : t =
                          let x = v[0]
                          let y = v[1]
                          in i64.bool(x*x+y*y < 1f64) }
 
-let norm (x:u32) : f64 = f64.u32(x)/S2.norm
+def norm (x:u32) : f64 = f64.u32(x)/S2.norm
 
-let norms [n] (xs:[n]u32) : [n]f64 = map norm xs
+def norms [n] (xs:[n]u32) : [n]f64 = map norm xs
 
-let normss [n] [D] (xs:[n][D]u32) : [n][D]f64 = map norms xs
+def normss [n] [D] (xs:[n][D]u32) : [n][D]f64 = map norms xs
 
-let means [n] [D] (xs:[D][n]f64) : [D]f64 = map mean xs
+def means [n] [D] (xs:[D][n]f64) : [D]f64 = map mean xs
 
-let main (n: i64) =
+def main (n: i64) =
   let offs = i64.u32 2323234545
   let a = S2.chunki offs n
   let b = map S2.independent (map (+offs) (iota n))

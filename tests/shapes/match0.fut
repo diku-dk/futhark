@@ -5,7 +5,7 @@
 -- input { 2 } output { 3i64 }
 -- input { 3 } output { 9i64 }
 
-let main i =
+def main i =
   length (match i
           case 0 -> iota 1
           case 1 -> iota 2

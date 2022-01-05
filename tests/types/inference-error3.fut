@@ -2,4 +2,4 @@
 -- ==
 -- error: -> b
 
-let f x = (x 2, [x])
+def f x = (x 2, [x])

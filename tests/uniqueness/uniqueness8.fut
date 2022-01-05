@@ -4,10 +4,10 @@
 -- output {
 --   0i64
 -- }
-let f(a: *[]i64) = a[0]
-let g(a: []i64) = a[0]
+def f(a: *[]i64) = a[0]
+def g(a: []i64) = a[0]
 
-let main: i64 =
+def main: i64 =
     let n = 10
     let a = iota(n)
     let b = a in

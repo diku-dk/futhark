@@ -1,4 +1,4 @@
-let main [n][m] (xsss: *[2][n][m]i32) =
+def main [n][m] (xsss: *[2][n][m]i32) =
   #[unsafe]
   let xss = xsss[0]
   let ys = loop acc = replicate m 0 for i < m do

@@ -18,4 +18,4 @@ module M1: MT = {
   type i32matrix = [2][2]i32
 }
 
-let main = 2
+def main = 2

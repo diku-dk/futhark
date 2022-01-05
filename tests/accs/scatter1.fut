@@ -4,9 +4,9 @@
 
 import "intrinsics"
 
-let f (acc: *acc ([]i32)) i =
+def f (acc: *acc ([]i32)) i =
   loop acc for j < i do
   write acc (j+i) 1
 
-let main (xs: *[]i32) =
+def main (xs: *[]i32) =
   scatter_stream xs f (iota 10)

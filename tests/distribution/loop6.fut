@@ -2,7 +2,7 @@
 -- ==
 -- structure gpu { /SegMap 0 /DoLoop 1 /DoLoop/SegMap 1 }
 
-let main [m] [n] (xss: *[m][n]i64) =
+def main [m] [n] (xss: *[m][n]i64) =
   #[incremental_flattening(only_inner)]
   map (\xs ->
        (loop (xs,out) = (xs, replicate n 0f32) for i < n do

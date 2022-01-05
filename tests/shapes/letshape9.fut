@@ -1,7 +1,7 @@
 -- ==
 -- input {} output { 1i64 2i64 }
 
-let main =
+def main =
   let [n] (_: [n]i32, f: [n]bool -> [n]bool) =
     (replicate 1 0, \(xs: [1]bool) -> xs)
   let [m] (f: [m]bool -> [m]bool, _: [m]i32) =

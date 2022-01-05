@@ -3,4 +3,4 @@
 -- input { 1 } output { 1 }
 -- input { -1 } output { 0 }
 
-let main (n: i32) = loop x = 0i32 for _i < n do x + 1
+def main (n: i32) = loop x = 0i32 for _i < n do x + 1

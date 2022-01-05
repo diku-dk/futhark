@@ -3,6 +3,6 @@
 -- in the let-binding, and due to how we constructed patterns for
 -- statements.
 
-let main n =
+def main n =
   loop acc = [([1], 1)] for i < n do
     replicate i (replicate (n-i) 1, i)

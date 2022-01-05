@@ -750,7 +750,11 @@ monomorphiseBinding entry (PolyBinding rr (name, tparams, params, rettype, body,
 
     body' <- updateExpTypes (`M.lookup` substs') body
     body'' <- withRecordReplacements (mconcat rrs) $ transformExp body'
-    name' <- if null tparams && not entry then return name else newName name
+    seen_before <- elem name . map (fst . fst) <$> getLifts
+    name' <-
+      if null tparams && not entry && not seen_before
+        then pure name
+        else newName name
 
     return
       ( name',

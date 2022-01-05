@@ -5,12 +5,12 @@
 
 module m = {
   type^ t [n] = [n]i32 -> i64
-  let f [n] (_: t [n]) = 0
-  let mk (n: i64) : t [n] = \(xs: [n]i32) -> n
+  def f [n] (_: t [n]) = 0
+  def mk (n: i64) : t [n] = \(xs: [n]i32) -> n
 } : {
   type^ t [n]
   val f [n] : (x: t [n]) -> i32
   val mk : (n: i64) -> t [n]
 }
 
-let main x = (x+2) |> m.mk |> m.f
+def main x = (x+2) |> m.mk |> m.f

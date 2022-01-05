@@ -1,8 +1,8 @@
-let dotprod [n] (a: [n]f32) (b: [n]f32): f32 =
+def dotprod [n] (a: [n]f32) (b: [n]f32): f32 =
   map2 (*) a b
   |> reduce (+) 0
 
-let lud_diagonal [b] (a: [b][b]f32): *[b][b]f32 =
+def lud_diagonal [b] (a: [b][b]f32): *[b][b]f32 =
          let mat = copy a
          in #[unsafe]
             loop (mat: *[b][b]f32) for i < b-1 do
@@ -22,7 +22,7 @@ let lud_diagonal [b] (a: [b][b]f32): *[b][b]f32 =
 
             in mat
 
-let lud_perimeter_upper [m][b] (diag: [b][b]f32) (a0s: [m][b][b]f32): *[m][b][b]f32 =
+def lud_perimeter_upper [m][b] (diag: [b][b]f32) (a0s: [m][b][b]f32): *[m][b][b]f32 =
     let a1s = map (\ (x: [b][b]f32): [b][b]f32  -> transpose(x)) a0s in
     let a2s =
         map (\a1 ->
@@ -37,7 +37,7 @@ let lud_perimeter_upper [m][b] (diag: [b][b]f32) (a0s: [m][b][b]f32): *[m][b][b]
             ) a1s
     in map transpose a2s
 
-let lud_perimeter_lower [b][m] (diag: [b][b]f32) (mat: [m][b][b]f32): *[m][b][b]f32 =
+def lud_perimeter_lower [b][m] (diag: [b][b]f32) (mat: [m][b][b]f32): *[m][b][b]f32 =
   map (\blk ->
          map (\row0 -> -- Lower
                 #[unsafe]
@@ -49,9 +49,9 @@ let lud_perimeter_lower [b][m] (diag: [b][b]f32) (mat: [m][b][b]f32): *[m][b][b]
              ) blk
       ) mat
 
-let block_size: i64 = 32
+def block_size: i64 = 32
 
-let main [num_blocks][n] (matb: *[num_blocks][num_blocks][n][n]f32) b =
+def main [num_blocks][n] (matb: *[num_blocks][num_blocks][n][n]f32) b =
   #[unsafe]
     let matb = loop matb for step < (n / b) - 1 do
         let diag = lud_diagonal matb[step,step] in

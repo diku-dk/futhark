@@ -5,16 +5,93 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
-## [0.21.0]
+## [0.22.0]
+
+### Added
+
+### Removed
+
+### Changed
+
+### Fixed
+
+* Overloaded number literals cannot be sum types (#1557).
+
+* Defective GPU code generation for vectorised non-commutative
+  operatators (#1559).
+
+## [0.21.2]
+
+### Added
+
+* New functions: `reduce_by_index_2d`, `reduce_by_index_3d`.
+
+* Manifests now contain compiler version information.
+
+### Fixed
+
+* Allocation insertion pass bug (#1546).
+
+* An exotic bug involving TLS and dynamically loading code generated
+  by the `multicore` backend.
+
+* Unconstrained ambiguous types now default to `()` (#1552).  This
+  should essentially never have any observable impact, except that
+  more programs will type check.
+
+* Double buffering compiler crash (#1553).
+
+## [0.21.1]
+
+### Added
+
+* Top-level value definitions can (and should) now be declared with
+  with `def`, although `let` still works.
+
+* New tool: `futhark defs`, for printing locations of top-level
+  definitions.
+
+### Changed
+
+* `def` is now a reserved word.
+
+### Fixed
+
+* Contrived intra-group code versions with no actual parallelism would
+  be given a group size of zero (#1524).
+
+## [0.20.8]
+
+### Added
+
+* `futhark repl` now allows Ctrl-c to interrupt execution.
+
+### Fixed
+
+* Alias tracking of sum types.
+
+* Proper checking that a function declared to return a unique-typed
+  value actually does so.
+
+* Faulty uniqueness checking and inference for lambdas (#1535).
+
+* Monomorphisation would duplicate functions under rare circumstances
+  (#1537).
+
+* Interpreter didn't check that the arguments passed to `unflatten`
+  made sense (#1539).
+
+* `futhark literate` now supports a `$loaddata` builtin function for
+  passing datasets to Futhark programs.
+
+## [0.20.7]
 
 ### Added
 
 * Better exploitation of parallelism in fused nested segmented
   reductions.
 
-### Removed
-
-### Changed
+* Prelude function `not` for negating booleans.
 
 ### Fixed
 
@@ -29,6 +106,11 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Incorrect code generation for some intra-group parallel code versions.
 
 * Flattening crash in the presence of irregular parallelism (#1525).
+
+* Incorrect substitution of type abbreviations with hidden sizes (#1531).
+
+* Proper handling of NaN in `min`/`max` functions for
+  `f16`/`f32`/`f64` in interpreter (#1528).
 
 ## [0.20.6]
 

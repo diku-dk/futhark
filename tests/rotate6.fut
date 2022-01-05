@@ -14,5 +14,5 @@
 -- structure { Rearrange 1 Rotate 1 }
 
 
-let main (i: i64) (arr: [][][]i32): [][][]i32 =
+def main (i: i64) (arr: [][][]i32): [][][]i32 =
   map (map (rotate i)) (rotate i arr |> transpose |> map transpose |> transpose)

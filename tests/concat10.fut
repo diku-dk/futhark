@@ -2,5 +2,5 @@
 -- ==
 -- structure { Concat 0 }
 
-let main (xs: []i32) : *[]i32 =
+def main (xs: []i32) : *[]i32 =
   xs ++ []

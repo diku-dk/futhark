@@ -5,10 +5,10 @@
 
 import "intrinsics"
 
-let f (acc: *acc ([]i32)) i =
+def f (acc: *acc ([]i32)) i =
   let js = scan (+) 0 (map (+i) (iota 10))
   in loop acc for j in js do
      write acc j (i32.i64 i)
 
-let main (xs: *[]i32) =
+def main (xs: *[]i32) =
   reduce_by_index_stream xs (+) 0 f (iota 10)

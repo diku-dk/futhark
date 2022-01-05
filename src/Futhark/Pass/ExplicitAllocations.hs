@@ -45,7 +45,7 @@ import Control.Monad.RWS.Strict
 import Control.Monad.Reader
 import Control.Monad.State
 import Control.Monad.Writer
-import Data.List (foldl', partition, zip4)
+import Data.List (foldl', partition, zip5)
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import qualified Data.Set as S
@@ -902,14 +902,6 @@ subExpIxFun ::
 subExpIxFun Constant {} = return Nothing
 subExpIxFun (Var v) = lookupIxFun v
 
-shiftShapeExts :: Int -> MemInfo ExtSize u r -> MemInfo ExtSize u r
-shiftShapeExts k (MemArray pt shape u returns) =
-  MemArray pt (fmap shift shape) u returns
-  where
-    shift (Ext i) = Ext (i + k)
-    shift (Free x) = Free x
-shiftShapeExts _ ret = ret
-
 addResCtxInIfBody ::
   (Allocable fromrep torep inner) =>
   [ExtType] ->
@@ -919,69 +911,72 @@ addResCtxInIfBody ::
   AllocM fromrep torep (Body torep, [BodyReturns])
 addResCtxInIfBody ifrets (Body _ stms res) spaces substs = buildBody $ do
   mapM_ addStm stms
-  (ctx, ctx_rets, res', res_rets, total_existentials) <-
-    foldM helper ([], [], [], [], 0) (zip4 ifrets res substs spaces)
-  pure
-    ( ctx <> res',
-      -- We need to adjust the existentials in shapes corresponding
-      -- to the previous type, because we added more existentials in
-      -- front.
-      ctx_rets ++ map (shiftShapeExts total_existentials) res_rets
-    )
+  let offsets = scanl (+) 0 $ zipWith numCtxNeeded ifrets substs
+      num_new_ctx = last offsets
+  (ctx, ctx_rets, res', res_rets) <-
+    foldM (helper num_new_ctx) ([], [], [], []) $
+      zip5 ifrets res substs spaces offsets
+  pure (ctx <> res', ctx_rets ++ res_rets)
   where
-    helper (ctx_acc, ctx_rets_acc, res_acc, res_rets_acc, k) (ifr, r, mbixfsub, sp) =
-      case mbixfsub of
-        Nothing -> do
-          -- does NOT generalize/antiunify; ensure direct
-          r' <- ensureDirect sp r
-          (mem_ctx_ses, mem_ctx_rets) <- unzip <$> bodyReturnMemCtx r'
-          let body_ret = inspect k ifr sp
-          pure
-            ( ctx_acc ++ mem_ctx_ses,
-              ctx_rets_acc ++ mem_ctx_rets,
-              res_acc ++ [r'],
-              res_rets_acc ++ [body_ret],
-              k + length mem_ctx_ses
-            )
-        Just (ixfn, m) -> do
-          -- generalizes
-          let i = length m
-          ext_ses <- mapM (toSubExp "ixfn_exist") m
-          (mem_ctx_ses, mem_ctx_rets) <- unzip <$> bodyReturnMemCtx r
-          let sp' = fromMaybe DefaultSpace sp
-              ixfn' = fmap (adjustExtPE k) ixfn
-              exttp = case ifr of
-                Array pt shp' u ->
-                  MemArray pt shp' u $ ReturnsNewBlock sp' (k + i) ixfn'
-                _ -> error "Impossible case reached in addResCtxInIfBody"
-          pure
-            ( ctx_acc ++ subExpsRes ext_ses ++ mem_ctx_ses,
-              ctx_rets_acc ++ map (const (MemPrim int64)) ext_ses ++ mem_ctx_rets,
-              res_acc ++ [r],
-              res_rets_acc ++ [exttp],
-              k + i + 1
-            )
+    numCtxNeeded Array {} Nothing = 1
+    numCtxNeeded Array {} (Just (_, m)) = length m + 1
+    numCtxNeeded _ _ = 0
 
-    inspect k (Array pt shape u) space =
+    helper
+      num_new_ctx
+      (ctx_acc, ctx_rets_acc, res_acc, res_rets_acc)
+      (ifr, r, mbixfsub, sp, ctx_offset) =
+        case mbixfsub of
+          Nothing -> do
+            -- does NOT generalize/antiunify; ensure direct
+            r' <- ensureDirect sp r
+            (mem_ctx_ses, mem_ctx_rets) <- unzip <$> bodyReturnMemCtx r'
+            let body_ret = inspect num_new_ctx ctx_offset ifr sp
+            pure
+              ( ctx_acc ++ mem_ctx_ses,
+                ctx_rets_acc ++ mem_ctx_rets,
+                res_acc ++ [r'],
+                res_rets_acc ++ [body_ret]
+              )
+          Just (ixfn, m) -> do
+            -- generalizes
+            let i = length m
+            ext_ses <- mapM (toSubExp "ixfn_exist") m
+            (mem_ctx_ses, mem_ctx_rets) <- unzip <$> bodyReturnMemCtx r
+            let sp' = fromMaybe DefaultSpace sp
+                ixfn' = fmap (adjustExtPE ctx_offset) ixfn
+                exttp = case ifr of
+                  Array pt shape u ->
+                    MemArray pt (fmap (adjustExt num_new_ctx) shape) u $
+                      ReturnsNewBlock sp' (ctx_offset + i) ixfn'
+                  _ -> error "Impossible case reached in addResCtxInIfBody"
+            pure
+              ( ctx_acc ++ subExpsRes ext_ses ++ mem_ctx_ses,
+                ctx_rets_acc ++ map (const (MemPrim int64)) ext_ses ++ mem_ctx_rets,
+                res_acc ++ [r],
+                res_rets_acc ++ [exttp]
+              )
+
+    inspect num_new_ctx k (Array pt shape u) space =
       let space' = fromMaybe DefaultSpace space
+          shape' = fmap (adjustExt num_new_ctx) shape
           bodyret =
-            MemArray pt shape u $
-              ReturnsNewBlock space' k $
-                IxFun.iota $ map convert $ shapeDims shape
+            MemArray pt shape' u . ReturnsNewBlock space' k $
+              IxFun.iota $ map convert $ shapeDims shape'
        in bodyret
-    inspect _ (Acc acc ispace ts u) _ = MemAcc acc ispace ts u
-    inspect _ (Prim pt) _ = MemPrim pt
-    inspect _ (Mem space) _ = MemMem space
+    inspect _ _ (Acc acc ispace ts u) _ = MemAcc acc ispace ts u
+    inspect _ _ (Prim pt) _ = MemPrim pt
+    inspect _ _ (Mem space) _ = MemMem space
 
     convert (Ext i) = le64 (Ext i)
     convert (Free v) = Free <$> pe64 v
 
-    adjustExtV :: Int -> Ext VName -> Ext VName
-    adjustExtV _ (Free v) = Free v
-    adjustExtV k (Ext i) = Ext (k + i)
+    adjustExt :: Int -> Ext a -> Ext a
+    adjustExt _ (Free v) = Free v
+    adjustExt k (Ext i) = Ext (k + i)
 
     adjustExtPE :: Int -> TPrimExp t (Ext VName) -> TPrimExp t (Ext VName)
-    adjustExtPE k = fmap (adjustExtV k)
+    adjustExtPE k = fmap (adjustExt k)
 
 mkSpaceOks ::
   (Mem torep inner, LocalScope torep m) =>

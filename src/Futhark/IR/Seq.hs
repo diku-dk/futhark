@@ -22,11 +22,11 @@ import Futhark.IR.Pretty
 import Futhark.IR.Prop
 import Futhark.IR.Syntax
 import Futhark.IR.Traversals
+import qualified Futhark.IR.TypeCheck as TC
 import qualified Futhark.Optimise.Simplify as Simplify
 import qualified Futhark.Optimise.Simplify.Engine as Engine
 import Futhark.Optimise.Simplify.Rules
 import Futhark.Pass
-import qualified Futhark.TypeCheck as TypeCheck
 
 -- | The phantom type for the Seq representation.
 data Seq
@@ -37,10 +37,10 @@ instance RepTypes Seq where
 instance ASTRep Seq where
   expTypesFromPat = return . expExtTypesFromPat
 
-instance TypeCheck.CheckableOp Seq where
+instance TC.CheckableOp Seq where
   checkOp = pure
 
-instance TypeCheck.Checkable Seq
+instance TC.Checkable Seq
 
 instance Buildable Seq where
   mkBody = Body ()

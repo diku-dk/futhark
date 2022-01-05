@@ -266,6 +266,23 @@ typeNotes ctx =
     . S.toList
     . typeDimNames
 
+typeVarNotes :: MonadUnify m => VName -> m Notes
+typeVarNotes v = maybe mempty (aNote . note . snd) . M.lookup v <$> getConstraints
+  where
+    note (HasConstrs cs _) =
+      pprName v <+> "="
+        <+> mconcat (map ppConstr (M.toList cs))
+        <+> "..."
+    note (Overloaded ts _) =
+      pprName v <+> "must be one of" <+> mconcat (punctuate ", " (map ppr ts))
+    note (HasFields fs _) =
+      pprName v <+> "="
+        <+> braces (mconcat (punctuate ", " (map ppField (M.toList fs))))
+    note _ = mempty
+
+    ppConstr (c, _) = "#" <> ppr c <+> "..." <+> "|"
+    ppField (f, _) = pprName f <> ":" <+> "..."
+
 -- | Monads that which to perform unification must implement this type
 -- class.
 class Monad m => MonadUnify m where
@@ -725,29 +742,32 @@ linkVarToType onDims usage bound bcs vn lvl tp = do
             modifyConstraints $
               M.insert vn (lvl, Constraint (RetType ext tp') usage)
             unifySharedConstructors onDims usage bound bcs required_cs ts
-        Scalar (TypeVar _ _ (TypeName [] v) [])
-          | not $ isRigid v constraints -> do
-            link
-            case M.lookup v constraints of
-              Just (_, HasConstrs v_cs _) ->
-                unifySharedConstructors onDims usage bound bcs required_cs v_cs
-              _ -> pure ()
-            modifyConstraints $
-              M.insertWith
-                combineConstrs
-                v
-                (lvl, HasConstrs required_cs old_usage)
+        Scalar (TypeVar _ _ (TypeName [] v) []) -> do
+          case M.lookup v constraints of
+            Just (_, HasConstrs v_cs _) -> do
+              unifySharedConstructors onDims usage bound bcs required_cs v_cs
+            Just (_, NoConstraint {}) -> pure ()
+            Just (_, Equality {}) -> pure ()
+            _ -> do
+              notes <- (<>) <$> typeVarNotes vn <*> typeVarNotes v
+              noSumType notes
+          link
+          modifyConstraints $
+            M.insertWith
+              combineConstrs
+              v
+              (lvl, HasConstrs required_cs old_usage)
           where
             combineConstrs (_, HasConstrs cs1 usage1) (_, HasConstrs cs2 _) =
               (lvl, HasConstrs (M.union cs1 cs2) usage1)
             combineConstrs hasCs _ = hasCs
-        _ -> noSumType
+        _ -> noSumType mempty
     _ -> link
   where
-    noSumType =
+    noSumType notes =
       unifyError
         usage
-        mempty
+        notes
         bcs
         "Cannot unify a sum type with a non-sum type"
 
@@ -998,9 +1018,8 @@ mustHaveConstr usage c t fs = do
           | otherwise ->
             unifyError usage mempty noBreadCrumbs $
               "Different arity for constructor" <+> pquote (ppr c) <+> "."
-    _ -> do
+    _ ->
       unify usage t $ Scalar $ Sum $ M.singleton c fs
-      return ()
 
 mustHaveFieldWith ::
   MonadUnify m =>

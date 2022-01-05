@@ -390,8 +390,8 @@ aggSummaryMapTotal :: MonadFreshNames m => ScopeTab rep -> ScopeTab rep -> Scala
 aggSummaryMapTotal _ _ _ [] _ = return mempty
 aggSummaryMapTotal _ _ _ _ (Set lmads)
   | lmads == mempty = return mempty
-aggSummaryMapTotal scope_before scope_loop scalars segspace Undeterminable = return Undeterminable
-aggSummaryMapTotal scope_before scope_loop scalars segspace (Set lmads0) =
+aggSummaryMapTotal _ _ _ _ Undeterminable = return Undeterminable
+aggSummaryMapTotal _scope_before _scope_loop scalars segspace (Set lmads0) =
   foldM
     ( \as' (gtid', size') -> case as' of
         Set lmads' ->

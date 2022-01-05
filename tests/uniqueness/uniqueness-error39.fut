@@ -3,6 +3,6 @@
 -- ==
 -- error: Unique-typed return value
 
-let f (x: []i32): []i32 = x
+def f (x: []i32): []i32 = x
 
-let main (a: []i32): *[]i32 = f a
+def main (a: []i32): *[]i32 = f a

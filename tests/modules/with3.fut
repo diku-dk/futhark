@@ -7,9 +7,9 @@ module type has_x = { type t val x: t }
 
 module pm (R: has_t) (V: has_x with t = R.t) =
 {
-  let x = V.x
+  def x = V.x
 }
 
-module m = pm { type t = i32} { type t = i32 let x = 2 }
+module m = pm { type t = i32} { type t = i32 def x = 2 }
 
-let main (y: i32) = y + m.x
+def main (y: i32) = y + m.x

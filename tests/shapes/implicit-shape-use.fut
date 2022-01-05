@@ -15,7 +15,7 @@
 --    [0.0, 0.0, 0.0]]
 -- }
 
-let brownianBridgeDates [num_dates]
+def brownianBridgeDates [num_dates]
                         (bb_inds: [3][num_dates]i32)
                         (bb_data: [3][num_dates]f64)
                         (gauss: [num_dates]f64): [num_dates]f64 =
@@ -51,7 +51,7 @@ let brownianBridgeDates [num_dates]
             let bbrow[i] = bbrow[i] - bbrow[i-1]
             in  bbrow
 
-let brownianBridge [num_dates]
+def brownianBridge [num_dates]
                (num_und: i64,
                 bb_inds: [3][num_dates]i32,
                 bb_data: [3][num_dates]f64,
@@ -63,7 +63,7 @@ let brownianBridge [num_dates]
         map (brownianBridgeDates bb_inds bb_data) gauss2dT
       )
 
-let main [num_dates] (num_und: i64)
+def main [num_dates] (num_und: i64)
                      (bb_inds: [3][num_dates]i32)
                      (arr_usz: []f64): [][]f64 =
   let n = num_dates*num_und

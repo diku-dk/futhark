@@ -1,1 +1,1 @@
-let main (#[foo] x: bool) = x
+def main (#[foo] x: bool) = x

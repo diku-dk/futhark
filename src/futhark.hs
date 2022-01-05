@@ -16,6 +16,7 @@ import qualified Futhark.CLI.CUDA as CCUDA
 import qualified Futhark.CLI.Check as Check
 import qualified Futhark.CLI.Datacmp as Datacmp
 import qualified Futhark.CLI.Dataset as Dataset
+import qualified Futhark.CLI.Defs as Defs
 import qualified Futhark.CLI.Dev as Dev
 import qualified Futhark.CLI.Doc as Doc
 import qualified Futhark.CLI.Literate as Literate
@@ -69,6 +70,7 @@ commands =
       ("imports", (Misc.mainImports, "Print all non-builtin imported Futhark files.")),
       ("hash", (Misc.mainHash, "Print hash of program AST.")),
       ("autotune", (Autotune.main, "Autotune threshold parameters.")),
+      ("defs", (Defs.main, "Show location and name of all definitions.")),
       ("query", (Query.main, "Query semantic information about program.")),
       ("literate", (Literate.main, "Process a literate Futhark program."))
     ]

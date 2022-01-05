@@ -3,11 +3,11 @@
 -- ==
 -- error: "b".*consumed
 
-let f(x: (i32, i32), t: (i32, i32, []i64)): []i64 =
+def f(x: (i32, i32), t: (i32, i32, []i64)): []i64 =
     let (x, y, a) = t in
     a
 
-let main(): []i32 =
+def main(): []i32 =
     let n = 10
     let a = iota(n)
     let t = (3, 4, a)

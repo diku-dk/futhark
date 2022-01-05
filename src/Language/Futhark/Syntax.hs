@@ -565,6 +565,8 @@ instance Located (TypeDeclBase f vn) where
 data Diet
   = -- | Consumes these fields in the record.
     RecordDiet (M.Map Name Diet)
+  | -- | Consume these parts of the constructors.
+    SumDiet (M.Map Name [Diet])
   | -- | A function that consumes its argument(s) like this.
     -- The final 'Diet' should always be 'Observe', as there
     -- is no way for a function to consume its return value.

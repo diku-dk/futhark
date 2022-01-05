@@ -100,10 +100,11 @@ generateBoilerplate opencl_code opencl_prelude cost_centres kernels types sizes 
   GC.earlyDecl [C.cedecl|struct tuning_params { $sdecls:size_decls };|]
   cfg <- GC.publicDef "context_config" GC.InitDecl $ \s ->
     ( [C.cedecl|struct $id:s;|],
-      [C.cedecl|struct $id:s { struct opencl_config opencl;
-                              typename int64_t tuning_params[$int:num_sizes];
-                              int num_build_opts;
-                              const char **build_opts;
+      [C.cedecl|struct $id:s { int in_use;
+                               struct opencl_config opencl;
+                               typename int64_t tuning_params[$int:num_sizes];
+                               int num_build_opts;
+                               const char **build_opts;
                             };|]
     )
 
@@ -119,6 +120,7 @@ generateBoilerplate opencl_code opencl_prelude cost_centres kernels types sizes 
                            return NULL;
                          }
 
+                         cfg->in_use = 0;
                          cfg->num_build_opts = 0;
                          cfg->build_opts = (const char**) malloc(sizeof(const char*));
                          cfg->build_opts[0] = NULL;
@@ -133,6 +135,7 @@ generateBoilerplate opencl_code opencl_prelude cost_centres kernels types sizes 
   GC.publicDef_ "context_config_free" GC.InitDecl $ \s ->
     ( [C.cedecl|void $id:s(struct $id:cfg* cfg);|],
       [C.cedecl|void $id:s(struct $id:cfg* cfg) {
+                         assert(!cfg->in_use);
                          free(cfg->build_opts);
                          free(cfg);
                        }|]
@@ -307,6 +310,7 @@ generateBoilerplate opencl_code opencl_prelude cost_centres kernels types sizes 
   ctx <- GC.publicDef "context" GC.InitDecl $ \s ->
     ( [C.cedecl|struct $id:s;|],
       [C.cedecl|struct $id:s {
+                         struct $id:cfg* cfg;
                          int detail_memory;
                          int debugging;
                          int profiling;
@@ -400,10 +404,13 @@ generateBoilerplate opencl_code opencl_prelude cost_centres kernels types sizes 
   GC.publicDef_ "context_new" GC.InitDecl $ \s ->
     ( [C.cedecl|struct $id:ctx* $id:s(struct $id:cfg* cfg);|],
       [C.cedecl|struct $id:ctx* $id:s(struct $id:cfg* cfg) {
+                          assert(!cfg->in_use);
                           struct $id:ctx* ctx = (struct $id:ctx*) malloc(sizeof(struct $id:ctx));
                           if (ctx == NULL) {
                             return NULL;
                           }
+                          ctx->cfg = cfg;
+                          ctx->cfg->in_use = 1;
 
                           int required_types = 0;
                           $stms:set_required_types
@@ -418,10 +425,13 @@ generateBoilerplate opencl_code opencl_prelude cost_centres kernels types sizes 
   GC.publicDef_ "context_new_with_command_queue" GC.InitDecl $ \s ->
     ( [C.cedecl|struct $id:ctx* $id:s(struct $id:cfg* cfg, typename cl_command_queue queue);|],
       [C.cedecl|struct $id:ctx* $id:s(struct $id:cfg* cfg, typename cl_command_queue queue) {
+                          assert(!cfg->in_use);
                           struct $id:ctx* ctx = (struct $id:ctx*) malloc(sizeof(struct $id:ctx));
                           if (ctx == NULL) {
                             return NULL;
                           }
+                          ctx->cfg = cfg;
+                          ctx->cfg->in_use = 1;
 
                           int required_types = 0;
                           $stms:set_required_types
@@ -441,6 +451,7 @@ generateBoilerplate opencl_code opencl_prelude cost_centres kernels types sizes 
                                  free_lock(&ctx->lock);
                                  $stms:(map releaseKernel (M.toList kernels))
                                  teardown_opencl(&ctx->opencl);
+                                 ctx->cfg->in_use = 0;
                                  free(ctx);
                                }|]
     )

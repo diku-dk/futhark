@@ -4,5 +4,5 @@
 -- input { [1,2] } output { [1,2] }
 -- compiled input { [1,2,3] } error:
 
-let main (xs: []i32) : [2]i32 =
+def main (xs: []i32) : [2]i32 =
   xs

@@ -123,45 +123,6 @@ jobs:
         name: futhark-nightly-macos-x86_64.tar.xz
         path: futhark-nightly-macos-x86_64.tar.xz
 
-  build-windows:
-    runs-on: windows-2019
-
-    steps:
-    - uses: actions/checkout@v2
-
-    - name: Install dependencies
-      run: |
-        choco install -y msys2
-        choco install -y ghc --version=8.10.3 --allow-downgrade
-      env:
-        ACTIONS_ALLOW_UNSECURE_COMMANDS: true
-
-    - uses: actions/cache@v2
-      name: Cache ~/.cabal/packages, ~/.cabal/store and dist-newstyle
-      with:
-        path: |
-          ~/AppData/Roaming/cabal/packages
-          ~/AppData/Roaming/cabal/store
-          dist-newstyle
-        key: ${{ runner.os }}-cabal
-
-    - name: Build
-      shell: bash
-      run: |
-        cabal update
-        try() { cabal install -j1 --install-method=copy --overwrite-policy=always --installdir=.; }
-        try || try || try
-
-    - uses: papeloto/action-zip@v1
-      with:
-        files: futhark.exe
-        dest: futhark-nightly-windows-x86_64.zip
-
-    - uses: actions/upload-artifact@v1
-      with:
-        name: futhark-nightly-windows-x86_64.zip
-        path: futhark-nightly-windows-x86_64.zip
-
   test-unit-and-style:
     runs-on: ubuntu-20.04
 
@@ -563,7 +524,7 @@ jobs:
 
   deploy-nightly:
     runs-on: ubuntu-20.04
-    needs: [build-windows, build-linux-nix, build-mac-cabal, test-tools]
+    needs: [build-linux-nix, build-mac-cabal, test-tools]
     if: github.ref == 'refs/heads/master'
 
     steps:
@@ -572,11 +533,6 @@ jobs:
       with:
         key: ${{ secrets.SSHKEY }}
         known_hosts: ${{ secrets.KNOWN_HOSTS }}
-
-    - uses: actions/download-artifact@v2
-      with:
-        name: futhark-nightly-windows-x86_64.zip
-
 
     - uses: actions/download-artifact@v2
       with:
@@ -591,7 +547,7 @@ jobs:
         name: prelude-docs.tar.xz
 
     - name: scp tarballs to server
-      run: scp -o StrictHostKeyChecking=no futhark-nightly-windows-x86_64.zip futhark-nightly-linux-x86_64.tar.xz futhark-nightly-macos-x86_64.tar.xz futhark@futhark-lang.org:/var/www/htdocs/futhark-lang.org/releases
+      run: scp -o StrictHostKeyChecking=no futhark-nightly-linux-x86_64.tar.xz futhark-nightly-macos-x86_64.tar.xz futhark@futhark-lang.org:/var/www/htdocs/futhark-lang.org/releases
 
     - name: copy docs to server
       run: |

@@ -4,10 +4,10 @@
 
 import "intrinsics"
 
-let f (acc: *acc ([]i32)) i =
+def f (acc: *acc ([]i32)) i =
   let acc = write acc i 1
   let acc = write acc (i+1) 1
   in acc
 
-let main (xs: *[]i32) =
+def main (xs: *[]i32) =
   reduce_by_index_stream xs (*) 1 f (iota 10)

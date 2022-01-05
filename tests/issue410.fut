@@ -1,4 +1,4 @@
-let sgmScanSum [n] (vals:[n]i32) (flags:[n]bool) : [n]i32 =
+def sgmScanSum [n] (vals:[n]i32) (flags:[n]bool) : [n]i32 =
   let pairs = scan ( \(v1,f1) (v2,f2) ->
                        let f = f1 || f2
                        let v = if f2 then v2 else v1+v2
@@ -6,14 +6,14 @@ let sgmScanSum [n] (vals:[n]i32) (flags:[n]bool) : [n]i32 =
   let (res,_) = unzip pairs
   in res
 
-let sgmIota [n] (flags:[n]bool) : [n]i32 =
+def sgmIota [n] (flags:[n]bool) : [n]i32 =
   let iotas = sgmScanSum (replicate n 1) flags
   in map (\x -> x-1) iotas
 
 type point = (i32,i32)
 type line = (point,point)
 
-let main [h][w][n] (grid:*[h][w]i32) (lines:[n]line) (nn: i64) (idxs: []i32) =
+def main [h][w][n] (grid:*[h][w]i32) (lines:[n]line) (nn: i64) (idxs: []i32) =
   #[unsafe]
   let iotan = iota n
   let nums = map (\i -> iotan[i]) idxs
