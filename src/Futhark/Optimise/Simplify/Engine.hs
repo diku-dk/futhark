@@ -717,8 +717,7 @@ usageFromDiet :: Diet -> UT.Usages
 usageFromDiet Consume = UT.consumedU
 usageFromDiet _ = mempty
 
--- | Simplify a single 'Result'.  The @[Diet]@ only covers the value
--- elements, because the context cannot be consumed.
+-- | Simplify a single 'Result'.
 simplifyResult ::
   SimplifiableRep rep => [UT.Usages] -> Result -> SimpleM rep (Result, UT.UsageTable)
 simplifyResult usages res = do
