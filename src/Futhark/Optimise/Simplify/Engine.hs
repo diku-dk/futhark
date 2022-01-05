@@ -535,7 +535,8 @@ expandUsage usageInStm vtable utable stm@(Let pat _ e) =
         zip (patNames pat) (patAliases pat)
     usageThroughBindeeAliases (name, aliases) = do
       uses <- UT.lookup name utable
-      return $ mconcat $ map (`UT.usage` uses) $ namesToList aliases
+      pure . mconcat $
+        map (`UT.usage` (uses `UT.withoutU` UT.presentU)) $ namesToList aliases
 
 type BlockPred rep = ST.SymbolTable rep -> UT.UsageTable -> Stm rep -> Bool
 
@@ -725,7 +726,11 @@ simplifyResult usages res = do
   vtable <- askVtable
   let more_usages = mconcat $ do
         (u, Var v) <- zip usages $ map resSubExp res
-        map (`UT.usage` u) $ v : namesToList (ST.lookupAliases v vtable)
+        let als_usages =
+              map
+                (`UT.usage` (u `UT.withoutU` UT.presentU))
+                (namesToList (ST.lookupAliases v vtable))
+        UT.usage v u : als_usages
   return (res', UT.usages (freeIn res') <> more_usages)
 
 isDoLoopResult :: Result -> UT.UsageTable
