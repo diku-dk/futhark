@@ -24,6 +24,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Defective GPU code generation for vectorised non-commutative
   operatators (#1559).
 
+* Excessive memory usage for some programs (#1325).
+
 ## [0.21.2]
 
 ### Added
