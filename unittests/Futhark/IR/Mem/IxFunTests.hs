@@ -6,10 +6,12 @@ module Futhark.IR.Mem.IxFunTests
 where
 
 import qualified Data.List as DL
+import Futhark.Analysis.PrimExp.Convert
 import qualified Futhark.IR.Mem.IxFun as IxFunLMAD
 import qualified Futhark.IR.Mem.IxFun.Alg as IxFunAlg
 import Futhark.IR.Mem.IxFunWrapper
 import qualified Futhark.IR.Mem.IxFunWrapper as IxFunWrap
+import Futhark.IR.Prop
 import Futhark.IR.Syntax
 import Futhark.IR.Syntax.Core ()
 import qualified Futhark.Util.IntegralExp as IE
@@ -119,7 +121,8 @@ tests =
         test_flatSlice_rotate_iota,
         test_flatSlice_rotate_slice_iota,
         test_flatSlice_transpose_slice_iota,
-        test_rotate_flatSlice_transpose_slice_iota
+        test_rotate_flatSlice_transpose_slice_iota,
+        test_disjoint2
       ]
 
 singleton :: TestTree -> [TestTree]
@@ -511,3 +514,48 @@ test_rotate_flatSlice_transpose_slice_iota =
         rotate (flatSlice (permute (slice (iota [20, 20]) $ Slice [DimSlice 1 5 2, DimSlice 1 5 2]) [1, 0]) flat_slice_1) [2, 1]
   where
     flat_slice_1 = FlatSlice 1 [FlatDimIndex 2 2]
+
+test_disjoint2 :: [TestTree]
+test_disjoint2 =
+  let add_nw64 = (+)
+
+      mul_nw64 = (*)
+
+      sub64 = (-)
+
+      vname s i = VName (nameFromString s) i
+   in [ let gtid_8472 = TPrimExp $ LeafExp (vname "gtid" 8472) $ IntType Int64
+
+            gtid_8473 = TPrimExp $ LeafExp (vname "gtid" 8473) $ IntType Int64
+
+            gtid_8474 = TPrimExp $ LeafExp (vname "gtid" 8474) $ IntType Int64
+
+            num_blocks_8284 = TPrimExp $ LeafExp (vname "num_blocks" 8284) $ IntType Int64
+
+            nonnegs = freeIn [gtid_8472, gtid_8473, gtid_8474, num_blocks_8284]
+
+            j_m_i_8287 :: TPrimExp Int64 VName
+            j_m_i_8287 = num_blocks_8284 - 1
+
+            lessthans :: [(VName, PrimExp VName)]
+            lessthans =
+              [ (head $ namesToList $ freeIn gtid_8472, untyped j_m_i_8287),
+                (head $ namesToList $ freeIn gtid_8473, untyped j_m_i_8287),
+                (head $ namesToList $ freeIn gtid_8474, untyped (16 :: TPrimExp Int64 VName))
+              ]
+
+            lm1 :: IxFunLMAD.LMAD (TPrimExp Int64 VName)
+            lm1 =
+              IxFunLMAD.LMAD
+                256
+                [ IxFunLMAD.LMADDim 256 0 (sub64 (num_blocks_8284) 1) 0 IxFunLMAD.Inc,
+                  IxFunLMAD.LMADDim 1 0 16 1 IxFunLMAD.Inc,
+                  IxFunLMAD.LMADDim 16 0 16 2 IxFunLMAD.Inc
+                ]
+            lm2 :: IxFunLMAD.LMAD (TPrimExp Int64 VName)
+            lm2 =
+              IxFunLMAD.LMAD
+                (add_nw64 (add_nw64 (add_nw64 (add_nw64 (mul_nw64 (256) (num_blocks_8284)) (256)) (mul_nw64 (gtid_8472) (mul_nw64 (256) (num_blocks_8284)))) (mul_nw64 (gtid_8473) (256))) (mul_nw64 (gtid_8474) (16)))
+                [IxFunLMAD.LMADDim 1 0 16 0 IxFunLMAD.Inc]
+         in testCase (pretty lm1 <> " and " <> pretty lm2) $ IxFunLMAD.disjoint2 lessthans nonnegs lm1 lm2 @? "Failed"
+      ]
