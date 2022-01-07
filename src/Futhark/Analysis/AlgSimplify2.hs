@@ -8,6 +8,7 @@ module Futhark.Analysis.AlgSimplify2
     simplify0,
     simplify,
     simplify',
+    simplifySofP,
     sumOfProducts,
     sumToExp,
     prodToExp,
@@ -19,7 +20,7 @@ module Futhark.Analysis.AlgSimplify2
 where
 
 import Data.Bits (xor)
-import Data.List (sort, (\\))
+import Data.List (partition, sort, (\\))
 import Data.Maybe (mapMaybe)
 import Futhark.Analysis.PrimExp
 import Futhark.IR.Syntax.Core
@@ -84,7 +85,7 @@ prodToExp (Prod False (a : as)) =
   foldl (BinOpExp $ Mul Int64 OverflowUndef) a as
 
 simplifySofP :: SofP -> SofP
-simplifySofP = fixPoint (mapMaybe (applyZero . removeOnes) . removeNegations)
+simplifySofP = fixPoint (mapMaybe (applyZero . removeOnes) . constFoldValueExps . removeNegations)
 
 simplify0 :: Exp -> SofP
 simplify0 = simplifySofP . sumOfProducts
@@ -111,6 +112,16 @@ removeNegations (t : ts) =
   case break (== negate t) ts of
     (start, _ : rest) -> removeNegations $ start <> rest
     _ -> t : removeNegations ts
+
+constFoldValueExps :: SofP -> SofP
+constFoldValueExps prods =
+  let (value_exps, others) = partition (all isPrimValue . atoms) prods
+      value_exps' = sumOfProducts $ constFoldPrimExp $ sumToExp value_exps
+   in value_exps' <> others
+
+isPrimValue :: Exp -> Bool
+isPrimValue (ValueExp _) = True
+isPrimValue _ = False
 
 val :: Int64 -> Exp
 val = ValueExp . IntValue . Int64Value
