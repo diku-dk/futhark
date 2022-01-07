@@ -68,6 +68,7 @@ import Futhark.IR.Syntax
     FlatSlice (..),
     ShapeChange,
     Slice (..),
+    SubExp (..),
     dimFix,
     flatSliceDims,
     flatSliceStrides,
@@ -1213,22 +1214,32 @@ nonNegativeishExp _ (ValueExp v) = not $ negativeIsh v
 nonNegativeishExp non_negatives (LeafExp vname _) = vname `nameIn` non_negatives
 nonNegativeishExp _ _ = False
 
-lessThanish :: [(VName, PrimExp VName)] -> Names -> TPrimExp Int64 VName -> TPrimExp Int64 VName -> Bool
-lessThanish less_thans non_negatives e1 e2 =
+-- | Is e1 symbolically less than or equal to e2?
+lessThanOrEqualish :: [(VName, PrimExp VName)] -> Names -> TPrimExp Int64 VName -> TPrimExp Int64 VName -> Bool
+lessThanOrEqualish less_thans0 non_negatives e1 e2 =
   case e2 - e1 & untyped & AlgSimplify2.simplify0 of
     [] -> False
     simplified ->
       nonNegativeish non_negatives $
-        fixPoint (`removeLessThans` less_thans) simplified
+        fixPoint (`removeLessThans` less_thans) $ simplified
+  where
+    less_thans =
+      concatMap
+        (\(i, bound) -> [(Var i, bound), (Constant $ IntValue $ Int64Value 0, bound)])
+        less_thans0
 
-removeLessThans :: AlgSimplify2.SofP -> [(VName, PrimExp VName)] -> AlgSimplify2.SofP
+lessThanish :: [(VName, PrimExp VName)] -> Names -> TPrimExp Int64 VName -> TPrimExp Int64 VName -> Bool
+lessThanish less_thans non_negatives e1 e2 =
+  lessThanOrEqualish less_thans non_negatives (e1 + 1) e2
+
+removeLessThans :: AlgSimplify2.SofP -> [(SubExp, PrimExp VName)] -> AlgSimplify2.SofP
 removeLessThans =
   foldl
     ( \sofp (i, bound) ->
         let to_remove =
-              [ AlgSimplify2.Prod True [LeafExp i $ IntType Int64],
-                AlgSimplify2.Prod False [bound]
-              ]
+              AlgSimplify2.simplifySofP $
+                AlgSimplify2.Prod True [primExpFromSubExp (IntType Int64) i] :
+                AlgSimplify2.simplify0 bound
          in case to_remove `intersect` sofp of
               to_remove' | to_remove' == to_remove -> sofp \\ to_remove
               _ -> sofp
