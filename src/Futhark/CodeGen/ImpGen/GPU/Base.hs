@@ -42,6 +42,7 @@ import Data.Maybe
 import qualified Data.Set as S
 import qualified Futhark.CodeGen.ImpCode.GPU as Imp
 import Futhark.CodeGen.ImpGen
+import Futhark.Construct (fullSliceNum)
 import Futhark.Error
 import Futhark.IR.GPUMem
 import qualified Futhark.IR.Mem.IxFun as IxFun
@@ -323,6 +324,12 @@ compileGroupSpace lvl space = do
   ltid <- kernelLocalThreadId . kernelConstants <$> askEnv
   dPrimV_ (segFlat space) ltid
 
+compileFlatId :: SegLevel -> SegSpace -> InKernelGen ()
+compileFlatId lvl space = do
+  sanityCheckLevel lvl
+  ltid <- kernelLocalThreadId . kernelConstants <$> askEnv
+  dPrimV_ (segFlat space) ltid
+
 -- Construct the necessary lock arrays for an intra-group histogram.
 prepareIntraGroupSegHist ::
   Count GroupSize SubExp ->
@@ -385,26 +392,102 @@ fenceForArrays = fmap (foldl' max Imp.FenceLocal) . mapM need
         . entryArrayLoc
         =<< lookupArray arr
 
+groupChunkLoop ::
+  Imp.TExp Int64 ->
+  (Imp.TExp Int64 -> TV Int64 -> InKernelGen ()) ->
+  InKernelGen ()
+groupChunkLoop w m = do
+  constants <- kernelConstants <$> askEnv
+  let max_chunk_size = kernelGroupSize constants
+  num_chunks <- dPrimVE "num_chunks" $ w `divUp` max_chunk_size
+  sFor "chunk_i" num_chunks $ \chunk_i -> do
+    chunk_start <-
+      dPrimVE "chunk_start" $ chunk_i * max_chunk_size
+    chunk_end <-
+      dPrimVE "chunk_end" $ sMin64 w (chunk_start + max_chunk_size)
+    chunk_size <-
+      dPrimV "chunk_size" $ chunk_end - chunk_start
+    m chunk_start chunk_size
+
+sliceArray :: Imp.TExp Int64 -> TV Int64 -> VName -> ImpM rep r op VName
+sliceArray start size arr = do
+  MemLoc mem _ ixfun <- entryArrayLoc <$> lookupArray arr
+  arr_t <- lookupType arr
+  let slice =
+        fullSliceNum
+          (map Imp.pe64 (arrayDims arr_t))
+          [DimSlice start (tvExp size) 1]
+  sArray
+    (baseString arr ++ "_chunk")
+    (elemType arr_t)
+    (arrayShape arr_t `setOuterDim` Var (tvVar size))
+    mem
+    $ IxFun.slice ixfun slice
+
+-- | @applyLambda lam dests args@ emits code that:
+--
+-- 1. Binds each parameter of @lam@ to the corresponding element of
+--    @args@, interpreted as a (name,slice) pair (as in 'copyDWIM').
+--    Use an empty list for a scalar.
+--
+-- 2. Executes the body of @lam@.
+--
+-- 3. Binds the 'SubExp's that are the 'Result' of @lam@ to the
+-- provided @dest@s, again interpreted as the destination for a
+-- 'copyDWIM'.
+applyLambda ::
+  Mem rep inner =>
+  Lambda rep ->
+  [(VName, [DimIndex (Imp.TExp Int64)])] ->
+  [(SubExp, [DimIndex (Imp.TExp Int64)])] ->
+  ImpM rep r op ()
+applyLambda lam dests args = do
+  dLParams $ lambdaParams lam
+  forM_ (zip (lambdaParams lam) args) $ \(p, (arg, arg_slice)) ->
+    copyDWIM (paramName p) [] arg arg_slice
+  compileStms mempty (bodyStms $ lambdaBody lam) $ do
+    let res = map resSubExp $ bodyResult $ lambdaBody lam
+    forM_ (zip dests res) $ \((dest, dest_slice), se) ->
+      copyDWIM dest dest_slice se []
+
+-- | As 'applyLambda', but first rename the names in the lambda.  This
+-- makes it safe to apply it in multiple places.  (It might be safe
+-- anyway, but you have to be more careful - use this if you are in
+-- doubt.)
+applyRenamedLambda ::
+  Mem rep inner =>
+  Lambda rep ->
+  [(VName, [DimIndex (Imp.TExp Int64)])] ->
+  [(SubExp, [DimIndex (Imp.TExp Int64)])] ->
+  ImpM rep r op ()
+applyRenamedLambda lam dests args = do
+  lam_renamed <- renameLambda lam
+  applyLambda lam_renamed dests args
+
 compileGroupOp :: OpCompiler GPUMem KernelEnv Imp.KernelOp
 compileGroupOp pat (Alloc size space) =
   kernelAlloc pat size space
 compileGroupOp pat (Inner (SizeOp (SplitSpace o w i elems_per_thread))) =
   splitSpace pat o w i elems_per_thread
 compileGroupOp pat (Inner (SegOp (SegMap lvl space _ body))) = do
-  void $ compileGroupSpace lvl space
+  compileFlatId lvl space
 
-  whenActive lvl space . localOps threadOperations $
+  let (ltids, dims) = unzip $ unSegSpace space
+      dims' = map toInt64Exp dims
+  groupCoverSpace dims' $ \is -> do
+    zipWithM_ dPrimV_ ltids is
     compileStms mempty (kernelBodyStms body) $
       zipWithM_ (compileThreadResult space) (patElems pat) $
         kernelBodyResult body
-
   sOp $ Imp.ErrorSync Imp.FenceLocal
 compileGroupOp pat (Inner (SegOp (SegScan lvl space scans _ body))) = do
-  compileGroupSpace lvl space
+  compileFlatId lvl space
+
   let (ltids, dims) = unzip $ unSegSpace space
       dims' = map toInt64Exp dims
 
-  whenActive lvl space . localOps threadOperations $
+  groupCoverSpace dims' $ \is -> do
+    zipWithM_ dPrimV_ ltids is
     compileStms mempty (kernelBodyStms body) $
       forM_ (zip (patNames pat) $ kernelBodyResult body) $ \(dest, res) ->
         copyDWIMFix
@@ -436,29 +519,51 @@ compileGroupOp pat (Inner (SegOp (SegScan lvl space scans _ body))) = do
           mem
           $ IxFun.reshape ixfun $ map (DimNew . pe64) arr_dims
 
-      num_scan_results = sum $ map (length . segBinOpNeutral) scans
+      scan = head scans
+
+      num_scan_results = length $ segBinOpNeutral scan
 
   arrs_flat <- mapM flattened $ take num_scan_results $ patElems pat
 
-  forM_ scans $ \scan -> do
-    let scan_op = segBinOpLambda scan
-    groupScan (Just crossesSegment) (product dims') (product dims') scan_op arrs_flat
+  case segVirt lvl of
+    SegVirt ->
+      groupChunkLoop (tvExp dims_flat) $ \chunk_start chunk_size -> do
+        ltid <- kernelLocalThreadId . kernelConstants <$> askEnv
+        sComment "possibly incorporate carry" $
+          sWhen (chunk_start .>. 0 .&&. ltid .==. 0) $ do
+            carry_idx <- dPrimVE "carry_idx" $ chunk_start - 1
+            applyRenamedLambda
+              (segBinOpLambda scan)
+              (zip arrs_flat $ repeat [DimFix chunk_start])
+              ( zip (map Var arrs_flat) (repeat [DimFix carry_idx])
+                  ++ zip (map Var arrs_flat) (repeat [DimFix chunk_start])
+              )
+
+        arrs_flat_chunks <- mapM (sliceArray chunk_start chunk_size) arrs_flat
+
+        groupScan
+          (Just crossesSegment)
+          (tvExp chunk_size)
+          (tvExp chunk_size)
+          (segBinOpLambda scan)
+          arrs_flat_chunks
+    _ ->
+      groupScan
+        (Just crossesSegment)
+        (product dims')
+        (product dims')
+        (segBinOpLambda scan)
+        arrs_flat
 compileGroupOp pat (Inner (SegOp (SegRed lvl space ops _ body))) = do
-  compileGroupSpace lvl space
+  compileFlatId lvl space
 
-  let (ltids, dims) = unzip $ unSegSpace space
-      (red_pes, map_pes) =
-        splitAt (segBinOpResults ops) $ patElems pat
-
-      dims' = map toInt64Exp dims
-
+  let dims' = map toInt64Exp dims
       mkTempArr t =
         sAllocArray "red_arr" (elemType t) (Shape dims <> arrayShape t) $ Space "local"
 
   tmp_arrs <- mapM mkTempArr $ concatMap (lambdaReturnType . segBinOpLambda) ops
-  let tmps_for_ops = chunks (map (length . segBinOpNeutral) ops) tmp_arrs
-
-  whenActive lvl space . localOps threadOperations $
+  groupCoverSpace dims' $ \is -> do
+    zipWithM_ dPrimV_ ltids is
     compileStms mempty (kernelBodyStms body) $ do
       let (red_res, map_res) =
             splitAt (segBinOpResults ops) $ kernelBodyResult body
@@ -468,18 +573,46 @@ compileGroupOp pat (Inner (SegOp (SegRed lvl space ops _ body))) = do
 
   sOp $ Imp.ErrorSync Imp.FenceLocal
 
-  case dims' of
-    -- Nonsegmented case (or rather, a single segment) - this we can
-    -- handle directly with a group-level reduction.
-    [dim'] -> do
+  let tmps_for_ops = chunks (map (length . segBinOpNeutral) ops) tmp_arrs
+  case segVirt lvl of
+    SegVirt -> virtCase dims' tmps_for_ops
+    _ -> nonvirtCase dims' tmps_for_ops
+  where
+    (ltids, dims) = unzip $ unSegSpace space
+    (red_pes, map_pes) = splitAt (segBinOpResults ops) $ patElems pat
+
+    virtCase [dim'] tmps_for_ops = do
+      ltid <- kernelLocalThreadId . kernelConstants <$> askEnv
+      groupChunkLoop dim' $ \chunk_start chunk_size -> do
+        sComment "possibly incorporate carry" $
+          sWhen (chunk_start .>. 0 .&&. ltid .==. 0) $
+            forM_ (zip ops tmps_for_ops) $ \(op, tmps) ->
+              applyRenamedLambda
+                (segBinOpLambda op)
+                (zip tmps $ repeat [DimFix chunk_start])
+                ( zip (map (Var . patElemName) red_pes) (repeat [])
+                    ++ zip (map Var tmps) (repeat [DimFix chunk_start])
+                )
+
+        forM_ (zip ops tmps_for_ops) $ \(op, tmps) -> do
+          tmps_chunks <- mapM (sliceArray chunk_start chunk_size) tmps
+          groupReduce (sExt32 (tvExp chunk_size)) (segBinOpLambda op) tmps_chunks
+
+        sOp $ Imp.ErrorSync Imp.FenceLocal
+
+        forM_ (zip red_pes $ concat tmps_for_ops) $ \(pe, arr) ->
+          copyDWIMFix (patElemName pe) [] (Var arr) [chunk_start]
+
+    nonvirtCase [dim'] tmps_for_ops = do
+      -- Nonsegmented case (or rather, a single segment) - this we can
+      -- handle directly with a group-level reduction.
       forM_ (zip ops tmps_for_ops) $ \(op, tmps) ->
         groupReduce (sExt32 dim') (segBinOpLambda op) tmps
-
       sOp $ Imp.ErrorSync Imp.FenceLocal
-
-      forM_ (zip red_pes tmp_arrs) $ \(pe, arr) ->
+      forM_ (zip red_pes $ concat tmps_for_ops) $ \(pe, arr) ->
         copyDWIMFix (patElemName pe) [] (Var arr) [0]
-    _ -> do
+    --
+    nonvirtCase dims' tmps_for_ops = do
       -- Segmented intra-group reductions are turned into (regular)
       -- segmented scans.  It is possible that this can be done
       -- better, but at least this approach is simple.
@@ -512,7 +645,7 @@ compileGroupOp pat (Inner (SegOp (SegRed lvl space ops _ body))) = do
 
       sOp $ Imp.ErrorSync Imp.FenceLocal
 
-      forM_ (zip red_pes tmp_arrs) $ \(pe, arr) ->
+      forM_ (zip red_pes $ concat tmps_for_ops) $ \(pe, arr) ->
         copyDWIM
           (patElemName pe)
           []
