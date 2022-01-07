@@ -129,6 +129,16 @@ analyseStm (lumap0, used0) (Let pat _ e) = do
         used_acc <> unAliases aliases
       )
 
+    addAliasesFromBodyRes (lumap_acc, used_acc) (PatElem {}, Constant _) = (lumap_acc, used_acc)
+    addAliasesFromBodyRes (lumap_acc, used_acc) (PatElem name _, Var body_res) =
+      -- Any aliases of `name` should have the same last-use as `name`
+      ( case M.lookup name lumap_acc of
+          Just name' ->
+            insertNames name' (oneName body_res) lumap_acc
+          Nothing -> lumap_acc,
+        used_acc <> oneName body_res
+      )
+
     pat_name = patElemName $ head $ patElems pat
 
     analyseExp (lumap, used) (BasicOp _) = do
@@ -140,13 +150,19 @@ analyseStm (lumap0, used0) (Let pat _ e) = do
     analyseExp (lumap, used) (If cse then_body else_body dec) = do
       (lumap_then, used_then) <- analyseBody lumap used then_body
       (lumap_else, used_else) <- analyseBody lumap used else_body
-      let used' = used_then <> used_else
+      let (lumap', used') =
+            (lumap_then <> lumap_else, used_then <> used_else)
+              & flip (foldl addAliasesFromBodyRes) (zip (patElems pat) (map resSubExp $ bodyResult then_body))
+              & flip (foldl addAliasesFromBodyRes) (zip (patElems pat) (map resSubExp $ bodyResult else_body))
           nms = (freeIn cse <> freeIn dec) `namesSubtract` used'
-      return (insertNames pat_name nms (lumap_then <> lumap_else), used' <> nms)
-    analyseExp (lumap, used) (DoLoop merge form body) = do
-      (lumap', used') <- analyseBody lumap used body
-      let nms = (freeIn merge <> freeIn form) `namesSubtract` used'
       return (insertNames pat_name nms lumap', used' <> nms)
+    analyseExp (lumap, used) (DoLoop merge form body) = do
+      let (lumap', used') =
+            zip (patElems pat) (map resSubExp $ bodyResult body)
+              & foldl addAliasesFromBodyRes (lumap, used)
+      (lumap'', used'') <- analyseBody lumap' used' body
+      let nms = (freeIn merge <> freeIn form) `namesSubtract` used''
+      return (insertNames pat_name nms lumap'', used'' <> nms)
     analyseExp (lumap, used) (Op op) = do
       onOp <- asks envLastUseOp
       onOp pat_name (lumap, used) op
