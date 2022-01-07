@@ -65,7 +65,7 @@ data TopDnEnv rep = TopDnEnv
     scalarTable :: M.Map VName (PrimExp VName),
     -- | A list of known relations of the form 'VName' @<@ 'SubExp', typically
     -- gotten from 'LoopForm' and 'SegSpace'.
-    knownLessThan :: [(VName, SubExp)]
+    knownLessThan :: [(VName, PrimExp VName)]
   }
 
 isInScope :: TopDnEnv rep -> VName -> Bool
@@ -130,7 +130,7 @@ getInvAliasFromExp _ = Nothing
 class TopDownHelper inner where
   innerNonNegatives :: [VName] -> inner -> Names
 
-  innerKnownLessThan :: inner -> [(VName, SubExp)]
+  innerKnownLessThan :: inner -> [(VName, PrimExp VName)]
 
   scopeHelper :: inner -> Scope rep
 
@@ -141,7 +141,7 @@ instance TopDownHelper (HostOp (Aliases GPUMem) ()) where
   innerNonNegatives _ _ = mempty
 
   innerKnownLessThan (SegOp seg_op) =
-    unSegSpace $ segSpace seg_op
+    map (fmap $ primExpFromSubExp $ IntType Int64) $ unSegSpace $ segSpace seg_op
   innerKnownLessThan _ = mempty
 
   scopeHelper (SegOp seg_op) = scopeOfSegSpace $ segSpace seg_op
@@ -193,9 +193,7 @@ topdwnTravBinding env stm@(Let (Pat [pe]) _ e)
      in env
           { v_alias = M.insert (patElemName pe) (x, ixfn, ixfn_inv) (v_alias env),
             scope = scope env <> scopeOf stm,
-            nonNegatives =
-              nonNegatives env
-                <> nonNegativesInPat (stmPat stm)
+            nonNegatives = nonNegatives env <> nonNegativesInPat (stmPat stm)
           }
 topdwnTravBinding env stm =
   env
@@ -221,7 +219,7 @@ topDownLoop td_env (Let _pat _ (DoLoop arginis lform _)) =
           _ -> mempty
       less_than =
         case lform of
-          ForLoop v _ b _ -> [(v, b)]
+          ForLoop v _ b _ -> [(v, primExpFromSubExp (IntType Int64) b)]
           _ -> mempty
    in td_env
         { scope = scopetab,

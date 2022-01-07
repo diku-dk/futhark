@@ -68,7 +68,6 @@ import Futhark.IR.Syntax
     FlatSlice (..),
     ShapeChange,
     Slice (..),
-    SubExp,
     dimFix,
     flatSliceDims,
     flatSliceStrides,
@@ -1166,7 +1165,7 @@ gcd x y = gcd' (abs x) (abs y)
 -- as soon as more than one dimension is involved, things get more
 -- tricky. Currently, we try to 'conservativelyFlatten' any LMAD with more than
 -- one dimension.
-disjoint :: [(VName, SubExp)] -> Names -> LMAD (TPrimExp Int64 VName) -> LMAD (TPrimExp Int64 VName) -> Bool
+disjoint :: [(VName, PrimExp VName)] -> Names -> LMAD (TPrimExp Int64 VName) -> LMAD (TPrimExp Int64 VName) -> Bool
 disjoint less_thans non_negatives (LMAD offset1 [dim1]) (LMAD offset2 [dim2]) =
   doesNotDivide (gcd (ldStride dim1) (ldStride dim2)) (offset1 - offset2)
     || lessThanish
@@ -1214,7 +1213,7 @@ nonNegativeishExp _ (ValueExp v) = not $ negativeIsh v
 nonNegativeishExp non_negatives (LeafExp vname _) = vname `nameIn` non_negatives
 nonNegativeishExp _ _ = False
 
-lessThanish :: [(VName, SubExp)] -> Names -> TPrimExp Int64 VName -> TPrimExp Int64 VName -> Bool
+lessThanish :: [(VName, PrimExp VName)] -> Names -> TPrimExp Int64 VName -> TPrimExp Int64 VName -> Bool
 lessThanish less_thans non_negatives e1 e2 =
   case e2 - e1 & untyped & AlgSimplify2.simplify0 of
     [] -> False
@@ -1222,20 +1221,20 @@ lessThanish less_thans non_negatives e1 e2 =
       nonNegativeish non_negatives $
         fixPoint (`removeLessThans` less_thans) simplified
 
-removeLessThans :: AlgSimplify2.SofP -> [(VName, SubExp)] -> AlgSimplify2.SofP
+removeLessThans :: AlgSimplify2.SofP -> [(VName, PrimExp VName)] -> AlgSimplify2.SofP
 removeLessThans =
   foldl
     ( \sofp (i, bound) ->
         let to_remove =
               [ AlgSimplify2.Prod True [LeafExp i $ IntType Int64],
-                AlgSimplify2.Prod False [primExpFromSubExp (IntType Int64) bound]
+                AlgSimplify2.Prod False [bound]
               ]
          in case to_remove `intersect` sofp of
               to_remove' | to_remove' == to_remove -> sofp \\ to_remove
               _ -> sofp
     )
 
-disjoint2 :: [(VName, SubExp)] -> Names -> LMAD (TPrimExp Int64 VName) -> LMAD (TPrimExp Int64 VName) -> Bool
+disjoint2 :: [(VName, PrimExp VName)] -> Names -> LMAD (TPrimExp Int64 VName) -> LMAD (TPrimExp Int64 VName) -> Bool
 disjoint2 less_thans non_negatives lmad1 lmad2 =
   let (offset1, interval1) = lmadToIntervals lmad1
       (offset2, interval2) = lmadToIntervals lmad2
@@ -1310,7 +1309,7 @@ distributeOffset offset (Interval lb ne st0 : is) = do
     justOne [a] = Just a
     justOne _ = Nothing
 
-intervalOverlap :: [(VName, SubExp)] -> Names -> Interval -> Interval -> Bool
+intervalOverlap :: [(VName, PrimExp VName)] -> Names -> Interval -> Interval -> Bool
 intervalOverlap less_thans non_negatives (Interval lb1 ne1 st1) (Interval lb2 ne2 st2)
   | st1 == st2,
     lessThanish less_thans non_negatives lb1 lb2,
@@ -1351,7 +1350,7 @@ intervalPairs = intervalPairs' []
 -- | Returns true if the intervals are self-overlapping, meaning that for a
 -- given dimension d, the stride of d is larger than the aggregate spans of the
 -- lower dimensions.
-selfOverlap :: [(VName, SubExp)] -> Names -> [Interval] -> Bool
+selfOverlap :: [(VName, PrimExp VName)] -> Names -> [Interval] -> Bool
 selfOverlap less_thans non_negatives is =
   -- TODO: Do we need to do something clever using some ranges of known values?
   selfOverlap' 0 $ reverse is
