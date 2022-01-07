@@ -15,7 +15,7 @@
 -- vertex that some unspecified source has an edge to, a path is attempted
 -- found to a sink. If a sink can be reached from the source, all edges along
 -- the path is reversed. The path in the opposite direction of reversed edges
--- from a source to some sink is (also) called a route.
+-- from a source to some sink is a route.
 --
 -- When routing fails to find a sink in some subgraph reached via an edge then
 -- that edge is marked exhausted. No sink can be reached via an exhausted edge,
@@ -26,8 +26,6 @@ module Futhark.Analysis.MigrationTable.Graph
     Id,
     IdSet,
     Vertex (..),
-    Meta (..),
-    ForkDepth,
     Routing (..),
     Exhaustion (..),
     Edges (..),
@@ -70,7 +68,7 @@ where
 import qualified Data.IntMap.Strict as IM
 import qualified Data.IntSet as IS
 import Data.List (foldl')
-import qualified Data.Map.Lazy as M
+import qualified Data.Map.Strict as M
 import Data.Maybe (fromJust)
 import Futhark.Error
 import Futhark.IR.GPU hiding (Result)
@@ -79,7 +77,7 @@ import Futhark.IR.GPU hiding (Result)
 
 -- | A data flow dependency graph of program variables, each variable
 -- represented by a 'Vertex'.
-newtype Graph = Graph (IM.IntMap Vertex)
+newtype Graph m = Graph (IM.IntMap (Vertex m))
 
 -- | A handle that identifies a specific 'Vertex'.
 type Id = Int
@@ -88,35 +86,16 @@ type Id = Int
 type IdSet = IS.IntSet
 
 -- | A graph representation of some program variable.
-data Vertex = Vertex
+data Vertex m = Vertex
   { -- | The handle for this vertex in the graph.
     vertexId :: Id,
-    -- | How many branch bodies this variable binding is nested within, and
-    -- in which subgraph it exists.
-    vertexMeta :: Meta,
+    -- | Custom data associated with the variable.
+    vertexMeta :: m,
     -- | Whether a route passes through this vertex, and from where.
     vertexRouting :: Routing,
     -- | Handles of vertices that this vertex has an edge to.
     vertexEdges :: Edges
   }
-
--- | Metadata on the environment that a variable is declared within.
-data Meta = Meta
-  { -- | The fork depth of the variable.
-    metaForkDepth :: ForkDepth,
-    -- | An id for the subgraph within which the variable exists, usually
-    -- defined at the body level. A read may only be delayed to a point within
-    -- its own subgraph.
-    metaGraphId :: Maybe Id
-  }
-
--- | A measurement of how many if statement branch bodies a variable binding is
--- nested within.
-type ForkDepth = Int
-
--- If a route passes through the edge u->v and the fork depth
---   1) increases from u to v, then u is within a conditional branch.
---   2) decreases from u to v, then v binds the result of two or more branches.
 
 -- | Route tracking for some vertex.
 -- If a route passes through the vertex then both an ingoing and an outgoing
@@ -194,7 +173,7 @@ instance Semigroup a => Semigroup (Result a) where
 {- CONSTRUCTION -}
 
 -- | The empty graph.
-empty :: Graph
+empty :: Graph m
 empty = Graph IM.empty
 
 -- | Maps a name to its corresponding vertex handle.
@@ -206,7 +185,7 @@ namesToIds :: Names -> [Id]
 namesToIds = IM.keys . namesIntMap
 
 -- | Constructs a 'Vertex' without any edges.
-vertex :: Id -> Meta -> Vertex
+vertex :: Id -> m -> Vertex m
 vertex i m =
   Vertex
     { vertexId = i,
@@ -231,41 +210,46 @@ none = Visited M.empty
 
 -- | Insert a new vertex in the graph. If its variable already is represented
 -- in the graph, the existing vertex is replaced with the supplied vertex.
-insert :: Vertex -> Graph -> Graph
+insert :: Vertex m -> Graph m -> Graph m
 insert v (Graph m) = Graph $ IM.insert (vertexId v) v m
 
 {- UPDATE -}
 
 -- | Adjust the vertex with this specific id. When no vertex with that id is a
 -- member of the graph, the original graph is returned.
-adjust :: (Vertex -> Vertex) -> Id -> Graph -> Graph
+adjust :: (Vertex m -> Vertex m) -> Id -> Graph m -> Graph m
 adjust f i (Graph m) = Graph $ IM.adjust f i m
 
 -- | Connect the vertex with this id to a sink. When no vertex with that id is a
 -- member of the graph, the original graph is returned.
-connectToSink :: Id -> Graph -> Graph
+connectToSink :: Id -> Graph m -> Graph m
 connectToSink = adjust $ \v -> v {vertexEdges = ToSink}
 
 -- | Add these edges to the vertex with this id. When no vertex with that id is
 -- a member of the graph, the original graph is returned.
-addEdges :: Edges -> Id -> Graph -> Graph
+addEdges :: Edges -> Id -> Graph m -> Graph m
 addEdges es = adjust $ \v -> v {vertexEdges = es <> vertexEdges v}
 
 {- QUERY -}
 
 -- | Does a vertex for the given id exist in the graph?
-member :: Id -> Graph -> Bool
+member :: Id -> Graph m -> Bool
 member i (Graph m) = IM.member i m
 
 -- | Returns the vertex with the given id.
-get :: Id -> Graph -> Maybe Vertex
+get :: Id -> Graph m -> Maybe (Vertex m)
 get i (Graph m) = IM.lookup i m
 
 -- | @canReachSink g vs et i@ returns whether a sink can be reached via the
 -- vertex @v@ with id @i@ in @g@. @et@ identifies the type of edge that @v@ is
 -- accessed by and thereby which edges of @v@ that are available. @vs@ caches
 -- whether a sink can be reached from vertices that are visited.
-canReachSink :: Graph -> Visited Bool -> EdgeType -> Id -> (Bool, Visited Bool)
+canReachSink ::
+  Graph m ->
+  Visited Bool ->
+  EdgeType ->
+  Id ->
+  (Bool, Visited Bool)
 canReachSink g vs et i
   | Just found <- M.lookup (et, i) (visited vs) =
     (found, vs)
@@ -309,7 +293,7 @@ canReachSink g vs et i
 -- vertex with id @src@. If a sink is found, all edges along the path will be
 -- reversed to create a route, and the id of the vertex that connects to the
 -- sink is returned.
-route :: Id -> Graph -> (Maybe Id, Graph)
+route :: Id -> Graph m -> (Maybe Id, Graph m)
 route src g =
   case route' IM.empty 0 Nothing Normal src g of
     (DeadEnd, g') -> (Nothing, g')
@@ -320,7 +304,7 @@ route src g =
 
 -- | @routeMany srcs g@ attempts to create a 'route' in @g@ from every vertex
 -- in @srcs@. Returns the ids for the vertices connected to all found sinks.
-routeMany :: [Id] -> Graph -> ([Id], Graph)
+routeMany :: [Id] -> Graph m -> ([Id], Graph m)
 routeMany srcs graph =
   foldl' f ([], graph) srcs
   where
@@ -341,8 +325,8 @@ routeMany srcs graph =
 -- The function returns an updated 'Visited' set recording the evaluations it
 -- has performed.
 fold ::
-  Graph ->
-  (a -> EdgeType -> Vertex -> a) ->
+  Graph m ->
+  (a -> EdgeType -> Vertex m -> a) ->
   (a, Visited ()) ->
   EdgeType ->
   Id ->
@@ -380,8 +364,8 @@ fold g f (res, vs) et i
 -- The reduction of a cyclic reference resolves to 'mempty'.
 reduce ::
   Monoid a =>
-  Graph ->
-  (a -> EdgeType -> Vertex -> a) ->
+  Graph m ->
+  (a -> EdgeType -> Vertex m -> a) ->
   Visited (Result a) ->
   EdgeType ->
   Id ->
@@ -444,7 +428,7 @@ type Pending = IM.IntMap Depth
 type Depth = Int
 
 -- | The outcome of attempted to find a route through a vertex.
-data RoutingResult
+data RoutingResult a
   = -- | No sink could be reached through this vertex.
     DeadEnd
   | -- | A cycle was detected. A sink can be reached through this vertex if a
@@ -452,11 +436,11 @@ data RoutingResult
     -- reached from the vertex at this depth, then the graph should be updated
     -- by these actions. Until the vertex is reached, the status of these
     -- vertices are pending.
-    CycleDetected Depth [Graph -> Graph] Pending
+    CycleDetected Depth [Graph a -> Graph a] Pending
   | -- | A sink was found. This is the id of the vertex connected to it.
     SinkFound Id
 
-instance Semigroup RoutingResult where
+instance Semigroup (RoutingResult a) where
   SinkFound i <> _ = SinkFound i
   _ <> SinkFound i = SinkFound i
   CycleDetected d1 as1 _ <> CycleDetected d2 as2 p2 =
@@ -465,7 +449,7 @@ instance Semigroup RoutingResult where
   CycleDetected d as p <> _ = CycleDetected d as p
   DeadEnd <> DeadEnd = DeadEnd
 
-instance Monoid RoutingResult where
+instance Monoid (RoutingResult a) where
   mempty = DeadEnd
 
 route' ::
@@ -474,8 +458,8 @@ route' ::
   Maybe Id ->
   EdgeType ->
   Id ->
-  Graph ->
-  (RoutingResult, Graph)
+  Graph m ->
+  (RoutingResult m, Graph m)
 route' p d prev et i g
   | Just d' <- IM.lookup i p =
     let foundCycle = (CycleDetected d' [] p, g)

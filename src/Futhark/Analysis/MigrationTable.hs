@@ -11,16 +11,22 @@ where
 
 import Control.Monad
 import Control.Monad.Trans.RWS.Lazy
-import qualified Control.Monad.Writer.Lazy as W
+import qualified Control.Monad.Trans.Writer.CPS as W
 import Control.Parallel.Strategies (parMap, rpar)
 import qualified Data.IntMap.Strict as IM
 import qualified Data.IntSet as IS
 import Data.List (find, foldl')
-import qualified Data.Map as M
+import qualified Data.Map.Strict as M
 import Data.Maybe (fromMaybe, isNothing)
 import Data.Set (Set, (\\))
 import qualified Data.Set as S
-import Futhark.Analysis.MigrationTable.Graph hiding (addEdges, get, none)
+import Futhark.Analysis.MigrationTable.Graph hiding
+  ( Graph,
+    addEdges,
+    connectToSink,
+    get,
+    none,
+  )
 import qualified Futhark.Analysis.MigrationTable.Graph as MG
 import Futhark.Error
 import Futhark.IR.GPU
@@ -48,10 +54,12 @@ newtype MigrationTable = MigrationTable (IM.IntMap MigrationStatus)
 
 statusOf :: VName -> MigrationTable -> MigrationStatus
 statusOf v (MigrationTable mt) =
-  fromMaybe UsedOnHost $ IM.lookup (baseTag v) mt
+  fromMaybe StayOnHost $ IM.lookup (baseTag v) mt
 
 -- | Should this whole statement be moved from host to device?
 moveToDevice :: Stm GPU -> MigrationTable -> Bool
+moveToDevice (Let (Pat ((PatElem v _) : _)) _ (BasicOp Index {})) mt =
+  statusOf v mt == MoveToDevice
 moveToDevice (Let (Pat ((PatElem v _) : _)) _ (BasicOp _)) mt =
   statusOf v mt /= StayOnHost
 moveToDevice (Let (Pat ((PatElem v _) : _)) _ Apply {}) mt =
@@ -88,21 +96,21 @@ analyseProg (Prog consts funs) =
    in foldl' merge mt mts
 
 -- | Returns the names of all top-level functions that cannot be called from the
--- device. The application of such a function is host-only.
+-- device. The evaluation of such a function is host-only.
 hostOnlyFunDefs :: [FunDef GPU] -> HostOnlyFuns
 hostOnlyFunDefs funs =
   let ns = map funDefName funs
       m = M.fromList $ zip ns (map checkFunDef funs)
-   in S.fromList ns \\ keysToSet (rmHostOnly m)
+   in S.fromList ns \\ keysToSet (removeHostOnly m)
   where
     keysToSet = S.fromAscList . M.keys
 
-    rmHostOnly m =
+    removeHostOnly m =
       let (a, b) = M.partition isNothing m
           done = M.null a
        in if done
             then b
-            else rmHostOnly $ M.map (test (keysToSet a)) b
+            else removeHostOnly $ M.map (test (keysToSet a)) b
 
     test s1 (Just s2) | s1 `S.disjoint` s2 = Just s2
     test _ _ = Nothing
@@ -265,25 +273,50 @@ instance Semigroup GraphAction where
 instance Monoid GraphAction where
   mempty = NeutralOp
 
+-- | Metadata on the environment that a variable is declared within.
+data Meta = Meta
+  { -- | The fork depth of the variable.
+    metaForkDepth :: ForkDepth,
+    -- | How many bodies the variable is nested within.
+    metaBodyDepth :: Int,
+    -- | An id for the subgraph within which the variable exists, defined at
+    -- the body level. A read may only be delayed to a point within its own
+    -- subgraph.
+    metaGraphId :: Maybe Id
+  }
+
+-- | A measurement of how many if statement branch bodies a variable binding is
+-- nested within.
+type ForkDepth = Int
+
+-- If a route passes through the edge u->v and the fork depth
+--   1) increases from u to v, then u is within a conditional branch.
+--   2) decreases from u to v, then v binds the result of two or more branches.
+
 -- | Statistics on the statements within a body and their dependencies.
 data BodyStats = BodyStats
-  { -- Whether the body contained any host-only statements.
+  { -- | Whether the body contained any host-only statements.
     bodyHostOnly :: Bool,
-    -- Whether the body performed any reads.
+    -- | Whether the body performed any reads.
     bodyReads :: Bool,
-    -- All scalar variables represented in the graph that have been used
-    -- as operands within the body, including those that have been added
-    -- by the body itself. Variables with vertices connected to sinks may
-    -- be excluded.
-    bodyOperands :: Operands
+    -- | All scalar variables represented in the graph that have been used
+    -- as operands within the body, including those that have been added by
+    -- the body itself. Variables with vertices connected to sinks may be
+    -- excluded.
+    bodyOperands :: Operands,
+    -- | Depth of parent bodies with variables that are required on host. Since
+    -- the variables are required on host, the parent statements of these bodies
+    -- cannot be moved to device as a whole. They are host-only.
+    bodyHostOnlyParents :: IS.IntSet
   }
 
 instance Semigroup BodyStats where
-  (BodyStats ho1 r1 o1) <> (BodyStats ho2 r2 o2) =
+  (BodyStats ho1 r1 o1 hop1) <> (BodyStats ho2 r2 o2 hop2) =
     BodyStats
       { bodyHostOnly = ho1 || ho2,
         bodyReads = r1 || r2,
-        bodyOperands = IS.union o1 o2
+        bodyOperands = IS.union o1 o2,
+        bodyHostOnlyParents = IS.union hop1 hop2
       }
 
 instance Monoid BodyStats where
@@ -291,11 +324,14 @@ instance Monoid BodyStats where
     BodyStats
       { bodyHostOnly = False,
         bodyReads = False,
-        bodyOperands = IS.empty
+        bodyOperands = IS.empty,
+        bodyHostOnlyParents = IS.empty
       }
 
 -- | Ids for all variables used as an operand.
 type Operands = IdSet
+
+type Graph = MG.Graph Meta
 
 data State = State
   { stateGraph :: Graph,
@@ -316,8 +352,24 @@ execGrapher hof g =
   let s = fst (execRWS g env st)
    in (stateGraph s, stateSources s, stateSinks s)
   where
-    env = Env hof IM.empty (Meta 0 Nothing)
-    st = State MG.empty IS.empty ([], []) []
+    env =
+      Env
+        { envHostOnlyFuns = hof,
+          envActionTable = IM.empty,
+          envMeta =
+            Meta
+              { metaForkDepth = 0,
+                metaBodyDepth = 0,
+                metaGraphId = Nothing
+              }
+        }
+    st =
+      State
+        { stateGraph = MG.empty,
+          stateGraphedScalars = IS.empty,
+          stateSources = ([], []),
+          stateSinks = []
+        }
 
 -- | Get the graph under construction.
 getGraph :: Grapher Graph
@@ -381,47 +433,93 @@ getAction i = do
 getMeta :: Grapher Meta
 getMeta = asks envMeta
 
-graphBody :: BodyT GPU -> Grapher BodyStats
-graphBody b = captureBodyStats $ graphStms (bodyStms b)
+graphBody :: BodyT GPU -> Grapher ()
+graphBody b = do
+  env <- ask
+  let meta = envMeta env
+  let bd = 1 + metaBodyDepth meta
+  let env' = env {envMeta = meta {metaBodyDepth = bd}}
+
+  let rmbd bs = bs {bodyHostOnlyParents = IS.delete bd (bodyHostOnlyParents bs)}
+  let hasHostVar m = IS.member bd . bodyHostOnlyParents <$> captureBodyStats m
+  ho <- censor rmbd $ hasHostVar $ local (const env') (graphStms $ bodyStms b)
+
+  -- Body contains a variable that is required on host, so the parent statement
+  -- that contains this body cannot be migrated as a whole.
+  when ho (tell $ mempty {bodyHostOnly = True})
 
 graphStms :: Stms GPU -> Grapher ()
 graphStms = mapM_ graphStm
 
 graphStm :: Stm GPU -> Grapher ()
 graphStm stm = do
-  let b = boundBy stm
+  let bs = boundBy stm
   let e = stmExp stm
+  -- These array expressions are inefficient to migrate to device because a
+  -- GPUBody redundantly copies their results:
+  --   * ArrayLit
+  --   * Update
+  --   * FlatIndex
+  --   * FlatUpdate
+  --   * Iota
+  --   * Replicate
+  --   * Rotate
+  --   * UpdateAcc
+  -- The same holds for these expressions but there is no need to migrate them:
+  --   * Concat    (size variables are required on host)
+  --   * Copy      (uses no scalar variables)
+  --   * Manifest  (uses no scalar variables)
+  --   * Scratch   (size variables are required on host)
+  --   * Reshape   (size variables are required on host)
+  --   * Rearrange (uses no scalar variables)
   case e of
     BasicOp Assert {} ->
-      graphAssert (one b) e
+      graphAssert (one bs) e
     BasicOp Index {} ->
-      graphRead (one b) e
+      graphRead (one bs) e
+    BasicOp (FlatIndex _ slice) ->
+      mapM_ hostSizeSE (flatSliceDims slice) >> graphSimple bs e
+    BasicOp (Concat _ _ _ (Var ressize)) ->
+      hostSizeVar ressize
+    BasicOp (Iota (Var n) _ _ _) ->
+      hostSizeVar n >> graphSimple bs e
+    BasicOp (Replicate (Shape ds) _) ->
+      mapM_ hostSizeSE ds >> graphSimple bs e
+    BasicOp (Scratch _ ds) ->
+      mapM_ hostSizeSE ds
+    BasicOp (Reshape ds _) ->
+      mapM_ hostSizeSE (newDims ds)
     BasicOp UpdateAcc {} ->
-      graphUpdateAcc (one b) e
+      graphUpdateAcc (one bs) e
     BasicOp _ ->
-      graphSimple b e
+      graphSimple bs e
     Apply n _ _ _ ->
-      graphApply n b e
+      graphApply n bs e
     If cond tbody fbody _ ->
-      graphIf b cond tbody fbody
+      graphIf bs cond tbody fbody
     DoLoop params lform body ->
-      graphLoop b params lform body
+      graphLoop bs params lform body
     WithAcc inputs f ->
-      graphWithAcc b inputs f
+      graphWithAcc bs inputs f
     Op _ ->
       graphHostOnly e
   where
     one [x] = x
     one _ = compilerBugS "Type error: unexpected number of pattern elements."
 
--- The vertex handle for a variable and its type.
+    hostSizeSE (Var v) = hostSizeVar v
+    hostSizeSE _ = pure ()
+
+    hostSizeVar = requiredOnHost . nameToId
+
+-- | The vertex handle for a variable and its type.
 type Binding = (Id, Type)
 
--- Bindings for all pattern elements bound by a statement.
+-- | Bindings for all pattern elements bound by a statement.
 boundBy :: Stm GPU -> [Binding]
 boundBy (Let (Pat pes) _ _) = map f pes
   where
-    f (PatElem v dec) = (nameToId v, typeOf dec)
+    f (PatElem v t) = (nameToId v, t)
 
 graphHostOnly :: Exp GPU -> Grapher ()
 graphHostOnly e = do
@@ -435,8 +533,8 @@ graphHostOnly e = do
 graphSimple :: [Binding] -> Exp GPU -> Grapher ()
 graphSimple bs e = do
   -- Only add vertices to the graph if they have a transitive dependency to
-  -- an array read. Transitive dependencies through variables required on host
-  -- (those that are connected to sinks) do not count.
+  -- an array read. Transitive dependencies through variables connected to
+  -- sinks do not count.
   ops <- graphedScalarOperands e
   if IS.null ops
     then pure ()
@@ -450,8 +548,12 @@ graphAssert b e = do
   -- during next (read) synchronization. To ensure that the number of reads
   -- does not increase by moving assertions, each assertion must in itself
   -- delay one read. By connecting assertion certificates to sinks, a set of
-  -- assertions will only be moved to device if they delay a greater number
-  -- of reads.
+  -- assertions will only be moved to device on their own if they delay a
+  -- greater number of reads.
+  -- Note that a parent statement containing an assert still can be moved to
+  -- device as a whole if it can eliminate a read, such as of a branch or loop
+  -- condition. In this case there might be no read reduction, depending on
+  -- which other device asserts that will be executed or have been.
   graphSimple [b] e
   modifyGraph (MG.connectToSink $ fst b)
 
@@ -480,106 +582,32 @@ graphUpdateAcc _ _ =
     "Type error: UpdateAcc did not produce accumulator typed value."
 
 graphApply :: Name -> [Binding] -> Exp GPU -> Grapher ()
-graphApply n b e = do
+graphApply n bs e = do
   hof <- isHostOnlyFun n
   if hof
     then graphHostOnly e
-    else graphSimple b e
+    else graphSimple bs e
 
 graphIf :: [Binding] -> SubExp -> BodyT GPU -> BodyT GPU -> Grapher ()
 graphIf bs cond tbody fbody = do
   ho <-
     incForkDepthFor
       ( do
-          tstats <- graphBody tbody
-          fstats <- graphBody fbody
+          tstats <- captureBodyStats (graphBody tbody)
+          fstats <- captureBodyStats (graphBody fbody)
           pure $ bodyHostOnly tstats || bodyHostOnly fstats
       )
   ci <- case (ho, cond) of
-    (True, Var v) -> requiredOnHost (nameToId v) >> pure IS.empty
+    (True, Var v) -> connectToSink (nameToId v) >> pure IS.empty
     (False, Var v) -> onlyGraphedScalars [v]
     (_, _) -> pure IS.empty
   ret <- zipWithM (f ci) (bodyResult tbody) (bodyResult fbody)
-  mapM_ (uncurry createNode) $ zip bs ret
+  mapM_ (uncurry createNode) (zip bs ret)
   where
     f ci a b = fmap (ci <>) $ onlyGraphedScalars $ toSet a <> toSet b
 
     toSet (SubExpRes _ (Var v)) = S.singleton v
     toSet _ = S.empty
-
-graphWithAcc ::
-  [Binding] ->
-  [(Shape, [VName], Maybe (Lambda GPU, [SubExp]))] ->
-  Lambda GPU ->
-  Grapher ()
-graphWithAcc bs inputs f = do
-  let accs = zip (lambdaReturnType f) inputs
-  -- Graph each accumulator operator. UpdateAcc statements will be graphed
-  -- based on which statements their associated accumulator operators
-  -- evaluate, which is captured as 'GraphAction's. The actions are made
-  -- available until the associated accumulators no longer are in scope.
-  actions <- IM.fromList <$> mapM (graph . extract) accs
-  let body = lambdaBody f
-  graphStms (bodyStms body) `withActions` actions
-  -- Connect return variables to bound values.
-  ret <- mapM (onlyGraphedScalars . toSet) (bodyResult body)
-  mapM_ (uncurry createNode) $ zip bs ret
-  where
-    graph (i, ts, op) = do
-      a <- graphAccOp i ts op
-      pure (i, a)
-
-    extract (Acc a _ ts _, (_, _, Nothing)) = (nameToId a, ts, Nothing)
-    extract (Acc a _ ts _, (_, _, Just (op, _))) = (nameToId a, ts, Just op)
-    extract _ =
-      compilerBugS "Type error: WithAcc expression did not return accumulator."
-
-    toSet (SubExpRes _ (Var v)) = S.singleton v
-    toSet _ = S.empty
-
--- Graphs the operator associated with updating an accumulator.
--- The arguments are the 'Id' for the accumulator token, the element type of
--- the accumulator, and its update operator lambda, if any.
-graphAccOp :: Id -> [Type] -> Maybe (Lambda GPU) -> Grapher GraphAction
-graphAccOp i ts op = do
-  env <- ask
-  st <- get
-
-  -- Graph the accumulator operator to collect statistics about its statements.
-  -- If the operator contains no host-only statements then the graphing will be
-  -- reversed. Otherwise no reads should be delayed into it, as it may be
-  -- evaluated multiple times.
-  let env' = env {envMeta = (envMeta env) {metaGraphId = Just i}}
-  let (st', bs) = case op of
-        Nothing -> (st, mempty)
-        Just lmd -> execRWS (graphBody $ lambdaBody lmd) env' st
-
-  -- The operator will be invoked by 'UpdateAcc' statements. Determine how these
-  -- statements should be graphed based on collected statistics.
-  let act = if any isScalarType ts then DeviceOp else NeutralOp
-  let act' =
-        act <> case bs of
-          BodyStats hostOnly _ _ | hostOnly -> HostOp
-          BodyStats _ didReads _ | didReads -> DeviceOp
-          _ -> NeutralOp
-
-  -- Determine which external variables the operator depends upon.
-  let g = stateGraph st
-  let ops = IS.filter (`MG.member` g) (bodyOperands bs)
-
-  -- Finish graphing the operator based on the determined action type.
-  case act' of
-    HostOp -> do
-      put st'
-      tell bs
-      censorRoutes i ops
-    DeviceOp -> addSource (i, Prim Unit) -- no sink possible ==> no edges
-    NeutralOp -> do
-      addVertex (i, Prim Unit)
-      addEdges (oneEdge i) ops
-
-  -- Report how 'UpdateAcc' statements that use this operator should be graphed.
-  pure act'
 
 graphLoop ::
   [Binding] ->
@@ -612,6 +640,7 @@ graphLoop (b : bs) params lform body = do
   -- Connect operands to sinks if they can reach a sink within the loop.
   -- Otherwise connect them to the loop bound variables that they can
   -- reach and exhaust their normal entry edges into the loop.
+  -- This means a read can be delayed through a loop body but not into it.
   foldM_ connectOperand vs (IS.elems ops)
 
   -- If the loop contains host-only statements then it must execute on
@@ -622,11 +651,11 @@ graphLoop (b : bs) params lform body = do
   -- against the need to read the values bound by the loop statement.
   case (ho, lform) of
     (True, ForLoop _ _ (Var v) _) ->
-      requiredOnHost (nameToId v)
+      connectToSink (nameToId v)
     (False, ForLoop _ _ n@(Var _) _) ->
       addEdges (ToNodes bindings Nothing) =<< onlyGraphedScalar n
     (True, WhileLoop v) ->
-      requiredOnHost (nameToId v)
+      connectToSink (nameToId v)
     (False, WhileLoop v)
       | i <- nameToId v,
         Just (_, _, c, _) <- find (\(_, p, _, _) -> p == i) loopValues,
@@ -651,7 +680,7 @@ graphLoop (b : bs) params lform body = do
       case lform of
         ForLoop _ _ _ elems -> mapM_ graphForInElem elems
         WhileLoop _ -> pure ()
-      graphStms (bodyStms body)
+      graphBody body
 
     graphParam ((_, t), p, pval, _) =
       do
@@ -709,7 +738,7 @@ graphLoop (b : bs) params lform body = do
       let st = (IS.empty, [], vs)
       let (res, nx, vs') = findBindings g st (IS.elems es)
       case res of
-        FoundSink -> requiredOnHost i
+        FoundSink -> connectToSink i
         Produced bnds -> modifyGraph $ MG.adjust (f nx bnds) i
       pure vs'
 
@@ -736,6 +765,80 @@ graphLoop (b : bs) params lform body = do
         -- don't exhaust
         findBindings g (bnds, i : nx, vs) is
 
+graphWithAcc ::
+  [Binding] ->
+  [(Shape, [VName], Maybe (Lambda GPU, [SubExp]))] ->
+  Lambda GPU ->
+  Grapher ()
+graphWithAcc bs inputs f = do
+  let accs = zip (lambdaReturnType f) inputs
+  -- Graph each accumulator operator. UpdateAcc statements will be graphed
+  -- based on which statements their associated accumulator operators
+  -- evaluate, which is captured as 'GraphAction's. The actions are made
+  -- available until the associated accumulators no longer are in scope.
+  actions <- IM.fromList <$> mapM (graph . extract) accs
+  let body = lambdaBody f
+  graphBody body `withActions` actions
+  -- Connect return variables to bound values.
+  ret <- mapM (onlyGraphedScalars . toSet) (bodyResult body)
+  mapM_ (uncurry createNode) $ zip bs ret
+  where
+    graph (i, ts, op) = do
+      a <- graphAccOp i ts op
+      pure (i, a)
+
+    extract (Acc a _ ts _, (_, _, Nothing)) = (nameToId a, ts, Nothing)
+    extract (Acc a _ ts _, (_, _, Just (op, _))) = (nameToId a, ts, Just op)
+    extract _ =
+      compilerBugS "Type error: WithAcc expression did not return accumulator."
+
+    toSet (SubExpRes _ (Var v)) = S.singleton v
+    toSet _ = S.empty
+
+-- Graphs the operator associated with updating an accumulator.
+-- The arguments are the 'Id' for the accumulator token, the element type of
+-- the accumulator, and its update operator lambda, if any.
+graphAccOp :: Id -> [Type] -> Maybe (Lambda GPU) -> Grapher GraphAction
+graphAccOp i ts op = do
+  env <- ask
+  st <- get
+
+  -- Graph the accumulator operator to collect statistics about its statements.
+  -- If the operator contains no host-only statements then the graphing will be
+  -- reversed. Otherwise no reads should be delayed into it, as it may be
+  -- evaluated multiple times.
+  let env' = env {envMeta = (envMeta env) {metaGraphId = Just i}}
+  let (st', bs) = case op of
+        Nothing -> (st, mempty)
+        Just lmd -> execRWS (graphBody $ lambdaBody lmd) env' st
+
+  -- The operator will be invoked by 'UpdateAcc' statements. Determine how these
+  -- statements should be graphed based on collected statistics.
+  let act = if any isScalarType ts then DeviceOp else NeutralOp
+  let act' =
+        act <> case bs of
+          BodyStats hostOnly _ _ _ | hostOnly -> HostOp
+          BodyStats _ didReads _ _ | didReads -> DeviceOp
+          _ -> NeutralOp
+
+  -- Determine which external variables the operator depends upon.
+  let g = stateGraph st
+  let ops = IS.filter (`MG.member` g) (bodyOperands bs)
+
+  -- Finish graphing the operator based on the determined action type.
+  case act' of
+    HostOp -> do
+      put st'
+      tell bs
+      censorRoutes i ops
+    DeviceOp -> addSource (i, Prim Unit) -- no sink possible ==> no edges
+    NeutralOp -> do
+      addVertex (i, Prim Unit)
+      addEdges (oneEdge i) ops
+
+  -- Report how 'UpdateAcc' statements that use this operator should be graphed.
+  pure act'
+
 -- | @censorRoutes si ops@ routes all possible routes within the subgraph
 -- identified by @si@ and then connects each operand in @ops@ to a sink if it
 -- can reach a subgraph sink.
@@ -755,7 +858,7 @@ censorRoutes si ops = do
         ToNodes es _ <- vertexEdges v =
         do
           let (sinkFound, vs') = foldl' (findSink g) (False, vs) (IS.elems es)
-          when sinkFound (requiredOnHost i)
+          when sinkFound (connectToSink i)
           pure vs'
       | otherwise =
         pure vs -- shouldn't happen
@@ -834,9 +937,21 @@ addEdges es is = do
   modifyGraph $ \g -> IS.foldl' (flip $ MG.addEdges es) g is
   tell $ mempty {bodyOperands = is}
 
--- | Connects the vertex of the given id to a sink.
+-- | Ensure that a variable (which is in scope) will be made available on host
+-- before its first use.
 requiredOnHost :: Id -> Grapher ()
 requiredOnHost i = do
+  mv <- MG.get i <$> getGraph
+  case mv of
+    Nothing -> pure ()
+    Just v -> do
+      connectToSink i
+      let bd = metaBodyDepth (vertexMeta v)
+      tell $ mempty {bodyHostOnlyParents = IS.singleton bd}
+
+-- | Connects the vertex of the given id to a sink.
+connectToSink :: Id -> Grapher ()
+connectToSink i = do
   modifyGraph (MG.connectToSink i)
   modifyGraphedScalars (IS.delete i)
 
