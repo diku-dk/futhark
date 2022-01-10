@@ -27,7 +27,7 @@ import Language.Futhark.TypeChecker.Monad hiding (BoundV)
 import Language.Futhark.TypeChecker.Terms.Monad
 import Language.Futhark.TypeChecker.Terms.Pat
 import Language.Futhark.TypeChecker.Types
-import Language.Futhark.TypeChecker.Unify hiding (Usage)
+import Language.Futhark.TypeChecker.Unify
 import Prelude hiding (mod)
 
 -- | Replace specified sizes with distinct fresh size variables.
@@ -68,6 +68,106 @@ freshDimsInType loc r desc sizes t =
             modify $ M.insert (qualLeaf d) v
             pure $ NamedDim $ qualName v
     onDim d = pure d
+
+-- | Mark bindings of names in "consumed" as Unique.
+uniquePat :: Names -> Pat -> Pat
+uniquePat consumed = recurse
+  where
+    recurse (Wildcard (Info t) wloc) =
+      Wildcard (Info $ t `setUniqueness` Nonunique) wloc
+    recurse (PatParens p ploc) =
+      PatParens (recurse p) ploc
+    recurse (PatAttr attr p ploc) =
+      PatAttr attr (recurse p) ploc
+    recurse (Id name (Info t) iloc)
+      | name `S.member` consumed =
+        let t' = t `setUniqueness` Unique `setAliases` mempty
+         in Id name (Info t') iloc
+      | otherwise =
+        let t' = t `setUniqueness` Nonunique
+         in Id name (Info t') iloc
+    recurse (TuplePat pats ploc) =
+      TuplePat (map recurse pats) ploc
+    recurse (RecordPat fs ploc) =
+      RecordPat (map (fmap recurse) fs) ploc
+    recurse (PatAscription p t ploc) =
+      PatAscription p t ploc
+    recurse p@PatLit {} = p
+    recurse (PatConstr n t ps ploc) =
+      PatConstr n t (map recurse ps) ploc
+
+convergePat :: SrcLoc -> Pat -> Names -> PatType -> Usage -> TermTypeM Pat
+convergePat loop_loc pat body_cons body_t body_loc = do
+  let -- Make the pattern unique where needed.
+      pat' = uniquePat (patNames pat `S.intersection` body_cons) pat
+
+  pat_t <- normTypeFully $ patternType pat'
+  unless (toStructural body_t `subtypeOf` toStructural pat_t) $
+    unexpectedType (srclocOf body_loc) (toStruct body_t) [toStruct pat_t]
+
+  -- Check that the new values of consumed merge parameters do not
+  -- alias something bound outside the loop, AND that anything
+  -- returned for a unique merge parameter does not alias anything
+  -- else returned.  We also update the aliases for the pattern.
+  bound_outside <- asks $ S.fromList . M.keys . scopeVtable . termScope
+  let combAliases t1 t2 =
+        case t1 of
+          Scalar Record {} -> t1
+          _ -> t1 `addAliases` (<> aliases t2)
+
+      checkMergeReturn (Id pat_v (Info pat_v_t) patloc) t
+        | unique pat_v_t,
+          v : _ <-
+            S.toList $
+              S.map aliasVar (aliases t) `S.intersection` bound_outside =
+          lift . typeError loop_loc mempty $
+            "Return value for loop parameter"
+              <+> pquote (pprName pat_v)
+              <+> "aliases"
+              <+> pprName v <> "."
+        | otherwise = do
+          (cons, obs) <- get
+          unless (S.null $ aliases t `S.intersection` cons) $
+            lift . typeError loop_loc mempty $
+              "Return value for loop parameter"
+                <+> pquote (pprName pat_v)
+                <+> "aliases other consumed loop parameter."
+          when
+            ( unique pat_v_t
+                && not (S.null (aliases t `S.intersection` (cons <> obs)))
+            )
+            $ lift . typeError loop_loc mempty $
+              "Return value for consuming loop parameter"
+                <+> pquote (pprName pat_v)
+                <+> "aliases previously returned value."
+          if unique pat_v_t
+            then put (cons <> aliases t, obs)
+            else put (cons, obs <> aliases t)
+
+          pure $ Id pat_v (Info (combAliases pat_v_t t)) patloc
+      checkMergeReturn (Wildcard (Info pat_v_t) patloc) t =
+        pure $ Wildcard (Info (combAliases pat_v_t t)) patloc
+      checkMergeReturn (PatParens p _) t =
+        checkMergeReturn p t
+      checkMergeReturn (PatAscription p _ _) t =
+        checkMergeReturn p t
+      checkMergeReturn (RecordPat pfs patloc) (Scalar (Record tfs)) =
+        RecordPat . M.toList <$> sequence pfs' <*> pure patloc
+        where
+          pfs' = M.intersectionWith checkMergeReturn (M.fromList pfs) tfs
+      checkMergeReturn (TuplePat pats patloc) t
+        | Just ts <- isTupleRecord t =
+          TuplePat <$> zipWithM checkMergeReturn pats ts <*> pure patloc
+      checkMergeReturn p _ =
+        pure p
+
+  (pat'', (pat_cons, _)) <-
+    runStateT (checkMergeReturn pat' body_t) (mempty, mempty)
+
+  let body_cons' = body_cons <> S.map aliasVar pat_cons
+  if body_cons' == body_cons && patternType pat'' == patternType pat
+    then pure pat'
+    else convergePat loop_loc pat'' body_cons' body_t body_loc
 
 -- | An un-checked loop.
 type UncheckedLoop =
@@ -232,7 +332,7 @@ checkDoLoop checkExp (mergepat, mergeexp, form, loopbody) loc =
 
     mergepat'' <- do
       loopbody_t <- expTypeFully loopbody'
-      convergePat mergepat' (allConsumed bodyflow) loopbody_t $
+      convergePat loc mergepat' (allConsumed bodyflow) loopbody_t $
         mkUsage (srclocOf loopbody') "being (part of) the result of the loop body"
 
     let consumeMerge (Id _ (Info pt) ploc) mt
@@ -281,100 +381,3 @@ checkDoLoop checkExp (mergepat, mergeexp, form, loopbody) loc =
     modifyConstraints $ M.filterWithKey $ \k _ -> k `notElem` sparams
 
     pure ((sparams, mergepat'', mergeexp', form', loopbody'), AppRes loopt' retext)
-  where
-    convergePat pat body_cons body_t body_loc = do
-      let consumed_merge = patNames pat `S.intersection` body_cons
-
-          uniquePat (Wildcard (Info t) wloc) =
-            Wildcard (Info $ t `setUniqueness` Nonunique) wloc
-          uniquePat (PatParens p ploc) =
-            PatParens (uniquePat p) ploc
-          uniquePat (PatAttr attr p ploc) =
-            PatAttr attr (uniquePat p) ploc
-          uniquePat (Id name (Info t) iloc)
-            | name `S.member` consumed_merge =
-              let t' = t `setUniqueness` Unique `setAliases` mempty
-               in Id name (Info t') iloc
-            | otherwise =
-              let t' = t `setUniqueness` Nonunique
-               in Id name (Info t') iloc
-          uniquePat (TuplePat pats ploc) =
-            TuplePat (map uniquePat pats) ploc
-          uniquePat (RecordPat fs ploc) =
-            RecordPat (map (fmap uniquePat) fs) ploc
-          uniquePat (PatAscription p t ploc) =
-            PatAscription p t ploc
-          uniquePat p@PatLit {} = p
-          uniquePat (PatConstr n t ps ploc) =
-            PatConstr n t (map uniquePat ps) ploc
-
-          -- Make the pattern unique where needed.
-          pat' = uniquePat pat
-
-      pat_t <- normTypeFully $ patternType pat'
-      unless (toStructural body_t `subtypeOf` toStructural pat_t) $
-        unexpectedType (srclocOf body_loc) (toStruct body_t) [toStruct pat_t]
-
-      -- Check that the new values of consumed merge parameters do not
-      -- alias something bound outside the loop, AND that anything
-      -- returned for a unique merge parameter does not alias anything
-      -- else returned.  We also update the aliases for the pattern.
-      bound_outside <- asks $ S.fromList . M.keys . scopeVtable . termScope
-      let combAliases t1 t2 =
-            case t1 of
-              Scalar Record {} -> t1
-              _ -> t1 `addAliases` (<> aliases t2)
-
-          checkMergeReturn (Id pat_v (Info pat_v_t) patloc) t
-            | unique pat_v_t,
-              v : _ <-
-                S.toList $
-                  S.map aliasVar (aliases t) `S.intersection` bound_outside =
-              lift . typeError loc mempty $
-                "Return value for loop parameter"
-                  <+> pquote (pprName pat_v)
-                  <+> "aliases"
-                  <+> pprName v <> "."
-            | otherwise = do
-              (cons, obs) <- get
-              unless (S.null $ aliases t `S.intersection` cons) $
-                lift . typeError loc mempty $
-                  "Return value for loop parameter"
-                    <+> pquote (pprName pat_v)
-                    <+> "aliases other consumed loop parameter."
-              when
-                ( unique pat_v_t
-                    && not (S.null (aliases t `S.intersection` (cons <> obs)))
-                )
-                $ lift . typeError loc mempty $
-                  "Return value for consuming loop parameter"
-                    <+> pquote (pprName pat_v)
-                    <+> "aliases previously returned value."
-              if unique pat_v_t
-                then put (cons <> aliases t, obs)
-                else put (cons, obs <> aliases t)
-
-              pure $ Id pat_v (Info (combAliases pat_v_t t)) patloc
-          checkMergeReturn (Wildcard (Info pat_v_t) patloc) t =
-            pure $ Wildcard (Info (combAliases pat_v_t t)) patloc
-          checkMergeReturn (PatParens p _) t =
-            checkMergeReturn p t
-          checkMergeReturn (PatAscription p _ _) t =
-            checkMergeReturn p t
-          checkMergeReturn (RecordPat pfs patloc) (Scalar (Record tfs)) =
-            RecordPat . M.toList <$> sequence pfs' <*> pure patloc
-            where
-              pfs' = M.intersectionWith checkMergeReturn (M.fromList pfs) tfs
-          checkMergeReturn (TuplePat pats patloc) t
-            | Just ts <- isTupleRecord t =
-              TuplePat <$> zipWithM checkMergeReturn pats ts <*> pure patloc
-          checkMergeReturn p _ =
-            pure p
-
-      (pat'', (pat_cons, _)) <-
-        runStateT (checkMergeReturn pat' body_t) (mempty, mempty)
-
-      let body_cons' = body_cons <> S.map aliasVar pat_cons
-      if body_cons' == body_cons && patternType pat'' == patternType pat
-        then pure pat'
-        else convergePat pat'' body_cons' body_t body_loc
