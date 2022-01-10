@@ -424,6 +424,16 @@ sliceArray start size arr = do
     mem
     $ IxFun.slice ixfun slice
 
+-- | @flattenArray k flat arr@ flattens the outer @k@ dimensions of
+-- @arr@ to @flat@.  (Make sure @flat@ is the sum of those dimensions
+-- or you'll have a bad time.)
+flattenArray :: Int -> TV Int64 -> VName -> ImpM rep r op VName
+flattenArray k flat arr = do
+  ArrayEntry arr_loc pt <- lookupArray arr
+  let flat_shape = Shape $ Var (tvVar flat) : drop k (memLocShape arr_loc)
+  sArray (baseString arr ++ "_flat") pt flat_shape (memLocName arr_loc) $
+    IxFun.reshape (memLocIxFun arr_loc) $ map (DimNew . pe64) $ shapeDims flat_shape
+
 -- | @applyLambda lam dests args@ emits code that:
 --
 -- 1. Binds each parameter of @lam@ to the corresponding element of
@@ -507,23 +517,11 @@ compileGroupOp pat (Inner (SegOp (SegScan lvl space scans _ body))) = do
   -- array of scan elements, so we invent some new flattened arrays
   -- here.
   dims_flat <- dPrimV "dims_flat" $ product dims'
-  let flattened pe = do
-        MemLoc mem _ ixfun <-
-          entryArrayLoc <$> lookupArray (patElemName pe)
-        let pe_t = typeOf pe
-            arr_dims = Var (tvVar dims_flat) : drop (length dims') (arrayDims pe_t)
-        sArray
-          (baseString (patElemName pe) ++ "_flat")
-          (elemType pe_t)
-          (Shape arr_dims)
-          mem
-          $ IxFun.reshape ixfun $ map (DimNew . pe64) arr_dims
-
-      scan = head scans
-
+  let scan = head scans
       num_scan_results = length $ segBinOpNeutral scan
-
-  arrs_flat <- mapM flattened $ take num_scan_results $ patElems pat
+  arrs_flat <-
+    mapM (flattenArray (length dims') dims_flat) $
+      take num_scan_results $ patNames pat
 
   case segVirt lvl of
     SegVirt ->
@@ -621,21 +619,12 @@ compileGroupOp pat (Inner (SegOp (SegRed lvl space ops _ body))) = do
       -- involve copying anything; merely playing with the index
       -- function.
       dims_flat <- dPrimV "dims_flat" $ product dims'
-      let flatten arr = do
-            ArrayEntry arr_loc pt <- lookupArray arr
-            let flat_shape =
-                  Shape $
-                    Var (tvVar dims_flat) :
-                    drop (length ltids) (memLocShape arr_loc)
-            sArray "red_arr_flat" pt flat_shape (memLocName arr_loc) $
-              IxFun.iota $ map pe64 $ shapeDims flat_shape
-
       let segment_size = last dims'
           crossesSegment from to =
             (sExt64 to - sExt64 from) .>. (sExt64 to `rem` sExt64 segment_size)
 
       forM_ (zip ops tmps_for_ops) $ \(op, tmps) -> do
-        tmps_flat <- mapM flatten tmps
+        tmps_flat <- mapM (flattenArray (length dims') dims_flat) tmps
         groupScan
           (Just crossesSegment)
           (product dims')
