@@ -316,14 +316,6 @@ localThreadIDs dims = do
     . kernelConstants
     <$> askEnv
 
-compileGroupSpace :: SegLevel -> SegSpace -> InKernelGen ()
-compileGroupSpace lvl space = do
-  sanityCheckLevel lvl
-  let (ltids, dims) = unzip $ unSegSpace space
-  zipWithM_ dPrimV_ ltids =<< localThreadIDs dims
-  ltid <- kernelLocalThreadId . kernelConstants <$> askEnv
-  dPrimV_ (segFlat space) ltid
-
 compileFlatId :: SegLevel -> SegSpace -> InKernelGen ()
 compileFlatId lvl space = do
   sanityCheckLevel lvl
@@ -365,17 +357,6 @@ prepareIntraGroupSegHist group_size =
               copyDWIMFix locks is (intConst Int32 0) []
 
           return (Just l', f l' (Space "local") local_subhistos)
-
-whenActive :: SegLevel -> SegSpace -> InKernelGen () -> InKernelGen ()
-whenActive lvl space m
-  | SegNoVirtFull <- segVirt lvl = m
-  | otherwise = do
-    group_size <- kernelGroupSize . kernelConstants <$> askEnv
-    -- XXX: the following check is too naive - we should also handle
-    -- the multi-dimensional case.
-    if [group_size] == map (toInt64Exp . snd) (unSegSpace space)
-      then m
-      else sWhen (isActive $ unSegSpace space) m
 
 -- Which fence do we need to protect shared access to this memory space?
 fenceForSpace :: Space -> Imp.Fence
@@ -690,8 +671,8 @@ compileGroupOp pat (Inner (SegOp (SegRed lvl space ops _ body))) = do
 
       sOp $ Imp.Barrier Imp.FenceLocal
 compileGroupOp pat (Inner (SegOp (SegHist lvl space ops _ kbody))) = do
-  compileGroupSpace lvl space
-  let ltids = map fst $ unSegSpace space
+  compileFlatId lvl space
+  let (ltids, dims) = unzip $ unSegSpace space
 
   -- We don't need the red_pes, because it is guaranteed by our type
   -- rules that they occupy the same memory as the destinations for
@@ -705,7 +686,9 @@ compileGroupOp pat (Inner (SegOp (SegHist lvl space ops _ kbody))) = do
   -- Ensure that all locks have been initialised.
   sOp $ Imp.Barrier Imp.FenceLocal
 
-  whenActive lvl space . localOps threadOperations $
+  let dims' = map toInt64Exp dims
+  groupCoverSpace dims' $ \dims_is -> do
+    zipWithM_ dPrimV_ ltids dims_is
     compileStms mempty (kernelBodyStms kbody) $ do
       let (red_res, map_res) = splitAt num_red_res $ kernelBodyResult kbody
           (red_is, red_vs) = splitAt (length ops) $ map kernelResultSubExp red_res
