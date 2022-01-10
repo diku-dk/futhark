@@ -24,7 +24,7 @@ import Futhark.Util (nubOrd)
 import Futhark.Util.Pretty hiding (bool, group, space)
 import Language.Futhark
 import Language.Futhark.TypeChecker.Monad hiding (BoundV)
-import Language.Futhark.TypeChecker.Terms.Monad
+import Language.Futhark.TypeChecker.Terms.Monad hiding (consumed)
 import Language.Futhark.TypeChecker.Terms.Pat
 import Language.Futhark.TypeChecker.Types
 import Language.Futhark.TypeChecker.Unify
