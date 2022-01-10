@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+* A size inference bug in type checking of `loop`s (#1565).
+
 ## [0.21.3]
 
 ### Added

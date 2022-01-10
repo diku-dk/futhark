@@ -1,3 +1,8 @@
+-- The "fix" for this in the internaliser was actually a workaround
+-- for a type checker bug (#1565).
+-- ==
+-- error: Loop body does not have expected type
+
 def matmult [n][m][p] (x: [n][m]f32) (y: [m][p]f32) : [n][p]f32 =
   map (\xr ->
     map (\yc ->

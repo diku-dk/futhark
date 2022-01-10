@@ -169,6 +169,25 @@ convergePat loop_loc pat body_cons body_t body_loc = do
     then pure pat'
     else convergePat loop_loc pat'' body_cons' body_t body_loc
 
+data ArgSource = Initial | BodyResult
+
+wellTypedLoopArg :: ArgSource -> [VName] -> Pat -> Exp -> TermTypeM ()
+wellTypedLoopArg src sparams pat arg = do
+  (merge_t, _) <-
+    freshDimsInType (srclocOf arg) Nonrigid "loop" (S.fromList sparams) $
+      toStruct $ patternType pat
+  arg_t <- toStruct <$> expTypeFully arg
+  onFailure (checking merge_t arg_t) $
+    unify
+      (mkUsage (srclocOf arg) desc)
+      merge_t
+      arg_t
+  where
+    (checking, desc) =
+      case src of
+        Initial -> (CheckingLoopInitial, "matching initial loop values to pattern")
+        BodyResult -> (CheckingLoopBody, "matching loop body to pattern")
+
 -- | An un-checked loop.
 type UncheckedLoop =
   (UncheckedPat, UncheckedExp, LoopFormBase NoInfo Name, UncheckedExp)
@@ -204,10 +223,13 @@ checkDoLoop checkExp (mergepat, mergeexp, form, loopbody) loc =
     -- variant, and these are turned into size parameters for the merge
     -- pattern.
     --
-    -- (3) We now conceptually have a function parameter type and return
-    -- type.  We check that it can be called with the initial merge
-    -- values as argument.  The result of this is the type of the loop
-    -- as a whole.
+    -- (3) We now conceptually have a function parameter type and
+    -- return type.  We check that it can be called with the body type
+    -- as argument.
+    --
+    -- (4) Similarly to (3), we check that the "function" can be
+    -- called with the initial merge values as argument.  The result
+    -- of this is the type of the loop as a whole.
     --
     -- (There is also a convergence loop for inferring uniqueness, but
     -- that's orthogonal to the size handling.)
@@ -263,6 +285,18 @@ checkDoLoop checkExp (mergepat, mergeexp, form, loopbody) loc =
           mapM_ dimToInit $ M.toList init_substs
 
           mergepat'' <- applySubst (`M.lookup` init_substs) <$> updateTypes mergepat'
+
+          -- Eliminate those new_dims that turned into sparams so it won't
+          -- look like we have ambiguous sizes lying around.
+          modifyConstraints $ M.filterWithKey $ \k _ -> k `notElem` sparams
+
+          -- dim handling (3)
+          --
+          -- The only trick here is that we have to turn any instances
+          -- of loop parameters in the type of loopbody' rigid,
+          -- because we are no longer in a position to change them,
+          -- really.
+          wellTypedLoopArg BodyResult sparams mergepat'' loopbody'
 
           pure (nubOrd sparams, mergepat'')
 
@@ -348,16 +382,8 @@ checkDoLoop checkExp (mergepat, mergeexp, form, loopbody) loc =
           pure ()
     consumeMerge mergepat'' =<< expTypeFully mergeexp'
 
-    -- dim handling (3)
-    merge_t' <-
-      someDimsFreshInType loc Nonrigid "loop" (S.fromList sparams) $
-        toStruct $ patternType mergepat''
-    mergeexp_t <- toStruct <$> expTypeFully mergeexp'
-    onFailure (CheckingLoopInitial merge_t' mergeexp_t) $
-      unify
-        (mkUsage (srclocOf mergeexp') "matching initial loop values to pattern")
-        merge_t'
-        mergeexp_t
+    -- dim handling (4)
+    wellTypedLoopArg Initial sparams mergepat'' mergeexp'
 
     (loopt, retext) <-
       freshDimsInType loc (Rigid RigidLoop) "loop" (S.fromList sparams) $
@@ -375,9 +401,5 @@ checkDoLoop checkExp (mergepat, mergeexp, form, loopbody) loc =
         loopt' =
           second (`S.difference` S.map AliasBound bound_here) $
             loopt `setUniqueness` Unique
-
-    -- Eliminate those new_dims that turned into sparams so it won't
-    -- look like we have ambiguous sizes lying around.
-    modifyConstraints $ M.filterWithKey $ \k _ -> k `notElem` sparams
 
     pure ((sparams, mergepat'', mergeexp', form', loopbody'), AppRes loopt' retext)
