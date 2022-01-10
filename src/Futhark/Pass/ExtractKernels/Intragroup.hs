@@ -62,14 +62,12 @@ intraGroupParallelise knest lam = runMaybeT $ do
             )
         <*> getSize "intra_group_size" SizeGroup
 
-  let body = lambdaBody lam
-
-  let intra_lvl = SegThread (Count num_groups) (Count group_size) SegNoVirt
-
   (wss_min, wss_avail, log, kbody) <-
     lift $
       localScope (scopeOfLParams $ lambdaParams lam) $
-        intraGroupParalleliseBody intra_lvl body
+        intraGroupParalleliseBody
+          (SegThread (Count num_groups) (Count group_size) SegVirt)
+          (lambdaBody lam)
 
   outside_scope <- lift askScope
   -- outside_scope may also contain the inputs, even though those are
@@ -93,7 +91,7 @@ intraGroupParallelise knest lam = runMaybeT $ do
       intra_avail_par <-
         letSubExp "intra_avail_par" =<< foldBinOp' (SMin Int64) ws_avail
 
-      let inputIsUsed input = kernelInputName input `nameIn` freeIn body
+      let inputIsUsed input = kernelInputName input `nameIn` freeIn (lambdaBody lam)
           used_inps = filter inputIsUsed inps
 
       addStms w_stms
@@ -179,7 +177,6 @@ intraGroupBody lvl body = do
 intraGroupStm :: SegLevel -> Stm -> IntraGroupM ()
 intraGroupStm lvl stm@(Let pat aux e) = do
   scope <- askScope
-  let lvl' = SegThread (segNumGroups lvl) (segGroupSize lvl) SegVirt
 
   case e of
     DoLoop merge form loopbody ->
@@ -238,7 +235,7 @@ intraGroupStm lvl stm@(Let pat aux e) = do
         let scanfun' = soacsLambdaToGPU scanfun
             mapfun' = soacsLambdaToGPU mapfun
         certifying (stmAuxCerts aux) $
-          addStms =<< segScan lvl' pat mempty w [SegBinOp Noncommutative scanfun' nes mempty] mapfun' arrs [] []
+          addStms =<< segScan lvl pat mempty w [SegBinOp Noncommutative scanfun' nes mempty] mapfun' arrs [] []
         parallelMin [w]
     Op (Screma w arrs form)
       | Just (reds, map_lam) <- isRedomapSOAC form,
@@ -246,7 +243,7 @@ intraGroupStm lvl stm@(Let pat aux e) = do
         let red_lam' = soacsLambdaToGPU red_lam
             map_lam' = soacsLambdaToGPU map_lam
         certifying (stmAuxCerts aux) $
-          addStms =<< segRed lvl' pat mempty w [SegBinOp comm red_lam' nes mempty] map_lam' arrs [] []
+          addStms =<< segRed lvl pat mempty w [SegBinOp comm red_lam' nes mempty] map_lam' arrs [] []
         parallelMin [w]
     Op (Hist w arrs ops bucket_fun) -> do
       ops' <- forM ops $ \(HistOp num_bins rf dests nes op) -> do
@@ -256,7 +253,7 @@ intraGroupStm lvl stm@(Let pat aux e) = do
 
       let bucket_fun' = soacsLambdaToGPU bucket_fun
       certifying (stmAuxCerts aux) $
-        addStms =<< segHist lvl' pat w [] [] ops' bucket_fun' arrs
+        addStms =<< segHist lvl pat w [] [] ops' bucket_fun' arrs
       parallelMin [w]
     Op (Stream w arrs Sequential accs lam)
       | chunk_size_param : _ <- lambdaParams lam -> do
@@ -294,7 +291,7 @@ intraGroupStm lvl stm@(Let pat aux e) = do
       certifying (stmAuxCerts aux) $ do
         let ts = zipWith (stripArray . length) dests_ws $ patTypes pat
             body = KernelBody () kstms krets
-        letBind pat $ Op $ SegOp $ SegMap lvl' space ts body
+        letBind pat $ Op $ SegOp $ SegMap lvl space ts body
 
       parallelMin [w]
     _ ->

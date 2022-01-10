@@ -474,6 +474,42 @@ applyRenamedLambda lam dests args = do
   lam_renamed <- renameLambda lam
   applyLambda lam_renamed dests args
 
+virtualisedGroupScan ::
+  Maybe (Imp.TExp Int32 -> Imp.TExp Int32 -> Imp.TExp Bool) ->
+  TV Int64 ->
+  Lambda GPUMem ->
+  [VName] ->
+  InKernelGen ()
+virtualisedGroupScan seg_flag w lam arrs = do
+  groupChunkLoop (tvExp w) $ \chunk_start chunk_size -> do
+    constants <- kernelConstants <$> askEnv
+    let ltid = kernelLocalThreadId constants
+        crosses_segment =
+          case seg_flag of
+            Nothing -> false
+            Just flag_true ->
+              flag_true (sExt32 (chunk_start -1)) (sExt32 chunk_start)
+    sComment "possibly incorporate carry" $
+      sWhen (chunk_start .>. 0 .&&. ltid .==. 0 .&&. bNot crosses_segment) $ do
+        carry_idx <- dPrimVE "carry_idx" $ chunk_start - 1
+        applyRenamedLambda
+          lam
+          (zip arrs $ repeat [DimFix chunk_start])
+          ( zip (map Var arrs) (repeat [DimFix carry_idx])
+              ++ zip (map Var arrs) (repeat [DimFix chunk_start])
+          )
+
+    arrs_chunks <- mapM (sliceArray chunk_start chunk_size) arrs
+
+    sOp $ Imp.ErrorSync Imp.FenceLocal
+
+    groupScan
+      seg_flag
+      (tvExp w)
+      (tvExp chunk_size)
+      lam
+      arrs_chunks
+
 compileGroupOp :: OpCompiler GPUMem KernelEnv Imp.KernelOp
 compileGroupOp pat (Alloc size space) =
   kernelAlloc pat size space
@@ -525,26 +561,11 @@ compileGroupOp pat (Inner (SegOp (SegScan lvl space scans _ body))) = do
 
   case segVirt lvl of
     SegVirt ->
-      groupChunkLoop (tvExp dims_flat) $ \chunk_start chunk_size -> do
-        ltid <- kernelLocalThreadId . kernelConstants <$> askEnv
-        sComment "possibly incorporate carry" $
-          sWhen (chunk_start .>. 0 .&&. ltid .==. 0) $ do
-            carry_idx <- dPrimVE "carry_idx" $ chunk_start - 1
-            applyRenamedLambda
-              (segBinOpLambda scan)
-              (zip arrs_flat $ repeat [DimFix chunk_start])
-              ( zip (map Var arrs_flat) (repeat [DimFix carry_idx])
-                  ++ zip (map Var arrs_flat) (repeat [DimFix chunk_start])
-              )
-
-        arrs_flat_chunks <- mapM (sliceArray chunk_start chunk_size) arrs_flat
-
-        groupScan
-          (Just crossesSegment)
-          (tvExp chunk_size)
-          (tvExp chunk_size)
-          (segBinOpLambda scan)
-          arrs_flat_chunks
+      virtualisedGroupScan
+        (Just crossesSegment)
+        dims_flat
+        (segBinOpLambda scan)
+        arrs_flat
     _ ->
       groupScan
         (Just crossesSegment)
@@ -592,6 +613,8 @@ compileGroupOp pat (Inner (SegOp (SegRed lvl space ops _ body))) = do
                     ++ zip (map Var tmps) (repeat [DimFix chunk_start])
                 )
 
+        sOp $ Imp.ErrorSync Imp.FenceLocal
+
         forM_ (zip ops tmps_for_ops) $ \(op, tmps) -> do
           tmps_chunks <- mapM (sliceArray chunk_start chunk_size) tmps
           groupReduce (sExt32 (tvExp chunk_size)) (segBinOpLambda op) tmps_chunks
@@ -600,6 +623,30 @@ compileGroupOp pat (Inner (SegOp (SegRed lvl space ops _ body))) = do
 
         forM_ (zip red_pes $ concat tmps_for_ops) $ \(pe, arr) ->
           copyDWIMFix (patElemName pe) [] (Var arr) [chunk_start]
+    virtCase dims' tmps_for_ops = do
+      dims_flat <- dPrimV "dims_flat" $ product dims'
+      let segment_size = last dims'
+          crossesSegment from to =
+            (sExt64 to - sExt64 from) .>. (sExt64 to `rem` sExt64 segment_size)
+
+      forM_ (zip ops tmps_for_ops) $ \(op, tmps) -> do
+        tmps_flat <- mapM (flattenArray (length dims') dims_flat) tmps
+        virtualisedGroupScan
+          (Just crossesSegment)
+          dims_flat
+          (segBinOpLambda op)
+          tmps_flat
+
+      sOp $ Imp.ErrorSync Imp.FenceLocal
+
+      forM_ (zip red_pes $ concat tmps_for_ops) $ \(pe, arr) ->
+        copyDWIM
+          (patElemName pe)
+          []
+          (Var arr)
+          (map (unitSlice 0) (init dims') ++ [DimFix $ last dims' -1])
+
+      sOp $ Imp.Barrier Imp.FenceLocal
 
     nonvirtCase [dim'] tmps_for_ops = do
       -- Nonsegmented case (or rather, a single segment) - this we can
