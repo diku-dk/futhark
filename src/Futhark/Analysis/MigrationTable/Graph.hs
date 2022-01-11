@@ -14,8 +14,25 @@
 -- The primary graph operation provided by this module is 'route'. Given the
 -- vertex that some unspecified source has an edge to, a path is attempted
 -- found to a sink. If a sink can be reached from the source, all edges along
--- the path is reversed. The path in the opposite direction of reversed edges
+-- the path are reversed. The path in the opposite direction of reversed edges
 -- from a source to some sink is a route.
+--
+-- Routes can be used to find a minimum vertex cut in the graph through what
+-- amounts to a specialized depth-first search implementation of the
+-- Ford-Fulkerson method. When viewed in this way each graph edge has a capacity
+-- of 1 and the reversing of edges to create routes amounts to sending reverse
+-- flow through a residual network (the current state of the graph).
+-- The max-flow min-cut theorem allows one to determine a minimum edge cut that
+-- separates the sources and sinks.
+--
+-- If each vertex @v@ in the graph is viewed as two vertices, @v_in@ and
+-- @v_out@, with all ingoing edges to @v@ going to @v_in@, all outgoing edges
+-- from @v@ going from @v_out@, and @v_in@ connected to @v_out@ with a single
+-- edge, then the minimum edge cut of the view amounts to a minimum vertex cut
+-- in the actual graph. The view need not be manifested as whether @v_in@ or
+-- @v_out@ is reached by an edge to @v@ can be determined from whether that edge
+-- is reversed or not. The presence of an outgoing, reversed edge also gives the
+-- state of the virtual edge that connects @v_in@ to @v_out@.
 --
 -- When routing fails to find a sink in some subgraph reached via an edge then
 -- that edge is marked exhausted. No sink can be reached via an exhausted edge,
@@ -123,7 +140,7 @@ data Exhaustion = Exhausted | NotExhausted
 data Edges
   = -- | The vertex has an edge to a sink; all other declared edges are
     -- irrelevant. The edge cannot become exhausted, and it is reversed if a
-    -- route passes through the vertex.
+    -- route passes through the vertex (@vertexRouting v /= NoRoute@).
     ToSink
   | -- | All vertices that the vertex has a declared edge to, and which of
     -- those edges that are not exhausted nor reversed, if not all.
@@ -208,7 +225,7 @@ none = Visited M.empty
 
 {- INSERTION -}
 
--- | Insert a new vertex in the graph. If its variable already is represented
+-- | Insert a new vertex into the graph. If its variable already is represented
 -- in the graph, the existing vertex is replaced with the supplied vertex.
 insert :: Vertex m -> Graph m -> Graph m
 insert v (Graph m) = Graph $ IM.insert (vertexId v) v m
@@ -303,7 +320,7 @@ route src g =
         "Routing did not escape cycle in Futhark.Analysis.MigrationTable.Graph."
 
 -- | @routeMany srcs g@ attempts to create a 'route' in @g@ from every vertex
--- in @srcs@. Returns the ids for the vertices connected to all found sinks.
+-- in @srcs@. Returns the ids for the vertices connected to each found sink.
 routeMany :: [Id] -> Graph m -> ([Id], Graph m)
 routeMany srcs graph =
   foldl' f ([], graph) srcs
@@ -424,7 +441,7 @@ reduce g r vs et i
 -- encountered. Used to detect cycles.
 type Pending = IM.IntMap Depth
 
--- | Search depth. Distance to some vertex from some root.
+-- | Search depth. Distance to some vertex from some search root.
 type Depth = Int
 
 -- | The outcome of attempted to find a route through a vertex.
@@ -462,14 +479,14 @@ route' ::
   (RoutingResult m, Graph m)
 route' p d prev et i g
   | Just d' <- IM.lookup i p =
-    let foundCycle = (CycleDetected d' [] p, g)
+    let found_cycle = (CycleDetected d' [] p, g)
      in case et of
           -- Accessing some vertex v via a normal edge corresponds to accessing
           -- v_in via a normal edge. If v_in has a reversed edge then that is
-          -- the only whose edges then are available.
-          -- All edges available via this edge were already available via the
-          -- edge that first reached the vertex.
-          Normal -> foundCycle
+          -- the only outgoing edge that is available.
+          -- All outgoing edges available via this ingoing edge were already
+          -- available via the edge that first reached the vertex.
+          Normal -> found_cycle
           -- Accessing some vertex v via a reversed edge corresponds to
           -- accessing v_out via a reversed edge. All other edges of v_out are
           -- available, and the edge from v_in to v_out has been reversed,
@@ -480,13 +497,13 @@ route' p d prev et i g
           -- reached, then the first reach must have been via a normal edge
           -- that only could traverse a reversed edge. The reversed edge from
           -- v_out to v_in thus completes a cycle, but a sink might be
-          -- reachable via all the other edges from v_out.
+          -- reachable via any of the other edges from v_out.
           -- The depth for the vertex need not be updated as this is the only
-          -- reversed edge and 'prev' already is in the 'Pending' map.
+          -- edge to v_out and 'prev' is already in the 'Pending' map.
           -- It follows that no (new) cycle can start here.
           Reversed ->
             let (res, g') = routeNormals (fromJust $ get i g) g p
-             in (fst foundCycle <> res, g')
+             in (fst found_cycle <> res, g')
   | Just v <- get i g =
     routeVertex v
   | otherwise =
