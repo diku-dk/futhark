@@ -339,8 +339,7 @@ kernelAlternatives pat default_body ((cond, alt) : alts) = runBuilder_ $ do
   let alt_body = mkBody alt_stms $ varsRes $ patNames alts_pat
 
   letBind pat $
-    If cond alt alt_body $
-      IfDec (staticShapes (patTypes pat)) IfEquiv
+    If cond alt alt_body $ IfDec (staticShapes (patTypes pat)) IfEquiv
 
 transformLambda :: KernelPath -> Lambda -> DistribM (Out.Lambda Out.GPU)
 transformLambda path (Lambda params body ret) =

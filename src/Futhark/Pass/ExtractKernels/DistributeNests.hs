@@ -1146,10 +1146,7 @@ permutationAndMissing (Pat pes) res = do
 
 -- Add extra pattern elements to every kernel nesting level.
 expandKernelNest ::
-  MonadFreshNames m =>
-  [PatElemT Type] ->
-  KernelNest ->
-  m KernelNest
+  MonadFreshNames m => [PatElemT Type] -> KernelNest -> m KernelNest
 expandKernelNest pes (outer_nest, inner_nests) = do
   let outer_size =
         loopNestingWidth outer_nest :
