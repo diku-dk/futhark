@@ -258,11 +258,10 @@ constructKernel mk_lvl kernel_nest inner_body = runBuilderT' $ do
       rts = map (stripArray (length ispace)) $ patTypes pat
 
   inner_body' <- fmap (uncurry (flip (KernelBody ()))) $
-    runBuilder $
-      localScope ispace_scope $ do
-        mapM_ readKernelInput $ filter inputIsUsed inps
-        res <- bodyBind inner_body
-        forM res $ \(SubExpRes cs se) -> pure $ Returns ResultMaySimplify cs se
+    runBuilder . localScope ispace_scope $ do
+      mapM_ readKernelInput $ filter inputIsUsed inps
+      res <- bodyBind inner_body
+      forM res $ \(SubExpRes cs se) -> pure $ Returns ResultMaySimplify cs se
 
   (segop, aux_stms) <- lift $ mapKernel mk_lvl ispace [] rts inner_body'
 
