@@ -37,7 +37,7 @@ import Futhark.Pass.ExtractKernels
 import Futhark.Pass.ExtractMulticore
 import Futhark.Pass.FirstOrderTransform
 import Futhark.Pass.KernelBabysitting
-import Futhark.Pass.ReduceDeviceReads
+import Futhark.Pass.ReduceDeviceSyncs
 import Futhark.Pass.Simplify
 import Futhark.Pipeline
 
@@ -67,7 +67,7 @@ kernelsPipeline =
     >>> onePass extractKernels
     >>> passes
       [ simplifyGPU,
-        reduceDeviceReads,
+        reduceDeviceSyncs,
         babysitKernels,
         tileLoops,
         unstreamGPU,
