@@ -464,7 +464,7 @@ histKernelGlobalPass map_pes num_groups group_size space slugs kbody histograms 
                     let bucket_is =
                           map Imp.le64 (init space_is)
                             ++ [sExt64 subhisto_ind]
-                            ++ unflattenIndex dest_shape' (flat_bucket - chk_beg)
+                            ++ unflattenIndex dest_shape' flat_bucket
                     dLParams $ lambdaParams lam
                     sLoopNest shape $ \is -> do
                       forM_ (zip vs_params vs') $ \(p, res) ->
