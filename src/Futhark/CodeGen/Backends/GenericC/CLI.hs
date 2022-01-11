@@ -209,10 +209,9 @@ readInput manifest i tname =
                               $id:shape,
                               $int:rank)
                    != 0) {
-                 futhark_panic(1, "Cannot read input #%d of type %s%s (errno: %s).\n",
+                 futhark_panic(1, "Cannot read input #%d of type %s (errno: %s).\n",
                                $int:i,
                                $string:(T.unpack tname),
-                               $id:info.type_name,
                                strerror(errno));
                }|]
        in ( items,
