@@ -17,6 +17,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * A size inference bug in type checking of `loop`s (#1565).
 
+* Exotic flattening bug (#1563).
+
 ## [0.21.3]
 
 ### Added
