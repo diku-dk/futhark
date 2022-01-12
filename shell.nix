@@ -26,6 +26,7 @@ pkgs.stdenv.mkDerivation {
     pkgs.python3Packages.jsonschema
     pkgs.python3Packages.sphinx
     pkgs.imagemagick # needed for literate tests
+    pkgs.z3
   ]
   ++ pkgs.lib.optionals (pkgs.stdenv.isLinux)
     [ pkgs.opencl-headers

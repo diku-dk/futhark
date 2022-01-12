@@ -36,14 +36,7 @@ module Futhark.IR.Mem.IxFun
     conservativeFlatten,
     disjoint,
     disjoint2,
-    -- Some of these may not be needed
-    lmadToIntervals,
-    intervalOverlap,
-    distributeOffset,
-    primInt,
-    primBool,
-    intervalPairs,
-    selfOverlap,
+    disjoint3,
   )
 where
 
@@ -51,15 +44,18 @@ import Control.Category
 import Control.Monad.Identity
 import Control.Monad.State
 import Control.Monad.Writer
+import Data.Char
 import Data.Function (on, (&))
 import Data.List (delete, find, intersect, partition, sort, sortBy, zip4, zip5, zipWith5, (\\))
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as M
 import Data.Maybe (isJust)
+import Debug.Trace
 import qualified Futhark.Analysis.AlgSimplify2 as AlgSimplify2
 import Futhark.Analysis.PrimExp.Convert
 import qualified Futhark.Analysis.PrimExp.Generalize as PEG
+import Futhark.IR.Mem.Interval
 import Futhark.IR.Prop
 import Futhark.IR.Syntax
   ( DimChange (..),
@@ -69,9 +65,11 @@ import Futhark.IR.Syntax
     ShapeChange,
     Slice (..),
     SubExp (..),
+    Type,
     dimFix,
     flatSliceDims,
     flatSliceStrides,
+    nameFromString,
     unitSlice,
   )
 import Futhark.IR.Syntax.Core (Ext (..), VName (..))
@@ -80,7 +78,11 @@ import Futhark.Transform.Substitute
 import Futhark.Util (fixPoint)
 import Futhark.Util.IntegralExp
 import Futhark.Util.Pretty
+import Z3.Monad
 import Prelude hiding (gcd, id, mod, (.))
+
+traceWith :: Pretty a => String -> a -> a
+traceWith s a = trace (s <> ": " <> pretty a) a
 
 type Shape num = [num]
 
@@ -1169,12 +1171,12 @@ gcd x y = gcd' (abs x) (abs y)
 disjoint :: [(VName, PrimExp VName)] -> Names -> LMAD (TPrimExp Int64 VName) -> LMAD (TPrimExp Int64 VName) -> Bool
 disjoint less_thans non_negatives (LMAD offset1 [dim1]) (LMAD offset2 [dim2]) =
   doesNotDivide (gcd (ldStride dim1) (ldStride dim2)) (offset1 - offset2)
-    || lessThanish
+    || AlgSimplify2.lessThanish
       less_thans
       non_negatives
       (offset2 + (ldShape dim2 - 1) * ldStride dim2)
       offset1
-    || lessThanish
+    || AlgSimplify2.lessThanish
       less_thans
       non_negatives
       (offset1 + (ldShape dim1 - 1) * ldStride dim1)
@@ -1195,56 +1197,6 @@ disjoint less_thans non_negatives lmad1 lmad2 =
     (Just lmad1', Just lmad2') -> disjoint less_thans non_negatives lmad1' lmad2'
     _ -> False
 
--- | Given a list of 'Names' that we know are non-negative (>= 0), determine
--- whether we can say for sure that the given 'AlgSimplify2.SofP' is
--- non-negative. Conservatively returns 'False' if there is any doubt.
---
--- TODO: We need to expand this to be able to handle cases such as @i*n + g < (i
--- + 1) * n@, if it is known that @g < n@, eg. from a 'SegSpace' or a loop form.
-nonNegativeish :: Names -> AlgSimplify2.SofP -> Bool
-nonNegativeish non_negatives = all (nonNegativeishProd non_negatives)
-
-nonNegativeishProd :: Names -> AlgSimplify2.Prod -> Bool
-nonNegativeishProd _ (AlgSimplify2.Prod True _) = False
-nonNegativeishProd non_negatives (AlgSimplify2.Prod False as) =
-  all (nonNegativeishExp non_negatives) as
-
-nonNegativeishExp :: Names -> PrimExp VName -> Bool
-nonNegativeishExp _ (ValueExp v) = not $ negativeIsh v
-nonNegativeishExp non_negatives (LeafExp vname _) = vname `nameIn` non_negatives
-nonNegativeishExp _ _ = False
-
--- | Is e1 symbolically less than or equal to e2?
-lessThanOrEqualish :: [(VName, PrimExp VName)] -> Names -> TPrimExp Int64 VName -> TPrimExp Int64 VName -> Bool
-lessThanOrEqualish less_thans0 non_negatives e1 e2 =
-  case e2 - e1 & untyped & AlgSimplify2.simplify0 of
-    [] -> False
-    simplified ->
-      nonNegativeish non_negatives $
-        fixPoint (`removeLessThans` less_thans) $ simplified
-  where
-    less_thans =
-      concatMap
-        (\(i, bound) -> [(Var i, bound), (Constant $ IntValue $ Int64Value 0, bound)])
-        less_thans0
-
-lessThanish :: [(VName, PrimExp VName)] -> Names -> TPrimExp Int64 VName -> TPrimExp Int64 VName -> Bool
-lessThanish less_thans non_negatives e1 e2 =
-  lessThanOrEqualish less_thans non_negatives (e1 + 1) e2
-
-removeLessThans :: AlgSimplify2.SofP -> [(SubExp, PrimExp VName)] -> AlgSimplify2.SofP
-removeLessThans =
-  foldl
-    ( \sofp (i, bound) ->
-        let to_remove =
-              AlgSimplify2.simplifySofP $
-                AlgSimplify2.Prod True [primExpFromSubExp (IntType Int64) i] :
-                AlgSimplify2.simplify0 bound
-         in case to_remove `intersect` sofp of
-              to_remove' | to_remove' == to_remove -> sofp \\ to_remove
-              _ -> sofp
-    )
-
 disjoint2 :: [(VName, PrimExp VName)] -> Names -> LMAD (TPrimExp Int64 VName) -> LMAD (TPrimExp Int64 VName) -> Bool
 disjoint2 less_thans non_negatives lmad1 lmad2 =
   let (offset1, interval1) = lmadToIntervals lmad1
@@ -1257,28 +1209,57 @@ disjoint2 less_thans non_negatives lmad1 lmad2 =
              distributeOffset (map AlgSimplify2.negate neg_offset) interval2'
            ) of
         (Just interval1'', Just interval2'') ->
-          not (selfOverlap less_thans non_negatives interval1'')
+          traceWith
+            ( unlines
+                [ "Disjoint2 ?",
+                  "less_thans: " <> pretty less_thans,
+                  "non_negatives: " <> pretty non_negatives,
+                  "lmad1: " <> pretty lmad1,
+                  "lmad2: " <> pretty lmad2,
+                  "of1: " <> pretty (AlgSimplify2.simplify0 $ untyped $ lmadOffset lmad1),
+                  "of2: " <> pretty (AlgSimplify2.simplify0 $ untyped $ lmadOffset lmad2),
+                  "offset1: " <> pretty offset1,
+                  "offset2: " <> pretty offset2,
+                  "diff: " <> pretty (offset1 `AlgSimplify2.sub` offset2),
+                  "neg_offset: " <> pretty neg_offset,
+                  "pos_offset: " <> pretty pos_offset,
+                  "interval1: " <> pretty interval1,
+                  "interval2: " <> pretty interval2,
+                  "interval1': " <> pretty interval1',
+                  "interval2': " <> pretty interval2',
+                  "interval1'': " <> pretty interval1'',
+                  "interval2'': " <> pretty interval2'',
+                  "selfoverlap interval1'': " <> pretty (selfOverlap less_thans non_negatives interval1''),
+                  "selfoverlap interval2'': " <> pretty (selfOverlap less_thans non_negatives interval2''),
+                  "intervaloverlap: " <> pretty (map (not . uncurry (intervalOverlap less_thans non_negatives)) (zip interval1'' interval2''))
+                ]
+            )
+            $ not (selfOverlap less_thans non_negatives interval1'')
+              && not (selfOverlap less_thans non_negatives interval2'')
+              && any
+                (not . uncurry (intervalOverlap less_thans non_negatives))
+                (zip interval1'' interval2'')
+        _ ->
+          False
+
+disjoint3 :: M.Map VName Type -> [(VName, PrimExp VName)] -> Names -> LMAD (TPrimExp Int64 VName) -> LMAD (TPrimExp Int64 VName) -> IO Bool
+disjoint3 scope less_thans non_negatives lmad1 lmad2 =
+  let (offset1, interval1) = lmadToIntervals lmad1
+      (offset2, interval2) = lmadToIntervals lmad2
+      (neg_offset, pos_offset) =
+        partition AlgSimplify2.negated $
+          offset1 `AlgSimplify2.sub` offset2
+      (interval1', interval2') = unzip $ intervalPairs interval1 interval2
+   in case ( distributeOffset pos_offset interval1',
+             distributeOffset (map AlgSimplify2.negate neg_offset) interval2'
+           ) of
+        (Just interval1'', Just interval2'') ->
+          if not (selfOverlap less_thans non_negatives interval1'')
             && not (selfOverlap less_thans non_negatives interval2'')
-            && any
-              (not . uncurry (intervalOverlap less_thans non_negatives))
-              (zip interval1'' interval2'')
-        _ -> False
-
-data Interval = Interval
-  { lowerBound :: TPrimExp Int64 VName,
-    numElements :: TPrimExp Int64 VName,
-    stride :: TPrimExp Int64 VName
-  }
-  deriving (Show)
-
-instance Pretty Interval where
-  ppr (Interval lb ne st) =
-    braces $
-      semisep
-        [ "lowerBound: " <> ppr lb,
-          "numElements: " <> ppr ne,
-          "stride: " <> ppr st
-        ]
+            then or . traceWith "disjoint3" <$> mapM (uncurry $ disjointZ3 scope less_thans non_negatives) (zip interval1'' interval2'')
+            else return False
+        _ ->
+          return False
 
 lmadToIntervals :: LMAD (TPrimExp Int64 VName) -> (AlgSimplify2.SofP, [Interval])
 lmadToIntervals (LMAD offset []) = (AlgSimplify2.simplify0 $ untyped offset, [Interval 0 1 1])
@@ -1291,83 +1272,70 @@ lmadToIntervals lmad@(LMAD offset dims0) =
     helper (LMADDim strd _ shp _ _) = do
       Interval 0 (AlgSimplify2.simplify' shp) (AlgSimplify2.simplify' strd)
 
-distributeOffset :: MonadFail m => AlgSimplify2.SofP -> [Interval] -> m [Interval]
-distributeOffset [] interval = return interval
-distributeOffset _ [] = fail "Cannot distribute offset across empty interval"
-distributeOffset offset [Interval lb ne 1] = return [Interval (lb + TPrimExp (AlgSimplify2.sumToExp offset)) ne 1]
-distributeOffset offset (Interval lb ne st0 : is) = do
-  -- If a term 't' in the offset contains a multiple of the stride: Subtract `t`
-  -- from the offset, add `t / st` to the lower bound.
-  --
-  -- Example: The offset is `a + b * b * 2` and the stride is `b * b`. The
-  -- remaining offset should be `a` and the new lower bound should be `2`.
-  AlgSimplify2.Prod neg st <-
-    maybe (fail "Stride should have exactly one term") return $
-      justOne $
-        AlgSimplify2.simplify0 $ untyped st0
-  -- We do not support negative strides here. They should've been normalized.
-  if neg
-    then fail "Stride should be positive"
-    else case find (`AlgSimplify2.isMultipleOf` st) offset of
-      Just t@(AlgSimplify2.Prod False as') ->
-        distributeOffset (t `delete` offset) $ Interval (lb + TPrimExp (AlgSimplify2.sumToExp [AlgSimplify2.Prod False $ as' \\ st])) ne st0 : is
-      Just (AlgSimplify2.Prod True _) -> fail "Offset term should be positive"
-      Nothing -> do
-        rest <- distributeOffset offset is
-        return $ Interval lb ne st0 : rest
-  where
-    justOne :: [a] -> Maybe a
-    justOne [a] = Just a
-    justOne _ = Nothing
+vname s = VName (nameFromString s) (sum $ map ord s)
 
-intervalOverlap :: [(VName, PrimExp VName)] -> Names -> Interval -> Interval -> Bool
-intervalOverlap less_thans non_negatives (Interval lb1 ne1 st1) (Interval lb2 ne2 st2)
-  | st1 == st2,
-    lessThanish less_thans non_negatives lb1 lb2,
-    lessThanish less_thans non_negatives (lb1 + ne1 - 1) lb2 =
-    False
-  | st1 == st2,
-    lessThanish less_thans non_negatives lb2 lb1,
-    lessThanish less_thans non_negatives (lb2 + ne2 - 1) lb1 =
-    False
-  | otherwise = True
+var s = TPrimExp $ LeafExp (vname s) $ IntType Int64
 
-primBool :: TPrimExp Bool VName -> Maybe Bool
-primBool p
-  | Just (BoolValue b) <- evalPrimExp (const Nothing) $ untyped p = Just b
-  | otherwise = Nothing
+gtid_8472 = TPrimExp $ LeafExp (foo "gtid" 8472) $ IntType Int64
 
-primInt :: TPrimExp Int64 VName -> Maybe Int64
-primInt p
-  | Just (IntValue (Int64Value i)) <- evalPrimExp (const Nothing) $ untyped p = Just i
-  | otherwise = Nothing
+gtid_8473 = TPrimExp $ LeafExp (foo "gtid" 8473) $ IntType Int64
 
-intervalPairs :: [Interval] -> [Interval] -> [(Interval, Interval)]
-intervalPairs = intervalPairs' []
-  where
-    intervalPairs' :: [(Interval, Interval)] -> [Interval] -> [Interval] -> [(Interval, Interval)]
-    intervalPairs' acc [] [] = reverse acc
-    intervalPairs' acc (i@(Interval lb _ st) : is) [] = intervalPairs' ((i, Interval lb 1 st) : acc) is []
-    intervalPairs' acc [] (i@(Interval lb _ st) : is) = intervalPairs' ((Interval lb 1 st, i) : acc) [] is
-    intervalPairs' acc (i1@(Interval lb1 _ st1) : is1) (i2@(Interval lb2 _ st2) : is2)
-      | st1 == st2 = intervalPairs' ((i1, i2) : acc) is1 is2
-      | otherwise =
-        let res1 = intervalPairs' ((i1, Interval lb1 1 st1) : acc) is1 (i2 : is2)
-            res2 = intervalPairs' ((Interval lb2 1 st2, i2) : acc) (i1 : is1) is2
-         in if length res1 <= length res2
-              then res1
-              else res2
+gtid_8474 = TPrimExp $ LeafExp (foo "gtid" 8474) $ IntType Int64
 
--- | Returns true if the intervals are self-overlapping, meaning that for a
--- given dimension d, the stride of d is larger than the aggregate spans of the
--- lower dimensions.
-selfOverlap :: [(VName, PrimExp VName)] -> Names -> [Interval] -> Bool
-selfOverlap less_thans non_negatives is =
-  -- TODO: Do we need to do something clever using some ranges of known values?
-  selfOverlap' 0 $ reverse is
-  where
-    selfOverlap' acc (x : xs) =
-      let interval_span = (lowerBound x + numElements x - 1) * stride x
-       in lessThanish less_thans non_negatives (AlgSimplify2.simplify' acc) (AlgSimplify2.simplify' $ stride x)
-            && selfOverlap' (acc + interval_span) xs
-    selfOverlap' _ [] = False
+num_blocks_8284 = TPrimExp $ LeafExp (foo "num_blocks" 8284) $ IntType Int64
+
+add_nw64 = (+)
+
+mul_nw64 = (*)
+
+sub64 = (-)
+
+sub_nw64 = (-)
+
+foo s i = VName (nameFromString s) i
+
+nonnegs = freeIn [gtid_8472, gtid_8473, gtid_8474, num_blocks_8284]
+
+lm1 :: LMAD (TPrimExp Int64 VName)
+lm1 =
+  LMAD
+    ( add_nw64
+        (mul_nw64 (256) (num_blocks_8284))
+        (256)
+    )
+    [ LMADDim (mul_nw64 (num_blocks_8284) (256)) 0 (sub_nw64 (gtid_8472) (1)) 0 Inc,
+      LMADDim 256 0 (sub64 (num_blocks_8284) (1)) 1 Inc,
+      LMADDim 16 0 16 2 Inc,
+      LMADDim 1 0 16 3 Inc
+    ]
+
+lm2 :: LMAD (TPrimExp Int64 VName)
+lm2 =
+  LMAD
+    ( add_nw64
+        ( add_nw64
+            ( add_nw64
+                ( add_nw64
+                    (mul_nw64 (256) (num_blocks_8284))
+                    (256)
+                )
+                ( mul_nw64
+                    (gtid_8472)
+                    (mul_nw64 (256) (num_blocks_8284))
+                )
+            )
+            (mul_nw64 (gtid_8473) (256))
+        )
+        (mul_nw64 (gtid_8474) (16))
+    )
+    [LMADDim 1 0 16 0 Inc]
+
+j_m_i_8287 :: TPrimExp Int64 VName
+j_m_i_8287 = num_blocks_8284 - 1
+
+lessthans :: [(VName, PrimExp VName)]
+lessthans =
+  [ (head $ namesToList $ freeIn gtid_8472, untyped j_m_i_8287),
+    (head $ namesToList $ freeIn gtid_8473, untyped j_m_i_8287),
+    (head $ namesToList $ freeIn gtid_8474, untyped (16 :: TPrimExp Int64 VName))
+  ]

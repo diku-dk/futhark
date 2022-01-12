@@ -122,7 +122,9 @@ tests =
         test_flatSlice_rotate_slice_iota,
         test_flatSlice_transpose_slice_iota,
         test_rotate_flatSlice_transpose_slice_iota,
-        test_disjoint2
+        test_disjoint2,
+        test_lessThanish,
+        test_lessThanOrEqualish
       ]
 
 singleton :: TestTree -> [TestTree]
@@ -559,3 +561,11 @@ test_disjoint2 =
                 [IxFunLMAD.LMADDim 1 0 16 0 IxFunLMAD.Inc]
          in testCase (pretty lm1 <> " and " <> pretty lm2) $ IxFunLMAD.disjoint2 lessthans nonnegs lm1 lm2 @? "Failed"
       ]
+
+test_lessThanish :: [TestTree]
+test_lessThanish =
+  [testCase "0 < 1" $ IxFunLMAD.lessThanish mempty mempty 0 1 @? "Failed"]
+
+test_lessThanOrEqualish :: [TestTree]
+test_lessThanOrEqualish =
+  [testCase "1 <= 1" $ IxFunLMAD.lessThanOrEqualish mempty mempty 1 1 @? "Failed"]

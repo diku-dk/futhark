@@ -8,6 +8,7 @@
 module Futhark.Optimise.ArrayShortCircuiting.ArrayCoalescing (mkCoalsTab, CoalsTab, mkCoalsTabGPU) where
 
 import qualified Control.Exception.Base as Exc
+import Control.Monad.IO.Class
 import Control.Monad.Reader
 import Control.Monad.State.Strict
 import Data.Function ((&))
@@ -17,6 +18,7 @@ import qualified Data.Map.Strict as M
 import Data.Maybe
 import Data.Sequence (Seq (..))
 import qualified Data.Set as S
+import Debug.Trace
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.IR.Aliases
 import Futhark.IR.GPUMem
@@ -27,6 +29,13 @@ import Futhark.Optimise.ArrayShortCircuiting.DataStructs
 import Futhark.Optimise.ArrayShortCircuiting.LastUse
 import Futhark.Optimise.ArrayShortCircuiting.MemRefAggreg
 import Futhark.Optimise.ArrayShortCircuiting.TopDownAn
+import Futhark.Util.Pretty (Pretty)
+
+traceWith :: Pretty a => String -> a -> a
+traceWith s a = trace (s <> ": " <> pretty a) a
+
+traceWith' :: Show a => String -> a -> a
+traceWith' s a = trace (s <> ": " <> show a) a
 
 type Coalesceable rep inner =
   ( CreatesNewArrOp (OpWithAliases inner),
@@ -48,8 +57,8 @@ newtype ShortCircuitReader rep = ShortCircuitReader
   { onOp :: LUTabFun -> Pat (Aliases rep) -> Op (Aliases rep) -> TopDnEnv rep -> BotUpEnv -> ShortCircuitM rep BotUpEnv
   }
 
-newtype ShortCircuitM rep a = ShortCircuitM (ReaderT (ShortCircuitReader rep) (State VNameSource) a)
-  deriving (Functor, Applicative, Monad, MonadReader (ShortCircuitReader rep), MonadState VNameSource)
+newtype ShortCircuitM rep a = ShortCircuitM (ReaderT (ShortCircuitReader rep) (StateT VNameSource IO) a)
+  deriving (Functor, Applicative, Monad, MonadReader (ShortCircuitReader rep), MonadState VNameSource, MonadIO)
 
 instance MonadFreshNames (ShortCircuitM rep) where
   putNameSource = put
@@ -114,7 +123,7 @@ markSuccessCoal (actv, succc) m_b info_b =
 
 -- | Given a 'FunDef' in 'SegMem' representation, compute the coalescing table
 -- by folding over each function.
-mkCoalsTab :: MonadFreshNames m => FunDef (Aliases SeqMem) -> m CoalsTab
+mkCoalsTab :: (MonadIO m, MonadFreshNames m) => FunDef (Aliases SeqMem) -> m CoalsTab
 mkCoalsTab =
   mkCoalsTabFun
     (snd . lastUseSeqMem)
@@ -123,7 +132,7 @@ mkCoalsTab =
 
 -- | Given a 'FunDef' in 'GPUMem' representation, compute the coalescing table
 -- by folding over each function.
-mkCoalsTabGPU :: MonadFreshNames m => FunDef (Aliases GPUMem) -> m CoalsTab
+mkCoalsTabGPU :: (MonadIO m, MonadFreshNames m) => FunDef (Aliases GPUMem) -> m CoalsTab
 mkCoalsTabGPU =
   mkCoalsTabFun
     (snd . lastUseGPUMem)
@@ -132,7 +141,7 @@ mkCoalsTabGPU =
 
 -- | Given a function, compute the coalescing table
 mkCoalsTabFun ::
-  (MonadFreshNames m, Coalesceable rep inner, FParamInfo rep ~ FParamMem) =>
+  (MonadFreshNames m, MonadIO m, Coalesceable rep inner, FParamInfo rep ~ FParamMem) =>
   (FunDef (Aliases rep) -> LUTabFun) ->
   ShortCircuitReader rep ->
   ComputeScalarTableOnOp rep ->
@@ -158,7 +167,7 @@ mkCoalsTabFun lufun r computeScalarOnOp fun@(FunDef _ _ _ _ fpars body) = do
             nonNegatives = foldMap paramSizes fpars
           }
       ShortCircuitM m = fixPointCoalesce lutab fpars body topenv
-  modifyNameSource $ runState (runReaderT m r)
+  modifyNameSourceIO $ runStateT (runReaderT m r)
 
 paramSizes :: Param FParamMem -> Names
 paramSizes (Param _ _ (MemArray _ shp _ _)) = freeIn shp
@@ -320,13 +329,36 @@ shortCircuitGPUMemHelper num_reds lvl lutab pat@(Pat ps0) space0 kernel_body td_
                 ps_and_space
           let source_writes = srcwrts (memrefs entry) <> thread_writes
           destination_uses <-
-            aggSummaryMapPartial (scope td_env) (scope td_env) (scalarTable td_env) (unSegSpace space0) $
-              dstrefs (memrefs entry)
-                `accessSubtract` dstrefs (maybe mempty memrefs $ M.lookup k $ activeCoals bu_env)
-          if noMemOverlap td_env destination_uses source_writes
+            case dstrefs (memrefs entry)
+              `accessSubtract` dstrefs (maybe mempty memrefs $ M.lookup k $ activeCoals bu_env) of
+              Set s -> mconcat <$> mapM (\lm -> aggSummaryMapPartial (scalarTable td_env) (unSegSpace space0) (Set $ S.singleton lm)) (S.toList s)
+              -- Set s -> mconcat <$> mapM undefined (S.toList s)
+              Undeterminable -> return Undeterminable
+          -- destination_uses <-
+          --   aggSummaryMapPartial
+          --     (traceWith "aggSummaryMapPartial scalars" $ scalarTable td_env)
+          --     (traceWith "aggSummaryMapPartial segspace" $ unSegSpace space0)
+          --     $ dstrefs (memrefs entry)
+          --       `accessSubtract` dstrefs (maybe mempty memrefs $ M.lookup k $ activeCoals bu_env)
+          res <- liftIO $ noMemOverlap td_env destination_uses source_writes
+          if traceWith
+            ( "blabla pat: " <> pretty (head $ patNames pat) <> "\nk: " <> pretty k
+                <> "\ndstrefs: "
+                <> pretty (dstrefs $ memrefs entry)
+                <> "\nother dstrefs: "
+                <> pretty (dstrefs (maybe mempty memrefs $ M.lookup k $ activeCoals bu_env))
+                <> "\ndestination_uses: "
+                <> pretty destination_uses
+                <> "\nthread_writes: "
+                <> pretty thread_writes
+                <> "\nsource_writes: "
+                <> pretty (srcwrts $ memrefs entry)
+                <> "\nnoMemOverlap"
+            )
+            res
             then return bu_env_f
             else do
-              let (ac, inh) = markFailedCoal (activeCoals bu_env_f, inhibit bu_env_f) k
+              let (ac, inh) = markFailedCoal (activeCoals bu_env_f, inhibit bu_env_f) $ traceWith "marking this as failed now" k
               return $ bu_env_f {activeCoals = ac, inhibit = inh}
       )
       bu_env'
@@ -335,8 +367,8 @@ shortCircuitGPUMemHelper num_reds lvl lutab pat@(Pat ps0) space0 kernel_body td_
   actv <-
     mapM
       ( \entry -> do
-          wrts <- aggSummaryMapTotal (scope td_env) (scope td_env) (scalarTable td_env) (unSegSpace space0) $ srcwrts $ memrefs entry
-          uses <- aggSummaryMapTotal (scope td_env) (scope td_env) (scalarTable td_env) (unSegSpace space0) $ dstrefs $ memrefs entry
+          wrts <- aggSummaryMapTotal (scalarTable td_env) (unSegSpace space0) $ srcwrts $ memrefs entry
+          uses <- aggSummaryMapTotal (scalarTable td_env) (unSegSpace space0) $ dstrefs $ memrefs entry
           return $ entry {memrefs = MemRefs uses wrts}
       )
       $ activeCoals bu_env''
@@ -344,40 +376,57 @@ shortCircuitGPUMemHelper num_reds lvl lutab pat@(Pat ps0) space0 kernel_body td_
 
   -- Process pattern and return values
   let mergee_writes = mapMaybe (\(p, _) -> fmap (p,) $ getDirAliasedIxfn td_env (activeCoals bu_env''') $ patElemName p) ps_and_space
-      -- Now, for each mergee write, we need to check that it doesn't overlap with any previous uses of the destination.
-      bu_env'''' =
-        foldl
-          ( \bu_env_f (p, (m_b, _m_y, ixf)) ->
-              let as = ixfunToAccessSummary ixf
-               in case M.lookup m_b $ activeCoals bu_env of
-                    Just coal_entry ->
-                      let mrefs =
-                            memrefs coal_entry
-                       in if noMemOverlap td_env as $ dstrefs mrefs
-                            then case M.lookup (patElemName p) $ vartab coal_entry of
-                              Nothing -> bu_env_f
-                              Just (Coalesced knd mbd@(MemBlock _ _ _ ixfn) _) ->
-                                case freeVarSubstitutions (scope td_env) (scalarTable td_env) ixfn of
-                                  Just fv_subst ->
-                                    if ixfunPermutation ixfn == ixfunPermutation (ixfun $ fromJust $ getScopeMemInfo (patElemName p) $ scope td_env)
-                                      then
-                                        let entry = coal_entry {vartab = M.insert (patElemName p) (Coalesced knd mbd fv_subst) (vartab coal_entry)}
-                                            (ac, suc) =
-                                              markSuccessCoal (activeCoals bu_env_f, successCoals bu_env_f) m_b entry
-                                         in bu_env_f {activeCoals = ac, successCoals = suc}
-                                      else
-                                        let (ac, inh) = markFailedCoal (activeCoals bu_env_f, inhibit bu_env_f) m_b
-                                         in bu_env_f {activeCoals = ac, inhibit = inh}
-                                  Nothing ->
-                                    let (ac, inh) = markFailedCoal (activeCoals bu_env_f, inhibit bu_env_f) m_b
-                                     in bu_env_f {activeCoals = ac, inhibit = inh}
-                            else
-                              let (ac, inh) = markFailedCoal (activeCoals bu_env_f, inhibit bu_env_f) m_b
-                               in bu_env_f {activeCoals = ac, inhibit = inh}
-                    _ -> bu_env_f
-          )
-          bu_env'''
-          mergee_writes
+  -- Now, for each mergee write, we need to check that it doesn't overlap with any previous uses of the destination.
+  bu_env'''' <-
+    foldM
+      ( \bu_env_f (p, (m_b, m_y, ixf)) ->
+          let as = ixfunToAccessSummary ixf
+           in -- Should be @bu_env@ here, because we need to check overlap
+              -- against previous uses.
+              case M.lookup m_b $ activeCoals bu_env of
+                Just coal_entry -> do
+                  let mrefs =
+                        memrefs coal_entry
+                  res <- liftIO $ noMemOverlap td_env as $ dstrefs mrefs
+                  if traceWith
+                    ( "pat: " <> pretty p
+                        <> "\nm_b: "
+                        <> pretty m_b
+                        <> "\nm_y: "
+                        <> pretty m_y
+                        <> "\nixf: "
+                        <> pretty ixf
+                        <> "\nas: "
+                        <> pretty as
+                        <> "\ndstrefs mrefs: "
+                        <> pretty (dstrefs mrefs)
+                        <> "\nnoMemOverlap2"
+                    )
+                    res
+                    then case M.lookup (patElemName p) $ vartab coal_entry of
+                      Nothing -> return bu_env_f
+                      Just (Coalesced knd mbd@(MemBlock _ _ _ ixfn) _) -> return $
+                        case freeVarSubstitutions (scope td_env) (scalarTable td_env) ixfn of
+                          Just fv_subst ->
+                            if ixfunPermutation ixfn == ixfunPermutation (ixfun $ fromJust $ getScopeMemInfo (patElemName p) $ scope td_env)
+                              then
+                                let entry = coal_entry {vartab = M.insert (patElemName p) (Coalesced knd mbd fv_subst) (vartab coal_entry)}
+                                    (ac, suc) =
+                                      markSuccessCoal (activeCoals bu_env_f, successCoals bu_env_f) m_b entry
+                                 in bu_env_f {activeCoals = ac, successCoals = suc}
+                              else
+                                let (ac, inh) = markFailedCoal (activeCoals bu_env_f, inhibit bu_env_f) m_b
+                                 in bu_env_f {activeCoals = ac, inhibit = inh}
+                          Nothing ->
+                            let (ac, inh) = markFailedCoal (activeCoals bu_env_f, inhibit bu_env_f) m_b
+                             in bu_env_f {activeCoals = ac, inhibit = inh}
+                    else
+                      let (ac, inh) = markFailedCoal (activeCoals bu_env_f, inhibit bu_env_f) m_b
+                       in return $ bu_env_f {activeCoals = ac, inhibit = inh}
+                _ -> return bu_env_f
+      )
+      bu_env'''
+      mergee_writes
   return bu_env''''
 
 ixfunPermutation :: IxFun -> [Int]
@@ -665,7 +714,13 @@ mkCoalsTabStm lutab (Let patt _ (If _ body_then body_else _)) td_env bu_env = do
         --trace ("COALESCING IF inhibits: " ++ prettyInhibitTab inhibit_res0 ++ " " ++ prettyInhibitTab inhb_then1 ++ " " ++ prettyInhibitTab inhb_else1) $
         M.unionWith (<>) inhibit1 $ -- inhibit_res0 $
           M.unionWith (<>) inhb_then1 inhb_else1
-  return bu_env {activeCoals = actv_res, successCoals = succ_res, inhibit = inhibit_res}
+  return
+    bu_env
+      { activeCoals =
+          actv_res,
+        successCoals = succ_res,
+        inhibit = inhibit_res
+      }
   where
     foldfun _ ((act, _), _) ((m_b, _, _, _), (_, _, _, _))
       | Nothing <- M.lookup m_b act =
@@ -841,13 +896,13 @@ mkCoalsTabStm lutab lstm@(Let pat _ (DoLoop arginis lform body)) td_env bu_env =
   --    Filter the entries by the SECOND SOUNDNESS CONDITION, namely:
   --      Union_{i=1..n-1} W_i does not overlap the before-the-loop uses
   --        of the destination memory block.
-  let res_actv3 = M.filterWithKey (loopSoundness2Entry actv3) res_actv2
+  res_actv3 <- liftIO $ filterMapWithKeyM1 (loopSoundness2Entry actv3) res_actv2
 
-      tmp_succ =
+  let tmp_succ =
         M.filterWithKey (okLookup actv3) $
           M.difference res_succ0 (successCoals bu_env)
-      ver_succ = M.filterWithKey (loopSoundness2Entry actv3) tmp_succ
-      suc_fail = M.difference tmp_succ ver_succ
+  ver_succ <- liftIO $ filterMapWithKeyM1 (loopSoundness2Entry actv3) tmp_succ
+  let suc_fail = M.difference tmp_succ ver_succ
       (res_succ, res_inhb1) = foldl markFailedCoal (res_succ0, res_inhb0) $ M.keys suc_fail
       --
       act_fail = M.difference res_actv0 res_actv3
@@ -982,12 +1037,11 @@ mkCoalsTabStm lutab lstm@(Let pat _ (DoLoop arginis lform body)) td_env bu_env =
       use_p <-
         aggSummaryLoopPartial (scope td_env) scope_loop (scal_tab <> scalarTable td_env) idx $
           dstrefs $ memrefs etry
-      return $
-        noMemOverlap td_env' wrt_i use_p
-    loopSoundness2Entry :: CoalsTab -> VName -> CoalsEntry -> Bool
+      liftIO $ noMemOverlap td_env' wrt_i use_p
+    loopSoundness2Entry :: CoalsTab -> VName -> CoalsEntry -> IO Bool
     loopSoundness2Entry old_actv m_b etry =
       case M.lookup m_b old_actv of
-        Nothing -> True
+        Nothing -> return True
         Just etry0 ->
           let uses_before = (dstrefs . memrefs) etry0
               write_loop = (srcwrts . memrefs) etry
@@ -999,11 +1053,11 @@ mkCoalsTabStm lutab stm@(Let pat@(Pat [x']) _ e@(BasicOp (Update safety x _ _elm
   | [(_, MemBlock _ _ m_x _)] <- getArrMemAssoc pat =
     do
       -- (a) filter by the 3rd safety for @elm@ and @x'@
-      let (actv, inhbt) = recordMemRefUses td_env bu_env stm
-          -- mkCoalsHelper1FilterActive pat (se2names elm) (scope td_env) (scals bu_env)
-          --                                      (activeCoals bu_env) (inhibit bu_env)
-          -- (b) if @x'@ is in active coalesced table, then add an entry for @x@ as well
-          (actv', inhbt') =
+      (actv, inhbt) <- liftIO $ recordMemRefUses td_env bu_env stm
+      -- mkCoalsHelper1FilterActive pat (se2names elm) (scope td_env) (scals bu_env)
+      --                                      (activeCoals bu_env) (inhibit bu_env)
+      -- (b) if @x'@ is in active coalesced table, then add an entry for @x@ as well
+      let (actv', inhbt') =
             case M.lookup m_x actv of
               Nothing -> (actv, inhbt)
               Just info ->
@@ -1044,16 +1098,16 @@ mkCoalsTabStm lutab stm@(Let pat _ e) td_env bu_env = do
   --      this is now relaxed by use of LMAD eqs:
   --      the memory referenced in stm are added to memrefs::dstrefs
   --      in corresponding coal-tab entries.
-  let (activeCoals', inhibit') = recordMemRefUses td_env bu_env stm
-      -- mkCoalsHelper1FilterActive pat (freeIn e) (scope td_env) (scals bu_env)
-      --                           (activeCoals bu_env) (inhibit bu_env)
+  (activeCoals', inhibit') <- liftIO $ recordMemRefUses td_env bu_env stm
+  -- mkCoalsHelper1FilterActive pat (freeIn e) (scope td_env) (scals bu_env)
+  --                           (activeCoals bu_env) (inhibit bu_env)
 
-      --  ii) promote any of the entries in @activeCoals@ to @successCoals@ as long as
-      --        - this statement defined a variable consumed in a coalesced statement
-      --        - and safety conditions 2, 4, and 5 are satisfied.
-      --      AND extend @activeCoals@ table for any definition of a variable that
-      --      aliases a coalesced variable.
-      safe_4 = createsNewArrOK e
+  --  ii) promote any of the entries in @activeCoals@ to @successCoals@ as long as
+  --        - this statement defined a variable consumed in a coalesced statement
+  --        - and safety conditions 2, 4, and 5 are satisfied.
+  --      AND extend @activeCoals@ table for any definition of a variable that
+  --      aliases a coalesced variable.
+  let safe_4 = createsNewArrOK e
       ((activeCoals'', inhibit''), successCoals') =
         foldl (foldfun safe_4) ((activeCoals', inhibit'), successCoals bu_env) (getArrMemAssoc pat)
 
@@ -1451,3 +1505,6 @@ computeScalarTableGPUMem _ (Inner (OtherOp ())) = return mempty
 
 filterMapM1 :: (Eq k, Monad m) => (v -> m Bool) -> M.Map k v -> m (M.Map k v)
 filterMapM1 f m = fmap M.fromAscList $ filterM (f . snd) $ M.toAscList m
+
+filterMapWithKeyM1 :: (Eq k, Monad m) => (k -> v -> m Bool) -> M.Map k v -> m (M.Map k v)
+filterMapWithKeyM1 f m = fmap M.fromAscList $ filterM (uncurry f) $ M.toAscList m

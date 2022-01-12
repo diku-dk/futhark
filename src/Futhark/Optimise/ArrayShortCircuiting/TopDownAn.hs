@@ -19,6 +19,7 @@ where
 
 import qualified Data.Map.Strict as M
 import Data.Maybe
+import Debug.Trace
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.IR.Aliases
 import Futhark.IR.GPUMem
@@ -243,8 +244,8 @@ getDirAliasedIxfn td_env coals_tab x =
         Nothing ->
           -- This value is not subject to coalescing at the moment. Just return the
           -- original index function
-          Just (m_x, m_x, orig_ixfun)
-    Nothing -> Nothing
+          trace ("Didn't find m_x (" <> pretty m_x <> ") in coals_tab") $ Just (m_x, m_x, orig_ixfun)
+    Nothing -> trace "Didn't find scope mem info" Nothing
 
 -- | Given a 'VName', walk the 'VarAliasTab' until found in the 'Map'.
 walkAliasTab ::

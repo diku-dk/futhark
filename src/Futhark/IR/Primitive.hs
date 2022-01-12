@@ -27,6 +27,7 @@ module Futhark.IR.Primitive
     FloatValue (..),
     floatValue,
     floatValueType,
+    valueRational,
     PrimValue (..),
     primValueType,
     blankPrimValue,
@@ -331,6 +332,11 @@ floatValueType :: FloatValue -> FloatType
 floatValueType Float16Value {} = Float16
 floatValueType Float32Value {} = Float32
 floatValueType Float64Value {} = Float64
+
+valueRational :: FloatValue -> Rational
+valueRational (Float16Value v) = toRational v
+valueRational (Float32Value v) = toRational v
+valueRational (Float64Value v) = toRational v
 
 -- | Non-array values.
 data PrimValue

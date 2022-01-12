@@ -16,13 +16,18 @@ module Futhark.Analysis.AlgSimplify2
     sub,
     negate,
     isMultipleOf,
+    removeLessThans,
+    lessThanish,
   )
 where
 
 import Data.Bits (xor)
-import Data.List (partition, sort, (\\))
+import Data.Function ((&))
+import Data.List (intersect, partition, sort, (\\))
 import Data.Maybe (mapMaybe)
 import Futhark.Analysis.PrimExp
+import Futhark.Analysis.PrimExp.Convert
+import Futhark.IR.Prop.Names
 import Futhark.IR.Syntax.Core
 import Futhark.Util
 import Futhark.Util.Pretty
@@ -136,3 +141,53 @@ isMultipleOf :: Prod -> [Exp] -> Bool
 isMultipleOf (Prod _ as) term =
   let quotient = as \\ term
    in sort (quotient <> term) == sort as
+
+-- | Given a list of 'Names' that we know are non-negative (>= 0), determine
+-- whether we can say for sure that the given 'AlgSimplify2.SofP' is
+-- non-negative. Conservatively returns 'False' if there is any doubt.
+--
+-- TODO: We need to expand this to be able to handle cases such as @i*n + g < (i
+-- + 1) * n@, if it is known that @g < n@, eg. from a 'SegSpace' or a loop form.
+nonNegativeish :: Names -> SofP -> Bool
+nonNegativeish non_negatives = all (nonNegativeishProd non_negatives)
+
+nonNegativeishProd :: Names -> Prod -> Bool
+nonNegativeishProd _ (Prod True _) = False
+nonNegativeishProd non_negatives (Prod False as) =
+  all (nonNegativeishExp non_negatives) as
+
+nonNegativeishExp :: Names -> PrimExp VName -> Bool
+nonNegativeishExp _ (ValueExp v) = not $ negativeIsh v
+nonNegativeishExp non_negatives (LeafExp vname _) = vname `nameIn` non_negatives
+nonNegativeishExp _ _ = False
+
+-- | Is e1 symbolically less than or equal to e2?
+lessThanOrEqualish :: [(VName, PrimExp VName)] -> Names -> TPrimExp Int64 VName -> TPrimExp Int64 VName -> Bool
+lessThanOrEqualish less_thans0 non_negatives e1 e2 =
+  case e2 - e1 & untyped & simplify0 of
+    [] -> True
+    simplified ->
+      nonNegativeish non_negatives $
+        fixPoint (`removeLessThans` less_thans) $ simplified
+  where
+    less_thans =
+      concatMap
+        (\(i, bound) -> [(Var i, bound), (Constant $ IntValue $ Int64Value 0, bound)])
+        less_thans0
+
+lessThanish :: [(VName, PrimExp VName)] -> Names -> TPrimExp Int64 VName -> TPrimExp Int64 VName -> Bool
+lessThanish less_thans non_negatives e1 e2 =
+  lessThanOrEqualish less_thans non_negatives (e1 + 1) e2
+
+removeLessThans :: SofP -> [(SubExp, PrimExp VName)] -> SofP
+removeLessThans =
+  foldl
+    ( \sofp (i, bound) ->
+        let to_remove =
+              simplifySofP $
+                Prod True [primExpFromSubExp (IntType Int64) i] :
+                simplify0 bound
+         in case to_remove `intersect` sofp of
+              to_remove' | to_remove' == to_remove -> sofp \\ to_remove
+              _ -> sofp
+    )
