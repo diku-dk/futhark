@@ -17,6 +17,7 @@ module Futhark.Pass
   )
 where
 
+import Control.Monad.IO.Class
 import Control.Monad.State.Strict
 import Control.Monad.Writer.Strict
 import Control.Parallel.Strategies
@@ -29,8 +30,8 @@ import Futhark.Util.Log
 import Prelude hiding (log)
 
 -- | The monad in which passes execute.
-newtype PassM a = PassM (WriterT Log (State VNameSource) a)
-  deriving (Functor, Applicative, Monad)
+newtype PassM a = PassM (WriterT Log (StateT VNameSource IO) a)
+  deriving (Functor, Applicative, Monad, MonadIO)
 
 instance MonadLogger PassM where
   addLog = PassM . tell
@@ -42,10 +43,11 @@ instance MonadFreshNames PassM where
 -- | Execute a 'PassM' action, yielding logging information and either
 -- an error text or a result.
 runPassM ::
-  MonadFreshNames m =>
+  (MonadIO m, MonadFreshNames m) =>
   PassM a ->
   m (a, Log)
-runPassM (PassM m) = modifyNameSource $ runState (runWriterT m)
+-- runPassM (PassM m) =  modifyNameSource $ runStateT (runWriterT m)
+runPassM (PassM m) = modifyNameSourceIO $ runStateT (runWriterT m)
 
 -- | Turn an 'Either' computation into a 'PassM'.  If the 'Either' is
 -- 'Left', the result is a 'CompilerBug'.
@@ -84,16 +86,16 @@ passLongOption = map (spaceToDash . toLower) . passName
 -- error properly.
 parPass :: (a -> PassM b) -> [a] -> PassM [b]
 parPass f as = do
-  (x, log) <- modifyNameSource $ \src ->
-    let (bs, logs, srcs) = unzip3 $ parMap rpar (f' src) as
-     in ((bs, mconcat logs), mconcat srcs)
+  (x, log) <- modifyNameSourceIO $ \src -> do
+    (bs, logs, srcs) <- unzip3 <$> sequence (parMap rpar (f' src) as)
+    return ((bs, mconcat logs), mconcat srcs)
 
   addLog log
   return x
   where
-    f' src a =
-      let ((x', log), src') = runState (runPassM (f a)) src
-       in (x', log, src')
+    f' src a = do
+      ((x', log), src') <- runStateT (runPassM (f a)) src
+      return (x', log, src')
 
 -- | Apply some operation to the top-level constants.  Then applies an
 -- operation to all the function function definitions, which are also
