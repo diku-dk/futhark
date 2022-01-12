@@ -516,20 +516,16 @@ type InitLocalHistograms =
 prepareIntermediateArraysLocal ::
   TV Int32 ->
   Count NumGroups (Imp.TExp Int64) ->
-  SegSpace ->
   [SegHistSlug] ->
   CallKernelGen InitLocalHistograms
-prepareIntermediateArraysLocal num_subhistos_per_group groups_per_segment space slugs = do
-  num_segments <-
-    dPrimVE "num_segments" $
-      product $ map (toInt64Exp . snd) $ init $ unSegSpace space
-  mapM (onOp num_segments) slugs
+prepareIntermediateArraysLocal num_subhistos_per_group groups_per_segment =
+  mapM onOp
   where
-    onOp num_segments (SegHistSlug op num_subhistos subhisto_info do_op) = do
-      num_subhistos <-- sExt64 (unCount groups_per_segment) * num_segments
+    onOp (SegHistSlug op num_subhistos subhisto_info do_op) = do
+      num_subhistos <-- sExt64 (unCount groups_per_segment)
 
       emit $
-        Imp.DebugPrint "Number of subhistograms in global memory" $
+        Imp.DebugPrint "Number of subhistograms in global memory per segment" $
           Just $ untyped $ tvExp num_subhistos
 
       mk_op <-
@@ -846,7 +842,7 @@ histKernelLocal num_subhistos_per_group_var groups_per_segment map_pes num_group
       Just $ untyped num_subhistos_per_group
 
   init_histograms <-
-    prepareIntermediateArraysLocal num_subhistos_per_group_var groups_per_segment space slugs
+    prepareIntermediateArraysLocal num_subhistos_per_group_var groups_per_segment slugs
 
   sFor "chk_i" hist_S $ \chk_i ->
     histKernelLocalPass
