@@ -548,7 +548,6 @@ jobs:
 
     - name: scp tarballs to server
       run: |
-        ssh-keygen -f "/home/runner/.ssh/known_hosts" -R "futhark-lang.org"
         scp -o StrictHostKeyChecking=no futhark-nightly-linux-x86_64.tar.xz futhark-nightly-macos-x86_64.tar.xz futhark@futhark-lang.org:/var/www/htdocs/futhark-lang.org/releases
 
     - name: copy docs to server
