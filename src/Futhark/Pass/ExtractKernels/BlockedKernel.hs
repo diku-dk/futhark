@@ -71,7 +71,7 @@ prepareRedOrScan cs w map_lam arrs ispace inps = do
         res <- bodyBind (lambdaBody map_lam)
         forM res $ \(SubExpRes res_cs se) -> pure $ Returns ResultMaySimplify res_cs se
 
-  return (space, kbody)
+  pure (space, kbody)
 
 segRed ::
   (MonadFreshNames m, DistRep rep, HasScope rep m) =>
@@ -208,7 +208,7 @@ mapKernelSkeleton ispace inputs = do
   read_input_stms <- runBuilder_ $ mapM readKernelInput inputs
 
   space <- mkSegSpace ispace
-  return (space, read_input_stms)
+  pure (space, read_input_stms)
 
 mapKernel ::
   (DistRep rep, HasScope rep m, MonadFreshNames m) =>
@@ -232,7 +232,7 @@ mapKernel mk_lvl ispace inputs rts (KernelBody () kstms krets) = runBuilderT' $ 
 
   lvl <- mk_lvl (map snd ispace) "segmap" r
 
-  return $ SegMap lvl space rts kbody'
+  pure $ SegMap lvl space rts kbody'
 
 data KernelInput = KernelInput
   { kernelInputName :: VName,
