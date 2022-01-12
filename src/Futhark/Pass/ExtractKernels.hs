@@ -339,8 +339,7 @@ kernelAlternatives pat default_body ((cond, alt) : alts) = runBuilder_ $ do
   let alt_body = mkBody alt_stms $ varsRes $ patNames alts_pat
 
   letBind pat $
-    If cond alt alt_body $
-      IfDec (staticShapes (patTypes pat)) IfEquiv
+    If cond alt alt_body $ IfDec (staticShapes (patTypes pat)) IfEquiv
 
 transformLambda :: KernelPath -> Lambda -> DistribM (Out.Lambda Out.GPU)
 transformLambda path (Lambda params body ret) =
@@ -856,6 +855,19 @@ onMap' loopnest path mk_seq_stms mk_par_stms pat lam = do
         group_par_body <- renameBody $ mkBody intra_stms res
         pure (group_par_body, intra_ok, intra_suff_key, intra_suff_stms)
 
+removeUnusedMapResults ::
+  PatT Type ->
+  [SubExpRes] ->
+  LambdaT rep ->
+  Maybe ([Int], PatT Type, LambdaT rep)
+removeUnusedMapResults (Pat pes) res lam = do
+  let (pes', body_res) =
+        unzip $ filter (used . fst) $ zip pes $ bodyResult (lambdaBody lam)
+  perm <- map (Var . patElemName) pes' `isPermutationOf` map resSubExp res
+  pure (perm, Pat pes', lam {lambdaBody = (lambdaBody lam) {bodyResult = body_res}})
+  where
+    used pe = patElemName pe `nameIn` freeIn res
+
 onInnerMap ::
   KernelPath ->
   MapLoop ->
@@ -868,16 +880,16 @@ onInnerMap path maploop@(MapLoop pat aux w lam arrs) acc
   | otherwise =
     distributeSingleStm acc (mapLoopStm maploop) >>= \case
       Just (post_kernels, res, nest, acc')
-        | Just (perm, _pat_unused) <- permutationAndMissing pat res -> do
+        | Just (perm, pat', lam') <- removeUnusedMapResults pat res lam -> do
           addPostStms post_kernels
-          multiVersion perm nest acc'
+          multiVersion perm nest acc' pat' lam'
       _ -> distributeMap maploop acc
   where
     discardTargets acc' =
       -- FIXME: work around bogus targets.
       acc' {distTargets = singleTarget (mempty, mempty)}
 
-    multiVersion perm nest acc' = do
+    multiVersion perm nest acc' pat' lam' = do
       -- The kernel can be distributed by itself, so now we can
       -- decide whether to just sequentialise, or exploit inner
       -- parallelism.
@@ -886,7 +898,7 @@ onInnerMap path maploop@(MapLoop pat aux w lam arrs) acc
 
       stms <- liftInner $
         localScope extra_scope $ do
-          let maploop' = MapLoop pat aux w lam arrs
+          let maploop' = MapLoop pat' aux w lam' arrs
 
               exploitInnerParallelism path' = do
                 let dist_env' =
@@ -894,27 +906,26 @@ onInnerMap path maploop@(MapLoop pat aux w lam arrs) acc
                         { distOnTopLevelStms = onTopLevelStms path',
                           distOnInnerMap = onInnerMap path'
                         }
-                runDistNestT dist_env' $
-                  inNesting nest $
-                    localScope extra_scope $
-                      discardTargets <$> distributeMap maploop' acc {distStms = mempty}
+                runDistNestT dist_env' . inNesting nest . localScope extra_scope $
+                  discardTargets
+                    <$> distributeMap maploop' acc {distStms = mempty}
 
           -- Normally the permutation is for the output pattern, but
           -- we can't really change that, so we change the result
           -- order instead.
           let lam_res' =
                 rearrangeShape (rearrangeInverse perm) $
-                  bodyResult $ lambdaBody lam
-              lam' = lam {lambdaBody = (lambdaBody lam) {bodyResult = lam_res'}}
-              map_nesting = MapNesting pat aux w $ zip (lambdaParams lam) arrs
-              nest' = pushInnerKernelNesting (pat, lam_res') map_nesting nest
+                  bodyResult $ lambdaBody lam'
+              lam'' = lam' {lambdaBody = (lambdaBody lam') {bodyResult = lam_res'}}
+              map_nesting = MapNesting pat' aux w $ zip (lambdaParams lam') arrs
+              nest' = pushInnerKernelNesting (pat', lam_res') map_nesting nest
 
           -- XXX: we do not construct a new KernelPath when
           -- sequentialising.  This is only OK as long as further
           -- versioning does not take place down that branch (it currently
           -- does not).
           (sequentialised_kernel, nestw_stms) <- localScope extra_scope $ do
-            let sequentialised_lam = soacsLambdaToGPU lam'
+            let sequentialised_lam = soacsLambdaToGPU lam''
             constructKernel segThreadCapped nest' $ lambdaBody sequentialised_lam
 
           let outer_pat = loopNestingPat $ fst nest
@@ -925,7 +936,7 @@ onInnerMap path maploop@(MapLoop pat aux w lam arrs) acc
               (const $ return $ oneStm sequentialised_kernel)
               exploitInnerParallelism
               outer_pat
-              lam'
+              lam''
 
       postStm stms
       return acc'

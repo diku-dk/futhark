@@ -9,13 +9,23 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
-* Parse errors now list possible expected tokens.
-
-* Lexer errors now mention the file.
-
 ### Removed
 
 ### Changed
+
+### Fixed
+
+* A size inference bug in type checking of `loop`s (#1565).
+
+* Exotic flattening bug (#1563).
+
+## [0.21.3]
+
+### Added
+
+* Parse errors now list possible expected tokens.
+
+* Lexer errors now mention the file.
 
 ### Fixed
 
@@ -23,6 +33,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Defective GPU code generation for vectorised non-commutative
   operatators (#1559).
+
+* Excessive memory usage for some programs (#1325).
 
 ## [0.21.2]
 

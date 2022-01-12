@@ -254,7 +254,8 @@ basicFwd pat aux op = do
     Replicate n x -> do
       x_tan <- tangent x
       addStm $ Let pat_tan aux $ BasicOp $ Replicate n x_tan
-    Scratch {} -> return ()
+    Scratch t shape ->
+      addStm $ Let pat_tan aux $ BasicOp $ Scratch t shape
     Reshape reshape arr -> do
       arr_tan <- tangent arr
       addStm $ Let pat_tan aux $ BasicOp $ Reshape reshape arr_tan
