@@ -16,7 +16,7 @@ use the C API.  Futhark's built-in benchmarking and testing tools use
 server executables.
 
 A server executable is started like any other executable, and supports
-most of the same command line options.
+most of the same command line options (:ref:`executable-options`).
 
 Basics
 ------
