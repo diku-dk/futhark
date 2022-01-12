@@ -56,26 +56,26 @@ data MigrationStatus
 newtype MigrationTable = MigrationTable (IM.IntMap MigrationStatus)
 
 statusOf :: VName -> MigrationTable -> MigrationStatus
-statusOf v (MigrationTable mt) =
-  fromMaybe StayOnHost $ IM.lookup (baseTag v) mt
+statusOf n (MigrationTable mt) =
+  fromMaybe StayOnHost $ IM.lookup (baseTag n) mt
 
 -- | Should this whole statement be moved from host to device?
 moveToDevice :: Stm GPU -> MigrationTable -> Bool
-moveToDevice (Let (Pat ((PatElem v _) : _)) _ (BasicOp (Index _ slice))) mt =
-  statusOf v mt == MoveToDevice || any movedOperand slice
+moveToDevice (Let (Pat ((PatElem n _) : _)) _ (BasicOp (Index _ slice))) mt =
+  statusOf n mt == MoveToDevice || any movedOperand slice
   where
     movedOperand (Var op) = statusOf op mt == MoveToDevice
     movedOperand _ = False
-moveToDevice (Let (Pat ((PatElem v _) : _)) _ (BasicOp _)) mt =
-  statusOf v mt /= StayOnHost
-moveToDevice (Let (Pat ((PatElem v _) : _)) _ Apply {}) mt =
-  statusOf v mt /= StayOnHost
-moveToDevice (Let _ _ (If (Var v) _ _ _)) mt =
-  statusOf v mt == MoveToDevice
-moveToDevice (Let _ _ (DoLoop _ (ForLoop _ _ (Var v) _) _)) mt =
-  statusOf v mt == MoveToDevice
-moveToDevice (Let _ _ (DoLoop _ (WhileLoop v) _)) mt =
-  statusOf v mt == MoveToDevice
+moveToDevice (Let (Pat ((PatElem n _) : _)) _ (BasicOp _)) mt =
+  statusOf n mt /= StayOnHost
+moveToDevice (Let (Pat ((PatElem n _) : _)) _ Apply {}) mt =
+  statusOf n mt /= StayOnHost
+moveToDevice (Let _ _ (If (Var n) _ _ _)) mt =
+  statusOf n mt == MoveToDevice
+moveToDevice (Let _ _ (DoLoop _ (ForLoop _ _ (Var n) _) _)) mt =
+  statusOf n mt == MoveToDevice
+moveToDevice (Let _ _ (DoLoop _ (WhileLoop n) _)) mt =
+  statusOf n mt == MoveToDevice
 -- BasicOp and Apply statements might not bind any variables (shouldn't happen).
 -- If statements might use a constant branch condition.
 -- For loop statements might use a constant number of iterations.
@@ -86,7 +86,7 @@ moveToDevice _ _ = False
 -- | Will the variable by this name still be used on host after all statements
 -- identified by this table have been migrated?
 usedOnHost :: VName -> MigrationTable -> Bool
-usedOnHost v mt = statusOf v mt == UsedOnHost
+usedOnHost n mt = statusOf n mt == UsedOnHost
 
 -- | Merges two migration tables that are assumed to be disjoint.
 merge :: MigrationTable -> MigrationTable -> MigrationTable
@@ -162,7 +162,7 @@ checkFunDef fun = do
     checkExp (BasicOp (FlatIndex _ _)) = hostOnly
     checkExp (WithAcc _ _) = hostOnly
     checkExp (Op _) = hostOnly
-    checkExp (Apply n _ _ _) = Just (S.singleton n)
+    checkExp (Apply fn _ _ _) = Just (S.singleton fn)
     checkExp (If _ tbranch fbranch _) = do
       calls1 <- checkBody tbranch
       calls2 <- checkBody fbranch
@@ -179,7 +179,7 @@ analyseConsts hof consts =
   let usage = M.foldlWithKey f [] (scopeOf consts)
    in analyseStms hof usage consts
   where
-    f usage v t | isScalar t = nameToId v : usage
+    f usage n t | isScalar t = nameToId n : usage
     f usage _ _ = usage
 
 -- | Analyses a top-level function definition.
@@ -190,7 +190,7 @@ analyseFunDef hof fd =
       stms = bodyStms body
    in analyseStms hof usage stms
   where
-    f usage (SubExpRes _ (Var v), t) | isScalarType t = nameToId v : usage
+    f usage (SubExpRes _ (Var n), t) | isScalarType t = nameToId n : usage
     f usage _ = usage
 
 isScalar :: Typed t => t -> Bool
@@ -446,22 +446,22 @@ getGraphedScalars = gets stateGraphedScalars
 -- connected to sinks.
 onlyGraphedScalars :: Foldable t => t VName -> Grapher IdSet
 onlyGraphedScalars vs = do
-  let is = foldl' (\s v -> IS.insert (nameToId v) s) IS.empty vs
+  let is = foldl' (\s n -> IS.insert (nameToId n) s) IS.empty vs
   IS.intersection is <$> getGraphedScalars
 
 -- | Like 'onlyGraphedScalars' but for a single 'VName'.
 onlyGraphedScalar :: VName -> Grapher IdSet
-onlyGraphedScalar v = do
-  let i = nameToId v
+onlyGraphedScalar n = do
+  let i = nameToId n
   gss <- getGraphedScalars
   if IS.member i gss
     then pure (IS.singleton i)
     else pure IS.empty
 
 -- | Like 'onlyGraphedScalars' but for a single 'SubExp'.
-onlyGraphedScalarSE :: SubExp -> Grapher IdSet
-onlyGraphedScalarSE (Constant _) = pure IS.empty
-onlyGraphedScalarSE (Var v) = onlyGraphedScalar v
+onlyGraphedScalarSubExp :: SubExp -> Grapher IdSet
+onlyGraphedScalarSubExp (Constant _) = pure IS.empty
+onlyGraphedScalarSubExp (Var n) = onlyGraphedScalar n
 
 -- | Update graph under construction.
 modifyGraph :: (Graph -> Graph) -> Grapher ()
@@ -522,7 +522,7 @@ withActions m table = local f m
 
 -- | Can applications of this function be moved to device?
 isHostOnlyFun :: Name -> Grapher Bool
-isHostOnlyFun n = asks $ S.member n . envHostOnlyFuns
+isHostOnlyFun fn = asks $ S.member fn . envHostOnlyFuns
 
 -- | How to graph updates of the accumulator with the given token.
 getAction :: Id -> Grapher GraphAction
@@ -644,7 +644,7 @@ graphStms = mapM_ graphStm
 boundBy :: Stm GPU -> [Binding]
 boundBy (Let (Pat pes) _ _) = map f pes
   where
-    f (PatElem v t) = (nameToId v, t)
+    f (PatElem n t) = (nameToId n, t)
 
 graphStm :: Stm GPU -> Grapher ()
 graphStm stm = do
@@ -708,8 +708,8 @@ graphStm stm = do
       graphMemReuse e
     BasicOp UpdateAcc {} ->
       graphUpdateAcc (one bs) e
-    Apply n _ _ _ ->
-      graphApply n bs e
+    Apply fn _ _ _ ->
+      graphApply fn bs e
     If cond tbody fbody _ ->
       graphIf bs cond tbody fbody
     DoLoop params lform body ->
@@ -725,8 +725,8 @@ graphStm stm = do
     -- Kept to easily add back support for moving array expressions to device.
     -- The function is used to ensure size variables are available to the host
     -- before any arrays of those sizes are allocated.
-    _hostSizeSE (Var v) = hostSizeVar v
-    _hostSizeSE _ = pure ()
+    _hostSize (Var n) = hostSizeVar n
+    _hostSize _ = pure ()
 
     hostSizeVar = requiredOnHost . nameToId
 
@@ -817,8 +817,8 @@ graphUpdateAcc _ _ =
     "Type error: UpdateAcc did not produce accumulator typed value."
 
 graphApply :: Name -> [Binding] -> Exp GPU -> Grapher ()
-graphApply n bs e = do
-  hof <- isHostOnlyFun n
+graphApply fn bs e = do
+  hof <- isHostOnlyFun fn
   if hof
     then graphHostOnly e
     else graphSimple bs e
@@ -833,15 +833,15 @@ graphIf bs cond tbody fbody = do
           pure $ bodyHostOnly tstats || bodyHostOnly fstats
       )
   cond_id <- case (host_only, cond) of
-    (True, Var v) -> connectToSink (nameToId v) >> pure IS.empty
-    (False, Var v) -> onlyGraphedScalar v
+    (True, Var n) -> connectToSink (nameToId n) >> pure IS.empty
+    (False, Var n) -> onlyGraphedScalar n
     (_, _) -> pure IS.empty
   ret <- zipWithM (f cond_id) (bodyResult tbody) (bodyResult fbody)
   mapM_ (uncurry createNode) (zip bs ret)
   where
     f ci a b = fmap (ci <>) $ onlyGraphedScalars $ toSet a <> toSet b
 
-    toSet (SubExpRes _ (Var v)) = S.singleton v
+    toSet (SubExpRes _ (Var n)) = S.singleton n
     toSet _ = S.empty
 
 graphLoop ::
@@ -885,17 +885,17 @@ graphLoop (b : bs) params lform body = do
   -- avoid reading the (initial) loop condition value. This must be balanced
   -- against the need to read the values bound by the loop statement.
   case (host_only, lform) of
-    (True, ForLoop _ _ (Var v) _) ->
-      connectToSink (nameToId v)
+    (True, ForLoop _ _ (Var n) _) ->
+      connectToSink (nameToId n)
     (False, ForLoop _ _ n@(Var _) _) ->
-      addEdges (ToNodes bindings Nothing) =<< onlyGraphedScalarSE n
-    (True, WhileLoop v) ->
-      connectToSink (nameToId v)
-    (False, WhileLoop v)
-      | i <- nameToId v,
+      addEdges (ToNodes bindings Nothing) =<< onlyGraphedScalarSubExp n
+    (True, WhileLoop n) ->
+      connectToSink (nameToId n)
+    (False, WhileLoop n)
+      | i <- nameToId n,
         Just (_, _, pval, _) <- find (\(_, p, _, _) -> p == i) loopValues,
         Var _ <- pval ->
-        onlyGraphedScalarSE pval >>= addEdges (ToNodes bindings Nothing)
+        onlyGraphedScalarSubExp pval >>= addEdges (ToNodes bindings Nothing)
     _ -> pure ()
   where
     subgraphId = fst b
@@ -923,7 +923,7 @@ graphLoop (b : bs) params lform body = do
         -- one iteration to the next, so we have to create a vertex even if the
         -- initial value never depends on a read.
         addVertex (p, t)
-        ops <- onlyGraphedScalarSE pval
+        ops <- onlyGraphedScalarSubExp pval
         addEdges (MG.oneEdge p) ops
 
     graphForInElem (p, _) =
@@ -932,8 +932,8 @@ graphLoop (b : bs) params lform body = do
     connectLoop = mapM_ connectLoopParam loopValues
 
     connectLoopParam (_, p, _, res)
-      | Var v <- res,
-        op <- nameToId v,
+      | Var n <- res,
+        op <- nameToId n,
         op /= p =
         addEdges (MG.oneEdge op) (IS.singleton p)
       | otherwise =
@@ -1027,7 +1027,7 @@ graphWithAcc bs inputs f = do
     extract _ =
       compilerBugS "Type error: WithAcc expression did not return accumulator."
 
-    toSet (SubExpRes _ (Var v)) = S.singleton v
+    toSet (SubExpRes _ (Var n)) = S.singleton n
     toSet _ = S.empty
 
 -- Graphs the operator associated with updating an accumulator.
@@ -1118,21 +1118,21 @@ graphedScalarOperands e =
    in IS.intersection is <$> getGraphedScalars
   where
     initial = (IS.empty, S.empty) -- scalar operands, accumulator tokens
-    captureName v = modify $ \(is, accs) -> (IS.insert (nameToId v) is, accs)
+    captureName n = modify $ \(is, accs) -> (IS.insert (nameToId n) is, accs)
     captureAcc a = modify $ \(is, accs) -> (is, S.insert a accs)
 
     collect b@BasicOp {} =
       collectBasic b
     collect (Apply _ params _ _) =
-      mapM_ (collectSE . fst) params
+      mapM_ (collectSubExp . fst) params
     collect (If cond tbranch fbranch _) =
       do
-        collectSE cond
+        collectSubExp cond
         collectBody tbranch
         collectBody fbranch
     collect (DoLoop params lform body) =
       do
-        mapM_ (collectSE . snd) params
+        mapM_ (collectSubExp . snd) params
         collectLForm lform
         collectBody body
     collect (WithAcc accs f) =
@@ -1141,10 +1141,10 @@ graphedScalarOperands e =
       collectHostOp op
 
     -- Note: Plain VName values only refer to arrays.
-    collectBasic = walkExpM (identityWalker {walkOnSubExp = collectSE})
+    collectBasic = walkExpM (identityWalker {walkOnSubExp = collectSubExp})
 
-    collectSE (Var v) = captureName v
-    collectSE _ = pure ()
+    collectSubExp (Var n) = captureName n
+    collectSubExp _ = pure ()
 
     collectBody = collectStms . bodyStms
     collectStms = mapM_ collectStm
@@ -1157,7 +1157,7 @@ graphedScalarOperands e =
         captureAcc a >> collectBasic ua
     collectStm stm = collect (stmExp stm)
 
-    collectLForm (ForLoop _ _ b _) = collectSE b
+    collectLForm (ForLoop _ _ b _) = collectSubExp b
     -- WhileLoop condition is declared as a loop parameter.
     collectLForm (WhileLoop _) = pure ()
 
@@ -1186,6 +1186,7 @@ graphedScalarOperands e =
     collectHostOp (GPUBody _ _) = pure ()
     collectHostOp op = mapM_ captureName (IM.elems $ namesIntMap $ freeIn op)
 
-    collectSegBinOp (SegBinOp _ _ nes _) = mapM_ collectSE nes
+    collectSegBinOp (SegBinOp _ _ nes _) = mapM_ collectSubExp nes
     -- TODO: Not sure whether collecting the race factor SubExp is necessary.
-    collectHistOp (HistOp _ rf _ nes _ _) = collectSE rf >> mapM_ collectSE nes
+    collectHistOp (HistOp _ rf _ nes _ _) =
+      collectSubExp rf >> mapM_ collectSubExp nes
