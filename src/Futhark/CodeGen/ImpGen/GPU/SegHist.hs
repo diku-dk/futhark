@@ -124,11 +124,8 @@ computeHistoUsage space op = do
                   Space "device"
 
             multiHistoCase = do
-              let num_elems =
-                    foldl' (*) (sExt64 $ tvExp num_subhistos) $
-                      map toInt64Exp $ arrayDims dest_t
-
-              let subhistos_mem_size =
+              let num_elems = product $ map toInt64Exp $ shapeDims subhistos_shape
+                  subhistos_mem_size =
                     Imp.bytes $
                       Imp.unCount (Imp.elements num_elems `Imp.withElemType` elemType dest_t)
 
