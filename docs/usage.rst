@@ -333,7 +333,7 @@ are as follows:
 
 Return types follow the rules, with one addition:
 
-* If the return type is an *m*-element tuple, then the the function
+* If the return type is an *m*-element tuple, then the function
   returns *m* values, mapped according to the rules above (but not
   including this one - nested tuples are not mapped directly).  This
   rule does not apply when the entry point has been given a return
