@@ -276,8 +276,8 @@ groupCoverSegSpace virt space m = do
       groupLoop iterations $ \i -> do
         dIndexSpace (zip ltids dims') i
         m
-    SegNoVirt -> nonvirt id
-    SegNoVirtFull -> nonvirt (sWhen (isActive $ zip ltids dims))
+    SegNoVirt -> nonvirt (sWhen (isActive $ zip ltids dims))
+    SegNoVirtFull -> nonvirt id
 
 compileGroupExp :: ExpCompiler GPUMem KernelEnv Imp.KernelOp
 compileGroupExp (Pat [pe]) (BasicOp (Opaque _ se)) =
