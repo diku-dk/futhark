@@ -267,7 +267,7 @@ groupCoverSegSpace :: SegVirt -> SegSpace -> InKernelGen () -> InKernelGen ()
 groupCoverSegSpace virt space m = do
   let (ltids, dims) = unzip $ unSegSpace space
       dims' = map pe64 dims
-      nonvirt wrap = do
+      nonvirt wrap = localOps threadOperations $ do
         zipWithM_ dPrimV_ ltids =<< localThreadIDs dims
         wrap m
   case virt of
