@@ -93,7 +93,7 @@ data KernelConstants = KernelConstants
     kernelWaveSize :: Imp.TExp Int32,
     kernelThreadActive :: Imp.TExp Bool,
     -- | A mapping from dimensions of nested SegOps to already
-    -- computed local thread IDs.
+    -- computed local thread IDs.  Only valid in non-virtualised case.
     kernelLocalIdMap :: M.Map [SubExp] [Imp.TExp Int32]
   }
 
@@ -253,6 +253,32 @@ groupCoverSpace ::
 groupCoverSpace ds f =
   groupLoop (product ds) $ f . unflattenIndex ds
 
+localThreadIDs :: [SubExp] -> InKernelGen [Imp.TExp Int64]
+localThreadIDs dims = do
+  ltid <- sExt64 . kernelLocalThreadId . kernelConstants <$> askEnv
+  let dims' = map toInt64Exp dims
+  maybe (dIndexSpace' "ltid" dims' ltid) (pure . map sExt64)
+    . M.lookup dims
+    . kernelLocalIdMap
+    . kernelConstants
+    =<< askEnv
+
+groupCoverSegSpace :: SegVirt -> SegSpace -> InKernelGen () -> InKernelGen ()
+groupCoverSegSpace virt space m = do
+  let (ltids, dims) = unzip $ unSegSpace space
+      dims' = map pe64 dims
+      nonvirt wrap = do
+        zipWithM_ dPrimV_ ltids =<< localThreadIDs dims
+        wrap m
+  case virt of
+    SegVirt -> do
+      iterations <- dPrimVE "iterations" $ product dims'
+      groupLoop iterations $ \i -> do
+        dIndexSpace (zip ltids dims') i
+        m
+    SegNoVirt -> nonvirt id
+    SegNoVirtFull -> nonvirt (sWhen (isActive $ zip ltids dims))
+
 compileGroupExp :: ExpCompiler GPUMem KernelEnv Imp.KernelOp
 compileGroupExp (Pat [pe]) (BasicOp (Opaque _ se)) =
   -- Cannot print in GPU code.
@@ -305,16 +331,6 @@ sanityCheckLevel :: SegLevel -> InKernelGen ()
 sanityCheckLevel SegThread {} = return ()
 sanityCheckLevel SegGroup {} =
   error "compileGroupOp: unexpected group-level SegOp."
-
-localThreadIDs :: [SubExp] -> InKernelGen [Imp.TExp Int64]
-localThreadIDs dims = do
-  ltid <- sExt64 . kernelLocalThreadId . kernelConstants <$> askEnv
-  let dims' = map toInt64Exp dims
-  maybe (unflattenIndex dims' ltid) (map sExt64)
-    . M.lookup dims
-    . kernelLocalIdMap
-    . kernelConstants
-    <$> askEnv
 
 compileFlatId :: SegLevel -> SegSpace -> InKernelGen ()
 compileFlatId lvl space = do
@@ -499,10 +515,7 @@ compileGroupOp pat (Inner (SizeOp (SplitSpace o w i elems_per_thread))) =
 compileGroupOp pat (Inner (SegOp (SegMap lvl space _ body))) = do
   compileFlatId lvl space
 
-  let (ltids, dims) = unzip $ unSegSpace space
-      dims' = map toInt64Exp dims
-  groupCoverSpace dims' $ \is -> do
-    zipWithM_ dPrimV_ ltids is
+  groupCoverSegSpace (segVirt lvl) space $
     compileStms mempty (kernelBodyStms body) $
       zipWithM_ (compileThreadResult space) (patElems pat) $
         kernelBodyResult body
@@ -513,8 +526,7 @@ compileGroupOp pat (Inner (SegOp (SegScan lvl space scans _ body))) = do
   let (ltids, dims) = unzip $ unSegSpace space
       dims' = map toInt64Exp dims
 
-  groupCoverSpace dims' $ \is -> do
-    zipWithM_ dPrimV_ ltids is
+  groupCoverSegSpace (segVirt lvl) space $
     compileStms mempty (kernelBodyStms body) $
       forM_ (zip (patNames pat) $ kernelBodyResult body) $ \(dest, res) ->
         copyDWIMFix
@@ -562,8 +574,7 @@ compileGroupOp pat (Inner (SegOp (SegRed lvl space ops _ body))) = do
         sAllocArray "red_arr" (elemType t) (Shape dims <> arrayShape t) $ Space "local"
 
   tmp_arrs <- mapM mkTempArr $ concatMap (lambdaReturnType . segBinOpLambda) ops
-  groupCoverSpace dims' $ \is -> do
-    zipWithM_ dPrimV_ ltids is
+  groupCoverSegSpace (segVirt lvl) space $
     compileStms mempty (kernelBodyStms body) $ do
       let (red_res, map_res) =
             splitAt (segBinOpResults ops) $ kernelBodyResult body
@@ -672,7 +683,7 @@ compileGroupOp pat (Inner (SegOp (SegRed lvl space ops _ body))) = do
       sOp $ Imp.Barrier Imp.FenceLocal
 compileGroupOp pat (Inner (SegOp (SegHist lvl space ops _ kbody))) = do
   compileFlatId lvl space
-  let (ltids, dims) = unzip $ unSegSpace space
+  let (ltids, _dims) = unzip $ unSegSpace space
 
   -- We don't need the red_pes, because it is guaranteed by our type
   -- rules that they occupy the same memory as the destinations for
@@ -686,9 +697,7 @@ compileGroupOp pat (Inner (SegOp (SegHist lvl space ops _ kbody))) = do
   -- Ensure that all locks have been initialised.
   sOp $ Imp.Barrier Imp.FenceLocal
 
-  let dims' = map toInt64Exp dims
-  groupCoverSpace dims' $ \dims_is -> do
-    zipWithM_ dPrimV_ ltids dims_is
+  groupCoverSegSpace (segVirt lvl) space $
     compileStms mempty (kernelBodyStms kbody) $ do
       let (red_res, map_res) = splitAt num_red_res $ kernelBodyResult kbody
           (red_is, red_vs) = splitAt (length ops) $ map kernelResultSubExp red_res
