@@ -118,7 +118,7 @@ class FutharkLexer(RegexLexer):
 
 lexers['futhark'] = FutharkLexer()
 
-highlight_language = 'futhark'
+highlight_language = 'text'
 
 # A list of ignored prefixes for module index sorting.
 #modindex_common_prefix = []
