@@ -297,7 +297,7 @@ noMemOverlap _ _ Undeterminable = return False
 noMemOverlap td_env (Set is0) (Set js0) = do
   -- TODO Expand this to be able to handle eg. nw
   bla1 <- mapM (\i -> allM (\j -> return (IxFun.disjoint less_thans (nonNegatives td_env) i j) ||^ return (IxFun.disjoint2 less_thans (nonNegatives td_env) i j) ||^ IxFun.disjoint3 (fmap typeOf $ scope td_env) less_thans (nonNegatives td_env) i j) js) is
-  bla2 <- head <$> filterM (fmap not . \i -> allM (\j -> return (IxFun.disjoint less_thans (nonNegatives td_env) i j) ||^ return (IxFun.disjoint2 less_thans (nonNegatives td_env) i j) ||^ IxFun.disjoint3 (fmap typeOf $ scope td_env) less_thans (nonNegatives td_env) i j) js) is
+  bla2 <- filterM (fmap not . \i -> allM (\j -> return (IxFun.disjoint less_thans (nonNegatives td_env) i j) ||^ return (IxFun.disjoint2 less_thans (nonNegatives td_env) i j) ||^ IxFun.disjoint3 (fmap typeOf $ scope td_env) less_thans (nonNegatives td_env) i j) js) is
   allM (\i -> allM (\j -> return (IxFun.disjoint less_thans (nonNegatives td_env) i j) ||^ return (IxFun.disjoint2 less_thans (nonNegatives td_env) i j) ||^ IxFun.disjoint3 (fmap typeOf $ scope td_env) less_thans (nonNegatives td_env) i j) js) is
     ||^ trace ("it failed\n" <> pretty bla1 <> "\nhalløj?: " <> pretty bla2 <> "\n og: " <> pretty js) (return False)
   where

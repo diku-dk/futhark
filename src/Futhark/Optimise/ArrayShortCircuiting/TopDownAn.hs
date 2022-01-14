@@ -25,6 +25,10 @@ import Futhark.IR.Aliases
 import Futhark.IR.GPUMem
 import qualified Futhark.IR.Mem.IxFun as IxFun
 import Futhark.Optimise.ArrayShortCircuiting.DataStructs
+import Futhark.Util.Pretty
+
+traceWith :: Pretty a => String -> a -> a
+traceWith s a = trace (s <> ": " <> pretty a) a
 
 type ScopeTab rep = Scope (Aliases rep)
 -- ^ maps array-variable names to various info, including
@@ -137,8 +141,9 @@ class TopDownHelper inner where
 
 instance TopDownHelper (HostOp (Aliases GPUMem) ()) where
   innerNonNegatives _ (SegOp seg_op) =
-    foldMap (oneName . fst) $ unSegSpace $ segSpace seg_op
-  innerNonNegatives [vname] (SizeOp _) = oneName vname
+    traceWith "innerNonNegatives1" $ foldMap (oneName . fst) $ unSegSpace $ segSpace seg_op
+  innerNonNegatives [vname] (SizeOp (GetSize _ _)) = traceWith "innerNonNegatives2" $ oneName vname
+  innerNonNegatives [vname] (SizeOp (GetSizeMax _)) = traceWith "innerNonNegatives2" $ oneName vname
   innerNonNegatives _ _ = mempty
 
   innerKnownLessThan (SegOp seg_op) =
@@ -204,9 +209,9 @@ topdwnTravBinding env stm =
           <> nonNegativesInPat (stmPat stm)
     }
 
-nonNegativesInPat :: Typed rep => PatT rep -> Names
+nonNegativesInPat :: (Pretty rep, Typed rep) => PatT rep -> Names
 nonNegativesInPat (Pat elems) =
-  foldMap (namesFromList . mapMaybe subExpVar . arrayDims . typeOf) elems
+  traceWith ("NonNegatives in pat " <> pretty (Pat elems)) $ foldMap (namesFromList . mapMaybe subExpVar . arrayDims . typeOf) elems
 
 topDownLoop :: TopDnEnv rep -> Stm (Aliases rep) -> TopDnEnv rep
 topDownLoop td_env (Let _pat _ (DoLoop arginis lform _)) =
@@ -216,7 +221,7 @@ topDownLoop td_env (Let _pat _ (DoLoop arginis lform _)) =
           <> scopeOf lform
       non_negatives =
         nonNegatives td_env <> case lform of
-          ForLoop v _ _ _ -> oneName v
+          ForLoop v _ _ _ -> traceWith "ForLoop" $ oneName v
           _ -> mempty
       less_than =
         case lform of

@@ -126,36 +126,42 @@ selfOverlap less_thans non_negatives is =
             && selfOverlap' (acc + interval_span) xs
     selfOverlap' _ [] = False
 
-primTypeSort :: PrimType -> Z3 Sort
+primTypeSort :: MonadZ3 z3 => PrimType -> z3 Sort
 primTypeSort (IntType _) = mkIntSort
 primTypeSort (FloatType _) = mkRealSort
 primTypeSort Bool = mkBoolSort
 primTypeSort _ = undefined
 
-valToZ3 :: M.Map VName Type -> VName -> Z3 AST
+valToZ3 :: MonadZ3 z3 => M.Map VName Type -> VName -> z3 (Maybe AST)
 valToZ3 scope vname =
   case M.lookup vname scope of
-    Just (Prim pt) -> mkFreshVar (pretty vname) =<< primTypeSort pt
-    Just _ -> undefined
-    Nothing -> undefined
+    Just (Prim pt) -> fmap Just (mkFreshVar (pretty vname) =<< primTypeSort pt)
+    Just _ -> trace ("Unsupported type for vname " <> pretty vname) undefined
+    Nothing -> trace ("Couldn't find vname " <> pretty vname) $ return Nothing
 
-cmpOpToZ3 :: CmpOp -> AST -> AST -> Z3 AST
+cmpOpToZ3 :: MonadZ3 z3 => CmpOp -> AST -> AST -> z3 AST
 cmpOpToZ3 (CmpEq _) = mkEq
 cmpOpToZ3 (CmpUlt _) = mkLt
 cmpOpToZ3 (CmpUle _) = mkLe
 cmpOpToZ3 (CmpSlt _) = mkLt
 cmpOpToZ3 (CmpSle _) = mkLe
-cmpOpToZ3 _ = undefined
+cmpOpToZ3 c = trace ("Unsupported CmpOp " <> pretty c) undefined
 
-binOpToZ3 :: BinOp -> AST -> AST -> Z3 AST
+binOpToZ3 :: MonadZ3 z3 => BinOp -> AST -> AST -> z3 AST
 binOpToZ3 (Add _ _) x y = mkAdd [x, y]
 binOpToZ3 (Sub _ _) x y = mkSub [x, y]
 binOpToZ3 (Mul _ _) x y = mkMul [x, y]
 binOpToZ3 (And _) x y = mkAnd [x, y]
 binOpToZ3 (Or _) x y = mkOr [x, y]
-binOpToZ3 _ x y = undefined
+binOpToZ3 (SDiv _ _) x y = mkDiv x y
+binOpToZ3 (SDivUp _ _) x y = mkDiv x y
+binOpToZ3 b _ _ = trace ("Unsupported BinOp " <> pretty b) undefined
 
-primExpToZ3 :: M.Map VName AST -> PrimExp VName -> Z3 AST
+convOpToZ3 :: MonadZ3 z3 => ConvOp -> AST -> z3 AST
+convOpToZ3 (SExt _ _) x = return x
+convOpToZ3 c _ = trace ("Unsupported ConvOp " <> pretty c) undefined
+
+primExpToZ3 :: MonadZ3 z3 => M.Map VName AST -> PrimExp VName -> z3 AST
 primExpToZ3 var_table (LeafExp vn _) = return $ var_table M.! vn
 primExpToZ3 var_table (ValueExp (IntValue v)) = mkInteger $ valueIntegral v
 primExpToZ3 var_table (ValueExp (FloatValue v)) = mkRealNum $ valueRational v
@@ -168,62 +174,114 @@ primExpToZ3 var_table (CmpOpExp cop e1 e2) =
   join $
     cmpOpToZ3 cop <$> primExpToZ3 var_table e1
       <*> primExpToZ3 var_table e2
-primExpToZ3 var_table _ = undefined
+primExpToZ3 var_table (ConvOpExp c e) = convOpToZ3 c =<< primExpToZ3 var_table e
+primExpToZ3 var_table e = trace ("undefined exp " <> pretty e) undefined
 
 disjointZ3 :: M.Map VName Type -> [(VName, PrimExp VName)] -> Names -> Interval -> Interval -> IO Bool
 disjointZ3 scope less_thans non_negatives i1@(Interval lb1 ne1 st1) i2@(Interval lb2 ne2 st2)
   | st1 == st2 = do
     let frees = namesToList $ freeIn less_thans <> freeIn non_negatives <> freeIn i1 <> freeIn i2
-    result <- evalZ3With Nothing (opt "timeout" (30 :: Integer)) $ do
-      var_table <- M.fromList <$> mapM (\x -> (,) x <$> valToZ3 scope x) frees
-      non_negs <- mapM (\vn -> join $ mkLe <$> mkInteger 0 <*> return (var_table M.! vn)) $ namesToList non_negatives
-      lts <- mapM (\(vn, pe) -> join $ mkLt <$> return (var_table M.! vn) <*> primExpToZ3 var_table pe) less_thans
-      apps <- mapM toApp $ M.elems var_table
-      implies1 <-
-        mkAnd
-          =<< sequence
-            [ join $ mkLt <$> mkInteger 0 <*> primExpToZ3 var_table (untyped ne1),
-              join $ mkLt <$> mkInteger 0 <*> primExpToZ3 var_table (untyped ne2)
-            ]
-      implies2 <-
-        mkOr
-          =<< sequence
-            [ mkAnd
-                =<< sequence
-                  [ join $ mkLt <$> primExpToZ3 var_table (untyped lb1) <*> primExpToZ3 var_table (untyped lb2),
-                    join $ mkLe <$> primExpToZ3 var_table (untyped $ lb1 + ne1) <*> primExpToZ3 var_table (untyped lb2)
-                  ],
-              mkAnd
-                =<< sequence
-                  [ join $ mkLt <$> primExpToZ3 var_table (untyped lb2) <*> primExpToZ3 var_table (untyped lb1),
-                    join $ mkLe <$> primExpToZ3 var_table (untyped $ lb2 + ne2) <*> primExpToZ3 var_table (untyped lb1)
+    result <- evalZ3With Nothing (opt "timeout" (30 :: Integer)) $
+      trace
+        ( "disjointZ3\ni1: " <> pretty i1
+            <> "\ni2: "
+            <> pretty i2
+            <> "\nscope: "
+            <> pretty scope
+            <> "\nless_thans: "
+            <> pretty less_thans
+            <> "\nnon_negatives: "
+            <> pretty non_negatives
+        )
+        $ do
+          maybe_var_table <- sequence <$> mapM (\x -> fmap ((,) x) <$> valToZ3 scope x) frees
+          case fmap M.fromList maybe_var_table of
+            Nothing -> return Undef
+            Just var_table -> do
+              non_negs <- mapM (\vn -> join $ mkLe <$> mkInteger 0 <*> return (var_table M.! vn)) $ namesToList non_negatives
+              lts <- mapM (\(vn, pe) -> join $ mkLt <$> return (var_table M.! vn) <*> primExpToZ3 var_table pe) less_thans
+              nes <-
+                sequence
+                  [ join $ mkLt <$> mkInteger 0 <*> primExpToZ3 var_table (untyped ne1),
+                    join $ mkLt <$> mkInteger 0 <*> primExpToZ3 var_table (untyped ne2)
                   ]
-            ]
-      assert =<< mkAnd non_negs
-      assert =<< mkAnd lts
-      assert =<< mkForallConst [] apps =<< mkImplies implies1 implies2
-      sexp <- solverToString
-      liftIO $ putStrLn sexp
-      check
+              apps <- mapM toApp $ M.elems var_table
+
+              implies1 <-
+                mkAnd $
+                  nes
+                    <> non_negs
+                    <> lts
+
+              implies2 <-
+                mkOr
+                  =<< sequence
+                    [ mkAnd
+                        =<< sequence
+                          [ join $ mkLt <$> primExpToZ3 var_table (untyped lb1) <*> primExpToZ3 var_table (untyped lb2),
+                            join $ mkLe <$> primExpToZ3 var_table (untyped $ lb1 + ne1) <*> primExpToZ3 var_table (untyped lb2)
+                          ],
+                      mkAnd
+                        =<< sequence
+                          [ join $ mkLt <$> primExpToZ3 var_table (untyped lb2) <*> primExpToZ3 var_table (untyped lb1),
+                            join $ mkLe <$> primExpToZ3 var_table (untyped $ lb2 + ne2) <*> primExpToZ3 var_table (untyped lb1)
+                          ]
+                    ]
+              assert =<< mkForallConst [] apps =<< mkImplies implies1 implies2
+              -- sexp <- solverToString
+              -- liftIO $ putStrLn sexp
+              check
     case result of
       Sat -> return True
       _ -> return False
   | otherwise = return False
 
-g = VName (nameFromString "g") 0
+vname s i = VName (nameFromString s) i
 
-g' = TPrimExp $ LeafExp g $ IntType Int64
+b_8622 = vname "b" 8622
 
-n = VName (nameFromString "n") 1
+i_9625 = vname "i" 9625
 
-n' = TPrimExp $ LeafExp n $ IntType Int64
+i_9633 = vname "i" 9633
 
-types = M.fromList [(g, Prim $ IntType Int64), (n, Prim $ IntType Int64)]
+gtid_8705 = vname "gtid" 8705
 
-lessthans = [(g, untyped $ n' - (1 :: TPrimExp Int64 VName))]
+num_blocks_8621 = vname "num_blocks" 8621
 
-nonnegs = (namesFromList [n, g])
+u name = LeafExp name (IntType Int64)
 
-int1 = Interval 0 g' 1
+t = TPrimExp . u
 
-int2 = Interval g' 1 1
+add_nw64 = (+)
+
+mul_nw64 = (*)
+
+sub64 = (-)
+
+sub_nw64 = (-)
+
+types =
+  M.fromList
+    [ (b_8622, Prim $ IntType Int64),
+      (i_9625, Prim $ IntType Int64),
+      (i_9633, Prim $ IntType Int64),
+      (gtid_8705, Prim $ IntType Int64),
+      (num_blocks_8621, Prim $ IntType Int64)
+    ]
+
+lessthans =
+  [ (i_9633, u b_8622),
+    (i_9625, untyped $ sub64 (t num_blocks_8621) (1 :: TPrimExp Int64 VName)),
+    (gtid_8705, untyped $ sub64 (t num_blocks_8621) 1)
+  ]
+
+nonnegs = namesFromList [b_8622, i_9625, i_9633, gtid_8705, num_blocks_8621]
+
+int1 = Interval (add_nw64 (add_nw64 (mul_nw64 (t b_8622) (t b_8622)) (mul_nw64 (mul_nw64 (t b_8622) (t b_8622)) (t i_9625))) (t i_9633)) 1 1
+
+int2 = Interval 0 (t b_8622) 1
+
+-- i1: {lowerBound: add_nw64 (add_nw64 (mul_nw64 (b_8622) (b_8622)) (mul_nw64 (mul_nw64 (b_8622) (b_8622)) (i_9625))) (i_9633);
+--  numElements: 1i64; stride: 1i64}
+
+-- i2: {lowerBound: 0i64; numElements: b_8622; stride: 1i64}

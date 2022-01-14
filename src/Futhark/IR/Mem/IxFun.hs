@@ -66,6 +66,7 @@ import Futhark.IR.Syntax
     Slice (..),
     SubExp (..),
     Type,
+    TypeBase (..),
     dimFix,
     flatSliceDims,
     flatSliceStrides,
@@ -1249,14 +1250,39 @@ disjoint3 scope less_thans non_negatives lmad1 lmad2 =
       (neg_offset, pos_offset) =
         partition AlgSimplify2.negated $
           offset1 `AlgSimplify2.sub` offset2
-      (interval1', interval2') = unzip $ intervalPairs interval1 interval2
+      (interval1', interval2') =
+        unzip $
+          intervalPairs
+            (reverse $ sortBy (compare `on` stride) interval1)
+            (reverse $ sortBy (compare `on` stride) interval2)
    in case ( distributeOffset pos_offset interval1',
              distributeOffset (map AlgSimplify2.negate neg_offset) interval2'
            ) of
         (Just interval1'', Just interval2'') ->
           if not (selfOverlap less_thans non_negatives interval1'')
             && not (selfOverlap less_thans non_negatives interval2'')
-            then or . traceWith "disjoint3" <$> mapM (uncurry $ disjointZ3 scope less_thans non_negatives) (zip interval1'' interval2'')
+            then
+              or
+                . traceWith
+                  ( "disjoint3\nlmad1: "
+                      <> pretty lmad1
+                      <> "\nlmad2: "
+                      <> pretty lmad2
+                      <> "\ninterval1: "
+                      <> pretty interval1
+                      <> "\ninterval2: "
+                      <> pretty interval2
+                      <> "\ninterval1': "
+                      <> pretty interval1'
+                      <> "\ninterval2': "
+                      <> pretty interval2'
+                      <> "\ninterval1'': "
+                      <> pretty interval1''
+                      <> "\ninterval2'': "
+                      <> pretty interval2''
+                      <> "\nresult"
+                  )
+                <$> mapM (uncurry $ disjointZ3 scope less_thans non_negatives) (zip interval1'' interval2'')
             else return False
         _ ->
           return False
@@ -1296,17 +1322,16 @@ foo s i = VName (nameFromString s) i
 
 nonnegs = freeIn [gtid_8472, gtid_8473, gtid_8474, num_blocks_8284]
 
+-- halløj?: {offset: mul_nw64 (add_nw64 (1i64) (gtid_8473)) (256i64);
+--  strides: [1i64, 16i64]; rotates: [0i64, 0i64]; shape: [16i64, 16i64];
+--  permutation: [0, 1]; monotonicity: [Inc, Inc]}
+
 lm1 :: LMAD (TPrimExp Int64 VName)
 lm1 =
   LMAD
-    ( add_nw64
-        (mul_nw64 (256) (num_blocks_8284))
-        (256)
-    )
-    [ LMADDim (mul_nw64 (num_blocks_8284) (256)) 0 (sub_nw64 (gtid_8472) (1)) 0 Inc,
-      LMADDim 256 0 (sub64 (num_blocks_8284) (1)) 1 Inc,
-      LMADDim 16 0 16 2 Inc,
-      LMADDim 1 0 16 3 Inc
+    ((1 + gtid_8473) * 256)
+    [ LMADDim 1 0 16 0 Inc,
+      LMADDim 16 0 16 1 Inc
     ]
 
 lm2 :: LMAD (TPrimExp Int64 VName)
@@ -1339,3 +1364,10 @@ lessthans =
     (head $ namesToList $ freeIn gtid_8473, untyped j_m_i_8287),
     (head $ namesToList $ freeIn gtid_8474, untyped (16 :: TPrimExp Int64 VName))
   ]
+
+scmap :: M.Map VName Type
+scmap =
+  M.fromList $
+    map (\x -> (x, Prim $ IntType Int64)) $
+      namesToList $
+        freeIn [gtid_8472, gtid_8473, gtid_8474, num_blocks_8284, j_m_i_8287]
