@@ -82,6 +82,7 @@ simplifyKernelOp _ (GPUBody ts body) = do
   where
     keepOnGPU _ _ = keepExpOnGPU . stmExp
     keepExpOnGPU (BasicOp Index {}) = True
+    keepExpOnGPU (BasicOp (ArrayLit _ t)) | primType t = True
     keepExpOnGPU _ = False
 
 instance TraverseOpStms (Wise GPU) where
