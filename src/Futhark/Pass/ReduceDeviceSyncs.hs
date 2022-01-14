@@ -126,7 +126,7 @@ optimizeStm out stm = do
           -- Read scalars that are used on host.
           foldM addRead (out |> stm') (zip pes pes')
       DoLoop params lform body ->
-        pure (out |> stm) -- TODO
+        pure (out |> stm) -- TODO (rewrite loop)
       WithAcc inputs lambda ->
         pure (out |> stm) -- TODO
       Op op ->
@@ -166,28 +166,16 @@ optimizeStm out stm = do
           let t = patElemDec pe
           (tstms', tarr) <- case tdst of
             Just arr -> pure (tstms, arr)
-            _ -> arrayizeRes tstms tres t
+            _ -> moveSubExp tstms tres t
           (fstms', farr) <- case fdst of
             Just arr -> pure (fstms, arr)
-            _ -> arrayizeRes fstms fres t
+            _ -> moveSubExp fstms fres t
 
           pe' <- arrayizePatElem pe
           let bt' = staticShapes1 (patElemDec pe')
           let tr' = tr {resSubExp = Var tarr}
           let fr' = fr {resSubExp = Var farr}
           pure ((pe', tr', fr', bt') : res, tstms', fstms')
-
-    arrayizeRes :: Stms GPU -> SubExp -> Type -> ReduceM (Stms GPU, VName)
-    arrayizeRes stms se t = do
-      pe <- arrayizePatElem $ case se of
-        Var n -> PatElem n t
-        _ -> PatElem (VName (nameFromString "x") 0) t
-
-      let pat = Pat [pe]
-      let aux = StmAux mempty mempty ()
-      let e = BasicOp (ArrayLit [se] t)
-
-      pure (stms |> Let pat aux e, patElemName pe)
 
 -- | Migrate a statement to device, ensuring all its bound variables used on
 -- host will remain available with the same names.
@@ -218,6 +206,25 @@ moveStm out stm = do
                 else pe `movedTo` dev >> pure stms
             -- Drop the first dimension of multidimensional arrays.
             _ -> add' $ Index dev (fullSlice dev_t [DimFix $ intConst Int64 0])
+
+-- | Move a copy of some value to device, adding its array binding to the given
+-- statements and returning its name.
+moveSubExp :: Stms GPU -> SubExp -> Type -> ReduceM (Stms GPU, VName)
+moveSubExp out se t = do
+  n <- newName $ case se of
+    Var n -> n
+    _ -> VName (nameFromString "const") 0
+
+  let pat = Pat [PatElem n t]
+  let aux = StmAux mempty mempty ()
+  let e = BasicOp (SubExp se)
+  let stm = Let pat aux e
+
+  -- Expression cannot be hoisted, because it is a result of the gpubody.
+  gpubody <- inGPUBody (pure stm)
+  let dev = patElemName $ head $ patElems (stmPat gpubody)
+
+  pure (out |> gpubody, dev)
 
 -- | Create a GPUBody kernel that executes a single statement. Device memory
 inGPUBody :: ReduceM (Stm GPU) -> ReduceM (Stm GPU)
