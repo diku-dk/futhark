@@ -637,7 +637,7 @@ sExtAs ::
   (IntExp to, IntExp from) =>
   TPrimExp from v ->
   TPrimExp to v ->
-  TPrimExp t v
+  TPrimExp to v
 sExtAs from to = TPrimExp $ sExt (expIntType to) (untyped from)
 
 -- Prettyprinting instances
