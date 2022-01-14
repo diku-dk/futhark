@@ -54,19 +54,17 @@ intraGroupParallelise ::
 intraGroupParallelise knest lam = runMaybeT $ do
   (ispace, inps) <- lift $ flatKernel knest
 
-  ((num_groups, group_size), w_stms) <-
+  group_size <- newVName "computed_group_size"
+  (num_groups, w_stms) <-
     lift . runBuilder $
-      (,)
-        <$> ( letSubExp "intra_num_groups"
-                =<< foldBinOp (Mul Int64 OverflowUndef) (intConst Int64 1) (map snd ispace)
-            )
-        <*> getSize "intra_group_size" SizeGroup
+      letSubExp "intra_num_groups"
+        =<< foldBinOp (Mul Int64 OverflowUndef) (intConst Int64 1) (map snd ispace)
 
   (wss_min, wss_avail, log, kbody) <-
     lift $
       localScope (scopeOfLParams $ lambdaParams lam) $
         intraGroupParalleliseBody
-          (SegThread (Count num_groups) (Count group_size) SegVirt)
+          (SegThread (Count num_groups) (Count (Var group_size)) SegVirt)
           (lambdaBody lam)
 
   outside_scope <- lift askScope
@@ -85,11 +83,28 @@ intraGroupParallelise knest lam = runMaybeT $ do
       ws_avail <-
         mapM (letSubExp "one_intra_par_avail" <=< foldBinOp' (Mul Int64 OverflowUndef)) $
           filter (not . null) wss_avail
+      ws_min <-
+        mapM (letSubExp "one_intra_par_min" <=< foldBinOp' (Mul Int64 OverflowUndef)) $
+          filter (not . null) wss_min
 
       -- The amount of parallelism available *in the worst case* is
       -- equal to the smallest parallel loop, or *at least* 1.
       intra_avail_par <-
         letSubExp "intra_avail_par" =<< foldBinOp' (SMin Int64) ws_avail
+
+      -- The group size is either the maximum of the minimum parallelism
+      -- exploited, or the desired parallelism (bounded by the max group
+      -- size) in case there is no minimum.
+      max_group_size <-
+        letSubExp "max_group_size" $ Op $ SizeOp $ Out.GetSizeMax Out.SizeGroup
+      letBindNames [group_size]
+        =<< eBinOp
+          (SMin Int64)
+          (eSubExp max_group_size)
+          ( if null ws_min
+              then eSubExp intra_avail_par
+              else foldBinOp' (SMax Int64) ws_min
+          )
 
       let inputIsUsed input = kernelInputName input `nameIn` freeIn (lambdaBody lam)
           used_inps = filter inputIsUsed inps
@@ -103,7 +118,7 @@ intraGroupParallelise knest lam = runMaybeT $ do
 
   let nested_pat = loopNestingPat first_nest
       rts = map (length ispace `stripArray`) $ patTypes nested_pat
-      lvl = SegGroup (Count num_groups) (Count group_size) SegNoVirt
+      lvl = SegGroup (Count num_groups) (Count (Var group_size)) SegNoVirt
       kstm =
         Let nested_pat aux $
           Op $ SegOp $ SegMap lvl kspace rts kbody'
@@ -111,7 +126,7 @@ intraGroupParallelise knest lam = runMaybeT $ do
   let intra_min_par = intra_avail_par
   return
     ( (intra_min_par, intra_avail_par),
-      group_size,
+      Var group_size,
       log,
       prelude_stms,
       oneStm kstm
