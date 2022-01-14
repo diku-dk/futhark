@@ -222,11 +222,10 @@ kernelLoop tid num_threads n f =
     if n == num_threads
       then f tid
       else do
-        -- Compute how many elements this thread is responsible for.
-        -- Formula: (n - tid) / num_threads (rounded up).
-        let elems_for_this = (n - tid) `divUp` num_threads
-
-        sFor "i" elems_for_this $ \i -> f $ i * num_threads + tid
+        num_chunks <- dPrimVE "num_chunks" $ n `divUp` num_threads
+        sFor "chunk_i" num_chunks $ \chunk_i -> do
+          i <- dPrimVE "i" $ chunk_i * num_threads + tid
+          sWhen (i .<. n) $ f i
 
 -- | Assign iterations of a for-loop to threads in the workgroup.  The
 -- passed-in function is invoked with the (symbolic) iteration.  For
