@@ -136,7 +136,7 @@ unique :: TypeBase shape Uniqueness -> Bool
 unique = (== Unique) . uniqueness
 
 -- | Convert types with non-existential shapes to types with
--- non-existential shapes.  Only the representation is changed, so all
+-- existential shapes.  Only the representation is changed, so all
 -- the shapes will be 'Free'.
 staticShapes :: [TypeBase Shape u] -> [TypeBase ExtShape u]
 staticShapes = map staticShapes1
