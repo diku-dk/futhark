@@ -231,14 +231,15 @@ kernelLoop tid num_threads n f =
 -- passed-in function is invoked with the (symbolic) iteration.  For
 -- multidimensional loops, use 'groupCoverSpace'.
 groupLoop ::
-  Imp.TExp Int64 ->
-  (Imp.TExp Int64 -> InKernelGen ()) ->
+  IntExp t =>
+  Imp.TExp t ->
+  (Imp.TExp t -> InKernelGen ()) ->
   InKernelGen ()
 groupLoop n f = do
   constants <- kernelConstants <$> askEnv
   kernelLoop
-    (sExt64 $ kernelLocalThreadId constants)
-    (kernelGroupSize constants)
+    (kernelLocalThreadId constants `sExtAs` n)
+    (kernelGroupSize constants `sExtAs` n)
     n
     f
 
@@ -271,9 +272,9 @@ groupCoverSegSpace virt space m = do
         wrap m
   case virt of
     SegVirt -> do
-      iterations <- dPrimVE "iterations" $ product dims'
+      iterations <- dPrimVE "iterations" $ product $ map sExt32 dims'
       groupLoop iterations $ \i -> do
-        dIndexSpace (zip ltids dims') i
+        dIndexSpace (zip ltids dims') $ sExt64 i
         m
     SegNoVirt -> nonvirt (sWhen (isActive $ zip ltids dims))
     SegNoVirtFull -> nonvirt id
