@@ -390,20 +390,20 @@ fenceForArrays = fmap (foldl' max Imp.FenceLocal) . mapM need
         =<< lookupArray arr
 
 groupChunkLoop ::
-  Imp.TExp Int64 ->
-  (Imp.TExp Int64 -> TV Int64 -> InKernelGen ()) ->
+  Imp.TExp Int32 ->
+  (Imp.TExp Int32 -> TV Int64 -> InKernelGen ()) ->
   InKernelGen ()
 groupChunkLoop w m = do
   constants <- kernelConstants <$> askEnv
-  let max_chunk_size = kernelGroupSize constants
+  let max_chunk_size = sExt32 $ kernelGroupSize constants
   num_chunks <- dPrimVE "num_chunks" $ w `divUp` max_chunk_size
   sFor "chunk_i" num_chunks $ \chunk_i -> do
     chunk_start <-
       dPrimVE "chunk_start" $ chunk_i * max_chunk_size
     chunk_end <-
-      dPrimVE "chunk_end" $ sMin64 w (chunk_start + max_chunk_size)
+      dPrimVE "chunk_end" $ sMin32 w (chunk_start + max_chunk_size)
     chunk_size <-
-      dPrimV "chunk_size" $ chunk_end - chunk_start
+      dPrimV "chunk_size" $ sExt64 $ chunk_end - chunk_start
     m chunk_start chunk_size
 
 sliceArray :: Imp.TExp Int64 -> TV Int64 -> VName -> ImpM rep r op VName
@@ -473,12 +473,12 @@ applyRenamedLambda lam dests args = do
 
 virtualisedGroupScan ::
   Maybe (Imp.TExp Int32 -> Imp.TExp Int32 -> Imp.TExp Bool) ->
-  TV Int64 ->
+  Imp.TExp Int32 ->
   Lambda GPUMem ->
   [VName] ->
   InKernelGen ()
 virtualisedGroupScan seg_flag w lam arrs = do
-  groupChunkLoop (tvExp w) $ \chunk_start chunk_size -> do
+  groupChunkLoop w $ \chunk_start chunk_size -> do
     constants <- kernelConstants <$> askEnv
     let ltid = kernelLocalThreadId constants
         crosses_segment =
@@ -488,21 +488,21 @@ virtualisedGroupScan seg_flag w lam arrs = do
               flag_true (sExt32 (chunk_start -1)) (sExt32 chunk_start)
     sComment "possibly incorporate carry" $
       sWhen (chunk_start .>. 0 .&&. ltid .==. 0 .&&. bNot crosses_segment) $ do
-        carry_idx <- dPrimVE "carry_idx" $ chunk_start - 1
+        carry_idx <- dPrimVE "carry_idx" $ sExt64 chunk_start - 1
         applyRenamedLambda
           lam
-          (zip arrs $ repeat [DimFix chunk_start])
+          (zip arrs $ repeat [DimFix $ sExt64 chunk_start])
           ( zip (map Var arrs) (repeat [DimFix carry_idx])
-              ++ zip (map Var arrs) (repeat [DimFix chunk_start])
+              ++ zip (map Var arrs) (repeat [DimFix $ sExt64 chunk_start])
           )
 
-    arrs_chunks <- mapM (sliceArray chunk_start chunk_size) arrs
+    arrs_chunks <- mapM (sliceArray (sExt64 chunk_start) chunk_size) arrs
 
     sOp $ Imp.ErrorSync Imp.FenceLocal
 
     groupScan
       seg_flag
-      (tvExp w)
+      (sExt64 w)
       (tvExp chunk_size)
       lam
       arrs_chunks
@@ -556,7 +556,7 @@ compileGroupOp pat (Inner (SegOp (SegScan lvl space scans _ body))) = do
     SegVirt ->
       virtualisedGroupScan
         (Just crossesSegment)
-        dims_flat
+        (sExt32 $ tvExp dims_flat)
         (segBinOpLambda scan)
         arrs_flat
     _ ->
@@ -594,27 +594,27 @@ compileGroupOp pat (Inner (SegOp (SegRed lvl space ops _ body))) = do
 
     virtCase [dim'] tmps_for_ops = do
       ltid <- kernelLocalThreadId . kernelConstants <$> askEnv
-      groupChunkLoop dim' $ \chunk_start chunk_size -> do
+      groupChunkLoop (sExt32 dim') $ \chunk_start chunk_size -> do
         sComment "possibly incorporate carry" $
           sWhen (chunk_start .>. 0 .&&. ltid .==. 0) $
             forM_ (zip ops tmps_for_ops) $ \(op, tmps) ->
               applyRenamedLambda
                 (segBinOpLambda op)
-                (zip tmps $ repeat [DimFix chunk_start])
+                (zip tmps $ repeat [DimFix $ sExt64 chunk_start])
                 ( zip (map (Var . patElemName) red_pes) (repeat [])
-                    ++ zip (map Var tmps) (repeat [DimFix chunk_start])
+                    ++ zip (map Var tmps) (repeat [DimFix $ sExt64 chunk_start])
                 )
 
         sOp $ Imp.ErrorSync Imp.FenceLocal
 
         forM_ (zip ops tmps_for_ops) $ \(op, tmps) -> do
-          tmps_chunks <- mapM (sliceArray chunk_start chunk_size) tmps
+          tmps_chunks <- mapM (sliceArray (sExt64 chunk_start) chunk_size) tmps
           groupReduce (sExt32 (tvExp chunk_size)) (segBinOpLambda op) tmps_chunks
 
         sOp $ Imp.ErrorSync Imp.FenceLocal
 
         forM_ (zip red_pes $ concat tmps_for_ops) $ \(pe, arr) ->
-          copyDWIMFix (patElemName pe) [] (Var arr) [chunk_start]
+          copyDWIMFix (patElemName pe) [] (Var arr) [sExt64 chunk_start]
     virtCase dims' tmps_for_ops = do
       dims_flat <- dPrimV "dims_flat" $ product dims'
       let segment_size = last dims'
@@ -625,7 +625,7 @@ compileGroupOp pat (Inner (SegOp (SegRed lvl space ops _ body))) = do
         tmps_flat <- mapM (flattenArray (length dims') dims_flat) tmps
         virtualisedGroupScan
           (Just crossesSegment)
-          dims_flat
+          (sExt32 $ tvExp dims_flat)
           (segBinOpLambda op)
           tmps_flat
 
