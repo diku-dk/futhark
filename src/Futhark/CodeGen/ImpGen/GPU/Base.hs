@@ -23,7 +23,6 @@ module Futhark.CodeGen.ImpGen.GPU.Base
     compileThreadResult,
     compileGroupResult,
     virtualiseGroups,
-    groupLoop,
     kernelLoop,
     groupCoverSpace,
     precomputeSegOpIDs,
@@ -247,8 +246,9 @@ groupLoop n f = do
 -- all threads in the group participate.  The passed-in function is
 -- invoked with a (symbolic) point in the index space.
 groupCoverSpace ::
-  [Imp.TExp Int64] ->
-  ([Imp.TExp Int64] -> InKernelGen ()) ->
+  IntExp t =>
+  [Imp.TExp t] ->
+  ([Imp.TExp t] -> InKernelGen ()) ->
   InKernelGen ()
 groupCoverSpace ds f =
   groupLoop (product ds) $ f . unflattenIndex ds
@@ -1613,11 +1613,11 @@ copyInGroup pt destloc srcloc = do
         (sliceMemLoc destloc destslice')
         (sliceMemLoc srcloc srcslice')
     _ -> do
-      groupCoverSpace dims $ \is ->
+      groupCoverSpace (map sExt32 dims) $ \is ->
         copyElementWise
           pt
-          (sliceMemLoc destloc (Slice $ map DimFix is))
-          (sliceMemLoc srcloc (Slice $ map DimFix is))
+          (sliceMemLoc destloc (Slice $ map (DimFix . sExt64) is))
+          (sliceMemLoc srcloc (Slice $ map (DimFix . sExt64) is))
       sOp $ Imp.Barrier Imp.FenceLocal
 
 threadOperations, groupOperations :: Operations GPUMem KernelEnv Imp.KernelOp
