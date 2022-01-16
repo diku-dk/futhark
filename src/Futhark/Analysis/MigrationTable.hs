@@ -5,6 +5,7 @@ module Futhark.Analysis.MigrationTable
     -- * Query
     MigrationTable,
     moveToDevice,
+    shouldMove,
     usedOnHost,
   )
 where
@@ -55,6 +56,7 @@ data MigrationStatus
 --         all such statements have been moved.
 newtype MigrationTable = MigrationTable (IM.IntMap MigrationStatus)
 
+-- | Where should the value bound by this name be computed? 
 statusOf :: VName -> MigrationTable -> MigrationStatus
 statusOf n (MigrationTable mt) =
   fromMaybe StayOnHost $ IM.lookup (baseTag n) mt
@@ -83,10 +85,13 @@ moveToDevice (Let _ _ (DoLoop _ (WhileLoop n) _)) mt =
 -- WithAcc statements are never moved in their entirety.
 moveToDevice _ _ = False
 
--- | Will the variable by this name still be used on host after all statements
--- identified by this table have been migrated?
+-- | Should the value bound by this name be computed on device? 
+shouldMove :: VName -> MigrationTable -> Bool
+shouldMove n mt = statusOf n mt /= StayOnHost
+
+-- | Is the value bound by this name used on host? 
 usedOnHost :: VName -> MigrationTable -> Bool
-usedOnHost n mt = statusOf n mt == UsedOnHost
+usedOnHost n mt = statusOf n mt /= MoveToDevice
 
 -- | Merges two migration tables that are assumed to be disjoint.
 merge :: MigrationTable -> MigrationTable -> MigrationTable

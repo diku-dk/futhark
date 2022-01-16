@@ -8,10 +8,10 @@ import Control.Parallel.Strategies (parMap, rpar)
 import qualified Data.IntMap.Strict as IM
 import Data.List (unzip4, zip4)
 import Data.Maybe (isNothing)
-import Data.Sequence hiding (reverse, sort, zip, zip4)
+import Data.Sequence hiding (index, reverse, sort, zip, zip4)
 import qualified Data.Text as T
 import Futhark.Analysis.MigrationTable
-import Futhark.Construct (fullSlice)
+import Futhark.Construct (fullSlice, sliceDim)
 import Futhark.Error
 import qualified Futhark.FreshNames as FN
 import Futhark.IR.GPU
@@ -61,6 +61,10 @@ initialState ns =
 -- | Retrieve a function of the current environment.
 asks :: (MigrationTable -> a) -> ReduceM a
 asks = lift . R.asks
+
+-- | Fetch the value of the environment.
+ask :: ReduceM MigrationTable
+ask = lift R.ask
 
 -- | Create a PatElem that binds the array of a migrated variable binding.
 arrayizePatElem :: PatElemT Type -> ReduceM (PatElemT Type)
@@ -125,8 +129,12 @@ optimizeStm out stm = do
 
           -- Read scalars that are used on host.
           foldM addRead (out |> stm') (zip pes pes')
-      DoLoop params lform body ->
-        pure (out |> stm) -- TODO (rewrite loop)
+      DoLoop ps lf b -> do
+        (params, lform, body) <- rewriteForIn (ps, lf, b)
+        -- Rewrite params (moveSubExp for moved params)
+        -- Rewrite body
+        -- Rewrite stm
+        pure (out |> stm) -- TODO
       WithAcc inputs lambda ->
         pure (out |> stm) -- TODO
       Op op ->
@@ -177,6 +185,37 @@ optimizeStm out stm = do
           let fr' = fr {resSubExp = Var farr}
           pure ((pe', tr', fr', bt') : res, tstms', fstms')
 
+-- | Rewrite a for-in loop such that relevant source array reads can be delayed.
+rewriteForIn ::
+  ([(FParam GPU, SubExp)], LoopForm GPU, BodyT GPU) ->
+  ReduceM ([(FParam GPU, SubExp)], LoopForm GPU, BodyT GPU)
+rewriteForIn loop@(_, WhileLoop {}, _) =
+  pure loop
+rewriteForIn (params, ForLoop i t n elems, body) = do
+  mt <- ask
+  let (elems', stms') = foldr (inline mt) ([], bodyStms body) elems
+  pure (params, ForLoop i t n elems', body {bodyStms = stms'})
+  where
+    inline ::
+      MigrationTable ->
+      (Param Type, VName) ->
+      ([(Param Type, VName)], Stms GPU) ->
+      ([(Param Type, VName)], Stms GPU)
+    inline mt (x, arr) (arrs, stms)
+      | pn <- paramName x,
+        not (usedOnHost pn mt) =
+        let pt = paramDec x
+            pat = Pat [PatElem pn pt]
+            aux = StmAux mempty mempty ()
+            e = BasicOp $ index arr pt
+            stm = Let pat aux e
+         in (arrs, stm <| stms)
+      | otherwise =
+        ((x, arr) : arrs, stms)
+
+    index arr ofType =
+      Index arr $ Slice $ DimFix (Var i) : map sliceDim (arrayDims ofType)
+
 -- | Migrate a statement to device, ensuring all its bound variables used on
 -- host will remain available with the same names.
 moveStm :: Stms GPU -> Stm GPU -> ReduceM (Stms GPU)
@@ -204,7 +243,7 @@ moveStm out stm = do
               if used || t == Prim Unit
                 then add (eIndex dev)
                 else pe `movedTo` dev >> pure stms
-            -- Drop the first dimension of multidimensional arrays.
+            -- Drop the added dimension of multidimensional arrays.
             _ -> add' $ Index dev (fullSlice dev_t [DimFix $ intConst Int64 0])
 
 -- | Move a copy of some value to device, adding its array binding to the given
