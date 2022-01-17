@@ -7,8 +7,8 @@ import Control.Monad.Trans.State.Strict hiding (State)
 import Control.Parallel.Strategies (parMap, rpar)
 import qualified Data.IntMap.Strict as IM
 import Data.List (unzip4, zip4)
-import Data.Maybe (isNothing)
-import Data.Sequence hiding (index, reverse, sort, zip, zip4)
+import Data.Maybe (fromMaybe, isNothing)
+import Data.Sequence hiding (index, reverse, sort, unzip, zip, zip4)
 import qualified Data.Text as T
 import Futhark.Analysis.MigrationTable
 import Futhark.Construct (fullSlice, sliceDim)
@@ -40,7 +40,11 @@ data State = State
     stateNameSource :: VNameSource,
     -- | Variables that have been computed on device, their orignal names,
     -- types, and 'Index' expressions that allow them to be read.
+    -- Only contains device locations for migrated variables that are not used
+    -- on host.
     stateDevSrc :: IM.IntMap (Name, Type, Exp GPU),
+    -- | Device locations for migrated variables that also are used on host.
+    stateDevAliases :: IM.IntMap VName,
     -- | Maps names in the original program to local names used within a GPUBody
     -- under construction.
     stateRenames :: IM.IntMap VName,
@@ -54,6 +58,7 @@ initialState ns =
   State
     { stateNameSource = ns,
       stateDevSrc = IM.empty,
+      stateDevAliases = IM.empty,
       stateRenames = IM.empty,
       stateDevReads = empty
     }
@@ -65,6 +70,45 @@ asks = lift . R.asks
 -- | Fetch the value of the environment.
 ask :: ReduceM MigrationTable
 ask = lift R.ask
+
+-- | @alias host dev@ records @dev@ as being a single element array containing
+-- the same value as the variable @host@.
+alias :: VName -> VName -> ReduceM ()
+alias host dev =
+  modify $ \st -> let aliases = stateDevAliases st
+                      aliases' = IM.insert (baseTag host) dev aliases
+                   in st {stateDevAliases = aliases'}
+
+aliasOf :: VName -> ReduceM (Maybe VName)
+aliasOf host =
+  gets $ \st -> IM.lookup (baseTag host) (stateDevAliases st)
+
+deviceCopy :: SubExp -> ReduceM (Maybe VName)
+deviceCopy (Var n) = deviceName n
+deviceCopy _ = pure Nothing
+
+deviceName :: VName -> ReduceM (Maybe VName)
+deviceName n = do
+  srcs <- gets stateDevSrc
+  let src (_, _, BasicOp (Index arr _)) = arr
+  pure $ src <$> IM.lookup (baseTag n) srcs
+
+-- | Produce a fresh name, using the given name as a template.
+newName :: VName -> ReduceM VName
+newName n = do
+  st <- get
+  let ns = stateNameSource st
+  let (n', ns') = FN.newName ns n
+  put (st {stateNameSource = ns'})
+  pure n'
+
+-- | @movedTo (PatElem x t) arr@ registers that the value of @x@ is stored at
+-- @arr[0]@, with @x@ being of type @t@.
+movedTo :: PatElemT Type -> VName -> ReduceM ()
+movedTo (PatElem x t) arr = do
+  st <- get
+  let src' = IM.insert (baseTag x) (baseName x, t, eIndex arr) (stateDevSrc st)
+  put (st {stateDevSrc = src'})
 
 -- | Create a PatElem that binds the array of a migrated variable binding.
 arrayizePatElem :: PatElemT Type -> ReduceM (PatElemT Type)
@@ -92,6 +136,28 @@ optimizeFunDef fd = do
   stms' <- optimizeStms empty (bodyStms body)
   pure $ fd {funDefBody = body {bodyStms = stms'}}
 
+optimizeBody :: BodyT GPU -> ReduceM (BodyT GPU)
+optimizeBody (Body _ stms res) = do
+  stms' <- optimizeStms empty stms
+  res' <- updateResult res
+  pure (Body () stms' res')
+
+updateResult :: Result -> ReduceM Result
+updateResult = mapM updateSubExpRes
+
+updateSubExpRes :: SubExpRes -> ReduceM SubExpRes
+updateSubExpRes (SubExpRes certs se) =
+  -- Certificates are always read back to host.
+  SubExpRes certs <$> updateSubExp se
+
+updateSubExp :: SubExp -> ReduceM SubExp
+updateSubExp (Var n) = Var <$> updateName n
+updateSubExp cnst = pure cnst
+
+updateName :: VName -> ReduceM VName
+updateName n = do
+  fromMaybe n <$> deviceName n
+
 optimizeStms :: Stms GPU -> Stms GPU -> ReduceM (Stms GPU)
 optimizeStms out Empty =
   pure out
@@ -111,17 +177,38 @@ optimizeStm out stm = do
         pure (out |> stm)
       If cond (Body _ tstms0 tres) (Body _ fstms0 fres) (IfDec btypes sort) ->
         do
+          -- Rewrite branches.
           tstms1 <- optimizeStms empty tstms0
           fstms1 <- optimizeStms empty fstms0
 
-          let pes = patElems (stmPat stm)
-
           -- Ensure return values and types match if one or both branches
           -- return a result that now reside on device.
+          let bmerge (res, tstms, fstms) (pe, tr, fr, bt) =
+                do
+                  tdst <- deviceCopy (resSubExp tr)
+                  fdst <- deviceCopy (resSubExp fr)
+
+                  if isNothing tdst && isNothing fdst
+                    then -- No result has been migrated ==> nothing to do.
+                      pure ((pe, tr, fr, bt) : res, tstms, fstms)
+                    else -- Otherwise, ensure both results are migrated.
+                    do
+                      let t = patElemDec pe
+                      (tstms', tarr) <- movedSubExp' tdst tstms (resSubExp tr) t
+                      (fstms', farr) <- movedSubExp' fdst fstms (resSubExp fr) t
+
+                      pe' <- arrayizePatElem pe
+                      let bt' = staticShapes1 (patElemDec pe')
+                      let tr' = tr {resSubExp = Var tarr}
+                      let fr' = fr {resSubExp = Var farr}
+                      pure ((pe', tr', fr', bt') : res, tstms', fstms')
+
+          let pes = patElems (stmPat stm)
           let res = zip4 pes tres fres btypes
           (res', tstms2, fstms2) <- foldM bmerge ([], tstms1, fstms1) res
-
           let (pes', tres', fres', btypes') = unzip4 (reverse res')
+
+          -- Rewrite statement.
           let tbranch' = Body () tstms2 tres'
           let fbranch' = Body () fstms2 fres'
           let e' = If cond tbranch' fbranch' (IfDec btypes' sort)
@@ -131,10 +218,38 @@ optimizeStm out stm = do
           foldM addRead (out |> stm') (zip pes pes')
       DoLoop ps lf b -> do
         (params, lform, body) <- rewriteForIn (ps, lf, b)
-        -- Rewrite params (moveSubExp for moved params)
-        -- Rewrite body
-        -- Rewrite stm
-        pure (out |> stm) -- TODO
+
+        -- Update statement bound variables and parameters if their values
+        -- have been migrated to device.
+        let lmerge (res, stms) (pe, (Param attrs pn pt, pval)) =
+              do
+                moved <- asks (shouldMove pn)
+                if not moved
+                  then pure ((pe, (Param attrs pn pt, pval)) : res, stms)
+                  else do
+                    pe' <- arrayizePatElem pe
+
+                    -- Move the initial value to device if not already there.
+                    (stms', arr) <- movedSubExp stms pval (fromDecl pt)
+
+                    pn' <- newName pn
+                    let pt' = toDecl (patElemDec pe') Nonunique
+                    let pval' = Var arr
+
+                    PatElem pn (fromDecl pt) `movedTo` pn'
+
+                    pure ((pe', (Param mempty pn' pt', pval')) : res, stms')
+
+        let pes = patElems (stmPat stm)
+        (ps', out') <- foldM lmerge ([], out) (zip pes params)
+        let (pes', params') = unzip (reverse ps')
+
+        body' <- optimizeBody body
+        let e' = DoLoop params' lform body'
+        let stm' = Let (Pat pes') (stmAux stm) e'
+
+        -- Read scalars that are used on host.
+        foldM addRead (out' |> stm') (zip pes pes')
       WithAcc inputs lambda ->
         pure (out |> stm) -- TODO
       Op op ->
@@ -152,38 +267,14 @@ optimizeStm out stm = do
           then add (eIndex dev)
           else pe `movedTo` dev >> pure stms
 
-    dst srcs (Var n) =
-      (\(_, _, BasicOp (Index arr _)) -> arr) <$> IM.lookup (baseTag n) srcs
-    dst _ _ = Nothing
+    movedSubExp stms se t = do
+      dst <- deviceCopy se
+      movedSubExp' dst stms se t
 
-    bmerge (res, tstms, fstms) (pe, tr, fr, bt) = do
-      let tres = resSubExp tr
-      let fres = resSubExp fr
-
-      srcs <- gets stateDevSrc
-      let tdst = dst srcs tres
-      let fdst = dst srcs fres
-
-      let no_diff = isNothing tdst && isNothing fdst
-
-      if no_diff
-        then -- No result has been migrated ==> nothing to do.
-          pure ((pe, tr, fr, bt) : res, tstms, fstms)
-        else -- Otherwise, ensure both results are migrated.
-        do
-          let t = patElemDec pe
-          (tstms', tarr) <- case tdst of
-            Just arr -> pure (tstms, arr)
-            _ -> moveSubExp tstms tres t
-          (fstms', farr) <- case fdst of
-            Just arr -> pure (fstms, arr)
-            _ -> moveSubExp fstms fres t
-
-          pe' <- arrayizePatElem pe
-          let bt' = staticShapes1 (patElemDec pe')
-          let tr' = tr {resSubExp = Var tarr}
-          let fr' = fr {resSubExp = Var farr}
-          pure ((pe', tr', fr', bt') : res, tstms', fstms')
+    movedSubExp' dev stms se t =
+      case dev of
+        Just arr -> pure (stms, arr)
+        _ -> moveSubExp stms se t
 
 -- | Rewrite a for-in loop such that relevant source array reads can be delayed.
 rewriteForIn ::
@@ -259,7 +350,6 @@ moveSubExp out se t = do
   let e = BasicOp (SubExp se)
   let stm = Let pat aux e
 
-  -- Expression cannot be hoisted, because it is a result of the gpubody.
   gpubody <- inGPUBody (pure stm)
   let dev = patElemName $ head $ patElems (stmPat gpubody)
 
@@ -346,23 +436,6 @@ cloneName n = do
   modify $ \st -> st {stateRenames = IM.insert (baseTag n) n' (stateRenames st)}
   pure n'
 
--- | Produce a fresh name, using the given name as a template.
-newName :: VName -> ReduceM VName
-newName n = do
-  st <- get
-  let ns = stateNameSource st
-  let (n', ns') = FN.newName ns n
-  put (st {stateNameSource = ns'})
-  pure n'
-
--- | @movedTo (PatElem x t) arr@ registers that the value of @x@ is stored at
--- @arr[0]@, with @x@ being of type @t@.
-movedTo :: PatElemT Type -> VName -> ReduceM ()
-movedTo (PatElem x t) arr = do
-  st <- get
-  let src' = IM.insert (baseTag x) (baseName x, t, eIndex arr) (stateDevSrc st)
-  put (st {stateDevSrc = src'})
-
 -- | Setup the read of a device-located variable, returning the name that the
 -- read scalar is bound to. The 'Exp' is expected to be a result of 'eIndex'.
 setupRead :: (Name, Type, Exp GPU) -> ReduceM VName
@@ -374,8 +447,8 @@ setupRead (name, t, e) = do
   modify $ \st -> st {stateDevReads = stateDevReads st |> stm}
   pure n
 
--- | Return the name to use for a dependency which may have been migrated or
--- cloned.
+-- | Return the name to use for a clone dependency which may have been migrated
+-- or cloned.
 rename :: VName -> ReduceM VName
 rename n = do
   st <- get
