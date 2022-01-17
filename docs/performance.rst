@@ -190,8 +190,8 @@ record compared to using a tuple.
 Sum Types
 ~~~~~~~~~
 
-A starting point, a sum type is turned into a tuple containing all the
-payload components in order, prefixed with an `i8` tag to identify the
+A sum type value is represented as a tuple containing all the payload
+components in order, prefixed with an `i8` tag to identify the
 constructor.  For example,
 
 .. code-block:: futhark
