@@ -940,7 +940,7 @@ graphLoop (b : bs) params lform body = do
       | Var n <- res,
         op <- nameToId n,
         op /= p =
-        addEdges (MG.oneEdge op) (IS.singleton p)
+        addEdges (MG.oneEdge p) (IS.singleton op)
       | otherwise =
         pure ()
 
