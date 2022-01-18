@@ -285,7 +285,12 @@ shortCircuitGPUMemHelper num_reds lvl lutab pat@(Pat ps0) space0 kernel_body td_
           (scals bu_env)
           td_env
           (patElems pat)
-      (actv_return, inhibit_return) = foldl (makeSegMapCoals lvl td_env kernel_body) (actv0, inhibit0) $ zip ps_and_space $ kernelBodyResult kernel_body
+      (actv_return, inhibit_return) =
+        if num_reds > 0
+          then (actv0, inhibit0)
+          else
+            traceWith ("ps0: " <> pretty ps0 <> "\nspace0: " <> pretty space0 <> "\nps_and_space: " <> pretty ps_and_space <> "\nkernelBodyResult: " <> pretty (kernelBodyResult kernel_body) <> "\nsegmapcoals") $
+              foldl (makeSegMapCoals lvl td_env kernel_body) (actv0, inhibit0) $ zip ps_and_space $ kernelBodyResult kernel_body
 
   -- Process kernel body statements
   bu_env' <- mkCoalsTabStms lutab (kernelBodyStms kernel_body) td_env $ bu_env {activeCoals = actv0 <> actv_return, inhibit = inhibit_return}
