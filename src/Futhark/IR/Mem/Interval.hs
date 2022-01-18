@@ -155,10 +155,19 @@ binOpToZ3 (And _) x y = mkAnd [x, y]
 binOpToZ3 (Or _) x y = mkOr [x, y]
 binOpToZ3 (SDiv _ _) x y = mkDiv x y
 binOpToZ3 (SDivUp _ _) x y = mkDiv x y
+binOpToZ3 (SMin _) x y = mkMin x y
+binOpToZ3 (UMin _) x y = mkMin x y
+binOpToZ3 (SMax _) x y = mkMax x y
+binOpToZ3 (UMax _) x y = mkMax x y
+binOpToZ3 (SDivUp _ _) x y = mkDiv x y
 binOpToZ3 b _ _ = trace ("Unsupported BinOp " <> pretty b) undefined
 
 convOpToZ3 :: MonadZ3 z3 => ConvOp -> AST -> z3 AST
 convOpToZ3 (SExt _ _) x = return x
+convOpToZ3 (SIToFP _ _) x = mkInt2Real x
+convOpToZ3 (UIToFP _ _) x = mkInt2Real x
+convOpToZ3 (FPToSI _ _) x = mkReal2Int x
+convOpToZ3 (FPToUI _ _) x = mkReal2Int x
 convOpToZ3 c _ = trace ("Unsupported ConvOp " <> pretty c) undefined
 
 primExpToZ3 :: MonadZ3 z3 => M.Map VName AST -> PrimExp VName -> z3 AST
@@ -175,11 +184,22 @@ primExpToZ3 var_table (CmpOpExp cop e1 e2) =
     cmpOpToZ3 cop <$> primExpToZ3 var_table e1
       <*> primExpToZ3 var_table e2
 primExpToZ3 var_table (ConvOpExp c e) = convOpToZ3 c =<< primExpToZ3 var_table e
-primExpToZ3 var_table (FunExp "sqrt64" [e1] _) = do
-  e1' <- primExpToZ3 var_table e1
-  exponent <- mkRealNum 0.5
-  mkPower e1' exponent
+primExpToZ3 var_table (FunExp name [e1] _)
+  | name == "sqrt64" || name == "sqrt32" || name == "sqrt16" = do
+    e1' <- primExpToZ3 var_table e1
+    exponent <- mkRealNum 0.5
+    mkPower e1' exponent
 primExpToZ3 var_table e = trace ("undefined exp " <> pretty e) undefined
+
+mkMin :: MonadZ3 z3 => AST -> AST -> z3 AST
+mkMin e1 e2 = do
+  cond <- mkLe e1 e2
+  mkIte cond e1 e2
+
+mkMax :: MonadZ3 z3 => AST -> AST -> z3 AST
+mkMax e1 e2 = do
+  cond <- mkGe e1 e2
+  mkIte cond e1 e2
 
 disjointZ3 :: M.Map VName Type -> [(VName, PrimExp VName)] -> Names -> Interval -> Interval -> IO Bool
 disjointZ3 scope less_thans non_negatives i1@(Interval lb1 ne1 st1) i2@(Interval lb2 ne2 st2)
