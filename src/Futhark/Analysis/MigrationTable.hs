@@ -1023,12 +1023,19 @@ graphWithAcc bs inputs f = do
   ret <- mapM (onlyGraphedScalars . toSet) (bodyResult body)
   mapM_ (uncurry createNode) $ zip bs ret
   where
-    graph (i, ts, op) = do
-      a <- graphAccOp i ts op
+    graph (i, ts, comb) = do
+      a <- graphAccOp i ts (fst <$> comb)
+      case comb of
+        -- Ensure neutral element is available on host such that an optimized
+        -- WithAcc statement will type check.
+        Just (_, nes) -> mapM_ ensureRead nes
+        _ -> pure ()
       pure (i, a)
 
-    extract (Acc a _ ts _, (_, _, Nothing)) = (nameToId a, ts, Nothing)
-    extract (Acc a _ ts _, (_, _, Just (op, _))) = (nameToId a, ts, Just op)
+    ensureRead (Var ne) = connectToSink (nameToId ne)
+    ensureRead _ = pure ()
+
+    extract (Acc a _ ts _, (_, _, comb)) = (nameToId a, ts, comb)
     extract _ =
       compilerBugS "Type error: WithAcc expression did not return accumulator."
 
