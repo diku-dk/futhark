@@ -599,6 +599,12 @@ connectToSink i = do
   modifyGraph (MG.connectToSink i)
   modifyGraphedScalars (IS.delete i)
 
+-- | Like 'connectToSink' but vertex is given by a 'SubExp'. This is a no-op if
+-- the 'SubExp' is a constant.
+connectSubExpToSink :: SubExp -> Grapher ()
+connectSubExpToSink (Var n) = connectToSink (nameToId n)
+connectSubExpToSink _ = pure ()
+
 -- | Routes all possible routes within the subgraph identified by this id.
 -- Returns the ids of the source connected vertices that were attempted routed.
 --
@@ -1028,12 +1034,9 @@ graphWithAcc bs inputs f = do
       case comb of
         -- Ensure neutral element is available on host such that an optimized
         -- WithAcc statement will type check.
-        Just (_, nes) -> mapM_ ensureRead nes
+        Just (_, nes) -> mapM_ connectSubExpToSink nes
         _ -> pure ()
       pure (i, a)
-
-    ensureRead (Var ne) = connectToSink (nameToId ne)
-    ensureRead _ = pure ()
 
     extract (Acc a _ ts _, (_, _, comb)) = (nameToId a, ts, comb)
     extract _ =
@@ -1061,7 +1064,7 @@ graphAccOp i types op = do
           let m = do
                 graphBody body
                 -- Results must be available on host if op is executed there.
-                connectToSinks (bodyResult body)
+                mapM_ (connectSubExpToSink . resSubExp) (bodyResult body)
            in R.runReader (runStateT (captureBodyStats m) st) env'
 
   -- The operator will be invoked by 'UpdateAcc' statements. Determine how these
@@ -1089,10 +1092,6 @@ graphAccOp i types op = do
 
   -- Report how 'UpdateAcc' statements that use this operator should be graphed.
   pure act'
-  where
-    connectToSinks = mapM_ f
-    f (SubExpRes _ (Var n)) = connectToSink (nameToId n)
-    f _ = pure ()
 
 -- | @censorRoutes si ops@ routes all possible routes within the subgraph
 -- identified by @si@ and then connects each operand in @ops@ to a sink if it
