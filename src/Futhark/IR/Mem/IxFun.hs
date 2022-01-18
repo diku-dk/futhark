@@ -51,7 +51,7 @@ import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as M
 import Data.Maybe (isJust)
-import Debug.Trace
+--import Debug.Trace
 import qualified Futhark.Analysis.AlgSimplify2 as AlgSimplify2
 import Futhark.Analysis.PrimExp.Convert
 import qualified Futhark.Analysis.PrimExp.Generalize as PEG
@@ -81,6 +81,8 @@ import Futhark.Util.IntegralExp
 import Futhark.Util.Pretty
 import Z3.Monad
 import Prelude hiding (gcd, id, mod, (.))
+
+trace _ x = x
 
 traceWith :: Pretty a => String -> a -> a
 traceWith s a = trace (s <> ": " <> pretty a) a

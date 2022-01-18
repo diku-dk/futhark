@@ -18,7 +18,7 @@ import qualified Data.Map.Strict as M
 import Data.Maybe
 import Data.Sequence (Seq (..))
 import qualified Data.Set as S
-import Debug.Trace
+--import Debug.Trace
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.IR.Aliases
 import Futhark.IR.GPUMem
@@ -30,6 +30,8 @@ import Futhark.Optimise.ArrayShortCircuiting.LastUse
 import Futhark.Optimise.ArrayShortCircuiting.MemRefAggreg
 import Futhark.Optimise.ArrayShortCircuiting.TopDownAn
 import Futhark.Util.Pretty (Pretty)
+
+trace _ x = x
 
 traceWith :: Pretty a => String -> a -> a
 traceWith s a = trace (s <> ": " <> pretty a) a
@@ -194,8 +196,18 @@ shortCircuitGPUMem lutab pat (Inner (SegOp (SegRed lvl space binops _ kernel_bod
   -- where any of the variables in 'vartab' are also free in the list of
   -- 'SegBinOp'. In other words, anything that is used as part of the reduction
   -- step should probably not be coalesced.
-  let to_fail = M.filter (\entry -> namesFromList (M.keys $ vartab entry) `namesIntersect` foldMap (freeIn . segBinOpLambda) binops) $ activeCoals bu_env
-      (active, inh) = foldl markFailedCoal (activeCoals bu_env, inhibit bu_env) $ M.keys to_fail
+  let to_fail = M.filter (\entry -> namesFromList (M.keys $ vartab entry) `namesIntersect` traceWith "to_fail before filter" (foldMap (freeIn . segBinOpLambda) binops)) $ activeCoals bu_env
+      (active, inh) =
+        traceWith
+          ( "failed? " <> pretty to_fail
+              <> "\nbu_env active: "
+              <> pretty (activeCoals bu_env)
+              <> "\nbu_env success: "
+              <> pretty (successCoals bu_env)
+              <> "\nbu_env inhibit: "
+              <> pretty (inhibit bu_env)
+          )
+          $ foldl markFailedCoal (activeCoals bu_env, inhibit bu_env) $ M.keys to_fail
       bu_env' = bu_env {activeCoals = active, inhibit = inh}
       num_reds = length red_ts
    in shortCircuitGPUMemHelper num_reds lvl lutab pat space kernel_body td_env bu_env'
@@ -550,7 +562,7 @@ fixPointCoalesce lutab fpar bdy topenv = do
         then error ("COALESCING ROOT: BROKEN INV, active not empty: " ++ pretty (M.keys actv_tab'))
         else
           if M.null $ inhb_tab'' `M.difference` inhibited topenv
-            then return succ_tab'
+            then return $ traceWith "succ_tab'" succ_tab'
             else fixPointCoalesce lutab fpar bdy (topenv {inhibited = inhb_tab''}) --new_inhibited })
             -- helper to helper
   where
