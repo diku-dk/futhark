@@ -205,7 +205,8 @@ disjointZ3 :: M.Map VName Type -> [(VName, PrimExp VName)] -> Names -> Interval 
 disjointZ3 scope less_thans non_negatives i1@(Interval lb1 ne1 st1) i2@(Interval lb2 ne2 st2)
   | st1 == st2 = do
     let frees = namesToList $ freeIn less_thans <> freeIn non_negatives <> freeIn i1 <> freeIn i2
-    result <- evalZ3With Nothing (opt "timeout" (30 :: Integer)) $
+    -- result <- evalZ3With Nothing (opt "timeout" (30 :: Integer)) $
+    result <- evalZ3 $
       trace
         ( "disjointZ3\ni1: " <> pretty i1
             <> "\ni2: "
