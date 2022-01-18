@@ -56,7 +56,7 @@ data MigrationStatus
 --         all such statements have been moved.
 newtype MigrationTable = MigrationTable (IM.IntMap MigrationStatus)
 
--- | Where should the value bound by this name be computed? 
+-- | Where should the value bound by this name be computed?
 statusOf :: VName -> MigrationTable -> MigrationStatus
 statusOf n (MigrationTable mt) =
   fromMaybe StayOnHost $ IM.lookup (baseTag n) mt
@@ -85,11 +85,11 @@ moveToDevice (Let _ _ (DoLoop _ (WhileLoop n) _)) mt =
 -- WithAcc statements are never moved in their entirety.
 moveToDevice _ _ = False
 
--- | Should the value bound by this name be computed on device? 
+-- | Should the value bound by this name be computed on device?
 shouldMove :: VName -> MigrationTable -> Bool
 shouldMove n mt = statusOf n mt /= StayOnHost
 
--- | Is the value bound by this name used on host? 
+-- | Is the value bound by this name used on host?
 usedOnHost :: VName -> MigrationTable -> Bool
 usedOnHost n mt = statusOf n mt /= MoveToDevice
 
@@ -1050,9 +1050,12 @@ graphAccOp i types op = do
   let env' = env {envMeta = (envMeta env) {metaGraphId = Just i}}
   let (stats, st') = case op of
         Nothing -> (mempty, st)
-        Just lmd ->
-          let m = captureBodyStats $ graphBody (lambdaBody lmd)
-           in R.runReader (runStateT m st) env'
+        Just (Lambda _ body _) ->
+          let m = do
+                graphBody body
+                -- Results must be available on host if op is executed there.
+                connectToSinks (bodyResult body)
+           in R.runReader (runStateT (captureBodyStats m) st) env'
 
   -- The operator will be invoked by 'UpdateAcc' statements. Determine how these
   -- statements should be graphed based on collected statistics.
@@ -1079,6 +1082,10 @@ graphAccOp i types op = do
 
   -- Report how 'UpdateAcc' statements that use this operator should be graphed.
   pure act'
+  where
+    connectToSinks = mapM_ f
+    f (SubExpRes _ (Var n)) = connectToSink (nameToId n)
+    f _ = pure ()
 
 -- | @censorRoutes si ops@ routes all possible routes within the subgraph
 -- identified by @si@ and then connects each operand in @ops@ to a sink if it
