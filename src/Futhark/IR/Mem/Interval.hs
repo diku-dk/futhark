@@ -175,6 +175,10 @@ primExpToZ3 var_table (CmpOpExp cop e1 e2) =
     cmpOpToZ3 cop <$> primExpToZ3 var_table e1
       <*> primExpToZ3 var_table e2
 primExpToZ3 var_table (ConvOpExp c e) = convOpToZ3 c =<< primExpToZ3 var_table e
+primExpToZ3 var_table (FunExp "sqrt64" [e1] _) = do
+  e1' <- primExpToZ3 var_table e1
+  exponent <- mkRealNum 0.5
+  mkPower e1' exponent
 primExpToZ3 var_table e = trace ("undefined exp " <> pretty e) undefined
 
 disjointZ3 :: M.Map VName Type -> [(VName, PrimExp VName)] -> Names -> Interval -> Interval -> IO Bool
