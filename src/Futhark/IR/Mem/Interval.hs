@@ -15,7 +15,7 @@ import Control.Monad
 import Control.Monad.IO.Class
 import Data.List (delete, find, intersect, partition, sort, sortBy, zip4, zip5, zipWith5, (\\))
 import qualified Data.Map.Strict as M
-import Debug.Trace
+--import Debug.Trace
 import qualified Futhark.Analysis.AlgSimplify2 as AlgSimplify
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.IR.Prop
@@ -24,10 +24,12 @@ import Futhark.Util.Pretty
 import Z3.Monad
 
 traceWith' :: Show a => String -> a -> a
-traceWith' s a = trace (s <> ": " <> show a) a
+traceWith' _ a = a
 
 traceWith :: Pretty a => String -> a -> a
-traceWith s a = trace (s <> ": " <> pretty a) a
+traceWith _ a = a
+
+trace _ a = a
 
 data Interval = Interval
   { lowerBound :: TPrimExp Int64 VName,
