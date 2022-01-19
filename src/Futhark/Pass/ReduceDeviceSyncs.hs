@@ -7,7 +7,7 @@ import Control.Monad.Trans.State.Strict hiding (State)
 import Control.Parallel.Strategies (parMap, rpar)
 import qualified Data.IntMap.Strict as IM
 import Data.List (unzip4, zip4)
-import Data.Sequence hiding (index, reverse, sort, unzip, zip, zip4)
+import Data.Sequence (Seq (..), empty, (<|), (|>))
 import qualified Data.Text as T
 import Futhark.Analysis.MigrationTable
 import Futhark.Construct (fullSlice, sliceDim)
@@ -295,8 +295,35 @@ optimizeStm out stm = do
 
         -- Read scalars that are used on host.
         foldM addRead (out' |> stm') (zip pes pes')
-      WithAcc inputs lambda ->
-        pure (out |> stm) -- TODO
+      WithAcc inputs lmd -> do
+        inputs' <- mapM optimizeWithAccInput inputs
+
+        let body = lambdaBody lmd
+        stms' <- optimizeStms empty (bodyStms body)
+
+        let rewrite (pe, SubExpRes certs se, t) =
+              do
+                se' <- resolveSubExp se
+                if se == se'
+                  then pure (pe, SubExpRes certs se, t)
+                  else do
+                    pe' <- arrayizePatElem pe
+                    let t' = patElemDec pe'
+                    pure (pe', SubExpRes certs se', t')
+
+        let pes = patElems (stmPat stm)
+        let res = bodyResult body
+        let rts = lambdaReturnType lmd
+        -- No rewriting of lambda parameters as they are all accumulators.
+        (pes', res', rts') <- unzip3 <$> mapM rewrite (zip3 pes res rts)
+
+        let body' = Body () stms' res'
+        let lmd' = lmd {lambdaBody = body', lambdaReturnType = rts'}
+        let e' = WithAcc inputs' lmd'
+        let stm' = Let (Pat pes') (stmAux stm) e'
+
+        -- Read scalars that are used on host.
+        foldM addRead (out |> stm') (zip pes pes')
       Op op ->
         pure (out |> stm) -- TODO
   where
@@ -306,6 +333,15 @@ optimizeStm out stm = do
     addRead stms (pe@(PatElem n _), PatElem dev _)
       | n == dev = pure stms
       | otherwise = pe `migratedTo` (dev, stms)
+
+optimizeWithAccInput :: WithAccInput GPU -> ReduceM (WithAccInput GPU)
+optimizeWithAccInput (shape, arrs, Nothing) = pure (shape, arrs, Nothing)
+optimizeWithAccInput (shape, arrs, Just (op, nes)) = do
+  let body = lambdaBody op
+  -- Neither parameters nor results can change types for WithAcc to type check.
+  stms' <- optimizeStms empty (bodyStms body)
+  let op' = op {lambdaBody = body {bodyStms = stms'}}
+  pure (shape, arrs, Just (op', nes))
 
 -- | Rewrite a for-in loop such that relevant source array reads can be delayed.
 rewriteForIn ::

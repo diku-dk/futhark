@@ -326,6 +326,9 @@ data BodyStats = BodyStats
     bodyHostOnlyParents :: IS.IntSet
   }
 
+-- | Ids for all variables used as an operand.
+type Operands = IdSet
+
 instance Semigroup BodyStats where
   (BodyStats ho1 r1 o1 hop1) <> (BodyStats ho2 r2 o2 hop2) =
     BodyStats
@@ -343,9 +346,6 @@ instance Monoid BodyStats where
         bodyOperands = IS.empty,
         bodyHostOnlyParents = IS.empty
       }
-
--- | Ids for all variables used as an operand.
-type Operands = IdSet
 
 type Graph = MG.Graph Meta
 
@@ -741,18 +741,18 @@ graphStm stm = do
 
     hostSizeVar = requiredOnHost . nameToId
 
+-- | Graph a statement which in itself neither reads scalars from device memory
+-- nor forces such scalars to be available on host. Such statement can be moved
+-- to device to eliminate the host usage of other variables which transitively
+-- depends on a scalar device read.
 graphSimple :: [Binding] -> Exp GPU -> Grapher ()
 graphSimple bs e = do
   -- Only add vertices to the graph if they have a transitive dependency to
   -- an array read. Transitive dependencies through variables connected to
   -- sinks do not count.
   ops <- graphedScalarOperands e
-  unless
-    (IS.null ops)
-    ( do
-        mapM_ addVertex bs
-        addEdges (MG.declareEdges $ map fst bs) ops
-    )
+  let edges = MG.declareEdges (map fst bs)
+  unless (IS.null ops) (mapM_ addVertex bs >> addEdges edges ops)
 
 -- | Graphs a statement that always should be moved to device.
 graphAutoMove :: Binding -> Exp GPU -> Grapher ()
@@ -761,16 +761,18 @@ graphAutoMove b e = do
   addSource b
   addEdges (oneEdge $ fst b) ops
 
+-- | Graph an assertion.
 graphAssert :: [Binding] -> Exp GPU -> Grapher ()
 -- The next read after the execution of a kernel containing an assertion will
 -- be made asynchronous, followed by an asynchronous read to check if any
 -- assertion failed. The runtime will then block for ALL enqueued commands to
 -- finish.
+--
 -- Since an assertion only binds a certificate of unit type, an assertion
 -- cannot increase the number of (read) synchronizations that occur. In this
--- regard it is free to migrate. The synchronization that does occur is
--- presumably more expensive however since the pipeline of GPU work will be
--- flushed.
+-- regard it is free to migrate. The synchronization that does occur is however
+-- (presumably) more expensive as the pipeline of GPU work will be flushed.
+--
 -- Since this cost is difficult to quantify and amortize over assertion
 -- migration candidates (cost depends on ordering of kernels and reads) we
 -- assume it is insignificant. This will likely hold for a system where
@@ -778,6 +780,7 @@ graphAssert :: [Binding] -> Exp GPU -> Grapher ()
 -- only will decrease if the GPU utilization decreases as a result.
 graphAssert = graphSimple
 
+-- | Graph a statement that reads a scalar from device memory.
 graphRead :: Binding -> Exp GPU -> Grapher ()
 graphRead b e = do
   ops <- graphedScalarOperands e
@@ -786,20 +789,22 @@ graphRead b e = do
   tellRead
 
 -- | Graphs a statement that may return a result backed by existing memory.
--- Currently these are not safe to migrate, as GPUBody copies all returned
+graphMemReuse :: Exp GPU -> Grapher ()
+-- Currently these are inefficient to migrate as GPUBody copies all returned
 -- arrays, changing the asymptotical cost of statements that otherwise reuse
 -- memory.
-graphMemReuse :: Exp GPU -> Grapher ()
 graphMemReuse = graphHostOnly
 
 -- | Graphs a statement that returns an array backed by new memory.
+graphNewArray :: Exp GPU -> Grapher ()
 -- Since migrated code is run in single-threaded GPUBody statements, in the
 -- worst case the produced array is so large that writing its elements takes
 -- longer than the reads that can be eliminated by migrating the statement.
 -- It is thus risky to migrate such a statement.
-graphNewArray :: Exp GPU -> Grapher ()
 graphNewArray = graphHostOnly
 
+-- | Graph a statement that only can execute on host and thus requires all its
+-- operands to be made available to the host.
 graphHostOnly :: Exp GPU -> Grapher ()
 graphHostOnly e = do
   -- Connect the vertices of all operands to sinks to mark that they are
@@ -809,24 +814,19 @@ graphHostOnly e = do
   addEdges ToSink ops
   tellHostOnly
 
+-- | Graph an 'UpdateAcc' statement.
 graphUpdateAcc :: Binding -> Exp GPU -> Grapher ()
 graphUpdateAcc b e | (_, Acc a _ _ _) <- b = do
-  let ai = nameToId a
-  act <- getAction ai
-  if act == HostOp
-    then graphHostOnly e
-    else do
-      ops <- graphedScalarOperands e
-      addVertex b
-      -- The vertex that represents the accumulator operator is also connected
-      -- to the UpdateAcc vertex, such that if the operator is moved to device,
-      -- all usage sites will be moved too.
-      addEdges (oneEdge $ fst b) (IS.insert ai ops)
--- Won't read any scalar to host, so no tellRead.
+  act <- getAction (nameToId a)
+  case act of
+    HostOp -> graphHostOnly e
+    DeviceOp -> graphAutoMove b e
+    NeutralOp -> graphSimple [b] e
 graphUpdateAcc _ _ =
   compilerBugS
     "Type error: UpdateAcc did not produce accumulator typed value."
 
+-- | Graph a function application.
 graphApply :: Name -> [Binding] -> Exp GPU -> Grapher ()
 graphApply fn bs e = do
   hof <- isHostOnlyFun fn
@@ -834,6 +834,7 @@ graphApply fn bs e = do
     then graphHostOnly e
     else graphSimple bs e
 
+-- | Graph an if statement.
 graphIf :: [Binding] -> SubExp -> BodyT GPU -> BodyT GPU -> Grapher ()
 graphIf bs cond tbody fbody = do
   host_only <-
@@ -855,6 +856,7 @@ graphIf bs cond tbody fbody = do
     toSet (SubExpRes _ (Var n)) = S.singleton n
     toSet _ = S.empty
 
+-- | Graph a loop statement.
 graphLoop ::
   [Binding] ->
   [(FParam GPU, SubExp)] ->
@@ -1011,6 +1013,7 @@ graphLoop (b : bs) params lform body = do
         -- don't exhaust
         findBindings g (bnds, i : nx, vs) is
 
+-- | Graph a 'WithAcc' statement.
 graphWithAcc ::
   [Binding] ->
   [(Shape, [VName], Maybe (Lambda GPU, [SubExp]))] ->
@@ -1023,17 +1026,20 @@ graphWithAcc bs inputs f = do
   -- evaluate, which is captured as 'GraphAction's. The actions are made
   -- available until the associated accumulators no longer are in scope.
   actions <- IM.fromList <$> mapM (graph . extract) accs
-  let body = lambdaBody f
-  graphBody body `withActions` actions
+  graphBody (lambdaBody f) `withActions` actions
+
   -- Connect return variables to bound values.
-  ret <- mapM (onlyGraphedScalars . toSet) (bodyResult body)
+  ret <- mapM (onlyGraphedScalars . toSet) (bodyResult $ lambdaBody f)
   mapM_ (uncurry createNode) $ zip bs ret
   where
     graph (i, ts, comb) = do
-      a <- graphAccOp i ts (fst <$> comb)
+      let op = fst <$> comb
+      a <- graphAccOp i ts op
       case comb of
-        -- Ensure neutral element is available on host such that an optimized
-        -- WithAcc statement will type check.
+        -- In principle UpdateAcc could be run on host and thus not use the
+        -- neutral elements, but we cannot change the type of neutral elements
+        -- if we want WithAcc to type check. Neutral elements must thus always
+        -- be made available on host.
         Just (_, nes) -> mapM_ connectSubExpToSink nes
         _ -> pure ()
       pure (i, a)
@@ -1045,7 +1051,7 @@ graphWithAcc bs inputs f = do
     toSet (SubExpRes _ (Var n)) = S.singleton n
     toSet _ = S.empty
 
--- Graphs the operator associated with updating an accumulator.
+-- Graph the operator associated with updating an accumulator.
 -- The arguments are the 'Id' for the accumulator token, the element type of
 -- the accumulator, and its update operator lambda, if any.
 graphAccOp :: Id -> [Type] -> Maybe (Lambda GPU) -> Grapher GraphAction
@@ -1055,20 +1061,29 @@ graphAccOp i types op = do
 
   -- Graph the accumulator operator to collect statistics about its statements.
   -- If the operator contains no host-only statements then the graphing will be
-  -- reversed. Otherwise no reads should be delayed into it, as it may be
-  -- evaluated multiple times.
+  -- reversed, either because all usages will be from device or because there is
+  -- nothing to graph.
   let env' = env {envMeta = (envMeta env) {metaGraphId = Just i}}
   let (stats, st') = case op of
         Nothing -> (mempty, st)
         Just (Lambda _ body _) ->
           let m = do
                 graphBody body
-                -- Results must be available on host if op is executed there.
+                -- We cannot change the type signature of op so results must be
+                -- read from device memory. This only matters if the op will
+                -- run on host.
                 mapM_ (connectSubExpToSink . resSubExp) (bodyResult body)
            in R.runReader (runStateT (captureBodyStats m) st) env'
 
   -- The operator will be invoked by 'UpdateAcc' statements. Determine how these
   -- statements should be graphed based on collected statistics.
+  --
+  -- op operands are read from arrays and written back so if any of the operands
+  -- are scalar then a read can be avoided by moving the 'UpdateAcc' usages to
+  -- device. If the op itself performs scalar reads its 'UpdateAcc' usages
+  -- should also be moved.
+  --
+  -- If the op is host-only its 'UpdateAcc's cannot be moved.
   let act = if any isScalarType types then DeviceOp else NeutralOp
   let act' =
         act <> case stats of
@@ -1083,12 +1098,26 @@ graphAccOp i types op = do
   -- Finish graphing the operator based on the determined action type.
   case act' of
     HostOp -> do
+      -- 'UpdateAcc's can only run on host.
+      --
+      -- Reads are only allowed to be delayed into the operator in so far
+      -- its total number of reads does not increase.
       put st'
       censorRoutes i ops
-    DeviceOp -> addSource (i, Prim Unit) -- no sink possible ==> no edges
+    DeviceOp -> do
+      -- 'UpdateAcc's should always be moved to device.
+      --
+      -- All free variables the operator depends upon should be made available
+      -- on host to not increase the number of reads done by the operator.
+      -- Operator reads will be done once per 'UpdateAcc' and not simply once
+      -- per kernel thread. This might be too conservative (more data needed!)
+      -- but will likely not matter as operators are expected to be monoids
+      -- and monoids with free variables are rare.
+      mapM_ connectToSink (IS.elems ops)
     NeutralOp -> do
-      addVertex (i, Prim Unit)
-      addEdges (oneEdge i) ops
+      -- 'UpdateAcc's should only be moved to device if it avoids the read of
+      -- one or more operator arguments.
+      mapM_ connectToSink (IS.elems ops)
 
   -- Report how 'UpdateAcc' statements that use this operator should be graphed.
   pure act'
