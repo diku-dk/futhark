@@ -67,10 +67,10 @@ kernelsPipeline =
     >>> onePass extractKernels
     >>> passes
       [ simplifyGPU,
-        reduceDeviceSyncs,
         babysitKernels,
         tileLoops,
         unstreamGPU,
+        reduceDeviceSyncs,
         performCSE True,
         simplifyGPU,
         sinkGPU,
