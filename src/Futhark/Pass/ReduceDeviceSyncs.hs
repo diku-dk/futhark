@@ -7,7 +7,8 @@ import Control.Monad.Trans.State.Strict hiding (State)
 import Control.Parallel.Strategies (parMap, rpar)
 import qualified Data.IntMap.Strict as IM
 import Data.List (unzip4, zip4)
-import Data.Sequence (Seq (..), empty, (<|), (|>))
+import qualified Data.Map.Strict as M
+import Data.Sequence (Seq (..), empty, (<|), (><), (|>))
 import qualified Data.Text as T
 import Futhark.Analysis.MigrationTable
 import Futhark.Construct (fullSlice, sliceDim)
@@ -16,6 +17,7 @@ import qualified Futhark.FreshNames as FN
 import Futhark.IR.GPU
 import Futhark.MonadFreshNames (VNameSource, getNameSource, putNameSource)
 import Futhark.Pass
+import Futhark.Transform.Substitute
 
 -- TODO: Run ormolu and hlint
 
@@ -324,8 +326,9 @@ optimizeStm out stm = do
 
         -- Read scalars that are used on host.
         foldM addRead (out |> stm') (zip pes pes')
-      Op op ->
-        pure (out |> stm) -- TODO
+      Op op -> do
+        op' <- optimizeHostOp op
+        pure (out |> stm {stmExp = Op op'})
   where
     onHost (Var v) = (v ==) <$> resolveName v
     onHost _ = pure True
@@ -333,15 +336,6 @@ optimizeStm out stm = do
     addRead stms (pe@(PatElem n _), PatElem dev _)
       | n == dev = pure stms
       | otherwise = pe `migratedTo` (dev, stms)
-
-optimizeWithAccInput :: WithAccInput GPU -> ReduceM (WithAccInput GPU)
-optimizeWithAccInput (shape, arrs, Nothing) = pure (shape, arrs, Nothing)
-optimizeWithAccInput (shape, arrs, Just (op, nes)) = do
-  let body = lambdaBody op
-  -- Neither parameters nor results can change types for WithAcc to type check.
-  stms' <- optimizeStms empty (bodyStms body)
-  let op' = op {lambdaBody = body {bodyStms = stms'}}
-  pure (shape, arrs, Just (op', nes))
 
 -- | Rewrite a for-in loop such that relevant source array reads can be delayed.
 rewriteForIn ::
@@ -370,6 +364,60 @@ rewriteForIn (params, ForLoop i t n elems, body) = do
 
     index arr ofType =
       Index arr $ Slice $ DimFix (Var i) : map sliceDim (arrayDims ofType)
+
+optimizeWithAccInput :: WithAccInput GPU -> ReduceM (WithAccInput GPU)
+optimizeWithAccInput (shape, arrs, Nothing) = pure (shape, arrs, Nothing)
+optimizeWithAccInput (shape, arrs, Just (op, nes)) = do
+  let body = lambdaBody op
+  -- Neither parameters nor results can change types for WithAcc to type check.
+  stms' <- optimizeStms empty (bodyStms body)
+  let op' = op {lambdaBody = body {bodyStms = stms'}}
+  pure (shape, arrs, Just (op', nes))
+
+optimizeHostOp :: HostOp GPU op -> ReduceM (HostOp GPU op)
+optimizeHostOp (SegOp (SegMap lvl space types kbody)) =
+  SegOp . SegMap lvl space types <$> rewriteKernelBody kbody
+optimizeHostOp (SegOp (SegRed lvl space ops types kbody)) = do
+  ops' <- mapM rewriteSegBinOp ops
+  SegOp . SegRed lvl space ops' types <$> rewriteKernelBody kbody
+optimizeHostOp (SegOp (SegScan lvl space ops types kbody)) = do
+  ops' <- mapM rewriteSegBinOp ops
+  SegOp . SegScan lvl space ops' types <$> rewriteKernelBody kbody
+optimizeHostOp (SegOp (SegHist lvl space ops types kbody)) = do
+  ops' <- mapM rewriteHistOp ops
+  SegOp . SegHist lvl space ops' types <$> rewriteKernelBody kbody
+optimizeHostOp (SizeOp op) =
+  pure (SizeOp op)
+optimizeHostOp OtherOp {} =
+  -- These should all have been taken care of in the unstreamGPU pass.
+  compilerBugS "optimizeHostOp: unhandled OtherOp"
+optimizeHostOp (GPUBody types body) =
+  GPUBody types <$> rewriteBody body
+
+rewriteSegBinOp :: SegBinOp GPU -> ReduceM (SegBinOp GPU)
+rewriteSegBinOp op = do
+  f' <- rewriteLambda (segBinOpLambda op)
+  pure (op {segBinOpLambda = f'})
+
+rewriteHistOp :: HistOp GPU -> ReduceM (HistOp GPU)
+rewriteHistOp op = do
+  f' <- rewriteLambda (histOp op)
+  pure (op {histOp = f'})
+
+rewriteLambda :: Lambda GPU -> ReduceM (Lambda GPU)
+rewriteLambda f = do
+  body' <- rewriteBody (lambdaBody f)
+  pure (f {lambdaBody = body'})
+
+rewriteBody :: BodyT GPU -> ReduceM (BodyT GPU)
+rewriteBody body = do
+  (body', st) <- runStateT (cloneBody body) (initialCloneState Reuse)
+  pure body' {bodyStms = clonePrologue st >< bodyStms body'}
+
+rewriteKernelBody :: KernelBody GPU -> ReduceM (KernelBody GPU)
+rewriteKernelBody kbody = do
+  (kbody', st) <- runStateT (cloneKernelBody kbody) (initialCloneState Reuse)
+  pure kbody' {kernelBodyStms = clonePrologue st >< kernelBodyStms kbody'}
 
 -- | Migrate a statement to device, ensuring all its bound variables used on
 -- host will remain available with the same names.
@@ -400,7 +448,7 @@ moveStm out stm = do
 -- result values wrapped in single element arrays.
 inGPUBody :: CloneM (Stm GPU) -> ReduceM (Stm GPU)
 inGPUBody m = do
-  (stm, st) <- runStateT m initialCloneState
+  (stm, st) <- runStateT m (initialCloneState Rebind)
   let prologue = clonePrologue st
 
   let pes = patElems (stmPat stm)
@@ -418,22 +466,43 @@ data CloneState = CloneState
   { -- | Maps variables in the original program to names to be used by clones.
     cloneRenames :: IM.IntMap VName,
     -- | Statements to be added as a prologue before cloned statements.
-    clonePrologue :: Stms GPU
+    clonePrologue :: Stms GPU,
+    -- | Whether cloned name bindings should be substituted with new names.
+    cloneRebind :: RebindOption
   }
 
-initialCloneState :: CloneState
-initialCloneState =
+data RebindOption
+  = -- | Replace cloned names with new 'VName's.
+    Rebind
+  | -- | Reuse names when cloned.
+    Reuse
+
+initialCloneState :: RebindOption -> CloneState
+initialCloneState rebind =
   CloneState
     { cloneRenames = IM.empty,
-      clonePrologue = empty
+      clonePrologue = empty,
+      cloneRebind = rebind
     }
 
--- | Create a fresh name, registering which name it is based on.
+-- | Reuse or replace a name with a fresh name, based on configuration.
 cloneName :: VName -> CloneM VName
 cloneName n = do
-  n' <- lift (newName n)
-  modify $ \st -> st {cloneRenames = IM.insert (baseTag n) n' (cloneRenames st)}
-  pure n'
+  rebind <- gets cloneRebind
+  case rebind of
+    Rebind -> do
+      n' <- lift (newName n)
+      modify $ \st ->
+        let renames' = IM.insert (baseTag n) n' (cloneRenames st)
+         in st {cloneRenames = renames'}
+      pure n'
+    Reuse -> pure n
+
+cloneKernelBody :: KernelBody GPU -> CloneM (KernelBody GPU)
+cloneKernelBody (KernelBody _ stms res) = do
+  stms' <- cloneStms stms
+  res' <- mapM renameKernelResult res
+  pure (KernelBody () stms' res')
 
 cloneBody :: BodyT GPU -> CloneM (BodyT GPU)
 cloneBody (Body _ stms res) = do
@@ -481,7 +550,7 @@ cloneExp =
   where
     -- This indicates that something fundamentally is wrong with the migration
     -- table produced by the MigrationTable module.
-    opError = compilerBugS "Cannot migrate a host operation to device."
+    opError = compilerBugS "Cannot migrate a host-only operation to device."
 
 cloneParam :: Param (TypeBase Shape u) -> CloneM (Param (TypeBase Shape u))
 cloneParam (Param attrs n t) = do
@@ -510,6 +579,13 @@ rename n = do
 
 renameResult :: Result -> CloneM Result
 renameResult = mapM renameSubExpRes
+
+renameKernelResult :: KernelResult -> CloneM KernelResult
+renameKernelResult kres = do
+  let from = namesToList (freeIn kres)
+  to <- mapM rename from
+  let rename_map = M.fromList (zip from to)
+  pure (substituteNames rename_map kres)
 
 renameSubExpRes :: SubExpRes -> CloneM SubExpRes
 renameSubExpRes (SubExpRes certs se) = do

@@ -162,9 +162,8 @@ checkFunDef fun = do
 
     checkStm (Let (Pat pats) _ e) = checkPats pats >> checkExp e
 
-    -- Any expression that produces an array is caught by checkPat
+    -- Any expression that produces an array is caught by checkPats
     checkExp (BasicOp (Index _ _)) = hostOnly
-    checkExp (BasicOp (FlatIndex _ _)) = hostOnly
     checkExp (WithAcc _ _) = hostOnly
     checkExp (Op _) = hostOnly
     checkExp (Apply fn _ _ _) = Just (S.singleton fn)
@@ -550,12 +549,7 @@ type Binding = (Id, Type)
 -- is not empty.
 createNode :: Binding -> Operands -> Grapher ()
 createNode b ops =
-  unless
-    (IS.null ops)
-    ( do
-        addVertex b
-        addEdges (oneEdge $ fst b) ops
-    )
+  unless (IS.null ops) (addVertex b >> addEdges (oneEdge $ fst b) ops)
 
 -- | Adds a vertex to the graph for the given binding.
 addVertex :: Binding -> Grapher ()
@@ -686,7 +680,7 @@ graphStm stm = do
     BasicOp Update {} ->
       -- Migrating an Update may replace the in-place update with a copy
       -- of the entire destination array, changing its asymptotical cost.
-      -- This is a limitation of the current GPUBody implementation, which
+      -- This is a limitation of the current GPUBody implementation which
       -- always copies returned arrays. Since we cannot guarantee that the
       -- updated array is not returned we block Updates from being moved.
       graphMemReuse e
@@ -700,10 +694,6 @@ graphStm stm = do
     BasicOp Copy {} ->
       graphNewArray e
     BasicOp Manifest {} ->
-      -- Manifest expressions are only introduced by later passes in the
-      -- pipeline and are therefore unlikely to occur. They are only worth
-      -- migrating as part of a parent statement body but are introduced
-      -- to optimize kernels which block such parent migration.
       graphNewArray e
     BasicOp Iota {} ->
       graphNewArray e
@@ -802,6 +792,7 @@ graphNewArray :: Exp GPU -> Grapher ()
 -- longer than the reads that can be eliminated by migrating the statement.
 -- It is thus risky to migrate such a statement.
 graphNewArray = graphHostOnly
+-- TODO: Conduct an experiment to measure the difference
 
 -- | Graph a statement that only can execute on host and thus requires all its
 -- operands to be made available to the host.
@@ -889,6 +880,8 @@ graphLoop (b : bs) params lform body = do
   -- Otherwise connect them to the loop bound variables that they can
   -- reach and exhaust their normal entry edges into the loop.
   -- This means a read can be delayed through a loop body but not into it.
+  --
+  -- TODO: Measure whether it is better to block delays through loops.
   foldM_ connectOperand vs (IS.elems ops)
 
   -- If the loop contains host-only statements then it must execute on
@@ -1070,20 +1063,20 @@ graphAccOp i types op = do
           let m = do
                 graphBody body
                 -- We cannot change the type signature of op so results must be
-                -- read from device memory. This only matters if the op will
-                -- run on host.
+                -- read from device memory. This only matters if the op actually
+                -- will be run on host.
                 mapM_ (connectSubExpToSink . resSubExp) (bodyResult body)
            in R.runReader (runStateT (captureBodyStats m) st) env'
 
-  -- The operator will be invoked by 'UpdateAcc' statements. Determine how these
+  -- The operator will be invoked by UpdateAcc statements. Determine how these
   -- statements should be graphed based on collected statistics.
   --
   -- op operands are read from arrays and written back so if any of the operands
-  -- are scalar then a read can be avoided by moving the 'UpdateAcc' usages to
-  -- device. If the op itself performs scalar reads its 'UpdateAcc' usages
-  -- should also be moved.
+  -- are scalar then a read can be avoided by moving the UpdateAcc usages to
+  -- device. If the op itself performs scalar reads its UpdateAcc usages should
+  -- also be moved.
   --
-  -- If the op is host-only its 'UpdateAcc's cannot be moved.
+  -- If the op is host-only its UpdateAccs cannot be moved.
   let act = if any isScalarType types then DeviceOp else NeutralOp
   let act' =
         act <> case stats of
@@ -1098,28 +1091,31 @@ graphAccOp i types op = do
   -- Finish graphing the operator based on the determined action type.
   case act' of
     HostOp -> do
-      -- 'UpdateAcc's can only run on host.
+      -- UpdateAccs can only run on host.
       --
       -- Reads are only allowed to be delayed into the operator in so far
       -- its total number of reads does not increase.
       put st'
       censorRoutes i ops
     DeviceOp -> do
-      -- 'UpdateAcc's should always be moved to device.
+      -- UpdateAccs should always be moved to device.
       --
       -- All free variables the operator depends upon should be made available
       -- on host to not increase the number of reads done by the operator.
-      -- Operator reads will be done once per 'UpdateAcc' and not simply once
-      -- per kernel thread. This might be too conservative (more data needed!)
-      -- but will likely not matter as operators are expected to be monoids
-      -- and monoids with free variables are rare.
+      -- Operator reads will be done once per UpdateAcc and not simply once per
+      -- kernel thread. This might be too conservative (more data needed!) but
+      -- will likely not matter as operators are expected to be monoids and
+      -- monoids with free variables are rare.
+      --
+      -- TODO: Reconsider after having measured map, reduce, scan, etc. using
+      --       delayed reads.
       mapM_ connectToSink (IS.elems ops)
     NeutralOp -> do
-      -- 'UpdateAcc's should only be moved to device if it avoids the read of
+      -- UpdateAccs should only be moved to device if it avoids the read of
       -- one or more operator arguments.
       mapM_ connectToSink (IS.elems ops)
 
-  -- Report how 'UpdateAcc' statements that use this operator should be graphed.
+  -- Report how UpdateAcc statements that use this operator should be graphed.
   pure act'
 
 -- | @censorRoutes si ops@ routes all possible routes within the subgraph
@@ -1155,10 +1151,11 @@ censorRoutes si ops = do
       | otherwise =
         (sinkFound, vs)
 
--- Returns all non-kernel scalar operands that have a vertex representation in
--- the graph, excluding those that have been connected to sinks. That is all
--- operands produced by statements that can be moved to device to potentially
--- avoid a read.
+-- Returns for an expression all scalar operands used outside a kernel and which
+-- have a vertex representation in the graph, excluding those that have been
+-- connected to sinks.
+-- That is all operands that might require a read from device memory to evaluate
+-- the given expression on host.
 graphedScalarOperands :: Exp GPU -> Grapher IdSet
 graphedScalarOperands e =
   let is = fst $ execState (collect e) initial
@@ -1173,15 +1170,10 @@ graphedScalarOperands e =
     collect (Apply _ params _ _) =
       mapM_ (collectSubExp . fst) params
     collect (If cond tbranch fbranch _) =
-      do
-        collectSubExp cond
-        collectBody tbranch
-        collectBody fbranch
+      collectSubExp cond >> collectBody tbranch >> collectBody fbranch
     collect (DoLoop params lform body) =
-      do
-        mapM_ (collectSubExp . snd) params
-        collectLForm lform
-        collectBody body
+      mapM_ (collectSubExp . snd) params >>
+        collectLForm lform >> collectBody body
     collect (WithAcc accs f) =
       collectWithAcc accs f
     collect (Op op) =
@@ -1210,8 +1202,7 @@ graphedScalarOperands e =
 
     -- The collective operands of an operator lambda body are only used on host
     -- if the associated accumulator is used in an UpdateAcc statement outside a
-    -- kernel. If neutral elements are used on host they will be operands to a
-    -- SegOp within the WithAcc lambda.
+    -- kernel.
     collectWithAcc inputs f = do
       collectBody (lambdaBody f)
       used_accs <- gets snd
@@ -1220,7 +1211,8 @@ graphedScalarOperands e =
       mapM_ collectAcc (zip used inputs)
 
     collectAcc (_, (_, _, Nothing)) = pure ()
-    collectAcc (used, (_, _, Just (op, _))) =
+    collectAcc (used, (_, _, Just (op, nes))) = do
+      mapM_ collectSubExp nes
       when used $ collectBody (lambdaBody op)
 
     -- SegLevel contains just tunable runtime constants, which are host-only.
@@ -1234,6 +1226,5 @@ graphedScalarOperands e =
     collectHostOp op = mapM_ captureName (IM.elems $ namesIntMap $ freeIn op)
 
     collectSegBinOp (SegBinOp _ _ nes _) = mapM_ collectSubExp nes
-    -- TODO: Not sure whether collecting the race factor SubExp is necessary.
     collectHistOp (HistOp _ rf _ nes _ _) =
       collectSubExp rf >> mapM_ collectSubExp nes
