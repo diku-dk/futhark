@@ -248,11 +248,9 @@ lowerUpdateIntoLoop scope updates pat val form body = do
     mkMerge summary
       | Just (update, mergename, mergedec) <- relatedUpdate summary = do
         source <- newVName "modified_source"
+        precopy <- newVName $ baseString (updateValue update) <> "_precopy"
         let source_t = snd $ updateType update
-            elmident =
-              Ident
-                (updateValue update)
-                (source_t `setArrayDims` sliceDims (updateIndices update))
+            elm_t = source_t `setArrayDims` sliceDims (updateIndices update)
         tell
           ( [ mkLet [Ident source source_t] . BasicOp $
                 Update
@@ -261,10 +259,11 @@ lowerUpdateIntoLoop scope updates pat val form body = do
                   (fullSlice source_t $ unSlice $ updateIndices update)
                   $ snd $ mergeParam summary
             ],
-            [ mkLet [elmident] . BasicOp $
+            [ mkLet [Ident precopy elm_t] . BasicOp $
                 Index
                   (updateName update)
-                  (fullSlice source_t $ unSlice $ updateIndices update)
+                  (fullSlice source_t $ unSlice $ updateIndices update),
+              mkLet [Ident (updateValue update) elm_t] $ BasicOp $ Copy precopy
             ]
           )
         return $
