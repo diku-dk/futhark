@@ -19,15 +19,13 @@ where
 
 import qualified Data.Map.Strict as M
 import Data.Maybe
---import Debug.Trace
+import Debug.Trace
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.IR.Aliases
 import Futhark.IR.GPUMem
 import qualified Futhark.IR.Mem.IxFun as IxFun
 import Futhark.Optimise.ArrayShortCircuiting.DataStructs
 import Futhark.Util.Pretty
-
-trace _ x = x
 
 traceWith :: Pretty a => String -> a -> a
 traceWith s a = trace (s <> ": " <> pretty a) a
