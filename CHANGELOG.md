@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+* Yet another in-place lowering issue (#1569).
+
 ## [0.21.4]
 
 ### Fixed
