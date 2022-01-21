@@ -288,5 +288,19 @@ diffMinMaxReduce _ops x aux w minmax ne as m = do
 --    and diff
 diffVecMinMaxOrMulReduce ::
   VjpOps -> Pat -> StmAux () -> SubExp -> SubExp -> BinOp -> VName -> VName -> ADM () -> ADM ()
-diffVecMinMaxOrMulReduce _ops x aux w n op ne as m =
-  error "todo"
+diffVecMinMaxOrMulReduce _ops x aux w n op ne as m = do
+  let t = binOpType op
+  op_lam <- binOpLambda op t
+  
+  stms <- collectStms_ $ do
+    tran_as <- letExp "tran_as" $ BasicOp $ Rearrange [1,0] as
+  
+    a_param <- newParam "a" $ Array t (Shape [w]) NoUniqueness
+    ne_param <- newParam "ne" $ Prim t
+
+    reduce_form <- reduceSOAC [Reduce Commutative op_lam [Var $ paramName ne_param]]
+  
+    map_lam <- mkLambda [a_param, ne_param] $ fmap varsRes . letTupExp "idx_res" $ Op $ Screma w [paramName a_param] reduce_form
+    addStm $ Let x aux $ Op $ Screma n [tran_as, ne] $ mapSOAC map_lam
+    
+  foldr (vjpStm _ops) m stms
