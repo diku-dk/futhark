@@ -54,6 +54,7 @@ where
 
 import Control.Category
 import Control.Monad.Identity hiding (mapM_)
+import Control.Monad.Reader hiding (mapM_)
 import Control.Monad.State.Strict
 import Control.Monad.Writer hiding (mapM_)
 import Data.Bifunctor (first)
@@ -1148,6 +1149,7 @@ simplifyKernelBody space (KernelBody _ stms res) = do
           `Engine.orIf` Engine.isOp
           `Engine.orIf` par_blocker
           `Engine.orIf` Engine.isConsumed
+          `Engine.orIf` isDeviceMigrated
 
   -- Ensure we do not try to use anything that is consumed in the result.
   (body_res, body_stms, hoisted) <-
@@ -1171,6 +1173,36 @@ simplifyKernelBody space (KernelBody _ stms res) = do
     consumedInResult _ =
       []
 
+-- | Statement is a scalar read from a single element array of rank one.
+isDeviceMigrated :: Engine.SimplifiableRep rep => Engine.BlockPred (Wise rep)
+isDeviceMigrated vtable _ stm
+  | BasicOp (Index arr slice) <- stmExp stm,
+    [DimFix idx] <- unSlice slice,
+    idx == intConst Int64 0,
+    Just arr_t <- ST.lookupType arr vtable,
+    [size] <- arrayDims arr_t,
+    size == intConst Int64 1 =
+    True
+  | otherwise =
+    False
+
+simplifyLambda ::
+  Engine.SimplifiableRep rep =>
+  Lambda (Wise rep) ->
+  Engine.SimpleM rep (Lambda (Wise rep), Stms (Wise rep))
+simplifyLambda lam =
+  local withMigrationBlocker (Engine.simplifyLambda lam)
+  where
+    withMigrationBlocker (ops, env) =
+      let blockers = Engine.envHoistBlockers env
+          par_blocker = Engine.blockHoistPar blockers
+
+          blocker = par_blocker `Engine.orIf` isDeviceMigrated
+
+          blockers' = blockers {Engine.blockHoistPar = blocker}
+          env' = env {Engine.envHoistBlockers = blockers'}
+       in (ops, env')
+
 segSpaceSymbolTable :: ASTRep rep => SegSpace -> ST.SymbolTable rep
 segSpaceSymbolTable (SegSpace flat gtids_and_dims) =
   foldl' f (ST.fromScope $ M.singleton flat $ IndexName Int64) gtids_and_dims
@@ -1184,7 +1216,7 @@ simplifySegBinOp ::
 simplifySegBinOp (SegBinOp comm lam nes shape) = do
   (lam', hoisted) <-
     Engine.localVtable (\vtable -> vtable {ST.simplifyMemory = True}) $
-      Engine.simplifyLambda lam
+      simplifyLambda lam
   shape' <- Engine.simplify shape
   nes' <- mapM Engine.simplify nes
   return (SegBinOp comm lam' nes' shape', hoisted)
@@ -1246,7 +1278,7 @@ simplifySegOp (SegHist lvl space ops ts kbody) = do
         (lam', op_hoisted) <-
           Engine.localVtable (<> scope_vtable) $
             Engine.localVtable (\vtable -> vtable {ST.simplifyMemory = True}) $
-              Engine.simplifyLambda lam
+              simplifyLambda lam
         return
           ( HistOp w' rf' arrs' nes' dims' lam',
             op_hoisted
