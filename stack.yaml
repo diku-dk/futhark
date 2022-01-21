@@ -7,7 +7,7 @@ flags: {}
 extra-package-dbs: []
 
 nix:
-    packages: [zlib.dev, zlib.out, pkgconfig]
+    packages: [zlib.dev, zlib.out, pkgconfig, z3]
 
 # By default, stack doesn't compile multiple modules in parallel.
 # This makes it do so.
@@ -19,3 +19,5 @@ extra-deps:
 - futhark-server-1.1.2.0
 - futhark-manifest-1.0.0.0
 - aeson-2.0.1.0
+- git: https://github.com/Munksgaard/haskell-z3.git
+  commit: 23f6eebe199c292c8d556c52a245e64d4b3caa92
