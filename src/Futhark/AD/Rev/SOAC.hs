@@ -76,6 +76,13 @@ vjpSOAC ops pat aux soac@(Screma w as form) m
     Just [(op, _, _, _)] <- lamIsBinOp $ redLambda red,
     isMinMaxOp op =
     diffMinMaxReduce ops x aux w op ne a m
+  | Just [red] <- isReduceSOAC form,
+    [x] <- patNames pat,
+    [ne] <- redNeutral red,
+    [a] <- as,
+    Just [(op, _, _, _)] <- lamIsBinOp $ redLambda red,
+    isMulOp op =
+    diffMulReduce ops x aux w op ne a m
   | Just red <- singleReduce <$> isReduceSOAC form = do
     pat_adj <- mapM adjVal =<< commonSOAC pat aux soac m
     diffReduce ops pat_adj w as red

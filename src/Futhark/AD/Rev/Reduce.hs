@@ -8,6 +8,7 @@ module Futhark.AD.Rev.Reduce
   ( diffReduce,
     diffMinMaxReduce,
     diffVecMinMaxOrMulReduce,
+    diffMulReduce,
   )
 where
 
@@ -304,3 +305,44 @@ diffVecMinMaxOrMulReduce _ops x aux w n op ne as m = do
     addStm $ Let x aux $ Op $ Screma n [tran_as, ne] $ mapSOAC map_lam
     
   foldr (vjpStm _ops) m stms
+
+--
+-- Special case of reduce with mul:
+--    let x = reduce (*) ne as
+-- Forward trace (assuming w = length as):
+--    let (p, z) = map (\a -> if a == 0 then (1, 1) else (a, 0)) as
+--    prodnonzeros = reduce (*) ne p
+--    zeros = reduce (+) 0 z
+--    let x = 
+--      if 0 == zeros
+--      then prodnonzeros
+--      else 0
+-- Reverse trace:
+--    as_bar = map2 
+--      (\a a_bar ->
+--        if zeros == 0
+--        then a_bar + prodnonzeros/a * x_bar
+--        else if zeros == 1
+--        then a_bar + (if a == 0 then prodnonzeros * x_bar else 0)
+--        else as_bar
+--      ) as as_bar
+diffMulReduce ::
+  VjpOps -> VName -> StmAux () -> SubExp -> BinOp -> SubExp -> VName -> ADM () -> ADM ()
+diffMulReduce _ops x aux w mul ne as m = do
+  let t = binOpType mul
+  
+  a_param <- newParam "a" $ Prim t
+
+  map_lam <-  
+    mkLambda [a_param] $
+      fmap varsRes . letTupExp "map_res" =<<
+        eIf
+          (eCmpOp (CmpEq t) (eParam  a_param) (eSubExp $ mkConst t 0))
+          (eBody $ fmap eSubExp [mkConst t 1, intConst Int64 1])
+          (eBody [eParam a_param, eSubExp $ intConst Int64 0])
+  error "TODO"
+  
+  where
+    mkConst :: PrimType -> Integer -> SubExp
+    mkConst (IntType t) = intConst t
+    mkConst (FloatType t) = floatConst t . fromIntegral
