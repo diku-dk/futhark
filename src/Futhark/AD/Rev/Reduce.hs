@@ -340,9 +340,79 @@ diffMulReduce _ops x aux w mul ne as m = do
           (eCmpOp (CmpEq t) (eParam  a_param) (eSubExp $ mkConst t 0))
           (eBody $ fmap eSubExp [mkConst t 1, intConst Int64 1])
           (eBody [eParam a_param, eSubExp $ intConst Int64 0])
-  error "TODO"
+
+  ps <- newVName "ps"
+  zs <- newVName "zs"
+
+  auxing aux $ 
+    letBindNames [ps, zs] $ 
+      Op $ Screma w [as] $ mapSOAC map_lam
+        
+  red_lam_mul <- binOpLambda mul t 
+  red_lam_add <- binOpLambda (Add Int64 OverflowUndef) int64
+
+  red_form_mul <- reduceSOAC $ return $ Reduce Commutative red_lam_mul $ return ne
+  red_form_add <- reduceSOAC $ return $ Reduce Commutative red_lam_add $ return $ intConst Int64 0
+
+  prodnonzeroes <- newVName "prodnonzeros"
+  zeros <- newVName "zeros"
+
+  auxing aux $ letBindNames [prodnonzeroes] $ Op $ Screma w [ps] red_form_mul
+  auxing aux $ letBindNames [zeros] $ Op $ Screma w [zs] red_form_add
+
+  auxing aux $
+    letBindNames [x] =<<
+      eIf 
+        (eCmpOp (CmpEq int64) (eSubExp $ intConst Int64 0) (eSubExp $ Var zeros))
+        (eBody $ return $ eSubExp $ Var prodnonzeroes)
+        (eBody $ return $ eSubExp $ mkConst t 0)
+
+  m
+
+  x_adj <- lookupAdjVal x
+  as_adj <- lookupAdjVal as
+
+  a_param_rev <- newParam "a" $ Prim t
+  a_bar_param_rev <- newParam "a_bar" $ Prim t
+  map_lam_rev <- 
+    mkLambda [a_param_rev, a_bar_param_rev] $
+      fmap varsRes . letTupExp "adj_res" =<<
+        eIf
+          (eCmpOp (CmpEq int64) (eSubExp $ intConst Int64 0) (eSubExp $ Var zeros))
+          (eBody $ return $
+             eBinOp 
+               (getAdd t) 
+               (eParam a_bar_param_rev) 
+               (eBinOp mul 
+                  (eSubExp $ Var x_adj) (
+                    eBinOp (getDiv t) (eSubExp $ Var prodnonzeroes) 
+                    (eParam a_param_rev)))
+          )
+          (eBody $ return $
+             eIf
+             (eCmpOp (CmpEq int64) (eSubExp $ intConst Int64 1) (eSubExp $ Var zeros))
+             (eBody $ return $
+                eIf 
+                (eCmpOp (CmpEq t) (eParam a_param_rev) (eSubExp $ mkConst t 0))
+                (eBody $ return $
+                   eBinOp (getAdd t) (eParam a_bar_param_rev) (eBinOp mul (eSubExp $ Var x_adj) (eSubExp $ Var prodnonzeroes))
+                )
+                (eBody $ return $ eParam a_bar_param_rev)
+             )
+             (eBody $ return $ eParam a_bar_param_rev) 
+          )
+
+  as_adjup <- letExp "adjs" $ Op $ Screma w [as, as_adj] $ mapSOAC map_lam_rev
+
+  updateAdj as as_adjup
   
   where
     mkConst :: PrimType -> Integer -> SubExp
     mkConst (IntType t) = intConst t
     mkConst (FloatType t) = floatConst t . fromIntegral
+    getAdd :: PrimType -> BinOp
+    getAdd (IntType t) = Add t OverflowUndef
+    getAdd (FloatType t) = FAdd t
+    getDiv :: PrimType -> BinOp
+    getDiv (IntType t) = SDiv t Unsafe
+    getDiv (FloatType t) = FDiv t
