@@ -241,6 +241,8 @@ sinkGPU = sink onHostOp
     onHostOp :: Sinker (SinkRep GPU) (Op (SinkRep GPU))
     onHostOp vtable sinking (SegOp op) =
       first SegOp $ optimiseSegOp onHostOp vtable sinking op
+    onHostOp vtable sinking (GPUBody types body) =
+      first (GPUBody types) $ optimiseBody onHostOp vtable sinking body
     onHostOp _ _ op = (op, mempty)
 
 -- | Sinking for multicore.
