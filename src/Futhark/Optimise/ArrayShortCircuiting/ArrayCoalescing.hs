@@ -288,9 +288,7 @@ shortCircuitGPUMemHelper num_reds lvl lutab pat@(Pat ps0) space0 kernel_body td_
       (actv_return, inhibit_return) =
         if num_reds > 0
           then (actv0, inhibit0)
-          else
-            traceWith ("ps0: " <> pretty ps0 <> "\nspace0: " <> pretty space0 <> "\nps_and_space: " <> pretty ps_and_space <> "\nkernelBodyResult: " <> pretty (kernelBodyResult kernel_body) <> "\nsegmapcoals") $
-              foldl (makeSegMapCoals lvl td_env kernel_body) (actv0, inhibit0) $ zip ps_and_space $ kernelBodyResult kernel_body
+          else foldl (makeSegMapCoals lvl td_env kernel_body) (actv0, inhibit0) $ zip ps_and_space $ kernelBodyResult kernel_body
 
   -- Process kernel body statements
   bu_env' <- mkCoalsTabStms lutab (kernelBodyStms kernel_body) td_env $ bu_env {activeCoals = actv0 <> actv_return, inhibit = inhibit_return}
@@ -313,61 +311,62 @@ shortCircuitGPUMemHelper num_reds lvl lutab pat@(Pat ps0) space0 kernel_body td_
   -- in the vartab? Just add them all up? Yes
   --
   -- We also need to subtract the current index from the destination uses?
-  bu_env'' <-
-    foldM
-      ( \bu_env_f (k, entry) -> do
-          thread_writes <-
-            mconcat
-              <$> mapM
-                ( \(p, space) -> case M.lookup (patElemName p) $ vartab entry of
-                    Just (Coalesced _ (MemBlock _ _ _ ixf) _) ->
-                      -- aggSummaryMapPartial (scalarTable td_env) (unSegSpace space) $
-                      return $
-                        ixfunToAccessSummary $
-                          IxFun.slice ixf $
-                            fullSlice (IxFun.shape ixf) $
-                              Slice $
-                                map (DimFix . TPrimExp . flip LeafExp (IntType Int64) . fst) $
-                                  unSegSpace space
-                    Nothing -> return mempty
-                )
-                ps_and_space
-          let source_writes = srcwrts (memrefs entry) <> thread_writes
-          destination_uses <-
-            case dstrefs (memrefs entry)
-              `accessSubtract` dstrefs (maybe mempty memrefs $ M.lookup k $ activeCoals bu_env) of
-              Set s -> mconcat <$> mapM (\lm -> aggSummaryMapPartial (scalarTable td_env) (unSegSpace space0) (Set $ S.singleton lm)) (S.toList s)
-              -- Set s -> mconcat <$> mapM undefined (S.toList s)
-              Undeterminable -> return Undeterminable
-          -- destination_uses <-
-          --   aggSummaryMapPartial
-          --     (traceWith "aggSummaryMapPartial scalars" $ scalarTable td_env)
-          --     (traceWith "aggSummaryMapPartial segspace" $ unSegSpace space0)
-          --     $ dstrefs (memrefs entry)
-          --       `accessSubtract` dstrefs (maybe mempty memrefs $ M.lookup k $ activeCoals bu_env)
-          res <- liftIO $ noMemOverlap td_env destination_uses source_writes
-          if traceWith
-            ( "blabla pat: " <> pretty (head $ patNames pat) <> "\nk: " <> pretty k
-                <> "\ndstrefs: "
-                <> pretty (dstrefs $ memrefs entry)
-                <> "\nother dstrefs: "
-                <> pretty (dstrefs (maybe mempty memrefs $ M.lookup k $ activeCoals bu_env))
-                <> "\ndestination_uses: "
-                <> pretty destination_uses
-                <> "\nthread_writes: "
-                <> pretty thread_writes
-                <> "\nsource_writes: "
-                <> pretty (srcwrts $ memrefs entry)
-                <> "\nnoMemOverlap"
-            )
-            res
-            then return bu_env_f
-            else do
-              let (ac, inh) = markFailedCoal (activeCoals bu_env_f, inhibit bu_env_f) $ traceWith "marking this as failed now" k
-              return $ bu_env_f {activeCoals = ac, inhibit = inh}
-      )
-      bu_env'
-      $ M.toList $ activeCoals bu_env'
+  let bu_env'' = bu_env'
+  -- bu_env'' <-
+  --   foldM
+  --     ( \bu_env_f (k, entry) -> do
+  --         thread_writes <-
+  --           mconcat
+  --             <$> mapM
+  --               ( \(p, space) -> case M.lookup (patElemName p) $ vartab entry of
+  --                   Just (Coalesced _ (MemBlock _ _ _ ixf) _) ->
+  --                     -- aggSummaryMapPartial (scalarTable td_env) (unSegSpace space) $
+  --                     return $
+  --                       ixfunToAccessSummary $
+  --                         IxFun.slice ixf $
+  --                           fullSlice (IxFun.shape ixf) $
+  --                             Slice $
+  --                               map (DimFix . TPrimExp . flip LeafExp (IntType Int64) . fst) $
+  --                                 unSegSpace space
+  --                   Nothing -> return mempty
+  --               )
+  --               ps_and_space
+  --         let source_writes = srcwrts (memrefs entry) <> thread_writes
+  --         destination_uses <-
+  --           case dstrefs (memrefs entry)
+  --             `accessSubtract` dstrefs (maybe mempty memrefs $ M.lookup k $ activeCoals bu_env) of
+  --             Set s -> mconcat <$> mapM (\lm -> aggSummaryMapPartial (scalarTable td_env) (unSegSpace space0) (Set $ S.singleton lm)) (S.toList s)
+  --             -- Set s -> mconcat <$> mapM undefined (S.toList s)
+  --             Undeterminable -> return Undeterminable
+  --         -- destination_uses <-
+  --         --   aggSummaryMapPartial
+  --         --     (traceWith "aggSummaryMapPartial scalars" $ scalarTable td_env)
+  --         --     (traceWith "aggSummaryMapPartial segspace" $ unSegSpace space0)
+  --         --     $ dstrefs (memrefs entry)
+  --         --       `accessSubtract` dstrefs (maybe mempty memrefs $ M.lookup k $ activeCoals bu_env)
+  --         res <- liftIO $ noMemOverlap td_env destination_uses source_writes
+  --         if traceWith
+  --           ( "blabla pat: " <> pretty (head $ patNames pat) <> "\nk: " <> pretty k
+  --               <> "\ndstrefs: "
+  --               <> pretty (dstrefs $ memrefs entry)
+  --               <> "\nother dstrefs: "
+  --               <> pretty (dstrefs (maybe mempty memrefs $ M.lookup k $ activeCoals bu_env))
+  --               <> "\ndestination_uses: "
+  --               <> pretty destination_uses
+  --               <> "\nthread_writes: "
+  --               <> pretty thread_writes
+  --               <> "\nsource_writes: "
+  --               <> pretty (srcwrts $ memrefs entry)
+  --               <> "\nnoMemOverlap"
+  --           )
+  --           res
+  --           then return bu_env_f
+  --           else do
+  --             let (ac, inh) = markFailedCoal (activeCoals bu_env_f, inhibit bu_env_f) $ traceWith "marking this as failed now" k
+  --             return $ bu_env_f {activeCoals = ac, inhibit = inh}
+  --     )
+  --     bu_env'
+  --     $ M.toList $ activeCoals bu_env'
 
   actv <-
     mapM
@@ -413,20 +412,20 @@ shortCircuitGPUMemHelper num_reds lvl lutab pat@(Pat ps0) space0 kernel_body td_
                       Just (Coalesced knd mbd@(MemBlock _ _ _ ixfn) _) -> return $
                         case freeVarSubstitutions (scope td_env) (scalarTable td_env) ixfn of
                           Just fv_subst ->
-                            if ixfunPermutation ixfn == ixfunPermutation (ixfun $ fromJust $ getScopeMemInfo (patElemName p) $ scope td_env)
+                            if traceWith "permutation" $ (traceWith "ixfn" $ ixfunPermutation ixfn) == (traceWith "ixfn2" $ ixfunPermutation (ixfun $ fromJust $ getScopeMemInfo (patElemName p) $ scope td_env))
                               then
                                 let entry = coal_entry {vartab = M.insert (patElemName p) (Coalesced knd mbd fv_subst) (vartab coal_entry)}
                                     (ac, suc) =
                                       markSuccessCoal (activeCoals bu_env_f, successCoals bu_env_f) m_b entry
                                  in bu_env_f {activeCoals = ac, successCoals = suc}
                               else
-                                let (ac, inh) = markFailedCoal (activeCoals bu_env_f, inhibit bu_env_f) m_b
+                                let (ac, inh) = markFailedCoal (activeCoals bu_env_f, inhibit bu_env_f) $ traceWith "blab" m_b
                                  in bu_env_f {activeCoals = ac, inhibit = inh}
                           Nothing ->
-                            let (ac, inh) = markFailedCoal (activeCoals bu_env_f, inhibit bu_env_f) m_b
+                            let (ac, inh) = markFailedCoal (activeCoals bu_env_f, inhibit bu_env_f) $ traceWith "blab2" m_b
                              in bu_env_f {activeCoals = ac, inhibit = inh}
                     else
-                      let (ac, inh) = markFailedCoal (activeCoals bu_env_f, inhibit bu_env_f) m_b
+                      let (ac, inh) = markFailedCoal (activeCoals bu_env_f, inhibit bu_env_f) $ traceWith "blab3" m_b
                        in return $ bu_env_f {activeCoals = ac, inhibit = inh}
                 _ -> return bu_env_f
       )
@@ -541,7 +540,7 @@ fixPointCoalesce lutab fpar bdy topenv = do
       -- remove @fpar@ from @actv_tab@, as function's parameters cannot be merged
       mems = map ((\(MemBlock _ _ m _) -> m) . snd) $ getArrMemAssocFParam fpar
       (actv_tab', inhb_tab') =
-        foldl markFailedCoal (actv_tab, inhb_tab) mems
+        foldl markFailedCoal (actv_tab, inhb_tab) $ traceWith "marking these as failed" mems
 
       (succ_tab', failed_optdeps) = fixPointFilterDeps succ_tab M.empty
       inhb_tab'' = M.unionWith (<>) failed_optdeps inhb_tab'
@@ -570,7 +569,7 @@ fixPointCoalesce lutab fpar bdy topenv = do
               then (coal, inhb) -- all ok
               else -- optimistic dependencies failed for the current
               -- memblock; extend inhibited mem-block mergings.
-                markFailedCoal (coal, inhb) mb
+                markFailedCoal (coal, inhb) $ traceWith "akldjwe" mb
     filterDeps _ _ = error "In ArrayCoalescing.hs, fun filterDeps, impossible case reached!"
     failedOptDep coal _ mr
       | not (mr `M.member` coal) = True
@@ -1273,10 +1272,10 @@ mkCoalsHelper3PatternMatch pat e lutab td_env successCoals_tab activeCoals_tab i
                         ixf
                       Nothing ->
                         ind_y
-                 in (m_y, alias_fn ind, oneName m_x <> y_al, x_deps0)
+                 in traceWith "inside mkCoals" (m_y, alias_fn ind, oneName m_x <> y_al, x_deps0)
           success0 = IxFun.hasOneLmad ind_yx
           m_b_aliased_m_yx = areAnyAliased td_env m_b [m_yx] -- m_b \= m_yx
-       in case (success0, not m_b_aliased_m_yx, isInScope td_env m_yx) of -- nameIn m_yx (alloc td_env)
+       in case traceWith ("processNewCoalesce\nm_x: " <> pretty m_x <> "\nm_b: " <> pretty m_b <> "\nresult") (success0, not m_b_aliased_m_yx, isInScope td_env m_yx) of -- nameIn m_yx (alloc td_env)
             (True, True, True) ->
               -- Finally update the @activeCoals@ table with a fresh
               --   binding for @m_b@; if such one exists then overwrite.
@@ -1299,7 +1298,7 @@ mkCoalsHelper3PatternMatch pat e lutab td_env successCoals_tab activeCoals_tab i
                   is_inhibited = case M.lookup m_b inhibit_tab of
                     Just nms -> nameIn m_yx nms
                     Nothing -> False
-               in case (is_inhibited, mvtab) of
+               in case traceWith "and then" (is_inhibited, mvtab) of
                     (True, _) -> acc -- fail due to inhibited
                     (_, Nothing) -> acc -- fail early due to non-invertible aliasing
                     (_, Just vtab') ->
@@ -1327,9 +1326,11 @@ genCoalStmtInfo ::
 -- CASE a) @let x <- copy(b^{lu})@
 genCoalStmtInfo lutab scopetab pat (BasicOp (Copy b))
   | Pat [PatElem x (_, MemArray _ _ _ (ArrayIn m_x ind_x))] <- pat =
-    case (M.lookup x lutab, getScopeMemInfo b scopetab) of
+    case traceWith
+      ("Copy!\npat:" <> pretty x <> "\nm_x: " <> pretty m_x <> "\nb: " <> pretty b <> "\nyoho")
+      (M.lookup x lutab, getScopeMemInfo b scopetab) of
       (Just last_uses, Just (MemBlock tpb shpb m_b ind_b)) ->
-        if not (nameIn b last_uses)
+        if traceWith "and is it in?" $ not (nameIn b last_uses)
           then Nothing
           else Just [(CopyCoal, id, x, m_x, ind_x, b, m_b, ind_b, tpb, shpb)]
       _ -> Nothing

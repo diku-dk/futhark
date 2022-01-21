@@ -23,6 +23,9 @@ import Futhark.IR.Syntax hiding (Result)
 import Futhark.Util.Pretty
 import Z3.Monad
 
+traceWith' :: Show a => String -> a -> a
+traceWith' s a = trace (s <> ": " <> show a) a
+
 traceWith :: Pretty a => String -> a -> a
 traceWith s a = trace (s <> ": " <> pretty a) a
 
@@ -206,57 +209,54 @@ disjointZ3 scope less_thans non_negatives i1@(Interval lb1 ne1 st1) i2@(Interval
   | st1 == st2 = do
     let frees = namesToList $ freeIn less_thans <> freeIn non_negatives <> freeIn i1 <> freeIn i2
     -- result <- evalZ3With Nothing (opt "timeout" (30 :: Integer)) $
-    result <- evalZ3 $
-      trace
-        ( "disjointZ3\ni1: " <> pretty i1
-            <> "\ni2: "
-            <> pretty i2
-            <> "\nscope: "
-            <> pretty scope
-            <> "\nless_thans: "
-            <> pretty less_thans
-            <> "\nnon_negatives: "
-            <> pretty non_negatives
-        )
-        $ do
-          maybe_var_table <- sequence <$> mapM (\x -> fmap ((,) x) <$> valToZ3 scope x) frees
-          case fmap M.fromList maybe_var_table of
-            Nothing -> return Undef
-            Just var_table -> do
-              non_negs <- mapM (\vn -> join $ mkLe <$> mkInteger 0 <*> return (var_table M.! vn)) $ namesToList non_negatives
-              lts <- mapM (\(vn, pe) -> join $ mkLt <$> return (var_table M.! vn) <*> primExpToZ3 var_table pe) less_thans
-              nes <-
-                sequence
-                  [ join $ mkLt <$> mkInteger 0 <*> primExpToZ3 var_table (untyped ne1),
-                    join $ mkLt <$> mkInteger 0 <*> primExpToZ3 var_table (untyped ne2)
-                  ]
-              apps <- mapM toApp $ M.elems var_table
+    result <- evalZ3 $ do
+      maybe_var_table <- sequence <$> mapM (\x -> fmap ((,) x) <$> valToZ3 scope x) frees
+      case fmap M.fromList maybe_var_table of
+        Nothing -> return Undef
+        Just var_table -> do
+          non_negs <- mapM (\vn -> join $ mkLe <$> mkInteger 0 <*> return (var_table M.! vn)) $ namesToList non_negatives
+          lts <- mapM (\(vn, pe) -> join $ mkLt <$> return (var_table M.! vn) <*> primExpToZ3 var_table pe) less_thans
+          nes <-
+            sequence
+              [ join $ mkLt <$> mkInteger 0 <*> primExpToZ3 var_table (untyped ne1),
+                join $ mkLt <$> mkInteger 0 <*> primExpToZ3 var_table (untyped ne2)
+              ]
+          apps <- mapM toApp $ M.elems var_table
 
-              implies1 <-
-                mkAnd $
-                  nes
-                    <> non_negs
-                    <> lts
+          implies1 <-
+            mkAnd $
+              nes
+                <> non_negs
+                <> lts
 
-              implies2 <-
-                mkOr
-                  =<< sequence
-                    [ mkAnd
-                        =<< sequence
-                          [ join $ mkLt <$> primExpToZ3 var_table (untyped lb1) <*> primExpToZ3 var_table (untyped lb2),
-                            join $ mkLe <$> primExpToZ3 var_table (untyped $ lb1 + ne1) <*> primExpToZ3 var_table (untyped lb2)
-                          ],
-                      mkAnd
-                        =<< sequence
-                          [ join $ mkLt <$> primExpToZ3 var_table (untyped lb2) <*> primExpToZ3 var_table (untyped lb1),
-                            join $ mkLe <$> primExpToZ3 var_table (untyped $ lb2 + ne2) <*> primExpToZ3 var_table (untyped lb1)
-                          ]
-                    ]
-              assert =<< mkForallConst [] apps =<< mkImplies implies1 implies2
-              -- sexp <- solverToString
-              -- liftIO $ putStrLn sexp
-              check
-    case result of
+          implies2 <-
+            mkOr
+              =<< sequence
+                [ mkAnd
+                    =<< sequence
+                      [ join $ mkLt <$> primExpToZ3 var_table (untyped lb1) <*> primExpToZ3 var_table (untyped lb2),
+                        join $ mkLe <$> primExpToZ3 var_table (untyped $ lb1 + ne1) <*> primExpToZ3 var_table (untyped lb2)
+                      ],
+                  mkAnd
+                    =<< sequence
+                      [ join $ mkLt <$> primExpToZ3 var_table (untyped lb2) <*> primExpToZ3 var_table (untyped lb1),
+                        join $ mkLe <$> primExpToZ3 var_table (untyped $ lb2 + ne2) <*> primExpToZ3 var_table (untyped lb1)
+                      ]
+                ]
+          assert =<< mkForallConst [] apps =<< mkImplies implies1 implies2
+          -- sexp <- solverToString
+          -- liftIO $ putStrLn sexp
+          check
+    case traceWith'
+      ( "disjointZ3\ni1: " <> pretty i1
+          <> "\ni2: "
+          <> pretty i2
+          <> "\nless_thans: "
+          <> pretty less_thans
+          <> "\nnon_negatives: "
+          <> pretty non_negatives
+      )
+      $ result of
       Sat -> return True
       _ -> return False
   | otherwise = return False
@@ -270,6 +270,8 @@ i_9625 = vname "i" 9625
 i_9633 = vname "i" 9633
 
 gtid_8705 = vname "gtid" 8705
+
+gtid_8703 = vname "gtid" 8703
 
 num_blocks_8621 = vname "num_blocks" 8621
 
@@ -291,7 +293,8 @@ types =
       (i_9625, Prim $ IntType Int64),
       (i_9633, Prim $ IntType Int64),
       (gtid_8705, Prim $ IntType Int64),
-      (num_blocks_8621, Prim $ IntType Int64)
+      (num_blocks_8621, Prim $ IntType Int64),
+      (gtid_8703, Prim $ IntType Int64)
     ]
 
 lessthans =
@@ -300,7 +303,7 @@ lessthans =
     (gtid_8705, untyped $ sub64 (t num_blocks_8621) 1)
   ]
 
-nonnegs = namesFromList [b_8622, i_9625, i_9633, gtid_8705, num_blocks_8621]
+nonnegs = namesFromList [b_8622, i_9625, i_9633, gtid_8705, num_blocks_8621, gtid_8703]
 
 int1 = Interval (add_nw64 (add_nw64 (mul_nw64 (t b_8622) (t b_8622)) (mul_nw64 (mul_nw64 (t b_8622) (t b_8622)) (t i_9625))) (t i_9633)) 1 1
 

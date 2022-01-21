@@ -353,7 +353,7 @@ markFailedCoal (coal_tab, inhb_tab) src_mem =
       let failed_set = oneName $ dstmem coale
           failed_set' = failed_set <> fromMaybe mempty (M.lookup src_mem inhb_tab)
        in trace
-            ("Marking " <> pretty src_mem <> " as failed")
+            ("Marking " <> pretty src_mem <> " as failed: " <> pretty failed_set)
             ( M.delete src_mem coal_tab,
               M.insert src_mem failed_set' inhb_tab
             )
