@@ -376,48 +376,55 @@ optimizeWithAccInput (shape, arrs, Just (op, nes)) = do
 
 optimizeHostOp :: HostOp GPU op -> ReduceM (HostOp GPU op)
 optimizeHostOp (SegOp (SegMap lvl space types kbody)) =
-  SegOp . SegMap lvl space types <$> rewriteKernelBody kbody
+  SegOp . SegMap lvl space types <$> addReadsToKernelBody kbody
 optimizeHostOp (SegOp (SegRed lvl space ops types kbody)) = do
-  ops' <- mapM rewriteSegBinOp ops
-  SegOp . SegRed lvl space ops' types <$> rewriteKernelBody kbody
+  ops' <- mapM addReadsToSegBinOp ops
+  SegOp . SegRed lvl space ops' types <$> addReadsToKernelBody kbody
 optimizeHostOp (SegOp (SegScan lvl space ops types kbody)) = do
-  ops' <- mapM rewriteSegBinOp ops
-  SegOp . SegScan lvl space ops' types <$> rewriteKernelBody kbody
+  ops' <- mapM addReadsToSegBinOp ops
+  SegOp . SegScan lvl space ops' types <$> addReadsToKernelBody kbody
 optimizeHostOp (SegOp (SegHist lvl space ops types kbody)) = do
-  ops' <- mapM rewriteHistOp ops
-  SegOp . SegHist lvl space ops' types <$> rewriteKernelBody kbody
+  ops' <- mapM addReadsToHistOp ops
+  SegOp . SegHist lvl space ops' types <$> addReadsToKernelBody kbody
 optimizeHostOp (SizeOp op) =
   pure (SizeOp op)
 optimizeHostOp OtherOp {} =
   -- These should all have been taken care of in the unstreamGPU pass.
   compilerBugS "optimizeHostOp: unhandled OtherOp"
 optimizeHostOp (GPUBody types body) =
-  GPUBody types <$> rewriteBody body
+  GPUBody types <$> addReadsToBody body
 
-rewriteSegBinOp :: SegBinOp GPU -> ReduceM (SegBinOp GPU)
-rewriteSegBinOp op = do
-  f' <- rewriteLambda (segBinOpLambda op)
+addReadsToSegBinOp :: SegBinOp GPU -> ReduceM (SegBinOp GPU)
+addReadsToSegBinOp op = do
+  f' <- addReadsToLambda (segBinOpLambda op)
   pure (op {segBinOpLambda = f'})
 
-rewriteHistOp :: HistOp GPU -> ReduceM (HistOp GPU)
-rewriteHistOp op = do
-  f' <- rewriteLambda (histOp op)
+addReadsToHistOp :: HistOp GPU -> ReduceM (HistOp GPU)
+addReadsToHistOp op = do
+  f' <- addReadsToLambda (histOp op)
   pure (op {histOp = f'})
 
-rewriteLambda :: Lambda GPU -> ReduceM (Lambda GPU)
-rewriteLambda f = do
-  body' <- rewriteBody (lambdaBody f)
+addReadsToLambda :: Lambda GPU -> ReduceM (Lambda GPU)
+addReadsToLambda f = do
+  body' <- addReadsToBody (lambdaBody f)
   pure (f {lambdaBody = body'})
 
-rewriteBody :: BodyT GPU -> ReduceM (BodyT GPU)
-rewriteBody body = do
-  (body', st) <- runStateT (cloneBody body) (initialCloneState Reuse)
-  pure body' {bodyStms = clonePrologue st >< bodyStms body'}
+addReadsToBody :: BodyT GPU -> ReduceM (BodyT GPU)
+addReadsToBody body = do
+  (body', prologue) <- addReadsHelper body
+  pure body' {bodyStms = prologue >< bodyStms body'}
 
-rewriteKernelBody :: KernelBody GPU -> ReduceM (KernelBody GPU)
-rewriteKernelBody kbody = do
-  (kbody', st) <- runStateT (cloneKernelBody kbody) (initialCloneState Reuse)
-  pure kbody' {kernelBodyStms = clonePrologue st >< kernelBodyStms kbody'}
+addReadsToKernelBody :: KernelBody GPU -> ReduceM (KernelBody GPU)
+addReadsToKernelBody kbody = do
+  (kbody', prologue) <- addReadsHelper kbody
+  pure kbody' {kernelBodyStms = prologue >< kernelBodyStms kbody'}
+
+addReadsHelper :: (FreeIn a, Substitute a) => a -> ReduceM (a, Stms GPU)
+addReadsHelper x = do
+  let from = namesToList (freeIn x)
+  (to, st) <- runStateT (mapM rename from) initialCloneState
+  let rename_map = M.fromList (zip from to)
+  pure (substituteNames rename_map x, clonePrologue st)
 
 -- | Migrate a statement to device, ensuring all its bound variables used on
 -- host will remain available with the same names.
@@ -448,7 +455,7 @@ moveStm out stm = do
 -- result values wrapped in single element arrays.
 inGPUBody :: CloneM (Stm GPU) -> ReduceM (Stm GPU)
 inGPUBody m = do
-  (stm, st) <- runStateT m (initialCloneState Rebind)
+  (stm, st) <- runStateT m initialCloneState
   let prologue = clonePrologue st
 
   let pes = patElems (stmPat stm)
@@ -466,43 +473,22 @@ data CloneState = CloneState
   { -- | Maps variables in the original program to names to be used by clones.
     cloneRenames :: IM.IntMap VName,
     -- | Statements to be added as a prologue before cloned statements.
-    clonePrologue :: Stms GPU,
-    -- | Whether cloned name bindings should be substituted with new names.
-    cloneRebind :: RebindOption
+    clonePrologue :: Stms GPU
   }
 
-data RebindOption
-  = -- | Replace cloned names with new 'VName's.
-    Rebind
-  | -- | Reuse names when cloned.
-    Reuse
-
-initialCloneState :: RebindOption -> CloneState
-initialCloneState rebind =
+initialCloneState :: CloneState
+initialCloneState =
   CloneState
     { cloneRenames = IM.empty,
-      clonePrologue = empty,
-      cloneRebind = rebind
+      clonePrologue = empty
     }
 
--- | Reuse or replace a name with a fresh name, based on configuration.
+-- | Create a fresh name, registering which name it is based on.
 cloneName :: VName -> CloneM VName
 cloneName n = do
-  rebind <- gets cloneRebind
-  case rebind of
-    Rebind -> do
-      n' <- lift (newName n)
-      modify $ \st ->
-        let renames' = IM.insert (baseTag n) n' (cloneRenames st)
-         in st {cloneRenames = renames'}
-      pure n'
-    Reuse -> pure n
-
-cloneKernelBody :: KernelBody GPU -> CloneM (KernelBody GPU)
-cloneKernelBody (KernelBody _ stms res) = do
-  stms' <- cloneStms stms
-  res' <- mapM renameKernelResult res
-  pure (KernelBody () stms' res')
+  n' <- lift (newName n)
+  modify $ \st -> st {cloneRenames = IM.insert (baseTag n) n' (cloneRenames st)}
+  pure n'
 
 cloneBody :: BodyT GPU -> CloneM (BodyT GPU)
 cloneBody (Body _ stms res) = do
@@ -579,13 +565,6 @@ rename n = do
 
 renameResult :: Result -> CloneM Result
 renameResult = mapM renameSubExpRes
-
-renameKernelResult :: KernelResult -> CloneM KernelResult
-renameKernelResult kres = do
-  let from = namesToList (freeIn kres)
-  to <- mapM rename from
-  let rename_map = M.fromList (zip from to)
-  pure (substituteNames rename_map kres)
 
 renameSubExpRes :: SubExpRes -> CloneM SubExpRes
 renameSubExpRes (SubExpRes certs se) = do

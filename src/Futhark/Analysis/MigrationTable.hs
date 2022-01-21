@@ -655,6 +655,13 @@ graphStm :: Stm GPU -> Grapher ()
 graphStm stm = do
   let bs = boundBy stm
   let e = stmExp stm
+  -- IMPORTANT! It is generally assumed that all scalars within types and
+  -- shapes are present on host.
+  -- Any expression that produces a type wherein one of its scalar operands
+  -- appears must therefore ensure that that scalar operand is marked as a
+  -- size variable (see 'hostSize' function).
+  -- Currently all relevant expressions are treated as host-only but the
+  -- above is relevant if this changes.
   case e of
     BasicOp SubExp {} ->
       graphSimple bs e
@@ -792,6 +799,7 @@ graphNewArray :: Exp GPU -> Grapher ()
 -- longer than the reads that can be eliminated by migrating the statement.
 -- It is thus risky to migrate such a statement.
 graphNewArray = graphHostOnly
+
 -- TODO: Conduct an experiment to measure the difference
 
 -- | Graph a statement that only can execute on host and thus requires all its
@@ -1164,6 +1172,7 @@ graphedScalarOperands e =
     initial = (IS.empty, S.empty) -- scalar operands, accumulator tokens
     captureName n = modify $ \(is, accs) -> (IS.insert (nameToId n) is, accs)
     captureAcc a = modify $ \(is, accs) -> (is, S.insert a accs)
+    collectFree x = mapM_ captureName (namesToList $ freeIn x)
 
     collect b@BasicOp {} =
       collectBasic b
@@ -1172,8 +1181,9 @@ graphedScalarOperands e =
     collect (If cond tbranch fbranch _) =
       collectSubExp cond >> collectBody tbranch >> collectBody fbranch
     collect (DoLoop params lform body) =
-      mapM_ (collectSubExp . snd) params >>
-        collectLForm lform >> collectBody body
+      mapM_ (collectSubExp . snd) params
+        >> collectLForm lform
+        >> collectBody body
     collect (WithAcc accs f) =
       collectWithAcc accs f
     collect (Op op) =
@@ -1215,16 +1225,30 @@ graphedScalarOperands e =
       mapM_ collectSubExp nes
       when used $ collectBody (lambdaBody op)
 
-    -- SegLevel contains just tunable runtime constants, which are host-only.
-    -- SegSpace and Types only refers to array sizes, which always reside on
-    -- host. Kernel bodies are explicitly skipped as all those occur on device.
+    -- All variables referred to by SegOp can be divided into these categories:
+    --
+    --   * Size variables (in types, shapes, SegSpace, ...) that are assumed to
+    --     be present on host.
+    --
+    --   * Variables computed by host-only SizeOp statements, such as those
+    --     that appear in SegLevel.
+    --
+    --   * Variables bound within the kernel body.
+    --
+    --   * Neutral elements provided by the programmer.
+    --
+    -- In the current compiler implementation the neutral elements are the only
+    -- variables that in principle might depend on a read and thus can appear
+    -- in the graph.
+    collectHostOp (SegOp SegMap {}) = pure ()
     collectHostOp (SegOp (SegRed _ _ ops _ _)) = mapM_ collectSegBinOp ops
     collectHostOp (SegOp (SegScan _ _ ops _ _)) = mapM_ collectSegBinOp ops
     collectHostOp (SegOp (SegHist _ _ ops _ _)) = mapM_ collectHistOp ops
-    collectHostOp (SegOp SegMap {}) = pure ()
-    collectHostOp (GPUBody _ _) = pure ()
-    collectHostOp op = mapM_ captureName (IM.elems $ namesIntMap $ freeIn op)
+    collectHostOp (SizeOp op) = collectFree op
+    collectHostOp (OtherOp op) = collectFree op
+    collectHostOp GPUBody {} = pure ()
 
-    collectSegBinOp (SegBinOp _ _ nes _) = mapM_ collectSubExp nes
-    collectHistOp (HistOp _ rf _ nes _ _) =
-      collectSubExp rf >> mapM_ collectSubExp nes
+    collectSegBinOp (SegBinOp _ _ nes _) =
+      mapM_ collectSubExp nes
+    collectHistOp (HistOp _ _ _ nes _ _) =
+      mapM_ collectSubExp nes
