@@ -45,13 +45,17 @@ Scans and reductions
 The ``scan`` and ``reduce`` SOACs are rather inefficient when their
 operators are on arrays.  If possible, use tuples instead (see
 :ref:`performance-small-arrays`).  The one exception is when the
-operator is a ``map2`` or equivalent.  Example::
+operator is a ``map2`` or equivalent.  Example:
+
+.. code-block:: futhark
 
   reduce (map2 (+)) (replicate n 0) xss
 
 Such "vectorised" operators are typically handled quite efficiently.
 Although to be on the safe side, you can rewrite the above by
-interchanging the ``reduce`` and ``map``::
+interchanging the ``reduce`` and ``map``:
+
+.. code-block:: futhark
 
   map (reduce (+) 0) (transpose xss)
 
@@ -85,7 +89,9 @@ Nested parallelism
 
 Futhark allows nested parallelism, understood as a parallel construct
 used inside some other parallel construct.  The simplest example is
-nested SOACs.  Example::
+nested SOACs.  Example:
+
+.. code-block:: futhark
 
   map (\xs -> reduce (+) 0 xs) xss
 
@@ -126,7 +132,9 @@ details.
 The main restriction is that the GPU backends can only handle
 *regular* nested parallelism, meaning that the sizes of inner parallel
 dimensions are invariant to the outer parallel dimensions.  For
-example, this expression contains *irregular* nested parallelism::
+example, this expression contains *irregular* nested parallelism:
+
+.. code-block:: futhark
 
   map (\i -> reduce (+) 0 (iota i)) is
 
@@ -182,8 +190,8 @@ record compared to using a tuple.
 Sum Types
 ~~~~~~~~~
 
-A starting point, a sum type is turned into a tuple containing all the
-payload components in order, prefixed with an `i8` tag to identify the
+A sum type value is represented as a tuple containing all the payload
+components in order, prefixed with an `i8` tag to identify the
 constructor.  For example,
 
 .. code-block:: futhark
@@ -345,7 +353,9 @@ Generally, ``map`` can always be fused as a producer, but ``scan``,
 
 *Horizontal fusion* occurs when two SOACs take as input the same
 array, but are not themselves in a producer-consumer relationship.
-Example::
+Example:
+
+.. code-block:: futhark
 
    (map f xs, map g xs)
 
@@ -418,7 +428,9 @@ results in slow compile times, but can also affect run-time
 performance.  In many cases this is currently unavoidable, but
 sometimes the program can be rewritten such that instead of calling
 the same function in multiple places, it is called in a single place,
-in a loop.  E.g. we might rewrite ``f x (f y (f z v))`` as::
+in a loop.  E.g. we might rewrite ``f x (f y (f z v))`` as:
+
+.. code-block:: futhark
 
   loop acc = v for a in [z,y,x] do
     f a acc

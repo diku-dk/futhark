@@ -170,6 +170,7 @@ unExistentialiseMemory vtable pat _ (cond, tbranch, fbranch, ifdec)
         Just tse <- maybeNth j $ bodyResult tbranch,
         Just fse <- maybeNth j $ bodyResult fbranch,
         mem `onlyUsedIn` patElemName pat_elem,
+        length (IxFun.base ixfun) == shapeRank shape, -- See #1325
         all knownSize (shapeDims shape),
         not $ freeIn ixfun `namesIntersect` namesFromList (patNames pat),
         fse /= tse =

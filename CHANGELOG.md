@@ -15,10 +15,35 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+* Yet another in-place lowering issue (#1569).
+
+## [0.21.4]
+
+### Fixed
+
+* A size inference bug in type checking of `loop`s (#1565).
+
+* Exotic flattening bug (#1563).
+
+* Segmented `reduce_by_index` with fairly small histogram size would
+  use vastly more memory than needed.
+
+## [0.21.3]
+
+### Added
+
+* Parse errors now list possible expected tokens.
+
+* Lexer errors now mention the file.
+
+### Fixed
+
 * Overloaded number literals cannot be sum types (#1557).
 
 * Defective GPU code generation for vectorised non-commutative
   operatators (#1559).
+
+* Excessive memory usage for some programs (#1325).
 
 ## [0.21.2]
 
