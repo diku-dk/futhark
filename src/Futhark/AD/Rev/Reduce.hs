@@ -7,6 +7,7 @@
 module Futhark.AD.Rev.Reduce
   ( diffReduce,
     diffMinMaxReduce,
+    diffVecMinMaxOrMulReduce,
   )
 where
 
@@ -277,3 +278,15 @@ diffMinMaxReduce _ops x aux w minmax ne as m = do
     letSubExp "minmax_in_bounds" . BasicOp $
       CmpOp (CmpSlt Int64) (intConst Int64 0) w
   updateAdjIndex as (CheckBounds (Just in_bounds), Var x_ind) (Var x_adj)
+  
+--
+-- Special case of reduce with vectorised min/max:
+--    let x = reduce (map2 minmax) nes as
+-- Idea: 
+--    rewrite to
+--      let x = map2 (\as ne -> reduce minmax ne as) (transpose as) nes
+--    and diff
+diffVecMinMaxOrMulReduce ::
+  VjpOps -> Pat -> StmAux () -> SubExp -> SubExp -> BinOp -> VName -> VName -> ADM () -> ADM ()
+diffVecMinMaxOrMulReduce _ops x aux w n op ne as m =
+  error "todo"

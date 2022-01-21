@@ -17,6 +17,7 @@ import Futhark.Builder
 import Futhark.IR.SOACS
 import Futhark.Tools
 import Futhark.Util (chunks)
+import Data.List (find)
 
 -- We split any multi-op scan or reduction into multiple operations so
 -- we can detect special cases.  Post-AD, the result may be fused
@@ -44,8 +45,27 @@ commonSOAC pat aux soac m = do
   m
   returnSweepCode $ mapM lookupAdj $ patNames pat
 
+lamIsMap :: Lambda -> Maybe [ScremaForm SOACS]
+lamIsMap lam = mapM splitStm $ bodyResult $ lambdaBody lam
+  where
+    splitStm (SubExpRes cs (Var res)) = do
+      guard $ cs == mempty
+      Let _ _ (Op (Screma _ _ sf)) <-
+        find (([res] ==) . patNames . stmPat) $
+          stmsToList $ bodyStms $ lambdaBody lam
+      return sf
+    splitStm _ = Nothing
+
 vjpSOAC :: VjpOps -> Pat -> StmAux () -> SOAC SOACS -> ADM () -> ADM ()
 vjpSOAC ops pat aux soac@(Screma w as form) m
+  | Just [red] <- isReduceSOAC form,
+    [Var ne] <- redNeutral red,
+    [a] <- as,
+    Just [sf] <- lamIsMap$ redLambda red, 
+    Just [(op, _, _, _)] <- lamIsBinOp =<< isMapSOAC sf,
+    isMinMaxOp op || isMulOp op,
+    [Array _ (Shape [n]) _] <- lambdaReturnType $ redLambda red = 
+    diffVecMinMaxOrMulReduce ops pat aux w n op ne a m
   | Just reds <- isReduceSOAC form,
     length reds > 1 =
     splitScanRed ops (reduceSOAC, redNeutral) (pat, aux, reds, w, as) m
@@ -67,6 +87,9 @@ vjpSOAC ops pat aux soac@(Screma w as form) m
     isMinMaxOp (UMax _) = True
     isMinMaxOp (FMax _) = True
     isMinMaxOp _ = False
+    isMulOp (Mul _ _)   = True
+    isMulOp (FMul _)    = True 
+    isMulOp _           = False
 vjpSOAC ops pat aux soac@(Screma w as form) m
   | Just scans <- isScanSOAC form,
     length scans > 1 =
