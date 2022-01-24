@@ -475,7 +475,7 @@ aggSummaryOne iterator_var lower_bound spn lmad@(IxFun.LMAD offset0 dims0)
                 <> "\nnew_lmad: "
                 <> pretty new_lmad
             )
-            undefined -- Undeterminable
+            Undeterminable
       else return $ Set $ S.singleton new_lmad
   where
     incPerm dim = dim {IxFun.ldPerm = IxFun.ldPerm dim + 1}
