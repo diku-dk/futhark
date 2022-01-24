@@ -370,23 +370,18 @@ diffMulReduce _ops x aux w mul ne as m = do
   m
 
   x_adj <- lookupAdjVal x
-  as_adj <- lookupAdjVal as
 
   a_param_rev <- newParam "a" $ Prim t
-  a_bar_param_rev <- newParam "a_bar" $ Prim t
   map_lam_rev <- 
-    mkLambda [a_param_rev, a_bar_param_rev] $
+    mkLambda [a_param_rev] $
       fmap varsRes . letTupExp "adj_res" =<<
         eIf
           (eCmpOp (CmpEq int64) (eSubExp $ intConst Int64 0) (eSubExp $ Var zeros))
           (eBody $ return $
-             eBinOp 
-               (getAdd t) 
-               (eParam a_bar_param_rev) 
-               (eBinOp mul 
-                  (eSubExp $ Var x_adj) (
-                    eBinOp (getDiv t) (eSubExp $ Var prodnonzeroes) 
-                    (eParam a_param_rev)))
+             eBinOp mul 
+               (eSubExp $ Var x_adj) (
+                  eBinOp (getDiv t) (eSubExp $ Var prodnonzeroes) 
+                  (eParam a_param_rev))
           )
           (eBody $ return $
              eIf
@@ -395,14 +390,14 @@ diffMulReduce _ops x aux w mul ne as m = do
                 eIf 
                 (eCmpOp (CmpEq t) (eParam a_param_rev) (eSubExp $ mkConst t 0))
                 (eBody $ return $
-                   eBinOp (getAdd t) (eParam a_bar_param_rev) (eBinOp mul (eSubExp $ Var x_adj) (eSubExp $ Var prodnonzeroes))
+                   eBinOp mul (eSubExp $ Var x_adj) (eSubExp $ Var prodnonzeroes)
                 )
-                (eBody $ return $ eParam a_bar_param_rev)
+                (eBody $ return $ eSubExp $ mkConst t 0)
              )
-             (eBody $ return $ eParam a_bar_param_rev) 
+             (eBody $ return $ eSubExp $ mkConst t 0)
           )
 
-  as_adjup <- letExp "adjs" $ Op $ Screma w [as, as_adj] $ mapSOAC map_lam_rev
+  as_adjup <- letExp "adjs" $ Op $ Screma w [as] $ mapSOAC map_lam_rev
 
   updateAdj as as_adjup
   
@@ -410,9 +405,6 @@ diffMulReduce _ops x aux w mul ne as m = do
     mkConst :: PrimType -> Integer -> SubExp
     mkConst (IntType t) = intConst t
     mkConst (FloatType t) = floatConst t . fromIntegral
-    getAdd :: PrimType -> BinOp
-    getAdd (IntType t) = Add t OverflowUndef
-    getAdd (FloatType t) = FAdd t
     getDiv :: PrimType -> BinOp
     getDiv (IntType t) = SDiv t Unsafe
     getDiv (FloatType t) = FDiv t
