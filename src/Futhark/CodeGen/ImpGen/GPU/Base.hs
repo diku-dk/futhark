@@ -25,7 +25,9 @@ module Futhark.CodeGen.ImpGen.GPU.Base
     virtualiseGroups,
     kernelLoop,
     groupCoverSpace,
-    precomputeSegOpIDs,
+    Precomputed,
+    precomputeConstants,
+    precomputedConstants,
     atomicUpdateLocking,
     AtomicBinOp,
     Locking (..),
@@ -93,10 +95,17 @@ data KernelConstants = KernelConstants
     kernelThreadActive :: Imp.TExp Bool,
     -- | A mapping from dimensions of nested SegOps to already
     -- computed local thread IDs.  Only valid in non-virtualised case.
-    kernelLocalIdMap :: M.Map [SubExp] [Imp.TExp Int32]
+    kernelLocalIdMap :: M.Map [SubExp] [Imp.TExp Int32],
+    -- | Mapping from dimensions of nested SegOps to how many
+    -- iterations the virtualisation loop needs.
+    kernelChunkItersMap :: M.Map [SubExp] (Imp.TExp Int32)
   }
 
-segOpSizes :: Stms GPUMem -> S.Set [SubExp]
+-- | The sizes of nested iteration spaces in the kernel.
+type SegOpSizes = S.Set [SubExp]
+
+-- | Find the sizes of nested parallelism in a 'SegOp' body.
+segOpSizes :: Stms GPUMem -> SegOpSizes
 segOpSizes = onStms
   where
     onStms = foldMap (onExp . stmExp)
@@ -108,14 +117,36 @@ segOpSizes = onStms
       onStms (bodyStms body)
     onExp _ = mempty
 
-precomputeSegOpIDs :: Stms GPUMem -> InKernelGen a -> InKernelGen a
-precomputeSegOpIDs stms m = do
+-- | Various useful precomputed information.
+data Precomputed = Precomputed
+  { pcSegOpSizes :: SegOpSizes,
+    pcChunkItersMap :: M.Map [SubExp] (Imp.TExp Int32)
+  }
+
+-- | Precompute various constants and useful information.
+precomputeConstants :: Count GroupSize (Imp.TExp Int64) -> Stms GPUMem -> CallKernelGen Precomputed
+precomputeConstants group_size stms = do
+  let sizes = segOpSizes stms
+  iters_map <- M.fromList <$> mapM mkMap (S.toList sizes)
+  pure $ Precomputed sizes iters_map
+  where
+    mkMap dims = do
+      let n = product $ map Imp.pe64 dims
+      num_chunks <- dPrimVE "num_chunks" $ sExt32 $ n `divUp` unCount group_size
+      pure (dims, num_chunks)
+
+-- | Make use of various precomputed constants.
+precomputedConstants :: Precomputed -> InKernelGen a -> InKernelGen a
+precomputedConstants pre m = do
   ltid <- kernelLocalThreadId . kernelConstants <$> askEnv
-  new_ids <- M.fromList <$> mapM (mkMap ltid) (S.toList (segOpSizes stms))
+  new_ids <- M.fromList <$> mapM (mkMap ltid) (S.toList (pcSegOpSizes pre))
   let f env =
         env
           { kernelConstants =
-              (kernelConstants env) {kernelLocalIdMap = new_ids}
+              (kernelConstants env)
+                { kernelLocalIdMap = new_ids,
+                  kernelChunkItersMap = pcChunkItersMap pre
+                }
           }
   localEnv f m
   where
@@ -271,16 +302,27 @@ groupCoverSegSpace virt space m = do
         zipWithM_ dPrimV_ ltids =<< localThreadIDs dims
         wrap m
 
-  group_size <- kernelGroupSize . kernelConstants <$> askEnv
+  constants <- kernelConstants <$> askEnv
+  let group_size = kernelGroupSize constants
   -- Maybe we can statically detect that this is actually a
   -- SegNoVirtFull and generate ever-so-slightly simpler code.
   let virt' = if dims' == [group_size] then SegNoVirtFull else virt
   case virt' of
     SegVirt -> do
-      iterations <- dPrimVE "iterations" $ product $ map sExt32 dims'
-      groupLoop iterations $ \i -> do
-        dIndexSpace (zip ltids dims') $ sExt64 i
-        m
+      iters <- M.lookup dims . kernelChunkItersMap . kernelConstants <$> askEnv
+      case iters of
+        Nothing -> do
+          iterations <- dPrimVE "iterations" $ product $ map sExt32 dims'
+          groupLoop iterations $ \i -> do
+            dIndexSpace (zip ltids dims') $ sExt64 i
+            m
+        Just num_chunks -> do
+          let ltid = kernelLocalThreadId constants
+          sFor "chunk_i" num_chunks $ \chunk_i -> do
+            i <- dPrimVE "i" $ chunk_i * sExt32 group_size + ltid
+            sWhen (i .<. sExt32 group_size) $ do
+              dIndexSpace (zip ltids dims') $ sExt64 i
+              m
     SegNoVirt -> nonvirt (sWhen (isActive $ zip ltids dims))
     SegNoVirtFull -> nonvirt id
 
@@ -1074,6 +1116,7 @@ kernelInitialisationSimple (Count num_groups) (Count group_size) = do
           (Imp.le32 wave_size)
           true
           mempty
+          mempty
 
   let set_constants = do
         dPrim_ global_tid int32
@@ -1499,6 +1542,7 @@ simpleKernelConstants kernel_size desc = do
         (sExt32 (group_size * num_groups))
         0
         (Imp.le64 thread_gtid .<. kernel_size)
+        mempty
         mempty,
       set_constants
     )
