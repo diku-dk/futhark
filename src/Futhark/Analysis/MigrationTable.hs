@@ -36,6 +36,9 @@ import qualified Futhark.Analysis.MigrationTable.Graph as MG
 import Futhark.Error
 import Futhark.IR.GPU
 
+{- HLINT ignore "Use first" -}
+{- HLINT ignore "Use second" -}
+
 -- | Where the value bound by a name should be computed.
 data MigrationStatus
   = -- | The statement that computes the value should be moved to device.
@@ -1237,30 +1240,45 @@ graphedScalarOperands e =
       mapM_ collectSubExp nes
       when used $ collectBody (lambdaBody op)
 
-    -- All variables referred to by SegOp can be divided into these categories:
+    -- Does not collect named operands in
     --
-    --   * Size variables (in types, shapes, SegSpace, ...) that are assumed to
-    --     be present on host.
+    --   * types and shapes; size variables are assumed available to the host.
     --
-    --   * Variables computed by host-only SizeOp statements, such as those
-    --     that appear in SegLevel.
+    --   * use by the kernel body.
     --
-    --   * Variables bound within the kernel body.
-    --
-    --   * Neutral elements provided by the programmer.
-    --
-    -- In the current compiler implementation the neutral elements are the only
-    -- variables that in principle might depend on a read and thus can appear
-    -- in the graph.
-    collectHostOp (SegOp SegMap {}) = pure ()
-    collectHostOp (SegOp (SegRed _ _ ops _ _)) = mapM_ collectSegBinOp ops
-    collectHostOp (SegOp (SegScan _ _ ops _ _)) = mapM_ collectSegBinOp ops
-    collectHostOp (SegOp (SegHist _ _ ops _ _)) = mapM_ collectHistOp ops
+    -- All other operands are conservatively collected even if they generally
+    -- appear to be size variables or results computed by a SizeOp.
+    collectHostOp (SegOp (SegMap lvl sp _ _)) = do
+      collectSegLevel lvl
+      collectSegSpace sp
+    collectHostOp (SegOp (SegRed lvl sp ops _ _)) = do
+      collectSegLevel lvl
+      collectSegSpace sp
+      mapM_ collectSegBinOp ops
+    collectHostOp (SegOp (SegScan lvl sp ops _ _)) = do
+      collectSegLevel lvl
+      collectSegSpace sp
+      mapM_ collectSegBinOp ops
+    collectHostOp (SegOp (SegHist lvl sp ops _ _)) = do
+      collectSegLevel lvl
+      collectSegSpace sp
+      mapM_ collectHistOp ops
     collectHostOp (SizeOp op) = collectFree op
     collectHostOp (OtherOp op) = collectFree op
     collectHostOp GPUBody {} = pure ()
 
+    collectSegLevel (SegThread (Count num) (Count size) _) =
+      collectSubExp num >> collectSubExp size
+    collectSegLevel (SegGroup (Count num) (Count size) _) =
+      collectSubExp num >> collectSubExp size
+
+    collectSegSpace space =
+      mapM_ collectSubExp (segSpaceDims space)
+
     collectSegBinOp (SegBinOp _ _ nes _) =
       mapM_ collectSubExp nes
-    collectHistOp (HistOp _ _ _ nes _ _) =
+
+    collectHistOp (HistOp w rf _ nes _ _) = do
+      collectSubExp w
+      collectSubExp rf
       mapM_ collectSubExp nes
