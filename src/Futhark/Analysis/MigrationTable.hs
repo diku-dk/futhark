@@ -1044,9 +1044,12 @@ graphWithAcc bs inputs f = do
   actions <- IM.fromList <$> mapM (graph . extract) accs
   graphBody (lambdaBody f) `withActions` actions
 
-  -- Connect return variables to bound values.
-  ret <- mapM (onlyGraphedScalars . toSet) (bodyResult $ lambdaBody f)
-  mapM_ (uncurry createNode) $ zip bs ret
+  -- Connect return variables to bound values. No outgoing edge exists
+  -- from an accumulator vertex so skip those. Note that accumulators do
+  -- not map to returned arrays one-to-one but one-to-many.
+  let res = drop (length inputs) (bodyResult $ lambdaBody f)
+  ret <- mapM (onlyGraphedScalarSubExp . resSubExp) res
+  mapM_ (uncurry createNode) $ zip (reverse bs) (reverse ret)
   where
     graph (i, ts, comb) = do
       let op = fst <$> comb
@@ -1063,9 +1066,6 @@ graphWithAcc bs inputs f = do
     extract (Acc a _ ts _, (_, _, comb)) = (nameToId a, ts, comb)
     extract _ =
       compilerBugS "Type error: WithAcc expression did not return accumulator."
-
-    toSet (SubExpRes _ (Var n)) = S.singleton n
-    toSet _ = S.empty
 
 -- Graph the operator associated with updating an accumulator.
 -- The arguments are the 'Id' for the accumulator token, the element type of

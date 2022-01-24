@@ -312,21 +312,28 @@ optimizeStm out stm = do
         let body = lambdaBody lmd
         stms' <- optimizeStms empty (bodyStms body)
 
-        let rewrite (pe, SubExpRes certs se, t) =
+        let rewrite (SubExpRes certs se, t, pe) =
               do
                 se' <- resolveSubExp se
                 if se == se'
-                  then pure (pe, SubExpRes certs se, t)
+                  then pure (SubExpRes certs se, t, pe)
                   else do
                     pe' <- arrayizePatElem pe
                     let t' = patElemDec pe'
-                    pure (pe', SubExpRes certs se', t')
+                    pure (SubExpRes certs se', t', pe')
 
+        -- Accumulator return values do not map to arrays one-to-one but
+        -- one-to-many. They are not transformed however and can be mapped
+        -- as a no-op.
+        let len = length inputs
+        let (res0, res1) = splitAt len (bodyResult body)
+        let (rts0, rts1) = splitAt len (lambdaReturnType lmd)
         let pes = patElems (stmPat stm)
-        let res = bodyResult body
-        let rts = lambdaReturnType lmd
-        -- No rewriting of lambda parameters as they are all accumulators.
-        (pes', res', rts') <- unzip3 <$> mapM rewrite (zip3 pes res rts)
+        let (pes0, pes1) = splitAt (length pes - length res1) pes
+        (res1', rts1', pes1') <- unzip3 <$> mapM rewrite (zip3 res1 rts1 pes1)
+        let res' = res0 ++ res1'
+        let rts' = rts0 ++ rts1'
+        let pes' = pes0 ++ pes1'
 
         let body' = Body () stms' res'
         let lmd' = lmd {lambdaBody = body', lambdaReturnType = rts'}
