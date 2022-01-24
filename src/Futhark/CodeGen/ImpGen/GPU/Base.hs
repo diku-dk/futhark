@@ -111,6 +111,8 @@ segOpSizes = onStms
     onStms = foldMap (onExp . stmExp)
     onExp (Op (Inner (SegOp op))) =
       S.singleton $ map snd $ unSegSpace $ segSpace op
+    onExp (BasicOp (Replicate shape _)) =
+      S.singleton $ shapeDims shape
     onExp (If _ tbranch fbranch _) =
       onStms (bodyStms tbranch) <> onStms (bodyStms fbranch)
     onExp (DoLoop _ _ body) =
