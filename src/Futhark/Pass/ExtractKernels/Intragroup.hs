@@ -54,18 +54,21 @@ intraGroupParallelise ::
 intraGroupParallelise knest lam = runMaybeT $ do
   (ispace, inps) <- lift $ flatKernel knest
 
-  group_size <- newVName "computed_group_size"
   (num_groups, w_stms) <-
-    lift . runBuilder $
-      letSubExp "intra_num_groups"
-        =<< foldBinOp (Mul Int64 OverflowUndef) (intConst Int64 1) (map snd ispace)
+    lift $
+      runBuilder $
+        letSubExp "intra_num_groups"
+          =<< foldBinOp (Mul Int64 OverflowUndef) (intConst Int64 1) (map snd ispace)
+
+  let body = lambdaBody lam
+
+  group_size <- newVName "computed_group_size"
+  let intra_lvl = SegThread (Count num_groups) (Count $ Var group_size) SegNoVirt
 
   (wss_min, wss_avail, log, kbody) <-
     lift $
       localScope (scopeOfLParams $ lambdaParams lam) $
-        intraGroupParalleliseBody
-          (SegThread (Count num_groups) (Count (Var group_size)) SegVirt)
-          (lambdaBody lam)
+        intraGroupParalleliseBody intra_lvl body
 
   outside_scope <- lift askScope
   -- outside_scope may also contain the inputs, even though those are
@@ -80,12 +83,12 @@ intraGroupParallelise knest lam = runMaybeT $ do
     runBuilder $ do
       let foldBinOp' _ [] = eSubExp $ intConst Int64 1
           foldBinOp' bop (x : xs) = foldBinOp bop x xs
-      ws_avail <-
-        mapM (letSubExp "one_intra_par_avail" <=< foldBinOp' (Mul Int64 OverflowUndef)) $
-          filter (not . null) wss_avail
       ws_min <-
         mapM (letSubExp "one_intra_par_min" <=< foldBinOp' (Mul Int64 OverflowUndef)) $
           filter (not . null) wss_min
+      ws_avail <-
+        mapM (letSubExp "one_intra_par_avail" <=< foldBinOp' (Mul Int64 OverflowUndef)) $
+          filter (not . null) wss_avail
 
       -- The amount of parallelism available *in the worst case* is
       -- equal to the smallest parallel loop, or *at least* 1.
@@ -95,18 +98,16 @@ intraGroupParallelise knest lam = runMaybeT $ do
       -- The group size is either the maximum of the minimum parallelism
       -- exploited, or the desired parallelism (bounded by the max group
       -- size) in case there is no minimum.
-      max_group_size <-
-        letSubExp "max_group_size" $ Op $ SizeOp $ Out.GetSizeMax Out.SizeGroup
       letBindNames [group_size]
-        =<< eBinOp
-          (SMin Int64)
-          (eSubExp max_group_size)
-          ( if null ws_min
-              then eSubExp intra_avail_par
-              else foldBinOp' (SMax Int64) ws_min
-          )
+        =<< if null ws_min
+          then
+            eBinOp
+              (SMin Int64)
+              (eSubExp =<< letSubExp "max_group_size" (Op $ SizeOp $ Out.GetSizeMax Out.SizeGroup))
+              (eSubExp intra_avail_par)
+          else foldBinOp' (SMax Int64) ws_min
 
-      let inputIsUsed input = kernelInputName input `nameIn` freeIn (lambdaBody lam)
+      let inputIsUsed input = kernelInputName input `nameIn` freeIn body
           used_inps = filter inputIsUsed inps
 
       addStms w_stms
@@ -118,7 +119,7 @@ intraGroupParallelise knest lam = runMaybeT $ do
 
   let nested_pat = loopNestingPat first_nest
       rts = map (length ispace `stripArray`) $ patTypes nested_pat
-      lvl = SegGroup (Count num_groups) (Count (Var group_size)) SegNoVirt
+      lvl = SegGroup (Count num_groups) (Count $ Var group_size) SegNoVirt
       kstm =
         Let nested_pat aux $
           Op $ SegOp $ SegMap lvl kspace rts kbody'
@@ -192,6 +193,7 @@ intraGroupBody lvl body = do
 intraGroupStm :: SegLevel -> Stm -> IntraGroupM ()
 intraGroupStm lvl stm@(Let pat aux e) = do
   scope <- askScope
+  let lvl' = SegThread (segNumGroups lvl) (segGroupSize lvl) SegNoVirt
 
   case e of
     DoLoop merge form loopbody ->
@@ -250,7 +252,7 @@ intraGroupStm lvl stm@(Let pat aux e) = do
         let scanfun' = soacsLambdaToGPU scanfun
             mapfun' = soacsLambdaToGPU mapfun
         certifying (stmAuxCerts aux) $
-          addStms =<< segScan lvl pat mempty w [SegBinOp Noncommutative scanfun' nes mempty] mapfun' arrs [] []
+          addStms =<< segScan lvl' pat mempty w [SegBinOp Noncommutative scanfun' nes mempty] mapfun' arrs [] []
         parallelMin [w]
     Op (Screma w arrs form)
       | Just (reds, map_lam) <- isRedomapSOAC form,
@@ -258,7 +260,7 @@ intraGroupStm lvl stm@(Let pat aux e) = do
         let red_lam' = soacsLambdaToGPU red_lam
             map_lam' = soacsLambdaToGPU map_lam
         certifying (stmAuxCerts aux) $
-          addStms =<< segRed lvl pat mempty w [SegBinOp comm red_lam' nes mempty] map_lam' arrs [] []
+          addStms =<< segRed lvl' pat mempty w [SegBinOp comm red_lam' nes mempty] map_lam' arrs [] []
         parallelMin [w]
     Op (Hist w arrs ops bucket_fun) -> do
       ops' <- forM ops $ \(HistOp num_bins rf dests nes op) -> do
@@ -268,7 +270,7 @@ intraGroupStm lvl stm@(Let pat aux e) = do
 
       let bucket_fun' = soacsLambdaToGPU bucket_fun
       certifying (stmAuxCerts aux) $
-        addStms =<< segHist lvl pat w [] [] ops' bucket_fun' arrs
+        addStms =<< segHist lvl' pat w [] [] ops' bucket_fun' arrs
       parallelMin [w]
     Op (Stream w arrs Sequential accs lam)
       | chunk_size_param : _ <- lambdaParams lam -> do
@@ -306,7 +308,7 @@ intraGroupStm lvl stm@(Let pat aux e) = do
       certifying (stmAuxCerts aux) $ do
         let ts = zipWith (stripArray . length) dests_ws $ patTypes pat
             body = KernelBody () kstms krets
-        letBind pat $ Op $ SegOp $ SegMap lvl space ts body
+        letBind pat $ Op $ SegOp $ SegMap lvl' space ts body
 
       parallelMin [w]
     _ ->
