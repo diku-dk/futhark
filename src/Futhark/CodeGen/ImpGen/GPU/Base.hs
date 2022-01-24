@@ -270,7 +270,12 @@ groupCoverSegSpace virt space m = do
       nonvirt wrap = localOps threadOperations $ do
         zipWithM_ dPrimV_ ltids =<< localThreadIDs dims
         wrap m
-  case virt of
+
+  group_size <- kernelGroupSize . kernelConstants <$> askEnv
+  -- Maybe we can statically detect that this is actually a
+  -- SegNoVirtFull and generate ever-so-slightly simpler code.
+  let virt' = if dims' == [group_size] then SegNoVirtFull else virt
+  case virt' of
     SegVirt -> do
       iterations <- dPrimVE "iterations" $ product $ map sExt32 dims'
       groupLoop iterations $ \i -> do
