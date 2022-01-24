@@ -232,6 +232,9 @@ optimizeStm out stm = do
           -- return a result that now reside on device.
           let bmerge (res, tstms, fstms) (pe, tr, fr, bt) =
                 do
+                  let onHost (Var v) = (v ==) <$> resolveName v
+                      onHost _ = pure True
+
                   tr_on_host <- onHost (resSubExp tr)
                   fr_on_host <- onHost (resSubExp fr)
 
@@ -251,9 +254,9 @@ optimizeStm out stm = do
                       pure ((pe', tr', fr', bt') : res, tstms', fstms')
 
           let pes = patElems (stmPat stm)
-          let res = zip4 pes tres fres btypes
-          (res', tstms2, fstms2) <- foldM bmerge ([], tstms1, fstms1) res
-          let (pes', tres', fres', btypes') = unzip4 (reverse res')
+          let zipped = zip4 pes tres fres btypes
+          (zipped', tstms2, fstms2) <- foldM bmerge ([], tstms1, fstms1) zipped
+          let (pes', tres', fres', btypes') = unzip4 (reverse zipped')
 
           -- Rewrite statement.
           let tbranch' = Body () tstms2 tres'
@@ -268,28 +271,34 @@ optimizeStm out stm = do
 
         -- Update statement bound variables and parameters if their values
         -- have been migrated to device.
-        let lmerge (res, stms) (pe, (Param attrs pn pt, pval)) =
-              do
-                moved <- asks (shouldMove pn)
-                if not moved
-                  then pure ((pe, (Param attrs pn pt, pval)) : res, stms)
-                  else do
-                    pe' <- arrayizePatElem pe
+        let lmerge (res, stms) (pe, param, MoveToDevice) = do
+              let (Param _ pn pt, pval) = param
+              pe' <- arrayizePatElem pe
 
-                    -- Move the initial value to device if not already there.
-                    (stms', arr) <- storeScalar stms pval (fromDecl pt)
+              -- Move the initial value to device if not already there.
+              (stms', arr) <- storeScalar stms pval (fromDecl pt)
 
-                    pn' <- newName pn
-                    let pt' = toDecl (patElemDec pe') Nonunique
-                    let pval' = Var arr
+              pn' <- newName pn
+              let pt' = toDecl (patElemDec pe') Nonunique
+              let pval' = Var arr
+              let param' = (Param mempty pn' pt', pval')
 
-                    PatElem pn (fromDecl pt) `movedTo` pn'
+              PatElem pn (fromDecl pt) `movedTo` pn'
 
-                    pure ((pe', (Param mempty pn' pt', pval')) : res, stms')
+              pure ((pe', param') : res, stms')
+            lmerge _ (_, _, UsedOnHost) =
+              -- Initial loop parameter value and loop result should have
+              -- been made available on host instead.
+              compilerBugS "optimizeStm: unhandled host usage of loop param"
+            lmerge (res, stms) (pe, param, StayOnHost) =
+              pure ((pe, param) : res, stms)
+
+        mt <- ask
 
         let pes = patElems (stmPat stm)
-        (ps', out') <- foldM lmerge ([], out) (zip pes params)
-        let (pes', params') = unzip (reverse ps')
+        let mss = map (\(Param _ n _, _) -> statusOf n mt) params
+        (zipped', out') <- foldM lmerge ([], out) (zip3 pes params mss)
+        let (pes', params') = unzip (reverse zipped')
 
         body' <- optimizeBody body
         let e' = DoLoop params' lform body'
@@ -330,9 +339,6 @@ optimizeStm out stm = do
         op' <- optimizeHostOp op
         pure (out |> stm {stmExp = Op op'})
   where
-    onHost (Var v) = (v ==) <$> resolveName v
-    onHost _ = pure True
-
     addRead stms (pe@(PatElem n _), PatElem dev _)
       | n == dev = pure stms
       | otherwise = pe `migratedTo` (dev, stms)

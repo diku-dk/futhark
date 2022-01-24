@@ -70,6 +70,7 @@ module Futhark.Analysis.MigrationTable.Graph
     -- * Query
     member,
     get,
+    isSinkConnected,
     canReachSink,
 
     -- * Routing
@@ -130,10 +131,12 @@ data Routing
     -- vertex. The edge gained by reversal may be exhausted. Routing assumes
     -- that at most one 'FromNode' routing exists to each vertex in a graph.
     FromNode Id Exhaustion
+  deriving (Show, Eq, Ord)
 
 -- | Whether some edge is exhausted or not. No sink can be reached via an
 -- exhausted edge.
 data Exhaustion = Exhausted | NotExhausted
+  deriving (Show, Eq, Ord)
 
 -- | All relevant edges that have been declared from some vertex, plus
 -- bookkeeping to track their exhaustion and reversal.
@@ -145,6 +148,7 @@ data Edges
   | -- | All vertices that the vertex has a declared edge to, and which of
     -- those edges that are not exhausted nor reversed, if not all.
     ToNodes IdSet (Maybe IdSet)
+  deriving (Show, Eq, Ord)
 
 instance Semigroup Edges where
   ToSink <> _ = ToSink
@@ -256,6 +260,12 @@ member i (Graph m) = IM.member i m
 -- | Returns the vertex with the given id.
 get :: Id -> Graph m -> Maybe (Vertex m)
 get i (Graph m) = IM.lookup i m
+
+-- | Returns whether a vertex with the given id exists in the
+-- graph and is connected directly to a sink.
+isSinkConnected :: Id -> Graph m -> Bool
+isSinkConnected i g =
+  maybe False ((ToSink ==) . vertexEdges) (get i g)
 
 -- | @canReachSink g vs et i@ returns whether a sink can be reached via the
 -- vertex @v@ with id @i@ in @g@. @et@ identifies the type of edge that @v@ is

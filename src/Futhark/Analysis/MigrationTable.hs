@@ -4,6 +4,8 @@ module Futhark.Analysis.MigrationTable
 
     -- * Query
     MigrationTable,
+    MigrationStatus (..),
+    statusOf,
     moveToDevice,
     shouldMove,
     usedOnHost,
@@ -20,7 +22,7 @@ import qualified Data.IntMap.Strict as IM
 import qualified Data.IntSet as IS
 import Data.List (find, foldl')
 import qualified Data.Map.Strict as M
-import Data.Maybe (fromMaybe, isNothing)
+import Data.Maybe (fromJust, fromMaybe, isNothing)
 import Data.Set (Set, (\\))
 import qualified Data.Set as S
 import Futhark.Analysis.MigrationTable.Graph hiding
@@ -44,7 +46,7 @@ data MigrationStatus
     UsedOnHost
   | -- | The statement that computes the value should remain on host.
     StayOnHost
-  deriving (Eq, Ord)
+  deriving (Eq, Ord, Show)
 
 -- | Identifies
 --
@@ -869,16 +871,29 @@ graphLoop (b : bs) params lform body = do
   -- Graph loop params and body while capturing statistics.
   g0 <- getGraph
   stats <- captureBodyStats (subgraphId `graphIdFor` graphTheLoop)
-  let host_only = bodyHostOnly stats
   let ops = IS.filter (`MG.member` g0) (bodyOperands stats)
-  connectLoop -- merge return values with params
+
+  -- Connect loop condition to a sink if the body cannot be migrated.
+  let host_only = bodyHostOnly stats
+  when host_only $ case lform of
+    ForLoop _ _ (Var n) _ -> connectToSink (nameToId n)
+    WhileLoop n -> connectToSink (nameToId n)
+    _ -> pure ()
+
+  -- Merge return values with params. If a parameter is connected to a sink
+  -- then its matching return value must also be connected to a sink to ensure
+  -- that its value is available on host when the next iteration begins.
+  -- Since a parameter aliases its initial value, if a parameter is connected
+  -- to a sink then its initial value is guaranteed to be available on host.
+  connectLoop
 
   -- Route the sources within the loop body in isolation.
+  -- The loop graph must not be altered after this point.
   srcs <- routeSubgraph subgraphId
 
-  -- Graph the variables bound by the loop. A device read can be delayed
-  -- from one iteration to the next, so the corresponding variables bound
-  -- by the loop must be treated as a sources.
+  -- Graph the variables bound by the statement. A device read can be delayed
+  -- from one iteration to the next, so the corresponding variables bound by
+  -- the statement must be treated as a sources.
   mapM_ graphBinding loopValues
   g1 <- getGraph
   let (dbs, vs) = foldl' (deviceBindings g1) (IS.empty, MG.none) srcs
@@ -892,25 +907,15 @@ graphLoop (b : bs) params lform body = do
   -- TODO: Measure whether it is better to block delays through loops.
   foldM_ connectOperand vs (IS.elems ops)
 
-  -- If the loop contains host-only statements then it must execute on
-  -- host and the loop condition must be read from device if that is where
-  -- it resides.
-  -- Otherwise it might be beneficial to move the whole loop to device, to
-  -- avoid reading the (initial) loop condition value. This must be balanced
+  -- It might be beneficial to move the whole loop to device, to avoid
+  -- reading the (initial) loop condition value. This must be balanced
   -- against the need to read the values bound by the loop statement.
-  case (host_only, lform) of
-    (True, ForLoop _ _ (Var n) _) ->
-      connectToSink (nameToId n)
-    (False, ForLoop _ _ n@(Var _) _) ->
-      addEdges (ToNodes bindings Nothing) =<< onlyGraphedScalarSubExp n
-    (True, WhileLoop n) ->
-      connectToSink (nameToId n)
-    (False, WhileLoop n)
-      | i <- nameToId n,
-        Just (_, _, pval, _) <- find (\(_, p, _, _) -> p == i) loopValues,
-        Var _ <- pval ->
+  unless host_only $ case lform of
+    ForLoop _ _ n _ ->
+      onlyGraphedScalarSubExp n >>= addEdges (ToNodes bindings Nothing)
+    WhileLoop n
+      | (_, _, pval, _) <- loopValueFor n ->
         onlyGraphedScalarSubExp pval >>= addEdges (ToNodes bindings Nothing)
-    _ -> pure ()
   where
     subgraphId = fst b
 
@@ -923,6 +928,9 @@ graphLoop (b : bs) params lform body = do
        in filter (\((_, t), _, _, _) -> isScalarType t) tmp'
 
     bindings = IS.fromList $ map (\((i, _), _, _, _) -> i) loopValues
+
+    loopValueFor n =
+      fromJust $ find (\(_, p, _, _) -> p == nameToId n) loopValues
 
     graphTheLoop = do
       mapM_ graphParam loopValues
@@ -943,13 +951,17 @@ graphLoop (b : bs) params lform body = do
     graphForInElem (p, _) =
       when (isScalar p) $ addSource (nameToId $ paramName p, typeOf p)
 
-    connectLoop = mapM_ connectLoopParam loopValues
+    connectLoop = do
+      g <- getGraph
+      mapM_ (mergeLoopParam g) loopValues
 
-    connectLoopParam (_, p, _, res)
+    mergeLoopParam g (_, p, _, res)
       | Var n <- res,
-        op <- nameToId n,
-        op /= p =
-        addEdges (MG.oneEdge p) (IS.singleton op)
+        ret <- nameToId n,
+        ret /= p =
+        if isSinkConnected p g
+          then connectToSink ret
+          else addEdges (MG.oneEdge p) (IS.singleton ret)
       | otherwise =
         pure ()
 
