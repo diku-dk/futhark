@@ -311,62 +311,63 @@ shortCircuitGPUMemHelper num_reds lvl lutab pat@(Pat ps0) space0 kernel_body td_
   -- in the vartab? Just add them all up? Yes
   --
   -- We also need to subtract the current index from the destination uses?
-  let bu_env'' = bu_env'
-  -- bu_env'' <-
-  --   foldM
-  --     ( \bu_env_f (k, entry) -> do
-  --         thread_writes <-
-  --           mconcat
-  --             <$> mapM
-  --               ( \(p, space) -> case M.lookup (patElemName p) $ vartab entry of
-  --                   Just (Coalesced _ (MemBlock _ _ _ ixf) _) ->
-  --                     -- aggSummaryMapPartial (scalarTable td_env) (unSegSpace space) $
-  --                     return $
-  --                       ixfunToAccessSummary $
-  --                         IxFun.slice ixf $
-  --                           fullSlice (IxFun.shape ixf) $
-  --                             Slice $
-  --                               map (DimFix . TPrimExp . flip LeafExp (IntType Int64) . fst) $
-  --                                 unSegSpace space
-  --                   Nothing -> return mempty
-  --               )
-  --               ps_and_space
-  --         let source_writes = srcwrts (memrefs entry) <> thread_writes
-  --         destination_uses <-
-  --           case dstrefs (memrefs entry)
-  --             `accessSubtract` dstrefs (maybe mempty memrefs $ M.lookup k $ activeCoals bu_env) of
-  --             Set s -> mconcat <$> mapM (\lm -> aggSummaryMapPartial (scalarTable td_env) (unSegSpace space0) (Set $ S.singleton lm)) (S.toList s)
-  --             -- Set s -> mconcat <$> mapM undefined (S.toList s)
-  --             Undeterminable -> return Undeterminable
-  --         -- destination_uses <-
-  --         --   aggSummaryMapPartial
-  --         --     (traceWith "aggSummaryMapPartial scalars" $ scalarTable td_env)
-  --         --     (traceWith "aggSummaryMapPartial segspace" $ unSegSpace space0)
-  --         --     $ dstrefs (memrefs entry)
-  --         --       `accessSubtract` dstrefs (maybe mempty memrefs $ M.lookup k $ activeCoals bu_env)
-  --         res <- liftIO $ noMemOverlap td_env destination_uses source_writes
-  --         if traceWith
-  --           ( "blabla pat: " <> pretty (head $ patNames pat) <> "\nk: " <> pretty k
-  --               <> "\ndstrefs: "
-  --               <> pretty (dstrefs $ memrefs entry)
-  --               <> "\nother dstrefs: "
-  --               <> pretty (dstrefs (maybe mempty memrefs $ M.lookup k $ activeCoals bu_env))
-  --               <> "\ndestination_uses: "
-  --               <> pretty destination_uses
-  --               <> "\nthread_writes: "
-  --               <> pretty thread_writes
-  --               <> "\nsource_writes: "
-  --               <> pretty (srcwrts $ memrefs entry)
-  --               <> "\nnoMemOverlap"
-  --           )
-  --           res
-  --           then return bu_env_f
-  --           else do
-  --             let (ac, inh) = markFailedCoal (activeCoals bu_env_f, inhibit bu_env_f) $ traceWith "marking this as failed now" k
-  --             return $ bu_env_f {activeCoals = ac, inhibit = inh}
-  --     )
-  --     bu_env'
-  --     $ M.toList $ activeCoals bu_env'
+  bu_env'' <-
+    foldM
+      ( \bu_env_f (k, entry) -> do
+          thread_writes <-
+            mconcat
+              <$> mapM
+                ( \(p, space) -> case M.lookup (patElemName p) $ vartab entry of
+                    Just (Coalesced _ (MemBlock _ _ _ ixf) _) ->
+                      -- aggSummaryMapPartial (scalarTable td_env) (unSegSpace space) $
+                      return $
+                        ixfunToAccessSummary $
+                          IxFun.slice ixf $
+                            fullSlice (IxFun.shape ixf) $
+                              Slice $
+                                map (DimFix . TPrimExp . flip LeafExp (IntType Int64) . fst) $
+                                  unSegSpace space
+                    Nothing -> return mempty
+                )
+                ps_and_space
+          let source_writes = srcwrts (memrefs entry) <> thread_writes
+          destination_uses <-
+            case dstrefs (memrefs entry)
+              `accessSubtract` dstrefs (maybe mempty memrefs $ M.lookup k $ activeCoals bu_env) of
+              Set s -> mconcat <$> mapM (\lm -> aggSummaryMapPartial (scalarTable td_env) (unSegSpace space0) (Set $ S.singleton lm)) (S.toList s)
+              -- Set s -> mconcat <$> mapM undefined (S.toList s)
+              Undeterminable -> return Undeterminable
+          -- destination_uses <-
+          --   aggSummaryMapPartial
+          --     (traceWith "aggSummaryMapPartial scalars" $ scalarTable td_env)
+          --     (traceWith "aggSummaryMapPartial segspace" $ unSegSpace space0)
+          --     $ dstrefs (memrefs entry)
+          --       `accessSubtract` dstrefs (maybe mempty memrefs $ M.lookup k $ activeCoals bu_env)
+          res <- liftIO $ noMemOverlap td_env destination_uses source_writes
+          if traceWith
+            ( "blabla pat: " <> pretty (head $ patNames pat) <> " k: " <> pretty k <> " dstmem: " <> pretty (dstmem entry)
+                <> "\nactiveCoals: "
+                <> pretty (map (\(x, y) -> (x, dstmem y)) $ M.toList $ activeCoals bu_env')
+                <> "\ndstrefs: "
+                <> pretty (dstrefs $ memrefs entry)
+                <> "\nother dstrefs: "
+                <> pretty (dstrefs (maybe mempty memrefs $ M.lookup k $ activeCoals bu_env))
+                <> "\ndestination_uses: "
+                <> pretty destination_uses
+                <> "\nthread_writes: "
+                <> pretty thread_writes
+                <> "\nsource_writes: "
+                <> pretty (srcwrts $ memrefs entry)
+                <> "\nnoMemOverlap"
+            )
+            res
+            then return bu_env_f
+            else do
+              let (ac, inh) = markFailedCoal (activeCoals bu_env_f, inhibit bu_env_f) $ traceWith "marking this as failed now" k
+              return $ bu_env_f {activeCoals = ac, inhibit = inh}
+      )
+      bu_env'
+      $ M.toList $ activeCoals bu_env'
 
   actv <-
     mapM

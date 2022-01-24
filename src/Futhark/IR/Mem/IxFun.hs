@@ -1253,8 +1253,8 @@ disjoint3 scope less_thans non_negatives lmad1 lmad2 =
       (interval1', interval2') =
         unzip $
           intervalPairs
-            (reverse $ sortBy (compare `on` stride) interval1)
-            (reverse $ sortBy (compare `on` stride) interval2)
+            (reverse $ sortBy (compare `on` stride) $ reverse interval1)
+            (reverse $ sortBy (compare `on` stride) $ reverse interval2)
    in case ( distributeOffset pos_offset interval1',
              distributeOffset (map AlgSimplify2.negate neg_offset) interval2'
            ) of
@@ -1268,6 +1268,14 @@ disjoint3 scope less_thans non_negatives lmad1 lmad2 =
                       <> pretty lmad1
                       <> "\nlmad2: "
                       <> pretty lmad2
+                      <> "\noffset1: "
+                      <> pretty offset1
+                      <> "\noffset2: "
+                      <> pretty offset2
+                      <> "\nneg_offset: "
+                      <> pretty (map AlgSimplify2.negate neg_offset)
+                      <> "\npos_offset: "
+                      <> pretty pos_offset
                       <> "\ninterval1: "
                       <> pretty interval1
                       <> "\ninterval2: "
@@ -1308,19 +1316,37 @@ gtid_8473 = TPrimExp $ LeafExp (foo "gtid" 8473) $ IntType Int64
 
 gtid_8474 = TPrimExp $ LeafExp (foo "gtid" 8474) $ IntType Int64
 
+step_14414 = TPrimExp $ LeafExp (foo "step" 14414) $ IntType Int64
+
+gtid_16875 = TPrimExp $ LeafExp (foo "gtid" 16875) $ IntType Int64
+
+gtid_16876 = TPrimExp $ LeafExp (foo "gtid" 16876) $ IntType Int64
+
+m_14362 = TPrimExp $ LeafExp (foo "m" 14362) $ IntType Int64
+
 num_blocks_8284 = TPrimExp $ LeafExp (foo "num_blocks" 8284) $ IntType Int64
+
+gid_y_18126 = TPrimExp $ LeafExp (foo "gid_y" 18126) $ IntType Int64
+
+gid_x_18125 = TPrimExp $ LeafExp (foo "gid_x" 18125) $ IntType Int64
 
 add_nw64 = (+)
 
+add64 = (+)
+
 mul_nw64 = (*)
 
+mul64 = (*)
+
 sub64 = (-)
+
+sdiv64 = (Futhark.Util.IntegralExp.div)
 
 sub_nw64 = (-)
 
 foo s i = VName (nameFromString s) i
 
-nonnegs = freeIn [gtid_8472, gtid_8473, gtid_8474, num_blocks_8284]
+nonnegs = freeIn lm1 <> freeIn lm2
 
 -- halløj?: {offset: mul_nw64 (add_nw64 (1i64) (gtid_8473)) (256i64);
 --  strides: [1i64, 16i64]; rotates: [0i64, 0i64]; shape: [16i64, 16i64];
@@ -1329,45 +1355,44 @@ nonnegs = freeIn [gtid_8472, gtid_8473, gtid_8474, num_blocks_8284]
 lm1 :: LMAD (TPrimExp Int64 VName)
 lm1 =
   LMAD
-    ((1 + gtid_8473) * 256)
-    [ LMADDim 1 0 16 0 Inc,
-      LMADDim 16 0 16 1 Inc
+    (add_nw64 (mul_nw64 (add_nw64 (add64 (1) (step_14414)) (gtid_16875)) (mul_nw64 (1024) (sdiv64 (sub64 (add64 (32) (m_14362)) (1)) (32)))) (mul_nw64 (add64 (1) (step_14414)) (1024)))
+    [ LMADDim 1024 0 gtid_16876 0 Inc,
+      LMADDim 1024 0 1 1 Inc,
+      LMADDim 32 0 1 2 Inc,
+      LMADDim 128 0 8 3 Inc,
+      LMADDim 4 0 8 4 Inc,
+      LMADDim 32 0 4 5 Inc,
+      LMADDim 1 0 4 6 Inc
     ]
 
 lm2 :: LMAD (TPrimExp Int64 VName)
 lm2 =
   LMAD
-    ( add_nw64
-        ( add_nw64
-            ( add_nw64
-                ( add_nw64
-                    (mul_nw64 (256) (num_blocks_8284))
-                    (256)
-                )
-                ( mul_nw64
-                    (gtid_8472)
-                    (mul_nw64 (256) (num_blocks_8284))
-                )
-            )
-            (mul_nw64 (gtid_8473) (256))
-        )
-        (mul_nw64 (gtid_8474) (16))
-    )
-    [LMADDim 1 0 16 0 Inc]
+    (add_nw64 (add_nw64 (add_nw64 (add_nw64 (add_nw64 (mul_nw64 (mul_nw64 (1024) (sdiv64 (sub64 (add64 (32) (m_14362)) (1)) (32))) (add64 (1) (step_14414))) (mul_nw64 (1024) (add64 (1) (step_14414)))) (mul_nw64 (gtid_16875) (mul_nw64 (1024) (sdiv64 (sub64 (add64 (32) (m_14362)) (1)) (32))))) (mul_nw64 (gtid_16876) (1024))) (mul_nw64 (gid_y_18126) (32))) (gid_x_18125))
+    []
 
 j_m_i_8287 :: TPrimExp Int64 VName
 j_m_i_8287 = num_blocks_8284 - 1
 
 lessthans :: [(VName, PrimExp VName)]
 lessthans =
-  [ (head $ namesToList $ freeIn gtid_8472, untyped j_m_i_8287),
-    (head $ namesToList $ freeIn gtid_8473, untyped j_m_i_8287),
-    (head $ namesToList $ freeIn gtid_8474, untyped (16 :: TPrimExp Int64 VName))
+  [ ( step_14414,
+      sub64 (sdiv64 (mul64 (32) (sdiv64 (sub64 (add64 (32) (m_14362)) (1)) (32))) (32)) (1)
+    ),
+    ( gtid_16875,
+      sub64 (sdiv64 (sub64 (add64 (32) (m_14362)) (1)) (32)) (add64 (1) (step_14414))
+    ),
+    ( gtid_16876,
+      sub64 (sdiv64 (sub64 (add64 (32) (m_14362)) (1)) (32)) (add64 (1) (step_14414))
+    ),
+    (gid_y_18126, 1),
+    (gid_x_18125, 1)
   ]
+    & map (\(v, p) -> (head $ namesToList $ freeIn v, untyped p))
 
 scmap :: M.Map VName Type
 scmap =
   M.fromList $
     map (\x -> (x, Prim $ IntType Int64)) $
       namesToList $
-        freeIn [gtid_8472, gtid_8473, gtid_8474, num_blocks_8284, j_m_i_8287]
+        freeIn lm1 <> freeIn lm2

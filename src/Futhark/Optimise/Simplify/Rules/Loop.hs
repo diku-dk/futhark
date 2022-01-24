@@ -313,8 +313,7 @@ topDownRules =
   [ RuleDoLoop hoistLoopInvariantMergeVariables,
     RuleDoLoop simplifyClosedFormLoop,
     RuleDoLoop simplifyKnownIterationLoop,
-    RuleDoLoop simplifyLoopVariables,
-    RuleDoLoop narrowLoopType
+    RuleDoLoop simplifyLoopVariables
   ]
 
 bottomUpRules :: BuilderOps rep => [BottomUpRule rep]

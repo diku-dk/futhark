@@ -201,7 +201,6 @@ recordMemRefUses td_env bu_env stm =
                             if length lmads' == length ixfns
                               then Set $ S.fromList lmads'
                               else Undeterminable
-
                           wrt_ixfns = map tupThd $ filter ((`nameIn` alias_m_b) . tupFst) stm_wrts
                           wrt_tmps = mapMaybe mbLmad wrt_ixfns
                           prev_use =
@@ -339,7 +338,7 @@ aggSummaryLoopTotal _ _ scalars_loop (Just (iterator_var, (lower_bound, upper_bo
       ( aggSummaryOne iterator_var lower_bound upper_bound
           . fixPoint (IxFun.substituteInLMAD $ fmap TPrimExp scalars_loop)
       )
-      (S.toList lmads)
+      (trace "aggSummaryLoopTotal" $ S.toList lmads)
 aggSummaryLoopTotal _ _ _ _ _ = return Undeterminable
 
 -- | Partially aggregate the iteration-level summaries
@@ -370,7 +369,7 @@ aggSummaryLoopPartial _ _ scalars_loop (Just (iterator_var, (_, upper_bound))) (
           (upper_bound - typedLeafExp iterator_var - 1)
           . fixPoint (IxFun.substituteInLMAD $ fmap TPrimExp scalars_loop)
       )
-      (S.toList lmads)
+      (trace "aggSummaryLoopTotal" $ S.toList lmads)
 
 aggSummaryMapPartial :: MonadFreshNames m => ScalarTab -> [(VName, SubExp)] -> AccessSummary -> m AccessSummary
 aggSummaryMapPartial _ [] _ = return mempty
@@ -391,7 +390,7 @@ aggSummaryMapPartial scalars ((gtid, size) : rest) as = do
           Undeterminable -> return Undeterminable
       )
       as
-      $ reverse rest
+      $ trace "aggSummaryMapPartial" $ reverse rest
   this_dim <- aggSummaryMapPartialOne scalars (gtid, size) $ traceWith "total_inner" total_inner
   rest' <- aggSummaryMapPartial scalars rest as
   return $ this_dim <> rest'
@@ -434,9 +433,10 @@ aggSummaryMapTotal scalars segspace (Set lmads0) =
     (reverse segspace)
   where
     lmads =
-      S.fromList $
-        map (fixPoint (IxFun.substituteInLMAD $ fmap TPrimExp scalars)) $
-          S.toList lmads0
+      trace "aggSummaryMapTotal" $
+        S.fromList $
+          map (fixPoint (IxFun.substituteInLMAD $ fmap TPrimExp scalars)) $
+            S.toList lmads0
 
 aggSummaryOne :: MonadFreshNames m => VName -> TPrimExp Int64 VName -> TPrimExp Int64 VName -> LmadRef -> m AccessSummary
 aggSummaryOne iterator_var lower_bound spn lmad@(IxFun.LMAD offset0 dims0)
@@ -452,7 +452,30 @@ aggSummaryOne iterator_var lower_bound spn lmad@(IxFun.LMAD offset0 dims0)
           IxFun.LMAD new_offset $
             IxFun.LMADDim new_stride 0 spn 0 IxFun.Inc : map incPerm dims0
     if new_var `nameIn` freeIn new_lmad
-      then return Undeterminable
+      then
+        return $
+          trace
+            ( "aggSummaryOne: " <> pretty lmad
+                <> "\niterator_var: "
+                <> pretty iterator_var
+                <> "\nlower_bound: "
+                <> pretty lower_bound
+                <> "\nspn: "
+                <> pretty spn
+                <> "\nnew_var: "
+                <> pretty new_var
+                <> "\noffset: "
+                <> pretty offset
+                <> "\noffsetp1: "
+                <> pretty offsetp1
+                <> "\nnew_stride: "
+                <> pretty new_stride
+                <> "\nnew_offset: "
+                <> pretty new_offset
+                <> "\nnew_lmad: "
+                <> pretty new_lmad
+            )
+            undefined -- Undeterminable
       else return $ Set $ S.singleton new_lmad
   where
     incPerm dim = dim {IxFun.ldPerm = IxFun.ldPerm dim + 1}

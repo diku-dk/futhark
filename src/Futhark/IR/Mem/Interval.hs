@@ -271,8 +271,6 @@ i_9633 = vname "i" 9633
 
 gtid_8705 = vname "gtid" 8705
 
-gtid_8703 = vname "gtid" 8703
-
 num_blocks_8621 = vname "num_blocks" 8621
 
 u name = LeafExp name (IntType Int64)
@@ -293,8 +291,7 @@ types =
       (i_9625, Prim $ IntType Int64),
       (i_9633, Prim $ IntType Int64),
       (gtid_8705, Prim $ IntType Int64),
-      (num_blocks_8621, Prim $ IntType Int64),
-      (gtid_8703, Prim $ IntType Int64)
+      (num_blocks_8621, Prim $ IntType Int64)
     ]
 
 lessthans =
@@ -303,7 +300,7 @@ lessthans =
     (gtid_8705, untyped $ sub64 (t num_blocks_8621) 1)
   ]
 
-nonnegs = namesFromList [b_8622, i_9625, i_9633, gtid_8705, num_blocks_8621, gtid_8703]
+nonnegs = namesFromList [b_8622, i_9625, i_9633, gtid_8705, num_blocks_8621]
 
 int1 = Interval (add_nw64 (add_nw64 (mul_nw64 (t b_8622) (t b_8622)) (mul_nw64 (mul_nw64 (t b_8622) (t b_8622)) (t i_9625))) (t i_9633)) 1 1
 
