@@ -7,6 +7,7 @@ module Futhark.Optimise.TileLoops.Shared
     VarianceTable,
     varianceInStms,
     isTileableRedomap,
+    TileKind (..),
   )
 where
 
@@ -181,3 +182,6 @@ varianceInStm v0 stm = defVarianceInStm v0 stm
 
 varianceInStms :: VarianceTable -> Stms GPU -> VarianceTable
 varianceInStms = foldl' varianceInStm
+
+-- | Are we working with full or partial tiles?
+data TileKind = TilePartial | TileFull
