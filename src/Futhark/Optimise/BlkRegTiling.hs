@@ -151,7 +151,7 @@ mmBlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kbo
         a_loc_init <- scratch "A_loc" map_t1 [a_loc_sz]
         b_loc_init <- scratch "B_loc" map_t2 [b_loc_sz]
 
-        let kkLoopBody kk0 (thd_res_merge, a_loc_init', b_loc_init') epilogue = do
+        let kkLoopBody tkind kk0 (thd_res_merge, a_loc_init', b_loc_init') epilogue = do
               kk <- letExp "kk" =<< toExp (le64 kk0 * pe64 tk)
               a_loc <- forLoop ry [a_loc_init'] $ \i0 [a_loc_merge] -> do
                 loop_a_loc <- forLoop tk_div_tx [a_loc_merge] $ \k0 [a_loc_merge'] -> do
@@ -291,15 +291,18 @@ mmBlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kbo
                             css_init <- index "css_init" acc_merge [ltid_y, ltid_x]
 
                             css <- forLoop ry [css_init] $ \i [css_merge] -> do
-                              css <- forLoop rx [css_merge] $ \j [css_merge'] ->
+                              css <- forLoop rx [css_merge] $ \j [css_merge'] -> do
+                                let cond =
+                                      toExp $ case tkind of
+                                        TileFull -> true
+                                        TilePartial ->
+                                          le64 iii + le64 i + pe64 ry * le64 ltid_y
+                                            .<. pe64 height_A
+                                              .&&. le64 jjj + le64 j + pe64 rx * le64 ltid_x
+                                            .<. pe64 width_B
                                 resultBodyM =<< letTupExp' "foo"
                                   =<< eIf
-                                    ( toExp $
-                                        le64 iii + le64 i + pe64 ry * le64 ltid_y
-                                          .<. pe64 height_A
-                                            .&&. le64 jjj + le64 j + pe64 rx * le64 ltid_x
-                                          .<. pe64 width_B
-                                    )
+                                    cond
                                     ( do
                                         a <- index "a" as [i]
                                         b <- index "b" bs [j]
@@ -339,14 +342,14 @@ mmBlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kbo
           forLoop' (Var full_tiles) [cssss, a_loc_init, b_loc_init] $
             \kk0 [thd_res_merge, a_loc_merge, b_loc_merge] -> do
               process_full_tiles <-
-                kkLoopBody kk0 (thd_res_merge, a_loc_merge, b_loc_merge) False
+                kkLoopBody TileFull kk0 (thd_res_merge, a_loc_merge, b_loc_merge) False
 
               resultBodyM $ map Var process_full_tiles
 
         let prologue_res : a_loc_reuse : b_loc_reuse : _ = prologue_res_list
 
         -- build epilogue.
-        epilogue_res_list <- kkLoopBody full_tiles (prologue_res, a_loc_reuse, b_loc_reuse) True
+        epilogue_res_list <- kkLoopBody TilePartial full_tiles (prologue_res, a_loc_reuse, b_loc_reuse) True
 
         let redomap_res : _ = epilogue_res_list
 
