@@ -17,6 +17,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Yet another in-place lowering issue (#1569).
 
+* Removed unnecessary bounds checks in register tiling, giving about
+  1.8x speedup on e.g. matrix multiplication on newer NVIDIA GPUs.
+
 ## [0.21.4]
 
 ### Fixed
