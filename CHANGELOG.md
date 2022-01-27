@@ -20,6 +20,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Removed unnecessary bounds checks in register tiling, giving about
   1.8x speedup on e.g. matrix multiplication on newer NVIDIA GPUs.
 
+* A parser bug erroneously demanded whitespace in some type
+  expressions (#1573).
+
 ## [0.21.4]
 
 ### Fixed
