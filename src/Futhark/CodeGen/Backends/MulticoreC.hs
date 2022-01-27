@@ -597,7 +597,7 @@ compileOp (Segop name params seq_task par_task retvals (SchedulerInfo nsubtask e
         [C.citems|int $id:ftask_err = scheduler_prepare_task(&ctx->scheduler, &$id:ftask_name);
                   if ($id:ftask_err != 0) {
                     $items:free_all_mem;
-                    err = 1;
+                    err = $id:ftask_err;
                     goto cleanup;
                   }|]
 
@@ -665,7 +665,7 @@ compileOp (ParLoop s' i prebody body postbody free tid) = do
       [C.citems|int $id:ftask_err = scheduler_execute_task(&ctx->scheduler,
                                                            &$id:ftask_name);
                if ($id:ftask_err != 0) {
-                 err = 1;
+                 err = $id:ftask_err;
                  goto cleanup;
                }|]
 

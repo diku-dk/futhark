@@ -177,7 +177,7 @@ readCUDAScalar _ _ _ space _ =
 
 allocateCUDABuffer :: GC.Allocate OpenCL ()
 allocateCUDABuffer mem size tag "device" =
-  GC.stm [C.cstm|CUDA_SUCCEED_OR_RETURN(cuda_alloc(&ctx->cuda, (size_t)$exp:size, $exp:tag, &$exp:mem));|]
+  GC.stm [C.cstm|ctx->error = CUDA_SUCCEED_NONFATAL(cuda_alloc(&ctx->cuda, (size_t)$exp:size, $exp:tag, &$exp:mem));|]
 allocateCUDABuffer _ _ _ space =
   error $ "Cannot allocate in '" ++ space ++ "' memory space."
 

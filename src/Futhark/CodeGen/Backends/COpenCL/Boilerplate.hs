@@ -492,7 +492,7 @@ generateBoilerplate opencl_code opencl_prelude cost_centres kernels types sizes 
 
                    $stm:(failureSwitch failures)
 
-                   return 1;
+                   return FUTHARK_PROGRAM_ERROR;
                  }
                  return 0;
                }|]
