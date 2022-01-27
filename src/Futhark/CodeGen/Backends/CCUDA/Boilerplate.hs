@@ -458,7 +458,7 @@ generateContextFuns cfg cost_centres kernels sizes failures = do
 
                      $stm:(failureSwitch failures)
 
-                     return 1;
+                     return FUTHARK_PROGRAM_ERROR;
                    }
                  }
                  CUDA_SUCCEED_OR_RETURN(cuCtxPopCurrent(&ctx->cuda.cu_ctx));

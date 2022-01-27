@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+* API functions now return more precise error codes in some cases.
+
+* Out-of-memory errors contain more information.
+
 ### Removed
 
 ### Changed
