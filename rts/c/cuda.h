@@ -4,8 +4,9 @@
 #define CUDA_SUCCEED_NONFATAL(x) cuda_api_succeed_nonfatal(x, #x, __FILE__, __LINE__)
 #define NVRTC_SUCCEED_FATAL(x) nvrtc_api_succeed_fatal(x, #x, __FILE__, __LINE__)
 #define NVRTC_SUCCEED_NONFATAL(x) nvrtc_api_succeed_nonfatal(x, #x, __FILE__, __LINE__)
-
-#define SUCCEED_OR_RETURN(serror) {               \
+// Take care not to override an existing error.
+#define CUDA_SUCCEED_OR_RETURN(e) {               \
+    char *serror = CUDA_SUCCEED_NONFATAL(e);      \
     if (serror) {                                 \
       if (!ctx->error) {                          \
         ctx->error = serror;                      \
@@ -15,8 +16,6 @@
       }                                           \
     }                                             \
   }
-
-#define CUDA_SUCCEED_OR_RETURN(e) SUCCEED_OR_RETURN(CUDA_SUCCEED_NONFATAL(e))
 
 // CUDA_SUCCEED_OR_RETURN returns the value of the variable 'bad' in
 // scope.  By default, it will be this one.  Create a local variable
