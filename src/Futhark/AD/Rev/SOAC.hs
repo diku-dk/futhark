@@ -59,13 +59,13 @@ lamIsMap lam = mapM splitStm $ bodyResult $ lambdaBody lam
 vjpSOAC :: VjpOps -> Pat -> StmAux () -> SOAC SOACS -> ADM () -> ADM ()
 vjpSOAC ops pat aux soac@(Screma w as form) m
   | Just [red] <- isReduceSOAC form,
+    iscomm <- redComm red,  -- if reduce_comm futhark should obey. (map2(binop)) commutative => binop commutative
     [Var ne] <- redNeutral red,
     [a] <- as,
-    Just [sf] <- lamIsMap$ redLambda red, 
+    Just [sf] <- lamIsMap $ redLambda red, 
     Just [(op, _, _, _)] <- lamIsBinOp =<< isMapSOAC sf,
-    isMinMaxOp op || isMulOp op,
     [Array _ (Shape [n]) _] <- lambdaReturnType $ redLambda red = 
-    diffVecMinMaxOrMulReduce ops pat aux w n op ne a m
+    diffRedMapInterchange ops pat aux w n iscomm op ne a m
   | Just reds <- isReduceSOAC form,
     length reds > 1 =
     splitScanRed ops (reduceSOAC, redNeutral) (pat, aux, reds, w, as) m
@@ -93,7 +93,7 @@ vjpSOAC ops pat aux soac@(Screma w as form) m
     isMinMaxOp (SMax _) = True
     isMinMaxOp (UMax _) = True
     isMinMaxOp (FMax _) = True
-    isMinMaxOp _ = False
+    isMinMaxOp _        = False
     isMulOp (Mul _ _)   = True
     isMulOp (FMul _)    = True 
     isMulOp _           = False

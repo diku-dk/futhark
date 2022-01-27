@@ -7,7 +7,7 @@
 module Futhark.AD.Rev.Reduce
   ( diffReduce,
     diffMinMaxReduce,
-    diffVecMinMaxOrMulReduce,
+    diffRedMapInterchange,
     diffMulReduce,
   )
 where
@@ -17,6 +17,7 @@ import Futhark.AD.Rev.Monad
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.Builder
 import Futhark.IR.SOACS
+import Futhark.IR.Primitive
 import Futhark.Tools
 import Futhark.Transform.Rename
 
@@ -287,9 +288,10 @@ diffMinMaxReduce _ops x aux w minmax ne as m = do
 --    rewrite to
 --      let x = map2 (\as ne -> reduce minmax ne as) (transpose as) nes
 --    and diff
-diffVecMinMaxOrMulReduce ::
-  VjpOps -> Pat -> StmAux () -> SubExp -> SubExp -> BinOp -> VName -> VName -> ADM () -> ADM ()
-diffVecMinMaxOrMulReduce _ops x aux w n op ne as m = do
+-- diffVecMinMaxOrMulReduce ::
+diffRedMapInterchange ::
+  VjpOps -> Pat -> StmAux () -> SubExp -> SubExp -> Commutativity -> BinOp -> VName -> VName -> ADM () -> ADM ()
+diffRedMapInterchange _ops x aux w n iscomm op ne as m = do
   let t = binOpType op
   op_lam <- binOpLambda op t
   
@@ -299,7 +301,12 @@ diffVecMinMaxOrMulReduce _ops x aux w n op ne as m = do
     a_param <- newParam "a" $ Array t (Shape [w]) NoUniqueness
     ne_param <- newParam "ne" $ Prim t
 
-    reduce_form <- reduceSOAC [Reduce Commutative op_lam [Var $ paramName ne_param]]
+    -- 'iscomm' is commutative if supplied by user. (e.g. reduce_comm (map2 (binop)))
+    -- if the (map2(binop)) is commutative then binop is also commutative.
+    -- if user has not supplied this information (e.g. use reduce and not reduce_comm),
+    -- it looks like it will be checked later on if binop is one of the 'known' commutative ones.
+    -- It could be checked using 'Futhark.IR.Primitive.commutativeBinOp'
+    reduce_form <- reduceSOAC [Reduce iscomm op_lam [Var $ paramName ne_param]]
   
     map_lam <- mkLambda [a_param, ne_param] $ fmap varsRes . letTupExp "idx_res" $ Op $ Screma w [paramName a_param] reduce_form
     addStm $ Let x aux $ Op $ Screma n [tran_as, ne] $ mapSOAC map_lam
