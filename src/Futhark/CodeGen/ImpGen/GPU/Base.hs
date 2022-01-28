@@ -339,9 +339,11 @@ compileGroupExp (Pat [dest]) (BasicOp (ArrayLit es _)) =
 compileGroupExp _ (BasicOp (UpdateAcc acc is vs)) =
   updateAcc acc is vs
 compileGroupExp (Pat [dest]) (BasicOp (Replicate ds se)) = do
-  let ds' = map toInt64Exp $ shapeDims ds
-  groupCoverSpace ds' $ \is ->
-    copyDWIMFix (patElemName dest) is se (drop (shapeRank ds) is)
+  flat <- newVName "rep_flat"
+  is <- replicateM (shapeRank ds) (newVName "rep_i")
+  let is' = map le64 is
+  groupCoverSegSpace SegVirt (SegSpace flat $ zip is $ shapeDims ds) $
+    copyDWIMFix (patElemName dest) is' se []
   sOp $ Imp.Barrier Imp.FenceLocal
 compileGroupExp (Pat [dest]) (BasicOp (Iota n e s it)) = do
   n' <- toExp n
