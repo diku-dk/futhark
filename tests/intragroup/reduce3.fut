@@ -2,8 +2,6 @@
 -- ==
 -- random input { [1][16][16]i32 } auto output
 -- random input { [10][16][16]i32 } auto output
--- random input { [10][32][32]i32 } auto output
--- random input { [10][64][64]i32 } auto output
 -- structure gpu { SegMap/SegRed 1 }
 
 def main xsss =
