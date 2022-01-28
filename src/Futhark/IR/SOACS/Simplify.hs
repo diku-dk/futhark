@@ -746,20 +746,20 @@ arrayOps = mconcat . map onStm . stmsToList . bodyStms
 replaceArrayOps ::
   forall rep.
   (Buildable rep, BuilderOps rep, HasSOAC rep) =>
-  M.Map ArrayOp ArrayOp ->
+  M.Map (AST.Pat rep, ArrayOp) ArrayOp ->
   AST.Body rep ->
   AST.Body rep
 replaceArrayOps substs (Body _ stms res) =
   mkBody (fmap onStm stms) res
   where
     onStm (Let pat aux e) =
-      let (cs', e') = onExp (stmAuxCerts aux) e
+      let (cs', e') = onExp pat (stmAuxCerts aux) e
        in certify cs' $ mkLet' (patIdents pat) aux e'
-    onExp cs e
+    onExp pat cs e
       | Just op <- isArrayOp cs e,
-        Just op' <- M.lookup op substs =
+        Just op' <- M.lookup (pat, op) substs =
         fromArrayOp op'
-    onExp cs e = (cs, mapExp mapper e)
+    onExp _ cs e = (cs, mapExp mapper e)
     mapper =
       identityMapper
         { mapOnBody = const $ return . replaceArrayOps substs,
@@ -792,11 +792,11 @@ simplifyMapIota ::
   forall rep.
   (Buildable rep, BuilderOps rep, HasSOAC rep) =>
   TopDownRuleOp rep
-simplifyMapIota vtable pat aux op
+simplifyMapIota vtable screma_pat aux op
   | Just (Screma w arrs (ScremaForm scan reduce map_lam) :: SOAC rep) <- asSOAC op,
     Just (p, _) <- find isIota (zip (lambdaParams map_lam) arrs),
     indexings <-
-      mapMaybe (indexesWith (paramName p) . snd) . S.toList $
+      mapMaybe (indexesWith (paramName p)) . S.toList $
         arrayOps $ lambdaBody map_lam,
     not $ null indexings = Simplify $ do
     -- For each indexing with iota, add the corresponding array to
@@ -810,7 +810,7 @@ simplifyMapIota vtable pat aux op
               lambdaBody = replaceArrayOps substs $ lambdaBody map_lam
             }
 
-    auxing aux . letBind pat . Op . soacOp $
+    auxing aux . letBind screma_pat . Op . soacOp $
       Screma w (arrs <> more_arrs) (ScremaForm scan reduce map_lam')
   where
     isIota (_, arr) = case ST.lookupBasicOp arr vtable of
@@ -825,12 +825,12 @@ simplifyMapIota vtable pat aux op
       | otherwise = (j :) <$> fixWith i slice
     fixWith _ _ = Nothing
 
-    indexesWith v idx@(ArrayIndexing cs arr (Slice js))
+    indexesWith v (pat, idx@(ArrayIndexing cs arr (Slice js)))
       | arr `ST.elem` vtable,
         all (`ST.elem` vtable) $ unCerts cs,
         Just js' <- fixWith v js,
         all (`ST.elem` vtable) $ namesToList $ freeIn js' =
-        Just (js', idx)
+        Just (pat, js', idx)
     indexesWith _ _ = Nothing
 
     properArr [] arr = pure arr
@@ -838,7 +838,7 @@ simplifyMapIota vtable pat aux op
       arr_t <- lookupType arr
       letExp (baseString arr) $ BasicOp $ Index arr $ fullSlice arr_t $ map DimFix js
 
-    mapOverArr w (js, ArrayIndexing cs arr slice) = do
+    mapOverArr w (pat, js, ArrayIndexing cs arr slice) = do
       arr' <- properArr js arr
       arr_t <- lookupType arr'
       arr'' <-
@@ -852,7 +852,7 @@ simplifyMapIota vtable pat aux op
         Just
           ( arr'',
             arr_elem_param,
-            ( ArrayIndexing cs arr slice,
+            ( (pat, ArrayIndexing cs arr slice),
               ArrayIndexing cs (paramName arr_elem_param) (Slice (drop (length js + 1) (unSlice slice)))
             )
           )
@@ -864,8 +864,8 @@ simplifyMapIota _ _ _ _ = Skip
 -- corresponding to that transformation performed on the rows of the
 -- full array.
 moveTransformToInput :: TopDownRuleOp (Wise SOACS)
-moveTransformToInput vtable pat aux soac@(Screma w arrs (ScremaForm scan reduce map_lam))
-  | ops <- map snd $ filter arrayIsMapParam $ S.toList $ arrayOps $ lambdaBody map_lam,
+moveTransformToInput vtable screma_pat aux soac@(Screma w arrs (ScremaForm scan reduce map_lam))
+  | ops <- filter arrayIsMapParam $ S.toList $ arrayOps $ lambdaBody map_lam,
     not $ null ops = Simplify $ do
     (more_arrs, more_params, replacements) <-
       unzip3 . catMaybes <$> mapM mapOverArr ops
@@ -879,7 +879,7 @@ moveTransformToInput vtable pat aux soac@(Screma w arrs (ScremaForm scan reduce 
             }
 
     auxing aux $
-      letBind pat $ Op $ Screma w (arrs <> more_arrs) (ScremaForm scan reduce map_lam')
+      letBind screma_pat $ Op $ Screma w (arrs <> more_arrs) (ScremaForm scan reduce map_lam')
   where
     -- It is not safe to move the transform if the root array is being
     -- consumed by the Screma.  This is a bit too conservative - it's
@@ -913,7 +913,7 @@ moveTransformToInput vtable pat aux soac@(Screma w arrs (ScremaForm scan reduce 
     arrayIsMapParam (_, ArrayVar {}) =
       False
 
-    mapOverArr op
+    mapOverArr (pat, op)
       | Just (_, arr) <- find ((== arrayOpArr op) . fst) (zip map_param_names arrs),
         not $ arr `nameIn` consumed = do
         arr_t <- lookupType arr
@@ -937,7 +937,7 @@ moveTransformToInput vtable pat aux soac@(Screma w arrs (ScremaForm scan reduce 
           Just
             ( arr_transformed,
               Param mempty arr_transformed_row (rowType arr_transformed_t),
-              (op, ArrayVar mempty arr_transformed_row)
+              ((pat, op), ArrayVar mempty arr_transformed_row)
             )
     mapOverArr _ = return Nothing
 moveTransformToInput _ _ _ _ =
