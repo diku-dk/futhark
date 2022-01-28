@@ -31,6 +31,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   and CUDA contexts, which could lead to memory leaks in processes
   that created and freed many contexts.
 
+* An incorrect copy-removal in some exotic cases (#1572).
+
 ## [0.21.4]
 
 ### Fixed
