@@ -27,6 +27,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * A parser bug erroneously demanded whitespace in some type
   expressions (#1573).
 
+* Some memory was not being freed correct when shutting down OpenCL
+  and CUDA contexts, which could lead to memory leaks in processes
+  that created and freed many contexts.
+
 ## [0.21.4]
 
 ### Fixed
