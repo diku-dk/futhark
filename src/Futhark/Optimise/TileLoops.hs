@@ -1010,7 +1010,7 @@ readTile2D (kdim_x, kdim_y) (gtid_x, gtid_y) (gid_x, gid_y) tile_size num_groups
   fmap (inputsToTiles inputs)
     . segMap2D
       "full_tile"
-      (SegThread num_groups group_size SegNoVirtFull)
+      (SegThread num_groups group_size (SegNoVirtFull (SegSeqDims [])))
       ResultNoSimplify
       (tile_size, tile_size)
     $ \(ltid_x, ltid_y) -> do
@@ -1090,7 +1090,7 @@ processTile2D (gid_x, gid_y) (gtid_x, gtid_y) (kdim_x, kdim_y) tile_size num_gro
 
   segMap2D
     "acc"
-    (SegThread num_groups group_size SegNoVirtFull)
+    (SegThread num_groups group_size (SegNoVirtFull (SegSeqDims [])))
     ResultPrivate
     (tile_size, tile_size)
     $ \(ltid_x, ltid_y) -> do
@@ -1225,7 +1225,7 @@ tiling2d dims_on_top _initial_lvl (gtid_x, gtid_y) (kdim_x, kdim_y) w = do
         (num_groups_y : map snd dims_on_top)
 
   gid_flat <- newVName "gid_flat"
-  let lvl = SegGroup (Count num_groups) (Count group_size) SegNoVirtFull
+  let lvl = SegGroup (Count num_groups) (Count group_size) (SegNoVirtFull (SegSeqDims []))
       space =
         SegSpace gid_flat $
           dims_on_top ++ [(gid_x, num_groups_x), (gid_y, num_groups_y)]

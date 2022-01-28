@@ -1,8 +1,8 @@
 -- 2D tiling, but where the arrays are variant to an outermost third dimension.
 -- ==
--- structure gpu { SegMap/DoLoop/DoLoop/SegMap 4
--- SegMap/DoLoop/DoLoop/DoLoop/SegMap 2
--- SegMap/SegMap 1
+-- structure gpu { SegMap/SegMap 4
+-- SegMap/DoLoop/SegMap 2
+-- SegMap/SegMap 3
 -- SegMap/DoLoop/DoLoop/SegMap/DoLoop 3 }
 
 
