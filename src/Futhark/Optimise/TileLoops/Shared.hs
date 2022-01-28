@@ -423,51 +423,7 @@ kkLoopBody
                   bsss <- bCopyLoc2Reg k ltid_x
                   return $ varsRes [asss, bsss]
               let [asss, bsss] = reg_mem
-
-              -- the actual redomap.
-              redomap_res <- segMap2D "redomap_res" segthd_lvl ResultPrivate (ty, tx) $
-                \(ltid_y, ltid_x) -> do
-                  as <- index "as" asss [ltid_y, ltid_x]
-                  bs <- index "bs" bsss [ltid_y, ltid_x]
-                  css_init <- index "css_init" acc_merge [ltid_y, ltid_x]
-
-                  css <- forLoop ry [css_init] $ \i [css_merge] -> do
-                    css <- forLoop rx [css_merge] $ \j [css_merge'] ->
-                      resultBodyM =<< letTupExp' "foo"
-                        =<< eIf
-                          ( toExp $
-                              le64 iii + le64 i + pe64 ry * le64 ltid_y
-                                .<. pe64 height_A
-                                  .&&. le64 jjj + le64 j + pe64 rx * le64 ltid_x
-                                .<. pe64 width_B
-                          )
-                          ( do
-                              a <- index "a" as [i]
-                              b <- index "b" bs [j]
-                              c <- index "c" css_merge' [i, j]
-
-                              map_res <- newVName "map_res"
-                              map_lam' <- renameLambda map_lam
-                              red_lam' <- renameLambda red_lam
-
-                              -- the inputs to map are supposed to be permutted with the
-                              -- inverted permutation, so as to reach the original position;
-                              -- it just so happens that the inverse of [a,b] is [b,a]
-                              let map_inp_reg = if var_dims == [0, 1] then [a, b] else [b, a]
-
-                              addStms $
-                                rebindLambda map_lam' map_inp_reg [map_res]
-                                  <> rebindLambda red_lam' [c, map_res] [c]
-
-                              css <- update "css" css_merge' [i, j] c
-
-                              resultBodyM [Var css]
-                          )
-                          (resultBodyM [Var css_merge'])
-                    resultBodyM [Var css]
-                  return [varRes css]
-
-              resultBodyM $ map Var redomap_res
+              mkRedomapOneTileBody acc_merge asss bsss True
           )
           (resultBodyM [Var acc_merge])
     return [thd_acc, a_loc, b_loc]
@@ -509,6 +465,58 @@ kkLoopBody
               res = last_perm == q -1 && (stride == pe64 (intConst Int64 1))
            in res
       isInnerCoal _ _ _ = error "TileLoops/Shared.hs: not an error, but I would like to know why!"
+      --
+      mkRedomapOneTileBody acc_merge asss bsss fits_ij = do
+        -- the actual redomap.
+        redomap_res <- segMap2D "redomap_res" segthd_lvl ResultPrivate (ty, tx) $
+          \(ltid_y, ltid_x) -> do
+            as <- index "as" asss [ltid_y, ltid_x]
+            bs <- index "bs" bsss [ltid_y, ltid_x]
+            css_init <- index "css_init" acc_merge [ltid_y, ltid_x]
+
+            css <- forLoop ry [css_init] $ \i [css_merge] -> do
+              css <- forLoop rx [css_merge] $ \j [css_merge'] ->
+                resultBodyM =<< letTupExp' "foo"
+                  =<< eIf
+                    ( toExp $
+                        if fits_ij
+                          then true
+                          else -- this condition is never needed because
+                          -- if i and j are out of range than css[i,j]
+                          -- is garbage anyways and should not be written.
+                          -- so fits_ij should be always true!!!
+
+                            le64 iii + le64 i + pe64 ry * le64 ltid_y
+                              .<. pe64 height_A
+                                .&&. le64 jjj + le64 j + pe64 rx * le64 ltid_x
+                              .<. pe64 width_B
+                    )
+                    ( do
+                        a <- index "a" as [i]
+                        b <- index "b" bs [j]
+                        c <- index "c" css_merge' [i, j]
+
+                        map_res <- newVName "map_res"
+                        map_lam' <- renameLambda map_lam
+                        red_lam' <- renameLambda red_lam
+
+                        -- the inputs to map are supposed to be permutted with the
+                        -- inverted permutation, so as to reach the original position;
+                        -- it just so happens that the inverse of [a,b] is [b,a]
+                        let map_inp_reg = if var_dims == [0, 1] then [a, b] else [b, a]
+
+                        addStms $
+                          rebindLambda map_lam' map_inp_reg [map_res]
+                            <> rebindLambda red_lam' [c, map_res] [c]
+
+                        css <- update "css" css_merge' [i, j] c
+
+                        resultBodyM [Var css]
+                    )
+                    (resultBodyM [Var css_merge'])
+              resultBodyM [Var css]
+            return [varRes css]
+        resultBodyM $ map Var redomap_res
       --
       copyGlb2ShMem ::
         VName ->

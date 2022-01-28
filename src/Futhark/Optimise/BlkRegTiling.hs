@@ -139,7 +139,7 @@ mmBlkRegTilingAcc env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts 
               ( do
                   off_t <- letExp "off_t" =<< toExp (pe64 rk * le64 gid_t + le64 full_tiles)
                   process_sprs_tile <-
-                    kkLoopBody env ct_arg off_t (prologue_res, a_loc_reuse, b_loc_reuse) False
+                    kkLoopBody env ct_arg off_t (prologue_res, a_loc_reuse, b_loc_reuse) True
 
                   resultBodyM $ map Var process_sprs_tile
               )
