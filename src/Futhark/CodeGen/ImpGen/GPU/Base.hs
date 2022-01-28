@@ -322,9 +322,8 @@ groupCoverSegSpace virt space m = do
           let ltid = kernelLocalThreadId constants
           sFor "chunk_i" num_chunks $ \chunk_i -> do
             i <- dPrimVE "i" $ chunk_i * sExt32 group_size + ltid
-            sWhen (i .<. sExt32 group_size) $ do
-              dIndexSpace (zip ltids dims') $ sExt64 i
-              m
+            dIndexSpace (zip ltids dims') $ sExt64 i
+            sWhen (inBounds (Slice (map (DimFix . le64) ltids)) dims') m
     SegNoVirt -> nonvirt (sWhen (isActive $ zip ltids dims))
     SegNoVirtFull -> nonvirt id
 
