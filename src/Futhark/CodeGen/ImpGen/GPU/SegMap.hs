@@ -48,10 +48,11 @@ compileSegMap pat lvl space kbody = do
             compileStms mempty (kernelBodyStms kbody) $
               zipWithM_ (compileThreadResult space) (patElems pat) $
                 kernelBodyResult kbody
-    SegGroup {} ->
+    SegGroup {} -> do
+      pc <- precomputeConstants group_size' $ kernelBodyStms kbody
       sKernelGroup "segmap_intragroup" num_groups' group_size' (segFlat space) $ do
         let virt_num_groups = sExt32 $ product dims'
-        precomputeSegOpIDs (kernelBodyStms kbody) $
+        precomputedConstants pc $
           virtualiseGroups (segVirt lvl) virt_num_groups $ \group_id -> do
             dIndexSpace (zip is dims') $ sExt64 group_id
 
