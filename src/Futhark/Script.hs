@@ -100,7 +100,7 @@ instance Pretty Func where
 instance Pretty Exp where
   ppr = pprPrec 0
   pprPrec _ (ServerVar _ v) = "$" <> ppr v
-  pprPrec _ (Const v) = strictText $ V.valueText v
+  pprPrec _ (Const v) = stack $ map strictText $ T.lines $ V.valueText v
   pprPrec i (Let pat e1 e2) =
     parensIf (i > 0) $ "let" <+> pat' <+> equals <+> ppr e1 <+> "in" <+> ppr e2
     where
@@ -109,13 +109,13 @@ instance Pretty Exp where
         _ -> parens $ commasep $ map ppr pat
   pprPrec _ (Call v []) = ppr v
   pprPrec i (Call v args) =
-    parensIf (i > 0) $ ppr v <+> spread (map (pprPrec 1) args)
+    parensIf (i > 0) $ ppr v <+> spread (map (align . pprPrec 1) args)
   pprPrec _ (Tuple vs) =
-    parens $ commasep $ map ppr vs
+    parens $ commasep $ map (align . ppr) vs
   pprPrec _ (StringLit s) = ppr $ show s
   pprPrec _ (Record m) = braces $ commasep $ map field m
     where
-      field (k, v) = ppr k <> equals <> ppr v
+      field (k, v) = align (ppr k <> equals <> ppr v)
 
 type Parser = Parsec Void T.Text
 
