@@ -1086,7 +1086,7 @@ opaqueLibraryFunctions desc vds = do
             shapearr = "shape_" ++ show i
             dims = [[C.cexp|$id:shapearr[$int:j]|] | j <- [0 .. rank - 1]]
             num_elems = cproduct dims
-        item [C.citem|typename int64_t $id:shapearr[$int:rank];|]
+        item [C.citem|typename int64_t $id:shapearr[$int:rank] = {0};|]
         stms $ loadValueHeader sign pt rank [C.cexp|$id:shapearr|] [C.cexp|src|]
         item [C.citem|const void* $id:dataptr = src;|]
         stm [C.cstm|obj->$id:field = NULL;|]
