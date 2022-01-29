@@ -33,6 +33,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * An incorrect copy-removal in some exotic cases (#1572).
 
+* 'restore'-functions might perform undefined pointer arithmetic when
+  passed garbage.
+
 ## [0.21.4]
 
 ### Fixed
