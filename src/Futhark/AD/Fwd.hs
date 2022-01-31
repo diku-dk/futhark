@@ -328,11 +328,26 @@ fwdSOAC pat aux (Stream size xs form nes lam) = do
       let form' = Parallel o comm lam0'
       addStm $ Let pat' aux $ Op $ Stream size xs' form' nes' lam'
 fwdSOAC pat aux (Hist w arrs ops bucket_fun) = do
-  pat_tan <- newTan pat
+  pat' <- bundleNew pat
   ops' <- mapM fwdHist ops
-  bucket_fun' <- fwdLambda bucket_fun
-  addStm $ Let (pat <> pat_tan) aux $ Op $ Hist w arrs ops' bucket_fun'
+  bucket_fun' <- fwdHistBucket bucket_fun
+  vss' <- bundleTan vss
+  addStm $ Let pat' aux $ Op $ Hist w (iss <> vss') ops' bucket_fun'
   where
+    n_indices = sum $ map (shapeRank . histShape) ops
+    (iss, vss) = splitAt n_indices arrs
+    fwdBodyHist (Body _ stms res) = buildBody_ $ do
+      mapM_ fwdStm stms
+      let (res_is, res_vs) = splitAt n_indices res
+      (res_is ++) <$> bundleTan res_vs
+    fwdHistBucket l@(Lambda params body ret) =
+      let (p_is, p_vs) = splitAt n_indices params
+          (r_is, r_vs) = splitAt n_indices ret
+       in Lambda
+            <$> ((p_is ++) <$> bundleNew p_vs)
+            <*> inScopeOf l (fwdBodyHist body)
+            <*> ((r_is ++) <$> bundleTan r_vs)
+
     fwdHist :: HistOp SOACS -> ADM (HistOp SOACS)
     fwdHist (HistOp shape rf dest nes op) = do
       dest' <- bundleTan dest
