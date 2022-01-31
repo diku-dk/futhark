@@ -420,6 +420,8 @@ generateContextFuns cfg cost_centres kernels sizes failures = do
       [C.cedecl|void $id:s(struct $id:ctx* ctx) {
                                  $stms:free_fields
                                  free_constants(ctx);
+                                 cuMemFree(ctx->global_failure);
+                                 cuMemFree(ctx->global_failure_args);
                                  cuda_cleanup(&ctx->cuda);
                                  free_lock(&ctx->lock);
                                  ctx->cfg->in_use = 0;
@@ -458,7 +460,7 @@ generateContextFuns cfg cost_centres kernels sizes failures = do
 
                      $stm:(failureSwitch failures)
 
-                     return 1;
+                     return FUTHARK_PROGRAM_ERROR;
                    }
                  }
                  CUDA_SUCCEED_OR_RETURN(cuCtxPopCurrent(&ctx->cuda.cu_ctx));

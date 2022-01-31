@@ -96,7 +96,7 @@ import Futhark.CodeGen.Backends.GenericC.Options
 import Futhark.CodeGen.Backends.GenericC.Server (serverDefs)
 import Futhark.CodeGen.Backends.SimpleRep
 import Futhark.CodeGen.ImpCode
-import Futhark.CodeGen.RTS.C (halfH, lockH, timingH, utilH)
+import Futhark.CodeGen.RTS.C (errorsH, halfH, lockH, timingH, utilH)
 import Futhark.IR.Prop (isBuiltInFunction)
 import qualified Futhark.Manifest as Manifest
 import Futhark.MonadFreshNames
@@ -258,7 +258,7 @@ defError msg stacktrace = do
   items
     [C.citems|ctx->error = msgprintf($string:formatstr', $args:formatargs, $string:stacktrace);
               $items:free_all_mem
-              err = 1;
+              err = FUTHARK_PROGRAM_ERROR;
               goto cleanup;|]
 
 defCall :: CallCompiler op s
@@ -673,12 +673,15 @@ defineMemorySpace space = do
   }
   int ret = $id:(fatMemUnRef space)(ctx, block, desc);
 
-  ctx->$id:usagename += size;
+  if (ret != FUTHARK_SUCCESS) {
+    return ret;
+  }
+
   if (ctx->detail_memory) {
     fprintf(ctx->log, "Allocating %lld bytes for %s in %s (then allocated: %lld bytes)",
             (long long) size,
             desc, $string:spacedesc,
-            (long long) ctx->$id:usagename);
+            (long long) ctx->$id:usagename + size);
   }
   if (ctx->$id:usagename > ctx->$id:peakname) {
     ctx->$id:peakname = ctx->$id:usagename;
@@ -690,11 +693,28 @@ defineMemorySpace space = do
   }
 
   $items:alloc
-  block->references = (int*) malloc(sizeof(int));
-  *(block->references) = 1;
-  block->size = size;
-  block->desc = desc;
-  return ret;
+
+  if (ctx->error == NULL) {
+    block->references = (int*) malloc(sizeof(int));
+    *(block->references) = 1;
+    block->size = size;
+    block->desc = desc;
+    ctx->$id:usagename += size;
+    return FUTHARK_SUCCESS;
+  } else {
+    // We are naively assuming that any memory allocation error is due to OOM.
+    // We preserve the original error so that a savvy user can perhaps find
+    // glory despite our naiveté.
+
+    char *old_error = ctx->error;
+    ctx->error = msgprintf("Failed to allocate memory in %s.\nAttempted allocation: %12lld bytes\nCurrently allocated:  %12lld bytes\n%s",
+                           $string:spacedesc,
+                           (long long) size,
+                           (long long) ctx->$id:usagename,
+                           old_error);
+    free(old_error);
+    return FUTHARK_OUT_OF_MEMORY;
+  }
   }|]
 
   -- Memory setting - unreference the destination and increase the
@@ -1066,7 +1086,7 @@ opaqueLibraryFunctions desc vds = do
             shapearr = "shape_" ++ show i
             dims = [[C.cexp|$id:shapearr[$int:j]|] | j <- [0 .. rank - 1]]
             num_elems = cproduct dims
-        item [C.citem|typename int64_t $id:shapearr[$int:rank];|]
+        item [C.citem|typename int64_t $id:shapearr[$int:rank] = {0};|]
         stms $ loadValueHeader sign pt rank [C.cexp|$id:shapearr|] [C.cexp|src|]
         item [C.citem|const void* $id:dataptr = src;|]
         stm [C.cstm|obj->$id:field = NULL;|]
@@ -1543,6 +1563,7 @@ $entrydecls
 // Miscellaneous
 $miscdecls
 #define FUTHARK_BACKEND_$backend
+$errorsH
 
 #ifdef __cplusplus
 }

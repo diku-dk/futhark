@@ -445,8 +445,6 @@ TypeExpTerm :: { UncheckedTypeExp }
            { TEUnique $2 (srcspan $1 $>) }
          | '[' DimExp ']' TypeExpTerm %prec indexprec
            { TEArray $4 $2 (srcspan $1 $>) }
-         | '['  ']' TypeExpTerm %prec indexprec
-           { TEArray $3 DimExpAny (srcspan $1 $>) }
          | TypeExpApply %prec sumprec { $1 }
 
          -- Errors
@@ -498,7 +496,6 @@ Constr :: { (Name, SrcLoc) }
 
 TypeArg :: { TypeArgExp Name }
          : '[' DimExp ']' { TypeArgExpDim $2 (srcspan $1 $>) }
-         | '[' ']'         { TypeArgExpDim DimExpAny (srcspan $1 $>) }
          | TypeExpAtom     { TypeArgExpType $1 }
 
 FieldType :: { (Name, UncheckedTypeExp) }
@@ -518,6 +515,8 @@ DimExp :: { DimExp Name }
         | intlit
           { let L loc (INTLIT n) = $1
             in DimExpConst (fromIntegral n) loc }
+        |
+          { DimExpAny }
 
 FunParam :: { PatBase NoInfo Name }
 FunParam : InnerPat { $1 }

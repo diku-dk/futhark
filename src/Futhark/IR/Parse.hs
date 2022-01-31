@@ -840,7 +840,8 @@ pSegLevel =
       <*> choice
         [ pSemi
             *> choice
-              [ keyword "full" $> SegOp.SegNoVirtFull,
+              [ keyword "full" $> SegOp.SegNoVirtFull
+                  <*> (SegOp.SegSeqDims <$> brackets (pInt `sepBy` pComma)),
                 keyword "virtualise" $> SegOp.SegVirt
               ],
           pure SegOp.SegNoVirt

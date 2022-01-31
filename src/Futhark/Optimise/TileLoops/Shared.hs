@@ -7,6 +7,7 @@ module Futhark.Optimise.TileLoops.Shared
     VarianceTable,
     varianceInStms,
     isTileableRedomap,
+    TileKind (..),
   )
 where
 
@@ -99,24 +100,36 @@ segScatter2D ::
   SubExp -> -- arr_size
   VName ->
   SegLevel -> -- lvl
+  [SubExp] -> -- dims of sequential loop on top
   (SubExp, SubExp) -> -- (dim_y, dim_x)
-  ((VName, VName) -> Builder GPU (SubExp, SubExp)) -> -- f
-  Builder GPU [VName]
-segScatter2D desc arr_size updt_arr lvl (dim_x, dim_y) f = do
+  ([VName] -> (VName, VName) -> Builder GPU (SubExp, SubExp)) -> -- f
+  Builder GPU VName
+segScatter2D desc arr_size updt_arr lvl seq_dims (dim_x, dim_y) f = do
   ltid_x <- newVName "ltid_x"
   ltid_y <- newVName "ltid_y"
   ltid_flat <- newVName "ltid_flat"
-  let segspace = SegSpace ltid_flat [(ltid_x, dim_x), (ltid_y, dim_y)]
+
+  seq_is <- replicateM (length seq_dims) (newVName "ltid_seq")
+  let seq_space = zip seq_is seq_dims
+
+  let segspace = SegSpace ltid_flat $ seq_space ++ [(ltid_x, dim_x), (ltid_y, dim_y)]
+      lvl' =
+        SegThread
+          (segNumGroups lvl)
+          (segGroupSize lvl)
+          (SegNoVirtFull (SegSeqDims [0 .. length seq_dims -1]))
 
   ((t_v, res_v, res_i), stms) <- runBuilder $ do
-    (res_v, res_i) <- f (ltid_x, ltid_y)
+    (res_v, res_i) <-
+      localScope (scopeOfSegSpace segspace) $
+        f seq_is (ltid_x, ltid_y)
     t_v <- subExpType res_v
     return (t_v, res_v, res_i)
 
   let ret = WriteReturns mempty (Shape [arr_size]) updt_arr [(Slice [DimFix res_i], res_v)]
   let body = KernelBody () stms [ret]
 
-  letTupExp desc <=< renameExp $ Op $ SegOp $ SegMap lvl segspace [t_v] body
+  letExp desc <=< renameExp $ Op $ SegOp $ SegMap lvl' segspace [t_v] body
 
 -- | The variance table keeps a mapping from a variable name
 -- (something produced by a 'Stm') to the kernel thread indices
@@ -181,3 +194,6 @@ varianceInStm v0 stm = defVarianceInStm v0 stm
 
 varianceInStms :: VarianceTable -> Stms GPU -> VarianceTable
 varianceInStms = foldl' varianceInStm
+
+-- | Are we working with full or partial tiles?
+data TileKind = TilePartial | TileFull

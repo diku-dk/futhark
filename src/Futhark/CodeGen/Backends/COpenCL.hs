@@ -213,7 +213,7 @@ readOpenCLScalar _ _ _ space _ =
 
 allocateOpenCLBuffer :: GC.Allocate OpenCL ()
 allocateOpenCLBuffer mem size tag "device" =
-  GC.stm [C.cstm|OPENCL_SUCCEED_OR_RETURN(opencl_alloc(&ctx->opencl, (size_t)$exp:size, $exp:tag, &$exp:mem));|]
+  GC.stm [C.cstm|ctx->error = OPENCL_SUCCEED_NONFATAL(opencl_alloc(&ctx->opencl, (size_t)$exp:size, $exp:tag, &$exp:mem));|]
 allocateOpenCLBuffer _ _ _ space =
   error $ "Cannot allocate in '" ++ space ++ "' space."
 

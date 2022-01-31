@@ -126,7 +126,7 @@ mmBlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kbo
               map snd rem_outer_dims_rev
       grid_size <- letSubExp "grid_size" =<< toExp grid_pexp
       group_size <- letSubExp "group_size" =<< toExp (pe64 ty * pe64 tx)
-      let segthd_lvl = SegThread (Count grid_size) (Count group_size) SegNoVirtFull
+      let segthd_lvl = SegThread (Count grid_size) (Count group_size) (SegNoVirtFull (SegSeqDims []))
 
       gid_x <- newVName "gid_x"
       gid_y <- newVName "gid_y"
@@ -151,90 +151,90 @@ mmBlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kbo
         a_loc_init <- scratch "A_loc" map_t1 [a_loc_sz]
         b_loc_init <- scratch "B_loc" map_t2 [b_loc_sz]
 
-        let kkLoopBody kk0 (thd_res_merge, a_loc_init', b_loc_init') epilogue = do
+        let kkLoopBody tkind kk0 (thd_res_merge, a_loc_init', b_loc_init') epilogue = do
               kk <- letExp "kk" =<< toExp (le64 kk0 * pe64 tk)
-              a_loc <- forLoop ry [a_loc_init'] $ \i0 [a_loc_merge] -> do
-                loop_a_loc <- forLoop tk_div_tx [a_loc_merge] $ \k0 [a_loc_merge'] -> do
-                  scatter_a_loc <- segScatter2D "A_glb2loc" a_loc_sz a_loc_merge' segthd_lvl (ty, tx) $
-                    \(thd_y, thd_x) -> do
-                      k <- letExp "k" =<< toExp (le64 thd_x + le64 k0 * pe64 tx)
-                      i <- letExp "i" =<< toExp (le64 thd_y + le64 i0 * pe64 ty)
+              a_loc <- segScatter2D
+                "A_glb2loc"
+                a_loc_sz
+                a_loc_init'
+                segthd_lvl
+                [ry, tk_div_tx]
+                (ty, tx)
+                $ \[i0, k0] (thd_y, thd_x) -> do
+                  k <- letExp "k" =<< toExp (le64 thd_x + le64 k0 * pe64 tx)
+                  i <- letExp "i" =<< toExp (le64 thd_y + le64 i0 * pe64 ty)
 
-                      letBindNames [gtid_y] =<< toExp (le64 iii + le64 i)
-                      a_col_idx <- letExp "A_col_idx" =<< toExp (le64 kk + le64 k)
+                  letBindNames [gtid_y] =<< toExp (le64 iii + le64 i)
+                  a_col_idx <- letExp "A_col_idx" =<< toExp (le64 kk + le64 k)
 
-                      a_elem <-
-                        letSubExp "A_elem"
-                          =<< eIf
-                            ( toExp $
-                                le64 gtid_y .<. pe64 height_A
-                                  .&&. if epilogue
-                                    then le64 a_col_idx .<. pe64 common_dim
-                                    else true
-                            )
-                            ( do
-                                addStm load_A
-                                res <- index "A_elem" inp_A [a_col_idx]
-                                resultBodyM [Var res]
-                            )
-                            (eBody [eBlank $ Prim map_t1])
-                      a_loc_ind <-
-                        letSubExp "a_loc_ind"
-                          =<< eIf
-                            (toExp $ le64 k .<. pe64 tk)
-                            ( toExp (le64 k + le64 i * pe64 tk)
-                                >>= letTupExp' "loc_fi"
-                                >>= resultBodyM
-                            )
-                            (eBody [pure $ BasicOp $ SubExp $ intConst Int64 (-1)])
-                      return (a_elem, a_loc_ind)
-                  resultBodyM $ map Var scatter_a_loc
-                resultBodyM [Var loop_a_loc]
+                  a_elem <-
+                    letSubExp "A_elem"
+                      =<< eIf
+                        ( toExp $
+                            le64 gtid_y .<. pe64 height_A
+                              .&&. if epilogue
+                                then le64 a_col_idx .<. pe64 common_dim
+                                else true
+                        )
+                        ( do
+                            addStm load_A
+                            res <- index "A_elem" inp_A [a_col_idx]
+                            resultBodyM [Var res]
+                        )
+                        (eBody [eBlank $ Prim map_t1])
+                  a_loc_ind <-
+                    letSubExp "a_loc_ind"
+                      =<< eIf
+                        (toExp $ le64 k .<. pe64 tk)
+                        ( toExp (le64 k + le64 i * pe64 tk)
+                            >>= letTupExp' "loc_fi"
+                            >>= resultBodyM
+                        )
+                        (eBody [pure $ BasicOp $ SubExp $ intConst Int64 (-1)])
+                  return (a_elem, a_loc_ind)
 
               -- copy B from global to shared memory
-              b_loc <- forLoop tk_div_ty [b_loc_init'] $ \k0 [b_loc_merge] -> do
-                loop_b_loc <- forLoop rx [b_loc_merge] $ \j0 [b_loc_merge'] -> do
-                  scatter_b_loc <- segScatter2D
-                    "B_glb2loc"
-                    b_loc_sz
-                    b_loc_merge'
-                    segthd_lvl
-                    (ty, tx)
-                    $ \(thd_y, thd_x) -> do
-                      k <- letExp "k" =<< toExp (le64 thd_y + le64 k0 * pe64 ty)
-                      j <- letExp "j" =<< toExp (le64 thd_x + le64 j0 * pe64 tx)
+              b_loc <- segScatter2D
+                "B_glb2loc"
+                b_loc_sz
+                b_loc_init'
+                segthd_lvl
+                [tk_div_ty, rx]
+                (ty, tx)
+                $ \[k0, j0] (thd_y, thd_x) ->
+                  do
+                    k <- letExp "k" =<< toExp (le64 thd_y + le64 k0 * pe64 ty)
+                    j <- letExp "j" =<< toExp (le64 thd_x + le64 j0 * pe64 tx)
 
-                      letBindNames [gtid_x] =<< toExp (le64 jjj + le64 j)
-                      b_row_idx <- letExp "B_row_idx" =<< toExp (le64 kk + le64 k)
+                    letBindNames [gtid_x] =<< toExp (le64 jjj + le64 j)
+                    b_row_idx <- letExp "B_row_idx" =<< toExp (le64 kk + le64 k)
 
-                      b_elem <-
-                        letSubExp "B_elem"
-                          =<< eIf
-                            ( toExp $
-                                le64 gtid_x .<. pe64 width_B
-                                  .&&. if epilogue
-                                    then le64 b_row_idx .<. pe64 common_dim
-                                    else true
-                            )
-                            ( do
-                                addStm load_B
-                                res <- index "B_elem" inp_B [b_row_idx]
-                                resultBodyM [Var res]
-                            )
-                            (eBody [eBlank $ Prim map_t2])
+                    b_elem <-
+                      letSubExp "B_elem"
+                        =<< eIf
+                          ( toExp $
+                              le64 gtid_x .<. pe64 width_B
+                                .&&. if epilogue
+                                  then le64 b_row_idx .<. pe64 common_dim
+                                  else true
+                          )
+                          ( do
+                              addStm load_B
+                              res <- index "B_elem" inp_B [b_row_idx]
+                              resultBodyM [Var res]
+                          )
+                          (eBody [eBlank $ Prim map_t2])
 
-                      b_loc_ind <-
-                        letSubExp "b_loc_ind"
-                          =<< eIf
-                            (toExp $ le64 k .<. pe64 tk)
-                            ( toExp (le64 j + le64 k * pe64 tx_rx)
-                                >>= letTupExp' "loc_fi"
-                                >>= resultBodyM
-                            )
-                            (eBody [pure $ BasicOp $ SubExp $ intConst Int64 (-1)])
-                      return (b_elem, b_loc_ind)
-                  resultBodyM $ map Var scatter_b_loc
-                resultBodyM [Var loop_b_loc]
+                    b_loc_ind <-
+                      letSubExp "b_loc_ind"
+                        =<< eIf
+                          (toExp $ le64 k .<. pe64 tk)
+                          ( toExp (le64 j + le64 k * pe64 tx_rx)
+                              >>= letTupExp' "loc_fi"
+                              >>= resultBodyM
+                          )
+                          (eBody [pure $ BasicOp $ SubExp $ intConst Int64 (-1)])
+                    return (b_elem, b_loc_ind)
 
               -- inner loop updating this thread's accumulator (loop k in mmm_kernels).
               thd_acc <- forLoop tk [thd_res_merge] $ \k [acc_merge] ->
@@ -291,15 +291,18 @@ mmBlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kbo
                             css_init <- index "css_init" acc_merge [ltid_y, ltid_x]
 
                             css <- forLoop ry [css_init] $ \i [css_merge] -> do
-                              css <- forLoop rx [css_merge] $ \j [css_merge'] ->
+                              css <- forLoop rx [css_merge] $ \j [css_merge'] -> do
+                                let cond =
+                                      toExp $ case tkind of
+                                        TileFull -> true
+                                        TilePartial ->
+                                          le64 iii + le64 i + pe64 ry * le64 ltid_y
+                                            .<. pe64 height_A
+                                              .&&. le64 jjj + le64 j + pe64 rx * le64 ltid_x
+                                            .<. pe64 width_B
                                 resultBodyM =<< letTupExp' "foo"
                                   =<< eIf
-                                    ( toExp $
-                                        le64 iii + le64 i + pe64 ry * le64 ltid_y
-                                          .<. pe64 height_A
-                                            .&&. le64 jjj + le64 j + pe64 rx * le64 ltid_x
-                                          .<. pe64 width_B
-                                    )
+                                    cond
                                     ( do
                                         a <- index "a" as [i]
                                         b <- index "b" bs [j]
@@ -339,14 +342,14 @@ mmBlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kbo
           forLoop' (Var full_tiles) [cssss, a_loc_init, b_loc_init] $
             \kk0 [thd_res_merge, a_loc_merge, b_loc_merge] -> do
               process_full_tiles <-
-                kkLoopBody kk0 (thd_res_merge, a_loc_merge, b_loc_merge) False
+                kkLoopBody TileFull kk0 (thd_res_merge, a_loc_merge, b_loc_merge) False
 
               resultBodyM $ map Var process_full_tiles
 
         let prologue_res : a_loc_reuse : b_loc_reuse : _ = prologue_res_list
 
         -- build epilogue.
-        epilogue_res_list <- kkLoopBody full_tiles (prologue_res, a_loc_reuse, b_loc_reuse) True
+        epilogue_res_list <- kkLoopBody TilePartial full_tiles (prologue_res, a_loc_reuse, b_loc_reuse) True
 
         let redomap_res : _ = epilogue_res_list
 
@@ -779,7 +782,7 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
       let grid_pexp = product $ gridxyz_pexp : map (pe64 . snd) rem_outer_dims_rev
       grid_size <- letSubExp "grid_size_tile3d" =<< toExp grid_pexp
       group_size <- letSubExp "group_size_tile3d" =<< toExp (pe64 ty * pe64 tx)
-      let segthd_lvl = SegThread (Count grid_size) (Count group_size) SegNoVirtFull
+      let segthd_lvl = SegThread (Count grid_size) (Count group_size) (SegNoVirtFull (SegSeqDims []))
 
       count_shmem <- letSubExp "count_shmem" =<< ceilDiv rz group_size
 
