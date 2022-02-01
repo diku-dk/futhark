@@ -19,8 +19,6 @@ import Futhark.MonadFreshNames (VNameSource, getNameSource, putNameSource)
 import Futhark.Pass
 import Futhark.Transform.Substitute
 
--- TODO: Run ormolu and hlint
-
 reduceDeviceSyncs :: Pass GPU GPU
 reduceDeviceSyncs =
   Pass
@@ -307,7 +305,13 @@ optimizeStm out stm = do
         -- Read scalars that are used on host.
         foldM addRead (out' |> stm') (zip pes pes')
       WithAcc inputs lmd -> do
-        inputs' <- mapM optimizeWithAccInput inputs
+        let getAcc (Acc a _ _ _) = a
+            getAcc _ =
+              compilerBugS
+                "Type error: WithAcc expression did not return accumulator."
+
+        let accs = zipWith (\t i -> (getAcc t, i)) (lambdaReturnType lmd) inputs
+        inputs' <- mapM (uncurry optimizeWithAccInput) accs
 
         let body = lambdaBody lmd
         stms' <- optimizeStms empty (bodyStms body)
@@ -378,14 +382,20 @@ rewriteForIn (params, ForLoop i t n elems, body) = do
     index arr ofType =
       Index arr $ Slice $ DimFix (Var i) : map sliceDim (arrayDims ofType)
 
-optimizeWithAccInput :: WithAccInput GPU -> ReduceM (WithAccInput GPU)
-optimizeWithAccInput (shape, arrs, Nothing) = pure (shape, arrs, Nothing)
-optimizeWithAccInput (shape, arrs, Just (op, nes)) = do
-  let body = lambdaBody op
-  -- Neither parameters nor results can change types for WithAcc to type check.
-  stms' <- optimizeStms empty (bodyStms body)
-  let op' = op {lambdaBody = body {bodyStms = stms'}}
-  pure (shape, arrs, Just (op', nes))
+optimizeWithAccInput :: VName -> WithAccInput GPU -> ReduceM (WithAccInput GPU)
+optimizeWithAccInput _ (shape, arrs, Nothing) = pure (shape, arrs, Nothing)
+optimizeWithAccInput acc (shape, arrs, Just (op, nes)) = do
+  device_only <- asks (shouldMove acc)
+  if device_only
+    then do
+      op' <- addReadsToLambda op
+      pure (shape, arrs, Just (op', nes))
+    else do
+      let body = lambdaBody op
+      -- To pass type check neither parameters nor results can change.
+      stms' <- optimizeStms empty (bodyStms body)
+      let op' = op {lambdaBody = body {bodyStms = stms'}}
+      pure (shape, arrs, Just (op', nes))
 
 optimizeHostOp :: HostOp GPU op -> ReduceM (HostOp GPU op)
 optimizeHostOp (SegOp (SegMap lvl space types kbody)) =

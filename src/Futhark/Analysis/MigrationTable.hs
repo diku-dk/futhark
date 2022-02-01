@@ -23,6 +23,7 @@ import qualified Data.IntSet as IS
 import Data.List (find, foldl')
 import qualified Data.Map.Strict as M
 import Data.Maybe (fromJust, fromMaybe, isJust, isNothing)
+import qualified Data.Sequence as SQ
 import Data.Set (Set, (\\))
 import qualified Data.Set as S
 import Futhark.Analysis.MigrationTable.Graph hiding
@@ -59,7 +60,6 @@ data MigrationStatus
 --
 --     (2) which migrated variables that still will be used on the host after
 --         all such statements have been moved.
---
 newtype MigrationTable = MigrationTable (IM.IntMap MigrationStatus)
 
 -- | Where should the value bound by this name be computed?
@@ -261,8 +261,6 @@ type Grapher = StateT State (R.Reader Env)
 data Env = Env
   { -- | See 'HostOnlyFuns'.
     envHostOnlyFuns :: HostOnlyFuns,
-    -- | How to graph some operation based on previous, non-local information.
-    envActionTable :: ActionTable,
     -- | Metadata for the current body being graphed.
     envMeta :: Meta
   }
@@ -270,37 +268,6 @@ data Env = Env
 -- | Identifies top-level function definitions that cannot be run on the
 -- device. The application of any such function is host-only.
 type HostOnlyFuns = Set Name
-
--- | From 'Id' to 'GraphAction'. Entries for 'UpdateAcc' expressions are
--- inserted under the token of their associated accumulator.
-type ActionTable = IM.IntMap GraphAction
-
--- | How to graph some operation based on previous, non-local information.
-data GraphAction
-  = -- | Operation is host-only.
-    HostOp
-  | -- | Operation should be moved to device.
-    DeviceOp
-  | -- | How to handle the operation has not been determined yet.
-    NeutralOp
-  deriving (Eq)
-
-instance Semigroup GraphAction where
-  _ <> HostOp = HostOp
-  DeviceOp <> DeviceOp = DeviceOp
-  x <> NeutralOp = x
-  x <> y = y <> x
-
-instance Monoid GraphAction where
-  mempty = NeutralOp
-
--- | A measurement of how many if statement branch bodies a variable binding is
--- nested within.
-type ForkDepth = Int
-
--- If a route passes through the edge u->v and the fork depth
---   1) increases from u to v, then u is within a conditional branch.
---   2) decreases from u to v, then v binds the result of two or more branches.
 
 -- | Metadata on the environment that a variable is declared within.
 data Meta = Meta
@@ -370,6 +337,12 @@ type Sources = ([Id], [Id])
 -- | All terminal vertices of routes.
 type Sinks = [Id]
 
+-- | A captured statement for which graphing has been delayed.
+type Delayed = (Binding, Exp GPU)
+
+-- | The vertex handle for a variable and its type.
+type Binding = (Id, Type)
+
 data State = State
   { -- | The graph being built.
     stateGraph :: Graph,
@@ -382,6 +355,8 @@ data State = State
     -- that bind these variables are moved to device, the variables must be read
     -- from device memory.
     stateSinks :: Sinks,
+    -- | Observed 'UpdateAcc' host statements to be graphed later.
+    stateUpdateAccs :: IM.IntMap [Delayed],
     -- | Information about the current body being graphed.
     stateStats :: BodyStats
   }
@@ -394,7 +369,6 @@ execGrapher hof m =
     env =
       Env
         { envHostOnlyFuns = hof,
-          envActionTable = IM.empty,
           envMeta =
             Meta
               { metaForkDepth = 0,
@@ -408,6 +382,7 @@ execGrapher hof m =
           stateGraphedScalars = IS.empty,
           stateSources = ([], []),
           stateSinks = [],
+          stateUpdateAccs = IM.empty,
           stateStats = mempty
         }
 
@@ -534,21 +509,9 @@ captureBodyStats m = do
 
   pure stats'
 
--- | Add these entries to the 'ActionTable' for this action.
-withActions :: Grapher a -> ActionTable -> Grapher a
-withActions m table = local f m
-  where
-    f env = env {envActionTable = table <> envActionTable env}
-
 -- | Can applications of this function be moved to device?
 isHostOnlyFun :: Name -> Grapher Bool
 isHostOnlyFun fn = asks $ S.member fn . envHostOnlyFuns
-
--- | How to graph updates of the accumulator with the given token.
-getAction :: Id -> Grapher GraphAction
-getAction i = do
-  table <- asks envActionTable
-  pure (table IM.! i)
 
 -- | Get the 'Meta' corresponding to the current body.
 getMeta :: Grapher Meta
@@ -557,9 +520,6 @@ getMeta = asks envMeta
 -- | Get the body depth of the current body (its nesting level).
 getBodyDepth :: Grapher Int
 getBodyDepth = asks (metaBodyDepth . envMeta)
-
--- | The vertex handle for a variable and its type.
-type Binding = (Id, Type)
 
 -- | Creates a vertex for the given binding, provided that the set of operands
 -- is not empty.
@@ -813,12 +773,15 @@ graphHostOnly e = do
 
 -- | Graph an 'UpdateAcc' statement.
 graphUpdateAcc :: Binding -> Exp GPU -> Grapher ()
-graphUpdateAcc b e | (_, Acc a _ _ _) <- b = do
-  act <- getAction (nameToId a)
-  case act of
-    HostOp -> graphHostOnly e
-    DeviceOp -> graphAutoMove b e
-    NeutralOp -> graphSimple [b] e
+graphUpdateAcc b e | (_, Acc a _ _ _) <- b =
+  -- The actual graphing is delayed to the corrensponding 'WithAcc' parent.
+  modify $ \st ->
+    let accs = stateUpdateAccs st
+        accs' = IM.alter add (nameToId a) accs
+     in st {stateUpdateAccs = accs'}
+  where
+    add Nothing = Just [(b, e)]
+    add (Just xs) = Just $ (b, e) : xs
 graphUpdateAcc _ _ =
   compilerBugS
     "Type error: UpdateAcc did not produce accumulator typed value."
@@ -1034,17 +997,15 @@ graphLoop (b : bs) params lform body = do
 -- | Graph a 'WithAcc' statement.
 graphWithAcc ::
   [Binding] ->
-  [(Shape, [VName], Maybe (Lambda GPU, [SubExp]))] ->
+  [WithAccInput GPU] ->
   Lambda GPU ->
   Grapher ()
 graphWithAcc bs inputs f = do
-  let accs = zip (lambdaReturnType f) inputs
-  -- Graph each accumulator operator. UpdateAcc statements will be graphed
-  -- based on which statements their associated accumulator operators
-  -- evaluate, which is captured as 'GraphAction's. The actions are made
-  -- available until the associated accumulators no longer are in scope.
-  actions <- IM.fromList <$> mapM (graph . extract) accs
-  graphBody (lambdaBody f) `withActions` actions
+  -- Graph the body, capturing 'UpdateAcc' statements for delayed graphing.
+  graphBody (lambdaBody f)
+
+  -- Graph each accumulator monoid and its associated 'UpdateAcc' statements.
+  mapM_ graph $ zip (lambdaReturnType f) inputs
 
   -- Connect return variables to bound values. No outgoing edge exists
   -- from an accumulator vertex so skip those. Note that accumulators do
@@ -1053,95 +1014,74 @@ graphWithAcc bs inputs f = do
   ret <- mapM (onlyGraphedScalarSubExp . resSubExp) res
   mapM_ (uncurry createNode) $ zip (reverse bs) (reverse ret)
   where
-    graph (i, ts, comb) = do
-      let op = fst <$> comb
-      a <- graphAccOp i ts op
-      case comb of
-        -- In principle UpdateAcc could be run on host and thus not use the
-        -- neutral elements, but we cannot change the type of neutral elements
-        -- if we want WithAcc to type check. Neutral elements must thus always
-        -- be made available on host.
-        Just (_, nes) -> mapM_ connectSubExpToSink nes
-        _ -> pure ()
-      pure (i, a)
+    graph (Acc a _ types _, (_, _, comb)) = do
+      let i = nameToId a
 
-    extract (Acc a _ ts _, (_, _, comb)) = (nameToId a, ts, comb)
-    extract _ =
+      delayed <- fromMaybe [] <$> gets (IM.lookup i . stateUpdateAccs)
+      modify $ \st -> st {stateUpdateAccs = IM.delete i (stateUpdateAccs st)}
+
+      graphAcc i types (fst <$> comb) delayed
+
+      -- Neutral elements must always be made available on host for 'WithAcc'
+      -- to type check.
+      mapM_ connectSubExpToSink $ maybe [] snd comb
+    graph _ =
       compilerBugS "Type error: WithAcc expression did not return accumulator."
 
--- Graph the operator associated with updating an accumulator.
--- The arguments are the 'Id' for the accumulator token, the element type of
--- the accumulator, and its update operator lambda, if any.
-graphAccOp :: Id -> [Type] -> Maybe (Lambda GPU) -> Grapher GraphAction
-graphAccOp i types op = do
+-- Graph the operator and all 'UpdateAcc' statements associated with an
+-- accumulator.
+--
+-- The arguments are the 'Id' for the accumulator token, the element types of
+-- the accumulator/operator, its combining function if any, and all associated
+-- 'UpdateAcc' statements outside kernels.
+graphAcc :: Id -> [Type] -> Maybe (Lambda GPU) -> [Delayed] -> Grapher ()
+graphAcc i _ _ [] = addSource (i, Prim Unit) -- only used on device
+graphAcc i types op delayed = do
+  -- Accumulators are intended for use within SegOps but in principle the AST
+  -- allows their 'UpdateAcc's to be used outside a kernel. This case handles
+  -- that unlikely situation.
+
   env <- ask
   st <- get
 
-  -- Graph the accumulator operator to collect statistics about its statements.
-  -- If the operator contains no host-only statements then the graphing will be
-  -- reversed, either because all usages will be from device or because there is
-  -- nothing to graph.
-  let env' = env {envMeta = (envMeta env) {metaGraphId = Just i}}
-  let (stats, st') = case op of
-        Nothing -> (mempty, st)
-        Just (Lambda _ body _) ->
-          let m = do
-                graphBody body
-                -- We cannot change the type signature of op so results must be
-                -- read from device memory. This only matters if the op actually
-                -- will be run on host.
-                mapM_ (connectSubExpToSink . resSubExp) (bodyResult body)
-           in R.runReader (runStateT (captureBodyStats m) st) env'
+  -- Collect statistics about the operator statements.
+  let lambda = fromMaybe (Lambda [] (Body () SQ.empty []) []) op
+  let m = graphBody (lambdaBody lambda)
+  let stats = R.runReader (evalStateT (captureBodyStats m) st) env
 
-  -- The operator will be invoked by UpdateAcc statements. Determine how these
-  -- statements should be graphed based on collected statistics.
-  --
   -- op operands are read from arrays and written back so if any of the operands
   -- are scalar then a read can be avoided by moving the UpdateAcc usages to
   -- device. If the op itself performs scalar reads its UpdateAcc usages should
   -- also be moved.
-  --
-  -- If the op is host-only its UpdateAccs cannot be moved.
-  let act = if any isScalarType types then DeviceOp else NeutralOp
-  let act' =
-        act <> case stats of
-          BodyStats host_only _ _ _ | host_only -> HostOp
-          BodyStats _ did_reads _ _ | did_reads -> DeviceOp
-          _ -> NeutralOp
+  let does_read = bodyReads stats || any isScalarType types
+  let host_only = bodyHostOnly stats
 
   -- Determine which external variables the operator depends upon.
-  let g = stateGraph st
-  let ops = IS.filter (`MG.member` g) (bodyOperands stats)
+  -- 'bodyOperands' cannot be used as it excludes branch conditions, operands
+  -- that were connected to sinks, and others, so instead we create an artifical
+  -- expression to capture graphed operands from.
+  ops <- graphedScalarOperands (WithAcc [] lambda)
 
-  -- Finish graphing the operator based on the determined action type.
-  case act' of
-    HostOp -> do
-      -- UpdateAccs can only run on host.
+  case (host_only, does_read) of
+    (True, _) -> do
+      -- If the operator cannot run well in a GPUBody then all non-kernel
+      -- UpdateAcc statements are host-only. The current analysis is ignorant
+      -- of what happens within kernels so we must assume that the operator
+      -- is used within a kernel, meaning that we cannot migrate its statements.
       --
-      -- Reads are only allowed to be delayed into the operator in so far
-      -- its total number of reads does not increase.
-      put st'
-      censorRoutes i ops
-    DeviceOp -> do
-      -- UpdateAccs should always be moved to device.
-      --
-      -- All free variables the operator depends upon should be made available
-      -- on host to not increase the number of reads done by the operator.
-      -- Operator reads will be done once per UpdateAcc and not simply once per
-      -- kernel thread. This might be too conservative (more data needed!) but
-      -- will likely not matter as operators are expected to be monoids and
-      -- monoids with free variables are rare.
-      --
-      -- TODO: Reconsider after having measured map, reduce, scan, etc. using
-      --       delayed reads.
-      mapM_ connectToSink (IS.elems ops)
-    NeutralOp -> do
-      -- UpdateAccs should only be moved to device if it avoids the read of
-      -- one or more operator arguments.
-      mapM_ connectToSink (IS.elems ops)
-
-  -- Report how UpdateAcc statements that use this operator should be graphed.
-  pure act'
+      -- TODO: Improve analysis if UpdateAcc ever is used outside kernels.
+      mapM_ (graphHostOnly . snd) delayed
+      addEdges ToSink ops
+    (_, True) -> do
+      -- Migrate all accumulator usage to device.
+      mapM_ (graphAutoMove . fst) delayed
+      addSource (i, Prim Unit)
+    _ -> do
+      -- Only migrate operator and UpdateAcc statements to allow their
+      -- operands to be migrated.
+      createNode (i, Prim Unit) ops
+      forM_ delayed $
+        \(b, e) -> graphedScalarOperands e >>= createNode b . IS.insert i
 
 -- | @censorRoutes si ops@ routes all possible routes within the subgraph
 -- identified by @si@ and then connects each operand in @ops@ to a sink if it
