@@ -386,11 +386,10 @@ collect = fmap snd . collect'
 collect' :: ImpM rep r op a -> ImpM rep r op (a, Imp.Code op)
 collect' m = do
   prev_code <- gets stateCode
-  prev_vtable <- gets stateVTable
   modify $ \s -> s {stateCode = mempty}
   x <- m
   new_code <- gets stateCode
-  modify $ \s -> s {stateCode = prev_code, stateVTable = prev_vtable}
+  modify $ \s -> s {stateCode = prev_code}
   return (x, new_code)
 
 -- | Execute a code generation action, wrapping the generated code
