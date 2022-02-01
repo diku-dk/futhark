@@ -198,7 +198,7 @@ checkLocalMemoryReqs code = do
       return $ Just $ foldl' (.&&.) true (map fits alloc_sizes)
   where
     getGPU = foldMap getKernel
-    getKernel (Imp.CallKernel k) = [k]
+    getKernel (Imp.CallKernel k) | Imp.kernelCheckLocalMemory k = [k]
     getKernel _ = []
 
     localAllocSizes = foldMap localAllocSize

@@ -198,7 +198,7 @@ nonsegmentedReduction segred_pat num_groups group_size space reds body = do
 
   emit $ Imp.DebugPrint "\n# SegRed" Nothing
 
-  sKernelThread "segred_nonseg" num_groups' group_size' (segFlat space) $ do
+  sKernelThread "segred_nonseg" (segFlat space) (defKernelAttrs num_groups' group_size') $ do
     constants <- kernelConstants <$> askEnv
     sync_arr <- sAllocArray "sync_arr" Bool (Shape [intConst Int32 1]) $ Space "local"
     reds_arrs <- mapM (intermediateArrays group_size (tvSize num_threads)) reds
@@ -284,7 +284,7 @@ smallSegmentsReduction (Pat segred_pes) num_groups group_size space reds body = 
   emit $ Imp.DebugPrint "segments_per_group" $ Just $ untyped segments_per_group
   emit $ Imp.DebugPrint "required_groups" $ Just $ untyped required_groups
 
-  sKernelThread "segred_small" num_groups' group_size' (segFlat space) $ do
+  sKernelThread "segred_small" (segFlat space) (defKernelAttrs num_groups' group_size') $ do
     constants <- kernelConstants <$> askEnv
     reds_arrs <- mapM (intermediateArrays group_size (Var $ tvVar num_threads)) reds
 
@@ -423,7 +423,7 @@ largeSegmentsReduction segred_pat num_groups group_size space reds body = do
     sStaticArray "counter" (Space "device") int32 $
       Imp.ArrayZeros num_counters
 
-  sKernelThread "segred_large" num_groups' group_size' (segFlat space) $ do
+  sKernelThread "segred_large" (segFlat space) (defKernelAttrs num_groups' group_size') $ do
     constants <- kernelConstants <$> askEnv
     reds_arrs <- mapM (intermediateArrays group_size (tvSize num_threads)) reds
     sync_arr <- sAllocArray "sync_arr" Bool (Shape [intConst Int32 1]) $ Space "local"

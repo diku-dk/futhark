@@ -266,7 +266,7 @@ compileSegScan pat lvl space scanOp kbody = do
 
   sReplicate statusFlags $ intConst Int8 statusX
 
-  sKernelThread "segscan" num_groups group_size (segFlat space) $ do
+  sKernelThread "segscan" (segFlat space) (defKernelAttrs num_groups group_size) $ do
     constants <- kernelConstants <$> askEnv
 
     (sharedId, transposedArrays, prefixArrays, warpscan, exchanges) <-

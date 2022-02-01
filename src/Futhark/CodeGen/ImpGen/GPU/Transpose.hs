@@ -321,7 +321,8 @@ mapTransposeKernel desc block_dim_int args t kind =
       kernelNumGroups = map untyped num_groups,
       kernelGroupSize = map untyped group_size,
       kernelName = nameFromString name,
-      kernelFailureTolerant = True
+      kernelFailureTolerant = True,
+      kernelCheckLocalMemory = False
     }
   where
     pad2DBytes k = k * (k + 1) * primByteSize t

@@ -396,7 +396,7 @@ histKernelGlobalPass map_pes num_groups group_size space slugs kbody histograms 
   hist_H_chks <- forM (map (histSize . slugOp) slugs) $ \w ->
     dPrimVE "hist_H_chk" $ w `divUp` sExt64 hist_S
 
-  sKernelThread "seghist_global" num_groups group_size (segFlat space) $ do
+  sKernelThread "seghist_global" (segFlat space) (defKernelAttrs num_groups group_size) $ do
     constants <- kernelConstants <$> askEnv
 
     -- Compute subhistogram index for each thread, per histogram.
@@ -625,7 +625,8 @@ histKernelLocalPass
         dPrimVE "init_per_thread" $ sExt32 $ group_hists_size `divUp` unCount group_size
       return (histo_dims, histo_size, init_per_thread)
 
-    sKernelThread "seghist_local" num_groups group_size (segFlat space) $
+    let attrs = (defKernelAttrs num_groups group_size) {kAttrCheckLocalMemory = False}
+    sKernelThread "seghist_local" (segFlat space) attrs $
       virtualiseGroups SegVirt (sExt32 $ unCount groups_per_segment * num_segments) $ \group_id -> do
         constants <- kernelConstants <$> askEnv
 

@@ -33,7 +33,7 @@ compileSegMap pat lvl space kbody = do
     SegThread {} -> do
       let virt_num_groups =
             sExt32 $ product dims' `divUp` unCount group_size'
-      sKernelThread "segmap" num_groups' group_size' (segFlat space) $
+      sKernelThread "segmap" (segFlat space) (defKernelAttrs num_groups' group_size') $
         virtualiseGroups (segVirt lvl) virt_num_groups $ \group_id -> do
           local_tid <- kernelLocalThreadId . kernelConstants <$> askEnv
 
@@ -50,7 +50,7 @@ compileSegMap pat lvl space kbody = do
                 kernelBodyResult kbody
     SegGroup {} -> do
       pc <- precomputeConstants group_size' $ kernelBodyStms kbody
-      sKernelGroup "segmap_intragroup" num_groups' group_size' (segFlat space) $ do
+      sKernelGroup "segmap_intragroup" (segFlat space) (defKernelAttrs num_groups' group_size') $ do
         let virt_num_groups = sExt32 $ product dims'
         precomputedConstants pc $
           virtualiseGroups (segVirt lvl) virt_num_groups $ \group_id -> do

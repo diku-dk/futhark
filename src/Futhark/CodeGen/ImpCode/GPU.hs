@@ -71,7 +71,11 @@ data Kernel = Kernel
     -- depend on any non-scalar parameters to make control
     -- flow decisions.  Replication, transpose, and copy
     -- kernels are examples of this.
-    kernelFailureTolerant :: Bool
+    kernelFailureTolerant :: Bool,
+    -- | If true, multi-versioning branches will consider this kernel
+    -- when considering the local memory requirements.  Set this to
+    -- false for kernels that do their own checking.
+    kernelCheckLocalMemory :: Bool
   }
   deriving (Show)
 
@@ -132,6 +136,7 @@ instance Pretty Kernel where
             </> text "group_size" <+> brace (ppr $ kernelGroupSize kernel)
             </> text "uses" <+> brace (commasep $ map ppr $ kernelUses kernel)
             </> text "failure_tolerant" <+> brace (ppr $ kernelFailureTolerant kernel)
+            </> text "check_local_memory" <+> brace (ppr $ kernelCheckLocalMemory kernel)
             </> text "body" <+> brace (ppr $ kernelBody kernel)
         )
 
