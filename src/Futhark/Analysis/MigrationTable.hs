@@ -22,7 +22,7 @@ import qualified Data.IntMap.Strict as IM
 import qualified Data.IntSet as IS
 import Data.List (find, foldl')
 import qualified Data.Map.Strict as M
-import Data.Maybe (fromJust, fromMaybe, isNothing)
+import Data.Maybe (fromJust, fromMaybe, isJust, isNothing)
 import Data.Set (Set, (\\))
 import qualified Data.Set as S
 import Futhark.Analysis.MigrationTable.Graph hiding
@@ -304,8 +304,17 @@ type ForkDepth = Int
 
 -- | Metadata on the environment that a variable is declared within.
 data Meta = Meta
-  { -- | The fork depth of the variable.
-    metaForkDepth :: ForkDepth,
+  { -- | How many if statement branch bodies the variable binding is nested
+    -- within. If a route passes through the edge u->v and the fork depth
+    --
+    --   1) increases from u to v, then u is within a conditional branch.
+    --
+    --   2) decreases from u to v, then v binds the result of two or more
+    --      branches.
+    --
+    -- After the graph has been built and routed, this can be used to delay
+    -- reads into deeper branches to reduce their likelihood of manifesting.
+    metaForkDepth :: Int,
     -- | How many bodies the variable is nested within.
     metaBodyDepth :: Int,
     -- | An id for the subgraph within which the variable exists, defined at
@@ -313,6 +322,9 @@ data Meta = Meta
     -- subgraph.
     metaGraphId :: Maybe Id
   }
+
+-- | Ids for all variables used as an operand.
+type Operands = IdSet
 
 -- | Statistics on the statements within a body and their dependencies.
 data BodyStats = BodyStats
@@ -330,9 +342,6 @@ data BodyStats = BodyStats
     -- cannot be moved to device as a whole. They are host-only.
     bodyHostOnlyParents :: IS.IntSet
   }
-
--- | Ids for all variables used as an operand.
-type Operands = IdSet
 
 instance Semigroup BodyStats where
   (BodyStats ho1 r1 o1 hop1) <> (BodyStats ho2 r2 o2 hop2) =
@@ -592,7 +601,7 @@ requiredOnHost i = do
     Nothing -> pure ()
     Just v -> do
       connectToSink i
-      tellHostOnlyParent $ metaBodyDepth (vertexMeta v)
+      tellHostOnlyParent (metaBodyDepth $ vertexMeta v)
 
 -- | Connects the vertex of the given id to a sink.
 connectToSink :: Id -> Grapher ()
@@ -635,6 +644,19 @@ inSubGraph si g i
     si == mgi
 inSubGraph _ _ _ = False
 
+-- | Does the given body return an array whose computation has not been
+-- migrated to device?
+returnsUnmigratedArray :: [Type] -> BodyT GPU -> Grapher Bool
+returnsUnmigratedArray types body =
+  -- TODO: Migration status is lost through aliasing, e.g. through body returns.
+  checkArrays (zip types $ bodyResult body) <$> getGraph
+  where
+    checkArrays [] _ = False
+    checkArrays ((Array {}, SubExpRes _ (Var n)) : _) g
+      | not $ MG.member (nameToId n) g =
+        True
+    checkArrays (_ : xs) g = checkArrays xs g
+
 graphBody :: BodyT GPU -> Grapher ()
 graphBody body = do
   body_depth <- (1 +) <$> getBodyDepth
@@ -663,64 +685,65 @@ graphStm stm = do
   let bs = boundBy stm
   let e = stmExp stm
   -- IMPORTANT! It is generally assumed that all scalars within types and
-  -- shapes are present on host.
-  -- Any expression that produces a type wherein one of its scalar operands
-  -- appears must therefore ensure that that scalar operand is marked as a
-  -- size variable (see 'hostSize' function).
-  -- Currently all relevant expressions are treated as host-only but the
-  -- above is relevant if this changes.
+  -- shapes are present on host. Any expression of a type wherein one of its
+  -- scalar operands appears must therefore ensure that that scalar operand is
+  -- marked as a size variable (see 'hostSize' function).
   case e of
-    BasicOp SubExp {} ->
-      graphSimple bs e
-    BasicOp Opaque {} ->
-      graphSimple bs e
+    BasicOp SubExp {} -> graphSimple bs e
+    BasicOp Opaque {} -> graphSimple bs e
     BasicOp ArrayLit {} ->
       -- Migrating an array literal of n elements saves n synchronous writes.
-      graphAutoMove (one bs) e
-    BasicOp UnOp {} ->
-      graphSimple bs e
-    BasicOp BinOp {} ->
-      graphSimple bs e
-    BasicOp CmpOp {} ->
-      graphSimple bs e
-    BasicOp ConvOp {} ->
-      graphSimple bs e
+      graphAutoMove (one bs)
+    BasicOp UnOp {} -> graphSimple bs e
+    BasicOp BinOp {} -> graphSimple bs e
+    BasicOp CmpOp {} -> graphSimple bs e
+    BasicOp ConvOp {} -> graphSimple bs e
     BasicOp Assert {} ->
-      graphAssert bs e
-    BasicOp (Index _ slice) ->
-      case sliceDims slice of
-        [] -> graphRead (one bs) e
-        _ -> graphMemReuse e
-    BasicOp Update {} ->
-      -- Migrating an Update may replace the in-place update with a copy
-      -- of the entire destination array, changing its asymptotical cost.
-      -- This is a limitation of the current GPUBody implementation which
-      -- always copies returned arrays. Since we cannot guarantee that the
-      -- updated array is not returned we block Updates from being moved.
-      graphMemReuse e
-    BasicOp FlatIndex {} ->
-      graphMemReuse e
-    BasicOp FlatUpdate {} ->
-      -- Same as Update.
-      graphMemReuse e
-    BasicOp Concat {} ->
-      graphNewArray e
-    BasicOp Copy {} ->
-      graphNewArray e
-    BasicOp Manifest {} ->
-      graphNewArray e
-    BasicOp Iota {} ->
-      graphNewArray e
-    BasicOp Replicate {} ->
-      graphNewArray e
-    BasicOp Scratch {} ->
-      graphNewArray e
-    BasicOp Reshape {} ->
-      graphMemReuse e
-    BasicOp Rearrange {} ->
-      graphMemReuse e
-    BasicOp Rotate {} ->
-      graphMemReuse e
+      -- The next read after the execution of a kernel containing an assertion
+      -- will be made asynchronous, followed by an asynchronous read to check
+      -- if any assertion failed. The runtime will then block for all enqueued
+      -- commands to finish.
+      --
+      -- Since an assertion only binds a certificate of unit type, an assertion
+      -- cannot increase the number of (read) synchronizations that occur. In
+      -- this regard it is free to migrate. The synchronization that does occur
+      -- is however (presumably) more expensive as the pipeline of GPU work will
+      -- be flushed.
+      --
+      -- Since this cost is difficult to quantify and amortize over assertion
+      -- migration candidates (cost depends on ordering of kernels and reads) we
+      -- assume it is insignificant. This will likely hold for a system where
+      -- multiple threads or processes schedules GPU work, as system-wide
+      -- throughput only will decrease if the GPU utilization decreases as a
+      -- result.
+      graphSimple bs e
+    BasicOp (Index _ slice)
+      | isFixed slice ->
+        graphRead (one bs)
+    -- Expressions with a cost sublinear to the size of their result arrays are
+    -- risky to migrate as we cannot guarantee that their results are not
+    -- returned from a GPUBody, which always copies its return values. Since
+    -- this would make the effective asymptotical cost of such statements linear
+    -- we block them from being migrated on their own. The parent statement of
+    -- an enclosing body may still be migrated, including these.
+    BasicOp (Index _ s) -> graphInefficientReturn (sliceDims s) e
+    BasicOp Update {} -> graphInefficientReturn [] e
+    BasicOp (FlatIndex _ s) -> graphInefficientReturn (flatSliceDims s) e
+    BasicOp FlatUpdate {} -> graphInefficientReturn [] e
+    BasicOp (Scratch _ s) -> graphInefficientReturn s e
+    BasicOp (Reshape s _) -> graphInefficientReturn (newDims s) e
+    BasicOp Rearrange {} -> graphInefficientReturn [] e
+    BasicOp Rotate {} -> graphInefficientReturn [] e
+    -- Expressions with a cost linear to the size of their result arrays are
+    -- inefficient to migrate into GPUBody kernels as such kernels are single-
+    -- threaded. For sufficiently large arrays the cost may exceed what is saved
+    -- by avoiding reads. We therefore also block these from being migrated.
+    BasicOp Concat {} -> graphHostOnly e
+    BasicOp Copy {} -> graphHostOnly e
+    BasicOp Manifest {} -> graphHostOnly e
+    BasicOp Iota {} -> graphHostOnly e
+    BasicOp Replicate {} -> graphHostOnly e
+    -- END
     BasicOp UpdateAcc {} ->
       graphUpdateAcc (one bs) e
     Apply fn _ _ _ ->
@@ -737,11 +760,17 @@ graphStm stm = do
     one [x] = x
     one _ = compilerBugS "Type error: unexpected number of pattern elements."
 
-    -- Kept to easily add back support for moving array expressions to device.
-    -- The function is used to ensure size variables are available to the host
-    -- before any arrays of those sizes are allocated.
-    _hostSize (Var n) = hostSizeVar n
-    _hostSize _ = pure ()
+    isFixed = isJust . sliceIndices
+
+    -- new_dims may introduce new size variables which must be present on host
+    -- when this expression is evaluated.
+    graphInefficientReturn new_dims e = do
+      mapM_ hostSize new_dims
+      ops <- graphedScalarOperands e
+      addEdges ToSink ops
+
+    hostSize (Var n) = hostSizeVar n
+    hostSize _ = pure ()
 
     hostSizeVar = requiredOnHost . nameToId
 
@@ -758,59 +787,21 @@ graphSimple bs e = do
   let edges = MG.declareEdges (map fst bs)
   unless (IS.null ops) (mapM_ addVertex bs >> addEdges edges ops)
 
--- | Graphs a statement that always should be moved to device.
-graphAutoMove :: Binding -> Exp GPU -> Grapher ()
-graphAutoMove b e = do
-  ops <- graphedScalarOperands e
-  addSource b
-  addEdges (oneEdge $ fst b) ops
-
--- | Graph an assertion.
-graphAssert :: [Binding] -> Exp GPU -> Grapher ()
--- The next read after the execution of a kernel containing an assertion will
--- be made asynchronous, followed by an asynchronous read to check if any
--- assertion failed. The runtime will then block for ALL enqueued commands to
--- finish.
---
--- Since an assertion only binds a certificate of unit type, an assertion
--- cannot increase the number of (read) synchronizations that occur. In this
--- regard it is free to migrate. The synchronization that does occur is however
--- (presumably) more expensive as the pipeline of GPU work will be flushed.
---
--- Since this cost is difficult to quantify and amortize over assertion
--- migration candidates (cost depends on ordering of kernels and reads) we
--- assume it is insignificant. This will likely hold for a system where
--- multiple threads or processes schedules GPU work, as system-wide throughput
--- only will decrease if the GPU utilization decreases as a result.
-graphAssert = graphSimple
-
 -- | Graph a statement that reads a scalar from device memory.
-graphRead :: Binding -> Exp GPU -> Grapher ()
-graphRead b e = do
-  ops <- graphedScalarOperands e
+graphRead :: Binding -> Grapher ()
+graphRead b = do
+  -- Operands are not important as the source will block routes through b.
   addSource b
-  addEdges (oneEdge $ fst b) ops
   tellRead
 
--- | Graphs a statement that may return a result backed by existing memory.
-graphMemReuse :: Exp GPU -> Grapher ()
--- Currently these are inefficient to migrate as GPUBody copies all returned
--- arrays, changing the asymptotical cost of statements that otherwise reuse
--- memory.
-graphMemReuse = graphHostOnly
+-- | Graph a statement that always should be moved to device.
+graphAutoMove :: Binding -> Grapher ()
+graphAutoMove =
+  -- Operands are not important as the source will block routes through b.
+  addSource
 
--- | Graphs a statement that returns an array backed by new memory.
-graphNewArray :: Exp GPU -> Grapher ()
--- Since migrated code is run in single-threaded GPUBody statements, in the
--- worst case the produced array is so large that writing its elements takes
--- longer than the reads that can be eliminated by migrating the statement.
--- It is thus risky to migrate such a statement.
-graphNewArray = graphHostOnly
-
--- TODO: Conduct an experiment to measure the difference
-
--- | Graph a statement that only can execute on host and thus requires all its
--- operands to be made available to the host.
+-- | Graph a statement that is unfit for execution in a GPUBody and thus must
+-- be executed on host, requiring all its operands to be made available there.
 graphHostOnly :: Exp GPU -> Grapher ()
 graphHostOnly e = do
   -- Connect the vertices of all operands to sinks to mark that they are
@@ -843,21 +834,28 @@ graphApply fn bs e = do
 -- | Graph an if statement.
 graphIf :: [Binding] -> SubExp -> BodyT GPU -> BodyT GPU -> Grapher ()
 graphIf bs cond tbody fbody = do
-  host_only <-
+  body_host_only <-
     incForkDepthFor
       ( do
           tstats <- captureBodyStats (graphBody tbody)
           fstats <- captureBodyStats (graphBody fbody)
           pure $ bodyHostOnly tstats || bodyHostOnly fstats
       )
+  host_only <- (body_host_only ||) <$> returns_unmigrated_array
+
   cond_id <- case (host_only, cond) of
     (True, Var n) -> connectToSink (nameToId n) >> pure IS.empty
     (False, Var n) -> onlyGraphedScalar n
     (_, _) -> pure IS.empty
-  ret <- zipWithM (f cond_id) (bodyResult tbody) (bodyResult fbody)
+
+  ret <- zipWithM (comb cond_id) (bodyResult tbody) (bodyResult fbody)
   mapM_ (uncurry createNode) (zip bs ret)
   where
-    f ci a b = fmap (ci <>) $ onlyGraphedScalars $ toSet a <> toSet b
+    returns_unmigrated_array =
+      let check = returnsUnmigratedArray (map snd bs)
+       in fmap (||) (check tbody) <*> check fbody
+
+    comb ci a b = (ci <>) <$> onlyGraphedScalars (toSet a <> toSet b)
 
     toSet (SubExpRes _ (Var n)) = S.singleton n
     toSet _ = S.empty
@@ -873,13 +871,15 @@ graphLoop [] _ _ _ =
   -- We expect each loop to bind a value or be eliminated.
   compilerBugS "Loop statement bound no variable; should have been eliminated."
 graphLoop (b : bs) params lform body = do
+  let types = map snd (b : bs)
+
   -- Graph loop params and body while capturing statistics.
   g0 <- getGraph
   stats <- captureBodyStats (subgraphId `graphIdFor` graphTheLoop)
   let ops = IS.filter (`MG.member` g0) (bodyOperands stats)
 
   -- Connect loop condition to a sink if the body cannot be migrated.
-  let host_only = bodyHostOnly stats
+  host_only <- (bodyHostOnly stats ||) <$> returnsUnmigratedArray types body
   when host_only $ case lform of
     ForLoop _ _ (Var n) _ -> connectToSink (nameToId n)
     WhileLoop n -> connectToSink (nameToId n)
@@ -1181,7 +1181,7 @@ censorRoutes si ops = do
 -- connected to sinks.
 -- That is all operands that might require a read from device memory to evaluate
 -- the given expression on host.
-graphedScalarOperands :: Exp GPU -> Grapher IdSet
+graphedScalarOperands :: Exp GPU -> Grapher Operands
 graphedScalarOperands e =
   let is = fst $ execState (collect e) initial
    in IS.intersection is <$> getGraphedScalars
