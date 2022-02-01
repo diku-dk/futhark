@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+* Some bugs in checking for local memory capacity for particularly
+  exotic generated code.
+
 ## [0.21.5]
 
 ### Added

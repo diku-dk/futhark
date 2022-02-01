@@ -17,6 +17,8 @@ module Futhark.CodeGen.ImpGen.GPU.Base
     isActive,
     sKernelThread,
     sKernelGroup,
+    KernelAttrs (..),
+    defKernelAttrs,
     sReplicate,
     sIota,
     sCopy,
@@ -1597,23 +1599,85 @@ virtualiseGroups _ _ m = do
   gid <- kernelGroupIdVar . kernelConstants <$> askEnv
   m $ Imp.le32 gid
 
-sKernelThread ::
-  String ->
+-- | Various extra configuration of the kernel being generated.
+data KernelAttrs = KernelAttrs
+  { -- | Can this kernel execute correctly even if previous kernels failed?
+    kAttrFailureTolerant :: Bool,
+    -- | Does whatever launch this kernel check for local memory capacity itself?
+    kAttrCheckLocalMemory :: Bool,
+    -- | Number of groups.
+    kAttrNumGroups :: Count NumGroups (Imp.TExp Int64),
+    -- | Group size.
+    kAttrGroupSize :: Count GroupSize (Imp.TExp Int64)
+  }
+
+-- | The default kernel attributes.
+defKernelAttrs ::
   Count NumGroups (Imp.TExp Int64) ->
   Count GroupSize (Imp.TExp Int64) ->
+  KernelAttrs
+defKernelAttrs num_groups group_size =
+  KernelAttrs
+    { kAttrFailureTolerant = False,
+      kAttrCheckLocalMemory = True,
+      kAttrNumGroups = num_groups,
+      kAttrGroupSize = group_size
+    }
+
+sKernel ::
+  Operations GPUMem KernelEnv Imp.KernelOp ->
+  (KernelConstants -> Imp.TExp Int32) ->
+  String ->
   VName ->
+  KernelAttrs ->
+  InKernelGen () ->
+  CallKernelGen ()
+sKernel ops flatf name v attrs f = do
+  (constants, set_constants) <-
+    kernelInitialisationSimple (kAttrNumGroups attrs) (kAttrGroupSize attrs)
+  name' <- nameForFun $ name ++ "_" ++ show (baseTag v)
+  sKernelOp attrs constants ops name' $ do
+    set_constants
+    dPrimV_ v $ flatf constants
+    f
+
+sKernelThread ::
+  String ->
+  VName ->
+  KernelAttrs ->
   InKernelGen () ->
   CallKernelGen ()
 sKernelThread = sKernel threadOperations kernelGlobalThreadId
 
 sKernelGroup ::
   String ->
-  Count NumGroups (Imp.TExp Int64) ->
-  Count GroupSize (Imp.TExp Int64) ->
   VName ->
+  KernelAttrs ->
   InKernelGen () ->
   CallKernelGen ()
 sKernelGroup = sKernel groupOperations kernelGroupId
+
+sKernelOp ::
+  KernelAttrs ->
+  KernelConstants ->
+  Operations GPUMem KernelEnv Imp.KernelOp ->
+  Name ->
+  InKernelGen () ->
+  CallKernelGen ()
+sKernelOp attrs constants ops name m = do
+  HostEnv atomics _ locks <- askEnv
+  body <- makeAllMemoryGlobal $ subImpM_ (KernelEnv atomics constants locks) ops m
+  uses <- computeKernelUses body mempty
+  emit . Imp.Op . Imp.CallKernel $
+    Imp.Kernel
+      { Imp.kernelBody = body,
+        Imp.kernelUses = uses,
+        Imp.kernelNumGroups = [untyped $ kernelNumGroups constants],
+        Imp.kernelGroupSize = [untyped $ kernelGroupSize constants],
+        Imp.kernelName = name,
+        Imp.kernelFailureTolerant = kAttrFailureTolerant attrs,
+        Imp.kernelCheckLocalMemory = kAttrCheckLocalMemory attrs
+      }
 
 sKernelFailureTolerant ::
   Bool ->
@@ -1623,37 +1687,15 @@ sKernelFailureTolerant ::
   InKernelGen () ->
   CallKernelGen ()
 sKernelFailureTolerant tol ops constants name m = do
-  HostEnv atomics _ locks <- askEnv
-  body <- makeAllMemoryGlobal $ subImpM_ (KernelEnv atomics constants locks) ops m
-  uses <- computeKernelUses body mempty
-  emit $
-    Imp.Op $
-      Imp.CallKernel
-        Imp.Kernel
-          { Imp.kernelBody = body,
-            Imp.kernelUses = uses,
-            Imp.kernelNumGroups = [untyped $ kernelNumGroups constants],
-            Imp.kernelGroupSize = [untyped $ kernelGroupSize constants],
-            Imp.kernelName = name,
-            Imp.kernelFailureTolerant = tol
-          }
-
-sKernel ::
-  Operations GPUMem KernelEnv Imp.KernelOp ->
-  (KernelConstants -> Imp.TExp Int32) ->
-  String ->
-  Count NumGroups (Imp.TExp Int64) ->
-  Count GroupSize (Imp.TExp Int64) ->
-  VName ->
-  InKernelGen () ->
-  CallKernelGen ()
-sKernel ops flatf name num_groups group_size v f = do
-  (constants, set_constants) <- kernelInitialisationSimple num_groups group_size
-  name' <- nameForFun $ name ++ "_" ++ show (baseTag v)
-  sKernelFailureTolerant False ops constants name' $ do
-    set_constants
-    dPrimV_ v $ flatf constants
-    f
+  sKernelOp attrs constants ops name m
+  where
+    attrs =
+      ( defKernelAttrs
+          (Count (kernelNumGroups constants))
+          (Count (kernelGroupSize constants))
+      )
+        { kAttrFailureTolerant = tol
+        }
 
 copyInGroup :: CopyCompiler GPUMem KernelEnv Imp.KernelOp
 copyInGroup pt destloc srcloc = do
