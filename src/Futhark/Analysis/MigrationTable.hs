@@ -59,6 +59,7 @@ data MigrationStatus
 --
 --     (2) which migrated variables that still will be used on the host after
 --         all such statements have been moved.
+--
 newtype MigrationTable = MigrationTable (IM.IntMap MigrationStatus)
 
 -- | Where should the value bound by this name be computed?
@@ -419,12 +420,13 @@ tellHostOnly :: Grapher ()
 tellHostOnly =
   modify $ \st -> st {stateStats = (stateStats st) {bodyHostOnly = True}}
 
--- | Register that the body contains a statement that reads device memory.
+-- | Register that the current body contains a statement that reads device
+-- memory.
 tellRead :: Grapher ()
 tellRead =
   modify $ \st -> st {stateStats = (stateStats st) {bodyReads = True}}
 
--- | Register these variables used as operands within the current body.
+-- | Register that these variables are used as operands within the current body.
 tellOperands :: IdSet -> Grapher ()
 tellOperands is =
   modify $ \st ->
@@ -472,7 +474,7 @@ onlyGraphedScalarSubExp :: SubExp -> Grapher IdSet
 onlyGraphedScalarSubExp (Constant _) = pure IS.empty
 onlyGraphedScalarSubExp (Var n) = onlyGraphedScalar n
 
--- | Update graph under construction.
+-- | Update the graph under construction.
 modifyGraph :: (Graph -> Graph) -> Grapher ()
 modifyGraph f =
   modify $ \st -> st {stateGraph = f (stateGraph st)}
@@ -745,8 +747,8 @@ graphStm stm = do
 
 -- | Graph a statement which in itself neither reads scalars from device memory
 -- nor forces such scalars to be available on host. Such statement can be moved
--- to device to eliminate the host usage of other variables which transitively
--- depends on a scalar device read.
+-- to device to eliminate the host usage of its operands which transitively may
+-- depend on a scalar device read.
 graphSimple :: [Binding] -> Exp GPU -> Grapher ()
 graphSimple bs e = do
   -- Only add vertices to the graph if they have a transitive dependency to
@@ -1244,7 +1246,7 @@ graphedScalarOperands e =
     --
     --   * types and shapes; size variables are assumed available to the host.
     --
-    --   * use by the kernel body.
+    --   * use by a kernel body.
     --
     -- All other operands are conservatively collected even if they generally
     -- appear to be size variables or results computed by a SizeOp.
