@@ -434,7 +434,7 @@ kkLoopBody
                     css <- forLoop rx [css_merge] $ \j [css_merge'] ->
                       resultBodyM =<< letTupExp' "foo"
                         =<< eIf
-			  (toExp (le64 iii .==. le64 iii))
+                          (toExp (le64 iii .==. le64 iii))
                           --( toExp $
                           --    le64 iii + le64 i + pe64 ry * le64 ltid_y
                           --      .<. pe64 height_A
