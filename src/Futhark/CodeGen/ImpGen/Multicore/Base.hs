@@ -128,11 +128,11 @@ compileThreadResult _ _ TileReturns {} =
 compileThreadResult _ _ RegTileReturns {} =
   compilerBugS "compileThreadResult: RegTileReturns unhandled."
 
-freeVariables :: Imp.Code -> [VName] -> [VName]
+freeVariables :: FreeIn a => a -> [VName] -> [VName]
 freeVariables code names =
   namesToList $ freeIn code `namesSubtract` namesFromList names
 
-freeParams :: Imp.Code -> [VName] -> MulticoreGen [Imp.Param]
+freeParams :: FreeIn a => a -> [VName] -> MulticoreGen [Imp.Param]
 freeParams code names = do
   let freeVars = freeVariables code names
   ts <- mapM lookupType freeVars

@@ -119,8 +119,8 @@ instance FreeIn SchedulerInfo where
     freeIn' iter <> freeIn' nsubtask
 
 instance FreeIn ParallelTask where
-  freeIn' (ParallelTask code _) =
-    freeIn' code
+  freeIn' (ParallelTask code i) =
+    fvBind (oneName i) $ freeIn' code
 
 instance FreeIn Multicore where
   freeIn' (SegOp _ _ par_code seq_code _ info) =
