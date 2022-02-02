@@ -115,7 +115,11 @@ genRed2Tile2d env kerstm@(Let pat_ker aux (Op (SegOp (SegMap seg_thd seg_space k
     -- check that the `acc_inds` are invariant to at least one
     -- parallel kernel dimensions, and return the innermost such one:
     Just (invar_gid, gid_ind) <- isInvarToParDim mempty seg_space variance acc_inds,
-    gid_dims_new <- filter (\x -> invar_gid /= fst x) (unSegSpace seg_space),
+    gid_dims_new_0 <- filter (\x -> invar_gid /= fst x) (unSegSpace seg_space),
+    -- reorder the variant dimensions such that inner(most) accum-indices
+    -- correspond to inner(most) parallel dimensions, so that the babysitter
+    -- does not introduce transpositions
+    gid_dims_new <- reorderParDims variance acc_inds gid_dims_new_0,
     -- check that all global-memory accesses in `code1` on which
     --   `accum_stmt` depends on are invariant to at least one of
     --   the remaining parallel dimensions (i.e., excluding `invar_gid`)
@@ -185,6 +189,24 @@ genRed2Tile2d env kerstm@(Let pat_ker aux (Op (SegOp (SegMap seg_thd seg_space k
       --      ) $
       Just (code1_tr_host <> host_stms1 <> oneStm ker1, ker2)
   where
+    isIndVarToParDim _ (Constant _) _ = False
+    isIndVarToParDim variance (Var acc_ind) par_dim =
+      ( acc_ind == fst par_dim ) ||
+      ( nameIn (fst par_dim) $ M.findWithDefault mempty acc_ind variance )
+    foldfunReorder variance (unused_dims, inner_dims) acc_ind =
+      case L.findIndex (isIndVarToParDim variance acc_ind) unused_dims of
+        Nothing -> (unused_dims, inner_dims)
+        Just i  ->
+          ( take i unused_dims ++ drop (i+1) unused_dims
+          , (unused_dims !! i) : inner_dims
+          )
+    reorderParDims variance acc_inds gid_dims_new_0 =
+      let (invar_dims, inner_dims) =
+            foldl (foldfunReorder variance)
+                  (gid_dims_new_0, [])
+                  (reverse acc_inds)
+      in  invar_dims ++ inner_dims
+    --
     ceilDiv x y = pure $ BasicOp $ BinOp (SDivUp Int64 Unsafe) x y
     getAccLambda acc_tp =
       case acc_tp of
