@@ -443,17 +443,15 @@ collect' m = do
 -- generate code for a new function.  Use this so that the compiler
 -- understands that previously declared memory doesn't need to be
 -- freed inside this action.
-inNewFunction :: Bool -> CompilerM op s a -> CompilerM op s a
-inNewFunction keep_cached m = do
+inNewFunction :: CompilerM op s a -> CompilerM op s a
+inNewFunction m = do
   old_mem <- gets compDeclaredMem
   modify $ \s -> s {compDeclaredMem = mempty}
   x <- local noCached m
   modify $ \s -> s {compDeclaredMem = old_mem}
   return x
   where
-    noCached env
-      | keep_cached = env
-      | otherwise = env {envCachedMem = mempty}
+    noCached env = env {envCachedMem = mempty}
 
 item :: C.BlockItem -> CompilerM op s ()
 item x = modify $ \s -> s {compItems = DL.snoc (compItems s) x}
