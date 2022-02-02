@@ -29,7 +29,7 @@ import Futhark.Pass
 import Futhark.Tools
 import Futhark.Transform.Rename
 
---import Debug.Trace
+import Debug.Trace
 
 type GenRedM = ReaderT (Scope GPU) (State VNameSource)
 
@@ -120,6 +120,7 @@ genRed2Tile2d env kerstm@(Let pat_ker aux (Op (SegOp (SegMap seg_thd seg_space k
     -- correspond to inner(most) parallel dimensions, so that the babysitter
     -- does not introduce transpositions
     gid_dims_new <- reorderParDims variance acc_inds gid_dims_new_0,
+    trace ("acc_inds: "++pretty acc_inds++" inv_dim: "++pretty invar_gid++" "++pretty gid_ind++" old dims: "++pretty gid_dims_new_0++" reordered dims: "++pretty gid_dims_new) True,
     -- check that all global-memory accesses in `code1` on which
     --   `accum_stmt` depends on are invariant to at least one of
     --   the remaining parallel dimensions (i.e., excluding `invar_gid`)
