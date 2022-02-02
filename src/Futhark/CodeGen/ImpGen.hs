@@ -85,6 +85,7 @@ module Futhark.CodeGen.ImpGen
     -- * Constructing code.
     dLParams,
     dFParams,
+    addLoopVar,
     dScope,
     dArray,
     dPrim,
