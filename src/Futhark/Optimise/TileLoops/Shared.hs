@@ -15,7 +15,6 @@ module Futhark.Optimise.TileLoops.Shared
     segMap3D,
     segScatter2D,
     VarianceTable,
-    varianceInStms,
     isTileableRedomap,
     changeEnv,
     kkLoopBody,
@@ -435,12 +434,13 @@ kkLoopBody
                     css <- forLoop rx [css_merge] $ \j [css_merge'] ->
                       resultBodyM =<< letTupExp' "foo"
                         =<< eIf
-                          ( toExp $
-                              le64 iii + le64 i + pe64 ry * le64 ltid_y
-                                .<. pe64 height_A
-                                  .&&. le64 jjj + le64 j + pe64 rx * le64 ltid_x
-                                .<. pe64 width_B
-                          )
+			  (toExp (le64 iii .==. le64 iii))
+                          --( toExp $
+                          --    le64 iii + le64 i + pe64 ry * le64 ltid_y
+                          --      .<. pe64 height_A
+                          --        .&&. le64 jjj + le64 j + pe64 rx * le64 ltid_x
+                          --      .<. pe64 width_B
+                          --)
                           ( do
                               a <- index "a" as [i]
                               b <- index "b" bs [j]
