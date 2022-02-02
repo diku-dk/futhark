@@ -15,6 +15,7 @@ module Futhark.Optimise.TileLoops.Shared
     segMap3D,
     segScatter2D,
     VarianceTable,
+    varianceInStms,
     isTileableRedomap,
     changeEnv,
     kkLoopBody,
