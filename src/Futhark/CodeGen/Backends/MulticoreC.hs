@@ -611,7 +611,7 @@ compileOp (ParLoop s' i prebody body postbody free tid) = do
 
   let lexical =
         lexicalMemoryUsage $
-          Function Nothing [] free (prebody <> body) [] []
+          Function Nothing [] free (prebody <> body <> postbody) [] []
 
   fstruct <-
     prepareTaskStruct (s' ++ "_parloop_struct") free_args free_ctypes mempty mempty
