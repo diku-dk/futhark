@@ -90,15 +90,15 @@ instance Pretty ParallelTask where
     "\\" <> ppr tid <+> "->" </> ppr code
 
 instance Pretty Multicore where
-  ppr (SegOp s free par_code seq_code retval scheduler) =
+  ppr (SegOp s free seq_code par_code retval scheduler) =
     "SegOp" <+> text s <+> nestedBlock "{" "}" ppbody
     where
       ppbody =
         stack
           [ ppr scheduler,
             nestedBlock "free {" "}" (ppr free),
-            nestedBlock "par {" "}" (ppr par_code),
-            maybe mempty (nestedBlock "seq {" "}" . ppr) seq_code,
+            nestedBlock "seq {" "}" (ppr seq_code),
+            maybe mempty (nestedBlock "par {" "}" . ppr) par_code,
             nestedBlock "retvals {" "}" (ppr retval)
           ]
   ppr (ParLoop s i prebody body postbody params info) =
