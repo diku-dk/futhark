@@ -96,8 +96,6 @@ reductionStage1 ::
 reductionStage1 space slugs kbody = do
   let (is, ns) = unzip $ unSegSpace space
       ns' = map toInt64Exp ns
-  flat_idx <- dPrim "iter" int64
-
   -- Create local accumulator variables in which we carry out the
   -- sequential reduction of this function.  If we are dealing with
   -- vectorised operators, then this implies a private allocation.  If
@@ -105,62 +103,61 @@ reductionStage1 space slugs kbody = do
   -- then our hands are unfortunately tied, and we have to use exactly
   -- that memory.  This is likely to be slow.
 
-  (slug_local_accs, prebody) <- collect' $ do
-    dScope Nothing $ scopeOfLParams $ concatMap slugParams slugs
-
-    forM slugs $ \slug -> do
-      let shape = segBinOpShape $ slugOp slug
-
-      forM (zip (accParams slug) (slugNeutral slug)) $ \(p, ne) -> do
-        -- Declare accumulator variable.
-        acc <-
-          case paramType p of
-            Prim pt
-              | shape == mempty ->
-                tvVar <$> dPrim "local_acc" pt
-              | otherwise ->
-                sAllocArray "local_acc" pt shape DefaultSpace
-            _ ->
-              pure $ paramName p
-
-        -- Now neutral-initialise the accumulator.
-        sLoopNest (slugShape slug) $ \vec_is ->
-          copyDWIMFix acc vec_is ne []
-
-        pure acc
-
   fbody <- collect $ do
-    zipWithM_ dPrimV_ is $ unflattenIndex ns' $ tvExp flat_idx
-    kbody $ \all_red_res -> do
-      let all_red_res' = segBinOpChunks (map slugOp slugs) all_red_res
-      forM_ (zip3 all_red_res' slugs slug_local_accs) $ \(red_res, slug, local_accs) ->
-        sLoopNest (slugShape slug) $ \vec_is -> do
-          let lamtypes = lambdaReturnType $ segBinOpLambda $ slugOp slug
-          -- Load accum params
-          sComment "Load accum params" $
-            forM_ (zip3 (accParams slug) local_accs lamtypes) $
-              \(p, local_acc, t) ->
-                when (primType t) $
-                  copyDWIMFix (paramName p) [] (Var local_acc) vec_is
+    slug_local_accs <- do
+      dScope Nothing $ scopeOfLParams $ concatMap slugParams slugs
 
-          sComment "Load next params" $
-            forM_ (zip (nextParams slug) red_res) $ \(p, (res, res_is)) ->
-              copyDWIMFix (paramName p) [] res (res_is ++ vec_is)
+      forM slugs $ \slug -> do
+        let shape = segBinOpShape $ slugOp slug
 
-          sComment "Red body" $
-            compileStms mempty (bodyStms $ slugBody slug) $
-              forM_ (zip local_accs $ map resSubExp $ bodyResult $ slugBody slug) $
-                \(local_acc, se) ->
-                  copyDWIMFix local_acc vec_is se []
+        forM (zip (accParams slug) (slugNeutral slug)) $ \(p, ne) -> do
+          -- Declare accumulator variable.
+          acc <-
+            case paramType p of
+              Prim pt
+                | shape == mempty ->
+                  tvVar <$> dPrim "local_acc" pt
+                | otherwise ->
+                  sAllocArray "local_acc" pt shape DefaultSpace
+              _ ->
+                pure $ paramName p
 
-  postbody <- collect $
+          -- Now neutral-initialise the accumulator.
+          sLoopNest (slugShape slug) $ \vec_is ->
+            copyDWIMFix acc vec_is ne []
+
+          pure acc
+
+    generateChunkLoop "SegRed" $ \i -> do
+      zipWithM_ dPrimV_ is $ unflattenIndex ns' i
+      kbody $ \all_red_res -> do
+        let all_red_res' = segBinOpChunks (map slugOp slugs) all_red_res
+        forM_ (zip3 all_red_res' slugs slug_local_accs) $ \(red_res, slug, local_accs) ->
+          sLoopNest (slugShape slug) $ \vec_is -> do
+            let lamtypes = lambdaReturnType $ segBinOpLambda $ slugOp slug
+            -- Load accum params
+            sComment "Load accum params" $
+              forM_ (zip3 (accParams slug) local_accs lamtypes) $
+                \(p, local_acc, t) ->
+                  when (primType t) $
+                    copyDWIMFix (paramName p) [] (Var local_acc) vec_is
+
+            sComment "Load next params" $
+              forM_ (zip (nextParams slug) red_res) $ \(p, (res, res_is)) ->
+                copyDWIMFix (paramName p) [] res (res_is ++ vec_is)
+
+            sComment "SegRed body" $
+              compileStms mempty (bodyStms $ slugBody slug) $
+                forM_ (zip local_accs $ map resSubExp $ bodyResult $ slugBody slug) $
+                  \(local_acc, se) ->
+                    copyDWIMFix local_acc vec_is se []
+
     forM_ (zip slugs slug_local_accs) $ \(slug, local_accs) ->
       forM (zip (slugResArrs slug) local_accs) $ \(acc, local_acc) ->
         copyDWIMFix acc [Imp.le64 $ segFlat space] (Var local_acc) []
 
-  free_params <- freeParams (prebody <> fbody <> postbody) (segFlat space : [tvVar flat_idx])
-  let (body_allocs, fbody') = extractAllocations fbody
-  emit $ Imp.Op $ Imp.ParLoop "segred_stage_1" (tvVar flat_idx) (body_allocs <> prebody) fbody' postbody free_params $ segFlat space
+  free_params <- freeParams fbody [segFlat space]
+  emit $ Imp.Op $ Imp.ParLoop "segred_stage_1" fbody free_params $ segFlat space
 
 reductionStage2 ::
   Pat MCMem ->
@@ -207,29 +204,25 @@ segmentedReduction ::
   MulticoreGen Imp.Code
 segmentedReduction pat space reds kbody =
   collect $ do
-    n_par_segments <- dPrim "segment_iter" $ IntType Int64
-    body <- compileSegRedBody n_par_segments pat space reds kbody
-    free_params <- freeParams body (segFlat space : [tvVar n_par_segments])
-    let (body_allocs, body') = extractAllocations body
-    emit $ Imp.Op $ Imp.ParLoop "segmented_segred" (tvVar n_par_segments) body_allocs body' mempty free_params $ segFlat space
+    body <- compileSegRedBody pat space reds kbody
+    free_params <- freeParams body [segFlat space]
+    emit $ Imp.Op $ Imp.ParLoop "segmented_segred" body free_params $ segFlat space
 
 compileSegRedBody ::
-  TV Int64 ->
   Pat MCMem ->
   SegSpace ->
   [SegBinOp MCMem] ->
   DoSegBody ->
   MulticoreGen Imp.Code
-compileSegRedBody n_segments pat space reds kbody = do
+compileSegRedBody pat space reds kbody = do
   let (is, ns) = unzip $ unSegSpace space
       ns_64 = map toInt64Exp ns
       inner_bound = last ns_64
-      n_segments' = tvExp n_segments
 
   let per_red_pes = segBinOpChunks reds $ patElems pat
   -- Perform sequential reduce on inner most dimension
-  collect $ do
-    flat_idx <- dPrimVE "flat_idx" $ n_segments' * inner_bound
+  collect . generateChunkLoop "SegRed" $ \n_segments -> do
+    flat_idx <- dPrimVE "flat_idx" $ n_segments * inner_bound
     zipWithM_ dPrimV_ is $ unflattenIndex ns_64 flat_idx
     sComment "neutral-initialise the accumulators" $
       forM_ (zip per_red_pes reds) $ \(pes, red) ->
@@ -243,7 +236,7 @@ compileSegRedBody n_segments pat space reds kbody = do
         zipWithM_
           (<--)
           (map (`mkTV` int64) $ init is)
-          (unflattenIndex (init ns_64) (sExt64 n_segments'))
+          (unflattenIndex (init ns_64) (sExt64 n_segments))
         dPrimV_ (last is) i
         kbody $ \all_red_res -> do
           let red_res' = chunks (map (length . segBinOpNeutral) reds) all_red_res

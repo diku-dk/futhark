@@ -547,6 +547,9 @@ prepareTaskStruct name free_args free_ctypes retval_args retval_ctypes = do
 
 -- Generate a segop function for top_level and potentially nested SegOp code
 compileOp :: GC.OpCompiler Multicore ()
+compileOp (GetLoopBounds start end) = do
+  GC.stm [C.cstm|$id:start = start;|]
+  GC.stm [C.cstm|$id:end = end;|]
 compileOp (SegOp name params seq_task par_task retvals (SchedulerInfo nsubtask e sched)) = do
   let (ParallelTask seq_code tid) = seq_task
   free_ctypes <- mapM paramToCType params
@@ -605,13 +608,11 @@ compileOp (SegOp name params seq_task par_task retvals (SchedulerInfo nsubtask e
 
   -- Add profile fields for -P option
   mapM_ GC.profileReport $ multiCoreReport $ (fpar_task, True) : fnpar_task
-compileOp (ParLoop s' i prebody body postbody free tid) = do
+compileOp (ParLoop s' body free tid) = do
   free_ctypes <- mapM paramToCType free
   let free_args = map paramName free
 
-  let lexical =
-        lexicalMemoryUsage $
-          Function Nothing [] free (prebody <> body <> postbody) [] []
+  let lexical = lexicalMemoryUsage $ Function Nothing [] free body [] []
 
   fstruct <-
     prepareTaskStruct (s' ++ "_parloop_struct") free_args free_ctypes mempty mempty
@@ -626,15 +627,9 @@ compileOp (ParLoop s' i prebody body postbody free tid) = do
 
           mapM_ GC.item decl_cached
 
-          GC.decl [C.cdecl|typename int64_t iterations = end - start;|]
-          GC.decl [C.cdecl|typename int64_t $id:i = start;|]
-          GC.compileCode prebody
-          body' <- GC.blockScope $ GC.compileCode body
-          GC.stm
-            [C.cstm|for (; $id:i < end; $id:i++) {
-                       $items:body'
-                     }|]
-          GC.compileCode postbody
+          GC.decl [C.cdecl|typename int64_t iterations = end-start;|]
+
+          GC.compileCode body
           GC.stm [C.cstm|cleanup: {}|]
           mapM_ GC.stm free_cached
 
