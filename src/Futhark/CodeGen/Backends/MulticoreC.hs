@@ -547,7 +547,7 @@ prepareTaskStruct name free_args free_ctypes retval_args retval_ctypes = do
 
 -- Generate a segop function for top_level and potentially nested SegOp code
 compileOp :: GC.OpCompiler Multicore ()
-compileOp (Segop name params seq_task par_task retvals (SchedulerInfo nsubtask e sched)) = do
+compileOp (SegOp name params seq_task par_task retvals (SchedulerInfo nsubtask e sched)) = do
   let (ParallelTask seq_code tid) = seq_task
   free_ctypes <- mapM paramToCType params
   retval_ctypes <- mapM paramToCType retvals

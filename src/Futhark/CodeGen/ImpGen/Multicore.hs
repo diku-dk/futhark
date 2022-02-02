@@ -153,7 +153,7 @@ compileMCOp pat (ParOp par_op op) = do
   s <- segOpString op
   free_params <- freeParams (par_code <> seq_code) non_free
   let seq_task = Imp.ParallelTask seq_code (segFlat space)
-  emit $ Imp.Op $ Imp.Segop s free_params seq_task par_task retvals $ scheduling_info (decideScheduling' op seq_code)
+  emit $ Imp.Op $ Imp.SegOp s free_params seq_task par_task retvals $ scheduling_info (decideScheduling' op seq_code)
 
 compileSegOp ::
   Pat MCMem ->
