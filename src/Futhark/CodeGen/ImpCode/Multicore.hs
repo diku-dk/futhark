@@ -31,7 +31,11 @@ type Code = Imp.Code Multicore
 -- | A multicore operation.
 data Multicore
   = SegOp String [Param] ParallelTask (Maybe ParallelTask) [Param] SchedulerInfo
-  | ParLoop String VName Code Code Code [Param] VName
+  | ParLoop String Code [Param] VName
+  | -- | Retrieve inclusive start and exclusive end indexes of the
+    -- chunk we are supposed to be executing.  Only valid inside a
+    -- 'ParLoop' construct!
+    GetLoopBounds VName VName
   | Atomic AtomicOp
 
 -- | Atomic operations return the value stored before the update.
@@ -90,6 +94,8 @@ instance Pretty ParallelTask where
     "\\" <> ppr tid <+> "->" </> ppr code
 
 instance Pretty Multicore where
+  ppr (GetLoopBounds start end) =
+    ppr (start, end) <+> "<-" <+> "get_loop_bounds()"
   ppr (SegOp s free seq_code par_code retval scheduler) =
     "SegOp" <+> text s <+> nestedBlock "{" "}" ppbody
     where
@@ -101,16 +107,14 @@ instance Pretty Multicore where
             maybe mempty (nestedBlock "par {" "}" . ppr) par_code,
             nestedBlock "retvals {" "}" (ppr retval)
           ]
-  ppr (ParLoop s i prebody body postbody params info) =
-    "parloop" <+> ppr s <+> ppr i <+> nestedBlock "{" "}" ppbody
+  ppr (ParLoop s body params info) =
+    "parloop" <+> ppr s </> nestedBlock "{" "}" ppbody
     where
       ppbody =
         stack
-          [ nestedBlock "prebody {" "}" (ppr prebody),
-            nestedBlock "params {" "}" (ppr params),
+          [ nestedBlock "params {" "}" (ppr params),
             ppr info,
-            nestedBlock "body {" "}" (ppr body),
-            nestedBlock "postbody {" "}" (ppr postbody)
+            nestedBlock "body {" "}" (ppr body)
           ]
   ppr (Atomic _) = "AtomicOp"
 
@@ -123,8 +127,10 @@ instance FreeIn ParallelTask where
     fvBind (oneName i) $ freeIn' code
 
 instance FreeIn Multicore where
+  freeIn' (GetLoopBounds start end) =
+    freeIn' (start, end)
   freeIn' (SegOp _ _ par_code seq_code _ info) =
     freeIn' par_code <> freeIn' seq_code <> freeIn' info
-  freeIn' (ParLoop _ _ prebody body postbody _ _) =
-    freeIn' prebody <> fvBind (Imp.declaredIn prebody) (freeIn' $ body <> postbody)
+  freeIn' (ParLoop _ body _ _) =
+    freeIn' body
   freeIn' (Atomic aop) = freeIn' aop
