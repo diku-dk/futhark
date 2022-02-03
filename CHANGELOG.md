@@ -18,6 +18,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Some bugs in checking for local memory capacity for particularly
   exotic generated code.
 
+* Insufficient hoisting of allocation sizes led to problems with
+  memory expansion in rare cases (#1579).
+
 ## [0.21.5]
 
 ### Added
