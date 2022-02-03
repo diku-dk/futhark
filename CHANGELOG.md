@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * `futhark bench` now explicitly notes when a tuning file is not
   present.
 
+* `futhark bench`, `futhark test` and friends are now better at
+  handling fatally terminating programs (e.g. segmentation faults).
+
 ### Removed
 
 ### Changed
