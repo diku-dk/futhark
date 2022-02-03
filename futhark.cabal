@@ -332,7 +332,7 @@ library
     , filepath >=1.4.1.1
     , free >=4.12.4
     , futhark-data >= 1.0.3.0
-    , futhark-server >= 1.1.2.0
+    , futhark-server >= 1.1.2.1
     , futhark-manifest >= 1.0.0.0
     , githash >=0.1.6.1
     , half >= 0.3
