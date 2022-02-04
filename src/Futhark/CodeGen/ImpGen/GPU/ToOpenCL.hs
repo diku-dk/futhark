@@ -235,8 +235,11 @@ onKernel target kernel = do
   failures <- gets clFailures
 
   let (kernel_body, cstate) =
-        genGPUCode KernelMode (kernelBody kernel) failures $
-          GC.blockScope $ GC.compileCode $ kernelBody kernel
+        genGPUCode KernelMode (kernelBody kernel) failures . GC.collect $ do
+          body <- GC.collect $ GC.compileCode $ kernelBody kernel
+          -- No need to free, as we cannot allocate memory in kernels.
+          mapM_ GC.item =<< GC.declAllocatedMem
+          mapM_ GC.item body
       kstate = GC.compUserState cstate
 
       (local_memory_args, local_memory_params, local_memory_init) =

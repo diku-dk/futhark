@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * `futhark bench`, `futhark test` and friends are now better at
   handling fatally terminating programs (e.g. segmentation faults).
 
+* Generated C code is now a lot smaller for large programs, as error
+  recovery has been more centralised (#1584).
+
 ### Removed
 
 ### Changed
