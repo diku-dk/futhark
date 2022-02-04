@@ -203,6 +203,9 @@ module type real = {
 -- | An extension of `real`@mtype that further gives access to the
 -- bitwise representation of the underlying number.  It is presumed
 -- that this will be some form of IEEE float.
+--
+-- Conversion of floats to integers is by truncation.  If an infinity
+-- or NaN is converted to an integer, the result is zero.
 module type float = {
   include real
 
