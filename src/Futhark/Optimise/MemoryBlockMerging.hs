@@ -191,7 +191,7 @@ onKernels f stms = inScopeOf stms $ mapM helper stms
 -- | Perform the reuse-allocations optimization.
 optimise :: Pass GPUMem GPUMem
 optimise =
-  Pass "reuse allocations" "reuse allocations" $ \prog ->
+  Pass "memory block merging" "memory block merging allocations" $ \prog ->
     let graph = Interference.analyseProgGPU prog
      in Pass.intraproceduralTransformation (onStms graph) prog
   where
