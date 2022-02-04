@@ -135,7 +135,7 @@ static void str_builder(struct str_builder *b, const char *s, ...) {
   b->used += needed;
 }
 
-int lexical_realloc(char **error, unsigned char **ptr, size_t *old_size, size_t new_size) {
+static int lexical_realloc(char **error, unsigned char **ptr, size_t *old_size, size_t new_size) {
   if (*old_size < new_size) {
     unsigned char *new = realloc(*ptr, new_size);
     if (new == NULL) {
