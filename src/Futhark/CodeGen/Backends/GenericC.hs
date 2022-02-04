@@ -2084,10 +2084,12 @@ compileCode (Allocate name (Count (TPrimExp e)) space) = do
   case cached of
     Just cur_size ->
       stm
-        [C.cstm|{err = lexical_realloc(&ctx->error, &$exp:name, &$exp:cur_size, $exp:size);
+        [C.cstm|if ($exp:cur_size < $exp:size) {
+                 err = lexical_realloc(&ctx->error, &$exp:name, &$exp:cur_size, $exp:size);
                  if (err != FUTHARK_SUCCESS) {
                    goto cleanup;
-                }} |]
+                 }
+                }|]
     _ ->
       allocMem name size space [C.cstm|{err = 1; goto cleanup;}|]
 compileCode (Free name space) = do
