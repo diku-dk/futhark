@@ -502,14 +502,15 @@ generateParLoopFn lexical basename code fstruct free retval tid ntasks = do
   let (retval_args, retval_ctypes) = unzip retval
   multicoreDef basename $ \s -> do
     fbody <- benchmarkCode s (Just tid) <=< GC.inNewFunction $
-      GC.cachingMemory lexical $
-        \decl_cached free_cached -> GC.blockScope $ do
-          mapM_ GC.item [C.citems|$decls:(compileGetStructVals fstruct fargs fctypes)|]
-          mapM_ GC.item [C.citems|$decls:(compileGetRetvalStructVals fstruct retval_args retval_ctypes)|]
-          mapM_ GC.item decl_cached
-          code' <- GC.blockScope $ GC.compileCode code
-          mapM_ GC.item [C.citems|$items:code'|]
-          GC.stm [C.cstm|cleanup: {$stms:free_cached}|]
+      GC.cachingMemory lexical $ \decl_cached free_cached -> GC.collect $ do
+        mapM_ GC.item [C.citems|$decls:(compileGetStructVals fstruct fargs fctypes)|]
+        mapM_ GC.item [C.citems|$decls:(compileGetRetvalStructVals fstruct retval_args retval_ctypes)|]
+        code' <- GC.collect $ GC.compileCode code
+        mapM_ GC.item decl_cached
+        mapM_ GC.item =<< GC.declAllocatedMem
+        mapM_ GC.item code'
+        free_mem <- GC.freeAllocatedMem
+        GC.stm [C.cstm|cleanup: {$stms:free_cached $items:free_mem}|]
     return
       [C.cedecl|int $id:s(void *args, typename int64_t iterations, int tid, struct scheduler_info info) {
                            int err = 0;
@@ -619,20 +620,20 @@ compileOp (ParLoop s' body free tid) = do
 
   ftask <- multicoreDef (s' ++ "_parloop") $ \s -> do
     fbody <- benchmarkCode s (Just tid) <=< GC.inNewFunction $
-      GC.cachingMemory lexical $
-        \decl_cached free_cached -> GC.blockScope $ do
-          mapM_
-            GC.item
-            [C.citems|$decls:(compileGetStructVals fstruct free_args free_ctypes)|]
+      GC.cachingMemory lexical $ \decl_cached free_cached -> GC.collect $ do
+        mapM_
+          GC.item
+          [C.citems|$decls:(compileGetStructVals fstruct free_args free_ctypes)|]
 
-          mapM_ GC.item decl_cached
+        GC.decl [C.cdecl|typename int64_t iterations = end-start;|]
 
-          GC.decl [C.cdecl|typename int64_t iterations = end-start;|]
+        body' <- GC.collect $ GC.compileCode body
 
-          GC.compileCode body
-          GC.stm [C.cstm|cleanup: {}|]
-          mapM_ GC.stm free_cached
-
+        mapM_ GC.item decl_cached
+        mapM_ GC.item =<< GC.declAllocatedMem
+        free_mem <- GC.freeAllocatedMem
+        mapM_ GC.item body'
+        GC.stm [C.cstm|cleanup: {$stms:free_cached $items:free_mem}|]
     return
       [C.cedecl|static int $id:s(void *args, typename int64_t start, typename int64_t end, int $id:tid, int tid) {
                        int err = 0;
