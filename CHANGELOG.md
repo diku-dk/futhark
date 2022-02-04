@@ -33,6 +33,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Conversion of floating-point NaNs and infinities to integers now
   well defined (produces zero) (#1586).
 
+* Better handling of OOM for certain short-lived CPU-side allocations (#1585).
+
 ## [0.21.5]
 
 ### Added
