@@ -308,35 +308,59 @@ def uitofp_T_f64(x):
 uitofp_i8_f64 = uitofp_i16_f64 = uitofp_i32_f64 = uitofp_i64_f64 = uitofp_T_f64
 
 def fptosi_T_i8(x):
-  return np.int8(np.trunc(x))
+  if np.isnan(x) or np.isinf(x):
+    return np.int8(0)
+  else:
+    return np.int8(np.trunc(x))
 fptosi_f16_i8 = fptosi_f32_i8 = fptosi_f64_i8 = fptosi_T_i8
 
 def fptosi_T_i16(x):
-  return np.int16(np.trunc(x))
+  if np.isnan(x) or np.isinf(x):
+    return np.int16(0)
+  else:
+    return np.int16(np.trunc(x))
 fptosi_f16_i16 = fptosi_f32_i16 = fptosi_f64_i16 = fptosi_T_i16
 
 def fptosi_T_i32(x):
-  return np.int32(np.trunc(x))
+  if np.isnan(x) or np.isinf(x):
+    return np.int32(0)
+  else:
+    return np.int32(np.trunc(x))
 fptosi_f16_i32 = fptosi_f32_i32 = fptosi_f64_i32 = fptosi_T_i32
 
 def fptosi_T_i64(x):
-  return np.int64(np.trunc(x))
+  if np.isnan(x) or np.isinf(x):
+    return np.int64(0)
+  else:
+    return np.int64(np.trunc(x))
 fptosi_f16_i64 = fptosi_f32_i64 = fptosi_f64_i64 = fptosi_T_i64
 
 def fptoui_T_i8(x):
-  return np.uint8(np.trunc(x))
+  if np.isnan(x) or np.isinf(x):
+    return np.int8(0)
+  else:
+    return np.uint8(np.trunc(x))
 fptoui_f16_i8 = fptoui_f32_i8 = fptoui_f64_i8 = fptoui_T_i8
 
 def fptoui_T_i16(x):
-  return np.uint16(np.trunc(x))
+  if np.isnan(x) or np.isinf(x):
+    return np.int16(0)
+  else:
+    return np.uint16(np.trunc(x))
 fptoui_f16_i16 = fptoui_f32_i16 = fptoui_f64_i16 = fptoui_T_i16
 
 def fptoui_T_i32(x):
-  return np.uint32(np.trunc(x))
+  if np.isnan(x) or np.isinf(x):
+    return np.int32(0)
+  else:
+    return np.uint32(np.trunc(x))
 fptoui_f16_i32 = fptoui_f32_i32 = fptoui_f64_i32 = fptoui_T_i32
 
 def fptoui_T_i64(x):
-  return np.uint64(np.trunc(x))
+  if np.isnan(x) or np.isinf(x):
+    return np.int64(0)
+  else:
+    return np.uint64(np.trunc(x))
 fptoui_f16_i64 = fptoui_f32_i64 = fptoui_f64_i64 = fptoui_T_i64
 
 def fpconv_f16_f32(x):

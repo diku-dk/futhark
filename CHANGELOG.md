@@ -27,6 +27,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Insufficient hoisting of allocation sizes led to problems with
   memory expansion in rare cases (#1579).
 
+* Conversion of floating-point NaNs and infinities to integers now
+  well defined (produces zero) (#1586).
+
 ## [0.21.5]
 
 ### Added
