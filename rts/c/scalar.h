@@ -1047,38 +1047,6 @@ static inline float uitofp_i64_f32(uint64_t x) {
   return (float) x;
 }
 
-static inline int8_t fptosi_f32_i8(float x) {
-  return (int8_t) x;
-}
-
-static inline int16_t fptosi_f32_i16(float x) {
-  return (int16_t) x;
-}
-
-static inline int32_t fptosi_f32_i32(float x) {
-  return (int32_t) x;
-}
-
-static inline int64_t fptosi_f32_i64(float x) {
-  return (int64_t) x;
-}
-
-static inline uint8_t fptoui_f32_i8(float x) {
-  return (uint8_t) x;
-}
-
-static inline uint16_t fptoui_f32_i16(float x) {
-  return (uint16_t) x;
-}
-
-static inline uint32_t fptoui_f32_i32(float x) {
-  return (uint32_t) x;
-}
-
-static inline uint64_t fptoui_f32_i64(float x) {
-  return (uint64_t) x;
-}
-
 #ifdef __OPENCL_VERSION__
 static inline float fabs32(float x) {
   return fabs(x);
@@ -1121,6 +1089,70 @@ static inline bool futrts_isnan32(float x) {
 
 static inline bool futrts_isinf32(float x) {
   return isinf(x);
+}
+
+static inline int8_t fptosi_f32_i8(float x) {
+  if (futrts_isnan32(x) || futrts_isinf32(x)) {
+    return 0;
+  } else {
+    return (int8_t) x;
+  }
+}
+
+static inline int16_t fptosi_f32_i16(float x) {
+  if (futrts_isnan32(x) || futrts_isinf32(x)) {
+    return 0;
+  } else {
+    return (int16_t) x;
+  }
+}
+
+static inline int32_t fptosi_f32_i32(float x) {
+  if (futrts_isnan32(x) || futrts_isinf32(x)) {
+    return 0;
+  } else {
+    return (int32_t) x;
+  }
+}
+
+static inline int64_t fptosi_f32_i64(float x) {
+  if (futrts_isnan32(x) || futrts_isinf32(x)) {
+    return 0;
+  } else {
+    return (int64_t) x;
+  };
+}
+
+static inline uint8_t fptoui_f32_i8(float x) {
+  if (futrts_isnan32(x) || futrts_isinf32(x)) {
+    return 0;
+  } else {
+    return (uint8_t) (int8_t) x;
+  }
+}
+
+static inline uint16_t fptoui_f32_i16(float x) {
+  if (futrts_isnan32(x) || futrts_isinf32(x)) {
+    return 0;
+  } else {
+    return (uint16_t) (int16_t) x;
+  }
+}
+
+static inline uint32_t fptoui_f32_i32(float x) {
+  if (futrts_isnan32(x) || futrts_isinf32(x)) {
+    return 0;
+  } else {
+    return (uint32_t) (int32_t) x;
+  }
+}
+
+static inline uint64_t fptoui_f32_i64(float x) {
+  if (futrts_isnan32(x) || futrts_isinf32(x)) {
+    return 0;
+  } else {
+    return (uint64_t) (int64_t) x;
+  }
 }
 
 #ifdef __OPENCL_VERSION__
@@ -1433,38 +1465,6 @@ static inline double uitofp_i64_f64(uint64_t x) {
   return (double) x;
 }
 
-static inline int8_t fptosi_f64_i8(double x) {
-  return (int8_t) x;
-}
-
-static inline int16_t fptosi_f64_i16(double x) {
-  return (int16_t) x;
-}
-
-static inline int32_t fptosi_f64_i32(double x) {
-  return (int32_t) x;
-}
-
-static inline int64_t fptosi_f64_i64(double x) {
-  return (int64_t) x;
-}
-
-static inline uint8_t fptoui_f64_i8(double x) {
-  return (uint8_t) x;
-}
-
-static inline uint16_t fptoui_f64_i16(double x) {
-  return (uint16_t) x;
-}
-
-static inline uint32_t fptoui_f64_i32(double x) {
-  return (uint32_t) x;
-}
-
-static inline uint64_t fptoui_f64_i64(double x) {
-  return (uint64_t) x;
-}
-
 static inline double fabs64(double x) {
   return fabs(x);
 }
@@ -1587,6 +1587,70 @@ static inline bool futrts_isnan64(double x) {
 
 static inline bool futrts_isinf64(double x) {
   return isinf(x);
+}
+
+static inline int8_t fptosi_f64_i8(double x) {
+  if (futrts_isnan64(x) || futrts_isinf64(x)) {
+    return 0;
+  } else {
+    return (int8_t) x;
+  }
+}
+
+static inline int16_t fptosi_f64_i16(double x) {
+  if (futrts_isnan64(x) || futrts_isinf64(x)) {
+    return 0;
+  } else {
+    return (int16_t) x;
+  }
+}
+
+static inline int32_t fptosi_f64_i32(double x) {
+  if (futrts_isnan64(x) || futrts_isinf64(x)) {
+    return 0;
+  } else {
+    return (int32_t) x;
+  }
+}
+
+static inline int64_t fptosi_f64_i64(double x) {
+  if (futrts_isnan64(x) || futrts_isinf64(x)) {
+    return 0;
+  } else {
+    return (int64_t) x;
+  }
+}
+
+static inline uint8_t fptoui_f64_i8(double x) {
+  if (futrts_isnan64(x) || futrts_isinf64(x)) {
+    return 0;
+  } else {
+    return (uint8_t) (int8_t) x;
+  }
+}
+
+static inline uint16_t fptoui_f64_i16(double x) {
+  if (futrts_isnan64(x) || futrts_isinf64(x)) {
+    return 0;
+  } else {
+    return (uint16_t) (int16_t) x;
+  }
+}
+
+static inline uint32_t fptoui_f64_i32(double x) {
+  if (futrts_isnan64(x) || futrts_isinf64(x)) {
+    return 0;
+  } else {
+    return (uint32_t) (int32_t) x;
+  }
+}
+
+static inline uint64_t fptoui_f64_i64(double x) {
+  if (futrts_isnan64(x) || futrts_isinf64(x)) {
+    return 0;
+  } else {
+    return (uint64_t) (int64_t) x;
+  }
 }
 
 static inline int64_t futrts_to_bits64(double x) {
