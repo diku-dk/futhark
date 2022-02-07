@@ -891,7 +891,8 @@ static int opencl_alloc_actual(struct opencl_context *ctx, size_t size, cl_mem *
   return error;
 }
 
-static int opencl_alloc(struct opencl_context *ctx, size_t min_size, const char *tag, cl_mem *mem_out) {
+static int opencl_alloc(struct opencl_context *ctx, FILE *log,
+                        size_t min_size, const char *tag, cl_mem *mem_out) {
   (void)tag;
   if (min_size < sizeof(int)) {
     min_size = sizeof(int);
@@ -915,16 +916,15 @@ static int opencl_alloc(struct opencl_context *ctx, size_t min_size, const char 
     // instead rely on a level of indirection.
     if (size >= min_size) {
       if (ctx->cfg.debugging) {
-        fprintf(stderr, "No need to allocate: Found a block in the free list.\n");
+        fprintf(log, "No need to allocate: Found a block in the free list.\n");
       }
 
       return CL_SUCCESS;
     } else {
       if (ctx->cfg.debugging) {
-        fprintf(stderr, "Found a free block, but it was too small.\n");
+        fprintf(log, "Found a free block, but it was too small.\n");
       }
 
-      // Not just right - free it.
       int error = clReleaseMemObject(*mem_out);
       if (error != CL_SUCCESS) {
         return error;
@@ -941,14 +941,14 @@ static int opencl_alloc(struct opencl_context *ctx, size_t min_size, const char 
   // expensive.  Let's hope that this case is hit rarely.
 
   if (ctx->cfg.debugging) {
-    fprintf(stderr, "Actually allocating the desired block.\n");
+    fprintf(log, "Actually allocating the desired block.\n");
   }
 
   int error = opencl_alloc_actual(ctx, min_size, mem_out);
 
   while (error == CL_MEM_OBJECT_ALLOCATION_FAILURE) {
     if (ctx->cfg.debugging) {
-      fprintf(stderr, "Out of OpenCL memory: releasing entry from the free list...\n");
+      fprintf(log, "Out of OpenCL memory: releasing entry from the free list...\n");
     }
     cl_mem mem;
     if (free_list_first(&ctx->free_list, &mem) == 0) {
