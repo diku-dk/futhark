@@ -10,6 +10,7 @@ module Futhark.CodeGen.Backends.MulticoreC
     GC.CParts (..),
     GC.asLibrary,
     GC.asExecutable,
+    GC.asISPCExecutable,
     GC.asServer,
     operations,
     cliOptions,
@@ -483,7 +484,7 @@ multicoreName s = do
 multicoreDef :: String -> (Name -> GC.CompilerM op s C.Definition) -> GC.CompilerM op s Name
 multicoreDef s f = do
   s' <- multicoreName s
-  GC.libDecl =<< f s'
+  GC.ispcDecl =<< f s'
   return s'
 
 generateParLoopFn ::

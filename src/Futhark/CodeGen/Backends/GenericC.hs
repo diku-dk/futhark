@@ -12,6 +12,7 @@ module Futhark.CodeGen.Backends.GenericC
     CParts (..),
     asLibrary,
     asExecutable,
+    asISPCExecutable,
     asServer,
 
     -- * Pluggable compiler
@@ -60,6 +61,7 @@ module Futhark.CodeGen.Backends.GenericC
     onClear,
     HeaderSection (..),
     libDecl,
+    ispcDecl,
     earlyDecl,
     publicName,
     contextType,
@@ -123,6 +125,7 @@ data CompilerState s = CompilerState
     compUserState :: s,
     compHeaderDecls :: M.Map HeaderSection (DL.DList C.Definition),
     compLibDecls :: DL.DList C.Definition,
+    compIspcDecls :: DL.DList C.Definition,
     compCtxFields :: DL.DList (C.Id, C.Type, Maybe C.Exp, Maybe C.Stm),
     compProfileItems :: DL.DList C.BlockItem,
     compClearItems :: DL.DList C.BlockItem,
@@ -141,6 +144,7 @@ newCompilerState src s =
       compUserState = s,
       compHeaderDecls = mempty,
       compLibDecls = mempty,
+      compIspcDecls = mempty,
       compCtxFields = mempty,
       compProfileItems = mempty,
       compClearItems = mempty,
@@ -509,6 +513,10 @@ headerDecl sec def = modify $ \s ->
 libDecl :: C.Definition -> CompilerM op s ()
 libDecl def = modify $ \s ->
   s {compLibDecls = compLibDecls s <> DL.singleton def}
+
+ispcDecl :: C.Definition  -> CompilerM op s ()
+ispcDecl def = modify $ \s ->
+  s {compIspcDecls = compIspcDecls s <> DL.singleton def}
 
 earlyDecl :: C.Definition -> CompilerM op s ()
 earlyDecl def = modify $ \s ->
@@ -1460,7 +1468,9 @@ data CParts = CParts
     cServer :: T.Text,
     cLib :: T.Text,
     -- | The manifest, in JSON format.
-    cJsonManifest :: T.Text
+    cJsonManifest :: T.Text,
+    -- | ISPC header
+    cISPC :: T.Text
   }
 
 gnuSource :: T.Text
@@ -1504,6 +1514,12 @@ asLibrary parts =
     gnuSource <> disableWarnings <> cHeader parts <> cUtils parts <> cLib parts,
     cJsonManifest parts
   )
+
+asISPCExecutable :: CParts -> (T.Text, T.Text)
+asISPCExecutable parts =
+  (c, ispc)
+  where c = asExecutable parts
+        ispc = cISPC parts
 
 -- | As executable with command-line interface.
 asExecutable :: CParts -> T.Text
@@ -1593,6 +1609,7 @@ $timingH
 
   let early_decls = T.unlines $ map prettyText $ DL.toList $ compEarlyDecls endstate
       lib_decls = T.unlines $ map prettyText $ DL.toList $ compLibDecls endstate
+      ispc_decls = T.unlines $ map prettyText $ DL.toList $ compIspcDecls endstate
       clidefs = cliDefs options manifest
       serverdefs = serverDefs options manifest
       libdefs =
@@ -1632,6 +1649,7 @@ $entry_point_decls
         cCLI = clidefs,
         cServer = serverdefs,
         cLib = libdefs,
+        cISPC = ispc_decls,
         cJsonManifest = Manifest.manifestToJSON manifest
       }
   where
@@ -2101,7 +2119,7 @@ compileCode (For i bound body) = do
   bound' <- compileExp bound
   body' <- collect $ compileCode body
   stm
-    [C.cstm|for ($ty:t $id:i' = 0; $id:i' < $exp:bound'; $id:i'++) {
+    [C.cstm|for ($ty:t $id:i' = 10; $id:i' < $exp:bound'; $id:i'++) {
             $items:body'
           }|]
 compileCode (While cond body) = do

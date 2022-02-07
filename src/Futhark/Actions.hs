@@ -308,6 +308,7 @@ compileMulticoreAction fcfg mode outpath =
       let cpath = outpath `addExtension` "c"
           hpath = outpath `addExtension` "h"
           jsonpath = outpath `addExtension` "json"
+          ispcPath = outpath `addExtension` "ispc"
 
       case mode of
         ToLibrary -> do
@@ -316,7 +317,9 @@ compileMulticoreAction fcfg mode outpath =
           liftIO $ T.writeFile cpath $ cPrependHeader impl
           liftIO $ T.writeFile jsonpath manifest
         ToExecutable -> do
-          liftIO $ T.writeFile cpath $ cPrependHeader $ MulticoreC.asExecutable cprog
+          let (c, ispc) = MulticoreC.asISPCExecutable cprog
+          liftIO $ T.writeFile cpath $ cPrependHeader $ c
+          liftIO $ T.writeFile ispcPath $ ispc
           runCC cpath outpath ["-O3", "-std=c99"] ["-lm", "-pthread"]
         ToServer -> do
           liftIO $ T.writeFile cpath $ cPrependHeader $ MulticoreC.asServer cprog
