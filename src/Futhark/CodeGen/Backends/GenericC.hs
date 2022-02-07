@@ -2119,7 +2119,7 @@ compileCode (For i bound body) = do
   bound' <- compileExp bound
   body' <- collect $ compileCode body
   stm
-    [C.cstm|for ($ty:t $id:i' = 10; $id:i' < $exp:bound'; $id:i'++) {
+    [C.cstm|for ($ty:t $id:i' = 0; $id:i' < $exp:bound'; $id:i'++) {
             $items:body'
           }|]
 compileCode (While cond body) = do
