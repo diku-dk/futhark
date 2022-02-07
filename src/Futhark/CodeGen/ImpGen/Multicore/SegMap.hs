@@ -23,24 +23,22 @@ writeResult _ pe (WriteReturns _ (Shape rws) _ idx_vals) = do
       rws' = map toInt64Exp rws
   forM_ (zip iss vs) $ \(slice, v) -> do
     let slice' = fmap toInt64Exp slice
-        when_in_bounds = copyDWIM (patElemName pe) (unSlice slice') v []
-    sWhen (inBounds slice' rws') when_in_bounds
+    sWhen (inBounds slice' rws') $
+      copyDWIM (patElemName pe) (unSlice slice') v []
 writeResult _ _ res =
   error $ "writeResult: cannot handle " ++ pretty res
 
 compileSegMapBody ::
-  TV Int64 ->
   Pat MCMem ->
   SegSpace ->
   KernelBody MCMem ->
   MulticoreGen Imp.Code
-compileSegMapBody flat_idx pat space (KernelBody _ kstms kres) = do
+compileSegMapBody pat space (KernelBody _ kstms kres) = collect $ do
   let (is, ns) = unzip $ unSegSpace space
       ns' = map toInt64Exp ns
   kstms' <- mapM renameStm kstms
-  collect $ do
-    emit $ Imp.DebugPrint "SegMap fbody" Nothing
-    dIndexSpace (zip is ns') $ tvExp flat_idx
+  generateChunkLoop "SegMap" $ \i -> do
+    dIndexSpace (zip is ns') i
     compileStms (freeIn kres) kstms' $
       zipWithM_ (writeResult is) (patElems pat) kres
 
@@ -49,10 +47,7 @@ compileSegMap ::
   SegSpace ->
   KernelBody MCMem ->
   MulticoreGen Imp.Code
-compileSegMap pat space kbody =
-  collect $ do
-    flat_par_idx <- dPrim "iter" int64
-    body <- compileSegMapBody flat_par_idx pat space kbody
-    free_params <- freeParams body [segFlat space, tvVar flat_par_idx]
-    let (body_allocs, body') = extractAllocations body
-    emit $ Imp.Op $ Imp.ParLoop "segmap" (tvVar flat_par_idx) body_allocs body' mempty free_params $ segFlat space
+compileSegMap pat space kbody = collect $ do
+  body <- compileSegMapBody pat space kbody
+  free_params <- freeParams body [segFlat space]
+  emit $ Imp.Op $ Imp.ParLoop "segmap" body free_params $ segFlat space

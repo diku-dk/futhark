@@ -130,16 +130,13 @@ compileMCOp pat (ParOp par_op op) = do
 
   let scheduling_info = Imp.SchedulerInfo (tvVar nsubtasks) (untyped iterations)
 
-  par_code <- case par_op of
+  par_task <- case par_op of
     Just nested_op -> do
       let space' = getSpace nested_op
       dPrimV_ (segFlat space') (0 :: Imp.TExp Int64)
-      compileSegOp pat nested_op nsubtasks
-    Nothing -> return mempty
-
-  let par_task = case par_op of
-        Just nested_op -> Just $ Imp.ParallelTask par_code $ segFlat $ getSpace nested_op
-        Nothing -> Nothing
+      par_code <- compileSegOp pat nested_op nsubtasks
+      pure $ Just $ Imp.ParallelTask par_code $ segFlat $ getSpace nested_op
+    Nothing -> pure Nothing
 
   let non_free =
         ( [segFlat space, tvVar nsubtasks]
@@ -151,9 +148,11 @@ compileMCOp pat (ParOp par_op op) = do
             Nothing -> []
 
   s <- segOpString op
-  free_params <- freeParams (par_code <> seq_code) non_free
   let seq_task = Imp.ParallelTask seq_code (segFlat space)
-  emit $ Imp.Op $ Imp.Segop s free_params seq_task par_task retvals $ scheduling_info (decideScheduling' op seq_code)
+  free_params <- freeParams (par_task, seq_task) non_free
+  emit . Imp.Op $
+    Imp.SegOp s free_params seq_task par_task retvals $
+      scheduling_info (decideScheduling' op seq_code)
 
 compileSegOp ::
   Pat MCMem ->

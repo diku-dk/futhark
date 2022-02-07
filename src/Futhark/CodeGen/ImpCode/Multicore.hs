@@ -1,3 +1,5 @@
+{-# LANGUAGE OverloadedStrings #-}
+
 -- | Multicore imperative code.
 module Futhark.CodeGen.ImpCode.Multicore
   ( Program,
@@ -28,8 +30,12 @@ type Code = Imp.Code Multicore
 
 -- | A multicore operation.
 data Multicore
-  = Segop String [Param] ParallelTask (Maybe ParallelTask) [Param] SchedulerInfo
-  | ParLoop String VName Code Code Code [Param] VName
+  = SegOp String [Param] ParallelTask (Maybe ParallelTask) [Param] SchedulerInfo
+  | ParLoop String Code [Param] VName
+  | -- | Retrieve inclusive start and exclusive end indexes of the
+    -- chunk we are supposed to be executing.  Only valid inside a
+    -- 'ParLoop' construct!
+    GetLoopBounds VName VName
   | Atomic AtomicOp
 
 -- | Atomic operations return the value stored before the update.
@@ -72,55 +78,59 @@ data Scheduling
   | Static
 
 instance Pretty Scheduling where
-  ppr Dynamic = text "Dynamic"
-  ppr Static = text "Static"
+  ppr Dynamic = "Dynamic"
+  ppr Static = "Static"
 
--- TODO fix all of this!
 instance Pretty SchedulerInfo where
   ppr (SchedulerInfo nsubtask i sched) =
-    text "SchedulingInfo"
-      <+> text "number of subtasks"
-      <+> ppr nsubtask
-      <+> text "scheduling"
-      <+> ppr sched
-      <+> text "iter"
-      <+> ppr i
+    stack
+      [ nestedBlock "number of subtasks {" "}" (ppr nsubtask),
+        nestedBlock "scheduling {" "}" (ppr sched),
+        nestedBlock "iter {" "}" (ppr i)
+      ]
 
 instance Pretty ParallelTask where
-  ppr (ParallelTask code _) =
-    ppr code
+  ppr (ParallelTask code tid) =
+    "\\" <> ppr tid <+> "->" </> ppr code
 
 instance Pretty Multicore where
-  ppr (Segop s free _par_code seq_code retval scheduler) =
-    text "parfor"
-      <+> ppr scheduler
-      <+> ppr free
-      <+> text s
-      <+> text "seq_code"
-      <+> nestedBlock "{" "}" (ppr seq_code)
-      <+> text "retvals"
-      <+> ppr retval
-  ppr (ParLoop s i prebody body postbody params info) =
-    text "parloop" <+> ppr s <+> ppr i
-      <+> ppr prebody
-      <+> ppr params
-      <+> ppr info
-      <+> langle
-      <+> nestedBlock "{" "}" (ppr body)
-      <+> ppr postbody
-  ppr (Atomic _) = text "AtomicOp"
+  ppr (GetLoopBounds start end) =
+    ppr (start, end) <+> "<-" <+> "get_loop_bounds()"
+  ppr (SegOp s free seq_code par_code retval scheduler) =
+    "SegOp" <+> text s <+> nestedBlock "{" "}" ppbody
+    where
+      ppbody =
+        stack
+          [ ppr scheduler,
+            nestedBlock "free {" "}" (ppr free),
+            nestedBlock "seq {" "}" (ppr seq_code),
+            maybe mempty (nestedBlock "par {" "}" . ppr) par_code,
+            nestedBlock "retvals {" "}" (ppr retval)
+          ]
+  ppr (ParLoop s body params info) =
+    "parloop" <+> ppr s </> nestedBlock "{" "}" ppbody
+    where
+      ppbody =
+        stack
+          [ nestedBlock "params {" "}" (ppr params),
+            ppr info,
+            nestedBlock "body {" "}" (ppr body)
+          ]
+  ppr (Atomic _) = "AtomicOp"
 
 instance FreeIn SchedulerInfo where
   freeIn' (SchedulerInfo nsubtask iter _) =
     freeIn' iter <> freeIn' nsubtask
 
 instance FreeIn ParallelTask where
-  freeIn' (ParallelTask code _) =
-    freeIn' code
+  freeIn' (ParallelTask code i) =
+    fvBind (oneName i) $ freeIn' code
 
 instance FreeIn Multicore where
-  freeIn' (Segop _ _ par_code seq_code _ info) =
+  freeIn' (GetLoopBounds start end) =
+    freeIn' (start, end)
+  freeIn' (SegOp _ _ par_code seq_code _ info) =
     freeIn' par_code <> freeIn' seq_code <> freeIn' info
-  freeIn' (ParLoop _ _ prebody body postbody _ _) =
-    freeIn' prebody <> fvBind (Imp.declaredIn prebody) (freeIn' $ body <> postbody)
+  freeIn' (ParLoop _ body _ _) =
+    freeIn' body
   freeIn' (Atomic aop) = freeIn' aop

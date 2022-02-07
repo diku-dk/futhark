@@ -9,13 +9,39 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
-* API functions now return more precise error codes in some cases.
+* `futhark bench` now explicitly notes when a tuning file is not
+  present.
 
-* Out-of-memory errors contain more information.
+* `futhark bench`, `futhark test` and friends are now better at
+  handling fatally terminating programs (e.g. segmentation faults).
+
+* Generated C code is now a lot smaller for large programs, as error
+  recovery has been more centralised (#1584).
 
 ### Removed
 
 ### Changed
+
+### Fixed
+
+* Some bugs in checking for local memory capacity for particularly
+  exotic generated code.
+
+* Insufficient hoisting of allocation sizes led to problems with
+  memory expansion in rare cases (#1579).
+
+* Conversion of floating-point NaNs and infinities to integers now
+  well defined (produces zero) (#1586).
+
+* Better handling of OOM for certain short-lived CPU-side allocations (#1585).
+
+## [0.21.5]
+
+### Added
+
+* API functions now return more precise error codes in some cases.
+
+* Out-of-memory errors contain more information.
 
 ### Fixed
 
@@ -27,11 +53,14 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * A parser bug erroneously demanded whitespace in some type
   expressions (#1573).
 
-* Some memory was not being freed correct when shutting down OpenCL
+* Some memory was not being freed correctly when shutting down OpenCL
   and CUDA contexts, which could lead to memory leaks in processes
   that created and freed many contexts.
 
 * An incorrect copy-removal in some exotic cases (#1572).
+
+* 'restore'-functions might perform undefined pointer arithmetic when
+  passed garbage.
 
 ## [0.21.4]
 

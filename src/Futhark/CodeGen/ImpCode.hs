@@ -484,6 +484,8 @@ instance Pretty op => Pretty (Code op) where
         Nonvolatile -> mempty
   ppr (SetScalar name val) =
     ppr name <+> text "<-" <+> ppr val
+  ppr (SetMem dest from DefaultSpace) =
+    ppr dest <+> text "<-" <+> ppr from
   ppr (SetMem dest from space) =
     ppr dest <+> text "<-" <+> ppr from <+> text "@" <> ppr space
   ppr (Assert e msg _) =

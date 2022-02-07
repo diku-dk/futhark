@@ -37,7 +37,7 @@ static char* msgprintf(const char *s, ...) {
 }
 
 static inline void check_err(int errval, int sets_errno, const char *fun, int line,
-                            const char *msg, ...) {
+                             const char *msg, ...) {
   if (errval) {
     char errnum[10];
 
@@ -133,6 +133,19 @@ static void str_builder(struct str_builder *b, const char *s, ...) {
   va_start(vl, s); // Must re-init.
   vsnprintf(b->str+b->used, b->capacity-b->used, s, vl);
   b->used += needed;
+}
+
+static int lexical_realloc(char **error, unsigned char **ptr, size_t *old_size, size_t new_size) {
+  unsigned char *new = realloc(*ptr, new_size);
+  if (new == NULL) {
+    *error = msgprintf("Failed to allocate memory.\nAttempted allocation: %12lld bytes\n",
+                       (long long) new_size);
+    return FUTHARK_OUT_OF_MEMORY;
+  } else {
+    *ptr = new;
+    *old_size = new_size;
+    return FUTHARK_SUCCESS;
+  }
 }
 
 // End of util.h.

@@ -15,9 +15,11 @@ module Futhark.CodeGen.ImpGen.Multicore.Base
     AtomicUpdate (..),
     Locking (..),
     getSpace,
+    getLoopBounds,
     getIterationDomain,
     getReturnParams,
     segOpString,
+    generateChunkLoop,
   )
 where
 
@@ -29,6 +31,7 @@ import qualified Futhark.CodeGen.ImpCode.Multicore as Imp
 import Futhark.CodeGen.ImpGen
 import Futhark.Error
 import Futhark.IR.MCMem
+import Futhark.MonadFreshNames
 import Futhark.Transform.Rename
 import Prelude hiding (quot, rem)
 
@@ -75,6 +78,13 @@ getSpace (SegHist _ space _ _ _) = space
 getSpace (SegRed _ space _ _ _) = space
 getSpace (SegScan _ space _ _ _) = space
 getSpace (SegMap _ space _ _) = space
+
+getLoopBounds :: MulticoreGen (Imp.TExp Int64, Imp.TExp Int64)
+getLoopBounds = do
+  start <- dPrim "start" int64
+  end <- dPrim "end" int64
+  emit $ Imp.Op $ Imp.GetLoopBounds (tvVar start) (tvVar end)
+  pure (tvExp start, tvExp end)
 
 getIterationDomain :: SegOp () MCMem -> SegSpace -> MulticoreGen (Imp.TExp Int64)
 getIterationDomain SegMap {} space = do
@@ -128,11 +138,11 @@ compileThreadResult _ _ TileReturns {} =
 compileThreadResult _ _ RegTileReturns {} =
   compilerBugS "compileThreadResult: RegTileReturns unhandled."
 
-freeVariables :: Imp.Code -> [VName] -> [VName]
+freeVariables :: FreeIn a => a -> [VName] -> [VName]
 freeVariables code names =
   namesToList $ freeIn code `namesSubtract` namesFromList names
 
-freeParams :: Imp.Code -> [VName] -> MulticoreGen [Imp.Param]
+freeParams :: FreeIn a => a -> [VName] -> MulticoreGen [Imp.Param]
 freeParams code names = do
   let freeVars = freeVariables code names
   ts <- mapM lookupType freeVars
@@ -156,7 +166,7 @@ isLoadBalanced (Imp.For _ _ a) = isLoadBalanced a
 isLoadBalanced (Imp.If _ a b) = isLoadBalanced a && isLoadBalanced b
 isLoadBalanced (Imp.Comment _ a) = isLoadBalanced a
 isLoadBalanced Imp.While {} = False
-isLoadBalanced (Imp.Op (Imp.ParLoop _ _ _ code _ _ _)) = isLoadBalanced code
+isLoadBalanced (Imp.Op (Imp.ParLoop _ code _ _)) = isLoadBalanced code
 isLoadBalanced _ = True
 
 segBinOpComm' :: [SegBinOp rep] -> Commutativity
@@ -203,7 +213,7 @@ extractAllocations segop_code = f segop_code
       let (ta, tcode') = f tcode
           (fa, fcode') = f fcode
        in (ta <> fa, Imp.If cond tcode' fcode')
-    f (Imp.Op (Imp.ParLoop s i prebody body postbody free info)) =
+    f (Imp.Op (Imp.ParLoop s body free info)) =
       let (body_allocs, body') = extractAllocations body
           (free_allocs, here_allocs) = f body_allocs
           free' =
@@ -214,11 +224,31 @@ extractAllocations segop_code = f segop_code
               )
               free
        in ( free_allocs,
-            here_allocs
-              <> Imp.Op (Imp.ParLoop s i prebody body' postbody free' info)
+            here_allocs <> Imp.Op (Imp.ParLoop s body' free' info)
           )
     f code =
       (mempty, code)
+
+-- | Emit code for the chunk loop, given an action that generates code
+-- for a single iteration.
+--
+-- The action is called with the (symbolic) index of the current
+-- iteration.
+generateChunkLoop ::
+  String ->
+  (Imp.TExp Int64 -> MulticoreGen ()) ->
+  MulticoreGen ()
+generateChunkLoop desc m = do
+  emit $ Imp.DebugPrint (desc <> " " <> "fbody") Nothing
+  (start, end) <- getLoopBounds
+  n <- dPrimVE "n" $ end - start
+  i <- newVName (desc <> "_i")
+  (body_allocs, body) <- fmap extractAllocations $
+    collect $ do
+      addLoopVar i Int64
+      m $ start + Imp.le64 i
+  emit body_allocs
+  emit $ Imp.For i (untyped n) body
 
 -------------------------------
 ------- SegHist helpers -------
@@ -312,29 +342,27 @@ atomicUpdateLocking _ op = AtomicLocking $ \locking arrs bucket -> do
   -- Critical section
   let try_acquire_lock = do
         old <-- (0 :: Imp.TExp Int32)
-        sOp $
-          Imp.Atomic $
-            Imp.AtomicCmpXchg
-              int32
-              (tvVar old)
-              locks'
-              (sExt32 <$> locks_offset)
-              (tvVar continue)
-              (untyped (lockingToLock locking))
+        sOp . Imp.Atomic $
+          Imp.AtomicCmpXchg
+            int32
+            (tvVar old)
+            locks'
+            (sExt32 <$> locks_offset)
+            (tvVar continue)
+            (untyped (lockingToLock locking))
       lock_acquired = tvExp continue
       -- Even the releasing is done with an atomic rather than a
       -- simple write, for memory coherency reasons.
       release_lock = do
         old <-- lockingToLock locking
-        sOp $
-          Imp.Atomic $
-            Imp.AtomicCmpXchg
-              int32
-              (tvVar old)
-              locks'
-              (sExt32 <$> locks_offset)
-              (tvVar continue)
-              (untyped (lockingToUnlock locking))
+        sOp . Imp.Atomic $
+          Imp.AtomicCmpXchg
+            int32
+            (tvVar old)
+            locks'
+            (sExt32 <$> locks_offset)
+            (tvVar continue)
+            (untyped (lockingToUnlock locking))
 
   -- Preparing parameters. It is assumed that the caller has already
   -- filled the arr_params. We copy the current value to the

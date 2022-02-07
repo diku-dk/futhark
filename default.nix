@@ -76,7 +76,7 @@ let
             in
             pkgs.haskell.lib.overrideCabal
               (pkgs.haskell.lib.addBuildTools
-                (haskellPackagesNew.callCabal2nix "futhark" (cleanSource ./.) { })
+                (haskellPackagesOld.callCabal2nix "futhark" (cleanSource ./.) { })
                 [ pkgs.python39Packages.sphinx ])
               ( _drv: {
                 isLibrary = false;
