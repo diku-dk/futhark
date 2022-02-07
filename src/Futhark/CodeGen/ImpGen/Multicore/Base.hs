@@ -239,7 +239,8 @@ generateChunkLoop ::
   (Imp.TExp Int64 -> MulticoreGen ()) ->
   MulticoreGen ()
 generateChunkLoop desc m = do
-  emit $ Imp.DebugPrint (desc <> " " <> "hello fbody") Nothing
+  -- TODO: Pema, debugging
+  -- emit $ Imp.DebugPrint (desc <> " " <> "hello fbody") Nothing
   (start, end) <- getLoopBounds
   n <- dPrimVE "n" $ end - start
   i <- newVName (desc <> "_i")

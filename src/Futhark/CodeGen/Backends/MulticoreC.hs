@@ -484,6 +484,12 @@ multicoreName s = do
 multicoreDef :: String -> (Name -> GC.CompilerM op s C.Definition) -> GC.CompilerM op s Name
 multicoreDef s f = do
   s' <- multicoreName s
+  GC.libDecl =<< f s'
+  return s'
+
+ispcDef :: String -> (Name -> GC.CompilerM op s C.Definition) -> GC.CompilerM op s Name
+ispcDef s f = do
+  s' <- multicoreName s
   GC.ispcDecl =<< f s'
   return s'
 
@@ -619,6 +625,20 @@ compileOp (ParLoop s' body free tid) = do
   fstruct <-
     prepareTaskStruct (s' ++ "_parloop_struct") free_args free_ctypes mempty mempty
 
+  _ispcLoop <- ispcDef (s' ++ "_ispc") $ \s -> do
+    loopBody <- GC.inNewFunction $
+      GC.collect $ do
+        GC.decl [C.cdecl|typename int64_t iterations = end-start;|]
+
+        body' <- GC.collect $ GC.compileCode body
+
+        mapM_ GC.item =<< GC.declAllocatedMem
+        mapM_ GC.item body'
+    return
+      [C.cedecl|static void $id:s(void *args, typename int64_t start, typename int64_t end, int $id:tid, int tid) {
+                       $items:loopBody
+                     }|]
+
   ftask <- multicoreDef (s' ++ "_parloop") $ \s -> do
     fbody <- benchmarkCode s (Just tid) <=< GC.inNewFunction $
       GC.cachingMemory lexical $ \decl_cached free_cached -> GC.collect $ do
@@ -628,12 +648,13 @@ compileOp (ParLoop s' body free tid) = do
 
         GC.decl [C.cdecl|typename int64_t iterations = end-start;|]
 
-        body' <- GC.collect $ GC.compileCode body
+        GC.decl [C.cdecl|typename int64_t PLACEHOLDER = 0;|]
+        -- body' <- GC.collect $ GC.compileCode body
 
         mapM_ GC.item decl_cached
         mapM_ GC.item =<< GC.declAllocatedMem
         free_mem <- GC.freeAllocatedMem
-        mapM_ GC.item body'
+        -- mapM_ GC.item body'
         GC.stm [C.cstm|cleanup: {$stms:free_cached $items:free_mem}|]
     return
       [C.cedecl|static int $id:s(void *args, typename int64_t start, typename int64_t end, int $id:tid, int tid) {

@@ -24,7 +24,7 @@ writeResult _ pe (WriteReturns _ (Shape rws) _ idx_vals) = do
   forM_ (zip iss vs) $ \(slice, v) -> do
     let slice' = fmap toInt64Exp slice
     sWhen (inBounds slice' rws') $
-      copyDWIM (patElemName pe) (unSlice slice') v []
+      copyDWIM (patElemName pe) (unSlice slice') v [] -- this is of interest (Pema)
 writeResult _ _ res =
   error $ "writeResult: cannot handle " ++ pretty res
 
