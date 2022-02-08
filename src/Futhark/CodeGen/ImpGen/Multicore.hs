@@ -140,11 +140,11 @@ compileMCOp pat (ParOp par_op op) = do
         nsubtasks <- dPrim "nsubtasks" int32
         sOp $ Imp.GetNumTasks $ tvVar nsubtasks
         emit =<< compileSegOp pat nested_op nsubtasks
-      pure $ Just $ Imp.ParallelTask par_code $ segFlat $ getSpace nested_op
+      pure $ Just $ Imp.ParallelTask par_code
     Nothing -> pure Nothing
 
   s <- segOpString op
-  let seq_task = Imp.ParallelTask seq_code (segFlat space)
+  let seq_task = Imp.ParallelTask seq_code
   free_params <- filter (`notElem` retvals) <$> freeParams (par_task, seq_task)
   emit . Imp.Op $
     Imp.SegOp s free_params seq_task par_task retvals $
