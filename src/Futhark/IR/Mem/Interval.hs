@@ -135,13 +135,13 @@ primTypeSort :: MonadZ3 z3 => PrimType -> z3 Sort
 primTypeSort (IntType _) = mkIntSort
 primTypeSort (FloatType _) = mkRealSort
 primTypeSort Bool = mkBoolSort
-primTypeSort _ = undefined
+primTypeSort pt = error $ "Unsupported PrimType " <> pretty pt
 
 valToZ3 :: MonadZ3 z3 => M.Map VName Type -> VName -> z3 (Maybe AST)
 valToZ3 scope vname =
   case M.lookup vname scope of
     Just (Prim pt) -> fmap Just (mkFreshVar (pretty vname) =<< primTypeSort pt)
-    Just _ -> trace ("Unsupported type for vname " <> pretty vname) undefined
+    Just _ -> error $ "Unsupported type for vname " <> pretty vname
     Nothing -> trace ("Couldn't find vname " <> pretty vname) $ return Nothing
 
 cmpOpToZ3 :: MonadZ3 z3 => CmpOp -> AST -> AST -> z3 AST
@@ -150,7 +150,7 @@ cmpOpToZ3 (CmpUlt _) = mkLt
 cmpOpToZ3 (CmpUle _) = mkLe
 cmpOpToZ3 (CmpSlt _) = mkLt
 cmpOpToZ3 (CmpSle _) = mkLe
-cmpOpToZ3 c = trace ("Unsupported CmpOp " <> pretty c) undefined
+cmpOpToZ3 c = error $ "Unsupported CmpOp " <> pretty c
 
 binOpToZ3 :: MonadZ3 z3 => BinOp -> AST -> AST -> z3 AST
 binOpToZ3 (Add _ _) x y = mkAdd [x, y]
@@ -165,7 +165,7 @@ binOpToZ3 (UMin _) x y = mkMin x y
 binOpToZ3 (SMax _) x y = mkMax x y
 binOpToZ3 (UMax _) x y = mkMax x y
 binOpToZ3 (SDivUp _ _) x y = mkDiv x y
-binOpToZ3 b _ _ = trace ("Unsupported BinOp " <> pretty b) undefined
+binOpToZ3 b _ _ = error $ "Unsupported BinOp " <> pretty b
 
 convOpToZ3 :: MonadZ3 z3 => ConvOp -> AST -> z3 AST
 convOpToZ3 (SExt _ _) x = return x
@@ -173,7 +173,7 @@ convOpToZ3 (SIToFP _ _) x = mkInt2Real x
 convOpToZ3 (UIToFP _ _) x = mkInt2Real x
 convOpToZ3 (FPToSI _ _) x = mkReal2Int x
 convOpToZ3 (FPToUI _ _) x = mkReal2Int x
-convOpToZ3 c _ = trace ("Unsupported ConvOp " <> pretty c) undefined
+convOpToZ3 c _ = error $ "Unsupported ConvOp " <> pretty c
 
 primExpToZ3 :: MonadZ3 z3 => M.Map VName AST -> PrimExp VName -> z3 AST
 primExpToZ3 var_table (LeafExp vn _) = return $ var_table M.! vn
@@ -194,7 +194,7 @@ primExpToZ3 var_table (FunExp name [e1] _)
     e1' <- primExpToZ3 var_table e1
     exponent <- mkRealNum 0.5
     mkPower e1' exponent
-primExpToZ3 var_table e = trace ("undefined exp " <> pretty e) undefined
+primExpToZ3 var_table e = error $ "Unsupported exp " <> pretty e
 
 mkMin :: MonadZ3 z3 => AST -> AST -> z3 AST
 mkMin e1 e2 = do
