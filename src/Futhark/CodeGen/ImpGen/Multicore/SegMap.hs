@@ -36,6 +36,8 @@ compileSegMapBody ::
 compileSegMapBody pat space (KernelBody _ kstms kres) = collect $ do
   let (is, ns) = unzip $ unSegSpace space
       ns' = map toInt64Exp ns
+  dPrim_ (segFlat space) int64
+  sOp $ Imp.GetTaskId (segFlat space)
   kstms' <- mapM renameStm kstms
   generateChunkLoop "SegMap" $ \i -> do
     dIndexSpace (zip is ns') i
@@ -49,5 +51,5 @@ compileSegMap ::
   MulticoreGen Imp.Code
 compileSegMap pat space kbody = collect $ do
   body <- compileSegMapBody pat space kbody
-  free_params <- freeParams body [segFlat space]
-  emit $ Imp.Op $ Imp.ParLoop "segmap" body free_params $ segFlat space
+  free_params <- freeParams body
+  emit $ Imp.Op $ Imp.ParLoop "segmap" body free_params
