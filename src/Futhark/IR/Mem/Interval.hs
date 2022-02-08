@@ -165,6 +165,7 @@ binOpToZ3 (UMin _) x y = mkMin x y
 binOpToZ3 (SMax _) x y = mkMax x y
 binOpToZ3 (UMax _) x y = mkMax x y
 binOpToZ3 (SDivUp _ _) x y = mkDiv x y
+binOpToZ3 (SQuot _ _) x y = mkDiv x y
 binOpToZ3 b _ _ = error $ "Unsupported BinOp " <> pretty b
 
 convOpToZ3 :: MonadZ3 z3 => ConvOp -> AST -> z3 AST
