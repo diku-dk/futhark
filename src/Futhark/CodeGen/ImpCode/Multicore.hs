@@ -40,7 +40,7 @@ data Multicore
     -- immediately inside a 'ParLoop' construct!
     GetTaskId VName
   | -- | Retrieve the number of subtasks to execute.  Only valid
-    -- immediately inside a 'SegOp'!
+    -- immediately inside a 'SegOp' or 'ParLoop' construct!
     GetNumTasks VName
   | Atomic AtomicOp
 
@@ -71,10 +71,7 @@ data SchedulerInfo = SchedulerInfo
     scheduling :: Scheduling -- The type scheduling for the task
   }
 
-data ParallelTask = ParallelTask
-  { task_code :: Code,
-    flatTid :: VName -- The variable for the thread id execution the code
-  }
+newtype ParallelTask = ParallelTask Code
 
 -- | Whether the Scheduler should schedule the tasks as Dynamic
 -- or it is restainted to Static
@@ -94,8 +91,7 @@ instance Pretty SchedulerInfo where
       ]
 
 instance Pretty ParallelTask where
-  ppr (ParallelTask code tid) =
-    "\\" <> ppr tid <+> "->" </> ppr code
+  ppr (ParallelTask code) = ppr code
 
 instance Pretty Multicore where
   ppr (GetLoopBounds start end) =
@@ -126,12 +122,10 @@ instance Pretty Multicore where
   ppr (Atomic _) = "AtomicOp"
 
 instance FreeIn SchedulerInfo where
-  freeIn' (SchedulerInfo iter _) =
-    freeIn' iter
+  freeIn' (SchedulerInfo iter _) = freeIn' iter
 
 instance FreeIn ParallelTask where
-  freeIn' (ParallelTask code i) =
-    fvBind (oneName i) $ freeIn' code
+  freeIn' (ParallelTask code) = freeIn' code
 
 instance FreeIn Multicore where
   freeIn' (GetLoopBounds start end) =
