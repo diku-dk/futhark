@@ -31,8 +31,7 @@ compileSegMap pat lvl space kbody = do
   emit $ Imp.DebugPrint "\n# SegMap" Nothing
   case lvl of
     SegThread {} -> do
-      let virt_num_groups =
-            sExt32 $ product dims' `divUp` unCount group_size'
+      virt_num_groups <- dPrimVE "virt_num_groups" $ sExt32 $ product dims' `divUp` unCount group_size'
       sKernelThread "segmap" (segFlat space) (defKernelAttrs num_groups' group_size') $
         virtualiseGroups (segVirt lvl) virt_num_groups $ \group_id -> do
           local_tid <- kernelLocalThreadId . kernelConstants <$> askEnv
@@ -50,8 +49,8 @@ compileSegMap pat lvl space kbody = do
                 kernelBodyResult kbody
     SegGroup {} -> do
       pc <- precomputeConstants group_size' $ kernelBodyStms kbody
+      virt_num_groups <- dPrimVE "virt_num_groups" $ sExt32 $ product dims'
       sKernelGroup "segmap_intragroup" (segFlat space) (defKernelAttrs num_groups' group_size') $ do
-        let virt_num_groups = sExt32 $ product dims'
         precomputedConstants pc $
           virtualiseGroups (segVirt lvl) virt_num_groups $ \group_id -> do
             dIndexSpace (zip is dims') $ sExt64 group_id
