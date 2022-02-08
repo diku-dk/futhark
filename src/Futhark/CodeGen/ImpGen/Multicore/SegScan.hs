@@ -80,6 +80,9 @@ scanStage1 pat space scan_ops kbody = do
   -- Writes directly to the resulting array
 
   body <- collect $ do
+    dPrim_ (segFlat space) int64
+    sOp $ Imp.GetTaskId (segFlat space)
+
     dScope Nothing $ scopeOfLParams $ concatMap (lambdaParams . segBinOpLambda) scan_ops
     local_accs <- forM scan_ops $ \scan_op -> do
       let shape = segBinOpShape scan_op
@@ -122,8 +125,8 @@ scanStage1 pat space scan_ops kbody = do
                   copyDWIMFix (patElemName pe) (map Imp.le64 is ++ vec_is) se []
                   copyDWIMFix acc' vec_is se []
 
-  free_params <- freeParams body [segFlat space]
-  emit $ Imp.Op $ Imp.ParLoop "scan_stage_1" body free_params $ segFlat space
+  free_params <- freeParams body
+  emit $ Imp.Op $ Imp.ParLoop "scan_stage_1" body free_params
 
 scanStage2 ::
   Pat MCMem ->
@@ -197,6 +200,9 @@ scanStage3 pat space scan_ops kbody = do
       ns' = map toInt64Exp ns
 
   body <- collect $ do
+    dPrim_ (segFlat space) int64
+    sOp $ Imp.GetTaskId (segFlat space)
+
     dScope Nothing $ scopeOfLParams $ concatMap (lambdaParams . segBinOpLambda) scan_ops
     local_accs <- forM (zip scan_ops per_scan_pes) $ \(scan_op, pes) -> do
       let shape = segBinOpShape scan_op
@@ -239,8 +245,8 @@ scanStage3 pat space scan_ops kbody = do
                     copyDWIMFix (patElemName pe) (map Imp.le64 is ++ vec_is) se []
                     copyDWIMFix acc' vec_is se []
 
-  free_params' <- freeParams body [segFlat space]
-  emit $ Imp.Op $ Imp.ParLoop "scan_stage_3" body free_params' $ segFlat space
+  free_params' <- freeParams body
+  emit $ Imp.Op $ Imp.ParLoop "scan_stage_3" body free_params'
 
 -- This implementation for a Segmented scan only
 -- parallelize over the segments and each segment is
@@ -255,8 +261,8 @@ segmentedScan pat space scan_ops kbody = do
   emit $ Imp.DebugPrint "segmented segScan" Nothing
   collect $ do
     body <- compileSegScanBody pat space scan_ops kbody
-    free_params <- freeParams body [segFlat space]
-    emit $ Imp.Op $ Imp.ParLoop "seg_scan" body free_params $ segFlat space
+    free_params <- freeParams body
+    emit $ Imp.Op $ Imp.ParLoop "seg_scan" body free_params
 
 compileSegScanBody ::
   Pat MCMem ->
@@ -264,12 +270,15 @@ compileSegScanBody ::
   [SegBinOp MCMem] ->
   KernelBody MCMem ->
   MulticoreGen Imp.Code
-compileSegScanBody pat space scan_ops kbody = do
+compileSegScanBody pat space scan_ops kbody = collect $ do
   let (is, ns) = unzip $ unSegSpace space
       ns_64 = map toInt64Exp ns
 
+  dPrim_ (segFlat space) int64
+  sOp $ Imp.GetTaskId (segFlat space)
+
   let per_scan_pes = segBinOpChunks scan_ops $ patElems pat
-  collect . generateChunkLoop "SegScan" $ \segment_i -> do
+  generateChunkLoop "SegScan" $ \segment_i -> do
     forM_ (zip scan_ops per_scan_pes) $ \(scan_op, scan_pes) -> do
       dScope Nothing $ scopeOfLParams $ lambdaParams $ segBinOpLambda scan_op
       let (scan_x_params, scan_y_params) = splitAt (length $ segBinOpNeutral scan_op) $ (lambdaParams . segBinOpLambda) scan_op

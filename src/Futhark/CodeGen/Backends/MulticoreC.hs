@@ -414,7 +414,7 @@ multiCoreReport names = report_kernels
                 [C.citem|ctx->total_runs += ctx->$id:runs;|]
               ]
 
-addBenchmarkFields :: Name -> Maybe VName -> GC.CompilerM op s ()
+addBenchmarkFields :: Name -> Maybe C.Id -> GC.CompilerM op s ()
 addBenchmarkFields name (Just _) = do
   GC.contextFieldDyn
     (functionRuntime name)
@@ -436,7 +436,7 @@ addBenchmarkFields name Nothing = do
   GC.contextField (functionRuns name) [C.cty|int|] $ Just [C.cexp|0|]
   GC.contextField (functionIter name) [C.cty|typename int64_t|] $ Just [C.cexp|0|]
 
-benchmarkCode :: Name -> Maybe VName -> [C.BlockItem] -> GC.CompilerM op s [C.BlockItem]
+benchmarkCode :: Name -> Maybe C.Id -> [C.BlockItem] -> GC.CompilerM op s [C.BlockItem]
 benchmarkCode name tid code = do
   addBenchmarkFields name tid
   return
@@ -495,13 +495,12 @@ generateParLoopFn ::
   [(VName, (C.Type, ValueType))] ->
   [(VName, (C.Type, ValueType))] ->
   VName ->
-  VName ->
   GC.CompilerM Multicore s Name
-generateParLoopFn lexical basename code fstruct free retval tid ntasks = do
+generateParLoopFn lexical basename code fstruct free retval tid = do
   let (fargs, fctypes) = unzip free
   let (retval_args, retval_ctypes) = unzip retval
   multicoreDef basename $ \s -> do
-    fbody <- benchmarkCode s (Just tid) <=< GC.inNewFunction $
+    fbody <- benchmarkCode s (Just "tid") <=< GC.inNewFunction $
       GC.cachingMemory lexical $ \decl_cached free_cached -> GC.collect $ do
         mapM_ GC.item [C.citems|$decls:(compileGetStructVals fstruct fargs fctypes)|]
         mapM_ GC.item [C.citems|$decls:(compileGetRetvalStructVals fstruct retval_args retval_ctypes)|]
@@ -515,7 +514,6 @@ generateParLoopFn lexical basename code fstruct free retval tid ntasks = do
       [C.cedecl|int $id:s(void *args, typename int64_t iterations, int tid, struct scheduler_info info) {
                            int err = 0;
                            int $id:tid = tid;
-                           int $id:ntasks = info.nsubtasks;
                            struct $id:fstruct *$id:fstruct = (struct $id:fstruct*) args;
                            struct futhark_context *ctx = $id:fstruct->ctx;
                            $items:fbody
@@ -551,7 +549,11 @@ compileOp :: GC.OpCompiler Multicore ()
 compileOp (GetLoopBounds start end) = do
   GC.stm [C.cstm|$id:start = start;|]
   GC.stm [C.cstm|$id:end = end;|]
-compileOp (SegOp name params seq_task par_task retvals (SchedulerInfo nsubtask e sched)) = do
+compileOp (GetTaskId v) =
+  GC.stm [C.cstm|$id:v = subtask_id;|]
+compileOp (GetNumTasks v) =
+  GC.stm [C.cstm|$id:v = info.nsubtasks;|]
+compileOp (SegOp name params seq_task par_task retvals (SchedulerInfo e sched)) = do
   let (ParallelTask seq_code tid) = seq_task
   free_ctypes <- mapM paramToCType params
   retval_ctypes <- mapM paramToCType retvals
@@ -567,7 +569,7 @@ compileOp (SegOp name params seq_task par_task retvals (SchedulerInfo nsubtask e
   fstruct <-
     prepareTaskStruct "task" free_args free_ctypes retval_args retval_ctypes
 
-  fpar_task <- generateParLoopFn lexical (name ++ "_task") seq_code fstruct free retval tid nsubtask
+  fpar_task <- generateParLoopFn lexical (name ++ "_task") seq_code fstruct free retval tid
   addTimingFields fpar_task
 
   let ftask_name = fstruct <> "_task"
@@ -588,7 +590,7 @@ compileOp (SegOp name params seq_task par_task retvals (SchedulerInfo nsubtask e
   fnpar_task <- case par_task of
     Just (ParallelTask nested_code nested_tid) -> do
       let lexical_nested = lexicalMemoryUsage $ Function Nothing [] params nested_code [] []
-      fnpar_task <- generateParLoopFn lexical_nested (name ++ "_nested_task") nested_code fstruct free retval nested_tid nsubtask
+      fnpar_task <- generateParLoopFn lexical_nested (name ++ "_nested_task") nested_code fstruct free retval nested_tid
       GC.stm [C.cstm|$id:ftask_name.nested_fn = $id:fnpar_task;|]
       return $ zip [fnpar_task] [True]
     Nothing -> do
@@ -609,7 +611,7 @@ compileOp (SegOp name params seq_task par_task retvals (SchedulerInfo nsubtask e
 
   -- Add profile fields for -P option
   mapM_ GC.profileReport $ multiCoreReport $ (fpar_task, True) : fnpar_task
-compileOp (ParLoop s' body free tid) = do
+compileOp (ParLoop s' body free) = do
   free_ctypes <- mapM paramToCType free
   let free_args = map paramName free
 
@@ -619,7 +621,7 @@ compileOp (ParLoop s' body free tid) = do
     prepareTaskStruct (s' ++ "_parloop_struct") free_args free_ctypes mempty mempty
 
   ftask <- multicoreDef (s' ++ "_parloop") $ \s -> do
-    fbody <- benchmarkCode s (Just tid) <=< GC.inNewFunction $
+    fbody <- benchmarkCode s (Just "tid") <=< GC.inNewFunction $
       GC.cachingMemory lexical $ \decl_cached free_cached -> GC.collect $ do
         mapM_
           GC.item
@@ -635,7 +637,7 @@ compileOp (ParLoop s' body free tid) = do
         mapM_ GC.item body'
         GC.stm [C.cstm|cleanup: {$stms:free_cached $items:free_mem}|]
     return
-      [C.cedecl|static int $id:s(void *args, typename int64_t start, typename int64_t end, int $id:tid, int tid) {
+      [C.cedecl|static int $id:s(void *args, typename int64_t start, typename int64_t end, int subtask_id, int tid) {
                        int err = 0;
                        struct $id:fstruct *$id:fstruct = (struct $id:fstruct*) args;
                        struct futhark_context *ctx = $id:fstruct->ctx;

@@ -104,6 +104,9 @@ reductionStage1 space slugs kbody = do
   -- that memory.  This is likely to be slow.
 
   fbody <- collect $ do
+    dPrim_ (segFlat space) int64
+    sOp $ Imp.GetTaskId (segFlat space)
+
     slug_local_accs <- do
       dScope Nothing $ scopeOfLParams $ concatMap slugParams slugs
 
@@ -156,8 +159,8 @@ reductionStage1 space slugs kbody = do
       forM (zip (slugResArrs slug) local_accs) $ \(acc, local_acc) ->
         copyDWIMFix acc [Imp.le64 $ segFlat space] (Var local_acc) []
 
-  free_params <- freeParams fbody [segFlat space]
-  emit $ Imp.Op $ Imp.ParLoop "segred_stage_1" fbody free_params $ segFlat space
+  free_params <- freeParams fbody
+  emit $ Imp.Op $ Imp.ParLoop "segred_stage_1" fbody free_params
 
 reductionStage2 ::
   Pat MCMem ->
@@ -205,8 +208,8 @@ segmentedReduction ::
 segmentedReduction pat space reds kbody =
   collect $ do
     body <- compileSegRedBody pat space reds kbody
-    free_params <- freeParams body [segFlat space]
-    emit $ Imp.Op $ Imp.ParLoop "segmented_segred" body free_params $ segFlat space
+    free_params <- freeParams body
+    emit $ Imp.Op $ Imp.ParLoop "segmented_segred" body free_params
 
 compileSegRedBody ::
   Pat MCMem ->
@@ -218,6 +221,8 @@ compileSegRedBody pat space reds kbody = do
   let (is, ns) = unzip $ unSegSpace space
       ns_64 = map toInt64Exp ns
       inner_bound = last ns_64
+  dPrim_ (segFlat space) int64
+  sOp $ Imp.GetTaskId (segFlat space)
 
   let per_red_pes = segBinOpChunks reds $ patElems pat
   -- Perform sequential reduce on inner most dimension

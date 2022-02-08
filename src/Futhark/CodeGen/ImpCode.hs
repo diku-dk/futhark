@@ -89,7 +89,7 @@ type DimSize = SubExp
 data Param
   = MemParam VName Space
   | ScalarParam VName PrimType
-  deriving (Show)
+  deriving (Eq, Show)
 
 -- | The name of a parameter.
 paramName :: Param -> VName
