@@ -138,15 +138,11 @@ compileThreadResult _ _ TileReturns {} =
 compileThreadResult _ _ RegTileReturns {} =
   compilerBugS "compileThreadResult: RegTileReturns unhandled."
 
-freeVariables :: FreeIn a => a -> [VName] -> [VName]
-freeVariables code names =
-  namesToList $ freeIn code `namesSubtract` namesFromList names
-
-freeParams :: FreeIn a => a -> [VName] -> MulticoreGen [Imp.Param]
-freeParams code names = do
-  let freeVars = freeVariables code names
-  ts <- mapM lookupType freeVars
-  concat <$> zipWithM toParam freeVars ts
+freeParams :: FreeIn a => a -> MulticoreGen [Imp.Param]
+freeParams code = do
+  let free = namesToList $ freeIn code
+  ts <- mapM lookupType free
+  concat <$> zipWithM toParam free ts
 
 -- | Arrays for storing group results shared between threads
 groupResultArrays ::
@@ -166,7 +162,7 @@ isLoadBalanced (Imp.For _ _ a) = isLoadBalanced a
 isLoadBalanced (Imp.If _ a b) = isLoadBalanced a && isLoadBalanced b
 isLoadBalanced (Imp.Comment _ a) = isLoadBalanced a
 isLoadBalanced Imp.While {} = False
-isLoadBalanced (Imp.Op (Imp.ParLoop _ code _ _)) = isLoadBalanced code
+isLoadBalanced (Imp.Op (Imp.ParLoop _ code _)) = isLoadBalanced code
 isLoadBalanced _ = True
 
 segBinOpComm' :: [SegBinOp rep] -> Commutativity
@@ -213,7 +209,7 @@ extractAllocations segop_code = f segop_code
       let (ta, tcode') = f tcode
           (fa, fcode') = f fcode
        in (ta <> fa, Imp.If cond tcode' fcode')
-    f (Imp.Op (Imp.ParLoop s body free info)) =
+    f (Imp.Op (Imp.ParLoop s body free)) =
       let (body_allocs, body') = extractAllocations body
           (free_allocs, here_allocs) = f body_allocs
           free' =
@@ -224,7 +220,7 @@ extractAllocations segop_code = f segop_code
               )
               free
        in ( free_allocs,
-            here_allocs <> Imp.Op (Imp.ParLoop s body' free' info)
+            here_allocs <> Imp.Op (Imp.ParLoop s body' free')
           )
     f code =
       (mempty, code)
