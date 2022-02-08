@@ -277,7 +277,7 @@ subHistogram pat space histops num_histos kbody = do
     let ns_red = map (toInt64Exp . snd) $ unSegSpace segred_space
         iterations = product $ init ns_red -- The segmented reduction is sequential over the inner most dimension
         scheduler_info = Imp.SchedulerInfo (untyped iterations) Imp.Static
-        red_task = Imp.ParallelTask red_code $ segFlat space
+        red_task = Imp.ParallelTask red_code
     free_params_red <- freeParams red_code
     emit $ Imp.Op $ Imp.SegOp "seghist_red" free_params_red red_task Nothing mempty scheduler_info
   where
