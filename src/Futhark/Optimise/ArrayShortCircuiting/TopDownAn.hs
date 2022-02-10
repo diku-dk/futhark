@@ -90,7 +90,7 @@ getDirAliasFromExp (BasicOp (Opaque _ (Var x))) = Just (x, id)
 getDirAliasFromExp (BasicOp (Reshape shp_chg x)) =
   Just (x, (`IxFun.reshape` map (fmap pe64) shp_chg))
 getDirAliasFromExp (BasicOp (Rearrange perm x)) =
-  Just (x, (`IxFun.permute` perm))
+  Nothing
 getDirAliasFromExp (BasicOp (Rotate rs x)) =
   Just (x, (`IxFun.rotate` fmap pe64 rs))
 getDirAliasFromExp (BasicOp (Index x slc)) =
