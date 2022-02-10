@@ -636,7 +636,7 @@ compileOp (ParLoop s' body free) = do
         mapM_ GC.item =<< GC.declAllocatedMem
         mapM_ GC.item body'
     return
-      [C.cedecl|static void $id:s(void *args, typename int64_t start, typename int64_t end, int $id:tid, int tid) {
+      [C.cedecl|static void $id:s(void *args, typename int64_t start, typename int64_t end, int subtask_id, int tid) {
                        $items:loopBody
                      }|]
 
