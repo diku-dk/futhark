@@ -1641,6 +1641,23 @@ $definitions
 
 $entry_point_decls
   |]
+      ispcdefs =
+        [untrimming|
+typedef int64 int64_t;
+typedef int32 int32_t;
+typedef int16 int16_t;
+typedef int8 int8_t;
+typedef int8 char;
+typedef unsigned int64 uint64_t;
+typedef unsigned int32 uint32_t;
+typedef unsigned int16 uint16_t;
+typedef unsigned int8 uint8_t;
+typedef unsigned int64 __uint128_t; // TODO(pema): Wrong
+
+$cScalarDefs
+
+$ispc_decls
+        |]
 
   return
     CParts
@@ -1649,7 +1666,7 @@ $entry_point_decls
         cCLI = clidefs,
         cServer = serverdefs,
         cLib = libdefs,
-        cISPC = ispc_decls,
+        cISPC = ispcdefs,
         cJsonManifest = Manifest.manifestToJSON manifest
       }
   where

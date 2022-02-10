@@ -81,14 +81,17 @@ static inline f16 uitofp_i16_f16(uint16_t x) {
 }
 
 static inline f16 uitofp_i32_f16(uint32_t x) {
+  #pragma ignore warning(perf)
   return (f16) x;
 }
 
 static inline f16 uitofp_i64_f16(uint64_t x) {
+  #pragma ignore warning(perf)
   return (f16) x;
 }
 
 static inline int8_t fptosi_f16_i8(f16 x) {
+  #pragma ignore warning(perf)
   return (int8_t) (float) x;
 }
 
@@ -105,18 +108,22 @@ static inline int64_t fptosi_f16_i64(f16 x) {
 }
 
 static inline uint8_t fptoui_f16_i8(f16 x) {
+  #pragma ignore warning(perf)
   return (uint8_t) (float) x;
 }
 
 static inline uint16_t fptoui_f16_i16(f16 x) {
+  #pragma ignore warning(perf)
   return (uint16_t) x;
 }
 
 static inline uint32_t fptoui_f16_i32(f16 x) {
+  #pragma ignore warning(perf)
   return (uint32_t) x;
 }
 
 static inline uint64_t fptoui_f16_i64(f16 x) {
+  #pragma ignore warning(perf)
   return (uint64_t) x;
 }
 
@@ -404,6 +411,14 @@ static inline int16_t futrts_to_bits16(f16 x) {
 static inline f16 futrts_from_bits16(int16_t x) {
   return __ushort_as_half(x);
 }
+#elif ISPC
+static inline int16_t futrts_to_bits16(f16 x) {
+  return *((int16_t *)&x);
+}
+
+static inline f16 futrts_from_bits16(int16_t x) {
+  return *((float *)&x);
+}
 #else
 static inline int16_t futrts_to_bits16(f16 x) {
   union {
@@ -581,6 +596,14 @@ static inline f16 futrts_from_bits16(int16_t x) {
   return (f16)vload_half(0, (half*)&x);
 }
 
+#elif ISPC
+static inline int16_t futrts_to_bits16(f16 x) {
+  return *((int16_t *)&x);
+}
+
+static inline f16 futrts_from_bits16(int16_t x) {
+  return *((f16 *)&x);
+}
 #else
 
 static inline int16_t futrts_to_bits16(f16 x) {
@@ -592,7 +615,7 @@ static inline f16 futrts_from_bits16(int16_t x) {
 }
 
 static inline f16 fsignum16(f16 x) {
-  return futrts_isnan16(x) ? x : (x > 0) - (x < 0);
+  return futrts_isnan16(x) ? x : (x > 0 ? 1 : 0) - (x < 0 ? 1 : 0);
 }
 
 #endif

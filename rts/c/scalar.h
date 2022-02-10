@@ -1,3 +1,4 @@
+
 // Start of scalar.h.
 
 // Implementation of the primitive scalar operations.  Very
@@ -66,124 +67,156 @@ static inline uint64_t mul64(uint64_t x, uint64_t y) {
 }
 
 static inline uint8_t udiv8(uint8_t x, uint8_t y) {
+  #pragma ignore warning(perf)
   return x / y;
 }
 
 static inline uint16_t udiv16(uint16_t x, uint16_t y) {
+  #pragma ignore warning(perf)
   return x / y;
 }
 
 static inline uint32_t udiv32(uint32_t x, uint32_t y) {
+  #pragma ignore warning(perf)
   return x / y;
 }
 
 static inline uint64_t udiv64(uint64_t x, uint64_t y) {
+  #pragma ignore warning(perf)
   return x / y;
 }
 
 static inline uint8_t udiv_up8(uint8_t x, uint8_t y) {
+  #pragma ignore warning(perf)
   return (x + y - 1) / y;
 }
 
 static inline uint16_t udiv_up16(uint16_t x, uint16_t y) {
+  #pragma ignore warning(perf)
   return (x + y - 1) / y;
 }
 
 static inline uint32_t udiv_up32(uint32_t x, uint32_t y) {
+  #pragma ignore warning(perf)
   return (x + y - 1) / y;
 }
 
 static inline uint64_t udiv_up64(uint64_t x, uint64_t y) {
+  #pragma ignore warning(perf)
   return (x + y - 1) / y;
 }
 
 static inline uint8_t umod8(uint8_t x, uint8_t y) {
+  #pragma ignore warning(perf)
   return x % y;
 }
 
 static inline uint16_t umod16(uint16_t x, uint16_t y) {
+  #pragma ignore warning(perf)
   return x % y;
 }
 
 static inline uint32_t umod32(uint32_t x, uint32_t y) {
+  #pragma ignore warning(perf)
   return x % y;
 }
 
 static inline uint64_t umod64(uint64_t x, uint64_t y) {
+  #pragma ignore warning(perf)
   return x % y;
 }
 
 static inline uint8_t udiv_safe8(uint8_t x, uint8_t y) {
+  #pragma ignore warning(perf)
   return y == 0 ? 0 : x / y;
 }
 
 static inline uint16_t udiv_safe16(uint16_t x, uint16_t y) {
+  #pragma ignore warning(perf)
   return y == 0 ? 0 : x / y;
 }
 
 static inline uint32_t udiv_safe32(uint32_t x, uint32_t y) {
+  #pragma ignore warning(perf)
   return y == 0 ? 0 : x / y;
 }
 
 static inline uint64_t udiv_safe64(uint64_t x, uint64_t y) {
+  #pragma ignore warning(perf)
   return y == 0 ? 0 : x / y;
 }
 
 static inline uint8_t udiv_up_safe8(uint8_t x, uint8_t y) {
+  #pragma ignore warning(perf)
   return y == 0 ? 0 : (x + y - 1) / y;
 }
 
 static inline uint16_t udiv_up_safe16(uint16_t x, uint16_t y) {
+  #pragma ignore warning(perf)
   return y == 0 ? 0 : (x + y - 1) / y;
 }
 
 static inline uint32_t udiv_up_safe32(uint32_t x, uint32_t y) {
+  #pragma ignore warning(perf)
   return y == 0 ? 0 : (x + y - 1) / y;
 }
 
 static inline uint64_t udiv_up_safe64(uint64_t x, uint64_t y) {
+  #pragma ignore warning(perf)
   return y == 0 ? 0 : (x + y - 1) / y;
 }
 
 static inline uint8_t umod_safe8(uint8_t x, uint8_t y) {
+  #pragma ignore warning(perf)
   return y == 0 ? 0 : x % y;
 }
 
 static inline uint16_t umod_safe16(uint16_t x, uint16_t y) {
+  #pragma ignore warning(perf)
   return y == 0 ? 0 : x % y;
 }
 
 static inline uint32_t umod_safe32(uint32_t x, uint32_t y) {
+  #pragma ignore warning(perf)
   return y == 0 ? 0 : x % y;
 }
 
 static inline uint64_t umod_safe64(uint64_t x, uint64_t y) {
+  #pragma ignore warning(perf)
   return y == 0 ? 0 : x % y;
 }
 
 static inline int8_t sdiv8(int8_t x, int8_t y) {
+  #pragma ignore warning(perf)
   int8_t q = x / y;
+  #pragma ignore warning(perf)
   int8_t r = x % y;
 
   return q - ((r != 0 && r < 0 != y < 0) ? 1 : 0);
 }
 
 static inline int16_t sdiv16(int16_t x, int16_t y) {
+  #pragma ignore warning(perf)
   int16_t q = x / y;
+  #pragma ignore warning(perf)
   int16_t r = x % y;
 
   return q - ((r != 0 && r < 0 != y < 0) ? 1 : 0);
 }
 
 static inline int32_t sdiv32(int32_t x, int32_t y) {
+  #pragma ignore warning(perf)
   int32_t q = x / y;
+  #pragma ignore warning(perf)
   int32_t r = x % y;
 
   return q - ((r != 0 && r < 0 != y < 0) ? 1 : 0);
 }
 
 static inline int64_t sdiv64(int64_t x, int64_t y) {
+  #pragma ignore warning(perf)
   int64_t q = x / y;
+  #pragma ignore warning(perf)
   int64_t r = x % y;
 
   return q - ((r != 0 && r < 0 != y < 0) ? 1 : 0);
@@ -206,24 +239,28 @@ static inline int64_t sdiv_up64(int64_t x, int64_t y) {
 }
 
 static inline int8_t smod8(int8_t x, int8_t y) {
+  #pragma ignore warning(perf)
   int8_t r = x % y;
 
   return r + (r == 0 || (x > 0 && y > 0) || (x < 0 && y < 0) ? 0 : y);
 }
 
 static inline int16_t smod16(int16_t x, int16_t y) {
+  #pragma ignore warning(perf)
   int16_t r = x % y;
 
   return r + (r == 0 || (x > 0 && y > 0) || (x < 0 && y < 0) ? 0 : y);
 }
 
 static inline int32_t smod32(int32_t x, int32_t y) {
+  #pragma ignore warning(perf)
   int32_t r = x % y;
 
   return r + (r == 0 || (x > 0 && y > 0) || (x < 0 && y < 0) ? 0 : y);
 }
 
 static inline int64_t smod64(int64_t x, int64_t y) {
+  #pragma ignore warning(perf)
   int64_t r = x % y;
 
   return r + (r == 0 || (x > 0 && y > 0) || (x < 0 && y < 0) ? 0 : y);
@@ -278,66 +315,82 @@ static inline int64_t smod_safe64(int64_t x, int64_t y) {
 }
 
 static inline int8_t squot8(int8_t x, int8_t y) {
+  #pragma ignore warning(perf)
   return x / y;
 }
 
 static inline int16_t squot16(int16_t x, int16_t y) {
+  #pragma ignore warning(perf)
   return x / y;
 }
 
 static inline int32_t squot32(int32_t x, int32_t y) {
+  #pragma ignore warning(perf)
   return x / y;
 }
 
 static inline int64_t squot64(int64_t x, int64_t y) {
+  #pragma ignore warning(perf)
   return x / y;
 }
 
 static inline int8_t srem8(int8_t x, int8_t y) {
+  #pragma ignore warning(perf)
   return x % y;
 }
 
 static inline int16_t srem16(int16_t x, int16_t y) {
+  #pragma ignore warning(perf)
   return x % y;
 }
 
 static inline int32_t srem32(int32_t x, int32_t y) {
+  #pragma ignore warning(perf)
   return x % y;
 }
 
 static inline int64_t srem64(int64_t x, int64_t y) {
+  #pragma ignore warning(perf)
   return x % y;
 }
 
 static inline int8_t squot_safe8(int8_t x, int8_t y) {
+  #pragma ignore warning(perf)
   return y == 0 ? 0 : x / y;
 }
 
 static inline int16_t squot_safe16(int16_t x, int16_t y) {
+  #pragma ignore warning(perf)
   return y == 0 ? 0 : x / y;
 }
 
 static inline int32_t squot_safe32(int32_t x, int32_t y) {
+  #pragma ignore warning(perf)
   return y == 0 ? 0 : x / y;
 }
 
 static inline int64_t squot_safe64(int64_t x, int64_t y) {
+  #pragma ignore warning(perf)
   return y == 0 ? 0 : x / y;
 }
 
 static inline int8_t srem_safe8(int8_t x, int8_t y) {
+  #pragma ignore warning(perf)
   return y == 0 ? 0 : x % y;
 }
 
 static inline int16_t srem_safe16(int16_t x, int16_t y) {
+  #pragma ignore warning(perf)
   return y == 0 ? 0 : x % y;
 }
 
 static inline int32_t srem_safe32(int32_t x, int32_t y) {
+  #pragma ignore warning(perf)
   return y == 0 ? 0 : x % y;
 }
 
 static inline int64_t srem_safe64(int64_t x, int64_t y) {
+  #pragma ignore warning(perf)
   return y == 0 ? 0 : x % y;
 }
 
@@ -422,34 +475,42 @@ static inline uint64_t shl64(uint64_t x, uint64_t y) {
 }
 
 static inline uint8_t lshr8(uint8_t x, uint8_t y) {
+  #pragma ignore warning(perf)
   return x >> y;
 }
 
 static inline uint16_t lshr16(uint16_t x, uint16_t y) {
+  #pragma ignore warning(perf)
   return x >> y;
 }
 
 static inline uint32_t lshr32(uint32_t x, uint32_t y) {
+  #pragma ignore warning(perf)
   return x >> y;
 }
 
 static inline uint64_t lshr64(uint64_t x, uint64_t y) {
+  #pragma ignore warning(perf)
   return x >> y;
 }
 
 static inline int8_t ashr8(int8_t x, int8_t y) {
+  #pragma ignore warning(perf)
   return x >> y;
 }
 
 static inline int16_t ashr16(int16_t x, int16_t y) {
+  #pragma ignore warning(perf)
   return x >> y;
 }
 
 static inline int32_t ashr32(int32_t x, int32_t y) {
+  #pragma ignore warning(perf)
   return x >> y;
 }
 
 static inline int64_t ashr64(int64_t x, int64_t y) {
+  #pragma ignore warning(perf)
   return x >> y;
 }
 
@@ -691,7 +752,7 @@ static int32_t abs32(int32_t x) {
 }
 
 static int64_t abs64(int64_t x) {
-#if defined(__OPENCL_VERSION__)
+#if defined(__OPENCL_VERSION__) || defined(ISPC)
   return abs(x);
 #else
   return llabs(x);
@@ -902,6 +963,24 @@ static int32_t futrts_clzz64(int64_t x) {
   return __clzll(x);
 }
 
+#elif ISPC
+
+static int32_t futrts_clzz8(int8_t x) {
+  return 0;
+}
+
+static int32_t futrts_clzz16(int16_t x) {
+  return 0;
+}
+
+static int32_t futrts_clzz32(int32_t x) {
+  return 0;
+}
+
+static int32_t futrts_clzz64(int64_t x) {
+  return 0;
+}
+
 #else // Not OpenCL or CUDA, but plain C.
 
 static int32_t futrts_clzz8(int8_t x) {
@@ -972,6 +1051,24 @@ static int32_t futrts_ctzz64(int64_t x) {
   return y == 0 ? 64 : y - 1;
 }
 
+#elif ISPC
+
+static int32_t futrts_ctzz8(int8_t x) {
+  return 0;
+}
+
+static int32_t futrts_ctzz16(int16_t x) {
+  return 0;
+}
+
+static int32_t futrts_ctzz32(int32_t x) {
+  return 0;
+}
+
+static int32_t futrts_ctzz64(int64_t x) {
+  return 0;
+}
+
 #else // Not OpenCL or CUDA, but plain C.
 
 static int32_t futrts_ctzz8(int8_t x) {
@@ -1040,6 +1137,7 @@ static inline float uitofp_i16_f32(uint16_t x) {
 }
 
 static inline float uitofp_i32_f32(uint32_t x) {
+  #pragma ignore warning(perf)
   return (float) x;
 }
 
@@ -1058,6 +1156,24 @@ static inline float fmax32(float x, float y) {
 
 static inline float fmin32(float x, float y) {
   return fmin(x, y);
+}
+
+static inline float fpow32(float x, float y) {
+  return pow(x, y);
+}
+
+#elif ISPC
+
+static inline float fabs32(float x) {
+  return fabs32(x);
+}
+
+static inline float fmax32(float x, float y) {
+  return fmax32(x, y);
+}
+
+static inline float fmin32(float x, float y) {
+  return fmin32(x, y);
 }
 
 static inline float fpow32(float x, float y) {
@@ -1087,9 +1203,19 @@ static inline bool futrts_isnan32(float x) {
   return isnan(x);
 }
 
+#if ISPC // Changed
+
+static inline bool futrts_isinf32(float x) {
+  return false;
+}
+
+#else
+
 static inline bool futrts_isinf32(float x) {
   return isinf(x);
 }
+
+#endif
 
 static inline int8_t fptosi_f32_i8(float x) {
   if (futrts_isnan32(x) || futrts_isinf32(x)) {
@@ -1268,6 +1394,120 @@ static inline float futrts_fma32(float a, float b, float c) {
   return fma(a, b, c);
 }
 
+#elif ISPC
+
+static inline float futrts_log32(float x) {
+  return log(x);
+}
+
+static inline float futrts_log2_32(float x) {
+  return log(x) / log(2.0f);
+}
+
+static inline float futrts_log10_32(float x) {
+  return log(x) / log(10.0f);
+}
+
+static inline float futrts_sqrt32(float x) {
+  return sqrt(x);
+}
+
+static inline float futrts_exp32(float x) {
+  return exp(x);
+}
+
+static inline float futrts_cos32(float x) {
+  return cos(x);
+}
+
+static inline float futrts_sin32(float x) {
+  return sin(x);
+}
+
+static inline float futrts_tan32(float x) {
+  return tan(x);
+}
+
+static inline float futrts_acos32(float x) {
+  return acos(x);
+}
+
+static inline float futrts_asin32(float x) {
+  return asin(x);
+}
+
+static inline float futrts_atan32(float x) {
+  return atan(x);
+}
+
+static inline float futrts_cosh32(float x) {
+  return 0; // TODO
+}
+
+static inline float futrts_sinh32(float x) {
+  return 0; // TODO
+}
+
+static inline float futrts_tanh32(float x) {
+  return 0; // TODO
+}
+
+static inline float futrts_acosh32(float x) {
+  return 0; // TODO
+}
+
+static inline float futrts_asinh32(float x) {
+  return 0; // TODO
+}
+
+static inline float futrts_atanh32(float x) {
+  return 0; // TODO
+}
+
+static inline float futrts_atan2_32(float x, float y) {
+  return atan2(x, y);
+}
+
+static inline float futrts_hypot32(float x, float y) {
+  return 0; // TODO
+}
+
+static inline float futrts_gamma32(float x) {
+  return 0; // TODO
+}
+
+static inline float futrts_lgamma32(float x) {
+  return 0; // TODO
+}
+
+static inline float fmod32(float x, float y) {
+  return fmod32(x, y);
+}
+
+static inline float futrts_round32(float x) {
+  return round(x);
+}
+
+static inline float futrts_floor32(float x) {
+  return floor(x);
+}
+
+static inline float futrts_ceil32(float x) {
+  return ceil(x);
+}
+
+static inline float futrts_lerp32(float v0, float v1, float t) {
+  return v0 + (v1 - v0) * t;
+}
+
+static inline float futrts_mad32(float a, float b, float c) {
+  return a * b + c;
+}
+
+static inline float futrts_fma32(float a, float b, float c) {
+  return a * b + c;
+}
+
 #else // Not OpenCL, but CUDA or plain C.
 
 static inline float futrts_log32(float x) {
@@ -1383,6 +1623,15 @@ static inline float futrts_fma32(float a, float b, float c) {
 }
 #endif
 
+#if ISPC
+static inline int32_t futrts_to_bits32(float x) {
+  return *((int32_t *)&x);
+}
+
+static inline float futrts_from_bits32(int32_t x) {
+  return *((float *)&x);
+}
+#else
 static inline int32_t futrts_to_bits32(float x) {
   union {
     float f;
@@ -1402,9 +1651,10 @@ static inline float futrts_from_bits32(int32_t x) {
   p.f = x;
   return p.t;
 }
+#endif
 
 static inline float fsignum32(float x) {
-  return futrts_isnan32(x) ? x : (x > 0) - (x < 0);
+  return futrts_isnan32(x) ? x : (x > 0 ? 1 : 0) - (x < 0 ? 1 : 0);
 }
 
 #ifdef FUTHARK_F64_ENABLED
