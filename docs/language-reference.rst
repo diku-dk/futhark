@@ -197,8 +197,9 @@ first class.  See :ref:`hofs` for the details.
 
 .. productionlist::
    stringlit: '"' `stringchar`* '"'
-   charlit: "'" `stringchar` "'"
-   stringchar: <any source character except "\" or newline or quotes>
+   stringchar: <any source character except "\" or newline or double quotes>
+   charlit: "'" `char` "'"
+   char: <any source character except "\" or newline or single quotes>
 
 String literals are supported, but only as syntactic sugar for UTF-8
 encoded arrays of ``u8`` values.  There is no character type in

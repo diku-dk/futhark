@@ -31,11 +31,17 @@ type Code = Imp.Code Multicore
 -- | A multicore operation.
 data Multicore
   = SegOp String [Param] ParallelTask (Maybe ParallelTask) [Param] SchedulerInfo
-  | ParLoop String Code [Param] VName
+  | ParLoop String Code [Param]
   | -- | Retrieve inclusive start and exclusive end indexes of the
-    -- chunk we are supposed to be executing.  Only valid inside a
-    -- 'ParLoop' construct!
+    -- chunk we are supposed to be executing.  Only valid immediately
+    -- inside a 'ParLoop' construct!
     GetLoopBounds VName VName
+  | -- | Retrieve the task ID that is currently executing.  Only valid
+    -- immediately inside a 'ParLoop' construct!
+    GetTaskId VName
+  | -- | Retrieve the number of subtasks to execute.  Only valid
+    -- immediately inside a 'SegOp' or 'ParLoop' construct!
+    GetNumTasks VName
   | Atomic AtomicOp
 
 -- | Atomic operations return the value stored before the update.
@@ -61,15 +67,11 @@ instance FreeIn AtomicOp where
   freeIn' (AtomicXchg _ _ arr i x) = freeIn' arr <> freeIn' i <> freeIn' x
 
 data SchedulerInfo = SchedulerInfo
-  { nsubtasks :: VName, -- The variable that describes how many subtasks the scheduler created
-    iterations :: Imp.Exp, -- The number of total iterations for a task
+  { iterations :: Imp.Exp, -- The number of total iterations for a task
     scheduling :: Scheduling -- The type scheduling for the task
   }
 
-data ParallelTask = ParallelTask
-  { task_code :: Code,
-    flatTid :: VName -- The variable for the thread id execution the code
-  }
+newtype ParallelTask = ParallelTask Code
 
 -- | Whether the Scheduler should schedule the tasks as Dynamic
 -- or it is restainted to Static
@@ -82,20 +84,22 @@ instance Pretty Scheduling where
   ppr Static = "Static"
 
 instance Pretty SchedulerInfo where
-  ppr (SchedulerInfo nsubtask i sched) =
+  ppr (SchedulerInfo i sched) =
     stack
-      [ nestedBlock "number of subtasks {" "}" (ppr nsubtask),
-        nestedBlock "scheduling {" "}" (ppr sched),
+      [ nestedBlock "scheduling {" "}" (ppr sched),
         nestedBlock "iter {" "}" (ppr i)
       ]
 
 instance Pretty ParallelTask where
-  ppr (ParallelTask code tid) =
-    "\\" <> ppr tid <+> "->" </> ppr code
+  ppr (ParallelTask code) = ppr code
 
 instance Pretty Multicore where
   ppr (GetLoopBounds start end) =
     ppr (start, end) <+> "<-" <+> "get_loop_bounds()"
+  ppr (GetTaskId v) =
+    ppr v <+> "<-" <+> "get_task_id()"
+  ppr (GetNumTasks v) =
+    ppr v <+> "<-" <+> "get_num_tasks()"
   ppr (SegOp s free seq_code par_code retval scheduler) =
     "SegOp" <+> text s <+> nestedBlock "{" "}" ppbody
     where
@@ -107,30 +111,31 @@ instance Pretty Multicore where
             maybe mempty (nestedBlock "par {" "}" . ppr) par_code,
             nestedBlock "retvals {" "}" (ppr retval)
           ]
-  ppr (ParLoop s body params info) =
+  ppr (ParLoop s body params) =
     "parloop" <+> ppr s </> nestedBlock "{" "}" ppbody
     where
       ppbody =
         stack
           [ nestedBlock "params {" "}" (ppr params),
-            ppr info,
             nestedBlock "body {" "}" (ppr body)
           ]
   ppr (Atomic _) = "AtomicOp"
 
 instance FreeIn SchedulerInfo where
-  freeIn' (SchedulerInfo nsubtask iter _) =
-    freeIn' iter <> freeIn' nsubtask
+  freeIn' (SchedulerInfo iter _) = freeIn' iter
 
 instance FreeIn ParallelTask where
-  freeIn' (ParallelTask code i) =
-    fvBind (oneName i) $ freeIn' code
+  freeIn' (ParallelTask code) = freeIn' code
 
 instance FreeIn Multicore where
   freeIn' (GetLoopBounds start end) =
     freeIn' (start, end)
+  freeIn' (GetTaskId v) =
+    freeIn' v
+  freeIn' (GetNumTasks v) =
+    freeIn' v
   freeIn' (SegOp _ _ par_code seq_code _ info) =
     freeIn' par_code <> freeIn' seq_code <> freeIn' info
-  freeIn' (ParLoop _ body _ _) =
+  freeIn' (ParLoop _ body _) =
     freeIn' body
   freeIn' (Atomic aop) = freeIn' aop

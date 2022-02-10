@@ -37,7 +37,7 @@ import Futhark.Util.Loc hiding (L)
 %wrapper "monad-bytestring"
 
 @charlit = ($printable#['\\]|\\($printable|[0-9]+))
-@stringcharlit = ($printable#[\"\\]|\\($printable|[0-9]+)|\n)
+@stringcharlit = ($printable#[\"\\]|\\($printable|[0-9]+))
 @hexlit = 0[xX][0-9a-fA-F][0-9a-fA-F_]*
 @declit = [0-9][0-9_]*
 @binlit = 0[bB][01][01_]*

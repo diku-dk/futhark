@@ -124,32 +124,28 @@ compileMCOp pat (ParOp par_op op) = do
   let space = getSpace op
   dPrimV_ (segFlat space) (0 :: Imp.TExp Int64)
   iterations <- getIterationDomain op space
-  nsubtasks <- dPrim "num_tasks" $ IntType Int32
-  seq_code <- compileSegOp pat op nsubtasks
+  seq_code <- collect $ do
+    nsubtasks <- dPrim "nsubtasks" int32
+    sOp $ Imp.GetNumTasks $ tvVar nsubtasks
+    emit =<< compileSegOp pat op nsubtasks
   retvals <- getReturnParams pat op
 
-  let scheduling_info = Imp.SchedulerInfo (tvVar nsubtasks) (untyped iterations)
+  let scheduling_info = Imp.SchedulerInfo (untyped iterations)
 
   par_task <- case par_op of
     Just nested_op -> do
       let space' = getSpace nested_op
       dPrimV_ (segFlat space') (0 :: Imp.TExp Int64)
-      par_code <- compileSegOp pat nested_op nsubtasks
-      pure $ Just $ Imp.ParallelTask par_code $ segFlat $ getSpace nested_op
+      par_code <- collect $ do
+        nsubtasks <- dPrim "nsubtasks" int32
+        sOp $ Imp.GetNumTasks $ tvVar nsubtasks
+        emit =<< compileSegOp pat nested_op nsubtasks
+      pure $ Just $ Imp.ParallelTask par_code
     Nothing -> pure Nothing
 
-  let non_free =
-        ( [segFlat space, tvVar nsubtasks]
-            ++ map Imp.paramName retvals
-        )
-          ++ case par_op of
-            Just nested_op ->
-              [segFlat $ getSpace nested_op]
-            Nothing -> []
-
   s <- segOpString op
-  let seq_task = Imp.ParallelTask seq_code (segFlat space)
-  free_params <- freeParams (par_task, seq_task) non_free
+  let seq_task = Imp.ParallelTask seq_code
+  free_params <- filter (`notElem` retvals) <$> freeParams (par_task, seq_task)
   emit . Imp.Op $
     Imp.SegOp s free_params seq_task par_task retvals $
       scheduling_info (decideScheduling' op seq_code)
