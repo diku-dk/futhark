@@ -1656,6 +1656,13 @@ typedef unsigned int64 __uint128_t; // TODO(pema): Wrong
 
 $cScalarDefs
 
+struct memblock {
+    int *references;
+    unsigned char *mem;
+    int64_t size;
+    const char *desc;
+};
+
 $ispc_decls
         |]
 
