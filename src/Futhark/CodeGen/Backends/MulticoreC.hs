@@ -640,7 +640,7 @@ compileOp (ParLoop s' body free) = do
   _ispcLoop <- ispcDef (s' ++ "_ispc") $ \s -> do
     loopBody <- GC.inNewFunction $
       GC.collect $ do
-        GC.decl [C.cdecl|typename int64_t iterations = end-start;|]
+        --GC.decl [C.cdecl|typename int64_t iterations = end-start;|]
 
         body' <- GC.collect $ GC.compileCode body
 

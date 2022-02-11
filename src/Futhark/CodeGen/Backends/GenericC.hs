@@ -1664,6 +1664,7 @@ struct memblock {
     const char *desc;
 };
 
+#define futhark_foreach(t, i, n) foreach(i = 0 ... extract(n, 0))
 #define register uniform
 #define memblock_ref memblock&
 #define auto export
