@@ -1685,7 +1685,7 @@ Attributes
 
 .. productionlist::
    attr:   `id`
-       :   `decimal`
+       : | `decimal`
        : | `id` "(" [`attr` ("," `attr`)*] ")"
 
 An expression, declaration, pattern, or module type spec can be
