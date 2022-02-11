@@ -529,6 +529,10 @@ in natural text.
   tightly than any infix operator.  Note that the only prefix
   operators are ``!`` and ``-``, and more cannot be defined.
 
+* ``#foo #bar`` is interpreted as a constructor with a ``#bar``
+  payload, not as applying ``#foo`` to ``#bar`` (the latter would be
+  semantically invalid anyway).
+
 * The following table describes the precedence and associativity of
   infix operators in both expressions and type expressions.  All
   operators in the same row have the same precedence.  The rows are
