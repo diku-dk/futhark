@@ -525,15 +525,16 @@ in natural text.
   enclosed in parentheses, rather than an operator section partially
   applying the infix operator ``-``.
 
-* Function application and prefix operators bind more tightly than any
-  infix operator.  Note that the only prefix operators are ``!`` and
-  ``-``, and more cannot be defined.
+* Function and type application, and prefix operators, bind more
+  tightly than any infix operator.  Note that the only prefix
+  operators are ``!`` and ``-``, and more cannot be defined.
 
 * The following table describes the precedence and associativity of
-  infix operators.  All operators in the same row have the same
-  precedence.  The rows are listed in increasing order of precedence.
-  Note that not all operators listed here are used in expressions;
-  nevertheless, they are still used for resolving ambiguities.
+  infix operators in both expressions and type expressions.  All
+  operators in the same row have the same precedence.  The rows are
+  listed in increasing order of precedence.  Note that not all
+  operators listed here are used in expressions; nevertheless, they
+  are still used for resolving ambiguities.
 
   =================  =============
   **Associativity**  **Operators**
