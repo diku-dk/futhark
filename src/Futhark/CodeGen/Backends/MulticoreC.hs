@@ -265,9 +265,9 @@ compileKernelInputs = zipWith field
   where
     getName name = nameFromString (pretty name)
     field name (ty, Prim) =
-      [C.cparam|$ty:ty $id:(getName name)|]
+      [C.cparam|register $ty:ty $id:(getName name)|]
     field name (_, _) =
-      [C.cparam|struct memblock $id:(getName name)|]
+      [C.cparam|register typename memblock_ref $id:(getName name)|]
 
 compileFreeStructFields :: [VName] -> [(C.Type, ValueType)] -> [C.FieldGroup]
 compileFreeStructFields = zipWith field
@@ -648,7 +648,7 @@ compileOp (ParLoop s' body free) = do
         mapM_ GC.item =<< GC.declAllocatedMem
         mapM_ GC.item body'
     return
-      [C.cedecl|static void $id:s(typename int64_t start, typename int64_t end, int subtask_id, $params:inputs) {
+      [C.cedecl|auto static void $id:s(register typename int64_t start, register typename int64_t end, register int subtask_id, $params:inputs) {
                        $items:loopBody
                      }|]
 

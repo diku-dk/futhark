@@ -1663,6 +1663,10 @@ struct memblock {
     const char *desc;
 };
 
+#define register uniform
+#define memblock_ref memblock&
+#define auto export
+
 $ispc_decls
         |]
 
