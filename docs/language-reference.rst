@@ -465,6 +465,8 @@ literals and variables, but also more complicated forms.
       : | "match" `exp` ("case" `pat` "->" `exp`)+
    field:   `fieldid` "=" `exp`
         : | `id`
+   index: `exp` [ ":" [ `exp` ] [ ":" `exp` ] ]
+        | ":" [ [ `exp` ] [ ":" `exp` ] ]
    size : "[" `id` "]"
    pat:   `id`
       : | `pat_literal`
