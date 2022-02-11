@@ -477,11 +477,11 @@ literals and variables, but also more complicated forms.
       : | `constructor` `pat`*
       : | `pat` ":" `type`
       : | "#[" `attr` "]" `pat`
-   pat_literal: [ "-" ] `intnumber`
-              | [ "-" ] `floatnumber`
-              | `charlit`
-              | "true"
-              | "false"
+   pat_literal:   [ "-" ] `intnumber`
+              : | [ "-" ] `floatnumber`
+              : | `charlit`
+              : | "true"
+              : | "false"
    loopform :   "for" `id` "<" `exp`
             : | "for" `pat` "in" `exp`
             : | "while" `exp`
