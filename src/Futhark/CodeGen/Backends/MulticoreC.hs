@@ -17,7 +17,6 @@ module Futhark.CodeGen.Backends.MulticoreC
   )
 where
 
-import Debug.Trace
 import Control.Monad
 import qualified Data.Map as M
 import Data.Maybe

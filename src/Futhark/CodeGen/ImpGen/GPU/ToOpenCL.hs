@@ -837,6 +837,7 @@ typesInCode :: ImpGPU.KernelCode -> S.Set PrimType
 typesInCode Skip = mempty
 typesInCode (c1 :>>: c2) = typesInCode c1 <> typesInCode c2
 typesInCode (For _ e c) = typesInExp e <> typesInCode c
+typesInCode (ForEach _ e c) = typesInExp e <> typesInCode c
 typesInCode (While (TPrimExp e) c) = typesInExp e <> typesInCode c
 typesInCode DeclareMem {} = mempty
 typesInCode (DeclareScalar _ _ t) = S.singleton t

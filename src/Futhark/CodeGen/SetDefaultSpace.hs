@@ -76,6 +76,8 @@ setCodeSpace space (c1 :>>: c2) =
   setCodeSpace space c1 :>>: setCodeSpace space c2
 setCodeSpace space (For i e body) =
   For i e $ setCodeSpace space body
+setCodeSpace space (ForEach i e body) =
+  ForEach i e $ setCodeSpace space body
 setCodeSpace space (While e body) =
   While e $ setCodeSpace space body
 setCodeSpace space (If e c1 c2) =

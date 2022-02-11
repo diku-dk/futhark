@@ -1214,6 +1214,7 @@ compileCode (Imp.For i bound body) = do
   stm $
     For counter (simpleCall "range" [bound']) $
       body' ++ [AssignOp "+" (Var i') (Var one)]
+compileCode (Imp.ForEach i bound body) = compileCode (Imp.For i bound body)
 compileCode (Imp.SetScalar name exp1) =
   stm =<< Assign <$> compileVar name <*> compileExp exp1
 compileCode Imp.DeclareMem {} = return ()

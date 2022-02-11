@@ -245,7 +245,7 @@ generateChunkLoop desc m = do
       addLoopVar i Int64
       m $ start + Imp.le64 i
   emit body_allocs
-  emit $ Imp.For i (untyped n) body
+  emit $ Imp.ForEach i (untyped n) body
 
 -------------------------------
 ------- SegHist helpers -------
