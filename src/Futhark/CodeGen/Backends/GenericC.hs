@@ -2161,7 +2161,7 @@ compileCode (ForEach i bound body) = do
   let pbound = pretty bound'
   let pbody = pretty body'
   let macro = "futhark_foreach (" <> ptype <> ", " <> pi' <> ", " <> pbound <> ") "
-              <> T.unpack (T.replace "\n" "\n\t\t" $ T.pack pbody)
+              <> T.unpack (T.replace "\n" "\n    " $ T.pack pbody)
   stm
     [C.cstm|$escstm:macro|]
 compileCode (While cond body) = do
