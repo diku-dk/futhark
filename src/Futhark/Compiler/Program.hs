@@ -163,9 +163,7 @@ readUntypedLibrary fps = do
 -- | Pre-typechecked imports, including a starting point for the name source.
 data Basis = Basis
   { basisImports :: Imports,
-    basisNameSource :: VNameSource,
-    -- | Files that should be implicitly opened.
-    basisRoots :: [String]
+    basisNameSource :: VNameSource
   }
 
 -- | A basis that contains no imports, and has a properly initialised
@@ -174,8 +172,7 @@ emptyBasis :: Basis
 emptyBasis =
   Basis
     { basisImports = mempty,
-      basisNameSource = src,
-      basisRoots = mempty
+      basisNameSource = src
     }
   where
     src = newNameSource $ E.maxIntrinsicTag + 1
