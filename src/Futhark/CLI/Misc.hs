@@ -5,6 +5,7 @@ module Futhark.CLI.Misc
   ( mainImports,
     mainHash,
     mainDataget,
+    mainCheckSyntax,
   )
 where
 
@@ -80,3 +81,9 @@ mainDataget = mainWithOptions () [] "program dataset" $ \args () ->
     testSpecRuns = testActionRuns . testAction
     testActionRuns CompileTimeFailure {} = []
     testActionRuns (RunCases ios _ _) = concatMap iosTestRuns ios
+
+mainCheckSyntax :: String -> [String] -> IO ()
+mainCheckSyntax = mainWithOptions () [] "program" $ \args () ->
+  case args of
+    [file] -> Just $ void $ readUntypedProgramOrDie file
+    _ -> Nothing
