@@ -266,7 +266,7 @@ compileKernelInputs = zipWith field
     field name (ty, Prim) =
       [C.cparam|register $ty:ty $id:(getName name)|]
     field name (_, _) =
-      [C.cparam|register typename memblock_ref $id:(getName name)|]
+      [C.cparam|typename memblock_ref $id:(getName name)|]
 
 compileFreeStructFields :: [VName] -> [(C.Type, ValueType)] -> [C.FieldGroup]
 compileFreeStructFields = zipWith field
