@@ -240,7 +240,7 @@ Declaring Functions and Values
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. productionlist::
-   val_bind:   ("def" | "entry" | "let") (`id` | "(" `binop` ")") `type_param`* `pat`+ [":" `type`] "=" `exp`
+   val_bind:   ("def" | "entry" | "let") (`id` | "(" `binop` ")") `type_param`* `pat`* [":" `type`] "=" `exp`
            : | ("def" | "entry" | "let") `pat` `binop` `pat` [":" `type`] "=" `exp`
 
 **Note:** using ``let`` to define top-level bindings is deprecated.
