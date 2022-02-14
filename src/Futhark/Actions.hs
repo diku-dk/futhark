@@ -209,7 +209,7 @@ runISPC ispcpath outpath cflags_def ldflags = do
         "ispc"
         ( [ispcpath, "-o", outpath] ++
           cmdCFLAGS cflags_def++
-          ["-h", "test.h"] ++
+          ["-h", outpath `addExtension` "h"] ++
           ldflags
         )
         mempty
