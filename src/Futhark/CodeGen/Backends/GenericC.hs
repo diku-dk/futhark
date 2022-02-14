@@ -1666,7 +1666,7 @@ struct memblock {
 
 #define futhark_foreach(t, i, n) foreach(i = 0 ... extract(n, 0))
 #define register uniform
-#define memblock_ref memblock * uniform
+#define memblock_ref memblock&
 #define auto export
 
 $ispc_decls
