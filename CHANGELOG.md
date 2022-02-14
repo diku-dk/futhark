@@ -21,6 +21,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+* Mistake in occurs check could cause infinite loop in type checker
+  for programs with type errors (#1599).
+
 ## [0.21.6]
 
 ### Added
