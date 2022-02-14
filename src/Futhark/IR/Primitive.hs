@@ -564,6 +564,12 @@ data ConvOp
   | -- | Convert a boolean to an integer.  True is converted
     -- to 1 and False to 0.
     BToI IntType
+  | -- | Convert a float to a boolean value.  Zero becomes false;
+    -- | anything else is true.
+    FToB FloatType
+  | -- | Convert a boolean to a float.  True is converted
+    -- to 1 and False to 0.
+    BToF FloatType
   deriving (Eq, Ord, Show)
 
 -- | A list of all unary operators for all types.
@@ -640,7 +646,9 @@ allConvOps =
       UIToFP <$> allIntTypes <*> allFloatTypes,
       SIToFP <$> allIntTypes <*> allFloatTypes,
       IToB <$> allIntTypes,
-      BToI <$> allIntTypes
+      BToI <$> allIntTypes,
+      FToB <$> allFloatTypes,
+      BToF <$> allFloatTypes
     ]
 
 -- | Apply an 'UnOp' to an operand.  Returns 'Nothing' if the
@@ -906,6 +914,8 @@ doConvOp (UIToFP _ to) (IntValue v) = Just $ FloatValue $ doUIToFP v to
 doConvOp (SIToFP _ to) (IntValue v) = Just $ FloatValue $ doSIToFP v to
 doConvOp (IToB _) (IntValue v) = Just $ BoolValue $ intToInt64 v /= 0
 doConvOp (BToI to) (BoolValue v) = Just $ IntValue $ intValue to $ if v then 1 else 0 :: Int
+doConvOp (FToB _) (FloatValue v) = Just $ BoolValue $ floatToDouble v /= 0
+doConvOp (BToF to) (BoolValue v) = Just $ FloatValue $ floatValue to $ if v then 1 else 0 :: Double
 doConvOp _ _ = Nothing
 
 -- | Turn the conversion the other way around.  Note that most
@@ -921,6 +931,8 @@ flipConvOp (UIToFP from to) = FPToSI to from
 flipConvOp (SIToFP from to) = FPToSI to from
 flipConvOp (IToB from) = BToI from
 flipConvOp (BToI to) = IToB to
+flipConvOp (FToB from) = BToF from
+flipConvOp (BToF to) = FToB to
 
 -- | Zero-extend the given integer value to the size of the given
 -- type.  If the type is smaller than the given value, the result is a
@@ -1133,6 +1145,8 @@ convOpType (UIToFP from to) = (IntType from, FloatType to)
 convOpType (SIToFP from to) = (IntType from, FloatType to)
 convOpType (IToB from) = (IntType from, Bool)
 convOpType (BToI to) = (Bool, IntType to)
+convOpType (FToB from) = (FloatType from, Bool)
+convOpType (BToF to) = (Bool, FloatType to)
 
 halfToWord :: Half -> Word16
 halfToWord (Half (CUShort x)) = x
@@ -1763,6 +1777,8 @@ convOpFun UIToFP {} = "uitofp"
 convOpFun SIToFP {} = "sitofp"
 convOpFun IToB {} = "itob"
 convOpFun BToI {} = "btoi"
+convOpFun FToB {} = "ftob"
+convOpFun BToF {} = "btof"
 
 taggedI :: String -> IntType -> Doc
 taggedI s Int8 = text $ s ++ "8"

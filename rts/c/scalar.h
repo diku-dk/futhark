@@ -1155,6 +1155,14 @@ static inline uint64_t fptoui_f32_i64(float x) {
   }
 }
 
+static inline bool ftob_f32_bool(float x) {
+  return x != 0;
+}
+
+static inline float btof_bool_f32(bool x) {
+  return x ? 1 : 0;
+}
+
 #ifdef __OPENCL_VERSION__
 static inline float futrts_log32(float x) {
   return log(x);
@@ -1651,6 +1659,14 @@ static inline uint64_t fptoui_f64_i64(double x) {
   } else {
     return (uint64_t) (int64_t) x;
   }
+}
+
+static inline bool ftob_f64_bool(double x) {
+  return x != 0;
+}
+
+static inline double btof_bool_f64(bool x) {
+  return x ? 1 : 0;
 }
 
 static inline int64_t futrts_to_bits64(double x) {
