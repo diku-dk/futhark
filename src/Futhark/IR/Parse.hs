@@ -312,6 +312,8 @@ pBasicOp =
       pConvOp "sitofp" SIToFP pIntType pFloatType,
       pConvOp "itob" (const . IToB) pIntType (keyword "bool"),
       pConvOp "btoi" (const BToI) (keyword "bool") pIntType,
+      pConvOp "ftob" (const . FToB) pFloatType (keyword "bool"),
+      pConvOp "btof" (const BToF) (keyword "bool") pFloatType,
       --
       pIndex,
       pFlatIndex,
