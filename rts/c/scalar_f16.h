@@ -121,7 +121,7 @@ static inline uint64_t fptoui_f16_i64(f16 x) {
 }
 
 static inline bool ftob_f16_bool(f16 x) {
-  return x != 0;
+  return x != (f16)0;
 }
 
 static inline f16 btof_bool_f16(bool x) {
