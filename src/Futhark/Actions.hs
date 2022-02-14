@@ -171,6 +171,9 @@ pyPrependHeader = (T.unlines pyHeaderLines <>)
 cmdCC :: String
 cmdCC = fromMaybe "cc" $ lookup "CC" unixEnvironment
 
+--cmdISPC :: String
+--cmdISPC = fromMaybe "ispc" $ lookup "CC" unixEnvironment
+
 cmdCFLAGS :: [String] -> [String]
 cmdCFLAGS def = maybe def words $ lookup "CFLAGS" unixEnvironment
 
@@ -185,6 +188,29 @@ runCC cpath outpath cflags_def ldflags = do
             ++
             -- The default LDFLAGS are always added.
             ldflags
+        )
+        mempty
+  case ret of
+    Left err ->
+      externalErrorS $ "Failed to run " ++ cmdCC ++ ": " ++ show err
+    Right (ExitFailure code, _, gccerr) ->
+      externalErrorS $
+        cmdCC ++ " failed with code "
+          ++ show code
+          ++ ":\n"
+          ++ gccerr
+    Right (ExitSuccess, _, _) ->
+      return ()
+runISPC :: String -> String -> [String] -> [String] -> FutharkM ()
+runISPC ispcpath outpath cflags_def ldflags = do
+  ret <-
+    liftIO $
+      runProgramWithExitCode
+        "ispc"
+        ( [ispcpath, "-o", outpath] ++
+          cmdCFLAGS cflags_def++
+          ["-h", "test.h"] ++
+          ldflags
         )
         mempty
   case ret of
@@ -320,6 +346,7 @@ compileMulticoreAction fcfg mode outpath =
           let (c, ispc) = MulticoreC.asISPCExecutable cprog
           liftIO $ T.writeFile cpath $ cPrependHeader $ c
           liftIO $ T.writeFile ispcPath $ ispc
+          runISPC ispcPath outpath ["-O3"] []
           runCC cpath outpath ["-O3", "-std=c99"] ["-lm", "-pthread"]
         ToServer -> do
           liftIO $ T.writeFile cpath $ cPrependHeader $ MulticoreC.asServer cprog
