@@ -166,6 +166,18 @@ def btoi_bool_i32(x):
 def btoi_bool_i64(x):
   return np.int8(x)
 
+def ftob_T_bool(x):
+  return bool(x)
+
+def btof_bool_f16(x):
+  return np.float16(x)
+
+def btof_bool_f32(x):
+  return np.float32(x)
+
+def btof_bool_f64(x):
+  return np.float64(x)
+
 def zext_i8_i8(x):
   return np.int8(np.uint8(x))
 
@@ -250,6 +262,7 @@ sext_i8_i16 = sext_i16_i16 = sext_i32_i16 = sext_i64_i16 = sext_T_i16
 sext_i8_i32 = sext_i16_i32 = sext_i32_i32 = sext_i64_i32 = sext_T_i32
 sext_i8_i64 = sext_i16_i64 = sext_i32_i64 = sext_i64_i64 = sext_T_i64
 itob_i8_bool = itob_i16_bool = itob_i32_bool = itob_i64_bool = itob_T_bool
+ftob_f16_bool = ftob_f32_bool = ftob_f64_bool = ftob_T_bool
 
 def clz_T(x):
   n = np.int32(0)
