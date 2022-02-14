@@ -5,6 +5,7 @@ module Futhark.CodeGen.ImpGen.Multicore.SegMap
 where
 
 import Control.Monad
+import Debug.Trace
 import qualified Futhark.CodeGen.ImpCode.Multicore as Imp
 import Futhark.CodeGen.ImpGen
 import Futhark.CodeGen.ImpGen.Multicore.Base
@@ -39,9 +40,10 @@ compileSegMapBody pat space (KernelBody _ kstms kres) = collect $ do
   dPrim_ (segFlat space) int64
   sOp $ Imp.GetTaskId (segFlat space)
   kstms' <- mapM renameStm kstms
+  let kstms'' = traceShow (pretty kstms') kstms'
   generateChunkLoop "SegMap" $ \i -> do
     dIndexSpace (zip is ns') i
-    compileStms (freeIn kres) kstms' $
+    compileStms (freeIn kres) kstms'' $
       zipWithM_ (writeResult is) (patElems pat) kres
 
 compileSegMap ::

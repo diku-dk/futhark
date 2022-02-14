@@ -208,8 +208,8 @@ runISPC ispcpath outpath cflags_def ldflags = do
       runProgramWithExitCode
         "ispc"
         ( [ispcpath, "-o", outpath] ++
-          cmdCFLAGS cflags_def++
-          ["-h", outpath `addExtension` "h"] ++
+          cmdCFLAGS cflags_def ++
+          ["-h", "ispc_" <> outpath `addExtension` "h"] ++
           ldflags
         )
         mempty
@@ -330,12 +330,13 @@ compileMulticoreAction fcfg mode outpath =
     }
   where
     helper prog = do
-      cprog <- handleWarnings fcfg $ MulticoreC.compileProg (T.pack versionString) prog
       let cpath = outpath `addExtension` "c"
           hpath = outpath `addExtension` "h"
           jsonpath = outpath `addExtension` "json"
           ispcPath = outpath `addExtension` "ispc"
+          ispcHeaderPath = ("ispc_" <> outpath) `addExtension` "h"
 
+      cprog <- handleWarnings fcfg $ MulticoreC.compileProg (T.pack $ "#include \"" <> ispcHeaderPath <> "\"") (T.pack versionString) prog
       case mode of
         ToLibrary -> do
           let (header, impl, manifest) = MulticoreC.asLibrary cprog

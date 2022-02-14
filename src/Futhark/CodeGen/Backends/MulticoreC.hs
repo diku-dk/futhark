@@ -34,15 +34,15 @@ import qualified Language.C.Syntax as C
 
 -- | Compile the program to ImpCode with multicore operations.
 compileProg ::
-  MonadFreshNames m => T.Text -> Prog MCMem -> m (ImpGen.Warnings, GC.CParts)
-compileProg version =
+  MonadFreshNames m => T.Text -> T.Text -> Prog MCMem -> m (ImpGen.Warnings, GC.CParts)
+compileProg header version =
   traverse
     ( GC.compileProg
         "multicore"
         version
         operations
         generateContext
-        ""
+        header
         [DefaultSpace]
         cliOptions
     )

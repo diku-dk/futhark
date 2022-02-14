@@ -601,7 +601,7 @@ rawMem v = rawMem' <$> fat <*> pure v
     fat = asks ((&&) . envFatMemory) <*> (isNothing <$> cacheMem v)
 
 rawMem' :: C.ToExp a => Bool -> a -> C.Exp
-rawMem' True e = [C.cexp|$exp:e.mem|]
+rawMem' True e = [C.cexp|$exp:e->mem|]
 rawMem' False e = [C.cexp|$exp:e|]
 
 allocRawMem ::
@@ -638,11 +638,13 @@ defineMemorySpace :: Space -> CompilerM op s (C.Definition, [C.Definition], C.Bl
 defineMemorySpace space = do
   rm <- rawMemCType space
   let structdef =
-        [C.cedecl|struct $id:sname { int *references;
-                                     $ty:rm mem;
-                                     typename int64_t size;
-                                     const char *desc; };|]
-
+        [C.cedecl|$esc:("#ifndef __ISPC_STRUCT_memblock__")
+                  $esc:("#define __ISPC_STRUCT_memblock__")
+                  struct $id:sname { int *references;
+                                      $ty:rm mem;
+                                      typename int64_t size;
+                                      const char *desc; };
+                  $esc:("#endif")|]
   contextField peakname [C.cty|typename int64_t|] $ Just [C.cexp|0|]
   contextField usagename [C.cty|typename int64_t|] $ Just [C.cexp|0|]
 
@@ -1611,6 +1613,7 @@ $timingH
   let early_decls = T.unlines $ map prettyText $ DL.toList $ compEarlyDecls endstate
       lib_decls = T.unlines $ map prettyText $ DL.toList $ compLibDecls endstate
       ispc_decls = T.unlines $ map prettyText $ DL.toList $ compIspcDecls endstate
+      -- ispc_header =
       clidefs = cliDefs options manifest
       serverdefs = serverDefs options manifest
       libdefs =
@@ -1623,7 +1626,6 @@ $timingH
 #include <errno.h>
 #include <assert.h>
 #include <ctype.h>
-
 $header_extra
 
 $lockH
@@ -1657,12 +1659,15 @@ typedef unsigned int64 __uint128_t; // TODO(pema): Wrong
 
 $cScalarDefs
 
+#ifndef __ISPC_STRUCT_memblock__
+#define __ISPC_STRUCT_memblock__
 struct memblock {
-    int *references;
-    unsigned char *mem;
+    int32_t * references;
+    uint8_t * mem;
     int64_t size;
-    const char *desc;
+    const int8_t * desc;
 };
+#endif
 
 #define futhark_foreach(t, i, n) foreach(i = 0 ... extract(n, 0))
 #define register uniform

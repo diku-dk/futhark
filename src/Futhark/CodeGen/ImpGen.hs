@@ -121,7 +121,7 @@ module Futhark.CodeGen.ImpGen
     module Language.Futhark.Warnings,
   )
 where
-
+import Debug.Trace
 import Control.Monad.Reader
 import Control.Monad.State
 import Control.Monad.Writer
@@ -153,6 +153,8 @@ import Futhark.Util.IntegralExp
 import Futhark.Util.Loc (noLoc)
 import Language.Futhark.Warnings
 import Prelude hiding (quot)
+import Language.C.Pretty (pprBlock)
+import Language.C (pprBlock)
 
 -- | How to compile an t'Op'.
 type OpCompiler rep r op = Pat rep -> Op rep -> ImpM rep r op ()
@@ -702,6 +704,7 @@ compileLoopBody mergeparams (Body _ stms ses) = do
 
 compileStms :: Names -> Stms rep -> ImpM rep r op () -> ImpM rep r op ()
 compileStms alive_after_stms all_stms m = do
+  --let t = traceShow (pprBlock all_stms) all_stms K: Maybe come back
   cb <- asks envStmsCompiler
   cb alive_after_stms all_stms m
 

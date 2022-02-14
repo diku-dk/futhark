@@ -7,7 +7,7 @@ module Futhark.CodeGen.ImpGen.Multicore
     Warnings,
   )
 where
-
+import Debug.Trace
 import Control.Monad
 import qualified Data.Map as M
 import qualified Futhark.CodeGen.ImpCode.Multicore as Imp
