@@ -42,6 +42,7 @@ import Control.Monad.Trans.Maybe
 import Control.Monad.Writer.Strict
 import Data.Function ((&))
 import Data.List (find, partition, tails)
+import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.Map as M
 import Data.Maybe
 import Futhark.IR
@@ -626,7 +627,7 @@ maybeDistributeStm stm@(Let pat aux (BasicOp (Update _ arr slice (Var v)))) acc
               =<< segmentedUpdateKernel nest' perm (stmAuxCerts aux) arr slice v
             return acc'
       _ -> addStmToAcc stm acc
-maybeDistributeStm stm@(Let _ aux (BasicOp (Concat d x xs w))) acc =
+maybeDistributeStm stm@(Let _ aux (BasicOp (Concat d (x :| xs) w))) acc =
   distributeSingleStm acc stm >>= \case
     Just (kernels, _, nest, acc') ->
       localScope (typeEnvFromDistAcc acc') $
@@ -639,7 +640,7 @@ maybeDistributeStm stm@(Let _ aux (BasicOp (Concat d x xs w))) acc =
       isSegmentedOp nest [0] mempty mempty [] (x : xs) $
         \pat _ _ _ (x' : xs') ->
           let d' = d + length (snd nest) + 1
-           in addStm $ Let pat aux $ BasicOp $ Concat d' x' xs' w
+           in addStm $ Let pat aux $ BasicOp $ Concat d' (x' :| xs') w
 maybeDistributeStm stm acc =
   addStmToAcc stm acc
 

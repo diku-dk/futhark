@@ -17,6 +17,7 @@ where
 import Data.Char (isAlpha)
 import Data.Functor
 import Data.List (zipWith5)
+import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Set as S
 import qualified Data.Text as T
@@ -283,7 +284,9 @@ pBasicOp =
         d <- "@" *> L.decimal
         parens $ do
           w <- pSubExp <* pComma
-          Concat d <$> pVName <*> many (pComma *> pVName) <*> pure w,
+          x <- pVName
+          ys <- many (pComma *> pVName)
+          return $ Concat d (x :| ys) w,
       pIota,
       try $
         flip Update

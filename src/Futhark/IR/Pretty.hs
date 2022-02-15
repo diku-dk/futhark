@@ -18,6 +18,7 @@ module Futhark.IR.Pretty
 where
 
 import Data.Foldable (toList)
+import Data.List.NonEmpty (NonEmpty (..))
 import Data.Maybe
 import Futhark.IR.Syntax
 import Futhark.Util.Pretty
@@ -217,8 +218,8 @@ instance Pretty BasicOp where
     text "rearrange" <> apply [apply (map ppr perm), ppr e]
   ppr (Rotate es e) =
     text "rotate" <> apply [apply (map ppr es), ppr e]
-  ppr (Concat i x ys w) =
-    text "concat" <> text "@" <> ppr i <> apply (ppr w : ppr x : map ppr ys)
+  ppr (Concat i (x :| xs) w) =
+    text "concat" <> text "@" <> ppr i <> apply (ppr w : ppr x : map ppr xs)
   ppr (Copy e) = text "copy" <> parens (ppr e)
   ppr (Manifest perm e) = text "manifest" <> apply [apply (map ppr perm), ppr e]
   ppr (Assert e msg (loc, _)) =
