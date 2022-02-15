@@ -272,7 +272,7 @@ onDec d = do
   -- that 'import "foo"' is a declaration.  We have to involve a lot
   -- of machinery to load this external code before executing the
   -- declaration itself.
-  let basis = Basis imports src ["/prelude/prelude"]
+  let basis = Basis imports src
       mkImport = uncurry $ T.mkImportFrom cur_import
   imp_r <- runExceptT $ readImports basis (map mkImport $ decImports d)
 

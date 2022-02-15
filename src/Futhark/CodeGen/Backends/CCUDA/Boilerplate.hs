@@ -391,7 +391,7 @@ generateContextFuns cfg cost_centres kernels sizes failures = do
                  ctx->error = cuda_setup(&ctx->cuda, cuda_program, cfg->nvrtc_opts);
 
                  if (ctx->error != NULL) {
-                   return NULL;
+                   futhark_panic(1, "%s\n", ctx->error);
                  }
 
                  typename int32_t no_error = -1;

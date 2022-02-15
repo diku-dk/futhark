@@ -101,6 +101,10 @@ isKernelInvariant :: Scope GPUMem -> (SubExp, space) -> Bool
 isKernelInvariant scope (Var vname, _) = vname `M.member` scope
 isKernelInvariant _ _ = True
 
+isScalarSpace :: (subExp, Space) -> Bool
+isScalarSpace (_, ScalarSpace _ _) = True
+isScalarSpace _ = False
+
 onKernelBodyStms ::
   MonadBuilder m =>
   SegOp lvl GPUMem ->
@@ -130,7 +134,9 @@ optimiseKernel ::
 optimiseKernel graph segop0 = do
   segop <- onKernelBodyStms segop0 $ onKernels $ optimiseKernel graph
   scope_here <- askScope
-  let allocs = M.filter (isKernelInvariant scope_here) $ getAllocsSegOp segop
+  let allocs =
+        M.filter (\alloc -> isKernelInvariant scope_here alloc && not (isScalarSpace alloc)) $
+          getAllocsSegOp segop
       (colorspaces, coloring) =
         GreedyColoring.colorGraph
           (fmap snd allocs)
@@ -191,7 +197,7 @@ onKernels f stms = inScopeOf stms $ mapM helper stms
 -- | Perform the reuse-allocations optimization.
 optimise :: Pass GPUMem GPUMem
 optimise =
-  Pass "reuse allocations" "reuse allocations" $ \prog ->
+  Pass "memory block merging" "memory block merging allocations" $ \prog ->
     let graph = Interference.analyseProgGPU prog
      in Pass.intraproceduralTransformation (onStms graph) prog
   where

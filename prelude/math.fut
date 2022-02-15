@@ -203,6 +203,9 @@ module type real = {
 -- | An extension of `real`@mtype that further gives access to the
 -- bitwise representation of the underlying number.  It is presumed
 -- that this will be some form of IEEE float.
+--
+-- Conversion of floats to integers is by truncation.  If an infinity
+-- or NaN is converted to an integer, the result is zero.
 module type float = {
   include real
 
@@ -237,9 +240,9 @@ module bool: from_prim with t = bool = {
   def u32 (x: u32) = intrinsics.itob_i32_bool (intrinsics.sign_i32 x)
   def u64 (x: u64) = intrinsics.itob_i64_bool (intrinsics.sign_i64 x)
 
-  def f16 (x: f16) = x != 0f16
-  def f32 (x: f32) = x != 0f32
-  def f64 (x: f64) = x != 0f64
+  def f16 (x: f16) = intrinsics.ftob_f16_bool x
+  def f32 (x: f32) = intrinsics.ftob_f32_bool x
+  def f64 (x: f64) = intrinsics.ftob_f64_bool x
 
   def bool (x: bool) = x
 }
@@ -874,7 +877,7 @@ module f64: (float with t = f64 with int_t = u64) = {
   def f32 (x: f32) = intrinsics.fpconv_f32_f64 x
   def f64 (x: f64) = intrinsics.fpconv_f64_f64 x
 
-  def bool (x: bool) = if x then 1f64 else 0f64
+  def bool (x: bool) = intrinsics.btof_bool_f64 x
 
   def from_fraction (x: i64) (y: i64) = i64 x / i64 y
   def to_i64 (x: f64) = intrinsics.fptosi_f64_i64 x
@@ -983,7 +986,7 @@ module f32: (float with t = f32 with int_t = u32) = {
   def f32 (x: f32) = intrinsics.fpconv_f32_f32 x
   def f64 (x: f64) = intrinsics.fpconv_f64_f32 x
 
-  def bool (x: bool) = if x then 1f32 else 0f32
+  def bool (x: bool) = intrinsics.btof_bool_f32 x
 
   def from_fraction (x: i64) (y: i64) = i64 x / i64 y
   def to_i64 (x: f32) = intrinsics.fptosi_f32_i64 x
@@ -1096,7 +1099,7 @@ module f16: (float with t = f16 with int_t = u16) = {
   def f32 (x: f32) = intrinsics.fpconv_f32_f16 x
   def f64 (x: f64) = intrinsics.fpconv_f64_f16 x
 
-  def bool (x: bool) = if x then 1f16 else 0f16
+  def bool (x: bool) = intrinsics.btof_bool_f16 x
 
   def from_fraction (x: i64) (y: i64) = i64 x / i64 y
   def to_i64 (x: f16) = intrinsics.fptosi_f16_i64 x

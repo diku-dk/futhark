@@ -462,7 +462,7 @@ determineTuning (Just ext) program = do
         ( ["--tuning", program <.> ext],
           " (using " <> takeFileName (program <.> ext) <> ")"
         )
-    else pure ([], mempty)
+    else pure ([], " (no tuning file)")
 
 -- | Check that the result is as expected, and write files and throw
 -- an error if not.

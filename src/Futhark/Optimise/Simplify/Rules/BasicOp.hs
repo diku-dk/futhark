@@ -390,6 +390,13 @@ ruleBasicOp vtable pat aux (UpdateAcc acc _ vs)
     Just (_, _, Just (_, ne)) <- ST.entryAccInput =<< ST.lookup token vtable,
     vs == ne =
     Simplify . auxing aux $ letBind pat $ BasicOp $ SubExp $ Var acc
+-- Manifest of a a copy can be simplified to manifesting the original
+-- array, if it is still available.
+ruleBasicOp vtable pat aux (Manifest perm v1)
+  | Just (Copy v2, cs) <- ST.lookupBasicOp v1 vtable,
+    ST.available v2 vtable =
+    Simplify . auxing aux . certifying cs $
+      letBind pat $ BasicOp $ Manifest perm v2
 ruleBasicOp _ _ _ _ =
   Skip
 

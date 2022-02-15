@@ -18,6 +18,7 @@ import Futhark.Server
 import Futhark.Test
 import Futhark.Util (maxinum)
 import Futhark.Util.Options
+import System.Directory
 import System.Environment (getExecutablePath)
 import System.Exit
 import System.FilePath
@@ -33,13 +34,14 @@ data AutotuneOptions = AutotuneOptions
     optExtraOptions :: [String],
     optVerbose :: Int,
     optTimeout :: Int,
+    optSkipCompilation :: Bool,
     optDefaultThreshold :: Int,
     optTestSpec :: Maybe FilePath
   }
 
 initialAutotuneOptions :: AutotuneOptions
 initialAutotuneOptions =
-  AutotuneOptions "opencl" Nothing 10 (Just "tuning") [] 0 60 thresholdMax Nothing
+  AutotuneOptions "opencl" Nothing 10 (Just "tuning") [] 0 60 False thresholdMax Nothing
 
 compileOptions :: AutotuneOptions -> IO CompileOptions
 compileOptions opts = do
@@ -115,14 +117,23 @@ prepare opts futhark prog = do
           putStrLn $
             unwords ("Entry points:" : map (T.unpack . iosEntryPoint) ios)
 
-        res <- prepareBenchmarkProgram Nothing copts prog ios
-        case res of
-          Left (err, errstr) -> do
-            putStrLn err
-            maybe (return ()) SBS.putStrLn errstr
-            exitFailure
-          Right () ->
-            return ios
+        if optSkipCompilation opts
+          then do
+            exists <- doesFileExist $ binaryName prog
+            if exists
+              then return ios
+              else do
+                putStrLn $ binaryName prog ++ " does not exist, but --skip-compilation passed."
+                exitFailure
+          else do
+            res <- prepareBenchmarkProgram Nothing copts prog ios
+            case res of
+              Left (err, errstr) -> do
+                putStrLn err
+                maybe (return ()) SBS.putStrLn errstr
+                exitFailure
+              Right () ->
+                return ios
       _ ->
         fail "Unsupported test spec."
 
@@ -502,6 +513,11 @@ commandLineOptions =
           "SECONDS"
       )
       "Initial tuning timeout for each dataset. Later tuning runs are based off of the runtime of the first run.",
+    Option
+      []
+      ["skip-compilation"]
+      (NoArg $ Right $ \config -> config {optSkipCompilation = True})
+      "Use already compiled program.",
     Option
       "v"
       ["verbose"]

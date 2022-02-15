@@ -120,6 +120,14 @@ static inline uint64_t fptoui_f16_i64(f16 x) {
   return (uint64_t) x;
 }
 
+static inline bool ftob_f16_bool(f16 x) {
+  return x != (f16)0;
+}
+
+static inline f16 btof_bool_f16(bool x) {
+  return x ? 1 : 0;
+}
+
 #ifndef EMULATE_F16
 
 #ifdef __OPENCL_VERSION__
