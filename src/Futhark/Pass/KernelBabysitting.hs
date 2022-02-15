@@ -8,6 +8,7 @@ import Control.Arrow (first)
 import Control.Monad.State.Strict
 import Data.Foldable
 import Data.List (elemIndex, isPrefixOf, sort)
+import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import Futhark.IR
@@ -474,7 +475,7 @@ rearrangeSlice d w num_chunks arr = do
         letExp (baseString arr <> "_padding") $
           BasicOp $ Scratch (elemType arr_t) (shapeDims padding_shape)
       letExp (baseString arr <> "_padded") $
-        BasicOp $ Concat d arr [arr_padding] w_padded
+        BasicOp $ Concat d (arr :| [arr_padding]) w_padded
 
     rearrange num_chunks' w_padded per_chunk arr_name arr_padded arr_t = do
       let arr_dims = arrayDims arr_t

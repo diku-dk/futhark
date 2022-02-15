@@ -30,6 +30,7 @@ import Control.Monad.Writer
 import Data.Either
 import Data.Foldable
 import Data.List (partition, transpose, unzip6, zip6)
+import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import qualified Data.Set as S
@@ -472,11 +473,11 @@ mapOpToOp (_, used) pat aux1 e
           | otherwise = DimNew w
     certifying (stmAuxCerts aux1 <> cs) . letBind pat . BasicOp $
       Reshape (redim : newshape) arr
-  | Just (_, cs, _, BasicOp (Concat d arr arrs dw), ps, outer_arr : outer_arrs) <-
+  | Just (_, cs, _, BasicOp (Concat d (arr :| arrs) dw), ps, outer_arr : outer_arrs) <-
       isMapWithOp pat e,
     (arr : arrs) == map paramName ps =
     Simplify . certifying (stmAuxCerts aux1 <> cs) . letBind pat . BasicOp $
-      Concat (d + 1) outer_arr outer_arrs dw
+      Concat (d + 1) (outer_arr :| outer_arrs) dw
   | Just
       (map_pe, cs, _, BasicOp (Rearrange perm rearrange_arr), [p], [arr]) <-
       isMapWithOp pat e,
@@ -597,7 +598,7 @@ fuseConcatScatter vtable pat _ (Scatter _ arrs fun dests)
     mix = concat . transpose
     incWrites r (w, n, a) = (w, n * r, a) -- ToDO: is it (n*r) or (n+r-1)??
     isConcat v = case ST.lookupExp v vtable of
-      Just (BasicOp (Concat 0 x ys _), cs) -> do
+      Just (BasicOp (Concat 0 (x :| ys) _), cs) -> do
         x_w <- sizeOf x
         y_ws <- mapM sizeOf ys
         guard $ all (x_w ==) y_ws
