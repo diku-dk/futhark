@@ -130,6 +130,7 @@ import Data.Bifunctor (first)
 import qualified Data.DList as DL
 import Data.Either
 import Data.List (find)
+import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import qualified Data.Set as S
@@ -917,7 +918,7 @@ defCompileBasicOp (Pat [pe]) (Copy src) =
   copyDWIM (patElemName pe) [] (Var src) []
 defCompileBasicOp (Pat [pe]) (Manifest _ src) =
   copyDWIM (patElemName pe) [] (Var src) []
-defCompileBasicOp (Pat [pe]) (Concat i x ys _) = do
+defCompileBasicOp (Pat [pe]) (Concat i (x :| ys) _) = do
   offs_glb <- dPrimV "tmp_offs" 0
 
   forM_ (x : ys) $ \y -> do
