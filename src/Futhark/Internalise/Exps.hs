@@ -10,6 +10,7 @@ module Futhark.Internalise.Exps (transformProg) where
 
 import Control.Monad.Reader
 import Data.List (find, intercalate, intersperse, transpose)
+import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
@@ -1786,7 +1787,7 @@ isOverloadedFunction qname args loc = do
           =<< mapM (fmap (arraysSize 0) . mapM lookupType) [ys]
 
       let conc xarr yarr =
-            I.BasicOp $ I.Concat 0 xarr [yarr] ressize
+            I.BasicOp $ I.Concat 0 (xarr :| [yarr]) ressize
       letSubExps desc $ zipWith conc xs ys
     handleRest [TupLit [offset, e] _] "rotate" = Just $ \desc -> do
       offset' <- internaliseExp1 "rotation_offset" offset

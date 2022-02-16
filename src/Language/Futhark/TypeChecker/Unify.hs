@@ -651,7 +651,10 @@ linkVarToType ::
   Level ->
   StructType ->
   m ()
-linkVarToType onDims usage bound bcs vn lvl tp = do
+linkVarToType onDims usage bound bcs vn lvl tp_unnorm = do
+  -- We have to expand anyway for the occurs check, so we might as
+  -- well link the fully expanded type.
+  tp <- normTypeFully tp_unnorm
   occursCheck usage bcs vn tp
   scopeCheck usage bcs vn lvl tp
 

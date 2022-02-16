@@ -197,8 +197,9 @@ first class.  See :ref:`hofs` for the details.
 
 .. productionlist::
    stringlit: '"' `stringchar`* '"'
-   charlit: "'" `stringchar` "'"
-   stringchar: <any source character except "\" or newline or quotes>
+   stringchar: <any source character except "\" or newline or double quotes>
+   charlit: "'" `char` "'"
+   char: <any source character except "\" or newline or single quotes>
 
 String literals are supported, but only as syntactic sugar for UTF-8
 encoded arrays of ``u8`` values.  There is no character type in
@@ -239,7 +240,7 @@ Declaring Functions and Values
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. productionlist::
-   val_bind:   ("def" | "entry" | "let") (`id` | "(" `binop` ")") `type_param`* `pat`+ [":" `type`] "=" `exp`
+   val_bind:   ("def" | "entry" | "let") (`id` | "(" `binop` ")") `type_param`* `pat`* [":" `type`] "=" `exp`
            : | ("def" | "entry" | "let") `pat` `binop` `pat` [":" `type`] "=" `exp`
 
 **Note:** using ``let`` to define top-level bindings is deprecated.
@@ -476,11 +477,11 @@ literals and variables, but also more complicated forms.
       : | `constructor` `pat`*
       : | `pat` ":" `type`
       : | "#[" `attr` "]" `pat`
-   pat_literal: [ "-" ] `intnumber`
-              | [ "-" ] `floatnumber`
-              | `charlit`
-              | "true"
-              | "false"
+   pat_literal:   [ "-" ] `intnumber`
+              : | [ "-" ] `floatnumber`
+              : | `charlit`
+              : | "true"
+              : | "false"
    loopform :   "for" `id` "<" `exp`
             : | "for" `pat` "in" `exp`
             : | "while" `exp`
@@ -524,15 +525,20 @@ in natural text.
   enclosed in parentheses, rather than an operator section partially
   applying the infix operator ``-``.
 
-* Function application and prefix operators bind more tightly than any
-  infix operator.  Note that the only prefix operators are ``!`` and
-  ``-``, and more cannot be defined.
+* Function and type application, and prefix operators, bind more
+  tightly than any infix operator.  Note that the only prefix
+  operators are ``!`` and ``-``, and more cannot be defined.
+
+* ``#foo #bar`` is interpreted as a constructor with a ``#bar``
+  payload, not as applying ``#foo`` to ``#bar`` (the latter would be
+  semantically invalid anyway).
 
 * The following table describes the precedence and associativity of
-  infix operators.  All operators in the same row have the same
-  precedence.  The rows are listed in increasing order of precedence.
-  Note that not all operators listed here are used in expressions;
-  nevertheless, they are still used for resolving ambiguities.
+  infix operators in both expressions and type expressions.  All
+  operators in the same row have the same precedence.  The rows are
+  listed in increasing order of precedence.  Note that not all
+  operators listed here are used in expressions; nevertheless, they
+  are still used for resolving ambiguities.
 
   =================  =============
   **Associativity**  **Operators**
@@ -1684,7 +1690,7 @@ Attributes
 
 .. productionlist::
    attr:   `id`
-       :   `decimal`
+       : | `decimal`
        : | `id` "(" [`attr` ("," `attr`)*] ")"
 
 An expression, declaration, pattern, or module type spec can be

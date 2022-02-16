@@ -7,6 +7,7 @@ module Futhark.Optimise.Simplify.Rules.Index
   )
 where
 
+import Data.List.NonEmpty (NonEmpty (..))
 import Data.Maybe
 import Futhark.Analysis.PrimExp.Convert
 import qualified Futhark.Analysis.SymbolTable as ST
@@ -165,7 +166,7 @@ simplifyIndexing vtable seType idd (Slice inds) consuming =
     Just (Reshape [_] v2, cs)
       | Just [_] <- arrayDims <$> seType (Var v2) ->
         Just $ pure $ IndexResult cs v2 $ Slice inds
-    Just (Concat d x xs _, cs)
+    Just (Concat d (x :| xs) _, cs)
       | -- HACK: simplifying the indexing of an N-array concatenation
         -- is going to produce an N-deep if expression, which is bad
         -- when N is large.  To try to avoid that, we use the

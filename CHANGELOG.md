@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+* `futhark check-syntax`: check syntactic validity of a program
+  file, without type-checking.
+
+* Parsing multi-file programs is now parallelised, making it
+  *slightly* faster.
+
+### Removed
+
+### Changed
+
+### Fixed
+
+* Mistake in occurs check could cause infinite loop in type checker
+  for programs with type errors (#1599).
+
+## [0.21.6]
+
+### Added
+
 * `futhark bench` now explicitly notes when a tuning file is not
   present.
 
@@ -17,10 +36,6 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Generated C code is now a lot smaller for large programs, as error
   recovery has been more centralised (#1584).
-
-### Removed
-
-### Changed
 
 ### Fixed
 

@@ -60,6 +60,7 @@ import Control.Monad.State.Strict
 import Control.Parallel.Strategies
 import Data.Bifunctor (second)
 import Data.List (find, intercalate, isPrefixOf, sort)
+import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import qualified Data.Set as S
@@ -907,7 +908,7 @@ checkBasicOp (Rotate rots arr) = do
           ++ " dimensions of "
           ++ show rank
           ++ "-dimensional array."
-checkBasicOp (Concat i arr1exp arr2exps ressize) = do
+checkBasicOp (Concat i (arr1exp :| arr2exps) ressize) = do
   arr1t <- checkArrIdent arr1exp
   arr2ts <- mapM checkArrIdent arr2exps
   let success =
