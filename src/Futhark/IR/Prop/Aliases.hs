@@ -52,7 +52,7 @@ class (RepTypes rep, AliasedOp (Op rep), AliasesOf (LetDec rep)) => Aliased rep 
 vnameAliases :: VName -> Names
 vnameAliases = oneName
 
--- | The alises of a subexpression.
+-- | The aliases of a subexpression.
 subExpAliases :: SubExp -> Names
 subExpAliases Constant {} = mempty
 subExpAliases (Var v) = vnameAliases v
