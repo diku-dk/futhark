@@ -256,6 +256,7 @@ library
       Futhark.Pass.ExtractMulticore
       Futhark.Pass.FirstOrderTransform
       Futhark.Pass.KernelBabysitting
+      Futhark.Pass.MergeGPUBodies
       Futhark.Pass.ReduceDeviceSyncs
       Futhark.Pass.Simplify
       Futhark.Passes

@@ -37,6 +37,7 @@ import Futhark.Pass.ExtractKernels
 import Futhark.Pass.ExtractMulticore
 import Futhark.Pass.FirstOrderTransform
 import Futhark.Pass.KernelBabysitting
+import Futhark.Pass.MergeGPUBodies
 import Futhark.Pass.ReduceDeviceSyncs
 import Futhark.Pass.Simplify
 import Futhark.Pipeline
@@ -71,6 +72,7 @@ kernelsPipeline =
         tileLoops,
         unstreamGPU,
         reduceDeviceSyncs,
+        mergeGPUBodies,
         performCSE True,
         simplifyGPU,
         sinkGPU,
