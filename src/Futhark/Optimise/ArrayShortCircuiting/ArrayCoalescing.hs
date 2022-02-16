@@ -30,6 +30,7 @@ import Futhark.Optimise.ArrayShortCircuiting.DataStructs
 import Futhark.Optimise.ArrayShortCircuiting.LastUse
 import Futhark.Optimise.ArrayShortCircuiting.MemRefAggreg
 import Futhark.Optimise.ArrayShortCircuiting.TopDownAn
+import Futhark.Util
 import Futhark.Util.Pretty (Pretty)
 
 trace _ x = x
@@ -1347,7 +1348,7 @@ genCoalStmtInfo lutab scopetab pat (BasicOp (Update _ x slice_x (Var b)))
        in IxFun.slice ind_fun $ Slice slc_x'
 
 -- CASE b) @let x = concat(a, b^{lu})@
-genCoalStmtInfo lutab scopetab pat (BasicOp (Concat 0 (b0 :| bs) _))
+genCoalStmtInfo lutab scopetab pat (BasicOp (Concat concat_dim (b0 :| bs) _))
   | Pat [PatElem x (_, MemArray _ _ _ (ArrayIn m_x ind_x))] <- pat =
     case M.lookup x lutab of
       Nothing -> Nothing
@@ -1359,15 +1360,20 @@ genCoalStmtInfo lutab scopetab pat (BasicOp (Concat 0 (b0 :| bs) _))
                     if not succ0
                       then (acc, offs, succ0)
                       else case getScopeMemInfo b scopetab of
-                        Just (MemBlock tpb shpb@(Shape (fd : rdims)) m_b ind_b) ->
-                          let offs' = offs + pe64 fd
-                           in if nameIn b last_uses
-                                then
-                                  let slc = Slice $ unitSlice offs (pe64 fd) : map (unitSlice zero . pe64) rdims
-                                   in -- ind_x_slice = IxFun.slice ind_x slc
+                        Just (MemBlock tpb shpb@(Shape dims@(_ : _)) m_b ind_b)
+                          | Just d <- maybeNth concat_dim dims ->
+                            let offs' = offs + pe64 d
+                             in if nameIn b last_uses
+                                  then
+                                    let slc =
+                                          Slice $
+                                            map (unitSlice zero . pe64) (take concat_dim dims)
+                                              <> [unitSlice offs (pe64 d)]
+                                              <> map (unitSlice zero . pe64) (drop (concat_dim + 1) dims)
+                                     in -- ind_x_slice = IxFun.slice ind_x slc
 
-                                      (acc ++ [(ConcatCoal, (`IxFun.slice` slc), x, m_x, ind_x, b, m_b, ind_b, tpb, shpb)], offs', True)
-                                else (acc, offs', True)
+                                        (acc ++ [(ConcatCoal, (`IxFun.slice` slc), x, m_x, ind_x, b, m_b, ind_b, tpb, shpb)], offs', True)
+                                  else (acc, offs', True)
                         _ -> (acc, offs, False)
                 )
                 ([], zero, True)
