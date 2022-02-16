@@ -15,6 +15,7 @@ module Futhark.Optimise.ArrayShortCircuiting.DataStructs
     LUTabPrg,
     ScalarTab,
     CoalsTab,
+    ScopeTab,
     CoalsEntry (..),
     FreeVarSubsts,
     LmadRef,
@@ -23,6 +24,7 @@ module Futhark.Optimise.ArrayShortCircuiting.DataStructs
     BotUpEnv (..),
     InhibitTab,
     unionCoalsEntry,
+    basePMconv,
     getArrMemAssocFParam,
     getScopeMemInfo,
     prettyCoalTab,
@@ -43,6 +45,10 @@ import qualified Futhark.IR.Mem.IxFun as IxFun
 import Futhark.IR.SeqMem
 import Futhark.Util.Pretty hiding (float, line, sep, string, (</>), (<|>))
 import Prelude
+
+type ScopeTab rep = Scope (Aliases rep)
+-- ^ maps array-variable names to various info, including
+--   types, memory block and index function, etc.
 
 -- | An LMAD specialized to TPrimExps (a typed primexp)
 type LmadRef = IxFun.LMAD (TPrimExp Int64 VName)
@@ -365,3 +371,21 @@ prettyCoalTab tab =
           )
           $ M.toList tab
    in pretty list_tups
+
+-- | basic conversion of a Var Expression to a PrimExp
+basePMconv ::
+  (CanBeAliased (Op rep), RepTypes rep) =>
+  ScopeTab rep ->
+  ScalarTab ->
+  VName ->
+  Maybe (PrimExp VName)
+basePMconv scopetab scaltab v =
+  case M.lookup v scaltab of
+    Just y ->
+      Just y -- error $ "Impossible. While looking up " <> pretty v <> " found " <> pretty y
+    Nothing -> case M.lookup v scopetab of
+      Just info ->
+        case typeOf info of
+          Prim tp -> Just $ LeafExp v tp
+          _ -> Nothing
+      _ -> Nothing

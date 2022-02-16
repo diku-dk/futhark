@@ -1245,7 +1245,7 @@ disjoint2 less_thans non_negatives lmad1 lmad2 =
         _ ->
           False
 
-disjoint3 :: M.Map VName Type -> [(VName, PrimExp VName)] -> Names -> LMAD (TPrimExp Int64 VName) -> LMAD (TPrimExp Int64 VName) -> IO Bool
+disjoint3 :: M.Map VName Type -> [(VName, PrimExp VName)] -> [PrimExp VName] -> LMAD (TPrimExp Int64 VName) -> LMAD (TPrimExp Int64 VName) -> IO Bool
 disjoint3 scope less_thans non_negatives lmad1 lmad2 =
   let (offset1, interval1) = lmadToIntervals lmad1
       (offset2, interval2) = lmadToIntervals lmad2
@@ -1261,8 +1261,8 @@ disjoint3 scope less_thans non_negatives lmad1 lmad2 =
              distributeOffset (map AlgSimplify2.negate neg_offset) interval2'
            ) of
         (Just interval1'', Just interval2'') ->
-          if not (selfOverlap less_thans non_negatives interval1'')
-            && not (selfOverlap less_thans non_negatives interval2'')
+          if not (selfOverlap less_thans (freeIn non_negatives) interval1'') -- TODO freeIn non_negatives is not correct
+            && not (selfOverlap less_thans (freeIn non_negatives) interval2'') -- TODO freeIn non_negatives is not correct
             then
               or
                 . traceWith

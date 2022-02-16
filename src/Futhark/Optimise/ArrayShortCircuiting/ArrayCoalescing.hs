@@ -89,24 +89,6 @@ emptyBotUpEnv =
       inhibit = mempty
     }
 
--- | basic conversion of a Var Expression to a PrimExp
-basePMconv ::
-  (CanBeAliased (Op rep), RepTypes rep) =>
-  ScopeTab rep ->
-  ScalarTab ->
-  VName ->
-  Maybe (PrimExp VName)
-basePMconv scopetab scaltab v =
-  case M.lookup v scaltab of
-    Just _ ->
-      error "Impossible"
-    Nothing -> case M.lookup v scopetab of
-      Just info ->
-        case typeOf info of
-          Prim tp -> Just $ LeafExp v tp
-          _ -> Nothing
-      _ -> Nothing
-
 -- | promotion from active-to-successful coalescing tables
 --   should be handled with this function (for clarity).
 markSuccessCoal ::
@@ -597,13 +579,14 @@ mkCoalsTabStms ::
   TopDnEnv rep ->
   BotUpEnv ->
   ShortCircuitM rep BotUpEnv
-mkCoalsTabStms lutab = traverseStms
+mkCoalsTabStms lutab stms = traverseStms stms
   where
-    traverseStms Empty _ bu_env = return bu_env
+    non_negs_in_pats = foldMap (nonNegativesInPat . stmPat) stms
+    traverseStms Empty td_env bu_env = return $ trace ("Done with some statements, nonnegs is now: " <> pretty (nonNegatives td_env)) bu_env
     traverseStms (stm :<| stms) td_env bu_env = do
       let td_env' = topdwnTravBinding td_env stm
       bu_env' <- traverseStms stms td_env' bu_env
-      mkCoalsTabStm lutab stm td_env' bu_env'
+      mkCoalsTabStm lutab stm (td_env' {nonNegatives = nonNegatives td_env' <> non_negs_in_pats}) bu_env'
 
 -- | Array (register) coalescing can have one of three shapes:
 --      a) @let y    = copy(b^{lu})@

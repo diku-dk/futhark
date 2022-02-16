@@ -293,18 +293,18 @@ noMemOverlap _ _ (Set mr)
   | mr == mempty = return True
 noMemOverlap _ (Set mr) _
   | mr == mempty = return True
-noMemOverlap _ Undeterminable _ = return False
-noMemOverlap _ _ Undeterminable = return False
-noMemOverlap td_env (Set is0) (Set js0) = do
-  -- TODO Expand this to be able to handle eg. nw
-  bla1 <- mapM (\i -> allM (\j -> return (IxFun.disjoint less_thans (nonNegatives td_env) i j) ||^ return (IxFun.disjoint2 less_thans (nonNegatives td_env) i j) ||^ IxFun.disjoint3 (fmap typeOf $ scope td_env) less_thans (nonNegatives td_env) i j) js) is
-  bla2 <- filterM (fmap not . \i -> allM (\j -> return (IxFun.disjoint less_thans (nonNegatives td_env) i j) ||^ return (IxFun.disjoint2 less_thans (nonNegatives td_env) i j) ||^ IxFun.disjoint3 (fmap typeOf $ scope td_env) less_thans (nonNegatives td_env) i j) js) is
-  allM (\i -> allM (\j -> return (IxFun.disjoint less_thans (nonNegatives td_env) i j) ||^ return (IxFun.disjoint2 less_thans (nonNegatives td_env) i j) ||^ IxFun.disjoint3 (fmap typeOf $ scope td_env) less_thans (nonNegatives td_env) i j) js) is
-    ||^ trace ("it failed\n" <> pretty bla1 <> "\nhalløj?: " <> pretty bla2 <> "\n og: " <> pretty js) (return False)
+noMemOverlap td_env (Set is0) (Set js0)
+  | Just non_negs <- mapM (primExpFromSubExpM (basePMconv (scope td_env) (scalarTable td_env)) . Var) $ namesToList $ nonNegatives td_env = do
+    -- TODO Expand this to be able to handle eg. nw
+    bla1 <- mapM (\i -> allM (\j -> return (IxFun.disjoint less_thans (nonNegatives td_env) i j) ||^ return (IxFun.disjoint2 less_thans (nonNegatives td_env) i j) ||^ IxFun.disjoint3 (fmap typeOf $ scope td_env) less_thans non_negs i j) js) is
+    bla2 <- filterM (fmap not . \i -> allM (\j -> return (IxFun.disjoint less_thans (nonNegatives td_env) i j) ||^ return (IxFun.disjoint2 less_thans (nonNegatives td_env) i j) ||^ IxFun.disjoint3 (fmap typeOf $ scope td_env) less_thans non_negs i j) js) is
+    allM (\i -> allM (\j -> return (IxFun.disjoint less_thans (nonNegatives td_env) i j) ||^ return (IxFun.disjoint2 less_thans (nonNegatives td_env) i j) ||^ IxFun.disjoint3 (fmap typeOf $ scope td_env) less_thans non_negs i j) js) is
+      ||^ trace ("it failed\n" <> pretty less_thans <> "\n" <> pretty bla1 <> "\nhalløj?: " <> pretty bla2 <> "\n og: " <> pretty js) (return False)
   where
     less_thans = map (fmap $ fixPoint $ substituteInPrimExp $ scalarTable td_env) $ knownLessThan td_env
     is = map (fixPoint (IxFun.substituteInLMAD $ TPrimExp <$> scalarTable td_env)) $ S.toList is0
     js = map (fixPoint (IxFun.substituteInLMAD $ TPrimExp <$> scalarTable td_env)) $ S.toList js0
+noMemOverlap _ _ _ = return False
 
 -- | Suppossed to aggregate the iteration-level summaries
 --     across a loop of index i = 0 .. n-1

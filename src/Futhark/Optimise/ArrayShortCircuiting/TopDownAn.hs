@@ -14,6 +14,7 @@ module Futhark.Optimise.ArrayShortCircuiting.TopDownAn
     addInvAliassesVarTab,
     areAnyAliased,
     isInScope,
+    nonNegativesInPat,
   )
 where
 
@@ -31,10 +32,6 @@ trace _ x = x
 
 traceWith :: Pretty a => String -> a -> a
 traceWith s a = trace (s <> ": " <> pretty a) a
-
-type ScopeTab rep = Scope (Aliases rep)
--- ^ maps array-variable names to various info, including
---   types, memory block and index function, etc.
 
 type DirAlias = IxFun -> IxFun
 -- ^ A direct aliasing transformation
