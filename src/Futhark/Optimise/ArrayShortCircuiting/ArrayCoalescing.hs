@@ -13,6 +13,7 @@ import Control.Monad.Reader
 import Control.Monad.State.Strict
 import Data.Function ((&))
 import qualified Data.List as L
+import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as M
 import Data.Maybe
@@ -1346,7 +1347,7 @@ genCoalStmtInfo lutab scopetab pat (BasicOp (Update _ x slice_x (Var b)))
        in IxFun.slice ind_fun $ Slice slc_x'
 
 -- CASE b) @let x = concat(a, b^{lu})@
-genCoalStmtInfo lutab scopetab pat (BasicOp (Concat 0 b0 bs _))
+genCoalStmtInfo lutab scopetab pat (BasicOp (Concat 0 (b0 :| bs) _))
   | Pat [PatElem x (_, MemArray _ _ _ (ArrayIn m_x ind_x))] <- pat =
     case M.lookup x lutab of
       Nothing -> Nothing
