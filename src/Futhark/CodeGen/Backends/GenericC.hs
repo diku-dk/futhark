@@ -83,7 +83,6 @@ module Futhark.CodeGen.Backends.GenericC
     copyMemoryDefaultSpace,
   )
 where
-
 import Control.Monad.Identity
 import Control.Monad.Reader
 import Control.Monad.State
@@ -103,7 +102,7 @@ import Futhark.CodeGen.RTS.C (errorsH, halfH, lockH, timingH, utilH)
 import Futhark.IR.Prop (isBuiltInFunction)
 import qualified Futhark.Manifest as Manifest
 import Futhark.MonadFreshNames
-import Futhark.Util.Pretty (prettyText)
+import Futhark.Util.Pretty (prettyText, ppr, prettyCompact)
 import qualified Language.C.Quote.OpenCL as C
 import qualified Language.C.Syntax as C
 import NeatInterpolation (untrimming)
@@ -637,9 +636,13 @@ freeRawMem mem space desc =
 defineMemorySpace :: Space -> CompilerM op s ([C.Definition], [C.Definition], C.BlockItem)
 defineMemorySpace space = do
   rm <- rawMemCType space
+  let structGuard =
+        "#ifndef __ISPC_STRUCT_" ++ prettyCompact (ppr sname) ++ "__"
+  let structDefine = "#define __ISPC_STRUCT_" ++ prettyCompact (ppr sname) ++ "__"
+
   let structdef =
-        [C.cunit|$esc:("#ifndef __ISPC_STRUCT_memblock__")
-                 $esc:("#define __ISPC_STRUCT_memblock__")
+        [C.cunit|$esc:(structGuard)
+                 $esc:(structDefine)
                  struct $id:sname {
                      int *references;
                      $ty:rm mem;
