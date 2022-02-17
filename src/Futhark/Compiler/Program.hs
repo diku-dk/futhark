@@ -7,7 +7,6 @@
 module Futhark.Compiler.Program
   ( readLibrary,
     readUntypedLibrary,
-    readImports,
     Imports,
     FileModule (..),
     E.Warnings,
@@ -236,23 +235,6 @@ readLibrary ::
 readLibrary extra_eps fps =
   typeCheckProgram emptyBasis . setEntryPoints (E.defaultEntryPoint : extra_eps) fps
     =<< readUntypedLibrary fps
-
--- | Read and type-check Futhark imports (no @.fut@ extension; may
--- refer to baked-in prelude).  This is an exotic operation that
--- probably only makes sense in an interactive environment.
-readImports ::
-  (MonadError CompilerError m, MonadIO m) =>
-  Basis ->
-  [ImportName] ->
-  m
-    ( E.Warnings,
-      Imports,
-      VNameSource
-    )
-readImports basis imps = do
-  state_mvar <- liftIO newState
-  files <- orderedImports . zip imps =<< liftIO (mapM (readImport state_mvar []) imps)
-  typeCheckProgram basis files
 
 prependRoots :: [FilePath] -> E.UncheckedProg -> E.UncheckedProg
 prependRoots roots (E.Prog doc ds) =

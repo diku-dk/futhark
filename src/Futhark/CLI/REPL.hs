@@ -264,38 +264,31 @@ getIt = do
   return (imports, src, tenv, ienv)
 
 onDec :: UncheckedDec -> FutharkiM ()
-onDec d = do
-  (imports, src, tenv, ienv) <- getIt
-  cur_import <- gets $ T.mkInitialImport . fromMaybe "." . futharkiLoaded
+onDec d
+  | not $ null $ decImports d = liftIO $ do
+    putStrLn "'import' is not allowed in 'futhark repl'."
+    putStrLn "Use :load instead."
+  | otherwise = do
+    (imports, src, tenv, ienv) <- getIt
+    cur_import <- gets $ T.mkInitialImport . fromMaybe "." . futharkiLoaded
 
-  -- Most of the complexity here concerns the dealing with the fact
-  -- that 'import "foo"' is a declaration.  We have to involve a lot
-  -- of machinery to load this external code before executing the
-  -- declaration itself.
-  let basis = Basis imports src
-      mkImport = uncurry $ T.mkImportFrom cur_import
-  imp_r <- runExceptT $ readImports basis (map mkImport $ decImports d)
-
-  case imp_r of
-    Left e -> liftIO $ print e
-    Right (_, imports', src') ->
-      case T.checkDec imports' src' tenv cur_import d of
-        (_, Left e) -> liftIO $ putStrLn $ pretty e
-        (_, Right (tenv', d', src'')) -> do
-          let new_imports = filter ((`notElem` map fst imports) . fst) imports'
-          int_r <- runInterpreter $ do
-            let onImport ienv' (s, imp) =
-                  I.interpretImport ienv' (s, T.fileProg imp)
-            ienv' <- foldM onImport ienv new_imports
-            I.interpretDec ienv' d'
-          case int_r of
-            Left err -> liftIO $ print err
-            Right ienv' -> modify $ \s ->
-              s
-                { futharkiEnv = (tenv', ienv'),
-                  futharkiImports = imports',
-                  futharkiNameSource = src''
-                }
+    case T.checkDec imports src tenv cur_import d of
+      (_, Left e) -> liftIO $ putStrLn $ pretty e
+      (_, Right (tenv', d', src')) -> do
+        let new_imports = filter ((`notElem` map fst imports) . fst) imports
+        int_r <- runInterpreter $ do
+          let onImport ienv' (s, imp) =
+                I.interpretImport ienv' (s, T.fileProg imp)
+          ienv' <- foldM onImport ienv new_imports
+          I.interpretDec ienv' d'
+        case int_r of
+          Left err -> liftIO $ print err
+          Right ienv' -> modify $ \s ->
+            s
+              { futharkiEnv = (tenv', ienv'),
+                futharkiImports = imports,
+                futharkiNameSource = src'
+              }
 
 onExp :: UncheckedExp -> FutharkiM ()
 onExp e = do
