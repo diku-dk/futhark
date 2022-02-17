@@ -10,8 +10,6 @@ module Futhark.Compiler.Program
     Imports,
     FileModule (..),
     E.Warnings,
-    Basis (..),
-    emptyBasis,
   )
 where
 
