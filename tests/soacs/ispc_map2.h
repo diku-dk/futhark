@@ -42,7 +42,7 @@ struct memblock {
 #if defined(__cplusplus) && (! defined(__ISPC_NO_EXTERN_C) || !__ISPC_NO_EXTERN_C )
 extern "C" {
 #endif // __cplusplus
-    extern void futhark_mc_segmap_ispc_4606(int64_t start, int64_t end, int32_t subtask_id, int64_t dz2080U_4583, struct memblock * a_mem_4590, struct memblock * mem_4593);
+    extern void futhark_mc_loop_ispc_4607(int64_t dz2080U_4583, struct memblock * a_mem_4590, struct memblock * mem_4593, int64_t start_4596, int64_t n_4598);
 #if defined(__cplusplus) && (! defined(__ISPC_NO_EXTERN_C) || !__ISPC_NO_EXTERN_C )
 } /* end extern C */
 #endif // __cplusplus

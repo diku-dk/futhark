@@ -668,6 +668,9 @@ compileOp (ForEach i bound body free) = do
       [C.cedecl|auto static void $id:s($params:inputs) {
                        $items:loopBody
                      }|]
+
+  let ispc_inputs = compileIspcInputs free_args free_ctypes
+  GC.stm [C.cstm|$id:_ispcLoop($args:ispc_inputs);|]
   pure ()
 
 
@@ -693,7 +696,6 @@ compileOp (ParLoop s' body free) = do
 
         GC.decl [C.cdecl|typename int64_t iterations = end-start;|]
 
-        GC.decl [C.cdecl|typename int64_t PLACEHOLDER = 0;|]
         body' <- GC.collect $ GC.compileCode body
 
         mapM_ GC.item decl_cached

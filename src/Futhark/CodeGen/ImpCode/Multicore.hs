@@ -19,6 +19,7 @@ import Futhark.CodeGen.ImpCode hiding (Code, Function)
 import qualified Futhark.CodeGen.ImpCode as Imp
 import Futhark.Util.Pretty
 import Debug.Trace
+import Futhark.IR.Prop.Names (FV)
 
 -- | An imperative program.
 type Program = Imp.Functions Multicore
@@ -146,4 +147,7 @@ instance FreeIn Multicore where
   freeIn' (ParLoop _ body _) =
     freeIn' body
   freeIn' (Atomic aop) = freeIn' aop
-  freeIn' (ForEach _ bound body _) = freeIn' body <> freeIn' bound--TODO(Louis):  Maybe add more logic to free vars
+  freeIn' (ForEach i bound body _) =
+    let a = unFV (freeIn' body <> freeIn' bound) in
+    let b = filter (/= i) (namesToList a) in
+    fvNames (namesFromList b)

@@ -218,8 +218,7 @@ runISPC ispcpath cpath outpath ispc_flags cflags_def ldflags = do
       runProgramWithExitCode
         cmdCC
         ( ["ispc_" ++ (outpath `addExtension` "h"),
-           "ispc_" ++ (outpath `addExtension` "o"),
-           cpath, "-o", outpath
+           "ispc_" ++ (outpath `addExtension` "o"), cpath--, "-o", outpath
           ]
             ++ cmdCFLAGS cflags_def
             ++

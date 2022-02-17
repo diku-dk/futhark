@@ -2644,25 +2644,12 @@ struct memblock {
 #define memblock_ref memblock * uniform
 #define auto export
 
-auto static void futhark_mc_segmap_ispc_4606(register int64_t start, register
-                                             int64_t end, register
-                                             int subtask_id, register
-                                             int64_t dz2080U_4583, register
-                                             memblock_ref a_mem_4590, register
-                                             memblock_ref mem_4593)
+auto static void futhark_mc_loop_ispc_4607(register int64_t dz2080U_4583,
+                                           register memblock_ref a_mem_4590,
+                                           register memblock_ref mem_4593,
+                                           register int64_t start_4596, register
+                                           int64_t n_4598)
 {
-    int64_t flat_tid_4588;
-    
-    flat_tid_4588 = subtask_id;
-    
-    int64_t start_4596;
-    int64_t end_4597;
-    
-    start_4596 = start;
-    end_4597 = end;
-    
-    int64_t n_4598 = end_4597 - start_4596;
-    
     futhark_foreach (int64_t, SegMap_i_4599, n_4598) {
         int64_t slice_4600 = dz2080U_4583;
         int64_t gtid_4589 = start_4596 + SegMap_i_4599;
