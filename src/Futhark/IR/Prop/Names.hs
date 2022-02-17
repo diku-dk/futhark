@@ -52,7 +52,6 @@ import Futhark.IR.Syntax
 import Futhark.IR.Traversals
 import Futhark.Util.Pretty
 import Prelude hiding (id, (.))
-
 -- | A set of names.  Note that the 'Ord' instance is a dummy that
 -- treats everything as 'EQ' if '==', and otherwise 'LT'.
 newtype Names = Names (IM.IntMap VName)
@@ -108,6 +107,7 @@ mapNames f vs = namesFromList $ map f $ namesToList vs
 
 -- | A computation to build a free variable set.
 newtype FV = FV {unFV :: Names}
+  deriving(Show)
 
 -- Right now the variable set is just stored explicitly, without the
 -- fancy functional representation that GHC uses.  Turns out it's
@@ -183,7 +183,7 @@ class FreeIn a where
 
 -- | The free variables of some syntactic construct.
 freeIn :: FreeIn a => a -> Names
-freeIn = unFV . freeIn'
+freeIn = unFV  .  freeIn'
 
 instance FreeIn FV where
   freeIn' = id

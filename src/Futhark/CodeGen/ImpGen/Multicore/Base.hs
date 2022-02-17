@@ -245,7 +245,14 @@ generateChunkLoop desc m = do
       addLoopVar i Int64
       m $ start + Imp.le64 i
   emit body_allocs
-  emit $ Imp.ForEach i (untyped n) body
+  -- We need to gather the free variables in both the bound expression and the body
+  let bound = untyped n
+  free_params_bound <- freeParams bound
+  free_params_body <- freeParams body
+  -- But we don't want to include the loop index, since is being bound in this expression
+  let free_final = filter (\x -> Imp.paramName x /= i) (free_params_body <> free_params_bound)
+  -- TODO(Louis): Add call to ISPC func here
+  emit $ Imp.Op $ Imp.ForEach i bound body free_final
 
 -------------------------------
 ------- SegHist helpers -------

@@ -18,6 +18,7 @@ where
 import Futhark.CodeGen.ImpCode hiding (Code, Function)
 import qualified Futhark.CodeGen.ImpCode as Imp
 import Futhark.Util.Pretty
+import Debug.Trace
 
 -- | An imperative program.
 type Program = Imp.Functions Multicore
@@ -32,6 +33,8 @@ type Code = Imp.Code Multicore
 data Multicore
   = SegOp String [Param] ParallelTask (Maybe ParallelTask) [Param] SchedulerInfo
   | ParLoop String Code [Param]
+  | -- | ForEach in ISPC
+    ForEach VName Exp Code [Param]
   | -- | Retrieve inclusive start and exclusive end indexes of the
     -- chunk we are supposed to be executing.  Only valid immediately
     -- inside a 'ParLoop' construct!
@@ -120,6 +123,10 @@ instance Pretty Multicore where
             nestedBlock "body {" "}" (ppr body)
           ]
   ppr (Atomic _) = "AtomicOp"
+  ppr (ForEach i limit body _) =
+    text "foreach" <+> ppr i <+> langle <+> ppr limit <+> text "{"
+      </> indent 2 (ppr body)
+      </> text "}"
 
 instance FreeIn SchedulerInfo where
   freeIn' (SchedulerInfo iter _) = freeIn' iter
@@ -139,3 +146,4 @@ instance FreeIn Multicore where
   freeIn' (ParLoop _ body _) =
     freeIn' body
   freeIn' (Atomic aop) = freeIn' aop
+  freeIn' (ForEach _ bound body _) = freeIn' body <> freeIn' bound--TODO(Louis):  Maybe add more logic to free vars
