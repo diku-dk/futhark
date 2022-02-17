@@ -2152,18 +2152,6 @@ compileCode (For i bound body) = do
     [C.cstm|for ($ty:t $id:i' = 0; $id:i' < $exp:bound'; $id:i'++) {
             $items:body'
           }|]
-compileCode (ForEach i bound body) = do
-  let t = primTypeToCType $ primExpType bound
-  bound' <- compileExp bound
-  body' <- collect $ compileCode body
-  let pi' = pretty i
-  let ptype = pretty t
-  let pbound = pretty bound'
-  let pbody = pretty body'
-  let macro = "futhark_foreach (" <> ptype <> ", " <> pi' <> ", " <> pbound <> ") "
-              <> T.unpack (T.replace "\n" "\n    " $ T.pack pbody)
-  stm
-    [C.cstm|$escstm:macro|]
 compileCode (While cond body) = do
   cond' <- compileExp $ untyped cond
   body' <- collect $ compileCode body

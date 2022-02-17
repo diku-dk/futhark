@@ -199,11 +199,6 @@ data Code a
     -- have the same (integer) type as the bound.  The bound
     -- is evaluated just once, before the loop is entered.
     For VName Exp (Code a)
-  | -- | A chunked foreach loop iterating the given number of times.
-    -- The loop parameter starts counting from zero and will
-    -- have the same (integer) type as the bound.  The bound
-    -- is evaluated just once, before the loop is entered.
-    ForEach VName Exp (Code a) -- TODO(pema): Move this to multicore?
   | -- | While loop.  The conditional is (of course)
     -- re-evaluated before every iteration of the loop.
     While (TExp Bool) (Code a)
@@ -452,10 +447,6 @@ instance Pretty op => Pretty (Code op) where
     text "for" <+> ppr i <+> langle <+> ppr limit <+> text "{"
       </> indent 2 (ppr body)
       </> text "}"
-  ppr (ForEach i limit body) =
-    text "foreach" <+> ppr i <+> langle <+> ppr limit <+> text "{"
-      </> indent 2 (ppr body)
-      </> text "}"
   ppr (While cond body) =
     text "while" <+> ppr cond <+> text "{"
       </> indent 2 (ppr body)
@@ -564,8 +555,8 @@ instance Traversable Code where
     (:>>:) <$> traverse f x <*> traverse f y
   traverse f (For i bound code) =
     For i bound <$> traverse f code
-  traverse f (ForEach i bound code) =
-    ForEach i bound <$> traverse f code
+  --traverse f (ForEach i bound code) =
+  --  ForEach i bound <$> traverse f code
   traverse f (While cond code) =
     While cond <$> traverse f code
   traverse f (If cond x y) =
@@ -643,8 +634,8 @@ instance FreeIn a => FreeIn (Code a) where
     mempty
   freeIn' (For i bound body) =
     fvBind (oneName i) $ freeIn' bound <> freeIn' body
-  freeIn' (ForEach i bound body) =
-    fvBind (oneName i) $ freeIn' bound <> freeIn' body
+ {- freeIn' (ForEach i bound body) =
+    fvBind (oneName i) $ freeIn' bound <> freeIn' body -}
   freeIn' (While cond body) =
     freeIn' cond <> freeIn' body
   freeIn' (DeclareMem _ space) =

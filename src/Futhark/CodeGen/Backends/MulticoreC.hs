@@ -32,6 +32,7 @@ import Futhark.MonadFreshNames
 import qualified Language.C.Quote.OpenCL as C
 import qualified Language.C.Syntax as C
 
+
 -- | Compile the program to ImpCode with multicore operations.
 compileProg ::
   MonadFreshNames m => T.Text -> Prog MCMem -> m (ImpGen.Warnings, GC.CParts)
@@ -626,6 +627,42 @@ compileOp (SegOp name params seq_task par_task retvals (SchedulerInfo e sched)) 
 
   -- Add profile fields for -P option
   mapM_ GC.profileReport $ multiCoreReport $ (fpar_task, True) : fnpar_task
+
+compileOp (ForEach i bound body free) = do 
+  free_ctypes <- mapM paramToCType free
+  let free_args = map paramName free
+
+  let lexical = lexicalMemoryUsage $ Function Nothing [] free body [] []
+
+  let inputs = compileKernelInputs free_args free_ctypes
+
+  let t = primTypeToCType $ primExpType bound
+  bound' <- GC.compileExp bound
+  body' <- GC.collect $ GC.compileCode body
+  let pi' = pretty i
+  let ptype = pretty t
+  let pbound = pretty bound'
+  let pbody = pretty body'
+  let macro = "futhark_foreach (" <> ptype <> ", " <> pi' <> ", " <> pbound <> ") "
+              <> T.unpack (T.replace "\n" "\n    " $ T.pack pbody)
+  let stm = [C.cstm|$escstm:macro|]
+
+  _ispcLoop <- ispcDef "loop_ispc" $ \s -> do
+    loopBody <- GC.inNewFunction $
+      GC.collect $ do
+        --GC.decl [C.cdecl|typename int64_t iterations = end-start;|]
+
+        GC.stm stm
+
+        --mapM_ GC.item =<< GC.declAllocatedMem
+        --mapM_ GC.item body'
+    return
+      [C.cedecl|auto static void $id:s($params:inputs) {
+                       $items:loopBody
+                     }|]
+  pure ()
+
+
 compileOp (ParLoop s' body free) = do
   free_ctypes <- mapM paramToCType free
   let free_args = map paramName free
@@ -637,19 +674,7 @@ compileOp (ParLoop s' body free) = do
   fstruct <-
     prepareTaskStruct (s' ++ "_parloop_struct") free_args free_ctypes mempty mempty
 
-  _ispcLoop <- ispcDef (s' ++ "_ispc") $ \s -> do
-    loopBody <- GC.inNewFunction $
-      GC.collect $ do
-        --GC.decl [C.cdecl|typename int64_t iterations = end-start;|]
 
-        body' <- GC.collect $ GC.compileCode body
-
-        mapM_ GC.item =<< GC.declAllocatedMem
-        mapM_ GC.item body'
-    return
-      [C.cedecl|auto static void $id:s(register typename int64_t start, register typename int64_t end, register int subtask_id, $params:inputs) {
-                       $items:loopBody
-                     }|]
 
   ftask <- multicoreDef (s' ++ "_parloop") $ \s -> do
     fbody <- benchmarkCode s (Just "tid") <=< GC.inNewFunction $
@@ -661,12 +686,12 @@ compileOp (ParLoop s' body free) = do
         GC.decl [C.cdecl|typename int64_t iterations = end-start;|]
 
         GC.decl [C.cdecl|typename int64_t PLACEHOLDER = 0;|]
-        -- body' <- GC.collect $ GC.compileCode body
+        body' <- GC.collect $ GC.compileCode body
 
         mapM_ GC.item decl_cached
         mapM_ GC.item =<< GC.declAllocatedMem
         free_mem <- GC.freeAllocatedMem
-        -- mapM_ GC.item body'
+        mapM_ GC.item body'
         GC.stm [C.cstm|cleanup: {$stms:free_cached $items:free_mem}|]
     return
       [C.cedecl|static int $id:s(void *args, typename int64_t start, typename int64_t end, int subtask_id, int tid) {
