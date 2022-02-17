@@ -1372,14 +1372,23 @@ fullyIndexArray' (MemLoc mem _ ixfun) indices = do
 -- More complicated read/write operations that use index functions.
 
 copy :: CopyCompiler rep r op
-copy bt dest src =
-  unless
-    ( memLocName dest == memLocName src
-        && memLocIxFun dest `IxFun.equivalent` memLocIxFun src
-    )
-    $ do
-      cc <- asks envCopyCompiler
-      cc bt dest src
+copy
+  bt
+  dst@(MemLoc dst_name _ dst_ixfn@(IxFun.IxFun dst_lmads@(dst_lmad :| _) _ _))
+  src@(MemLoc src_name _ src_ixfn@(IxFun.IxFun src_lmads@(src_lmad :| _) _ _)) = do
+    -- If we can statically determine that the two index-functions
+    -- are equivalent, don't do anything
+    unless (dst_name == src_name && dst_ixfn `IxFun.equivalent` src_ixfn) $
+      -- It's also possible that we can dynamically determine that the two
+      -- index-functions are equivalent.
+      sUnless
+        ( fromBool (dst_name == src_name && length dst_lmads == 1 && length src_lmads == 1)
+            .&&. IxFun.dynamicEqualsLMAD dst_lmad src_lmad
+        )
+        $ do
+          -- If none of the above is true, actually do the copy
+          cc <- asks envCopyCompiler
+          cc bt dst src
 
 -- | Is this copy really a mapping with transpose?
 isMapTransposeCopy ::

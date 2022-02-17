@@ -29,6 +29,7 @@ module Futhark.IR.Mem.IxFun
     existentialize,
     closeEnough,
     equivalent,
+    dynamicEqualsLMAD,
   )
 where
 
@@ -43,11 +44,6 @@ import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as M
 import Data.Maybe (isJust)
 import Futhark.Analysis.PrimExp
-  ( IntExp,
-    PrimExp (..),
-    TPrimExp (..),
-    primExpType,
-  )
 import Futhark.Analysis.PrimExp.Convert (substituteInPrimExp)
 import qualified Futhark.Analysis.PrimExp.Generalize as PEG
 import Futhark.IR.Prop
@@ -1067,3 +1063,25 @@ equivalent ixf1 ixf2 =
         == map ldStride (lmadDims lmad2)
         && map ldRotate (lmadDims lmad1)
         == map ldRotate (lmadDims lmad2)
+
+-- | Dynamically determine if two 'LMADDim' are equal.
+--
+-- True if the dynamic values of their constituents are equal.
+dynamicEqualsLMADDim :: Eq num => LMADDim (TPrimExp t num) -> LMADDim (TPrimExp t num) -> TPrimExp Bool num
+dynamicEqualsLMADDim dim1 dim2 =
+  ldStride dim1 .==. ldStride dim2
+    .&&. ldRotate dim1 .==. ldRotate dim2
+    .&&. ldShape dim1 .==. ldShape dim2
+    .&&. fromBool (ldPerm dim1 == ldPerm dim2)
+    .&&. fromBool (ldMon dim1 == ldMon dim2)
+
+-- | Dynamically determine if two 'LMAD' are equal.
+--
+-- True if offset and constituent 'LMADDim' are equal.
+dynamicEqualsLMAD :: Eq num => LMAD (TPrimExp t num) -> LMAD (TPrimExp t num) -> TPrimExp Bool num
+dynamicEqualsLMAD lmad1 lmad2 =
+  lmadOffset lmad1 .==. lmadOffset lmad2
+    .&&. foldr
+      ((.&&.) . uncurry dynamicEqualsLMADDim)
+      true
+      (zip (lmadDims lmad1) (lmadDims lmad2))
