@@ -61,6 +61,7 @@ import System.Directory
 import System.Exit
 import System.FilePath
 import qualified System.Info
+import Debug.Trace (traceShowId)
 
 -- | Print the result to stdout.
 printAction :: ASTRep rep => Action rep
@@ -201,16 +202,29 @@ runCC cpath outpath cflags_def ldflags = do
           ++ gccerr
     Right (ExitSuccess, _, _) ->
       return ()
-runISPC :: String -> String -> [String] -> [String] -> FutharkM ()
-runISPC ispcpath outpath cflags_def ldflags = do
-  ret <-
+runISPC :: String -> String -> String -> [String] -> [String] -> [String] -> FutharkM ()
+runISPC ispcpath cpath outpath ispc_flags cflags_def ldflags = do
+  ret_ispc <-
     liftIO $
       runProgramWithExitCode
         "ispc"
-        ( [ispcpath, "-o", outpath] ++
-          cmdCFLAGS cflags_def ++
-          ["-h", "ispc_" <> outpath `addExtension` "h"] ++
-          ldflags
+        ( [ispcpath, "-o", "ispc_" <> outpath `addExtension` "o"] ++
+          cmdCFLAGS ispc_flags ++
+          ["-h", "ispc_" <> outpath `addExtension` "h"]
+        )
+        mempty
+  ret <- -- TODO(kris): Clean this shit up
+    liftIO $
+      runProgramWithExitCode
+        cmdCC
+        ( ["ispc_" ++ (outpath `addExtension` "h"),
+           "ispc_" ++ (outpath `addExtension` "o"),
+           cpath, "-o", outpath
+          ]
+            ++ cmdCFLAGS cflags_def
+            ++
+            -- The default LDFLAGS are always added.
+            ldflags
         )
         mempty
   case ret of
@@ -223,7 +237,17 @@ runISPC ispcpath outpath cflags_def ldflags = do
           ++ ":\n"
           ++ gccerr
     Right (ExitSuccess, _, _) ->
-      return ()
+      case ret_ispc of
+        Left err ->
+          externalErrorS $ "Failed to run " ++ "ispc" ++ ": " ++ show err
+        Right (ExitFailure code, _, gccerr) ->
+          externalErrorS $
+            cmdCC ++ " failed with code "
+              ++ show code
+              ++ ":\n"
+              ++ gccerr
+        Right (ExitSuccess, _, _) ->
+          return ()
 
 -- | The @futhark c@ action.
 compileCAction :: FutharkConfig -> CompilerMode -> FilePath -> Action SeqMem
@@ -347,8 +371,8 @@ compileMulticoreAction fcfg mode outpath =
           let (c, ispc) = MulticoreC.asISPCExecutable cprog
           liftIO $ T.writeFile cpath $ cPrependHeader $ c
           liftIO $ T.writeFile ispcPath $ ispc
-          runISPC ispcPath outpath ["-O3"] []
-          runCC cpath outpath ["-O3", "-std=c99"] ["-lm", "-pthread"]
+          runISPC ispcPath cpath outpath ["-O3"] ["-O3", "-std=c99"] ["-lm", "-pthread"]
+          --runCC cpath outpath ["-O3", "-std=c99"] ["-lm", "-pthread"]
         ToServer -> do
           liftIO $ T.writeFile cpath $ cPrependHeader $ MulticoreC.asServer cprog
           runCC cpath outpath ["-O3", "-std=c99"] ["-lm", "-pthread"]

@@ -31,6 +31,8 @@ import Futhark.IR.MCMem (MCMem, Prog)
 import Futhark.MonadFreshNames
 import qualified Language.C.Quote.OpenCL as C
 import qualified Language.C.Syntax as C
+import Futhark.Util.Pretty (prettyCompact)
+import Language.Haskell.TH (fieldExp)
 
 -- | Compile the program to ImpCode with multicore operations.
 compileProg ::
@@ -267,6 +269,12 @@ compileKernelInputs = zipWith field
       [C.cparam|register $ty:ty $id:(getName name)|]
     field name (_, _) =
       [C.cparam|register typename memblock_ref $id:(getName name)|]
+compileIspcInputs :: [VName] -> [(C.Type, ValueType)] -> [C.Exp]
+compileIspcInputs = zipWith field
+  where
+    getName name = nameFromString (pretty name)
+    field name (ty, Prim) = [C.cexp|$id:(getName name)|]
+    field name (_, _) = [C.cexp|&$id:(getName name)|]
 
 compileFreeStructFields :: [VName] -> [(C.Type, ValueType)] -> [C.FieldGroup]
 compileFreeStructFields = zipWith field
@@ -659,8 +667,9 @@ compileOp (ParLoop s' body free) = do
           [C.citems|$decls:(compileGetStructVals fstruct free_args free_ctypes)|]
 
         GC.decl [C.cdecl|typename int64_t iterations = end-start;|]
-
-        GC.decl [C.cdecl|typename int64_t PLACEHOLDER = 0;|]
+        let ispc_inputs = compileIspcInputs free_args free_ctypes
+        GC.stm [C.cstm|$id:_ispcLoop(start, end, subtask_id, $args:ispc_inputs);|]
+        --GC.decl [C.cdecl|typename int64_t PLACEHOLDER = 0;|]
         -- body' <- GC.collect $ GC.compileCode body
 
         mapM_ GC.item decl_cached
