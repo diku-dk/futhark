@@ -102,6 +102,7 @@ module Futhark.IR.Primitive
     intByteSize,
     floatByteSize,
     commutativeBinOp,
+    associativeBinOp,
 
     -- * Prettyprinting
     convOpFun,
@@ -1692,6 +1693,23 @@ commutativeBinOp UMin {} = True
 commutativeBinOp FMax {} = True
 commutativeBinOp FMin {} = True
 commutativeBinOp _ = False
+
+-- | True if the given binary operator is associative.
+associativeBinOp :: BinOp -> Bool
+associativeBinOp Add {} = True
+associativeBinOp Mul {} = True
+associativeBinOp And {} = True
+associativeBinOp Or {} = True
+associativeBinOp Xor {} = True
+associativeBinOp LogOr {} = True
+associativeBinOp LogAnd {} = True
+associativeBinOp SMax {} = True
+associativeBinOp SMin {} = True
+associativeBinOp UMax {} = True
+associativeBinOp UMin {} = True
+associativeBinOp FMax {} = True
+associativeBinOp FMin {} = True
+associativeBinOp _ = False
 
 -- Prettyprinting instances
 
