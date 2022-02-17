@@ -1372,14 +1372,37 @@ fullyIndexArray' (MemLoc mem _ ixfun) indices = do
 -- More complicated read/write operations that use index functions.
 
 copy :: CopyCompiler rep r op
-copy bt dest src =
-  unless
-    ( memLocName dest == memLocName src
-        && memLocIxFun dest `IxFun.equivalent` memLocIxFun src
-    )
-    $ do
-      cc <- asks envCopyCompiler
-      cc bt dest src
+copy
+  bt
+  dst@(MemLoc dst_name _ dst_ixfn@(IxFun.IxFun dst_lmads@(dst_lmad :| _) _ _))
+  src@(MemLoc src_name _ src_ixfn@(IxFun.IxFun src_lmads@(src_lmad :| _) _ _)) = do
+    -- If we can statically determine that the two index-functions
+    -- are equivalent, don't do anything
+    unless (dst_name == src_name && dst_ixfn `IxFun.equivalent` src_ixfn) $ do
+      -- It's also possible that we can dynamically determine that the two
+      -- index-functions are equivalent.
+      --
+      -- For that to be true, we require that they only have one lmad each, and
+      -- that the dimensions match exactly.
+      sUnless
+        ( fromBool (dst_name == src_name && length dst_lmads == 1 && length src_lmads == 1)
+            .&&. IxFun.lmadOffset dst_lmad .==. IxFun.lmadOffset src_lmad
+            .&&. foldl
+              ( \acc (dim1, dim2) ->
+                  acc
+                    .&&. IxFun.ldStride dim1 .==. IxFun.ldStride dim2
+                    .&&. IxFun.ldRotate dim1 .==. IxFun.ldRotate dim2
+                    .&&. IxFun.ldShape dim1 .==. IxFun.ldShape dim2
+                    .&&. (fromBool $ IxFun.ldPerm dim1 == IxFun.ldPerm dim2)
+                    .&&. (fromBool $ IxFun.ldMon dim1 == IxFun.ldMon dim2)
+              )
+              true
+              (zip (IxFun.lmadDims dst_lmad) (IxFun.lmadDims src_lmad))
+        )
+        $ do
+          -- If none of the above is true, actually do the copy
+          cc <- asks envCopyCompiler
+          cc bt dst src
 
 -- | Is this copy really a mapping with transpose?
 isMapTransposeCopy ::
