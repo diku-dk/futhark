@@ -651,6 +651,7 @@ graphStm stm = do
   case e of
     BasicOp SubExp {} -> graphSimple bs e
     BasicOp Opaque {} -> graphSimple bs e
+    BasicOp (ArrayLit [] _) -> graphSimple bs e
     BasicOp ArrayLit {} ->
       -- Migrating an array literal of n elements saves n synchronous writes.
       graphAutoMove (one bs)
@@ -1082,39 +1083,6 @@ graphAcc i types op delayed = do
       createNode (i, Prim Unit) ops
       forM_ delayed $
         \(b, e) -> graphedScalarOperands e >>= createNode b . IS.insert i
-
--- | @censorRoutes si ops@ routes all possible routes within the subgraph
--- identified by @si@ and then connects each operand in @ops@ to a sink if it
--- can reach a subgraph sink.
---
--- Assumption: The subgraph with the given id has just been created and no path
--- exists from it to an external sink.
-censorRoutes :: Id -> Operands -> Grapher ()
-censorRoutes si ops = do
-  _ <- routeSubgraph si
-  -- Connect operands to sinks if they can reach a sink within the subgraph.
-  -- This ensures additional reads cannot occur by delaying any reads into it.
-  g <- getGraph
-  foldM_ (sinker g) MG.none (IS.elems ops)
-  where
-    sinker g vs i
-      | Just v <- MG.get i g,
-        ToNodes es _ <- vertexEdges v =
-        do
-          let (sinkFound, vs') = foldl' (findSink g) (False, vs) (IS.elems es)
-          when sinkFound (connectToSink i)
-          pure vs'
-      | otherwise =
-        pure vs -- shouldn't happen
-    findSink g (sinkFound, vs) i
-      | not sinkFound,
-        Just v <- MG.get i g,
-        Just gid <- metaGraphId (vertexMeta v),
-        gid == si -- only search the subgraph
-        =
-        MG.canReachSink g vs Normal i
-      | otherwise =
-        (sinkFound, vs)
 
 -- Returns for an expression all scalar operands used outside a kernel and which
 -- have a vertex representation in the graph, excluding those that have been
