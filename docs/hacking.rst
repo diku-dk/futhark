@@ -36,9 +36,15 @@ here are a few hints:
     Guide.
 
   * You may wish to set the environment variable
-    ``FUTHARK_COMPILER_DEBUGGING=1``.  Currently this only has the
-    effect of making the frontend print internal names, but it may
-    control more things in the future.
+    ``FUTHARK_COMPILER_DEBUGGING=1``.  This has the following
+    effects:
+
+    * The frontend prints internal names.  (This may affect code
+      generation in some cases, so turn it off when actually
+      generating code.)
+
+    * Tools that talk to server-mode executables will print the
+      messages sent back and worth on the standard error stream.
 
 .. _`stack`: https://docs.haskellstack.org/en/stable/README/
 .. _`Profiling`: https://downloads.haskell.org/~ghc/latest/docs/html/users_guide/profiling.html
@@ -93,6 +99,43 @@ For debugging specific compiler passes, the ``futhark dev`` subcommand
 allows you to tailor your own compilation pipeline using command line
 options.  It is also useful for seeing what the AST looks like after
 specific passes.
+
+Running compiler pipelines
+--------------------------
+
+You can run the various compiler passes in whatever order you wish.
+There are also various shorthands for running entire standard
+pipelines:
+
+* ``--gpu``: pipeline used for GPU backends (stopping just
+  before adding memory information).
+
+* ``--gpu-mem``: pipeline used for GPU backends, with memory
+  information.  This will show the IR that is passed to ImpGen.
+
+* ``--seq``: pipeline used for sequential backends (stopping just
+  before adding memory information).
+
+* ``--seq-mem``: pipeline used for sequential backends, with memory
+  information.  This will show the IR that is passed to ImpGen.
+
+* ``--mc``: pipeline used for multicore backends (stopping just
+  before adding memory information).
+
+* ``--mc-mem``: pipeline used for multicore backends, with memory
+  information.  This will show the IR that is passed to ImpGen.
+
+By default, ``futhark dev`` will print the resulting IR.  You can
+switch to a different *action* with one of the following options:
+
+* ``--compile-imperative``: generate sequential ImpCode and print it.
+
+* ``--compile-imperative-kernels``: generate GPU ImpCode and print it.
+
+* ``--compile-imperative-multicore``: generate multicore ImpCode and print it.
+
+You must use the appropriate pipeline as well (e.g. ``--gpu-mem`` for
+``--compile-imperative-kernels``).
 
 When you are about to have a bad day
 ------------------------------------
