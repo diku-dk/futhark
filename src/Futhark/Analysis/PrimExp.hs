@@ -23,6 +23,7 @@ module Futhark.Analysis.PrimExp
     leafExpTypes,
     true,
     false,
+    fromBool,
     constFoldPrimExp,
 
     -- * Construction
@@ -586,6 +587,10 @@ primExpIntType e = case primExpType e of
 true, false :: TPrimExp Bool v
 true = TPrimExp $ ValueExp $ BoolValue True
 false = TPrimExp $ ValueExp $ BoolValue False
+
+-- | Conversion from Bool to 'TPrimExp'
+fromBool :: Bool -> TPrimExp Bool v
+fromBool b = if b then true else false
 
 -- | Boolean negation smart constructor.
 bNot :: TPrimExp Bool v -> TPrimExp Bool v
