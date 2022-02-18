@@ -27,6 +27,7 @@ module Futhark.Util
     hashText,
     unixEnvironment,
     isEnvVarAtLeast,
+    startupTime,
     fancyTerminal,
     runProgramWithExitCode,
     directoryContents,
@@ -46,6 +47,7 @@ module Futhark.Util
     toPOSIX,
     trim,
     pmapIO,
+    interactWithFileSafely,
     readFileSafely,
     convFloat,
     UserString,
@@ -76,6 +78,7 @@ import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import qualified Data.Text.Encoding.Error as T
 import qualified Data.Text.IO as T
+import Data.Time.Clock (UTCTime, getCurrentTime)
 import Data.Tuple (swap)
 import Numeric
 import qualified System.Directory.Tree as Dir
@@ -199,6 +202,13 @@ isEnvVarAtLeast s x =
   case readMaybe =<< lookup s unixEnvironment of
     Just y -> y >= x
     _ -> False
+
+{-# NOINLINE startupTime #-}
+
+-- | The time at which the process started - or more accurately, the
+-- first time this binding was forced.
+startupTime :: UTCTime
+startupTime = unsafePerformIO getCurrentTime
 
 {-# NOINLINE fancyTerminal #-}
 
@@ -355,17 +365,23 @@ pmapIO concurrency f elems = do
         Left err -> throw (err :: SomeException)
         Right v -> pure v
 
--- | Read a file, returning 'Nothing' if the file does not exist, and
--- 'Left' if some other error occurs.
-readFileSafely :: FilePath -> IO (Maybe (Either String T.Text))
-readFileSafely filepath =
-  (Just . Right <$> T.readFile filepath) `catch` couldNotRead
+-- | Do some operation on a file, returning 'Nothing' if the file does
+-- not exist, and 'Left' if some other error occurs.
+interactWithFileSafely :: IO a -> IO (Maybe (Either String a))
+interactWithFileSafely m =
+  (Just . Right <$> m) `catch` couldNotRead
   where
     couldNotRead e
       | isDoesNotExistError e =
         return Nothing
       | otherwise =
         return $ Just $ Left $ show e
+
+-- | Read a file, returning 'Nothing' if the file does not exist, and
+-- 'Left' if some other error occurs.
+readFileSafely :: FilePath -> IO (Maybe (Either String T.Text))
+readFileSafely filepath =
+  interactWithFileSafely $ T.readFile filepath
 
 -- | Convert between different floating-point types, preserving
 -- infinities and NaNs.

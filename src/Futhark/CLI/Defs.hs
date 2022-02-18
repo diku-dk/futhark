@@ -13,7 +13,7 @@ import Futhark.Util.Options
 import Language.Futhark
 
 isBuiltin :: String -> Bool
-isBuiltin = ("prelude/" `isPrefixOf`)
+isBuiltin = ("/prelude/" `isPrefixOf`)
 
 data DefKind = Value | Module | ModuleType | Type
 
