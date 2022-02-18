@@ -25,7 +25,7 @@ import System.FilePath
 import System.IO
 
 isBuiltin :: String -> Bool
-isBuiltin = ("prelude/" `isPrefixOf`)
+isBuiltin = ("/prelude/" `isPrefixOf`)
 
 -- | @futhark imports@
 mainImports :: String -> [String] -> IO ()
