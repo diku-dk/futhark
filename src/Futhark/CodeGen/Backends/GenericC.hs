@@ -600,7 +600,7 @@ rawMem v = rawMem' <$> fat <*> pure v
     fat = asks ((&&) . envFatMemory) <*> (isNothing <$> cacheMem v)
 
 rawMem' :: C.ToExp a => Bool -> a -> C.Exp
-rawMem' True e = [C.cexp|$exp:e->mem|]
+rawMem' True e = [C.cexp|$exp:e.mem|]
 rawMem' False e = [C.cexp|$exp:e|]
 
 allocRawMem ::

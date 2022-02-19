@@ -260,6 +260,13 @@ closureRetvalStructField :: VName -> Name
 closureRetvalStructField v =
   nameFromString "retval_" <> nameFromString (pretty v)
 
+getName :: VName -> Name
+getName name = nameFromString $ pretty name
+
+isMemblock :: Param -> Bool
+isMemblock (MemParam _ _) = True
+isMemblock _ = False
+
 data ValueType = Prim | MemBlock | RawMem
 
 compileKernelInputs :: [VName] -> [(C.Type, ValueType)] -> [C.Param]
@@ -276,6 +283,12 @@ compileIspcInputs = zipWith field
     getName name = nameFromString (pretty name)
     field name (ty, Prim) = [C.cexp|$id:(getName name)|]
     field name (_, _) = [C.cexp|&$id:(getName name)|]
+
+compileMemblockDeref :: [VName] -> [(C.Type, ValueType)] -> [C.InitGroup]
+compileMemblockDeref = zipWith field
+  where
+    a = nameFromString "a"
+    field name (ty, _) = [C.cdecl|$ty:ty $id:a = *$id:(getName name);|]
 
 compileFreeStructFields :: [VName] -> [(C.Type, ValueType)] -> [C.FieldGroup]
 compileFreeStructFields = zipWith field
@@ -636,13 +649,22 @@ compileOp (SegOp name params seq_task par_task retvals (SchedulerInfo e sched)) 
   -- Add profile fields for -P option
   mapM_ GC.profileReport $ multiCoreReport $ (fpar_task, True) : fnpar_task
 
-compileOp (ForEach i bound body free) = do 
+compileOp (ForEach i bound body free) = do
   free_ctypes <- mapM paramToCType free
   let free_args = map paramName free
 
   let lexical = lexicalMemoryUsage $ Function Nothing [] free body [] []
 
   let inputs = compileKernelInputs free_args free_ctypes
+
+  -- TODO(k): Come back to generate fresh names for dereferenced memblocks
+  vname <- newVName "Test"
+  traceM(nameToString $ getName vname)
+  let memblock = filter isMemblock free
+  memblock_ctypes <- mapM paramToCType memblock
+  let memblock_args = map paramName memblock
+  let memderef = compileMemblockDeref memblock_args memblock_ctypes
+  --
 
   let t = primTypeToCType $ primExpType bound
   bound' <- GC.compileExp bound
@@ -666,6 +688,7 @@ compileOp (ForEach i bound body free) = do
         --mapM_ GC.item body'
     return
       [C.cedecl|auto static void $id:s($params:inputs) {
+                       $decls:memderef
                        $items:loopBody
                      }|]
 

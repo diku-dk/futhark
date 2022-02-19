@@ -226,7 +226,7 @@ runISPC ispcpath cpath outpath ispc_flags cflags_def ldflags = do
             ldflags
         )
         mempty
-  case ret of
+  case ret_ispc of
     Left err ->
       externalErrorS $ "Failed to run " ++ cmdCC ++ ": " ++ show err
     Right (ExitFailure code, _, gccerr) ->
@@ -236,7 +236,7 @@ runISPC ispcpath cpath outpath ispc_flags cflags_def ldflags = do
           ++ ":\n"
           ++ gccerr
     Right (ExitSuccess, _, _) ->
-      case ret_ispc of
+      case ret of
         Left err ->
           externalErrorS $ "Failed to run " ++ "ispc" ++ ": " ++ show err
         Right (ExitFailure code, _, gccerr) ->
