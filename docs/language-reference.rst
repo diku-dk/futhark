@@ -1576,14 +1576,13 @@ Module Type Expressions
 
 
 .. productionlist::
-   spec:   "val" `id` `type_param`* ":" `spec_type`
-       : | "val" `binop` `type_param`* ":" `spec_type`
+   spec:   "val" `id` `type_param`* ":" `type`
+       : | "val" `binop` `type_param`* ":" `type`
        : | "type" ["^"] `id` `type_param`* "=" `type`
        : | "type" ["^"] `id` `type_param`*
        : | "module" `id` ":" `mod_type_exp`
        : | "include" `mod_type_exp`
        : | "#[" attr "]" spec
-   spec_type: `type` | `type` "->" `spec_type`
 
 Module types classify modules, with the only (unimportant) difference
 in expressivity being that modules can contain module types, but
