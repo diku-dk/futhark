@@ -1,0 +1,145 @@
+-- |
+--
+-- This module contains no code.  Its purpose is to explain the
+-- overall architecture of the code base, with links to the relevant
+-- modules and definitions.  It is intended for people who intend to
+-- hack on the compiler itself, not for those who just want to use its
+-- public API as a library.  Most of what's here discusses the
+-- compiler itself, but we'll also provide pointers for where to find
+-- the code for the various other tools and subcommands.
+--
+-- Much of the documentation here is by referencing other modules that
+-- contain more information.  Make sure to follow the links.  Also,
+-- make sure to click the *source* links to study the actual code.
+-- Many of the links are provided not because the exposed module API
+-- is particularly interesting, but because their implementation is.
+--
+-- = Compiler
+--
+-- At a very high level, the Futhark compiler has a fairly
+-- conventional architecture.  After reading and type-checking a
+-- program, it is gradually transformed, passing through a variety of
+-- different /intermediate representations/ (IRs), where the specifics
+-- depend on which code generator is intended.  The final result is
+-- then written to one or more files.  We can divide the compiler into
+-- roughly three parts: frontend, middle-end [sic], and backend.
+--
+-- == Frontend
+--
+-- The frontend of the compiler is concerned with parsing the Futhark
+-- source language, type-checking it, and transforming it to the core
+-- IR used by the middle-end of the compiler.  The following modules
+-- are of particular interest:
+--
+-- * "Language.Futhark.Syntax" contains the source language AST definition.
+--
+-- * "Language.Futhark.Parser" contains parsers for the source
+--   language and various fragments.
+--
+-- * "Futhark.Compiler" and "Futhark.Compiler.Program" contains
+--   functions for conveniently reading and type-checking an entire
+--   Futhark source program, chasing down imports, and so on.
+--
+-- * "Language.Futhark.TypeChecker" is the type checker itself.
+--
+-- * /Internalisation/ of the source language to the core IR is in
+--   "Futhark.Internalise".
+--
+-- == Middle-end
+--
+-- The compiler middle-end is based around /passes/ that are
+-- essentially pure functions that accept a program as input and
+-- produce a program as output.  A composition of such passes is
+-- called a /pipeline/.  The various compiler backends (@futhark
+-- opencl@, @futhark multicore@, etc) use different pipelines.  See
+-- "Futhark.Pass" and (less importantly) "Futhark.Pipeline".  The
+-- actual pipelines we use are in "Futhark.Passes".
+--
+-- The compiler front-end produces a core IR program that is then
+-- processed by a pipeline in the middle-end.  The fundamental
+-- structure of this IR is defined in "Futhark.IR.Syntax".  As
+-- mentioned in that module, the IR supports multiple
+-- /representations/.  The middle-end always starts with the program
+-- in the SOACS representation ("Futhark.IR.SOACS"), which closely
+-- resembles the kind of free-form nested parallelism that the source
+-- language permits.  Depending on the specific compilation pipeline,
+-- the program will eventually be transformed to various other
+-- representations.  The output of the middle-end is always a core IR
+-- program in some representation (probably not the same one that it
+-- started with).
+--
+-- Many passes will involve constructing core IR AST fragments.  See
+-- "Futhark.Construct" for advice and guidance on how to do that.
+--
+-- === Main representations
+--
+-- * "Futhark.IR.SOACS": the initial core representation of any
+--   Futhark program.  This is the representation on which we perform
+--   optimisations such as fusion, inlining, and a host of other
+--   cleanup.
+--
+-- * "Futhark.IR.GPU": a representation where parallelism is expressed
+--   with flat /segmented operations/, and a few other GPU-specific
+--   operations are also supported.  The pass
+--   "Futhark.Pass.ExtractKernels" transforms a
+--   'Futhark.IR.SOACS.SOACS' program to a 'Futhark.IR.GPU.GPU'
+--   program.
+--
+-- * "Futhark.IR.MC": a representation where parallelism is expressed
+--   with flat /segmented operations/, and a few other multicore-specific
+--   operations are also supported.  The pass
+--   "Futhark.Pass.ExtractMulticore" transforms a
+--   'Futhark.IR.SOACS.SOACS' program to a 'Futhark.IR.MC.MC'
+--   program.
+--
+-- * "Futhark.IR.GPUMem": like 'Futhark.IR.GPU.GPU', but with memory
+--   information.  See "Futhark.IR.Mem" for information on how we
+--   represent memory in the Futhark compiler.  This representation is
+--   produced by "Futhark.Pass.ExplicitAllocations.GPU"
+--
+-- * "Futhark.IR.MCMem": the multicore counterpart to
+--   'Futhark.IR.GPUMem.GPUMem'.  Produced by
+--   "Futhark.Pass.ExplicitAllocations.MC".
+--
+-- == Backend
+--
+-- The backend accepts a program in some core IR representation.
+-- Currently this must always be a representation with memory
+-- information (e.g. 'Futhark.IR.GPUMem.GPUMem').  It then translates
+-- the program to the /imperative/ IR, which we call ImpCode.
+--
+-- * "Futhark.CodeGen.ImpCode": The main definition of ImpCode, which
+--   is an extensible representation like the core IR.
+--
+-- * "Futhark.CodeGen.ImpCode.GPU": an example of ImpCode
+--   extended/specialised to handle GPU operations (but at a high
+--   level, before generating actual CUDA/OpenCL kernel code).
+--
+-- * "Futhark.CodeGen.ImpGen": a translator from core IR to ImpCode.
+--   Heavily parameterised so that it can handle the various dialects
+--   of both core IR and ImpCode that it must be expected to work
+--   with.  In practice, when adding a new backend (or modifying an
+--   existing one), you'll be working on more specialised modules such
+--   as "Futhark.CodeGen.ImpGen.GPU".
+--
+-- Ultimately, ImpCode must then be translated to some /real/
+-- executable language, which in our case means C or Python.
+--
+-- * "Futhark.CodeGen.Backends.GenericC": framework for translating
+--   ImpCode to C.  Rather convoluted because it is used in a large
+--   number of settings.  The module
+--   "Futhark.CodeGen.Backends.SequentialC" shows perhaps the simplest
+--   use of it.
+--
+-- * "Futhark.CodeGen.Backends.GenericPython": the generic Python code
+--   generator (see "Futhark.CodeGen.Backends.SequentialPython" for a
+--   usage example).
+--
+-- = Command line interface
+--
+-- The @futhark@ program dispatches to a Haskell-level main function
+-- based on its first argument (the subcommand).  Some of these
+-- subcommands are implemented as their own modules under the
+-- @Futhark.CLI@ hierarchy.  Others, particularly the simplest ones,
+-- are bundled together in "Futhark.CLI.Misc".
+module Futhark () where

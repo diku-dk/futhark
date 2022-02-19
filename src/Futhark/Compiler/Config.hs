@@ -1,3 +1,4 @@
+-- | Configuration of compiler behaviour that is universal to all backends.
 module Futhark.Compiler.Config
   ( FutharkConfig (..),
     newFutharkConfig,
