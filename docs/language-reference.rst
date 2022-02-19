@@ -110,8 +110,8 @@ Compound types can be constructed based on the primitive types.  The
 Futhark type system is entirely structural, and type abbreviations are
 merely shorthands (with one exception, see
 :ref:`sizes-in-abbreviations`).  The only exception is abstract types
-whose definition has been hidden via the module system (see `Module
-System`_).
+whose definition has been hidden via the module system (see
+:ref:`module-system`).
 
 .. productionlist::
    tuple_type: "(" ")" | "(" `type` ("," `type`)+ ")"
@@ -230,18 +230,17 @@ declaration can only refer to names bound by preceding declarations.
 Any names defined by a declaration inside a module are by default
 visible to users of that module (see :ref:`module-system`).
 
-The ``open`` declaration brings names defined in another module into
-scope.  These names will also be visible to users of the module.
+* ``open mod_exp`` brings names bound in ``mod_exp`` into the current scope.
+  These names will also be visible to users of the module.
 
-The ``import`` declaration is a shorthand for ``open``ing another file
-as a module; see :ref:`other-files`.
+* ``local dec`` has the meaning of ``dec``, but any names bound by
+  ``dec`` will not be visible outside the module.
 
-If a declaration is prefixed with ``local``, whatever names are
-defines will *not* be visible outside the current module.  In
-particular ``local open`` is used to bring names from another module
-into scope, without making those names available to users of the
-module being defined.  In most cases, using module type ascription is
-a better idea.
+* ``import "foo"`` is a shorthand for ``local open import "foo"``,
+  where the ``import`` is interpreted as a module expression (see
+  :ref:`module-system`).
+
+* ``#[attr] dec`` adds an attribute to a declaration (see :ref:`attributes`).
 
 Declaring Functions and Values
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1459,8 +1458,8 @@ functions:
 
 .. _module-system:
 
-Module System
--------------
+Modules
+-------
 
 .. productionlist::
    mod_bind: "module" `id` `mod_param`* "=" [":" mod_type_exp] "=" `mod_exp`
@@ -1476,11 +1475,11 @@ parametric modules are called structs, signatures, and functors,
 respectively.  Module names exist in the same name space as values,
 but module types are their own name space.
 
-Named modules are declared as::
+Named modules are bound as::
 
   module name = ...
 
-A named module type is defined as::
+Named module types are bound as::
 
   module type name = ...
 
@@ -1538,20 +1537,6 @@ module type, we can neither construct values of type ``AbstractVec.T``
 or convert them to anything else, making this a rather useless use of
 abstraction.  As a derived form, we can write ``module M: S = e`` to
 mean ``module M = e : S``.
-
-In a value spec, sizes in types on the left-hand side of a function
-arrow must not be anonymous.  For example, this is forbidden::
-
-  val sum: []t -> t
-
-Instead write::
-
-  val sum [n]: [n]t -> t
-
-But this is allowed, because the empty size is not to the left of a
-function arrow::
-
-  val evens [n]: [n]i32 -> []i32
 
 Parametric modules allow us to write definitions that abstract over
 modules.  For example::
@@ -1631,7 +1616,7 @@ module defines any name defined by any declaration that is not
 ................
 
 Returns a module that contains the definitions of the file ``"foo"``
-relative to the current file.  See :ref:`other-files`.
+relative to the current file.
 
 Module Type Expressions
 ~~~~~~~~~~~~~~~~~~~~~~~
@@ -1660,6 +1645,20 @@ in expressivity being that modules can contain module types, but
 module types cannot specify that a module must contain a specific
 module type. They can specify of course that a module contains a
 *submodule* of a specific module type.
+
+In a value spec, sizes in types on the left-hand side of a function
+arrow must not be anonymous.  For example, this is forbidden::
+
+  val sum: []t -> t
+
+Instead write::
+
+  val sum [n]: [n]t -> t
+
+But this is allowed, because the empty size is not to the left of a
+function arrow::
+
+  val evens [n]: [n]i32 -> []i32
 
 .. _other-files:
 
