@@ -216,9 +216,9 @@ unknowable array sizes.
 Declarations
 ------------
 
-A Futhark file or module consists of a sequence of declarations.  Each
-declaration is processed in order, and a declaration can only refer to
-names bound by preceding declarations.
+A Futhark module consists of a sequence of declarations.  Files are
+also modules.  Each declaration is processed in order, and a
+declaration can only refer to names bound by preceding declarations.
 
 .. productionlist::
    dec:   `val_bind` | `type_bind` | `mod_bind` | `mod_type_bind`
@@ -227,14 +227,21 @@ names bound by preceding declarations.
       : | "local" `dec`
       : | "#[" attr "]" dec
 
+Any names defined by a declaration inside a module are by default
+visible to users of that module (see :ref:`module-system`).
+
 The ``open`` declaration brings names defined in another module into
-scope (see also `Module System`_).  For the meaning of ``import``, see
-`Referring to Other Files`_.  If a declaration is prefixed with
-``local``, whatever names it defines will *not* be visible outside the
-current module.  In particular ``local open`` is used to bring names
-from another module into scope, without making those names available
-to users of the module being defined.  In most cases, using module
-type ascription is a better idea.
+scope.  These names will also be visible to users of the module.
+
+The ``import`` declaration is a shorthand for ``open``ing another file
+as a module; see :ref:`other-files`.
+
+If a declaration is prefixed with ``local``, whatever names are
+defines will *not* be visible outside the current module.  In
+particular ``local open`` is used to bring names from another module
+into scope, without making those names available to users of the
+module being defined.  In most cases, using module type ascription is
+a better idea.
 
 Declaring Functions and Values
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1682,6 +1689,10 @@ file::
 In fact, a plain ``import "file"`` is equivalent to::
 
   local open import "file"
+
+To re-export names from another file in the current module, use::
+
+  open import "file"
 
 .. _attributes:
 
