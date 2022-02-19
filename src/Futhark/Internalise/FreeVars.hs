@@ -4,7 +4,6 @@ module Futhark.Internalise.FreeVars
   ( freeVars,
     without,
     ident,
-    size,
     sizes,
     NameSet (..),
     patVars,
