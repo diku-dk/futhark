@@ -41,6 +41,7 @@ ident v = NameSet $ M.singleton (identName v) (toStruct $ unInfo $ identType v)
 size :: VName -> NameSet
 size v = NameSet $ M.singleton v $ Scalar $ Prim $ Signed Int64
 
+-- | A 'NameSet' with these names, considered to be sizes.
 sizes :: S.Set VName -> NameSet
 sizes = foldMap size
 

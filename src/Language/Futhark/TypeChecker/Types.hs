@@ -327,6 +327,12 @@ evalTypeExp ote@TEApply {} = do
           <+> "not valid for a type parameter"
           <+> ppr p <> "."
 
+-- | Check a type expression, producing:
+--
+-- * The checked expression.
+-- * Size variables for any anonymous sizes in the expression.
+-- * The elaborated type.
+-- * The liftedness of the type.
 checkTypeExp ::
   MonadTypeChecker m =>
   TypeExp Name ->
