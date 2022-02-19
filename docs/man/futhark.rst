@@ -31,7 +31,7 @@ Check whether a Futhark program type checks.  With ``-w``, no warnings
 are printed.
 
 futhark check-syntax PROGRAM
---------------------------
+----------------------------
 
 Check whether a Futhark program is syntactically correct.
 
