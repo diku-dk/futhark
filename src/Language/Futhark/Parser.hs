@@ -7,15 +7,11 @@ module Language.Futhark.Parser
     parseValue,
     parseValues,
     parseDecOrExpIncrM,
-    ParseError (..),
-    scanTokensText,
-    L (..),
-    Token (..),
+    ParseError,
   )
 where
 
 import qualified Data.Text as T
-import Language.Futhark.Parser.Lexer
 import Language.Futhark.Parser.Parser
 import Language.Futhark.Prop
 import Language.Futhark.Syntax

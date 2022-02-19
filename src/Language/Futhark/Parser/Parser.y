@@ -1,7 +1,7 @@
 {
-{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE Trustworthy #-}
+{-# LANGUAGE TupleSections #-}
+
 -- | Futhark parser written with Happy.
 module Language.Futhark.Parser.Parser
   ( prog
@@ -10,8 +10,6 @@ module Language.Futhark.Parser.Parser
   , futharkType
   , anyValue
   , anyValues
-
-  , ParserMonad
   , parse
   , ParseError(..)
   , parseDecOrExpIncrM
@@ -40,6 +38,7 @@ import Language.Futhark.Pretty
 import Language.Futhark.Parser.Lexer
 import Futhark.Util.Pretty
 import Futhark.Util.Loc hiding (L) -- Lexer has replacements.
+import Language.Futhark.Parser.Monad
 
 }
 
@@ -1009,263 +1008,28 @@ Values : Value ',' Values { $1 : $3 }
        |                  { [] }
 
 {
-
-addDoc :: DocComment -> UncheckedDec -> UncheckedDec
-addDoc doc (ValDec val) = ValDec (val { valBindDoc = Just doc })
-addDoc doc (TypeDec tp) = TypeDec (tp { typeDoc = Just doc })
-addDoc doc (SigDec sig) = SigDec (sig { sigDoc = Just doc })
-addDoc doc (ModDec mod) = ModDec (mod { modDoc = Just doc })
-addDoc _ dec = dec
-
-addDocSpec :: DocComment -> SpecBase NoInfo Name -> SpecBase NoInfo Name
-addDocSpec doc (TypeAbbrSpec tpsig) = TypeAbbrSpec (tpsig { typeDoc = Just doc })
-addDocSpec doc val@(ValSpec {}) = val { specDoc = Just doc }
-addDocSpec doc (TypeSpec l name ps _ loc) = TypeSpec l name ps (Just doc) loc
-addDocSpec doc (ModSpec name se _ loc) = ModSpec name se (Just doc) loc
-addDocSpec _ spec = spec
-
-addAttr :: AttrInfo Name -> UncheckedDec -> UncheckedDec
-addAttr attr (ValDec val) =
-  ValDec $ val { valBindAttrs = attr : valBindAttrs val }
-addAttr attr dec =
-  dec
-
--- We will extend this function once we actually start tracking these.
-addAttrSpec :: AttrInfo Name -> UncheckedSpec -> UncheckedSpec
-addAttrSpec _attr dec = dec
-
-reverseNonempty :: (a, [a]) -> (a, [a])
-reverseNonempty (x, l) =
-  case reverse (x:l) of
-    x':rest -> (x', rest)
-    []      -> (x, [])
-
-mustBe (L loc (ID got)) expected
-  | nameToString got == expected = pure ()
-mustBe (L loc _) expected =
-  parseErrorAt loc $ Just $
-  "Only the keyword '" ++ expected ++ "' may appear here."
-
-mustBeEmpty :: SrcLoc -> ValueType -> ParserMonad ()
-mustBeEmpty loc (Array _ _ _ (ShapeDecl dims))
-  | any (==0) dims = pure ()
-mustBeEmpty loc t =
-  parseErrorAt loc $ Just $ pretty t ++ " is not an empty array."
-
-data ParserEnv = ParserEnv {
-                 parserFile :: FilePath
-               }
-
-type ParserMonad a =
-  ExceptT String (
-    StateT ParserEnv (
-       StateT ([L Token], Pos) ReadLineMonad)) a
-
-data ReadLineMonad a = Value a
-                     | GetLine (Maybe T.Text -> ReadLineMonad a)
-
-readLineFromMonad :: ReadLineMonad (Maybe T.Text)
-readLineFromMonad = GetLine Value
-
-instance Monad ReadLineMonad where
-  return = pure
-  Value x >>= f = f x
-  GetLine g >>= f = GetLine $ \s -> g s >>= f
-
-instance Functor ReadLineMonad where
-  f `fmap` m = do x <- m
-                  pure $ f x
-
-instance Applicative ReadLineMonad where
-  pure = Value
-  (<*>) = ap
-
-getLinesFromM :: Monad m => m T.Text -> ReadLineMonad a -> m a
-getLinesFromM _ (Value x) = pure x
-getLinesFromM fetch (GetLine f) = do
-  s <- fetch
-  getLinesFromM fetch $ f $ Just s
-
-getLinesFromTexts :: [T.Text] -> ReadLineMonad a -> Either String a
-getLinesFromTexts _ (Value x) = Right x
-getLinesFromTexts (x : xs) (GetLine f) = getLinesFromTexts xs $ f $ Just x
-getLinesFromTexts [] (GetLine f) = getLinesFromTexts [] $ f Nothing
-
-getNoLines :: ReadLineMonad a -> Either String a
-getNoLines (Value x) = Right x
-getNoLines (GetLine f) = getNoLines $ f Nothing
-
-combArrayElements :: Value
-                  -> [Value]
-                  -> Either String Value
-combArrayElements t ts = foldM comb t ts
-  where comb x y
-          | valueType x == valueType y = Right x
-          | otherwise                  = Left $ "Elements " ++ pretty x ++ " and " ++
-                                         pretty y ++ " cannot exist in same array."
-
-arrayFromList :: [a] -> Array Int a
-arrayFromList l = listArray (0, length l-1) l
-
-applyExp :: [UncheckedExp] -> ParserMonad UncheckedExp
-applyExp all@((Constr n [] _ loc1):es) =
-  pure $ Constr n es NoInfo (srcspan loc1 (last all))
-applyExp es =
-  foldM ap (head es) (tail es)
-  where
-     ap (AppExp (Index e is floc) _) (ArrayLit xs _ xloc) =
-       parseErrorAt (srcspan floc xloc) $
-       Just $ pretty $ "Incorrect syntax for multi-dimensional indexing." </>
-       "Use" <+> align (ppr index)
-       where index = AppExp (Index e (is++map DimFix xs) xloc) NoInfo
-     ap f x =
-        pure $ AppExp (Apply f x NoInfo (srcspan f x)) NoInfo
-
-patternExp :: UncheckedPat -> ParserMonad UncheckedExp
-patternExp (Id v _ loc) = pure $ Var (qualName v) NoInfo loc
-patternExp (TuplePat pats loc) = TupLit <$> (mapM patternExp pats) <*> pure loc
-patternExp (Wildcard _ loc) = parseErrorAt loc $ Just "cannot have wildcard here."
-patternExp (PatAscription pat _ _) = patternExp pat
-patternExp (PatParens pat _) = patternExp pat
-patternExp (RecordPat fs loc) = RecordLit <$> mapM field fs <*> pure loc
-  where field (name, pat) = RecordFieldExplicit name <$> patternExp pat <*> pure loc
-
-eof :: Pos -> L Token
-eof pos = L (SrcLoc $ Loc pos pos) EOF
-
-binOpName (L loc (SYMBOL _ qs op)) = (QualName qs op, loc)
-
-binOp x (L loc (SYMBOL _ qs op)) y =
-  AppExp (BinOp (QualName qs op, loc) NoInfo (x, NoInfo) (y, NoInfo) (srcspan x y)) NoInfo
-
-getTokens :: ParserMonad ([L Token], Pos)
-getTokens = lift $ lift get
-
-putTokens :: ([L Token], Pos) -> ParserMonad ()
-putTokens = lift . lift . put
-
-primTypeFromName :: SrcLoc -> Name -> ParserMonad PrimType
-primTypeFromName loc s = maybe boom pure $ M.lookup s namesToPrimTypes
-  where boom = parseErrorAt loc $ Just $ "No type named " ++ nameToString s
-
-getFilename :: ParserMonad FilePath
-getFilename = lift $ gets parserFile
-
-intNegate :: IntValue -> IntValue
-intNegate (Int8Value v) = Int8Value (-v)
-intNegate (Int16Value v) = Int16Value (-v)
-intNegate (Int32Value v) = Int32Value (-v)
-intNegate (Int64Value v) = Int64Value (-v)
-
-floatNegate :: FloatValue -> FloatValue
-floatNegate (Float16Value v) = Float16Value (-v)
-floatNegate (Float32Value v) = Float32Value (-v)
-floatNegate (Float64Value v) = Float64Value (-v)
-
-primNegate :: PrimValue -> PrimValue
-primNegate (FloatValue v) = FloatValue $ floatNegate v
-primNegate (SignedValue v) = SignedValue $ intNegate v
-primNegate (UnsignedValue v) = UnsignedValue $ intNegate v
-primNegate (BoolValue v) = BoolValue $ not v
-
-readLine :: ParserMonad (Maybe T.Text)
-readLine = lift $ lift $ lift readLineFromMonad
-
-lexer :: (L Token -> ParserMonad a) -> ParserMonad a
-lexer cont = do
-  (ts, pos) <- getTokens
-  case ts of
-    [] -> do
-      ended <- lift $ runExceptT $ cont $ eof pos
-      case ended of
-        Right x -> pure x
-        Left parse_e -> do
-          line <- readLine
-          ts' <-
-            case line of Nothing -> throwError parse_e
-                         Just line' -> pure $ scanTokensText (advancePos pos '\n') line'
-          (ts'', pos') <-
-            case ts' of Right x -> pure x
-                        Left lex_e  -> throwError lex_e
-          case ts'' of
-            [] -> cont $ eof pos
-            xs -> do
-              putTokens (xs, pos')
-              lexer cont
-    (x : xs) -> do
-      putTokens (xs, pos)
-      cont x
-
-parseError :: (L Token, [String]) -> ParserMonad a
-parseError (L loc EOF, expected) =
-  parseErrorAt (srclocOf loc) $ Just $
-  unlines ["unexpected end of file.",
-           "Expected one of the following: " ++ unwords expected]
-parseError (L loc DOC{}, _) =
-  parseErrorAt (srclocOf loc) $
-  Just "documentation comments ('-- |') are only permitted when preceding declarations."
-parseError (L loc tok, expected) =
-  parseErrorAt loc $ Just $
-  unlines ["unexpected " ++ show tok,
-          "Expected one of the following: " ++ unwords expected]
-
-parseErrorAt :: SrcLoc -> Maybe String -> ParserMonad a
-parseErrorAt loc Nothing = throwError $ "Error at " ++ locStr loc ++ ": Parse error."
-parseErrorAt loc (Just s) = throwError $ "Error at " ++ locStr loc ++ ": " ++ s
-
-emptyArrayError :: SrcLoc -> ParserMonad a
-emptyArrayError loc =
-  parseErrorAt loc $
-  Just "write empty arrays as 'empty(t)', for element type 't'.\n"
-
-twoDotsRange :: SrcLoc -> ParserMonad a
-twoDotsRange loc = parseErrorAt loc $ Just "use '...' for ranges, not '..'.\n"
-
---- Now for the parser interface.
-
--- | A parse error.  Use 'show' to get a human-readable description.
-data ParseError = ParseError String
-
-instance Show ParseError where
-  show (ParseError s) = s
-
-parseInMonad :: ParserMonad a -> FilePath -> T.Text
-             -> ReadLineMonad (Either ParseError a)
-parseInMonad p file program =
-  either (Left . ParseError) Right <$> either (pure . Left)
-  (evalStateT (evalStateT (runExceptT p) env))
-  (scanTokensText (Pos file 1 1 0) program)
-  where env = ParserEnv file
-
-parseIncremental :: ParserMonad a -> FilePath -> T.Text
-                 -> Either ParseError a
-parseIncremental p file program =
-  either (Left . ParseError) id
-  $ getLinesFromTexts (T.lines program)
-  $ parseInMonad p file mempty
-
-parse :: ParserMonad a -> FilePath -> T.Text
-      -> Either ParseError a
-parse p file program =
-  either (Left . ParseError) id
-  $ getNoLines $ parseInMonad p file program
-
--- | Parse an Futhark expression incrementally from monadic actions, using the
+  -- | Parse an Futhark expression incrementally from monadic actions, using the
 -- 'FilePath' as the source name for error messages.
-parseExpIncrM :: Monad m =>
-                 m T.Text -> FilePath -> T.Text
-              -> m (Either ParseError UncheckedExp)
+parseExpIncrM ::
+  Monad m =>
+  m T.Text ->
+  FilePath ->
+  T.Text ->
+  m (Either ParseError UncheckedExp)
 parseExpIncrM fetch file program =
   getLinesFromM fetch $ parseInMonad expression file program
 
 -- | Parse either an expression or a declaration incrementally;
 -- favouring declarations in case of ambiguity.
-parseDecOrExpIncrM :: Monad m =>
-                      m T.Text -> FilePath -> T.Text
-                   -> m (Either ParseError (Either UncheckedDec UncheckedExp))
+parseDecOrExpIncrM ::
+  Monad m =>
+  m T.Text ->
+  FilePath ->
+  T.Text ->
+  m (Either ParseError (Either UncheckedDec UncheckedExp))
 parseDecOrExpIncrM fetch file input =
   case parseInMonad declaration file input of
-    Value Left{} -> fmap Right <$> parseExpIncrM fetch file input
+    Value Left {} -> fmap Right <$> parseExpIncrM fetch file input
     Value (Right d) -> pure $ Right $ Left d
     GetLine c -> do
       l <- fetch
