@@ -18,6 +18,7 @@ description:    Futhark is a small programming language designed to be compiled 
                 Regarding the internal design of the compiler, the following modules make
                 good starting points:
                 .
+                * "Futhark" contains a basic architectural overview of the compiler.
                 * "Futhark.IR.Syntax" explains the
                   basic design of the intermediate representation (IR).
                 * "Futhark.Construct" explains how to write code that
@@ -52,6 +53,7 @@ source-repository head
 
 library
   exposed-modules:
+      Futhark
       Futhark.Actions
       Futhark.Analysis.Alias
       Futhark.Analysis.CallGraph
