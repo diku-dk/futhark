@@ -1475,87 +1475,32 @@ parametric modules are called structs, signatures, and functors,
 respectively.  Module names exist in the same name space as values,
 but module types are their own name space.
 
-Named modules are bound as::
+Module bindings
+~~~~~~~~~~~~~~~
 
-  module name = ...
+``module m = mod_exp``
+......................
 
-Named module types are bound as::
+Binds *m* to the module produced by the module expression ``mod_exp``.
+Any name x in the module produced by ``mod_exp`` can then be accessed
+with ``m.x``.
 
-  module type name = ...
+``module m : mod_type_exp = mod_exp``
+.....................................
 
-Where a module expression can be the name of another module, an
-application of a parametric module, or a sequence of declarations
-enclosed in curly braces::
+Shorthand for ``module m = mod_exp : mod_type_exp``.
 
-  module Vec3 = {
-    type t = ( f32 , f32 , f32 )
-    def add(a: t) (b: t): t =
-      let (a1, a2, a3) = a in
-      let (b1, b2, b3) = b in
-      (a1 + b1, a2 + b2 , a3 + b3)
-  }
+``module m mod_params... = mod_exp``
+....................................
 
-  module AlsoVec3 = Vec3
+Shorthand for ``module m = \mod_params... -> mod_exp``.  This produces
+a parametric module.
 
-Functions and types within modules can be accessed using dot
-notation::
+``module type mt = mod_type_exp``
+.................................
 
-    type vector = Vec3.t
-    def double(v: vector): vector = Vec3.add v v
-
-We can also use ``open Vec3`` to bring the names defined by ``Vec3``
-into the current scope.  Multiple modules can be opened simultaneously
-by separating their names with spaces.  In case several modules define
-the same names, the ones mentioned last take precedence.  The first
-argument to ``open`` may be a full module expression.
-
-Named module types are defined as::
-
-  module type ModuleTypeName = ...
-
-A module type expression can be the name of another module type, or a
-sequence of *specifications*, or *specs*, enclosed in curly braces.  A
-spec can be a *value spec*, indicating the presence of a function or
-value, an *abstract type spec*, or a *type abbreviation spec*.  For
-example::
-
-  module type Addable = {
-    type t                 -- abstract type spec
-    type two_ts = (t,t)    -- type abbreviation spec
-    val add: t -> t -> t   -- value spec
-  }
-
-This module type specifies the presence of an *abstract type* ``t``,
-as well as a function operating on values of type ``t``.  We can use
-*module type ascription* to restrict a module to what is exposed by
-some module type::
-
-  module AbstractVec = Vec3 : Addable
-
-The definition of ``AbstractVec.t`` is now hidden.  In fact, with this
-module type, we can neither construct values of type ``AbstractVec.T``
-or convert them to anything else, making this a rather useless use of
-abstraction.  As a derived form, we can write ``module M: S = e`` to
-mean ``module M = e : S``.
-
-Parametric modules allow us to write definitions that abstract over
-modules.  For example::
-
-  module Times = \(M: Addable) -> {
-    def times (x: M.t) (k: i32): M.t =
-      loop x' = x for i < k do
-        M.add x' x
-  }
-
-We can instantiate ``Times`` with any module that fulfils the module
-type ``Addable`` and get back a module that defines a function
-``times``::
-
-  module Vec3Times = Times Vec3
-
-Now ``Vec3Times.times`` is a function of type ``Vec3.t -> int ->
-Vec3.t``.  As a derived form, we can write ``module M p = e`` to mean
-``module M = \p -> e``.
+Binds *mt* to the module type produced by the module type expression
+``mod_type_exp``.
 
 Module Expressions
 ~~~~~~~~~~~~~~~~~~
@@ -1646,6 +1591,11 @@ module types cannot specify that a module must contain a specific
 module type. They can specify of course that a module contains a
 *submodule* of a specific module type.
 
+A module type expression can be the name of another module type, or a
+sequence of *specifications*, or *specs*, enclosed in curly braces.  A
+spec can be a *value spec*, indicating the presence of a function or
+value, an *abstract type spec*, or a *type abbreviation spec*.
+
 In a value spec, sizes in types on the left-hand side of a function
 arrow must not be anonymous.  For example, this is forbidden::
 
@@ -1662,8 +1612,8 @@ function arrow::
 
 .. _other-files:
 
-Referring to Other Files
-------------------------
+Referencing Other Files
+-----------------------
 
 You can refer to external files in a Futhark file like this::
 
