@@ -271,6 +271,9 @@ prependRoots roots (E.Prog doc ds) =
       -- type checker to issue a warning about a redundant import.
       E.LocalDec (E.OpenDec (E.ModImport fp E.NoInfo mempty) mempty) mempty
 
+-- | A loaded, type-checked program.  This can be used to extract
+-- information about the program, but also to speed up subsequent
+-- reloads.
 data LoadedProg = LoadedProg
   { lpRoots :: [FilePath],
     -- | The 'VNameSource' is the name source just *before* the module
@@ -304,6 +307,8 @@ unchangedImports src (f : fs)
       then pure ([], fst $ lfMod f)
       else first (f :) <$> unchangedImports src fs
 
+-- | A "loaded program" containing no actual files.  Use this as a
+-- starting point for 'reloadProg'
 noLoadedProg :: LoadedProg
 noLoadedProg =
   LoadedProg
