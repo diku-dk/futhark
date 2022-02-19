@@ -92,11 +92,11 @@ import System.IO.Unsafe
 import System.Process.ByteString
 import Text.Read (readMaybe)
 
--- | Like 'nub', but without the quadratic runtime.
+-- | Like @nub@, but without the quadratic runtime.
 nubOrd :: Ord a => [a] -> [a]
 nubOrd = nubByOrd compare
 
--- | Like 'nubBy', but without the quadratic runtime.
+-- | Like @nubBy@, but without the quadratic runtime.
 nubByOrd :: (a -> a -> Ordering) -> [a] -> [a]
 nubByOrd cmp = map NE.head . NE.groupBy eq . sortBy cmp
   where
@@ -469,17 +469,22 @@ encodeAsUnicodeCharar c =
   where
     hex_str = showHex (ord c) "U"
 
+-- | Truncate to at most this many characters, making the last three
+-- characters "..." if truncation is necessary.
 atMostChars :: Int -> String -> String
 atMostChars n s
   | length s > n = take (n -3) s ++ "..."
   | otherwise = s
 
+-- | Invert a map, handling duplicate values (now keys) by
+-- constructing a set of corresponding values.
 invertMap :: (Ord v, Ord k) => M.Map k v -> M.Map v (S.Set k)
 invertMap m =
   M.toList m
     & fmap (swap . first S.singleton)
     & foldr (uncurry $ M.insertWith (<>)) mempty
 
+-- | Perform fixpoint iteration.
 fixPoint :: Eq a => (a -> a) -> a -> a
 fixPoint f x =
   let x' = f x
