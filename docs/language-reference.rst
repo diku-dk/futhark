@@ -370,7 +370,7 @@ Type Abbreviations
 ~~~~~~~~~~~~~~~~~~
 
 .. productionlist::
-   type_bind: "type" ["^" | "~"] `id` `type_param`* "=" `type`
+   type_bind: ("type" | "type^" | "type~") `id` `type_param`* "=" `type`
    type_param: "[" `id` "]" | "'" `id` | "'~" `id` | "'^" `id`
 
 Type abbreviations function as shorthands for the purpose of
@@ -1578,8 +1578,8 @@ Module Type Expressions
 .. productionlist::
    spec:   "val" `id` `type_param`* ":" `type`
        : | "val" `binop` `type_param`* ":" `type`
-       : | "type" ["^"] `id` `type_param`* "=" `type`
-       : | "type" ["^"] `id` `type_param`*
+       : | ("type" | "type^" | "type~") `id` `type_param`* "=" `type`
+       : | ("type" | "type^" | "type~") `id` `type_param`*
        : | "module" `id` ":" `mod_type_exp`
        : | "include" `mod_type_exp`
        : | "#[" attr "]" spec
