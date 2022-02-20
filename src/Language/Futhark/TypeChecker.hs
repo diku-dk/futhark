@@ -14,6 +14,7 @@ module Language.Futhark.TypeChecker
     TypeError,
     Warnings,
     initialEnv,
+    envWithImports,
   )
 where
 
@@ -133,6 +134,13 @@ initialEnv =
       Just (name, TypeAbbr l ps $ RetType [] t)
     addIntrinsicT _ =
       Nothing
+
+-- | Produce an environment, based on the one passed in, where all of
+-- the provided imports have been @open@ened in order.  This could in principle
+-- also be done with 'checkDec', but this is more precise.
+envWithImports :: Imports -> Env -> Env
+envWithImports imports env =
+  mconcat (map (fileEnv . snd) (reverse imports)) <> env
 
 checkProgM :: UncheckedProg -> TypeM FileModule
 checkProgM (Prog doc decs) = do

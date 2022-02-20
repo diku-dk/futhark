@@ -13,6 +13,7 @@
 module Futhark.AD.Rev (revVJP) where
 
 import Control.Monad
+import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.Map as M
 import Futhark.AD.Derivatives
 import Futhark.AD.Rev.Loop
@@ -26,14 +27,14 @@ import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
 import Futhark.Util (takeLast)
 
-patName :: Pat -> ADM VName
+patName :: Pat SOACS -> ADM VName
 patName (Pat [pe]) = pure $ patElemName pe
 patName pat = error $ "Expected single-element pattern: " ++ pretty pat
 
 -- The vast majority of BasicOps require no special treatment in the
 -- forward pass and produce one value (and hence one adjoint).  We
 -- deal with that case here.
-commonBasicOp :: Pat -> StmAux () -> BasicOp -> ADM () -> ADM (VName, VName)
+commonBasicOp :: Pat SOACS -> StmAux () -> BasicOp -> ADM () -> ADM (VName, VName)
 commonBasicOp pat aux op m = do
   addStm $ Let pat aux $ BasicOp op
   m
@@ -41,7 +42,7 @@ commonBasicOp pat aux op m = do
   pat_adj <- lookupAdjVal pat_v
   pure (pat_v, pat_adj)
 
-diffBasicOp :: Pat -> StmAux () -> BasicOp -> ADM () -> ADM ()
+diffBasicOp :: Pat SOACS -> StmAux () -> BasicOp -> ADM () -> ADM ()
 diffBasicOp pat aux e m =
   case e of
     CmpOp cmp x y -> do
@@ -165,7 +166,7 @@ diffBasicOp pat aux e m =
         updateSubExpAdj x
           =<< letExp "rep_contrib" (Op $ Screma n [pat_adj_flat] reduce)
     --
-    Concat d arr arrs _ -> do
+    Concat d (arr :| arrs) _ -> do
       (_pat_v, pat_adj) <- commonBasicOp pat aux e m
       returnSweepCode $ do
         let sliceAdj _ [] = pure []
@@ -223,7 +224,7 @@ diffBasicOp pat aux e m =
 vjpOps :: VjpOps
 vjpOps = VjpOps diffLambda diffStm
 
-diffStm :: Stm -> ADM () -> ADM ()
+diffStm :: Stm SOACS -> ADM () -> ADM ()
 diffStm (Let pat aux (BasicOp e)) m =
   diffBasicOp pat aux e m
 diffStm stm@(Let pat _ (Apply f args _ _)) m
@@ -294,7 +295,7 @@ diffStms all_stms
 preprocess :: Stms SOACS -> ADM (Stms SOACS)
 preprocess = stripmineStms
 
-diffBody :: [Adj] -> [VName] -> Body -> ADM Body
+diffBody :: [Adj] -> [VName] -> Body SOACS -> ADM (Body SOACS)
 diffBody res_adjs get_adjs_for (Body () stms res) = subAD $
   subSubsts $ do
     let onResult (SubExpRes _ (Constant _)) _ = pure ()
@@ -305,7 +306,7 @@ diffBody res_adjs get_adjs_for (Body () stms res) = subAD $
       mapM lookupAdjVal get_adjs_for
     pure $ Body () stms' $ res <> varsRes adjs
 
-diffLambda :: [Adj] -> [VName] -> Lambda -> ADM Lambda
+diffLambda :: [Adj] -> [VName] -> Lambda SOACS -> ADM (Lambda SOACS)
 diffLambda res_adjs get_adjs_for (Lambda params body _) =
   localScope (scopeOfLParams params) $ do
     Body () stms res <- diffBody res_adjs get_adjs_for body
@@ -313,7 +314,7 @@ diffLambda res_adjs get_adjs_for (Lambda params body _) =
     ts' <- mapM lookupType get_adjs_for
     pure $ Lambda params body' ts'
 
-revVJP :: MonadFreshNames m => Scope SOACS -> Lambda -> m Lambda
+revVJP :: MonadFreshNames m => Scope SOACS -> Lambda SOACS -> m (Lambda SOACS)
 revVJP scope (Lambda params body ts) =
   runADM . localScope (scope <> scopeOfLParams params) $ do
     params_adj <- forM (zip (map resSubExp (bodyResult body)) ts) $ \(se, t) ->

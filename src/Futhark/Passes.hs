@@ -42,6 +42,9 @@ import Futhark.Pass.KernelBabysitting
 import Futhark.Pass.Simplify
 import Futhark.Pipeline
 
+-- | A pipeline used by all current compilers.  Performs inlining,
+-- fusion, and various forms of cleanup.  This pipeline will be
+-- followed by another one that deals with parallelism and memory.
 standardPipeline :: Pipeline SOACS SOACS
 standardPipeline =
   passes
@@ -72,6 +75,8 @@ standardPipeline =
       simplifySOACS
     ]
 
+-- | The pipeline used by the CUDA and OpenCL backends, but before
+-- adding memory information.  Includes 'standardPipeline'.
 kernelsPipeline :: Pipeline SOACS GPU
 kernelsPipeline =
   standardPipeline
@@ -88,6 +93,8 @@ kernelsPipeline =
         inPlaceLoweringGPU
       ]
 
+-- | The pipeline used by the sequential backends.  Turns all
+-- parallelism into sequential loops.  Includes 'standardPipeline'.
 sequentialPipeline :: Pipeline SOACS Seq
 sequentialPipeline =
   standardPipeline
@@ -97,6 +104,8 @@ sequentialPipeline =
         inPlaceLoweringSeq
       ]
 
+-- | Run 'sequentialPipeline', then add memory information (and
+-- optimise it slightly).
 sequentialCpuPipeline :: Pipeline SOACS SeqMem
 sequentialCpuPipeline =
   sequentialPipeline
@@ -106,6 +115,8 @@ sequentialCpuPipeline =
         simplifySeqMem
       ]
 
+-- | Run 'kernelsPipeline', then add memory information (and optimise
+-- it a lot).
 gpuPipeline :: Pipeline SOACS GPUMem
 gpuPipeline =
   kernelsPipeline
@@ -122,6 +133,8 @@ gpuPipeline =
         simplifyGPUMem
       ]
 
+-- | Run 'standardPipeline' and then convert to multicore
+-- representation (and do a bunch of optimisation).
 mcPipeline :: Pipeline SOACS MC
 mcPipeline =
   standardPipeline
@@ -135,6 +148,7 @@ mcPipeline =
         inPlaceLoweringMC
       ]
 
+-- | Run 'mcPipeline' and then add memory information.
 multicorePipeline :: Pipeline SOACS MCMem
 multicorePipeline =
   mcPipeline

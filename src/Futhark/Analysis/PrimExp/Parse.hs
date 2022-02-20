@@ -19,33 +19,31 @@ import Futhark.IR.Primitive.Parse
 import Futhark.Util.Pretty (prettyText)
 import Text.Megaparsec
 
-type Parser = Parsec Void T.Text
-
-pBinOp :: Parser BinOp
+pBinOp :: Parsec Void T.Text BinOp
 pBinOp = choice $ map p allBinOps
   where
     p op = keyword (prettyText op) $> op
 
-pCmpOp :: Parser CmpOp
+pCmpOp :: Parsec Void T.Text CmpOp
 pCmpOp = choice $ map p allCmpOps
   where
     p op = keyword (prettyText op) $> op
 
-pUnOp :: Parser UnOp
+pUnOp :: Parsec Void T.Text UnOp
 pUnOp = choice $ map p allUnOps
   where
     p op = keyword (prettyText op) $> op
 
-pConvOp :: Parser ConvOp
+pConvOp :: Parsec Void T.Text ConvOp
 pConvOp = choice $ map p allConvOps
   where
     p op = keyword (prettyText op) $> op
 
-parens :: Parser a -> Parser a
+parens :: Parsec Void T.Text a -> Parsec Void T.Text a
 parens = between (lexeme "(") (lexeme ")")
 
 -- | Parse a 'PrimExp' given a leaf parser.
-pPrimExp :: PrimType -> Parser v -> Parser (PrimExp v)
+pPrimExp :: PrimType -> Parsec Void T.Text v -> Parsec Void T.Text (PrimExp v)
 pPrimExp t pLeaf =
   choice
     [ flip LeafExp t <$> pLeaf,

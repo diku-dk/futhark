@@ -5,7 +5,7 @@
 {-# LANGUAGE TypeFamilies #-}
 
 -- | Provides last-use analysis for Futhark programs.
-module Futhark.Analysis.LastUse (LastUseMap, analyseGPUMem, analyseSeqMem) where
+module Futhark.Analysis.LastUse (LastUseMap, Used, analyseGPUMem, analyseSeqMem) where
 
 import Control.Monad.Reader
 import Data.Bifunctor (first)

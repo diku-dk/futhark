@@ -35,6 +35,7 @@ module Futhark.IR.Prop.TypeOf
   )
 where
 
+import Data.List.NonEmpty (NonEmpty (..))
 import Futhark.IR.Prop.Constants
 import Futhark.IR.Prop.Reshape
 import Futhark.IR.Prop.Scope
@@ -115,7 +116,7 @@ basicOpType (Rearrange perm e) =
     result t = [rearrangeType perm t]
 basicOpType (Rotate _ e) =
   pure <$> lookupType e
-basicOpType (Concat i x _ ressize) =
+basicOpType (Concat i (x :| _) ressize) =
   result <$> lookupType x
   where
     result xt = [setDimSize i xt ressize]

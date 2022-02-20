@@ -490,7 +490,7 @@ generateParLoopFn ::
   C.ToIdent a =>
   M.Map VName Space ->
   String ->
-  Code ->
+  MCCode ->
   a ->
   [(VName, (C.Type, ValueType))] ->
   [(VName, (C.Type, ValueType))] ->

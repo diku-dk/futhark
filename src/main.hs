@@ -1,6 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 
--- | The futhark command line tool.
+-- | The @futhark@ command line program.
 module Main (main) where
 
 import Control.Exception

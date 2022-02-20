@@ -165,7 +165,7 @@ nestifyLoop bound_se = nestifyLoop' bound_se
 -- An additional @bound - (floor(bound^(1/n)))^n@-iteration remainder loop is
 -- inserted after the stripmined loop which executes the remaining iterations
 -- so that the stripmined loop is semantically equivalent to the original loop.
-stripmine :: Integer -> Pat -> ExpT SOACS -> ADM (Stms SOACS)
+stripmine :: Integer -> Pat SOACS -> Exp SOACS -> ADM (Stms SOACS)
 stripmine n pat loop = do
   loop' <- removeLoopVars loop
   bindForLoop loop' $ \_val_pats _form _i it bound _loop_vars _body -> do
@@ -197,7 +197,7 @@ stripmine n pat loop = do
 -- | Stripmines a statement. Only has an effect when the statement's
 -- expression is a for-loop with a @#[stripmine(n)]@ attribute, where
 -- @n@ is the nesting depth.
-stripmineStm :: Stm -> ADM (Stms SOACS)
+stripmineStm :: Stm SOACS -> ADM (Stms SOACS)
 stripmineStm stm@(Let pat aux loop@(DoLoop _ ForLoop {} _)) =
   case nums of
     (n : _) -> stripmine n pat loop
@@ -215,7 +215,7 @@ stripmineStms = traverseFold stripmineStm
 -- to save the loop values at each iteration onto a tape as well as copying
 -- any consumed arrays in the loop's body and consuming said copies in lieu of
 -- the originals (which will be consumed later in the reverse pass).
-fwdLoop :: Pat -> StmAux () -> ExpT SOACS -> ADM ()
+fwdLoop :: Pat SOACS -> StmAux () -> Exp SOACS -> ADM ()
 fwdLoop pat aux loop =
   bindForLoop loop $ \val_pats form i _it bound _loop_vars body -> do
     bound64 <- asIntS Int64 bound
@@ -273,7 +273,7 @@ valPatAdjs = (mapM . mapM) valPatAdj
 
 -- | Reverses a loop by substituting the loop index as well as reversing
 -- the arrays that loop variables are bound to.
-reverseIndices :: ExpT SOACS -> ADM (Substitutions, Substitutions, Stms SOACS)
+reverseIndices :: Exp SOACS -> ADM (Substitutions, Substitutions, Stms SOACS)
 reverseIndices loop = do
   bindForLoop loop $ \_val_pats form i it bound loop_vars _body -> do
     bound_minus_one <-
@@ -339,7 +339,7 @@ data LoopInfo a = LoopInfo
   deriving (Functor, Foldable, Traversable, Show)
 
 -- | Transforms a for-loop into its reverse-mode derivative.
-revLoop :: (Stms SOACS -> ADM ()) -> Pat -> ExpT SOACS -> ADM ()
+revLoop :: (Stms SOACS -> ADM ()) -> Pat SOACS -> Exp SOACS -> ADM ()
 revLoop diffStms pat loop =
   bindForLoop loop $ \val_pats _form _i _it _bound _loop_vars _body ->
     renameForLoop loop $
@@ -435,7 +435,7 @@ revLoop diffStms pat loop =
               zipWithM_ updateAdj (loopVals loop_vnames) loop_val_adjs
 
 -- | Transforms a loop into its reverse-mode derivative.
-diffLoop :: (Stms SOACS -> ADM ()) -> Pat -> StmAux () -> ExpT SOACS -> ADM () -> ADM ()
+diffLoop :: (Stms SOACS -> ADM ()) -> Pat SOACS -> StmAux () -> ExpT SOACS -> ADM () -> ADM ()
 diffLoop diffStms pat aux loop m
   | isWhileLoop loop =
     let getBound (AttrComp "bound" [AttrInt b]) = Just b

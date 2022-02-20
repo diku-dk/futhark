@@ -29,6 +29,7 @@ module Futhark.Util
     hashText,
     unixEnvironment,
     isEnvVarAtLeast,
+    startupTime,
     fancyTerminal,
     runProgramWithExitCode,
     directoryContents,
@@ -48,6 +49,7 @@ module Futhark.Util
     toPOSIX,
     trim,
     pmapIO,
+    interactWithFileSafely,
     readFileSafely,
     convFloat,
     UserString,
@@ -80,6 +82,7 @@ import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import qualified Data.Text.Encoding.Error as T
 import qualified Data.Text.IO as T
+import Data.Time.Clock (UTCTime, getCurrentTime)
 import Data.Tuple (swap)
 import Numeric
 import qualified System.Directory.Tree as Dir
@@ -93,11 +96,11 @@ import System.IO.Unsafe
 import System.Process.ByteString
 import Text.Read (readMaybe)
 
--- | Like 'nub', but without the quadratic runtime.
+-- | Like @nub@, but without the quadratic runtime.
 nubOrd :: Ord a => [a] -> [a]
 nubOrd = nubByOrd compare
 
--- | Like 'nubBy', but without the quadratic runtime.
+-- | Like @nubBy@, but without the quadratic runtime.
 nubByOrd :: (a -> a -> Ordering) -> [a] -> [a]
 nubByOrd cmp = map NE.head . NE.groupBy eq . sortBy cmp
   where
@@ -215,6 +218,13 @@ isEnvVarAtLeast s x =
   case readMaybe =<< lookup s unixEnvironment of
     Just y -> y >= x
     _ -> False
+
+{-# NOINLINE startupTime #-}
+
+-- | The time at which the process started - or more accurately, the
+-- first time this binding was forced.
+startupTime :: UTCTime
+startupTime = unsafePerformIO getCurrentTime
 
 {-# NOINLINE fancyTerminal #-}
 
@@ -371,17 +381,23 @@ pmapIO concurrency f elems = do
         Left err -> throw (err :: SomeException)
         Right v -> pure v
 
--- | Read a file, returning 'Nothing' if the file does not exist, and
--- 'Left' if some other error occurs.
-readFileSafely :: FilePath -> IO (Maybe (Either String T.Text))
-readFileSafely filepath =
-  (Just . Right <$> T.readFile filepath) `catch` couldNotRead
+-- | Do some operation on a file, returning 'Nothing' if the file does
+-- not exist, and 'Left' if some other error occurs.
+interactWithFileSafely :: IO a -> IO (Maybe (Either String a))
+interactWithFileSafely m =
+  (Just . Right <$> m) `catch` couldNotRead
   where
     couldNotRead e
       | isDoesNotExistError e =
         return Nothing
       | otherwise =
         return $ Just $ Left $ show e
+
+-- | Read a file, returning 'Nothing' if the file does not exist, and
+-- 'Left' if some other error occurs.
+readFileSafely :: FilePath -> IO (Maybe (Either String T.Text))
+readFileSafely filepath =
+  interactWithFileSafely $ T.readFile filepath
 
 -- | Convert between different floating-point types, preserving
 -- infinities and NaNs.
@@ -469,20 +485,26 @@ encodeAsUnicodeCharar c =
   where
     hex_str = showHex (ord c) "U"
 
+-- | Truncate to at most this many characters, making the last three
+-- characters "..." if truncation is necessary.
 atMostChars :: Int -> String -> String
 atMostChars n s
   | length s > n = take (n -3) s ++ "..."
   | otherwise = s
 
+-- | Invert a map, handling duplicate values (now keys) by
+-- constructing a set of corresponding values.
 invertMap :: (Ord v, Ord k) => M.Map k v -> M.Map v (S.Set k)
 invertMap m =
   M.toList m
     & fmap (swap . first S.singleton)
     & foldr (uncurry $ M.insertWith (<>)) mempty
 
+-- | Applicatively fold a traversable.
 traverseFold :: (Monoid m, Traversable t, Applicative f) => (a -> f m) -> t a -> f m
 traverseFold f = fmap fold . traverse f
 
+-- | Perform fixpoint iteration.
 fixPoint :: Eq a => (a -> a) -> a -> a
 fixPoint f x =
   let x' = f x

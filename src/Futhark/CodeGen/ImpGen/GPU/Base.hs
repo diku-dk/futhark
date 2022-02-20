@@ -107,7 +107,7 @@ data KernelConstants = KernelConstants
 -- | The sizes of nested iteration spaces in the kernel.
 type SegOpSizes = S.Set [SubExp]
 
--- | Find the sizes of nested parallelism in a 'SegOp' body.
+-- | Find the sizes of nested parallelism in a t'SegOp' body.
 segOpSizes :: Stms GPUMem -> SegOpSizes
 segOpSizes = onStms
   where
@@ -246,8 +246,8 @@ compileThreadExp dest e =
 
 -- | Assign iterations of a for-loop to all threads in the kernel.
 -- The passed-in function is invoked with the (symbolic) iteration.
--- 'threadOperations' will be in effect in the body.  For
--- multidimensional loops, use 'groupCoverSpace'.
+-- The body must contain thread-level code.  For multidimensional
+-- loops, use 'groupCoverSpace'.
 kernelLoop ::
   IntExp t =>
   Imp.TExp t ->
@@ -506,7 +506,7 @@ flattenArray k flat arr = do
 --
 -- 2. Executes the body of @lam@.
 --
--- 3. Binds the 'SubExp's that are the 'Result' of @lam@ to the
+-- 3. Binds the t'SubExp's that are the 'Result' of @lam@ to the
 -- provided @dest@s, again interpreted as the destination for a
 -- 'copyDWIM'.
 applyLambda ::

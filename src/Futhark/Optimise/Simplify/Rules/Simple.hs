@@ -59,6 +59,15 @@ simplifyBinOp :: SimpleRule rep
 simplifyBinOp _ _ (BinOp op (Constant v1) (Constant v2))
   | Just res <- doBinOp op v1 v2 =
     constRes res
+-- By normalisation, constants are always on the left.
+--
+-- x+(y+z) = (x+y)+z (where x and y are constants).
+simplifyBinOp look _ (BinOp op1 (Constant x1) (Var y1))
+  | associativeBinOp op1,
+    Just (BasicOp (BinOp op2 (Constant x2) y2), cs) <- look y1,
+    op1 == op2,
+    Just res <- doBinOp op1 x1 x2 =
+    Just (BinOp op1 (Constant res) y2, cs)
 simplifyBinOp look _ (BinOp Add {} e1 e2)
   | isCt0 e1 = resIsSubExp e2
   | isCt0 e2 = resIsSubExp e1
@@ -365,7 +374,7 @@ simpleRules =
     improveReshape
   ]
 
--- | Try to simplify the given 'BasicOp', returning a new 'BasicOp'
+-- | Try to simplify the given t'BasicOp', returning a new t'BasicOp'
 -- and certificates that it must depend on.
 {-# NOINLINE applySimpleRules #-}
 applySimpleRules ::

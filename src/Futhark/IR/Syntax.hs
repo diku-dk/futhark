@@ -14,11 +14,11 @@
 -- The core language type system is much more restricted than the core
 -- language.  This is a theme that repeats often.  The only types that
 -- are supported in the core language are various primitive types
--- t'PrimType' which can be combined in arrays (ignore v'Mem' for
--- now).  Types are represented as t'TypeBase', which is parameterised
--- by the shape of the array and whether we keep uniqueness
--- information.  The t'Type' alias, which is the most commonly used,
--- uses t'Shape' and t'NoUniqueness'.
+-- t'PrimType' which can be combined in arrays (ignore v'Mem' and
+-- v'Acc' for now).  Types are represented as t'TypeBase', which is
+-- parameterised by the shape of the array and whether we keep
+-- uniqueness information.  The t'Type' alias, which is the most
+-- commonly used, uses t'Shape' and t'NoUniqueness'.
 --
 -- This means that the records, tuples, and sum types of the source
 -- language are represented merely as collections of primitives and
@@ -168,6 +168,7 @@ where
 
 import Control.Category
 import Data.Foldable
+import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.Sequence as Seq
 import Data.String
 import Data.Traversable (fmapDefault, foldMapDefault)
@@ -384,8 +385,19 @@ data BasicOp
     Update Safety VName (Slice SubExp) SubExp
   | FlatIndex VName (FlatSlice SubExp)
   | FlatUpdate VName (FlatSlice SubExp) VName
-  | -- | @concat@0([1],[2, 3, 4]) = [1, 2, 3, 4]@.
-    Concat Int VName [VName] SubExp
+  | -- | @
+    -- concat(0, [1] :| [[2, 3, 4], [5, 6]], 6) = [1, 2, 3, 4, 5, 6]@.
+    -- @
+    --
+    -- Concatenates the non-empty list of 'VName' resulting in an
+    -- array of length t'SubExp'. The 'Int' argument is used to
+    -- specify the dimension along which the arrays are
+    -- concatenated. For instance:
+    --
+    -- @
+    -- concat(1, [[1,2], [3, 4]] :| [[[5,6]], [[7, 8]]], 4) = [[1, 2, 5, 6], [3, 4, 7, 8]]
+    -- @
+    Concat Int (NonEmpty VName) SubExp
   | -- | Copy the given array.  The result will not alias anything.
     Copy VName
   | -- | Manifest an array with dimensions represented in the given
