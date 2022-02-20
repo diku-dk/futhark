@@ -66,7 +66,7 @@ import Futhark.Util.Log
 scopeForSOACs :: SameScope rep SOACS => Scope rep -> Scope SOACS
 scopeForSOACs = castScope
 
-data MapLoop = MapLoop SOACS.Pat (StmAux ()) SubExp SOACS.Lambda [VName]
+data MapLoop = MapLoop (Pat SOACS) (StmAux ()) SubExp (Lambda SOACS) [VName]
 
 mapLoopStm :: MapLoop -> Stm SOACS
 mapLoopStm (MapLoop pat aux w lam arrs) =

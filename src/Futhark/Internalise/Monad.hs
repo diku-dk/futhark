@@ -39,7 +39,7 @@ import Futhark.Tools
 type FunInfo =
   ( [VName],
     [DeclType],
-    [FParam],
+    [FParam SOACS],
     [(SubExp, Type)] -> Maybe [DeclExtType]
   )
 

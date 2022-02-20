@@ -68,24 +68,18 @@ simplifyFun =
   Simplify.simplifyFun simpleSOACS soacRules Engine.noExtraHoistBlockers
 
 simplifyLambda ::
-  (HasScope SOACS m, MonadFreshNames m) =>
-  Lambda ->
-  m Lambda
+  (HasScope SOACS m, MonadFreshNames m) => Lambda SOACS -> m (Lambda SOACS)
 simplifyLambda =
   Simplify.simplifyLambda simpleSOACS soacRules Engine.noExtraHoistBlockers
 
 simplifyStms ::
-  (HasScope SOACS m, MonadFreshNames m) =>
-  Stms SOACS ->
-  m (Stms SOACS)
+  (HasScope SOACS m, MonadFreshNames m) => Stms SOACS -> m (Stms SOACS)
 simplifyStms stms = do
   scope <- askScope
   Simplify.simplifyStms simpleSOACS soacRules Engine.noExtraHoistBlockers scope stms
 
 simplifyConsts ::
-  MonadFreshNames m =>
-  Stms SOACS ->
-  m (Stms SOACS)
+  MonadFreshNames m => Stms SOACS -> m (Stms SOACS)
 simplifyConsts =
   Simplify.simplifyStms simpleSOACS soacRules Engine.noExtraHoistBlockers mempty
 

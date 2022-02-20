@@ -36,7 +36,7 @@ internaliseAttrs = fmap (mconcat . map I.oneAttr) . mapM internaliseAttr
 bindingFParams ::
   [E.TypeParam] ->
   [E.Pat] ->
-  ([I.FParam] -> [[I.FParam]] -> InternaliseM a) ->
+  ([I.FParam I.SOACS] -> [[I.FParam I.SOACS]] -> InternaliseM a) ->
   InternaliseM a
 bindingFParams tparams params m = do
   flattened_params <- mapM flattenPat params
@@ -65,7 +65,7 @@ bindingLoopParams ::
   [E.TypeParam] ->
   E.Pat ->
   [I.Type] ->
-  ([I.FParam] -> [I.FParam] -> InternaliseM a) ->
+  ([I.FParam I.SOACS] -> [I.FParam I.SOACS] -> InternaliseM a) ->
   InternaliseM a
 bindingLoopParams tparams pat ts m = do
   pat_idents <- flattenPat pat
@@ -81,7 +81,7 @@ bindingLoopParams tparams pat ts m = do
 bindingLambdaParams ::
   [E.Pat] ->
   [I.Type] ->
-  ([I.LParam] -> InternaliseM a) ->
+  ([I.LParam I.SOACS] -> InternaliseM a) ->
   InternaliseM a
 bindingLambdaParams params ts m = do
   params_idents <- concat <$> mapM flattenPat params
