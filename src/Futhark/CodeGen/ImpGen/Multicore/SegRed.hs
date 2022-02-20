@@ -1,6 +1,7 @@
 module Futhark.CodeGen.ImpGen.Multicore.SegRed
   ( compileSegRed,
     compileSegRed',
+    DoSegBody,
   )
 where
 

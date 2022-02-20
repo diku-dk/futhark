@@ -13,6 +13,7 @@ module Futhark.CodeGen.ImpGen.Multicore.Base
     renameHistOpLambda,
     atomicUpdateLocking,
     AtomicUpdate (..),
+    DoAtomicUpdate,
     Locking (..),
     getSpace,
     getLoopBounds,

@@ -30,7 +30,7 @@
 -- ImpCode does not have arrays. 'DeclareArray' is for declaring
 -- constant array literals, not arrays in general.  Instead, ImpCode
 -- deals only with memory.  Array operations present in core IR
--- programs are turned into 'Write', c'Read', and 'Copy' operations
+-- programs are turned into 'Write', v'Read', and 'Copy' operations
 -- that use flat indexes and offsets based on the index function of
 -- the original array.
 --
@@ -284,8 +284,7 @@ data Code a
   | -- | @Write mem i t space vol v@ writes the value @v@ to
     -- @mem@ offset by @i@ elements of type @t@.  The
     -- 'Space' argument is the memory space of @mem@
-    -- (technically redundant, but convenient).  Note that
-    -- /reading/ is done with an 'Exp' ('Read').
+    -- (technically redundant, but convenient).
     Write VName (Count Elements (TExp Int64)) PrimType Space Volatility Exp
   | -- | Set a scalar variable.
     SetScalar VName Exp

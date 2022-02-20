@@ -24,27 +24,25 @@ import Text.Megaparsec
 import Text.Megaparsec.Char
 import qualified Text.Megaparsec.Char.Lexer as L
 
-type Parser = Parsec Void T.Text
-
 constituent :: Char -> Bool
 constituent c = isAlphaNum c || (c `elem` ("_/'+-=!&^.<>*|" :: String))
 
-whitespace :: Parser ()
+whitespace :: Parsec Void T.Text ()
 whitespace = L.space space1 (L.skipLineComment "--") empty
 
-lexeme :: Parser a -> Parser a
+lexeme :: Parsec Void T.Text a -> Parsec Void T.Text a
 lexeme = try . L.lexeme whitespace
 
-keyword :: T.Text -> Parser ()
+keyword :: T.Text -> Parsec Void T.Text ()
 keyword s = lexeme $ chunk s *> notFollowedBy (satisfy constituent)
 
-pIntValue :: Parser IntValue
+pIntValue :: Parsec Void T.Text IntValue
 pIntValue = try $ do
   x <- L.signed (pure ()) L.decimal
   t <- pIntType
   pure $ intValue t (x :: Integer)
 
-pFloatValue :: Parser FloatValue
+pFloatValue :: Parsec Void T.Text FloatValue
 pFloatValue =
   choice
     [ pNum,
@@ -64,7 +62,7 @@ pFloatValue =
       t <- pFloatType
       pure $ floatValue t (x :: Double)
 
-pBoolValue :: Parser Bool
+pBoolValue :: Parsec Void T.Text Bool
 pBoolValue =
   choice
     [ keyword "true" $> True,
@@ -72,7 +70,7 @@ pBoolValue =
     ]
 
 -- | Defined in this module for convenience.
-pPrimValue :: Parser PrimValue
+pPrimValue :: Parsec Void T.Text PrimValue
 pPrimValue =
   choice
     [ FloatValue <$> pFloatValue,
@@ -82,17 +80,17 @@ pPrimValue =
     ]
     <?> "primitive value"
 
-pFloatType :: Parser FloatType
+pFloatType :: Parsec Void T.Text FloatType
 pFloatType = choice $ map p allFloatTypes
   where
     p t = keyword (prettyText t) $> t
 
-pIntType :: Parser IntType
+pIntType :: Parsec Void T.Text IntType
 pIntType = choice $ map p allIntTypes
   where
     p t = keyword (prettyText t) $> t
 
-pPrimType :: Parser PrimType
+pPrimType :: Parsec Void T.Text PrimType
 pPrimType =
   choice [p Bool, p Unit, FloatType <$> pFloatType, IntType <$> pIntType]
   where

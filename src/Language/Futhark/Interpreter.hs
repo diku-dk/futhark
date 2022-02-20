@@ -18,7 +18,7 @@ module Language.Futhark.Interpreter
     BreakReason (..),
     StackFrame (..),
     typeCheckerEnv,
-    Value (ValuePrim, ValueArray, ValueRecord),
+    Value (ValuePrim, ValueRecord),
     fromTuple,
     isEmptyArray,
     prettyEmptyArray,
@@ -151,6 +151,7 @@ data Shape d
   | ShapeSum (M.Map Name [Shape d])
   deriving (Eq, Show, Functor, Foldable, Traversable)
 
+-- | The shape of an array.
 type ValueShape = Shape Int64
 
 instance Pretty d => Pretty (Shape d) where
