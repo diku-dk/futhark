@@ -265,9 +265,13 @@ getName name = nameFromString $ pretty name
 
 isMemblock :: Param -> Bool
 isMemblock (MemParam _ _) = True
-isMemblock _ = False
+isMemblock _  = False
 
 data ValueType = Prim | MemBlock | RawMem
+
+freshMemName :: Param -> GC.CompilerM op s Param
+freshMemName (MemParam _ s) = newVName "mem" >>= (\v' -> return $ MemParam v' s)
+freshMemName param = return param
 
 compileKernelInputs :: [VName] -> [(C.Type, ValueType)] -> [C.Param]
 compileKernelInputs = zipWith field
@@ -284,11 +288,10 @@ compileIspcInputs = zipWith field
     field name (ty, Prim) = [C.cexp|$id:(getName name)|]
     field name (_, _) = [C.cexp|&$id:(getName name)|]
 
-compileMemblockDeref :: [VName] -> [(C.Type, ValueType)] -> [C.InitGroup]
-compileMemblockDeref = zipWith field
+compileMemblockDeref :: [(VName, VName)] -> [(C.Type, ValueType)] -> [C.InitGroup]
+compileMemblockDeref = zipWith deref
   where
-    a = nameFromString "a"
-    field name (ty, _) = [C.cdecl|$ty:ty $id:a = *$id:(getName name);|]
+    deref (v1, v2) (ty, _) = [C.cdecl|$ty:ty $id:v1 = *$id:(getName v2);|]
 
 compileFreeStructFields :: [VName] -> [(C.Type, ValueType)] -> [C.FieldGroup]
 compileFreeStructFields = zipWith field
@@ -651,20 +654,20 @@ compileOp (SegOp name params seq_task par_task retvals (SchedulerInfo e sched)) 
 
 compileOp (ForEach i bound body free) = do
   free_ctypes <- mapM paramToCType free
+  new_free <- mapM freshMemName free -- fresh memblock names
   let free_args = map paramName free
+  let _free_args = map paramName new_free
 
   let lexical = lexicalMemoryUsage $ Function Nothing [] free body [] []
 
-  let inputs = compileKernelInputs free_args free_ctypes
+  let inputs = compileKernelInputs _free_args free_ctypes
 
-  -- TODO(k): Come back to generate fresh names for dereferenced memblocks
-  vname <- newVName "Test"
-  traceM(nameToString $ getName vname)
-  let memblock = filter isMemblock free
-  memblock_ctypes <- mapM paramToCType memblock
-  let memblock_args = map paramName memblock
-  let memderef = compileMemblockDeref memblock_args memblock_ctypes
-  --
+  let mem_input = filter isMemblock new_free -- get freshly named memblocks
+  let mem = filter isMemblock free -- old memblocks
+  let mem_args = map paramName mem
+  let mem_input_args = map paramName mem_input
+  mem_ctypes <- mapM paramToCType mem_input
+  let memderef = compileMemblockDeref (zip mem_args mem_input_args) mem_ctypes
 
   let t = primTypeToCType $ primExpType bound
   bound' <- GC.compileExp bound
