@@ -32,7 +32,7 @@ compileSegMapBody ::
   Pat MCMem ->
   SegSpace ->
   KernelBody MCMem ->
-  MulticoreGen Imp.Code
+  MulticoreGen Imp.MCCode
 compileSegMapBody pat space (KernelBody _ kstms kres) = collect $ do
   let (is, ns) = unzip $ unSegSpace space
       ns' = map toInt64Exp ns
@@ -48,7 +48,7 @@ compileSegMap ::
   Pat MCMem ->
   SegSpace ->
   KernelBody MCMem ->
-  MulticoreGen Imp.Code
+  MulticoreGen Imp.MCCode
 compileSegMap pat space kbody = collect $ do
   body <- compileSegMapBody pat space kbody
   free_params <- freeParams body
