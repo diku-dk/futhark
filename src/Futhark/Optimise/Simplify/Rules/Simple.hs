@@ -374,7 +374,7 @@ simpleRules =
     improveReshape
   ]
 
--- | Try to simplify the given 'BasicOp', returning a new 'BasicOp'
+-- | Try to simplify the given t'BasicOp', returning a new t'BasicOp'
 -- and certificates that it must depend on.
 {-# NOINLINE applySimpleRules #-}
 applySimpleRules ::

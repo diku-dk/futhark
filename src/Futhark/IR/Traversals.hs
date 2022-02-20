@@ -353,7 +353,7 @@ walkExpM tv (Op op) =
 -- given op for some representation.
 type OpStmsTraverser m op rep = (Scope rep -> Stms rep -> m (Stms rep)) -> op -> m op
 
--- | This representatin supports an 'OpStmsTraverser' for its 'Op'.
+-- | This representation supports an 'OpStmsTraverser' for its t'Op'.
 -- This is used for some simplification rules.
 class TraverseOpStms rep where
   -- | Transform every sub-'Stms' of this op.

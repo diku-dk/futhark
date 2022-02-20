@@ -237,7 +237,7 @@ instance IsPrimValue Double where
 instance IsPrimValue Bool where
   primValue = BoolValue
 
--- | The value of an 'AttrAtom'.
+-- | The value of an c'AttrAtom'.
 data AttrAtom vn
   = AtomName Name
   | AtomInt Integer

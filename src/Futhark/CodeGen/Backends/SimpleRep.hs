@@ -230,6 +230,9 @@ instance C.ToExp SubExp where
 cScalarDefs :: T.Text
 cScalarDefs = scalarH <> scalarF16H
 
+-- | @storageSize pt rank shape@ produces an expression giving size
+-- taken when storing this value in the binary value format.  It is
+-- assumed that the @shape@ is an array with @rank@ dimensions.
 storageSize :: PrimType -> Int -> C.Exp -> C.Exp
 storageSize pt rank shape =
   [C.cexp|$int:header_size +
@@ -258,6 +261,8 @@ typeStr sign pt =
     (TypeUnsigned, IntType Int32) -> " u32"
     (TypeUnsigned, IntType Int64) -> " u64"
 
+-- | Produce code for storing the header (everything besides the
+-- actual payload) for a value of this type.
 storeValueHeader :: Signedness -> PrimType -> Int -> C.Exp -> C.Exp -> [C.Stm]
 storeValueHeader sign pt rank shape dest =
   [C.cstms|
@@ -276,6 +281,8 @@ storeValueHeader sign pt rank shape dest =
                 memcpy($exp:dest, $exp:shape, $int:rank*sizeof(typename int64_t));
                 $exp:dest += $int:rank*sizeof(typename int64_t);|]
 
+-- | Produce code for loading the header (everything besides the
+-- actual payload) for a value of this type.
 loadValueHeader :: Signedness -> PrimType -> Int -> C.Exp -> C.Exp -> [C.Stm]
 loadValueHeader sign pt rank shape src =
   [C.cstms|
