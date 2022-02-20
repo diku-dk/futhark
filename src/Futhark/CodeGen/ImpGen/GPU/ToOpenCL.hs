@@ -3,7 +3,7 @@
 {-# LANGUAGE TupleSections #-}
 
 -- | This module defines a translation from imperative code with
--- kernels to imperative code with OpenCL calls.
+-- kernels to imperative code with OpenCL or CUDA calls.
 module Futhark.CodeGen.ImpGen.GPU.ToOpenCL
   ( kernelsToOpenCL,
     kernelsToCUDA,
@@ -33,8 +33,12 @@ import qualified Language.C.Quote.OpenCL as C
 import qualified Language.C.Syntax as C
 import NeatInterpolation (untrimming)
 
-kernelsToCUDA, kernelsToOpenCL :: ImpGPU.Program -> ImpOpenCL.Program
+-- | Generate CUDA host and device code.
+kernelsToCUDA :: ImpGPU.Program -> ImpOpenCL.Program
 kernelsToCUDA = translateGPU TargetCUDA
+
+-- | Generate OpenCL host and device code.
+kernelsToOpenCL :: ImpGPU.Program -> ImpOpenCL.Program
 kernelsToOpenCL = translateGPU TargetOpenCL
 
 -- | Translate a kernels-program to an OpenCL-program.

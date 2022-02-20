@@ -1,10 +1,12 @@
 {-# LANGUAGE QuasiQuotes #-}
 
+-- | Boilerplate for sequential C code.
 module Futhark.CodeGen.Backends.SequentialC.Boilerplate (generateBoilerplate) where
 
 import qualified Futhark.CodeGen.Backends.GenericC as GC
 import qualified Language.C.Quote.OpenCL as C
 
+-- | Generate the necessary boilerplate.
 generateBoilerplate :: GC.CompilerM op s ()
 generateBoilerplate = do
   cfg <- GC.publicDef "context_config" GC.InitDecl $ \s ->
