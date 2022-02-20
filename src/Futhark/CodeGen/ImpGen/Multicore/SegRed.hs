@@ -22,7 +22,7 @@ compileSegRed ::
   [SegBinOp MCMem] ->
   KernelBody MCMem ->
   TV Int32 ->
-  MulticoreGen Imp.Code
+  MulticoreGen Imp.MCCode
 compileSegRed pat space reds kbody nsubtasks =
   compileSegRed' pat space reds nsubtasks $ \red_cont ->
     compileStms mempty (kernelBodyStms kbody) $ do
@@ -41,7 +41,7 @@ compileSegRed' ::
   [SegBinOp MCMem] ->
   TV Int32 ->
   DoSegBody ->
-  MulticoreGen Imp.Code
+  MulticoreGen Imp.MCCode
 compileSegRed' pat space reds nsubtasks kbody
   | [_] <- unSegSpace space =
     nonsegmentedReduction pat space reds nsubtasks kbody
@@ -78,7 +78,7 @@ nonsegmentedReduction ::
   [SegBinOp MCMem] ->
   TV Int32 ->
   DoSegBody ->
-  MulticoreGen Imp.Code
+  MulticoreGen Imp.MCCode
 nonsegmentedReduction pat space reds nsubtasks kbody = collect $ do
   thread_res_arrs <- groupResultArrays "reduce_stage_1_tid_res_arr" (tvSize nsubtasks) reds
   let slugs1 = zipWith SegBinOpSlug reds thread_res_arrs
@@ -205,7 +205,7 @@ segmentedReduction ::
   SegSpace ->
   [SegBinOp MCMem] ->
   DoSegBody ->
-  MulticoreGen Imp.Code
+  MulticoreGen Imp.MCCode
 segmentedReduction pat space reds kbody =
   collect $ do
     body <- compileSegRedBody pat space reds kbody
@@ -217,7 +217,7 @@ compileSegRedBody ::
   SegSpace ->
   [SegBinOp MCMem] ->
   DoSegBody ->
-  MulticoreGen Imp.Code
+  MulticoreGen Imp.MCCode
 compileSegRedBody pat space reds kbody = do
   let (is, ns) = unzip $ unSegSpace space
       ns_64 = map toInt64Exp ns

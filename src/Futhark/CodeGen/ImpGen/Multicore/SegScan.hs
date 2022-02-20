@@ -19,7 +19,7 @@ compileSegScan ::
   [SegBinOp MCMem] ->
   KernelBody MCMem ->
   TV Int32 ->
-  MulticoreGen Imp.Code
+  MulticoreGen Imp.MCCode
 compileSegScan pat space reds kbody nsubtasks
   | [_] <- unSegSpace space =
     nonsegmentedScan pat space reds kbody nsubtasks
@@ -50,7 +50,7 @@ nonsegmentedScan ::
   [SegBinOp MCMem] ->
   KernelBody MCMem ->
   TV Int32 ->
-  MulticoreGen Imp.Code
+  MulticoreGen Imp.MCCode
 nonsegmentedScan pat space scan_ops kbody nsubtasks = do
   emit $ Imp.DebugPrint "nonsegmented segScan" Nothing
   collect $ do
@@ -256,7 +256,7 @@ segmentedScan ::
   SegSpace ->
   [SegBinOp MCMem] ->
   KernelBody MCMem ->
-  MulticoreGen Imp.Code
+  MulticoreGen Imp.MCCode
 segmentedScan pat space scan_ops kbody = do
   emit $ Imp.DebugPrint "segmented segScan" Nothing
   collect $ do
@@ -269,7 +269,7 @@ compileSegScanBody ::
   SegSpace ->
   [SegBinOp MCMem] ->
   KernelBody MCMem ->
-  MulticoreGen Imp.Code
+  MulticoreGen Imp.MCCode
 compileSegScanBody pat space scan_ops kbody = collect $ do
   let (is, ns) = unzip $ unSegSpace space
       ns_64 = map toInt64Exp ns

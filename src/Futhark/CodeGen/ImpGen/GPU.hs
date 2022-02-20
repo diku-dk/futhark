@@ -178,7 +178,7 @@ segOpCompiler pat segop =
 -- otherwise protected by their own multi-versioning branches deeper
 -- down.  Currently the compiler will not generate multi-versioning
 -- that makes this a problem, but it might in the future.
-checkLocalMemoryReqs :: Imp.Code -> CallKernelGen (Maybe (Imp.TExp Bool))
+checkLocalMemoryReqs :: Imp.HostCode -> CallKernelGen (Maybe (Imp.TExp Bool))
 checkLocalMemoryReqs code = do
   scope <- askScope
   let alloc_sizes = map (sum . map alignedSize . localAllocSizes . Imp.kernelBody) $ getGPU code
@@ -313,7 +313,7 @@ mapTransposeForType bt = do
 mapTransposeName :: PrimType -> String
 mapTransposeName bt = "gpu_map_transpose_" ++ pretty bt
 
-mapTransposeFunction :: PrimType -> Imp.Function
+mapTransposeFunction :: PrimType -> Imp.Function Imp.HostOp
 mapTransposeFunction bt =
   Imp.Function Nothing [] params transpose_code [] []
   where

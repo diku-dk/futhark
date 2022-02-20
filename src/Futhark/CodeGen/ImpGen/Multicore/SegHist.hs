@@ -21,7 +21,7 @@ compileSegHist ::
   [HistOp MCMem] ->
   KernelBody MCMem ->
   TV Int32 ->
-  MulticoreGen Imp.Code
+  MulticoreGen Imp.MCCode
 compileSegHist pat space histops kbody nsubtasks
   | [_] <- unSegSpace space =
     nonsegmentedHist pat space histops kbody nsubtasks
@@ -42,7 +42,7 @@ nonsegmentedHist ::
   [HistOp MCMem] ->
   KernelBody MCMem ->
   TV Int32 ->
-  MulticoreGen Imp.Code
+  MulticoreGen Imp.MCCode
 nonsegmentedHist pat space histops kbody num_histos = do
   let ns = map snd $ unSegSpace space
       ns_64 = map toInt64Exp ns
@@ -291,7 +291,7 @@ segmentedHist ::
   SegSpace ->
   [HistOp MCMem] ->
   KernelBody MCMem ->
-  MulticoreGen Imp.Code
+  MulticoreGen Imp.MCCode
 segmentedHist pat space histops kbody = do
   emit $ Imp.DebugPrint "Segmented segHist" Nothing
   collect $ do
@@ -304,7 +304,7 @@ compileSegHistBody ::
   SegSpace ->
   [HistOp MCMem] ->
   KernelBody MCMem ->
-  MulticoreGen Imp.Code
+  MulticoreGen Imp.MCCode
 compileSegHistBody pat space histops kbody = collect $ do
   let (is, ns) = unzip $ unSegSpace space
       ns_64 = map toInt64Exp ns
