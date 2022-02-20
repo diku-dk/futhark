@@ -246,8 +246,8 @@ compileThreadExp dest e =
 
 -- | Assign iterations of a for-loop to all threads in the kernel.
 -- The passed-in function is invoked with the (symbolic) iteration.
--- 'threadOperations' will be in effect in the body.  For
--- multidimensional loops, use 'groupCoverSpace'.
+-- The body must contain thread-level code.  For multidimensional
+-- loops, use 'groupCoverSpace'.
 kernelLoop ::
   IntExp t =>
   Imp.TExp t ->

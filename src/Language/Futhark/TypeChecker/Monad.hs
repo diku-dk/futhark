@@ -74,10 +74,9 @@ import Language.Futhark.Warnings
 import qualified Paths_futhark
 import Prelude hiding (mapM, mod)
 
--- | A note with extra information regarding a type error.
 newtype Note = Note Doc
 
--- | A collection of 'Note's.
+-- | A collection of extra information regarding a type error.
 newtype Notes = Notes [Note]
   deriving (Semigroup, Monoid)
 

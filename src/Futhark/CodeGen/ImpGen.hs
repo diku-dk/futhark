@@ -1696,9 +1696,9 @@ copyDWIMFix ::
 copyDWIMFix dest dest_is src src_is =
   copyDWIM dest (map DimFix dest_is) src (map DimFix src_is)
 
--- | @compileAlloc pat size space@ allocates @n@ bytes of memory in @space@,
--- writing the result to @dest@, which must be a single
--- 'MemoryDestination',
+-- | @compileAlloc pat size space@ allocates @n@ bytes of memory in
+-- @space@, writing the result to @pat@, which must contain a single
+-- memory-typed element.
 compileAlloc ::
   Mem rep inner => Pat rep -> SubExp -> Space -> ImpM rep r op ()
 compileAlloc (Pat [mem]) e space = do

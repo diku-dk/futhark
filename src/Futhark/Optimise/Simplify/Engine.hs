@@ -112,6 +112,10 @@ emptyEnv rules blockers =
       envVtable = mempty
     }
 
+-- | A function that protects a hoisted operation (if possible).  The
+-- first operand is the condition of the 'If' we have hoisted out of
+-- (or equivalently, a boolean indicating whether a loop has nonzero
+-- trip count).
 type Protect m = SubExp -> Pat (Rep m) -> Op (Rep m) -> Maybe (m ())
 
 type SimplifyOp rep op = op -> SimpleM rep (op, Stms (Wise rep))

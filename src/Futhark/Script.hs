@@ -129,7 +129,7 @@ inBraces :: Parser () -> Parser a -> Parser a
 inBraces sep = between (lexeme sep "{") (lexeme sep "}")
 
 -- | Parse a FutharkScript expression, given a whitespace parser.
-parseExp :: Parser () -> Parser Exp
+parseExp :: Parsec Void T.Text () -> Parsec Void T.Text Exp
 parseExp sep =
   choice
     [ lexeme sep "let" $> Let

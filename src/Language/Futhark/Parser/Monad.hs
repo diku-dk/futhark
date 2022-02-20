@@ -8,6 +8,7 @@
 -- standards.
 module Language.Futhark.Parser.Monad
   ( ParserMonad,
+    ParserEnv,
     ReadLineMonad (..),
     parseInMonad,
     parse,
@@ -34,6 +35,10 @@ module Language.Futhark.Parser.Monad
     emptyArrayError,
     parseError,
     parseErrorAt,
+
+    -- * Reexports
+    L,
+    Token,
   )
 where
 

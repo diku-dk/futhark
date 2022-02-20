@@ -7,6 +7,7 @@ module Futhark.CodeGen.Backends.GenericWASM
     GC.asLibrary,
     GC.asExecutable,
     GC.asServer,
+    EntryPointType,
     JSEntryPoint (..),
     emccExportNames,
     javascriptWrapper,
