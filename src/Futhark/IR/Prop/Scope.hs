@@ -16,6 +16,10 @@
 -- from variable names to 'NameInfo's.  Convenience facilities are
 -- also provided to communicate that some monad or applicative functor
 -- maintains type information.
+--
+-- A simple example of a monad that maintains such as environment is
+-- 'Reader'.  Indeed, 'HasScope' and 'LocalScope' instances for this
+-- monad are already defined.
 module Futhark.IR.Prop.Scope
   ( HasScope (..),
     NameInfo (..),

@@ -5,10 +5,10 @@
 {-# LANGUAGE Strict #-}
 
 -- | The Futhark source language AST definition.  Many types, such as
--- 'ExpBase'@, are parametrised by type and name representation.
+-- 'ExpBase', are parametrised by type and name representation.
 -- E.g. in a value of type @ExpBase f vn@, annotations are wrapped in
--- the functor @f@, and all names are of type @vn@.  See the
--- @https://futhark.readthedocs.org@ for a language reference, or this
+-- the functor @f@, and all names are of type @vn@.  See
+-- https://futhark.readthedocs.org for a language reference, or this
 -- module may be a little hard to understand.
 module Language.Futhark.Syntax
   ( module Language.Futhark.Core,
