@@ -14,11 +14,11 @@
 -- The core language type system is much more restricted than the core
 -- language.  This is a theme that repeats often.  The only types that
 -- are supported in the core language are various primitive types
--- t'PrimType' which can be combined in arrays (ignore v'Mem' for
--- now).  Types are represented as t'TypeBase', which is parameterised
--- by the shape of the array and whether we keep uniqueness
--- information.  The t'Type' alias, which is the most commonly used,
--- uses t'Shape' and t'NoUniqueness'.
+-- t'PrimType' which can be combined in arrays (ignore v'Mem' and
+-- v'Acc' for now).  Types are represented as t'TypeBase', which is
+-- parameterised by the shape of the array and whether we keep
+-- uniqueness information.  The t'Type' alias, which is the most
+-- commonly used, uses t'Shape' and t'NoUniqueness'.
 --
 -- This means that the records, tuples, and sum types of the source
 -- language are represented merely as collections of primitives and

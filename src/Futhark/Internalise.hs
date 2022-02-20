@@ -39,7 +39,7 @@
 --
 -- * For the above reason, SOACs also accept multiple input arrays.
 --   The available primitive operations are also somewhat different
---   than in the source language.  See "Futhark.IR.SOACS.SOAC.SOAC".
+--   than in the source language.  See 'Futhark.IR.SOACS.SOAC.SOAC'.
 module Futhark.Internalise (internaliseProg) where
 
 import qualified Data.Text as T
