@@ -16,6 +16,7 @@ where
 import Futhark.CodeGen.ImpCode
 import Futhark.Util.Pretty
 
+-- | An imperative multicore program.
 type Program = Functions Multicore
 
 -- | A multicore operation.
@@ -59,11 +60,16 @@ instance FreeIn AtomicOp where
   freeIn' (AtomicCmpXchg _ _ arr i retval x) = freeIn' arr <> freeIn' i <> freeIn' x <> freeIn' retval
   freeIn' (AtomicXchg _ _ arr i x) = freeIn' arr <> freeIn' i <> freeIn' x
 
+-- | Information about parallel work that is do be done.  This is
+-- passed to the scheduler to help it make scheduling decisions.
 data SchedulerInfo = SchedulerInfo
-  { iterations :: Exp, -- The number of total iterations for a task
-    scheduling :: Scheduling -- The type scheduling for the task
+  { -- | The number of total iterations for a task.
+    iterations :: Exp,
+    -- | The type scheduling for the task.
+    scheduling :: Scheduling
   }
 
+-- | A task for a v'SegOp'.
 newtype ParallelTask = ParallelTask (Code Multicore)
 
 -- | Whether the Scheduler should schedule the tasks as Dynamic
