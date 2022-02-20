@@ -107,7 +107,7 @@ data KernelConstants = KernelConstants
 -- | The sizes of nested iteration spaces in the kernel.
 type SegOpSizes = S.Set [SubExp]
 
--- | Find the sizes of nested parallelism in a 'SegOp' body.
+-- | Find the sizes of nested parallelism in a t'SegOp' body.
 segOpSizes :: Stms GPUMem -> SegOpSizes
 segOpSizes = onStms
   where
@@ -506,7 +506,7 @@ flattenArray k flat arr = do
 --
 -- 2. Executes the body of @lam@.
 --
--- 3. Binds the 'SubExp's that are the 'Result' of @lam@ to the
+-- 3. Binds the t'SubExp's that are the 'Result' of @lam@ to the
 -- provided @dest@s, again interpreted as the destination for a
 -- 'copyDWIM'.
 applyLambda ::

@@ -151,7 +151,7 @@ histType op =
     lambdaReturnType $ histOp op
 
 -- | Split reduction results returned by a 'KernelBody' into those
--- that correspond to indexes for the 'HistOps', and those that
+-- that correspond to indexes for the 'HistOp's, and those that
 -- correspond to value.
 splitHistResults :: [HistOp rep] -> [SubExp] -> [([SubExp], [SubExp])]
 splitHistResults ops res =

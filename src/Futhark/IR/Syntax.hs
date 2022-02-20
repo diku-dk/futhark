@@ -376,9 +376,10 @@ data BasicOp
     -- concat(0, [1] :| [[2, 3, 4], [5, 6]], 6) = [1, 2, 3, 4, 5, 6]@.
     -- @
     --
-    -- Concatenates the non-empty list of 'VName' resulting in an array of
-    -- length 'SubExp'. The 'Int' argument is used to specify the dimension
-    -- along which the arrays are concatenated. For instance:
+    -- Concatenates the non-empty list of 'VName' resulting in an
+    -- array of length t'SubExp'. The 'Int' argument is used to
+    -- specify the dimension along which the arrays are
+    -- concatenated. For instance:
     --
     -- @
     -- concat(1, [[1,2], [3, 4]] :| [[[5,6]], [[7, 8]]], 4) = [[1, 2, 5, 6], [3, 4, 7, 8]]
