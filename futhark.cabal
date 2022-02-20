@@ -366,7 +366,7 @@ library
   default-language: Haskell2010
 
 executable futhark
-  main-is: src/futhark.hs
+  main-is: src/main.hs
   other-modules:
       Paths_futhark
   ghc-options: -Wall -Wcompat -Wno-incomplete-uni-patterns -Wredundant-constraints -Wincomplete-record-updates -Wmissing-export-lists -threaded -rtsopts "-with-rtsopts=-N -qg1 -A16M"
