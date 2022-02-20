@@ -663,11 +663,11 @@ compileOp (ForEach i bound body free) = do
   let inputs = compileKernelInputs _free_args free_ctypes
 
   let mem_input = filter isMemblock new_free -- get freshly named memblocks
-  let mem = filter isMemblock free -- old memblocks
-  let mem_args = map paramName mem
+  let mem_body = filter isMemblock free -- old memblocks
+  let mem_body_args = map paramName mem_body
   let mem_input_args = map paramName mem_input
   mem_ctypes <- mapM paramToCType mem_input
-  let memderef = compileMemblockDeref (zip mem_args mem_input_args) mem_ctypes
+  let memderef = compileMemblockDeref (zip mem_body_args mem_input_args) mem_ctypes
 
   let t = primTypeToCType $ primExpType bound
   bound' <- GC.compileExp bound
