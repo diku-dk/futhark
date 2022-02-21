@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
-## [0.22.0]
+## [0.21.7]
 
 ### Added
 
@@ -17,10 +17,6 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Reloading a large program in `futhark repl` is now faster, as long
   as not too many of its files have been modified (#1597).
-
-### Removed
-
-### Changed
 
 ### Fixed
 
