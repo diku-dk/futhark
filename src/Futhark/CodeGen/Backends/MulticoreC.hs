@@ -269,9 +269,9 @@ isMemblock _  = False
 
 data ValueType = Prim | MemBlock | RawMem
 
-freshMemName :: Param -> GC.CompilerM op s Param
-freshMemName (MemParam _ s) = newVName "mem" >>= (\v' -> return $ MemParam v' s)
-freshMemName param = return param
+freshMemName :: Param -> Param
+freshMemName (MemParam v s) = MemParam (VName (nameFromString ('_' : baseString v)) (baseTag v)) s
+freshMemName param = param
 
 compileKernelInputs :: [VName] -> [(C.Type, ValueType)] -> [C.Param]
 compileKernelInputs = zipWith field
@@ -654,7 +654,7 @@ compileOp (SegOp name params seq_task par_task retvals (SchedulerInfo e sched)) 
 
 compileOp (ForEach i bound body free) = do
   free_ctypes <- mapM paramToCType free
-  new_free <- mapM freshMemName free -- fresh memblock names
+  let new_free = map freshMemName free -- fresh memblock names
   let free_args = map paramName free
   let _free_args = map paramName new_free
 
