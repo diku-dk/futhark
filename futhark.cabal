@@ -311,7 +311,7 @@ library
       Paths_futhark
   hs-source-dirs:
       src
-  ghc-options: -Wall -Wcompat -Wno-incomplete-uni-patterns -Wredundant-constraints -Wincomplete-record-updates -Wmissing-export-lists
+  ghc-options: -Wall -Wcompat -Wno-incomplete-uni-patterns -Wredundant-constraints -Wincomplete-record-updates -Wmissing-export-lists -Wunused-packages
   build-tool-depends:
       alex:alex
     , happy:happy
@@ -359,7 +359,6 @@ library
     , time >=1.6.0.1
     , transformers >=0.3
     , vector >=0.12
-    , vector-binary-instances >=0.2.2.0
     , versions >=5.0.0
     , zip-archive >=0.3.1.1
     , zlib >=0.6.1.2
@@ -369,7 +368,7 @@ executable futhark
   main-is: src/main.hs
   other-modules:
       Paths_futhark
-  ghc-options: -Wall -Wcompat -Wno-incomplete-uni-patterns -Wredundant-constraints -Wincomplete-record-updates -Wmissing-export-lists -threaded -rtsopts "-with-rtsopts=-N -qg1 -A16M"
+  ghc-options: -Wall -Wcompat -Wno-incomplete-uni-patterns -Wredundant-constraints -Wincomplete-record-updates -Wmissing-export-lists -Wunused-packages -threaded -rtsopts "-with-rtsopts=-N -qg1 -A16M"
   build-depends:
       base
     , futhark
