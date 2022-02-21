@@ -2644,11 +2644,13 @@ struct memblock {
 #define memblock_ref memblock * uniform
 #define auto export
 
-auto static void futhark_mc_loop_ispc_4607(uniform int64_t dz2080U_4583, uniform
-                                           memblock *uniform _a_mem_4590,
-                                           uniform memblock *uniform _mem_4593,
-                                           uniform int64_t start_4596, uniform
-                                           int64_t n_4598)
+export static void futhark_mc_loop_ispc_4607(uniform int64_t dz2080U_4583,
+                                             uniform
+                                             memblock *uniform _a_mem_4590,
+                                             uniform
+                                             memblock *uniform _mem_4593,
+                                             uniform int64_t start_4596, uniform
+                                             int64_t n_4598)
 {
     struct memblock a_mem_4590 = *_a_mem_4590;
     struct memblock mem_4593 = *_mem_4593;

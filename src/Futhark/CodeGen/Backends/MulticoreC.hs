@@ -691,7 +691,7 @@ compileOp (ForEach i bound body free) = do
         --mapM_ GC.item =<< GC.declAllocatedMem
         --mapM_ GC.item body'
     return
-      [C.cedecl|auto static void $id:s($params:inputs) {
+      [ISPC.cedecl|export static void $id:s($params:inputs) {
                        $decls:memderef
                        $items:loopBody
                      }|]
