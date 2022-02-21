@@ -13,7 +13,7 @@ import Futhark.Transform.Rename
 
 writeResult ::
   [VName] ->
-  PatElemT dec ->
+  PatElem dec ->
   KernelResult ->
   MulticoreGen ()
 writeResult is pe (Returns _ _ se) =
@@ -29,7 +29,7 @@ writeResult _ _ res =
   error $ "writeResult: cannot handle " ++ pretty res
 
 compileSegMapBody ::
-  Pat MCMem ->
+  Pat LetDecMem ->
   SegSpace ->
   KernelBody MCMem ->
   MulticoreGen Imp.MCCode
@@ -45,7 +45,7 @@ compileSegMapBody pat space (KernelBody _ kstms kres) = collect $ do
       zipWithM_ (writeResult is) (patElems pat) kres
 
 compileSegMap ::
-  Pat MCMem ->
+  Pat LetDecMem ->
   SegSpace ->
   KernelBody MCMem ->
   MulticoreGen Imp.MCCode

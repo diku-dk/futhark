@@ -104,7 +104,7 @@ getIterationDomain _ space = do
 
 -- When the SegRed's return value is a scalar
 -- we perform a call by value-result in the segop function
-getReturnParams :: Pat MCMem -> SegOp () MCMem -> MulticoreGen [Imp.Param]
+getReturnParams :: Pat LetDecMem -> SegOp () MCMem -> MulticoreGen [Imp.Param]
 getReturnParams pat SegRed {} =
   -- It's a good idea to make sure any prim values are initialised, as
   -- we will load them (redundantly) in the task code, and
@@ -124,7 +124,7 @@ renameSegBinOp segbinops =
 
 compileThreadResult ::
   SegSpace ->
-  PatElem MCMem ->
+  PatElem LetDecMem ->
   KernelResult ->
   MulticoreGen ()
 compileThreadResult space pe (Returns _ _ what) = do

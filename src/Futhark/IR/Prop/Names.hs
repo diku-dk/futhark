@@ -337,7 +337,7 @@ instance FreeIn shape => FreeIn (TypeBase shape u) where
 instance FreeIn dec => FreeIn (Param dec) where
   freeIn' (Param attrs _ dec) = freeIn' attrs <> freeIn' dec
 
-instance FreeIn dec => FreeIn (PatElemT dec) where
+instance FreeIn dec => FreeIn (PatElem dec) where
   freeIn' (PatElem _ dec) = freeIn' dec
 
 instance FreeIn (LParamInfo rep) => FreeIn (LoopForm rep) where
@@ -362,7 +362,7 @@ instance FreeIn d => FreeIn (FlatSlice d) where
 instance FreeIn SubExpRes where
   freeIn' (SubExpRes cs se) = freeIn' cs <> freeIn' se
 
-instance FreeIn dec => FreeIn (PatT dec) where
+instance FreeIn dec => FreeIn (Pat dec) where
   freeIn' (Pat xs) =
     fvBind bound_here $ freeIn' xs
     where

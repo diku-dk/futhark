@@ -156,13 +156,13 @@ import Language.Futhark.Warnings
 import Prelude hiding (quot)
 
 -- | How to compile an t'Op'.
-type OpCompiler rep r op = Pat rep -> Op rep -> ImpM rep r op ()
+type OpCompiler rep r op = Pat (LetDec rep) -> Op rep -> ImpM rep r op ()
 
 -- | How to compile some 'Stms'.
 type StmsCompiler rep r op = Names -> Stms rep -> ImpM rep r op () -> ImpM rep r op ()
 
 -- | How to compile an 'Exp'.
-type ExpCompiler rep r op = Pat rep -> Exp rep -> ImpM rep r op ()
+type ExpCompiler rep r op = Pat (LetDec rep) -> Exp rep -> ImpM rep r op ()
 
 type CopyCompiler rep r op =
   PrimType ->
@@ -667,7 +667,7 @@ compileFunDef (FunDef entry _ fname rettype params body) =
 
       pure (outparams, inparams, results, args)
 
-compileBody :: Pat rep -> Body rep -> ImpM rep r op ()
+compileBody :: Pat (LetDec rep) -> Body rep -> ImpM rep r op ()
 compileBody pat (Body _ stms ses) = do
   dests <- destinationFromPat pat
   compileStms (freeIn ses) stms $
@@ -746,14 +746,14 @@ defCompileStms alive_after_stms all_stms m =
       Mem space -> Just (patElemName pe, space)
       _ -> Nothing
 
-compileExp :: Pat rep -> Exp rep -> ImpM rep r op ()
+compileExp :: Pat (LetDec rep) -> Exp rep -> ImpM rep r op ()
 compileExp pat e = do
   ec <- asks envExpCompiler
   ec pat e
 
 defCompileExp ::
   (Mem rep inner) =>
-  Pat rep ->
+  Pat (LetDec rep) ->
   Exp rep ->
   ImpM rep r op ()
 defCompileExp pat (If cond tbranch fbranch _) =
@@ -835,7 +835,7 @@ traceArray s t shape se = do
 
 defCompileBasicOp ::
   Mem rep inner =>
-  Pat rep ->
+  Pat (LetDec rep) ->
   BasicOp ->
   ImpM rep r op ()
 defCompileBasicOp (Pat [pe]) (SubExp se) =
@@ -1026,7 +1026,7 @@ addLoopVar i it = addVar i $ ScalarVar Nothing $ ScalarEntry $ IntType it
 dVars ::
   Mem rep inner =>
   Maybe (Exp rep) ->
-  [PatElem rep] ->
+  [PatElem (LetDec rep)] ->
   ImpM rep r op ()
 dVars e = mapM_ dVar
   where
@@ -1333,7 +1333,7 @@ lookupAcc name is = do
           error $ "ImpGen.lookupAcc: unlisted accumulator: " ++ pretty name
     _ -> error $ "ImpGen.lookupAcc: not an accumulator: " ++ pretty name
 
-destinationFromPat :: Pat rep -> ImpM rep r op [ValueDestination]
+destinationFromPat :: Pat (LetDec rep) -> ImpM rep r op [ValueDestination]
 destinationFromPat = mapM inspect . patElems
   where
     inspect pe = do
@@ -1700,7 +1700,7 @@ copyDWIMFix dest dest_is src src_is =
 -- @space@, writing the result to @pat@, which must contain a single
 -- memory-typed element.
 compileAlloc ::
-  Mem rep inner => Pat rep -> SubExp -> Space -> ImpM rep r op ()
+  Mem rep inner => Pat (LetDec rep) -> SubExp -> Space -> ImpM rep r op ()
 compileAlloc (Pat [mem]) e space = do
   let e' = Imp.bytes $ toInt64Exp e
   allocator <- asks $ M.lookup space . envAllocCompilers

@@ -77,7 +77,7 @@ type DoSegBody = ([(SubExp, [Imp.TExp Int64])] -> InKernelGen ()) -> InKernelGen
 -- | Compile 'SegRed' instance to host-level code with calls to
 -- various kernels.
 compileSegRed ::
-  Pat GPUMem ->
+  Pat LetDecMem ->
   SegLevel ->
   SegSpace ->
   [SegBinOp GPUMem] ->
@@ -96,7 +96,7 @@ compileSegRed pat lvl space reds body =
 
 -- | Like 'compileSegRed', but where the body is a monadic action.
 compileSegRed' ::
-  Pat GPUMem ->
+  Pat LetDecMem ->
   SegLevel ->
   SegSpace ->
   [SegBinOp GPUMem] ->
@@ -171,7 +171,7 @@ groupResultArrays (Count virt_num_groups) (Count group_size) reds =
       sAllocArrayPerm "segred_tmp" pt full_shape (Space "device") perm
 
 nonsegmentedReduction ::
-  Pat GPUMem ->
+  Pat LetDecMem ->
   Count NumGroups SubExp ->
   Count GroupSize SubExp ->
   SegSpace ->
@@ -255,7 +255,7 @@ nonsegmentedReduction segred_pat num_groups group_size space reds body = do
   emit $ Imp.DebugPrint "" Nothing
 
 smallSegmentsReduction ::
-  Pat GPUMem ->
+  Pat LetDecMem ->
   Count NumGroups SubExp ->
   Count GroupSize SubExp ->
   SegSpace ->
@@ -364,7 +364,7 @@ smallSegmentsReduction (Pat segred_pes) num_groups group_size space reds body = 
   emit $ Imp.DebugPrint "" Nothing
 
 largeSegmentsReduction ::
-  Pat GPUMem ->
+  Pat LetDecMem ->
   Count NumGroups SubExp ->
   Count GroupSize SubExp ->
   SegSpace ->
@@ -702,7 +702,7 @@ reductionStageOne constants ispace num_elements global_tid elems_per_thread thre
 
 reductionStageTwo ::
   KernelConstants ->
-  [PatElem GPUMem] ->
+  [PatElem LetDecMem] ->
   Imp.TExp Int32 ->
   Imp.TExp Int32 ->
   [Imp.TExp Int64] ->

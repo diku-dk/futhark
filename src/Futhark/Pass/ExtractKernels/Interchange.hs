@@ -36,7 +36,7 @@ import Futhark.Util (splitFromEnd)
 -- | An encoding of a sequential do-loop with no existential context,
 -- alongside its result pattern.
 data SeqLoop
-  = SeqLoop [Int] (Pat SOACS) [(FParam SOACS, SubExp)] (LoopForm SOACS) (Body SOACS)
+  = SeqLoop [Int] (Pat Type) [(FParam SOACS, SubExp)] (LoopForm SOACS) (Body SOACS)
 
 loopPerm :: SeqLoop -> [Int]
 loopPerm (SeqLoop perm _ _ _ _) = perm
@@ -185,7 +185,7 @@ interchangeLoops full_nest = recurse (kernelNestLoops full_nest)
 
 -- | An encoding of a branch with alongside its result pattern.
 data Branch
-  = Branch [Int] (Pat SOACS) SubExp (Body SOACS) (Body SOACS) (IfDec (BranchType SOACS))
+  = Branch [Int] (Pat Type) SubExp (Body SOACS) (Body SOACS) (IfDec (BranchType SOACS))
 
 branchStm :: Branch -> Stm SOACS
 branchStm (Branch _ pat cond tbranch fbranch ret) =
@@ -232,7 +232,7 @@ interchangeBranch nest loop = do
 
 -- | An encoding of a WithAcc with alongside its result pattern.
 data WithAccStm
-  = WithAccStm [Int] (Pat SOACS) [(Shape, [VName], Maybe (Lambda SOACS, [SubExp]))] (Lambda SOACS)
+  = WithAccStm [Int] (Pat Type) [(Shape, [VName], Maybe (Lambda SOACS, [SubExp]))] (Lambda SOACS)
 
 withAccStm :: WithAccStm -> Stm SOACS
 withAccStm (WithAccStm _ pat inputs lam) =

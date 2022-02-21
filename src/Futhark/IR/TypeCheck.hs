@@ -79,7 +79,7 @@ data ErrorCase rep
   | DupDefinitionError Name
   | DupParamError Name VName
   | DupPatError VName
-  | InvalidPatError (Pat (Aliases rep)) [ExtType] (Maybe String)
+  | InvalidPatError (Pat (LetDec (Aliases rep))) [ExtType] (Maybe String)
   | UnknownVariableError VName
   | UnknownFunctionError Name
   | ParameterMismatch (Maybe Name) [Type] [Type]
@@ -1231,7 +1231,7 @@ checkBinOpArgs t e1 e2 = do
 
 checkPatElem ::
   Checkable rep =>
-  PatElemT (LetDec rep) ->
+  PatElem (LetDec rep) ->
   TypeM rep ()
 checkPatElem (PatElem name dec) =
   context ("When checking pattern element " ++ pretty name) $
@@ -1288,7 +1288,7 @@ checkStm stm@(Let pat (StmAux (Certs cs) _ (_, dec)) e) m = do
 
 matchExtPat ::
   Checkable rep =>
-  Pat (Aliases rep) ->
+  Pat (LetDec (Aliases rep)) ->
   [ExtType] ->
   TypeM rep ()
 matchExtPat pat ts =
@@ -1491,7 +1491,7 @@ class (ASTRep rep, CanBeAliased (Op rep), CheckableOp rep) => Checkable rep wher
   checkLParamDec :: VName -> LParamInfo rep -> TypeM rep ()
   checkLetBoundDec :: VName -> LetDec rep -> TypeM rep ()
   checkRetType :: [RetType rep] -> TypeM rep ()
-  matchPat :: Pat (Aliases rep) -> Exp (Aliases rep) -> TypeM rep ()
+  matchPat :: Pat (LetDec (Aliases rep)) -> Exp (Aliases rep) -> TypeM rep ()
   primFParam :: VName -> PrimType -> TypeM rep (FParam (Aliases rep))
   matchReturnType :: [RetType rep] -> Result -> TypeM rep ()
   matchBranchType :: [BranchType rep] -> Body (Aliases rep) -> TypeM rep ()
@@ -1515,7 +1515,7 @@ class (ASTRep rep, CanBeAliased (Op rep), CheckableOp rep) => Checkable rep wher
   default checkRetType :: RetType rep ~ DeclExtType => [RetType rep] -> TypeM rep ()
   checkRetType = mapM_ $ checkExtType . declExtTypeOf
 
-  default matchPat :: Pat (Aliases rep) -> Exp (Aliases rep) -> TypeM rep ()
+  default matchPat :: Pat (LetDec (Aliases rep)) -> Exp (Aliases rep) -> TypeM rep ()
   matchPat pat = matchExtPat pat <=< expExtType
 
   default primFParam :: FParamInfo rep ~ DeclType => VName -> PrimType -> TypeM rep (FParam (Aliases rep))

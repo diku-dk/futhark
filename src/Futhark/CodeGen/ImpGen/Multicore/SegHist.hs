@@ -16,7 +16,7 @@ import Futhark.Util.IntegralExp (rem)
 import Prelude hiding (quot, rem)
 
 compileSegHist ::
-  Pat MCMem ->
+  Pat LetDecMem ->
   SegSpace ->
   [HistOp MCMem] ->
   KernelBody MCMem ->
@@ -37,7 +37,7 @@ histSize :: HistOp MCMem -> Imp.TExp Int64
 histSize = product . map toInt64Exp . shapeDims . histShape
 
 nonsegmentedHist ::
-  Pat MCMem ->
+  Pat LetDecMem ->
   SegSpace ->
   [HistOp MCMem] ->
   KernelBody MCMem ->
@@ -91,7 +91,7 @@ onOpAtomic op = do
       return $ f l'
 
 atomicHistogram ::
-  Pat MCMem ->
+  Pat LetDecMem ->
   SegSpace ->
   [HistOp MCMem] ->
   KernelBody MCMem ->
@@ -161,7 +161,7 @@ updateHisto op arrs bucket = do
 -- across the histogram indicies.
 -- This is expected to be fast if len(histDest) is small
 subHistogram ::
-  Pat MCMem ->
+  Pat LetDecMem ->
   SegSpace ->
   [HistOp MCMem] ->
   TV Int32 ->
@@ -287,7 +287,7 @@ subHistogram pat space histops num_histos kbody = do
 -- parallelize over the segments,
 -- where each segment is updated sequentially.
 segmentedHist ::
-  Pat MCMem ->
+  Pat LetDecMem ->
   SegSpace ->
   [HistOp MCMem] ->
   KernelBody MCMem ->
@@ -300,7 +300,7 @@ segmentedHist pat space histops kbody = do
     emit $ Imp.Op $ Imp.ParLoop "segmented_hist" body free_params
 
 compileSegHistBody ::
-  Pat MCMem ->
+  Pat LetDecMem ->
   SegSpace ->
   [HistOp MCMem] ->
   KernelBody MCMem ->

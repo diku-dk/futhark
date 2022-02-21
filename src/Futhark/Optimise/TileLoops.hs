@@ -344,7 +344,7 @@ tileDoLoop ::
   Names ->
   (Stms GPU, Tiling, TiledBody) ->
   [Type] ->
-  Pat GPU ->
+  Pat Type ->
   StmAux (ExpDec GPU) ->
   [(FParam GPU, SubExp)] ->
   VName ->
@@ -625,7 +625,7 @@ protectOutOfBounds desc in_bounds ts m = do
 postludeGeneric ::
   Tiling ->
   PrivStms ->
-  Pat GPU ->
+  Pat Type ->
   [VName] ->
   Stms GPU ->
   Result ->
@@ -655,7 +655,7 @@ tileGeneric ::
   DoTiling gtids kdims ->
   SegLevel ->
   [Type] ->
-  Pat GPU ->
+  Pat Type ->
   gtids ->
   kdims ->
   SubExp ->
