@@ -2,7 +2,6 @@ module Futhark.Pass.MergeGPUBodies (mergeGPUBodies) where
 
 import Control.Monad
 import Control.Monad.Trans.Class
-import qualified Control.Monad.Trans.Reader as R
 import Control.Monad.Trans.State.Strict hiding (State)
 import Data.Foldable
 import qualified Data.IntMap as IM
@@ -28,44 +27,123 @@ mergeGPUBodies =
     $ intraproceduralTransformationWithConsts onStms onFunDef . aliasAnalysis
   where
     onFunDef _ (FunDef entry attrs name types params body) =
-      FunDef entry attrs name types params . fst <$> transformBody body
+      FunDef entry attrs name types params . fst <$> transformBody mempty body
     onStms stms =
-      fst <$> transformStms stms
+      fst <$> transformStms mempty stms
 
-transformLambda :: LambdaT (Aliases GPU) -> PassM (LambdaT GPU, FreeVars)
-transformLambda (Lambda params body types) = do
-  (body', free) <- transformBody body
-  pure (Lambda params body' types, free)
+type Dependencies = IS.IntSet
 
-transformBody :: BodyT (Aliases GPU) -> PassM (BodyT GPU, FreeVars)
-transformBody (Body _ stms res) = do
-  (stms', free) <- transformStms stms
-  pure (Body () stms' res, free)
+transformLambda :: AliasTable
+                -> LambdaT (Aliases GPU)
+                -> PassM (LambdaT GPU, Dependencies)
+transformLambda aliases (Lambda params body types) = do
+  (body', deps) <- transformBody aliases body
+  pure (Lambda params body' types, deps)
 
-transformStms :: Stms (Aliases GPU) -> PassM (Stms GPU, FreeVars)
-transformStms stms = do
-  let m = mapM_ handleStm stms >> collapse
+transformBody :: AliasTable
+              -> BodyT (Aliases GPU)
+              -> PassM (BodyT GPU, Dependencies)
+transformBody aliases (Body _ stms res) = do
+  (stms', deps) <- transformStms aliases stms
+  pure (Body () stms' res, deps)
+
+transformStms :: AliasTable
+              -> Stms (Aliases GPU)
+              -> PassM (Stms GPU, Dependencies)
+transformStms aliases stms = do
+  let m = foldM handleStm aliases stms >> collapse
   grp <- statePrelude . snd <$> runStateT m initialState
 
   let stms' = groupStms grp
-  let free = groupFreeVars grp \\ groupBindings grp
+  let deps = groupDependencies grp \\ groupBindings grp
 
-  pure (stms', free)
+  pure (stms', deps)
 
-handleStm :: Stm (Aliases GPU) -> MergeM ()
-handleStm (Let pat (StmAux cs attrs _) e) = do
-  (e', free) <- lift (transformExp e)
+transformExp :: AliasTable
+             -> Exp (Aliases GPU)
+             -> PassM (Exp GPU, Dependencies)
+transformExp aliases e =
+  -- TODO: Eliminate unused return values of GPUBody.
+  case e of
+    BasicOp {} -> pure (removeExpAliases e, depsOf e)
+    Apply {} -> pure (removeExpAliases e, depsOf e)
+    If c tbody fbody dec -> do
+      -- TODO: Transform into a single GPUBody if both transformed branches
+      --       only contain single GPUBody statements and all return values
+      --       (1) originate from the branch GPUBody statements (not a
+      --           dependency to its branch body).
+      --       (2) originate from other GPUBody statements. (Only if a merge
+      --           with that GPUBody is guaranteed or just if the asymptotical
+      --           cost remains the same? For the prior: Inspect stateMemStored)
+      --       (3) are scalar arrays of size 1, whatever their rank.
+      (tbody', t_deps) <- transformBody aliases tbody
+      (fbody', f_deps) <- transformBody aliases fbody
+      let deps = depsOf c <> t_deps <> f_deps <> depsOf dec
+      pure (If c tbody' fbody' dec, deps)
+    DoLoop merge lform body -> do
+      -- TODO: Transform into a single GPUBody if body only contains a single
+      --       GPUBody statement and all return values
+      --       (1) originate from that GPUBody statement (not a dependency to
+      --           its body).
+      --       (2) originate from other GPUBody statements. (Only if a merge
+      --           with that GPUBody is guaranteed or just if the asymptotical
+      --           cost remains the same? For the prior: Inspect stateMemStored)
+      --       (3) are scalar arrays of size 1, whatever their rank.
+      --
+      -- What merge and lform aliases outside the loop is irrelevant as those
+      -- cannot be consumed within the loop.
+      (body', body_deps) <- transformBody aliases body
+      let (params, args) = unzip merge
+      let deps = body_deps <> depsOf params <> depsOf args <> depsOf lform
+
+      let scope = scopeOf lform <> scopeOfFParams params
+      let bound = IS.fromList $ map baseTag (M.keys scope)
+      let deps' = deps \\ bound
+
+      let dummy = DoLoop merge lform (Body (bodyDec body) SQ.empty [])
+      let DoLoop merge' lform' _ = removeExpAliases dummy
+
+      pure (DoLoop merge' lform' body', deps')
+    WithAcc inputs lambda -> do
+      accs <- mapM (transformWithAccInput aliases) inputs
+      let (inputs', input_deps) = unzip accs
+      -- Lambda parameters are all unique and thus have no aliases.
+      (lambda', deps) <- transformLambda aliases lambda
+      pure (WithAcc inputs' lambda', deps <> fold input_deps)
+    Op {} ->
+      -- A GPUBody cannot be nested within other HostOp constructs.
+      pure (removeExpAliases e, depsOf e)
+
+transformWithAccInput :: AliasTable
+                      -> WithAccInput (Aliases GPU)
+                      -> PassM (WithAccInput GPU, Dependencies)
+transformWithAccInput aliases (shape, arrs, op) = do
+  (op', deps) <- case op of
+    Nothing -> pure (Nothing, mempty)
+    Just (f, nes) -> do
+      -- Lambda parameters have no aliases.
+      (f', deps) <- transformLambda aliases f
+      pure (Just (f', nes), deps <> depsOf nes)
+  let deps' = deps <> depsOf shape <> depsOf arrs
+  pure ((shape, arrs, op'), deps')
+
+depsOf :: FreeIn a => a -> Dependencies
+depsOf = namesToSet . freeIn
+
+namesToSet :: Names -> IS.IntSet
+namesToSet = IS.fromList . map baseTag . namesToList
+
+handleStm :: AliasTable -> Stm (Aliases GPU) -> MergeM AliasTable
+handleStm aliases (Let pat (StmAux cs attrs _) e) = do
+  (e', deps) <- lift (transformExp aliases e)
   let pat' = removePatAliases pat
   let stm' = Let pat' (StmAux cs attrs ()) e'
 
-  -- Usage cannot pass site of binding.
-  -- Consumption cannot pass site of usage by any alias.
-
-  let consumed = namesToSet (consumedInExp e)
+  let observed = namesToSet $ rootAliasesOf (fold $ expAliases e) aliases
+  let consumed = namesToSet $ rootAliasesOf (consumedInExp e) aliases
   let usage = Usage {
     usageBindings = IS.fromList $ map (baseTag . patElemName) (patElems pat'),
-    usageFreeVars = free <> freeVars pat' <> freeVars cs,
-    usageAliases = namesToSet (fold $ expAliases e)
+    usageDependencies = observed <> deps <> depsOf pat' <> depsOf cs
   }
 
   case e' of
@@ -80,80 +158,32 @@ handleStm (Let pat (StmAux cs attrs _) e) = do
         then moveToPrelude stm' usage
         else moveToPostlude stm' usage
 
-transformExp :: Exp (Aliases GPU) -> PassM (Exp GPU, FreeVars)
-transformExp e =
-  case e of
-    BasicOp {} -> pure (removeExpAliases e, freeVars e)
-    Apply {} -> pure (removeExpAliases e, freeVars e)
-    If c tbody fbody dec -> do
-      (tbody', t_free) <- transformBody tbody
-      (fbody', f_free) <- transformBody fbody
-      let free = freeVars c <> t_free <> f_free <> freeVars dec
-      pure (If c tbody' fbody' dec, free)
-    DoLoop merge lform body -> do
-      (body', body_free) <- transformBody body
-      let (params, args) = unzip merge
-      let free = body_free <> freeVars params <> freeVars args <> freeVars lform
+  pure $ foldl recordAliases aliases (patElems pat)
+  where
+    rootAliasesOf names atable =
+      let look n = M.findWithDefault (oneName n) n atable
+       in foldMap look (namesToList names)
 
-      let scope = scopeOf lform <> scopeOfFParams params
-      let bound = IS.fromList $ map baseTag (M.keys scope)
-      let free' = free \\ bound
+    recordAliases atable pe
+      | aliasesOf pe == mempty
+      = atable
 
-      let dummy = DoLoop merge lform (Body (bodyDec body) SQ.empty [])
-      let DoLoop merge' lform' _ = removeExpAliases dummy
-
-      pure (DoLoop merge' lform' body', free')
-    WithAcc inputs lambda -> do
-      (inputs', frees) <- unzip <$> mapM transformWithAccInput inputs
-      (lambda', free) <- transformLambda lambda
-      pure (WithAcc inputs' lambda', free <> fold frees)
-    Op {} ->
-      -- A GPUBody cannot be nested into other HostOp constructs.
-      pure (removeExpAliases e, freeVars e)
-
-transformWithAccInput :: WithAccInput (Aliases GPU)
-                      -> PassM (WithAccInput GPU, FreeVars)
-transformWithAccInput (shape, arrs, op) = do
-  (op', free) <- case op of
-    Nothing -> pure (Nothing, mempty)
-    Just (f, nes) -> do
-      (f', free) <- transformLambda f
-      pure (Just (f', nes), free <> freeVars nes)
-  let free' = free <> freeVars shape <> freeVars arrs
-  pure ((shape, arrs, op'), free')
-
-freeVars :: FreeIn a => a -> IS.IntSet
-freeVars = namesToSet . freeIn
-
-namesToSet :: Names -> IS.IntSet
-namesToSet = IS.fromList . map baseTag . namesToList
-
-stores :: PatElemT Type -> SubExp -> MergeM ()
-stores (PatElem n t) se | isArray t =
-  let row_t = fromJust (peelArray 1 t)
-   in modify $ \st -> let stored = stateMemStored st
-                          stored' = IM.insert (baseTag n) (se, row_t) stored
-                       in st {stateMemStored = stored'}
-stores pe se = pe `aliases` se
-
-aliases :: PatElemT Type -> SubExp -> MergeM ()
-aliases (PatElem n _) se =
-  modify $ \st -> st {stateAliases = IM.insert (baseTag n) se (stateAliases st)}
-
-isArray :: ArrayShape shape => TypeBase shape u -> Bool
-isArray t = arrayRank t > 0
+      | otherwise 
+      = let root_aliases = rootAliasesOf (aliasesOf pe) atable
+         in M.insert (patElemName pe) root_aliases atable
 
 canMergeGPUBodies :: Usage -> Consumption -> MergeM Bool
 canMergeGPUBodies usage consumed = do
   st <- get
   let stored = stateMemStored st
-  let aliased = stateAliases st
-  let isAlias i = IM.member i aliased || IM.member i stored
+  let bound = stateHostBound st
+  let onDevice tag = IM.member tag bound || IM.member tag stored
 
-  -- Can use aliased value instead of its alias, allowing a statement to
-  -- be moved before the alias given the alias would not be consumed.
+  -- A dependency returned from a GPUBody can be ignored as that dependency
+  -- still will be available after a potential merge, albeit under a different
+  -- name.
   let usage' = usage {
-    usageFreeVars = IS.filter (not . isAlias) (usageFreeVars usage)
+    usageDependencies = IS.filter (not . onDevice) (usageDependencies usage)
   }
 
   canMoveBeforePostlude usage' consumed
@@ -162,11 +192,11 @@ canMoveBeforePostlude :: Usage -> Consumption -> MergeM Bool
 canMoveBeforePostlude usage consumed = do
   postlude <- gets statePostlude
   let bound = groupBindings postlude
-  let aliased = groupAliases postlude
+  let deps = groupDependencies postlude
 
-  let used = usageFreeVars usage
+  let used = usageDependencies usage
 
-  pure (IS.disjoint bound used && IS.disjoint aliased consumed)
+  pure (IS.disjoint bound used && IS.disjoint deps consumed)
 
 canMoveToPrelude :: Usage -> Consumption -> MergeM Bool
 canMoveToPrelude usage consumed = do
@@ -174,11 +204,11 @@ canMoveToPrelude usage consumed = do
 
   interlude <- gets stateInterlude
   let bound = groupBindings interlude
-  let aliased = groupAliases interlude
+  let deps = groupDependencies interlude
 
-  let used = usageFreeVars usage
+  let used = usageDependencies usage
 
-  pure (canMove && IS.disjoint bound used && IS.disjoint aliased consumed)
+  pure (canMove && IS.disjoint bound used && IS.disjoint deps consumed)
 
 moveToPrelude :: Stm GPU -> Usage -> MergeM ()
 moveToPrelude stm usage =
@@ -190,27 +220,7 @@ moveToInterlude stm usage =
 
 moveToPostlude :: Stm GPU -> Usage -> MergeM ()
 moveToPostlude stm usage = do
-  stored <- gets stateMemStored
-  aliased <- gets stateAliases
-
-  -- Record aliases of GPUBody results to enable merging beyond those.
-  case stm of
-    Let (Pat [a]) _ (BasicOp (SubExp (Var n))) ->
-      if isArray (patElemDec a)
-        then case IM.lookup (baseTag n) stored of
-          Nothing -> pure ()
-          Just (se, _) -> a `stores` se
-        else case IM.lookup (baseTag n) aliased of
-          Nothing -> pure ()
-          Just se -> a `aliases` se
-    Let (Pat [a]) _ (BasicOp (Index arr slice))
-      | Just (se, t) <- IM.lookup (baseTag arr) stored
-      , DimFix idx : dims <- unSlice slice
-      , idx == intConst Int64 0
-      , and $ zipWith (\sd ad -> sd == sliceDim ad) dims (arrayDims t)
-      -> a `aliases` se
-    _ -> pure ()
-
+  recordResultAliases stm
   modify $ \st -> st {statePostlude = (stm, usage) `moveTo` statePostlude st}
 
 moveTo :: (Stm GPU, Usage) -> Group -> Group
@@ -220,70 +230,24 @@ moveTo (stm, usage) grp =
         groupUsage = groupUsage grp <> usage
       }
 
-collapse :: MergeM ()
-collapse = do
-  mergeInterlude
-  modify $ \st -> st {
-      statePrelude = statePrelude st <> stateInterlude st <> statePostlude st,
-      stateInterlude = mempty,
-      statePostlude = mempty,
-      stateMemStored = mempty,
-      stateAliases = mempty
-    }
-
-mergeInterlude :: MergeM ()
-mergeInterlude = do
-  stms <- gets (groupStms . stateInterlude)
-  info <- AliasInfo <$> gets stateMemStored <*> gets stateAliases
-
-  stms' <- if SQ.length stms < 2
-              then pure stms
-              else SQ.singleton <$> foldrM (merge info) empty stms
-
-  modify $ \st -> st {stateInterlude = (stateInterlude st) {groupStms = stms'}}
-  where
-    empty = Let mempty (StmAux mempty mempty ()) noop
-    noop = Op (GPUBody [] (Body () SQ.empty []))
-
-    merge :: AliasInfo -> Stm GPU -> Stm GPU -> MergeM (Stm GPU)
-    merge info stm0 stm1
-      | Let pat0 (StmAux cs0 attrs0 _) (Op (GPUBody types0 body)) <- stm0
-      , Let pat1 (StmAux cs1 attrs1 _) (Op (GPUBody types1 body1)) <- stm1
-      = do
-        Body _ stms0 res0 <- execRewrite (rewriteBody body) info
-        let Body _ stms1 res1 = body1
-
-            pat' = pat0 <> pat1
-            aux' = StmAux (cs0 <> cs1) (attrs0 <> attrs1) ()
-            types' = types0 ++ types1
-            body' = Body () (stms0 <> stms1) (res0 <> res1)
-
-         in pure (Let pat' aux' (Op (GPUBody types' body')))
-    merge _ _ _ =
-      compilerBugS "mergeInterlude: cannot merge non-GPUBody statements"
-
-type FreeVars = IS.IntSet
 type Consumption = IS.IntSet
 
 data Usage = Usage {
     usageBindings :: IS.IntSet,
-    usageFreeVars :: FreeVars,
-    usageAliases :: IS.IntSet
+    usageDependencies :: Dependencies
   }
 
 instance Semigroup Usage where
   a <> b =
     Usage {
       usageBindings = usageBindings a <> usageBindings b,
-      usageFreeVars = usageFreeVars a <> usageFreeVars b,
-      usageAliases = usageAliases a <> usageAliases b
+      usageDependencies = usageDependencies a <> usageDependencies b
     }
 
 instance Monoid Usage where
   mempty = Usage {
       usageBindings = mempty,
-      usageFreeVars = mempty,
-      usageAliases = mempty
+      usageDependencies = mempty
     }
 
 data Group = Group {
@@ -294,11 +258,8 @@ data Group = Group {
 groupBindings :: Group -> IS.IntSet
 groupBindings = usageBindings . groupUsage
 
-groupFreeVars :: Group -> FreeVars
-groupFreeVars = usageFreeVars . groupUsage
-
-groupAliases :: Group -> IS.IntSet
-groupAliases = usageAliases . groupUsage
+groupDependencies :: Group -> Dependencies
+groupDependencies = usageDependencies . groupUsage
 
 instance Semigroup Group where
   a <> b =
@@ -318,7 +279,7 @@ data State = State {
     stateInterlude :: Group,
     statePostlude :: Group,
     stateMemStored :: IM.IntMap (SubExp, Type),
-    stateAliases :: IM.IntMap SubExp
+    stateHostBound :: IM.IntMap SubExp
   }
 
 initialState :: State
@@ -327,24 +288,103 @@ initialState = State {
     stateInterlude = mempty,
     statePostlude = mempty,
     stateMemStored = mempty,
-    stateAliases = mempty
+    stateHostBound = mempty
   }
 
 type MergeM = StateT State PassM
 
-type RewriteM = StateT (Stms GPU) (R.ReaderT AliasInfo MergeM)
+stores :: PatElemT Type -> SubExp -> MergeM ()
+stores (PatElem n t) se | isArray t =
+  let row_t = fromJust (peelArray 1 t)
+   in modify $ \st -> let stored = stateMemStored st
+                          stored' = IM.insert (baseTag n) (se, row_t) stored
+                       in st {stateMemStored = stored'}
+stores pe se = pe `binds` se
 
-data AliasInfo = AliasInfo {
-    infoStored :: IM.IntMap (SubExp, Type),
-    infoAliased :: IM.IntMap SubExp
-  }
+binds :: PatElemT Type -> SubExp -> MergeM ()
+binds (PatElem n _) se =
+  modify $ \st -> let bound = stateHostBound st
+                   in st {stateHostBound = IM.insert (baseTag n) se bound}
 
--- | Retrieve a function of the current environment.
-asks :: (AliasInfo -> a) -> RewriteM a
-asks = lift . R.asks
+isArray :: ArrayShape shape => TypeBase shape u -> Bool
+isArray t = arrayRank t > 0
 
-execRewrite :: RewriteM (BodyT GPU) -> AliasInfo -> MergeM (BodyT GPU)
-execRewrite m info = fst <$> R.runReaderT (runStateT m' SQ.empty) info
+-- | Record direct aliases of GPUBody results and their contents. Any GPUBody
+-- can have its dependencies to those substituted if they merge with the source
+-- GPUBody. Hence alias dependencies can be ignored when determing whether a
+-- GPUBody can be moved across the postlude.
+recordResultAliases :: Stm GPU -> MergeM ()
+recordResultAliases stm = do
+  stored <- gets stateMemStored
+  bound <- gets stateHostBound
+  case stm of
+    Let (Pat [a]) _ (BasicOp (SubExp (Var n))) ->
+      if isArray (patElemType a)
+        then case IM.lookup (baseTag n) stored of
+          Nothing -> pure ()
+          Just (se, _) -> a `stores` se
+        else case IM.lookup (baseTag n) bound of
+          Nothing -> pure ()
+          Just se -> a `binds` se
+    Let (Pat [a]) _ (BasicOp (Index arr slice))
+      | Just (se, t) <- IM.lookup (baseTag arr) stored
+      , DimFix idx : dims <- unSlice slice
+      , idx == intConst Int64 0
+      , and $ zipWith (\sd ad -> sd == sliceDim ad) dims (arrayDims t)
+      -> a `binds` se
+    _ -> pure ()
+
+collapse :: MergeM ()
+collapse = do
+  mergeInterlude
+  modify $ \st -> st {
+      statePrelude = statePrelude st <> stateInterlude st <> statePostlude st,
+      stateInterlude = mempty,
+      statePostlude = mempty,
+      stateMemStored = mempty,
+      stateHostBound = mempty
+    }
+
+mergeInterlude :: MergeM ()
+mergeInterlude = do
+  stms <- gets (groupStms . stateInterlude)
+
+  stms' <- if SQ.length stms < 2
+              then pure stms
+              else SQ.singleton <$> foldrM merge empty stms
+
+  modify $ \st -> st {stateInterlude = (stateInterlude st) {groupStms = stms'}}
+  where
+    empty = Let mempty (StmAux mempty mempty ()) noop
+    noop = Op (GPUBody [] (Body () SQ.empty []))
+
+    merge :: Stm GPU -> Stm GPU -> MergeM (Stm GPU)
+    merge stm0 stm1
+      | Let pat0 (StmAux cs0 attrs0 _) (Op (GPUBody types0 body)) <- stm0
+      , Let pat1 (StmAux cs1 attrs1 _) (Op (GPUBody types1 body1)) <- stm1
+      = do
+        Body _ stms0 res0 <- execRewrite (rewriteBody body)
+        let Body _ stms1 res1 = body1
+
+            pat' = pat0 <> pat1
+            aux' = StmAux (cs0 <> cs1) (attrs0 <> attrs1) ()
+            types' = types0 ++ types1
+            body' = Body () (stms0 <> stms1) (res0 <> res1)
+
+         in pure (Let pat' aux' (Op (GPUBody types' body')))
+    merge _ _ =
+      compilerBugS "mergeInterlude: cannot merge non-GPUBody statements"
+
+type RewriteM = StateT (Stms GPU) MergeM
+
+arrayContents :: RewriteM (IM.IntMap (SubExp, Type))
+arrayContents = lift (gets stateMemStored)
+
+returnedValues :: RewriteM (IM.IntMap SubExp)
+returnedValues = lift (gets stateHostBound)
+
+execRewrite :: RewriteM (BodyT GPU) -> MergeM (BodyT GPU)
+execRewrite m = fst <$> runStateT m' SQ.empty
   where
     m' = do Body _ stms res <- m
             prelude <- get
@@ -370,7 +410,7 @@ rewritePatElem (PatElem n t) =
 
 rewriteExp :: Exp GPU -> RewriteM (Exp GPU)
 rewriteExp e = do
-  stored <- asks infoStored
+  stored <- arrayContents
   case e of
     BasicOp (Index arr slice)
       | Just (se, _) <- IM.lookup (baseTag arr) stored
@@ -425,41 +465,45 @@ rewriteParam (Param attrs n t) =
 rewriteSubExp :: SubExp -> RewriteM SubExp
 rewriteSubExp (Constant c) = pure (Constant c)
 rewriteSubExp (Var n) = do
-  aliased <- asks infoAliased
-  case IM.lookup (baseTag n) aliased of
+  as_value <- returnedValues
+  case IM.lookup (baseTag n) as_value of
     Just se -> pure se
     Nothing -> do
-      stored <- asks infoStored
-      case IM.lookup (baseTag n) stored of
-        Just (se, t) -> Var <$> addArray se t
+      as_array <- arrayContents
+      case IM.lookup (baseTag n) as_array of
+        Just (se, t) -> Var <$> asArray se t
         Nothing -> pure (Var n)
-  where
-    addArray se row_t = do
-      name <- newName "arr"
-      let t = row_t `arrayOfRow` intConst Int64 1
-
-      let pat = Pat [PatElem name t]
-      let aux = StmAux mempty mempty ()
-      let e = BasicOp (ArrayLit [se] row_t)
-
-      modify (|> Let pat aux e)
-      pure name
 
 rewriteName :: VName -> RewriteM VName
 rewriteName n = do
   se <- rewriteSubExp (Var n)
   case se of
     Var n' -> pure n'
-    Constant c -> do
-      name <- newName "cnst"
-      let t = Prim (primValueType c)
+    Constant c -> referConst c
 
-      let pat = Pat [PatElem name t]
-      let aux = StmAux mempty mempty ()
-      let e = BasicOp (SubExp se)
+asArray :: SubExp -> Type -> RewriteM VName
+asArray se row_t = do
+  name <- newName "arr"
+  let t = row_t `arrayOfRow` intConst Int64 1
 
-      modify (|> Let pat aux e)
-      pure name
+  let pat = Pat [PatElem name t]
+  let aux = StmAux mempty mempty ()
+  let e = BasicOp (ArrayLit [se] row_t)
+
+  modify (|> Let pat aux e)
+  pure name
+
+referConst :: PrimValue -> RewriteM VName
+referConst c = do
+  name <- newName "cnst"
+  let t = Prim (primValueType c)
+
+  let pat = Pat [PatElem name t]
+  let aux = StmAux mempty mempty ()
+  let e = BasicOp (SubExp $ Constant c)
+
+  modify (|> Let pat aux e)
+  pure name
 
 newName :: String -> RewriteM VName
-newName s = lift $ lift $ lift (newNameFromString s)
+newName s = lift $ lift (newNameFromString s)

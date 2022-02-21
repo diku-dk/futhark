@@ -688,7 +688,13 @@ graphStm stm = do
     -- we block them from being migrated on their own. The parent statement of
     -- an enclosing body may still be migrated, including these.
     BasicOp (Index _ s) -> graphInefficientReturn (sliceDims s) e
-    BasicOp Update {} -> graphInefficientReturn [] e
+    BasicOp Update {} ->
+      -- TODO: Any update of a single scalar read from an array can be
+      --       transformed into a slice update that eliminates the read.
+      --       This means Updates are not sinks for scalar write values,
+      --       eliminating additional reads. ReduceDeviceSyncs needs to
+      --       rewrite such Updates to remain valid.
+      graphInefficientReturn [] e
     BasicOp (FlatIndex _ s) -> graphInefficientReturn (flatSliceDims s) e
     BasicOp FlatUpdate {} -> graphInefficientReturn [] e
     BasicOp (Scratch _ s) -> graphInefficientReturn s e

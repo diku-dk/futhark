@@ -241,12 +241,12 @@ optimizeStm out stm = do
                       pure ((pe, tr, fr, bt) : res, tstms, fstms)
                     else -- Otherwise, ensure both results are migrated.
                     do
-                      let t = patElemDec pe
+                      let t = patElemType pe
                       (tstms', tarr) <- storeScalar tstms (resSubExp tr) t
                       (fstms', farr) <- storeScalar fstms (resSubExp fr) t
 
                       pe' <- arrayizePatElem pe
-                      let bt' = staticShapes1 (patElemDec pe')
+                      let bt' = staticShapes1 (patElemType pe')
                       let tr' = tr {resSubExp = Var tarr}
                       let fr' = fr {resSubExp = Var farr}
                       pure ((pe', tr', fr', bt') : res, tstms', fstms')
@@ -277,7 +277,7 @@ optimizeStm out stm = do
               (stms', arr) <- storeScalar stms pval (fromDecl pt)
 
               pn' <- newName pn
-              let pt' = toDecl (patElemDec pe') Nonunique
+              let pt' = toDecl (patElemType pe') Nonunique
               let pval' = Var arr
               let param' = (Param mempty pn' pt', pval')
 
@@ -323,7 +323,7 @@ optimizeStm out stm = do
                   then pure (SubExpRes certs se, t, pe)
                   else do
                     pe' <- arrayizePatElem pe
-                    let t' = patElemDec pe'
+                    let t' = patElemType pe'
                     pure (SubExpRes certs se', t', pe')
 
         -- Accumulator return values do not map to arrays one-to-one but
@@ -484,7 +484,7 @@ inGPUBody m = do
   let pes = patElems (stmPat stm)
   pat <- Pat <$> mapM arrayizePatElem pes
   let aux = StmAux mempty mempty ()
-  let types = map patElemDec pes
+  let types = map patElemType pes
   let res = map (SubExpRes mempty . Var . patElemName) pes
   let body = Body () (prologue |> stm) res
   let e = Op (GPUBody types body)
