@@ -601,9 +601,9 @@ offsetMemoryInStm (Let pat dec e) = do
   pure (scope', stm)
   where
     pick ::
-      PatElemT (MemInfo SubExp NoUniqueness MemBind) ->
+      PatElem (MemInfo SubExp NoUniqueness MemBind) ->
       ExpReturns ->
-      PatElemT (MemInfo SubExp NoUniqueness MemBind)
+      PatElem (MemInfo SubExp NoUniqueness MemBind)
     pick
       (PatElem name (MemArray pt s u _ret))
       (MemArray _ _ _ (Just (ReturnsInBlock m extixfun)))
@@ -617,7 +617,7 @@ offsetMemoryInStm (Let pat dec e) = do
         inst Ext {} = Nothing
         inst (Free x) = pure x
 
-offsetMemoryInPat :: Pat GPUMem -> [ExpReturns] -> OffsetM (Pat GPUMem)
+offsetMemoryInPat :: Pat LetDecMem -> [ExpReturns] -> OffsetM (Pat LetDecMem)
 offsetMemoryInPat (Pat pes) rets = do
   Pat <$> zipWithM onPE pes rets
   where

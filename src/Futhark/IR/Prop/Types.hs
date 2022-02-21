@@ -554,7 +554,7 @@ instance Typed Ident where
 instance Typed dec => Typed (Param dec) where
   typeOf = typeOf . paramDec
 
-instance Typed dec => Typed (PatElemT dec) where
+instance Typed dec => Typed (PatElem dec) where
   typeOf = typeOf . patElemDec
 
 instance Typed b => Typed (a, b) where
@@ -594,7 +594,7 @@ instance SetType Type where
 instance SetType b => SetType (a, b) where
   setType (a, b) t = (a, setType b t)
 
-instance SetType dec => SetType (PatElemT dec) where
+instance SetType dec => SetType (PatElem dec) where
   setType (PatElem name dec) t =
     PatElem name $ setType dec t
 

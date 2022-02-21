@@ -194,14 +194,14 @@ removeBodyWisdom = runIdentity . rephraseBody removeWisdom
 removeExpWisdom :: CanBeWise (Op rep) => Exp (Wise rep) -> Exp rep
 removeExpWisdom = runIdentity . rephraseExp removeWisdom
 
-removePatWisdom :: PatT (VarWisdom, a) -> PatT a
+removePatWisdom :: Pat (VarWisdom, a) -> Pat a
 removePatWisdom = runIdentity . rephrasePat (return . snd)
 
 addWisdomToPat ::
   (ASTRep rep, CanBeWise (Op rep)) =>
-  Pat rep ->
+  Pat (LetDec rep) ->
   Exp (Wise rep) ->
-  Pat (Wise rep)
+  Pat (LetDec (Wise rep))
 addWisdomToPat pat e =
   Pat $ map f $ Aliases.mkPatAliases pat e
   where
@@ -227,7 +227,7 @@ mkWiseBody dec stms res =
 
 mkWiseLetStm ::
   (ASTRep rep, CanBeWise (Op rep)) =>
-  Pat rep ->
+  Pat (LetDec rep) ->
   StmAux (ExpDec rep) ->
   Exp (Wise rep) ->
   Stm (Wise rep)
@@ -237,7 +237,7 @@ mkWiseLetStm pat (StmAux cs attrs dec) e =
 
 mkWiseExpDec ::
   (ASTRep rep, CanBeWise (Op rep)) =>
-  Pat (Wise rep) ->
+  Pat (LetDec (Wise rep)) ->
   ExpDec rep ->
   Exp (Wise rep) ->
   ExpDec (Wise rep)

@@ -172,7 +172,7 @@ allocLocal mem size =
   sOp $ Imp.LocalAlloc mem size
 
 kernelAlloc ::
-  Pat GPUMem ->
+  Pat LetDecMem ->
   SubExp ->
   Space ->
   InKernelGen ()
@@ -189,7 +189,7 @@ kernelAlloc dest _ _ =
 
 splitSpace ::
   (ToExp w, ToExp i, ToExp elems_per_thread) =>
-  Pat GPUMem ->
+  Pat LetDecMem ->
   SplitOrdering ->
   w ->
   i ->
@@ -1942,7 +1942,7 @@ sCopy pt destloc@(MemLoc destmem _ _) srcloc@(MemLoc srcmem srcdims _) = do
 
 compileGroupResult ::
   SegSpace ->
-  PatElem GPUMem ->
+  PatElem LetDecMem ->
   KernelResult ->
   InKernelGen ()
 compileGroupResult _ pe (TileReturns _ [(w, per_group_elems)] what) = do
@@ -2035,7 +2035,7 @@ compileGroupResult _ _ ConcatReturns {} =
 
 compileThreadResult ::
   SegSpace ->
-  PatElem GPUMem ->
+  PatElem LetDecMem ->
   KernelResult ->
   InKernelGen ()
 compileThreadResult _ _ RegTileReturns {} =

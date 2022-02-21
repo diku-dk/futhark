@@ -366,7 +366,7 @@ indexExp _ _ _ _ = Nothing
 defBndEntry ::
   (ASTRep rep, IndexOp (Op rep)) =>
   SymbolTable rep ->
-  PatElem rep ->
+  PatElem (LetDec rep) ->
   Names ->
   Stm rep ->
   LetBoundEntry rep

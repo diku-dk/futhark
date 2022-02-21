@@ -121,7 +121,7 @@ blockedPerThread ::
   Lambda (Rep m) ->
   Int ->
   [VName] ->
-  m ([PatElemT Type], [PatElemT Type])
+  m ([PatElem Type], [PatElem Type])
 blockedPerThread thread_gtid w kernel_size ordering lam num_nonconcat arrs = do
   let (_, chunk_size, [], arr_params) =
         partitionChunkedKernelFoldParameters 0 $ lambdaParams lam
@@ -231,7 +231,7 @@ prepareStream size ispace w comm fold_lam nes arrs = do
 streamRed ::
   (MonadFreshNames m, HasScope GPU m) =>
   MkSegLevel GPU m ->
-  Pat GPU ->
+  Pat Type ->
   SubExp ->
   Commutativity ->
   Lambda GPU ->
@@ -262,7 +262,7 @@ streamMap ::
   (MonadFreshNames m, HasScope GPU m) =>
   MkSegLevel GPU m ->
   [String] ->
-  [PatElem GPU] ->
+  [PatElem Type] ->
   SubExp ->
   Commutativity ->
   Lambda GPU ->

@@ -108,8 +108,8 @@ renameLambda = modifyNameSource . runRenamer . rename
 -- a new name.
 renamePat ::
   (Rename dec, MonadFreshNames m) =>
-  PatT dec ->
-  m (PatT dec)
+  Pat dec ->
+  m (Pat dec)
 renamePat = modifyNameSource . runRenamer . rename'
   where
     rename' pat = renameBound (patNames pat) $ rename pat
@@ -224,10 +224,10 @@ instance Rename dec => Rename (Param dec) where
   rename (Param attrs name dec) =
     Param <$> rename attrs <*> rename name <*> rename dec
 
-instance Rename dec => Rename (PatT dec) where
+instance Rename dec => Rename (Pat dec) where
   rename (Pat xs) = Pat <$> rename xs
 
-instance Rename dec => Rename (PatElemT dec) where
+instance Rename dec => Rename (PatElem dec) where
   rename (PatElem ident dec) = PatElem <$> rename ident <*> rename dec
 
 instance Rename Certs where

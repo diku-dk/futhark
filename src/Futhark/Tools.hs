@@ -33,10 +33,10 @@ redomapToMapAndReduce ::
     ExpDec rep ~ (),
     Op rep ~ SOAC rep
   ) =>
-  Pat rep ->
+  Pat (LetDec rep) ->
   ( SubExp,
     [Reduce rep],
-    LambdaT rep,
+    Lambda rep,
     [VName]
   ) ->
   m (Stm rep, Stm rep)
@@ -51,11 +51,11 @@ redomapToMapAndReduce (Pat pes) (w, reds, map_lam, arrs) = do
 
 splitScanOrRedomap ::
   (Typed dec, MonadFreshNames m) =>
-  [PatElemT dec] ->
+  [PatElem dec] ->
   SubExp ->
-  LambdaT rep ->
+  Lambda rep ->
   [[SubExp]] ->
-  m ([Ident], PatT dec, [VName])
+  m ([Ident], Pat dec, [VName])
 splitScanOrRedomap pes w map_lam nes = do
   let (acc_pes, arr_pes) =
         splitAt (length $ concat nes) pes
@@ -79,7 +79,7 @@ dissectScrema ::
     Op (Rep m) ~ SOAC (Rep m),
     Buildable (Rep m)
   ) =>
-  Pat (Rep m) ->
+  Pat (LetDec (Rep m)) ->
   SubExp ->
   ScremaForm (Rep m) ->
   [VName] ->
@@ -103,10 +103,10 @@ dissectScrema pat w (ScremaForm scans reds map_lam) arrs = do
 -- to the entire input.
 sequentialStreamWholeArray ::
   (MonadBuilder m, Buildable (Rep m)) =>
-  Pat (Rep m) ->
+  Pat (LetDec (Rep m)) ->
   SubExp ->
   [SubExp] ->
-  LambdaT (Rep m) ->
+  Lambda (Rep m) ->
   [VName] ->
   m ()
 sequentialStreamWholeArray pat w nes lam arrs = do

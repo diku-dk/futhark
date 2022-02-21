@@ -106,7 +106,7 @@ compileProgOpenCL = compileProg $ HostEnv openclAtomics OpenCL mempty
 compileProgCUDA = compileProg $ HostEnv cudaAtomics CUDA mempty
 
 opCompiler ::
-  Pat GPUMem ->
+  Pat LetDecMem ->
   Op GPUMem ->
   CallKernelGen ()
 opCompiler dest (Alloc e space) =
@@ -158,7 +158,7 @@ sizeClassWithEntryPoint fname (Imp.SizeThreshold path def) =
 sizeClassWithEntryPoint _ size_class = size_class
 
 segOpCompiler ::
-  Pat GPUMem ->
+  Pat LetDecMem ->
   SegOp SegLevel GPUMem ->
   CallKernelGen ()
 segOpCompiler pat (SegMap lvl space _ kbody) =
@@ -211,7 +211,7 @@ checkLocalMemoryReqs code = do
     alignedSize x = x + ((8 - (x `rem` 8)) `rem` 8)
 
 withAcc ::
-  Pat GPUMem ->
+  Pat LetDecMem ->
   [(Shape, [VName], Maybe (Lambda GPUMem, [SubExp]))] ->
   Lambda GPUMem ->
   CallKernelGen ()

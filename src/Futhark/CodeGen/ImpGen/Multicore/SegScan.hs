@@ -14,7 +14,7 @@ import Prelude hiding (quot, rem)
 
 -- Compile a SegScan construct
 compileSegScan ::
-  Pat MCMem ->
+  Pat LetDecMem ->
   SegSpace ->
   [SegBinOp MCMem] ->
   KernelBody MCMem ->
@@ -45,7 +45,7 @@ resultArrays s segops =
       sAllocArray s pt full_shape DefaultSpace
 
 nonsegmentedScan ::
-  Pat MCMem ->
+  Pat LetDecMem ->
   SegSpace ->
   [SegBinOp MCMem] ->
   KernelBody MCMem ->
@@ -64,7 +64,7 @@ nonsegmentedScan pat space scan_ops kbody nsubtasks = do
       scanStage3 pat space scan_ops3 kbody
 
 scanStage1 ::
-  Pat MCMem ->
+  Pat LetDecMem ->
   SegSpace ->
   [SegBinOp MCMem] ->
   KernelBody MCMem ->
@@ -129,7 +129,7 @@ scanStage1 pat space scan_ops kbody = do
   emit $ Imp.Op $ Imp.ParLoop "scan_stage_1" body free_params
 
 scanStage2 ::
-  Pat MCMem ->
+  Pat LetDecMem ->
   TV Int32 ->
   SegSpace ->
   [SegBinOp MCMem] ->
@@ -187,7 +187,7 @@ scanStage2 pat nsubtasks space scan_ops kbody = do
 -- Stage 3 : Finally each thread partially scans a chunk of the input
 --           reading its corresponding carry-in
 scanStage3 ::
-  Pat MCMem ->
+  Pat LetDecMem ->
   SegSpace ->
   [SegBinOp MCMem] ->
   KernelBody MCMem ->
@@ -252,7 +252,7 @@ scanStage3 pat space scan_ops kbody = do
 -- parallelize over the segments and each segment is
 -- scanned sequentially.
 segmentedScan ::
-  Pat MCMem ->
+  Pat LetDecMem ->
   SegSpace ->
   [SegBinOp MCMem] ->
   KernelBody MCMem ->
@@ -265,7 +265,7 @@ segmentedScan pat space scan_ops kbody = do
     emit $ Imp.Op $ Imp.ParLoop "seg_scan" body free_params
 
 compileSegScanBody ::
-  Pat MCMem ->
+  Pat LetDecMem ->
   SegSpace ->
   [SegBinOp MCMem] ->
   KernelBody MCMem ->

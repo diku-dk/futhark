@@ -92,7 +92,7 @@ yParams scan =
 
 writeToScanValues ::
   [VName] ->
-  ([PatElem GPUMem], SegBinOp GPUMem, [KernelResult]) ->
+  ([PatElem LetDecMem], SegBinOp GPUMem, [KernelResult]) ->
   InKernelGen ()
 writeToScanValues gtids (pes, scan, scan_res)
   | shapeRank (segBinOpShape scan) > 0 =
@@ -108,7 +108,7 @@ writeToScanValues gtids (pes, scan, scan_res)
 
 readToScanValues ::
   [Imp.TExp Int64] ->
-  [PatElem GPUMem] ->
+  [PatElem LetDecMem] ->
   SegBinOp GPUMem ->
   InKernelGen ()
 readToScanValues is pes scan
@@ -123,7 +123,7 @@ readCarries ::
   Imp.TExp Int64 ->
   [Imp.TExp Int64] ->
   [Imp.TExp Int64] ->
-  [PatElem GPUMem] ->
+  [PatElem LetDecMem] ->
   SegBinOp GPUMem ->
   InKernelGen ()
 readCarries chunk_id chunk_offset dims' vec_is pes scan
@@ -146,7 +146,7 @@ readCarries chunk_id chunk_offset dims' vec_is pes scan
 
 -- | Produce partially scanned intervals; one per workgroup.
 scanStage1 ::
-  Pat GPUMem ->
+  Pat LetDecMem ->
   Count NumGroups SubExp ->
   Count GroupSize SubExp ->
   SegSpace ->
@@ -317,7 +317,7 @@ scanStage1 (Pat all_pes) num_groups group_size space scans kbody = do
   return (num_threads, elems_per_group, crossesSegment)
 
 scanStage2 ::
-  Pat GPUMem ->
+  Pat LetDecMem ->
   TV Int32 ->
   Imp.TExp Int64 ->
   Count NumGroups SubExp ->
@@ -394,7 +394,7 @@ scanStage2 (Pat all_pes) stage1_num_threads elems_per_group num_groups crossesSe
                   [localArrayIndex constants t]
 
 scanStage3 ::
-  Pat GPUMem ->
+  Pat LetDecMem ->
   Count NumGroups SubExp ->
   Count GroupSize SubExp ->
   Imp.TExp Int64 ->
@@ -481,7 +481,7 @@ scanStage3 (Pat all_pes) num_groups group_size elems_per_group crossesSegment sp
 -- | Compile 'SegScan' instance to host-level code with calls to
 -- various kernels.
 compileSegScan ::
-  Pat GPUMem ->
+  Pat LetDecMem ->
   SegLevel ->
   SegSpace ->
   [SegBinOp GPUMem] ->

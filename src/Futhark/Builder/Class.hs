@@ -42,8 +42,8 @@ class
   ) =>
   Buildable rep
   where
-  mkExpPat :: [Ident] -> Exp rep -> Pat rep
-  mkExpDec :: Pat rep -> Exp rep -> ExpDec rep
+  mkExpPat :: [Ident] -> Exp rep -> Pat (LetDec rep)
+  mkExpDec :: Pat (LetDec rep) -> Exp rep -> ExpDec rep
   mkBody :: Stms rep -> Result -> Body rep
   mkLetNames ::
     (MonadFreshNames m, HasScope rep m) =>
@@ -72,7 +72,7 @@ class
   MonadBuilder m
   where
   type Rep m :: Data.Kind.Type
-  mkExpDecM :: Pat (Rep m) -> Exp (Rep m) -> m (ExpDec (Rep m))
+  mkExpDecM :: Pat (LetDec (Rep m)) -> Exp (Rep m) -> m (ExpDec (Rep m))
   mkBodyM :: Stms (Rep m) -> Result -> m (Body (Rep m))
   mkLetNamesM :: [VName] -> Exp (Rep m) -> m (Stm (Rep m))
 
@@ -127,7 +127,7 @@ auxing (StmAux cs attrs _) = censorStms $ fmap onStm
 -- | Add a statement with the given pattern and expression.
 letBind ::
   MonadBuilder m =>
-  Pat (Rep m) ->
+  Pat (LetDec (Rep m)) ->
   Exp (Rep m) ->
   m ()
 letBind pat e =

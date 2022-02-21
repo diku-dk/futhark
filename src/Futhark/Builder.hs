@@ -46,7 +46,7 @@ import Futhark.IR
 class ASTRep rep => BuilderOps rep where
   mkExpDecB ::
     (MonadBuilder m, Rep m ~ rep) =>
-    Pat rep ->
+    Pat (LetDec rep) ->
     Exp rep ->
     m (ExpDec rep)
   mkBodyB ::
@@ -62,7 +62,7 @@ class ASTRep rep => BuilderOps rep where
 
   default mkExpDecB ::
     (MonadBuilder m, Buildable rep) =>
-    Pat rep ->
+    Pat (LetDec rep) ->
     Exp rep ->
     m (ExpDec rep)
   mkExpDecB pat e = return $ mkExpDec pat e

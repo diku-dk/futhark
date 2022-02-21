@@ -135,10 +135,10 @@ stmCertAnnots = certAnnots . stmAuxCerts . stmAux
 instance Pretty Attrs where
   ppr = spread . attrAnnots
 
-instance Pretty (PatElemT dec) => Pretty (PatT dec) where
+instance Pretty t => Pretty (Pat t) where
   ppr (Pat xs) = braces $ commastack $ map ppr xs
 
-instance Pretty t => Pretty (PatElemT t) where
+instance Pretty t => Pretty (PatElem t) where
   ppr (PatElem name t) = ppr name <+> colon <+> align (ppr t)
 
 instance Pretty t => Pretty (Param t) where

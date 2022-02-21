@@ -147,7 +147,7 @@ inlineInFunDef fdmap (FunDef entry attrs name rtp args body) =
 
 inlineFunction ::
   MonadFreshNames m =>
-  Pat SOACS ->
+  Pat Type ->
   StmAux dec ->
   [(SubExp, Diet)] ->
   (Safety, SrcLoc, [SrcLoc]) ->

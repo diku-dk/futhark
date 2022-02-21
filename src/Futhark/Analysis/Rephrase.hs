@@ -64,12 +64,12 @@ rephraseStm rephraser (Let pat (StmAux cs attrs dec) e) =
 rephrasePat ::
   Monad m =>
   (from -> m to) ->
-  PatT from ->
-  m (PatT to)
+  Pat from ->
+  m (Pat to)
 rephrasePat = traverse
 
 -- | Rephrase a pattern element.
-rephrasePatElem :: Monad m => (from -> m to) -> PatElemT from -> m (PatElemT to)
+rephrasePatElem :: Monad m => (from -> m to) -> PatElem from -> m (PatElem to)
 rephrasePatElem rephraser (PatElem ident from) =
   PatElem ident <$> rephraser from
 

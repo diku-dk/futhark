@@ -120,13 +120,13 @@ doubleBuffer onOp =
     doNotTouchLoop pat merge body = pure (mempty, pat, merge, body)
 
 type OptimiseLoop rep =
-  Pat rep ->
+  Pat (LetDec rep) ->
   [(FParam rep, SubExp)] ->
   Body rep ->
   DoubleBufferM
     rep
     ( Stms rep,
-      Pat rep,
+      Pat (LetDec rep),
       [(FParam rep, SubExp)],
       Body rep
     )

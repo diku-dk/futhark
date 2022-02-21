@@ -17,7 +17,7 @@ import Prelude hiding (quot, rem)
 
 -- | Compile 'SegMap' instance code.
 compileSegMap ::
-  Pat GPUMem ->
+  Pat LetDecMem ->
   SegLevel ->
   SegSpace ->
   KernelBody GPUMem ->

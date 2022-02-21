@@ -386,11 +386,11 @@ pLParam = pParam . pLParamInfo
 pLParams :: PR rep -> Parser [LParam rep]
 pLParams pr = braces $ pLParam pr `sepBy` pComma
 
-pPatElem :: PR rep -> Parser (PatElem rep)
+pPatElem :: PR rep -> Parser (PatElem (LetDec rep))
 pPatElem pr =
   (PatElem <$> pVName <*> (pColon *> pLetDec pr)) <?> "pattern element"
 
-pPat :: PR rep -> Parser (Pat rep)
+pPat :: PR rep -> Parser (Pat (LetDec rep))
 pPat pr = Pat <$> braces (pPatElem pr `sepBy` pComma)
 
 pResult :: Parser Result

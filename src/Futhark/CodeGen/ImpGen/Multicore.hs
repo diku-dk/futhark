@@ -83,7 +83,7 @@ updateAcc acc is vs = sComment "UpdateAcc" $ do
                 error $ "Missing locks for " ++ pretty acc
 
 withAcc ::
-  Pat MCMem ->
+  Pat LetDecMem ->
   [(Shape, [VName], Maybe (Lambda MCMem, [SubExp]))] ->
   Lambda MCMem ->
   MulticoreGen ()
@@ -116,7 +116,7 @@ compileMCExp dest e =
   defCompileExp dest e
 
 compileMCOp ::
-  Pat MCMem ->
+  Pat LetDecMem ->
   MCOp MCMem () ->
   ImpM MCMem HostEnv Imp.Multicore ()
 compileMCOp _ (OtherOp ()) = pure ()
@@ -151,7 +151,7 @@ compileMCOp pat (ParOp par_op op) = do
       scheduling_info (decideScheduling' op seq_code)
 
 compileSegOp ::
-  Pat MCMem ->
+  Pat LetDecMem ->
   SegOp () MCMem ->
   TV Int32 ->
   ImpM MCMem HostEnv Imp.Multicore Imp.MCCode
