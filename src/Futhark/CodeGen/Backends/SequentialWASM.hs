@@ -25,7 +25,18 @@ import qualified Futhark.CodeGen.ImpGen.Sequential as ImpGen
 import Futhark.IR.SeqMem
 import Futhark.MonadFreshNames
 
--- | Compile the program to sequential C with a JavaScript wrapper.
+-- | Compile Futhark program to wasm program (some assembly
+-- required).
+--
+-- The triple that is returned consists of
+--
+-- * Generated C code (to be passed to Emscripten).
+--
+-- * JavaScript wrapper code that presents a nicer interface to the
+--   Emscripten-produced code (this should be put in a @.class.js@
+--   file by itself).
+--
+-- * Options that should be passed to @emcc@.
 compileProg :: MonadFreshNames m => T.Text -> Prog SeqMem -> m (ImpGen.Warnings, (GC.CParts, T.Text, [String]))
 compileProg version prog = do
   (ws, prog') <- ImpGen.compileProg prog

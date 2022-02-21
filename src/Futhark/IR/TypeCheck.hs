@@ -21,7 +21,6 @@ module Futhark.IR.TypeCheck
     TypeM,
     bad,
     context,
-    message,
     Checkable (..),
     CheckableOp (..),
     lookupVar,
@@ -42,14 +41,12 @@ module Futhark.IR.TypeCheck
     matchExtPat,
     matchExtBranchType,
     argType,
-    argAliases,
     noArgAliases,
     checkArg,
     checkSOACArrayArgs,
     checkLambda,
     checkBody,
     consume,
-    consumeOnlyParams,
     binding,
     alternative,
   )
@@ -317,6 +314,7 @@ runTypeM ::
 runTypeM env (TypeM m) =
   second stateCons <$> runStateT (runReaderT m env) (TState mempty mempty)
 
+-- | Signal a type error.
 bad :: ErrorCase rep -> TypeM rep a
 bad e = do
   messages <- asks envContext
@@ -394,6 +392,9 @@ checkConsumption :: Consumption -> TypeM rep Occurences
 checkConsumption (ConsumptionError e) = bad $ TypeError e
 checkConsumption (Consumption os) = return os
 
+-- | Type check two mutually control flow branches.  Think @if@.  This
+-- interacts with consumption checking, as it is OK for an array to be
+-- consumed in both branches.
 alternative :: TypeM rep a -> TypeM rep b -> TypeM rep (a, b)
 alternative m1 m2 = do
   (x, os1) <- collectOccurences m1
