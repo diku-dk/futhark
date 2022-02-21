@@ -1674,35 +1674,10 @@ struct memblock {
 };
 #endif
 
-enum scheduling {
-    DYNAMIC,
-    STATIC
-};
-
-typedef int (*segop_fn)(void* args,
-                        int64_t iterations,
-                        int tid,
-                        struct scheduler_info info);
-
-#ifndef __ISPC_STRUCT_scheduler_segop__
-#define __ISPC_STRUCT_scheduler_segop__
-struct scheduler_segop {
-  void *args;
-  segop_fn top_level_fn;
-  segop_fn nested_fn;
-  int64_t iterations;
-  scheduling sched;
-
-  // Pointers to timer and iter associated with the task
-  int64_t *task_time;
-  int64_t *task_iter;
-
-  // For debugging
-  const char* name;
-};
-#endif
-
-#define futhark_foreach(t, i, n) foreach(i = 0 ... extract(n, 0))
+#define futhark_foreach(t, i, n) foreach(i = 0 ... n)
+#define register uniform
+#define memblock_ref memblock * uniform
+#define auto export
 
 $ispc_decls
         |]
