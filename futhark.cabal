@@ -337,7 +337,7 @@ library
     , githash >=0.1.6.1
     , half >= 0.3
     , haskeline
-    , language-c-quote >=0.12
+    , language-c-quote
     , mainland-pretty >=0.7.1
     , cmark-gfm >=0.2.1
     , megaparsec >=9.0.0

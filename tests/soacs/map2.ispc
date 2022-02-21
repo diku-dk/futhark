@@ -2644,23 +2644,26 @@ struct memblock {
 #define memblock_ref memblock * uniform
 #define auto export
 
-auto static void futhark_mc_loop_ispc_4607(register int64_t dz2080U_4583,
-                                           register memblock_ref a_mem_4590,
-                                           register memblock_ref mem_4593,
-                                           register int64_t start_4596, register
+auto static void futhark_mc_loop_ispc_4607(uniform int64_t dz2080U_4583, uniform
+                                           memblock *uniform _a_mem_4590,
+                                           uniform memblock *uniform _mem_4593,
+                                           uniform int64_t start_4596, uniform
                                            int64_t n_4598)
 {
+    struct memblock a_mem_4590 = *_a_mem_4590;
+    struct memblock mem_4593 = *_mem_4593;
+    
     futhark_foreach (int64_t, SegMap_i_4599, n_4598) {
         int64_t slice_4600 = dz2080U_4583;
         int64_t gtid_4589 = start_4596 + SegMap_i_4599;
         int64_t remnant_4601 = start_4596 + SegMap_i_4599 - gtid_4589;
         int32_t x_4586;
         
-        x_4586 = ((int32_t *) a_mem_4590->mem)[gtid_4589];
+        x_4586 = ((int32_t *) a_mem_4590.mem)[gtid_4589];
         
         int32_t defunc_0_f_res_4587 = add32(2, x_4586);
         
-        ((int32_t *) mem_4593->mem)[gtid_4589] = defunc_0_f_res_4587;
+        ((int32_t *) mem_4593.mem)[gtid_4589] = defunc_0_f_res_4587;
     }
 }
         

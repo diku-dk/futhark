@@ -30,6 +30,7 @@ import Futhark.CodeGen.RTS.C (schedulerH)
 import Futhark.IR.MCMem (MCMem, Prog)
 import Futhark.MonadFreshNames
 import qualified Language.C.Quote.OpenCL as C
+import qualified Language.C.Quote.ISPC as ISPC
 import qualified Language.C.Syntax as C
 import Futhark.Util.Pretty (prettyCompact)
 import Language.Haskell.TH (fieldExp)
@@ -278,9 +279,9 @@ compileKernelInputs = zipWith field
   where
     getName name = nameFromString (pretty name)
     field name (ty, Prim) =
-      [C.cparam|register $ty:ty $id:(getName name)|]
+      [ISPC.cparam|uniform $ty:ty $id:(getName name)|]
     field name (_, _) =
-      [C.cparam|register typename memblock_ref $id:(getName name)|]
+      [ISPC.cparam|uniform typename memblock * uniform $id:(getName name)|]
 compileIspcInputs :: [VName] -> [(C.Type, ValueType)] -> [C.Exp]
 compileIspcInputs = zipWith field
   where
