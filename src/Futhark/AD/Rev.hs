@@ -27,14 +27,14 @@ import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
 import Futhark.Util (takeLast)
 
-patName :: Pat SOACS -> ADM VName
+patName :: Pat Type -> ADM VName
 patName (Pat [pe]) = pure $ patElemName pe
 patName pat = error $ "Expected single-element pattern: " ++ pretty pat
 
 -- The vast majority of BasicOps require no special treatment in the
 -- forward pass and produce one value (and hence one adjoint).  We
 -- deal with that case here.
-commonBasicOp :: Pat SOACS -> StmAux () -> BasicOp -> ADM () -> ADM (VName, VName)
+commonBasicOp :: Pat Type -> StmAux () -> BasicOp -> ADM () -> ADM (VName, VName)
 commonBasicOp pat aux op m = do
   addStm $ Let pat aux $ BasicOp op
   m
@@ -42,7 +42,7 @@ commonBasicOp pat aux op m = do
   pat_adj <- lookupAdjVal pat_v
   pure (pat_v, pat_adj)
 
-diffBasicOp :: Pat SOACS -> StmAux () -> BasicOp -> ADM () -> ADM ()
+diffBasicOp :: Pat Type -> StmAux () -> BasicOp -> ADM () -> ADM ()
 diffBasicOp pat aux e m =
   case e of
     CmpOp cmp x y -> do

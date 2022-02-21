@@ -321,7 +321,7 @@ cmpSizeLe desc size_class to_what = do
 
 kernelAlternatives ::
   (MonadFreshNames m, HasScope GPU m) =>
-  Pat GPU ->
+  Pat Type ->
   Body GPU ->
   [(SubExp, Body GPU)] ->
   m (Stms GPU)
@@ -730,7 +730,7 @@ onMap' ::
   KernelPath ->
   (KernelPath -> DistribM (Stms GPU)) ->
   (KernelPath -> DistribM (Stms GPU)) ->
-  Pat SOACS ->
+  Pat Type ->
   Lambda SOACS ->
   DistribM (Stms GPU)
 onMap' loopnest path mk_seq_stms mk_par_stms pat lam = do
@@ -855,10 +855,10 @@ onMap' loopnest path mk_seq_stms mk_par_stms pat lam = do
         pure (group_par_body, intra_ok, intra_suff_key, intra_suff_stms)
 
 removeUnusedMapResults ::
-  PatT Type ->
+  Pat Type ->
   [SubExpRes] ->
-  LambdaT rep ->
-  Maybe ([Int], PatT Type, LambdaT rep)
+  Lambda rep ->
+  Maybe ([Int], Pat Type, Lambda rep)
 removeUnusedMapResults (Pat pes) res lam = do
   let (pes', body_res) =
         unzip $ filter (used . fst) $ zip pes $ bodyResult (lambdaBody lam)

@@ -120,7 +120,7 @@ resultArray arrs ts = do
 -- on the given rep.
 transformSOAC ::
   Transformer m =>
-  AST.Pat (Rep m) ->
+  Pat (LetDec (Rep m)) ->
   SOAC (Rep m) ->
   m ()
 transformSOAC _ JVP {} =

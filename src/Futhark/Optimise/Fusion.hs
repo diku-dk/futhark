@@ -102,13 +102,13 @@ bindVars = foldl bindVar
 binding :: [(Ident, Names)] -> FusionGM a -> FusionGM a
 binding vs = local (`bindVars` vs)
 
-gatherStmPat :: Pat SOACS -> Exp SOACS -> FusionGM FusedRes -> FusionGM FusedRes
+gatherStmPat :: Pat Type -> Exp SOACS -> FusionGM FusedRes -> FusionGM FusedRes
 gatherStmPat pat e = binding $ zip idents aliases
   where
     idents = patIdents pat
     aliases = expAliases (Alias.analyseExp mempty e)
 
-bindingPat :: Pat SOACS -> FusionGM a -> FusionGM a
+bindingPat :: Pat Type -> FusionGM a -> FusionGM a
 bindingPat = binding . (`zip` repeat mempty) . patIdents
 
 bindingParams :: Typed t => [Param t] -> FusionGM a -> FusionGM a
@@ -162,14 +162,14 @@ checkForUpdates res _ = return res
 --   variables in scope (map) by inserting each (pattern-array) name.
 --   Finally, if the binding is an in-place update, then the @inplace@ field
 --   of each (result) kernel is updated with the new in-place updates.
-bindingFamily :: Pat SOACS -> FusionGM FusedRes -> FusionGM FusedRes
+bindingFamily :: Pat Type -> FusionGM FusedRes -> FusionGM FusedRes
 bindingFamily pat = local bind
   where
     idents = patIdents pat
     family = patNames pat
     bind env = foldl (bindingFamilyVar family) env idents
 
-bindingTransform :: PatElem SOACS -> VName -> SOAC.ArrayTransform -> FusionGM a -> FusionGM a
+bindingTransform :: PatElem Type -> VName -> SOAC.ArrayTransform -> FusionGM a -> FusionGM a
 bindingTransform pe srcname trns = local $ \env ->
   case M.lookup srcname $ varsInScope env of
     Just (IsArray src' _ aliases input) ->
@@ -398,7 +398,7 @@ greedyFuse ::
   [Stm SOACS] ->
   Names ->
   FusedRes ->
-  (Pat SOACS, StmAux (), SOAC, Names) ->
+  (Pat Type, StmAux (), SOAC, Names) ->
   FusionGM FusedRes
 greedyFuse rem_stms lam_used_nms res (out_idds, aux, orig_soac, consumed) = do
   soac <- inlineSOACInputs orig_soac
@@ -497,7 +497,7 @@ greedyFuse rem_stms lam_used_nms res (out_idds, aux, orig_soac, consumed) = do
 
 prodconsGreedyFuse ::
   FusedRes ->
-  (Pat SOACS, StmAux (), SOAC, Names) ->
+  (Pat Type, StmAux (), SOAC, Names) ->
   FusionGM (Bool, [FusedKer], [KernName], [FusedKer], [KernName])
 prodconsGreedyFuse res (out_idds, aux, soac, consumed) = do
   let out_nms = patNames out_idds -- Extract VNames from output patterns
@@ -527,7 +527,7 @@ prodconsGreedyFuse res (out_idds, aux, soac, consumed) = do
 horizontGreedyFuse ::
   [Stm SOACS] ->
   FusedRes ->
-  (Pat SOACS, StmAux (), SOAC, Names) ->
+  (Pat Type, StmAux (), SOAC, Names) ->
   FusionGM (Bool, [FusedKer], [KernName], [FusedKer], [KernName])
 horizontGreedyFuse rem_stms res (out_idds, aux, soac, consumed) = do
   (inp_nms, _) <- soacInputs soac
@@ -914,7 +914,7 @@ fuseInLambda (Lambda params body rtp) = do
   body' <- bindingParams params $ fuseInBody body
   return $ Lambda params body' rtp
 
-replaceSOAC :: Pat SOACS -> StmAux () -> Exp SOACS -> FusionGM (Stms SOACS)
+replaceSOAC :: Pat Type -> StmAux () -> Exp SOACS -> FusionGM (Stms SOACS)
 replaceSOAC (Pat []) _ _ = return mempty
 replaceSOAC pat@(Pat (patElem : _)) aux e = do
   fres <- asks fusedRes

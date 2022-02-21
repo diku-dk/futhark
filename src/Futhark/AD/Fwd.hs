@@ -109,7 +109,7 @@ instance (Monoid (Bundled a), TanBuilder a) => TanBuilder [a] where
   newTan = mapM newTan
   bundleNew = fmap mconcat . mapM bundleNew
 
-instance TanBuilder (PatElemT (TypeBase s u)) where
+instance TanBuilder (PatElem (TypeBase s u)) where
   newTan (PatElem p t)
     | isAcc t = do
       insertTan p p
@@ -126,8 +126,8 @@ instance TanBuilder (PatElemT (TypeBase s u)) where
       then return [pe']
       else return [pe, pe']
 
-instance TanBuilder (PatT (TypeBase s u)) where
-  type Bundled (PatT (TypeBase s u)) = PatT (TypeBase s u)
+instance TanBuilder (Pat (TypeBase s u)) where
+  type Bundled (Pat (TypeBase s u)) = Pat (TypeBase s u)
   newTan (Pat pes) = Pat <$> newTan pes
   bundleNew (Pat pes) = Pat <$> bundleNew pes
 
@@ -199,7 +199,7 @@ instance Tangent SubExpRes where
   tangent (SubExpRes cs se) = SubExpRes cs <$> tangent se
   bundleTan (SubExpRes cs se) = map (SubExpRes cs) <$> bundleTan se
 
-basicFwd :: Pat SOACS -> StmAux () -> BasicOp -> ADM ()
+basicFwd :: Pat Type -> StmAux () -> BasicOp -> ADM ()
 basicFwd pat aux op = do
   pat_tan <- newTan pat
   case op of
@@ -287,7 +287,7 @@ zeroFromSubExp (Var v) = do
   t <- lookupType v
   letExp "zero" $ zeroExp t
 
-fwdSOAC :: Pat SOACS -> StmAux () -> SOAC SOACS -> ADM ()
+fwdSOAC :: Pat Type -> StmAux () -> SOAC SOACS -> ADM ()
 fwdSOAC pat aux (Screma size xs (ScremaForm scs reds f)) = do
   pat' <- bundleNew pat
   xs' <- bundleTan xs

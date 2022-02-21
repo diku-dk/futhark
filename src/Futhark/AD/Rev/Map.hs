@@ -54,7 +54,7 @@ partitionAdjVars (fv : fvs) =
 buildRenamedBody ::
   MonadBuilder m =>
   m (Result, a) ->
-  m (BodyT (Rep m), a)
+  m (Body (Rep m), a)
 buildRenamedBody m = do
   (body, x) <- buildBody m
   body' <- renameBody body

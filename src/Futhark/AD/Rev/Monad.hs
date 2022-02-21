@@ -74,7 +74,7 @@ import Futhark.Tools
 import Futhark.Transform.Substitute
 import Futhark.Util (chunks)
 
-zeroExp :: Type -> ExpT rep
+zeroExp :: Type -> Exp rep
 zeroExp (Prim pt) =
   BasicOp $ SubExp $ Constant $ blankPrimValue pt
 zeroExp (Array pt shape _) =
@@ -87,7 +87,7 @@ onePrim (FloatType ft) = FloatValue $ floatValue ft (1 :: Double)
 onePrim Bool = BoolValue True
 onePrim Unit = UnitValue
 
-oneExp :: Type -> ExpT rep
+oneExp :: Type -> Exp rep
 oneExp (Prim t) = BasicOp $ SubExp $ constant $ onePrim t
 oneExp (Array pt shape _) =
   BasicOp $ Replicate shape $ Constant $ onePrim pt

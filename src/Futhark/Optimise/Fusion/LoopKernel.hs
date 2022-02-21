@@ -710,7 +710,7 @@ setParamOuterDimTo w param =
   let t = paramType param `setOuterSize` w
    in param {paramDec = t}
 
-setPatOuterDimTo :: SubExp -> Pat SOACS -> Pat SOACS
+setPatOuterDimTo :: SubExp -> Pat Type -> Pat Type
 setPatOuterDimTo w = fmap (`setOuterSize` w)
 
 -- Now for fiddling with transpositions...

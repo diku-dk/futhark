@@ -61,7 +61,7 @@ module Futhark.IR.Syntax.Core
     unitSlice,
     fixSlice,
     sliceSlice,
-    PatElemT (..),
+    PatElem (..),
 
     -- * Flat (LMAD) slices
     FlatSlice (..),
@@ -457,7 +457,7 @@ flatSliceStrides (FlatSlice _ ds) = map dimStride ds
 -- | An element of a pattern - consisting of a name and an addditional
 -- parametric decoration.  This decoration is what is expected to
 -- contain the type of the resulting variable.
-data PatElemT dec = PatElem
+data PatElem dec = PatElem
   { -- | The name being bound.
     patElemName :: VName,
     -- | Pat element decoration.
@@ -465,13 +465,13 @@ data PatElemT dec = PatElem
   }
   deriving (Ord, Show, Eq)
 
-instance Functor PatElemT where
+instance Functor PatElem where
   fmap = fmapDefault
 
-instance Foldable PatElemT where
+instance Foldable PatElem where
   foldMap = foldMapDefault
 
-instance Traversable PatElemT where
+instance Traversable PatElem where
   traverse f (PatElem name dec) =
     PatElem name <$> f dec
 

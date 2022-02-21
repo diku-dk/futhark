@@ -17,7 +17,7 @@ type DoSegBody = (([(SubExp, [Imp.TExp Int64])] -> MulticoreGen ()) -> Multicore
 
 -- | Generate code for a SegRed construct
 compileSegRed ::
-  Pat MCMem ->
+  Pat LetDecMem ->
   SegSpace ->
   [SegBinOp MCMem] ->
   KernelBody MCMem ->
@@ -36,7 +36,7 @@ compileSegRed pat space reds kbody nsubtasks =
 
 -- | Like 'compileSegRed', but where the body is a monadic action.
 compileSegRed' ::
-  Pat MCMem ->
+  Pat LetDecMem ->
   SegSpace ->
   [SegBinOp MCMem] ->
   TV Int32 ->
@@ -73,7 +73,7 @@ accParams slug = take (length (slugNeutral slug)) $ slugParams slug
 nextParams slug = drop (length (slugNeutral slug)) $ slugParams slug
 
 nonsegmentedReduction ::
-  Pat MCMem ->
+  Pat LetDecMem ->
   SegSpace ->
   [SegBinOp MCMem] ->
   TV Int32 ->
@@ -164,7 +164,7 @@ reductionStage1 space slugs kbody = do
   emit $ Imp.Op $ Imp.ParLoop "segred_stage_1" fbody free_params
 
 reductionStage2 ::
-  Pat MCMem ->
+  Pat LetDecMem ->
   SegSpace ->
   Imp.TExp Int32 ->
   [SegBinOpSlug] ->
@@ -201,7 +201,7 @@ reductionStage2 pat space nsubtasks slugs = do
 -- Maybe we should select the work of the inner loop
 -- based on n_segments and dimensions etc.
 segmentedReduction ::
-  Pat MCMem ->
+  Pat LetDecMem ->
   SegSpace ->
   [SegBinOp MCMem] ->
   DoSegBody ->
@@ -213,7 +213,7 @@ segmentedReduction pat space reds kbody =
     emit $ Imp.Op $ Imp.ParLoop "segmented_segred" body free_params
 
 compileSegRedBody ::
-  Pat MCMem ->
+  Pat LetDecMem ->
   SegSpace ->
   [SegBinOp MCMem] ->
   DoSegBody ->

@@ -37,7 +37,6 @@ import qualified Data.Set as S
 import Futhark.Analysis.DataDependencies
 import qualified Futhark.Analysis.SymbolTable as ST
 import qualified Futhark.Analysis.UsageTable as UT
-import qualified Futhark.IR as AST
 import Futhark.IR.Prop.Aliases
 import Futhark.IR.SOACS
 import Futhark.MonadFreshNames
@@ -160,9 +159,9 @@ instance TraverseOpStms (Wise SOACS) where
 
 fixLambdaParams ::
   (MonadBuilder m, Buildable (Rep m), BuilderOps (Rep m)) =>
-  AST.Lambda (Rep m) ->
+  Lambda (Rep m) ->
   [Maybe SubExp] ->
-  m (AST.Lambda (Rep m))
+  m (Lambda (Rep m))
 fixLambdaParams lam fixes = do
   body <- runBodyBuilder $
     localScope (scopeOfLParams $ lambdaParams lam) $ do
@@ -181,7 +180,7 @@ fixLambdaParams lam fixes = do
     maybeFix p (Just x) = letBindNames [paramName p] $ BasicOp $ SubExp x
     maybeFix _ Nothing = return ()
 
-removeLambdaResults :: [Bool] -> AST.Lambda rep -> AST.Lambda rep
+removeLambdaResults :: [Bool] -> Lambda rep -> Lambda rep
 removeLambdaResults keep lam =
   lam
     { lambdaBody = lam_body',
@@ -368,11 +367,11 @@ removeReplicateWrite _ _ _ _ = Skip
 removeReplicateInput ::
   Aliased rep =>
   ST.SymbolTable rep ->
-  AST.Lambda rep ->
+  Lambda rep ->
   [VName] ->
   Maybe
-    ( [([VName], Certs, AST.Exp rep)],
-      AST.Lambda rep,
+    ( [([VName], Certs, Exp rep)],
+      Lambda rep,
       [VName]
     )
 removeReplicateInput vtable fun arrs
@@ -498,13 +497,13 @@ mapOpToOp (_, used) pat aux1 e
 mapOpToOp _ _ _ _ = Skip
 
 isMapWithOp ::
-  PatT dec ->
+  Pat dec ->
   SOAC (Wise SOACS) ->
   Maybe
-    ( PatElemT dec,
+    ( PatElem dec,
       Certs,
       SubExp,
-      AST.Exp (Wise SOACS),
+      Exp (Wise SOACS),
       [Param Type],
       [VName]
     )
@@ -701,7 +700,7 @@ arrayOpCerts (ArrayRotate cs _ _) = cs
 arrayOpCerts (ArrayCopy cs _) = cs
 arrayOpCerts (ArrayVar cs _) = cs
 
-isArrayOp :: Certs -> AST.Exp rep -> Maybe ArrayOp
+isArrayOp :: Certs -> Exp rep -> Maybe ArrayOp
 isArrayOp cs (BasicOp (Index arr slice)) =
   Just $ ArrayIndexing cs arr slice
 isArrayOp cs (BasicOp (Rearrange perm arr)) =
@@ -713,7 +712,7 @@ isArrayOp cs (BasicOp (Copy arr)) =
 isArrayOp _ _ =
   Nothing
 
-fromArrayOp :: ArrayOp -> (Certs, AST.Exp rep)
+fromArrayOp :: ArrayOp -> (Certs, Exp rep)
 fromArrayOp (ArrayIndexing cs arr slice) = (cs, BasicOp $ Index arr slice)
 fromArrayOp (ArrayRearrange cs arr perm) = (cs, BasicOp $ Rearrange perm arr)
 fromArrayOp (ArrayRotate cs arr rots) = (cs, BasicOp $ Rotate rots arr)
@@ -723,8 +722,8 @@ fromArrayOp (ArrayVar cs arr) = (cs, BasicOp $ SubExp $ Var arr)
 arrayOps ::
   forall rep.
   (Buildable rep, HasSOAC rep) =>
-  AST.Body rep ->
-  S.Set (AST.Pat rep, ArrayOp)
+  Body rep ->
+  S.Set (Pat (LetDec rep), ArrayOp)
 arrayOps = mconcat . map onStm . stmsToList . bodyStms
   where
     onStm (Let pat aux e) =
@@ -751,9 +750,9 @@ arrayOps = mconcat . map onStm . stmsToList . bodyStms
 replaceArrayOps ::
   forall rep.
   (Buildable rep, BuilderOps rep, HasSOAC rep) =>
-  M.Map (AST.Pat rep, ArrayOp) ArrayOp ->
-  AST.Body rep ->
-  AST.Body rep
+  M.Map (Pat (LetDec rep), ArrayOp) ArrayOp ->
+  Body rep ->
+  Body rep
 replaceArrayOps substs (Body _ stms res) =
   mkBody (fmap onStm stms) res
   where

@@ -12,7 +12,7 @@ import Futhark.Pass
 
 bindLambda ::
   (MonadBuilder m, Rep m ~ SOACS) =>
-  Pat SOACS ->
+  Pat Type ->
   StmAux (ExpDec SOACS) ->
   Lambda SOACS ->
   [SubExp] ->

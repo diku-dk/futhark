@@ -1327,7 +1327,7 @@ segOpRuleBottomUp vtable pat dec op
 topDownSegOp ::
   (HasSegOp rep, BuilderOps rep, Buildable rep) =>
   ST.SymbolTable rep ->
-  Pat rep ->
+  Pat (LetDec rep) ->
   StmAux (ExpDec rep) ->
   SegOp (SegOpLevel rep) rep ->
   Rule rep
@@ -1433,7 +1433,7 @@ segOpGuts (SegHist lvl space ops kts body) =
 bottomUpSegOp ::
   (HasSegOp rep, BuilderOps rep) =>
   (ST.SymbolTable rep, UT.UsageTable) ->
-  Pat rep ->
+  Pat (LetDec rep) ->
   StmAux (ExpDec rep) ->
   SegOp (SegOpLevel rep) rep ->
   Rule rep

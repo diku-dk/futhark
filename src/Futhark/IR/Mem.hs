@@ -767,7 +767,7 @@ matchReturnType rettype res ts = do
 
 matchPatToExp ::
   (Mem rep inner, LetDec rep ~ LetDecMem, TC.Checkable rep) =>
-  Pat (Aliases rep) ->
+  Pat (LetDec (Aliases rep)) ->
   Exp (Aliases rep) ->
   TC.TypeM rep ()
 matchPatToExp pat e = do
@@ -901,7 +901,7 @@ checkMemInfo name (MemArray _ shape _ (ArrayIn v ixfun)) = do
             ++ ")"
 
 bodyReturnsFromPat ::
-  PatT (MemBound NoUniqueness) -> [(VName, BodyReturns)]
+  Pat (MemBound NoUniqueness) -> [(VName, BodyReturns)]
 bodyReturnsFromPat pat =
   map asReturns $ patElems pat
   where

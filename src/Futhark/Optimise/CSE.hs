@@ -253,7 +253,7 @@ cseInStm consumed (Let pat (StmAux cs attrs edec) e) m = do
 type ExpressionSubstitutions rep =
   M.Map
     (ExpDec rep, Exp rep)
-    (Pat rep)
+    (Pat (LetDec rep))
 
 type NameSubstitutions = M.Map VName VName
 
@@ -265,16 +265,16 @@ data CSEState rep = CSEState
 newCSEState :: Bool -> CSEState rep
 newCSEState = CSEState (M.empty, M.empty)
 
-mkSubsts :: PatT dec -> PatT dec -> M.Map VName VName
+mkSubsts :: Pat dec -> Pat dec -> M.Map VName VName
 mkSubsts pat vs = M.fromList $ zip (patNames pat) (patNames vs)
 
-addNameSubst :: PatT dec -> PatT dec -> CSEState rep -> CSEState rep
+addNameSubst :: Pat dec -> Pat dec -> CSEState rep -> CSEState rep
 addNameSubst pat subpat (CSEState (esubsts, nsubsts) cse_arrays) =
   CSEState (esubsts, mkSubsts pat subpat `M.union` nsubsts) cse_arrays
 
 addExpSubst ::
   ASTRep rep =>
-  Pat rep ->
+  Pat (LetDec rep) ->
   ExpDec rep ->
   Exp rep ->
   CSEState rep ->

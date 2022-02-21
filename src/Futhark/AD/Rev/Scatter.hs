@@ -79,7 +79,7 @@ genIdxLamBody as wpis = genRecLamBody as wpis []
 --   let xs_adj = scatter ys_adj is \overline{0}
 --   let xs = scatter ys is xs_save
 vjpScatter1 ::
-  PatElem SOACS ->
+  PatElem Type ->
   StmAux () ->
   (SubExp, [VName], (ShapeBase SubExp, Int, VName)) ->
   ADM () ->
@@ -144,7 +144,7 @@ vjpScatter1 pys aux (w, ass, (shp, num_vals, xs)) m = do
 
 vjpScatter ::
   VjpOps ->
-  Pat SOACS ->
+  Pat Type ->
   StmAux () ->
   (SubExp, [VName], Lambda SOACS, [(Shape, Int, VName)]) ->
   ADM () ->

@@ -280,7 +280,7 @@ transformParStream rename onBody w comm red_lam red_nes map_lam arrs = do
       SegRed () space [red] (lambdaReturnType map_lam) kbody
   return (red_stms, op)
 
-transformSOAC :: Pat SOACS -> Attrs -> SOAC SOACS -> ExtractM (Stms MC)
+transformSOAC :: Pat Type -> Attrs -> SOAC SOACS -> ExtractM (Stms MC)
 transformSOAC _ _ JVP {} =
   error "transformSOAC: unhandled JVP"
 transformSOAC _ _ VJP {} =

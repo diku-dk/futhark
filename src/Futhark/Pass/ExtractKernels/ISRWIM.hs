@@ -19,7 +19,7 @@ import Futhark.Tools
 -- @map(scan)
 iswim ::
   (MonadBuilder m, Rep m ~ SOACS) =>
-  Pat SOACS ->
+  Pat Type ->
   SubExp ->
   Lambda SOACS ->
   [(SubExp, VName)] ->
@@ -77,7 +77,7 @@ iswim res_pat w scan_fun scan_input
 -- @map(reduce)
 irwim ::
   (MonadBuilder m, Rep m ~ SOACS) =>
-  Pat SOACS ->
+  Pat Type ->
   SubExp ->
   Commutativity ->
   Lambda SOACS ->
@@ -137,7 +137,7 @@ irwim res_pat w comm red_fun red_input
 -- does that map look like?
 rwimPossible ::
   Lambda SOACS ->
-  Maybe (Pat SOACS, Certs, SubExp, Lambda SOACS)
+  Maybe (Pat Type, Certs, SubExp, Lambda SOACS)
 rwimPossible fun
   | Body _ stms res <- lambdaBody fun,
     [stm] <- stmsToList stms, -- Body has a single binding
@@ -175,7 +175,7 @@ setOuterDimTo :: SubExp -> Type -> Type
 setOuterDimTo w t =
   arrayOfRow (rowType t) w
 
-setPatOuterDimTo :: SubExp -> Pat SOACS -> Pat SOACS
+setPatOuterDimTo :: SubExp -> Pat Type -> Pat Type
 setPatOuterDimTo w pat =
   basicPat $ map (setIdentOuterDimTo w) $ patIdents pat
 
@@ -187,6 +187,6 @@ stripIdentOuterDim :: Ident -> Ident
 stripIdentOuterDim ident =
   ident {identType = rowType $ identType ident}
 
-stripPatOuterDim :: Pat SOACS -> Pat SOACS
+stripPatOuterDim :: Pat Type -> Pat Type
 stripPatOuterDim pat =
   basicPat $ map stripIdentOuterDim $ patIdents pat
