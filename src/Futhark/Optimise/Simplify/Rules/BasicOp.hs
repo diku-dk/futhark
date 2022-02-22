@@ -182,16 +182,16 @@ ruleBasicOp vtable pat _ (Update _ dest destis (Var v))
         True
     arrayFrom _ =
       False
-ruleBasicOp vtable pat _ (Update _ dest is se)
-  | Just dest_t <- ST.lookupType dest vtable,
-    isFullSlice (arrayShape dest_t) is = Simplify $
-    case se of
-      Var v | not $ null $ sliceDims is -> do
-        v_reshaped <-
-          letExp (baseString v ++ "_reshaped") $
-            BasicOp $ Reshape (map DimNew $ arrayDims dest_t) v
-        letBind pat $ BasicOp $ Copy v_reshaped
-      _ -> letBind pat $ BasicOp $ ArrayLit [se] $ rowType dest_t
+-- ruleBasicOp vtable pat _ (Update _ dest is se)
+--   | Just dest_t <- ST.lookupType dest vtable,
+--     isFullSlice (arrayShape dest_t) is = Simplify $
+--     case se of
+--       Var v | not $ null $ sliceDims is -> do
+--         v_reshaped <-
+--           letExp (baseString v ++ "_reshaped") $
+--             BasicOp $ Reshape (map DimNew $ arrayDims dest_t) v
+--         letBind pat $ BasicOp $ Copy v_reshaped
+--       _ -> letBind pat $ BasicOp $ ArrayLit [se] $ rowType dest_t
 ruleBasicOp vtable pat (StmAux cs1 attrs _) (Update safety1 dest1 is1 (Var v1))
   | Just (Update safety2 dest2 is2 se2, cs2) <- ST.lookupBasicOp v1 vtable,
     Just (Copy v3, cs3) <- ST.lookupBasicOp dest2 vtable,
