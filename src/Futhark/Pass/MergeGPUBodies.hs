@@ -33,25 +33,28 @@ mergeGPUBodies =
 
 type Dependencies = IS.IntSet
 
-transformLambda :: AliasTable
-                -> LambdaT (Aliases GPU)
-                -> PassM (LambdaT GPU, Dependencies)
+transformLambda ::
+  AliasTable ->
+  LambdaT (Aliases GPU) ->
+  PassM (LambdaT GPU, Dependencies)
 transformLambda aliases (Lambda params body types) = do
   (body', deps) <- transformBody aliases body
   pure (Lambda params body' types, deps)
 
-transformBody :: AliasTable
-              -> BodyT (Aliases GPU)
-              -> PassM (BodyT GPU, Dependencies)
+transformBody ::
+  AliasTable ->
+  BodyT (Aliases GPU) ->
+  PassM (BodyT GPU, Dependencies)
 transformBody aliases (Body _ stms res) = do
   (stms', deps) <- transformStms aliases stms
   pure (Body () stms' res, deps)
 
-transformStms :: AliasTable
-              -> Stms (Aliases GPU)
-              -> PassM (Stms GPU, Dependencies)
+transformStms ::
+  AliasTable ->
+  Stms (Aliases GPU) ->
+  PassM (Stms GPU, Dependencies)
 transformStms aliases stms = do
-  let m = foldM handleStm aliases stms >> collapse
+  let m = foldM_ handleStm aliases stms >> collapse
   grp <- statePrelude . snd <$> runStateT m initialState
 
   let stms' = groupStms grp
@@ -59,9 +62,10 @@ transformStms aliases stms = do
 
   pure (stms', deps)
 
-transformExp :: AliasTable
-             -> Exp (Aliases GPU)
-             -> PassM (Exp GPU, Dependencies)
+transformExp ::
+  AliasTable ->
+  Exp (Aliases GPU) ->
+  PassM (Exp GPU, Dependencies)
 transformExp aliases e =
   case e of
     BasicOp {} -> pure (removeExpAliases e, depsOf e)
@@ -113,9 +117,10 @@ transformExp aliases e =
       -- A GPUBody cannot be nested within other HostOp constructs.
       pure (removeExpAliases e, depsOf e)
 
-transformWithAccInput :: AliasTable
-                      -> WithAccInput (Aliases GPU)
-                      -> PassM (WithAccInput GPU, Dependencies)
+transformWithAccInput ::
+  AliasTable ->
+  WithAccInput (Aliases GPU) ->
+  PassM (WithAccInput GPU, Dependencies)
 transformWithAccInput aliases (shape, arrs, op) = do
   (op', deps) <- case op of
     Nothing -> pure (Nothing, mempty)
@@ -137,20 +142,22 @@ handleStm aliases (Let pat (StmAux cs attrs _) e) = do
   (e', deps) <- lift (transformExp aliases e)
   let pat' = removePatAliases pat
   let stm' = Let pat' (StmAux cs attrs ()) e'
+  let pes' = patElems pat'
 
   let observed = namesToSet $ rootAliasesOf (fold $ expAliases e) aliases
   let consumed = namesToSet $ rootAliasesOf (consumedInExp e) aliases
-  let usage = Usage {
-    usageBindings = IS.fromList $ map (baseTag . patElemName) (patElems pat'),
-    usageDependencies = observed <> deps <> depsOf pat' <> depsOf cs
-  }
+  let usage =
+        Usage
+          { usageBindings = IS.fromList $ map (baseTag . patElemName) pes',
+            usageDependencies = observed <> deps <> depsOf pat' <> depsOf cs
+          }
 
   case e' of
     Op (GPUBody _ (Body _ _ res)) -> do
       move <- canMergeGPUBodies usage consumed
       unless move collapse
       moveToInterlude stm' usage
-      mapM_ (uncurry stores) (zip (patElems pat') (map resSubExp res))
+      mapM_ (uncurry stores) (zip pes' (map resSubExp res))
     _ -> do
       move <- canMoveToPrelude usage consumed
       if move
@@ -164,11 +171,10 @@ handleStm aliases (Let pat (StmAux cs attrs _) e) = do
        in foldMap look (namesToList names)
 
     recordAliases atable pe
-      | aliasesOf pe == mempty
-      = atable
-
-      | otherwise 
-      = let root_aliases = rootAliasesOf (aliasesOf pe) atable
+      | aliasesOf pe == mempty =
+        atable
+      | otherwise =
+        let root_aliases = rootAliasesOf (aliasesOf pe) atable
          in M.insert (patElemName pe) root_aliases atable
 
 canMergeGPUBodies :: Usage -> Consumption -> MergeM Bool
@@ -181,9 +187,8 @@ canMergeGPUBodies usage consumed = do
   -- A dependency returned from a GPUBody can be ignored as that dependency
   -- still will be available after a potential merge, albeit under a different
   -- name.
-  let usage' = usage {
-    usageDependencies = IS.filter (not . onDevice) (usageDependencies usage)
-  }
+  let deps = usageDependencies usage
+  let usage' = usage {usageDependencies = IS.filter (not . onDevice) deps}
 
   canMoveBeforePostlude usage' consumed
 
@@ -224,33 +229,34 @@ moveToPostlude stm usage = do
 
 moveTo :: (Stm GPU, Usage) -> Group -> Group
 moveTo (stm, usage) grp =
-  grp {
-        groupStms = groupStms grp |> stm,
-        groupUsage = groupUsage grp <> usage
-      }
+  grp
+    { groupStms = groupStms grp |> stm,
+      groupUsage = groupUsage grp <> usage
+    }
 
 type Consumption = IS.IntSet
 
-data Usage = Usage {
-    usageBindings :: IS.IntSet,
+data Usage = Usage
+  { usageBindings :: IS.IntSet,
     usageDependencies :: Dependencies
   }
 
 instance Semigroup Usage where
   a <> b =
-    Usage {
-      usageBindings = usageBindings a <> usageBindings b,
-      usageDependencies = usageDependencies a <> usageDependencies b
-    }
+    Usage
+      { usageBindings = usageBindings a <> usageBindings b,
+        usageDependencies = usageDependencies a <> usageDependencies b
+      }
 
 instance Monoid Usage where
-  mempty = Usage {
-      usageBindings = mempty,
-      usageDependencies = mempty
-    }
+  mempty =
+    Usage
+      { usageBindings = mempty,
+        usageDependencies = mempty
+      }
 
-data Group = Group {
-    groupStms :: Stms GPU,
+data Group = Group
+  { groupStms :: Stms GPU,
     groupUsage :: Usage
   }
 
@@ -262,19 +268,20 @@ groupDependencies = usageDependencies . groupUsage
 
 instance Semigroup Group where
   a <> b =
-    Group {
-      groupStms = groupStms a <> groupStms b,
-      groupUsage = groupUsage a <> groupUsage b
-    }
+    Group
+      { groupStms = groupStms a <> groupStms b,
+        groupUsage = groupUsage a <> groupUsage b
+      }
 
 instance Monoid Group where
-  mempty = Group {
-      groupStms = mempty,
-      groupUsage = mempty
-    }
+  mempty =
+    Group
+      { groupStms = mempty,
+        groupUsage = mempty
+      }
 
-data State = State {
-    statePrelude :: Group,
+data State = State
+  { statePrelude :: Group,
     stateInterlude :: Group,
     statePostlude :: Group,
     stateMemStored :: IM.IntMap (SubExp, Type),
@@ -282,28 +289,32 @@ data State = State {
   }
 
 initialState :: State
-initialState = State {
-    statePrelude = mempty,
-    stateInterlude = mempty,
-    statePostlude = mempty,
-    stateMemStored = mempty,
-    stateHostBound = mempty
-  }
+initialState =
+  State
+    { statePrelude = mempty,
+      stateInterlude = mempty,
+      statePostlude = mempty,
+      stateMemStored = mempty,
+      stateHostBound = mempty
+    }
 
 type MergeM = StateT State PassM
 
 stores :: PatElemT Type -> SubExp -> MergeM ()
-stores (PatElem n t) se | isArray t =
-  let row_t = fromJust (peelArray 1 t)
-   in modify $ \st -> let stored = stateMemStored st
-                          stored' = IM.insert (baseTag n) (se, row_t) stored
-                       in st {stateMemStored = stored'}
+stores (PatElem n t) se
+  | isArray t =
+    let row_t = fromJust (peelArray 1 t)
+     in modify $ \st ->
+          let stored = stateMemStored st
+              stored' = IM.insert (baseTag n) (se, row_t) stored
+           in st {stateMemStored = stored'}
 stores pe se = pe `binds` se
 
 binds :: PatElemT Type -> SubExp -> MergeM ()
 binds (PatElem n _) se =
-  modify $ \st -> let bound = stateHostBound st
-                   in st {stateHostBound = IM.insert (baseTag n) se bound}
+  modify $ \st ->
+    let bound = stateHostBound st
+     in st {stateHostBound = IM.insert (baseTag n) se bound}
 
 isArray :: ArrayShape shape => TypeBase shape u -> Bool
 isArray t = arrayRank t > 0
@@ -326,31 +337,33 @@ recordResultAliases stm = do
           Nothing -> pure ()
           Just se -> a `binds` se
     Let (Pat [a]) _ (BasicOp (Index arr slice))
-      | Just (se, t) <- IM.lookup (baseTag arr) stored
-      , DimFix idx : dims <- unSlice slice
-      , idx == intConst Int64 0
-      , and $ zipWith (\sd ad -> sd == sliceDim ad) dims (arrayDims t)
-      -> a `binds` se
+      | Just (se, t) <- IM.lookup (baseTag arr) stored,
+        DimFix idx : dims <- unSlice slice,
+        idx == intConst Int64 0,
+        and $ zipWith (\sd ad -> sd == sliceDim ad) dims (arrayDims t) ->
+        a `binds` se
     _ -> pure ()
 
 collapse :: MergeM ()
 collapse = do
   mergeInterlude
-  modify $ \st -> st {
-      statePrelude = statePrelude st <> stateInterlude st <> statePostlude st,
-      stateInterlude = mempty,
-      statePostlude = mempty,
-      stateMemStored = mempty,
-      stateHostBound = mempty
-    }
+  modify $ \st ->
+    st
+      { statePrelude = statePrelude st <> stateInterlude st <> statePostlude st,
+        stateInterlude = mempty,
+        statePostlude = mempty,
+        stateMemStored = mempty,
+        stateHostBound = mempty
+      }
 
 mergeInterlude :: MergeM ()
 mergeInterlude = do
   stms <- gets (groupStms . stateInterlude)
 
-  stms' <- if SQ.length stms < 2
-              then pure stms
-              else SQ.singleton <$> foldrM merge empty stms
+  stms' <-
+    if SQ.length stms < 2
+      then pure stms
+      else SQ.singleton <$> foldrM merge empty stms
 
   modify $ \st -> st {stateInterlude = (stateInterlude st) {groupStms = stms'}}
   where
@@ -359,18 +372,17 @@ mergeInterlude = do
 
     merge :: Stm GPU -> Stm GPU -> MergeM (Stm GPU)
     merge stm0 stm1
-      | Let pat0 (StmAux cs0 attrs0 _) (Op (GPUBody types0 body)) <- stm0
-      , Let pat1 (StmAux cs1 attrs1 _) (Op (GPUBody types1 body1)) <- stm1
-      = do
-        Body _ stms0 res0 <- execRewrite (rewriteBody body)
-        let Body _ stms1 res1 = body1
+      | Let pat0 (StmAux cs0 attrs0 _) (Op (GPUBody types0 body)) <- stm0,
+        Let pat1 (StmAux cs1 attrs1 _) (Op (GPUBody types1 body1)) <- stm1 =
+        do
+          Body _ stms0 res0 <- execRewrite (rewriteBody body)
+          let Body _ stms1 res1 = body1
 
-            pat' = pat0 <> pat1
-            aux' = StmAux (cs0 <> cs1) (attrs0 <> attrs1) ()
-            types' = types0 ++ types1
-            body' = Body () (stms0 <> stms1) (res0 <> res1)
-
-         in pure (Let pat' aux' (Op (GPUBody types' body')))
+              pat' = pat0 <> pat1
+              aux' = StmAux (cs0 <> cs1) (attrs0 <> attrs1) ()
+              types' = types0 ++ types1
+              body' = Body () (stms0 <> stms1) (res0 <> res1)
+           in pure (Let pat' aux' (Op (GPUBody types' body')))
     merge _ _ =
       compilerBugS "mergeInterlude: cannot merge non-GPUBody statements"
 
@@ -385,9 +397,10 @@ returnedValues = lift (gets stateHostBound)
 execRewrite :: RewriteM (BodyT GPU) -> MergeM (BodyT GPU)
 execRewrite m = fst <$> runStateT m' SQ.empty
   where
-    m' = do Body _ stms res <- m
-            prelude <- get
-            pure (Body () (prelude <> stms) res)
+    m' = do
+      Body _ stms res <- m
+      prelude <- get
+      pure (Body () (prelude <> stms) res)
 
 rewriteBody :: BodyT GPU -> RewriteM (BodyT GPU)
 rewriteBody (Body _ stms res) =
@@ -412,21 +425,20 @@ rewriteExp e = do
   stored <- arrayContents
   case e of
     BasicOp (Index arr slice)
-      | Just (se, _) <- IM.lookup (baseTag arr) stored
-      , [DimFix idx] <- unSlice slice
-      , idx == intConst Int64 0
-      -> pure $ BasicOp (SubExp se)
-
+      | Just (se, _) <- IM.lookup (baseTag arr) stored,
+        [DimFix idx] <- unSlice slice,
+        idx == intConst Int64 0 ->
+        pure $ BasicOp (SubExp se)
     BasicOp (Index arr slice)
-      | Just (Var src, _) <- IM.lookup (baseTag arr) stored
-      , DimFix idx : dims <- unSlice slice
-      , idx == intConst Int64 0
-      -> pure $ BasicOp $ Index src (Slice dims)
-
+      | Just (Var src, _) <- IM.lookup (baseTag arr) stored,
+        DimFix idx : dims <- unSlice slice,
+        idx == intConst Int64 0 ->
+        pure $ BasicOp $ Index src (Slice dims)
     _ -> mapExpM rewriter e
   where
-    rewriter = Mapper {
-          mapOnSubExp = rewriteSubExp,
+    rewriter =
+      Mapper
+        { mapOnSubExp = rewriteSubExp,
           mapOnBody = const rewriteBody,
           mapOnVName = rewriteName,
           mapOnRetType = rewriteExtType,
@@ -434,7 +446,7 @@ rewriteExp e = do
           mapOnFParam = rewriteParam,
           mapOnLParam = rewriteParam,
           mapOnOp = const opError
-      }
+        }
 
     opError = compilerBugS "rewriteExp: unhandled HostOp in GPUBody"
 
