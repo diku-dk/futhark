@@ -16,6 +16,7 @@ module Futhark.IR.GPU.Simplify
 where
 
 import qualified Futhark.Analysis.SymbolTable as ST
+import qualified Futhark.Analysis.UsageTable as UT
 import Futhark.IR.GPU
 import qualified Futhark.IR.SOACS.Simplify as SOAC
 import Futhark.MonadFreshNames
@@ -111,7 +112,8 @@ kernelRules =
         RuleOp SOAC.liftIdentityMapping,
         RuleOp SOAC.simplifyMapIota
       ]
-      [ RuleBasicOp removeUnnecessaryCopy
+      [ RuleBasicOp removeUnnecessaryCopy,
+        RuleOp removeDeadGPUBodyResult
       ]
 
 -- We turn reductions over (solely) iotas into do-loops, because there
@@ -125,3 +127,22 @@ redomapIotaToLoop vtable pat aux (OtherOp soac@(Screma _ [arr] form))
     Simplify $ certifying (stmAuxCerts aux) $ FOT.transformSOAC pat soac
 redomapIotaToLoop _ _ _ _ =
   Skip
+
+-- | Remove the unused return values of a GPUBody.
+removeDeadGPUBodyResult :: BottomUpRuleOp (Wise GPU)
+removeDeadGPUBodyResult (_, used) pat aux (GPUBody types body)
+  | -- Figure out which of the names in 'pat' are used...
+    pat_used <- map (`UT.isUsedDirectly` used) $ patNames pat,
+    -- If they are not all used, then this rule applies.
+    not (and pat_used) =
+    -- Remove the parts of the GPUBody results that correspond to dead
+    -- return value bindings.  Note that this leaves dead code in the
+    -- kernel, but that will be removed later.
+    let pick :: [a] -> [a]
+        pick = map snd . filter fst . zip pat_used
+        pat' = pick (patElems pat)
+        types' = pick types
+        body' = body {bodyResult = pick (bodyResult body)}
+     in Simplify $ auxing aux $ letBind (Pat pat') $ Op $ GPUBody types' body'
+  | otherwise = Skip
+removeDeadGPUBodyResult _ _ _ _ = Skip

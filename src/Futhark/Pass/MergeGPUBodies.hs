@@ -63,7 +63,6 @@ transformExp :: AliasTable
              -> Exp (Aliases GPU)
              -> PassM (Exp GPU, Dependencies)
 transformExp aliases e =
-  -- TODO: Eliminate unused return values of GPUBody.
   case e of
     BasicOp {} -> pure (removeExpAliases e, depsOf e)
     Apply {} -> pure (removeExpAliases e, depsOf e)
