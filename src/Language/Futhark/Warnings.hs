@@ -6,7 +6,7 @@ module Language.Futhark.Warnings
     anyWarnings,
     singleWarning,
     singleWarning',
-    listWarnings
+    listWarnings,
   )
 where
 
@@ -61,6 +61,6 @@ singleWarning loc = singleWarning' loc []
 singleWarning' :: SrcLoc -> [SrcLoc] -> Doc -> Warnings
 singleWarning' loc locs problem = Warnings [(loc, locs, problem)]
 
--- | Exports Warnings into a list of (location, context, problem)
-listWarnings :: Warnings -> [(SrcLoc, [SrcLoc], Doc)]
-listWarnings (Warnings ws) = ws
+-- | Exports Warnings into a list of (location, problem).
+listWarnings :: Warnings -> [(SrcLoc, Doc)]
+listWarnings (Warnings ws) = map (\(loc, _, doc) -> (loc, doc)) ws
