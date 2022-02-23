@@ -18,9 +18,9 @@ import qualified Control.Monad.Trans.Reader as R
 import Control.Monad.Trans.State.Strict ()
 import Control.Monad.Trans.State.Strict hiding (State)
 import Control.Parallel.Strategies (parMap, rpar)
+import Data.Foldable
 import qualified Data.IntMap.Strict as IM
 import qualified Data.IntSet as IS
-import Data.List (find, foldl')
 import qualified Data.Map.Strict as M
 import Data.Maybe (fromJust, fromMaybe, isJust, isNothing)
 import qualified Data.Sequence as SQ
@@ -30,6 +30,7 @@ import Futhark.Analysis.MigrationTable.Graph hiding
   ( Graph,
     addEdges,
     connectToSink,
+    fold,
     get,
     none,
   )
@@ -688,13 +689,12 @@ graphStm stm = do
     -- we block them from being migrated on their own. The parent statement of
     -- an enclosing body may still be migrated, including these.
     BasicOp (Index _ s) -> graphInefficientReturn (sliceDims s) e
-    BasicOp Update {} ->
-      -- TODO: Any update of a single scalar read from an array can be
-      --       transformed into a slice update that eliminates the read.
-      --       This means Updates are not sinks for scalar write values,
-      --       eliminating additional reads. ReduceDeviceSyncs needs to
-      --       rewrite such Updates to remain valid.
-      graphInefficientReturn [] e
+    BasicOp (Update _ _ (Slice slice) _) -> do
+      -- Writing a scalar to an array can be replaced with copying a single-
+      -- element slice. If the scalar originates from device memory its read
+      -- might thus be prevented without requiring the 'Update' to be migrated.
+      ops <- onlyGraphedScalars (namesToList $ freeIn slice)
+      addEdges ToSink ops
     BasicOp (FlatIndex _ s) -> graphInefficientReturn (flatSliceDims s) e
     BasicOp FlatUpdate {} -> graphInefficientReturn [] e
     BasicOp (Scratch _ s) -> graphInefficientReturn s e

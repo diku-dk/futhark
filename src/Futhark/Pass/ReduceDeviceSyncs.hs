@@ -79,8 +79,9 @@ arrayizePatElem (PatElem n t) = do
   dev <- newName (VName name 0)
   let dev_t = t `arrayOfRow` intConst Int64 1
   pure (PatElem dev dev_t)
-  where
-    withSuffix name sfx = nameFromText $ T.append (nameToText name) (T.pack sfx)
+
+withSuffix :: Name -> String -> Name
+withSuffix name sfx = nameFromText $ T.append (nameToText name) (T.pack sfx)
 
 -- | @(PatElem x t) `movedTo` arr@ registers that the value of @x@ has been
 -- migrated to @arr[0]@, with @x@ being of type @t@.
@@ -216,6 +217,18 @@ optimizeStm out stm = do
   if move
     then moveStm out stm
     else case stmExp stm of
+      BasicOp (Update safety arr (Slice slice) val) -> do
+        val' <- resolveSubExp val
+        -- If val' /= val then val is a scalar and val' is a single-element
+        -- array of rank 1 whose only element equals val.
+        if val' == val
+          then pure (out |> stm)
+          else
+            let (outer, [DimFix i]) = splitAt (length slice - 1) slice
+                one = intConst Int64 1
+                slice' = Slice $ outer ++ [DimSlice i one one]
+                stm' = stm {stmExp = BasicOp (Update safety arr slice' val')}
+             in pure (out |> stm')
       BasicOp {} ->
         pure (out |> stm)
       Apply {} ->
