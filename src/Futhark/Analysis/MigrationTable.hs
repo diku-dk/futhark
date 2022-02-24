@@ -150,15 +150,14 @@ checkFunDef fun = do
     hostOnly = Nothing
     ok = Just ()
     check isArr as = if any isArr as then hostOnly else ok
-    isArray = not . primType
 
-    checkFParams ps = check (isArray . typeOf) ps
+    checkFParams ps = check isArray ps
 
-    checkLParams ps = check (isArray . typeOf . fst) ps
+    checkLParams ps = check (isArray . fst) ps
 
-    checkRetTypes rs = check isArray rs
+    checkRetTypes rs = check isArrayType rs
 
-    checkPats pats = check (isArray . typeOf) pats
+    checkPats pats = check isArray pats
 
     checkLoopForm (ForLoop _ _ _ (_ : _)) = hostOnly
     checkLoopForm _ = ok
@@ -211,6 +210,12 @@ isScalarType :: TypeBase shape u -> Bool
 isScalarType (Prim Unit) = False
 isScalarType (Prim _) = True
 isScalarType _ = False
+
+isArray :: Typed t => t -> Bool
+isArray = isArrayType . typeOf
+
+isArrayType :: ArrayShape shape => TypeBase shape u -> Bool
+isArrayType = (0 <) . arrayRank
 
 -- | HostUsage identifies scalar variables that are used on host.
 type HostUsage = [Id]
@@ -301,9 +306,9 @@ data BodyStats = BodyStats
     -- | Whether the body performed any reads.
     bodyReads :: Bool,
     -- | All scalar variables represented in the graph that have been used
-    -- as operands within the body, including those that are defined within
-    -- the body itself. Variables with vertices connected to sinks may be
-    -- excluded.
+    -- as return values of the body or as operands within it, including those
+    -- that are defined within the body itself. Variables with vertices
+    -- connected to sinks may be excluded.
     bodyOperands :: Operands,
     -- | Depth of parent bodies with variables that are required on host. Since
     -- the variables are required on host, the parent statements of these bodies
@@ -344,6 +349,8 @@ type Delayed = (Binding, Exp GPU)
 -- | The vertex handle for a variable and its type.
 type Binding = (Id, Type)
 
+type CopyableMemoryMap = IM.IntMap Int
+
 data State = State
   { -- | The graph being built.
     stateGraph :: Graph,
@@ -358,6 +365,10 @@ data State = State
     stateSinks :: Sinks,
     -- | Observed 'UpdateAcc' host statements to be graphed later.
     stateUpdateAccs :: IM.IntMap [Delayed],
+    -- | Every known array that is backed by a memory segment that may be
+    -- copied, mapped to the outermost known body depth where an array is backed
+    -- by a superset of that segment.
+    stateCopyableMemory :: CopyableMemoryMap,
     -- | Information about the current body being graphed.
     stateStats :: BodyStats
   }
@@ -384,6 +395,7 @@ execGrapher hof m =
           stateSources = ([], []),
           stateSinks = [],
           stateUpdateAccs = IM.empty,
+          stateCopyableMemory = IM.empty,
           stateStats = mempty
         }
 
@@ -437,6 +449,20 @@ getGraph = gets stateGraph
 getGraphedScalars :: Grapher IdSet
 getGraphedScalars = gets stateGraphedScalars
 
+-- | Every known array that is backed by a memory segment that may be copied,
+-- mapped to the outermost known body depth where an array is backed by a
+-- superset of that segment.
+--
+-- A body where all returned arrays are backed by such memory and written by
+-- its own statements will retain its asymptotic cost if migrated as a whole.
+getCopyableMemory :: Grapher CopyableMemoryMap
+getCopyableMemory = gets stateCopyableMemory
+
+-- | The outermost known body depth for an array backed by the same copyable
+-- memory as the array with this name.
+outermostCopyableArray :: VName -> Grapher (Maybe Int)
+outermostCopyableArray n = IM.lookup (nameToId n) <$> getCopyableMemory
+
 -- | Reduces the variables to just the 'Id's of those that are scalars and which
 -- have a vertex representation in the graph, excluding those that have been
 -- connected to sinks.
@@ -469,10 +495,21 @@ modifyGraphedScalars :: (IdSet -> IdSet) -> Grapher ()
 modifyGraphedScalars f =
   modify $ \st -> st {stateGraphedScalars = f (stateGraphedScalars st)}
 
+-- | Update the contents of the copyable memory map.
+modifyCopyableMemory :: (CopyableMemoryMap -> CopyableMemoryMap) -> Grapher ()
+modifyCopyableMemory f =
+  modify $ \st -> st {stateCopyableMemory = f (stateCopyableMemory st)}
+
 -- | Update the set of source connected vertices.
 modifySources :: (Sources -> Sources) -> Grapher ()
 modifySources f =
   modify $ \st -> st {stateSources = f (stateSources st)}
+
+-- | Record that this variable binds an array that is backed by copyable
+-- memory shared by an array at this outermost body depth.
+recordCopyableMemory :: Id -> Int -> Grapher ()
+recordCopyableMemory i bd =
+  modifyCopyableMemory (IM.insert i bd)
 
 -- | Increment the fork depth for variables graphed by this action.
 incForkDepthFor :: Grapher a -> Grapher a
@@ -533,7 +570,8 @@ addVertex :: Binding -> Grapher ()
 addVertex (i, t) = do
   meta <- getMeta
   let v = MG.vertex i meta
-  when (isScalarType t) $ modifyGraphedScalars (IS.insert i)
+  when (isScalar t) $ modifyGraphedScalars (IS.insert i)
+  when (isArray t) $ recordCopyableMemory i (metaBodyDepth meta)
   modifyGraph (MG.insert v)
 
 -- | Adds a source connected vertex to the graph for the given binding.
@@ -605,18 +643,77 @@ inSubGraph si g i
     si == mgi
 inSubGraph _ _ _ = False
 
--- | Does the given body return an array whose computation has not been
--- migrated to device?
-returnsUnmigratedArray :: [Type] -> BodyT GPU -> Grapher Bool
-returnsUnmigratedArray types body =
-  -- TODO: Migration status is lost through aliasing, e.g. through body returns.
-  checkArrays (zip types $ bodyResult body) <$> getGraph
+-- | @b `reuses` n@ records that @b@ binds an array backed by the same memory
+-- as @n@. If @b@ is not array typed or the backing memory is not copyable then
+-- this does nothing.
+reuses :: Binding -> VName -> Grapher ()
+reuses (i, t) n
+  | isArray t =
+    do
+      body_depth <- outermostCopyableArray n
+      case body_depth of
+        Just bd -> recordCopyableMemory i bd
+        Nothing -> pure ()
+  | otherwise =
+    pure ()
+
+reusesSubExp :: Binding -> SubExp -> Grapher ()
+reusesSubExp b (Var n) = b `reuses` n
+reusesSubExp _ _ = pure ()
+
+-- @reusesReturn bs res@ records each array binding in @bs@ as reusing copyable
+-- memory if the corresponding return value in @res@ is backed by copyable
+-- memory. If every array binding is registered as being backed by copyable
+-- memory then the function returns @True@, otherwise it returns @False@.
+reusesReturn :: [Binding] -> [SubExp] -> Grapher Bool
+reusesReturn bs res = do
+  body_depth <- metaBodyDepth <$> getMeta
+  foldM (reuse body_depth) True (zip bs res)
   where
-    checkArrays [] _ = False
-    checkArrays ((Array {}, SubExpRes _ (Var n)) : _) g
-      | not $ MG.member (nameToId n) g =
-        True
-    checkArrays (_ : xs) g = checkArrays xs g
+    reuse body_depth onlyCopyable (b, se)
+      | (i, t) <- b,
+        isArray t,
+        Var n <- se =
+        do
+          res_body_depth <- outermostCopyableArray n
+          case res_body_depth of
+            Just inner -> do
+              recordCopyableMemory i (min body_depth inner)
+              let returns_free_var = inner <= body_depth
+              pure (onlyCopyable && not returns_free_var)
+            _ ->
+              pure False
+      | otherwise =
+        pure onlyCopyable
+
+-- @reusesBranches bs b1 b2@ records each array binding in @bs@ as reusing
+-- copyable memory if each corresponding return value in the lists @b1@ and @b2@
+-- are backed by copyable memory. If every array binding is registered as being
+-- backed by copyable memory then the function returns @True@, otherwise it
+-- returns @False@.
+reusesBranches :: [Binding] -> [SubExp] -> [SubExp] -> Grapher Bool
+reusesBranches bs b1 b2 = do
+  body_depth <- metaBodyDepth <$> getMeta
+  foldM (reuse body_depth) True $ zip3 bs b1 b2
+  where
+    reuse body_depth onlyCopyable (b, se1, se2)
+      | (i, t) <- b,
+        isArray t,
+        Var n1 <- se1,
+        Var n2 <- se2 =
+        do
+          body_depth_1 <- outermostCopyableArray n1
+          body_depth_2 <- outermostCopyableArray n2
+          case (body_depth_1, body_depth_2) of
+            (Just bd1, Just bd2) -> do
+              let inner = min bd1 bd2
+              recordCopyableMemory i (min body_depth inner)
+              let returns_free_var = inner <= body_depth
+              pure (onlyCopyable && not returns_free_var)
+            _ ->
+              pure False
+      | otherwise =
+        pure onlyCopyable
 
 graphBody :: BodyT GPU -> Grapher ()
 graphBody body = do
@@ -650,8 +747,12 @@ graphStm stm = do
   -- scalar operands appears must therefore ensure that that scalar operand is
   -- marked as a size variable (see 'hostSize' function).
   case e of
-    BasicOp SubExp {} -> graphSimple bs e
-    BasicOp Opaque {} -> graphSimple bs e
+    BasicOp (SubExp se) -> do
+      graphSimple bs e
+      one bs `reusesSubExp` se
+    BasicOp (Opaque _ se) -> do
+      graphSimple bs e
+      one bs `reusesSubExp` se
     BasicOp (ArrayLit [] _) -> graphSimple bs e
     BasicOp ArrayLit {} ->
       -- Migrating an array literal of n elements saves n synchronous writes.
@@ -685,22 +786,40 @@ graphStm stm = do
     -- Expressions with a cost sublinear to the size of their result arrays are
     -- risky to migrate as we cannot guarantee that their results are not
     -- returned from a GPUBody, which always copies its return values. Since
-    -- this would make the effective asymptotical cost of such statements linear
-    -- we block them from being migrated on their own. The parent statement of
-    -- an enclosing body may still be migrated, including these.
-    BasicOp (Index _ s) -> graphInefficientReturn (sliceDims s) e
-    BasicOp (Update _ _ (Slice slice) _) -> do
+    -- this would make the effective asymptotic cost of such statements linear
+    -- we block them from being migrated on their own.
+    --
+    -- The parent statement of an enclosing body may still be migrated,
+    -- including these, given that all its returned arrays are backed by memory
+    -- used by migratable statements within its body. Copied result arrays will
+    -- then be subsets of arrays that was considered ok to be copied and so
+    -- its asymptotic cost should not change.
+    BasicOp (Index arr s) -> do
+      graphInefficientReturn (sliceDims s) e
+      one bs `reuses` arr
+    BasicOp (Update _ arr (Slice slice) _) -> do
       -- Writing a scalar to an array can be replaced with copying a single-
       -- element slice. If the scalar originates from device memory its read
       -- might thus be prevented without requiring the 'Update' to be migrated.
-      ops <- onlyGraphedScalars (namesToList $ freeIn slice)
-      addEdges ToSink ops
-    BasicOp (FlatIndex _ s) -> graphInefficientReturn (flatSliceDims s) e
-    BasicOp FlatUpdate {} -> graphInefficientReturn [] e
+      let indices = namesToList $ freeIn slice
+      _ <- graphInefficientReturn' [] <$> onlyGraphedScalars indices
+      one bs `reuses` arr
+    BasicOp (FlatIndex arr s) -> do
+      graphInefficientReturn (flatSliceDims s) e
+      one bs `reuses` arr
+    BasicOp (FlatUpdate arr _ _) -> do
+      graphInefficientReturn [] e
+      one bs `reuses` arr
     BasicOp (Scratch _ s) -> graphInefficientReturn s e
-    BasicOp (Reshape s _) -> graphInefficientReturn (newDims s) e
-    BasicOp Rearrange {} -> graphInefficientReturn [] e
-    BasicOp Rotate {} -> graphInefficientReturn [] e
+    BasicOp (Reshape s arr) -> do
+      graphInefficientReturn (newDims s) e
+      one bs `reuses` arr
+    BasicOp (Rearrange _ arr) -> do
+      graphInefficientReturn [] e
+      one bs `reuses` arr
+    BasicOp (Rotate _ arr) -> do
+      graphInefficientReturn [] e
+      one bs `reuses` arr
     -- Expressions with a cost linear to the size of their result arrays are
     -- inefficient to migrate into GPUBody kernels as such kernels are single-
     -- threaded. For sufficiently large arrays the cost may exceed what is saved
@@ -731,9 +850,11 @@ graphStm stm = do
 
     -- new_dims may introduce new size variables which must be present on host
     -- when this expression is evaluated.
-    graphInefficientReturn new_dims e = do
+    graphInefficientReturn new_dims e =
+      graphedScalarOperands e >>= graphInefficientReturn' new_dims
+
+    graphInefficientReturn' new_dims ops = do
       mapM_ hostSize new_dims
-      ops <- graphedScalarOperands e
       addEdges ToSink ops
 
     hostSize (Var n) = hostSizeVar n
@@ -811,20 +932,20 @@ graphIf bs cond tbody fbody = do
           fstats <- captureBodyStats (graphBody fbody)
           pure $ bodyHostOnly tstats || bodyHostOnly fstats
       )
-  host_only <- (body_host_only ||) <$> returns_unmigrated_array
 
-  cond_id <- case (host_only, cond) of
-    (True, Var n) -> connectToSink (nameToId n) >> pure IS.empty
-    (False, Var n) -> onlyGraphedScalar n
+  let results = map resSubExp . bodyResult
+  may_copy_results <- reusesBranches bs (results tbody) (results fbody)
+
+  let may_migrate = not body_host_only && may_copy_results
+
+  cond_id <- case (may_migrate, cond) of
+    (False, Var n) -> connectToSink (nameToId n) >> pure IS.empty
+    (True, Var n) -> onlyGraphedScalar n
     (_, _) -> pure IS.empty
 
   ret <- zipWithM (comb cond_id) (bodyResult tbody) (bodyResult fbody)
   mapM_ (uncurry createNode) (zip bs ret)
   where
-    returns_unmigrated_array =
-      let check = returnsUnmigratedArray (map snd bs)
-       in fmap (||) (check tbody) <*> check fbody
-
     comb ci a b = (ci <>) <$> onlyGraphedScalars (toSet a <> toSet b)
 
     toSet (SubExpRes _ (Var n)) = S.singleton n
@@ -841,16 +962,20 @@ graphLoop [] _ _ _ =
   -- We expect each loop to bind a value or be eliminated.
   compilerBugS "Loop statement bound no variable; should have been eliminated."
 graphLoop (b : bs) params lform body = do
-  let types = map snd (b : bs)
-
   -- Graph loop params and body while capturing statistics.
   g0 <- getGraph
   stats <- captureBodyStats (subgraphId `graphIdFor` graphTheLoop)
   let ops = IS.filter (`MG.member` g0) (bodyOperands stats)
 
+  -- Does the loop return any arrays which prevent it from being migrated?
+  -- Also record aliases for the backing memory of these arrays.
+  let args = map snd params
+  let results = map resSubExp (bodyResult body)
+  may_copy_results <- reusesBranches (b : bs) args results
+
   -- Connect loop condition to a sink if the body cannot be migrated.
-  host_only <- (bodyHostOnly stats ||) <$> returnsUnmigratedArray types body
-  when host_only $ case lform of
+  let may_migrate = not (bodyHostOnly stats) && may_copy_results
+  unless may_migrate $ case lform of
     ForLoop _ _ (Var n) _ -> connectToSink (nameToId n)
     WhileLoop n -> connectToSink (nameToId n)
     _ -> pure ()
@@ -885,7 +1010,7 @@ graphLoop (b : bs) params lform body = do
   -- It might be beneficial to move the whole loop to device, to avoid
   -- reading the (initial) loop condition value. This must be balanced
   -- against the need to read the values bound by the loop statement.
-  unless host_only $ case lform of
+  when may_migrate $ case lform of
     ForLoop _ _ n _ ->
       onlyGraphedScalarSubExp n >>= addEdges (ToNodes bindings Nothing)
     WhileLoop n
@@ -900,7 +1025,7 @@ graphLoop (b : bs) params lform body = do
             \(bnd, (p, pval), res) ->
               let i = nameToId (paramName p)
                in (bnd, i, pval, resSubExp res)
-       in filter (\((_, t), _, _, _) -> isScalarType t) tmp'
+       in filter (\((_, t), _, _, _) -> isScalar t) tmp'
 
     bindings = IS.fromList $ map (\((i, _), _, _, _) -> i) loopValues
 
@@ -1014,12 +1139,16 @@ graphWithAcc bs inputs f = do
   -- Graph each accumulator monoid and its associated 'UpdateAcc' statements.
   mapM_ graph $ zip (lambdaReturnType f) inputs
 
+  -- Record aliases for the backing memory of each returned array.
+  let arrs = concatMap (\(_, as, _) -> map Var as) inputs
+  let res = drop (length inputs) (bodyResult $ lambdaBody f)
+  _ <- reusesReturn bs (arrs ++ map resSubExp res)
+
   -- Connect return variables to bound values. No outgoing edge exists
   -- from an accumulator vertex so skip those. Note that accumulators do
   -- not map to returned arrays one-to-one but one-to-many.
-  let res = drop (length inputs) (bodyResult $ lambdaBody f)
   ret <- mapM (onlyGraphedScalarSubExp . resSubExp) res
-  mapM_ (uncurry createNode) $ zip (reverse bs) (reverse ret)
+  mapM_ (uncurry createNode) $ zip (drop (length arrs) bs) ret
   where
     graph (Acc a _ types _, (_, _, comb)) = do
       let i = nameToId a
@@ -1060,7 +1189,7 @@ graphAcc i types op delayed = do
   -- are scalar then a read can be avoided by moving the UpdateAcc usages to
   -- device. If the op itself performs scalar reads its UpdateAcc usages should
   -- also be moved.
-  let does_read = bodyReads stats || any isScalarType types
+  let does_read = bodyReads stats || any isScalar types
   let host_only = bodyHostOnly stats
 
   -- Determine which external variables the operator depends upon.

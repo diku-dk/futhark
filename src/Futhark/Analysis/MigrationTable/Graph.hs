@@ -230,9 +230,9 @@ none = Visited M.empty
 {- INSERTION -}
 
 -- | Insert a new vertex into the graph. If its variable already is represented
--- in the graph, the existing vertex is replaced with the supplied vertex.
+-- in the graph, the original graph is returned.
 insert :: Vertex m -> Graph m -> Graph m
-insert v (Graph m) = Graph $ IM.insert (vertexId v) v m
+insert v (Graph m) = Graph $ IM.insertWith const (vertexId v) v m
 
 {- UPDATE -}
 
