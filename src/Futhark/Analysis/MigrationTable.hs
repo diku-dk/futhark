@@ -717,9 +717,12 @@ reusesBranches bs b1 b2 = do
 
 graphBody :: BodyT GPU -> Grapher ()
 graphBody body = do
-  body_depth <- (1 +) <$> getBodyDepth
-  body_stats <- captureBodyStats $ incBodyDepthFor $ graphStms (bodyStms body)
+  let res_ops = IS.fromList $ namesToIds $ freeIn (bodyResult body)
+  body_stats <-
+    captureBodyStats $
+      incBodyDepthFor (graphStms (bodyStms body) >> tellOperands res_ops)
 
+  body_depth <- (1 +) <$> getBodyDepth
   let host_only = IS.member body_depth (bodyHostOnlyParents body_stats)
   modify $ \st ->
     let stats = stateStats st
@@ -1240,10 +1243,10 @@ graphedScalarOperands e =
       mapM_ (collectSubExp . fst) params
     collect (If cond tbranch fbranch _) =
       collectSubExp cond >> collectBody tbranch >> collectBody fbranch
-    collect (DoLoop params lform body) =
+    collect (DoLoop params lform body) = do
       mapM_ (collectSubExp . snd) params
-        >> collectLForm lform
-        >> collectBody body
+      collectLForm lform
+      collectBody body
     collect (WithAcc accs f) =
       collectWithAcc accs f
     collect (Op op) =
@@ -1255,7 +1258,9 @@ graphedScalarOperands e =
     collectSubExp (Var n) = captureName n
     collectSubExp _ = pure ()
 
-    collectBody = collectStms . bodyStms
+    collectBody body = do
+      collectStms (bodyStms body)
+      collectFree (bodyResult body)
     collectStms = mapM_ collectStm
 
     collectStm (Let pat _ ua)
