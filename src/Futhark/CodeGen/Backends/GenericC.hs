@@ -1674,10 +1674,12 @@ struct memblock {
 };
 #endif
 
+enum scheduling {
+    DYNAMIC,
+    STATIC
+};
+
 #define futhark_foreach(t, i, n) foreach(i = 0 ... extract(n, 0))
-#define register uniform
-#define memblock_ref memblock * uniform
-#define auto export
 
 $ispc_decls
         |]
