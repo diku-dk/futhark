@@ -531,6 +531,13 @@ ispcDef s f = do
   GC.ispcDecl =<< f s'
   return s'
 
+sharedDef :: String -> (Name -> GC.CompilerM op s C.Definition) -> GC.CompilerM op s Name
+sharedDef s f = do
+  s' <- multicoreName s
+  GC.libDecl =<< f s'
+  GC.ispcDecl =<< f s'
+  return s'
+
 generateParLoopFn ::
   C.ToIdent a =>
   M.Map VName Space ->
@@ -575,13 +582,13 @@ prepareTaskStruct ::
   [(C.Type, ValueType)] ->
   GC.CompilerM Multicore s Name
 prepareTaskStruct name free_args free_ctypes retval_args retval_ctypes = do
-  fstruct <- multicoreDef name $ \s ->
-    return
-      [C.cedecl|struct $id:s {
+  let makeStruct s = return
+        [C.cedecl|struct $id:s {
                        struct futhark_context *ctx;
                        $sdecls:(compileFreeStructFields free_args free_ctypes)
                        $sdecls:(compileRetvalStructFields retval_args retval_ctypes)
                      };|]
+  fstruct <- sharedDef name makeStruct
   GC.decl [C.cdecl|struct $id:fstruct $id:fstruct;|]
   GC.stm [C.cstm|$id:fstruct.ctx = ctx;|]
   GC.stms [C.cstms|$stms:(compileSetStructValues fstruct free_args free_ctypes)|]
