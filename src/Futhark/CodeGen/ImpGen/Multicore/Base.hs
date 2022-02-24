@@ -251,7 +251,6 @@ generateChunkLoop desc m = do
   free_params_body <- freeParams body
   -- But we don't want to include the loop index, since is being bound in this expression
   let free_final = filter (\x -> Imp.paramName x /= i) (free_params_body <> free_params_bound)
-  -- TODO(Louis): Add call to ISPC func here
   emit $ Imp.Op $ Imp.ForEach i bound body free_final
 
 -------------------------------

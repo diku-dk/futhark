@@ -277,22 +277,25 @@ freshMemName param = param
 compileKernelInputs :: [VName] -> [(C.Type, ValueType)] -> [C.Param]
 compileKernelInputs = zipWith field
   where
-    getName name = nameFromString (pretty name)
     field name (ty, Prim) =
       [ISPC.cparam|uniform $ty:ty $id:(getName name)|]
+    field name (_, RawMem) =
+      [ISPC.cparam|unsigned char uniform * uniform $id:(getName name)|]
     field name (_, _) =
       [ISPC.cparam|uniform typename memblock * uniform $id:(getName name)|]
 compileIspcInputs :: [VName] -> [(C.Type, ValueType)] -> [C.Exp]
 compileIspcInputs = zipWith field
   where
-    getName name = nameFromString (pretty name)
-    field name (ty, Prim) = [C.cexp|$id:(getName name)|]
-    field name (_, _) = [C.cexp|&$id:(getName name)|]
+    field name (_, Prim) = [C.cexp|$id:(getName name)|]
+    field name (_, RawMem) = [C.cexp|$id:(getName name)|]
+    field name (_, MemBlock) = [C.cexp|&$id:(getName name)|]
 
 compileMemblockDeref :: [(VName, VName)] -> [(C.Type, ValueType)] -> [C.InitGroup]
 compileMemblockDeref = zipWith deref
   where
-    deref (v1, v2) (ty, _) = [C.cdecl|$ty:ty $id:v1 = *$id:(getName v2);|]
+    deref (v1, v2) (ty, Prim) = [C.cdecl|$ty:ty $id:v1 = $id:(getName v2);|]
+    deref (v1, v2) (_, RawMem) = [ISPC.cdecl|unsigned char uniform * uniform $id:v1 = $id:(getName v2);|]
+    deref (v1, v2) (ty, MemBlock) = [C.cdecl|$ty:ty $id:v1 = *$id:(getName v2);|]
 
 compileFreeStructFields :: [VName] -> [(C.Type, ValueType)] -> [C.FieldGroup]
 compileFreeStructFields = zipWith field
@@ -667,7 +670,7 @@ compileOp (ForEach i bound body free) = do
   let mem_body = filter isMemblock free -- old memblocks
   let mem_body_args = map paramName mem_body
   let mem_input_args = map paramName mem_input
-  mem_ctypes <- mapM paramToCType mem_input
+  mem_ctypes <- mapM paramToCType (filter isMemblock free)
   let memderef = compileMemblockDeref (zip mem_body_args mem_input_args) mem_ctypes
 
   let t = primTypeToCType $ primExpType bound
