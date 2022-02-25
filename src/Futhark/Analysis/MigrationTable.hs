@@ -1,3 +1,29 @@
+-- |
+-- This module implements program analysis to determine which program statements
+-- the "Futhark.Pass.ReduceDeviceSyncs" pass should move into GPUBody kernels
+-- to reduce blocking memory operations, primarily device-host scalar reads.
+-- The results of the analysis is encoded into a 'MigrationTable' which can be
+-- queried.
+--
+-- The module constructs a data flow dependency graph of program variables (see
+-- "Futhark.Analysis.MigrationTable.Graph") in which it finds a minimum vertex
+-- cut that separates array reads of scalars from transitive usage that cannot
+-- or should not be migrated to device.
+--
+-- The variables of each partition is assigned a 'MigrationStatus' that states
+-- whether computation of the variable should be moved to device or remain on
+-- host. Due to how the graph is built and the vertex cut is found all
+-- variables bound by a single statement will all belong to the same partition.
+--
+-- The vertex cut contains all variables that will reside in device memory but
+-- are required by host operations. These variables must be read from device
+-- memory and cannot be reduced further in number merely by migrating
+-- statements (subject to the accuracy of the graph model). The model is built
+-- to reduce the worst-case number of scalar reads; an optimal migration of
+-- statements depends on runtime data.
+--
+-- For details on how the graph is constructed and how the vertex cut is found,
+-- see the master thesis "TODO" by Philip Børgesen (2022).
 module Futhark.Analysis.MigrationTable
   ( -- * Analysis
     analyseProg,
