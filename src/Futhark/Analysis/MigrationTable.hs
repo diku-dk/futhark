@@ -960,6 +960,8 @@ graphIf bs cond tbody fbody = do
     (True, Var n) -> onlyGraphedScalar n
     (_, _) -> pure IS.empty
 
+  tellOperands cond_id
+
   -- Connect branch results to bound variables to allow delaying reads out of
   -- branches. It might also be beneficial to move the whole statement to
   -- device, to avoid reading the branch condition value. This must be balanced
@@ -1078,11 +1080,14 @@ graphLoop (b : bs) params lform body = do
     loopValueFor :: VName -> LoopValue
     loopValueFor n =
       fromJust $ find (\(_, p, _, _) -> p == nameToId n) loopValues
+
     graphTheLoop :: Grapher ()
     graphTheLoop = do
       mapM_ graphParam loopValues
       case lform of
-        ForLoop _ _ _ elems -> mapM_ graphForInElem elems
+        ForLoop _ _ n elems -> do
+          onlyGraphedScalarSubExp n >>= tellOperands
+          mapM_ graphForInElem elems
         WhileLoop _ -> pure ()
       graphBody body
       where
@@ -1258,8 +1263,8 @@ graphAcc i types op delayed = do
   let does_read = bodyReads stats || any isScalar types
 
   -- Determine which external variables the operator depends upon.
-  -- 'bodyOperands' cannot be used as it excludes branch conditions, operands
-  -- that were connected to sinks, and others, so instead we create an artifical
+  -- 'bodyOperands' cannot be used as it might exclude operands that were
+  -- connected to sinks within the body, so instead we create an artifical
   -- expression to capture graphed operands from.
   ops <- graphedScalarOperands (WithAcc [] lambda)
 
