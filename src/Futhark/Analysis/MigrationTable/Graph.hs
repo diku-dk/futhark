@@ -8,8 +8,8 @@
 -- The 'Graph' type is a data flow dependency graph of program variables, each
 -- variable represented by a 'Vertex'. A vertex may have edges to other vertices
 -- or to a sink, which is a special vertex with no graph representation. Each
--- edge to a vertex is either from another vertex or from a source, which is
--- another special vertex with no graph representation.
+-- edge to a vertex is either from another vertex or from a source, which also
+-- is a special vertex with no graph representation.
 --
 -- The primary graph operation provided by this module is 'route'. Given the
 -- vertex that some unspecified source has an edge to, a path is attempted
@@ -91,7 +91,9 @@ import Data.Maybe (fromJust)
 import Futhark.Error
 import Futhark.IR.GPU hiding (Result)
 
-{- TYPES -}
+--------------------------------------------------------------------------------
+--                                   TYPES                                    --
+--------------------------------------------------------------------------------
 
 -- | A data flow dependency graph of program variables, each variable
 -- represented by a 'Vertex'.
@@ -191,7 +193,9 @@ instance Semigroup a => Semigroup (Result a) where
   _ <> FoundSink = FoundSink
   Produced x <> Produced y = Produced (x <> y)
 
-{- CONSTRUCTION -}
+--------------------------------------------------------------------------------
+--                                CONSTRUCTION                                --
+--------------------------------------------------------------------------------
 
 -- | The empty graph.
 empty :: Graph m
@@ -227,14 +231,18 @@ oneEdge i = ToNodes (IS.singleton i) Nothing
 none :: Visited a
 none = Visited M.empty
 
-{- INSERTION -}
+--------------------------------------------------------------------------------
+--                                 INSERTION                                  --
+--------------------------------------------------------------------------------
 
 -- | Insert a new vertex into the graph. If its variable already is represented
 -- in the graph, the original graph is returned.
 insert :: Vertex m -> Graph m -> Graph m
 insert v (Graph m) = Graph $ IM.insertWith const (vertexId v) v m
 
-{- UPDATE -}
+--------------------------------------------------------------------------------
+--                                   UPDATE                                   --
+--------------------------------------------------------------------------------
 
 -- | Adjust the vertex with this specific id. When no vertex with that id is a
 -- member of the graph, the original graph is returned.
@@ -251,7 +259,9 @@ connectToSink = adjust $ \v -> v {vertexEdges = ToSink}
 addEdges :: Edges -> Id -> Graph m -> Graph m
 addEdges es = adjust $ \v -> v {vertexEdges = es <> vertexEdges v}
 
-{- QUERY -}
+--------------------------------------------------------------------------------
+--                                   QUERY                                    --
+--------------------------------------------------------------------------------
 
 -- | Does a vertex for the given id exist in the graph?
 member :: Id -> Graph m -> Bool
@@ -314,7 +324,9 @@ canReachSink g vs et i
       let (found, vs1) = canReachSink g vs0 Normal e
        in if found then (True, vs1) else searchNorms es vs1
 
-{- ROUTING -}
+--------------------------------------------------------------------------------
+--                                  ROUTING                                   --
+--------------------------------------------------------------------------------
 
 -- | @route src g@ attempts to find a path in @g@ from the source connected
 -- vertex with id @src@. If a sink is found, all edges along the path will be
@@ -340,7 +352,9 @@ routeMany srcs graph =
         (Nothing, g') -> (snks, g')
         (Just snk, g') -> (snk : snks, g')
 
-{- TRAVERSAL -}
+--------------------------------------------------------------------------------
+--                                 TRAVERSAL                                  --
+--------------------------------------------------------------------------------
 
 -- | @fold g f (a, vs) et i@ folds @f@ over the vertices in @g@ that can be
 -- reached from the vertex with handle @i@, as when accessed via an edge of
@@ -445,7 +459,10 @@ reduce g r vs et i
             Produced y -> reduceNorms (x <> y) es vs1
             FoundSink -> (res, vs1)
 
-{- INTERNALS BELOW -}
+
+--------------------------------------------------------------------------------
+--                             ROUTING INTERNALS                              --
+--------------------------------------------------------------------------------
 
 -- | A set of vertices visited by a graph traversal, and at what depth they were
 -- encountered. Used to detect cycles.

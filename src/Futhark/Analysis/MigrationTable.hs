@@ -3,12 +3,14 @@ module Futhark.Analysis.MigrationTable
     analyseProg,
 
     -- * Query
-    MigrationTable,
-    MigrationStatus (..),
-    statusOf,
-    moveToDevice,
+    shouldMoveStm,
     shouldMove,
     usedOnHost,
+    statusOf,
+
+    -- * Types
+    MigrationTable,
+    MigrationStatus (..),
   )
 where
 
@@ -41,12 +43,16 @@ import Futhark.IR.GPU
 {- HLINT ignore "Use first" -}
 {- HLINT ignore "Use second" -}
 
+--------------------------------------------------------------------------------
+--                              MIGRATION TABLES                              --
+--------------------------------------------------------------------------------
+
 -- | Where the value bound by a name should be computed.
 data MigrationStatus
   = -- | The statement that computes the value should be moved to device.
     -- No host usage of the value will be left after the migration.
     MoveToDevice
-  | -- | As MoveToDevice but host usage of the value will remain after
+  | -- | As 'MoveToDevice' but host usage of the value will remain after
     -- migration.
     UsedOnHost
   | -- | The statement that computes the value should remain on host.
@@ -56,7 +62,7 @@ data MigrationStatus
 -- | Identifies
 --
 --     (1) which statements should be moved from host to device to reduce the
---         the worst case number of blocking memory transfers, primarily
+--         worst case number of blocking memory transfers, primarily
 --         device-host scalar reads.
 --
 --     (2) which migrated variables that still will be used on the host after
@@ -69,34 +75,34 @@ statusOf n (MigrationTable mt) =
   fromMaybe StayOnHost $ IM.lookup (baseTag n) mt
 
 -- | Should this whole statement be moved from host to device?
-moveToDevice :: Stm GPU -> MigrationTable -> Bool
-moveToDevice (Let (Pat ((PatElem n _) : _)) _ (BasicOp (Index _ slice))) mt =
+shouldMoveStm :: Stm GPU -> MigrationTable -> Bool
+shouldMoveStm (Let (Pat ((PatElem n _) : _)) _ (BasicOp (Index _ slice))) mt =
   statusOf n mt == MoveToDevice || any movedOperand slice
   where
     movedOperand (Var op) = statusOf op mt == MoveToDevice
     movedOperand _ = False
-moveToDevice (Let (Pat ((PatElem n _) : _)) _ (BasicOp _)) mt =
+shouldMoveStm (Let (Pat ((PatElem n _) : _)) _ (BasicOp _)) mt =
   statusOf n mt /= StayOnHost
-moveToDevice (Let (Pat ((PatElem n _) : _)) _ Apply {}) mt =
+shouldMoveStm (Let (Pat ((PatElem n _) : _)) _ Apply {}) mt =
   statusOf n mt /= StayOnHost
-moveToDevice (Let _ _ (If (Var n) _ _ _)) mt =
+shouldMoveStm (Let _ _ (If (Var n) _ _ _)) mt =
   statusOf n mt == MoveToDevice
-moveToDevice (Let _ _ (DoLoop _ (ForLoop _ _ (Var n) _) _)) mt =
+shouldMoveStm (Let _ _ (DoLoop _ (ForLoop _ _ (Var n) _) _)) mt =
   statusOf n mt == MoveToDevice
-moveToDevice (Let _ _ (DoLoop _ (WhileLoop n) _)) mt =
+shouldMoveStm (Let _ _ (DoLoop _ (WhileLoop n) _)) mt =
   statusOf n mt == MoveToDevice
 -- BasicOp and Apply statements might not bind any variables (shouldn't happen).
 -- If statements might use a constant branch condition.
 -- For loop statements might use a constant number of iterations.
 -- HostOp statements cannot execute on device.
 -- WithAcc statements are never moved in their entirety.
-moveToDevice _ _ = False
+shouldMoveStm _ _ = False
 
 -- | Should the value bound by this name be computed on device?
 shouldMove :: VName -> MigrationTable -> Bool
 shouldMove n mt = statusOf n mt /= StayOnHost
 
--- | Is the value bound by this name used on host?
+-- | Will the value bound by this name be used on host?
 usedOnHost :: VName -> MigrationTable -> Bool
 usedOnHost n mt = statusOf n mt /= MoveToDevice
 
@@ -104,14 +110,13 @@ usedOnHost n mt = statusOf n mt /= MoveToDevice
 merge :: MigrationTable -> MigrationTable -> MigrationTable
 merge (MigrationTable a) (MigrationTable b) = MigrationTable (a `IM.union` b)
 
--- | Analyses a program to return a migration table that covers all its
--- statements and variables.
-analyseProg :: Prog GPU -> MigrationTable
-analyseProg (Prog consts funs) =
-  let hof = hostOnlyFunDefs funs
-      mt = analyseConsts hof consts
-      mts = parMap rpar (analyseFunDef hof) funs
-   in foldl' merge mt mts
+--------------------------------------------------------------------------------
+--                         HOST-ONLY FUNCTION ANALYSIS                        --
+--------------------------------------------------------------------------------
+
+-- | Identifies top-level function definitions that cannot be run on the
+-- device. The application of any such function is host-only.
+type HostOnlyFuns = Set Name
 
 -- | Returns the names of all top-level functions that cannot be called from the
 -- device. The evaluation of such a function is host-only.
@@ -183,6 +188,22 @@ checkFunDef fun = do
       checkBody body
     checkExp _ = Just S.empty
 
+--------------------------------------------------------------------------------
+--                             MIGRATION ANALYSIS                             --
+--------------------------------------------------------------------------------
+
+-- | HostUsage identifies scalar variables that are used on host.
+type HostUsage = [Id]
+
+-- | Analyses a program to return a migration table that covers all its
+-- statements and variables.
+analyseProg :: Prog GPU -> MigrationTable
+analyseProg (Prog consts funs) =
+  let hof = hostOnlyFunDefs funs
+      mt = analyseConsts hof consts
+      mts = parMap rpar (analyseFunDef hof) funs
+   in foldl' merge mt mts
+
 -- | Analyses top-level constants.
 analyseConsts :: HostOnlyFuns -> Stms GPU -> MigrationTable
 analyseConsts hof consts =
@@ -202,23 +223,6 @@ analyseFunDef hof fd =
   where
     f usage (SubExpRes _ (Var n), t) | isScalarType t = nameToId n : usage
     f usage _ = usage
-
-isScalar :: Typed t => t -> Bool
-isScalar = isScalarType . typeOf
-
-isScalarType :: TypeBase shape u -> Bool
-isScalarType (Prim Unit) = False
-isScalarType (Prim _) = True
-isScalarType _ = False
-
-isArray :: Typed t => t -> Bool
-isArray = isArrayType . typeOf
-
-isArrayType :: ArrayShape shape => TypeBase shape u -> Bool
-isArrayType = (0 <) . arrayRank
-
--- | HostUsage identifies scalar variables that are used on host.
-type HostUsage = [Id]
 
 -- | Analyses statements. The 'HostUsage' list identifies which bound scalar
 -- variables that subsequently may be used on host. All free variables such as
@@ -256,477 +260,33 @@ analyseStms hof usage stms =
       let tn' = IS.insert (vertexId v) tn
        in (vr, vn, tn')
 
+--------------------------------------------------------------------------------
+--                                TYPE HELPERS                                --
+--------------------------------------------------------------------------------
+
+isScalar :: Typed t => t -> Bool
+isScalar = isScalarType . typeOf
+
+isScalarType :: TypeBase shape u -> Bool
+isScalarType (Prim Unit) = False
+isScalarType (Prim _) = True
+isScalarType _ = False
+
+isArray :: Typed t => t -> Bool
+isArray = isArrayType . typeOf
+
+isArrayType :: ArrayShape shape => TypeBase shape u -> Bool
+isArrayType = (0 <) . arrayRank
+
+--------------------------------------------------------------------------------
+--                               GRAPH BUILDING                               --
+--------------------------------------------------------------------------------
+
 buildGraph :: HostOnlyFuns -> HostUsage -> Stms GPU -> (Graph, Sources, Sinks)
 buildGraph hof usage stms =
   let (g, srcs, sinks) = execGrapher hof (graphStms stms)
       g' = foldl' (flip MG.connectToSink) g usage
    in (g', srcs, sinks)
-
-type Grapher = StateT State (R.Reader Env)
-
-data Env = Env
-  { -- | See 'HostOnlyFuns'.
-    envHostOnlyFuns :: HostOnlyFuns,
-    -- | Metadata for the current body being graphed.
-    envMeta :: Meta
-  }
-
--- | Identifies top-level function definitions that cannot be run on the
--- device. The application of any such function is host-only.
-type HostOnlyFuns = Set Name
-
--- | A measurement of how many bodies something is nested within.
-type BodyDepth = Int
-
--- | Metadata on the environment that a variable is declared within.
-data Meta = Meta
-  { -- | How many if statement branch bodies the variable binding is nested
-    -- within. If a route passes through the edge u->v and the fork depth
-    --
-    --   1) increases from u to v, then u is within a conditional branch.
-    --
-    --   2) decreases from u to v, then v binds the result of two or more
-    --      branches.
-    --
-    -- After the graph has been built and routed, this can be used to delay
-    -- reads into deeper branches to reduce their likelihood of manifesting.
-    metaForkDepth :: Int,
-    -- | How many bodies the variable is nested within.
-    metaBodyDepth :: BodyDepth,
-    -- | An id for the subgraph within which the variable exists, defined at
-    -- the body level. A read may only be delayed to a point within its own
-    -- subgraph.
-    metaGraphId :: Maybe Id
-  }
-
--- | Ids for all variables used as an operand.
-type Operands = IdSet
-
--- | Statistics on the statements within a body and their dependencies.
-data BodyStats = BodyStats
-  { -- | Whether the body contained any host-only statements.
-    bodyHostOnly :: Bool,
-    -- | Whether the body performed any reads.
-    bodyReads :: Bool,
-    -- | All scalar variables represented in the graph that have been used
-    -- as return values of the body or as operands within it, including those
-    -- that are defined within the body itself. Variables with vertices
-    -- connected to sinks may be excluded.
-    bodyOperands :: Operands,
-    -- | Depth of parent bodies with variables that are required on host. Since
-    -- the variables are required on host, the parent statements of these bodies
-    -- cannot be moved to device as a whole. They are host-only.
-    bodyHostOnlyParents :: IS.IntSet
-  }
-
-instance Semigroup BodyStats where
-  (BodyStats ho1 r1 o1 hop1) <> (BodyStats ho2 r2 o2 hop2) =
-    BodyStats
-      { bodyHostOnly = ho1 || ho2,
-        bodyReads = r1 || r2,
-        bodyOperands = IS.union o1 o2,
-        bodyHostOnlyParents = IS.union hop1 hop2
-      }
-
-instance Monoid BodyStats where
-  mempty =
-    BodyStats
-      { bodyHostOnly = False,
-        bodyReads = False,
-        bodyOperands = IS.empty,
-        bodyHostOnlyParents = IS.empty
-      }
-
-type Graph = MG.Graph Meta
-
--- | All vertices connected from a source, partitioned into those that have
--- been attempted routed and those which have not.
-type Sources = ([Id], [Id])
-
--- | All terminal vertices of routes.
-type Sinks = [Id]
-
--- | A captured statement for which graphing has been delayed.
-type Delayed = (Binding, Exp GPU)
-
--- | The vertex handle for a variable and its type.
-type Binding = (Id, Type)
-
--- | Array variables backed by memory segments that may be copied, mapped to the
--- outermost known body depths that declares arrays backed by a superset of
--- those segments.
-type CopyableMemoryMap = IM.IntMap BodyDepth
-
-data State = State
-  { -- | The graph being built.
-    stateGraph :: Graph,
-    -- | All known scalars that have been graphed.
-    stateGraphedScalars :: IdSet,
-    -- | All variables that directly bind scalars read from device memory.
-    stateSources :: Sources,
-    -- | Graphed scalars that are used as operands by statements that cannot be
-    -- migrated. A read cannot be delayed beyond these, so if the statements
-    -- that bind these variables are moved to device, the variables must be read
-    -- from device memory.
-    stateSinks :: Sinks,
-    -- | Observed 'UpdateAcc' host statements to be graphed later.
-    stateUpdateAccs :: IM.IntMap [Delayed],
-    -- | A map of all encountered arrays that are backed by copyable memory.
-    stateCopyableMemory :: CopyableMemoryMap,
-    -- | Information about the current body being graphed.
-    stateStats :: BodyStats
-  }
-
-execGrapher :: HostOnlyFuns -> Grapher a -> (Graph, Sources, Sinks)
-execGrapher hof m =
-  let s = R.runReader (execStateT m st) env
-   in (stateGraph s, stateSources s, stateSinks s)
-  where
-    env =
-      Env
-        { envHostOnlyFuns = hof,
-          envMeta =
-            Meta
-              { metaForkDepth = 0,
-                metaBodyDepth = 0,
-                metaGraphId = Nothing
-              }
-        }
-    st =
-      State
-        { stateGraph = MG.empty,
-          stateGraphedScalars = IS.empty,
-          stateSources = ([], []),
-          stateSinks = [],
-          stateUpdateAccs = IM.empty,
-          stateCopyableMemory = IM.empty,
-          stateStats = mempty
-        }
-
--- | Execute a computation in a modified environment.
-local :: (Env -> Env) -> Grapher a -> Grapher a
-local f = mapStateT (R.local f)
-
--- | Fetch the value of the environment.
-ask :: Grapher Env
-ask = lift R.ask
-
--- | Retrieve a function of the current environment.
-asks :: (Env -> a) -> Grapher a
-asks = lift . R.asks
-
--- | Register that the body contains a host-only statement. This means its
--- parent statement and any parent bodies themselves are host-only.
-tellHostOnly :: Grapher ()
-tellHostOnly =
-  modify $ \st -> st {stateStats = (stateStats st) {bodyHostOnly = True}}
-
--- | Register that the current body contains a statement that reads device
--- memory.
-tellRead :: Grapher ()
-tellRead =
-  modify $ \st -> st {stateStats = (stateStats st) {bodyReads = True}}
-
--- | Register that these variables are used as operands within the current body.
-tellOperands :: IdSet -> Grapher ()
-tellOperands is =
-  modify $ \st ->
-    let stats = stateStats st
-        operands = bodyOperands stats
-     in st {stateStats = stats {bodyOperands = operands <> is}}
-
--- | Register that the current statement with a body at the given body depth is
--- host-only.
-tellHostOnlyParent :: BodyDepth -> Grapher ()
-tellHostOnlyParent body_depth =
-  modify $ \st ->
-    let stats = stateStats st
-        parents = bodyHostOnlyParents stats
-        parents' = IS.insert body_depth parents
-     in st {stateStats = stats {bodyHostOnlyParents = parents'}}
-
--- | Get the graph under construction.
-getGraph :: Grapher Graph
-getGraph = gets stateGraph
-
--- | All scalar variables with a vertex representation in the graph.
-getGraphedScalars :: Grapher IdSet
-getGraphedScalars = gets stateGraphedScalars
-
--- | Every known array that is backed by a memory segment that may be copied,
--- mapped to the outermost known body depth where an array is backed by a
--- superset of that segment.
---
--- A body where all returned arrays are backed by such memory and are written by
--- its own statements will retain its asymptotic cost if migrated as a whole.
-getCopyableMemory :: Grapher CopyableMemoryMap
-getCopyableMemory = gets stateCopyableMemory
-
--- | The outermost known body depth for an array backed by the same copyable
--- memory as the array with this name.
-outermostCopyableArray :: VName -> Grapher (Maybe BodyDepth)
-outermostCopyableArray n = IM.lookup (nameToId n) <$> getCopyableMemory
-
--- | Reduces the variables to just the 'Id's of those that are scalars and which
--- have a vertex representation in the graph, excluding those that have been
--- connected to sinks.
-onlyGraphedScalars :: Foldable t => t VName -> Grapher IdSet
-onlyGraphedScalars vs = do
-  let is = foldl' (\s n -> IS.insert (nameToId n) s) IS.empty vs
-  IS.intersection is <$> getGraphedScalars
-
--- | Like 'onlyGraphedScalars' but for a single 'VName'.
-onlyGraphedScalar :: VName -> Grapher IdSet
-onlyGraphedScalar n = do
-  let i = nameToId n
-  gss <- getGraphedScalars
-  if IS.member i gss
-    then pure (IS.singleton i)
-    else pure IS.empty
-
--- | Like 'onlyGraphedScalars' but for a single 'SubExp'.
-onlyGraphedScalarSubExp :: SubExp -> Grapher IdSet
-onlyGraphedScalarSubExp (Constant _) = pure IS.empty
-onlyGraphedScalarSubExp (Var n) = onlyGraphedScalar n
-
--- | Update the graph under construction.
-modifyGraph :: (Graph -> Graph) -> Grapher ()
-modifyGraph f =
-  modify $ \st -> st {stateGraph = f (stateGraph st)}
-
--- | Update the contents of the graphed scalar set.
-modifyGraphedScalars :: (IdSet -> IdSet) -> Grapher ()
-modifyGraphedScalars f =
-  modify $ \st -> st {stateGraphedScalars = f (stateGraphedScalars st)}
-
--- | Update the contents of the copyable memory map.
-modifyCopyableMemory :: (CopyableMemoryMap -> CopyableMemoryMap) -> Grapher ()
-modifyCopyableMemory f =
-  modify $ \st -> st {stateCopyableMemory = f (stateCopyableMemory st)}
-
--- | Update the set of source connected vertices.
-modifySources :: (Sources -> Sources) -> Grapher ()
-modifySources f =
-  modify $ \st -> st {stateSources = f (stateSources st)}
-
--- | Record that this variable binds an array that is backed by copyable
--- memory shared by an array at this outermost body depth.
-recordCopyableMemory :: Id -> BodyDepth -> Grapher ()
-recordCopyableMemory i bd =
-  modifyCopyableMemory (IM.insert i bd)
-
--- | Increment the fork depth for variables graphed by this action.
-incForkDepthFor :: Grapher a -> Grapher a
-incForkDepthFor =
-  local $ \env ->
-    let meta = envMeta env
-        fork_depth = metaForkDepth meta
-     in env {envMeta = meta {metaForkDepth = fork_depth + 1}}
-
--- | Increment the body depth for variables graphed by this action.
-incBodyDepthFor :: Grapher a -> Grapher a
-incBodyDepthFor =
-  local $ \env ->
-    let meta = envMeta env
-        body_depth = metaBodyDepth meta
-     in env {envMeta = meta {metaBodyDepth = body_depth + 1}}
-
--- | Change the graph id for variables graphed by this action.
-graphIdFor :: Id -> Grapher a -> Grapher a
-graphIdFor i =
-  local $ \env ->
-    let meta = envMeta env
-     in env {envMeta = meta {metaGraphId = Just i}}
-
--- | Capture body stats produced by the given action.
-captureBodyStats :: Grapher a -> Grapher BodyStats
-captureBodyStats m = do
-  stats <- gets stateStats
-  modify $ \st -> st {stateStats = mempty}
-
-  _ <- m
-
-  stats' <- gets stateStats
-  modify $ \st -> st {stateStats = stats <> stats'}
-
-  pure stats'
-
--- | Can applications of this function be moved to device?
-isHostOnlyFun :: Name -> Grapher Bool
-isHostOnlyFun fn = asks $ S.member fn . envHostOnlyFuns
-
--- | Get the 'Meta' corresponding to the current body.
-getMeta :: Grapher Meta
-getMeta = asks envMeta
-
--- | Get the body depth of the current body (its nesting level).
-getBodyDepth :: Grapher BodyDepth
-getBodyDepth = asks (metaBodyDepth . envMeta)
-
--- | Creates a vertex for the given binding, provided that the set of operands
--- is not empty.
-createNode :: Binding -> Operands -> Grapher ()
-createNode b ops =
-  unless (IS.null ops) (addVertex b >> addEdges (oneEdge $ fst b) ops)
-
--- | Adds a vertex to the graph for the given binding.
-addVertex :: Binding -> Grapher ()
-addVertex (i, t) = do
-  meta <- getMeta
-  let v = MG.vertex i meta
-  when (isScalar t) $ modifyGraphedScalars (IS.insert i)
-  when (isArray t) $ recordCopyableMemory i (metaBodyDepth meta)
-  modifyGraph (MG.insert v)
-
--- | Adds a source connected vertex to the graph for the given binding.
-addSource :: Binding -> Grapher ()
-addSource b = do
-  addVertex b
-  modifySources $ \(routed, unrouted) -> (routed, fst b : unrouted)
-
--- | Adds the given edges to each vertex identified by the 'IdSet'. It is
--- assumed that all vertices reside within the body that currently is being
--- graphed.
-addEdges :: Edges -> IdSet -> Grapher ()
-addEdges ToSink is = do
-  modifyGraph $ \g -> IS.foldl' (flip MG.connectToSink) g is
-  modifyGraphedScalars (`IS.difference` is)
-addEdges es is = do
-  modifyGraph $ \g -> IS.foldl' (flip $ MG.addEdges es) g is
-  tellOperands is
-
--- | Ensure that a variable (which is in scope) will be made available on host
--- before its first use.
-requiredOnHost :: Id -> Grapher ()
-requiredOnHost i = do
-  mv <- MG.get i <$> getGraph
-  case mv of
-    Nothing -> pure ()
-    Just v -> do
-      connectToSink i
-      tellHostOnlyParent (metaBodyDepth $ vertexMeta v)
-
--- | Connects the vertex of the given id to a sink.
-connectToSink :: Id -> Grapher ()
-connectToSink i = do
-  modifyGraph (MG.connectToSink i)
-  modifyGraphedScalars (IS.delete i)
-
--- | Like 'connectToSink' but vertex is given by a 'SubExp'. This is a no-op if
--- the 'SubExp' is a constant.
-connectSubExpToSink :: SubExp -> Grapher ()
-connectSubExpToSink (Var n) = connectToSink (nameToId n)
-connectSubExpToSink _ = pure ()
-
--- | Routes all possible routes within the subgraph identified by this id.
--- Returns the ids of the source connected vertices that were attempted routed.
---
--- Assumption: The subgraph with the given id has just been created and no path
--- exists from it to an external sink.
-routeSubgraph :: Id -> Grapher [Id]
-routeSubgraph si = do
-  st <- get
-  let g = stateGraph st
-  let (routed, unrouted) = stateSources st
-  let (gsrcs, unrouted') = span (inSubGraph si g) unrouted
-  let (sinks, g') = MG.routeMany gsrcs g
-  put $
-    st
-      { stateGraph = g',
-        stateSources = (gsrcs ++ routed, unrouted'),
-        stateSinks = sinks ++ stateSinks st
-      }
-  pure gsrcs
-
--- | @inSubGraph si g i@ returns whether @g@ contains a vertex with id @i@ that
--- is declared within the subgraph with id @si@.
-inSubGraph :: Id -> Graph -> Id -> Bool
-inSubGraph si g i
-  | Just v <- MG.get i g,
-    Just mgi <- metaGraphId (vertexMeta v) =
-    si == mgi
-inSubGraph _ _ _ = False
-
--- | @b `reuses` n@ records that @b@ binds an array backed by the same memory
--- as @n@. If @b@ is not array typed or the backing memory is not copyable then
--- this does nothing.
-reuses :: Binding -> VName -> Grapher ()
-reuses (i, t) n
-  | isArray t =
-    do
-      body_depth <- outermostCopyableArray n
-      case body_depth of
-        Just bd -> recordCopyableMemory i bd
-        Nothing -> pure ()
-  | otherwise =
-    pure ()
-
-reusesSubExp :: Binding -> SubExp -> Grapher ()
-reusesSubExp b (Var n) = b `reuses` n
-reusesSubExp _ _ = pure ()
-
--- @reusesReturn bs res@ records each array binding in @bs@ as reusing copyable
--- memory if the corresponding return value in @res@ is backed by copyable
--- memory.
---
--- If every array binding is registered as being backed by copyable memory then
--- the function returns @True@, otherwise it returns @False@.
-reusesReturn :: [Binding] -> [SubExp] -> Grapher Bool
-reusesReturn bs res = do
-  body_depth <- metaBodyDepth <$> getMeta
-  foldM (reuse body_depth) True (zip bs res)
-  where
-    reuse body_depth onlyCopyable (b, se)
-      | (i, t) <- b,
-        isArray t,
-        Var n <- se =
-        do
-          res_body_depth <- outermostCopyableArray n
-          case res_body_depth of
-            Just inner -> do
-              recordCopyableMemory i (min body_depth inner)
-              let returns_free_var = inner <= body_depth
-              pure (onlyCopyable && not returns_free_var)
-            _ ->
-              pure False
-      | otherwise =
-        pure onlyCopyable
-
--- @reusesBranches bs b1 b2@ records each array binding in @bs@ as reusing
--- copyable memory if each corresponding return value in the lists @b1@ and @b2@
--- are backed by copyable memory.
---
--- If every array binding is registered as being backed by copyable memory then
--- the function returns @True@, otherwise it returns @False@.
-reusesBranches :: [Binding] -> [SubExp] -> [SubExp] -> Grapher Bool
-reusesBranches bs b1 b2 = do
-  body_depth <- metaBodyDepth <$> getMeta
-  foldM (reuse body_depth) True $ zip3 bs b1 b2
-  where
-    reuse body_depth onlyCopyable (b, se1, se2)
-      | (i, t) <- b,
-        isArray t,
-        Var n1 <- se1,
-        Var n2 <- se2 =
-        do
-          body_depth_1 <- outermostCopyableArray n1
-          body_depth_2 <- outermostCopyableArray n2
-          case (body_depth_1, body_depth_2) of
-            (Just bd1, Just bd2) -> do
-              let inner = min bd1 bd2
-              recordCopyableMemory i (min body_depth inner)
-              let returns_free_var = inner <= body_depth
-              pure (onlyCopyable && not returns_free_var)
-            _ ->
-              pure False
-      | otherwise =
-        pure onlyCopyable
-
--- | Bindings for all pattern elements bound by a statement.
-boundBy :: Stm GPU -> [Binding]
-boundBy (Let (Pat pes) _ _) = map f pes
-  where
-    f (PatElem n t) = (nameToId n, t)
 
 -- | Graph a body.
 graphBody :: BodyT GPU -> Grapher ()
@@ -869,6 +429,10 @@ graphStm stm = do
 
     hostSizeVar = requiredOnHost . nameToId
 
+-- | Bindings for all pattern elements bound by a statement.
+boundBy :: Stm GPU -> [Binding]
+boundBy = map (\(PatElem n t) -> (nameToId n, t)) . patElems . stmPat
+
 -- | Graph a statement which in itself neither reads scalars from device memory
 -- nor forces such scalars to be available on host. Such statement can be moved
 -- to device to eliminate the host usage of its operands which transitively may
@@ -948,7 +512,7 @@ graphIf bs cond tbody fbody = do
   cond_id <- case (may_migrate, cond) of
     (False, Var n) ->
       -- The migration status of the condition is what determines whether the
-      -- statement may be migrated as a whole or not. See 'moveToDevice'.
+      -- statement may be migrated as a whole or not. See 'shouldMoveStm'.
       connectToSink (nameToId n) >> pure IS.empty
     (True, Var n) -> onlyGraphedScalar n
     (_, _) -> pure IS.empty
@@ -976,7 +540,9 @@ graphIf bs cond tbody fbody = do
     toSet (SubExpRes _ (Var n)) = S.singleton n
     toSet _ = S.empty
 
--- These type aliases are only used by 'graphLoop'
+-----------------------------------------------------
+-- These type aliases are only used by 'graphLoop' --
+-----------------------------------------------------
 type ReachableBindings = IdSet
 
 type ReachableBindingsCache = Visited (MG.Result ReachableBindings)
@@ -984,6 +550,8 @@ type ReachableBindingsCache = Visited (MG.Result ReachableBindings)
 type NonExhausted = [Id]
 
 type LoopValue = (Binding, Id, SubExp, SubExp)
+-----------------------------------------------------
+-----------------------------------------------------
 
 -- | Graph a loop statement.
 graphLoop ::
@@ -1008,7 +576,7 @@ graphLoop (b : bs) params lform body = do
 
   -- Connect loop condition to a sink if the loop cannot be migrated.
   -- The migration status of the condition is what determines whether the
-  -- loop may be migrated as a whole or not. See 'moveToDevice'.
+  -- loop may be migrated as a whole or not. See 'shouldMoveStm'.
   let may_migrate = not (bodyHostOnly stats) && may_copy_results
   unless may_migrate $ case lform of
     ForLoop _ _ (Var n) _ -> connectToSink (nameToId n)
@@ -1395,3 +963,471 @@ graphedScalarOperands e =
       collectSubExp w
       collectSubExp rf
       mapM_ collectSubExp nes
+
+--------------------------------------------------------------------------------
+--                        GRAPH BUILDING - PRIMITIVES                         --
+--------------------------------------------------------------------------------
+
+-- | Creates a vertex for the given binding, provided that the set of operands
+-- is not empty.
+createNode :: Binding -> Operands -> Grapher ()
+createNode b ops =
+  unless (IS.null ops) (addVertex b >> addEdges (oneEdge $ fst b) ops)
+
+-- | Adds a vertex to the graph for the given binding.
+addVertex :: Binding -> Grapher ()
+addVertex (i, t) = do
+  meta <- getMeta
+  let v = MG.vertex i meta
+  when (isScalar t) $ modifyGraphedScalars (IS.insert i)
+  when (isArray t) $ recordCopyableMemory i (metaBodyDepth meta)
+  modifyGraph (MG.insert v)
+
+-- | Adds a source connected vertex to the graph for the given binding.
+addSource :: Binding -> Grapher ()
+addSource b = do
+  addVertex b
+  modifySources $ \(routed, unrouted) -> (routed, fst b : unrouted)
+
+-- | Adds the given edges to each vertex identified by the 'IdSet'. It is
+-- assumed that all vertices reside within the body that currently is being
+-- graphed.
+addEdges :: Edges -> IdSet -> Grapher ()
+addEdges ToSink is = do
+  modifyGraph $ \g -> IS.foldl' (flip MG.connectToSink) g is
+  modifyGraphedScalars (`IS.difference` is)
+addEdges es is = do
+  modifyGraph $ \g -> IS.foldl' (flip $ MG.addEdges es) g is
+  tellOperands is
+
+-- | Ensure that a variable (which is in scope) will be made available on host
+-- before its first use.
+requiredOnHost :: Id -> Grapher ()
+requiredOnHost i = do
+  mv <- MG.get i <$> getGraph
+  case mv of
+    Nothing -> pure ()
+    Just v -> do
+      connectToSink i
+      tellHostOnlyParent (metaBodyDepth $ vertexMeta v)
+
+-- | Connects the vertex of the given id to a sink.
+connectToSink :: Id -> Grapher ()
+connectToSink i = do
+  modifyGraph (MG.connectToSink i)
+  modifyGraphedScalars (IS.delete i)
+
+-- | Like 'connectToSink' but vertex is given by a 'SubExp'. This is a no-op if
+-- the 'SubExp' is a constant.
+connectSubExpToSink :: SubExp -> Grapher ()
+connectSubExpToSink (Var n) = connectToSink (nameToId n)
+connectSubExpToSink _ = pure ()
+
+-- | Routes all possible routes within the subgraph identified by this id.
+-- Returns the ids of the source connected vertices that were attempted routed.
+--
+-- Assumption: The subgraph with the given id has just been created and no path
+-- exists from it to an external sink.
+routeSubgraph :: Id -> Grapher [Id]
+routeSubgraph si = do
+  st <- get
+  let g = stateGraph st
+  let (routed, unrouted) = stateSources st
+  let (gsrcs, unrouted') = span (inSubGraph si g) unrouted
+  let (sinks, g') = MG.routeMany gsrcs g
+  put $
+    st
+      { stateGraph = g',
+        stateSources = (gsrcs ++ routed, unrouted'),
+        stateSinks = sinks ++ stateSinks st
+      }
+  pure gsrcs
+
+-- | @inSubGraph si g i@ returns whether @g@ contains a vertex with id @i@ that
+-- is declared within the subgraph with id @si@.
+inSubGraph :: Id -> Graph -> Id -> Bool
+inSubGraph si g i
+  | Just v <- MG.get i g,
+    Just mgi <- metaGraphId (vertexMeta v) =
+    si == mgi
+inSubGraph _ _ _ = False
+
+-- | @b `reuses` n@ records that @b@ binds an array backed by the same memory
+-- as @n@. If @b@ is not array typed or the backing memory is not copyable then
+-- this does nothing.
+reuses :: Binding -> VName -> Grapher ()
+reuses (i, t) n
+  | isArray t =
+    do
+      body_depth <- outermostCopyableArray n
+      case body_depth of
+        Just bd -> recordCopyableMemory i bd
+        Nothing -> pure ()
+  | otherwise =
+    pure ()
+
+reusesSubExp :: Binding -> SubExp -> Grapher ()
+reusesSubExp b (Var n) = b `reuses` n
+reusesSubExp _ _ = pure ()
+
+-- @reusesReturn bs res@ records each array binding in @bs@ as reusing copyable
+-- memory if the corresponding return value in @res@ is backed by copyable
+-- memory.
+--
+-- If every array binding is registered as being backed by copyable memory then
+-- the function returns @True@, otherwise it returns @False@.
+reusesReturn :: [Binding] -> [SubExp] -> Grapher Bool
+reusesReturn bs res = do
+  body_depth <- metaBodyDepth <$> getMeta
+  foldM (reuse body_depth) True (zip bs res)
+  where
+    reuse body_depth onlyCopyable (b, se)
+      | (i, t) <- b,
+        isArray t,
+        Var n <- se =
+        do
+          res_body_depth <- outermostCopyableArray n
+          case res_body_depth of
+            Just inner -> do
+              recordCopyableMemory i (min body_depth inner)
+              let returns_free_var = inner <= body_depth
+              pure (onlyCopyable && not returns_free_var)
+            _ ->
+              pure False
+      | otherwise =
+        pure onlyCopyable
+
+-- @reusesBranches bs b1 b2@ records each array binding in @bs@ as reusing
+-- copyable memory if each corresponding return value in the lists @b1@ and @b2@
+-- are backed by copyable memory.
+--
+-- If every array binding is registered as being backed by copyable memory then
+-- the function returns @True@, otherwise it returns @False@.
+reusesBranches :: [Binding] -> [SubExp] -> [SubExp] -> Grapher Bool
+reusesBranches bs b1 b2 = do
+  body_depth <- metaBodyDepth <$> getMeta
+  foldM (reuse body_depth) True $ zip3 bs b1 b2
+  where
+    reuse body_depth onlyCopyable (b, se1, se2)
+      | (i, t) <- b,
+        isArray t,
+        Var n1 <- se1,
+        Var n2 <- se2 =
+        do
+          body_depth_1 <- outermostCopyableArray n1
+          body_depth_2 <- outermostCopyableArray n2
+          case (body_depth_1, body_depth_2) of
+            (Just bd1, Just bd2) -> do
+              let inner = min bd1 bd2
+              recordCopyableMemory i (min body_depth inner)
+              let returns_free_var = inner <= body_depth
+              pure (onlyCopyable && not returns_free_var)
+            _ ->
+              pure False
+      | otherwise =
+        pure onlyCopyable
+
+--------------------------------------------------------------------------------
+--                           GRAPH BUILDING - TYPES                           --
+--------------------------------------------------------------------------------
+
+type Grapher = StateT State (R.Reader Env)
+
+data Env = Env
+  { -- | See 'HostOnlyFuns'.
+    envHostOnlyFuns :: HostOnlyFuns,
+    -- | Metadata for the current body being graphed.
+    envMeta :: Meta
+  }
+
+-- | A measurement of how many bodies something is nested within.
+type BodyDepth = Int
+
+-- | Metadata on the environment that a variable is declared within.
+data Meta = Meta
+  { -- | How many if statement branch bodies the variable binding is nested
+    -- within. If a route passes through the edge u->v and the fork depth
+    --
+    --   1) increases from u to v, then u is within a conditional branch.
+    --
+    --   2) decreases from u to v, then v binds the result of two or more
+    --      branches.
+    --
+    -- After the graph has been built and routed, this can be used to delay
+    -- reads into deeper branches to reduce their likelihood of manifesting.
+    metaForkDepth :: Int,
+    -- | How many bodies the variable is nested within.
+    metaBodyDepth :: BodyDepth,
+    -- | An id for the subgraph within which the variable exists, defined at
+    -- the body level. A read may only be delayed to a point within its own
+    -- subgraph.
+    metaGraphId :: Maybe Id
+  }
+
+-- | Ids for all variables used as an operand.
+type Operands = IdSet
+
+-- | Statistics on the statements within a body and their dependencies.
+data BodyStats = BodyStats
+  { -- | Whether the body contained any host-only statements.
+    bodyHostOnly :: Bool,
+    -- | Whether the body performed any reads.
+    bodyReads :: Bool,
+    -- | All scalar variables represented in the graph that have been used
+    -- as return values of the body or as operands within it, including those
+    -- that are defined within the body itself. Variables with vertices
+    -- connected to sinks may be excluded.
+    bodyOperands :: Operands,
+    -- | Depth of parent bodies with variables that are required on host. Since
+    -- the variables are required on host, the parent statements of these bodies
+    -- cannot be moved to device as a whole. They are host-only.
+    bodyHostOnlyParents :: IS.IntSet
+  }
+
+instance Semigroup BodyStats where
+  (BodyStats ho1 r1 o1 hop1) <> (BodyStats ho2 r2 o2 hop2) =
+    BodyStats
+      { bodyHostOnly = ho1 || ho2,
+        bodyReads = r1 || r2,
+        bodyOperands = IS.union o1 o2,
+        bodyHostOnlyParents = IS.union hop1 hop2
+      }
+
+instance Monoid BodyStats where
+  mempty =
+    BodyStats
+      { bodyHostOnly = False,
+        bodyReads = False,
+        bodyOperands = IS.empty,
+        bodyHostOnlyParents = IS.empty
+      }
+
+type Graph = MG.Graph Meta
+
+-- | All vertices connected from a source, partitioned into those that have
+-- been attempted routed and those which have not.
+type Sources = ([Id], [Id])
+
+-- | All terminal vertices of routes.
+type Sinks = [Id]
+
+-- | A captured statement for which graphing has been delayed.
+type Delayed = (Binding, Exp GPU)
+
+-- | The vertex handle for a variable and its type.
+type Binding = (Id, Type)
+
+-- | Array variables backed by memory segments that may be copied, mapped to the
+-- outermost known body depths that declares arrays backed by a superset of
+-- those segments.
+type CopyableMemoryMap = IM.IntMap BodyDepth
+
+data State = State
+  { -- | The graph being built.
+    stateGraph :: Graph,
+    -- | All known scalars that have been graphed.
+    stateGraphedScalars :: IdSet,
+    -- | All variables that directly bind scalars read from device memory.
+    stateSources :: Sources,
+    -- | Graphed scalars that are used as operands by statements that cannot be
+    -- migrated. A read cannot be delayed beyond these, so if the statements
+    -- that bind these variables are moved to device, the variables must be read
+    -- from device memory.
+    stateSinks :: Sinks,
+    -- | Observed 'UpdateAcc' host statements to be graphed later.
+    stateUpdateAccs :: IM.IntMap [Delayed],
+    -- | A map of all encountered arrays that are backed by copyable memory.
+    stateCopyableMemory :: CopyableMemoryMap,
+    -- | Information about the current body being graphed.
+    stateStats :: BodyStats
+  }
+
+--------------------------------------------------------------------------------
+--                             GRAPHER OPERATIONS                             --
+--------------------------------------------------------------------------------
+
+execGrapher :: HostOnlyFuns -> Grapher a -> (Graph, Sources, Sinks)
+execGrapher hof m =
+  let s = R.runReader (execStateT m st) env
+   in (stateGraph s, stateSources s, stateSinks s)
+  where
+    env =
+      Env
+        { envHostOnlyFuns = hof,
+          envMeta =
+            Meta
+              { metaForkDepth = 0,
+                metaBodyDepth = 0,
+                metaGraphId = Nothing
+              }
+        }
+    st =
+      State
+        { stateGraph = MG.empty,
+          stateGraphedScalars = IS.empty,
+          stateSources = ([], []),
+          stateSinks = [],
+          stateUpdateAccs = IM.empty,
+          stateCopyableMemory = IM.empty,
+          stateStats = mempty
+        }
+
+-- | Execute a computation in a modified environment.
+local :: (Env -> Env) -> Grapher a -> Grapher a
+local f = mapStateT (R.local f)
+
+-- | Fetch the value of the environment.
+ask :: Grapher Env
+ask = lift R.ask
+
+-- | Retrieve a function of the current environment.
+asks :: (Env -> a) -> Grapher a
+asks = lift . R.asks
+
+-- | Register that the body contains a host-only statement. This means its
+-- parent statement and any parent bodies themselves are host-only.
+tellHostOnly :: Grapher ()
+tellHostOnly =
+  modify $ \st -> st {stateStats = (stateStats st) {bodyHostOnly = True}}
+
+-- | Register that the current body contains a statement that reads device
+-- memory.
+tellRead :: Grapher ()
+tellRead =
+  modify $ \st -> st {stateStats = (stateStats st) {bodyReads = True}}
+
+-- | Register that these variables are used as operands within the current body.
+tellOperands :: IdSet -> Grapher ()
+tellOperands is =
+  modify $ \st ->
+    let stats = stateStats st
+        operands = bodyOperands stats
+     in st {stateStats = stats {bodyOperands = operands <> is}}
+
+-- | Register that the current statement with a body at the given body depth is
+-- host-only.
+tellHostOnlyParent :: BodyDepth -> Grapher ()
+tellHostOnlyParent body_depth =
+  modify $ \st ->
+    let stats = stateStats st
+        parents = bodyHostOnlyParents stats
+        parents' = IS.insert body_depth parents
+     in st {stateStats = stats {bodyHostOnlyParents = parents'}}
+
+-- | Get the graph under construction.
+getGraph :: Grapher Graph
+getGraph = gets stateGraph
+
+-- | All scalar variables with a vertex representation in the graph.
+getGraphedScalars :: Grapher IdSet
+getGraphedScalars = gets stateGraphedScalars
+
+-- | Every known array that is backed by a memory segment that may be copied,
+-- mapped to the outermost known body depth where an array is backed by a
+-- superset of that segment.
+--
+-- A body where all returned arrays are backed by such memory and are written by
+-- its own statements will retain its asymptotic cost if migrated as a whole.
+getCopyableMemory :: Grapher CopyableMemoryMap
+getCopyableMemory = gets stateCopyableMemory
+
+-- | The outermost known body depth for an array backed by the same copyable
+-- memory as the array with this name.
+outermostCopyableArray :: VName -> Grapher (Maybe BodyDepth)
+outermostCopyableArray n = IM.lookup (nameToId n) <$> getCopyableMemory
+
+-- | Reduces the variables to just the 'Id's of those that are scalars and which
+-- have a vertex representation in the graph, excluding those that have been
+-- connected to sinks.
+onlyGraphedScalars :: Foldable t => t VName -> Grapher IdSet
+onlyGraphedScalars vs = do
+  let is = foldl' (\s n -> IS.insert (nameToId n) s) IS.empty vs
+  IS.intersection is <$> getGraphedScalars
+
+-- | Like 'onlyGraphedScalars' but for a single 'VName'.
+onlyGraphedScalar :: VName -> Grapher IdSet
+onlyGraphedScalar n = do
+  let i = nameToId n
+  gss <- getGraphedScalars
+  if IS.member i gss
+    then pure (IS.singleton i)
+    else pure IS.empty
+
+-- | Like 'onlyGraphedScalars' but for a single 'SubExp'.
+onlyGraphedScalarSubExp :: SubExp -> Grapher IdSet
+onlyGraphedScalarSubExp (Constant _) = pure IS.empty
+onlyGraphedScalarSubExp (Var n) = onlyGraphedScalar n
+
+-- | Update the graph under construction.
+modifyGraph :: (Graph -> Graph) -> Grapher ()
+modifyGraph f =
+  modify $ \st -> st {stateGraph = f (stateGraph st)}
+
+-- | Update the contents of the graphed scalar set.
+modifyGraphedScalars :: (IdSet -> IdSet) -> Grapher ()
+modifyGraphedScalars f =
+  modify $ \st -> st {stateGraphedScalars = f (stateGraphedScalars st)}
+
+-- | Update the contents of the copyable memory map.
+modifyCopyableMemory :: (CopyableMemoryMap -> CopyableMemoryMap) -> Grapher ()
+modifyCopyableMemory f =
+  modify $ \st -> st {stateCopyableMemory = f (stateCopyableMemory st)}
+
+-- | Update the set of source connected vertices.
+modifySources :: (Sources -> Sources) -> Grapher ()
+modifySources f =
+  modify $ \st -> st {stateSources = f (stateSources st)}
+
+-- | Record that this variable binds an array that is backed by copyable
+-- memory shared by an array at this outermost body depth.
+recordCopyableMemory :: Id -> BodyDepth -> Grapher ()
+recordCopyableMemory i bd =
+  modifyCopyableMemory (IM.insert i bd)
+
+-- | Increment the fork depth for variables graphed by this action.
+incForkDepthFor :: Grapher a -> Grapher a
+incForkDepthFor =
+  local $ \env ->
+    let meta = envMeta env
+        fork_depth = metaForkDepth meta
+     in env {envMeta = meta {metaForkDepth = fork_depth + 1}}
+
+-- | Increment the body depth for variables graphed by this action.
+incBodyDepthFor :: Grapher a -> Grapher a
+incBodyDepthFor =
+  local $ \env ->
+    let meta = envMeta env
+        body_depth = metaBodyDepth meta
+     in env {envMeta = meta {metaBodyDepth = body_depth + 1}}
+
+-- | Change the graph id for variables graphed by this action.
+graphIdFor :: Id -> Grapher a -> Grapher a
+graphIdFor i =
+  local $ \env ->
+    let meta = envMeta env
+     in env {envMeta = meta {metaGraphId = Just i}}
+
+-- | Capture body stats produced by the given action.
+captureBodyStats :: Grapher a -> Grapher BodyStats
+captureBodyStats m = do
+  stats <- gets stateStats
+  modify $ \st -> st {stateStats = mempty}
+
+  _ <- m
+
+  stats' <- gets stateStats
+  modify $ \st -> st {stateStats = stats <> stats'}
+
+  pure stats'
+
+-- | Can applications of this function be moved to device?
+isHostOnlyFun :: Name -> Grapher Bool
+isHostOnlyFun fn = asks $ S.member fn . envHostOnlyFuns
+
+-- | Get the 'Meta' corresponding to the current body.
+getMeta :: Grapher Meta
+getMeta = asks envMeta
+
+-- | Get the body depth of the current body (its nesting level).
+getBodyDepth :: Grapher BodyDepth
+getBodyDepth = asks (metaBodyDepth . envMeta)
