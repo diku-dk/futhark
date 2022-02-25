@@ -275,6 +275,9 @@ data Env = Env
 -- device. The application of any such function is host-only.
 type HostOnlyFuns = Set Name
 
+-- | A measurement of how many bodies something is nested within.
+type BodyDepth = Int
+
 -- | Metadata on the environment that a variable is declared within.
 data Meta = Meta
   { -- | How many if statement branch bodies the variable binding is nested
@@ -289,7 +292,7 @@ data Meta = Meta
     -- reads into deeper branches to reduce their likelihood of manifesting.
     metaForkDepth :: Int,
     -- | How many bodies the variable is nested within.
-    metaBodyDepth :: Int,
+    metaBodyDepth :: BodyDepth,
     -- | An id for the subgraph within which the variable exists, defined at
     -- the body level. A read may only be delayed to a point within its own
     -- subgraph.
@@ -349,7 +352,10 @@ type Delayed = (Binding, Exp GPU)
 -- | The vertex handle for a variable and its type.
 type Binding = (Id, Type)
 
-type CopyableMemoryMap = IM.IntMap Int
+-- | Array variables backed by memory segments that may be copied, mapped to the
+-- outermost known body depths that declares arrays backed by a superset of
+-- those segments.
+type CopyableMemoryMap = IM.IntMap BodyDepth
 
 data State = State
   { -- | The graph being built.
@@ -365,9 +371,7 @@ data State = State
     stateSinks :: Sinks,
     -- | Observed 'UpdateAcc' host statements to be graphed later.
     stateUpdateAccs :: IM.IntMap [Delayed],
-    -- | Every known array that is backed by a memory segment that may be
-    -- copied, mapped to the outermost known body depth where an array is backed
-    -- by a superset of that segment.
+    -- | A map of all encountered arrays that are backed by copyable memory.
     stateCopyableMemory :: CopyableMemoryMap,
     -- | Information about the current body being graphed.
     stateStats :: BodyStats
@@ -433,12 +437,12 @@ tellOperands is =
 
 -- | Register that the current statement with a body at the given body depth is
 -- host-only.
-tellHostOnlyParent :: Int -> Grapher ()
-tellHostOnlyParent bodyDepth =
+tellHostOnlyParent :: BodyDepth -> Grapher ()
+tellHostOnlyParent body_depth =
   modify $ \st ->
     let stats = stateStats st
         parents = bodyHostOnlyParents stats
-        parents' = IS.insert bodyDepth parents
+        parents' = IS.insert body_depth parents
      in st {stateStats = stats {bodyHostOnlyParents = parents'}}
 
 -- | Get the graph under construction.
@@ -453,14 +457,14 @@ getGraphedScalars = gets stateGraphedScalars
 -- mapped to the outermost known body depth where an array is backed by a
 -- superset of that segment.
 --
--- A body where all returned arrays are backed by such memory and written by
+-- A body where all returned arrays are backed by such memory and are written by
 -- its own statements will retain its asymptotic cost if migrated as a whole.
 getCopyableMemory :: Grapher CopyableMemoryMap
 getCopyableMemory = gets stateCopyableMemory
 
 -- | The outermost known body depth for an array backed by the same copyable
 -- memory as the array with this name.
-outermostCopyableArray :: VName -> Grapher (Maybe Int)
+outermostCopyableArray :: VName -> Grapher (Maybe BodyDepth)
 outermostCopyableArray n = IM.lookup (nameToId n) <$> getCopyableMemory
 
 -- | Reduces the variables to just the 'Id's of those that are scalars and which
@@ -507,7 +511,7 @@ modifySources f =
 
 -- | Record that this variable binds an array that is backed by copyable
 -- memory shared by an array at this outermost body depth.
-recordCopyableMemory :: Id -> Int -> Grapher ()
+recordCopyableMemory :: Id -> BodyDepth -> Grapher ()
 recordCopyableMemory i bd =
   modifyCopyableMemory (IM.insert i bd)
 
@@ -556,7 +560,7 @@ getMeta :: Grapher Meta
 getMeta = asks envMeta
 
 -- | Get the body depth of the current body (its nesting level).
-getBodyDepth :: Grapher Int
+getBodyDepth :: Grapher BodyDepth
 getBodyDepth = asks (metaBodyDepth . envMeta)
 
 -- | Creates a vertex for the given binding, provided that the set of operands
@@ -663,8 +667,10 @@ reusesSubExp _ _ = pure ()
 
 -- @reusesReturn bs res@ records each array binding in @bs@ as reusing copyable
 -- memory if the corresponding return value in @res@ is backed by copyable
--- memory. If every array binding is registered as being backed by copyable
--- memory then the function returns @True@, otherwise it returns @False@.
+-- memory.
+--
+-- If every array binding is registered as being backed by copyable memory then
+-- the function returns @True@, otherwise it returns @False@.
 reusesReturn :: [Binding] -> [SubExp] -> Grapher Bool
 reusesReturn bs res = do
   body_depth <- metaBodyDepth <$> getMeta
@@ -688,9 +694,10 @@ reusesReturn bs res = do
 
 -- @reusesBranches bs b1 b2@ records each array binding in @bs@ as reusing
 -- copyable memory if each corresponding return value in the lists @b1@ and @b2@
--- are backed by copyable memory. If every array binding is registered as being
--- backed by copyable memory then the function returns @True@, otherwise it
--- returns @False@.
+-- are backed by copyable memory.
+--
+-- If every array binding is registered as being backed by copyable memory then
+-- the function returns @True@, otherwise it returns @False@.
 reusesBranches :: [Binding] -> [SubExp] -> [SubExp] -> Grapher Bool
 reusesBranches bs b1 b2 = do
   body_depth <- metaBodyDepth <$> getMeta
@@ -715,6 +722,13 @@ reusesBranches bs b1 b2 = do
       | otherwise =
         pure onlyCopyable
 
+-- | Bindings for all pattern elements bound by a statement.
+boundBy :: Stm GPU -> [Binding]
+boundBy (Let (Pat pes) _ _) = map f pes
+  where
+    f (PatElem n t) = (nameToId n, t)
+
+-- | Graph a body.
 graphBody :: BodyT GPU -> Grapher ()
 graphBody body = do
   let res_ops = IS.fromList $ namesToIds $ freeIn (bodyResult body)
@@ -732,15 +746,11 @@ graphBody body = do
         stats' = if host_only then stats {bodyHostOnly = True} else stats
      in st {stateStats = stats' {bodyHostOnlyParents = hops'}}
 
+-- | Graph multiple statements.
 graphStms :: Stms GPU -> Grapher ()
 graphStms = mapM_ graphStm
 
--- | Bindings for all pattern elements bound by a statement.
-boundBy :: Stm GPU -> [Binding]
-boundBy (Let (Pat pes) _ _) = map f pes
-  where
-    f (PatElem n t) = (nameToId n, t)
-
+-- | Graph a single statement.
 graphStm :: Stm GPU -> Grapher ()
 graphStm stm = do
   let bs = boundBy stm
@@ -794,9 +804,9 @@ graphStm stm = do
     --
     -- The parent statement of an enclosing body may still be migrated,
     -- including these, given that all its returned arrays are backed by memory
-    -- used by migratable statements within its body. Copied result arrays will
-    -- then be subsets of arrays that was considered ok to be copied and so
-    -- its asymptotic cost should not change.
+    -- used by migratable statements within its body ("copyable memory").
+    -- Copied result arrays will then be subsets of arrays that was considered
+    -- ok to be copied and so its asymptotic cost should not change.
     BasicOp (Index arr s) -> do
       graphInefficientReturn (sliceDims s) e
       one bs `reuses` arr
@@ -826,7 +836,8 @@ graphStm stm = do
     -- Expressions with a cost linear to the size of their result arrays are
     -- inefficient to migrate into GPUBody kernels as such kernels are single-
     -- threaded. For sufficiently large arrays the cost may exceed what is saved
-    -- by avoiding reads. We therefore also block these from being migrated.
+    -- by avoiding reads. We therefore also block these from being migrated,
+    -- as well as their parents.
     BasicOp Concat {} -> graphHostOnly e
     BasicOp Copy {} -> graphHostOnly e
     BasicOp Manifest {} -> graphHostOnly e
@@ -893,6 +904,7 @@ graphAutoMove =
 
 -- | Graph a statement that is unfit for execution in a GPUBody and thus must
 -- be executed on host, requiring all its operands to be made available there.
+-- Parent statements of enclosing bodies are also blocked from being migrated.
 graphHostOnly :: Exp GPU -> Grapher ()
 graphHostOnly e = do
   -- Connect the vertices of all operands to sinks to mark that they are
@@ -936,23 +948,47 @@ graphIf bs cond tbody fbody = do
           pure $ bodyHostOnly tstats || bodyHostOnly fstats
       )
 
-  let results = map resSubExp . bodyResult
+  -- Record aliases for copyable memory backing returned arrays.
   may_copy_results <- reusesBranches bs (results tbody) (results fbody)
-
   let may_migrate = not body_host_only && may_copy_results
 
   cond_id <- case (may_migrate, cond) of
-    (False, Var n) -> connectToSink (nameToId n) >> pure IS.empty
+    (False, Var n) ->
+      -- The migration status of the condition is what determines whether the
+      -- statement may be migrated as a whole or not. See 'moveToDevice'.
+      connectToSink (nameToId n) >> pure IS.empty
     (True, Var n) -> onlyGraphedScalar n
     (_, _) -> pure IS.empty
 
+  -- Connect branch results to bound variables to allow delaying reads out of
+  -- branches. It might also be beneficial to move the whole statement to
+  -- device, to avoid reading the branch condition value. This must be balanced
+  -- against the need to read the values bound by the if statement.
+  --
+  -- By connecting the branch condition to each variable bound by the statement
+  -- the condition will only stay on device if (1) the if statement is not
+  -- required on host and (2) no additional reads will be required to use the
+  -- if statement bound variables should the whole statement be migrated.
+  -- (If the condition is migrated to device and stays there, then the if
+  -- statement must necessarily execute on device.)
   ret <- zipWithM (comb cond_id) (bodyResult tbody) (bodyResult fbody)
   mapM_ (uncurry createNode) (zip bs ret)
   where
+    results = map resSubExp . bodyResult
+
     comb ci a b = (ci <>) <$> onlyGraphedScalars (toSet a <> toSet b)
 
     toSet (SubExpRes _ (Var n)) = S.singleton n
     toSet _ = S.empty
+
+-- These type aliases are only used by 'graphLoop'
+type ReachableBindings = IdSet
+
+type ReachableBindingsCache = Visited (MG.Result ReachableBindings)
+
+type NonExhausted = [Id]
+
+type LoopValue = (Binding, Id, SubExp, SubExp)
 
 -- | Graph a loop statement.
 graphLoop ::
@@ -968,96 +1004,101 @@ graphLoop (b : bs) params lform body = do
   -- Graph loop params and body while capturing statistics.
   g0 <- getGraph
   stats <- captureBodyStats (subgraphId `graphIdFor` graphTheLoop)
-  let ops = IS.filter (`MG.member` g0) (bodyOperands stats)
 
+  -- Record aliases for copyable memory backing returned arrays.
   -- Does the loop return any arrays which prevent it from being migrated?
-  -- Also record aliases for the backing memory of these arrays.
   let args = map snd params
   let results = map resSubExp (bodyResult body)
   may_copy_results <- reusesBranches (b : bs) args results
 
-  -- Connect loop condition to a sink if the body cannot be migrated.
+  -- Connect loop condition to a sink if the loop cannot be migrated.
+  -- The migration status of the condition is what determines whether the
+  -- loop may be migrated as a whole or not. See 'moveToDevice'.
   let may_migrate = not (bodyHostOnly stats) && may_copy_results
   unless may_migrate $ case lform of
     ForLoop _ _ (Var n) _ -> connectToSink (nameToId n)
     WhileLoop n -> connectToSink (nameToId n)
     _ -> pure ()
 
-  -- Merge return values with params. If a parameter is connected to a sink
-  -- then its matching return value must also be connected to a sink to ensure
-  -- that its value is available on host when the next iteration begins.
-  -- Since a parameter aliases its initial value, if a parameter is connected
-  -- to a sink then its initial value is guaranteed to be available on host.
-  connectLoop
+  -- Connect graphed return values to their loop parameters.
+  g1 <- getGraph
+  mapM_ (mergeLoopParam g1) loopValues
 
   -- Route the sources within the loop body in isolation.
   -- The loop graph must not be altered after this point.
   srcs <- routeSubgraph subgraphId
 
-  -- Graph the variables bound by the statement. A device read can be delayed
-  -- from one iteration to the next, so the corresponding variables bound by
-  -- the statement must be treated as a sources.
-  mapM_ graphBinding loopValues
-  g1 <- getGraph
-  let (dbs, vs) = foldl' (deviceBindings g1) (IS.empty, MG.none) srcs
+  -- Graph the variables bound by the statement.
+  forM_ loopValues $ \(bnd, p, _, _) -> createNode bnd (IS.singleton p)
+
+  -- If a device read is delayed from one iteration to the next the
+  -- corresponding variables bound by the statement must be treated as
+  -- sources.
+  g2 <- getGraph
+  let (dbs, rbc) = foldl' (deviceBindings g2) (IS.empty, MG.none) srcs
   modifySources $ \(r, u) -> (r, IS.toList dbs ++ u)
 
   -- Connect operands to sinks if they can reach a sink within the loop.
   -- Otherwise connect them to the loop bound variables that they can
   -- reach and exhaust their normal entry edges into the loop.
-  -- This means a read can be delayed through a loop body but not into it.
+  -- This means a read can be delayed through a loop body but not into it
+  -- if that would increase the number of reads done by the body.
   --
   -- TODO: Measure whether it is better to block delays through loops.
-  foldM_ connectOperand vs (IS.elems ops)
+  let ops = IS.filter (`MG.member` g0) (bodyOperands stats)
+  foldM_ connectOperand rbc (IS.elems ops)
 
   -- It might be beneficial to move the whole loop to device, to avoid
   -- reading the (initial) loop condition value. This must be balanced
   -- against the need to read the values bound by the loop statement.
+  --
+  -- For more details see the similar description for if statements.
   when may_migrate $ case lform of
     ForLoop _ _ n _ ->
       onlyGraphedScalarSubExp n >>= addEdges (ToNodes bindings Nothing)
     WhileLoop n
-      | (_, _, pval, _) <- loopValueFor n ->
-        onlyGraphedScalarSubExp pval >>= addEdges (ToNodes bindings Nothing)
+      | (_, _, arg, _) <- loopValueFor n ->
+        onlyGraphedScalarSubExp arg >>= addEdges (ToNodes bindings Nothing)
   where
+    subgraphId :: Id
     subgraphId = fst b
 
+    loopValues :: [LoopValue]
     loopValues =
       let tmp = zip3 (b : bs) params (bodyResult body)
           tmp' = flip map tmp $
-            \(bnd, (p, pval), res) ->
+            \(bnd, (p, arg), res) ->
               let i = nameToId (paramName p)
-               in (bnd, i, pval, resSubExp res)
+               in (bnd, i, arg, resSubExp res)
        in filter (\((_, t), _, _, _) -> isScalar t) tmp'
 
+    bindings :: IdSet
     bindings = IS.fromList $ map (\((i, _), _, _, _) -> i) loopValues
 
+    loopValueFor :: VName -> LoopValue
     loopValueFor n =
       fromJust $ find (\(_, p, _, _) -> p == nameToId n) loopValues
-
+    graphTheLoop :: Grapher ()
     graphTheLoop = do
       mapM_ graphParam loopValues
       case lform of
         ForLoop _ _ _ elems -> mapM_ graphForInElem elems
         WhileLoop _ -> pure ()
       graphBody body
+      where
+        graphForInElem (p, _) =
+          when (isScalar p) $ addSource (nameToId $ paramName p, typeOf p)
 
-    graphParam ((_, t), p, pval, _) =
-      do
-        -- It is unknown whether a read can be delayed via the parameter from
-        -- one iteration to the next, so we have to create a vertex even if the
-        -- initial value never depends on a read.
-        addVertex (p, t)
-        ops <- onlyGraphedScalarSubExp pval
-        addEdges (MG.oneEdge p) ops
+        graphParam ((_, t), p, arg, _) =
+          do
+            -- It is unknown whether a read can be delayed via the parameter
+            -- from one iteration to the next, so we have to create a vertex
+            -- even if the initial value never depends on a read.
+            addVertex (p, t)
+            ops <- onlyGraphedScalarSubExp arg
+            addEdges (MG.oneEdge p) ops
 
-    graphForInElem (p, _) =
-      when (isScalar p) $ addSource (nameToId $ paramName p, typeOf p)
-
-    connectLoop = do
-      g <- getGraph
-      mapM_ (mergeLoopParam g) loopValues
-
+    mergeLoopParam :: Graph -> LoopValue -> Grapher ()
     mergeLoopParam g (_, p, _, res)
       | Var n <- res,
         ret <- nameToId n,
@@ -1067,67 +1108,86 @@ graphLoop (b : bs) params lform body = do
           else addEdges (MG.oneEdge p) (IS.singleton ret)
       | otherwise =
         pure ()
-
-    graphBinding (bnd, p, _, _) =
-      createNode bnd (IS.singleton p)
-
-    deviceBindings g (s, vs) i =
-      let (r, vs') = MG.reduce g bindingReach vs Normal i
+    deviceBindings ::
+      Graph ->
+      (ReachableBindings, ReachableBindingsCache) ->
+      Id ->
+      (ReachableBindings, ReachableBindingsCache)
+    deviceBindings g (rb, rbc) i =
+      let (r, rbc') = MG.reduce g bindingReach rbc Normal i
        in case r of
-            Produced s' -> (s <> s', vs')
+            Produced rb' -> (rb <> rb', rbc')
             _ ->
               compilerBugS
                 "Migration graph sink could be reached from source after it\
                 \ had been attempted routed."
-
-    bindingReach s _ v =
-      let i = vertexId v
-       in if IS.member i bindings
-            then IS.insert i s
-            else s
-
-    connectOperand vs i = do
+    bindingReach ::
+      ReachableBindings ->
+      EdgeType ->
+      Vertex Meta ->
+      ReachableBindings
+    bindingReach rb _ v
+      | i <- vertexId v,
+        IS.member i bindings =
+        IS.insert i rb
+      | otherwise =
+        rb
+    connectOperand ::
+      ReachableBindingsCache ->
+      Id ->
+      Grapher ReachableBindingsCache
+    connectOperand cache op = do
       g <- getGraph
-      case MG.get i g of
-        Nothing -> pure vs
+      case MG.get op g of
+        Nothing -> pure cache
         Just v ->
           case vertexEdges v of
-            ToSink -> pure vs
-            ToNodes es Nothing ->
-              connectOp g vs i es
-            ToNodes _ (Just nx) ->
-              connectOp g vs i nx
-
-    connectOp g vs i es = do
-      let st = (IS.empty, [], vs)
-      let (res, nx, vs') = findBindings g st (IS.elems es)
-      case res of
-        FoundSink -> connectToSink i
-        Produced bnds -> modifyGraph $ MG.adjust (f nx bnds) i
-      pure vs'
-
-    f nx bnds v
-      | ToNodes es _ <- vertexEdges v =
-        let nx' = bnds <> IS.fromList nx
-            es' = ToNodes (bnds <> es) (Just nx')
-         in v {vertexEdges = es'}
-      | otherwise =
-        v
-
-    findBindings _ (bnds, nx, vs) [] =
-      (Produced bnds, nx, vs)
-    findBindings g (bnds, nx, vs) (i : is)
-      | Just v <- MG.get i g,
-        Just gid <- metaGraphId (vertexMeta v),
-        gid == subgraphId -- only search the subgraph
-        =
-        let (res, vs') = MG.reduce g bindingReach vs Normal i
-         in case res of
-              FoundSink -> (FoundSink, [], vs')
-              Produced bnds' -> findBindings g (bnds <> bnds', nx, vs') is
-      | otherwise =
-        -- don't exhaust
-        findBindings g (bnds, i : nx, vs) is
+            ToSink -> pure cache
+            ToNodes es Nothing -> connectOp g cache op es
+            ToNodes _ (Just nx) -> connectOp g cache op nx
+      where
+        connectOp ::
+          Graph ->
+          ReachableBindingsCache ->
+          Id -> -- operand id
+          IdSet -> -- its edges
+          Grapher ReachableBindingsCache
+        connectOp g rbc i es = do
+          let (res, nx, rbc') = findBindings g (IS.empty, [], rbc) (IS.elems es)
+          case res of
+            FoundSink -> connectToSink i
+            Produced rb -> modifyGraph $ MG.adjust (updateEdges nx rb) i
+          pure rbc'
+        updateEdges ::
+          NonExhausted ->
+          ReachableBindings ->
+          Vertex Meta ->
+          Vertex Meta
+        updateEdges nx rb v
+          | ToNodes es _ <- vertexEdges v =
+            let nx' = IS.fromList nx
+                es' = ToNodes (rb <> es) $ Just (rb <> nx')
+             in v {vertexEdges = es'}
+          | otherwise = v
+        findBindings ::
+          Graph ->
+          (ReachableBindings, NonExhausted, ReachableBindingsCache) ->
+          [Id] -> -- current non-exhausted edges
+          (MG.Result ReachableBindings, NonExhausted, ReachableBindingsCache)
+        findBindings _ (rb, nx, rbc) [] =
+          (Produced rb, nx, rbc)
+        findBindings g (rb, nx, rbc) (i : is)
+          | Just v <- MG.get i g,
+            Just gid <- metaGraphId (vertexMeta v),
+            gid == subgraphId -- only search the subgraph
+            =
+            let (res, rbc') = MG.reduce g bindingReach rbc Normal i
+             in case res of
+                  FoundSink -> (FoundSink, [], rbc')
+                  Produced rb' -> findBindings g (rb <> rb', nx, rbc') is
+          | otherwise =
+            -- don't exhaust
+            findBindings g (rb, i : nx, rbc) is
 
 -- | Graph a 'WithAcc' statement.
 graphWithAcc ::
@@ -1143,6 +1203,8 @@ graphWithAcc bs inputs f = do
   mapM_ graph $ zip (lambdaReturnType f) inputs
 
   -- Record aliases for the backing memory of each returned array.
+  -- 'WithAcc' statements are never migrated as a whole and always returns
+  -- arrays backed by memory allocated elsewhere.
   let arrs = concatMap (\(_, as, _) -> map Var as) inputs
   let res = drop (length inputs) (bodyResult $ lambdaBody f)
   _ <- reusesReturn bs (arrs ++ map resSubExp res)
@@ -1187,13 +1249,13 @@ graphAcc i types op delayed = do
   let lambda = fromMaybe (Lambda [] (Body () SQ.empty []) []) op
   let m = graphBody (lambdaBody lambda)
   let stats = R.runReader (evalStateT (captureBodyStats m) st) env
+  let host_only = bodyHostOnly stats
 
   -- op operands are read from arrays and written back so if any of the operands
   -- are scalar then a read can be avoided by moving the UpdateAcc usages to
   -- device. If the op itself performs scalar reads its UpdateAcc usages should
   -- also be moved.
   let does_read = bodyReads stats || any isScalar types
-  let host_only = bodyHostOnly stats
 
   -- Determine which external variables the operator depends upon.
   -- 'bodyOperands' cannot be used as it excludes branch conditions, operands
@@ -1212,11 +1274,11 @@ graphAcc i types op delayed = do
       mapM_ (graphHostOnly . snd) delayed
       addEdges ToSink ops
     (_, True) -> do
-      -- Migrate all accumulator usage to device.
+      -- Migrate all accumulator usage to device to avoid reads and writes.
       mapM_ (graphAutoMove . fst) delayed
       addSource (i, Prim Unit)
     _ -> do
-      -- Only migrate operator and UpdateAcc statements to allow their
+      -- Only migrate operator and UpdateAcc statements if it can allow their
       -- operands to be migrated.
       createNode (i, Prim Unit) ops
       forM_ delayed $
