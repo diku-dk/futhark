@@ -810,12 +810,8 @@ graphStm stm = do
     BasicOp (Index arr s) -> do
       graphInefficientReturn (sliceDims s) e
       one bs `reuses` arr
-    BasicOp (Update _ arr (Slice slice) _) -> do
-      -- Writing a scalar to an array can be replaced with copying a single-
-      -- element slice. If the scalar originates from device memory its read
-      -- might thus be prevented without requiring the 'Update' to be migrated.
-      let indices = namesToList $ freeIn slice
-      _ <- graphInefficientReturn' [] <$> onlyGraphedScalars indices
+    BasicOp (Update _ arr _ _) -> do
+      graphInefficientReturn [] e
       one bs `reuses` arr
     BasicOp (FlatIndex arr s) -> do
       graphInefficientReturn (flatSliceDims s) e
@@ -864,12 +860,9 @@ graphStm stm = do
 
     -- new_dims may introduce new size variables which must be present on host
     -- when this expression is evaluated.
-    graphInefficientReturn new_dims e =
-      graphedScalarOperands e >>= graphInefficientReturn' new_dims
-
-    graphInefficientReturn' new_dims ops = do
+    graphInefficientReturn new_dims e = do
       mapM_ hostSize new_dims
-      addEdges ToSink ops
+      graphedScalarOperands e >>= addEdges ToSink
 
     hostSize (Var n) = hostSizeVar n
     hostSize _ = pure ()
@@ -1289,11 +1282,8 @@ graphAcc i types op delayed = do
       forM_ delayed $
         \(b, e) -> graphedScalarOperands e >>= createNode b . IS.insert i
 
--- Returns for an expression all scalar operands used outside a kernel and which
--- have a vertex representation in the graph, excluding those that have been
--- connected to sinks.
--- That is all operands that might require a read from device memory to evaluate
--- the given expression on host.
+-- Returns for an expression all scalar operands that must be made available
+-- on host to execute the expression there.
 graphedScalarOperands :: Exp GPU -> Grapher Operands
 graphedScalarOperands e =
   let is = fst $ execState (collect e) initial
@@ -1319,8 +1309,14 @@ graphedScalarOperands e =
     collect (Op op) =
       collectHostOp op
 
-    -- Note: Plain VName values only refer to arrays.
-    collectBasic = walkExpM (identityWalker {walkOnSubExp = collectSubExp})
+    collectBasic (BasicOp (Update _ _ slice _)) =
+      -- Writing a scalar to an array can be replaced with copying a single-
+      -- element slice. If the scalar originates from device memory its read
+      -- can thus be prevented without requiring the 'Update' to be migrated.
+      collectFree slice
+    collectBasic e' =
+      -- Note: Plain VName values only refer to arrays.
+      walkExpM (identityWalker {walkOnSubExp = collectSubExp}) e'
 
     collectSubExp (Var n) = captureName n
     collectSubExp _ = pure ()
