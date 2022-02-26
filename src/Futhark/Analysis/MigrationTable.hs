@@ -353,9 +353,11 @@ graphStm stm = do
       graphSimple bs e
       one bs `reusesSubExp` se
     BasicOp (ArrayLit [] _) -> graphSimple bs e
-    BasicOp ArrayLit {} ->
-      -- Migrating an array literal of n elements saves n synchronous writes.
-      graphAutoMove (one bs)
+    BasicOp (ArrayLit _ t)
+      | isScalar t ->
+        -- Migrating an array literal of n scalars saves n synchronous writes.
+        graphAutoMove (one bs)
+    BasicOp ArrayLit {} -> graphSimple bs e
     BasicOp UnOp {} -> graphSimple bs e
     BasicOp BinOp {} -> graphSimple bs e
     BasicOp CmpOp {} -> graphSimple bs e
