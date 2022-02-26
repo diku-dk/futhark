@@ -578,6 +578,7 @@ type ReachableBindingsCache = Visited (MG.Result ReachableBindings)
 type NonExhausted = [Id]
 
 type LoopValue = (Binding, Id, SubExp, SubExp)
+
 -----------------------------------------------------
 -----------------------------------------------------
 
@@ -680,8 +681,9 @@ graphLoop (b : bs) params lform body = do
         WhileLoop _ -> pure ()
       graphBody body
       where
-        graphForInElem (p, _) =
+        graphForInElem (p, arr) = do
           when (isScalar p) $ addSource (nameToId $ paramName p, typeOf p)
+          when (isArray p) $ (nameToId (paramName p), typeOf p) `reuses` arr
 
         graphParam ((_, t), p, arg, _) =
           do
