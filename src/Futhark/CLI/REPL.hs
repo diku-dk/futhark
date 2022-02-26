@@ -153,7 +153,8 @@ newFutharkiState count prev_prog maybe_file = runExceptT $ do
   (prog, tenv, ienv) <- case maybe_file of
     Nothing -> do
       -- Load the builtins through the type checker.
-      (_, prog) <- badOnLeft show =<< runExceptT (reloadProg prev_prog [])
+      (_, prog) <-
+        badOnLeft prettyProgramErrors =<< liftIO (reloadProg prev_prog [])
       -- Then into the interpreter.
       ienv <-
         foldM
@@ -166,7 +167,7 @@ newFutharkiState count prev_prog maybe_file = runExceptT $ do
 
       pure (prog, tenv, ienv')
     Just file -> do
-      (ws, prog) <- badOnLeft show =<< runExceptT (reloadProg prev_prog [file])
+      (ws, prog) <- badOnLeft prettyProgramErrors =<< liftIO (reloadProg prev_prog [file])
       liftIO $ putStrLn $ pretty ws
 
       ienv <-
@@ -194,6 +195,8 @@ newFutharkiState count prev_prog maybe_file = runExceptT $ do
     badOnLeft :: (err -> String) -> Either err a -> ExceptT String IO a
     badOnLeft _ (Right x) = pure x
     badOnLeft p (Left err) = throwError $ p err
+
+    prettyProgramErrors = pretty . pprProgramErrors
 
 getPrompt :: FutharkiM String
 getPrompt = do
@@ -260,12 +263,10 @@ onDec d = do
   let mkImport = uncurry $ T.mkImportFrom cur_import
       files = map (T.includeToFilePath . mkImport) $ decImports d
 
-  imp_r <- runExceptT $ do
-    prog <- lift $ gets futharkiProg
-    extendProg prog files
-
+  cur_prog <- gets futharkiProg
+  imp_r <- liftIO $ extendProg cur_prog files
   case imp_r of
-    Left e -> liftIO $ print e
+    Left e -> liftIO $ T.putStrLn $ prettyText $ pprProgramErrors e
     Right (_ws, prog) -> do
       env <- gets futharkiEnv
       let (tenv, ienv) = extendEnvs prog env (map fst $ decImports d)
