@@ -66,9 +66,7 @@ data LoadedFile fm = LoadedFile
 -- happens when the problem is that a root file cannot be found.
 data ProgramError = ProgramError Loc Doc
 
-type WithErrors =
-  Either
-    (NE.NonEmpty ProgramError)
+type WithErrors = Either (NE.NonEmpty ProgramError)
 
 newtype UncheckedImport = UncheckedImport
   { unChecked ::
@@ -81,6 +79,10 @@ type ReaderState = MVar (M.Map ImportName (Maybe (MVar UncheckedImport)))
 
 newState :: [ImportName] -> IO ReaderState
 newState known = newMVar $ M.fromList $ zip known $ repeat Nothing
+
+-- Since we need to work with base 4.14 that does not have NE.singleton.
+singleError :: ProgramError -> NE.NonEmpty ProgramError
+singleError = (NE.:| [])
 
 orderedImports ::
   [(ImportName, MVar UncheckedImport)] ->
@@ -95,7 +97,7 @@ orderedImports = fmap reverse . flip execStateT [] . mapM_ (spelunk [])
                   <> intercalate
                     " -> "
                     (map includeToString $ reverse $ include : steps)
-        modify ((include, Left (NE.singleton problem)) :)
+        modify ((include, Left (singleError problem)) :)
       | otherwise = do
         prev <- gets $ lookup include
         case prev of
@@ -164,7 +166,7 @@ handleFile ::
 handleFile state_mvar (LoadedFile file_name import_name file_contents mod_time) = do
   case parseFuthark file_name file_contents of
     Left err ->
-      pure . UncheckedImport . Left . NE.singleton $
+      pure . UncheckedImport . Left . singleError $
         ProgramError (locOf import_name) $ text $ show err
     Right prog -> do
       let imports = map (uncurry (mkImportFrom import_name)) $ E.progImports prog
@@ -188,7 +190,7 @@ readImport state_mvar include =
       Nothing -> do
         prog_mvar <- newImportMVar $ do
           readImportFile include >>= \case
-            Left e -> pure $ UncheckedImport $ Left $ NE.singleton e
+            Left e -> pure $ UncheckedImport $ Left $ singleError e
             Right file -> handleFile state_mvar file
         pure (M.insert include prog_mvar state, prog_mvar)
 
@@ -222,10 +224,10 @@ readUntypedLibraryExceptKnown known fps = do
                         lfPath = fp
                       }
                 Just (Left e) ->
-                  pure . UncheckedImport . Left . NE.singleton $
+                  pure . UncheckedImport . Left . singleError $
                     ProgramError NoLoc $ text $ show e
                 Nothing ->
-                  pure . UncheckedImport . Left . NE.singleton $
+                  pure . UncheckedImport . Left . singleError $
                     ProgramError NoLoc $ text $ fp <> ": file not found."
             pure (M.insert include prog_mvar state, (include, prog_mvar))
       where
@@ -255,7 +257,7 @@ typeCheckProg orig_imports orig_src =
         (prog_ws, Left (E.TypeError loc notes msg)) -> do
           let ws' = ws <> prog_ws
               err' = msg <> ppr notes
-          Left . NE.singleton . ProgramError (locOf loc) $
+          Left . singleError . ProgramError (locOf loc) $
             if anyWarnings ws'
               then ppr ws' </> line <> ppr err'
               else ppr err'
