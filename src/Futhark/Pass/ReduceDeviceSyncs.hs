@@ -19,6 +19,10 @@ import Futhark.MonadFreshNames (VNameSource, getNameSource, putNameSource)
 import Futhark.Pass
 import Futhark.Transform.Substitute
 
+-- TODO: Add documentation (ReduceDeviceSyncs + MergeGPUBodies)
+
+-- TODO: Run ormolu and hlint (all contributed files)
+
 reduceDeviceSyncs :: Pass GPU GPU
 reduceDeviceSyncs =
   Pass
@@ -218,6 +222,8 @@ optimizeStm out stm = do
     then moveStm out stm
     else case stmExp stm of
       BasicOp (Update safety arr (Slice slice) val) -> do
+        -- TODO: Is it worth running a kernel that copies a scalar to an array
+        --       just to enable this optimization?
         val' <- resolveSubExp val
         -- If val' /= val then val is a scalar and val' is a single-element
         -- array of rank 1 whose only element equals val.

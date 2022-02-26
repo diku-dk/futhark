@@ -1,17 +1,16 @@
 -- |
 -- This module implements program analysis to determine which program statements
 -- the "Futhark.Pass.ReduceDeviceSyncs" pass should move into GPUBody kernels
--- to reduce blocking memory operations, primarily device-host scalar reads.
--- The results of the analysis is encoded into a 'MigrationTable' which can be
--- queried.
+-- to reduce blocking memory transfers between host and device. The results of
+-- the analysis is encoded into a 'MigrationTable' which can be queried.
 --
--- The module constructs a data flow dependency graph of program variables (see
--- "Futhark.Analysis.MigrationTable.Graph") in which it finds a minimum vertex
--- cut that separates array reads of scalars from transitive usage that cannot
--- or should not be migrated to device.
+-- To reduce blocking scalar reads the module constructs a data flow dependency
+-- graph of program variables (see "Futhark.Analysis.MigrationTable.Graph") in
+-- which it finds a minimum vertex cut that separates array reads of scalars
+-- from transitive usage that cannot or should not be migrated to device.
 --
--- The variables of each partition is assigned a 'MigrationStatus' that states
--- whether computation of the variable should be moved to device or remain on
+-- The variables of each partition are assigned a 'MigrationStatus' that states
+-- whether computation of that variable should be moved to device or remain on
 -- host. Due to how the graph is built and the vertex cut is found all
 -- variables bound by a single statement will all belong to the same partition.
 --
@@ -21,6 +20,10 @@
 -- statements (subject to the accuracy of the graph model). The model is built
 -- to reduce the worst-case number of scalar reads; an optimal migration of
 -- statements depends on runtime data.
+--
+-- Blocking scalar writes are reduced by either turning such writes into
+-- asynchronous kernels, as is done with scalar array literals and accumulator
+-- updates, or by transforming scalar writing into array copying.
 --
 -- For details on how the graph is constructed and how the vertex cut is found,
 -- see the master thesis "TODO" by Philip Børgesen (2022).
@@ -88,8 +91,7 @@ data MigrationStatus
 -- | Identifies
 --
 --     (1) which statements should be moved from host to device to reduce the
---         worst case number of blocking memory transfers, primarily
---         device-host scalar reads.
+--         worst case number of blocking memory transfers.
 --
 --     (2) which migrated variables that still will be used on the host after
 --         all such statements have been moved.
