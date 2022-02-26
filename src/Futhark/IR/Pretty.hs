@@ -18,6 +18,7 @@ module Futhark.IR.Pretty
 where
 
 import Data.Foldable (toList)
+import Data.List.NonEmpty (NonEmpty (..))
 import Data.Maybe
 import Futhark.IR.Syntax
 import Futhark.Util.Pretty
@@ -134,10 +135,10 @@ stmCertAnnots = certAnnots . stmAuxCerts . stmAux
 instance Pretty Attrs where
   ppr = spread . attrAnnots
 
-instance Pretty (PatElemT dec) => Pretty (PatT dec) where
+instance Pretty t => Pretty (Pat t) where
   ppr (Pat xs) = braces $ commastack $ map ppr xs
 
-instance Pretty t => Pretty (PatElemT t) where
+instance Pretty t => Pretty (PatElem t) where
   ppr (PatElem name t) = ppr name <+> colon <+> align (ppr t)
 
 instance Pretty t => Pretty (Param t) where
@@ -217,8 +218,8 @@ instance Pretty BasicOp where
     text "rearrange" <> apply [apply (map ppr perm), ppr e]
   ppr (Rotate es e) =
     text "rotate" <> apply [apply (map ppr es), ppr e]
-  ppr (Concat i x ys w) =
-    text "concat" <> text "@" <> ppr i <> apply (ppr w : ppr x : map ppr ys)
+  ppr (Concat i (x :| xs) w) =
+    text "concat" <> text "@" <> ppr i <> apply (ppr w : ppr x : map ppr xs)
   ppr (Copy e) = text "copy" <> parens (ppr e)
   ppr (Manifest perm e) = text "manifest" <> apply [apply (map ppr perm), ppr e]
   ppr (Assert e msg (loc, _)) =
@@ -308,7 +309,7 @@ instance PrettyRep rep => Pretty (Lambda rep) where
   ppr (Lambda [] (Body _ stms []) []) | stms == mempty = text "nilFn"
   ppr (Lambda params body rettype) =
     text "\\" <+> ppTuple' params
-      <+/> colon <+> ppTupleLines' rettype <+> text "->"
+      </> indent 2 (colon <+> ppTupleLines' rettype <+> text "->")
       </> indent 2 (ppr body)
 
 instance Pretty EntryPointType where

@@ -17,7 +17,7 @@ module Language.Futhark.TypeChecker.Terms.Monad
     liftTypeM,
     ValBinding (..),
     Locality (..),
-    SizeSource (..),
+    SizeSource (SourceBound, SourceSlice),
     NameReason (..),
     InferredType (..),
     Checking (..),
@@ -356,7 +356,7 @@ instance Pretty Checking where
     where
       expected' = commasep (map ppr expected)
   ppr (CheckingBranches t1 t2) =
-    "Conditional branches differ in type."
+    "Branches differ in type."
       </> "Former:" <+> ppr t1
       </> "Latter:" <+> ppr t2
 
@@ -399,7 +399,7 @@ envToTermScope env =
 withEnv :: TermEnv -> Env -> TermEnv
 withEnv tenv env = tenv {termScope = termScope tenv <> envToTermScope env}
 
--- Wrap a function name to give it a vacuous Eq instance for SizeSource.
+-- | Wrap a function name to give it a vacuous Eq instance for SizeSource.
 newtype FName = FName (Maybe (QualName VName))
   deriving (Show)
 

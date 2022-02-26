@@ -5,17 +5,125 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
-## [0.22.0]
+## [0.21.7]
 
 ### Added
 
-### Removed
+* `futhark check-syntax`: check syntactic validity of a program
+  file, without type-checking.
 
-### Changed
+* Parsing multi-file programs is now parallelised, making it
+  *slightly* faster.
+
+* Reloading a large program in `futhark repl` is now faster, as long
+  as not too many of its files have been modified (#1597).
+
+### Fixed
+
+* Mistake in occurs check could cause infinite loop in type checker
+  for programs with type errors (#1599).
+
+## [0.21.6]
+
+### Added
+
+* `futhark bench` now explicitly notes when a tuning file is not
+  present.
+
+* `futhark bench`, `futhark test` and friends are now better at
+  handling fatally terminating programs (e.g. segmentation faults).
+
+* Generated C code is now a lot smaller for large programs, as error
+  recovery has been more centralised (#1584).
+
+### Fixed
+
+* Some bugs in checking for local memory capacity for particularly
+  exotic generated code.
+
+* Insufficient hoisting of allocation sizes led to problems with
+  memory expansion in rare cases (#1579).
+
+* Conversion of floating-point NaNs and infinities to integers now
+  well defined (produces zero) (#1586).
+
+* Better handling of OOM for certain short-lived CPU-side allocations (#1585).
+
+## [0.21.5]
+
+### Added
+
+* API functions now return more precise error codes in some cases.
+
+* Out-of-memory errors contain more information.
+
+### Fixed
+
+* Yet another in-place lowering issue (#1569).
+
+* Removed unnecessary bounds checks in register tiling, giving about
+  1.8x speedup on e.g. matrix multiplication on newer NVIDIA GPUs.
+
+* A parser bug erroneously demanded whitespace in some type
+  expressions (#1573).
+
+* Some memory was not being freed correctly when shutting down OpenCL
+  and CUDA contexts, which could lead to memory leaks in processes
+  that created and freed many contexts.
+
+* An incorrect copy-removal in some exotic cases (#1572).
+
+* 'restore'-functions might perform undefined pointer arithmetic when
+  passed garbage.
+
+## [0.21.4]
+
+### Fixed
+
+* A size inference bug in type checking of `loop`s (#1565).
+
+* Exotic flattening bug (#1563).
+
+* Segmented `reduce_by_index` with fairly small histogram size would
+  use vastly more memory than needed.
+
+## [0.21.3]
+
+### Added
+
+* Parse errors now list possible expected tokens.
+
+* Lexer errors now mention the file.
+
+### Fixed
+
+* Overloaded number literals cannot be sum types (#1557).
+
+* Defective GPU code generation for vectorised non-commutative
+  operatators (#1559).
+
+* Excessive memory usage for some programs (#1325).
+
+## [0.21.2]
+
+### Added
+
+* New functions: `reduce_by_index_2d`, `reduce_by_index_3d`.
+
+* Manifests now contain compiler version information.
 
 ### Fixed
 
 * Allocation insertion pass bug (#1546).
+
+* An exotic bug involving TLS and dynamically loading code generated
+  by the `multicore` backend.
+
+* Unconstrained ambiguous types now default to `()` (#1552).  This
+  should essentially never have any observable impact, except that
+  more programs will type check.
+
+* Double buffering compiler crash (#1553).
 
 ## [0.21.1]
 

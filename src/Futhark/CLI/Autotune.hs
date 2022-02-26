@@ -8,6 +8,7 @@ import Control.Monad
 import qualified Data.ByteString.Char8 as SBS
 import Data.Function (on)
 import Data.List (elemIndex, intersect, isPrefixOf, minimumBy, sort, sortOn)
+import qualified Data.Map as M
 import Data.Maybe
 import qualified Data.Set as S
 import qualified Data.Text as T
@@ -17,6 +18,7 @@ import Futhark.Server
 import Futhark.Test
 import Futhark.Util (maxinum)
 import Futhark.Util.Options
+import System.Directory
 import System.Environment (getExecutablePath)
 import System.Exit
 import System.FilePath
@@ -32,13 +34,14 @@ data AutotuneOptions = AutotuneOptions
     optExtraOptions :: [String],
     optVerbose :: Int,
     optTimeout :: Int,
+    optSkipCompilation :: Bool,
     optDefaultThreshold :: Int,
     optTestSpec :: Maybe FilePath
   }
 
 initialAutotuneOptions :: AutotuneOptions
 initialAutotuneOptions =
-  AutotuneOptions "opencl" Nothing 10 (Just "tuning") [] 0 60 thresholdMax Nothing
+  AutotuneOptions "opencl" Nothing 10 (Just "tuning") [] 0 60 False thresholdMax Nothing
 
 compileOptions :: AutotuneOptions -> IO CompileOptions
 compileOptions opts = do
@@ -114,14 +117,23 @@ prepare opts futhark prog = do
           putStrLn $
             unwords ("Entry points:" : map (T.unpack . iosEntryPoint) ios)
 
-        res <- prepareBenchmarkProgram Nothing copts prog ios
-        case res of
-          Left (err, errstr) -> do
-            putStrLn err
-            maybe (return ()) SBS.putStrLn errstr
-            exitFailure
-          Right () ->
-            return ios
+        if optSkipCompilation opts
+          then do
+            exists <- doesFileExist $ binaryName prog
+            if exists
+              then return ios
+              else do
+                putStrLn $ binaryName prog ++ " does not exist, but --skip-compilation passed."
+                exitFailure
+          else do
+            res <- prepareBenchmarkProgram Nothing copts prog ios
+            case res of
+              Left (err, errstr) -> do
+                putStrLn err
+                maybe (return ()) SBS.putStrLn errstr
+                exitFailure
+              Right () ->
+                return ios
       _ ->
         fail "Unsupported test spec."
 
@@ -240,31 +252,36 @@ thresholdForest prog = do
             return ((v, cmp), ancestors')
        in ((parent, parent_cmp), mapMaybe isChild thresholds)
 
+-- | The performance difference in percentage that triggers a non-monotonicity
+-- warning. This is to account for slight variantions in run-time.
+epsilon :: Double
+epsilon = 1.02
+
 --- Doing the atual tuning
 
 tuneThreshold ::
   AutotuneOptions ->
   Server ->
   [(DatasetName, RunDataset, T.Text)] ->
-  Path ->
+  (Path, M.Map DatasetName Int) ->
   (String, Path) ->
-  IO Path
-tuneThreshold opts server datasets already_tuned (v, _v_path) = do
-  tune_result <-
-    foldM tuneDataset Nothing datasets
+  IO (Path, M.Map DatasetName Int)
+tuneThreshold opts server datasets (already_tuned, best_runtimes0) (v, _v_path) = do
+  (tune_result, best_runtimes) <-
+    foldM tuneDataset (Nothing, best_runtimes0) datasets
   case tune_result of
     Nothing ->
-      return $ (v, thresholdMin) : already_tuned
+      return ((v, thresholdMin) : already_tuned, best_runtimes)
     Just (_, threshold) ->
-      return $ (v, threshold) : already_tuned
+      return ((v, threshold) : already_tuned, best_runtimes)
   where
-    tuneDataset :: Maybe (Int, Int) -> (DatasetName, RunDataset, T.Text) -> IO (Maybe (Int, Int))
-    tuneDataset thresholds (dataset_name, run, entry_point) =
+    tuneDataset :: (Maybe (Int, Int), M.Map DatasetName Int) -> (DatasetName, RunDataset, T.Text) -> IO (Maybe (Int, Int), M.Map DatasetName Int)
+    tuneDataset (thresholds, best_runtimes) (dataset_name, run, entry_point) =
       if not $ isPrefixOf (T.unpack entry_point ++ ".") v
         then do
           when (optVerbose opts > 0) $
             putStrLn $ unwords [v, "is irrelevant for", T.unpack entry_point]
-          return thresholds
+          return (thresholds, best_runtimes)
         else do
           putStrLn $
             unwords
@@ -290,7 +307,7 @@ tuneThreshold opts server datasets already_tuned (v, _v_path) = do
               when (optVerbose opts > 0) $
                 putStrLn $
                   "Sampling run failed:\n" ++ err
-              return thresholds
+              return (thresholds, best_runtimes)
             Right (cmps, t) -> do
               let (tMin, tMax) = fromMaybe (thresholdMin, thresholdMax) thresholds
               let ePars =
@@ -311,10 +328,30 @@ tuneThreshold opts server datasets already_tuned (v, _v_path) = do
               when (optVerbose opts > 1) $
                 putStrLn $ unwords ("Got ePars: " : map show ePars)
 
-              newMax <- binarySearch runner (t, tMax) ePars
-              let newMinIdx = pred <$> elemIndex newMax ePars
-              let newMin = maxinum $ catMaybes [Just tMin, newMinIdx]
-              return $ Just (newMin, newMax)
+              (best_t, newMax) <- binarySearch runner (t, tMax) ePars
+              let newMinIdx = do
+                    i <- pred <$> elemIndex newMax ePars
+                    if i < 0 then fail "Invalid lower index" else return i
+              let newMin = maxinum $ catMaybes [Just tMin, fmap (ePars !!) newMinIdx]
+              best_runtimes' <-
+                case dataset_name `M.lookup` best_runtimes of
+                  Just rt
+                    | fromIntegral rt * epsilon < fromIntegral best_t -> do
+                      putStrLn $
+                        unwords
+                          [ "WARNING! Possible non-monotonicity detected. Previous best run-time for dataset",
+                            dataset_name,
+                            " was",
+                            show rt,
+                            "but after tuning threshold",
+                            v,
+                            "it is",
+                            show best_t
+                          ]
+                      return best_runtimes
+                  _ ->
+                    return $ M.insertWith min dataset_name best_t best_runtimes
+              return (Just (newMin, newMax), best_runtimes')
 
     bestPair :: [(Int, Int)] -> (Int, Int)
     bestPair = minimumBy (compare `on` fst)
@@ -327,7 +364,7 @@ tuneThreshold opts server datasets already_tuned (v, _v_path) = do
     candidateEPar (tMin, tMax) (threshold, ePar) =
       ePar > tMin && ePar < tMax && threshold == v
 
-    binarySearch :: (Int -> Int -> IO (Maybe Int)) -> (Int, Int) -> [Int] -> IO Int
+    binarySearch :: (Int -> Int -> IO (Maybe Int)) -> (Int, Int) -> [Int] -> IO (Int, Int)
     binarySearch runner best@(best_t, best_e_par) xs =
       case splitAt (length xs `div` 2) xs of
         (lower, middle : middle' : upper) -> do
@@ -363,14 +400,14 @@ tuneThreshold opts server datasets already_tuned (v, _v_path) = do
                       "and",
                       show middle'
                     ]
-              return best_e_par
+              return (best_t, best_e_par)
         (_, _) -> do
           when (optVerbose opts > 0) $
             putStrLn $ unwords ["Trying e_pars", show xs]
           candidates <-
             catMaybes . zipWith (fmap . flip (,)) xs
               <$> mapM (runner $ timeout best_t) xs
-          return $ snd $ bestPair $ best : candidates
+          return $ bestPair $ best : candidates
 
 --- CLI
 
@@ -389,7 +426,8 @@ tune opts prog = do
   putStrLn $ "Running with options: " ++ unwords (serverOptions opts)
 
   withServer (futharkServerCfg progbin (serverOptions opts)) $ \server ->
-    foldM (tuneThreshold opts server datasets) [] $ tuningPaths forest
+    fmap fst . foldM (tuneThreshold opts server datasets) ([], mempty) $
+      tuningPaths forest
 
 runAutotuner :: AutotuneOptions -> FilePath -> IO ()
 runAutotuner opts prog = do
@@ -475,6 +513,11 @@ commandLineOptions =
           "SECONDS"
       )
       "Initial tuning timeout for each dataset. Later tuning runs are based off of the runtime of the first run.",
+    Option
+      []
+      ["skip-compilation"]
+      (NoArg $ Right $ \config -> config {optSkipCompilation = True})
+      "Use already compiled program.",
     Option
       "v"
       ["verbose"]

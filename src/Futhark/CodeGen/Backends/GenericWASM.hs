@@ -7,6 +7,7 @@ module Futhark.CodeGen.Backends.GenericWASM
     GC.asLibrary,
     GC.asExecutable,
     GC.asServer,
+    EntryPointType,
     JSEntryPoint (..),
     emccExportNames,
     javascriptWrapper,
@@ -325,6 +326,8 @@ toFutharkArray typ =
     (arraynd_p, arraynd_flat_p, arraynd_dims_p) = (T.pack arraynd, T.pack arraynd_flat, T.pack arraynd_dims)
     args = T.pack $ intercalate ", " ["'" ++ ftype ++ "'", show d, heap, fshape, fvalues, ffree]
 
+-- | Javascript code that can be appended to the generated module to
+-- run a Futhark server instance on startup.
 runServer :: T.Text
 runServer =
   [text|
@@ -334,5 +337,6 @@ runServer =
      server.run();
    }|]
 
+-- | The names exported by the generated module.
 libraryExports :: T.Text
 libraryExports = "export {newFutharkContext, FutharkContext, FutharkArray, FutharkOpaque};"

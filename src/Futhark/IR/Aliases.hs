@@ -231,15 +231,15 @@ removeLambdaAliases ::
 removeLambdaAliases = runIdentity . rephraseLambda removeAliases
 
 removePatAliases ::
-  PatT (AliasDec, a) ->
-  PatT a
+  Pat (AliasDec, a) ->
+  Pat a
 removePatAliases = runIdentity . rephrasePat (return . snd)
 
 addAliasesToPat ::
   (ASTRep rep, CanBeAliased (Op rep), Typed dec) =>
-  PatT dec ->
+  Pat dec ->
   Exp (Aliases rep) ->
-  PatT (VarAliases, dec)
+  Pat (VarAliases, dec)
 addAliasesToPat pat e =
   Pat $ mkPatAliases pat e
 
@@ -254,9 +254,9 @@ mkAliasedBody dec stms res =
 
 mkPatAliases ::
   (Aliased rep, Typed dec) =>
-  PatT dec ->
+  Pat dec ->
   Exp rep ->
-  [PatElemT (VarAliases, dec)]
+  [PatElem (VarAliases, dec)]
 mkPatAliases pat e =
   let als = expAliases e ++ repeat mempty
    in -- In case the pattern has
@@ -338,7 +338,7 @@ trackAliases (aliasmap, consumed) stm =
 
 mkAliasedLetStm ::
   (ASTRep rep, CanBeAliased (Op rep)) =>
-  Pat rep ->
+  Pat (LetDec rep) ->
   StmAux (ExpDec rep) ->
   Exp (Aliases rep) ->
   Stm (Aliases rep)

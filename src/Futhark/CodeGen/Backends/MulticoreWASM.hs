@@ -25,13 +25,30 @@ import qualified Futhark.CodeGen.ImpGen.Multicore as ImpGen
 import Futhark.IR.MCMem
 import Futhark.MonadFreshNames
 
-compileProg :: MonadFreshNames m => Prog MCMem -> m (ImpGen.Warnings, (GC.CParts, T.Text, [String]))
-compileProg prog = do
+-- | Compile Futhark program to wasm-multicore program (some assembly
+-- required).
+--
+-- The triple that is returned consists of
+--
+-- * Generated C code (to be passed to Emscripten).
+--
+-- * JavaScript wrapper code that presents a nicer interface to the
+--   Emscripten-produced code (this should be put in a @.class.js@
+--   file by itself).
+--
+-- * Options that should be passed to @emcc@.
+compileProg ::
+  MonadFreshNames m =>
+  T.Text ->
+  Prog MCMem ->
+  m (ImpGen.Warnings, (GC.CParts, T.Text, [String]))
+compileProg version prog = do
   (ws, prog') <- ImpGen.compileProg prog
 
   prog'' <-
     GC.compileProg
       "wasm_multicore"
+      version
       MC.operations
       MC.generateContext
       ""

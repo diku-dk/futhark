@@ -35,16 +35,16 @@ type Dependencies = IS.IntSet
 
 transformLambda ::
   AliasTable ->
-  LambdaT (Aliases GPU) ->
-  PassM (LambdaT GPU, Dependencies)
+  Lambda (Aliases GPU) ->
+  PassM (Lambda GPU, Dependencies)
 transformLambda aliases (Lambda params body types) = do
   (body', deps) <- transformBody aliases body
   pure (Lambda params body' types, deps)
 
 transformBody ::
   AliasTable ->
-  BodyT (Aliases GPU) ->
-  PassM (BodyT GPU, Dependencies)
+  Body (Aliases GPU) ->
+  PassM (Body GPU, Dependencies)
 transformBody aliases (Body _ stms res) = do
   (stms', deps) <- transformStms aliases stms
   pure (Body () stms' res, deps)
@@ -300,7 +300,7 @@ initialState =
 
 type MergeM = StateT State PassM
 
-stores :: PatElemT Type -> SubExp -> MergeM ()
+stores :: PatElem Type -> SubExp -> MergeM ()
 stores (PatElem n t) se
   | isArray t =
     let row_t = fromJust (peelArray 1 t)
@@ -310,7 +310,7 @@ stores (PatElem n t) se
            in st {stateMemStored = stored'}
 stores pe se = pe `binds` se
 
-binds :: PatElemT Type -> SubExp -> MergeM ()
+binds :: PatElem Type -> SubExp -> MergeM ()
 binds (PatElem n _) se =
   modify $ \st ->
     let bound = stateHostBound st
@@ -394,7 +394,7 @@ arrayContents = lift (gets stateMemStored)
 returnedValues :: RewriteM (IM.IntMap SubExp)
 returnedValues = lift (gets stateHostBound)
 
-execRewrite :: RewriteM (BodyT GPU) -> MergeM (BodyT GPU)
+execRewrite :: RewriteM (Body GPU) -> MergeM (Body GPU)
 execRewrite m = fst <$> runStateT m' SQ.empty
   where
     m' = do
@@ -402,7 +402,7 @@ execRewrite m = fst <$> runStateT m' SQ.empty
       prelude <- get
       pure (Body () (prelude <> stms) res)
 
-rewriteBody :: BodyT GPU -> RewriteM (BodyT GPU)
+rewriteBody :: Body GPU -> RewriteM (Body GPU)
 rewriteBody (Body _ stms res) =
   Body () <$> rewriteStms stms <*> rewriteResult res
 
@@ -416,7 +416,7 @@ rewriteStm (Let (Pat pes) (StmAux cs attrs _) e) = do
   e' <- rewriteExp e
   pure $ Let pat' (StmAux cs' attrs ()) e'
 
-rewritePatElem :: PatElemT Type -> RewriteM (PatElemT Type)
+rewritePatElem :: PatElem Type -> RewriteM (PatElem Type)
 rewritePatElem (PatElem n t) =
   PatElem n <$> rewriteType t
 

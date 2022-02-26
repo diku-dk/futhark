@@ -15,6 +15,7 @@ where
 
 import Control.Monad hiding (mapM)
 import Data.List (intercalate)
+import qualified Data.Text as T
 import Futhark.CodeGen.Backends.COpenCL.Boilerplate
 import qualified Futhark.CodeGen.Backends.GenericC as GC
 import Futhark.CodeGen.Backends.GenericC.Options
@@ -32,8 +33,8 @@ import qualified Language.C.Syntax as C
 import NeatInterpolation (untrimming)
 
 -- | Compile the program to C with calls to OpenCL.
-compileProg :: MonadFreshNames m => Prog GPUMem -> m (ImpGen.Warnings, GC.CParts)
-compileProg prog = do
+compileProg :: MonadFreshNames m => T.Text -> Prog GPUMem -> m (ImpGen.Warnings, GC.CParts)
+compileProg version prog = do
   ( ws,
     Program
       opencl_code
@@ -55,6 +56,7 @@ compileProg prog = do
   (ws,)
     <$> GC.compileProg
       "opencl"
+      version
       operations
       ( generateBoilerplate
           opencl_code
@@ -211,9 +213,12 @@ readOpenCLScalar _ _ _ space _ =
 
 allocateOpenCLBuffer :: GC.Allocate OpenCL ()
 allocateOpenCLBuffer mem size tag "device" =
-  GC.stm [C.cstm|OPENCL_SUCCEED_OR_RETURN(opencl_alloc(&ctx->opencl, (size_t)$exp:size, $exp:tag, &$exp:mem));|]
+  GC.stm
+    [C.cstm|ctx->error =
+     OPENCL_SUCCEED_NONFATAL(opencl_alloc(&ctx->opencl, ctx->log,
+                                          (size_t)$exp:size, $exp:tag, &$exp:mem));|]
 allocateOpenCLBuffer _ _ _ space =
-  error $ "Cannot allocate in '" ++ space ++ "' space."
+  error $ "Cannot allocate in '" ++ space ++ "' memory space."
 
 deallocateOpenCLBuffer :: GC.Deallocate OpenCL ()
 deallocateOpenCLBuffer mem tag "device" =

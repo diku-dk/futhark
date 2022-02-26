@@ -315,7 +315,7 @@ buildGraph hof usage stms =
    in (g', srcs, sinks)
 
 -- | Graph a body.
-graphBody :: BodyT GPU -> Grapher ()
+graphBody :: Body GPU -> Grapher ()
 graphBody body = do
   let res_ops = IS.fromList $ namesToIds $ freeIn (bodyResult body)
   body_stats <-
@@ -523,7 +523,7 @@ graphApply fn bs e = do
     else graphSimple bs e
 
 -- | Graph an if statement.
-graphIf :: [Binding] -> SubExp -> BodyT GPU -> BodyT GPU -> Grapher ()
+graphIf :: [Binding] -> SubExp -> Body GPU -> Body GPU -> Grapher ()
 graphIf bs cond tbody fbody = do
   body_host_only <-
     incForkDepthFor
@@ -587,7 +587,7 @@ graphLoop ::
   [Binding] ->
   [(FParam GPU, SubExp)] ->
   LoopForm GPU ->
-  BodyT GPU ->
+  Body GPU ->
   Grapher ()
 graphLoop [] _ _ _ =
   -- We expect each loop to bind a value or be eliminated.
@@ -989,8 +989,7 @@ graphedScalarOperands e =
     collectSegBinOp (SegBinOp _ _ nes _) =
       mapM_ collectSubExp nes
 
-    collectHistOp (HistOp w rf _ nes _ _) = do
-      collectSubExp w
+    collectHistOp (HistOp _ rf _ nes _ _) = do
       collectSubExp rf
       mapM_ collectSubExp nes
 

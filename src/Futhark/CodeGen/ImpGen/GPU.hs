@@ -106,7 +106,7 @@ compileProgOpenCL = compileProg $ HostEnv openclAtomics OpenCL mempty
 compileProgCUDA = compileProg $ HostEnv cudaAtomics CUDA mempty
 
 opCompiler ::
-  Pat GPUMem ->
+  Pat LetDecMem ->
   Op GPUMem ->
   CallKernelGen ()
 opCompiler dest (Alloc e space) =
@@ -145,7 +145,7 @@ opCompiler dest (Inner (SegOp op)) =
   segOpCompiler dest op
 opCompiler (Pat pes) (Inner (GPUBody _ (Body _ stms res))) = do
   tid <- newVName "tid"
-  sKernelThread "gpuseq" 1 1 tid $
+  sKernelThread "gpuseq" tid (defKernelAttrs 1 1) $
     compileStms (freeIn res) stms $
       forM_ (zip pes res) $ \(pe, SubExpRes _ se) ->
         copyDWIM (patElemName pe) [DimFix 0] se []
@@ -164,7 +164,7 @@ sizeClassWithEntryPoint fname (Imp.SizeThreshold path def) =
 sizeClassWithEntryPoint _ size_class = size_class
 
 segOpCompiler ::
-  Pat GPUMem ->
+  Pat LetDecMem ->
   SegOp SegLevel GPUMem ->
   CallKernelGen ()
 segOpCompiler pat (SegMap lvl space _ kbody) =
@@ -184,7 +184,7 @@ segOpCompiler pat segop =
 -- otherwise protected by their own multi-versioning branches deeper
 -- down.  Currently the compiler will not generate multi-versioning
 -- that makes this a problem, but it might in the future.
-checkLocalMemoryReqs :: Imp.Code -> CallKernelGen (Maybe (Imp.TExp Bool))
+checkLocalMemoryReqs :: Imp.HostCode -> CallKernelGen (Maybe (Imp.TExp Bool))
 checkLocalMemoryReqs code = do
   scope <- askScope
   let alloc_sizes = map (sum . map alignedSize . localAllocSizes . Imp.kernelBody) $ getGPU code
@@ -204,7 +204,7 @@ checkLocalMemoryReqs code = do
       return $ Just $ foldl' (.&&.) true (map fits alloc_sizes)
   where
     getGPU = foldMap getKernel
-    getKernel (Imp.CallKernel k) = [k]
+    getKernel (Imp.CallKernel k) | Imp.kernelCheckLocalMemory k = [k]
     getKernel _ = []
 
     localAllocSizes = foldMap localAllocSize
@@ -217,7 +217,7 @@ checkLocalMemoryReqs code = do
     alignedSize x = x + ((8 - (x `rem` 8)) `rem` 8)
 
 withAcc ::
-  Pat GPUMem ->
+  Pat LetDecMem ->
   [(Shape, [VName], Maybe (Lambda GPUMem, [SubExp]))] ->
   Lambda GPUMem ->
   CallKernelGen ()
@@ -319,7 +319,7 @@ mapTransposeForType bt = do
 mapTransposeName :: PrimType -> String
 mapTransposeName bt = "gpu_map_transpose_" ++ pretty bt
 
-mapTransposeFunction :: PrimType -> Imp.Function
+mapTransposeFunction :: PrimType -> Imp.Function Imp.HostOp
 mapTransposeFunction bt =
   Imp.Function Nothing [] params transpose_code [] []
   where

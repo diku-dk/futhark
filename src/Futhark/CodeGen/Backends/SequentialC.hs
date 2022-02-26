@@ -13,6 +13,7 @@ module Futhark.CodeGen.Backends.SequentialC
 where
 
 import Control.Monad
+import qualified Data.Text as T
 import qualified Futhark.CodeGen.Backends.GenericC as GC
 import Futhark.CodeGen.Backends.SequentialC.Boilerplate
 import qualified Futhark.CodeGen.ImpCode.Sequential as Imp
@@ -21,10 +22,10 @@ import Futhark.IR.SeqMem
 import Futhark.MonadFreshNames
 
 -- | Compile the program to sequential C.
-compileProg :: MonadFreshNames m => Prog SeqMem -> m (ImpGen.Warnings, GC.CParts)
-compileProg =
+compileProg :: MonadFreshNames m => T.Text -> Prog SeqMem -> m (ImpGen.Warnings, GC.CParts)
+compileProg version =
   traverse
-    (GC.compileProg "c" operations generateBoilerplate mempty [DefaultSpace] [])
+    (GC.compileProg "c" version operations generateBoilerplate mempty [DefaultSpace] [])
     <=< ImpGen.compileProg
   where
     operations :: GC.Operations Imp.Sequential ()

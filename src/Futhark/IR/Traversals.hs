@@ -44,6 +44,7 @@ import Control.Monad
 import Control.Monad.Identity
 import Data.Bitraversable
 import Data.Foldable (traverse_)
+import Data.List.NonEmpty (NonEmpty (..))
 import Futhark.IR.Prop.Scope
 import Futhark.IR.Prop.Types (mapOnType)
 import Futhark.IR.Syntax
@@ -146,13 +147,11 @@ mapExpM tv (BasicOp (Rearrange perm e)) =
   BasicOp <$> (Rearrange perm <$> mapOnVName tv e)
 mapExpM tv (BasicOp (Rotate es e)) =
   BasicOp <$> (Rotate <$> mapM (mapOnSubExp tv) es <*> mapOnVName tv e)
-mapExpM tv (BasicOp (Concat i x ys size)) =
-  BasicOp
-    <$> ( Concat i
-            <$> mapOnVName tv x
-            <*> mapM (mapOnVName tv) ys
-            <*> mapOnSubExp tv size
-        )
+mapExpM tv (BasicOp (Concat i (x :| ys) size)) = do
+  x' <- mapOnVName tv x
+  ys' <- mapM (mapOnVName tv) ys
+  size' <- mapOnSubExp tv size
+  return $ BasicOp $ Concat i (x' :| ys') size'
 mapExpM tv (BasicOp (Copy e)) =
   BasicOp <$> (Copy <$> mapOnVName tv e)
 mapExpM tv (BasicOp (Manifest perm e)) =
@@ -319,7 +318,7 @@ walkExpM tv (BasicOp (Rearrange _ e)) =
   walkOnVName tv e
 walkExpM tv (BasicOp (Rotate es e)) =
   mapM_ (walkOnSubExp tv) es >> walkOnVName tv e
-walkExpM tv (BasicOp (Concat _ x ys size)) =
+walkExpM tv (BasicOp (Concat _ (x :| ys) size)) =
   walkOnVName tv x >> mapM_ (walkOnVName tv) ys >> walkOnSubExp tv size
 walkExpM tv (BasicOp (Copy e)) =
   walkOnVName tv e
@@ -354,7 +353,7 @@ walkExpM tv (Op op) =
 -- given op for some representation.
 type OpStmsTraverser m op rep = (Scope rep -> Stms rep -> m (Stms rep)) -> op -> m op
 
--- | This representatin supports an 'OpStmsTraverser' for its 'Op'.
+-- | This representation supports an 'OpStmsTraverser' for its t'Op'.
 -- This is used for some simplification rules.
 class TraverseOpStms rep where
   -- | Transform every sub-'Stms' of this op.

@@ -18,8 +18,10 @@ module Futhark.Analysis.UsageTable
     inResultUsage,
     sizeUsage,
     sizeUsages,
+    withoutU,
     Usages,
     consumedU,
+    presentU,
     usageInStm,
   )
 where
@@ -127,6 +129,7 @@ instance Semigroup Usages where
 instance Monoid Usages where
   mempty = Usages 0
 
+-- | A kind of usage.
 consumedU, inResultU, presentU, sizeU :: Usages
 consumedU = Usages 1
 inResultU = Usages 2
@@ -138,7 +141,7 @@ sizeU = Usages 8
 matches :: Usages -> Usages -> Bool
 matches (Usages x) (Usages y) = x == (x .&. y)
 
--- | x - y, but for Usages.
+-- | x - y, but for 'Usages'.
 withoutU :: Usages -> Usages -> Usages
 withoutU (Usages x) (Usages y) = Usages $ x .&. complement y
 

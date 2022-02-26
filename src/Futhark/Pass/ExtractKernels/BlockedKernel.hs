@@ -71,12 +71,12 @@ prepareRedOrScan cs w map_lam arrs ispace inps = do
         res <- bodyBind (lambdaBody map_lam)
         forM res $ \(SubExpRes res_cs se) -> pure $ Returns ResultMaySimplify res_cs se
 
-  return (space, kbody)
+  pure (space, kbody)
 
 segRed ::
   (MonadFreshNames m, DistRep rep, HasScope rep m) =>
   SegOpLevel rep ->
-  Pat rep ->
+  Pat (LetDec rep) ->
   Certs ->
   SubExp -> -- segment size
   [SegBinOp rep] ->
@@ -95,7 +95,7 @@ segRed lvl pat cs w ops map_lam arrs ispace inps = runBuilder_ $ do
 segScan ::
   (MonadFreshNames m, DistRep rep, HasScope rep m) =>
   SegOpLevel rep ->
-  Pat rep ->
+  Pat (LetDec rep) ->
   Certs ->
   SubExp -> -- segment size
   [SegBinOp rep] ->
@@ -114,7 +114,7 @@ segScan lvl pat cs w ops map_lam arrs ispace inps = runBuilder_ $ do
 segMap ::
   (MonadFreshNames m, DistRep rep, HasScope rep m) =>
   SegOpLevel rep ->
-  Pat rep ->
+  Pat (LetDec rep) ->
   SubExp -> -- segment size
   Lambda rep ->
   [VName] ->
@@ -129,9 +129,9 @@ segMap lvl pat w map_lam arrs ispace inps = runBuilder_ $ do
         SegMap lvl kspace (lambdaReturnType map_lam) kbody
 
 dummyDim ::
-  (MonadFreshNames m, MonadBuilder m, DistRep (Rep m)) =>
-  Pat (Rep m) ->
-  m (Pat (Rep m), [(VName, SubExp)], m ())
+  (MonadFreshNames m, MonadBuilder m) =>
+  Pat Type ->
+  m (Pat Type, [(VName, SubExp)], m ())
 dummyDim pat = do
   -- We add a unit-size segment on top to ensure that the result
   -- of the SegRed is an array, which we then immediately index.
@@ -158,7 +158,7 @@ dummyDim pat = do
 nonSegRed ::
   (MonadFreshNames m, DistRep rep, HasScope rep m) =>
   SegOpLevel rep ->
-  Pat rep ->
+  Pat Type ->
   SubExp ->
   [SegBinOp rep] ->
   Lambda rep ->
@@ -172,7 +172,7 @@ nonSegRed lvl pat w ops map_lam arrs = runBuilder_ $ do
 segHist ::
   (DistRep rep, MonadFreshNames m, HasScope rep m) =>
   SegOpLevel rep ->
-  Pat rep ->
+  Pat Type ->
   SubExp ->
   -- | Segment indexes and sizes.
   [(VName, SubExp)] ->
@@ -208,7 +208,7 @@ mapKernelSkeleton ispace inputs = do
   read_input_stms <- runBuilder_ $ mapM readKernelInput inputs
 
   space <- mkSegSpace ispace
-  return (space, read_input_stms)
+  pure (space, read_input_stms)
 
 mapKernel ::
   (DistRep rep, HasScope rep m, MonadFreshNames m) =>
@@ -232,7 +232,7 @@ mapKernel mk_lvl ispace inputs rts (KernelBody () kstms krets) = runBuilderT' $ 
 
   lvl <- mk_lvl (map snd ispace) "segmap" r
 
-  return $ SegMap lvl space rts kbody'
+  pure $ SegMap lvl space rts kbody'
 
 data KernelInput = KernelInput
   { kernelInputName :: VName,

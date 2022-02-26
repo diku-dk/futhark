@@ -13,9 +13,9 @@ then used to obtain a *context object*, which is then used to perform
 most other operations, such as calling Futhark functions.
 
 Most functions that can fail return an integer: 0 on success and a
-non-zero value on error.  Others return a ``NULL`` pointer.  Use
-:c:func:`futhark_context_get_error` to get a (possibly) more precise
-error message.
+non-zero value on error, as documented below.  Others return a
+``NULL`` pointer.  Use :c:func:`futhark_context_get_error` to get a
+(possibly) more precise error message.
 
 .. c:macro:: FUTHARK_BACKEND_foo
 
@@ -23,6 +23,29 @@ error message.
    generate the code; e.g. ``c``, ``opencl``, or ``cuda``.  This can
    be used for conditional compilation of code that only works with
    specific backends.
+
+Error codes
+-----------
+
+Most errors are result in a not otherwise specified nonzero return
+code, but a few classes of errors have distinct error codes.
+
+.. c:macro:: FUTHARK_SUCCESS
+
+   Defined as ``0``.  Returned in case of success.
+
+.. c:macro:: FUTHARK_PROGRAM_ERROR
+
+   Defined as ``2``.  Returned when the program fails due to
+   out-of-bounds, an invalid size coercion, invalid entry point
+   arguments, or similar misuse.
+
+.. c:macro:: FUTHARK_OUT_OF_MEMORY
+
+   Defined as ``3``.  Returned when the program fails to allocate
+   memory.  This is (somewhat) reliable only for GPU memory - due to
+   overcommit and other VM tricks, you should not expect running out
+   of main memory to be reported gracefully.
 
 Configuration
 -------------

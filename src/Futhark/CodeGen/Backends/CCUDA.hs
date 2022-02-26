@@ -14,6 +14,7 @@ where
 
 import Control.Monad
 import Data.Maybe (catMaybes)
+import qualified Data.Text as T
 import Futhark.CodeGen.Backends.CCUDA.Boilerplate
 import Futhark.CodeGen.Backends.COpenCL.Boilerplate (commonOptions, sizeLoggingCode)
 import qualified Futhark.CodeGen.Backends.GenericC as GC
@@ -31,8 +32,8 @@ import qualified Language.C.Quote.OpenCL as C
 import NeatInterpolation (untrimming)
 
 -- | Compile the program to C with calls to CUDA.
-compileProg :: MonadFreshNames m => Prog GPUMem -> m (ImpGen.Warnings, GC.CParts)
-compileProg prog = do
+compileProg :: MonadFreshNames m => T.Text -> Prog GPUMem -> m (ImpGen.Warnings, GC.CParts)
+compileProg version prog = do
   (ws, Program cuda_code cuda_prelude kernels _ sizes failures prog') <-
     ImpGen.compileProg prog
   let cost_centres =
@@ -53,6 +54,7 @@ compileProg prog = do
   (ws,)
     <$> GC.compileProg
       "cuda"
+      version
       operations
       extra
       cuda_includes
@@ -175,7 +177,10 @@ readCUDAScalar _ _ _ space _ =
 
 allocateCUDABuffer :: GC.Allocate OpenCL ()
 allocateCUDABuffer mem size tag "device" =
-  GC.stm [C.cstm|CUDA_SUCCEED_OR_RETURN(cuda_alloc(&ctx->cuda, (size_t)$exp:size, $exp:tag, &$exp:mem));|]
+  GC.stm
+    [C.cstm|ctx->error =
+     CUDA_SUCCEED_NONFATAL(cuda_alloc(&ctx->cuda, ctx->log,
+                                      (size_t)$exp:size, $exp:tag, &$exp:mem));|]
 allocateCUDABuffer _ _ _ space =
   error $ "Cannot allocate in '" ++ space ++ "' memory space."
 

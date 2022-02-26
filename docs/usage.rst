@@ -227,8 +227,7 @@ there is likely only a single device associated with this platform.
 On \*nix (including macOS), the `clinfo
 <https://github.com/Oblomov/clinfo>`_ tool (available in many package
 managers) can be used to determine which OpenCL platforms and devices
-are available on a given system.  On Windows, `CPU-z
-<https://www.cpuid.com/softwares/cpu-z.html>`_ can be used.
+are available on a given system.
 
 CUDA-specific Options
 ~~~~~~~~~~~~~~~~~~~~~
@@ -334,7 +333,7 @@ are as follows:
 
 Return types follow the rules, with one addition:
 
-* If the return type is an *m*-element tuple, then the the function
+* If the return type is an *m*-element tuple, then the function
   returns *m* values, mapped according to the rules above (but not
   including this one - nested tuples are not mapped directly).  This
   rule does not apply when the entry point has been given a return

@@ -10,15 +10,16 @@ from urllib.error import HTTPError
 import json
 import tempfile
 import os
+import gzip
 
 def url_for(backend, system, commit):
-    return 'https://futhark-lang.org/benchmark-results/futhark-{}-{}-{}.json'.format(backend, system, commit)
+    return 'https://futhark-lang.org/benchmark-results/futhark-{}-{}-{}.json.gz'.format(backend, system, commit)
 
 def results_for_commit(backend, system, commit):
     try:
         url = url_for(backend, system, commit)
         print('Fetching {}...'.format(url))
-        return json.loads(urlopen(url).read())
+        return json.loads(gzip.decompress(urlopen(url).read()))
     except HTTPError:
         return None
 

@@ -5,9 +5,7 @@
 -- of a kernel invocation.
 module Futhark.CodeGen.ImpCode.GPU
   ( Program,
-    Function,
-    FunctionT (Function),
-    Code,
+    HostCode,
     KernelCode,
     KernelConst (..),
     KernelConstExp,
@@ -22,23 +20,19 @@ module Futhark.CodeGen.ImpCode.GPU
   )
 where
 
-import Futhark.CodeGen.ImpCode hiding (Code, Function)
-import qualified Futhark.CodeGen.ImpCode as Imp
+import Futhark.CodeGen.ImpCode
 import Futhark.IR.GPU.Sizes
 import Futhark.IR.Pretty ()
 import Futhark.Util.Pretty
 
 -- | A program that calls kernels.
-type Program = Imp.Definitions HostOp
-
--- | A function that calls kernels.
-type Function = Imp.Function HostOp
+type Program = Definitions HostOp
 
 -- | Host-level code that can call kernels.
-type Code = Imp.Code HostOp
+type HostCode = Code HostOp
 
 -- | Code inside a kernel.
-type KernelCode = Imp.Code KernelOp
+type KernelCode = Code KernelOp
 
 -- | A run-time constant related to kernels.
 newtype KernelConst = SizeConst Name
@@ -51,17 +45,17 @@ type KernelConstExp = PrimExp KernelConst
 data HostOp
   = CallKernel Kernel
   | GetSize VName Name SizeClass
-  | CmpSizeLe VName Name SizeClass Imp.Exp
+  | CmpSizeLe VName Name SizeClass Exp
   | GetSizeMax VName SizeClass
   deriving (Show)
 
 -- | A generic kernel containing arbitrary kernel code.
 data Kernel = Kernel
-  { kernelBody :: Imp.Code KernelOp,
+  { kernelBody :: Code KernelOp,
     -- | The host variables referenced by the kernel.
     kernelUses :: [KernelUse],
-    kernelNumGroups :: [Imp.Exp],
-    kernelGroupSize :: [Imp.Exp],
+    kernelNumGroups :: [Exp],
+    kernelGroupSize :: [Exp],
     -- | A short descriptive and _unique_ name - should be
     -- alphanumeric and without spaces.
     kernelName :: Name,
@@ -71,7 +65,11 @@ data Kernel = Kernel
     -- depend on any non-scalar parameters to make control
     -- flow decisions.  Replication, transpose, and copy
     -- kernels are examples of this.
-    kernelFailureTolerant :: Bool
+    kernelFailureTolerant :: Bool,
+    -- | If true, multi-versioning branches will consider this kernel
+    -- when considering the local memory requirements.  Set this to
+    -- false for kernels that do their own checking.
+    kernelCheckLocalMemory :: Bool
   }
   deriving (Show)
 
@@ -132,6 +130,7 @@ instance Pretty Kernel where
             </> text "group_size" <+> brace (ppr $ kernelGroupSize kernel)
             </> text "uses" <+> brace (commasep $ map ppr $ kernelUses kernel)
             </> text "failure_tolerant" <+> brace (ppr $ kernelFailureTolerant kernel)
+            </> text "check_local_memory" <+> brace (ppr $ kernelCheckLocalMemory kernel)
             </> text "body" <+> brace (ppr $ kernelBody kernel)
         )
 
@@ -151,7 +150,7 @@ data KernelOp
   | Atomic Space AtomicOp
   | Barrier Fence
   | MemFence Fence
-  | LocalAlloc VName (Count Bytes (Imp.TExp Int64))
+  | LocalAlloc VName (Count Bytes (TExp Int64))
   | -- | Perform a barrier and also check whether any
     -- threads have failed an assertion.  Make sure all
     -- threads would reach all 'ErrorSync's if any of them
@@ -165,17 +164,17 @@ data KernelOp
 -- This old value is stored in the first 'VName'.  The second 'VName'
 -- is the memory block to update.  The 'Exp' is the new value.
 data AtomicOp
-  = AtomicAdd IntType VName VName (Count Elements (Imp.TExp Int64)) Exp
-  | AtomicFAdd FloatType VName VName (Count Elements (Imp.TExp Int64)) Exp
-  | AtomicSMax IntType VName VName (Count Elements (Imp.TExp Int64)) Exp
-  | AtomicSMin IntType VName VName (Count Elements (Imp.TExp Int64)) Exp
-  | AtomicUMax IntType VName VName (Count Elements (Imp.TExp Int64)) Exp
-  | AtomicUMin IntType VName VName (Count Elements (Imp.TExp Int64)) Exp
-  | AtomicAnd IntType VName VName (Count Elements (Imp.TExp Int64)) Exp
-  | AtomicOr IntType VName VName (Count Elements (Imp.TExp Int64)) Exp
-  | AtomicXor IntType VName VName (Count Elements (Imp.TExp Int64)) Exp
-  | AtomicCmpXchg PrimType VName VName (Count Elements (Imp.TExp Int64)) Exp Exp
-  | AtomicXchg PrimType VName VName (Count Elements (Imp.TExp Int64)) Exp
+  = AtomicAdd IntType VName VName (Count Elements (TExp Int64)) Exp
+  | AtomicFAdd FloatType VName VName (Count Elements (TExp Int64)) Exp
+  | AtomicSMax IntType VName VName (Count Elements (TExp Int64)) Exp
+  | AtomicSMin IntType VName VName (Count Elements (TExp Int64)) Exp
+  | AtomicUMax IntType VName VName (Count Elements (TExp Int64)) Exp
+  | AtomicUMin IntType VName VName (Count Elements (TExp Int64)) Exp
+  | AtomicAnd IntType VName VName (Count Elements (TExp Int64)) Exp
+  | AtomicOr IntType VName VName (Count Elements (TExp Int64)) Exp
+  | AtomicXor IntType VName VName (Count Elements (TExp Int64)) Exp
+  | AtomicCmpXchg PrimType VName VName (Count Elements (TExp Int64)) Exp Exp
+  | AtomicXchg PrimType VName VName (Count Elements (TExp Int64)) Exp
   deriving (Show)
 
 instance FreeIn AtomicOp where

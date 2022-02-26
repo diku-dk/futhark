@@ -391,7 +391,7 @@ generateContextFuns cfg cost_centres kernels sizes failures = do
                  ctx->error = cuda_setup(&ctx->cuda, cuda_program, cfg->nvrtc_opts);
 
                  if (ctx->error != NULL) {
-                   return NULL;
+                   futhark_panic(1, "%s\n", ctx->error);
                  }
 
                  typename int32_t no_error = -1;
@@ -420,6 +420,8 @@ generateContextFuns cfg cost_centres kernels sizes failures = do
       [C.cedecl|void $id:s(struct $id:ctx* ctx) {
                                  $stms:free_fields
                                  free_constants(ctx);
+                                 cuMemFree(ctx->global_failure);
+                                 cuMemFree(ctx->global_failure_args);
                                  cuda_cleanup(&ctx->cuda);
                                  free_lock(&ctx->lock);
                                  ctx->cfg->in_use = 0;
@@ -458,7 +460,7 @@ generateContextFuns cfg cost_centres kernels sizes failures = do
 
                      $stm:(failureSwitch failures)
 
-                     return 1;
+                     return FUTHARK_PROGRAM_ERROR;
                    }
                  }
                  CUDA_SUCCEED_OR_RETURN(cuCtxPopCurrent(&ctx->cuda.cu_ctx));

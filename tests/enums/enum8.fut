@@ -1,5 +1,5 @@
 -- Invalid constructor format.
 -- ==
--- error: Parse error
+-- error: unexpected ID
 
 type foo = #foo | bar

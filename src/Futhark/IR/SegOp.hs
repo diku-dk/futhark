@@ -13,6 +13,7 @@
 module Futhark.IR.SegOp
   ( SegOp (..),
     SegVirt (..),
+    SegSeqDims (..),
     segLevel,
     segBody,
     segSpace,
@@ -24,6 +25,7 @@ module Futhark.IR.SegOp
     -- * Details
     HistOp (..),
     histType,
+    splitHistResults,
     SegBinOp (..),
     segBinOpResults,
     segBinOpChunks,
@@ -127,7 +129,7 @@ instance Rename SplitOrdering where
 
 -- | An operator for 'SegHist'.
 data HistOp rep = HistOp
-  { histWidth :: SubExp,
+  { histShape :: Shape,
     histRaceFactor :: SubExp,
     histDest :: [VName],
     histNeutral :: [SubExp],
@@ -136,7 +138,7 @@ data HistOp rep = HistOp
     -- SOACS representation), these are the logical
     -- "dimensions".  This is used to generate more efficient
     -- code.
-    histShape :: Shape,
+    histOpShape :: Shape,
     histOp :: Lambda rep
   }
   deriving (Eq, Ord, Show)
@@ -146,11 +148,19 @@ data HistOp rep = HistOp
 -- dealing with a segmented histogram.
 histType :: HistOp rep -> [Type]
 histType op =
-  map
-    ( (`arrayOfRow` histWidth op)
-        . (`arrayOfShape` histShape op)
-    )
-    $ lambdaReturnType $ histOp op
+  map (`arrayOfShape` (histShape op <> histOpShape op)) $
+    lambdaReturnType $ histOp op
+
+-- | Split reduction results returned by a 'KernelBody' into those
+-- that correspond to indexes for the 'HistOp's, and those that
+-- correspond to value.
+splitHistResults :: [HistOp rep] -> [SubExp] -> [([SubExp], [SubExp])]
+splitHistResults ops res =
+  let ranks = map (shapeRank . histShape) ops
+      (idxs, vals) = splitAt (sum ranks) res
+   in zip
+        (chunks ranks idxs)
+        (chunks (map (length . histDest) ops) vals)
 
 -- | An operator for 'SegScan' and 'SegRed'.
 data SegBinOp rep = SegBinOp
@@ -486,6 +496,24 @@ instance Pretty KernelResult where
       onDim (dim, blk_tile, reg_tile) =
         ppr dim <+> "/" <+> parens (ppr blk_tile <+> "*" <+> ppr reg_tile)
 
+-- | These dimensions (indexed from 0, outermost) of the corresponding
+-- 'SegSpace' should not be parallelised, but instead iterated
+-- sequentially.  For example, with a 'SegSeqDims' of @[0]@ and a
+-- 'SegSpace' with dimensions @[n][m]@, there will be an outer loop
+-- with @n@ iterations, while the @m@ dimension will be parallelised.
+--
+-- Semantically, this has no effect, but it may allow reductions in
+-- memory usage or other low-level optimisations.  Operationally, the
+-- guarantee is that for a SegSeqDims of e.g. @[i,j,k]@, threads
+-- running at any given moment will always have the same indexes along
+-- the dimensions specified by @[i,j,k]@.
+--
+-- At the moment, this is only supported for 'SegNoVirtFull'
+-- intra-group parallelism in GPU code, as we have not yet found it
+-- useful anywhere else.
+newtype SegSeqDims = SegSeqDims {segSeqDims :: [Int]}
+  deriving (Eq, Ord, Show)
+
 -- | Do we need group-virtualisation when generating code for the
 -- segmented operation?  In most cases, we do, but for some simple
 -- kernels, we compute the full number of groups in advance, and then
@@ -499,7 +527,7 @@ data SegVirt
   | -- | Not only do we not need virtualisation, but we _guarantee_
     -- that all physical threads participate in the work.  This can
     -- save some checks in code generation.
-    SegNoVirtFull
+    SegNoVirtFull SegSeqDims
   deriving (Eq, Ord, Show)
 
 -- | Index space of a 'SegOp'.
@@ -611,7 +639,7 @@ segOpType (SegScan _ space scans ts kbody) =
       map (`arrayOfShape` shape) (lambdaReturnType $ segBinOpLambda op)
 segOpType (SegHist _ space ops _ _) = do
   op <- ops
-  let shape = Shape (segment_dims <> [histWidth op]) <> histShape op
+  let shape = Shape segment_dims <> histShape op <> histOpShape op
   map (`arrayOfShape` shape) (lambdaReturnType $ histOp op)
   where
     dims = segSpaceDims space
@@ -668,8 +696,8 @@ typeCheckSegOp checkLvl (SegHist lvl space ops ts kbody) = do
   mapM_ TC.checkType ts
 
   TC.binding (scopeOfSegSpace space) $ do
-    nes_ts <- forM ops $ \(HistOp dest_w rf dests nes shape op) -> do
-      TC.require [Prim int64] dest_w
+    nes_ts <- forM ops $ \(HistOp dest_shape rf dests nes shape op) -> do
+      mapM_ (TC.require [Prim int64]) dest_shape
       TC.require [Prim int64] rf
       nes' <- mapM TC.checkArg nes
       mapM_ (TC.require [Prim int64]) $ shapeDims shape
@@ -687,9 +715,9 @@ typeCheckSegOp checkLvl (SegHist lvl space ops ts kbody) = do
               ++ prettyTuple nes_t
 
       -- Arrays must have proper type.
-      let dest_shape = Shape (segment_dims <> [dest_w]) <> shape
+      let dest_shape' = Shape segment_dims <> dest_shape <> shape
       forM_ (zip nes_t dests) $ \(t, dest) -> do
-        TC.requireI [t `arrayOfShape` dest_shape] dest
+        TC.requireI [t `arrayOfShape` dest_shape'] dest
         TC.consume =<< TC.lookupAliases dest
 
       return $ map (`arrayOfShape` shape) nes_t
@@ -698,7 +726,9 @@ typeCheckSegOp checkLvl (SegHist lvl space ops ts kbody) = do
 
     -- Return type of bucket function must be an index for each
     -- operation followed by the values to write.
-    let bucket_ret_t = replicate (length ops) (Prim int64) ++ concat nes_ts
+    let bucket_ret_t =
+          concatMap ((`replicate` Prim int64) . shapeRank . histShape) ops
+            ++ concat nes_ts
     unless (bucket_ret_t == ts) $
       TC.bad $
         TC.TypeError $
@@ -820,7 +850,7 @@ mapSegOpM tv (SegHist lvl space ops ts body) =
     <*> mapOnSegOpBody tv body
   where
     onHistOp (HistOp w rf arrs nes shape op) =
-      HistOp <$> mapOnSegOpSubExp tv w
+      HistOp <$> mapM (mapOnSegOpSubExp tv) w
         <*> mapOnSegOpSubExp tv rf
         <*> mapM (mapOnSegOpVName tv) arrs
         <*> mapM (mapOnSegOpSubExp tv) nes
@@ -1329,7 +1359,7 @@ segOpRuleBottomUp vtable pat dec op
 topDownSegOp ::
   (HasSegOp rep, BuilderOps rep, Buildable rep) =>
   ST.SymbolTable rep ->
-  Pat rep ->
+  Pat (LetDec rep) ->
   StmAux (ExpDec rep) ->
   SegOp (SegOpLevel rep) rep ->
   Rule rep
@@ -1435,7 +1465,7 @@ segOpGuts (SegHist lvl space ops kts body) =
 bottomUpSegOp ::
   (HasSegOp rep, BuilderOps rep) =>
   (ST.SymbolTable rep, UT.UsageTable) ->
-  Pat rep ->
+  Pat (LetDec rep) ->
   StmAux (ExpDec rep) ->
   SegOp (SegOpLevel rep) rep ->
   Rule rep

@@ -113,14 +113,18 @@ emptyEnv rules blockers =
       envVtable = mempty
     }
 
-type Protect m = SubExp -> Pat (Rep m) -> Op (Rep m) -> Maybe (m ())
+-- | A function that protects a hoisted operation (if possible).  The
+-- first operand is the condition of the 'If' we have hoisted out of
+-- (or equivalently, a boolean indicating whether a loop has nonzero
+-- trip count).
+type Protect m = SubExp -> Pat (LetDec (Rep m)) -> Op (Rep m) -> Maybe (m ())
 
 type SimplifyOp rep op = op -> SimpleM rep (op, Stms (Wise rep))
 
 data SimpleOps rep = SimpleOps
   { mkExpDecS ::
       ST.SymbolTable (Wise rep) ->
-      Pat (Wise rep) ->
+      Pat (LetDec (Wise rep)) ->
       Exp (Wise rep) ->
       SimpleM rep (ExpDec (Wise rep)),
     mkBodyS ::
@@ -536,7 +540,8 @@ expandUsage usageInStm vtable utable stm@(Let pat _ e) =
         zip (patNames pat) (patAliases pat)
     usageThroughBindeeAliases (name, aliases) = do
       uses <- UT.lookup name utable
-      return $ mconcat $ map (`UT.usage` uses) $ namesToList aliases
+      pure . mconcat $
+        map (`UT.usage` (uses `UT.withoutU` UT.presentU)) $ namesToList aliases
 
 type BlockPred rep = ST.SymbolTable rep -> UT.UsageTable -> Stm rep -> Bool
 
@@ -717,8 +722,7 @@ usageFromDiet :: Diet -> UT.Usages
 usageFromDiet Consume = UT.consumedU
 usageFromDiet _ = mempty
 
--- | Simplify a single 'Result'.  The @[Diet]@ only covers the value
--- elements, because the context cannot be consumed.
+-- | Simplify a single 'Result'.
 simplifyResult ::
   SimplifiableRep rep => [UT.Usages] -> Result -> SimpleM rep (Result, UT.UsageTable)
 simplifyResult usages res = do
@@ -726,7 +730,11 @@ simplifyResult usages res = do
   vtable <- askVtable
   let more_usages = mconcat $ do
         (u, Var v) <- zip usages $ map resSubExp res
-        map (`UT.usage` u) $ v : namesToList (ST.lookupAliases v vtable)
+        let als_usages =
+              map
+                (`UT.usage` (u `UT.withoutU` UT.presentU))
+                (namesToList (ST.lookupAliases v vtable))
+        UT.usage v u : als_usages
   return (res', UT.usages (freeIn res') <> more_usages)
 
 isDoLoopResult :: Result -> UT.UsageTable
@@ -762,7 +770,7 @@ simplifyOp op = do
 simplifyExp ::
   SimplifiableRep rep =>
   UT.UsageTable ->
-  Pat (Wise rep) ->
+  Pat (LetDec (Wise rep)) ->
   Exp (Wise rep) ->
   SimpleM rep (Exp (Wise rep), Stms (Wise rep))
 simplifyExp usage (Pat pes) (If cond tbranch fbranch (IfDec ts ifsort)) = do
@@ -930,8 +938,8 @@ instance Simplifiable SubExpRes where
 
 simplifyPat ::
   (SimplifiableRep rep, Simplifiable dec) =>
-  PatT dec ->
-  SimpleM rep (PatT dec)
+  Pat dec ->
+  SimpleM rep (Pat dec)
 simplifyPat (Pat xs) =
   Pat <$> mapM inspect xs
   where

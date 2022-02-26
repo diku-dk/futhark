@@ -73,7 +73,7 @@ newName n = do
   pure n'
 
 -- | Create a PatElem that binds the array of a migrated variable binding.
-arrayizePatElem :: PatElemT Type -> ReduceM (PatElemT Type)
+arrayizePatElem :: PatElem Type -> ReduceM (PatElem Type)
 arrayizePatElem (PatElem n t) = do
   let name = baseName n `withSuffix` "_dev"
   dev <- newName (VName name 0)
@@ -85,17 +85,17 @@ withSuffix name sfx = nameFromText $ T.append (nameToText name) (T.pack sfx)
 
 -- | @(PatElem x t) `movedTo` arr@ registers that the value of @x@ has been
 -- migrated to @arr[0]@, with @x@ being of type @t@.
-movedTo :: PatElemT Type -> VName -> ReduceM ()
+movedTo :: PatElem Type -> VName -> ReduceM ()
 movedTo = recordMigration False
 
 -- | @(PatElem x t) `aliasedBy` arr@ registers that the value of @x@ also is
 -- available on device as @arr[0]@, with @x@ being of type @t@.
-aliasedBy :: PatElemT Type -> VName -> ReduceM ()
+aliasedBy :: PatElem Type -> VName -> ReduceM ()
 aliasedBy = recordMigration True
 
 -- | Records the migration of a variable and whether the original variable
 -- still can be used on host.
-recordMigration :: Bool -> PatElemT Type -> VName -> ReduceM ()
+recordMigration :: Bool -> PatElem Type -> VName -> ReduceM ()
 recordMigration alias (PatElem x t) arr =
   modify $ \st ->
     let migrated = stateMigrated st
@@ -106,7 +106,7 @@ recordMigration alias (PatElem x t) arr =
 -- | @pe `migratedTo` (dev, stms)@ registers that the variable @pe@ in the
 -- original program has been migrated to @dev@ and rebinds the variable if
 -- deemed necessary, adding an index statement to the given statements.
-migratedTo :: PatElemT Type -> (VName, Stms GPU) -> ReduceM (Stms GPU)
+migratedTo :: PatElem Type -> (VName, Stms GPU) -> ReduceM (Stms GPU)
 migratedTo pe (dev, stms) = do
   used <- asks (usedOnHost $ patElemName pe)
   if used
@@ -136,7 +136,7 @@ eIndex :: VName -> Exp GPU
 eIndex arr = BasicOp $ Index arr (Slice [DimFix $ intConst Int64 0])
 
 -- | A shorthand for binding a single variable to an expression.
-bind :: PatElemT Type -> Exp GPU -> Stm GPU
+bind :: PatElem Type -> Exp GPU -> Stm GPU
 bind pe = Let (Pat [pe]) (StmAux mempty mempty ())
 
 -- | @storeScalar stms se t@ returns a variable that binds a single element
@@ -198,7 +198,7 @@ optimizeFunDef fd = do
   stms' <- optimizeStms empty (bodyStms body)
   pure $ fd {funDefBody = body {bodyStms = stms'}}
 
-optimizeBody :: BodyT GPU -> ReduceM (BodyT GPU)
+optimizeBody :: Body GPU -> ReduceM (Body GPU)
 optimizeBody (Body _ stms res) = do
   stms' <- optimizeStms empty stms
   res' <- resolveResult res
@@ -213,7 +213,7 @@ optimizeStms out (stm :<| stms) = do
 
 optimizeStm :: Stms GPU -> Stm GPU -> ReduceM (Stms GPU)
 optimizeStm out stm = do
-  move <- asks (moveToDevice stm)
+  move <- asks (shouldMoveStm stm)
   if move
     then moveStm out stm
     else case stmExp stm of
@@ -369,8 +369,8 @@ optimizeStm out stm = do
 
 -- | Rewrite a for-in loop such that relevant source array reads can be delayed.
 rewriteForIn ::
-  ([(FParam GPU, SubExp)], LoopForm GPU, BodyT GPU) ->
-  ReduceM ([(FParam GPU, SubExp)], LoopForm GPU, BodyT GPU)
+  ([(FParam GPU, SubExp)], LoopForm GPU, Body GPU) ->
+  ReduceM ([(FParam GPU, SubExp)], LoopForm GPU, Body GPU)
 rewriteForIn loop@(_, WhileLoop {}, _) =
   pure loop
 rewriteForIn (params, ForLoop i t n elems, body) = do
@@ -445,7 +445,7 @@ addReadsToLambda f = do
   body' <- addReadsToBody (lambdaBody f)
   pure (f {lambdaBody = body'})
 
-addReadsToBody :: BodyT GPU -> ReduceM (BodyT GPU)
+addReadsToBody :: Body GPU -> ReduceM (Body GPU)
 addReadsToBody body = do
   (body', prologue) <- addReadsHelper body
   pure body' {bodyStms = prologue >< bodyStms body'}
@@ -526,7 +526,7 @@ cloneName n = do
   modify $ \st -> st {cloneRenames = IM.insert (baseTag n) n' (cloneRenames st)}
   pure n'
 
-cloneBody :: BodyT GPU -> CloneM (BodyT GPU)
+cloneBody :: Body GPU -> CloneM (Body GPU)
 cloneBody (Body _ stms res) = do
   stms' <- cloneStms stms
   res' <- renameResult res
@@ -542,10 +542,10 @@ cloneStm (Let pat aux e) = do
   aux' <- cloneStmAux aux
   pure (Let pat' aux' e')
 
-clonePat :: Pat GPU -> CloneM (Pat GPU)
+clonePat :: Pat Type -> CloneM (Pat Type)
 clonePat pat = Pat <$> mapM clonePatElem (patElems pat)
 
-clonePatElem :: PatElemT Type -> CloneM (PatElemT Type)
+clonePatElem :: PatElem Type -> CloneM (PatElem Type)
 clonePatElem (PatElem n t) = do
   n' <- cloneName n
   t' <- renameType t

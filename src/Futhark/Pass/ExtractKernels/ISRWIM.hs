@@ -19,9 +19,9 @@ import Futhark.Tools
 -- @map(scan)
 iswim ::
   (MonadBuilder m, Rep m ~ SOACS) =>
-  Pat ->
+  Pat Type ->
   SubExp ->
-  Lambda ->
+  Lambda SOACS ->
   [(SubExp, VName)] ->
   Maybe (m ())
 iswim res_pat w scan_fun scan_input
@@ -77,10 +77,10 @@ iswim res_pat w scan_fun scan_input
 -- @map(reduce)
 irwim ::
   (MonadBuilder m, Rep m ~ SOACS) =>
-  Pat ->
+  Pat Type ->
   SubExp ->
   Commutativity ->
-  Lambda ->
+  Lambda SOACS ->
   [(SubExp, VName)] ->
   Maybe (m ())
 irwim res_pat w comm red_fun red_input
@@ -136,8 +136,8 @@ irwim res_pat w comm red_fun red_input
 -- | Does this reduce operator contain an inner map, and if so, what
 -- does that map look like?
 rwimPossible ::
-  Lambda ->
-  Maybe (Pat, Certs, SubExp, Lambda)
+  Lambda SOACS ->
+  Maybe (Pat Type, Certs, SubExp, Lambda SOACS)
 rwimPossible fun
   | Body _ stms res <- lambdaBody fun,
     [stm] <- stmsToList stms, -- Body has a single binding
@@ -156,12 +156,12 @@ transposedArrays arrs = forM arrs $ \arr -> do
   let perm = [1, 0] ++ [2 .. arrayRank t -1]
   letExp (baseString arr) $ BasicOp $ Rearrange perm arr
 
-removeParamOuterDim :: LParam -> LParam
+removeParamOuterDim :: LParam SOACS -> LParam SOACS
 removeParamOuterDim param =
   let t = rowType $ paramType param
    in param {paramDec = t}
 
-setParamOuterDimTo :: SubExp -> LParam -> LParam
+setParamOuterDimTo :: SubExp -> LParam SOACS -> LParam SOACS
 setParamOuterDimTo w param =
   let t = setOuterDimTo w $ paramType param
    in param {paramDec = t}
@@ -175,7 +175,7 @@ setOuterDimTo :: SubExp -> Type -> Type
 setOuterDimTo w t =
   arrayOfRow (rowType t) w
 
-setPatOuterDimTo :: SubExp -> Pat -> Pat
+setPatOuterDimTo :: SubExp -> Pat Type -> Pat Type
 setPatOuterDimTo w pat =
   basicPat $ map (setIdentOuterDimTo w) $ patIdents pat
 
@@ -187,6 +187,6 @@ stripIdentOuterDim :: Ident -> Ident
 stripIdentOuterDim ident =
   ident {identType = rowType $ identType ident}
 
-stripPatOuterDim :: Pat -> Pat
+stripPatOuterDim :: Pat Type -> Pat Type
 stripPatOuterDim pat =
   basicPat $ map stripIdentOuterDim $ patIdents pat

@@ -15,10 +15,10 @@ where
 import Data.Bifunctor (first, second)
 import qualified Data.Map as M
 import qualified Data.Text as T
-import Futhark.CodeGen.Backends.GenericC.Manifest
 import Futhark.CodeGen.Backends.GenericC.Options
 import Futhark.CodeGen.Backends.SimpleRep
 import Futhark.CodeGen.RTS.C (serverH, tuningH, valuesH)
+import Futhark.Manifest
 import Futhark.Util (zEncodeString)
 import Futhark.Util.Pretty (prettyText)
 import qualified Language.C.Quote.OpenCL as C

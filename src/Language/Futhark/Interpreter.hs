@@ -13,11 +13,12 @@ module Language.Futhark.Interpreter
     interpretDec,
     interpretImport,
     interpretFunction,
+    ctxWithImports,
     ExtOp (..),
     BreakReason (..),
     StackFrame (..),
     typeCheckerEnv,
-    Value (ValuePrim, ValueArray, ValueRecord),
+    Value (ValuePrim, ValueRecord),
     fromTuple,
     isEmptyArray,
     prettyEmptyArray,
@@ -26,6 +27,7 @@ where
 
 import Control.Monad.Except
 import Control.Monad.Free.Church
+import Control.Monad.Identity
 import Control.Monad.Reader
 import Control.Monad.State
 import Control.Monad.Trans.Maybe
@@ -149,6 +151,7 @@ data Shape d
   | ShapeSum (M.Map Name [Shape d])
   deriving (Eq, Show, Functor, Foldable, Traversable)
 
+-- | The shape of an array.
 type ValueShape = Shape Int64
 
 instance Pretty d => Pretty (Shape d) where
@@ -620,25 +623,41 @@ indexArray (IndexingSlice start end stride : is) (ValueArray (ShapeDim _ rowshap
   toArray' (indexShape is rowshape) <$> mapM (indexArray is . (arr !)) js
 indexArray _ v = Just v
 
-updateArray :: [Indexing] -> Value -> Value -> Maybe Value
-updateArray (IndexingFix i : is) (ValueArray shape arr) v
+writeArray :: [Indexing] -> Value -> Value -> Maybe Value
+writeArray slice x y = runIdentity $ updateArray (\_ y' -> pure y') slice x y
+
+updateArray ::
+  Monad m =>
+  (Value -> Value -> m Value) ->
+  [Indexing] ->
+  Value ->
+  Value ->
+  m (Maybe Value)
+updateArray f (IndexingFix i : is) (ValueArray shape arr) v
   | i >= 0,
     i < n = do
-    v' <- updateArray is (arr ! i') v
-    Just $ ValueArray shape $ arr // [(i', v')]
+    v' <- updateArray f is (arr ! i') v
+    pure $ do
+      v'' <- v'
+      Just $ ValueArray shape $ arr // [(i', v'')]
   | otherwise =
-    Nothing
+    pure Nothing
   where
     n = arrayLength arr
     i' = fromIntegral i
-updateArray (IndexingSlice start end stride : is) (ValueArray shape arr) (ValueArray _ v) = do
-  arr_is <- indexesFor start end stride $ arrayLength arr
-  guard $ length arr_is == arrayLength v
-  let update arr' (i, v') = do
-        x <- updateArray is (arr ! i) v'
-        return $ arr' // [(i, x)]
-  fmap (ValueArray shape) $ foldM update arr $ zip arr_is $ elems v
-updateArray _ _ v = Just v
+updateArray f (IndexingSlice start end stride : is) (ValueArray shape arr) (ValueArray _ v)
+  | Just arr_is <- indexesFor start end stride $ arrayLength arr,
+    length arr_is == arrayLength v = do
+    let update (Just arr') (i, v') = do
+          x <- updateArray f is (arr ! i) v'
+          pure $ do
+            x' <- x
+            Just $ arr' // [(i, x')]
+        update Nothing _ = pure Nothing
+    fmap (fmap (ValueArray shape)) $ foldM update (Just arr) $ zip arr_is $ elems v
+  | otherwise =
+    pure Nothing
+updateArray f _ x y = Just <$> f x y
 
 evalDimIndex :: Env -> DimIndex -> EvalM Indexing
 evalDimIndex env (DimFix x) =
@@ -704,7 +723,7 @@ evalTermVar env qv t =
       size_env <- extSizeEnv
       v $ evalType (size_env <> env) t
     Just (TermValue _ v) -> return v
-    _ -> error $ "`" <> pretty qv <> "` is not bound to a value."
+    _ -> error $ "\"" <> pretty qv <> "\" is not bound to a value."
 
 typeValueShape :: Env -> StructType -> EvalM ValueShape
 typeValueShape env t = do
@@ -903,7 +922,7 @@ evalAppExp env (LetWith dest src is v body loc) = do
   let Ident src_vn (Info src_t) _ = src
   dest' <-
     maybe oob return
-      =<< updateArray <$> mapM (evalDimIndex env) is
+      =<< writeArray <$> mapM (evalDimIndex env) is
       <*> evalTermVar env (qualName src_vn) (toStruct src_t)
       <*> eval env v
   let t = T.BoundV [] $ toStruct $ unInfo $ identType dest
@@ -1044,7 +1063,7 @@ eval env (Not e _) = do
     _ -> error $ "Cannot logically negate " ++ pretty ev
 eval env (Update src is v loc) =
   maybe oob return
-    =<< updateArray <$> mapM (evalDimIndex env) is <*> eval env src <*> eval env v
+    =<< writeArray <$> mapM (evalDimIndex env) is <*> eval env src <*> eval env v
   where
     oob = bad loc env "Bad update"
 eval env (RecordUpdate src all_fs v _ _) =
@@ -1156,8 +1175,14 @@ evalModuleVar env qv =
 evalModExp :: Env -> ModExp -> EvalM Module
 evalModExp _ (ModImport _ (Info f) _) = do
   f' <- lookupImport f
+  known <- asks snd
   case f' of
-    Nothing -> error $ "Unknown import " ++ show f
+    Nothing ->
+      error $
+        unlines
+          [ "Unknown interpreter import: " ++ show f,
+            "Known: " ++ show (M.keys known)
+          ]
     Just m -> return $ Module m
 evalModExp env (ModDecs ds _) = do
   Env terms types _ <- foldM evalDec env ds
@@ -1611,7 +1636,7 @@ initialCtx =
       where
         update :: Value -> (Maybe [Value], Value) -> Value
         update arr (Just idxs@[_, _], v) =
-          fromMaybe arr $ updateArray (map (IndexingFix . asInt64) idxs) arr v
+          fromMaybe arr $ writeArray (map (IndexingFix . asInt64) idxs) arr v
         update _ _ =
           error "scatter_2d expects 2-dimensional indices"
     def "scatter_3d" = Just $
@@ -1626,27 +1651,42 @@ initialCtx =
       where
         update :: Value -> (Maybe [Value], Value) -> Value
         update arr (Just idxs@[_, _, _], v) =
-          fromMaybe arr $ updateArray (map (IndexingFix . asInt64) idxs) arr v
+          fromMaybe arr $ writeArray (map (IndexingFix . asInt64) idxs) arr v
         update _ _ =
           error "scatter_3d expects 3-dimensional indices"
-    def "hist" = Just $
-      fun6t $ \_ arr fun _ is vs ->
-        case arr of
-          ValueArray shape arr' ->
-            ValueArray shape
-              <$> foldM
-                (update fun)
-                arr'
-                (zip (map asInt $ snd $ fromArray is) (snd $ fromArray vs))
-          _ ->
-            error $ "hist expects array, but got: " ++ pretty arr
+    def "hist_1d" = Just . fun6t $ \_ arr fun _ is vs ->
+      foldM
+        (update fun)
+        arr
+        (zip (map asInt64 $ snd $ fromArray is) (snd $ fromArray vs))
       where
-        update fun arr' (i, v) =
-          if i >= 0 && i < arrayLength arr'
-            then do
-              v' <- apply2 noLoc mempty fun (arr' ! i) v
-              return $ arr' // [(i, v')]
-            else return arr'
+        op = apply2 mempty mempty
+        update fun arr (i, v) =
+          fromMaybe arr <$> updateArray (op fun) [IndexingFix i] arr v
+    def "hist_2d" = Just . fun6t $ \_ arr fun _ is vs ->
+      foldM
+        (update fun)
+        arr
+        (zip (map fromTuple $ snd $ fromArray is) (snd $ fromArray vs))
+      where
+        op = apply2 mempty mempty
+        update fun arr (Just idxs@[_, _], v) =
+          fromMaybe arr
+            <$> updateArray (op fun) (map (IndexingFix . asInt64) idxs) arr v
+        update _ _ _ =
+          error "hist_2d: bad index value"
+    def "hist_3d" = Just . fun6t $ \_ arr fun _ is vs ->
+      foldM
+        (update fun)
+        arr
+        (zip (map fromTuple $ snd $ fromArray is) (snd $ fromArray vs))
+      where
+        op = apply2 mempty mempty
+        update fun arr (Just idxs@[_, _, _], v) =
+          fromMaybe arr
+            <$> updateArray (op fun) (map (IndexingFix . asInt64) idxs) arr v
+        update _ _ _ =
+          error "hist_2d: bad index value"
     def "partition" = Just $
       fun3t $ \k f xs -> do
         let (ShapeDim _ rowshape, xs') = fromArray xs
@@ -1739,7 +1779,7 @@ initialCtx =
         ShapeDim n1 (ShapeDim n2 _) -> do
           let iota x = [0 .. x -1]
               f arr' (i, j) =
-                updateArray [IndexingFix $ offset' + i * s1' + j * s2'] arr'
+                writeArray [IndexingFix $ offset' + i * s1' + j * s2'] arr'
                   =<< indexArray [IndexingFix i, IndexingFix j] v
           case foldM f arr [(i, j) | i <- iota n1, j <- iota n2] of
             Just arr' -> pure arr'
@@ -1779,7 +1819,7 @@ initialCtx =
         ShapeDim n1 (ShapeDim n2 (ShapeDim n3 _)) -> do
           let iota x = [0 .. x -1]
               f arr' (i, j, l) =
-                updateArray [IndexingFix $ offset' + i * s1' + j * s2' + l * s3'] arr'
+                writeArray [IndexingFix $ offset' + i * s1' + j * s2' + l * s3'] arr'
                   =<< indexArray [IndexingFix i, IndexingFix j, IndexingFix l] v
           case foldM f arr [(i, j, l) | i <- iota n1, j <- iota n2, l <- iota n3] of
             Just arr' -> pure arr'
@@ -1823,7 +1863,7 @@ initialCtx =
         ShapeDim n1 (ShapeDim n2 (ShapeDim n3 (ShapeDim n4 _))) -> do
           let iota x = [0 .. x -1]
               f arr' (i, j, l, m) =
-                updateArray [IndexingFix $ offset' + i * s1' + j * s2' + l * s3' + m * s4'] arr'
+                writeArray [IndexingFix $ offset' + i * s1' + j * s2' + l * s3' + m * s4'] arr'
                   =<< indexArray [IndexingFix i, IndexingFix j, IndexingFix l, IndexingFix m] v
           case foldM f arr [(i, j, l, m) | i <- iota n1, j <- iota n2, l <- iota n3, m <- iota n4] of
             Just arr' -> pure arr'
@@ -1923,6 +1963,11 @@ interpretImport :: Ctx -> (FilePath, Prog) -> F ExtOp Ctx
 interpretImport ctx (fp, prog) = do
   env <- runEvalM (ctxImports ctx) $ foldM evalDec (ctxEnv ctx) $ progDecs prog
   return ctx {ctxImports = M.insert fp env $ ctxImports ctx}
+
+-- | Produce a context, based on the one passed in, where all of
+-- the provided imports have been @open@ened in order.
+ctxWithImports :: [Env] -> Ctx -> Ctx
+ctxWithImports envs ctx = ctx {ctxEnv = mconcat (reverse envs) <> ctxEnv ctx}
 
 checkEntryArgs :: VName -> [F.Value] -> StructType -> Either String ()
 checkEntryArgs entry args entry_t
