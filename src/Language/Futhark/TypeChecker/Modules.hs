@@ -251,7 +251,7 @@ resolveAbsTypes ::
   TySet ->
   Mod ->
   TySet ->
-  SrcLoc ->
+  Loc ->
   Either TypeError (M.Map VName (QualName VName, TypeBinding))
 resolveAbsTypes mod_abs mod sig_abs loc = do
   let abs_mapping =
@@ -282,7 +282,7 @@ resolveAbsTypes mod_abs mod sig_abs loc = do
         missingType loc $ fmap baseName name
   where
     mismatchedLiftedness name_l abs name mod_t =
-      Left . TypeError loc mempty $
+      Left . TypeError (locOf loc) mempty $
         "Module defines"
           </> indent 2 (ppTypeAbbr abs name mod_t)
           </> "but module type requires" <+> text what <> "."
@@ -293,11 +293,10 @@ resolveAbsTypes mod_abs mod sig_abs loc = do
           Lifted -> "a lifted type"
 
     anonymousSizes abs name mod_t =
-      Left $
-        TypeError loc mempty $
-          "Module defines"
-            </> indent 2 (ppTypeAbbr abs name mod_t)
-            </> "which contains anonymous sizes, but module type requires non-lifted type."
+      Left . TypeError (locOf loc) mempty $
+        "Module defines"
+          </> indent 2 (ppTypeAbbr abs name mod_t)
+          </> "which contains anonymous sizes, but module type requires non-lifted type."
 
 resolveMTyNames ::
   MTy ->
@@ -338,38 +337,34 @@ resolveMTyNames = resolveMTyNames'
         resolve' name _ =
           M.lookup (namespace, baseName name) $ envNameMap mod_env
 
-missingType :: Pretty a => SrcLoc -> a -> Either TypeError b
+missingType :: Pretty a => Loc -> a -> Either TypeError b
 missingType loc name =
-  Left $
-    TypeError loc mempty $
-      "Module does not define a type named" <+> ppr name <> "."
+  Left . TypeError loc mempty $
+    "Module does not define a type named" <+> ppr name <> "."
 
-missingVal :: Pretty a => SrcLoc -> a -> Either TypeError b
+missingVal :: Pretty a => Loc -> a -> Either TypeError b
 missingVal loc name =
-  Left $
-    TypeError loc mempty $
-      "Module does not define a value named" <+> ppr name <> "."
+  Left . TypeError loc mempty $
+    "Module does not define a value named" <+> ppr name <> "."
 
-missingMod :: Pretty a => SrcLoc -> a -> Either TypeError b
+missingMod :: Pretty a => Loc -> a -> Either TypeError b
 missingMod loc name =
-  Left $
-    TypeError loc mempty $
-      "Module does not define a module named" <+> ppr name <> "."
+  Left . TypeError loc mempty $
+    "Module does not define a module named" <+> ppr name <> "."
 
 mismatchedType ::
-  SrcLoc ->
+  Loc ->
   [VName] ->
   VName ->
   (Liftedness, [TypeParam], StructRetType) ->
   (Liftedness, [TypeParam], StructRetType) ->
   Either TypeError b
 mismatchedType loc abs name spec_t env_t =
-  Left $
-    TypeError loc mempty $
-      "Module defines"
-        </> indent 2 (ppTypeAbbr abs name env_t)
-        </> "but module type requires"
-        </> indent 2 (ppTypeAbbr abs name spec_t)
+  Left . TypeError loc mempty $
+    "Module defines"
+      </> indent 2 (ppTypeAbbr abs name env_t)
+      </> "but module type requires"
+      </> indent 2 (ppTypeAbbr abs name spec_t)
 
 ppTypeAbbr :: [VName] -> VName -> (Liftedness, [TypeParam], StructRetType) -> Doc
 ppTypeAbbr abs name (l, ps, RetType [] (Scalar (TypeVar () _ tn args)))
@@ -390,7 +385,7 @@ ppTypeAbbr _ name (l, ps, t) =
 matchMTys ::
   MTy ->
   MTy ->
-  SrcLoc ->
+  Loc ->
   Either TypeError (M.Map VName VName)
 matchMTys orig_mty orig_mty_sig =
   matchMTys'
@@ -402,7 +397,7 @@ matchMTys orig_mty orig_mty_sig =
       M.Map VName (Subst StructRetType) ->
       MTy ->
       MTy ->
-      SrcLoc ->
+      Loc ->
       Either TypeError (M.Map VName VName)
 
     matchMTys' _ (MTy _ ModFun {}) (MTy _ ModEnv {}) loc =
@@ -433,7 +428,7 @@ matchMTys orig_mty orig_mty_sig =
       M.Map VName (Subst StructRetType) ->
       Mod ->
       Mod ->
-      SrcLoc ->
+      Loc ->
       Either TypeError (M.Map VName VName)
     matchMods _ ModEnv {} ModFun {} loc =
       Left $
@@ -466,7 +461,7 @@ matchMTys orig_mty orig_mty_sig =
       M.Map VName (Subst StructRetType) ->
       Env ->
       Env ->
-      SrcLoc ->
+      Loc ->
       Either TypeError (M.Map VName VName)
     matchEnvs abs_subst_to_type env sig loc = do
       -- XXX: we only want to create substitutions for visible names.
@@ -505,7 +500,7 @@ matchMTys orig_mty orig_mty_sig =
       return $ val_substs <> mod_substs <> abbr_name_substs
 
     matchTypeAbbr ::
-      SrcLoc ->
+      Loc ->
       M.Map VName (Subst StructRetType) ->
       VName ->
       Liftedness ->
@@ -559,7 +554,7 @@ matchMTys orig_mty orig_mty_sig =
       nomatch
 
     matchVal ::
-      SrcLoc ->
+      Loc ->
       VName ->
       BoundV ->
       VName ->
@@ -577,7 +572,7 @@ matchMTys orig_mty orig_mty_sig =
                 </> indent 2 (ppValBind spec_name v)
                 </> fromMaybe mempty problem
 
-    matchValBinding :: SrcLoc -> BoundV -> BoundV -> Maybe (Maybe Doc)
+    matchValBinding :: Loc -> BoundV -> BoundV -> Maybe (Maybe Doc)
     matchValBinding loc (BoundV _ orig_spec_t) (BoundV tps orig_t) =
       case doUnification loc tps (toStruct orig_spec_t) (toStruct orig_t) of
         Left (TypeError _ notes msg) ->
@@ -596,7 +591,7 @@ matchMTys orig_mty orig_mty_sig =
 
 -- | Apply a parametric module to an argument.
 applyFunctor ::
-  SrcLoc ->
+  Loc ->
   FunSig ->
   MTy ->
   TypeM

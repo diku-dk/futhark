@@ -14,7 +14,6 @@ import qualified Data.Text as T
 import Data.Void
 import Futhark.IR.Primitive.Parse (constituent, keyword, lexeme)
 import Futhark.IR.PrimitiveTests ()
-import Futhark.Util.Pretty (prettyText)
 import Language.Futhark
 import Language.Futhark.Parser
 import Test.QuickCheck

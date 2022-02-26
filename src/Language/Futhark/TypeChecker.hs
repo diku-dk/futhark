@@ -11,7 +11,7 @@ module Language.Futhark.TypeChecker
     checkExp,
     checkDec,
     checkModExp,
-    TypeError,
+    TypeError (..),
     Warnings,
     initialEnv,
     envWithImports,
@@ -403,7 +403,7 @@ checkOneModExp (ModApply f e NoInfo NoInfo loc) = do
   case mtyMod f_mty of
     ModFun functor -> do
       (e_abs, e_mty, e') <- checkOneModExp e
-      (mty, psubsts, rsubsts) <- applyFunctor loc functor e_mty
+      (mty, psubsts, rsubsts) <- applyFunctor (locOf loc) functor e_mty
       return
         ( mtyAbs mty <> f_abs <> e_abs,
           mty,
@@ -414,7 +414,7 @@ checkOneModExp (ModApply f e NoInfo NoInfo loc) = do
 checkOneModExp (ModAscript me se NoInfo loc) = do
   (me_abs, me_mod, me') <- checkOneModExp me
   (se_abs, se_mty, se') <- checkSigExp se
-  match_subst <- badOnLeft $ matchMTys me_mod se_mty loc
+  match_subst <- badOnLeft $ matchMTys me_mod se_mty (locOf loc)
   return (se_abs <> me_abs, se_mty, ModAscript me' se' (Info match_subst) loc)
 checkOneModExp (ModLambda param maybe_fsig_e body_e loc) =
   withModParam param $ \param' param_abs param_mod -> do
@@ -476,7 +476,7 @@ checkModBody maybe_fsig_e body_e loc = enteringModule $ do
         )
     Just fsig_e -> do
       (fsig_abs, fsig_mty, fsig_e') <- checkSigExp fsig_e
-      fsig_subst <- badOnLeft $ matchMTys body_mty fsig_mty loc
+      fsig_subst <- badOnLeft $ matchMTys body_mty fsig_mty (locOf loc)
       return
         ( fsig_abs <> body_e_abs,
           Just (fsig_e', Info fsig_subst),

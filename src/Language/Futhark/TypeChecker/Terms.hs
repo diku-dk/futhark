@@ -1098,11 +1098,11 @@ causalityCheck binding_body = do
         | (d, dloc) : _ <-
             mapMaybe (unknown constraints known) $
               S.toList $ typeDimNames $ toStruct t =
-          Just $ lift $ causality what loc d dloc t
+          Just $ lift $ causality what (locOf loc) d dloc t
         | otherwise = Nothing
 
       checkParamCausality known p =
-        checkCausality (ppr p) known (patternType p) (srclocOf p)
+        checkCausality (ppr p) known (patternType p) (locOf p)
 
       onExp ::
         S.Set VName ->

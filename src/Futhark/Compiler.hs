@@ -8,9 +8,11 @@ module Futhark.Compiler
     runCompilerOnProgram,
     dumpError,
     handleWarnings,
+    pprProgramErrors,
     module Futhark.Compiler.Program,
     module Futhark.Compiler.Config,
-    readProgram,
+    readProgramFile,
+    readProgramFiles,
     readProgramOrDie,
     readUntypedProgram,
     readUntypedProgramOrDie,
@@ -20,6 +22,8 @@ where
 import Control.Monad
 import Control.Monad.Except
 import Data.Bifunctor (first)
+import qualified Data.List.NonEmpty as NE
+import Data.Loc (Loc (NoLoc))
 import qualified Data.Text.IO as T
 import qualified Futhark.Analysis.Alias as Alias
 import Futhark.Compiler.Config
@@ -30,8 +34,9 @@ import qualified Futhark.IR.TypeCheck as I
 import Futhark.Internalise
 import Futhark.MonadFreshNames
 import Futhark.Pipeline
+import Futhark.Util.Console (inRed)
 import Futhark.Util.Log
-import Futhark.Util.Pretty (ppr, prettyText)
+import Futhark.Util.Pretty (Doc, line, ppr, prettyText, punctuate, stack, text, (</>))
 import qualified Language.Futhark as E
 import Language.Futhark.Semantic (includeToString)
 import Language.Futhark.Warnings
@@ -105,7 +110,7 @@ runPipelineOnProgram config pipeline file = do
   (prog_imports, namesrc) <-
     handleWarnings config $
       (\(a, b, c) -> (a, (b, c)))
-        <$> readProgram (futharkEntryPoints config) file
+        <$> readProgramFile (futharkEntryPoints config) file
 
   putNameSource namesrc
   int_prog <- internaliseProg config prog_imports
@@ -128,13 +133,43 @@ typeCheckInternalProgram prog =
   where
     prog' = Alias.aliasAnalysis prog
 
--- | Read and type-check a Futhark program, including all imports.
-readProgram ::
+-- | Prettyprint program errors as suitable for showing on a text console.
+pprProgramErrors :: NE.NonEmpty ProgramError -> Doc
+pprProgramErrors = stack . punctuate line . map onError . NE.toList
+  where
+    onError (ProgramError NoLoc msg) =
+      msg
+    onError (ProgramError loc msg) =
+      text (inRed $ "Error at " <> locStr (srclocOf loc) <> ":") </> msg
+
+-- | Throw an exception formatted with 'pprProgramErrors' if there's
+-- an error.
+throwOnProgramError ::
+  MonadError CompilerError m =>
+  Either (NE.NonEmpty ProgramError) a ->
+  m a
+throwOnProgramError =
+  either (externalError . pprProgramErrors) pure
+
+-- | Read and type-check a Futhark program, comprising a single file,
+-- including all imports.
+readProgramFile ::
   (MonadError CompilerError m, MonadIO m) =>
   [I.Name] ->
   FilePath ->
   m (Warnings, Imports, VNameSource)
-readProgram extra_eps = readLibrary extra_eps . pure
+readProgramFile extra_eps =
+  readProgramFiles extra_eps . pure
+
+-- | Read and type-check a Futhark library, comprising multiple files,
+-- including all imports.
+readProgramFiles ::
+  (MonadError CompilerError m, MonadIO m) =>
+  [I.Name] ->
+  [FilePath] ->
+  m (Warnings, Imports, VNameSource)
+readProgramFiles extra_eps =
+  throwOnProgramError <=< liftIO . readLibrary extra_eps
 
 -- | Read and parse (but do not type-check) a Futhark program,
 -- including all imports.
@@ -143,7 +178,8 @@ readUntypedProgram ::
   FilePath ->
   m [(String, E.UncheckedProg)]
 readUntypedProgram =
-  fmap (map (first includeToString)) . readUntypedLibrary . pure
+  fmap (map (first includeToString)) . throwOnProgramError
+    <=< liftIO . readUntypedLibrary . pure
 
 orDie :: MonadIO m => FutharkM a -> m a
 orDie m = liftIO $ do
@@ -156,7 +192,7 @@ orDie m = liftIO $ do
 
 -- | Not verbose, and terminates process on error.
 readProgramOrDie :: MonadIO m => FilePath -> m (Warnings, Imports, VNameSource)
-readProgramOrDie file = orDie $ readProgram mempty file
+readProgramOrDie file = orDie $ readProgramFile mempty file
 
 -- | Not verbose, and terminates process on error.
 readUntypedProgramOrDie :: MonadIO m => FilePath -> m [(String, E.UncheckedProg)]
