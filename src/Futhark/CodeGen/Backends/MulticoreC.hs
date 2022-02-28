@@ -624,7 +624,25 @@ compileOp (SegOp name params seq_task par_task retvals (SchedulerInfo e sched)) 
   addTimingFields fpar_task
 
   let ftask_name = fstruct <> "_task"
-  GC.decl [C.cdecl|struct scheduler_segop $id:ftask_name;|]
+  
+  schedn <- multicoreDef "schedule_shim" $ \s ->
+    return [C.cedecl|void $id:s(struct futhark_context* ctx, void* args, typename int64_t iterations) { }|]
+
+  let fwdDec = "extern \"C\" unmasked void "
+               <> schedn <> "("
+               <> "struct futhark_context uniform * uniform ctx, "
+               <> "struct " <> fstruct <> " uniform * uniform args, "
+               <> "uniform int iterations" <> ");"
+  _fwdDec <- ispcDef "" $ \_ -> return [ISPC.cedecl|$esc:(nameToString fwdDec)|]
+
+  GC.decl [ISPC.cdecl|uniform struct $id:fstruct aos[programCount];|]
+  GC.stm [ISPC.cstm|aos[programIndex] = $id:fstruct;|]
+  GC.stm [ISPC.cstm|$escstm:("foreach_active (i) {")|]
+  GC.stm [ISPC.cstm|$id:schedn(ctx, &aos[i], extract($exp:e', i));|]
+  GC.stm [ISPC.cstm|$escstm:("}")|]
+
+  -- TODO(pema): Move this to C
+  {-GC.decl [C.cdecl|struct scheduler_segop $id:ftask_name;|]
   GC.stm [C.cstm|$id:ftask_name.args = &$id:fstruct;|]
   GC.stm [C.cstm|$id:ftask_name.top_level_fn = $id:fpar_task;|]
   GC.stm [C.cstm|$id:ftask_name.name = $string:(nameToString fpar_task);|]
@@ -635,20 +653,20 @@ compileOp (SegOp name params seq_task par_task retvals (SchedulerInfo e sched)) 
 
   case sched of
     Dynamic -> GC.stm [C.cstm|$id:ftask_name.sched = DYNAMIC;|]
-    Static -> GC.stm [C.cstm|$id:ftask_name.sched = STATIC;|]
+    Static -> GC.stm [C.cstm|$id:ftask_name.sched = STATIC;|]-}
 
   -- Generate the nested segop function if available
   fnpar_task <- case par_task of
     Just (ParallelTask nested_code) -> do
       let lexical_nested = lexicalMemoryUsage $ Function Nothing [] params nested_code [] []
       fnpar_task <- generateParLoopFn lexical_nested (name ++ "_nested_task") nested_code fstruct free retval
-      GC.stm [C.cstm|$id:ftask_name.nested_fn = $id:fnpar_task;|]
+      --GC.stm [C.cstm|$id:ftask_name.nested_fn = $id:fnpar_task;|]
       return $ zip [fnpar_task] [True]
     Nothing -> do
-      GC.stm [C.cstm|$id:ftask_name.nested_fn=NULL;|]
+      --GC.stm [C.cstm|$id:ftask_name.nested_fn=NULL;|]
       return mempty
 
-  free_all_mem <- GC.freeAllocatedMem
+  {-free_all_mem <- GC.freeAllocatedMem
   let ftask_err = fpar_task <> "_err"
       code =
         [C.citems|int $id:ftask_err = scheduler_prepare_task(&ctx->scheduler, &$id:ftask_name);
@@ -661,7 +679,8 @@ compileOp (SegOp name params seq_task par_task retvals (SchedulerInfo e sched)) 
   mapM_ GC.item code
 
   -- Add profile fields for -P option
-  mapM_ GC.profileReport $ multiCoreReport $ (fpar_task, True) : fnpar_task
+  mapM_ GC.profileReport $ multiCoreReport $ (fpar_task, True) : fnpar_task-}
+  pure ()
 
 compileOp (ForEach i bound body free) = do
   free_ctypes <- mapM paramToCType free
@@ -701,13 +720,13 @@ compileOp (ForEach i bound body free) = do
         --mapM_ GC.item =<< GC.declAllocatedMem
         --mapM_ GC.item body'
     return
-      [ISPC.cedecl|export static void $id:s($params:inputs) {
+      [ISPC.cedecl|export static void $id:s(struct futhark_context uniform * uniform ctx, $params:inputs) {
                        $decls:memderef
                        $items:loopBody
                      }|]
 
   let ispc_inputs = compileIspcInputs free_args free_ctypes
-  GC.stm [C.cstm|$id:_ispcLoop($args:ispc_inputs);|]
+  GC.stm [C.cstm|$id:_ispcLoop(ctx, $args:ispc_inputs);|]
   pure ()
 
 
