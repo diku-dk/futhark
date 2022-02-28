@@ -625,8 +625,50 @@ compileOp (SegOp name params seq_task par_task retvals (SchedulerInfo e sched)) 
 
   let ftask_name = fstruct <> "_task"
   
+  toc <- GC.collect $ do
+    GC.decl [C.cdecl|struct scheduler_segop $id:ftask_name;|]
+    GC.stm [C.cstm|$id:ftask_name.args = args;|]
+    GC.stm [C.cstm|$id:ftask_name.top_level_fn = $id:fpar_task;|]
+    GC.stm [C.cstm|$id:ftask_name.name = $string:(nameToString fpar_task);|]
+    GC.stm [C.cstm|$id:ftask_name.iterations = iterations;|]
+    -- Create the timing fields for the task
+    GC.stm [C.cstm|$id:ftask_name.task_time = &ctx->$id:(functionTiming fpar_task);|]
+    GC.stm [C.cstm|$id:ftask_name.task_iter = &ctx->$id:(functionIterations fpar_task);|]
+
+    case sched of
+        Dynamic -> GC.stm [C.cstm|$id:ftask_name.sched = DYNAMIC;|]
+        Static -> GC.stm [C.cstm|$id:ftask_name.sched = STATIC;|]
+
+    -- Generate the nested segop function if available
+    fnpar_task <- case par_task of
+        Just (ParallelTask nested_code) -> do
+            let lexical_nested = lexicalMemoryUsage $ Function Nothing [] params nested_code [] []
+            fnpar_task <- generateParLoopFn lexical_nested (name ++ "_nested_task") nested_code fstruct free retval
+            GC.stm [C.cstm|$id:ftask_name.nested_fn = $id:fnpar_task;|]
+            return $ zip [fnpar_task] [True]
+        Nothing -> do
+            GC.stm [C.cstm|$id:ftask_name.nested_fn=NULL;|]
+            return mempty
+
+    free_all_mem <- GC.freeAllocatedMem
+    let ftask_err = fpar_task <> "_err"
+        code =
+            [C.citems|int $id:ftask_err = scheduler_prepare_task(&ctx->scheduler, &$id:ftask_name);
+                    /*if ($id:ftask_err != 0) {
+                        $items:free_all_mem;
+                        err = $id:ftask_err;
+                        goto cleanup;
+                    }*/|]
+
+    mapM_ GC.item code
+
+    -- Add profile fields for -P option
+    mapM_ GC.profileReport $ multiCoreReport $ (fpar_task, True) : fnpar_task
+
   schedn <- multicoreDef "schedule_shim" $ \s ->
-    return [C.cedecl|void $id:s(struct futhark_context* ctx, void* args, typename int64_t iterations) { }|]
+    return [C.cedecl|void $id:s(struct futhark_context* ctx, void* args, typename int64_t iterations) {
+        $items:toc
+    }|]
 
   let fwdDec = "extern \"C\" unmasked void "
                <> schedn <> "("
@@ -642,44 +684,6 @@ compileOp (SegOp name params seq_task par_task retvals (SchedulerInfo e sched)) 
   GC.stm [ISPC.cstm|$escstm:("}")|]
 
   -- TODO(pema): Move this to C
-  {-GC.decl [C.cdecl|struct scheduler_segop $id:ftask_name;|]
-  GC.stm [C.cstm|$id:ftask_name.args = &$id:fstruct;|]
-  GC.stm [C.cstm|$id:ftask_name.top_level_fn = $id:fpar_task;|]
-  GC.stm [C.cstm|$id:ftask_name.name = $string:(nameToString fpar_task);|]
-  GC.stm [C.cstm|$id:ftask_name.iterations = $exp:e';|]
-  -- Create the timing fields for the task
-  GC.stm [C.cstm|$id:ftask_name.task_time = &ctx->$id:(functionTiming fpar_task);|]
-  GC.stm [C.cstm|$id:ftask_name.task_iter = &ctx->$id:(functionIterations fpar_task);|]
-
-  case sched of
-    Dynamic -> GC.stm [C.cstm|$id:ftask_name.sched = DYNAMIC;|]
-    Static -> GC.stm [C.cstm|$id:ftask_name.sched = STATIC;|]-}
-
-  -- Generate the nested segop function if available
-  fnpar_task <- case par_task of
-    Just (ParallelTask nested_code) -> do
-      let lexical_nested = lexicalMemoryUsage $ Function Nothing [] params nested_code [] []
-      fnpar_task <- generateParLoopFn lexical_nested (name ++ "_nested_task") nested_code fstruct free retval
-      --GC.stm [C.cstm|$id:ftask_name.nested_fn = $id:fnpar_task;|]
-      return $ zip [fnpar_task] [True]
-    Nothing -> do
-      --GC.stm [C.cstm|$id:ftask_name.nested_fn=NULL;|]
-      return mempty
-
-  {-free_all_mem <- GC.freeAllocatedMem
-  let ftask_err = fpar_task <> "_err"
-      code =
-        [C.citems|int $id:ftask_err = scheduler_prepare_task(&ctx->scheduler, &$id:ftask_name);
-                  if ($id:ftask_err != 0) {
-                    $items:free_all_mem;
-                    err = $id:ftask_err;
-                    goto cleanup;
-                  }|]
-
-  mapM_ GC.item code
-
-  -- Add profile fields for -P option
-  mapM_ GC.profileReport $ multiCoreReport $ (fpar_task, True) : fnpar_task-}
   pure ()
 
 compileOp (ForEach i bound body free) = do
