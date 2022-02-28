@@ -121,7 +121,6 @@ module Futhark.CodeGen.ImpGen
     module Language.Futhark.Warnings,
   )
 where
-import Debug.Trace
 import Control.Monad.Reader
 import Control.Monad.State
 import Control.Monad.Writer
