@@ -1469,15 +1469,15 @@ static inline float futrts_atan2_32(float x, float y) {
 }
 
 static inline float futrts_hypot32(float x, float y) {
-  return 0; // TODO
+  return sqrt(x*x+y*y); // TODO: Should handle over/underflow
 }
 
 static inline float futrts_gamma32(float x) {
-  return 0; // TODO
+  return 0; // TODO: Call C
 }
 
 static inline float futrts_lgamma32(float x) {
-  return 0; // TODO
+  return 0; // TODO: Call C
 }
 
 static inline float fmod32(float x, float y) {
