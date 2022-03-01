@@ -13,6 +13,7 @@
 module Language.Futhark.Syntax
   ( module Language.Futhark.Core,
     pretty,
+    prettyText,
 
     -- * Types
     Uniqueness (..),

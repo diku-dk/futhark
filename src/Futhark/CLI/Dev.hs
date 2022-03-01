@@ -646,7 +646,7 @@ main = mainWithOptions newConfig commandLineOptions "options... program" compile
               . intersperse ""
               . map (if futharkPrintAST config then show else pretty)
 
-          readProgram' = readProgram (futharkEntryPoints (futharkConfig config)) file
+          readProgram' = readProgramFile (futharkEntryPoints (futharkConfig config)) file
 
       case futharkPipeline config of
         PrettyPrint -> liftIO $ do

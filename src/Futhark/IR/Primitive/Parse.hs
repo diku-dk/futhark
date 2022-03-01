@@ -1,5 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 
+-- | Parsers for primitive values and types.  Mostly useful for
+-- "Futhark.IR.Parse", but can perhaps come in handy elsewhere too.
 module Futhark.IR.Primitive.Parse
   ( pPrimValue,
     pPrimType,
@@ -24,24 +26,33 @@ import Text.Megaparsec
 import Text.Megaparsec.Char
 import qualified Text.Megaparsec.Char.Lexer as L
 
+-- | Is this character a valid member of an identifier?
 constituent :: Char -> Bool
 constituent c = isAlphaNum c || (c `elem` ("_/'+-=!&^.<>*|" :: String))
 
+-- | Consume whitespace (including skipping line comments).
 whitespace :: Parsec Void T.Text ()
 whitespace = L.space space1 (L.skipLineComment "--") empty
 
+-- | Consume whitespace after the provided parser, if it succeeds.
 lexeme :: Parsec Void T.Text a -> Parsec Void T.Text a
 lexeme = try . L.lexeme whitespace
 
+-- | @keyword k@ parses @k@, which must not be immediately followed by
+-- a 'constituent' character.  This ensures that @iff@ is not seen as
+-- the @if@ keyword followed by @f@.  Sometimes called the "maximum
+-- munch" rule.
 keyword :: T.Text -> Parsec Void T.Text ()
 keyword s = lexeme $ chunk s *> notFollowedBy (satisfy constituent)
 
+-- | Parse an integer value.
 pIntValue :: Parsec Void T.Text IntValue
 pIntValue = try $ do
   x <- L.signed (pure ()) L.decimal
   t <- pIntType
   pure $ intValue t (x :: Integer)
 
+-- | Parse a floating-point value.
 pFloatValue :: Parsec Void T.Text FloatValue
 pFloatValue =
   choice
@@ -62,6 +73,7 @@ pFloatValue =
       t <- pFloatType
       pure $ floatValue t (x :: Double)
 
+-- | Parse a boolean value.
 pBoolValue :: Parsec Void T.Text Bool
 pBoolValue =
   choice
@@ -80,16 +92,19 @@ pPrimValue =
     ]
     <?> "primitive value"
 
+-- | Parse a floating-point type.
 pFloatType :: Parsec Void T.Text FloatType
 pFloatType = choice $ map p allFloatTypes
   where
     p t = keyword (prettyText t) $> t
 
+-- | Parse an integer type.
 pIntType :: Parsec Void T.Text IntType
 pIntType = choice $ map p allIntTypes
   where
     p t = keyword (prettyText t) $> t
 
+-- | Parse a primitive type.
 pPrimType :: Parsec Void T.Text PrimType
 pPrimType =
   choice [p Bool, p Unit, FloatType <$> pFloatType, IntType <$> pIntType]
