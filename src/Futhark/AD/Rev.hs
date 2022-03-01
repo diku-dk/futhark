@@ -110,8 +110,9 @@ diffBasicOp pat aux e m =
     Assert {} ->
       void $ commonBasicOp pat aux e m
     --
-    ArrayLit elems t -> do
+    ArrayLit elems _ -> do
       (_pat_v, pat_adj) <- commonBasicOp pat aux e m
+      t <- lookupType pat_adj
       returnSweepCode $ do
         forM_ (zip [(0 :: Int64) ..] elems) $ \(i, se) -> do
           let slice = fullSlice t [DimFix (constant i)]
