@@ -860,8 +860,54 @@ static uint32_t futrts_mul_hi32(uint32_t a, uint32_t b) {
 static uint64_t futrts_mul_hi64(uint64_t a, uint64_t b) {
   return mul64hi(a, b);
 }
+#elif ISPC
 
-#else // Not OpenCL or CUDA, but plain C.
+static uint8_t futrts_mul_hi8(uint8_t a, uint8_t b) {
+  uint16_t aa = a;
+  uint16_t bb = b;
+
+  return aa * bb >> 8;
+}
+
+static uint16_t futrts_mul_hi16(uint16_t a, uint16_t b) {
+  uint32_t aa = a;
+  uint32_t bb = b;
+
+  return aa * bb >> 16;
+}
+
+static uint32_t futrts_mul_hi32(uint32_t a, uint32_t b) {
+  uint64_t aa = a;
+  uint64_t bb = b;
+
+  return aa * bb >> 32;
+}
+
+static uint64_t futrts_mul_hi64(uint64_t a, uint64_t b) {
+  uint64_t ah = a >> 32;
+  uint64_t al = a & 0xffffffff;
+  uint64_t bh = b >> 32;
+  uint64_t bl = b & 0xffffffff;
+
+  uint64_t p1 = al * bl;
+  uint64_t p2 = al * bh;
+  uint64_t p3 = ah * bl;
+  uint64_t p4 = ah * bh;
+
+  uint64_t p1h = p1 >> 32;
+  uint64_t p2h = p2 >> 32;
+  uint64_t p3h = p3 >> 32;
+  uint64_t p2l = p2 & 0xffffffff;
+  uint64_t p3l = p3 & 0xffffffff;
+
+  uint64_t l = p1h + p2l  + p3l;
+  uint64_t m = (p2 >> 32) + (p3 >> 32);
+  uint64_t h = (l >> 32) + m + p4;
+
+  return h;
+}
+
+#else // Not OpenCL, ISPC, or CUDA, but plain C.
 
 static uint8_t futrts_mul_hi8(uint8_t a, uint8_t b) {
   uint16_t aa = a;
