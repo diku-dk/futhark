@@ -208,17 +208,17 @@ runISPC ispcpath cpath outpath ispc_flags cflags_def ldflags = do
     liftIO $
       runProgramWithExitCode
         "ispc"
-        ( [ispcpath, "-o", "ispc_" <> outpath `addExtension` "o"] ++
+        ( [ispcpath, "-o", outpath <> "_ispc"  `addExtension` "o"] ++
           cmdCFLAGS ispc_flags ++
-          ["-h", "ispc_" <> outpath `addExtension` "h"]
+          ["-h", outpath <> "_ispc"  `addExtension` "h"]
         )
         mempty
   ret <- -- TODO(kris): Clean this shit up
     liftIO $
       runProgramWithExitCode
         cmdCC
-        ( ["ispc_" ++ (outpath `addExtension` "h"),
-           "ispc_" ++ (outpath `addExtension` "o"), cpath--, "-o", outpath
+        ( [outpath <> "_ispc" `addExtension` "h",
+           outpath <> "_ispc"  `addExtension` "o", cpath--, "-o", outpath
           ]
             ++ cmdCFLAGS cflags_def
             ++
@@ -357,7 +357,7 @@ compileMulticoreAction fcfg mode outpath =
           hpath = outpath `addExtension` "h"
           jsonpath = outpath `addExtension` "json"
           ispcPath = outpath `addExtension` "ispc"
-          ispcHeaderPath = ("ispc_" <> outpath) `addExtension` "h"
+          ispcHeaderPath = (outpath <> "_ispc" ) `addExtension` "h"
 
       cprog <- handleWarnings fcfg $ MulticoreC.compileProg (T.pack $ "#include \"" <> ispcHeaderPath <> "\"") (T.pack versionString) prog
       case mode of
