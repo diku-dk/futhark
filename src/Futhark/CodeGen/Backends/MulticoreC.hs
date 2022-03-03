@@ -534,7 +534,10 @@ ispcDef s f = do
 sharedDef :: String -> (Name -> GC.CompilerM op s C.Definition) -> GC.CompilerM op s Name
 sharedDef s f = do
   s' <- multicoreName s
+  GC.libDecl [C.cedecl|$esc:("#ifndef __ISPC_STRUCT_" <> (nameToString s') <> "__")|]
+  GC.libDecl [C.cedecl|$esc:("#define __ISPC_STRUCT_" <> (nameToString s') <> "__")|] -- TODO:(K) - refacor this shit
   GC.libDecl =<< f s'
+  GC.libDecl [C.cedecl|$esc:("#endif")|]
   GC.ispcDecl =<< f s'
   return s'
 
@@ -589,10 +592,11 @@ prepareTaskStruct name free_args free_ctypes retval_args retval_ctypes = do
                        $sdecls:(compileRetvalStructFields retval_args retval_ctypes)
                      };|]
   fstruct <- sharedDef name makeStruct
-  GC.decl [C.cdecl|struct $id:fstruct $id:fstruct;|]
-  GC.stm [C.cstm|$id:fstruct.ctx = ctx;|]
-  GC.stms [C.cstms|$stms:(compileSetStructValues fstruct free_args free_ctypes)|]
-  GC.stms [C.cstms|$stms:(compileSetRetvalStructValues fstruct retval_args retval_ctypes)|]
+  let fstruct' =  fstruct <> "_"
+  GC.decl [C.cdecl|struct $id:fstruct $id:fstruct';|]
+  GC.stm [C.cstm|$id:fstruct'.ctx = ctx;|]
+  GC.stms [C.cstms|$stms:(compileSetStructValues fstruct' free_args free_ctypes)|]
+  GC.stms [C.cstms|$stms:(compileSetRetvalStructValues fstruct' retval_args retval_ctypes)|]
   return fstruct
 
 -- Generate a segop function for top_level and potentially nested SegOp code
@@ -677,11 +681,15 @@ compileOp (SegOp name params seq_task par_task retvals (SchedulerInfo e sched)) 
                <> "uniform int iterations" <> ");"
   _fwdDec <- ispcDef "" $ \_ -> return [ISPC.cedecl|$esc:(nameToString fwdDec)|]
 
+  GC.stm [ISPC.cstm|$escstm:("#if ISPC")|]
   GC.decl [ISPC.cdecl|uniform struct $id:fstruct aos[programCount];|]
-  GC.stm [ISPC.cstm|aos[programIndex] = $id:fstruct;|]
+  GC.stm [ISPC.cstm|aos[programIndex] = $id:(fstruct <> "_");|]
   GC.stm [ISPC.cstm|$escstm:("foreach_active (i) {")|]
   GC.stm [ISPC.cstm|$id:schedn(ctx, &aos[i], extract($exp:e', i));|]
   GC.stm [ISPC.cstm|$escstm:("}")|]
+  GC.stm [ISPC.cstm|$escstm:("#else")|]
+  GC.stm [ISPC.cstm|$id:schedn(ctx, &$id:(fstruct <> "_"), $exp:e');|]
+  GC.stm [ISPC.cstm|$escstm:("#endif")|]
 
   -- TODO(pema): Move this to C
   pure ()
@@ -776,7 +784,7 @@ compileOp (ParLoop s' body free) = do
   GC.decl [C.cdecl|struct scheduler_parloop $id:ftask_name;|]
   GC.stm [C.cstm|$id:ftask_name.name = $string:(nameToString ftask);|]
   GC.stm [C.cstm|$id:ftask_name.fn = $id:ftask;|]
-  GC.stm [C.cstm|$id:ftask_name.args = &$id:fstruct;|]
+  GC.stm [C.cstm|$id:ftask_name.args = &$id:(fstruct <> "_");|]
   GC.stm [C.cstm|$id:ftask_name.iterations = iterations;|]
   GC.stm [C.cstm|$id:ftask_name.info = info;|]
 
