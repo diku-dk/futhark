@@ -5,7 +5,6 @@ module Futhark.CodeGen.ImpGen.Multicore.SegMap
 where
 
 import Control.Monad
-import Debug.Trace
 import qualified Futhark.CodeGen.ImpCode.Multicore as Imp
 import Futhark.CodeGen.ImpGen
 import Futhark.CodeGen.ImpGen.Multicore.Base
