@@ -147,7 +147,7 @@ inlineInFunDef fdmap (FunDef entry attrs name rtp args body) =
 
 inlineFunction ::
   MonadFreshNames m =>
-  Pat ->
+  Pat Type ->
   StmAux dec ->
   [(SubExp, Diet)] ->
   (Safety, SrcLoc, [SrcLoc]) ->
@@ -189,8 +189,8 @@ inlineInStms fdmap stms =
 inlineInBody ::
   MonadFreshNames m =>
   M.Map Name (FunDef SOACS) ->
-  Body ->
-  m Body
+  Body SOACS ->
+  m (Body SOACS)
 inlineInBody fdmap = onBody
   where
     inline (Let pat aux (Apply fname args _ what) : rest)

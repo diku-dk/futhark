@@ -16,12 +16,12 @@ import Futhark.Util.IntegralExp (rem)
 import Prelude hiding (quot, rem)
 
 compileSegHist ::
-  Pat MCMem ->
+  Pat LetDecMem ->
   SegSpace ->
   [HistOp MCMem] ->
   KernelBody MCMem ->
   TV Int32 ->
-  MulticoreGen Imp.Code
+  MulticoreGen Imp.MCCode
 compileSegHist pat space histops kbody nsubtasks
   | [_] <- unSegSpace space =
     nonsegmentedHist pat space histops kbody nsubtasks
@@ -37,12 +37,12 @@ histSize :: HistOp MCMem -> Imp.TExp Int64
 histSize = product . map toInt64Exp . shapeDims . histShape
 
 nonsegmentedHist ::
-  Pat MCMem ->
+  Pat LetDecMem ->
   SegSpace ->
   [HistOp MCMem] ->
   KernelBody MCMem ->
   TV Int32 ->
-  MulticoreGen Imp.Code
+  MulticoreGen Imp.MCCode
 nonsegmentedHist pat space histops kbody num_histos = do
   let ns = map snd $ unSegSpace space
       ns_64 = map toInt64Exp ns
@@ -91,7 +91,7 @@ onOpAtomic op = do
       return $ f l'
 
 atomicHistogram ::
-  Pat MCMem ->
+  Pat LetDecMem ->
   SegSpace ->
   [HistOp MCMem] ->
   KernelBody MCMem ->
@@ -161,7 +161,7 @@ updateHisto op arrs bucket = do
 -- across the histogram indicies.
 -- This is expected to be fast if len(histDest) is small
 subHistogram ::
-  Pat MCMem ->
+  Pat LetDecMem ->
   SegSpace ->
   [HistOp MCMem] ->
   TV Int32 ->
@@ -287,11 +287,11 @@ subHistogram pat space histops num_histos kbody = do
 -- parallelize over the segments,
 -- where each segment is updated sequentially.
 segmentedHist ::
-  Pat MCMem ->
+  Pat LetDecMem ->
   SegSpace ->
   [HistOp MCMem] ->
   KernelBody MCMem ->
-  MulticoreGen Imp.Code
+  MulticoreGen Imp.MCCode
 segmentedHist pat space histops kbody = do
   emit $ Imp.DebugPrint "Segmented segHist" Nothing
   collect $ do
@@ -300,11 +300,11 @@ segmentedHist pat space histops kbody = do
     emit $ Imp.Op $ Imp.ParLoop "segmented_hist" body free_params
 
 compileSegHistBody ::
-  Pat MCMem ->
+  Pat LetDecMem ->
   SegSpace ->
   [HistOp MCMem] ->
   KernelBody MCMem ->
-  MulticoreGen Imp.Code
+  MulticoreGen Imp.MCCode
 compileSegHistBody pat space histops kbody = collect $ do
   let (is, ns) = unzip $ unSegSpace space
       ns_64 = map toInt64Exp ns

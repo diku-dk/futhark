@@ -151,7 +151,7 @@ histType op =
     lambdaReturnType $ histOp op
 
 -- | Split reduction results returned by a 'KernelBody' into those
--- that correspond to indexes for the 'HistOps', and those that
+-- that correspond to indexes for the 'HistOp's, and those that
 -- correspond to value.
 splitHistResults :: [HistOp rep] -> [SubExp] -> [([SubExp], [SubExp])]
 splitHistResults ops res =
@@ -1327,7 +1327,7 @@ segOpRuleBottomUp vtable pat dec op
 topDownSegOp ::
   (HasSegOp rep, BuilderOps rep, Buildable rep) =>
   ST.SymbolTable rep ->
-  Pat rep ->
+  Pat (LetDec rep) ->
   StmAux (ExpDec rep) ->
   SegOp (SegOpLevel rep) rep ->
   Rule rep
@@ -1433,7 +1433,7 @@ segOpGuts (SegHist lvl space ops kts body) =
 bottomUpSegOp ::
   (HasSegOp rep, BuilderOps rep) =>
   (ST.SymbolTable rep, UT.UsageTable) ->
-  Pat rep ->
+  Pat (LetDec rep) ->
   StmAux (ExpDec rep) ->
   SegOp (SegOpLevel rep) rep ->
   Rule rep

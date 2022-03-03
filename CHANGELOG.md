@@ -9,15 +9,24 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+### Removed
+
+### Changed
+
+### Fixed
+
+## [0.21.7]
+
+### Added
+
 * `futhark check-syntax`: check syntactic validity of a program
   file, without type-checking.
 
 * Parsing multi-file programs is now parallelised, making it
   *slightly* faster.
 
-### Removed
-
-### Changed
+* Reloading a large program in `futhark repl` is now faster, as long
+  as not too many of its files have been modified (#1597).
 
 ### Fixed
 

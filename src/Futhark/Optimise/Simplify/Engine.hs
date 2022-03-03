@@ -112,14 +112,18 @@ emptyEnv rules blockers =
       envVtable = mempty
     }
 
-type Protect m = SubExp -> Pat (Rep m) -> Op (Rep m) -> Maybe (m ())
+-- | A function that protects a hoisted operation (if possible).  The
+-- first operand is the condition of the 'If' we have hoisted out of
+-- (or equivalently, a boolean indicating whether a loop has nonzero
+-- trip count).
+type Protect m = SubExp -> Pat (LetDec (Rep m)) -> Op (Rep m) -> Maybe (m ())
 
 type SimplifyOp rep op = op -> SimpleM rep (op, Stms (Wise rep))
 
 data SimpleOps rep = SimpleOps
   { mkExpDecS ::
       ST.SymbolTable (Wise rep) ->
-      Pat (Wise rep) ->
+      Pat (LetDec (Wise rep)) ->
       Exp (Wise rep) ->
       SimpleM rep (ExpDec (Wise rep)),
     mkBodyS ::
@@ -765,7 +769,7 @@ simplifyOp op = do
 simplifyExp ::
   SimplifiableRep rep =>
   UT.UsageTable ->
-  Pat (Wise rep) ->
+  Pat (LetDec (Wise rep)) ->
   Exp (Wise rep) ->
   SimpleM rep (Exp (Wise rep), Stms (Wise rep))
 simplifyExp usage (Pat pes) (If cond tbranch fbranch (IfDec ts ifsort)) = do
@@ -933,8 +937,8 @@ instance Simplifiable SubExpRes where
 
 simplifyPat ::
   (SimplifiableRep rep, Simplifiable dec) =>
-  PatT dec ->
-  SimpleM rep (PatT dec)
+  Pat dec ->
+  SimpleM rep (Pat dec)
 simplifyPat (Pat xs) =
   Pat <$> mapM inspect xs
   where

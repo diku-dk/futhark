@@ -209,7 +209,7 @@ inBlockScanLookback constants arrs_full_size flag_arr arrs scan_lam = everything
 -- | Compile 'SegScan' instance to host-level code with calls to a
 -- single-pass kernel.
 compileSegScan ::
-  Pat GPUMem ->
+  Pat LetDecMem ->
   SegLevel ->
   SegSpace ->
   SegBinOp GPUMem ->

@@ -20,7 +20,7 @@ import Futhark.Util (takeLast)
 
 shapeMapping ::
   (HasScope SOACS m, Monad m) =>
-  [FParam] ->
+  [FParam SOACS] ->
   [Type] ->
   m (M.Map VName SubExp)
 shapeMapping all_params value_arg_types =
@@ -42,7 +42,7 @@ shapeMapping all_params value_arg_types =
     match (Var v, se) = Just (v, se)
     match _ = Nothing
 
-argShapes :: [VName] -> [FParam] -> [Type] -> InternaliseM [SubExp]
+argShapes :: [VName] -> [FParam SOACS] -> [Type] -> InternaliseM [SubExp]
 argShapes shapes all_params valargts = do
   mapping <- shapeMapping all_params valargts
   let addShape name =

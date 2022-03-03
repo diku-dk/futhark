@@ -17,13 +17,13 @@ import Language.Futhark as E
 
 -- | A function for internalising lambdas.
 type InternaliseLambda =
-  E.Exp -> [I.Type] -> InternaliseM ([I.LParam], I.Body, [I.Type])
+  E.Exp -> [I.Type] -> InternaliseM ([I.LParam SOACS], I.Body SOACS, [I.Type])
 
 internaliseMapLambda ::
   InternaliseLambda ->
   E.Exp ->
   [I.SubExp] ->
-  InternaliseM I.Lambda
+  InternaliseM (I.Lambda SOACS)
 internaliseMapLambda internaliseLambda lam args = do
   argtypes <- mapM I.subExpType args
   let rowtypes = map I.rowType argtypes
@@ -39,7 +39,7 @@ internaliseStreamMapLambda ::
   InternaliseLambda ->
   E.Exp ->
   [I.SubExp] ->
-  InternaliseM I.Lambda
+  InternaliseM (I.Lambda SOACS)
 internaliseStreamMapLambda internaliseLambda lam args = do
   chunk_size <- newVName "chunk_size"
   let chunk_param = I.Param mempty chunk_size (I.Prim int64)
@@ -65,7 +65,7 @@ internaliseFoldLambda ::
   E.Exp ->
   [I.Type] ->
   [I.Type] ->
-  InternaliseM I.Lambda
+  InternaliseM (I.Lambda SOACS)
 internaliseFoldLambda internaliseLambda lam acctypes arrtypes = do
   let rowtypes = map I.rowType arrtypes
   (params, body, rettype) <- internaliseLambda lam $ acctypes ++ rowtypes
@@ -86,7 +86,7 @@ internaliseStreamLambda ::
   InternaliseLambda ->
   E.Exp ->
   [I.Type] ->
-  InternaliseM ([LParam], Body)
+  InternaliseM ([LParam SOACS], Body SOACS)
 internaliseStreamLambda internaliseLambda lam rowts = do
   chunk_size <- newVName "chunk_size"
   let chunk_param = I.Param mempty chunk_size $ I.Prim int64
@@ -109,7 +109,7 @@ internalisePartitionLambda ::
   Int ->
   E.Exp ->
   [I.SubExp] ->
-  InternaliseM I.Lambda
+  InternaliseM (I.Lambda SOACS)
 internalisePartitionLambda internaliseLambda k lam args = do
   argtypes <- mapM I.subExpType args
   let rowtypes = map I.rowType argtypes
@@ -138,7 +138,7 @@ internalisePartitionLambda internaliseLambda k lam args = do
           (pure $ resultBody $ result i)
           (resultBody <$> mkResult eq_class (i + 1))
 
-    lambdaWithIncrement :: I.Body -> InternaliseM I.Body
+    lambdaWithIncrement :: I.Body SOACS -> InternaliseM (I.Body SOACS)
     lambdaWithIncrement lam_body = runBodyBuilder $ do
       eq_class <- resSubExp . head <$> bodyBind lam_body
       resultBody <$> mkResult eq_class 0

@@ -21,7 +21,6 @@ module Futhark.IR.TypeCheck
     TypeM,
     bad,
     context,
-    message,
     Checkable (..),
     CheckableOp (..),
     lookupVar,
@@ -42,14 +41,12 @@ module Futhark.IR.TypeCheck
     matchExtPat,
     matchExtBranchType,
     argType,
-    argAliases,
     noArgAliases,
     checkArg,
     checkSOACArrayArgs,
     checkLambda,
     checkBody,
     consume,
-    consumeOnlyParams,
     binding,
     alternative,
   )
@@ -79,7 +76,7 @@ data ErrorCase rep
   | DupDefinitionError Name
   | DupParamError Name VName
   | DupPatError VName
-  | InvalidPatError (Pat (Aliases rep)) [ExtType] (Maybe String)
+  | InvalidPatError (Pat (LetDec (Aliases rep))) [ExtType] (Maybe String)
   | UnknownVariableError VName
   | UnknownFunctionError Name
   | ParameterMismatch (Maybe Name) [Type] [Type]
@@ -317,6 +314,7 @@ runTypeM ::
 runTypeM env (TypeM m) =
   second stateCons <$> runStateT (runReaderT m env) (TState mempty mempty)
 
+-- | Signal a type error.
 bad :: ErrorCase rep -> TypeM rep a
 bad e = do
   messages <- asks envContext
@@ -394,6 +392,9 @@ checkConsumption :: Consumption -> TypeM rep Occurences
 checkConsumption (ConsumptionError e) = bad $ TypeError e
 checkConsumption (Consumption os) = return os
 
+-- | Type check two mutually control flow branches.  Think @if@.  This
+-- interacts with consumption checking, as it is OK for an array to be
+-- consumed in both branches.
 alternative :: TypeM rep a -> TypeM rep b -> TypeM rep (a, b)
 alternative m1 m2 = do
   (x, os1) <- collectOccurences m1
@@ -1231,7 +1232,7 @@ checkBinOpArgs t e1 e2 = do
 
 checkPatElem ::
   Checkable rep =>
-  PatElemT (LetDec rep) ->
+  PatElem (LetDec rep) ->
   TypeM rep ()
 checkPatElem (PatElem name dec) =
   context ("When checking pattern element " ++ pretty name) $
@@ -1288,7 +1289,7 @@ checkStm stm@(Let pat (StmAux (Certs cs) _ (_, dec)) e) m = do
 
 matchExtPat ::
   Checkable rep =>
-  Pat (Aliases rep) ->
+  Pat (LetDec (Aliases rep)) ->
   [ExtType] ->
   TypeM rep ()
 matchExtPat pat ts =
@@ -1491,7 +1492,7 @@ class (ASTRep rep, CanBeAliased (Op rep), CheckableOp rep) => Checkable rep wher
   checkLParamDec :: VName -> LParamInfo rep -> TypeM rep ()
   checkLetBoundDec :: VName -> LetDec rep -> TypeM rep ()
   checkRetType :: [RetType rep] -> TypeM rep ()
-  matchPat :: Pat (Aliases rep) -> Exp (Aliases rep) -> TypeM rep ()
+  matchPat :: Pat (LetDec (Aliases rep)) -> Exp (Aliases rep) -> TypeM rep ()
   primFParam :: VName -> PrimType -> TypeM rep (FParam (Aliases rep))
   matchReturnType :: [RetType rep] -> Result -> TypeM rep ()
   matchBranchType :: [BranchType rep] -> Body (Aliases rep) -> TypeM rep ()
@@ -1515,7 +1516,7 @@ class (ASTRep rep, CanBeAliased (Op rep), CheckableOp rep) => Checkable rep wher
   default checkRetType :: RetType rep ~ DeclExtType => [RetType rep] -> TypeM rep ()
   checkRetType = mapM_ $ checkExtType . declExtTypeOf
 
-  default matchPat :: Pat (Aliases rep) -> Exp (Aliases rep) -> TypeM rep ()
+  default matchPat :: Pat (LetDec (Aliases rep)) -> Exp (Aliases rep) -> TypeM rep ()
   matchPat pat = matchExtPat pat <=< expExtType
 
   default primFParam :: FParamInfo rep ~ DeclType => VName -> PrimType -> TypeM rep (FParam (Aliases rep))

@@ -13,6 +13,7 @@ module Futhark.CodeGen.ImpGen.Multicore.Base
     renameHistOpLambda,
     atomicUpdateLocking,
     AtomicUpdate (..),
+    DoAtomicUpdate,
     Locking (..),
     getSpace,
     getLoopBounds,
@@ -103,7 +104,7 @@ getIterationDomain _ space = do
 
 -- When the SegRed's return value is a scalar
 -- we perform a call by value-result in the segop function
-getReturnParams :: Pat MCMem -> SegOp () MCMem -> MulticoreGen [Imp.Param]
+getReturnParams :: Pat LetDecMem -> SegOp () MCMem -> MulticoreGen [Imp.Param]
 getReturnParams pat SegRed {} =
   -- It's a good idea to make sure any prim values are initialised, as
   -- we will load them (redundantly) in the task code, and
@@ -123,7 +124,7 @@ renameSegBinOp segbinops =
 
 compileThreadResult ::
   SegSpace ->
-  PatElem MCMem ->
+  PatElem LetDecMem ->
   KernelResult ->
   MulticoreGen ()
 compileThreadResult space pe (Returns _ _ what) = do
@@ -156,7 +157,7 @@ groupResultArrays s num_threads reds =
       let full_shape = Shape [num_threads] <> shape <> arrayShape t
       sAllocArray s (elemType t) full_shape DefaultSpace
 
-isLoadBalanced :: Imp.Code -> Bool
+isLoadBalanced :: Imp.MCCode -> Bool
 isLoadBalanced (a Imp.:>>: b) = isLoadBalanced a && isLoadBalanced b
 isLoadBalanced (Imp.For _ _ a) = isLoadBalanced a
 isLoadBalanced (Imp.If _ a b) = isLoadBalanced a && isLoadBalanced b
@@ -168,7 +169,7 @@ isLoadBalanced _ = True
 segBinOpComm' :: [SegBinOp rep] -> Commutativity
 segBinOpComm' = mconcat . map segBinOpComm
 
-decideScheduling' :: SegOp () rep -> Imp.Code -> Imp.Scheduling
+decideScheduling' :: SegOp () rep -> Imp.MCCode -> Imp.Scheduling
 decideScheduling' SegHist {} _ = Imp.Static
 decideScheduling' SegScan {} _ = Imp.Static
 decideScheduling' (SegRed _ _ reds _ _) code =
@@ -177,16 +178,16 @@ decideScheduling' (SegRed _ _ reds _ _) code =
     Noncommutative -> Imp.Static
 decideScheduling' SegMap {} code = decideScheduling code
 
-decideScheduling :: Imp.Code -> Imp.Scheduling
+decideScheduling :: Imp.MCCode -> Imp.Scheduling
 decideScheduling code =
   if isLoadBalanced code
     then Imp.Static
     else Imp.Dynamic
 
 -- | Try to extract invariant allocations.  If we assume that the
--- given 'Imp.Code' is the body of a 'SegOp', then it is always safe
+-- given 'Imp.MCCode' is the body of a 'SegOp', then it is always safe
 -- to move the immediate allocations to the prebody.
-extractAllocations :: Imp.Code -> (Imp.Code, Imp.Code)
+extractAllocations :: Imp.MCCode -> (Imp.MCCode, Imp.MCCode)
 extractAllocations segop_code = f segop_code
   where
     declared = Imp.declaredIn segop_code

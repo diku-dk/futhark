@@ -378,7 +378,7 @@ prepareIntermediateArraysGlobal passage hist_T hist_N slugs = do
       return (l', do_op')
 
 histKernelGlobalPass ::
-  [PatElem GPUMem] ->
+  [PatElem LetDecMem] ->
   Count NumGroups (Imp.TExp Int64) ->
   Count GroupSize (Imp.TExp Int64) ->
   SegSpace ->
@@ -469,7 +469,7 @@ histKernelGlobalPass map_pes num_groups group_size space slugs kbody histograms 
                       do_op (bucket_is ++ is)
 
 histKernelGlobal ::
-  [PatElem GPUMem] ->
+  [PatElem LetDecMem] ->
   Count NumGroups SubExp ->
   Count GroupSize SubExp ->
   SegSpace ->
@@ -577,7 +577,7 @@ prepareIntermediateArraysLocal num_subhistos_per_group groups_per_segment =
 histKernelLocalPass ::
   TV Int32 ->
   Count NumGroups (Imp.TExp Int64) ->
-  [PatElem GPUMem] ->
+  [PatElem LetDecMem] ->
   Count NumGroups (Imp.TExp Int64) ->
   Count GroupSize (Imp.TExp Int64) ->
   SegSpace ->
@@ -825,7 +825,7 @@ histKernelLocalPass
 histKernelLocal ::
   TV Int32 ->
   Count NumGroups (Imp.TExp Int64) ->
-  [PatElem GPUMem] ->
+  [PatElem LetDecMem] ->
   Count NumGroups SubExp ->
   Count GroupSize SubExp ->
   SegSpace ->
@@ -869,7 +869,7 @@ slugMaxLocalMemPasses slug =
     AtomicLocking _ -> 6
 
 localMemoryCase ::
-  [PatElem GPUMem] ->
+  [PatElem LetDecMem] ->
   Imp.TExp Int32 ->
   SegSpace ->
   Imp.TExp Int64 ->
@@ -1024,7 +1024,7 @@ localMemoryCase map_pes hist_T space hist_H hist_el_size hist_N _ slugs kbody = 
 
 -- | Generate code for a segmented histogram called from the host.
 compileSegHist ::
-  Pat GPUMem ->
+  Pat LetDecMem ->
   Count NumGroups SubExp ->
   Count GroupSize SubExp ->
   SegSpace ->

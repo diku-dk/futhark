@@ -157,13 +157,13 @@ import Language.Futhark.Warnings
 import Prelude hiding (quot)
 
 -- | How to compile an t'Op'.
-type OpCompiler rep r op = Pat rep -> Op rep -> ImpM rep r op ()
+type OpCompiler rep r op = Pat (LetDec rep) -> Op rep -> ImpM rep r op ()
 
 -- | How to compile some 'Stms'.
 type StmsCompiler rep r op = Names -> Stms rep -> ImpM rep r op () -> ImpM rep r op ()
 
 -- | How to compile an 'Exp'.
-type ExpCompiler rep r op = Pat rep -> Exp rep -> ImpM rep r op ()
+type ExpCompiler rep r op = Pat (LetDec rep) -> Exp rep -> ImpM rep r op ()
 
 type CopyCompiler rep r op =
   PrimType ->
@@ -668,7 +668,7 @@ compileFunDef (FunDef entry _ fname rettype params body) =
 
       pure (outparams, inparams, results, args)
 
-compileBody :: Pat rep -> Body rep -> ImpM rep r op ()
+compileBody :: Pat (LetDec rep) -> Body rep -> ImpM rep r op ()
 compileBody pat (Body _ stms ses) = do
   dests <- destinationFromPat pat
   compileStms (freeIn ses) stms $
@@ -747,14 +747,14 @@ defCompileStms alive_after_stms all_stms m =
       Mem space -> Just (patElemName pe, space)
       _ -> Nothing
 
-compileExp :: Pat rep -> Exp rep -> ImpM rep r op ()
+compileExp :: Pat (LetDec rep) -> Exp rep -> ImpM rep r op ()
 compileExp pat e = do
   ec <- asks envExpCompiler
   ec pat e
 
 defCompileExp ::
   (Mem rep inner) =>
-  Pat rep ->
+  Pat (LetDec rep) ->
   Exp rep ->
   ImpM rep r op ()
 defCompileExp pat (If cond tbranch fbranch _) =
@@ -836,7 +836,7 @@ traceArray s t shape se = do
 
 defCompileBasicOp ::
   Mem rep inner =>
-  Pat rep ->
+  Pat (LetDec rep) ->
   BasicOp ->
   ImpM rep r op ()
 defCompileBasicOp (Pat [pe]) (SubExp se) =
@@ -1027,7 +1027,7 @@ addLoopVar i it = addVar i $ ScalarVar Nothing $ ScalarEntry $ IntType it
 dVars ::
   Mem rep inner =>
   Maybe (Exp rep) ->
-  [PatElem rep] ->
+  [PatElem (LetDec rep)] ->
   ImpM rep r op ()
 dVars e = mapM_ dVar
   where
@@ -1334,7 +1334,7 @@ lookupAcc name is = do
           error $ "ImpGen.lookupAcc: unlisted accumulator: " ++ pretty name
     _ -> error $ "ImpGen.lookupAcc: not an accumulator: " ++ pretty name
 
-destinationFromPat :: Pat rep -> ImpM rep r op [ValueDestination]
+destinationFromPat :: Pat (LetDec rep) -> ImpM rep r op [ValueDestination]
 destinationFromPat = mapM inspect . patElems
   where
     inspect pe = do
@@ -1379,26 +1379,12 @@ copy
   src@(MemLoc src_name _ src_ixfn@(IxFun.IxFun src_lmads@(src_lmad :| _) _ _)) = do
     -- If we can statically determine that the two index-functions
     -- are equivalent, don't do anything
-    unless (dst_name == src_name && dst_ixfn `IxFun.equivalent` src_ixfn) $ do
+    unless (dst_name == src_name && dst_ixfn `IxFun.equivalent` src_ixfn) $
       -- It's also possible that we can dynamically determine that the two
       -- index-functions are equivalent.
-      --
-      -- For that to be true, we require that they only have one lmad each, and
-      -- that the dimensions match exactly.
       sUnless
         ( fromBool (dst_name == src_name && length dst_lmads == 1 && length src_lmads == 1)
-            .&&. IxFun.lmadOffset dst_lmad .==. IxFun.lmadOffset src_lmad
-            .&&. foldl
-              ( \acc (dim1, dim2) ->
-                  acc
-                    .&&. IxFun.ldStride dim1 .==. IxFun.ldStride dim2
-                    .&&. IxFun.ldRotate dim1 .==. IxFun.ldRotate dim2
-                    .&&. IxFun.ldShape dim1 .==. IxFun.ldShape dim2
-                    .&&. (fromBool $ IxFun.ldPerm dim1 == IxFun.ldPerm dim2)
-                    .&&. (fromBool $ IxFun.ldMon dim1 == IxFun.ldMon dim2)
-              )
-              true
-              (zip (IxFun.lmadDims dst_lmad) (IxFun.lmadDims src_lmad))
+            .&&. IxFun.dynamicEqualsLMAD dst_lmad src_lmad
         )
         $ do
           -- If none of the above is true, actually do the copy
@@ -1702,11 +1688,11 @@ copyDWIMFix ::
 copyDWIMFix dest dest_is src src_is =
   copyDWIM dest (map DimFix dest_is) src (map DimFix src_is)
 
--- | @compileAlloc pat size space@ allocates @n@ bytes of memory in @space@,
--- writing the result to @dest@, which must be a single
--- 'MemoryDestination',
+-- | @compileAlloc pat size space@ allocates @n@ bytes of memory in
+-- @space@, writing the result to @pat@, which must contain a single
+-- memory-typed element.
 compileAlloc ::
-  Mem rep inner => Pat rep -> SubExp -> Space -> ImpM rep r op ()
+  Mem rep inner => Pat (LetDec rep) -> SubExp -> Space -> ImpM rep r op ()
 compileAlloc (Pat [mem]) e space = do
   let e' = Imp.bytes $ toInt64Exp e
   allocator <- asks $ M.lookup space . envAllocCompilers

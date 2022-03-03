@@ -1,6 +1,7 @@
 module Futhark.CodeGen.ImpGen.Multicore.SegRed
   ( compileSegRed,
     compileSegRed',
+    DoSegBody,
   )
 where
 
@@ -16,12 +17,12 @@ type DoSegBody = (([(SubExp, [Imp.TExp Int64])] -> MulticoreGen ()) -> Multicore
 
 -- | Generate code for a SegRed construct
 compileSegRed ::
-  Pat MCMem ->
+  Pat LetDecMem ->
   SegSpace ->
   [SegBinOp MCMem] ->
   KernelBody MCMem ->
   TV Int32 ->
-  MulticoreGen Imp.Code
+  MulticoreGen Imp.MCCode
 compileSegRed pat space reds kbody nsubtasks =
   compileSegRed' pat space reds nsubtasks $ \red_cont ->
     compileStms mempty (kernelBodyStms kbody) $ do
@@ -35,12 +36,12 @@ compileSegRed pat space reds kbody nsubtasks =
 
 -- | Like 'compileSegRed', but where the body is a monadic action.
 compileSegRed' ::
-  Pat MCMem ->
+  Pat LetDecMem ->
   SegSpace ->
   [SegBinOp MCMem] ->
   TV Int32 ->
   DoSegBody ->
-  MulticoreGen Imp.Code
+  MulticoreGen Imp.MCCode
 compileSegRed' pat space reds nsubtasks kbody
   | [_] <- unSegSpace space =
     nonsegmentedReduction pat space reds nsubtasks kbody
@@ -72,12 +73,12 @@ accParams slug = take (length (slugNeutral slug)) $ slugParams slug
 nextParams slug = drop (length (slugNeutral slug)) $ slugParams slug
 
 nonsegmentedReduction ::
-  Pat MCMem ->
+  Pat LetDecMem ->
   SegSpace ->
   [SegBinOp MCMem] ->
   TV Int32 ->
   DoSegBody ->
-  MulticoreGen Imp.Code
+  MulticoreGen Imp.MCCode
 nonsegmentedReduction pat space reds nsubtasks kbody = collect $ do
   thread_res_arrs <- groupResultArrays "reduce_stage_1_tid_res_arr" (tvSize nsubtasks) reds
   let slugs1 = zipWith SegBinOpSlug reds thread_res_arrs
@@ -163,7 +164,7 @@ reductionStage1 space slugs kbody = do
   emit $ Imp.Op $ Imp.ParLoop "segred_stage_1" fbody free_params
 
 reductionStage2 ::
-  Pat MCMem ->
+  Pat LetDecMem ->
   SegSpace ->
   Imp.TExp Int32 ->
   [SegBinOpSlug] ->
@@ -200,11 +201,11 @@ reductionStage2 pat space nsubtasks slugs = do
 -- Maybe we should select the work of the inner loop
 -- based on n_segments and dimensions etc.
 segmentedReduction ::
-  Pat MCMem ->
+  Pat LetDecMem ->
   SegSpace ->
   [SegBinOp MCMem] ->
   DoSegBody ->
-  MulticoreGen Imp.Code
+  MulticoreGen Imp.MCCode
 segmentedReduction pat space reds kbody =
   collect $ do
     body <- compileSegRedBody pat space reds kbody
@@ -212,11 +213,11 @@ segmentedReduction pat space reds kbody =
     emit $ Imp.Op $ Imp.ParLoop "segmented_segred" body free_params
 
 compileSegRedBody ::
-  Pat MCMem ->
+  Pat LetDecMem ->
   SegSpace ->
   [SegBinOp MCMem] ->
   DoSegBody ->
-  MulticoreGen Imp.Code
+  MulticoreGen Imp.MCCode
 compileSegRedBody pat space reds kbody = do
   let (is, ns) = unzip $ unSegSpace space
       ns_64 = map toInt64Exp ns
