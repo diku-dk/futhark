@@ -978,19 +978,19 @@ static int32_t futrts_clzz64(int64_t x) {
 #elif ISPC
 
 static int32_t futrts_clzz8(int8_t x) {
-  return 0;
+  return count_leading_zeros((int32_t)x)-24;
 }
 
 static int32_t futrts_clzz16(int16_t x) {
-  return 0;
+  return count_leading_zeros((int32_t)x)-16;
 }
 
 static int32_t futrts_clzz32(int32_t x) {
-  return 0;
+  return count_leading_zeros(x);
 }
 
 static int32_t futrts_clzz64(int64_t x) {
-  return 0;
+  return count_leading_zeros(x);
 }
 
 #else // Not OpenCL or CUDA, but plain C.
@@ -1066,19 +1066,19 @@ static int32_t futrts_ctzz64(int64_t x) {
 #elif ISPC
 
 static int32_t futrts_ctzz8(int8_t x) {
-  return 0;
+  return count_trailing_zeros((int32_t)x)-24;
 }
 
 static int32_t futrts_ctzz16(int16_t x) {
-  return 0;
+  return count_trailing_zeros((int32_t)x)-16;
 }
 
 static int32_t futrts_ctzz32(int32_t x) {
-  return 0;
+  return count_trailing_zeros(x);
 }
 
 static int32_t futrts_ctzz64(int64_t x) {
-  return 0;
+  return count_trailing_zeros(x);
 }
 
 #else // Not OpenCL or CUDA, but plain C.
@@ -1453,27 +1453,27 @@ static inline float futrts_atan32(float x) {
 }
 
 static inline float futrts_cosh32(float x) {
-  return 0; // TODO
+  return (exp(x)+exp(-x)) / 2; 
 }
 
 static inline float futrts_sinh32(float x) {
-  return 0; // TODO
+  return (exp(x)-exp(-x)) / 2; 
 }
 
 static inline float futrts_tanh32(float x) {
-  return 0; // TODO
+  return futrts_sinh32(x)/futrts_cosh32(x);
 }
 
 static inline float futrts_acosh32(float x) {
-  return 0; // TODO
+  return log(x+sqrt(x*x-1)); // TODO: Check if correct, might not work for all x? (Might not need to) 
 }
 
 static inline float futrts_asinh32(float x) {
-  return 0; // TODO
+  return log(x+sqrt(x*x+1));
 }
 
 static inline float futrts_atanh32(float x) {
-  return 0; // TODO
+  return log((1+x)/(1-x))/2; // TODO: Check if correct, might not work for all x? (Might not need to) 
 }
 
 static inline float futrts_atan2_32(float x, float y) {
@@ -1481,15 +1481,15 @@ static inline float futrts_atan2_32(float x, float y) {
 }
 
 static inline float futrts_hypot32(float x, float y) {
-  return 0; // TODO
+  return sqrt(x*x+y*y); // TODO: Should handle over/underflow
 }
 
 static inline float futrts_gamma32(float x) {
-  return 0; // TODO
+  return 0; // TODO: Call C
 }
 
 static inline float futrts_lgamma32(float x) {
-  return 0; // TODO
+  return 0; // TODO: Call C
 }
 
 static inline float fmod32(float x, float y) {
@@ -2639,11 +2639,23 @@ struct memblock {
 };
 #endif
 
-#define futhark_foreach(t, i, n) foreach(i = 0 ... extract(n, 0))
+#define futhark_foreach(t, i, n) foreach(i = 0 ... n)
 #define register uniform
 #define memblock_ref memblock * uniform
 #define auto export
 
+struct futhark_mc_task_4603 {
+    struct futhark_context *ctx;
+    int64_t free_dz2080U_4583;
+    unsigned char *free_a_mem_4590;
+    unsigned char *free_mem_4593;
+};
+struct futhark_mc_segmap_parloop_struct_4605 {
+    struct futhark_context *ctx;
+    int64_t free_dz2080U_4583;
+    unsigned char *free_a_mem_4590;
+    unsigned char *free_mem_4593;
+};
 export static void futhark_mc_loop_ispc_4607(uniform int64_t dz2080U_4583,
                                              uniform
                                              memblock *uniform _a_mem_4590,
