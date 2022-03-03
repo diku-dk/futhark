@@ -208,7 +208,7 @@ topdwnTravBinding env stm =
           <> nonNegativesInPat (stmPat stm)
     }
 
-nonNegativesInPat :: (Pretty rep, Typed rep) => PatT rep -> Names
+nonNegativesInPat :: (Pretty rep, Typed rep) => Pat rep -> Names
 nonNegativesInPat (Pat elems) =
   traceWith ("NonNegatives in pat " <> pretty (Pat elems)) $ foldMap (namesFromList . mapMaybe subExpVar . arrayDims . typeOf) elems
 

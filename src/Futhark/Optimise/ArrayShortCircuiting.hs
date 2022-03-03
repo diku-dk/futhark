@@ -59,12 +59,12 @@ replaceInStm (Let (Pat elems) d e) = do
   e' <- replaceInExp elems' e
   return $ Let (Pat elems') d e'
   where
-    replaceInPatElem :: PatElemT LetDecMem -> ReplaceM inner (PatElemT LetDecMem)
+    replaceInPatElem :: PatElem LetDecMem -> ReplaceM inner (PatElem LetDecMem)
     replaceInPatElem p@(PatElem vname (MemArray _ _ u _)) =
       fromMaybe p <$> lookupAndReplace vname PatElem u
     replaceInPatElem p = return p
 
-replaceInExp :: (Mem rep inner, LetDec rep ~ LetDecMem) => [PatElemT LetDecMem] -> Exp rep -> ReplaceM inner (Exp rep)
+replaceInExp :: (Mem rep inner, LetDec rep ~ LetDecMem) => [PatElem LetDecMem] -> Exp rep -> ReplaceM inner (Exp rep)
 replaceInExp _ e@(BasicOp _) = return e
 replaceInExp pat_elems (If se then_body else_body dec) = do
   then_body' <- replaceInIfBody then_body
@@ -99,7 +99,7 @@ replaceInHostOp (SegOp (SegHist lvl sp hist_ops tps body)) = do
   return $ SegOp $ SegHist lvl sp hist_ops tps $ body {kernelBodyStms = stms}
 replaceInHostOp op = return op
 
-generalizeIxfun :: [PatElemT dec] -> PatElemT LetDecMem -> BodyReturns -> ReplaceM inner BodyReturns
+generalizeIxfun :: [PatElem dec] -> PatElem LetDecMem -> BodyReturns -> ReplaceM inner BodyReturns
 generalizeIxfun
   pat_elems
   (PatElem vname (MemArray _ _ _ (ArrayIn mem ixf)))

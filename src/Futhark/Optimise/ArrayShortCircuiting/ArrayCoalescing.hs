@@ -58,7 +58,7 @@ newtype ComputeScalarTableOnOp rep = ComputeScalarTableOnOp
 type ScalarTableM rep a = Reader (ComputeScalarTableOnOp rep) a
 
 newtype ShortCircuitReader rep = ShortCircuitReader
-  { onOp :: LUTabFun -> Pat (Aliases rep) -> Op (Aliases rep) -> TopDnEnv rep -> BotUpEnv -> ShortCircuitM rep BotUpEnv
+  { onOp :: LUTabFun -> Pat (VarAliases, LetDecMem) -> Op (Aliases rep) -> TopDnEnv rep -> BotUpEnv -> ShortCircuitM rep BotUpEnv
   }
 
 newtype ShortCircuitM rep a = ShortCircuitM (ReaderT (ShortCircuitReader rep) (StateT VNameSource IO) a)
@@ -163,14 +163,20 @@ paramSizes _ = mempty
 --
 -- Because 'SeqMem' don't have any special operation, simply return the input
 -- 'BotUpEnv'.
-shortCircuitSeqMem :: LUTabFun -> Pat (Aliases SeqMem) -> Op (Aliases SeqMem) -> TopDnEnv SeqMem -> BotUpEnv -> ShortCircuitM SeqMem BotUpEnv
+shortCircuitSeqMem :: LUTabFun -> Pat (VarAliases, LetDecMem) -> Op (Aliases SeqMem) -> TopDnEnv SeqMem -> BotUpEnv -> ShortCircuitM SeqMem BotUpEnv
 shortCircuitSeqMem _ _ _ _ = return
 
 -- | Short-circuit handler for 'GPUMem' 'Op'.
 --
 -- When the 'Op' is a 'SegOp', we handle it accordingly, otherwise we do
 -- nothing.
-shortCircuitGPUMem :: LUTabFun -> Pat (Aliases GPUMem) -> Op (Aliases GPUMem) -> TopDnEnv GPUMem -> BotUpEnv -> ShortCircuitM GPUMem BotUpEnv
+shortCircuitGPUMem ::
+  LUTabFun ->
+  Pat (VarAliases, LetDecMem) ->
+  Op (Aliases GPUMem) ->
+  TopDnEnv GPUMem ->
+  BotUpEnv ->
+  ShortCircuitM GPUMem BotUpEnv
 shortCircuitGPUMem _ _ (Alloc _ _) _ bu_env = return bu_env
 shortCircuitGPUMem lutab pat (Inner (SegOp (SegMap lvl space _ kernel_body))) td_env bu_env =
   -- No special handling necessary for 'SegMap'. Just call the helper-function.
@@ -262,7 +268,7 @@ shortCircuitGPUMemHelper ::
   Int ->
   SegLevel ->
   LUTabFun ->
-  Pat (Aliases GPUMem) ->
+  Pat (VarAliases, LetDecMem) ->
   SegSpace ->
   KernelBody (Aliases GPUMem) ->
   TopDnEnv GPUMem ->
@@ -435,7 +441,7 @@ ixfunPermutation = map IxFun.ldPerm . IxFun.lmadDims . NE.head . IxFun.ixfunLMAD
 
 -- | Given a pattern element and the corresponding kernel result, try to put the
 -- kernel result directly in the memory block of pattern element
-makeSegMapCoals :: SegLevel -> TopDnEnv GPUMem -> KernelBody (Aliases GPUMem) -> (CoalsTab, InhibitTab) -> ((PatElemT (VarAliases, LetDecMem), SegSpace), KernelResult) -> (CoalsTab, InhibitTab)
+makeSegMapCoals :: SegLevel -> TopDnEnv GPUMem -> KernelBody (Aliases GPUMem) -> (CoalsTab, InhibitTab) -> ((PatElem (VarAliases, LetDecMem), SegSpace), KernelResult) -> (CoalsTab, InhibitTab)
 makeSegMapCoals lvl td_env kernel_body (active, inhb) ((PatElem pat_name (_, MemArray _ _ _ (ArrayIn pat_mem pat_ixf)), space), Returns _ _ (Var return_name))
   | Just mb@(MemBlock tp return_shp return_mem _) <-
       getScopeMemInfo return_name $ scope td_env <> scopeOf (kernelBodyStms kernel_body),
@@ -1184,7 +1190,7 @@ filterSafetyCond2and5 ::
   InhibitTab ->
   ScalarTab ->
   TopDnEnv rep ->
-  [PatElemT (VarAliases, LetDecMem)] ->
+  [PatElem (VarAliases, LetDecMem)] ->
   (CoalsTab, InhibitTab)
 filterSafetyCond2and5 act_coal inhb_coal scals_env td_env =
   foldl
@@ -1232,7 +1238,7 @@ filterSafetyCond2and5 act_coal inhb_coal scals_env td_env =
 --     records a new association in @activeCoals@
 mkCoalsHelper3PatternMatch ::
   HasMemBlock (Aliases rep) =>
-  PatT (VarAliases, LetDecMem) ->
+  Pat (VarAliases, LetDecMem) ->
   Exp (Aliases rep) ->
   LUTabFun ->
   TopDnEnv rep ->
@@ -1318,7 +1324,7 @@ genCoalStmtInfo ::
   HasMemBlock (Aliases rep) =>
   LUTabFun ->
   ScopeTab rep ->
-  PatT (VarAliases, LetDecMem) ->
+  Pat (VarAliases, LetDecMem) ->
   Exp (Aliases rep) ->
   Maybe [(CoalescedKind, IxFun -> IxFun, VName, VName, IxFun, VName, VName, IxFun, PrimType, Shape)]
 -- CASE a) @let x <- copy(b^{lu})@
@@ -1395,7 +1401,7 @@ findMemBodyResult ::
   (HasMemBlock (Aliases rep)) =>
   CoalsTab ->
   ScopeTab rep ->
-  [PatElemT (VarAliases, LetDecMem)] ->
+  [PatElem (VarAliases, LetDecMem)] ->
   Body (Aliases rep) ->
   [(VName, VName, VName, VName)]
 findMemBodyResult activeCoals_tab scope_env patelms bdy =
@@ -1463,7 +1469,7 @@ transferCoalsToBody exist_subs activeCoals_tab (m_b, b, r, m_r)
   | otherwise = error "Impossible"
 
 mkSubsTab ::
-  PatT (aliases, LetDecMem) ->
+  Pat (aliases, LetDecMem) ->
   [SubExp] ->
   M.Map VName (TPrimExp Int64 VName)
 mkSubsTab pat res =

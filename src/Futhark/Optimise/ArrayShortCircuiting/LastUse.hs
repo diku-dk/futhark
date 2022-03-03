@@ -298,19 +298,19 @@ aliasTransitiveClosure args = do
     then return res
     else aliasTransitiveClosure res
 
--- | For each 'PatElemT' in the 'PatT', add its aliases to the 'AliasTab' in
+-- | For each 'PatElem' in the 'Pat', add its aliases to the 'AliasTab' in
 -- 'LastUseM'. Additionally, 'Names' are added as aliases of all the 'PatElemT'.
 updateAliasing ::
   AliasesOf dec =>
-  -- | Extra names that all 'PatElemT' should alias.
+  -- | Extra names that all 'PatElem' should alias.
   Names ->
   -- | Pattern to process
-  PatT dec ->
+  Pat dec ->
   LastUseM rep ()
 updateAliasing extra_aliases =
   mapM_ update . patElems
   where
-    update :: AliasesOf dec => PatElemT dec -> LastUseM rep ()
+    update :: AliasesOf dec => PatElem dec -> LastUseM rep ()
     update (PatElem name dec) = do
       let aliases = aliasesOf dec
       aliases' <- aliasTransitiveClosure $ extra_aliases <> aliases

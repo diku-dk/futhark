@@ -250,7 +250,7 @@ unionCoalsEntry etry1 (CoalsEntry dstmem2 dstind2 alsmem2 vartab2 optdeps2 memre
 
 -- | Get the names of array 'PatElem's in a 'Pat' and the corresponding
 -- 'ArrayMemBound' information for each array.
-getArrMemAssoc :: PatT (aliases, LetDecMem) -> [(VName, ArrayMemBound)]
+getArrMemAssoc :: Pat (aliases, LetDecMem) -> [(VName, ArrayMemBound)]
 getArrMemAssoc pat =
   mapMaybe
     ( \patel -> case snd $ patElemDec patel of
